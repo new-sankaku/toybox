@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LIC法による鉛筆画自動生成</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>LIC法による鉛筆画自動生成</h1>
+        <p class="subtitle">Line Integral Convolution を利用した鉛筆画変換</p>
+
+        <div class="main-content">
+            <div class="drop-zone" id="dropZone">
+                <div class="drop-icon">🖼️</div>
+                <p>画像をドラッグ＆ドロップ</p>
+                <p class="drop-hint">または クリックして選択</p>
+                <input type="file" id="fileInput" accept="image/*" hidden>
+            </div>
+
+            <div class="controls" id="controls">
+                <h3>パラメータ設定</h3>
+
+                <div class="control-group">
+                    <label>ストローク長さ: <span id="kernelLengthValue">20</span></label>
+                    <input type="range" id="kernelLength" min="5" max="40" value="20">
+                </div>
+
+                <div class="control-group">
+                    <label>明るさ係数 (k): <span id="brightnessValue">0.7</span></label>
+                    <input type="range" id="brightness" min="0.3" max="1.0" step="0.05" value="0.7">
+                </div>
+
+                <div class="control-group">
+                    <label>エッジ強度: <span id="edgeStrengthValue">0.5</span></label>
+                    <input type="range" id="edgeStrength" min="0" max="1" step="0.1" value="0.5">
+                </div>
+
+                <div class="control-group">
+                    <label>紙テクスチャ強度: <span id="paperStrengthValue">0.3</span></label>
+                    <input type="range" id="paperStrength" min="0" max="0.6" step="0.05" value="0.3">
+                </div>
+
+                <div class="control-group">
+                    <label>ストローク方向:</label>
+                    <select id="strokeDirection">
+                        <option value="texture">テクスチャ自動検出</option>
+                        <option value="diagonal">斜め (45°)</option>
+                        <option value="horizontal">水平</option>
+                        <option value="vertical">垂直</option>
+                        <option value="random">ランダム（写実的）</option>
+                        <option value="crosshatch">クロスハッチング</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label>ノイズ粒度: <span id="noiseScaleValue">1</span></label>
+                    <input type="range" id="noiseScale" min="1" max="4" value="1">
+                </div>
+
+                <button id="generateBtn" class="generate-btn">鉛筆画を生成</button>
+                <button id="downloadBtn" class="download-btn" disabled>画像をダウンロード</button>
+            </div>
+        </div>
+
+        <div class="canvas-container" id="canvasContainer">
+            <div class="canvas-wrapper">
+                <h3>入力画像</h3>
+                <canvas id="inputCanvas"></canvas>
+            </div>
+            <div class="canvas-wrapper">
+                <h3>鉛筆画出力</h3>
+                <canvas id="outputCanvas"></canvas>
+            </div>
+        </div>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <p class="progress-text" id="progressText">処理中...</p>
+        </div>
+    </div>
+
+    <script src="lic.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
