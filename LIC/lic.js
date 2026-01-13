@@ -110,7 +110,9 @@ this.generateUniformVectorField(vectorField,width,height);
 }else if(direction==='random'){
 this.generateRandomVectorField(vectorField,width,height);
 }else if(direction==='crosshatch'){
-this.generateUniformVectorField(vectorField,width,height);
+// クロスハッチング1回目：テクスチャベースの方向を使用（論文に基づく実装）
+// 2回目パスで直交方向のストロークを暗い部分に追加する
+await this.generateTextureBasedVectorField(vectorField,grayscale,width,height,segmentResult);
 }
 return this.smoothVectorField(vectorField,width,height);
 }
