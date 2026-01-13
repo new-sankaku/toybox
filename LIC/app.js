@@ -164,7 +164,7 @@ secondProcessor.setParams({
 kernelLength:parseInt(params.kernelLength.value),
 noiseScale:parseInt(params.noiseScale.value),
 strokeDirection:'uniform',
-brightness:parseFloat(params.brightness.value)*0.6,
+brightness:parseFloat(params.brightness.value)*0.8,
 useSegmentation:false,
 drawBoundaries:false,
 textureWindowSize:parseInt(params.textureWindowSize.value),
@@ -179,13 +179,28 @@ updateProgress(50+p*0.5,t);
 });
 const secondPass=await secondProcessor.generate(currentImageData);
 const currentOutput=outputCtx.getImageData(0,0,outputCanvas.width,outputCanvas.height);
-for(let i=0;i<currentOutput.data.length;i+=4){
-const v1=currentOutput.data[i]/255;
-const v2=secondPass.data[i]/255;
-const blended=Math.floor(v1*v2*255);
+// 元画像のグレースケール値を取得（クロスハッチングの強度決定に使用）
+const width=currentOutput.width;
+const height=currentOutput.height;
+for(let y=0;y<height;y++){
+for(let x=0;x<width;x++){
+const i=(y*width+x)*4;
+// 元画像の輝度（暗いほど値が小さい）
+const originalLuminance=(0.299*currentImageData.data[i]+0.587*currentImageData.data[i+1]+0.114*currentImageData.data[i+2])/255;
+// クロスハッチング強度：暗い部分ほど強く適用（1-luminanceで反転）
+// 閾値を設けて、明るい部分にはほとんど適用しない
+const darkness=1-originalLuminance;
+// 暗さが0.3以下の部分にはクロスハッチングをほぼ適用しない
+// 暗さが0.7以上の部分には完全に適用
+const crosshatchStrength=Math.max(0,Math.min(1,(darkness-0.3)/0.4));
+const v1=currentOutput.data[i]/255;  // 1回目パス結果
+const v2=secondPass.data[i]/255;     // 2回目パス結果
+// 強度に応じてブレンド：strength=0なら1回目のみ、strength=1なら乗算
+const blended=Math.floor((v1*(1-crosshatchStrength)+v1*v2*crosshatchStrength)*255);
 currentOutput.data[i]=blended;
 currentOutput.data[i+1]=blended;
 currentOutput.data[i+2]=blended;
+}
 }
 outputCtx.putImageData(currentOutput,0,0);
 }
