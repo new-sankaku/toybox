@@ -166,7 +166,13 @@ class GameCreatorGraph:
 
         coder = CoderAgent()
         tracker.agent_progress("coder", f"LLM呼び出し中: {platform}コード生成 (メインループ・クラス・関数)")
-        result = coder.run(state)
+
+        try:
+            result = coder.run(state)
+        except Exception as e:
+            tracker.agent_error("coder", f"コード生成失敗: {e}")
+            tracker.set_phase("error")
+            raise
 
         state["current_phase"] = Phase.CODING
         state["code_files"].update(result.get("code_files", {}))
@@ -373,7 +379,13 @@ class GameCreatorGraph:
             "review_targets": file_list,
             "review_criteria": ["可読性", "保守性", "ベストプラクティス", "セキュリティ"]
         })
-        result = reviewer.run(state)
+
+        try:
+            result = reviewer.run(state)
+        except Exception as e:
+            tracker.agent_error("reviewer", f"レビュー失敗: {e}")
+            tracker.set_phase("error")
+            raise
 
         state["review_comments"].extend(result.get("review_comments", []))
         state["messages"].append({

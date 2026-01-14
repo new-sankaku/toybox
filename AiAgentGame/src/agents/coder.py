@@ -160,11 +160,10 @@ Start directly with imports.""")
             }
 
         except Exception as e:
+            import traceback
             logger.error(f"コード生成失敗: {e}")
-            return {
-                "main.py": self._generate_fallback_pygame_code(game_spec),
-                "README.md": self._generate_readme(game_spec)
-            }
+            logger.error(f"詳細: {traceback.format_exc()}")
+            raise RuntimeError(f"コード生成フェーズでエラーが発生しました: {e}") from e
 
     def _generate_pyxel_code(
         self,
@@ -249,69 +248,6 @@ gameLoop();
 """,
             "README.md": self._generate_readme(game_spec)
         }
-
-    def _generate_fallback_pygame_code(self, game_spec: Dict[str, Any]) -> str:
-        """Generate minimal fallback Pygame code."""
-        return f'''"""
-{game_spec.get("title", "Game")}
-{game_spec.get("description", "")}
-"""
-
-import pygame
-import sys
-
-# Initialize Pygame
-pygame.init()
-
-# Constants
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-FPS = 60
-
-# Colors
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GREEN = (0, 255, 0)
-
-# Create screen
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption("{game_spec.get("title", "Game")}")
-clock = pygame.time.Clock()
-
-# Game variables
-player_x = SCREEN_WIDTH // 2
-player_y = SCREEN_HEIGHT // 2
-player_speed = 5
-
-# Game loop
-running = True
-while running:
-    # Handle events
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-
-    # Get keys
-    keys = pygame.key.get_pressed()
-    if keys[pygame.K_LEFT]:
-        player_x -= player_speed
-    if keys[pygame.K_RIGHT]:
-        player_x += player_speed
-    if keys[pygame.K_UP]:
-        player_y -= player_speed
-    if keys[pygame.K_DOWN]:
-        player_y += player_speed
-
-    # Draw
-    screen.fill(BLACK)
-    pygame.draw.rect(screen, GREEN, (player_x, player_y, 50, 50))
-
-    pygame.display.flip()
-    clock.tick(FPS)
-
-pygame.quit()
-sys.exit()
-'''
 
     def _generate_readme(self, game_spec: Dict[str, Any]) -> str:
         """Generate README for the game."""

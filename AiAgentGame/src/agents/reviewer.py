@@ -131,5 +131,7 @@ Return ONLY the JSON, no additional text.""")
             return comments
 
         except Exception as e:
+            import traceback
             logger.error(f"レビュー失敗: {e}")
-            return []
+            logger.error(f"詳細: {traceback.format_exc()}")
+            raise RuntimeError(f"レビューフェーズでエラーが発生しました: {e}") from e
