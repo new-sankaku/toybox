@@ -103,10 +103,7 @@ class PlannerAgent:
             import traceback
             logger.error(f"計画失敗: {e}")
             logger.error(f"詳細: {traceback.format_exc()}")
-            return {
-                "game_spec": self._create_fallback_spec(user_request),
-                "tasks": []
-            }
+            raise RuntimeError(f"計画フェーズでエラーが発生しました: {e}") from e
 
     def _create_prompt(self, development_phase: DevelopmentPhase) -> ChatPromptTemplate:
         """Create planning prompt based on development phase."""
@@ -287,15 +284,3 @@ Return ONLY the JSON, no additional text."""
             )
             tasks.append(task)
         return tasks
-
-    def _create_fallback_spec(self, user_request: str) -> GameSpec:
-        """Create a minimal fallback specification."""
-        return GameSpec(
-            title="Simple Game",
-            genre="casual",
-            description=user_request,
-            mechanics=["basic_movement"],
-            visual_style="simple",
-            audio_style="minimal",
-            target_platform="pygame"
-        )

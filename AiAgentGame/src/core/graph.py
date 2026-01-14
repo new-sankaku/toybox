@@ -105,7 +105,13 @@ class GameCreatorGraph:
 
         planner = PlannerAgent()
         tracker.agent_progress("planner", "LLM呼び出し中: ゲームコンセプト・仕様・タスク分解を生成")
-        result = planner.run(state)
+
+        try:
+            result = planner.run(state)
+        except Exception as e:
+            tracker.agent_error("planner", f"計画失敗: {e}")
+            tracker.set_phase("error")
+            raise
 
         state["current_phase"] = Phase.PLANNING
         state["game_spec"] = result.get("game_spec")
