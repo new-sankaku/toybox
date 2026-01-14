@@ -9,6 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ..core.state import GameState, DevelopmentPhase
 from ..core.llm import get_llm_for_agent
+from ..tools import ClaudeCodeDelegate, FileTools
 
 
 class CoderAgent:
@@ -20,6 +21,7 @@ class CoderAgent:
     - Adapt implementation to development phase
     - Write code files to output directory
     - Handle platform-specific implementations
+    - Delegate complex tasks to Claude Code
     """
 
     def __init__(self):
@@ -27,6 +29,8 @@ class CoderAgent:
         self.llm = get_llm_for_agent("coder")
         self.output_dir = Path("output/code")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.claude_delegate = ClaudeCodeDelegate()
+        self.file_tools = FileTools()
 
     def run(self, state: GameState) -> Dict[str, Any]:
         """
@@ -48,6 +52,10 @@ class CoderAgent:
         print(f"💻 Implementing: {game_spec.get('title')}")
         print(f"🎮 Platform: {game_spec.get('target_platform')}")
         print(f"🔧 Phase: {development_phase}")
+
+        # Check if task should be delegated to Claude Code
+        if self._should_delegate(game_spec, development_phase):
+            return self._delegate_to_claude_code(game_spec, development_phase, state)
 
         # Generate code based on platform
         platform = game_spec.get("target_platform", "pygame")
@@ -371,3 +379,92 @@ python main.py
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             print(f"   ✍️  Wrote {file_path}")
+
+    def _should_delegate(self, game_spec: Dict[str, Any], phase: DevelopmentPhase) -> bool:
+        """
+        Determine if implementation should be delegated to Claude Code.
+
+        Args:
+            game_spec: Game specification
+            phase: Development phase
+
+        Returns:
+            True if should delegate
+        """
+        # Estimate complexity
+        mechanics_count = len(game_spec.get("mechanics", []))
+        estimated_lines = mechanics_count * 50  # Rough estimate
+
+        # More complex in later phases
+        phase_multipliers = {
+            DevelopmentPhase.MOCK: 1.0,
+            DevelopmentPhase.GENERATE: 1.5,
+            DevelopmentPhase.POLISH: 2.0,
+            DevelopmentPhase.FINAL: 2.5
+        }
+        estimated_lines *= phase_multipliers.get(phase, 1.0)
+
+        # Check delegation criteria
+        should_delegate = self.claude_delegate.should_delegate(
+            estimated_lines=int(estimated_lines),
+            file_count=1,
+            complexity_score=mechanics_count / 10.0,  # Normalize
+            task_type="code_generation"
+        )
+
+        return should_delegate
+
+    def _delegate_to_claude_code(
+        self,
+        game_spec: Dict[str, Any],
+        phase: DevelopmentPhase,
+        state: GameState
+    ) -> Dict[str, Any]:
+        """
+        Delegate code generation to Claude Code.
+
+        Args:
+            game_spec: Game specification
+            phase: Development phase
+            state: Current state
+
+        Returns:
+            Dictionary with code_files or empty if delegation
+        """
+        description = f"""Generate a complete {game_spec.get('target_platform')} game:
+
+Title: {game_spec.get('title')}
+Genre: {game_spec.get('genre')}
+Description: {game_spec.get('description')}
+
+Mechanics:
+{chr(10).join(f'- {m}' for m in game_spec.get('mechanics', []))}
+
+Development Phase: {phase}
+
+Requirements:
+- Create main.py with complete game implementation
+- Follow {phase} phase guidelines (see ARCHITECTURE.md)
+- Include README.md with instructions
+- Ensure code runs without errors
+
+Output files to: output/code/
+"""
+
+        # Create task
+        task, result = self.claude_delegate.create_task(
+            task_type="code_generation",
+            description=description,
+            target_files=["output/code/main.py", "output/code/README.md"],
+            context=f"Game spec: {json.dumps(game_spec, indent=2)}",
+            priority="high",
+            wait_for_result=False  # Don't block workflow
+        )
+
+        # Add task to state
+        state["claude_code_tasks"].append(task)
+
+        print("   ⏭️  Continuing with fallback implementation while waiting...")
+
+        # Return empty for now - Claude Code will handle it
+        return {"code_files": {}}

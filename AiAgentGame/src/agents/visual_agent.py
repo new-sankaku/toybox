@@ -7,6 +7,7 @@ from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.state import DevelopmentPhase, Artifact, ArtifactStatus
+from ..tools import AttributionManager
 
 
 class VisualAgent:
@@ -29,6 +30,9 @@ class VisualAgent:
         (self.output_dir / "backgrounds").mkdir(exist_ok=True)
         (self.output_dir / "effects").mkdir(exist_ok=True)
         (self.output_dir / "mock").mkdir(exist_ok=True)
+
+        # Attribution manager
+        self.attribution = AttributionManager()
 
     def generate(self, game_spec: Dict[str, Any], phase: DevelopmentPhase) -> Dict[str, Artifact]:
         """
@@ -74,6 +78,9 @@ class VisualAgent:
             feedback_history=[]
         )
 
+        # Record attribution
+        self.attribution.add_mock_attribution("visual_player", "image")
+
         # Generate enemy if game has enemies
         mechanics = game_spec.get("mechanics", [])
         if any(word in str(mechanics).lower() for word in ["enemy", "enemies", "opponent"]):
@@ -93,6 +100,9 @@ class VisualAgent:
                 feedback_history=[]
             )
 
+            # Record attribution
+            self.attribution.add_mock_attribution("visual_enemy", "image")
+
         # Generate background
         bg_path = self._create_background("background", (800, 600))
 
@@ -104,6 +114,9 @@ class VisualAgent:
             status=ArtifactStatus.COMPLETED,
             feedback_history=[]
         )
+
+        # Record attribution
+        self.attribution.add_mock_attribution("visual_background", "image")
 
         print(f"   ✅ Generated {len(artifacts)} placeholder images")
 

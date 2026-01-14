@@ -8,6 +8,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from ..core.state import GameState
 from ..core.llm import get_llm_for_agent
+from ..tools import ClaudeCodeDelegate, FileTools, BashTools
 
 
 class DebuggerAgent:
@@ -26,6 +27,11 @@ class DebuggerAgent:
         """Initialize the Debugger Agent."""
         self.llm = get_llm_for_agent("debugger")
         self.output_dir = Path("output/code")
+        self.claude_delegate = ClaudeCodeDelegate()
+        self.file_tools = FileTools()
+        self.bash_tools = BashTools()
+        self.retry_count = 0
+        self.max_retries = 3
 
     def run(self, state: GameState) -> Dict[str, Any]:
         """
@@ -70,6 +76,13 @@ class DebuggerAgent:
                 fixed_code[filename] = auto_fixed
                 print(f"   ✅ Automatically fixed {filename}")
             else:
+                # Check if should delegate to Claude Code
+                if self._should_delegate_debugging(file_errors, state):
+                    delegated = self._delegate_to_claude_code(filename, code_files[filename], file_errors, state)
+                    if delegated:
+                        print(f"   🔄 Delegated {filename} to Claude Code")
+                        continue
+
                 # Use LLM to fix
                 llm_fixed = self._fix_with_llm(filename, code_files[filename], file_errors)
                 if llm_fixed:
@@ -183,3 +196,89 @@ Start directly with the code.""")
             code = "\n".join(lines)
 
         return code.strip()
+
+    def _should_delegate_debugging(self, errors: list, state: GameState) -> bool:
+        """
+        Determine if debugging should be delegated to Claude Code.
+
+        Args:
+            errors: List of errors
+            state: Current state
+
+        Returns:
+            True if should delegate
+        """
+        # Delegate if too many retries
+        iteration = state.get("iteration", 0)
+        if iteration >= self.max_retries:
+            print(f"   ⚠️  Max retries ({self.max_retries}) reached")
+            return True
+
+        # Delegate if complex logic errors
+        has_logic_errors = any(
+            e.get("type") not in ["syntax_error", "import_error"]
+            for e in errors
+        )
+
+        if has_logic_errors and len(errors) > 3:
+            return True
+
+        # Delegate if multiple files involved
+        unique_files = set(e.get("file") for e in errors)
+        if len(unique_files) >= 3:
+            return True
+
+        return False
+
+    def _delegate_to_claude_code(
+        self,
+        filename: str,
+        code: str,
+        errors: list,
+        state: GameState
+    ) -> bool:
+        """
+        Delegate debugging to Claude Code.
+
+        Args:
+            filename: File to fix
+            code: Current code
+            errors: List of errors
+            state: Current state
+
+        Returns:
+            True if delegated successfully
+        """
+        error_summary = "\n".join([
+            f"- Line {e.get('line', '?')}: {e.get('message')}"
+            for e in errors
+        ])
+
+        description = f"""Debug and fix errors in {filename}:
+
+Errors found:
+{error_summary}
+
+Current code is in: output/code/{filename}
+
+Requirements:
+- Fix all errors
+- Ensure code runs without errors
+- Maintain existing functionality
+- Add comments explaining fixes
+"""
+
+        # Create task
+        task, _ = self.claude_delegate.create_task(
+            task_type="debug",
+            description=description,
+            target_files=[f"output/code/{filename}"],
+            context=f"Errors: {error_summary}",
+            priority="high",
+            wait_for_result=False
+        )
+
+        # Add to state
+        state["claude_code_tasks"].append(task)
+
+        return True

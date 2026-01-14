@@ -92,6 +92,12 @@ Development Phases:
         graph = GameCreatorGraph()
         final_state = graph.run(state)
 
+        # Generate attribution credits
+        from src.tools import AttributionManager
+        attribution = AttributionManager()
+        attribution.generate_credits_file("output/CREDITS.md")
+        attribution.print_summary()
+
         # Print summary
         print("\n" + "=" * 80)
         print("📊 SUMMARY")

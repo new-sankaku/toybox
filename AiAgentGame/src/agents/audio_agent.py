@@ -8,6 +8,7 @@ import struct
 import wave
 
 from ..core.state import DevelopmentPhase, Artifact, ArtifactStatus
+from ..tools import AttributionManager
 
 
 class AudioAgent:
@@ -29,6 +30,9 @@ class AudioAgent:
         (self.output_dir / "bgm").mkdir(exist_ok=True)
         (self.output_dir / "se").mkdir(exist_ok=True)
         (self.output_dir / "mock").mkdir(exist_ok=True)
+
+        # Attribution manager
+        self.attribution = AttributionManager()
 
     def generate(self, game_spec: Dict[str, Any], phase: DevelopmentPhase) -> Dict[str, Artifact]:
         """
@@ -68,6 +72,9 @@ class AudioAgent:
             status=ArtifactStatus.COMPLETED,
             feedback_history=[]
         )
+
+        # Record attribution
+        self.attribution.add_mock_attribution("audio_jump_se", "audio")
 
         print(f"   ✅ Generated {len(artifacts)} placeholder sounds")
 

@@ -7,6 +7,7 @@ from typing import Dict, Any
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.state import DevelopmentPhase, Artifact, ArtifactStatus
+from ..tools import AttributionManager
 
 
 class UIAgent:
@@ -28,6 +29,9 @@ class UIAgent:
         (self.output_dir / "icons").mkdir(exist_ok=True)
         (self.output_dir / "buttons").mkdir(exist_ok=True)
         (self.output_dir / "mock").mkdir(exist_ok=True)
+
+        # Attribution manager
+        self.attribution = AttributionManager()
 
     def generate(self, game_spec: Dict[str, Any], phase: DevelopmentPhase) -> Dict[str, Artifact]:
         """
@@ -68,6 +72,9 @@ class UIAgent:
             feedback_history=[]
         )
 
+        # Record attribution
+        self.attribution.add_mock_attribution("ui_play_button", "ui")
+
         # Generate game icon
         icon_path = self._create_icon("game_icon", game_spec.get("title", "Game")[0])
 
@@ -79,6 +86,9 @@ class UIAgent:
             status=ArtifactStatus.COMPLETED,
             feedback_history=[]
         )
+
+        # Record attribution
+        self.attribution.add_mock_attribution("ui_game_icon", "ui")
 
         print(f"   ✅ Generated {len(artifacts)} placeholder UI elements")
 
