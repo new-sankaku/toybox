@@ -9,12 +9,13 @@ from typing import Optional
 from datetime import datetime
 
 from .state import Feedback, GameState
+from .llm import get_output_dir
 
 
 class FeedbackManager:
     """Manages file-based feedback for artifacts."""
 
-    def __init__(self, feedback_dir: str = "feedback", status_dir: str = "status"):
+    def __init__(self, feedback_dir: str = None, status_dir: str = None):
         """
         Initialize feedback manager.
 
@@ -22,8 +23,9 @@ class FeedbackManager:
             feedback_dir: Directory for user feedback files
             status_dir: Directory for status files
         """
-        self.feedback_dir = Path(feedback_dir)
-        self.status_dir = Path(status_dir)
+        output_dir = get_output_dir()
+        self.feedback_dir = Path(feedback_dir) if feedback_dir else output_dir / "feedback"
+        self.status_dir = Path(status_dir) if status_dir else output_dir / "status"
 
         # Create directories if they don't exist
         self.feedback_dir.mkdir(parents=True, exist_ok=True)
@@ -94,7 +96,7 @@ class FeedbackManager:
 
     def _parse_json_feedback(self, artifact_id: str, file_path: Path) -> Feedback:
         """Parse JSON feedback file."""
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
         return Feedback(
@@ -107,7 +109,7 @@ class FeedbackManager:
 
     def _parse_text_feedback(self, artifact_id: str, file_path: Path) -> Feedback:
         """Parse simple text feedback file."""
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             comment = f.read().strip()
 
         # Simple heuristic to determine action
@@ -161,8 +163,8 @@ class FeedbackManager:
             ]
         }
 
-        with open(status_file, 'w') as f:
-            json.dump(status, f, indent=2)
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump(status, f, indent=2, ensure_ascii=False)
 
     def check_global_feedback(self) -> Optional[str]:
         """
@@ -174,7 +176,7 @@ class FeedbackManager:
         global_feedback = self.feedback_dir / "_global.txt"
 
         if global_feedback.exists():
-            with open(global_feedback, 'r') as f:
+            with open(global_feedback, 'r', encoding='utf-8') as f:
                 message = f.read().strip()
             global_feedback.unlink()
             print(f"🌐 Global feedback received: {message}")

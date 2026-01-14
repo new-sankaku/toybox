@@ -8,6 +8,9 @@ from typing import Dict, Any, List
 from datetime import datetime
 
 from ..core.state import Attribution
+from ..utils.logger import get_logger
+
+logger = get_logger()
 
 
 class AttributionManager:
@@ -135,7 +138,7 @@ class AttributionManager:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(credits_text)
 
-        print(f"✅ Generated credits file: {output_path}")
+        logger.info(f"クレジットファイル生成: {output_path}")
 
     def _load(self) -> None:
         """Load existing attributions from file."""
@@ -145,7 +148,7 @@ class AttributionManager:
                     data = json.load(f)
                     self.attributions = data.get("attributions", [])
             except Exception as e:
-                print(f"⚠️  Error loading attributions: {e}")
+                logger.warning(f"アトリビューション読込エラー: {e}")
                 self.attributions = []
 
     def _save(self) -> None:
@@ -161,7 +164,7 @@ class AttributionManager:
                 json.dump(data, f, indent=2)
 
         except Exception as e:
-            print(f"❌ Error saving attributions: {e}")
+            logger.error(f"アトリビューション保存エラー: {e}")
 
     def get_summary(self) -> Dict[str, Any]:
         """
@@ -195,14 +198,14 @@ class AttributionManager:
         """Print attribution summary."""
         summary = self.get_summary()
 
-        print("\n📊 Attribution Summary:")
-        print(f"   Total assets: {summary['total_assets']}")
-        print(f"   Requires credit: {summary['requires_credit']}")
+        logger.info("アトリビューション概要:")
+        logger.info(f"  総アセット数: {summary['total_assets']}")
+        logger.info(f"  クレジット必要: {summary['requires_credit']}")
 
-        print("\n   By type:")
+        logger.info("  タイプ別:")
         for asset_type, count in summary['by_type'].items():
-            print(f"     - {asset_type}: {count}")
+            logger.info(f"    - {asset_type}: {count}")
 
-        print("\n   By license:")
+        logger.info("  ライセンス別:")
         for license, count in summary['by_license'].items():
-            print(f"     - {license}: {count}")
+            logger.info(f"    - {license}: {count}")

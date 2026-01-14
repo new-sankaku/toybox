@@ -8,6 +8,9 @@ from langchain_core.output_parsers import JsonOutputParser
 
 from ..core.state import GameState
 from ..core.llm import get_llm_for_agent
+from ..utils.logger import get_logger
+
+logger = get_logger()
 
 
 class ReviewerAgent:
@@ -23,7 +26,7 @@ class ReviewerAgent:
 
     def __init__(self):
         """Initialize the Reviewer Agent."""
-        self.llm = get_llm_for_agent("planner")  # Reuse planner LLM
+        self.llm = get_llm_for_agent("planner")
         self.parser = JsonOutputParser()
 
     def run(self, state: GameState) -> Dict[str, Any]:
@@ -40,12 +43,11 @@ class ReviewerAgent:
         game_spec = state.get("game_spec", {})
 
         if not code_files:
-            print("⚠️  No code to review")
+            logger.warning("レビュー対象のコードなし")
             return {"review_comments": [], "approval_status": True}
 
-        print(f"👀 Reviewing {len(code_files)} files")
+        logger.info(f"レビュー中: {len(code_files)}ファイル")
 
-        # Review main Python file
         main_file = None
         main_content = None
 
@@ -58,17 +60,15 @@ class ReviewerAgent:
         if not main_file:
             return {"review_comments": [], "approval_status": True}
 
-        # Perform review
         review_comments = self._review_code(main_file, main_content, game_spec)
 
-        # Count critical issues
         critical_count = len([c for c in review_comments if c.get("severity") == "error"])
 
         if critical_count > 0:
-            print(f"\n❌ Review failed: {critical_count} critical issues")
+            logger.warning(f"レビュー不合格: 重大な問題{critical_count}件")
             approval_status = False
         else:
-            print(f"\n✅ Review passed with {len(review_comments)} suggestions")
+            logger.info(f"レビュー合格: 提案{len(review_comments)}件")
             approval_status = True
 
         return {
@@ -117,7 +117,7 @@ Return ONLY the JSON, no additional text.""")
                 "title": game_spec.get("title", "Unknown"),
                 "mechanics": ", ".join(game_spec.get("mechanics", [])),
                 "filename": filename,
-                "code": code[:2000]  # Limit code length for review
+                "code": code[:2000]
             })
 
             comments = result.get("comments", [])
@@ -125,19 +125,11 @@ Return ONLY the JSON, no additional text.""")
             for comment in comments:
                 severity = comment.get("severity", "info")
                 message = comment.get("message", "")
-                print(f"   {self._get_emoji(severity)} {message}")
+                level = severity.upper()
+                logger.debug(f"[{level}] {message}")
 
             return comments
 
         except Exception as e:
-            print(f"⚠️  Review error: {e}")
-            # Return empty comments on error
+            logger.error(f"レビュー失敗: {e}")
             return []
-
-    def _get_emoji(self, severity: str) -> str:
-        """Get emoji for severity level."""
-        return {
-            "error": "❌",
-            "warning": "⚠️",
-            "info": "ℹ️"
-        }.get(severity, "•")

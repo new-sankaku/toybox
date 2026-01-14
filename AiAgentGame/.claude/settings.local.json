@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venvScriptspython.exe -c \"import sys; print\\(''Python:'', sys.version\\); import langgraph; print\\(''langgraph OK''\\); import langchain; print\\(''langchain OK''\\); from src.core.state import create_initial_state; print\\(''src.core.state OK''\\)\")",
+      "Bash(cmd.exe /c run.bat)",
+      "Bash(cmd.exe /c \"run.bat \"\"Create a simple puzzle game\"\"\")",
+      "Bash(run.bat)",
+      "Bash(cmd.exe /c \"cd /d C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame && run.bat\")",
+      "Bash(cmd.exe /c \"chcp 65001 && cd /d C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame && python -m src.main \"\"横スクロールのシューティングゲームを作って\"\"\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame && venv\\\\Scripts\\\\activate.bat && python -m src.main test\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame''; .\\\\venv\\\\Scripts\\\\Activate.ps1; python -m src.main ''test'' 2>&1\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame''; .\\\\venv\\\\Scripts\\\\Activate.ps1; python -m src.main ''横スクロールのシューティングゲームを作って'' 2>&1\")",
+      "Bash(cmd.exe /c \"cd /d C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame && call venv\\\\Scripts\\\\activate.bat && set /p REQUEST=<request.txt && echo Request: %REQUEST% && python -m src.main \"\"%REQUEST%\"\"\")",
+      "Bash(powershell.exe -Command \"cd ''C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame''; $req = Get-Content ''request.txt'' -Encoding UTF8; Write-Host \"\"Request: $req\"\"; .\\\\venv\\\\Scripts\\\\Activate.ps1; python -m src.main $req 2>&1\")",
+      "Bash(powershell.exe -Command \"Get-Content ''C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame\\\\request.txt'' -Encoding UTF8\")",
+      "Bash(powershell.exe -Command \"[System.IO.File]::WriteAllText\\(''C:\\\\01_work\\\\00_Git\\\\toybox\\\\AiAgentGame\\\\request.txt'', ''横スクロールのシューティングゲームを作って'', [System.Text.Encoding]::UTF8\\)\")",
+      "Bash(powershell.exe:*)",
+      "Bash(python:*)",
+      "Bash(pip install:*)",
+      "Bash(pip show:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 3)",
+      "Bash(ping:*)"
+    ]
+  }
+}

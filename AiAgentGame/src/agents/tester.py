@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 from ..core.state import GameState
+from ..utils.logger import get_logger
+
+logger = get_logger()
 
 
 class TesterAgent:
@@ -38,10 +41,10 @@ class TesterAgent:
         code_files = state.get("code_files", {})
 
         if not code_files:
-            print("❌ No code files to test")
+            logger.warning("テスト対象のコードファイルなし")
             return {"test_results": None, "errors": []}
 
-        print(f"🧪 Testing {len(code_files)} files")
+        logger.info(f"テスト中: {len(code_files)}ファイル")
 
         errors = []
         test_results = {
@@ -50,34 +53,28 @@ class TesterAgent:
             "runtime_check": False
         }
 
-        # Test each Python file
         for filename, content in code_files.items():
             if not filename.endswith('.py'):
                 continue
 
-            print(f"\n   Testing {filename}...")
+            logger.debug(f"Testing {filename}")
 
-            # Syntax check
             syntax_errors = self._check_syntax(filename, content)
             if syntax_errors:
                 errors.extend(syntax_errors)
                 test_results["syntax_check"] = False
 
-            # Import check
             import_errors = self._check_imports(filename, content)
             if import_errors:
                 errors.extend(import_errors)
                 test_results["import_check"] = False
 
-        # Print results
         if errors:
-            print(f"\n❌ Found {len(errors)} errors:")
-            for error in errors[:5]:  # Show first 5 errors
-                print(f"   • {error.get('message')}")
-            if len(errors) > 5:
-                print(f"   ... and {len(errors) - 5} more")
+            logger.warning(f"エラー発見: {len(errors)}件")
+            for error in errors[:3]:
+                logger.warning(f"  {error.get('message')}")
         else:
-            print("\n✅ All tests passed!")
+            logger.info("全テスト合格")
 
         return {
             "test_results": test_results,
@@ -108,7 +105,7 @@ class TesterAgent:
         try:
             tree = ast.parse(code)
         except:
-            return errors  # Syntax error already caught
+            return errors
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -136,7 +133,6 @@ class TesterAgent:
 
     def _is_module_available(self, module_name: str) -> bool:
         """Check if a module is available."""
-        # Skip checking standard library and built-in modules
         stdlib_modules = {
             'sys', 'os', 'json', 'time', 'datetime', 'random', 'math',
             'collections', 'itertools', 'functools', 'pathlib', 're',
@@ -146,7 +142,6 @@ class TesterAgent:
         if module_name.split('.')[0] in stdlib_modules:
             return True
 
-        # Check if module is installed
         try:
             __import__(module_name.split('.')[0])
             return True
@@ -162,7 +157,6 @@ class TesterAgent:
         if not file_path.exists():
             return errors
 
-        # Try to run pylint or flake8 if available
         try:
             result = subprocess.run(
                 ['python', '-m', 'pylint', '--errors-only', str(file_path)],
@@ -180,7 +174,6 @@ class TesterAgent:
                 })
 
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            # Pylint not available or timeout
             pass
 
         return errors

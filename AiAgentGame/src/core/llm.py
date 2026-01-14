@@ -5,10 +5,14 @@ LLM configuration and initialization.
 import os
 import yaml
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable, Any
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import ChatOpenAI
 from langchain.chat_models.base import BaseChatModel
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+
+# Global config cache
+_config_cache = None
 
 
 def load_config(config_path: str = "config/llm_config.yaml") -> dict:
@@ -19,7 +23,7 @@ def load_config(config_path: str = "config/llm_config.yaml") -> dict:
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file}")
 
-    with open(config_file, 'r') as f:
+    with open(config_file, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
     # Replace environment variables
@@ -137,3 +141,65 @@ def get_llm_for_agent(agent_name: str) -> BaseChatModel:
         BaseChatModel: Initialized LLM instance with agent-specific config
     """
     return get_llm(agent_name=agent_name)
+
+
+def get_app_language() -> str:
+    """Get configured language (ja or en)."""
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = load_config()
+    return _config_cache.get("app", {}).get("language", "ja")
+
+
+def get_output_dir() -> Path:
+    """Get configured output directory."""
+    global _config_cache
+    if _config_cache is None:
+        _config_cache = load_config()
+    output_dir = _config_cache.get("app", {}).get("output_dir", "./output")
+    project_root = Path(__file__).parent.parent.parent
+    path = project_root / output_dir
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+# LLM interaction tracking
+_llm_callback = None
+_total_tokens = {"input": 0, "output": 0}
+
+
+def set_llm_callback(callback: Callable[[dict], None]):
+    """Set callback for LLM interaction events."""
+    global _llm_callback
+    _llm_callback = callback
+
+
+def get_total_tokens() -> dict:
+    """Get total token usage."""
+    return _total_tokens.copy()
+
+
+def reset_tokens():
+    """Reset token counters."""
+    global _total_tokens
+    _total_tokens = {"input": 0, "output": 0}
+
+
+def track_llm_call(agent_name: str, prompt: str, response: str,
+                   input_tokens: int = 0, output_tokens: int = 0):
+    """Track an LLM call and notify callback."""
+    global _total_tokens, _llm_callback
+
+    _total_tokens["input"] += input_tokens
+    _total_tokens["output"] += output_tokens
+
+    if _llm_callback:
+        _llm_callback({
+            "agent": agent_name,
+            "prompt": prompt,
+            "response": response,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_input": _total_tokens["input"],
+            "total_output": _total_tokens["output"]
+        })

@@ -8,15 +8,28 @@ Usage:
 """
 
 import sys
+import io
 import argparse
 from pathlib import Path
+
+# Fix Windows console encoding for Unicode support
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.state import create_initial_state, DevelopmentPhase
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv(project_root / ".env")
+
+from src.core.state import create_initial_state, DevelopmentPhase, Phase
 from src.core.graph import GameCreatorGraph
+from src.utils.logger import setup_logger
+
+logger = setup_logger()
 
 
 def main():
@@ -72,14 +85,10 @@ Development Phases:
 
     development_phase = phase_map[args.phase]
 
-    # Print welcome message
-    print("\n" + "=" * 80)
-    print("🎮 AI AGENT GAME CREATOR")
-    print("=" * 80)
-    print(f"Request: {args.request}")
-    print(f"Phase: {args.phase}")
-    print(f"Output: {args.output}")
-    print("=" * 80 + "\n")
+    logger.info("AI Agent Game Creator 開始")
+    logger.info(f"リクエスト: {args.request}")
+    logger.info(f"フェーズ: {args.phase}")
+    logger.info(f"出力先: {args.output}")
 
     # Create initial state
     state = create_initial_state(
@@ -96,47 +105,32 @@ Development Phases:
         from src.tools import AttributionManager
         attribution = AttributionManager()
         attribution.generate_credits_file("output/CREDITS.md")
-        attribution.print_summary()
 
         # Print summary
-        print("\n" + "=" * 80)
-        print("📊 SUMMARY")
-        print("=" * 80)
-
         game_spec = final_state.get("game_spec", {})
-        print(f"Title: {game_spec.get('title', 'N/A')}")
-        print(f"Genre: {game_spec.get('genre', 'N/A')}")
-        print(f"Platform: {game_spec.get('target_platform', 'N/A')}")
-        print(f"\nCode Files: {len(final_state.get('code_files', {}))}")
-        print(f"Assets: {len(final_state.get('artifacts', {}))}")
-        print(f"Errors: {len(final_state.get('errors', []))}")
+        logger.info("結果:")
+        logger.info(f"  タイトル: {game_spec.get('title', 'N/A')}")
+        logger.info(f"  ジャンル: {game_spec.get('genre', 'N/A')}")
+        logger.info(f"  プラットフォーム: {game_spec.get('target_platform', 'N/A')}")
+        logger.info(f"  コードファイル: {len(final_state.get('code_files', {}))}件")
+        logger.info(f"  アセット: {len(final_state.get('artifacts', {}))}件")
+        logger.info(f"  エラー: {len(final_state.get('errors', []))}件")
 
-        print("\n📂 Output Location:")
-        print(f"   Code: {args.output}/code/")
-        print(f"   Images: {args.output}/images/")
-        print(f"   Audio: {args.output}/audio/")
-        print(f"   UI: {args.output}/ui/")
-
-        if final_state.get("current_phase") == "completed":
-            print("\n✅ Game creation completed successfully!")
-            print("\n🎮 To run your game:")
-            print(f"   cd {args.output}/code")
-            print("   python main.py")
+        current_phase = final_state.get("current_phase")
+        if current_phase == Phase.COMPLETED:
+            logger.info("ゲーム作成完了")
+            logger.info(f"実行: cd {args.output}/code && python main.py")
         else:
-            print("\n⚠️  Game creation incomplete")
-            if final_state.get("errors"):
-                print("   Please check errors above")
-
-        print("=" * 80 + "\n")
+            logger.warning(f"ゲーム作成未完了 (フェーズ: {current_phase})")
 
         return 0
 
     except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
+        logger.warning("ユーザーによる中断")
         return 1
 
     except Exception as e:
-        print(f"\n\n❌ Error: {e}")
+        logger.error(f"エラー: {e}")
         import traceback
         traceback.print_exc()
         return 1

@@ -142,6 +142,7 @@ class GameState(TypedDict):
     # Control
     current_phase: Phase
     iteration: int
+    review_iteration: int
 
     # Feedback
     pending_feedback: Annotated[list[Feedback], operator.add]
@@ -171,6 +172,7 @@ def create_initial_state(user_request: str, development_phase: DevelopmentPhase 
         errors=[],
         current_phase=Phase.PLANNING,
         iteration=0,
+        review_iteration=0,
         pending_feedback=[],
         attributions=[],
         claude_code_tasks=[],

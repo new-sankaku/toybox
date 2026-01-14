@@ -6,6 +6,9 @@ from typing import Dict, Any
 from pathlib import Path
 
 from ..core.state import GameState, DevelopmentPhase
+from ..utils.logger import get_logger
+
+logger = get_logger()
 
 
 class AssetCoordinatorAgent:
@@ -36,36 +39,31 @@ class AssetCoordinatorAgent:
         game_spec = state.get("game_spec", {})
         development_phase = state["development_phase"]
 
-        print(f"🎨 Coordinating asset generation")
-        print(f"   Phase: {development_phase}")
+        logger.info(f"アセット調整中 (フェーズ: {development_phase})")
 
         artifacts = {}
 
-        # Import specialized agents
         from .visual_agent import VisualAgent
         from .audio_agent import AudioAgent
         from .ui_agent import UIAgent
 
-        # Generate visual assets
         if game_spec.get("visual_style"):
-            print("\n   🖼️  Generating visual assets...")
+            logger.debug("ビジュアルアセット生成中")
             visual_agent = VisualAgent()
             visual_artifacts = visual_agent.generate(game_spec, development_phase)
             artifacts.update(visual_artifacts)
 
-        # Generate audio assets
         if game_spec.get("audio_style"):
-            print("\n   🔊 Generating audio assets...")
+            logger.debug("オーディオアセット生成中")
             audio_agent = AudioAgent()
             audio_artifacts = audio_agent.generate(game_spec, development_phase)
             artifacts.update(audio_artifacts)
 
-        # Generate UI assets
-        print("\n   🎯 Generating UI assets...")
+        logger.debug("UIアセット生成中")
         ui_agent = UIAgent()
         ui_artifacts = ui_agent.generate(game_spec, development_phase)
         artifacts.update(ui_artifacts)
 
-        print(f"\n✅ Generated {len(artifacts)} assets")
+        logger.info(f"アセット生成完了: {len(artifacts)}件")
 
         return {"artifacts": artifacts}

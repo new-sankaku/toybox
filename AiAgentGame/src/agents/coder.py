@@ -10,6 +10,9 @@ from langchain_core.prompts import ChatPromptTemplate
 from ..core.state import GameState, DevelopmentPhase
 from ..core.llm import get_llm_for_agent
 from ..tools import ClaudeCodeDelegate, FileTools
+from ..utils.logger import get_logger
+
+logger = get_logger()
 
 
 class CoderAgent:
@@ -46,12 +49,10 @@ class CoderAgent:
         development_phase = state["development_phase"]
 
         if not game_spec:
-            print("❌ No game spec available")
+            logger.error("ゲーム仕様がありません")
             return {"code_files": {}}
 
-        print(f"💻 Implementing: {game_spec.get('title')}")
-        print(f"🎮 Platform: {game_spec.get('target_platform')}")
-        print(f"🔧 Phase: {development_phase}")
+        logger.info(f"実装中: {game_spec.get('title')} ({game_spec.get('target_platform')})")
 
         # Check if task should be delegated to Claude Code
         if self._should_delegate(game_spec, development_phase):
@@ -67,15 +68,13 @@ class CoderAgent:
         elif platform == "html5":
             code_files = self._generate_html5_code(game_spec, development_phase)
         else:
-            print(f"⚠️  Unknown platform: {platform}, defaulting to pygame")
+            logger.warning(f"不明なプラットフォーム: {platform}、pygameを使用")
             code_files = self._generate_pygame_code(game_spec, development_phase)
 
         # Write files to output directory
         self._write_code_files(code_files)
 
-        print(f"\n✅ Generated {len(code_files)} code files")
-        for filename in code_files.keys():
-            print(f"   📄 {filename}")
+        logger.info(f"生成完了: {len(code_files)}ファイル")
 
         return {"code_files": code_files}
 
@@ -152,10 +151,7 @@ Start directly with imports.""")
                 "development_phase": development_phase
             })
 
-            # Extract code from response
             code_content = code.content if hasattr(code, 'content') else str(code)
-
-            # Clean up markdown formatting if present
             code_content = self._clean_code_output(code_content)
 
             return {
@@ -164,7 +160,7 @@ Start directly with imports.""")
             }
 
         except Exception as e:
-            print(f"❌ Error generating code: {e}")
+            logger.error(f"コード生成失敗: {e}")
             return {
                 "main.py": self._generate_fallback_pygame_code(game_spec),
                 "README.md": self._generate_readme(game_spec)
@@ -176,8 +172,6 @@ Start directly with imports.""")
         development_phase: DevelopmentPhase
     ) -> Dict[str, str]:
         """Generate Pyxel code (retro game engine)."""
-        # Similar to pygame but for Pyxel
-        # Simplified for now
         return {
             "main.py": f"""# {game_spec.get('title')}
 # Pyxel implementation - TODO
@@ -360,12 +354,9 @@ python main.py
 
     def _clean_code_output(self, code: str) -> str:
         """Clean up code output from LLM."""
-        # Remove markdown code blocks if present
         if code.startswith("```"):
             lines = code.split("\n")
-            # Remove first line (```python or similar)
             lines = lines[1:]
-            # Remove last line if it's ```
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             code = "\n".join(lines)
@@ -378,24 +369,17 @@ python main.py
             file_path = self.output_dir / filename
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            print(f"   ✍️  Wrote {file_path}")
+            logger.debug(f"Wrote {file_path}")
 
     def _should_delegate(self, game_spec: Dict[str, Any], phase: DevelopmentPhase) -> bool:
-        """
-        Determine if implementation should be delegated to Claude Code.
+        """Determine if implementation should be delegated to Claude Code."""
+        # MOCK phase should never delegate - fast local generation is preferred
+        if phase == DevelopmentPhase.MOCK:
+            return False
 
-        Args:
-            game_spec: Game specification
-            phase: Development phase
-
-        Returns:
-            True if should delegate
-        """
-        # Estimate complexity
         mechanics_count = len(game_spec.get("mechanics", []))
-        estimated_lines = mechanics_count * 50  # Rough estimate
+        estimated_lines = mechanics_count * 50
 
-        # More complex in later phases
         phase_multipliers = {
             DevelopmentPhase.MOCK: 1.0,
             DevelopmentPhase.GENERATE: 1.5,
@@ -404,11 +388,10 @@ python main.py
         }
         estimated_lines *= phase_multipliers.get(phase, 1.0)
 
-        # Check delegation criteria
         should_delegate = self.claude_delegate.should_delegate(
             estimated_lines=int(estimated_lines),
             file_count=1,
-            complexity_score=mechanics_count / 10.0,  # Normalize
+            complexity_score=mechanics_count / 10.0,
             task_type="code_generation"
         )
 
@@ -420,17 +403,7 @@ python main.py
         phase: DevelopmentPhase,
         state: GameState
     ) -> Dict[str, Any]:
-        """
-        Delegate code generation to Claude Code.
-
-        Args:
-            game_spec: Game specification
-            phase: Development phase
-            state: Current state
-
-        Returns:
-            Dictionary with code_files or empty if delegation
-        """
+        """Delegate code generation to Claude Code."""
         description = f"""Generate a complete {game_spec.get('target_platform')} game:
 
 Title: {game_spec.get('title')}
@@ -451,20 +424,17 @@ Requirements:
 Output files to: output/code/
 """
 
-        # Create task
         task, result = self.claude_delegate.create_task(
             task_type="code_generation",
             description=description,
             target_files=["output/code/main.py", "output/code/README.md"],
             context=f"Game spec: {json.dumps(game_spec, indent=2)}",
             priority="high",
-            wait_for_result=False  # Don't block workflow
+            wait_for_result=False
         )
 
-        # Add task to state
         state["claude_code_tasks"].append(task)
 
-        print("   ⏭️  Continuing with fallback implementation while waiting...")
+        logger.info("Claude Codeに委任")
 
-        # Return empty for now - Claude Code will handle it
         return {"code_files": {}}
