@@ -11,6 +11,7 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
 ### 1.2 設計思想
 
 - **LLM非依存**: LangChainによる抽象化で、Claude/GPT/Deepseek等を切り替え可能
+- **コスト最適化**: 自前API（ComfyUI等）・無料APIを優先し、有料APIはフォールバック
 - **リアルタイムフィードバック**: ファイルベースの簡易な仕組みでいつでも介入可能
 - **並列処理**: 独立したタスクは並列実行で効率化
 - **監視可能**: LangSmithによるトレース・デバッグ
@@ -168,10 +169,14 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - アニメーション・スプライト
   - エフェクト
 使用API:
-  - DALL-E 3
-  - Stable Diffusion
-  - Midjourney API
-  - Blender (3D)
+  優先度高（無料/自前）:
+    - ComfyUI (self-hosted)      # メイン：ローカルSD環境
+    - Stable Diffusion WebUI     # 代替ローカル環境
+  優先度低（有料）:
+    - DALL-E 3                   # フォールバック
+    - Midjourney API             # 高品質が必要な場合
+  3D:
+    - Blender (ローカル)
 ```
 
 #### 3.2.5 Audio Agent
@@ -184,10 +189,14 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - ジングル
   - ボイス（オプション）
 使用API:
-  - Suno AI
-  - ElevenLabs
-  - AudioGen
-  - Bark
+  優先度高（無料/自前）:
+    - AudioCraft (Meta, ローカル)  # BGM/SE生成
+    - Bark (ローカル)              # 音声合成
+    - Freesound API (無料)         # SE素材
+    - VOICEVOX (ローカル)          # 日本語音声
+  優先度低（有料）:
+    - Suno AI                      # 高品質BGM
+    - ElevenLabs                   # 高品質音声
 ```
 
 #### 3.2.6 UI Agent
@@ -201,9 +210,13 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - HUD要素
   - フォント選定
 使用API:
-  - DALL-E 3
-  - Stable Diffusion
-  - Figma API（オプション）
+  優先度高（無料/自前）:
+    - ComfyUI (self-hosted)        # Visual Agentと共有
+    - Google Fonts API (無料)      # フォント
+    - SVGリポジトリ (無料素材)     # アイコン素材
+  優先度低（有料）:
+    - DALL-E 3                     # フォールバック
+    - Figma API                    # 複雑なUI設計時
 ```
 
 ---
@@ -656,10 +669,14 @@ def get_llm(config: dict):
 | **Game Engine** | Pygame | 2.5+ | 2Dゲーム |
 | **Game Engine** | Pyxel | 2.0+ | レトロゲーム |
 | **Game Engine** | HTML5 Canvas | - | Webゲーム |
-| **Image Gen** | DALL-E 3 | - | 画像生成 |
-| **Image Gen** | Stable Diffusion | - | 画像生成 |
-| **Audio Gen** | Suno AI | - | BGM生成 |
-| **Audio Gen** | ElevenLabs | - | 音声生成 |
+| **Image Gen** | ComfyUI | - | 画像生成（メイン・自前） |
+| **Image Gen** | Stable Diffusion WebUI | - | 画像生成（代替・自前） |
+| **Image Gen** | DALL-E 3 | - | 画像生成（フォールバック） |
+| **Audio Gen** | AudioCraft | - | BGM/SE生成（自前） |
+| **Audio Gen** | VOICEVOX | - | 日本語音声（自前） |
+| **Audio Gen** | Freesound API | - | SE素材（無料） |
+| **Audio Gen** | Suno AI | - | BGM生成（有料フォールバック） |
+| **Audio Gen** | ElevenLabs | - | 音声生成（有料フォールバック） |
 | **File Watch** | watchdog | 3.0+ | ファイル監視 |
 
 ---
@@ -711,11 +728,20 @@ def get_llm(config: dict):
 
 ### 11.2 必要なAPIキー
 
+**必須（いずれか1つ）**:
 - Anthropic API Key（Claude使用時）
-- OpenAI API Key（GPT/DALL-E使用時）
+- OpenAI API Key（GPT使用時）
 - Deepseek API Key（Deepseek使用時）
-- Suno API Key（BGM生成時）
-- ElevenLabs API Key（音声生成時）
+
+**自前環境（推奨・APIキー不要）**:
+- ComfyUI / Stable Diffusion WebUI（ローカル画像生成）
+- AudioCraft / Bark（ローカル音声生成）
+- VOICEVOX（ローカル日本語音声）
+
+**オプション（有料フォールバック）**:
+- OpenAI API Key（DALL-E 3使用時）
+- Suno API Key（高品質BGM生成時）
+- ElevenLabs API Key（高品質音声生成時）
 
 ### 11.3 制限事項
 
