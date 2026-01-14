@@ -11,9 +11,69 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
 ### 1.2 設計思想
 
 - **LLM非依存**: LangChainによる抽象化で、Claude/GPT/Deepseek等を切り替え可能
+- **Claude Code併用**: 複雑なコーディングタスクはClaude Codeにファイル経由で委譲
+- **コスト最適化**: 自前API・無料API・フリー素材を優先し、有料APIはフォールバック
+- **段階的開発**: モック→生成→ブラッシュアップ→完成の4段階で素早く動作確認
 - **リアルタイムフィードバック**: ファイルベースの簡易な仕組みでいつでも介入可能
 - **並列処理**: 独立したタスクは並列実行で効率化
 - **監視可能**: LangSmithによるトレース・デバッグ
+- **ライセンス遵守**: フリー素材使用時は出典・ライセンス情報を必ず保存
+
+### 1.3 開発フェーズ（4段階アプローチ）
+
+ゲーム開発は以下の4段階で進行。各段階で「動くもの」を維持し、段階的に品質を向上。
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        4-Phase Development Approach                          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Step 1: MOCK（モック版）                                                    │
+│  ────────────────────────                                                    │
+│  目的: 最速で動作確認、ゲームの骨格を検証                                    │
+│                                                                              │
+│  • 画像: 単色矩形、基本図形、プレースホルダー画像                           │
+│  • 音声: システム音源、Windows内蔵音、無音ファイル                          │
+│  • コード: 最小限の実装、ハードコード値、TODO多め                           │
+│  • 所要時間: 数分〜数十分                                                    │
+│                                                                              │
+│         ↓ 動作確認OK                                                        │
+│                                                                              │
+│  Step 2: GENERATE（生成版）                                                  │
+│  ────────────────────────                                                    │
+│  目的: 実際のアセットを生成・取得してゲームらしくする                        │
+│                                                                              │
+│  • 画像: フリー素材取得 or ComfyUI生成（低解像度可）                        │
+│  • 音声: フリー素材取得 or AudioCraft生成                                   │
+│  • コード: 基本機能実装、設定値の外部化                                      │
+│  • 所要時間: 数十分〜数時間                                                  │
+│                                                                              │
+│         ↓ 基本動作OK                                                        │
+│                                                                              │
+│  Step 3: POLISH（ブラッシュアップ版）                                        │
+│  ────────────────────────                                                    │
+│  目的: 品質向上、細部の調整                                                  │
+│                                                                              │
+│  • 画像: Upscale処理、背景削除、色調補正                                    │
+│  • 音声: ループ加工、ノーマライズ、ノイズ除去                               │
+│  • コード: リファクタリング、エラーハンドリング強化                          │
+│  • 所要時間: 数時間                                                          │
+│                                                                              │
+│         ↓ 品質OK                                                            │
+│                                                                              │
+│  Step 4: FINAL（完成版）                                                     │
+│  ────────────────────────                                                    │
+│  目的: リリース品質に仕上げる                                                │
+│                                                                              │
+│  • 画像: 高解像度版、アニメーション追加                                      │
+│  • 音声: BGMバリエーション、SE追加                                          │
+│  • コード: 最適化、ドキュメント整備、テスト完備                              │
+│  • 所要時間: 数時間〜数日                                                    │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+各Agentは現在のフェーズに応じた処理を行う。フェーズはユーザーが指定可能。
 
 ---
 
@@ -85,6 +145,23 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
 │  │                                                                       │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐   │
+│  │                    Claude Code Integration                            │   │
+│  │                   (File-based Task Delegation)                        │   │
+│  │                                                                       │   │
+│  │   📁 claude_tasks/    ← タスク依頼ファイル出力                       │   │
+│  │   📁 claude_results/  ← Claude Code実行結果                          │   │
+│  │                                                                       │   │
+│  │   使用例:                                                             │   │
+│  │   • 複雑なリファクタリング                                           │   │
+│  │   • バグ修正・デバッグ                                               │   │
+│  │   • テストコード生成                                                 │   │
+│  │   • コードレビュー                                                   │   │
+│  │                                                                       │   │
+│  └──────────────────────────────────────────────────────────────────────┘   │
+│                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -121,6 +198,31 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
 使用Tool:
   - WebSearch: 参考情報検索
   - FileRead: 既存コード参照
+
+振る舞い:
+  1. 要求解析:
+    - ユーザー要求からゲームジャンル・規模を判定
+    - 曖昧な要求は具体化のため質問を生成
+    - 実現可能性を評価（技術的制約、リソース制約）
+
+  2. 仕様策定:
+    - ゲームメカニクスを定義
+    - 必要なアセット一覧を作成（画像/音声/UI）
+    - ターゲットプラットフォームを決定（pygame/pyxel/html5）
+
+  3. タスク分解:
+    - 実装タスクを依存関係順にリスト化
+    - 各タスクに優先度と見積もり難易度を付与
+    - 並列実行可能なタスクを識別
+
+  4. 出力:
+    - game_spec.json を ./output/ に保存
+    - フィードバック待機（30秒タイムアウト）
+    - 承認後、次フェーズへ
+
+エラー処理:
+  - 要求が不明確 → 質問を生成してユーザーに確認
+  - 実現不可能な要求 → 代替案を提示
 ```
 
 #### 3.2.2 Coder Agent
@@ -138,6 +240,63 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - FileRead: 既存コード参照
   - FileEdit: コード修正
   - BashExec: コマンド実行（pip install等）
+  - ClaudeCodeDelegate: 複雑タスク委譲
+
+振る舞い（フェーズ別）:
+
+  【Step 1: MOCK】最速で動作するコードを生成
+    - テンプレートから最小限のスケルトン生成
+    - ハードコード値を多用（設定ファイル化は後回し）
+    - TODO/FIXMEコメントで未実装箇所を明示
+    - エラーハンドリングは最小限（print文でログ）
+    - アセットパスはモック素材を直接参照
+    - 目標: 「起動して何か動く」状態
+    - 所要時間: 数分
+
+  【Step 2: GENERATE】基本機能を実装
+    - game_specに従ってロジックを実装
+    - 設定値を外部ファイル化（config.json等）
+    - 基本的なエラーハンドリング追加
+    - アセット読み込みを動的に変更
+    - 所要時間: 数十分〜数時間
+
+  【Step 3: POLISH】品質向上
+    - リファクタリング（関数分割、クラス整理）
+    - 適切なエラーハンドリング
+    - ログ出力の整備
+    - コードコメント追加
+    - 基本的なユニットテスト
+
+  【Step 4: FINAL】完成版
+    - パフォーマンス最適化
+    - エッジケース対応
+    - 完全なテストカバレッジ
+    - ドキュメント整備
+
+タスク評価:
+  - タスクの複雑度を評価（LOC予測、依存関係数）
+  - 複雑度が閾値超え → Claude Codeに委譲
+  - 閾値以下 → 自身で実装
+
+品質チェック:
+  - 構文エラーチェック（AST解析）
+  - 基本的なlintチェック
+  - 依存パッケージの自動インストール
+
+出力:
+  - ./output/code/ にファイル保存
+  - 変更ファイル一覧をログ出力
+
+Claude Code委譲条件:
+  - 100行以上の新規実装
+  - 3ファイル以上にまたがる変更
+  - 複雑なアルゴリズム実装
+  - 大規模リファクタリング
+
+エラー処理:
+  - 構文エラー → 自動修正を試行（3回まで）
+  - 修正失敗 → Claude Codeに委譲
+  - 依存エラー → pip installで解決試行
 ```
 
 #### 3.2.3 Asset Coordinator Agent
@@ -151,10 +310,50 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - visual_tasks: list[VisualTask]
   - audio_tasks: list[AudioTask]
   - ui_tasks: list[UITask]
-動作:
-  - 必要なアセットを分析
-  - 適切なSub-Agentに振り分け
-  - 並列実行を制御
+
+振る舞い:
+  1. アセット分析:
+    - game_specから必要アセットを抽出
+    - アセットをカテゴリ分類（visual/audio/ui）
+    - 各アセットの優先度・依存関係を決定
+
+  2. ソース選択判断:
+    - 各アセットに対して取得方法を決定:
+      a. フリー素材検索（最優先）
+      b. 自前生成（ComfyUI/AudioCraft等）
+      c. 有料API（フォールバック）
+    - スタイル一貫性を考慮（同一ソース優先）
+
+  3. タスク振り分け:
+    - Visual Agent: キャラ、背景、エフェクト、スプライト
+    - Audio Agent: BGM、SE、ボイス
+    - UI Agent: アイコン、ボタン、フォント
+    - 独立タスクは並列実行
+
+  4. 進捗管理:
+    - 各Sub-Agentの完了を監視
+    - 失敗時はリトライ or 代替ソースで再試行
+    - 全完了後、統合チェック
+
+出力フォルダ構造:
+  ./output/images/
+    ├── characters/      # キャラクター画像
+    ├── backgrounds/     # 背景画像
+    ├── effects/         # エフェクト
+    ├── sprites/         # スプライトシート
+    └── raw/             # 生成元画像（処理前）
+  ./output/audio/
+    ├── bgm/             # BGM
+    ├── se/              # 効果音
+    └── voice/           # ボイス
+  ./output/ui/
+    ├── icons/           # アイコン
+    ├── buttons/         # ボタン素材
+    └── fonts/           # フォントファイル
+
+エラー処理:
+  - Sub-Agent失敗 → 代替ソースで再試行（最大3回）
+  - 全ソース失敗 → プレースホルダー生成 + 警告
 ```
 
 #### 3.2.4 Visual Agent
@@ -168,10 +367,83 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - アニメーション・スプライト
   - エフェクト
 使用API:
-  - DALL-E 3
-  - Stable Diffusion
-  - Midjourney API
-  - Blender (3D)
+  優先度1（フリー素材）:
+    - OpenGameArt.org             # ゲーム用フリー素材
+    - itch.io (free assets)       # インディーゲーム素材
+    - Kenney.nl                   # CC0ゲームアセット
+    - 写真AC / イラストAC         # 日本語フリー素材
+  優先度2（自前生成）:
+    - ComfyUI (self-hosted)       # メイン：ローカルSD環境
+    - Stable Diffusion WebUI      # 代替ローカル環境
+  優先度3（有料）:
+    - DALL-E 3                    # フォールバック
+    - Midjourney API              # 高品質が必要な場合
+  3D:
+    - Blender (ローカル)
+    - Sketchfab (CC素材)          # 3Dフリー素材
+出典管理:
+  - 使用素材ごとに attribution.json へ記録
+  - ライセンス種別（CC0, CC-BY, etc.）を保存
+  - 出典URL・作者名を必須記録
+
+振る舞い（フェーズ別）:
+
+  【Step 1: MOCK】即座に動作確認用の仮素材を生成
+    - キャラクター: 色付き矩形 + ラベルテキスト（例: 緑の四角に"Player"）
+    - 背景: 単色グラデーション or パターン画像
+    - エフェクト: 基本図形（円、星形）
+    - スプライト: 色違いの矩形を並べたシート
+    - 生成時間: 数秒/枚
+    - 使用ツール: Pillow で即時生成
+
+  【Step 2: GENERATE】実際の素材を取得・生成
+    - まずフリー素材サイトを検索
+    - 適合素材なし → ComfyUI/SDで生成（低〜中解像度）
+    - ローカル環境なし → 有料APIにフォールバック
+    - 生成元画像は ./output/images/raw/ に保存
+
+  【Step 3: POLISH】品質向上の後処理
+    a. Upscale処理（必須）:
+      - Real-ESRGAN または ESRGAN で高解像度化
+      - 最低2倍、必要に応じて4倍まで
+
+    b. キャラクター画像の場合（必須）:
+      - 背景削除（rembg / Segment Anything）
+      - 透過PNG形式で保存
+      - エッジのアンチエイリアス処理
+
+    c. スプライト画像の場合:
+      - スプライトシート形式に結合
+      - アニメーションフレーム情報をJSON出力
+
+  【Step 4: FINAL】完成版の仕上げ
+    - 高解像度版の最終調整
+    - 表情差分・アニメーションバリエーション追加
+    - 色調統一、エフェクト追加
+
+フォルダ振り分け:
+  - characters/ : キャラ立ち絵、表情差分
+  - backgrounds/: 背景画像
+  - effects/    : エフェクト、パーティクル
+  - sprites/    : スプライトシート
+  - raw/        : 処理前の生成元画像
+  - mock/       : Step1で生成したモック画像
+
+品質チェック:
+  - 解像度が要件を満たすか確認
+  - キャラ画像の透過が正しいか確認
+  - フィードバック待機（30秒）
+
+後処理ツール:
+  - モック生成: Pillow（図形描画）
+  - Upscale: Real-ESRGAN, ESRGAN, ComfyUI Upscaler
+  - 背景削除: rembg, Segment Anything (SAM)
+  - 画像編集: Pillow, OpenCV
+
+エラー処理:
+  - 生成失敗 → プロンプト調整して再試行（3回）
+  - Upscale失敗 → 代替アルゴリズムで再試行
+  - 背景削除失敗 → 手動確認フラグを立てる
 ```
 
 #### 3.2.5 Audio Agent
@@ -184,10 +456,92 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - ジングル
   - ボイス（オプション）
 使用API:
-  - Suno AI
-  - ElevenLabs
-  - AudioGen
-  - Bark
+  優先度1（フリー素材）:
+    - Freesound.org (CC素材)       # SE・環境音
+    - OpenGameArt.org (audio)      # ゲーム用BGM/SE
+    - DOVA-SYNDROME                # 日本語フリーBGM
+    - 効果音ラボ                   # 日本語フリーSE
+    - 魔王魂                       # 日本語フリーBGM/SE
+  優先度2（自前生成）:
+    - AudioCraft (Meta, ローカル)  # BGM/SE生成
+    - Bark (ローカル)              # 音声合成
+    - VOICEVOX (ローカル)          # 日本語音声
+  優先度3（有料）:
+    - Suno AI                      # 高品質BGM
+    - ElevenLabs                   # 高品質音声
+出典管理:
+  - 使用素材ごとに attribution.json へ記録
+  - ライセンス種別・利用規約URLを保存
+  - クレジット表記要否を記録
+
+振る舞い（フェーズ別）:
+
+  【Step 1: MOCK】即座に動作確認用の仮音源を使用
+    - BGM: Windowsシステム音源、または同梱のダミーBGM
+      - Windows: C:\Windows\Media\*.wav
+      - Linux: /usr/share/sounds/ 内の音源
+      - 同梱: ./templates/audio/dummy_bgm.ogg
+    - SE: システムビープ音、または短い無音+ビープ生成
+      - pydubで簡易ビープ音を即時生成
+    - ボイス: 無音ファイル or テキスト読み上げ（pyttsx3）
+    - 生成時間: 即時〜数秒
+    - 使用ツール: pydub（トーン生成）、OS標準音源
+
+  【Step 2: GENERATE】実際の素材を取得・生成
+    - まずフリー素材サイトを検索（キーワード、BPM、ムード）
+    - 適合素材なし → AudioCraft/Bark で生成
+    - ローカル環境なし → 有料APIにフォールバック
+    - 生成元は ./output/audio/raw/ に保存
+
+  【Step 3: POLISH】品質向上の後処理
+    a. BGMの場合（必須）:
+      - ループポイント検出・設定
+      - シームレスループ加工（クロスフェード）
+      - 音量ノーマライズ（-14 LUFS目安）
+      - フェードイン/アウト追加（オプション）
+
+    b. SEの場合（必須）:
+      - 無音トリミング（前後の無音除去）
+      - 音量ノーマライズ
+      - 必要に応じてピッチ/速度調整
+
+    c. ボイスの場合:
+      - ノイズ除去
+      - 音量ノーマライズ
+      - 無音トリミング
+
+  【Step 4: FINAL】完成版の仕上げ
+    - BGMバリエーション追加（通常、ボス戦、イベント等）
+    - SE追加（アクション別、環境音等）
+    - マスタリング（全体の音量バランス調整）
+
+フォーマット変換:
+  - BGM: OGG形式（ループ対応）、MP3（フォールバック）
+  - SE: WAV形式（低レイテンシ）、OGG（容量重視）
+  - メタデータ（BPM、ループポイント等）をJSON出力
+
+フォルダ振り分け:
+  - bgm/   : BGM、ジングル
+  - se/    : 効果音
+  - voice/ : ボイス、セリフ
+  - raw/   : 処理前の生成元音声
+  - mock/  : Step1で使用したモック音源
+
+品質チェック:
+  - ループ再生テスト（BGM）
+  - 音量バランス確認
+  - フィードバック待機（30秒）
+
+後処理ツール:
+  - モック生成: pydub（トーン生成）、pyttsx3（TTS）
+  - 音声編集: pydub, librosa, FFmpeg
+  - ノーマライズ: pyloudnorm
+  - ノイズ除去: noisereduce, RNNoise
+
+エラー処理:
+  - 生成失敗 → プロンプト調整して再試行（3回）
+  - ループ加工失敗 → 手動確認フラグを立てる
+  - フォーマット変換失敗 → 代替形式で出力
 ```
 
 #### 3.2.6 UI Agent
@@ -201,9 +555,231 @@ Claude Codeのように対話形式でゲームを作成できるAI Agentシス�
   - HUD要素
   - フォント選定
 使用API:
-  - DALL-E 3
-  - Stable Diffusion
-  - Figma API（オプション）
+  優先度1（フリー素材）:
+    - Google Fonts (無料)          # Webフォント
+    - Font Awesome (無料)          # アイコンフォント
+    - Heroicons / Lucide           # UIアイコン (MIT)
+    - game-icons.net               # ゲーム用アイコン (CC-BY)
+    - Kenney UI Pack               # UI素材 (CC0)
+  優先度2（自前生成）:
+    - ComfyUI (self-hosted)        # Visual Agentと共有
+  優先度3（有料）:
+    - DALL-E 3                     # フォールバック
+    - Figma API                    # 複雑なUI設計時
+出典管理:
+  - 使用素材ごとに attribution.json へ記録
+  - フォントライセンス（OFL, Apache等）を保存
+  - アイコンライセンス・帰属表示を記録
+
+振る舞い（フェーズ別）:
+
+  【Step 1: MOCK】即座に動作確認用の仮UI素材を生成
+    - ボタン: 色付き矩形 + テキストラベル（Pillowで描画）
+    - アイコン: 基本図形（丸、三角、四角）で代用
+    - HUD: 単純な矩形、プログレスバー
+    - フォント: システムフォント（Arial, sans-serif等）
+    - ロゴ: テキストのみ、または単純な図形+テキスト
+    - 生成時間: 即時〜数秒
+    - 使用ツール: Pillow（図形描画）
+
+  【Step 2: GENERATE】実際の素材を取得・生成
+    - フォント → Google Fonts優先
+    - アイコン → game-icons.net, Heroicons優先
+    - ボタン/HUD → Kenney UI Pack優先
+    - 適合素材なし → ComfyUIで生成
+    - 生成元は ./output/ui/raw/ に保存
+
+  【Step 3: POLISH】品質向上の後処理
+    a. アイコン/ボタンの場合:
+      - 適切なサイズにリサイズ（16x16, 32x32, 64x64等）
+      - 透過PNG形式で保存
+      - 複数サイズバリエーションを生成
+
+    b. ロゴの場合:
+      - 高解像度版とサムネイル版を生成
+      - 背景透過版を作成
+      - SVG形式への変換（可能な場合）
+
+    c. フォントの場合:
+      - ゲームエンジン対応形式に変換（TTF/OTF）
+      - サブセット化（使用文字のみ抽出）
+
+  【Step 4: FINAL】完成版の仕上げ
+    - ホバー/クリック状態のバリエーション追加
+    - アニメーション用スプライト作成
+    - 多言語対応フォント整備
+
+フォルダ振り分け:
+  - icons/   : ゲームアイコン、システムアイコン
+  - buttons/ : ボタン、メニュー素材
+  - hud/     : HUD要素、ゲージ、枠
+  - logos/   : タイトルロゴ
+  - fonts/   : フォントファイル
+  - raw/     : 処理前の生成元素材
+  - mock/    : Step1で生成したモックUI
+
+スタイル統一チェック:
+  - カラーパレットの一貫性確認
+  - デザイントーンの統一確認
+  - フィードバック待機（30秒）
+
+エラー処理:
+  - 生成失敗 → プロンプト調整して再試行（3回）
+  - フォント変換失敗 → 代替フォントを提案
+```
+
+#### 3.2.7 Reviewer Agent
+
+```yaml
+役割: コードレビュー・改善提案
+入力:
+  - code_files: dict[str, str]  # レビュー対象コード
+  - game_spec: GameSpec         # 仕様との照合用
+出力:
+  - review_comments: list[ReviewComment]
+  - approval_status: bool
+使用Tool:
+  - FileRead: コード読み取り
+  - ClaudeCodeDelegate: 詳細レビュー委譲
+
+振る舞い:
+  1. 静的解析:
+    - lint/formatチェック（ruff, black）
+    - 型チェック（mypy）
+    - セキュリティチェック（bandit）
+
+  2. ロジックレビュー:
+    - game_specとの整合性確認
+    - エッジケースの検出
+    - パフォーマンス問題の指摘
+
+  3. Claude Code委譲条件:
+    - 複雑なロジックの妥当性検証
+    - アーキテクチャ全体の評価
+    - リファクタリング提案
+
+  4. 出力:
+    - 各指摘にseverity（error/warning/info）付与
+    - 修正提案コードを含める
+    - 承認/差し戻し判定
+
+判定基準:
+  - error: 0件 → 承認可能
+  - error: 1件以上 → 差し戻し
+  - warning: 5件以上 → 差し戻し検討
+```
+
+#### 3.2.8 Tester Agent
+
+```yaml
+役割: ゲーム実行・動作確認
+入力:
+  - code_files: dict[str, str]
+  - assets: dict[str, str]       # アセットファイルパス
+  - game_spec: GameSpec
+出力:
+  - test_results: TestResults
+  - screenshots: list[str]       # 実行画面キャプチャ
+使用Tool:
+  - BashExec: ゲーム実行
+  - FileRead: ログ確認
+  - ClaudeCodeDelegate: テストコード生成
+
+振る舞い:
+  1. 環境準備:
+    - 依存パッケージのインストール確認
+    - アセットファイルの配置確認
+    - 仮想ディスプレイ準備（headless環境）
+
+  2. 自動テスト実行:
+    - 起動テスト（クラッシュしないか）
+    - 基本操作テスト（入力応答）
+    - 画面キャプチャ取得
+
+  3. テスト項目:
+    a. 起動テスト:
+      - 正常起動するか
+      - 初期画面が表示されるか
+      - エラーログがないか
+
+    b. 機能テスト:
+      - game_specの各mechanicsが動作するか
+      - アセットが正しく読み込まれるか
+      - 音声が再生されるか
+
+    c. 安定性テスト:
+      - 長時間実行でメモリリークないか
+      - 連続操作でクラッシュしないか
+
+  4. Claude Code委譲条件:
+    - ユニットテストコードの生成
+    - 複雑なテストシナリオの作成
+
+  5. 出力:
+    - テスト結果サマリー
+    - 失敗テストの詳細ログ
+    - スクリーンショット
+
+判定基準:
+  - 起動テスト失敗 → Debugger Agentへ
+  - 機能テスト一部失敗 → 警告付きで続行可
+  - 全テスト成功 → 完了
+```
+
+#### 3.2.9 Debugger Agent
+
+```yaml
+役割: バグ解析・修正
+入力:
+  - error_info: ErrorInfo        # エラー情報
+  - code_files: dict[str, str]
+  - test_results: TestResults
+出力:
+  - fixed_code: dict[str, str]
+  - fix_summary: str
+使用Tool:
+  - FileRead: コード読み取り
+  - FileEdit: コード修正
+  - BashExec: 修正確認実行
+  - ClaudeCodeDelegate: 複雑なバグ修正
+
+振る舞い:
+  1. エラー解析:
+    - スタックトレース解析
+    - エラー種別の特定
+    - 原因箇所の特定
+
+  2. 修正戦略決定:
+    - 単純なエラー → 自動修正
+    - 複雑なエラー → Claude Codeに委譲
+    - ロジックエラー → Claude Codeに委譲
+
+  3. 自動修正対象:
+    - ImportError → パッケージインストール
+    - SyntaxError → 構文修正
+    - TypeError（単純） → 型変換追加
+    - FileNotFoundError → パス修正
+
+  4. Claude Code委譲条件:
+    - ロジックバグ
+    - 複数ファイルにまたがるバグ
+    - 原因特定が困難なバグ
+    - 3回修正しても解決しない
+
+  5. 修正確認:
+    - 修正後に再テスト実行
+    - 同じエラーが出ないか確認
+    - 新たなエラーが出ていないか確認
+
+  6. 出力:
+    - 修正内容のサマリー
+    - 変更ファイル一覧
+    - 修正理由の説明
+
+リトライ制限:
+  - 同一エラー: 最大3回
+  - 全体リトライ: 最大10回
+  - 超過 → 人間介入を要求
 ```
 
 ---
@@ -291,6 +867,50 @@ class Feedback(TypedDict):
     comment: str           # ユーザーコメント
     timestamp: float
     processed: bool
+```
+
+### 4.3 出典情報（Attribution）構造
+
+```python
+class Attribution(TypedDict):
+    asset_id: str           # 対象アセットID
+    asset_type: str         # "image", "audio", "font", "icon"
+    source_type: str        # "free_asset", "generated", "purchased"
+
+    # フリー素材の場合
+    source_url: str         # 素材の出典URL
+    source_name: str        # サイト名 (e.g., "OpenGameArt.org")
+    author: str             # 作者名
+    license: str            # ライセンス種別 (e.g., "CC0", "CC-BY-4.0", "OFL")
+    license_url: str        # ライセンス全文URL
+    requires_credit: bool   # クレジット表記が必要か
+    credit_text: str        # 必要な場合のクレジット表記文
+
+    # メタ情報
+    downloaded_at: str      # ダウンロード日時
+    notes: str              # 備考（利用規約の特記事項等）
+```
+
+### 4.4 Claude Code連携構造
+
+```python
+class ClaudeCodeTask(TypedDict):
+    task_id: str            # タスクID
+    task_type: str          # "refactor", "debug", "test", "review"
+    description: str        # タスク説明
+    target_files: list[str] # 対象ファイルパス
+    context: str            # 追加コンテキスト
+    priority: str           # "high", "medium", "low"
+    created_at: str
+    status: str             # "pending", "in_progress", "completed", "failed"
+
+class ClaudeCodeResult(TypedDict):
+    task_id: str            # 対応するタスクID
+    success: bool
+    modified_files: list[str]
+    summary: str            # 実行結果の要約
+    errors: list[str]       # エラーがあれば
+    completed_at: str
 ```
 
 ---
@@ -427,6 +1047,62 @@ class Feedback(TypedDict):
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### 5.3 Claude Code連携フロー
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      Claude Code Integration Flow                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Agent (Coder/Debugger/Tester)                                             │
+│     │                                                                        │
+│     │ 複雑なタスクを検出                                                     │
+│     ▼                                                                        │
+│   ┌──────────────────────────────────────┐                                  │
+│   │  ./claude_tasks/{task_id}.json 作成   │                                  │
+│   │                                       │                                  │
+│   │  {                                    │                                  │
+│   │    "task_type": "refactor",          │                                  │
+│   │    "description": "...",              │                                  │
+│   │    "target_files": ["src/game.py"],  │                                  │
+│   │    "context": "..."                   │                                  │
+│   │  }                                    │                                  │
+│   └──────────────────┬───────────────────┘                                  │
+│                      │                                                       │
+│                      ▼                                                       │
+│   ┌──────────────────────────────────────┐                                  │
+│   │  Claude Code (別プロセス/手動実行)    │                                  │
+│   │                                       │                                  │
+│   │  $ claude-code --task claude_tasks/   │                                  │
+│   │    {task_id}.json                     │                                  │
+│   │                                       │                                  │
+│   │  ※ サブスク範囲内で実行可能           │                                  │
+│   └──────────────────┬───────────────────┘                                  │
+│                      │                                                       │
+│                      ▼                                                       │
+│   ┌──────────────────────────────────────┐                                  │
+│   │  ./claude_results/{task_id}_result    │                                  │
+│   │  .json に結果出力                     │                                  │
+│   │                                       │                                  │
+│   │  {                                    │                                  │
+│   │    "success": true,                   │                                  │
+│   │    "modified_files": [...],           │                                  │
+│   │    "summary": "..."                   │                                  │
+│   │  }                                    │                                  │
+│   └──────────────────┬───────────────────┘                                  │
+│                      │                                                       │
+│                      ▼                                                       │
+│   Agent が結果を取り込み、次のステップへ                                     │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+使用シナリオ:
+  • Coder Agent → 複雑なリファクタリング → Claude Code
+  • Debugger Agent → 難解なバグ → Claude Code
+  • Tester Agent → テストコード生成 → Claude Code
+  • Reviewer Agent → コードレビュー → Claude Code
+```
+
 ---
 
 ## 6. ディレクトリ構造
@@ -450,7 +1126,10 @@ class Feedback(TypedDict):
 │   │   ├── 📄 bash_tools.py         # BashExec
 │   │   ├── 📄 image_tools.py        # ImageGenerate
 │   │   ├── 📄 audio_tools.py        # AudioGenerate
-│   │   └── 📄 web_tools.py          # WebSearch
+│   │   ├── 📄 web_tools.py          # WebSearch
+│   │   ├── 📄 claude_code_tools.py  # Claude Code連携
+│   │   ├── 📄 attribution_tools.py  # 出典情報管理
+│   │   └── 📄 free_asset_tools.py   # フリー素材検索・取得
 │   │
 │   ├── 📁 core/                     # コア機能
 │   │   ├── 📄 graph.py              # LangGraph定義
@@ -464,7 +1143,8 @@ class Feedback(TypedDict):
 │   ├── 📁 code/                     # 生成されたゲームコード
 │   ├── 📁 images/                   # 画像アセット
 │   ├── 📁 audio/                    # 音声アセット
-│   └── 📁 ui/                       # UI素材
+│   ├── 📁 ui/                       # UI素材
+│   └── 📄 attribution.json          # 全素材の出典・ライセンス情報
 │
 ├── 📁 feedback/                     # ユーザーフィードバック
 │   └── 📄 (artifact_id).txt         # 各成果物へのフィードバック
@@ -472,6 +1152,12 @@ class Feedback(TypedDict):
 ├── 📁 status/                       # 進捗状況
 │   ├── 📄 current.json              # 現在の状態
 │   └── 📄 history.json              # 実行履歴
+│
+├── 📁 claude_tasks/                 # Claude Code連携（タスク依頼）
+│   └── 📄 (task_id).json            # タスク定義ファイル
+│
+├── 📁 claude_results/               # Claude Code連携（実行結果）
+│   └── 📄 (task_id)_result.json     # 実行結果ファイル
 │
 ├── 📁 templates/                    # ゲームテンプレート
 │   ├── 📁 pygame/
@@ -656,10 +1342,14 @@ def get_llm(config: dict):
 | **Game Engine** | Pygame | 2.5+ | 2Dゲーム |
 | **Game Engine** | Pyxel | 2.0+ | レトロゲーム |
 | **Game Engine** | HTML5 Canvas | - | Webゲーム |
-| **Image Gen** | DALL-E 3 | - | 画像生成 |
-| **Image Gen** | Stable Diffusion | - | 画像生成 |
-| **Audio Gen** | Suno AI | - | BGM生成 |
-| **Audio Gen** | ElevenLabs | - | 音声生成 |
+| **Image Gen** | ComfyUI | - | 画像生成（メイン・自前） |
+| **Image Gen** | Stable Diffusion WebUI | - | 画像生成（代替・自前） |
+| **Image Gen** | DALL-E 3 | - | 画像生成（フォールバック） |
+| **Audio Gen** | AudioCraft | - | BGM/SE生成（自前） |
+| **Audio Gen** | VOICEVOX | - | 日本語音声（自前） |
+| **Audio Gen** | Freesound API | - | SE素材（無料） |
+| **Audio Gen** | Suno AI | - | BGM生成（有料フォールバック） |
+| **Audio Gen** | ElevenLabs | - | 音声生成（有料フォールバック） |
 | **File Watch** | watchdog | 3.0+ | ファイル監視 |
 
 ---
@@ -711,11 +1401,20 @@ def get_llm(config: dict):
 
 ### 11.2 必要なAPIキー
 
+**必須（いずれか1つ）**:
 - Anthropic API Key（Claude使用時）
-- OpenAI API Key（GPT/DALL-E使用時）
+- OpenAI API Key（GPT使用時）
 - Deepseek API Key（Deepseek使用時）
-- Suno API Key（BGM生成時）
-- ElevenLabs API Key（音声生成時）
+
+**自前環境（推奨・APIキー不要）**:
+- ComfyUI / Stable Diffusion WebUI（ローカル画像生成）
+- AudioCraft / Bark（ローカル音声生成）
+- VOICEVOX（ローカル日本語音声）
+
+**オプション（有料フォールバック）**:
+- OpenAI API Key（DALL-E 3使用時）
+- Suno API Key（高品質BGM生成時）
+- ElevenLabs API Key（高品質音声生成時）
 
 ### 11.3 制限事項
 
