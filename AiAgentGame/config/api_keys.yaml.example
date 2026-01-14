@@ -1,0 +1,20 @@
+# API Keys Configuration
+# Copy this file to api_keys.yaml and fill in your keys
+
+# LLM APIs
+anthropic_api_key: ""
+openai_api_key: ""
+deepseek_api_key: ""
+
+# LangSmith (Optional)
+langsmith_api_key: ""
+
+# Asset Generation APIs (Optional)
+dalle_api_key: ""
+midjourney_api_key: ""
+suno_api_key: ""
+elevenlabs_api_key: ""
+
+# Free Asset APIs (Optional - some require registration)
+freesound_api_key: ""
+opengameart_api_key: ""

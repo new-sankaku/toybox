@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Config
+config/api_keys.yaml
+
+# Output
+output/
+feedback/
+status/
+claude_tasks/
+claude_results/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
