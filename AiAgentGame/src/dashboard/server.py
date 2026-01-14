@@ -131,6 +131,7 @@ async def start_workflow(request: dict, background_tasks: BackgroundTasks):
 
     user_request = request.get("request", "Create a simple game")
     phase = request.get("phase", "mock")
+    llm_config = request.get("llm_config")
 
     # Reset tracker
     tracker.reset()
@@ -146,6 +147,11 @@ async def start_workflow(request: dict, background_tasks: BackgroundTasks):
 
             from src.core.state import create_initial_state, DevelopmentPhase
             from src.core.graph import GameCreatorGraph
+            from src.core.llm import set_runtime_llm_config
+
+            # Set runtime LLM config if provided
+            if llm_config:
+                set_runtime_llm_config(llm_config)
 
             phase_map = {
                 "mock": DevelopmentPhase.MOCK,
@@ -156,7 +162,8 @@ async def start_workflow(request: dict, background_tasks: BackgroundTasks):
 
             state = create_initial_state(
                 user_request=user_request,
-                development_phase=phase_map.get(phase, DevelopmentPhase.MOCK)
+                development_phase=phase_map.get(phase, DevelopmentPhase.MOCK),
+                llm_config=llm_config
             )
 
             graph = GameCreatorGraph()

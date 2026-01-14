@@ -117,6 +117,14 @@ class ClaudeCodeResult(TypedDict):
     completed_at: str
 
 
+class LLMConfig(TypedDict, total=False):
+    """LLM configuration override."""
+    model: str
+    temperature: float
+    max_tokens: int
+    provider: str
+
+
 class GameState(TypedDict):
     """
     Main state object for the LangGraph workflow.
@@ -157,8 +165,15 @@ class GameState(TypedDict):
     # Messages for agent communication
     messages: Annotated[list[dict], operator.add]
 
+    # LLM configuration override
+    llm_config: Optional[LLMConfig]
 
-def create_initial_state(user_request: str, development_phase: DevelopmentPhase = DevelopmentPhase.MOCK) -> GameState:
+
+def create_initial_state(
+    user_request: str,
+    development_phase: DevelopmentPhase = DevelopmentPhase.MOCK,
+    llm_config: Optional[LLMConfig] = None
+) -> GameState:
     """Create initial state for a new game development session."""
     return GameState(
         user_request=user_request,
@@ -177,5 +192,6 @@ def create_initial_state(user_request: str, development_phase: DevelopmentPhase 
         attributions=[],
         claude_code_tasks=[],
         claude_code_results=[],
-        messages=[]
+        messages=[],
+        llm_config=llm_config
     )

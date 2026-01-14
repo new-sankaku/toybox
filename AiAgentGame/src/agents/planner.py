@@ -85,6 +85,7 @@ class PlannerAgent:
             })
 
             # Parse response
+            logger.debug(f"LLMレスポンス: {response_text[:500]}...")
             result = self.parser.parse(response_text)
 
             game_spec = self._parse_game_spec(result.get("game_spec", {}))
@@ -99,7 +100,9 @@ class PlannerAgent:
             }
 
         except Exception as e:
+            import traceback
             logger.error(f"計画失敗: {e}")
+            logger.error(f"詳細: {traceback.format_exc()}")
             return {
                 "game_spec": self._create_fallback_spec(user_request),
                 "tasks": []

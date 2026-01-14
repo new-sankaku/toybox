@@ -14,6 +14,20 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 # Global config cache
 _config_cache = None
 
+# Runtime LLM config override (set from dashboard)
+_runtime_config_override = None
+
+
+def set_runtime_llm_config(config: dict):
+    """Set runtime LLM config override from dashboard."""
+    global _runtime_config_override
+    _runtime_config_override = config
+
+
+def get_runtime_llm_config() -> dict:
+    """Get current runtime LLM config override."""
+    return _runtime_config_override or {}
+
 
 def load_config(config_path: str = "config/llm_config.yaml") -> dict:
     """Load LLM configuration from YAML file."""
@@ -60,6 +74,11 @@ def get_llm(
     if agent_name and "agent_overrides" in config:
         agent_override = config["agent_overrides"].get(agent_name, {})
         llm_config.update(agent_override)
+
+    # Apply runtime config override (from dashboard)
+    runtime_override = get_runtime_llm_config()
+    if runtime_override:
+        llm_config.update(runtime_override)
 
     # Apply kwargs overrides
     llm_config.update(kwargs)
@@ -186,12 +205,28 @@ def reset_tokens():
 
 
 def track_llm_call(agent_name: str, prompt: str, response: str,
-                   input_tokens: int = 0, output_tokens: int = 0):
+                   input_tokens: int = 0, output_tokens: int = 0,
+                   model: str = None, temperature: float = None, max_tokens: int = None):
     """Track an LLM call and notify callback."""
     global _total_tokens, _llm_callback
 
     _total_tokens["input"] += input_tokens
     _total_tokens["output"] += output_tokens
+
+    # Get config for model info if not provided
+    if model is None or temperature is None or max_tokens is None:
+        try:
+            config = load_config()
+            default_config = config.get("default", {})
+            agent_config = config.get("agent_overrides", {}).get(agent_name, {})
+            merged = {**default_config, **agent_config}
+            model = model or merged.get("model", "unknown")
+            temperature = temperature if temperature is not None else merged.get("temperature", 0.7)
+            max_tokens = max_tokens if max_tokens is not None else merged.get("max_tokens", 4096)
+        except Exception:
+            model = model or "unknown"
+            temperature = temperature if temperature is not None else 0.7
+            max_tokens = max_tokens if max_tokens is not None else 4096
 
     if _llm_callback:
         _llm_callback({
@@ -201,5 +236,8 @@ def track_llm_call(agent_name: str, prompt: str, response: str,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "total_input": _total_tokens["input"],
-            "total_output": _total_tokens["output"]
+            "total_output": _total_tokens["output"],
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens
         })
