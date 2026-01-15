@@ -396,7 +396,9 @@ flowchart LR
 
 ## Agent詳細仕様
 
-### フェーズ1: 企画層（6 Agent）
+### 簡易版（概要一覧）
+
+#### フェーズ1: 企画層（6 Agent）
 
 | Agent | 入力 | 出力 | Human確認ポイント |
 |-------|-----|------|-----------------|
@@ -407,45 +409,442 @@ flowchart LR
 | **世界観** | シナリオ | ワールド/レベル設計 | 世界観承認 |
 | **タスク分解** | 上記全て | タスク一覧+依存関係 | タスク計画承認 |
 
-### フェーズ2: 開発層
+#### フェーズ2: 開発層
 
-#### Leader Agent（2 Agent）
+| Agent | 種別 | 責務 |
+|-------|-----|------|
+| **Code Leader** | Leader | コードタスク管理・統合・品質確認 |
+| **Asset Leader** | Leader | アセットタスク管理・納品・仕様管理 |
+| **GameLoop** | Code | メインループ、フレーム管理 |
+| **StateManager** | Code | ゲーム状態、遷移管理 |
+| **EventSystem** | Code | イベントの発行/購読 |
+| **PlayerController** | Code | プレイヤー操作 |
+| **UIManager** | Code | UI表示、操作 |
+| **DialogSystem** | Code | 会話システム |
+| **AudioManager** | Code | BGM/SE再生 |
+| **SaveLoadManager** | Code | セーブ/ロード |
+| **CharacterImage** | Asset | キャラクター画像生成 |
+| **BackgroundImage** | Asset | 背景画像生成 |
+| **UIImage** | Asset | UI部品画像生成 |
+| **BGMGenerator** | Asset | BGM生成 |
+| **SEGenerator** | Asset | 効果音生成 |
 
-| Agent | 責務 | Human確認ポイント |
-|-------|-----|-----------------|
-| **Code Leader** | コードタスク管理・統合・品質確認 | 開発計画承認、統合確認 |
-| **Asset Leader** | アセットタスク管理・納品・仕様管理 | 制作計画承認、納品確認 |
-
-#### Code Agent（必要に応じて動的生成）
-
-| Agent | 責務 | 依存アセット |
-|-------|-----|------------|
-| **GameLoop** | メインループ、フレーム管理 | なし |
-| **StateManager** | ゲーム状態、遷移管理 | なし |
-| **EventSystem** | イベントの発行/購読 | なし |
-| **PlayerController** | プレイヤー操作 | プレイヤー画像 |
-| **UIManager** | UI表示、操作 | UI画像 |
-| **DialogSystem** | 会話システム | キャラクター画像 |
-| **AudioManager** | BGM/SE再生 | BGM、SE |
-| **SaveLoadManager** | セーブ/ロード | なし |
-
-#### Asset Agent（必要に応じて動的生成）
-
-| Agent | 責務 | 出力形式 |
-|-------|-----|---------|
-| **CharacterImage** | キャラクター画像生成 | PNG |
-| **BackgroundImage** | 背景画像生成 | PNG/JPG |
-| **UIImage** | UI部品画像生成 | PNG/SVG |
-| **BGMGenerator** | BGM生成 | MP3/OGG |
-| **SEGenerator** | 効果音生成 | WAV/MP3 |
-
-### フェーズ3: 品質層（3 Agent）
+#### フェーズ3: 品質層（3 Agent）
 
 | Agent | 責務 | Human確認ポイント |
 |-------|-----|-----------------|
 | **Integrator** | 全コンポーネント統合 | 自動（確認なし） |
 | **Tester** | 自動テスト実行 | テスト結果確認 |
 | **Reviewer** | コード品質確認 | 最終リリース承認 |
+
+---
+
+### 詳細版
+
+#### フェーズ1: 企画層
+
+##### 企画 Agent（Concept Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | ユーザーのアイデアをゲームコンセプトに具体化する |
+| **入力** | ユーザーのアイデア（自然言語） |
+| **出力** | ゲームコンセプト文書（JSON） |
+| **Human確認** | ゲームの方向性が正しいか確認 |
+
+**処理フロー:**
+1. ユーザーアイデアを分析
+2. ゲームジャンル・ターゲット層を特定
+3. コアループを設計
+4. ユニークポイントを抽出
+5. コンセプト文書を生成
+
+**出力例:**
+```json
+{
+  "title": "宇宙探索RPG",
+  "genre": "アクションRPG",
+  "platform": "PC/Web",
+  "target_audience": "20-30代ゲーマー",
+  "summary": "未知の惑星を探索し、資源を集めて宇宙船を強化するRPG",
+  "core_loop": ["探索", "収集", "強化", "戦闘"],
+  "unique_points": ["手続き生成による無限の惑星", "物理ベースの宇宙船操作"],
+  "key_features": ["オープンワールド", "クラフトシステム", "マルチプレイ対応"]
+}
+```
+
+##### 設計 Agent（Design Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | コンセプトを技術的な設計に落とし込む |
+| **入力** | ゲームコンセプト文書 |
+| **出力** | 技術設計書（JSON） |
+| **Human確認** | 技術選定・アーキテクチャが適切か確認 |
+
+**処理フロー:**
+1. コンセプトから技術要件を抽出
+2. 適切な技術スタックを選定
+3. システムアーキテクチャを設計
+4. コンポーネント分割を決定
+5. 設計書を生成
+
+**出力例:**
+```json
+{
+  "tech_stack": {
+    "language": "TypeScript",
+    "framework": "Phaser.js",
+    "libraries": ["matter.js", "howler.js"]
+  },
+  "architecture": "コンポーネントベース",
+  "components": [
+    {"name": "GameCore", "responsibility": "ゲームループ管理"},
+    {"name": "PlayerSystem", "responsibility": "プレイヤー操作・状態管理"},
+    {"name": "WorldGenerator", "responsibility": "惑星の手続き生成"},
+    {"name": "CombatSystem", "responsibility": "戦闘ロジック"},
+    {"name": "UIManager", "responsibility": "UI表示・操作"}
+  ],
+  "data_flow": "イベント駆動型"
+}
+```
+
+##### シナリオ Agent（Scenario Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | ゲームのストーリー・世界設定を作成 |
+| **入力** | コンセプト + 設計 |
+| **出力** | シナリオ文書（JSON） |
+| **Human確認** | ストーリーの魅力・整合性を確認 |
+
+**出力例:**
+```json
+{
+  "setting": {
+    "era": "西暦3000年",
+    "location": "銀河辺境",
+    "situation": "地球資源枯渇により宇宙開拓時代"
+  },
+  "main_story": {
+    "premise": "失われた古代文明の遺跡を探す探索者の物語",
+    "goal": "古代技術を発見し地球を救う",
+    "conflict": "宇宙海賊との対立"
+  },
+  "chapters": [
+    {"title": "旅立ち", "summary": "故郷を離れ宇宙へ"},
+    {"title": "最初の発見", "summary": "古代遺跡の手がかりを得る"},
+    {"title": "対決", "summary": "宇宙海賊との決戦"}
+  ]
+}
+```
+
+##### キャラクター Agent（Character Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | ゲームに登場するキャラクターを設計 |
+| **入力** | シナリオ文書 |
+| **出力** | キャラクター仕様（JSON） |
+| **Human確認** | キャラクターの魅力・バランスを確認 |
+
+**出力例:**
+```json
+{
+  "characters": [
+    {
+      "id": "player",
+      "name": "（プレイヤー命名）",
+      "role": "主人公",
+      "personality": "好奇心旺盛、正義感が強い",
+      "appearance": {
+        "age": 25,
+        "gender": "選択可能",
+        "features": "パイロットスーツ着用"
+      },
+      "abilities": ["操縦", "射撃", "修理"]
+    },
+    {
+      "id": "rival",
+      "name": "レイ",
+      "role": "ライバル/後に仲間",
+      "personality": "クール、合理的",
+      "backstory": "元軍人、過去に家族を失う"
+    }
+  ]
+}
+```
+
+##### 世界観 Agent（World Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | ゲーム世界・レベルを設計 |
+| **入力** | シナリオ文書 |
+| **出力** | 世界観設計書（JSON） |
+| **Human確認** | 世界の広がり・一貫性を確認 |
+
+**出力例:**
+```json
+{
+  "worlds": [
+    {
+      "id": "home_planet",
+      "name": "ネオアース",
+      "type": "都市惑星",
+      "description": "人類の居住地、近代的な都市",
+      "features": ["宇宙港", "マーケット", "修理工場"]
+    },
+    {
+      "id": "desert_planet",
+      "name": "サンドリア",
+      "type": "砂漠惑星",
+      "description": "古代遺跡が眠る砂の惑星",
+      "hazards": ["砂嵐", "高温"],
+      "resources": ["レアメタル", "古代技術"]
+    }
+  ],
+  "level_progression": ["ネオアース → サンドリア → ..."]
+}
+```
+
+##### タスク分解 Agent（TaskSplit Agent）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | 企画・設計を開発タスクに分解 |
+| **入力** | 全企画ドキュメント |
+| **出力** | タスク一覧 + 依存関係マップ（JSON） |
+| **Human確認** | タスク粒度・優先順位を確認 |
+
+**出力例:**
+```json
+{
+  "iteration": 1,
+  "iteration_goal": "コアゲームループ実装",
+  "code_tasks": [
+    {
+      "id": "code_001",
+      "name": "GameLoop実装",
+      "priority": 1,
+      "estimated_complexity": "medium",
+      "depends_on": [],
+      "required_assets": []
+    }
+  ],
+  "asset_tasks": [
+    {
+      "id": "asset_001",
+      "name": "プレイヤー画像",
+      "type": "image",
+      "priority": 1,
+      "specs": {"format": "PNG", "size": "64x64"}
+    }
+  ],
+  "dependencies": {
+    "code_002": ["asset_001"]
+  }
+}
+```
+
+---
+
+#### フェーズ2: 開発層
+
+##### Code Leader Agent
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | コード開発全体を統括 |
+| **入力** | タスク一覧、アセット納品情報 |
+| **出力** | 開発計画、統合コード |
+| **Human確認** | 開発計画承認、統合確認 |
+
+**責務詳細:**
+1. **計画作成**: タスクの実行順序を決定
+2. **割り当て**: 各Code Agentにタスクを配分
+3. **依存管理**: アセット待ちタスクの管理
+4. **進捗追跡**: 各Agentの完了状況を監視
+5. **統合**: 生成されたコードを統合
+6. **品質確認**: 統合後の動作確認
+
+**出力例（開発計画）:**
+```json
+{
+  "phase": "development",
+  "iteration": 1,
+  "plan": [
+    {"order": 1, "task_id": "code_001", "agent": "GameLoopAgent", "status": "ready"},
+    {"order": 2, "task_id": "code_002", "agent": "PlayerAgent", "status": "waiting_asset", "waiting_for": ["asset_001"]}
+  ],
+  "asset_requests": [
+    {"asset_id": "asset_001", "requested_at": "2024-01-01T10:00:00Z"}
+  ]
+}
+```
+
+##### Asset Leader Agent
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | アセット制作全体を統括 |
+| **入力** | タスク一覧、Code Leaderからの要求 |
+| **出力** | 制作計画、納品アセット一覧 |
+| **Human確認** | 制作計画承認、納品確認 |
+
+**責務詳細:**
+1. **計画作成**: アセット制作の優先順位決定
+2. **仕様管理**: 各アセットの詳細仕様を管理
+3. **割り当て**: 各Asset Agentにタスクを配分
+4. **品質確認**: 生成されたアセットの品質確認
+5. **納品**: Code Leaderへのアセット納品
+
+**出力例（納品リスト）:**
+```json
+{
+  "deliveries": [
+    {
+      "asset_id": "asset_001",
+      "name": "player.png",
+      "path": "/assets/characters/player.png",
+      "specs": {"width": 64, "height": 64, "format": "PNG"},
+      "delivered_at": "2024-01-01T12:00:00Z",
+      "status": "delivered"
+    }
+  ]
+}
+```
+
+##### GameLoop Agent（Code Agent例）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | ゲームのメインループを実装 |
+| **入力** | 設計書、タスク仕様 |
+| **出力** | ソースコード |
+| **依存アセット** | なし |
+
+**出力例:**
+```json
+{
+  "file_path": "src/core/game_loop.ts",
+  "language": "typescript",
+  "code": "// ゲームループ実装...",
+  "exports": ["GameLoop", "startGame", "stopGame"],
+  "tests_required": ["test_game_loop_start", "test_game_loop_stop"]
+}
+```
+
+##### CharacterImage Agent（Asset Agent例）
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | キャラクター画像を生成 |
+| **入力** | キャラクター仕様、画像仕様 |
+| **出力** | 画像ファイルパス、メタデータ |
+| **生成方法** | DALL-E / Stable Diffusion |
+
+**出力例:**
+```json
+{
+  "asset_id": "asset_001",
+  "type": "image",
+  "file_path": "/assets/characters/player.png",
+  "metadata": {
+    "width": 64,
+    "height": 64,
+    "format": "PNG",
+    "frames": 8,
+    "prompt_used": "pixel art character, space pilot, 64x64"
+  }
+}
+```
+
+---
+
+#### フェーズ3: 品質層
+
+##### Integrator Agent
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | 全コンポーネントを統合 |
+| **入力** | 全コード出力、全アセット |
+| **出力** | 統合済みプロジェクト |
+| **Human確認** | なし（自動） |
+
+**処理フロー:**
+1. 全コードファイルを収集
+2. 依存関係を解決
+3. ビルド実行
+4. アセットを配置
+5. 統合結果を報告
+
+##### Tester Agent
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | 自動テストを実行 |
+| **入力** | 統合済みプロジェクト |
+| **出力** | テスト結果レポート |
+| **Human確認** | テスト結果の確認 |
+
+**出力例:**
+```json
+{
+  "summary": {
+    "total": 50,
+    "passed": 48,
+    "failed": 2,
+    "skipped": 0
+  },
+  "failures": [
+    {
+      "test": "test_player_collision",
+      "error": "AssertionError: expected true, got false",
+      "file": "tests/player.test.ts",
+      "line": 42
+    }
+  ],
+  "coverage": {
+    "statements": 85,
+    "branches": 78,
+    "functions": 90
+  }
+}
+```
+
+##### Reviewer Agent
+
+| 項目 | 内容 |
+|-----|------|
+| **役割** | コード品質を確認 |
+| **入力** | 統合済みプロジェクト、テスト結果 |
+| **出力** | レビューレポート |
+| **Human確認** | 最終リリース承認 |
+
+**出力例:**
+```json
+{
+  "overall_status": "approval_recommended",
+  "score": 85,
+  "findings": [
+    {
+      "severity": "warning",
+      "category": "performance",
+      "file": "src/world/generator.ts",
+      "message": "ループ内で重い処理。最適化を推奨"
+    }
+  ],
+  "checklist": {
+    "tests_passing": true,
+    "no_critical_bugs": true,
+    "code_style_ok": true,
+    "documentation_ok": false
+  },
+  "recommendation": "ドキュメント追加後、リリース可能"
+}
+```
 
 ---
 
