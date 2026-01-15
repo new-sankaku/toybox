@@ -766,3 +766,253 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* ============================================
+   Task Phases Grid
+   ============================================ */
+
+.task-phase {
+    background: var(--bg-secondary);
+    padding: 8px;
+    margin-bottom: 8px;
+}
+
+.task-phase.running {
+    border-left: 3px solid var(--running);
+}
+
+.task-phase.completed {
+    border-left: 3px solid var(--success);
+}
+
+.phase-progress {
+    font-size: 8px;
+    color: var(--text-muted);
+}
+
+.task-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.task-item {
+    padding: 3px 8px;
+    font-size: 9px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    cursor: default;
+}
+
+.task-item.pending {
+    opacity: 0.6;
+}
+
+.task-item.running {
+    border-color: var(--running);
+    animation: task-pulse 1.5s infinite;
+}
+
+.task-item.completed {
+    border-color: var(--success);
+    background: rgba(90, 110, 74, 0.1);
+}
+
+.task-item.error {
+    border-color: var(--error);
+    background: rgba(139, 77, 77, 0.1);
+}
+
+@keyframes task-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ============================================
+   Asset Grid
+   ============================================ */
+
+.asset-count {
+    font-size: 8px;
+    color: var(--text-muted);
+}
+
+.asset-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.asset-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    font-size: 9px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.asset-item:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+}
+
+.asset-item.pending {
+    opacity: 0.6;
+}
+
+.asset-item.running {
+    border-color: var(--running);
+    animation: task-pulse 1.5s infinite;
+}
+
+.asset-item.completed {
+    border-color: var(--success);
+    background: rgba(90, 110, 74, 0.15);
+}
+
+.asset-item.error {
+    border-color: var(--error);
+    background: rgba(139, 77, 77, 0.15);
+}
+
+.preview-icon {
+    font-size: 10px;
+    opacity: 0.5;
+}
+
+.asset-item:hover .preview-icon {
+    opacity: 1;
+}
+
+.asset-name {
+    flex: 1;
+}
+
+.asset-status-icon {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+/* ============================================
+   Asset Preview Modal
+   ============================================ */
+
+.asset-preview-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+}
+
+.asset-preview-modal.active {
+    display: flex;
+}
+
+.asset-preview-content {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    width: 80%;
+    max-width: 800px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.asset-preview-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.asset-preview-close {
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: var(--text-primary);
+    padding: 0 5px;
+}
+
+.asset-preview-close:hover {
+    color: var(--error);
+}
+
+.asset-preview-body {
+    flex: 1;
+    padding: 20px;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.preview-image-container {
+    text-align: center;
+}
+
+.preview-image-container img {
+    max-width: 100%;
+    max-height: 60vh;
+    border: 1px solid var(--border-color);
+}
+
+.preview-audio-container {
+    text-align: center;
+    width: 100%;
+}
+
+.preview-audio-container audio {
+    width: 100%;
+    max-width: 500px;
+}
+
+.audio-visualizer {
+    margin-top: 20px;
+    height: 60px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+}
+
+.preview-placeholder {
+    color: var(--text-muted);
+    font-size: 14px;
+    padding: 40px;
+    text-align: center;
+    border: 2px dashed var(--border-color);
+    border-radius: 4px;
+}
+
+/* ============================================
+   Architecture Value Highlight
+   ============================================ */
+
+.stat-value.has-value {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+#detail-arch .stat-box {
+    min-height: 50px;
+}
+
+#detail-arch .stat-value {
+    word-break: break-word;
+    line-height: 1.3;
+}
