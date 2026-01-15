@@ -492,6 +492,40 @@ body {
     display: block;
 }
 
+/* Asset subtabs */
+.asset-subtabs {
+    display: flex;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    margin: -10px -10px 10px -10px;
+}
+
+.asset-subtab {
+    padding: 6px 12px;
+    font-size: 9px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    border-bottom: 2px solid transparent;
+}
+
+.asset-subtab:hover {
+    color: var(--text-primary);
+}
+
+.asset-subtab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+}
+
+.asset-tab-content {
+    display: none;
+}
+
+.asset-tab-content.active {
+    display: block;
+}
+
 .detail-section {
     margin-bottom: 12px;
 }

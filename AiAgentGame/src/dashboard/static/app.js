@@ -291,6 +291,16 @@ document.querySelectorAll('.detail-tab').forEach(tab => {
     });
 });
 
+// Asset subtabs
+document.querySelectorAll('.asset-subtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.asset-subtab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.asset-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`asset-${tab.dataset.assetTab}`).classList.add('active');
+    });
+});
+
 // WebSocket
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';

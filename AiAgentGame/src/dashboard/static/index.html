@@ -143,10 +143,97 @@
                 </div>
 
                 <div class="detail-content" id="detail-assets">
-                    <div class="detail-section" style="flex: 1; display: flex; flex-direction: column;">
-                        <div class="detail-section-title">アセット一覧 <span id="asset-count">(0)</span></div>
-                        <div class="item-list" id="asset-list" style="flex: 1; overflow-y: auto;">
-                            <div class="empty-state">アセットなし</div>
+                    <div class="asset-subtabs">
+                        <div class="asset-subtab active" data-asset-tab="visual">画像系</div>
+                        <div class="asset-subtab" data-asset-tab="sound">サウンド系</div>
+                        <div class="asset-subtab" data-asset-tab="text">テキスト系</div>
+                    </div>
+                    <div class="asset-tab-content active" id="asset-visual">
+                        <div class="detail-section">
+                            <div class="detail-section-title">グラフィック</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                                <div class="stat-box"><div class="stat-label">キャラクター</div><div class="stat-value" id="asset-char-sprite" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">背景</div><div class="stat-value" id="asset-background" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">タイルセット</div><div class="stat-value" id="asset-tileset" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">アイコン</div><div class="stat-value" id="asset-icons" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">エフェクト</div><div class="stat-value" id="asset-effects" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">パーティクル</div><div class="stat-value" id="asset-particles" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">UIパーツ</div><div class="stat-value" id="asset-ui-parts" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">ロゴ</div><div class="stat-value" id="asset-logo" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">イベントCG</div><div class="stat-value" id="asset-cg" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section">
+                            <div class="detail-section-title">アニメーション</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                                <div class="stat-box"><div class="stat-label">キャラモーション</div><div class="stat-value" id="asset-char-motion" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">敵モーション</div><div class="stat-value" id="asset-enemy-motion" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">UI演出</div><div class="stat-value" id="asset-ui-anim" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">オブジェクト</div><div class="stat-value" id="asset-obj-anim" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section">
+                            <div class="detail-section-title">動画・フォント</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                                <div class="stat-box"><div class="stat-label">OPムービー</div><div class="stat-value" id="asset-op-movie" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">EDムービー</div><div class="stat-value" id="asset-ed-movie" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">イベント動画</div><div class="stat-value" id="asset-event-movie" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">表示用フォント</div><div class="stat-value" id="asset-font-main" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">装飾フォント</div><div class="stat-value" id="asset-font-deco" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                            <div class="detail-section-title">画像アセット一覧 <span id="asset-visual-count">(0)</span></div>
+                            <div class="item-list" id="asset-visual-list" style="flex: 1; overflow-y: auto;">
+                                <div class="empty-state">アセットなし</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="asset-tab-content" id="asset-sound">
+                        <div class="detail-section">
+                            <div class="detail-section-title">サウンドアセット</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                                <div class="stat-box"><div class="stat-label">BGM</div><div class="stat-value" id="asset-bgm" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">効果音</div><div class="stat-value" id="asset-se" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">環境音</div><div class="stat-value" id="asset-ambient" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">ジングル</div><div class="stat-value" id="asset-jingle" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">ボイス</div><div class="stat-value" id="asset-voice" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                            <div class="detail-section-title">サウンドアセット一覧 <span id="asset-sound-count">(0)</span></div>
+                            <div class="item-list" id="asset-sound-list" style="flex: 1; overflow-y: auto;">
+                                <div class="empty-state">アセットなし</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="asset-tab-content" id="asset-text">
+                        <div class="detail-section">
+                            <div class="detail-section-title">テキストアセット</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                                <div class="stat-box"><div class="stat-label">シナリオ</div><div class="stat-value" id="asset-scenario" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">UI文言</div><div class="stat-value" id="asset-ui-text" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">チュートリアル</div><div class="stat-value" id="asset-tutorial-text" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">アイテム説明</div><div class="stat-value" id="asset-item-desc" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">翻訳データ</div><div class="stat-value" id="asset-i18n" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section">
+                            <div class="detail-section-title">データアセット</div>
+                            <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                                <div class="stat-box"><div class="stat-label">キャラパラメータ</div><div class="stat-value" id="asset-char-param" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">敵パラメータ</div><div class="stat-value" id="asset-enemy-param" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">アイテムデータ</div><div class="stat-value" id="asset-item-data" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">スキルデータ</div><div class="stat-value" id="asset-skill-data" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">マップデータ</div><div class="stat-value" id="asset-map-data" style="font-size: 11px;">0</div></div>
+                                <div class="stat-box"><div class="stat-label">イベントフラグ</div><div class="stat-value" id="asset-event-flag" style="font-size: 11px;">0</div></div>
+                            </div>
+                        </div>
+                        <div class="detail-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                            <div class="detail-section-title">テキスト/データ一覧 <span id="asset-text-count">(0)</span></div>
+                            <div class="item-list" id="asset-text-list" style="flex: 1; overflow-y: auto;">
+                                <div class="empty-state">アセットなし</div>
+                            </div>
                         </div>
                     </div>
                 </div>
