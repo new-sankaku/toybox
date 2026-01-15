@@ -125,8 +125,125 @@
                 </div>
 
                 <div class="detail-content" id="detail-tasks">
-                    <div class="detail-section" style="flex: 1; display: flex; flex-direction: column;">
-                        <div class="detail-section-title">タスク一覧 <span id="task-count">(0)</span></div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">企画フェーズ</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                            <div class="stat-box"><div class="stat-label">コンセプト立案</div><div class="stat-value task-status" id="task-concept" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">市場調査</div><div class="stat-value task-status" id="task-market" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ターゲット設定</div><div class="stat-value task-status" id="task-target" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">企画書作成</div><div class="stat-value task-status" id="task-proposal" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">仕様書作成</div><div class="stat-value task-status" id="task-spec" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">プリプロダクション</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(7, 1fr);">
+                            <div class="stat-box"><div class="stat-label">技術検証</div><div class="stat-value task-status" id="task-tech-verify" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">アート方針</div><div class="stat-value task-status" id="task-art-style" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">サウンド方針</div><div class="stat-value task-status" id="task-sound-style" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">環境構築</div><div class="stat-value task-status" id="task-env" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">VCS導入</div><div class="stat-value task-status" id="task-vcs" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">規約策定</div><div class="stat-value task-status" id="task-coding-rule" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">パイプライン</div><div class="stat-value task-status" id="task-pipeline" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">グラフィック制作</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(9, 1fr);">
+                            <div class="stat-box"><div class="stat-label">コンセプトアート</div><div class="stat-value task-status" id="task-concept-art" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">キャラデザ</div><div class="stat-value task-status" id="task-char-design" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">背景デザ</div><div class="stat-value task-status" id="task-bg-design" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">UIデザ</div><div class="stat-value task-status" id="task-ui-design" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">モデリング</div><div class="stat-value task-status" id="task-modeling" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">テクスチャ</div><div class="stat-value task-status" id="task-texture" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">リギング</div><div class="stat-value task-status" id="task-rigging" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">アニメ</div><div class="stat-value task-status" id="task-animation" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">エフェクト</div><div class="stat-value task-status" id="task-effect" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">サウンド制作</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="stat-box"><div class="stat-label">BGM作曲</div><div class="stat-value task-status" id="task-bgm" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">効果音作成</div><div class="stat-value task-status" id="task-se" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ボイス収録</div><div class="stat-value task-status" id="task-voice" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">サウンド実装</div><div class="stat-value task-status" id="task-sound-impl" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">プログラミング</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(7, 1fr);">
+                            <div class="stat-box"><div class="stat-label">エンジン</div><div class="stat-value task-status" id="task-engine" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">基盤システム</div><div class="stat-value task-status" id="task-core" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">入力処理</div><div class="stat-value task-status" id="task-input" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">キャラ制御</div><div class="stat-value task-status" id="task-char-ctrl" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">敵AI</div><div class="stat-value task-status" id="task-enemy-ai" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">物理演算</div><div class="stat-value task-status" id="task-physics" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">当たり判定</div><div class="stat-value task-status" id="task-collision" style="font-size: 10px;">-</div></div>
+                        </div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(6, 1fr); margin-top: 6px;">
+                            <div class="stat-box"><div class="stat-label">カメラ</div><div class="stat-value task-status" id="task-camera" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">UI実装</div><div class="stat-value task-status" id="task-ui-impl" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">セーブ/ロード</div><div class="stat-value task-status" id="task-save" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">サウンド再生</div><div class="stat-value task-status" id="task-sound-play" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ネットワーク</div><div class="stat-value task-status" id="task-network" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">デバッグ機能</div><div class="stat-value task-status" id="task-debug" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">レベルデザイン</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(6, 1fr);">
+                            <div class="stat-box"><div class="stat-label">マップ設計</div><div class="stat-value task-status" id="task-map-design" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ステージ作成</div><div class="stat-value task-status" id="task-stage" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">敵配置</div><div class="stat-value task-status" id="task-enemy-place" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">アイテム配置</div><div class="stat-value task-status" id="task-item-place" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">難易度調整</div><div class="stat-value task-status" id="task-difficulty" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">チュートリアル</div><div class="stat-value task-status" id="task-tutorial" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">シナリオ・テキスト</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="stat-box"><div class="stat-label">シナリオ執筆</div><div class="stat-value task-status" id="task-scenario" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">台詞執筆</div><div class="stat-value task-status" id="task-dialogue" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">テキスト校正</div><div class="stat-value task-status" id="task-proofread" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ローカライズ</div><div class="stat-value task-status" id="task-localize" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">データ作成</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="stat-box"><div class="stat-label">パラメータ設計</div><div class="stat-value task-status" id="task-param" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">バランス調整</div><div class="stat-value task-status" id="task-balance" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">マスターデータ</div><div class="stat-value task-status" id="task-master" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">データ入力</div><div class="stat-value task-status" id="task-data-input" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">QA・テスト</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(8, 1fr);">
+                            <div class="stat-box"><div class="stat-label">テスト計画</div><div class="stat-value task-status" id="task-test-plan" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">機能テスト</div><div class="stat-value task-status" id="task-func-test" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">バグ報告</div><div class="stat-value task-status" id="task-bug-report" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">バグ修正</div><div class="stat-value task-status" id="task-bug-fix" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">バランステスト</div><div class="stat-value task-status" id="task-balance-test" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">互換性テスト</div><div class="stat-value task-status" id="task-compat-test" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">負荷テスト</div><div class="stat-value task-status" id="task-load-test" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">UXテスト</div><div class="stat-value task-status" id="task-ux-test" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">最適化</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                            <div class="stat-box"><div class="stat-label">パフォーマンス計測</div><div class="stat-value task-status" id="task-perf" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">処理負荷軽減</div><div class="stat-value task-status" id="task-cpu-opt" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">メモリ最適化</div><div class="stat-value task-status" id="task-mem-opt" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">ロード時間</div><div class="stat-value task-status" id="task-load-opt" style="font-size: 10px;">-</div></div>
+                            <div class="stat-box"><div class="stat-label">容量削減</div><div class="stat-value task-status" id="task-size-opt" style="font-size: 10px;">-</div></div>
+                        </div>
+                    </div>
+                    <div class="detail-section" style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+                        <div class="detail-section-title">タスクログ <span id="task-count">(0)</span></div>
                         <div class="item-list" id="task-list" style="flex: 1; overflow-y: auto;">
                             <div class="empty-state">タスクなし</div>
                         </div>
