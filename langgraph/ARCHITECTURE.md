@@ -31,7 +31,7 @@ flowchart TB
     Start --> Phase1
 
     subgraph Phase1["📋 フェーズ1: 企画"]
-        direction LR
+        direction TB
         subgraph Row1[" "]
             direction LR
             P1["🤖 企画"] --> H1["👤"]
