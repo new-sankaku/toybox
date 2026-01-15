@@ -25,7 +25,6 @@
 ```mermaid
 flowchart TB
     Orch[Orchestrator]
-    Orch --> Phase1
 
     subgraph Phase1[Phase1: 企画]
         subgraph P1a[" "]
@@ -39,8 +38,6 @@ flowchart TB
         P1a --> P1b
     end
 
-    H6 --> Phase2
-
     subgraph Phase2[Phase2: 開発]
         subgraph P2a[" "]
             direction LR
@@ -52,13 +49,15 @@ flowchart TB
         Int --> HI[H]
     end
 
-    HI --> Phase3
-
     subgraph Phase3[Phase3: 品質]
         direction LR
         T[テスト]-->HT[H]-->R[レビュー]-->HF[H]
     end
 
+    Orch --> P1
+    H6 --> CL
+    H6 --> AL
+    HI --> T
     HF -->|承認| Release[リリース]
     HF -->|修正| Phase2
 ```
