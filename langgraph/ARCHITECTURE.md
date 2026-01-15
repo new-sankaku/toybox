@@ -31,22 +31,12 @@ flowchart TB
         direction TB
         subgraph P1Agents[" "]
             direction LR
-            A1[企画]
-            A2[設計]
-            A3[シナリオ]
-            A4[キャラ]
-            A5[世界観]
-            A6[タスク分解]
+            A1[企画] ~~~ A2[設計] ~~~ A3[シナリオ] ~~~ A4[キャラ] ~~~ A5[世界観] ~~~ A6[タスク分解]
         end
         Loop1[承認プロセス Loop]
         subgraph P1Human[" "]
             direction LR
-            H1[Human]
-            H2[Human]
-            H3[Human]
-            H4[Human]
-            H5[Human]
-            H6[Human]
+            H1[H] ~~~ H2[H] ~~~ H3[H] ~~~ H4[H] ~~~ H5[H] ~~~ H6[H]
         end
         P1Agents <--> Loop1 <--> P1Human
         Done1[全承認完了]
@@ -59,20 +49,12 @@ flowchart TB
         direction TB
         subgraph P2Agents[" "]
             direction LR
-            CL[Code Leader]
-            AL[Asset Leader]
-            CA[Code Agents]
-            AA[Asset Agents]
-            INT[統合]
+            CL[Code Leader] ~~~ AL[Asset Leader] ~~~ CA[Code Agents] ~~~ AA[Asset Agents] ~~~ INT[統合]
         end
         Loop2[承認プロセス Loop]
         subgraph P2Human[" "]
             direction LR
-            HC1[Human]
-            HA1[Human]
-            HC2[Human]
-            HA2[Human]
-            HI[Human]
+            HC1[H] ~~~ HA1[H] ~~~ HC2[H] ~~~ HA2[H] ~~~ HI[H]
         end
         P2Agents <--> Loop2 <--> P2Human
         Done2[全承認完了]
@@ -85,14 +67,12 @@ flowchart TB
         direction TB
         subgraph P3Agents[" "]
             direction LR
-            T[テスト]
-            R[レビュー]
+            T[テスト] ~~~ R[レビュー]
         end
         Loop3[承認プロセス Loop]
         subgraph P3Human[" "]
             direction LR
-            HT[Human]
-            HF[Human]
+            HT[H] ~~~ HF[H]
         end
         P3Agents <--> Loop3 <--> P3Human
     end
