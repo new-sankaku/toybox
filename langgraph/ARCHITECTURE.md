@@ -292,6 +292,225 @@ flowchart TB
 
 ---
 
+### 5. ログ/監視方針
+
+#### ログレベル定義
+
+| Level | 用途 | 例 |
+|-------|------|-----|
+| **DEBUG** | 開発時の詳細情報 | プロンプト全文、LLMレスポンス全文 |
+| **INFO** | 正常な処理フロー | Agent開始/終了、Human承認完了 |
+| **WARNING** | 注意が必要な状況 | リトライ発生、タイムアウト接近 |
+| **ERROR** | 処理失敗（リカバリ可能） | LLM呼び出し失敗、バリデーションエラー |
+| **CRITICAL** | 致命的エラー（要介入） | 認証失敗、State破損 |
+
+#### ログ出力内容
+
+```python
+import structlog
+
+logger = structlog.get_logger()
+
+# Agent実行ログ
+logger.info(
+    "agent_executed",
+    agent_name="ConceptAgent",
+    phase="planning",
+    duration_ms=1523,
+    input_tokens=450,
+    output_tokens=1200,
+    status="success"
+)
+
+# Human介入ログ
+logger.info(
+    "human_feedback_received",
+    agent_name="ConceptAgent",
+    decision="revise",
+    wait_duration_hours=2.5
+)
+
+# エラーログ
+logger.error(
+    "agent_failed",
+    agent_name="GameLoopAgent",
+    error_type="LLMTimeout",
+    retry_count=3,
+    recoverable=True
+)
+```
+
+#### 監視ダッシュボード項目
+
+```mermaid
+flowchart LR
+    subgraph Dashboard["📊 Monitoring Dashboard"]
+        M1["Agent実行時間"]
+        M2["成功/失敗率"]
+        M3["Human待ち時間"]
+        M4["トークン使用量"]
+        M5["リトライ回数"]
+    end
+```
+
+| メトリクス | 説明 | アラート閾値 |
+|-----------|------|-------------|
+| `agent_duration_p95` | Agent実行時間 (95%ile) | > 30秒 |
+| `agent_success_rate` | 成功率 | < 95% |
+| `human_wait_time_avg` | Human承認待ち平均時間 | > 24時間 |
+| `token_usage_daily` | 1日あたりトークン使用量 | > 100万 |
+| `retry_rate` | リトライ発生率 | > 10% |
+
+#### アラート設定
+
+```yaml
+alerts:
+  - name: high_failure_rate
+    condition: agent_success_rate < 0.95
+    duration: 5m
+    severity: warning
+    notify: [slack, email]
+
+  - name: agent_timeout
+    condition: agent_duration_p95 > 60s
+    duration: 10m
+    severity: critical
+    notify: [slack, pagerduty]
+
+  - name: human_bottleneck
+    condition: human_wait_time_avg > 48h
+    duration: 1h
+    severity: warning
+    notify: [slack]
+```
+
+---
+
+### 6. バージョニング戦略
+
+#### セマンティックバージョニング
+
+```
+MAJOR.MINOR.PATCH
+  │     │     └── バグ修正（後方互換）
+  │     └──────── 機能追加（後方互換）
+  └────────────── 破壊的変更（互換性なし）
+```
+
+| 変更種別 | バージョン | 例 |
+|---------|-----------|-----|
+| バグ修正 | PATCH | 1.0.0 → 1.0.1 |
+| 新Agent追加 | MINOR | 1.0.1 → 1.1.0 |
+| State schema変更 | MAJOR | 1.1.0 → 2.0.0 |
+| プロンプト改善 | PATCH | 変更なし（コンテンツは別管理） |
+
+#### コンポーネント別バージョン管理
+
+```
+langgraph-gamedev/
+├── VERSION                    # 全体バージョン: 1.2.3
+├── agents/
+│   ├── planning/
+│   │   └── VERSION           # planning agents: 1.1.0
+│   ├── development/
+│   │   └── VERSION           # dev agents: 1.0.5
+│   └── quality/
+│       └── VERSION           # quality agents: 1.0.2
+├── prompts/
+│   └── VERSION               # prompts: 2.3.1
+└── state/
+    └── VERSION               # state schema: 2.0.0
+```
+
+#### State Schemaのバージョン管理
+
+```python
+class GameDevState(TypedDict):
+    # Schema version for migration
+    _schema_version: str  # "2.0.0"
+
+    # ... other fields
+```
+
+マイグレーション戦略:
+```python
+def migrate_state(old_state: dict) -> GameDevState:
+    """古いバージョンのStateを最新に変換"""
+    version = old_state.get("_schema_version", "1.0.0")
+
+    if version == "1.0.0":
+        # v1 → v2: characters フィールド追加
+        old_state["characters"] = []
+        old_state["_schema_version"] = "2.0.0"
+
+    return old_state
+```
+
+#### Git管理戦略
+
+```mermaid
+gitGraph
+    commit id: "v1.0.0"
+    branch develop
+    commit id: "feat: add Character Agent"
+    commit id: "fix: retry logic"
+    checkout main
+    merge develop id: "v1.1.0" tag: "v1.1.0"
+    branch develop
+    commit id: "feat: new State schema"
+    checkout main
+    merge develop id: "v2.0.0" tag: "v2.0.0"
+```
+
+| ブランチ | 用途 |
+|---------|------|
+| `main` | 安定版リリース |
+| `develop` | 開発中の最新 |
+| `feature/*` | 新機能開発 |
+| `hotfix/*` | 緊急バグ修正 |
+
+#### リリースチェックリスト
+
+```markdown
+## Release Checklist
+
+- [ ] 全テスト通過 (unit/integration/e2e)
+- [ ] State schema変更あり → マイグレーションスクリプト作成
+- [ ] 破壊的変更あり → MAJORバージョンアップ
+- [ ] CHANGELOG.md 更新
+- [ ] VERSION ファイル更新
+- [ ] タグ付け (`git tag -a v1.2.3`)
+- [ ] Human承認 → リリース
+```
+
+#### 後方互換性ポリシー
+
+| 項目 | ポリシー |
+|------|---------|
+| **State schema** | MAJOR-1までサポート（v2.xはv1.xからの移行サポート） |
+| **API** | 非推奨化後、2 MINORバージョンで削除 |
+| **Prompts** | バージョン管理なし（常に最新を使用） |
+| **Checkpoints** | 同一MAJORバージョン内で互換 |
+
+非推奨化の流れ:
+```python
+import warnings
+
+def old_function():
+    """
+    .. deprecated:: 1.2.0
+       Use `new_function` instead. Will be removed in 1.4.0.
+    """
+    warnings.warn(
+        "old_function is deprecated, use new_function instead",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    return new_function()
+```
+
+---
+
 ## System Overview
 
 ```mermaid
