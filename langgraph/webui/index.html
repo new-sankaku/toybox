@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LangGraph Game Studio</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0D0D0D;
+      --bg-secondary: #1A1A1A;
+      --bg-tertiary: #262626;
+      --text-primary: #DAD4BB;
+      --text-secondary: #8B8678;
+      --text-muted: #4A473D;
+      --accent-gold: #C9B77D;
+      --accent-red: #8B0000;
+      --status-success: #4A5D45;
+      --status-warning: #8B7355;
+      --status-error: #8B3A3A;
+      --border-primary: #3D3D3D;
+      --border-glow: rgba(218, 212, 187, 0.2);
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      letter-spacing: 0.05em;
+    }
+
+    /* Scanlines */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.15),
+        rgba(0, 0, 0, 0.15) 1px,
+        transparent 1px,
+        transparent 2px
+      );
+      pointer-events: none;
+      z-index: 1000;
+    }
+
+    /* Header */
+    header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-primary);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .logo {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.5rem;
+      letter-spacing: 0.1em;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-secondary);
+    }
+
+    .status-indicator::before {
+      content: '';
+      width: 8px; height: 8px;
+      background: var(--status-success);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    /* Main */
+    main {
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Panel */
+    .panel {
+      background: rgba(26, 26, 26, 0.85);
+      border: 1px solid var(--border-primary);
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 0 20px rgba(218, 212, 187, 0.05);
+    }
+
+    .panel-header {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.875rem;
+      color: var(--accent-gold);
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border-primary);
+      letter-spacing: 0.1em;
+    }
+
+    /* Progress */
+    .phase-progress {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin: 1.5rem 0;
+    }
+
+    .phase-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      position: relative;
+    }
+
+    .phase-dot.complete { background: var(--accent-gold); }
+    .phase-dot.active {
+      background: var(--accent-gold);
+      animation: pulse 1.5s infinite;
+    }
+
+    .phase-line {
+      flex: 1;
+      height: 2px;
+      background: var(--border-primary);
+    }
+
+    .phase-line.complete { background: var(--accent-gold); }
+
+    .phase-label {
+      font-size: 0.75rem;
+      color: var(--text-secondary);
+      text-align: center;
+      margin-top: 0.5rem;
+    }
+
+    /* Agent List */
+    .agent-list {
+      display: grid;
+      gap: 1rem;
+    }
+
+    .agent-item {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.75rem;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border-primary);
+    }
+
+    .agent-status {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+
+    .agent-status.running {
+      background: var(--accent-gold);
+      animation: pulse 1s infinite;
+    }
+
+    .agent-status.idle { background: var(--text-muted); }
+    .agent-status.complete { background: var(--status-success); }
+
+    .agent-name {
+      flex: 1;
+      font-weight: 500;
+    }
+
+    .agent-progress {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.875rem;
+      color: var(--text-secondary);
+    }
+
+    /* Buttons */
+    .btn {
+      font-family: 'Rajdhani', sans-serif;
+      font-size: 0.875rem;
+      padding: 0.75rem 1.5rem;
+      background: transparent;
+      border: 1px solid var(--text-primary);
+      color: var(--text-primary);
+      cursor: pointer;
+      letter-spacing: 0.1em;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: rgba(218, 212, 187, 0.1);
+      box-shadow: 0 0 10px var(--border-glow);
+    }
+
+    .btn-primary {
+      border: 2px solid var(--accent-gold);
+      color: var(--accent-gold);
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 1rem;
+      margin-top: 1.5rem;
+    }
+
+    /* Log */
+    .log-viewer {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 0.8rem;
+      background: var(--bg-primary);
+      padding: 1rem;
+      height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border-primary);
+    }
+
+    .log-entry {
+      margin-bottom: 0.25rem;
+      line-height: 1.4;
+    }
+
+    .log-time { color: var(--text-muted); }
+    .log-info { color: var(--text-primary); }
+    .log-warn { color: var(--accent-gold); }
+    .log-error { color: var(--status-error); }
+
+    /* Checkpoint */
+    .checkpoint-alert {
+      background: rgba(201, 183, 125, 0.1);
+      border: 2px solid var(--accent-gold);
+      padding: 1.5rem;
+      animation: glow 2s infinite;
+    }
+
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 0 10px rgba(201, 183, 125, 0.2); }
+      50% { box-shadow: 0 0 20px rgba(201, 183, 125, 0.4); }
+    }
+
+    .checkpoint-title {
+      font-family: 'Orbitron', sans-serif;
+      color: var(--accent-gold);
+      margin-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="logo">LANGGRAPH GAME STUDIO</div>
+    <div class="status-indicator">SYSTEM ONLINE</div>
+  </header>
+
+  <main>
+    <!-- Project Status -->
+    <div class="panel">
+      <div class="panel-header">PROJECT STATUS</div>
+      <div style="font-size: 1.25rem; margin-bottom: 0.5rem;">Untitled RPG</div>
+      <div style="color: var(--text-secondary);">Phase 2: Development</div>
+
+      <div class="phase-progress">
+        <div style="text-align: center;">
+          <div class="phase-dot complete"></div>
+          <div class="phase-label">Concept</div>
+        </div>
+        <div class="phase-line complete"></div>
+        <div style="text-align: center;">
+          <div class="phase-dot complete"></div>
+          <div class="phase-label">Design</div>
+        </div>
+        <div class="phase-line complete"></div>
+        <div style="text-align: center;">
+          <div class="phase-dot active"></div>
+          <div class="phase-label">Code</div>
+        </div>
+        <div class="phase-line"></div>
+        <div style="text-align: center;">
+          <div class="phase-dot"></div>
+          <div class="phase-label">Test</div>
+        </div>
+        <div class="phase-line"></div>
+        <div style="text-align: center;">
+          <div class="phase-dot"></div>
+          <div class="phase-label">Review</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Checkpoint Alert -->
+    <div class="panel checkpoint-alert">
+      <div class="checkpoint-title">AWAITING APPROVAL</div>
+      <div style="margin-bottom: 1rem;">Design Document Review - Waiting: 1h 23m</div>
+      <div class="btn-group">
+        <button class="btn btn-primary">APPROVE</button>
+        <button class="btn">REQUEST CHANGES</button>
+        <button class="btn" style="border-color: var(--status-error); color: var(--status-error);">REJECT</button>
+      </div>
+    </div>
+
+    <!-- Active Agents -->
+    <div class="panel">
+      <div class="panel-header">ACTIVE AGENTS</div>
+      <div class="agent-list">
+        <div class="agent-item">
+          <div class="agent-status running"></div>
+          <div class="agent-name">CodeLeader</div>
+          <div class="agent-progress">67%</div>
+        </div>
+        <div class="agent-item">
+          <div class="agent-status running"></div>
+          <div class="agent-name">AssetLeader</div>
+          <div class="agent-progress">45%</div>
+        </div>
+        <div class="agent-item">
+          <div class="agent-status idle"></div>
+          <div class="agent-name">Tester</div>
+          <div class="agent-progress">--</div>
+        </div>
+        <div class="agent-item">
+          <div class="agent-status idle"></div>
+          <div class="agent-name">Reviewer</div>
+          <div class="agent-progress">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log Viewer -->
+    <div class="panel">
+      <div class="panel-header">SYSTEM LOG</div>
+      <div class="log-viewer">
+        <div class="log-entry"><span class="log-time">14:23:01</span> <span class="log-info">[INFO] CodeLeader started</span></div>
+        <div class="log-entry"><span class="log-time">14:23:02</span> <span class="log-info">[INFO] Spawning CodeWorker #1</span></div>
+        <div class="log-entry"><span class="log-time">14:23:15</span> <span class="log-info">[INFO] Implementing PlayerController.ts</span></div>
+        <div class="log-entry"><span class="log-time">14:24:30</span> <span class="log-warn">[WARN] Token usage: 2,847 / 4,096</span></div>
+        <div class="log-entry"><span class="log-time">14:25:01</span> <span class="log-info">[INFO] AssetLeader started</span></div>
+        <div class="log-entry"><span class="log-time">14:25:45</span> <span class="log-info">[INFO] Generating character sprites...</span></div>
+        <div class="log-entry"><span class="log-time">14:26:12</span> <span class="log-info">[CHECKPOINT] Awaiting human approval</span></div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="btn-group">
+      <button class="btn btn-primary">NEW PROJECT</button>
+      <button class="btn">PAUSE</button>
+      <button class="btn">EXPORT</button>
+    </div>
+  </main>
+</body>
+</html>
