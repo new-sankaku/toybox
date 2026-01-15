@@ -1,3 +1,119 @@
+// LLM config cache
+let llmConfig = null;
+
+// Load LLM config from server
+async function loadLLMConfig() {
+    try {
+        const response = await fetch('/api/llm-config');
+        const data = await response.json();
+        llmConfig = data;
+        initializeLLMSelectors(data);
+    } catch (error) {
+        console.error('Failed to load LLM config:', error);
+        // Fallback to default config
+        llmConfig = {
+            providers: {
+                anthropic: {
+                    models: [
+                        { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', max_tokens: 8192 }
+                    ]
+                }
+            },
+            default: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' }
+        };
+        initializeLLMSelectors(llmConfig);
+    }
+}
+
+// Initialize LLM provider and model selectors
+function initializeLLMSelectors(config) {
+    const providerSelect = document.getElementById('llm-provider-select');
+    const modelSelect = document.getElementById('llm-model-select');
+
+    // Clear and populate provider select
+    providerSelect.innerHTML = '';
+    for (const [providerId, providerData] of Object.entries(config.providers)) {
+        if (providerData.models && providerData.models.length > 0) {
+            const option = document.createElement('option');
+            option.value = providerId;
+            option.textContent = getProviderDisplayName(providerId);
+            providerSelect.appendChild(option);
+        }
+    }
+
+    // Set default provider
+    if (config.default && config.default.provider) {
+        providerSelect.value = config.default.provider;
+    }
+
+    // Update models for selected provider
+    updateModelSelect();
+
+    // Set default model if specified
+    if (config.default && config.default.model) {
+        modelSelect.value = config.default.model;
+        updateMaxTokensLimit();
+    }
+
+    // Add event listeners
+    providerSelect.addEventListener('change', () => {
+        updateModelSelect();
+        updateMaxTokensLimit();
+    });
+
+    modelSelect.addEventListener('change', updateMaxTokensLimit);
+}
+
+// Get display name for provider
+function getProviderDisplayName(providerId) {
+    const names = {
+        'anthropic': 'Anthropic (Claude)',
+        'openai': 'OpenAI (GPT)',
+        'deepseek': 'DeepSeek',
+        'custom': 'Custom'
+    };
+    return names[providerId] || providerId;
+}
+
+// Update model select based on provider
+function updateModelSelect() {
+    const providerSelect = document.getElementById('llm-provider-select');
+    const modelSelect = document.getElementById('llm-model-select');
+    const provider = providerSelect.value;
+
+    modelSelect.innerHTML = '';
+
+    if (llmConfig && llmConfig.providers && llmConfig.providers[provider]) {
+        const models = llmConfig.providers[provider].models || [];
+        for (const model of models) {
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = model.name;
+            option.dataset.maxTokens = model.max_tokens || 4096;
+            modelSelect.appendChild(option);
+        }
+    }
+}
+
+// Update max tokens limit display
+function updateMaxTokensLimit() {
+    const modelSelect = document.getElementById('llm-model-select');
+    const maxTokensInput = document.getElementById('llm-max-tokens-input');
+    const maxTokensLimit = document.getElementById('llm-max-tokens-limit');
+
+    const selectedOption = modelSelect.options[modelSelect.selectedIndex];
+    if (selectedOption) {
+        const maxTokens = parseInt(selectedOption.dataset.maxTokens) || 4096;
+        maxTokensLimit.textContent = `(max: ${maxTokens})`;
+        maxTokensInput.max = maxTokens;
+
+        // Adjust current value if exceeds max
+        if (parseInt(maxTokensInput.value) > maxTokens) {
+            maxTokensInput.value = maxTokens;
+        }
+    }
+}
+
 // Agent definitions with workflow order
 const AGENTS = [
     { id: 'planner', name: 'Planner', label: '企画', order: 1 },
@@ -475,6 +591,7 @@ function handleAgentEvent(event) {
 async function startWorkflow() {
     const request = document.getElementById('request-input').value;
     const phase = document.getElementById('phase-select').value;
+    const provider = document.getElementById('llm-provider-select').value;
     const model = document.getElementById('llm-model-select').value;
     const temperature = parseFloat(document.getElementById('llm-temp-input').value);
     const maxTokens = parseInt(document.getElementById('llm-max-tokens-input').value);
@@ -547,6 +664,7 @@ async function startWorkflow() {
                 request,
                 phase,
                 llm_config: {
+                    provider: provider,
                     model: model,
                     temperature: temperature,
                     max_tokens: maxTokens
@@ -572,5 +690,6 @@ async function stopWorkflow() {
 
 // Initialize
 connectWebSocket();
+loadLLMConfig();
 renderAgentList();
 renderWorkflowGrid();

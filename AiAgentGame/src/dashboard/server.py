@@ -118,6 +118,25 @@ async def get_state():
     return JSONResponse(content=tracker.get_state())
 
 
+@app.get("/api/llm-config")
+async def get_llm_config():
+    """Get LLM configuration (providers and models)."""
+    try:
+        from src.core.llm import load_config
+        config = load_config()
+        providers = config.get("providers", {})
+        default = config.get("default", {})
+        return JSONResponse(content={
+            "providers": providers,
+            "default": default
+        })
+    except Exception as e:
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
+
+
 @app.post("/api/start")
 async def start_workflow(request: dict, background_tasks: BackgroundTasks):
     """Start a new workflow."""
