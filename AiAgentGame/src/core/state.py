@@ -66,6 +66,54 @@ class GameSpec(TypedDict):
     target_platform: str   # "pygame", "html5", "pyxel"
 
 
+class GameArchitecture(TypedDict, total=False):
+    """Game architecture - 29 design elements."""
+    # 基本コンセプト (5)
+    genre: str              # ジャンル
+    target: str             # ターゲット層
+    platform: str           # プラットフォーム
+    theme: str              # 世界観・テーマ
+    coreFun: str            # コアの面白さ
+
+    # ゲームメカニクス (5)
+    rules: str              # ルール・勝敗条件
+    controls: str           # 操作方法
+    flow: str               # 進行フロー
+    difficulty: str         # 難易度設計
+    reward: str             # 報酬・成長システム
+
+    # ストーリー・キャラクター (3)
+    scenario: str           # シナリオ概要
+    characters: str         # キャラクター設定
+    world: str              # 世界設定
+
+    # ビジュアル・オーディオ (3)
+    art: str                # アートスタイル
+    ui: str                 # UI方針
+    audio: str              # BGM・効果音方針
+
+    # 技術仕様 (4)
+    engine: str             # エンジン・開発環境
+    resolution: str         # 解像度・FPS
+    data: str               # データ・セーブ仕様
+    network: str            # 通信仕様
+
+    # レベルデザイン (3)
+    stages: str             # ステージ・マップ構成
+    placement: str          # 敵・アイテム配置
+    tutorial: str           # チュートリアル設計
+
+    # 収益・運営 (3)
+    monetize: str           # マネタイズ方針
+    updates: str            # アップデート計画
+    support: str            # サポート体制
+
+    # スケジュール・リソース (3)
+    schedule: str           # 開発期間
+    budget: str             # 人員・予算
+    outsource: str          # 外注範囲
+
+
 class Feedback(TypedDict):
     """User feedback on an artifact."""
     artifact_id: str       # Target artifact ID
@@ -136,6 +184,7 @@ class GameState(TypedDict):
 
     # Planning
     game_spec: Optional[GameSpec]
+    architecture: Optional[GameArchitecture]
     tasks: Annotated[list[Task], operator.add]
 
     # Artifacts
@@ -179,6 +228,7 @@ def create_initial_state(
         user_request=user_request,
         development_phase=development_phase,
         game_spec=None,
+        architecture=None,
         tasks=[],
         artifacts={},
         code_files={},

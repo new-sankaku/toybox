@@ -10,6 +10,7 @@ from ..core.state import GameState
 from ..core.llm import get_llm_for_agent
 from ..tools import ClaudeCodeDelegate, FileTools, BashTools
 from ..utils.logger import get_logger
+from ..dashboard.tracker import tracker, AgentStatus
 
 logger = get_logger()
 
@@ -51,7 +52,10 @@ class DebuggerAgent:
 
         if not errors:
             logger.info("修正対象のエラーなし")
+            tracker.agent_complete("debugger", "修正対象のエラーなし")
             return {"fixed_code": {}}
+
+        tracker.agent_start("debugger", f"デバッグ開始: {len(errors)}件のエラー")
 
         logger.info(f"修正中: {len(errors)}件のエラー")
 
@@ -91,6 +95,16 @@ class DebuggerAgent:
             file_path = self.output_dir / filename
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
+
+        if fixed_code:
+            tracker.agent_complete("debugger", f"デバッグ完了: {len(fixed_code)}ファイル修正", {
+                "fixed_files": list(fixed_code.keys()),
+                "original_errors": len(errors)
+            })
+        else:
+            tracker.agent_complete("debugger", "修正対象なし", {
+                "original_errors": len(errors)
+            })
 
         return {"fixed_code": fixed_code}
 

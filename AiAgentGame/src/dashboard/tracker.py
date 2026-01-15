@@ -74,6 +74,9 @@ class EventTracker:
         }
         self.current_phase = "idle"
         self.game_spec = {}
+        self.architecture = {}
+        self.task_phases = []
+        self.asset_categories = {}
         self.tasks = []
         self.errors = []
         self.assets = []
@@ -163,6 +166,39 @@ class EventTracker:
         """Set game specification."""
         self.game_spec = spec
 
+    def set_architecture(self, arch: dict):
+        """Set game architecture and emit to dashboard."""
+        self.architecture = arch
+        self.emit("planner", AgentStatus.RUNNING, "アーキテクチャ設計完了", {
+            "architecture": arch
+        })
+
+    def set_task_phases(self, phases: list):
+        """Set task phases and emit to dashboard."""
+        self.task_phases = phases
+        self.emit("planner", AgentStatus.RUNNING, f"タスクフェーズ設定: {len(phases)}フェーズ", {
+            "task_phases": phases
+        })
+
+    def set_asset_categories(self, categories: dict):
+        """Set asset categories and emit to dashboard."""
+        self.asset_categories = categories
+        self.emit("planner", AgentStatus.RUNNING, "アセットカテゴリ設定完了", {
+            "asset_categories": categories
+        })
+
+    def update_task_status(self, phase_id: str, task_name: str, status: str):
+        """Update individual task status."""
+        self.emit("workflow", AgentStatus.RUNNING, f"タスク更新: {task_name}", {
+            "task_update": {"phaseId": phase_id, "taskName": task_name, "status": status}
+        })
+
+    def update_asset_status(self, tab_key: str, category_id: str, item_name: str, status: str):
+        """Update individual asset status."""
+        self.emit("workflow", AgentStatus.RUNNING, f"アセット更新: {item_name}", {
+            "asset_update": {"tabKey": tab_key, "categoryId": category_id, "itemName": item_name, "status": status}
+        })
+
     def set_tasks(self, tasks: list):
         """Set task list from planner."""
         self.tasks = [
@@ -208,6 +244,9 @@ class EventTracker:
             "phase": self.current_phase,
             "user_request": self.user_request,
             "game_spec": self.game_spec,
+            "architecture": self.architecture,
+            "task_phases": self.task_phases,
+            "asset_categories": self.asset_categories,
             "agents": {k: v.value for k, v in self.agent_states.items()},
             "events": [e.to_dict() for e in self.events[-100:]],
             "tasks": self.tasks,

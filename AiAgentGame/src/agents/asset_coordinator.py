@@ -7,6 +7,7 @@ from pathlib import Path
 
 from ..core.state import GameState, DevelopmentPhase
 from ..utils.logger import get_logger
+from ..dashboard.tracker import tracker, AgentStatus
 
 logger = get_logger()
 
@@ -39,6 +40,7 @@ class AssetCoordinatorAgent:
         game_spec = state.get("game_spec", {})
         development_phase = state["development_phase"]
 
+        tracker.agent_start("asset_coordinator", "アセット生成を調整中...")
         logger.info(f"アセット調整中 (フェーズ: {development_phase})")
 
         artifacts = {}
@@ -63,6 +65,17 @@ class AssetCoordinatorAgent:
         ui_agent = UIAgent()
         ui_artifacts = ui_agent.generate(game_spec, development_phase)
         artifacts.update(ui_artifacts)
+
+        # Notify dashboard
+        asset_list = [
+            {"name": k, "type": v.get("type", "unknown"), "status": "completed"}
+            for k, v in artifacts.items()
+        ]
+        tracker.set_assets(asset_list)
+        tracker.agent_complete("asset_coordinator", f"アセット生成完了: {len(artifacts)}件", {
+            "assets": len(artifacts),
+            "asset_list": asset_list
+        })
 
         logger.info(f"アセット生成完了: {len(artifacts)}件")
 

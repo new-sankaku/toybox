@@ -9,6 +9,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from ..core.state import GameState
 from ..core.llm import get_llm_for_agent
 from ..utils.logger import get_logger
+from ..dashboard.tracker import tracker, AgentStatus
 
 logger = get_logger()
 
@@ -44,7 +45,10 @@ class ReviewerAgent:
 
         if not code_files:
             logger.warning("レビュー対象のコードなし")
+            tracker.agent_complete("reviewer", "レビュー対象のコードなし")
             return {"review_comments": [], "approval_status": True}
+
+        tracker.agent_start("reviewer", f"レビュー開始: {len(code_files)}ファイル")
 
         logger.info(f"レビュー中: {len(code_files)}ファイル")
 
@@ -67,9 +71,21 @@ class ReviewerAgent:
         if critical_count > 0:
             logger.warning(f"レビュー不合格: 重大な問題{critical_count}件")
             approval_status = False
+            tracker.agent_complete("reviewer", f"レビュー不合格: 重大な問題{critical_count}件", {
+                "files_reviewed": len(code_files),
+                "comments": len(review_comments),
+                "critical_count": critical_count,
+                "approved": False
+            })
         else:
             logger.info(f"レビュー合格: 提案{len(review_comments)}件")
             approval_status = True
+            tracker.agent_complete("reviewer", f"レビュー合格: 提案{len(review_comments)}件", {
+                "files_reviewed": len(code_files),
+                "comments": len(review_comments),
+                "critical_count": 0,
+                "approved": True
+            })
 
         return {
             "review_comments": review_comments,

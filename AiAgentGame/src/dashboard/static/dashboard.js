@@ -291,6 +291,16 @@ document.querySelectorAll('.detail-tab').forEach(tab => {
     });
 });
 
+// Asset subtabs
+document.querySelectorAll('.asset-subtab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.asset-subtab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.asset-tab-content').forEach(c => c.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(`asset-${tab.dataset.assetTab}`).classList.add('active');
+    });
+});
+
 // WebSocket
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -336,12 +346,7 @@ function updateState(state) {
     }
 
     if (state.game_spec) {
-        document.getElementById('spec-title').textContent = state.game_spec.title || '-';
-        document.getElementById('spec-genre').textContent = state.game_spec.genre || '-';
-        document.getElementById('spec-platform').textContent = state.game_spec.target_platform || '-';
-        document.getElementById('spec-description').textContent = state.game_spec.description || '-';
-        document.getElementById('spec-visual').textContent = state.game_spec.visual_style || '-';
-        document.getElementById('spec-audio').textContent = state.game_spec.audio_style || '-';
+        updateGameSpec(state.game_spec);
     }
 
     eventCount = state.events?.length || 0;
@@ -406,19 +411,22 @@ function renderErrorList(errors) {
 }
 
 function renderAssetList(assets) {
-    const container = document.getElementById('asset-list');
-    document.getElementById('asset-count').textContent = `(${assets.length})`;
+    // Update stat count
     document.getElementById('stat-assets').textContent = assets.length;
-    if (assets.length === 0) {
-        container.innerHTML = '<div class="empty-state">アセットなし</div>';
-        return;
-    }
-    container.innerHTML = assets.map(a => `
-        <div class="item-entry">
-            <div class="item-title">${a.name || a}</div>
-            <div class="item-meta">${a.type || '-'}</div>
-        </div>
-    `).join('');
+
+    // Process assets to update status in the dynamic asset grid
+    assets.forEach(a => {
+        if (a && a.type && a.category && a.name) {
+            // Map asset type to tab key
+            let tabKey = 'text';
+            if (a.type === 'image' || a.type === 'sprite' || a.type === 'background') {
+                tabKey = 'image';
+            } else if (a.type === 'audio' || a.type === 'bgm' || a.type === 'se') {
+                tabKey = 'audio';
+            }
+            updateAssetStatus(tabKey, a.category, a.name, a.status || 'completed');
+        }
+    });
 }
 
 function renderReviewList(comments) {
@@ -499,15 +507,16 @@ function updateTokens(tokens) {
     }
 }
 
-// Update game spec display
+// Update game spec display - maps to architecture fields
 function updateGameSpec(spec) {
     if (!spec) return;
-    document.getElementById('spec-title').textContent = spec.title || '-';
-    document.getElementById('spec-genre').textContent = spec.genre || '-';
-    document.getElementById('spec-platform').textContent = spec.target_platform || '-';
-    document.getElementById('spec-visual').textContent = spec.visual_style || '-';
-    document.getElementById('spec-audio').textContent = spec.audio_style || '-';
-    document.getElementById('spec-description').textContent = spec.description || '-';
+    updateArchitecture({
+        genre: spec.genre,
+        platform: spec.target_platform,
+        art: spec.visual_style,
+        audio: spec.audio_style,
+        theme: spec.description
+    });
 }
 
 function handleAgentEvent(event) {
@@ -565,23 +574,15 @@ function handleAgentEvent(event) {
         if (event.details.game_spec) {
             updateGameSpec(event.details.game_spec);
         }
-        if (event.details.title) {
-            document.getElementById('spec-title').textContent = event.details.title;
-        }
-        if (event.details.genre) {
-            document.getElementById('spec-genre').textContent = event.details.genre;
-        }
-        if (event.details.target_platform) {
-            document.getElementById('spec-platform').textContent = event.details.target_platform;
-        }
-        if (event.details.visual_style) {
-            document.getElementById('spec-visual').textContent = event.details.visual_style;
-        }
-        if (event.details.audio_style) {
-            document.getElementById('spec-audio').textContent = event.details.audio_style;
-        }
-        if (event.details.description) {
-            document.getElementById('spec-description').textContent = event.details.description;
+        // Update architecture from individual spec fields
+        const archUpdate = {};
+        if (event.details.genre) archUpdate.genre = event.details.genre;
+        if (event.details.target_platform) archUpdate.platform = event.details.target_platform;
+        if (event.details.visual_style) archUpdate.art = event.details.visual_style;
+        if (event.details.audio_style) archUpdate.audio = event.details.audio_style;
+        if (event.details.description) archUpdate.theme = event.details.description;
+        if (Object.keys(archUpdate).length > 0) {
+            updateArchitecture(archUpdate);
         }
         // Handle LLM interactions
         if (event.details.llm_interaction) {
@@ -635,13 +636,24 @@ async function startWorkflow() {
     renderReviewList([]);
     renderFileList([]);
 
-    // Reset spec display
-    document.getElementById('spec-title').textContent = '-';
-    document.getElementById('spec-genre').textContent = '-';
-    document.getElementById('spec-platform').textContent = '-';
-    document.getElementById('spec-visual').textContent = '-';
-    document.getElementById('spec-audio').textContent = '-';
-    document.getElementById('spec-description').textContent = '-';
+    // Reset architecture display
+    updateArchitecture({
+        genre: '-', target: '-', platform: '-', theme: '-', coreFun: '-',
+        rules: '-', controls: '-', flow: '-', difficulty: '-', reward: '-',
+        scenario: '-', characters: '-', world: '-',
+        art: '-', ui: '-', audio: '-',
+        engine: '-', resolution: '-', data: '-', network: '-',
+        stages: '-', placement: '-', tutorial: '-',
+        monetize: '-', updates: '-', support: '-',
+        schedule: '-', budget: '-', outsource: '-'
+    });
+
+    // Reset task and asset status
+    taskStatus = {};
+    assetStatus = {};
+    renderTaskPhases();
+    renderAssetSubtabs();
+    renderAssetContent();
 
     // Reset LLM interactions
     currentLLMInteractions = [];
@@ -702,8 +714,391 @@ async function stopWorkflow() {
     }
 }
 
+// ============================================
+// Dynamic Task Phases Rendering
+// ============================================
+
+// Default task phases structure (can be overridden by Planner Agent)
+let taskPhases = [
+    { id: 'concept', name: '企画・コンセプト', tasks: ['ゲームコンセプト決定', 'ターゲット層定義', 'コアメカニクス設計', 'マネタイズ方針'] },
+    { id: 'design', name: 'ゲームデザイン', tasks: ['ルール設計', '難易度曲線設計', 'UI/UXフロー設計', 'バランス設計'] },
+    { id: 'story', name: 'シナリオ・世界観', tasks: ['ストーリー構成', 'キャラクター設定', '世界観設定', 'ダイアログ作成'] },
+    { id: 'prototype', name: 'プロトタイプ', tasks: ['コア機能実装', '仮アセット作成', '動作確認', 'フィードバック収集'] },
+    { id: 'art', name: 'ビジュアル制作', tasks: ['キャラクターデザイン', '背景制作', 'UI素材制作', 'アニメーション制作', 'エフェクト制作'] },
+    { id: 'audio', name: 'オーディオ制作', tasks: ['BGM作曲', 'SE制作', '環境音制作', 'ボイス収録'] },
+    { id: 'implementation', name: '実装', tasks: ['ゲームシステム実装', 'UI実装', 'データ連携', 'セーブ/ロード機能'] },
+    { id: 'integration', name: '統合・調整', tasks: ['アセット統合', 'パラメータ調整', 'バグ修正', '最適化'] },
+    { id: 'testing', name: 'テスト', tasks: ['機能テスト', 'バランステスト', 'ユーザビリティテスト', '負荷テスト'] },
+    { id: 'release', name: 'リリース', tasks: ['最終確認', 'ビルド作成', 'ストア申請', 'ランチプロモーション'] }
+];
+
+// Task status tracking
+let taskStatus = {};
+
+function renderTaskPhases() {
+    const container = document.getElementById('task-phases-container');
+    if (!container) return;
+
+    container.innerHTML = taskPhases.map(phase => {
+        const tasks = phase.tasks || [];
+        const completed = tasks.filter(t => taskStatus[`${phase.id}:${t}`] === 'completed').length;
+        const running = tasks.filter(t => taskStatus[`${phase.id}:${t}`] === 'running').length;
+        const statusClass = running > 0 ? 'running' : (completed === tasks.length && tasks.length > 0 ? 'completed' : '');
+
+        return `
+            <div class="detail-section task-phase ${statusClass}">
+                <div class="detail-section-title">${phase.name} <span class="phase-progress">(${completed}/${tasks.length})</span></div>
+                <div class="task-grid">
+                    ${tasks.map(task => {
+                        const status = taskStatus[`${phase.id}:${task}`] || 'pending';
+                        return `<div class="task-item ${status}" title="${task}">${task}</div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Update task phases from Planner Agent data
+function updateTaskPhases(phases) {
+    if (phases && Array.isArray(phases)) {
+        taskPhases = phases;
+        renderTaskPhases();
+    }
+}
+
+// Update individual task status
+function updateTaskStatus(phaseId, taskName, status) {
+    taskStatus[`${phaseId}:${taskName}`] = status;
+    renderTaskPhases();
+}
+
+// ============================================
+// Dynamic Asset Rendering
+// ============================================
+
+// Default asset categories (can be overridden by Planner Agent)
+let assetCategories = {
+    image: {
+        name: '画像系',
+        categories: [
+            { id: 'character', name: 'キャラクター', items: ['プレイヤー', '敵キャラ', 'NPC', 'ボス'] },
+            { id: 'background', name: '背景', items: ['タイトル画面', 'ステージ背景', 'メニュー背景'] },
+            { id: 'ui', name: 'UI', items: ['ボタン', 'アイコン', 'フレーム', 'ゲージ'] },
+            { id: 'effect', name: 'エフェクト', items: ['パーティクル', 'ヒットエフェクト', '爆発'] },
+            { id: 'item', name: 'アイテム・オブジェクト', items: ['アイテム', '障害物', 'コレクション'] }
+        ]
+    },
+    audio: {
+        name: 'サウンド系',
+        categories: [
+            { id: 'bgm', name: 'BGM', items: ['タイトルBGM', 'ゲームプレイBGM', 'ボス戦BGM', 'リザルトBGM'] },
+            { id: 'se', name: '効果音', items: ['ジャンプ', '着地', '攻撃', 'ダメージ', 'アイテム取得', '決定', 'キャンセル'] },
+            { id: 'ambient', name: '環境音', items: ['風', '水', '森', '街'] }
+        ]
+    },
+    text: {
+        name: 'テキスト系',
+        categories: [
+            { id: 'dialog', name: 'ダイアログ', items: ['オープニング', 'チュートリアル', 'エンディング', 'NPC会話'] },
+            { id: 'ui-text', name: 'UI文言', items: ['メニュー', 'ヘルプ', 'チュートリアルガイド'] },
+            { id: 'data', name: 'データ', items: ['ステージデータ', '敵パラメータ', 'アイテムマスタ', 'ローカライズ'] }
+        ]
+    }
+};
+
+// Asset status tracking
+let assetStatus = {};
+let currentAssetTab = 'image';
+
+function renderAssetSubtabs() {
+    const container = document.getElementById('asset-subtabs-container');
+    if (!container) return;
+
+    const tabs = Object.entries(assetCategories);
+    container.innerHTML = tabs.map(([key, data], idx) => {
+        const isActive = key === currentAssetTab;
+        const totalAssets = data.categories.reduce((sum, cat) => sum + cat.items.length, 0);
+        const completedAssets = data.categories.reduce((sum, cat) =>
+            sum + cat.items.filter(item => assetStatus[`${key}:${cat.id}:${item}`] === 'completed').length, 0);
+        return `<div class="asset-subtab ${isActive ? 'active' : ''}" data-asset-tab="${key}">
+            ${data.name} <span class="asset-count">(${completedAssets}/${totalAssets})</span>
+        </div>`;
+    }).join('');
+
+    // Re-attach event listeners
+    container.querySelectorAll('.asset-subtab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            currentAssetTab = tab.dataset.assetTab;
+            renderAssetSubtabs();
+            renderAssetContent();
+        });
+    });
+}
+
+function renderAssetContent() {
+    const container = document.getElementById('asset-tabs-container');
+    if (!container) return;
+
+    const data = assetCategories[currentAssetTab];
+    if (!data) {
+        container.innerHTML = '<div class="empty-state">カテゴリなし</div>';
+        return;
+    }
+
+    container.innerHTML = data.categories.map(cat => {
+        const items = cat.items || [];
+        return `
+            <div class="detail-section">
+                <div class="detail-section-title">${cat.name} (${items.length})</div>
+                <div class="asset-grid">
+                    ${items.map(item => {
+                        const status = assetStatus[`${currentAssetTab}:${cat.id}:${item}`] || 'pending';
+                        const canPreview = currentAssetTab === 'image' || currentAssetTab === 'audio';
+                        const previewClick = canPreview ? `onclick="previewAsset('${currentAssetTab}', '${cat.id}', '${item}')"` : '';
+                        return `<div class="asset-item ${status}" ${previewClick} title="${item}">
+                            ${canPreview ? '<span class="preview-icon">👁</span>' : ''}
+                            <span class="asset-name">${item}</span>
+                            <span class="asset-status-icon">${getStatusIcon(status)}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function getStatusIcon(status) {
+    switch(status) {
+        case 'completed': return '✓';
+        case 'running': return '⟳';
+        case 'error': return '✗';
+        default: return '○';
+    }
+}
+
+// Update asset categories from Planner Agent data
+function updateAssetCategories(categories) {
+    if (categories && typeof categories === 'object') {
+        assetCategories = categories;
+        renderAssetSubtabs();
+        renderAssetContent();
+    }
+}
+
+// Update individual asset status
+function updateAssetStatus(tabKey, categoryId, itemName, status) {
+    assetStatus[`${tabKey}:${categoryId}:${itemName}`] = status;
+    renderAssetSubtabs();
+    renderAssetContent();
+}
+
+// ============================================
+// Asset Preview Functions
+// ============================================
+
+function previewAsset(tabKey, categoryId, itemName) {
+    const modal = document.getElementById('asset-preview-modal');
+    const title = document.getElementById('asset-preview-title');
+    const body = document.getElementById('asset-preview-body');
+
+    title.textContent = `${itemName} (${categoryId})`;
+
+    // Check if asset exists and get path
+    const assetPath = getAssetPath(tabKey, categoryId, itemName);
+
+    if (tabKey === 'image') {
+        body.innerHTML = `
+            <div class="preview-image-container">
+                <img src="${assetPath}" alt="${itemName}" onerror="this.parentElement.innerHTML='<div class=\\'preview-placeholder\\'>画像が生成されていません</div>'">
+            </div>
+        `;
+    } else if (tabKey === 'audio') {
+        body.innerHTML = `
+            <div class="preview-audio-container">
+                <audio controls src="${assetPath}" onerror="this.parentElement.innerHTML='<div class=\\'preview-placeholder\\'>音声が生成されていません</div>'">
+                    音声ファイル
+                </audio>
+                <div class="audio-visualizer" id="audio-visualizer"></div>
+            </div>
+        `;
+    } else {
+        body.innerHTML = '<div class="preview-placeholder">このアセットはプレビューできません</div>';
+    }
+
+    modal.classList.add('active');
+}
+
+function getAssetPath(tabKey, categoryId, itemName) {
+    // Generate asset path based on naming convention
+    const safeName = itemName.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '_').toLowerCase();
+    const ext = tabKey === 'image' ? 'png' : (tabKey === 'audio' ? 'mp3' : 'json');
+    return `/output/assets/${tabKey}/${categoryId}/${safeName}.${ext}`;
+}
+
+function closeAssetPreview() {
+    const modal = document.getElementById('asset-preview-modal');
+    modal.classList.remove('active');
+}
+
+// Close modal on outside click
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('asset-preview-modal');
+    if (e.target === modal) {
+        closeAssetPreview();
+    }
+});
+
+// Close modal on Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        closeAssetPreview();
+    }
+});
+
+// ============================================
+// Architecture Update Functions
+// ============================================
+
+// Architecture data structure
+let architectureData = {
+    // 基本コンセプト
+    genre: '-',
+    target: '-',
+    platform: '-',
+    theme: '-',
+    coreFun: '-',
+    // ゲームメカニクス
+    rules: '-',
+    controls: '-',
+    flow: '-',
+    difficulty: '-',
+    reward: '-',
+    // ストーリー・キャラクター
+    scenario: '-',
+    characters: '-',
+    world: '-',
+    // ビジュアル・オーディオ
+    art: '-',
+    ui: '-',
+    audio: '-',
+    // 技術仕様
+    engine: '-',
+    resolution: '-',
+    data: '-',
+    network: '-',
+    // レベルデザイン
+    stages: '-',
+    placement: '-',
+    tutorial: '-',
+    // 収益・運営
+    monetize: '-',
+    updates: '-',
+    support: '-',
+    // スケジュール・リソース
+    schedule: '-',
+    budget: '-',
+    outsource: '-'
+};
+
+function updateArchitecture(data) {
+    if (!data) return;
+
+    // Map data to architecture fields
+    const fieldMap = {
+        'arch-genre': data.genre || architectureData.genre,
+        'arch-target': data.target || architectureData.target,
+        'arch-platform': data.platform || architectureData.platform,
+        'arch-theme': data.theme || architectureData.theme,
+        'arch-core-fun': data.coreFun || architectureData.coreFun,
+        'arch-rules': data.rules || architectureData.rules,
+        'arch-controls': data.controls || architectureData.controls,
+        'arch-flow': data.flow || architectureData.flow,
+        'arch-difficulty': data.difficulty || architectureData.difficulty,
+        'arch-reward': data.reward || architectureData.reward,
+        'arch-scenario': data.scenario || architectureData.scenario,
+        'arch-characters': data.characters || architectureData.characters,
+        'arch-world': data.world || architectureData.world,
+        'arch-art': data.art || architectureData.art,
+        'arch-ui': data.ui || architectureData.ui,
+        'arch-audio': data.audio || architectureData.audio,
+        'arch-engine': data.engine || architectureData.engine,
+        'arch-resolution': data.resolution || architectureData.resolution,
+        'arch-data': data.data || architectureData.data,
+        'arch-network': data.network || architectureData.network,
+        'arch-stages': data.stages || architectureData.stages,
+        'arch-placement': data.placement || architectureData.placement,
+        'arch-tutorial': data.tutorial || architectureData.tutorial,
+        'arch-monetize': data.monetize || architectureData.monetize,
+        'arch-updates': data.updates || architectureData.updates,
+        'arch-support': data.support || architectureData.support,
+        'arch-schedule': data.schedule || architectureData.schedule,
+        'arch-budget': data.budget || architectureData.budget,
+        'arch-outsource': data.outsource || architectureData.outsource
+    };
+
+    // Update each field
+    for (const [id, value] of Object.entries(fieldMap)) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.textContent = value;
+            // Highlight if value changed
+            if (value !== '-') {
+                el.classList.add('has-value');
+            }
+        }
+    }
+
+    // Store updated values
+    architectureData = { ...architectureData, ...data };
+}
+
+// ============================================
+// Enhanced Event Handler
+// ============================================
+
+// Extended handleAgentEvent to process dynamic updates
+const originalHandleAgentEvent = handleAgentEvent;
+handleAgentEvent = function(event) {
+    // Call original handler
+    originalHandleAgentEvent(event);
+
+    // Process additional dynamic updates
+    if (event.details) {
+        // Update task phases if provided
+        if (event.details.task_phases) {
+            updateTaskPhases(event.details.task_phases);
+        }
+
+        // Update individual task status
+        if (event.details.task_update) {
+            const { phaseId, taskName, status } = event.details.task_update;
+            updateTaskStatus(phaseId, taskName, status);
+        }
+
+        // Update asset categories if provided
+        if (event.details.asset_categories) {
+            updateAssetCategories(event.details.asset_categories);
+        }
+
+        // Update individual asset status
+        if (event.details.asset_update) {
+            const { tabKey, categoryId, itemName, status } = event.details.asset_update;
+            updateAssetStatus(tabKey, categoryId, itemName, status);
+        }
+
+        // Update architecture if provided
+        if (event.details.architecture) {
+            updateArchitecture(event.details.architecture);
+        }
+    }
+};
+
 // Initialize
 connectWebSocket();
 loadLLMConfig();
 renderAgentList();
 renderWorkflowGrid();
+renderTaskPhases();
+renderAssetSubtabs();
+renderAssetContent();

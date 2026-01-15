@@ -82,7 +82,7 @@ async def startup_event():
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """Serve dashboard HTML."""
-    html_path = static_dir / "index.html"
+    html_path = static_dir / "dashboard.html"
     if html_path.exists():
         return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
     return HTMLResponse(content="<h1>Dashboard not found. Run setup first.</h1>")

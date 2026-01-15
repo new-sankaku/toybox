@@ -9,6 +9,7 @@ from typing import Dict, Any, List
 
 from ..core.state import GameState
 from ..utils.logger import get_logger
+from ..dashboard.tracker import tracker, AgentStatus
 
 logger = get_logger()
 
@@ -42,7 +43,10 @@ class TesterAgent:
 
         if not code_files:
             logger.warning("テスト対象のコードファイルなし")
+            tracker.agent_complete("tester", "テスト対象なし")
             return {"test_results": None, "errors": []}
+
+        tracker.agent_start("tester", f"テスト開始: {len(code_files)}ファイル")
 
         logger.info(f"テスト中: {len(code_files)}ファイル")
 
@@ -73,8 +77,20 @@ class TesterAgent:
             logger.warning(f"エラー発見: {len(errors)}件")
             for error in errors[:3]:
                 logger.warning(f"  {error.get('message')}")
+            tracker.set_errors(errors)
+            tracker.agent_complete("tester", f"テスト完了: {len(errors)}件のエラー", {
+                "files_tested": len(code_files),
+                "errors": len(errors),
+                "test_passed": False,
+                "error_list": errors
+            })
         else:
             logger.info("全テスト合格")
+            tracker.agent_complete("tester", "全テスト合格", {
+                "files_tested": len(code_files),
+                "errors": 0,
+                "test_passed": True
+            })
 
         return {
             "test_results": test_results,
