@@ -65,19 +65,19 @@ Human介入は全13箇所。各ポイントで「承認」「修正指示」「�
 
 | Agent | 役割 | 詳細 |
 |-------|------|------|
-| Concept | 企画 | [agents/concept.md](./agents/concept.md) |
-| Design | 設計 | [agents/design.md](./agents/design.md) |
-| Scenario | シナリオ | [agents/scenario.md](./agents/scenario.md) |
-| Character | キャラクター | [agents/character.md](./agents/character.md) |
-| World | 世界観 | [agents/world.md](./agents/world.md) |
-| TaskSplit | タスク分解 | [agents/task_split.md](./agents/task_split.md) |
+| Concept | 企画 | [agents/phase1_concept.md](./agents/phase1_concept.md) |
+| Design | 設計 | [agents/phase1_design.md](./agents/phase1_design.md) |
+| Scenario | シナリオ | [agents/phase1_scenario.md](./agents/phase1_scenario.md) |
+| Character | キャラクター | [agents/phase1_character.md](./agents/phase1_character.md) |
+| World | 世界観 | [agents/phase1_world.md](./agents/phase1_world.md) |
+| TaskSplit | タスク分解 | [agents/phase1_task_split.md](./agents/phase1_task_split.md) |
 
 ### Phase2: 開発（2 Leader + 複数Agent）
 
 | Agent | 種別 | 詳細 |
 |-------|------|------|
-| CodeLeader | Leader | [agents/code_leader.md](./agents/code_leader.md) |
-| AssetLeader | Leader | [agents/asset_leader.md](./agents/asset_leader.md) |
+| CodeLeader | Leader | [agents/phase2_code_leader.md](./agents/phase2_code_leader.md) |
+| AssetLeader | Leader | [agents/phase2_asset_leader.md](./agents/phase2_asset_leader.md) |
 | CodeAgents | Agent群 | GameLoop, State, UI等（動的に生成） |
 | AssetAgents | Agent群 | Image, Audio等（動的に生成） |
 
@@ -85,9 +85,9 @@ Human介入は全13箇所。各ポイントで「承認」「修正指示」「�
 
 | Agent | 役割 | 詳細 |
 |-------|------|------|
-| Integrator | 統合 | [agents/integrator.md](./agents/integrator.md) |
-| Tester | テスト | [agents/tester.md](./agents/tester.md) |
-| Reviewer | レビュー | [agents/reviewer.md](./agents/reviewer.md) |
+| Integrator | 統合 | [agents/phase3_integrator.md](./agents/phase3_integrator.md) |
+| Tester | テスト | [agents/phase3_tester.md](./agents/phase3_tester.md) |
+| Reviewer | レビュー | [agents/phase3_reviewer.md](./agents/phase3_reviewer.md) |
 
 ---
 
