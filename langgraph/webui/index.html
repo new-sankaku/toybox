@@ -4,358 +4,540 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LangGraph Game Studio</title>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@400;500;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
   <style>
+    /*
+     * NieR:Automata UI Style
+     * Reference: https://codepen.io/levise/pen/vMzEwr
+     *
+     * Key characteristics:
+     * - Light beige background (#C8C2AA)
+     * - Dark brown text (#4D493E)
+     * - Minimalist, flat design
+     * - Uppercase text, wide letter-spacing
+     * - Soft box shadows
+     * - Musical score motifs (lines, decorations)
+     */
+
     :root {
-      --bg-primary: #0D0D0D;
-      --bg-secondary: #1A1A1A;
-      --bg-tertiary: #262626;
-      --text-primary: #DAD4BB;
-      --text-secondary: #8B8678;
-      --text-muted: #4A473D;
-      --accent-gold: #C9B77D;
-      --accent-red: #8B0000;
-      --status-success: #4A5D45;
-      --status-warning: #8B7355;
-      --status-error: #8B3A3A;
-      --border-primary: #3D3D3D;
-      --border-glow: rgba(218, 212, 187, 0.2);
+      --bg-main: #D4CDB7;
+      --bg-panel: #C8C2AA;
+      --bg-hover: #BFB9A1;
+      --bg-active: #4D493E;
+      --text-main: #4D493E;
+      --text-light: #6B665A;
+      --text-active: #D4CDB7;
+      --border: rgba(77, 73, 62, 0.3);
+      --shadow: rgba(77, 73, 62, 0.4);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: 'Rajdhani', sans-serif;
-      background: var(--bg-primary);
-      color: var(--text-primary);
+      font-family: 'Noto Sans', 'Noto Sans JP', sans-serif;
+      font-weight: 300;
+      background: var(--bg-main);
+      color: var(--text-main);
       min-height: 100vh;
-      letter-spacing: 0.05em;
-    }
-
-    /* Scanlines */
-    body::after {
-      content: '';
-      position: fixed;
-      top: 0; left: 0;
-      width: 100%; height: 100%;
-      background: repeating-linear-gradient(
-        0deg,
-        rgba(0, 0, 0, 0.15),
-        rgba(0, 0, 0, 0.15) 1px,
-        transparent 1px,
-        transparent 2px
-      );
-      pointer-events: none;
-      z-index: 1000;
+      letter-spacing: 0.1em;
+      line-height: 1.6;
     }
 
     /* Header */
     header {
-      background: var(--bg-secondary);
-      border-bottom: 1px solid var(--border-primary);
-      padding: 1rem 2rem;
+      background: var(--bg-panel);
+      padding: 1.5rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      box-shadow: 0 2px 8px var(--shadow);
     }
 
     .logo {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 1.5rem;
-      letter-spacing: 0.1em;
+      font-size: 1rem;
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.2em;
     }
 
-    .status-indicator {
+    .status {
+      font-size: 0.75rem;
+      text-transform: uppercase;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-      color: var(--text-secondary);
     }
 
-    .status-indicator::before {
+    .status::before {
       content: '';
-      width: 8px; height: 8px;
-      background: var(--status-success);
+      width: 6px;
+      height: 6px;
+      background: var(--text-main);
       border-radius: 50%;
-      animation: pulse 2s infinite;
     }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+    /* Main Layout */
+    .container {
+      display: flex;
+      min-height: calc(100vh - 80px);
     }
 
-    /* Main */
-    main {
+    /* Sidebar */
+    .sidebar {
+      width: 280px;
+      background: var(--bg-panel);
+      padding: 1rem 0;
+      box-shadow: 2px 0 8px var(--shadow);
+    }
+
+    .menu-item {
+      display: block;
+      padding: 1rem 1.5rem;
+      text-decoration: none;
+      color: var(--text-main);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: background 0.1s;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .menu-item:hover {
+      background: var(--bg-hover);
+    }
+
+    .menu-item.active {
+      background: var(--bg-active);
+      color: var(--text-active);
+    }
+
+    .menu-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 0.5rem 1.5rem;
+    }
+
+    /* Content */
+    .content {
+      flex: 1;
       padding: 2rem;
-      max-width: 1200px;
-      margin: 0 auto;
     }
 
     /* Panel */
     .panel {
-      background: rgba(26, 26, 26, 0.85);
-      border: 1px solid var(--border-primary);
-      padding: 1.5rem;
+      background: var(--bg-panel);
       margin-bottom: 1.5rem;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 0 20px rgba(218, 212, 187, 0.05);
+      box-shadow: 3px 3px 0 var(--shadow);
     }
 
     .panel-header {
-      font-family: 'Orbitron', sans-serif;
-      font-size: 0.875rem;
-      color: var(--accent-gold);
-      margin-bottom: 1rem;
-      padding-bottom: 0.5rem;
-      border-bottom: 1px solid var(--border-primary);
-      letter-spacing: 0.1em;
+      background: var(--bg-active);
+      color: var(--text-active);
+      padding: 0.75rem 1.25rem;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-weight: 400;
     }
 
-    /* Progress */
-    .phase-progress {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
+    .panel-body {
+      padding: 1.25rem;
+    }
+
+    /* Typography */
+    h1, h2, h3 {
+      font-weight: 400;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+    }
+
+    .title-large {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      font-size: 0.8rem;
+      color: var(--text-light);
+      text-transform: uppercase;
+    }
+
+    /* Progress Bar */
+    .progress-container {
       margin: 1.5rem 0;
     }
 
-    .phase-dot {
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      background: var(--text-muted);
-      position: relative;
+    .progress-phases {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
 
-    .phase-dot.complete { background: var(--accent-gold); }
-    .phase-dot.active {
-      background: var(--accent-gold);
-      animation: pulse 1.5s infinite;
+    .phase {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .phase-marker {
+      width: 12px;
+      height: 12px;
+      border: 2px solid var(--text-main);
+      background: transparent;
+    }
+
+    .phase-marker.complete {
+      background: var(--text-main);
+    }
+
+    .phase-marker.active {
+      background: var(--text-main);
+      box-shadow: 0 0 0 3px var(--bg-panel), 0 0 0 5px var(--text-main);
     }
 
     .phase-line {
       flex: 1;
       height: 2px;
-      background: var(--border-primary);
+      background: var(--border);
+      margin: 0 0.5rem;
     }
 
-    .phase-line.complete { background: var(--accent-gold); }
+    .phase-line.complete {
+      background: var(--text-main);
+    }
 
     .phase-label {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
-      text-align: center;
-      margin-top: 0.5rem;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
     }
 
     /* Agent List */
     .agent-list {
-      display: grid;
-      gap: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
     }
 
-    .agent-item {
+    .agent-row {
       display: flex;
       align-items: center;
+      padding: 0.75rem 1rem;
+      background: var(--bg-main);
       gap: 1rem;
-      padding: 0.75rem;
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-primary);
     }
 
-    .agent-status {
-      width: 10px; height: 10px;
-      border-radius: 50%;
+    .agent-row:hover {
+      background: var(--bg-hover);
     }
 
-    .agent-status.running {
-      background: var(--accent-gold);
-      animation: pulse 1s infinite;
+    .agent-indicator {
+      width: 8px;
+      height: 8px;
+      background: var(--text-light);
     }
 
-    .agent-status.idle { background: var(--text-muted); }
-    .agent-status.complete { background: var(--status-success); }
+    .agent-indicator.running {
+      background: var(--text-main);
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
 
     .agent-name {
       flex: 1;
-      font-weight: 500;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
     }
 
-    .agent-progress {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.875rem;
-      color: var(--text-secondary);
+    .agent-status {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      color: var(--text-light);
     }
 
     /* Buttons */
     .btn {
-      font-family: 'Rajdhani', sans-serif;
-      font-size: 0.875rem;
-      padding: 0.75rem 1.5rem;
+      font-family: inherit;
+      font-size: 0.75rem;
+      font-weight: 400;
+      padding: 0.75rem 2rem;
       background: transparent;
-      border: 1px solid var(--text-primary);
-      color: var(--text-primary);
+      border: 2px solid var(--text-main);
+      color: var(--text-main);
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
       cursor: pointer;
-      letter-spacing: 0.1em;
-      transition: all 0.2s;
+      transition: all 0.1s;
     }
 
     .btn:hover {
-      background: rgba(218, 212, 187, 0.1);
-      box-shadow: 0 0 10px var(--border-glow);
-    }
-
-    .btn-primary {
-      border: 2px solid var(--accent-gold);
-      color: var(--accent-gold);
+      background: var(--text-main);
+      color: var(--text-active);
     }
 
     .btn-group {
       display: flex;
       gap: 1rem;
-      margin-top: 1.5rem;
+      margin-top: 1rem;
     }
 
-    /* Log */
-    .log-viewer {
-      font-family: 'Share Tech Mono', monospace;
-      font-size: 0.8rem;
-      background: var(--bg-primary);
-      padding: 1rem;
-      height: 200px;
-      overflow-y: auto;
-      border: 1px solid var(--border-primary);
-    }
-
-    .log-entry {
-      margin-bottom: 0.25rem;
-      line-height: 1.4;
-    }
-
-    .log-time { color: var(--text-muted); }
-    .log-info { color: var(--text-primary); }
-    .log-warn { color: var(--accent-gold); }
-    .log-error { color: var(--status-error); }
-
-    /* Checkpoint */
-    .checkpoint-alert {
-      background: rgba(201, 183, 125, 0.1);
-      border: 2px solid var(--accent-gold);
+    /* Checkpoint Alert */
+    .checkpoint {
+      border: 3px solid var(--text-main);
       padding: 1.5rem;
-      animation: glow 2s infinite;
+      margin-bottom: 1.5rem;
+      background: var(--bg-panel);
     }
 
-    @keyframes glow {
-      0%, 100% { box-shadow: 0 0 10px rgba(201, 183, 125, 0.2); }
-      50% { box-shadow: 0 0 20px rgba(201, 183, 125, 0.4); }
+    .checkpoint-badge {
+      display: inline-block;
+      background: var(--bg-active);
+      color: var(--text-active);
+      padding: 0.25rem 0.75rem;
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      margin-bottom: 1rem;
     }
 
     .checkpoint-title {
-      font-family: 'Orbitron', sans-serif;
-      color: var(--accent-gold);
+      font-size: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
       margin-bottom: 0.5rem;
+    }
+
+    .checkpoint-meta {
+      font-size: 0.75rem;
+      color: var(--text-light);
+      margin-bottom: 1.5rem;
+    }
+
+    /* Log Viewer */
+    .log-viewer {
+      font-family: 'Noto Sans', monospace;
+      font-size: 0.7rem;
+      background: var(--bg-main);
+      padding: 1rem;
+      height: 180px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+    }
+
+    .log-entry {
+      padding: 0.25rem 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 1rem;
+    }
+
+    .log-time {
+      color: var(--text-light);
+      min-width: 70px;
+    }
+
+    .log-level {
+      min-width: 50px;
+      text-transform: uppercase;
+    }
+
+    .log-msg {
+      flex: 1;
+    }
+
+    /* Decorative Lines (Musical Score Motif) */
+    .deco-lines {
+      height: 20px;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        var(--border) 3px,
+        var(--border) 4px
+      );
+      margin: 1rem 0;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--bg-main);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--text-light);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-main);
     }
   </style>
 </head>
 <body>
   <header>
-    <div class="logo">LANGGRAPH GAME STUDIO</div>
-    <div class="status-indicator">SYSTEM ONLINE</div>
+    <div class="logo">LangGraph Game Studio</div>
+    <div class="status">System Active</div>
   </header>
 
-  <main>
-    <!-- Project Status -->
-    <div class="panel">
-      <div class="panel-header">PROJECT STATUS</div>
-      <div style="font-size: 1.25rem; margin-bottom: 0.5rem;">Untitled RPG</div>
-      <div style="color: var(--text-secondary);">Phase 2: Development</div>
+  <div class="container">
+    <nav class="sidebar">
+      <button class="menu-item active">Dashboard</button>
+      <button class="menu-item">Projects</button>
+      <button class="menu-item">Agents</button>
+      <div class="menu-divider"></div>
+      <button class="menu-item">New Project</button>
+      <button class="menu-item">Settings</button>
+      <div class="menu-divider"></div>
+      <button class="menu-item">Logs</button>
+      <button class="menu-item">Help</button>
+    </nav>
 
-      <div class="phase-progress">
-        <div style="text-align: center;">
-          <div class="phase-dot complete"></div>
-          <div class="phase-label">Concept</div>
-        </div>
-        <div class="phase-line complete"></div>
-        <div style="text-align: center;">
-          <div class="phase-dot complete"></div>
-          <div class="phase-label">Design</div>
-        </div>
-        <div class="phase-line complete"></div>
-        <div style="text-align: center;">
-          <div class="phase-dot active"></div>
-          <div class="phase-label">Code</div>
-        </div>
-        <div class="phase-line"></div>
-        <div style="text-align: center;">
-          <div class="phase-dot"></div>
-          <div class="phase-label">Test</div>
-        </div>
-        <div class="phase-line"></div>
-        <div style="text-align: center;">
-          <div class="phase-dot"></div>
-          <div class="phase-label">Review</div>
+    <main class="content">
+      <!-- Project Status -->
+      <div class="panel">
+        <div class="panel-header">Current Project</div>
+        <div class="panel-body">
+          <div class="title-large">Untitled RPG</div>
+          <div class="subtitle">Phase 2 Development</div>
+
+          <div class="deco-lines"></div>
+
+          <div class="progress-container">
+            <div class="progress-phases">
+              <div class="phase">
+                <div class="phase-marker complete"></div>
+                <div class="phase-label">Concept</div>
+              </div>
+              <div class="phase-line complete"></div>
+              <div class="phase">
+                <div class="phase-marker complete"></div>
+                <div class="phase-label">Design</div>
+              </div>
+              <div class="phase-line complete"></div>
+              <div class="phase">
+                <div class="phase-marker active"></div>
+                <div class="phase-label">Code</div>
+              </div>
+              <div class="phase-line"></div>
+              <div class="phase">
+                <div class="phase-marker"></div>
+                <div class="phase-label">Test</div>
+              </div>
+              <div class="phase-line"></div>
+              <div class="phase">
+                <div class="phase-marker"></div>
+                <div class="phase-label">Review</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Checkpoint Alert -->
-    <div class="panel checkpoint-alert">
-      <div class="checkpoint-title">AWAITING APPROVAL</div>
-      <div style="margin-bottom: 1rem;">Design Document Review - Waiting: 1h 23m</div>
+      <!-- Checkpoint -->
+      <div class="checkpoint">
+        <div class="checkpoint-badge">Awaiting Approval</div>
+        <div class="checkpoint-title">Design Document Review</div>
+        <div class="checkpoint-meta">Submitted by DesignAgent / Waiting 1h 23m</div>
+        <div class="btn-group">
+          <button class="btn">Approve</button>
+          <button class="btn">Request Changes</button>
+          <button class="btn">Reject</button>
+        </div>
+      </div>
+
+      <!-- Agents -->
+      <div class="panel">
+        <div class="panel-header">Active Agents</div>
+        <div class="panel-body">
+          <div class="agent-list">
+            <div class="agent-row">
+              <div class="agent-indicator running"></div>
+              <div class="agent-name">Code Leader</div>
+              <div class="agent-status">Running 67%</div>
+            </div>
+            <div class="agent-row">
+              <div class="agent-indicator running"></div>
+              <div class="agent-name">Asset Leader</div>
+              <div class="agent-status">Running 45%</div>
+            </div>
+            <div class="agent-row">
+              <div class="agent-indicator"></div>
+              <div class="agent-name">Tester</div>
+              <div class="agent-status">Idle</div>
+            </div>
+            <div class="agent-row">
+              <div class="agent-indicator"></div>
+              <div class="agent-name">Reviewer</div>
+              <div class="agent-status">Idle</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Log -->
+      <div class="panel">
+        <div class="panel-header">System Log</div>
+        <div class="panel-body">
+          <div class="log-viewer">
+            <div class="log-entry">
+              <span class="log-time">14:23:01</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">CodeLeader initialized</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:23:02</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">Spawning CodeWorker 1</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:23:15</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">Implementing PlayerController.ts</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:24:30</span>
+              <span class="log-level">Warn</span>
+              <span class="log-msg">Token usage 2847 of 4096</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:25:01</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">AssetLeader initialized</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:25:45</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">Generating character sprites</span>
+            </div>
+            <div class="log-entry">
+              <span class="log-time">14:26:12</span>
+              <span class="log-level">Info</span>
+              <span class="log-msg">Checkpoint awaiting human approval</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="btn-group">
-        <button class="btn btn-primary">APPROVE</button>
-        <button class="btn">REQUEST CHANGES</button>
-        <button class="btn" style="border-color: var(--status-error); color: var(--status-error);">REJECT</button>
+        <button class="btn">New Project</button>
+        <button class="btn">Pause</button>
+        <button class="btn">Export</button>
       </div>
-    </div>
-
-    <!-- Active Agents -->
-    <div class="panel">
-      <div class="panel-header">ACTIVE AGENTS</div>
-      <div class="agent-list">
-        <div class="agent-item">
-          <div class="agent-status running"></div>
-          <div class="agent-name">CodeLeader</div>
-          <div class="agent-progress">67%</div>
-        </div>
-        <div class="agent-item">
-          <div class="agent-status running"></div>
-          <div class="agent-name">AssetLeader</div>
-          <div class="agent-progress">45%</div>
-        </div>
-        <div class="agent-item">
-          <div class="agent-status idle"></div>
-          <div class="agent-name">Tester</div>
-          <div class="agent-progress">--</div>
-        </div>
-        <div class="agent-item">
-          <div class="agent-status idle"></div>
-          <div class="agent-name">Reviewer</div>
-          <div class="agent-progress">--</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Log Viewer -->
-    <div class="panel">
-      <div class="panel-header">SYSTEM LOG</div>
-      <div class="log-viewer">
-        <div class="log-entry"><span class="log-time">14:23:01</span> <span class="log-info">[INFO] CodeLeader started</span></div>
-        <div class="log-entry"><span class="log-time">14:23:02</span> <span class="log-info">[INFO] Spawning CodeWorker #1</span></div>
-        <div class="log-entry"><span class="log-time">14:23:15</span> <span class="log-info">[INFO] Implementing PlayerController.ts</span></div>
-        <div class="log-entry"><span class="log-time">14:24:30</span> <span class="log-warn">[WARN] Token usage: 2,847 / 4,096</span></div>
-        <div class="log-entry"><span class="log-time">14:25:01</span> <span class="log-info">[INFO] AssetLeader started</span></div>
-        <div class="log-entry"><span class="log-time">14:25:45</span> <span class="log-info">[INFO] Generating character sprites...</span></div>
-        <div class="log-entry"><span class="log-time">14:26:12</span> <span class="log-info">[CHECKPOINT] Awaiting human approval</span></div>
-      </div>
-    </div>
-
-    <!-- Actions -->
-    <div class="btn-group">
-      <button class="btn btn-primary">NEW PROJECT</button>
-      <button class="btn">PAUSE</button>
-      <button class="btn">EXPORT</button>
-    </div>
-  </main>
+    </main>
+  </div>
 </body>
 </html>
