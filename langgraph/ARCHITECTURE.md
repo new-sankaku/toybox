@@ -30,24 +30,35 @@ flowchart TB
     Orch --> Phase1
 
     subgraph Phase1[Phase1: 企画]
-        P1[企画] --> H1[Human] --> P2[設計] --> H2[Human] --> P3[シナリオ] --> H3[Human]
-        H3 --> P4[キャラ] --> H4[Human] --> P5[世界観] --> H5[Human] --> P6[タスク分解] --> H6[Human]
+        subgraph P1a[" "]
+            direction LR
+            P1[企画]-->H1[H]-->P2[設計]-->H2[H]-->P3[シナリオ]-->H3[H]
+        end
+        subgraph P1b[" "]
+            direction LR
+            P4[キャラ]-->H4[H]-->P5[世界観]-->H5[H]-->P6[タスク分解]-->H6[H]
+        end
+        P1a --> P1b
     end
 
     H6 --> Phase2
 
     subgraph Phase2[Phase2: 開発]
-        CL[Code Leader] --> HC1[Human] --> CA[Code Agent群] --> HC2[Human]
-        AL[Asset Leader] --> HA1[Human] --> AA[Asset Agent群] --> HA2[Human]
+        subgraph P2a[" "]
+            direction LR
+            CL[Code Leader]-->HC1[H]-->CA[Code Agents]-->HC2[H]
+            AL[Asset Leader]-->HA1[H]-->AA[Asset Agents]-->HA2[H]
+        end
         HC2 --> Int[統合]
         HA2 --> Int
-        Int --> HI[Human]
+        Int --> HI[H]
     end
 
     HI --> Phase3
 
     subgraph Phase3[Phase3: 品質]
-        T[テスト] --> HT[Human] --> R[レビュー] --> HF[Human]
+        direction LR
+        T[テスト]-->HT[H]-->R[レビュー]-->HF[H]
     end
 
     HF -->|承認| Release[リリース]
