@@ -24,9 +24,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph Orch[Orchestrator: Agent実行 --> Human承認 --> 次Agent]
-    end
-
+    Orch[Orchestrator]
     Orch --> Phase1
 
     subgraph Phase1[Phase1: 企画]
