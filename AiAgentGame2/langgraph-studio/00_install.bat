@@ -6,6 +6,8 @@ echo ========================================
 echo.
 
 cd /d "%~dp0"
+echo カレントディレクトリ: %cd%
+echo.
 
 echo Node.js バージョンを確認中...
 node --version
@@ -18,13 +20,16 @@ if errorlevel 1 (
 
 echo.
 echo npm バージョンを確認中...
-npm --version
+call npm --version
 
 echo.
 echo 依存関係をインストール中...
 echo.
 
+echo npm install を実行します...
 call npm install
+echo.
+echo npm install 終了コード: %errorlevel%
 
 if errorlevel 1 (
     echo.
