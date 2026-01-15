@@ -27,11 +27,14 @@
 ### 1.2 Visual Identity
 
 NieR:Automataの特徴的なUI要素：
-- **透過パネル**: 背景が透けて見える半透明レイヤー
-- **スキャンライン**: CRTモニターを模したライン効果
-- **幾何学模様**: 円形ゲージ、六角形グリッド、平行線
-- **グリッチエフェクト**: データ破損を模した視覚効果
-- **タイポグラフィ**: 機械的で角ばったフォント
+- **ベージュ背景**: 温かみのある明るいベージュ/タン色が基調
+- **ダークブラウンテキスト**: 背景に対してコントラストのある暗い茶色
+- **ミニマルデザイン**: 装飾を排除したフラットでシンプルな構成
+- **大文字・広い字間**: UPPERCASEテキストと0.1em以上のletter-spacing
+- **ソフトシャドウ**: 角ばった影（box-shadow: 3px 3px 0）
+- **五線譜モチーフ**: 音楽のスコアを模した線装飾
+
+> **Reference**: [PlatinumGames Official Blog - UI Design in NieR:Automata](https://www.platinumgames.com/official-blog/article/9624)
 
 ---
 
@@ -42,32 +45,32 @@ NieR:Automataの特徴的なUI要素：
 ```
 ┌────────────────────────────────────────────────────────────────┐
 │  COLOR PALETTE - NieR:Automata Style                           │
+│  Source: https://codepen.io/levise/pen/vMzEwr                  │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                │
-│  ■ Background                                                  │
-│    --bg-primary:      #0D0D0D    /* 深い黒 */                  │
-│    --bg-secondary:    #1A1A1A    /* パネル背景 */              │
-│    --bg-tertiary:     #262626    /* 浮き上がり要素 */          │
+│  ■ Background (明るいベージュ系)                               │
+│    --bg-main:       #D4CDB7    /* メイン背景 */                │
+│    --bg-panel:      #C8C2AA    /* パネル背景 */                │
+│    --bg-hover:      #BFB9A1    /* ホバー状態 */                │
 │                                                                │
-│  ■ Text                                                        │
-│    --text-primary:    #DAD4BB    /* メインテキスト(セピア) */  │
-│    --text-secondary:  #8B8678    /* サブテキスト */            │
-│    --text-muted:      #4A473D    /* 非活性テキスト */          │
+│  ■ Text (ダークブラウン系)                                     │
+│    --text-main:     #4D493E    /* メインテキスト */            │
+│    --text-light:    #6B665A    /* サブテキスト */              │
+│    --text-active:   #D4CDB7    /* アクティブ時(反転) */        │
 │                                                                │
-│  ■ Accent                                                      │
-│    --accent-gold:     #C9B77D    /* ゴールド(重要) */          │
-│    --accent-red:      #8B0000    /* 警告・エラー */            │
-│    --accent-white:    #F5F5DC    /* ハイライト */              │
+│  ■ Active/Selected State                                       │
+│    --bg-active:     #4D493E    /* 選択状態の背景 */            │
 │                                                                │
-│  ■ Status                                                      │
-│    --status-success:  #4A5D45    /* 成功(くすんだ緑) */        │
-│    --status-warning:  #8B7355    /* 警告(くすんだオレンジ) */  │
-│    --status-error:    #8B3A3A    /* エラー(くすんだ赤) */      │
-│    --status-info:     #4A5568    /* 情報(くすんだ青) */        │
+│  ■ Borders & Shadows                                           │
+│    --border:        rgba(77, 73, 62, 0.3)   /* ボーダー */     │
+│    --shadow:        rgba(77, 73, 62, 0.4)   /* シャドウ */     │
 │                                                                │
-│  ■ Borders & Lines                                             │
-│    --border-primary:  #3D3D3D    /* 主要ボーダー */            │
-│    --border-glow:     #DAD4BB33  /* 発光ボーダー(透過) */      │
+│  ■ Alternative Palette (参考)                                  │
+│    #eeeeee - ライトグレー                                      │
+│    #c1afa0 - ウォームベージュ                                  │
+│    #957e72 - ミュートブラウン                                  │
+│    #6c584c - ディープブラウン                                  │
+│    #3f352f - ダークブラウン                                    │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -76,11 +79,12 @@ NieR:Automataの特徴的なUI要素：
 
 | 用途 | カラー | 備考 |
 |------|--------|------|
-| 通常テキスト | `--text-primary` | セピア調の白 |
-| 重要な情報 | `--accent-gold` | ゴールドで強調 |
-| エラー・警告 | `--accent-red` | 控えめな赤 |
-| 成功状態 | `--status-success` | くすんだ緑 |
-| インタラクティブ要素 | `--accent-white` | ホバー時に使用 |
+| 背景 | `--bg-main` | 明るいベージュ (#D4CDB7) |
+| パネル | `--bg-panel` | やや濃いベージュ (#C8C2AA) |
+| テキスト | `--text-main` | ダークブラウン (#4D493E) |
+| アクティブ項目 | `--bg-active` + `--text-active` | 背景と文字色を反転 |
+| ボーダー | `--border` | テキスト色の30%透過 |
+| シャドウ | `--shadow` | 3px 3px 0 で角ばった影 |
 
 ---
 
@@ -89,14 +93,20 @@ NieR:Automataの特徴的なUI要素：
 ### 3.1 Font Stack
 
 ```css
-/* Primary Font - 機械的なサンセリフ */
---font-primary: 'Rajdhani', 'Noto Sans JP', sans-serif;
+/* Primary Font - シンプルなサンセリフ（NieR:Automata標準） */
+--font-primary: 'Noto Sans', 'Noto Sans JP', sans-serif;
 
-/* Monospace - コード・ログ表示 */
---font-mono: 'Share Tech Mono', 'Source Code Pro', monospace;
+/* Font Weight - 細めを基本に */
+font-weight: 300;  /* Light */
+font-weight: 400;  /* Regular - 見出し用 */
 
-/* Display - 大きな見出し */
---font-display: 'Orbitron', 'Rajdhani', sans-serif;
+/* Letter Spacing - 広めに設定 */
+letter-spacing: 0.1em;   /* 本文 */
+letter-spacing: 0.15em;  /* 見出し */
+letter-spacing: 0.2em;   /* ロゴ */
+
+/* Text Transform - 大文字が基本 */
+text-transform: uppercase;
 ```
 
 ### 3.2 Type Scale
