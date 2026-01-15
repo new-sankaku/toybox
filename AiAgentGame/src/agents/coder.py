@@ -11,6 +11,7 @@ from ..core.state import GameState, DevelopmentPhase
 from ..core.llm import get_llm_for_agent
 from ..tools import ClaudeCodeDelegate, FileTools
 from ..utils.logger import get_logger
+from ..dashboard.tracker import tracker, AgentStatus
 
 logger = get_logger()
 
@@ -50,7 +51,10 @@ class CoderAgent:
 
         if not game_spec:
             logger.error("ゲーム仕様がありません")
+            tracker.agent_error("coder", "ゲーム仕様がありません")
             return {"code_files": {}}
+
+        tracker.agent_start("coder", f"コード生成開始: {game_spec.get('title')}")
 
         logger.info(f"実装中: {game_spec.get('title')} ({game_spec.get('target_platform')})")
 
@@ -73,6 +77,13 @@ class CoderAgent:
 
         # Write files to output directory
         self._write_code_files(code_files)
+
+        # Notify dashboard
+        tracker.set_code_files(list(code_files.keys()))
+        tracker.agent_complete("coder", f"コード生成完了: {len(code_files)}ファイル", {
+            "files": len(code_files),
+            "file_list": list(code_files.keys())
+        })
 
         logger.info(f"生成完了: {len(code_files)}ファイル")
 

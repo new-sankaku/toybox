@@ -7,7 +7,7 @@ from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-from ..core.state import GameState, GameSpec, Task, DevelopmentPhase
+from ..core.state import GameState, GameSpec, GameArchitecture, Task, DevelopmentPhase
 from ..core.llm import get_llm_for_agent, get_app_language, track_llm_call
 from ..utils.logger import get_logger
 from ..dashboard.tracker import tracker
@@ -39,10 +39,13 @@ class PlannerAgent:
             state: Current game state
 
         Returns:
-            Dictionary with game_spec and tasks
+            Dictionary with game_spec, architecture, and tasks
         """
         user_request = state["user_request"]
         development_phase = state["development_phase"]
+
+        # Notify dashboard
+        tracker.agent_start("planner", "ゲーム企画を分析中...")
 
         logger.info(f"分析中: {user_request}")
         logger.debug(f"フェーズ: {development_phase}")
@@ -89,13 +92,33 @@ class PlannerAgent:
             result = self.parser.parse(response_text)
 
             game_spec = self._parse_game_spec(result.get("game_spec", {}))
+            architecture = self._parse_architecture(result.get("architecture", {}), game_spec)
             tasks = self._parse_tasks(result.get("tasks", []))
+            task_phases = result.get("task_phases", [])
+            asset_categories = result.get("asset_categories", {})
+
+            # Send to dashboard
+            tracker.set_game_spec(game_spec)
+            tracker.set_architecture(architecture)
+            tracker.set_tasks(tasks)
+
+            if task_phases:
+                tracker.set_task_phases(task_phases)
+            if asset_categories:
+                tracker.set_asset_categories(asset_categories)
+
+            tracker.agent_complete("planner", f"企画完了: {game_spec.get('title')}", {
+                "game_spec": game_spec,
+                "architecture": architecture,
+                "task_count": len(tasks)
+            })
 
             logger.info(f"仕様作成完了: {game_spec.get('title')} ({game_spec.get('genre')})")
             logger.info(f"タスク数: {len(tasks)}")
 
             return {
                 "game_spec": game_spec,
+                "architecture": architecture,
                 "tasks": tasks
             }
 
@@ -103,6 +126,7 @@ class PlannerAgent:
             import traceback
             logger.error(f"計画失敗: {e}")
             logger.error(f"詳細: {traceback.format_exc()}")
+            tracker.agent_error("planner", f"計画失敗: {str(e)}")
             raise RuntimeError(f"計画フェーズでエラーが発生しました: {e}") from e
 
     def _create_prompt(self, development_phase: DevelopmentPhase) -> ChatPromptTemplate:
@@ -143,7 +167,7 @@ class PlannerAgent:
 """
         }
 
-        template = f"""あなたはゲームデザイナーAIです。ユーザーのリクエストに基づいて詳細なゲーム仕様を作成してください。
+        template = f"""あなたはゲームデザイナーAIです。ユーザーのリクエストに基づいて詳細なゲーム仕様とアーキテクチャを作成してください。
 
 {phase_instructions.get(development_phase, "")}
 
@@ -157,10 +181,41 @@ class PlannerAgent:
     "title": "ゲームタイトル",
     "genre": "ジャンル（例: プラットフォーマー、シューター、パズル）",
     "description": "ゲームの簡単な説明",
-    "mechanics": ["メカニクス1", "メカニクス2", "..."],
+    "mechanics": ["メカニクス1", "メカニクス2"],
     "visual_style": "ビジュアルスタイルの説明",
     "audio_style": "オーディオスタイルの説明",
     "target_platform": "pygame または pyxel または html5"
+  }}}},
+  "architecture": {{{{
+    "genre": "ジャンル（具体的に）",
+    "target": "ターゲット層（例: カジュアルゲーマー）",
+    "platform": "プラットフォーム（例: Web/HTML5）",
+    "theme": "世界観・テーマ（例: ファンタジー冒険）",
+    "coreFun": "コアの面白さ（例: 精密ジャンプアクション）",
+    "rules": "ルール・勝敗条件（例: ゴール到達でクリア）",
+    "controls": "操作方法（例: 矢印キー移動、スペースジャンプ）",
+    "flow": "進行フロー（例: ステージ選択→プレイ→リザルト）",
+    "difficulty": "難易度設計（例: 序盤易しく後半難しく）",
+    "reward": "報酬・成長システム（例: コイン収集でアンロック）",
+    "scenario": "シナリオ概要（例: 姫を救出）",
+    "characters": "キャラクター設定（例: 勇者、敵モンスター）",
+    "world": "世界設定（例: 中世ファンタジー王国）",
+    "art": "アートスタイル（例: ピクセルアート16x16）",
+    "ui": "UI方針（例: シンプル、大きなボタン）",
+    "audio": "BGM・効果音方針（例: チップチューン）",
+    "engine": "エンジン・開発環境（例: Pygame 2.x）",
+    "resolution": "解像度・FPS（例: 800x600, 60fps）",
+    "data": "データ・セーブ仕様（例: ローカルJSON）",
+    "network": "通信仕様（例: オフライン専用）",
+    "stages": "ステージ・マップ構成（例: 5ステージ）",
+    "placement": "敵・アイテム配置（例: 各ステージ3敵）",
+    "tutorial": "チュートリアル設計（例: ステージ1で操作説明）",
+    "monetize": "マネタイズ方針（例: 無料）",
+    "updates": "アップデート計画（例: 追加ステージ）",
+    "support": "サポート体制（例: GitHub Issues）",
+    "schedule": "開発期間（例: 2週間）",
+    "budget": "人員・予算（例: 個人開発）",
+    "outsource": "外注範囲（例: なし）"
   }}}},
   "tasks": [
     {{{{
@@ -170,8 +225,7 @@ class PlannerAgent:
       "assigned_agent": "coder",
       "status": "pending",
       "dependencies": []
-    }}}},
-    ...
+    }}}}
   ]
 }}}}
 
@@ -180,7 +234,7 @@ class PlannerAgent:
 2. MOCKフェーズではアセット要件を最小限に
 3. 適切なプラットフォームを選択（複雑なゲームはpygame、レトロゲームはpyxel）
 4. 論理的で順次的なタスクに分解
-5. 並列タスク（独立したアセット生成）を特定
+5. アーキテクチャの29項目すべてに具体的な値を設定
 
 JSONのみを返してください。追加のテキストは不要です。"""
 
@@ -268,6 +322,48 @@ Return ONLY the JSON, no additional text."""
             visual_style=spec_data.get("visual_style", "simple"),
             audio_style=spec_data.get("audio_style", "minimal"),
             target_platform=spec_data.get("target_platform", "pygame")
+        )
+
+    def _parse_architecture(self, arch_data: Dict[str, Any], game_spec: GameSpec) -> GameArchitecture:
+        """Parse game architecture from LLM output, with fallbacks from game_spec."""
+        return GameArchitecture(
+            # 基本コンセプト
+            genre=arch_data.get("genre", game_spec.get("genre", "-")),
+            target=arch_data.get("target", "-"),
+            platform=arch_data.get("platform", game_spec.get("target_platform", "-")),
+            theme=arch_data.get("theme", game_spec.get("description", "-")),
+            coreFun=arch_data.get("coreFun", "-"),
+            # ゲームメカニクス
+            rules=arch_data.get("rules", "-"),
+            controls=arch_data.get("controls", "-"),
+            flow=arch_data.get("flow", "-"),
+            difficulty=arch_data.get("difficulty", "-"),
+            reward=arch_data.get("reward", "-"),
+            # ストーリー・キャラクター
+            scenario=arch_data.get("scenario", "-"),
+            characters=arch_data.get("characters", "-"),
+            world=arch_data.get("world", "-"),
+            # ビジュアル・オーディオ
+            art=arch_data.get("art", game_spec.get("visual_style", "-")),
+            ui=arch_data.get("ui", "-"),
+            audio=arch_data.get("audio", game_spec.get("audio_style", "-")),
+            # 技術仕様
+            engine=arch_data.get("engine", "-"),
+            resolution=arch_data.get("resolution", "-"),
+            data=arch_data.get("data", "-"),
+            network=arch_data.get("network", "-"),
+            # レベルデザイン
+            stages=arch_data.get("stages", "-"),
+            placement=arch_data.get("placement", "-"),
+            tutorial=arch_data.get("tutorial", "-"),
+            # 収益・運営
+            monetize=arch_data.get("monetize", "-"),
+            updates=arch_data.get("updates", "-"),
+            support=arch_data.get("support", "-"),
+            # スケジュール・リソース
+            schedule=arch_data.get("schedule", "-"),
+            budget=arch_data.get("budget", "-"),
+            outsource=arch_data.get("outsource", "-")
         )
 
     def _parse_tasks(self, tasks_data: list) -> list[Task]:
