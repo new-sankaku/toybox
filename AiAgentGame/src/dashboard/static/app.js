@@ -32,7 +32,21 @@ function initializeLLMSelectors(config) {
 
     // Clear and populate provider select
     providerSelect.innerHTML = '';
-    for (const [providerId, providerData] of Object.entries(config.providers)) {
+
+    const providers = config.providers || {};
+    const providerIds = Object.keys(providers);
+
+    if (providerIds.length === 0) {
+        // No providers available (no API keys set)
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'APIキーが設定されていません';
+        providerSelect.appendChild(option);
+        modelSelect.innerHTML = '<option value="">モデルなし</option>';
+        return;
+    }
+
+    for (const [providerId, providerData] of Object.entries(providers)) {
         if (providerData.models && providerData.models.length > 0) {
             const option = document.createElement('option');
             option.value = providerId;
@@ -42,7 +56,7 @@ function initializeLLMSelectors(config) {
     }
 
     // Set default provider
-    if (config.default && config.default.provider) {
+    if (config.default && config.default.provider && providers[config.default.provider]) {
         providerSelect.value = config.default.provider;
     }
 
