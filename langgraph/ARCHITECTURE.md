@@ -25,60 +25,33 @@
 ```mermaid
 flowchart TB
     Orch[Orchestrator]
-    Orch --> Phase1
 
     subgraph Phase1[Phase1: 企画]
-        direction TB
-        subgraph P1Agents[" "]
-            direction LR
-            A1[企画] ~~~ A2[設計] ~~~ A3[シナリオ] ~~~ A4[キャラ] ~~~ A5[世界観] ~~~ A6[タスク分解]
-        end
+        A1[企画] ~~~ A2[設計] ~~~ A3[シナリオ] ~~~ A4[キャラ] ~~~ A5[世界観] ~~~ A6[タスク分解]
         Loop1[承認プロセス Loop]
-        subgraph P1Human[" "]
-            direction LR
-            H1[H] ~~~ H2[H] ~~~ H3[H] ~~~ H4[H] ~~~ H5[H] ~~~ H6[H]
-        end
-        P1Agents <--> Loop1 <--> P1Human
-        Done1[全承認完了]
-        P1Human --> Done1
+        H1[H] ~~~ H2[H] ~~~ H3[H] ~~~ H4[H] ~~~ H5[H] ~~~ H6[H]
+        A1 & A2 & A3 & A4 & A5 & A6 <--> Loop1 <--> H1 & H2 & H3 & H4 & H5 & H6
     end
-
-    Done1 --> Phase2
 
     subgraph Phase2[Phase2: 開発]
-        direction TB
-        subgraph P2Agents[" "]
-            direction LR
-            CL[Code Leader] ~~~ AL[Asset Leader] ~~~ CA[Code Agents] ~~~ AA[Asset Agents] ~~~ INT[統合]
-        end
+        CL[Code Leader] ~~~ AL[Asset Leader] ~~~ CA[Code Agents] ~~~ AA[Asset Agents] ~~~ INT[統合]
         Loop2[承認プロセス Loop]
-        subgraph P2Human[" "]
-            direction LR
-            HC1[H] ~~~ HA1[H] ~~~ HC2[H] ~~~ HA2[H] ~~~ HI[H]
-        end
-        P2Agents <--> Loop2 <--> P2Human
-        Done2[全承認完了]
-        P2Human --> Done2
+        HC1[H] ~~~ HA1[H] ~~~ HC2[H] ~~~ HA2[H] ~~~ HI[H]
+        CL & AL & CA & AA & INT <--> Loop2 <--> HC1 & HA1 & HC2 & HA2 & HI
     end
-
-    Done2 --> Phase3
 
     subgraph Phase3[Phase3: 品質]
-        direction TB
-        subgraph P3Agents[" "]
-            direction LR
-            T[テスト] ~~~ R[レビュー]
-        end
+        T[テスト] ~~~ R[レビュー]
         Loop3[承認プロセス Loop]
-        subgraph P3Human[" "]
-            direction LR
-            HT[H] ~~~ HF[H]
-        end
-        P3Agents <--> Loop3 <--> P3Human
+        HT[H] ~~~ HF[H]
+        T & R <--> Loop3 <--> HT & HF
     end
 
+    Orch --> A1
+    H6 --> CL
+    HI --> T
     HF -->|承認| Release[リリース]
-    HF -->|修正| Phase2
+    HF -->|修正| CL
 ```
 
 Human介入は全13箇所。各ポイントで「承認」「修正指示」「却下」を選択可。
