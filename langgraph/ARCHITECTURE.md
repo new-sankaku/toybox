@@ -22,77 +22,81 @@
 
 ## システム概要
 
-```mermaid
-flowchart TB
-    Orch[Orchestrator]
-    Orch -->|指示| Agent[Agent実行]
-    Agent -->|結果| Orch
-    Orch -->|承認依頼| Human[Human承認]
-    Human -->|承認/修正| Orch
+```
+                    +---------------+
+                    | Orchestrator  |
+                    +-------+-------+
+                            |
+        +-------------------+-------------------+
+        |                   |                   |
+        v                   v                   v
+  +-----------+       +-----------+       +-----------+
+  |Agent実行  |------>|Human承認  |------>|次Agentへ  |
+  +-----------+       +-----------+       +-----------+
+                    (interrupt)
 ```
 
 ↓
 
-```mermaid
-flowchart LR
-    subgraph Phase1[フェーズ1: 企画]
-        direction LR
-        P1[企画] --> H1[Human]
-        H1 --> P2[設計] --> H2[Human]
-        H2 --> P3[シナリオ] --> H3[Human]
-    end
 ```
-```mermaid
-flowchart LR
-    subgraph Phase1b[フェーズ1: 企画 続き]
-        direction LR
-        P4[キャラ] --> H4[Human]
-        H4 --> P5[世界観] --> H5[Human]
-        H5 --> P6[タスク分解] --> H6[Human]
-    end
++--------------------------------------------------------------------+
+| Phase1: 企画                                                        |
++--------------------------------------------------------------------+
+|                                                                    |
+| [企画]-->[Human]-->[設計]-->[Human]-->[シナリオ]-->[Human]          |
+|                                          |                         |
+|                                          v                         |
+| [キャラ]-->[Human]-->[世界観]-->[Human]-->[タスク分解]-->[Human]    |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
 ↓
 
-```mermaid
-flowchart TB
-    subgraph Phase2[フェーズ2: 開発]
-        direction TB
-        subgraph Leaders[Leader層]
-            direction LR
-            CL[Code Leader]
-            AL[Asset Leader]
-        end
-        subgraph CodePath[Code側]
-            direction TB
-            HC1[Human承認] --> CA[Code Agent群] --> HC2[Human確認]
-        end
-        subgraph AssetPath[Asset側]
-            direction TB
-            HA1[Human承認] --> AA[Asset Agent群] --> HA2[Human確認]
-        end
-        CL --> CodePath
-        AL --> AssetPath
-        HC2 --> Int[統合]
-        HA2 --> Int
-        Int --> HInt[Human確認]
-    end
+```
++--------------------------------------------------------------------+
+| Phase2: 開発                                                        |
++--------------------------------------------------------------------+
+|                                                                    |
+|        [Code Leader]                    [Asset Leader]             |
+|              |                                |                    |
+|              v                                v                    |
+|        [Human承認]                      [Human承認]                |
+|              |                                |                    |
+|              v                                v                    |
+|       [Code Agent群]                   [Asset Agent群]             |
+|         (並列)                            (並列)                   |
+|              |                                |                    |
+|              v                                v                    |
+|        [Human確認]                      [Human確認]                |
+|              |                                |                    |
+|              +-------------+------------------+                    |
+|                            |                                       |
+|                            v                                       |
+|                        [統合]                                      |
+|                            |                                       |
+|                            v                                       |
+|                      [Human確認]                                   |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
 ↓
 
-```mermaid
-flowchart LR
-    subgraph Phase3[フェーズ3: 品質]
-        direction LR
-        T[テスト] --> HT[Human確認]
-        HT --> R[レビュー] --> HF[Human最終承認]
-        HF -->|承認| Done[リリース]
-        HF -->|修正| Back[フェーズ2へ]
-    end
+```
++--------------------------------------------------------------------+
+| Phase3: 品質                                                        |
++--------------------------------------------------------------------+
+|                                                                    |
+| [テスト]-->[Human確認]-->[レビュー]-->[Human最終承認]-->[リリース]  |
+|                                              |                     |
+|                                              v                     |
+|                                     修正あり: Phase2へ             |
+|                                                                    |
++--------------------------------------------------------------------+
 ```
 
-Human介入は全13箇所。各ポイントで「承認」「修正指示」「却下」を選択できます。
+Human介入は全13箇所。各ポイントで「承認」「修正指示」「却下」を選択可。
 
 ---
 
