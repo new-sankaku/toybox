@@ -451,6 +451,7 @@ body {
     padding: 10px;
     border: 1px solid var(--border-color);
     margin-bottom: 8px;
+    max-width: 250px;
 }
 
 .llm-config-form .input-group {
