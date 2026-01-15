@@ -12,30 +12,57 @@ default:
   temperature: 0.7
   max_tokens: 4096
 
-# Provider configurations
+# Provider configurations with model details
 providers:
   anthropic:
     models:
-      - claude-sonnet-4-20250514
-      - claude-3-opus-20240229
-      - claude-3-haiku-20240307
+      - id: claude-sonnet-4-20250514
+        name: Claude Sonnet 4
+        max_tokens: 8192
+      - id: claude-opus-4-20250514
+        name: Claude Opus 4
+        max_tokens: 8192
+      - id: claude-3-5-sonnet-20241022
+        name: Claude 3.5 Sonnet
+        max_tokens: 8192
+      - id: claude-3-5-haiku-20241022
+        name: Claude 3.5 Haiku
+        max_tokens: 8192
+      - id: claude-3-opus-20240229
+        name: Claude 3 Opus
+        max_tokens: 4096
+      - id: claude-3-haiku-20240307
+        name: Claude 3 Haiku
+        max_tokens: 4096
 
   openai:
     models:
-      - gpt-4-turbo
-      - gpt-4o
-      - gpt-3.5-turbo
+      - id: gpt-4o
+        name: GPT-4o
+        max_tokens: 16384
+      - id: gpt-4o-mini
+        name: GPT-4o Mini
+        max_tokens: 16384
+      - id: gpt-4-turbo
+        name: GPT-4 Turbo
+        max_tokens: 4096
 
   deepseek:
     base_url: https://api.deepseek.com/v1
     models:
-      - deepseek-chat
-      - deepseek-coder
+      - id: deepseek-chat
+        name: DeepSeek Chat
+        max_tokens: 4096
+      - id: deepseek-coder
+        name: DeepSeek Coder
+        max_tokens: 4096
 
   custom:
     base_url: ${CUSTOM_LLM_URL}
     models:
-      - custom-model
+      - id: custom-model
+        name: Custom Model
+        max_tokens: 4096
 
 # Agent-specific LLM overrides (optional)
 agent_overrides:

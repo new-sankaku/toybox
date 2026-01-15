@@ -2,10 +2,12 @@
 Dashboard Server - FastAPI + WebSocket for real-time agent monitoring.
 """
 
+import os
 import sys
 import asyncio
 import threading
 import json
+import httpx
 from pathlib import Path
 from typing import Optional, Set
 
@@ -116,6 +118,160 @@ async def websocket_endpoint(websocket: WebSocket):
 async def get_state():
     """Get current workflow state."""
     return JSONResponse(content=tracker.get_state())
+
+
+@app.get("/api/llm-config")
+async def get_llm_config():
+    """Get LLM configuration (providers and models from APIs)."""
+    from dotenv import load_dotenv
+    load_dotenv(project_root / ".env")
+
+    providers = {}
+
+    # Fetch Anthropic models
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01"
+                    },
+                    timeout=10.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    for model in data.get("data", []):
+                        model_id = model.get("id", "")
+                        # Filter Claude models and get display name
+                        if "claude" in model_id.lower():
+                            display_name = get_claude_display_name(model_id)
+                            max_tokens = get_model_max_tokens(model_id)
+                            models.append({
+                                "id": model_id,
+                                "name": display_name,
+                                "max_tokens": max_tokens
+                            })
+                    # Sort by name (newer models first)
+                    models.sort(key=lambda x: x["name"], reverse=True)
+                    providers["anthropic"] = {"models": models}
+        except Exception as e:
+            print(f"Failed to fetch Anthropic models: {e}")
+
+    # Fetch OpenAI models
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {openai_key}"},
+                    timeout=10.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    models = []
+                    for model in data.get("data", []):
+                        model_id = model.get("id", "")
+                        # Filter GPT models (gpt-4, gpt-3.5, etc.)
+                        if model_id.startswith("gpt-"):
+                            display_name = get_gpt_display_name(model_id)
+                            max_tokens = get_model_max_tokens(model_id)
+                            if display_name:  # Only include known models
+                                models.append({
+                                    "id": model_id,
+                                    "name": display_name,
+                                    "max_tokens": max_tokens
+                                })
+                    # Remove duplicates and sort
+                    seen = set()
+                    unique_models = []
+                    for m in models:
+                        if m["id"] not in seen:
+                            seen.add(m["id"])
+                            unique_models.append(m)
+                    unique_models.sort(key=lambda x: x["name"], reverse=True)
+                    providers["openai"] = {"models": unique_models}
+        except Exception as e:
+            print(f"Failed to fetch OpenAI models: {e}")
+
+    # Load config for default values
+    try:
+        from src.core.llm import load_config
+        config = load_config()
+        default = config.get("default", {})
+    except Exception:
+        default = {"provider": "anthropic", "model": "claude-sonnet-4-20250514"}
+
+    return JSONResponse(content={
+        "providers": providers,
+        "default": default
+    })
+
+
+def get_claude_display_name(model_id: str) -> str:
+    """Get display name for Claude model."""
+    # Map model IDs to display names
+    name_map = {
+        "claude-sonnet-4": "Claude Sonnet 4",
+        "claude-opus-4": "Claude Opus 4",
+        "claude-3-7-sonnet": "Claude 3.7 Sonnet",
+        "claude-3-5-sonnet": "Claude 3.5 Sonnet",
+        "claude-3-5-haiku": "Claude 3.5 Haiku",
+        "claude-3-opus": "Claude 3 Opus",
+        "claude-3-sonnet": "Claude 3 Sonnet",
+        "claude-3-haiku": "Claude 3 Haiku",
+    }
+    for prefix, name in name_map.items():
+        if model_id.startswith(prefix):
+            return name
+    # Fallback: format model_id
+    return model_id.replace("-", " ").title()
+
+
+def get_gpt_display_name(model_id: str) -> str:
+    """Get display name for GPT model."""
+    name_map = {
+        "gpt-5": "GPT-5",
+        "gpt-4.1": "GPT-4.1",
+        "gpt-4o-mini": "GPT-4o Mini",
+        "gpt-4o": "GPT-4o",
+        "gpt-4-turbo": "GPT-4 Turbo",
+        "gpt-4": "GPT-4",
+        "gpt-3.5-turbo": "GPT-3.5 Turbo",
+    }
+    for prefix, name in name_map.items():
+        if model_id.startswith(prefix):
+            return name
+    return None  # Skip unknown models
+
+
+def get_model_max_tokens(model_id: str) -> int:
+    """Get max output tokens for a model."""
+    # Claude models
+    if "claude-sonnet-4" in model_id or "claude-opus-4" in model_id:
+        return 16384
+    if "claude-3-7" in model_id or "claude-3-5" in model_id:
+        return 8192
+    if "claude-3" in model_id:
+        return 4096
+    # GPT models
+    if "gpt-5" in model_id:
+        return 32768
+    if "gpt-4.1" in model_id:
+        return 32768
+    if "gpt-4o" in model_id:
+        return 16384
+    if "gpt-4-turbo" in model_id:
+        return 4096
+    if "gpt-4" in model_id:
+        return 8192
+    if "gpt-3.5" in model_id:
+        return 4096
+    return 4096  # Default
 
 
 @app.post("/api/start")
