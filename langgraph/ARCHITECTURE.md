@@ -22,99 +22,72 @@
 
 ## システム概要
 
-### 全体フロー（Human介入ポイント付き）
-
-```mermaid
-flowchart TB
-    Start["🚀 開始"]
-
-    Start --> Phase1
-
-    subgraph Phase1["📋 フェーズ1: 企画"]
-        direction TB
-        subgraph Row1[" "]
-            direction LR
-            P1["🤖 企画"] --> H1["👤"]
-            H1 --> P2["🤖 設計"] --> H2["👤"]
-            H2 --> P3["🤖 シナリオ"] --> H3["👤"]
-        end
-        subgraph Row2[" "]
-            direction LR
-            P4["🤖 キャラ"] --> H4["👤"]
-            H4 --> P5["🤖 世界観"] --> H5["👤"]
-            H5 --> P6["🤖 タスク分解"] --> H6["👤"]
-        end
-        Row1 --> Row2
-    end
-
-    Phase1 --> Phase2
-
-    subgraph Phase2["⚙️ フェーズ2: 開発"]
-        direction TB
-        subgraph Leaders[" "]
-            direction LR
-            CL["🎖️ Code Leader"]
-            AL["🎖️ Asset Leader"]
-        end
-
-        subgraph Work[" "]
-            direction LR
-            subgraph CodeSide[" "]
-                direction TB
-                HCL["👤 計画承認"]
-                CodeWork["🤖 Code Agent群"]
-                HCode["👤 確認"]
-                HCL --> CodeWork --> HCode
-            end
-            subgraph AssetSide[" "]
-                direction TB
-                HAL["👤 計画承認"]
-                AssetWork["🤖 Asset Agent群"]
-                HAsset["👤 確認"]
-                HAL --> AssetWork --> HAsset
-            end
-        end
-
-        CL --> CodeSide
-        AL --> AssetSide
-
-        HCode --> Integration["🤖 統合"]
-        HAsset --> Integration
-        Integration --> HInt["👤 統合確認"]
-    end
-
-    HInt --> Phase3
-
-    subgraph Phase3["✅ フェーズ3: 品質"]
-        T1["🤖 テストAgent"]
-        T1 --> HT["👤 テスト結果確認"]
-        HT --> R1["🤖 レビューAgent"]
-        R1 --> HFinal["👤 最終承認"]
-    end
-
-    HFinal -->|"✅ 承認"| Done["🎮 リリース"]
-    HFinal -->|"🔄 修正"| Phase2
-    HT -->|"🔄 修正"| Phase2
-```
-
-### Orchestratorの位置づけ
+### Orchestratorの役割
 
 ```mermaid
 flowchart LR
-    subgraph System["システム全体"]
-        Orch["🎯 Orchestrator"]
-
-        Orch -->|"1. 指示"| Agent["🤖 Agent"]
-        Agent -->|"2. 結果"| Orch
-        Orch -->|"3. 承認依頼"| Human["👤 Human"]
-        Human -->|"4. 承認/修正"| Orch
-        Orch -->|"5. 次へ進む<br/>or 修正指示"| Agent
-    end
+    Orch["🎯 Orchestrator"]
+    Orch -->|"1. 指示"| Agent["🤖 Agent"]
+    Agent -->|"2. 結果"| Orch
+    Orch -->|"3. 承認依頼"| Human["👤 Human"]
+    Human -->|"4. 承認/修正"| Orch
 ```
 
-**Orchestratorは全てのフローを制御します。** 上図の「👤」マークは全てOrchestratorが`interrupt()`で中断し、Humanの入力を待つポイントです。
+Orchestratorは全フローを制御。各Agentの実行後に`interrupt()`でHuman承認を待ちます。
 
-### Human介入ポイント一覧
+---
+
+### 全体フロー
+
+```mermaid
+flowchart LR
+    Start["🚀 開始"] --> P1["📋 フェーズ1: 企画"]
+```
+
+↓
+
+#### 📋 フェーズ1: 企画（順次実行）
+
+```
+🤖 企画 → 👤 → 🤖 設計 → 👤 → 🤖 シナリオ → 👤
+                           ↓
+🤖 キャラ → 👤 → 🤖 世界観 → 👤 → 🤖 タスク分解 → 👤
+```
+
+↓
+
+#### ⚙️ フェーズ2: 開発（並列実行）
+
+```
+        🎖️ Code Leader          🎖️ Asset Leader
+              ↓                        ↓
+        👤 計画承認               👤 計画承認
+              ↓                        ↓
+        🤖 Code Agent群          🤖 Asset Agent群
+        (並列実行)                (並列実行)
+              ↓                        ↓
+          👤 確認                   👤 確認
+              ↓                        ↓
+              └──────→ 🤖 統合 ←──────┘
+                          ↓
+                    👤 統合確認
+```
+
+↓
+
+#### ✅ フェーズ3: 品質（順次実行）
+
+```mermaid
+flowchart LR
+    T["🤖 テスト"] --> HT["👤 確認"]
+    HT --> R["🤖 レビュー"] --> HF["👤 最終承認"]
+    HF -->|"✅ 承認"| Done["🎮 リリース"]
+    HF -->|"🔄 修正"| Back["フェーズ2へ"]
+```
+
+---
+
+### Human介入ポイント一覧（全13箇所）
 
 | フェーズ | 介入ポイント | 確認内容 |
 |---------|------------|---------|
@@ -132,7 +105,7 @@ flowchart LR
 | 品質 | テスト結果確認 | 失敗したテストはどう対処するか？ |
 | 品質 | 最終承認 | リリースして良いか？ |
 
-> **合計13箇所** でHumanが介入します。各ポイントで「承認」「修正指示」「却下」を選択できます。
+各ポイントで「承認」「修正指示」「却下」を選択できます。
 
 ---
 
