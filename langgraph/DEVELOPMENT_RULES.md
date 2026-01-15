@@ -84,13 +84,24 @@ prompts/
     └── ...
 ```
 
-#### プロンプトファイルの構造
+#### プロンプトファイルの構造（段階的生成対応）
+
+LLMに高品質な出力を得るため、**段階的思考（Chain of Thought）** を組み込みます。
+
+```mermaid
+flowchart LR
+    subgraph Stages["段階的生成フロー"]
+        S1["1. 理解"] --> S2["2. 分析"] --> S3["3. 計画"] --> S4["4. 実行"] --> S5["5. 検証"]
+    end
+```
+
+#### 基本テンプレート
 
 ```markdown
 # [Agent名] Prompt
 
 ## Role
-あなたは[役割]です。
+あなたは[役割]です。[専門性や経験の説明]
 
 ## Context
 {context}
@@ -98,12 +109,299 @@ prompts/
 ## Task
 {task_description}
 
+---
+
+## 思考プロセス（必ずこの順序で進めてください）
+
+### Step 1: 理解（Understanding）
+まず、与えられた情報を整理してください：
+- 入力として何が与えられているか
+- 何を達成する必要があるか
+- 制約条件は何か
+
+### Step 2: 分析（Analysis）
+次に、タスクを分析してください：
+- 考慮すべき要素は何か
+- 潜在的な問題点や課題は何か
+- 類似の事例や参考になるパターンはあるか
+
+### Step 3: 計画（Planning）
+実行計画を立ててください：
+- どのような手順で進めるか
+- 各手順で何を生成するか
+- 依存関係や順序はあるか
+
+### Step 4: 実行（Execution）
+計画に従って出力を生成してください：
+[具体的な生成指示]
+
+### Step 5: 検証（Verification）
+生成した内容を自己レビューしてください：
+- 要件を満たしているか
+- 矛盾や抜け漏れはないか
+- 品質基準を満たしているか
+
+---
+
 ## Output Format
 [期待する出力形式]
 
 ## Constraints
 - [制約1]
 - [制約2]
+
+## Quality Checklist
+出力前に以下を確認してください：
+- [ ] 全ての要件を満たしている
+- [ ] 論理的な一貫性がある
+- [ ] 指定されたフォーマットに従っている
+```
+
+#### Agent別テンプレート例
+
+**Concept Agent（企画）の場合：**
+
+```markdown
+# Concept Agent Prompt
+
+## Role
+あなたはゲーム企画の専門家です。10年以上の経験を持ち、
+多様なジャンルのゲームコンセプトを立案してきました。
+
+## Context
+ユーザーのアイデア: {user_idea}
+ターゲット層: {target_audience}
+プラットフォーム: {platform}
+
+## Task
+ユーザーのアイデアを基に、ゲームコンセプト文書を作成してください。
+
+---
+
+## 思考プロセス
+
+### Step 1: 理解
+ユーザーのアイデアを分解してください：
+- コアとなるゲーム体験は何か
+- ユーザーが求めている感情・体験は何か
+- 明示されていない暗黙の要件は何か
+
+### Step 2: 分析
+以下を分析してください：
+- 類似ゲームの成功/失敗要因
+- ターゲット層の嗜好
+- 技術的な実現可能性
+
+### Step 3: 計画
+コンセプト文書の構成を決定してください：
+1. ゲーム概要（1-2文）
+2. コアループ
+3. ユニークセリングポイント
+4. ターゲット体験
+5. 主要機能リスト
+
+### Step 4: 実行
+各セクションを順番に記述してください。
+各セクションは具体的かつ簡潔に。
+
+### Step 5: 検証
+以下を確認してください：
+- ユーザーの元アイデアを尊重しているか
+- 実現可能な範囲に収まっているか
+- 独自性があるか
+
+---
+
+## Output Format
+```yaml
+title: [ゲームタイトル案]
+genre: [ジャンル]
+platform: [プラットフォーム]
+summary: |
+  [1-2文のゲーム概要]
+core_loop:
+  - [ループ要素1]
+  - [ループ要素2]
+unique_points:
+  - [USP1]
+  - [USP2]
+target_experience: |
+  [プレイヤーが得る体験の説明]
+key_features:
+  - [機能1]
+  - [機能2]
+```
+
+## Constraints
+- 実装困難な機能は含めない
+- 1つのコアループに集中する
+- 技術的な詳細には踏み込まない
+```
+
+**Coder Agent（実装）の場合：**
+
+```markdown
+# [ComponentName] Coder Agent Prompt
+
+## Role
+あなたは[言語/フレームワーク]の専門エンジニアです。
+クリーンコード、テスタビリティ、保守性を重視します。
+
+## Context
+設計文書: {design_doc}
+既存コード: {existing_code}
+依存関係: {dependencies}
+
+## Task
+{component_name}を実装してください。
+
+---
+
+## 思考プロセス
+
+### Step 1: 理解
+設計文書から以下を把握してください：
+- このコンポーネントの責務
+- 入力と出力
+- 他コンポーネントとのインターフェース
+
+### Step 2: 分析
+実装方針を検討してください：
+- 使用するデザインパターン
+- エラーハンドリング方針
+- パフォーマンス考慮点
+
+### Step 3: 計画
+実装の順序を決定してください：
+1. 型定義/インターフェース
+2. コア実装
+3. エラーハンドリング
+4. ヘルパー関数
+
+### Step 4: 実行
+コードを記述してください。
+各関数は単一責任を持つこと。
+
+### Step 5: 検証
+コードを自己レビューしてください：
+- 型安全性
+- エッジケース処理
+- コメントの適切さ
+
+---
+
+## Output Format
+```python
+# [ファイル名].py
+
+"""
+[モジュールの説明]
+"""
+
+from typing import ...
+
+# 型定義
+...
+
+# メイン実装
+...
+
+# ヘルパー関数
+...
+```
+
+## Constraints
+- 外部ライブラリは指定されたもののみ使用
+- 1関数50行以内
+- docstringは必須
+
+## Quality Checklist
+- [ ] 型ヒントが全ての関数にある
+- [ ] エラーケースを処理している
+- [ ] 設計文書の仕様を満たしている
+```
+
+#### 段階的生成の実装パターン
+
+```python
+from langchain.prompts import PromptTemplate
+
+# マルチステップ実行
+def run_agent_with_stages(state: GameDevState, prompt_template: str) -> dict:
+    """段階的にLLMを実行"""
+
+    stages = [
+        ("understanding", "Step 1の出力を生成"),
+        ("analysis", "Step 2の出力を生成"),
+        ("planning", "Step 3の出力を生成"),
+        ("execution", "Step 4の出力を生成"),
+        ("verification", "Step 5の出力を生成"),
+    ]
+
+    intermediate_outputs = {}
+
+    for stage_name, stage_instruction in stages:
+        # 前のステージの出力をコンテキストに追加
+        stage_prompt = prompt_template.format(
+            **state,
+            previous_outputs=intermediate_outputs,
+            current_stage=stage_instruction
+        )
+
+        result = llm.invoke(stage_prompt)
+        intermediate_outputs[stage_name] = result
+
+        # 中間検証（オプション）
+        if stage_name == "planning":
+            validate_plan(result)
+
+    return {
+        "result": intermediate_outputs["execution"],
+        "verification": intermediate_outputs["verification"],
+        "trace": intermediate_outputs  # デバッグ用
+    }
+```
+
+#### 自己修正ループ
+
+```mermaid
+flowchart TB
+    Generate["生成"] --> Verify{"検証OK?"}
+    Verify -->|"Yes"| Output["出力"]
+    Verify -->|"No"| Feedback["フィードバック生成"]
+    Feedback --> Revise["修正"]
+    Revise --> Verify
+
+    style Verify fill:#ff9
+```
+
+```python
+MAX_REVISIONS = 3
+
+def generate_with_self_correction(prompt: str, validator: Callable) -> str:
+    """自己修正ループ付き生成"""
+
+    for attempt in range(MAX_REVISIONS):
+        result = llm.invoke(prompt)
+
+        # 検証
+        is_valid, feedback = validator(result)
+
+        if is_valid:
+            return result
+
+        # フィードバックを含めて再生成
+        prompt = f"""
+        前回の出力:
+        {result}
+
+        問題点:
+        {feedback}
+
+        上記の問題を修正して、再度生成してください。
+        """
+
+    raise AgentError("Max revisions exceeded", recoverable=False)
 ```
 
 ---
