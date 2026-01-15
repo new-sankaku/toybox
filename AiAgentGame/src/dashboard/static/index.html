@@ -61,6 +61,7 @@
                     <div class="detail-tab" data-detail="errors">エラー</div>
                     <div class="detail-tab" data-detail="assets">アセット</div>
                     <div class="detail-tab" data-detail="review">レビュー</div>
+                    <div class="detail-tab" data-detail="arch">アーキテクチャ</div>
                     <div class="detail-tab" data-detail="stats">統計</div>
                 </div>
 
@@ -159,36 +160,77 @@
                     </div>
                 </div>
 
-                <div class="detail-content" id="detail-stats">
+                <div class="detail-content" id="detail-arch">
                     <div class="detail-section">
-                        <div class="detail-section-title">ゲーム仕様</div>
-                        <div class="game-description" id="spec-description">-</div>
-                        <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                        <div class="detail-section-title">基本情報</div>
+                        <div class="game-description" id="arch-description">-</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
                             <div class="stat-box">
                                 <div class="stat-label">タイトル</div>
-                                <div class="stat-value" id="spec-title" style="font-size: 12px;">-</div>
+                                <div class="stat-value" id="arch-title" style="font-size: 12px;">-</div>
                             </div>
                             <div class="stat-box">
                                 <div class="stat-label">ジャンル</div>
-                                <div class="stat-value" id="spec-genre" style="font-size: 12px;">-</div>
+                                <div class="stat-value" id="arch-genre" style="font-size: 12px;">-</div>
                             </div>
                             <div class="stat-box">
                                 <div class="stat-label">プラットフォーム</div>
-                                <div class="stat-value" id="spec-platform" style="font-size: 12px;">-</div>
-                            </div>
-                            <div class="stat-box">
-                                <div class="stat-label">ビジュアル</div>
-                                <div class="stat-value" id="spec-visual" style="font-size: 12px;">-</div>
-                            </div>
-                            <div class="stat-box">
-                                <div class="stat-label">オーディオ</div>
-                                <div class="stat-value" id="spec-audio" style="font-size: 12px;">-</div>
+                                <div class="stat-value" id="arch-platform" style="font-size: 12px;">-</div>
                             </div>
                         </div>
                     </div>
-
                     <div class="detail-section">
-                        <div class="detail-section-title">統計情報</div>
+                        <div class="detail-section-title">体験設計</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                            <div class="stat-box">
+                                <div class="stat-label">コアループ</div>
+                                <div class="stat-value" id="arch-core-loop" style="font-size: 11px;">-</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">目標感情</div>
+                                <div class="stat-value" id="arch-emotion" style="font-size: 11px;">-</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">難易度方針</div>
+                                <div class="stat-value" id="arch-difficulty" style="font-size: 11px;">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">メカニクス</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                            <div class="stat-box">
+                                <div class="stat-label">操作方法</div>
+                                <div class="stat-value" id="arch-controls" style="font-size: 11px;">-</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">勝利条件</div>
+                                <div class="stat-value" id="arch-win" style="font-size: 11px;">-</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">敗北条件</div>
+                                <div class="stat-value" id="arch-lose" style="font-size: 11px;">-</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">表現</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(2, 1fr);">
+                            <div class="stat-box">
+                                <div class="stat-label">ビジュアル</div>
+                                <div class="stat-value" id="arch-visual" style="font-size: 11px;">-</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-label">オーディオ</div>
+                                <div class="stat-value" id="arch-audio" style="font-size: 11px;">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-content" id="detail-stats">
+                    <div class="detail-section">
+                        <div class="detail-section-title">生成統計</div>
                         <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
                             <div class="stat-box">
                                 <div class="stat-value" id="stat-files">0</div>
@@ -205,6 +247,27 @@
                             <div class="stat-box">
                                 <div class="stat-value" id="stat-elapsed">-</div>
                                 <div class="stat-label">経過</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="detail-section">
+                        <div class="detail-section-title">生成コスト</div>
+                        <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="stat-box">
+                                <div class="stat-value" id="cost-llm">$0</div>
+                                <div class="stat-label">LLM</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-value" id="cost-assets">$0</div>
+                                <div class="stat-label">アセット</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-value" id="cost-other">$0</div>
+                                <div class="stat-label">その他</div>
+                            </div>
+                            <div class="stat-box">
+                                <div class="stat-value" id="cost-total">$0</div>
+                                <div class="stat-label">合計</div>
                             </div>
                         </div>
                     </div>
