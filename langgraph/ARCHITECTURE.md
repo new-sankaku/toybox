@@ -22,42 +22,29 @@
 
 ## システム概要
 
-### Orchestratorの役割
+Orchestratorが全フローを制御し、各Agentの実行後に`interrupt()`でHuman承認を待ちます。
 
 ```mermaid
 flowchart LR
     Orch["🎯 Orchestrator"]
-    Orch -->|"1. 指示"| Agent["🤖 Agent"]
-    Agent -->|"2. 結果"| Orch
-    Orch -->|"3. 承認依頼"| Human["👤 Human"]
-    Human -->|"4. 承認/修正"| Orch
+    Orch -->|"指示"| Agent["🤖 Agent"]
+    Agent -->|"結果"| Orch
+    Orch -->|"承認依頼"| Human["👤 Human"]
+    Human -->|"承認/修正"| Orch
 ```
-
-Orchestratorは全フローを制御。各Agentの実行後に`interrupt()`でHuman承認を待ちます。
-
----
 
 ### 全体フロー
 
-```mermaid
-flowchart LR
-    Start["🚀 開始"] --> P1["📋 フェーズ1: 企画"]
-```
-
+🚀 **開始**
 ↓
-
-#### 📋 フェーズ1: 企画（順次実行）
-
+📋 **フェーズ1: 企画**（順次実行）
 ```
 🤖 企画 → 👤 → 🤖 設計 → 👤 → 🤖 シナリオ → 👤
                            ↓
 🤖 キャラ → 👤 → 🤖 世界観 → 👤 → 🤖 タスク分解 → 👤
 ```
-
 ↓
-
-#### ⚙️ フェーズ2: 開発（並列実行）
-
+⚙️ **フェーズ2: 開発**（並列実行）
 ```
         🎖️ Code Leader          🎖️ Asset Leader
               ↓                        ↓
@@ -72,20 +59,13 @@ flowchart LR
                           ↓
                     👤 統合確認
 ```
-
 ↓
-
-#### ✅ フェーズ3: 品質（順次実行）
-
-```mermaid
-flowchart LR
-    T["🤖 テスト"] --> HT["👤 確認"]
-    HT --> R["🤖 レビュー"] --> HF["👤 最終承認"]
-    HF -->|"✅ 承認"| Done["🎮 リリース"]
-    HF -->|"🔄 修正"| Back["フェーズ2へ"]
+✅ **フェーズ3: 品質**（順次実行）
 ```
-
----
+🤖 テスト → 👤 確認 → 🤖 レビュー → 👤 最終承認 → 🎮 リリース
+                                       ↓
+                               🔄 修正あれば フェーズ2へ
+```
 
 ### Human介入ポイント一覧（全13箇所）
 
