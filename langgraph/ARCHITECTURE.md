@@ -54,20 +54,29 @@ flowchart LR
 
 ↓
 
-```
-フェーズ2: 開発（並列実行）
-
-      [Code Leader]              [Asset Leader]
-            ↓                          ↓
-        Human承認                  Human承認
-            ↓                          ↓
-      [Code Agent群]             [Asset Agent群]
-            ↓                          ↓
-        Human確認                  Human確認
-            ↓                          ↓
-            └────────→ [統合] ←────────┘
-                          ↓
-                     Human確認
+```mermaid
+flowchart TB
+    subgraph Phase2[フェーズ2: 開発]
+        direction TB
+        subgraph Leaders[Leader層]
+            direction LR
+            CL[Code Leader]
+            AL[Asset Leader]
+        end
+        subgraph CodePath[Code側]
+            direction TB
+            HC1[Human承認] --> CA[Code Agent群] --> HC2[Human確認]
+        end
+        subgraph AssetPath[Asset側]
+            direction TB
+            HA1[Human承認] --> AA[Asset Agent群] --> HA2[Human確認]
+        end
+        CL --> CodePath
+        AL --> AssetPath
+        HC2 --> Int[統合]
+        HA2 --> Int
+        Int --> HInt[Human確認]
+    end
 ```
 
 ↓
