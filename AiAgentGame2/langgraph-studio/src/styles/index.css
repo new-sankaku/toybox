@@ -1,0 +1,359 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NieR:Automata Design System Base */
+@layer base {
+  :root {
+    /* Background Colors */
+    --bg-main: #E8E4D4;
+    --bg-panel: #DAD5C3;
+    --bg-selected: #CCC7B5;
+    --bg-header: #57534A;
+    --bg-footer: #57534A;
+
+    /* Text Colors */
+    --text-main: #454138;
+    --text-light: #5A5548;    /* Darker for better contrast */
+    --text-header: #E8E4D4;
+    --text-footer: #E8E4D4;
+
+    /* Accent Colors (Category Markers) */
+    --accent-red: #B85C5C;
+    --accent-orange: #C4956C;
+    --accent-yellow: #C9C078;
+    --accent-green: #7AAA7A;
+    --accent-blue: #6B8FAA;
+
+    /* Borders */
+    --border-light: rgba(69, 65, 56, 0.2);
+    --border-dark: rgba(69, 65, 56, 0.4);
+
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    /* Letter Spacing (default: normal) */
+    --tracking-base: 0.05em;
+    --tracking-wide: 0.08em;
+
+    /* Line Height (default: compact) */
+    --leading-base: 1.4;
+
+    /* Padding (default: compact) */
+    --padding-card: 12px;
+    --padding-section: 20px;
+    --gap-base: 12px;
+
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-normal: 300ms ease;
+    --transition-slow: 500ms ease;
+
+    /* Z-Index Layers */
+    --z-base: 0;
+    --z-dropdown: 100;
+    --z-modal: 200;
+    --z-toast: 300;
+    --z-tooltip: 400;
+  }
+
+  /* Letter Spacing Modes */
+  :root[data-tracking="tight"] {
+    --tracking-base: 0.02em;
+    --tracking-wide: 0.04em;
+  }
+
+  :root[data-tracking="normal"] {
+    --tracking-base: 0.05em;
+    --tracking-wide: 0.08em;
+  }
+
+  :root[data-tracking="wide"] {
+    --tracking-base: 0.1em;
+    --tracking-wide: 0.15em;
+  }
+
+  /* Line Height Modes */
+  :root[data-leading="tight"] {
+    --leading-base: 1.3;
+  }
+
+  :root[data-leading="normal"] {
+    --leading-base: 1.6;
+  }
+
+  :root[data-leading="relaxed"] {
+    --leading-base: 2.0;
+  }
+
+  /* Padding Modes */
+  :root[data-padding="compact"] {
+    --padding-card: 12px;
+    --padding-section: 16px;
+    --gap-base: 12px;
+  }
+
+  :root[data-padding="normal"] {
+    --padding-card: 16px;
+    --padding-section: 24px;
+    --gap-base: 16px;
+  }
+
+  :root[data-padding="spacious"] {
+    --padding-card: 24px;
+    --padding-section: 32px;
+    --gap-base: 24px;
+  }
+
+  html {
+    background-color: var(--bg-main);
+  }
+
+  body {
+    font-family: 'Noto Sans JP', sans-serif;
+    font-weight: 400;
+    font-size: 14px;
+    color: var(--text-main);
+    background-color: var(--bg-main);
+    letter-spacing: var(--tracking-base);
+    line-height: var(--leading-base);
+    min-height: 100vh;
+  }
+
+  /* Force line-height on all text elements */
+  p, span, div, li, td, th, label, button, input, select, textarea,
+  h1, h2, h3, h4, h5, h6, a, small, strong, em {
+    line-height: var(--leading-base) !important;
+  }
+
+  /* Global selection styling */
+  ::selection {
+    background-color: var(--bg-selected);
+    color: var(--text-main);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--bg-main);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-dark);
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-light);
+  }
+}
+
+@layer components {
+  /* NieR Button Styles */
+  .nier-btn {
+    @apply px-6 py-2 bg-nier-bg-panel border border-nier-border-dark
+           tracking-nier text-nier-text-main font-normal
+           transition-all duration-nier-fast
+           hover:bg-nier-bg-selected active:bg-nier-bg-header active:text-nier-text-header;
+  }
+
+  .nier-btn-primary {
+    @apply nier-btn bg-nier-bg-header text-nier-text-header
+           hover:bg-nier-text-main;
+  }
+
+  .nier-btn-danger {
+    @apply nier-btn border-nier-accent-red text-nier-accent-red
+           hover:bg-nier-accent-red hover:text-white;
+  }
+
+  .nier-btn-success {
+    @apply nier-btn border-nier-accent-green text-nier-accent-green
+           hover:bg-nier-accent-green hover:text-white;
+  }
+
+  /* NieR Card/Panel */
+  .nier-card {
+    @apply bg-nier-bg-panel border border-nier-border-light;
+  }
+
+  .nier-card-header {
+    @apply bg-nier-bg-header text-nier-text-header
+           px-4 py-2 text-nier-small tracking-nier;
+  }
+
+  .nier-card-body {
+    padding: var(--padding-card);
+    @apply bg-nier-bg-panel text-nier-text-main;
+  }
+
+  /* NieR Input */
+  .nier-input {
+    @apply w-full px-3 py-2 bg-nier-bg-main border border-nier-border-dark
+           text-nier-text-main tracking-nier
+           focus:outline-none focus:border-nier-text-main
+           placeholder:text-nier-text-light;
+  }
+
+  /* Diamond Marker */
+  .nier-diamond {
+    @apply flex items-center gap-2 text-nier-caption;
+    color: inherit;
+  }
+
+  .nier-diamond::before {
+    content: '◇';
+    @apply text-sm;
+  }
+
+  /* Category Marker */
+  .nier-category-marker {
+    @apply w-1 h-4 flex-shrink-0;
+  }
+
+  .nier-category-marker.system { @apply bg-nier-accent-red; }
+  .nier-category-marker.running { @apply bg-nier-accent-orange; }
+  .nier-category-marker.pending { @apply bg-nier-accent-yellow; }
+  .nier-category-marker.complete { @apply bg-nier-accent-green; }
+  .nier-category-marker.info { @apply bg-nier-accent-blue; }
+
+  /* Progress Bar */
+  .nier-progress {
+    @apply h-2 bg-nier-border-light overflow-hidden relative;
+  }
+
+  .nier-progress-fill {
+    @apply h-full bg-nier-text-main transition-all duration-nier-normal relative overflow-hidden;
+  }
+
+  .nier-progress-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.4) 50%,
+      transparent 100%
+    );
+    animation: progress-shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes progress-shimmer {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Status Row */
+  .nier-status-row {
+    @apply flex justify-between py-1.5 border-b border-nier-border-light last:border-b-0;
+  }
+
+  .nier-status-label {
+    @apply text-nier-text-light;
+  }
+
+  .nier-status-value {
+    @apply font-medium;
+  }
+
+  /* List Item */
+  .nier-list-item {
+    @apply flex items-center gap-3 px-4 py-2.5
+           border-b border-nier-border-light
+           cursor-pointer transition-colors duration-nier-fast
+           hover:bg-nier-bg-selected;
+  }
+
+  .nier-list-item.selected {
+    @apply bg-nier-bg-selected;
+  }
+
+  /* Tab */
+  .nier-tab {
+    @apply px-6 py-3 text-nier-text-header text-nier-small tracking-nier
+           flex items-center gap-2 cursor-pointer
+           border-r border-white/10
+           transition-colors duration-nier-fast
+           hover:bg-white/10;
+  }
+
+  .nier-tab.active {
+    @apply bg-white/15;
+  }
+
+  /* Toast */
+  .nier-toast {
+    @apply flex items-center gap-3 px-4 py-3
+           bg-nier-bg-panel border border-nier-border-dark
+           shadow-lg;
+  }
+
+  /* Modal Overlay */
+  .nier-modal-overlay {
+    @apply fixed inset-0 bg-black/50 flex items-center justify-center
+           z-[200] animate-nier-fade-in;
+  }
+
+  .nier-modal {
+    @apply bg-nier-bg-panel border border-nier-border-dark
+           max-w-2xl w-full max-h-[80vh] overflow-hidden
+           animate-nier-slide-in;
+  }
+}
+
+@layer utilities {
+  /* Text utilities */
+  .text-change-up {
+    @apply text-nier-accent-green;
+  }
+
+  .text-change-down {
+    @apply text-nier-accent-red;
+  }
+
+  /* Animation utilities */
+  .animate-pulse-slow {
+    animation: nier-pulse 2s ease-in-out infinite;
+  }
+
+  /* Corner decoration */
+  .corner-dots::before,
+  .corner-dots::after {
+    content: '• • •';
+    @apply absolute text-[8px] text-nier-text-light tracking-[4px];
+  }
+
+  .corner-dots::before {
+    @apply top-2 right-4;
+  }
+
+  .corner-dots::after {
+    @apply bottom-2 left-4;
+  }
+
+  /* Dynamic letter-spacing using CSS variables */
+  .tracking-nier {
+    letter-spacing: var(--tracking-base) !important;
+  }
+
+  .tracking-nier-wide {
+    letter-spacing: var(--tracking-wide) !important;
+  }
+}
