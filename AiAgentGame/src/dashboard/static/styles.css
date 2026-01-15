@@ -445,6 +445,22 @@ body {
     font-weight: 600;
 }
 
+/* LLM Config Form */
+.llm-config-form {
+    background: var(--bg-secondary);
+    padding: 10px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 8px;
+}
+
+.llm-config-form .input-group {
+    margin-bottom: 8px;
+}
+
+.llm-config-form .input-group:last-child {
+    margin-bottom: 0;
+}
+
 .detail-tabs {
     display: flex;
     background: var(--bg-tertiary);

@@ -479,11 +479,6 @@ async function startWorkflow() {
     const temperature = parseFloat(document.getElementById('llm-temp-input').value);
     const maxTokens = parseInt(document.getElementById('llm-max-tokens-input').value);
 
-    // Update LLM config display
-    document.getElementById('llm-model').textContent = model;
-    document.getElementById('llm-temperature').textContent = temperature;
-    document.getElementById('llm-max-tokens').textContent = maxTokens;
-
     // Reset state with new structure
     AGENTS.forEach(a => {
         agentStates[a.id] = {
