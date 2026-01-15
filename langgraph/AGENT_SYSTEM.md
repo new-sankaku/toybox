@@ -258,3 +258,109 @@ sequenceDiagram
     CL->>CA: コード実装タスク（アセット付き）
     CA->>CL: 実装完了
 ```
+
+---
+
+## WebUI連携
+
+本システムはWebUIを通じて操作・監視される。WebUIはNieR:Automata風のデザインを採用。
+
+### 関連ドキュメント
+
+| ドキュメント | 内容 |
+|-------------|------|
+| [WEBUI_DESIGN.md](./WEBUI_DESIGN.md) | UIデザインシステム（カラー、タイポグラフィ、コンポーネント） |
+| [WEBUI_ARCHITECTURE.md](./WEBUI_ARCHITECTURE.md) | 技術アーキテクチャ（API、WebSocket、DB） |
+
+### WebUI主要機能
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     WebUI 機能概要                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. プロジェクト管理                                            │
+│     - 新規プロジェクト作成（ゲームコンセプト入力）              │
+│     - プロジェクト一覧・検索                                    │
+│     - 実行開始/一時停止/再開/キャンセル                         │
+│                                                                 │
+│  2. リアルタイム監視                                            │
+│     - Agent実行状況の可視化                                     │
+│     - 進捗インジケータ（Phase/Agent単位）                       │
+│     - ログのライブストリーミング                                │
+│                                                                 │
+│  3. Human Checkpoint                                            │
+│     - 承認待ち一覧の表示                                        │
+│     - 成果物のプレビュー                                        │
+│     - 承認/修正依頼/却下のアクション                            │
+│     - フィードバックコメント入力                                │
+│                                                                 │
+│  4. 成果物確認                                                  │
+│     - 各Agent出力の閲覧                                         │
+│     - コード/アセットのダウンロード                             │
+│     - ビルド成果物の取得                                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Agent ↔ WebUI 通信
+
+```
+┌──────────────┐     State Update      ┌──────────────┐
+│              │ ───────────────────► │              │
+│   LangGraph  │                       │   WebSocket  │
+│   Agent      │                       │   Server     │
+│              │ ◄─────────────────── │              │
+└──────────────┘    Human Feedback     └──────┬───────┘
+                                              │
+                                              │ Real-time Events
+                                              │
+                                              ▼
+                                       ┌──────────────┐
+                                       │   Browser    │
+                                       │   (WebUI)    │
+                                       └──────────────┘
+```
+
+### WebSocket Events
+
+| Event | Direction | 説明 |
+|-------|-----------|------|
+| `agent:started` | Server → Client | Agent実行開始 |
+| `agent:progress` | Server → Client | 進捗更新 |
+| `agent:completed` | Server → Client | Agent完了 |
+| `agent:failed` | Server → Client | Agentエラー |
+| `agent:log` | Server → Client | ログエントリ追加 |
+| `checkpoint:created` | Server → Client | Human承認待ち発生 |
+| `checkpoint:resolved` | Server → Client | 承認完了 |
+
+### Human Checkpoint フロー（WebUI経由）
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant O as Orchestrator
+    participant WS as WebSocket Server
+    participant UI as WebUI
+
+    A->>O: 成果物完成
+    O->>O: interrupt()
+    O->>WS: checkpoint:created
+    WS->>UI: リアルタイム通知
+    UI->>UI: 承認待ちパネル表示
+
+    Note over UI: ユーザーがレビュー
+
+    alt 承認
+        UI->>WS: POST /checkpoints/{id}/approve
+        WS->>O: 承認通知
+        O->>A: 次のステップへ
+    else 修正依頼
+        UI->>WS: POST /checkpoints/{id}/request-changes
+        WS->>O: フィードバック転送
+        O->>A: 修正指示
+        A->>A: 修正実行
+        A->>O: 修正完了
+        O->>WS: checkpoint:created（再レビュー）
+    end
+```
