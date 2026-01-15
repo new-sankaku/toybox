@@ -25,39 +25,78 @@
 ```mermaid
 flowchart TB
     Orch[Orchestrator]
+    Orch --> Phase1
 
     subgraph Phase1[Phase1: 企画]
-        subgraph P1a[" "]
+        direction TB
+        subgraph P1Agents[" "]
             direction LR
-            P1[企画]-->H1[H]-->P2[設計]-->H2[H]-->P3[シナリオ]-->H3[H]
+            A1[企画]
+            A2[設計]
+            A3[シナリオ]
+            A4[キャラ]
+            A5[世界観]
+            A6[タスク分解]
         end
-        subgraph P1b[" "]
+        Loop1[承認プロセス Loop]
+        subgraph P1Human[" "]
             direction LR
-            P4[キャラ]-->H4[H]-->P5[世界観]-->H5[H]-->P6[タスク分解]-->H6[H]
+            H1[Human]
+            H2[Human]
+            H3[Human]
+            H4[Human]
+            H5[Human]
+            H6[Human]
         end
-        P1a --> P1b
+        P1Agents <--> Loop1 <--> P1Human
+        Done1[全承認完了]
+        P1Human --> Done1
     end
+
+    Done1 --> Phase2
 
     subgraph Phase2[Phase2: 開発]
-        subgraph P2a[" "]
+        direction TB
+        subgraph P2Agents[" "]
             direction LR
-            CL[Code Leader]-->HC1[H]-->CA[Code Agents]-->HC2[H]
-            AL[Asset Leader]-->HA1[H]-->AA[Asset Agents]-->HA2[H]
+            CL[Code Leader]
+            AL[Asset Leader]
+            CA[Code Agents]
+            AA[Asset Agents]
+            INT[統合]
         end
-        HC2 --> Int[統合]
-        HA2 --> Int
-        Int --> HI[H]
+        Loop2[承認プロセス Loop]
+        subgraph P2Human[" "]
+            direction LR
+            HC1[Human]
+            HA1[Human]
+            HC2[Human]
+            HA2[Human]
+            HI[Human]
+        end
+        P2Agents <--> Loop2 <--> P2Human
+        Done2[全承認完了]
+        P2Human --> Done2
     end
+
+    Done2 --> Phase3
 
     subgraph Phase3[Phase3: 品質]
-        direction LR
-        T[テスト]-->HT[H]-->R[レビュー]-->HF[H]
+        direction TB
+        subgraph P3Agents[" "]
+            direction LR
+            T[テスト]
+            R[レビュー]
+        end
+        Loop3[承認プロセス Loop]
+        subgraph P3Human[" "]
+            direction LR
+            HT[Human]
+            HF[Human]
+        end
+        P3Agents <--> Loop3 <--> P3Human
     end
 
-    Orch --> P1
-    H6 --> CL
-    H6 --> AL
-    HI --> T
     HF -->|承認| Release[リリース]
     HF -->|修正| Phase2
 ```
