@@ -66,6 +66,87 @@ def agent_name(state: GameDevState) -> AgentOutput:
     pass
 ```
 
+### Agent間通信フォーマット
+
+Agent間のデータ受け渡しは**JSON形式**で統一します。
+
+```python
+from pydantic import BaseModel
+from typing import Literal
+
+class AgentMessage(BaseModel):
+    """Agent間通信の標準フォーマット"""
+    agent_name: str                    # 送信元Agent
+    status: Literal["success", "needs_revision", "error"]
+    data: dict                         # 生成物（JSON形式）
+    metadata: dict                     # 付加情報
+
+# 使用例
+message = AgentMessage(
+    agent_name="ConceptAgent",
+    status="success",
+    data={
+        "title": "Space Explorer",
+        "genre": "Action RPG",
+        "summary": "宇宙を探索するアクションRPG",
+        "core_loop": ["探索", "戦闘", "成長"],
+        "key_features": ["手続き生成", "マルチプレイ"]
+    },
+    metadata={
+        "tokens_used": 1500,
+        "duration_ms": 2300,
+        "model": "claude-3-opus"
+    }
+)
+```
+
+#### Agent出力スキーマ例
+
+**ConceptAgent:**
+```json
+{
+  "title": "string",
+  "genre": "string",
+  "platform": "string",
+  "summary": "string",
+  "core_loop": ["string"],
+  "unique_points": ["string"],
+  "key_features": ["string"]
+}
+```
+
+**DesignAgent:**
+```json
+{
+  "architecture": "string",
+  "tech_stack": {
+    "language": "string",
+    "framework": "string",
+    "libraries": ["string"]
+  },
+  "components": [
+    {
+      "name": "string",
+      "responsibility": "string",
+      "dependencies": ["string"]
+    }
+  ],
+  "data_flow": "string"
+}
+```
+
+**CoderAgent:**
+```json
+{
+  "file_path": "string",
+  "code": "string",
+  "language": "string",
+  "imports": ["string"],
+  "exports": ["string"],
+  "tests_required": ["string"]
+}
+```
+
 ### プロンプト設計ガイドライン
 
 #### ディレクトリ構成
@@ -494,16 +575,13 @@ tests/
 
 ### レビュー基準
 
-```mermaid
-flowchart LR
-    subgraph Review["Code Review Checklist"]
-        R1["✅ 単一責任か"]
-        R2["✅ 型定義あるか"]
-        R3["✅ テストあるか"]
-        R4["✅ エラー処理あるか"]
-        R5["✅ プロンプト外部化か"]
-    end
-```
+| チェック項目 | 確認内容 |
+|-------------|---------|
+| 単一責任 | Agentが1つの責務のみを持っているか |
+| 型定義 | 入出力に型ヒントがあるか |
+| テスト | ユニットテストが存在するか |
+| エラー処理 | 例外が適切に処理されているか |
+| プロンプト外部化 | プロンプトがmdファイルに分離されているか |
 
 ### エラーハンドリング方針
 
@@ -528,13 +606,7 @@ def gameloop_agent(state: GameDevState) -> dict:
 
 ### リトライ戦略
 
-| エラー種別 | リトライ | 最大回数 | バックオフ |
-|-----------|---------|---------|-----------|
-| Rate Limit | ✅ | 5 | Exponential (2^n秒) |
-| Timeout | ✅ | 3 | Linear (5秒) |
-| Invalid Response | ✅ | 2 | None |
-| Auth Error | ❌ | - | - |
-| Unknown | ❌ | - | Escalate to Human |
+リトライ設定は `config.yaml` で管理します（Config管理セクション参照）。
 
 ---
 
@@ -742,65 +814,121 @@ def migrate_state(old_state: dict) -> GameDevState:
     return old_state
 ```
 
-### Git管理戦略
+---
 
-```mermaid
-gitGraph
-    commit id: "v1.0.0"
-    branch develop
-    commit id: "feat: add Character Agent"
-    commit id: "fix: retry logic"
-    checkout main
-    merge develop id: "v1.1.0" tag: "v1.1.0"
-    branch develop
-    commit id: "feat: new State schema"
-    checkout main
-    merge develop id: "v2.0.0" tag: "v2.0.0"
+## 7. Config管理
+
+全ての設定値は `config.yaml` で一元管理します。
+
+### 設定ファイル構造
+
+```yaml
+# config.yaml
+
+# LLM設定
+llm:
+  provider: "anthropic"          # anthropic | openai
+  model: "claude-3-opus"
+  temperature: 0.7
+  max_tokens: 4096
+
+# リトライ設定
+retry:
+  rate_limit:
+    enabled: true
+    max_attempts: 5
+    backoff: "exponential"       # exponential | linear | none
+    base_delay_sec: 2
+  timeout:
+    enabled: true
+    max_attempts: 3
+    backoff: "linear"
+    base_delay_sec: 5
+  invalid_response:
+    enabled: true
+    max_attempts: 2
+    backoff: "none"
+  auth_error:
+    enabled: false               # リトライしない
+  unknown:
+    enabled: false
+    escalate_to_human: true
+
+# Human介入設定
+human:
+  timeout:
+    reminder_hours: 24
+    escalation_hours: 72
+    auto_pause_days: 7
+  notification:
+    channels: ["slack", "email"]
+
+# 監視設定
+monitoring:
+  log_level: "INFO"              # DEBUG | INFO | WARNING | ERROR
+  metrics:
+    enabled: true
+    export_interval_sec: 60
+  alerts:
+    agent_duration_threshold_sec: 30
+    success_rate_threshold: 0.95
+    token_usage_daily_limit: 1000000
+
+# 並列実行設定
+parallel:
+  max_concurrent_agents: 5
+  timeout_per_agent_sec: 300
+
+# State永続化設定
+persistence:
+  backend: "sqlite"              # sqlite | postgresql
+  checkpoint_interval_sec: 60
 ```
 
-| ブランチ | 用途 |
-|---------|------|
-| `main` | 安定版リリース |
-| `develop` | 開発中の最新 |
-| `feature/*` | 新機能開発 |
-| `hotfix/*` | 緊急バグ修正 |
+### 設定の読み込み
 
-### リリースチェックリスト
-
-```markdown
-## Release Checklist
-
-- [ ] 全テスト通過 (unit/integration/e2e)
-- [ ] State schema変更あり → マイグレーションスクリプト作成
-- [ ] 破壊的変更あり → MAJORバージョンアップ
-- [ ] CHANGELOG.md 更新
-- [ ] VERSION ファイル更新
-- [ ] タグ付け (`git tag -a v1.2.3`)
-- [ ] Human承認 → リリース
-```
-
-### 後方互換性ポリシー
-
-| 項目 | ポリシー |
-|------|---------|
-| **State schema** | MAJOR-1までサポート（v2.xはv1.xからの移行サポート） |
-| **API** | 非推奨化後、2 MINORバージョンで削除 |
-| **Prompts** | バージョン管理なし（常に最新を使用） |
-| **Checkpoints** | 同一MAJORバージョン内で互換 |
-
-非推奨化の流れ:
 ```python
-import warnings
+from pydantic import BaseSettings
+from typing import Literal
+import yaml
 
-def old_function():
-    """
-    .. deprecated:: 1.2.0
-       Use `new_function` instead. Will be removed in 1.4.0.
-    """
-    warnings.warn(
-        "old_function is deprecated, use new_function instead",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    return new_function()
+class RetryConfig(BaseSettings):
+    enabled: bool = True
+    max_attempts: int = 3
+    backoff: Literal["exponential", "linear", "none"] = "exponential"
+    base_delay_sec: int = 2
+
+class Config(BaseSettings):
+    llm_provider: str
+    llm_model: str
+    retry_rate_limit: RetryConfig
+    retry_timeout: RetryConfig
+    # ... etc
+
+    @classmethod
+    def from_yaml(cls, path: str = "config.yaml") -> "Config":
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        return cls(**data)
+
+# 使用
+config = Config.from_yaml()
+```
+
+### 環境別設定
+
+```
+config/
+├── config.yaml          # デフォルト設定
+├── config.dev.yaml      # 開発環境用
+├── config.prod.yaml     # 本番環境用
+└── config.test.yaml     # テスト環境用
+```
+
+環境変数 `ENV` で切り替え:
+```python
+import os
+
+env = os.getenv("ENV", "dev")
+config = Config.from_yaml(f"config/config.{env}.yaml")
 ```
