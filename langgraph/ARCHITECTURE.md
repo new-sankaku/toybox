@@ -1,173 +1,344 @@
 # LangGraph Game Development System
 
-## Overview
+## Design Principles (LangGraph Best Practices)
+
+| Principle | Description |
+|-----------|-------------|
+| **Single Responsibility** | Each node handles ONE specific task |
+| **Fine Granularity** | Small nodes = reusable, testable, maintainable |
+| **Human Checkpoint** | Place `interrupt()` BEFORE irreversible actions |
+| **Durable State** | Checkpoints enable pause/resume (days/months later) |
+| **Parallel Execution** | Independent tasks run concurrently |
+
+Sources:
+- [Building LangGraph](https://blog.langchain.com/building-langgraph/)
+- [Human-in-the-Loop Best Practices](https://www.permit.io/blog/human-in-the-loop-for-ai-agents-best-practices-frameworks-use-cases-and-demo)
+
+---
+
+## System Overview
 
 ```mermaid
 flowchart TB
     Human["👤 Human"]
 
-    subgraph Orchestration
-        Orch["🎯 Orchestrator Agent"]
+    subgraph Orchestration["🎯 Orchestration Layer"]
+        Orch["Orchestrator<br/>State & Routing"]
     end
 
-    Human <--> Orch
+    Human <-->|"All approvals<br/>go through here"| Orch
+
+    Orch --> Phase1
+    Orch --> Phase2
+    Orch --> Phase3
 
     subgraph Phase1["📋 Phase 1: Planning"]
-        Planner["Planner Agent<br/>ゲーム企画・設計"]
-        Scenario["Scenario Agent<br/>シナリオ・キャラ"]
-        TaskSplitter["TaskSplitter Agent<br/>タスク分解"]
-
-        Planner --> Scenario --> TaskSplitter
+        direction LR
+        P1["Concept"] --> P2["Design"] --> P3["Scenario"] --> P4["Character"] --> P5["World"] --> P6["Task Split"]
     end
 
     subgraph Phase2["⚙️ Phase 2: Development"]
         direction TB
-
-        subgraph Coders["Coder Group (並列)"]
-            Logic["Logic Coder<br/>ゲームロジック"]
-            UI["UI Coder<br/>UI/UX"]
-            System["System Coder<br/>システム"]
+        subgraph CodeGroup["Code Agents"]
+            C1["GameLoop"]
+            C2["State"]
+            C3["Event"]
+            C4["Menu"]
+            C5["HUD"]
+            C6["Dialog"]
+            C7["Save"]
+            C8["Config"]
         end
-
-        subgraph Assets["Asset Group (並列)"]
-            Image["Image Agent<br/>画像生成"]
-            Sound["Sound Agent<br/>音声生成"]
+        subgraph AssetGroup["Asset Agents"]
+            A1["CharaImg"]
+            A2["BgImg"]
+            A3["UIImg"]
+            A4["BGM"]
+            A5["SE"]
         end
     end
 
     subgraph Phase3["✅ Phase 3: Quality"]
-        Integrator["Integrator Agent<br/>統合"]
-        Test["Test Agent<br/>テスト"]
-        Reviewer["Reviewer Agent<br/>レビュー"]
-
-        Integrator --> Test --> Reviewer
+        direction LR
+        Q1["Integrate"] --> Q2["Test"] --> Q3["Review"]
     end
 
-    Orch --> Phase1
     Phase1 --> Phase2
     Phase2 --> Phase3
-
-    Reviewer -->|"問題あり"| Phase2
-    Reviewer -->|"OK"| Done["🎮 Complete"]
+    Phase3 -->|"Issues Found"| Phase2
+    Phase3 -->|"Approved"| Done["🎮 Release"]
 ```
+
+---
+
+## Complete Agent List with Human Checkpoints
+
+```mermaid
+flowchart TB
+    subgraph Legend["Legend"]
+        direction LR
+        L1["🤖 Agent"]
+        L2["👤 Human Review"]
+        L3["⚡ Parallel"]
+    end
+```
+
+### Phase 1: Planning (Sequential)
+
+```mermaid
+flowchart LR
+    subgraph Planning["Phase 1: Planning - All require Human approval"]
+        C["🤖 Concept<br/>Agent"] --> HC["👤"] --> D["🤖 Design<br/>Agent"] --> HD["👤"] --> S["🤖 Scenario<br/>Agent"] --> HS["👤"] --> CH["🤖 Character<br/>Agent"] --> HCH["👤"] --> W["🤖 World<br/>Agent"] --> HW["👤"] --> T["🤖 TaskSplit<br/>Agent"] --> HT["👤"]
+    end
+
+    HT --> Phase2["To Phase 2"]
+```
+
+### Phase 2: Development (Parallel)
+
+```mermaid
+flowchart TB
+    subgraph Development["Phase 2: Development - Parallel Execution"]
+        direction TB
+
+        subgraph Logic["Logic Layer"]
+            GL["🤖 GameLoop"] --> HGL["👤"]
+            SM["🤖 StateManager"] --> HSM["👤"]
+            EV["🤖 EventSystem"] --> HEV["👤"]
+        end
+
+        subgraph UI["UI Layer"]
+            MN["🤖 Menu"] --> HMN["👤"]
+            HD2["🤖 HUD"] --> HHD["👤"]
+            DL["🤖 Dialog"] --> HDL["👤"]
+        end
+
+        subgraph System["System Layer"]
+            SV["🤖 SaveLoad"] --> HSV["👤"]
+            CF["🤖 Config"] --> HCF["👤"]
+            AU["🤖 AudioSys"] --> HAU["👤"]
+        end
+
+        subgraph Assets["Asset Layer"]
+            CI["🤖 CharaImage"] --> HCI["👤"]
+            BI["🤖 BgImage"] --> HBI["👤"]
+            UI2["🤖 UIImage"] --> HUI["👤"]
+            BG["🤖 BGM"] --> HBG["👤"]
+            SE["🤖 SE"] --> HSE["👤"]
+        end
+    end
+
+    Logic ~~~ UI
+    UI ~~~ System
+    System ~~~ Assets
+```
+
+### Phase 3: Quality (Sequential)
+
+```mermaid
+flowchart LR
+    subgraph Quality["Phase 3: Quality"]
+        I["🤖 Integrator"] --> T["🤖 Tester"] --> HT["👤<br/>Test Results"] --> R["🤖 Reviewer"] --> HR["👤<br/>Final Review"]
+    end
+
+    HR -->|"Approved"| Done["🎮 Release"]
+    HR -->|"Issues"| Back["Back to Phase 2"]
+```
+
+---
+
+## Detailed Agent Specifications
+
+### Phase 1: Planning Layer (6 Agents)
+
+| Agent | Input | Output | Human Review Point |
+|-------|-------|--------|-------------------|
+| **Concept** | User idea | Game concept doc | Approve direction |
+| **Design** | Concept | Technical design | Approve architecture |
+| **Scenario** | Concept + Design | Story outline | Approve story |
+| **Character** | Scenario | Character specs | Approve characters |
+| **World** | Scenario | World/level design | Approve world |
+| **TaskSplit** | All above | Task breakdown | Approve task list |
+
+### Phase 2: Development Layer (14 Agents, Parallel)
+
+#### Code Agents (9)
+
+| Agent | Responsibility | Dependencies |
+|-------|---------------|--------------|
+| **GameLoop** | Main loop, frame timing | Design |
+| **StateManager** | Game state, transitions | Design |
+| **EventSystem** | Event pub/sub | Design |
+| **Menu** | Title, pause, settings UI | Design, UIImage |
+| **HUD** | In-game overlay | Design, UIImage |
+| **Dialog** | Text/conversation system | Scenario, CharaImage |
+| **SaveLoad** | Persistence | StateManager |
+| **Config** | Settings management | - |
+| **AudioSystem** | BGM/SE playback | BGM, SE assets |
+
+#### Asset Agents (5)
+
+| Agent | Responsibility | Output Format |
+|-------|---------------|---------------|
+| **CharaImage** | Character sprites/portraits | PNG/SVG |
+| **BgImage** | Backgrounds, scenes | PNG/JPG |
+| **UIImage** | Buttons, icons, frames | PNG/SVG |
+| **BGM** | Background music | MP3/OGG |
+| **SE** | Sound effects | WAV/MP3 |
+
+### Phase 3: Quality Layer (3 Agents)
+
+| Agent | Responsibility | Human Review Point |
+|-------|---------------|-------------------|
+| **Integrator** | Combine all components | Auto (no review) |
+| **Tester** | Run automated tests | Review test results |
+| **Reviewer** | Code quality check | Final approval |
+
+---
+
+## Orchestrator Detail
+
+```mermaid
+flowchart TB
+    subgraph Orchestrator["🎯 Orchestrator Agent"]
+        SM["State Manager<br/>Track current phase/status"]
+        RT["Router<br/>Decide next agent"]
+        HC["Human Control<br/>Handle interrupt/resume"]
+        PT["Parallel Tracker<br/>Monitor concurrent tasks"]
+        ER["Error Handler<br/>Recovery & retry logic"]
+    end
+
+    SM --> RT
+    RT --> HC
+    HC --> PT
+    PT --> ER
+    ER --> SM
+```
+
+### Orchestrator Responsibilities
+
+1. **State Management**
+   - Current phase (Planning/Development/Quality)
+   - Completed tasks
+   - Pending human approvals
+
+2. **Routing Logic**
+   - Sequential flow in Phase 1 & 3
+   - Parallel dispatch in Phase 2
+   - Conditional routing based on human feedback
+
+3. **Human-in-the-Loop Control**
+   - `interrupt()` before each checkpoint
+   - Store state durably (can resume months later)
+   - Route feedback to appropriate agent
+
+4. **Parallel Task Management**
+   - Launch independent tasks concurrently
+   - Track completion status
+   - Aggregate results before Phase 3
+
+5. **Error Recovery**
+   - Retry failed LLM calls
+   - Escalate to human on repeated failures
+   - Rollback to last checkpoint if needed
+
+---
 
 ## Human-in-the-Loop Flow
 
 ```mermaid
 sequenceDiagram
+    participant O as Orchestrator
     participant A as Agent
     participant H as Human
 
+    O->>A: Dispatch task
+    A->>A: Execute task
+    A->>O: Return output
+    O->>O: interrupt()
+    O->>H: Present output for review
+
     loop Until Approved
-        A->>H: 成果物を提示
-        H->>A: フィードバック (承認 or 修正指示)
-        alt 修正指示
-            A->>A: 修正作業
+        H->>O: Feedback (approve/revise)
+        alt Revision requested
+            O->>A: Forward feedback
+            A->>A: Revise output
+            A->>O: Return revised
+            O->>H: Present revision
         end
     end
-    A->>A: 次のステップへ
+
+    H->>O: Approve
+    O->>O: Resume to next agent
 ```
 
-## Agent Details
+---
 
-### Phase 1: Planning Layer
+## State Schema
 
-| Agent | Role | Output |
-|-------|------|--------|
-| **Planner** | ゲームコンセプト・基本設計 | 企画書、技術要件 |
-| **Scenario** | ストーリー・キャラクター・世界観 | シナリオ、キャラ設定 |
-| **TaskSplitter** | 実装タスクへの分解 | タスクリスト（並列実行可否を識別） |
+```python
+from typing import TypedDict, Literal, Optional
+from langgraph.graph import StateGraph
 
-### Phase 2: Development Layer (Parallel Execution)
+class GameDevState(TypedDict):
+    # Current phase
+    phase: Literal["planning", "development", "quality", "complete"]
 
-| Agent | Role |
-|-------|------|
-| **Logic Coder** | ゲームロジック、状態管理、ゲームループ |
-| **UI Coder** | UI/UX、メニュー、HUD、画面遷移 |
-| **System Coder** | セーブ/ロード、設定、ファイル管理 |
-| **Image Agent** | 画像アセット生成・調達 |
-| **Sound Agent** | BGM/SE アセット生成・調達 |
+    # Planning outputs
+    concept: Optional[str]
+    design: Optional[str]
+    scenario: Optional[str]
+    characters: Optional[list[dict]]
+    world: Optional[str]
+    tasks: Optional[list[dict]]
 
-### Phase 3: Quality Layer
+    # Development outputs
+    code_outputs: dict[str, str]  # agent_name -> code
+    asset_outputs: dict[str, str]  # agent_name -> asset_path
 
-| Agent | Role |
-|-------|------|
-| **Integrator** | 各パーツの統合・結合 |
-| **Test** | 自動テスト実行、バグ検出 |
-| **Reviewer** | コードレビュー、最終品質確認 |
+    # Quality outputs
+    test_results: Optional[dict]
+    review_comments: Optional[list[str]]
 
-## Orchestrator Responsibilities
+    # Human feedback
+    pending_approval: Optional[str]  # agent awaiting approval
+    human_feedback: Optional[str]
 
-```mermaid
-flowchart LR
-    subgraph Orchestrator
-        A[State Management]
-        B[Agent Routing]
-        C[Human Approval Control]
-        D[Parallel Task Tracking]
-        E[Error Recovery]
-    end
+    # Metadata
+    iteration_count: int
+    error_log: list[str]
 ```
 
-- **State Management**: 現在のPhase/状態を管理
-- **Agent Routing**: 次に動くAgentを決定
-- **Human Approval Control**: Human承認待ちの制御
-- **Parallel Task Tracking**: 並列タスクの進捗追跡
-- **Error Recovery**: エラー時のリカバリー判断
+---
 
-## Detailed Flow
+## Implementation Phases
 
-```mermaid
-stateDiagram-v2
-    [*] --> Planning
+### MVP (Minimum Viable Product)
+- [ ] Orchestrator with basic routing
+- [ ] Concept + Design agents
+- [ ] Single Coder agent (combined)
+- [ ] Human approval at 3 checkpoints
 
-    state Planning {
-        [*] --> Planner
-        Planner --> HumanReview1: 企画提出
-        HumanReview1 --> Planner: 修正指示
-        HumanReview1 --> Scenario: 承認
-        Scenario --> HumanReview2: シナリオ提出
-        HumanReview2 --> Scenario: 修正指示
-        HumanReview2 --> TaskSplit: 承認
-        TaskSplit --> HumanReview3: タスク分解案
-        HumanReview3 --> TaskSplit: 修正指示
-        HumanReview3 --> [*]: 承認
-    }
+### V1.0
+- [ ] Full Planning layer (6 agents)
+- [ ] Parallel Development layer
+- [ ] Quality layer with automated tests
 
-    Planning --> Development
+### V2.0
+- [ ] Asset generation integration (DALL-E, etc.)
+- [ ] Multi-game template support
+- [ ] Web UI for human review
 
-    state Development {
-        [*] --> Parallel
-        state Parallel {
-            LogicCoder
-            UICoder
-            SystemCoder
-            --
-            ImageAgent
-            SoundAgent
-        }
-        Parallel --> HumanReviewDev: 成果物提出
-        HumanReviewDev --> Parallel: 修正指示
-        HumanReviewDev --> [*]: 承認
-    }
+---
 
-    Development --> Quality
+## Tech Stack
 
-    state Quality {
-        [*] --> Integrate
-        Integrate --> Test
-        Test --> Review
-        Review --> HumanFinal: 最終確認
-        HumanFinal --> [*]: 承認
-        HumanFinal --> Development: 問題あり
-    }
-
-    Quality --> [*]
-```
-
-## Tech Stack (Proposed)
-
-- **LangGraph**: Agent orchestration
-- **LangChain**: LLM integration
-- **Python**: Primary language
-- **Game Engine**: TBD (Phaser.js / Pygame / etc.)
+| Component | Technology |
+|-----------|------------|
+| **Orchestration** | LangGraph |
+| **LLM** | Claude / GPT-4 |
+| **Language** | Python 3.11+ |
+| **State Storage** | SQLite / PostgreSQL |
+| **Game Engine** | TBD (Phaser.js / Pygame) |
+| **Asset Gen** | DALL-E / Stable Diffusion |
+| **Audio Gen** | Suno / ElevenLabs |
