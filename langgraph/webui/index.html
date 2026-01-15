@@ -4,374 +4,349 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LangGraph Game Studio</title>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@300;400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
   <style>
     /*
-     * NieR:Automata UI Style
-     * Reference: https://codepen.io/levise/pen/vMzEwr
-     *
-     * Key characteristics:
-     * - Light beige background (#C8C2AA)
-     * - Dark brown text (#4D493E)
-     * - Minimalist, flat design
-     * - Uppercase text, wide letter-spacing
-     * - Soft box shadows
-     * - Musical score motifs (lines, decorations)
+     * NieR:Automata UI Style v2
+     * Based on actual game screenshots
      */
 
     :root {
-      --bg-main: #D4CDB7;
-      --bg-panel: #C8C2AA;
-      --bg-hover: #BFB9A1;
-      --bg-active: #4D493E;
-      --text-main: #4D493E;
-      --text-light: #6B665A;
-      --text-active: #D4CDB7;
-      --border: rgba(77, 73, 62, 0.3);
-      --shadow: rgba(77, 73, 62, 0.4);
+      /* Background colors */
+      --bg-main: #E8E4D4;
+      --bg-panel: #DAD5C3;
+      --bg-selected: #CCC7B5;
+      --bg-header: #57534A;
+      --bg-footer: #57534A;
+
+      /* Text colors */
+      --text-main: #454138;
+      --text-light: #7A756A;
+      --text-header: #E8E4D4;
+      --text-footer: #E8E4D4;
+
+      /* Accent colors (category markers) */
+      --accent-red: #B85C5C;
+      --accent-orange: #C4956C;
+      --accent-yellow: #C9C078;
+      --accent-green: #7AAA7A;
+      --accent-blue: #6B8FAA;
+
+      /* Borders */
+      --border-light: rgba(69, 65, 56, 0.2);
+      --border-dark: rgba(69, 65, 56, 0.4);
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      font-family: 'Noto Sans', 'Noto Sans JP', sans-serif;
-      font-weight: 300;
+      font-family: 'Noto Sans JP', sans-serif;
+      font-weight: 400;
+      font-size: 14px;
       background: var(--bg-main);
       color: var(--text-main);
       min-height: 100vh;
-      letter-spacing: 0.1em;
-      line-height: 1.6;
-    }
-
-    /* Header */
-    header {
-      background: var(--bg-panel);
-      padding: 1.5rem 2rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 2px 8px var(--shadow);
-    }
-
-    .logo {
-      font-size: 1rem;
-      font-weight: 400;
-      text-transform: uppercase;
-      letter-spacing: 0.2em;
-    }
-
-    .status {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .status::before {
-      content: '';
-      width: 6px;
-      height: 6px;
-      background: var(--text-main);
-      border-radius: 50%;
-    }
-
-    /* Main Layout */
-    .container {
-      display: flex;
-      min-height: calc(100vh - 80px);
-    }
-
-    /* Sidebar */
-    .sidebar {
-      width: 280px;
-      background: var(--bg-panel);
-      padding: 1rem 0;
-      box-shadow: 2px 0 8px var(--shadow);
-    }
-
-    .menu-item {
-      display: block;
-      padding: 1rem 1.5rem;
-      text-decoration: none;
-      color: var(--text-main);
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      cursor: pointer;
-      transition: background 0.1s;
-      border: none;
-      background: none;
-      width: 100%;
-      text-align: left;
-    }
-
-    .menu-item:hover {
-      background: var(--bg-hover);
-    }
-
-    .menu-item.active {
-      background: var(--bg-active);
-      color: var(--text-active);
-    }
-
-    .menu-divider {
-      height: 1px;
-      background: var(--border);
-      margin: 0.5rem 1.5rem;
-    }
-
-    /* Content */
-    .content {
-      flex: 1;
-      padding: 2rem;
-    }
-
-    /* Panel */
-    .panel {
-      background: var(--bg-panel);
-      margin-bottom: 1.5rem;
-      box-shadow: 3px 3px 0 var(--shadow);
-    }
-
-    .panel-header {
-      background: var(--bg-active);
-      color: var(--text-active);
-      padding: 0.75rem 1.25rem;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      font-weight: 400;
-    }
-
-    .panel-body {
-      padding: 1.25rem;
-    }
-
-    /* Typography */
-    h1, h2, h3 {
-      font-weight: 400;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-    }
-
-    .title-large {
-      font-size: 1.25rem;
-      margin-bottom: 0.5rem;
-    }
-
-    .subtitle {
-      font-size: 0.8rem;
-      color: var(--text-light);
-      text-transform: uppercase;
-    }
-
-    /* Progress Bar */
-    .progress-container {
-      margin: 1.5rem 0;
-    }
-
-    .progress-phases {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .phase {
       display: flex;
       flex-direction: column;
-      align-items: center;
-      gap: 0.5rem;
     }
 
-    .phase-marker {
-      width: 12px;
-      height: 12px;
-      border: 2px solid var(--text-main);
-      background: transparent;
+    /* ===== Header Tab Navigation ===== */
+    .header-tabs {
+      display: flex;
+      background: var(--bg-header);
+      border-bottom: 2px solid #3D3A33;
     }
 
-    .phase-marker.complete {
-      background: var(--text-main);
-    }
-
-    .phase-marker.active {
-      background: var(--text-main);
-      box-shadow: 0 0 0 3px var(--bg-panel), 0 0 0 5px var(--text-main);
-    }
-
-    .phase-line {
-      flex: 1;
-      height: 2px;
-      background: var(--border);
-      margin: 0 0.5rem;
-    }
-
-    .phase-line.complete {
-      background: var(--text-main);
-    }
-
-    .phase-label {
-      font-size: 0.65rem;
-      text-transform: uppercase;
+    .tab {
+      padding: 12px 24px;
+      color: var(--text-header);
+      font-size: 13px;
       letter-spacing: 0.1em;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-right: 1px solid rgba(255,255,255,0.1);
+      transition: background 0.15s;
+    }
+
+    .tab:hover {
+      background: rgba(255,255,255,0.1);
+    }
+
+    .tab.active {
+      background: rgba(255,255,255,0.15);
+    }
+
+    .tab-icon {
+      font-size: 11px;
+      opacity: 0.8;
+    }
+
+    /* Diamond cursor for active tab */
+    .tab.active::before {
+      content: '◇';
+      position: absolute;
+      left: -20px;
+      font-size: 10px;
+    }
+
+    /* ===== Main Content ===== */
+    .main-content {
+      flex: 1;
+      display: flex;
+      padding: 20px;
+      gap: 20px;
+    }
+
+    /* ===== Page Title ===== */
+    .page-title {
+      font-size: 28px;
+      font-weight: 300;
+      letter-spacing: 0.15em;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+
+    .page-title-sub {
+      font-size: 14px;
       color: var(--text-light);
     }
 
-    /* Agent List */
-    .agent-list {
+    /* ===== Left Panel (List) ===== */
+    .left-panel {
+      width: 320px;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
     }
 
-    .agent-row {
+    /* Diamond marker */
+    .diamond-marker {
       display: flex;
       align-items: center;
-      padding: 0.75rem 1rem;
-      background: var(--bg-main);
-      gap: 1rem;
-    }
-
-    .agent-row:hover {
-      background: var(--bg-hover);
-    }
-
-    .agent-indicator {
-      width: 8px;
-      height: 8px;
-      background: var(--text-light);
-    }
-
-    .agent-indicator.running {
-      background: var(--text-main);
-      animation: blink 1s infinite;
-    }
-
-    @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    .agent-name {
-      flex: 1;
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-    }
-
-    .agent-status {
-      font-size: 0.7rem;
-      text-transform: uppercase;
+      gap: 8px;
+      margin-bottom: 8px;
       color: var(--text-light);
+      font-size: 12px;
     }
 
-    /* Buttons */
-    .btn {
-      font-family: inherit;
-      font-size: 0.75rem;
-      font-weight: 400;
-      padding: 0.75rem 2rem;
-      background: transparent;
-      border: 2px solid var(--text-main);
-      color: var(--text-main);
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      cursor: pointer;
-      transition: all 0.1s;
+    .diamond-marker::before {
+      content: '◇';
+      font-size: 14px;
     }
 
-    .btn:hover {
-      background: var(--text-main);
-      color: var(--text-active);
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 1rem;
-      margin-top: 1rem;
-    }
-
-    /* Checkpoint Alert */
-    .checkpoint {
-      border: 3px solid var(--text-main);
-      padding: 1.5rem;
-      margin-bottom: 1.5rem;
+    /* List items */
+    .list-container {
       background: var(--bg-panel);
-    }
-
-    .checkpoint-badge {
-      display: inline-block;
-      background: var(--bg-active);
-      color: var(--text-active);
-      padding: 0.25rem 0.75rem;
-      font-size: 0.65rem;
-      text-transform: uppercase;
-      letter-spacing: 0.15em;
-      margin-bottom: 1rem;
-    }
-
-    .checkpoint-title {
-      font-size: 1rem;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.5rem;
-    }
-
-    .checkpoint-meta {
-      font-size: 0.75rem;
-      color: var(--text-light);
-      margin-bottom: 1.5rem;
-    }
-
-    /* Log Viewer */
-    .log-viewer {
-      font-family: 'Noto Sans', monospace;
-      font-size: 0.7rem;
-      background: var(--bg-main);
-      padding: 1rem;
-      height: 180px;
+      border: 1px solid var(--border-light);
+      flex: 1;
       overflow-y: auto;
-      border: 1px solid var(--border);
     }
 
-    .log-entry {
-      padding: 0.25rem 0;
-      border-bottom: 1px solid var(--border);
+    .list-item {
       display: flex;
-      gap: 1rem;
+      align-items: center;
+      padding: 10px 16px;
+      gap: 12px;
+      cursor: pointer;
+      border-bottom: 1px solid var(--border-light);
+      transition: background 0.1s;
     }
 
-    .log-time {
-      color: var(--text-light);
-      min-width: 70px;
+    .list-item:hover {
+      background: var(--bg-selected);
     }
 
-    .log-level {
-      min-width: 50px;
-      text-transform: uppercase;
+    .list-item.selected {
+      background: var(--bg-selected);
     }
 
-    .log-msg {
+    /* Category color marker */
+    .category-marker {
+      width: 4px;
+      height: 16px;
+    }
+
+    .category-marker.system { background: var(--accent-red); }
+    .category-marker.attack { background: var(--accent-orange); }
+    .category-marker.defense { background: var(--accent-yellow); }
+    .category-marker.support { background: var(--accent-green); }
+    .category-marker.hacking { background: var(--accent-blue); }
+
+    .list-item-text {
       flex: 1;
     }
 
-    /* Decorative Lines (Musical Score Motif) */
-    .deco-lines {
-      height: 20px;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 3px,
-        var(--border) 3px,
-        var(--border) 4px
-      );
-      margin: 1rem 0;
+    .list-item-value {
+      color: var(--text-light);
+      font-size: 13px;
     }
 
-    /* Scrollbar */
+    .badge-new {
+      background: var(--accent-red);
+      color: white;
+      font-size: 10px;
+      padding: 2px 6px;
+      letter-spacing: 0.05em;
+    }
+
+    /* ===== Right Panel (Detail) ===== */
+    .right-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Detail card */
+    .detail-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+    }
+
+    .detail-header {
+      background: var(--bg-header);
+      color: var(--text-header);
+      padding: 8px 16px;
+      font-size: 13px;
+      letter-spacing: 0.1em;
+    }
+
+    .detail-body {
+      padding: 16px;
+    }
+
+    /* Status display */
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .status-row:last-child {
+      border-bottom: none;
+    }
+
+    .status-label {
+      color: var(--text-light);
+    }
+
+    .status-value {
+      font-weight: 500;
+    }
+
+    .status-change-up {
+      color: var(--accent-green);
+    }
+
+    .status-change-down {
+      color: var(--accent-red);
+    }
+
+    /* Icon display area */
+    .icon-display {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 120px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-light);
+      margin-bottom: 12px;
+    }
+
+    .icon-symbol {
+      font-size: 48px;
+      color: var(--text-light);
+    }
+
+    .detail-description {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text-light);
+    }
+
+    /* Progress bar */
+    .progress-bar {
+      height: 8px;
+      background: var(--border-light);
+      margin-top: 8px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--text-main);
+    }
+
+    /* ===== Footer ===== */
+    .footer {
+      background: var(--bg-footer);
+      color: var(--text-footer);
+      padding: 12px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 2px solid #3D3A33;
+    }
+
+    .footer-message {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .footer-message::before {
+      content: '';
+      width: 3px;
+      height: 16px;
+      background: var(--text-footer);
+    }
+
+    .footer-controls {
+      display: flex;
+      gap: 24px;
+      font-size: 13px;
+    }
+
+    .footer-control {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .control-icon {
+      opacity: 0.7;
+    }
+
+    /* ===== Decorative elements ===== */
+    .corner-dots {
+      position: relative;
+    }
+
+    .corner-dots::before,
+    .corner-dots::after {
+      content: '• • •';
+      position: absolute;
+      font-size: 8px;
+      color: var(--text-light);
+      letter-spacing: 4px;
+    }
+
+    .corner-dots::before {
+      top: 8px;
+      right: 16px;
+    }
+
+    .corner-dots::after {
+      bottom: 8px;
+      left: 16px;
+    }
+
+    /* ===== Scrollbar ===== */
     ::-webkit-scrollbar {
-      width: 8px;
+      width: 6px;
     }
 
     ::-webkit-scrollbar-track {
@@ -379,165 +354,182 @@
     }
 
     ::-webkit-scrollbar-thumb {
-      background: var(--text-light);
+      background: var(--border-dark);
     }
 
-    ::-webkit-scrollbar-thumb:hover {
-      background: var(--text-main);
+    /* ===== Category Legend ===== */
+    .category-legend {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 16px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      margin-bottom: 16px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .legend-marker {
+      width: 4px;
+      height: 14px;
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="logo">LangGraph Game Studio</div>
-    <div class="status">System Active</div>
-  </header>
 
-  <div class="container">
-    <nav class="sidebar">
-      <button class="menu-item active">Dashboard</button>
-      <button class="menu-item">Projects</button>
-      <button class="menu-item">Agents</button>
-      <div class="menu-divider"></div>
-      <button class="menu-item">New Project</button>
-      <button class="menu-item">Settings</button>
-      <div class="menu-divider"></div>
-      <button class="menu-item">Logs</button>
-      <button class="menu-item">Help</button>
-    </nav>
+  <!-- Header Tabs -->
+  <nav class="header-tabs">
+    <div class="tab"><span class="tab-icon">⊞</span> MAP</div>
+    <div class="tab"><span class="tab-icon">✦</span> QUEST</div>
+    <div class="tab active"><span class="tab-icon">⚙</span> SYSTEM</div>
+    <div class="tab"><span class="tab-icon">⚔</span> AGENTS</div>
+    <div class="tab"><span class="tab-icon">◈</span> LOGS</div>
+    <div class="tab"><span class="tab-icon">☰</span> DATA</div>
+  </nav>
 
-    <main class="content">
-      <!-- Project Status -->
-      <div class="panel">
-        <div class="panel-header">Current Project</div>
-        <div class="panel-body">
-          <div class="title-large">Untitled RPG</div>
-          <div class="subtitle">Phase 2 Development</div>
+  <!-- Main Content -->
+  <div class="main-content corner-dots">
+    <div class="left-panel">
+      <div class="page-title">
+        SYSTEM <span class="page-title-sub">- エージェント管理</span>
+      </div>
 
-          <div class="deco-lines"></div>
+      <!-- Category Legend -->
+      <div class="category-legend">
+        <div class="legend-item">
+          <div class="legend-marker" style="background: var(--accent-red)"></div>
+          システム
+        </div>
+        <div class="legend-item">
+          <div class="legend-marker" style="background: var(--accent-orange)"></div>
+          実行中
+        </div>
+        <div class="legend-item">
+          <div class="legend-marker" style="background: var(--accent-yellow)"></div>
+          待機中
+        </div>
+        <div class="legend-item">
+          <div class="legend-marker" style="background: var(--accent-green)"></div>
+          完了
+        </div>
+      </div>
 
-          <div class="progress-container">
-            <div class="progress-phases">
-              <div class="phase">
-                <div class="phase-marker complete"></div>
-                <div class="phase-label">Concept</div>
-              </div>
-              <div class="phase-line complete"></div>
-              <div class="phase">
-                <div class="phase-marker complete"></div>
-                <div class="phase-label">Design</div>
-              </div>
-              <div class="phase-line complete"></div>
-              <div class="phase">
-                <div class="phase-marker active"></div>
-                <div class="phase-label">Code</div>
-              </div>
-              <div class="phase-line"></div>
-              <div class="phase">
-                <div class="phase-marker"></div>
-                <div class="phase-label">Test</div>
-              </div>
-              <div class="phase-line"></div>
-              <div class="phase">
-                <div class="phase-marker"></div>
-                <div class="phase-label">Review</div>
-              </div>
-            </div>
+      <div class="diamond-marker">エージェント一覧</div>
+
+      <div class="list-container">
+        <div class="list-item selected">
+          <div class="category-marker attack"></div>
+          <div class="list-item-text">CodeLeader</div>
+          <div class="list-item-value">67%</div>
+        </div>
+        <div class="list-item">
+          <div class="category-marker attack"></div>
+          <div class="list-item-text">AssetLeader</div>
+          <div class="list-item-value">45%</div>
+        </div>
+        <div class="list-item">
+          <div class="category-marker defense"></div>
+          <div class="list-item-text">Tester</div>
+          <div class="list-item-value">--</div>
+        </div>
+        <div class="list-item">
+          <div class="category-marker defense"></div>
+          <div class="list-item-text">Reviewer</div>
+          <div class="list-item-value">--</div>
+        </div>
+        <div class="list-item">
+          <div class="category-marker support"></div>
+          <div class="list-item-text">Integrator</div>
+          <div class="list-item-value">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-panel">
+      <!-- Agent Detail -->
+      <div class="detail-card">
+        <div class="detail-header">CodeLeader</div>
+        <div class="detail-body">
+          <div class="icon-display">
+            <div class="icon-symbol">◈</div>
+          </div>
+          <div class="detail-description">
+            コード実装を統括するリーダーエージェント。<br>
+            配下のCodeWorkerに対してタスクを分配し、進捗を管理する。
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" style="width: 67%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div class="detail-card">
+        <div class="detail-header">ステータス</div>
+        <div class="detail-body">
+          <div class="status-row">
+            <span class="status-label">プロジェクト：</span>
+            <span class="status-value">Untitled RPG</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">フェーズ：</span>
+            <span class="status-value">Phase 2 - Development</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">実行時間：</span>
+            <span class="status-value">00:45:23</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">タスク完了：</span>
+            <span class="status-value">12 / 28</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">サブエージェント：</span>
+            <span class="status-value">3 active</span>
           </div>
         </div>
       </div>
 
       <!-- Checkpoint -->
-      <div class="checkpoint">
-        <div class="checkpoint-badge">Awaiting Approval</div>
-        <div class="checkpoint-title">Design Document Review</div>
-        <div class="checkpoint-meta">Submitted by DesignAgent / Waiting 1h 23m</div>
-        <div class="btn-group">
-          <button class="btn">Approve</button>
-          <button class="btn">Request Changes</button>
-          <button class="btn">Reject</button>
+      <div class="detail-card">
+        <div class="detail-header" style="background: var(--accent-red);">
+          ◈ CHECKPOINT - 承認待ち
         </div>
-      </div>
-
-      <!-- Agents -->
-      <div class="panel">
-        <div class="panel-header">Active Agents</div>
-        <div class="panel-body">
-          <div class="agent-list">
-            <div class="agent-row">
-              <div class="agent-indicator running"></div>
-              <div class="agent-name">Code Leader</div>
-              <div class="agent-status">Running 67%</div>
-            </div>
-            <div class="agent-row">
-              <div class="agent-indicator running"></div>
-              <div class="agent-name">Asset Leader</div>
-              <div class="agent-status">Running 45%</div>
-            </div>
-            <div class="agent-row">
-              <div class="agent-indicator"></div>
-              <div class="agent-name">Tester</div>
-              <div class="agent-status">Idle</div>
-            </div>
-            <div class="agent-row">
-              <div class="agent-indicator"></div>
-              <div class="agent-name">Reviewer</div>
-              <div class="agent-status">Idle</div>
-            </div>
+        <div class="detail-body">
+          <div class="status-row">
+            <span class="status-label">種別：</span>
+            <span class="status-value">Design Document Review</span>
+          </div>
+          <div class="status-row">
+            <span class="status-label">待機時間：</span>
+            <span class="status-value status-change-down">1h 23m</span>
           </div>
         </div>
       </div>
-
-      <!-- Log -->
-      <div class="panel">
-        <div class="panel-header">System Log</div>
-        <div class="panel-body">
-          <div class="log-viewer">
-            <div class="log-entry">
-              <span class="log-time">14:23:01</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">CodeLeader initialized</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:23:02</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">Spawning CodeWorker 1</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:23:15</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">Implementing PlayerController.ts</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:24:30</span>
-              <span class="log-level">Warn</span>
-              <span class="log-msg">Token usage 2847 of 4096</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:25:01</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">AssetLeader initialized</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:25:45</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">Generating character sprites</span>
-            </div>
-            <div class="log-entry">
-              <span class="log-time">14:26:12</span>
-              <span class="log-level">Info</span>
-              <span class="log-msg">Checkpoint awaiting human approval</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="btn-group">
-        <button class="btn">New Project</button>
-        <button class="btn">Pause</button>
-        <button class="btn">Export</button>
-      </div>
-    </main>
+    </div>
   </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-message">プロジェクトを選択してください。</div>
+    <div class="footer-controls">
+      <div class="footer-control">
+        <span class="control-icon">↕</span> 選択
+      </div>
+      <div class="footer-control">
+        <span class="control-icon">◉</span> 決定
+      </div>
+      <div class="footer-control">
+        <span class="control-icon">⊗</span> 戻る
+      </div>
+    </div>
+  </footer>
+
 </body>
 </html>
