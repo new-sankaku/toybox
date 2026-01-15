@@ -51,21 +51,35 @@ flowchart TB
 
     subgraph Phase2["⚙️ フェーズ2: 開発"]
         direction TB
-        CL["🎖️ Code Leader"]
-        AL["🎖️ Asset Leader"]
+        subgraph Leaders[" "]
+            direction LR
+            CL["🎖️ Code Leader"]
+            AL["🎖️ Asset Leader"]
+        end
 
-        CL --> HCL["👤 開発計画承認"]
-        AL --> HAL["👤 制作計画承認"]
+        subgraph Work[" "]
+            direction LR
+            subgraph CodeSide[" "]
+                direction TB
+                HCL["👤 計画承認"]
+                CodeWork["🤖 Code Agent群"]
+                HCode["👤 確認"]
+                HCL --> CodeWork --> HCode
+            end
+            subgraph AssetSide[" "]
+                direction TB
+                HAL["👤 計画承認"]
+                AssetWork["🤖 Asset Agent群"]
+                HAsset["👤 確認"]
+                HAL --> AssetWork --> HAsset
+            end
+        end
 
-        HCL --> CodeWork["🤖 Code Agent群<br/>（並列実行）"]
-        HAL --> AssetWork["🤖 Asset Agent群<br/>（並列実行）"]
-
-        CodeWork --> HCode["👤 コード確認"]
-        AssetWork --> HAsset["👤 アセット確認"]
+        CL --> CodeSide
+        AL --> AssetSide
 
         HCode --> Integration["🤖 統合"]
         HAsset --> Integration
-
         Integration --> HInt["👤 統合確認"]
     end
 
