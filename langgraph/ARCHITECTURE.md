@@ -22,33 +22,46 @@
 
 ## システム概要
 
-```
-                        [Orchestrator]
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-        ▼                    ▼                    ▼
-   [Agent実行] ──────→ [Human承認] ──────→ [次のAgentへ]
-                    (interrupt()で中断)
+```mermaid
+flowchart TB
+    Orch[Orchestrator]
+    Orch -->|指示| Agent[Agent実行]
+    Agent -->|結果| Orch
+    Orch -->|承認依頼| Human[Human承認]
+    Human -->|承認/修正| Orch
 ```
 
-**開始**
 ↓
-**フェーズ1: 企画（順次実行）**
+
+```mermaid
+flowchart LR
+    subgraph Phase1[フェーズ1: 企画]
+        direction LR
+        P1[企画] --> H1[Human]
+        H1 --> P2[設計] --> H2[Human]
+        H2 --> P3[シナリオ] --> H3[Human]
+    end
 ```
-[企画] → Human → [設計] → Human → [シナリオ] → Human
-                                       ↓
-[キャラ] → Human → [世界観] → Human → [タスク分解] → Human
+```mermaid
+flowchart LR
+    subgraph Phase1b[フェーズ1: 企画 続き]
+        direction LR
+        P4[キャラ] --> H4[Human]
+        H4 --> P5[世界観] --> H5[Human]
+        H5 --> P6[タスク分解] --> H6[Human]
+    end
 ```
+
 ↓
-**フェーズ2: 開発（並列実行）**
+
 ```
+フェーズ2: 開発（並列実行）
+
       [Code Leader]              [Asset Leader]
             ↓                          ↓
         Human承認                  Human承認
             ↓                          ↓
       [Code Agent群]             [Asset Agent群]
-       (並列実行)                  (並列実行)
             ↓                          ↓
         Human確認                  Human確認
             ↓                          ↓
@@ -56,12 +69,18 @@
                           ↓
                      Human確認
 ```
+
 ↓
-**フェーズ3: 品質（順次実行）**
-```
-[テスト] → Human確認 → [レビュー] → Human最終承認 → リリース
-                                        ↓
-                                修正あれば フェーズ2へ
+
+```mermaid
+flowchart LR
+    subgraph Phase3[フェーズ3: 品質]
+        direction LR
+        T[テスト] --> HT[Human確認]
+        HT --> R[レビュー] --> HF[Human最終承認]
+        HF -->|承認| Done[リリース]
+        HF -->|修正| Back[フェーズ2へ]
+    end
 ```
 
 Human介入は全13箇所。各ポイントで「承認」「修正指示」「却下」を選択できます。
