@@ -2,6 +2,7 @@
 Flask + Socket.IO Server
 """
 
+import os
 from flask import Flask
 from flask_cors import CORS
 import socketio
@@ -12,20 +13,25 @@ from handlers.checkpoint import register_checkpoint_routes
 from handlers.metrics import register_metrics_routes
 from handlers.websocket import register_websocket_handlers
 from mock_data import MockDataStore
+from config import get_config
+from agents import create_agent_runner
 
 
 def create_app():
     """Create and configure Flask app with Socket.IO"""
 
+    # Load config
+    config = get_config()
+
     # Flask app
     app = Flask(__name__)
-    CORS(app, origins="*")
+    CORS(app, origins=config.server.cors_origins)
 
     # Socket.IO server with CORS
     sio = socketio.Server(
-        cors_allowed_origins="*",
+        cors_allowed_origins=config.server.cors_origins,
         async_mode='eventlet',
-        logger=True,
+        logger=config.server.debug,
         engineio_logger=False
     )
 
@@ -34,6 +40,14 @@ def create_app():
 
     # Initialize mock data store
     data_store = MockDataStore()
+
+    # Initialize agent runner (mock or langgraph based on config)
+    agent_runner = create_agent_runner(
+        mode=config.agent.mode,
+        api_key=config.agent.anthropic_api_key,
+        model=config.agent.model,
+        max_tokens=config.agent.max_tokens,
+    )
 
     # Register REST API routes
     register_project_routes(app, data_store, sio)
@@ -47,10 +61,16 @@ def create_app():
     # Health check endpoint
     @app.route('/health')
     def health():
-        return {'status': 'ok', 'service': 'aiagentgame2-mock-backend'}
+        return {
+            'status': 'ok',
+            'service': 'aiagentgame2-backend',
+            'agent_mode': config.agent.mode,
+        }
 
     # Store references
     app.data_store = data_store
+    app.agent_runner = agent_runner
+    app.config_obj = config
     app.sio = sio
     app.wsgi_app_wrapper = app_wsgi
 
