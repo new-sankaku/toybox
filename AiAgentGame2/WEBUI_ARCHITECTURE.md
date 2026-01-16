@@ -58,9 +58,11 @@
 | Layer | Technology | Purpose |
 |-------|------------|---------|
 | **Frontend** | React 18 + TypeScript | UI Framework |
+| | Vite | Build Tool |
+| | Electron | Desktop Application |
 | | Tailwind CSS | Styling (NieR theme) |
 | | Zustand | State Management |
-| | React Query | Server State / Caching |
+| | React Query | Server State / Caching (予定) |
 | | Socket.io Client | Real-time Communication |
 | **Backend** | FastAPI (Python) | REST API Server |
 | | Socket.io | WebSocket Server |
@@ -76,82 +78,84 @@
 
 ```
 src/
-├── app/
-│   ├── layout.tsx              # Root layout with NieR theme
-│   ├── page.tsx                # Dashboard (main page)
-│   ├── projects/
-│   │   ├── page.tsx            # Project list
-│   │   ├── [id]/
-│   │   │   ├── page.tsx        # Project detail
-│   │   │   ├── agents/
-│   │   │   │   └── [agentId]/
-│   │   │   │       └── page.tsx # Agent detail view
-│   │   │   └── checkpoints/
-│   │   │       └── [checkpointId]/
-│   │   │           └── page.tsx # Checkpoint review
-│   │   └── new/
-│   │       └── page.tsx        # Create project
-│   └── settings/
-│       └── page.tsx            # Settings
+├── main.tsx                    # Entry point
+├── App.tsx                     # Root component with routing
+│
+├── views/                      # Page-level components
+│   ├── index.ts
+│   ├── ProjectView.tsx         # Project dashboard
+│   ├── AgentsView.tsx          # Agent list view
+│   ├── CheckpointsView.tsx     # Checkpoint list view
+│   ├── LogsView.tsx            # System logs view
+│   ├── DataView.tsx            # Data/outputs view
+│   ├── CostView.tsx            # Cost tracking view
+│   └── ConfigView.tsx          # Settings view
 │
 ├── components/
 │   ├── ui/                     # Base UI components (NieR styled)
+│   │   ├── index.ts
 │   │   ├── Button.tsx
 │   │   ├── Card.tsx
-│   │   ├── Panel.tsx
-│   │   ├── Input.tsx
-│   │   ├── Select.tsx
 │   │   ├── Progress.tsx
-│   │   ├── Badge.tsx
-│   │   ├── Modal.tsx
-│   │   ├── Toast.tsx
-│   │   └── CategoryMarker.tsx
+│   │   ├── CategoryMarker.tsx
+│   │   └── DiamondMarker.tsx
+│   │   # 予定: Panel, Input, Select, Badge, Modal, Toast
 │   │
 │   ├── layout/                 # Layout components
-│   │   ├── Header.tsx
-│   │   ├── TabNavigation.tsx
+│   │   ├── AppLayout.tsx
+│   │   ├── HeaderTabs.tsx
 │   │   ├── Footer.tsx
 │   │   └── ConnectionStatus.tsx
 │   │
 │   ├── dashboard/              # Dashboard specific
+│   │   ├── DashboardView.tsx
 │   │   ├── ProjectStatus.tsx
 │   │   ├── ActiveAgents.tsx
 │   │   ├── PendingApprovals.tsx
-│   │   ├── MetricsPanel.tsx
-│   │   └── PhaseProgress.tsx
+│   │   ├── MetricsOverview.tsx
+│   │   ├── PhaseProgress.tsx
+│   │   ├── TaskList.tsx
+│   │   └── AssetStatus.tsx
 │   │
 │   ├── agents/                 # Agent related
+│   │   ├── index.ts
 │   │   ├── AgentCard.tsx
-│   │   ├── AgentDetail.tsx
-│   │   ├── AgentMetrics.tsx
-│   │   ├── AgentLog.tsx
-│   │   ├── SubAgentList.tsx
-│   │   └── TaskQueue.tsx
+│   │   ├── AgentDetailView.tsx
+│   │   ├── AgentListView.tsx
+│   │   └── AgentLog.tsx
+│   │   # 予定: AgentMetrics, SubAgentList, TaskQueue
 │   │
 │   ├── checkpoints/            # Human checkpoint
+│   │   ├── index.ts
 │   │   ├── CheckpointCard.tsx
-│   │   ├── CheckpointReview.tsx
+│   │   ├── CheckpointListView.tsx
+│   │   ├── CheckpointReviewView.tsx
 │   │   ├── FeedbackForm.tsx
 │   │   └── ApprovalButtons.tsx
 │   │
 │   ├── viewers/                # Output viewers
 │   │   ├── DocumentViewer.tsx
-│   │   ├── CodeViewer.tsx
-│   │   ├── AssetViewer.tsx
-│   │   └── TestResultViewer.tsx
+│   │   └── CodeViewer.tsx
+│   │   # 予定: AssetViewer, TestResultViewer
 │   │
-│   ├── errors/                 # Error handling
+│   ├── analytics/              # Analytics & cost tracking
+│   │   ├── index.ts
+│   │   ├── TokenTracker.tsx
+│   │   ├── CostEstimator.tsx
+│   │   └── DependencyGraph.tsx
+│   │
+│   ├── errors/                 # Error handling (予定)
 │   │   ├── ErrorPanel.tsx
 │   │   ├── ErrorToast.tsx
 │   │   ├── ConnectionOverlay.tsx
 │   │   └── RecoveryModal.tsx
 │   │
-│   └── project/                # Project related
+│   └── project/                # Project related (予定)
 │       ├── ProjectCard.tsx
 │       ├── ProjectForm.tsx
 │       └── ProjectTimeline.tsx
 │
-├── hooks/                      # Custom hooks
+├── hooks/                      # Custom hooks (予定)
 │   ├── useWebSocket.ts
 │   ├── useProject.ts
 │   ├── useAgents.ts
@@ -161,37 +165,39 @@ src/
 │   └── useRecovery.ts
 │
 ├── stores/                     # Zustand stores
+│   ├── index.ts
 │   ├── projectStore.ts
 │   ├── agentStore.ts
+│   ├── checkpointStore.ts
 │   ├── metricsStore.ts
-│   ├── connectionStore.ts
-│   └── uiStore.ts
+│   └── connectionStore.ts
 │
 ├── services/                   # API services
-│   ├── api.ts                  # Axios instance
-│   ├── projectService.ts
-│   ├── agentService.ts
-│   ├── checkpointService.ts
-│   ├── metricsService.ts
 │   └── websocketService.ts
+│   # 予定: api.ts, projectService.ts, agentService.ts 等
 │
 ├── types/                      # TypeScript types
+│   ├── index.ts
 │   ├── project.ts
 │   ├── agent.ts
 │   ├── checkpoint.ts
-│   ├── metrics.ts
-│   ├── websocket.ts
-│   └── api.ts
+│   └── websocket.ts
 │
 ├── styles/                     # Global styles
-│   ├── globals.css
-│   ├── nier-theme.css
-│   └── animations.css
+│   └── index.css               # Tailwind + NieR theme
 │
 └── lib/                        # Utilities
-    ├── utils.ts
-    ├── constants.ts
-    └── formatters.ts
+    └── utils.ts
+```
+
+### 2.1.1 Electron Structure
+
+```
+electron/
+├── main.ts                     # Electron main process
+├── preload.ts                  # Preload script (IPC bridge)
+└── backend/
+    └── manager.ts              # Backend process manager
 ```
 
 ### 2.2 State Management
@@ -451,207 +457,11 @@ backend/
 └── tests/
 ```
 
-### 3.2 API Endpoints
+### 3.2 API Endpoints & WebSocket Events
 
-```yaml
-# REST API Endpoints
+**→ [WebUI_API.md](./WebUI_API.md) を参照**
 
-# Projects
-GET     /api/v1/projects                    # List all projects
-POST    /api/v1/projects                    # Create new project
-GET     /api/v1/projects/{id}               # Get project details
-PUT     /api/v1/projects/{id}               # Update project
-DELETE  /api/v1/projects/{id}               # Delete project
-POST    /api/v1/projects/{id}/start         # Start project execution
-POST    /api/v1/projects/{id}/pause         # Pause project
-POST    /api/v1/projects/{id}/resume        # Resume project
-POST    /api/v1/projects/{id}/cancel        # Cancel project
-
-# Agents
-GET     /api/v1/projects/{id}/agents        # List agents for project
-GET     /api/v1/agents/{id}                 # Get agent details
-GET     /api/v1/agents/{id}/logs            # Get agent logs
-GET     /api/v1/agents/{id}/outputs         # Get agent outputs
-GET     /api/v1/agents/{id}/tasks           # Get agent task queue
-
-# Checkpoints
-GET     /api/v1/projects/{id}/checkpoints   # List checkpoints for project
-GET     /api/v1/checkpoints/{id}            # Get checkpoint details
-POST    /api/v1/checkpoints/{id}/approve    # Approve checkpoint
-POST    /api/v1/checkpoints/{id}/reject     # Reject checkpoint
-POST    /api/v1/checkpoints/{id}/request-changes  # Request changes
-
-# Metrics
-GET     /api/v1/projects/{id}/metrics       # Get project metrics
-GET     /api/v1/agents/{id}/metrics         # Get agent metrics
-
-# Outputs (Viewers)
-GET     /api/v1/outputs/{id}                # Get output content
-GET     /api/v1/outputs/{id}/raw            # Get raw output (JSON)
-GET     /api/v1/outputs/{id}/preview        # Get preview (rendered)
-GET     /api/v1/outputs/{id}/download       # Download output file
-
-# State (Recovery)
-GET     /api/v1/projects/{id}/state         # Get current state
-GET     /api/v1/projects/{id}/state/diff    # Get state diff (local vs server)
-POST    /api/v1/projects/{id}/state/sync    # Sync to server state
-
-# Logs
-GET     /api/v1/projects/{id}/logs          # Get project logs
-GET     /api/v1/logs/stream                 # SSE log stream
-```
-
-### 3.3 WebSocket Events
-
-```yaml
-# WebSocket Event Specifications
-
-# Client → Server Events
-subscribe:project:
-  payload:
-    projectId: string
-  description: Subscribe to project updates
-
-unsubscribe:project:
-  payload:
-    projectId: string
-  description: Unsubscribe from project updates
-
-subscribe:agent:
-  payload:
-    agentId: string
-  description: Subscribe to specific agent updates
-
-request:state_sync:
-  payload:
-    projectId: string
-  description: Request state synchronization after reconnection
-
-# Server → Client Events
-project:status_changed:
-  payload:
-    projectId: string
-    oldStatus: ProjectStatus
-    newStatus: ProjectStatus
-    timestamp: ISO8601
-
-project:phase_changed:
-  payload:
-    projectId: string
-    phase: number
-    phaseName: string
-    timestamp: ISO8601
-
-agent:started:
-  payload:
-    agentId: string
-    agentType: string
-    projectId: string
-    timestamp: ISO8601
-
-agent:progress:
-  payload:
-    agentId: string
-    progress: number (0-100)
-    currentTask: string
-    completedTasks: number
-    totalTasks: number
-    timestamp: ISO8601
-
-agent:completed:
-  payload:
-    agentId: string
-    duration: number (seconds)
-    tokensUsed: number
-    outputSummary: string
-    timestamp: ISO8601
-
-agent:failed:
-  payload:
-    agentId: string
-    errorType: "timeout" | "llm_error" | "validation_error" | "dependency_error"
-    errorMessage: string
-    canRetry: boolean
-    retryCount: number
-    maxRetries: number
-    timestamp: ISO8601
-
-agent:log:
-  payload:
-    agentId: string
-    level: "DEBUG" | "INFO" | "WARN" | "ERROR"
-    message: string
-    timestamp: ISO8601
-    metadata: object (optional)
-
-checkpoint:created:
-  payload:
-    checkpointId: string
-    projectId: string
-    agentId: string
-    checkpointType: string
-    title: string
-    outputPreview: string
-    timestamp: ISO8601
-
-checkpoint:resolved:
-  payload:
-    checkpointId: string
-    resolution: "approved" | "rejected" | "changes_requested"
-    feedback: string (optional)
-    timestamp: ISO8601
-
-metrics:update:
-  payload:
-    projectId: string
-    totalTokens: number
-    estimatedTotalTokens: number
-    elapsedSeconds: number
-    estimatedRemainingSeconds: number
-    completedTasks: number
-    totalTasks: number
-    timestamp: ISO8601
-
-metrics:tokens:
-  payload:
-    agentId: string
-    tokensUsed: number
-    tokensTotal: number
-    timestamp: ISO8601
-
-error:agent:
-  payload:
-    agentId: string
-    errorType: string
-    errorMessage: string
-    suggestions: string[]
-    actions: Array<{ label: string; action: string }>
-    timestamp: ISO8601
-
-error:llm:
-  payload:
-    errorType: "rate_limit" | "token_limit" | "api_error" | "invalid_response"
-    errorMessage: string
-    retryAfter: number (optional, seconds)
-    timestamp: ISO8601
-
-error:state:
-  payload:
-    errorType: "sync_failed" | "checkpoint_failed" | "restore_failed"
-    errorMessage: string
-    timestamp: ISO8601
-
-connection:state_sync:
-  payload:
-    projectId: string
-    serverState: {
-      currentAgent: string
-      progress: number
-      completedTasks: number
-      totalTasks: number
-    }
-    timestamp: ISO8601
-```
+REST APIエンドポイントおよびWebSocketイベントの詳細仕様は `WebUI_API.md` に記載。
 
 ---
 

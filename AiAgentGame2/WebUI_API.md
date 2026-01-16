@@ -203,6 +203,8 @@ interface StateSyncEvent {
 |-----------|-----------|------|
 | `subscribe:project` | `projectId: string` | プロジェクトの更新を購読 |
 | `unsubscribe:project` | `projectId: string` | 購読解除 |
+| `subscribe:agent` | `agentId: string` | 特定エージェントの更新を購読 (予定) |
+| `request:state_sync` | `{ projectId: string }` | 再接続後の状態同期リクエスト (予定) |
 | `checkpoint:resolve` | `CheckpointResolution` | チェックポイントを解決 |
 
 ```typescript
@@ -229,6 +231,7 @@ interface CheckpointResolution {
 | POST | `/api/projects/:id/start` | プロジェクト開始 |
 | POST | `/api/projects/:id/pause` | プロジェクト一時停止 |
 | POST | `/api/projects/:id/resume` | プロジェクト再開 |
+| POST | `/api/projects/:id/cancel` | プロジェクトキャンセル (予定) |
 
 #### リクエスト/レスポンス型
 
@@ -279,6 +282,7 @@ interface CreateProjectInput {
 | GET | `/api/agents/:id/logs` | エージェントログ取得 |
 | GET | `/api/agents/:id/outputs` | エージェント出力取得 |
 | GET | `/api/agents/:id/metrics` | エージェントメトリクス取得 |
+| GET | `/api/agents/:id/tasks` | エージェントタスクキュー取得 (予定) |
 
 #### リクエスト/レスポンス型
 
@@ -422,6 +426,82 @@ interface ProjectMetrics {
   currentPhase: 1 | 2 | 3
   phaseName: string
 }
+```
+
+### 2.5 Outputs API (予定)
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| GET | `/api/outputs/:id` | 出力コンテンツ取得 |
+| GET | `/api/outputs/:id/raw` | 生データ取得 (JSON) |
+| GET | `/api/outputs/:id/preview` | プレビュー取得 (レンダリング済み) |
+| GET | `/api/outputs/:id/download` | ファイルダウンロード |
+
+```typescript
+interface OutputPreview {
+  type: 'markdown' | 'code' | 'image' | 'audio' | 'test_result'
+  // Markdown
+  html?: string
+  raw?: Record<string, unknown>
+  // Code
+  language?: string
+  code?: string
+  filename?: string
+  lineCount?: number
+  // Image
+  url?: string
+  mimeType?: string
+  dimensions?: { width: number; height: number }
+  // Audio
+  duration?: number
+  // Test Result
+  summary?: string
+  passRate?: number
+  results?: TestResult[]
+}
+```
+
+### 2.6 State API (予定)
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| GET | `/api/projects/:id/state` | 現在の状態取得 |
+| GET | `/api/projects/:id/state/diff` | 状態差分取得 (ローカル vs サーバー) |
+| POST | `/api/projects/:id/state/sync` | サーバー状態に同期 |
+
+```typescript
+interface StateDiff {
+  server: {
+    currentAgent: string
+    progress: number
+    completedTasks: number
+    totalTasks: number
+  }
+  client: Record<string, unknown>
+  hasDiff: boolean
+}
+```
+
+### 2.7 Logs API (予定)
+
+| メソッド | エンドポイント | 説明 |
+|---------|---------------|------|
+| GET | `/api/projects/:id/logs` | プロジェクトログ取得 |
+| GET | `/api/logs/stream` | SSEログストリーム |
+
+```typescript
+interface LogEntry {
+  id: string
+  agentId: string
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  metadata?: Record<string, unknown>
+  timestamp: string
+}
+
+// SSE stream format
+// event: log
+// data: {"agentId": "...", "level": "info", "message": "...", "timestamp": "..."}
 ```
 
 ---
