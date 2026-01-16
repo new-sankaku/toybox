@@ -524,3 +524,36 @@ interface LogEntry {
 Socket.IOは以下の優先順位でトランスポートを使用:
 1. WebSocket
 2. Polling (フォールバック)
+
+---
+
+## 4. 実装ルール
+
+### 4.1 通信方式
+
+| 用途 | 方式 | 理由 |
+|-----|------|------|
+| リアルタイム更新 | WebSocket (Socket.IO) | プッシュ通知が必要 |
+| CRUD操作 | WebSocket | シンプルに統一 |
+| バイナリ転送 | Electron fs | HTTP不要、直接読み書き |
+
+### 4.2 ファイルアクセス (Electron)
+
+Electronアプリのため、ファイル読み書きは **Node.js fs モジュール**を直接使用する。
+HTTP経由のダウンロード/アップロードAPIは不要。
+
+```typescript
+// preload.ts で公開
+contextBridge.exposeInMainWorld('fs', {
+  readFile: (path: string) => fs.promises.readFile(path),
+  writeFile: (path: string, data: Buffer) => fs.promises.writeFile(path, data),
+})
+
+// renderer で使用
+const content = await window.fs.readFile('/path/to/output.png')
+```
+
+### 4.3 REST API
+
+REST APIは**将来のWeb版対応**のために仕様として残すが、
+Electron版では基本的にWebSocket + fs で実装する。
