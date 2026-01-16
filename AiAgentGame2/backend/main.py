@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-AiAgentGame2 Mock Backend Server
-LLM連携なしでフロントエンドとのI/F確認用
+AiAgentGame2 Backend Server
+AGENT_MODE で mock / langgraph を切り替え可能
 """
 
 # eventlet monkey_patch must be called before any other imports
@@ -9,19 +9,46 @@ import eventlet
 eventlet.monkey_patch()
 
 import argparse
-import sys
+import os
+
+# Load .env file if exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from server import create_app, run_server
+from config import get_config
 
 
 def main():
-    parser = argparse.ArgumentParser(description='AiAgentGame2 Mock Backend Server')
-    parser.add_argument('--port', type=int, default=8765, help='Port to run the server on')
-    parser.add_argument('--host', type=str, default='127.0.0.1', help='Host to bind to')
-    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    config = get_config()
+
+    parser = argparse.ArgumentParser(description='AiAgentGame2 Backend Server')
+    parser.add_argument('--port', type=int, default=config.server.port, help='Port to run the server on')
+    parser.add_argument('--host', type=str, default=config.server.host, help='Host to bind to')
+    parser.add_argument('--debug', action='store_true', default=config.server.debug, help='Enable debug mode')
+    parser.add_argument('--mode', type=str, choices=['mock', 'langgraph'], default=None,
+                        help='Agent mode (overrides AGENT_MODE env)')
 
     args = parser.parse_args()
 
-    print(f"Starting AiAgentGame2 Mock Backend on {args.host}:{args.port}")
+    # Override mode if specified
+    if args.mode:
+        os.environ['AGENT_MODE'] = args.mode
+        from config import reload_config
+        reload_config()
+        config = get_config()
+
+    print("=" * 50)
+    print("  AiAgentGame2 Backend Server")
+    print("=" * 50)
+    print(f"  Host: {args.host}")
+    print(f"  Port: {args.port}")
+    print(f"  Agent Mode: {config.agent.mode}")
+    print(f"  Debug: {args.debug}")
+    print("=" * 50)
 
     app, socketio = create_app()
     run_server(app, socketio, host=args.host, port=args.port, debug=args.debug)
