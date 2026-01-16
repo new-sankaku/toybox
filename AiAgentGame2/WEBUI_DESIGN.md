@@ -4,7 +4,7 @@
 
 本ドキュメントはLangGraph Game Development SystemのためのNieR:Automata風UIデザインシステムを定義する。
 
-**Reference Implementation**: `webui/index.html`
+**Reference Implementation**: `sample_webui/index.html`
 
 ---
 
