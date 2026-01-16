@@ -155,15 +155,6 @@ src/
 │       ├── ProjectForm.tsx
 │       └── ProjectTimeline.tsx
 │
-├── hooks/                      # Custom hooks (予定)
-│   ├── useWebSocket.ts
-│   ├── useProject.ts
-│   ├── useAgents.ts
-│   ├── useCheckpoints.ts
-│   ├── useMetrics.ts
-│   ├── useConnection.ts
-│   └── useRecovery.ts
-│
 ├── stores/                     # Zustand stores
 │   ├── index.ts
 │   ├── projectStore.ts
@@ -173,8 +164,7 @@ src/
 │   └── connectionStore.ts
 │
 ├── services/                   # API services
-│   └── websocketService.ts
-│   # 予定: api.ts, projectService.ts, agentService.ts 等
+│   └── websocketService.ts     # WebSocket + Store連携
 │
 ├── types/                      # TypeScript types
 │   ├── index.ts

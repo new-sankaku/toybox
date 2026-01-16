@@ -1,9 +1,12 @@
 import { io, Socket } from 'socket.io-client'
 import { useConnectionStore } from '@/stores/connectionStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useCheckpointStore } from '@/stores/checkpointStore'
+import { useMetricsStore } from '@/stores/metricsStore'
 import type { Agent, AgentLogEntry } from '@/types/agent'
 import type { Checkpoint } from '@/types/checkpoint'
+import type { Project, ProjectMetrics, PhaseNumber } from '@/types/project'
 
 // WebSocket Events from server
 interface ServerToClientEvents {
@@ -24,8 +27,11 @@ interface ServerToClientEvents {
   'checkpoint:resolved': (data: { checkpoint: Checkpoint }) => void
 
   // Project events
-  'project:updated': (data: { projectId: string; updates: Record<string, unknown> }) => void
-  'phase:changed': (data: { projectId: string; phase: string }) => void
+  'project:updated': (data: { projectId: string; updates: Partial<Project> }) => void
+  'phase:changed': (data: { projectId: string; phase: PhaseNumber; phaseName: string }) => void
+
+  // Metrics events
+  'metrics:update': (data: { metrics: ProjectMetrics }) => void
 }
 
 // WebSocket Events to server
@@ -67,8 +73,10 @@ class WebSocketService {
     if (!this.socket) return
 
     const connectionStore = useConnectionStore.getState()
+    const projectStore = useProjectStore.getState()
     const agentStore = useAgentStore.getState()
     const checkpointStore = useCheckpointStore.getState()
+    const metricsStore = useMetricsStore.getState()
 
     // Connection events
     this.socket.on('connect', () => {
@@ -136,6 +144,23 @@ class WebSocketService {
     this.socket.on('checkpoint:resolved', ({ checkpoint }) => {
       console.log('Checkpoint resolved:', checkpoint.id)
       checkpointStore.updateCheckpoint(checkpoint.id, checkpoint)
+    })
+
+    // Project events
+    this.socket.on('project:updated', ({ projectId, updates }) => {
+      console.log('Project updated:', projectId)
+      projectStore.updateProject(projectId, updates)
+    })
+
+    this.socket.on('phase:changed', ({ projectId, phase, phaseName }) => {
+      console.log('Phase changed:', projectId, phase, phaseName)
+      projectStore.updateProject(projectId, { currentPhase: phase })
+    })
+
+    // Metrics events
+    this.socket.on('metrics:update', ({ metrics }) => {
+      console.log('Metrics updated:', metrics.projectId)
+      metricsStore.setProjectMetrics(metrics)
     })
   }
 
