@@ -14,20 +14,17 @@ AiAgentGame2は以下のコンポーネントで構成されています：
 
 ## クイックスタート
 
-### 1. バックエンド起動
+### 1. 全てインストール（初回のみ）
 
 ```bash
-cd backend
-00_install.bat      # 初回のみ
-01_run_mock.bat     # モックモードで起動
+00_install_all.bat
 ```
 
-### 2. フロントエンド起動
+### 2. Backend + Frontend 同時起動
 
 ```bash
-cd langgraph-studio
-00_install.bat      # 初回のみ
-01_run_dev.bat      # 開発サーバー起動
+20_run_all_mock.bat     # モックモード（開発用）
+21_run_all_langgraph.bat # LangGraphモード（本番用）
 ```
 
 ### 3. ブラウザでアクセス
@@ -38,32 +35,60 @@ cd langgraph-studio
 
 ---
 
-## 詳細セットアップ
+## batファイル一覧
 
-### バックエンド (backend/)
-
-#### 必要環境
-- Python 3.10+
-
-#### batファイル一覧
+### インストール
 
 | ファイル | 説明 |
 |---------|------|
-| `00_install.bat` | 仮想環境作成 + 依存関係インストール |
-| `01_run_mock.bat` | モックモードで起動（LLM呼び出しなし） |
-| `02_run_langgraph.bat` | LangGraphモードで起動（Claude API使用） |
+| `00_install_all.bat` | Backend + Frontend 両方インストール |
+| `01_backend_install.bat` | Backend のみインストール |
+| `11_frontend_install.bat` | Frontend のみインストール |
 
-#### エージェントモード
+### Backend 起動
+
+| ファイル | 説明 |
+|---------|------|
+| `02_backend_run_mock.bat` | モックモードで起動（LLM呼び出しなし） |
+| `03_backend_run_langgraph.bat` | LangGraphモードで起動（Claude API使用） |
+
+### Frontend 起動
+
+| ファイル | 説明 |
+|---------|------|
+| `12_frontend_run_dev.bat` | 開発サーバー起動 (Vite) |
+| `13_frontend_build.bat` | プロダクションビルド |
+| `14_frontend_preview.bat` | ビルド後プレビュー |
+| `19_frontend_clean.bat` | node_modules 削除 |
+
+### 同時起動
+
+| ファイル | 説明 |
+|---------|------|
+| `20_run_all_mock.bat` | Backend (mock) + Frontend 同時起動 |
+| `21_run_all_langgraph.bat` | Backend (langgraph) + Frontend 同時起動 |
+
+---
+
+## 必要環境
+
+- **Backend**: Python 3.10+
+- **Frontend**: Node.js 18+, npm
+
+---
+
+## エージェントモード
 
 | モード | 説明 | 用途 |
 |-------|------|------|
 | `mock` | シミュレーションデータを返す | フロントエンド開発・テスト |
 | `langgraph` | Claude APIで実際に生成 | 本番使用 |
 
-#### LangGraphモードの設定
+### LangGraphモードの設定
 
 1. `.env` ファイルを作成:
 ```bash
+cd backend
 copy .env.example .env
 ```
 
@@ -72,24 +97,6 @@ copy .env.example .env
 ANTHROPIC_API_KEY=sk-ant-xxxxx
 AGENT_MODE=langgraph
 ```
-
----
-
-### フロントエンド (langgraph-studio/)
-
-#### 必要環境
-- Node.js 18+
-- npm
-
-#### batファイル一覧
-
-| ファイル | 説明 |
-|---------|------|
-| `00_install.bat` | 依存関係インストール (npm install) |
-| `01_run_dev.bat` | 開発サーバー起動 (Vite) |
-| `02_build.bat` | プロダクションビルド |
-| `03_preview.bat` | ビルド後プレビュー |
-| `09_clean.bat` | node_modules削除 |
 
 ---
 

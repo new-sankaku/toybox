@@ -1,15 +1,15 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo   AiAgentGame2 Backend - Mock Mode
+echo   Backend - Mock Mode
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0\backend"
 
 if not exist "venv" (
     echo エラー: 仮想環境が見つかりません
-    echo 先に 00_install.bat を実行してください
+    echo 先に 01_backend_install.bat を実行してください
     pause
     exit /b 1
 )

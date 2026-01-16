@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo   AiAgentGame2 Backend - 依存関係インストール
+echo   Backend - 依存関係インストール
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0\backend"
 echo カレントディレクトリ: %cd%
 echo.
 
@@ -44,16 +44,6 @@ if errorlevel 1 (
 
 echo.
 echo ========================================
-echo   インストール完了
+echo   Backend インストール完了
 echo ========================================
 echo.
-echo 次のコマンドで起動できます:
-echo   01_run_mock.bat     - モックモードで起動
-echo   02_run_langgraph.bat - LangGraphモードで起動
-echo.
-echo .env ファイルを設定してください:
-echo   copy .env.example .env
-echo   (ANTHROPIC_API_KEY を設定)
-echo.
-
-pause

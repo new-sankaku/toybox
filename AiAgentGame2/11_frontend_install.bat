@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo   LangGraph Studio - 依存関係インストール
+echo   Frontend - 依存関係インストール
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0\langgraph-studio"
 echo カレントディレクトリ: %cd%
 echo.
 
@@ -26,10 +26,7 @@ echo.
 echo 依存関係をインストール中...
 echo.
 
-echo npm install を実行します...
 call npm install
-echo.
-echo npm install 終了コード: %errorlevel%
 
 if errorlevel 1 (
     echo.
@@ -40,13 +37,6 @@ if errorlevel 1 (
 
 echo.
 echo ========================================
-echo   インストール完了
+echo   Frontend インストール完了
 echo ========================================
 echo.
-echo 次のコマンドで起動できます:
-echo   dev.bat     - 開発サーバー起動
-echo   build.bat   - プロダクションビルド
-echo   preview.bat - ビルド後のプレビュー
-echo.
-
-pause

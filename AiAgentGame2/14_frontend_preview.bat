@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo   LangGraph Studio - 開発サーバー起動
+echo   Frontend - ビルド後プレビュー
 echo ========================================
 echo.
 
-cd /d "%~dp0"
+cd /d "%~dp0\langgraph-studio"
 
-call npm run dev
+call npm run preview
 
 pause
