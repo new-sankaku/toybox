@@ -1,19 +1,14 @@
+import { useEffect, useState } from 'react'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { CategoryMarker } from '@/components/ui/CategoryMarker'
 import { Progress } from '@/components/ui/Progress'
+import { useProjectStore } from '@/stores/projectStore'
+import { agentApi, type ApiAgent } from '@/services/apiService'
 import { formatNumber, cn } from '@/lib/utils'
+import { Clock } from 'lucide-react'
 
 type AgentStatus = 'running' | 'pending' | 'completed' | 'failed' | 'blocked'
-
-interface DashboardAgent {
-  id: string
-  name: string
-  status: AgentStatus
-  progress: number | null
-  tokensUsed: number
-  tokensEstimated: number
-}
 
 const statusLabels: Record<AgentStatus, string> = {
   running: '実行中',
@@ -23,63 +18,124 @@ const statusLabels: Record<AgentStatus, string> = {
   blocked: 'ブロック'
 }
 
-export default function ActiveAgents(): JSX.Element {
-  // Mock data - including all agents
-  const agents: DashboardAgent[] = [
-    { id: '1', name: 'Concept', status: 'completed', progress: 100, tokensUsed: 5200, tokensEstimated: 5000 },
-    { id: '2', name: 'Design', status: 'completed', progress: 100, tokensUsed: 8400, tokensEstimated: 8000 },
-    { id: '3', name: 'Scenario', status: 'running', progress: 67, tokensUsed: 12450, tokensEstimated: 18000 },
-    { id: '4', name: 'Character', status: 'pending', progress: null, tokensUsed: 0, tokensEstimated: 10000 },
-    { id: '5', name: 'World', status: 'pending', progress: null, tokensUsed: 0, tokensEstimated: 12000 },
-    { id: '6', name: 'TaskSplit', status: 'pending', progress: null, tokensUsed: 0, tokensEstimated: 6000 }
-  ]
+// Format elapsed time
+const formatElapsedTime = (startedAt: string | null, completedAt: string | null): string => {
+  if (!startedAt) return '-'
+  const start = new Date(startedAt).getTime()
+  const end = completedAt ? new Date(completedAt).getTime() : Date.now()
+  const seconds = Math.floor((end - start) / 1000)
+  if (seconds < 60) return `${seconds}秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  if (minutes < 60) return `${minutes}分${remainingSeconds}秒`
+  const hours = Math.floor(minutes / 60)
+  const remainingMinutes = minutes % 60
+  return `${hours}時${remainingMinutes}分`
+}
 
-  const runningCount = agents.filter(a => a.status === 'running').length
-  const completedCount = agents.filter(a => a.status === 'completed').length
+export default function ActiveAgents(): JSX.Element {
+  const { currentProject } = useProjectStore()
+  const [agents, setAgents] = useState<ApiAgent[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!currentProject) {
+      setAgents([])
+      return
+    }
+
+    const fetchAgents = async () => {
+      setLoading(true)
+      try {
+        const data = await agentApi.listByProject(currentProject.id)
+        setAgents(data)
+      } catch (error) {
+        console.error('Failed to fetch agents:', error)
+        setAgents([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchAgents()
+    // Poll every 5 seconds
+    const interval = setInterval(fetchAgents, 5000)
+    return () => clearInterval(interval)
+  }, [currentProject?.id])
+
+  if (!currentProject) {
+    return (
+      <Card>
+        <CardHeader>
+          <DiamondMarker>Agents</DiamondMarker>
+        </CardHeader>
+        <CardContent>
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            -
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Only show running and pending agents
+  const activeAgents = agents.filter(a => a.status === 'running' || a.status === 'pending')
+  const runningCount = activeAgents.filter(a => a.status === 'running').length
 
   return (
     <Card>
       <CardHeader>
-        <DiamondMarker>Agents</DiamondMarker>
-        <span className="ml-auto text-nier-caption text-nier-text-light">
-          {runningCount > 0 && <span className="text-nier-accent-orange mr-2">{runningCount}実行中</span>}
-          <span className="text-nier-accent-green">{completedCount}/{agents.length}完了</span>
-        </span>
+        <DiamondMarker>Agents ({activeAgents.length})</DiamondMarker>
+        {runningCount > 0 && (
+          <span className="ml-auto text-nier-caption text-nier-accent-orange">
+            {runningCount}実行中
+          </span>
+        )}
       </CardHeader>
       <CardContent>
-        <div className="flex gap-3 flex-wrap">
-          {agents.map((agent) => (
-            <div
-              key={agent.id}
-              className={cn(
-                'flex items-center gap-2 px-3 py-2 bg-nier-bg-main border border-nier-border-light min-w-[180px] cursor-pointer hover:bg-nier-bg-selected transition-colors',
-                agent.status === 'completed' && 'opacity-60'
-              )}
-            >
-              <CategoryMarker status={agent.status === 'completed' ? 'complete' : agent.status} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-nier-small font-medium truncate">{agent.name}</span>
-                  <span className={cn(
-                    'text-nier-caption shrink-0',
-                    agent.status === 'running' && 'text-nier-accent-orange',
-                    agent.status === 'completed' && 'text-nier-accent-green',
-                    agent.status === 'failed' && 'text-nier-accent-red',
-                    agent.status === 'pending' && 'text-nier-text-light'
-                  )}>
-                    {statusLabels[agent.status]}
+        {loading && agents.length === 0 ? (
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            読み込み中...
+          </div>
+        ) : activeAgents.length === 0 ? (
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            待機・実行中なし
+          </div>
+        ) : (
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {activeAgents.map((agent) => {
+              const displayName = (agent.metadata?.displayName as string) || agent.type
+              const elapsed = formatElapsedTime(agent.startedAt, agent.completedAt)
+              return (
+                <div
+                  key={agent.id}
+                  className="flex items-center gap-2 px-2 py-1.5 bg-nier-bg-main border border-nier-border-light cursor-pointer hover:bg-nier-bg-selected transition-colors"
+                >
+                  <CategoryMarker status={agent.status === 'completed' ? 'complete' : agent.status} />
+                  <span className="text-nier-small font-medium truncate w-24">{displayName}</span>
+                  <span className="text-nier-caption w-12 text-nier-text-light">
+                    {statusLabels[agent.status as AgentStatus] || agent.status}
+                  </span>
+                  {agent.status === 'running' && agent.progress !== null ? (
+                    <div className="flex items-center gap-1 w-16">
+                      <Progress value={agent.progress} className="h-1 w-10" />
+                      <span className="text-nier-caption text-nier-text-light">{agent.progress}%</span>
+                    </div>
+                  ) : (
+                    <span className="w-16" />
+                  )}
+                  <span className="text-nier-caption text-nier-text-light flex items-center gap-0.5 w-14">
+                    <Clock size={10} />
+                    {elapsed}
+                  </span>
+                  <span className="text-nier-caption text-nier-text-light w-12 text-right">
+                    {formatNumber(agent.tokensUsed)}tk
                   </span>
                 </div>
-                <div className="text-nier-caption text-nier-text-light">
-                  {formatNumber(agent.tokensUsed)}tk
-                </div>
-                {agent.status === 'running' && agent.progress !== null && (
-                  <Progress value={agent.progress} className="h-1 mt-1" />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

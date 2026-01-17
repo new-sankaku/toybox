@@ -1,30 +1,60 @@
+import { useEffect, useState } from 'react'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/Progress'
+import { useProjectStore } from '@/stores/projectStore'
+import { metricsApi, type ApiProjectMetrics } from '@/services/apiService'
 import { formatNumber } from '@/lib/utils'
 
-interface MetricRow {
-  label: string
-  value: string | number
-  change?: 'up' | 'down'
-}
-
 export default function MetricsOverview(): JSX.Element {
-  // Mock data
-  const actualTokens = 20680 // Sum of agent tokensUsed
-  const estimatedTokens = 53000 // Sum of agent tokensEstimated
+  const { currentProject } = useProjectStore()
+  const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
+  const [loading, setLoading] = useState(false)
 
-  const metrics: MetricRow[] = [
-    { label: '消費トークン', value: formatNumber(actualTokens) },
-    { label: '完了時予想総トークン', value: formatNumber(estimatedTokens) },
-    { label: '開始時間', value: '2026/01/16 14:32:10' },
-    { label: '終了時間', value: '2026/01/16 15:17:23' },
-    { label: '予想完了時間', value: '00:45:13' }
-  ]
+  useEffect(() => {
+    if (!currentProject) {
+      setMetrics(null)
+      return
+    }
 
-  const completedTasks = 12
-  const totalTasks = 28
-  const progress = Math.round((completedTasks / totalTasks) * 100)
+    const fetchMetrics = async () => {
+      setLoading(true)
+      try {
+        const data = await metricsApi.getByProject(currentProject.id)
+        setMetrics(data)
+      } catch (error) {
+        console.error('Failed to fetch metrics:', error)
+        setMetrics(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchMetrics()
+    const interval = setInterval(fetchMetrics, 5000)
+    return () => clearInterval(interval)
+  }, [currentProject?.id])
+
+  if (!currentProject) {
+    return (
+      <Card>
+        <CardHeader>
+          <DiamondMarker>メトリクス</DiamondMarker>
+        </CardHeader>
+        <CardContent>
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            -
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const actualTokens = metrics?.totalTokensUsed || 0
+  const estimatedTokens = metrics?.estimatedTotalTokens || 0
+  const completedTasks = metrics?.completedTasks || 0
+  const totalTasks = metrics?.totalTasks || 0
+  const progress = metrics?.progressPercent || 0
 
   return (
     <Card>
@@ -32,27 +62,43 @@ export default function MetricsOverview(): JSX.Element {
         <DiamondMarker>メトリクス</DiamondMarker>
       </CardHeader>
       <CardContent>
-        <div className="space-y-2 mb-4">
-          {metrics.map((metric) => (
-            <div key={metric.label} className="nier-status-row">
-              <span className="nier-status-label">{metric.label}:</span>
-              <span className="nier-status-value">{metric.value}</span>
+        {loading && !metrics ? (
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            読み込み中...
+          </div>
+        ) : (
+          <>
+            <div className="space-y-2 mb-4">
+              <div className="nier-status-row">
+                <span className="nier-status-label">消費トークン:</span>
+                <span className="nier-status-value">{formatNumber(actualTokens)}</span>
+              </div>
+              <div className="nier-status-row">
+                <span className="nier-status-label">予想トークン:</span>
+                <span className="nier-status-value">{formatNumber(estimatedTokens)}</span>
+              </div>
+              {metrics?.phaseName && (
+                <div className="nier-status-row">
+                  <span className="nier-status-label">フェーズ:</span>
+                  <span className="nier-status-value">{metrics.phaseName}</span>
+                </div>
+              )}
             </div>
-          ))}
-        </div>
 
-        <div className="space-y-2">
-          <div className="flex justify-between text-nier-small">
-            <span className="text-nier-text-light">タスク:</span>
-            <span>{completedTasks}/{totalTasks} 完了</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <Progress value={progress} className="flex-1" />
-            <span className="text-nier-small text-nier-text-light w-10">
-              {progress}%
-            </span>
-          </div>
-        </div>
+            <div className="space-y-2">
+              <div className="flex justify-between text-nier-small">
+                <span className="text-nier-text-light">タスク:</span>
+                <span>{completedTasks}/{totalTasks} 完了</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Progress value={progress} className="flex-1" />
+                <span className="text-nier-small text-nier-text-light w-10">
+                  {progress}%
+                </span>
+              </div>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )

@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
-import { Button } from '@/components/ui/Button'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
+import { useProjectStore } from '@/stores/projectStore'
+import { logsApi, type ApiSystemLog } from '@/services/apiService'
 import { cn } from '@/lib/utils'
-import { Download, Trash2, Search, AlertCircle, Info, AlertTriangle, Bug } from 'lucide-react'
+import { Search, AlertCircle, Info, AlertTriangle, Bug, FolderOpen } from 'lucide-react'
 
 interface SystemLog {
   id: string
@@ -14,89 +15,136 @@ interface SystemLog {
   details?: string
 }
 
-// Agent sources for filtering
-const agentSources = ['Concept', 'Design', 'Scenario', 'Character', 'World', 'TaskSplit', 'CodeLeader', 'AssetLeader'] as const
+// Convert API log to frontend SystemLog type
+function convertApiLog(apiLog: ApiSystemLog): SystemLog {
+  return {
+    id: apiLog.id,
+    timestamp: apiLog.timestamp,
+    level: apiLog.level,
+    source: apiLog.source,
+    message: apiLog.message,
+    details: apiLog.details || undefined,
+  }
+}
+
+// Agent sources for filtering (lowercase to match backend)
+const agentSources = ['concept', 'design', 'scenario', 'character', 'world', 'System'] as const
 type AgentSource = typeof agentSources[number]
 
-// Mock system logs
-const mockSystemLogs: SystemLog[] = [
-  { id: '1', timestamp: new Date(Date.now() - 1000 * 60 * 50).toISOString(), level: 'info', source: 'System', message: 'LangGraph Studio 起動' },
-  { id: '2', timestamp: new Date(Date.now() - 1000 * 60 * 49).toISOString(), level: 'info', source: 'Backend', message: 'Python バックエンド起動中...' },
-  { id: '3', timestamp: new Date(Date.now() - 1000 * 60 * 48).toISOString(), level: 'info', source: 'Backend', message: 'FastAPI サーバー起動 (port: 8000)' },
-  { id: '4', timestamp: new Date(Date.now() - 1000 * 60 * 47).toISOString(), level: 'info', source: 'WebSocket', message: '接続確立' },
-  { id: '5', timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(), level: 'info', source: 'Project', message: 'プロジェクト "Project Aurora" 読み込み完了' },
-  { id: '6', timestamp: new Date(Date.now() - 1000 * 60 * 44).toISOString(), level: 'info', source: 'Concept', message: 'コンセプトエージェント開始' },
-  { id: '7', timestamp: new Date(Date.now() - 1000 * 60 * 42).toISOString(), level: 'debug', source: 'Concept', message: 'ユーザー入力解析中...', details: 'tokens: 500' },
-  { id: '8', timestamp: new Date(Date.now() - 1000 * 60 * 40).toISOString(), level: 'debug', source: 'Concept', message: 'API呼び出し: claude-3-opus', details: 'tokens: 1500, latency: 2.3s' },
-  { id: '9', timestamp: new Date(Date.now() - 1000 * 60 * 35).toISOString(), level: 'info', source: 'Concept', message: 'コンセプトエージェント完了 (tokens: 2450)' },
-  { id: '10', timestamp: new Date(Date.now() - 1000 * 60 * 34).toISOString(), level: 'info', source: 'Checkpoint', message: 'チェックポイント作成: concept_review' },
-  { id: '11', timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(), level: 'info', source: 'Design', message: 'デザインエージェント開始' },
-  { id: '12', timestamp: new Date(Date.now() - 1000 * 60 * 28).toISOString(), level: 'debug', source: 'Design', message: 'コンセプト分析中...' },
-  { id: '13', timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(), level: 'warn', source: 'System', message: 'レート制限警告: 残り呼び出し数 50/100' },
-  { id: '14', timestamp: new Date(Date.now() - 1000 * 60 * 22).toISOString(), level: 'debug', source: 'Design', message: 'API呼び出し: claude-3-opus', details: 'tokens: 2200, latency: 3.1s' },
-  { id: '15', timestamp: new Date(Date.now() - 1000 * 60 * 18).toISOString(), level: 'info', source: 'Design', message: 'ゲームメカニクス設計完了' },
-  { id: '16', timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(), level: 'info', source: 'Design', message: 'デザインエージェント完了 (tokens: 3200)' },
-  { id: '17', timestamp: new Date(Date.now() - 1000 * 60 * 14).toISOString(), level: 'info', source: 'Checkpoint', message: 'チェックポイント作成: design_review' },
-  { id: '18', timestamp: new Date(Date.now() - 1000 * 60 * 10).toISOString(), level: 'info', source: 'Scenario', message: 'シナリオエージェント開始' },
-  { id: '19', timestamp: new Date(Date.now() - 1000 * 60 * 8).toISOString(), level: 'debug', source: 'Scenario', message: 'Act 1 生成中...' },
-  { id: '20', timestamp: new Date(Date.now() - 1000 * 60 * 5).toISOString(), level: 'debug', source: 'Scenario', message: 'API呼び出し: claude-3-opus', details: 'tokens: 1800, latency: 2.8s' },
-  { id: '21', timestamp: new Date(Date.now() - 1000 * 60 * 3).toISOString(), level: 'info', source: 'Scenario', message: 'Act 1 完了: 目覚めと旅立ち' },
-  { id: '22', timestamp: new Date(Date.now() - 1000 * 60 * 2).toISOString(), level: 'info', source: 'Scenario', message: 'シナリオエージェント進行中 (65%)' },
-  { id: '23', timestamp: new Date().toISOString(), level: 'debug', source: 'System', message: '現在のメモリ使用量: 245MB' }
-]
+// Display names for agent sources
+const agentDisplayNames: Record<AgentSource | 'all', string> = {
+  all: '全て',
+  concept: 'Concept',
+  design: 'Design',
+  scenario: 'Scenario',
+  character: 'Character',
+  world: 'World',
+  System: 'System',
+}
 
 type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error'
 
 const levelConfig = {
   debug: { icon: Bug, color: 'text-nier-text-light', bg: 'bg-nier-bg-panel' },
-  info: { icon: Info, color: 'text-nier-accent-blue', bg: 'bg-nier-accent-blue/10' },
-  warn: { icon: AlertTriangle, color: 'text-nier-accent-yellow', bg: 'bg-nier-accent-yellow/10' },
-  error: { icon: AlertCircle, color: 'text-nier-accent-red', bg: 'bg-nier-accent-red/10' }
+  info: { icon: Info, color: 'text-nier-text-light', bg: 'bg-nier-bg-panel' },
+  warn: { icon: AlertTriangle, color: 'text-nier-text-light', bg: 'bg-nier-bg-panel' },
+  error: { icon: AlertCircle, color: 'text-nier-text-light', bg: 'bg-nier-bg-panel' }
 }
 
 export default function LogsView(): JSX.Element {
+  const { currentProject } = useProjectStore()
+  const [logs, setLogs] = useState<SystemLog[]>([])
+  const [loading, setLoading] = useState(false)
   const [filterLevel, setFilterLevel] = useState<LogLevel>('all')
   const [filterAgent, setFilterAgent] = useState<AgentSource | 'all'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedLog, setSelectedLog] = useState<SystemLog | null>(null)
 
+  // Fetch logs from API
+  useEffect(() => {
+    if (!currentProject) {
+      setLogs([])
+      return
+    }
+
+    const fetchLogs = async () => {
+      setLoading(true)
+      try {
+        const data = await logsApi.getByProject(currentProject.id)
+        setLogs(data.map(convertApiLog))
+      } catch (error) {
+        console.error('Failed to fetch logs:', error)
+        setLogs([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchLogs()
+    const interval = setInterval(fetchLogs, 5000)
+    return () => clearInterval(interval)
+  }, [currentProject?.id])
+
+  // Project not selected
+  if (!currentProject) {
+    return (
+      <div className="p-4 animate-nier-fade-in">
+        <div className="nier-page-header-row">
+          <div className="nier-page-header-left">
+            <h1 className="nier-page-title">LOGS</h1>
+            <span className="nier-page-subtitle">- システムログ</span>
+          </div>
+          <div className="nier-page-header-right" />
+        </div>
+        <Card>
+          <CardContent>
+            <div className="text-center py-12 text-nier-text-light">
+              <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
+              <p className="text-nier-body">プロジェクトを選択してください</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
   const filteredLogs = useMemo(() => {
-    let logs = mockSystemLogs
+    let filtered = logs
 
     if (filterLevel !== 'all') {
-      logs = logs.filter(log => log.level === filterLevel)
+      filtered = filtered.filter(log => log.level === filterLevel)
     }
 
     if (filterAgent !== 'all') {
-      logs = logs.filter(log => log.source === filterAgent)
+      filtered = filtered.filter(log => log.source === filterAgent)
     }
 
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      logs = logs.filter(log =>
+      filtered = filtered.filter(log =>
         log.message.toLowerCase().includes(query) ||
         log.source.toLowerCase().includes(query)
       )
     }
 
-    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-  }, [filterLevel, filterAgent, searchQuery])
+    return filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  }, [logs, filterLevel, filterAgent, searchQuery])
 
   const levelCounts = useMemo(() => ({
-    all: mockSystemLogs.length,
-    debug: mockSystemLogs.filter(l => l.level === 'debug').length,
-    info: mockSystemLogs.filter(l => l.level === 'info').length,
-    warn: mockSystemLogs.filter(l => l.level === 'warn').length,
-    error: mockSystemLogs.filter(l => l.level === 'error').length
-  }), [])
+    all: logs.length,
+    debug: logs.filter(l => l.level === 'debug').length,
+    info: logs.filter(l => l.level === 'info').length,
+    warn: logs.filter(l => l.level === 'warn').length,
+    error: logs.filter(l => l.level === 'error').length
+  }), [logs])
 
   const agentCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: mockSystemLogs.filter(l => agentSources.includes(l.source as AgentSource)).length }
+    const counts: Record<string, number> = { all: logs.filter(l => agentSources.includes(l.source as AgentSource)).length }
     agentSources.forEach(agent => {
-      counts[agent] = mockSystemLogs.filter(l => l.source === agent).length
+      counts[agent] = logs.filter(l => l.source === agent).length
     })
     return counts
-  }, [])
+  }, [logs])
 
   const formatTime = (timestamp: string) => {
     return new Date(timestamp).toLocaleTimeString('ja-JP', {
@@ -107,37 +155,23 @@ export default function LogsView(): JSX.Element {
   }
 
   return (
-    <div className="p-6 animate-nier-fade-in">
+    <div className="p-4 animate-nier-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-6 bg-nier-accent-blue" />
-          <h1 className="text-nier-h1 font-medium tracking-nier-wide">
-            SYSTEM LOGS
-          </h1>
-          <span className="text-nier-text-light">
-            - Real-time Monitor
-          </span>
+      <div className="nier-page-header-row">
+        <div className="nier-page-header-left">
+          <h1 className="nier-page-title">LOGS</h1>
+          <span className="nier-page-subtitle">- システムログ</span>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm">
-            <Download size={14} />
-            <span className="ml-1.5">エクスポート</span>
-          </Button>
-          <Button variant="ghost" size="sm">
-            <Trash2 size={14} />
-            <span className="ml-1.5">クリア</span>
-          </Button>
-        </div>
+        <div className="nier-page-header-right" />
       </div>
 
       {/* Filters */}
-      <Card className="mb-6">
+      <Card className="mb-3">
         <CardContent className="py-3">
           <div className="space-y-3">
             {/* Level Filter Row */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1 flex-wrap">
                 {(['all', 'error', 'warn', 'info', 'debug'] as LogLevel[]).map(level => (
                   <button
                     key={level}
@@ -163,7 +197,7 @@ export default function LogsView(): JSX.Element {
                 <Search size={14} className="text-nier-text-light" />
                 <input
                   type="text"
-                  className="bg-transparent border-b border-nier-border-light px-2 py-1 text-nier-small w-48 focus:outline-none focus:border-nier-accent-blue"
+                  className="bg-transparent border-b border-nier-border-light px-2 py-1 text-nier-small w-48 focus:outline-none focus:border-nier-border-dark"
                   placeholder="検索..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -172,7 +206,7 @@ export default function LogsView(): JSX.Element {
             </div>
 
             {/* Agent Filter Row */}
-            <div className="flex items-center gap-2 border-t border-nier-border-light pt-3">
+            <div className="flex items-center gap-2 flex-wrap border-t border-nier-border-light pt-3">
               <span className="text-nier-caption text-nier-text-light mr-2">エージェント:</span>
               <button
                 className={cn(
@@ -191,12 +225,12 @@ export default function LogsView(): JSX.Element {
                   className={cn(
                     'px-3 py-1 text-nier-small tracking-nier transition-colors',
                     filterAgent === agent
-                      ? 'bg-nier-accent-blue/20 text-nier-accent-blue'
+                      ? 'bg-nier-bg-selected text-nier-text-main'
                       : 'text-nier-text-light hover:bg-nier-bg-panel'
                   )}
                   onClick={() => setFilterAgent(agent)}
                 >
-                  {agent} {agentCounts[agent] > 0 && `(${agentCounts[agent]})`}
+                  {agentDisplayNames[agent]} {agentCounts[agent] > 0 && `(${agentCounts[agent]})`}
                 </button>
               ))}
             </div>
@@ -204,7 +238,7 @@ export default function LogsView(): JSX.Element {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-3 gap-5">
+      <div className="grid grid-cols-3 gap-3">
         {/* Log List */}
         <div className="col-span-2">
           <Card>
@@ -214,8 +248,12 @@ export default function LogsView(): JSX.Element {
                 {filteredLogs.length}件
               </span>
             </CardHeader>
-            <CardContent className="p-0 max-h-[600px] overflow-auto">
-              {filteredLogs.length === 0 ? (
+            <CardContent className="p-0 nier-scroll-list">
+              {loading && logs.length === 0 ? (
+                <div className="p-8 text-center text-nier-text-light">
+                  読み込み中...
+                </div>
+              ) : filteredLogs.length === 0 ? (
                 <div className="p-8 text-center text-nier-text-light">
                   ログがありません
                 </div>
@@ -240,7 +278,7 @@ export default function LogsView(): JSX.Element {
                           <span className={cn('flex items-center gap-1', config.color)}>
                             <Icon size={12} />
                           </span>
-                          <span className="text-nier-caption text-nier-accent-blue whitespace-nowrap">
+                          <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
                             [{log.source}]
                           </span>
                           <span className="text-nier-small text-nier-text-main truncate">
@@ -309,19 +347,19 @@ export default function LogsView(): JSX.Element {
               <div className="space-y-2">
                 <div className="flex justify-between text-nier-small">
                   <span className="text-nier-text-light">エラー</span>
-                  <span className="text-nier-accent-red">{levelCounts.error}</span>
+                  <span className="text-nier-text-main">{levelCounts.error}</span>
                 </div>
                 <div className="flex justify-between text-nier-small">
                   <span className="text-nier-text-light">警告</span>
-                  <span className="text-nier-accent-yellow">{levelCounts.warn}</span>
+                  <span className="text-nier-text-main">{levelCounts.warn}</span>
                 </div>
                 <div className="flex justify-between text-nier-small">
                   <span className="text-nier-text-light">情報</span>
-                  <span className="text-nier-accent-blue">{levelCounts.info}</span>
+                  <span className="text-nier-text-main">{levelCounts.info}</span>
                 </div>
                 <div className="flex justify-between text-nier-small">
                   <span className="text-nier-text-light">デバッグ</span>
-                  <span>{levelCounts.debug}</span>
+                  <span className="text-nier-text-main">{levelCounts.debug}</span>
                 </div>
               </div>
             </CardContent>

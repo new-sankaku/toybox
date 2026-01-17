@@ -1,56 +1,107 @@
+import { useState, useEffect, useMemo } from 'react'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
-import { Progress } from '@/components/ui/Progress'
-import { cn } from '@/lib/utils'
-import { Image, Music, FileCode } from 'lucide-react'
+import { useProjectStore } from '@/stores/projectStore'
+import { assetApi, type ApiAsset } from '@/services/apiService'
+import { Image, Music, FileCode, FileText } from 'lucide-react'
 
-type AssetType = 'image' | 'audio' | 'code'
+type AssetType = 'image' | 'audio' | 'code' | 'document'
 
-interface AssetCategory {
+interface UnapprovedCategory {
   type: AssetType
   label: string
   icon: typeof Image
-  generated: number
-  total: number
+  count: number
 }
 
 export default function AssetStatus(): JSX.Element {
-  // Mock data
-  const categories: AssetCategory[] = [
-    { type: 'image', label: '画像', icon: Image, generated: 12, total: 24 },
-    { type: 'audio', label: '音声', icon: Music, generated: 3, total: 8 },
-    { type: 'code', label: 'コード', icon: FileCode, generated: 45, total: 120 }
-  ]
+  const { currentProject } = useProjectStore()
+  const [assets, setAssets] = useState<ApiAsset[]>([])
 
-  const totalGenerated = categories.reduce((acc, c) => acc + c.generated, 0)
-  const totalAssets = categories.reduce((acc, c) => acc + c.total, 0)
+  useEffect(() => {
+    if (!currentProject) {
+      setAssets([])
+      return
+    }
+
+    const fetchAssets = async () => {
+      try {
+        const data = await assetApi.listByProject(currentProject.id)
+        setAssets(data)
+      } catch (error) {
+        console.error('Failed to fetch assets:', error)
+        setAssets([])
+      }
+    }
+
+    fetchAssets()
+    const interval = setInterval(fetchAssets, 5000)
+    return () => clearInterval(interval)
+  }, [currentProject?.id])
+
+  // Only unapproved assets
+  const unapprovedAssets = useMemo(() =>
+    assets.filter(a => a.approvalStatus !== 'approved'),
+    [assets]
+  )
+
+  const categories = useMemo<UnapprovedCategory[]>(() => {
+    const result: UnapprovedCategory[] = []
+    const imageCount = unapprovedAssets.filter(a => a.type === 'image').length
+    const audioCount = unapprovedAssets.filter(a => a.type === 'audio').length
+    const docCount = unapprovedAssets.filter(a => a.type === 'document').length
+    const codeCount = unapprovedAssets.filter(a => a.type === 'code').length
+
+    if (imageCount > 0) result.push({ type: 'image', label: '画像', icon: Image, count: imageCount })
+    if (audioCount > 0) result.push({ type: 'audio', label: '音声', icon: Music, count: audioCount })
+    if (docCount > 0) result.push({ type: 'document', label: 'ドキュメント', icon: FileText, count: docCount })
+    if (codeCount > 0) result.push({ type: 'code', label: 'コード', icon: FileCode, count: codeCount })
+
+    return result
+  }, [unapprovedAssets])
+
+  if (!currentProject) {
+    return (
+      <Card>
+        <CardHeader>
+          <DiamondMarker>Assets</DiamondMarker>
+        </CardHeader>
+        <CardContent>
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            -
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>
       <CardHeader>
-        <DiamondMarker>Assets</DiamondMarker>
-        <span className="ml-auto text-nier-caption text-nier-text-light">
-          <span className="text-nier-accent-green">{totalGenerated}/{totalAssets}</span>
-        </span>
+        <DiamondMarker>Assets ({unapprovedAssets.length})</DiamondMarker>
       </CardHeader>
-      <CardContent className="space-y-2">
-        {categories.map((category) => {
-          const Icon = category.icon
-          const progress = category.total > 0 ? (category.generated / category.total) * 100 : 0
-          return (
-            <div key={category.type} className="flex items-center gap-3">
-              <Icon size={14} className="text-nier-text-light shrink-0" />
-              <span className="text-nier-small w-12">{category.label}</span>
-              <Progress value={progress} className="flex-1 h-1.5" />
-              <span className={cn(
-                'text-nier-caption w-14 text-right',
-                progress === 100 ? 'text-nier-accent-green' : 'text-nier-text-light'
-              )}>
-                {category.generated}/{category.total}
-              </span>
-            </div>
-          )
-        })}
+      <CardContent className="overflow-hidden">
+        {unapprovedAssets.length === 0 ? (
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            未承認なし
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {categories.map((category) => {
+              const Icon = category.icon
+              return (
+                <div key={category.type} className="flex items-center gap-2">
+                  <Icon size={14} className="text-nier-text-light shrink-0" />
+                  <span className="text-nier-small flex-1">{category.label}</span>
+                  <span className="text-nier-caption text-nier-text-light">未承認</span>
+                  <span className="text-nier-caption text-nier-accent-yellow w-12 text-right">
+                    {category.count}件
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

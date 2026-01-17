@@ -97,3 +97,19 @@ export type OutputType =
   | 'build_result'
   | 'test_result'
   | 'review_result'
+
+// Quality Check Configuration
+export interface QualityCheckConfig {
+  enabled: boolean
+  maxRetries: number
+  isHighCost: boolean
+}
+
+// Quality Check Result
+export interface QualityCheckResult {
+  passed: boolean
+  issues: string[]
+  score: number
+  retryNeeded: boolean
+  humanReviewNeeded: boolean
+}

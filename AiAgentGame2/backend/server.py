@@ -3,7 +3,7 @@ Flask + Socket.IO Server
 """
 
 import os
-from flask import Flask
+from flask import Flask, send_from_directory, abort
 from flask_cors import CORS
 import socketio
 
@@ -12,9 +12,11 @@ from handlers.agent import register_agent_routes
 from handlers.checkpoint import register_checkpoint_routes
 from handlers.metrics import register_metrics_routes
 from handlers.websocket import register_websocket_handlers
+from handlers.settings import register_settings_routes
 from mock_data import MockDataStore
 from config import get_config
 from agents import create_agent_runner
+from asset_scanner import get_mock_data_path
 
 
 def create_app():
@@ -41,6 +43,9 @@ def create_app():
     # Initialize mock data store
     data_store = MockDataStore()
 
+    # Start simulation engine for real-time updates
+    data_store.start_simulation()
+
     # Initialize agent runner (mock or langgraph based on config)
     agent_runner = create_agent_runner(
         mode=config.agent.mode,
@@ -54,6 +59,7 @@ def create_app():
     register_agent_routes(app, data_store, sio)
     register_checkpoint_routes(app, data_store, sio)
     register_metrics_routes(app, data_store)
+    register_settings_routes(app, data_store)
 
     # Register WebSocket handlers
     register_websocket_handlers(sio, data_store)
@@ -66,6 +72,18 @@ def create_app():
             'service': 'aiagentgame2-backend',
             'agent_mode': config.agent.mode,
         }
+
+    # Static file serving for mock_data assets
+    mock_data_path = get_mock_data_path()
+
+    @app.route('/mock_data/<path:filepath>')
+    def serve_mock_data(filepath):
+        """Serve static files from mock_data folder"""
+        try:
+            return send_from_directory(mock_data_path, filepath)
+        except Exception as e:
+            print(f"[Server] Error serving {filepath}: {e}")
+            abort(404)
 
     # Store references
     app.data_store = data_store

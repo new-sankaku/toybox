@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import AppLayout from './components/layout/AppLayout'
 import DashboardView from './components/dashboard/DashboardView'
-import { ProjectView, CheckpointsView, AgentsView, LogsView, DataView, CostView, ConfigView } from './views'
+import { ProjectView, CheckpointsView, AgentsView, LogsView, DataView, AIView, CostView, ConfigView } from './views'
+import { useNavigationStore } from './stores/navigationStore'
+import { websocketService } from './services/websocketService'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -13,11 +15,21 @@ const queryClient = new QueryClient({
   }
 })
 
-// Tab definitions
-export type TabId = 'project' | 'checkpoints' | 'system' | 'agents' | 'logs' | 'data' | 'cost' | 'config'
+// Re-export TabId for backward compatibility
+export type { TabId } from './stores/navigationStore'
 
 function App(): JSX.Element {
-  const [activeTab, setActiveTab] = useState<TabId>('system')
+  const { activeTab, setActiveTab } = useNavigationStore()
+
+  // Initialize WebSocket connection
+  useEffect(() => {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+    websocketService.connect(backendUrl)
+
+    return () => {
+      websocketService.disconnect()
+    }
+  }, [])
 
   const renderContent = () => {
     switch (activeTab) {
@@ -33,6 +45,8 @@ function App(): JSX.Element {
         return <LogsView />
       case 'data':
         return <DataView />
+      case 'ai':
+        return <AIView />
       case 'cost':
         return <CostView />
       case 'config':

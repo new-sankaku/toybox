@@ -4,6 +4,7 @@ import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { Save, Eye, EyeOff, FolderOpen, RefreshCw } from 'lucide-react'
+import { QualityCheckSettingsPanel } from '@/components/settings/QualityCheckSettingsPanel'
 
 interface ConfigSection {
   id: string
@@ -16,6 +17,7 @@ const configSections: ConfigSection[] = [
   { id: 'cost', label: 'コスト設定' },
   { id: 'output', label: '出力設定' },
   { id: 'project', label: 'プロジェクト設定' },
+  { id: 'agent-quality', label: 'エージェント品質設定' },
   { id: 'display', label: '表示設定' }
 ]
 
@@ -42,8 +44,8 @@ export default function ConfigView(): JSX.Element {
     outputTokenPrice: 0.015,
     // Display settings
     letterSpacing: 'normal' as 'tight' | 'normal' | 'wide',
-    lineHeight: 1.4,
-    padding: 12
+    lineHeight: 1.0,
+    padding: 4
   })
 
   // Apply letter spacing to document
@@ -81,25 +83,22 @@ export default function ConfigView(): JSX.Element {
   }
 
   return (
-    <div className="p-6 animate-nier-fade-in">
+    <div className="p-4 animate-nier-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-6 bg-nier-accent-yellow" />
-          <h1 className="text-nier-h1 font-medium tracking-nier-wide">
-            CONFIGURATION
-          </h1>
-          <span className="text-nier-text-light">
-            - システム設定
-          </span>
+      <div className="nier-page-header-row">
+        <div className="nier-page-header-left">
+          <h1 className="nier-page-title">CONFIG</h1>
+          <span className="nier-page-subtitle">- システム設定</span>
         </div>
-        <Button variant="primary" onClick={handleSave}>
-          <Save size={14} />
-          <span className="ml-1.5">保存</span>
-        </Button>
+        <div className="nier-page-header-right">
+          <Button variant="primary" size="sm" onClick={handleSave}>
+            <Save size={14} />
+            <span className="ml-1.5">保存</span>
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-4 gap-3">
         {/* Section Navigation */}
         <Card>
           <CardHeader>
@@ -139,7 +138,7 @@ export default function ConfigView(): JSX.Element {
                     APIプロバイダー
                   </label>
                   <select
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.apiProvider}
                     onChange={(e) => setConfig({ ...config, apiProvider: e.target.value })}
                   >
@@ -156,7 +155,7 @@ export default function ConfigView(): JSX.Element {
                   <div className="flex gap-2">
                     <input
                       type={showApiKey ? 'text' : 'password'}
-                      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                       placeholder="sk-..."
                       value={config.apiKey}
                       onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
@@ -195,7 +194,7 @@ export default function ConfigView(): JSX.Element {
                     使用モデル
                   </label>
                   <select
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.modelId}
                     onChange={(e) => setConfig({ ...config, modelId: e.target.value })}
                   >
@@ -237,7 +236,7 @@ export default function ConfigView(): JSX.Element {
                   </label>
                   <input
                     type="number"
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.maxTokens}
                     onChange={(e) => setConfig({ ...config, maxTokens: parseInt(e.target.value) })}
                   />
@@ -264,7 +263,7 @@ export default function ConfigView(): JSX.Element {
                   <input
                     type="number"
                     step="0.01"
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.budgetLimit}
                     onChange={(e) => setConfig({ ...config, budgetLimit: parseFloat(e.target.value) })}
                   />
@@ -318,7 +317,7 @@ export default function ConfigView(): JSX.Element {
                       <input
                         type="number"
                         step="0.001"
-                        className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                        className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                         value={config.inputTokenPrice}
                         onChange={(e) => setConfig({ ...config, inputTokenPrice: parseFloat(e.target.value) })}
                       />
@@ -330,7 +329,7 @@ export default function ConfigView(): JSX.Element {
                       <input
                         type="number"
                         step="0.001"
-                        className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                        className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                         value={config.outputTokenPrice}
                         onChange={(e) => setConfig({ ...config, outputTokenPrice: parseFloat(e.target.value) })}
                       />
@@ -358,7 +357,7 @@ export default function ConfigView(): JSX.Element {
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                       value={config.outputDir}
                       onChange={(e) => setConfig({ ...config, outputDir: e.target.value })}
                     />
@@ -386,7 +385,7 @@ export default function ConfigView(): JSX.Element {
                     出力言語
                   </label>
                   <select
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.language}
                     onChange={(e) => setConfig({ ...config, language: e.target.value })}
                   >
@@ -412,7 +411,7 @@ export default function ConfigView(): JSX.Element {
                     プロジェクトテンプレート
                   </label>
                   <select
-                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-accent-blue"
+                    className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
                     value={config.projectTemplate}
                     onChange={(e) => setConfig({ ...config, projectTemplate: e.target.value })}
                   >
@@ -438,6 +437,11 @@ export default function ConfigView(): JSX.Element {
             </Card>
           )}
 
+          {/* Agent Quality Settings */}
+          {activeSection === 'agent-quality' && (
+            <QualityCheckSettingsPanel projectId="proj-001" />
+          )}
+
           {/* Display Settings */}
           {activeSection === 'display' && (
             <Card>
@@ -457,7 +461,7 @@ export default function ConfigView(): JSX.Element {
                         className={cn(
                           'px-4 py-2 border text-nier-small transition-colors',
                           config.letterSpacing === spacing
-                            ? 'border-nier-accent-blue bg-nier-accent-blue/10 text-nier-accent-blue'
+                            ? 'border-nier-border-dark bg-nier-bg-selected text-nier-text-main'
                             : 'border-nier-border-light hover:bg-nier-bg-panel'
                         )}
                         onClick={() => handleLetterSpacingChange(spacing)}
@@ -477,7 +481,7 @@ export default function ConfigView(): JSX.Element {
                   </label>
                   <input
                     type="range"
-                    min="1.0"
+                    min="0.2"
                     max="2.5"
                     step="0.1"
                     className="w-full"
@@ -485,7 +489,7 @@ export default function ConfigView(): JSX.Element {
                     onChange={(e) => handleLineHeightChange(parseFloat(e.target.value))}
                   />
                   <div className="flex justify-between text-nier-caption text-nier-text-light mt-1">
-                    <span>1.0 (狭い)</span>
+                    <span>0.2 (最小)</span>
                     <span>2.5 (広い)</span>
                   </div>
                 </div>
@@ -497,16 +501,16 @@ export default function ConfigView(): JSX.Element {
                   </label>
                   <input
                     type="range"
-                    min="8"
-                    max="32"
-                    step="2"
+                    min="0"
+                    max="15"
+                    step="1"
                     className="w-full"
                     value={config.padding}
                     onChange={(e) => handlePaddingChange(parseInt(e.target.value))}
                   />
                   <div className="flex justify-between text-nier-caption text-nier-text-light mt-1">
-                    <span>8px (コンパクト)</span>
-                    <span>32px (ゆったり)</span>
+                    <span>0px (最小)</span>
+                    <span>15px (最大)</span>
                   </div>
                 </div>
 

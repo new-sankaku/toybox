@@ -19,6 +19,9 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'electron/preload.ts')
+        },
+        output: {
+          entryFileNames: '[name].js'
         }
       }
     }

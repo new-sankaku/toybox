@@ -6,7 +6,7 @@ import { DocumentViewer } from '@/components/viewers/DocumentViewer'
 import { CodeViewer } from '@/components/viewers/CodeViewer'
 import type { Checkpoint } from '@/types/checkpoint'
 import { cn } from '@/lib/utils'
-import { CheckCircle, XCircle, RotateCcw, MessageSquare } from 'lucide-react'
+import { CheckCircle, XCircle, RotateCcw, MessageSquare, Send, X } from 'lucide-react'
 
 interface CheckpointReviewViewProps {
   checkpoint: Checkpoint
@@ -17,6 +17,7 @@ interface CheckpointReviewViewProps {
 }
 
 type ViewMode = 'preview' | 'raw'
+type FeedbackAction = 'reject' | 'revision' | null
 
 export default function CheckpointReviewView({
   checkpoint,
@@ -28,6 +29,7 @@ export default function CheckpointReviewView({
   const [viewMode, setViewMode] = useState<ViewMode>('preview')
   const [feedback, setFeedback] = useState('')
   const [showFeedbackForm, setShowFeedbackForm] = useState(false)
+  const [feedbackAction, setFeedbackAction] = useState<FeedbackAction>(null)
 
   const getWaitingTime = () => {
     const created = new Date(checkpoint.createdAt)
@@ -50,6 +52,7 @@ export default function CheckpointReviewView({
       onReject(feedback)
     } else {
       setShowFeedbackForm(true)
+      setFeedbackAction('reject')
     }
   }
 
@@ -58,36 +61,75 @@ export default function CheckpointReviewView({
       onRequestChanges(feedback)
     } else {
       setShowFeedbackForm(true)
+      setFeedbackAction('revision')
     }
+  }
+
+  const handleSubmitFeedback = () => {
+    if (!feedback.trim()) return
+
+    if (feedbackAction === 'reject') {
+      onReject(feedback)
+    } else if (feedbackAction === 'revision') {
+      onRequestChanges(feedback)
+    }
+  }
+
+  const handleCancelFeedback = () => {
+    setShowFeedbackForm(false)
+    setFeedbackAction(null)
+    setFeedback('')
+  }
+
+  // Helper to extract content string from various formats
+  const getContentString = (content: unknown): string => {
+    if (typeof content === 'string') {
+      return content
+    }
+    if (content && typeof content === 'object') {
+      // Handle { text: "..." } format
+      const obj = content as Record<string, unknown>
+      if (typeof obj.text === 'string') {
+        return obj.text
+      }
+    }
+    return JSON.stringify(content, null, 2)
   }
 
   const renderOutput = () => {
     const { output } = checkpoint
 
+    // Raw表示: contentをそのままJSON/文字列で表示
     if (viewMode === 'raw') {
+      const rawContent = typeof output.content === 'string'
+        ? output.content
+        : JSON.stringify(output.content, null, 2)
       return (
         <CodeViewer
-          code={JSON.stringify(output.content, null, 2)}
-          language="json"
-          filename="output.json"
+          code={rawContent || '(no content)'}
+          language={typeof output.content === 'string' ? 'markdown' : 'json'}
+          filename={typeof output.content === 'string' ? 'output.md' : 'output.json'}
         />
       )
     }
 
+    // format または documentType をチェック（バックエンドは format を返す）
+    const format = output.format || output.documentType
+
     // Determine content type and render appropriate viewer
-    if (output.documentType === 'markdown' || checkpoint.type.includes('review')) {
+    if (format === 'markdown' || checkpoint.type.includes('review')) {
       return (
         <DocumentViewer
-          content={typeof output.content === 'string' ? output.content : JSON.stringify(output.content, null, 2)}
+          content={getContentString(output.content)}
           title={checkpoint.title}
         />
       )
     }
 
-    if (output.documentType === 'code') {
+    if (format === 'code' || output.type === 'code') {
       return (
         <CodeViewer
-          code={typeof output.content === 'string' ? output.content : ''}
+          code={getContentString(output.content)}
           language="typescript"
           filename="output.ts"
         />
@@ -97,7 +139,7 @@ export default function CheckpointReviewView({
     // Default to document viewer
     return (
       <DocumentViewer
-        content={output.summary || JSON.stringify(output.content, null, 2)}
+        content={output.summary || getContentString(output.content)}
         title={checkpoint.title}
       />
     )
@@ -127,9 +169,9 @@ export default function CheckpointReviewView({
       </div>
 
       {/* Main Content */}
-      <div className="grid grid-cols-3 gap-5">
-        {/* Output Preview (2 columns) */}
-        <div className="col-span-2">
+      <div className="grid grid-cols-4 gap-4">
+        {/* Output Preview (3 columns) */}
+        <div className="col-span-3">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <DiamondMarker>出力プレビュー</DiamondMarker>
@@ -204,15 +246,37 @@ export default function CheckpointReviewView({
           {showFeedbackForm && (
             <Card>
               <CardHeader>
-                <DiamondMarker>フィードバック</DiamondMarker>
+                <DiamondMarker>
+                  {feedbackAction === 'reject' ? '却下理由' : '変更要求内容'}
+                </DiamondMarker>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-3">
                 <textarea
                   className="nier-input min-h-[120px] resize-none"
                   placeholder="フィードバックを入力..."
                   value={feedback}
                   onChange={(e) => setFeedback(e.target.value)}
+                  autoFocus
                 />
+                <div className="flex gap-2">
+                  <Button
+                    variant={feedbackAction === 'reject' ? 'danger' : 'default'}
+                    className="flex-1 gap-2"
+                    onClick={handleSubmitFeedback}
+                    disabled={!feedback.trim()}
+                  >
+                    <Send size={16} />
+                    送信
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="gap-2"
+                    onClick={handleCancelFeedback}
+                  >
+                    <X size={16} />
+                    キャンセル
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
@@ -237,10 +301,7 @@ export default function CheckpointReviewView({
 
               <Button
                 className="w-full justify-start gap-3"
-                onClick={() => {
-                  setShowFeedbackForm(true)
-                  setTimeout(handleRequestChanges, 100)
-                }}
+                onClick={handleRequestChanges}
               >
                 <RotateCcw size={18} />
                 変更を要求

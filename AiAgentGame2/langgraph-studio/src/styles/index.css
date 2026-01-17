@@ -31,24 +31,24 @@
     --border-light: rgba(69, 65, 56, 0.2);
     --border-dark: rgba(69, 65, 56, 0.4);
 
-    /* Spacing */
-    --space-xs: 4px;
-    --space-sm: 8px;
-    --space-md: 16px;
-    --space-lg: 24px;
-    --space-xl: 32px;
+    /* Spacing - Compact defaults */
+    --space-xs: 2px;
+    --space-sm: 4px;
+    --space-md: 8px;
+    --space-lg: 12px;
+    --space-xl: 16px;
 
     /* Letter Spacing (default: normal) */
     --tracking-base: 0.05em;
     --tracking-wide: 0.08em;
 
-    /* Line Height (default: compact) */
+    /* Line Height (default: readable) */
     --leading-base: 1.4;
 
     /* Padding (default: compact) */
-    --padding-card: 12px;
-    --padding-section: 20px;
-    --gap-base: 12px;
+    --padding-card: 8px;
+    --padding-section: 12px;
+    --gap-base: 8px;
 
     /* Transitions */
     --transition-fast: 150ms ease;
@@ -81,7 +81,7 @@
 
   /* Line Height Modes */
   :root[data-leading="tight"] {
-    --leading-base: 1.3;
+    --leading-base: 1.0;
   }
 
   :root[data-leading="normal"] {
@@ -94,21 +94,21 @@
 
   /* Padding Modes */
   :root[data-padding="compact"] {
+    --padding-card: 8px;
+    --padding-section: 12px;
+    --gap-base: 8px;
+  }
+
+  :root[data-padding="normal"] {
     --padding-card: 12px;
     --padding-section: 16px;
     --gap-base: 12px;
   }
 
-  :root[data-padding="normal"] {
+  :root[data-padding="spacious"] {
     --padding-card: 16px;
     --padding-section: 24px;
     --gap-base: 16px;
-  }
-
-  :root[data-padding="spacious"] {
-    --padding-card: 24px;
-    --padding-section: 32px;
-    --gap-base: 24px;
   }
 
   html {
@@ -160,7 +160,7 @@
 @layer components {
   /* NieR Button Styles */
   .nier-btn {
-    @apply px-6 py-2 bg-nier-bg-panel border border-nier-border-dark
+    @apply px-4 py-1.5 bg-nier-bg-panel border border-nier-border-dark
            tracking-nier text-nier-text-main font-normal
            transition-all duration-nier-fast
            hover:bg-nier-bg-selected active:bg-nier-bg-header active:text-nier-text-header;
@@ -188,7 +188,8 @@
 
   .nier-card-header {
     @apply bg-nier-bg-header text-nier-text-header
-           px-4 py-2 text-nier-small tracking-nier;
+           px-3 py-1.5 text-nier-small tracking-nier
+           flex items-center;
   }
 
   .nier-card-body {
@@ -275,7 +276,7 @@
 
   /* List Item */
   .nier-list-item {
-    @apply flex items-center gap-3 px-4 py-2.5
+    @apply flex items-center gap-2 px-3 py-1.5
            border-b border-nier-border-light
            cursor-pointer transition-colors duration-nier-fast
            hover:bg-nier-bg-selected;
@@ -287,11 +288,17 @@
 
   /* Tab */
   .nier-tab {
-    @apply px-6 py-3 text-nier-text-header text-nier-small tracking-nier
-           flex items-center gap-2 cursor-pointer
+    @apply px-4 py-2 text-nier-text-header text-nier-small tracking-nier
+           flex items-center gap-1.5 cursor-pointer
            border-r border-white/10
            transition-colors duration-nier-fast
            hover:bg-white/10;
+    line-height: 1 !important;
+    height: 36px;
+  }
+
+  .nier-tab span {
+    line-height: 1 !important;
   }
 
   .nier-tab.active {
@@ -315,6 +322,38 @@
     @apply bg-nier-bg-panel border border-nier-border-dark
            max-w-2xl w-full max-h-[80vh] overflow-hidden
            animate-nier-slide-in;
+  }
+
+  /* Scrollable List Container */
+  .nier-scroll-list {
+    max-height: calc(100vh - 280px);
+    overflow-y: auto;
+  }
+
+  .nier-scroll-list-short {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  /* Page Header - 統一構造 */
+  .nier-page-header-row {
+    @apply flex items-center justify-between mb-3 h-8;
+  }
+
+  .nier-page-header-left {
+    @apply flex items-baseline gap-2;
+  }
+
+  .nier-page-header-right {
+    @apply flex items-center gap-2;
+  }
+
+  .nier-page-title {
+    @apply text-nier-h1 font-medium tracking-nier-wide leading-none;
+  }
+
+  .nier-page-subtitle {
+    @apply text-nier-small text-nier-text-light leading-none;
   }
 }
 

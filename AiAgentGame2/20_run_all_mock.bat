@@ -18,12 +18,17 @@ echo Frontend を起動中...
 start "AiAgentGame2 Frontend" cmd /k "cd /d "%~dp0\langgraph-studio" && npm run dev"
 
 echo.
+echo 3秒後にブラウザを開きます...
+timeout /t 3 /nobreak > nul
+
+start http://localhost:5173
+
+echo.
 echo ========================================
 echo   起動完了
 echo ========================================
 echo.
-echo 以下のウィンドウが開きます:
-echo   - Backend: http://localhost:8765
+echo   - Backend: http://localhost:5000
 echo   - Frontend: http://localhost:5173
 echo.
 echo 終了するには各ウィンドウを閉じてください

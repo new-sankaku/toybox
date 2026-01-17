@@ -1,7 +1,7 @@
 import { ReactNode } from 'react'
 import HeaderTabs from './HeaderTabs'
-import Footer from './Footer'
 import ConnectionStatus from './ConnectionStatus'
+import ActivitySidebar from './ActivitySidebar'
 import type { TabId } from '../../App'
 
 interface AppLayoutProps {
@@ -25,13 +25,13 @@ export default function AppLayout({
         </div>
       </header>
 
-      {/* Main content area */}
-      <main className="flex-1 overflow-auto relative">
-        {children}
-      </main>
-
-      {/* Footer */}
-      <Footer />
+      {/* Main content area with sidebar */}
+      <div className="flex flex-1 overflow-hidden">
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+        <ActivitySidebar />
+      </div>
     </div>
   )
 }

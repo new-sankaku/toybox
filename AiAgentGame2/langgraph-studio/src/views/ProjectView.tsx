@@ -1,15 +1,32 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Button } from '@/components/ui/Button'
 import { useProjectStore } from '@/stores/projectStore'
+import { useNavigationStore } from '@/stores/navigationStore'
+import { projectApi, extractApiError } from '@/services/apiService'
 import type { Project, ProjectStatus } from '@/types/project'
 import { cn } from '@/lib/utils'
-import { Play, Pause, Square, Trash2, Plus, FolderOpen, RotateCcw, AlertTriangle } from 'lucide-react'
+import { Play, Pause, Square, Trash2, Plus, FolderOpen, RotateCcw, AlertTriangle, Loader2, RefreshCw, Pencil, X, Check } from 'lucide-react'
 
-type Platform = 'web' | 'desktop' | 'mobile'
-type Scope = 'mvp' | 'full'
+type Platform = 'web-canvas' | 'web-dom' | 'electron'
+type Scope = 'prototype' | 'demo' | 'standard' | 'full'
 type LLMProvider = 'claude' | 'gpt4'
+
+// Platform options - only what Claude can actually generate
+const platformOptions: { value: Platform; label: string; desc: string }[] = [
+  { value: 'web-canvas', label: 'ブラウザゲーム (Canvas)', desc: '2D/3Dゲーム、HTML5 Canvas + JavaScript' },
+  { value: 'web-dom', label: 'ブラウザゲーム (DOM)', desc: 'テキストベース、カードゲーム、HTML + CSS + JavaScript' },
+  { value: 'electron', label: 'デスクトップアプリ', desc: 'Win/Mac/Linux対応、Electron + JavaScript' },
+]
+
+// Scope options - simple descriptions only
+const scopeOptions: { value: Scope; label: string; desc: string }[] = [
+  { value: 'prototype', label: 'プロトタイプ', desc: '動作確認用の最小実装' },
+  { value: 'demo', label: 'デモ版', desc: '見せられるレベルの完成度' },
+  { value: 'standard', label: 'スタンダード', desc: '完全な1本のゲーム' },
+  { value: 'full', label: 'フル版', desc: '商用レベルの完成度' },
+]
 
 interface NewProjectForm {
   name: string
@@ -24,46 +41,10 @@ const initialForm: NewProjectForm = {
   name: '',
   userIdea: '',
   references: '',
-  platform: 'web',
-  scope: 'mvp',
+  platform: 'web-canvas',
+  scope: 'demo',
   llmProvider: 'claude'
 }
-
-// Mock projects for UI demonstration
-const mockProjects: Project[] = [
-  {
-    id: 'proj-001',
-    name: 'NebulaForge',
-    description: '星を砕いて、宇宙船を創れ',
-    status: 'running',
-    currentPhase: 1,
-    concept: {
-      description: '惑星の残骸から資源を収集し、自分だけの宇宙船を設計・強化しながら、銀河の謎を解き明かすクラフト探索ゲーム',
-      platform: 'web',
-      scope: 'mvp',
-      genre: 'サバイバルクラフト',
-      targetAudience: 'ミッドコア'
-    },
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'proj-002',
-    name: 'Pixel Dungeon',
-    description: 'レトロスタイルローグライク',
-    status: 'paused',
-    currentPhase: 2,
-    concept: {
-      description: 'クラシックなダンジョン探索RPG',
-      platform: 'web',
-      scope: 'mvp',
-      genre: 'ローグライク',
-      targetAudience: 'コアゲーマー'
-    },
-    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
-    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString()
-  }
-]
 
 const statusLabels: Record<ProjectStatus, string> = {
   draft: '下書き',
@@ -75,131 +56,288 @@ const statusLabels: Record<ProjectStatus, string> = {
 
 const statusColors: Record<ProjectStatus, string> = {
   draft: 'text-nier-text-light',
-  running: 'text-nier-accent-green',
-  paused: 'text-nier-accent-orange',
-  completed: 'text-nier-accent-blue',
-  failed: 'text-nier-accent-red'
+  running: 'text-nier-text-light',
+  paused: 'text-nier-text-light',
+  completed: 'text-nier-text-light',
+  failed: 'text-nier-text-light'
 }
 
 export default function ProjectView(): JSX.Element {
-  const { currentProject, setCurrentProject } = useProjectStore()
-  const [projects, setProjects] = useState<Project[]>(mockProjects)
+  const { currentProject, setCurrentProject, projects, setProjects } = useProjectStore()
+  const { setActiveTab } = useNavigationStore()
   const [showNewForm, setShowNewForm] = useState(false)
   const [form, setForm] = useState<NewProjectForm>(initialForm)
   const [showInitializeDialog, setShowInitializeDialog] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isEditing, setIsEditing] = useState(false)
+  const [editForm, setEditForm] = useState<NewProjectForm>(initialForm)
 
-  const handleCreateProject = () => {
+  // Fetch projects from backend
+  const fetchProjects = async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const data = await projectApi.list()
+      setProjects(data)
+    } catch (err) {
+      console.error('Failed to fetch projects:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの取得に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchProjects()
+  }, [])
+
+  const handleCreateProject = async () => {
     if (!form.name.trim() || !form.userIdea.trim()) return
 
-    const newProject: Project = {
-      id: `proj-${Date.now()}`,
-      name: form.name,
-      description: form.userIdea.slice(0, 50) + (form.userIdea.length > 50 ? '...' : ''),
-      status: 'draft',
-      currentPhase: 1,
-      concept: {
-        description: form.userIdea,
-        platform: form.platform,
-        scope: form.scope,
-        genre: undefined,
-        targetAudience: undefined
-      },
-      config: {
-        llmProvider: form.llmProvider
-      },
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
+    setIsLoading(true)
+    try {
+      const newProject = await projectApi.create({
+        name: form.name,
+        description: form.userIdea.slice(0, 50) + (form.userIdea.length > 50 ? '...' : ''),
+        concept: {
+          description: form.userIdea,
+          platform: form.platform,
+          scope: form.scope
+        },
+        config: {
+          llmProvider: form.llmProvider
+        }
+      })
 
-    setProjects([newProject, ...projects])
-    setCurrentProject(newProject)
-    setForm(initialForm)
-    setShowNewForm(false)
+      setProjects([newProject, ...projects])
+      setCurrentProject(newProject)
+      setForm(initialForm)
+      setShowNewForm(false)
+    } catch (err) {
+      console.error('Failed to create project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの作成に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleSelectProject = (project: Project) => {
     setCurrentProject(project)
   }
 
-  const handleDeleteProject = (id: string) => {
-    setProjects(projects.filter(p => p.id !== id))
-    if (currentProject?.id === id) {
-      setCurrentProject(null)
+  // Edit project from list
+  const handleEditProjectFromList = (project: Project) => {
+    setCurrentProject(project)
+    setEditForm({
+      name: project.name,
+      userIdea: project.concept?.description || '',
+      references: '',
+      platform: (project.concept?.platform as Platform) || 'web-canvas',
+      scope: (project.concept?.scope as Scope) || 'demo',
+      llmProvider: (project.config?.llmProvider as LLMProvider) || 'claude'
+    })
+    setIsEditing(true)
+  }
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      await projectApi.delete(id)
+      setProjects(projects.filter(p => p.id !== id))
+      if (currentProject?.id === id) {
+        setCurrentProject(null)
+      }
+    } catch (err) {
+      console.error('Failed to delete project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの削除に失敗: ${apiError.message}`)
     }
   }
 
-  const handleStartProject = () => {
+  const handleStartProject = async () => {
     if (!currentProject) return
-    const updated = { ...currentProject, status: 'running' as ProjectStatus }
-    setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
-    setCurrentProject(updated)
-  }
-
-  const handlePauseProject = () => {
-    if (!currentProject) return
-    const updated = { ...currentProject, status: 'paused' as ProjectStatus }
-    setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
-    setCurrentProject(updated)
-  }
-
-  const handleStopProject = () => {
-    if (!currentProject) return
-    const updated = { ...currentProject, status: 'draft' as ProjectStatus }
-    setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
-    setCurrentProject(updated)
-  }
-
-  const handleInitializeProject = () => {
-    if (!currentProject) return
-    const initialized: Project = {
-      ...currentProject,
-      status: 'draft' as ProjectStatus,
-      currentPhase: 1,
-      updatedAt: new Date().toISOString()
+    setIsLoading(true)
+    try {
+      const updated = await projectApi.start(currentProject.id)
+      setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
+      setCurrentProject(updated)
+    } catch (err) {
+      console.error('Failed to start project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの開始に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
     }
-    setProjects(projects.map(p => p.id === currentProject.id ? initialized : p))
-    setCurrentProject(initialized)
-    setShowInitializeDialog(false)
+  }
+
+  const handlePauseProject = async () => {
+    if (!currentProject) return
+    setIsLoading(true)
+    try {
+      const updated = await projectApi.pause(currentProject.id)
+      setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
+      setCurrentProject(updated)
+    } catch (err) {
+      console.error('Failed to pause project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの一時停止に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleStopProject = async () => {
+    if (!currentProject) return
+    setIsLoading(true)
+    try {
+      const updated = await projectApi.update(currentProject.id, { status: 'draft' })
+      setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
+      setCurrentProject(updated)
+    } catch (err) {
+      console.error('Failed to stop project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの停止に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleInitializeProject = async () => {
+    if (!currentProject) return
+    setIsLoading(true)
+    try {
+      const updated = await projectApi.initialize(currentProject.id)
+      setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
+      setCurrentProject(updated)
+      setShowInitializeDialog(false)
+      // Stay on PROJECT tab after initialization
+    } catch (err) {
+      console.error('Failed to initialize project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの初期化に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   // Check if project can be initialized (not already in initial state)
   const canInitialize = currentProject && (currentProject.status !== 'draft' || currentProject.currentPhase > 1)
 
+  // Start editing
+  const handleStartEdit = () => {
+    if (!currentProject) return
+    setEditForm({
+      name: currentProject.name,
+      userIdea: currentProject.concept?.description || '',
+      references: '',
+      platform: (currentProject.concept?.platform as Platform) || 'web-canvas',
+      scope: (currentProject.concept?.scope as Scope) || 'demo',
+      llmProvider: (currentProject.config?.llmProvider as LLMProvider) || 'claude'
+    })
+    setIsEditing(true)
+  }
+
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setIsEditing(false)
+    setEditForm(initialForm)
+  }
+
+  // Save edits
+  const handleSaveEdit = async () => {
+    if (!currentProject || !editForm.name.trim()) return
+    setIsLoading(true)
+    try {
+      const updated = await projectApi.update(currentProject.id, {
+        name: editForm.name,
+        description: editForm.userIdea.slice(0, 50) + (editForm.userIdea.length > 50 ? '...' : ''),
+        concept: {
+          ...currentProject.concept,
+          description: editForm.userIdea,
+          platform: editForm.platform,
+          scope: editForm.scope
+        },
+        config: {
+          ...currentProject.config,
+          llmProvider: editForm.llmProvider
+        }
+      })
+      setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
+      setCurrentProject(updated)
+      setIsEditing(false)
+    } catch (err) {
+      console.error('Failed to update project:', err)
+      const apiError = extractApiError(err)
+      setError(`プロジェクトの更新に失敗: ${apiError.message}`)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   return (
-    <div className="p-6 animate-nier-fade-in">
+    <div className="p-4 animate-nier-fade-in">
       {/* Page Title */}
-      <div className="flex items-baseline gap-3 mb-6">
-        <h1 className="text-nier-display font-light tracking-nier-wide">
-          PROJECT
-        </h1>
-        <span className="text-nier-body text-nier-text-light">
-          - プロジェクト管理
-        </span>
+      <div className="nier-page-header-row">
+        <div className="nier-page-header-left">
+          <h1 className="nier-page-title">PROJECT</h1>
+          <span className="nier-page-subtitle">- プロジェクト管理</span>
+        </div>
+        <div className="nier-page-header-right" />
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
+      {/* Error Message */}
+      {error && (
+        <div className="mb-4 p-3 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main text-nier-small">
+          {error}
+          <button
+            onClick={() => setError(null)}
+            className="ml-2 underline hover:no-underline"
+          >
+            閉じる
+          </button>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-3">
         {/* Left: Project List */}
-        <div className="col-span-1 space-y-4">
+        <div className="col-span-1 space-y-3">
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between w-full">
                 <DiamondMarker>プロジェクト一覧</DiamondMarker>
-                <button
-                  onClick={() => setShowNewForm(true)}
-                  className="p-1.5 hover:bg-nier-bg-selected transition-colors"
-                  title="新規作成"
-                >
-                  <Plus size={16} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={fetchProjects}
+                    className="p-1.5 hover:bg-nier-bg-selected transition-colors"
+                    title="更新"
+                    disabled={isLoading}
+                  >
+                    <RefreshCw size={16} className={isLoading ? 'animate-spin' : ''} />
+                  </button>
+                  <button
+                    onClick={() => setShowNewForm(true)}
+                    className="p-1.5 hover:bg-nier-bg-selected transition-colors"
+                    title="新規作成"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
-              {projects.length === 0 ? (
+              {isLoading && projects.length === 0 ? (
+                <div className="text-center text-nier-text-light py-8">
+                  <Loader2 size={24} className="mx-auto mb-2 animate-spin" />
+                  読み込み中...
+                </div>
+              ) : projects.length === 0 ? (
                 <div className="text-center text-nier-text-light py-8">
                   プロジェクトがありません
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2 nier-scroll-list-short">
                   {projects.map((project) => (
                     <div
                       key={project.id}
@@ -207,7 +345,7 @@ export default function ProjectView(): JSX.Element {
                       className={cn(
                         'p-3 border cursor-pointer transition-colors',
                         currentProject?.id === project.id
-                          ? 'border-nier-accent-gold bg-nier-bg-selected'
+                          ? 'border-nier-border-light bg-nier-bg-selected'
                           : 'border-nier-border-light hover:bg-nier-bg-hover'
                       )}
                     >
@@ -227,9 +365,20 @@ export default function ProjectView(): JSX.Element {
                           <button
                             onClick={(e) => {
                               e.stopPropagation()
+                              handleEditProjectFromList(project)
+                            }}
+                            className="p-1 hover:bg-nier-bg-main transition-colors text-nier-text-light hover:text-nier-accent-gold"
+                            title="編集"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
                               handleDeleteProject(project.id)
                             }}
-                            className="p-1 hover:bg-nier-bg-main transition-colors text-nier-text-light hover:text-nier-accent-red"
+                            className="p-1 hover:bg-nier-bg-main transition-colors text-nier-text-light hover:text-nier-text-main"
+                            title="削除"
                           >
                             <Trash2 size={12} />
                           </button>
@@ -258,7 +407,7 @@ export default function ProjectView(): JSX.Element {
                   {/* Project Name */}
                   <div>
                     <label className="block text-nier-small text-nier-text-light mb-1">
-                      プロジェクト名 <span className="text-nier-accent-red">*</span>
+                      プロジェクト名 <span className="text-nier-text-main">*</span>
                     </label>
                     <input
                       type="text"
@@ -272,7 +421,7 @@ export default function ProjectView(): JSX.Element {
                   {/* User Idea */}
                   <div>
                     <label className="block text-nier-small text-nier-text-light mb-1">
-                      ゲームアイデア <span className="text-nier-accent-red">*</span>
+                      ゲームアイデア <span className="text-nier-text-main">*</span>
                     </label>
                     <textarea
                       value={form.userIdea}
@@ -297,53 +446,75 @@ export default function ProjectView(): JSX.Element {
                     />
                   </div>
 
-                  {/* Platform & Scope */}
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-nier-small text-nier-text-light mb-1">
-                        プラットフォーム
-                      </label>
-                      <select
-                        value={form.platform}
-                        onChange={(e) => setForm({ ...form, platform: e.target.value as Platform })}
-                        className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
-                      >
-                        <option value="web">Web</option>
-                        <option value="desktop">Desktop</option>
-                        <option value="mobile">Mobile</option>
-                      </select>
+                  {/* Platform Selection */}
+                  <div>
+                    <label className="block text-nier-small text-nier-text-light mb-2">
+                      プラットフォーム
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {platformOptions.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setForm({ ...form, platform: opt.value })}
+                          className={cn(
+                            'p-2 border text-left transition-colors',
+                            form.platform === opt.value
+                              ? 'border-nier-accent-gold bg-nier-bg-selected'
+                              : 'border-nier-border-light hover:bg-nier-bg-hover'
+                          )}
+                        >
+                          <div className="text-nier-small font-medium">{opt.label}</div>
+                          <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+                        </button>
+                      ))}
                     </div>
-                    <div>
-                      <label className="block text-nier-small text-nier-text-light mb-1">
-                        スコープ
-                      </label>
-                      <select
-                        value={form.scope}
-                        onChange={(e) => setForm({ ...form, scope: e.target.value as Scope })}
-                        className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
-                      >
-                        <option value="mvp">MVP（最小構成）</option>
-                        <option value="full">Full（フル機能）</option>
-                      </select>
+                  </div>
+
+                  {/* Scope Selection */}
+                  <div>
+                    <label className="block text-nier-small text-nier-text-light mb-2">
+                      スコープ（ゲームの規模）
+                    </label>
+                    <div className="grid grid-cols-4 gap-2">
+                      {scopeOptions.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setForm({ ...form, scope: opt.value })}
+                          className={cn(
+                            'p-2 border text-left transition-colors',
+                            form.scope === opt.value
+                              ? 'border-nier-accent-gold bg-nier-bg-selected'
+                              : 'border-nier-border-light hover:bg-nier-bg-hover'
+                          )}
+                        >
+                          <div className="text-nier-small font-medium">{opt.label}</div>
+                          <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+                        </button>
+                      ))}
                     </div>
-                    <div>
-                      <label className="block text-nier-small text-nier-text-light mb-1">
-                        LLMプロバイダー
-                      </label>
-                      <select
-                        value={form.llmProvider}
-                        onChange={(e) => setForm({ ...form, llmProvider: e.target.value as LLMProvider })}
-                        className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
-                      >
-                        <option value="claude">Claude</option>
-                        <option value="gpt4">GPT-4</option>
-                      </select>
-                    </div>
+                  </div>
+
+                  {/* LLM Provider */}
+                  <div>
+                    <label className="block text-nier-small text-nier-text-light mb-1">
+                      LLMプロバイダー
+                    </label>
+                    <select
+                      value={form.llmProvider}
+                      onChange={(e) => setForm({ ...form, llmProvider: e.target.value as LLMProvider })}
+                      className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
+                    >
+                      <option value="claude">Claude (推奨)</option>
+                      <option value="gpt4">GPT-4</option>
+                    </select>
                   </div>
 
                   {/* Buttons */}
                   <div className="flex gap-3 pt-2">
-                    <Button onClick={handleCreateProject} disabled={!form.name.trim() || !form.userIdea.trim()}>
+                    <Button onClick={handleCreateProject} disabled={!form.name.trim() || !form.userIdea.trim() || isLoading}>
+                      {isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
                       作成
                     </Button>
                     <Button variant="secondary" onClick={() => setShowNewForm(false)}>
@@ -354,59 +525,162 @@ export default function ProjectView(): JSX.Element {
               </CardContent>
             </Card>
           ) : currentProject ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {/* Project Info */}
               <Card>
                 <CardHeader>
-                  <DiamondMarker>プロジェクト詳細</DiamondMarker>
+                  <div className="flex items-center justify-between w-full">
+                    <DiamondMarker>プロジェクト詳細</DiamondMarker>
+                    {!isEditing && currentProject.status !== 'running' && (
+                      <button
+                        onClick={handleStartEdit}
+                        className="p-1.5 hover:bg-nier-bg-selected transition-colors"
+                        title="編集"
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
-                    <div>
-                      <span className="text-nier-caption text-nier-text-light block">名前</span>
-                      <span className="text-nier-h2 font-medium">{currentProject.name}</span>
-                    </div>
-                    <div>
-                      <span className="text-nier-caption text-nier-text-light block">ステータス</span>
-                      <span className={cn('text-nier-body', statusColors[currentProject.status])}>
-                        {statusLabels[currentProject.status]}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-nier-caption text-nier-text-light block">現在のフェーズ</span>
-                      <span className="text-nier-body">Phase {currentProject.currentPhase}</span>
-                    </div>
-                    {currentProject.concept && (
-                      <>
-                        <div>
-                          <span className="text-nier-caption text-nier-text-light block">ゲームアイデア</span>
-                          <span className="text-nier-body">{currentProject.concept.description}</span>
+                  {isEditing ? (
+                    <div className="space-y-4">
+                      {/* Project Name */}
+                      <div>
+                        <label className="block text-nier-small text-nier-text-light mb-1">
+                          プロジェクト名 <span className="text-nier-text-main">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={editForm.name}
+                          onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                          className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
+                        />
+                      </div>
+
+                      {/* User Idea */}
+                      <div>
+                        <label className="block text-nier-small text-nier-text-light mb-1">
+                          ゲームアイデア
+                        </label>
+                        <textarea
+                          value={editForm.userIdea}
+                          onChange={(e) => setEditForm({ ...editForm, userIdea: e.target.value })}
+                          rows={4}
+                          className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none resize-none"
+                        />
+                      </div>
+
+                      {/* Platform Selection */}
+                      <div>
+                        <label className="block text-nier-small text-nier-text-light mb-2">
+                          プラットフォーム
+                        </label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {platformOptions.map((opt) => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setEditForm({ ...editForm, platform: opt.value })}
+                              className={cn(
+                                'p-2 border text-left transition-colors',
+                                editForm.platform === opt.value
+                                  ? 'border-nier-accent-gold bg-nier-bg-selected'
+                                  : 'border-nier-border-light hover:bg-nier-bg-hover'
+                              )}
+                            >
+                              <div className="text-nier-small font-medium">{opt.label}</div>
+                              <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+                            </button>
+                          ))}
                         </div>
-                        <div className="grid grid-cols-3 gap-4">
+                      </div>
+
+                      {/* Scope Selection */}
+                      <div>
+                        <label className="block text-nier-small text-nier-text-light mb-2">
+                          スコープ
+                        </label>
+                        <div className="grid grid-cols-4 gap-2">
+                          {scopeOptions.map((opt) => (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => setEditForm({ ...editForm, scope: opt.value })}
+                              className={cn(
+                                'p-2 border text-left transition-colors',
+                                editForm.scope === opt.value
+                                  ? 'border-nier-accent-gold bg-nier-bg-selected'
+                                  : 'border-nier-border-light hover:bg-nier-bg-hover'
+                              )}
+                            >
+                              <div className="text-nier-small font-medium">{opt.label}</div>
+                              <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Buttons */}
+                      <div className="flex gap-3 pt-2">
+                        <Button onClick={handleSaveEdit} disabled={!editForm.name.trim() || isLoading}>
+                          {isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Check size={14} className="mr-1.5" />}
+                          保存
+                        </Button>
+                        <Button variant="secondary" onClick={handleCancelEdit}>
+                          <X size={14} className="mr-1.5" />
+                          キャンセル
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <span className="text-nier-caption text-nier-text-light block">名前</span>
+                        <span className="text-nier-h2 font-medium">{currentProject.name}</span>
+                      </div>
+                      <div>
+                        <span className="text-nier-caption text-nier-text-light block">ステータス</span>
+                        <span className={cn('text-nier-body', statusColors[currentProject.status])}>
+                          {statusLabels[currentProject.status]}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-nier-caption text-nier-text-light block">現在のフェーズ</span>
+                        <span className="text-nier-body">Phase {currentProject.currentPhase}</span>
+                      </div>
+                      {currentProject.concept && (
+                        <>
                           <div>
-                            <span className="text-nier-caption text-nier-text-light block">プラットフォーム</span>
-                            <span className="text-nier-body">{currentProject.concept.platform}</span>
+                            <span className="text-nier-caption text-nier-text-light block">ゲームアイデア</span>
+                            <span className="text-nier-body">{currentProject.concept.description}</span>
                           </div>
-                          <div>
-                            <span className="text-nier-caption text-nier-text-light block">スコープ</span>
-                            <span className="text-nier-body">{currentProject.concept.scope}</span>
-                          </div>
-                          {currentProject.concept.genre && (
+                          <div className="grid grid-cols-3 gap-4">
                             <div>
-                              <span className="text-nier-caption text-nier-text-light block">ジャンル</span>
-                              <span className="text-nier-body">{currentProject.concept.genre}</span>
+                              <span className="text-nier-caption text-nier-text-light block">プラットフォーム</span>
+                              <span className="text-nier-body">{currentProject.concept.platform}</span>
                             </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                    <div>
-                      <span className="text-nier-caption text-nier-text-light block">作成日時</span>
-                      <span className="text-nier-body">
-                        {new Date(currentProject.createdAt).toLocaleString('ja-JP')}
-                      </span>
+                            <div>
+                              <span className="text-nier-caption text-nier-text-light block">スコープ</span>
+                              <span className="text-nier-body">{currentProject.concept.scope}</span>
+                            </div>
+                            {currentProject.concept.genre && (
+                              <div>
+                                <span className="text-nier-caption text-nier-text-light block">ジャンル</span>
+                                <span className="text-nier-body">{currentProject.concept.genre}</span>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      <div>
+                        <span className="text-nier-caption text-nier-text-light block">作成日時</span>
+                        <span className="text-nier-body">
+                          {new Date(currentProject.createdAt).toLocaleString('ja-JP')}
+                        </span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -417,29 +691,32 @@ export default function ProjectView(): JSX.Element {
                 </CardHeader>
                 <CardContent>
                   <div className="flex gap-3">
-                    {currentProject.status !== 'running' && (
-                      <Button onClick={handleStartProject}>
-                        <Play size={14} className="mr-1.5" />
+                    {/* 開始/再開: draft または paused の時のみ */}
+                    {(currentProject.status === 'draft' || currentProject.status === 'paused') && (
+                      <Button onClick={handleStartProject} disabled={isLoading}>
+                        {isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Play size={14} className="mr-1.5" />}
                         {currentProject.status === 'paused' ? '再開' : '開始'}
                       </Button>
                     )}
+                    {/* 一時停止: running の時のみ */}
                     {currentProject.status === 'running' && (
-                      <Button onClick={handlePauseProject}>
-                        <Pause size={14} className="mr-1.5" />
+                      <Button onClick={handlePauseProject} disabled={isLoading}>
+                        {isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : <Pause size={14} className="mr-1.5" />}
                         一時停止
                       </Button>
                     )}
+                    {/* 停止: running または paused の時のみ */}
                     {(currentProject.status === 'running' || currentProject.status === 'paused') && (
-                      <Button variant="secondary" onClick={handleStopProject}>
+                      <Button variant="secondary" onClick={handleStopProject} disabled={isLoading}>
                         <Square size={14} className="mr-1.5" />
                         停止
                       </Button>
                     )}
+                    {/* 初期化: draft以外の時（進捗がある時） */}
                     {canInitialize && (
                       <Button
-                        variant="ghost"
+                        variant="danger"
                         onClick={() => setShowInitializeDialog(true)}
-                        className="text-nier-accent-orange hover:text-nier-accent-red"
                       >
                         <RotateCcw size={14} className="mr-1.5" />
                         初期化
@@ -471,7 +748,7 @@ export default function ProjectView(): JSX.Element {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <Card className="w-96">
             <CardHeader>
-              <div className="flex items-center gap-2 text-nier-accent-orange">
+              <div className="flex items-center gap-2 text-nier-text-main">
                 <AlertTriangle size={18} />
                 <span>初期化の確認</span>
               </div>
@@ -480,7 +757,7 @@ export default function ProjectView(): JSX.Element {
               <p className="text-nier-body mb-4">
                 プロジェクト「{currentProject.name}」を初期化しますか？
               </p>
-              <p className="text-nier-small text-nier-accent-red mb-6">
+              <p className="text-nier-small text-nier-text-main mb-6">
                 すべての進捗状況とエージェント出力がリセットされます。この操作は取り消せません。
               </p>
               <div className="flex gap-3 justify-end">
@@ -488,9 +765,11 @@ export default function ProjectView(): JSX.Element {
                   キャンセル
                 </Button>
                 <Button
+                  variant="danger"
                   onClick={handleInitializeProject}
-                  className="bg-nier-accent-red text-white hover:bg-nier-accent-red/80"
+                  disabled={isLoading}
                 >
+                  {isLoading ? <Loader2 size={14} className="mr-1.5 animate-spin" /> : null}
                   初期化する
                 </Button>
               </div>

@@ -1,74 +1,59 @@
 """
 Mock Data Store and Generators
 フロントエンドテスト用のモックデータ管理
+リアルタイムシミュレーション対応
 """
 
 import uuid
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 import random
 
+from asset_scanner import scan_all_mock_data, get_mock_data_path
+from agent_settings import get_default_quality_settings, QualityCheckConfig
+
 
 class MockDataStore:
-    """In-memory data store for mock backend"""
+    """In-memory data store for mock backend with real-time simulation"""
 
     def __init__(self):
         self.projects: Dict[str, Dict] = {}
         self.agents: Dict[str, Dict] = {}
         self.checkpoints: Dict[str, Dict] = {}
         self.agent_logs: Dict[str, List[Dict]] = {}
+        self.system_logs: Dict[str, List[Dict]] = {}  # Per project
         self.metrics: Dict[str, Dict] = {}
-        self.subscriptions: Dict[str, set] = {}  # project_id -> set of sid
+        self.assets: Dict[str, List[Dict]] = {}  # Per project assets
+        self.subscriptions: Dict[str, set] = {}
+        self.quality_settings: Dict[str, Dict[str, QualityCheckConfig]] = {}  # Per project
 
-        # Initialize with sample data
+        # Simulation state
+        self._simulation_running = False
+        self._simulation_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+
         self._init_sample_data()
 
     def _init_sample_data(self):
-        """Initialize with comprehensive sample project data"""
+        """Initialize with single comprehensive project"""
 
-        # ============================================================
-        # Project 1: Draft RPG - 新規作成待ち
-        # ============================================================
-        proj1_id = "proj-001"
-        self.projects[proj1_id] = {
-            "id": proj1_id,
-            "name": "サンプルRPGゲーム",
-            "description": "ターン制バトルシステムを持つシンプルなRPG。レトロスタイルのグラフィックと戦略的なバトルが特徴。",
-            "concept": {
-                "description": "勇者が魔王を倒す王道RPG。4人パーティでのターン制バトル、装備システム、スキルツリーを実装。",
-                "platform": "web",
-                "scope": "mvp",
-                "genre": "RPG",
-                "targetAudience": "カジュアルゲーマー、レトロゲーム好き"
-            },
-            "status": "draft",
-            "currentPhase": 1,
-            "state": {},
-            "config": {
-                "maxTokensPerAgent": 100000,
-                "enableAutoApproval": False,
-                "llmProvider": "mock"
-            },
-            "createdAt": datetime.now().isoformat(),
-            "updatedAt": datetime.now().isoformat()
-        }
+        proj_id = "proj-001"
+        now = datetime.now()
 
-        # ============================================================
-        # Project 2: Running Puzzle Game - Phase 1実行中
-        # ============================================================
-        proj2_id = "proj-002"
-        self.projects[proj2_id] = {
-            "id": proj2_id,
+        self.projects[proj_id] = {
+            "id": proj_id,
             "name": "パズルアクションゲーム",
             "description": "物理演算を使ったパズルゲーム。ボールを転がして障害物を避けながらゴールを目指す。",
             "concept": {
-                "description": "ボールを転がしてゴールを目指すパズル。重力や摩擦をリアルに再現した物理演算エンジン搭載。",
+                "description": "ボールを転がしてゴールを目指すパズル。重力や摩擦をリアルに再現。",
                 "platform": "web",
                 "scope": "mvp",
                 "genre": "Puzzle",
                 "targetAudience": "全年齢"
             },
-            "status": "running",
+            "status": "draft",  # Start as draft, user starts it
             "currentPhase": 1,
             "state": {},
             "config": {
@@ -76,851 +61,579 @@ class MockDataStore:
                 "enableAutoApproval": False,
                 "llmProvider": "mock"
             },
-            "createdAt": (datetime.now() - timedelta(hours=2)).isoformat(),
-            "updatedAt": datetime.now().isoformat()
+            "createdAt": now.isoformat(),
+            "updatedAt": now.isoformat()
         }
 
-        # Add agents for project 2 (Phase 1)
-        self._create_sample_agents_phase1(proj2_id)
+        # Create agents - all pending initially (Phase 1 Leaders)
+        agents_data = [
+            {"type": "concept_leader", "name": "コンセプト定義"},
+            {"type": "design_leader", "name": "ゲームデザイン"},
+            {"type": "scenario_leader", "name": "シナリオ作成"},
+            {"type": "character_leader", "name": "キャラクターデザイン"},
+            {"type": "world_leader", "name": "ワールドビルディング"},
+            {"type": "task_split_leader", "name": "タスク分割"},
+        ]
 
-        # Add checkpoints for project 2
-        self._create_sample_checkpoints_phase1(proj2_id)
+        for data in agents_data:
+            agent_id = f"agent-{proj_id}-{data['type']}"
+            self.agents[agent_id] = {
+                "id": agent_id,
+                "projectId": proj_id,
+                "type": data["type"],
+                "status": "pending",
+                "progress": 0,
+                "currentTask": None,
+                "tokensUsed": 0,
+                "startedAt": None,
+                "completedAt": None,
+                "error": None,
+                "parentAgentId": None,
+                "metadata": {"displayName": data["name"]},
+                "createdAt": now.isoformat()
+            }
+            self.agent_logs[agent_id] = []
 
-        # Initialize metrics for project 2
-        self.metrics[proj2_id] = {
-            "projectId": proj2_id,
-            "totalTokensUsed": 15420,
+        # Initialize logs and metrics
+        self.system_logs[proj_id] = []
+
+        # Load real assets from mock_data folder
+        mock_data_path = get_mock_data_path()
+        real_assets = scan_all_mock_data(mock_data_path)
+        self.assets[proj_id] = real_assets
+        print(f"[MockDataStore] Loaded {len(real_assets)} real assets")
+
+        self.metrics[proj_id] = {
+            "projectId": proj_id,
+            "totalTokensUsed": 0,
             "estimatedTotalTokens": 50000,
-            "elapsedTimeSeconds": 3600,
-            "estimatedRemainingSeconds": 7200,
-            "estimatedEndTime": (datetime.now() + timedelta(hours=2)).isoformat(),
-            "completedTasks": 2,
-            "totalTasks": 5,
-            "progressPercent": 35,
-            "currentPhase": 1,
-            "phaseName": "Phase 1: 企画・設計"
-        }
-
-        # ============================================================
-        # Project 3: Paused Shooting Game - Phase 2で一時停止
-        # ============================================================
-        proj3_id = "proj-003"
-        self.projects[proj3_id] = {
-            "id": proj3_id,
-            "name": "スペースシューティング",
-            "description": "レトロスタイルの縦スクロールシューティングゲーム。",
-            "concept": {
-                "description": "宇宙を舞台にした縦スクロールシューティング。パワーアップシステムとボス戦が特徴。",
-                "platform": "web",
-                "scope": "full",
-                "genre": "Shooting",
-                "targetAudience": "シューティング好き、アーケードゲーマー"
-            },
-            "status": "paused",
-            "currentPhase": 2,
-            "state": {},
-            "config": {
-                "maxTokensPerAgent": 150000,
-                "enableAutoApproval": False,
-                "llmProvider": "mock"
-            },
-            "createdAt": (datetime.now() - timedelta(days=1)).isoformat(),
-            "updatedAt": (datetime.now() - timedelta(hours=3)).isoformat()
-        }
-
-        # Add completed Phase 1 agents and in-progress Phase 2 agents
-        self._create_sample_agents_phase2(proj3_id)
-        self._create_sample_checkpoints_phase2(proj3_id)
-
-        self.metrics[proj3_id] = {
-            "projectId": proj3_id,
-            "totalTokensUsed": 78500,
-            "estimatedTotalTokens": 150000,
-            "elapsedTimeSeconds": 86400,
-            "estimatedRemainingSeconds": 43200,
-            "estimatedEndTime": (datetime.now() + timedelta(hours=12)).isoformat(),
-            "completedTasks": 8,
-            "totalTasks": 14,
-            "progressPercent": 52,
-            "currentPhase": 2,
-            "phaseName": "Phase 2: 実装"
-        }
-
-        # ============================================================
-        # Project 4: Completed Card Game - 完了済み
-        # ============================================================
-        proj4_id = "proj-004"
-        self.projects[proj4_id] = {
-            "id": proj4_id,
-            "name": "トランプソリティア",
-            "description": "クラシックなソリティアゲーム。ドラッグ&ドロップ操作対応。",
-            "concept": {
-                "description": "クロンダイク形式のソリティア。アンドゥ機能、ヒント機能、統計表示を実装。",
-                "platform": "web",
-                "scope": "mvp",
-                "genre": "Card",
-                "targetAudience": "カジュアルゲーマー、暇つぶし派"
-            },
-            "status": "completed",
-            "currentPhase": 3,
-            "state": {},
-            "config": {
-                "maxTokensPerAgent": 80000,
-                "enableAutoApproval": True,
-                "llmProvider": "mock"
-            },
-            "createdAt": (datetime.now() - timedelta(days=3)).isoformat(),
-            "updatedAt": (datetime.now() - timedelta(days=1)).isoformat()
-        }
-
-        self._create_sample_agents_completed(proj4_id)
-        self._create_sample_checkpoints_completed(proj4_id)
-
-        self.metrics[proj4_id] = {
-            "projectId": proj4_id,
-            "totalTokensUsed": 65230,
-            "estimatedTotalTokens": 80000,
-            "elapsedTimeSeconds": 172800,
+            "elapsedTimeSeconds": 0,
             "estimatedRemainingSeconds": 0,
             "estimatedEndTime": None,
-            "completedTasks": 12,
-            "totalTasks": 12,
-            "progressPercent": 100,
-            "currentPhase": 3,
-            "phaseName": "Phase 3: 統合・テスト"
-        }
-
-        # ============================================================
-        # Project 5: Failed Project - エラーで失敗
-        # ============================================================
-        proj5_id = "proj-005"
-        self.projects[proj5_id] = {
-            "id": proj5_id,
-            "name": "3Dアクションゲーム（失敗）",
-            "description": "複雑すぎる要件により失敗したプロジェクト例。",
-            "concept": {
-                "description": "オープンワールド3Dアクション。要件が複雑すぎてMVPスコープを超過。",
-                "platform": "desktop",
-                "scope": "full",
-                "genre": "Action",
-                "targetAudience": "コアゲーマー"
-            },
-            "status": "failed",
+            "completedTasks": 0,
+            "totalTasks": 6,
+            "progressPercent": 0,
             "currentPhase": 1,
-            "state": {"failReason": "要件の複雑さによりスコープ超過"},
-            "config": {
-                "maxTokensPerAgent": 200000,
-                "enableAutoApproval": False,
-                "llmProvider": "mock"
-            },
-            "createdAt": (datetime.now() - timedelta(days=5)).isoformat(),
-            "updatedAt": (datetime.now() - timedelta(days=4)).isoformat()
+            "phaseName": "Phase 1: 企画・設計",
+            "activeGenerations": 0
         }
 
-        self._create_sample_agents_failed(proj5_id)
+    # ===== Simulation Engine =====
 
-        self.metrics[proj5_id] = {
-            "projectId": proj5_id,
-            "totalTokensUsed": 45000,
-            "estimatedTotalTokens": 200000,
-            "elapsedTimeSeconds": 28800,
-            "estimatedRemainingSeconds": 0,
-            "estimatedEndTime": None,
-            "completedTasks": 1,
-            "totalTasks": 5,
-            "progressPercent": 15,
-            "currentPhase": 1,
-            "phaseName": "Phase 1: 企画・設計"
-        }
+    def start_simulation(self):
+        """Start background simulation thread"""
+        if self._simulation_running:
+            return
 
-    def _create_sample_agents_phase1(self, project_id: str):
-        """Create sample agents for Phase 1 project"""
-        base_time = datetime.now() - timedelta(hours=2)
+        self._simulation_running = True
+        self._simulation_thread = threading.Thread(target=self._simulation_loop, daemon=True)
+        self._simulation_thread.start()
+        print("[Simulation] Started")
 
-        agents_data = [
-            {
-                "type": "concept",
-                "status": "completed",
-                "progress": 100,
-                "currentTask": None,
-                "tokensUsed": 4520,
-                "startedAt": base_time.isoformat(),
-                "completedAt": (base_time + timedelta(minutes=30)).isoformat(),
-                "displayName": "コンセプト定義エージェント"
-            },
-            {
-                "type": "design",
-                "status": "running",
-                "progress": 65,
-                "currentTask": "UI/UX設計ドキュメント作成中",
-                "tokensUsed": 6800,
-                "startedAt": (base_time + timedelta(minutes=35)).isoformat(),
-                "completedAt": None,
-                "displayName": "ゲームデザインエージェント"
-            },
-            {
-                "type": "scenario",
-                "status": "pending",
-                "progress": 0,
-                "currentTask": None,
-                "tokensUsed": 0,
-                "startedAt": None,
-                "completedAt": None,
-                "displayName": "シナリオ作成エージェント"
-            },
-            {
-                "type": "character",
-                "status": "pending",
-                "progress": 0,
-                "currentTask": None,
-                "tokensUsed": 0,
-                "startedAt": None,
-                "completedAt": None,
-                "displayName": "キャラクターデザインエージェント"
-            },
-            {
-                "type": "world",
-                "status": "pending",
-                "progress": 0,
-                "currentTask": None,
-                "tokensUsed": 0,
-                "startedAt": None,
-                "completedAt": None,
-                "displayName": "ワールドビルディングエージェント"
-            }
-        ]
+    def stop_simulation(self):
+        """Stop background simulation"""
+        self._simulation_running = False
+        if self._simulation_thread:
+            self._simulation_thread.join(timeout=2)
+        print("[Simulation] Stopped")
 
-        for data in agents_data:
-            agent_id = f"agent-{project_id}-{data['type']}"
-            self.agents[agent_id] = {
-                "id": agent_id,
-                "projectId": project_id,
-                "type": data["type"],
-                "status": data["status"],
-                "progress": data["progress"],
-                "currentTask": data["currentTask"],
-                "tokensUsed": data["tokensUsed"],
-                "startedAt": data["startedAt"],
-                "completedAt": data["completedAt"],
-                "error": None,
-                "parentAgentId": None,
-                "metadata": {"displayName": data["displayName"]},
-                "createdAt": base_time.isoformat()
-            }
+    def _simulation_loop(self):
+        """Main simulation loop - runs every second"""
+        while self._simulation_running:
+            try:
+                with self._lock:
+                    self._tick_simulation()
+            except Exception as e:
+                print(f"[Simulation] Error: {e}")
+            time.sleep(1)
 
-            if data["status"] in ("running", "completed"):
-                self.agent_logs[agent_id] = self._generate_detailed_logs(agent_id, data["type"], data["status"])
+    def _tick_simulation(self):
+        """Process one simulation tick for all running projects"""
+        for project_id, project in list(self.projects.items()):
+            if project["status"] == "running":
+                self._simulate_project(project_id)
 
-    def _create_sample_agents_phase2(self, project_id: str):
-        """Create sample agents for Phase 2 project (with completed Phase 1)"""
-        base_time = datetime.now() - timedelta(days=1)
+    def _simulate_project(self, project_id: str):
+        """Simulate one tick for a project"""
+        project = self.projects.get(project_id)
+        if not project:
+            return
 
-        # Phase 1 agents (all completed)
-        phase1_agents = [
-            {"type": "concept", "displayName": "コンセプト定義"},
-            {"type": "design", "displayName": "ゲームデザイン"},
-            {"type": "scenario", "displayName": "シナリオ作成"},
-            {"type": "character", "displayName": "キャラクターデザイン"},
-            {"type": "world", "displayName": "ワールドビルディング"}
-        ]
+        agents = [a for a in self.agents.values() if a["projectId"] == project_id]
+        running_agent = next((a for a in agents if a["status"] == "running"), None)
 
-        for i, data in enumerate(phase1_agents):
-            agent_id = f"agent-{project_id}-p1-{data['type']}"
-            start = base_time + timedelta(hours=i * 2)
-            self.agents[agent_id] = {
-                "id": agent_id,
-                "projectId": project_id,
-                "type": data["type"],
-                "status": "completed",
-                "progress": 100,
-                "currentTask": None,
-                "tokensUsed": random.randint(4000, 8000),
-                "startedAt": start.isoformat(),
-                "completedAt": (start + timedelta(hours=1, minutes=30)).isoformat(),
-                "error": None,
-                "parentAgentId": None,
-                "metadata": {"displayName": data["displayName"], "phase": 1},
-                "createdAt": base_time.isoformat()
-            }
-            self.agent_logs[agent_id] = self._generate_detailed_logs(agent_id, data["type"], "completed")
-
-        # Phase 2 agents
-        phase2_start = base_time + timedelta(hours=12)
-        phase2_agents = [
-            {"type": "task_split", "status": "completed", "progress": 100, "tokensUsed": 5200, "displayName": "タスク分割"},
-            {"type": "code_leader", "status": "running", "progress": 45, "currentTask": "アーキテクチャ設計", "tokensUsed": 12000, "displayName": "コードリーダー"},
-            {"type": "asset_leader", "status": "blocked", "progress": 30, "currentTask": "アセット仕様待ち", "tokensUsed": 3500, "displayName": "アセットリーダー"},
-            {"type": "code_worker", "status": "pending", "progress": 0, "tokensUsed": 0, "displayName": "コードワーカー1"},
-            {"type": "code_worker", "status": "pending", "progress": 0, "tokensUsed": 0, "displayName": "コードワーカー2"},
-            {"type": "asset_worker", "status": "pending", "progress": 0, "tokensUsed": 0, "displayName": "アセットワーカー"}
-        ]
-
-        for i, data in enumerate(phase2_agents):
-            suffix = f"-{i}" if data["type"] in ("code_worker", "asset_worker") else ""
-            agent_id = f"agent-{project_id}-p2-{data['type']}{suffix}"
-            start = phase2_start + timedelta(hours=i)
-
-            self.agents[agent_id] = {
-                "id": agent_id,
-                "projectId": project_id,
-                "type": data["type"],
-                "status": data["status"],
-                "progress": data["progress"],
-                "currentTask": data.get("currentTask"),
-                "tokensUsed": data["tokensUsed"],
-                "startedAt": start.isoformat() if data["status"] != "pending" else None,
-                "completedAt": (start + timedelta(hours=2)).isoformat() if data["status"] == "completed" else None,
-                "error": None,
-                "parentAgentId": None,
-                "metadata": {"displayName": data["displayName"], "phase": 2},
-                "createdAt": phase2_start.isoformat()
-            }
-
-            if data["status"] in ("running", "completed", "blocked"):
-                self.agent_logs[agent_id] = self._generate_detailed_logs(agent_id, data["type"], data["status"])
-
-    def _create_sample_agents_completed(self, project_id: str):
-        """Create sample agents for completed project"""
-        base_time = datetime.now() - timedelta(days=3)
-
-        all_phases = [
-            # Phase 1
-            [("concept", "コンセプト"), ("design", "デザイン"), ("scenario", "シナリオ")],
-            # Phase 2
-            [("task_split", "タスク分割"), ("code_leader", "コードリーダー"), ("code_worker", "コードワーカー")],
-            # Phase 3
-            [("integrator", "統合"), ("tester", "テスト"), ("reviewer", "レビュー")]
-        ]
-
-        hour_offset = 0
-        for phase_num, phase_agents in enumerate(all_phases, 1):
-            for agent_type, display_name in phase_agents:
-                agent_id = f"agent-{project_id}-p{phase_num}-{agent_type}"
-                start = base_time + timedelta(hours=hour_offset)
-
-                self.agents[agent_id] = {
-                    "id": agent_id,
-                    "projectId": project_id,
-                    "type": agent_type,
-                    "status": "completed",
-                    "progress": 100,
-                    "currentTask": None,
-                    "tokensUsed": random.randint(5000, 10000),
-                    "startedAt": start.isoformat(),
-                    "completedAt": (start + timedelta(hours=3)).isoformat(),
-                    "error": None,
-                    "parentAgentId": None,
-                    "metadata": {"displayName": display_name, "phase": phase_num},
-                    "createdAt": base_time.isoformat()
-                }
-                self.agent_logs[agent_id] = self._generate_detailed_logs(agent_id, agent_type, "completed")
-                hour_offset += 4
-
-    def _create_sample_agents_failed(self, project_id: str):
-        """Create sample agents for failed project"""
-        base_time = datetime.now() - timedelta(days=5)
-
-        agents_data = [
-            {"type": "concept", "status": "completed", "progress": 100, "error": None},
-            {"type": "design", "status": "failed", "progress": 35, "error": "要件の複雑さにより処理できません。スコープを縮小してください。"},
-            {"type": "scenario", "status": "pending", "progress": 0, "error": None},
-            {"type": "character", "status": "pending", "progress": 0, "error": None},
-            {"type": "world", "status": "pending", "progress": 0, "error": None}
-        ]
-
-        for data in agents_data:
-            agent_id = f"agent-{project_id}-{data['type']}"
-            self.agents[agent_id] = {
-                "id": agent_id,
-                "projectId": project_id,
-                "type": data["type"],
-                "status": data["status"],
-                "progress": data["progress"],
-                "currentTask": None,
-                "tokensUsed": random.randint(3000, 15000) if data["status"] != "pending" else 0,
-                "startedAt": base_time.isoformat() if data["status"] != "pending" else None,
-                "completedAt": (base_time + timedelta(hours=2)).isoformat() if data["status"] == "completed" else None,
-                "error": data["error"],
-                "parentAgentId": None,
-                "metadata": {"phase": 1},
-                "createdAt": base_time.isoformat()
-            }
-
-            if data["status"] in ("completed", "failed"):
-                self.agent_logs[agent_id] = self._generate_detailed_logs(agent_id, data["type"], data["status"])
-
-    def _create_sample_checkpoints_phase1(self, project_id: str):
-        """Create sample checkpoints for Phase 1"""
-        base_time = datetime.now() - timedelta(hours=1)
-
-        # Approved checkpoint from concept agent
-        cp1_id = f"cp-{project_id}-001"
-        self.checkpoints[cp1_id] = {
-            "id": cp1_id,
-            "projectId": project_id,
-            "agentId": f"agent-{project_id}-concept",
-            "type": "concept_review",
-            "title": "ゲームコンセプトの承認",
-            "description": "ゲームの基本コンセプトと方向性を確認してください",
-            "output": {
-                "type": "document",
-                "format": "markdown",
-                "content": """# ゲームコンセプト: パズルアクションゲーム
-
-## ゲーム概要
-プレイヤーがボールを操作し、物理演算を活用して様々な障害物を乗り越えながらゴールを目指すパズルゲーム。
-
-## コアコンセプト
-- **シンプルな操作**: 方向キーのみの直感的操作
-- **物理演算**: リアルな重力・摩擦・反発
-- **段階的難易度**: チュートリアルから上級者向けまで
-
-## ターゲットユーザー
-- カジュアルゲーマー
-- 短時間で遊びたい人
-- パズルゲーム好き
-
-## 差別化ポイント
-1. 美しいミニマルデザイン
-2. 中毒性のあるゲームループ
-3. ソーシャル機能（スコア共有）
-
-## MVP機能
-- 30ステージ
-- 基本物理演算
-- スコアシステム
-- ローカルハイスコア保存""",
-                "artifacts": []
-            },
-            "status": "approved",
-            "feedback": "コンセプトは明確で良い方向性です。MVPとして適切なスコープだと思います。",
-            "resolvedAt": (base_time - timedelta(minutes=30)).isoformat(),
-            "createdAt": (base_time - timedelta(hours=1)).isoformat(),
-            "updatedAt": (base_time - timedelta(minutes=30)).isoformat()
-        }
-
-        # Pending checkpoint from design agent
-        cp2_id = f"cp-{project_id}-002"
-        self.checkpoints[cp2_id] = {
-            "id": cp2_id,
-            "projectId": project_id,
-            "agentId": f"agent-{project_id}-design",
-            "type": "game_design_review",
-            "title": "ゲームデザインドキュメントのレビュー",
-            "description": "基本的なゲームメカニクスと画面遷移の設計をレビューしてください",
-            "output": {
-                "type": "document",
-                "format": "markdown",
-                "content": """# ゲームデザインドキュメント
-
-## 1. ゲームメカニクス
-
-### 1.1 基本操作
-| 入力 | アクション |
-|------|----------|
-| ← → | 左右移動 |
-| ↑ | ジャンプ |
-| スペース | ブースト |
-| R | リスタート |
-
-### 1.2 物理パラメータ
-- 重力: 9.8 m/s²
-- 摩擦係数: 0.3
-- 反発係数: 0.7
-- 最大速度: 15 m/s
-
-### 1.3 スコアリング
-```
-最終スコア = 基本点 × タイムボーナス × コレクティブルボーナス
-```
-
-## 2. 画面遷移
-
-```
-[タイトル] → [ステージ選択] → [ゲームプレイ] → [リザルト]
-     ↓              ↓                              ↓
-  [設定]      [チュートリアル]              [次のステージ]
-```
-
-## 3. UI/UX設計
-
-### 3.1 カラースキーム
-- Primary: #3498db (ブルー)
-- Secondary: #2ecc71 (グリーン)
-- Accent: #e74c3c (レッド)
-- Background: #1a1a2e (ダークネイビー)
-
-### 3.2 フォント
-- 見出し: Noto Sans JP Bold
-- 本文: Noto Sans JP Regular
-- 数字: Roboto Mono
-
-## 4. 音声設計
-
-### BGM
-- タイトル: 落ち着いたアンビエント
-- ゲームプレイ: テンポの良いエレクトロニカ
-- リザルト: 達成感のあるファンファーレ
-
-### SE
-- ボール転がり音
-- 壁接触音
-- ゴール到達音
-- スター獲得音""",
-                "artifacts": []
-            },
-            "status": "pending",
-            "feedback": None,
-            "resolvedAt": None,
-            "createdAt": base_time.isoformat(),
-            "updatedAt": base_time.isoformat()
-        }
-
-    def _create_sample_checkpoints_phase2(self, project_id: str):
-        """Create sample checkpoints for Phase 2"""
-        base_time = datetime.now() - timedelta(hours=5)
-
-        # Approved Phase 1 checkpoints
-        for i, (cp_type, title) in enumerate([
-            ("concept_review", "コンセプト承認"),
-            ("design_review", "デザイン承認"),
-            ("scenario_review", "シナリオ承認")
-        ]):
-            cp_id = f"cp-{project_id}-p1-{i+1:03d}"
-            self.checkpoints[cp_id] = {
-                "id": cp_id,
-                "projectId": project_id,
-                "agentId": f"agent-{project_id}-p1-concept",
-                "type": cp_type,
-                "title": title,
-                "description": f"Phase 1 {title}",
-                "output": {"type": "document", "format": "markdown", "content": f"# {title}\n\n承認済みドキュメント"},
-                "status": "approved",
-                "feedback": "LGTM",
-                "resolvedAt": (base_time - timedelta(hours=10 + i)).isoformat(),
-                "createdAt": (base_time - timedelta(hours=12 + i)).isoformat(),
-                "updatedAt": (base_time - timedelta(hours=10 + i)).isoformat()
-            }
-
-        # Pending Phase 2 checkpoint
-        cp_id = f"cp-{project_id}-p2-001"
-        self.checkpoints[cp_id] = {
-            "id": cp_id,
-            "projectId": project_id,
-            "agentId": f"agent-{project_id}-p2-code_leader",
-            "type": "architecture_review",
-            "title": "アーキテクチャ設計レビュー",
-            "description": "コード実装のアーキテクチャを確認してください",
-            "output": {
-                "type": "document",
-                "format": "markdown",
-                "content": """# システムアーキテクチャ設計
-
-## 技術スタック
-- **フレームワーク**: Phaser 3
-- **言語**: TypeScript
-- **ビルドツール**: Vite
-- **状態管理**: Zustand
-
-## ディレクトリ構造
-```
-src/
-├── scenes/          # Phaserシーン
-│   ├── TitleScene.ts
-│   ├── GameScene.ts
-│   └── ResultScene.ts
-├── objects/         # ゲームオブジェクト
-│   ├── Ball.ts
-│   └── Obstacle.ts
-├── physics/         # 物理演算
-│   └── PhysicsEngine.ts
-├── ui/              # UIコンポーネント
-├── stores/          # 状態管理
-└── utils/           # ユーティリティ
-```
-
-## クラス設計
-- `GameManager`: ゲーム全体の制御
-- `LevelLoader`: ステージデータ読み込み
-- `ScoreManager`: スコア計算・保存
-- `SoundManager`: 音声制御"""
-            },
-            "status": "pending",
-            "feedback": None,
-            "resolvedAt": None,
-            "createdAt": base_time.isoformat(),
-            "updatedAt": base_time.isoformat()
-        }
-
-        # Revision requested checkpoint
-        cp_id = f"cp-{project_id}-p2-002"
-        self.checkpoints[cp_id] = {
-            "id": cp_id,
-            "projectId": project_id,
-            "agentId": f"agent-{project_id}-p2-asset_leader",
-            "type": "asset_plan_review",
-            "title": "アセット制作計画レビュー",
-            "description": "アセット制作の計画を確認してください",
-            "output": {
-                "type": "document",
-                "format": "markdown",
-                "content": "# アセット制作計画\n\n## 必要アセット一覧\n- キャラクタースプライト\n- 背景画像\n- UIアイコン\n- エフェクト"
-            },
-            "status": "revision_requested",
-            "feedback": "アセットのサイズ仕様と形式を追記してください。また、アニメーションフレーム数も明記が必要です。",
-            "resolvedAt": (base_time - timedelta(hours=1)).isoformat(),
-            "createdAt": (base_time - timedelta(hours=3)).isoformat(),
-            "updatedAt": (base_time - timedelta(hours=1)).isoformat()
-        }
-
-    def _create_sample_checkpoints_completed(self, project_id: str):
-        """Create sample checkpoints for completed project"""
-        base_time = datetime.now() - timedelta(days=2)
-
-        checkpoints_data = [
-            ("concept_review", "コンセプト承認", "approved", "良いコンセプトです"),
-            ("design_review", "デザイン承認", "approved", "シンプルで分かりやすい設計"),
-            ("code_review", "コードレビュー", "approved", "コード品質OK"),
-            ("integration_review", "統合テスト結果", "approved", "全テストパス"),
-            ("final_review", "最終承認", "approved", "リリース準備完了")
-        ]
-
-        for i, (cp_type, title, status, feedback) in enumerate(checkpoints_data):
-            cp_id = f"cp-{project_id}-{i+1:03d}"
-            created = base_time + timedelta(hours=i * 8)
-            self.checkpoints[cp_id] = {
-                "id": cp_id,
-                "projectId": project_id,
-                "agentId": f"agent-{project_id}-p1-concept",
-                "type": cp_type,
-                "title": title,
-                "description": f"{title}のチェックポイント",
-                "output": {"type": "document", "format": "markdown", "content": f"# {title}\n\n完了"},
-                "status": status,
-                "feedback": feedback,
-                "resolvedAt": (created + timedelta(hours=2)).isoformat(),
-                "createdAt": created.isoformat(),
-                "updatedAt": (created + timedelta(hours=2)).isoformat()
-            }
-
-    def _generate_sample_logs(self, agent_id: str) -> List[Dict]:
-        """Generate sample log entries (legacy, use _generate_detailed_logs)"""
-        return self._generate_detailed_logs(agent_id, "generic", "running")
-
-    def _generate_detailed_logs(self, agent_id: str, agent_type: str, status: str) -> List[Dict]:
-        """Generate detailed log entries based on agent type and status"""
-        logs = []
-        base_time = datetime.now() - timedelta(minutes=random.randint(30, 120))
-
-        # Agent-type specific log templates
-        log_templates = {
-            "concept": [
-                ("info", "コンセプト定義エージェント起動", 0),
-                ("info", "プロジェクト要件を分析中...", 5),
-                ("debug", "ユーザー入力データ: ジャンル、プラットフォーム、スコープを取得", 10),
-                ("info", "市場分析を実行中...", 15),
-                ("debug", "類似ゲームのトレンドデータを収集", 20),
-                ("info", "コアゲームループを設計中...", 30),
-                ("info", "ターゲットユーザー分析完了", 40),
-                ("debug", "USP (Unique Selling Point) を特定", 45),
-                ("info", "コンセプトドキュメント生成中...", 55),
-                ("info", "レビュー用チェックポイントを作成", 70),
-                ("warn", "ドキュメントサイズが大きいため圧縮処理", 75),
-                ("info", "最終確認中...", 85),
-                ("info", "コンセプト定義完了", 100),
-            ],
-            "design": [
-                ("info", "ゲームデザインエージェント起動", 0),
-                ("info", "コンセプトドキュメントを読み込み中...", 5),
-                ("debug", "ゲームジャンル: パズル, プラットフォーム: Web", 8),
-                ("info", "ゲームメカニクス設計開始", 15),
-                ("debug", "操作スキーム: キーボード/タッチ対応", 20),
-                ("info", "物理パラメータを計算中...", 25),
-                ("info", "画面遷移フローを設計中...", 35),
-                ("debug", "シーン数: 5, 遷移パターン: 8", 40),
-                ("info", "UI/UXガイドライン作成中...", 50),
-                ("warn", "複雑なUI要素を検出 - 簡素化を推奨", 55),
-                ("info", "カラースキーム決定", 60),
-                ("info", "サウンドデザイン仕様作成中...", 65),
-                ("debug", "BGM: 3曲, SE: 15種類", 68),
-                ("info", "デザインドキュメント統合中...", 75),
-                ("info", "チェックポイント作成準備", 85),
-            ],
-            "scenario": [
-                ("info", "シナリオ作成エージェント起動", 0),
-                ("info", "ゲームコンセプトを分析中...", 10),
-                ("debug", "ストーリー要素: 必要, 複雑さ: 低", 15),
-                ("info", "プロット構成を生成中...", 25),
-                ("info", "キャラクター配置を計画中...", 40),
-                ("debug", "主要キャラクター: 3, サブキャラクター: 5", 45),
-                ("info", "イベントシーケンスを設計中...", 55),
-                ("info", "台詞データベース作成中...", 70),
-                ("warn", "テキスト量が多いため分割処理", 75),
-                ("info", "シナリオドキュメント最終化", 90),
-            ],
-            "code_leader": [
-                ("info", "コードリーダーエージェント起動", 0),
-                ("info", "技術要件を分析中...", 5),
-                ("debug", "フレームワーク選定: Phaser 3", 10),
-                ("info", "アーキテクチャ設計開始", 15),
-                ("debug", "パターン: Component-based, State: Zustand", 20),
-                ("info", "ディレクトリ構造を設計中...", 30),
-                ("info", "クラス設計ドキュメント作成中...", 45),
-                ("warn", "依存関係の循環を検出 - 再設計中", 50),
-                ("info", "インターフェース定義中...", 60),
-                ("debug", "公開API: 12, 内部API: 28", 65),
-                ("info", "タスク分割を準備中...", 75),
-            ],
-            "tester": [
-                ("info", "テストエージェント起動", 0),
-                ("info", "テスト計画を作成中...", 10),
-                ("debug", "ユニットテスト: 45, 統合テスト: 12, E2E: 8", 15),
-                ("info", "ユニットテスト実行中...", 25),
-                ("debug", "テストカバレッジ: 78%", 35),
-                ("info", "統合テスト実行中...", 45),
-                ("warn", "統合テスト 2件 失敗 - 再試行中", 55),
-                ("info", "E2Eテスト実行中...", 65),
-                ("info", "パフォーマンステスト実行中...", 75),
-                ("debug", "FPS: 60, メモリ使用量: 128MB", 80),
-                ("info", "テストレポート生成中...", 90),
-            ],
-            "integrator": [
-                ("info", "統合エージェント起動", 0),
-                ("info", "コードモジュールを収集中...", 10),
-                ("debug", "モジュール数: 15, 依存関係: 42", 15),
-                ("info", "コード統合を実行中...", 25),
-                ("warn", "型の不一致を検出 - 自動修正中", 35),
-                ("info", "ビルドプロセス実行中...", 50),
-                ("debug", "ビルド成功: バンドルサイズ 2.4MB", 60),
-                ("info", "アセット統合中...", 70),
-                ("info", "最終パッケージ作成中...", 85),
-            ]
-        }
-
-        # Get appropriate logs or use generic
-        template = log_templates.get(agent_type, [
-            ("info", "エージェント起動", 0),
-            ("info", "タスク分析中...", 15),
-            ("debug", "データ処理中", 25),
-            ("info", "メイン処理実行中...", 40),
-            ("info", "中間結果を確認中...", 55),
-            ("debug", "最適化処理", 65),
-            ("info", "出力生成中...", 80),
-            ("info", "処理完了", 100),
-        ])
-
-        # Determine how many logs to include based on status
-        if status == "completed":
-            logs_to_include = template
-        elif status == "failed":
-            logs_to_include = template[:len(template)//2] + [("error", "処理中にエラーが発生しました", template[len(template)//2][2])]
-        elif status == "running":
-            logs_to_include = template[:int(len(template) * 0.7)]
-        elif status == "blocked":
-            logs_to_include = template[:int(len(template) * 0.4)] + [("warn", "外部依存の完了待ち - ブロック中", template[int(len(template) * 0.4)][2])]
+        if running_agent:
+            self._simulate_agent(running_agent)
         else:
-            logs_to_include = template[:3]
+            # Start next pending agent
+            pending_agents = [a for a in agents if a["status"] == "pending"]
+            if pending_agents:
+                self._start_agent(pending_agents[0])
+            else:
+                # All agents done - check if project complete
+                completed = all(a["status"] == "completed" for a in agents)
+                if completed:
+                    project["status"] = "completed"
+                    project["updatedAt"] = datetime.now().isoformat()
+                    self._add_system_log(project_id, "info", "System", "プロジェクト完了！")
 
-        for i, (level, message, progress) in enumerate(logs_to_include):
-            logs.append({
-                "id": f"log-{agent_id}-{i:03d}",
-                "timestamp": (base_time + timedelta(minutes=i * random.randint(1, 4))).isoformat(),
-                "level": level,
-                "message": message,
-                "progress": progress,
-                "metadata": {"agent_type": agent_type}
-            })
+        # Update metrics
+        self._update_project_metrics(project_id)
 
-        return logs
+    def _start_agent(self, agent: Dict):
+        """Start an agent"""
+        now = datetime.now()
+        agent["status"] = "running"
+        agent["progress"] = 0
+        agent["startedAt"] = now.isoformat()
+        agent["currentTask"] = self._get_initial_task(agent["type"])
 
-    # Project CRUD
-    def get_projects(self) -> List[Dict]:
-        return list(self.projects.values())
+        # Add logs
+        display_name = agent["metadata"].get("displayName", agent["type"])
+        self._add_agent_log(agent["id"], "info", f"{display_name}エージェント起動", 0)
+        self._add_system_log(agent["projectId"], "info", agent["type"], f"{display_name}開始")
 
-    def get_project(self, project_id: str) -> Optional[Dict]:
-        return self.projects.get(project_id)
+    def _simulate_agent(self, agent: Dict):
+        """Simulate one tick for a running agent"""
+        # Progress increment (2-5% per second)
+        increment = random.randint(2, 5)
+        new_progress = min(100, agent["progress"] + increment)
 
-    def create_project(self, data: Dict) -> Dict:
-        project_id = f"proj-{uuid.uuid4().hex[:8]}"
+        # Token increment
+        token_increment = random.randint(30, 80)
+        agent["tokensUsed"] += token_increment
+
+        # Check for milestone logs
+        old_progress = agent["progress"]
+        agent["progress"] = new_progress
+
+        # Update current task based on progress
+        agent["currentTask"] = self._get_task_for_progress(agent["type"], new_progress)
+
+        # Add progress logs at milestones
+        self._check_milestone_logs(agent, old_progress, new_progress)
+
+        # Check for checkpoint creation
+        self._check_checkpoint_creation(agent, old_progress, new_progress)
+
+        # Check for asset generation
+        self._check_asset_generation(agent, old_progress, new_progress)
+
+        # Check completion
+        if new_progress >= 100:
+            self._complete_agent(agent)
+
+    def _complete_agent(self, agent: Dict):
+        """Mark agent as completed"""
+        now = datetime.now()
+        agent["status"] = "completed"
+        agent["progress"] = 100
+        agent["completedAt"] = now.isoformat()
+        agent["currentTask"] = None
+
+        display_name = agent["metadata"].get("displayName", agent["type"])
+        self._add_agent_log(agent["id"], "info", f"{display_name}完了", 100)
+        self._add_system_log(agent["projectId"], "info", agent["type"], f"{display_name}完了")
+
+    def _check_milestone_logs(self, agent: Dict, old_progress: int, new_progress: int):
+        """Add logs at milestone progress points"""
+        milestones = self._get_milestones(agent["type"])
+
+        for milestone_progress, level, message in milestones:
+            if old_progress < milestone_progress <= new_progress:
+                self._add_agent_log(agent["id"], level, message, milestone_progress)
+                if level in ("warn", "error"):
+                    self._add_system_log(agent["projectId"], level, agent["type"], message)
+
+    def _check_checkpoint_creation(self, agent: Dict, old_progress: int, new_progress: int):
+        """Create checkpoints at certain progress points"""
+        checkpoint_points = self._get_checkpoint_points(agent["type"])
+
+        for cp_progress, cp_type, cp_title in checkpoint_points:
+            if old_progress < cp_progress <= new_progress:
+                # Check if checkpoint already exists
+                existing = [c for c in self.checkpoints.values()
+                           if c["agentId"] == agent["id"] and c["type"] == cp_type]
+                if not existing:
+                    self._create_agent_checkpoint(agent, cp_type, cp_title)
+
+    def _create_agent_checkpoint(self, agent: Dict, cp_type: str, title: str):
+        """Create a checkpoint for an agent"""
+        checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
 
-        project = {
-            "id": project_id,
-            "name": data.get("name", "新規プロジェクト"),
-            "description": data.get("description", ""),
-            "concept": data.get("concept", {}),
-            "status": "draft",
-            "currentPhase": 1,
-            "state": {},
-            "config": data.get("config", {}),
+        content = self._generate_checkpoint_content(agent["type"], cp_type)
+
+        checkpoint = {
+            "id": checkpoint_id,
+            "projectId": agent["projectId"],
+            "agentId": agent["id"],
+            "type": cp_type,
+            "title": title,
+            "description": f"{agent['metadata'].get('displayName', agent['type'])}の成果物を確認してください",
+            "output": {
+                "type": "document",
+                "format": "markdown",
+                "content": content
+            },
+            "status": "pending",
+            "feedback": None,
+            "resolvedAt": None,
             "createdAt": now,
             "updatedAt": now
         }
+        self.checkpoints[checkpoint_id] = checkpoint
 
-        self.projects[project_id] = project
-        return project
+        self._add_system_log(agent["projectId"], "info", "System", f"チェックポイント作成: {title}")
 
-    def update_project(self, project_id: str, data: Dict) -> Optional[Dict]:
-        if project_id not in self.projects:
-            return None
+    def _check_asset_generation(self, agent: Dict, old_progress: int, new_progress: int):
+        """Generate assets at certain progress points"""
+        asset_points = self._get_asset_points(agent["type"])
 
-        project = self.projects[project_id]
-        project.update(data)
-        project["updatedAt"] = datetime.now().isoformat()
-        return project
+        for point_progress, asset_type, asset_name, asset_size in asset_points:
+            if old_progress < point_progress <= new_progress:
+                # Check if asset already exists
+                project_id = agent["projectId"]
+                existing = [a for a in self.assets.get(project_id, [])
+                           if a["name"] == asset_name and a["agent"] == agent["metadata"].get("displayName", agent["type"])]
+                if not existing:
+                    self._create_asset(agent, asset_type, asset_name, asset_size)
 
-    def delete_project(self, project_id: str) -> bool:
-        if project_id in self.projects:
-            del self.projects[project_id]
-            # Clean up related data
-            self.agents = {k: v for k, v in self.agents.items() if v["projectId"] != project_id}
-            self.checkpoints = {k: v for k, v in self.checkpoints.items() if v["projectId"] != project_id}
-            if project_id in self.metrics:
-                del self.metrics[project_id]
-            return True
-        return False
+    def _create_asset(self, agent: Dict, asset_type: str, name: str, size: str):
+        """Create an asset"""
+        project_id = agent["projectId"]
+        if project_id not in self.assets:
+            self.assets[project_id] = []
 
-    # Agent operations
-    def get_agents_by_project(self, project_id: str) -> List[Dict]:
-        return [a for a in self.agents.values() if a["projectId"] == project_id]
+        # Determine URL based on asset type
+        if asset_type == "image":
+            url = f"/assets/{name}"
+            thumbnail = f"/thumbnails/{name}"
+        elif asset_type == "audio":
+            url = f"/assets/{name}"
+            thumbnail = None
+        else:
+            url = None
+            thumbnail = None
 
-    def get_agent(self, agent_id: str) -> Optional[Dict]:
-        return self.agents.get(agent_id)
+        asset = {
+            "id": f"asset-{uuid.uuid4().hex[:8]}",
+            "name": name,
+            "type": asset_type,
+            "agent": agent["metadata"].get("displayName", agent["type"]),
+            "size": size,
+            "createdAt": datetime.now().isoformat(),
+            "url": url,
+            "thumbnail": thumbnail,
+            "duration": self._random_duration() if asset_type == "audio" else None,
+            "approvalStatus": "pending"
+        }
+        self.assets[project_id].append(asset)
 
-    def get_agent_logs(self, agent_id: str) -> List[Dict]:
-        return self.agent_logs.get(agent_id, [])
+        display_name = agent["metadata"].get("displayName", agent["type"])
+        self._add_system_log(project_id, "info", display_name, f"アセット生成: {name}")
 
-    def create_agent(self, project_id: str, agent_type: str) -> Dict:
-        agent_id = f"agent-{uuid.uuid4().hex[:8]}"
-        now = datetime.now().isoformat()
+    def _random_duration(self) -> str:
+        """Generate random audio duration"""
+        seconds = random.randint(5, 180)
+        mins = seconds // 60
+        secs = seconds % 60
+        return f"{mins}:{secs:02d}"
 
-        agent = {
-            "id": agent_id,
+    def _get_asset_points(self, agent_type: str) -> List[tuple]:
+        """Get asset generation points: (progress, type, name, size)"""
+        assets = {
+            "concept_leader": [
+                (50, "document", "concept_draft.md", "12KB"),
+                (90, "document", "concept_final.md", "28KB"),
+            ],
+            "design_leader": [
+                (30, "document", "mechanics_spec.md", "18KB"),
+                (45, "image", "ui_wireframe_01.png", "245KB"),
+                (55, "image", "ui_wireframe_02.png", "312KB"),
+                (70, "document", "sound_spec.md", "8KB"),
+                (80, "audio", "bgm_title.wav", "1.2MB"),
+                (85, "audio", "se_click.wav", "24KB"),
+                (95, "document", "design_final.md", "42KB"),
+            ],
+            "scenario_leader": [
+                (40, "document", "story_outline.md", "15KB"),
+                (70, "document", "stage_design.md", "22KB"),
+                (90, "document", "dialogue_script.md", "35KB"),
+            ],
+            "character_leader": [
+                (35, "image", "ball_concept.png", "156KB"),
+                (50, "image", "ball_sprite_sheet.png", "512KB"),
+                (65, "image", "guide_character.png", "234KB"),
+                (80, "image", "boss_enemy.png", "445KB"),
+                (95, "document", "character_specs.md", "18KB"),
+            ],
+            "world_leader": [
+                (25, "image", "bg_grassland.png", "1.8MB"),
+                (45, "image", "bg_cave.png", "2.1MB"),
+                (60, "image", "bg_sky.png", "1.6MB"),
+                (75, "audio", "bgm_grassland.wav", "3.2MB"),
+                (85, "audio", "bgm_cave.wav", "2.8MB"),
+                (95, "audio", "bgm_sky.wav", "3.5MB"),
+            ],
+            "task_split_leader": [
+                (50, "document", "task_breakdown.md", "25KB"),
+                (90, "document", "iteration_plan.md", "35KB"),
+            ],
+        }
+        return assets.get(agent_type, [])
+
+    def _update_project_metrics(self, project_id: str):
+        """Update project metrics"""
+        agents = [a for a in self.agents.values() if a["projectId"] == project_id]
+
+        total_tokens = sum(a["tokensUsed"] for a in agents)
+        completed_count = len([a for a in agents if a["status"] == "completed"])
+        total_count = len(agents)
+
+        # Calculate overall progress
+        total_progress = sum(a["progress"] for a in agents)
+        overall_progress = int(total_progress / total_count) if total_count > 0 else 0
+
+        # Time estimation
+        running_agent = next((a for a in agents if a["status"] == "running"), None)
+        if running_agent and running_agent["progress"] > 0:
+            elapsed = (datetime.now() - datetime.fromisoformat(running_agent["startedAt"])).total_seconds()
+            rate = running_agent["progress"] / elapsed if elapsed > 0 else 1
+            remaining_progress = 100 - running_agent["progress"]
+            remaining_agents = len([a for a in agents if a["status"] == "pending"])
+            estimated_remaining = (remaining_progress / rate) + (remaining_agents * 100 / rate) if rate > 0 else 0
+        else:
+            estimated_remaining = 0
+
+        # Count active generations (running agents doing LLM work)
+        active_generations = len([a for a in agents if a["status"] == "running"])
+
+        self.metrics[project_id] = {
             "projectId": project_id,
-            "type": agent_type,
-            "status": "pending",
-            "progress": 0,
-            "currentTask": None,
-            "tokensUsed": 0,
-            "startedAt": None,
-            "completedAt": None,
-            "error": None,
-            "parentAgentId": None,
-            "metadata": {},
-            "createdAt": now
+            "totalTokensUsed": total_tokens,
+            "estimatedTotalTokens": 50000,
+            "elapsedTimeSeconds": int((datetime.now() - datetime.fromisoformat(self.projects[project_id]["createdAt"])).total_seconds()),
+            "estimatedRemainingSeconds": int(estimated_remaining),
+            "estimatedEndTime": (datetime.now() + timedelta(seconds=estimated_remaining)).isoformat() if estimated_remaining > 0 else None,
+            "completedTasks": completed_count,
+            "totalTasks": total_count,
+            "progressPercent": overall_progress,
+            "currentPhase": 1,
+            "phaseName": "Phase 1: 企画・設計",
+            "activeGenerations": active_generations
         }
 
-        self.agents[agent_id] = agent
-        self.agent_logs[agent_id] = []
-        return agent
+    # ===== Task and Log Templates =====
 
-    def update_agent(self, agent_id: str, data: Dict) -> Optional[Dict]:
-        if agent_id not in self.agents:
-            return None
-        self.agents[agent_id].update(data)
-        return self.agents[agent_id]
+    def _get_initial_task(self, agent_type: str) -> str:
+        tasks = {
+            "concept_leader": "プロジェクト要件を分析中...",
+            "design_leader": "コンセプトドキュメントを読み込み中...",
+            "scenario_leader": "ストーリー構成を検討中...",
+            "character_leader": "キャラクター設定を分析中...",
+            "world_leader": "世界観設定を構築中...",
+            "task_split_leader": "タスク分解を開始中...",
+        }
+        return tasks.get(agent_type, "処理中...")
 
-    def add_agent_log(self, agent_id: str, level: str, message: str, progress: Optional[int] = None):
+    def _get_task_for_progress(self, agent_type: str, progress: int) -> str:
+        tasks = {
+            "concept_leader": [
+                (0, "プロジェクト要件を分析中..."),
+                (20, "コアコンセプトを定義中..."),
+                (40, "ターゲットユーザーを分析中..."),
+                (60, "コンセプトドキュメント作成中..."),
+                (80, "最終確認中..."),
+            ],
+            "design_leader": [
+                (0, "コンセプトドキュメントを読み込み中..."),
+                (15, "ゲームメカニクスを設計中..."),
+                (30, "操作スキームを定義中..."),
+                (50, "UI/UXを設計中..."),
+                (70, "サウンドデザイン仕様を作成中..."),
+                (85, "最終レビュー中..."),
+            ],
+            "scenario_leader": [
+                (0, "ストーリー構成を検討中..."),
+                (25, "メインプロットを執筆中..."),
+                (50, "ステージ構成を設計中..."),
+                (75, "テキスト最終調整中..."),
+            ],
+            "character_leader": [
+                (0, "キャラクター設定を分析中..."),
+                (30, "メインキャラクターをデザイン中..."),
+                (60, "サブキャラクターをデザイン中..."),
+                (85, "最終調整中..."),
+            ],
+            "world_leader": [
+                (0, "世界観設定を構築中..."),
+                (25, "背景設定を作成中..."),
+                (50, "ステージビジュアルを設計中..."),
+                (75, "環境エフェクトを定義中..."),
+            ],
+            "task_split_leader": [
+                (0, "企画成果物を分析中..."),
+                (25, "タスクを分解中..."),
+                (50, "依存関係を分析中..."),
+                (75, "スケジュールを作成中..."),
+            ],
+        }
+
+        agent_tasks = tasks.get(agent_type, [(0, "処理中...")])
+        current_task = agent_tasks[0][1]
+        for threshold, task in agent_tasks:
+            if progress >= threshold:
+                current_task = task
+        return current_task
+
+    def _get_milestones(self, agent_type: str) -> List[tuple]:
+        """Get log milestones for agent type: (progress, level, message)"""
+        milestones = {
+            "concept_leader": [
+                (10, "info", "プロジェクト要件の分析完了"),
+                (30, "info", "コアコンセプト定義完了"),
+                (50, "debug", "ターゲットユーザー分析中"),
+                (70, "info", "コンセプトドキュメント生成開始"),
+                (90, "info", "最終確認中"),
+            ],
+            "design_leader": [
+                (10, "info", "コンセプトドキュメント読み込み完了"),
+                (25, "info", "ゲームメカニクス設計開始"),
+                (40, "debug", "操作スキーム定義中"),
+                (55, "warn", "複雑なUI要素を検出 - 簡素化を検討"),
+                (70, "info", "サウンドデザイン仕様作成中"),
+                (85, "info", "最終レビュー開始"),
+            ],
+            "scenario_leader": [
+                (15, "info", "ストーリー構成確定"),
+                (40, "info", "メインプロット執筆中"),
+                (60, "debug", "ステージ構成を調整中"),
+                (85, "info", "テキスト最終調整"),
+            ],
+            "character_leader": [
+                (20, "info", "キャラクター設定分析完了"),
+                (50, "info", "メインキャラクターデザイン完了"),
+                (75, "info", "サブキャラクターデザイン中"),
+            ],
+            "world_leader": [
+                (15, "info", "世界観ベース構築完了"),
+                (40, "info", "背景設定作成中"),
+                (65, "info", "ステージビジュアル設計中"),
+                (85, "debug", "環境エフェクト定義中"),
+            ],
+            "task_split_leader": [
+                (15, "info", "企画成果物の分析完了"),
+                (40, "info", "タスク分解完了"),
+                (65, "info", "依存関係分析中"),
+                (85, "info", "スケジュール作成中"),
+            ],
+        }
+        return milestones.get(agent_type, [])
+
+    def _get_checkpoint_points(self, agent_type: str) -> List[tuple]:
+        """Get checkpoint creation points: (progress, type, title)"""
+        checkpoints = {
+            "concept_leader": [
+                (90, "concept_review", "ゲームコンセプトの承認"),
+            ],
+            "design_leader": [
+                (60, "design_review", "ゲームデザインドキュメントのレビュー"),
+                (95, "ui_review", "UI設計の確認"),
+            ],
+            "scenario_leader": [
+                (85, "scenario_review", "シナリオのレビュー"),
+            ],
+            "character_leader": [
+                (90, "character_review", "キャラクターデザインの確認"),
+            ],
+            "world_leader": [
+                (90, "world_review", "ワールド設計の確認"),
+            ],
+            "task_split_leader": [
+                (90, "task_review", "タスク分割のレビュー"),
+            ],
+        }
+        return checkpoints.get(agent_type, [])
+
+    def _generate_checkpoint_content(self, agent_type: str, cp_type: str) -> str:
+        """Generate checkpoint content"""
+        contents = {
+            "concept_review": """# ゲームコンセプト
+
+## 概要
+ボールを操作してゴールを目指すシンプルなパズルゲーム。
+
+## 特徴
+- 物理演算ベースのリアルな挙動
+- 全30ステージ
+- スコアシステム（タイム + コイン収集）
+
+## ターゲット
+全年齢向け、カジュアルゲーマー""",
+
+            "design_review": """# ゲームデザイン
+
+## 操作方法
+- 矢印キー: ボールの移動
+- スペースキー: ジャンプ
+- R: リスタート
+
+## 物理パラメータ
+- 重力: 9.8 m/s²
+- 摩擦係数: 0.3
+- 反発係数: 0.7""",
+
+            "ui_review": """# UI設計
+
+## 画面構成
+1. タイトル画面
+2. ステージ選択
+3. ゲームプレイ
+4. リザルト画面
+
+## HUD要素
+- タイマー（右上）
+- コイン数（左上）
+- ポーズボタン（右上）""",
+
+            "scenario_review": """# シナリオ
+
+## ストーリー
+小さなボールが大きな冒険に出る物語。
+様々な障害物を乗り越えながら、最終目的地を目指す。
+
+## ステージ構成
+- ワールド1: 草原（チュートリアル）
+- ワールド2: 洞窟
+- ワールド3: 空中庭園""",
+
+            "character_review": """# キャラクターデザイン
+
+## メインキャラクター
+- ボール: プレイヤー操作キャラ
+- 表情変化あり（喜怒哀楽）
+
+## サブキャラクター
+- ガイドキャラ: チュートリアル担当
+- ボスキャラ: 各ワールドボス""",
+
+            "world_review": """# ワールドビルディング
+
+## 世界観
+ファンタジー × 物理パズル
+
+## ステージテーマ
+- 草原: 明るく開放的
+- 洞窟: 暗めでミステリアス
+- 空中: 浮遊感と開放感"""
+        }
+        return contents.get(cp_type, f"# {cp_type}\n\n内容を確認してください。")
+
+    # ===== Log Management =====
+
+    def _add_agent_log(self, agent_id: str, level: str, message: str, progress: Optional[int] = None):
+        """Add log entry to agent"""
         if agent_id not in self.agent_logs:
             self.agent_logs[agent_id] = []
 
@@ -933,57 +646,172 @@ src/
             "metadata": {}
         }
         self.agent_logs[agent_id].append(log_entry)
-        return log_entry
 
-    # Checkpoint operations
-    def get_checkpoints_by_project(self, project_id: str) -> List[Dict]:
-        return [c for c in self.checkpoints.values() if c["projectId"] == project_id]
+    def _add_system_log(self, project_id: str, level: str, source: str, message: str):
+        """Add system log entry"""
+        if project_id not in self.system_logs:
+            self.system_logs[project_id] = []
 
-    def get_checkpoint(self, checkpoint_id: str) -> Optional[Dict]:
-        return self.checkpoints.get(checkpoint_id)
-
-    def create_checkpoint(self, project_id: str, agent_id: str, data: Dict) -> Dict:
-        checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
-        now = datetime.now().isoformat()
-
-        checkpoint = {
-            "id": checkpoint_id,
-            "projectId": project_id,
-            "agentId": agent_id,
-            "type": data.get("type", "review"),
-            "title": data.get("title", "レビュー依頼"),
-            "description": data.get("description"),
-            "output": data.get("output", {}),
-            "status": "pending",
-            "feedback": None,
-            "resolvedAt": None,
-            "createdAt": now,
-            "updatedAt": now
+        log_entry = {
+            "id": f"syslog-{uuid.uuid4().hex[:8]}",
+            "timestamp": datetime.now().isoformat(),
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": None
         }
+        self.system_logs[project_id].append(log_entry)
 
-        self.checkpoints[checkpoint_id] = checkpoint
-        return checkpoint
+    # ===== Project CRUD =====
 
-    def resolve_checkpoint(self, checkpoint_id: str, resolution: str, feedback: Optional[str] = None) -> Optional[Dict]:
-        if checkpoint_id not in self.checkpoints:
-            return None
+    def get_projects(self) -> List[Dict]:
+        with self._lock:
+            return list(self.projects.values())
 
-        checkpoint = self.checkpoints[checkpoint_id]
-        now = datetime.now().isoformat()
+    def get_project(self, project_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.projects.get(project_id)
 
-        checkpoint["status"] = resolution  # approved, rejected, revision_requested
-        checkpoint["feedback"] = feedback
-        checkpoint["resolvedAt"] = now
-        checkpoint["updatedAt"] = now
+    def create_project(self, data: Dict) -> Dict:
+        with self._lock:
+            project_id = f"proj-{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
+            project = {
+                "id": project_id,
+                "name": data.get("name", "新規プロジェクト"),
+                "description": data.get("description", ""),
+                "concept": data.get("concept", {}),
+                "status": "draft",
+                "currentPhase": 1,
+                "state": {},
+                "config": data.get("config", {}),
+                "createdAt": now,
+                "updatedAt": now
+            }
+            self.projects[project_id] = project
+            self.system_logs[project_id] = []
+            return project
 
-        return checkpoint
+    def update_project(self, project_id: str, data: Dict) -> Optional[Dict]:
+        with self._lock:
+            if project_id not in self.projects:
+                return None
+            project = self.projects[project_id]
+            project.update(data)
+            project["updatedAt"] = datetime.now().isoformat()
+            return project
 
-    # Metrics operations
-    def get_project_metrics(self, project_id: str) -> Optional[Dict]:
-        return self.metrics.get(project_id)
+    def delete_project(self, project_id: str) -> bool:
+        with self._lock:
+            if project_id in self.projects:
+                del self.projects[project_id]
+                self.agents = {k: v for k, v in self.agents.items() if v["projectId"] != project_id}
+                self.checkpoints = {k: v for k, v in self.checkpoints.items() if v["projectId"] != project_id}
+                if project_id in self.metrics:
+                    del self.metrics[project_id]
+                if project_id in self.system_logs:
+                    del self.system_logs[project_id]
+                return True
+            return False
 
-    def update_project_metrics(self, project_id: str, data: Dict) -> Dict:
-        if project_id not in self.metrics:
+    def start_project(self, project_id: str) -> Optional[Dict]:
+        """Start a project - begins simulation"""
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return None
+
+            if project["status"] in ("draft", "paused"):
+                project["status"] = "running"
+                project["updatedAt"] = datetime.now().isoformat()
+                self._add_system_log(project_id, "info", "System", "プロジェクト開始")
+            return project
+
+    def pause_project(self, project_id: str) -> Optional[Dict]:
+        """Pause a project"""
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return None
+
+            if project["status"] == "running":
+                project["status"] = "paused"
+                project["updatedAt"] = datetime.now().isoformat()
+                self._add_system_log(project_id, "info", "System", "プロジェクト一時停止")
+            return project
+
+    def resume_project(self, project_id: str) -> Optional[Dict]:
+        """Resume a paused project"""
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return None
+
+            if project["status"] == "paused":
+                project["status"] = "running"
+                project["updatedAt"] = datetime.now().isoformat()
+                self._add_system_log(project_id, "info", "System", "プロジェクト再開")
+            return project
+
+    def initialize_project(self, project_id: str) -> Optional[Dict]:
+        """Initialize/reset a project - clears all agents, checkpoints, logs, assets, metrics"""
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return None
+
+            now = datetime.now()
+
+            # Reset project status
+            project["status"] = "draft"
+            project["currentPhase"] = 1
+            project["updatedAt"] = now.isoformat()
+
+            # Clear agents and recreate
+            self.agents = {k: v for k, v in self.agents.items() if v["projectId"] != project_id}
+            self.agent_logs = {k: v for k, v in self.agent_logs.items() if not k.startswith(f"agent-{project_id}")}
+
+            # Recreate initial agents (Phase 1 Leaders)
+            agents_data = [
+                {"type": "concept_leader", "name": "コンセプト定義"},
+                {"type": "design_leader", "name": "ゲームデザイン"},
+                {"type": "scenario_leader", "name": "シナリオ作成"},
+                {"type": "character_leader", "name": "キャラクターデザイン"},
+                {"type": "world_leader", "name": "ワールドビルディング"},
+                {"type": "task_split_leader", "name": "タスク分割"},
+            ]
+
+            for data in agents_data:
+                agent_id = f"agent-{project_id}-{data['type']}"
+                self.agents[agent_id] = {
+                    "id": agent_id,
+                    "projectId": project_id,
+                    "type": data["type"],
+                    "status": "pending",
+                    "progress": 0,
+                    "currentTask": None,
+                    "tokensUsed": 0,
+                    "startedAt": None,
+                    "completedAt": None,
+                    "error": None,
+                    "parentAgentId": None,
+                    "metadata": {"displayName": data["name"]},
+                    "createdAt": now.isoformat()
+                }
+                self.agent_logs[agent_id] = []
+
+            # Clear checkpoints for this project
+            self.checkpoints = {k: v for k, v in self.checkpoints.items() if v["projectId"] != project_id}
+
+            # Clear system logs
+            self.system_logs[project_id] = []
+
+            # Reload assets from disk
+            mock_data_path = get_mock_data_path()
+            real_assets = scan_all_mock_data(mock_data_path)
+            self.assets[project_id] = real_assets
+
+            # Reset metrics
             self.metrics[project_id] = {
                 "projectId": project_id,
                 "totalTokensUsed": 0,
@@ -992,28 +820,248 @@ src/
                 "estimatedRemainingSeconds": 0,
                 "estimatedEndTime": None,
                 "completedTasks": 0,
-                "totalTasks": 0,
+                "totalTasks": 6,
                 "progressPercent": 0,
                 "currentPhase": 1,
-                "phaseName": "Phase 1: 企画・設計"
+                "phaseName": "Phase 1: 企画・設計",
+                "activeGenerations": 0
             }
 
-        self.metrics[project_id].update(data)
-        return self.metrics[project_id]
+            self._add_system_log(project_id, "info", "System", "プロジェクト初期化完了")
+            print(f"[MockDataStore] Project {project_id} initialized")
+            return project
 
-    # Subscription management
+    # ===== Agent Operations =====
+
+    def get_agents_by_project(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return [a for a in self.agents.values() if a["projectId"] == project_id]
+
+    def get_agent(self, agent_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.agents.get(agent_id)
+
+    def get_agent_logs(self, agent_id: str) -> List[Dict]:
+        with self._lock:
+            return self.agent_logs.get(agent_id, [])
+
+    def create_agent(self, project_id: str, agent_type: str) -> Dict:
+        with self._lock:
+            agent_id = f"agent-{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
+            agent = {
+                "id": agent_id,
+                "projectId": project_id,
+                "type": agent_type,
+                "status": "pending",
+                "progress": 0,
+                "currentTask": None,
+                "tokensUsed": 0,
+                "startedAt": None,
+                "completedAt": None,
+                "error": None,
+                "parentAgentId": None,
+                "metadata": {},
+                "createdAt": now
+            }
+            self.agents[agent_id] = agent
+            self.agent_logs[agent_id] = []
+            return agent
+
+    def update_agent(self, agent_id: str, data: Dict) -> Optional[Dict]:
+        with self._lock:
+            if agent_id not in self.agents:
+                return None
+            self.agents[agent_id].update(data)
+            return self.agents[agent_id]
+
+    def add_agent_log(self, agent_id: str, level: str, message: str, progress: Optional[int] = None):
+        with self._lock:
+            self._add_agent_log(agent_id, level, message, progress)
+
+    # ===== Checkpoint Operations =====
+
+    def get_checkpoints_by_project(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return [c for c in self.checkpoints.values() if c["projectId"] == project_id]
+
+    def get_checkpoint(self, checkpoint_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.checkpoints.get(checkpoint_id)
+
+    def create_checkpoint(self, project_id: str, agent_id: str, data: Dict) -> Dict:
+        with self._lock:
+            checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
+            checkpoint = {
+                "id": checkpoint_id,
+                "projectId": project_id,
+                "agentId": agent_id,
+                "type": data.get("type", "review"),
+                "title": data.get("title", "レビュー依頼"),
+                "description": data.get("description"),
+                "output": data.get("output", {}),
+                "status": "pending",
+                "feedback": None,
+                "resolvedAt": None,
+                "createdAt": now,
+                "updatedAt": now
+            }
+            self.checkpoints[checkpoint_id] = checkpoint
+            return checkpoint
+
+    def resolve_checkpoint(self, checkpoint_id: str, resolution: str, feedback: Optional[str] = None) -> Optional[Dict]:
+        with self._lock:
+            if checkpoint_id not in self.checkpoints:
+                return None
+            checkpoint = self.checkpoints[checkpoint_id]
+            now = datetime.now().isoformat()
+            checkpoint["status"] = resolution
+            checkpoint["feedback"] = feedback
+            checkpoint["resolvedAt"] = now
+            checkpoint["updatedAt"] = now
+
+            # Add system log
+            project_id = checkpoint["projectId"]
+            status_text = {"approved": "承認", "rejected": "却下", "revision_requested": "修正要求"}
+            self._add_system_log(project_id, "info", "System",
+                               f"チェックポイント{status_text.get(resolution, resolution)}: {checkpoint['title']}")
+
+            # Check if all Phase 1 checkpoints are approved to advance to Phase 2
+            if resolution == "approved":
+                self._check_phase_advancement(project_id)
+
+            return checkpoint
+
+    def _check_phase_advancement(self, project_id: str):
+        """Check if we should advance to the next phase"""
+        project = self.projects.get(project_id)
+        if not project:
+            return
+
+        current_phase = project.get("currentPhase", 1)
+        project_checkpoints = [c for c in self.checkpoints.values() if c["projectId"] == project_id]
+
+        # Phase 1 checkpoint types (from all Phase 1 Leaders)
+        phase1_types = {"concept_review", "design_review", "scenario_review", "character_review", "world_review", "task_review"}
+
+        if current_phase == 1:
+            # Check if all phase 1 checkpoints are approved
+            phase1_checkpoints = [c for c in project_checkpoints if c["type"] in phase1_types]
+            if phase1_checkpoints and all(c["status"] == "approved" for c in phase1_checkpoints):
+                # Advance to Phase 2
+                project["currentPhase"] = 2
+                project["updatedAt"] = datetime.now().isoformat()
+
+                # Update metrics
+                if project_id in self.metrics:
+                    self.metrics[project_id]["currentPhase"] = 2
+                    self.metrics[project_id]["phaseName"] = "Phase 2: 実装"
+
+                self._add_system_log(project_id, "info", "System", "Phase 2: 実装 に移行しました")
+                print(f"[MockDataStore] Project {project_id} advanced to Phase 2")
+
+    # ===== System Logs =====
+
+    def get_system_logs(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return self.system_logs.get(project_id, [])
+
+    # ===== Asset Operations =====
+
+    def get_assets_by_project(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return self.assets.get(project_id, [])
+
+    def update_asset(self, project_id: str, asset_id: str, data: Dict) -> Optional[Dict]:
+        with self._lock:
+            assets = self.assets.get(project_id, [])
+            for asset in assets:
+                if asset["id"] == asset_id:
+                    asset.update(data)
+                    return asset
+            return None
+
+    # ===== Metrics Operations =====
+
+    def get_project_metrics(self, project_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.metrics.get(project_id)
+
+    def update_project_metrics(self, project_id: str, data: Dict) -> Dict:
+        with self._lock:
+            if project_id not in self.metrics:
+                self.metrics[project_id] = {
+                    "projectId": project_id,
+                    "totalTokensUsed": 0,
+                    "estimatedTotalTokens": 50000,
+                    "elapsedTimeSeconds": 0,
+                    "estimatedRemainingSeconds": 0,
+                    "estimatedEndTime": None,
+                    "completedTasks": 0,
+                    "totalTasks": 0,
+                    "progressPercent": 0,
+                    "currentPhase": 1,
+                    "phaseName": "Phase 1: 企画・設計",
+                    "activeGenerations": 0
+                }
+            self.metrics[project_id].update(data)
+            return self.metrics[project_id]
+
+    # ===== Subscription Management =====
+
     def add_subscription(self, project_id: str, sid: str):
-        if project_id not in self.subscriptions:
-            self.subscriptions[project_id] = set()
-        self.subscriptions[project_id].add(sid)
+        with self._lock:
+            if project_id not in self.subscriptions:
+                self.subscriptions[project_id] = set()
+            self.subscriptions[project_id].add(sid)
 
     def remove_subscription(self, project_id: str, sid: str):
-        if project_id in self.subscriptions:
-            self.subscriptions[project_id].discard(sid)
+        with self._lock:
+            if project_id in self.subscriptions:
+                self.subscriptions[project_id].discard(sid)
 
     def remove_all_subscriptions(self, sid: str):
-        for project_id in self.subscriptions:
-            self.subscriptions[project_id].discard(sid)
+        with self._lock:
+            for project_id in self.subscriptions:
+                self.subscriptions[project_id].discard(sid)
 
     def get_subscribers(self, project_id: str) -> set:
-        return self.subscriptions.get(project_id, set())
+        with self._lock:
+            return self.subscriptions.get(project_id, set()).copy()
+
+    # ===== Quality Settings Operations =====
+
+    def get_quality_settings(self, project_id: str) -> Dict[str, QualityCheckConfig]:
+        """プロジェクトの品質チェック設定を取得"""
+        with self._lock:
+            if project_id not in self.quality_settings:
+                # デフォルト設定で初期化
+                self.quality_settings[project_id] = get_default_quality_settings()
+            return self.quality_settings[project_id].copy()
+
+    def set_quality_setting(
+        self,
+        project_id: str,
+        agent_type: str,
+        config: QualityCheckConfig
+    ) -> None:
+        """単一エージェントの品質チェック設定を更新"""
+        with self._lock:
+            if project_id not in self.quality_settings:
+                self.quality_settings[project_id] = get_default_quality_settings()
+            self.quality_settings[project_id][agent_type] = config
+
+    def reset_quality_settings(self, project_id: str) -> None:
+        """プロジェクトの品質チェック設定をデフォルトにリセット"""
+        with self._lock:
+            self.quality_settings[project_id] = get_default_quality_settings()
+
+    def get_quality_setting_for_agent(
+        self,
+        project_id: str,
+        agent_type: str
+    ) -> QualityCheckConfig:
+        """特定エージェントの品質チェック設定を取得"""
+        settings = self.get_quality_settings(project_id)
+        return settings.get(agent_type, QualityCheckConfig())

@@ -1,7 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Button } from '@/components/ui/Button'
+import { useProjectStore } from '@/stores/projectStore'
+import { useNavigationStore } from '@/stores/navigationStore'
+import { assetApi, type ApiAsset } from '@/services/apiService'
 import { cn } from '@/lib/utils'
 import {
   Image,
@@ -36,132 +41,26 @@ interface Asset {
   url?: string
   thumbnail?: string
   duration?: string
+  content?: string
   approvalStatus: ApprovalStatus
 }
 
-// Mock assets data
-const initialMockAssets: Asset[] = [
-  {
-    id: '1',
-    name: 'player_sprite.png',
-    type: 'image',
-    agent: 'AssetLeader',
-    size: '245 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-    url: 'https://via.placeholder.com/256x256/4A7C59/FFFFFF?text=Player',
-    thumbnail: 'https://via.placeholder.com/128x128/4A7C59/FFFFFF?text=Player',
-    approvalStatus: 'approved'
-  },
-  {
-    id: '2',
-    name: 'enemy_goblin.png',
-    type: 'image',
-    agent: 'AssetLeader',
-    size: '180 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-    url: 'https://via.placeholder.com/256x256/8B4513/FFFFFF?text=Goblin',
-    thumbnail: 'https://via.placeholder.com/128x128/8B4513/FFFFFF?text=Goblin',
-    approvalStatus: 'pending'
-  },
-  {
-    id: '3',
-    name: 'tileset_forest.png',
-    type: 'image',
-    agent: 'AssetLeader',
-    size: '512 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-    url: 'https://via.placeholder.com/512x512/228B22/FFFFFF?text=Forest+Tiles',
-    thumbnail: 'https://via.placeholder.com/128x128/228B22/FFFFFF?text=Forest',
-    approvalStatus: 'approved'
-  },
-  {
-    id: '4',
-    name: 'ui_buttons.png',
-    type: 'image',
-    agent: 'AssetLeader',
-    size: '89 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-    url: 'https://via.placeholder.com/256x128/4169E1/FFFFFF?text=UI+Buttons',
-    thumbnail: 'https://via.placeholder.com/128x64/4169E1/FFFFFF?text=Buttons',
-    approvalStatus: 'pending'
-  },
-  {
-    id: '5',
-    name: 'main_theme.mp3',
-    type: 'audio',
-    agent: 'AssetLeader',
-    size: '3.2 MB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-    duration: '2:45',
-    approvalStatus: 'approved'
-  },
-  {
-    id: '6',
-    name: 'battle_bgm.mp3',
-    type: 'audio',
-    agent: 'AssetLeader',
-    size: '2.8 MB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 150).toISOString(),
-    duration: '3:12',
-    approvalStatus: 'pending'
-  },
-  {
-    id: '7',
-    name: 'sfx_attack.wav',
-    type: 'audio',
-    agent: 'AssetLeader',
-    size: '156 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-    duration: '0:02',
-    approvalStatus: 'rejected'
-  },
-  {
-    id: '8',
-    name: 'sfx_jump.wav',
-    type: 'audio',
-    agent: 'AssetLeader',
-    size: '98 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 200).toISOString(),
-    duration: '0:01',
-    approvalStatus: 'approved'
-  },
-  {
-    id: '9',
-    name: 'concept_document.md',
-    type: 'document',
-    agent: 'Concept',
-    size: '12.5 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
-    approvalStatus: 'approved'
-  },
-  {
-    id: '10',
-    name: 'game_design.md',
-    type: 'document',
-    agent: 'Design',
-    size: '18.2 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 300).toISOString(),
-    approvalStatus: 'pending'
-  },
-  {
-    id: '11',
-    name: 'player_controller.ts',
-    type: 'code',
-    agent: 'CodeLeader',
-    size: '4.5 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-    approvalStatus: 'approved'
-  },
-  {
-    id: '12',
-    name: 'game_state.ts',
-    type: 'code',
-    agent: 'CodeLeader',
-    size: '6.2 KB',
-    createdAt: new Date(Date.now() - 1000 * 60 * 400).toISOString(),
-    approvalStatus: 'pending'
+// Convert API asset to frontend Asset type
+function convertApiAsset(apiAsset: ApiAsset): Asset {
+  return {
+    id: apiAsset.id,
+    name: apiAsset.name,
+    type: apiAsset.type,
+    agent: apiAsset.agent,
+    size: apiAsset.size,
+    createdAt: apiAsset.createdAt,
+    url: apiAsset.url || undefined,
+    thumbnail: apiAsset.thumbnail || undefined,
+    duration: apiAsset.duration || undefined,
+    content: apiAsset.content || undefined,
+    approvalStatus: apiAsset.approvalStatus,
   }
-]
+}
 
 const approvalStatusLabels: Record<ApprovalStatus, string> = {
   approved: '承認済',
@@ -170,15 +69,15 @@ const approvalStatusLabels: Record<ApprovalStatus, string> = {
 }
 
 const approvalStatusColors: Record<ApprovalStatus, string> = {
-  approved: 'text-nier-accent-green',
-  pending: 'text-nier-accent-orange',
-  rejected: 'text-nier-accent-red'
+  approved: 'text-nier-text-light',
+  pending: 'text-nier-text-light',
+  rejected: 'text-nier-text-light'
 }
 
 const approvalBgColors: Record<ApprovalStatus, string> = {
-  approved: 'bg-nier-accent-green/20 border-nier-accent-green',
-  pending: 'bg-nier-accent-orange/20 border-nier-accent-orange',
-  rejected: 'bg-nier-accent-red/20 border-nier-accent-red'
+  approved: 'bg-nier-bg-selected border-nier-border-light',
+  pending: 'bg-nier-bg-selected border-nier-border-light',
+  rejected: 'bg-nier-bg-selected border-nier-border-light'
 }
 
 const typeIcons: Record<AssetType, typeof Image> = {
@@ -197,21 +96,83 @@ const typeLabels: Record<AssetType, string> = {
   other: 'その他'
 }
 
+// アイコン色は統一（ゴチャゴチャ防止）
 const typeColors: Record<AssetType, string> = {
-  image: 'text-nier-accent-green',
-  audio: 'text-nier-accent-orange',
-  document: 'text-nier-accent-blue',
-  code: 'text-nier-accent-yellow',
+  image: 'text-nier-text-light',
+  audio: 'text-nier-text-light',
+  document: 'text-nier-text-light',
+  code: 'text-nier-text-light',
   other: 'text-nier-text-light'
 }
 
 export default function DataView(): JSX.Element {
-  const [assets, setAssets] = useState<Asset[]>(initialMockAssets)
+  const { currentProject } = useProjectStore()
+  const { tabResetCounter } = useNavigationStore()
+  const [assets, setAssets] = useState<Asset[]>([])
+  const [loading, setLoading] = useState(false)
   const [filterType, setFilterType] = useState<AssetType | 'all'>('all')
-  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>('all')
+  const [approvalFilter, setApprovalFilter] = useState<ApprovalFilter>('pending')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
   const [playingAudio, setPlayingAudio] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  // Reset selection when tab is clicked (even if same tab)
+  useEffect(() => {
+    setSelectedAsset(null)
+    if (audioRef.current) {
+      audioRef.current.pause()
+    }
+    setPlayingAudio(null)
+  }, [tabResetCounter])
+
+  // Fetch assets from API
+  useEffect(() => {
+    if (!currentProject) {
+      setAssets([])
+      return
+    }
+
+    const fetchAssets = async () => {
+      setLoading(true)
+      try {
+        const data = await assetApi.listByProject(currentProject.id)
+        setAssets(data.map(convertApiAsset))
+      } catch (error) {
+        console.error('Failed to fetch assets:', error)
+        setAssets([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchAssets()
+    const interval = setInterval(fetchAssets, 5000)
+    return () => clearInterval(interval)
+  }, [currentProject?.id])
+
+  // Project not selected
+  if (!currentProject) {
+    return (
+      <div className="p-4 animate-nier-fade-in">
+        <div className="nier-page-header-row">
+          <div className="nier-page-header-left">
+            <h1 className="nier-page-title">ASSET</h1>
+            <span className="nier-page-subtitle">- アセット管理</span>
+          </div>
+          <div className="nier-page-header-right" />
+        </div>
+        <Card>
+          <CardContent>
+            <div className="text-center py-12 text-nier-text-light">
+              <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
+              <p className="text-nier-body">プロジェクトを選択してください</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   const filteredAssets = assets
     .filter(a => filterType === 'all' || a.type === filterType)
@@ -232,55 +193,91 @@ export default function DataView(): JSX.Element {
     rejected: assets.filter(a => a.approvalStatus === 'rejected').length
   }
 
-  const handlePlayAudio = (assetId: string) => {
+  const handlePlayAudio = (assetId: string, audioUrl?: string) => {
     if (playingAudio === assetId) {
+      // Stop playing
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current.currentTime = 0
+      }
       setPlayingAudio(null)
     } else {
+      // Start playing new audio
+      if (audioRef.current && audioUrl) {
+        // Build full URL for the audio
+        const fullUrl = audioUrl.startsWith('http')
+          ? audioUrl
+          : `http://localhost:8000${audioUrl}`
+        audioRef.current.src = fullUrl
+        audioRef.current.play().catch(err => {
+          console.error('Failed to play audio:', err)
+        })
+      }
       setPlayingAudio(assetId)
     }
   }
 
-  const handleApprove = (assetId: string) => {
-    setAssets(assets.map(a =>
-      a.id === assetId ? { ...a, approvalStatus: 'approved' as ApprovalStatus } : a
-    ))
-    if (selectedAsset?.id === assetId) {
-      setSelectedAsset({ ...selectedAsset, approvalStatus: 'approved' })
+  // Helper to find and select next pending asset
+  const selectNextPending = (updatedAssets: Asset[], currentId: string) => {
+    const pendingAssets = updatedAssets.filter(
+      a => a.approvalStatus === 'pending' && a.id !== currentId
+    )
+    if (pendingAssets.length > 0) {
+      // Select the oldest pending asset
+      const nextPending = pendingAssets.reduce((oldest, current) =>
+        new Date(oldest.createdAt) < new Date(current.createdAt) ? oldest : current
+      )
+      setSelectedAsset(nextPending)
+    } else {
+      setSelectedAsset(null)
     }
   }
 
-  const handleReject = (assetId: string) => {
-    setAssets(assets.map(a =>
-      a.id === assetId ? { ...a, approvalStatus: 'rejected' as ApprovalStatus } : a
-    ))
-    if (selectedAsset?.id === assetId) {
-      setSelectedAsset({ ...selectedAsset, approvalStatus: 'rejected' })
+  const handleApprove = async (assetId: string) => {
+    if (!currentProject) return
+    const currentId = assetId
+    try {
+      await assetApi.updateStatus(currentProject.id, assetId, 'approved')
+      // Refresh assets
+      const data = await assetApi.listByProject(currentProject.id)
+      const updatedAssets = data.map(convertApiAsset)
+      setAssets(updatedAssets)
+      // If this was the selected asset, select next pending
+      if (selectedAsset?.id === assetId) {
+        selectNextPending(updatedAssets, currentId)
+      }
+    } catch (error) {
+      console.error('Failed to approve asset:', error)
     }
   }
 
-  const handleSetPending = (assetId: string) => {
-    setAssets(assets.map(a =>
-      a.id === assetId ? { ...a, approvalStatus: 'pending' as ApprovalStatus } : a
-    ))
-    if (selectedAsset?.id === assetId) {
-      setSelectedAsset({ ...selectedAsset, approvalStatus: 'pending' })
+  const handleReject = async (assetId: string) => {
+    if (!currentProject) return
+    const currentId = assetId
+    try {
+      await assetApi.updateStatus(currentProject.id, assetId, 'rejected')
+      // Refresh assets
+      const data = await assetApi.listByProject(currentProject.id)
+      const updatedAssets = data.map(convertApiAsset)
+      setAssets(updatedAssets)
+      // If this was the selected asset, select next pending
+      if (selectedAsset?.id === assetId) {
+        selectNextPending(updatedAssets, currentId)
+      }
+    } catch (error) {
+      console.error('Failed to reject asset:', error)
     }
   }
 
   return (
-    <div className="p-6 animate-nier-fade-in">
+    <div className="p-4 animate-nier-fade-in">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-1.5 h-6 bg-nier-accent-blue" />
-          <h1 className="text-nier-h1 font-medium tracking-nier-wide">
-            DATA
-          </h1>
-          <span className="text-nier-text-light">
-            - アセット管理
-          </span>
+      <div className="nier-page-header-row">
+        <div className="nier-page-header-left">
+          <h1 className="nier-page-title">ASSET</h1>
+          <span className="nier-page-subtitle">- アセット管理</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="nier-page-header-right">
           <button
             onClick={() => setViewMode('grid')}
             className={cn(
@@ -303,20 +300,20 @@ export default function DataView(): JSX.Element {
       </div>
 
       {/* Filter Tabs */}
-      <Card className="mb-6">
+      <Card className="mb-3">
         <CardContent className="py-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-3">
             {/* Type Filter */}
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-wrap">
               {(['all', 'image', 'audio', 'document', 'code'] as const).map(type => {
                 const Icon = type === 'all' ? FolderOpen : typeIcons[type]
-                const label = type === 'all' ? 'すべて' : typeLabels[type]
+                const label = type === 'all' ? '全て' : typeLabels[type]
                 const count = assetCounts[type]
                 return (
                   <button
                     key={type}
                     className={cn(
-                      'flex items-center gap-2 px-4 py-2 text-nier-small tracking-nier transition-colors',
+                      'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
                       filterType === type
                         ? 'bg-nier-bg-selected text-nier-text-main'
                         : 'text-nier-text-light hover:bg-nier-bg-panel'
@@ -332,7 +329,7 @@ export default function DataView(): JSX.Element {
             </div>
 
             {/* Approval Filter */}
-            <div className="flex items-center gap-1 border-l border-nier-border-light pl-4">
+            <div className="flex items-center gap-1 flex-wrap">
               <Filter size={14} className="text-nier-text-light mr-2" />
               {(['all', 'pending', 'approved', 'rejected'] as const).map(status => {
                 const label = status === 'all' ? '全状態' : approvalStatusLabels[status]
@@ -343,9 +340,7 @@ export default function DataView(): JSX.Element {
                     className={cn(
                       'px-3 py-1.5 text-nier-small tracking-nier transition-colors border',
                       approvalFilter === status
-                        ? status === 'all'
-                          ? 'bg-nier-bg-selected border-nier-text-main'
-                          : approvalBgColors[status]
+                        ? 'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
                         : 'border-transparent text-nier-text-light hover:bg-nier-bg-panel'
                     )}
                     onClick={() => setApprovalFilter(status)}
@@ -361,98 +356,99 @@ export default function DataView(): JSX.Element {
       </Card>
 
       {/* Asset Grid/List */}
-      {viewMode === 'grid' ? (
-        <div className="grid grid-cols-4 gap-4">
+      {loading && assets.length === 0 ? (
+        <Card>
+          <CardContent>
+            <div className="text-center py-8 text-nier-text-light">
+              <p className="text-nier-small">読み込み中...</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : filteredAssets.length === 0 ? (
+        <Card>
+          <CardContent>
+            <div className="text-center py-8 text-nier-text-light">
+              <FolderOpen size={32} className="mx-auto mb-2 opacity-50" />
+              <p className="text-nier-small">アセットがありません</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : viewMode === 'grid' ? (
+        <div className="grid grid-cols-6 gap-2 nier-scroll-list">
           {filteredAssets.map(asset => {
-            const Icon = typeIcons[asset.type]
+            const Icon = typeIcons[asset.type] || FolderOpen
             return (
-              <Card
+              <div
                 key={asset.id}
-                className="cursor-pointer hover:border-nier-accent-gold transition-colors"
+                className="bg-nier-bg-panel border border-nier-border-light cursor-pointer hover:border-nier-accent-gold transition-colors p-2"
                 onClick={() => setSelectedAsset(asset)}
               >
-                <CardContent className="p-3">
-                  {/* Thumbnail / Icon */}
-                  <div className="aspect-square bg-nier-bg-header mb-3 flex items-center justify-center overflow-hidden">
-                    {asset.type === 'image' && asset.thumbnail ? (
-                      <img
-                        src={asset.thumbnail}
-                        alt={asset.name}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : asset.type === 'audio' ? (
+                {/* Thumbnail / Icon */}
+                <div className="aspect-square bg-nier-bg-selected mb-1.5 flex items-center justify-center overflow-hidden">
+                  {asset.type === 'image' && asset.thumbnail ? (
+                    <img
+                      src={asset.thumbnail}
+                      alt={asset.name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : asset.type === 'audio' ? (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handlePlayAudio(asset.id, asset.url)
+                      }}
+                      className="w-10 h-10 rounded-full bg-nier-bg-panel border border-nier-border-dark flex items-center justify-center hover:bg-nier-bg-main transition-colors"
+                    >
+                      {playingAudio === asset.id ? (
+                        <Pause size={16} className="text-nier-text-main" />
+                      ) : (
+                        <Play size={16} className="text-nier-text-main ml-0.5" />
+                      )}
+                    </button>
+                  ) : (
+                    <Icon size={24} className={typeColors[asset.type]} />
+                  )}
+                </div>
+
+                {/* Info */}
+                <div className="text-nier-caption font-medium truncate" title={asset.name}>
+                  {asset.name}
+                </div>
+
+                {/* Size + Status + Actions in one row */}
+                <div className="text-[10px] text-nier-text-light mt-0.5 flex items-center justify-between">
+                  <span>{asset.size}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] px-1 py-0.5 border bg-nier-bg-selected border-nier-border-light text-nier-text-light">
+                      {asset.approvalStatus === 'approved' ? '承認' : asset.approvalStatus === 'rejected' ? '却下' : '未承認'}
+                    </span>
+                    {asset.approvalStatus !== 'approved' && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
-                          handlePlayAudio(asset.id)
+                          handleApprove(asset.id)
                         }}
-                        className="w-16 h-16 rounded-full bg-nier-bg-main border-2 border-nier-accent-orange flex items-center justify-center hover:bg-nier-bg-selected transition-colors"
+                        className="p-0.5 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
+                        title="承認"
                       >
-                        {playingAudio === asset.id ? (
-                          <Pause size={24} className="text-nier-accent-orange" />
-                        ) : (
-                          <Play size={24} className="text-nier-accent-orange ml-1" />
-                        )}
+                        <Check size={12} />
                       </button>
-                    ) : (
-                      <Icon size={48} className={typeColors[asset.type]} />
+                    )}
+                    {asset.approvalStatus !== 'rejected' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleReject(asset.id)
+                        }}
+                        className="p-0.5 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
+                        title="却下"
+                      >
+                        <XCircle size={12} />
+                      </button>
                     )}
                   </div>
-
-                  {/* Info */}
-                  <div className="text-nier-small font-medium truncate" title={asset.name}>
-                    {asset.name}
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <span className={cn('text-nier-caption', typeColors[asset.type])}>
-                      {typeLabels[asset.type]}
-                    </span>
-                    <span className="text-nier-caption text-nier-text-light">
-                      {asset.size}
-                    </span>
-                  </div>
-                  {asset.duration && (
-                    <div className="text-nier-caption text-nier-text-light mt-1">
-                      {asset.duration}
-                    </div>
-                  )}
-
-                  {/* Approval Status & Buttons */}
-                  <div className="mt-2 pt-2 border-t border-nier-border-light">
-                    <div className="flex items-center justify-between">
-                      <span className={cn('text-nier-caption px-1.5 py-0.5 border', approvalBgColors[asset.approvalStatus])}>
-                        {approvalStatusLabels[asset.approvalStatus]}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        {asset.approvalStatus !== 'approved' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleApprove(asset.id)
-                            }}
-                            className="p-1 hover:bg-nier-accent-green/20 transition-colors text-nier-accent-green"
-                            title="承認"
-                          >
-                            <Check size={14} />
-                          </button>
-                        )}
-                        {asset.approvalStatus !== 'rejected' && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleReject(asset.id)
-                            }}
-                            className="p-1 hover:bg-nier-accent-red/20 transition-colors text-nier-accent-red"
-                            title="却下"
-                          >
-                            <XCircle size={14} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )
           })}
         </div>
@@ -479,7 +475,7 @@ export default function DataView(): JSX.Element {
               </thead>
               <tbody className="divide-y divide-nier-border-light">
                 {filteredAssets.map(asset => {
-                  const Icon = typeIcons[asset.type]
+                  const Icon = typeIcons[asset.type] || FolderOpen
                   return (
                     <tr key={asset.id} className="hover:bg-nier-bg-panel transition-colors">
                       <td className="px-4 py-3">
@@ -510,15 +506,15 @@ export default function DataView(): JSX.Element {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => setSelectedAsset(asset)}
-                            className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-accent-blue"
+                            className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
                             title="プレビュー"
                           >
                             <Eye size={14} />
                           </button>
                           {asset.type === 'audio' && (
                             <button
-                              onClick={() => handlePlayAudio(asset.id)}
-                              className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-accent-orange"
+                              onClick={() => handlePlayAudio(asset.id, asset.url)}
+                              className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
                               title={playingAudio === asset.id ? '停止' : '再生'}
                             >
                               {playingAudio === asset.id ? <Pause size={14} /> : <Play size={14} />}
@@ -527,7 +523,7 @@ export default function DataView(): JSX.Element {
                           {asset.approvalStatus !== 'approved' && (
                             <button
                               onClick={() => handleApprove(asset.id)}
-                              className="p-1 hover:bg-nier-accent-green/20 transition-colors text-nier-accent-green"
+                              className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
                               title="承認"
                             >
                               <Check size={14} />
@@ -536,7 +532,7 @@ export default function DataView(): JSX.Element {
                           {asset.approvalStatus !== 'rejected' && (
                             <button
                               onClick={() => handleReject(asset.id)}
-                              className="p-1 hover:bg-nier-accent-red/20 transition-colors text-nier-accent-red"
+                              className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
                               title="却下"
                             >
                               <XCircle size={14} />
@@ -567,14 +563,14 @@ export default function DataView(): JSX.Element {
             <div className="flex items-center justify-between px-4 py-3 bg-nier-bg-header border-b border-nier-border-light">
               <div className="flex items-center gap-2">
                 {(() => {
-                  const Icon = typeIcons[selectedAsset.type]
+                  const Icon = typeIcons[selectedAsset.type] || FolderOpen
                   return <Icon size={16} className={typeColors[selectedAsset.type]} />
                 })()}
-                <span className="text-nier-body font-medium">{selectedAsset.name}</span>
+                <span className="text-nier-body font-medium text-nier-text-header">{selectedAsset.name}</span>
               </div>
               <button
                 onClick={() => setSelectedAsset(null)}
-                className="p-1 hover:bg-nier-bg-selected transition-colors"
+                className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-text-header"
               >
                 <X size={20} />
               </button>
@@ -594,16 +590,16 @@ export default function DataView(): JSX.Element {
 
               {selectedAsset.type === 'audio' && (
                 <div className="flex flex-col items-center py-12">
-                  <div className="w-32 h-32 rounded-full bg-nier-bg-header border-4 border-nier-accent-orange flex items-center justify-center mb-6">
-                    <Music size={48} className="text-nier-accent-orange" />
+                  <div className="w-32 h-32 rounded-full bg-nier-bg-selected border-2 border-nier-border-dark flex items-center justify-center mb-6">
+                    <Music size={48} className="text-nier-text-light" />
                   </div>
-                  <div className="text-nier-h2 mb-2">{selectedAsset.name}</div>
-                  <div className="text-nier-text-light mb-6">
+                  <div className="text-nier-h2 text-nier-text-main mb-2">{selectedAsset.name}</div>
+                  <div className="text-nier-small text-nier-text-light mb-6">
                     {selectedAsset.duration} | {selectedAsset.size}
                   </div>
                   <button
-                    onClick={() => handlePlayAudio(selectedAsset.id)}
-                    className="px-8 py-3 bg-nier-accent-orange text-white flex items-center gap-2 hover:opacity-90 transition-opacity"
+                    onClick={() => handlePlayAudio(selectedAsset.id, selectedAsset.url)}
+                    className="px-6 py-2 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main flex items-center gap-2 hover:bg-nier-bg-selected transition-colors"
                   >
                     {playingAudio === selectedAsset.id ? (
                       <>
@@ -621,17 +617,45 @@ export default function DataView(): JSX.Element {
               )}
 
               {selectedAsset.type === 'document' && (
-                <div className="bg-nier-bg-header p-6">
-                  <pre className="text-nier-small whitespace-pre-wrap">
-                    {`# ${selectedAsset.name}\n\nこのドキュメントのプレビューです。\n実際の実装ではMarkdownレンダリングが行われます。\n\n## セクション1\n\nコンテンツがここに表示されます...`}
-                  </pre>
+                <div className="bg-nier-bg-panel border border-nier-border-light p-6 prose prose-sm max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({ children }) => <h1 className="text-nier-h1 font-medium text-nier-text-main mb-4 border-b border-nier-border-light pb-2">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-nier-h2 font-medium text-nier-text-main mt-6 mb-3">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-nier-body font-medium text-nier-text-main mt-4 mb-2">{children}</h3>,
+                      p: ({ children }) => <p className="text-nier-small text-nier-text-main mb-3 leading-relaxed">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc list-inside text-nier-small text-nier-text-main mb-3 space-y-1">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal list-inside text-nier-small text-nier-text-main mb-3 space-y-1">{children}</ol>,
+                      li: ({ children }) => <li className="text-nier-text-main">{children}</li>,
+                      a: ({ href, children }) => <a href={href} className="text-nier-text-main hover:underline">{children}</a>,
+                      code: ({ children, className }) => {
+                        const isBlock = className?.includes('language-')
+                        return isBlock ? (
+                          <code className="block bg-nier-bg-main p-4 text-nier-caption font-mono text-nier-text-main overflow-x-auto">{children}</code>
+                        ) : (
+                          <code className="bg-nier-bg-main px-1 py-0.5 text-nier-caption font-mono text-nier-text-main">{children}</code>
+                        )
+                      },
+                      pre: ({ children }) => <pre className="mb-4">{children}</pre>,
+                      blockquote: ({ children }) => <blockquote className="border-l-4 border-nier-border-dark pl-4 italic text-nier-text-light mb-3">{children}</blockquote>,
+                      table: ({ children }) => <table className="w-full border-collapse mb-4 text-nier-small">{children}</table>,
+                      th: ({ children }) => <th className="border border-nier-border-light bg-nier-bg-panel px-3 py-2 text-left font-medium">{children}</th>,
+                      td: ({ children }) => <td className="border border-nier-border-light px-3 py-2">{children}</td>,
+                      hr: () => <hr className="border-nier-border-light my-6" />,
+                      strong: ({ children }) => <strong className="font-medium text-nier-text-main">{children}</strong>,
+                      em: ({ children }) => <em className="italic text-nier-text-light">{children}</em>,
+                    }}
+                  >
+                    {selectedAsset.content || `# ${selectedAsset.name}\n\nコンテンツが利用できません。`}
+                  </ReactMarkdown>
                 </div>
               )}
 
               {selectedAsset.type === 'code' && (
-                <div className="bg-nier-bg-header p-6">
-                  <pre className="text-nier-small font-mono whitespace-pre-wrap text-nier-accent-green">
-                    {`// ${selectedAsset.name}\n\nexport class PlayerController {\n  private velocity: Vector2 = { x: 0, y: 0 };\n  private position: Vector2 = { x: 0, y: 0 };\n\n  update(deltaTime: number): void {\n    // Update player position\n    this.position.x += this.velocity.x * deltaTime;\n    this.position.y += this.velocity.y * deltaTime;\n  }\n}`}
+                <div className="bg-nier-bg-panel border border-nier-border-light p-6 overflow-auto max-h-[60vh]">
+                  <pre className="text-nier-small font-mono whitespace-pre-wrap text-nier-text-main">
+                    {selectedAsset.content || `// ${selectedAsset.name}\n\n// コンテンツが利用できません`}
                   </pre>
                 </div>
               )}
@@ -653,15 +677,15 @@ export default function DataView(): JSX.Element {
                   </div>
                   <div>
                     <span className="text-nier-text-light block">サイズ</span>
-                    <span>{selectedAsset.size}</span>
+                    <span className="text-nier-text-main">{selectedAsset.size}</span>
                   </div>
                   <div>
                     <span className="text-nier-text-light block">生成エージェント</span>
-                    <span>{selectedAsset.agent}</span>
+                    <span className="text-nier-text-main">{selectedAsset.agent}</span>
                   </div>
                   <div>
                     <span className="text-nier-text-light block">作成日時</span>
-                    <span>{new Date(selectedAsset.createdAt).toLocaleString('ja-JP')}</span>
+                    <span className="text-nier-text-main">{new Date(selectedAsset.createdAt).toLocaleString('ja-JP')}</span>
                   </div>
                 </div>
               </div>
@@ -678,15 +702,9 @@ export default function DataView(): JSX.Element {
                   <Button
                     variant="secondary"
                     onClick={() => handleReject(selectedAsset.id)}
-                    className="border-nier-accent-red text-nier-accent-red hover:bg-nier-accent-red/10"
                   >
                     <XCircle size={14} className="mr-1.5" />
                     却下
-                  </Button>
-                )}
-                {selectedAsset.approvalStatus !== 'pending' && (
-                  <Button variant="secondary" onClick={() => handleSetPending(selectedAsset.id)}>
-                    未承認に戻す
                   </Button>
                 )}
                 <Button variant="secondary">
@@ -701,6 +719,16 @@ export default function DataView(): JSX.Element {
           </div>
         </div>
       )}
+
+      {/* Hidden audio element for playback */}
+      <audio
+        ref={audioRef}
+        onEnded={() => setPlayingAudio(null)}
+        onError={(e) => {
+          console.error('Audio error:', e)
+          setPlayingAudio(null)
+        }}
+      />
     </div>
   )
 }

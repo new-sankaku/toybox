@@ -6,6 +6,15 @@ from flask import Flask, request, jsonify
 from mock_data import MockDataStore
 from simulation.agent_simulation import AgentSimulator
 
+# ステータスの日本語表示
+STATUS_LABELS = {
+    "draft": "下書き",
+    "running": "実行中",
+    "paused": "一時停止",
+    "completed": "完了",
+    "failed": "エラー"
+}
+
 
 def register_project_routes(app: Flask, data_store: MockDataStore, sio):
     """Register project-related REST API routes"""
@@ -23,7 +32,7 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         """Get a single project by ID"""
         project = data_store.get_project(project_id)
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
         return jsonify(project)
 
     @app.route('/api/projects', methods=['POST'])
@@ -44,7 +53,7 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         project = data_store.update_project(project_id, data)
 
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
 
         # Emit update event
         sio.emit('project:updated', project)
@@ -57,7 +66,7 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         success = data_store.delete_project(project_id)
 
         if not success:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
 
         return '', 204
 
@@ -67,10 +76,14 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         project = data_store.get_project(project_id)
 
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
 
-        if project["status"] not in ("draft", "paused"):
-            return jsonify({"error": f"Cannot start project in {project['status']} status"}), 400
+        current_status = project["status"]
+        if current_status not in ("draft", "paused"):
+            status_label = STATUS_LABELS.get(current_status, current_status)
+            return jsonify({
+                "error": f"プロジェクトを開始できません。現在のステータス「{status_label}」では開始操作は実行できません。下書きまたは一時停止状態のプロジェクトのみ開始できます。"
+            }), 400
 
         # Update project status
         project = data_store.update_project(project_id, {"status": "running"})
@@ -93,10 +106,14 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         project = data_store.get_project(project_id)
 
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
 
-        if project["status"] != "running":
-            return jsonify({"error": "Can only pause running projects"}), 400
+        current_status = project["status"]
+        if current_status != "running":
+            status_label = STATUS_LABELS.get(current_status, current_status)
+            return jsonify({
+                "error": f"プロジェクトを一時停止できません。現在のステータス「{status_label}」では一時停止操作は実行できません。実行中のプロジェクトのみ一時停止できます。"
+            }), 400
 
         # Update project status
         project = data_store.update_project(project_id, {"status": "paused"})
@@ -119,10 +136,14 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
         project = data_store.get_project(project_id)
 
         if not project:
-            return jsonify({"error": "Project not found"}), 404
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
 
-        if project["status"] != "paused":
-            return jsonify({"error": "Can only resume paused projects"}), 400
+        current_status = project["status"]
+        if current_status != "paused":
+            status_label = STATUS_LABELS.get(current_status, current_status)
+            return jsonify({
+                "error": f"プロジェクトを再開できません。現在のステータス「{status_label}」では再開操作は実行できません。一時停止中のプロジェクトのみ再開できます。"
+            }), 400
 
         # Update project status
         project = data_store.update_project(project_id, {"status": "running"})
@@ -135,6 +156,27 @@ def register_project_routes(app: Flask, data_store: MockDataStore, sio):
             "projectId": project_id,
             "status": "running",
             "previousStatus": "paused"
+        })
+
+        return jsonify(project)
+
+    @app.route('/api/projects/<project_id>/initialize', methods=['POST'])
+    def initialize_project(project_id: str):
+        """Initialize/reset a project - clears all data"""
+        project = data_store.get_project(project_id)
+
+        if not project:
+            return jsonify({"error": "プロジェクトが見つかりません"}), 404
+
+        # Stop any running simulation first
+        simulator.stop_simulation(project_id)
+
+        # Initialize project
+        project = data_store.initialize_project(project_id)
+
+        # Emit reset event
+        sio.emit('project:initialized', {
+            "projectId": project_id,
         })
 
         return jsonify(project)

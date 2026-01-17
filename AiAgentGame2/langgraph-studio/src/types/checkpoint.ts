@@ -33,9 +33,11 @@ export interface Checkpoint {
 }
 
 export interface CheckpointOutput {
-  documentType?: string
+  type?: string           // バックエンド: "document", "code", etc.
+  format?: string         // バックエンド: "markdown", "json", etc.
+  documentType?: string   // 互換性のため残す
   summary?: string
-  content?: Record<string, unknown>
+  content?: string | Record<string, unknown>  // 文字列またはオブジェクト
   tokensUsed?: number
   generationTimeMs?: number
   previewUrl?: string

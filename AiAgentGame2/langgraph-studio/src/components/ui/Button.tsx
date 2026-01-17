@@ -8,9 +8,11 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          'bg-nier-bg-panel border border-nier-border-dark text-nier-text-main hover:bg-nier-bg-selected active:bg-nier-bg-header active:text-nier-text-header',
+          'bg-nier-bg-panel border border-nier-border-light text-nier-text-main hover:bg-nier-bg-selected hover:border-nier-border-dark',
         primary:
-          'bg-nier-bg-header text-nier-text-header hover:bg-nier-text-main',
+          'bg-nier-bg-panel border border-nier-border-dark text-nier-text-main font-medium hover:bg-nier-bg-selected',
+        secondary:
+          'bg-nier-bg-panel border border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main',
         danger:
           'bg-nier-bg-panel border border-nier-accent-red text-nier-accent-red hover:bg-nier-accent-red hover:text-white',
         success:
@@ -21,10 +23,10 @@ const buttonVariants = cva(
           'text-nier-text-main underline-offset-4 hover:underline'
       },
       size: {
-        default: 'h-10 px-6 py-2',
-        sm: 'h-8 px-4 text-nier-small',
-        lg: 'h-12 px-8 text-nier-h2',
-        icon: 'h-10 w-10'
+        default: 'h-8 px-4 py-1.5 text-nier-small',
+        sm: 'h-7 px-3 py-1 text-nier-small',
+        lg: 'h-10 px-6 py-2 text-nier-body',
+        icon: 'h-8 w-8'
       }
     },
     defaultVariants: {

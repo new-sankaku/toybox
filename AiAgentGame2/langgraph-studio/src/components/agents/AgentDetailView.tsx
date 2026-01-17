@@ -26,26 +26,15 @@ interface AgentDetailViewProps {
 
 const statusLabels: Record<string, { text: string; color: string }> = {
   pending: { text: '待機中', color: 'text-nier-text-light' },
-  running: { text: '実行中', color: 'text-nier-accent-orange' },
-  completed: { text: '完了', color: 'text-nier-accent-green' },
-  failed: { text: 'エラー', color: 'text-nier-accent-red' },
-  blocked: { text: 'ブロック', color: 'text-nier-accent-yellow' }
+  running: { text: '実行中', color: 'text-nier-text-light' },
+  completed: { text: '完了', color: 'text-nier-text-light' },
+  failed: { text: 'エラー', color: 'text-nier-text-light' },
+  blocked: { text: 'ブロック', color: 'text-nier-text-light' }
 }
 
-const agentTypeLabels: Record<string, string> = {
-  concept: 'コンセプトエージェント',
-  design: 'デザインエージェント',
-  scenario: 'シナリオエージェント',
-  character: 'キャラクターエージェント',
-  world: 'ワールドエージェント',
-  task_split: 'タスク分割エージェント',
-  code_leader: 'コードリーダーエージェント',
-  asset_leader: 'アセットリーダーエージェント',
-  code_worker: 'コードワーカーエージェント',
-  asset_worker: 'アセットワーカーエージェント',
-  integrator: 'インテグレーターエージェント',
-  tester: 'テスターエージェント',
-  reviewer: 'レビュアーエージェント'
+// エージェント表示名を取得（バックエンドの metadata.displayName を使用）
+const getDisplayName = (agent: Agent): string => {
+  return (agent.metadata?.displayName as string) || agent.type
 }
 
 export default function AgentDetailView({
@@ -79,18 +68,9 @@ export default function AgentDetailView({
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div
-              className={cn(
-                'w-1.5 h-6',
-                agent.status === 'running' && 'bg-nier-accent-orange animate-nier-pulse',
-                agent.status === 'completed' && 'bg-nier-accent-green',
-                agent.status === 'failed' && 'bg-nier-accent-red',
-                agent.status === 'pending' && 'bg-[#8A857A]',
-                agent.status === 'blocked' && 'bg-nier-accent-yellow'
-              )}
-            />
+            <div className="w-1.5 h-6 bg-nier-border-dark" />
             <h1 className="text-nier-h1 font-medium tracking-nier-wide">
-              {agentTypeLabels[agent.type] || agent.type.toUpperCase()}
+              {getDisplayName(agent)}
             </h1>
           </div>
           <div className="flex items-center gap-4 text-nier-small text-nier-text-light ml-4">

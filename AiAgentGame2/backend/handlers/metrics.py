@@ -2,7 +2,7 @@
 Metrics REST API Handlers
 """
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from mock_data import MockDataStore
 
 
@@ -35,6 +35,41 @@ def register_metrics_routes(app: Flask, data_store: MockDataStore):
             }
 
         return jsonify(metrics)
+
+    @app.route('/api/projects/<project_id>/logs', methods=['GET'])
+    def get_project_logs(project_id: str):
+        """Get system logs for a project"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        logs = data_store.get_system_logs(project_id)
+        return jsonify(logs)
+
+    @app.route('/api/projects/<project_id>/assets', methods=['GET'])
+    def get_project_assets(project_id: str):
+        """Get assets for a project"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        assets = data_store.get_assets_by_project(project_id)
+        return jsonify(assets)
+
+    @app.route('/api/projects/<project_id>/assets/<asset_id>', methods=['PATCH'])
+    def update_project_asset(project_id: str, asset_id: str):
+        """Update an asset (approve/reject)"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        data = request.get_json()
+        asset = data_store.update_asset(project_id, asset_id, data)
+
+        if not asset:
+            return jsonify({"error": "Asset not found"}), 404
+
+        return jsonify(asset)
 
 
 def _get_phase_name(phase: int) -> str:

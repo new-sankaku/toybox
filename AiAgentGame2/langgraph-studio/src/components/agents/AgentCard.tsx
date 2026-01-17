@@ -1,71 +1,93 @@
-import { Card, CardContent } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/Progress'
 import { cn } from '@/lib/utils'
-import type { Agent } from '@/types/agent'
-import { Cpu, Play, CheckCircle, XCircle, Pause, Clock } from 'lucide-react'
+import type { Agent, QualityCheckConfig } from '@/types/agent'
+import { Cpu, Play, CheckCircle, XCircle, Pause, Clock, Shield, ShieldOff, Sparkles } from 'lucide-react'
 
 interface AgentCardProps {
   agent: Agent
   onSelect: (agent: Agent) => void
   isSelected?: boolean
+  qualityCheckConfig?: QualityCheckConfig
+  /** 待機中の場合、何を待っているかの説明 */
+  waitingFor?: string
 }
 
 const statusConfig = {
   pending: {
-    color: 'bg-[#8A857A]',
+    color: 'bg-nier-border-dark',
     icon: Clock,
     text: '待機中',
     pulse: false
   },
   running: {
-    color: 'bg-nier-accent-orange',
+    color: 'bg-nier-border-dark',
     icon: Play,
     text: '実行中',
-    pulse: true
+    pulse: false
   },
   completed: {
-    color: 'bg-nier-accent-green',
+    color: 'bg-nier-border-dark',
     icon: CheckCircle,
     text: '完了',
     pulse: false
   },
   failed: {
-    color: 'bg-nier-accent-red',
+    color: 'bg-nier-border-dark',
     icon: XCircle,
     text: 'エラー',
     pulse: false
   },
   blocked: {
-    color: 'bg-nier-accent-yellow',
+    color: 'bg-nier-border-dark',
     icon: Pause,
     text: 'ブロック',
-    pulse: true
+    pulse: false
   }
 }
 
-const agentTypeLabels: Record<string, string> = {
-  concept: 'コンセプト',
-  design: 'デザイン',
-  scenario: 'シナリオ',
-  character: 'キャラクター',
-  world: 'ワールド',
-  task_split: 'タスク分割',
-  code_leader: 'コードリーダー',
-  asset_leader: 'アセットリーダー',
-  code_worker: 'コードワーカー',
-  asset_worker: 'アセットワーカー',
-  integrator: 'インテグレーター',
-  tester: 'テスター',
-  reviewer: 'レビュアー'
+// エージェント表示名を取得（バックエンドの metadata.displayName を使用）
+const getDisplayName = (agent: Agent): string => {
+  return (agent.metadata?.displayName as string) || agent.type
+}
+
+// Agent role (Leader/Worker) labels - ALL agents must have a role
+const getAgentRole = (type: string): { role: string } => {
+  // Explicit Leader types
+  if (type.endsWith('_leader')) {
+    return { role: 'Leader' }
+  }
+  // Explicit Worker types
+  if (type.endsWith('_worker')) {
+    return { role: 'Worker' }
+  }
+  // Phase 3 agents - assign roles based on function
+  if (type === 'integrator') {
+    return { role: 'Leader' }  // Coordinates integration
+  }
+  if (type === 'tester') {
+    return { role: 'Worker' }  // Executes tests
+  }
+  if (type === 'reviewer') {
+    return { role: 'Leader' }  // Reviews and approves
+  }
+  // Phase 1 standalone agents (without _leader suffix) - treat as Leaders
+  if (['concept', 'design', 'scenario', 'character', 'world', 'task_split'].includes(type)) {
+    return { role: 'Leader' }
+  }
+  // Default to Worker for any unknown type
+  return { role: 'Worker' }
 }
 
 export function AgentCard({
   agent,
   onSelect,
-  isSelected = false
+  isSelected = false,
+  qualityCheckConfig,
+  waitingFor
 }: AgentCardProps): JSX.Element {
   const status = statusConfig[agent.status]
   const StatusIcon = status.icon
+  const agentRole = getAgentRole(agent.type)
 
   const getRuntime = () => {
     if (!agent.startedAt) return '-'
@@ -81,89 +103,99 @@ export function AgentCard({
     return `${minutes}分${remainingSeconds}秒`
   }
 
+  // Get detailed task/status text based on role
+  const getTaskText = () => {
+    if (agent.status === 'running') {
+      return agent.currentTask || '処理中'
+    }
+    if (agent.status === 'pending') return waitingFor || '開始待機'
+    if (agent.status === 'blocked') return '承認待ち'
+    if (agent.status === 'completed') return '完了'
+    if (agent.status === 'failed') return agent.error || 'エラー発生'
+    return ''
+  }
+
+  // Check if LLM is being used (simulation)
+  const isUsingLLM = agent.status === 'running' && agent.progress > 0
+
   return (
-    <Card
+    <div
       className={cn(
-        'cursor-pointer transition-all duration-nier-normal',
-        'hover:shadow-md hover:translate-x-1',
-        isSelected && 'ring-2 ring-nier-accent-blue'
+        'cursor-pointer transition-all duration-nier-normal px-3 py-2',
+        'hover:bg-nier-bg-selected',
+        isSelected && 'bg-nier-bg-selected'
       )}
       onClick={() => onSelect(agent)}
     >
-      <CardContent className="p-3">
-        {/* Header Row */}
-        <div className="flex items-start justify-between mb-2">
-          <div className="flex items-center gap-2">
-            {/* Status Indicator */}
-            <div
-              className={cn(
-                'w-1 h-8',
-                status.color,
-                status.pulse && 'animate-nier-pulse'
-              )}
-            />
+        {/* Grid Layout for aligned columns - each column has fixed width for vertical alignment */}
+        <div className="grid grid-cols-[4px_55px_140px_1fr_140px_auto] items-center gap-2">
+          {/* Col 1: Status Indicator */}
+          <div className="w-1 h-6 bg-nier-border-dark" />
 
-            {/* Agent Info */}
-            <div>
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <Cpu size={12} className="text-nier-text-light" />
-                <span className="text-nier-caption text-nier-text-light tracking-nier">
-                  AGENT
-                </span>
-              </div>
-              <h3 className="text-nier-small font-medium text-nier-text-main">
-                {agentTypeLabels[agent.type] || agent.type}
-              </h3>
-            </div>
+          {/* Col 2: Role badge (fixed width) - comes BEFORE agent type */}
+          <div className="flex items-center">
+            <span className="text-nier-caption text-nier-text-light">
+              [{agentRole.role}]
+            </span>
           </div>
 
-          {/* Time, Tokens, Status Badge */}
+          {/* Col 3: Agent Type (fixed width) */}
+          <div className="flex items-center gap-1.5">
+            <Cpu size={12} className="text-nier-text-light flex-shrink-0" />
+            <span className="text-nier-small font-medium text-nier-text-main">
+              {getDisplayName(agent)}
+            </span>
+          </div>
+
+          {/* Col 4: Task/Status Text (flexible) */}
+          <div className="flex items-center gap-2 min-w-0">
+            {isUsingLLM && (
+              <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中" />
+            )}
+            <span className="text-nier-caption truncate text-nier-text-light">
+              {getTaskText()}
+            </span>
+          </div>
+
+          {/* Col 5: Progress Bar + Time (fixed width) */}
           <div className="flex items-center gap-2">
+            {agent.status === 'running' ? (
+              <>
+                <Progress value={agent.progress} className="h-1.5 w-12" />
+                <span className="text-nier-caption text-nier-text-light w-8">
+                  {agent.progress}%
+                </span>
+              </>
+            ) : (
+              <span className="w-[76px]" />
+            )}
             <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
               <Clock size={10} />
               {getRuntime()}
             </span>
-            <span className="text-nier-caption text-nier-text-light">
+          </div>
+
+          {/* Col 6: Right side info (auto width) */}
+          <div className="flex items-center gap-2">
+            <span className="text-nier-caption text-nier-text-light w-14 text-right">
               {agent.tokensUsed.toLocaleString()}tk
             </span>
-            <div className={cn(
-              'px-1.5 py-0.5 text-nier-caption tracking-nier flex items-center gap-1',
-              status.color === 'bg-nier-accent-green' && 'bg-nier-accent-green/20 text-nier-accent-green',
-              status.color === 'bg-nier-accent-red' && 'bg-nier-accent-red/20 text-nier-accent-red',
-              status.color === 'bg-nier-accent-orange' && 'bg-nier-accent-orange/20 text-nier-accent-orange',
-              status.color === 'bg-nier-accent-yellow' && 'bg-nier-accent-yellow/20 text-nier-text-main',
-              status.color === 'bg-[#8A857A]' && 'bg-[#8A857A]/20 text-nier-text-light'
-            )}>
+            {/* Quality Check Badge */}
+            {qualityCheckConfig && (
+              <div
+                className="px-1.5 py-0.5 text-nier-caption tracking-nier flex items-center gap-1 bg-nier-bg-selected text-nier-text-light border border-nier-border-light"
+                title={qualityCheckConfig.enabled ? '品質チェックON' : '品質チェックOFF'}
+              >
+                {qualityCheckConfig.enabled ? <Shield size={10} /> : <ShieldOff size={10} />}
+                <span>QC</span>
+              </div>
+            )}
+            <div className="px-1.5 py-0.5 text-nier-caption tracking-nier flex items-center gap-1 w-16 justify-center bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
               <StatusIcon size={10} />
               {status.text}
             </div>
           </div>
         </div>
-
-        {/* Progress Bar (only for running agents) */}
-        {agent.status === 'running' && (
-          <div className="mb-2 pl-3">
-            <Progress value={agent.progress} className="h-1" />
-            <div className="flex justify-between mt-1">
-              <span className="text-nier-caption text-nier-text-light">
-                {agent.currentTask || '処理中...'}
-              </span>
-              <span className="text-nier-caption text-nier-accent-orange">
-                {agent.progress}%
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* Error Message */}
-        {agent.status === 'failed' && agent.error && (
-          <div className="mt-2 pt-2 border-t border-nier-border-light pl-3">
-            <p className="text-nier-caption text-nier-accent-red line-clamp-2">
-              {agent.error}
-            </p>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    </div>
   )
 }

@@ -8,6 +8,7 @@ import { Activity, TrendingUp } from 'lucide-react'
 interface TokenData {
   agentId: string
   agentType: string
+  displayName?: string  // バックエンドから取得（将来対応）
   tokensUsed: number
   tokensEstimated: number
   timestamp: string
@@ -20,15 +21,9 @@ interface TokenTrackerProps {
   maxTokens?: number
 }
 
-const agentTypeLabels: Record<string, string> = {
-  concept: 'コンセプト',
-  design: 'デザイン',
-  scenario: 'シナリオ',
-  character: 'キャラクター',
-  world: 'ワールド',
-  task_split: 'タスク分割',
-  code_leader: 'コードリーダー',
-  asset_leader: 'アセットリーダー'
+// エージェント表示名を取得（displayName優先、なければagentType）
+const getDisplayName = (data: TokenData): string => {
+  return data.displayName || data.agentType
 }
 
 export default function TokenTracker({
@@ -106,7 +101,7 @@ export default function TokenTracker({
                   <div key={agent.agentId} className="space-y-1">
                     <div className="flex items-center justify-between">
                       <span className="text-nier-small text-nier-text-main">
-                        {agentTypeLabels[agent.agentType] || agent.agentType}
+                        {getDisplayName(agent)}
                       </span>
                       <span className="text-nier-caption text-nier-text-light">
                         {formatTokens(agent.tokensUsed)}

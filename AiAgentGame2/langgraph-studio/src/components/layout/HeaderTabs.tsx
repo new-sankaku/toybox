@@ -11,9 +11,10 @@ const tabs: Tab[] = [
   { id: 'checkpoints', label: 'CHECKPOINTS', icon: '✦' },
   { id: 'system', label: 'DASHBOARD', icon: '⬡' },
   { id: 'agents', label: 'AGENTS', icon: '⚔' },
-  { id: 'logs', label: 'LOGS', icon: '◈' },
-  { id: 'data', label: 'DATA', icon: '☰' },
+  { id: 'data', label: 'ASSET', icon: '☰' },
+  { id: 'ai', label: 'AI', icon: '✧' },
   { id: 'cost', label: 'COST', icon: '¤' },
+  { id: 'logs', label: 'LOGS', icon: '◈' },
   { id: 'config', label: 'CONFIG', icon: '⚙' }
 ]
 

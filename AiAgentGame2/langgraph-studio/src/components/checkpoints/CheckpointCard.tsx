@@ -12,24 +12,24 @@ interface CheckpointCardProps {
 
 const statusConfig = {
   pending: {
-    color: 'bg-nier-accent-yellow',
+    color: 'bg-nier-border-dark',
     text: '承認待ち',
-    pulse: true
+    pulse: false
   },
   approved: {
-    color: 'bg-nier-accent-green',
+    color: 'bg-nier-border-dark',
     text: '承認済み',
     pulse: false
   },
   rejected: {
-    color: 'bg-nier-accent-red',
+    color: 'bg-nier-border-dark',
     text: '却下',
     pulse: false
   },
   revision_requested: {
-    color: 'bg-nier-accent-orange',
+    color: 'bg-nier-border-dark',
     text: '修正要求',
-    pulse: true
+    pulse: false
   }
 }
 
@@ -106,19 +106,13 @@ export function CheckpointCard({
                 {checkpoint.output.tokensUsed.toLocaleString()}tk
               </span>
             )}
-            <div className={cn(
-              'px-1.5 py-0.5 text-nier-caption tracking-nier',
-              status.color === 'bg-nier-accent-yellow' && 'bg-nier-accent-yellow/20 text-nier-text-main',
-              status.color === 'bg-nier-accent-green' && 'bg-nier-accent-green/20 text-nier-accent-green',
-              status.color === 'bg-nier-accent-red' && 'bg-nier-accent-red/20 text-nier-accent-red',
-              status.color === 'bg-nier-accent-orange' && 'bg-nier-accent-orange/20 text-nier-accent-orange'
-            )}>
+            <div className="px-1.5 py-0.5 text-nier-caption tracking-nier bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
               {status.text}
             </div>
             <Button
               variant="ghost"
               size="sm"
-              className="text-nier-accent-blue py-0 px-1.5 text-nier-caption"
+              className="text-nier-text-light py-0 px-1.5 text-nier-caption"
               onClick={(e) => {
                 e.stopPropagation()
                 onSelect(checkpoint)

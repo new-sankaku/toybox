@@ -95,24 +95,24 @@ class AgentSimulator:
         """Create agents for a phase"""
         phase_agents = {
             1: [
-                ("concept", "コンセプト定義エージェント"),
-                ("design", "ゲームデザインエージェント"),
-                ("scenario", "シナリオ作成エージェント"),
-                ("character", "キャラクターデザインエージェント"),
-                ("world", "ワールドビルディングエージェント"),
+                ("concept", "コンセプト"),
+                ("design", "デザイン"),
+                ("scenario", "シナリオ"),
+                ("character", "キャラクター"),
+                ("world", "ワールド"),
             ],
             2: [
-                ("task_split", "タスク分割エージェント"),
-                ("code_leader", "コードリーダーエージェント"),
-                ("asset_leader", "アセットリーダーエージェント"),
-                ("code_worker", "コードワーカー1"),
-                ("code_worker", "コードワーカー2"),
-                ("asset_worker", "アセットワーカー1"),
+                ("task_split", "タスク分割"),
+                ("code_leader", "コード"),
+                ("asset_leader", "アセット"),
+                ("code_worker", "コード"),
+                ("code_worker", "コード"),
+                ("asset_worker", "アセット"),
             ],
             3: [
-                ("integrator", "統合エージェント"),
-                ("tester", "テストエージェント"),
-                ("reviewer", "レビューエージェント"),
+                ("integrator", "統合"),
+                ("tester", "テスト"),
+                ("reviewer", "レビュー"),
             ]
         }
 

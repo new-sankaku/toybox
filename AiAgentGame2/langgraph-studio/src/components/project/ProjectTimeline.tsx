@@ -105,12 +105,7 @@ export function ProjectTimeline({ currentPhase, phases, vertical = false }: Proj
         <div key={phase.phase} className="flex-1 relative">
           {/* Connector line */}
           {index < timelinePhases.length - 1 && (
-            <div
-              className={cn(
-                'absolute top-4 left-1/2 w-full h-0.5',
-                phase.status === 'completed' ? 'bg-nier-accent-green' : 'bg-nier-border-dark'
-              )}
-            />
+            <div className="absolute top-4 left-1/2 w-full h-0.5 bg-nier-border-dark" />
           )}
 
           {/* Phase content */}
@@ -132,11 +127,11 @@ export function ProjectTimeline({ currentPhase, phases, vertical = false }: Proj
 }
 
 function PhaseIcon({ status }: { status: 'completed' | 'active' | 'pending' }) {
-  const baseClasses = 'w-8 h-8 rounded-full flex items-center justify-center'
+  const baseClasses = 'w-8 h-8 rounded-full flex items-center justify-center bg-nier-bg-selected text-nier-text-light border border-nier-border-light'
 
   if (status === 'completed') {
     return (
-      <div className={cn(baseClasses, 'bg-nier-accent-green text-white')}>
+      <div className={baseClasses}>
         <CheckCircle size={18} />
       </div>
     )
@@ -144,14 +139,14 @@ function PhaseIcon({ status }: { status: 'completed' | 'active' | 'pending' }) {
 
   if (status === 'active') {
     return (
-      <div className={cn(baseClasses, 'bg-nier-accent-orange text-white animate-nier-pulse')}>
+      <div className={baseClasses}>
         <Play size={16} />
       </div>
     )
   }
 
   return (
-    <div className={cn(baseClasses, 'bg-nier-bg-selected text-nier-text-light')}>
+    <div className={baseClasses}>
       <Clock size={16} />
     </div>
   )
