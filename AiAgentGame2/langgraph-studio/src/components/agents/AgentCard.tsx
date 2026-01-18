@@ -23,7 +23,7 @@ const statusConfig = {
     color: 'bg-nier-border-dark',
     icon: Play,
     text: '実行中',
-    pulse: false
+    pulse: true
   },
   completed: {
     color: 'bg-nier-border-dark',
@@ -123,32 +123,34 @@ export function AgentCard({
       className={cn(
         'cursor-pointer transition-all duration-nier-normal px-3 py-2',
         'hover:bg-nier-bg-selected',
-        isSelected && 'bg-nier-bg-selected'
+        isSelected && 'bg-nier-bg-selected',
+        status.pulse && 'animate-nier-pulse'
       )}
       onClick={() => onSelect(agent)}
     >
-        {/* Grid Layout for aligned columns - each column has fixed width for vertical alignment */}
-        <div className="grid grid-cols-[4px_55px_140px_1fr_140px_auto] items-center gap-2">
+        {/* Grid Layout for aligned columns */}
+        <div className="grid grid-cols-[4px_55px_180px_1fr_140px_auto] items-center gap-2">
           {/* Col 1: Status Indicator */}
-          <div className="w-1 h-6 bg-nier-border-dark" />
+          <div className={cn(
+            'w-1 h-6 bg-nier-border-dark transition-opacity',
+            status.pulse && 'animate-pulse'
+          )} />
 
-          {/* Col 2: Role badge (fixed width) - comes BEFORE agent type */}
-          <div className="flex items-center">
-            <span className="text-nier-caption text-nier-text-light">
-              [{agentRole.role}]
-            </span>
-          </div>
+          {/* Col 2: Role badge */}
+          <span className="text-nier-caption text-nier-text-light">
+            [{agentRole.role}]
+          </span>
 
-          {/* Col 3: Agent Type (fixed width) */}
-          <div className="flex items-center gap-1.5">
+          {/* Col 3: Agent Type */}
+          <div className="flex items-center gap-1.5 min-w-0">
             <Cpu size={12} className="text-nier-text-light flex-shrink-0" />
-            <span className="text-nier-small font-medium text-nier-text-main">
+            <span className="text-nier-small font-medium text-nier-text-main truncate">
               {getDisplayName(agent)}
             </span>
           </div>
 
-          {/* Col 4: Task/Status Text (flexible) */}
-          <div className="flex items-center gap-2 min-w-0">
+          {/* Col 4: Task/Status Text */}
+          <div className="flex items-center gap-2 min-w-0 pl-4">
             {isUsingLLM && (
               <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中" />
             )}
@@ -157,7 +159,7 @@ export function AgentCard({
             </span>
           </div>
 
-          {/* Col 5: Progress Bar + Time (fixed width) */}
+          {/* Col 5: Progress Bar + Time */}
           <div className="flex items-center gap-2">
             {agent.status === 'running' ? (
               <>
@@ -175,25 +177,25 @@ export function AgentCard({
             </span>
           </div>
 
-          {/* Col 6: Right side info (auto width) */}
-          <div className="flex items-center gap-2">
+          {/* Col 6: Right side info */}
+          <div className="flex items-center gap-3">
             <span className="text-nier-caption text-nier-text-light w-14 text-right">
               {agent.tokensUsed.toLocaleString()}tk
             </span>
             {/* Quality Check Badge */}
             {qualityCheckConfig && (
-              <div
-                className="px-1.5 py-0.5 text-nier-caption tracking-nier flex items-center gap-1 bg-nier-bg-selected text-nier-text-light border border-nier-border-light"
+              <span
+                className="text-nier-caption text-nier-text-light flex items-center gap-1"
                 title={qualityCheckConfig.enabled ? '品質チェックON' : '品質チェックOFF'}
               >
                 {qualityCheckConfig.enabled ? <Shield size={10} /> : <ShieldOff size={10} />}
-                <span>QC</span>
-              </div>
+                QC
+              </span>
             )}
-            <div className="px-1.5 py-0.5 text-nier-caption tracking-nier flex items-center gap-1 w-16 justify-center bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
+            <span className="text-nier-caption text-nier-text-light flex items-center gap-1 w-14">
               <StatusIcon size={10} />
               {status.text}
-            </div>
+            </span>
           </div>
         </div>
     </div>

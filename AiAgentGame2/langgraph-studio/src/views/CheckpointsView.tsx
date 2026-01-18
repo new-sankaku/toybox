@@ -4,8 +4,9 @@ import CheckpointReviewView from '@/components/checkpoints/CheckpointReviewView'
 import { Card, CardContent } from '@/components/ui/Card'
 import { useProjectStore } from '@/stores/projectStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { useCheckpointStore } from '@/stores/checkpointStore'
 import { checkpointApi, type ApiCheckpoint } from '@/services/apiService'
-import type { Checkpoint, CheckpointType } from '@/types/checkpoint'
+import type { Checkpoint, CheckpointType, CheckpointStatus } from '@/types/checkpoint'
 import { FolderOpen } from 'lucide-react'
 
 // Convert API checkpoint to frontend Checkpoint type
@@ -29,7 +30,7 @@ function convertApiCheckpoint(apiCheckpoint: ApiCheckpoint): Checkpoint {
         ? apiCheckpoint.output.content
         : undefined,
     },
-    status: apiCheckpoint.status,
+    status: apiCheckpoint.status as CheckpointStatus,
     feedback: apiCheckpoint.feedback,
     resolvedAt: apiCheckpoint.resolvedAt,
     createdAt: apiCheckpoint.createdAt,
@@ -40,9 +41,9 @@ function convertApiCheckpoint(apiCheckpoint: ApiCheckpoint): Checkpoint {
 export default function CheckpointsView(): JSX.Element {
   const { currentProject } = useProjectStore()
   const { tabResetCounter, pendingCheckpointId, clearPendingCheckpoint } = useNavigationStore()
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
+  const { checkpoints, setCheckpoints, isLoading } = useCheckpointStore()
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<Checkpoint | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   // Reset selection when tab is clicked (even if same tab)
   // But NOT if we're navigating to a specific checkpoint
@@ -52,41 +53,45 @@ export default function CheckpointsView(): JSX.Element {
     }
   }, [tabResetCounter, pendingCheckpointId])
 
+  // Filter checkpoints for current project
+  const projectCheckpoints = currentProject
+    ? checkpoints.filter(cp => cp.projectId === currentProject.id)
+    : []
+
   // Auto-select checkpoint if navigating from dashboard
   useEffect(() => {
-    if (pendingCheckpointId && checkpoints.length > 0) {
-      const checkpoint = checkpoints.find(cp => cp.id === pendingCheckpointId)
+    if (pendingCheckpointId && projectCheckpoints.length > 0) {
+      const checkpoint = projectCheckpoints.find(cp => cp.id === pendingCheckpointId)
       if (checkpoint) {
         setSelectedCheckpoint(checkpoint)
         clearPendingCheckpoint()
       }
     }
-  }, [pendingCheckpointId, checkpoints, clearPendingCheckpoint])
+  }, [pendingCheckpointId, projectCheckpoints, clearPendingCheckpoint])
 
-  // Fetch checkpoints from API
+  // Initial fetch checkpoints from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setCheckpoints([])
+      setInitialLoading(false)
       return
     }
 
     const fetchCheckpoints = async () => {
-      setLoading(true)
+      setInitialLoading(true)
       try {
         const data = await checkpointApi.listByProject(currentProject.id)
         setCheckpoints(data.map(convertApiCheckpoint))
       } catch (error) {
         console.error('Failed to fetch checkpoints:', error)
-        setCheckpoints([])
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
     fetchCheckpoints()
-    const interval = setInterval(fetchCheckpoints, 5000)
-    return () => clearInterval(interval)
-  }, [currentProject?.id])
+    // No polling - WebSocket events will update the store
+  }, [currentProject?.id, setCheckpoints])
 
   // Project not selected
   if (!currentProject) {
@@ -182,9 +187,11 @@ export default function CheckpointsView(): JSX.Element {
 
   // Show review view if checkpoint is selected
   if (selectedCheckpoint) {
+    // Get latest checkpoint data from store
+    const currentCheckpointData = projectCheckpoints.find(cp => cp.id === selectedCheckpoint.id) || selectedCheckpoint
     return (
       <CheckpointReviewView
-        checkpoint={selectedCheckpoint}
+        checkpoint={currentCheckpointData}
         onApprove={handleApprove}
         onReject={handleReject}
         onRequestChanges={handleRequestChanges}
@@ -196,10 +203,10 @@ export default function CheckpointsView(): JSX.Element {
   // Show checkpoint list
   return (
     <CheckpointListView
-      checkpoints={checkpoints}
+      checkpoints={projectCheckpoints}
       onSelectCheckpoint={handleSelectCheckpoint}
       selectedCheckpointId={undefined}
-      loading={loading}
+      loading={initialLoading || isLoading}
     />
   )
 }

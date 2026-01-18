@@ -101,7 +101,7 @@ export function CheckpointCard({
               <Clock size={10} />
               {getWaitingTime()}
             </span>
-            {checkpoint.output.tokensUsed && (
+            {checkpoint.output?.tokensUsed && (
               <span className="text-nier-caption text-nier-text-light">
                 {checkpoint.output.tokensUsed.toLocaleString()}tk
               </span>
@@ -124,7 +124,7 @@ export function CheckpointCard({
         </div>
 
         {/* Summary */}
-        {checkpoint.output.summary && (
+        {checkpoint.output?.summary && (
           <p className="text-nier-caption text-nier-text-light line-clamp-2 pl-3">
             {checkpoint.output.summary}
           </p>

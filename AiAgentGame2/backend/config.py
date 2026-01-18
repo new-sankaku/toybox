@@ -12,7 +12,7 @@ from typing import Optional
 @dataclass
 class AgentConfig:
     """エージェント設定"""
-    mode: str = "mock"  # "mock" or "langgraph"
+    mode: str = "testdata"  # "testdata" or "api"
     anthropic_api_key: Optional[str] = None
     model: str = "claude-sonnet-4-20250514"
     max_tokens: int = 4096
@@ -38,7 +38,7 @@ def load_config() -> Config:
     """環境変数から設定をロード"""
     return Config(
         agent=AgentConfig(
-            mode=os.environ.get("AGENT_MODE", "mock"),
+            mode=os.environ.get("AGENT_MODE", "testdata"),
             anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
             model=os.environ.get("AGENT_MODEL", "claude-sonnet-4-20250514"),
             max_tokens=int(os.environ.get("AGENT_MAX_TOKENS", "4096")),

@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 > nul
 echo ========================================
-echo   AiAgentGame2 - Install
+echo   Rebuild - Backend + Frontend
 echo ========================================
 echo.
 
@@ -12,22 +12,17 @@ echo.
 
 cd /d "%~dp0\backend"
 
-python --version
-if errorlevel 1 (
-    echo Error: Python is not installed
+if not exist "venv" (
+    echo Error: venv not found. Run 00_install_all.bat first
     pause
     exit /b 1
-)
-
-if not exist "venv" (
-    python -m venv venv
 )
 
 call venv\Scripts\activate.bat
 pip install -r requirements.txt
 
-if errorlevel 1 (
-    echo Error: Backend install failed
+if %errorlevel% neq 0 (
+    echo Error: Backend rebuild failed
     pause
     exit /b 1
 )
@@ -38,27 +33,24 @@ echo.
 
 cd /d "%~dp0\langgraph-studio"
 
-node --version
-if errorlevel 1 (
-    echo Error: Node.js is not installed
+if not exist "node_modules" (
+    echo Error: node_modules not found. Run 00_install_all.bat first
     pause
     exit /b 1
 )
 
-call npm install
+call npm run build
 
-if errorlevel 1 (
-    echo Error: Frontend install failed
+if %errorlevel% neq 0 (
+    echo Error: Frontend rebuild failed
     pause
     exit /b 1
 )
 
 echo.
 echo ========================================
-echo   Install completed
+echo   Rebuild completed
 echo ========================================
-echo.
-echo Run: 20_run_all_testdata.bat
 echo.
 
 pause

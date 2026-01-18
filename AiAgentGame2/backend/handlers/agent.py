@@ -3,10 +3,10 @@ Agent REST API Handlers
 """
 
 from flask import Flask, jsonify
-from mock_data import MockDataStore
+from testdata import TestDataStore
 
 
-def register_agent_routes(app: Flask, data_store: MockDataStore, sio):
+def register_agent_routes(app: Flask, data_store: TestDataStore, sio):
     """Register agent-related REST API routes"""
 
     @app.route('/api/projects/<project_id>/agents', methods=['GET'])

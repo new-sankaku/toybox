@@ -3,8 +3,11 @@ import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/Progress'
 import { useProjectStore } from '@/stores/projectStore'
-import { metricsApi, agentApi, type ApiProjectMetrics, type ApiAgent } from '@/services/apiService'
+import { useMetricsStore } from '@/stores/metricsStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { metricsApi, agentApi } from '@/services/apiService'
 import { cn } from '@/lib/utils'
+import type { Agent, AgentStatus } from '@/types/agent'
 
 interface Phase {
   id: number
@@ -15,37 +18,61 @@ interface Phase {
 
 export default function PhaseProgress(): JSX.Element {
   const { currentProject } = useProjectStore()
-  const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
-  const [agents, setAgents] = useState<ApiAgent[]>([])
-  const [loading, setLoading] = useState(false)
+  const { projectMetrics, setProjectMetrics } = useMetricsStore()
+  const { agents, setAgents } = useAgentStore()
+  const [initialLoading, setInitialLoading] = useState(true)
 
+  // Initial data fetch only (no polling) - rely on WebSocket for updates
   useEffect(() => {
     if (!currentProject) {
-      setMetrics(null)
+      setProjectMetrics(null)
       setAgents([])
+      setInitialLoading(false)
       return
     }
 
     const fetchData = async () => {
-      setLoading(true)
+      setInitialLoading(true)
       try {
         const [metricsData, agentsData] = await Promise.all([
           metricsApi.getByProject(currentProject.id),
           agentApi.listByProject(currentProject.id)
         ])
-        setMetrics(metricsData)
-        setAgents(agentsData)
+        setProjectMetrics({
+          projectId: currentProject.id,
+          totalTokensUsed: metricsData.totalTokensUsed,
+          estimatedTotalTokens: metricsData.estimatedTotalTokens,
+          completedTasks: metricsData.completedTasks,
+          totalTasks: metricsData.totalTasks,
+          progressPercent: metricsData.progressPercent,
+          currentPhase: metricsData.currentPhase,
+          phaseName: metricsData.phaseName
+        })
+        // Convert API format to store format
+        const agentsConverted: Agent[] = agentsData.map(a => ({
+          id: a.id,
+          projectId: a.projectId,
+          type: a.type,
+          phase: a.phase,
+          status: a.status as AgentStatus,
+          progress: a.progress,
+          currentTask: a.currentTask,
+          tokensUsed: a.tokensUsed,
+          startedAt: a.startedAt,
+          completedAt: a.completedAt,
+          error: a.error,
+          metadata: a.metadata
+        }))
+        setAgents(agentsConverted)
       } catch (error) {
         console.error('Failed to fetch data:', error)
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
-  }, [currentProject?.id])
+  }, [currentProject?.id, setProjectMetrics, setAgents])
 
   if (!currentProject) {
     return (
@@ -62,7 +89,8 @@ export default function PhaseProgress(): JSX.Element {
     )
   }
 
-  // Calculate phase progress from agents
+  // Calculate phase progress from metrics
+  const metrics = projectMetrics
   const currentPhase = metrics?.currentPhase || currentProject.currentPhase || 1
   const overallProgress = metrics?.progressPercent || 0
 
@@ -72,8 +100,9 @@ export default function PhaseProgress(): JSX.Element {
     { id: 3, name: 'Phase 3', progress: currentPhase > 3 ? 100 : currentPhase === 3 ? overallProgress : 0, status: currentPhase === 3 ? 'current' : currentPhase > 3 ? 'completed' : 'pending' }
   ]
 
-  // Find running agent
-  const runningAgent = agents.find(a => a.status === 'running')
+  // Find running agent from store (filter by current project)
+  const projectAgents = agents.filter(a => a.projectId === currentProject.id)
+  const runningAgent = projectAgents.find(a => a.status === 'running')
   const currentAgentName = runningAgent ? ((runningAgent.metadata?.displayName as string) || runningAgent.type) : null
   const currentAgentProgress = runningAgent?.progress || 0
 
@@ -86,7 +115,7 @@ export default function PhaseProgress(): JSX.Element {
         </span>
       </CardHeader>
       <CardContent className="space-y-3">
-        {loading && !metrics ? (
+        {initialLoading && !metrics ? (
           <div className="text-nier-text-light text-center py-2 text-nier-small">
             読み込み中...
           </div>
@@ -95,7 +124,10 @@ export default function PhaseProgress(): JSX.Element {
             {/* Phase Bars */}
             {phases.map((phase) => (
               <div key={phase.id} className="flex items-center gap-3">
-                <span className="text-nier-caption w-16 text-nier-text-light">
+                <span className={cn(
+                  'text-nier-caption w-16',
+                  phase.status === 'current' ? 'text-nier-text-main font-medium' : 'text-nier-text-light'
+                )}>
                   {phase.name}
                 </span>
                 <Progress
@@ -113,7 +145,7 @@ export default function PhaseProgress(): JSX.Element {
               <div className="pt-2 border-t border-nier-border-light">
                 <div className="flex justify-between text-nier-caption mb-1">
                   <span className="text-nier-text-light">実行中:</span>
-                  <span className="text-nier-accent-orange">{currentAgentName} ({currentAgentProgress}%)</span>
+                  <span className="text-nier-accent-orange animate-pulse">{currentAgentName} ({currentAgentProgress}%)</span>
                 </div>
                 <Progress value={currentAgentProgress} className="h-1" />
               </div>

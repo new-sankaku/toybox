@@ -3,10 +3,10 @@ Metrics REST API Handlers
 """
 
 from flask import Flask, jsonify, request
-from mock_data import MockDataStore
+from testdata import TestDataStore
 
 
-def register_metrics_routes(app: Flask, data_store: MockDataStore):
+def register_metrics_routes(app: Flask, data_store: TestDataStore):
     """Register metrics-related REST API routes"""
 
     @app.route('/api/projects/<project_id>/metrics', methods=['GET'])

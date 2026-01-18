@@ -13,10 +13,10 @@ from handlers.checkpoint import register_checkpoint_routes
 from handlers.metrics import register_metrics_routes
 from handlers.websocket import register_websocket_handlers
 from handlers.settings import register_settings_routes
-from mock_data import MockDataStore
+from testdata import TestDataStore
 from config import get_config
 from agents import create_agent_runner
-from asset_scanner import get_mock_data_path
+from asset_scanner import get_testdata_path
 
 
 def create_app():
@@ -40,13 +40,16 @@ def create_app():
     # Wrap Flask app with Socket.IO
     app_wsgi = socketio.WSGIApp(sio, app)
 
-    # Initialize mock data store
-    data_store = MockDataStore()
+    # Initialize test data store
+    data_store = TestDataStore()
+
+    # Set Socket.IO reference for real-time event emission
+    data_store.set_sio(sio)
 
     # Start simulation engine for real-time updates
     data_store.start_simulation()
 
-    # Initialize agent runner (mock or langgraph based on config)
+    # Initialize agent runner (testdata or api based on config)
     agent_runner = create_agent_runner(
         mode=config.agent.mode,
         api_key=config.agent.anthropic_api_key,
@@ -73,14 +76,14 @@ def create_app():
             'agent_mode': config.agent.mode,
         }
 
-    # Static file serving for mock_data assets
-    mock_data_path = get_mock_data_path()
+    # Static file serving for testdata assets
+    testdata_path = get_testdata_path()
 
-    @app.route('/mock_data/<path:filepath>')
-    def serve_mock_data(filepath):
-        """Serve static files from mock_data folder"""
+    @app.route('/testdata/<path:filepath>')
+    def serve_testdata(filepath):
+        """Serve static files from testdata folder"""
         try:
-            return send_from_directory(mock_data_path, filepath)
+            return send_from_directory(testdata_path, filepath)
         except Exception as e:
             print(f"[Server] Error serving {filepath}: {e}")
             abort(404)

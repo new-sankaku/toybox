@@ -126,7 +126,7 @@ export default function DataView(): JSX.Element {
     setPlayingAudio(null)
   }, [tabResetCounter])
 
-  // Fetch assets from API
+  // Initial fetch assets from API (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setAssets([])
@@ -147,8 +147,8 @@ export default function DataView(): JSX.Element {
     }
 
     fetchAssets()
-    const interval = setInterval(fetchAssets, 5000)
-    return () => clearInterval(interval)
+    // Note: WebSocket event for assets should be implemented in the future
+    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
   // Project not selected

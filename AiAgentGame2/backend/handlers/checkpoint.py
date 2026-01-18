@@ -3,10 +3,10 @@ Checkpoint REST API Handlers
 """
 
 from flask import Flask, request, jsonify
-from mock_data import MockDataStore
+from testdata import TestDataStore
 
 
-def register_checkpoint_routes(app: Flask, data_store: MockDataStore, sio):
+def register_checkpoint_routes(app: Flask, data_store: TestDataStore, sio):
     """Register checkpoint-related REST API routes"""
 
     @app.route('/api/projects/<project_id>/checkpoints', methods=['GET'])

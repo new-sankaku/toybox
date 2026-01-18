@@ -42,7 +42,7 @@ export default function ActivitySidebar(): JSX.Element {
   const [logs, setLogs] = useState<ApiSystemLog[]>([])
   const [aiGenerating, setAiGenerating] = useState(0)
 
-  // Fetch data from API
+  // Initial fetch data from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setMetrics(null)
@@ -77,8 +77,8 @@ export default function ActivitySidebar(): JSX.Element {
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
+    // Note: WebSocket events should update stores, sidebar should use stores
+    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
   // Calculate stats

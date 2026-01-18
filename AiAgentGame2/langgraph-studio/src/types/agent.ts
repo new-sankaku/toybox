@@ -1,27 +1,41 @@
-export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked'
+export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'waiting_approval'
 
 export type AgentType =
-  // Phase 1 agents
+  // Phase 0: 企画
   | 'concept'
-  | 'design'
+  // Phase 1: タスク分割1
+  | 'task_split_1'
+  // Phase 2: 設計 (L/W combined - Leader/Worker continuous loop check)
+  | 'concept_detail'
   | 'scenario'
-  | 'character'
   | 'world'
-  | 'task_split'
-  // Phase 2 agents
-  | 'code_leader'
-  | 'asset_leader'
-  | 'code_worker'
-  | 'asset_worker'
-  // Phase 3 agents
-  | 'integrator'
-  | 'tester'
-  | 'reviewer'
+  | 'game_design'
+  | 'tech_spec'
+  // Phase 3: タスク分割2 + アセット
+  | 'task_split_2'
+  | 'asset_character'
+  | 'asset_background'
+  | 'asset_ui'
+  | 'asset_effect'
+  | 'asset_bgm'
+  | 'asset_voice'
+  | 'asset_sfx'
+  // Phase 4: タスク分割3 + 実装 (L/W combined - Leader/Worker continuous loop check)
+  | 'task_split_3'
+  | 'code'
+  | 'event'
+  | 'ui_integration'
+  | 'asset_integration'
+  // Phase 5: タスク分割4 + テスト (L/W combined - Leader/Worker continuous loop check)
+  | 'task_split_4'
+  | 'unit_test'
+  | 'integration_test'
 
 export interface Agent {
   id: string
   projectId: string
   type: AgentType
+  phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   status: AgentStatus
   progress: number
   currentTask: string | null

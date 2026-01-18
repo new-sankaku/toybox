@@ -54,21 +54,22 @@ const levelConfig = {
 export default function LogsView(): JSX.Element {
   const { currentProject } = useProjectStore()
   const [logs, setLogs] = useState<SystemLog[]>([])
-  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
   const [filterLevel, setFilterLevel] = useState<LogLevel>('all')
   const [filterAgent, setFilterAgent] = useState<AgentSource | 'all'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedLog, setSelectedLog] = useState<SystemLog | null>(null)
 
-  // Fetch logs from API
+  // Initial fetch logs from API (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setLogs([])
+      setInitialLoading(false)
       return
     }
 
     const fetchLogs = async () => {
-      setLoading(true)
+      setInitialLoading(true)
       try {
         const data = await logsApi.getByProject(currentProject.id)
         setLogs(data.map(convertApiLog))
@@ -76,13 +77,13 @@ export default function LogsView(): JSX.Element {
         console.error('Failed to fetch logs:', error)
         setLogs([])
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
     fetchLogs()
-    const interval = setInterval(fetchLogs, 5000)
-    return () => clearInterval(interval)
+    // Note: WebSocket event for system logs should be implemented in the future
+    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
   // Project not selected
@@ -249,7 +250,7 @@ export default function LogsView(): JSX.Element {
               </span>
             </CardHeader>
             <CardContent className="p-0 nier-scroll-list">
-              {loading && logs.length === 0 ? (
+              {initialLoading && logs.length === 0 ? (
                 <div className="p-8 text-center text-nier-text-light">
                   読み込み中...
                 </div>

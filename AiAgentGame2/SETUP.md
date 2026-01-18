@@ -23,34 +23,32 @@ AiAgentGame2は以下のコンポーネントで構成されています：
 ### 2. Backend + Frontend 同時起動
 
 ```bash
-20_run_all_mock.bat     # モックモード（開発用）
-21_run_all_langgraph.bat # LangGraphモード（本番用）
+20_run_all_testdata.bat  # テストデータモード（開発用）
 ```
 
 ### 3. ブラウザでアクセス
 
 - フロントエンド: http://localhost:5173
-- バックエンドAPI: http://localhost:8765
-- WebSocket: ws://localhost:8765
+- バックエンドAPI: http://localhost:5000
+- WebSocket: ws://localhost:5000
 
 ---
 
 ## batファイル一覧
 
-### インストール
+### インストール・リビルド
 
 | ファイル | 説明 |
 |---------|------|
-| `00_install_all.bat` | Backend + Frontend 両方インストール |
-| `01_backend_install.bat` | Backend のみインストール |
-| `11_frontend_install.bat` | Frontend のみインストール |
+| `00_install_all.bat` | Backend + Frontend フルインストール（初回/クリーン時） |
+| `09_rebuild_all.bat` | Backend + Frontend リビルド（依存関係更新時） |
 
 ### Backend 起動
 
 | ファイル | 説明 |
 |---------|------|
-| `02_backend_run_mock.bat` | モックモードで起動（LLM呼び出しなし） |
-| `03_backend_run_langgraph.bat` | LangGraphモードで起動（Claude API使用） |
+| `02_backend_run_testdata.bat` | テストデータモードで起動（API呼び出しなし） |
+| `03_backend_run_api.bat` | APIモードで起動（Claude API使用） |
 
 ### Frontend 起動
 
@@ -58,15 +56,12 @@ AiAgentGame2は以下のコンポーネントで構成されています：
 |---------|------|
 | `12_frontend_run_dev.bat` | 開発サーバー起動 (Vite) |
 | `13_frontend_build.bat` | プロダクションビルド |
-| `14_frontend_preview.bat` | ビルド後プレビュー |
-| `19_frontend_clean.bat` | node_modules 削除 |
 
 ### 同時起動
 
 | ファイル | 説明 |
 |---------|------|
-| `20_run_all_mock.bat` | Backend (mock) + Frontend 同時起動 |
-| `21_run_all_langgraph.bat` | Backend (langgraph) + Frontend 同時起動 |
+| `20_run_all_testdata.bat` | Backend (testdata) + Frontend 同時起動 |
 
 ---
 
@@ -81,10 +76,10 @@ AiAgentGame2は以下のコンポーネントで構成されています：
 
 | モード | 説明 | 用途 |
 |-------|------|------|
-| `mock` | シミュレーションデータを返す | フロントエンド開発・テスト |
-| `langgraph` | Claude APIで実際に生成 | 本番使用 |
+| `testdata` | シミュレーションデータを返す | フロントエンド開発・テスト |
+| `api` | Claude APIで実際に生成 | 本番使用 |
 
-### LangGraphモードの設定
+### APIモードの設定
 
 1. `.env` ファイルを作成:
 ```bash
@@ -95,7 +90,7 @@ copy .env.example .env
 2. APIキーを設定:
 ```env
 ANTHROPIC_API_KEY=sk-ant-xxxxx
-AGENT_MODE=langgraph
+AGENT_MODE=api
 ```
 
 ---
@@ -115,8 +110,8 @@ AiAgentGame2/
 ├── backend/                 # バックエンドサーバー
 │   ├── agents/             # AgentRunner実装
 │   │   ├── base.py         # 抽象基底クラス
-│   │   ├── mock_runner.py  # モック実装
-│   │   └── langgraph_runner.py  # 本番実装
+│   │   ├── testdata_runner.py  # テストデータ実装
+│   │   └── api_runner.py   # API実装
 │   ├── handlers/           # APIハンドラー
 │   ├── simulation/         # シミュレーションロジック
 │   ├── config.py           # 設定管理
@@ -147,39 +142,23 @@ AiAgentGame2/
 ### バックエンドが起動しない
 
 1. Python 3.10+ がインストールされているか確認
-2. `00_install.bat` を再実行
-3. `venv` フォルダを削除して再インストール
+2. `00_install_all.bat` を再実行
+3. `backend/venv` フォルダを削除して再インストール
 
 ### フロントエンドが起動しない
 
 1. Node.js 18+ がインストールされているか確認
-2. `09_clean.bat` で node_modules を削除
-3. `00_install.bat` を再実行
+2. `langgraph-studio/node_modules` を削除
+3. `00_install_all.bat` を再実行
 
 ### WebSocket接続エラー
 
 1. バックエンドが起動しているか確認
-2. ポート8765が使用されていないか確認
+2. ポート5000が使用されていないか確認
 3. ファイアウォール設定を確認
 
-### LangGraphモードでエラー
+### APIモードでエラー
 
 1. `.env` ファイルが存在するか確認
 2. `ANTHROPIC_API_KEY` が正しく設定されているか確認
 3. APIキーの有効性を確認
-
----
-
-## 開発フロー
-
-1. **フロントエンド開発**: `mock` モードでバックエンドを起動
-2. **エージェント開発**: `langgraph` モードでテスト
-3. **統合テスト**: 両方を起動して動作確認
-
-```bash
-# ターミナル1: バックエンド
-cd backend && 01_run_mock.bat
-
-# ターミナル2: フロントエンド
-cd langgraph-studio && 01_run_dev.bat
-```

@@ -9,8 +9,8 @@ from typing import Optional
 from .base import AgentRunner
 
 
-# 環境変数からモード取得（デフォルトはmock）
-AGENT_MODE = os.environ.get("AGENT_MODE", "mock")
+# 環境変数からモード取得（デフォルトはtestdata）
+AGENT_MODE = os.environ.get("AGENT_MODE", "testdata")
 
 
 def create_agent_runner(
@@ -21,7 +21,7 @@ def create_agent_runner(
     AgentRunnerのインスタンスを生成
 
     Args:
-        mode: "mock" or "langgraph" (Noneの場合は環境変数から)
+        mode: "testdata" or "api" (Noneの場合は環境変数から)
         **kwargs: ランナー固有の設定
 
     Returns:
@@ -32,16 +32,16 @@ def create_agent_runner(
     """
     actual_mode = mode or AGENT_MODE
 
-    if actual_mode == "mock":
-        from .mock_runner import MockAgentRunner
-        return MockAgentRunner(**kwargs)
+    if actual_mode == "testdata":
+        from .testdata_runner import TestDataAgentRunner
+        return TestDataAgentRunner(**kwargs)
 
-    elif actual_mode == "langgraph":
-        from .langgraph_runner import LangGraphAgentRunner
-        return LangGraphAgentRunner(**kwargs)
+    elif actual_mode == "api":
+        from .api_runner import ApiAgentRunner
+        return ApiAgentRunner(**kwargs)
 
     else:
-        raise ValueError(f"Unknown agent mode: {actual_mode}. Use 'mock' or 'langgraph'")
+        raise ValueError(f"Unknown agent mode: {actual_mode}. Use 'testdata' or 'api'")
 
 
 def get_current_mode() -> str:

@@ -3,8 +3,9 @@ import { AgentListView, AgentDetailView } from '@/components/agents'
 import { Card, CardContent } from '@/components/ui/Card'
 import { useProjectStore } from '@/stores/projectStore'
 import { useNavigationStore } from '@/stores/navigationStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { agentApi, type ApiAgent, type ApiAgentLog } from '@/services/apiService'
-import type { Agent, AgentLogEntry, AgentType } from '@/types/agent'
+import type { Agent, AgentLogEntry, AgentType, AgentStatus } from '@/types/agent'
 import { FolderOpen } from 'lucide-react'
 
 // Convert API agent to frontend Agent type
@@ -13,7 +14,7 @@ function convertApiAgent(apiAgent: ApiAgent): Agent {
     id: apiAgent.id,
     projectId: apiAgent.projectId,
     type: apiAgent.type as AgentType,
-    status: apiAgent.status,
+    status: apiAgent.status as AgentStatus,
     progress: apiAgent.progress,
     currentTask: apiAgent.currentTask,
     tokensUsed: apiAgent.tokensUsed,
@@ -23,6 +24,7 @@ function convertApiAgent(apiAgent: ApiAgent): Agent {
     parentAgentId: apiAgent.parentAgentId,
     metadata: apiAgent.metadata,
     createdAt: apiAgent.createdAt,
+    phase: apiAgent.phase
   }
 }
 
@@ -41,66 +43,71 @@ function convertApiLog(apiLog: ApiAgentLog): AgentLogEntry {
 export default function AgentsView(): JSX.Element {
   const { currentProject } = useProjectStore()
   const { tabResetCounter } = useNavigationStore()
-  const [agents, setAgents] = useState<Agent[]>([])
+  const { agents, setAgents, agentLogs, isLoading } = useAgentStore()
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
-  const [selectedAgentLogs, setSelectedAgentLogs] = useState<AgentLogEntry[]>([])
-  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [initialLogsFetched, setInitialLogsFetched] = useState<Record<string, boolean>>({})
 
   // Reset selection when tab is clicked (even if same tab)
   useEffect(() => {
     setSelectedAgent(null)
   }, [tabResetCounter])
 
-  // Fetch agents from API
+  // Initial fetch agents from API (no polling)
   useEffect(() => {
     if (!currentProject) {
       setAgents([])
+      setInitialLoading(false)
       return
     }
 
     const fetchAgents = async () => {
-      setLoading(true)
+      setInitialLoading(true)
       try {
         const data = await agentApi.listByProject(currentProject.id)
         setAgents(data.map(convertApiAgent))
       } catch (error) {
         console.error('Failed to fetch agents:', error)
-        setAgents([])
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
     fetchAgents()
-    const interval = setInterval(fetchAgents, 5000)
-    return () => clearInterval(interval)
-  }, [currentProject?.id])
+  }, [currentProject?.id, setAgents])
 
-  // Fetch selected agent's logs
+  // Fetch selected agent's logs (initial fetch only, then rely on WebSocket)
   useEffect(() => {
-    if (!selectedAgent) {
-      setSelectedAgentLogs([])
-      return
-    }
+    if (!selectedAgent) return
+    if (initialLogsFetched[selectedAgent.id]) return
 
     const fetchLogs = async () => {
       try {
         const data = await agentApi.getLogs(selectedAgent.id)
-        // Sort logs DESC (newest first)
-        const logs = data.map(convertApiLog).sort(
-          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        )
-        setSelectedAgentLogs(logs)
+        const logs = data.map(convertApiLog)
+        // Add to store (store will handle deduplication if needed)
+        const { addLogEntry } = useAgentStore.getState()
+        logs.forEach(log => addLogEntry(selectedAgent.id, log))
+        setInitialLogsFetched(prev => ({ ...prev, [selectedAgent.id]: true }))
       } catch (error) {
         console.error('Failed to fetch agent logs:', error)
-        setSelectedAgentLogs([])
       }
     }
 
     fetchLogs()
-    const interval = setInterval(fetchLogs, 3000)
-    return () => clearInterval(interval)
-  }, [selectedAgent?.id])
+  }, [selectedAgent?.id, initialLogsFetched])
+
+  // Get logs from store for selected agent
+  const selectedAgentLogs = selectedAgent
+    ? (agentLogs[selectedAgent.id] || [])
+        .slice()
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    : []
+
+  // Filter agents for current project
+  const projectAgents = currentProject
+    ? agents.filter(a => a.projectId === currentProject.id)
+    : []
 
   // Project not selected
   if (!currentProject) {
@@ -139,12 +146,14 @@ export default function AgentsView(): JSX.Element {
 
   // Show detail view if agent is selected
   if (selectedAgent) {
+    // Get latest agent data from store
+    const currentAgentData = projectAgents.find(a => a.id === selectedAgent.id) || selectedAgent
     return (
       <AgentDetailView
-        agent={selectedAgent}
+        agent={currentAgentData}
         logs={selectedAgentLogs}
         onBack={handleBack}
-        onRetry={selectedAgent.status === 'failed' ? handleRetry : undefined}
+        onRetry={currentAgentData.status === 'failed' ? handleRetry : undefined}
       />
     )
   }
@@ -152,10 +161,10 @@ export default function AgentsView(): JSX.Element {
   // Show agent list
   return (
     <AgentListView
-      agents={agents}
+      agents={projectAgents}
       onSelectAgent={handleSelectAgent}
       selectedAgentId={undefined}
-      loading={loading}
+      loading={initialLoading || isLoading}
     />
   )
 }

@@ -8,7 +8,7 @@ import { Activity, TrendingUp } from 'lucide-react'
 interface TokenData {
   agentId: string
   agentType: string
-  displayName?: string  // バックエンドから取得（将来対応）
+  agentName?: string
   tokensUsed: number
   tokensEstimated: number
   timestamp: string
@@ -21,9 +21,9 @@ interface TokenTrackerProps {
   maxTokens?: number
 }
 
-// エージェント表示名を取得（displayName優先、なければagentType）
+// エージェント表示名を取得（agentName優先、なければagentType）
 const getDisplayName = (data: TokenData): string => {
-  return data.displayName || data.agentType
+  return data.agentName || data.agentType
 }
 
 export default function TokenTracker({

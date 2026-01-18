@@ -152,6 +152,8 @@ export interface ApiAgent {
   progress: number
   currentTask: string | null
   tokensUsed: number
+  inputTokens: number
+  outputTokens: number
   startedAt: string | null
   completedAt: string | null
   error: string | null
@@ -249,10 +251,19 @@ export const checkpointApi = {
 // ============================================================
 // Metrics API
 // ============================================================
+// 生成タイプ別トークン（サーバーから動的に返される）
+export interface TokensByTypeEntry {
+  input: number
+  output: number
+}
+
 export interface ApiProjectMetrics {
   projectId: string
   totalTokensUsed: number
+  totalInputTokens: number
+  totalOutputTokens: number
   estimatedTotalTokens: number
+  tokensByType?: Record<string, TokensByTypeEntry>
   elapsedTimeSeconds: number
   estimatedRemainingSeconds: number
   estimatedEndTime: string | null

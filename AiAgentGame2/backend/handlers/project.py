@@ -3,7 +3,7 @@ Project REST API Handlers
 """
 
 from flask import Flask, request, jsonify
-from mock_data import MockDataStore
+from testdata import TestDataStore
 from simulation.agent_simulation import AgentSimulator
 
 # ステータスの日本語表示
@@ -16,7 +16,7 @@ STATUS_LABELS = {
 }
 
 
-def register_project_routes(app: Flask, data_store: MockDataStore, sio):
+def register_project_routes(app: Flask, data_store: TestDataStore, sio):
     """Register project-related REST API routes"""
 
     simulator = AgentSimulator(data_store, sio)

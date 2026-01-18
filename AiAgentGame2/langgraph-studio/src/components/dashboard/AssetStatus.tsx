@@ -17,26 +17,32 @@ interface UnapprovedCategory {
 export default function AssetStatus(): JSX.Element {
   const { currentProject } = useProjectStore()
   const [assets, setAssets] = useState<ApiAsset[]>([])
+  const [initialLoading, setInitialLoading] = useState(true)
 
+  // Initial fetch only (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setAssets([])
+      setInitialLoading(false)
       return
     }
 
     const fetchAssets = async () => {
+      setInitialLoading(true)
       try {
         const data = await assetApi.listByProject(currentProject.id)
         setAssets(data)
       } catch (error) {
         console.error('Failed to fetch assets:', error)
         setAssets([])
+      } finally {
+        setInitialLoading(false)
       }
     }
 
     fetchAssets()
-    const interval = setInterval(fetchAssets, 5000)
-    return () => clearInterval(interval)
+    // Note: WebSocket event for assets should be implemented in the future
+    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
   // Only unapproved assets
@@ -79,9 +85,18 @@ export default function AssetStatus(): JSX.Element {
     <Card>
       <CardHeader>
         <DiamondMarker>Assets ({unapprovedAssets.length})</DiamondMarker>
+        {unapprovedAssets.length > 0 && (
+          <span className="ml-auto text-nier-caption text-nier-accent-orange animate-pulse">
+            未承認あり
+          </span>
+        )}
       </CardHeader>
       <CardContent className="overflow-hidden">
-        {unapprovedAssets.length === 0 ? (
+        {initialLoading && assets.length === 0 ? (
+          <div className="text-nier-text-light text-center py-4 text-nier-small">
+            読み込み中...
+          </div>
+        ) : unapprovedAssets.length === 0 ? (
           <div className="text-nier-text-light text-center py-4 text-nier-small">
             未承認なし
           </div>
@@ -94,7 +109,7 @@ export default function AssetStatus(): JSX.Element {
                   <Icon size={14} className="text-nier-text-light shrink-0" />
                   <span className="text-nier-small flex-1">{category.label}</span>
                   <span className="text-nier-caption text-nier-text-light">未承認</span>
-                  <span className="text-nier-caption text-nier-accent-yellow w-12 text-right">
+                  <span className="text-nier-caption text-nier-text-light w-12 text-right">
                     {category.count}件
                   </span>
                 </div>

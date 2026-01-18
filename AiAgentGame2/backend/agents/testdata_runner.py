@@ -1,7 +1,7 @@
 """
-Mock Agent Runner
+TestData Agent Runner
 
-フロントエンドテスト用のモックエージェント実装
+フロントエンドテスト用のテストデータエージェント実装
 実際のLLM呼び出しは行わず、シミュレーションデータを返す
 """
 
@@ -19,7 +19,7 @@ from .base import (
 )
 
 
-class MockAgentRunner(AgentRunner):
+class TestDataAgentRunner(AgentRunner):
     """
     モックエージェントランナー
 

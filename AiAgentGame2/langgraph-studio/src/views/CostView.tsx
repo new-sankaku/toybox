@@ -1,108 +1,52 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
-import { TokenTracker, CostEstimator } from '@/components/analytics'
 import { Progress } from '@/components/ui/Progress'
 import { useProjectStore } from '@/stores/projectStore'
 import { metricsApi, agentApi, type ApiAgent, type ApiProjectMetrics } from '@/services/apiService'
 import { formatNumber } from '@/lib/utils'
-import { TrendingUp, TrendingDown, DollarSign, Cpu, FolderOpen } from 'lucide-react'
+import { FolderOpen } from 'lucide-react'
 
 // Pricing (Claude 3.5 Sonnet)
 const PRICING = {
   inputPer1K: 0.003,
-  outputPer1K: 0.015,
-  inputRatio: 0.3,
-  outputRatio: 0.7
+  outputPer1K: 0.015
 }
 
-interface TokenByAgent {
-  agentId: string
-  agentType: string
-  agentName: string
-  tokensUsed: number
-  tokensEstimated: number
-  timestamp: string
+// グループ表示名
+const GROUP_NAMES: Record<string, string> = {
+  concept: 'コンセプト',
+  design: 'デザイン',
+  scenario: 'シナリオ',
+  character: 'キャラクター',
+  world: 'ワールド',
+  task_split: 'タスク分割',
+  code: 'コード',
+  asset: 'アセット',
+  integrator: '統合',
+  tester: 'テスト',
+  reviewer: 'レビュー'
 }
 
-interface TokenByGroup {
-  groupKey: string
-  groupName: string
-  agents: TokenByAgent[]
-  totalTokensUsed: number
-  totalTokensEstimated: number
+// 生成タイプの表示名
+const GENERATION_TYPE_NAMES: Record<string, string> = {
+  llm: 'LLM（企画・設計）',
+  image: '画像生成',
+  audio: '音楽・SE生成',
+  dialogue: 'セリフ・シナリオ',
+  video: '動画生成'
 }
 
-// Convert API agent to TokenByAgent type
-function convertToTokenByAgent(agent: ApiAgent): TokenByAgent {
-  return {
-    agentId: agent.id,
-    agentType: agent.type,
-    agentName: (agent.metadata?.displayName as string) || agent.type,
-    tokensUsed: agent.tokensUsed,
-    tokensEstimated: 5000, // Estimated per agent
-    timestamp: agent.createdAt,
-  }
+// エージェントタイプからグループキーを取得
+function getGroupKey(type: string): string {
+  if (type.endsWith('_leader')) return type.replace('_leader', '')
+  if (type.endsWith('_worker')) return type.replace('_worker', '')
+  return type
 }
 
-// Group agents by leader/worker pairs
-function groupAgentsByRole(agents: TokenByAgent[]): TokenByGroup[] {
-  const groupMap = new Map<string, TokenByAgent[]>()
-
-  // Define grouping rules
-  const getGroupKey = (type: string): string => {
-    // Remove _leader, _worker suffix to get base type
-    if (type.endsWith('_leader')) return type.replace('_leader', '')
-    if (type.endsWith('_worker')) return type.replace('_worker', '')
-    // Standalone agents
-    return type
-  }
-
-  // Group agents
-  agents.forEach(agent => {
-    const groupKey = getGroupKey(agent.agentType)
-    if (!groupMap.has(groupKey)) {
-      groupMap.set(groupKey, [])
-    }
-    groupMap.get(groupKey)!.push(agent)
-  })
-
-  // Group display names
-  const groupNames: Record<string, string> = {
-    concept: 'コンセプト',
-    concept_leader: 'コンセプト',
-    design: 'デザイン',
-    design_leader: 'デザイン',
-    scenario: 'シナリオ',
-    scenario_leader: 'シナリオ',
-    character: 'キャラクター',
-    character_leader: 'キャラクター',
-    world: 'ワールド',
-    world_leader: 'ワールド',
-    task_split: 'タスク分割',
-    task_split_leader: 'タスク分割',
-    code: 'コード',
-    code_leader: 'コード',
-    code_worker: 'コード',
-    asset: 'アセット',
-    asset_leader: 'アセット',
-    asset_worker: 'アセット',
-    integrator: '統合',
-    integrator_leader: '統合',
-    tester: 'テスト',
-    tester_leader: 'テスト',
-    reviewer: 'レビュー',
-    reviewer_leader: 'レビュー'
-  }
-
-  // Convert to array
-  return Array.from(groupMap.entries()).map(([groupKey, groupAgents]) => ({
-    groupKey,
-    groupName: groupNames[groupKey] || groupKey,
-    agents: groupAgents,
-    totalTokensUsed: groupAgents.reduce((sum, a) => sum + a.tokensUsed, 0),
-    totalTokensEstimated: groupAgents.reduce((sum, a) => sum + a.tokensEstimated, 0)
-  }))
+// コスト計算
+function calculateCost(input: number, output: number): number {
+  return (input / 1000) * PRICING.inputPer1K + (output / 1000) * PRICING.outputPer1K
 }
 
 export default function CostView(): JSX.Element {
@@ -111,7 +55,7 @@ export default function CostView(): JSX.Element {
   const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Fetch data from API
+  // Initial fetch data from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setAgents([])
@@ -138,9 +82,44 @@ export default function CostView(): JSX.Element {
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 5000)
-    return () => clearInterval(interval)
+    // Note: WebSocket events should update stores
+    // Currently only initial fetch, no polling
   }, [currentProject?.id])
+
+  // エージェント別グループ集計
+  const agentGroups = useMemo(() => {
+    const groupMap = new Map<string, { input: number; output: number }>()
+
+    agents.forEach(agent => {
+      const groupKey = getGroupKey(agent.type)
+      const existing = groupMap.get(groupKey) || { input: 0, output: 0 }
+      groupMap.set(groupKey, {
+        input: existing.input + (agent.inputTokens || 0),
+        output: existing.output + (agent.outputTokens || 0)
+      })
+    })
+
+    return Array.from(groupMap.entries()).map(([key, tokens]) => ({
+      key,
+      name: GROUP_NAMES[key] || key,
+      input: tokens.input,
+      output: tokens.output,
+      cost: calculateCost(tokens.input, tokens.output)
+    }))
+  }, [agents])
+
+  // 全体合計
+  const totals = useMemo(() => {
+    const input = agents.reduce((sum, a) => sum + (a.inputTokens || 0), 0)
+    const output = agents.reduce((sum, a) => sum + (a.outputTokens || 0), 0)
+    return {
+      input,
+      output,
+      cost: calculateCost(input, output)
+    }
+  }, [agents])
+
+  const budgetLimit = 10.0
 
   // Project not selected
   if (!currentProject) {
@@ -165,27 +144,6 @@ export default function CostView(): JSX.Element {
     )
   }
 
-  // Convert agents to TokenByAgent format
-  const tokensByAgent: TokenByAgent[] = agents.map(convertToTokenByAgent)
-
-  // Group by leader/worker pairs
-  const groupedAgents = groupAgentsByRole(tokensByAgent)
-
-  const currentTokens = tokensByAgent.reduce((sum, t) => sum + t.tokensUsed, 0)
-  const estimatedTotalTokens = tokensByAgent.reduce((sum, t) => sum + t.tokensEstimated, 0)
-
-  const inputTokens = Math.round(currentTokens * PRICING.inputRatio)
-  const outputTokens = Math.round(currentTokens * PRICING.outputRatio)
-  const inputCost = (inputTokens / 1000) * PRICING.inputPer1K
-  const outputCost = (outputTokens / 1000) * PRICING.outputPer1K
-  const currentCost = inputCost + outputCost
-
-  const estimatedInputTokens = Math.round(estimatedTotalTokens * PRICING.inputRatio)
-  const estimatedOutputTokens = Math.round(estimatedTotalTokens * PRICING.outputRatio)
-  const estimatedCost = (estimatedInputTokens / 1000) * PRICING.inputPer1K + (estimatedOutputTokens / 1000) * PRICING.outputPer1K
-
-  const budgetLimit = 10.0 // $10 budget
-
   return (
     <div className="p-4 animate-nier-fade-in">
       {/* Header */}
@@ -197,170 +155,43 @@ export default function CostView(): JSX.Element {
         <div className="nier-page-header-right" />
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-4 gap-3 mb-3">
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <Cpu className="text-nier-text-light" size={24} />
-              <div>
-                <div className="text-nier-caption text-nier-text-light">消費トークン</div>
-                <div className="text-nier-h2 font-medium">{formatNumber(currentTokens)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <TrendingUp className="text-nier-text-light" size={24} />
-              <div>
-                <div className="text-nier-caption text-nier-text-light">完了時予想</div>
-                <div className="text-nier-h2 font-medium">{formatNumber(estimatedTotalTokens)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <DollarSign className="text-nier-text-light" size={24} />
-              <div>
-                <div className="text-nier-caption text-nier-text-light">現在コスト</div>
-                <div className="text-nier-h2 font-medium">${currentCost.toFixed(3)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center gap-3">
-              <TrendingDown className="text-nier-text-light" size={24} />
-              <div>
-                <div className="text-nier-caption text-nier-text-light">予算残り</div>
-                <div className="text-nier-h2 font-medium">${(budgetLimit - currentCost).toFixed(2)}</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
       <div className="grid grid-cols-2 gap-3">
-        {/* Token Tracker */}
-        <TokenTracker
-          currentTokens={currentTokens}
-          estimatedTotalTokens={estimatedTotalTokens}
-          tokensByAgent={tokensByAgent}
-          maxTokens={100000}
-        />
-
-        {/* Cost Estimator */}
-        <CostEstimator
-          currentCost={currentCost}
-          estimatedTotalCost={estimatedCost}
-          budgetLimit={budgetLimit}
-          breakdown={{
-            inputTokens,
-            outputTokens,
-            inputCost,
-            outputCost
-          }}
-        />
-
-        {/* Agent Token Breakdown */}
-        <Card className="col-span-2">
+        {/* Left Column - Agent Breakdown */}
+        <Card>
           <CardHeader>
-            <DiamondMarker>エージェント別トークン消費</DiamondMarker>
+            <DiamondMarker>エージェント別</DiamondMarker>
           </CardHeader>
-          <CardContent className="nier-scroll-list-short">
-            {loading && groupedAgents.length === 0 ? (
-              <div className="text-center py-8 text-nier-text-light">
-                読み込み中...
-              </div>
-            ) : groupedAgents.length === 0 ? (
-              <div className="text-center py-8 text-nier-text-light">
-                データがありません
-              </div>
+          <CardContent>
+            {loading && agentGroups.length === 0 ? (
+              <div className="text-center py-8 text-nier-text-light">読み込み中...</div>
+            ) : agentGroups.length === 0 ? (
+              <div className="text-center py-8 text-nier-text-light">データがありません</div>
             ) : (
               <table className="w-full">
                 <thead className="bg-nier-bg-header text-nier-text-header">
                   <tr>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">グループ</th>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">内訳</th>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">消費トークン</th>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">予想トークン</th>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">進捗</th>
-                    <th className="px-4 py-2 text-left text-nier-small tracking-nier">推定コスト</th>
+                    <th className="px-3 py-2 text-left text-nier-small">グループ</th>
+                    <th className="px-3 py-2 text-right text-nier-small">In(トークン)</th>
+                    <th className="px-3 py-2 text-right text-nier-small">Out(トークン)</th>
+                    <th className="px-3 py-2 text-right text-nier-small">コスト</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-nier-border-light">
-                  {groupedAgents.map(group => {
-                    const progress = group.totalTokensEstimated > 0
-                      ? Math.round((group.totalTokensUsed / group.totalTokensEstimated) * 100)
-                      : 0
-                    const groupCost = (group.totalTokensUsed * PRICING.inputRatio / 1000) * PRICING.inputPer1K
-                      + (group.totalTokensUsed * PRICING.outputRatio / 1000) * PRICING.outputPer1K
-                    // Build breakdown string
-                    const breakdown = group.agents.length > 1
-                      ? group.agents.map(a => {
-                          const role = a.agentType.includes('leader') ? 'L' : a.agentType.includes('worker') ? 'W' : ''
-                          return `${role ? role + ':' : ''}${formatNumber(a.tokensUsed)}`
-                        }).join(' / ')
-                      : '-'
-                    return (
-                      <tr key={group.groupKey} className="hover:bg-nier-bg-panel transition-colors">
-                        <td className="px-4 py-3">
-                          <span className="text-nier-small font-medium">{group.groupName}</span>
-                          {group.agents.length > 1 && (
-                            <span className="text-nier-caption text-nier-text-light ml-2">
-                              ({group.agents.length}エージェント)
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-nier-caption text-nier-text-light">
-                          {breakdown}
-                        </td>
-                        <td className="px-4 py-3 text-nier-small">
-                          {formatNumber(group.totalTokensUsed)}
-                        </td>
-                        <td className="px-4 py-3 text-nier-small text-nier-text-light">
-                          {formatNumber(group.totalTokensEstimated)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <Progress value={progress} className="w-24 h-1.5" />
-                            <span className="text-nier-caption text-nier-text-light w-10">
-                              {progress}%
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-nier-small text-nier-text-main">
-                          ${groupCost.toFixed(4)}
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {agentGroups.map(group => (
+                    <tr key={group.key} className="hover:bg-nier-bg-panel transition-colors">
+                      <td className="px-3 py-2 text-nier-small">{group.name}</td>
+                      <td className="px-3 py-2 text-nier-small text-right">{formatNumber(group.input)}</td>
+                      <td className="px-3 py-2 text-nier-small text-right">{formatNumber(group.output)}</td>
+                      <td className="px-3 py-2 text-nier-small text-right">${group.cost.toFixed(4)}</td>
+                    </tr>
+                  ))}
                 </tbody>
                 <tfoot className="bg-nier-bg-header text-nier-text-header">
                   <tr>
-                    <td className="px-4 py-2 text-nier-small font-medium text-nier-text-header">合計</td>
-                    <td className="px-4 py-2 text-nier-small text-nier-text-header">-</td>
-                    <td className="px-4 py-2 text-nier-small font-medium text-nier-text-header">{formatNumber(currentTokens)}</td>
-                    <td className="px-4 py-2 text-nier-small font-medium text-nier-text-header">{formatNumber(estimatedTotalTokens)}</td>
-                    <td className="px-4 py-2">
-                      <div className="flex items-center gap-2">
-                        <Progress
-                          value={estimatedTotalTokens > 0 ? Math.round((currentTokens / estimatedTotalTokens) * 100) : 0}
-                          className="w-24 h-1.5"
-                        />
-                        <span className="text-nier-caption text-nier-text-header w-10">
-                          {estimatedTotalTokens > 0 ? Math.round((currentTokens / estimatedTotalTokens) * 100) : 0}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2 text-nier-small font-medium text-nier-text-header">
-                      ${currentCost.toFixed(4)}
-                    </td>
+                    <td className="px-3 py-2 text-nier-small font-medium">合計</td>
+                    <td className="px-3 py-2 text-nier-small font-medium text-right">{formatNumber(totals.input)}</td>
+                    <td className="px-3 py-2 text-nier-small font-medium text-right">{formatNumber(totals.output)}</td>
+                    <td className="px-3 py-2 text-nier-small font-medium text-right">${totals.cost.toFixed(4)}</td>
                   </tr>
                 </tfoot>
               </table>
@@ -368,66 +199,81 @@ export default function CostView(): JSX.Element {
           </CardContent>
         </Card>
 
-        {/* Cost Projection */}
-        <Card>
-          <CardHeader>
-            <DiamondMarker>コスト内訳</DiamondMarker>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between text-nier-small">
-                <span className="text-nier-text-light">入力トークン ({formatNumber(inputTokens)})</span>
-                <span>${inputCost.toFixed(4)}</span>
-              </div>
-              <div className="flex justify-between text-nier-small">
-                <span className="text-nier-text-light">出力トークン ({formatNumber(outputTokens)})</span>
-                <span>${outputCost.toFixed(4)}</span>
-              </div>
-              <div className="border-t border-nier-border-light pt-2 mt-2">
-                <div className="flex justify-between text-nier-body font-medium">
-                  <span>現在のコスト</span>
-                  <span className="text-nier-text-main">${currentCost.toFixed(4)}</span>
+        {/* Right Column - Summary & Type Breakdown */}
+        <div className="space-y-3">
+          {/* Summary */}
+          <Card>
+            <CardHeader>
+              <DiamondMarker>サマリー</DiamondMarker>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Tokens */}
+              <div className="space-y-2">
+                <div className="flex justify-between text-nier-small">
+                  <span className="text-nier-text-light">使用トークン (In)</span>
+                  <span>{formatNumber(totals.input)}</span>
+                </div>
+                <div className="flex justify-between text-nier-small">
+                  <span className="text-nier-text-light">使用トークン (Out)</span>
+                  <span>{formatNumber(totals.output)}</span>
                 </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
 
-        {/* Budget Status */}
-        <Card>
-          <CardHeader>
-            <DiamondMarker>予算ステータス</DiamondMarker>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div className="flex justify-between text-nier-small">
-                <span className="text-nier-text-light">設定予算</span>
-                <span>${budgetLimit.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-nier-small">
-                <span className="text-nier-text-light">現在の消費</span>
-                <span>${currentCost.toFixed(4)}</span>
-              </div>
-              <div className="flex justify-between text-nier-small">
-                <span className="text-nier-text-light">完了時予想コスト</span>
-                <span className="text-nier-text-main">${estimatedCost.toFixed(4)}</span>
-              </div>
-              <div className="border-t border-nier-border-light pt-2 mt-2">
-                <div className="flex justify-between text-nier-body font-medium">
-                  <span>残り予算</span>
-                  <span className="text-nier-text-main">${(budgetLimit - currentCost).toFixed(2)}</span>
+              {/* Cost */}
+              <div className="pt-3 border-t border-nier-border-light space-y-2">
+                <div className="flex justify-between text-nier-small">
+                  <span className="text-nier-text-light">現在コスト</span>
+                  <span className="font-medium">${totals.cost.toFixed(4)}</span>
                 </div>
+                <div className="flex justify-between text-nier-small">
+                  <span className="text-nier-text-light">予算</span>
+                  <span>${budgetLimit.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-nier-small font-medium">
+                  <span>残り予算</span>
+                  <span className="text-nier-text-main">${(budgetLimit - totals.cost).toFixed(2)}</span>
+                </div>
+                <Progress value={(totals.cost / budgetLimit) * 100} className="h-1.5" />
               </div>
-              <Progress
-                value={(currentCost / budgetLimit) * 100}
-                className="h-2 mt-2"
-              />
-              <div className="text-nier-caption text-nier-text-light text-center">
-                予算の {((currentCost / budgetLimit) * 100).toFixed(1)}% を使用
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+
+          {/* Generation Type Breakdown */}
+          <Card>
+            <CardHeader>
+              <DiamondMarker>生成タイプ別</DiamondMarker>
+            </CardHeader>
+            <CardContent>
+              {metrics?.tokensByType && Object.keys(metrics.tokensByType).length > 0 ? (
+                <table className="w-full">
+                  <thead className="bg-nier-bg-header text-nier-text-header">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-nier-small">タイプ</th>
+                      <th className="px-3 py-2 text-right text-nier-small">In(トークン)</th>
+                      <th className="px-3 py-2 text-right text-nier-small">Out(トークン)</th>
+                      <th className="px-3 py-2 text-right text-nier-small">コスト</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-nier-border-light">
+                    {Object.entries(metrics.tokensByType).map(([key, tokens]) => {
+                      const cost = calculateCost(tokens.input, tokens.output)
+                      return (
+                        <tr key={key}>
+                          <td className="px-3 py-2 text-nier-small">{GENERATION_TYPE_NAMES[key] || key}</td>
+                          <td className="px-3 py-2 text-nier-small text-right">{formatNumber(tokens.input)}</td>
+                          <td className="px-3 py-2 text-nier-small text-right">{formatNumber(tokens.output)}</td>
+                          <td className="px-3 py-2 text-nier-small text-right">${cost.toFixed(4)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="text-center py-4 text-nier-text-light text-nier-small">データがありません</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   )

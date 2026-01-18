@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AiAgentGame2 Backend Server
-AGENT_MODE で mock / langgraph を切り替え可能
+AGENT_MODE で testdata / api を切り替え可能
 """
 
 # eventlet monkey_patch must be called before any other imports
@@ -29,7 +29,7 @@ def main():
     parser.add_argument('--port', type=int, default=config.server.port, help='Port to run the server on')
     parser.add_argument('--host', type=str, default=config.server.host, help='Host to bind to')
     parser.add_argument('--debug', action='store_true', default=config.server.debug, help='Enable debug mode')
-    parser.add_argument('--mode', type=str, choices=['mock', 'langgraph'], default=None,
+    parser.add_argument('--mode', type=str, choices=['testdata', 'api'], default=None,
                         help='Agent mode (overrides AGENT_MODE env)')
 
     args = parser.parse_args()

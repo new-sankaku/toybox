@@ -1,5 +1,5 @@
 """
-Asset Scanner - Scan mock_data folders for real media files
+Asset Scanner - Scan testdata folders for real media files
 """
 
 import os
@@ -49,7 +49,7 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
     Recursively scan a directory for media files
 
     Args:
-        base_path: Root path of mock_data
+        base_path: Root path of testdata
         subdir: Subdirectory to scan (e.g., 'image', 'mp3', 'movie')
 
     Returns:
@@ -83,8 +83,8 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
                     "agent": folder_name or subdir.capitalize(),
                     "size": format_file_size(stat.st_size),
                     "createdAt": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "url": f"/mock_data/{relative_path.replace(os.sep, '/')}",
-                    "thumbnail": f"/mock_data/{relative_path.replace(os.sep, '/')}" if file_type == 'image' else None,
+                    "url": f"/testdata/{relative_path.replace(os.sep, '/')}",
+                    "thumbnail": f"/testdata/{relative_path.replace(os.sep, '/')}" if file_type == 'image' else None,
                     "duration": None,  # Would need to parse audio/video for real duration
                     "approvalStatus": "pending",
                     "filePath": file_path,  # Full path for server reference
@@ -97,12 +97,12 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
     return assets
 
 
-def scan_all_mock_data(mock_data_path: str) -> List[Dict]:
+def scan_all_testdata(testdata_path: str) -> List[Dict]:
     """
-    Scan all mock_data folders (image, mp3, movie)
+    Scan all testdata folders (image, mp3, movie)
 
     Args:
-        mock_data_path: Path to mock_data folder
+        testdata_path: Path to testdata folder
 
     Returns:
         List of all assets
@@ -111,7 +111,7 @@ def scan_all_mock_data(mock_data_path: str) -> List[Dict]:
 
     # Scan each folder
     for subdir in ['image', 'mp3', 'movie']:
-        assets = scan_directory(mock_data_path, subdir)
+        assets = scan_directory(testdata_path, subdir)
         all_assets.extend(assets)
         print(f"[AssetScanner] Found {len(assets)} files in {subdir}/")
 
@@ -119,19 +119,19 @@ def scan_all_mock_data(mock_data_path: str) -> List[Dict]:
     return all_assets
 
 
-def get_mock_data_path() -> str:
-    """Get the mock_data path relative to the backend"""
-    # Go up one level from backend to find mock_data
+def get_testdata_path() -> str:
+    """Get the testdata path relative to the backend"""
+    # Go up one level from backend to find testdata
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(backend_dir)
-    mock_data_path = os.path.join(project_root, 'mock_data')
-    return mock_data_path
+    testdata_path = os.path.join(project_root, 'testdata')
+    return testdata_path
 
 
 if __name__ == "__main__":
     # Test scan
-    mock_path = get_mock_data_path()
-    print(f"Scanning: {mock_path}")
-    assets = scan_all_mock_data(mock_path)
+    testdata_path = get_testdata_path()
+    print(f"Scanning: {testdata_path}")
+    assets = scan_all_testdata(testdata_path)
     for asset in assets[:10]:
         print(f"  - {asset['name']} ({asset['type']}, {asset['size']})")

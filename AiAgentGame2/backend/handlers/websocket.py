@@ -2,10 +2,10 @@
 WebSocket (Socket.IO) Event Handlers
 """
 
-from mock_data import MockDataStore
+from testdata import TestDataStore
 
 
-def register_websocket_handlers(sio, data_store: MockDataStore):
+def register_websocket_handlers(sio, data_store: TestDataStore):
     """Register Socket.IO event handlers"""
 
     @sio.event

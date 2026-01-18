@@ -4,11 +4,11 @@ import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { CategoryMarker } from '@/components/ui/CategoryMarker'
 import { Progress } from '@/components/ui/Progress'
 import { useProjectStore } from '@/stores/projectStore'
-import { agentApi, type ApiAgent } from '@/services/apiService'
+import { useAgentStore } from '@/stores/agentStore'
+import { agentApi } from '@/services/apiService'
 import { formatNumber, cn } from '@/lib/utils'
 import { Clock } from 'lucide-react'
-
-type AgentStatus = 'running' | 'pending' | 'completed' | 'failed' | 'blocked'
+import type { Agent, AgentStatus } from '@/types/agent'
 
 const statusLabels: Record<AgentStatus, string> = {
   running: '実行中',
@@ -35,33 +35,60 @@ const formatElapsedTime = (startedAt: string | null, completedAt: string | null)
 
 export default function ActiveAgents(): JSX.Element {
   const { currentProject } = useProjectStore()
-  const [agents, setAgents] = useState<ApiAgent[]>([])
-  const [loading, setLoading] = useState(false)
+  const { agents, setAgents, isLoading } = useAgentStore()
+  const [initialLoading, setInitialLoading] = useState(true)
+  // Timestamp to force re-render for elapsed time update
+  const [, setTick] = useState(0)
 
+  // Initial data fetch only (no polling)
   useEffect(() => {
     if (!currentProject) {
       setAgents([])
+      setInitialLoading(false)
       return
     }
 
-    const fetchAgents = async () => {
-      setLoading(true)
+    const fetchInitialAgents = async () => {
+      setInitialLoading(true)
       try {
         const data = await agentApi.listByProject(currentProject.id)
-        setAgents(data)
+        // Convert API format to store format
+        const agentsData: Agent[] = data.map(a => ({
+          id: a.id,
+          projectId: a.projectId,
+          type: a.type,
+          phase: a.phase,
+          status: a.status as AgentStatus,
+          progress: a.progress,
+          currentTask: a.currentTask,
+          tokensUsed: a.tokensUsed,
+          startedAt: a.startedAt,
+          completedAt: a.completedAt,
+          error: a.error,
+          metadata: a.metadata
+        }))
+        setAgents(agentsData)
       } catch (error) {
         console.error('Failed to fetch agents:', error)
-        setAgents([])
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
-    fetchAgents()
-    // Poll every 5 seconds
-    const interval = setInterval(fetchAgents, 5000)
+    fetchInitialAgents()
+  }, [currentProject?.id, setAgents])
+
+  // Timer for updating elapsed time display (every second for running agents)
+  useEffect(() => {
+    const activeCount = agents.filter(a => a.status === 'running').length
+    if (activeCount === 0) return
+
+    const interval = setInterval(() => {
+      setTick(t => t + 1)
+    }, 1000)
+
     return () => clearInterval(interval)
-  }, [currentProject?.id])
+  }, [agents])
 
   if (!currentProject) {
     return (
@@ -78,8 +105,9 @@ export default function ActiveAgents(): JSX.Element {
     )
   }
 
-  // Only show running and pending agents
-  const activeAgents = agents.filter(a => a.status === 'running' || a.status === 'pending')
+  // Filter agents for current project and only show running/pending
+  const projectAgents = agents.filter(a => a.projectId === currentProject.id)
+  const activeAgents = projectAgents.filter(a => a.status === 'running' || a.status === 'pending')
   const runningCount = activeAgents.filter(a => a.status === 'running').length
 
   return (
@@ -87,13 +115,13 @@ export default function ActiveAgents(): JSX.Element {
       <CardHeader>
         <DiamondMarker>Agents ({activeAgents.length})</DiamondMarker>
         {runningCount > 0 && (
-          <span className="ml-auto text-nier-caption text-nier-accent-orange">
+          <span className="ml-auto text-nier-caption text-nier-accent-orange animate-pulse">
             {runningCount}実行中
           </span>
         )}
       </CardHeader>
       <CardContent>
-        {loading && agents.length === 0 ? (
+        {(initialLoading || isLoading) && agents.length === 0 ? (
           <div className="text-nier-text-light text-center py-4 text-nier-small">
             読み込み中...
           </div>
@@ -106,31 +134,37 @@ export default function ActiveAgents(): JSX.Element {
             {activeAgents.map((agent) => {
               const displayName = (agent.metadata?.displayName as string) || agent.type
               const elapsed = formatElapsedTime(agent.startedAt, agent.completedAt)
+              const isRunning = agent.status === 'running'
               return (
                 <div
                   key={agent.id}
-                  className="flex items-center gap-2 px-2 py-1.5 bg-nier-bg-main border border-nier-border-light cursor-pointer hover:bg-nier-bg-selected transition-colors"
+                  className={cn(
+                    'flex items-center gap-2 px-2 py-1.5 bg-nier-bg-main border border-nier-border-light cursor-pointer hover:bg-nier-bg-selected transition-colors',
+                    isRunning && 'animate-nier-pulse'
+                  )}
                 >
                   <CategoryMarker status={agent.status === 'completed' ? 'complete' : agent.status} />
-                  <span className="text-nier-small font-medium truncate w-24">{displayName}</span>
-                  <span className="text-nier-caption w-12 text-nier-text-light">
-                    {statusLabels[agent.status as AgentStatus] || agent.status}
-                  </span>
-                  {agent.status === 'running' && agent.progress !== null ? (
-                    <div className="flex items-center gap-1 w-16">
-                      <Progress value={agent.progress} className="h-1 w-10" />
-                      <span className="text-nier-caption text-nier-text-light">{agent.progress}%</span>
-                    </div>
-                  ) : (
-                    <span className="w-16" />
-                  )}
-                  <span className="text-nier-caption text-nier-text-light flex items-center gap-0.5 w-14">
-                    <Clock size={10} />
-                    {elapsed}
-                  </span>
-                  <span className="text-nier-caption text-nier-text-light w-12 text-right">
-                    {formatNumber(agent.tokensUsed)}tk
-                  </span>
+                  <span className="text-nier-small font-medium truncate flex-1 min-w-0">{displayName}</span>
+                  <div className="flex items-center gap-2 ml-auto shrink-0">
+                    <span className="text-nier-caption w-12 text-nier-text-light">
+                      {statusLabels[agent.status] || agent.status}
+                    </span>
+                    {isRunning && agent.progress !== null ? (
+                      <div className="flex items-center gap-1 w-16">
+                        <Progress value={agent.progress} className="h-1 w-10" />
+                        <span className="text-nier-caption text-nier-text-light">{agent.progress}%</span>
+                      </div>
+                    ) : (
+                      <span className="w-16" />
+                    )}
+                    <span className="text-nier-caption text-nier-text-light flex items-center gap-0.5 w-14">
+                      <Clock size={10} />
+                      {elapsed}
+                    </span>
+                    <span className="text-nier-caption text-nier-text-light w-12 text-right">
+                      {formatNumber(agent.tokensUsed)}tk
+                    </span>
+                  </div>
                 </div>
               )
             })}

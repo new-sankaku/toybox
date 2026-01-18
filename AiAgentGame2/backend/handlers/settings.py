@@ -5,7 +5,7 @@ Settings API Handler
 """
 
 from flask import Flask, request, jsonify
-from mock_data import MockDataStore
+from testdata import TestDataStore
 from agent_settings import (
     get_default_quality_settings,
     QualityCheckConfig,
@@ -15,7 +15,7 @@ from agent_settings import (
 )
 
 
-def register_settings_routes(app: Flask, data_store: MockDataStore):
+def register_settings_routes(app: Flask, data_store: TestDataStore):
     """設定関連のルートを登録"""
 
     @app.route('/api/projects/<project_id>/settings/quality-check', methods=['GET'])

@@ -3,37 +3,48 @@ import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { Progress } from '@/components/ui/Progress'
 import { useProjectStore } from '@/stores/projectStore'
+import { useMetricsStore } from '@/stores/metricsStore'
 import { metricsApi, type ApiProjectMetrics } from '@/services/apiService'
-import { formatNumber } from '@/lib/utils'
+import { formatNumber, cn } from '@/lib/utils'
 
 export default function MetricsOverview(): JSX.Element {
   const { currentProject } = useProjectStore()
-  const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
-  const [loading, setLoading] = useState(false)
+  const { projectMetrics, setProjectMetrics, isLoading } = useMetricsStore()
+  const [initialLoading, setInitialLoading] = useState(true)
 
+  // Initial data fetch only (no polling) - rely on WebSocket for updates
   useEffect(() => {
     if (!currentProject) {
-      setMetrics(null)
+      setProjectMetrics(null)
+      setInitialLoading(false)
       return
     }
 
     const fetchMetrics = async () => {
-      setLoading(true)
+      setInitialLoading(true)
       try {
         const data = await metricsApi.getByProject(currentProject.id)
-        setMetrics(data)
+        // Convert API format to store format
+        setProjectMetrics({
+          projectId: currentProject.id,
+          totalTokensUsed: data.totalTokensUsed,
+          estimatedTotalTokens: data.estimatedTotalTokens,
+          completedTasks: data.completedTasks,
+          totalTasks: data.totalTasks,
+          progressPercent: data.progressPercent,
+          currentPhase: data.currentPhase,
+          phaseName: data.phaseName
+        })
       } catch (error) {
         console.error('Failed to fetch metrics:', error)
-        setMetrics(null)
+        setProjectMetrics(null)
       } finally {
-        setLoading(false)
+        setInitialLoading(false)
       }
     }
 
     fetchMetrics()
-    const interval = setInterval(fetchMetrics, 5000)
-    return () => clearInterval(interval)
-  }, [currentProject?.id])
+  }, [currentProject?.id, setProjectMetrics])
 
   if (!currentProject) {
     return (
@@ -50,6 +61,7 @@ export default function MetricsOverview(): JSX.Element {
     )
   }
 
+  const metrics = projectMetrics
   const actualTokens = metrics?.totalTokensUsed || 0
   const estimatedTokens = metrics?.estimatedTotalTokens || 0
   const completedTasks = metrics?.completedTasks || 0
@@ -62,7 +74,7 @@ export default function MetricsOverview(): JSX.Element {
         <DiamondMarker>メトリクス</DiamondMarker>
       </CardHeader>
       <CardContent>
-        {loading && !metrics ? (
+        {(initialLoading || isLoading) && !metrics ? (
           <div className="text-nier-text-light text-center py-4 text-nier-small">
             読み込み中...
           </div>

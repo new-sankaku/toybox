@@ -1,7 +1,7 @@
 """
-LangGraph Agent Runner
+API Agent Runner
 
-本番用のLangGraphベースエージェント実装
+本番用のAPIベースエージェント実装
 Claude APIを使用して実際のコンテンツを生成
 """
 
@@ -20,7 +20,7 @@ from .base import (
 )
 
 
-class LangGraphAgentRunner(AgentRunner):
+class ApiAgentRunner(AgentRunner):
     """
     LangGraphベースのエージェントランナー
 
@@ -112,7 +112,7 @@ class LangGraphAgentRunner(AgentRunner):
             "type": "log",
             "data": {
                 "level": "info",
-                "message": f"LangGraph Agent開始: {agent_type.value}",
+                "message": f"API Agent開始: {agent_type.value}",
                 "timestamp": datetime.now().isoformat()
             }
         }
@@ -197,7 +197,7 @@ class LangGraphAgentRunner(AgentRunner):
             "type": "log",
             "data": {
                 "level": "info",
-                "message": "LangGraph Agent完了",
+                "message": "API Agent完了",
                 "timestamp": datetime.now().isoformat()
             }
         }
@@ -1856,14 +1856,14 @@ class LeaderWorkerOrchestrator:
 
     def __init__(
         self,
-        agent_runner: LangGraphAgentRunner,
+        agent_runner: ApiAgentRunner,
         quality_settings: Dict[str, Any],
         on_progress: Optional[Callable[[str, int, str], None]] = None,
         on_checkpoint: Optional[Callable[[str, Dict], None]] = None,
     ):
         """
         Args:
-            agent_runner: LangGraphAgentRunner instance
+            agent_runner: ApiAgentRunner instance
             quality_settings: 品質チェック設定 { agent_type: { enabled, maxRetries, isHighCost } }
             on_progress: 進捗コールバック (agent_type, progress, message)
             on_checkpoint: チェックポイントコールバック (type, data)

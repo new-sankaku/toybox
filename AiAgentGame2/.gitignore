@@ -61,3 +61,6 @@ coverage/
 *.orig
 *.bak
 ~$*
+
+# Test data (not tracked)
+testdata/

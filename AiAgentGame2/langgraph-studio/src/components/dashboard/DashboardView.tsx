@@ -1,9 +1,4 @@
-import ProjectStatus from './ProjectStatus'
-import PhaseProgress from './PhaseProgress'
-import MetricsOverview from './MetricsOverview'
-import PendingApprovals from './PendingApprovals'
-import ActiveAgents from './ActiveAgents'
-import AssetStatus from './AssetStatus'
+import WorkflowDiagram from './WorkflowDiagram'
 
 export default function DashboardView(): JSX.Element {
   return (
@@ -17,20 +12,8 @@ export default function DashboardView(): JSX.Element {
         <div className="nier-page-header-right" />
       </div>
 
-      {/* Main Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Row 1 */}
-        <ProjectStatus />
-        <PhaseProgress />
-
-        {/* Row 2 */}
-        <MetricsOverview />
-        <PendingApprovals />
-
-        {/* Row 3 */}
-        <ActiveAgents />
-        <AssetStatus />
-      </div>
+      {/* Workflow Diagram */}
+      <WorkflowDiagram />
     </div>
   )
 }
