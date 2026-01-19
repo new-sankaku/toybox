@@ -136,3 +136,39 @@
     - **グリッドレイアウトの統一**: 2カラム構成は `grid-cols-3` で左1:右2、3カラム構成は `grid-cols-3` で均等分割など、既存パターンに従う
     - **空状態の表示**: データがない場合も同じレイアウト構造を維持し、中央に「〇〇がありません」メッセージとアクションボタンを表示する
     - **条件付き表示の注意**: ボタンやアイコンを条件で表示/非表示にする場合、非表示時もスペースを確保するか、親要素のレイアウトに影響しないことを確認する
+
+## Three.js ルール
+
+このプロジェクトではThree.js 0.182.0（npm版）を使用している。`public/sample/`にあるHTMLファイルはThree.js r128（CDN版）を使用している。
+
+### バージョン間の色の違い
+
+Three.js r152以降で以下の変更があり、r128と同じコードでも色がくすんで見える：
+
+1. **カラーマネジメントがデフォルトで有効** - sRGB↔リニア変換が自動で行われる
+2. **ライティング計算が物理的に正確（physically correct）になった** - 同じライト強度でも暗く見える
+
+### r128と同じ色を再現するための設定
+
+1. **main.tsxでカラーマネジメントを無効化**（Colorインスタンス作成前に設定必須）:
+   ```typescript
+   import * as THREE from 'three'
+   THREE.ColorManagement.enabled = false
+   ```
+
+2. **レンダラーの出力カラースペースを設定**:
+   ```typescript
+   renderer.outputColorSpace = THREE.LinearSRGBColorSpace
+   ```
+
+3. **ライト強度を上げる**（r128の約3倍）:
+   ```typescript
+   // r128: AmbientLight(0xffffff, 0.6), DirectionalLight(0xffffff, 0.8)
+   // r182: AmbientLight(0xffffff, 2.0), DirectionalLight(0xffffff, 2.0)
+   ```
+
+### 注意事項
+
+- Sampleファイル（`public/sample/*.html`）のコードをReactに移植する際は、上記の設定を必ず適用すること
+- 色が黒い/くすんでいる場合、まずライト強度を確認すること
+- gradientMapは不要（r128でも使っていない）

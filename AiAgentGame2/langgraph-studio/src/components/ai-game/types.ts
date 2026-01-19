@@ -39,37 +39,40 @@ export interface ServiceZoneState {
   isActive: boolean
 }
 
-// エージェントタイプと3Dモデルのマッピング
+// 精霊の種類（5種類をローテーション）
+const SPIRIT_TYPES = ['spirit_fire', 'spirit_water', 'spirit_earth', 'spirit_light', 'spirit_wind'] as const
+
+// エージェントタイプと3Dモデルのマッピング（全て精霊モデルを使用）
 export const AGENT_MODEL_MAP: Record<AgentType, string> = {
   // Phase 0: 企画
-  concept: 'cube_robot',
+  concept: SPIRIT_TYPES[0],           // spirit_fire
   // Phase 1: タスク分割1
-  task_split_1: 'spider_robot',
+  task_split_1: SPIRIT_TYPES[1],      // spirit_water
   // Phase 2: 設計
-  concept_detail: 'antenna_robot',
-  scenario: 'animal_cat',
-  world: 'animal_bird',
-  game_design: 'tank_robot',
-  tech_spec: 'submarine_robot',
+  concept_detail: SPIRIT_TYPES[2],    // spirit_earth
+  scenario: SPIRIT_TYPES[3],          // spirit_light
+  world: SPIRIT_TYPES[4],             // spirit_wind
+  game_design: SPIRIT_TYPES[0],       // spirit_fire
+  tech_spec: SPIRIT_TYPES[1],         // spirit_water
   // Phase 3: タスク分割2 + アセット
-  task_split_2: 'spider_robot',
-  asset_character: 'spirit_fire',
-  asset_background: 'spirit_earth',
-  asset_ui: 'spirit_light',
-  asset_effect: 'spirit_water',
-  asset_bgm: 'spirit_wind',
-  asset_voice: 'animal_dog',
-  asset_sfx: 'drum_robot',
+  task_split_2: SPIRIT_TYPES[2],      // spirit_earth
+  asset_character: SPIRIT_TYPES[3],   // spirit_light
+  asset_background: SPIRIT_TYPES[4],  // spirit_wind
+  asset_ui: SPIRIT_TYPES[0],          // spirit_fire
+  asset_effect: SPIRIT_TYPES[1],      // spirit_water
+  asset_bgm: SPIRIT_TYPES[2],         // spirit_earth
+  asset_voice: SPIRIT_TYPES[3],       // spirit_light
+  asset_sfx: SPIRIT_TYPES[4],         // spirit_wind
   // Phase 4: タスク分割3 + 実装
-  task_split_3: 'spider_robot',
-  code: 'hover_robot',
-  event: 'train_robot',
-  ui_integration: 'plane_robot',
-  asset_integration: 'helicopter_robot',
+  task_split_3: SPIRIT_TYPES[0],      // spirit_fire
+  code: SPIRIT_TYPES[1],              // spirit_water
+  event: SPIRIT_TYPES[2],             // spirit_earth
+  ui_integration: SPIRIT_TYPES[3],    // spirit_light
+  asset_integration: SPIRIT_TYPES[4], // spirit_wind
   // Phase 5: タスク分割4 + テスト
-  task_split_4: 'spider_robot',
-  unit_test: 'animal_rabbit',
-  integration_test: 'animal_bear'
+  task_split_4: SPIRIT_TYPES[0],      // spirit_fire
+  unit_test: SPIRIT_TYPES[1],         // spirit_water
+  integration_test: SPIRIT_TYPES[2]   // spirit_earth
 }
 
 // サービスタイプの設定

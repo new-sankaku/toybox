@@ -31,6 +31,7 @@
     "@tanstack/react-query": "^5.62.0",
     "@tanstack/react-virtual": "^3.11.2",
     "@twemoji/api": "^17.0.2",
+    "@types/three": "^0.182.0",
     "@xyflow/react": "^12.10.0",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
@@ -44,6 +45,7 @@
     "remark-gfm": "^4.0.0",
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^2.6.0",
+    "three": "^0.182.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {

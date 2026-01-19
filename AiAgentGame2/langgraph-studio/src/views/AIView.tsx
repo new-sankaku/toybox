@@ -1,240 +1,225 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { useProjectStore } from '@/stores/projectStore'
-import { useNavigationStore } from '@/stores/navigationStore'
-import { cn } from '@/lib/utils'
-import { GuildHallScene } from '@/components/ai-game'
-import {
-  MessageSquare,
-  Image,
-  Music,
-  Mic,
-  FolderOpen,
-  Clock,
-  Zap,
-  CheckCircle,
-  XCircle,
-  Loader2,
-  ChevronDown,
-  ChevronRight,
-  Bot,
-  LayoutGrid,
-  List
-} from 'lucide-react'
+import { AIField2D } from '@/components/ai-game'
+import type { CharacterState, AIServiceType, AIRequest, CharacterEmotion } from '@/components/ai-game/types'
+import { SERVICE_CONFIG } from '@/components/ai-game/types'
+import { FolderOpen, Pause } from 'lucide-react'
+import { Button } from '@/components/ui/Button'
 import type { AgentType } from '@/types/agent'
 
-type AIServiceType = 'llm' | 'image' | 'audio' | 'music'
-type RequestStatus = 'pending' | 'processing' | 'completed' | 'failed'
-type ViewMode = 'visual' | 'list'
-
-interface AIRequest {
-  id: string
-  serviceType: AIServiceType
-  serviceName: string
-  agentId: string
-  agentType: AgentType
-  input: string
-  output?: string
-  status: RequestStatus
-  tokensUsed?: number
-  cost?: number
-  duration?: number
-  createdAt: string
-  completedAt?: string
-  error?: string
+// エージェントタイプごとの適切なサービスマッピング
+const AGENT_SERVICE_MAP: Record<AgentType, AIServiceType> = {
+  // 企画・設計系 → LLM
+  concept: 'llm',
+  task_split_1: 'llm',
+  concept_detail: 'llm',
+  scenario: 'llm',
+  world: 'llm',
+  game_design: 'llm',
+  tech_spec: 'llm',
+  task_split_2: 'llm',
+  task_split_3: 'llm',
+  task_split_4: 'llm',
+  // 実装・テスト系 → LLM
+  code: 'llm',
+  event: 'llm',
+  ui_integration: 'llm',
+  asset_integration: 'llm',
+  unit_test: 'llm',
+  integration_test: 'llm',
+  // ビジュアルアセット → 画像生成
+  asset_character: 'image',
+  asset_background: 'image',
+  asset_ui: 'image',
+  asset_effect: 'image',
+  // 音楽 → 音楽生成
+  asset_bgm: 'music',
+  // 音声・効果音 → 音声生成
+  asset_voice: 'audio',
+  asset_sfx: 'audio'
 }
 
-interface GroupedRequests {
-  serviceName: string
-  serviceType: AIServiceType
-  requests: AIRequest[]
-  stats: {
-    total: number
-    completed: number
-    processing: number
-    pending: number
-    failed: number
-    totalCost: number
-    totalTokens: number
-  }
+// サービスごとの生成時間範囲（ミリ秒）
+const SERVICE_DURATION: Record<AIServiceType, { min: number; max: number }> = {
+  llm: { min: 3000, max: 8000 },
+  image: { min: 10000, max: 20000 },
+  music: { min: 30000, max: 60000 },
+  audio: { min: 5000, max: 15000 }
 }
 
-const serviceConfig: Record<AIServiceType, { icon: typeof MessageSquare; label: string; color: string }> = {
-  llm: { icon: MessageSquare, label: 'LLM', color: 'text-nier-text-light' },
-  image: { icon: Image, label: '画像生成', color: 'text-nier-text-light' },
-  audio: { icon: Mic, label: '音声生成', color: 'text-nier-text-light' },
-  music: { icon: Music, label: '音楽生成', color: 'text-nier-text-light' }
+// エージェントタイプごとのリアルなタスク例
+const AGENT_TASKS: Record<AgentType, string[]> = {
+  concept: [
+    'ゲームの基本コンセプトを策定',
+    'ターゲットユーザー分析を実施',
+    'コアゲームループの定義'
+  ],
+  task_split_1: ['Phase1タスクの分割と依存関係整理'],
+  concept_detail: ['コンセプトドキュメントの詳細化'],
+  scenario: [
+    'メインストーリーの執筆',
+    'ステージ1〜5のシナリオ作成',
+    'キャラクター会話スクリプト作成'
+  ],
+  world: [
+    '世界観設定ドキュメント作成',
+    '地域・マップ構成の設計'
+  ],
+  game_design: [
+    'ゲームメカニクスの詳細設計',
+    'バランス調整パラメータ定義',
+    'レベルデザインガイドライン作成'
+  ],
+  tech_spec: [
+    '技術仕様書の作成',
+    'システムアーキテクチャ設計'
+  ],
+  task_split_2: ['Phase2タスクの分割'],
+  task_split_3: ['Phase3タスクの分割'],
+  task_split_4: ['Phase4タスクの分割'],
+  asset_character: [
+    'プレイヤーキャラクターのデザイン',
+    'NPC立ち絵の生成',
+    '敵キャラクターのコンセプトアート'
+  ],
+  asset_background: [
+    '草原ステージの背景画像生成',
+    'ダンジョン背景の作成',
+    'タイトル画面背景のデザイン'
+  ],
+  asset_ui: [
+    'ボタンUIのデザイン',
+    'ステータスバーの作成',
+    'メニュー画面UIの生成'
+  ],
+  asset_effect: [
+    '攻撃エフェクトの作成',
+    'パーティクル素材の生成'
+  ],
+  asset_bgm: [
+    '草原ステージBGMの作曲',
+    'ボス戦BGMの生成',
+    'タイトル画面BGMの作成'
+  ],
+  asset_voice: [
+    'ナレーション音声の生成',
+    'キャラクターボイスの合成'
+  ],
+  asset_sfx: [
+    '攻撃効果音の生成',
+    'UI操作音の作成',
+    '環境音の合成'
+  ],
+  code: [
+    'プレイヤー移動処理の実装',
+    '当たり判定システムの実装',
+    'セーブ・ロード機能の実装'
+  ],
+  event: [
+    'イベントトリガーシステムの実装',
+    'カットシーン制御の実装'
+  ],
+  ui_integration: [
+    'UIコンポーネントの統合',
+    'メニュー画面の実装'
+  ],
+  asset_integration: [
+    'アセットのインポートと配置',
+    'アニメーション設定'
+  ],
+  unit_test: [
+    'プレイヤークラスの単体テスト',
+    'アイテムシステムのテスト'
+  ],
+  integration_test: [
+    'ステージ1の統合テスト',
+    'セーブ・ロードの結合テスト'
+  ]
 }
 
-const statusConfig: Record<RequestStatus, { icon: typeof CheckCircle; label: string; color: string }> = {
-  pending: { icon: Clock, label: '待機中', color: 'text-nier-text-light' },
-  processing: { icon: Loader2, label: '処理中', color: 'text-nier-text-light' },
-  completed: { icon: CheckCircle, label: '完了', color: 'text-nier-text-light' },
-  failed: { icon: XCircle, label: 'エラー', color: 'text-nier-text-light' }
-}
-
-const agentConfig: Record<AgentType, { label: string; shortLabel: string }> = {
-  // Phase 0: 企画
-  concept: { label: 'Concept Agent', shortLabel: 'CONCEPT' },
-  // Phase 1: タスク分割1
-  task_split_1: { label: 'Task Split 1', shortLabel: 'SPLIT1' },
-  // Phase 2: 設計
-  concept_detail: { label: 'Concept Detail', shortLabel: 'DETAIL' },
-  scenario: { label: 'Scenario Agent', shortLabel: 'SCENARIO' },
-  world: { label: 'World Agent', shortLabel: 'WORLD' },
-  game_design: { label: 'Game Design', shortLabel: 'DESIGN' },
-  tech_spec: { label: 'Tech Spec', shortLabel: 'TECH' },
-  // Phase 3: タスク分割2 + アセット
-  task_split_2: { label: 'Task Split 2', shortLabel: 'SPLIT2' },
-  asset_character: { label: 'Asset Character', shortLabel: 'A_CHAR' },
-  asset_background: { label: 'Asset Background', shortLabel: 'A_BG' },
-  asset_ui: { label: 'Asset UI', shortLabel: 'A_UI' },
-  asset_effect: { label: 'Asset Effect', shortLabel: 'A_FX' },
-  asset_bgm: { label: 'Asset BGM', shortLabel: 'A_BGM' },
-  asset_voice: { label: 'Asset Voice', shortLabel: 'A_VOICE' },
-  asset_sfx: { label: 'Asset SFX', shortLabel: 'A_SFX' },
-  // Phase 4: タスク分割3 + 実装
-  task_split_3: { label: 'Task Split 3', shortLabel: 'SPLIT3' },
-  code: { label: 'Code Agent', shortLabel: 'CODE' },
-  event: { label: 'Event Agent', shortLabel: 'EVENT' },
-  ui_integration: { label: 'UI Integration', shortLabel: 'UI_INT' },
-  asset_integration: { label: 'Asset Integration', shortLabel: 'A_INT' },
-  // Phase 5: タスク分割4 + テスト
-  task_split_4: { label: 'Task Split 4', shortLabel: 'SPLIT4' },
-  unit_test: { label: 'Unit Test', shortLabel: 'U_TEST' },
-  integration_test: { label: 'Integration Test', shortLabel: 'I_TEST' }
-}
-
-// Mock data for demonstration
+// Mock data for demonstration - 初期状態は完了済みリクエストのみ
 const mockRequests: AIRequest[] = [
-  // Claude requests
   {
     id: 'ai-001',
     serviceType: 'llm',
     serviceName: 'Claude 3.5 Sonnet',
-    agentId: 'agent-concept-001',
+    agentId: 'agent-concept',
     agentType: 'concept',
-    input: 'ボールを転がすパズルゲームのコンセプトドキュメントを作成してください。',
-    output: '# ゲームコンセプト\n\n## 概要\nボールを操作してゴールを目指すシンプルなパズルゲーム。',
+    input: 'ゲームの基本コンセプトを策定',
+    output: '# ゲームコンセプト\n\n## 概要\nボールを操作してゴールを目指すパズルゲーム',
     status: 'completed',
     tokensUsed: 1250,
     cost: 0.015,
-    duration: 3200,
+    duration: 5200,
     createdAt: new Date(Date.now() - 300000).toISOString(),
-    completedAt: new Date(Date.now() - 296800).toISOString()
+    completedAt: new Date(Date.now() - 294800).toISOString()
   },
   {
     id: 'ai-002',
     serviceType: 'llm',
     serviceName: 'Claude 3.5 Sonnet',
-    agentId: 'agent-scenario-001',
+    agentId: 'agent-scenario',
     agentType: 'scenario',
-    input: 'ステージ1〜5のシナリオを作成してください。',
-    output: '# ステージシナリオ\n\n## ステージ1: はじまりの草原\nチュートリアルステージ...',
+    input: 'ステージ1〜5のシナリオ作成',
+    output: '# ステージシナリオ\n\n## ステージ1: はじまりの草原',
     status: 'completed',
     tokensUsed: 2100,
     cost: 0.025,
-    duration: 4500,
+    duration: 6500,
     createdAt: new Date(Date.now() - 250000).toISOString(),
-    completedAt: new Date(Date.now() - 245500).toISOString()
+    completedAt: new Date(Date.now() - 243500).toISOString()
   },
   {
     id: 'ai-003',
     serviceType: 'llm',
     serviceName: 'Claude 3.5 Sonnet',
-    agentId: 'agent-asset-character-001',
-    agentType: 'asset_character',
-    input: 'キャラクターの会話テキストを生成してください。',
-    status: 'processing',
-    createdAt: new Date(Date.now() - 5000).toISOString()
-  },
-  {
-    id: 'ai-004',
-    serviceType: 'llm',
-    serviceName: 'Claude 3.5 Sonnet',
-    agentId: 'agent-game-design-001',
+    agentId: 'agent-game_design',
     agentType: 'game_design',
-    input: 'ゲームメカニクスの詳細設計を作成してください。',
-    status: 'processing',
-    createdAt: new Date(Date.now() - 3000).toISOString()
+    input: 'ゲームメカニクスの詳細設計',
+    output: '# ゲームメカニクス設計書',
+    status: 'completed',
+    tokensUsed: 1800,
+    cost: 0.022,
+    duration: 7200,
+    createdAt: new Date(Date.now() - 200000).toISOString(),
+    completedAt: new Date(Date.now() - 192800).toISOString()
   },
-  {
-    id: 'ai-005',
-    serviceType: 'llm',
-    serviceName: 'Claude 3.5 Sonnet',
-    agentId: 'agent-game-design-001',
-    agentType: 'game_design',
-    input: 'UI/UXデザインドキュメントを作成してください。',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 1000).toISOString()
-  },
-  // DALL-E requests
   {
     id: 'ai-010',
     serviceType: 'image',
     serviceName: 'DALL-E 3',
-    agentId: 'agent-asset-character-001',
+    agentId: 'agent-asset_character',
     agentType: 'asset_character',
-    input: 'キャラクターデザイン: 青い球体のかわいいキャラクター',
-    output: '/assets/character_ball_001.png',
+    input: 'プレイヤーキャラクターのデザイン',
+    output: '/assets/character_player_001.png',
     status: 'completed',
     cost: 0.04,
     duration: 15000,
-    createdAt: new Date(Date.now() - 200000).toISOString(),
-    completedAt: new Date(Date.now() - 185000).toISOString()
+    createdAt: new Date(Date.now() - 180000).toISOString(),
+    completedAt: new Date(Date.now() - 165000).toISOString()
   },
   {
     id: 'ai-011',
     serviceType: 'image',
     serviceName: 'DALL-E 3',
-    agentId: 'agent-asset-background-001',
+    agentId: 'agent-asset_background',
     agentType: 'asset_background',
-    input: '背景画像: 草原ステージ',
-    output: '/assets/bg_grassland.png',
+    input: '草原ステージの背景画像生成',
+    output: '/assets/bg_grassland_001.png',
     status: 'completed',
     cost: 0.04,
-    duration: 12000,
-    createdAt: new Date(Date.now() - 180000).toISOString(),
-    completedAt: new Date(Date.now() - 168000).toISOString()
+    duration: 18000,
+    createdAt: new Date(Date.now() - 160000).toISOString(),
+    completedAt: new Date(Date.now() - 142000).toISOString()
   },
-  {
-    id: 'ai-012',
-    serviceType: 'image',
-    serviceName: 'DALL-E 3',
-    agentId: 'agent-asset-background-002',
-    agentType: 'asset_background',
-    input: '背景画像: 洞窟ステージ',
-    status: 'processing',
-    createdAt: new Date(Date.now() - 8000).toISOString()
-  },
-  {
-    id: 'ai-013',
-    serviceType: 'image',
-    serviceName: 'DALL-E 3',
-    agentId: 'agent-world-001',
-    agentType: 'world',
-    input: '背景画像: 空中庭園ステージ',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 2000).toISOString()
-  },
-  {
-    id: 'ai-014',
-    serviceType: 'image',
-    serviceName: 'DALL-E 3',
-    agentId: 'agent-asset-ui-001',
-    agentType: 'asset_ui',
-    input: 'アイテムアイコン: コイン',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 1500).toISOString()
-  },
-  // Suno requests
   {
     id: 'ai-020',
     serviceType: 'music',
     serviceName: 'Suno AI',
-    agentId: 'agent-asset-bgm-001',
+    agentId: 'agent-asset_bgm',
     agentType: 'asset_bgm',
-    input: 'BGM: 明るい草原ステージ用の音楽',
+    input: '草原ステージBGMの作曲',
     output: '/assets/bgm_grassland.mp3',
     status: 'completed',
     cost: 0.10,
@@ -243,143 +228,186 @@ const mockRequests: AIRequest[] = [
     completedAt: new Date(Date.now() - 355000).toISOString()
   },
   {
-    id: 'ai-021',
-    serviceType: 'music',
-    serviceName: 'Suno AI',
-    agentId: 'agent-asset-bgm-001',
-    agentType: 'asset_bgm',
-    input: 'BGM: 神秘的な洞窟ステージ用の音楽',
-    status: 'processing',
-    createdAt: new Date(Date.now() - 30000).toISOString()
-  },
-  {
-    id: 'ai-022',
-    serviceType: 'music',
-    serviceName: 'Suno AI',
-    agentId: 'agent-asset-bgm-002',
-    agentType: 'asset_bgm',
-    input: 'BGM: 壮大な空中庭園ステージ用の音楽',
-    status: 'pending',
-    createdAt: new Date(Date.now() - 500).toISOString()
-  },
-  // ElevenLabs requests
-  {
     id: 'ai-030',
     serviceType: 'audio',
     serviceName: 'ElevenLabs',
-    agentId: 'agent-asset-voice-001',
+    agentId: 'agent-asset_voice',
     agentType: 'asset_voice',
-    input: 'ナレーション: 「ようこそ、ボールの冒険へ！」',
+    input: 'ナレーション音声の生成',
     output: '/assets/audio/narration_001.mp3',
     status: 'completed',
     cost: 0.02,
     duration: 8000,
     createdAt: new Date(Date.now() - 150000).toISOString(),
     completedAt: new Date(Date.now() - 142000).toISOString()
-  },
-  {
-    id: 'ai-031',
-    serviceType: 'audio',
-    serviceName: 'ElevenLabs',
-    agentId: 'agent-asset-voice-001',
-    agentType: 'asset_voice',
-    input: 'ナレーション: 「ステージクリア！」',
-    status: 'completed',
-    cost: 0.02,
-    duration: 6000,
-    createdAt: new Date(Date.now() - 140000).toISOString(),
-    completedAt: new Date(Date.now() - 134000).toISOString()
   }
 ]
 
 export default function AIView(): JSX.Element {
   const { currentProject } = useProjectStore()
-  const { tabResetCounter } = useNavigationStore()
   const [requests, setRequests] = useState<AIRequest[]>([])
-  const [viewMode, setViewMode] = useState<ViewMode>('visual')
-  const [filterType, setFilterType] = useState<AIServiceType | 'all'>('all')
-  const [filterAgent, setFilterAgent] = useState<AgentType | 'all'>('all')
-  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [activeAgents, setActiveAgents] = useState<Set<AgentType>>(new Set())
+  const [selectedCharacter, setSelectedCharacter] = useState<CharacterState | null>(null)
 
-  // Reset expanded state when tab is clicked (even if same tab)
-  useEffect(() => {
-    setExpandedGroups(new Set())
-  }, [tabResetCounter])
-
+  // プロジェクト選択時にリクエストを読み込み、初期エージェントを設定
   useEffect(() => {
     if (!currentProject) {
       setRequests([])
+      setActiveAgents(new Set())
       return
     }
     setRequests(mockRequests)
+
+    // 初期エージェントを設定（デモ用）
+    const initialAgents = new Set<AgentType>([
+      'concept',
+      'scenario',
+      'game_design',
+      'asset_character',
+      'asset_background',
+      'asset_bgm',
+      'asset_voice'
+    ])
+    setActiveAgents(initialAgents)
   }, [currentProject?.id])
 
-  // Get unique agent types from requests
-  const availableAgentTypes = useMemo<AgentType[]>(() => {
-    const types = new Set<AgentType>()
-    requests.forEach(r => types.add(r.agentType))
-    return Array.from(types)
-  }, [requests])
+  // 自動アクティビティシミュレーション（バックエンド駆動のシミュレーション）
+  useEffect(() => {
+    if (!currentProject) return
 
-  // Group requests by serviceName
-  const groupedRequests = useMemo<GroupedRequests[]>(() => {
-    let filtered = requests
+    const simulateActivity = () => {
+      setActiveAgents((currentActiveAgents) => {
+        // アイドル状態のエージェントを見つける
+        const activeAgentList = Array.from(currentActiveAgents)
+        if (activeAgentList.length === 0) return currentActiveAgents
 
-    if (filterType !== 'all') {
-      filtered = filtered.filter(r => r.serviceType === filterType)
+        // ランダムにエージェントを選択
+        const randomAgent = activeAgentList[Math.floor(Math.random() * activeAgentList.length)]
+
+        // 現在のリクエスト状態を確認
+        setRequests((prevRequests) => {
+          // このエージェントが既に処理中かチェック
+          const isAlreadyProcessing = prevRequests.some(
+            (r) => r.agentType === randomAgent && r.status === 'processing'
+          )
+
+          if (isAlreadyProcessing) {
+            return prevRequests
+          }
+
+          // エージェントタイプに適したサービスを取得
+          const serviceType = AGENT_SERVICE_MAP[randomAgent]
+          const serviceConfig = SERVICE_CONFIG[serviceType]
+
+          // このエージェント用のタスク一覧からランダムに選択
+          const tasks = AGENT_TASKS[randomAgent] || [`${randomAgent}のタスク実行`]
+          const taskInput = tasks[Math.floor(Math.random() * tasks.length)]
+
+          const newRequest: AIRequest = {
+            id: `ai-auto-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            serviceType,
+            serviceName: serviceConfig.description,
+            agentId: `agent-${randomAgent}`,
+            agentType: randomAgent,
+            input: taskInput,
+            status: 'processing',
+            createdAt: new Date().toISOString()
+          }
+
+          // サービスタイプに応じた生成時間
+          const duration = SERVICE_DURATION[serviceType]
+          const completionTime = duration.min + Math.random() * (duration.max - duration.min)
+
+          setTimeout(() => {
+            setRequests((prev) =>
+              prev.map((r) =>
+                r.id === newRequest.id
+                  ? {
+                      ...r,
+                      status: 'completed',
+                      completedAt: new Date().toISOString(),
+                      output: `${taskInput} - 完了`,
+                      tokensUsed: serviceType === 'llm' ? Math.floor(500 + Math.random() * 2000) : undefined,
+                      cost: serviceType === 'llm' ? Math.random() * 0.05 :
+                            serviceType === 'image' ? 0.02 + Math.random() * 0.02 :
+                            serviceType === 'music' ? 0.05 + Math.random() * 0.10 :
+                            0.01 + Math.random() * 0.02,
+                      duration: completionTime
+                    }
+                  : r
+              )
+            )
+          }, completionTime)
+
+          return [...prevRequests, newRequest]
+        })
+
+        return currentActiveAgents
+      })
     }
 
-    if (filterAgent !== 'all') {
-      filtered = filtered.filter(r => r.agentType === filterAgent)
+    // 3-6秒ごとにシミュレーション実行
+    const intervalId = setInterval(simulateActivity, 3000 + Math.random() * 3000)
+
+    // 初回は1秒後に開始
+    const initialTimeoutId = setTimeout(simulateActivity, 1000)
+
+    return () => {
+      clearInterval(intervalId)
+      clearTimeout(initialTimeoutId)
     }
+  }, [currentProject?.id])
 
-    const groups = new Map<string, AIRequest[]>()
+  // リクエストからキャラクターの状態を生成
+  const characters = useMemo((): CharacterState[] => {
+    const characterMap = new Map<string, CharacterState>()
 
-    filtered.forEach(req => {
-      const existing = groups.get(req.serviceName) || []
-      groups.set(req.serviceName, [...existing, req])
+    // アクティブなエージェントごとにキャラクターを作成
+    activeAgents.forEach((agentType) => {
+      const agentId = `agent-${agentType}`
+
+      // このエージェントの処理中リクエストを探す
+      const processingRequest = requests.find(
+        (r) => r.agentType === agentType && r.status === 'processing'
+      )
+
+      let status: CharacterState['status'] = 'idle'
+      let emotion: CharacterEmotion = 'idle'
+      let targetService: AIServiceType | undefined = undefined
+
+      if (processingRequest) {
+        status = 'working'
+        emotion = 'working'
+        targetService = processingRequest.serviceType
+      }
+
+      characterMap.set(agentId, {
+        agentId,
+        agentType,
+        status,
+        emotion,
+        targetService,
+        request: processingRequest,
+        position: { x: 0, y: 0 }
+      })
     })
 
-    return Array.from(groups.entries()).map(([serviceName, reqs]) => ({
-      serviceName,
-      serviceType: reqs[0].serviceType,
-      requests: reqs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
-      stats: {
-        total: reqs.length,
-        completed: reqs.filter(r => r.status === 'completed').length,
-        processing: reqs.filter(r => r.status === 'processing').length,
-        pending: reqs.filter(r => r.status === 'pending').length,
-        failed: reqs.filter(r => r.status === 'failed').length,
-        totalCost: reqs.reduce((sum, r) => sum + (r.cost || 0), 0),
-        totalTokens: reqs.reduce((sum, r) => sum + (r.tokensUsed || 0), 0)
-      }
-    }))
-  }, [requests, filterType, filterAgent])
+    return Array.from(characterMap.values())
+  }, [activeAgents, requests])
 
-  const toggleGroup = (serviceName: string) => {
-    setExpandedGroups(prev => {
+  // エージェントの削除
+  const removeAgent = useCallback((agentType: AgentType) => {
+    setActiveAgents((prev) => {
       const next = new Set(prev)
-      if (next.has(serviceName)) {
-        next.delete(serviceName)
-      } else {
-        next.add(serviceName)
-      }
+      next.delete(agentType)
       return next
     })
-  }
+  }, [])
 
-  const stats = {
-    total: requests.length,
-    completed: requests.filter(r => r.status === 'completed').length,
-    processing: requests.filter(r => r.status === 'processing').length,
-    pending: requests.filter(r => r.status === 'pending').length,
-    failed: requests.filter(r => r.status === 'failed').length
-  }
-
-  const formatDuration = (ms: number) => {
-    if (ms < 1000) return `${ms}ms`
-    return `${(ms / 1000).toFixed(1)}秒`
-  }
+  // キャラクタークリック時のハンドラ
+  const handleCharacterClick = useCallback((character: CharacterState) => {
+    setSelectedCharacter(character)
+  }, [])
 
   if (!currentProject) {
     return (
@@ -411,288 +439,72 @@ export default function AIView(): JSX.Element {
           <h1 className="nier-page-title">AI</h1>
           <span className="nier-page-subtitle">- 外部AI連携</span>
         </div>
-        <div className="nier-page-header-right">
-          {/* View Mode Toggle */}
-          <div className="flex items-center border border-nier-border-light">
-            <button
-              className={cn(
-                'flex items-center gap-1 px-3 py-1.5 text-nier-small transition-colors',
-                viewMode === 'visual'
-                  ? 'bg-nier-bg-selected text-nier-text-main'
-                  : 'text-nier-text-light hover:bg-nier-bg-panel'
-              )}
-              onClick={() => setViewMode('visual')}
-            >
-              <LayoutGrid size={14} />
-              ビジュアル
-            </button>
-            <button
-              className={cn(
-                'flex items-center gap-1 px-3 py-1.5 text-nier-small transition-colors border-l border-nier-border-light',
-                viewMode === 'list'
-                  ? 'bg-nier-bg-selected text-nier-text-main'
-                  : 'text-nier-text-light hover:bg-nier-bg-panel'
-              )}
-              onClick={() => setViewMode('list')}
-            >
-              <List size={14} />
-              リスト
-            </button>
-          </div>
-        </div>
+        <div className="nier-page-header-right" />
       </div>
 
-      {/* Visual Mode: Guild Hall Scene */}
-      {viewMode === 'visual' && (
-        <GuildHallScene requests={requests} />
-      )}
-
-      {/* List Mode: Original List View */}
-      {viewMode === 'list' && (
-        <>
-          {/* Filter */}
-          <Card className="mb-3">
-            <CardContent className="py-1.5 space-y-1.5">
-              {/* Service Filter */}
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="text-nier-caption text-nier-text-light w-16">Service:</span>
-                <button
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-                    filterType === 'all'
-                      ? 'bg-nier-bg-selected text-nier-text-main'
-                      : 'text-nier-text-light hover:bg-nier-bg-panel'
-                  )}
-                  onClick={() => setFilterType('all')}
-                >
-                  <Zap size={14} />
-                  全て
-                  <span className="text-nier-caption opacity-70">({requests.length})</span>
-                </button>
-                {(Object.keys(serviceConfig) as AIServiceType[]).map(type => {
-                  const config = serviceConfig[type]
-                  const Icon = config.icon
-                  const count = requests.filter(r => r.serviceType === type).length
-                  if (count === 0) return null
-                  return (
-                    <button
-                      key={type}
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-                        filterType === type
-                          ? 'bg-nier-bg-selected text-nier-text-main'
-                          : 'text-nier-text-light hover:bg-nier-bg-panel'
-                      )}
-                      onClick={() => setFilterType(type)}
-                    >
-                      <Icon size={14} />
-                      {config.label}
-                      <span className="text-nier-caption opacity-70">({count})</span>
-                    </button>
-                  )
-                })}
-              </div>
-
-              {/* Agent Filter */}
-              <div className="flex items-center gap-1 flex-wrap border-t border-nier-border-light pt-2">
-                <span className="text-nier-caption text-nier-text-light w-16">Agent:</span>
-                <button
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-                    filterAgent === 'all'
-                      ? 'bg-nier-bg-selected text-nier-text-main'
-                      : 'text-nier-text-light hover:bg-nier-bg-panel'
-                  )}
-                  onClick={() => setFilterAgent('all')}
-                >
-                  <Bot size={14} />
-                  全て
-                  <span className="text-nier-caption opacity-70">({requests.length})</span>
-                </button>
-                {availableAgentTypes.map(type => {
-                  const config = agentConfig[type]
-                  const count = requests.filter(r => r.agentType === type).length
-                  return (
-                    <button
-                      key={type}
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-2 text-nier-small tracking-nier transition-colors',
-                        filterAgent === type
-                          ? 'bg-nier-bg-selected text-nier-text-main'
-                          : 'text-nier-text-light hover:bg-nier-bg-panel'
-                      )}
-                      onClick={() => setFilterAgent(type)}
-                    >
-                      {config.shortLabel}
-                      <span className="text-nier-caption opacity-70">({count})</span>
-                    </button>
-                  )
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Grouped Request List */}
-          <div className="space-y-4 nier-scroll-list">
-            {groupedRequests.length === 0 ? (
-              <Card>
-                <CardContent>
-                  <div className="text-center py-8 text-nier-text-light">
-                    <Zap size={32} className="mx-auto mb-2 opacity-50" />
-                    <p className="text-nier-small">AIリクエストがありません</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : (
-              groupedRequests.map(group => {
-                const serviceConf = serviceConfig[group.serviceType]
-                const ServiceIcon = serviceConf.icon
-                const isExpanded = expandedGroups.has(group.serviceName)
-
-                return (
-                  <Card key={group.serviceName}>
-                    {/* Group Header */}
-                    <div
-                      className="flex items-center justify-between p-4 cursor-pointer hover:bg-nier-bg-panel transition-colors"
-                      onClick={() => toggleGroup(group.serviceName)}
-                    >
-                      <div className="flex items-center gap-3">
-                        {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                        <ServiceIcon size={18} className={serviceConf.color} />
-                        <span className="text-nier-body font-medium text-nier-text-main">
-                          {group.serviceName}
-                        </span>
-                        <span className={cn('text-nier-caption', serviceConf.color)}>
-                          [{serviceConf.label}]
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-4 text-nier-small">
-                        <span className="text-nier-text-light">{group.stats.completed}完了</span>
-                        {group.stats.processing > 0 && (
-                          <span className="text-nier-text-light flex items-center gap-1">
-                            <Loader2 size={12} className="animate-spin" />
-                            {group.stats.processing}処理中
-                          </span>
-                        )}
-                        {group.stats.pending > 0 && (
-                          <span className="text-nier-text-light">{group.stats.pending}待機中</span>
-                        )}
-                        {group.stats.failed > 0 && (
-                          <span className="text-nier-text-light">{group.stats.failed}エラー</span>
-                        )}
-                        <span className="text-nier-text-main font-medium border-l border-nier-border-light pl-4">
-                          {group.stats.total}件
-                        </span>
-                        {group.stats.totalCost > 0 && (
-                          <span className="text-nier-text-main">${group.stats.totalCost.toFixed(3)}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Expanded Request List */}
-                    {isExpanded && (
-                      <CardContent className="pt-0 border-t border-nier-border-light">
-                        <div className="divide-y divide-nier-border-light">
-                          {group.requests.map(request => {
-                            const statusConf = statusConfig[request.status]
-                            const StatusIcon = statusConf.icon
-
-                            return (
-                              <div key={request.id} className="py-3">
-                                <div className="flex items-start justify-between mb-2">
-                                  <div className="flex items-center gap-3">
-                                    <div className={cn(
-                                      'flex items-center gap-1 text-nier-caption px-2 py-0.5',
-                                      statusConf.color,
-                                      request.status === 'processing' && 'animate-pulse'
-                                    )}>
-                                      <StatusIcon size={12} className={request.status === 'processing' ? 'animate-spin' : ''} />
-                                      {statusConf.label}
-                                    </div>
-                                    {/* Agent Badge */}
-                                    <div className="flex items-center gap-1 text-nier-caption px-2 py-0.5 bg-nier-bg-panel border border-nier-border-light">
-                                      <Bot size={10} className="text-nier-text-light" />
-                                      <span className="text-nier-text-main">{agentConfig[request.agentType].shortLabel}</span>
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-3 text-nier-caption text-nier-text-light">
-                                    <span className="flex items-center gap-1">
-                                      <Clock size={10} />
-                                      {new Date(request.createdAt).toLocaleTimeString('ja-JP')}
-                                    </span>
-                                    {request.duration && (
-                                      <span>{formatDuration(request.duration)}</span>
-                                    )}
-                                    {request.tokensUsed && (
-                                      <span>{request.tokensUsed.toLocaleString()}tk</span>
-                                    )}
-                                    {request.cost && (
-                                      <span className="text-nier-text-main">${request.cost.toFixed(3)}</span>
-                                    )}
-                                  </div>
-                                </div>
-
-                                {/* Input */}
-                                <div className="mb-2">
-                                  <span className="text-nier-caption text-nier-text-light mr-2">IN:</span>
-                                  <span className="text-nier-small text-nier-text-light">
-                                    {request.input}
-                                  </span>
-                                </div>
-
-                                {/* Output */}
-                                {request.output && (
-                                  <div className="p-2 bg-nier-bg-main border-l-2 border-nier-border-dark">
-                                    <span className="text-nier-caption text-nier-text-light mr-2">OUT:</span>
-                                    <span className="text-nier-small text-nier-text-main whitespace-pre-wrap">
-                                      {request.output.length > 150 ? `${request.output.slice(0, 150)}...` : request.output}
-                                    </span>
-                                  </div>
-                                )}
-
-                                {/* Error */}
-                                {request.error && (
-                                  <div className="p-2 bg-nier-bg-panel border-l-2 border-nier-border-dark">
-                                    <span className="text-nier-caption text-nier-text-light">
-                                      {request.error}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </CardContent>
-                    )}
-                  </Card>
-                )
-              })
-            )}
+      {/* 2D AIフィールド */}
+      <Card className="mb-4">
+        <CardContent className="p-0">
+          <div className="h-[500px] rounded-lg overflow-hidden">
+            <AIField2D
+              characters={characters}
+              onCharacterClick={handleCharacterClick}
+            />
           </div>
+        </CardContent>
+      </Card>
 
-          {/* Summary */}
-          <Card className="mt-6">
-            <CardContent className="py-3">
-              <div className="flex items-center justify-between text-nier-small">
-                <div className="flex items-center gap-6 text-nier-text-light">
-                  <span>総リクエスト: <span className="text-nier-text-main">{stats.total}</span></span>
-                  <span>完了率: <span className="text-nier-text-main">{stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 0}%</span></span>
-                </div>
-                <div className="flex items-center gap-4">
-                  {requests.reduce((sum, r) => sum + (r.tokensUsed || 0), 0) > 0 && (
-                    <span className="text-nier-text-light">
-                      総トークン: <span className="text-nier-text-main">{requests.reduce((sum, r) => sum + (r.tokensUsed || 0), 0).toLocaleString()}</span>
-                    </span>
-                  )}
-                  <span className="text-nier-text-light">
-                    総コスト: <span className="text-nier-text-main">${requests.reduce((sum, r) => sum + (r.cost || 0), 0).toFixed(3)}</span>
-                  </span>
-                </div>
+      {/* 選択されたキャラクターの詳細パネル */}
+      {selectedCharacter && (
+        <Card className="mt-4">
+          <CardContent>
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-nier-body font-medium text-nier-text-main">
+                  {selectedCharacter.agentType.toUpperCase().replace(/_/g, ' ')}
+                </h3>
+                <p className="text-nier-small text-nier-text-light mt-1">
+                  ステータス: {selectedCharacter.status === 'idle' ? '待機中' :
+                              selectedCharacter.status === 'working' ? '作業中' :
+                              selectedCharacter.status === 'departing' ? '移動中' : '帰還中'}
+                </p>
+                {selectedCharacter.targetService && (
+                  <p className="text-nier-small text-nier-text-light">
+                    サービス: {selectedCharacter.targetService.toUpperCase()}
+                  </p>
+                )}
+                {selectedCharacter.request && (
+                  <p className="text-nier-small text-nier-text-light mt-1 truncate max-w-md">
+                    タスク: {selectedCharacter.request.input}
+                  </p>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </>
+              <div className="flex gap-2 items-center">
+                {selectedCharacter.status === 'working' && (
+                  <span className="text-nier-small text-nier-accent-orange flex items-center">
+                    <Pause size={14} className="mr-1 animate-pulse" />
+                    処理中...
+                  </span>
+                )}
+                {selectedCharacter.status === 'idle' && (
+                  <span className="text-nier-small text-nier-text-light">
+                    自動タスク割り当て待ち
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  variant="danger"
+                  onClick={() => {
+                    removeAgent(selectedCharacter.agentType)
+                    setSelectedCharacter(null)
+                  }}
+                >
+                  削除
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   )

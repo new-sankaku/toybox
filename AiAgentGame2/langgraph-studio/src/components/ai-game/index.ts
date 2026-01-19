@@ -1,7 +1,2 @@
-export { GuildHallScene } from './GuildHallScene'
-export { GuildHall } from './GuildHall'
-export { ServiceZone } from './ServiceZone'
-export { Character3D, SimpleCharacter3D } from './Character3D'
-export { SpeechBubble } from './SpeechBubble'
-export { FlatEmoji, MiniIcon } from './FlatEmoji'
+export { AIField2D } from './AIField2D'
 export * from './types'
