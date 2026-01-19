@@ -19,14 +19,6 @@ def register_checkpoint_routes(app: Flask, data_store: TestDataStore, sio):
         checkpoints = data_store.get_checkpoints_by_project(project_id)
         return jsonify(checkpoints)
 
-    @app.route('/api/checkpoints/<checkpoint_id>', methods=['GET'])
-    def get_checkpoint(checkpoint_id: str):
-        """Get a single checkpoint by ID"""
-        checkpoint = data_store.get_checkpoint(checkpoint_id)
-        if not checkpoint:
-            return jsonify({"error": "Checkpoint not found"}), 404
-        return jsonify(checkpoint)
-
     @app.route('/api/checkpoints/<checkpoint_id>/resolve', methods=['POST'])
     def resolve_checkpoint(checkpoint_id: str):
         """Resolve a checkpoint (approve/reject/request changes)"""

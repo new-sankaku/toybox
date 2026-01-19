@@ -32,11 +32,7 @@ def create_agent_runner(
     """
     actual_mode = mode or AGENT_MODE
 
-    if actual_mode == "testdata":
-        from .testdata_runner import TestDataAgentRunner
-        return TestDataAgentRunner(**kwargs)
-
-    elif actual_mode == "api":
+    if actual_mode == "api":
         from .api_runner import ApiAgentRunner
         return ApiAgentRunner(**kwargs)
 

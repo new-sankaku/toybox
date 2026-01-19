@@ -49,13 +49,15 @@ def create_app():
     # Start simulation engine for real-time updates
     data_store.start_simulation()
 
-    # Initialize agent runner (testdata or api based on config)
-    agent_runner = create_agent_runner(
-        mode=config.agent.mode,
-        api_key=config.agent.anthropic_api_key,
-        model=config.agent.model,
-        max_tokens=config.agent.max_tokens,
-    )
+    # Initialize agent runner only for API mode (testdata mode uses simulation)
+    agent_runner = None
+    if config.agent.mode == "api":
+        agent_runner = create_agent_runner(
+            mode=config.agent.mode,
+            api_key=config.agent.anthropic_api_key,
+            model=config.agent.model,
+            max_tokens=config.agent.max_tokens,
+        )
 
     # Register REST API routes
     register_project_routes(app, data_store, sio)
