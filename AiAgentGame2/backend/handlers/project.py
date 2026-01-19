@@ -24,14 +24,6 @@ def register_project_routes(app: Flask, data_store: TestDataStore, sio):
         projects = data_store.get_projects()
         return jsonify(projects)
 
-    @app.route('/api/projects/<project_id>', methods=['GET'])
-    def get_project(project_id: str):
-        """Get a single project by ID"""
-        project = data_store.get_project(project_id)
-        if not project:
-            return jsonify({"error": "プロジェクトが見つかりません"}), 404
-        return jsonify(project)
-
     @app.route('/api/projects', methods=['POST'])
     def create_project():
         """Create a new project"""
