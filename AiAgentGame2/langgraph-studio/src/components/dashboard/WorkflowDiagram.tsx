@@ -516,7 +516,6 @@ function FlowCanvas({ nodes, edges, onContainerResize }: FlowCanvasProps) {
 export default function WorkflowDiagram(): JSX.Element {
   const { currentProject } = useProjectStore()
   const { agents, setAgents } = useAgentStore()
-  const [initialLoading, setInitialLoading] = useState(true)
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
 
   // Handle container resize
@@ -532,16 +531,11 @@ export default function WorkflowDiagram(): JSX.Element {
     return DEFAULT_LAYOUT_CONFIG
   }, [containerSize])
 
-  // Initial data fetch
+  // Initial data fetch - runs once when project changes
   useEffect(() => {
-    if (!currentProject) {
-      setAgents([])
-      setInitialLoading(false)
-      return
-    }
+    if (!currentProject) return
 
     const fetchAgents = async () => {
-      setInitialLoading(true)
       try {
         const agentsData = await agentApi.listByProject(currentProject.id)
         const agentsConverted: Agent[] = agentsData.map(a => ({
@@ -563,8 +557,6 @@ export default function WorkflowDiagram(): JSX.Element {
         setAgents(agentsConverted)
       } catch (error) {
         console.error('Failed to fetch agents:', error)
-      } finally {
-        setInitialLoading(false)
       }
     }
 
@@ -738,15 +730,9 @@ export default function WorkflowDiagram(): JSX.Element {
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {initialLoading ? (
-          <div className="text-nier-text-light text-center py-8 text-nier-small">
-            読み込み中...
-          </div>
-        ) : (
-          <ReactFlowProvider>
-            <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize} />
-          </ReactFlowProvider>
-        )}
+        <ReactFlowProvider>
+          <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize} />
+        </ReactFlowProvider>
 
         {/* Legend - compact */}
         <div className="flex items-center justify-center gap-4 py-2 border-t border-nier-border-light text-nier-caption text-nier-text-light">

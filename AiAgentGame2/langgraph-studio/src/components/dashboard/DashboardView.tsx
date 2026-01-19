@@ -1,4 +1,5 @@
 import WorkflowDiagram from './WorkflowDiagram'
+import AgentWorkspace from './AgentWorkspace'
 
 export default function DashboardView(): JSX.Element {
   return (
@@ -14,6 +15,11 @@ export default function DashboardView(): JSX.Element {
 
       {/* Workflow Diagram */}
       <WorkflowDiagram />
+
+      {/* Agent Workspace - Gamification view */}
+      <div className="mt-3">
+        <AgentWorkspace />
+      </div>
     </div>
   )
 }

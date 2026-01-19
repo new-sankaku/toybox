@@ -395,4 +395,37 @@
   .tracking-nier-wide {
     letter-spacing: var(--tracking-wide) !important;
   }
+
+  /* Pixel art character animations */
+  @keyframes pixel-work {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    25% {
+      transform: translateY(-2px);
+    }
+    50% {
+      transform: translateY(0);
+    }
+    75% {
+      transform: translateY(-1px);
+    }
+  }
+
+  @keyframes pixel-idle {
+    0%, 100% {
+      transform: scale(1);
+    }
+    50% {
+      transform: scale(1.02);
+    }
+  }
+
+  .animate-pixel-work {
+    animation: pixel-work 0.6s ease-in-out infinite;
+  }
+
+  .animate-pixel-idle {
+    animation: pixel-idle 2s ease-in-out infinite;
+  }
 }
