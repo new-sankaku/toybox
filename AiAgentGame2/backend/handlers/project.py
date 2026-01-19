@@ -4,7 +4,6 @@ Project REST API Handlers
 
 from flask import Flask, request, jsonify
 from testdata import TestDataStore
-from simulation.agent_simulation import AgentSimulator
 
 # ステータスの日本語表示
 STATUS_LABELS = {
@@ -18,8 +17,6 @@ STATUS_LABELS = {
 
 def register_project_routes(app: Flask, data_store: TestDataStore, sio):
     """Register project-related REST API routes"""
-
-    simulator = AgentSimulator(data_store, sio)
 
     @app.route('/api/projects', methods=['GET'])
     def list_projects():
@@ -95,9 +92,6 @@ def register_project_routes(app: Flask, data_store: TestDataStore, sio):
             "previousStatus": project.get("status", "draft")
         })
 
-        # Start agent simulation
-        simulator.start_simulation(project_id)
-
         return jsonify(project)
 
     @app.route('/api/projects/<project_id>/pause', methods=['POST'])
@@ -117,9 +111,6 @@ def register_project_routes(app: Flask, data_store: TestDataStore, sio):
 
         # Update project status
         project = data_store.update_project(project_id, {"status": "paused"})
-
-        # Stop simulation
-        simulator.stop_simulation(project_id)
 
         # Emit status change
         sio.emit('project:status_changed', {
@@ -148,9 +139,6 @@ def register_project_routes(app: Flask, data_store: TestDataStore, sio):
         # Update project status
         project = data_store.update_project(project_id, {"status": "running"})
 
-        # Resume simulation
-        simulator.start_simulation(project_id)
-
         # Emit status change
         sio.emit('project:status_changed', {
             "projectId": project_id,
@@ -167,9 +155,6 @@ def register_project_routes(app: Flask, data_store: TestDataStore, sio):
 
         if not project:
             return jsonify({"error": "プロジェクトが見つかりません"}), 404
-
-        # Stop any running simulation first
-        simulator.stop_simulation(project_id)
 
         # Initialize project
         project = data_store.initialize_project(project_id)
