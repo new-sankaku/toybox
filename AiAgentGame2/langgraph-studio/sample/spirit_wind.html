@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>風の精霊</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#d8d0c8;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif;}
+.container{background:#fff;border-radius:20px;padding:30px;box-shadow:0 10px 40px rgba(0,0,0,0.08);}
+h2{text-align:center;color:#8b8178;margin-bottom:15px;font-weight:normal;font-size:18px;}
+#canvas{display:block;border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>風の精霊</h2>
+<canvas id="canvas" width="400" height="400"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+var scene,camera,renderer,character,time=0;
+function init(){
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0xd8d0c8);
+camera=new THREE.PerspectiveCamera(50,1,0.1,1000);
+camera.position.set(0,2,5);
+camera.lookAt(0,1.2,0);
+renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true});
+renderer.setSize(400,400);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+var ambLight=new THREE.AmbientLight(0xffffff,0.6);
+scene.add(ambLight);
+var dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(5,10,5);
+dirLight.castShadow=true;
+scene.add(dirLight);
+createCharacter();
+createFloor();
+animate();
+}
+function createCharacter(){
+character=new THREE.Group();
+var bodyColor=0xd0e0d8;
+var coreColor=0xe8f0e8;
+var streamColor=0xc8dcd0;
+var eyeColor=0x506858;
+var cheekColor=0xb8d8c8;
+
+// コア（中心・やや透明）
+var coreGeo=new THREE.SphereGeometry(0.35,32,32);
+var coreMat=new THREE.MeshToonMaterial({color:coreColor,transparent:true,opacity:0.75});
+var core=new THREE.Mesh(coreGeo,coreMat);
+core.position.y=1.3;
+character.add(core);
+character.core=core;
+
+// 内側の光
+var innerGeo=new THREE.SphereGeometry(0.2,24,24);
+var innerMat=new THREE.MeshToonMaterial({color:0xf0f8f0,transparent:true,opacity:0.6});
+var inner=new THREE.Mesh(innerGeo,innerMat);
+inner.position.y=1.3;
+character.add(inner);
+
+// 目
+var eyeGeo=new THREE.SphereGeometry(0.07,16,16);
+var eyeMat=new THREE.MeshToonMaterial({color:eyeColor});
+var leftEye=new THREE.Mesh(eyeGeo,eyeMat);
+leftEye.position.set(-0.12,1.38,0.3);
+character.add(leftEye);
+var rightEye=new THREE.Mesh(eyeGeo,eyeMat);
+rightEye.position.set(0.12,1.38,0.3);
+character.add(rightEye);
+
+// 瞳ハイライト
+var highlightGeo=new THREE.SphereGeometry(0.02,8,8);
+var highlightMat=new THREE.MeshToonMaterial({color:0xffffff});
+var leftHighlight=new THREE.Mesh(highlightGeo,highlightMat);
+leftHighlight.position.set(-0.1,1.4,0.36);
+character.add(leftHighlight);
+var rightHighlight=new THREE.Mesh(highlightGeo,highlightMat);
+rightHighlight.position.set(0.14,1.4,0.36);
+character.add(rightHighlight);
+
+// 頬
+var cheekGeo=new THREE.SphereGeometry(0.05,12,12);
+var cheekMat=new THREE.MeshToonMaterial({color:cheekColor,transparent:true,opacity:0.7});
+var leftCheek=new THREE.Mesh(cheekGeo,cheekMat);
+leftCheek.position.set(-0.22,1.25,0.25);
+leftCheek.scale.set(1,0.6,0.5);
+character.add(leftCheek);
+var rightCheek=new THREE.Mesh(cheekGeo,cheekMat);
+rightCheek.position.set(0.22,1.25,0.25);
+rightCheek.scale.set(1,0.6,0.5);
+character.add(rightCheek);
+
+// 風の流れ（螺旋状）
+character.streams=[];
+for(var j=0;j<3;j++){
+var streamGroup=new THREE.Group();
+for(var i=0;i<12;i++){
+var t=i/12;
+var angle=t*Math.PI*4+j*Math.PI*2/3;
+var radius=0.3+t*0.4;
+var y=0.7+t*1.2;
+var streamPart=new THREE.Mesh(
+new THREE.SphereGeometry(0.04-t*0.02,8,8),
+new THREE.MeshToonMaterial({color:streamColor,transparent:true,opacity:0.6-t*0.3})
+);
+streamPart.position.set(Math.sin(angle)*radius,y,Math.cos(angle)*radius);
+streamGroup.add(streamPart);
+}
+character.add(streamGroup);
+character.streams.push(streamGroup);
+}
+
+// 風の輪
+character.windRings=[];
+for(var i=0;i<4;i++){
+var ringGeo=new THREE.TorusGeometry(0.4+i*0.1,0.015,8,32);
+var ringMat=new THREE.MeshToonMaterial({color:bodyColor,transparent:true,opacity:0.4-i*0.08});
+var ring=new THREE.Mesh(ringGeo,ringMat);
+ring.position.y=1.3;
+ring.rotation.x=Math.PI/2+i*0.2;
+ring.rotation.z=i*0.3;
+character.add(ring);
+character.windRings.push(ring);
+}
+
+// 葉っぱ（風に乗る）
+character.leaves=[];
+var leafColor=0xa8c8b0;
+for(var i=0;i<5;i++){
+var leafGeo=new THREE.SphereGeometry(0.05,8,8);
+var leaf=new THREE.Mesh(leafGeo,new THREE.MeshToonMaterial({color:leafColor,transparent:true,opacity:0.8}));
+leaf.scale.set(1,0.3,1.5);
+var angle=i*Math.PI*2/5;
+leaf.position.set(Math.sin(angle)*0.6,1+Math.random()*0.6,Math.cos(angle)*0.6);
+character.add(leaf);
+character.leaves.push({mesh:leaf,angle:angle,baseY:leaf.position.y,rotSpeed:0.5+Math.random()*0.5});
+}
+
+// 風の粒子
+character.particles=[];
+for(var i=0;i<15;i++){
+var particle=new THREE.Mesh(
+new THREE.SphereGeometry(0.02,6,6),
+new THREE.MeshToonMaterial({color:coreColor,transparent:true,opacity:0.5})
+);
+particle.position.set(
+(Math.random()-0.5)*1.5,
+0.5+Math.random()*1.5,
+(Math.random()-0.5)*1.5
+);
+character.add(particle);
+character.particles.push({
+mesh:particle,
+speed:1+Math.random()*2,
+angle:Math.random()*Math.PI*2
+});
+}
+
+scene.add(character);
+}
+function createFloor(){
+var floorGeo=new THREE.CircleGeometry(2,32);
+var floorMat=new THREE.MeshToonMaterial({color:0xcac4bc});
+var floor=new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+floor.position.y=0;
+floor.receiveShadow=true;
+scene.add(floor);
+}
+function animate(){
+requestAnimationFrame(animate);
+time+=0.03;
+// コアの揺らぎ
+character.core.scale.x=1+Math.sin(time*3)*0.1;
+character.core.scale.z=1+Math.cos(time*3)*0.1;
+character.core.rotation.y=time*0.5;
+// 風の流れ回転
+character.streams.forEach(function(s,i){
+s.rotation.y=time*(1+i*0.2);
+});
+// 風の輪
+character.windRings.forEach(function(r,i){
+r.rotation.z=time*(0.5+i*0.3);
+r.rotation.x=Math.PI/2+Math.sin(time+i)*0.3;
+r.scale.setScalar(1+Math.sin(time*2+i)*0.15);
+});
+// 葉っぱの舞い
+character.leaves.forEach(function(l,i){
+l.mesh.position.x=Math.sin(l.angle+time*l.rotSpeed)*0.6;
+l.mesh.position.z=Math.cos(l.angle+time*l.rotSpeed)*0.6;
+l.mesh.position.y=l.baseY+Math.sin(time*2+i)*0.2;
+l.mesh.rotation.y+=0.05;
+l.mesh.rotation.z=Math.sin(time*3+i)*0.3;
+});
+// 粒子
+character.particles.forEach(function(p){
+p.mesh.position.x+=Math.sin(p.angle)*0.02;
+p.mesh.position.z+=Math.cos(p.angle)*0.02;
+p.mesh.position.y+=0.01;
+if(p.mesh.position.y>2.5||Math.abs(p.mesh.position.x)>1||Math.abs(p.mesh.position.z)>1){
+p.mesh.position.set((Math.random()-0.5)*0.5,0.5,(Math.random()-0.5)*0.5);
+p.angle=Math.random()*Math.PI*2;
+}
+p.mesh.material.opacity=0.3+Math.sin(time*5+p.angle)*0.2;
+});
+// 全体の浮遊
+character.position.y=Math.sin(time*1.5)*0.12;
+character.position.x=Math.sin(time*0.8)*0.05;
+// 全体の回転
+character.rotation.y+=0.012;
+renderer.render(scene,camera);
+}
+init();
+</script>
+</body>
+</html>
