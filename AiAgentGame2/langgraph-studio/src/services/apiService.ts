@@ -101,11 +101,6 @@ export const projectApi = {
     return response.data
   },
 
-  get: async (projectId: string): Promise<Project> => {
-    const response = await api.get(`/api/projects/${projectId}`)
-    return response.data
-  },
-
   create: async (data: Partial<Project>): Promise<Project> => {
     const response = await api.post('/api/projects', data)
     return response.data
@@ -177,30 +172,8 @@ export const agentApi = {
     return response.data
   },
 
-  get: async (agentId: string): Promise<ApiAgent> => {
-    const response = await api.get(`/api/agents/${agentId}`)
-    return response.data
-  },
-
   getLogs: async (agentId: string): Promise<ApiAgentLog[]> => {
     const response = await api.get(`/api/agents/${agentId}/logs`)
-    return response.data
-  },
-
-  getOutputs: async (agentId: string): Promise<unknown[]> => {
-    const response = await api.get(`/api/agents/${agentId}/outputs`)
-    return response.data
-  },
-
-  getMetrics: async (agentId: string): Promise<{
-    agentId: string
-    tokensUsed: number
-    tokensLimit: number
-    executionTimeSeconds: number
-    progress: number
-    status: string
-  }> => {
-    const response = await api.get(`/api/agents/${agentId}/metrics`)
     return response.data
   }
 }
@@ -231,11 +204,6 @@ export interface ApiCheckpoint {
 export const checkpointApi = {
   listByProject: async (projectId: string): Promise<ApiCheckpoint[]> => {
     const response = await api.get(`/api/projects/${projectId}/checkpoints`)
-    return response.data
-  },
-
-  get: async (checkpointId: string): Promise<ApiCheckpoint> => {
-    const response = await api.get(`/api/checkpoints/${checkpointId}`)
     return response.data
   },
 
