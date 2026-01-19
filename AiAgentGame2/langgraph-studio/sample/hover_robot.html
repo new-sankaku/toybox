@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>球体ホバーロボット</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#d8d0c8;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif;}
+.container{background:#fff;border-radius:20px;padding:30px;box-shadow:0 10px 40px rgba(0,0,0,0.08);}
+h2{text-align:center;color:#8b8178;margin-bottom:15px;font-weight:normal;font-size:18px;}
+#canvas{display:block;border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>球体ホバーロボット</h2>
+<canvas id="canvas" width="400" height="400"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+var scene,camera,renderer,robot,time=0;
+function init(){
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0xd8d0c8);
+camera=new THREE.PerspectiveCamera(50,1,0.1,1000);
+camera.position.set(0,2,5);
+camera.lookAt(0,1.2,0);
+renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true});
+renderer.setSize(400,400);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+var ambLight=new THREE.AmbientLight(0xffffff,0.6);
+scene.add(ambLight);
+var dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(5,10,5);
+dirLight.castShadow=true;
+dirLight.shadow.mapSize.width=1024;
+dirLight.shadow.mapSize.height=1024;
+scene.add(dirLight);
+createRobot();
+createFloor();
+animate();
+}
+function createRobot(){
+robot=new THREE.Group();
+var bodyColor=0xb8aea4;
+var accentColor=0x8a817a;
+var eyeColor=0x4a443e;
+var cheekColor=0xc9a99c;
+var darkColor=0x6a635c;
+var glowColor=0xd4ccc4;
+
+// メイン球体
+var sphereGeo=new THREE.SphereGeometry(0.8,32,32);
+var sphereMat=new THREE.MeshToonMaterial({color:bodyColor});
+var mainSphere=new THREE.Mesh(sphereGeo,sphereMat);
+mainSphere.position.y=1.5;
+mainSphere.castShadow=true;
+robot.add(mainSphere);
+robot.mainSphere=mainSphere;
+
+// 赤道リング
+var ringGeo=new THREE.TorusGeometry(0.9,0.06,8,48);
+var ringMat=new THREE.MeshToonMaterial({color:accentColor});
+var equatorRing=new THREE.Mesh(ringGeo,ringMat);
+equatorRing.position.y=1.5;
+equatorRing.rotation.x=Math.PI/2;
+robot.add(equatorRing);
+robot.equatorRing=equatorRing;
+
+// 縦リング
+var vertRing=new THREE.Mesh(ringGeo,ringMat);
+vertRing.position.y=1.5;
+robot.add(vertRing);
+robot.vertRing=vertRing;
+
+// 目（大きな単眼）
+var eyeGeo=new THREE.SphereGeometry(0.25,32,32);
+var eyeMat=new THREE.MeshToonMaterial({color:eyeColor});
+var eye=new THREE.Mesh(eyeGeo,eyeMat);
+eye.position.set(0,1.6,0.7);
+robot.add(eye);
+
+// 瞳
+var pupilGeo=new THREE.SphereGeometry(0.12,16,16);
+var pupilMat=new THREE.MeshToonMaterial({color:0x2a2520});
+var pupil=new THREE.Mesh(pupilGeo,pupilMat);
+pupil.position.set(0,1.6,0.92);
+robot.add(pupil);
+
+// 目のハイライト
+var highlightGeo=new THREE.SphereGeometry(0.04,12,12);
+var highlightMat=new THREE.MeshToonMaterial({color:0xffffff});
+var highlight=new THREE.Mesh(highlightGeo,highlightMat);
+highlight.position.set(0.08,1.68,0.95);
+robot.add(highlight);
+
+// 頬
+var cheekGeo=new THREE.SphereGeometry(0.1,16,16);
+var cheekMat=new THREE.MeshToonMaterial({color:cheekColor});
+var leftCheek=new THREE.Mesh(cheekGeo,cheekMat);
+leftCheek.position.set(-0.4,1.35,0.6);
+leftCheek.scale.set(1,0.6,0.5);
+robot.add(leftCheek);
+var rightCheek=new THREE.Mesh(cheekGeo,cheekMat);
+rightCheek.position.set(0.4,1.35,0.6);
+rightCheek.scale.set(1,0.6,0.5);
+robot.add(rightCheek);
+
+// アンテナ（2本）
+var antennaGeo=new THREE.CylinderGeometry(0.02,0.02,0.4,12);
+var antennaMat=new THREE.MeshToonMaterial({color:accentColor});
+var leftAntenna=new THREE.Mesh(antennaGeo,antennaMat);
+leftAntenna.position.set(-0.25,2.4,0);
+leftAntenna.rotation.z=0.2;
+robot.add(leftAntenna);
+var rightAntenna=new THREE.Mesh(antennaGeo,antennaMat);
+rightAntenna.position.set(0.25,2.4,0);
+rightAntenna.rotation.z=-0.2;
+robot.add(rightAntenna);
+
+var antennaTipGeo=new THREE.SphereGeometry(0.05,12,12);
+var antennaTipMat=new THREE.MeshToonMaterial({color:cheekColor});
+var leftTip=new THREE.Mesh(antennaTipGeo,antennaTipMat);
+leftTip.position.set(-0.33,2.6,0);
+robot.add(leftTip);
+robot.leftTip=leftTip;
+var rightTip=new THREE.Mesh(antennaTipGeo,antennaTipMat);
+rightTip.position.set(0.33,2.6,0);
+robot.add(rightTip);
+robot.rightTip=rightTip;
+
+// 浮遊エフェクト用リング（下部）
+var hoverRingGeo=new THREE.TorusGeometry(0.5,0.04,8,32);
+var hoverRingMat=new THREE.MeshToonMaterial({color:glowColor,transparent:true,opacity:0.7});
+var hoverRing1=new THREE.Mesh(hoverRingGeo,hoverRingMat);
+hoverRing1.position.y=0.5;
+hoverRing1.rotation.x=Math.PI/2;
+robot.add(hoverRing1);
+robot.hoverRing1=hoverRing1;
+
+var hoverRing2=new THREE.Mesh(hoverRingGeo,hoverRingMat.clone());
+hoverRing2.position.y=0.3;
+hoverRing2.rotation.x=Math.PI/2;
+hoverRing2.scale.set(0.7,0.7,0.7);
+robot.add(hoverRing2);
+robot.hoverRing2=hoverRing2;
+
+var hoverRing3=new THREE.Mesh(hoverRingGeo,hoverRingMat.clone());
+hoverRing3.position.y=0.15;
+hoverRing3.rotation.x=Math.PI/2;
+hoverRing3.scale.set(0.4,0.4,0.4);
+robot.add(hoverRing3);
+robot.hoverRing3=hoverRing3;
+
+// 小さな腕
+var armMat=new THREE.MeshToonMaterial({color:bodyColor});
+var leftArmGroup=new THREE.Group();
+var leftArmSphere=new THREE.Mesh(new THREE.SphereGeometry(0.12,16,16),new THREE.MeshToonMaterial({color:accentColor}));
+leftArmGroup.add(leftArmSphere);
+var leftArmCyl=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.3,12),armMat);
+leftArmCyl.position.y=-0.2;
+leftArmGroup.add(leftArmCyl);
+var leftHand=new THREE.Mesh(new THREE.SphereGeometry(0.1,12,12),new THREE.MeshToonMaterial({color:accentColor}));
+leftHand.position.y=-0.4;
+leftArmGroup.add(leftHand);
+leftArmGroup.position.set(-0.9,1.5,0);
+leftArmGroup.rotation.z=0.5;
+robot.add(leftArmGroup);
+robot.leftArm=leftArmGroup;
+
+var rightArmGroup=new THREE.Group();
+var rightArmSphere=new THREE.Mesh(new THREE.SphereGeometry(0.12,16,16),new THREE.MeshToonMaterial({color:accentColor}));
+rightArmGroup.add(rightArmSphere);
+var rightArmCyl=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,0.3,12),armMat);
+rightArmCyl.position.y=-0.2;
+rightArmGroup.add(rightArmCyl);
+var rightHand=new THREE.Mesh(new THREE.SphereGeometry(0.1,12,12),new THREE.MeshToonMaterial({color:accentColor}));
+rightHand.position.y=-0.4;
+rightArmGroup.add(rightHand);
+rightArmGroup.position.set(0.9,1.5,0);
+rightArmGroup.rotation.z=-0.5;
+robot.add(rightArmGroup);
+robot.rightArm=rightArmGroup;
+
+scene.add(robot);
+}
+function createFloor(){
+var floorGeo=new THREE.CircleGeometry(2,32);
+var floorMat=new THREE.MeshToonMaterial({color:0xcac4bc});
+var floor=new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+floor.position.y=0;
+floor.receiveShadow=true;
+scene.add(floor);
+}
+function animate(){
+requestAnimationFrame(animate);
+time+=0.03;
+// 浮遊
+robot.position.y=Math.sin(time*1.5)*0.15;
+// リング回転
+robot.equatorRing.rotation.z=time*0.5;
+robot.vertRing.rotation.y=time*0.3;
+// ホバーリングの脈動
+robot.hoverRing1.scale.set(1+Math.sin(time*3)*0.1,1+Math.sin(time*3)*0.1,1);
+robot.hoverRing2.scale.set(0.7+Math.sin(time*3+1)*0.1,0.7+Math.sin(time*3+1)*0.1,1);
+robot.hoverRing3.scale.set(0.4+Math.sin(time*3+2)*0.1,0.4+Math.sin(time*3+2)*0.1,1);
+robot.hoverRing1.material.opacity=0.5+Math.sin(time*4)*0.2;
+robot.hoverRing2.material.opacity=0.5+Math.sin(time*4+0.5)*0.2;
+robot.hoverRing3.material.opacity=0.5+Math.sin(time*4+1)*0.2;
+// アンテナ先端の揺れ
+robot.leftTip.position.y=2.6+Math.sin(time*4)*0.03;
+robot.rightTip.position.y=2.6+Math.sin(time*4+Math.PI)*0.03;
+// 腕の動き
+robot.leftArm.rotation.z=0.5+Math.sin(time*1.5)*0.2;
+robot.rightArm.rotation.z=-0.5-Math.sin(time*1.5)*0.2;
+// 全体の回転
+robot.rotation.y=Math.sin(time*0.5)*0.3;
+renderer.render(scene,camera);
+}
+init();
+</script>
+</body>
+</html>
