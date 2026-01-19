@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>蜘蛛型ロボット</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#d8d0c8;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif;}
+.container{background:#fff;border-radius:20px;padding:30px;box-shadow:0 10px 40px rgba(0,0,0,0.08);}
+h2{text-align:center;color:#8b8178;margin-bottom:15px;font-weight:normal;font-size:18px;}
+#canvas{display:block;border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>蜘蛛型ロボット</h2>
+<canvas id="canvas" width="400" height="400"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+var scene,camera,renderer,robot,time=0;
+function init(){
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0xd8d0c8);
+camera=new THREE.PerspectiveCamera(50,1,0.1,1000);
+camera.position.set(3,4,5);
+camera.lookAt(0,0.8,0);
+renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true});
+renderer.setSize(400,400);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+var ambLight=new THREE.AmbientLight(0xffffff,0.6);
+scene.add(ambLight);
+var dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(5,10,5);
+dirLight.castShadow=true;
+dirLight.shadow.mapSize.width=1024;
+dirLight.shadow.mapSize.height=1024;
+scene.add(dirLight);
+createRobot();
+createFloor();
+animate();
+}
+function createRobot(){
+robot=new THREE.Group();
+var bodyColor=0xb8aea4;
+var accentColor=0x8a817a;
+var eyeColor=0x4a443e;
+var cheekColor=0xc9a99c;
+var darkColor=0x6a635c;
+
+// メインボディ（楕円形）
+var bodyGeo=new THREE.SphereGeometry(0.6,32,32);
+var bodyMat=new THREE.MeshToonMaterial({color:bodyColor});
+var body=new THREE.Mesh(bodyGeo,bodyMat);
+body.scale.set(1,0.6,1.2);
+body.position.y=1;
+body.castShadow=true;
+robot.add(body);
+robot.body=body;
+
+// 頭部
+var headGeo=new THREE.SphereGeometry(0.4,32,32);
+var headMat=new THREE.MeshToonMaterial({color:bodyColor});
+var head=new THREE.Mesh(headGeo,headMat);
+head.position.set(0,1.1,0.7);
+head.castShadow=true;
+robot.add(head);
+robot.head=head;
+
+// 複眼（4つの目）
+var eyeGeo=new THREE.SphereGeometry(0.08,12,12);
+var eyeMat=new THREE.MeshToonMaterial({color:eyeColor});
+var eyePositions=[
+{x:-0.15,y:1.2,z:1.0},
+{x:0.15,y:1.2,z:1.0},
+{x:-0.25,y:1.05,z:0.95},
+{x:0.25,y:1.05,z:0.95}
+];
+eyePositions.forEach(function(pos){
+var eye=new THREE.Mesh(eyeGeo,eyeMat);
+eye.position.set(pos.x,pos.y,pos.z);
+robot.add(eye);
+});
+
+// 瞳（メインの2つ）
+var pupilGeo=new THREE.SphereGeometry(0.04,8,8);
+var pupilMat=new THREE.MeshToonMaterial({color:0x2a2520});
+var leftPupil=new THREE.Mesh(pupilGeo,pupilMat);
+leftPupil.position.set(-0.15,1.2,1.08);
+robot.add(leftPupil);
+var rightPupil=new THREE.Mesh(pupilGeo,pupilMat);
+rightPupil.position.set(0.15,1.2,1.08);
+robot.add(rightPupil);
+
+// 頬
+var cheekGeo=new THREE.SphereGeometry(0.06,12,12);
+var cheekMat=new THREE.MeshToonMaterial({color:cheekColor});
+var leftCheek=new THREE.Mesh(cheekGeo,cheekMat);
+leftCheek.position.set(-0.3,1,0.9);
+leftCheek.scale.set(1,0.6,0.5);
+robot.add(leftCheek);
+var rightCheek=new THREE.Mesh(cheekGeo,cheekMat);
+rightCheek.position.set(0.3,1,0.9);
+rightCheek.scale.set(1,0.6,0.5);
+robot.add(rightCheek);
+
+// 触角（2本）
+var antennaGeo=new THREE.CylinderGeometry(0.02,0.02,0.3,8);
+var antennaMat=new THREE.MeshToonMaterial({color:accentColor});
+var leftAntenna=new THREE.Mesh(antennaGeo,antennaMat);
+leftAntenna.position.set(-0.15,1.55,0.8);
+leftAntenna.rotation.x=-0.3;
+leftAntenna.rotation.z=0.2;
+robot.add(leftAntenna);
+var rightAntenna=new THREE.Mesh(antennaGeo,antennaMat);
+rightAntenna.position.set(0.15,1.55,0.8);
+rightAntenna.rotation.x=-0.3;
+rightAntenna.rotation.z=-0.2;
+robot.add(rightAntenna);
+
+var tipGeo=new THREE.SphereGeometry(0.04,8,8);
+var tipMat=new THREE.MeshToonMaterial({color:cheekColor});
+var leftTip=new THREE.Mesh(tipGeo,tipMat);
+leftTip.position.set(-0.2,1.7,0.65);
+robot.add(leftTip);
+robot.leftTip=leftTip;
+var rightTip=new THREE.Mesh(tipGeo,tipMat);
+rightTip.position.set(0.2,1.7,0.65);
+robot.add(rightTip);
+robot.rightTip=rightTip;
+
+// 8本の脚
+var legMat=new THREE.MeshToonMaterial({color:bodyColor});
+var jointMat=new THREE.MeshToonMaterial({color:accentColor});
+var footMat=new THREE.MeshToonMaterial({color:darkColor});
+
+robot.legs=[];
+var legAngles=[
+{angle:0.4,side:-1},   // 前左1
+{angle:0.4,side:1},    // 前右1
+{angle:1.2,side:-1},   // 前左2
+{angle:1.2,side:1},    // 前右2
+{angle:2.0,side:-1},   // 後左1
+{angle:2.0,side:1},    // 後右1
+{angle:2.8,side:-1},   // 後左2
+{angle:2.8,side:1}     // 後右2
+];
+
+legAngles.forEach(function(legData,i){
+var legGroup=new THREE.Group();
+
+// 付け根関節
+var hipJoint=new THREE.Mesh(new THREE.SphereGeometry(0.1,12,12),jointMat);
+legGroup.add(hipJoint);
+
+// 上部脚
+var upperLeg=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.4,8),legMat);
+upperLeg.position.set(legData.side*0.2,0.1,0);
+upperLeg.rotation.z=legData.side*1.2;
+legGroup.add(upperLeg);
+
+// 中間関節
+var midJoint=new THREE.Mesh(new THREE.SphereGeometry(0.07,10,10),jointMat);
+midJoint.position.set(legData.side*0.45,0.25,0);
+legGroup.add(midJoint);
+
+// 下部脚
+var lowerLeg=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.5,8),legMat);
+lowerLeg.position.set(legData.side*0.55,-0.1,0);
+lowerLeg.rotation.z=legData.side*(-0.8);
+legGroup.add(lowerLeg);
+
+// 足先
+var foot=new THREE.Mesh(new THREE.SphereGeometry(0.08,10,10),footMat);
+foot.position.set(legData.side*0.65,-0.45,0);
+foot.scale.set(1,0.5,1);
+legGroup.add(foot);
+
+// 位置設定
+var x=Math.sin(legData.angle)*0.5;
+var z=Math.cos(legData.angle)*0.6;
+legGroup.position.set(x,1,z);
+legGroup.rotation.y=-legData.angle+Math.PI/2;
+
+robot.add(legGroup);
+robot.legs.push(legGroup);
+});
+
+// 腹部のライト
+var lightGeo=new THREE.SphereGeometry(0.15,16,16);
+var lightMat=new THREE.MeshToonMaterial({color:cheekColor,transparent:true,opacity:0.8});
+var bellyLight=new THREE.Mesh(lightGeo,lightMat);
+bellyLight.position.set(0,0.7,0);
+robot.add(bellyLight);
+robot.bellyLight=bellyLight;
+
+scene.add(robot);
+}
+function createFloor(){
+var floorGeo=new THREE.CircleGeometry(3,32);
+var floorMat=new THREE.MeshToonMaterial({color:0xcac4bc});
+var floor=new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+floor.position.y=0;
+floor.receiveShadow=true;
+scene.add(floor);
+}
+function animate(){
+requestAnimationFrame(animate);
+time+=0.03;
+// ボディの微動
+robot.body.position.y=1+Math.sin(time*2)*0.03;
+robot.head.position.y=1.1+Math.sin(time*2)*0.03;
+// 触角の揺れ
+robot.leftTip.position.y=1.7+Math.sin(time*4)*0.03;
+robot.rightTip.position.y=1.7+Math.sin(time*4+Math.PI)*0.03;
+// 脚の歩行アニメーション
+robot.legs.forEach(function(leg,i){
+var offset=i*Math.PI/4;
+var walkCycle=Math.sin(time*3+offset);
+leg.rotation.x=walkCycle*0.15;
+leg.position.y=1+Math.abs(walkCycle)*0.05;
+});
+// 腹部ライトの脈動
+var brightness=0.6+Math.sin(time*2)*0.2;
+robot.bellyLight.material.opacity=brightness;
+// 全体の回転
+robot.rotation.y=Math.sin(time*0.5)*0.3;
+renderer.render(scene,camera);
+}
+init();
+</script>
+</body>
+</html>

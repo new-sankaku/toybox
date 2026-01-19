@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ヘリコプター型ロボット</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:#d8d0c8;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif;}
+.container{background:#fff;border-radius:20px;padding:30px;box-shadow:0 10px 40px rgba(0,0,0,0.08);}
+h2{text-align:center;color:#8b8178;margin-bottom:15px;font-weight:normal;font-size:18px;}
+#canvas{display:block;border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>ヘリコプター型ロボット</h2>
+<canvas id="canvas" width="400" height="400"></canvas>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+var scene,camera,renderer,robot,time=0;
+function init(){
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0xd8d0c8);
+camera=new THREE.PerspectiveCamera(50,1,0.1,1000);
+camera.position.set(2,3,5);
+camera.lookAt(0,1.5,0);
+renderer=new THREE.WebGLRenderer({canvas:document.getElementById('canvas'),antialias:true});
+renderer.setSize(400,400);
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+var ambLight=new THREE.AmbientLight(0xffffff,0.6);
+scene.add(ambLight);
+var dirLight=new THREE.DirectionalLight(0xffffff,0.8);
+dirLight.position.set(5,10,5);
+dirLight.castShadow=true;
+dirLight.shadow.mapSize.width=1024;
+dirLight.shadow.mapSize.height=1024;
+scene.add(dirLight);
+createRobot();
+createFloor();
+animate();
+}
+function createRobot(){
+robot=new THREE.Group();
+var bodyColor=0xb8aea4;
+var accentColor=0x8a817a;
+var eyeColor=0x4a443e;
+var cheekColor=0xc9a99c;
+var darkColor=0x6a635c;
+
+// メインボディ（卵形）
+var bodyGeo=new THREE.SphereGeometry(0.6,32,32);
+var bodyMat=new THREE.MeshToonMaterial({color:bodyColor});
+var body=new THREE.Mesh(bodyGeo,bodyMat);
+body.scale.set(0.8,0.7,1);
+body.position.y=1.5;
+body.castShadow=true;
+robot.add(body);
+robot.body=body;
+
+// コックピット窓
+var windowGeo=new THREE.SphereGeometry(0.35,32,16,0,Math.PI*2,0,Math.PI/2);
+var windowMat=new THREE.MeshToonMaterial({color:accentColor});
+var cockpitWindow=new THREE.Mesh(windowGeo,windowMat);
+cockpitWindow.position.set(0,1.55,0.35);
+cockpitWindow.rotation.x=-0.3;
+robot.add(cockpitWindow);
+
+// 目
+var eyeGeo=new THREE.SphereGeometry(0.12,16,16);
+var eyeMat=new THREE.MeshToonMaterial({color:eyeColor});
+var leftEye=new THREE.Mesh(eyeGeo,eyeMat);
+leftEye.position.set(-0.18,1.6,0.55);
+robot.add(leftEye);
+var rightEye=new THREE.Mesh(eyeGeo,eyeMat);
+rightEye.position.set(0.18,1.6,0.55);
+robot.add(rightEye);
+
+// 瞳
+var pupilGeo=new THREE.SphereGeometry(0.05,10,10);
+var pupilMat=new THREE.MeshToonMaterial({color:0x2a2520});
+var leftPupil=new THREE.Mesh(pupilGeo,pupilMat);
+leftPupil.position.set(-0.18,1.6,0.67);
+robot.add(leftPupil);
+var rightPupil=new THREE.Mesh(pupilGeo,pupilMat);
+rightPupil.position.set(0.18,1.6,0.67);
+robot.add(rightPupil);
+
+// 頬
+var cheekGeo=new THREE.SphereGeometry(0.08,12,12);
+var cheekMat=new THREE.MeshToonMaterial({color:cheekColor});
+var leftCheek=new THREE.Mesh(cheekGeo,cheekMat);
+leftCheek.position.set(-0.35,1.4,0.45);
+leftCheek.scale.set(1,0.6,0.5);
+robot.add(leftCheek);
+var rightCheek=new THREE.Mesh(cheekGeo,cheekMat);
+rightCheek.position.set(0.35,1.4,0.45);
+rightCheek.scale.set(1,0.6,0.5);
+robot.add(rightCheek);
+
+// テールブーム
+var tailGeo=new THREE.CylinderGeometry(0.1,0.15,1.2,16);
+var tailMat=new THREE.MeshToonMaterial({color:bodyColor});
+var tail=new THREE.Mesh(tailGeo,tailMat);
+tail.rotation.x=Math.PI/2;
+tail.position.set(0,1.5,-0.9);
+robot.add(tail);
+
+// テールフィン
+var tailFinGeo=new THREE.BoxGeometry(0.08,0.4,0.2);
+var tailFinMat=new THREE.MeshToonMaterial({color:accentColor});
+var tailFin=new THREE.Mesh(tailFinGeo,tailFinMat);
+tailFin.position.set(0,1.7,-1.4);
+robot.add(tailFin);
+
+// テールローター
+var tailRotorHub=new THREE.Mesh(new THREE.SphereGeometry(0.08,10,10),new THREE.MeshToonMaterial({color:darkColor}));
+tailRotorHub.position.set(0.1,1.7,-1.4);
+robot.add(tailRotorHub);
+
+var tailRotorGroup=new THREE.Group();
+for(var i=0;i<2;i++){
+var blade=new THREE.Mesh(new THREE.BoxGeometry(0.04,0.3,0.02),new THREE.MeshToonMaterial({color:accentColor}));
+blade.position.y=0.15;
+var bladeGroup=new THREE.Group();
+bladeGroup.add(blade);
+bladeGroup.rotation.z=i*Math.PI;
+tailRotorGroup.add(bladeGroup);
+}
+tailRotorGroup.position.set(0.15,1.7,-1.4);
+tailRotorGroup.rotation.y=Math.PI/2;
+robot.add(tailRotorGroup);
+robot.tailRotor=tailRotorGroup;
+
+// メインローターマスト
+var mastGeo=new THREE.CylinderGeometry(0.08,0.08,0.3,12);
+var mastMat=new THREE.MeshToonMaterial({color:accentColor});
+var mast=new THREE.Mesh(mastGeo,mastMat);
+mast.position.set(0,2.1,0);
+robot.add(mast);
+
+// メインローターハブ
+var mainRotorHub=new THREE.Mesh(new THREE.SphereGeometry(0.12,12,12),new THREE.MeshToonMaterial({color:darkColor}));
+mainRotorHub.position.set(0,2.3,0);
+robot.add(mainRotorHub);
+
+// メインローターブレード
+var mainRotorGroup=new THREE.Group();
+for(var i=0;i<4;i++){
+var mainBlade=new THREE.Mesh(new THREE.BoxGeometry(1.2,0.03,0.12),new THREE.MeshToonMaterial({color:accentColor}));
+mainBlade.position.x=0.6;
+var mainBladeGroup=new THREE.Group();
+mainBladeGroup.add(mainBlade);
+mainBladeGroup.rotation.y=i*Math.PI/2;
+mainRotorGroup.add(mainBladeGroup);
+}
+mainRotorGroup.position.set(0,2.35,0);
+robot.add(mainRotorGroup);
+robot.mainRotor=mainRotorGroup;
+
+// スキッド（着陸脚）
+var skidMat=new THREE.MeshToonMaterial({color:darkColor});
+// 左スキッド
+var leftSkidRail=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,1,10),skidMat);
+leftSkidRail.rotation.x=Math.PI/2;
+leftSkidRail.position.set(-0.4,0.5,0);
+robot.add(leftSkidRail);
+var leftSkidFront=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,10),skidMat);
+leftSkidFront.position.set(-0.4,0.7,0.4);
+leftSkidFront.rotation.z=0.3;
+robot.add(leftSkidFront);
+var leftSkidBack=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,10),skidMat);
+leftSkidBack.position.set(-0.4,0.7,-0.4);
+leftSkidBack.rotation.z=0.3;
+robot.add(leftSkidBack);
+
+// 右スキッド
+var rightSkidRail=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,1,10),skidMat);
+rightSkidRail.rotation.x=Math.PI/2;
+rightSkidRail.position.set(0.4,0.5,0);
+robot.add(rightSkidRail);
+var rightSkidFront=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,10),skidMat);
+rightSkidFront.position.set(0.4,0.7,0.4);
+rightSkidFront.rotation.z=-0.3;
+robot.add(rightSkidFront);
+var rightSkidBack=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.4,10),skidMat);
+rightSkidBack.position.set(0.4,0.7,-0.4);
+rightSkidBack.rotation.z=-0.3;
+robot.add(rightSkidBack);
+
+// スキッド先端
+var skidCapGeo=new THREE.SphereGeometry(0.06,10,10);
+var skidCapMat=new THREE.MeshToonMaterial({color:accentColor});
+[{x:-0.4,z:0.5},{x:-0.4,z:-0.5},{x:0.4,z:0.5},{x:0.4,z:-0.5}].forEach(function(pos){
+var cap=new THREE.Mesh(skidCapGeo,skidCapMat);
+cap.position.set(pos.x,0.5,pos.z);
+robot.add(cap);
+});
+
+// ライト
+var lightGeo=new THREE.SphereGeometry(0.06,10,10);
+var lightMat=new THREE.MeshToonMaterial({color:cheekColor,transparent:true,opacity:0.9});
+var noseLight=new THREE.Mesh(lightGeo,lightMat);
+noseLight.position.set(0,1.3,0.6);
+robot.add(noseLight);
+robot.noseLight=noseLight;
+
+scene.add(robot);
+}
+function createFloor(){
+var floorGeo=new THREE.CircleGeometry(2.5,32);
+var floorMat=new THREE.MeshToonMaterial({color:0xcac4bc});
+var floor=new THREE.Mesh(floorGeo,floorMat);
+floor.rotation.x=-Math.PI/2;
+floor.position.y=0;
+floor.receiveShadow=true;
+scene.add(floor);
+}
+function animate(){
+requestAnimationFrame(animate);
+time+=0.03;
+// 浮遊
+robot.position.y=Math.sin(time*2)*0.1;
+// 傾き
+robot.rotation.x=Math.sin(time*1.5)*0.05;
+robot.rotation.z=Math.sin(time*1.2)*0.03;
+// メインローター回転
+robot.mainRotor.rotation.y+=0.3;
+// テールローター回転
+robot.tailRotor.rotation.z+=0.5;
+// ライト点滅
+var brightness=0.6+Math.sin(time*5)*0.4;
+robot.noseLight.material.opacity=brightness;
+// 全体の回転
+robot.rotation.y=Math.sin(time*0.5)*0.3;
+renderer.render(scene,camera);
+}
+init();
+</script>
+</body>
+</html>
