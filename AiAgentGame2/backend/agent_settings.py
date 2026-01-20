@@ -1,23 +1,12 @@
-"""
-Agent Settings Module
-
-品質チェック設定の定義とデフォルト値を管理
-エージェント定義（表示名等）の一元管理
-"""
-
 from typing import Dict, Set, TypedDict
 from dataclasses import dataclass, field
 
 
-# =============================================================================
-# エージェント定義（フロントエンド向けの一元管理）
-# =============================================================================
 class AgentDefinition(TypedDict):
-    """エージェント定義の型"""
-    label: str        # フル表示名
-    shortLabel: str   # 短縮表示名（スペースが狭い場所用）
-    phase: int        # フェーズ番号
-    speechBubble: str # 吹き出しのセリフ
+    label: str
+    shortLabel: str
+    phase: int
+    speechBubble: str
 
 
 AGENT_DEFINITIONS: Dict[str, AgentDefinition] = {
@@ -263,7 +252,6 @@ DEFAULT_QUALITY_CHECK_SETTINGS: Dict[str, bool] = {
 
 @dataclass
 class QualityCheckConfig:
-    """品質チェック設定"""
     enabled: bool = True
     max_retries: int = 3
     is_high_cost: bool = False
@@ -285,7 +273,6 @@ class QualityCheckConfig:
 
 
 def get_default_quality_settings() -> Dict[str, QualityCheckConfig]:
-    """全エージェントのデフォルト品質チェック設定を取得"""
     settings = {}
     for agent_type, enabled in DEFAULT_QUALITY_CHECK_SETTINGS.items():
         is_high_cost = agent_type in HIGH_COST_AGENTS
@@ -298,11 +285,9 @@ def get_default_quality_settings() -> Dict[str, QualityCheckConfig]:
 
 
 def is_high_cost_agent(agent_type: str) -> bool:
-    """高コストエージェントかどうかを判定"""
     return agent_type in HIGH_COST_AGENTS
 
 
-# Phase別エージェントグループ
 AGENT_PHASES = {
     "phase1_leaders": [
         "concept_leader",
@@ -375,7 +360,6 @@ AGENT_PHASES = {
 }
 
 
-# エージェント表示名（役割は別カラムで表示されるため、名前部分のみ）
 AGENT_DISPLAY_NAMES: Dict[str, str] = {
     # Phase 1 Leaders
     "concept_leader": "コンセプト",

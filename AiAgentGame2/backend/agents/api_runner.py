@@ -1,10 +1,3 @@
-"""
-API Agent Runner
-
-本番用のAPIベースエージェント実装
-Claude APIを使用して実際のコンテンツを生成
-"""
-
 import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, AsyncGenerator, Optional, Callable
@@ -21,13 +14,6 @@ from .base import (
 
 
 class ApiAgentRunner(AgentRunner):
-    """
-    LangGraphベースのエージェントランナー
-
-    各エージェントタイプに対応するLangGraphノードを実行し、
-    Claude APIを使用してコンテンツを生成する
-    """
-
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -35,25 +21,14 @@ class ApiAgentRunner(AgentRunner):
         max_tokens: int = 4096,
         **kwargs
     ):
-        """
-        Args:
-            api_key: Anthropic API Key (環境変数ANTHROPIC_API_KEYから取得も可)
-            model: 使用するClaudeモデル
-            max_tokens: 最大トークン数
-        """
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.model = model
         self.max_tokens = max_tokens
-
-        # LangGraphとLLMクライアントは遅延初期化
         self._llm_client = None
         self._graphs: Dict[AgentType, Any] = {}
-
-        # プロンプトテンプレート
         self._prompts = self._load_prompts()
 
     def _get_llm_client(self):
-        """LLMクライアントを取得（遅延初期化）"""
         if self._llm_client is None:
             try:
                 from anthropic import Anthropic
@@ -65,7 +40,6 @@ class ApiAgentRunner(AgentRunner):
         return self._llm_client
 
     async def run_agent(self, context: AgentContext) -> AgentOutput:
-        """エージェントを実行（非ストリーミング）"""
         started_at = datetime.now().isoformat()
         tokens_used = 0
         output = {}
@@ -103,11 +77,8 @@ class ApiAgentRunner(AgentRunner):
         self,
         context: AgentContext
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """エージェントをストリーミング実行"""
-
         agent_type = context.agent_type
 
-        # 開始ログ
         yield {
             "type": "log",
             "data": {
@@ -117,13 +88,11 @@ class ApiAgentRunner(AgentRunner):
             }
         }
 
-        # 進捗: 準備中
         yield {
             "type": "progress",
             "data": {"progress": 10, "current_task": "プロンプト準備中"}
         }
 
-        # プロンプト取得
         prompt = self._build_prompt(context)
 
         yield {
@@ -131,7 +100,6 @@ class ApiAgentRunner(AgentRunner):
             "data": {"progress": 20, "current_task": "LLM呼び出し中"}
         }
 
-        # LLM呼び出し
         try:
             result = await self._call_llm(prompt, context)
 
@@ -148,7 +116,6 @@ class ApiAgentRunner(AgentRunner):
                 "data": {"progress": 80, "current_task": "出力処理中"}
             }
 
-            # 出力を整形
             output = self._process_output(result, context)
 
             yield {
@@ -156,7 +123,6 @@ class ApiAgentRunner(AgentRunner):
                 "data": {"progress": 90, "current_task": "チェックポイント準備"}
             }
 
-            # チェックポイント生成
             checkpoint_data = self._generate_checkpoint(context, output)
             yield {
                 "type": "checkpoint",
@@ -171,7 +137,6 @@ class ApiAgentRunner(AgentRunner):
                 "data": {"progress": 100, "current_task": "完了"}
             }
 
-            # 最終出力
             yield {
                 "type": "output",
                 "data": output
@@ -192,7 +157,6 @@ class ApiAgentRunner(AgentRunner):
             }
             raise
 
-        # 完了ログ
         yield {
             "type": "log",
             "data": {
@@ -203,10 +167,8 @@ class ApiAgentRunner(AgentRunner):
         }
 
     async def _call_llm(self, prompt: str, context: AgentContext) -> Dict[str, Any]:
-        """Claude APIを呼び出し"""
         client = self._get_llm_client()
-
-        # 非同期で実行（anthropicはsyncなのでrun_in_executorで）
+        # anthropicはsyncなのでrun_in_executorで非同期化
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
@@ -226,11 +188,8 @@ class ApiAgentRunner(AgentRunner):
         }
 
     def _build_prompt(self, context: AgentContext) -> str:
-        """プロンプトを構築"""
         agent_type = context.agent_type.value
         base_prompt = self._prompts.get(agent_type, self._default_prompt())
-
-        # コンテキスト情報を埋め込み
         prompt = base_prompt.format(
             project_concept=context.project_concept or "（未定義）",
             previous_outputs=self._format_previous_outputs(context.previous_outputs),
@@ -240,7 +199,6 @@ class ApiAgentRunner(AgentRunner):
         return prompt
 
     def _format_previous_outputs(self, outputs: Dict[str, Any]) -> str:
-        """前のエージェントの出力をフォーマット"""
         if not outputs:
             return "（なし）"
 
@@ -254,7 +212,6 @@ class ApiAgentRunner(AgentRunner):
         return "\n\n".join(parts)
 
     def _process_output(self, result: Dict[str, Any], context: AgentContext) -> Dict[str, Any]:
-        """LLM出力を処理・整形"""
         return {
             "type": "document",
             "format": "markdown",
@@ -267,7 +224,6 @@ class ApiAgentRunner(AgentRunner):
         }
 
     def _generate_checkpoint(self, context: AgentContext, output: Dict[str, Any]) -> Dict[str, Any]:
-        """チェックポイントデータを生成"""
         checkpoint_config = {
             # Phase 1 Leaders
             AgentType.CONCEPT_LEADER: ("concept_review", "ゲームコンセプトのレビュー"),
@@ -299,8 +255,6 @@ class ApiAgentRunner(AgentRunner):
         }
 
     def get_supported_agents(self) -> List[AgentType]:
-        """サポートしているエージェントタイプ"""
-        # 全Phaseのエージェントをサポート
         return [
             # Phase1: 企画 - Leaders
             AgentType.CONCEPT_LEADER,
@@ -360,7 +314,6 @@ class ApiAgentRunner(AgentRunner):
         ]
 
     def validate_context(self, context: AgentContext) -> bool:
-        """コンテキストのバリデーション"""
         if not self.api_key:
             return False
         if context.agent_type not in self.get_supported_agents():
@@ -368,7 +321,6 @@ class ApiAgentRunner(AgentRunner):
         return True
 
     def _load_prompts(self) -> Dict[str, str]:
-        """プロンプトテンプレートをロード"""
         return {
             # ========================================
             # Phase 1: CONCEPT_LEADER
@@ -1827,7 +1779,6 @@ E2Eシナリオテストを実行してください。
 
 @dataclass
 class QualityCheckResult:
-    """品質チェック結果"""
     passed: bool
     issues: List[str] = field(default_factory=list)
     score: float = 1.0
@@ -1837,7 +1788,6 @@ class QualityCheckResult:
 
 @dataclass
 class WorkerTaskResult:
-    """Worker実行結果"""
     worker_type: str
     status: str  # "completed" | "failed" | "needs_retry" | "needs_human_review"
     output: Dict[str, Any] = field(default_factory=dict)
@@ -1847,12 +1797,7 @@ class WorkerTaskResult:
 
 
 class LeaderWorkerOrchestrator:
-    """
-    Leader-Worker オーケストレーター
-
-    Leaderエージェントの分析結果に基づいてWorkerを実行し、
-    品質チェックの設定に応じてリトライやHuman Review要求を行う
-    """
+    """Leaderの分析結果に基づいてWorkerを実行し、品質チェックに応じてリトライやHuman Review要求を行う"""
 
     def __init__(
         self,
@@ -1861,40 +1806,12 @@ class LeaderWorkerOrchestrator:
         on_progress: Optional[Callable[[str, int, str], None]] = None,
         on_checkpoint: Optional[Callable[[str, Dict], None]] = None,
     ):
-        """
-        Args:
-            agent_runner: ApiAgentRunner instance
-            quality_settings: 品質チェック設定 { agent_type: { enabled, maxRetries, isHighCost } }
-            on_progress: 進捗コールバック (agent_type, progress, message)
-            on_checkpoint: チェックポイントコールバック (type, data)
-        """
         self.agent_runner = agent_runner
         self.quality_settings = quality_settings
         self.on_progress = on_progress
         self.on_checkpoint = on_checkpoint
 
-    async def run_leader_with_workers(
-        self,
-        leader_context: AgentContext,
-    ) -> Dict[str, Any]:
-        """
-        Leaderエージェントを実行し、配下のWorkerを管理
-
-        Flow:
-        1. Leader分析 → worker_tasks取得
-        2. 各Worker実行（品質チェック有無で分岐）
-        3. Leader統合 → 最終出力
-        4. チェックポイント生成
-
-        Returns:
-            {
-                "leader_output": { ... },
-                "worker_results": [ { worker_type, status, output, quality_check } ],
-                "final_output": { ... },
-                "checkpoint": { ... },
-                "human_review_required": [ ... ]
-            }
-        """
+    async def run_leader_with_workers(self, leader_context: AgentContext) -> Dict[str, Any]:
         results = {
             "leader_output": {},
             "worker_results": [],
@@ -2006,7 +1923,6 @@ class LeaderWorkerOrchestrator:
                 result.error = f"Unknown worker type: {worker_type}"
                 return result
 
-            # Workerコンテキスト作成
             worker_context = AgentContext(
                 project_id=leader_context.project_id,
                 agent_id=f"{leader_context.agent_id}-{worker_type}",
@@ -2017,14 +1933,12 @@ class LeaderWorkerOrchestrator:
             )
 
             if quality_check_enabled:
-                # 品質チェック付き実行
                 result = await self._run_with_quality_check(
                     worker_context=worker_context,
                     worker_type=worker_type,
                     max_retries=max_retries,
                 )
             else:
-                # 品質チェックなし実行
                 output = await self.agent_runner.run_agent(worker_context)
                 result.status = "completed" if output.status == AgentStatus.COMPLETED else "failed"
                 result.output = output.output
@@ -2043,17 +1957,11 @@ class LeaderWorkerOrchestrator:
         worker_type: str,
         max_retries: int = 3,
     ) -> WorkerTaskResult:
-        """
-        品質チェック付きでWorkerを実行
-        失敗時は最大max_retries回リトライ
-        それでも失敗ならHuman Review要求
-        """
+        """失敗時は最大max_retries回リトライ、それでも失敗ならHuman Review要求"""
         result = WorkerTaskResult(worker_type=worker_type)
 
         for retry in range(max_retries):
             result.retries = retry
-
-            # Worker実行
             output = await self.agent_runner.run_agent(worker_context)
 
             if output.status == AgentStatus.FAILED:
@@ -2061,8 +1969,6 @@ class LeaderWorkerOrchestrator:
                 continue
 
             result.output = output.output
-
-            # 品質チェック
             qc_result = self._perform_quality_check(output.output, worker_type)
             result.quality_check = qc_result
 
@@ -2070,16 +1976,13 @@ class LeaderWorkerOrchestrator:
                 result.status = "completed"
                 return result
 
-            # 品質チェック失敗 → リトライ
             if retry < max_retries - 1:
                 result.status = "needs_retry"
-                # 前回の出力をコンテキストに追加してリトライ
                 worker_context.previous_outputs[f"{worker_type}_previous_attempt"] = {
                     "output": output.output,
                     "issues": qc_result.issues,
                 }
             else:
-                # 最大リトライ到達 → Human Review要求
                 result.status = "needs_human_review"
                 result.quality_check.human_review_needed = True
                 return result
@@ -2087,23 +1990,15 @@ class LeaderWorkerOrchestrator:
         return result
 
     def _perform_quality_check(self, output: Dict[str, Any], worker_type: str) -> QualityCheckResult:
-        """
-        出力の品質チェックを実行
-
-        Note: 実際のプロダクションでは、別のLLM呼び出しで品質評価を行う
-        ここでは簡易的なルールベースチェックを実装
-        """
+        """簡易的なルールベースチェック（本番ではLLMで品質評価）"""
         issues = []
         score = 1.0
-
         content = output.get("content", "")
 
-        # 基本チェック: 出力が空でないか
         if not content or len(str(content)) < 50:
             issues.append("出力内容が不十分です")
             score -= 0.3
 
-        # JSONとして解析可能かチェック（JSON形式の出力が期待される場合）
         if "```json" in str(content):
             import json
             import re
@@ -2115,9 +2010,6 @@ class LeaderWorkerOrchestrator:
                     issues.append("JSON形式が不正です")
                     score -= 0.2
 
-        # Worker固有のチェック（将来的に拡張）
-        # 例: design_workerならUIコンポーネントの定義があるかなど
-
         passed = score >= 0.7 and len(issues) == 0
 
         return QualityCheckResult(
@@ -2128,21 +2020,7 @@ class LeaderWorkerOrchestrator:
         )
 
     def _extract_worker_tasks(self, leader_output: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Leader出力からworker_tasksを抽出
-
-        Leader出力形式:
-        {
-            "worker_tasks": [
-                { "worker": "research_worker", "task": "市場調査", "status": "pending" },
-                ...
-            ],
-            ...
-        }
-        """
         content = leader_output.get("content", "")
-
-        # JSONブロックを探す
         import json
         import re
 
@@ -2154,7 +2032,6 @@ class LeaderWorkerOrchestrator:
             except json.JSONDecodeError:
                 pass
 
-        # 直接dict形式の場合
         if isinstance(leader_output, dict) and "worker_tasks" in leader_output:
             return leader_output.get("worker_tasks", [])
 
@@ -2166,12 +2043,7 @@ class LeaderWorkerOrchestrator:
         leader_output: Dict[str, Any],
         worker_results: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """
-        Worker結果をLeaderが統合して最終出力を生成
-
-        Note: シンプルな実装として、Worker結果をマージして返す
-        実際のプロダクションではLeaderに再度LLM呼び出しを行い統合させる
-        """
+        """Worker結果をマージ（本番ではLeaderに再度LLM呼び出しで統合）"""
         integrated = {
             "type": "document",
             "format": "markdown",
@@ -2194,6 +2066,5 @@ class LeaderWorkerOrchestrator:
         return integrated
 
     def _emit_progress(self, agent_type: str, progress: int, message: str):
-        """進捗を通知"""
         if self.on_progress:
             self.on_progress(agent_type, progress, message)

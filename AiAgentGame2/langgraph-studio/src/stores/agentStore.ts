@@ -2,14 +2,11 @@ import { create } from 'zustand'
 import type { Agent, AgentStatus, AgentLogEntry } from '@/types/agent'
 
 interface AgentState {
-  // State
   agents: Agent[]
   selectedAgentId: string | null
   agentLogs: Record<string, AgentLogEntry[]>
   isLoading: boolean
   error: string | null
-
-  // Actions
   setAgents: (agents: Agent[]) => void
   addAgent: (agent: Agent) => void
   updateAgent: (id: string, updates: Partial<Agent>) => void
@@ -19,8 +16,6 @@ interface AgentState {
   clearLogs: (agentId: string) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-
-  // Selectors
   getSelectedAgent: () => Agent | undefined
   getAgentsByProject: (projectId: string) => Agent[]
   getActiveAgents: () => Agent[]
@@ -28,19 +23,16 @@ interface AgentState {
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
-  // Initial state
   agents: [],
   selectedAgentId: null,
   agentLogs: {},
   isLoading: false,
   error: null,
 
-  // Actions
   setAgents: (agents) => set({ agents }),
 
   addAgent: (agent) =>
     set((state) => {
-      // 重複チェック: 同じIDのエージェントが既に存在する場合は追加しない
       if (state.agents.some((a) => a.id === agent.id)) {
         return state
       }
@@ -94,7 +86,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   setError: (error) => set({ error }),
 
-  // Selectors
   getSelectedAgent: () => {
     const state = get()
     return state.agents.find((agent) => agent.id === state.selectedAgentId)
@@ -115,7 +106,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   }
 }))
 
-// Helper hooks
 export const useActiveAgentsCount = () => {
   return useAgentStore((state) =>
     state.agents.filter((a) => a.status === 'running' || a.status === 'pending').length

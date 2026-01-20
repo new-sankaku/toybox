@@ -1,17 +1,11 @@
-"""
-Metrics REST API Handlers
-"""
-
 from flask import Flask, jsonify, request
 from testdata import TestDataStore
 
 
 def register_metrics_routes(app: Flask, data_store: TestDataStore):
-    """Register metrics-related REST API routes"""
 
     @app.route('/api/projects/<project_id>/metrics', methods=['GET'])
     def get_project_metrics(project_id: str):
-        """Get metrics for a project"""
         project = data_store.get_project(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
@@ -19,7 +13,6 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
         metrics = data_store.get_project_metrics(project_id)
 
         if not metrics:
-            # Return default metrics if none exist
             metrics = {
                 "projectId": project_id,
                 "totalTokensUsed": 0,
@@ -38,7 +31,6 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
 
     @app.route('/api/projects/<project_id>/logs', methods=['GET'])
     def get_project_logs(project_id: str):
-        """Get system logs for a project"""
         project = data_store.get_project(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
@@ -48,7 +40,6 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
 
     @app.route('/api/projects/<project_id>/assets', methods=['GET'])
     def get_project_assets(project_id: str):
-        """Get assets for a project"""
         project = data_store.get_project(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
@@ -58,7 +49,6 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
 
     @app.route('/api/projects/<project_id>/assets/<asset_id>', methods=['PATCH'])
     def update_project_asset(project_id: str, asset_id: str):
-        """Update an asset (approve/reject)"""
         project = data_store.get_project(project_id)
         if not project:
             return jsonify({"error": "Project not found"}), 404
@@ -73,7 +63,6 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
 
 
 def _get_phase_name(phase: int) -> str:
-    """Get human-readable phase name"""
     phase_names = {
         1: "Phase 1: 企画・設計",
         2: "Phase 2: 実装",

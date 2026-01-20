@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-AiAgentGame2 Backend Server
-AGENT_MODE で testdata / api を切り替え可能
-"""
-
 # eventlet monkey_patch must be called before any other imports
 import eventlet
 eventlet.monkey_patch()
@@ -11,7 +6,6 @@ eventlet.monkey_patch()
 import argparse
 import os
 
-# Load .env file if exists
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -34,7 +28,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Override mode if specified
     if args.mode:
         os.environ['AGENT_MODE'] = args.mode
         from config import reload_config

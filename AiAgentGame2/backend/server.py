@@ -1,7 +1,3 @@
-"""
-Flask + Socket.IO Server
-"""
-
 import os
 from flask import Flask, send_from_directory, abort
 from flask_cors import CORS
@@ -20,16 +16,10 @@ from asset_scanner import get_testdata_path
 
 
 def create_app():
-    """Create and configure Flask app with Socket.IO"""
-
-    # Load config
     config = get_config()
-
-    # Flask app
     app = Flask(__name__)
     CORS(app, origins=config.server.cors_origins)
 
-    # Socket.IO server with CORS
     sio = socketio.Server(
         cors_allowed_origins=config.server.cors_origins,
         async_mode='eventlet',
@@ -37,19 +27,12 @@ def create_app():
         engineio_logger=False
     )
 
-    # Wrap Flask app with Socket.IO
     app_wsgi = socketio.WSGIApp(sio, app)
-
-    # Initialize test data store
     data_store = TestDataStore()
-
-    # Set Socket.IO reference for real-time event emission
     data_store.set_sio(sio)
-
-    # Start simulation engine for real-time updates
     data_store.start_simulation()
 
-    # Initialize agent runner only for API mode (testdata mode uses simulation)
+    # testdata modeではsimulationを使用するためagent_runnerは不要
     agent_runner = None
     if config.agent.mode == "api":
         agent_runner = create_agent_runner(
@@ -59,17 +42,13 @@ def create_app():
             max_tokens=config.agent.max_tokens,
         )
 
-    # Register REST API routes
     register_project_routes(app, data_store, sio)
     register_agent_routes(app, data_store, sio)
     register_checkpoint_routes(app, data_store, sio)
     register_metrics_routes(app, data_store)
     register_settings_routes(app, data_store)
-
-    # Register WebSocket handlers
     register_websocket_handlers(sio, data_store)
 
-    # Health check endpoint
     @app.route('/health')
     def health():
         return {
@@ -78,19 +57,16 @@ def create_app():
             'agent_mode': config.agent.mode,
         }
 
-    # Static file serving for testdata assets
     testdata_path = get_testdata_path()
 
     @app.route('/testdata/<path:filepath>')
     def serve_testdata(filepath):
-        """Serve static files from testdata folder"""
         try:
             return send_from_directory(testdata_path, filepath)
         except Exception as e:
             print(f"[Server] Error serving {filepath}: {e}")
             abort(404)
 
-    # Store references
     app.data_store = data_store
     app.agent_runner = agent_runner
     app.config_obj = config
@@ -101,7 +77,6 @@ def create_app():
 
 
 def run_server(app, sio, host='127.0.0.1', port=8765, debug=False):
-    """Run the server with eventlet"""
     import eventlet
 
     print(f"Server running at http://{host}:{port}")

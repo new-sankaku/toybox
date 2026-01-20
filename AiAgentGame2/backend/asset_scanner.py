@@ -1,7 +1,3 @@
-"""
-Asset Scanner - Scan testdata folders for real media files
-"""
-
 import os
 import uuid
 from datetime import datetime
@@ -9,7 +5,6 @@ from typing import List, Dict, Optional
 from pathlib import Path
 
 
-# Supported extensions
 IMAGE_EXTENSIONS = {'.webp', '.png', '.jpg', '.jpeg', '.gif', '.bmp'}
 AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.flac', '.m4a'}
 VIDEO_EXTENSIONS = {'.mp4', '.webm', '.avi', '.mov', '.mkv'}
@@ -18,7 +13,6 @@ CODE_EXTENSIONS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css'}
 
 
 def get_file_type(filename: str) -> str:
-    """Determine asset type from file extension"""
     ext = Path(filename).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
         return 'image'
@@ -34,7 +28,6 @@ def get_file_type(filename: str) -> str:
 
 
 def format_file_size(size_bytes: int) -> str:
-    """Format file size to human readable string"""
     if size_bytes < 1024:
         return f"{size_bytes}B"
     elif size_bytes < 1024 * 1024:
@@ -45,16 +38,6 @@ def format_file_size(size_bytes: int) -> str:
 
 
 def scan_directory(base_path: str, subdir: str) -> List[Dict]:
-    """
-    Recursively scan a directory for media files
-
-    Args:
-        base_path: Root path of testdata
-        subdir: Subdirectory to scan (e.g., 'image', 'mp3', 'movie')
-
-    Returns:
-        List of asset dictionaries
-    """
     assets = []
     scan_path = os.path.join(base_path, subdir)
 
@@ -70,8 +53,6 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
             try:
                 stat = os.stat(file_path)
                 file_type = get_file_type(filename)
-
-                # Get folder name as category
                 folder_name = os.path.basename(os.path.dirname(file_path))
                 if folder_name == subdir:
                     folder_name = ""
@@ -85,9 +66,9 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
                     "createdAt": datetime.fromtimestamp(stat.st_mtime).isoformat(),
                     "url": f"/testdata/{relative_path.replace(os.sep, '/')}",
                     "thumbnail": f"/testdata/{relative_path.replace(os.sep, '/')}" if file_type == 'image' else None,
-                    "duration": None,  # Would need to parse audio/video for real duration
+                    "duration": None,
                     "approvalStatus": "pending",
-                    "filePath": file_path,  # Full path for server reference
+                    "filePath": file_path,
                     "relativePath": relative_path.replace(os.sep, '/'),
                 }
                 assets.append(asset)
@@ -98,18 +79,7 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
 
 
 def scan_all_testdata(testdata_path: str) -> List[Dict]:
-    """
-    Scan all testdata folders (image, mp3, movie)
-
-    Args:
-        testdata_path: Path to testdata folder
-
-    Returns:
-        List of all assets
-    """
     all_assets = []
-
-    # Scan each folder
     for subdir in ['image', 'mp3', 'movie']:
         assets = scan_directory(testdata_path, subdir)
         all_assets.extend(assets)
@@ -120,8 +90,6 @@ def scan_all_testdata(testdata_path: str) -> List[Dict]:
 
 
 def get_testdata_path() -> str:
-    """Get the testdata path relative to the backend"""
-    # Go up one level from backend to find testdata
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(backend_dir)
     testdata_path = os.path.join(project_root, 'testdata')

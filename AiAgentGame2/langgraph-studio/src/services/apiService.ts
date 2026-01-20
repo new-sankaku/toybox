@@ -5,23 +5,16 @@ import type { Checkpoint } from '@/types/checkpoint'
 
 const API_BASE_URL = 'http://localhost:5000'
 
-// ============================================================
-// Error Handling
-// ============================================================
 export interface ApiErrorDetail {
   message: string
   statusCode?: number
   originalError?: unknown
 }
 
-/**
- * APIエラーから詳細情報を抽出する
- */
 export function extractApiError(error: unknown): ApiErrorDetail {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<{ error?: string; message?: string }>
 
-    // ネットワークエラー（サーバー接続不可）
     if (!axiosError.response) {
       return {
         message: 'サーバーに接続できません。バックエンドが起動しているか確認してください。',
@@ -29,11 +22,8 @@ export function extractApiError(error: unknown): ApiErrorDetail {
       }
     }
 
-    // サーバーからのエラーレスポンス
     const statusCode = axiosError.response.status
     const data = axiosError.response.data
-
-    // バックエンドが返すエラーメッセージを取得
     const serverMessage = data?.error || data?.message
 
     if (serverMessage) {
@@ -44,7 +34,6 @@ export function extractApiError(error: unknown): ApiErrorDetail {
       }
     }
 
-    // ステータスコード別のデフォルトメッセージ
     const statusMessages: Record<number, string> = {
       400: 'リクエストが不正です',
       401: '認証が必要です',
@@ -62,7 +51,6 @@ export function extractApiError(error: unknown): ApiErrorDetail {
     }
   }
 
-  // 通常のErrorオブジェクト
   if (error instanceof Error) {
     return {
       message: error.message,
@@ -70,7 +58,6 @@ export function extractApiError(error: unknown): ApiErrorDetail {
     }
   }
 
-  // その他
   return {
     message: '予期しないエラーが発生しました',
     originalError: error
@@ -85,16 +72,12 @@ const api = axios.create({
   }
 })
 
-// Helper to convert relative URLs to full URLs
 function toFullUrl(path: string | null): string | null {
   if (!path) return null
   if (path.startsWith('http://') || path.startsWith('https://')) return path
   return `${API_BASE_URL}${path}`
 }
 
-// ============================================================
-// Project API
-// ============================================================
 export const projectApi = {
   list: async (): Promise<Project[]> => {
     const response = await api.get('/api/projects')
@@ -136,9 +119,6 @@ export const projectApi = {
   }
 }
 
-// ============================================================
-// Agent API
-// ============================================================
 export interface ApiAgent {
   id: string
   projectId: string
@@ -178,9 +158,6 @@ export const agentApi = {
   }
 }
 
-// ============================================================
-// Checkpoint API
-// ============================================================
 export interface ApiCheckpoint {
   id: string
   projectId: string
@@ -216,10 +193,6 @@ export const checkpointApi = {
   }
 }
 
-// ============================================================
-// Metrics API
-// ============================================================
-// 生成タイプ別トークン（サーバーから動的に返される）
 export interface TokensByTypeEntry {
   input: number
   output: number
@@ -250,9 +223,6 @@ export const metricsApi = {
   }
 }
 
-// ============================================================
-// System Logs API
-// ============================================================
 export interface ApiSystemLog {
   id: string
   timestamp: string
@@ -269,9 +239,6 @@ export const logsApi = {
   }
 }
 
-// ============================================================
-// Asset API
-// ============================================================
 export interface ApiAsset {
   id: string
   name: string
@@ -289,7 +256,6 @@ export interface ApiAsset {
 export const assetApi = {
   listByProject: async (projectId: string): Promise<ApiAsset[]> => {
     const response = await api.get(`/api/projects/${projectId}/assets`)
-    // Convert relative URLs to full URLs
     return response.data.map((asset: ApiAsset) => ({
       ...asset,
       url: toFullUrl(asset.url),
@@ -309,9 +275,6 @@ export const assetApi = {
   }
 }
 
-// ============================================================
-// Quality Settings API
-// ============================================================
 export interface QualityCheckConfig {
   enabled: boolean
   maxRetries: number
@@ -368,9 +331,6 @@ export const qualitySettingsApi = {
   }
 }
 
-// ============================================================
-// AI Request API (Mock)
-// ============================================================
 export interface ApiAIRequestStats {
   total: number
   processing: number
@@ -379,24 +339,18 @@ export interface ApiAIRequestStats {
   failed: number
 }
 
-// Mock data for AI requests stats
 export const aiRequestApi = {
   getStats: async (_projectId: string): Promise<ApiAIRequestStats> => {
-    // Mock: 処理中 + 待機中の数を返す
-    // 実際のバックエンドができたらAPIから取得する
     return {
       total: 16,
-      processing: 4,  // LLM 2, Image 1, Music 1
-      pending: 4,     // LLM 1, Image 2, Music 1
+      processing: 4,
+      pending: 4,
       completed: 8,
       failed: 0
     }
   }
 }
 
-// ============================================================
-// Agent Definition API
-// ============================================================
 export interface AgentDefinition {
   label: string
   shortLabel: string

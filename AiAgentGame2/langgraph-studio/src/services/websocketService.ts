@@ -8,9 +8,7 @@ import type { Agent, AgentLogEntry } from '@/types/agent'
 import type { Checkpoint } from '@/types/checkpoint'
 import type { Project, ProjectMetrics, PhaseNumber } from '@/types/project'
 
-// WebSocket Events from server
 interface ServerToClientEvents {
-  // Connection events
   connect: () => void
   disconnect: () => void
   error: (error: Error) => void
@@ -22,23 +20,15 @@ interface ServerToClientEvents {
     checkpoints?: Checkpoint[]
     metrics?: ProjectMetrics
   }) => void
-
-  // Agent events
   'agent:started': (data: { agent: Agent; agentId: string; projectId: string }) => void
   'agent:progress': (data: { agentId: string; projectId: string; progress: number; currentTask: string; tokensUsed: number; message: string }) => void
   'agent:log': (data: { agentId: string; entry: AgentLogEntry }) => void
   'agent:completed': (data: { agent: Agent; agentId: string; projectId: string }) => void
   'agent:failed': (data: { agentId: string; error: string }) => void
-
-  // Checkpoint events
   'checkpoint:created': (data: { checkpoint: Checkpoint; checkpointId: string; projectId: string; agentId: string }) => void
   'checkpoint:resolved': (data: { checkpoint: Checkpoint }) => void
-
-  // Project events
   'project:updated': (data: { projectId: string; updates: Partial<Project> }) => void
   'phase:changed': (data: { projectId: string; phase: PhaseNumber; phaseName: string }) => void
-
-  // Metrics events
   'metrics:update': (data: { projectId: string; metrics: ProjectMetrics }) => void
 }
 
@@ -55,8 +45,8 @@ class WebSocketService {
   private socket: TypedSocket | null = null
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
-  private pendingProjectId: string | null = null  // Project to subscribe to when connected
-  private currentProjectId: string | null = null  // Currently subscribed project
+  private pendingProjectId: string | null = null
+  private currentProjectId: string | null = null
 
   connect(backendUrl: string): void {
     if (this.socket?.connected) {
@@ -84,7 +74,6 @@ class WebSocketService {
   private setupEventHandlers(): void {
     if (!this.socket) return
 
-    // Connection events
     this.socket.on('connect', () => {
       console.log('[WS] Connected! Socket ID:', this.socket?.id)
       const connectionStore = useConnectionStore.getState()
@@ -92,7 +81,6 @@ class WebSocketService {
       connectionStore.setError(null)
       connectionStore.resetReconnect()
 
-      // Auto-subscribe to pending project on connect/reconnect
       if (this.pendingProjectId) {
         console.log('[WS] Auto-subscribing to pending project:', this.pendingProjectId)
         this.doSubscribe(this.pendingProjectId)
@@ -110,7 +98,6 @@ class WebSocketService {
       useConnectionStore.getState().setError(error.message)
     }) as () => void)
 
-    // State sync event - received when subscribing to a project
     this.socket.on('connection:state_sync', (data) => {
       console.log('[WS] State sync received:', {
         hasAgents: data.agents?.length || 0,
@@ -132,7 +119,6 @@ class WebSocketService {
       }
     })
 
-    // Agent events
     this.socket.on('agent:started', (data) => {
       console.log('[WS] Agent started:', data.agentId)
       const agentStore = useAgentStore.getState()
@@ -177,7 +163,6 @@ class WebSocketService {
       })
     })
 
-    // Checkpoint events
     this.socket.on('checkpoint:created', (data) => {
       console.log('[WS] Checkpoint created:', data.checkpointId)
       if (data.checkpoint) {
@@ -190,7 +175,6 @@ class WebSocketService {
       useCheckpointStore.getState().updateCheckpoint(checkpoint.id, checkpoint)
     })
 
-    // Project events
     this.socket.on('project:updated', ({ projectId, updates }) => {
       console.log('[WS] Project updated:', projectId)
       useProjectStore.getState().updateProject(projectId, updates)
@@ -201,7 +185,6 @@ class WebSocketService {
       useProjectStore.getState().updateProject(projectId, { currentPhase: phase })
     })
 
-    // Metrics events
     this.socket.on('metrics:update', ({ projectId, metrics }) => {
       console.log('[WS] Metrics updated:', projectId, 'Progress:', metrics.progressPercent + '%')
       useMetricsStore.getState().setProjectMetrics(metrics)
@@ -220,8 +203,6 @@ class WebSocketService {
 
   subscribeToProject(projectId: string): void {
     console.log('[WS] subscribeToProject called:', projectId, 'Connected:', this.socket?.connected)
-
-    // Store as pending for reconnection
     this.pendingProjectId = projectId
 
     if (!this.socket?.connected) {
@@ -229,13 +210,11 @@ class WebSocketService {
       return
     }
 
-    // Already subscribed to this project
     if (this.currentProjectId === projectId) {
       console.log('[WS] Already subscribed to this project')
       return
     }
 
-    // Unsubscribe from previous project if any
     if (this.currentProjectId && this.currentProjectId !== projectId) {
       this.doUnsubscribe(this.currentProjectId)
     }
@@ -285,7 +264,6 @@ class WebSocketService {
     return this.socket?.connected ?? false
   }
 
-  // Debug helper
   getStatus(): { connected: boolean; currentProject: string | null; pendingProject: string | null } {
     return {
       connected: this.socket?.connected ?? false,
@@ -295,5 +273,4 @@ class WebSocketService {
   }
 }
 
-// Singleton instance
 export const websocketService = new WebSocketService()

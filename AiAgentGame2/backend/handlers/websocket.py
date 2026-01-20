@@ -1,16 +1,10 @@
-"""
-WebSocket (Socket.IO) Event Handlers
-"""
-
 from testdata import TestDataStore
 
 
 def register_websocket_handlers(sio, data_store: TestDataStore):
-    """Register Socket.IO event handlers"""
 
     @sio.event
     def connect(sid, environ):
-        """Handle client connection"""
         print(f"[WebSocket] Client connected: {sid}")
         sio.emit('connection:state_sync', {
             "status": "connected",
@@ -19,18 +13,11 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
 
     @sio.event
     def disconnect(sid):
-        """Handle client disconnection"""
         print(f"[WebSocket] Client disconnected: {sid}")
-        # Clean up subscriptions
         data_store.remove_all_subscriptions(sid)
 
     @sio.event
     def subscribe_project(sid, data):
-        """
-        Client subscribes to project updates
-        Event: subscribe:project
-        Data: { projectId: string }
-        """
         project_id = data.get('projectId') if isinstance(data, dict) else data
         print(f"[WebSocket] Client {sid} subscribing to project: {project_id}")
 
@@ -42,11 +29,8 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
             }, room=sid)
             return
 
-        # Add subscription
         data_store.add_subscription(project_id, sid)
         sio.enter_room(sid, f"project:{project_id}")
-
-        # Send current state
         agents = data_store.get_agents_by_project(project_id)
         checkpoints = data_store.get_checkpoints_by_project(project_id)
         metrics = data_store.get_project_metrics(project_id)
@@ -62,11 +46,6 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
 
     @sio.event
     def unsubscribe_project(sid, data):
-        """
-        Client unsubscribes from project updates
-        Event: unsubscribe:project
-        Data: { projectId: string }
-        """
         project_id = data.get('projectId') if isinstance(data, dict) else data
         print(f"[WebSocket] Client {sid} unsubscribing from project: {project_id}")
 
@@ -75,11 +54,6 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
 
     @sio.event
     def checkpoint_resolve(sid, data):
-        """
-        Client resolves a checkpoint
-        Event: checkpoint:resolve
-        Data: { checkpointId: string, resolution: string, feedback?: string }
-        """
         checkpoint_id = data.get('checkpointId')
         resolution = data.get('resolution')
         feedback = data.get('feedback')
@@ -102,7 +76,6 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
             }, room=sid)
             return
 
-        # Broadcast to all subscribers of this project
         project_id = checkpoint["projectId"]
         sio.emit('checkpoint:resolved', {
             "checkpointId": checkpoint_id,
@@ -113,7 +86,6 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
             "checkpoint": checkpoint
         }, room=f"project:{project_id}")
 
-    # Aliases for different event name formats
     @sio.on('subscribe:project')
     def on_subscribe_project(sid, data):
         return subscribe_project(sid, data)
