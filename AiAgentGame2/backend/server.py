@@ -9,6 +9,8 @@ from handlers.checkpoint import register_checkpoint_routes
 from handlers.metrics import register_metrics_routes
 from handlers.websocket import register_websocket_handlers
 from handlers.settings import register_settings_routes
+from handlers.intervention import register_intervention_routes
+from handlers.file_upload import register_file_upload_routes
 from testdata import TestDataStore
 from config import get_config
 from agents import create_agent_runner
@@ -47,7 +49,12 @@ def create_app():
     register_checkpoint_routes(app, data_store, sio)
     register_metrics_routes(app, data_store)
     register_settings_routes(app, data_store)
+    register_intervention_routes(app, data_store, sio)
     register_websocket_handlers(sio, data_store)
+
+    # File upload folder
+    upload_folder = os.path.join(os.path.dirname(__file__), 'uploads')
+    register_file_upload_routes(app, data_store, upload_folder)
 
     @app.route('/health')
     def health():

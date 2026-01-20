@@ -2,12 +2,20 @@ import{useState,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
+import{FileUploader}from'@/components/project/FileUploader'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
-import{projectApi,extractApiError}from'@/services/apiService'
+import{projectApi,fileUploadApi,extractApiError}from'@/services/apiService'
 import type{Project,ProjectStatus}from'@/types/project'
+import type{FileCategory}from'@/types/uploadedFile'
 import{cn}from'@/lib/utils'
-import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check}from'lucide-react'
+import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload}from'lucide-react'
+
+interface SelectedFile{
+ file:File
+ category:FileCategory
+ preview?:string
+}
 
 type Platform='web-canvas'|'web-dom'|'electron'
 type Scope='prototype'|'demo'|'standard'|'full'
@@ -65,8 +73,10 @@ export default function ProjectView():JSX.Element{
  const{setActiveTab}=useNavigationStore()
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
+ const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
  const[showInitializeDialog,setShowInitializeDialog]=useState(false)
  const[isLoading,setIsLoading]=useState(false)
+ const[uploadProgress,setUploadProgress]=useState<string|null>(null)
  const[error,setError]=useState<string|null>(null)
  const[isEditing,setIsEditing]=useState(false)
  const[editForm,setEditForm]=useState<NewProjectForm>(initialForm)
@@ -108,9 +118,27 @@ export default function ProjectView():JSX.Element{
     }
    })
 
+   // Upload files if any
+   if(selectedFiles.length>0){
+    setUploadProgress(`ファイルをアップロード中... (0/${selectedFiles.length})`)
+    const files=selectedFiles.map(sf=>sf.file)
+    try{
+     const result=await fileUploadApi.uploadBatch(newProject.id,files)
+     setUploadProgress(`${result.totalUploaded}ファイルをアップロードしました`)
+     if(result.totalErrors>0){
+      console.warn('Some files failed to upload:',result.errors)
+     }
+    }catch(uploadErr){
+     console.error('Failed to upload files:',uploadErr)
+     // Continue even if upload fails
+    }
+   }
+
    setProjects([newProject,...projects])
    setCurrentProject(newProject)
    setForm(initialForm)
+   setSelectedFiles([])
+   setUploadProgress(null)
    setShowNewForm(false)
   }catch(err){
    console.error('Failed to create project:',err)
@@ -501,6 +529,29 @@ export default function ProjectView():JSX.Element{
            <option value="gpt4">GPT-4</option>
           </select>
          </div>
+
+         {/*Initial Files*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-1">
+           <Upload size={14} className="inline mr-1"/>
+           初期ファイル（オプション）
+          </label>
+          <p className="text-nier-caption text-nier-text-light mb-2">
+           企画書、仕様書、参考資料、アセットなどをアップロードできます
+          </p>
+          <FileUploader
+           files={selectedFiles}
+           onFilesChange={setSelectedFiles}
+           disabled={isLoading}
+          />
+         </div>
+
+         {/*Upload Progress*/}
+         {uploadProgress&&(
+          <div className="text-nier-small text-nier-accent-gold">
+           {uploadProgress}
+          </div>
+         )}
 
          {/*Buttons*/}
          <div className="flex gap-3 pt-2">

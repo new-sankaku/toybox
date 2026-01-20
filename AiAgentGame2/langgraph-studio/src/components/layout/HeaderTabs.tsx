@@ -10,6 +10,7 @@ const tabs:Tab[]=[
  {id:'project',label:'PROJECT',icon:'◉'},
  {id:'system',label:'DASHBOARD',icon:'⬡'},
  {id:'checkpoints',label:'CHECKPOINTS',icon:'✦'},
+ {id:'intervention',label:'INTERVENTION',icon:'✋'},
  {id:'agents',label:'AGENTS',icon:'⚔'},
  {id:'data',label:'ASSET',icon:'☰'},
  {id:'ai',label:'AI',icon:'✧'},

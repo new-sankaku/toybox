@@ -1,5 +1,6 @@
 export{default as ProjectView}from'./ProjectView'
 export{default as CheckpointsView}from'./CheckpointsView'
+export{default as InterventionView}from'./InterventionView'
 export{default as AgentsView}from'./AgentsView'
 export{default as LogsView}from'./LogsView'
 export{default as DataView}from'./DataView'
