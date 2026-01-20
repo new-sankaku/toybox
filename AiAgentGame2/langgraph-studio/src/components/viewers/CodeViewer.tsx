@@ -4,7 +4,6 @@ import { Button } from '@/components/ui/Button'
 import { cn } from '@/lib/utils'
 import { Copy, Check, Download } from 'lucide-react'
 
-// Configure Monaco to use local files if needed
 loader.config({
   paths: {
     vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'
@@ -21,7 +20,6 @@ interface CodeViewerProps {
   onCopy?: () => void
 }
 
-// NieR-themed Monaco options
 const monacoOptions = {
   readOnly: true,
   minimap: { enabled: false },
@@ -41,7 +39,6 @@ const monacoOptions = {
   }
 }
 
-// NieR-themed colors for Monaco
 const nierTheme = {
   base: 'vs' as const,
   inherit: true,

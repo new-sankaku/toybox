@@ -81,13 +81,11 @@ export default function CheckpointReviewView({
     setFeedback('')
   }
 
-  // Helper to extract content string from various formats
   const getContentString = (content: unknown): string => {
     if (typeof content === 'string') {
       return content
     }
     if (content && typeof content === 'object') {
-      // Handle { text: "..." } format
       const obj = content as Record<string, unknown>
       if (typeof obj.text === 'string') {
         return obj.text
@@ -99,7 +97,6 @@ export default function CheckpointReviewView({
   const renderOutput = () => {
     const { output } = checkpoint
 
-    // Raw表示: contentをそのままJSON/文字列で表示
     if (viewMode === 'raw') {
       const rawContent = typeof output.content === 'string'
         ? output.content
@@ -113,10 +110,8 @@ export default function CheckpointReviewView({
       )
     }
 
-    // format または documentType をチェック（バックエンドは format を返す）
     const format = output.format || output.documentType
 
-    // Determine content type and render appropriate viewer
     if (format === 'markdown' || checkpoint.type.includes('review')) {
       return (
         <DocumentViewer
@@ -136,7 +131,6 @@ export default function CheckpointReviewView({
       )
     }
 
-    // Default to document viewer
     return (
       <DocumentViewer
         content={output.summary || getContentString(output.content)}

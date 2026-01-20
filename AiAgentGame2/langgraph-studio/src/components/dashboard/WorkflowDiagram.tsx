@@ -21,7 +21,6 @@ import { useAgentDefinitionStore } from '@/stores/agentDefinitionStore'
 import { agentApi } from '@/services/apiService'
 import type { Agent, AgentType, AgentStatus } from '@/types/agent'
 
-// Agent node definition
 interface AgentNodeDef {
   id: string
   type: AgentType
@@ -30,23 +29,15 @@ interface AgentNodeDef {
   hasLW?: boolean  // Leader/Worker continuous loop check
 }
 
-// Node definitions matching new workflow structure
-// L/W pairs are combined into single nodes with hasLW flag
-// タスク分割は独立したPhaseとして配置
 const AGENT_NODES: AgentNodeDef[] = [
-  // Phase 0: 企画
   { id: 'concept', type: 'concept', label: 'コンセプト', phase: 0 },
-  // Phase 1: タスク分割1
   { id: 'task_split_1', type: 'task_split_1', label: 'タスク分割1', phase: 1 },
-  // Phase 2: 設計 (L/W pairs combined)
   { id: 'concept_detail', type: 'concept_detail', label: 'コンセプト詳細', phase: 2, hasLW: true },
   { id: 'scenario', type: 'scenario', label: 'シナリオ', phase: 2, hasLW: true },
   { id: 'world', type: 'world', label: '世界観', phase: 2, hasLW: true },
   { id: 'game_design', type: 'game_design', label: 'ゲームデザイン', phase: 2, hasLW: true },
   { id: 'tech_spec', type: 'tech_spec', label: '技術仕様', phase: 2, hasLW: true },
-  // Phase 3: タスク分割2
   { id: 'task_split_2', type: 'task_split_2', label: 'タスク分割2', phase: 3 },
-  // Phase 4: アセット
   { id: 'asset_character', type: 'asset_character', label: 'キャラ', phase: 4 },
   { id: 'asset_background', type: 'asset_background', label: '背景', phase: 4 },
   { id: 'asset_ui', type: 'asset_ui', label: 'UI', phase: 4 },
@@ -54,37 +45,28 @@ const AGENT_NODES: AgentNodeDef[] = [
   { id: 'asset_bgm', type: 'asset_bgm', label: 'BGM', phase: 4 },
   { id: 'asset_voice', type: 'asset_voice', label: 'ボイス', phase: 4 },
   { id: 'asset_sfx', type: 'asset_sfx', label: '効果音', phase: 4 },
-  // Phase 5: タスク分割3
   { id: 'task_split_3', type: 'task_split_3', label: 'タスク分割3', phase: 5 },
-  // Phase 6: 実装 (L/W pairs combined)
   { id: 'code', type: 'code', label: 'コード', phase: 6, hasLW: true },
   { id: 'event', type: 'event', label: 'イベント', phase: 6, hasLW: true },
   { id: 'ui_integration', type: 'ui_integration', label: 'UI統合', phase: 6, hasLW: true },
   { id: 'asset_integration', type: 'asset_integration', label: 'アセット統合', phase: 6, hasLW: true },
-  // Phase 7: タスク分割4
   { id: 'task_split_4', type: 'task_split_4', label: 'タスク分割4', phase: 7 },
-  // Phase 8: テスト (L/W pairs combined)
   { id: 'unit_test', type: 'unit_test', label: '単体テスト', phase: 8, hasLW: true },
   { id: 'integration_test', type: 'integration_test', label: '統合テスト', phase: 8, hasLW: true },
 ]
 
-// Edge definitions - workflow dependencies (simplified without L/W internal edges)
 const EDGE_DEFS: Array<{ source: string; target: string }> = [
-  // Phase 0 → 1
   { source: 'concept', target: 'task_split_1' },
-  // Phase 1 → 2: タスク分割1 → 設計エージェント
   { source: 'task_split_1', target: 'concept_detail' },
   { source: 'task_split_1', target: 'scenario' },
   { source: 'task_split_1', target: 'world' },
   { source: 'task_split_1', target: 'game_design' },
   { source: 'task_split_1', target: 'tech_spec' },
-  // Phase 2 → 3: 設計 → タスク分割2
   { source: 'concept_detail', target: 'task_split_2' },
   { source: 'scenario', target: 'task_split_2' },
   { source: 'world', target: 'task_split_2' },
   { source: 'game_design', target: 'task_split_2' },
   { source: 'tech_spec', target: 'task_split_2' },
-  // Phase 3 内: タスク分割2 → アセット
   { source: 'task_split_2', target: 'asset_character' },
   { source: 'task_split_2', target: 'asset_background' },
   { source: 'task_split_2', target: 'asset_ui' },
@@ -92,7 +74,6 @@ const EDGE_DEFS: Array<{ source: string; target: string }> = [
   { source: 'task_split_2', target: 'asset_bgm' },
   { source: 'task_split_2', target: 'asset_voice' },
   { source: 'task_split_2', target: 'asset_sfx' },
-  // Phase 3 → 4: アセット → タスク分割3
   { source: 'asset_character', target: 'task_split_3' },
   { source: 'asset_background', target: 'task_split_3' },
   { source: 'asset_ui', target: 'task_split_3' },
@@ -100,22 +81,18 @@ const EDGE_DEFS: Array<{ source: string; target: string }> = [
   { source: 'asset_bgm', target: 'task_split_3' },
   { source: 'asset_voice', target: 'task_split_3' },
   { source: 'asset_sfx', target: 'task_split_3' },
-  // Phase 4 内: タスク分割3 → 実装
   { source: 'task_split_3', target: 'code' },
   { source: 'task_split_3', target: 'event' },
   { source: 'task_split_3', target: 'ui_integration' },
   { source: 'task_split_3', target: 'asset_integration' },
-  // Phase 4 → 5: 実装 → タスク分割4
   { source: 'code', target: 'task_split_4' },
   { source: 'event', target: 'task_split_4' },
   { source: 'ui_integration', target: 'task_split_4' },
   { source: 'asset_integration', target: 'task_split_4' },
-  // Phase 5 内: タスク分割4 → テスト
   { source: 'task_split_4', target: 'unit_test' },
   { source: 'task_split_4', target: 'integration_test' },
 ]
 
-// Layout configuration interface
 interface LayoutConfig {
   nodeHeight: number
   nodeWidth: number
@@ -125,12 +102,9 @@ interface LayoutConfig {
   fontSize: number
 }
 
-// Find the longest label in AGENT_NODES
 const MAX_LABEL_LENGTH = Math.max(...AGENT_NODES.map(n => n.label.length))  // 7 characters (e.g., コンセプト詳細, ゲームデザイン)
 
-// Calculate layout config based on container size
 function calculateLayoutConfig(containerWidth: number, containerHeight: number): LayoutConfig {
-  // Constants for calculation
   const NUM_PHASES = 9
   const MAX_NODES_IN_PHASE = 7  // Phase 4 (アセット) has 7 nodes
   const MIN_NODE_HEIGHT = 28
@@ -139,33 +113,23 @@ function calculateLayoutConfig(containerWidth: number, containerHeight: number):
   const MAX_FONT_SIZE = 14
   const NODE_PADDING_X = 12  // Horizontal padding inside node
 
-  // Calculate available space
   const availableHeight = containerHeight - 40  // Reserve space for padding
   const availableWidth = containerWidth - 40
 
-  // Calculate node height based on available vertical space
   const verticalFactor = MAX_NODES_IN_PHASE + 0.2 * (MAX_NODES_IN_PHASE - 1) + 0.6
   let nodeHeight = availableHeight / verticalFactor
   nodeHeight = Math.max(MIN_NODE_HEIGHT, Math.min(MAX_NODE_HEIGHT, nodeHeight))
 
-  // Calculate node width based on available horizontal space
-  // phaseGapX = nodeWidth * 0.6 for tighter layout
   const horizontalFactor = NUM_PHASES + 0.6 * (NUM_PHASES - 1) + 0.4
   let nodeWidth = availableWidth / horizontalFactor
 
-  // Calculate font size that fits within node width
-  // Japanese characters are roughly square, so width ≈ fontSize
-  // nodeWidth = fontSize * MAX_LABEL_LENGTH + NODE_PADDING_X * 2
   const maxFontSizeForWidth = (nodeWidth - NODE_PADDING_X * 2) / MAX_LABEL_LENGTH
 
-  // Also consider height constraint (font + some vertical space)
   const maxFontSizeForHeight = (nodeHeight - 8) / 1.5  // Leave room for padding and potential progress bar
 
-  // Use the smaller of the two constraints
   let fontSize = Math.min(maxFontSizeForWidth, maxFontSizeForHeight)
   fontSize = Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, fontSize))
 
-  // Recalculate node width based on final font size to fit text perfectly
   nodeWidth = fontSize * MAX_LABEL_LENGTH + NODE_PADDING_X * 2
 
   return {
@@ -178,7 +142,6 @@ function calculateLayoutConfig(containerWidth: number, containerHeight: number):
   }
 }
 
-// Default layout config for initial render (fontSize 11 * 7 chars + padding 24 = 101)
 const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   nodeHeight: 36,
   nodeWidth: 101,
@@ -188,7 +151,6 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   fontSize: 11,
 }
 
-// Calculate vertical column layout dynamically based on status and layout config
 function getColumnLayout(
   statusMap: Record<string, AgentStatus | undefined>,
   config: LayoutConfig
@@ -204,22 +166,18 @@ function getColumnLayout(
   const widths: Record<string, number> = {}
   const heights: Record<string, number> = {}
 
-  // All nodes use the same dimensions now
   AGENT_NODES.forEach(node => {
     widths[node.id] = nodeWidth
     heights[node.id] = nodeHeight
   })
 
-  // Group nodes by phase (phases 0-8)
   const phaseNodes: (typeof AGENT_NODES)[] = []
   for (let i = 0; i <= 8; i++) {
     phaseNodes[i] = AGENT_NODES.filter(n => n.phase === i)
   }
 
-  // All phases use the same width
   const phaseWidths = phaseNodes.map(nodes => nodes.length > 0 ? nodeWidth : 0)
 
-  // Calculate total heights for each phase (sum of node heights + gaps)
   const calcPhaseHeight = (nodes: typeof AGENT_NODES) => {
     if (nodes.length === 0) return 0
     const totalNodeHeights = nodes.length * nodeHeight
@@ -230,14 +188,12 @@ function getColumnLayout(
   const phaseHeights = phaseNodes.map(calcPhaseHeight)
   const maxHeight = Math.max(...phaseHeights)
 
-  // X positions for each phase
   const phaseX: number[] = []
   phaseX[0] = phasePadding
   for (let i = 1; i <= 8; i++) {
     phaseX[i] = phaseX[i - 1] + (phaseWidths[i - 1] > 0 ? phaseWidths[i - 1] + phaseGapX : 0)
   }
 
-  // Position nodes vertically within each phase (top-aligned)
   const positionPhaseNodes = (nodes: typeof AGENT_NODES, x: number) => {
     let currentY = phasePadding
     nodes.forEach((node) => {
@@ -249,7 +205,6 @@ function getColumnLayout(
     })
   }
 
-  // Position all phases
   for (let i = 0; i <= 8; i++) {
     if (phaseNodes[i].length > 0) {
       positionPhaseNodes(phaseNodes[i], phaseX[i])
@@ -262,7 +217,6 @@ function getColumnLayout(
   return { positions, widths, heights, width: totalWidth, height: totalHeight }
 }
 
-// Calculate phase group bounds dynamically
 function calculatePhaseBounds(
   phase: number,
   positions: Record<string, { x: number; y: number }>,
@@ -292,7 +246,6 @@ function calculatePhaseBounds(
   }
 }
 
-// Get status style
 function getStatusStyle(status: AgentStatus | undefined): {
   background: string
   border: string
@@ -315,7 +268,6 @@ function getStatusStyle(status: AgentStatus | undefined): {
   }
 }
 
-// Custom agent node component
 interface AgentNodeData {
   label: string
   status?: AgentStatus
@@ -406,7 +358,6 @@ function AgentNode({ data }: { data: AgentNodeData }) {
   )
 }
 
-// Phase group node component
 function PhaseGroupNode({ data }: { data: { label: string; width: number; height: number } }) {
   return (
     <div
@@ -435,13 +386,11 @@ function PhaseGroupNode({ data }: { data: { label: string; width: number; height
   )
 }
 
-// Node types for React Flow
 const nodeTypes = {
   agent: AgentNode,
   phaseGroup: PhaseGroupNode,
 }
 
-// Inner flow canvas with resize handling
 interface FlowCanvasProps {
   nodes: Node[]
   edges: Edge[]
@@ -453,7 +402,6 @@ function FlowCanvas({ nodes, edges, onContainerResize }: FlowCanvasProps) {
   const { fitView } = useReactFlow()
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
 
-  // Observe container size changes
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -470,7 +418,6 @@ function FlowCanvas({ nodes, edges, onContainerResize }: FlowCanvasProps) {
     return () => resizeObserver.disconnect()
   }, [onContainerResize])
 
-  // Fit view when nodes change or container size changes
   useEffect(() => {
     if (containerSize.width > 0 && containerSize.height > 0 && nodes.length > 0) {
       const timer = setTimeout(() => {
@@ -520,12 +467,10 @@ export default function WorkflowDiagram(): JSX.Element {
   const { getLabel } = useAgentDefinitionStore()
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
 
-  // Handle container resize
   const handleContainerResize = useCallback((width: number, height: number) => {
     setContainerSize({ width, height })
   }, [])
 
-  // Calculate layout config based on container size
   const layoutConfig = useMemo(() => {
     if (containerSize.width > 0 && containerSize.height > 0) {
       return calculateLayoutConfig(containerSize.width, containerSize.height)
@@ -533,7 +478,6 @@ export default function WorkflowDiagram(): JSX.Element {
     return DEFAULT_LAYOUT_CONFIG
   }, [containerSize])
 
-  // Initial data fetch - runs once when project changes
   useEffect(() => {
     if (!currentProject) return
 
@@ -565,7 +509,6 @@ export default function WorkflowDiagram(): JSX.Element {
     fetchAgents()
   }, [currentProject?.id, setAgents])
 
-  // Get agent by type (handles _leader suffix)
   const getAgentByType = useCallback((type: AgentType): Agent | undefined => {
     const projectAgents = agents.filter(a => a.projectId === currentProject?.id)
     let agent = projectAgents.find(a => a.type === type)
@@ -578,7 +521,6 @@ export default function WorkflowDiagram(): JSX.Element {
     return agent
   }, [agents, currentProject?.id])
 
-  // Build status map for dynamic layout
   const statusMap = useMemo(() => {
     const map: Record<string, AgentStatus | undefined> = {}
     AGENT_NODES.forEach(nodeDef => {
@@ -588,12 +530,10 @@ export default function WorkflowDiagram(): JSX.Element {
     return map
   }, [getAgentByType])
 
-  // Calculate dynamic layout based on status and layout config
   const layout = useMemo(() => {
     return getColumnLayout(statusMap, layoutConfig)
   }, [statusMap, layoutConfig])
 
-  // Calculate phase group bounds
   const phaseGroups = useMemo(() => {
     const groups = [
       { id: 'phase-0', label: 'P0: 企画', phase: 0 },
@@ -612,9 +552,7 @@ export default function WorkflowDiagram(): JSX.Element {
     }))
   }, [layout, layoutConfig])
 
-  // Build nodes
   const nodes: Node[] = useMemo(() => {
-    // Phase group nodes (background)
     const groupNodes: Node[] = phaseGroups.map(group => ({
       id: group.id,
       type: 'phaseGroup',
@@ -625,7 +563,6 @@ export default function WorkflowDiagram(): JSX.Element {
       zIndex: -1,
     }))
 
-    // Agent nodes
     const agentNodes: Node[] = AGENT_NODES.map(nodeDef => {
       const agent = getAgentByType(nodeDef.type)
       const pos = layout.positions[nodeDef.id]
@@ -651,9 +588,7 @@ export default function WorkflowDiagram(): JSX.Element {
     return [...groupNodes, ...agentNodes]
   }, [getAgentByType, layout, phaseGroups, layoutConfig, getLabel])
 
-  // Build edges
   const edges: Edge[] = useMemo(() => {
-    // Helper to get node's phase
     const getNodePhase = (nodeId: string): number => {
       const node = AGENT_NODES.find(n => n.id === nodeId)
       return node?.phase ?? 1
@@ -690,7 +625,6 @@ export default function WorkflowDiagram(): JSX.Element {
     })
   }, [getAgentByType])
 
-  // Calculate stats
   const projectAgents = agents.filter(a => a.projectId === currentProject?.id)
   const completedCount = projectAgents.filter(a => a.status === 'completed').length
   const runningCount = projectAgents.filter(a => a.status === 'running').length

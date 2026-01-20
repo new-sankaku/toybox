@@ -18,7 +18,6 @@ const statusLabels: Record<AgentStatus, string> = {
   blocked: 'ブロック'
 }
 
-// Format elapsed time
 const formatElapsedTime = (startedAt: string | null, completedAt: string | null): string => {
   if (!startedAt) return '-'
   const start = new Date(startedAt).getTime()
@@ -37,10 +36,8 @@ export default function ActiveAgents(): JSX.Element {
   const { currentProject } = useProjectStore()
   const { agents, setAgents, isLoading } = useAgentStore()
   const [initialLoading, setInitialLoading] = useState(true)
-  // Timestamp to force re-render for elapsed time update
   const [, setTick] = useState(0)
 
-  // Initial data fetch only (no polling)
   useEffect(() => {
     if (!currentProject) {
       setAgents([])
@@ -52,7 +49,6 @@ export default function ActiveAgents(): JSX.Element {
       setInitialLoading(true)
       try {
         const data = await agentApi.listByProject(currentProject.id)
-        // Convert API format to store format
         const agentsData: Agent[] = data.map(a => ({
           id: a.id,
           projectId: a.projectId,
@@ -78,7 +74,6 @@ export default function ActiveAgents(): JSX.Element {
     fetchInitialAgents()
   }, [currentProject?.id, setAgents])
 
-  // Timer for updating elapsed time display (every second for running agents)
   useEffect(() => {
     const activeCount = agents.filter(a => a.status === 'running').length
     if (activeCount === 0) return
@@ -105,7 +100,6 @@ export default function ActiveAgents(): JSX.Element {
     )
   }
 
-  // Filter agents for current project and only show running/pending
   const projectAgents = agents.filter(a => a.projectId === currentProject.id)
   const activeAgents = projectAgents.filter(a => a.status === 'running' || a.status === 'pending')
   const runningCount = activeAgents.filter(a => a.status === 'running').length

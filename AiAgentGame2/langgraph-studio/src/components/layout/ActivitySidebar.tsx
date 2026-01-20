@@ -7,7 +7,6 @@ import { formatNumber } from '@/lib/utils'
 import { Progress } from '@/components/ui/Progress'
 import { ChevronRight, ChevronLeft } from 'lucide-react'
 
-// Format seconds to readable time
 function formatTime(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)}秒`
   if (seconds < 3600) return `${Math.floor(seconds / 60)}分${Math.round(seconds % 60)}秒`
@@ -16,14 +15,12 @@ function formatTime(seconds: number): string {
   return `${hours}時間${mins}分`
 }
 
-// Format token count with k/m suffix
 function formatTokenCount(count: number): string {
   if (count >= 1000000) return `${(count / 1000000).toFixed(1)}m`
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k`
   return count.toString()
 }
 
-// Calculate cost from tokens (assuming $0.003 per 1k input, $0.015 per 1k output, rough average $0.01 per 1k)
 function formatCost(tokens: number): string {
   const cost = tokens * 0.00001 // $0.01 per 1k tokens
   if (cost < 0.01) return `$${cost.toFixed(4)}`
@@ -42,7 +39,6 @@ export default function ActivitySidebar(): JSX.Element {
   const [logs, setLogs] = useState<ApiSystemLog[]>([])
   const [aiGenerating, setAiGenerating] = useState(0)
 
-  // Initial fetch data from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setMetrics(null)
@@ -77,11 +73,8 @@ export default function ActivitySidebar(): JSX.Element {
     }
 
     fetchData()
-    // Note: WebSocket events should update stores, sidebar should use stores
-    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
-  // Calculate stats
   const runningAgents = agents.filter(a => a.status === 'running').length
   const completedAgents = agents.filter(a => a.status === 'completed').length
   const failedAgents = agents.filter(a => a.status === 'failed').length
@@ -95,10 +88,8 @@ export default function ActivitySidebar(): JSX.Element {
   const totalAssets = assets.length
   const pendingAssets = assets.filter(a => a.approvalStatus === 'pending').length
 
-  // 生成中 = AIリクエストAPIから取得（処理中 + 待機中）
   const generatingCount = aiGenerating
 
-  // ハイライト管理
   const [highlights, setHighlights] = useState<Record<string, boolean>>({})
   const prevValues = useRef<Record<string, number>>({})
 
@@ -123,7 +114,6 @@ export default function ActivitySidebar(): JSX.Element {
     if (Object.keys(newHighlights).length > 0) {
       setHighlights(prev => ({ ...prev, ...newHighlights }))
 
-      // 1秒後にハイライト解除
       setTimeout(() => {
         setHighlights(prev => {
           const updated = { ...prev }

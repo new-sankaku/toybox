@@ -13,14 +13,12 @@ type Platform = 'web-canvas' | 'web-dom' | 'electron'
 type Scope = 'prototype' | 'demo' | 'standard' | 'full'
 type LLMProvider = 'claude' | 'gpt4'
 
-// Platform options - only what Claude can actually generate
 const platformOptions: { value: Platform; label: string; desc: string }[] = [
   { value: 'web-canvas', label: 'ブラウザゲーム (Canvas)', desc: '2D/3Dゲーム、HTML5 Canvas + JavaScript' },
   { value: 'web-dom', label: 'ブラウザゲーム (DOM)', desc: 'テキストベース、カードゲーム、HTML + CSS + JavaScript' },
   { value: 'electron', label: 'デスクトップアプリ', desc: 'Win/Mac/Linux対応、Electron + JavaScript' },
 ]
 
-// Scope options - simple descriptions only
 const scopeOptions: { value: Scope; label: string; desc: string }[] = [
   { value: 'prototype', label: 'プロトタイプ', desc: '動作確認用の最小実装' },
   { value: 'demo', label: 'デモ版', desc: '見せられるレベルの完成度' },
@@ -73,7 +71,6 @@ export default function ProjectView(): JSX.Element {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<NewProjectForm>(initialForm)
 
-  // Fetch projects from backend
   const fetchProjects = async () => {
     setIsLoading(true)
     setError(null)
@@ -128,7 +125,6 @@ export default function ProjectView(): JSX.Element {
     setCurrentProject(project)
   }
 
-  // Edit project from list
   const handleEditProjectFromList = (project: Project) => {
     setCurrentProject(project)
     setEditForm({
@@ -212,7 +208,6 @@ export default function ProjectView(): JSX.Element {
       setProjects(projects.map(p => p.id === currentProject.id ? updated : p))
       setCurrentProject(updated)
       setShowInitializeDialog(false)
-      // Stay on PROJECT tab after initialization
     } catch (err) {
       console.error('Failed to initialize project:', err)
       const apiError = extractApiError(err)
@@ -222,10 +217,8 @@ export default function ProjectView(): JSX.Element {
     }
   }
 
-  // Check if project can be initialized (not already in initial state)
   const canInitialize = currentProject && (currentProject.status !== 'draft' || currentProject.currentPhase > 1)
 
-  // Start editing
   const handleStartEdit = () => {
     if (!currentProject) return
     setEditForm({
@@ -239,13 +232,11 @@ export default function ProjectView(): JSX.Element {
     setIsEditing(true)
   }
 
-  // Cancel editing
   const handleCancelEdit = () => {
     setIsEditing(false)
     setEditForm(initialForm)
   }
 
-  // Save edits
   const handleSaveEdit = async () => {
     if (!currentProject || !editForm.name.trim()) return
     setIsLoading(true)

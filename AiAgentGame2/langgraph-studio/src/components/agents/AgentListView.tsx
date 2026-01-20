@@ -6,7 +6,6 @@ import type { Agent, AgentStatus, AgentType } from '@/types/agent'
 import { cn } from '@/lib/utils'
 import { Filter, Play, CheckCircle, XCircle, Clock, Pause, CircleDashed } from 'lucide-react'
 
-// エージェント表示名を取得（バックエンドの metadata.displayName を使用）
 const getDisplayName = (agent: Agent): string => {
   return (agent.metadata?.displayName as string) || agent.type
 }
@@ -57,7 +56,6 @@ export default function AgentListView({
     }
   }, [agents])
 
-  // Group agents by phase
   const agentsByPhase = useMemo(() => {
     const phase1Types = ['concept', 'design', 'scenario', 'character', 'world', 'task_split',
                          'concept_leader', 'design_leader', 'scenario_leader', 'character_leader', 'world_leader', 'task_split_leader']
@@ -71,11 +69,9 @@ export default function AgentListView({
     }
   }, [filteredAgents])
 
-  // Get waiting reason for pending agents
   const getWaitingFor = useCallback((agent: Agent): string | undefined => {
     if (agent.status !== 'pending') return undefined
 
-    // Find all running agents
     const runningAgents = agents.filter(a => a.status === 'running')
     if (runningAgents.length > 0) {
       const runningNames = runningAgents.map(a => getDisplayName(a))
@@ -85,21 +81,18 @@ export default function AgentListView({
       return `${runningNames.join(', ')} 完了待ち`
     }
 
-    // Find all agents that are not yet completed (excluding self)
     const notCompletedAgents = agents.filter(a =>
       a.id !== agent.id &&
       a.status !== 'completed' &&
       a.status !== 'failed'
     )
 
-    // If all other agents are completed or this is the first agent
     const pendingBeforeMe = agents.filter(a =>
       a.id !== agent.id &&
       (a.status === 'pending' || a.status === 'running')
     )
 
     if (pendingBeforeMe.length === 0) {
-      // No running agent - check if any agent has completed
       const hasCompleted = agents.some(a => a.status === 'completed')
       if (!hasCompleted) {
         return 'プロジェクト開始待ち'
@@ -107,13 +100,11 @@ export default function AgentListView({
       return '開始待機'
     }
 
-    // List specific agents we're waiting for (running + pending before us)
     const waitingForAgents = agents.filter(a =>
       a.id !== agent.id &&
       (a.status === 'running' || a.status === 'pending')
     )
 
-    // Just show running ones if any
     if (runningAgents.length > 0) {
       const names = runningAgents.map(a => getDisplayName(a))
       return `${names.join(', ')} 完了待ち`
@@ -125,7 +116,6 @@ export default function AgentListView({
   const renderPhaseSection = (title: string, phaseAgents: Agent[]) => {
     if (phaseAgents.length === 0) return null
 
-    // Calculate phase stats
     const completed = phaseAgents.filter(a => a.status === 'completed').length
     const running = phaseAgents.filter(a => a.status === 'running').length
 
@@ -173,7 +163,6 @@ export default function AgentListView({
             {filterOptions.map((option) => {
               const Icon = option.icon
               const count = statusCounts[option.value]
-              // Always show 'all' and 'incomplete', hide others if count is 0
               if (option.value !== 'all' && option.value !== 'incomplete' && count === 0) return null
 
               return (

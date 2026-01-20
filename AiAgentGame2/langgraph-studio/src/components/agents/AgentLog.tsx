@@ -138,7 +138,6 @@ export function AgentLog({
   )
 }
 
-// Streaming log component with live updates indicator
 export function AgentLogStreaming({
   logs,
   isStreaming = false,

@@ -49,7 +49,6 @@ export default function DependencyGraph({
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
 
-    // Create simulation data with mutable positions
     type SimNode = GraphNodeInput & d3.SimulationNodeDatum
     type SimLink = d3.SimulationLinkDatum<SimNode> & { type: string }
 
@@ -60,7 +59,6 @@ export default function DependencyGraph({
       type: l.type
     }))
 
-    // Create arrow marker
     svg.append('defs').append('marker')
       .attr('id', 'arrowhead')
       .attr('viewBox', '0 -5 10 10')
@@ -73,10 +71,8 @@ export default function DependencyGraph({
       .attr('d', 'M0,-5L10,0L0,5')
       .attr('fill', '#7A756A')
 
-    // Create container group
     const g = svg.append('g')
 
-    // Create links
     const link = g.append('g')
       .selectAll('line')
       .data(simLinks)
@@ -85,7 +81,6 @@ export default function DependencyGraph({
       .attr('stroke-width', 1.5)
       .attr('marker-end', 'url(#arrowhead)')
 
-    // Create node groups
     const node = g.append('g')
       .selectAll<SVGGElement, SimNode>('g')
       .data(simNodes)
@@ -96,7 +91,6 @@ export default function DependencyGraph({
         onNodeClick?.(d.id)
       })
 
-    // Add shapes based on node type
     node.each(function (d) {
       const el = d3.select(this)
       const isSelected = d.id === selectedNodeId
@@ -128,7 +122,6 @@ export default function DependencyGraph({
           .attr('stroke-width', isSelected ? 3 : 1.5)
       }
 
-      // Add label
       el.append('text')
         .attr('dy', d.type === 'agent' ? 35 : 30)
         .attr('text-anchor', 'middle')
@@ -138,7 +131,6 @@ export default function DependencyGraph({
         .text(d.label)
     })
 
-    // Setup drag behavior
     const drag = d3.drag<SVGGElement, SimNode>()
       .on('start', function (event, d) {
         if (!event.active) simulation.alphaTarget(0.3).restart()
@@ -157,7 +149,6 @@ export default function DependencyGraph({
 
     node.call(drag)
 
-    // Create simulation
     const simulation = d3.forceSimulation(simNodes)
       .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance(100))
       .force('charge', d3.forceManyBody().strength(-300))
@@ -173,7 +164,6 @@ export default function DependencyGraph({
         node.attr('transform', (d) => `translate(${d.x ?? 0},${d.y ?? 0})`)
       })
 
-    // Zoom behavior
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.5, 2])
       .on('zoom', (event) => {

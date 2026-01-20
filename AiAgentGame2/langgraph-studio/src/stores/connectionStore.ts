@@ -3,15 +3,13 @@ import { create } from 'zustand'
 export type ConnectionStatus = 'connected' | 'connecting' | 'reconnecting' | 'disconnected'
 
 interface ConnectionState {
-  // State
+
   status: ConnectionStatus
   reconnectAttempts: number
   lastConnectedAt: Date | null
   backendPort: number | null
   hasPendingSync: boolean
   error: string | null
-
-  // Actions
   setStatus: (status: ConnectionStatus) => void
   setBackendPort: (port: number | null) => void
   setError: (error: string | null) => void

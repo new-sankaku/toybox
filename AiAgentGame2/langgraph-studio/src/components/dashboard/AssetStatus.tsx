@@ -19,7 +19,6 @@ export default function AssetStatus(): JSX.Element {
   const [assets, setAssets] = useState<ApiAsset[]>([])
   const [initialLoading, setInitialLoading] = useState(true)
 
-  // Initial fetch only (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setAssets([])
@@ -41,11 +40,8 @@ export default function AssetStatus(): JSX.Element {
     }
 
     fetchAssets()
-    // Note: WebSocket event for assets should be implemented in the future
-    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
-  // Only unapproved assets
   const unapprovedAssets = useMemo(() =>
     assets.filter(a => a.approvalStatus !== 'approved'),
     [assets]

@@ -12,7 +12,6 @@ export default function MetricsOverview(): JSX.Element {
   const { projectMetrics, setProjectMetrics, isLoading } = useMetricsStore()
   const [initialLoading, setInitialLoading] = useState(true)
 
-  // Initial data fetch only (no polling) - rely on WebSocket for updates
   useEffect(() => {
     if (!currentProject) {
       setProjectMetrics(null)
@@ -24,7 +23,6 @@ export default function MetricsOverview(): JSX.Element {
       setInitialLoading(true)
       try {
         const data = await metricsApi.getByProject(currentProject.id)
-        // Convert API format to store format
         setProjectMetrics({
           projectId: currentProject.id,
           totalTokensUsed: data.totalTokensUsed,

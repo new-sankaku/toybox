@@ -32,7 +32,6 @@ const statusLabels: Record<string, { text: string; color: string }> = {
   blocked: { text: 'ブロック', color: 'text-nier-text-light' }
 }
 
-// エージェント表示名を取得（バックエンドの metadata.displayName を使用）
 const getDisplayName = (agent: Agent): string => {
   return (agent.metadata?.displayName as string) || agent.type
 }

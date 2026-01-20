@@ -1,5 +1,3 @@
-// ===== Server -> Client Events =====
-
 export interface ProjectStatusEvent {
   projectId: string
   oldStatus: string
@@ -125,34 +123,26 @@ export interface StateSyncEvent {
   timestamp: string
 }
 
-// ===== Event Map =====
-
 export interface WebSocketEventMap {
-  // Project events
   'project:status_changed': ProjectStatusEvent
   'project:phase_changed': PhaseChangeEvent
 
-  // Agent events
   'agent:started': AgentStartedEvent
   'agent:progress': AgentProgressEvent
   'agent:completed': AgentCompletedEvent
   'agent:failed': AgentFailedEvent
   'agent:log': AgentLogEvent
 
-  // Checkpoint events
   'checkpoint:created': CheckpointCreatedEvent
   'checkpoint:resolved': CheckpointResolvedEvent
 
-  // Metrics events
   'metrics:update': MetricsUpdateEvent
   'metrics:tokens': TokensUpdateEvent
 
-  // Error events
   'error:agent': AgentErrorEvent
   'error:llm': LLMErrorEvent
   'error:state': StateErrorEvent
 
-  // Connection events
   'connection:state_sync': StateSyncEvent
 }
 

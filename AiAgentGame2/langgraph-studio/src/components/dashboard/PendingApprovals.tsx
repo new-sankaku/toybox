@@ -14,10 +14,8 @@ export default function PendingApprovals(): JSX.Element {
   const { navigateToCheckpoint } = useNavigationStore()
   const { checkpoints, setCheckpoints, isLoading } = useCheckpointStore()
   const [initialLoading, setInitialLoading] = useState(true)
-  // For updating waiting time display
   const [, setTick] = useState(0)
 
-  // Initial data fetch only (no polling) - rely on WebSocket for updates
   useEffect(() => {
     if (!currentProject) {
       setCheckpoints([])
@@ -29,7 +27,6 @@ export default function PendingApprovals(): JSX.Element {
       setInitialLoading(true)
       try {
         const data = await checkpointApi.listByProject(currentProject.id)
-        // Convert API format to store format
         const checkpointsData: Checkpoint[] = data.map(cp => ({
           id: cp.id,
           projectId: cp.projectId,
@@ -54,7 +51,6 @@ export default function PendingApprovals(): JSX.Element {
     fetchCheckpoints()
   }, [currentProject?.id, setCheckpoints])
 
-  // Timer for updating waiting time display (every minute)
   useEffect(() => {
     const pendingCount = checkpoints.filter(cp => cp.status === 'pending').length
     if (pendingCount === 0) return
@@ -81,7 +77,6 @@ export default function PendingApprovals(): JSX.Element {
     )
   }
 
-  // Filter pending checkpoints for current project
   const projectCheckpoints = checkpoints.filter(cp => cp.projectId === currentProject.id)
   const pendingCheckpoints = projectCheckpoints.filter(cp => cp.status === 'pending')
 

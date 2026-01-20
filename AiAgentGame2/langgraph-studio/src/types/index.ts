@@ -3,7 +3,6 @@ export * from './agent'
 export * from './checkpoint'
 export * from './websocket'
 
-// Electron API types (exposed via preload)
 export interface ElectronAPI {
   backend: {
     start: () => Promise<{ success: boolean; port?: number; error?: string }>

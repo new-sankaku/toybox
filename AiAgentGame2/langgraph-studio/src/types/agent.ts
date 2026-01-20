@@ -1,17 +1,13 @@
 export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'waiting_approval'
 
 export type AgentType =
-  // Phase 0: 企画
   | 'concept'
-  // Phase 1: タスク分割1
   | 'task_split_1'
-  // Phase 2: 設計 (L/W combined - Leader/Worker continuous loop check)
   | 'concept_detail'
   | 'scenario'
   | 'world'
   | 'game_design'
   | 'tech_spec'
-  // Phase 3: タスク分割2 + アセット
   | 'task_split_2'
   | 'asset_character'
   | 'asset_background'
@@ -20,13 +16,11 @@ export type AgentType =
   | 'asset_bgm'
   | 'asset_voice'
   | 'asset_sfx'
-  // Phase 4: タスク分割3 + 実装 (L/W combined - Leader/Worker continuous loop check)
   | 'task_split_3'
   | 'code'
   | 'event'
   | 'ui_integration'
   | 'asset_integration'
-  // Phase 5: タスク分割4 + テスト (L/W combined - Leader/Worker continuous loop check)
   | 'task_split_4'
   | 'unit_test'
   | 'integration_test'
@@ -96,30 +90,25 @@ export interface AgentOutput {
 }
 
 export type OutputType =
-  // Phase 1
   | 'concept_doc'
   | 'design_doc'
   | 'scenario_doc'
   | 'character_specs'
   | 'world_design'
   | 'task_breakdown'
-  // Phase 2
   | 'code'
   | 'asset_image'
   | 'asset_audio'
-  // Phase 3
   | 'build_result'
   | 'test_result'
   | 'review_result'
 
-// Quality Check Configuration
 export interface QualityCheckConfig {
   enabled: boolean
   maxRetries: number
   isHighCost: boolean
 }
 
-// Quality Check Result
 export interface QualityCheckResult {
   passed: boolean
   issues: string[]

@@ -25,7 +25,6 @@ export default function ConfigView(): JSX.Element {
   const [activeSection, setActiveSection] = useState('api')
   const [showApiKey, setShowApiKey] = useState(false)
 
-  // Mock config state
   const [config, setConfig] = useState({
     apiProvider: 'anthropic',
     apiKey: '',
@@ -36,31 +35,26 @@ export default function ConfigView(): JSX.Element {
     autoSave: true,
     projectTemplate: 'rpg',
     language: 'ja',
-    // Cost settings
     budgetLimit: 10.0,
     alertThreshold: 80,
     stopOnBudgetExceeded: true,
     inputTokenPrice: 0.003,
     outputTokenPrice: 0.015,
-    // Display settings
     letterSpacing: 'normal' as 'tight' | 'normal' | 'wide',
     lineHeight: 1.0,
     padding: 4
   })
 
-  // Apply letter spacing to document
   const handleLetterSpacingChange = (value: 'tight' | 'normal' | 'wide') => {
     setConfig({ ...config, letterSpacing: value })
     document.documentElement.setAttribute('data-tracking', value)
   }
 
-  // Apply line height to document (numeric value)
   const handleLineHeightChange = (value: number) => {
     setConfig({ ...config, lineHeight: value })
     document.documentElement.style.setProperty('--leading-base', String(value))
   }
 
-  // Apply padding to document (numeric value in px)
   const handlePaddingChange = (value: number) => {
     setConfig({ ...config, padding: value })
     document.documentElement.style.setProperty('--padding-card', `${value}px`)
@@ -68,7 +62,6 @@ export default function ConfigView(): JSX.Element {
     document.documentElement.style.setProperty('--gap-base', `${value}px`)
   }
 
-  // Apply initial display settings on mount
   useEffect(() => {
     document.documentElement.setAttribute('data-tracking', config.letterSpacing)
     document.documentElement.style.setProperty('--leading-base', String(config.lineHeight))

@@ -2,13 +2,11 @@ import { create } from 'zustand'
 import type { Checkpoint, CheckpointStatus } from '@/types/checkpoint'
 
 interface CheckpointState {
-  // State
+
   checkpoints: Checkpoint[]
   selectedCheckpointId: string | null
   isLoading: boolean
   error: string | null
-
-  // Actions
   setCheckpoints: (checkpoints: Checkpoint[]) => void
   addCheckpoint: (checkpoint: Checkpoint) => void
   updateCheckpoint: (id: string, updates: Partial<Checkpoint>) => void
@@ -16,8 +14,6 @@ interface CheckpointState {
   selectCheckpoint: (id: string | null) => void
   setLoading: (loading: boolean) => void
   setError: (error: string | null) => void
-
-  // Selectors (computed values)
   getSelectedCheckpoint: () => Checkpoint | undefined
   getPendingCheckpoints: () => Checkpoint[]
   getCheckpointsByProject: (projectId: string) => Checkpoint[]
@@ -25,13 +21,11 @@ interface CheckpointState {
 }
 
 export const useCheckpointStore = create<CheckpointState>((set, get) => ({
-  // Initial state
+
   checkpoints: [],
   selectedCheckpointId: null,
   isLoading: false,
   error: null,
-
-  // Actions
   setCheckpoints: (checkpoints) => set({ checkpoints }),
 
   addCheckpoint: (checkpoint) =>
@@ -65,8 +59,6 @@ export const useCheckpointStore = create<CheckpointState>((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
 
   setError: (error) => set({ error }),
-
-  // Selectors
   getSelectedCheckpoint: () => {
     const state = get()
     return state.checkpoints.find((cp) => cp.id === state.selectedCheckpointId)
@@ -84,8 +76,6 @@ export const useCheckpointStore = create<CheckpointState>((set, get) => ({
     return get().checkpoints.filter((cp) => cp.type === type)
   }
 }))
-
-// Helper hooks for common use cases
 export const usePendingCheckpointsCount = () => {
   return useCheckpointStore((state) =>
     state.checkpoints.filter((cp) => cp.status === 'pending').length

@@ -45,22 +45,17 @@ const statusConfig = {
   }
 }
 
-// エージェント表示名を取得（バックエンドの metadata.displayName を使用）
 const getDisplayName = (agent: Agent): string => {
   return (agent.metadata?.displayName as string) || agent.type
 }
 
-// Agent role (Leader/Worker) labels - ALL agents must have a role
 const getAgentRole = (type: string): { role: string } => {
-  // Explicit Leader types
   if (type.endsWith('_leader')) {
     return { role: 'Leader' }
   }
-  // Explicit Worker types
   if (type.endsWith('_worker')) {
     return { role: 'Worker' }
   }
-  // Phase 3 agents - assign roles based on function
   if (type === 'integrator') {
     return { role: 'Leader' }  // Coordinates integration
   }
@@ -70,11 +65,9 @@ const getAgentRole = (type: string): { role: string } => {
   if (type === 'reviewer') {
     return { role: 'Leader' }  // Reviews and approves
   }
-  // Phase 1 standalone agents (without _leader suffix) - treat as Leaders
   if (['concept', 'design', 'scenario', 'character', 'world', 'task_split'].includes(type)) {
     return { role: 'Leader' }
   }
-  // Default to Worker for any unknown type
   return { role: 'Worker' }
 }
 
@@ -103,7 +96,6 @@ export function AgentCard({
     return `${minutes}分${remainingSeconds}秒`
   }
 
-  // Get detailed task/status text based on role
   const getTaskText = () => {
     if (agent.status === 'running') {
       return agent.currentTask || '処理中'
@@ -115,7 +107,6 @@ export function AgentCard({
     return ''
   }
 
-  // Check if LLM is being used (simulation)
   const isUsingLLM = agent.status === 'running' && agent.progress > 0
 
   return (

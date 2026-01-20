@@ -98,7 +98,6 @@ export function ProjectTimeline({ currentPhase, phases, vertical = false }: Proj
     )
   }
 
-  // Horizontal layout
   return (
     <div className="flex items-start">
       {timelinePhases.map((phase, index) => (

@@ -16,7 +16,6 @@ interface SystemLog {
   details?: string
 }
 
-// Convert API log to frontend SystemLog type
 function convertApiLog(apiLog: ApiSystemLog): SystemLog {
   return {
     id: apiLog.id,
@@ -28,7 +27,6 @@ function convertApiLog(apiLog: ApiSystemLog): SystemLog {
   }
 }
 
-// Agent sources for filtering (lowercase to match backend)
 const agentSources = ['concept', 'design', 'scenario', 'character', 'world', 'System'] as const
 type AgentSource = typeof agentSources[number]
 
@@ -51,14 +49,12 @@ export default function LogsView(): JSX.Element {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedLog, setSelectedLog] = useState<SystemLog | null>(null)
 
-  // Helper to get agent display name
   const getAgentDisplayName = (source: AgentSource | 'all'): string => {
     if (source === 'all') return '全て'
     if (source === 'System') return 'System'
     return getLabel(source)
   }
 
-  // Initial fetch logs from API (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setLogs([])
@@ -80,11 +76,8 @@ export default function LogsView(): JSX.Element {
     }
 
     fetchLogs()
-    // Note: WebSocket event for system logs should be implemented in the future
-    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
-  // Project not selected
   if (!currentProject) {
     return (
       <div className="p-4 animate-nier-fade-in">

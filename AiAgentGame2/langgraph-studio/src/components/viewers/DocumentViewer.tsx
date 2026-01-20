@@ -24,7 +24,6 @@ export function DocumentViewer({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            // Headings
             h1: ({ children }) => (
               <h1 className="text-nier-h1 font-medium tracking-nier-wide mb-4 mt-6">
                 {children}
@@ -40,13 +39,11 @@ export function DocumentViewer({
                 {children}
               </h3>
             ),
-            // Paragraphs
             p: ({ children }) => (
               <p className="text-nier-body text-nier-text-main leading-relaxed mb-3">
                 {children}
               </p>
             ),
-            // Lists
             ul: ({ children }) => (
               <ul className="list-none space-y-1 mb-4 pl-4">
                 {children}
@@ -63,7 +60,6 @@ export function DocumentViewer({
                 <span>{children}</span>
               </li>
             ),
-            // Code
             code: ({ className, children }) => {
               const isInline = !className
               if (isInline) {
@@ -84,13 +80,11 @@ export function DocumentViewer({
                 {children}
               </pre>
             ),
-            // Blockquote
             blockquote: ({ children }) => (
               <blockquote className="border-l-4 border-nier-accent-blue pl-4 py-2 mb-4 text-nier-text-light italic">
                 {children}
               </blockquote>
             ),
-            // Table
             table: ({ children }) => (
               <div className="overflow-x-auto mb-4">
                 <table className="w-full border-collapse">
@@ -113,7 +107,6 @@ export function DocumentViewer({
                 {children}
               </td>
             ),
-            // Links
             a: ({ href, children }) => (
               <a
                 href={href}
@@ -124,17 +117,14 @@ export function DocumentViewer({
                 {children}
               </a>
             ),
-            // Horizontal rule
             hr: () => (
               <hr className="border-t border-nier-border-dark my-6" />
             ),
-            // Strong
             strong: ({ children }) => (
               <strong className="font-medium text-nier-text-main">
                 {children}
               </strong>
             ),
-            // Emphasis
             em: ({ children }) => (
               <em className="italic text-nier-text-light">
                 {children}

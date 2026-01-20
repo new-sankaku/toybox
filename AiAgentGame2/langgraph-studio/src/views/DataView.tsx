@@ -45,7 +45,6 @@ interface Asset {
   approvalStatus: ApprovalStatus
 }
 
-// Convert API asset to frontend Asset type
 function convertApiAsset(apiAsset: ApiAsset): Asset {
   return {
     id: apiAsset.id,
@@ -96,7 +95,6 @@ const typeLabels: Record<AssetType, string> = {
   other: 'その他'
 }
 
-// アイコン色は統一（ゴチャゴチャ防止）
 const typeColors: Record<AssetType, string> = {
   image: 'text-nier-text-light',
   audio: 'text-nier-text-light',
@@ -117,7 +115,6 @@ export default function DataView(): JSX.Element {
   const [playingAudio, setPlayingAudio] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  // Reset selection when tab is clicked (even if same tab)
   useEffect(() => {
     setSelectedAsset(null)
     if (audioRef.current) {
@@ -126,7 +123,6 @@ export default function DataView(): JSX.Element {
     setPlayingAudio(null)
   }, [tabResetCounter])
 
-  // Initial fetch assets from API (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
     if (!currentProject) {
       setAssets([])
@@ -147,11 +143,8 @@ export default function DataView(): JSX.Element {
     }
 
     fetchAssets()
-    // Note: WebSocket event for assets should be implemented in the future
-    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
-  // Project not selected
   if (!currentProject) {
     return (
       <div className="p-4 animate-nier-fade-in">
@@ -195,16 +188,13 @@ export default function DataView(): JSX.Element {
 
   const handlePlayAudio = (assetId: string, audioUrl?: string) => {
     if (playingAudio === assetId) {
-      // Stop playing
       if (audioRef.current) {
         audioRef.current.pause()
         audioRef.current.currentTime = 0
       }
       setPlayingAudio(null)
     } else {
-      // Start playing new audio
       if (audioRef.current && audioUrl) {
-        // Build full URL for the audio
         const fullUrl = audioUrl.startsWith('http')
           ? audioUrl
           : `http://localhost:8000${audioUrl}`
@@ -217,13 +207,11 @@ export default function DataView(): JSX.Element {
     }
   }
 
-  // Helper to find and select next pending asset
   const selectNextPending = (updatedAssets: Asset[], currentId: string) => {
     const pendingAssets = updatedAssets.filter(
       a => a.approvalStatus === 'pending' && a.id !== currentId
     )
     if (pendingAssets.length > 0) {
-      // Select the oldest pending asset
       const nextPending = pendingAssets.reduce((oldest, current) =>
         new Date(oldest.createdAt) < new Date(current.createdAt) ? oldest : current
       )
@@ -238,11 +226,9 @@ export default function DataView(): JSX.Element {
     const currentId = assetId
     try {
       await assetApi.updateStatus(currentProject.id, assetId, 'approved')
-      // Refresh assets
       const data = await assetApi.listByProject(currentProject.id)
       const updatedAssets = data.map(convertApiAsset)
       setAssets(updatedAssets)
-      // If this was the selected asset, select next pending
       if (selectedAsset?.id === assetId) {
         selectNextPending(updatedAssets, currentId)
       }
@@ -256,11 +242,9 @@ export default function DataView(): JSX.Element {
     const currentId = assetId
     try {
       await assetApi.updateStatus(currentProject.id, assetId, 'rejected')
-      // Refresh assets
       const data = await assetApi.listByProject(currentProject.id)
       const updatedAssets = data.map(convertApiAsset)
       setAssets(updatedAssets)
-      // If this was the selected asset, select next pending
       if (selectedAsset?.id === assetId) {
         selectNextPending(updatedAssets, currentId)
       }

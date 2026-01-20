@@ -65,7 +65,6 @@ export function RecoveryModal({
 
   const options = defaultOptions.map((opt) => ({
     ...opt,
-    // Disable retry if max retries reached
     disabled: opt.action === 'retry' && !canRetry
   }))
 

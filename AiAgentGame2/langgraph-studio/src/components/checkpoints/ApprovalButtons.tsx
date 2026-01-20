@@ -83,7 +83,6 @@ export function ApprovalButtons({
   )
 }
 
-// Compact version for inline use
 export function ApprovalButtonsCompact({
   onApprove,
   onReject,

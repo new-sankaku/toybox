@@ -22,7 +22,6 @@ export default function PhaseProgress(): JSX.Element {
   const { agents, setAgents } = useAgentStore()
   const [initialLoading, setInitialLoading] = useState(true)
 
-  // Initial data fetch only (no polling) - rely on WebSocket for updates
   useEffect(() => {
     if (!currentProject) {
       setProjectMetrics(null)
@@ -48,7 +47,6 @@ export default function PhaseProgress(): JSX.Element {
           currentPhase: metricsData.currentPhase,
           phaseName: metricsData.phaseName
         })
-        // Convert API format to store format
         const agentsConverted: Agent[] = agentsData.map(a => ({
           id: a.id,
           projectId: a.projectId,
@@ -89,7 +87,6 @@ export default function PhaseProgress(): JSX.Element {
     )
   }
 
-  // Calculate phase progress from metrics
   const metrics = projectMetrics
   const currentPhase = metrics?.currentPhase || currentProject.currentPhase || 1
   const overallProgress = metrics?.progressPercent || 0
@@ -100,7 +97,6 @@ export default function PhaseProgress(): JSX.Element {
     { id: 3, name: 'Phase 3', progress: currentPhase > 3 ? 100 : currentPhase === 3 ? overallProgress : 0, status: currentPhase === 3 ? 'current' : currentPhase > 3 ? 'completed' : 'pending' }
   ]
 
-  // Find running agent from store (filter by current project)
   const projectAgents = agents.filter(a => a.projectId === currentProject.id)
   const runningAgent = projectAgents.find(a => a.status === 'running')
   const currentAgentName = runningAgent ? ((runningAgent.metadata?.displayName as string) || runningAgent.type) : null

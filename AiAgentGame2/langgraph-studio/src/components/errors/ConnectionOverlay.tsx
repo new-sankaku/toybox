@@ -15,7 +15,6 @@ export function ConnectionOverlay({
   maxAttempts = 5,
   onManualReconnect
 }: ConnectionOverlayProps) {
-  // Only show for disconnected or reconnecting states
   if (status === 'connected' || status === 'connecting') {
     return null
   }

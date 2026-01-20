@@ -1,18 +1,15 @@
 export type CheckpointStatus = 'pending' | 'approved' | 'rejected' | 'revision_requested'
 
 export type CheckpointType =
-  // Phase 1
   | 'concept_review'
   | 'design_review'
   | 'scenario_review'
   | 'character_review'
   | 'world_review'
   | 'task_split_review'
-  // Phase 2
   | 'code_review'
   | 'asset_review'
   | 'integration_review'
-  // Phase 3
   | 'test_review'
   | 'final_review'
   | 'release_decision'

@@ -17,7 +17,6 @@ const queryClient = new QueryClient({
   }
 })
 
-// Re-export TabId for backward compatibility
 export type { TabId } from './stores/navigationStore'
 
 function App(): JSX.Element {
@@ -26,12 +25,10 @@ function App(): JSX.Element {
   const { fetchDefinitions } = useAgentDefinitionStore()
   const previousProjectIdRef = useRef<string | null>(null)
 
-  // Initialize WebSocket connection and fetch agent definitions
   useEffect(() => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
     websocketService.connect(backendUrl)
 
-    // Fetch agent definitions at startup
     fetchDefinitions()
 
     return () => {
@@ -39,16 +36,13 @@ function App(): JSX.Element {
     }
   }, [fetchDefinitions])
 
-  // Subscribe to project updates when project changes
   useEffect(() => {
     const projectId = currentProject?.id ?? null
 
-    // Unsubscribe from previous project
     if (previousProjectIdRef.current && previousProjectIdRef.current !== projectId) {
       websocketService.unsubscribeFromProject(previousProjectIdRef.current)
     }
 
-    // Subscribe to new project (service handles connection timing internally)
     if (projectId) {
       console.log('[App] Requesting WebSocket subscription for project:', projectId)
       websocketService.subscribeToProject(projectId)

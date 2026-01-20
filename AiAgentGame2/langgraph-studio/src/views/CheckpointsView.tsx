@@ -9,7 +9,6 @@ import { checkpointApi, type ApiCheckpoint } from '@/services/apiService'
 import type { Checkpoint, CheckpointType, CheckpointStatus } from '@/types/checkpoint'
 import { FolderOpen } from 'lucide-react'
 
-// Convert API checkpoint to frontend Checkpoint type
 function convertApiCheckpoint(apiCheckpoint: ApiCheckpoint): Checkpoint {
   return {
     id: apiCheckpoint.id,
@@ -20,7 +19,6 @@ function convertApiCheckpoint(apiCheckpoint: ApiCheckpoint): Checkpoint {
     description: apiCheckpoint.description || null,
     output: {
       documentType: apiCheckpoint.output?.format || 'markdown',
-      // Store the actual content string for display
       content: apiCheckpoint.output?.content
         ? (typeof apiCheckpoint.output.content === 'string'
             ? { text: apiCheckpoint.output.content }
@@ -45,20 +43,16 @@ export default function CheckpointsView(): JSX.Element {
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<Checkpoint | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
 
-  // Reset selection when tab is clicked (even if same tab)
-  // But NOT if we're navigating to a specific checkpoint
   useEffect(() => {
     if (!pendingCheckpointId) {
       setSelectedCheckpoint(null)
     }
   }, [tabResetCounter, pendingCheckpointId])
 
-  // Filter checkpoints for current project
   const projectCheckpoints = currentProject
     ? checkpoints.filter(cp => cp.projectId === currentProject.id)
     : []
 
-  // Auto-select checkpoint if navigating from dashboard
   useEffect(() => {
     if (pendingCheckpointId && projectCheckpoints.length > 0) {
       const checkpoint = projectCheckpoints.find(cp => cp.id === pendingCheckpointId)
@@ -69,7 +63,6 @@ export default function CheckpointsView(): JSX.Element {
     }
   }, [pendingCheckpointId, projectCheckpoints, clearPendingCheckpoint])
 
-  // Initial fetch checkpoints from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setCheckpoints([])
@@ -90,10 +83,8 @@ export default function CheckpointsView(): JSX.Element {
     }
 
     fetchCheckpoints()
-    // No polling - WebSocket events will update the store
   }, [currentProject?.id, setCheckpoints])
 
-  // Project not selected
   if (!currentProject) {
     return (
       <div className="p-4 animate-nier-fade-in">
@@ -120,13 +111,11 @@ export default function CheckpointsView(): JSX.Element {
     setSelectedCheckpoint(checkpoint)
   }
 
-  // Helper to find and select next pending checkpoint
   const selectNextPending = (updatedCheckpoints: Checkpoint[], currentId: string) => {
     const pendingCheckpoints = updatedCheckpoints.filter(
       cp => cp.status === 'pending' && cp.id !== currentId
     )
     if (pendingCheckpoints.length > 0) {
-      // Select the oldest pending checkpoint
       const nextPending = pendingCheckpoints.reduce((oldest, current) =>
         new Date(oldest.createdAt) < new Date(current.createdAt) ? oldest : current
       )
@@ -141,7 +130,6 @@ export default function CheckpointsView(): JSX.Element {
     const currentId = selectedCheckpoint.id
     try {
       await checkpointApi.resolve(selectedCheckpoint.id, 'approved')
-      // Refresh checkpoints and select next pending
       const data = await checkpointApi.listByProject(currentProject.id)
       const updatedCheckpoints = data.map(convertApiCheckpoint)
       setCheckpoints(updatedCheckpoints)
@@ -156,7 +144,6 @@ export default function CheckpointsView(): JSX.Element {
     const currentId = selectedCheckpoint.id
     try {
       await checkpointApi.resolve(selectedCheckpoint.id, 'rejected', reason)
-      // Refresh checkpoints and select next pending
       const data = await checkpointApi.listByProject(currentProject.id)
       const updatedCheckpoints = data.map(convertApiCheckpoint)
       setCheckpoints(updatedCheckpoints)
@@ -171,7 +158,6 @@ export default function CheckpointsView(): JSX.Element {
     const currentId = selectedCheckpoint.id
     try {
       await checkpointApi.resolve(selectedCheckpoint.id, 'revision_requested', feedback)
-      // Refresh checkpoints and select next pending
       const data = await checkpointApi.listByProject(currentProject.id)
       const updatedCheckpoints = data.map(convertApiCheckpoint)
       setCheckpoints(updatedCheckpoints)
@@ -185,9 +171,7 @@ export default function CheckpointsView(): JSX.Element {
     setSelectedCheckpoint(null)
   }
 
-  // Show review view if checkpoint is selected
   if (selectedCheckpoint) {
-    // Get latest checkpoint data from store
     const currentCheckpointData = projectCheckpoints.find(cp => cp.id === selectedCheckpoint.id) || selectedCheckpoint
     return (
       <CheckpointReviewView
@@ -200,7 +184,6 @@ export default function CheckpointsView(): JSX.Element {
     )
   }
 
-  // Show checkpoint list
   return (
     <CheckpointListView
       checkpoints={projectCheckpoints}

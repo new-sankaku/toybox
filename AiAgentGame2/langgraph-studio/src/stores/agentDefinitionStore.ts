@@ -2,16 +2,12 @@ import { create } from 'zustand'
 import { agentDefinitionApi, type AgentDefinition } from '@/services/apiService'
 
 interface AgentDefinitionState {
-  // State
+
   definitions: Record<string, AgentDefinition>
   loaded: boolean
   loading: boolean
   error: string | null
-
-  // Actions
   fetchDefinitions: () => Promise<void>
-
-  // Selectors
   getLabel: (type: string) => string
   getShortLabel: (type: string) => string
   getPhase: (type: string) => number
@@ -20,15 +16,12 @@ interface AgentDefinitionState {
 }
 
 export const useAgentDefinitionStore = create<AgentDefinitionState>((set, get) => ({
-  // Initial state
+
   definitions: {},
   loaded: false,
   loading: false,
   error: null,
-
-  // Actions
   fetchDefinitions: async () => {
-    // Skip if already loaded or loading
     if (get().loaded || get().loading) return
 
     set({ loading: true, error: null })
@@ -43,8 +36,6 @@ export const useAgentDefinitionStore = create<AgentDefinitionState>((set, get) =
       })
     }
   },
-
-  // Selectors
   getLabel: (type: string) => {
     const definitions = get().definitions
     return definitions[type]?.label || type
@@ -69,8 +60,6 @@ export const useAgentDefinitionStore = create<AgentDefinitionState>((set, get) =
     return get().definitions[type]
   },
 }))
-
-// Helper hooks
 export const useAgentLabel = (type: string) => {
   return useAgentDefinitionStore((state) => state.definitions[type]?.label || type)
 }

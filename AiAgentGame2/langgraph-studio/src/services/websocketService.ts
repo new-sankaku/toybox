@@ -32,7 +32,6 @@ interface ServerToClientEvents {
   'metrics:update': (data: { projectId: string; metrics: ProjectMetrics }) => void
 }
 
-// WebSocket Events to server
 interface ClientToServerEvents {
   'subscribe:project': (projectId: string) => void
   'unsubscribe:project': (projectId: string) => void

@@ -21,7 +21,6 @@ interface TokenTrackerProps {
   maxTokens?: number
 }
 
-// エージェント表示名を取得（agentName優先、なければagentType）
 const getDisplayName = (data: TokenData): string => {
   return data.agentName || data.agentType
 }

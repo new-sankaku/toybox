@@ -39,22 +39,16 @@ export interface ServiceZoneState {
   isActive: boolean
 }
 
-// 精霊の種類（5種類をローテーション）
 const SPIRIT_TYPES = ['spirit_fire', 'spirit_water', 'spirit_earth', 'spirit_light', 'spirit_wind'] as const
 
-// エージェントタイプと3Dモデルのマッピング（全て精霊モデルを使用）
 export const AGENT_MODEL_MAP: Record<AgentType, string> = {
-  // Phase 0: 企画
   concept: SPIRIT_TYPES[0],           // spirit_fire
-  // Phase 1: タスク分割1
   task_split_1: SPIRIT_TYPES[1],      // spirit_water
-  // Phase 2: 設計
   concept_detail: SPIRIT_TYPES[2],    // spirit_earth
   scenario: SPIRIT_TYPES[3],          // spirit_light
   world: SPIRIT_TYPES[4],             // spirit_wind
   game_design: SPIRIT_TYPES[0],       // spirit_fire
   tech_spec: SPIRIT_TYPES[1],         // spirit_water
-  // Phase 3: タスク分割2 + アセット
   task_split_2: SPIRIT_TYPES[2],      // spirit_earth
   asset_character: SPIRIT_TYPES[3],   // spirit_light
   asset_background: SPIRIT_TYPES[4],  // spirit_wind
@@ -63,19 +57,16 @@ export const AGENT_MODEL_MAP: Record<AgentType, string> = {
   asset_bgm: SPIRIT_TYPES[2],         // spirit_earth
   asset_voice: SPIRIT_TYPES[3],       // spirit_light
   asset_sfx: SPIRIT_TYPES[4],         // spirit_wind
-  // Phase 4: タスク分割3 + 実装
   task_split_3: SPIRIT_TYPES[0],      // spirit_fire
   code: SPIRIT_TYPES[1],              // spirit_water
   event: SPIRIT_TYPES[2],             // spirit_earth
   ui_integration: SPIRIT_TYPES[3],    // spirit_light
   asset_integration: SPIRIT_TYPES[4], // spirit_wind
-  // Phase 5: タスク分割4 + テスト
   task_split_4: SPIRIT_TYPES[0],      // spirit_fire
   unit_test: SPIRIT_TYPES[1],         // spirit_water
   integration_test: SPIRIT_TYPES[2]   // spirit_earth
 }
 
-// サービスタイプの設定
 export const SERVICE_CONFIG: Record<AIServiceType, { label: string; description: string }> = {
   llm: { label: 'LLM', description: 'Claude 3.5 Sonnet' },
   image: { label: '画像生成', description: 'DALL-E 3' },

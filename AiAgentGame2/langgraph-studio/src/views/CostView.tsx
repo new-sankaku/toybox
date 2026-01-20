@@ -8,13 +8,11 @@ import { metricsApi, agentApi, type ApiAgent, type ApiProjectMetrics } from '@/s
 import { formatNumber } from '@/lib/utils'
 import { FolderOpen } from 'lucide-react'
 
-// Pricing (Claude 3.5 Sonnet)
 const PRICING = {
   inputPer1K: 0.003,
   outputPer1K: 0.015
 }
 
-// 生成タイプの表示名
 const GENERATION_TYPE_NAMES: Record<string, string> = {
   llm: 'LLM（企画・設計）',
   image: '画像生成',
@@ -23,14 +21,12 @@ const GENERATION_TYPE_NAMES: Record<string, string> = {
   video: '動画生成'
 }
 
-// エージェントタイプからグループキーを取得
 function getGroupKey(type: string): string {
   if (type.endsWith('_leader')) return type.replace('_leader', '')
   if (type.endsWith('_worker')) return type.replace('_worker', '')
   return type
 }
 
-// コスト計算
 function calculateCost(input: number, output: number): number {
   return (input / 1000) * PRICING.inputPer1K + (output / 1000) * PRICING.outputPer1K
 }
@@ -42,7 +38,6 @@ export default function CostView(): JSX.Element {
   const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
   const [loading, setLoading] = useState(false)
 
-  // Initial fetch data from API (no polling - rely on WebSocket for updates)
   useEffect(() => {
     if (!currentProject) {
       setAgents([])
@@ -69,11 +64,8 @@ export default function CostView(): JSX.Element {
     }
 
     fetchData()
-    // Note: WebSocket events should update stores
-    // Currently only initial fetch, no polling
   }, [currentProject?.id])
 
-  // エージェント別グループ集計
   const agentGroups = useMemo(() => {
     const groupMap = new Map<string, { input: number; output: number }>()
 
@@ -95,7 +87,6 @@ export default function CostView(): JSX.Element {
     }))
   }, [agents, getLabel])
 
-  // 全体合計
   const totals = useMemo(() => {
     const input = agents.reduce((sum, a) => sum + (a.inputTokens || 0), 0)
     const output = agents.reduce((sum, a) => sum + (a.outputTokens || 0), 0)
@@ -108,7 +99,6 @@ export default function CostView(): JSX.Element {
 
   const budgetLimit = 10.0
 
-  // Project not selected
   if (!currentProject) {
     return (
       <div className="p-4 animate-nier-fade-in">

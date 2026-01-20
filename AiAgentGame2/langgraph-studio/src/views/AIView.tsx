@@ -8,9 +8,7 @@ import { FolderOpen, Pause } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import type { AgentType } from '@/types/agent'
 
-// エージェントタイプごとの適切なサービスマッピング
 const AGENT_SERVICE_MAP: Record<AgentType, AIServiceType> = {
-  // 企画・設計系 → LLM
   concept: 'llm',
   task_split_1: 'llm',
   concept_detail: 'llm',
@@ -21,26 +19,21 @@ const AGENT_SERVICE_MAP: Record<AgentType, AIServiceType> = {
   task_split_2: 'llm',
   task_split_3: 'llm',
   task_split_4: 'llm',
-  // 実装・テスト系 → LLM
   code: 'llm',
   event: 'llm',
   ui_integration: 'llm',
   asset_integration: 'llm',
   unit_test: 'llm',
   integration_test: 'llm',
-  // ビジュアルアセット → 画像生成
   asset_character: 'image',
   asset_background: 'image',
   asset_ui: 'image',
   asset_effect: 'image',
-  // 音楽 → 音楽生成
   asset_bgm: 'music',
-  // 音声・効果音 → 音声生成
   asset_voice: 'audio',
   asset_sfx: 'audio'
 }
 
-// サービスごとの生成時間範囲（ミリ秒）
 const SERVICE_DURATION: Record<AIServiceType, { min: number; max: number }> = {
   llm: { min: 3000, max: 8000 },
   image: { min: 10000, max: 20000 },
@@ -48,7 +41,6 @@ const SERVICE_DURATION: Record<AIServiceType, { min: number; max: number }> = {
   audio: { min: 5000, max: 15000 }
 }
 
-// エージェントタイプごとのリアルなタスク例
 const AGENT_TASKS: Record<AgentType, string[]> = {
   concept: [
     'ゲームの基本コンセプトを策定',
@@ -138,7 +130,6 @@ const AGENT_TASKS: Record<AgentType, string[]> = {
   ]
 }
 
-// Mock data for demonstration - 初期状態は完了済みリクエストのみ
 const mockRequests: AIRequest[] = [
   {
     id: 'ai-001',
@@ -249,7 +240,6 @@ export default function AIView(): JSX.Element {
   const [activeAgents, setActiveAgents] = useState<Set<AgentType>>(new Set())
   const [selectedCharacter, setSelectedCharacter] = useState<CharacterState | null>(null)
 
-  // プロジェクト選択時にリクエストを読み込み、初期エージェントを設定
   useEffect(() => {
     if (!currentProject) {
       setRequests([])
@@ -258,7 +248,6 @@ export default function AIView(): JSX.Element {
     }
     setRequests(mockRequests)
 
-    // 初期エージェントを設定（デモ用）
     const initialAgents = new Set<AgentType>([
       'concept',
       'scenario',
@@ -271,22 +260,17 @@ export default function AIView(): JSX.Element {
     setActiveAgents(initialAgents)
   }, [currentProject?.id])
 
-  // 自動アクティビティシミュレーション（バックエンド駆動のシミュレーション）
   useEffect(() => {
     if (!currentProject) return
 
     const simulateActivity = () => {
       setActiveAgents((currentActiveAgents) => {
-        // アイドル状態のエージェントを見つける
         const activeAgentList = Array.from(currentActiveAgents)
         if (activeAgentList.length === 0) return currentActiveAgents
 
-        // ランダムにエージェントを選択
         const randomAgent = activeAgentList[Math.floor(Math.random() * activeAgentList.length)]
 
-        // 現在のリクエスト状態を確認
         setRequests((prevRequests) => {
-          // このエージェントが既に処理中かチェック
           const isAlreadyProcessing = prevRequests.some(
             (r) => r.agentType === randomAgent && r.status === 'processing'
           )
@@ -295,11 +279,9 @@ export default function AIView(): JSX.Element {
             return prevRequests
           }
 
-          // エージェントタイプに適したサービスを取得
           const serviceType = AGENT_SERVICE_MAP[randomAgent]
           const serviceConfig = SERVICE_CONFIG[serviceType]
 
-          // このエージェント用のタスク一覧からランダムに選択
           const tasks = AGENT_TASKS[randomAgent] || [`${randomAgent}のタスク実行`]
           const taskInput = tasks[Math.floor(Math.random() * tasks.length)]
 
@@ -314,7 +296,6 @@ export default function AIView(): JSX.Element {
             createdAt: new Date().toISOString()
           }
 
-          // サービスタイプに応じた生成時間
           const duration = SERVICE_DURATION[serviceType]
           const completionTime = duration.min + Math.random() * (duration.max - duration.min)
 
@@ -346,10 +327,8 @@ export default function AIView(): JSX.Element {
       })
     }
 
-    // 3-6秒ごとにシミュレーション実行
     const intervalId = setInterval(simulateActivity, 3000 + Math.random() * 3000)
 
-    // 初回は1秒後に開始
     const initialTimeoutId = setTimeout(simulateActivity, 1000)
 
     return () => {
@@ -358,15 +337,12 @@ export default function AIView(): JSX.Element {
     }
   }, [currentProject?.id])
 
-  // リクエストからキャラクターの状態を生成
   const characters = useMemo((): CharacterState[] => {
     const characterMap = new Map<string, CharacterState>()
 
-    // アクティブなエージェントごとにキャラクターを作成
     activeAgents.forEach((agentType) => {
       const agentId = `agent-${agentType}`
 
-      // このエージェントの処理中リクエストを探す
       const processingRequest = requests.find(
         (r) => r.agentType === agentType && r.status === 'processing'
       )
@@ -395,7 +371,6 @@ export default function AIView(): JSX.Element {
     return Array.from(characterMap.values())
   }, [activeAgents, requests])
 
-  // エージェントの削除
   const removeAgent = useCallback((agentType: AgentType) => {
     setActiveAgents((prev) => {
       const next = new Set(prev)
@@ -404,7 +379,6 @@ export default function AIView(): JSX.Element {
     })
   }, [])
 
-  // キャラクタークリック時のハンドラ
   const handleCharacterClick = useCallback((character: CharacterState) => {
     setSelectedCharacter(character)
   }, [])

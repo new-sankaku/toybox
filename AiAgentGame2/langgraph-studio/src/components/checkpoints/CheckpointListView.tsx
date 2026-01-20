@@ -35,14 +35,12 @@ export default function CheckpointListView({
   const filteredCheckpoints = useMemo(() => {
     let filtered = checkpoints
 
-    // Apply status filter
     if (filterStatus === 'incomplete') {
       filtered = filtered.filter(cp => cp.status !== 'approved')
     } else if (filterStatus !== 'all') {
       filtered = filtered.filter(cp => cp.status === filterStatus)
     }
 
-    // Apply sort
     filtered = [...filtered].sort((a, b) => {
       const dateA = new Date(a.createdAt).getTime()
       const dateB = new Date(b.createdAt).getTime()

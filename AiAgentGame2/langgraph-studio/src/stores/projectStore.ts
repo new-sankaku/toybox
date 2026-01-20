@@ -2,13 +2,11 @@ import { create } from 'zustand'
 import type { Project } from '@/types/project'
 
 interface ProjectState {
-  // State
+
   currentProject: Project | null
   projects: Project[]
   isLoading: boolean
   error: string | null
-
-  // Actions
   setCurrentProject: (project: Project | null) => void
   setProjects: (projects: Project[]) => void
   addProject: (project: Project) => void
