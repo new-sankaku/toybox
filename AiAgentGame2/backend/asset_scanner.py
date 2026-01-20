@@ -1,18 +1,18 @@
 import os
 import uuid
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List,Dict,Optional
 from pathlib import Path
 
 
-IMAGE_EXTENSIONS = {'.webp', '.png', '.jpg', '.jpeg', '.gif', '.bmp'}
-AUDIO_EXTENSIONS = {'.mp3', '.wav', '.ogg', '.flac', '.m4a'}
-VIDEO_EXTENSIONS = {'.mp4', '.webm', '.avi', '.mov', '.mkv'}
-DOCUMENT_EXTENSIONS = {'.md', '.txt', '.json', '.yaml', '.yml'}
-CODE_EXTENSIONS = {'.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css'}
+IMAGE_EXTENSIONS = {'.webp','.png','.jpg','.jpeg','.gif','.bmp'}
+AUDIO_EXTENSIONS = {'.mp3','.wav','.ogg','.flac','.m4a'}
+VIDEO_EXTENSIONS = {'.mp4','.webm','.avi','.mov','.mkv'}
+DOCUMENT_EXTENSIONS = {'.md','.txt','.json','.yaml','.yml'}
+CODE_EXTENSIONS = {'.py','.js','.ts','.tsx','.jsx','.html','.css'}
 
 
-def get_file_type(filename: str) -> str:
+def get_file_type(filename:str)->str:
     ext = Path(filename).suffix.lower()
     if ext in IMAGE_EXTENSIONS:
         return 'image'
@@ -27,7 +27,7 @@ def get_file_type(filename: str) -> str:
     return 'other'
 
 
-def format_file_size(size_bytes: int) -> str:
+def format_file_size(size_bytes:int)->str:
     if size_bytes < 1024:
         return f"{size_bytes}B"
     elif size_bytes < 1024 * 1024:
@@ -37,18 +37,18 @@ def format_file_size(size_bytes: int) -> str:
     return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
 
 
-def scan_directory(base_path: str, subdir: str) -> List[Dict]:
+def scan_directory(base_path:str,subdir:str)->List[Dict]:
     assets = []
-    scan_path = os.path.join(base_path, subdir)
+    scan_path = os.path.join(base_path,subdir)
 
     if not os.path.exists(scan_path):
         print(f"[AssetScanner] Directory not found: {scan_path}")
         return assets
 
-    for root, dirs, files in os.walk(scan_path):
+    for root,dirs,files in os.walk(scan_path):
         for filename in files:
-            file_path = os.path.join(root, filename)
-            relative_path = os.path.relpath(file_path, base_path)
+            file_path = os.path.join(root,filename)
+            relative_path = os.path.relpath(file_path,base_path)
 
             try:
                 stat = os.stat(file_path)
@@ -58,18 +58,18 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
                     folder_name = ""
 
                 asset = {
-                    "id": f"asset-{uuid.uuid4().hex[:8]}",
-                    "name": filename,
-                    "type": file_type,
-                    "agent": folder_name or subdir.capitalize(),
-                    "size": format_file_size(stat.st_size),
-                    "createdAt": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                    "url": f"/testdata/{relative_path.replace(os.sep, '/')}",
-                    "thumbnail": f"/testdata/{relative_path.replace(os.sep, '/')}" if file_type == 'image' else None,
-                    "duration": None,
-                    "approvalStatus": "pending",
-                    "filePath": file_path,
-                    "relativePath": relative_path.replace(os.sep, '/'),
+                    "id":f"asset-{uuid.uuid4().hex[:8]}",
+                    "name":filename,
+                    "type":file_type,
+                    "agent":folder_name or subdir.capitalize(),
+                    "size":format_file_size(stat.st_size),
+                    "createdAt":datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "url":f"/testdata/{relative_path.replace(os.sep, '/')}",
+                    "thumbnail":f"/testdata/{relative_path.replace(os.sep, '/')}" if file_type == 'image' else None,
+                    "duration":None,
+                    "approvalStatus":"pending",
+                    "filePath":file_path,
+                    "relativePath":relative_path.replace(os.sep,'/'),
                 }
                 assets.append(asset)
             except Exception as e:
@@ -78,10 +78,10 @@ def scan_directory(base_path: str, subdir: str) -> List[Dict]:
     return assets
 
 
-def scan_all_testdata(testdata_path: str) -> List[Dict]:
+def scan_all_testdata(testdata_path:str)->List[Dict]:
     all_assets = []
-    for subdir in ['image', 'mp3', 'movie']:
-        assets = scan_directory(testdata_path, subdir)
+    for subdir in ['image','mp3','movie']:
+        assets = scan_directory(testdata_path,subdir)
         all_assets.extend(assets)
         print(f"[AssetScanner] Found {len(assets)} files in {subdir}/")
 
@@ -89,15 +89,15 @@ def scan_all_testdata(testdata_path: str) -> List[Dict]:
     return all_assets
 
 
-def get_testdata_path() -> str:
+def get_testdata_path()->str:
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(backend_dir)
-    testdata_path = os.path.join(project_root, 'testdata')
+    testdata_path = os.path.join(project_root,'testdata')
     return testdata_path
 
 
 if __name__ == "__main__":
-    # Test scan
+
     testdata_path = get_testdata_path()
     print(f"Scanning: {testdata_path}")
     assets = scan_all_testdata(testdata_path)
