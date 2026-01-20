@@ -2,6 +2,8 @@ export*from'./project'
 export*from'./agent'
 export*from'./checkpoint'
 export*from'./websocket'
+export*from'./intervention'
+export*from'./uploadedFile'
 
 export interface ElectronAPI{
  backend:{

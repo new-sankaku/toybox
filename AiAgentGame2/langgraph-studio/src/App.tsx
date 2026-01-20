@@ -2,7 +2,7 @@ import{useEffect,useRef}from'react'
 import{QueryClient,QueryClientProvider}from'@tanstack/react-query'
 import AppLayout from'./components/layout/AppLayout'
 import DashboardView from'./components/dashboard/DashboardView'
-import{ProjectView,CheckpointsView,AgentsView,LogsView,DataView,AIView,CostView,ConfigView}from'./views'
+import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,AIView,CostView,ConfigView}from'./views'
 import{useNavigationStore}from'./stores/navigationStore'
 import{useProjectStore}from'./stores/projectStore'
 import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
@@ -57,6 +57,8 @@ function App():JSX.Element{
     return<ProjectView/>
    case'checkpoints':
     return<CheckpointsView/>
+   case'intervention':
+    return<InterventionView/>
    case'system':
     return<DashboardView/>
    case'agents':

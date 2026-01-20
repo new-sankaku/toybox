@@ -20,6 +20,8 @@ class TestDataStore:
         self.assets: Dict[str, List[Dict]] = {}  # Per project assets
         self.subscriptions: Dict[str, set] = {}
         self.quality_settings: Dict[str, Dict[str, QualityCheckConfig]] = {}  # Per project
+        self.interventions: Dict[str, Dict] = {}  # Human interventions
+        self.uploaded_files: Dict[str, Dict] = {}  # Uploaded files
 
         # Simulation state
         self._simulation_running = False
@@ -1509,3 +1511,148 @@ class TestDataStore:
     def get_quality_setting_for_agent(self, project_id: str, agent_type: str) -> QualityCheckConfig:
         settings = self.get_quality_settings(project_id)
         return settings.get(agent_type, QualityCheckConfig())
+
+    # ===== Intervention Methods =====
+
+    def get_interventions_by_project(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return [i for i in self.interventions.values() if i["projectId"] == project_id]
+
+    def get_intervention(self, intervention_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.interventions.get(intervention_id)
+
+    def create_intervention(
+        self,
+        project_id: str,
+        target_type: str,
+        target_agent_id: Optional[str],
+        priority: str,
+        message: str,
+        attached_file_ids: List[str]
+    ) -> Dict:
+        with self._lock:
+            intervention_id = f"int-{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
+            intervention = {
+                "id": intervention_id,
+                "projectId": project_id,
+                "targetType": target_type,
+                "targetAgentId": target_agent_id,
+                "priority": priority,
+                "message": message,
+                "attachedFileIds": attached_file_ids,
+                "status": "pending",
+                "createdAt": now,
+                "deliveredAt": None,
+                "acknowledgedAt": None,
+                "processedAt": None
+            }
+            self.interventions[intervention_id] = intervention
+
+            # Add system log
+            target_desc = "全エージェント" if target_type == "all" else f"エージェント {target_agent_id}"
+            priority_desc = "緊急" if priority == "urgent" else "通常"
+            self._add_system_log(
+                project_id, "info", "Human",
+                f"[{priority_desc}] {target_desc}への介入: {message[:50]}..."
+            )
+
+            return intervention
+
+    def acknowledge_intervention(self, intervention_id: str) -> Optional[Dict]:
+        with self._lock:
+            if intervention_id not in self.interventions:
+                return None
+            intervention = self.interventions[intervention_id]
+            now = datetime.now().isoformat()
+            intervention["status"] = "acknowledged"
+            intervention["acknowledgedAt"] = now
+            return intervention
+
+    def process_intervention(self, intervention_id: str) -> Optional[Dict]:
+        with self._lock:
+            if intervention_id not in self.interventions:
+                return None
+            intervention = self.interventions[intervention_id]
+            now = datetime.now().isoformat()
+            intervention["status"] = "processed"
+            intervention["processedAt"] = now
+
+            # Add system log
+            self._add_system_log(
+                intervention["projectId"], "info", "System",
+                f"介入処理完了: {intervention['message'][:30]}..."
+            )
+
+            return intervention
+
+    def deliver_intervention(self, intervention_id: str) -> Optional[Dict]:
+        with self._lock:
+            if intervention_id not in self.interventions:
+                return None
+            intervention = self.interventions[intervention_id]
+            now = datetime.now().isoformat()
+            intervention["status"] = "delivered"
+            intervention["deliveredAt"] = now
+            return intervention
+
+    # ===== Uploaded File Methods =====
+
+    def get_uploaded_files_by_project(self, project_id: str) -> List[Dict]:
+        with self._lock:
+            return [f for f in self.uploaded_files.values() if f["projectId"] == project_id]
+
+    def get_uploaded_file(self, file_id: str) -> Optional[Dict]:
+        with self._lock:
+            return self.uploaded_files.get(file_id)
+
+    def create_uploaded_file(
+        self,
+        project_id: str,
+        filename: str,
+        original_filename: str,
+        mime_type: str,
+        category: str,
+        size_bytes: int,
+        description: str
+    ) -> Dict:
+        with self._lock:
+            file_id = f"file-{uuid.uuid4().hex[:8]}"
+            now = datetime.now().isoformat()
+            uploaded_file = {
+                "id": file_id,
+                "projectId": project_id,
+                "filename": filename,
+                "originalFilename": original_filename,
+                "mimeType": mime_type,
+                "category": category,
+                "sizeBytes": size_bytes,
+                "status": "ready",
+                "description": description,
+                "uploadedAt": now,
+                "url": f"/uploads/{project_id}/{filename}"
+            }
+            self.uploaded_files[file_id] = uploaded_file
+
+            # Add system log
+            self._add_system_log(
+                project_id, "info", "Upload",
+                f"ファイルアップロード: {original_filename} ({category})"
+            )
+
+            return uploaded_file
+
+    def delete_uploaded_file(self, file_id: str) -> bool:
+        with self._lock:
+            if file_id in self.uploaded_files:
+                del self.uploaded_files[file_id]
+                return True
+            return False
+
+    def update_uploaded_file(self, file_id: str, data: Dict) -> Optional[Dict]:
+        with self._lock:
+            if file_id not in self.uploaded_files:
+                return None
+            self.uploaded_files[file_id].update(data)
+            return self.uploaded_files[file_id]
