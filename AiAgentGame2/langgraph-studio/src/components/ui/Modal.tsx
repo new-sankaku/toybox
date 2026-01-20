@@ -10,12 +10,12 @@ export interface ModalProps{
  title?:string
  children:ReactNode
  footer?:ReactNode
- size?:'sm' | 'md' | 'lg' | 'xl'
+ size?:'sm'|'md'|'lg'|'xl'
  closeOnOverlay?:boolean
  closeOnEscape?:boolean
 }
 
-const sizeClasses = {
+const sizeClasses={
  sm:'max-w-sm',
  md:'max-w-md',
  lg:'max-w-2xl',
@@ -28,27 +28,27 @@ export function Modal({
  title,
  children,
  footer,
- size = 'md',
- closeOnOverlay = true,
- closeOnEscape = true
+ size='md',
+ closeOnOverlay=true,
+ closeOnEscape=true
 }:ModalProps){
- const handleEscape = useCallback(
-  (e:KeyboardEvent) => {
-   if(closeOnEscape && e.key === 'Escape'){
+ const handleEscape=useCallback(
+  (e:KeyboardEvent)=>{
+   if(closeOnEscape&&e.key==='Escape'){
     onClose()
    }
   },
   [closeOnEscape,onClose]
- )
+)
 
- useEffect(() => {
+ useEffect(()=>{
   if(isOpen){
    document.addEventListener('keydown',handleEscape)
-   document.body.style.overflow = 'hidden'
+   document.body.style.overflow='hidden'
   }
-  return() => {
+  return()=>{
    document.removeEventListener('keydown',handleEscape)
-   document.body.style.overflow = ''
+   document.body.style.overflow=''
   }
  },[isOpen,handleEscape])
 
@@ -57,14 +57,14 @@ export function Modal({
  return createPortal(
   <div
    className="nier-modal-overlay"
-   onClick={closeOnOverlay ? onClose : undefined}
+   onClick={closeOnOverlay?onClose : undefined}
   >
    <div
     className={cn('nier-modal',sizeClasses[size],'w-full mx-4')}
-    onClick={(e) => e.stopPropagation()}
+    onClick={(e)=>e.stopPropagation()}
    >
     {/* Header */}
-    {title && (
+    {title&&(
      <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-3">
       <h2 className="text-nier-h2 tracking-nier-wide">{title}</h2>
       <Button
@@ -73,10 +73,10 @@ export function Modal({
        onClick={onClose}
        className="text-nier-text-header hover:bg-white/10 h-8 w-8"
       >
-       <X size={18} />
+       <X size={18}/>
       </Button>
      </div>
-    )}
+)}
 
     {/* Content */}
     <div className="p-6 max-h-[60vh] overflow-y-auto">
@@ -84,13 +84,13 @@ export function Modal({
     </div>
 
     {/* Footer */}
-    {footer && (
+    {footer&&(
      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-nier-border-light bg-nier-bg-selected/50">
       {footer}
      </div>
-    )}
+)}
    </div>
   </div>,
   document.body
- )
+)
 }

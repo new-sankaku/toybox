@@ -7,8 +7,8 @@ export interface ElectronAPI{
  backend:{
   start:()=>Promise<{success:boolean;port?:number;error?:string}>
   stop:()=>Promise<{success:boolean}>
-  status:()=>Promise<{running:boolean;port:number | null}>
-  getPort:()=>Promise<number | null>
+  status:()=>Promise<{running:boolean;port:number|null}>
+  getPort:()=>Promise<number|null>
  }
  app:{
   getVersion:()=>Promise<string>

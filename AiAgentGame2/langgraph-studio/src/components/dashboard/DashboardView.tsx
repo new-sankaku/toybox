@@ -8,18 +8,18 @@ export default function DashboardView():JSX.Element{
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">DASHBOARD</h1>
-     <span className="nier-page-subtitle">- プロジェクト概要</span>
+     <span className="nier-page-subtitle">-プロジェクト概要</span>
     </div>
-    <div className="nier-page-header-right" />
+    <div className="nier-page-header-right"/>
    </div>
 
    {/* Workflow Diagram */}
-   <WorkflowDiagram />
+   <WorkflowDiagram/>
 
-   {/* Agent Workspace - Gamification view */}
+   {/* Agent Workspace-Gamification view */}
    <div className="mt-3">
-    <AgentWorkspace />
+    <AgentWorkspace/>
    </div>
   </div>
- )
+)
 }

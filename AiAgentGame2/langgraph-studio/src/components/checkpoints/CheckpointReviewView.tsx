@@ -16,8 +16,8 @@ interface CheckpointReviewViewProps{
  onClose:()=>void
 }
 
-type ViewMode = 'preview' | 'raw'
-type FeedbackAction = 'reject' | 'revision' | null
+type ViewMode='preview'|'raw'
+type FeedbackAction='reject'|'revision'|null
 
 export default function CheckpointReviewView({
  checkpoint,
@@ -26,28 +26,28 @@ export default function CheckpointReviewView({
  onRequestChanges,
  onClose
 }:CheckpointReviewViewProps):JSX.Element{
- const[viewMode,setViewMode] = useState<ViewMode>('preview')
- const[feedback,setFeedback] = useState('')
- const[showFeedbackForm,setShowFeedbackForm] = useState(false)
- const[feedbackAction,setFeedbackAction] = useState<FeedbackAction>(null)
+ const[viewMode,setViewMode]=useState<ViewMode>('preview')
+ const[feedback,setFeedback]=useState('')
+ const[showFeedbackForm,setShowFeedbackForm]=useState(false)
+ const[feedbackAction,setFeedbackAction]=useState<FeedbackAction>(null)
 
- const getWaitingTime = () => {
-  const created = new Date(checkpoint.createdAt)
-  const now = new Date()
-  const diffMs = now.getTime() - created.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
+ const getWaitingTime=()=>{
+  const created=new Date(checkpoint.createdAt)
+  const now=new Date()
+  const diffMs=now.getTime()-created.getTime()
+  const diffMins=Math.floor(diffMs/60000)
 
-  if(diffMins < 60)return`${diffMins}分`
-  const hours = Math.floor(diffMins / 60)
-  const mins = diffMins % 60
+  if(diffMins<60)return`${diffMins}分`
+  const hours=Math.floor(diffMins/60)
+  const mins=diffMins%60
   return`${hours}時間${mins}分`
  }
 
- const handleApprove = () => {
+ const handleApprove=()=>{
   onApprove()
  }
 
- const handleReject = () => {
+ const handleReject=()=>{
   if(feedback.trim()){
    onReject(feedback)
   }else{
@@ -56,7 +56,7 @@ export default function CheckpointReviewView({
   }
  }
 
- const handleRequestChanges = () => {
+ const handleRequestChanges=()=>{
   if(feedback.trim()){
    onRequestChanges(feedback)
   }else{
@@ -65,78 +65,78 @@ export default function CheckpointReviewView({
   }
  }
 
- const handleSubmitFeedback = () => {
+ const handleSubmitFeedback=()=>{
   if(!feedback.trim())return
 
-  if(feedbackAction === 'reject'){
+  if(feedbackAction==='reject'){
    onReject(feedback)
-  }else if(feedbackAction === 'revision'){
+  }else if(feedbackAction==='revision'){
    onRequestChanges(feedback)
   }
  }
 
- const handleCancelFeedback = () => {
+ const handleCancelFeedback=()=>{
   setShowFeedbackForm(false)
   setFeedbackAction(null)
   setFeedback('')
  }
 
- const getContentString = (content:unknown):string => {
-  if(typeof content === 'string'){
+ const getContentString=(content:unknown):string=>{
+  if(typeof content==='string'){
    return content
   }
-  if(content && typeof content === 'object'){
-   const obj = content as Record<string,unknown>
-   if(typeof obj.text === 'string'){
+  if(content&&typeof content==='object'){
+   const obj=content as Record<string,unknown>
+   if(typeof obj.text==='string'){
     return obj.text
    }
   }
   return JSON.stringify(content,null,2)
  }
 
- const renderOutput = () => {
-  const{output} = checkpoint
+ const renderOutput=()=>{
+  const{output}=checkpoint
 
-  if(viewMode === 'raw'){
-   const rawContent = typeof output.content === 'string'
-    ? output.content
+  if(viewMode==='raw'){
+   const rawContent=typeof output.content==='string'
+    ?output.content
     : JSON.stringify(output.content,null,2)
    return(
     <CodeViewer
-     code={rawContent || '(no content)'}
-     language={typeof output.content === 'string' ? 'markdown' : 'json'}
-     filename={typeof output.content === 'string' ? 'output.md' : 'output.json'}
+     code={rawContent||'(no content)'}
+     language={typeof output.content==='string'?'markdown' : 'json'}
+     filename={typeof output.content==='string'?'output.md' : 'output.json'}
     />
-   )
+)
   }
 
-  const format = output.format || output.documentType
+  const format=output.format||output.documentType
 
-  if(format === 'markdown' || checkpoint.type.includes('review')){
+  if(format==='markdown'||checkpoint.type.includes('review')){
    return(
     <DocumentViewer
      content={getContentString(output.content)}
      title={checkpoint.title}
     />
-   )
+)
   }
 
-  if(format === 'code' || output.type === 'code'){
+  if(format==='code'||output.type==='code'){
    return(
     <CodeViewer
      code={getContentString(output.content)}
      language="typescript"
      filename="output.ts"
     />
-   )
+)
   }
 
   return(
    <DocumentViewer
-    content={output.summary || getContentString(output.content)}
+    content={output.summary||getContentString(output.content)}
     title={checkpoint.title}
    />
-  )
+)
  }
 
  return(
@@ -145,16 +145,16 @@ export default function CheckpointReviewView({
    <div className="flex items-center justify-between mb-6">
     <div>
      <div className="flex items-center gap-3 mb-2">
-      <div className="w-1.5 h-6 bg-nier-accent-red" />
+      <div className="w-1.5 h-6 bg-nier-accent-red"/>
       <h1 className="text-nier-h1 font-medium tracking-nier-wide">
        CHECKPOINT
       </h1>
-      <span className="text-nier-text-light">- {checkpoint.title}</span>
+      <span className="text-nier-text-light">-{checkpoint.title}</span>
      </div>
      <div className="flex items-center gap-4 text-nier-small text-nier-text-light ml-4">
       <span>Phase: {checkpoint.type.split('_')[0]}</span>
       <span>|</span>
-      <span>待機時間: <span className="text-nier-accent-red">{getWaitingTime()}</span></span>
+      <span>待機時間:<span className="text-nier-accent-red">{getWaitingTime()}</span></span>
      </div>
     </div>
     <Button variant="ghost" onClick={onClose}>
@@ -173,22 +173,22 @@ export default function CheckpointReviewView({
         <button
          className={cn(
           'px-3 py-1 text-nier-caption tracking-nier transition-colors',
-          viewMode === 'preview'
-           ? 'bg-nier-bg-selected'
+          viewMode==='preview'
+           ?'bg-nier-bg-selected'
            : 'hover:bg-nier-bg-selected'
-         )}
-         onClick={() => setViewMode('preview')}
+)}
+         onClick={()=>setViewMode('preview')}
         >
          PREVIEW
         </button>
         <button
          className={cn(
           'px-3 py-1 text-nier-caption tracking-nier transition-colors',
-          viewMode === 'raw'
-           ? 'bg-nier-bg-selected'
+          viewMode==='raw'
+           ?'bg-nier-bg-selected'
            : 'hover:bg-nier-bg-selected'
-         )}
-         onClick={() => setViewMode('raw')}
+)}
+         onClick={()=>setViewMode('raw')}
         >
          RAW
         </button>
@@ -205,7 +205,7 @@ export default function CheckpointReviewView({
        <div className="flex items-center gap-6 text-nier-small text-nier-text-light">
         <span>Tokens: {checkpoint.output.tokensUsed?.toLocaleString() ?? '-'}</span>
         <span>|</span>
-        <span>生成時間: {checkpoint.output.generationTimeMs ? `${(checkpoint.output.generationTimeMs / 1000).toFixed(1)}秒` : '-'}</span>
+        <span>生成時間: {checkpoint.output.generationTimeMs?`${(checkpoint.output.generationTimeMs/1000).toFixed(1)}秒` : '-'}</span>
         <span>|</span>
         <span>作成: {new Date(checkpoint.createdAt).toLocaleString('ja-JP')}</span>
        </div>
@@ -229,7 +229,7 @@ export default function CheckpointReviewView({
         <div className="nier-status-row">
          <span className="nier-status-label">状態:</span>
          <span className="nier-status-value text-nier-accent-yellow">
-          {checkpoint.status === 'pending' ? '承認待ち' : checkpoint.status}
+          {checkpoint.status==='pending'?'承認待ち' : checkpoint.status}
          </span>
         </div>
        </div>
@@ -237,11 +237,11 @@ export default function CheckpointReviewView({
      </Card>
 
      {/* Feedback Form */}
-     {showFeedbackForm && (
+     {showFeedbackForm&&(
       <Card>
        <CardHeader>
         <DiamondMarker>
-         {feedbackAction === 'reject' ? '却下理由' : '変更要求内容'}
+         {feedbackAction==='reject'?'却下理由' : '変更要求内容'}
         </DiamondMarker>
        </CardHeader>
        <CardContent className="space-y-3">
@@ -249,17 +249,17 @@ export default function CheckpointReviewView({
          className="nier-input min-h-[120px] resize-none"
          placeholder="フィードバックを入力..."
          value={feedback}
-         onChange={(e) => setFeedback(e.target.value)}
+         onChange={(e)=>setFeedback(e.target.value)}
          autoFocus
         />
         <div className="flex gap-2">
          <Button
-          variant={feedbackAction === 'reject' ? 'danger' : 'default'}
+          variant={feedbackAction==='reject'?'danger' : 'default'}
           className="flex-1 gap-2"
           onClick={handleSubmitFeedback}
           disabled={!feedback.trim()}
          >
-          <Send size={16} />
+          <Send size={16}/>
           送信
          </Button>
          <Button
@@ -267,13 +267,13 @@ export default function CheckpointReviewView({
           className="gap-2"
           onClick={handleCancelFeedback}
          >
-          <X size={16} />
+          <X size={16}/>
           キャンセル
          </Button>
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Action Buttons */}
      <Card>
@@ -289,7 +289,7 @@ export default function CheckpointReviewView({
         className="w-full justify-start gap-3"
         onClick={handleApprove}
        >
-        <CheckCircle size={18} />
+        <CheckCircle size={18}/>
         承認
        </Button>
 
@@ -297,7 +297,7 @@ export default function CheckpointReviewView({
         className="w-full justify-start gap-3"
         onClick={handleRequestChanges}
        >
-        <RotateCcw size={18} />
+        <RotateCcw size={18}/>
         変更を要求
        </Button>
 
@@ -306,24 +306,24 @@ export default function CheckpointReviewView({
         className="w-full justify-start gap-3"
         onClick={handleReject}
        >
-        <XCircle size={18} />
+        <XCircle size={18}/>
         却下
        </Button>
 
-       {!showFeedbackForm && (
+       {!showFeedbackForm&&(
         <Button
          variant="ghost"
          className="w-full justify-start gap-3 text-nier-text-light"
-         onClick={() => setShowFeedbackForm(true)}
+         onClick={()=>setShowFeedbackForm(true)}
         >
-         <MessageSquare size={18} />
+         <MessageSquare size={18}/>
          コメントを追加
         </Button>
-       )}
+)}
       </CardContent>
      </Card>
     </div>
    </div>
   </div>
- )
+)
 }

@@ -8,10 +8,10 @@ export interface ProgressProps
  indicatorClassName?:string
 }
 
-const Progress = React.forwardRef<
+const Progress=React.forwardRef<
  React.ElementRef<typeof ProgressPrimitive.Root>,
  ProgressProps
->(({className,value = 0,indicatorClassName,...props},ref) => (
+>(({className,value=0,indicatorClassName,...props},ref)=>(
  <ProgressPrimitive.Root
   ref={ref}
   className={cn('nier-progress',className)}
@@ -23,6 +23,6 @@ const Progress = React.forwardRef<
   />
  </ProgressPrimitive.Root>
 ))
-Progress.displayName = 'Progress'
+Progress.displayName='Progress'
 
 export{Progress}

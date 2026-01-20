@@ -11,7 +11,7 @@ interface ConfigSection{
  label:string
 }
 
-const configSections:ConfigSection[] = [
+const configSections:ConfigSection[]=[
  {id:'api',label:'API設定'},
  {id:'model',label:'モデル設定'},
  {id:'cost',label:'コスト設定'},
@@ -22,10 +22,10 @@ const configSections:ConfigSection[] = [
 ]
 
 export default function ConfigView():JSX.Element{
- const[activeSection,setActiveSection] = useState('api')
- const[showApiKey,setShowApiKey] = useState(false)
+ const[activeSection,setActiveSection]=useState('api')
+ const[showApiKey,setShowApiKey]=useState(false)
 
- const[config,setConfig] = useState({
+ const[config,setConfig]=useState({
   apiProvider:'anthropic',
   apiKey:'',
   modelId:'claude-3-opus-20240229',
@@ -40,37 +40,37 @@ export default function ConfigView():JSX.Element{
   stopOnBudgetExceeded:true,
   inputTokenPrice:0.003,
   outputTokenPrice:0.015,
-  letterSpacing:'normal'as'tight' | 'normal' | 'wide',
+  letterSpacing:'normal'as'tight'|'normal'|'wide',
   lineHeight:1.0,
   padding:4
  })
 
- const handleLetterSpacingChange = (value:'tight' | 'normal' | 'wide') => {
+ const handleLetterSpacingChange=(value:'tight'|'normal'|'wide')=>{
   setConfig({...config,letterSpacing:value})
   document.documentElement.setAttribute('data-tracking',value)
  }
 
- const handleLineHeightChange = (value:number) => {
+ const handleLineHeightChange=(value:number)=>{
   setConfig({...config,lineHeight:value})
   document.documentElement.style.setProperty('--leading-base',String(value))
  }
 
- const handlePaddingChange = (value:number) => {
+ const handlePaddingChange=(value:number)=>{
   setConfig({...config,padding:value})
   document.documentElement.style.setProperty('--padding-card',`${value}px`)
-  document.documentElement.style.setProperty('--padding-section',`${value + 8}px`)
+  document.documentElement.style.setProperty('--padding-section',`${value+8}px`)
   document.documentElement.style.setProperty('--gap-base',`${value}px`)
  }
 
- useEffect(() => {
+ useEffect(()=>{
   document.documentElement.setAttribute('data-tracking',config.letterSpacing)
   document.documentElement.style.setProperty('--leading-base',String(config.lineHeight))
   document.documentElement.style.setProperty('--padding-card',`${config.padding}px`)
-  document.documentElement.style.setProperty('--padding-section',`${config.padding + 8}px`)
+  document.documentElement.style.setProperty('--padding-section',`${config.padding+8}px`)
   document.documentElement.style.setProperty('--gap-base',`${config.padding}px`)
  },[])
 
- const handleSave = () => {
+ const handleSave=()=>{
   console.log('Config saved:',config)
   // TODO: Implement actual save
  }
@@ -81,11 +81,11 @@ export default function ConfigView():JSX.Element{
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">CONFIG</h1>
-     <span className="nier-page-subtitle">- システム設定</span>
+     <span className="nier-page-subtitle">-システム設定</span>
     </div>
     <div className="nier-page-header-right">
      <Button variant="primary" size="sm" onClick={handleSave}>
-      <Save size={14} />
+      <Save size={14}/>
       <span className="ml-1.5">保存</span>
      </Button>
     </div>
@@ -99,20 +99,20 @@ export default function ConfigView():JSX.Element{
      </CardHeader>
      <CardContent className="p-0">
       <div className="divide-y divide-nier-border-light">
-       {configSections.map(section => (
+       {configSections.map(section=>(
         <button
          key={section.id}
          className={cn(
           'w-full px-4 py-3 text-left text-nier-small tracking-nier transition-colors',
-          activeSection === section.id
-           ? 'bg-nier-bg-selected text-nier-text-main'
+          activeSection===section.id
+           ?'bg-nier-bg-selected text-nier-text-main'
            : 'text-nier-text-light hover:bg-nier-bg-panel'
-         )}
-         onClick={() => setActiveSection(section.id)}
+)}
+         onClick={()=>setActiveSection(section.id)}
         >
          {section.label}
         </button>
-       ))}
+))}
       </div>
      </CardContent>
     </Card>
@@ -120,7 +120,7 @@ export default function ConfigView():JSX.Element{
     {/* Config Content */}
     <div className="col-span-3 space-y-4">
      {/* API Settings */}
-     {activeSection === 'api' && (
+     {activeSection==='api'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>API設定</DiamondMarker>
@@ -133,7 +133,7 @@ export default function ConfigView():JSX.Element{
          <select
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.apiProvider}
-          onChange={(e) => setConfig({...config,apiProvider:e.target.value})}
+          onChange={(e)=>setConfig({...config,apiProvider:e.target.value})}
          >
           <option value="anthropic">Anthropic (Claude)</option>
           <option value="openai">OpenAI (GPT)</option>
@@ -147,17 +147,17 @@ export default function ConfigView():JSX.Element{
          </label>
          <div className="flex gap-2">
           <input
-           type={showApiKey ? 'text' : 'password'}
+           type={showApiKey?'text' : 'password'}
            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
            placeholder="sk-..."
            value={config.apiKey}
-           onChange={(e) => setConfig({...config,apiKey:e.target.value})}
+           onChange={(e)=>setConfig({...config,apiKey:e.target.value})}
           />
           <button
            className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
-           onClick={() => setShowApiKey(!showApiKey)}
+           onClick={()=>setShowApiKey(!showApiKey)}
           >
-           {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+           {showApiKey?<EyeOff size={16}/>:<Eye size={16}/>}
           </button>
          </div>
          <p className="mt-1 text-nier-caption text-nier-text-light">
@@ -167,16 +167,16 @@ export default function ConfigView():JSX.Element{
 
         <div>
          <Button variant="ghost" size="sm">
-          <RefreshCw size={14} />
+          <RefreshCw size={14}/>
           <span className="ml-1.5">接続テスト</span>
          </Button>
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Model Settings */}
-     {activeSection === 'model' && (
+     {activeSection==='model'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>モデル設定</DiamondMarker>
@@ -189,7 +189,7 @@ export default function ConfigView():JSX.Element{
          <select
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.modelId}
-          onChange={(e) => setConfig({...config,modelId:e.target.value})}
+          onChange={(e)=>setConfig({...config,modelId:e.target.value})}
          >
           <optgroup label="Anthropic">
            <option value="claude-3-opus-20240229">Claude 3 Opus (最高品質)</option>
@@ -215,7 +215,7 @@ export default function ConfigView():JSX.Element{
           step="0.1"
           className="w-full"
           value={config.temperature}
-          onChange={(e) => setConfig({...config,temperature:parseFloat(e.target.value)})}
+          onChange={(e)=>setConfig({...config,temperature:parseFloat(e.target.value)})}
          />
          <div className="flex justify-between text-nier-caption text-nier-text-light">
           <span>0 (確定的)</span>
@@ -231,15 +231,15 @@ export default function ConfigView():JSX.Element{
           type="number"
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.maxTokens}
-          onChange={(e) => setConfig({...config,maxTokens:parseInt(e.target.value)})}
+          onChange={(e)=>setConfig({...config,maxTokens:parseInt(e.target.value)})}
          />
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Cost Settings */}
-     {activeSection === 'cost' && (
+     {activeSection==='cost'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>コスト設定</DiamondMarker>
@@ -258,7 +258,7 @@ export default function ConfigView():JSX.Element{
           step="0.01"
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.budgetLimit}
-          onChange={(e) => setConfig({...config,budgetLimit:parseFloat(e.target.value)})}
+          onChange={(e)=>setConfig({...config,budgetLimit:parseFloat(e.target.value)})}
          />
          <p className="mt-1 text-nier-caption text-nier-text-light">
           プロジェクトあたりの予算上限
@@ -276,7 +276,7 @@ export default function ConfigView():JSX.Element{
           step="5"
           className="w-full"
           value={config.alertThreshold}
-          onChange={(e) => setConfig({...config,alertThreshold:parseInt(e.target.value)})}
+          onChange={(e)=>setConfig({...config,alertThreshold:parseInt(e.target.value)})}
          />
          <div className="flex justify-between text-nier-caption text-nier-text-light">
           <span>50%</span>
@@ -292,7 +292,7 @@ export default function ConfigView():JSX.Element{
           type="checkbox"
           id="stopOnBudget"
           checked={config.stopOnBudgetExceeded}
-          onChange={(e) => setConfig({...config,stopOnBudgetExceeded:e.target.checked})}
+          onChange={(e)=>setConfig({...config,stopOnBudgetExceeded:e.target.checked})}
           className="w-4 h-4"
          />
          <label htmlFor="stopOnBudget" className="text-nier-small">
@@ -312,7 +312,7 @@ export default function ConfigView():JSX.Element{
             step="0.001"
             className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
             value={config.inputTokenPrice}
-            onChange={(e) => setConfig({...config,inputTokenPrice:parseFloat(e.target.value)})}
+            onChange={(e)=>setConfig({...config,inputTokenPrice:parseFloat(e.target.value)})}
            />
           </div>
           <div>
@@ -324,20 +324,20 @@ export default function ConfigView():JSX.Element{
             step="0.001"
             className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
             value={config.outputTokenPrice}
-            onChange={(e) => setConfig({...config,outputTokenPrice:parseFloat(e.target.value)})}
+            onChange={(e)=>setConfig({...config,outputTokenPrice:parseFloat(e.target.value)})}
            />
           </div>
          </div>
          <p className="mt-2 text-nier-caption text-nier-text-light">
-          Claude 3.5 Sonnet: 入力 $0.003/1K, 出力 $0.015/1K
+          Claude 3.5 Sonnet: 入力 $0.003/1K,出力 $0.015/1K
          </p>
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Output Settings */}
-     {activeSection === 'output' && (
+     {activeSection==='output'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>出力設定</DiamondMarker>
@@ -352,10 +352,10 @@ export default function ConfigView():JSX.Element{
            type="text"
            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
            value={config.outputDir}
-           onChange={(e) => setConfig({...config,outputDir:e.target.value})}
+           onChange={(e)=>setConfig({...config,outputDir:e.target.value})}
           />
           <button className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors">
-           <FolderOpen size={16} />
+           <FolderOpen size={16}/>
           </button>
          </div>
         </div>
@@ -365,7 +365,7 @@ export default function ConfigView():JSX.Element{
           type="checkbox"
           id="autoSave"
           checked={config.autoSave}
-          onChange={(e) => setConfig({...config,autoSave:e.target.checked})}
+          onChange={(e)=>setConfig({...config,autoSave:e.target.checked})}
           className="w-4 h-4"
          />
          <label htmlFor="autoSave" className="text-nier-small">
@@ -380,7 +380,7 @@ export default function ConfigView():JSX.Element{
          <select
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.language}
-          onChange={(e) => setConfig({...config,language:e.target.value})}
+          onChange={(e)=>setConfig({...config,language:e.target.value})}
          >
           <option value="ja">日本語</option>
           <option value="en">English</option>
@@ -390,10 +390,10 @@ export default function ConfigView():JSX.Element{
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Project Settings */}
-     {activeSection === 'project' && (
+     {activeSection==='project'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>プロジェクト設定</DiamondMarker>
@@ -406,7 +406,7 @@ export default function ConfigView():JSX.Element{
          <select
           className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
           value={config.projectTemplate}
-          onChange={(e) => setConfig({...config,projectTemplate:e.target.value})}
+          onChange={(e)=>setConfig({...config,projectTemplate:e.target.value})}
          >
           <option value="rpg">RPG (ロールプレイングゲーム)</option>
           <option value="action">アクションゲーム</option>
@@ -423,20 +423,20 @@ export default function ConfigView():JSX.Element{
           <li>• Phase 1: コンセプト → デザイン → シナリオ → キャラクター → ワールド → タスク分割</li>
           <li>• Phase 2: アセット生成 (画像、音楽、効果音)</li>
           <li>• Phase 3: コード生成 (ゲームロジック、UI、データ)</li>
-          <li>• Phase 4: 統合 & テスト</li>
+          <li>• Phase 4: 統合&テスト</li>
          </ul>
         </div>
        </CardContent>
       </Card>
-     )}
+)}
 
      {/* Agent Quality Settings */}
-     {activeSection === 'agent-quality' && (
-      <QualityCheckSettingsPanel projectId="proj-001" />
-     )}
+     {activeSection==='agent-quality'&&(
+      <QualityCheckSettingsPanel projectId="proj-001"/>
+)}
 
      {/* Display Settings */}
-     {activeSection === 'display' && (
+     {activeSection==='display'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>表示設定</DiamondMarker>
@@ -448,22 +448,22 @@ export default function ConfigView():JSX.Element{
           文字間隔
          </label>
          <div className="flex gap-2">
-          {(['tight','normal','wide']as const).map((spacing) => (
+          {(['tight','normal','wide']as const).map((spacing)=>(
            <button
             key={spacing}
             className={cn(
              'px-4 py-2 border text-nier-small transition-colors',
-             config.letterSpacing === spacing
-              ? 'border-nier-border-dark bg-nier-bg-selected text-nier-text-main'
+             config.letterSpacing===spacing
+              ?'border-nier-border-dark bg-nier-bg-selected text-nier-text-main'
               : 'border-nier-border-light hover:bg-nier-bg-panel'
-            )}
-            onClick={() => handleLetterSpacingChange(spacing)}
+)}
+            onClick={()=>handleLetterSpacingChange(spacing)}
            >
-            {spacing === 'tight' && 'タイト'}
-            {spacing === 'normal' && '標準'}
-            {spacing === 'wide' && 'ワイド'}
+            {spacing==='tight'&&'タイト'}
+            {spacing==='normal'&&'標準'}
+            {spacing==='wide'&&'ワイド'}
            </button>
-          ))}
+))}
          </div>
         </div>
 
@@ -479,7 +479,7 @@ export default function ConfigView():JSX.Element{
           step="0.1"
           className="w-full"
           value={config.lineHeight}
-          onChange={(e) => handleLineHeightChange(parseFloat(e.target.value))}
+          onChange={(e)=>handleLineHeightChange(parseFloat(e.target.value))}
          />
          <div className="flex justify-between text-nier-caption text-nier-text-light mt-1">
           <span>0.2 (最小)</span>
@@ -499,7 +499,7 @@ export default function ConfigView():JSX.Element{
           step="1"
           className="w-full"
           value={config.padding}
-          onChange={(e) => handlePaddingChange(parseInt(e.target.value))}
+          onChange={(e)=>handlePaddingChange(parseInt(e.target.value))}
          />
          <div className="flex justify-between text-nier-caption text-nier-text-light mt-1">
           <span>0px (最小)</span>
@@ -511,7 +511,7 @@ export default function ConfigView():JSX.Element{
         <div className="nier-card border border-nier-border-light" style={{padding:`${config.padding}px`}}>
          <h4 className="text-nier-small font-medium mb-2">プレビュー</h4>
          <p className="text-nier-body">
-          SYSTEM LOGS - Real-time Monitor
+          SYSTEM LOGS-Real-time Monitor
          </p>
          <p className="text-nier-small text-nier-text-light mt-1">
           エージェント別トークン消費についての説明文です。複数行にわたるテキストで行間の確認ができます。
@@ -519,9 +519,9 @@ export default function ConfigView():JSX.Element{
         </div>
        </CardContent>
       </Card>
-     )}
+)}
     </div>
    </div>
   </div>
- )
+)
 }

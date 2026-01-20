@@ -29,7 +29,7 @@ interface AgentNodeDef{
  hasLW?:boolean  // Leader/Worker continuous loop check
 }
 
-const AGENT_NODES:AgentNodeDef[] = [
+const AGENT_NODES:AgentNodeDef[]=[
  {id:'concept',type:'concept',label:'コンセプト',phase:0},
  {id:'task_split_1',type:'task_split_1',label:'タスク分割1',phase:1},
  {id:'concept_detail',type:'concept_detail',label:'コンセプト詳細',phase:2,hasLW:true},
@@ -55,7 +55,7 @@ const AGENT_NODES:AgentNodeDef[] = [
  {id:'integration_test',type:'integration_test',label:'統合テスト',phase:8,hasLW:true},
 ]
 
-const EDGE_DEFS:Array<{source:string;target:string}> = [
+const EDGE_DEFS:Array<{source:string;target:string}>=[
  {source:'concept',target:'task_split_1'},
  {source:'task_split_1',target:'concept_detail'},
  {source:'task_split_1',target:'scenario'},
@@ -102,47 +102,47 @@ interface LayoutConfig{
  fontSize:number
 }
 
-const MAX_LABEL_LENGTH = Math.max(...AGENT_NODES.map(n => n.label.length))  // 7 characters (e.g., コンセプト詳細, ゲームデザイン)
+const MAX_LABEL_LENGTH=Math.max(...AGENT_NODES.map(n=>n.label.length))  // 7 characters (e.g., コンセプト詳細, ゲームデザイン)
 
 function calculateLayoutConfig(containerWidth:number,containerHeight:number):LayoutConfig{
- const NUM_PHASES = 9
- const MAX_NODES_IN_PHASE = 7  // Phase 4 (アセット) has 7 nodes
- const MIN_NODE_HEIGHT = 28
- const MAX_NODE_HEIGHT = 60
- const MIN_FONT_SIZE = 9
- const MAX_FONT_SIZE = 14
- const NODE_PADDING_X = 12  // Horizontal padding inside node
+ const NUM_PHASES=9
+ const MAX_NODES_IN_PHASE=7  // Phase 4 (アセット) has 7 nodes
+ const MIN_NODE_HEIGHT=28
+ const MAX_NODE_HEIGHT=60
+ const MIN_FONT_SIZE=9
+ const MAX_FONT_SIZE=14
+ const NODE_PADDING_X=12  // Horizontal padding inside node
 
- const availableHeight = containerHeight - 40  // Reserve space for padding
- const availableWidth = containerWidth - 40
+ const availableHeight=containerHeight-40  // Reserve space for padding
+ const availableWidth=containerWidth-40
 
- const verticalFactor = MAX_NODES_IN_PHASE + 0.2 * (MAX_NODES_IN_PHASE - 1) + 0.6
- let nodeHeight = availableHeight / verticalFactor
- nodeHeight = Math.max(MIN_NODE_HEIGHT,Math.min(MAX_NODE_HEIGHT,nodeHeight))
+ const verticalFactor=MAX_NODES_IN_PHASE+0.2*(MAX_NODES_IN_PHASE-1)+0.6
+ let nodeHeight=availableHeight/verticalFactor
+ nodeHeight=Math.max(MIN_NODE_HEIGHT,Math.min(MAX_NODE_HEIGHT,nodeHeight))
 
- const horizontalFactor = NUM_PHASES + 0.6 * (NUM_PHASES - 1) + 0.4
- let nodeWidth = availableWidth / horizontalFactor
+ const horizontalFactor=NUM_PHASES+0.6*(NUM_PHASES-1)+0.4
+ let nodeWidth=availableWidth/horizontalFactor
 
- const maxFontSizeForWidth = (nodeWidth - NODE_PADDING_X * 2) / MAX_LABEL_LENGTH
+ const maxFontSizeForWidth=(nodeWidth-NODE_PADDING_X*2)/MAX_LABEL_LENGTH
 
- const maxFontSizeForHeight = (nodeHeight - 8) / 1.5  // Leave room for padding and potential progress bar
+ const maxFontSizeForHeight=(nodeHeight-8)/1.5  // Leave room for padding and potential progress bar
 
- let fontSize = Math.min(maxFontSizeForWidth,maxFontSizeForHeight)
- fontSize = Math.max(MIN_FONT_SIZE,Math.min(MAX_FONT_SIZE,fontSize))
+ let fontSize=Math.min(maxFontSizeForWidth,maxFontSizeForHeight)
+ fontSize=Math.max(MIN_FONT_SIZE,Math.min(MAX_FONT_SIZE,fontSize))
 
- nodeWidth = fontSize * MAX_LABEL_LENGTH + NODE_PADDING_X * 2
+ nodeWidth=fontSize*MAX_LABEL_LENGTH+NODE_PADDING_X*2
 
  return{
   nodeHeight:Math.round(nodeHeight),
   nodeWidth:Math.round(nodeWidth),
-  phasePadding:Math.round(nodeHeight * 0.3),
-  nodeGapY:Math.round(nodeHeight * 0.2),
-  phaseGapX:Math.round(nodeWidth * 0.6),
+  phasePadding:Math.round(nodeHeight*0.3),
+  nodeGapY:Math.round(nodeHeight*0.2),
+  phaseGapX:Math.round(nodeWidth*0.6),
   fontSize:Math.round(fontSize),
  }
 }
 
-const DEFAULT_LAYOUT_CONFIG:LayoutConfig = {
+const DEFAULT_LAYOUT_CONFIG:LayoutConfig={
  nodeHeight:36,
  nodeWidth:101,
  phasePadding:11,
@@ -152,7 +152,7 @@ const DEFAULT_LAYOUT_CONFIG:LayoutConfig = {
 }
 
 function getColumnLayout(
- statusMap:Record<string,AgentStatus | undefined>,
+ statusMap:Record<string,AgentStatus|undefined>,
  config:LayoutConfig
 ):{
  positions:Record<string,{x:number;y:number}>
@@ -161,58 +161,58 @@ function getColumnLayout(
  width:number
  height:number
 }{
- const{nodeHeight,nodeWidth,phasePadding,nodeGapY,phaseGapX} = config
- const positions:Record<string,{x:number;y:number}> = {}
- const widths:Record<string,number> = {}
- const heights:Record<string,number> = {}
+ const{nodeHeight,nodeWidth,phasePadding,nodeGapY,phaseGapX}=config
+ const positions:Record<string,{x:number;y:number}>={}
+ const widths:Record<string,number>={}
+ const heights:Record<string,number>={}
 
- AGENT_NODES.forEach(node => {
-  widths[node.id] = nodeWidth
-  heights[node.id] = nodeHeight
+ AGENT_NODES.forEach(node=>{
+  widths[node.id]=nodeWidth
+  heights[node.id]=nodeHeight
  })
 
- const phaseNodes:(typeof AGENT_NODES)[] = []
- for(let i = 0;i <= 8;i++){
-  phaseNodes[i] = AGENT_NODES.filter(n => n.phase === i)
+ const phaseNodes:(typeof AGENT_NODES)[]=[]
+ for(let i=0;i<=8;i++){
+  phaseNodes[i]=AGENT_NODES.filter(n=>n.phase===i)
  }
 
- const phaseWidths = phaseNodes.map(nodes => nodes.length > 0 ? nodeWidth : 0)
+ const phaseWidths=phaseNodes.map(nodes=>nodes.length>0?nodeWidth : 0)
 
- const calcPhaseHeight = (nodes:typeof AGENT_NODES) => {
-  if(nodes.length === 0)return 0
-  const totalNodeHeights = nodes.length * nodeHeight
-  const totalGaps = (nodes.length - 1) * nodeGapY
-  return totalNodeHeights + totalGaps
+ const calcPhaseHeight=(nodes:typeof AGENT_NODES)=>{
+  if(nodes.length===0)return 0
+  const totalNodeHeights=nodes.length*nodeHeight
+  const totalGaps=(nodes.length-1)*nodeGapY
+  return totalNodeHeights+totalGaps
  }
 
- const phaseHeights = phaseNodes.map(calcPhaseHeight)
- const maxHeight = Math.max(...phaseHeights)
+ const phaseHeights=phaseNodes.map(calcPhaseHeight)
+ const maxHeight=Math.max(...phaseHeights)
 
- const phaseX:number[] = []
- phaseX[0] = phasePadding
- for(let i = 1;i <= 8;i++){
-  phaseX[i] = phaseX[i - 1] + (phaseWidths[i - 1] > 0 ? phaseWidths[i - 1] + phaseGapX : 0)
+ const phaseX:number[]=[]
+ phaseX[0]=phasePadding
+ for(let i=1;i<=8;i++){
+  phaseX[i]=phaseX[i-1]+(phaseWidths[i-1]>0?phaseWidths[i-1]+phaseGapX : 0)
  }
 
- const positionPhaseNodes = (nodes:typeof AGENT_NODES,x:number) => {
-  let currentY = phasePadding
-  nodes.forEach((node) => {
-   positions[node.id] = {
+ const positionPhaseNodes=(nodes:typeof AGENT_NODES,x:number)=>{
+  let currentY=phasePadding
+  nodes.forEach((node)=>{
+   positions[node.id]={
     x:x,
     y:currentY,
    }
-   currentY += nodeHeight + nodeGapY
+   currentY+=nodeHeight+nodeGapY
   })
  }
 
- for(let i = 0;i <= 8;i++){
-  if(phaseNodes[i].length > 0){
+ for(let i=0;i<=8;i++){
+  if(phaseNodes[i].length>0){
    positionPhaseNodes(phaseNodes[i],phaseX[i])
   }
  }
 
- const totalWidth = phaseX[8] + phaseWidths[8] + phasePadding
- const totalHeight = maxHeight + phasePadding * 2
+ const totalWidth=phaseX[8]+phaseWidths[8]+phasePadding
+ const totalHeight=maxHeight+phasePadding*2
 
  return{positions,widths,heights,width:totalWidth,height:totalHeight}
 }
@@ -224,29 +224,29 @@ function calculatePhaseBounds(
  heights:Record<string,number>,
  config:LayoutConfig
 ):{x:number;y:number;width:number;height:number}{
- const phaseNodes = AGENT_NODES.filter(n => n.phase === phase)
- if(phaseNodes.length === 0){
+ const phaseNodes=AGENT_NODES.filter(n=>n.phase===phase)
+ if(phaseNodes.length===0){
   return{x:0,y:0,width:0,height:0}
  }
 
- const nodePositions = phaseNodes.map(n => positions[n.id])
- const nodeWidths = phaseNodes.map(n => widths[n.id])
- const nodeHeights = phaseNodes.map(n => heights[n.id])
+ const nodePositions=phaseNodes.map(n=>positions[n.id])
+ const nodeWidths=phaseNodes.map(n=>widths[n.id])
+ const nodeHeights=phaseNodes.map(n=>heights[n.id])
 
- const minX = Math.min(...nodePositions.map(p => p.x))
- const maxX = Math.max(...nodePositions.map((p,i) => p.x + nodeWidths[i]))
- const minY = Math.min(...nodePositions.map(p => p.y))
- const maxY = Math.max(...nodePositions.map((p,i) => p.y + nodeHeights[i]))
+ const minX=Math.min(...nodePositions.map(p=>p.x))
+ const maxX=Math.max(...nodePositions.map((p,i)=>p.x+nodeWidths[i]))
+ const minY=Math.min(...nodePositions.map(p=>p.y))
+ const maxY=Math.max(...nodePositions.map((p,i)=>p.y+nodeHeights[i]))
 
  return{
-  x:minX - config.phasePadding,
-  y:minY - config.phasePadding,
-  width:(maxX - minX) + config.phasePadding * 2,
-  height:(maxY - minY) + config.phasePadding * 2 + 20,
+  x:minX-config.phasePadding,
+  y:minY-config.phasePadding,
+  width:(maxX-minX)+config.phasePadding*2,
+  height:(maxY-minY)+config.phasePadding*2+20,
  }
 }
 
-function getStatusStyle(status:AgentStatus | undefined):{
+function getStatusStyle(status:AgentStatus|undefined):{
  background:string
  border:string
  color:string
@@ -279,83 +279,83 @@ interface AgentNodeData{
 }
 
 function AgentNode({data }:{data:AgentNodeData}){
- const style = getStatusStyle(data.status)
- const isRunning = data.status === 'running'
- const isCompleted = data.status === 'completed'
- const isWaitingApproval = data.status === 'waiting_approval'
- const progress = data.progress ?? 0
- const{nodeWidth,nodeHeight,fontSize} = data
+ const style=getStatusStyle(data.status)
+ const isRunning=data.status==='running'
+ const isCompleted=data.status==='completed'
+ const isWaitingApproval=data.status==='waiting_approval'
+ const progress=data.progress ?? 0
+ const{nodeWidth,nodeHeight,fontSize}=data
 
  return(
   <div
-   className={`relative rounded text-center flex flex-col justify-center ${isRunning || isWaitingApproval ? 'animate-pulse' : ''}`}
+   className={`relative rounded text-center flex flex-col justify-center ${isRunning||isWaitingApproval?'animate-pulse' : ''}`}
    style={{
     background:style.background,
     border:`1.5px solid ${style.border}`,
     color:style.color,
     width:nodeWidth,
     height:nodeHeight,
-    boxShadow:isRunning ? `0 0 8px ${style.border}` : isWaitingApproval ? `0 0 6px ${style.border}` : 'none',
+    boxShadow:isRunning?`0 0 8px ${style.border}` : isWaitingApproval?`0 0 6px ${style.border}` : 'none',
    }}
   >
-   {/* Connection handles - invisible but needed for edge connections */}
-   <Handle type="target" position={Position.Left} id="left" style={{opacity:0,width:1,height:1}} />
-   <Handle type="target" position={Position.Top} id="top" style={{opacity:0,width:1,height:1}} />
-   <Handle type="source" position={Position.Right} id="right" style={{opacity:0,width:1,height:1}} />
-   <Handle type="source" position={Position.Bottom} id="bottom" style={{opacity:0,width:1,height:1}} />
+   {/* Connection handles-invisible but needed for edge connections */}
+   <Handle type="target" position={Position.Left} id="left" style={{opacity:0,width:1,height:1}}/>
+   <Handle type="target" position={Position.Top} id="top" style={{opacity:0,width:1,height:1}}/>
+   <Handle type="source" position={Position.Right} id="right" style={{opacity:0,width:1,height:1}}/>
+   <Handle type="source" position={Position.Bottom} id="bottom" style={{opacity:0,width:1,height:1}}/>
 
    <div className="font-medium whitespace-nowrap" style={{fontSize}}>{data.label}</div>
-   {(isRunning || isCompleted) && (
+   {(isRunning||isCompleted)&&(
     <div className="mt-1 px-2">
      <div className="h-1 bg-black/10 rounded-full overflow-hidden">
       <div
        className="h-full transition-all duration-300"
        style={{
         width:`${progress}%`,
-        background:isCompleted ? '#7AAA7A' : '#8B6914',
+        background:isCompleted?'#7AAA7A' : '#8B6914',
        }}
       />
      </div>
-     {isRunning && (
-      <div className="mt-0.5" style={{fontSize:fontSize * 0.8,color:'#8B6914'}}>
+     {isRunning&&(
+      <div className="mt-0.5" style={{fontSize:fontSize*0.8,color:'#8B6914'}}>
        {progress}%
       </div>
-     )}
+)}
     </div>
-   )}
+)}
    {/* L/W indicator in bottom right */}
-   {data.hasLW && (
+   {data.hasLW&&(
     <div
      className="absolute"
      style={{
       bottom:'2px',
       right:'4px',
-      fontSize:fontSize * 0.7,
+      fontSize:fontSize*0.7,
       color:style.color,
       opacity:0.7,
      }}
     >
      L/W
     </div>
-   )}
-   {isCompleted && (
+)}
+   {isCompleted&&(
     <div
      className="absolute -top-1 -right-1 w-4 h-4 bg-[#7AAA7A] rounded-full flex items-center justify-center"
-     style={{fontSize:fontSize * 0.8,color:'white',fontWeight:'bold'}}
+     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
     >
      ✓
     </div>
-   )}
-   {isWaitingApproval && (
+)}
+   {isWaitingApproval&&(
     <div
      className="absolute -top-1 -right-1 w-4 h-4 bg-[#8B7914] rounded-full flex items-center justify-center"
-     style={{fontSize:fontSize * 0.8,color:'white',fontWeight:'bold'}}
+     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
     >
      !
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 function PhaseGroupNode({data }:{data:{label:string;width:number;height:number}}){
@@ -383,10 +383,10 @@ function PhaseGroupNode({data }:{data:{label:string;width:number;height:number}}
     {data.label}
    </div>
   </div>
- )
+)
 }
 
-const nodeTypes = {
+const nodeTypes={
  agent:AgentNode,
  phaseGroup:PhaseGroupNode,
 }
@@ -398,32 +398,32 @@ interface FlowCanvasProps{
 }
 
 function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
- const containerRef = useRef<HTMLDivElement>(null)
- const{fitView} = useReactFlow()
- const[containerSize,setContainerSize] = useState({width:0,height:0})
+ const containerRef=useRef<HTMLDivElement>(null)
+ const{fitView}=useReactFlow()
+ const[containerSize,setContainerSize]=useState({width:0,height:0})
 
- useEffect(() => {
-  const container = containerRef.current
+ useEffect(()=>{
+  const container=containerRef.current
   if(!container)return
 
-  const resizeObserver = new ResizeObserver((entries) => {
+  const resizeObserver=new ResizeObserver((entries)=>{
    for(const entry of entries){
-    const{width,height} = entry.contentRect
+    const{width,height}=entry.contentRect
     setContainerSize({width,height})
     onContainerResize(width,height)
    }
   })
 
   resizeObserver.observe(container)
-  return() => resizeObserver.disconnect()
+  return()=>resizeObserver.disconnect()
  },[onContainerResize])
 
- useEffect(() => {
-  if(containerSize.width > 0 && containerSize.height > 0 && nodes.length > 0){
-   const timer = setTimeout(() => {
+ useEffect(()=>{
+  if(containerSize.width>0&&containerSize.height>0&&nodes.length>0){
+   const timer=setTimeout(()=>{
     fitView({padding:0.05,duration:200})
    },50)
-   return() => clearTimeout(timer)
+   return()=>clearTimeout(timer)
   }
  },[containerSize,nodes,fitView])
 
@@ -458,33 +458,33 @@ function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
     />
    </ReactFlow>
   </div>
- )
+)
 }
 
 export default function WorkflowDiagram():JSX.Element{
- const{currentProject} = useProjectStore()
- const{agents,setAgents} = useAgentStore()
- const{getLabel} = useAgentDefinitionStore()
- const[containerSize,setContainerSize] = useState({width:0,height:0})
+ const{currentProject}=useProjectStore()
+ const{agents,setAgents}=useAgentStore()
+ const{getLabel}=useAgentDefinitionStore()
+ const[containerSize,setContainerSize]=useState({width:0,height:0})
 
- const handleContainerResize = useCallback((width:number,height:number) => {
+ const handleContainerResize=useCallback((width:number,height:number)=>{
   setContainerSize({width,height})
  },[])
 
- const layoutConfig = useMemo(() => {
-  if(containerSize.width > 0 && containerSize.height > 0){
+ const layoutConfig=useMemo(()=>{
+  if(containerSize.width>0&&containerSize.height>0){
    return calculateLayoutConfig(containerSize.width,containerSize.height)
   }
   return DEFAULT_LAYOUT_CONFIG
  },[containerSize])
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject)return
 
-  const fetchAgents = async() => {
+  const fetchAgents=async()=>{
    try{
-    const agentsData = await agentApi.listByProject(currentProject.id)
-    const agentsConverted:Agent[] = agentsData.map(a => ({
+    const agentsData=await agentApi.listByProject(currentProject.id)
+    const agentsConverted:Agent[]=agentsData.map(a=>({
      id:a.id,
      projectId:a.projectId,
      type:a.type,
@@ -498,7 +498,7 @@ export default function WorkflowDiagram():JSX.Element{
      error:a.error,
      parentAgentId:null,
      metadata:a.metadata,
-     createdAt:a.startedAt || new Date().toISOString()
+     createdAt:a.startedAt||new Date().toISOString()
     }))
     setAgents(agentsConverted)
    }catch(error){
@@ -509,33 +509,33 @@ export default function WorkflowDiagram():JSX.Element{
   fetchAgents()
  },[currentProject?.id,setAgents])
 
- const getAgentByType = useCallback((type:AgentType):Agent | undefined => {
-  const projectAgents = agents.filter(a => a.projectId === currentProject?.id)
-  let agent = projectAgents.find(a => a.type === type)
+ const getAgentByType=useCallback((type:AgentType):Agent|undefined=>{
+  const projectAgents=agents.filter(a=>a.projectId===currentProject?.id)
+  let agent=projectAgents.find(a=>a.type===type)
   if(!agent){
-   agent = projectAgents.find(a => a.type === `${type}_leader`)
+   agent=projectAgents.find(a=>a.type===`${type}_leader`)
   }
   if(!agent){
-   agent = projectAgents.find(a => a.type === type.replace('_leader',''))
+   agent=projectAgents.find(a=>a.type===type.replace('_leader',''))
   }
   return agent
  },[agents,currentProject?.id])
 
- const statusMap = useMemo(() => {
-  const map:Record<string,AgentStatus | undefined> = {}
-  AGENT_NODES.forEach(nodeDef => {
-   const agent = getAgentByType(nodeDef.type)
-   map[nodeDef.id] = agent?.status
+ const statusMap=useMemo(()=>{
+  const map:Record<string,AgentStatus|undefined>={}
+  AGENT_NODES.forEach(nodeDef=>{
+   const agent=getAgentByType(nodeDef.type)
+   map[nodeDef.id]=agent?.status
   })
   return map
  },[getAgentByType])
 
- const layout = useMemo(() => {
+ const layout=useMemo(()=>{
   return getColumnLayout(statusMap,layoutConfig)
  },[statusMap,layoutConfig])
 
- const phaseGroups = useMemo(() => {
-  const groups = [
+ const phaseGroups=useMemo(()=>{
+  const groups=[
    {id:'phase-0',label:'P0: 企画',phase:0},
    {id:'phase-1',label:'P1: 分割1',phase:1},
    {id:'phase-2',label:'P2: 設計',phase:2},
@@ -545,15 +545,15 @@ export default function WorkflowDiagram():JSX.Element{
    {id:'phase-6',label:'P6: 実装',phase:6},
    {id:'phase-7',label:'P7: 分割4',phase:7},
    {id:'phase-8',label:'P8: テスト',phase:8},
-  ]
-  return groups.map(g => ({
+]
+  return groups.map(g=>({
    ...g,
    ...calculatePhaseBounds(g.phase,layout.positions,layout.widths,layout.heights,layoutConfig),
   }))
  },[layout,layoutConfig])
 
- const nodes:Node[] = useMemo(() => {
-  const groupNodes:Node[] = phaseGroups.map(group => ({
+ const nodes:Node[]=useMemo(()=>{
+  const groupNodes:Node[]=phaseGroups.map(group=>({
    id:group.id,
    type:'phaseGroup',
    position:{x:group.x,y:group.y},
@@ -563,9 +563,9 @@ export default function WorkflowDiagram():JSX.Element{
    zIndex:-1,
   }))
 
-  const agentNodes:Node[] = AGENT_NODES.map(nodeDef => {
-   const agent = getAgentByType(nodeDef.type)
-   const pos = layout.positions[nodeDef.id]
+  const agentNodes:Node[]=AGENT_NODES.map(nodeDef=>{
+   const agent=getAgentByType(nodeDef.type)
+   const pos=layout.positions[nodeDef.id]
    return{
     id:nodeDef.id,
     type:'agent',
@@ -588,51 +588,51 @@ export default function WorkflowDiagram():JSX.Element{
   return[...groupNodes,...agentNodes]
  },[getAgentByType,layout,phaseGroups,layoutConfig,getLabel])
 
- const edges:Edge[] = useMemo(() => {
-  const getNodePhase = (nodeId:string):number => {
-   const node = AGENT_NODES.find(n => n.id === nodeId)
+ const edges:Edge[]=useMemo(()=>{
+  const getNodePhase=(nodeId:string):number=>{
+   const node=AGENT_NODES.find(n=>n.id===nodeId)
    return node?.phase ?? 1
   }
 
-  return EDGE_DEFS.map((edgeDef,index) => {
-   const sourceAgent = getAgentByType(edgeDef.source as AgentType)
-   const isCompleted = sourceAgent?.status === 'completed'
-   const isRunning = sourceAgent?.status === 'running'
+  return EDGE_DEFS.map((edgeDef,index)=>{
+   const sourceAgent=getAgentByType(edgeDef.source as AgentType)
+   const isCompleted=sourceAgent?.status==='completed'
+   const isRunning=sourceAgent?.status==='running'
 
-   const sourcePhase = getNodePhase(edgeDef.source)
-   const targetPhase = getNodePhase(edgeDef.target)
-   const isCrossPhase = sourcePhase !== targetPhase
+   const sourcePhase=getNodePhase(edgeDef.source)
+   const targetPhase=getNodePhase(edgeDef.target)
+   const isCrossPhase=sourcePhase!==targetPhase
 
    return{
     id:`e-${index}`,
     source:edgeDef.source,
     target:edgeDef.target,
-    sourceHandle:isCrossPhase ? 'right' : 'bottom',
-    targetHandle:isCrossPhase ? 'left' : 'top',
+    sourceHandle:isCrossPhase?'right' : 'bottom',
+    targetHandle:isCrossPhase?'left' : 'top',
     type:'straight',
     animated:isRunning,
     style:{
-     stroke:isCompleted ? 'rgba(69, 65, 56, 0.5)' : isRunning ? '#C4956C' : 'rgba(69, 65, 56, 0.15)',
-     strokeWidth:isRunning ? 2 : 1,
+     stroke:isCompleted?'rgba(69, 65, 56, 0.5)' : isRunning?'#C4956C' : 'rgba(69, 65, 56, 0.15)',
+     strokeWidth:isRunning?2 : 1,
     },
     markerEnd:{
      type:MarkerType.ArrowClosed,
      width:10,
      height:10,
-     color:isCompleted ? 'rgba(69, 65, 56, 0.5)' : isRunning ? '#C4956C' : 'rgba(69, 65, 56, 0.15)',
+     color:isCompleted?'rgba(69, 65, 56, 0.5)' : isRunning?'#C4956C' : 'rgba(69, 65, 56, 0.15)',
     },
    }
   })
  },[getAgentByType])
 
- const projectAgents = agents.filter(a => a.projectId === currentProject?.id)
- const completedCount = projectAgents.filter(a => a.status === 'completed').length
- const runningCount = projectAgents.filter(a => a.status === 'running').length
- const waitingApprovalCount = projectAgents.filter(a => a.status === 'waiting_approval').length
- const totalCount = AGENT_NODES.length
- const overallProgress = totalCount > 0
-  ? Math.round((completedCount / totalCount) * 100 +
-        (projectAgents.filter(a => a.status === 'running').reduce((sum,a) => sum + (a.progress || 0),0) / totalCount))
+ const projectAgents=agents.filter(a=>a.projectId===currentProject?.id)
+ const completedCount=projectAgents.filter(a=>a.status==='completed').length
+ const runningCount=projectAgents.filter(a=>a.status==='running').length
+ const waitingApprovalCount=projectAgents.filter(a=>a.status==='waiting_approval').length
+ const totalCount=AGENT_NODES.length
+ const overallProgress=totalCount>0
+  ?Math.round((completedCount/totalCount)*100+
+        (projectAgents.filter(a=>a.status==='running').reduce((sum,a)=>sum+(a.progress||0),0)/totalCount))
   : 0
 
  if(!currentProject){
@@ -647,7 +647,7 @@ export default function WorkflowDiagram():JSX.Element{
      </div>
     </CardContent>
    </Card>
-  )
+)
  }
 
  return(
@@ -657,40 +657,40 @@ export default function WorkflowDiagram():JSX.Element{
     <div className="ml-auto flex items-center gap-4 text-nier-caption text-nier-text-light">
      <span>全体: {overallProgress}%</span>
      <span>完了: {completedCount}/{totalCount}</span>
-     {runningCount > 0 && (
+     {runningCount>0&&(
       <span className="text-nier-accent-orange animate-pulse">実行中: {runningCount}</span>
-     )}
-     {waitingApprovalCount > 0 && (
+)}
+     {waitingApprovalCount>0&&(
       <span className="text-[#8B7914] animate-pulse">承認待ち: {waitingApprovalCount}</span>
-     )}
+)}
     </div>
    </CardHeader>
    <CardContent className="p-0">
     <ReactFlowProvider>
-     <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize} />
+     <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize}/>
     </ReactFlowProvider>
 
-    {/* Legend - compact */}
+    {/* Legend-compact */}
     <div className="flex items-center justify-center gap-4 py-2 border-t border-nier-border-light text-nier-caption text-nier-text-light">
      <div className="flex items-center gap-1">
-      <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm" />
+      <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm"/>
       <span>完了</span>
      </div>
      <div className="flex items-center gap-1">
-      <div className="w-3 h-2.5 bg-nier-accent-orange border border-[#8B6914] rounded-sm" />
+      <div className="w-3 h-2.5 bg-nier-accent-orange border border-[#8B6914] rounded-sm"/>
       <span>実行中</span>
      </div>
-     {waitingApprovalCount > 0 && (
+     {waitingApprovalCount>0&&(
       <div className="flex items-center gap-1">
-       <div className="w-3 h-2.5 bg-[#D4C896] border border-[#8B7914] rounded-sm" />
+       <div className="w-3 h-2.5 bg-[#D4C896] border border-[#8B7914] rounded-sm"/>
        <span>承認待ち</span>
       </div>
-     )}
+)}
      <div className="flex items-center gap-1">
-      <div className="w-3 h-2.5 bg-nier-bg-main border border-nier-border-light rounded-sm" />
+      <div className="w-3 h-2.5 bg-nier-bg-main border border-nier-border-light rounded-sm"/>
       <span>待機</span>
      </div>
-     <div className="border-l border-nier-border-light h-3 mx-1" />
+     <div className="border-l border-nier-border-light h-3 mx-1"/>
      <div className="flex items-center gap-1">
       <span className="text-[9px] px-1 py-0.5 border border-nier-border-light rounded text-nier-text-light">L/W</span>
       <span>Leader/Worker継続ループ</span>
@@ -698,5 +698,5 @@ export default function WorkflowDiagram():JSX.Element{
     </div>
    </CardContent>
   </Card>
- )
+)
 }

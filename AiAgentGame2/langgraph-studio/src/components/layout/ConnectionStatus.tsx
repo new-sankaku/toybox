@@ -2,9 +2,9 @@ import{useConnectionStore}from'@/stores/connectionStore'
 import{cn}from'@/lib/utils'
 
 export default function ConnectionStatus():JSX.Element{
- const{status} = useConnectionStore()
+ const{status}=useConnectionStore()
 
- const statusConfig = {
+ const statusConfig={
   connected:{
    color:'bg-nier-accent-green',
    text:'Connected',
@@ -27,7 +27,7 @@ export default function ConnectionStatus():JSX.Element{
   }
  }
 
- const config = statusConfig[status]
+ const config=statusConfig[status]
 
  return(
   <div className="flex items-center gap-2 text-nier-text-header text-nier-small">
@@ -35,10 +35,10 @@ export default function ConnectionStatus():JSX.Element{
     className={cn(
      'w-2 h-2 rounded-full',
      config.color,
-     config.pulse && 'animate-pulse-slow'
-    )}
+     config.pulse&&'animate-pulse-slow'
+)}
    />
    <span className="tracking-nier">{config.text}</span>
   </div>
- )
+)
 }

@@ -24,7 +24,7 @@ interface AgentDetailViewProps{
  onPause?:()=>void
 }
 
-const statusLabels:Record<string,{text:string;color:string}> = {
+const statusLabels:Record<string,{text:string;color:string}>={
  pending:{text:'待機中',color:'text-nier-text-light'},
  running:{text:'実行中',color:'text-nier-text-light'},
  completed:{text:'完了',color:'text-nier-text-light'},
@@ -32,8 +32,8 @@ const statusLabels:Record<string,{text:string;color:string}> = {
  blocked:{text:'ブロック',color:'text-nier-text-light'}
 }
 
-const getDisplayName = (agent:Agent):string => {
- return(agent.metadata?.displayName as string) || agent.type
+const getDisplayName=(agent:Agent):string=>{
+ return(agent.metadata?.displayName as string)||agent.type
 }
 
 export default function AgentDetailView({
@@ -43,21 +43,21 @@ export default function AgentDetailView({
  onRetry,
  onPause
 }:AgentDetailViewProps):JSX.Element{
- const[showMetadata,setShowMetadata] = useState(false)
+ const[showMetadata,setShowMetadata]=useState(false)
 
- const status = statusLabels[agent.status]
+ const status=statusLabels[agent.status]
 
- const getRuntime = () => {
+ const getRuntime=()=>{
   if(!agent.startedAt)return'-'
-  const start = new Date(agent.startedAt).getTime()
-  const end = agent.completedAt
-   ? new Date(agent.completedAt).getTime()
+  const start=new Date(agent.startedAt).getTime()
+  const end=agent.completedAt
+   ?new Date(agent.completedAt).getTime()
    : Date.now()
-  const seconds = Math.floor((end - start) / 1000)
+  const seconds=Math.floor((end-start)/1000)
 
-  if(seconds < 60)return`${seconds}秒`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
+  if(seconds<60)return`${seconds}秒`
+  const minutes=Math.floor(seconds/60)
+  const remainingSeconds=seconds%60
   return`${minutes}分${remainingSeconds}秒`
  }
 
@@ -67,7 +67,7 @@ export default function AgentDetailView({
    <div className="flex items-center justify-between mb-6">
     <div>
      <div className="flex items-center gap-3 mb-2">
-      <div className="w-1.5 h-6 bg-nier-border-dark" />
+      <div className="w-1.5 h-6 bg-nier-border-dark"/>
       <h1 className="text-nier-h1 font-medium tracking-nier-wide">
        {getDisplayName(agent)}
       </h1>
@@ -79,14 +79,14 @@ export default function AgentDetailView({
      </div>
     </div>
     <Button variant="ghost" onClick={onBack}>
-     <ArrowLeft size={16} />
+     <ArrowLeft size={16}/>
      <span className="ml-1.5">戻る</span>
     </Button>
    </div>
 
    {/* Main Content */}
    <div className="grid grid-cols-3 gap-5">
-    {/* Left Column - Status & Controls */}
+    {/* Left Column-Status & Controls */}
     <div className="space-y-4">
      {/* Progress Card */}
      <Card>
@@ -94,12 +94,12 @@ export default function AgentDetailView({
        <DiamondMarker>進捗</DiamondMarker>
       </CardHeader>
       <CardContent className="space-y-4">
-       <Progress value={agent.progress} className="h-3" />
+       <Progress value={agent.progress} className="h-3"/>
        <div className="flex justify-between text-nier-small">
         <span className="text-nier-text-light">完了率</span>
         <span className="text-nier-text-main">{agent.progress}%</span>
        </div>
-       {agent.currentTask && (
+       {agent.currentTask&&(
         <div className="pt-3 border-t border-nier-border-light">
          <span className="text-nier-caption text-nier-text-light block mb-1">
           現在のタスク:
@@ -108,7 +108,7 @@ export default function AgentDetailView({
           {agent.currentTask}
          </span>
         </div>
-       )}
+)}
       </CardContent>
      </Card>
 
@@ -121,7 +121,7 @@ export default function AgentDetailView({
        <div className="space-y-3">
         <div className="flex items-center justify-between">
          <span className="flex items-center gap-2 text-nier-small text-nier-text-light">
-          <Clock size={14} />
+          <Clock size={14}/>
           実行時間
          </span>
          <span className="text-nier-small text-nier-text-main">
@@ -130,7 +130,7 @@ export default function AgentDetailView({
         </div>
         <div className="flex items-center justify-between">
          <span className="flex items-center gap-2 text-nier-small text-nier-text-light">
-          <Activity size={14} />
+          <Activity size={14}/>
           Token使用量
          </span>
          <span className="text-nier-small text-nier-text-main">
@@ -139,7 +139,7 @@ export default function AgentDetailView({
         </div>
         <div className="flex items-center justify-between">
          <span className="flex items-center gap-2 text-nier-small text-nier-text-light">
-          <FileText size={14} />
+          <FileText size={14}/>
           ログエントリ
          </span>
          <span className="text-nier-small text-nier-text-main">
@@ -154,40 +154,40 @@ export default function AgentDetailView({
      <Card>
       <CardHeader className="bg-nier-accent-blue">
        <span className="flex items-center gap-2 text-white">
-        <Cpu size={14} />
+        <Cpu size={14}/>
         コントロール
        </span>
       </CardHeader>
       <CardContent className="space-y-3">
-       {agent.status === 'running' && onPause && (
+       {agent.status==='running'&&onPause&&(
         <Button className="w-full justify-start gap-3" onClick={onPause}>
-         <Pause size={16} />
+         <Pause size={16}/>
          一時停止
         </Button>
-       )}
-       {(agent.status === 'failed' || agent.status === 'blocked') && onRetry && (
+)}
+       {(agent.status==='failed'||agent.status==='blocked')&&onRetry&&(
         <Button
          variant="success"
          className="w-full justify-start gap-3"
          onClick={onRetry}
         >
-         <RotateCcw size={16} />
+         <RotateCcw size={16}/>
          リトライ
         </Button>
-       )}
+)}
        <Button
         variant="ghost"
         className="w-full justify-start gap-3 text-nier-text-light"
-        onClick={() => setShowMetadata(!showMetadata)}
+        onClick={()=>setShowMetadata(!showMetadata)}
        >
-        <FileText size={16} />
-        {showMetadata ? 'メタデータを隠す' : 'メタデータを表示'}
+        <FileText size={16}/>
+        {showMetadata?'メタデータを隠す' : 'メタデータを表示'}
        </Button>
       </CardContent>
      </Card>
 
      {/* Metadata (conditional) */}
-     {showMetadata && agent.metadata && Object.keys(agent.metadata).length > 0 && (
+     {showMetadata&&agent.metadata&&Object.keys(agent.metadata).length>0&&(
       <Card>
        <CardHeader>
         <DiamondMarker>メタデータ</DiamondMarker>
@@ -198,19 +198,19 @@ export default function AgentDetailView({
         </pre>
        </CardContent>
       </Card>
-     )}
+)}
     </div>
 
-    {/* Right Column - Logs (2 columns wide) */}
+    {/* Right Column-Logs (2 columns wide) */}
     <div className="col-span-2">
      <AgentLogStreaming
       logs={logs}
-      isStreaming={agent.status === 'running'}
+      isStreaming={agent.status==='running'}
       maxHeight="600px"
      />
 
      {/* Error Details */}
-     {agent.status === 'failed' && agent.error && (
+     {agent.status==='failed'&&agent.error&&(
       <Card className="mt-4 border-nier-accent-red">
        <CardHeader className="bg-nier-accent-red">
         <span className="text-white">エラー詳細</span>
@@ -221,9 +221,9 @@ export default function AgentDetailView({
         </p>
        </CardContent>
       </Card>
-     )}
+)}
     </div>
    </div>
   </div>
- )
+)
 }

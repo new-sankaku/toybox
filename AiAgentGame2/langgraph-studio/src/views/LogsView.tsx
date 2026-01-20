@@ -10,7 +10,7 @@ import{Search,AlertCircle,Info,AlertTriangle,Bug,FolderOpen}from'lucide-react'
 interface SystemLog{
  id:string
  timestamp:string
- level:'debug' | 'info' | 'warn' | 'error'
+ level:'debug'|'info'|'warn'|'error'
  source:string
  message:string
  details?:string
@@ -23,16 +23,16 @@ function convertApiLog(apiLog:ApiSystemLog):SystemLog{
   level:apiLog.level,
   source:apiLog.source,
   message:apiLog.message,
-  details:apiLog.details || undefined,
+  details:apiLog.details||undefined,
  }
 }
 
-const agentSources = ['concept','design','scenario','character','world','System']as const
-type AgentSource = typeof agentSources[number]
+const agentSources=['concept','design','scenario','character','world','System']as const
+type AgentSource=typeof agentSources[number]
 
-type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error'
+type LogLevel='all'|'debug'|'info'|'warn'|'error'
 
-const levelConfig = {
+const levelConfig={
  debug:{icon:Bug,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
  info:{icon:Info,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
  warn:{icon:AlertTriangle,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
@@ -40,32 +40,32 @@ const levelConfig = {
 }
 
 export default function LogsView():JSX.Element{
- const{currentProject} = useProjectStore()
- const{getLabel} = useAgentDefinitionStore()
- const[logs,setLogs] = useState<SystemLog[]>([])
- const[initialLoading,setInitialLoading] = useState(true)
- const[filterLevel,setFilterLevel] = useState<LogLevel>('all')
- const[filterAgent,setFilterAgent] = useState<AgentSource | 'all'>('all')
- const[searchQuery,setSearchQuery] = useState('')
- const[selectedLog,setSelectedLog] = useState<SystemLog | null>(null)
+ const{currentProject}=useProjectStore()
+ const{getLabel}=useAgentDefinitionStore()
+ const[logs,setLogs]=useState<SystemLog[]>([])
+ const[initialLoading,setInitialLoading]=useState(true)
+ const[filterLevel,setFilterLevel]=useState<LogLevel>('all')
+ const[filterAgent,setFilterAgent]=useState<AgentSource|'all'>('all')
+ const[searchQuery,setSearchQuery]=useState('')
+ const[selectedLog,setSelectedLog]=useState<SystemLog|null>(null)
 
- const getAgentDisplayName = (source:AgentSource | 'all'):string => {
-  if(source === 'all')return'全て'
-  if(source === 'System')return'System'
+ const getAgentDisplayName=(source:AgentSource|'all'):string=>{
+  if(source==='all')return'全て'
+  if(source==='System')return'System'
   return getLabel(source)
  }
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setLogs([])
    setInitialLoading(false)
    return
   }
 
-  const fetchLogs = async() => {
+  const fetchLogs=async()=>{
    setInitialLoading(true)
    try{
-    const data = await logsApi.getByProject(currentProject.id)
+    const data=await logsApi.getByProject(currentProject.id)
     setLogs(data.map(convertApiLog))
    }catch(error){
     console.error('Failed to fetch logs:',error)
@@ -84,61 +84,61 @@ export default function LogsView():JSX.Element{
     <div className="nier-page-header-row">
      <div className="nier-page-header-left">
       <h1 className="nier-page-title">LOGS</h1>
-      <span className="nier-page-subtitle">- システムログ</span>
+      <span className="nier-page-subtitle">-システムログ</span>
      </div>
-     <div className="nier-page-header-right" />
+     <div className="nier-page-header-right"/>
     </div>
     <Card>
      <CardContent>
       <div className="text-center py-12 text-nier-text-light">
-       <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
+       <FolderOpen size={48} className="mx-auto mb-4 opacity-50"/>
        <p className="text-nier-body">プロジェクトを選択してください</p>
       </div>
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
- const filteredLogs = useMemo(() => {
-  let filtered = logs
+ const filteredLogs=useMemo(()=>{
+  let filtered=logs
 
-  if(filterLevel !== 'all'){
-   filtered = filtered.filter(log => log.level === filterLevel)
+  if(filterLevel!=='all'){
+   filtered=filtered.filter(log=>log.level===filterLevel)
   }
 
-  if(filterAgent !== 'all'){
-   filtered = filtered.filter(log => log.source === filterAgent)
+  if(filterAgent!=='all'){
+   filtered=filtered.filter(log=>log.source===filterAgent)
   }
 
   if(searchQuery){
-   const query = searchQuery.toLowerCase()
-   filtered = filtered.filter(log =>
-    log.message.toLowerCase().includes(query) ||
+   const query=searchQuery.toLowerCase()
+   filtered=filtered.filter(log=>
+    log.message.toLowerCase().includes(query)||
         log.source.toLowerCase().includes(query)
-   )
+)
   }
 
-  return filtered.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+  return filtered.sort((a,b)=>new Date(b.timestamp).getTime()-new Date(a.timestamp).getTime())
  },[logs,filterLevel,filterAgent,searchQuery])
 
- const levelCounts = useMemo(() => ({
+ const levelCounts=useMemo(()=>({
   all:logs.length,
-  debug:logs.filter(l => l.level === 'debug').length,
-  info:logs.filter(l => l.level === 'info').length,
-  warn:logs.filter(l => l.level === 'warn').length,
-  error:logs.filter(l => l.level === 'error').length
+  debug:logs.filter(l=>l.level==='debug').length,
+  info:logs.filter(l=>l.level==='info').length,
+  warn:logs.filter(l=>l.level==='warn').length,
+  error:logs.filter(l=>l.level==='error').length
  }),[logs])
 
- const agentCounts = useMemo(() => {
-  const counts:Record<string,number> = {all:logs.filter(l => agentSources.includes(l.source as AgentSource)).length}
-  agentSources.forEach(agent => {
-   counts[agent] = logs.filter(l => l.source === agent).length
+ const agentCounts=useMemo(()=>{
+  const counts:Record<string,number>={all:logs.filter(l=>agentSources.includes(l.source as AgentSource)).length}
+  agentSources.forEach(agent=>{
+   counts[agent]=logs.filter(l=>l.source===agent).length
   })
   return counts
  },[logs])
 
- const formatTime = (timestamp:string) => {
+ const formatTime=(timestamp:string)=>{
   return new Date(timestamp).toLocaleTimeString('ja-JP',{
    hour:'2-digit',
    minute:'2-digit',
@@ -152,9 +152,9 @@ export default function LogsView():JSX.Element{
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">LOGS</h1>
-     <span className="nier-page-subtitle">- システムログ</span>
+     <span className="nier-page-subtitle">-システムログ</span>
     </div>
-    <div className="nier-page-header-right" />
+    <div className="nier-page-header-right"/>
    </div>
 
    {/* Filters */}
@@ -164,35 +164,35 @@ export default function LogsView():JSX.Element{
       {/* Level Filter Row */}
       <div className="flex items-center justify-between flex-wrap gap-2">
        <div className="flex items-center gap-1 flex-wrap">
-        {(['all','error','warn','info','debug']as LogLevel[]).map(level => (
+        {(['all','error','warn','info','debug']as LogLevel[]).map(level=>(
          <button
           key={level}
           className={cn(
            'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-           filterLevel === level
-            ? 'bg-nier-bg-selected text-nier-text-main'
+           filterLevel===level
+            ?'bg-nier-bg-selected text-nier-text-main'
             : 'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
-          onClick={() => setFilterLevel(level)}
+)}
+          onClick={()=>setFilterLevel(level)}
          >
-          {level !== 'all' && (() => {
-           const Icon = levelConfig[level].icon
-           return<Icon size={14} className={levelConfig[level].color} />
+          {level!=='all'&&(()=>{
+           const Icon=levelConfig[level].icon
+           return<Icon size={14} className={levelConfig[level].color}/>
           })()}
-          <span>{level === 'all' ? '全て' : level.toUpperCase()}</span>
+          <span>{level==='all'?'全て' : level.toUpperCase()}</span>
           <span className="text-nier-caption">({levelCounts[level]})</span>
          </button>
-        ))}
+))}
        </div>
 
        <div className="flex items-center gap-2">
-        <Search size={14} className="text-nier-text-light" />
+        <Search size={14} className="text-nier-text-light"/>
         <input
          type="text"
          className="bg-transparent border-b border-nier-border-light px-2 py-1 text-nier-small w-48 focus:outline-none focus:border-nier-border-dark"
          placeholder="検索..."
          value={searchQuery}
-         onChange={(e) => setSearchQuery(e.target.value)}
+         onChange={(e)=>setSearchQuery(e.target.value)}
         />
        </div>
       </div>
@@ -203,28 +203,28 @@ export default function LogsView():JSX.Element{
        <button
         className={cn(
          'px-3 py-1 text-nier-small tracking-nier transition-colors',
-         filterAgent === 'all'
-          ? 'bg-nier-bg-selected text-nier-text-main'
+         filterAgent==='all'
+          ?'bg-nier-bg-selected text-nier-text-main'
           : 'text-nier-text-light hover:bg-nier-bg-panel'
-        )}
-        onClick={() => setFilterAgent('all')}
+)}
+        onClick={()=>setFilterAgent('all')}
        >
         全て ({agentCounts.all})
        </button>
-       {agentSources.map(agent => (
+       {agentSources.map(agent=>(
         <button
          key={agent}
          className={cn(
           'px-3 py-1 text-nier-small tracking-nier transition-colors',
-          filterAgent === agent
-           ? 'bg-nier-bg-selected text-nier-text-main'
+          filterAgent===agent
+           ?'bg-nier-bg-selected text-nier-text-main'
            : 'text-nier-text-light hover:bg-nier-bg-panel'
-         )}
-         onClick={() => setFilterAgent(agent)}
+)}
+         onClick={()=>setFilterAgent(agent)}
         >
-         {getAgentDisplayName(agent)} {agentCounts[agent] > 0 && `(${agentCounts[agent]})`}
+         {getAgentDisplayName(agent)} {agentCounts[agent]>0&&`(${agentCounts[agent]})`}
         </button>
-       ))}
+))}
       </div>
      </div>
     </CardContent>
@@ -241,34 +241,34 @@ export default function LogsView():JSX.Element{
        </span>
       </CardHeader>
       <CardContent className="p-0 nier-scroll-list">
-       {initialLoading && logs.length === 0 ? (
+       {initialLoading&&logs.length===0?(
         <div className="p-8 text-center text-nier-text-light">
          読み込み中...
         </div>
-       ) : filteredLogs.length === 0 ? (
+) : filteredLogs.length===0?(
         <div className="p-8 text-center text-nier-text-light">
          ログがありません
         </div>
-       ) : (
+) : (
         <div className="divide-y divide-nier-border-light">
-         {filteredLogs.map(log => {
-          const config = levelConfig[log.level]
-          const Icon = config.icon
+         {filteredLogs.map(log=>{
+          const config=levelConfig[log.level]
+          const Icon=config.icon
           return(
            <div
             key={log.id}
             className={cn(
              'px-4 py-2 cursor-pointer transition-colors hover:bg-nier-bg-panel',
-             selectedLog?.id === log.id && 'bg-nier-bg-selected'
-            )}
-            onClick={() => setSelectedLog(log)}
+             selectedLog?.id===log.id&&'bg-nier-bg-selected'
+)}
+            onClick={()=>setSelectedLog(log)}
            >
             <div className="flex items-start gap-3">
              <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
               {formatTime(log.timestamp)}
              </span>
              <span className={cn('flex items-center gap-1',config.color)}>
-              <Icon size={12} />
+              <Icon size={12}/>
              </span>
              <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
               [{log.source}]
@@ -278,10 +278,10 @@ export default function LogsView():JSX.Element{
              </span>
             </div>
            </div>
-          )
+)
          })}
         </div>
-       )}
+)}
       </CardContent>
      </Card>
     </div>
@@ -293,7 +293,7 @@ export default function LogsView():JSX.Element{
        <DiamondMarker>詳細</DiamondMarker>
       </CardHeader>
       <CardContent>
-       {selectedLog ? (
+       {selectedLog?(
         <div className="space-y-4">
          <div>
           <span className="text-nier-caption text-nier-text-light block">タイムスタンプ</span>
@@ -313,20 +313,20 @@ export default function LogsView():JSX.Element{
           <span className="text-nier-caption text-nier-text-light block">メッセージ</span>
           <span className="text-nier-small">{selectedLog.message}</span>
          </div>
-         {selectedLog.details && (
+         {selectedLog.details&&(
           <div>
            <span className="text-nier-caption text-nier-text-light block">詳細</span>
            <pre className="text-nier-caption bg-nier-bg-main p-2 mt-1 overflow-auto">
             {selectedLog.details}
            </pre>
           </div>
-         )}
+)}
         </div>
-       ) : (
+) : (
         <div className="text-center text-nier-text-light py-8">
          ログを選択してください
         </div>
-       )}
+)}
       </CardContent>
      </Card>
 
@@ -359,5 +359,5 @@ export default function LogsView():JSX.Element{
     </div>
    </div>
   </div>
- )
+)
 }

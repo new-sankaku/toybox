@@ -33,34 +33,34 @@ function convertApiLog(apiLog:ApiAgentLog):AgentLogEntry{
   timestamp:apiLog.timestamp,
   level:apiLog.level,
   message:apiLog.message,
-  progress:apiLog.progress || undefined,
+  progress:apiLog.progress||undefined,
   metadata:apiLog.metadata,
  }
 }
 
 export default function AgentsView():JSX.Element{
- const{currentProject} = useProjectStore()
- const{tabResetCounter} = useNavigationStore()
- const{agents,setAgents,agentLogs,isLoading} = useAgentStore()
- const[selectedAgent,setSelectedAgent] = useState<Agent | null>(null)
- const[initialLoading,setInitialLoading] = useState(true)
- const[initialLogsFetched,setInitialLogsFetched] = useState<Record<string,boolean>>({})
+ const{currentProject}=useProjectStore()
+ const{tabResetCounter}=useNavigationStore()
+ const{agents,setAgents,agentLogs,isLoading}=useAgentStore()
+ const[selectedAgent,setSelectedAgent]=useState<Agent|null>(null)
+ const[initialLoading,setInitialLoading]=useState(true)
+ const[initialLogsFetched,setInitialLogsFetched]=useState<Record<string,boolean>>({})
 
- useEffect(() => {
+ useEffect(()=>{
   setSelectedAgent(null)
  },[tabResetCounter])
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setAgents([])
    setInitialLoading(false)
    return
   }
 
-  const fetchAgents = async() => {
+  const fetchAgents=async()=>{
    setInitialLoading(true)
    try{
-    const data = await agentApi.listByProject(currentProject.id)
+    const data=await agentApi.listByProject(currentProject.id)
     setAgents(data.map(convertApiAgent))
    }catch(error){
     console.error('Failed to fetch agents:',error)
@@ -72,17 +72,17 @@ export default function AgentsView():JSX.Element{
   fetchAgents()
  },[currentProject?.id,setAgents])
 
- useEffect(() => {
+ useEffect(()=>{
   if(!selectedAgent)return
   if(initialLogsFetched[selectedAgent.id])return
 
-  const fetchLogs = async() => {
+  const fetchLogs=async()=>{
    try{
-    const data = await agentApi.getLogs(selectedAgent.id)
-    const logs = data.map(convertApiLog)
-    const{addLogEntry} = useAgentStore.getState()
-    logs.forEach(log => addLogEntry(selectedAgent.id,log))
-    setInitialLogsFetched(prev => ({...prev,[selectedAgent.id]:true}))
+    const data=await agentApi.getLogs(selectedAgent.id)
+    const logs=data.map(convertApiLog)
+    const{addLogEntry}=useAgentStore.getState()
+    logs.forEach(log=>addLogEntry(selectedAgent.id,log))
+    setInitialLogsFetched(prev=>({...prev,[selectedAgent.id]:true}))
    }catch(error){
     console.error('Failed to fetch agent logs:',error)
    }
@@ -91,14 +91,14 @@ export default function AgentsView():JSX.Element{
   fetchLogs()
  },[selectedAgent?.id,initialLogsFetched])
 
- const selectedAgentLogs = selectedAgent
-  ? (agentLogs[selectedAgent.id] || [])
+ const selectedAgentLogs=selectedAgent
+  ?(agentLogs[selectedAgent.id]||[])
    .slice()
-   .sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+   .sort((a,b)=>new Date(b.timestamp).getTime()-new Date(a.timestamp).getTime())
   : []
 
- const projectAgents = currentProject
-  ? agents.filter(a => a.projectId === currentProject.id)
+ const projectAgents=currentProject
+  ?agents.filter(a=>a.projectId===currentProject.id)
   : []
 
  if(!currentProject){
@@ -107,44 +107,44 @@ export default function AgentsView():JSX.Element{
     <div className="nier-page-header-row">
      <div className="nier-page-header-left">
       <h1 className="nier-page-title">AGENTS</h1>
-      <span className="nier-page-subtitle">- エージェント管理</span>
+      <span className="nier-page-subtitle">-エージェント管理</span>
      </div>
-     <div className="nier-page-header-right" />
+     <div className="nier-page-header-right"/>
     </div>
     <Card>
      <CardContent>
       <div className="text-center py-12 text-nier-text-light">
-       <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
+       <FolderOpen size={48} className="mx-auto mb-4 opacity-50"/>
        <p className="text-nier-body">プロジェクトを選択してください</p>
       </div>
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
- const handleSelectAgent = (agent:Agent) => {
+ const handleSelectAgent=(agent:Agent)=>{
   setSelectedAgent(agent)
  }
 
- const handleBack = () => {
+ const handleBack=()=>{
   setSelectedAgent(null)
  }
 
- const handleRetry = () => {
+ const handleRetry=()=>{
   console.log('Retry agent:',selectedAgent?.id)
  }
 
  if(selectedAgent){
-  const currentAgentData = projectAgents.find(a => a.id === selectedAgent.id) || selectedAgent
+  const currentAgentData=projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
   return(
    <AgentDetailView
     agent={currentAgentData}
     logs={selectedAgentLogs}
     onBack={handleBack}
-    onRetry={currentAgentData.status === 'failed' ? handleRetry : undefined}
+    onRetry={currentAgentData.status==='failed'?handleRetry : undefined}
    />
-  )
+)
  }
 
  return(
@@ -152,7 +152,7 @@ export default function AgentsView():JSX.Element{
    agents={projectAgents}
    onSelectAgent={handleSelectAgent}
    selectedAgentId={undefined}
-   loading={initialLoading || isLoading}
+   loading={initialLoading||isLoading}
   />
- )
+)
 }

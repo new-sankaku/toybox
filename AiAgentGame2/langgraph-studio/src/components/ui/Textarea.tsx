@@ -6,20 +6,20 @@ export interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElemen
  error?:string
 }
 
-const Textarea = forwardRef<HTMLTextAreaElement,TextareaProps>(
- ({className,label,error,id,...props},ref) => {
-  const textareaId = id || `textarea-${Math.random().toString(36).slice(2,9)}`
+const Textarea=forwardRef<HTMLTextAreaElement,TextareaProps>(
+ ({className,label,error,id,...props},ref)=>{
+  const textareaId=id||`textarea-${Math.random().toString(36).slice(2,9)}`
 
   return(
    <div className="w-full">
-    {label && (
+    {label&&(
      <label
       htmlFor={textareaId}
       className="block text-nier-small text-nier-text-light mb-1 tracking-nier"
      >
       {label}
      </label>
-    )}
+)}
     <textarea
      id={textareaId}
      ref={ref}
@@ -28,18 +28,18 @@ const Textarea = forwardRef<HTMLTextAreaElement,TextareaProps>(
       'text-nier-text-main tracking-nier resize-none',
       'focus:outline-none focus:border-nier-text-main',
       'placeholder:text-nier-text-light',
-      error && 'border-nier-accent-red',
+      error&&'border-nier-accent-red',
       className
-     )}
+)}
      {...props}
     />
-    {error && (
+    {error&&(
      <p className="mt-1 text-nier-caption text-nier-accent-red">{error}</p>
-    )}
+)}
    </div>
-  )
+)
  }
 )
-Textarea.displayName = 'Textarea'
+Textarea.displayName='Textarea'
 
 export{Textarea}

@@ -2,7 +2,7 @@ import{forwardRef,HTMLAttributes}from'react'
 import{cn}from'@/lib/utils'
 import{cva,type VariantProps}from'class-variance-authority'
 
-const categoryMarkerVariants = cva('nier-category-marker',{
+const categoryMarkerVariants=cva('nier-category-marker',{
  variants:{
   status:{
    system:'system',
@@ -27,15 +27,15 @@ export interface CategoryMarkerProps
  extends HTMLAttributes<HTMLDivElement>,
  VariantProps<typeof categoryMarkerVariants>{}
 
-const CategoryMarker = forwardRef<HTMLDivElement,CategoryMarkerProps>(
- ({className,status,size,...props},ref) => (
+const CategoryMarker=forwardRef<HTMLDivElement,CategoryMarkerProps>(
+ ({className,status,size,...props},ref)=>(
   <div
    ref={ref}
    className={cn(categoryMarkerVariants({status,size}),className)}
    {...props}
   />
- )
 )
-CategoryMarker.displayName = 'CategoryMarker'
+)
+CategoryMarker.displayName='CategoryMarker'
 
 export{CategoryMarker,categoryMarkerVariants}

@@ -19,15 +19,15 @@ interface CostEstimatorProps{
 export default function CostEstimator({
  currentCost,
  estimatedTotalCost,
- budgetLimit = 10,
+ budgetLimit=10,
  breakdown,
- currency = 'USD'
+ currency='USD'
 }:CostEstimatorProps):JSX.Element{
- const budgetUsedPercent = (currentCost / budgetLimit) * 100
- const isOverBudget = currentCost > budgetLimit
- const willExceedBudget = estimatedTotalCost > budgetLimit
+ const budgetUsedPercent=(currentCost/budgetLimit)*100
+ const isOverBudget=currentCost>budgetLimit
+ const willExceedBudget=estimatedTotalCost>budgetLimit
 
- const formatCurrency = (amount:number) => {
+ const formatCurrency=(amount:number)=>{
   return new Intl.NumberFormat('en-US',{
    style:'currency',
    currency:currency,
@@ -36,12 +36,12 @@ export default function CostEstimator({
   }).format(amount)
  }
 
- const formatTokens = (tokens:number) => {
-  if(tokens >= 1000000){
-   return`${(tokens / 1000000).toFixed(2)}M`
+ const formatTokens=(tokens:number)=>{
+  if(tokens>=1000000){
+   return`${(tokens/1000000).toFixed(2)}M`
   }
-  if(tokens >= 1000){
-   return`${(tokens / 1000).toFixed(1)}K`
+  if(tokens>=1000){
+   return`${(tokens/1000).toFixed(1)}K`
   }
   return tokens.toString()
  }
@@ -55,13 +55,13 @@ export default function CostEstimator({
     {/* Current Cost */}
     <div className="text-center py-4 bg-nier-bg-main">
      <div className="flex items-center justify-center gap-2 text-nier-small text-nier-text-light mb-2">
-      <DollarSign size={16} />
+      <DollarSign size={16}/>
       <span>現在のコスト</span>
      </div>
      <div className={cn(
       'text-nier-display font-medium tracking-nier',
-      isOverBudget ? 'text-nier-accent-red' : 'text-nier-text-main'
-     )}>
+      isOverBudget?'text-nier-accent-red' : 'text-nier-text-main'
+)}>
       {formatCurrency(currentCost)}
      </div>
     </div>
@@ -71,8 +71,8 @@ export default function CostEstimator({
      <div className="flex items-center justify-between mb-2 text-nier-small">
       <span className="text-nier-text-light">予算使用率</span>
       <span className={cn(
-       isOverBudget ? 'text-nier-accent-red' : 'text-nier-text-main'
-      )}>
+       isOverBudget?'text-nier-accent-red' : 'text-nier-text-main'
+)}>
        {budgetUsedPercent.toFixed(1)}%
       </span>
      </div>
@@ -80,50 +80,50 @@ export default function CostEstimator({
       <div
        className={cn(
         'h-full transition-all duration-300',
-        budgetUsedPercent > 80
-         ? 'bg-nier-accent-red'
-         : budgetUsedPercent > 50
-          ? 'bg-nier-accent-yellow'
+        budgetUsedPercent>80
+         ?'bg-nier-accent-red'
+         : budgetUsedPercent>50
+          ?'bg-nier-accent-yellow'
           : 'bg-nier-accent-green'
-       )}
+)}
        style={{width:`${Math.min(budgetUsedPercent,100)}%`}}
       />
      </div>
      <div className="flex items-center justify-between mt-1 text-nier-caption text-nier-text-light">
       <span>予算: {formatCurrency(budgetLimit)}</span>
-      <span>残り: {formatCurrency(Math.max(0,budgetLimit - currentCost))}</span>
+      <span>残り: {formatCurrency(Math.max(0,budgetLimit-currentCost))}</span>
      </div>
     </div>
 
     {/* Estimated Final */}
     <div className={cn(
      'p-3',
-     willExceedBudget ? 'bg-nier-accent-red/10' : 'bg-nier-bg-main'
-    )}>
+     willExceedBudget?'bg-nier-accent-red/10' : 'bg-nier-bg-main'
+)}>
      <div className="flex items-center justify-between">
       <span className="flex items-center gap-2 text-nier-small text-nier-text-light">
-       <TrendingUp size={14} />
+       <TrendingUp size={14}/>
        推定最終コスト
       </span>
       <span className={cn(
        'text-nier-body font-medium',
-       willExceedBudget ? 'text-nier-accent-red' : 'text-nier-accent-blue'
-      )}>
+       willExceedBudget?'text-nier-accent-red' : 'text-nier-accent-blue'
+)}>
        {formatCurrency(estimatedTotalCost)}
       </span>
      </div>
-     {willExceedBudget && (
+     {willExceedBudget&&(
       <div className="flex items-center gap-2 mt-2 text-nier-caption text-nier-accent-red">
-       <AlertTriangle size={12} />
+       <AlertTriangle size={12}/>
        予算を超過する可能性があります
       </div>
-     )}
+)}
     </div>
 
     {/* Cost Breakdown */}
     <div className="pt-4 border-t border-nier-border-light">
      <div className="flex items-center gap-2 mb-3 text-nier-small text-nier-text-light">
-      <Calculator size={14} />
+      <Calculator size={14}/>
       内訳
      </div>
      <div className="space-y-2">
@@ -148,10 +148,10 @@ export default function CostEstimator({
 
     {/* Pricing Info */}
     <div className="text-nier-caption text-nier-text-light">
-     <p>* Claude APIの価格に基づいて計算</p>
-     <p>* 入力: $0.003/1K tokens, 出力: $0.015/1K tokens</p>
+     <p>*Claude APIの価格に基づいて計算</p>
+     <p>*入力: $0.003/1K tokens,出力: $0.015/1K tokens</p>
     </div>
    </CardContent>
   </Card>
- )
+)
 }

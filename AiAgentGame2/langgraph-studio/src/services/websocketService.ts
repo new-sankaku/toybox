@@ -38,14 +38,14 @@ interface ClientToServerEvents{
  'checkpoint:resolve':(data:{checkpointId:string;resolution:string;feedback?:string})=>void
 }
 
-type TypedSocket = Socket<ServerToClientEvents,ClientToServerEvents>
+type TypedSocket=Socket<ServerToClientEvents,ClientToServerEvents>
 
 class WebSocketService{
- private socket:TypedSocket | null = null
- private maxReconnectAttempts = 5
- private reconnectDelay = 1000
- private pendingProjectId:string | null = null
- private currentProjectId:string | null = null
+ private socket:TypedSocket|null=null
+ private maxReconnectAttempts=5
+ private reconnectDelay=1000
+ private pendingProjectId:string|null=null
+ private currentProjectId:string|null=null
 
  connect(backendUrl:string):void{
   if(this.socket?.connected){
@@ -53,12 +53,12 @@ class WebSocketService{
    return
   }
 
-  const connectionStore = useConnectionStore.getState()
+  const connectionStore=useConnectionStore.getState()
   connectionStore.setStatus('connecting')
 
   console.log('[WS] Connecting to:',backendUrl)
 
-  this.socket = io(backendUrl,{
+  this.socket=io(backendUrl,{
    transports:['websocket','polling'],
    reconnection:true,
    reconnectionAttempts:this.maxReconnectAttempts,
@@ -73,9 +73,9 @@ class WebSocketService{
  private setupEventHandlers():void{
   if(!this.socket)return
 
-  this.socket.on('connect',() => {
+  this.socket.on('connect',()=>{
    console.log('[WS] Connected! Socket ID:',this.socket?.id)
-   const connectionStore = useConnectionStore.getState()
+   const connectionStore=useConnectionStore.getState()
    connectionStore.setStatus('connected')
    connectionStore.setError(null)
    connectionStore.resetReconnect()
@@ -86,50 +86,50 @@ class WebSocketService{
    }
   })
 
-  this.socket.on('disconnect',(reason) => {
+  this.socket.on('disconnect',(reason)=>{
    console.log('[WS] Disconnected. Reason:',reason)
    useConnectionStore.getState().setStatus('disconnected')
-   this.currentProjectId = null
+   this.currentProjectId=null
   })
 
-  this.socket.on('error'as keyof ServerToClientEvents,((error:Error) => {
+  this.socket.on('error'as keyof ServerToClientEvents,((error:Error)=>{
    console.error('[WS] Error:',error)
    useConnectionStore.getState().setError(error.message)
   })as()=>void)
 
-  this.socket.on('connection:state_sync',(data) => {
+  this.socket.on('connection:state_sync',(data)=>{
    console.log('[WS] State sync received:',{
-    hasAgents:data.agents?.length || 0,
-    hasCheckpoints:data.checkpoints?.length || 0,
+    hasAgents:data.agents?.length||0,
+    hasCheckpoints:data.checkpoints?.length||0,
     hasMetrics:!!data.metrics,
     status:data.status
    })
 
-   if(data.agents && data.agents.length > 0){
+   if(data.agents&&data.agents.length>0){
     console.log('[WS] Setting agents from state sync:',data.agents.length)
     useAgentStore.getState().setAgents(data.agents)
    }
-   if(data.checkpoints && data.checkpoints.length > 0){
-    const checkpointStore = useCheckpointStore.getState()
-    data.checkpoints.forEach(cp => checkpointStore.addCheckpoint(cp))
+   if(data.checkpoints&&data.checkpoints.length>0){
+    const checkpointStore=useCheckpointStore.getState()
+    data.checkpoints.forEach(cp=>checkpointStore.addCheckpoint(cp))
    }
    if(data.metrics){
     useMetricsStore.getState().setProjectMetrics(data.metrics)
    }
   })
 
-  this.socket.on('agent:started',(data) => {
+  this.socket.on('agent:started',(data)=>{
    console.log('[WS] Agent started:',data.agentId)
-   const agentStore = useAgentStore.getState()
+   const agentStore=useAgentStore.getState()
    if(data.agent){
     agentStore.addAgent(data.agent)
     agentStore.updateAgentStatus(data.agent.id,'running')
    }
   })
 
-  this.socket.on('agent:progress',(data) => {
-   console.log('[WS] Agent progress:',data.agentId,data.progress + '%')
-   const agentStore = useAgentStore.getState()
+  this.socket.on('agent:progress',(data)=>{
+   console.log('[WS] Agent progress:',data.agentId,data.progress+'%')
+   const agentStore=useAgentStore.getState()
    agentStore.updateAgent(data.agentId,{
     progress:data.progress,
     currentTask:data.currentTask,
@@ -137,22 +137,22 @@ class WebSocketService{
    })
   })
 
-  this.socket.on('agent:log',({agentId,entry}) => {
+  this.socket.on('agent:log',({agentId,entry})=>{
    useAgentStore.getState().addLogEntry(agentId,entry)
   })
 
-  this.socket.on('agent:completed',(data) => {
+  this.socket.on('agent:completed',(data)=>{
    console.log('[WS] Agent completed:',data.agentId)
-   const agentStore = useAgentStore.getState()
+   const agentStore=useAgentStore.getState()
    if(data.agent){
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'completed')
   })
 
-  this.socket.on('agent:failed',({agentId,error}) => {
+  this.socket.on('agent:failed',({agentId,error})=>{
    console.error('[WS] Agent failed:',agentId,error)
-   const agentStore = useAgentStore.getState()
+   const agentStore=useAgentStore.getState()
    agentStore.updateAgentStatus(agentId,'failed')
    agentStore.addLogEntry(agentId,{
     id:crypto.randomUUID(),
@@ -162,30 +162,30 @@ class WebSocketService{
    })
   })
 
-  this.socket.on('checkpoint:created',(data) => {
+  this.socket.on('checkpoint:created',(data)=>{
    console.log('[WS] Checkpoint created:',data.checkpointId)
    if(data.checkpoint){
     useCheckpointStore.getState().addCheckpoint(data.checkpoint)
    }
   })
 
-  this.socket.on('checkpoint:resolved',({checkpoint}) => {
+  this.socket.on('checkpoint:resolved',({checkpoint})=>{
    console.log('[WS] Checkpoint resolved:',checkpoint.id)
    useCheckpointStore.getState().updateCheckpoint(checkpoint.id,checkpoint)
   })
 
-  this.socket.on('project:updated',({projectId,updates}) => {
+  this.socket.on('project:updated',({projectId,updates})=>{
    console.log('[WS] Project updated:',projectId)
    useProjectStore.getState().updateProject(projectId,updates)
   })
 
-  this.socket.on('phase:changed',({projectId,phase,phaseName}) => {
+  this.socket.on('phase:changed',({projectId,phase,phaseName})=>{
    console.log('[WS] Phase changed:',projectId,phase,phaseName)
    useProjectStore.getState().updateProject(projectId,{currentPhase:phase})
   })
 
-  this.socket.on('metrics:update',({projectId,metrics}) => {
-   console.log('[WS] Metrics updated:',projectId,'Progress:',metrics.progressPercent + '%')
+  this.socket.on('metrics:update',({projectId,metrics})=>{
+   console.log('[WS] Metrics updated:',projectId,'Progress:',metrics.progressPercent+'%')
    useMetricsStore.getState().setProjectMetrics(metrics)
   })
  }
@@ -197,24 +197,24 @@ class WebSocketService{
   }
   console.log('[WS] Emitting subscribe:project for:',projectId)
   this.socket.emit('subscribe:project',projectId)
-  this.currentProjectId = projectId
+  this.currentProjectId=projectId
  }
 
  subscribeToProject(projectId:string):void{
   console.log('[WS] subscribeToProject called:',projectId,'Connected:',this.socket?.connected)
-  this.pendingProjectId = projectId
+  this.pendingProjectId=projectId
 
   if(!this.socket?.connected){
    console.warn('[WS] Not connected yet, will subscribe when connected')
    return
   }
 
-  if(this.currentProjectId === projectId){
+  if(this.currentProjectId===projectId){
    console.log('[WS] Already subscribed to this project')
    return
   }
 
-  if(this.currentProjectId && this.currentProjectId !== projectId){
+  if(this.currentProjectId&&this.currentProjectId!==projectId){
    this.doUnsubscribe(this.currentProjectId)
   }
 
@@ -230,12 +230,12 @@ class WebSocketService{
  unsubscribeFromProject(projectId:string):void{
   console.log('[WS] unsubscribeFromProject called:',projectId)
 
-  if(this.pendingProjectId === projectId){
-   this.pendingProjectId = null
+  if(this.pendingProjectId===projectId){
+   this.pendingProjectId=null
   }
-  if(this.currentProjectId === projectId){
+  if(this.currentProjectId===projectId){
    this.doUnsubscribe(projectId)
-   this.currentProjectId = null
+   this.currentProjectId=null
   }
  }
 
@@ -252,10 +252,10 @@ class WebSocketService{
   console.log('[WS] Disconnecting...')
   if(this.socket){
    this.socket.disconnect()
-   this.socket = null
+   this.socket=null
   }
-  this.pendingProjectId = null
-  this.currentProjectId = null
+  this.pendingProjectId=null
+  this.currentProjectId=null
   useConnectionStore.getState().setStatus('disconnected')
  }
 
@@ -263,7 +263,7 @@ class WebSocketService{
   return this.socket?.connected ?? false
  }
 
- getStatus():{connected:boolean;currentProject:string | null;pendingProject:string | null}{
+ getStatus():{connected:boolean;currentProject:string|null;pendingProject:string|null}{
   return{
    connected:this.socket?.connected ?? false,
    currentProject:this.currentProjectId,
@@ -272,4 +272,4 @@ class WebSocketService{
  }
 }
 
-export const websocketService = new WebSocketService()
+export const websocketService=new WebSocketService()

@@ -1,25 +1,25 @@
 import{create}from'zustand'
 
-export type ConnectionStatus = 'connected' | 'connecting' | 'reconnecting' | 'disconnected'
+export type ConnectionStatus='connected'|'connecting'|'reconnecting'|'disconnected'
 
 interface ConnectionState{
 
  status:ConnectionStatus
  reconnectAttempts:number
- lastConnectedAt:Date | null
- backendPort:number | null
+ lastConnectedAt:Date|null
+ backendPort:number|null
  hasPendingSync:boolean
- error:string | null
+ error:string|null
  setStatus:(status:ConnectionStatus)=>void
- setBackendPort:(port:number | null)=>void
- setError:(error:string | null)=>void
+ setBackendPort:(port:number|null)=>void
+ setError:(error:string|null)=>void
  incrementReconnect:()=>void
  resetReconnect:()=>void
  setSyncRequired:(required:boolean)=>void
  reset:()=>void
 }
 
-const initialState = {
+const initialState={
  status:'disconnected'as ConnectionStatus,
  reconnectAttempts:0,
  lastConnectedAt:null,
@@ -28,27 +28,27 @@ const initialState = {
  error:null
 }
 
-export const useConnectionStore = create<ConnectionState>((set) => ({
+export const useConnectionStore=create<ConnectionState>((set)=>({
  ...initialState,
 
- setStatus:(status) =>
-  set((state) => ({
+ setStatus:(status)=>
+  set((state)=>({
    status,
-   lastConnectedAt:status === 'connected' ? new Date() : state.lastConnectedAt
+   lastConnectedAt:status==='connected'?new Date() : state.lastConnectedAt
   })),
 
- setBackendPort:(port) => set({backendPort:port}),
+ setBackendPort:(port)=>set({backendPort:port}),
 
- setError:(error) => set({error}),
+ setError:(error)=>set({error}),
 
- incrementReconnect:() =>
-  set((state) => ({
-   reconnectAttempts:state.reconnectAttempts + 1
+ incrementReconnect:()=>
+  set((state)=>({
+   reconnectAttempts:state.reconnectAttempts+1
   })),
 
- resetReconnect:() => set({reconnectAttempts:0}),
+ resetReconnect:()=>set({reconnectAttempts:0}),
 
- setSyncRequired:(required) => set({hasPendingSync:required}),
+ setSyncRequired:(required)=>set({hasPendingSync:required}),
 
- reset:() => set(initialState)
+ reset:()=>set(initialState)
 }))

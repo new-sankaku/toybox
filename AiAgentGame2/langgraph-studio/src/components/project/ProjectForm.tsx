@@ -13,18 +13,18 @@ interface ProjectFormProps{
  initialData?:Partial<CreateProjectInput>
 }
 
-const platformOptions:SelectOption[] = [
+const platformOptions:SelectOption[]=[
  {value:'web',label:'Web Browser'},
  {value:'desktop',label:'Desktop (Electron)'},
  {value:'mobile',label:'Mobile (PWA)'}
 ]
 
-const scopeOptions:SelectOption[] = [
- {value:'mvp',label:'MVP - Minimal Viable Product'},
- {value:'full',label:'Full - Complete Game'}
+const scopeOptions:SelectOption[]=[
+ {value:'mvp',label:'MVP-Minimal Viable Product'},
+ {value:'full',label:'Full-Complete Game'}
 ]
 
-const genreOptions:SelectOption[] = [
+const genreOptions:SelectOption[]=[
  {value:'rpg',label:'RPG'},
  {value:'action',label:'Action'},
  {value:'puzzle',label:'Puzzle'},
@@ -35,44 +35,44 @@ const genreOptions:SelectOption[] = [
 ]
 
 export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFormProps){
- const[name,setName] = useState(initialData?.name || '')
- const[description,setDescription] = useState(initialData?.description || '')
- const[conceptDescription,setConceptDescription] = useState(initialData?.concept?.description || '')
- const[platform,setPlatform] = useState<GameConcept['platform']>(initialData?.concept?.platform || 'web')
- const[scope,setScope] = useState<GameConcept['scope']>(initialData?.concept?.scope || 'mvp')
- const[genre,setGenre] = useState(initialData?.concept?.genre || '')
+ const[name,setName]=useState(initialData?.name||'')
+ const[description,setDescription]=useState(initialData?.description||'')
+ const[conceptDescription,setConceptDescription]=useState(initialData?.concept?.description||'')
+ const[platform,setPlatform]=useState<GameConcept['platform']>(initialData?.concept?.platform||'web')
+ const[scope,setScope]=useState<GameConcept['scope']>(initialData?.concept?.scope||'mvp')
+ const[genre,setGenre]=useState(initialData?.concept?.genre||'')
 
- const[errors,setErrors] = useState<Record<string,string>>({})
+ const[errors,setErrors]=useState<Record<string,string>>({})
 
- const validate = ():boolean => {
-  const newErrors:Record<string,string> = {}
+ const validate=():boolean=>{
+  const newErrors:Record<string,string>={}
 
   if(!name.trim()){
-   newErrors.name = 'Project name is required'
+   newErrors.name='Project name is required'
   }
   if(!conceptDescription.trim()){
-   newErrors.conceptDescription = 'Game concept description is required'
+   newErrors.conceptDescription='Game concept description is required'
   }
-  if(conceptDescription.length < 20){
-   newErrors.conceptDescription = 'Please provide more detail (min 20 characters)'
+  if(conceptDescription.length<20){
+   newErrors.conceptDescription='Please provide more detail (min 20 characters)'
   }
 
   setErrors(newErrors)
-  return Object.keys(newErrors).length === 0
+  return Object.keys(newErrors).length===0
  }
 
- const handleSubmit = (e:React.FormEvent) => {
+ const handleSubmit=(e:React.FormEvent)=>{
   e.preventDefault()
   if(!validate())return
 
   onSubmit({
    name:name.trim(),
-   description:description.trim() || undefined,
+   description:description.trim()||undefined,
    concept:{
     description:conceptDescription.trim(),
     platform,
     scope,
-    genre:genre || undefined
+    genre:genre||undefined
    }
   })
  }
@@ -85,7 +85,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
      <Input
       label="Project Name"
       value={name}
-      onChange={(e) => setName(e.target.value)}
+      onChange={(e)=>setName(e.target.value)}
       placeholder="My Awesome Game"
       error={errors.name}
       disabled={isLoading}
@@ -93,7 +93,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
      <Textarea
       label="Description (optional)"
       value={description}
-      onChange={(e) => setDescription(e.target.value)}
+      onChange={(e)=>setDescription(e.target.value)}
       placeholder="Brief description of your project..."
       rows={2}
       disabled={isLoading}
@@ -107,7 +107,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
      <Textarea
       label="Game Concept"
       value={conceptDescription}
-      onChange={(e) => setConceptDescription(e.target.value)}
+      onChange={(e)=>setConceptDescription(e.target.value)}
       placeholder="Describe your game idea in detail. What is the gameplay like? What makes it unique? Who is the target audience?"
       rows={5}
       error={errors.conceptDescription}
@@ -118,21 +118,21 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
        label="Platform"
        options={platformOptions}
        value={platform}
-       onChange={(e) => setPlatform(e.target.value as GameConcept['platform'])}
+       onChange={(e)=>setPlatform(e.target.value as GameConcept['platform'])}
        disabled={isLoading}
       />
       <Select
        label="Scope"
        options={scopeOptions}
        value={scope}
-       onChange={(e) => setScope(e.target.value as GameConcept['scope'])}
+       onChange={(e)=>setScope(e.target.value as GameConcept['scope'])}
        disabled={isLoading}
       />
       <Select
        label="Genre"
        options={genreOptions}
        value={genre}
-       onChange={(e) => setGenre(e.target.value)}
+       onChange={(e)=>setGenre(e.target.value)}
        placeholder="Select genre..."
        disabled={isLoading}
       />
@@ -142,15 +142,15 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
 
    {/* Actions */}
    <div className="flex items-center justify-end gap-3">
-    {onCancel && (
+    {onCancel&&(
      <Button type="button" variant="ghost" onClick={onCancel} disabled={isLoading}>
       Cancel
      </Button>
-    )}
+)}
     <Button type="submit" variant="primary" disabled={isLoading}>
-     {isLoading ? 'Creating...' : 'Create Project'}
+     {isLoading?'Creating...' : 'Create Project'}
     </Button>
    </div>
   </form>
- )
+)
 }

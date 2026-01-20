@@ -12,7 +12,7 @@ interface AgentCardProps{
  waitingFor?:string
 }
 
-const statusConfig = {
+const statusConfig={
  pending:{
   color:'bg-nier-border-dark',
   icon:Clock,
@@ -45,24 +45,24 @@ const statusConfig = {
  }
 }
 
-const getDisplayName = (agent:Agent):string => {
- return(agent.metadata?.displayName as string) || agent.type
+const getDisplayName=(agent:Agent):string=>{
+ return(agent.metadata?.displayName as string)||agent.type
 }
 
-const getAgentRole = (type:string):{role:string} => {
+const getAgentRole=(type:string):{role:string}=>{
  if(type.endsWith('_leader')){
   return{role:'Leader'}
  }
  if(type.endsWith('_worker')){
   return{role:'Worker'}
  }
- if(type === 'integrator'){
+ if(type==='integrator'){
   return{role:'Leader'}  // Coordinates integration
  }
- if(type === 'tester'){
+ if(type==='tester'){
   return{role:'Worker'}  // Executes tests
  }
- if(type === 'reviewer'){
+ if(type==='reviewer'){
   return{role:'Leader'}  // Reviews and approves
  }
  if(['concept','design','scenario','character','world','task_split'].includes(type)){
@@ -74,58 +74,58 @@ const getAgentRole = (type:string):{role:string} => {
 export function AgentCard({
  agent,
  onSelect,
- isSelected = false,
+ isSelected=false,
  qualityCheckConfig,
  waitingFor
 }:AgentCardProps):JSX.Element{
- const status = statusConfig[agent.status]
- const StatusIcon = status.icon
- const agentRole = getAgentRole(agent.type)
+ const status=statusConfig[agent.status]
+ const StatusIcon=status.icon
+ const agentRole=getAgentRole(agent.type)
 
- const getRuntime = () => {
+ const getRuntime=()=>{
   if(!agent.startedAt)return'-'
-  const start = new Date(agent.startedAt).getTime()
-  const end = agent.completedAt
-   ? new Date(agent.completedAt).getTime()
+  const start=new Date(agent.startedAt).getTime()
+  const end=agent.completedAt
+   ?new Date(agent.completedAt).getTime()
    : Date.now()
-  const seconds = Math.floor((end - start) / 1000)
+  const seconds=Math.floor((end-start)/1000)
 
-  if(seconds < 60)return`${seconds}秒`
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
+  if(seconds<60)return`${seconds}秒`
+  const minutes=Math.floor(seconds/60)
+  const remainingSeconds=seconds%60
   return`${minutes}分${remainingSeconds}秒`
  }
 
- const getTaskText = () => {
-  if(agent.status === 'running'){
-   return agent.currentTask || '処理中'
+ const getTaskText=()=>{
+  if(agent.status==='running'){
+   return agent.currentTask||'処理中'
   }
-  if(agent.status === 'pending')return waitingFor || '開始待機'
-  if(agent.status === 'blocked')return'承認待ち'
-  if(agent.status === 'completed')return'完了'
-  if(agent.status === 'failed')return agent.error || 'エラー発生'
+  if(agent.status==='pending')return waitingFor||'開始待機'
+  if(agent.status==='blocked')return'承認待ち'
+  if(agent.status==='completed')return'完了'
+  if(agent.status==='failed')return agent.error||'エラー発生'
   return''
  }
 
- const isUsingLLM = agent.status === 'running' && agent.progress > 0
+ const isUsingLLM=agent.status==='running'&&agent.progress>0
 
  return(
   <div
    className={cn(
     'cursor-pointer transition-all duration-nier-normal px-3 py-2',
     'hover:bg-nier-bg-selected',
-    isSelected && 'bg-nier-bg-selected',
-    status.pulse && 'animate-nier-pulse'
-   )}
-   onClick={() => onSelect(agent)}
+    isSelected&&'bg-nier-bg-selected',
+    status.pulse&&'animate-nier-pulse'
+)}
+   onClick={()=>onSelect(agent)}
   >
    {/* Grid Layout for aligned columns */}
    <div className="grid grid-cols-[4px_55px_180px_1fr_140px_auto] items-center gap-2">
     {/* Col 1: Status Indicator */}
     <div className={cn(
      'w-1 h-6 bg-nier-border-dark transition-opacity',
-     status.pulse && 'animate-pulse'
-    )} />
+     status.pulse&&'animate-pulse'
+)}/>
 
     {/* Col 2: Role badge */}
     <span className="text-nier-caption text-nier-text-light">
@@ -134,7 +134,7 @@ export function AgentCard({
 
     {/* Col 3: Agent Type */}
     <div className="flex items-center gap-1.5 min-w-0">
-     <Cpu size={12} className="text-nier-text-light flex-shrink-0" />
+     <Cpu size={12} className="text-nier-text-light flex-shrink-0"/>
      <span className="text-nier-small font-medium text-nier-text-main truncate">
       {getDisplayName(agent)}
      </span>
@@ -142,28 +142,28 @@ export function AgentCard({
 
     {/* Col 4: Task/Status Text */}
     <div className="flex items-center gap-2 min-w-0 pl-4">
-     {isUsingLLM && (
-      <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中" />
-     )}
+     {isUsingLLM&&(
+      <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中"/>
+)}
      <span className="text-nier-caption truncate text-nier-text-light">
       {getTaskText()}
      </span>
     </div>
 
-    {/* Col 5: Progress Bar + Time */}
+    {/* Col 5: Progress Bar+Time */}
     <div className="flex items-center gap-2">
-     {agent.status === 'running' ? (
+     {agent.status==='running'?(
       <>
-       <Progress value={agent.progress} className="h-1.5 w-12" />
+       <Progress value={agent.progress} className="h-1.5 w-12"/>
        <span className="text-nier-caption text-nier-text-light w-8">
         {agent.progress}%
        </span>
       </>
-     ) : (
-      <span className="w-[76px]" />
-     )}
+) : (
+      <span className="w-[76px]"/>
+)}
      <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
-      <Clock size={10} />
+      <Clock size={10}/>
       {getRuntime()}
      </span>
     </div>
@@ -174,21 +174,21 @@ export function AgentCard({
       {agent.tokensUsed.toLocaleString()}tk
      </span>
      {/* Quality Check Badge */}
-     {qualityCheckConfig && (
+     {qualityCheckConfig&&(
       <span
        className="text-nier-caption text-nier-text-light flex items-center gap-1"
-       title={qualityCheckConfig.enabled ? '品質チェックON' : '品質チェックOFF'}
+       title={qualityCheckConfig.enabled?'品質チェックON' : '品質チェックOFF'}
       >
-       {qualityCheckConfig.enabled ? <Shield size={10} /> : <ShieldOff size={10} />}
+       {qualityCheckConfig.enabled?<Shield size={10}/>:<ShieldOff size={10}/>}
        QC
       </span>
-     )}
+)}
      <span className="text-nier-caption text-nier-text-light flex items-center gap-1 w-14">
-      <StatusIcon size={10} />
+      <StatusIcon size={10}/>
       {status.text}
      </span>
     </div>
    </div>
   </div>
- )
+)
 }

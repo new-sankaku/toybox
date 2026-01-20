@@ -19,9 +19,9 @@ export default function AppLayout({
   <div className="flex flex-col h-screen bg-nier-bg-main">
    {/* Header with tabs */}
    <header className="flex items-center bg-nier-bg-header border-b-2 border-[#3D3A33]">
-    <HeaderTabs activeTab={activeTab} onTabChange={onTabChange} />
+    <HeaderTabs activeTab={activeTab} onTabChange={onTabChange}/>
     <div className="ml-auto px-4">
-     <ConnectionStatus />
+     <ConnectionStatus/>
     </div>
    </header>
 
@@ -30,8 +30,8 @@ export default function AppLayout({
     <main className="flex-1 overflow-auto">
      {children}
     </main>
-    <ActivitySidebar />
+    <ActivitySidebar/>
    </div>
   </div>
- )
+)
 }

@@ -5,8 +5,8 @@ export interface DiamondMarkerProps extends HTMLAttributes<HTMLDivElement>{
  children:React.ReactNode
 }
 
-const DiamondMarker = forwardRef<HTMLDivElement,DiamondMarkerProps>(
- ({className,children,...props},ref) => (
+const DiamondMarker=forwardRef<HTMLDivElement,DiamondMarkerProps>(
+ ({className,children,...props},ref)=>(
   <div
    ref={ref}
    className={cn('nier-diamond',className)}
@@ -14,8 +14,8 @@ const DiamondMarker = forwardRef<HTMLDivElement,DiamondMarkerProps>(
   >
    {children}
   </div>
- )
 )
-DiamondMarker.displayName = 'DiamondMarker'
+)
+DiamondMarker.displayName='DiamondMarker'
 
 export{DiamondMarker}

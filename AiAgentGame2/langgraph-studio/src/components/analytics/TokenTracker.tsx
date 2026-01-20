@@ -21,29 +21,29 @@ interface TokenTrackerProps{
  maxTokens?:number
 }
 
-const getDisplayName = (data:TokenData):string => {
- return data.agentName || data.agentType
+const getDisplayName=(data:TokenData):string=>{
+ return data.agentName||data.agentType
 }
 
 export default function TokenTracker({
  currentTokens,
  estimatedTotalTokens,
  tokensByAgent,
- maxTokens = 1000000
+ maxTokens=1000000
 }:TokenTrackerProps):JSX.Element{
- const usagePercent = (currentTokens / maxTokens) * 100
- const estimatedPercent = (estimatedTotalTokens / maxTokens) * 100
+ const usagePercent=(currentTokens/maxTokens)*100
+ const estimatedPercent=(estimatedTotalTokens/maxTokens)*100
 
- const sortedAgents = useMemo(() => {
-  return[...tokensByAgent].sort((a,b) => b.tokensUsed - a.tokensUsed)
+ const sortedAgents=useMemo(()=>{
+  return[...tokensByAgent].sort((a,b)=>b.tokensUsed-a.tokensUsed)
  },[tokensByAgent])
 
- const formatTokens = (tokens:number) => {
-  if(tokens >= 1000000){
-   return`${(tokens / 1000000).toFixed(2)}M`
+ const formatTokens=(tokens:number)=>{
+  if(tokens>=1000000){
+   return`${(tokens/1000000).toFixed(2)}M`
   }
-  if(tokens >= 1000){
-   return`${(tokens / 1000).toFixed(1)}K`
+  if(tokens>=1000){
+   return`${(tokens/1000).toFixed(1)}K`
   }
   return tokens.toString()
  }
@@ -58,15 +58,15 @@ export default function TokenTracker({
     <div>
      <div className="flex items-center justify-between mb-2">
       <span className="text-nier-small text-nier-text-light flex items-center gap-2">
-       <Activity size={14} />
+       <Activity size={14}/>
        現在の使用量
       </span>
       <span className="text-nier-small text-nier-text-main">
-       {formatTokens(currentTokens)} / {formatTokens(maxTokens)}
+       {formatTokens(currentTokens)}/{formatTokens(maxTokens)}
       </span>
      </div>
      <div className="relative">
-      <Progress value={usagePercent} />
+      <Progress value={usagePercent}/>
       {/* Estimated marker */}
       <div
        className="absolute top-0 h-full w-0.5 bg-nier-accent-orange"
@@ -74,9 +74,9 @@ export default function TokenTracker({
       />
      </div>
      <div className="flex items-center justify-between mt-2 text-nier-caption text-nier-text-light">
-      <span>{usagePercent.toFixed(1)}% 使用中</span>
+      <span>{usagePercent.toFixed(1)}%使用中</span>
       <span className="flex items-center gap-1 text-nier-accent-orange">
-       <TrendingUp size={12} />
+       <TrendingUp size={12}/>
        推定: {formatTokens(estimatedTotalTokens)}
       </span>
      </div>
@@ -85,17 +85,17 @@ export default function TokenTracker({
     {/* Agent Breakdown */}
     <div>
      <div className="flex items-center gap-2 mb-3 text-nier-small text-nier-text-light">
-      <span className="w-3 h-0.5 bg-nier-accent-blue" />
+      <span className="w-3 h-0.5 bg-nier-accent-blue"/>
       エージェント別内訳
      </div>
      <div className="space-y-3">
-      {sortedAgents.length === 0 ? (
+      {sortedAgents.length===0?(
        <div className="text-center text-nier-text-light text-nier-small py-4">
         データがありません
        </div>
-      ) : (
-       sortedAgents.map((agent) => {
-        const percent = (agent.tokensUsed / currentTokens) * 100 || 0
+) : (
+       sortedAgents.map((agent)=>{
+        const percent=(agent.tokensUsed/currentTokens)*100||0
         return(
          <div key={agent.agentId} className="space-y-1">
           <div className="flex items-center justify-between">
@@ -113,9 +113,9 @@ export default function TokenTracker({
            />
           </div>
          </div>
-        )
+)
        })
-      )}
+)}
      </div>
     </div>
 
@@ -127,8 +127,8 @@ export default function TokenTracker({
         平均/エージェント
        </span>
        <span className="text-nier-body text-nier-text-main">
-        {tokensByAgent.length > 0
-         ? formatTokens(Math.round(currentTokens / tokensByAgent.length))
+        {tokensByAgent.length>0
+         ?formatTokens(Math.round(currentTokens/tokensByAgent.length))
          : '-'}
        </span>
       </div>
@@ -138,14 +138,14 @@ export default function TokenTracker({
        </span>
        <span className={cn(
         'text-nier-body',
-        usagePercent > 80 ? 'text-nier-accent-red' : 'text-nier-accent-green'
-       )}>
-        {formatTokens(maxTokens - currentTokens)}
+        usagePercent>80?'text-nier-accent-red' : 'text-nier-accent-green'
+)}>
+        {formatTokens(maxTokens-currentTokens)}
        </span>
       </div>
      </div>
     </div>
    </CardContent>
   </Card>
- )
+)
 }

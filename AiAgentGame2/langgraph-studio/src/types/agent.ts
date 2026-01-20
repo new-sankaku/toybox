@@ -1,43 +1,43 @@
-export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'waiting_approval'
+export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
 
-export type AgentType =
-  | 'concept'
-  | 'task_split_1'
-  | 'concept_detail'
-  | 'scenario'
-  | 'world'
-  | 'game_design'
-  | 'tech_spec'
-  | 'task_split_2'
-  | 'asset_character'
-  | 'asset_background'
-  | 'asset_ui'
-  | 'asset_effect'
-  | 'asset_bgm'
-  | 'asset_voice'
-  | 'asset_sfx'
-  | 'task_split_3'
-  | 'code'
-  | 'event'
-  | 'ui_integration'
-  | 'asset_integration'
-  | 'task_split_4'
-  | 'unit_test'
-  | 'integration_test'
+export type AgentType=
+ |'concept'
+ |'task_split_1'
+ |'concept_detail'
+ |'scenario'
+ |'world'
+ |'game_design'
+ |'tech_spec'
+ |'task_split_2'
+ |'asset_character'
+ |'asset_background'
+ |'asset_ui'
+ |'asset_effect'
+ |'asset_bgm'
+ |'asset_voice'
+ |'asset_sfx'
+ |'task_split_3'
+ |'code'
+ |'event'
+ |'ui_integration'
+ |'asset_integration'
+ |'task_split_4'
+ |'unit_test'
+ |'integration_test'
 
 export interface Agent{
  id:string
  projectId:string
  type:AgentType
- phase?:0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
+ phase?:0|1|2|3|4|5|6|7|8
  status:AgentStatus
  progress:number
- currentTask:string | null
+ currentTask:string|null
  tokensUsed:number
- startedAt:string | null
- completedAt:string | null
- error:string | null
- parentAgentId:string | null
+ startedAt:string|null
+ completedAt:string|null
+ error:string|null
+ parentAgentId:string|null
  metadata:Record<string,unknown>
  createdAt:string
 }
@@ -47,7 +47,7 @@ export interface AgentMetrics{
  agentType:AgentType
  status:AgentStatus
  progress:number
- currentTask:string | null
+ currentTask:string|null
  tokensUsed:number
  tokensEstimated:number
  runtimeSeconds:number
@@ -58,7 +58,7 @@ export interface AgentMetrics{
  subAgentMetrics:AgentMetrics[]
 }
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogLevel='debug'|'info'|'warn'|'error'
 
 export interface LogEntry{
  id:string
@@ -82,26 +82,26 @@ export interface AgentOutput{
  id:string
  agentId:string
  outputType:OutputType
- content:Record<string,unknown> | null
- filePath:string | null
+ content:Record<string,unknown>|null
+ filePath:string|null
  tokensUsed:number
  generationTimeMs:number
  createdAt:string
 }
 
-export type OutputType =
-  | 'concept_doc'
-  | 'design_doc'
-  | 'scenario_doc'
-  | 'character_specs'
-  | 'world_design'
-  | 'task_breakdown'
-  | 'code'
-  | 'asset_image'
-  | 'asset_audio'
-  | 'build_result'
-  | 'test_result'
-  | 'review_result'
+export type OutputType=
+ |'concept_doc'
+ |'design_doc'
+ |'scenario_doc'
+ |'character_specs'
+ |'world_design'
+ |'task_breakdown'
+ |'code'
+ |'asset_image'
+ |'asset_audio'
+ |'build_result'
+ |'test_result'
+ |'review_result'
 
 export interface QualityCheckConfig{
  enabled:boolean

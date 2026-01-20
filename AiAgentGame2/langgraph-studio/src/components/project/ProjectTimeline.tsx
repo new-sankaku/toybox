@@ -6,7 +6,7 @@ interface TimelinePhase{
  phase:PhaseNumber
  name:string
  description:string
- status:'completed' | 'active' | 'pending'
+ status:'completed'|'active'|'pending'
  progress?:number
  agents?:string[]
 }
@@ -17,7 +17,7 @@ interface ProjectTimelineProps{
  vertical?:boolean
 }
 
-const defaultPhases:TimelinePhase[] = [
+const defaultPhases:TimelinePhase[]=[
  {
   phase:1,
   name:'Planning',
@@ -41,14 +41,14 @@ const defaultPhases:TimelinePhase[] = [
  }
 ]
 
-function getPhaseStatus(phase:PhaseNumber,currentPhase:PhaseNumber):'completed' | 'active' | 'pending'{
- if(phase < currentPhase)return'completed'
- if(phase === currentPhase)return'active'
+function getPhaseStatus(phase:PhaseNumber,currentPhase:PhaseNumber):'completed'|'active'|'pending'{
+ if(phase<currentPhase)return'completed'
+ if(phase===currentPhase)return'active'
  return'pending'
 }
 
-export function ProjectTimeline({currentPhase,phases,vertical = false}:ProjectTimelineProps){
- const timelinePhases = phases || defaultPhases.map((p) => ({
+export function ProjectTimeline({currentPhase,phases,vertical=false}:ProjectTimelineProps){
+ const timelinePhases=phases||defaultPhases.map((p)=>({
   ...p,
   status:getPhaseStatus(p.phase,currentPhase)
  }))
@@ -56,16 +56,16 @@ export function ProjectTimeline({currentPhase,phases,vertical = false}:ProjectTi
  if(vertical){
   return(
    <div className="space-y-0">
-    {timelinePhases.map((phase,index) => (
+    {timelinePhases.map((phase,index)=>(
      <div key={phase.phase} className="relative flex gap-4">
       {/* Line */}
-      {index < timelinePhases.length - 1 && (
-       <div className="absolute left-[15px] top-8 w-0.5 h-full bg-nier-border-dark" />
-      )}
+      {index<timelinePhases.length-1&&(
+       <div className="absolute left-[15px] top-8 w-0.5 h-full bg-nier-border-dark"/>
+)}
 
       {/* Icon */}
       <div className="relative z-10 flex-shrink-0">
-       <PhaseIcon status={phase.status} />
+       <PhaseIcon status={phase.status}/>
       </div>
 
       {/* Content */}
@@ -79,37 +79,37 @@ export function ProjectTimeline({currentPhase,phases,vertical = false}:ProjectTi
        <p className="text-nier-small text-nier-text-light mb-2">
         {phase.description}
        </p>
-       {phase.agents && (
+       {phase.agents&&(
         <div className="flex flex-wrap gap-1">
-         {phase.agents.map((agent) => (
+         {phase.agents.map((agent)=>(
           <span
            key={agent}
            className="text-nier-caption px-2 py-0.5 bg-nier-bg-selected"
           >
            {agent}
           </span>
-         ))}
+))}
         </div>
-       )}
+)}
       </div>
      </div>
-    ))}
+))}
    </div>
-  )
+)
  }
 
  return(
   <div className="flex items-start">
-   {timelinePhases.map((phase,index) => (
+   {timelinePhases.map((phase,index)=>(
     <div key={phase.phase} className="flex-1 relative">
      {/* Connector line */}
-     {index < timelinePhases.length - 1 && (
-      <div className="absolute top-4 left-1/2 w-full h-0.5 bg-nier-border-dark" />
-     )}
+     {index<timelinePhases.length-1&&(
+      <div className="absolute top-4 left-1/2 w-full h-0.5 bg-nier-border-dark"/>
+)}
 
      {/* Phase content */}
      <div className="relative flex flex-col items-center text-center px-2">
-      <PhaseIcon status={phase.status} />
+      <PhaseIcon status={phase.status}/>
       <div className="mt-3">
        <div className="text-nier-caption text-nier-text-light">
         PHASE {phase.phase}
@@ -120,33 +120,33 @@ export function ProjectTimeline({currentPhase,phases,vertical = false}:ProjectTi
       </div>
      </div>
     </div>
-   ))}
+))}
   </div>
- )
+)
 }
 
-function PhaseIcon({status }:{status:'completed' | 'active' | 'pending'}){
- const baseClasses = 'w-8 h-8 rounded-full flex items-center justify-center bg-nier-bg-selected text-nier-text-light border border-nier-border-light'
+function PhaseIcon({status }:{status:'completed'|'active'|'pending'}){
+ const baseClasses='w-8 h-8 rounded-full flex items-center justify-center bg-nier-bg-selected text-nier-text-light border border-nier-border-light'
 
- if(status === 'completed'){
+ if(status==='completed'){
   return(
    <div className={baseClasses}>
-    <CheckCircle size={18} />
+    <CheckCircle size={18}/>
    </div>
-  )
+)
  }
 
- if(status === 'active'){
+ if(status==='active'){
   return(
    <div className={baseClasses}>
-    <Play size={16} />
+    <Play size={16}/>
    </div>
-  )
+)
  }
 
  return(
   <div className={baseClasses}>
-   <Clock size={16} />
+   <Clock size={16}/>
   </div>
- )
+)
 }

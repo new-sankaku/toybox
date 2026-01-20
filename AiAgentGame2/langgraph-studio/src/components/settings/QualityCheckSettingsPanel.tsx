@@ -16,7 +16,7 @@ interface PhaseGroup{
  agents:string[]
 }
 
-const phaseGroups:PhaseGroup[] = [
+const phaseGroups:PhaseGroup[]=[
  {
   id:'phase1_leaders',
   label:'Phase1: リーダー',
@@ -27,7 +27,7 @@ const phaseGroups:PhaseGroup[] = [
    'character_leader',
    'world_leader',
    'task_split_leader',
-  ]
+]
  },
  {
   id:'phase1_workers',
@@ -39,7 +39,7 @@ const phaseGroups:PhaseGroup[] = [
    'main_character_worker','npc_worker','relationship_worker',
    'geography_worker','lore_worker','system_worker',
    'analysis_worker','decomposition_worker','schedule_worker',
-  ]
+]
  },
  {
   id:'phase2',
@@ -47,7 +47,7 @@ const phaseGroups:PhaseGroup[] = [
   agents:[
    'code_leader','asset_leader',
    'code_worker','asset_worker',
-  ]
+]
  },
  {
   id:'phase3',
@@ -57,26 +57,26 @@ const phaseGroups:PhaseGroup[] = [
    'dependency_worker','build_worker','integration_validation_worker',
    'unit_test_worker','integration_test_worker','e2e_test_worker','performance_test_worker',
    'code_review_worker','asset_review_worker','gameplay_review_worker','compliance_worker',
-  ]
+]
  },
 ]
 
 export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelProps):JSX.Element{
- const[settings,setSettings] = useState<Record<string,QualityCheckConfig>>({})
- const[displayNames,setDisplayNames] = useState<Record<string,string>>({})
- const[loading,setLoading] = useState(true)
- const[saving,setSaving] = useState(false)
- const[error,setError] = useState<string | null>(null)
+ const[settings,setSettings]=useState<Record<string,QualityCheckConfig>>({})
+ const[displayNames,setDisplayNames]=useState<Record<string,string>>({})
+ const[loading,setLoading]=useState(true)
+ const[saving,setSaving]=useState(false)
+ const[error,setError]=useState<string|null>(null)
 
- useEffect(() => {
+ useEffect(()=>{
   loadSettings()
  },[projectId])
 
- const loadSettings = async() => {
+ const loadSettings=async()=>{
   try{
    setLoading(true)
    setError(null)
-   const response = await qualitySettingsApi.getByProject(projectId)
+   const response=await qualitySettingsApi.getByProject(projectId)
    setSettings(response.settings)
    setDisplayNames(response.displayNames)
   }catch(err){
@@ -87,8 +87,8 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
   }
  }
 
- const toggleSetting = async(agentType:string) => {
-  const currentConfig = settings[agentType]
+ const toggleSetting=async(agentType:string)=>{
+  const currentConfig=settings[agentType]
   if(!currentConfig)return
 
   try{
@@ -96,7 +96,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
    await qualitySettingsApi.updateSingle(projectId,agentType,{
     enabled:!currentConfig.enabled
    })
-   setSettings(prev => ({
+   setSettings(prev=>({
     ...prev,
     [agentType]:{
      ...prev[agentType],
@@ -111,18 +111,18 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
   }
  }
 
- const setAllEnabled = async(enabled:boolean) => {
+ const setAllEnabled=async(enabled:boolean)=>{
   try{
    setSaving(true)
-   const updates:Record<string,{enabled:boolean}> = {}
-   Object.keys(settings).forEach(agentType => {
-    updates[agentType] = {enabled}
+   const updates:Record<string,{enabled:boolean}>={}
+   Object.keys(settings).forEach(agentType=>{
+    updates[agentType]={enabled}
    })
    await qualitySettingsApi.bulkUpdate(projectId,updates)
-   setSettings(prev => {
-    const newSettings = {...prev}
-    Object.keys(newSettings).forEach(key => {
-     newSettings[key] = {...newSettings[key],enabled}
+   setSettings(prev=>{
+    const newSettings={...prev}
+    Object.keys(newSettings).forEach(key=>{
+     newSettings[key]={...newSettings[key],enabled}
     })
     return newSettings
    })
@@ -134,10 +134,10 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
   }
  }
 
- const resetToDefaults = async() => {
+ const resetToDefaults=async()=>{
   try{
    setSaving(true)
-   const response = await qualitySettingsApi.resetToDefaults(projectId)
+   const response=await qualitySettingsApi.resetToDefaults(projectId)
    setSettings(response.settings)
   }catch(err){
    console.error('Failed to reset settings:',err)
@@ -147,11 +147,11 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
   }
  }
 
- const getEnabledCount = () => {
-  return Object.values(settings).filter(s => s.enabled).length
+ const getEnabledCount=()=>{
+  return Object.values(settings).filter(s=>s.enabled).length
  }
 
- const getTotalCount = () => {
+ const getTotalCount=()=>{
   return Object.keys(settings).length
  }
 
@@ -162,7 +162,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
      <p className="text-nier-text-light">読み込み中...</p>
     </CardContent>
    </Card>
-  )
+)
  }
 
  return(
@@ -173,34 +173,34 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
      <DiamondMarker>品質チェック設定</DiamondMarker>
     </CardHeader>
     <CardContent className="space-y-4">
-     {error && (
+     {error&&(
       <div className="p-2 bg-nier-accent-red/20 text-nier-accent-red text-nier-small">
        {error}
       </div>
-     )}
+)}
 
      <div className="flex items-center justify-between">
       <div className="text-nier-small">
        <span className="text-nier-accent-green">{getEnabledCount()}</span>
-       <span className="text-nier-text-light"> / {getTotalCount()} エージェントで品質チェックON</span>
+       <span className="text-nier-text-light">/{getTotalCount()} エージェントで品質チェックON</span>
       </div>
       <div className="flex gap-2">
        <Button
         variant="ghost"
         size="sm"
-        onClick={() => setAllEnabled(true)}
+        onClick={()=>setAllEnabled(true)}
         disabled={saving}
        >
-        <CheckCircle2 size={14} />
+        <CheckCircle2 size={14}/>
         <span className="ml-1">全てON</span>
        </Button>
        <Button
         variant="ghost"
         size="sm"
-        onClick={() => setAllEnabled(false)}
+        onClick={()=>setAllEnabled(false)}
         disabled={saving}
        >
-        <XCircle size={14} />
+        <XCircle size={14}/>
         <span className="ml-1">全てOFF</span>
        </Button>
        <Button
@@ -209,7 +209,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
         onClick={resetToDefaults}
         disabled={saving}
        >
-        <RefreshCw size={14} />
+        <RefreshCw size={14}/>
         <span className="ml-1">デフォルトに戻す</span>
        </Button>
       </div>
@@ -217,7 +217,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
 
      <div className="p-3 bg-nier-bg-panel border border-nier-border-light text-nier-caption">
       <div className="flex items-center gap-2 text-nier-accent-yellow">
-       <DollarSign size={14} />
+       <DollarSign size={14}/>
        <span>高コストエージェント（アセット系）はデフォルトで品質チェックOFFです</span>
       </div>
      </div>
@@ -225,7 +225,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
    </Card>
 
    {/* Phase Groups */}
-   {phaseGroups.map(phase => (
+   {phaseGroups.map(phase=>(
     <Card key={phase.id}>
      <CardHeader>
       <DiamondMarker variant="secondary">{phase.label}</DiamondMarker>
@@ -233,10 +233,10 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
      <CardContent className="p-0">
       <div className="divide-y divide-nier-border-light">
        {phase.agents
-        .filter(agentType => settings[agentType])
-        .map(agentType => {
-         const config = settings[agentType]
-         const name = displayNames[agentType] || agentType
+        .filter(agentType=>settings[agentType])
+        .map(agentType=>{
+         const config=settings[agentType]
+         const name=displayNames[agentType]||agentType
 
          return(
           <div
@@ -244,16 +244,16 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
            className={cn(
             'flex items-center justify-between px-4 py-2 transition-colors',
             'hover:bg-nier-bg-panel'
-           )}
+)}
           >
            <div className="flex items-center gap-3">
-            {config.isHighCost && (
+            {config.isHighCost&&(
              <DollarSign
               size={14}
               className="text-nier-accent-yellow"
               title="高コストエージェント"
              />
-            )}
+)}
             <div>
              <span className="text-nier-small text-nier-text-main">{name}</span>
              <span className="ml-2 text-nier-caption text-nier-text-light">
@@ -262,34 +262,34 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
             </div>
            </div>
            <button
-            onClick={() => toggleSetting(agentType)}
+            onClick={()=>toggleSetting(agentType)}
             disabled={saving}
             className={cn(
              'p-1 rounded transition-colors',
              'focus:outline-none focus:ring-2 focus:ring-nier-accent-blue',
-             saving && 'opacity-50 cursor-not-allowed'
-            )}
-            title={config.enabled ? '品質チェックON' : '品質チェックOFF'}
+             saving&&'opacity-50 cursor-not-allowed'
+)}
+            title={config.enabled?'品質チェックON' : '品質チェックOFF'}
            >
-            {config.enabled ? (
+            {config.enabled?(
              <div className="flex items-center gap-1 text-nier-accent-green">
-              <ToggleRight size={20} />
+              <ToggleRight size={20}/>
               <span className="text-nier-caption">ON</span>
              </div>
-            ) : (
+) : (
              <div className="flex items-center gap-1 text-nier-text-light">
-              <ToggleLeft size={20} />
+              <ToggleLeft size={20}/>
               <span className="text-nier-caption">OFF</span>
              </div>
-            )}
+)}
            </button>
           </div>
-         )
+)
         })}
       </div>
      </CardContent>
     </Card>
-   ))}
+))}
   </div>
- )
+)
 }

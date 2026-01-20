@@ -8,21 +8,21 @@ import{metricsApi,type ApiProjectMetrics}from'@/services/apiService'
 import{formatNumber,cn}from'@/lib/utils'
 
 export default function MetricsOverview():JSX.Element{
- const{currentProject} = useProjectStore()
- const{projectMetrics,setProjectMetrics,isLoading} = useMetricsStore()
- const[initialLoading,setInitialLoading] = useState(true)
+ const{currentProject}=useProjectStore()
+ const{projectMetrics,setProjectMetrics,isLoading}=useMetricsStore()
+ const[initialLoading,setInitialLoading]=useState(true)
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setProjectMetrics(null)
    setInitialLoading(false)
    return
   }
 
-  const fetchMetrics = async() => {
+  const fetchMetrics=async()=>{
    setInitialLoading(true)
    try{
-    const data = await metricsApi.getByProject(currentProject.id)
+    const data=await metricsApi.getByProject(currentProject.id)
     setProjectMetrics({
      projectId:currentProject.id,
      totalTokensUsed:data.totalTokensUsed,
@@ -56,15 +56,15 @@ export default function MetricsOverview():JSX.Element{
      </div>
     </CardContent>
    </Card>
-  )
+)
  }
 
- const metrics = projectMetrics
- const actualTokens = metrics?.totalTokensUsed || 0
- const estimatedTokens = metrics?.estimatedTotalTokens || 0
- const completedTasks = metrics?.completedTasks || 0
- const totalTasks = metrics?.totalTasks || 0
- const progress = metrics?.progressPercent || 0
+ const metrics=projectMetrics
+ const actualTokens=metrics?.totalTokensUsed||0
+ const estimatedTokens=metrics?.estimatedTotalTokens||0
+ const completedTasks=metrics?.completedTasks||0
+ const totalTasks=metrics?.totalTasks||0
+ const progress=metrics?.progressPercent||0
 
  return(
   <Card>
@@ -72,11 +72,11 @@ export default function MetricsOverview():JSX.Element{
     <DiamondMarker>メトリクス</DiamondMarker>
    </CardHeader>
    <CardContent>
-    {(initialLoading || isLoading) && !metrics ? (
+    {(initialLoading||isLoading)&&!metrics?(
      <div className="text-nier-text-light text-center py-4 text-nier-small">
       読み込み中...
      </div>
-    ) : (
+) : (
      <>
       <div className="space-y-2 mb-4">
        <div className="nier-status-row">
@@ -87,12 +87,12 @@ export default function MetricsOverview():JSX.Element{
         <span className="nier-status-label">予想トークン:</span>
         <span className="nier-status-value">{formatNumber(estimatedTokens)}</span>
        </div>
-       {metrics?.phaseName && (
+       {metrics?.phaseName&&(
         <div className="nier-status-row">
          <span className="nier-status-label">フェーズ:</span>
          <span className="nier-status-value">{metrics.phaseName}</span>
         </div>
-       )}
+)}
       </div>
 
       <div className="space-y-2">
@@ -101,15 +101,15 @@ export default function MetricsOverview():JSX.Element{
         <span>{completedTasks}/{totalTasks} 完了</span>
        </div>
        <div className="flex items-center gap-3">
-        <Progress value={progress} className="flex-1" />
+        <Progress value={progress} className="flex-1"/>
         <span className="text-nier-small text-nier-text-light w-10">
          {progress}%
         </span>
        </div>
       </div>
      </>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }

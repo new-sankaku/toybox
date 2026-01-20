@@ -1,6 +1,6 @@
-export type ProjectStatus = 'draft' | 'running' | 'paused' | 'completed' | 'failed'
+export type ProjectStatus='draft'|'running'|'paused'|'completed'|'failed'
 
-export type PhaseNumber = 1 | 2 | 3
+export type PhaseNumber=1|2|3
 
 export interface Project{
  id:string
@@ -17,14 +17,14 @@ export interface Project{
 
 export interface GameConcept{
  description:string
- platform:'web' | 'desktop' | 'mobile'
- scope:'mvp' | 'full'
+ platform:'web'|'desktop'|'mobile'
+ scope:'mvp'|'full'
  genre?:string
  targetAudience?:string
 }
 
 export interface ProjectConfig{
- llmProvider?:'claude' | 'gpt4'
+ llmProvider?:'claude'|'gpt4'
  maxTokensPerAgent?:number
  enableAssetGeneration?:boolean
 }
@@ -42,7 +42,7 @@ export interface ProjectMetrics{
  estimatedTotalTokens:number
  elapsedTimeSeconds:number
  estimatedRemainingSeconds:number
- estimatedEndTime:string | null
+ estimatedEndTime:string|null
  completedTasks:number
  totalTasks:number
  progressPercent:number

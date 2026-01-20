@@ -11,7 +11,7 @@ interface SubAgentListProps{
  title?:string
 }
 
-const statusIcons:Record<AgentStatus,typeof Play> = {
+const statusIcons:Record<AgentStatus,typeof Play>={
  pending:Clock,
  running:Play,
  completed:CheckCircle,
@@ -19,7 +19,7 @@ const statusIcons:Record<AgentStatus,typeof Play> = {
  blocked:Pause
 }
 
-const statusColors:Record<AgentStatus,string> = {
+const statusColors:Record<AgentStatus,string>={
  pending:'text-nier-text-light',
  running:'text-nier-accent-orange',
  completed:'text-nier-accent-green',
@@ -31,9 +31,9 @@ export function SubAgentList({
  agents,
  onSelectAgent,
  selectedAgentId,
- title = 'SUB-AGENTS'
+ title='SUB-AGENTS'
 }:SubAgentListProps){
- if(agents.length === 0){
+ if(agents.length===0){
   return(
    <Card>
     <CardHeader>
@@ -45,7 +45,7 @@ export function SubAgentList({
      </p>
     </CardContent>
    </Card>
-  )
+)
  }
 
  return(
@@ -54,15 +54,15 @@ export function SubAgentList({
     <div className="flex items-center justify-between w-full">
      <span className="text-nier-small">{title}</span>
      <span className="text-nier-caption text-nier-text-header/70">
-      {agents.filter((a) => a.status === 'running').length} active
+      {agents.filter((a)=>a.status==='running').length} active
      </span>
     </div>
    </CardHeader>
    <CardContent className="p-0">
     <div className="divide-y divide-nier-border-light">
-     {agents.map((agent) => {
-      const Icon = statusIcons[agent.status]
-      const isSelected = selectedAgentId === agent.id
+     {agents.map((agent)=>{
+      const Icon=statusIcons[agent.status]
+      const isSelected=selectedAgentId===agent.id
 
       return(
        <div
@@ -70,24 +70,24 @@ export function SubAgentList({
         className={cn(
          'flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors',
          'hover:bg-nier-bg-selected',
-         isSelected && 'bg-nier-bg-selected'
-        )}
-        onClick={() => onSelectAgent?.(agent)}
+         isSelected&&'bg-nier-bg-selected'
+)}
+        onClick={()=>onSelectAgent?.(agent)}
        >
         {/* Status Icon */}
         <Icon
          size={16}
          className={cn(
           statusColors[agent.status],
-          agent.status === 'running' && 'animate-nier-pulse'
-         )}
+          agent.status==='running'&&'animate-nier-pulse'
+)}
         />
 
         {/* Info */}
         <div className="flex-1 min-w-0">
          <div className="flex items-center gap-2">
           <span className="text-nier-small font-medium truncate">
-           {agent.name || agent.type}
+           {agent.name||agent.type}
           </span>
           <span className="text-nier-caption text-nier-text-light">
            {agent.type}
@@ -95,18 +95,18 @@ export function SubAgentList({
          </div>
 
          {/* Progress for running agents */}
-         {agent.status === 'running' && (
+         {agent.status==='running'&&(
           <div className="mt-1">
-           <Progress value={agent.progress} size="sm" />
+           <Progress value={agent.progress} size="sm"/>
           </div>
-         )}
+)}
 
          {/* Current task */}
-         {agent.currentTask && (
+         {agent.currentTask&&(
           <p className="text-nier-caption text-nier-text-light truncate mt-0.5">
            {agent.currentTask}
           </p>
-         )}
+)}
         </div>
 
         {/* Progress percentage */}
@@ -115,14 +115,14 @@ export function SubAgentList({
         </div>
 
         {/* Arrow */}
-        {onSelectAgent && (
-         <ChevronRight size={16} className="text-nier-text-light" />
-        )}
+        {onSelectAgent&&(
+         <ChevronRight size={16} className="text-nier-text-light"/>
+)}
        </div>
-      )
+)
      })}
     </div>
    </CardContent>
   </Card>
- )
+)
 }

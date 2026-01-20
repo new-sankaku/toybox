@@ -16,16 +16,16 @@ function convertApiCheckpoint(apiCheckpoint:ApiCheckpoint):Checkpoint{
   agentId:apiCheckpoint.agentId,
   type:apiCheckpoint.type as CheckpointType,
   title:apiCheckpoint.title,
-  description:apiCheckpoint.description || null,
+  description:apiCheckpoint.description||null,
   output:{
-   documentType:apiCheckpoint.output?.format || 'markdown',
+   documentType:apiCheckpoint.output?.format||'markdown',
    content:apiCheckpoint.output?.content
-    ? (typeof apiCheckpoint.output.content === 'string'
-     ? {text:apiCheckpoint.output.content}
+    ?(typeof apiCheckpoint.output.content==='string'
+     ?{text:apiCheckpoint.output.content}
      : apiCheckpoint.output.content as Record<string,unknown>)
     : undefined,
-   summary:typeof apiCheckpoint.output?.content === 'string'
-    ? apiCheckpoint.output.content
+   summary:typeof apiCheckpoint.output?.content==='string'
+    ?apiCheckpoint.output.content
     : undefined,
   },
   status:apiCheckpoint.status as CheckpointStatus,
@@ -37,25 +37,25 @@ function convertApiCheckpoint(apiCheckpoint:ApiCheckpoint):Checkpoint{
 }
 
 export default function CheckpointsView():JSX.Element{
- const{currentProject} = useProjectStore()
- const{tabResetCounter,pendingCheckpointId,clearPendingCheckpoint} = useNavigationStore()
- const{checkpoints,setCheckpoints,isLoading} = useCheckpointStore()
- const[selectedCheckpoint,setSelectedCheckpoint] = useState<Checkpoint | null>(null)
- const[initialLoading,setInitialLoading] = useState(true)
+ const{currentProject}=useProjectStore()
+ const{tabResetCounter,pendingCheckpointId,clearPendingCheckpoint}=useNavigationStore()
+ const{checkpoints,setCheckpoints,isLoading}=useCheckpointStore()
+ const[selectedCheckpoint,setSelectedCheckpoint]=useState<Checkpoint|null>(null)
+ const[initialLoading,setInitialLoading]=useState(true)
 
- useEffect(() => {
+ useEffect(()=>{
   if(!pendingCheckpointId){
    setSelectedCheckpoint(null)
   }
  },[tabResetCounter,pendingCheckpointId])
 
- const projectCheckpoints = currentProject
-  ? checkpoints.filter(cp => cp.projectId === currentProject.id)
+ const projectCheckpoints=currentProject
+  ?checkpoints.filter(cp=>cp.projectId===currentProject.id)
   : []
 
- useEffect(() => {
-  if(pendingCheckpointId && projectCheckpoints.length > 0){
-   const checkpoint = projectCheckpoints.find(cp => cp.id === pendingCheckpointId)
+ useEffect(()=>{
+  if(pendingCheckpointId&&projectCheckpoints.length>0){
+   const checkpoint=projectCheckpoints.find(cp=>cp.id===pendingCheckpointId)
    if(checkpoint){
     setSelectedCheckpoint(checkpoint)
     clearPendingCheckpoint()
@@ -63,17 +63,17 @@ export default function CheckpointsView():JSX.Element{
   }
  },[pendingCheckpointId,projectCheckpoints,clearPendingCheckpoint])
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setCheckpoints([])
    setInitialLoading(false)
    return
   }
 
-  const fetchCheckpoints = async() => {
+  const fetchCheckpoints=async()=>{
    setInitialLoading(true)
    try{
-    const data = await checkpointApi.listByProject(currentProject.id)
+    const data=await checkpointApi.listByProject(currentProject.id)
     setCheckpoints(data.map(convertApiCheckpoint))
    }catch(error){
     console.error('Failed to fetch checkpoints:',error)
@@ -91,47 +91,47 @@ export default function CheckpointsView():JSX.Element{
     <div className="nier-page-header-row">
      <div className="nier-page-header-left">
       <h1 className="nier-page-title">CHECKPOINTS</h1>
-      <span className="nier-page-subtitle">- レビュー待ち</span>
+      <span className="nier-page-subtitle">-レビュー待ち</span>
      </div>
-     <div className="nier-page-header-right" />
+     <div className="nier-page-header-right"/>
     </div>
     <Card>
      <CardContent>
       <div className="text-center py-12 text-nier-text-light">
-       <FolderOpen size={48} className="mx-auto mb-4 opacity-50" />
+       <FolderOpen size={48} className="mx-auto mb-4 opacity-50"/>
        <p className="text-nier-body">プロジェクトを選択してください</p>
       </div>
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
- const handleSelectCheckpoint = (checkpoint:Checkpoint) => {
+ const handleSelectCheckpoint=(checkpoint:Checkpoint)=>{
   setSelectedCheckpoint(checkpoint)
  }
 
- const selectNextPending = (updatedCheckpoints:Checkpoint[],currentId:string) => {
-  const pendingCheckpoints = updatedCheckpoints.filter(
-   cp => cp.status === 'pending' && cp.id !== currentId
-  )
-  if(pendingCheckpoints.length > 0){
-   const nextPending = pendingCheckpoints.reduce((oldest,current) =>
-    new Date(oldest.createdAt) < new Date(current.createdAt) ? oldest : current
-   )
+ const selectNextPending=(updatedCheckpoints:Checkpoint[],currentId:string)=>{
+  const pendingCheckpoints=updatedCheckpoints.filter(
+   cp=>cp.status==='pending'&&cp.id!==currentId
+)
+  if(pendingCheckpoints.length>0){
+   const nextPending=pendingCheckpoints.reduce((oldest,current)=>
+    new Date(oldest.createdAt)<new Date(current.createdAt)?oldest : current
+)
    setSelectedCheckpoint(nextPending)
   }else{
    setSelectedCheckpoint(null)
   }
  }
 
- const handleApprove = async() => {
+ const handleApprove=async()=>{
   if(!selectedCheckpoint)return
-  const currentId = selectedCheckpoint.id
+  const currentId=selectedCheckpoint.id
   try{
    await checkpointApi.resolve(selectedCheckpoint.id,'approved')
-   const data = await checkpointApi.listByProject(currentProject.id)
-   const updatedCheckpoints = data.map(convertApiCheckpoint)
+   const data=await checkpointApi.listByProject(currentProject.id)
+   const updatedCheckpoints=data.map(convertApiCheckpoint)
    setCheckpoints(updatedCheckpoints)
    selectNextPending(updatedCheckpoints,currentId)
   }catch(error){
@@ -139,13 +139,13 @@ export default function CheckpointsView():JSX.Element{
   }
  }
 
- const handleReject = async(reason:string) => {
+ const handleReject=async(reason:string)=>{
   if(!selectedCheckpoint)return
-  const currentId = selectedCheckpoint.id
+  const currentId=selectedCheckpoint.id
   try{
    await checkpointApi.resolve(selectedCheckpoint.id,'rejected',reason)
-   const data = await checkpointApi.listByProject(currentProject.id)
-   const updatedCheckpoints = data.map(convertApiCheckpoint)
+   const data=await checkpointApi.listByProject(currentProject.id)
+   const updatedCheckpoints=data.map(convertApiCheckpoint)
    setCheckpoints(updatedCheckpoints)
    selectNextPending(updatedCheckpoints,currentId)
   }catch(error){
@@ -153,13 +153,13 @@ export default function CheckpointsView():JSX.Element{
   }
  }
 
- const handleRequestChanges = async(feedback:string) => {
+ const handleRequestChanges=async(feedback:string)=>{
   if(!selectedCheckpoint)return
-  const currentId = selectedCheckpoint.id
+  const currentId=selectedCheckpoint.id
   try{
    await checkpointApi.resolve(selectedCheckpoint.id,'revision_requested',feedback)
-   const data = await checkpointApi.listByProject(currentProject.id)
-   const updatedCheckpoints = data.map(convertApiCheckpoint)
+   const data=await checkpointApi.listByProject(currentProject.id)
+   const updatedCheckpoints=data.map(convertApiCheckpoint)
    setCheckpoints(updatedCheckpoints)
    selectNextPending(updatedCheckpoints,currentId)
   }catch(error){
@@ -167,12 +167,12 @@ export default function CheckpointsView():JSX.Element{
   }
  }
 
- const handleClose = () => {
+ const handleClose=()=>{
   setSelectedCheckpoint(null)
  }
 
  if(selectedCheckpoint){
-  const currentCheckpointData = projectCheckpoints.find(cp => cp.id === selectedCheckpoint.id) || selectedCheckpoint
+  const currentCheckpointData=projectCheckpoints.find(cp=>cp.id===selectedCheckpoint.id)||selectedCheckpoint
   return(
    <CheckpointReviewView
     checkpoint={currentCheckpointData}
@@ -181,7 +181,7 @@ export default function CheckpointsView():JSX.Element{
     onRequestChanges={handleRequestChanges}
     onClose={handleClose}
    />
-  )
+)
  }
 
  return(
@@ -189,7 +189,7 @@ export default function CheckpointsView():JSX.Element{
    checkpoints={projectCheckpoints}
    onSelectCheckpoint={handleSelectCheckpoint}
    selectedCheckpointId={undefined}
-   loading={initialLoading || isLoading}
+   loading={initialLoading||isLoading}
   />
- )
+)
 }

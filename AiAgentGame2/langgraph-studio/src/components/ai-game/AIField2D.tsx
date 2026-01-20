@@ -8,7 +8,7 @@ interface AIField2DProps{
  characterScale?:number
 }
 
-const NIER_COLORS = {
+const NIER_COLORS={
  background:'#d4cdb8',
  backgroundDark:'#c4bda8',
  primary:'#4a4540',
@@ -19,7 +19,7 @@ const NIER_COLORS = {
  textDim:'#7a756a'
 }
 
-const SPIRIT_COLORS:Record<string,{body:string;core:string}> = {
+const SPIRIT_COLORS:Record<string,{body:string;core:string}>={
  spirit_fire:{body:'#6a6a6a',core:'#8a8a8a'},
  spirit_water:{body:'#5a5a5a',core:'#7a7a7a'},
  spirit_earth:{body:'#707070',core:'#909090'},
@@ -37,33 +37,33 @@ interface CharacterPosition{
  wasWorking:boolean  // Track previous working state
 }
 
-export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIField2DProps):JSX.Element{
- const canvasRef = useRef<HTMLCanvasElement>(null)
- const containerRef = useRef<HTMLDivElement>(null)
- const[dimensions,setDimensions] = useState({width:800,height:500})
- const positionsRef = useRef<Map<string,CharacterPosition>>(new Map())
- const frameRef = useRef<number>(0)
- const animationRef = useRef<number>(0)
+export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIField2DProps):JSX.Element{
+ const canvasRef=useRef<HTMLCanvasElement>(null)
+ const containerRef=useRef<HTMLDivElement>(null)
+ const[dimensions,setDimensions]=useState({width:800,height:500})
+ const positionsRef=useRef<Map<string,CharacterPosition>>(new Map())
+ const frameRef=useRef<number>(0)
+ const animationRef=useRef<number>(0)
 
- const ROOM_X = 0.75
- const ROOM_WIDTH = 0.22
- const PLATFORM_X = 0.03
- const PLATFORM_WIDTH = 0.35
+ const ROOM_X=0.75
+ const ROOM_WIDTH=0.22
+ const PLATFORM_X=0.03
+ const PLATFORM_WIDTH=0.35
 
- useEffect(() => {
-  const updateDimensions = () => {
-   if(containerRef.current && canvasRef.current){
-    const rect = containerRef.current.getBoundingClientRect()
-    const dpr = window.devicePixelRatio || 1
-    const canvas = canvasRef.current
+ useEffect(()=>{
+  const updateDimensions=()=>{
+   if(containerRef.current&&canvasRef.current){
+    const rect=containerRef.current.getBoundingClientRect()
+    const dpr=window.devicePixelRatio||1
+    const canvas=canvasRef.current
 
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
+    canvas.width=rect.width*dpr
+    canvas.height=rect.height*dpr
 
-    canvas.style.width = `${rect.width}px`
-    canvas.style.height = `${rect.height}px`
+    canvas.style.width=`${rect.width}px`
+    canvas.style.height=`${rect.height}px`
 
-    const ctx = canvas.getContext('2d')
+    const ctx=canvas.getContext('2d')
     if(ctx){
      ctx.scale(dpr,dpr)
     }
@@ -73,33 +73,33 @@ export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIF
   }
   updateDimensions()
   window.addEventListener('resize',updateDimensions)
-  return() => window.removeEventListener('resize',updateDimensions)
+  return()=>window.removeEventListener('resize',updateDimensions)
  },[])
 
- useEffect(() => {
-  const positions = positionsRef.current
-  const roomStartX = dimensions.width * ROOM_X
-  const roomWidth = dimensions.width * ROOM_WIDTH
-  const roomStartY = dimensions.height * 0.08
-  const roomHeight = dimensions.height * 0.84
+ useEffect(()=>{
+  const positions=positionsRef.current
+  const roomStartX=dimensions.width*ROOM_X
+  const roomWidth=dimensions.width*ROOM_WIDTH
+  const roomStartY=dimensions.height*0.08
+  const roomHeight=dimensions.height*0.84
 
-  characters.forEach((char) => {
+  characters.forEach((char)=>{
    if(!positions.has(char.agentId)){
-    const x = roomStartX + 20 + Math.random() * (roomWidth - 40)
-    const y = roomStartY + 30 + Math.random() * (roomHeight - 60)
+    const x=roomStartX+20+Math.random()*(roomWidth-40)
+    const y=roomStartY+30+Math.random()*(roomHeight-60)
     positions.set(char.agentId,{
      x,y,
      targetX:x,
      targetY:y,
-     wanderTimer:Math.random() * 3000,
-     rotation:Math.random() * Math.PI * 2,
+     wanderTimer:Math.random()*3000,
+     rotation:Math.random()*Math.PI*2,
      wasWorking:false
     })
    }
   })
  },[characters,dimensions])
 
- const drawSprite = useCallback((
+ const drawSprite=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
@@ -108,55 +108,55 @@ export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIF
   isWorking:boolean,
   frame:number,
   rotation:number
- ) => {
-  const colors = SPIRIT_COLORS[spiritType] || SPIRIT_COLORS.spirit_light
-  const s = size / 2
+)=>{
+  const colors=SPIRIT_COLORS[spiritType]||SPIRIT_COLORS.spirit_light
+  const s=size/2
 
   ctx.save()
-  ctx.translate(x + 3,y + 4)
-  ctx.rotate(rotation + frame * 0.02)
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)'
+  ctx.translate(x+3,y+4)
+  ctx.rotate(rotation+frame*0.02)
+  ctx.fillStyle='rgba(0, 0, 0, 0.2)'
   ctx.beginPath()
   ctx.moveTo(0,-s)
-  ctx.lineTo(s * 0.7,0)
+  ctx.lineTo(s*0.7,0)
   ctx.lineTo(0,s)
-  ctx.lineTo(-s * 0.7,0)
+  ctx.lineTo(-s*0.7,0)
   ctx.closePath()
   ctx.fill()
   ctx.restore()
 
   ctx.save()
   ctx.translate(x,y)
-  ctx.rotate(rotation + frame * 0.02)
+  ctx.rotate(rotation+frame*0.02)
 
   if(isWorking){
-   ctx.shadowColor = NIER_COLORS.accent
-   ctx.shadowBlur = 12 + Math.sin(frame * 0.15) * 4
+   ctx.shadowColor=NIER_COLORS.accent
+   ctx.shadowBlur=12+Math.sin(frame*0.15)*4
   }
 
-  ctx.fillStyle = colors.body
+  ctx.fillStyle=colors.body
   ctx.beginPath()
   ctx.moveTo(0,-s)
-  ctx.lineTo(s * 0.7,0)
+  ctx.lineTo(s*0.7,0)
   ctx.lineTo(0,s)
-  ctx.lineTo(-s * 0.7,0)
+  ctx.lineTo(-s*0.7,0)
   ctx.closePath()
   ctx.fill()
 
-  ctx.fillStyle = isWorking ? NIER_COLORS.accent : colors.core
-  const coreSize = s * 0.4
+  ctx.fillStyle=isWorking?NIER_COLORS.accent : colors.core
+  const coreSize=s*0.4
   ctx.beginPath()
   ctx.moveTo(0,-coreSize)
-  ctx.lineTo(coreSize * 0.7,0)
+  ctx.lineTo(coreSize*0.7,0)
   ctx.lineTo(0,coreSize)
-  ctx.lineTo(-coreSize * 0.7,0)
+  ctx.lineTo(-coreSize*0.7,0)
   ctx.closePath()
   ctx.fill()
 
   ctx.restore()
  },[])
 
- const drawPlatform = useCallback((
+ const drawPlatform=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
@@ -165,61 +165,61 @@ export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIF
   serviceType:AIServiceType,
   hasWorkers:boolean,
   frame:number
- ):{centerX:number;centerY:number} => {
-  const config = SERVICE_CONFIG[serviceType]
+):{centerX:number;centerY:number}=>{
+  const config=SERVICE_CONFIG[serviceType]
 
-  ctx.fillStyle = hasWorkers ? NIER_COLORS.backgroundDark : NIER_COLORS.background
+  ctx.fillStyle=hasWorkers?NIER_COLORS.backgroundDark : NIER_COLORS.background
   ctx.fillRect(x,y,width,height)
 
-  ctx.strokeStyle = hasWorkers ? NIER_COLORS.accent : NIER_COLORS.primaryDim
-  ctx.lineWidth = hasWorkers ? 2 : 1
+  ctx.strokeStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primaryDim
+  ctx.lineWidth=hasWorkers?2 : 1
   ctx.strokeRect(x,y,width,height)
 
-  const cs = 8
-  ctx.fillStyle = hasWorkers ? NIER_COLORS.accent : NIER_COLORS.primary
+  const cs=8
+  ctx.fillStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primary
   ctx.fillRect(x,y,cs,2)
   ctx.fillRect(x,y,2,cs)
-  ctx.fillRect(x + width - cs,y,cs,2)
-  ctx.fillRect(x + width - 2,y,2,cs)
-  ctx.fillRect(x,y + height - 2,cs,2)
-  ctx.fillRect(x,y + height - cs,2,cs)
-  ctx.fillRect(x + width - cs,y + height - 2,cs,2)
-  ctx.fillRect(x + width - 2,y + height - cs,2,cs)
+  ctx.fillRect(x+width-cs,y,cs,2)
+  ctx.fillRect(x+width-2,y,2,cs)
+  ctx.fillRect(x,y+height-2,cs,2)
+  ctx.fillRect(x,y+height-cs,2,cs)
+  ctx.fillRect(x+width-cs,y+height-2,cs,2)
+  ctx.fillRect(x+width-2,y+height-cs,2,cs)
 
-  ctx.fillStyle = NIER_COLORS.textMain
-  ctx.font = 'bold 13px "Courier New", monospace'
-  ctx.textAlign = 'left'
-  ctx.fillText(serviceType.toUpperCase(),x + 12,y + 20)
+  ctx.fillStyle=NIER_COLORS.textMain
+  ctx.font='bold 13px "Courier New", monospace'
+  ctx.textAlign='left'
+  ctx.fillText(serviceType.toUpperCase(),x+12,y+20)
 
-  ctx.font = '10px "Courier New", monospace'
-  ctx.fillStyle = NIER_COLORS.textDim
-  ctx.fillText(config.description,x + 12,y + 36)
+  ctx.font='10px "Courier New", monospace'
+  ctx.fillStyle=NIER_COLORS.textDim
+  ctx.fillText(config.description,x+12,y+36)
 
-  const indicatorY = y + height - 15
+  const indicatorY=y+height-15
   if(hasWorkers){
-   ctx.shadowColor = NIER_COLORS.accent
-   ctx.shadowBlur = 8 + Math.sin(frame * 0.1) * 4
+   ctx.shadowColor=NIER_COLORS.accent
+   ctx.shadowBlur=8+Math.sin(frame*0.1)*4
   }
   ctx.beginPath()
-  ctx.arc(x + width / 2,indicatorY,4,0,Math.PI * 2)
-  ctx.fillStyle = hasWorkers ? NIER_COLORS.accent : NIER_COLORS.primaryDim
+  ctx.arc(x+width/2,indicatorY,4,0,Math.PI*2)
+  ctx.fillStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primaryDim
   ctx.fill()
-  ctx.shadowBlur = 0
+  ctx.shadowBlur=0
 
   if(hasWorkers){
-   const barW = width - 30
-   const barX = x + 15
-   const barY = y + height - 30
-   ctx.fillStyle = NIER_COLORS.primaryDim
+   const barW=width-30
+   const barX=x+15
+   const barY=y+height-30
+   ctx.fillStyle=NIER_COLORS.primaryDim
    ctx.fillRect(barX,barY,barW,3)
-   ctx.fillStyle = NIER_COLORS.accent
-   ctx.fillRect(barX,barY,barW * ((Math.sin(frame * 0.05) + 1) / 2),3)
+   ctx.fillStyle=NIER_COLORS.accent
+   ctx.fillRect(barX,barY,barW*((Math.sin(frame*0.05)+1)/2),3)
   }
 
-  return{centerX:x + width / 2,centerY:y + height / 2}
+  return{centerX:x+width/2,centerY:y+height/2}
  },[])
 
- const drawRoom = useCallback((
+ const drawRoom=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
@@ -227,378 +227,378 @@ export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIF
   height:number,
   assetCount:number,
   frame:number
- ) => {
-  ctx.fillStyle = NIER_COLORS.backgroundDark
+)=>{
+  ctx.fillStyle=NIER_COLORS.backgroundDark
   ctx.fillRect(x,y,width,height)
 
-  const assetAreaY = y + height - 60
-  const maxVisibleAssets = Math.min(assetCount,20)
+  const assetAreaY=y+height-60
+  const maxVisibleAssets=Math.min(assetCount,20)
 
-  for(let i = 0;i < maxVisibleAssets;i++){
-   const row = Math.floor(i / 5)
-   const col = i % 5
-   const assetX = x + 15 + col * (width - 30) / 5
-   const assetY = assetAreaY - row * 12
+  for(let i=0;i<maxVisibleAssets;i++){
+   const row=Math.floor(i/5)
+   const col=i%5
+   const assetX=x+15+col*(width-30)/5
+   const assetY=assetAreaY-row*12
 
-   const assetType = i % 4
-   ctx.fillStyle = i % 2 === 0 ? '#9a9590' : '#8a8580'
+   const assetType=i%4
+   ctx.fillStyle=i%2===0?'#9a9590' : '#8a8580'
 
-   if(assetType === 0){
+   if(assetType===0){
     ctx.fillRect(assetX,assetY,12,15)
-    ctx.fillStyle = '#b5b0a8'
-    ctx.fillRect(assetX + 2,assetY + 2,8,2)
-    ctx.fillRect(assetX + 2,assetY + 5,6,2)
-    ctx.fillRect(assetX + 2,assetY + 8,7,2)
-   }else if(assetType === 1){
+    ctx.fillStyle='#b5b0a8'
+    ctx.fillRect(assetX+2,assetY+2,8,2)
+    ctx.fillRect(assetX+2,assetY+5,6,2)
+    ctx.fillRect(assetX+2,assetY+8,7,2)
+   }else if(assetType===1){
     ctx.fillRect(assetX,assetY,14,12)
-    ctx.fillStyle = '#7a7570'
-    ctx.fillRect(assetX + 2,assetY + 2,10,8)
-    ctx.fillStyle = '#a5a098'
+    ctx.fillStyle='#7a7570'
+    ctx.fillRect(assetX+2,assetY+2,10,8)
+    ctx.fillStyle='#a5a098'
     ctx.beginPath()
-    ctx.arc(assetX + 5,assetY + 5,2,0,Math.PI * 2)
+    ctx.arc(assetX+5,assetY+5,2,0,Math.PI*2)
     ctx.fill()
-   }else if(assetType === 2){
+   }else if(assetType===2){
     ctx.fillRect(assetX,assetY,13,13)
-    ctx.fillStyle = '#b5b0a8'
+    ctx.fillStyle='#b5b0a8'
     ctx.beginPath()
-    ctx.moveTo(assetX + 4,assetY + 3)
-    ctx.lineTo(assetX + 4,assetY + 10)
-    ctx.lineTo(assetX + 9,assetY + 6.5)
+    ctx.moveTo(assetX+4,assetY+3)
+    ctx.lineTo(assetX+4,assetY+10)
+    ctx.lineTo(assetX+9,assetY+6.5)
     ctx.closePath()
     ctx.fill()
    }else{
     ctx.fillRect(assetX,assetY,12,14)
-    ctx.fillStyle = '#b5b0a8'
-    ctx.font = '8px monospace'
-    ctx.fillText('<>',assetX + 2,assetY + 9)
+    ctx.fillStyle='#b5b0a8'
+    ctx.font='8px monospace'
+    ctx.fillText('<>',assetX+2,assetY+9)
    }
   }
 
-  if(assetCount > 0){
-   ctx.fillStyle = NIER_COLORS.textDim
-   ctx.font = '9px -apple-system, sans-serif'
-   ctx.textAlign = 'right'
-   ctx.fillText(`${assetCount} assets`,x + width - 8,y + height - 5)
+  if(assetCount>0){
+   ctx.fillStyle=NIER_COLORS.textDim
+   ctx.font='9px -apple-system, sans-serif'
+   ctx.textAlign='right'
+   ctx.fillText(`${assetCount} assets`,x+width-8,y+height-5)
   }
 
-  ctx.strokeStyle = NIER_COLORS.primary
-  ctx.lineWidth = 2
+  ctx.strokeStyle=NIER_COLORS.primary
+  ctx.lineWidth=2
   ctx.strokeRect(x,y,width,height)
 
-  const cl = 15
-  ctx.fillStyle = NIER_COLORS.primary
+  const cl=15
+  ctx.fillStyle=NIER_COLORS.primary
   ctx.fillRect(x,y,cl,2)
   ctx.fillRect(x,y,2,cl)
-  ctx.fillRect(x + width - cl,y,cl,2)
-  ctx.fillRect(x + width - 2,y,2,cl)
-  ctx.fillRect(x,y + height - 2,cl,2)
-  ctx.fillRect(x,y + height - cl,2,cl)
-  ctx.fillRect(x + width - cl,y + height - 2,cl,2)
-  ctx.fillRect(x + width - 2,y + height - cl,2,cl)
+  ctx.fillRect(x+width-cl,y,cl,2)
+  ctx.fillRect(x+width-2,y,2,cl)
+  ctx.fillRect(x,y+height-2,cl,2)
+  ctx.fillRect(x,y+height-cl,2,cl)
+  ctx.fillRect(x+width-cl,y+height-2,cl,2)
+  ctx.fillRect(x+width-2,y+height-cl,2,cl)
 
-  ctx.fillStyle = NIER_COLORS.textMain
-  ctx.font = 'bold 11px "Courier New", monospace'
-  ctx.textAlign = 'center'
-  ctx.fillText('[ AGENTS ]',x + width / 2,y + 15)
+  ctx.fillStyle=NIER_COLORS.textMain
+  ctx.font='bold 11px "Courier New", monospace'
+  ctx.textAlign='center'
+  ctx.fillText('[ AGENTS ]',x+width/2,y+15)
  },[])
 
- const drawDataLine = useCallback((
+ const drawDataLine=useCallback((
   ctx:CanvasRenderingContext2D,
   platformRight:number,
   platformCenterY:number,
   roomLeft:number,
   roomCenterY:number,
   frame:number
- ) => {
-  ctx.strokeStyle = NIER_COLORS.primaryDim
-  ctx.lineWidth = 2
+)=>{
+  ctx.strokeStyle=NIER_COLORS.primaryDim
+  ctx.lineWidth=2
   ctx.setLineDash([])
   ctx.beginPath()
   ctx.moveTo(platformRight,platformCenterY)
   ctx.lineTo(roomLeft,roomCenterY)
   ctx.stroke()
 
-  const dx = roomLeft - platformRight
-  const dy = roomCenterY - platformCenterY
-  const len = Math.sqrt(dx * dx + dy * dy)
+  const dx=roomLeft-platformRight
+  const dy=roomCenterY-platformCenterY
+  const len=Math.sqrt(dx*dx+dy*dy)
 
-  const packetsToApi = 4
-  for(let i = 0;i < packetsToApi;i++){
-   const t = ((frame * 0.015 + i / packetsToApi) % 1)
-   const px = roomLeft - dx * t
-   const py = roomCenterY - dy * t
+  const packetsToApi=4
+  for(let i=0;i<packetsToApi;i++){
+   const t=((frame*0.015+i/packetsToApi)%1)
+   const px=roomLeft-dx*t
+   const py=roomCenterY-dy*t
 
-   ctx.fillStyle = NIER_COLORS.accent
+   ctx.fillStyle=NIER_COLORS.accent
    ctx.beginPath()
-   ctx.arc(px,py,4,0,Math.PI * 2)
+   ctx.arc(px,py,4,0,Math.PI*2)
    ctx.fill()
   }
 
-  const packetsFromApi = 4
-  for(let i = 0;i < packetsFromApi;i++){
-   const t = ((frame * 0.012 + i / packetsFromApi + 0.5) % 1)
-   const px = platformRight + dx * t
-   const py = platformCenterY + dy * t
+  const packetsFromApi=4
+  for(let i=0;i<packetsFromApi;i++){
+   const t=((frame*0.012+i/packetsFromApi+0.5)%1)
+   const px=platformRight+dx*t
+   const py=platformCenterY+dy*t
 
-   ctx.fillStyle = '#7a7a7a'
+   ctx.fillStyle='#7a7a7a'
    ctx.beginPath()
-   ctx.rect(px - 3,py - 3,6,6)
+   ctx.rect(px-3,py-3,6,6)
    ctx.fill()
   }
  },[])
 
- const drawSpeechBubble = useCallback((
+ const drawSpeechBubble=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
   text:string
- ) => {
-  ctx.font = '12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+)=>{
+  ctx.font='12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
-  const padding = 8
-  const lineHeight = 15
+  const padding=8
+  const lineHeight=15
 
-  const textWidth = ctx.measureText(text).width
+  const textWidth=ctx.measureText(text).width
 
-  const maxLineWidth = 180
+  const maxLineWidth=180
 
-  let lines:string[] = []
-  if(textWidth <= maxLineWidth){
-   lines = [text]
+  let lines:string[]=[]
+  if(textWidth<=maxLineWidth){
+   lines=[text]
   }else{
-   let currentLine = ''
+   let currentLine=''
    for(const char of text.split('')){
-    const testLine = currentLine + char
-    if(ctx.measureText(testLine).width > maxLineWidth){
+    const testLine=currentLine+char
+    if(ctx.measureText(testLine).width>maxLineWidth){
      if(currentLine) lines.push(currentLine)
-     currentLine = char
+     currentLine=char
     }else{
-     currentLine = testLine
+     currentLine=testLine
     }
    }
    if(currentLine) lines.push(currentLine)
 
-   if(lines.length > 2){
-    lines = lines.slice(0,2)
-    lines[1] = lines[1].slice(0,-3) + '...'
+   if(lines.length>2){
+    lines=lines.slice(0,2)
+    lines[1]=lines[1].slice(0,-3)+'...'
    }
   }
 
-  const actualTextWidth = Math.max(...lines.map(l => ctx.measureText(l).width))
-  const bubbleWidth = actualTextWidth + padding * 2 + 4
-  const bubbleHeight = lines.length * lineHeight + padding * 2
+  const actualTextWidth=Math.max(...lines.map(l=>ctx.measureText(l).width))
+  const bubbleWidth=actualTextWidth+padding*2+4
+  const bubbleHeight=lines.length*lineHeight+padding*2
 
-  const bubbleX = Math.round(x - bubbleWidth / 2)
-  const bubbleY = Math.round(y - bubbleHeight - 10)
+  const bubbleX=Math.round(x-bubbleWidth/2)
+  const bubbleY=Math.round(y-bubbleHeight-10)
 
-  ctx.fillStyle = '#e8e4d8'
+  ctx.fillStyle='#e8e4d8'
   ctx.fillRect(bubbleX,bubbleY,bubbleWidth,bubbleHeight)
 
-  ctx.strokeStyle = '#8a8070'
-  ctx.lineWidth = 1
-  ctx.strokeRect(bubbleX + 0.5,bubbleY + 0.5,bubbleWidth - 1,bubbleHeight - 1)
+  ctx.strokeStyle='#8a8070'
+  ctx.lineWidth=1
+  ctx.strokeRect(bubbleX+0.5,bubbleY+0.5,bubbleWidth-1,bubbleHeight-1)
 
-  ctx.fillStyle = '#e8e4d8'
+  ctx.fillStyle='#e8e4d8'
   ctx.beginPath()
-  ctx.moveTo(x - 5,bubbleY + bubbleHeight)
-  ctx.lineTo(x,bubbleY + bubbleHeight + 6)
-  ctx.lineTo(x + 5,bubbleY + bubbleHeight)
+  ctx.moveTo(x-5,bubbleY+bubbleHeight)
+  ctx.lineTo(x,bubbleY+bubbleHeight+6)
+  ctx.lineTo(x+5,bubbleY+bubbleHeight)
   ctx.closePath()
   ctx.fill()
 
-  ctx.fillStyle = '#3a3530'
-  ctx.textAlign = 'left'
-  lines.forEach((line,i) => {
-   ctx.fillText(line,bubbleX + padding,bubbleY + padding + (i + 1) * lineHeight - 3)
+  ctx.fillStyle='#3a3530'
+  ctx.textAlign='left'
+  lines.forEach((line,i)=>{
+   ctx.fillText(line,bubbleX+padding,bubbleY+padding+(i+1)*lineHeight-3)
   })
  },[])
 
- useEffect(() => {
-  const canvas = canvasRef.current
+ useEffect(()=>{
+  const canvas=canvasRef.current
   if(!canvas)return
 
-  const ctx = canvas.getContext('2d')
+  const ctx=canvas.getContext('2d')
   if(!ctx)return
 
-  const render = () => {
+  const render=()=>{
    frameRef.current++
-   const frame = frameRef.current
+   const frame=frameRef.current
 
-   const dpr = window.devicePixelRatio || 1
+   const dpr=window.devicePixelRatio||1
    ctx.setTransform(dpr,0,0,dpr,0,0)
 
-   ctx.fillStyle = NIER_COLORS.background
+   ctx.fillStyle=NIER_COLORS.background
    ctx.fillRect(0,0,dimensions.width,dimensions.height)
 
-   const platformX = dimensions.width * PLATFORM_X
-   const platformWidth = dimensions.width * PLATFORM_WIDTH
-   const roomX = dimensions.width * ROOM_X
-   const roomWidth = dimensions.width * ROOM_WIDTH
-   const roomY = dimensions.height * 0.08
-   const roomHeight = dimensions.height * 0.84
+   const platformX=dimensions.width*PLATFORM_X
+   const platformWidth=dimensions.width*PLATFORM_WIDTH
+   const roomX=dimensions.width*ROOM_X
+   const roomWidth=dimensions.width*ROOM_WIDTH
+   const roomY=dimensions.height*0.08
+   const roomHeight=dimensions.height*0.84
 
-   const services = Object.keys(SERVICE_CONFIG)as AIServiceType[]
-   const numServices = services.length
-   const platformGap = dimensions.height * 0.02
-   const totalGapHeight = (numServices - 1) * platformGap
-   const platformHeight = (roomHeight - totalGapHeight) / numServices
-   const platformCenters:Record<AIServiceType,{centerX:number;centerY:number}> = {}as any
+   const services=Object.keys(SERVICE_CONFIG)as AIServiceType[]
+   const numServices=services.length
+   const platformGap=dimensions.height*0.02
+   const totalGapHeight=(numServices-1)*platformGap
+   const platformHeight=(roomHeight-totalGapHeight)/numServices
+   const platformCenters:Record<AIServiceType,{centerX:number;centerY:number}>={}as any
 
-   services.forEach((service,index) => {
-    const py = roomY + index * (platformHeight + platformGap)
-    const hasWorkers = characters.some(c => c.status === 'working' && c.targetService === service)
-    platformCenters[service] = drawPlatform(ctx,platformX,py,platformWidth,platformHeight,service,hasWorkers,frame)
+   services.forEach((service,index)=>{
+    const py=roomY+index*(platformHeight+platformGap)
+    const hasWorkers=characters.some(c=>c.status==='working'&&c.targetService===service)
+    platformCenters[service]=drawPlatform(ctx,platformX,py,platformWidth,platformHeight,service,hasWorkers,frame)
    })
 
-   const completedCount = characters.filter(c => c.request?.status === 'completed').length
-   const assetCount = Math.floor(frame / 300) + completedCount + 5
+   const completedCount=characters.filter(c=>c.request?.status==='completed').length
+   const assetCount=Math.floor(frame/300)+completedCount+5
 
    drawRoom(ctx,roomX,roomY,roomWidth,roomHeight,assetCount,frame)
 
-   const positions = positionsRef.current
-   const spriteSize = 26 * characterScale
-   const workingAgents:{char:CharacterState;pos:CharacterPosition}[] = []
+   const positions=positionsRef.current
+   const spriteSize=26*characterScale
+   const workingAgents:{char:CharacterState;pos:CharacterPosition}[]=[]
 
-   const workingPerService:Record<AIServiceType,number> = {}as Record<AIServiceType,number>
-   services.forEach(s => { workingPerService[s] = 0 })
-   const workingIndexMap = new Map<string,number>()
+   const workingPerService:Record<AIServiceType,number>={}as Record<AIServiceType,number>
+   services.forEach(s=>{ workingPerService[s]=0 })
+   const workingIndexMap=new Map<string,number>()
 
-   characters.forEach((char) => {
-    if(char.status === 'working' && char.targetService){
+   characters.forEach((char)=>{
+    if(char.status==='working'&&char.targetService){
      workingIndexMap.set(char.agentId,workingPerService[char.targetService])
      workingPerService[char.targetService]++
     }
    })
 
-   characters.forEach((char) => {
-    const pos = positions.get(char.agentId)
+   characters.forEach((char)=>{
+    const pos=positions.get(char.agentId)
     if(!pos)return
 
-    const isWorking = char.status === 'working'
+    const isWorking=char.status==='working'
 
-    if(isWorking && char.targetService){
-     const pc = platformCenters[char.targetService]
-     const workingIndex = workingIndexMap.get(char.agentId) || 0
-     const totalWorking = workingPerService[char.targetService]
+    if(isWorking&&char.targetService){
+     const pc=platformCenters[char.targetService]
+     const workingIndex=workingIndexMap.get(char.agentId)||0
+     const totalWorking=workingPerService[char.targetService]
 
-     const lineX = platformX + platformWidth + 20
-     const spreadY = totalWorking > 1 ? (workingIndex - (totalWorking - 1) / 2) * 25 : 0
-     pos.targetX = lineX
-     pos.targetY = pc.centerY + spreadY
-     pos.wasWorking = true
+     const lineX=platformX+platformWidth+20
+     const spreadY=totalWorking>1?(workingIndex-(totalWorking-1)/2)*25 : 0
+     pos.targetX=lineX
+     pos.targetY=pc.centerY+spreadY
+     pos.wasWorking=true
      workingAgents.push({char,pos})
     }else{
      if(pos.wasWorking){
-      pos.targetX = roomX + 20 + Math.random() * (roomWidth - 40)
-      pos.targetY = roomY + 30 + Math.random() * (roomHeight - 60)
-      pos.wanderTimer = 2000 + Math.random() * 3000
-      pos.wasWorking = false
+      pos.targetX=roomX+20+Math.random()*(roomWidth-40)
+      pos.targetY=roomY+30+Math.random()*(roomHeight-60)
+      pos.wanderTimer=2000+Math.random()*3000
+      pos.wasWorking=false
      }else{
-      pos.wanderTimer -= 16
-      if(pos.wanderTimer <= 0){
+      pos.wanderTimer-=16
+      if(pos.wanderTimer<=0){
        let newX,newY
-       let attempts = 0
+       let attempts=0
        do{
-        newX = roomX + 20 + Math.random() * (roomWidth - 40)
-        newY = roomY + 30 + Math.random() * (roomHeight - 60)
+        newX=roomX+20+Math.random()*(roomWidth-40)
+        newY=roomY+30+Math.random()*(roomHeight-60)
         attempts++
-       }while(attempts < 10 && isOverlapping(newX,newY,char.agentId,positions,30))
+       }while(attempts<10&&isOverlapping(newX,newY,char.agentId,positions,30))
 
-       pos.targetX = newX
-       pos.targetY = newY
-       pos.wanderTimer = 3000 + Math.random() * 4000
+       pos.targetX=newX
+       pos.targetY=newY
+       pos.wanderTimer=3000+Math.random()*4000
       }
      }
     }
 
-    const justReturning = !isWorking && Math.abs(pos.x - pos.targetX) > 50
-    const speed = isWorking ? 0.08 : (justReturning ? 0.12 : 0.025)
-    pos.x += (pos.targetX - pos.x) * speed
-    pos.y += (pos.targetY - pos.y) * speed
-    pos.rotation += isWorking ? 0.15 : 0.01
+    const justReturning=!isWorking&&Math.abs(pos.x-pos.targetX)>50
+    const speed=isWorking?0.08 : (justReturning?0.12 : 0.025)
+    pos.x+=(pos.targetX-pos.x)*speed
+    pos.y+=(pos.targetY-pos.y)*speed
+    pos.rotation+=isWorking?0.15 : 0.01
    })
 
    function isOverlapping(x:number,y:number,excludeId:string,positions:Map<string,CharacterPosition>,minDist:number):boolean{
     for(const[id,p]of positions){
-     if(id === excludeId)continue
-     const dist = Math.sqrt((x - p.x) ** 2 + (y - p.y) ** 2)
-     if(dist < minDist)return true
+     if(id===excludeId)continue
+     const dist=Math.sqrt((x-p.x)**2+(y-p.y)**2)
+     if(dist<minDist)return true
     }
     return false
    }
 
-   const activeServices = new Set<AIServiceType>()
-   workingAgents.forEach(({char,pos}) => {
+   const activeServices=new Set<AIServiceType>()
+   workingAgents.forEach(({char,pos})=>{
     if(char.targetService){
-     const distToTarget = Math.sqrt(Math.pow(pos.x - pos.targetX,2) + Math.pow(pos.y - pos.targetY,2))
-     if(distToTarget < 50){
+     const distToTarget=Math.sqrt(Math.pow(pos.x-pos.targetX,2)+Math.pow(pos.y-pos.targetY,2))
+     if(distToTarget<50){
       activeServices.add(char.targetService)
      }
     }
    })
 
-   activeServices.forEach((service) => {
-    const pc = platformCenters[service]
-    const platformRightEdge = platformX + platformWidth
-    drawDataLine(ctx,platformRightEdge,pc.centerY,roomX,roomY + roomHeight / 2,frame)
+   activeServices.forEach((service)=>{
+    const pc=platformCenters[service]
+    const platformRightEdge=platformX+platformWidth
+    drawDataLine(ctx,platformRightEdge,pc.centerY,roomX,roomY+roomHeight/2,frame)
    })
 
-   characters.forEach((char) => {
-    const pos = positions.get(char.agentId)
+   characters.forEach((char)=>{
+    const pos=positions.get(char.agentId)
     if(!pos)return
 
-    const spiritType = AGENT_MODEL_MAP[char.agentType] || 'spirit_light'
-    const isWorking = char.status === 'working'
+    const spiritType=AGENT_MODEL_MAP[char.agentType]||'spirit_light'
+    const isWorking=char.status==='working'
 
     drawSprite(ctx,pos.x,pos.y,spiritType,spriteSize,isWorking,frame,pos.rotation)
 
-    ctx.font = '10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    ctx.fillStyle = NIER_COLORS.textDim
-    ctx.textAlign = 'center'
-    const agentName = char.agentType.replace(/_/g,' ').toUpperCase()
-    ctx.fillText(agentName,pos.x,pos.y + spriteSize / 2 + 12)
+    ctx.font='10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+    ctx.fillStyle=NIER_COLORS.textDim
+    ctx.textAlign='center'
+    const agentName=char.agentType.replace(/_/g,' ').toUpperCase()
+    ctx.fillText(agentName,pos.x,pos.y+spriteSize/2+12)
 
-    if(isWorking && char.request){
-     drawSpeechBubble(ctx,pos.x,pos.y - spriteSize / 2,char.request.input)
+    if(isWorking&&char.request){
+     drawSpeechBubble(ctx,pos.x,pos.y-spriteSize/2,char.request.input)
     }
    })
 
-   ctx.fillStyle = NIER_COLORS.textDim
-   ctx.font = '10px "Courier New", monospace'
-   ctx.textAlign = 'left'
-   ctx.fillText(`AGENTS: ${characters.length}`,10,dimensions.height - 8)
-   ctx.fillText(`ACTIVE: ${workingAgents.length}`,90,dimensions.height - 8)
+   ctx.fillStyle=NIER_COLORS.textDim
+   ctx.font='10px "Courier New", monospace'
+   ctx.textAlign='left'
+   ctx.fillText(`AGENTS: ${characters.length}`,10,dimensions.height-8)
+   ctx.fillText(`ACTIVE: ${workingAgents.length}`,90,dimensions.height-8)
 
-   animationRef.current = requestAnimationFrame(render)
+   animationRef.current=requestAnimationFrame(render)
   }
 
   render()
 
-  return() => {
+  return()=>{
    if(animationRef.current){
     cancelAnimationFrame(animationRef.current)
    }
   }
  },[characters,dimensions,characterScale,drawSprite,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble])
 
- const handleClick = useCallback((e:React.MouseEvent<HTMLCanvasElement>) => {
+ const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return
 
-  const canvas = canvasRef.current
+  const canvas=canvasRef.current
   if(!canvas)return
 
-  const rect = canvas.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  const spriteSize = 26 * characterScale
+  const rect=canvas.getBoundingClientRect()
+  const x=e.clientX-rect.left
+  const y=e.clientY-rect.top
+  const spriteSize=26*characterScale
 
-  const positions = positionsRef.current
+  const positions=positionsRef.current
   for(const char of characters){
-   const pos = positions.get(char.agentId)
+   const pos=positions.get(char.agentId)
    if(!pos)continue
 
-   const dist = Math.sqrt(Math.pow(x - pos.x,2) + Math.pow(y - pos.y,2))
-   if(dist < spriteSize / 2 + 12){
+   const dist=Math.sqrt(Math.pow(x-pos.x,2)+Math.pow(y-pos.y,2))
+   if(dist<spriteSize/2+12){
     onCharacterClick(char)
     return
    }
@@ -613,5 +613,5 @@ export function AIField2D({characters,onCharacterClick,characterScale = 1.0}:AIF
     className="cursor-pointer"
    />
   </div>
- )
+)
 }

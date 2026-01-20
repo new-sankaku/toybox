@@ -8,10 +8,10 @@ import{useProjectStore}from'./stores/projectStore'
 import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
 import{websocketService}from'./services/websocketService'
 
-const queryClient = new QueryClient({
+const queryClient=new QueryClient({
  defaultOptions:{
   queries:{
-   staleTime:1000 * 60 * 5, // 5 minutes
+   staleTime:1000*60*5,// 5 minutes
    retry:1
   }
  }
@@ -20,26 +20,26 @@ const queryClient = new QueryClient({
 export type{TabId}from'./stores/navigationStore'
 
 function App():JSX.Element{
- const{activeTab,setActiveTab} = useNavigationStore()
- const{currentProject} = useProjectStore()
- const{fetchDefinitions} = useAgentDefinitionStore()
- const previousProjectIdRef = useRef<string | null>(null)
+ const{activeTab,setActiveTab}=useNavigationStore()
+ const{currentProject}=useProjectStore()
+ const{fetchDefinitions}=useAgentDefinitionStore()
+ const previousProjectIdRef=useRef<string|null>(null)
 
- useEffect(() => {
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+ useEffect(()=>{
+  const backendUrl=import.meta.env.VITE_BACKEND_URL||'http://localhost:5000'
   websocketService.connect(backendUrl)
 
   fetchDefinitions()
 
-  return() => {
+  return()=>{
    websocketService.disconnect()
   }
  },[fetchDefinitions])
 
- useEffect(() => {
-  const projectId = currentProject?.id ?? null
+ useEffect(()=>{
+  const projectId=currentProject?.id ?? null
 
-  if(previousProjectIdRef.current && previousProjectIdRef.current !== projectId){
+  if(previousProjectIdRef.current&&previousProjectIdRef.current!==projectId){
    websocketService.unsubscribeFromProject(previousProjectIdRef.current)
   }
 
@@ -48,31 +48,31 @@ function App():JSX.Element{
    websocketService.subscribeToProject(projectId)
   }
 
-  previousProjectIdRef.current = projectId
+  previousProjectIdRef.current=projectId
  },[currentProject?.id])
 
- const renderContent = () => {
+ const renderContent=()=>{
   switch(activeTab){
    case'project':
-    return<ProjectView />
+    return<ProjectView/>
    case'checkpoints':
-    return<CheckpointsView />
+    return<CheckpointsView/>
    case'system':
-    return<DashboardView />
+    return<DashboardView/>
    case'agents':
-    return<AgentsView />
+    return<AgentsView/>
    case'logs':
-    return<LogsView />
+    return<LogsView/>
    case'data':
-    return<DataView />
+    return<DataView/>
    case'ai':
-    return<AIView />
+    return<AIView/>
    case'cost':
-    return<CostView />
+    return<CostView/>
    case'config':
-    return<ConfigView />
+    return<ConfigView/>
    default:
-    return<DashboardView />
+    return<DashboardView/>
   }
  }
 
@@ -82,7 +82,7 @@ function App():JSX.Element{
     {renderContent()}
    </AppLayout>
   </QueryClientProvider>
- )
+)
 }
 
 export default App

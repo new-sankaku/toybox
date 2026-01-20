@@ -15,7 +15,7 @@ interface FeedbackFormProps{
  required?:boolean
 }
 
-const quickFeedbackOptions = [
+const quickFeedbackOptions=[
  {label:'品質向上が必要',value:'品質が基準に達していません。改善をお願いします。'},
  {label:'詳細が不足',value:'詳細な説明が不足しています。より具体的な内容を追加してください。'},
  {label:'方向性の修正',value:'コンセプトの方向性を修正する必要があります。'},
@@ -25,23 +25,23 @@ const quickFeedbackOptions = [
 export function FeedbackForm({
  onSubmit,
  onCancel,
- placeholder = 'フィードバックを入力してください...',
- submitLabel = '送信',
- title = 'フィードバック',
- initialValue = '',
- required = false
+ placeholder='フィードバックを入力してください...',
+ submitLabel='送信',
+ title='フィードバック',
+ initialValue='',
+ required=false
 }:FeedbackFormProps):JSX.Element{
- const[feedback,setFeedback] = useState(initialValue)
+ const[feedback,setFeedback]=useState(initialValue)
 
- const handleSubmit = () => {
-  if(required && !feedback.trim()){
+ const handleSubmit=()=>{
+  if(required&&!feedback.trim()){
    return
   }
   onSubmit(feedback)
  }
 
- const handleQuickSelect = (value:string) => {
-  setFeedback((prev) => (prev ? `${prev}\n\n${value}` : value))
+ const handleQuickSelect=(value:string)=>{
+  setFeedback((prev)=>(prev?`${prev}\n\n${value}` : value))
  }
 
  return(
@@ -56,19 +56,19 @@ export function FeedbackForm({
       クイック選択:
      </p>
      <div className="flex flex-wrap gap-2">
-      {quickFeedbackOptions.map((option) => (
+      {quickFeedbackOptions.map((option)=>(
        <button
         key={option.label}
         className={cn(
          'px-2 py-1 text-nier-caption tracking-nier',
          'border border-nier-border-light',
          'hover:bg-nier-bg-selected transition-colors'
-        )}
-        onClick={() => handleQuickSelect(option.value)}
+)}
+        onClick={()=>handleQuickSelect(option.value)}
        >
         {option.label}
        </button>
-      ))}
+))}
      </div>
     </div>
 
@@ -77,30 +77,30 @@ export function FeedbackForm({
      <textarea
       className={cn(
        'nier-input min-h-[120px] resize-none',
-       required && !feedback.trim() && 'border-nier-accent-red'
-      )}
+       required&&!feedback.trim()&&'border-nier-accent-red'
+)}
       placeholder={placeholder}
       value={feedback}
-      onChange={(e) => setFeedback(e.target.value)}
+      onChange={(e)=>setFeedback(e.target.value)}
      />
-     {required && !feedback.trim() && (
+     {required&&!feedback.trim()&&(
       <p className="text-nier-caption text-nier-accent-red mt-1">
        フィードバックは必須です
       </p>
-     )}
+)}
     </div>
 
     {/* Character Count */}
     <div className="flex items-center justify-between text-nier-caption text-nier-text-light">
      <span>{feedback.length} 文字</span>
-     {feedback.length > 0 && (
+     {feedback.length>0&&(
       <button
        className="hover:text-nier-text-main"
-       onClick={() => setFeedback('')}
+       onClick={()=>setFeedback('')}
       >
        クリア
       </button>
-     )}
+)}
     </div>
 
     {/* Action Buttons */}
@@ -109,18 +109,18 @@ export function FeedbackForm({
       variant="ghost"
       onClick={onCancel}
      >
-      <X size={14} />
+      <X size={14}/>
       <span className="ml-1.5">キャンセル</span>
      </Button>
      <Button
       onClick={handleSubmit}
-      disabled={required && !feedback.trim()}
+      disabled={required&&!feedback.trim()}
      >
-      <Send size={14} />
+      <Send size={14}/>
       <span className="ml-1.5">{submitLabel}</span>
      </Button>
     </div>
    </CardContent>
   </Card>
- )
+)
 }

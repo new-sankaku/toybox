@@ -38,7 +38,7 @@ export interface AgentCompletedEvent{
 
 export interface AgentFailedEvent{
  agentId:string
- errorType:'timeout' | 'llm_error' | 'validation_error' | 'dependency_error'
+ errorType:'timeout'|'llm_error'|'validation_error'|'dependency_error'
  errorMessage:string
  canRetry:boolean
  retryCount:number
@@ -48,7 +48,7 @@ export interface AgentFailedEvent{
 
 export interface AgentLogEvent{
  agentId:string
- level:'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
+ level:'DEBUG'|'INFO'|'WARN'|'ERROR'
  message:string
  metadata?:Record<string,unknown>
  timestamp:string
@@ -66,7 +66,7 @@ export interface CheckpointCreatedEvent{
 
 export interface CheckpointResolvedEvent{
  checkpointId:string
- resolution:'approved' | 'rejected' | 'changes_requested'
+ resolution:'approved'|'rejected'|'changes_requested'
  feedback?:string
  timestamp:string
 }
@@ -99,14 +99,14 @@ export interface AgentErrorEvent{
 }
 
 export interface LLMErrorEvent{
- errorType:'rate_limit' | 'token_limit' | 'api_error' | 'invalid_response'
+ errorType:'rate_limit'|'token_limit'|'api_error'|'invalid_response'
  errorMessage:string
  retryAfter?:number
  timestamp:string
 }
 
 export interface StateErrorEvent{
- errorType:'sync_failed' | 'checkpoint_failed' | 'restore_failed'
+ errorType:'sync_failed'|'checkpoint_failed'|'restore_failed'
  errorMessage:string
  timestamp:string
 }
@@ -146,4 +146,4 @@ export interface WebSocketEventMap{
  'connection:state_sync':StateSyncEvent
 }
 
-export type WebSocketEventName = keyof WebSocketEventMap
+export type WebSocketEventName=keyof WebSocketEventMap

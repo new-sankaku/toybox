@@ -11,7 +11,7 @@ interface AgentLogProps{
  autoScroll?:boolean
 }
 
-const levelConfig:Record<LogLevel,{icon:typeof Info;color:string;label:string}> = {
+const levelConfig:Record<LogLevel,{icon:typeof Info;color:string;label:string}>={
  debug:{
   icon:Bug,
   color:'text-nier-text-light',
@@ -36,19 +36,19 @@ const levelConfig:Record<LogLevel,{icon:typeof Info;color:string;label:string}> 
 
 export function AgentLog({
  logs,
- maxHeight = '400px',
- autoScroll = true
+ maxHeight='400px',
+ autoScroll=true
 }:AgentLogProps):JSX.Element{
- const scrollRef = useRef<HTMLDivElement>(null)
+ const scrollRef=useRef<HTMLDivElement>(null)
 
- useEffect(() => {
-  if(autoScroll && scrollRef.current){
-   scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+ useEffect(()=>{
+  if(autoScroll&&scrollRef.current){
+   scrollRef.current.scrollTop=scrollRef.current.scrollHeight
   }
  },[logs,autoScroll])
 
- const formatTime = (timestamp:string) => {
-  const date = new Date(timestamp)
+ const formatTime=(timestamp:string)=>{
+  const date=new Date(timestamp)
   return date.toLocaleTimeString('ja-JP',{
    hour:'2-digit',
    minute:'2-digit',
@@ -71,23 +71,23 @@ export function AgentLog({
      className="font-mono text-nier-small bg-nier-bg-main overflow-auto"
      style={{maxHeight}}
     >
-     {logs.length === 0 ? (
+     {logs.length===0?(
       <div className="p-4 text-center text-nier-text-light">
        ログがありません
       </div>
-     ) : (
+) : (
       <div className="divide-y divide-nier-border-light">
-       {logs.map((entry) => {
-        const config = levelConfig[entry.level]
-        const Icon = config.icon
+       {logs.map((entry)=>{
+        const config=levelConfig[entry.level]
+        const Icon=config.icon
 
         return(
          <div
           key={entry.id}
           className={cn(
            'p-2 hover:bg-nier-bg-panel transition-colors',
-           entry.level === 'error' && 'bg-nier-accent-red/5'
-          )}
+           entry.level==='error'&&'bg-nier-accent-red/5'
+)}
          >
           <div className="flex items-start gap-3">
            {/* Timestamp */}
@@ -100,9 +100,9 @@ export function AgentLog({
             className={cn(
              'flex items-center gap-1 text-nier-caption whitespace-nowrap',
              config.color
-            )}
+)}
            >
-            <Icon size={12} />
+            <Icon size={12}/>
             <span>{config.label}</span>
            </span>
 
@@ -112,48 +112,48 @@ export function AgentLog({
            </span>
 
            {/* Progress (if available) */}
-           {entry.progress !== undefined && (
+           {entry.progress!==undefined&&(
             <span className="text-nier-caption text-nier-accent-orange ml-auto whitespace-nowrap">
              {entry.progress}%
             </span>
-           )}
+)}
           </div>
 
           {/* Metadata (if available) */}
-          {entry.metadata && Object.keys(entry.metadata).length > 0 && (
+          {entry.metadata&&Object.keys(entry.metadata).length>0&&(
            <div className="mt-1 ml-20 text-nier-caption text-nier-text-light">
             <pre className="whitespace-pre-wrap">
              {JSON.stringify(entry.metadata,null,2)}
             </pre>
            </div>
-          )}
+)}
          </div>
-        )
+)
        })}
       </div>
-     )}
+)}
     </div>
    </CardContent>
   </Card>
- )
+)
 }
 
 export function AgentLogStreaming({
  logs,
- isStreaming = false,
- maxHeight = '400px'
-}:AgentLogProps & {isStreaming?:boolean}):JSX.Element{
+ isStreaming=false,
+ maxHeight='400px'
+}:AgentLogProps&{isStreaming?:boolean}):JSX.Element{
  return(
   <div className="relative">
-   <AgentLog logs={logs} maxHeight={maxHeight} autoScroll={isStreaming} />
-   {isStreaming && (
+   <AgentLog logs={logs} maxHeight={maxHeight} autoScroll={isStreaming}/>
+   {isStreaming&&(
     <div className="absolute bottom-4 right-4">
      <div className="flex items-center gap-2 bg-nier-bg-panel px-2 py-1 text-nier-caption">
-      <div className="w-2 h-2 bg-nier-accent-green rounded-full animate-pulse" />
+      <div className="w-2 h-2 bg-nier-accent-green rounded-full animate-pulse"/>
       <span className="text-nier-accent-green">LIVE</span>
      </div>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

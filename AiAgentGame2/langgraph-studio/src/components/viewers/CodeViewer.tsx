@@ -20,7 +20,7 @@ interface CodeViewerProps{
  onCopy?:()=>void
 }
 
-const monacoOptions = {
+const monacoOptions={
  readOnly:true,
  minimap:{enabled:false},
  lineNumbers:'on'as const,
@@ -39,7 +39,7 @@ const monacoOptions = {
  }
 }
 
-const nierTheme = {
+const nierTheme={
  base:'vs'as const,
  inherit:true,
  rules:[
@@ -48,7 +48,7 @@ const nierTheme = {
   {token:'string',foreground:'7AAA7A'},
   {token:'number',foreground:'C4956C'},
   {token:'type',foreground:'6B8FAA'}
- ],
+],
  colors:{
   'editor.background':'#E8E4D4',
   'editor.foreground':'#454138',
@@ -63,49 +63,49 @@ const nierTheme = {
 
 export function CodeViewer({
  code,
- language = 'typescript',
+ language='typescript',
  filename,
- showLineNumbers = true,
- maxHeight = '400px',
+ showLineNumbers=true,
+ maxHeight='400px',
  className,
  onCopy
 }:CodeViewerProps):JSX.Element{
- const[copied,setCopied] = useState(false)
+ const[copied,setCopied]=useState(false)
 
- const handleCopy = useCallback(async() => {
+ const handleCopy=useCallback(async()=>{
   try{
    await navigator.clipboard.writeText(code)
    setCopied(true)
    onCopy?.()
-   setTimeout(() => setCopied(false),2000)
+   setTimeout(()=>setCopied(false),2000)
   }catch(err){
    console.error('Failed to copy:',err)
   }
  },[code,onCopy])
 
- const handleDownload = useCallback(() => {
-  const blob = new Blob([code],{type:'text/plain'})
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename || `code.${language}`
+ const handleDownload=useCallback(()=>{
+  const blob=new Blob([code],{type:'text/plain'})
+  const url=URL.createObjectURL(blob)
+  const a=document.createElement('a')
+  a.href=url
+  a.download=filename||`code.${language}`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
  },[code,filename,language])
 
- const lineCount = code.split('\n').length
+ const lineCount=code.split('\n').length
 
  return(
   <div className={cn('code-viewer border border-nier-border-light',className)}>
    {/* Header */}
-   {filename && (
+   {filename&&(
     <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2">
      <div className="flex items-center gap-3">
       <span className="text-nier-small tracking-nier">{filename}</span>
       <span className="text-nier-caption text-nier-text-header/70">
-       {lineCount} lines | {language}
+       {lineCount} lines|{language}
       </span>
      </div>
      <div className="flex items-center gap-2">
@@ -115,13 +115,13 @@ export function CodeViewer({
        className="text-nier-text-header hover:bg-white/10"
        onClick={handleCopy}
       >
-       {copied ? (
-        <Check size={14} className="text-nier-accent-green" />
-       ) : (
-        <Copy size={14} />
-       )}
+       {copied?(
+        <Check size={14} className="text-nier-accent-green"/>
+) : (
+        <Copy size={14}/>
+)}
        <span className="ml-1.5 text-nier-caption">
-        {copied ? 'Copied!' : 'Copy'}
+        {copied?'Copied!' : 'Copy'}
        </span>
       </Button>
       <Button
@@ -130,12 +130,12 @@ export function CodeViewer({
        className="text-nier-text-header hover:bg-white/10"
        onClick={handleDownload}
       >
-       <Download size={14} />
+       <Download size={14}/>
        <span className="ml-1.5 text-nier-caption">Download</span>
       </Button>
      </div>
     </div>
-   )}
+)}
 
    {/* Editor */}
    <div style={{height:maxHeight}}>
@@ -145,10 +145,10 @@ export function CodeViewer({
      value={code}
      options={{
       ...monacoOptions,
-      lineNumbers:showLineNumbers ? 'on' : 'off'
+      lineNumbers:showLineNumbers?'on' : 'off'
      }}
      theme="nier-theme"
-     beforeMount={(monaco) => {
+     beforeMount={(monaco)=>{
       monaco.editor.defineTheme('nier-theme',nierTheme)
      }}
      loading={
@@ -160,10 +160,10 @@ export function CodeViewer({
    </div>
 
    {/* Footer */}
-   {!filename && (
+   {!filename&&(
     <div className="flex items-center justify-between bg-nier-bg-panel px-4 py-2 border-t border-nier-border-light">
      <span className="text-nier-caption text-nier-text-light">
-      {lineCount} lines | {language}
+      {lineCount} lines|{language}
      </span>
      <div className="flex items-center gap-2">
       <Button
@@ -171,15 +171,15 @@ export function CodeViewer({
        size="sm"
        onClick={handleCopy}
       >
-       {copied ? (
-        <Check size={14} className="text-nier-accent-green" />
-       ) : (
-        <Copy size={14} />
-       )}
+       {copied?(
+        <Check size={14} className="text-nier-accent-green"/>
+) : (
+        <Copy size={14}/>
+)}
       </Button>
      </div>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

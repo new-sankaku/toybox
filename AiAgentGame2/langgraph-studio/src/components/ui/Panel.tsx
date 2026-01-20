@@ -7,27 +7,27 @@ export interface PanelProps extends HTMLAttributes<HTMLDivElement>{
  noPadding?:boolean
 }
 
-const Panel = forwardRef<HTMLDivElement,PanelProps>(
- ({className,title,headerRight,noPadding,children,...props},ref) => {
+const Panel=forwardRef<HTMLDivElement,PanelProps>(
+ ({className,title,headerRight,noPadding,children,...props},ref)=>{
   return(
    <div
     ref={ref}
     className={cn('bg-nier-bg-panel border border-nier-border-light',className)}
     {...props}
    >
-    {title && (
+    {title&&(
      <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2">
       <span className="text-nier-small tracking-nier">{title}</span>
       {headerRight}
      </div>
-    )}
-    <div className={cn(!noPadding && 'p-4')}>
+)}
+    <div className={cn(!noPadding&&'p-4')}>
      {children}
     </div>
    </div>
-  )
+)
  }
 )
-Panel.displayName = 'Panel'
+Panel.displayName='Panel'
 
 export{Panel}

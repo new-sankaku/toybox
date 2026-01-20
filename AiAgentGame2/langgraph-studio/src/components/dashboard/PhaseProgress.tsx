@@ -13,16 +13,16 @@ interface Phase{
  id:number
  name:string
  progress:number
- status:'current' | 'pending' | 'completed'
+ status:'current'|'pending'|'completed'
 }
 
 export default function PhaseProgress():JSX.Element{
- const{currentProject} = useProjectStore()
- const{projectMetrics,setProjectMetrics} = useMetricsStore()
- const{agents,setAgents} = useAgentStore()
- const[initialLoading,setInitialLoading] = useState(true)
+ const{currentProject}=useProjectStore()
+ const{projectMetrics,setProjectMetrics}=useMetricsStore()
+ const{agents,setAgents}=useAgentStore()
+ const[initialLoading,setInitialLoading]=useState(true)
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setProjectMetrics(null)
    setAgents([])
@@ -30,13 +30,13 @@ export default function PhaseProgress():JSX.Element{
    return
   }
 
-  const fetchData = async() => {
+  const fetchData=async()=>{
    setInitialLoading(true)
    try{
-    const[metricsData,agentsData] = await Promise.all([
+    const[metricsData,agentsData]=await Promise.all([
      metricsApi.getByProject(currentProject.id),
      agentApi.listByProject(currentProject.id)
-    ])
+])
     setProjectMetrics({
      projectId:currentProject.id,
      totalTokensUsed:metricsData.totalTokensUsed,
@@ -47,7 +47,7 @@ export default function PhaseProgress():JSX.Element{
      currentPhase:metricsData.currentPhase,
      phaseName:metricsData.phaseName
     })
-    const agentsConverted:Agent[] = agentsData.map(a => ({
+    const agentsConverted:Agent[]=agentsData.map(a=>({
      id:a.id,
      projectId:a.projectId,
      type:a.type,
@@ -84,23 +84,23 @@ export default function PhaseProgress():JSX.Element{
      </div>
     </CardContent>
    </Card>
-  )
+)
  }
 
- const metrics = projectMetrics
- const currentPhase = metrics?.currentPhase || currentProject.currentPhase || 1
- const overallProgress = metrics?.progressPercent || 0
+ const metrics=projectMetrics
+ const currentPhase=metrics?.currentPhase||currentProject.currentPhase||1
+ const overallProgress=metrics?.progressPercent||0
 
- const phases:Phase[] = [
-  {id:1,name:'Phase 1',progress:currentPhase > 1 ? 100 : currentPhase === 1 ? overallProgress : 0,status:currentPhase === 1 ? 'current' : currentPhase > 1 ? 'completed' : 'pending'},
-  {id:2,name:'Phase 2',progress:currentPhase > 2 ? 100 : currentPhase === 2 ? overallProgress : 0,status:currentPhase === 2 ? 'current' : currentPhase > 2 ? 'completed' : 'pending'},
-  {id:3,name:'Phase 3',progress:currentPhase > 3 ? 100 : currentPhase === 3 ? overallProgress : 0,status:currentPhase === 3 ? 'current' : currentPhase > 3 ? 'completed' : 'pending'}
- ]
+ const phases:Phase[]=[
+  {id:1,name:'Phase 1',progress:currentPhase>1?100 : currentPhase===1?overallProgress : 0,status:currentPhase===1?'current' : currentPhase>1?'completed' : 'pending'},
+  {id:2,name:'Phase 2',progress:currentPhase>2?100 : currentPhase===2?overallProgress : 0,status:currentPhase===2?'current' : currentPhase>2?'completed' : 'pending'},
+  {id:3,name:'Phase 3',progress:currentPhase>3?100 : currentPhase===3?overallProgress : 0,status:currentPhase===3?'current' : currentPhase>3?'completed' : 'pending'}
+]
 
- const projectAgents = agents.filter(a => a.projectId === currentProject.id)
- const runningAgent = projectAgents.find(a => a.status === 'running')
- const currentAgentName = runningAgent ? ((runningAgent.metadata?.displayName as string) || runningAgent.type) : null
- const currentAgentProgress = runningAgent?.progress || 0
+ const projectAgents=agents.filter(a=>a.projectId===currentProject.id)
+ const runningAgent=projectAgents.find(a=>a.status==='running')
+ const currentAgentName=runningAgent?((runningAgent.metadata?.displayName as string)||runningAgent.type) : null
+ const currentAgentProgress=runningAgent?.progress||0
 
  return(
   <Card>
@@ -111,19 +111,19 @@ export default function PhaseProgress():JSX.Element{
     </span>
    </CardHeader>
    <CardContent className="space-y-3">
-    {initialLoading && !metrics ? (
+    {initialLoading&&!metrics?(
      <div className="text-nier-text-light text-center py-2 text-nier-small">
       読み込み中...
      </div>
-    ) : (
+) : (
      <>
       {/* Phase Bars */}
-      {phases.map((phase) => (
+      {phases.map((phase)=>(
        <div key={phase.id} className="flex items-center gap-3">
         <span className={cn(
          'text-nier-caption w-16',
-         phase.status === 'current' ? 'text-nier-text-main font-medium' : 'text-nier-text-light'
-        )}>
+         phase.status==='current'?'text-nier-text-main font-medium' : 'text-nier-text-light'
+)}>
          {phase.name}
         </span>
         <Progress
@@ -134,21 +134,21 @@ export default function PhaseProgress():JSX.Element{
          {phase.progress}%
         </span>
        </div>
-      ))}
+))}
 
       {/* Current Agent */}
-      {currentAgentName && (
+      {currentAgentName&&(
        <div className="pt-2 border-t border-nier-border-light">
         <div className="flex justify-between text-nier-caption mb-1">
          <span className="text-nier-text-light">実行中:</span>
          <span className="text-nier-accent-orange animate-pulse">{currentAgentName} ({currentAgentProgress}%)</span>
         </div>
-        <Progress value={currentAgentProgress} className="h-1" />
+        <Progress value={currentAgentProgress} className="h-1"/>
        </div>
-      )}
+)}
      </>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }

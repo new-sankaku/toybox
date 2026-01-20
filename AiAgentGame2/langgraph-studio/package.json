@@ -15,7 +15,8 @@
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "node scripts/remove-spaces.cjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -65,6 +66,7 @@
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
     "eslint": "^8.57.1",
+    "glob": "^13.0.0",
     "postcss": "^8.4.49",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

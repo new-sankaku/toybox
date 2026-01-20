@@ -10,7 +10,7 @@ interface CheckpointCardProps{
  isSelected?:boolean
 }
 
-const statusConfig = {
+const statusConfig={
  pending:{
   color:'bg-nier-border-dark',
   text:'承認待ち',
@@ -33,7 +33,7 @@ const statusConfig = {
  }
 }
 
-const typeConfig:Record<string,{icon:typeof FileText;label:string}> = {
+const typeConfig:Record<string,{icon:typeof FileText;label:string}>={
  concept_review:{icon:FileText,label:'コンセプト'},
  design_review:{icon:FileText,label:'デザイン'},
  scenario_review:{icon:FileText,label:'シナリオ'},
@@ -45,23 +45,23 @@ const typeConfig:Record<string,{icon:typeof FileText;label:string}> = {
 export function CheckpointCard({
  checkpoint,
  onSelect,
- isSelected = false
+ isSelected=false
 }:CheckpointCardProps):JSX.Element{
- const status = statusConfig[checkpoint.status]
- const type = typeConfig[checkpoint.type] || {icon:FileText,label:checkpoint.type}
- const TypeIcon = type.icon
+ const status=statusConfig[checkpoint.status]
+ const type=typeConfig[checkpoint.type]||{icon:FileText,label:checkpoint.type}
+ const TypeIcon=type.icon
 
- const getWaitingTime = () => {
-  const created = new Date(checkpoint.createdAt)
-  const now = new Date()
-  const diffMs = now.getTime() - created.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
+ const getWaitingTime=()=>{
+  const created=new Date(checkpoint.createdAt)
+  const now=new Date()
+  const diffMs=now.getTime()-created.getTime()
+  const diffMins=Math.floor(diffMs/60000)
 
-  if(diffMins < 1)return'今すぐ'
-  if(diffMins < 60)return`${diffMins}分前`
-  const hours = Math.floor(diffMins / 60)
-  if(hours < 24)return`${hours}時間前`
-  const days = Math.floor(hours / 24)
+  if(diffMins<1)return'今すぐ'
+  if(diffMins<60)return`${diffMins}分前`
+  const hours=Math.floor(diffMins/60)
+  if(hours<24)return`${hours}時間前`
+  const days=Math.floor(hours/24)
   return`${days}日前`
  }
 
@@ -70,21 +70,21 @@ export function CheckpointCard({
    className={cn(
     'cursor-pointer transition-all duration-nier-normal',
     'hover:shadow-md hover:translate-x-1',
-    isSelected && 'ring-2 ring-nier-accent-blue'
-   )}
-   onClick={() => onSelect(checkpoint)}
+    isSelected&&'ring-2 ring-nier-accent-blue'
+)}
+   onClick={()=>onSelect(checkpoint)}
   >
    <CardContent className="p-3">
     {/* Header Row */}
     <div className="flex items-start justify-between mb-2">
      <div className="flex items-center gap-2">
       {/* Category Marker */}
-      <div className={cn('w-1 h-8',status.color,status.pulse && 'animate-nier-pulse')} />
+      <div className={cn('w-1 h-8',status.color,status.pulse&&'animate-nier-pulse')}/>
 
       {/* Type Icon & Title */}
       <div>
        <div className="flex items-center gap-1.5 mb-0.5">
-        <TypeIcon size={12} className="text-nier-text-light" />
+        <TypeIcon size={12} className="text-nier-text-light"/>
         <span className="text-nier-caption text-nier-text-light tracking-nier">
          {type.label}
         </span>
@@ -98,14 +98,14 @@ export function CheckpointCard({
      {/* Status, Time, Tokens, Review Button */}
      <div className="flex items-center gap-2">
       <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
-       <Clock size={10} />
+       <Clock size={10}/>
        {getWaitingTime()}
       </span>
-      {checkpoint.output?.tokensUsed && (
+      {checkpoint.output?.tokensUsed&&(
        <span className="text-nier-caption text-nier-text-light">
         {checkpoint.output.tokensUsed.toLocaleString()}tk
        </span>
-      )}
+)}
       <div className="px-1.5 py-0.5 text-nier-caption tracking-nier bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
        {status.text}
       </div>
@@ -113,7 +113,7 @@ export function CheckpointCard({
        variant="ghost"
        size="sm"
        className="text-nier-text-light py-0 px-1.5 text-nier-caption"
-       onClick={(e) => {
+       onClick={(e)=>{
         e.stopPropagation()
         onSelect(checkpoint)
        }}
@@ -124,12 +124,12 @@ export function CheckpointCard({
     </div>
 
     {/* Summary */}
-    {checkpoint.output?.summary && (
+    {checkpoint.output?.summary&&(
      <p className="text-nier-caption text-nier-text-light line-clamp-2 pl-3">
       {checkpoint.output.summary}
      </p>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }

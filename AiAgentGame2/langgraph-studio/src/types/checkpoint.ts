@@ -1,18 +1,18 @@
-export type CheckpointStatus = 'pending' | 'approved' | 'rejected' | 'revision_requested'
+export type CheckpointStatus='pending'|'approved'|'rejected'|'revision_requested'
 
-export type CheckpointType =
-  | 'concept_review'
-  | 'design_review'
-  | 'scenario_review'
-  | 'character_review'
-  | 'world_review'
-  | 'task_split_review'
-  | 'code_review'
-  | 'asset_review'
-  | 'integration_review'
-  | 'test_review'
-  | 'final_review'
-  | 'release_decision'
+export type CheckpointType=
+ |'concept_review'
+ |'design_review'
+ |'scenario_review'
+ |'character_review'
+ |'world_review'
+ |'task_split_review'
+ |'code_review'
+ |'asset_review'
+ |'integration_review'
+ |'test_review'
+ |'final_review'
+ |'release_decision'
 
 export interface Checkpoint{
  id:string
@@ -20,11 +20,11 @@ export interface Checkpoint{
  agentId:string
  type:CheckpointType
  title:string
- description:string | null
+ description:string|null
  output:CheckpointOutput
  status:CheckpointStatus
- feedback:string | null
- resolvedAt:string | null
+ feedback:string|null
+ resolvedAt:string|null
  createdAt:string
  updatedAt:string
 }
@@ -34,7 +34,7 @@ export interface CheckpointOutput{
  format?:string         // バックエンド: "markdown", "json", etc.
  documentType?:string   // 互換性のため残す
  summary?:string
- content?:string | Record<string,unknown>  // 文字列またはオブジェクト
+ content?:string|Record<string,unknown>// 文字列またはオブジェクト
  tokensUsed?:number
  generationTimeMs?:number
  previewUrl?:string
@@ -42,7 +42,7 @@ export interface CheckpointOutput{
 
 export interface CheckpointResolution{
  checkpointId:string
- resolution:'approved' | 'rejected' | 'revision_requested'
+ resolution:'approved'|'rejected'|'revision_requested'
  feedback?:string
 }
 

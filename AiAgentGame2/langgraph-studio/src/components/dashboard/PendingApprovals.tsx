@@ -10,24 +10,24 @@ import type{Checkpoint,CheckpointType,CheckpointStatus}from'@/types/checkpoint'
 import{cn}from'@/lib/utils'
 
 export default function PendingApprovals():JSX.Element{
- const{currentProject} = useProjectStore()
- const{navigateToCheckpoint} = useNavigationStore()
- const{checkpoints,setCheckpoints,isLoading} = useCheckpointStore()
- const[initialLoading,setInitialLoading] = useState(true)
- const[, setTick] = useState(0)
+ const{currentProject}=useProjectStore()
+ const{navigateToCheckpoint}=useNavigationStore()
+ const{checkpoints,setCheckpoints,isLoading}=useCheckpointStore()
+ const[initialLoading,setInitialLoading]=useState(true)
+ const[,setTick]=useState(0)
 
- useEffect(() => {
+ useEffect(()=>{
   if(!currentProject){
    setCheckpoints([])
    setInitialLoading(false)
    return
   }
 
-  const fetchCheckpoints = async() => {
+  const fetchCheckpoints=async()=>{
    setInitialLoading(true)
    try{
-    const data = await checkpointApi.listByProject(currentProject.id)
-    const checkpointsData:Checkpoint[] = data.map(cp => ({
+    const data=await checkpointApi.listByProject(currentProject.id)
+    const checkpointsData:Checkpoint[]=data.map(cp=>({
      id:cp.id,
      projectId:cp.projectId,
      agentId:cp.agentId,
@@ -51,15 +51,15 @@ export default function PendingApprovals():JSX.Element{
   fetchCheckpoints()
  },[currentProject?.id,setCheckpoints])
 
- useEffect(() => {
-  const pendingCount = checkpoints.filter(cp => cp.status === 'pending').length
-  if(pendingCount === 0)return
+ useEffect(()=>{
+  const pendingCount=checkpoints.filter(cp=>cp.status==='pending').length
+  if(pendingCount===0)return
 
-  const interval = setInterval(() => {
-   setTick(t => t + 1)
+  const interval=setInterval(()=>{
+   setTick(t=>t+1)
   },60000)
 
-  return() => clearInterval(interval)
+  return()=>clearInterval(interval)
  },[checkpoints])
 
  if(!currentProject){
@@ -74,20 +74,20 @@ export default function PendingApprovals():JSX.Element{
      </div>
     </CardContent>
    </Card>
-  )
+)
  }
 
- const projectCheckpoints = checkpoints.filter(cp => cp.projectId === currentProject.id)
- const pendingCheckpoints = projectCheckpoints.filter(cp => cp.status === 'pending')
+ const projectCheckpoints=checkpoints.filter(cp=>cp.projectId===currentProject.id)
+ const pendingCheckpoints=projectCheckpoints.filter(cp=>cp.status==='pending')
 
- const formatWaitingTime = (createdAt:string) => {
-  const created = new Date(createdAt)
-  const now = new Date()
-  const diffMs = now.getTime() - created.getTime()
-  const diffMins = Math.floor(diffMs / 60000)
-  const hours = Math.floor(diffMins / 60)
-  const mins = diffMins % 60
-  if(hours > 0){
+ const formatWaitingTime=(createdAt:string)=>{
+  const created=new Date(createdAt)
+  const now=new Date()
+  const diffMs=now.getTime()-created.getTime()
+  const diffMins=Math.floor(diffMs/60000)
+  const hours=Math.floor(diffMins/60)
+  const mins=diffMins%60
+  if(hours>0){
    return`${hours}h ${mins}m`
   }
   return`${mins}m`
@@ -97,33 +97,33 @@ export default function PendingApprovals():JSX.Element{
   <Card>
    <CardHeader>
     <DiamondMarker>承認待ち ({pendingCheckpoints.length})</DiamondMarker>
-    {pendingCheckpoints.length > 0 && (
+    {pendingCheckpoints.length>0&&(
      <span className="ml-auto text-nier-caption text-nier-accent-orange animate-pulse">
       要確認
      </span>
-    )}
+)}
    </CardHeader>
    <CardContent>
-    {(initialLoading || isLoading) && checkpoints.length === 0 ? (
+    {(initialLoading||isLoading)&&checkpoints.length===0?(
      <div className="text-nier-text-light text-center py-4 text-nier-small">
       読み込み中...
      </div>
-    ) : pendingCheckpoints.length === 0 ? (
+) : pendingCheckpoints.length===0?(
      <div className="text-nier-text-light text-center py-4 text-nier-small">
       承認待ちなし
      </div>
-    ) : (
+) : (
      <div className="space-y-1 max-h-32 overflow-y-auto">
-      {pendingCheckpoints.slice(0,5).map((checkpoint) => (
+      {pendingCheckpoints.slice(0,5).map((checkpoint)=>(
        <div
         key={checkpoint.id}
         className={cn(
          'nier-list-item cursor-pointer hover:bg-nier-bg-selected',
          'animate-nier-fade-in'
-        )}
-        onClick={() => navigateToCheckpoint(checkpoint.id)}
+)}
+        onClick={()=>navigateToCheckpoint(checkpoint.id)}
        >
-        <CategoryMarker status="pending" />
+        <CategoryMarker status="pending"/>
         <div className="flex-1 min-w-0">
          <div className="text-nier-small truncate">{checkpoint.title}</div>
         </div>
@@ -131,18 +131,18 @@ export default function PendingApprovals():JSX.Element{
          {formatWaitingTime(checkpoint.createdAt)}
         </div>
        </div>
-      ))}
-      {pendingCheckpoints.length > 5 && (
+))}
+      {pendingCheckpoints.length>5&&(
        <button
-        onClick={() => navigateToCheckpoint(pendingCheckpoints[0].id)}
+        onClick={()=>navigateToCheckpoint(pendingCheckpoints[0].id)}
         className="w-full text-center text-nier-caption text-nier-text-light hover:underline py-1"
        >
-        他 {pendingCheckpoints.length - 5} 件を表示...
+        他 {pendingCheckpoints.length-5} 件を表示...
        </button>
-      )}
+)}
      </div>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }
