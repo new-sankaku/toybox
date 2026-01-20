@@ -1,129 +1,118 @@
-export type AgentStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked' | 'waiting_approval'
+export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
 
-export type AgentType =
-  // Phase 0: 企画
-  | 'concept'
-  // Phase 1: タスク分割1
-  | 'task_split_1'
-  // Phase 2: 設計 (L/W combined - Leader/Worker continuous loop check)
-  | 'concept_detail'
-  | 'scenario'
-  | 'world'
-  | 'game_design'
-  | 'tech_spec'
-  // Phase 3: タスク分割2 + アセット
-  | 'task_split_2'
-  | 'asset_character'
-  | 'asset_background'
-  | 'asset_ui'
-  | 'asset_effect'
-  | 'asset_bgm'
-  | 'asset_voice'
-  | 'asset_sfx'
-  // Phase 4: タスク分割3 + 実装 (L/W combined - Leader/Worker continuous loop check)
-  | 'task_split_3'
-  | 'code'
-  | 'event'
-  | 'ui_integration'
-  | 'asset_integration'
-  // Phase 5: タスク分割4 + テスト (L/W combined - Leader/Worker continuous loop check)
-  | 'task_split_4'
-  | 'unit_test'
-  | 'integration_test'
+export type AgentType=
+ |'concept'
+ |'task_split_1'
+ |'concept_detail'
+ |'scenario'
+ |'world'
+ |'game_design'
+ |'tech_spec'
+ |'task_split_2'
+ |'asset_character'
+ |'asset_background'
+ |'asset_ui'
+ |'asset_effect'
+ |'asset_bgm'
+ |'asset_voice'
+ |'asset_sfx'
+ |'task_split_3'
+ |'code'
+ |'event'
+ |'ui_integration'
+ |'asset_integration'
+ |'task_split_4'
+ |'unit_test'
+ |'integration_test'
 
-export interface Agent {
-  id: string
-  projectId: string
-  type: AgentType
-  phase?: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
-  status: AgentStatus
-  progress: number
-  currentTask: string | null
-  tokensUsed: number
-  startedAt: string | null
-  completedAt: string | null
-  error: string | null
-  parentAgentId: string | null
-  metadata: Record<string, unknown>
-  createdAt: string
+export interface Agent{
+ id:string
+ projectId:string
+ type:AgentType
+ phase?:0|1|2|3|4|5|6|7|8
+ status:AgentStatus
+ progress:number
+ currentTask:string|null
+ tokensUsed:number
+ startedAt:string|null
+ completedAt:string|null
+ error:string|null
+ parentAgentId:string|null
+ metadata:Record<string,unknown>
+ createdAt:string
 }
 
-export interface AgentMetrics {
-  agentId: string
-  agentType: AgentType
-  status: AgentStatus
-  progress: number
-  currentTask: string | null
-  tokensUsed: number
-  tokensEstimated: number
-  runtimeSeconds: number
-  estimatedRemainingSeconds: number
-  completedTasks: number
-  totalTasks: number
-  activeSubAgents: number
-  subAgentMetrics: AgentMetrics[]
+export interface AgentMetrics{
+ agentId:string
+ agentType:AgentType
+ status:AgentStatus
+ progress:number
+ currentTask:string|null
+ tokensUsed:number
+ tokensEstimated:number
+ runtimeSeconds:number
+ estimatedRemainingSeconds:number
+ completedTasks:number
+ totalTasks:number
+ activeSubAgents:number
+ subAgentMetrics:AgentMetrics[]
 }
 
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type LogLevel='debug'|'info'|'warn'|'error'
 
-export interface LogEntry {
-  id: string
-  agentId: string
-  level: LogLevel
-  message: string
-  metadata?: Record<string, unknown>
-  timestamp: string
+export interface LogEntry{
+ id:string
+ agentId:string
+ level:LogLevel
+ message:string
+ metadata?:Record<string,unknown>
+ timestamp:string
 }
 
-export interface AgentLogEntry {
-  id: string
-  timestamp: string
-  level: LogLevel
-  message: string
-  progress?: number
-  metadata?: Record<string, unknown>
+export interface AgentLogEntry{
+ id:string
+ timestamp:string
+ level:LogLevel
+ message:string
+ progress?:number
+ metadata?:Record<string,unknown>
 }
 
-export interface AgentOutput {
-  id: string
-  agentId: string
-  outputType: OutputType
-  content: Record<string, unknown> | null
-  filePath: string | null
-  tokensUsed: number
-  generationTimeMs: number
-  createdAt: string
+export interface AgentOutput{
+ id:string
+ agentId:string
+ outputType:OutputType
+ content:Record<string,unknown>|null
+ filePath:string|null
+ tokensUsed:number
+ generationTimeMs:number
+ createdAt:string
 }
 
-export type OutputType =
-  // Phase 1
-  | 'concept_doc'
-  | 'design_doc'
-  | 'scenario_doc'
-  | 'character_specs'
-  | 'world_design'
-  | 'task_breakdown'
-  // Phase 2
-  | 'code'
-  | 'asset_image'
-  | 'asset_audio'
-  // Phase 3
-  | 'build_result'
-  | 'test_result'
-  | 'review_result'
+export type OutputType=
+ |'concept_doc'
+ |'design_doc'
+ |'scenario_doc'
+ |'character_specs'
+ |'world_design'
+ |'task_breakdown'
+ |'code'
+ |'asset_image'
+ |'asset_audio'
+ |'build_result'
+ |'test_result'
+ |'review_result'
 
-// Quality Check Configuration
-export interface QualityCheckConfig {
-  enabled: boolean
-  maxRetries: number
-  isHighCost: boolean
+export interface QualityCheckConfig{
+ enabled:boolean
+ maxRetries:number
+ isHighCost:boolean
 }
 
-// Quality Check Result
-export interface QualityCheckResult {
-  passed: boolean
-  issues: string[]
-  score: number
-  retryNeeded: boolean
-  humanReviewNeeded: boolean
+export interface QualityCheckResult{
+ passed:boolean
+ issues:string[]
+ score:number
+ retryNeeded:boolean
+ humanReviewNeeded:boolean
 }

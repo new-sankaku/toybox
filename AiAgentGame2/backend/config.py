@@ -1,9 +1,3 @@
-"""
-Backend Configuration
-
-環境変数とデフォルト値の管理
-"""
-
 import os
 from dataclasses import dataclass
 from typing import Optional
@@ -11,7 +5,6 @@ from typing import Optional
 
 @dataclass
 class AgentConfig:
-    """エージェント設定"""
     mode: str = "testdata"  # "testdata" or "api"
     anthropic_api_key: Optional[str] = None
     model: str = "claude-sonnet-4-20250514"
@@ -20,7 +13,6 @@ class AgentConfig:
 
 @dataclass
 class ServerConfig:
-    """サーバー設定"""
     host: str = "127.0.0.1"
     port: int = 5000
     debug: bool = True
@@ -29,13 +21,11 @@ class ServerConfig:
 
 @dataclass
 class Config:
-    """全体設定"""
     agent: AgentConfig
     server: ServerConfig
 
 
 def load_config() -> Config:
-    """環境変数から設定をロード"""
     return Config(
         agent=AgentConfig(
             mode=os.environ.get("AGENT_MODE", "testdata"),
@@ -52,16 +42,13 @@ def load_config() -> Config:
     )
 
 
-# グローバル設定インスタンス
 config = load_config()
 
 
 def get_config() -> Config:
-    """設定を取得"""
     return config
 
 
 def reload_config():
-    """設定を再読み込み"""
     global config
     config = load_config()

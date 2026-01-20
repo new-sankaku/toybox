@@ -1,9 +1,3 @@
-"""
-Test Data Store and Generators
-フロントエンドテスト用のテストデータ管理
-リアルタイムシミュレーション対応
-"""
-
 import uuid
 import threading
 import time
@@ -16,8 +10,6 @@ from agent_settings import get_default_quality_settings, QualityCheckConfig
 
 
 class TestDataStore:
-    """In-memory data store for mock backend with real-time simulation"""
-
     def __init__(self):
         self.projects: Dict[str, Dict] = {}
         self.agents: Dict[str, Dict] = {}
@@ -40,11 +32,9 @@ class TestDataStore:
         self._init_sample_data()
 
     def set_sio(self, sio):
-        """Set Socket.IO instance for emitting events"""
         self._sio = sio
 
     def _emit_event(self, event: str, data: Dict, project_id: str):
-        """Emit WebSocket event to project subscribers"""
         if self._sio:
             try:
                 self._sio.emit(event, data, room=f"project:{project_id}")
@@ -52,8 +42,6 @@ class TestDataStore:
                 print(f"[TestDataStore] Error emitting {event}: {e}")
 
     def _init_sample_data(self):
-        """Initialize with single comprehensive project"""
-
         proj_id = "proj-001"
         now = datetime.now()
 
@@ -175,10 +163,7 @@ class TestDataStore:
             "activeGenerations": 0
         }
 
-    # ===== Simulation Engine =====
-
     def start_simulation(self):
-        """Start background simulation thread"""
         if self._simulation_running:
             return
 
@@ -188,14 +173,12 @@ class TestDataStore:
         print("[Simulation] Started")
 
     def stop_simulation(self):
-        """Stop background simulation"""
         self._simulation_running = False
         if self._simulation_thread:
             self._simulation_thread.join(timeout=2)
         print("[Simulation] Stopped")
 
     def _simulation_loop(self):
-        """Main simulation loop - runs every second"""
         while self._simulation_running:
             try:
                 with self._lock:
@@ -205,29 +188,19 @@ class TestDataStore:
             time.sleep(1)
 
     def _tick_simulation(self):
-        """Process one simulation tick for all running projects"""
         for project_id, project in list(self.projects.items()):
             if project["status"] == "running":
                 self._simulate_project(project_id)
 
-    # Workflow dependency graph
-    # Agent can only start when all its dependencies are completed
-    # L/W統合済み: Phase 2/4/5 のL/W対はLeader/Worker継続的ループチェックとして1ノードに統合
-    # タスク分割はP3/P4/P5の前にも配置
     WORKFLOW_DEPENDENCIES = {
-        # Phase 0: 企画
-        "concept": [],  # No dependencies, first agent
-        # Phase 1: タスク分割1
+        "concept": [],
         "task_split_1": ["concept"],
-        # Phase 2: 設計 (parallel after task_split_1) - L/W統合
         "concept_detail": ["task_split_1"],
         "scenario": ["task_split_1"],
         "world": ["task_split_1"],
         "game_design": ["task_split_1"],
         "tech_spec": ["task_split_1"],
-        # Phase 3: タスク分割2 (after all Phase 2 complete)
         "task_split_2": ["concept_detail", "scenario", "world", "game_design", "tech_spec"],
-        # Phase 3: アセット (parallel after task_split_2)
         "asset_character": ["task_split_2"],
         "asset_background": ["task_split_2"],
         "asset_ui": ["task_split_2"],
@@ -235,22 +208,17 @@ class TestDataStore:
         "asset_bgm": ["task_split_2"],
         "asset_voice": ["task_split_2"],
         "asset_sfx": ["task_split_2"],
-        # Phase 4: タスク分割3 (after all Phase 3 assets complete)
         "task_split_3": ["asset_character", "asset_background", "asset_ui", "asset_effect", "asset_bgm", "asset_voice", "asset_sfx"],
-        # Phase 4: 実装 (parallel after task_split_3) - L/W統合
         "code": ["task_split_3"],
         "event": ["task_split_3"],
         "ui_integration": ["task_split_3"],
         "asset_integration": ["task_split_3"],
-        # Phase 5: タスク分割4 (after all Phase 4 complete)
         "task_split_4": ["code", "event", "ui_integration", "asset_integration"],
-        # Phase 5: テスト (parallel after task_split_4) - L/W統合
         "unit_test": ["task_split_4"],
         "integration_test": ["task_split_4"],
     }
 
     def _can_start_agent(self, agent_type: str, agents: List[Dict]) -> bool:
-        """Check if an agent's dependencies are all completed"""
         dependencies = self.WORKFLOW_DEPENDENCIES.get(agent_type, [])
         for dep_type in dependencies:
             dep_agent = next((a for a in agents if a["type"] == dep_type), None)
@@ -259,12 +227,10 @@ class TestDataStore:
         return True
 
     def _get_next_agents_to_start(self, agents: List[Dict]) -> List[Dict]:
-        """Get all pending agents whose dependencies are satisfied"""
         pending = [a for a in agents if a["status"] == "pending"]
         return [a for a in pending if self._can_start_agent(a["type"], agents)]
 
     def _simulate_project(self, project_id: str):
-        """Simulate one tick for a project"""
         project = self.projects.get(project_id)
         if not project:
             return
@@ -295,7 +261,6 @@ class TestDataStore:
         self._update_project_metrics(project_id)
 
     def _start_agent(self, agent: Dict):
-        """Start an agent"""
         now = datetime.now()
         agent["status"] = "running"
         agent["progress"] = 0
@@ -315,36 +280,21 @@ class TestDataStore:
         }, agent["projectId"])
 
     def _simulate_agent(self, agent: Dict):
-        """Simulate one tick for a running agent"""
-        # Progress increment (2-5% per second)
         increment = random.randint(2, 5)
         new_progress = min(100, agent["progress"] + increment)
-
-        # Token increment (input: 30%, output: 70%)
         token_increment = random.randint(30, 80)
         input_increment = int(token_increment * 0.3)
         output_increment = token_increment - input_increment
         agent["tokensUsed"] += token_increment
         agent["inputTokens"] += input_increment
         agent["outputTokens"] += output_increment
-
-        # Check for milestone logs
         old_progress = agent["progress"]
         agent["progress"] = new_progress
-
-        # Update current task based on progress
         agent["currentTask"] = self._get_task_for_progress(agent["type"], new_progress)
-
-        # Add progress logs at milestones
         self._check_milestone_logs(agent, old_progress, new_progress)
-
-        # Check for checkpoint creation
         self._check_checkpoint_creation(agent, old_progress, new_progress)
-
-        # Check for asset generation
         self._check_asset_generation(agent, old_progress, new_progress)
 
-        # Emit WebSocket progress event
         self._emit_event("agent:progress", {
             "agentId": agent["id"],
             "projectId": agent["projectId"],
@@ -354,12 +304,10 @@ class TestDataStore:
             "message": f"進捗: {new_progress}%"
         }, agent["projectId"])
 
-        # Check completion
         if new_progress >= 100:
             self._complete_agent(agent)
 
     def _complete_agent(self, agent: Dict):
-        """Mark agent as completed"""
         now = datetime.now()
         agent["status"] = "completed"
         agent["progress"] = 100
@@ -378,7 +326,6 @@ class TestDataStore:
         }, agent["projectId"])
 
     def _check_milestone_logs(self, agent: Dict, old_progress: int, new_progress: int):
-        """Add logs at milestone progress points"""
         milestones = self._get_milestones(agent["type"])
 
         for milestone_progress, level, message in milestones:
@@ -388,7 +335,6 @@ class TestDataStore:
                     self._add_system_log(agent["projectId"], level, agent["type"], message)
 
     def _check_checkpoint_creation(self, agent: Dict, old_progress: int, new_progress: int):
-        """Create checkpoints at certain progress points"""
         checkpoint_points = self._get_checkpoint_points(agent["type"])
 
         for cp_progress, cp_type, cp_title in checkpoint_points:
@@ -400,7 +346,6 @@ class TestDataStore:
                     self._create_agent_checkpoint(agent, cp_type, cp_title)
 
     def _create_agent_checkpoint(self, agent: Dict, cp_type: str, title: str):
-        """Create a checkpoint for an agent"""
         checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
 
@@ -437,7 +382,6 @@ class TestDataStore:
         }, agent["projectId"])
 
     def _check_asset_generation(self, agent: Dict, old_progress: int, new_progress: int):
-        """Generate assets at certain progress points"""
         asset_points = self._get_asset_points(agent["type"])
 
         for point_progress, asset_type, asset_name, asset_size in asset_points:
@@ -450,7 +394,6 @@ class TestDataStore:
                     self._create_asset(agent, asset_type, asset_name, asset_size)
 
     def _create_asset(self, agent: Dict, asset_type: str, name: str, size: str):
-        """Create an asset"""
         project_id = agent["projectId"]
         if project_id not in self.assets:
             self.assets[project_id] = []
@@ -484,26 +427,21 @@ class TestDataStore:
         self._add_system_log(project_id, "info", display_name, f"アセット生成: {name}")
 
     def _random_duration(self) -> str:
-        """Generate random audio duration"""
         seconds = random.randint(5, 180)
         mins = seconds // 60
         secs = seconds % 60
         return f"{mins}:{secs:02d}"
 
     def _get_asset_points(self, agent_type: str) -> List[tuple]:
-        """Get asset generation points: (progress, type, name, size)"""
         assets = {
-            # Phase 0: 企画
             "concept": [
                 (50, "document", "concept_draft.md", "12KB"),
                 (90, "document", "concept_final.md", "28KB"),
             ],
-            # Phase 1: タスク分割
             "task_split_1": [
                 (50, "document", "task_breakdown.md", "25KB"),
                 (90, "document", "iteration_plan.md", "35KB"),
             ],
-            # Phase 2: 設計 (L/W統合)
             "concept_detail": [
                 (50, "document", "concept_detail_draft.md", "18KB"),
                 (90, "document", "concept_detail.md", "32KB"),
@@ -532,7 +470,6 @@ class TestDataStore:
                 (50, "document", "tech_spec_draft.md", "20KB"),
                 (90, "document", "tech_spec.md", "38KB"),
             ],
-            # Phase 3: アセット
             "asset_character": [
                 (35, "image", "ball_concept.png", "156KB"),
                 (50, "image", "ball_sprite_sheet.png", "512KB"),
@@ -540,7 +477,6 @@ class TestDataStore:
                 (80, "image", "boss_enemy.png", "445KB"),
                 (95, "document", "character_specs.md", "18KB"),
             ],
-            # Phase 4: 実装 (L/W統合)
             "code": [
                 (30, "document", "main.ts", "8KB"),
                 (60, "document", "utils.ts", "4KB"),
@@ -550,16 +486,11 @@ class TestDataStore:
         return assets.get(agent_type, [])
 
     def _get_generation_type(self, agent_type: str) -> str:
-        """エージェントタイプから生成タイプを判定"""
-        # LLM（企画・設計・コード・テスト）
         llm_types = ['concept', 'task_split_1', 'concept_detail', 'game_design', 'tech_spec',
                      'code', 'event', 'ui_integration', 'asset_integration',
                      'unit_test', 'integration_test']
-        # 画像生成
         image_types = ['asset_character', 'asset_background', 'asset_ui', 'asset_effect']
-        # 音楽・SE生成
         audio_types = ['world', 'asset_bgm', 'asset_voice', 'asset_sfx']
-        # セリフ・シナリオ
         dialogue_types = ['scenario']
 
         if agent_type in dialogue_types:
@@ -571,19 +502,14 @@ class TestDataStore:
         return 'llm'
 
     def _update_project_metrics(self, project_id: str):
-        """Update project metrics"""
         agents = [a for a in self.agents.values() if a["projectId"] == project_id]
 
         total_input = sum(a.get("inputTokens", 0) for a in agents)
         total_output = sum(a.get("outputTokens", 0) for a in agents)
         completed_count = len([a for a in agents if a["status"] == "completed"])
         total_count = len(agents)
-
-        # Calculate overall progress
         total_progress = sum(a["progress"] for a in agents)
         overall_progress = int(total_progress / total_count) if total_count > 0 else 0
-
-        # 生成タイプ別のトークン使用量を計算 (input/output別)
         tokens_by_type = {}
         for agent in agents:
             gen_type = self._get_generation_type(agent["type"])
@@ -592,7 +518,6 @@ class TestDataStore:
             tokens_by_type[gen_type]["input"] += agent.get("inputTokens", 0)
             tokens_by_type[gen_type]["output"] += agent.get("outputTokens", 0)
 
-        # Time estimation
         running_agent = next((a for a in agents if a["status"] == "running"), None)
         if running_agent and running_agent["progress"] > 0:
             elapsed = (datetime.now() - datetime.fromisoformat(running_agent["startedAt"])).total_seconds()
@@ -603,7 +528,6 @@ class TestDataStore:
         else:
             estimated_remaining = 0
 
-        # Count active generations (running agents doing LLM work)
         active_generations = len([a for a in agents if a["status"] == "running"])
 
         self.metrics[project_id] = {
@@ -847,7 +771,6 @@ class TestDataStore:
         return current_task
 
     def _get_milestones(self, agent_type: str) -> List[tuple]:
-        """Get log milestones for agent type: (progress, level, message)"""
         milestones = {
             # Phase 0: 企画
             "concept": [
@@ -1019,7 +942,6 @@ class TestDataStore:
         return milestones.get(agent_type, [])
 
     def _get_checkpoint_points(self, agent_type: str) -> List[tuple]:
-        """Get checkpoint creation points: (progress, type, title)"""
         checkpoints = {
             # Phase 0: 企画
             "concept": [
@@ -1082,7 +1004,6 @@ class TestDataStore:
         return checkpoints.get(agent_type, [])
 
     def _generate_checkpoint_content(self, agent_type: str, cp_type: str) -> str:
-        """Generate checkpoint content"""
         contents = {
             "concept_review": """# ゲームコンセプト
 
@@ -1155,10 +1076,7 @@ class TestDataStore:
         }
         return contents.get(cp_type, f"# {cp_type}\n\n内容を確認してください。")
 
-    # ===== Log Management =====
-
     def _add_agent_log(self, agent_id: str, level: str, message: str, progress: Optional[int] = None):
-        """Add log entry to agent"""
         if agent_id not in self.agent_logs:
             self.agent_logs[agent_id] = []
 
@@ -1173,7 +1091,6 @@ class TestDataStore:
         self.agent_logs[agent_id].append(log_entry)
 
     def _add_system_log(self, project_id: str, level: str, source: str, message: str):
-        """Add system log entry"""
         if project_id not in self.system_logs:
             self.system_logs[project_id] = []
 
@@ -1186,8 +1103,6 @@ class TestDataStore:
             "details": None
         }
         self.system_logs[project_id].append(log_entry)
-
-    # ===== Project CRUD =====
 
     def get_projects(self) -> List[Dict]:
         with self._lock:
@@ -1240,7 +1155,6 @@ class TestDataStore:
             return False
 
     def start_project(self, project_id: str) -> Optional[Dict]:
-        """Start a project - begins simulation"""
         with self._lock:
             project = self.projects.get(project_id)
             if not project:
@@ -1253,7 +1167,6 @@ class TestDataStore:
             return project
 
     def pause_project(self, project_id: str) -> Optional[Dict]:
-        """Pause a project"""
         with self._lock:
             project = self.projects.get(project_id)
             if not project:
@@ -1266,7 +1179,6 @@ class TestDataStore:
             return project
 
     def resume_project(self, project_id: str) -> Optional[Dict]:
-        """Resume a paused project"""
         with self._lock:
             project = self.projects.get(project_id)
             if not project:
@@ -1279,7 +1191,6 @@ class TestDataStore:
             return project
 
     def initialize_project(self, project_id: str) -> Optional[Dict]:
-        """Initialize/reset a project - clears all agents, checkpoints, logs, assets, metrics"""
         with self._lock:
             project = self.projects.get(project_id)
             if not project:
@@ -1387,8 +1298,6 @@ class TestDataStore:
             print(f"[TestDataStore] Project {project_id} initialized")
             return project
 
-    # ===== Agent Operations =====
-
     def get_agents_by_project(self, project_id: str) -> List[Dict]:
         with self._lock:
             return [a for a in self.agents.values() if a["projectId"] == project_id]
@@ -1436,8 +1345,6 @@ class TestDataStore:
     def add_agent_log(self, agent_id: str, level: str, message: str, progress: Optional[int] = None):
         with self._lock:
             self._add_agent_log(agent_id, level, message, progress)
-
-    # ===== Checkpoint Operations =====
 
     def get_checkpoints_by_project(self, project_id: str) -> List[Dict]:
         with self._lock:
@@ -1519,13 +1426,9 @@ class TestDataStore:
                 self._add_system_log(project_id, "info", "System", "Phase 2: 実装 に移行しました")
                 print(f"[TestDataStore] Project {project_id} advanced to Phase 2")
 
-    # ===== System Logs =====
-
     def get_system_logs(self, project_id: str) -> List[Dict]:
         with self._lock:
             return self.system_logs.get(project_id, [])
-
-    # ===== Asset Operations =====
 
     def get_assets_by_project(self, project_id: str) -> List[Dict]:
         with self._lock:
@@ -1539,8 +1442,6 @@ class TestDataStore:
                     asset.update(data)
                     return asset
             return None
-
-    # ===== Metrics Operations =====
 
     def get_project_metrics(self, project_id: str) -> Optional[Dict]:
         with self._lock:
@@ -1566,8 +1467,6 @@ class TestDataStore:
             self.metrics[project_id].update(data)
             return self.metrics[project_id]
 
-    # ===== Subscription Management =====
-
     def add_subscription(self, project_id: str, sid: str):
         with self._lock:
             if project_id not in self.subscriptions:
@@ -1588,10 +1487,7 @@ class TestDataStore:
         with self._lock:
             return self.subscriptions.get(project_id, set()).copy()
 
-    # ===== Quality Settings Operations =====
-
     def get_quality_settings(self, project_id: str) -> Dict[str, QualityCheckConfig]:
-        """プロジェクトの品質チェック設定を取得"""
         with self._lock:
             if project_id not in self.quality_settings:
                 # デフォルト設定で初期化
@@ -1599,27 +1495,17 @@ class TestDataStore:
             return self.quality_settings[project_id].copy()
 
     def set_quality_setting(
-        self,
-        project_id: str,
-        agent_type: str,
-        config: QualityCheckConfig
+        self, project_id: str, agent_type: str, config: QualityCheckConfig
     ) -> None:
-        """単一エージェントの品質チェック設定を更新"""
         with self._lock:
             if project_id not in self.quality_settings:
                 self.quality_settings[project_id] = get_default_quality_settings()
             self.quality_settings[project_id][agent_type] = config
 
     def reset_quality_settings(self, project_id: str) -> None:
-        """プロジェクトの品質チェック設定をデフォルトにリセット"""
         with self._lock:
             self.quality_settings[project_id] = get_default_quality_settings()
 
-    def get_quality_setting_for_agent(
-        self,
-        project_id: str,
-        agent_type: str
-    ) -> QualityCheckConfig:
-        """特定エージェントの品質チェック設定を取得"""
+    def get_quality_setting_for_agent(self, project_id: str, agent_type: str) -> QualityCheckConfig:
         settings = self.get_quality_settings(project_id)
         return settings.get(agent_type, QualityCheckConfig())
