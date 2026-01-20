@@ -45,7 +45,8 @@ function getCategoryFromFile(file:File):FileCategory{
 function formatFileSize(bytes:number):string{
  if(bytes<1024)return`${bytes} B`
  if(bytes<1024*1024)return`${(bytes/1024).toFixed(1)} KB`
- return`${(bytes/(1024*1024)).toFixed(1)} MB`
+ if(bytes<1024*1024*1024)return`${(bytes/(1024*1024)).toFixed(1)} MB`
+ return`${(bytes/(1024*1024*1024)).toFixed(1)} GB`
 }
 
 export function FileUploader({
@@ -53,7 +54,7 @@ export function FileUploader({
  onFilesChange,
  disabled=false,
  maxFiles=20,
- maxSizeBytes=100*1024*1024
+ maxSizeBytes=4*1024*1024*1024
 }:FileUploaderProps){
  const[dragActive,setDragActive]=useState(false)
  const[error,setError]=useState<string|null>(null)

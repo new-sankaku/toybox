@@ -41,7 +41,7 @@ CATEGORY_MAP = {
     '7z': 'archive', 'rar': 'archive',
 }
 
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024  # 4GB
 
 
 def allowed_file(filename: str) -> bool:
