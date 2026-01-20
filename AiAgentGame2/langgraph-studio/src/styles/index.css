@@ -453,4 +453,243 @@
   .agent-card-wrapper {
     transition: transform 0.5s ease-out, opacity 0.3s ease-out;
   }
+
+  /* Navigator Overlay */
+  .navigator-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    cursor: pointer;
+    pointer-events: auto;
+    animation: navigator-fade-in 0.3s ease-out;
+  }
+
+  @keyframes navigator-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* Navigator Character - Right Bottom */
+  .navigator-character {
+    position: fixed;
+    right: 24px;
+    bottom: 100px;
+    width: 150px;
+    height: 150px;
+    animation: navigator-slide-in 0.4s ease-out;
+  }
+
+  @keyframes navigator-slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(50px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .navigator-frame {
+    width: 100%;
+    height: 100%;
+    background: var(--bg-panel);
+    border: 2px solid var(--border-dark);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .navigator-header {
+    background: var(--bg-header);
+    color: var(--text-header);
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  .navigator-diamond {
+    font-size: 8px;
+    opacity: 0.7;
+  }
+
+  .navigator-title {
+    font-weight: 500;
+  }
+
+  .navigator-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .navigator-status-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    animation: status-pulse 1.5s ease-in-out infinite;
+  }
+
+  @keyframes status-pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  .navigator-status-text {
+    font-size: 8px;
+    opacity: 0.8;
+  }
+
+  .navigator-portrait {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    background: var(--bg-main);
+    overflow: hidden;
+  }
+
+  .navigator-portrait-inner {
+    width: 80px;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .navigator-icon {
+    width: 100%;
+    height: 100%;
+    color: var(--text-main);
+  }
+
+  .navigator-scanline {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      rgba(69, 65, 56, 0.3),
+      transparent
+    );
+    animation: scanline 2s linear infinite;
+  }
+
+  @keyframes scanline {
+    from {
+      top: 0;
+    }
+    to {
+      top: 100%;
+    }
+  }
+
+  .navigator-footer {
+    background: var(--bg-panel);
+    padding: 4px 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-top: 1px solid var(--border-light);
+  }
+
+  .navigator-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border-dark);
+  }
+
+  .navigator-label {
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    color: var(--text-light);
+  }
+
+  /* Dialogue Bar - Bottom */
+  .dialogue-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    color: #fff;
+    padding: 16px 24px;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    animation: dialogue-slide-up 0.3s ease-out;
+  }
+
+  @keyframes dialogue-slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .dialogue-content {
+    max-width: 800px;
+  }
+
+  .dialogue-speaker {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    letter-spacing: 0.15em;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 8px;
+  }
+
+  .dialogue-diamond {
+    font-size: 10px;
+    opacity: 0.7;
+  }
+
+  .dialogue-text {
+    font-size: 16px;
+    letter-spacing: 0.05em;
+    line-height: 1.6 !important;
+  }
+
+  .dialogue-hint {
+    position: absolute;
+    right: 24px;
+    bottom: 16px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    letter-spacing: 0.1em;
+    animation: hint-blink 1.5s ease-in-out infinite;
+  }
+
+  @keyframes hint-blink {
+    0%, 100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.8;
+    }
+  }
 }
