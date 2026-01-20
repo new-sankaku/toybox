@@ -1,11 +1,12 @@
 import{useState,useEffect,useRef}from'react'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
+import{useNavigatorStore}from'@/stores/navigatorStore'
 import{logsApi,checkpointApi,metricsApi,agentApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiCheckpoint,type ApiProjectMetrics,type ApiAgent,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{formatNumber}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
-import{ChevronRight,ChevronLeft}from'lucide-react'
+import{ChevronRight,ChevronLeft,Radio}from'lucide-react'
 
 function formatTime(seconds:number):string{
  if(seconds<60)return`${Math.round(seconds)}秒`
@@ -31,6 +32,7 @@ function formatCost(tokens:number):string{
 export default function ActivitySidebar():JSX.Element{
  const{currentProject}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
+ const{showMessage}=useNavigatorStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
  const[metrics,setMetrics]=useState<ApiProjectMetrics|null>(null)
  const[agents,setAgents]=useState<ApiAgent[]>([])
@@ -164,8 +166,15 @@ export default function ActivitySidebar():JSX.Element{
      {isCollapsed?<ChevronLeft size={16}/>:<ChevronRight size={16}/>}
     </button>
     {!isCollapsed&&(
-     <div className="pr-3 text-nier-caption text-nier-text-light">
-      SUMMARY
+     <div className="flex items-center gap-2 pr-3">
+      <button
+       onClick={()=>showMessage('オペレーター','システム状態は正常です。全エージェントが稼働中。何かあればお知らせください。')}
+       className="p-1 hover:bg-nier-bg-hover transition-colors text-nier-text-light hover:text-nier-text-main"
+       title="オペレーター通信"
+      >
+       <Radio size={14}/>
+      </button>
+      <span className="text-nier-caption text-nier-text-light">SUMMARY</span>
      </div>
 )}
    </div>
