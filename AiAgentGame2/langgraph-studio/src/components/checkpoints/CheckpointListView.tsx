@@ -64,7 +64,7 @@ export default function CheckpointListView({
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">CHECKPOINTS</h1>
@@ -73,7 +73,7 @@ export default function CheckpointListView({
     <div className="nier-page-header-right"/>
    </div>
 
-   {/* Filters */}
+   {/*Filters*/}
    <Card className="mb-3">
     <CardContent className="py-1.5">
      <div className="flex items-center justify-between flex-wrap gap-3">
@@ -125,7 +125,7 @@ export default function CheckpointListView({
     </CardContent>
    </Card>
 
-   {/* Summary Stats */}
+   {/*Summary Stats*/}
    <div className="flex items-center gap-6 mb-3 text-nier-small text-nier-text-light">
     <span>
      総チェックポイント:<span className="text-nier-text-main">{statusCounts.all}</span>
@@ -142,7 +142,7 @@ export default function CheckpointListView({
     </span>
    </div>
 
-   {/* Checkpoint List */}
+   {/*Checkpoint List*/}
    {loading&&checkpoints.length===0?(
     <Card>
      <CardContent className="py-12 text-center">

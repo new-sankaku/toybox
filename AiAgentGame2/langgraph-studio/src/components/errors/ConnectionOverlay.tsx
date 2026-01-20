@@ -25,7 +25,7 @@ export function ConnectionOverlay({
  return(
   <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[250] flex items-center justify-center animate-nier-fade-in">
    <div className="bg-nier-bg-panel border border-nier-border-dark p-8 max-w-md w-full mx-4 text-center">
-    {/* Icon */}
+    {/*Icon*/}
     <div className="flex justify-center mb-6">
      {isReconnecting?(
       <div className="w-16 h-16 rounded-full bg-nier-accent-orange/20 flex items-center justify-center">
@@ -38,19 +38,19 @@ export function ConnectionOverlay({
 )}
     </div>
 
-    {/* Title */}
+    {/*Title*/}
     <h2 className="text-nier-h1 font-medium tracking-nier-wide mb-2">
      {isReconnecting?'RECONNECTING...' : 'CONNECTION LOST'}
     </h2>
 
-    {/* Message */}
+    {/*Message*/}
     <p className="text-nier-small text-nier-text-light mb-6">
      {isReconnecting
       ?`Attempting to restore connection (${reconnectAttempts}/${maxAttempts})...`
       : 'Unable to connect to the backend server. Please check your connection and try again.'}
     </p>
 
-    {/* Progress indicator for reconnecting */}
+    {/*Progress indicator for reconnecting*/}
     {isReconnecting&&(
      <div className="mb-6">
       <div className="flex justify-center gap-1">
@@ -68,7 +68,7 @@ export function ConnectionOverlay({
      </div>
 )}
 
-    {/* Actions */}
+    {/*Actions*/}
     {canRetry&&(
      <Button
       variant="primary"
@@ -80,7 +80,7 @@ export function ConnectionOverlay({
      </Button>
 )}
 
-    {/* Additional info */}
+    {/*Additional info*/}
     <p className="text-nier-caption text-nier-text-light mt-4">
      Your progress has been saved locally.
     </p>

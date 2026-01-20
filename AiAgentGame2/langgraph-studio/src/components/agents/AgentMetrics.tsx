@@ -30,7 +30,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
 )}
    <CardContent className={showHeader?'' : 'pt-4'}>
     <div className="space-y-4">
-     {/* Progress */}
+     {/*Progress*/}
      <div>
       <div className="flex items-center justify-between mb-1">
        <span className="text-nier-small text-nier-text-light">Progress</span>
@@ -39,9 +39,9 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
       <Progress value={metrics.progress}/>
      </div>
 
-     {/* Stats Grid */}
+     {/*Stats Grid*/}
      <div className="grid grid-cols-2 gap-3">
-      {/* Runtime */}
+      {/*Runtime*/}
       <div className="flex items-center gap-2 p-2 bg-nier-bg-main">
        <Clock size={16} className="text-nier-accent-blue"/>
        <div>
@@ -52,7 +52,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
        </div>
       </div>
 
-      {/* Tokens */}
+      {/*Tokens*/}
       <div className="flex items-center gap-2 p-2 bg-nier-bg-main">
        <Zap size={16} className="text-nier-accent-orange"/>
        <div>
@@ -63,7 +63,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
        </div>
       </div>
 
-      {/* Tasks */}
+      {/*Tasks*/}
       <div className="flex items-center gap-2 p-2 bg-nier-bg-main">
        <Cpu size={16} className="text-nier-accent-green"/>
        <div>
@@ -74,7 +74,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
        </div>
       </div>
 
-      {/* Completion Rate */}
+      {/*Completion Rate*/}
       <div className="flex items-center gap-2 p-2 bg-nier-bg-main">
        <TrendingUp size={16} className="text-nier-accent-yellow"/>
        <div>
@@ -86,7 +86,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
       </div>
      </div>
 
-     {/* Current Task */}
+     {/*Current Task*/}
      {metrics.currentTask&&(
       <div className="pt-3 border-t border-nier-border-light">
        <div className="text-nier-caption text-nier-text-light mb-1">
@@ -96,7 +96,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
       </div>
 )}
 
-     {/* Estimated Remaining */}
+     {/*Estimated Remaining*/}
      {metrics.estimatedRemainingSeconds>0&&(
       <div className="text-nier-caption text-nier-text-light text-center">
        Est. remaining: {formatTime(metrics.estimatedRemainingSeconds)}

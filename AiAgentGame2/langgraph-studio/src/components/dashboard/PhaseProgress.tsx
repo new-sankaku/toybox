@@ -117,7 +117,7 @@ export default function PhaseProgress():JSX.Element{
      </div>
 ) : (
      <>
-      {/* Phase Bars */}
+      {/*Phase Bars*/}
       {phases.map((phase)=>(
        <div key={phase.id} className="flex items-center gap-3">
         <span className={cn(
@@ -136,7 +136,7 @@ export default function PhaseProgress():JSX.Element{
        </div>
 ))}
 
-      {/* Current Agent */}
+      {/*Current Agent*/}
       {currentAgentName&&(
        <div className="pt-2 border-t border-nier-border-light">
         <div className="flex justify-between text-nier-caption mb-1">

@@ -147,7 +147,7 @@ export default function AgentListView({
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">AGENTS</h1>
@@ -156,7 +156,7 @@ export default function AgentListView({
     <div className="nier-page-header-right"/>
    </div>
 
-   {/* Filters */}
+   {/*Filters*/}
    <Card className="mb-3">
     <CardContent className="py-2">
      <div className="flex items-center gap-1 flex-wrap">
@@ -186,7 +186,7 @@ export default function AgentListView({
     </CardContent>
    </Card>
 
-   {/* Agent List */}
+   {/*Agent List*/}
    {loading&&agents.length===0?(
     <Card>
      <CardContent className="py-12 text-center">
@@ -214,7 +214,7 @@ export default function AgentListView({
     </div>
 )}
 
-   {/* Summary Stats */}
+   {/*Summary Stats*/}
    <Card className="mt-4">
     <CardContent className="py-2">
      <div className="flex items-center justify-between text-nier-small text-nier-text-light">

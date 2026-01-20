@@ -42,29 +42,29 @@ export interface ServiceZoneState{
 const SPIRIT_TYPES=['spirit_fire','spirit_water','spirit_earth','spirit_light','spirit_wind']as const
 
 export const AGENT_MODEL_MAP:Record<AgentType,string>={
- concept:SPIRIT_TYPES[0],// spirit_fire
- task_split_1:SPIRIT_TYPES[1],// spirit_water
- concept_detail:SPIRIT_TYPES[2],// spirit_earth
- scenario:SPIRIT_TYPES[3],// spirit_light
- world:SPIRIT_TYPES[4],// spirit_wind
- game_design:SPIRIT_TYPES[0],// spirit_fire
- tech_spec:SPIRIT_TYPES[1],// spirit_water
- task_split_2:SPIRIT_TYPES[2],// spirit_earth
- asset_character:SPIRIT_TYPES[3],// spirit_light
- asset_background:SPIRIT_TYPES[4],// spirit_wind
- asset_ui:SPIRIT_TYPES[0],// spirit_fire
- asset_effect:SPIRIT_TYPES[1],// spirit_water
- asset_bgm:SPIRIT_TYPES[2],// spirit_earth
- asset_voice:SPIRIT_TYPES[3],// spirit_light
- asset_sfx:SPIRIT_TYPES[4],// spirit_wind
- task_split_3:SPIRIT_TYPES[0],// spirit_fire
- code:SPIRIT_TYPES[1],// spirit_water
- event:SPIRIT_TYPES[2],// spirit_earth
- ui_integration:SPIRIT_TYPES[3],// spirit_light
- asset_integration:SPIRIT_TYPES[4],// spirit_wind
- task_split_4:SPIRIT_TYPES[0],// spirit_fire
- unit_test:SPIRIT_TYPES[1],// spirit_water
- integration_test:SPIRIT_TYPES[2]   // spirit_earth
+ concept:SPIRIT_TYPES[0],
+ task_split_1:SPIRIT_TYPES[1],
+ concept_detail:SPIRIT_TYPES[2],
+ scenario:SPIRIT_TYPES[3],
+ world:SPIRIT_TYPES[4],
+ game_design:SPIRIT_TYPES[0],
+ tech_spec:SPIRIT_TYPES[1],
+ task_split_2:SPIRIT_TYPES[2],
+ asset_character:SPIRIT_TYPES[3],
+ asset_background:SPIRIT_TYPES[4],
+ asset_ui:SPIRIT_TYPES[0],
+ asset_effect:SPIRIT_TYPES[1],
+ asset_bgm:SPIRIT_TYPES[2],
+ asset_voice:SPIRIT_TYPES[3],
+ asset_sfx:SPIRIT_TYPES[4],
+ task_split_3:SPIRIT_TYPES[0],
+ code:SPIRIT_TYPES[1],
+ event:SPIRIT_TYPES[2],
+ ui_integration:SPIRIT_TYPES[3],
+ asset_integration:SPIRIT_TYPES[4],
+ task_split_4:SPIRIT_TYPES[0],
+ unit_test:SPIRIT_TYPES[1],
+ integration_test:SPIRIT_TYPES[2]
 }
 
 export const SERVICE_CONFIG:Record<AIServiceType,{label:string;description:string}>={

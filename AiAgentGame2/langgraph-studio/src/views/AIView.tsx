@@ -407,7 +407,7 @@ export default function AIView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">AI</h1>
@@ -416,7 +416,7 @@ export default function AIView():JSX.Element{
     <div className="nier-page-header-right"/>
    </div>
 
-   {/* 2D AIフィールド */}
+   {/*2D AIフィールド*/}
    <Card className="mb-4">
     <CardContent className="p-0">
      <div className="h-[500px] rounded-lg overflow-hidden">
@@ -428,7 +428,7 @@ export default function AIView():JSX.Element{
     </CardContent>
    </Card>
 
-   {/* 選択されたキャラクターの詳細パネル */}
+   {/*選択されたキャラクターの詳細パネル*/}
    {selectedCharacter&&(
     <Card className="mt-4">
      <CardContent>

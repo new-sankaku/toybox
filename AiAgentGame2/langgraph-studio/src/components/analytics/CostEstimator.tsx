@@ -52,7 +52,7 @@ export default function CostEstimator({
     <DiamondMarker>コスト見積もり</DiamondMarker>
    </CardHeader>
    <CardContent className="space-y-6">
-    {/* Current Cost */}
+    {/*Current Cost*/}
     <div className="text-center py-4 bg-nier-bg-main">
      <div className="flex items-center justify-center gap-2 text-nier-small text-nier-text-light mb-2">
       <DollarSign size={16}/>
@@ -66,7 +66,7 @@ export default function CostEstimator({
      </div>
     </div>
 
-    {/* Budget Progress */}
+    {/*Budget Progress*/}
     <div>
      <div className="flex items-center justify-between mb-2 text-nier-small">
       <span className="text-nier-text-light">予算使用率</span>
@@ -95,7 +95,7 @@ export default function CostEstimator({
      </div>
     </div>
 
-    {/* Estimated Final */}
+    {/*Estimated Final*/}
     <div className={cn(
      'p-3',
      willExceedBudget?'bg-nier-accent-red/10' : 'bg-nier-bg-main'
@@ -120,7 +120,7 @@ export default function CostEstimator({
 )}
     </div>
 
-    {/* Cost Breakdown */}
+    {/*Cost Breakdown*/}
     <div className="pt-4 border-t border-nier-border-light">
      <div className="flex items-center gap-2 mb-3 text-nier-small text-nier-text-light">
       <Calculator size={14}/>
@@ -146,7 +146,7 @@ export default function CostEstimator({
      </div>
     </div>
 
-    {/* Pricing Info */}
+    {/*Pricing Info*/}
     <div className="text-nier-caption text-nier-text-light">
      <p>*Claude APIの価格に基づいて計算</p>
      <p>*入力: $0.003/1K tokens,出力: $0.015/1K tokens</p>

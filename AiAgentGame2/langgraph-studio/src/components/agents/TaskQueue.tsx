@@ -8,7 +8,7 @@ export interface QueuedTask{
  description?:string
  status:'queued'|'running'|'completed'|'failed'
  priority?:'high'|'normal'|'low'
- estimatedTime?:number // seconds
+ estimatedTime?:number
  startedAt?:string
  completedAt?:string
 }
@@ -86,7 +86,7 @@ export function TaskQueue({
           config.bg
 )}
         >
-         {/* Queue number/Status icon */}
+         {/*Queue number/Status icon*/}
          <div className="flex-shrink-0 w-8 flex justify-center">
           {task.status==='queued'?(
            <span className="text-nier-small text-nier-text-light">
@@ -103,7 +103,7 @@ export function TaskQueue({
 )}
          </div>
 
-         {/* Priority indicator */}
+         {/*Priority indicator*/}
          {task.priority&&(
           <div
            className={cn(
@@ -113,7 +113,7 @@ export function TaskQueue({
           />
 )}
 
-         {/* Task info */}
+         {/*Task info*/}
          <div className="flex-1 min-w-0">
           <div className="text-nier-small font-medium truncate">
            {task.name}
@@ -125,7 +125,7 @@ export function TaskQueue({
 )}
          </div>
 
-         {/* Estimated time */}
+         {/*Estimated time*/}
          {task.estimatedTime&&task.status==='queued'&&(
           <span className="text-nier-caption text-nier-text-light flex-shrink-0">
            ~{Math.ceil(task.estimatedTime/60)}m
@@ -137,7 +137,7 @@ export function TaskQueue({
      </div>
 )}
 
-    {/* Hidden count */}
+    {/*Hidden count*/}
     {hiddenCount>0&&(
      <div className="px-4 py-2 text-center border-t border-nier-border-light">
       <span className="text-nier-caption text-nier-text-light">

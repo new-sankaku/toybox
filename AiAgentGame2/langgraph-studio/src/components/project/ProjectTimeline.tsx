@@ -58,17 +58,17 @@ export function ProjectTimeline({currentPhase,phases,vertical=false}:ProjectTime
    <div className="space-y-0">
     {timelinePhases.map((phase,index)=>(
      <div key={phase.phase} className="relative flex gap-4">
-      {/* Line */}
+      {/*Line*/}
       {index<timelinePhases.length-1&&(
        <div className="absolute left-[15px] top-8 w-0.5 h-full bg-nier-border-dark"/>
 )}
 
-      {/* Icon */}
+      {/*Icon*/}
       <div className="relative z-10 flex-shrink-0">
        <PhaseIcon status={phase.status}/>
       </div>
 
-      {/* Content */}
+      {/*Content*/}
       <div className="pb-8 flex-1">
        <div className="flex items-center gap-2 mb-1">
         <span className="text-nier-small font-medium tracking-nier">
@@ -102,12 +102,12 @@ export function ProjectTimeline({currentPhase,phases,vertical=false}:ProjectTime
   <div className="flex items-start">
    {timelinePhases.map((phase,index)=>(
     <div key={phase.phase} className="flex-1 relative">
-     {/* Connector line */}
+     {/*Connector line*/}
      {index<timelinePhases.length-1&&(
       <div className="absolute top-4 left-1/2 w-full h-0.5 bg-nier-border-dark"/>
 )}
 
-     {/* Phase content */}
+     {/*Phase content*/}
      <div className="relative flex flex-col items-center text-center px-2">
       <PhaseIcon status={phase.status}/>
       <div className="mt-3">

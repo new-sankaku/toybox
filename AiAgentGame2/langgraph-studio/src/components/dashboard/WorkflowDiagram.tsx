@@ -25,8 +25,8 @@ interface AgentNodeDef{
  id:string
  type:AgentType
  label:string
- phase:number  // 0-8
- hasLW?:boolean  // Leader/Worker continuous loop check
+ phase:number
+ hasLW?:boolean
 }
 
 const AGENT_NODES:AgentNodeDef[]=[
@@ -102,18 +102,18 @@ interface LayoutConfig{
  fontSize:number
 }
 
-const MAX_LABEL_LENGTH=Math.max(...AGENT_NODES.map(n=>n.label.length))  // 7 characters (e.g., コンセプト詳細, ゲームデザイン)
+const MAX_LABEL_LENGTH=Math.max(...AGENT_NODES.map(n=>n.label.length))
 
 function calculateLayoutConfig(containerWidth:number,containerHeight:number):LayoutConfig{
  const NUM_PHASES=9
- const MAX_NODES_IN_PHASE=7  // Phase 4 (アセット) has 7 nodes
+ const MAX_NODES_IN_PHASE=7
  const MIN_NODE_HEIGHT=28
  const MAX_NODE_HEIGHT=60
  const MIN_FONT_SIZE=9
  const MAX_FONT_SIZE=14
- const NODE_PADDING_X=12  // Horizontal padding inside node
+ const NODE_PADDING_X=12
 
- const availableHeight=containerHeight-40  // Reserve space for padding
+ const availableHeight=containerHeight-40
  const availableWidth=containerWidth-40
 
  const verticalFactor=MAX_NODES_IN_PHASE+0.2*(MAX_NODES_IN_PHASE-1)+0.6
@@ -125,7 +125,7 @@ function calculateLayoutConfig(containerWidth:number,containerHeight:number):Lay
 
  const maxFontSizeForWidth=(nodeWidth-NODE_PADDING_X*2)/MAX_LABEL_LENGTH
 
- const maxFontSizeForHeight=(nodeHeight-8)/1.5  // Leave room for padding and potential progress bar
+ const maxFontSizeForHeight=(nodeHeight-8)/1.5
 
  let fontSize=Math.min(maxFontSizeForWidth,maxFontSizeForHeight)
  fontSize=Math.max(MIN_FONT_SIZE,Math.min(MAX_FONT_SIZE,fontSize))
@@ -298,7 +298,7 @@ function AgentNode({data }:{data:AgentNodeData}){
     boxShadow:isRunning?`0 0 8px ${style.border}` : isWaitingApproval?`0 0 6px ${style.border}` : 'none',
    }}
   >
-   {/* Connection handles-invisible but needed for edge connections */}
+   {/*Connection handles-invisible but needed for edge connections*/}
    <Handle type="target" position={Position.Left} id="left" style={{opacity:0,width:1,height:1}}/>
    <Handle type="target" position={Position.Top} id="top" style={{opacity:0,width:1,height:1}}/>
    <Handle type="source" position={Position.Right} id="right" style={{opacity:0,width:1,height:1}}/>
@@ -323,7 +323,7 @@ function AgentNode({data }:{data:AgentNodeData}){
 )}
     </div>
 )}
-   {/* L/W indicator in bottom right */}
+   {/*L/W indicator in bottom right*/}
    {data.hasLW&&(
     <div
      className="absolute"
@@ -670,7 +670,7 @@ export default function WorkflowDiagram():JSX.Element{
      <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize}/>
     </ReactFlowProvider>
 
-    {/* Legend-compact */}
+    {/*Legend-compact*/}
     <div className="flex items-center justify-center gap-4 py-2 border-t border-nier-border-light text-nier-caption text-nier-text-light">
      <div className="flex items-center gap-1">
       <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm"/>

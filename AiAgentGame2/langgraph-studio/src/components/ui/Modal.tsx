@@ -63,7 +63,7 @@ export function Modal({
     className={cn('nier-modal',sizeClasses[size],'w-full mx-4')}
     onClick={(e)=>e.stopPropagation()}
    >
-    {/* Header */}
+    {/*Header*/}
     {title&&(
      <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-3">
       <h2 className="text-nier-h2 tracking-nier-wide">{title}</h2>
@@ -78,12 +78,12 @@ export function Modal({
      </div>
 )}
 
-    {/* Content */}
+    {/*Content*/}
     <div className="p-6 max-h-[60vh] overflow-y-auto">
      {children}
     </div>
 
-    {/* Footer */}
+    {/*Footer*/}
     {footer&&(
      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-nier-border-light bg-nier-bg-selected/50">
       {footer}

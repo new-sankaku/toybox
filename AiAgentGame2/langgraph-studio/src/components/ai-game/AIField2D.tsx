@@ -34,7 +34,7 @@ interface CharacterPosition{
  targetY:number
  wanderTimer:number
  rotation:number
- wasWorking:boolean  // Track previous working state
+ wasWorking:boolean
 }
 
 export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIField2DProps):JSX.Element{

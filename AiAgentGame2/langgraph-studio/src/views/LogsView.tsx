@@ -148,7 +148,7 @@ export default function LogsView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">LOGS</h1>
@@ -157,11 +157,11 @@ export default function LogsView():JSX.Element{
     <div className="nier-page-header-right"/>
    </div>
 
-   {/* Filters */}
+   {/*Filters*/}
    <Card className="mb-3">
     <CardContent className="py-3">
      <div className="space-y-3">
-      {/* Level Filter Row */}
+      {/*Level Filter Row*/}
       <div className="flex items-center justify-between flex-wrap gap-2">
        <div className="flex items-center gap-1 flex-wrap">
         {(['all','error','warn','info','debug']as LogLevel[]).map(level=>(
@@ -197,7 +197,7 @@ export default function LogsView():JSX.Element{
        </div>
       </div>
 
-      {/* Agent Filter Row */}
+      {/*Agent Filter Row*/}
       <div className="flex items-center gap-2 flex-wrap border-t border-nier-border-light pt-3">
        <span className="text-nier-caption text-nier-text-light mr-2">エージェント:</span>
        <button
@@ -231,7 +231,7 @@ export default function LogsView():JSX.Element{
    </Card>
 
    <div className="grid grid-cols-3 gap-3">
-    {/* Log List */}
+    {/*Log List*/}
     <div className="col-span-2">
      <Card>
       <CardHeader>
@@ -286,7 +286,7 @@ export default function LogsView():JSX.Element{
      </Card>
     </div>
 
-    {/* Log Details */}
+    {/*Log Details*/}
     <div>
      <Card>
       <CardHeader>
@@ -330,7 +330,7 @@ export default function LogsView():JSX.Element{
       </CardContent>
      </Card>
 
-     {/* Stats */}
+     {/*Stats*/}
      <Card className="mt-4">
       <CardHeader>
        <DiamondMarker>統計</DiamondMarker>

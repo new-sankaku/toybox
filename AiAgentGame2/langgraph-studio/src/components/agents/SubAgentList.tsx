@@ -74,7 +74,7 @@ export function SubAgentList({
 )}
         onClick={()=>onSelectAgent?.(agent)}
        >
-        {/* Status Icon */}
+        {/*Status Icon*/}
         <Icon
          size={16}
          className={cn(
@@ -83,7 +83,7 @@ export function SubAgentList({
 )}
         />
 
-        {/* Info */}
+        {/*Info*/}
         <div className="flex-1 min-w-0">
          <div className="flex items-center gap-2">
           <span className="text-nier-small font-medium truncate">
@@ -94,14 +94,14 @@ export function SubAgentList({
           </span>
          </div>
 
-         {/* Progress for running agents */}
+         {/*Progress for running agents*/}
          {agent.status==='running'&&(
           <div className="mt-1">
            <Progress value={agent.progress} size="sm"/>
           </div>
 )}
 
-         {/* Current task */}
+         {/*Current task*/}
          {agent.currentTask&&(
           <p className="text-nier-caption text-nier-text-light truncate mt-0.5">
            {agent.currentTask}
@@ -109,12 +109,12 @@ export function SubAgentList({
 )}
         </div>
 
-        {/* Progress percentage */}
+        {/*Progress percentage*/}
         <div className="text-nier-caption text-nier-text-light">
          {Math.round(agent.progress)}%
         </div>
 
-        {/* Arrow */}
+        {/*Arrow*/}
         {onSelectAgent&&(
          <ChevronRight size={16} className="text-nier-text-light"/>
 )}

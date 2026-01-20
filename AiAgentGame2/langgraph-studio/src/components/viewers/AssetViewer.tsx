@@ -11,8 +11,8 @@ export interface Asset{
  url:string
  mimeType:string
  dimensions?:{width:number;height:number}
- duration?:number // seconds for audio
- size?:number // bytes
+ duration?:number
+ size?:number
  createdAt?:string
 }
 
@@ -54,7 +54,7 @@ export function AssetViewer({asset,onDownload}:AssetViewerProps){
       <span className="text-nier-small">{asset.name}</span>
      </div>
 
-     {/* Controls */}
+     {/*Controls*/}
      <div className="flex items-center gap-1">
       {asset.type==='image'&&(
        <>
@@ -108,7 +108,7 @@ export function AssetViewer({asset,onDownload}:AssetViewerProps){
    </CardHeader>
 
    <CardContent className="p-0">
-    {/* Image Viewer */}
+    {/*Image Viewer*/}
     {asset.type==='image'&&(
      <div className="relative overflow-auto bg-nier-bg-main" style={{maxHeight:'400px'}}>
       <div
@@ -125,7 +125,7 @@ export function AssetViewer({asset,onDownload}:AssetViewerProps){
      </div>
 )}
 
-    {/* Audio Player */}
+    {/*Audio Player*/}
     {asset.type==='audio'&&(
      <div className="p-6 bg-nier-bg-main">
       <div className="flex items-center gap-4">
@@ -137,7 +137,7 @@ export function AssetViewer({asset,onDownload}:AssetViewerProps){
         {isPlaying?<Pause size={18}/>:<Play size={18}/>}
        </Button>
 
-       {/* Waveform placeholder */}
+       {/*Waveform placeholder*/}
        <div className="flex-1 h-12 bg-nier-bg-selected flex items-center justify-center">
         <div className="flex items-end gap-0.5 h-8">
          {Array.from({length:40}).map((_,i)=>(
@@ -170,7 +170,7 @@ export function AssetViewer({asset,onDownload}:AssetViewerProps){
      </div>
 )}
 
-    {/* Meta Info */}
+    {/*Meta Info*/}
     <div className="px-4 py-2 border-t border-nier-border-light flex items-center justify-between text-nier-caption text-nier-text-light">
      <div className="flex items-center gap-4">
       {asset.dimensions&&(

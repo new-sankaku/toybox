@@ -54,7 +54,7 @@ export default function TokenTracker({
     <DiamondMarker>Token使用量</DiamondMarker>
    </CardHeader>
    <CardContent className="space-y-6">
-    {/* Overall Progress */}
+    {/*Overall Progress*/}
     <div>
      <div className="flex items-center justify-between mb-2">
       <span className="text-nier-small text-nier-text-light flex items-center gap-2">
@@ -67,7 +67,7 @@ export default function TokenTracker({
      </div>
      <div className="relative">
       <Progress value={usagePercent}/>
-      {/* Estimated marker */}
+      {/*Estimated marker*/}
       <div
        className="absolute top-0 h-full w-0.5 bg-nier-accent-orange"
        style={{left:`${Math.min(estimatedPercent,100)}%`}}
@@ -82,7 +82,7 @@ export default function TokenTracker({
      </div>
     </div>
 
-    {/* Agent Breakdown */}
+    {/*Agent Breakdown*/}
     <div>
      <div className="flex items-center gap-2 mb-3 text-nier-small text-nier-text-light">
       <span className="w-3 h-0.5 bg-nier-accent-blue"/>
@@ -119,7 +119,7 @@ export default function TokenTracker({
      </div>
     </div>
 
-    {/* Usage Stats */}
+    {/*Usage Stats*/}
     <div className="pt-4 border-t border-nier-border-light">
      <div className="grid grid-cols-2 gap-4">
       <div>

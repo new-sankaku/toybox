@@ -64,7 +64,7 @@ export function ProjectCard({project,onSelect,isSelected}:ProjectCardProps){
      </Badge>
     </div>
 
-    {/* Progress */}
+    {/*Progress*/}
     <div className="mb-3">
      <div className="flex items-center justify-between mb-1">
       <span className="text-nier-caption text-nier-text-light">
@@ -77,7 +77,7 @@ export function ProjectCard({project,onSelect,isSelected}:ProjectCardProps){
      <Progress value={progress}/>
     </div>
 
-    {/* Meta */}
+    {/*Meta*/}
     <div className="flex items-center justify-between text-nier-caption text-nier-text-light">
      <span>
       Created: {new Date(project.createdAt).toLocaleDateString()}

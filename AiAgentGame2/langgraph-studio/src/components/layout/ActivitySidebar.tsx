@@ -22,7 +22,7 @@ function formatTokenCount(count:number):string{
 }
 
 function formatCost(tokens:number):string{
- const cost=tokens*0.00001 // $0.01 per 1k tokens
+ const cost=tokens*0.00001
  if(cost<0.01)return`${cost.toFixed(4)}`
  if(cost<1)return`${cost.toFixed(2)}`
  return`${cost.toFixed(2)}`
@@ -155,7 +155,7 @@ export default function ActivitySidebar():JSX.Element{
    'bg-nier-bg-panel border-l border-nier-border-light flex flex-col transition-all duration-200',
    isCollapsed?'w-10' : 'w-64'
 )}>
-   {/* Header */}
+   {/*Header*/}
    <div className="flex items-center justify-between border-b border-nier-border-light">
     <button
      onClick={()=>setIsCollapsed(!isCollapsed)}
@@ -172,7 +172,7 @@ export default function ActivitySidebar():JSX.Element{
 
    {!isCollapsed&&(
     <>
-     {/* Project Status-Compact */}
+     {/*Project Status-Compact*/}
      <div className="px-2 py-1.5 border-b border-nier-border-light">
       <div className="flex items-center justify-between">
        <div className="text-nier-caption truncate flex-1">{currentProject.name}</div>
@@ -194,7 +194,7 @@ export default function ActivitySidebar():JSX.Element{
 )}
      </div>
 
-     {/* Summary List */}
+     {/*Summary List*/}
      <div className="px-2 py-1.5 text-[10px] space-y-0.5">
       <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">Token</span>

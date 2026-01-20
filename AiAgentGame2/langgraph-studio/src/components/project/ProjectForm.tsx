@@ -79,7 +79,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
 
  return(
   <form onSubmit={handleSubmit} className="space-y-6">
-   {/* Basic Info */}
+   {/*Basic Info*/}
    <Panel title="PROJECT INFORMATION">
     <div className="space-y-4">
      <Input
@@ -101,7 +101,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     </div>
    </Panel>
 
-   {/* Game Concept */}
+   {/*Game Concept*/}
    <Panel title="GAME CONCEPT">
     <div className="space-y-4">
      <Textarea
@@ -140,7 +140,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     </div>
    </Panel>
 
-   {/* Actions */}
+   {/*Actions*/}
    <div className="flex items-center justify-end gap-3">
     {onCancel&&(
      <Button type="button" variant="ghost" onClick={onCancel} disabled={isLoading}>

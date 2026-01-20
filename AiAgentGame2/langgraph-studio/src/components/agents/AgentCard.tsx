@@ -8,7 +8,7 @@ interface AgentCardProps{
  onSelect:(agent:Agent)=>void
  isSelected?:boolean
  qualityCheckConfig?:QualityCheckConfig
- /** 待機中の場合、何を待っているかの説明 */
+ /**待機中の場合、何を待っているかの説明*/
  waitingFor?:string
 }
 
@@ -57,13 +57,13 @@ const getAgentRole=(type:string):{role:string}=>{
   return{role:'Worker'}
  }
  if(type==='integrator'){
-  return{role:'Leader'}  // Coordinates integration
+  return{role:'Leader'}
  }
  if(type==='tester'){
-  return{role:'Worker'}  // Executes tests
+  return{role:'Worker'}
  }
  if(type==='reviewer'){
-  return{role:'Leader'}  // Reviews and approves
+  return{role:'Leader'}
  }
  if(['concept','design','scenario','character','world','task_split'].includes(type)){
   return{role:'Leader'}
@@ -119,20 +119,20 @@ export function AgentCard({
 )}
    onClick={()=>onSelect(agent)}
   >
-   {/* Grid Layout for aligned columns */}
+   {/*Grid Layout for aligned columns*/}
    <div className="grid grid-cols-[4px_55px_180px_1fr_140px_auto] items-center gap-2">
-    {/* Col 1: Status Indicator */}
+    {/*Col 1: Status Indicator*/}
     <div className={cn(
      'w-1 h-6 bg-nier-border-dark transition-opacity',
      status.pulse&&'animate-pulse'
 )}/>
 
-    {/* Col 2: Role badge */}
+    {/*Col 2: Role badge*/}
     <span className="text-nier-caption text-nier-text-light">
      [{agentRole.role}]
     </span>
 
-    {/* Col 3: Agent Type */}
+    {/*Col 3: Agent Type*/}
     <div className="flex items-center gap-1.5 min-w-0">
      <Cpu size={12} className="text-nier-text-light flex-shrink-0"/>
      <span className="text-nier-small font-medium text-nier-text-main truncate">
@@ -140,7 +140,7 @@ export function AgentCard({
      </span>
     </div>
 
-    {/* Col 4: Task/Status Text */}
+    {/*Col 4: Task/Status Text*/}
     <div className="flex items-center gap-2 min-w-0 pl-4">
      {isUsingLLM&&(
       <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中"/>
@@ -150,7 +150,7 @@ export function AgentCard({
      </span>
     </div>
 
-    {/* Col 5: Progress Bar+Time */}
+    {/*Col 5: Progress Bar+Time*/}
     <div className="flex items-center gap-2">
      {agent.status==='running'?(
       <>
@@ -168,12 +168,12 @@ export function AgentCard({
      </span>
     </div>
 
-    {/* Col 6: Right side info */}
+    {/*Col 6: Right side info*/}
     <div className="flex items-center gap-3">
      <span className="text-nier-caption text-nier-text-light w-14 text-right">
       {agent.tokensUsed.toLocaleString()}tk
      </span>
-     {/* Quality Check Badge */}
+     {/*Quality Check Badge*/}
      {qualityCheckConfig&&(
       <span
        className="text-nier-caption text-nier-text-light flex items-center gap-1"

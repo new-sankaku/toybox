@@ -35,7 +35,7 @@ export function ApprovalButtons({
     isHorizontal?'flex items-center gap-3' : 'space-y-3'
 )}
   >
-   {/* Approve Button */}
+   {/*Approve Button*/}
    <Button
     variant="success"
     className={buttonClasses}
@@ -46,7 +46,7 @@ export function ApprovalButtons({
     {!isHorizontal&&<span>承認</span>}
    </Button>
 
-   {/* Request Changes Button */}
+   {/*Request Changes Button*/}
    <Button
     className={buttonClasses}
     onClick={onRequestChanges}
@@ -56,7 +56,7 @@ export function ApprovalButtons({
     {!isHorizontal&&<span>変更を要求</span>}
    </Button>
 
-   {/* Reject Button */}
+   {/*Reject Button*/}
    <Button
     variant="danger"
     className={buttonClasses}
@@ -67,7 +67,7 @@ export function ApprovalButtons({
     {!isHorizontal&&<span>却下</span>}
    </Button>
 
-   {/* Add Comment Button (Optional) */}
+   {/*Add Comment Button (Optional)*/}
    {onAddComment&&!isHorizontal&&(
     <Button
      variant="ghost"

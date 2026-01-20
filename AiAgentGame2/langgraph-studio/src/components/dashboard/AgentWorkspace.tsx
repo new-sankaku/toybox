@@ -8,34 +8,34 @@ import{agentApi}from'@/services/apiService'
 import type{Agent,AgentStatus}from'@/types/agent'
 
 type CharacterType=
- |'wizard'    // ボス-魔法使い
- |'knight'    // 分配係1-騎士
- |'ninja'     // 分配係2-忍者
- |'samurai'   // 分配係3-侍
- |'archer'    // 分配係4-弓使い
- |'princess'  // 企画-姫
- |'bard'      // シナリオ-吟遊詩人
- |'druid'     // 世界観-ドルイド
- |'alchemist' // デザイン-錬金術師
- |'engineer'  // テック-エンジニア
- |'cat'       // キャラアセット-猫
- |'owl'       // 背景アセット-フクロウ
- |'fox'       // UIアセット-キツネ
- |'fairy'     // エフェクト-妖精
- |'phoenix'   // BGM-不死鳥
- |'mermaid'   // ボイス-人魚
- |'wolf'      // 効果音-オオカミ
- |'golem'     // コード-ゴーレム
- |'puppet'    // イベント-人形
- |'clockwork' // UI統合-機械仕掛け
- |'mech'      // アセット統合-メカ
- |'dragon'    // テスト1-ドラゴン
- |'turtle'    // テスト2-亀
+ |'wizard'
+ |'knight'
+ |'ninja'
+ |'samurai'
+ |'archer'
+ |'princess'
+ |'bard'
+ |'druid'
+ |'alchemist'
+ |'engineer'
+ |'cat'
+ |'owl'
+ |'fox'
+ |'fairy'
+ |'phoenix'
+ |'mermaid'
+ |'wolf'
+ |'golem'
+ |'puppet'
+ |'clockwork'
+ |'mech'
+ |'dragon'
+ |'turtle'
 
 interface AgentDisplayConfig{
  label:string
- bodyColor:string    // メインカラー
- accentColor:string  // アクセントカラー
+ bodyColor:string
+ accentColor:string
  characterType:CharacterType
 }
 
@@ -124,7 +124,7 @@ function PixelAvatar({
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY,2,3)
    drawPx(centerX+2,baseY,2,3)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+1,1,1)
    drawPx(centerX+2,baseY+1,1,1)
@@ -132,7 +132,7 @@ function PixelAvatar({
    ctx.fillStyle='#40a040'
    drawPx(centerX-3,baseY+5,2,2)
    drawPx(centerX+1,baseY+5,2,2)
-      
+
    ctx.fillStyle='#1a1a1a'
    drawPx(centerX-2.5,baseY+5.5,1,1)
    drawPx(centerX+1.5,baseY+5.5,1,1)
@@ -158,7 +158,7 @@ function PixelAvatar({
    drawPx(centerX-4,26,8,1)
    ctx.fillStyle='#5a3a20'
    drawPx(centerX+6,baseY+4+float,1,14)
-      
+
    ctx.fillStyle=`rgba(${parseInt(config.accentColor.slice(1,3),16)}, ${parseInt(config.accentColor.slice(3,5),16)}, ${parseInt(config.accentColor.slice(5,7),16)}, ${staffGlow})`
    drawPx(centerX+5,baseY+2+float,3,3)
    ctx.fillStyle=config.accentColor
@@ -198,16 +198,16 @@ function PixelAvatar({
 
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+2,6,5)
-      
+
    ctx.fillStyle='#1a1a1a'
    drawPx(centerX-2,baseY+4,4,2)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+5,1,1)
    drawPx(centerX+1,baseY+5,1,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+7,10,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+8,4,3)
    ctx.fillStyle='#808080'
@@ -265,7 +265,7 @@ function PixelAvatar({
 
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY+3,8,4)
-      
+
    ctx.fillStyle='#d0c0b0'
    drawPx(centerX-2,baseY+5,4,3)
    ctx.fillStyle='#1a1a1a'
@@ -273,7 +273,7 @@ function PixelAvatar({
    drawPx(centerX+1,baseY+6,1,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+8,10,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-5,baseY+8,10,1)
    ctx.fillStyle='#808080'
@@ -339,15 +339,15 @@ function PixelAvatar({
    ctx.fillStyle='#2a2a2a'
    drawPx(centerX-2,baseY+5,1.5,1.5)
    drawPx(centerX+0.5,baseY+5,1.5,1.5)
-      
+
    ctx.fillStyle='#c08080'
    drawPx(centerX-0.5,baseY+7,1,0.5)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY+8,8,4)
-      
+
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+12+sway,10,8)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-1,baseY+9,2,2)
    drawPx(centerX-4,baseY+14+sway,8,1)
@@ -366,7 +366,7 @@ function PixelAvatar({
    }
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+2,6,3)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX+2,baseY,2,3)
 
@@ -415,7 +415,7 @@ function PixelAvatar({
    drawPx(centerX-5,baseY+12,10,8)
    ctx.fillStyle='#5a4a30'
    drawPx(centerX+5,baseY+4,1,14)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX+4,baseY+2,3,3)
   }
@@ -432,18 +432,18 @@ function PixelAvatar({
 
    ctx.fillStyle='#e8d4c4'
    drawPx(centerX-2,baseY+4,4,4)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+5,1.5,1.5)
    drawPx(centerX+0.5,baseY+5,1.5,1.5)
    ctx.fillStyle='#e0e0e0'
    drawPx(centerX-4,baseY+8,8,8)
-      
+
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+9,6,6)
    ctx.fillStyle='#90c0d0'
    drawPx(centerX+4,baseY+10,3,5)
-      
+
    if(isWorking){
     ctx.fillStyle=config.accentColor
     drawPx(centerX+5,baseY+8-bubble,1,1)
@@ -463,7 +463,7 @@ function PixelAvatar({
    drawPx(centerX-4,26,8,1)
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+1,6,4)
-      
+
    ctx.fillStyle=isWorking?'#ffff00' : '#808080'
    drawPx(centerX-1,baseY+2,2,1)
 
@@ -474,7 +474,7 @@ function PixelAvatar({
    drawPx(centerX+1,baseY+5,1,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY+8,8,7)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+10,2,2)
    drawPx(centerX+1,baseY+10,2,2)
@@ -547,7 +547,7 @@ function PixelAvatar({
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+2,3,4)
    drawPx(centerX+2,baseY+2,3,4)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-4,baseY+3,1,2)
    drawPx(centerX+3,baseY+3,1,2)
@@ -653,14 +653,14 @@ function PixelAvatar({
    drawPx(centerX+1,baseY+4+swim,1,1)
    ctx.fillStyle='#f0e8e0'
    drawPx(centerX-3,baseY+7+swim,6,4)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+8+swim,1.5,1.5)
    drawPx(centerX+0.5,baseY+8+swim,1.5,1.5)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-2,baseY+11+swim,4,4)
    drawPx(centerX-1,baseY+15+swim+tailWave,2,3)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+17+swim+tailWave,2,3)
    drawPx(centerX+1,baseY+17+swim+tailWave,2,3)
@@ -680,15 +680,15 @@ function PixelAvatar({
    drawPx(centerX-4,baseY+12,8,6)
 
    if(howl){
-        
+
     drawPx(centerX-3,baseY+4,6,4)
     drawPx(centerX-1,baseY+2,2,3)
-        
+
     ctx.fillStyle='#1a1a1a'
     drawPx(centerX-0.5,baseY+2,1,2)
    }else{
     drawPx(centerX-3,baseY+5,6,6)
-        
+
     ctx.fillStyle=config.accentColor
     drawPx(centerX-1,baseY+8,2,3)
     ctx.fillStyle='#1a1a1a'
@@ -717,19 +717,19 @@ function PixelAvatar({
 
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+2+stomp,6,5)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+4+stomp,1.5,1.5)
    drawPx(centerX+0.5,baseY+4+stomp,1.5,1.5)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+7+stomp,10,8)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-1,baseY+9+stomp,2,4)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-8,baseY+8+stomp,3,8)
    drawPx(centerX+5,baseY+8+stomp,3,8)
-      
+
    drawPx(centerX-9,baseY+15+stomp,4,3)
    drawPx(centerX+5,baseY+15+stomp,4,3)
    drawPx(centerX-4,baseY+15,3,5)
@@ -745,17 +745,17 @@ function PixelAvatar({
 
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+3+dangle,6,5)
-      
+
    ctx.fillStyle='#1a1a1a'
    drawPx(centerX-2,baseY+5+dangle,1.5,1.5)
    drawPx(centerX+0.5,baseY+5+dangle,1.5,1.5)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-1,baseY+7+dangle,2,0.5)
 
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+8+dangle,6,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+9+dangle,4,2)
    ctx.fillStyle='#808080'
@@ -779,16 +779,16 @@ function PixelAvatar({
    drawPx(centerX-5,26,10,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY+2,8,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+3,6,4)
-      
+
    ctx.fillStyle='#1a1a1a'
    drawPx(centerX,baseY+4,1,2)
    drawPx(centerX-1+tick,baseY+5,2,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+8,10,8)
-      
+
    ctx.fillStyle=config.accentColor
    const gx=Math.cos(gearRotate*0.02)*0.5
    const gy=Math.sin(gearRotate*0.02)*0.5
@@ -798,7 +798,7 @@ function PixelAvatar({
    ctx.fillStyle='#606060'
    drawPx(centerX-7,baseY+9,2,5)
    drawPx(centerX+5,baseY+9,2,5)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-7,baseY+13,2,1)
    drawPx(centerX+5,baseY+13,2,1)
@@ -816,16 +816,16 @@ function PixelAvatar({
    drawPx(centerX-6,26,12,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-3,baseY+2,6,4)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+3,4,2)
-      
+
    ctx.fillStyle=isWorking?'#00ff00' : '#404040'
    drawPx(centerX-1,baseY+4,1,1)
    drawPx(centerX+1,baseY+4,1,1)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-4,baseY+6,8,7)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+7,6,4)
    ctx.fillStyle=config.bodyColor
@@ -835,7 +835,7 @@ function PixelAvatar({
    ctx.fillStyle='#606060'
    drawPx(centerX-7,baseY+9,2,6)
    drawPx(centerX+5,baseY+9,2,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-8,baseY+14,3,2)
    drawPx(centerX+5,baseY+14,3,2)
@@ -872,7 +872,7 @@ function PixelAvatar({
    drawPx(centerX-4,baseY+10+breathe,8,8)
 
    drawPx(centerX-2,baseY+4+breathe,6,6)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-2,baseY+2+breathe,2,3)
    drawPx(centerX+2,baseY+2+breathe,2,3)
@@ -900,7 +900,7 @@ function PixelAvatar({
    drawPx(centerX-6,baseY+16,2,2)
    ctx.fillStyle=config.bodyColor
    drawPx(centerX-5,baseY+8,10,8)
-      
+
    ctx.fillStyle=config.accentColor
    drawPx(centerX-3,baseY+10,2,2)
    drawPx(centerX+1,baseY+10,2,2)
@@ -956,7 +956,7 @@ function PixelAvatar({
   }
 
   const animate=()=>{
-   frameRef.current+=3  // Faster animation speed
+   frameRef.current+=3
    draw(frameRef.current)
    if(isWorking){
     animationRef.current=requestAnimationFrame(animate)
@@ -1048,7 +1048,7 @@ function AgentCharacterCard({
    }}
    onAnimationEnd={handleAnimationEnd}
   >
-   {/* Speech bubble (only when working)-replaces status badge */}
+   {/*Speech bubble (only when working)-replaces status badge*/}
    {isWorking&&speechBubbleText&&(
     <div
      className="absolute -top-7 left-0 right-0 mx-auto px-2 py-0.5 rounded text-[9px] z-20 pointer-events-none text-center w-fit"
@@ -1110,12 +1110,12 @@ function AgentCharacterCard({
     </div>
 )}
 
-   {/* Avatar */}
+   {/*Avatar*/}
    <div className="mt-1">
     <PixelAvatar agentType={agent.type} status={agent.status} isExiting={isExiting}/>
    </div>
 
-   {/* Progress bar */}
+   {/*Progress bar*/}
    {(isWorking||isCompleted)&&(
     <div className="w-14 h-1.5 mt-1.5 rounded-full overflow-hidden" style={{background:'rgba(0,0,0,0.1)'}}>
      <div
@@ -1130,12 +1130,12 @@ function AgentCharacterCard({
     </div>
 )}
 
-   {/* Name */}
+   {/*Name*/}
    <div className="mt-1 text-[10px] text-nier-text-main font-medium text-center">
     {displayLabel}
    </div>
 
-   {/* Progress percentage for running */}
+   {/*Progress percentage for running*/}
    {isWorking&&(
     <div className="text-[9px] text-nier-accent-orange font-bold">
      {agent.progress||0}%
@@ -1197,7 +1197,7 @@ export default function AgentWorkspace():JSX.Element{
     if(a.phase!==b.phase)return a.phase-b.phase
     return a.type.localeCompare(b.type)
    })
-   .slice(0,16) // Show max 16 agents
+   .slice(0,16)
  },[agents,currentProject,exitedAgentIds])
 
  const runningCount=displayAgents.filter(a=>a.status==='running').length

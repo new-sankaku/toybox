@@ -8,7 +8,7 @@ export interface TestCase{
  id:string
  name:string
  status:'passed'|'failed'|'skipped'|'pending'
- duration?:number // ms
+ duration?:number
  error?:{
   message:string
   stack?:string
@@ -30,7 +30,7 @@ export interface TestResult{
  passed:number
  failed:number
  skipped:number
- duration:number // ms
+ duration:number
  suites:TestSuite[]
  timestamp:string
 }
@@ -94,7 +94,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
    </CardHeader>
 
    <CardContent>
-    {/* Summary */}
+    {/*Summary*/}
     <div className="mb-6">
      <div className="flex items-center justify-between mb-2">
       <span className="text-nier-small text-nier-text-light">Pass Rate</span>
@@ -117,7 +117,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
      />
     </div>
 
-    {/* Stats */}
+    {/*Stats*/}
     <div className="grid grid-cols-4 gap-2 mb-6">
      <div className="text-center p-2 bg-nier-bg-main">
       <div className="text-nier-h2 font-medium">{result.totalTests}</div>
@@ -137,7 +137,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
      </div>
     </div>
 
-    {/* Test Suites */}
+    {/*Test Suites*/}
     <div className="space-y-2">
      {result.suites.map((suite)=>{
       const Icon=statusIcons[suite.status]
@@ -145,7 +145,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
 
       return(
        <div key={suite.id} className="border border-nier-border-light">
-        {/* Suite Header */}
+        {/*Suite Header*/}
         <button
          className="w-full flex items-center gap-3 px-3 py-2 hover:bg-nier-bg-selected transition-colors"
          onClick={()=>toggleSuite(suite.id)}
@@ -164,7 +164,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
          </span>
         </button>
 
-        {/* Test Cases */}
+        {/*Test Cases*/}
         {isExpanded&&(
          <div className="border-t border-nier-border-light">
           {suite.tests.map((test)=>{
@@ -181,7 +181,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
 )}
              </div>
 
-             {/* Error details */}
+             {/*Error details*/}
              {test.error&&(
               <div className="px-3 py-2 pl-10 bg-nier-accent-red/5 border-t border-nier-border-light">
                <p className="text-nier-small text-nier-accent-red mb-1">
@@ -216,7 +216,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
      })}
     </div>
 
-    {/* Timestamp */}
+    {/*Timestamp*/}
     <div className="mt-4 text-nier-caption text-nier-text-light text-right">
      Run at: {new Date(result.timestamp).toLocaleString()}
     </div>

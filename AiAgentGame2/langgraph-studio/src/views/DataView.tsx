@@ -255,7 +255,7 @@ export default function DataView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">ASSET</h1>
@@ -283,11 +283,11 @@ export default function DataView():JSX.Element{
     </div>
    </div>
 
-   {/* Filter Tabs */}
+   {/*Filter Tabs*/}
    <Card className="mb-3">
     <CardContent className="py-2">
      <div className="flex items-center justify-between flex-wrap gap-3">
-      {/* Type Filter */}
+      {/*Type Filter*/}
       <div className="flex items-center gap-1 flex-wrap">
        {(['all','image','audio','document','code']as const).map(type=>{
         const Icon=type==='all'?FolderOpen : typeIcons[type]
@@ -312,7 +312,7 @@ export default function DataView():JSX.Element{
        })}
       </div>
 
-      {/* Approval Filter */}
+      {/*Approval Filter*/}
       <div className="flex items-center gap-1 flex-wrap">
        <Filter size={14} className="text-nier-text-light mr-2"/>
        {(['all','pending','approved','rejected']as const).map(status=>{
@@ -339,7 +339,7 @@ export default function DataView():JSX.Element{
     </CardContent>
    </Card>
 
-   {/* Asset Grid/List */}
+   {/*Asset Grid/List*/}
    {loading&&assets.length===0?(
     <Card>
      <CardContent>
@@ -367,7 +367,7 @@ export default function DataView():JSX.Element{
         className="bg-nier-bg-panel border border-nier-border-light cursor-pointer hover:border-nier-accent-gold transition-colors p-2"
         onClick={()=>setSelectedAsset(asset)}
        >
-        {/* Thumbnail/Icon */}
+        {/*Thumbnail/Icon*/}
         <div className="aspect-square bg-nier-bg-selected mb-1.5 flex items-center justify-center overflow-hidden">
          {asset.type==='image'&&asset.thumbnail?(
           <img
@@ -394,12 +394,12 @@ export default function DataView():JSX.Element{
 )}
         </div>
 
-        {/* Info */}
+        {/*Info*/}
         <div className="text-nier-caption font-medium truncate" title={asset.name}>
          {asset.name}
         </div>
 
-        {/* Size+Status+Actions in one row */}
+        {/*Size+Status+Actions in one row*/}
         <div className="text-[10px] text-nier-text-light mt-0.5 flex items-center justify-between">
          <span>{asset.size}</span>
          <div className="flex items-center gap-1">
@@ -539,11 +539,11 @@ export default function DataView():JSX.Element{
     </Card>
 )}
 
-   {/* Preview Modal */}
+   {/*Preview Modal*/}
    {selectedAsset&&(
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
      <div className="bg-nier-bg-main border border-nier-border-light max-w-4xl max-h-[90vh] w-full overflow-hidden">
-      {/* Modal Header */}
+      {/*Modal Header*/}
       <div className="flex items-center justify-between px-4 py-3 bg-nier-bg-header border-b border-nier-border-light">
        <div className="flex items-center gap-2">
         {(()=>{
@@ -560,7 +560,7 @@ export default function DataView():JSX.Element{
        </button>
       </div>
 
-      {/* Modal Content */}
+      {/*Modal Content*/}
       <div className="p-6 overflow-auto max-h-[calc(90vh-60px)]">
        {selectedAsset.type==='image'&&selectedAsset.url&&(
         <div className="flex flex-col items-center">
@@ -644,7 +644,7 @@ export default function DataView():JSX.Element{
         </div>
 )}
 
-       {/* Asset Info */}
+       {/*Asset Info*/}
        <div className="mt-6 pt-6 border-t border-nier-border-light">
         <div className="grid grid-cols-5 gap-4 text-nier-small">
          <div>
@@ -674,7 +674,7 @@ export default function DataView():JSX.Element{
         </div>
        </div>
 
-       {/* Actions */}
+       {/*Actions*/}
        <div className="mt-6 flex gap-3">
         {selectedAsset.approvalStatus!=='approved'&&(
          <Button onClick={()=>handleApprove(selectedAsset.id)}>
@@ -704,7 +704,7 @@ export default function DataView():JSX.Element{
     </div>
 )}
 
-   {/* Hidden audio element for playback */}
+   {/*Hidden audio element for playback*/}
    <audio
     ref={audioRef}
     onEnded={()=>setPlayingAudio(null)}

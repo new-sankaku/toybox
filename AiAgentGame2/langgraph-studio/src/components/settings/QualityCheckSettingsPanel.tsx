@@ -167,7 +167,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
 
  return(
   <div className="space-y-4">
-   {/* Summary and Actions */}
+   {/*Summary and Actions*/}
    <Card>
     <CardHeader>
      <DiamondMarker>品質チェック設定</DiamondMarker>
@@ -224,7 +224,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
     </CardContent>
    </Card>
 
-   {/* Phase Groups */}
+   {/*Phase Groups*/}
    {phaseGroups.map(phase=>(
     <Card key={phase.id}>
      <CardHeader>

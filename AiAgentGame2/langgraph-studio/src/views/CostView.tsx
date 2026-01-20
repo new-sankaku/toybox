@@ -123,7 +123,7 @@ export default function CostView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">COST</h1>
@@ -133,7 +133,7 @@ export default function CostView():JSX.Element{
    </div>
 
    <div className="grid grid-cols-2 gap-3">
-    {/* Left Column-Agent Breakdown */}
+    {/*Left Column-Agent Breakdown*/}
     <Card>
      <CardHeader>
       <DiamondMarker>エージェント別</DiamondMarker>
@@ -176,15 +176,15 @@ export default function CostView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/* Right Column-Summary & Type Breakdown */}
+    {/*Right Column-Summary&Type Breakdown*/}
     <div className="space-y-3">
-     {/* Summary */}
+     {/*Summary*/}
      <Card>
       <CardHeader>
        <DiamondMarker>サマリー</DiamondMarker>
       </CardHeader>
       <CardContent className="space-y-3">
-       {/* Tokens */}
+       {/*Tokens*/}
        <div className="space-y-2">
         <div className="flex justify-between text-nier-small">
          <span className="text-nier-text-light">使用トークン (In)</span>
@@ -196,7 +196,7 @@ export default function CostView():JSX.Element{
         </div>
        </div>
 
-       {/* Cost */}
+       {/*Cost*/}
        <div className="pt-3 border-t border-nier-border-light space-y-2">
         <div className="flex justify-between text-nier-small">
          <span className="text-nier-text-light">現在コスト</span>
@@ -215,7 +215,7 @@ export default function CostView():JSX.Element{
       </CardContent>
      </Card>
 
-     {/* Generation Type Breakdown */}
+     {/*Generation Type Breakdown*/}
      <Card>
       <CardHeader>
        <DiamondMarker>生成タイプ別</DiamondMarker>

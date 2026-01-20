@@ -38,8 +38,8 @@ interface MetricsState{
 }
 
 const TOKEN_COSTS={
- input:0.003/1000,// $0.003 per 1K input tokens
- output:0.015/1000   // $0.015 per 1K output tokens
+ input:0.003/1000,
+ output:0.015/1000
 }
 
 export const useMetricsStore=create<MetricsState>((set,get)=>({

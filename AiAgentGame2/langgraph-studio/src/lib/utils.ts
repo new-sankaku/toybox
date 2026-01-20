@@ -57,7 +57,7 @@ export function formatDate(date:Date|string):string{
 }
 
 /**
-*Format relative time (e.g., "5分前")
+*Format relative time (e.g.,"5分前")
  */
 export function formatRelativeTime(date:Date|string):string{
  const d=typeof date==='string'?new Date(date) : date

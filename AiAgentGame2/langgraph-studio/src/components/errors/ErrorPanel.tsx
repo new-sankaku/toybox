@@ -75,13 +75,13 @@ export function ErrorPanel({error,onAction,onDismiss,expanded:initialExpanded=fa
    </CardHeader>
 
    <CardContent className="py-4">
-    {/* Error Message */}
+    {/*Error Message*/}
     <p className="text-nier-body mb-4">{error.message}</p>
 
-    {/* Expanded Details */}
+    {/*Expanded Details*/}
     {expanded&&(
      <div className="space-y-4 mb-4">
-      {/* Details */}
+      {/*Details*/}
       {error.details&&Object.keys(error.details).length>0&&(
        <div className="bg-nier-bg-main p-3 text-nier-small">
         <div className="text-nier-caption text-nier-text-light mb-2">DETAILS</div>
@@ -91,7 +91,7 @@ export function ErrorPanel({error,onAction,onDismiss,expanded:initialExpanded=fa
        </div>
 )}
 
-      {/* Suggestions */}
+      {/*Suggestions*/}
       {error.suggestions&&error.suggestions.length>0&&(
        <div>
         <div className="text-nier-caption text-nier-text-light mb-2">SUGGESTIONS</div>
@@ -106,7 +106,7 @@ export function ErrorPanel({error,onAction,onDismiss,expanded:initialExpanded=fa
        </div>
 )}
 
-      {/* Meta */}
+      {/*Meta*/}
       <div className="flex items-center gap-4 text-nier-caption text-nier-text-light">
        <span>Time: {new Date(error.timestamp).toLocaleTimeString()}</span>
        {error.requestId&&<span>Request ID: {error.requestId}</span>}
@@ -114,7 +114,7 @@ export function ErrorPanel({error,onAction,onDismiss,expanded:initialExpanded=fa
      </div>
 )}
 
-    {/* Actions */}
+    {/*Actions*/}
     {error.actions&&error.actions.length>0&&onAction&&(
      <div className="flex items-center gap-2 pt-3 border-t border-nier-border-light">
       {error.actions.map((action)=>(

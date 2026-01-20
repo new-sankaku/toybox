@@ -72,12 +72,12 @@ export default function ConfigView():JSX.Element{
 
  const handleSave=()=>{
   console.log('Config saved:',config)
-  // TODO: Implement actual save
+  //TODO: Implement actual save
  }
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Header */}
+   {/*Header*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">CONFIG</h1>
@@ -92,7 +92,7 @@ export default function ConfigView():JSX.Element{
    </div>
 
    <div className="grid grid-cols-4 gap-3">
-    {/* Section Navigation */}
+    {/*Section Navigation*/}
     <Card>
      <CardHeader>
       <DiamondMarker>設定カテゴリ</DiamondMarker>
@@ -117,9 +117,9 @@ export default function ConfigView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/* Config Content */}
+    {/*Config Content*/}
     <div className="col-span-3 space-y-4">
-     {/* API Settings */}
+     {/*API Settings*/}
      {activeSection==='api'&&(
       <Card>
        <CardHeader>
@@ -175,7 +175,7 @@ export default function ConfigView():JSX.Element{
       </Card>
 )}
 
-     {/* Model Settings */}
+     {/*Model Settings*/}
      {activeSection==='model'&&(
       <Card>
        <CardHeader>
@@ -238,7 +238,7 @@ export default function ConfigView():JSX.Element{
       </Card>
 )}
 
-     {/* Cost Settings */}
+     {/*Cost Settings*/}
      {activeSection==='cost'&&(
       <Card>
        <CardHeader>
@@ -336,7 +336,7 @@ export default function ConfigView():JSX.Element{
       </Card>
 )}
 
-     {/* Output Settings */}
+     {/*Output Settings*/}
      {activeSection==='output'&&(
       <Card>
        <CardHeader>
@@ -392,7 +392,7 @@ export default function ConfigView():JSX.Element{
       </Card>
 )}
 
-     {/* Project Settings */}
+     {/*Project Settings*/}
      {activeSection==='project'&&(
       <Card>
        <CardHeader>
@@ -430,19 +430,19 @@ export default function ConfigView():JSX.Element{
       </Card>
 )}
 
-     {/* Agent Quality Settings */}
+     {/*Agent Quality Settings*/}
      {activeSection==='agent-quality'&&(
       <QualityCheckSettingsPanel projectId="proj-001"/>
 )}
 
-     {/* Display Settings */}
+     {/*Display Settings*/}
      {activeSection==='display'&&(
       <Card>
        <CardHeader>
         <DiamondMarker>表示設定</DiamondMarker>
        </CardHeader>
        <CardContent className="space-y-6">
-        {/* Letter Spacing */}
+        {/*Letter Spacing*/}
         <div>
          <label className="block text-nier-caption text-nier-text-light mb-2">
           文字間隔
@@ -467,7 +467,7 @@ export default function ConfigView():JSX.Element{
          </div>
         </div>
 
-        {/* Line Height */}
+        {/*Line Height*/}
         <div>
          <label className="block text-nier-caption text-nier-text-light mb-2">
           行間: {config.lineHeight.toFixed(1)}
@@ -487,7 +487,7 @@ export default function ConfigView():JSX.Element{
          </div>
         </div>
 
-        {/* Padding */}
+        {/*Padding*/}
         <div>
          <label className="block text-nier-caption text-nier-text-light mb-2">
           余白: {config.padding}px
@@ -507,7 +507,7 @@ export default function ConfigView():JSX.Element{
          </div>
         </div>
 
-        {/* Preview */}
+        {/*Preview*/}
         <div className="nier-card border border-nier-border-light" style={{padding:`${config.padding}px`}}>
          <h4 className="text-nier-small font-medium mb-2">プレビュー</h4>
          <p className="text-nier-body">

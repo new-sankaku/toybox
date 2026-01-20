@@ -269,7 +269,7 @@ export default function ProjectView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/* Page Title */}
+   {/*Page Title*/}
    <div className="nier-page-header-row">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">PROJECT</h1>
@@ -278,7 +278,7 @@ export default function ProjectView():JSX.Element{
     <div className="nier-page-header-right"/>
    </div>
 
-   {/* Error Message */}
+   {/*Error Message*/}
    {error&&(
     <div className="mb-4 p-3 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main text-nier-small">
      {error}
@@ -292,7 +292,7 @@ export default function ProjectView():JSX.Element{
 )}
 
    <div className="grid grid-cols-3 gap-3">
-    {/* Left: Project List */}
+    {/*Left: Project List*/}
     <div className="col-span-1 space-y-3">
      <Card>
       <CardHeader>
@@ -386,7 +386,7 @@ export default function ProjectView():JSX.Element{
      </Card>
     </div>
 
-    {/* Right: New Project Form or Project Details */}
+    {/*Right: New Project Form or Project Details*/}
     <div className="col-span-2">
      {showNewForm?(
       <Card>
@@ -395,7 +395,7 @@ export default function ProjectView():JSX.Element{
        </CardHeader>
        <CardContent>
         <div className="space-y-4">
-         {/* Project Name */}
+         {/*Project Name*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-1">
            プロジェクト名<span className="text-nier-text-main">*</span>
@@ -409,7 +409,7 @@ export default function ProjectView():JSX.Element{
           />
          </div>
 
-         {/* User Idea */}
+         {/*User Idea*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-1">
            ゲームアイデア<span className="text-nier-text-main">*</span>
@@ -423,7 +423,7 @@ export default function ProjectView():JSX.Element{
           />
          </div>
 
-         {/* References */}
+         {/*References*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-1">
            参考ゲーム（カンマ区切り）
@@ -437,7 +437,7 @@ export default function ProjectView():JSX.Element{
           />
          </div>
 
-         {/* Platform Selection */}
+         {/*Platform Selection*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            プラットフォーム
@@ -462,7 +462,7 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/* Scope Selection */}
+         {/*Scope Selection*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            スコープ（ゲームの規模）
@@ -487,7 +487,7 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/* LLM Provider */}
+         {/*LLM Provider*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-1">
            LLMプロバイダー
@@ -502,7 +502,7 @@ export default function ProjectView():JSX.Element{
           </select>
          </div>
 
-         {/* Buttons */}
+         {/*Buttons*/}
          <div className="flex gap-3 pt-2">
           <Button onClick={handleCreateProject} disabled={!form.name.trim()||!form.userIdea.trim()||isLoading}>
            {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>: null}
@@ -517,7 +517,7 @@ export default function ProjectView():JSX.Element{
       </Card>
 ) : currentProject?(
       <div className="space-y-3">
-       {/* Project Info */}
+       {/*Project Info*/}
        <Card>
         <CardHeader>
          <div className="flex items-center justify-between w-full">
@@ -536,7 +536,7 @@ export default function ProjectView():JSX.Element{
         <CardContent>
          {isEditing?(
           <div className="space-y-4">
-           {/* Project Name */}
+           {/*Project Name*/}
            <div>
             <label className="block text-nier-small text-nier-text-light mb-1">
              プロジェクト名<span className="text-nier-text-main">*</span>
@@ -549,7 +549,7 @@ export default function ProjectView():JSX.Element{
             />
            </div>
 
-           {/* User Idea */}
+           {/*User Idea*/}
            <div>
             <label className="block text-nier-small text-nier-text-light mb-1">
              ゲームアイデア
@@ -562,7 +562,7 @@ export default function ProjectView():JSX.Element{
             />
            </div>
 
-           {/* Platform Selection */}
+           {/*Platform Selection*/}
            <div>
             <label className="block text-nier-small text-nier-text-light mb-2">
              プラットフォーム
@@ -587,7 +587,7 @@ export default function ProjectView():JSX.Element{
             </div>
            </div>
 
-           {/* Scope Selection */}
+           {/*Scope Selection*/}
            <div>
             <label className="block text-nier-small text-nier-text-light mb-2">
              スコープ
@@ -612,7 +612,7 @@ export default function ProjectView():JSX.Element{
             </div>
            </div>
 
-           {/* Buttons */}
+           {/*Buttons*/}
            <div className="flex gap-3 pt-2">
             <Button onClick={handleSaveEdit} disabled={!editForm.name.trim()||isLoading}>
              {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Check size={14} className="mr-1.5"/>}
@@ -675,35 +675,35 @@ export default function ProjectView():JSX.Element{
         </CardContent>
        </Card>
 
-       {/* Controls */}
+       {/*Controls*/}
        <Card>
         <CardHeader>
          <DiamondMarker>実行コントロール</DiamondMarker>
         </CardHeader>
         <CardContent>
          <div className="flex gap-3">
-          {/* 開始/再開: draft または paused の時のみ */}
+          {/*開始/再開: draft または paused の時のみ*/}
           {(currentProject.status==='draft'||currentProject.status==='paused')&&(
            <Button onClick={handleStartProject} disabled={isLoading}>
             {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
             {currentProject.status==='paused'?'再開' : '開始'}
            </Button>
 )}
-          {/* 一時停止: running の時のみ */}
+          {/*一時停止: running の時のみ*/}
           {currentProject.status==='running'&&(
            <Button onClick={handlePauseProject} disabled={isLoading}>
             {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Pause size={14} className="mr-1.5"/>}
             一時停止
            </Button>
 )}
-          {/* 停止: running または paused の時のみ */}
+          {/*停止: running または paused の時のみ*/}
           {(currentProject.status==='running'||currentProject.status==='paused')&&(
            <Button variant="secondary" onClick={handleStopProject} disabled={isLoading}>
             <Square size={14} className="mr-1.5"/>
             停止
            </Button>
 )}
-          {/* 初期化: draft以外の時（進捗がある時） */}
+          {/*初期化: draft以外の時（進捗がある時）*/}
           {canInitialize&&(
            <Button
             variant="danger"
@@ -734,7 +734,7 @@ export default function ProjectView():JSX.Element{
     </div>
    </div>
 
-   {/* Initialize Confirmation Dialog */}
+   {/*Initialize Confirmation Dialog*/}
    {showInitializeDialog&&currentProject&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
      <Card className="w-96">

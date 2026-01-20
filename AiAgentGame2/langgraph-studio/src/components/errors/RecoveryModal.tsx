@@ -75,7 +75,7 @@ export function RecoveryModal({
    title="RECOVERY REQUIRED"
    size="lg"
   >
-   {/* Error Summary */}
+   {/*Error Summary*/}
    <div className="mb-6">
     <div className="flex items-start gap-4 p-4 bg-nier-accent-red/10 border border-nier-accent-red/30">
      <AlertTriangle className="text-nier-accent-red flex-shrink-0 mt-0.5" size={24}/>
@@ -90,7 +90,7 @@ export function RecoveryModal({
     </div>
    </div>
 
-   {/* Context */}
+   {/*Context*/}
    {(agentName||taskName)&&(
     <div className="mb-6 grid grid-cols-2 gap-4 text-nier-small">
      {agentName&&(
@@ -112,7 +112,7 @@ export function RecoveryModal({
     </div>
 )}
 
-   {/* Recovery Options */}
+   {/*Recovery Options*/}
    <div className="space-y-3">
     <div className="text-nier-small text-nier-text-light mb-2">
      SELECT RECOVERY ACTION

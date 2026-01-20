@@ -50,7 +50,7 @@ export function FeedbackForm({
     <DiamondMarker>{title}</DiamondMarker>
    </CardHeader>
    <CardContent className="space-y-4">
-    {/* Quick Feedback Options */}
+    {/*Quick Feedback Options*/}
     <div>
      <p className="text-nier-caption text-nier-text-light mb-2">
       クイック選択:
@@ -72,7 +72,7 @@ export function FeedbackForm({
      </div>
     </div>
 
-    {/* Textarea */}
+    {/*Textarea*/}
     <div>
      <textarea
       className={cn(
@@ -90,7 +90,7 @@ export function FeedbackForm({
 )}
     </div>
 
-    {/* Character Count */}
+    {/*Character Count*/}
     <div className="flex items-center justify-between text-nier-caption text-nier-text-light">
      <span>{feedback.length} 文字</span>
      {feedback.length>0&&(
@@ -103,7 +103,7 @@ export function FeedbackForm({
 )}
     </div>
 
-    {/* Action Buttons */}
+    {/*Action Buttons*/}
     <div className="flex items-center justify-end gap-3 pt-2 border-t border-nier-border-light">
      <Button
       variant="ghost"
