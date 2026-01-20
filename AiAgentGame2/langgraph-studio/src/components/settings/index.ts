@@ -1,1 +1,1 @@
-export { QualityCheckSettingsPanel } from './QualityCheckSettingsPanel'
+export{QualityCheckSettingsPanel}from'./QualityCheckSettingsPanel'
