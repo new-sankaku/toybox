@@ -503,4 +503,59 @@ export const fileUploadApi={
  }
 }
 
+export interface ProjectTreeNode{
+ id:string
+ name:string
+ type:'file'|'directory'
+ path:string
+ modified?:boolean
+ children?:ProjectTreeNode[]
+ size?:number
+ mimeType?:string
+}
+
+export const projectTreeApi={
+ getTree:async(projectId:string):Promise<ProjectTreeNode>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree`)
+  return response.data
+ },
+
+ downloadFile:async(projectId:string,filePath:string):Promise<Blob>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree/download`,{
+   params:{path:filePath},
+   responseType:'blob'
+  })
+  return response.data
+ },
+
+ replaceFile:async(projectId:string,filePath:string,file:File):Promise<void>=>{
+  const formData=new FormData()
+  formData.append('file',file)
+  formData.append('path',filePath)
+  await api.post(`/api/projects/${projectId}/tree/replace`,formData,{
+   headers:{'Content-Type':'multipart/form-data'}
+  })
+ },
+
+ downloadAll:async(projectId:string):Promise<Blob>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree/download-all`,{
+   responseType:'blob'
+  })
+  return response.data
+ }
+}
+
+export interface AIProviderTestResult{
+ success:boolean
+ message:string
+ latency?:number
+}
+
+export const aiProviderApi={
+ testConnection:async(providerType:string,config:Record<string,unknown>):Promise<AIProviderTestResult>=>{
+  const response=await api.post('/api/ai-providers/test',{providerType,config})
+  return response.data
+ }
+}
+
 export{api}
