@@ -12,6 +12,7 @@ from agent_settings import (
     AGENT_PHASES,
     AGENT_DISPLAY_NAMES,
     HIGH_COST_AGENTS,
+    AGENT_DEFINITIONS,
 )
 
 
@@ -178,3 +179,16 @@ def register_settings_routes(app: Flask, data_store: TestDataStore):
             "message": "Settings reset to default",
             "settings": settings_dict,
         })
+
+    @app.route('/api/agent-definitions', methods=['GET'])
+    def get_agent_definitions():
+        """
+        エージェント定義（表示名等）を取得
+
+        Returns:
+            {
+                "concept": { "label": "コンセプト", "shortLabel": "コンセプト", "phase": 0 },
+                ...
+            }
+        """
+        return jsonify(AGENT_DEFINITIONS)

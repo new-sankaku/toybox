@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { useProjectStore } from '@/stores/projectStore'
+import { useAgentDefinitionStore } from '@/stores/agentDefinitionStore'
 import { logsApi, type ApiSystemLog } from '@/services/apiService'
 import { cn } from '@/lib/utils'
 import { Search, AlertCircle, Info, AlertTriangle, Bug, FolderOpen } from 'lucide-react'
@@ -31,17 +32,6 @@ function convertApiLog(apiLog: ApiSystemLog): SystemLog {
 const agentSources = ['concept', 'design', 'scenario', 'character', 'world', 'System'] as const
 type AgentSource = typeof agentSources[number]
 
-// Display names for agent sources
-const agentDisplayNames: Record<AgentSource | 'all', string> = {
-  all: '全て',
-  concept: 'Concept',
-  design: 'Design',
-  scenario: 'Scenario',
-  character: 'Character',
-  world: 'World',
-  System: 'System',
-}
-
 type LogLevel = 'all' | 'debug' | 'info' | 'warn' | 'error'
 
 const levelConfig = {
@@ -53,12 +43,20 @@ const levelConfig = {
 
 export default function LogsView(): JSX.Element {
   const { currentProject } = useProjectStore()
+  const { getLabel } = useAgentDefinitionStore()
   const [logs, setLogs] = useState<SystemLog[]>([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [filterLevel, setFilterLevel] = useState<LogLevel>('all')
   const [filterAgent, setFilterAgent] = useState<AgentSource | 'all'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedLog, setSelectedLog] = useState<SystemLog | null>(null)
+
+  // Helper to get agent display name
+  const getAgentDisplayName = (source: AgentSource | 'all'): string => {
+    if (source === 'all') return '全て'
+    if (source === 'System') return 'System'
+    return getLabel(source)
+  }
 
   // Initial fetch logs from API (no polling - will be updated via WebSocket when implemented)
   useEffect(() => {
@@ -231,7 +229,7 @@ export default function LogsView(): JSX.Element {
                   )}
                   onClick={() => setFilterAgent(agent)}
                 >
-                  {agentDisplayNames[agent]} {agentCounts[agent] > 0 && `(${agentCounts[agent]})`}
+                  {getAgentDisplayName(agent)} {agentCounts[agent] > 0 && `(${agentCounts[agent]})`}
                 </button>
               ))}
             </div>

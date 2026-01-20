@@ -2,10 +2,173 @@
 Agent Settings Module
 
 品質チェック設定の定義とデフォルト値を管理
+エージェント定義（表示名等）の一元管理
 """
 
-from typing import Dict, Set
+from typing import Dict, Set, TypedDict
 from dataclasses import dataclass, field
+
+
+# =============================================================================
+# エージェント定義（フロントエンド向けの一元管理）
+# =============================================================================
+class AgentDefinition(TypedDict):
+    """エージェント定義の型"""
+    label: str        # フル表示名
+    shortLabel: str   # 短縮表示名（スペースが狭い場所用）
+    phase: int        # フェーズ番号
+    speechBubble: str # 吹き出しのセリフ
+
+
+AGENT_DEFINITIONS: Dict[str, AgentDefinition] = {
+    # Phase 0: 企画
+    'concept': {
+        'label': 'コンセプト',
+        'shortLabel': 'コンセプト',
+        'phase': 0,
+        'speechBubble': '全体を統括するのだ',
+    },
+    # Phase 1: タスク分割
+    'task_split_1': {
+        'label': 'タスク分割1',
+        'shortLabel': '分割1',
+        'phase': 1,
+        'speechBubble': '設計タスクを分配します',
+    },
+    # Phase 2: 設計
+    'concept_detail': {
+        'label': 'コンセプト詳細',
+        'shortLabel': '詳細',
+        'phase': 2,
+        'speechBubble': '企画を練り上げます',
+    },
+    'scenario': {
+        'label': 'シナリオ',
+        'shortLabel': 'シナリオ',
+        'phase': 2,
+        'speechBubble': '物語を紡ぎます',
+    },
+    'world': {
+        'label': '世界観',
+        'shortLabel': '世界観',
+        'phase': 2,
+        'speechBubble': '世界を創造します',
+    },
+    'game_design': {
+        'label': 'ゲームデザイン',
+        'shortLabel': 'デザイン',
+        'phase': 2,
+        'speechBubble': 'システムを設計します',
+    },
+    'tech_spec': {
+        'label': '技術仕様',
+        'shortLabel': 'テック',
+        'phase': 2,
+        'speechBubble': '技術を検証します',
+    },
+    # Phase 3: タスク分割
+    'task_split_2': {
+        'label': 'タスク分割2',
+        'shortLabel': '分割2',
+        'phase': 3,
+        'speechBubble': 'アセットタスクを分配',
+    },
+    # Phase 4: アセット
+    'asset_character': {
+        'label': 'キャラクター',
+        'shortLabel': 'キャラ',
+        'phase': 4,
+        'speechBubble': 'キャラを描くにゃ',
+    },
+    'asset_background': {
+        'label': '背景',
+        'shortLabel': '背景',
+        'phase': 4,
+        'speechBubble': '背景を観察中...',
+    },
+    'asset_ui': {
+        'label': 'UI',
+        'shortLabel': 'UI',
+        'phase': 4,
+        'speechBubble': 'UIをデザイン中',
+    },
+    'asset_effect': {
+        'label': 'エフェクト',
+        'shortLabel': 'エフェクト',
+        'phase': 4,
+        'speechBubble': 'キラキラを作るよ',
+    },
+    'asset_bgm': {
+        'label': 'BGM',
+        'shortLabel': 'BGM',
+        'phase': 4,
+        'speechBubble': '旋律を奏でます',
+    },
+    'asset_voice': {
+        'label': 'ボイス',
+        'shortLabel': 'ボイス',
+        'phase': 4,
+        'speechBubble': '声を届けます',
+    },
+    'asset_sfx': {
+        'label': '効果音',
+        'shortLabel': '効果音',
+        'phase': 4,
+        'speechBubble': '音を探索中...',
+    },
+    # Phase 5: タスク分割
+    'task_split_3': {
+        'label': 'タスク分割3',
+        'shortLabel': '分割3',
+        'phase': 5,
+        'speechBubble': '実装タスクを分配',
+    },
+    # Phase 6: 実装
+    'code': {
+        'label': 'コード',
+        'shortLabel': 'コード',
+        'phase': 6,
+        'speechBubble': 'コード...実装中...',
+    },
+    'event': {
+        'label': 'イベント',
+        'shortLabel': 'イベント',
+        'phase': 6,
+        'speechBubble': 'イベントを仕込む',
+    },
+    'ui_integration': {
+        'label': 'UI統合',
+        'shortLabel': 'UI統合',
+        'phase': 6,
+        'speechBubble': 'UI部品を組み立て中',
+    },
+    'asset_integration': {
+        'label': 'アセット統合',
+        'shortLabel': '統合',
+        'phase': 6,
+        'speechBubble': 'アセットを統合中',
+    },
+    # Phase 7: タスク分割
+    'task_split_4': {
+        'label': 'タスク分割4',
+        'shortLabel': '分割4',
+        'phase': 7,
+        'speechBubble': 'テストタスクを分配',
+    },
+    # Phase 8: テスト
+    'unit_test': {
+        'label': '単体テスト',
+        'shortLabel': 'テスト1',
+        'phase': 8,
+        'speechBubble': 'バグを焼き尽くす！',
+    },
+    'integration_test': {
+        'label': '統合テスト',
+        'shortLabel': 'テスト2',
+        'phase': 8,
+        'speechBubble': '慎重にテスト中...',
+    },
+}
 
 
 # 高コストエージェント（画像/音声/動画系）

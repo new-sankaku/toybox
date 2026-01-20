@@ -39,9 +39,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setAgents: (agents) => set({ agents }),
 
   addAgent: (agent) =>
-    set((state) => ({
-      agents: [...state.agents, agent]
-    })),
+    set((state) => {
+      // 重複チェック: 同じIDのエージェントが既に存在する場合は追加しない
+      if (state.agents.some((a) => a.id === agent.id)) {
+        return state
+      }
+      return { agents: [...state.agents, agent] }
+    }),
 
   updateAgent: (id, updates) =>
     set((state) => ({

@@ -394,4 +394,21 @@ export const aiRequestApi = {
   }
 }
 
+// ============================================================
+// Agent Definition API
+// ============================================================
+export interface AgentDefinition {
+  label: string
+  shortLabel: string
+  phase: number
+  speechBubble: string
+}
+
+export const agentDefinitionApi = {
+  getAll: async (): Promise<Record<string, AgentDefinition>> => {
+    const response = await api.get('/api/agent-definitions')
+    return response.data
+  }
+}
+
 export { api }

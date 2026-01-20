@@ -17,6 +17,7 @@ import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { useProjectStore } from '@/stores/projectStore'
 import { useAgentStore } from '@/stores/agentStore'
+import { useAgentDefinitionStore } from '@/stores/agentDefinitionStore'
 import { agentApi } from '@/services/apiService'
 import type { Agent, AgentType, AgentStatus } from '@/types/agent'
 
@@ -516,6 +517,7 @@ function FlowCanvas({ nodes, edges, onContainerResize }: FlowCanvasProps) {
 export default function WorkflowDiagram(): JSX.Element {
   const { currentProject } = useProjectStore()
   const { agents, setAgents } = useAgentStore()
+  const { getLabel } = useAgentDefinitionStore()
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
 
   // Handle container resize
@@ -632,7 +634,7 @@ export default function WorkflowDiagram(): JSX.Element {
         type: 'agent',
         position: pos,
         data: {
-          label: nodeDef.label,
+          label: getLabel(nodeDef.type),
           status: agent?.status,
           progress: agent?.progress ?? 0,
           hasLW: nodeDef.hasLW,
@@ -647,7 +649,7 @@ export default function WorkflowDiagram(): JSX.Element {
     })
 
     return [...groupNodes, ...agentNodes]
-  }, [getAgentByType, layout, phaseGroups, layoutConfig])
+  }, [getAgentByType, layout, phaseGroups, layoutConfig, getLabel])
 
   // Build edges
   const edges: Edge[] = useMemo(() => {

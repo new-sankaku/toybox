@@ -3,6 +3,7 @@ import { Card, CardHeader, CardContent } from '@/components/ui/Card'
 import { DiamondMarker } from '@/components/ui/DiamondMarker'
 import { Progress } from '@/components/ui/Progress'
 import { useProjectStore } from '@/stores/projectStore'
+import { useAgentDefinitionStore } from '@/stores/agentDefinitionStore'
 import { metricsApi, agentApi, type ApiAgent, type ApiProjectMetrics } from '@/services/apiService'
 import { formatNumber } from '@/lib/utils'
 import { FolderOpen } from 'lucide-react'
@@ -11,21 +12,6 @@ import { FolderOpen } from 'lucide-react'
 const PRICING = {
   inputPer1K: 0.003,
   outputPer1K: 0.015
-}
-
-// グループ表示名
-const GROUP_NAMES: Record<string, string> = {
-  concept: 'コンセプト',
-  design: 'デザイン',
-  scenario: 'シナリオ',
-  character: 'キャラクター',
-  world: 'ワールド',
-  task_split: 'タスク分割',
-  code: 'コード',
-  asset: 'アセット',
-  integrator: '統合',
-  tester: 'テスト',
-  reviewer: 'レビュー'
 }
 
 // 生成タイプの表示名
@@ -51,6 +37,7 @@ function calculateCost(input: number, output: number): number {
 
 export default function CostView(): JSX.Element {
   const { currentProject } = useProjectStore()
+  const { getLabel } = useAgentDefinitionStore()
   const [agents, setAgents] = useState<ApiAgent[]>([])
   const [metrics, setMetrics] = useState<ApiProjectMetrics | null>(null)
   const [loading, setLoading] = useState(false)
@@ -101,12 +88,12 @@ export default function CostView(): JSX.Element {
 
     return Array.from(groupMap.entries()).map(([key, tokens]) => ({
       key,
-      name: GROUP_NAMES[key] || key,
+      name: getLabel(key),
       input: tokens.input,
       output: tokens.output,
       cost: calculateCost(tokens.input, tokens.output)
     }))
-  }, [agents])
+  }, [agents, getLabel])
 
   // 全体合計
   const totals = useMemo(() => {

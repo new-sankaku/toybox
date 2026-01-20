@@ -5,6 +5,7 @@ import DashboardView from './components/dashboard/DashboardView'
 import { ProjectView, CheckpointsView, AgentsView, LogsView, DataView, AIView, CostView, ConfigView } from './views'
 import { useNavigationStore } from './stores/navigationStore'
 import { useProjectStore } from './stores/projectStore'
+import { useAgentDefinitionStore } from './stores/agentDefinitionStore'
 import { websocketService } from './services/websocketService'
 
 const queryClient = new QueryClient({
@@ -22,17 +23,21 @@ export type { TabId } from './stores/navigationStore'
 function App(): JSX.Element {
   const { activeTab, setActiveTab } = useNavigationStore()
   const { currentProject } = useProjectStore()
+  const { fetchDefinitions } = useAgentDefinitionStore()
   const previousProjectIdRef = useRef<string | null>(null)
 
-  // Initialize WebSocket connection
+  // Initialize WebSocket connection and fetch agent definitions
   useEffect(() => {
     const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
     websocketService.connect(backendUrl)
 
+    // Fetch agent definitions at startup
+    fetchDefinitions()
+
     return () => {
       websocketService.disconnect()
     }
-  }, [])
+  }, [fetchDefinitions])
 
   // Subscribe to project updates when project changes
   useEffect(() => {

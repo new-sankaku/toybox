@@ -28,6 +28,17 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/scripts/log-tool-use.sh"
+          }
+        ]
+      }
     ]
   }
 }
