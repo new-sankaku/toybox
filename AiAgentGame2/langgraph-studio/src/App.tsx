@@ -6,6 +6,7 @@ import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView
 import{useNavigationStore}from'./stores/navigationStore'
 import{useProjectStore}from'./stores/projectStore'
 import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
+import{useNavigatorStore}from'./stores/navigatorStore'
 import{websocketService}from'./services/websocketService'
 
 const queryClient=new QueryClient({
@@ -23,7 +24,10 @@ function App():JSX.Element{
  const{activeTab,setActiveTab}=useNavigationStore()
  const{currentProject}=useProjectStore()
  const{fetchDefinitions}=useAgentDefinitionStore()
+ const{showMessage}=useNavigatorStore()
  const previousProjectIdRef=useRef<string|null>(null)
+ const previousProjectStatusRef=useRef<string|null>(null)
+ const hasShownWelcomeRef=useRef(false)
 
  useEffect(()=>{
   const backendUrl=import.meta.env.VITE_BACKEND_URL||'http://localhost:5000'
@@ -31,13 +35,23 @@ function App():JSX.Element{
 
   fetchDefinitions()
 
+  // Show welcome message on app startup
+  if(!hasShownWelcomeRef.current){
+   hasShownWelcomeRef.current=true
+   setTimeout(()=>{
+    showMessage('オペレーター','システム起動完了。LangGraph Studio へようこそ。プロジェクトを選択して作業を開始してください。')
+   },500)
+  }
+
   return()=>{
    websocketService.disconnect()
   }
- },[fetchDefinitions])
+ },[fetchDefinitions,showMessage])
 
  useEffect(()=>{
   const projectId=currentProject?.id ?? null
+  const projectStatus=currentProject?.status ?? null
+  const projectName=currentProject?.name ?? ''
 
   if(previousProjectIdRef.current&&previousProjectIdRef.current!==projectId){
    websocketService.unsubscribeFromProject(previousProjectIdRef.current)
@@ -46,10 +60,29 @@ function App():JSX.Element{
   if(projectId){
    console.log('[App] Requesting WebSocket subscription for project:',projectId)
    websocketService.subscribeToProject(projectId)
+
+   // Show message when project is selected (different project)
+   if(previousProjectIdRef.current!==projectId){
+    showMessage('オペレーター',`プロジェクト「${projectName}」を選択しました。ダッシュボードで進捗を確認できます。`)
+   }
+  }
+
+  // Show message on project status change
+  if(previousProjectStatusRef.current&&previousProjectStatusRef.current!==projectStatus&&projectStatus){
+   const statusMessages:Record<string,string>={
+    running:`プロジェクト「${projectName}」が開始されました。エージェントが稼働を開始します。`,
+    paused:`プロジェクト「${projectName}」が一時停止されました。`,
+    completed:`プロジェクト「${projectName}」が完了しました。お疲れ様でした。`,
+    failed:`警告：プロジェクト「${projectName}」でエラーが発生しました。ログを確認してください。`
+   }
+   if(statusMessages[projectStatus]){
+    showMessage('オペレーター',statusMessages[projectStatus])
+   }
   }
 
   previousProjectIdRef.current=projectId
- },[currentProject?.id])
+  previousProjectStatusRef.current=projectStatus
+ },[currentProject?.id,currentProject?.status,currentProject?.name,showMessage])
 
  const renderContent=()=>{
   switch(activeTab){
