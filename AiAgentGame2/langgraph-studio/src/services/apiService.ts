@@ -3,7 +3,8 @@ import type{Project}from'@/types/project'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 
-const API_BASE_URL='http://localhost:5000'
+// 環境変数からURLを取得（未設定の場合はデフォルト値を使用）
+const API_BASE_URL=import.meta.env.VITE_API_BASE_URL||'http://localhost:5000'
 
 export interface ApiErrorDetail{
  message:string
@@ -360,14 +361,9 @@ export interface ApiAIRequestStats{
 }
 
 export const aiRequestApi={
- getStats:async(_projectId:string):Promise<ApiAIRequestStats>=>{
-  return{
-   total:16,
-   processing:4,
-   pending:4,
-   completed:8,
-   failed:0
-  }
+ getStats:async(projectId:string):Promise<ApiAIRequestStats>=>{
+  const response=await api.get(`/api/projects/${projectId}/ai-requests/stats`)
+  return response.data
  }
 }
 
@@ -578,6 +574,99 @@ export interface AIProviderTestResult{
 export const aiProviderApi={
  testConnection:async(providerType:string,config:Record<string,unknown>):Promise<AIProviderTestResult>=>{
   const response=await api.post('/api/ai-providers/test',{providerType,config})
+  return response.data
+ }
+}
+
+// === System Configuration APIs ===
+
+export interface ModelInfo{
+ id:string
+ label:string
+ recommended?:boolean
+}
+
+export interface ProviderConfig{
+ label:string
+ models:ModelInfo[]
+ defaultModel:string
+ endpoint:string
+}
+
+export interface TokenPricing{
+ input:number
+ output:number
+ unit:string
+}
+
+export interface ModelsConfig{
+ providers:Record<string,ProviderConfig>
+ tokenPricing:Record<string,TokenPricing>
+ defaults:{temperature:number;maxTokens:number}
+ currency:string
+}
+
+export interface PlatformOption{
+ value:string
+ label:string
+ description:string
+}
+
+export interface ScopeOption{
+ value:string
+ label:string
+ description:string
+}
+
+export interface LLMProviderOption{
+ value:string
+ label:string
+ recommended?:boolean
+}
+
+export interface ProjectOptionsConfig{
+ platforms:PlatformOption[]
+ scopes:ScopeOption[]
+ llmProviders:LLMProviderOption[]
+ projectTemplates:{value:string;label:string}[]
+ defaults:{platform:string;scope:string;llmProvider:string;projectTemplate:string}
+}
+
+export interface FileExtensionCategory{
+ extensions:string[]
+ label:string
+ mimeTypes:string[]
+}
+
+export interface FileExtensionsConfig{
+ categories:Record<string,FileExtensionCategory>
+ scanDirectories:string[]
+ defaultCategory:string
+}
+
+export const configApi={
+ getModels:async():Promise<ModelsConfig>=>{
+  const response=await api.get('/api/config/models')
+  return response.data
+ },
+
+ getModelPricing:async(modelId:string):Promise<{modelId:string;pricing:TokenPricing}>=>{
+  const response=await api.get(`/api/config/models/pricing/${modelId}`)
+  return response.data
+ },
+
+ getProjectOptions:async():Promise<ProjectOptionsConfig>=>{
+  const response=await api.get('/api/config/project-options')
+  return response.data
+ },
+
+ getFileExtensions:async():Promise<FileExtensionsConfig>=>{
+  const response=await api.get('/api/config/file-extensions')
+  return response.data
+ },
+
+ getAgentsConfig:async():Promise<Record<string,unknown>>=>{
+  const response=await api.get('/api/config/agents')
   return response.data
  }
 }

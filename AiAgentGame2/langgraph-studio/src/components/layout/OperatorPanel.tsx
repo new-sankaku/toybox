@@ -2,10 +2,12 @@ import{useNavigatorStore}from'@/stores/navigatorStore'
 import{cn}from'@/lib/utils'
 
 export default function OperatorPanel():JSX.Element{
- const{isActive,isConnecting,showMessage}=useNavigatorStore()
+ const{isVisible,currentMessage,showMessage}=useNavigatorStore()
+
+ const isActive=isVisible&&currentMessage!==null
 
  const handleIdleClick=()=>{
-  if(!isActive&&!isConnecting){
+  if(!isActive){
    showMessage('オペレーター','システム状態は正常です。全エージェントが稼働中。何かあればお知らせください。')
   }
  }
@@ -15,12 +17,11 @@ export default function OperatorPanel():JSX.Element{
    <div
     className={cn(
      'operator-frame',
-     isConnecting&&'operator-connecting',
-     !isActive&&!isConnecting&&'operator-idle',
-     !isActive&&!isConnecting&&'cursor-pointer'
+     !isActive&&'operator-idle',
+     !isActive&&'cursor-pointer'
     )}
     onClick={handleIdleClick}
-    title={!isActive&&!isConnecting?'クリックでオペレーター呼び出し':undefined}
+    title={!isActive?'クリックでオペレーター呼び出し':undefined}
    >
     <div className="operator-header">
      <span className="operator-diamond">◇</span>
@@ -28,18 +29,17 @@ export default function OperatorPanel():JSX.Element{
      <div className="operator-status">
       <span className={cn(
        'operator-status-dot',
-       isActive?'operator-status-online':
-       isConnecting?'operator-status-connecting':'operator-status-offline'
+       isActive?'operator-status-online':'operator-status-offline'
       )}/>
       <span className="operator-status-text">
-       {isActive?'ONLINE':isConnecting?'CONNECTING':'STANDBY'}
+       {isActive?'ONLINE':'STANDBY'}
       </span>
      </div>
     </div>
 
     <div className="operator-portrait">
      <div className="operator-portrait-inner">
-      {(isActive||isConnecting)?(
+      {isActive?(
        <svg viewBox="0 0 100 100" className="operator-icon">
         <circle cx="50" cy="35" r="20" fill="none" stroke="currentColor" strokeWidth="2"/>
         <circle cx="43" cy="32" r="3" fill="currentColor"/>
@@ -59,14 +59,13 @@ export default function OperatorPanel():JSX.Element{
        </svg>
       )}
      </div>
-     {isConnecting&&<div className="operator-noise"/>}
      {isActive&&<div className="operator-scanline"/>}
     </div>
 
     <div className="operator-footer">
      <div className="operator-line"/>
      <span className="operator-label">
-      {isConnecting?'CONNECTING...':isActive?'TRANSMISSION':'NO SIGNAL'}
+      {isActive?'TRANSMISSION':'NO SIGNAL'}
      </span>
      <div className="operator-line"/>
     </div>

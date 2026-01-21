@@ -1,9 +1,9 @@
 import{useNavigatorStore}from'@/stores/navigatorStore'
 
 export default function DialogueBar():JSX.Element|null{
- const{isActive,currentMessage,dismissMessage}=useNavigatorStore()
+ const{isVisible,currentMessage,dismissMessage}=useNavigatorStore()
 
- if(!isActive||!currentMessage){
+ if(!isVisible||!currentMessage){
   return null
  }
 

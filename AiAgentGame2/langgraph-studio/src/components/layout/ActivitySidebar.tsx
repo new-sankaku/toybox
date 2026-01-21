@@ -1,6 +1,7 @@
 import{useState,useEffect,useRef}from'react'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
+import{useNavigatorStore}from'@/stores/navigatorStore'
 import{logsApi,checkpointApi,metricsApi,agentApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiCheckpoint,type ApiProjectMetrics,type ApiAgent,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
@@ -51,6 +52,7 @@ function formatSize(bytes:number):string{
 export default function ActivitySidebar():JSX.Element{
  const{currentProject,dataVersion}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
+ const{showMessage}=useNavigatorStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
  const[metrics,setMetrics]=useState<ApiProjectMetrics|null>(null)
  const[agents,setAgents]=useState<ApiAgent[]>([])
@@ -124,6 +126,7 @@ export default function ActivitySidebar():JSX.Element{
    checkpoints:pendingCheckpoints,
    assets:pendingAssets,
    logs:logs.length,
+   errors:errorLogs,
    generating:generatingCount
   }
 
@@ -134,6 +137,17 @@ export default function ActivitySidebar():JSX.Element{
     newHighlights[key]=true
    }
   })
+
+  // Show navigator messages for important changes
+  if(prevValues.current.checkpoints!==undefined&&pendingCheckpoints>prevValues.current.checkpoints){
+   showMessage('オペレーター',`新しいチェックポイントが${pendingCheckpoints-prevValues.current.checkpoints}件追加されました。承認をお願いします。`)
+  }
+  if(prevValues.current.assets!==undefined&&pendingAssets>prevValues.current.assets){
+   showMessage('オペレーター',`新しいアセットが${pendingAssets-prevValues.current.assets}件生成されました。確認をお願いします。`)
+  }
+  if(prevValues.current.errors!==undefined&&errorLogs>prevValues.current.errors){
+   showMessage('オペレーター','警告：新しいエラーが検出されました。ログを確認してください。')
+  }
 
   if(Object.keys(newHighlights).length>0){
    setHighlights(prev=>({...prev,...newHighlights}))
@@ -150,7 +164,7 @@ export default function ActivitySidebar():JSX.Element{
   }
 
   prevValues.current=currentValues
- },[metrics?.totalTokensUsed,completedAgents,pendingCheckpoints,pendingAssets,logs.length,generatingCount])
+ },[metrics?.totalTokensUsed,completedAgents,pendingCheckpoints,pendingAssets,logs.length,errorLogs,generatingCount,showMessage])
 
  if(!currentProject){
   return(

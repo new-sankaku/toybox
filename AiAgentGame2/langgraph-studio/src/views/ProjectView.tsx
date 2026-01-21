@@ -10,6 +10,14 @@ import type{Project,ProjectStatus}from'@/types/project'
 import type{FileCategory}from'@/types/uploadedFile'
 import{cn}from'@/lib/utils'
 import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload,FileText,Image,Music,File}from'lucide-react'
+import{
+ PLATFORM_OPTIONS,
+ SCOPE_OPTIONS,
+ PROJECT_DEFAULTS,
+ type Platform,
+ type Scope,
+ type LLMProvider
+}from'@/config/projectOptions'
 
 interface SelectedFile{
  file:File
@@ -28,23 +36,6 @@ interface UploadedFile{
  uploadedAt:string
 }
 
-type Platform='web-canvas'|'web-dom'|'electron'
-type Scope='prototype'|'demo'|'standard'|'full'
-type LLMProvider='claude'|'gpt4'
-
-const platformOptions:{value:Platform;label:string;desc:string}[]=[
- {value:'web-canvas',label:'ブラウザゲーム (Canvas)',desc:'2D/3Dゲーム、HTML5 Canvas+JavaScript'},
- {value:'web-dom',label:'ブラウザゲーム (DOM)',desc:'テキストベース、カードゲーム、HTML+CSS+JavaScript'},
- {value:'electron',label:'デスクトップアプリ',desc:'Win/Mac/Linux対応、Electron+JavaScript'},
-]
-
-const scopeOptions:{value:Scope;label:string;desc:string}[]=[
- {value:'prototype',label:'プロトタイプ',desc:'動作確認用の最小実装'},
- {value:'demo',label:'デモ版',desc:'見せられるレベルの完成度'},
- {value:'standard',label:'スタンダード',desc:'完全な1本のゲーム'},
- {value:'full',label:'フル版',desc:'商用レベルの完成度'},
-]
-
 interface NewProjectForm{
  name:string
  userIdea:string
@@ -58,9 +49,9 @@ const initialForm:NewProjectForm={
  name:'',
  userIdea:'',
  references:'',
- platform:'web-canvas',
- scope:'demo',
- llmProvider:'claude'
+ platform:PROJECT_DEFAULTS.platform,
+ scope:PROJECT_DEFAULTS.scope,
+ llmProvider:PROJECT_DEFAULTS.llmProvider
 }
 
 const statusLabels:Record<ProjectStatus,string>={
@@ -503,7 +494,7 @@ export default function ProjectView():JSX.Element{
            プラットフォーム
           </label>
           <div className="grid grid-cols-3 gap-2">
-           {platformOptions.map((opt)=>(
+           {PLATFORM_OPTIONS.map((opt)=>(
             <button
              key={opt.value}
              type="button"
@@ -516,7 +507,7 @@ export default function ProjectView():JSX.Element{
 )}
             >
              <div className="text-nier-small font-medium">{opt.label}</div>
-             <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+             <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
             </button>
 ))}
           </div>
@@ -528,7 +519,7 @@ export default function ProjectView():JSX.Element{
            スコープ（ゲームの規模）
           </label>
           <div className="grid grid-cols-4 gap-2">
-           {scopeOptions.map((opt)=>(
+           {SCOPE_OPTIONS.map((opt)=>(
             <button
              key={opt.value}
              type="button"
@@ -541,7 +532,7 @@ export default function ProjectView():JSX.Element{
 )}
             >
              <div className="text-nier-small font-medium">{opt.label}</div>
-             <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+             <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
             </button>
 ))}
           </div>
@@ -651,7 +642,7 @@ export default function ProjectView():JSX.Element{
              プラットフォーム
             </label>
             <div className="grid grid-cols-3 gap-2">
-             {platformOptions.map((opt)=>(
+             {PLATFORM_OPTIONS.map((opt)=>(
               <button
                key={opt.value}
                type="button"
@@ -664,7 +655,7 @@ export default function ProjectView():JSX.Element{
 )}
               >
                <div className="text-nier-small font-medium">{opt.label}</div>
-               <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+               <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
               </button>
 ))}
             </div>
@@ -676,7 +667,7 @@ export default function ProjectView():JSX.Element{
              スコープ
             </label>
             <div className="grid grid-cols-4 gap-2">
-             {scopeOptions.map((opt)=>(
+             {SCOPE_OPTIONS.map((opt)=>(
               <button
                key={opt.value}
                type="button"
@@ -689,7 +680,7 @@ export default function ProjectView():JSX.Element{
 )}
               >
                <div className="text-nier-small font-medium">{opt.label}</div>
-               <div className="text-nier-caption text-nier-text-light">{opt.desc}</div>
+               <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
               </button>
 ))}
             </div>

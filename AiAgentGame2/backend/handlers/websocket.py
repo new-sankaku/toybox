@@ -1,6 +1,32 @@
 from testdata import TestDataStore
 
 
+def broadcast_navigator_message(sio, project_id: str, speaker: str, text: str, priority: str = "normal"):
+    """
+    Send a navigator message to all clients subscribed to a project.
+
+    Args:
+        sio: Socket.IO server instance
+        project_id: Target project ID (or "global" for all clients)
+        speaker: Speaker name (e.g., "オペレーター", "システム")
+        text: Message text
+        priority: Message priority ("low", "normal", "high", "critical")
+    """
+    message_data = {
+        "speaker": speaker,
+        "text": text,
+        "priority": priority,
+        "source": "server"
+    }
+
+    if project_id == "global":
+        sio.emit('navigator:message', message_data)
+    else:
+        sio.emit('navigator:message', message_data, room=f"project:{project_id}")
+
+    print(f"[Navigator] Sent message to {project_id}: {text[:50]}...")
+
+
 def register_websocket_handlers(sio, data_store: TestDataStore):
 
     @sio.event
@@ -16,7 +42,7 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
         print(f"[WebSocket] Client disconnected: {sid}")
         data_store.remove_all_subscriptions(sid)
 
-    @sio.event
+    @sio.on('subscribe:project')
     def subscribe_project(sid, data):
         project_id = data.get('projectId') if isinstance(data, dict) else data
         print(f"[WebSocket] Client {sid} subscribing to project: {project_id}")
@@ -44,7 +70,7 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
 
         print(f"[WebSocket] Sent state sync to {sid} for project {project_id}")
 
-    @sio.event
+    @sio.on('unsubscribe:project')
     def unsubscribe_project(sid, data):
         project_id = data.get('projectId') if isinstance(data, dict) else data
         print(f"[WebSocket] Client {sid} unsubscribing from project: {project_id}")
@@ -52,7 +78,7 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
         data_store.remove_subscription(project_id, sid)
         sio.leave_room(sid, f"project:{project_id}")
 
-    @sio.event
+    @sio.on('checkpoint:resolve')
     def checkpoint_resolve(sid, data):
         checkpoint_id = data.get('checkpointId')
         resolution = data.get('resolution')
@@ -89,15 +115,3 @@ def register_websocket_handlers(sio, data_store: TestDataStore):
             "checkpoint": checkpoint,
             "agentStatus": agent_status
         }, room=f"project:{project_id}")
-
-    @sio.on('subscribe:project')
-    def on_subscribe_project(sid, data):
-        return subscribe_project(sid, data)
-
-    @sio.on('unsubscribe:project')
-    def on_unsubscribe_project(sid, data):
-        return unsubscribe_project(sid, data)
-
-    @sio.on('checkpoint:resolve')
-    def on_checkpoint_resolve(sid, data):
-        return checkpoint_resolve(sid, data)

@@ -7,6 +7,7 @@ import{Save,Eye,EyeOff,FolderOpen,RefreshCw}from'lucide-react'
 import{QualityCheckSettingsPanel}from'@/components/settings/QualityCheckSettingsPanel'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
 import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
+import{CLAUDE_MODELS,OPENAI_MODELS,DEFAULT_LLM_CONFIG}from'@/types/aiProvider'
 
 interface ConfigSection{
  id:string
@@ -32,9 +33,9 @@ export default function ConfigView():JSX.Element{
  const[config,setConfig]=useState({
   apiProvider:'anthropic',
   apiKey:'',
-  modelId:'claude-3-opus-20240229',
-  temperature:0.7,
-  maxTokens:4096,
+  modelId:DEFAULT_LLM_CONFIG.model,
+  temperature:DEFAULT_LLM_CONFIG.temperature,
+  maxTokens:DEFAULT_LLM_CONFIG.maxTokens,
   outputDir:'./output',
   autoSave:true,
   projectTemplate:'rpg',
@@ -75,9 +76,18 @@ export default function ConfigView():JSX.Element{
  },[])
 
  const handleSave=()=>{
-  console.log('Config saved:',config)
-  //TODO: Implement actual save
+  localStorage.setItem('aiagent-config',JSON.stringify(config))
  }
+
+ useEffect(()=>{
+  const saved=localStorage.getItem('aiagent-config')
+  if(saved){
+   try{
+    const parsed=JSON.parse(saved)
+    setConfig(prev=>({...prev,...parsed}))
+   }catch{}
+  }
+ },[])
 
  return(
   <div className="p-4 animate-nier-fade-in">
@@ -196,14 +206,14 @@ export default function ConfigView():JSX.Element{
           onChange={(e)=>setConfig({...config,modelId:e.target.value})}
          >
           <optgroup label="Anthropic">
-           <option value="claude-3-opus-20240229">Claude 3 Opus (最高品質)</option>
-           <option value="claude-3-sonnet-20240229">Claude 3 Sonnet (バランス)</option>
-           <option value="claude-3-haiku-20240307">Claude 3 Haiku (高速)</option>
+           {CLAUDE_MODELS.map(model=>(
+            <option key={model.id} value={model.id}>{model.label}</option>
+           ))}
           </optgroup>
           <optgroup label="OpenAI">
-           <option value="gpt-4-turbo">GPT-4 Turbo</option>
-           <option value="gpt-4">GPT-4</option>
-           <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+           {OPENAI_MODELS.map(model=>(
+            <option key={model.id} value={model.id}>{model.label}</option>
+           ))}
           </optgroup>
          </select>
         </div>

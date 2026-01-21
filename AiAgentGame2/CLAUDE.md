@@ -14,19 +14,26 @@
 - 外部APIやライブラリの制約・仕様
 - TODO/FIXME（一時的なもの）
 
-## コード圧縮（langgraph-studio）
+## コード圧縮
 
 トークン削減のためコードを圧縮する:
 
 ```bash
+# TypeScript（langgraph-studio）
 cd langgraph-studio
 npm run lint:fix    # ESLint適用（インデント1スペース等）
 npm run format      # 演算子スペース削除
+
+# Python（backend）
+cd backend
+python scripts/remove-spaces.py
 ```
 
-**圧縮ルール:**
-- インデント: 1スペース
+**圧縮ルール（共通）:**
 - コロン/カンマ後: スペースなし
-- 演算子前後: スペースなし
+- アロー演算子前後: スペースなし
 - コメント: 削除（TODO/FIXME以外）
 - 文字列内: 保持
+
+**TypeScript追加ルール:**
+- インデント: 1スペース
