@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-# eventlet monkey_patch must be called before any other imports
+
+
 import eventlet
 eventlet.monkey_patch()
 
@@ -12,7 +12,7 @@ try:
 except ImportError:
     pass
 
-from server import create_app, run_server
+from server import create_app,run_server
 from config import get_config
 
 
@@ -20,10 +20,10 @@ def main():
     config = get_config()
 
     parser = argparse.ArgumentParser(description='AiAgentGame2 Backend Server')
-    parser.add_argument('--port', type=int, default=config.server.port, help='Port to run the server on')
-    parser.add_argument('--host', type=str, default=config.server.host, help='Host to bind to')
-    parser.add_argument('--debug', action='store_true', default=config.server.debug, help='Enable debug mode')
-    parser.add_argument('--mode', type=str, choices=['testdata', 'api'], default=None,
+    parser.add_argument('--port',type=int,default=config.server.port,help='Port to run the server on')
+    parser.add_argument('--host',type=str,default=config.server.host,help='Host to bind to')
+    parser.add_argument('--debug',action='store_true',default=config.server.debug,help='Enable debug mode')
+    parser.add_argument('--mode',type=str,choices=['testdata','api'],default=None,
                         help='Agent mode (overrides AGENT_MODE env)')
 
     args = parser.parse_args()
@@ -43,8 +43,8 @@ def main():
     print(f"  Debug: {args.debug}")
     print("=" * 50)
 
-    app, socketio = create_app()
-    run_server(app, socketio, host=args.host, port=args.port, debug=args.debug)
+    app,socketio = create_app()
+    run_server(app,socketio,host=args.host,port=args.port,debug=args.debug)
 
 
 if __name__ == '__main__':

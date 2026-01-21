@@ -1,8 +1,8 @@
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, AsyncGenerator, Optional, Callable
+from typing import Any,Dict,List,AsyncGenerator,Optional,Callable
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass,field
 
 from .base import (
     AgentRunner,
@@ -16,16 +16,16 @@ from .base import (
 class ApiAgentRunner(AgentRunner):
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-20250514",
-        max_tokens: int = 4096,
+        api_key:Optional[str] = None,
+        model:str = "claude-sonnet-4-20250514",
+        max_tokens:int = 4096,
         **kwargs
     ):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         self.model = model
         self.max_tokens = max_tokens
         self._llm_client = None
-        self._graphs: Dict[AgentType, Any] = {}
+        self._graphs:Dict[AgentType,Any] = {}
         self._prompts = self._load_prompts()
 
     def _get_llm_client(self):
@@ -39,7 +39,7 @@ class ApiAgentRunner(AgentRunner):
                 )
         return self._llm_client
 
-    async def run_agent(self, context: AgentContext) -> AgentOutput:
+    async def run_agent(self,context:AgentContext)->AgentOutput:
         started_at = datetime.now().isoformat()
         tokens_used = 0
         output = {}
@@ -49,7 +49,7 @@ class ApiAgentRunner(AgentRunner):
                 if event["type"] == "output":
                     output = event["data"]
                 elif event["type"] == "tokens":
-                    tokens_used += event["data"].get("count", 0)
+                    tokens_used += event["data"].get("count",0)
 
             return AgentOutput(
                 agent_id=context.agent_id,
@@ -75,121 +75,121 @@ class ApiAgentRunner(AgentRunner):
 
     async def run_agent_stream(
         self,
-        context: AgentContext
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        context:AgentContext
+    )->AsyncGenerator[Dict[str,Any],None]:
         agent_type = context.agent_type
 
         yield {
-            "type": "log",
-            "data": {
-                "level": "info",
-                "message": f"API Agent開始: {agent_type.value}",
-                "timestamp": datetime.now().isoformat()
+            "type":"log",
+            "data":{
+                "level":"info",
+                "message":f"API Agent開始: {agent_type.value}",
+                "timestamp":datetime.now().isoformat()
             }
         }
 
         yield {
-            "type": "progress",
-            "data": {"progress": 10, "current_task": "プロンプト準備中"}
+            "type":"progress",
+            "data":{"progress":10,"current_task":"プロンプト準備中"}
         }
 
         prompt = self._build_prompt(context)
 
         yield {
-            "type": "progress",
-            "data": {"progress": 20, "current_task": "LLM呼び出し中"}
+            "type":"progress",
+            "data":{"progress":20,"current_task":"LLM呼び出し中"}
         }
 
         try:
-            result = await self._call_llm(prompt, context)
+            result = await self._call_llm(prompt,context)
 
             yield {
-                "type": "tokens",
-                "data": {
-                    "count": result.get("tokens_used", 0),
-                    "total": result.get("tokens_used", 0)
+                "type":"tokens",
+                "data":{
+                    "count":result.get("tokens_used",0),
+                    "total":result.get("tokens_used",0)
                 }
             }
 
             yield {
-                "type": "progress",
-                "data": {"progress": 80, "current_task": "出力処理中"}
+                "type":"progress",
+                "data":{"progress":80,"current_task":"出力処理中"}
             }
 
-            output = self._process_output(result, context)
+            output = self._process_output(result,context)
 
             yield {
-                "type": "progress",
-                "data": {"progress": 90, "current_task": "チェックポイント準備"}
+                "type":"progress",
+                "data":{"progress":90,"current_task":"チェックポイント準備"}
             }
 
-            checkpoint_data = self._generate_checkpoint(context, output)
+            checkpoint_data = self._generate_checkpoint(context,output)
             yield {
-                "type": "checkpoint",
-                "data": checkpoint_data
+                "type":"checkpoint",
+                "data":checkpoint_data
             }
 
             if context.on_checkpoint:
-                context.on_checkpoint(checkpoint_data["type"], checkpoint_data)
+                context.on_checkpoint(checkpoint_data["type"],checkpoint_data)
 
             yield {
-                "type": "progress",
-                "data": {"progress": 100, "current_task": "完了"}
+                "type":"progress",
+                "data":{"progress":100,"current_task":"完了"}
             }
 
             yield {
-                "type": "output",
-                "data": output
+                "type":"output",
+                "data":output
             }
 
         except Exception as e:
             yield {
-                "type": "log",
-                "data": {
-                    "level": "error",
-                    "message": f"LLM呼び出しエラー: {str(e)}",
-                    "timestamp": datetime.now().isoformat()
+                "type":"log",
+                "data":{
+                    "level":"error",
+                    "message":f"LLM呼び出しエラー: {str(e)}",
+                    "timestamp":datetime.now().isoformat()
                 }
             }
             yield {
-                "type": "error",
-                "data": {"message": str(e)}
+                "type":"error",
+                "data":{"message":str(e)}
             }
             raise
 
         yield {
-            "type": "log",
-            "data": {
-                "level": "info",
-                "message": "API Agent完了",
-                "timestamp": datetime.now().isoformat()
+            "type":"log",
+            "data":{
+                "level":"info",
+                "message":"API Agent完了",
+                "timestamp":datetime.now().isoformat()
             }
         }
 
-    async def _call_llm(self, prompt: str, context: AgentContext) -> Dict[str, Any]:
+    async def _call_llm(self,prompt:str,context:AgentContext)->Dict[str,Any]:
         client = self._get_llm_client()
-        # anthropicはsyncなのでrun_in_executorで非同期化
+
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: client.messages.create(
+            lambda:client.messages.create(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role":"user","content":prompt}
                 ]
             )
         )
 
         return {
-            "content": response.content[0].text,
-            "tokens_used": response.usage.input_tokens + response.usage.output_tokens,
-            "model": response.model,
+            "content":response.content[0].text,
+            "tokens_used":response.usage.input_tokens + response.usage.output_tokens,
+            "model":response.model,
         }
 
-    def _build_prompt(self, context: AgentContext) -> str:
+    def _build_prompt(self,context:AgentContext)->str:
         agent_type = context.agent_type.value
-        base_prompt = self._prompts.get(agent_type, self._default_prompt())
+        base_prompt = self._prompts.get(agent_type,self._default_prompt())
         prompt = base_prompt.format(
             project_concept=context.project_concept or "（未定義）",
             previous_outputs=self._format_previous_outputs(context.previous_outputs),
@@ -198,134 +198,134 @@ class ApiAgentRunner(AgentRunner):
 
         return prompt
 
-    def _format_previous_outputs(self, outputs: Dict[str, Any]) -> str:
+    def _format_previous_outputs(self,outputs:Dict[str,Any])->str:
         if not outputs:
             return "（なし）"
 
         parts = []
-        for agent, output in outputs.items():
-            if isinstance(output, dict) and "content" in output:
+        for agent,output in outputs.items():
+            if isinstance(output,dict) and "content" in output:
                 parts.append(f"## {agent}の出力\n{output['content']}")
             else:
                 parts.append(f"## {agent}の出力\n{output}")
 
         return "\n\n".join(parts)
 
-    def _process_output(self, result: Dict[str, Any], context: AgentContext) -> Dict[str, Any]:
+    def _process_output(self,result:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
         return {
-            "type": "document",
-            "format": "markdown",
-            "content": result.get("content", ""),
-            "metadata": {
-                "model": result.get("model"),
-                "tokens_used": result.get("tokens_used"),
-                "agent_type": context.agent_type.value,
+            "type":"document",
+            "format":"markdown",
+            "content":result.get("content",""),
+            "metadata":{
+                "model":result.get("model"),
+                "tokens_used":result.get("tokens_used"),
+                "agent_type":context.agent_type.value,
             }
         }
 
-    def _generate_checkpoint(self, context: AgentContext, output: Dict[str, Any]) -> Dict[str, Any]:
+    def _generate_checkpoint(self,context:AgentContext,output:Dict[str,Any])->Dict[str,Any]:
         checkpoint_config = {
-            # Phase 1 Leaders
-            AgentType.CONCEPT_LEADER: ("concept_review", "ゲームコンセプトのレビュー"),
-            AgentType.DESIGN_LEADER: ("design_review", "ゲームデザインのレビュー"),
-            AgentType.SCENARIO_LEADER: ("scenario_review", "シナリオのレビュー"),
-            AgentType.CHARACTER_LEADER: ("character_review", "キャラクターのレビュー"),
-            AgentType.WORLD_LEADER: ("world_review", "ワールド設定のレビュー"),
-            AgentType.TASK_SPLIT_LEADER: ("task_review", "タスク分割のレビュー"),
-            # Phase 2 Leaders
-            AgentType.CODE_LEADER: ("code_plan_review", "コード計画のレビュー"),
-            AgentType.ASSET_LEADER: ("asset_plan_review", "アセット計画のレビュー"),
-            # Phase 3 Leaders
-            AgentType.INTEGRATOR_LEADER: ("integration_review", "統合結果のレビュー"),
-            AgentType.TESTER_LEADER: ("test_review", "テスト結果のレビュー"),
-            AgentType.REVIEWER_LEADER: ("final_review", "最終レビュー"),
+
+            AgentType.CONCEPT_LEADER:("concept_review","ゲームコンセプトのレビュー"),
+            AgentType.DESIGN_LEADER:("design_review","ゲームデザインのレビュー"),
+            AgentType.SCENARIO_LEADER:("scenario_review","シナリオのレビュー"),
+            AgentType.CHARACTER_LEADER:("character_review","キャラクターのレビュー"),
+            AgentType.WORLD_LEADER:("world_review","ワールド設定のレビュー"),
+            AgentType.TASK_SPLIT_LEADER:("task_review","タスク分割のレビュー"),
+
+            AgentType.CODE_LEADER:("code_plan_review","コード計画のレビュー"),
+            AgentType.ASSET_LEADER:("asset_plan_review","アセット計画のレビュー"),
+
+            AgentType.INTEGRATOR_LEADER:("integration_review","統合結果のレビュー"),
+            AgentType.TESTER_LEADER:("test_review","テスト結果のレビュー"),
+            AgentType.REVIEWER_LEADER:("final_review","最終レビュー"),
         }
 
-        cp_type, title = checkpoint_config.get(
+        cp_type,title = checkpoint_config.get(
             context.agent_type,
-            ("review", "レビュー依頼")
+            ("review","レビュー依頼")
         )
 
         return {
-            "type": cp_type,
-            "title": title,
-            "description": f"{context.agent_type.value}エージェントの出力を確認してください",
-            "output": output,
-            "timestamp": datetime.now().isoformat()
+            "type":cp_type,
+            "title":title,
+            "description":f"{context.agent_type.value}エージェントの出力を確認してください",
+            "output":output,
+            "timestamp":datetime.now().isoformat()
         }
 
-    def get_supported_agents(self) -> List[AgentType]:
+    def get_supported_agents(self)->List[AgentType]:
         return [
-            # Phase1: 企画 - Leaders
+
             AgentType.CONCEPT_LEADER,
             AgentType.DESIGN_LEADER,
             AgentType.SCENARIO_LEADER,
             AgentType.CHARACTER_LEADER,
             AgentType.WORLD_LEADER,
             AgentType.TASK_SPLIT_LEADER,
-            # Phase1: 企画 - Workers (CONCEPT)
+
             AgentType.RESEARCH_WORKER,
             AgentType.IDEATION_WORKER,
             AgentType.CONCEPT_VALIDATION_WORKER,
-            # Phase1: 企画 - Workers (DESIGN)
+
             AgentType.ARCHITECTURE_WORKER,
             AgentType.COMPONENT_WORKER,
             AgentType.DATAFLOW_WORKER,
-            # Phase1: 企画 - Workers (SCENARIO)
+
             AgentType.STORY_WORKER,
             AgentType.DIALOG_WORKER,
             AgentType.EVENT_WORKER,
-            # Phase1: 企画 - Workers (CHARACTER)
+
             AgentType.MAIN_CHARACTER_WORKER,
             AgentType.NPC_WORKER,
             AgentType.RELATIONSHIP_WORKER,
-            # Phase1: 企画 - Workers (WORLD)
+
             AgentType.GEOGRAPHY_WORKER,
             AgentType.LORE_WORKER,
             AgentType.SYSTEM_WORKER,
-            # Phase1: 企画 - Workers (TASK_SPLIT)
+
             AgentType.ANALYSIS_WORKER,
             AgentType.DECOMPOSITION_WORKER,
             AgentType.SCHEDULE_WORKER,
-            # Phase2: 開発 - Leaders
+
             AgentType.CODE_LEADER,
             AgentType.ASSET_LEADER,
-            # Phase2: 開発 - Workers
+
             AgentType.CODE_WORKER,
             AgentType.ASSET_WORKER,
-            # Phase3: 品質 - Leaders
+
             AgentType.INTEGRATOR_LEADER,
             AgentType.TESTER_LEADER,
             AgentType.REVIEWER_LEADER,
-            # Phase3: 品質 - Workers (INTEGRATOR)
+
             AgentType.DEPENDENCY_WORKER,
             AgentType.BUILD_WORKER,
             AgentType.INTEGRATION_VALIDATION_WORKER,
-            # Phase3: 品質 - Workers (TESTER)
+
             AgentType.UNIT_TEST_WORKER,
             AgentType.INTEGRATION_TEST_WORKER,
             AgentType.E2E_TEST_WORKER,
             AgentType.PERFORMANCE_TEST_WORKER,
-            # Phase3: 品質 - Workers (REVIEWER)
+
             AgentType.CODE_REVIEW_WORKER,
             AgentType.ASSET_REVIEW_WORKER,
             AgentType.GAMEPLAY_REVIEW_WORKER,
             AgentType.COMPLIANCE_WORKER,
         ]
 
-    def validate_context(self, context: AgentContext) -> bool:
+    def validate_context(self,context:AgentContext)->bool:
         if not self.api_key:
             return False
         if context.agent_type not in self.get_supported_agents():
             return False
         return True
 
-    def _load_prompts(self) -> Dict[str, str]:
+    def _load_prompts(self)->Dict[str,str]:
         return {
-            # ========================================
-            # Phase 1: CONCEPT_LEADER
-            # ========================================
-            "concept_leader": """あなたはゲームコンセプト設計チームのリーダー「Concept Leader」です。
+
+
+
+            "concept_leader":"""あなたはゲームコンセプト設計チームのリーダー「Concept Leader」です。
 配下のWorkerを指揮してゲームコンセプトを策定することが役割です。
 
 ## あなたの専門性
@@ -377,8 +377,8 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # CONCEPT Workers
-            "research_worker": """あなたはマーケットリサーチャー「Research Worker」です。
+
+            "research_worker":"""あなたはマーケットリサーチャー「Research Worker」です。
 
 ## タスク
 市場調査と類似ゲーム分析を行ってください。
@@ -402,7 +402,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "ideation_worker": """あなたはゲームコンセプトクリエイター「Ideation Worker」です。
+            "ideation_worker":"""あなたはゲームコンセプトクリエイター「Ideation Worker」です。
 
 ## タスク
 ゲームコンセプトの要素を創出してください。
@@ -431,7 +431,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "concept_validation_worker": """あなたはコンセプト検証スペシャリスト「Validation Worker」です。
+            "concept_validation_worker":"""あなたはコンセプト検証スペシャリスト「Validation Worker」です。
 
 ## タスク
 コンセプトの整合性と実現可能性を検証してください。
@@ -455,10 +455,10 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # ========================================
-            # Phase 1: DESIGN_LEADER
-            # ========================================
-            "design_leader": """あなたはゲームデザインチームのリーダー「Design Leader」です。
+
+
+
+            "design_leader":"""あなたはゲームデザインチームのリーダー「Design Leader」です。
 配下のWorkerを指揮してゲームの技術設計を行うことが役割です。
 
 ## あなたの専門性
@@ -494,8 +494,8 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # DESIGN Workers
-            "architecture_worker": """あなたはシステムアーキテクト「Architecture Worker」です。
+
+            "architecture_worker":"""あなたはシステムアーキテクト「Architecture Worker」です。
 
 ## タスク
 ゲームシステムのアーキテクチャを設計してください。
@@ -518,7 +518,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "component_worker": """あなたはコンポーネント設計者「Component Worker」です。
+            "component_worker":"""あなたはコンポーネント設計者「Component Worker」です。
 
 ## タスク
 個別コンポーネントの詳細設計を行ってください。
@@ -542,7 +542,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "dataflow_worker": """あなたはデータフロー設計者「DataFlow Worker」です。
+            "dataflow_worker":"""あなたはデータフロー設計者「DataFlow Worker」です。
 
 ## タスク
 データフローと状態管理を設計してください。
@@ -562,10 +562,10 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # ========================================
-            # Phase 1: SCENARIO_LEADER
-            # ========================================
-            "scenario_leader": """あなたはシナリオチームのリーダー「Scenario Leader」です。
+
+
+
+            "scenario_leader":"""あなたはシナリオチームのリーダー「Scenario Leader」です。
 配下のWorkerを指揮してゲームシナリオを作成することが役割です。
 
 ## あなたの専門性
@@ -602,8 +602,8 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # SCENARIO Workers
-            "story_worker": """あなたはストーリーライター「Story Worker」です。
+
+            "story_worker":"""あなたはストーリーライター「Story Worker」です。
 
 ## タスク
 メインストーリーと章構成を作成してください。
@@ -626,7 +626,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "dialog_worker": """あなたはダイアログライター「Dialog Worker」です。
+            "dialog_worker":"""あなたはダイアログライター「Dialog Worker」です。
 
 ## タスク
 キャラクターの会話・ダイアログを作成してください。
@@ -651,7 +651,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "event_worker": """あなたはイベント設計者「Event Worker」です。
+            "event_worker":"""あなたはイベント設計者「Event Worker」です。
 
 ## タスク
 ゲームイベントと分岐を設計してください。
@@ -676,10 +676,10 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # ========================================
-            # Phase 1: CHARACTER_LEADER
-            # ========================================
-            "character_leader": """あなたはキャラクターデザインチームのリーダー「Character Leader」です。
+
+
+
+            "character_leader":"""あなたはキャラクターデザインチームのリーダー「Character Leader」です。
 配下のWorkerを指揮してキャラクター設計を行うことが役割です。
 
 ## あなたの専門性
@@ -717,8 +717,8 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            # CHARACTER Workers
-            "main_character_worker": """あなたはメインキャラクターデザイナー「MainCharacter Worker」です。
+
+            "main_character_worker":"""あなたはメインキャラクターデザイナー「MainCharacter Worker」です。
 
 ## タスク
 プレイヤーキャラクターと主要キャラクターを設計してください。
@@ -754,7 +754,7 @@ class ApiAgentRunner(AgentRunner):
 ```
 """,
 
-            "npc_worker": """あなたはNPC・敵キャラデザイナー「NPC Worker」です。
+            "npc_worker":"""あなたはNPC・敵キャラデザイナー「NPC Worker」です。
 
 ## タスク
 NPC、敵キャラクター、ボスを設計してください。
@@ -786,7 +786,7 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            "relationship_worker": """あなたはキャラクター関係性デザイナー「Relationship Worker」です。
+            "relationship_worker":"""あなたはキャラクター関係性デザイナー「Relationship Worker」です。
 
 ## タスク
 キャラクター間の関係性と相関図を設計してください。
@@ -810,10 +810,10 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            # ========================================
-            # Phase 1: WORLD_LEADER
-            # ========================================
-            "world_leader": """あなたはワールドビルディングチームのリーダー「World Leader」です。
+
+
+
+            "world_leader":"""あなたはワールドビルディングチームのリーダー「World Leader」です。
 配下のWorkerを指揮して世界設計を行うことが役割です。
 
 ## あなたの専門性
@@ -852,8 +852,8 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            # WORLD Workers
-            "geography_worker": """あなたは地理設計者「Geography Worker」です。
+
+            "geography_worker":"""あなたは地理設計者「Geography Worker」です。
 
 ## タスク
 地理・マップ・ロケーションを設計してください。
@@ -892,7 +892,7 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            "lore_worker": """あなたは設定・世界観ライター「Lore Worker」です。
+            "lore_worker":"""あなたは設定・世界観ライター「Lore Worker」です。
 
 ## タスク
 歴史・設定・世界観を設計してください。
@@ -922,7 +922,7 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            "system_worker": """あなたは経済・勢力システムデザイナー「System Worker」です。
+            "system_worker":"""あなたは経済・勢力システムデザイナー「System Worker」です。
 
 ## タスク
 経済システムと勢力を設計してください。
@@ -954,10 +954,10 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            # ========================================
-            # Phase 1: TASK_SPLIT_LEADER
-            # ========================================
-            "task_split_leader": """あなたはプロジェクト管理チームのリーダー「TaskSplit Leader」です。
+
+
+
+            "task_split_leader":"""あなたはプロジェクト管理チームのリーダー「TaskSplit Leader」です。
 配下のWorkerを指揮してタスク分解とスケジュール作成を行うことが役割です。
 
 ## あなたの専門性
@@ -995,8 +995,8 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            # TASK_SPLIT Workers
-            "analysis_worker": """あなたは要件分析者「Analysis Worker」です。
+
+            "analysis_worker":"""あなたは要件分析者「Analysis Worker」です。
 
 ## タスク
 企画成果物から要件を分析し、機能を抽出してください。
@@ -1029,7 +1029,7 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            "decomposition_worker": """あなたはタスク分解スペシャリスト「Decomposition Worker」です。
+            "decomposition_worker":"""あなたはタスク分解スペシャリスト「Decomposition Worker」です。
 
 ## タスク
 機能をコードタスクとアセットタスクに分解してください。
@@ -1072,7 +1072,7 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            "schedule_worker": """あなたはスケジュール計画者「Schedule Worker」です。
+            "schedule_worker":"""あなたはスケジュール計画者「Schedule Worker」です。
 
 ## タスク
 イテレーション計画とマイルストーンを作成してください。
@@ -1115,10 +1115,10 @@ NPC、敵キャラクター、ボスを設計してください。
 ```
 """,
 
-            # ========================================
-            # Phase2: Code Leader Agent
-            # ========================================
-            "code_leader": """あなたはゲーム開発チームのコードリーダー「Code Leader」です。
+
+
+
+            "code_leader":"""あなたはゲーム開発チームのコードリーダー「Code Leader」です。
 Phase1で作成された設計とタスク計画に基づき、高品質なコードを実装することが役割です。
 
 ## あなたの専門性
@@ -1213,10 +1213,10 @@ Phase1で作成された設計とタスク計画に基づき、高品質なコ�
 ```
 """,
 
-            # ========================================
-            # Phase2: Asset Leader Agent
-            # ========================================
-            "asset_leader": """あなたはゲーム開発チームのアセットリーダー「Asset Leader」です。
+
+
+
+            "asset_leader":"""あなたはゲーム開発チームのアセットリーダー「Asset Leader」です。
 Phase1で作成された仕様に基づき、高品質なアセットを制作することが役割です。
 
 ## あなたの専門性
@@ -1312,10 +1312,10 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            # ========================================
-            # Phase 3: INTEGRATOR_LEADER
-            # ========================================
-            "integrator_leader": """あなたは統合チームのリーダー「Integrator Leader」です。
+
+
+
+            "integrator_leader":"""あなたは統合チームのリーダー「Integrator Leader」です。
 配下のWorkerを指揮して成果物の統合とビルドを行うことが役割です。
 
 ## あなたの専門性
@@ -1354,8 +1354,8 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            # INTEGRATOR Workers
-            "dependency_worker": """あなたは依存関係管理者「Dependency Worker」です。
+
+            "dependency_worker":"""あなたは依存関係管理者「Dependency Worker」です。
 
 ## タスク
 依存関係の解決とパッケージ管理を行ってください。
@@ -1380,7 +1380,7 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            "build_worker": """あなたはビルドエンジニア「Build Worker」です。
+            "build_worker":"""あなたはビルドエンジニア「Build Worker」です。
 
 ## タスク
 ビルドの実行とバンドル生成を行ってください。
@@ -1410,7 +1410,7 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            "integration_validation_worker": """あなたは統合検証者「IntegrationValidation Worker」です。
+            "integration_validation_worker":"""あなたは統合検証者「IntegrationValidation Worker」です。
 
 ## タスク
 起動テストと基本動作確認を行ってください。
@@ -1435,10 +1435,10 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            # ========================================
-            # Phase 3: TESTER_LEADER
-            # ========================================
-            "tester_leader": """あなたはテストチームのリーダー「Tester Leader」です。
+
+
+
+            "tester_leader":"""あなたはテストチームのリーダー「Tester Leader」です。
 配下のWorkerを指揮して包括的なテストを実行することが役割です。
 
 ## あなたの専門性
@@ -1478,8 +1478,8 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            # TESTER Workers
-            "unit_test_worker": """あなたはユニットテストエンジニア「UnitTest Worker」です。
+
+            "unit_test_worker":"""あなたはユニットテストエンジニア「UnitTest Worker」です。
 
 ## タスク
 ユニットテストを実行し、カバレッジを測定してください。
@@ -1509,7 +1509,7 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            "integration_test_worker": """あなたは統合テストエンジニア「IntegrationTest Worker」です。
+            "integration_test_worker":"""あなたは統合テストエンジニア「IntegrationTest Worker」です。
 
 ## タスク
 統合テストを実行してください。
@@ -1532,7 +1532,7 @@ Phase1で作成された仕様に基づき、高品質なアセットを制作�
 ```
 """,
 
-            "e2e_test_worker": """あなたはE2Eテストエンジニア「E2ETest Worker」です。
+            "e2e_test_worker":"""あなたはE2Eテストエンジニア「E2ETest Worker」です。
 
 ## タスク
 E2Eシナリオテストを実行してください。
@@ -1560,7 +1560,7 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            "performance_test_worker": """あなたはパフォーマンステストエンジニア「PerformanceTest Worker」です。
+            "performance_test_worker":"""あなたはパフォーマンステストエンジニア「PerformanceTest Worker」です。
 
 ## タスク
 パフォーマンステストと負荷テストを実行してください。
@@ -1583,10 +1583,10 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            # ========================================
-            # Phase 3: REVIEWER_LEADER
-            # ========================================
-            "reviewer_leader": """あなたはレビューチームのリーダー「Reviewer Leader」です。
+
+
+
+            "reviewer_leader":"""あなたはレビューチームのリーダー「Reviewer Leader」です。
 配下のWorkerを指揮して総合的なレビューを行いリリース判定することが役割です。
 
 ## あなたの専門性
@@ -1627,8 +1627,8 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            # REVIEWER Workers
-            "code_review_worker": """あなたはコードレビューア「CodeReview Worker」です。
+
+            "code_review_worker":"""あなたはコードレビューア「CodeReview Worker」です。
 
 ## タスク
 コード品質をレビューしてください。
@@ -1664,7 +1664,7 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            "asset_review_worker": """あなたはアセットレビューア「AssetReview Worker」です。
+            "asset_review_worker":"""あなたはアセットレビューア「AssetReview Worker」です。
 
 ## タスク
 アセット品質をレビューしてください。
@@ -1697,7 +1697,7 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            "gameplay_review_worker": """あなたはゲームプレイレビューア「GameplayReview Worker」です。
+            "gameplay_review_worker":"""あなたはゲームプレイレビューア「GameplayReview Worker」です。
 
 ## タスク
 ゲームプレイとUXをレビューしてください。
@@ -1730,7 +1730,7 @@ E2Eシナリオテストを実行してください。
 ```
 """,
 
-            "compliance_worker": """あなたは仕様整合性チェッカー「Compliance Worker」です。
+            "compliance_worker":"""あなたは仕様整合性チェッカー「Compliance Worker」です。
 
 ## タスク
 仕様との整合性をチェックしてください。
@@ -1760,7 +1760,7 @@ E2Eシナリオテストを実行してください。
 """,
         }
 
-    def _default_prompt(self) -> str:
+    def _default_prompt(self)->str:
         """デフォルトプロンプト"""
         return """あなたはゲーム開発の専門家です。
 
@@ -1779,21 +1779,21 @@ E2Eシナリオテストを実行してください。
 
 @dataclass
 class QualityCheckResult:
-    passed: bool
-    issues: List[str] = field(default_factory=list)
-    score: float = 1.0
-    retry_needed: bool = False
-    human_review_needed: bool = False
+    passed:bool
+    issues:List[str] = field(default_factory=list)
+    score:float = 1.0
+    retry_needed:bool = False
+    human_review_needed:bool = False
 
 
 @dataclass
 class WorkerTaskResult:
-    worker_type: str
-    status: str  # "completed" | "failed" | "needs_retry" | "needs_human_review"
-    output: Dict[str, Any] = field(default_factory=dict)
-    quality_check: Optional[QualityCheckResult] = None
-    retries: int = 0
-    error: Optional[str] = None
+    worker_type:str
+    status:str
+    output:Dict[str,Any] = field(default_factory=dict)
+    quality_check:Optional[QualityCheckResult] = None
+    retries:int = 0
+    error:Optional[str] = None
 
 
 class LeaderWorkerOrchestrator:
@@ -1801,27 +1801,27 @@ class LeaderWorkerOrchestrator:
 
     def __init__(
         self,
-        agent_runner: ApiAgentRunner,
-        quality_settings: Dict[str, Any],
-        on_progress: Optional[Callable[[str, int, str], None]] = None,
-        on_checkpoint: Optional[Callable[[str, Dict], None]] = None,
+        agent_runner:ApiAgentRunner,
+        quality_settings:Dict[str,Any],
+        on_progress:Optional[Callable[[str,int,str],None]] = None,
+        on_checkpoint:Optional[Callable[[str,Dict],None]] = None,
     ):
         self.agent_runner = agent_runner
         self.quality_settings = quality_settings
         self.on_progress = on_progress
         self.on_checkpoint = on_checkpoint
 
-    async def run_leader_with_workers(self, leader_context: AgentContext) -> Dict[str, Any]:
+    async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
         results = {
-            "leader_output": {},
-            "worker_results": [],
-            "final_output": {},
-            "checkpoint": None,
-            "human_review_required": [],
+            "leader_output":{},
+            "worker_results":[],
+            "final_output":{},
+            "checkpoint":None,
+            "human_review_required":[],
         }
 
-        # 1. Leader分析フェーズ
-        self._emit_progress(leader_context.agent_type.value, 10, "Leader分析開始")
+
+        self._emit_progress(leader_context.agent_type.value,10,"Leader分析開始")
 
         leader_output = await self.agent_runner.run_agent(leader_context)
         results["leader_output"] = leader_output.output
@@ -1829,26 +1829,26 @@ class LeaderWorkerOrchestrator:
         if leader_output.status == AgentStatus.FAILED:
             return results
 
-        # worker_tasksを抽出
+
         worker_tasks = self._extract_worker_tasks(leader_output.output)
 
-        self._emit_progress(leader_context.agent_type.value, 30, f"Worker実行開始 ({len(worker_tasks)}タスク)")
+        self._emit_progress(leader_context.agent_type.value,30,f"Worker実行開始 ({len(worker_tasks)}タスク)")
 
-        # 2. 各Worker実行
+
         total_workers = len(worker_tasks)
-        for i, worker_task in enumerate(worker_tasks):
-            worker_type = worker_task.get("worker", "")
-            task_description = worker_task.get("task", "")
+        for i,worker_task in enumerate(worker_tasks):
+            worker_type = worker_task.get("worker","")
+            task_description = worker_task.get("task","")
 
             progress = 30 + int((i / total_workers) * 50)
-            self._emit_progress(leader_context.agent_type.value, progress, f"{worker_type} 実行中: {task_description}")
+            self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中: {task_description}")
 
-            # 品質チェック設定を確認
-            qc_config = self.quality_settings.get(worker_type, {})
-            qc_enabled = qc_config.get("enabled", True)
-            max_retries = qc_config.get("maxRetries", 3)
 
-            # Worker実行
+            qc_config = self.quality_settings.get(worker_type,{})
+            qc_enabled = qc_config.get("enabled",True)
+            max_retries = qc_config.get("maxRetries",3)
+
+
             worker_result = await self._execute_worker(
                 leader_context=leader_context,
                 worker_type=worker_type,
@@ -1859,16 +1859,16 @@ class LeaderWorkerOrchestrator:
 
             results["worker_results"].append(worker_result.__dict__)
 
-            # Human Review要求を集約
+
             if worker_result.status == "needs_human_review":
                 results["human_review_required"].append({
-                    "worker_type": worker_type,
-                    "task": task_description,
-                    "issues": worker_result.quality_check.issues if worker_result.quality_check else [],
+                    "worker_type":worker_type,
+                    "task":task_description,
+                    "issues":worker_result.quality_check.issues if worker_result.quality_check else [],
                 })
 
-        # 3. Leader統合フェーズ
-        self._emit_progress(leader_context.agent_type.value, 85, "Leader統合中")
+
+        self._emit_progress(leader_context.agent_type.value,85,"Leader統合中")
 
         final_output = await self._integrate_outputs(
             leader_context=leader_context,
@@ -1877,45 +1877,45 @@ class LeaderWorkerOrchestrator:
         )
         results["final_output"] = final_output
 
-        # 4. チェックポイント生成
-        self._emit_progress(leader_context.agent_type.value, 95, "チェックポイント生成")
+
+        self._emit_progress(leader_context.agent_type.value,95,"チェックポイント生成")
 
         checkpoint_data = {
-            "type": f"{leader_context.agent_type.value}_review",
-            "title": f"{leader_context.agent_type.value} 成果物レビュー",
-            "output": final_output,
-            "worker_summary": {
-                "total": total_workers,
-                "completed": sum(1 for r in results["worker_results"] if r["status"] == "completed"),
-                "failed": sum(1 for r in results["worker_results"] if r["status"] == "failed"),
-                "needs_review": len(results["human_review_required"]),
+            "type":f"{leader_context.agent_type.value}_review",
+            "title":f"{leader_context.agent_type.value} 成果物レビュー",
+            "output":final_output,
+            "worker_summary":{
+                "total":total_workers,
+                "completed":sum(1 for r in results["worker_results"] if r["status"] == "completed"),
+                "failed":sum(1 for r in results["worker_results"] if r["status"] == "failed"),
+                "needs_review":len(results["human_review_required"]),
             },
-            "human_review_required": results["human_review_required"],
+            "human_review_required":results["human_review_required"],
         }
         results["checkpoint"] = checkpoint_data
 
         if self.on_checkpoint:
-            self.on_checkpoint(checkpoint_data["type"], checkpoint_data)
+            self.on_checkpoint(checkpoint_data["type"],checkpoint_data)
 
-        self._emit_progress(leader_context.agent_type.value, 100, "完了")
+        self._emit_progress(leader_context.agent_type.value,100,"完了")
 
         return results
 
     async def _execute_worker(
         self,
-        leader_context: AgentContext,
-        worker_type: str,
-        task: str,
-        quality_check_enabled: bool,
-        max_retries: int,
-    ) -> WorkerTaskResult:
+        leader_context:AgentContext,
+        worker_type:str,
+        task:str,
+        quality_check_enabled:bool,
+        max_retries:int,
+    )->WorkerTaskResult:
         """
         Workerを実行（品質チェック有無で分岐）
         """
         result = WorkerTaskResult(worker_type=worker_type)
 
         try:
-            # AgentTypeに変換
+
             try:
                 agent_type = AgentType(worker_type)
             except ValueError:
@@ -1953,10 +1953,10 @@ class LeaderWorkerOrchestrator:
 
     async def _run_with_quality_check(
         self,
-        worker_context: AgentContext,
-        worker_type: str,
-        max_retries: int = 3,
-    ) -> WorkerTaskResult:
+        worker_context:AgentContext,
+        worker_type:str,
+        max_retries:int = 3,
+    )->WorkerTaskResult:
         """失敗時は最大max_retries回リトライ、それでも失敗ならHuman Review要求"""
         result = WorkerTaskResult(worker_type=worker_type)
 
@@ -1969,7 +1969,7 @@ class LeaderWorkerOrchestrator:
                 continue
 
             result.output = output.output
-            qc_result = self._perform_quality_check(output.output, worker_type)
+            qc_result = self._perform_quality_check(output.output,worker_type)
             result.quality_check = qc_result
 
             if qc_result.passed:
@@ -1979,8 +1979,8 @@ class LeaderWorkerOrchestrator:
             if retry < max_retries - 1:
                 result.status = "needs_retry"
                 worker_context.previous_outputs[f"{worker_type}_previous_attempt"] = {
-                    "output": output.output,
-                    "issues": qc_result.issues,
+                    "output":output.output,
+                    "issues":qc_result.issues,
                 }
             else:
                 result.status = "needs_human_review"
@@ -1989,11 +1989,11 @@ class LeaderWorkerOrchestrator:
 
         return result
 
-    def _perform_quality_check(self, output: Dict[str, Any], worker_type: str) -> QualityCheckResult:
+    def _perform_quality_check(self,output:Dict[str,Any],worker_type:str)->QualityCheckResult:
         """簡易的なルールベースチェック（本番ではLLMで品質評価）"""
         issues = []
         score = 1.0
-        content = output.get("content", "")
+        content = output.get("content","")
 
         if not content or len(str(content)) < 50:
             issues.append("出力内容が不十分です")
@@ -2002,7 +2002,7 @@ class LeaderWorkerOrchestrator:
         if "```json" in str(content):
             import json
             import re
-            json_match = re.search(r'```json\s*([\s\S]*?)\s*```', str(content))
+            json_match = re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
             if json_match:
                 try:
                     json.loads(json_match.group(1))
@@ -2019,52 +2019,52 @@ class LeaderWorkerOrchestrator:
             retry_needed=not passed,
         )
 
-    def _extract_worker_tasks(self, leader_output: Dict[str, Any]) -> List[Dict[str, Any]]:
-        content = leader_output.get("content", "")
+    def _extract_worker_tasks(self,leader_output:Dict[str,Any])->List[Dict[str,Any]]:
+        content = leader_output.get("content","")
         import json
         import re
 
-        json_match = re.search(r'```json\s*([\s\S]*?)\s*```', str(content))
+        json_match = re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
         if json_match:
             try:
                 data = json.loads(json_match.group(1))
-                return data.get("worker_tasks", [])
+                return data.get("worker_tasks",[])
             except json.JSONDecodeError:
                 pass
 
-        if isinstance(leader_output, dict) and "worker_tasks" in leader_output:
-            return leader_output.get("worker_tasks", [])
+        if isinstance(leader_output,dict) and "worker_tasks" in leader_output:
+            return leader_output.get("worker_tasks",[])
 
         return []
 
     async def _integrate_outputs(
         self,
-        leader_context: AgentContext,
-        leader_output: Dict[str, Any],
-        worker_results: List[Dict[str, Any]],
-    ) -> Dict[str, Any]:
+        leader_context:AgentContext,
+        leader_output:Dict[str,Any],
+        worker_results:List[Dict[str,Any]],
+    )->Dict[str,Any]:
         """Worker結果をマージ（本番ではLeaderに再度LLM呼び出しで統合）"""
         integrated = {
-            "type": "document",
-            "format": "markdown",
-            "leader_summary": leader_output,
-            "worker_outputs": {},
-            "metadata": {
-                "agent_type": leader_context.agent_type.value,
-                "worker_count": len(worker_results),
-                "completed_count": sum(1 for r in worker_results if r.get("status") == "completed"),
+            "type":"document",
+            "format":"markdown",
+            "leader_summary":leader_output,
+            "worker_outputs":{},
+            "metadata":{
+                "agent_type":leader_context.agent_type.value,
+                "worker_count":len(worker_results),
+                "completed_count":sum(1 for r in worker_results if r.get("status") == "completed"),
             }
         }
 
         for result in worker_results:
-            worker_type = result.get("worker_type", "unknown")
+            worker_type = result.get("worker_type","unknown")
             integrated["worker_outputs"][worker_type] = {
-                "status": result.get("status"),
-                "output": result.get("output", {}),
+                "status":result.get("status"),
+                "output":result.get("output",{}),
             }
 
         return integrated
 
-    def _emit_progress(self, agent_type: str, progress: int, message: str):
+    def _emit_progress(self,agent_type:str,progress:int,message:str):
         if self.on_progress:
-            self.on_progress(agent_type, progress, message)
+            self.on_progress(agent_type,progress,message)
