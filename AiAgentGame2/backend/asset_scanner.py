@@ -1,29 +1,32 @@
 import os
 import uuid
 from datetime import datetime
-from typing import List,Dict,Optional
+from typing import List,Dict,Optional,Set
 from pathlib import Path
 
+from config_loader import get_all_extension_categories, get_scan_directories, get_file_extensions_config
 
-IMAGE_EXTENSIONS = {'.webp','.png','.jpg','.jpeg','.gif','.bmp'}
-AUDIO_EXTENSIONS = {'.mp3','.wav','.ogg','.flac','.m4a'}
-VIDEO_EXTENSIONS = {'.mp4','.webm','.avi','.mov','.mkv'}
-DOCUMENT_EXTENSIONS = {'.md','.txt','.json','.yaml','.yml'}
-CODE_EXTENSIONS = {'.py','.js','.ts','.tsx','.jsx','.html','.css'}
+
+# キャッシュ用変数
+_extension_categories: Optional[Dict[str, Set[str]]] = None
+
+
+def _get_extension_categories() -> Dict[str, Set[str]]:
+    """拡張子カテゴリマップを取得（キャッシュ付き）"""
+    global _extension_categories
+    if _extension_categories is None:
+        _extension_categories = get_all_extension_categories()
+    return _extension_categories
 
 
 def get_file_type(filename:str)->str:
     ext = Path(filename).suffix.lower()
-    if ext in IMAGE_EXTENSIONS:
-        return 'image'
-    elif ext in AUDIO_EXTENSIONS:
-        return 'audio'
-    elif ext in VIDEO_EXTENSIONS:
-        return 'video'
-    elif ext in DOCUMENT_EXTENSIONS:
-        return 'document'
-    elif ext in CODE_EXTENSIONS:
-        return 'code'
+    categories = _get_extension_categories()
+
+    for category, extensions in categories.items():
+        if ext in extensions:
+            return category
+
     return 'other'
 
 
@@ -80,7 +83,9 @@ def scan_directory(base_path:str,subdir:str)->List[Dict]:
 
 def scan_all_testdata(testdata_path:str)->List[Dict]:
     all_assets = []
-    for subdir in ['image','mp3','movie']:
+    scan_dirs = get_scan_directories()
+
+    for subdir in scan_dirs:
         assets = scan_directory(testdata_path,subdir)
         all_assets.extend(assets)
         print(f"[AssetScanner] Found {len(assets)} files in {subdir}/")

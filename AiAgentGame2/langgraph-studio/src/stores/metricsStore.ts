@@ -18,6 +18,11 @@ interface CostEstimate{
  currency:string
 }
 
+interface TokenCosts{
+ input:number
+ output:number
+}
+
 interface MetricsState{
 
  projectMetrics:ProjectMetrics|null
@@ -25,19 +30,23 @@ interface MetricsState{
  tokenHistory:TokenUsage[]
  costEstimate:CostEstimate|null
  isLoading:boolean
+ tokenCosts:TokenCosts
+ currency:string
  setProjectMetrics:(metrics:ProjectMetrics|null)=>void
  setAgentMetrics:(metrics:AgentMetrics[])=>void
  updateAgentMetrics:(agentId:string,updates:Partial<AgentMetrics>)=>void
  addTokenUsage:(usage:TokenUsage)=>void
  setCostEstimate:(estimate:CostEstimate|null)=>void
  setLoading:(loading:boolean)=>void
+ setTokenCosts:(costs:TokenCosts,currency?:string)=>void
  reset:()=>void
  getTotalTokens:()=>number
  getTokensByAgent:(agentId:string)=>number
  getEstimatedCost:()=>number
 }
 
-const TOKEN_COSTS={
+// デフォルト値（APIから取得するまでのフォールバック）
+const DEFAULT_TOKEN_COSTS:TokenCosts={
  input:0.003/1000,
  output:0.015/1000
 }
@@ -49,6 +58,8 @@ export const useMetricsStore=create<MetricsState>((set,get)=>({
  tokenHistory:[],
  costEstimate:null,
  isLoading:false,
+ tokenCosts:DEFAULT_TOKEN_COSTS,
+ currency:'USD',
  setProjectMetrics:(metrics)=>set({projectMetrics:metrics}),
 
  setAgentMetrics:(metrics)=>set({agentMetrics:metrics}),
@@ -69,13 +80,20 @@ export const useMetricsStore=create<MetricsState>((set,get)=>({
 
  setLoading:(loading)=>set({isLoading:loading}),
 
+ setTokenCosts:(costs,currency)=>set({
+  tokenCosts:costs,
+  ...(currency?{currency}:{})
+ }),
+
  reset:()=>
   set({
    projectMetrics:null,
    agentMetrics:[],
    tokenHistory:[],
    costEstimate:null,
-   isLoading:false
+   isLoading:false,
+   tokenCosts:DEFAULT_TOKEN_COSTS,
+   currency:'USD'
   }),
  getTotalTokens:()=>{
   const state=get()
@@ -94,18 +112,31 @@ export const useMetricsStore=create<MetricsState>((set,get)=>({
   const totalTokens=state.tokenHistory.reduce((sum,t)=>sum+t.tokensUsed,0)
   const inputTokens=totalTokens*0.3
   const outputTokens=totalTokens*0.7
-  return inputTokens*TOKEN_COSTS.input+outputTokens*TOKEN_COSTS.output
+  return inputTokens*state.tokenCosts.input+outputTokens*state.tokenCosts.output
  }
 }))
-export function calculateCost(inputTokens:number,outputTokens:number):CostEstimate{
- const inputCost=inputTokens*TOKEN_COSTS.input
- const outputCost=outputTokens*TOKEN_COSTS.output
+
+/**
+ * コストを計算する
+ * @param inputTokens 入力トークン数
+ * @param outputTokens 出力トークン数
+ * @param costs オプション: カスタムコスト設定（未指定時はストアの値を使用）
+ */
+export function calculateCost(
+ inputTokens:number,
+ outputTokens:number,
+ costs?:{input:number;output:number;currency?:string}
+):CostEstimate{
+ const tokenCosts=costs||useMetricsStore.getState().tokenCosts
+ const currency=costs?.currency||useMetricsStore.getState().currency
+ const inputCost=inputTokens*tokenCosts.input
+ const outputCost=outputTokens*tokenCosts.output
  return{
   inputTokens,
   outputTokens,
   inputCost,
   outputCost,
   totalCost:inputCost+outputCost,
-  currency:'USD'
+  currency
  }
 }
