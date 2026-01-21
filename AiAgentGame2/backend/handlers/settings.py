@@ -8,6 +8,13 @@ from agent_settings import (
     HIGH_COST_AGENTS,
     AGENT_DEFINITIONS,
 )
+from config_loader import (
+    get_models_config,
+    get_project_options_config,
+    get_file_extensions_config,
+    get_agent_definitions_config,
+    get_token_pricing,
+)
 
 
 def register_settings_routes(app:Flask,data_store:TestDataStore):
@@ -124,3 +131,34 @@ def register_settings_routes(app:Flask,data_store:TestDataStore):
     @app.route('/api/agent-definitions',methods=['GET'])
     def get_agent_definitions():
         return jsonify(AGENT_DEFINITIONS)
+
+    # === System Configuration APIs ===
+
+    @app.route('/api/config/models',methods=['GET'])
+    def get_models_config_api():
+        """モデル設定を取得（プロバイダー、モデル一覧、トークン料金）"""
+        return jsonify(get_models_config())
+
+    @app.route('/api/config/models/pricing/<model_id>',methods=['GET'])
+    def get_model_pricing_api(model_id:str):
+        """特定モデルのトークン料金を取得"""
+        pricing = get_token_pricing(model_id)
+        return jsonify({
+            "modelId": model_id,
+            "pricing": pricing,
+        })
+
+    @app.route('/api/config/project-options',methods=['GET'])
+    def get_project_options_api():
+        """プロジェクトオプション設定を取得（プラットフォーム、スコープ、LLMプロバイダー）"""
+        return jsonify(get_project_options_config())
+
+    @app.route('/api/config/file-extensions',methods=['GET'])
+    def get_file_extensions_api():
+        """ファイル拡張子分類設定を取得"""
+        return jsonify(get_file_extensions_config())
+
+    @app.route('/api/config/agents',methods=['GET'])
+    def get_agents_config_api():
+        """エージェント定義設定を取得"""
+        return jsonify(get_agent_definitions_config())
