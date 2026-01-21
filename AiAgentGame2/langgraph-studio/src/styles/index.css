@@ -692,4 +692,69 @@
       opacity: 0.8;
     }
   }
+
+  /* Server message source badge */
+  .message-source-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    margin-left: 8px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    background: rgba(100, 180, 255, 0.3);
+    border: 1px solid rgba(100, 180, 255, 0.5);
+    border-radius: 2px;
+    color: #8cc8ff;
+  }
+
+  /* Priority styles for server messages */
+  .dialogue-bar.priority-high {
+    background: rgba(30, 30, 0, 0.95);
+    border-top: 2px solid #c9a227;
+  }
+
+  .dialogue-bar.priority-high .message-source-badge {
+    background: rgba(201, 162, 39, 0.3);
+    border-color: rgba(201, 162, 39, 0.5);
+    color: #e8c44a;
+  }
+
+  .dialogue-bar.priority-critical {
+    background: rgba(40, 10, 10, 0.95);
+    border-top: 2px solid #c94040;
+    animation: dialogue-slide-up 0.3s ease-out, critical-pulse 2s ease-in-out infinite;
+  }
+
+  .dialogue-bar.priority-critical .message-source-badge {
+    background: rgba(201, 64, 64, 0.3);
+    border-color: rgba(201, 64, 64, 0.5);
+    color: #ff6b6b;
+  }
+
+  @keyframes critical-pulse {
+    0%, 100% {
+      border-top-color: #c94040;
+    }
+    50% {
+      border-top-color: #ff6b6b;
+    }
+  }
+
+  .navigator-overlay.priority-high .navigator-frame {
+    border-color: #c9a227;
+  }
+
+  .navigator-overlay.priority-critical .navigator-frame {
+    border-color: #c94040;
+    animation: frame-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes frame-pulse {
+    0%, 100% {
+      border-color: #c94040;
+    }
+    50% {
+      border-color: #ff6b6b;
+    }
+  }
 }

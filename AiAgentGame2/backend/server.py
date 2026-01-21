@@ -13,6 +13,7 @@ from handlers.intervention import register_intervention_routes
 from handlers.file_upload import register_file_upload_routes
 from handlers.project_tree import register_project_tree_routes
 from handlers.ai_provider import register_ai_provider_routes
+from handlers.navigator import register_navigator_routes
 from testdata import TestDataStore
 from config import get_config
 from agents import create_agent_runner
@@ -53,6 +54,7 @@ def create_app():
     register_settings_routes(app,data_store)
     register_intervention_routes(app,data_store,sio)
     register_websocket_handlers(sio,data_store)
+    register_navigator_routes(app,sio)
 
 
     upload_folder = os.path.join(os.path.dirname(__file__),'uploads')

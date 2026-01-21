@@ -7,8 +7,25 @@ export default function Navigator(): JSX.Element | null {
     return null
   }
 
+  // Priority-based styling
+  const getPriorityClass = () => {
+    if (currentMessage.source !== 'server') return ''
+    switch (currentMessage.priority) {
+      case 'critical': return 'priority-critical'
+      case 'high': return 'priority-high'
+      default: return ''
+    }
+  }
+
+  const getSourceIndicator = () => {
+    if (currentMessage.source === 'server') {
+      return <span className="message-source-badge">SERVER</span>
+    }
+    return null
+  }
+
   return (
-    <div className="navigator-overlay" onClick={dismissMessage}>
+    <div className={`navigator-overlay ${getPriorityClass()}`} onClick={dismissMessage}>
       {/* Navigator Character - Right Bottom */}
       <div className="navigator-character">
         <div className="navigator-frame">
@@ -59,11 +76,12 @@ export default function Navigator(): JSX.Element | null {
       </div>
 
       {/* Dialogue Bar - Bottom */}
-      <div className="dialogue-bar">
+      <div className={`dialogue-bar ${getPriorityClass()}`}>
         <div className="dialogue-content">
           <span className="dialogue-speaker">
             <span className="dialogue-diamond">◇</span>
             {currentMessage.speaker}
+            {getSourceIndicator()}
           </span>
           <p className="dialogue-text">{currentMessage.text}</p>
         </div>
