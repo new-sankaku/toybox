@@ -4,10 +4,18 @@ import{Select,SelectOption}from'@/components/ui/Select'
 import{Textarea}from'@/components/ui/Textarea'
 import{Button}from'@/components/ui/Button'
 import{Panel}from'@/components/ui/Panel'
+import{FileUploader}from'./FileUploader'
 import type{CreateProjectInput,GameConcept}from'@/types/project'
+import type{FileCategory}from'@/types/uploadedFile'
+
+interface SelectedFile{
+ file:File
+ category:FileCategory
+ preview?:string
+}
 
 interface ProjectFormProps{
- onSubmit:(data:CreateProjectInput)=>void
+ onSubmit:(data:CreateProjectInput,files:File[])=>void
  onCancel?:()=>void
  isLoading?:boolean
  initialData?:Partial<CreateProjectInput>
@@ -41,6 +49,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
  const[platform,setPlatform]=useState<GameConcept['platform']>(initialData?.concept?.platform||'web')
  const[scope,setScope]=useState<GameConcept['scope']>(initialData?.concept?.scope||'mvp')
  const[genre,setGenre]=useState(initialData?.concept?.genre||'')
+ const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
 
  const[errors,setErrors]=useState<Record<string,string>>({})
 
@@ -74,7 +83,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     scope,
     genre:genre||undefined
    }
-  })
+  },selectedFiles.map(sf=>sf.file))
  }
 
  return(
@@ -137,6 +146,20 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
        disabled={isLoading}
       />
      </div>
+    </div>
+   </Panel>
+
+   {/*Initial Files*/}
+   <Panel title="INITIAL FILES (Optional)">
+    <div className="space-y-2">
+     <p className="text-nier-caption text-nier-text-light">
+      プロジェクト開始時に使用する企画書、仕様書、参考資料、アセットなどをアップロードできます。
+     </p>
+     <FileUploader
+      files={selectedFiles}
+      onFilesChange={setSelectedFiles}
+      disabled={isLoading}
+     />
     </div>
    </Panel>
 

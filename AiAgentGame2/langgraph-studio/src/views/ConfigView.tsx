@@ -5,6 +5,8 @@ import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{Save,Eye,EyeOff,FolderOpen,RefreshCw}from'lucide-react'
 import{QualityCheckSettingsPanel}from'@/components/settings/QualityCheckSettingsPanel'
+import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
+import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
 
 interface ConfigSection{
  id:string
@@ -12,6 +14,8 @@ interface ConfigSection{
 }
 
 const configSections:ConfigSection[]=[
+ {id:'ai-providers',label:'AI Provider設定'},
+ {id:'auto-approval',label:'自動承認設定'},
  {id:'api',label:'API設定'},
  {id:'model',label:'モデル設定'},
  {id:'cost',label:'コスト設定'},
@@ -22,7 +26,7 @@ const configSections:ConfigSection[]=[
 ]
 
 export default function ConfigView():JSX.Element{
- const[activeSection,setActiveSection]=useState('api')
+ const[activeSection,setActiveSection]=useState('ai-providers')
  const[showApiKey,setShowApiKey]=useState(false)
 
  const[config,setConfig]=useState({
@@ -119,6 +123,12 @@ export default function ConfigView():JSX.Element{
 
     {/*Config Content*/}
     <div className="col-span-3 space-y-4">
+     {/*AI Provider Settings*/}
+     {activeSection==='ai-providers'&&<AIProviderSettings/>}
+
+     {/*Auto Approval Settings*/}
+     {activeSection==='auto-approval'&&<AutoApprovalSettings/>}
+
      {/*API Settings*/}
      {activeSection==='api'&&(
       <Card>

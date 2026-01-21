@@ -2,6 +2,7 @@ import{ReactNode}from'react'
 import HeaderTabs from'./HeaderTabs'
 import ConnectionStatus from'./ConnectionStatus'
 import ActivitySidebar from'./ActivitySidebar'
+import Navigator from'./Navigator'
 import type{TabId}from'../../App'
 
 interface AppLayoutProps{
@@ -32,6 +33,9 @@ export default function AppLayout({
     </main>
     <ActivitySidebar/>
    </div>
+
+   {/*Navigator overlay*/}
+   <Navigator/>
   </div>
 )
 }

@@ -365,4 +365,197 @@ export const agentDefinitionApi={
  }
 }
 
+// Human Intervention API
+export type InterventionPriority='normal'|'urgent'
+export type InterventionTarget='all'|'specific'
+export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'
+
+export interface ApiIntervention{
+ id:string
+ projectId:string
+ targetType:InterventionTarget
+ targetAgentId:string|null
+ priority:InterventionPriority
+ message:string
+ attachedFileIds:string[]
+ status:InterventionStatus
+ createdAt:string
+ deliveredAt:string|null
+ acknowledgedAt:string|null
+ processedAt:string|null
+}
+
+export interface CreateInterventionInput{
+ targetType:InterventionTarget
+ targetAgentId?:string
+ priority:InterventionPriority
+ message:string
+ attachedFileIds?:string[]
+}
+
+export const interventionApi={
+ listByProject:async(projectId:string):Promise<ApiIntervention[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/interventions`)
+  return response.data
+ },
+
+ create:async(projectId:string,data:CreateInterventionInput):Promise<ApiIntervention>=>{
+  const response=await api.post(`/api/projects/${projectId}/interventions`,data)
+  return response.data
+ },
+
+ get:async(interventionId:string):Promise<ApiIntervention>=>{
+  const response=await api.get(`/api/interventions/${interventionId}`)
+  return response.data
+ },
+
+ acknowledge:async(interventionId:string):Promise<ApiIntervention>=>{
+  const response=await api.post(`/api/interventions/${interventionId}/acknowledge`)
+  return response.data
+ },
+
+ process:async(interventionId:string):Promise<ApiIntervention>=>{
+  const response=await api.post(`/api/interventions/${interventionId}/process`)
+  return response.data
+ }
+}
+
+// File Upload API
+export type FileCategory='code'|'image'|'audio'|'video'|'document'|'archive'|'other'
+export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'
+
+export interface ApiUploadedFile{
+ id:string
+ projectId:string
+ filename:string
+ originalFilename:string
+ mimeType:string
+ category:FileCategory
+ sizeBytes:number
+ status:UploadedFileStatus
+ description:string
+ uploadedAt:string
+ url:string
+}
+
+export interface BatchUploadResult{
+ success:ApiUploadedFile[]
+ errors:{filename:string;error:string}[]
+ totalUploaded:number
+ totalErrors:number
+}
+
+export const fileUploadApi={
+ listByProject:async(projectId:string):Promise<ApiUploadedFile[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/files`)
+  return response.data.map((file:ApiUploadedFile)=>({
+   ...file,
+   url:toFullUrl(file.url)
+  }))
+ },
+
+ upload:async(projectId:string,file:File,description?:string):Promise<ApiUploadedFile>=>{
+  const formData=new FormData()
+  formData.append('file',file)
+  if(description){
+   formData.append('description',description)
+  }
+  const response=await api.post(`/api/projects/${projectId}/files`,formData,{
+   headers:{'Content-Type':'multipart/form-data'}
+  })
+  return{
+   ...response.data,
+   url:toFullUrl(response.data.url)
+  }
+ },
+
+ uploadBatch:async(projectId:string,files:File[]):Promise<BatchUploadResult>=>{
+  const formData=new FormData()
+  files.forEach(file=>{
+   formData.append('files',file)
+  })
+  const response=await api.post(`/api/projects/${projectId}/files/batch`,formData,{
+   headers:{'Content-Type':'multipart/form-data'}
+  })
+  return{
+   ...response.data,
+   success:response.data.success.map((file:ApiUploadedFile)=>({
+    ...file,
+    url:toFullUrl(file.url)
+   }))
+  }
+ },
+
+ get:async(fileId:string):Promise<ApiUploadedFile>=>{
+  const response=await api.get(`/api/files/${fileId}`)
+  return{
+   ...response.data,
+   url:toFullUrl(response.data.url)
+  }
+ },
+
+ delete:async(fileId:string):Promise<void>=>{
+  await api.delete(`/api/files/${fileId}`)
+ },
+
+ getDownloadUrl:(fileId:string):string=>{
+  return`${API_BASE_URL}/api/files/${fileId}/download`
+ }
+}
+
+export interface ProjectTreeNode{
+ id:string
+ name:string
+ type:'file'|'directory'
+ path:string
+ modified?:boolean
+ children?:ProjectTreeNode[]
+ size?:number
+ mimeType?:string
+}
+
+export const projectTreeApi={
+ getTree:async(projectId:string):Promise<ProjectTreeNode>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree`)
+  return response.data
+ },
+
+ downloadFile:async(projectId:string,filePath:string):Promise<Blob>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree/download`,{
+   params:{path:filePath},
+   responseType:'blob'
+  })
+  return response.data
+ },
+
+ replaceFile:async(projectId:string,filePath:string,file:File):Promise<void>=>{
+  const formData=new FormData()
+  formData.append('file',file)
+  formData.append('path',filePath)
+  await api.post(`/api/projects/${projectId}/tree/replace`,formData,{
+   headers:{'Content-Type':'multipart/form-data'}
+  })
+ },
+
+ downloadAll:async(projectId:string):Promise<Blob>=>{
+  const response=await api.get(`/api/projects/${projectId}/tree/download-all`,{
+   responseType:'blob'
+  })
+  return response.data
+ }
+}
+
+export interface AIProviderTestResult{
+ success:boolean
+ message:string
+ latency?:number
+}
+
+export const aiProviderApi={
+ testConnection:async(providerType:string,config:Record<string,unknown>):Promise<AIProviderTestResult>=>{
+  const response=await api.post('/api/ai-providers/test',{providerType,config})
+  return response.data
+ }
+}
+
 export{api}
