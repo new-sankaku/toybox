@@ -1,5 +1,5 @@
 import os
-from flask import Flask, send_from_directory, abort
+from flask import Flask,send_from_directory,abort
 from flask_cors import CORS
 import socketio
 
@@ -20,7 +20,7 @@ from asset_scanner import get_testdata_path
 def create_app():
     config = get_config()
     app = Flask(__name__)
-    CORS(app, origins=config.server.cors_origins)
+    CORS(app,origins=config.server.cors_origins)
 
     sio = socketio.Server(
         cors_allowed_origins=config.server.cors_origins,
@@ -29,12 +29,12 @@ def create_app():
         engineio_logger=False
     )
 
-    app_wsgi = socketio.WSGIApp(sio, app)
+    app_wsgi = socketio.WSGIApp(sio,app)
     data_store = TestDataStore()
     data_store.set_sio(sio)
     data_store.start_simulation()
 
-    # testdata modeではsimulationを使用するためagent_runnerは不要
+
     agent_runner = None
     if config.agent.mode == "api":
         agent_runner = create_agent_runner(
@@ -44,24 +44,24 @@ def create_app():
             max_tokens=config.agent.max_tokens,
         )
 
-    register_project_routes(app, data_store, sio)
-    register_agent_routes(app, data_store, sio)
-    register_checkpoint_routes(app, data_store, sio)
-    register_metrics_routes(app, data_store)
-    register_settings_routes(app, data_store)
-    register_intervention_routes(app, data_store, sio)
-    register_websocket_handlers(sio, data_store)
+    register_project_routes(app,data_store,sio)
+    register_agent_routes(app,data_store,sio)
+    register_checkpoint_routes(app,data_store,sio)
+    register_metrics_routes(app,data_store)
+    register_settings_routes(app,data_store)
+    register_intervention_routes(app,data_store,sio)
+    register_websocket_handlers(sio,data_store)
 
-    # File upload folder
-    upload_folder = os.path.join(os.path.dirname(__file__), 'uploads')
-    register_file_upload_routes(app, data_store, upload_folder)
+
+    upload_folder = os.path.join(os.path.dirname(__file__),'uploads')
+    register_file_upload_routes(app,data_store,upload_folder)
 
     @app.route('/health')
     def health():
         return {
-            'status': 'ok',
-            'service': 'aiagentgame2-backend',
-            'agent_mode': config.agent.mode,
+            'status':'ok',
+            'service':'aiagentgame2-backend',
+            'agent_mode':config.agent.mode,
         }
 
     testdata_path = get_testdata_path()
@@ -69,7 +69,7 @@ def create_app():
     @app.route('/testdata/<path:filepath>')
     def serve_testdata(filepath):
         try:
-            return send_from_directory(testdata_path, filepath)
+            return send_from_directory(testdata_path,filepath)
         except Exception as e:
             print(f"[Server] Error serving {filepath}: {e}")
             abort(404)
@@ -80,14 +80,14 @@ def create_app():
     app.sio = sio
     app.wsgi_app_wrapper = app_wsgi
 
-    return app, sio
+    return app,sio
 
 
-def run_server(app, sio, host='127.0.0.1', port=8765, debug=False):
+def run_server(app,sio,host='127.0.0.1',port=8765,debug=False):
     import eventlet
 
     print(f"Server running at http://{host}:{port}")
     print(f"WebSocket available at ws://{host}:{port}")
 
-    listener = eventlet.listen((host, port))
-    eventlet.wsgi.server(listener, app.wsgi_app_wrapper, log_output=debug)
+    listener = eventlet.listen((host,port))
+    eventlet.wsgi.server(listener,app.wsgi_app_wrapper,log_output=debug)
