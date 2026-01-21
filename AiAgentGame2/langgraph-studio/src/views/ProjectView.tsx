@@ -1,4 +1,4 @@
-import{useState,useEffect}from'react'
+import{useState,useEffect,useCallback}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
@@ -9,12 +9,23 @@ import{projectApi,fileUploadApi,extractApiError}from'@/services/apiService'
 import type{Project,ProjectStatus}from'@/types/project'
 import type{FileCategory}from'@/types/uploadedFile'
 import{cn}from'@/lib/utils'
-import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload}from'lucide-react'
+import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload,FileText,Image,Music,File}from'lucide-react'
 
 interface SelectedFile{
  file:File
  category:FileCategory
  preview?:string
+}
+
+interface UploadedFile{
+ id:string
+ filename:string
+ originalFilename:string
+ mimeType:string
+ category:string
+ sizeBytes:number
+ url:string
+ uploadedAt:string
 }
 
 type Platform='web-canvas'|'web-dom'|'electron'
@@ -69,7 +80,7 @@ const statusColors:Record<ProjectStatus,string>={
 }
 
 export default function ProjectView():JSX.Element{
- const{currentProject,setCurrentProject,projects,setProjects}=useProjectStore()
+ const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
@@ -80,6 +91,8 @@ export default function ProjectView():JSX.Element{
  const[error,setError]=useState<string|null>(null)
  const[isEditing,setIsEditing]=useState(false)
  const[editForm,setEditForm]=useState<NewProjectForm>(initialForm)
+ const[uploadedFiles,setUploadedFiles]=useState<UploadedFile[]>([])
+ const[filesLoading,setFilesLoading]=useState(false)
 
  const fetchProjects=async()=>{
   setIsLoading(true)
@@ -96,9 +109,30 @@ export default function ProjectView():JSX.Element{
   }
  }
 
+ const fetchUploadedFiles=useCallback(async(projectId:string)=>{
+  setFilesLoading(true)
+  try{
+   const files=await fileUploadApi.listByProject(projectId)
+   setUploadedFiles(files)
+  }catch(err){
+   console.error('Failed to fetch uploaded files:',err)
+   setUploadedFiles([])
+  }finally{
+   setFilesLoading(false)
+  }
+ },[])
+
  useEffect(()=>{
   fetchProjects()
  },[])
+
+ useEffect(()=>{
+  if(currentProject){
+   fetchUploadedFiles(currentProject.id)
+  }else{
+   setUploadedFiles([])
+  }
+ },[currentProject,fetchUploadedFiles])
 
  const handleCreateProject=async()=>{
   if(!form.name.trim()||!form.userIdea.trim())return
@@ -118,7 +152,7 @@ export default function ProjectView():JSX.Element{
     }
    })
 
-   // Upload files if any
+
    if(selectedFiles.length>0){
     setUploadProgress(`ファイルをアップロード中... (0/${selectedFiles.length})`)
     const files=selectedFiles.map(sf=>sf.file)
@@ -130,7 +164,7 @@ export default function ProjectView():JSX.Element{
      }
     }catch(uploadErr){
      console.error('Failed to upload files:',uploadErr)
-     // Continue even if upload fails
+
     }
    }
 
@@ -150,10 +184,16 @@ export default function ProjectView():JSX.Element{
  }
 
  const handleSelectProject=(project:Project)=>{
+  if(currentProject?.id!==project.id){
+   incrementDataVersion()
+  }
   setCurrentProject(project)
  }
 
  const handleEditProjectFromList=(project:Project)=>{
+  if(currentProject?.id!==project.id){
+   incrementDataVersion()
+  }
   setCurrentProject(project)
   setEditForm({
    name:project.name,
@@ -233,6 +273,7 @@ export default function ProjectView():JSX.Element{
   setIsLoading(true)
   try{
    const updated=await projectApi.initialize(currentProject.id)
+   incrementDataVersion()
    setProjects(projects.map(p=>p.id===currentProject.id?updated : p))
    setCurrentProject(updated)
    setShowInitializeDialog(false)
@@ -297,15 +338,6 @@ export default function ProjectView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/*Page Title*/}
-   <div className="nier-page-header-row">
-    <div className="nier-page-header-left">
-     <h1 className="nier-page-title">PROJECT</h1>
-     <span className="nier-page-subtitle">-プロジェクト管理</span>
-    </div>
-    <div className="nier-page-header-right"/>
-   </div>
-
    {/*Error Message*/}
    {error&&(
     <div className="mb-4 p-3 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main text-nier-small">
@@ -551,7 +583,7 @@ export default function ProjectView():JSX.Element{
           <div className="text-nier-small text-nier-accent-gold">
            {uploadProgress}
           </div>
-         )}
+)}
 
          {/*Buttons*/}
          <div className="flex gap-3 pt-2">
@@ -765,6 +797,63 @@ export default function ProjectView():JSX.Element{
            </Button>
 )}
          </div>
+        </CardContent>
+       </Card>
+
+       {/*Uploaded Files*/}
+       <Card>
+        <CardHeader>
+         <div className="flex items-center justify-between w-full">
+          <DiamondMarker>アップロードファイル</DiamondMarker>
+          <span className="text-nier-caption text-nier-text-light">{uploadedFiles.length}件</span>
+         </div>
+        </CardHeader>
+        <CardContent>
+         {filesLoading?(
+          <div className="text-center py-4 text-nier-text-light">
+           <Loader2 size={20} className="mx-auto mb-2 animate-spin"/>
+           読み込み中...
+          </div>
+) : uploadedFiles.length===0?(
+          <div className="text-center py-4 text-nier-text-light">
+           アップロードファイルはありません
+          </div>
+) : (
+          <div className="grid grid-cols-2 gap-2 max-h-[200px] overflow-y-auto">
+           {uploadedFiles.map((file)=>{
+            const isImage=file.mimeType.startsWith('image/')
+            const isAudio=file.mimeType.startsWith('audio/')
+            const isPdf=file.mimeType==='application/pdf'
+            const FileIcon=isImage?Image : isAudio?Music : isPdf?FileText : File
+            const sizeKB=Math.round(file.sizeBytes/1024)
+
+            return(
+             <div
+              key={file.id}
+              className="flex items-center gap-2 p-2 border border-nier-border-light hover:bg-nier-bg-hover"
+             >
+              {isImage&&file.url?(
+               <img
+                src={file.url}
+                alt={file.originalFilename}
+                className="w-10 h-10 object-cover rounded"
+               />
+) : (
+               <div className="w-10 h-10 flex items-center justify-center bg-nier-bg-selected rounded">
+                <FileIcon size={20} className="text-nier-text-light"/>
+               </div>
+)}
+              <div className="flex-1 min-w-0">
+               <div className="text-nier-small truncate">{file.originalFilename}</div>
+               <div className="text-nier-caption text-nier-text-light">
+                {file.category} / {sizeKB}KB
+               </div>
+              </div>
+             </div>
+            )
+           })}
+          </div>
+)}
         </CardContent>
        </Card>
       </div>

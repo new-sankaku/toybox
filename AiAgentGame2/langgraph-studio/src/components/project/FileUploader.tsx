@@ -70,19 +70,19 @@ export function FileUploader({
   for(let i=0;i<fileList.length;i++){
    const file=fileList[i]
 
-   // Check file count
+
    if(files.length+newFiles.length>=maxFiles){
     errors.push(`最大${maxFiles}ファイルまでです`)
     break
    }
 
-   // Check file size
+
    if(file.size>maxSizeBytes){
     errors.push(`${file.name}: ファイルサイズが大きすぎます (最大${formatFileSize(maxSizeBytes)})`)
     continue
    }
 
-   // Check duplicate
+
    if(files.some(f=>f.file.name===file.name)){
     errors.push(`${file.name}: 同名のファイルが既にあります`)
     continue
@@ -91,7 +91,7 @@ export function FileUploader({
    const category=getCategoryFromFile(file)
    const selectedFile:SelectedFile={file,category}
 
-   // Create preview for images
+
    if(category==='image'){
     selectedFile.preview=URL.createObjectURL(file)
    }
@@ -165,7 +165,7 @@ export function FileUploader({
 
  return(
   <div className="space-y-4">
-   {/* Drop Zone */}
+   {/*Drop Zone*/}
    <div
     className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
      dragActive?'border-nier-accent bg-nier-accent/5':
@@ -199,15 +199,15 @@ export function FileUploader({
     </p>
    </div>
 
-   {/* Error Message */}
+   {/*Error Message*/}
    {error&&(
     <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded text-red-700">
      <AlertCircle size={16} className="flex-shrink-0 mt-0.5"/>
      <pre className="text-nier-caption whitespace-pre-wrap">{error}</pre>
     </div>
-   )}
+)}
 
-   {/* File List */}
+   {/*File List*/}
    {files.length>0&&(
     <div className="space-y-3">
      <div className="flex items-center justify-between text-nier-caption">
@@ -248,9 +248,9 @@ export function FileUploader({
               alt={selectedFile.file.name}
               className="w-8 h-8 object-cover rounded"
              />
-            ):(
+):(
              <Icon size={16} className="text-nier-text-light"/>
-            )}
+)}
             <span className="flex-1 text-nier-caption truncate">
              {selectedFile.file.name}
             </span>
@@ -266,14 +266,14 @@ export function FileUploader({
              <X size={14}/>
             </button>
            </div>
-          )
+)
          })}
         </div>
        </div>
-      )
+)
      })}
     </div>
-   )}
+)}
   </div>
- )
+)
 }

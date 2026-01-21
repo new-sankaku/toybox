@@ -60,7 +60,7 @@ function TreeNode({node,depth,onDownload,onReplace}:TreeNodeProps){
      className={cn(
       'flex items-center py-1 px-2 cursor-pointer',
       'hover:bg-nier-bg-panel transition-colors'
-     )}
+)}
      style={{paddingLeft:`${indent}px`}}
      onClick={()=>setExpanded(!expanded)}
     >
@@ -75,9 +75,9 @@ function TreeNode({node,depth,onDownload,onReplace}:TreeNodeProps){
       onDownload={onDownload}
       onReplace={onReplace}
      />
-    ))}
+))}
    </div>
-  )
+)
  }
 
  return(
@@ -85,20 +85,20 @@ function TreeNode({node,depth,onDownload,onReplace}:TreeNodeProps){
    className={cn(
     'flex items-center justify-between py-1 px-2',
     'hover:bg-nier-bg-panel transition-colors group'
-   )}
+)}
    style={{paddingLeft:`${indent+18}px`}}
   >
    <div className="flex items-center gap-2 min-w-0">
     <span className={cn(
      'text-nier-small truncate',
      node.modified?'text-nier-accent-yellow':'text-nier-text-main'
-    )}>
+)}>
      {node.name}
     </span>
     {node.modified&&<span className="text-nier-caption text-nier-accent-yellow">*</span>}
     {node.size&&(
      <span className="text-nier-caption text-nier-text-light">{formatSize(node.size)}</span>
-    )}
+)}
    </div>
    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
     <button
@@ -123,7 +123,7 @@ function TreeNode({node,depth,onDownload,onReplace}:TreeNodeProps){
     />
    </div>
   </div>
- )
+)
 }
 
 export function ProjectTreeView({
@@ -158,7 +158,7 @@ export function ProjectTreeView({
       {totalFiles} ファイル
       {modifiedFiles>0&&(
        <span className="text-nier-accent-yellow ml-2">({modifiedFiles} 変更あり)</span>
-      )}
+)}
      </div>
      <div className="flex gap-2">
       <Button variant="ghost" size="sm" onClick={onRefresh}>
@@ -182,11 +182,11 @@ export function ProjectTreeView({
     </div>
 
     <div className="text-nier-caption text-nier-text-light">
-     * = 変更あり
+     *=変更あり
     </div>
    </CardContent>
   </Card>
- )
+)
 }
 
 export const MOCK_PROJECT_TREE:FileNode={
@@ -211,9 +211,9 @@ export const MOCK_PROJECT_TREE:FileNode={
      children:[
       {id:'button',name:'Button.tsx',type:'file',path:'/src/components/Button.tsx',size:892},
       {id:'modal',name:'Modal.tsx',type:'file',path:'/src/components/Modal.tsx',modified:true,size:2341}
-     ]
+]
     }
-   ]
+]
   },
   {
    id:'assets',
@@ -223,9 +223,9 @@ export const MOCK_PROJECT_TREE:FileNode={
    children:[
     {id:'logo',name:'logo.png',type:'file',path:'/assets/logo.png',size:15234,mimeType:'image/png'},
     {id:'bgm',name:'bgm.mp3',type:'file',path:'/assets/bgm.mp3',size:3456789,mimeType:'audio/mpeg'}
-   ]
+]
   },
   {id:'readme',name:'README.md',type:'file',path:'/README.md',size:567},
   {id:'package',name:'package.json',type:'file',path:'/package.json',size:1892}
- ]
+]
 }

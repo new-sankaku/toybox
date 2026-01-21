@@ -7,16 +7,15 @@ interface Tab{
 }
 
 const tabs:Tab[]=[
- {id:'project',label:'PROJECT',icon:'◉'},
- {id:'system',label:'DASHBOARD',icon:'⬡'},
- {id:'checkpoints',label:'CHECKPOINTS',icon:'✦'},
- {id:'intervention',label:'INTERVENTION',icon:'✋'},
- {id:'agents',label:'AGENTS',icon:'⚔'},
- {id:'data',label:'ASSET',icon:'☰'},
- {id:'ai',label:'AI',icon:'✧'},
- {id:'cost',label:'COST',icon:'¤'},
- {id:'logs',label:'LOGS',icon:'◈'},
- {id:'config',label:'CONFIG',icon:'⚙'}
+ {id:'project',label:'プロジェクト',icon:'◉'},
+ {id:'system',label:'ダッシュボード',icon:'⬡'},
+ {id:'checkpoints',label:'チェックポイント',icon:'✦'},
+ {id:'intervention',label:'連絡',icon:'⊕'},
+ {id:'agents',label:'エージェント',icon:'⚔'},
+ {id:'data',label:'生成素材',icon:'☰'},
+ {id:'cost',label:'コスト',icon:'¤'},
+ {id:'logs',label:'ログ',icon:'◈'},
+ {id:'config',label:'設定',icon:'⚙'}
 ]
 
 interface HeaderTabsProps{

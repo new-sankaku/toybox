@@ -29,7 +29,7 @@ export const useAutoApprovalStore=create<AutoApprovalState>()(
       rule.category===category&&rule.action===action
        ?{...rule,enabled}
        :rule
-     )
+)
     }))
    },
 
@@ -59,5 +59,5 @@ export const useAutoApprovalStore=create<AutoApprovalState>()(
   {
    name:'auto-approval-settings'
   }
- )
+)
 )

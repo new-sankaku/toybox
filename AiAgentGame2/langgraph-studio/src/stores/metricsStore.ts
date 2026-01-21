@@ -25,6 +25,7 @@ interface MetricsState{
  tokenHistory:TokenUsage[]
  costEstimate:CostEstimate|null
  isLoading:boolean
+ version:number
  setProjectMetrics:(metrics:ProjectMetrics|null)=>void
  setAgentMetrics:(metrics:AgentMetrics[])=>void
  updateAgentMetrics:(agentId:string,updates:Partial<AgentMetrics>)=>void
@@ -49,6 +50,7 @@ export const useMetricsStore=create<MetricsState>((set,get)=>({
  tokenHistory:[],
  costEstimate:null,
  isLoading:false,
+ version:0,
  setProjectMetrics:(metrics)=>set({projectMetrics:metrics}),
 
  setAgentMetrics:(metrics)=>set({agentMetrics:metrics}),
@@ -70,13 +72,14 @@ export const useMetricsStore=create<MetricsState>((set,get)=>({
  setLoading:(loading)=>set({isLoading:loading}),
 
  reset:()=>
-  set({
+  set((state)=>({
    projectMetrics:null,
    agentMetrics:[],
    tokenHistory:[],
    costEstimate:null,
-   isLoading:false
-  }),
+   isLoading:false,
+   version:state.version+1
+  })),
  getTotalTokens:()=>{
   const state=get()
   return state.tokenHistory.reduce((sum,t)=>sum+t.tokensUsed,0)

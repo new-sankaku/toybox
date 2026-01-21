@@ -100,7 +100,7 @@ function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdat
     </div>
    </div>
   </div>
- )
+)
 }
 
 function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Partial<ComfyUIConfig>)=>void}){
@@ -184,7 +184,7 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
     </div>
    </div>
   </div>
- )
+)
 }
 
 function VoicevoxForm({provider,onUpdate}:{provider:VoicevoxConfig,onUpdate:(u:Partial<VoicevoxConfig>)=>void}){
@@ -223,7 +223,7 @@ function VoicevoxForm({provider,onUpdate}:{provider:VoicevoxConfig,onUpdate:(u:P
     </div>
    </div>
   </div>
- )
+)
 }
 
 function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(u:Partial<MusicGeneratorConfig>)=>void}){
@@ -257,7 +257,7 @@ function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(
     />
    </div>
   </div>
- )
+)
 }
 
 function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
@@ -295,7 +295,7 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
     className={cn(
      'flex items-center justify-between px-4 py-3 cursor-pointer',
      'hover:bg-nier-bg-panel transition-colors'
-    )}
+)}
     onClick={()=>setExpanded(!expanded)}
    >
     <div className="flex items-center gap-3">
@@ -313,12 +313,12 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
         <ToggleRight size={20}/>
         <span className="text-nier-caption">有効</span>
        </div>
-      ):(
+):(
        <div className="flex items-center gap-1 text-nier-text-light">
         <ToggleLeft size={20}/>
         <span className="text-nier-caption">無効</span>
        </div>
-      )}
+)}
      </button>
      <button
       onClick={onRemove}
@@ -340,15 +340,15 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
        <span className={cn(
         'text-nier-caption',
         testResult.success?'text-nier-accent-green':'text-nier-accent-red'
-       )}>
+)}>
         {testResult.message}
        </span>
-      )}
+)}
      </div>
     </CardContent>
-   )}
+)}
   </Card>
- )
+)
 }
 
 export function AIProviderSettings():JSX.Element{
@@ -431,9 +431,9 @@ export function AIProviderSettings():JSX.Element{
            >
             {PROVIDER_TYPE_LABELS[type]}
            </button>
-          ))}
+))}
          </div>
-        )}
+)}
        </div>
        <Button variant="ghost" size="sm" onClick={handleExport}>
         <Download size={14}/>
@@ -464,7 +464,7 @@ export function AIProviderSettings():JSX.Element{
      onToggle={()=>toggleProvider(provider.id)}
      onRemove={()=>removeProvider(provider.id)}
     />
-   ))}
+))}
   </div>
- )
+)
 }

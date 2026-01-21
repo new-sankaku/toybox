@@ -88,13 +88,6 @@ export default function CheckpointsView():JSX.Element{
  if(!currentProject){
   return(
    <div className="p-4 animate-nier-fade-in">
-    <div className="nier-page-header-row">
-     <div className="nier-page-header-left">
-      <h1 className="nier-page-title">CHECKPOINTS</h1>
-      <span className="nier-page-subtitle">-レビュー待ち</span>
-     </div>
-     <div className="nier-page-header-right"/>
-    </div>
     <Card>
      <CardContent>
       <div className="text-center py-12 text-nier-text-light">

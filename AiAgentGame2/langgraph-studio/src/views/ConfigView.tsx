@@ -81,45 +81,39 @@ export default function ConfigView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in">
-   {/*Header*/}
-   <div className="nier-page-header-row">
-    <div className="nier-page-header-left">
-     <h1 className="nier-page-title">CONFIG</h1>
-     <span className="nier-page-subtitle">-システム設定</span>
-    </div>
-    <div className="nier-page-header-right">
-     <Button variant="primary" size="sm" onClick={handleSave}>
-      <Save size={14}/>
-      <span className="ml-1.5">保存</span>
-     </Button>
-    </div>
-   </div>
-
-   <div className="grid grid-cols-4 gap-3">
+   <div className="grid grid-cols-4 gap-3 items-start">
     {/*Section Navigation*/}
-    <Card>
-     <CardHeader>
-      <DiamondMarker>設定カテゴリ</DiamondMarker>
-     </CardHeader>
-     <CardContent className="p-0">
-      <div className="divide-y divide-nier-border-light">
-       {configSections.map(section=>(
-        <button
-         key={section.id}
-         className={cn(
-          'w-full px-4 py-3 text-left text-nier-small tracking-nier transition-colors',
-          activeSection===section.id
-           ?'bg-nier-bg-selected text-nier-text-main'
-           : 'text-nier-text-light hover:bg-nier-bg-panel'
+    <div>
+     <Card>
+      <CardHeader>
+       <DiamondMarker>設定カテゴリ</DiamondMarker>
+      </CardHeader>
+      <CardContent className="p-0">
+       <div className="divide-y divide-nier-border-light">
+        {configSections.map(section=>(
+         <button
+          key={section.id}
+          className={cn(
+           'w-full px-4 py-3 text-left text-nier-small tracking-nier transition-colors',
+           activeSection===section.id
+            ?'bg-nier-bg-selected text-nier-text-main'
+            : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
-         onClick={()=>setActiveSection(section.id)}
-        >
-         {section.label}
-        </button>
+          onClick={()=>setActiveSection(section.id)}
+         >
+          {section.label}
+         </button>
 ))}
-      </div>
-     </CardContent>
-    </Card>
+       </div>
+       <div className="p-3 border-t border-nier-border-light">
+        <Button variant="primary" size="sm" className="w-full" onClick={handleSave}>
+         <Save size={14}/>
+         <span className="ml-1.5">保存</span>
+        </Button>
+       </div>
+      </CardContent>
+     </Card>
+    </div>
 
     {/*Config Content*/}
     <div className="col-span-3 space-y-4">

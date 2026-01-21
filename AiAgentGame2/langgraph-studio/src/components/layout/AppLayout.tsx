@@ -2,7 +2,7 @@ import{ReactNode}from'react'
 import HeaderTabs from'./HeaderTabs'
 import ConnectionStatus from'./ConnectionStatus'
 import ActivitySidebar from'./ActivitySidebar'
-import Navigator from'./Navigator'
+import DialogueBar from'./DialogueBar'
 import type{TabId}from'../../App'
 
 interface AppLayoutProps{
@@ -28,14 +28,14 @@ export default function AppLayout({
 
    {/*Main content area with sidebar*/}
    <div className="flex flex-1 overflow-hidden">
-    <main className="flex-1 overflow-auto">
+    <main className="flex-1 overflow-hidden flex flex-col">
      {children}
     </main>
     <ActivitySidebar/>
    </div>
 
-   {/*Navigator overlay*/}
-   <Navigator/>
+   {/*Dialogue overlay*/}
+   <DialogueBar/>
   </div>
 )
 }

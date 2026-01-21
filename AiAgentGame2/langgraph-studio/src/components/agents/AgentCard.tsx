@@ -1,7 +1,7 @@
 import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
-import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles}from'lucide-react'
+import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle}from'lucide-react'
 
 interface AgentCardProps{
  agent:Agent
@@ -23,6 +23,12 @@ const statusConfig={
   color:'bg-nier-border-dark',
   icon:Play,
   text:'実行中',
+  pulse:true
+ },
+ waiting_approval:{
+  color:'bg-nier-border-dark',
+  icon:AlertCircle,
+  text:'承認待ち',
   pulse:true
  },
  completed:{
@@ -100,8 +106,9 @@ export function AgentCard({
   if(agent.status==='running'){
    return agent.currentTask||'処理中'
   }
+  if(agent.status==='waiting_approval')return'チェックポイント承認待ち'
   if(agent.status==='pending')return waitingFor||'開始待機'
-  if(agent.status==='blocked')return'承認待ち'
+  if(agent.status==='blocked')return'ブロック'
   if(agent.status==='completed')return'完了'
   if(agent.status==='failed')return agent.error||'エラー発生'
   return''
@@ -152,7 +159,7 @@ export function AgentCard({
 
     {/*Col 5: Progress Bar+Time*/}
     <div className="flex items-center gap-2">
-     {agent.status==='running'?(
+     {(agent.status==='running'||agent.status==='waiting_approval')?(
       <>
        <Progress value={agent.progress} className="h-1.5 w-12"/>
        <span className="text-nier-caption text-nier-text-light w-8">

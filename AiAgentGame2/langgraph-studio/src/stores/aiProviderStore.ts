@@ -72,7 +72,7 @@ export const useAIProviderStore=create<AIProviderState>()(
     set(state=>({
      providers:state.providers.map(p=>
       p.id===id?{...p,...updates}as AIProviderConfig:p
-     )
+)
     }))
    },
 
@@ -86,7 +86,7 @@ export const useAIProviderStore=create<AIProviderState>()(
     set(state=>({
      providers:state.providers.map(p=>
       p.id===id?{...p,enabled:!p.enabled}:p
-     )
+)
     }))
    },
 
@@ -132,5 +132,5 @@ export const useAIProviderStore=create<AIProviderState>()(
   {
    name:'ai-provider-settings'
   }
- )
+)
 )

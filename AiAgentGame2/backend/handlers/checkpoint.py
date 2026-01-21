@@ -27,12 +27,16 @@ def register_checkpoint_routes(app: Flask, data_store: TestDataStore, sio):
         if not checkpoint:
             return jsonify({"error": "Checkpoint not found"}), 404
 
+        agent_id = checkpoint["agentId"]
+        agent = data_store.agents.get(agent_id)
+        agent_status = agent["status"] if agent else None
         sio.emit('checkpoint:resolved', {
             "checkpointId": checkpoint_id,
             "projectId": checkpoint["projectId"],
-            "agentId": checkpoint["agentId"],
+            "agentId": agent_id,
             "resolution": resolution,
-            "feedback": feedback
+            "feedback": feedback,
+            "agentStatus": agent_status
         })
 
         return jsonify(checkpoint)

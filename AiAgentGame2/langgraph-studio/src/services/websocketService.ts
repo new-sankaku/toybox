@@ -167,11 +167,19 @@ class WebSocketService{
    if(data.checkpoint){
     useCheckpointStore.getState().addCheckpoint(data.checkpoint)
    }
+   if(data.agentId&&data.agentStatus){
+    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus)
+   }
   })
 
-  this.socket.on('checkpoint:resolved',({checkpoint})=>{
-   console.log('[WS] Checkpoint resolved:',checkpoint.id)
-   useCheckpointStore.getState().updateCheckpoint(checkpoint.id,checkpoint)
+  this.socket.on('checkpoint:resolved',(data)=>{
+   console.log('[WS] Checkpoint resolved:',data.checkpoint?.id||data.checkpointId)
+   if(data.checkpoint){
+    useCheckpointStore.getState().updateCheckpoint(data.checkpoint.id,data.checkpoint)
+   }
+   if(data.agentId&&data.agentStatus){
+    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus)
+   }
   })
 
   this.socket.on('project:updated',({projectId,updates})=>{

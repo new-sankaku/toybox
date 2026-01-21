@@ -5,8 +5,10 @@ interface AgentState{
  agents:Agent[]
  selectedAgentId:string|null
  agentLogs:Record<string,AgentLogEntry[]>
+ exitedAgentIds:Set<string>
  isLoading:boolean
  error:string|null
+ version:number
  setAgents:(agents:Agent[])=>void
  addAgent:(agent:Agent)=>void
  updateAgent:(id:string,updates:Partial<Agent>)=>void
@@ -16,6 +18,9 @@ interface AgentState{
  clearLogs:(agentId:string)=>void
  setLoading:(loading:boolean)=>void
  setError:(error:string|null)=>void
+ addExitedAgentId:(agentId:string)=>void
+ clearExitedAgentIds:()=>void
+ reset:()=>void
  getSelectedAgent:()=>Agent|undefined
  getAgentsByProject:(projectId:string)=>Agent[]
  getActiveAgents:()=>Agent[]
@@ -26,8 +31,10 @@ export const useAgentStore=create<AgentState>((set,get)=>({
  agents:[],
  selectedAgentId:null,
  agentLogs:{},
+ exitedAgentIds:new Set<string>(),
  isLoading:false,
  error:null,
+ version:0,
 
  setAgents:(agents)=>set({agents}),
 
@@ -85,6 +92,23 @@ export const useAgentStore=create<AgentState>((set,get)=>({
  setLoading:(loading)=>set({isLoading:loading}),
 
  setError:(error)=>set({error}),
+
+ addExitedAgentId:(agentId)=>
+  set((state)=>({
+   exitedAgentIds:new Set([...state.exitedAgentIds,agentId])
+  })),
+
+ clearExitedAgentIds:()=>set({exitedAgentIds:new Set<string>()}),
+
+ reset:()=>set((state)=>({
+  agents:[],
+  selectedAgentId:null,
+  agentLogs:{},
+  exitedAgentIds:new Set<string>(),
+  isLoading:false,
+  error:null,
+  version:state.version+1
+ })),
 
  getSelectedAgent:()=>{
   const state=get()

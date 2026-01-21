@@ -2,11 +2,11 @@ import{create}from'zustand'
 import type{Project}from'@/types/project'
 
 interface ProjectState{
-
  currentProject:Project|null
  projects:Project[]
  isLoading:boolean
  error:string|null
+ dataVersion:number
  setCurrentProject:(project:Project|null)=>void
  setProjects:(projects:Project[])=>void
  addProject:(project:Project)=>void
@@ -14,6 +14,7 @@ interface ProjectState{
  removeProject:(id:string)=>void
  setLoading:(loading:boolean)=>void
  setError:(error:string|null)=>void
+ incrementDataVersion:()=>void
  reset:()=>void
 }
 
@@ -21,7 +22,8 @@ const initialState={
  currentProject:null,
  projects:[],
  isLoading:false,
- error:null
+ error:null,
+ dataVersion:0
 }
 
 export const useProjectStore=create<ProjectState>((set)=>({
@@ -55,6 +57,8 @@ export const useProjectStore=create<ProjectState>((set)=>({
  setLoading:(loading)=>set({isLoading:loading}),
 
  setError:(error)=>set({error}),
+
+ incrementDataVersion:()=>set((state)=>({dataVersion:state.dataVersion+1})),
 
  reset:()=>set(initialState)
 }))

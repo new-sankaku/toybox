@@ -4,7 +4,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import type{Agent,AgentStatus,AgentType}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle}from'lucide-react'
 
 const getDisplayName=(agent:Agent):string=>{
  return(agent.metadata?.displayName as string)||agent.type
@@ -23,6 +23,7 @@ const filterOptions:{value:FilterStatus;label:string;icon:typeof Filter}[]=[
  {value:'all',label:'全て',icon:Filter},
  {value:'incomplete',label:'未完了',icon:CircleDashed},
  {value:'running',label:'実行中',icon:Play},
+ {value:'waiting_approval',label:'承認待ち',icon:AlertCircle},
  {value:'pending',label:'待機中',icon:Clock},
  {value:'completed',label:'完了',icon:CheckCircle},
  {value:'failed',label:'エラー',icon:XCircle},
@@ -49,6 +50,7 @@ export default function AgentListView({
    all:agents.length,
    incomplete,
    running:agents.filter((a)=>a.status==='running').length,
+   waiting_approval:agents.filter((a)=>a.status==='waiting_approval').length,
    pending:agents.filter((a)=>a.status==='pending').length,
    completed:agents.filter((a)=>a.status==='completed').length,
    failed:agents.filter((a)=>a.status==='failed').length,
@@ -146,101 +148,102 @@ export default function AgentListView({
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   {/*Header*/}
-   <div className="nier-page-header-row">
-    <div className="nier-page-header-left">
-     <h1 className="nier-page-title">AGENTS</h1>
-     <span className="nier-page-subtitle">-エージェント管理</span>
-    </div>
-    <div className="nier-page-header-right"/>
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+   {/*Agent List-Main Content*/}
+   <div className="flex-1 flex flex-col overflow-hidden">
+    {loading&&agents.length===0?(
+     <Card className="flex-1">
+      <CardContent className="py-12 text-center">
+       <div className="text-nier-text-light">
+        <p className="text-nier-body">読み込み中...</p>
+       </div>
+      </CardContent>
+     </Card>
+) : filteredAgents.length===0?(
+     <Card className="flex-1">
+      <CardContent className="py-12 text-center">
+       <div className="text-nier-text-light">
+        <p className="text-nier-body mb-2">エージェントがありません</p>
+        <p className="text-nier-small">
+         プロジェクトを開始するとエージェントが表示されます
+        </p>
+       </div>
+      </CardContent>
+     </Card>
+) : (
+     <div className="nier-scroll-list flex-1 overflow-y-auto">
+      {renderPhaseSection('PHASE 1 - Planning',agentsByPhase.phase1)}
+      {renderPhaseSection('PHASE 2 - Development',agentsByPhase.phase2)}
+      {renderPhaseSection('PHASE 3 - Quality',agentsByPhase.phase3)}
+     </div>
+)}
    </div>
 
-   {/*Filters*/}
-   <Card className="mb-3">
-    <CardContent className="py-2">
-     <div className="flex items-center gap-1 flex-wrap">
-      {filterOptions.map((option)=>{
-       const Icon=option.icon
-       const count=statusCounts[option.value]
-       if(option.value!=='all'&&option.value!=='incomplete'&&count===0)return null
-
-       return(
-        <button
-         key={option.value}
-         className={cn(
-          'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-          filterStatus===option.value
-           ?'bg-nier-bg-selected text-nier-text-main'
-           : 'text-nier-text-light hover:bg-nier-bg-panel'
+   {/*Filter Sidebar*/}
+   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+    {/*Status Filter*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>ステータス</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex flex-col gap-1">
+       {filterOptions.map((option)=>{
+        const Icon=option.icon
+        const count=statusCounts[option.value]
+        if(option.value!=='all'&&option.value!=='incomplete'&&count===0)return null
+        return(
+         <button
+          key={option.value}
+          className={cn(
+           'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
+           filterStatus===option.value
+            ?'bg-nier-bg-selected text-nier-text-main'
+            : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
-         onClick={()=>setFilterStatus(option.value)}
-        >
-         <Icon size={14}/>
-         <span>{option.label}</span>
-         <span className="text-nier-caption">({count})</span>
-        </button>
+          onClick={()=>setFilterStatus(option.value)}
+         >
+          <Icon size={14}/>
+          <span className="flex-1">{option.label}</span>
+          <span className="text-nier-caption opacity-70">({count})</span>
+         </button>
 )
-      })}
-     </div>
-    </CardContent>
-   </Card>
-
-   {/*Agent List*/}
-   {loading&&agents.length===0?(
-    <Card>
-     <CardContent className="py-12 text-center">
-      <div className="text-nier-text-light">
-       <p className="text-nier-body">読み込み中...</p>
+       })}
       </div>
      </CardContent>
     </Card>
-) : filteredAgents.length===0?(
-    <Card>
-     <CardContent className="py-12 text-center">
-      <div className="text-nier-text-light">
-       <p className="text-nier-body mb-2">エージェントがありません</p>
-       <p className="text-nier-small">
-        プロジェクトを開始するとエージェントが表示されます
-       </p>
-      </div>
-     </CardContent>
-    </Card>
-) : (
-    <div className="nier-scroll-list">
-     {renderPhaseSection('PHASE 1-Planning',agentsByPhase.phase1)}
-     {renderPhaseSection('PHASE 2-Development',agentsByPhase.phase2)}
-     {renderPhaseSection('PHASE 3-Quality',agentsByPhase.phase3)}
-    </div>
-)}
 
-   {/*Summary Stats*/}
-   <Card className="mt-4">
-    <CardContent className="py-2">
-     <div className="flex items-center justify-between text-nier-small text-nier-text-light">
-      <div className="flex items-center gap-6">
-       <span>
-        総エージェント:<span className="text-nier-text-main">{statusCounts.all}</span>
-       </span>
-       <span>
-        完了率:{' '}
+    {/*Summary Stats*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>統計</DiamondMarker>
+     </CardHeader>
+     <CardContent>
+      <div className="space-y-1 text-nier-small">
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">総数</span>
+        <span className="text-nier-text-main">{statusCounts.all}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">完了率</span>
         <span className="text-nier-text-main">
-         {statusCounts.all>0
-          ?Math.round((statusCounts.completed/statusCounts.all)*100)
-          : 0}
-         %
+         {statusCounts.all>0?Math.round((statusCounts.completed/statusCounts.all)*100) : 0}%
         </span>
-       </span>
+       </div>
        {statusCounts.failed>0&&(
-        <span>
-         エラー:<span className="text-nier-text-main">{statusCounts.failed}</span>
-        </span>
+        <div className="flex justify-between">
+         <span className="text-nier-text-light">エラー</span>
+         <span className="text-nier-text-main">{statusCounts.failed}</span>
+        </div>
 )}
+       <div className="flex justify-between border-t border-nier-border-light pt-1 mt-1">
+        <span className="text-nier-text-light">表示中</span>
+        <span className="text-nier-text-main">{filteredAgents.length}件</span>
+       </div>
       </div>
-      <span>表示中: {filteredAgents.length}件</span>
-     </div>
-    </CardContent>
-   </Card>
+     </CardContent>
+    </Card>
+   </div>
   </div>
 )
 }

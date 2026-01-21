@@ -1147,12 +1147,11 @@ function AgentCharacterCard({
 
 export default function AgentWorkspace():JSX.Element{
  const{currentProject}=useProjectStore()
- const{agents,setAgents}=useAgentStore()
- const[exitedAgentIds,setExitedAgentIds]=useState<Set<string>>(new Set())
+ const{agents,setAgents,exitedAgentIds,addExitedAgentId}=useAgentStore()
 
  const handleExitComplete=useCallback((agentId:string)=>{
-  setExitedAgentIds(prev=>new Set([...prev,agentId]))
- },[])
+  addExitedAgentId(agentId)
+ },[addExitedAgentId])
 
  useEffect(()=>{
   if(!currentProject)return

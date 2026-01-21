@@ -347,12 +347,26 @@ function AgentNode({data }:{data:AgentNodeData}){
     </div>
 )}
    {isWaitingApproval&&(
-    <div
-     className="absolute -top-1 -right-1 w-4 h-4 bg-[#8B7914] rounded-full flex items-center justify-center"
-     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
-    >
-     !
-    </div>
+    <>
+     <div
+      className="absolute -top-1 -right-1 w-4 h-4 bg-[#8B7914] rounded-full flex items-center justify-center"
+      style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
+     >
+      !
+     </div>
+     <div
+      className="absolute left-1/2 -translate-x-1/2"
+      style={{
+       bottom:'-14px',
+       fontSize:fontSize*0.75,
+       color:'#8B7914',
+       fontWeight:'bold',
+       whiteSpace:'nowrap'
+      }}
+     >
+      承認待ち
+     </div>
+    </>
 )}
   </div>
 )
@@ -431,7 +445,7 @@ function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
   <div
    ref={containerRef}
    className="w-full"
-   style={{height:'50vh'}}
+   style={{height:'35vh'}}
   >
    <ReactFlow
     nodes={nodes}
@@ -665,13 +679,13 @@ export default function WorkflowDiagram():JSX.Element{
 )}
     </div>
    </CardHeader>
-   <CardContent className="p-0">
+   <CardContent className="p-0 relative">
     <ReactFlowProvider>
      <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize}/>
     </ReactFlowProvider>
 
-    {/*Legend-compact*/}
-    <div className="flex items-center justify-center gap-4 py-2 border-t border-nier-border-light text-nier-caption text-nier-text-light">
+    {/*Legend-図の右下に縦並び*/}
+    <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-nier-caption text-nier-text-light bg-nier-bg-main/90 p-2 rounded border border-nier-border-light">
      <div className="flex items-center gap-1">
       <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm"/>
       <span>完了</span>
@@ -690,10 +704,9 @@ export default function WorkflowDiagram():JSX.Element{
       <div className="w-3 h-2.5 bg-nier-bg-main border border-nier-border-light rounded-sm"/>
       <span>待機</span>
      </div>
-     <div className="border-l border-nier-border-light h-3 mx-1"/>
-     <div className="flex items-center gap-1">
+     <div className="flex items-center gap-1 mt-1 pt-1 border-t border-nier-border-light">
       <span className="text-[9px] px-1 py-0.5 border border-nier-border-light rounded text-nier-text-light">L/W</span>
-      <span>Leader/Worker継続ループ</span>
+      <span>継続ループ</span>
      </div>
     </div>
    </CardContent>

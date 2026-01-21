@@ -41,7 +41,7 @@ export const ALLOWED_MIME_TYPES:Record<FileCategory,string[]>={
   'text/x-c',
   'text/x-csharp',
   'text/markdown'
- ],
+],
  image:[
   'image/png',
   'image/jpeg',
@@ -49,7 +49,7 @@ export const ALLOWED_MIME_TYPES:Record<FileCategory,string[]>={
   'image/webp',
   'image/svg+xml',
   'image/bmp'
- ],
+],
  audio:[
   'audio/mpeg',
   'audio/wav',
@@ -57,19 +57,19 @@ export const ALLOWED_MIME_TYPES:Record<FileCategory,string[]>={
   'audio/webm',
   'audio/flac',
   'audio/aac'
- ],
+],
  video:[
   'video/mp4',
   'video/webm',
   'video/ogg',
   'video/quicktime',
   'video/x-msvideo'
- ],
+],
  document:[
   'application/pdf',
   'text/plain',
   'text/markdown'
- ],
+],
  other:[]
 }
 

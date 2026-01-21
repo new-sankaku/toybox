@@ -198,6 +198,12 @@ export interface TokensByTypeEntry{
  output:number
 }
 
+export interface GenerationCount{
+ count:number
+ unit:string
+ calls:number
+}
+
 export interface ApiProjectMetrics{
  projectId:string
  totalTokensUsed:number
@@ -205,6 +211,7 @@ export interface ApiProjectMetrics{
  totalOutputTokens:number
  estimatedTotalTokens:number
  tokensByType?:Record<string,TokensByTypeEntry>
+ generationCounts?:Record<string,GenerationCount>
  elapsedTimeSeconds:number
  estimatedRemainingSeconds:number
  estimatedEndTime:string|null
@@ -214,6 +221,19 @@ export interface ApiProjectMetrics{
  currentPhase:number
  phaseName:string
  activeGenerations:number
+ generationCounts?:{
+  characters:{count:number;unit:string;calls:number}
+  backgrounds:{count:number;unit:string;calls:number}
+  ui:{count:number;unit:string;calls:number}
+  effects:{count:number;unit:string;calls:number}
+  music:{count:number;unit:string;calls:number}
+  sfx:{count:number;unit:string;calls:number}
+  voice:{count:number;unit:string;calls:number}
+  video:{count:number;unit:string;calls:number}
+  scenarios:{count:number;unit:string;calls:number}
+  code:{count:number;unit:string;calls:number}
+  documents:{count:number;unit:string;calls:number}
+ }
 }
 
 export const metricsApi={
@@ -365,7 +385,7 @@ export const agentDefinitionApi={
  }
 }
 
-// Human Intervention API
+
 export type InterventionPriority='normal'|'urgent'
 export type InterventionTarget='all'|'specific'
 export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'
@@ -417,10 +437,14 @@ export const interventionApi={
  process:async(interventionId:string):Promise<ApiIntervention>=>{
   const response=await api.post(`/api/interventions/${interventionId}/process`)
   return response.data
+ },
+
+ delete:async(interventionId:string):Promise<void>=>{
+  await api.delete(`/api/interventions/${interventionId}`)
  }
 }
 
-// File Upload API
+
 export type FileCategory='code'|'image'|'audio'|'video'|'document'|'archive'|'other'
 export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'
 

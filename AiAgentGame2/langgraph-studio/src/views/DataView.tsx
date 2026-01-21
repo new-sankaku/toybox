@@ -148,13 +148,6 @@ export default function DataView():JSX.Element{
  if(!currentProject){
   return(
    <div className="p-4 animate-nier-fade-in">
-    <div className="nier-page-header-row">
-     <div className="nier-page-header-left">
-      <h1 className="nier-page-title">ASSET</h1>
-      <span className="nier-page-subtitle">-アセット管理</span>
-     </div>
-     <div className="nier-page-header-right"/>
-    </div>
     <Card>
      <CardContent>
       <div className="text-center py-12 text-nier-text-light">
@@ -254,111 +247,27 @@ export default function DataView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   {/*Header*/}
-   <div className="nier-page-header-row">
-    <div className="nier-page-header-left">
-     <h1 className="nier-page-title">ASSET</h1>
-     <span className="nier-page-subtitle">-アセット管理</span>
-    </div>
-    <div className="nier-page-header-right">
-     <button
-      onClick={()=>setViewMode('grid')}
-      className={cn(
-       'p-2 transition-colors',
-       viewMode==='grid'?'bg-nier-bg-selected' : 'hover:bg-nier-bg-hover'
-)}
-     >
-      <Grid size={16}/>
-     </button>
-     <button
-      onClick={()=>setViewMode('list')}
-      className={cn(
-       'p-2 transition-colors',
-       viewMode==='list'?'bg-nier-bg-selected' : 'hover:bg-nier-bg-hover'
-)}
-     >
-      <List size={16}/>
-     </button>
-    </div>
-   </div>
-
-   {/*Filter Tabs*/}
-   <Card className="mb-3">
-    <CardContent className="py-2">
-     <div className="flex items-center justify-between flex-wrap gap-3">
-      {/*Type Filter*/}
-      <div className="flex items-center gap-1 flex-wrap">
-       {(['all','image','audio','document','code']as const).map(type=>{
-        const Icon=type==='all'?FolderOpen : typeIcons[type]
-        const label=type==='all'?'全て' : typeLabels[type]
-        const count=assetCounts[type]
-        return(
-         <button
-          key={type}
-          className={cn(
-           'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
-           filterType===type
-            ?'bg-nier-bg-selected text-nier-text-main'
-            : 'text-nier-text-light hover:bg-nier-bg-panel'
-)}
-          onClick={()=>setFilterType(type)}
-         >
-          <Icon size={14}/>
-          {label}
-          <span className="text-nier-caption opacity-70">({count})</span>
-         </button>
-)
-       })}
-      </div>
-
-      {/*Approval Filter*/}
-      <div className="flex items-center gap-1 flex-wrap">
-       <Filter size={14} className="text-nier-text-light mr-2"/>
-       {(['all','pending','approved','rejected']as const).map(status=>{
-        const label=status==='all'?'全状態' : approvalStatusLabels[status]
-        const count=approvalCounts[status]
-        return(
-         <button
-          key={status}
-          className={cn(
-           'px-3 py-1.5 text-nier-small tracking-nier transition-colors border',
-           approvalFilter===status
-            ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
-            : 'border-transparent text-nier-text-light hover:bg-nier-bg-panel'
-)}
-          onClick={()=>setApprovalFilter(status)}
-         >
-          {label}
-          <span className="text-nier-caption opacity-70 ml-1">({count})</span>
-         </button>
-)
-       })}
-      </div>
-     </div>
-    </CardContent>
-   </Card>
-
-   {/*Asset Grid/List*/}
-   {loading&&assets.length===0?(
-    <Card>
-     <CardContent>
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+   {/*Asset Grid/List-Main Content*/}
+   <Card className="flex-1 flex flex-col overflow-hidden">
+    <CardHeader className="flex-shrink-0">
+     <DiamondMarker>アセット一覧</DiamondMarker>
+     <span className="text-nier-caption text-nier-text-light ml-2">
+      ({filteredAssets.length}件)
+     </span>
+    </CardHeader>
+    <CardContent className="flex-1 overflow-y-auto">
+     {loading&&assets.length===0?(
       <div className="text-center py-8 text-nier-text-light">
        <p className="text-nier-small">読み込み中...</p>
       </div>
-     </CardContent>
-    </Card>
-) : filteredAssets.length===0?(
-    <Card>
-     <CardContent>
+):filteredAssets.length===0?(
       <div className="text-center py-8 text-nier-text-light">
        <FolderOpen size={32} className="mx-auto mb-2 opacity-50"/>
        <p className="text-nier-small">アセットがありません</p>
       </div>
-     </CardContent>
-    </Card>
-) : viewMode==='grid'?(
-    <div className="grid grid-cols-6 gap-2 nier-scroll-list">
+):viewMode==='grid'?(
+      <div className="grid grid-cols-6 gap-2">
      {filteredAssets.map(asset=>{
       const Icon=typeIcons[asset.type]||FolderOpen
       return(
@@ -435,16 +344,8 @@ export default function DataView():JSX.Element{
        </div>
 )
      })}
-    </div>
-) : (
-    <Card>
-     <CardHeader>
-      <DiamondMarker>アセット一覧</DiamondMarker>
-      <span className="text-nier-caption text-nier-text-light ml-auto">
-       {filteredAssets.length}件
-      </span>
-     </CardHeader>
-     <CardContent className="p-0">
+      </div>
+):(
       <table className="w-full">
        <thead className="bg-nier-bg-header text-nier-text-header">
         <tr>
@@ -535,9 +436,105 @@ export default function DataView():JSX.Element{
         })}
        </tbody>
       </table>
+)}
+    </CardContent>
+   </Card>
+
+   {/*Filter Sidebar*/}
+   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+    {/*Type Filter*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>タイプ</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex flex-col gap-1">
+       {(['all','image','audio','document','code']as const).map(type=>{
+        const Icon=type==='all'?FolderOpen : typeIcons[type]
+        const label=type==='all'?'全て' : typeLabels[type]
+        const count=assetCounts[type]
+        return(
+         <button
+          key={type}
+          className={cn(
+           'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
+           filterType===type
+            ?'bg-nier-bg-selected text-nier-text-main'
+            : 'text-nier-text-light hover:bg-nier-bg-panel'
+)}
+          onClick={()=>setFilterType(type)}
+         >
+          <Icon size={14}/>
+          <span className="flex-1">{label}</span>
+          <span className="text-nier-caption opacity-70">({count})</span>
+         </button>
+)
+       })}
+      </div>
      </CardContent>
     </Card>
+
+    {/*Approval Filter*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>承認状態</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex flex-col gap-1">
+       {(['all','pending','approved','rejected']as const).map(status=>{
+        const label=status==='all'?'全状態' : approvalStatusLabels[status]
+        const count=approvalCounts[status]
+        return(
+         <button
+          key={status}
+          className={cn(
+           'flex items-center justify-between px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
+           approvalFilter===status
+            ?'bg-nier-bg-selected text-nier-text-main'
+            : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
+          onClick={()=>setApprovalFilter(status)}
+         >
+          <span>{label}</span>
+          <span className="text-nier-caption opacity-70">({count})</span>
+         </button>
+)
+       })}
+      </div>
+     </CardContent>
+    </Card>
+
+    {/*View Mode*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>表示</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex items-center gap-1">
+       <button
+        onClick={()=>setViewMode('grid')}
+        className={cn(
+         'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
+         viewMode==='grid'?'bg-nier-bg-selected text-nier-text-main' : 'text-nier-text-light hover:bg-nier-bg-hover'
+)}
+       >
+        <Grid size={14}/>
+        グリッド
+       </button>
+       <button
+        onClick={()=>setViewMode('list')}
+        className={cn(
+         'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
+         viewMode==='list'?'bg-nier-bg-selected text-nier-text-main' : 'text-nier-text-light hover:bg-nier-bg-hover'
+)}
+       >
+        <List size={14}/>
+        リスト
+       </button>
+      </div>
+     </CardContent>
+    </Card>
+   </div>
 
    {/*Preview Modal*/}
    {selectedAsset&&(

@@ -1,6 +1,7 @@
 import{useRef,useEffect,useCallback,useState}from'react'
 import type{CharacterState,AIServiceType}from'./types'
-import{AGENT_MODEL_MAP,SERVICE_CONFIG}from'./types'
+import{SERVICE_CONFIG}from'./types'
+import{drawPixelCharacter,getAgentDisplayConfig}from'./pixelCharacters'
 
 interface AIField2DProps{
  characters:CharacterState[]
@@ -17,14 +18,6 @@ const NIER_COLORS={
  accentBright:'#c4a574',
  textMain:'#4a4540',
  textDim:'#7a756a'
-}
-
-const SPIRIT_COLORS:Record<string,{body:string;core:string}>={
- spirit_fire:{body:'#6a6a6a',core:'#8a8a8a'},
- spirit_water:{body:'#5a5a5a',core:'#7a7a7a'},
- spirit_earth:{body:'#707070',core:'#909090'},
- spirit_light:{body:'#505050',core:'#707070'},
- spirit_wind:{body:'#606060',core:'#808080'}
 }
 
 interface CharacterPosition{
@@ -44,36 +37,46 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
  const positionsRef=useRef<Map<string,CharacterPosition>>(new Map())
  const frameRef=useRef<number>(0)
  const animationRef=useRef<number>(0)
+ const prevDimensionsRef=useRef({width:0,height:0})
 
- const ROOM_X=0.75
- const ROOM_WIDTH=0.22
+ const ROOM_X=0.68
+ const ROOM_WIDTH=0.30
  const PLATFORM_X=0.03
  const PLATFORM_WIDTH=0.35
 
  useEffect(()=>{
+  const container=containerRef.current
+  const canvas=canvasRef.current
+  if(!container||!canvas)return
+
   const updateDimensions=()=>{
-   if(containerRef.current&&canvasRef.current){
-    const rect=containerRef.current.getBoundingClientRect()
-    const dpr=window.devicePixelRatio||1
-    const canvas=canvasRef.current
+   const rect=container.getBoundingClientRect()
+   if(rect.width===0||rect.height===0)return
 
-    canvas.width=rect.width*dpr
-    canvas.height=rect.height*dpr
+   const dpr=window.devicePixelRatio||1
 
-    canvas.style.width=`${rect.width}px`
-    canvas.style.height=`${rect.height}px`
+   canvas.width=rect.width*dpr
+   canvas.height=rect.height*dpr
 
-    const ctx=canvas.getContext('2d')
-    if(ctx){
-     ctx.scale(dpr,dpr)
-    }
+   canvas.style.width=`${rect.width}px`
+   canvas.style.height=`${rect.height}px`
 
-    setDimensions({width:rect.width,height:rect.height})
+   const ctx=canvas.getContext('2d')
+   if(ctx){
+    ctx.scale(dpr,dpr)
    }
+
+   setDimensions({width:rect.width,height:rect.height})
   }
-  updateDimensions()
-  window.addEventListener('resize',updateDimensions)
-  return()=>window.removeEventListener('resize',updateDimensions)
+
+  const resizeObserver=new ResizeObserver(()=>{
+   updateDimensions()
+  })
+  resizeObserver.observe(container)
+
+  return()=>{
+   resizeObserver.disconnect()
+  }
  },[])
 
  useEffect(()=>{
@@ -83,78 +86,49 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const roomStartY=dimensions.height*0.08
   const roomHeight=dimensions.height*0.84
 
-  characters.forEach((char)=>{
-   if(!positions.has(char.agentId)){
-    const x=roomStartX+20+Math.random()*(roomWidth-40)
-    const y=roomStartY+30+Math.random()*(roomHeight-60)
+  const dimensionsChanged=prevDimensionsRef.current.width!==dimensions.width||
+   prevDimensionsRef.current.height!==dimensions.height
+  prevDimensionsRef.current={width:dimensions.width,height:dimensions.height}
+
+  const currentAgentIds=new Set(characters.map(c=>c.agentId))
+  for(const agentId of positions.keys()){
+   if(!currentAgentIds.has(agentId)){
+    positions.delete(agentId)
+   }
+  }
+
+  const spriteSize=56*characterScale
+  const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
+  const gridRows=Math.ceil(characters.length/gridCols)
+  const cellWidth=(roomWidth-30)/gridCols
+  const cellHeight=(roomHeight-50)/Math.max(gridRows,4)
+
+  characters.forEach((char,index)=>{
+   const col=index%gridCols
+   const row=Math.floor(index/gridCols)
+   const x=roomStartX+20+col*cellWidth+cellWidth/2
+   const y=roomStartY+35+row*cellHeight+cellHeight/2
+   const existing=positions.get(char.agentId)
+   if(existing){
+    if(dimensionsChanged&&char.status!=='working'){
+     existing.x=x
+     existing.y=y
+     existing.targetX=x
+     existing.targetY=y
+    }
+   }else{
     positions.set(char.agentId,{
      x,y,
      targetX:x,
      targetY:y,
-     wanderTimer:Math.random()*3000,
-     rotation:Math.random()*Math.PI*2,
-     wasWorking:false
+     wanderTimer:0,
+     rotation:0,
+     wasWorking:char.status==='working'
     })
    }
   })
- },[characters,dimensions])
+ },[characters,dimensions,characterScale])
 
- const drawSprite=useCallback((
-  ctx:CanvasRenderingContext2D,
-  x:number,
-  y:number,
-  spiritType:string,
-  size:number,
-  isWorking:boolean,
-  frame:number,
-  rotation:number
-)=>{
-  const colors=SPIRIT_COLORS[spiritType]||SPIRIT_COLORS.spirit_light
-  const s=size/2
-
-  ctx.save()
-  ctx.translate(x+3,y+4)
-  ctx.rotate(rotation+frame*0.02)
-  ctx.fillStyle='rgba(0, 0, 0, 0.2)'
-  ctx.beginPath()
-  ctx.moveTo(0,-s)
-  ctx.lineTo(s*0.7,0)
-  ctx.lineTo(0,s)
-  ctx.lineTo(-s*0.7,0)
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-
-  ctx.save()
-  ctx.translate(x,y)
-  ctx.rotate(rotation+frame*0.02)
-
-  if(isWorking){
-   ctx.shadowColor=NIER_COLORS.accent
-   ctx.shadowBlur=12+Math.sin(frame*0.15)*4
-  }
-
-  ctx.fillStyle=colors.body
-  ctx.beginPath()
-  ctx.moveTo(0,-s)
-  ctx.lineTo(s*0.7,0)
-  ctx.lineTo(0,s)
-  ctx.lineTo(-s*0.7,0)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.fillStyle=isWorking?NIER_COLORS.accent : colors.core
-  const coreSize=s*0.4
-  ctx.beginPath()
-  ctx.moveTo(0,-coreSize)
-  ctx.lineTo(coreSize*0.7,0)
-  ctx.lineTo(0,coreSize)
-  ctx.lineTo(-coreSize*0.7,0)
-  ctx.closePath()
-  ctx.fill()
-
-  ctx.restore()
- },[])
 
  const drawPlatform=useCallback((
   ctx:CanvasRenderingContext2D,
@@ -224,62 +198,10 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   x:number,
   y:number,
   width:number,
-  height:number,
-  assetCount:number,
-  frame:number
+  height:number
 )=>{
   ctx.fillStyle=NIER_COLORS.backgroundDark
   ctx.fillRect(x,y,width,height)
-
-  const assetAreaY=y+height-60
-  const maxVisibleAssets=Math.min(assetCount,20)
-
-  for(let i=0;i<maxVisibleAssets;i++){
-   const row=Math.floor(i/5)
-   const col=i%5
-   const assetX=x+15+col*(width-30)/5
-   const assetY=assetAreaY-row*12
-
-   const assetType=i%4
-   ctx.fillStyle=i%2===0?'#9a9590' : '#8a8580'
-
-   if(assetType===0){
-    ctx.fillRect(assetX,assetY,12,15)
-    ctx.fillStyle='#b5b0a8'
-    ctx.fillRect(assetX+2,assetY+2,8,2)
-    ctx.fillRect(assetX+2,assetY+5,6,2)
-    ctx.fillRect(assetX+2,assetY+8,7,2)
-   }else if(assetType===1){
-    ctx.fillRect(assetX,assetY,14,12)
-    ctx.fillStyle='#7a7570'
-    ctx.fillRect(assetX+2,assetY+2,10,8)
-    ctx.fillStyle='#a5a098'
-    ctx.beginPath()
-    ctx.arc(assetX+5,assetY+5,2,0,Math.PI*2)
-    ctx.fill()
-   }else if(assetType===2){
-    ctx.fillRect(assetX,assetY,13,13)
-    ctx.fillStyle='#b5b0a8'
-    ctx.beginPath()
-    ctx.moveTo(assetX+4,assetY+3)
-    ctx.lineTo(assetX+4,assetY+10)
-    ctx.lineTo(assetX+9,assetY+6.5)
-    ctx.closePath()
-    ctx.fill()
-   }else{
-    ctx.fillRect(assetX,assetY,12,14)
-    ctx.fillStyle='#b5b0a8'
-    ctx.font='8px monospace'
-    ctx.fillText('<>',assetX+2,assetY+9)
-   }
-  }
-
-  if(assetCount>0){
-   ctx.fillStyle=NIER_COLORS.textDim
-   ctx.font='9px -apple-system, sans-serif'
-   ctx.textAlign='right'
-   ctx.fillText(`${assetCount} assets`,x+width-8,y+height-5)
-  }
 
   ctx.strokeStyle=NIER_COLORS.primary
   ctx.lineWidth=2
@@ -353,16 +275,14 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   y:number,
   text:string
 )=>{
-  ctx.font='12px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  ctx.font='11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
-  const padding=8
-  const lineHeight=15
-
-  const textWidth=ctx.measureText(text).width
-
-  const maxLineWidth=180
+  const padding=6
+  const lineHeight=14
+  const maxLineWidth=140
 
   let lines:string[]=[]
+  const textWidth=ctx.measureText(text).width
   if(textWidth<=maxLineWidth){
    lines=[text]
   }else{
@@ -370,14 +290,13 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    for(const char of text.split('')){
     const testLine=currentLine+char
     if(ctx.measureText(testLine).width>maxLineWidth){
-     if(currentLine) lines.push(currentLine)
+     if(currentLine)lines.push(currentLine)
      currentLine=char
     }else{
      currentLine=testLine
     }
    }
-   if(currentLine) lines.push(currentLine)
-
+   if(currentLine)lines.push(currentLine)
    if(lines.length>2){
     lines=lines.slice(0,2)
     lines[1]=lines[1].slice(0,-3)+'...'
@@ -388,8 +307,8 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const bubbleWidth=actualTextWidth+padding*2+4
   const bubbleHeight=lines.length*lineHeight+padding*2
 
-  const bubbleX=Math.round(x-bubbleWidth/2)
-  const bubbleY=Math.round(y-bubbleHeight-10)
+  const bubbleX=Math.round(x+35)
+  const bubbleY=Math.round(y-bubbleHeight/2)
 
   ctx.fillStyle='#e8e4d8'
   ctx.fillRect(bubbleX,bubbleY,bubbleWidth,bubbleHeight)
@@ -400,9 +319,9 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
   ctx.fillStyle='#e8e4d8'
   ctx.beginPath()
-  ctx.moveTo(x-5,bubbleY+bubbleHeight)
-  ctx.lineTo(x,bubbleY+bubbleHeight+6)
-  ctx.lineTo(x+5,bubbleY+bubbleHeight)
+  ctx.moveTo(bubbleX,y-5)
+  ctx.lineTo(bubbleX-8,y)
+  ctx.lineTo(bubbleX,y+5)
   ctx.closePath()
   ctx.fill()
 
@@ -450,13 +369,10 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     platformCenters[service]=drawPlatform(ctx,platformX,py,platformWidth,platformHeight,service,hasWorkers,frame)
    })
 
-   const completedCount=characters.filter(c=>c.request?.status==='completed').length
-   const assetCount=Math.floor(frame/300)+completedCount+5
-
-   drawRoom(ctx,roomX,roomY,roomWidth,roomHeight,assetCount,frame)
+   drawRoom(ctx,roomX,roomY,roomWidth,roomHeight)
 
    const positions=positionsRef.current
-   const spriteSize=26*characterScale
+   const spriteSize=56*characterScale
    const workingAgents:{char:CharacterState;pos:CharacterPosition}[]=[]
 
    const workingPerService:Record<AIServiceType,number>={}as Record<AIServiceType,number>
@@ -470,7 +386,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     }
    })
 
-   characters.forEach((char)=>{
+   const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
+   const cellWidth=(roomWidth-30)/gridCols
+   const cellHeight=(roomHeight-50)/Math.max(Math.ceil(characters.length/gridCols),4)
+
+   characters.forEach((char,index)=>{
     const pos=positions.get(char.agentId)
     if(!pos)return
 
@@ -482,50 +402,23 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      const totalWorking=workingPerService[char.targetService]
 
      const lineX=platformX+platformWidth+20
-     const spreadY=totalWorking>1?(workingIndex-(totalWorking-1)/2)*25 : 0
+     const spreadY=totalWorking>1?(workingIndex-(totalWorking-1)/2)*25:0
      pos.targetX=lineX
      pos.targetY=pc.centerY+spreadY
      pos.wasWorking=true
      workingAgents.push({char,pos})
     }else{
-     if(pos.wasWorking){
-      pos.targetX=roomX+20+Math.random()*(roomWidth-40)
-      pos.targetY=roomY+30+Math.random()*(roomHeight-60)
-      pos.wanderTimer=2000+Math.random()*3000
-      pos.wasWorking=false
-     }else{
-      pos.wanderTimer-=16
-      if(pos.wanderTimer<=0){
-       let newX,newY
-       let attempts=0
-       do{
-        newX=roomX+20+Math.random()*(roomWidth-40)
-        newY=roomY+30+Math.random()*(roomHeight-60)
-        attempts++
-       }while(attempts<10&&isOverlapping(newX,newY,char.agentId,positions,30))
-
-       pos.targetX=newX
-       pos.targetY=newY
-       pos.wanderTimer=3000+Math.random()*4000
-      }
-     }
+     const col=index%gridCols
+     const row=Math.floor(index/gridCols)
+     pos.targetX=roomX+20+col*cellWidth+cellWidth/2
+     pos.targetY=roomY+35+row*cellHeight+cellHeight/2
+     pos.wasWorking=false
     }
 
-    const justReturning=!isWorking&&Math.abs(pos.x-pos.targetX)>50
-    const speed=isWorking?0.08 : (justReturning?0.12 : 0.025)
+    const speed=isWorking?0.08:0.06
     pos.x+=(pos.targetX-pos.x)*speed
     pos.y+=(pos.targetY-pos.y)*speed
-    pos.rotation+=isWorking?0.15 : 0.01
    })
-
-   function isOverlapping(x:number,y:number,excludeId:string,positions:Map<string,CharacterPosition>,minDist:number):boolean{
-    for(const[id,p]of positions){
-     if(id===excludeId)continue
-     const dist=Math.sqrt((x-p.x)**2+(y-p.y)**2)
-     if(dist<minDist)return true
-    }
-    return false
-   }
 
    const activeServices=new Set<AIServiceType>()
    workingAgents.forEach(({char,pos})=>{
@@ -547,19 +440,23 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     const pos=positions.get(char.agentId)
     if(!pos)return
 
-    const spiritType=AGENT_MODEL_MAP[char.agentType]||'spirit_light'
     const isWorking=char.status==='working'
+    const isActive=char.isActive??isWorking
+    const config=getAgentDisplayConfig(char.agentType)
 
-    drawSprite(ctx,pos.x,pos.y,spiritType,spriteSize,isWorking,frame,pos.rotation)
+    if(!isActive){
+     ctx.globalAlpha=0.4
+    }
+    drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking,frame,characterScale)
+    ctx.globalAlpha=1.0
 
     ctx.font='10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    ctx.fillStyle=NIER_COLORS.textDim
+    ctx.fillStyle=isActive?NIER_COLORS.textMain : NIER_COLORS.textDim
     ctx.textAlign='center'
-    const agentName=char.agentType.replace(/_/g,' ').toUpperCase()
-    ctx.fillText(agentName,pos.x,pos.y+spriteSize/2+12)
+    ctx.fillText(config.label,pos.x,pos.y+spriteSize/2+12)
 
     if(isWorking&&char.request){
-     drawSpeechBubble(ctx,pos.x,pos.y-spriteSize/2,char.request.input)
+     drawSpeechBubble(ctx,pos.x,pos.y,char.request.input)
     }
    })
 
@@ -579,7 +476,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     cancelAnimationFrame(animationRef.current)
    }
   }
- },[characters,dimensions,characterScale,drawSprite,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble])
+ },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble])
 
  const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return
@@ -590,7 +487,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const rect=canvas.getBoundingClientRect()
   const x=e.clientX-rect.left
   const y=e.clientY-rect.top
-  const spriteSize=26*characterScale
+  const spriteSize=56*characterScale
 
   const positions=positionsRef.current
   for(const char of characters){

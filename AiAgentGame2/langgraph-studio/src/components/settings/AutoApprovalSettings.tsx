@@ -61,7 +61,7 @@ export function AutoApprovalSettings():JSX.Element{
           className={cn(
            'flex items-center justify-between px-4 py-2 transition-colors',
            'hover:bg-nier-bg-panel'
-          )}
+)}
          >
           <span className="text-nier-small text-nier-text-main">{rule.label}</span>
           <button
@@ -69,27 +69,27 @@ export function AutoApprovalSettings():JSX.Element{
            className={cn(
             'p-1 rounded transition-colors',
             'focus:outline-none focus:ring-2 focus:ring-nier-accent-blue'
-           )}
+)}
           >
            {rule.enabled?(
             <div className="flex items-center gap-1 text-nier-accent-green">
              <ToggleRight size={20}/>
              <span className="text-nier-caption">ON</span>
             </div>
-           ):(
+):(
             <div className="flex items-center gap-1 text-nier-text-light">
              <ToggleLeft size={20}/>
              <span className="text-nier-caption">OFF</span>
             </div>
-           )}
+)}
           </button>
          </div>
-        ))}
+))}
        </div>
       </CardContent>
      </Card>
-    )
+)
    })}
   </div>
- )
+)
 }

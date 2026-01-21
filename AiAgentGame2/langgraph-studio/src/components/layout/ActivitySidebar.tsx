@@ -1,12 +1,11 @@
 import{useState,useEffect,useRef}from'react'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
-import{useNavigatorStore}from'@/stores/navigatorStore'
 import{logsApi,checkpointApi,metricsApi,agentApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiCheckpoint,type ApiProjectMetrics,type ApiAgent,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
-import{formatNumber}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
-import{ChevronRight,ChevronLeft,Radio}from'lucide-react'
+import{ChevronRight,ChevronLeft}from'lucide-react'
+import OperatorPanel from'./OperatorPanel'
 
 function formatTime(seconds:number):string{
  if(seconds<60)return`${Math.round(seconds)}秒`
@@ -29,10 +28,29 @@ function formatCost(tokens:number):string{
  return`${cost.toFixed(2)}`
 }
 
+function formatFileSize(sizeStr:string):number{
+ const match=sizeStr.match(/^([\d.]+)\s*(B|KB|MB|GB)?$/i)
+ if(!match)return 0
+ const value=parseFloat(match[1])
+ const unit=(match[2]||'B').toUpperCase()
+ switch(unit){
+  case'GB':return value*1024*1024*1024
+  case'MB':return value*1024*1024
+  case'KB':return value*1024
+  default:return value
+ }
+}
+
+function formatSize(bytes:number):string{
+ if(bytes>=1024*1024*1024)return`${(bytes/(1024*1024*1024)).toFixed(1)}GB`
+ if(bytes>=1024*1024)return`${(bytes/(1024*1024)).toFixed(1)}MB`
+ if(bytes>=1024)return`${(bytes/1024).toFixed(1)}KB`
+ return`${bytes}B`
+}
+
 export default function ActivitySidebar():JSX.Element{
- const{currentProject}=useProjectStore()
+ const{currentProject,dataVersion}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
- const{showMessage}=useNavigatorStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
  const[metrics,setMetrics]=useState<ApiProjectMetrics|null>(null)
  const[agents,setAgents]=useState<ApiAgent[]>([])
@@ -75,7 +93,7 @@ export default function ActivitySidebar():JSX.Element{
   }
 
   fetchData()
- },[currentProject?.id])
+ },[currentProject?.id,dataVersion])
 
  const runningAgents=agents.filter(a=>a.status==='running').length
  const completedAgents=agents.filter(a=>a.status==='completed').length
@@ -91,6 +109,10 @@ export default function ActivitySidebar():JSX.Element{
  const pendingAssets=assets.filter(a=>a.approvalStatus==='pending').length
 
  const generatingCount=aiGenerating
+
+ const totalProjectSize=assets.reduce((acc,asset)=>{
+  return acc+formatFileSize(asset.size||'0')
+ },0)
 
  const[highlights,setHighlights]=useState<Record<string,boolean>>({})
  const prevValues=useRef<Record<string,number>>({})
@@ -166,16 +188,7 @@ export default function ActivitySidebar():JSX.Element{
      {isCollapsed?<ChevronLeft size={16}/>:<ChevronRight size={16}/>}
     </button>
     {!isCollapsed&&(
-     <div className="flex items-center gap-2 pr-3">
-      <button
-       onClick={()=>showMessage('オペレーター','システム状態は正常です。全エージェントが稼働中。何かあればお知らせください。')}
-       className="p-1 hover:bg-nier-bg-hover transition-colors text-nier-text-light hover:text-nier-text-main"
-       title="オペレーター通信"
-      >
-       <Radio size={14}/>
-      </button>
-      <span className="text-nier-caption text-nier-text-light">SUMMARY</span>
-     </div>
+     <span className="text-nier-caption text-nier-text-light pr-3">SUMMARY</span>
 )}
    </div>
 
@@ -184,7 +197,7 @@ export default function ActivitySidebar():JSX.Element{
      {/*Project Status-Compact*/}
      <div className="px-2 py-1.5 border-b border-nier-border-light">
       <div className="flex items-center justify-between">
-       <div className="text-nier-caption truncate flex-1">{currentProject.name}</div>
+       <div className="text-[11px] truncate flex-1 font-medium">{currentProject.name}</div>
        <span className="text-[10px] px-1 py-0.5 border ml-1 bg-nier-bg-selected border-nier-border-light text-nier-text-light">
         {currentProject.status==='running'?'実行中' :
          currentProject.status==='paused'?'一時停止' :
@@ -194,24 +207,24 @@ export default function ActivitySidebar():JSX.Element{
       </div>
       {metrics&&(
        <div className="mt-1">
-        <div className="flex items-center justify-between text-[10px] text-nier-text-light mb-0.5">
-         <span>Phase {currentProject.currentPhase}-{metrics.phaseName}</span>
+        <div className="flex items-center justify-between text-[11px] text-nier-text-light mb-0.5">
+         <span className="truncate flex-1 mr-2">{metrics.phaseName}</span>
          <span>{metrics.progressPercent}%</span>
         </div>
-        <Progress value={metrics.progressPercent} className="h-1"/>
+        <Progress value={metrics.progressPercent} className="h-1.5"/>
        </div>
 )}
      </div>
 
      {/*Summary List*/}
-     <div className="px-2 py-1.5 text-[10px] space-y-0.5">
+     <div className="px-2 py-1.5 text-[11px] space-y-1">
       <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">Token</span>
        <span className="text-nier-text-main">{metrics?formatTokenCount(metrics.totalTokensUsed) : 0}</span>
       </div>
       <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">料金</span>
-       <span className="text-nier-text-main">{metrics?formatCost(metrics.totalTokensUsed) : '$0'}</span>
+       <span className="text-nier-text-main">${metrics?formatCost(metrics.totalTokensUsed) : '0'}</span>
       </div>
       <div className={cn('flex justify-between transition-colors duration-300',highlights.agent&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">Agent</span>
@@ -242,6 +255,64 @@ export default function ActivitySidebar():JSX.Element{
        <span className="text-nier-text-main">{generatingCount}件</span>
       </button>
      </div>
+
+     {/*Output*/}
+     <div className="px-2 py-1.5 text-[11px] border-t border-nier-border-light">
+      <div className="text-nier-text-light text-[9px] tracking-wider mb-1">OUTPUT</div>
+      <div className="space-y-0.5">
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">キャラクター</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.characters?.count||0}{metrics?.generationCounts?.characters?.unit||'体'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">背景</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.backgrounds?.count||0}{metrics?.generationCounts?.backgrounds?.unit||'枚'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">UIパーツ</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.ui?.count||0}{metrics?.generationCounts?.ui?.unit||'点'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">エフェクト</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.effects?.count||0}{metrics?.generationCounts?.effects?.unit||'種'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">BGM</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.music?.count||0}{metrics?.generationCounts?.music?.unit||'曲'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">効果音</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.sfx?.count||0}{metrics?.generationCounts?.sfx?.unit||'個'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">ボイス</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.voice?.count||0}{metrics?.generationCounts?.voice?.unit||'件'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">動画</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.video?.count||0}{metrics?.generationCounts?.video?.unit||'本'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">シナリオ</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.scenarios?.count||0}{metrics?.generationCounts?.scenarios?.unit||'本'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">コード</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.code?.count||0}{metrics?.generationCounts?.code?.unit||'行'}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">ドキュメント</span>
+        <span className="text-nier-text-main">{metrics?.generationCounts?.documents?.count||0}{metrics?.generationCounts?.documents?.unit||'件'}</span>
+       </div>
+       <div className="flex justify-between pt-1 border-t border-nier-border-light mt-1">
+        <span className="text-nier-text-light">ファイル合計</span>
+        <span className="text-nier-text-main">{totalAssets}件 / {formatSize(totalProjectSize)}</span>
+       </div>
+      </div>
+     </div>
+
+     {/*Operator Panel*/}
+     <OperatorPanel/>
     </>
 )}
   </div>

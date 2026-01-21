@@ -24,7 +24,16 @@ def register_metrics_routes(app: Flask, data_store: TestDataStore):
                 "totalTasks": 0,
                 "progressPercent": 0,
                 "currentPhase": project.get("currentPhase", 1),
-                "phaseName": _get_phase_name(project.get("currentPhase", 1))
+                "phaseName": _get_phase_name(project.get("currentPhase", 1)),
+                "generationCounts": {
+                    "images": {"count": 0, "unit": "枚", "calls": 0},
+                    "music": {"count": 0, "unit": "曲", "calls": 0},
+                    "sfx": {"count": 0, "unit": "個", "calls": 0},
+                    "voice": {"count": 0, "unit": "件", "calls": 0},
+                    "code": {"count": 0, "unit": "行", "calls": 0},
+                    "documents": {"count": 0, "unit": "件", "calls": 0},
+                    "scenarios": {"count": 0, "unit": "本", "calls": 0}
+                }
             }
 
         return jsonify(metrics)

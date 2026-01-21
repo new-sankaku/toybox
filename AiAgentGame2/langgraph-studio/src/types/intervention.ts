@@ -13,6 +13,9 @@ export interface Intervention{
  message:string
  attachedFileIds:string[]
  status:InterventionStatus
+ response?:string
+ respondedBy?:string
+ respondedAt?:string
  createdAt:string
  deliveredAt:string|null
  acknowledgedAt:string|null

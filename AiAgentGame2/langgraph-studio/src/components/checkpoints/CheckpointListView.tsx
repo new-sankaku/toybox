@@ -1,5 +1,6 @@
 import{useState,useMemo}from'react'
-import{Card,CardContent}from'@/components/ui/Card'
+import{Card,CardContent,CardHeader}from'@/components/ui/Card'
+import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{CheckpointCard}from'./CheckpointCard'
 import type{Checkpoint}from'@/types/checkpoint'
 import{cn}from'@/lib/utils'
@@ -63,21 +64,53 @@ export default function CheckpointListView({
  },[checkpoints])
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   {/*Header*/}
-   <div className="nier-page-header-row">
-    <div className="nier-page-header-left">
-     <h1 className="nier-page-title">CHECKPOINTS</h1>
-     <span className="nier-page-subtitle">-レビュー待ち</span>
-    </div>
-    <div className="nier-page-header-right"/>
-   </div>
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+   {/*Checkpoint List-Main Content*/}
+   <Card className="flex-1 flex flex-col overflow-hidden">
+    <CardHeader className="flex-shrink-0">
+     <DiamondMarker>チェックポイント一覧</DiamondMarker>
+     <span className="text-nier-caption text-nier-text-light ml-2">
+      ({filteredCheckpoints.length}件)
+     </span>
+    </CardHeader>
+    <CardContent className="flex-1 overflow-y-auto">
+     {loading&&checkpoints.length===0?(
+      <div className="py-12 text-center text-nier-text-light">
+       <p className="text-nier-body">読み込み中...</p>
+      </div>
+):filteredCheckpoints.length===0?(
+      <div className="py-12 text-center text-nier-text-light">
+       <p className="text-nier-body mb-2">チェックポイントがありません</p>
+       <p className="text-nier-small">
+        {filterStatus!=='all'
+         ?`「${filterOptions.find(o=>o.value===filterStatus)?.label}」のチェックポイントはありません`
+         :'エージェントの実行を開始してください'}
+       </p>
+      </div>
+):(
+      <div className="space-y-2">
+       {filteredCheckpoints.map(checkpoint=>(
+        <CheckpointCard
+         key={checkpoint.id}
+         checkpoint={checkpoint}
+         onSelect={onSelectCheckpoint}
+         isSelected={selectedCheckpointId===checkpoint.id}
+        />
+))}
+      </div>
+)}
+    </CardContent>
+   </Card>
 
-   {/*Filters*/}
-   <Card className="mb-3">
-    <CardContent className="py-1.5">
-     <div className="flex items-center justify-between flex-wrap gap-3">
-      <div className="flex items-center gap-1 flex-wrap">
+   {/*Filter Sidebar*/}
+   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+    {/*Status Filter*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>ステータス</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex flex-col gap-1">
        {filterOptions.map(option=>{
         const Icon=option.icon
         const count=statusCounts[option.value]
@@ -85,7 +118,7 @@ export default function CheckpointListView({
          <button
           key={option.value}
           className={cn(
-           'flex items-center gap-2 px-3 py-1.5 text-nier-small tracking-nier transition-colors',
+           'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
            filterStatus===option.value
             ?'bg-nier-bg-selected text-nier-text-main'
             : 'text-nier-text-light hover:bg-nier-bg-panel'
@@ -93,19 +126,28 @@ export default function CheckpointListView({
           onClick={()=>setFilterStatus(option.value)}
          >
           <Icon size={14}/>
-          <span>{option.label}</span>
-          <span className="text-nier-caption">({count})</span>
+          <span className="flex-1">{option.label}</span>
+          <span className="text-nier-caption opacity-70">({count})</span>
          </button>
 )
        })}
       </div>
+     </CardContent>
+    </Card>
 
-      <div className="flex items-center gap-2">
-       <span className="text-nier-caption text-nier-text-light">並び順:</span>
+    {/*Sort Order*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>並び順</DiamondMarker>
+     </CardHeader>
+     <CardContent className="py-2">
+      <div className="flex flex-col gap-1">
        <button
         className={cn(
-         'px-2 py-1 text-nier-caption tracking-nier',
-         sortOrder==='newest'?'bg-nier-bg-selected' : 'hover:bg-nier-bg-panel'
+         'px-2 py-1.5 text-nier-small tracking-nier text-left',
+         sortOrder==='newest'
+          ?'bg-nier-bg-selected text-nier-text-main'
+          : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
         onClick={()=>setSortOrder('newest')}
        >
@@ -113,70 +155,44 @@ export default function CheckpointListView({
        </button>
        <button
         className={cn(
-         'px-2 py-1 text-nier-caption tracking-nier',
-         sortOrder==='oldest'?'bg-nier-bg-selected' : 'hover:bg-nier-bg-panel'
+         'px-2 py-1.5 text-nier-small tracking-nier text-left',
+         sortOrder==='oldest'
+          ?'bg-nier-bg-selected text-nier-text-main'
+          : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
         onClick={()=>setSortOrder('oldest')}
        >
         古い順
        </button>
       </div>
-     </div>
-    </CardContent>
-   </Card>
+     </CardContent>
+    </Card>
 
-   {/*Summary Stats*/}
-   <div className="flex items-center gap-6 mb-3 text-nier-small text-nier-text-light">
-    <span>
-     総チェックポイント:<span className="text-nier-text-main">{statusCounts.all}</span>
-    </span>
-    <span>
-     承認率:<span className="text-nier-text-main">
-      {statusCounts.all>0
-       ?Math.round((statusCounts.approved/statusCounts.all)*100)
-       : 0}%
-     </span>
-    </span>
-    <span>
-     表示中:<span className="text-nier-text-main">{filteredCheckpoints.length}件</span>
-    </span>
+    {/*Summary Stats*/}
+    <Card>
+     <CardHeader>
+      <DiamondMarker>統計</DiamondMarker>
+     </CardHeader>
+     <CardContent>
+      <div className="space-y-1 text-nier-small">
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">総数</span>
+        <span className="text-nier-text-main">{statusCounts.all}</span>
+       </div>
+       <div className="flex justify-between">
+        <span className="text-nier-text-light">承認率</span>
+        <span className="text-nier-text-main">
+         {statusCounts.all>0?Math.round((statusCounts.approved/statusCounts.all)*100) : 0}%
+        </span>
+       </div>
+       <div className="flex justify-between border-t border-nier-border-light pt-1 mt-1">
+        <span className="text-nier-text-light">表示中</span>
+        <span className="text-nier-text-main">{filteredCheckpoints.length}件</span>
+       </div>
+      </div>
+     </CardContent>
+    </Card>
    </div>
-
-   {/*Checkpoint List*/}
-   {loading&&checkpoints.length===0?(
-    <Card>
-     <CardContent className="py-12 text-center">
-      <div className="text-nier-text-light">
-       <p className="text-nier-body">読み込み中...</p>
-      </div>
-     </CardContent>
-    </Card>
-) : filteredCheckpoints.length===0?(
-    <Card>
-     <CardContent className="py-12 text-center">
-      <div className="text-nier-text-light">
-       <p className="text-nier-body mb-2">チェックポイントがありません</p>
-       <p className="text-nier-small">
-        {filterStatus!=='all'
-         ?`「${filterOptions.find(o=>o.value===filterStatus)?.label}」のチェックポイントはありません`
-         : 'エージェントの実行を開始してください'}
-       </p>
-      </div>
-     </CardContent>
-    </Card>
-) : (
-    <div className="space-y-2 nier-scroll-list">
-     {filteredCheckpoints.map(checkpoint=>(
-      <CheckpointCard
-       key={checkpoint.id}
-       checkpoint={checkpoint}
-       onSelect={onSelectCheckpoint}
-       isSelected={selectedCheckpointId===checkpoint.id}
-      />
-))}
-    </div>
-)}
-
   </div>
 )
 }

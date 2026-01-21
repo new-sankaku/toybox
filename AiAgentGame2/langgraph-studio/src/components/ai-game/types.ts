@@ -30,6 +30,7 @@ export interface CharacterState{
  request?:AIRequest
  position:{x:number;y:number}
  speechBubble?:string
+ isActive?:boolean
 }
 
 export interface ServiceZoneState{

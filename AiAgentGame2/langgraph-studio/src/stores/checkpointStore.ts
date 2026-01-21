@@ -7,6 +7,7 @@ interface CheckpointState{
  selectedCheckpointId:string|null
  isLoading:boolean
  error:string|null
+ version:number
  setCheckpoints:(checkpoints:Checkpoint[])=>void
  addCheckpoint:(checkpoint:Checkpoint)=>void
  updateCheckpoint:(id:string,updates:Partial<Checkpoint>)=>void
@@ -14,6 +15,7 @@ interface CheckpointState{
  selectCheckpoint:(id:string|null)=>void
  setLoading:(loading:boolean)=>void
  setError:(error:string|null)=>void
+ reset:()=>void
  getSelectedCheckpoint:()=>Checkpoint|undefined
  getPendingCheckpoints:()=>Checkpoint[]
  getCheckpointsByProject:(projectId:string)=>Checkpoint[]
@@ -26,6 +28,7 @@ export const useCheckpointStore=create<CheckpointState>((set,get)=>({
  selectedCheckpointId:null,
  isLoading:false,
  error:null,
+ version:0,
  setCheckpoints:(checkpoints)=>set({checkpoints}),
 
  addCheckpoint:(checkpoint)=>
@@ -59,6 +62,15 @@ export const useCheckpointStore=create<CheckpointState>((set,get)=>({
  setLoading:(loading)=>set({isLoading:loading}),
 
  setError:(error)=>set({error}),
+
+ reset:()=>set((state)=>({
+  checkpoints:[],
+  selectedCheckpointId:null,
+  isLoading:false,
+  error:null,
+  version:state.version+1
+ })),
+
  getSelectedCheckpoint:()=>{
   const state=get()
   return state.checkpoints.find((cp)=>cp.id===state.selectedCheckpointId)
