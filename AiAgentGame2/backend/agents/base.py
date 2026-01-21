@@ -6,8 +6,29 @@ from datetime import datetime
 
 
 class AgentType(str,Enum):
-
-
+    CONCEPT = "concept"
+    TASK_SPLIT_1 = "task_split_1"
+    CONCEPT_DETAIL = "concept_detail"
+    SCENARIO = "scenario"
+    WORLD = "world"
+    GAME_DESIGN = "game_design"
+    TECH_SPEC = "tech_spec"
+    TASK_SPLIT_2 = "task_split_2"
+    ASSET_CHARACTER = "asset_character"
+    ASSET_BACKGROUND = "asset_background"
+    ASSET_UI = "asset_ui"
+    ASSET_EFFECT = "asset_effect"
+    ASSET_BGM = "asset_bgm"
+    ASSET_VOICE = "asset_voice"
+    ASSET_SFX = "asset_sfx"
+    TASK_SPLIT_3 = "task_split_3"
+    CODE = "code"
+    EVENT = "event"
+    UI_INTEGRATION = "ui_integration"
+    ASSET_INTEGRATION = "asset_integration"
+    TASK_SPLIT_4 = "task_split_4"
+    UNIT_TEST = "unit_test"
+    INTEGRATION_TEST = "integration_test"
 
     CONCEPT_LEADER = "concept_leader"
     DESIGN_LEADER = "design_leader"
@@ -15,84 +36,43 @@ class AgentType(str,Enum):
     CHARACTER_LEADER = "character_leader"
     WORLD_LEADER = "world_leader"
     TASK_SPLIT_LEADER = "task_split_leader"
-
-
-    RESEARCH_WORKER = "research_worker"
-    IDEATION_WORKER = "ideation_worker"
-    CONCEPT_VALIDATION_WORKER = "concept_validation_worker"
-
-
-    ARCHITECTURE_WORKER = "architecture_worker"
-    COMPONENT_WORKER = "component_worker"
-    DATAFLOW_WORKER = "dataflow_worker"
-
-
-    STORY_WORKER = "story_worker"
-    DIALOG_WORKER = "dialog_worker"
-    EVENT_WORKER = "event_worker"
-
-
-    MAIN_CHARACTER_WORKER = "main_character_worker"
-    NPC_WORKER = "npc_worker"
-    RELATIONSHIP_WORKER = "relationship_worker"
-
-
-    GEOGRAPHY_WORKER = "geography_worker"
-    LORE_WORKER = "lore_worker"
-    SYSTEM_WORKER = "system_worker"
-
-
-    ANALYSIS_WORKER = "analysis_worker"
-    DECOMPOSITION_WORKER = "decomposition_worker"
-    SCHEDULE_WORKER = "schedule_worker"
-
-
-
-
     CODE_LEADER = "code_leader"
     ASSET_LEADER = "asset_leader"
-
-
-    CODE_WORKER = "code_worker"
-    ASSET_WORKER = "asset_worker"
-
-
-
-
     INTEGRATOR_LEADER = "integrator_leader"
     TESTER_LEADER = "tester_leader"
     REVIEWER_LEADER = "reviewer_leader"
 
-
+    RESEARCH_WORKER = "research_worker"
+    IDEATION_WORKER = "ideation_worker"
+    CONCEPT_VALIDATION_WORKER = "concept_validation_worker"
+    ARCHITECTURE_WORKER = "architecture_worker"
+    COMPONENT_WORKER = "component_worker"
+    DATAFLOW_WORKER = "dataflow_worker"
+    STORY_WORKER = "story_worker"
+    DIALOG_WORKER = "dialog_worker"
+    EVENT_WORKER = "event_worker"
+    MAIN_CHARACTER_WORKER = "main_character_worker"
+    NPC_WORKER = "npc_worker"
+    RELATIONSHIP_WORKER = "relationship_worker"
+    GEOGRAPHY_WORKER = "geography_worker"
+    LORE_WORKER = "lore_worker"
+    SYSTEM_WORKER = "system_worker"
+    ANALYSIS_WORKER = "analysis_worker"
+    DECOMPOSITION_WORKER = "decomposition_worker"
+    SCHEDULE_WORKER = "schedule_worker"
+    CODE_WORKER = "code_worker"
+    ASSET_WORKER = "asset_worker"
     DEPENDENCY_WORKER = "dependency_worker"
     BUILD_WORKER = "build_worker"
     INTEGRATION_VALIDATION_WORKER = "integration_validation_worker"
-
-
     UNIT_TEST_WORKER = "unit_test_worker"
     INTEGRATION_TEST_WORKER = "integration_test_worker"
     E2E_TEST_WORKER = "e2e_test_worker"
     PERFORMANCE_TEST_WORKER = "performance_test_worker"
-
-
     CODE_REVIEW_WORKER = "code_review_worker"
     ASSET_REVIEW_WORKER = "asset_review_worker"
     GAMEPLAY_REVIEW_WORKER = "gameplay_review_worker"
     COMPLIANCE_WORKER = "compliance_worker"
-
-
-
-
-
-    CONCEPT = "concept_leader"
-    DESIGN = "design_leader"
-    SCENARIO = "scenario_leader"
-    CHARACTER = "character_leader"
-    WORLD = "world_leader"
-    TASK_SPLIT = "task_split_leader"
-    INTEGRATOR = "integrator_leader"
-    TESTER = "tester_leader"
-    REVIEWER = "reviewer_leader"
 
 
 class AgentStatus(str,Enum):

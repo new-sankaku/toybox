@@ -340,14 +340,9 @@ export interface ApiAIRequestStats{
 }
 
 export const aiRequestApi={
- getStats:async(_projectId:string):Promise<ApiAIRequestStats>=>{
-  return{
-   total:16,
-   processing:4,
-   pending:4,
-   completed:8,
-   failed:0
-  }
+ getStats:async(projectId:string):Promise<ApiAIRequestStats>=>{
+  const response=await api.get(`/api/projects/${projectId}/ai-requests/stats`)
+  return response.data
  }
 }
 

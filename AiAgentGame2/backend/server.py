@@ -11,6 +11,8 @@ from handlers.websocket import register_websocket_handlers
 from handlers.settings import register_settings_routes
 from handlers.intervention import register_intervention_routes
 from handlers.file_upload import register_file_upload_routes
+from handlers.project_tree import register_project_tree_routes
+from handlers.ai_provider import register_ai_provider_routes
 from testdata import TestDataStore
 from config import get_config
 from agents import create_agent_runner
@@ -54,7 +56,10 @@ def create_app():
 
 
     upload_folder = os.path.join(os.path.dirname(__file__),'uploads')
+    output_folder = os.path.join(os.path.dirname(__file__),'outputs')
     register_file_upload_routes(app,data_store,upload_folder)
+    register_project_tree_routes(app,data_store,output_folder)
+    register_ai_provider_routes(app)
 
     @app.route('/health')
     def health():
