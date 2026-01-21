@@ -75,9 +75,18 @@ export default function ConfigView():JSX.Element{
  },[])
 
  const handleSave=()=>{
-  console.log('Config saved:',config)
-  //TODO: Implement actual save
+  localStorage.setItem('aiagent-config',JSON.stringify(config))
  }
+
+ useEffect(()=>{
+  const saved=localStorage.getItem('aiagent-config')
+  if(saved){
+   try{
+    const parsed=JSON.parse(saved)
+    setConfig(prev=>({...prev,...parsed}))
+   }catch{}
+  }
+ },[])
 
  return(
   <div className="p-4 animate-nier-fade-in">

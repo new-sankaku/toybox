@@ -4,6 +4,30 @@ from testdata import TestDataStore
 
 def register_metrics_routes(app:Flask,data_store:TestDataStore):
 
+    @app.route('/api/projects/<project_id>/ai-requests/stats',methods=['GET'])
+    def get_ai_request_stats(project_id:str):
+        """Get AI request statistics for a project"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+
+        # Calculate stats from agents
+        agents = data_store.get_agents_by_project(project_id)
+
+        total = len(agents)
+        processing = len([a for a in agents if a["status"] == "running"])
+        pending = len([a for a in agents if a["status"] == "pending"])
+        completed = len([a for a in agents if a["status"] == "completed"])
+        failed = len([a for a in agents if a["status"] == "failed"])
+
+        return jsonify({
+            "total": total,
+            "processing": processing,
+            "pending": pending,
+            "completed": completed,
+            "failed": failed
+        })
+
     @app.route('/api/projects/<project_id>/metrics',methods=['GET'])
     def get_project_metrics(project_id:str):
         project = data_store.get_project(project_id)

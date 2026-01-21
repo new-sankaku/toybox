@@ -268,8 +268,15 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
  const handleTest=async()=>{
   setTesting(true)
   setTestResult(null)
-  await new Promise(r=>setTimeout(r,1000))
-  setTestResult({success:true,message:'接続成功'})
+  try{
+   const{aiProviderApi}=await import('@/services/apiService')
+   const providerType=provider.type==='claude'?'anthropic':provider.type
+   const config:Record<string,unknown>={apiKey:(provider as LLMProviderConfig).apiKey}
+   const result=await aiProviderApi.testConnection(providerType,config)
+   setTestResult({success:result.success,message:result.message})
+  }catch{
+   setTestResult({success:false,message:'接続テストに失敗しました'})
+  }
   setTesting(false)
  }
 
