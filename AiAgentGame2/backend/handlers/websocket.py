@@ -1,6 +1,32 @@
 from testdata import TestDataStore
 
 
+def broadcast_navigator_message(sio, project_id: str, speaker: str, text: str, priority: str = "normal"):
+    """
+    Send a navigator message to all clients subscribed to a project.
+
+    Args:
+        sio: Socket.IO server instance
+        project_id: Target project ID (or "global" for all clients)
+        speaker: Speaker name (e.g., "オペレーター", "システム")
+        text: Message text
+        priority: Message priority ("low", "normal", "high", "critical")
+    """
+    message_data = {
+        "speaker": speaker,
+        "text": text,
+        "priority": priority,
+        "source": "server"
+    }
+
+    if project_id == "global":
+        sio.emit('navigator:message', message_data)
+    else:
+        sio.emit('navigator:message', message_data, room=f"project:{project_id}")
+
+    print(f"[Navigator] Sent message to {project_id}: {text[:50]}...")
+
+
 def register_websocket_handlers(sio, data_store: TestDataStore):
 
     @sio.event

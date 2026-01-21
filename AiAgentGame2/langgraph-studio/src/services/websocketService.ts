@@ -4,6 +4,7 @@ import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
 import{useMetricsStore}from'@/stores/metricsStore'
+import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
@@ -30,6 +31,7 @@ interface ServerToClientEvents{
  'project:updated':(data:{projectId:string;updates:Partial<Project>})=>void
  'phase:changed':(data:{projectId:string;phase:PhaseNumber;phaseName:string})=>void
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
+ 'navigator:message':(data:{speaker:string;text:string;priority:MessagePriority;source:'server'})=>void
 }
 
 interface ClientToServerEvents{
@@ -187,6 +189,11 @@ class WebSocketService{
   this.socket.on('metrics:update',({projectId,metrics})=>{
    console.log('[WS] Metrics updated:',projectId,'Progress:',metrics.progressPercent+'%')
    useMetricsStore.getState().setProjectMetrics(metrics)
+  })
+
+  this.socket.on('navigator:message',({speaker,text,priority})=>{
+   console.log('[WS] Navigator message received:',speaker,text.substring(0,50)+'...')
+   useNavigatorStore.getState().showServerMessage(speaker,text,priority)
   })
  }
 
