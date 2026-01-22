@@ -18,6 +18,7 @@ import {
   SIZES,
   COLORS,
   ZOOM,
+  ANIMATION,
 } from './strategyMapConfig'
 import { drawPixelCharacter, getAgentDisplayConfig } from '../ai-game/pixelCharacters'
 
@@ -94,7 +95,7 @@ function computeAgentTarget(
     const count = waiting.length
     const spacing = Math.min(LAYOUT.APPROVAL_QUEUE_SPACING, (width * 0.75) / Math.max(count, 1))
     const startX = user.x - ((count - 1) * spacing) / 2
-    return { x: startX + idx * spacing, y: userZoneY - 70 }
+    return { x: startX + idx * spacing, y: userZoneY - LAYOUT.APPROVAL_QUEUE_OFFSET_Y }
   }
 
   if (agent.aiTarget && agent.status === 'running') {
@@ -123,7 +124,7 @@ function computeAgentTarget(
       const siblings = allAgents.filter(a => a.parentId === agent.parentId)
       const idx = siblings.findIndex(a => a.id === agent.id)
       const count = siblings.length
-      const spread = Math.min(count * 45, LAYOUT.CHILD_SPREAD_MAX)
+      const spread = Math.min(count * LAYOUT.CHILD_SPREAD_FACTOR, LAYOUT.CHILD_SPREAD_MAX)
       const col = idx % 6
       const row = Math.floor(idx / 6)
       const colCount = Math.min(count, 6)
@@ -131,7 +132,7 @@ function computeAgentTarget(
       const xStep = spread / Math.max(colCount - 1, 1)
       return {
         x: startX + col * xStep,
-        y: parentPos.y + LAYOUT.CHILD_VERTICAL_GAP + row * 55,
+        y: parentPos.y + LAYOUT.CHILD_VERTICAL_GAP + row * LAYOUT.CHILD_ROW_GAP,
       }
     }
   }
@@ -142,7 +143,7 @@ function computeAgentTarget(
   const availableWidth = width - LAYOUT.MARGIN_X * 2
   const spacing = Math.min(LAYOUT.LEADER_SPACING_MAX, availableWidth / Math.max(count, 1))
   const startX = width / 2 - ((count - 1) * spacing) / 2
-  return { x: startX + idx * spacing, y: workZoneTop + 40 }
+  return { x: startX + idx * spacing, y: workZoneTop + LAYOUT.LEADER_OFFSET_Y }
 }
 
 function findAvoidanceDirection(
@@ -151,7 +152,7 @@ function findAvoidanceDirection(
   pos: AgentPositionState,
   dirX: number,
   dirY: number
-): { x: number; y: number } {
+): Vec2 {
   const avoidRadius = PHYSICS.REPULSION_RADIUS
   let needsAvoidance = false
   let obstacleX = 0
@@ -165,7 +166,7 @@ function findAvoidanceDirection(
     const dist = Math.sqrt(toOtherX * toOtherX + toOtherY * toOtherY)
 
     if (dist < avoidRadius * 2 && dist > 0) {
-      const dotProduct = (dirX * toOtherX + dirY * toOtherY)
+      const dotProduct = dirX * toOtherX + dirY * toOtherY
       if (dotProduct > 0) {
         needsAvoidance = true
         obstacleX = other.x
@@ -195,9 +196,9 @@ function findAvoidanceDirection(
   const cross = dirX * toObsY - dirY * toObsX
   const sign = cross >= 0 ? 1 : -1
 
-  const avoidStrength = 0.7
-  const newDirX = dirX * (1 - avoidStrength) + normPerpX * sign * avoidStrength
-  const newDirY = dirY * (1 - avoidStrength) + normPerpY * sign * avoidStrength
+  const strength = PHYSICS.AVOIDANCE_STRENGTH
+  const newDirX = dirX * (1 - strength) + normPerpX * sign * strength
+  const newDirY = dirY * (1 - strength) + normPerpY * sign * strength
 
   const len = Math.sqrt(newDirX * newDirX + newDirY * newDirY)
   if (len < 0.01) {
@@ -248,7 +249,7 @@ function renderAIService(
   activeCount: number
 ): void {
   const { x, y, name, color } = ai
-  const pulse = 1 + Math.sin(frame * 0.04) * 0.025
+  const pulse = 1 + Math.sin(frame * ANIMATION.AI_PULSE_SPEED) * ANIMATION.AI_PULSE_AMPLITUDE
   const radius = SIZES.AI_NODE_RADIUS * pulse
 
   const glowGradient = ctx.createRadialGradient(x, y, radius * 0.4, x, y, radius * 1.6)
@@ -271,11 +272,11 @@ function renderAIService(
   ctx.fillText(name, x, y)
 
   if (activeCount > 0) {
-    const badgeX = x + radius * 0.72
-    const badgeY = y - radius * 0.72
+    const badgeX = x + radius * SIZES.AI_BADGE_OFFSET
+    const badgeY = y - radius * SIZES.AI_BADGE_OFFSET
     ctx.fillStyle = color
     ctx.beginPath()
-    ctx.arc(badgeX, badgeY, 13, 0, Math.PI * 2)
+    ctx.arc(badgeX, badgeY, SIZES.AI_BADGE_RADIUS, 0, Math.PI * 2)
     ctx.fill()
     ctx.fillStyle = '#ffffff'
     ctx.font = 'bold 10px system-ui, sans-serif'
@@ -292,14 +293,21 @@ function renderUserNode(
   const hasQueue = queue.length > 0
 
   if (hasQueue) {
-    const alertIntensity = 0.18 + Math.sin(frame * 0.07) * 0.12
+    const alertIntensity = ANIMATION.USER_ALERT_BASE +
+      Math.sin(frame * ANIMATION.USER_ALERT_SPEED) * ANIMATION.USER_ALERT_AMPLITUDE
     ctx.fillStyle = `rgba(180, 60, 60, ${alertIntensity})`
     ctx.beginPath()
-    ctx.arc(x, y, SIZES.USER_NODE_RADIUS + 18 + queue.length * 2.5, 0, Math.PI * 2)
+    ctx.arc(
+      x,
+      y,
+      SIZES.USER_NODE_RADIUS + SIZES.USER_ALERT_BASE_OFFSET + queue.length * SIZES.USER_ALERT_QUEUE_FACTOR,
+      0,
+      Math.PI * 2
+    )
     ctx.fill()
   }
 
-  const gradient = ctx.createRadialGradient(x, y - 6, 0, x, y, SIZES.USER_NODE_RADIUS)
+  const gradient = ctx.createRadialGradient(x, y - SIZES.USER_GRADIENT_OFFSET_Y, 0, x, y, SIZES.USER_NODE_RADIUS)
   gradient.addColorStop(0, COLORS.USER_NODE_INNER)
   gradient.addColorStop(1, COLORS.USER_NODE_OUTER)
   ctx.fillStyle = gradient
@@ -335,9 +343,9 @@ function renderBubble(
 
   ctx.font = '9px system-ui, sans-serif'
   const textWidth = ctx.measureText(displayText).width
-  const w = Math.min(Math.max(textWidth + SIZES.BUBBLE_PADDING, 48), SIZES.BUBBLE_MAX_WIDTH)
+  const w = Math.min(Math.max(textWidth + SIZES.BUBBLE_PADDING, SIZES.BUBBLE_MIN_WIDTH), SIZES.BUBBLE_MAX_WIDTH)
   const h = SIZES.BUBBLE_HEIGHT
-  const floatY = y + Math.sin(frame * 0.055) * 1.8
+  const floatY = y + Math.sin(frame * ANIMATION.BUBBLE_FLOAT_SPEED) * ANIMATION.BUBBLE_FLOAT_AMPLITUDE
 
   ctx.shadowColor = 'rgba(0, 0, 0, 0.08)'
   ctx.shadowBlur = 3
@@ -348,15 +356,15 @@ function renderBubble(
   ctx.lineWidth = 1
 
   ctx.beginPath()
-  ctx.roundRect(x - w / 2, floatY - h / 2, w, h, 3)
+  ctx.roundRect(x - w / 2, floatY - h / 2, w, h, SIZES.BUBBLE_BORDER_RADIUS)
   ctx.fill()
   ctx.shadowBlur = 0
   ctx.stroke()
 
   ctx.beginPath()
-  ctx.moveTo(x - 3, floatY + h / 2)
-  ctx.lineTo(x, floatY + h / 2 + 4)
-  ctx.lineTo(x + 3, floatY + h / 2)
+  ctx.moveTo(x - SIZES.BUBBLE_TAIL_WIDTH, floatY + h / 2)
+  ctx.lineTo(x, floatY + h / 2 + SIZES.BUBBLE_TAIL_HEIGHT)
+  ctx.lineTo(x + SIZES.BUBBLE_TAIL_WIDTH, floatY + h / 2)
   ctx.closePath()
   ctx.fillStyle = style.bg
   ctx.fill()
@@ -388,10 +396,10 @@ function renderAgent(
   }
 
   if (isSpawning) {
-    const glowRadius = 45 * (1 - spawnProgress * 0.6)
+    const glowRadius = SIZES.AGENT_SPAWN_GLOW_RADIUS * (1 - spawnProgress * ANIMATION.SPAWN_GLOW_SHRINK)
     const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius)
     glowGradient.addColorStop(0, COLORS.SPAWN_GLOW)
-    glowGradient.addColorStop(1, 'rgba(255, 240, 180, 0)')
+    glowGradient.addColorStop(1, COLORS.SPAWN_GLOW_END)
     ctx.fillStyle = glowGradient
     ctx.beginPath()
     ctx.arc(x, y, glowRadius, 0, Math.PI * 2)
@@ -401,46 +409,49 @@ function renderAgent(
   ctx.globalAlpha = alpha
 
   if (status === 'running') {
-    const intensity = 0.12 + Math.sin(frame * 0.1) * 0.08
-    const workGlow = ctx.createRadialGradient(x, y, 0, x, y, 32)
+    const intensity = ANIMATION.AGENT_WORK_GLOW_BASE +
+      Math.sin(frame * ANIMATION.AGENT_WORK_GLOW_SPEED) * ANIMATION.AGENT_WORK_GLOW_AMPLITUDE
+    const workGlow = ctx.createRadialGradient(x, y, 0, x, y, SIZES.AGENT_WORK_GLOW_RADIUS)
     workGlow.addColorStop(0, `rgba(255, 200, 100, ${intensity})`)
     workGlow.addColorStop(1, 'rgba(255, 200, 100, 0)')
     ctx.fillStyle = workGlow
     ctx.beginPath()
-    ctx.arc(x, y, 32, 0, Math.PI * 2)
+    ctx.arc(x, y, SIZES.AGENT_WORK_GLOW_RADIUS, 0, Math.PI * 2)
     ctx.fill()
   }
 
   if (status === 'waiting_approval') {
     ctx.strokeStyle = COLORS.CONFIRM
     ctx.lineWidth = 1.5
-    ctx.setLineDash([4, 3])
-    ctx.lineDashOffset = -frame * 0.25
+    ctx.setLineDash([SIZES.WAITING_DASH_ON, SIZES.WAITING_DASH_OFF])
+    ctx.lineDashOffset = -frame * ANIMATION.WAITING_DASH_SPEED
     ctx.beginPath()
-    ctx.arc(x, y, 26, 0, Math.PI * 2)
+    ctx.arc(x, y, SIZES.AGENT_WAITING_CIRCLE_RADIUS, 0, Math.PI * 2)
     ctx.stroke()
     ctx.setLineDash([])
   }
 
-  const bobY = status === 'running' ? Math.sin(frame * 0.08) * 1.2 : 0
-  drawPixelCharacter(ctx, x, y - 8 + bobY, type, status === 'running', frame, SIZES.AGENT_SCALE)
+  const bobY = status === 'running'
+    ? Math.sin(frame * ANIMATION.AGENT_BOB_SPEED) * ANIMATION.AGENT_BOB_AMPLITUDE
+    : 0
+  drawPixelCharacter(ctx, x, y - SIZES.AGENT_OFFSET_Y + bobY, type, status === 'running', frame, SIZES.AGENT_SCALE)
 
   ctx.globalAlpha = 1
   const config = getAgentDisplayConfig(type)
   ctx.fillStyle = COLORS.TEXT_PRIMARY
   ctx.font = '9px system-ui, sans-serif'
   ctx.textAlign = 'center'
-  ctx.fillText(config.label, x, y + 19)
+  ctx.fillText(config.label, x, y + SIZES.AGENT_LABEL_OFFSET_Y)
 
   if (status === 'pending') {
     ctx.fillStyle = COLORS.TEXT_SECONDARY
     ctx.font = 'italic 8px system-ui, sans-serif'
-    const zOffset = Math.sin(frame * 0.05) * 1.2
-    ctx.fillText('zzz', x + 14, y - 14 + zOffset)
+    const zOffset = Math.sin(frame * ANIMATION.PENDING_ZZZ_SPEED) * ANIMATION.PENDING_ZZZ_AMPLITUDE
+    ctx.fillText('zzz', x + SIZES.PENDING_ZZZ_OFFSET_X, y - SIZES.PENDING_ZZZ_OFFSET_Y + zOffset)
   }
 
   if (bubble) {
-    renderBubble(ctx, x, y - 40, bubble, bubbleType, frame)
+    renderBubble(ctx, x, y - SIZES.BUBBLE_OFFSET_Y, bubble, bubbleType, frame)
   }
 
   ctx.restore()
@@ -564,7 +575,7 @@ export default function StrategyMapCanvas({
           targetY: target.y,
         }
         positions.set(agent.id, pos)
-        spawnParticles(target.x, target.y, '#FFD080', TIMING.SPAWN_PARTICLE_COUNT, 3.5)
+        spawnParticles(target.x, target.y, COLORS.SPAWN_PARTICLE, TIMING.SPAWN_PARTICLE_COUNT, TIMING.SPAWN_PARTICLE_SPREAD)
       } else {
         pos.targetX = target.x
         pos.targetY = target.y
@@ -573,7 +584,7 @@ export default function StrategyMapCanvas({
 
     positions.forEach((pos, id) => {
       if (!agentIdsSet.has(id)) {
-        spawnParticles(pos.x, pos.y, '#888888', TIMING.DESPAWN_PARTICLE_COUNT, 2.5)
+        spawnParticles(pos.x, pos.y, COLORS.DESPAWN_PARTICLE, TIMING.DESPAWN_PARTICLE_COUNT, TIMING.DESPAWN_PARTICLE_SPREAD)
         positions.delete(id)
       }
     })
@@ -587,7 +598,7 @@ export default function StrategyMapCanvas({
       p.x += p.vx
       p.y += p.vy
       p.vy += TIMING.PARTICLE_GRAVITY
-      p.vx *= 0.98
+      p.vx *= PHYSICS.PARTICLE_FRICTION
       p.life--
       return p.life > 0
     })
@@ -598,7 +609,7 @@ export default function StrategyMapCanvas({
     state.packets = state.packets.filter(p => {
       p.progress += TIMING.PACKET_SPEED
       if (p.progress >= 1) {
-        spawnParticles(p.toX, p.toY, p.color, 4, 1.8)
+        spawnParticles(p.toX, p.toY, p.color, TIMING.PACKET_ARRIVAL_PARTICLES, TIMING.PACKET_ARRIVAL_SPREAD)
         return false
       }
       return true
