@@ -145,12 +145,43 @@ function computeAgentTarget(
   return { x: startX + idx * spacing, y: workZoneTop + 40 }
 }
 
-function updatePhysics(pos: AgentPositionState): void {
+function applyRepulsion(
+  positions: Map<string, AgentPositionState>,
+  currentId: string,
+  pos: AgentPositionState
+): void {
+  positions.forEach((other, otherId) => {
+    if (otherId === currentId) return
+
+    const dx = pos.x - other.x
+    const dy = pos.y - other.y
+    const distSq = dx * dx + dy * dy
+    const minDist = PHYSICS.REPULSION_RADIUS
+
+    if (distSq < minDist * minDist && distSq > 0) {
+      const dist = Math.sqrt(distSq)
+      const force = PHYSICS.REPULSION_STRENGTH / distSq
+      const nx = dx / dist
+      const ny = dy / dist
+      pos.vx += nx * force
+      pos.vy += ny * force
+    }
+  })
+}
+
+function updatePhysics(
+  positions: Map<string, AgentPositionState>,
+  id: string,
+  pos: AgentPositionState
+): void {
   const dx = pos.targetX - pos.x
   const dy = pos.targetY - pos.y
 
   pos.vx += dx * PHYSICS.SPRING_STIFFNESS
   pos.vy += dy * PHYSICS.SPRING_STIFFNESS
+
+  applyRepulsion(positions, id, pos)
+
   pos.vx *= PHYSICS.DAMPING
   pos.vy *= PHYSICS.DAMPING
 
@@ -498,7 +529,7 @@ export default function StrategyMapCanvas({
       }
     })
 
-    positions.forEach(updatePhysics)
+    positions.forEach((pos, id) => updatePhysics(positions, id, pos))
   }, [agents, aiServices, user, width, height, agentIdsSet, spawnParticles])
 
   const updateParticles = useCallback(() => {
