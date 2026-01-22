@@ -24,14 +24,13 @@ ORCHESTRATOR (1体)
 |------|------|
 | 数 | 1体（全体で1つ） |
 | 役割 | プロジェクト全体のPM |
-| 責務 | Phase間の遷移、Human承認の管理、全体進捗の監視 |
+| 責務 | Phase間の遷移判断、全体進捗の監視 |
 | 管理対象 | 全DIRECTOR |
-| 使用LLM | Opus（重要な判断が多い） |
+| 使用LLM | 思考型ハイパフォーマンス（Opus等） |
 
 **具体的な責務:**
 - プロジェクト開始時の初期化
-- Phase1→Phase2→Phase3の遷移判断
-- Human承認待ち（interrupt）の管理
+- Phase遷移の判断（Phase N → Phase N+1）
 - エラー発生時のエスカレーション受付
 - 全体の進捗レポート生成
 
@@ -39,16 +38,17 @@ ORCHESTRATOR (1体)
 
 | 項目 | 内容 |
 |------|------|
-| 数 | Phase毎に1体（計3体） |
+| 数 | Phase毎に1体 |
 | 役割 | Phase全体の統括 |
 | 責務 | Phase内のLEADER管理、Phase完了判定 |
 | 管理対象 | 配下のLEADER群 |
-| 使用LLM | Sonnet（バランス型） |
+| 使用LLM | 思考型ハイパフォーマンス（Opus等） |
 
 **Phase毎のDIRECTOR:**
 - Phase1 DIRECTOR: 企画フェーズ統括
 - Phase2 DIRECTOR: 開発フェーズ統括
 - Phase3 DIRECTOR: 品質フェーズ統括
+- （将来的にPhaseが増える可能性あり）
 
 **具体的な責務:**
 - 配下LEADERへのタスク分配
@@ -62,9 +62,9 @@ ORCHESTRATOR (1体)
 |------|------|
 | 数 | 機能単位で1体 |
 | 役割 | チームリーダー |
-| 責務 | WORKERへのタスク分解・割当、成果物の統合 |
+| 責務 | WORKERへのタスク分解・割当、成果物の統合、Human承認の提出 |
 | 管理対象 | 配下のWORKER群 |
-| 使用LLM | Sonnet（デフォルト）、複雑な場合はOpus |
+| 使用LLM | 思考型ハイパフォーマンス（Opus等） |
 
 **Phase1のLEADER:**
 - Concept LEADER: 企画立案
@@ -86,7 +86,9 @@ ORCHESTRATOR (1体)
 **具体的な責務:**
 - 受け取ったタスクを単一タスクに分解
 - WORKERの生成・割当
-- WORKER成果物のレビュー・統合
+- WORKER成果物の確認・再指示（最大3回）
+- 成果物の統合
+- **Human承認の提出**（WebUIへの承認依頼）
 - DIRECTORへの完了報告
 
 ### WORKER（ワーカー）
@@ -105,6 +107,43 @@ ORCHESTRATOR (1体)
 - LEADERへの完了報告
 - エラー発生時のLEADERへのエスカレーション
 
+## Human承認フロー
+
+Human承認はORCHESTRATORではなく、**各LEADERが提出**する。
+
+```
+LEADER
+    │ 成果物完成
+    v
+WebUI承認画面に提出
+    │
+    v
+Humanがレビュー
+    │
+    ├── 承認 → 次のステップへ
+    │
+    ├── 修正指示 → LEADERがWORKERに再指示
+    │
+    └── 追加指示 → LEADERが追加タスクを作成
+```
+
+### 承認画面の表示内容
+
+| 表示項目 | 説明 |
+|---------|------|
+| LEADERの指示内容 | LEADERがWORKERに出した指示 |
+| WORKERへの指示 | 個別WORKERへの具体的な指示 |
+| 生成物 | WORKERが作成した成果物 |
+| 指示履歴 | 修正指示があった場合の履歴 |
+
+### 未承認時の操作
+
+| 操作 | 説明 |
+|------|------|
+| 指示内容の書き換え | LEADERの指示を編集して再実行 |
+| 追加指示 | 既存の指示に追加で指示を付与 |
+| 却下 | 作業を中止 |
+
 ## 通信フロー
 
 ### 下向き（指示）
@@ -120,6 +159,16 @@ LEADER (Concept)
     │ "アイデア3案を出せ"
     v
 WORKER
+    │ 実行
+    v
+LEADER (確認)
+    │
+    ├── OK → 成果物を受領
+    │
+    └── NG → 再指示（最大3回）
+              │
+              v
+            WORKER（再実行）
 ```
 
 ### 上向き（報告）
@@ -129,81 +178,57 @@ WORKER
     │ "アイデア3案完成"
     v
 LEADER (Concept)
-    │ "Concept完成、レビュー依頼"
-    v
-DIRECTOR (Phase1)
-    │ "Phase1完了、Human承認待ち"
-    v
-ORCHESTRATOR
-    │ interrupt() → Human
+    │ 確認
+    │
+    ├── OK → Human承認を提出（WebUI）
+    │          │
+    │          v
+    │        Human承認
+    │          │
+    │          v
+    │        DIRECTORへ報告
+    │
+    └── NG → WORKERへ再指示（最大3回）
 ```
 
-## 実装時のクラス構造
+### 再確認処理
 
-```python
-from abc import ABC, abstractmethod
-from typing import List, Optional
-from enum import Enum
+LEADER-WORKER間の再確認は無限ループを避けるため**最大3回**に制限。
 
-class AgentRole(Enum):
-    ORCHESTRATOR = "orchestrator"
-    DIRECTOR = "director"
-    LEADER = "leader"
-    WORKER = "worker"
-
-class BaseAgent(ABC):
-    def __init__(self, agent_id: str, role: AgentRole):
-        self.agent_id = agent_id
-        self.role = role
-        self.parent: Optional["BaseAgent"] = None
-        self.children: List["BaseAgent"] = []
-
-    @abstractmethod
-    def execute(self, task: dict) -> dict:
-        pass
-
-    @abstractmethod
-    def report(self, result: dict) -> None:
-        pass
-
-class Orchestrator(BaseAgent):
-    def __init__(self):
-        super().__init__("orchestrator_main", AgentRole.ORCHESTRATOR)
-        self.directors: List[Director] = []
-        self.current_phase: int = 1
-
-class Director(BaseAgent):
-    def __init__(self, phase: int):
-        super().__init__(f"director_phase{phase}", AgentRole.DIRECTOR)
-        self.phase = phase
-        self.leaders: List[Leader] = []
-
-class Leader(BaseAgent):
-    def __init__(self, leader_type: str, phase: int):
-        super().__init__(f"leader_{leader_type}", AgentRole.LEADER)
-        self.leader_type = leader_type
-        self.workers: List[Worker] = []
-
-class Worker(BaseAgent):
-    def __init__(self, task_id: str):
-        super().__init__(f"worker_{task_id}", AgentRole.WORKER)
-        self.task_id = task_id
+```
+LEADER → WORKER: 指示
+WORKER → LEADER: 成果物提出
+LEADER: 確認
+    │
+    ├── OK → 完了
+    │
+    └── NG (1回目) → 再指示
+          │
+          v
+        WORKER: 再実行
+        LEADER: 確認
+            │
+            ├── OK → 完了
+            │
+            └── NG (2回目) → 再指示
+                  │
+                  v
+                WORKER: 再実行
+                LEADER: 確認
+                    │
+                    ├── OK → 完了
+                    │
+                    └── NG (3回目) → エスカレーション（DIRECTORへ）
 ```
 
-## 既存ファイルとの対応
+## 既存ファイルの統合方針
 
-| 既存ファイル | 新しい役割 |
-|-------------|-----------|
-| AGENT_SYSTEM.md の Orchestrator | ORCHESTRATOR |
-| phase1_concept_leader.md | LEADER (Concept) |
-| phase1_concept_workers.md | WORKER群の定義 |
-| phase2_code_leader.md | LEADER (Code) |
-| phase2_asset_leader.md | LEADER (Asset) |
-| phase3_integrator.md | LEADER (Integrator) |
+このドキュメントの内容に合わせて、以下の既存ファイルを更新・統合する:
 
-## 変更が必要な既存ファイル
-
-1. `AGENT_SYSTEM.md`: 階層構造の図を更新、DIRECTORを追加
-2. `agents/_COMMON.md`: AgentRole enumを追加
-3. `agents/phase*_*.md`: 役割名をLEADER/WORKERに統一
-4. 新規作成: `agents/directors/` フォルダにDIRECTOR定義を追加
+| 対象 | 作業内容 |
+|------|---------|
+| AGENT_SYSTEM.md | 階層構造図を更新、DIRECTORの追加 |
+| agents/_COMMON.md | AgentRole定義、共通プロンプトの更新 |
+| agents/phase*_*_leader.md | LEADER定義として統一、Human承認提出の責務を追加 |
+| agents/phase*_*_workers.md | WORKER定義として統一 |
+| agents/directors/ | 新規作成：各Phase DIRECTORの定義 |

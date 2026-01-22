@@ -3,7 +3,16 @@
 ## 概要
 
 停電やエラーでAgentが中断した場合、最初からやり直さずに途中から再開できる仕組み。
-作業をIDで管理し、状態要約ファイルを作成することで、新しいセッションでファイルパスを提供するだけで継続可能にする。
+作業をIDで管理し、状態をDBとJSONファイルに保存することで、新しいセッションでファイルパスを提供するだけで継続可能にする。
+
+## データ保存先
+
+| データ種別 | 保存先 | 理由 |
+|-----------|-------|------|
+| Human承認 | SQLite DB | 永続性、検索性、トランザクション |
+| セッション状態 | SQLite DB + JSON | DBがメイン、JSONはバックアップ |
+| アプローチ記録 | JSON | Agentが読み書きするため機械可読形式 |
+| 成果物 | ファイルシステム | バイナリ含むため |
 
 ## フォルダ構造
 
@@ -13,14 +22,72 @@ projects/
     ├── project.json              # プロジェクト基本情報
     └── sessions/
         └── {session_id}/
-            ├── SESSION_STATE.md      # 人間可読な状態要約
             ├── state_checkpoint.json # 機械可読な完全状態
-            ├── approaches/
-            │   ├── verified.md       # 機能したアプローチ（証拠付き）
-            │   ├── failed.md         # 失敗したアプローチ（理由付き）
-            │   └── untried.md        # 未試行のアプローチ
+            ├── approaches.json       # アプローチ記録（全種別統合）
             ├── remaining_tasks.json  # 残作業リスト
             └── artifacts/            # このセッションの成果物
+```
+
+## DBスキーマ
+
+### sessionsテーブル
+
+```sql
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    parent_session_id TEXT,
+    started_at TIMESTAMP NOT NULL,
+    ended_at TIMESTAMP,
+    interruption_reason TEXT,
+    current_phase INTEGER,
+    current_agent_role TEXT,
+    current_agent_type TEXT,
+    current_task_id TEXT,
+    context_summary TEXT,
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+```
+
+### human_approvalsテーブル
+
+```sql
+CREATE TABLE human_approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    checkpoint_type TEXT NOT NULL,
+    leader_id TEXT NOT NULL,
+    status TEXT NOT NULL,  -- pending, approved, rejected, revision_requested
+    submitted_at TIMESTAMP NOT NULL,
+    resolved_at TIMESTAMP,
+    feedback TEXT,
+    instruction_content TEXT,  -- LEADERの指示内容
+    worker_instructions JSON,  -- WORKERへの指示（JSON配列）
+    artifacts JSON,            -- 生成物のパス（JSON配列）
+    revision_history JSON,     -- 修正履歴（JSON配列）
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+```
+
+### tasksテーブル
+
+```sql
+CREATE TABLE tasks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    phase INTEGER NOT NULL,
+    task_type TEXT NOT NULL,
+    status TEXT NOT NULL,  -- pending, in_progress, completed, failed, blocked
+    progress_percent INTEGER DEFAULT 0,
+    assigned_to TEXT,
+    depends_on JSON,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    result JSON,
+    FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
 ```
 
 ## ID体系
@@ -41,45 +108,9 @@ projects/
 - 例: `task_p1_concept_001`
 - 用途: 個別タスクを識別
 
-## 状態要約ファイル
+## 状態ファイル
 
-### SESSION_STATE.md（人間可読）
-
-```markdown
-# セッション状態要約
-
-## 基本情報
-- Project ID: proj_20240115_a1b2c3
-- Session ID: sess_20240115143000_x1y2z3
-- 開始時刻: 2024-01-15 14:30:00
-- 中断時刻: 2024-01-15 16:45:00
-- 中断理由: 接続エラー
-
-## 現在位置
-- Phase: 2 (開発)
-- 実行中Agent: Code LEADER
-- 実行中タスク: PlayerController実装
-
-## 完了済み
-- [x] Phase1 企画完了
-- [x] Concept承認済み
-- [x] Design承認済み
-- [x] タスク分解完了（全15タスク）
-
-## 進行中
-- [ ] task_p2_code_003: PlayerController実装 (70%)
-- [ ] task_p2_asset_001: プレイヤー画像生成 (待機中)
-
-## 未着手
-- task_p2_code_004 ~ task_p2_code_010
-- task_p2_asset_002 ~ task_p2_asset_005
-
-## 再開時の注意
-- PlayerControllerのジャンプ機能でバグあり、approaches/failed.md参照
-- アセット生成はコード実装後に開始予定
-```
-
-### state_checkpoint.json（機械可読）
+### state_checkpoint.json
 
 ```json
 {
@@ -118,101 +149,131 @@ projects/
     {"task_id": "task_p2_code_005", "status": "pending"}
   ],
 
-  "human_approvals": [
-    {"checkpoint": "concept", "status": "approved", "timestamp": "2024-01-15T15:00:00Z"},
-    {"checkpoint": "design", "status": "approved", "timestamp": "2024-01-15T15:30:00Z"}
-  ],
-
   "context_summary": "ゲーム企画完了、開発フェーズでPlayerController実装中。ジャンプ機能にバグあり修正中。"
 }
 ```
 
 ## アプローチ記録
 
-### approaches/verified.md（機能したアプローチ）
+### approaches.json
 
-```markdown
-# 機能したアプローチ
+Agentが動作するためのデータなので、機械可読なJSON形式で保存。
 
-## [2024-01-15] Concept生成
+```json
+{
+  "schema_version": "1.0",
+  "session_id": "sess_20240115143000_x1y2z3",
+  "last_updated": "2024-01-15T16:45:00Z",
 
-### アプローチ
-- ユーザー入力「2Dアクションゲーム」から3案生成
-- 各案に独自性スコアを付与
+  "verified": [
+    {
+      "id": "approach_001",
+      "date": "2024-01-15",
+      "category": "concept_generation",
+      "description": "ユーザー入力「2Dアクションゲーム」から3案生成",
+      "details": {
+        "method": "各案に独自性スコアを付与",
+        "parameters": {"案数": 3}
+      },
+      "evidence": {
+        "type": "human_approval",
+        "approval_id": 123,
+        "comment": "2案目が良い"
+      },
+      "learnings": [
+        "案は3つ程度が適切（多すぎると選択困難）",
+        "独自性スコアは判断材料として有効"
+      ],
+      "reusable": true
+    },
+    {
+      "id": "approach_002",
+      "date": "2024-01-15",
+      "category": "state_management",
+      "description": "TypedDictベースの状態管理",
+      "details": {
+        "method": "LangGraphのAnnotatedで差分更新"
+      },
+      "evidence": {
+        "type": "test_result",
+        "test_file": "test_state.py",
+        "passed": 5,
+        "failed": 0
+      },
+      "learnings": [
+        "Annotatedを使うと差分更新が楽"
+      ],
+      "reusable": true
+    }
+  ],
 
-### 証拠
-- 3案すべてHuman承認取得
-- 承認コメント: 「2案目が良い」
+  "failed": [
+    {
+      "id": "approach_f001",
+      "date": "2024-01-15",
+      "category": "jump_implementation",
+      "description": "単純なvelocity.y設定でジャンプ",
+      "details": {
+        "method": "直接velocity.yを設定"
+      },
+      "failure_reason": "地面判定なしで空中ジャンプ可能になった",
+      "error": "無限ジャンプバグ",
+      "learnings": [
+        "地面判定（is_grounded）を先に実装すべき"
+      ],
+      "avoid": true
+    },
+    {
+      "id": "approach_f002",
+      "date": "2024-01-15",
+      "category": "asset_generation",
+      "description": "5つのアセットを同時に生成依頼",
+      "details": {
+        "parallel_count": 5
+      },
+      "failure_reason": "API rate limit超過",
+      "error": "429 Too Many Requests",
+      "learnings": [
+        "並列度は3以下に制限すべき"
+      ],
+      "avoid": true
+    }
+  ],
 
-### 再利用可能な知見
-- 案は3つ程度が適切（多すぎると選択困難）
-- 独自性スコアは判断材料として有効
-
----
-
-## [2024-01-15] State管理実装
-
-### アプローチ
-- TypedDictベースの状態管理
-- LangGraphのAnnotatedで差分更新
-
-### 証拠
-- テスト通過: test_state.py (5/5 passed)
-
-### 再利用可能な知見
-- Annotatedを使うと差分更新が楽
-```
-
-### approaches/failed.md（失敗したアプローチ）
-
-```markdown
-# 失敗したアプローチ
-
-## [2024-01-15] PlayerController ジャンプ実装 (1回目)
-
-### 試したこと
-- 単純なvelocity.y設定でジャンプ
-
-### 失敗理由
-- 地面判定なしで空中ジャンプ可能になった
-- エラー: 無限ジャンプバグ
-
-### 学び
-- 地面判定（is_grounded）を先に実装すべき
-
----
-
-## [2024-01-15] アセット並列生成
-
-### 試したこと
-- 5つのアセットを同時に生成依頼
-
-### 失敗理由
-- API rate limit超過
-- エラー: 429 Too Many Requests
-
-### 学び
-- 並列度は3以下に制限すべき
-```
-
-### approaches/untried.md（未試行のアプローチ）
-
-```markdown
-# 未試行のアプローチ
-
-## PlayerController ジャンプ実装
-
-### 案1: Raycastによる地面判定
-- 足元にRayを飛ばして地面検出
-- 優先度: 高（次に試す）
-
-### 案2: Collider接触判定
-- OnCollisionEnterで地面タグ判定
-- 優先度: 中
-
-### 案3: CharacterControllerのisGrounded使用
-- Unity標準機能を使用
-- 優先度: 低（カスタマイズ性が低い）
+  "untried": [
+    {
+      "id": "approach_u001",
+      "category": "jump_implementation",
+      "description": "Raycastによる地面判定",
+      "details": {
+        "method": "足元にRayを飛ばして地面検出"
+      },
+      "priority": "high",
+      "next_to_try": true
+    },
+    {
+      "id": "approach_u002",
+      "category": "jump_implementation",
+      "description": "Collider接触判定",
+      "details": {
+        "method": "OnCollisionEnterで地面タグ判定"
+      },
+      "priority": "medium",
+      "next_to_try": false
+    },
+    {
+      "id": "approach_u003",
+      "category": "jump_implementation",
+      "description": "CharacterControllerのisGrounded使用",
+      "details": {
+        "method": "Unity標準機能を使用"
+      },
+      "priority": "low",
+      "next_to_try": false,
+      "note": "カスタマイズ性が低い"
+    }
+  ]
+}
 ```
 
 ## 再開フロー
@@ -220,17 +281,18 @@ projects/
 ### 1. 新セッション開始
 
 ```python
-def resume_session(session_path: str) -> Session:
+def resume_session(project_id: str, session_id: str) -> Session:
     """
     中断したセッションを再開する
     """
-    # 状態ファイル読み込み
-    state = load_json(f"{session_path}/state_checkpoint.json")
-    approaches = {
-        "verified": load_md(f"{session_path}/approaches/verified.md"),
-        "failed": load_md(f"{session_path}/approaches/failed.md"),
-        "untried": load_md(f"{session_path}/approaches/untried.md"),
-    }
+    # DBから状態を取得
+    db_state = db.query_session(session_id)
+    db_approvals = db.query_approvals(session_id)
+
+    # JSONファイルから詳細を取得
+    session_path = Path(f"projects/{project_id}/sessions/{session_id}")
+    state = load_json(session_path / "state_checkpoint.json")
+    approaches = load_json(session_path / "approaches.json")
 
     # 新しいセッションID生成
     new_session_id = generate_session_id()
@@ -238,9 +300,16 @@ def resume_session(session_path: str) -> Session:
     # コンテキスト構築
     context = build_resume_context(state, approaches)
 
+    # 新セッションをDBに登録
+    db.create_session(
+        id=new_session_id,
+        project_id=project_id,
+        parent_session_id=session_id
+    )
+
     return Session(
         session_id=new_session_id,
-        parent_session=state["session_id"],
+        parent_session=session_id,
         resume_context=context,
         remaining_tasks=state["remaining_tasks"]
     )
@@ -253,100 +322,38 @@ def build_resume_context(state: dict, approaches: dict) -> str:
     """
     再開用のコンテキストを構築する
     """
-    context = f"""
-# 再開セッション
+    # 失敗アプローチをフォーマット
+    failed_approaches = format_approaches(approaches["failed"])
 
-## 前回の状態
-{state["context_summary"]}
+    # 成功アプローチをフォーマット
+    verified_approaches = format_approaches(approaches["verified"])
 
-## 現在位置
-- Phase: {state["current_state"]["phase"]}
-- 実行中タスク: {state["current_state"]["active_task"]["name"]}
+    # 次に試すアプローチをフォーマット
+    untried_approaches = [a for a in approaches["untried"] if a.get("next_to_try")]
 
-## 失敗したアプローチ（避けるべき）
-{approaches["failed"]}
+    context = {
+        "previous_state": state["context_summary"],
+        "current_phase": state["current_state"]["phase"],
+        "current_task": state["current_state"]["active_task"],
+        "failed_approaches": failed_approaches,
+        "verified_approaches": verified_approaches,
+        "next_approaches": untried_approaches,
+        "remaining_tasks": state["remaining_tasks"]
+    }
 
-## 機能したアプローチ（参考にすべき）
-{approaches["verified"]}
-
-## 次に試すべきアプローチ
-{approaches["untried"]}
-
-## 残タスク
-{format_remaining_tasks(state["remaining_tasks"])}
-"""
     return context
 ```
 
 ## 自動保存タイミング
 
-| イベント | 保存内容 |
-|---------|---------|
-| タスク完了時 | state_checkpoint.json更新 |
-| Human承認時 | 全ファイル更新 |
-| エラー発生時 | 全ファイル更新 + エラー情報追加 |
-| 5分ごと | state_checkpoint.json更新（定期） |
-| セッション終了時 | 全ファイル更新 |
-
-## 実装時のクラス構造
-
-```python
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Optional, List
-from pathlib import Path
-import json
-
-@dataclass
-class SessionState:
-    project_id: str
-    session_id: str
-    phase: int
-    active_agent: Optional[dict]
-    active_task: Optional[dict]
-    completed_tasks: List[dict]
-    pending_tasks: List[dict]
-    remaining_tasks: List[dict]
-
-class SessionManager:
-    def __init__(self, project_path: Path):
-        self.project_path = project_path
-        self.current_session: Optional[SessionState] = None
-
-    def start_new_session(self) -> str:
-        """新しいセッションを開始"""
-        session_id = f"sess_{datetime.now().strftime('%Y%m%d%H%M%S')}_{generate_random(6)}"
-        session_path = self.project_path / "sessions" / session_id
-        session_path.mkdir(parents=True)
-        (session_path / "approaches").mkdir()
-        return session_id
-
-    def save_checkpoint(self) -> None:
-        """現在の状態を保存"""
-        if not self.current_session:
-            return
-
-        session_path = self.project_path / "sessions" / self.current_session.session_id
-
-        # JSON保存
-        with open(session_path / "state_checkpoint.json", "w") as f:
-            json.dump(self.current_session.__dict__, f, indent=2, default=str)
-
-        # Markdown生成
-        self._generate_session_state_md(session_path)
-
-    def resume_from(self, session_id: str) -> SessionState:
-        """既存セッションから再開"""
-        session_path = self.project_path / "sessions" / session_id
-        with open(session_path / "state_checkpoint.json") as f:
-            data = json.load(f)
-        return SessionState(**data)
-
-    def record_approach(self, approach_type: str, content: str) -> None:
-        """アプローチを記録"""
-        # verified, failed, untried のいずれか
-        pass
-```
+| イベント | 保存先 | 保存内容 |
+|---------|-------|---------|
+| タスク完了時 | DB + JSON | タスク状態、state_checkpoint.json |
+| Human承認時 | DB | human_approvalsテーブル |
+| アプローチ記録時 | JSON | approaches.json |
+| エラー発生時 | DB + JSON | 全データ + エラー情報 |
+| 5分ごと | JSON | state_checkpoint.json（定期バックアップ） |
+| セッション終了時 | DB + JSON | 全データ |
 
 ## WebUIとの連携
 
@@ -358,6 +365,10 @@ class SessionManager:
 - 過去のセッション一覧を表示
 - 各セッションの状態要約を閲覧可能
 
+### 承認履歴
+- DBから承認履歴を取得して表示
+- 承認/却下/修正依頼のステータス確認
+
 ### API エンドポイント
 
 | メソッド | パス | 説明 |
@@ -365,3 +376,4 @@ class SessionManager:
 | GET | /projects/{id}/sessions | セッション一覧 |
 | GET | /projects/{id}/sessions/{sid} | セッション詳細 |
 | POST | /projects/{id}/sessions/{sid}/resume | セッション再開 |
+| GET | /projects/{id}/approvals | 承認履歴 |
