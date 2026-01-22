@@ -6,15 +6,12 @@ Agentを4層の階層構造で管理する。各層は明確な責務を持ち�
 
 ## 階層構造
 
-```
-ORCHESTRATOR (1体)
-    │
-    ├── DIRECTOR (Phase毎に1体)
-    │       │
-    │       └── LEADER (機能単位で1体)
-    │               │
-    │               └── WORKER (タスク毎に1体)
-```
+| 層 | Agent | 数 |
+|----|-------|-----|
+| 1 | ORCHESTRATOR | 1体（全体で1つ） |
+| 2 | DIRECTOR | Phase毎に1体 |
+| 3 | LEADER | 機能単位で1体 |
+| 4 | WORKER | タスク毎に動的生成 |
 
 ## 各層の定義
 
@@ -99,7 +96,7 @@ ORCHESTRATOR (1体)
 | 役割 | 単一タスクの実行者 |
 | 責務 | 1タスク = 1成果物の生成 |
 | 管理対象 | なし（末端） |
-| 使用LLM | Haiku（デフォルト）、失敗時にSonnetへ昇格 |
+| 使用LLM | Haiku（デフォルト）、難度・失敗時に昇格 |
 
 **具体的な責務:**
 - 割り当てられた単一タスクの実行
@@ -111,21 +108,11 @@ ORCHESTRATOR (1体)
 
 Human承認はORCHESTRATORではなく、**各LEADERが提出**する。
 
-```
-LEADER
-    │ 成果物完成
-    v
-WebUI承認画面に提出
-    │
-    v
-Humanがレビュー
-    │
-    ├── 承認 → 次のステップへ
-    │
-    ├── 修正指示 → LEADERがWORKERに再指示
-    │
-    └── 追加指示 → LEADERが追加タスクを作成
-```
+**フロー:**
+1. LEADER が成果物を完成
+2. WebUI承認画面に提出
+3. Humanがレビュー
+4. 承認 → 次のステップへ / 修正指示 → LEADERがWORKERに再指示 / 追加指示 → LEADERが追加タスクを作成
 
 ### 承認画面の表示内容
 
@@ -148,82 +135,22 @@ Humanがレビュー
 
 ### 下向き（指示）
 
-```
-ORCHESTRATOR
-    │ "Phase1を開始せよ"
-    v
-DIRECTOR (Phase1)
-    │ "Conceptを作成せよ"
-    v
-LEADER (Concept)
-    │ "アイデア3案を出せ"
-    v
-WORKER
-    │ 実行
-    v
-LEADER (確認)
-    │
-    ├── OK → 成果物を受領
-    │
-    └── NG → 再指示（最大3回）
-              │
-              v
-            WORKER（再実行）
-```
+ORCHESTRATOR → DIRECTOR → LEADER → WORKER の順で指示が下りる。
 
 ### 上向き（報告）
 
-```
-WORKER
-    │ "アイデア3案完成"
-    v
-LEADER (Concept)
-    │ 確認
-    │
-    ├── OK → Human承認を提出（WebUI）
-    │          │
-    │          v
-    │        Human承認
-    │          │
-    │          v
-    │        DIRECTORへ報告
-    │
-    └── NG → WORKERへ再指示（最大3回）
-```
+WORKER → LEADER（確認）→ Human承認 → DIRECTOR → ORCHESTRATOR の順で報告が上がる。
 
 ### 再確認処理
 
 LEADER-WORKER間の再確認は無限ループを避けるため**最大3回**に制限。
 
-```
-LEADER → WORKER: 指示
-WORKER → LEADER: 成果物提出
-LEADER: 確認
-    │
-    ├── OK → 完了
-    │
-    └── NG (1回目) → 再指示
-          │
-          v
-        WORKER: 再実行
-        LEADER: 確認
-            │
-            ├── OK → 完了
-            │
-            └── NG (2回目) → 再指示
-                  │
-                  v
-                WORKER: 再実行
-                LEADER: 確認
-                    │
-                    ├── OK → 完了
-                    │
-                    └── NG (3回目) → エスカレーション（DIRECTORへ）
-```
+1. LEADER → WORKER: 指示
+2. WORKER → LEADER: 成果物提出
+3. LEADER: 確認 → OK なら完了、NG なら再指示（最大3回まで）
+4. 3回NGでもダメならDIRECTORへエスカレーション
 
 ## 既存ファイルの統合方針
-
-このドキュメントの内容に合わせて、以下の既存ファイルを更新・統合する:
 
 | 対象 | 作業内容 |
 |------|---------|
