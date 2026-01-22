@@ -1,62 +1,81 @@
-import type{AgentType,AgentStatus}from'../../types/agent'
+import type { AgentType, AgentStatus } from '../../types/agent'
+import type { AIServiceId } from './strategyMapConfig'
 
-export interface MapAgent{
- id:string
- type:AgentType
- status:AgentStatus
- parentId:string|null
- x:number
- y:number
- targetX:number
- targetY:number
- currentTask:string|null
- bubble:string|null
- bubbleType:'info'|'question'|'success'|'warning'|null
- isSpawning:boolean
- spawnProgress:number
- workingFrame:number
- aiTarget:string|null
+export interface Vec2 {
+  x: number
+  y: number
 }
 
-export interface AIService{
- id:string
- name:string
- icon:string
- x:number
- y:number
- color:string
+export interface PhysicsBody extends Vec2 {
+  vx: number
+  vy: number
 }
 
-export interface UserNode{
- x:number
- y:number
- queue:string[]
+export interface MapAgent {
+  readonly id: string
+  readonly type: AgentType
+  readonly status: AgentStatus
+  readonly parentId: string | null
+  readonly currentTask: string | null
+  readonly aiTarget: AIServiceId | null
+  readonly bubble: string | null
+  readonly bubbleType: BubbleType | null
+  readonly spawnProgress: number
 }
 
-export interface Connection{
- id:string
- fromId:string
- toId:string
- type:'instruction'|'confirm'|'delivery'|'ai-request'|'user-contact'
- progress:number
- active:boolean
+export type BubbleType = 'info' | 'question' | 'success' | 'warning'
+
+export interface AIService {
+  readonly id: AIServiceId
+  readonly name: string
+  readonly color: string
+  x: number
+  y: number
 }
 
-export interface MapState{
- agents:MapAgent[]
- aiServices:AIService[]
- user:UserNode
- connections:Connection[]
- viewOffset:{x:number,y:number}
- zoom:number
+export interface UserNode extends Vec2 {
+  readonly queue: readonly string[]
 }
 
-export type MapAction=
- |{type:'SPAWN_AGENT',agent:MapAgent}
- |{type:'REMOVE_AGENT',id:string}
- |{type:'UPDATE_AGENT',id:string,updates:Partial<MapAgent>}
- |{type:'ADD_CONNECTION',connection:Connection}
- |{type:'REMOVE_CONNECTION',id:string}
- |{type:'UPDATE_CONNECTION',id:string,updates:Partial<Connection>}
- |{type:'SET_VIEW',offset:{x:number,y:number},zoom:number}
- |{type:'TICK'}
+export type ConnectionType =
+  | 'instruction'
+  | 'confirm'
+  | 'delivery'
+  | 'ai-request'
+  | 'user-contact'
+
+export interface Connection {
+  readonly id: string
+  readonly fromId: string
+  readonly toId: string
+  readonly type: ConnectionType
+  readonly active: boolean
+}
+
+export interface Particle extends PhysicsBody {
+  life: number
+  readonly maxLife: number
+  readonly color: string
+  readonly size: number
+}
+
+export interface DataPacket {
+  readonly id: string
+  readonly fromX: number
+  readonly fromY: number
+  readonly toX: number
+  readonly toY: number
+  readonly color: string
+  progress: number
+}
+
+export interface CanvasTransform {
+  zoom: number
+  panX: number
+  panY: number
+}
+
+export interface AgentPositionState extends PhysicsBody {
+  targetX: number
+  targetY: number
+}

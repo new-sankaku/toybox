@@ -1,224 +1,254 @@
-import{useState,useEffect,useRef}from'react'
-import{useAgentStore}from'../stores/agentStore'
-import{useProjectStore}from'../stores/projectStore'
-import StrategyMapCanvas from'../components/strategy-map/StrategyMapCanvas'
-import type{MapAgent,AIService,UserNode,Connection}from'../components/strategy-map/strategyMapTypes'
-import type{Agent}from'../types/agent'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useAgentStore } from '../stores/agentStore'
+import { useProjectStore } from '../stores/projectStore'
+import StrategyMapCanvas from '../components/strategy-map/StrategyMapCanvas'
+import { AI_SERVICES_CONFIG, TIMING, LAYOUT } from '../components/strategy-map/strategyMapConfig'
+import type { MapAgent, AIService, UserNode, Connection, BubbleType, ConnectionType } from '../components/strategy-map/strategyMapTypes'
+import type { AIServiceId } from '../components/strategy-map/strategyMapConfig'
+import type { Agent, AgentStatus } from '../types/agent'
 
-const AI_SERVICES:AIService[]=[
- {id:'claude',name:'Claude',icon:'C',x:200,y:100,color:'#D97706'},
- {id:'openai',name:'OpenAI',icon:'O',x:500,y:80,color:'#10B981'},
- {id:'gemini',name:'Gemini',icon:'G',x:800,y:100,color:'#3B82F6'},
-]
-
-const USER_NODE:UserNode={x:500,y:600,queue:[]}
-
-const prevAgentIdsRef={current:new Set<string>()}
-const spawnTimesRef={current:new Map<string,number>()}
-
-function getBubbleForAgent(agent:Agent):{text:string|null,type:'info'|'question'|'success'|'warning'|null}{
- if(agent.status==='running'&&agent.currentTask){
-  return{text:agent.currentTask,type:'info'}
- }
- if(agent.status==='waiting_approval'){
-  return{text:'確認をお願いします',type:'question'}
- }
- if(agent.status==='completed'){
-  return{text:'タスク完了!',type:'success'}
- }
- if(agent.status==='failed'){
-  return{text:agent.error||'エラー発生',type:'warning'}
- }
- if(agent.status==='blocked'){
-  return{text:'ブロック中…',type:'warning'}
- }
- if(agent.status==='pending'){
-  return{text:null,type:null}
- }
- return{text:null,type:null}
+interface SpawnTracker {
+  spawnTimes: Map<string, number>
+  previousIds: Set<string>
 }
 
-function getAITarget(agent:Agent,index:number):string|null{
- if(agent.status!=='running')return null
- const aiServices=['claude','openai','gemini']
- const typeHash=agent.type.split('').reduce((a,c)=>a+c.charCodeAt(0),0)
- return aiServices[(typeHash+index)%aiServices.length]
+function determineBubble(agent: Agent): { text: string | null; type: BubbleType | null } {
+  switch (agent.status) {
+    case 'running':
+      return agent.currentTask
+        ? { text: agent.currentTask, type: 'info' }
+        : { text: null, type: null }
+    case 'waiting_approval':
+      return { text: '確認をお願いします', type: 'question' }
+    case 'completed':
+      return { text: 'タスク完了!', type: 'success' }
+    case 'failed':
+      return { text: agent.error || 'エラー発生', type: 'warning' }
+    case 'blocked':
+      return { text: 'ブロック中…', type: 'warning' }
+    default:
+      return { text: null, type: null }
+  }
 }
 
-function agentToMapAgent(agent:Agent,index:number,allAgents:Agent[],now:number):MapAgent{
- const isNew=!prevAgentIdsRef.current.has(agent.id)
- if(isNew){
-  spawnTimesRef.current.set(agent.id,now)
- }
- const spawnTime=spawnTimesRef.current.get(agent.id)||now
- const spawnDuration=1000
- const elapsed=now-spawnTime
- const spawnProgress=Math.min(1,elapsed/spawnDuration)
- const isSpawning=spawnProgress<1
- const{text:bubble,type:bubbleType}=getBubbleForAgent(agent)
- const aiTarget=getAITarget(agent,index)
- return{
-  id:agent.id,
-  type:agent.type,
-  status:agent.status,
-  parentId:agent.parentAgentId,
-  x:0,
-  y:0,
-  targetX:0,
-  targetY:0,
-  currentTask:agent.currentTask,
-  bubble,
-  bubbleType,
-  isSpawning,
-  spawnProgress,
-  workingFrame:0,
-  aiTarget,
- }
+function computeAITarget(agent: Agent, index: number): AIServiceId | null {
+  if (agent.status !== 'running') return null
+
+  const serviceIds = AI_SERVICES_CONFIG.map(s => s.id)
+  const typeHash = agent.type.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
+  return serviceIds[(typeHash + index) % serviceIds.length]
 }
 
-function generateConnections(mapAgents:MapAgent[]):Connection[]{
- const conns:Connection[]=[]
- mapAgents.forEach(agent=>{
-  if(agent.parentId){
-   const parent=mapAgents.find(a=>a.id===agent.parentId)
-   if(parent){
-    if(agent.status==='running'){
-     conns.push({
-      id:`inst-${agent.id}`,
-      fromId:parent.id,
-      toId:agent.id,
-      type:'instruction',
-      progress:1,
-      active:true
-     })
-    }
-    if(agent.status==='waiting_approval'){
-     conns.push({
-      id:`conf-${agent.id}`,
-      fromId:agent.id,
-      toId:parent.id,
-      type:'confirm',
-      progress:0,
-      active:true
-     })
-    }
-    if(agent.status==='completed'){
-     conns.push({
-      id:`deliv-${agent.id}`,
-      fromId:agent.id,
-      toId:parent.id,
-      type:'delivery',
-      progress:0,
-      active:true
-     })
-    }
-   }
+function convertAgentToMapAgent(
+  agent: Agent,
+  index: number,
+  now: number,
+  tracker: SpawnTracker
+): MapAgent {
+  const isNew = !tracker.previousIds.has(agent.id)
+  if (isNew) {
+    tracker.spawnTimes.set(agent.id, now)
   }
-  if(agent.aiTarget&&agent.status==='running'){
-   conns.push({
-    id:`ai-${agent.id}`,
-    fromId:agent.id,
-    toId:agent.aiTarget,
-    type:'ai-request',
-    progress:0,
-    active:true
-   })
+
+  const spawnTime = tracker.spawnTimes.get(agent.id) ?? now
+  const elapsed = now - spawnTime
+  const spawnProgress = Math.min(1, elapsed / TIMING.SPAWN_DURATION_MS)
+
+  const bubble = determineBubble(agent)
+  const aiTarget = computeAITarget(agent, index)
+
+  return {
+    id: agent.id,
+    type: agent.type,
+    status: agent.status,
+    parentId: agent.parentAgentId,
+    currentTask: agent.currentTask,
+    aiTarget,
+    bubble: bubble.text,
+    bubbleType: bubble.type,
+    spawnProgress,
   }
-  if(agent.status==='waiting_approval'){
-   conns.push({
-    id:`user-${agent.id}`,
-    fromId:agent.id,
-    toId:'user',
-    type:'user-contact',
-    progress:0,
-    active:true
-   })
-  }
- })
- return conns
 }
 
-export default function StrategyMapView(){
- const agents=useAgentStore((s:{agents:Agent[]})=>s.agents)
- const{currentProject}=useProjectStore()
- const containerRef=useRef<HTMLDivElement>(null)
- const [size,setSize]=useState({width:1000,height:700})
- const [mapAgents,setMapAgents]=useState<MapAgent[]>([])
- const [connections,setConnections]=useState<Connection[]>([])
- const [userNode,setUserNode]=useState<UserNode>(USER_NODE)
+function generateConnections(agents: readonly MapAgent[]): Connection[] {
+  const connections: Connection[] = []
 
- useEffect(()=>{
-  const updateSize=()=>{
-   if(containerRef.current){
-    const rect=containerRef.current.getBoundingClientRect()
-    setSize({width:rect.width,height:rect.height})
-    setUserNode((prev:UserNode)=>({...prev,x:rect.width/2,y:rect.height-80}))
-   }
-  }
-  updateSize()
-  window.addEventListener('resize',updateSize)
-  return()=>window.removeEventListener('resize',updateSize)
- },[])
-
- useEffect(()=>{
-  const projectAgents=currentProject?agents.filter((a:Agent)=>a.projectId===currentProject.id):agents
-  const now=Date.now()
-  const mapped=projectAgents.map((a:Agent,i:number)=>agentToMapAgent(a,i,projectAgents,now))
-  prevAgentIdsRef.current=new Set(projectAgents.map((a:Agent)=>a.id))
-  setMapAgents(mapped)
-  const conns=generateConnections(mapped)
-  setConnections(conns)
-  const waiting=mapped.filter((a:MapAgent)=>a.status==='waiting_approval').map((a:MapAgent)=>a.id)
-  setUserNode((prev:UserNode)=>({...prev,queue:waiting}))
- },[agents,currentProject])
-
- useEffect(()=>{
-  const interval=setInterval(()=>{
-   setMapAgents((prev:MapAgent[])=>prev.map((a:MapAgent)=>{
-    if(a.isSpawning){
-     const newProgress=Math.min(1,a.spawnProgress+0.02)
-     return{...a,spawnProgress:newProgress,isSpawning:newProgress<1}
+  for (const agent of agents) {
+    if (agent.parentId) {
+      const parentExists = agents.some(a => a.id === agent.parentId)
+      if (parentExists) {
+        const connectionType = getParentConnectionType(agent.status)
+        if (connectionType) {
+          connections.push({
+            id: `${connectionType}-${agent.id}`,
+            fromId: connectionType === 'instruction' ? agent.parentId : agent.id,
+            toId: connectionType === 'instruction' ? agent.id : agent.parentId,
+            type: connectionType,
+            active: true,
+          })
+        }
+      }
     }
-    return a
-   }))
-  },16)
-  return()=>clearInterval(interval)
- },[])
 
- const aiServicesPositioned=AI_SERVICES.map((s:AIService,i:number)=>({
-  ...s,
-  x:120+(size.width-240)/(AI_SERVICES.length-1||1)*i,
-  y:90
- }))
+    if (agent.aiTarget && agent.status === 'running') {
+      connections.push({
+        id: `ai-${agent.id}`,
+        fromId: agent.id,
+        toId: agent.aiTarget,
+        type: 'ai-request',
+        active: true,
+      })
+    }
 
- const runningCount=mapAgents.filter(a=>a.status==='running').length
- const waitingCount=mapAgents.filter(a=>a.status==='waiting_approval').length
- const completedCount=mapAgents.filter(a=>a.status==='completed').length
+    if (agent.status === 'waiting_approval') {
+      connections.push({
+        id: `user-${agent.id}`,
+        fromId: agent.id,
+        toId: 'user',
+        type: 'user-contact',
+        active: true,
+      })
+    }
+  }
 
- return(
-  <div className="h-full flex flex-col">
-   <div className="nier-page-header-row mb-2">
-    <h1 className="nier-page-title">戦略マップ</h1>
-    <div className="flex gap-4 text-nier-small">
-     <span className="text-nier-accent-orange">稼働: {runningCount}</span>
-     <span className="text-nier-accent-yellow">待機: {waitingCount}</span>
-     <span className="text-nier-accent-green">完了: {completedCount}</span>
-     <span className="text-nier-text-light">計: {mapAgents.length}</span>
+  return connections
+}
+
+function getParentConnectionType(status: AgentStatus): ConnectionType | null {
+  switch (status) {
+    case 'running':
+      return 'instruction'
+    case 'waiting_approval':
+      return 'confirm'
+    case 'completed':
+      return 'delivery'
+    default:
+      return null
+  }
+}
+
+function positionAIServices(width: number): AIService[] {
+  const count = AI_SERVICES_CONFIG.length
+  const margin = LAYOUT.MARGIN_X
+  const availableWidth = width - margin * 2
+
+  return AI_SERVICES_CONFIG.map((config, index) => ({
+    ...config,
+    x: margin + (availableWidth / Math.max(count - 1, 1)) * index,
+    y: 85,
+  }))
+}
+
+export default function StrategyMapView() {
+  const agents = useAgentStore(state => state.agents)
+  const { currentProject } = useProjectStore()
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const trackerRef = useRef<SpawnTracker>({
+    spawnTimes: new Map(),
+    previousIds: new Set(),
+  })
+
+  const [dimensions, setDimensions] = useState({ width: 1000, height: 700 })
+  const [mapAgents, setMapAgents] = useState<MapAgent[]>([])
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [userNode, setUserNode] = useState<UserNode>({ x: 500, y: 600, queue: [] })
+
+  const updateDimensions = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const rect = container.getBoundingClientRect()
+    setDimensions({ width: rect.width, height: rect.height })
+    setUserNode(prev => ({
+      ...prev,
+      x: rect.width / 2,
+      y: rect.height * LAYOUT.USER_ZONE_Y + 20,
+    }))
+  }, [])
+
+  useEffect(() => {
+    updateDimensions()
+    window.addEventListener('resize', updateDimensions)
+    return () => window.removeEventListener('resize', updateDimensions)
+  }, [updateDimensions])
+
+  useEffect(() => {
+    const projectAgents = currentProject
+      ? agents.filter(a => a.projectId === currentProject.id)
+      : agents
+
+    const now = Date.now()
+    const tracker = trackerRef.current
+
+    const mapped = projectAgents.map((agent, index) =>
+      convertAgentToMapAgent(agent, index, now, tracker)
+    )
+
+    tracker.previousIds = new Set(projectAgents.map(a => a.id))
+
+    setMapAgents(mapped)
+    setConnections(generateConnections(mapped))
+
+    const waitingIds = mapped
+      .filter(a => a.status === 'waiting_approval')
+      .map(a => a.id)
+    setUserNode(prev => ({ ...prev, queue: waitingIds }))
+  }, [agents, currentProject])
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      setMapAgents(prev =>
+        prev.map(agent => {
+          if (agent.spawnProgress >= 1) return agent
+          const newProgress = Math.min(1, agent.spawnProgress + 0.025)
+          return { ...agent, spawnProgress: newProgress }
+        })
+      )
+    }, 16)
+
+    return () => clearInterval(intervalId)
+  }, [])
+
+  const aiServices = useMemo(
+    () => positionAIServices(dimensions.width),
+    [dimensions.width]
+  )
+
+  const stats = useMemo(() => ({
+    running: mapAgents.filter(a => a.status === 'running').length,
+    waiting: mapAgents.filter(a => a.status === 'waiting_approval').length,
+    completed: mapAgents.filter(a => a.status === 'completed').length,
+    total: mapAgents.length,
+  }), [mapAgents])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="nier-page-header-row mb-2">
+        <h1 className="nier-page-title">戦略マップ</h1>
+        <div className="flex gap-4 text-nier-small">
+          <span className="text-nier-accent-orange">稼働: {stats.running}</span>
+          <span className="text-nier-accent-yellow">待機: {stats.waiting}</span>
+          <span className="text-nier-accent-green">完了: {stats.completed}</span>
+          <span className="text-nier-text-light">計: {stats.total}</span>
+        </div>
+      </div>
+      <div className="text-nier-caption text-nier-text-light mb-1">
+        ホイール: ズーム / ドラッグ: パン
+      </div>
+      <div
+        ref={containerRef}
+        className="flex-1 border border-nier-border-light rounded overflow-hidden bg-nier-bg-main"
+      >
+        <StrategyMapCanvas
+          agents={mapAgents}
+          aiServices={aiServices}
+          user={userNode}
+          connections={connections}
+          width={dimensions.width}
+          height={dimensions.height}
+        />
+      </div>
     </div>
-   </div>
-   <div className="text-nier-caption text-nier-text-light mb-1">
-    ホイール: ズーム / ドラッグ: パン
-   </div>
-   <div ref={containerRef} className="flex-1 border border-nier-border-light rounded overflow-hidden bg-nier-bg-main">
-    <StrategyMapCanvas
-     agents={mapAgents}
-     aiServices={aiServicesPositioned}
-     user={userNode}
-     connections={connections}
-     width={size.width}
-     height={size.height}
-    />
-   </div>
-  </div>
- )
+  )
 }

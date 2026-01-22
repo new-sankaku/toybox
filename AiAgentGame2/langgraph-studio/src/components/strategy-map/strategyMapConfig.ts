@@ -1,0 +1,91 @@
+/**
+ * Strategy Map Configuration
+ * Centralized configuration for all visual and physics parameters
+ */
+
+export const PHYSICS = {
+  SPRING_STIFFNESS: 0.06,
+  DAMPING: 0.88,
+  MIN_VELOCITY: 0.01,
+  REPULSION_RADIUS: 50,
+  REPULSION_STRENGTH: 200,
+} as const
+
+export const LAYOUT = {
+  AI_ZONE_Y: 0.12,
+  USER_ZONE_Y: 0.88,
+  WORK_ZONE_TOP: 0.22,
+  WORK_ZONE_BOTTOM: 0.72,
+  LEADER_SPACING_MAX: 180,
+  CHILD_SPREAD_MAX: 300,
+  CHILD_VERTICAL_GAP: 70,
+  APPROVAL_QUEUE_SPACING: 55,
+  AI_ORBIT_RADIUS_BASE: 65,
+  AI_ORBIT_RADIUS_STEP: 35,
+  AI_ORBIT_ANGLE_SPREAD: Math.PI * 0.7,
+  MARGIN_X: 100,
+} as const
+
+export const TIMING = {
+  SPAWN_DURATION_MS: 800,
+  SPAWN_PARTICLE_COUNT: 10,
+  DESPAWN_PARTICLE_COUNT: 6,
+  PACKET_SPAWN_INTERVAL: 25,
+  PACKET_SPEED: 0.035,
+  PARTICLE_GRAVITY: 0.12,
+  PARTICLE_INITIAL_LIFE: 35,
+} as const
+
+export const SIZES = {
+  AI_NODE_RADIUS: 38,
+  USER_NODE_RADIUS: 34,
+  AGENT_SCALE: 0.85,
+  BUBBLE_MAX_WIDTH: 140,
+  BUBBLE_HEIGHT: 20,
+  BUBBLE_PADDING: 14,
+  PACKET_OUTER_RADIUS: 7,
+  PACKET_INNER_RADIUS: 2.5,
+} as const
+
+export const COLORS = {
+  BACKGROUND: '#E8E4D4',
+  TEXT_PRIMARY: '#454138',
+  TEXT_SECONDARY: '#6B6558',
+
+  INSTRUCTION: '#5080B0',
+  CONFIRM: '#C49060',
+  DELIVERY: '#60A060',
+  AI_REQUEST: '#9060B0',
+  USER_CONTACT: '#B05050',
+
+  USER_NODE_INNER: '#C85858',
+  USER_NODE_OUTER: '#A04848',
+  USER_NODE_BORDER: '#803838',
+  USER_ALERT: 'rgba(180, 60, 60, 0.25)',
+
+  SPAWN_GLOW: 'rgba(255, 240, 180, 0.7)',
+  WORK_GLOW: 'rgba(255, 200, 100, 0.2)',
+
+  BUBBLE_DEFAULT_BG: '#F8F6F0',
+  BUBBLE_DEFAULT_BORDER: '#454138',
+  BUBBLE_SUCCESS_BG: '#E6F4E6',
+  BUBBLE_SUCCESS_BORDER: '#5A9A5A',
+  BUBBLE_QUESTION_BG: '#FFF6E6',
+  BUBBLE_QUESTION_BORDER: '#C49060',
+  BUBBLE_WARNING_BG: '#FFE8E8',
+  BUBBLE_WARNING_BORDER: '#B05050',
+} as const
+
+export const ZOOM = {
+  MIN: 0.35,
+  MAX: 2.8,
+  STEP: 0.07,
+} as const
+
+export const AI_SERVICES_CONFIG = [
+  { id: 'claude', name: 'Claude', color: '#D97706' },
+  { id: 'openai', name: 'OpenAI', color: '#10B981' },
+  { id: 'gemini', name: 'Gemini', color: '#3B82F6' },
+] as const
+
+export type AIServiceId = typeof AI_SERVICES_CONFIG[number]['id']
