@@ -154,42 +154,44 @@ function findAvoidanceDirection(
   dirY: number
 ): Vec2 {
   const avoidRadius = PHYSICS.REPULSION_RADIUS
-  let needsAvoidance = false
-  let obstacleX = 0
-  let obstacleY = 0
+  const avoidRadiusSq = avoidRadius * avoidRadius * 4
+  let closestDistSq = Infinity
+  let closestX = 0
+  let closestY = 0
 
   positions.forEach((other, otherId) => {
     if (otherId === currentId) return
 
     const toOtherX = other.x - pos.x
     const toOtherY = other.y - pos.y
-    const dist = Math.sqrt(toOtherX * toOtherX + toOtherY * toOtherY)
+    const distSq = toOtherX * toOtherX + toOtherY * toOtherY
 
-    if (dist < avoidRadius * 2 && dist > 0) {
+    if (distSq < avoidRadiusSq && distSq > PHYSICS.EPSILON) {
       const dotProduct = dirX * toOtherX + dirY * toOtherY
-      if (dotProduct > 0) {
-        needsAvoidance = true
-        obstacleX = other.x
-        obstacleY = other.y
+      if (dotProduct > 0 && distSq < closestDistSq) {
+        closestDistSq = distSq
+        closestX = other.x
+        closestY = other.y
       }
     }
   })
 
-  if (!needsAvoidance) {
+  if (closestDistSq === Infinity) {
     return { x: dirX, y: dirY }
   }
 
-  const toObsX = obstacleX - pos.x
-  const toObsY = obstacleY - pos.y
+  const toObsX = closestX - pos.x
+  const toObsY = closestY - pos.y
 
   const perpX = -toObsY
   const perpY = toObsX
-  const perpLen = Math.sqrt(perpX * perpX + perpY * perpY)
+  const perpLenSq = perpX * perpX + perpY * perpY
 
-  if (perpLen < 0.01) {
+  if (perpLenSq < PHYSICS.EPSILON) {
     return { x: dirX, y: dirY }
   }
 
+  const perpLen = Math.sqrt(perpLenSq)
   const normPerpX = perpX / perpLen
   const normPerpY = perpY / perpLen
 
@@ -200,11 +202,12 @@ function findAvoidanceDirection(
   const newDirX = dirX * (1 - strength) + normPerpX * sign * strength
   const newDirY = dirY * (1 - strength) + normPerpY * sign * strength
 
-  const len = Math.sqrt(newDirX * newDirX + newDirY * newDirY)
-  if (len < 0.01) {
+  const lenSq = newDirX * newDirX + newDirY * newDirY
+  if (lenSq < PHYSICS.EPSILON) {
     return { x: dirX, y: dirY }
   }
 
+  const len = Math.sqrt(lenSq)
   return { x: newDirX / len, y: newDirY / len }
 }
 
@@ -683,22 +686,29 @@ export default function StrategyMapCanvas({
         renderPacket(ctx, packet)
       }
 
+      const aiCounts = new Map<string, number>()
+      for (const agent of agents) {
+        if (agent.aiTarget && agent.status === 'running') {
+          aiCounts.set(agent.aiTarget, (aiCounts.get(agent.aiTarget) ?? 0) + 1)
+        }
+      }
+
       for (const ai of aiServices) {
-        const activeCount = agents.filter(
-          a => a.aiTarget === ai.id && a.status === 'running'
-        ).length
-        renderAIService(ctx, ai, state.frame, activeCount)
+        renderAIService(ctx, ai, state.frame, aiCounts.get(ai.id) ?? 0)
       }
 
       renderUserNode(ctx, user, state.frame)
 
-      const sortedAgents = [...agents].sort((a, b) => {
-        const posA = state.positions.get(a.id)
-        const posB = state.positions.get(b.id)
-        return (posA?.y ?? 0) - (posB?.y ?? 0)
-      })
+      const agentsByY: Array<{ agent: MapAgent; y: number }> = []
+      for (const agent of agents) {
+        const pos = state.positions.get(agent.id)
+        if (pos) {
+          agentsByY.push({ agent, y: pos.y })
+        }
+      }
+      agentsByY.sort((a, b) => a.y - b.y)
 
-      for (const agent of sortedAgents) {
+      for (const { agent } of agentsByY) {
         const pos = state.positions.get(agent.id)
         if (pos) {
           renderAgent(ctx, agent, pos, state.frame)
