@@ -13,85 +13,127 @@ const AI_SERVICES:AIService[]=[
 
 const USER_NODE:UserNode={x:500,y:600,queue:[]}
 
-function agentToMapAgent(agent:Agent,index:number,allAgents:Agent[]):MapAgent{
- const parent=agent.parentAgentId?allAgents.find(a=>a.id===agent.parentAgentId):null
- let baseX=300+Math.random()*400
- let baseY=250+Math.random()*200
- if(parent){
-  const parentMap=allAgents.findIndex(a=>a.id===parent.id)
-  const siblingIndex=allAgents.filter(a=>a.parentAgentId===agent.parentAgentId).findIndex(a=>a.id===agent.id)
-  baseX=300+(parentMap%5)*150+(siblingIndex%3)*50
-  baseY=300+Math.floor(parentMap/5)*100+(siblingIndex)*40
- }else{
-  const leaderIndex=allAgents.filter(a=>!a.parentAgentId).findIndex(a=>a.id===agent.id)
-  baseX=150+leaderIndex*200
-  baseY=250
- }
- let bubble:string|null=null
- let bubbleType:'info'|'question'|'success'|'warning'|null=null
+const prevAgentIdsRef={current:new Set<string>()}
+const spawnTimesRef={current:new Map<string,number>()}
+
+function getBubbleForAgent(agent:Agent):{text:string|null,type:'info'|'question'|'success'|'warning'|null}{
  if(agent.status==='running'&&agent.currentTask){
-  bubble=agent.currentTask.slice(0,15)+'...'
-  bubbleType='info'
+  return{text:agent.currentTask,type:'info'}
  }
  if(agent.status==='waiting_approval'){
-  bubble='確認待ち'
-  bubbleType='question'
+  return{text:'確認をお願いします',type:'question'}
  }
  if(agent.status==='completed'){
-  bubble='完了!'
-  bubbleType='success'
+  return{text:'タスク完了!',type:'success'}
  }
  if(agent.status==='failed'){
-  bubble='エラー'
-  bubbleType='warning'
+  return{text:agent.error||'エラー発生',type:'warning'}
  }
- let aiTarget:string|null=null
- if(agent.status==='running'){
-  aiTarget=['claude','openai','gemini'][index%3]
+ if(agent.status==='blocked'){
+  return{text:'ブロック中…',type:'warning'}
  }
+ if(agent.status==='pending'){
+  return{text:null,type:null}
+ }
+ return{text:null,type:null}
+}
+
+function getAITarget(agent:Agent,index:number):string|null{
+ if(agent.status!=='running')return null
+ const aiServices=['claude','openai','gemini']
+ const typeHash=agent.type.split('').reduce((a,c)=>a+c.charCodeAt(0),0)
+ return aiServices[(typeHash+index)%aiServices.length]
+}
+
+function agentToMapAgent(agent:Agent,index:number,allAgents:Agent[],now:number):MapAgent{
+ const isNew=!prevAgentIdsRef.current.has(agent.id)
+ if(isNew){
+  spawnTimesRef.current.set(agent.id,now)
+ }
+ const spawnTime=spawnTimesRef.current.get(agent.id)||now
+ const spawnDuration=1000
+ const elapsed=now-spawnTime
+ const spawnProgress=Math.min(1,elapsed/spawnDuration)
+ const isSpawning=spawnProgress<1
+ const{text:bubble,type:bubbleType}=getBubbleForAgent(agent)
+ const aiTarget=getAITarget(agent,index)
  return{
   id:agent.id,
   type:agent.type,
   status:agent.status,
   parentId:agent.parentAgentId,
-  x:baseX,
-  y:baseY,
-  targetX:baseX,
-  targetY:baseY,
+  x:0,
+  y:0,
+  targetX:0,
+  targetY:0,
   currentTask:agent.currentTask,
   bubble,
   bubbleType,
-  isSpawning:false,
-  spawnProgress:1,
+  isSpawning,
+  spawnProgress,
   workingFrame:0,
   aiTarget,
  }
 }
 
-function generateConnections(mapAgents:MapAgent[],_user:UserNode):Connection[]{
+function generateConnections(mapAgents:MapAgent[]):Connection[]{
  const conns:Connection[]=[]
  mapAgents.forEach(agent=>{
   if(agent.parentId){
    const parent=mapAgents.find(a=>a.id===agent.parentId)
    if(parent){
     if(agent.status==='running'){
-     conns.push({id:`inst-${agent.id}`,fromId:parent.id,toId:agent.id,type:'instruction',progress:1,active:true})
+     conns.push({
+      id:`inst-${agent.id}`,
+      fromId:parent.id,
+      toId:agent.id,
+      type:'instruction',
+      progress:1,
+      active:true
+     })
     }
     if(agent.status==='waiting_approval'){
-     conns.push({id:`conf-${agent.id}`,fromId:agent.id,toId:parent.id,type:'confirm',progress:0.5+Math.sin(Date.now()*0.002)*0.3,active:true})
+     conns.push({
+      id:`conf-${agent.id}`,
+      fromId:agent.id,
+      toId:parent.id,
+      type:'confirm',
+      progress:0,
+      active:true
+     })
     }
     if(agent.status==='completed'){
-     conns.push({id:`deliv-${agent.id}`,fromId:agent.id,toId:parent.id,type:'delivery',progress:1,active:true})
+     conns.push({
+      id:`deliv-${agent.id}`,
+      fromId:agent.id,
+      toId:parent.id,
+      type:'delivery',
+      progress:0,
+      active:true
+     })
     }
    }
   }
-  if(agent.aiTarget){
-   conns.push({id:`ai-${agent.id}`,fromId:agent.id,toId:agent.aiTarget,type:'ai-request',progress:Math.random(),active:true})
+  if(agent.aiTarget&&agent.status==='running'){
+   conns.push({
+    id:`ai-${agent.id}`,
+    fromId:agent.id,
+    toId:agent.aiTarget,
+    type:'ai-request',
+    progress:0,
+    active:true
+   })
   }
- })
- const waitingApproval=mapAgents.filter(a=>a.status==='waiting_approval')
- waitingApproval.forEach(agent=>{
-  conns.push({id:`user-${agent.id}`,fromId:agent.id,toId:'user',type:'user-contact',progress:0.7,active:true})
+  if(agent.status==='waiting_approval'){
+   conns.push({
+    id:`user-${agent.id}`,
+    fromId:agent.id,
+    toId:'user',
+    type:'user-contact',
+    progress:0,
+    active:true
+   })
+  }
  })
  return conns
 }
@@ -120,37 +162,52 @@ export default function StrategyMapView(){
 
  useEffect(()=>{
   const projectAgents=currentProject?agents.filter((a:Agent)=>a.projectId===currentProject.id):agents
-  const mapped=projectAgents.map((a:Agent,i:number)=>agentToMapAgent(a,i,projectAgents))
+  const now=Date.now()
+  const mapped=projectAgents.map((a:Agent,i:number)=>agentToMapAgent(a,i,projectAgents,now))
+  prevAgentIdsRef.current=new Set(projectAgents.map((a:Agent)=>a.id))
   setMapAgents(mapped)
-  const conns=generateConnections(mapped,userNode)
+  const conns=generateConnections(mapped)
   setConnections(conns)
   const waiting=mapped.filter((a:MapAgent)=>a.status==='waiting_approval').map((a:MapAgent)=>a.id)
   setUserNode((prev:UserNode)=>({...prev,queue:waiting}))
- },[agents,currentProject,userNode.x,userNode.y])
+ },[agents,currentProject])
 
  useEffect(()=>{
   const interval=setInterval(()=>{
-   setConnections((prev:Connection[])=>prev.map((c:Connection)=>{
-    if(c.type==='ai-request'||c.type==='confirm'){
-     return{...c,progress:(c.progress+0.02)%1}
+   setMapAgents((prev:MapAgent[])=>prev.map((a:MapAgent)=>{
+    if(a.isSpawning){
+     const newProgress=Math.min(1,a.spawnProgress+0.02)
+     return{...a,spawnProgress:newProgress,isSpawning:newProgress<1}
     }
-    return c
+    return a
    }))
-  },50)
+  },16)
   return()=>clearInterval(interval)
  },[])
 
  const aiServicesPositioned=AI_SERVICES.map((s:AIService,i:number)=>({
   ...s,
-  x:150+(size.width-300)/(AI_SERVICES.length-1)*i,
-  y:80
+  x:120+(size.width-240)/(AI_SERVICES.length-1||1)*i,
+  y:90
  }))
+
+ const runningCount=mapAgents.filter(a=>a.status==='running').length
+ const waitingCount=mapAgents.filter(a=>a.status==='waiting_approval').length
+ const completedCount=mapAgents.filter(a=>a.status==='completed').length
 
  return(
   <div className="h-full flex flex-col">
    <div className="nier-page-header-row mb-2">
     <h1 className="nier-page-title">戦略マップ</h1>
-    <p className="nier-page-subtitle">Agent {mapAgents.length}体稼働中</p>
+    <div className="flex gap-4 text-nier-small">
+     <span className="text-nier-accent-orange">稼働: {runningCount}</span>
+     <span className="text-nier-accent-yellow">待機: {waitingCount}</span>
+     <span className="text-nier-accent-green">完了: {completedCount}</span>
+     <span className="text-nier-text-light">計: {mapAgents.length}</span>
+    </div>
+   </div>
+   <div className="text-nier-caption text-nier-text-light mb-1">
+    ホイール: ズーム / ドラッグ: パン
    </div>
    <div ref={containerRef} className="flex-1 border border-nier-border-light rounded overflow-hidden bg-nier-bg-main">
     <StrategyMapCanvas
