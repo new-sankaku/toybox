@@ -3,7 +3,7 @@
 ## 概要
 
 Agentが生成した成果物（コード、アセット、ドキュメント）をバージョン管理し、任意の時点にロールバック可能にする。
-コードはGit、バイナリアセットはタイムスタンプ付きフォルダで管理する。
+コードはGit、バイナリアセットはDVC（Data Version Control）で管理する。
 
 ## 成果物の種類と管理方法
 
@@ -11,10 +11,73 @@ Agentが生成した成果物（コード、アセット、ドキュメント）
 |------|-----|---------|
 | コード | .py, .ts, .cs | Git |
 | テキストアセット | .json, .yaml, .md | Git |
-| 画像 | .png, .jpg, .webp | フォルダ + manifest.json |
-| 音声 | .mp3, .wav, .ogg | フォルダ + manifest.json |
-| 3Dモデル | .fbx, .glb | フォルダ + manifest.json |
-| ビルド成果物 | .exe, .apk | フォルダ + manifest.json |
+| 画像 | .png, .jpg, .webp | DVC |
+| 音声 | .mp3, .wav, .ogg | DVC |
+| 3Dモデル | .fbx, .glb | DVC |
+| ビルド成果物 | .exe, .apk | DVC |
+
+## Gitリモート設定
+
+### リモートリポジトリ設定
+
+プロジェクト作成時にGitリモートを設定する。
+
+```sql
+CREATE TABLE git_config (
+    id INTEGER PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    remote_url TEXT NOT NULL,
+    remote_name TEXT DEFAULT 'origin',
+    default_branch TEXT DEFAULT 'main',
+    auth_method TEXT NOT NULL,  -- 'ssh', 'token', 'none'
+    credential_key TEXT,         -- 認証情報へのキー（環境変数名等）
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+);
+```
+
+### WebUI設定画面
+
+| 設定項目 | 説明 |
+|---------|------|
+| リモートURL | GitHub/GitLab等のリポジトリURL |
+| 認証方式 | SSH鍵 / Personal Access Token |
+| デフォルトブランチ | main / master 等 |
+
+### 初期化処理
+
+```python
+class GitRepoManager:
+    def __init__(self, db: Database):
+        self.db = db
+
+    def init_repo(self, project_id: str, local_path: Path) -> None:
+        """プロジェクト用Gitリポジトリを初期化"""
+        config = self.db.get_git_config(project_id)
+
+        # ローカルリポジトリ初期化
+        subprocess.run(["git", "init"], cwd=local_path)
+
+        # リモート設定
+        if config.remote_url:
+            subprocess.run(
+                ["git", "remote", "add", config.remote_name, config.remote_url],
+                cwd=local_path
+            )
+
+        # 初期コミット
+        subprocess.run(["git", "add", "."], cwd=local_path)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=local_path)
+
+    def push(self, local_path: Path, branch: str = None) -> None:
+        """リモートにプッシュ"""
+        config = self.db.get_git_config_by_path(local_path)
+        branch = branch or config.default_branch
+        subprocess.run(
+            ["git", "push", "-u", config.remote_name, branch],
+            cwd=local_path
+        )
+```
 
 ## フォルダ構造
 
@@ -22,25 +85,17 @@ Agentが生成した成果物（コード、アセット、ドキュメント）
 projects/{project_id}/
 ├── repo/                         # Gitリポジトリ（コード）
 │   ├── .git/
+│   ├── .dvc/                     # DVC設定
+│   ├── .dvcignore
 │   ├── src/
+│   ├── assets/                   # DVCトラッキング対象
+│   │   ├── images/
+│   │   │   └── player.png.dvc   # DVCメタファイル
+│   │   ├── audio/
+│   │   └── models/
 │   └── ...
 │
-├── artifacts/                    # バイナリアセット
-│   ├── versions/
-│   │   ├── v001/
-│   │   │   ├── manifest.json
-│   │   │   ├── images/
-│   │   │   ├── audio/
-│   │   │   └── models/
-│   │   ├── v002/
-│   │   └── v003/
-│   ├── latest -> versions/v003/  # シンボリックリンク
-│   └── version_history.json
-│
-└── builds/                       # ビルド成果物
-    ├── v001/
-    ├── v002/
-    └── latest -> v002/
+└── dvc_cache/                    # DVCキャッシュ（ローカル）
 ```
 
 ## Gitによるコード管理
@@ -102,212 +157,125 @@ class WorkerGitOps:
         subprocess.run(["git", "branch", "-d", self.branch_name], cwd=self.repo_path)
 ```
 
-## バイナリアセットの管理
+## DVCによるバイナリアセット管理
 
-### manifest.json
+### DVCとは
 
-```json
-{
-  "version": "v003",
-  "created_at": "2024-01-15T16:00:00Z",
-  "created_by": "worker_asset_001",
-  "parent_version": "v002",
-  "description": "プレイヤーキャラクターの画像を追加",
+DVC（Data Version Control）はGitと連携してバイナリファイルをバージョン管理するツール。
+ファイルの実体はリモートストレージに保存し、Gitにはメタデータ（.dvcファイル）のみをコミットする。
 
-  "assets": [
-    {
-      "id": "asset_001",
-      "path": "images/player.png",
-      "type": "image",
-      "size_bytes": 102400,
-      "hash": "sha256:abc123...",
-      "metadata": {
-        "width": 256,
-        "height": 256,
-        "format": "PNG"
-      },
-      "created_by_task": "task_p2_asset_001"
-    },
-    {
-      "id": "asset_002",
-      "path": "audio/jump.mp3",
-      "type": "audio",
-      "size_bytes": 51200,
-      "hash": "sha256:def456...",
-      "metadata": {
-        "duration_ms": 500,
-        "sample_rate": 44100
-      },
-      "created_by_task": "task_p2_asset_002"
-    }
-  ],
+### DVCリモート設定
 
-  "changes": [
-    {"action": "add", "asset_id": "asset_001"},
-    {"action": "add", "asset_id": "asset_002"}
-  ]
-}
+```sql
+-- git_configテーブルに追加
+ALTER TABLE git_config ADD COLUMN dvc_remote_url TEXT;
+ALTER TABLE git_config ADD COLUMN dvc_remote_type TEXT;  -- 's3', 'gcs', 'azure', 'local'
 ```
 
-### version_history.json
-
-```json
-{
-  "current_version": "v003",
-  "versions": [
-    {
-      "version": "v001",
-      "created_at": "2024-01-15T14:00:00Z",
-      "description": "初期アセット",
-      "asset_count": 5
-    },
-    {
-      "version": "v002",
-      "created_at": "2024-01-15T15:00:00Z",
-      "description": "敵キャラクター追加",
-      "asset_count": 10
-    },
-    {
-      "version": "v003",
-      "created_at": "2024-01-15T16:00:00Z",
-      "description": "プレイヤーキャラクター追加",
-      "asset_count": 12
-    }
-  ]
-}
-```
-
-## バージョン操作
-
-### 新バージョン作成
+### 初期化
 
 ```python
-class ArtifactVersionManager:
-    def __init__(self, artifacts_path: Path):
-        self.artifacts_path = artifacts_path
-        self.versions_path = artifacts_path / "versions"
+class DVCManager:
+    def __init__(self, repo_path: Path, db: Database):
+        self.repo_path = repo_path
+        self.db = db
 
-    def create_version(self, description: str, assets: List[Asset]) -> str:
-        """新しいバージョンを作成"""
-        # 次のバージョン番号を取得
-        current = self._get_current_version()
-        new_version = f"v{int(current[1:]) + 1:03d}"
+    def init(self, project_id: str) -> None:
+        """DVCを初期化"""
+        config = self.db.get_git_config(project_id)
 
-        # バージョンフォルダ作成
-        version_path = self.versions_path / new_version
-        version_path.mkdir(parents=True)
+        # DVC初期化
+        subprocess.run(["dvc", "init"], cwd=self.repo_path)
 
-        # アセットをコピー
-        for asset in assets:
-            dest = version_path / asset.relative_path
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(asset.source_path, dest)
+        # リモートストレージ設定
+        if config.dvc_remote_url:
+            subprocess.run([
+                "dvc", "remote", "add", "-d", "storage", config.dvc_remote_url
+            ], cwd=self.repo_path)
 
-        # manifest.json作成
-        manifest = self._create_manifest(new_version, description, assets)
-        with open(version_path / "manifest.json", "w") as f:
-            json.dump(manifest, f, indent=2)
+        # .dvcをGitにコミット
+        subprocess.run(["git", "add", ".dvc", ".dvcignore"], cwd=self.repo_path)
+        subprocess.run(["git", "commit", "-m", "Initialize DVC"], cwd=self.repo_path)
+```
 
-        # latestリンク更新
-        latest_link = self.artifacts_path / "latest"
-        if latest_link.exists():
-            latest_link.unlink()
-        latest_link.symlink_to(version_path)
+### アセット追加
 
-        # version_history.json更新
-        self._update_history(new_version, description, len(assets))
+```python
+def add_asset(self, asset_path: Path) -> None:
+    """アセットをDVCトラッキングに追加"""
+    # DVCでトラッキング
+    subprocess.run(["dvc", "add", str(asset_path)], cwd=self.repo_path)
 
-        return new_version
+    # .dvcファイルをGitにコミット
+    dvc_file = asset_path.with_suffix(asset_path.suffix + ".dvc")
+    subprocess.run(["git", "add", str(dvc_file)], cwd=self.repo_path)
+```
+
+### プッシュ・プル
+
+```python
+def push(self) -> None:
+    """アセットをリモートストレージにプッシュ"""
+    subprocess.run(["dvc", "push"], cwd=self.repo_path)
+
+def pull(self) -> None:
+    """アセットをリモートストレージからプル"""
+    subprocess.run(["dvc", "pull"], cwd=self.repo_path)
+```
+
+### バージョン間の差分
+
+```python
+def diff(self, rev_a: str = "HEAD~1", rev_b: str = "HEAD") -> dict:
+    """2つのバージョン間のアセット差分を取得"""
+    result = subprocess.run(
+        ["dvc", "diff", rev_a, rev_b, "--json"],
+        cwd=self.repo_path,
+        capture_output=True,
+        text=True
+    )
+    return json.loads(result.stdout)
 ```
 
 ### ロールバック
 
 ```python
-def rollback_to(self, target_version: str) -> None:
-    """指定バージョンにロールバック"""
-    target_path = self.versions_path / target_version
-
-    if not target_path.exists():
-        raise ValueError(f"Version {target_version} not found")
-
-    # latestリンクを更新
-    latest_link = self.artifacts_path / "latest"
-    if latest_link.exists():
-        latest_link.unlink()
-    latest_link.symlink_to(target_path)
-
-    # version_history.jsonに記録
-    self._record_rollback(target_version)
-
-    # ロールバック後のバージョンを新バージョンとして作成（履歴を保持）
-    # 例: v005からv003にロールバック → v006としてv003の内容をコピー
+def checkout(self, revision: str) -> None:
+    """指定リビジョンのアセットをチェックアウト"""
+    # Gitで対象リビジョンに移動
+    subprocess.run(["git", "checkout", revision], cwd=self.repo_path)
+    # DVCでアセットを取得
+    subprocess.run(["dvc", "checkout"], cwd=self.repo_path)
 ```
 
-### 差分取得
+## タスク完了時のフロー
 
 ```python
-def get_diff(self, from_version: str, to_version: str) -> dict:
-    """2つのバージョン間の差分を取得"""
-    from_manifest = self._load_manifest(from_version)
-    to_manifest = self._load_manifest(to_version)
+class TaskCompletionHandler:
+    def __init__(self, git_ops: WorkerGitOps, dvc_manager: DVCManager):
+        self.git_ops = git_ops
+        self.dvc_manager = dvc_manager
 
-    from_assets = {a["id"]: a for a in from_manifest["assets"]}
-    to_assets = {a["id"]: a for a in to_manifest["assets"]}
+    def complete(self, task: Task, outputs: List[Path]) -> None:
+        """タスク完了時の処理"""
 
-    added = [a for id, a in to_assets.items() if id not in from_assets]
-    removed = [a for id, a in from_assets.items() if id not in to_assets]
-    modified = [
-        a for id, a in to_assets.items()
-        if id in from_assets and a["hash"] != from_assets[id]["hash"]
-    ]
+        # バイナリアセットをDVCに追加
+        for output in outputs:
+            if self._is_binary_asset(output):
+                self.dvc_manager.add_asset(output)
 
-    return {
-        "from_version": from_version,
-        "to_version": to_version,
-        "added": added,
-        "removed": removed,
-        "modified": modified
-    }
-```
+        # Gitコミット
+        self.git_ops.commit_changes(f"feat({task.scope}): {task.objective}")
 
-## ストレージ最適化
+        # タスク完了（マージ）
+        self.git_ops.complete_task()
 
-### 重複排除
+        # リモートにプッシュ
+        self.dvc_manager.push()
 
-```python
-def deduplicate_assets(self) -> int:
-    """同一ハッシュのファイルをハードリンクに置換"""
-    hash_to_path: Dict[str, Path] = {}
-    saved_bytes = 0
-
-    for version_path in self.versions_path.iterdir():
-        manifest = self._load_manifest(version_path.name)
-        for asset in manifest["assets"]:
-            asset_path = version_path / asset["path"]
-            asset_hash = asset["hash"]
-
-            if asset_hash in hash_to_path:
-                # 同一ハッシュが存在 → ハードリンクに置換
-                saved_bytes += asset_path.stat().st_size
-                asset_path.unlink()
-                asset_path.hardlink_to(hash_to_path[asset_hash])
-            else:
-                hash_to_path[asset_hash] = asset_path
-
-    return saved_bytes
-```
-
-### 古いバージョンの圧縮
-
-```python
-def archive_old_versions(self, keep_recent: int = 5) -> None:
-    """古いバージョンをzip圧縮"""
-    versions = sorted(self.versions_path.iterdir())
-
-    for version_path in versions[:-keep_recent]:
-        archive_path = self.artifacts_path / "archives" / f"{version_path.name}.zip"
-        shutil.make_archive(archive_path.with_suffix(""), "zip", version_path)
-        shutil.rmtree(version_path)
+    def _is_binary_asset(self, path: Path) -> bool:
+        binary_extensions = {'.png', '.jpg', '.webp', '.mp3', '.wav', '.fbx', '.glb'}
+        return path.suffix.lower() in binary_extensions
 ```
 
 ## WebUI連携
@@ -316,19 +284,19 @@ def archive_old_versions(self, keep_recent: int = 5) -> None:
 
 | 表示項目 | 説明 |
 |---------|------|
-| バージョン番号 | v001, v002, ... |
-| 作成日時 | タイムスタンプ |
-| 説明 | 変更内容 |
-| アセット数 | 含まれるアセット数 |
-| サイズ | 合計サイズ |
-| アクション | 詳細表示、ロールバック、ダウンロード |
+| コミットハッシュ | Gitコミットの短縮ハッシュ |
+| 日時 | コミット日時 |
+| メッセージ | コミットメッセージ |
+| 変更ファイル | 変更されたファイル一覧 |
+| アセット変更 | DVCで管理されたアセットの変更 |
+| アクション | 詳細表示、チェックアウト、差分表示 |
 
 ### APIエンドポイント
 
 | メソッド | パス | 説明 |
 |---------|------|------|
-| GET | /projects/{id}/artifacts/versions | バージョン一覧 |
-| GET | /projects/{id}/artifacts/versions/{v} | バージョン詳細 |
-| POST | /projects/{id}/artifacts/rollback | ロールバック実行 |
-| GET | /projects/{id}/artifacts/diff | 差分取得 |
-| GET | /projects/{id}/artifacts/download/{v} | ダウンロード |
+| GET | /projects/{id}/versions | バージョン一覧（Gitログ） |
+| GET | /projects/{id}/versions/{hash} | バージョン詳細 |
+| POST | /projects/{id}/checkout | 指定バージョンをチェックアウト |
+| GET | /projects/{id}/diff | 差分取得 |
+| GET | /projects/{id}/assets | アセット一覧（DVC管理） |
