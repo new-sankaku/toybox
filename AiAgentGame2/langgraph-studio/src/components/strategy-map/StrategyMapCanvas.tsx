@@ -1,4 +1,4 @@
-import{useRef,useEffect,useState}from'react'
+import{useRef,useEffect,useState,useCallback}from'react'
 import type{MapAgent,AIService,UserNode,Connection}from'./strategyMapTypes'
 import{drawPixelCharacter,getAgentDisplayConfig}from'../ai-game/pixelCharacters'
 
@@ -11,427 +11,388 @@ interface Props{
  height:number
 }
 
+interface AgentPosition{
+ x:number
+ y:number
+ vx:number
+ vy:number
+ targetX:number
+ targetY:number
+}
+
 interface Particle{
  x:number
  y:number
  vx:number
  vy:number
  life:number
- maxLife:number
  color:string
  size:number
 }
 
-interface Packet{
+interface DataPacket{
  id:string
- fromX:number
- fromY:number
- toX:number
- toY:number
- progress:number
- speed:number
+ x:number
+ y:number
+ targetX:number
+ targetY:number
  color:string
- trail:Array<{x:number,y:number,alpha:number}>
+ progress:number
 }
 
-const AGENT_SIZE=50
-const AI_SERVICE_RADIUS=45
-const USER_RADIUS=40
-const SPRING_STRENGTH=0.02
-const DAMPING=0.85
-const REPULSION=800
-const MIN_DISTANCE=70
+const EASING=0.08
+const AI_ZONE_Y_RATIO=0.12
+const USER_ZONE_Y_RATIO=0.88
+const WORK_ZONE_Y_MIN=0.25
+const WORK_ZONE_Y_MAX=0.75
 
 export default function StrategyMapCanvas({agents,aiServices,user,connections,width,height}:Props){
  const canvasRef=useRef<HTMLCanvasElement>(null)
  const frameRef=useRef(0)
+ const positionsRef=useRef<Map<string,AgentPosition>>(new Map())
  const particlesRef=useRef<Particle[]>([])
- const packetsRef=useRef<Packet[]>([])
- const positionsRef=useRef<Map<string,{x:number,y:number,vx:number,vy:number}>>(new Map())
+ const packetsRef=useRef<DataPacket[]>([])
  const [zoom,setZoom]=useState(1)
- const [offset,setOffset]=useState({x:0,y:0})
- const [isDragging,setIsDragging]=useState(false)
+ const [pan,setPan]=useState({x:0,y:0})
+ const [dragging,setDragging]=useState(false)
  const [dragStart,setDragStart]=useState({x:0,y:0})
- const lastPacketTimeRef=useRef<Map<string,number>>(new Map())
 
- const getTargetPosition=(agent:MapAgent,allAgents:MapAgent[],aiSvcs:AIService[],usr:UserNode):{x:number,y:number}=>{
+ const getAgentTarget=useCallback((agent:MapAgent,allAgents:MapAgent[]):{ x:number,y:number}=>{
+  const aiZoneY=height*AI_ZONE_Y_RATIO
+  const userZoneY=height*USER_ZONE_Y_RATIO
+  const workZoneTop=height*WORK_ZONE_Y_MIN
+  const workZoneBottom=height*WORK_ZONE_Y_MAX
   if(agent.status==='waiting_approval'){
-   const waitingAgents=allAgents.filter(a=>a.status==='waiting_approval')
-   const idx=waitingAgents.findIndex(a=>a.id===agent.id)
-   const queueStartX=usr.x-((waitingAgents.length-1)*45)/2
-   return{x:queueStartX+idx*45,y:usr.y-90}
+   const waitingList=allAgents.filter(a=>a.status==='waiting_approval')
+   const myIndex=waitingList.findIndex(a=>a.id===agent.id)
+   const total=waitingList.length
+   const spacing=Math.min(60,width*0.8/Math.max(total,1))
+   const startX=user.x-(total-1)*spacing/2
+   return{x:startX+myIndex*spacing,y:userZoneY-80}
   }
   if(agent.aiTarget&&agent.status==='running'){
-   const ai=aiSvcs.find(s=>s.id===agent.aiTarget)
+   const ai=aiServices.find(s=>s.id===agent.aiTarget)
    if(ai){
-    const agentsAtAI=allAgents.filter(a=>a.aiTarget===agent.aiTarget&&a.status==='running')
-    const idx=agentsAtAI.findIndex(a=>a.id===agent.id)
-    const angle=(idx/(agentsAtAI.length||1))*Math.PI*2-Math.PI/2
-    const radius=AI_SERVICE_RADIUS+50+idx*15
-    return{x:ai.x+Math.cos(angle)*radius,y:ai.y+Math.sin(angle)*radius+30}
+    const atThisAI=allAgents.filter(a=>a.aiTarget===agent.aiTarget&&a.status==='running')
+    const myIndex=atThisAI.findIndex(a=>a.id===agent.id)
+    const total=atThisAI.length
+    const angleSpread=Math.PI*0.8
+    const baseAngle=Math.PI/2
+    const angle=total===1?baseAngle:baseAngle-angleSpread/2+angleSpread*myIndex/(total-1)
+    const radius=70+Math.floor(myIndex/5)*40
+    return{x:ai.x+Math.cos(angle)*radius,y:ai.y+Math.sin(angle)*radius}
    }
   }
   if(agent.parentId){
    const parent=allAgents.find(a=>a.id===agent.parentId)
    if(parent){
-    const siblings=allAgents.filter(a=>a.parentId===agent.parentId)
-    const idx=siblings.findIndex(a=>a.id===agent.id)
     const parentPos=positionsRef.current.get(parent.id)
-    const px=parentPos?.x??width/2
-    const py=parentPos?.y??height/2
-    const angle=((idx+1)/(siblings.length+1))*Math.PI-Math.PI/2
-    return{x:px+Math.cos(angle)*120,y:py+Math.sin(angle)*80+100}
+    if(parentPos){
+     const siblings=allAgents.filter(a=>a.parentId===agent.parentId)
+     const myIndex=siblings.findIndex(a=>a.id===agent.id)
+     const total=siblings.length
+     const spread=Math.min(total*50,300)
+     const startX=parentPos.x-spread/2
+     const offsetY=80+Math.floor(myIndex/6)*60
+     return{x:startX+(myIndex%6)*(spread/Math.min(total,6)),y:parentPos.y+offsetY}
+    }
    }
   }
   const leaders=allAgents.filter(a=>!a.parentId)
-  const idx=leaders.findIndex(a=>a.id===agent.id)
-  const spacing=Math.min(200,width/(leaders.length+1))
-  return{x:spacing*(idx+1),y:height*0.4}
- }
+  const myIndex=leaders.findIndex(a=>a.id===agent.id)
+  const total=leaders.length
+  const spacing=Math.min(180,width*0.8/Math.max(total,1))
+  const startX=width/2-(total-1)*spacing/2
+  return{x:startX+myIndex*spacing,y:workZoneTop+50}
+ },[height,width,aiServices,user.x])
 
- const updatePhysics=(allAgents:MapAgent[],aiSvcs:AIService[],usr:UserNode)=>{
+ const updatePositions=useCallback((allAgents:MapAgent[])=>{
   allAgents.forEach(agent=>{
-   if(!positionsRef.current.has(agent.id)){
-    const target=getTargetPosition(agent,allAgents,aiSvcs,usr)
-    positionsRef.current.set(agent.id,{x:target.x,y:target.y,vx:0,vy:0})
+   let pos=positionsRef.current.get(agent.id)
+   const target=getAgentTarget(agent,allAgents)
+   if(!pos){
+    pos={x:target.x,y:target.y,vx:0,vy:0,targetX:target.x,targetY:target.y}
+    positionsRef.current.set(agent.id,pos)
+    for(let i=0;i<8;i++){
+     particlesRef.current.push({
+      x:target.x,y:target.y,
+      vx:(Math.random()-0.5)*4,
+      vy:(Math.random()-0.5)*4,
+      life:30,color:'#FFD700',size:3
+     })
+    }
+   }else{
+    pos.targetX=target.x
+    pos.targetY=target.y
    }
   })
-  const toRemove:string[]=[]
-  positionsRef.current.forEach((_,id)=>{
-   if(!allAgents.find(a=>a.id===id))toRemove.push(id)
-  })
-  toRemove.forEach(id=>positionsRef.current.delete(id))
-  allAgents.forEach(agent=>{
-   const pos=positionsRef.current.get(agent.id)
-   if(!pos)return
-   const target=getTargetPosition(agent,allAgents,aiSvcs,usr)
-   let fx=(target.x-pos.x)*SPRING_STRENGTH
-   let fy=(target.y-pos.y)*SPRING_STRENGTH
-   allAgents.forEach(other=>{
-    if(other.id===agent.id)return
-    const otherPos=positionsRef.current.get(other.id)
-    if(!otherPos)return
-    const dx=pos.x-otherPos.x
-    const dy=pos.y-otherPos.y
-    const dist=Math.sqrt(dx*dx+dy*dy)||1
-    if(dist<MIN_DISTANCE){
-     const force=REPULSION/(dist*dist)
-     fx+=dx/dist*force
-     fy+=dy/dist*force
+  const currentIds=new Set(allAgents.map(a=>a.id))
+  positionsRef.current.forEach((pos,id)=>{
+   if(!currentIds.has(id)){
+    for(let i=0;i<5;i++){
+     particlesRef.current.push({
+      x:pos.x,y:pos.y,
+      vx:(Math.random()-0.5)*3,
+      vy:(Math.random()-0.5)*3,
+      life:20,color:'#888',size:2
+     })
     }
-   })
-   pos.vx=(pos.vx+fx)*DAMPING
-   pos.vy=(pos.vy+fy)*DAMPING
+    positionsRef.current.delete(id)
+   }
+  })
+  positionsRef.current.forEach(pos=>{
+   const dx=pos.targetX-pos.x
+   const dy=pos.targetY-pos.y
+   pos.vx+=dx*EASING
+   pos.vy+=dy*EASING
+   pos.vx*=0.9
+   pos.vy*=0.9
    pos.x+=pos.vx
    pos.y+=pos.vy
-   pos.x=Math.max(50,Math.min(width-50,pos.x))
-   pos.y=Math.max(100,Math.min(height-80,pos.y))
   })
- }
+ },[getAgentTarget])
 
- const spawnParticles=(x:number,y:number,color:string,count:number)=>{
-  for(let i=0;i<count;i++){
-   const angle=Math.random()*Math.PI*2
-   const speed=1+Math.random()*3
-   particlesRef.current.push({
-    x,y,
-    vx:Math.cos(angle)*speed,
-    vy:Math.sin(angle)*speed,
-    life:30+Math.random()*20,
-    maxLife:50,
-    color,
-    size:2+Math.random()*3
-   })
-  }
- }
-
- const updateParticles=()=>{
-  particlesRef.current=particlesRef.current.filter(p=>{
-   p.x+=p.vx
-   p.y+=p.vy
-   p.vy+=0.1
-   p.life--
-   return p.life>0
-  })
- }
-
- const spawnPacket=(fromX:number,fromY:number,toX:number,toY:number,color:string,id:string)=>{
-  const now=Date.now()
-  const lastTime=lastPacketTimeRef.current.get(id)||0
-  if(now-lastTime<200)return
-  lastPacketTimeRef.current.set(id,now)
+ const spawnPacket=(fromX:number,fromY:number,toX:number,toY:number,color:string)=>{
   packetsRef.current.push({
-   id:`${id}-${now}`,
-   fromX,fromY,toX,toY,
-   progress:0,
-   speed:0.015+Math.random()*0.01,
-   color,
-   trail:[]
+   id:`${Date.now()}-${Math.random()}`,
+   x:fromX,y:fromY,
+   targetX:toX,targetY:toY,
+   color,progress:0
   })
  }
 
  const updatePackets=()=>{
   packetsRef.current=packetsRef.current.filter(p=>{
-   p.progress+=p.speed
-   const x=p.fromX+(p.toX-p.fromX)*p.progress
-   const y=p.fromY+(p.toY-p.fromY)*p.progress
-   p.trail.unshift({x,y,alpha:1})
-   if(p.trail.length>15)p.trail.pop()
-   p.trail.forEach((t,i)=>{t.alpha=1-i/15})
+   p.progress+=0.025
+   p.x+=(p.targetX-p.x)*0.08
+   p.y+=(p.targetY-p.y)*0.08
    if(p.progress>=1){
-    spawnParticles(p.toX,p.toY,p.color,5)
+    for(let i=0;i<4;i++){
+     particlesRef.current.push({
+      x:p.targetX,y:p.targetY,
+      vx:(Math.random()-0.5)*2,
+      vy:(Math.random()-0.5)*2,
+      life:15,color:p.color,size:2
+     })
+    }
     return false
    }
    return true
   })
  }
 
- const drawAIService=(ctx:CanvasRenderingContext2D,service:AIService,frame:number,agentCount:number)=>{
-  const{x,y,name,color}=service
-  ctx.save()
-  const pulse=1+Math.sin(frame*0.05)*0.05
-  const glowRadius=AI_SERVICE_RADIUS+20+agentCount*5
-  const gradient=ctx.createRadialGradient(x,y,AI_SERVICE_RADIUS,x,y,glowRadius)
-  gradient.addColorStop(0,color+'40')
-  gradient.addColorStop(1,color+'00')
-  ctx.fillStyle=gradient
+ const updateParticles=()=>{
+  particlesRef.current=particlesRef.current.filter(p=>{
+   p.x+=p.vx
+   p.y+=p.vy
+   p.vy+=0.15
+   p.life--
+   return p.life>0
+  })
+ }
+
+ const drawAIService=(ctx:CanvasRenderingContext2D,ai:AIService,frame:number,count:number)=>{
+  const{x,y,name,color}=ai
+  const pulse=1+Math.sin(frame*0.05)*0.03
+  const r=40*pulse
+  const grad=ctx.createRadialGradient(x,y,r*0.3,x,y,r*1.5)
+  grad.addColorStop(0,color+'30')
+  grad.addColorStop(1,color+'00')
+  ctx.fillStyle=grad
   ctx.beginPath()
-  ctx.arc(x,y,glowRadius*pulse,0,Math.PI*2)
+  ctx.arc(x,y,r*1.5,0,Math.PI*2)
   ctx.fill()
   ctx.fillStyle=color
   ctx.beginPath()
-  ctx.arc(x,y,AI_SERVICE_RADIUS,0,Math.PI*2)
+  ctx.arc(x,y,r,0,Math.PI*2)
   ctx.fill()
-  ctx.strokeStyle=color
-  ctx.lineWidth=2
-  ctx.beginPath()
-  ctx.arc(x,y,AI_SERVICE_RADIUS+8+Math.sin(frame*0.03)*3,0,Math.PI*2)
-  ctx.stroke()
-  ctx.fillStyle='#E8E4D4'
-  ctx.font='bold 14px sans-serif'
+  ctx.fillStyle='#fff'
+  ctx.font='bold 13px sans-serif'
   ctx.textAlign='center'
   ctx.textBaseline='middle'
   ctx.fillText(name,x,y)
-  if(agentCount>0){
-   ctx.fillStyle='#ffffff'
-   ctx.font='bold 11px sans-serif'
-   ctx.beginPath()
-   ctx.arc(x+AI_SERVICE_RADIUS-5,y-AI_SERVICE_RADIUS+5,12,0,Math.PI*2)
+  if(count>0){
    ctx.fillStyle=color
+   ctx.beginPath()
+   ctx.arc(x+r*0.7,y-r*0.7,14,0,Math.PI*2)
    ctx.fill()
-   ctx.fillStyle='#ffffff'
-   ctx.fillText(`${agentCount}`,x+AI_SERVICE_RADIUS-5,y-AI_SERVICE_RADIUS+6)
+   ctx.fillStyle='#fff'
+   ctx.font='bold 11px sans-serif'
+   ctx.fillText(String(count),x+r*0.7,y-r*0.7)
   }
-  ctx.restore()
  }
 
- const drawUser=(ctx:CanvasRenderingContext2D,u:UserNode,frame:number)=>{
+ const drawUserNode=(ctx:CanvasRenderingContext2D,u:UserNode,frame:number)=>{
   const{x,y,queue}=u
-  ctx.save()
-  if(queue.length>0){
-   const alertPulse=0.3+Math.sin(frame*0.1)*0.2
-   ctx.fillStyle=`rgba(184,92,92,${alertPulse})`
+  const hasQueue=queue.length>0
+  if(hasQueue){
+   const alertPulse=0.2+Math.sin(frame*0.08)*0.15
+   ctx.fillStyle=`rgba(200,80,80,${alertPulse})`
    ctx.beginPath()
-   ctx.arc(x,y,USER_RADIUS+20+queue.length*3,0,Math.PI*2)
+   ctx.arc(x,y,55+queue.length*3,0,Math.PI*2)
    ctx.fill()
   }
-  const gradient=ctx.createRadialGradient(x,y-10,0,x,y,USER_RADIUS)
-  gradient.addColorStop(0,'#C97070')
-  gradient.addColorStop(1,'#B85C5C')
-  ctx.fillStyle=gradient
+  const grad=ctx.createRadialGradient(x,y-8,0,x,y,35)
+  grad.addColorStop(0,'#D06060')
+  grad.addColorStop(1,'#B85050')
+  ctx.fillStyle=grad
   ctx.beginPath()
-  ctx.arc(x,y,USER_RADIUS,0,Math.PI*2)
+  ctx.arc(x,y,35,0,Math.PI*2)
   ctx.fill()
-  ctx.strokeStyle='#9A4A4A'
-  ctx.lineWidth=3
+  ctx.strokeStyle='#904040'
+  ctx.lineWidth=2
   ctx.stroke()
-  ctx.fillStyle='#E8E4D4'
-  ctx.font='bold 14px sans-serif'
+  ctx.fillStyle='#fff'
+  ctx.font='bold 12px sans-serif'
   ctx.textAlign='center'
   ctx.textBaseline='middle'
-  ctx.fillText('USER',x,y-5)
-  ctx.font='11px sans-serif'
+  ctx.fillText('USER',x,y-4)
+  ctx.font='10px sans-serif'
   ctx.fillText('承認者',x,y+10)
-  if(queue.length>0){
-   ctx.fillStyle='#454138'
-   ctx.font='bold 11px sans-serif'
-   const queueText=`待機中: ${queue.length}`
-   ctx.fillText(queueText,x,y+USER_RADIUS+18)
-  }
-  ctx.restore()
  }
 
- const drawAgent=(ctx:CanvasRenderingContext2D,agent:MapAgent,pos:{x:number,y:number},frame:number)=>{
-  const{type,status,isSpawning,spawnProgress,bubble,bubbleType}=agent
+ const drawAgent=(ctx:CanvasRenderingContext2D,agent:MapAgent,pos:AgentPosition,frame:number)=>{
   const{x,y}=pos
+  const{type,status,bubble,bubbleType,isSpawning,spawnProgress}=agent
   const config=getAgentDisplayConfig(type)
   ctx.save()
+  let alpha=1
   if(isSpawning&&spawnProgress<1){
-   ctx.globalAlpha=spawnProgress
-   const scale=0.3+spawnProgress*0.7
-   ctx.translate(x,y)
-   ctx.scale(scale,scale)
-   ctx.translate(-x,-y)
-   const spawnGlow=ctx.createRadialGradient(x,y,0,x,y,60)
-   spawnGlow.addColorStop(0,'rgba(255,255,200,0.8)')
-   spawnGlow.addColorStop(1,'rgba(255,255,200,0)')
-   ctx.fillStyle=spawnGlow
+   alpha=spawnProgress
+   const glow=ctx.createRadialGradient(x,y,0,x,y,50)
+   glow.addColorStop(0,'rgba(255,255,200,0.6)')
+   glow.addColorStop(1,'rgba(255,255,200,0)')
+   ctx.fillStyle=glow
    ctx.beginPath()
-   ctx.arc(x,y,60,0,Math.PI*2)
+   ctx.arc(x,y,50*(1-spawnProgress*0.5),0,Math.PI*2)
    ctx.fill()
   }
-  if(status==='blocked'||status==='failed'){
+  ctx.globalAlpha=alpha
+  if(status==='failed'||status==='blocked'){
    ctx.globalAlpha=0.5
-   ctx.filter='grayscale(70%)'
   }
   if(status==='running'){
-   const workGlow=ctx.createRadialGradient(x,y,0,x,y,AGENT_SIZE)
-   const glowIntensity=0.2+Math.sin(frame*0.15)*0.15
-   workGlow.addColorStop(0,`rgba(255,200,100,${glowIntensity})`)
+   const workGlow=ctx.createRadialGradient(x,y,0,x,y,35)
+   const intensity=0.15+Math.sin(frame*0.12)*0.1
+   workGlow.addColorStop(0,`rgba(255,200,100,${intensity})`)
    workGlow.addColorStop(1,'rgba(255,200,100,0)')
    ctx.fillStyle=workGlow
    ctx.beginPath()
-   ctx.arc(x,y,AGENT_SIZE,0,Math.PI*2)
+   ctx.arc(x,y,35,0,Math.PI*2)
    ctx.fill()
   }
   if(status==='waiting_approval'){
    ctx.strokeStyle='#C4956C'
    ctx.lineWidth=2
-   ctx.setLineDash([6,4])
-   const dashOffset=frame*0.5
-   ctx.lineDashOffset=-dashOffset
+   ctx.setLineDash([5,3])
+   ctx.lineDashOffset=-frame*0.3
    ctx.beginPath()
-   ctx.arc(x,y,AGENT_SIZE/2+8,0,Math.PI*2)
+   ctx.arc(x,y,28,0,Math.PI*2)
    ctx.stroke()
    ctx.setLineDash([])
   }
-  const isWorking=status==='running'
-  const bobY=isWorking?Math.sin(frame*0.1)*2:0
-  drawPixelCharacter(ctx,x,y-12+bobY,type,isWorking,frame,0.9)
+  const bobY=status==='running'?Math.sin(frame*0.1)*1.5:0
+  drawPixelCharacter(ctx,x,y-8+bobY,type,status==='running',frame,0.85)
   ctx.globalAlpha=1
-  ctx.filter='none'
   ctx.fillStyle='#454138'
-  ctx.font='10px sans-serif'
+  ctx.font='9px sans-serif'
   ctx.textAlign='center'
-  ctx.fillText(config.label,x,y+22)
+  ctx.fillText(config.label,x,y+20)
   if(status==='pending'){
-   ctx.fillStyle='#5A5548'
-   ctx.font='italic 9px sans-serif'
-   const zzzOffset=Math.sin(frame*0.08)*2
-   ctx.fillText('zzz',x+18,y-18+zzzOffset)
+   ctx.fillStyle='#888'
+   ctx.font='italic 8px sans-serif'
+   const zOff=Math.sin(frame*0.06)*1.5
+   ctx.fillText('zzz',x+15,y-15+zOff)
   }
   if(bubble){
-   drawBubble(ctx,x,y-45,bubble,bubbleType,frame)
+   drawBubble(ctx,x,y-42,bubble,bubbleType,frame)
   }
   ctx.restore()
  }
 
  const drawBubble=(ctx:CanvasRenderingContext2D,x:number,y:number,text:string,type:string|null,frame:number)=>{
-  const padding=8
-  ctx.font='10px sans-serif'
-  const metrics=ctx.measureText(text)
-  const w=Math.min(metrics.width+padding*2,120)
-  const h=20
-  const floatY=y+Math.sin(frame*0.08)*2
-  let bgColor='#F5F2E8'
-  let borderColor='#454138'
-  let shadowColor='rgba(0,0,0,0.1)'
-  if(type==='success'){bgColor='#E8F5E9';borderColor='#7AAA7A';shadowColor='rgba(122,170,122,0.2)'}
-  if(type==='question'){bgColor='#FFF8E1';borderColor='#C4956C';shadowColor='rgba(196,149,108,0.2)'}
-  if(type==='warning'){bgColor='#FFEBEE';borderColor='#B85C5C';shadowColor='rgba(184,92,92,0.2)'}
   ctx.save()
-  ctx.shadowColor=shadowColor
-  ctx.shadowBlur=8
+  ctx.font='9px sans-serif'
+  const displayText=text.length>16?text.slice(0,14)+'…':text
+  const w=Math.max(ctx.measureText(displayText).width+12,50)
+  const h=18
+  const floatY=y+Math.sin(frame*0.06)*1.5
+  let bg='#F8F6F0',border='#454138'
+  if(type==='success'){bg='#E8F5E9';border='#66A866'}
+  if(type==='question'){bg='#FFF8E1';border='#C4956C'}
+  if(type==='warning'){bg='#FFEBEE';border='#C06060'}
+  ctx.shadowColor='rgba(0,0,0,0.1)'
+  ctx.shadowBlur=4
   ctx.shadowOffsetY=2
-  ctx.fillStyle=bgColor
-  ctx.strokeStyle=borderColor
-  ctx.lineWidth=1.5
+  ctx.fillStyle=bg
+  ctx.strokeStyle=border
+  ctx.lineWidth=1
   ctx.beginPath()
-  ctx.roundRect(x-w/2,floatY-h/2,w,h,6)
+  ctx.roundRect(x-w/2,floatY-h/2,w,h,4)
   ctx.fill()
   ctx.shadowBlur=0
   ctx.stroke()
   ctx.beginPath()
-  ctx.moveTo(x-6,floatY+h/2)
-  ctx.lineTo(x,floatY+h/2+8)
-  ctx.lineTo(x+6,floatY+h/2)
+  ctx.moveTo(x-4,floatY+h/2)
+  ctx.lineTo(x,floatY+h/2+5)
+  ctx.lineTo(x+4,floatY+h/2)
   ctx.closePath()
-  ctx.fillStyle=bgColor
+  ctx.fillStyle=bg
   ctx.fill()
-  ctx.strokeStyle=borderColor
-  ctx.beginPath()
-  ctx.moveTo(x-6,floatY+h/2)
-  ctx.lineTo(x,floatY+h/2+8)
-  ctx.lineTo(x+6,floatY+h/2)
   ctx.stroke()
   ctx.fillStyle='#454138'
   ctx.textAlign='center'
   ctx.textBaseline='middle'
-  const displayText=text.length>14?text.slice(0,12)+'…':text
   ctx.fillText(displayText,x,floatY)
   ctx.restore()
  }
 
- const drawConnection=(ctx:CanvasRenderingContext2D,fromX:number,fromY:number,toX:number,toY:number,type:string,_frame:number)=>{
+ const drawConnection=(ctx:CanvasRenderingContext2D,from:{x:number,y:number},to:{x:number,y:number},type:string)=>{
   ctx.save()
-  let color='#454138'
-  let lineWidth=1.5
-  let dash:number[]=[]
-  if(type==='instruction'){color='#6B8FAA';lineWidth=2}
-  if(type==='confirm'){color='#C4956C';dash=[8,4]}
-  if(type==='delivery'){color='#7AAA7A';lineWidth=2.5}
-  if(type==='ai-request'){color='#9060c0';lineWidth=1.5;dash=[4,4]}
-  if(type==='user-contact'){color='#B85C5C';lineWidth=2}
-  ctx.strokeStyle=color+'60'
-  ctx.lineWidth=lineWidth
+  let color='#454138',lw=1.5,dash:number[]=[]
+  if(type==='instruction'){color='#5588AA';lw=2}
+  if(type==='confirm'){color='#C4956C';dash=[6,4]}
+  if(type==='delivery'){color='#66A866';lw=2}
+  if(type==='ai-request'){color='#8855AA';dash=[3,3]}
+  if(type==='user-contact'){color='#C06060';lw=2}
+  ctx.strokeStyle=color+'50'
+  ctx.lineWidth=lw
   ctx.setLineDash(dash)
   ctx.beginPath()
-  ctx.moveTo(fromX,fromY)
-  ctx.lineTo(toX,toY)
+  ctx.moveTo(from.x,from.y)
+  ctx.lineTo(to.x,to.y)
   ctx.stroke()
   ctx.restore()
  }
 
- const drawPackets=(ctx:CanvasRenderingContext2D)=>{
-  packetsRef.current.forEach(p=>{
-   ctx.save()
-   p.trail.forEach((t,i)=>{
-    ctx.fillStyle=p.color+Math.floor(t.alpha*180).toString(16).padStart(2,'0')
-    ctx.beginPath()
-    ctx.arc(t.x,t.y,4-i*0.2,0,Math.PI*2)
-    ctx.fill()
-   })
-   const x=p.fromX+(p.toX-p.fromX)*p.progress
-   const y=p.fromY+(p.toY-p.fromY)*p.progress
-   const glow=ctx.createRadialGradient(x,y,0,x,y,12)
-   glow.addColorStop(0,p.color)
-   glow.addColorStop(1,p.color+'00')
-   ctx.fillStyle=glow
-   ctx.beginPath()
-   ctx.arc(x,y,12,0,Math.PI*2)
-   ctx.fill()
-   ctx.fillStyle='#ffffff'
-   ctx.beginPath()
-   ctx.arc(x,y,4,0,Math.PI*2)
-   ctx.fill()
-   ctx.restore()
-  })
+ const drawPacket=(ctx:CanvasRenderingContext2D,p:DataPacket)=>{
+  ctx.save()
+  const grad=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,8)
+  grad.addColorStop(0,p.color)
+  grad.addColorStop(1,p.color+'00')
+  ctx.fillStyle=grad
+  ctx.beginPath()
+  ctx.arc(p.x,p.y,8,0,Math.PI*2)
+  ctx.fill()
+  ctx.fillStyle='#fff'
+  ctx.beginPath()
+  ctx.arc(p.x,p.y,3,0,Math.PI*2)
+  ctx.fill()
+  ctx.restore()
  }
 
- const drawParticles=(ctx:CanvasRenderingContext2D)=>{
-  particlesRef.current.forEach(p=>{
-   ctx.save()
-   ctx.globalAlpha=p.life/p.maxLife
-   ctx.fillStyle=p.color
-   ctx.beginPath()
-   ctx.arc(p.x,p.y,p.size*(p.life/p.maxLife),0,Math.PI*2)
-   ctx.fill()
-   ctx.restore()
-  })
+ const drawParticle=(ctx:CanvasRenderingContext2D,p:Particle)=>{
+  ctx.save()
+  ctx.globalAlpha=p.life/30
+  ctx.fillStyle=p.color
+  ctx.beginPath()
+  ctx.arc(p.x,p.y,p.size*(p.life/30),0,Math.PI*2)
+  ctx.fill()
+  ctx.restore()
  }
 
  useEffect(()=>{
-  let animationId:number
+  let animId:number
   const loop=()=>{
    const canvas=canvasRef.current
    if(!canvas)return
@@ -439,91 +400,85 @@ export default function StrategyMapCanvas({agents,aiServices,user,connections,wi
    if(!ctx)return
    frameRef.current++
    const frame=frameRef.current
-   updatePhysics(agents,aiServices,user)
-   updateParticles()
+   updatePositions(agents)
    updatePackets()
-   connections.forEach(conn=>{
-    if(!conn.active)return
-    const fromPos=positionsRef.current.get(conn.fromId)
-    const toAgent=agents.find(a=>a.id===conn.toId)
-    const toPos=toAgent?positionsRef.current.get(conn.toId):null
-    const toAI=aiServices.find(s=>s.id===conn.toId)
-    let fromX=fromPos?.x??0,fromY=fromPos?.y??0
-    let toX=0,toY=0
-    if(toPos){toX=toPos.x;toY=toPos.y}
-    if(toAI){toX=toAI.x;toY=toAI.y}
-    if(conn.toId==='user'){toX=user.x;toY=user.y}
-    if(fromX&&toX&&Math.random()<0.03){
+   updateParticles()
+   if(frame%20===0){
+    connections.forEach(conn=>{
+     if(!conn.active)return
+     const fromPos=positionsRef.current.get(conn.fromId)
+     const toPos=positionsRef.current.get(conn.toId)
+     const toAI=aiServices.find(s=>s.id===conn.toId)
+     if(!fromPos)return
+     let toX=0,toY=0
+     if(toPos){toX=toPos.x;toY=toPos.y}
+     else if(toAI){toX=toAI.x;toY=toAI.y}
+     else if(conn.toId==='user'){toX=user.x;toY=user.y}
+     else return
      let color='#454138'
-     if(conn.type==='instruction')color='#6B8FAA'
+     if(conn.type==='instruction')color='#5588AA'
      if(conn.type==='confirm')color='#C4956C'
-     if(conn.type==='delivery')color='#7AAA7A'
-     if(conn.type==='ai-request')color='#9060c0'
-     if(conn.type==='user-contact')color='#B85C5C'
-     spawnPacket(fromX,fromY,toX,toY,color,conn.id)
-    }
-   })
+     if(conn.type==='delivery')color='#66A866'
+     if(conn.type==='ai-request')color='#8855AA'
+     if(conn.type==='user-contact')color='#C06060'
+     spawnPacket(fromPos.x,fromPos.y,toX,toY,color)
+    })
+   }
    ctx.fillStyle='#E8E4D4'
    ctx.fillRect(0,0,width,height)
    ctx.save()
    ctx.translate(width/2,height/2)
    ctx.scale(zoom,zoom)
-   ctx.translate(-width/2+offset.x,-height/2+offset.y)
+   ctx.translate(-width/2+pan.x,-height/2+pan.y)
    connections.forEach(conn=>{
     if(!conn.active)return
     const fromPos=positionsRef.current.get(conn.fromId)
-    const toAgent=agents.find(a=>a.id===conn.toId)
-    const toPos=toAgent?positionsRef.current.get(conn.toId):null
+    const toPos=positionsRef.current.get(conn.toId)
     const toAI=aiServices.find(s=>s.id===conn.toId)
-    let fromX=fromPos?.x??0,fromY=fromPos?.y??0
-    let toX=0,toY=0
-    if(toPos){toX=toPos.x;toY=toPos.y}
-    if(toAI){toX=toAI.x;toY=toAI.y}
-    if(conn.toId==='user'){toX=user.x;toY=user.y}
-    if(fromX&&toX){
-     drawConnection(ctx,fromX,fromY,toX,toY,conn.type,frame)
-    }
+    if(!fromPos)return
+    let to={x:0,y:0}
+    if(toPos)to={x:toPos.x,y:toPos.y}
+    else if(toAI)to={x:toAI.x,y:toAI.y}
+    else if(conn.toId==='user')to={x:user.x,y:user.y}
+    else return
+    drawConnection(ctx,{x:fromPos.x,y:fromPos.y},to,conn.type)
    })
-   drawPackets(ctx)
-   aiServices.forEach(s=>{
-    const count=agents.filter(a=>a.aiTarget===s.id&&a.status==='running').length
-    drawAIService(ctx,s,frame,count)
+   packetsRef.current.forEach(p=>drawPacket(ctx,p))
+   aiServices.forEach(ai=>{
+    const count=agents.filter(a=>a.aiTarget===ai.id&&a.status==='running').length
+    drawAIService(ctx,ai,frame,count)
    })
-   drawUser(ctx,user,frame)
-   const sortedAgents=[...agents].sort((a,b)=>{
-    const posA=positionsRef.current.get(a.id)
-    const posB=positionsRef.current.get(b.id)
-    return(posA?.y??0)-(posB?.y??0)
+   drawUserNode(ctx,user,frame)
+   const sorted=[...agents].sort((a,b)=>{
+    const pa=positionsRef.current.get(a.id)
+    const pb=positionsRef.current.get(b.id)
+    return(pa?.y??0)-(pb?.y??0)
    })
-   sortedAgents.forEach(agent=>{
+   sorted.forEach(agent=>{
     const pos=positionsRef.current.get(agent.id)
     if(pos)drawAgent(ctx,agent,pos,frame)
    })
-   drawParticles(ctx)
+   particlesRef.current.forEach(p=>drawParticle(ctx,p))
    ctx.restore()
-   animationId=requestAnimationFrame(loop)
+   animId=requestAnimationFrame(loop)
   }
   loop()
-  return()=>cancelAnimationFrame(animationId)
- },[agents,aiServices,user,connections,width,height,zoom,offset])
+  return()=>cancelAnimationFrame(animId)
+ },[agents,aiServices,user,connections,width,height,zoom,pan,updatePositions])
 
- const handleWheel=(e:React.WheelEvent)=>{
+ const onWheel=(e:React.WheelEvent)=>{
   e.preventDefault()
-  const delta=e.deltaY>0?0.9:1.1
-  setZoom(z=>Math.max(0.5,Math.min(2,z*delta)))
+  setZoom(z=>Math.max(0.4,Math.min(2.5,z*(e.deltaY>0?0.92:1.08))))
  }
-
- const handleMouseDown=(e:React.MouseEvent)=>{
-  setIsDragging(true)
-  setDragStart({x:e.clientX-offset.x,y:e.clientY-offset.y})
+ const onMouseDown=(e:React.MouseEvent)=>{
+  setDragging(true)
+  setDragStart({x:e.clientX-pan.x,y:e.clientY-pan.y})
  }
-
- const handleMouseMove=(e:React.MouseEvent)=>{
-  if(!isDragging)return
-  setOffset({x:e.clientX-dragStart.x,y:e.clientY-dragStart.y})
+ const onMouseMove=(e:React.MouseEvent)=>{
+  if(!dragging)return
+  setPan({x:e.clientX-dragStart.x,y:e.clientY-dragStart.y})
  }
-
- const handleMouseUp=()=>setIsDragging(false)
+ const onMouseUp=()=>setDragging(false)
 
  return(
   <canvas
@@ -531,11 +486,11 @@ export default function StrategyMapCanvas({agents,aiServices,user,connections,wi
    width={width}
    height={height}
    className="cursor-grab active:cursor-grabbing"
-   onWheel={handleWheel}
-   onMouseDown={handleMouseDown}
-   onMouseMove={handleMouseMove}
-   onMouseUp={handleMouseUp}
-   onMouseLeave={handleMouseUp}
+   onWheel={onWheel}
+   onMouseDown={onMouseDown}
+   onMouseMove={onMouseMove}
+   onMouseUp={onMouseUp}
+   onMouseLeave={onMouseUp}
   />
  )
 }
