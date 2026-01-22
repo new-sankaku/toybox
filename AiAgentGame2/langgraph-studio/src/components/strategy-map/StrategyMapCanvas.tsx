@@ -145,28 +145,66 @@ function computeAgentTarget(
   return { x: startX + idx * spacing, y: workZoneTop + 40 }
 }
 
-function applyRepulsion(
+function findAvoidanceDirection(
   positions: Map<string, AgentPositionState>,
   currentId: string,
-  pos: AgentPositionState
-): void {
+  pos: AgentPositionState,
+  dirX: number,
+  dirY: number
+): { x: number; y: number } {
+  const avoidRadius = PHYSICS.REPULSION_RADIUS
+  let needsAvoidance = false
+  let obstacleX = 0
+  let obstacleY = 0
+
   positions.forEach((other, otherId) => {
     if (otherId === currentId) return
 
-    const dx = pos.x - other.x
-    const dy = pos.y - other.y
-    const distSq = dx * dx + dy * dy
-    const minDist = PHYSICS.REPULSION_RADIUS
+    const toOtherX = other.x - pos.x
+    const toOtherY = other.y - pos.y
+    const dist = Math.sqrt(toOtherX * toOtherX + toOtherY * toOtherY)
 
-    if (distSq < minDist * minDist && distSq > 0) {
-      const dist = Math.sqrt(distSq)
-      const force = PHYSICS.REPULSION_STRENGTH / distSq
-      const nx = dx / dist
-      const ny = dy / dist
-      pos.vx += nx * force
-      pos.vy += ny * force
+    if (dist < avoidRadius * 2 && dist > 0) {
+      const dotProduct = (dirX * toOtherX + dirY * toOtherY)
+      if (dotProduct > 0) {
+        needsAvoidance = true
+        obstacleX = other.x
+        obstacleY = other.y
+      }
     }
   })
+
+  if (!needsAvoidance) {
+    return { x: dirX, y: dirY }
+  }
+
+  const toObsX = obstacleX - pos.x
+  const toObsY = obstacleY - pos.y
+
+  const perpX = -toObsY
+  const perpY = toObsX
+  const perpLen = Math.sqrt(perpX * perpX + perpY * perpY)
+
+  if (perpLen < 0.01) {
+    return { x: dirX, y: dirY }
+  }
+
+  const normPerpX = perpX / perpLen
+  const normPerpY = perpY / perpLen
+
+  const cross = dirX * toObsY - dirY * toObsX
+  const sign = cross >= 0 ? 1 : -1
+
+  const avoidStrength = 0.7
+  const newDirX = dirX * (1 - avoidStrength) + normPerpX * sign * avoidStrength
+  const newDirY = dirY * (1 - avoidStrength) + normPerpY * sign * avoidStrength
+
+  const len = Math.sqrt(newDirX * newDirX + newDirY * newDirY)
+  if (len < 0.01) {
+    return { x: dirX, y: dirY }
+  }
+
+  return { x: newDirX / len, y: newDirY / len }
 }
 
 function updatePhysics(
@@ -176,12 +214,23 @@ function updatePhysics(
 ): void {
   const dx = pos.targetX - pos.x
   const dy = pos.targetY - pos.y
+  const dist = Math.sqrt(dx * dx + dy * dy)
 
-  pos.vx += dx * PHYSICS.SPRING_STIFFNESS
-  pos.vy += dy * PHYSICS.SPRING_STIFFNESS
+  if (dist < 1) {
+    pos.vx *= PHYSICS.DAMPING
+    pos.vy *= PHYSICS.DAMPING
+    pos.x += pos.vx
+    pos.y += pos.vy
+    return
+  }
 
-  applyRepulsion(positions, id, pos)
+  const dirX = dx / dist
+  const dirY = dy / dist
 
+  const adjusted = findAvoidanceDirection(positions, id, pos, dirX, dirY)
+
+  pos.vx += adjusted.x * dist * PHYSICS.SPRING_STIFFNESS
+  pos.vy += adjusted.y * dist * PHYSICS.SPRING_STIFFNESS
   pos.vx *= PHYSICS.DAMPING
   pos.vy *= PHYSICS.DAMPING
 
