@@ -7,6 +7,10 @@
 export type Platform = 'web-canvas' | 'web-dom' | 'electron'
 export type Scope = 'prototype' | 'demo' | 'standard' | 'full'
 export type LLMProvider = 'claude' | 'gpt4'
+export type PlayTime = '5min' | '15min' | '30min' | '1hour' | '2hour'
+export type CharacterCount = '1-3' | '4-10' | '11+'
+export type ArtStyle = 'pixel' | 'anime' | 'realistic' | 'minimal'
+export type GameLanguage = 'ja' | 'ja-en' | 'en'
 
 export interface PlatformOption {
   value: Platform
@@ -28,6 +32,27 @@ export interface LLMProviderOption {
 
 export interface ProjectTemplateOption {
   value: string
+  label: string
+}
+
+export interface PlayTimeOption {
+  value: PlayTime
+  label: string
+}
+
+export interface CharacterCountOption {
+  value: CharacterCount
+  label: string
+}
+
+export interface ArtStyleOption {
+  value: ArtStyle
+  label: string
+  description: string
+}
+
+export interface GameLanguageOption {
+  value: GameLanguage
   label: string
 }
 
@@ -97,10 +122,51 @@ export const PROJECT_TEMPLATE_OPTIONS: ProjectTemplateOption[] = [
   { value: 'custom', label: 'カスタム' }
 ]
 
+// プレイ時間選択肢
+export const PLAY_TIME_OPTIONS: PlayTimeOption[] = [
+  { value: '5min', label: '5分' },
+  { value: '15min', label: '15分' },
+  { value: '30min', label: '30分' },
+  { value: '1hour', label: '1時間' },
+  { value: '2hour', label: '2時間' }
+]
+
+// キャラクター数選択肢
+export const CHARACTER_COUNT_OPTIONS: CharacterCountOption[] = [
+  { value: '1-3', label: '1〜3体' },
+  { value: '4-10', label: '4〜10体' },
+  { value: '11+', label: '11体以上' }
+]
+
+// アートスタイル選択肢
+export const ART_STYLE_OPTIONS: ArtStyleOption[] = [
+  { value: 'pixel', label: 'ピクセルアート', description: 'ドット絵スタイル' },
+  { value: 'anime', label: 'アニメ調', description: '日本アニメ風' },
+  { value: 'realistic', label: 'リアル調', description: '写実的なスタイル' },
+  { value: 'minimal', label: 'ミニマル', description: 'シンプルな図形' }
+]
+
+// 言語選択肢
+export const GAME_LANGUAGE_OPTIONS: GameLanguageOption[] = [
+  { value: 'ja', label: '日本語のみ' },
+  { value: 'ja-en', label: '日英両対応' },
+  { value: 'en', label: '英語のみ' }
+]
+
 // デフォルト値
 export const PROJECT_DEFAULTS = {
   platform: 'web-canvas' as Platform,
   scope: 'demo' as Scope,
   llmProvider: 'claude' as LLMProvider,
-  projectTemplate: 'rpg'
+  projectTemplate: 'rpg',
+  playTime: '15min' as PlayTime,
+  characterCount: '1-3' as CharacterCount,
+  artStyle: 'pixel' as ArtStyle,
+  language: 'ja' as GameLanguage,
+  enableImageGeneration: false,
+  enableBGMGeneration: false,
+  enableVoiceSynthesis: false,
+  enableVideoGeneration: false,
+  allowViolence: false,
+  allowSexualContent: false
 }

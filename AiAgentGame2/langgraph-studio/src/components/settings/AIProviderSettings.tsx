@@ -15,15 +15,19 @@ import{
  type ComfyUIConfig,
  type VoicevoxConfig,
  type MusicGeneratorConfig,
+ type VideoGeneratorConfig,
  PROVIDER_TYPE_LABELS,
  CLAUDE_MODELS,
  OPENAI_MODELS,
  COMFYUI_SAMPLERS,
  COMFYUI_SCHEDULERS,
+ VIDEO_MODELS,
+ VIDEO_RESOLUTIONS,
  DEFAULT_LLM_CONFIG,
  DEFAULT_COMFYUI_CONFIG,
  DEFAULT_VOICEVOX_CONFIG,
- DEFAULT_SUNO_CONFIG
+ DEFAULT_SUNO_CONFIG,
+ DEFAULT_VIDEO_CONFIG
 }from'@/types/aiProvider'
 
 interface ProviderCardProps{
@@ -260,6 +264,73 @@ function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(
 )
 }
 
+function VideoForm({provider,onUpdate}:{provider:VideoGeneratorConfig,onUpdate:(u:Partial<VideoGeneratorConfig>)=>void}){
+ const[showKey,setShowKey]=useState(false)
+ return(
+  <div className="space-y-3">
+   <div>
+    <label className="block text-nier-caption text-nier-text-light mb-1">API Key</label>
+    <div className="flex gap-2">
+     <input
+      type={showKey?'text':'password'}
+      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      value={provider.apiKey}
+      onChange={e=>onUpdate({apiKey:e.target.value})}
+     />
+     <button
+      className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
+      onClick={()=>setShowKey(!showKey)}
+     >
+      {showKey?<EyeOff size={16}/>:<Eye size={16}/>}
+     </button>
+    </div>
+   </div>
+   <div>
+    <label className="block text-nier-caption text-nier-text-light mb-1">Model</label>
+    <select
+     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     value={provider.model}
+     onChange={e=>onUpdate({model:e.target.value as 'runway'|'pika'|'stablevideo'})}
+    >
+     {VIDEO_MODELS.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
+    </select>
+   </div>
+   <div>
+    <label className="block text-nier-caption text-nier-text-light mb-1">Endpoint</label>
+    <input
+     type="text"
+     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     value={provider.endpoint}
+     onChange={e=>onUpdate({endpoint:e.target.value})}
+    />
+   </div>
+   <div className="grid grid-cols-2 gap-3">
+    <div>
+     <label className="block text-nier-caption text-nier-text-light mb-1">Resolution</label>
+     <select
+      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      value={provider.resolution}
+      onChange={e=>onUpdate({resolution:e.target.value as '720p'|'1080p'})}
+     >
+      {VIDEO_RESOLUTIONS.map(r=><option key={r.id} value={r.id}>{r.label}</option>)}
+     </select>
+    </div>
+    <div>
+     <label className="block text-nier-caption text-nier-text-light mb-1">FPS</label>
+     <input
+      type="number"
+      min="12"
+      max="60"
+      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      value={provider.fps}
+      onChange={e=>onUpdate({fps:parseInt(e.target.value)||24})}
+     />
+    </div>
+   </div>
+  </div>
+)
+}
+
 function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
  const[expanded,setExpanded]=useState(false)
  const[testing,setTesting]=useState(false)
@@ -291,6 +362,8 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
     return<VoicevoxForm provider={provider as VoicevoxConfig} onUpdate={onUpdate}/>
    case'suno':
     return<MusicForm provider={provider as MusicGeneratorConfig} onUpdate={onUpdate}/>
+   case'video':
+    return<VideoForm provider={provider as VideoGeneratorConfig} onUpdate={onUpdate}/>
    default:
     return null
   }
@@ -404,6 +477,9 @@ export function AIProviderSettings():JSX.Element{
    case'suno':
     config={id,name:'Suno AI (新規)',...DEFAULT_SUNO_CONFIG}
     break
+   case'video':
+    config={id,name:'動画生成 (新規)',...DEFAULT_VIDEO_CONFIG}
+    break
    default:
     config={id,name:'カスタム',type:'custom',enabled:false,endpoint:'',apiKey:'',settings:{}}
   }
@@ -430,7 +506,7 @@ export function AIProviderSettings():JSX.Element{
         </Button>
         {showAddMenu&&(
          <div className="absolute right-0 top-full mt-1 z-10 bg-nier-bg-main border border-nier-border-dark shadow-lg">
-          {(['claude','openai','comfyui','voicevox','suno']as AIProviderType[]).map(type=>(
+          {(['claude','openai','comfyui','voicevox','suno','video']as AIProviderType[]).map(type=>(
            <button
             key={type}
             className="block w-full px-4 py-2 text-left text-nier-small hover:bg-nier-bg-selected"

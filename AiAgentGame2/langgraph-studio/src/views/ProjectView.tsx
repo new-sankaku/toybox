@@ -13,10 +13,18 @@ import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,
 import{
  PLATFORM_OPTIONS,
  SCOPE_OPTIONS,
+ PLAY_TIME_OPTIONS,
+ CHARACTER_COUNT_OPTIONS,
+ ART_STYLE_OPTIONS,
+ GAME_LANGUAGE_OPTIONS,
  PROJECT_DEFAULTS,
  type Platform,
  type Scope,
- type LLMProvider
+ type LLMProvider,
+ type PlayTime,
+ type CharacterCount,
+ type ArtStyle,
+ type GameLanguage
 }from'@/config/projectOptions'
 
 interface SelectedFile{
@@ -43,6 +51,16 @@ interface NewProjectForm{
  platform:Platform
  scope:Scope
  llmProvider:LLMProvider
+ playTime:PlayTime
+ characterCount:CharacterCount
+ artStyle:ArtStyle
+ language:GameLanguage
+ enableImageGeneration:boolean
+ enableBGMGeneration:boolean
+ enableVoiceSynthesis:boolean
+ enableVideoGeneration:boolean
+ allowViolence:boolean
+ allowSexualContent:boolean
 }
 
 const initialForm:NewProjectForm={
@@ -51,7 +69,17 @@ const initialForm:NewProjectForm={
  references:'',
  platform:PROJECT_DEFAULTS.platform,
  scope:PROJECT_DEFAULTS.scope,
- llmProvider:PROJECT_DEFAULTS.llmProvider
+ llmProvider:PROJECT_DEFAULTS.llmProvider,
+ playTime:PROJECT_DEFAULTS.playTime,
+ characterCount:PROJECT_DEFAULTS.characterCount,
+ artStyle:PROJECT_DEFAULTS.artStyle,
+ language:PROJECT_DEFAULTS.language,
+ enableImageGeneration:PROJECT_DEFAULTS.enableImageGeneration,
+ enableBGMGeneration:PROJECT_DEFAULTS.enableBGMGeneration,
+ enableVoiceSynthesis:PROJECT_DEFAULTS.enableVoiceSynthesis,
+ enableVideoGeneration:PROJECT_DEFAULTS.enableVideoGeneration,
+ allowViolence:PROJECT_DEFAULTS.allowViolence,
+ allowSexualContent:PROJECT_DEFAULTS.allowSexualContent
 }
 
 const statusLabels:Record<ProjectStatus,string>={
@@ -139,7 +167,17 @@ export default function ProjectView():JSX.Element{
      scope:form.scope
     },
     config:{
-     llmProvider:form.llmProvider
+     llmProvider:form.llmProvider,
+     playTime:form.playTime,
+     characterCount:form.characterCount,
+     artStyle:form.artStyle,
+     language:form.language,
+     enableImageGeneration:form.enableImageGeneration,
+     enableBGMGeneration:form.enableBGMGeneration,
+     enableVoiceSynthesis:form.enableVoiceSynthesis,
+     enableVideoGeneration:form.enableVideoGeneration,
+     allowViolence:form.allowViolence,
+     allowSexualContent:form.allowSexualContent
     }
    })
 
@@ -551,6 +589,199 @@ export default function ProjectView():JSX.Element{
            <option value="claude">Claude (推奨)</option>
            <option value="gpt4">GPT-4</option>
           </select>
+         </div>
+
+         {/*Play Time*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           想定プレイ時間
+          </label>
+          <div className="flex gap-2">
+           {PLAY_TIME_OPTIONS.map((opt)=>(
+            <button
+             key={opt.value}
+             type="button"
+             onClick={()=>setForm({...form,playTime:opt.value})}
+             className={cn(
+              'px-3 py-2 border transition-colors',
+              form.playTime===opt.value
+               ?'border-nier-accent-gold bg-nier-bg-selected'
+               : 'border-nier-border-light hover:bg-nier-bg-hover'
+             )}
+            >
+             <div className="text-nier-small">{opt.label}</div>
+            </button>
+           ))}
+          </div>
+         </div>
+
+         {/*Character Count*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           最大キャラクター数
+          </label>
+          <div className="flex gap-2">
+           {CHARACTER_COUNT_OPTIONS.map((opt)=>(
+            <button
+             key={opt.value}
+             type="button"
+             onClick={()=>setForm({...form,characterCount:opt.value})}
+             className={cn(
+              'px-4 py-2 border transition-colors',
+              form.characterCount===opt.value
+               ?'border-nier-accent-gold bg-nier-bg-selected'
+               : 'border-nier-border-light hover:bg-nier-bg-hover'
+             )}
+            >
+             <div className="text-nier-small">{opt.label}</div>
+            </button>
+           ))}
+          </div>
+         </div>
+
+         {/*Art Style*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           アートスタイル
+          </label>
+          <div className="grid grid-cols-4 gap-2">
+           {ART_STYLE_OPTIONS.map((opt)=>(
+            <button
+             key={opt.value}
+             type="button"
+             onClick={()=>setForm({...form,artStyle:opt.value})}
+             className={cn(
+              'p-2 border text-left transition-colors',
+              form.artStyle===opt.value
+               ?'border-nier-accent-gold bg-nier-bg-selected'
+               : 'border-nier-border-light hover:bg-nier-bg-hover'
+             )}
+            >
+             <div className="text-nier-small font-medium">{opt.label}</div>
+             <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
+            </button>
+           ))}
+          </div>
+         </div>
+
+         {/*Language*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           言語設定
+          </label>
+          <div className="flex gap-2">
+           {GAME_LANGUAGE_OPTIONS.map((opt)=>(
+            <button
+             key={opt.value}
+             type="button"
+             onClick={()=>setForm({...form,language:opt.value})}
+             className={cn(
+              'px-4 py-2 border transition-colors',
+              form.language===opt.value
+               ?'border-nier-accent-gold bg-nier-bg-selected'
+               : 'border-nier-border-light hover:bg-nier-bg-hover'
+             )}
+            >
+             <div className="text-nier-small">{opt.label}</div>
+            </button>
+           ))}
+          </div>
+         </div>
+
+         {/*Asset Generation Options*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           アセット自動生成
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+           <label className={cn(
+            'flex items-center gap-2 p-3 border cursor-pointer transition-colors',
+            form.enableImageGeneration?'border-nier-accent-gold bg-nier-bg-selected':'border-nier-border-light hover:bg-nier-bg-hover'
+           )}>
+            <input
+             type="checkbox"
+             checked={form.enableImageGeneration}
+             onChange={(e)=>setForm({...form,enableImageGeneration:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <div>
+             <div className="text-nier-small">画像生成</div>
+             <div className="text-nier-caption text-nier-text-light">ComfyUI</div>
+            </div>
+           </label>
+           <label className={cn(
+            'flex items-center gap-2 p-3 border cursor-pointer transition-colors',
+            form.enableBGMGeneration?'border-nier-accent-gold bg-nier-bg-selected':'border-nier-border-light hover:bg-nier-bg-hover'
+           )}>
+            <input
+             type="checkbox"
+             checked={form.enableBGMGeneration}
+             onChange={(e)=>setForm({...form,enableBGMGeneration:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <div>
+             <div className="text-nier-small">BGM生成</div>
+             <div className="text-nier-caption text-nier-text-light">Suno AI</div>
+            </div>
+           </label>
+           <label className={cn(
+            'flex items-center gap-2 p-3 border cursor-pointer transition-colors',
+            form.enableVoiceSynthesis?'border-nier-accent-gold bg-nier-bg-selected':'border-nier-border-light hover:bg-nier-bg-hover'
+           )}>
+            <input
+             type="checkbox"
+             checked={form.enableVoiceSynthesis}
+             onChange={(e)=>setForm({...form,enableVoiceSynthesis:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <div>
+             <div className="text-nier-small">音声合成</div>
+             <div className="text-nier-caption text-nier-text-light">VOICEVOX</div>
+            </div>
+           </label>
+           <label className={cn(
+            'flex items-center gap-2 p-3 border cursor-pointer transition-colors',
+            form.enableVideoGeneration?'border-nier-accent-gold bg-nier-bg-selected':'border-nier-border-light hover:bg-nier-bg-hover'
+           )}>
+            <input
+             type="checkbox"
+             checked={form.enableVideoGeneration}
+             onChange={(e)=>setForm({...form,enableVideoGeneration:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <div>
+             <div className="text-nier-small">動画生成</div>
+             <div className="text-nier-caption text-nier-text-light">Runway / Pika</div>
+            </div>
+           </label>
+          </div>
+         </div>
+
+         {/*Content Warnings*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           コンテンツ許可
+          </label>
+          <div className="flex gap-4">
+           <label className="flex items-center gap-2 cursor-pointer">
+            <input
+             type="checkbox"
+             checked={form.allowViolence}
+             onChange={(e)=>setForm({...form,allowViolence:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <span className="text-nier-small">暴力表現を許可</span>
+           </label>
+           <label className="flex items-center gap-2 cursor-pointer">
+            <input
+             type="checkbox"
+             checked={form.allowSexualContent}
+             onChange={(e)=>setForm({...form,allowSexualContent:e.target.checked})}
+             className="w-4 h-4"
+            />
+            <span className="text-nier-small">性的表現を許可</span>
+           </label>
+          </div>
          </div>
 
          {/*Initial Files*/}

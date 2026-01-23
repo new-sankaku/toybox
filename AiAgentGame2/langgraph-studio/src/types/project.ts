@@ -26,8 +26,17 @@ export interface GameConcept{
 export interface ProjectConfig{
  llmProvider?:'claude'|'gpt4'|'mock'
  maxTokensPerAgent?:number
- enableAssetGeneration?:boolean
  enableAutoApproval?:boolean
+ enableImageGeneration?:boolean
+ enableBGMGeneration?:boolean
+ enableVoiceSynthesis?:boolean
+ enableVideoGeneration?:boolean
+ playTime?:'5min'|'15min'|'30min'|'1hour'|'2hour'
+ characterCount?:'1-3'|'4-10'|'11+'
+ artStyle?:'pixel'|'anime'|'realistic'|'minimal'
+ language?:'ja'|'ja-en'|'en'
+ allowViolence?:boolean
+ allowSexualContent?:boolean
 }
 
 export interface CreateProjectInput{

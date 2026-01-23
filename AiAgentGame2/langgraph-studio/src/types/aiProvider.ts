@@ -1,4 +1,4 @@
-export type AIProviderType='claude'|'openai'|'comfyui'|'voicevox'|'suno'|'custom'
+export type AIProviderType='claude'|'openai'|'comfyui'|'voicevox'|'suno'|'video'|'custom'
 
 export interface BaseProviderConfig{
  id:string
@@ -40,6 +40,15 @@ export interface MusicGeneratorConfig extends BaseProviderConfig{
  endpoint:string
 }
 
+export interface VideoGeneratorConfig extends BaseProviderConfig{
+ type:'video'
+ apiKey:string
+ endpoint:string
+ model:'runway'|'pika'|'stablevideo'
+ resolution:'720p'|'1080p'
+ fps:number
+}
+
 export interface CustomProviderConfig extends BaseProviderConfig{
  type:'custom'
  endpoint:string
@@ -52,6 +61,7 @@ export type AIProviderConfig=
  |ComfyUIConfig
  |VoicevoxConfig
  |MusicGeneratorConfig
+ |VideoGeneratorConfig
  |CustomProviderConfig
 
 export const PROVIDER_TYPE_LABELS:Record<AIProviderType,string>={
@@ -60,8 +70,20 @@ export const PROVIDER_TYPE_LABELS:Record<AIProviderType,string>={
  comfyui:'ComfyUI',
  voicevox:'VOICEVOX',
  suno:'Suno AI',
+ video:'動画生成',
  custom:'カスタム'
 }
+
+export const VIDEO_MODELS=[
+ {id:'runway',label:'Runway Gen-3'},
+ {id:'pika',label:'Pika Labs'},
+ {id:'stablevideo',label:'Stable Video Diffusion'},
+]
+
+export const VIDEO_RESOLUTIONS=[
+ {id:'720p',label:'720p (HD)'},
+ {id:'1080p',label:'1080p (Full HD)'},
+]
 
 export const CLAUDE_MODELS=[
  {id:'claude-sonnet-4-20250514',label:'Claude Sonnet 4'},
@@ -122,4 +144,14 @@ export const DEFAULT_SUNO_CONFIG:Omit<MusicGeneratorConfig,'id'|'name'>={
  enabled:false,
  apiKey:'',
  endpoint:'https://api.suno.ai'
+}
+
+export const DEFAULT_VIDEO_CONFIG:Omit<VideoGeneratorConfig,'id'|'name'>={
+ type:'video',
+ enabled:false,
+ apiKey:'',
+ endpoint:'https://api.runwayml.com',
+ model:'runway',
+ resolution:'1080p',
+ fps:24
 }
