@@ -1,0 +1,66 @@
+{
+  "platforms": [
+    {
+      "value": "web-canvas",
+      "label": "ブラウザゲーム (Canvas)",
+      "description": "2D/3Dゲーム、HTML5 Canvas+JavaScript"
+    },
+    {
+      "value": "web-dom",
+      "label": "ブラウザゲーム (DOM)",
+      "description": "テキストベース、カードゲーム、HTML+CSS+JavaScript"
+    },
+    {
+      "value": "electron",
+      "label": "デスクトップアプリ",
+      "description": "Win/Mac/Linux対応、Electron+JavaScript"
+    }
+  ],
+  "scopes": [
+    {
+      "value": "prototype",
+      "label": "プロトタイプ",
+      "description": "動作確認用の最小実装"
+    },
+    {
+      "value": "demo",
+      "label": "デモ版",
+      "description": "見せられるレベルの完成度"
+    },
+    {
+      "value": "standard",
+      "label": "スタンダード",
+      "description": "完全な1本のゲーム"
+    },
+    {
+      "value": "full",
+      "label": "フル版",
+      "description": "商用レベルの完成度"
+    }
+  ],
+  "llmProviders": [
+    {
+      "value": "claude",
+      "label": "Claude (推奨)",
+      "recommended": true
+    },
+    {
+      "value": "gpt4",
+      "label": "GPT-4"
+    }
+  ],
+  "projectTemplates": [
+    {"value": "rpg", "label": "RPG (ロールプレイングゲーム)"},
+    {"value": "action", "label": "アクションゲーム"},
+    {"value": "adventure", "label": "アドベンチャーゲーム"},
+    {"value": "puzzle", "label": "パズルゲーム"},
+    {"value": "simulation", "label": "シミュレーションゲーム"},
+    {"value": "custom", "label": "カスタム"}
+  ],
+  "defaults": {
+    "platform": "web-canvas",
+    "scope": "demo",
+    "llmProvider": "claude",
+    "projectTemplate": "rpg"
+  }
+}

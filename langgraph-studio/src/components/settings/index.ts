@@ -1,0 +1,1 @@
+export{QualityCheckSettingsPanel}from'./QualityCheckSettingsPanel'
