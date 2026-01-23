@@ -1,6 +1,62 @@
 import type{AgentType}from'@/types/agent'
 
 export type AIServiceType='llm'|'image'|'audio'|'music'
+
+// Agent階層定義
+export type AgentHierarchyLevel='orchestrator'|'division'|'worker'
+
+export interface AgentHierarchyConfig{
+ level:AgentHierarchyLevel
+ parent?:AgentType
+ label:string
+ groupLabel?:string
+}
+
+// オーケストラ（大区分）: concept
+// 中区分: task_split_1, task_split_2, task_split_3, task_split_4
+// 小区分: それぞれのtask_splitに属するworker agents
+export const AGENT_HIERARCHY:Record<AgentType,AgentHierarchyConfig>={
+ concept:{level:'orchestrator',label:'オーケストラ'},
+ task_split_1:{level:'division',parent:'concept',label:'設計分配',groupLabel:'設計'},
+ task_split_2:{level:'division',parent:'concept',label:'アセット分配',groupLabel:'アセット'},
+ task_split_3:{level:'division',parent:'concept',label:'実装分配',groupLabel:'実装'},
+ task_split_4:{level:'division',parent:'concept',label:'テスト分配',groupLabel:'テスト'},
+ concept_detail:{level:'worker',parent:'task_split_1',label:'企画'},
+ scenario:{level:'worker',parent:'task_split_1',label:'シナリオ'},
+ world:{level:'worker',parent:'task_split_1',label:'世界観'},
+ game_design:{level:'worker',parent:'task_split_1',label:'デザイン'},
+ tech_spec:{level:'worker',parent:'task_split_1',label:'テック'},
+ asset_character:{level:'worker',parent:'task_split_2',label:'キャラ'},
+ asset_background:{level:'worker',parent:'task_split_2',label:'背景'},
+ asset_ui:{level:'worker',parent:'task_split_2',label:'UI'},
+ asset_effect:{level:'worker',parent:'task_split_2',label:'エフェクト'},
+ asset_bgm:{level:'worker',parent:'task_split_2',label:'BGM'},
+ asset_voice:{level:'worker',parent:'task_split_2',label:'ボイス'},
+ asset_sfx:{level:'worker',parent:'task_split_2',label:'効果音'},
+ code:{level:'worker',parent:'task_split_3',label:'コード'},
+ event:{level:'worker',parent:'task_split_3',label:'イベント'},
+ ui_integration:{level:'worker',parent:'task_split_3',label:'UI統合'},
+ asset_integration:{level:'worker',parent:'task_split_3',label:'統合'},
+ unit_test:{level:'worker',parent:'task_split_4',label:'テスト1'},
+ integration_test:{level:'worker',parent:'task_split_4',label:'テスト2'}
+}
+
+// 中区分Agentとその子Agentのグループ化
+export const DIVISION_AGENTS:AgentType[]=['task_split_1','task_split_2','task_split_3','task_split_4']
+
+export function getAgentsByDivision(division:AgentType):AgentType[]{
+ return(Object.entries(AGENT_HIERARCHY)as[AgentType,AgentHierarchyConfig][])
+  .filter(([_,config])=>config.parent===division&&config.level==='worker')
+  .map(([type])=>type)
+}
+
+export function getAgentLevel(agentType:AgentType):AgentHierarchyLevel{
+ return AGENT_HIERARCHY[agentType]?.level||'worker'
+}
+
+export function getAgentParent(agentType:AgentType):AgentType|undefined{
+ return AGENT_HIERARCHY[agentType]?.parent
+}
 export type RequestStatus='pending'|'processing'|'completed'|'failed'
 export type CharacterEmotion='idle'|'happy'|'working'|'sleepy'|'sad'|'excited'
 
