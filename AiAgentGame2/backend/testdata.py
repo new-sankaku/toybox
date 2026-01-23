@@ -8,6 +8,46 @@ import random
 
 from asset_scanner import scan_all_testdata,get_testdata_path
 from agent_settings import get_default_quality_settings,QualityCheckConfig
+from config_loader import get_agent_definitions
+
+CHECKPOINT_TO_CATEGORY={
+    "concept_review":"document",
+    "concept_detail_review":"document",
+    "scenario_review":"document",
+    "world_review":"document",
+    "game_design_review":"document",
+    "tech_spec_review":"document",
+    "task_review_1":"document",
+    "task_review_2":"document",
+    "task_review_3":"document",
+    "task_review_4":"document",
+    "character_review":"image",
+    "ui_review":"image",
+    "code_review":"code",
+    "ui_integration_review":"code",
+    "unit_test_review":"code",
+    "integration_test_review":"code",
+}
+
+DEFAULT_AUTO_APPROVAL_RULES=[
+    {"category":"code","action":"create","enabled":True,"label":"生成"},
+    {"category":"code","action":"edit","enabled":True,"label":"修正"},
+    {"category":"code","action":"delete","enabled":False,"label":"削除"},
+    {"category":"image","action":"create","enabled":True,"label":"生成"},
+    {"category":"image","action":"edit","enabled":False,"label":"編集"},
+    {"category":"image","action":"delete","enabled":False,"label":"削除"},
+    {"category":"audio","action":"create","enabled":True,"label":"生成"},
+    {"category":"audio","action":"edit","enabled":False,"label":"編集"},
+    {"category":"audio","action":"delete","enabled":False,"label":"削除"},
+    {"category":"music","action":"create","enabled":True,"label":"生成"},
+    {"category":"music","action":"edit","enabled":False,"label":"編集"},
+    {"category":"music","action":"delete","enabled":False,"label":"削除"},
+    {"category":"document","action":"create","enabled":True,"label":"生成"},
+    {"category":"document","action":"edit","enabled":True,"label":"編集"},
+    {"category":"document","action":"delete","enabled":False,"label":"削除"},
+    {"category":"system","action":"create","enabled":False,"label":"コマンド実行"},
+    {"category":"system","action":"edit","enabled":False,"label":"外部API呼び出し"},
+]
 
 
 class TestDataStore:
@@ -23,6 +63,7 @@ class TestDataStore:
         self.quality_settings:Dict[str,Dict[str,QualityCheckConfig]] = {}
         self.interventions:Dict[str,Dict] = {}
         self.uploaded_files:Dict[str,Dict] = {}
+        self.auto_approval_settings:Dict[str,List[Dict]] = {}
 
 
         self._simulation_running = False
@@ -82,40 +123,12 @@ class TestDataStore:
 
 
 
+        agent_defs = get_agent_definitions()
         agents_data = [
-
-            {"type":"concept","name":"コンセプト","phase":0},
-
-            {"type":"task_split_1","name":"タスク分割1","phase":1},
-
-            {"type":"concept_detail","name":"コンセプト詳細","phase":2},
-            {"type":"scenario","name":"シナリオ","phase":2},
-            {"type":"world","name":"世界観","phase":2},
-            {"type":"game_design","name":"ゲームデザイン","phase":2},
-            {"type":"tech_spec","name":"技術仕様","phase":2},
-
-            {"type":"task_split_2","name":"タスク分割2","phase":3},
-
-            {"type":"asset_character","name":"キャラ","phase":4},
-            {"type":"asset_background","name":"背景","phase":4},
-            {"type":"asset_ui","name":"UI","phase":4},
-            {"type":"asset_effect","name":"エフェクト","phase":4},
-            {"type":"asset_bgm","name":"BGM","phase":4},
-            {"type":"asset_voice","name":"ボイス","phase":4},
-            {"type":"asset_sfx","name":"効果音","phase":4},
-
-            {"type":"task_split_3","name":"タスク分割3","phase":5},
-
-            {"type":"code","name":"コード","phase":6},
-            {"type":"event","name":"イベント","phase":6},
-            {"type":"ui_integration","name":"UI統合","phase":6},
-            {"type":"asset_integration","name":"アセット統合","phase":6},
-
-            {"type":"task_split_4","name":"タスク分割4","phase":7},
-
-            {"type":"unit_test","name":"単体テスト","phase":8},
-            {"type":"integration_test","name":"統合テスト","phase":8},
+            {"type":agent_type,"name":info["label"],"phase":info["phase"]}
+            for agent_type,info in agent_defs.items()
         ]
+        agents_data.sort(key=lambda x:(x["phase"],x["type"]))
 
         for data in agents_data:
             agent_id = f"agent-{proj_id}-{data['type']}"
@@ -364,15 +377,33 @@ class TestDataStore:
                 if not existing:
                     self._create_agent_checkpoint(agent,cp_type,cp_title)
 
+    def _should_auto_approve(self,project_id:str,cp_type:str)->bool:
+        project = self.projects.get(project_id)
+        if not project:
+            return False
+        config = project.get("config",{})
+        if not config.get("enableAutoApproval",False):
+            return False
+        category = CHECKPOINT_TO_CATEGORY.get(cp_type)
+        if not category:
+            return False
+        rules = self.auto_approval_settings.get(project_id,DEFAULT_AUTO_APPROVAL_RULES)
+        for rule in rules:
+            if rule["category"] == category and rule["action"] == "create":
+                return rule.get("enabled",False)
+        return False
+
     def _create_agent_checkpoint(self,agent:Dict,cp_type:str,title:str):
         checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
 
         content = self._generate_checkpoint_content(agent["type"],cp_type)
+        project_id = agent["projectId"]
+        auto_approved = self._should_auto_approve(project_id,cp_type)
 
         checkpoint = {
             "id":checkpoint_id,
-            "projectId":agent["projectId"],
+            "projectId":project_id,
             "agentId":agent["id"],
             "type":cp_type,
             "title":title,
@@ -382,25 +413,38 @@ class TestDataStore:
                 "format":"markdown",
                 "content":content
             },
-            "status":"pending",
-            "feedback":None,
-            "resolvedAt":None,
+            "status":"approved" if auto_approved else "pending",
+            "feedback":"自動承認" if auto_approved else None,
+            "resolvedAt":now if auto_approved else None,
             "createdAt":now,
             "updatedAt":now
         }
         self.checkpoints[checkpoint_id] = checkpoint
 
-        agent["status"] = "waiting_approval"
-        agent["updatedAt"] = now
-
-        self._add_system_log(agent["projectId"],"info","System",f"チェックポイント作成: {title}")
-
-        self._emit_event("checkpoint:created",{
-            "checkpointId":checkpoint_id,
-            "projectId":agent["projectId"],
-            "agentId":agent["id"],
-            "checkpoint":checkpoint
-        },agent["projectId"])
+        if auto_approved:
+            self._add_system_log(project_id,"info","System",f"チェックポイント自動承認: {title}")
+            self._emit_event("checkpoint:created",{
+                "checkpointId":checkpoint_id,
+                "projectId":project_id,
+                "agentId":agent["id"],
+                "checkpoint":checkpoint
+            },project_id)
+            self._emit_event("checkpoint:resolved",{
+                "checkpointId":checkpoint_id,
+                "projectId":project_id,
+                "checkpoint":checkpoint
+            },project_id)
+            self._check_phase_advancement(project_id)
+        else:
+            agent["status"] = "waiting_approval"
+            agent["updatedAt"] = now
+            self._add_system_log(project_id,"info","System",f"チェックポイント作成: {title}")
+            self._emit_event("checkpoint:created",{
+                "checkpointId":checkpoint_id,
+                "projectId":project_id,
+                "agentId":agent["id"],
+                "checkpoint":checkpoint
+            },project_id)
 
     def _check_asset_generation(self,agent:Dict,old_progress:int,new_progress:int):
         asset_points = self._get_asset_points(agent["type"])
@@ -1557,7 +1601,6 @@ class TestDataStore:
             return checkpoint
 
     def _check_phase_advancement(self,project_id:str):
-        """Check if we should advance to the next phase"""
         project = self.projects.get(project_id)
         if not project:
             return
@@ -1565,22 +1608,19 @@ class TestDataStore:
         current_phase = project.get("currentPhase",1)
         project_checkpoints = [c for c in self.checkpoints.values() if c["projectId"] == project_id]
 
-
-        phase1_types = {"concept_review","design_review","scenario_review","character_review","world_review","task_review"}
+        phase1_types = {
+            "concept_review","concept_detail_review","scenario_review",
+            "world_review","game_design_review","tech_spec_review","task_review_1"
+        }
 
         if current_phase == 1:
-
             phase1_checkpoints = [c for c in project_checkpoints if c["type"] in phase1_types]
             if phase1_checkpoints and all(c["status"] == "approved" for c in phase1_checkpoints):
-
                 project["currentPhase"] = 2
                 project["updatedAt"] = datetime.now().isoformat()
-
-
                 if project_id in self.metrics:
                     self.metrics[project_id]["currentPhase"] = 2
                     self.metrics[project_id]["phaseName"] = "Phase 2: 実装"
-
                 self._add_system_log(project_id,"info","System","Phase 2: 実装 に移行しました")
                 print(f"[TestDataStore] Project {project_id} advanced to Phase 2")
 
@@ -1677,7 +1717,21 @@ class TestDataStore:
         settings = self.get_quality_settings(project_id)
         return settings.get(agent_type,QualityCheckConfig())
 
+    def get_auto_approval_settings(self,project_id:str)->List[Dict]:
+        with self._lock:
+            if project_id not in self.auto_approval_settings:
+                import copy
+                self.auto_approval_settings[project_id] = copy.deepcopy(DEFAULT_AUTO_APPROVAL_RULES)
+            return self.auto_approval_settings[project_id]
 
+    def set_auto_approval_settings(self,project_id:str,rules:List[Dict])->None:
+        with self._lock:
+            self.auto_approval_settings[project_id] = rules
+
+    def reset_auto_approval_settings(self,project_id:str)->None:
+        with self._lock:
+            import copy
+            self.auto_approval_settings[project_id] = copy.deepcopy(DEFAULT_AUTO_APPROVAL_RULES)
 
     def get_interventions_by_project(self,project_id:str)->List[Dict]:
         with self._lock:

@@ -24,9 +24,10 @@ export interface GameConcept{
 }
 
 export interface ProjectConfig{
- llmProvider?:'claude'|'gpt4'
+ llmProvider?:'claude'|'gpt4'|'mock'
  maxTokensPerAgent?:number
  enableAssetGeneration?:boolean
+ enableAutoApproval?:boolean
 }
 
 export interface CreateProjectInput{
