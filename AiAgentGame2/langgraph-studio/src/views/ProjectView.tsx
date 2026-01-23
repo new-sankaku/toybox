@@ -591,7 +591,6 @@ export default function ProjectView():JSX.Element{
           </select>
          </div>
 
-         {/*Play Time*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            想定プレイ時間
@@ -615,7 +614,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*Character Count*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            最大キャラクター数
@@ -639,7 +637,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*Art Style*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            アートスタイル
@@ -664,7 +661,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*Language*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            言語設定
@@ -688,7 +684,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*Asset Generation Options*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            アセット自動生成
@@ -757,7 +752,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*Content Warnings*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            コンテンツ許可
