@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bubble Test</title>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+  <style>
+    body { margin: 20px; background: #f0f0f0; font-family: system-ui, sans-serif; }
+    #game { border: 1px solid #454138; margin-bottom: 20px; }
+    .info { color: #333; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h2>Bubble Size Test</h2>
+  <div id="game"></div>
+  <div class="info">
+    <p>各バブルは文字に合わせてサイズ調整されているか確認してください。</p>
+    <p>コンソールログで計算された幅も確認できます。</p>
+  </div>
+  <script>
+    const FONT_SIZE = 12
+    const FONT_FAMILY = 'system-ui, sans-serif'
+    const PADDING_X = 12
+    const PADDING_Y = 8
+    const BORDER_RADIUS = 4
+    const TAIL_WIDTH = 5
+    const TAIL_HEIGHT = 6
+    const CHAR_WIDTH_CJK = 14
+    const CHAR_WIDTH_ASCII = 8
+
+    const BUBBLE_STYLES = {
+      info: { bg: 0xF8F6F0, border: 0x454138 },
+      success: { bg: 0xE8F0E8, border: 0x5A8A5A },
+      question: { bg: 0xF8F0E8, border: 0x9A7A5A },
+      warning: { bg: 0xF8E8E8, border: 0x9A5A5A },
+    }
+
+    function estimateTextWidth(text) {
+      let width = 0
+      for (const char of text) {
+        if (char.charCodeAt(0) > 127) {
+          width += CHAR_WIDTH_CJK
+        } else {
+          width += CHAR_WIDTH_ASCII
+        }
+      }
+      return Math.max(width, 30)
+    }
+
+    class BubbleScene extends Phaser.Scene {
+      constructor() {
+        super({ key: 'BubbleScene' })
+      }
+
+      create() {
+        const testTexts = [
+          { text: 'Hello', type: 'info' },
+          { text: 'プロジェクト分析中...', type: 'info' },
+          { text: 'Short', type: 'success' },
+          { text: 'DIRECTORを召喚中...', type: 'question' },
+          { text: 'テスト', type: 'warning' },
+          { text: 'This is longer text', type: 'info' },
+          { text: 'Phase1開始: 企画フェーズ', type: 'success' },
+          { text: 'コンセプト承認待ち', type: 'question' },
+        ]
+
+        let y = 40
+        for (const item of testTexts) {
+          this.createBubble(200, y, item.text, item.type)
+          y += 50
+        }
+      }
+
+      createBubble(x, y, text, type) {
+        const truncated = text.length > 20 ? text.slice(0, 18) + '...' : text
+        const container = this.add.container(x, y)
+
+        const graphics = this.add.graphics()
+        container.add(graphics)
+
+        const dpr = Math.min(window.devicePixelRatio || 1, 2)
+        const textObj = this.add.text(0, 0, truncated, {
+          fontFamily: FONT_FAMILY,
+          fontSize: `${FONT_SIZE}px`,
+          color: '#454138',
+        })
+        textObj.setOrigin(0.5, 0.5)
+        textObj.setResolution(dpr)
+        container.add(textObj)
+
+        // Calculate dimensions using character-based estimation
+        const textW = estimateTextWidth(truncated)
+        const textH = FONT_SIZE
+
+        console.log(`[Bubble] "${truncated}" -> estimated width: ${textW}, phaser width: ${textObj.width}`)
+
+        const w = textW + PADDING_X * 2
+        const h = textH + PADDING_Y * 2
+
+        const style = BUBBLE_STYLES[type] || BUBBLE_STYLES.info
+
+        // Draw bubble background
+        graphics.fillStyle(style.bg)
+        graphics.lineStyle(1, style.border)
+        graphics.fillRoundedRect(-w/2, -h/2, w, h, BORDER_RADIUS)
+        graphics.strokeRoundedRect(-w/2, -h/2, w, h, BORDER_RADIUS)
+
+        // Draw tail
+        graphics.fillStyle(style.bg)
+        graphics.beginPath()
+        graphics.moveTo(-TAIL_WIDTH, h/2)
+        graphics.lineTo(0, h/2 + TAIL_HEIGHT)
+        graphics.lineTo(TAIL_WIDTH, h/2)
+        graphics.closePath()
+        graphics.fillPath()
+
+        graphics.lineStyle(1, style.border)
+        graphics.beginPath()
+        graphics.moveTo(-TAIL_WIDTH, h/2)
+        graphics.lineTo(0, h/2 + TAIL_HEIGHT)
+        graphics.lineTo(TAIL_WIDTH, h/2)
+        graphics.strokePath()
+      }
+    }
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const game = new Phaser.Game({
+      type: Phaser.CANVAS,
+      parent: 'game',
+      width: 400 * dpr,
+      height: 450 * dpr,
+      backgroundColor: 0xDAD4BB,
+      pixelArt: false,
+      antialias: true,
+      scale: {
+        mode: Phaser.Scale.NONE,
+        zoom: 1 / dpr,
+      },
+      scene: [BubbleScene],
+    })
+  </script>
+</body>
+</html>

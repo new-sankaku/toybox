@@ -459,8 +459,7 @@
     position: fixed;
     inset: 0;
     z-index: 500;
-    cursor: pointer;
-    pointer-events: auto;
+    pointer-events: none;
     animation: navigator-fade-in 0.3s ease-out;
   }
 
@@ -622,20 +621,13 @@
     color: var(--text-light);
   }
 
-  /* Dialogue Overlay */
-  .dialogue-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    cursor: pointer;
-  }
-
-  /* Dialogue Bar - Bottom */
-  .dialogue-bar {
+  /* Dialogue Bar Container - Bottom (no overlay) */
+  .dialogue-bar-container {
     position: fixed;
     left: 0;
     right: 264px;
     bottom: 0;
+    z-index: 100;
     background: rgba(0, 0, 0, 0.9);
     color: #fff;
     padding: 16px 24px;
@@ -644,6 +636,7 @@
     flex-direction: column;
     justify-content: center;
     animation: dialogue-slide-up 0.3s ease-out;
+    cursor: pointer;
   }
 
   @keyframes dialogue-slide-up {
@@ -995,11 +988,11 @@
     }
   }
 
-  .navigator-overlay.priority-high .navigator-frame {
+  .navigator-character.priority-high .navigator-frame {
     border-color: #c9a227;
   }
 
-  .navigator-overlay.priority-critical .navigator-frame {
+  .navigator-character.priority-critical .navigator-frame {
     border-color: #c94040;
     animation: frame-pulse 2s ease-in-out infinite;
   }

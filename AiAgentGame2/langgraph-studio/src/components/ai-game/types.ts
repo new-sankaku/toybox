@@ -43,11 +43,28 @@ export interface ServiceZoneState{
 const SPIRIT_TYPES=['spirit_fire','spirit_water','spirit_earth','spirit_light','spirit_wind']as const
 
 export const AGENT_MODEL_MAP:Record<AgentType,string>={
+ orchestrator:SPIRIT_TYPES[0],
+ director_phase1:SPIRIT_TYPES[1],
+ director_phase2:SPIRIT_TYPES[2],
+ director_phase3:SPIRIT_TYPES[3],
+ leader_concept:SPIRIT_TYPES[4],
+ leader_scenario:SPIRIT_TYPES[0],
+ leader_design:SPIRIT_TYPES[1],
+ leader_task_split:SPIRIT_TYPES[2],
+ leader_code:SPIRIT_TYPES[3],
+ leader_asset:SPIRIT_TYPES[4],
+ worker_concept:SPIRIT_TYPES[0],
+ worker_scenario:SPIRIT_TYPES[1],
+ worker_design:SPIRIT_TYPES[2],
+ worker_task_split:SPIRIT_TYPES[3],
+ worker_code:SPIRIT_TYPES[4],
+ worker_asset:SPIRIT_TYPES[0],
  concept:SPIRIT_TYPES[0],
  task_split_1:SPIRIT_TYPES[1],
  concept_detail:SPIRIT_TYPES[2],
  scenario:SPIRIT_TYPES[3],
  world:SPIRIT_TYPES[4],
+ character:SPIRIT_TYPES[0],
  game_design:SPIRIT_TYPES[0],
  tech_spec:SPIRIT_TYPES[1],
  task_split_2:SPIRIT_TYPES[2],
@@ -65,7 +82,9 @@ export const AGENT_MODEL_MAP:Record<AgentType,string>={
  asset_integration:SPIRIT_TYPES[4],
  task_split_4:SPIRIT_TYPES[0],
  unit_test:SPIRIT_TYPES[1],
- integration_test:SPIRIT_TYPES[2]
+ integration_test:SPIRIT_TYPES[2],
+ integrator:SPIRIT_TYPES[3],
+ reviewer:SPIRIT_TYPES[4]
 }
 
 export const SERVICE_CONFIG:Record<AIServiceType,{label:string;description:string}>={

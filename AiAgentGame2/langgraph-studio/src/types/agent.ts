@@ -1,11 +1,28 @@
 export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
 
 export type AgentType=
+ |'orchestrator'
+ |'director_phase1'
+ |'director_phase2'
+ |'director_phase3'
+ |'leader_concept'
+ |'leader_scenario'
+ |'leader_design'
+ |'leader_task_split'
+ |'leader_code'
+ |'leader_asset'
+ |'worker_concept'
+ |'worker_scenario'
+ |'worker_design'
+ |'worker_task_split'
+ |'worker_code'
+ |'worker_asset'
  |'concept'
  |'task_split_1'
  |'concept_detail'
  |'scenario'
  |'world'
+ |'character'
  |'game_design'
  |'tech_spec'
  |'task_split_2'
@@ -24,6 +41,8 @@ export type AgentType=
  |'task_split_4'
  |'unit_test'
  |'integration_test'
+ |'integrator'
+ |'reviewer'
 
 export interface Agent{
  id:string

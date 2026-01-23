@@ -342,11 +342,10 @@ function renderBubble(
   ctx.save()
 
   const style = type ? BUBBLE_STYLES[type] : BUBBLE_STYLES.info
-  const displayText = text.length > 18 ? text.slice(0, 16) + '…' : text
 
-  ctx.font = '9px system-ui, sans-serif'
-  const textWidth = ctx.measureText(displayText).width
-  const w = Math.min(Math.max(textWidth + SIZES.BUBBLE_PADDING, SIZES.BUBBLE_MIN_WIDTH), SIZES.BUBBLE_MAX_WIDTH)
+  ctx.font = 'bold 14px system-ui, sans-serif'
+  const textWidth = ctx.measureText(text).width
+  const w = Math.max(textWidth + SIZES.BUBBLE_PADDING * 2, SIZES.BUBBLE_MIN_WIDTH)
   const h = SIZES.BUBBLE_HEIGHT
   const floatY = y + Math.sin(frame * ANIMATION.BUBBLE_FLOAT_SPEED) * ANIMATION.BUBBLE_FLOAT_AMPLITUDE
 
@@ -373,10 +372,10 @@ function renderBubble(
   ctx.fill()
   ctx.stroke()
 
-  ctx.fillStyle = COLORS.TEXT_PRIMARY
+  ctx.fillStyle = '#222222'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillText(displayText, x, floatY)
+  ctx.fillText(text, x, floatY)
 
   ctx.restore()
 }
