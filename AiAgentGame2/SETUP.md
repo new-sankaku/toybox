@@ -8,7 +8,7 @@ AiAgentGame2は以下のコンポーネントで構成されています：
 |--------------|------|-------------|
 | WebUI (Frontend) | Electron + React アプリ | `langgraph-studio/` |
 | Backend | Flask + Socket.IO サーバー | `backend/` |
-| Agent仕様 | 各エージェントの設計ドキュメント | `agents/` |
+| ドキュメント | 設計・仕様ドキュメント | `docs/` |
 
 ---
 
@@ -101,19 +101,24 @@ AGENT_MODE=api
 AiAgentGame2/
 ├── SETUP.md                 # このファイル
 ├── PROJECT.md               # プロジェクト概要
-├── AGENT_SYSTEM.md          # エージェントシステム設計
-├── WEBUI_DESIGN.md          # WebUIデザイン仕様
-├── WEBUI_ARCHITECTURE.md    # WebUIアーキテクチャ
-├── WebUI_API.md             # API仕様
-├── DEVELOPMENT_RULES.md     # 開発ルール
+├── CLAUDE.md                # Claude Code向けルール
+│
+├── docs/                    # ドキュメント
+│   ├── AGENT_SYSTEM.md      # エージェントシステム設計
+│   ├── WEBUI_DESIGN.md      # WebUIデザイン仕様
+│   ├── WEBUI_ARCHITECTURE.md # WebUIアーキテクチャ
+│   ├── WebUI_API.md         # API仕様
+│   ├── DEVELOPMENT_RULES.md # 開発ルール
+│   └── agent/               # エージェント詳細仕様
+│       ├── 01_AGENT_HIERARCHY.md
+│       └── ...
 │
 ├── backend/                 # バックエンドサーバー
 │   ├── agents/             # AgentRunner実装
 │   │   ├── base.py         # 抽象基底クラス
-│   │   ├── testdata_runner.py  # テストデータ実装
+│   │   ├── mock_runner.py  # テストデータ実装
 │   │   └── api_runner.py   # API実装
 │   ├── handlers/           # APIハンドラー
-│   ├── simulation/         # シミュレーションロジック
 │   ├── config.py           # 設定管理
 │   ├── server.py           # Flask + Socket.IO
 │   └── main.py             # エントリーポイント
@@ -126,11 +131,6 @@ AiAgentGame2/
 │   │   ├── views/          # ページビュー
 │   │   └── types/          # TypeScript型定義
 │   └── electron/           # Electronメインプロセス
-│
-├── agents/                  # エージェント設計仕様書
-│   ├── phase1_*.md         # Phase 1 エージェント仕様
-│   ├── phase2_*.md         # Phase 2 エージェント仕様
-│   └── phase3_*.md         # Phase 3 エージェント仕様
 │
 └── sample_webui/            # UIサンプル（参考用）
 ```

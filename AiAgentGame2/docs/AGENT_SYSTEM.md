@@ -61,33 +61,56 @@ Human介入は全13箇所。各ポイントで「承認」「修正指示」「�
 
 ## Agent一覧
 
+詳細なAgent設計は [agent/](./agent/) 配下を参照。
+
 ### Phase1: 企画（6 Agent）
 
-| Agent | 役割 | 詳細 |
-|-------|------|------|
-| Concept | 企画 | [agents/phase1_concept.md](./agents/phase1_concept.md) |
-| Design | 設計 | [agents/phase1_design.md](./agents/phase1_design.md) |
-| Scenario | シナリオ | [agents/phase1_scenario.md](./agents/phase1_scenario.md) |
-| Character | キャラクター | [agents/phase1_character.md](./agents/phase1_character.md) |
-| World | 世界観 | [agents/phase1_world.md](./agents/phase1_world.md) |
-| TaskSplit | タスク分解 | [agents/phase1_task_split.md](./agents/phase1_task_split.md) |
+| Agent | 役割 |
+|-------|------|
+| Concept | ゲームコンセプトを生成 |
+| Design | 技術設計文書を作成 |
+| Scenario | ストーリー・シナリオを作成 |
+| Character | キャラクター設定を作成 |
+| World | 世界観設定を作成 |
+| TaskSplit | 実装タスクに分解 |
 
 ### Phase2: 開発（2 Leader + 複数Agent）
 
-| Agent | 種別 | 詳細 |
-|-------|------|------|
-| CodeLeader | Leader | [agents/phase2_code_leader.md](./agents/phase2_code_leader.md) |
-| AssetLeader | Leader | [agents/phase2_asset_leader.md](./agents/phase2_asset_leader.md) |
-| CodeAgents | Agent群 | GameLoop, State, UI等（動的に生成） |
-| AssetAgents | Agent群 | Image, Audio等（動的に生成） |
+| Agent | 種別 |
+|-------|------|
+| CodeLeader | コード実装を統括するLeader |
+| AssetLeader | アセット生成を統括するLeader |
+| CodeAgents | GameLoop, State, UI等（動的に生成） |
+| AssetAgents | Image, Audio等（動的に生成） |
 
 ### Phase3: 品質（3 Agent）
 
-| Agent | 役割 | 詳細 |
-|-------|------|------|
-| Integrator | 統合 | [agents/phase3_integrator.md](./agents/phase3_integrator.md) |
-| Tester | テスト | [agents/phase3_tester.md](./agents/phase3_tester.md) |
-| Reviewer | レビュー | [agents/phase3_reviewer.md](./agents/phase3_reviewer.md) |
+| Agent | 役割 |
+|-------|------|
+| Integrator | コード・アセットを統合 |
+| Tester | テストを実行 |
+| Reviewer | 最終レビュー |
+
+### Agent設計ドキュメント
+
+| ドキュメント | 内容 |
+|-------------|------|
+| [01_AGENT_HIERARCHY.md](./agent/01_AGENT_HIERARCHY.md) | Agent階層構造 |
+| [02_SESSION_CONTINUITY.md](./agent/02_SESSION_CONTINUITY.md) | セッション継続性 |
+| [03_DYNAMIC_SCALING.md](./agent/03_DYNAMIC_SCALING.md) | 動的スケーリング |
+| [04_VERSION_CONTROL.md](./agent/04_VERSION_CONTROL.md) | バージョン管理 |
+| [05_SINGLE_TASK_PRINCIPLE.md](./agent/05_SINGLE_TASK_PRINCIPLE.md) | 単一タスク原則 |
+| [06_LLM_COST_STRATEGY.md](./agent/06_LLM_COST_STRATEGY.md) | LLMコスト戦略 |
+| [07_PARALLEL_EXECUTION.md](./agent/07_PARALLEL_EXECUTION.md) | 並列実行 |
+| [08_CONTINUOUS_LEARNING.md](./agent/08_CONTINUOUS_LEARNING.md) | 継続学習 |
+| [09_CONTEXT_COMPRESSION.md](./agent/09_CONTEXT_COMPRESSION.md) | コンテキスト圧縮 |
+| [10_SYSTEM_PROMPT.md](./agent/10_SYSTEM_PROMPT.md) | システムプロンプト |
+| [11_LOG_SYSTEM.md](./agent/11_LOG_SYSTEM.md) | ログシステム |
+| [12_SELF_IMPROVEMENT.md](./agent/12_SELF_IMPROVEMENT.md) | 自己改善 |
+| [13_WORKSPACE_ISOLATION.md](./agent/13_WORKSPACE_ISOLATION.md) | ワークスペース分離 |
+| [14_AGENT_POOL_CONTROL.md](./agent/14_AGENT_POOL_CONTROL.md) | Agentプール制御 |
+| [15_MECHANICAL_TASK_STRATEGY.md](./agent/15_MECHANICAL_TASK_STRATEGY.md) | 機械的タスク戦略 |
+| [16_MCP_AND_SKILLS.md](./agent/16_MCP_AND_SKILLS.md) | MCPとスキル |
 
 ---
 

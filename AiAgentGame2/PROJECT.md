@@ -17,26 +17,22 @@
 ## フォルダ構成
 
 ```
-langgraph/
+AiAgentGame2/
 ├── PROJECT.md              # プロジェクト概要（このファイル）
-├── AGENT_SYSTEM.md         # Agentシステム全体設計
-├── DEVELOPMENT_RULES.md    # 開発規約
-├── agents/                 # 個別Agent仕様
-│   ├── concept.md
-│   ├── design.md
-│   ├── scenario.md
-│   ├── character.md
-│   ├── world.md
-│   ├── task_split.md
-│   ├── code_leader.md
-│   ├── asset_leader.md
-│   ├── integrator.md
-│   ├── tester.md
-│   └── reviewer.md
-└── src/                    # 実装コード（今後作成）
-    ├── agents/
-    ├── state/
-    └── orchestrator/
+├── SETUP.md                # セットアップガイド
+├── CLAUDE.md               # Claude Code向けルール
+├── docs/                   # ドキュメント
+│   ├── AGENT_SYSTEM.md     # Agentシステム全体設計
+│   ├── DEVELOPMENT_RULES.md # 開発規約
+│   ├── WEBUI_DESIGN.md     # WebUIデザイン仕様
+│   ├── WEBUI_ARCHITECTURE.md # WebUIアーキテクチャ
+│   ├── WebUI_API.md        # API仕様
+│   └── agent/              # 個別Agent仕様
+│       ├── 01_AGENT_HIERARCHY.md
+│       ├── ...
+│       └── 16_MCP_AND_SKILLS.md
+├── backend/                # バックエンドサーバー
+└── langgraph-studio/       # フロントエンド (Electron + React)
 ```
 
 ---
