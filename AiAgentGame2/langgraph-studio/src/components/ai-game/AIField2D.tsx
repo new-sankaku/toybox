@@ -1,7 +1,8 @@
 import{useRef,useEffect,useCallback,useState}from'react'
-import type{CharacterState,AIServiceType}from'./types'
-import{SERVICE_CONFIG}from'./types'
+import type{CharacterState}from'./types'
+import{AGENT_HIERARCHY,DIVISION_AGENTS,getAgentsByDivision,getAgentLevel}from'./types'
 import{drawPixelCharacter,getAgentDisplayConfig}from'./pixelCharacters'
+import type{AgentType}from'@/types/agent'
 
 interface AIField2DProps{
  characters:CharacterState[]
@@ -17,7 +18,13 @@ const NIER_COLORS={
  accent:'#b5a078',
  accentBright:'#c4a574',
  textMain:'#4a4540',
- textDim:'#7a756a'
+ textDim:'#7a756a',
+ divisionBg:'#e8e4d8',
+ divisionBorder:'#9a9080',
+ orchestraBg:'#d0c8b0',
+ orchestraBorder:'#8a8070',
+ summonGlow:'rgba(200,180,120,0.5)',
+ activeGlow:'rgba(180,160,100,0.8)'
 }
 
 interface CharacterPosition{
@@ -25,10 +32,26 @@ interface CharacterPosition{
  y:number
  targetX:number
  targetY:number
- wanderTimer:number
- rotation:number
- wasWorking:boolean
+ scale:number
+ targetScale:number
+ opacity:number
+ targetOpacity:number
+ summoned:boolean
+ summonProgress:number
 }
+
+interface DivisionLayout{
+ x:number
+ y:number
+ width:number
+ height:number
+ agentType:AgentType
+ workers:CharacterState[]
+ divisionChar?:CharacterState
+}
+
+const MAX_VISIBLE_WORKERS=3
+const SUMMON_DURATION=60 // frames for summon animation
 
 export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIField2DProps):JSX.Element{
  const canvasRef=useRef<HTMLCanvasElement>(null)
@@ -37,13 +60,10 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
  const positionsRef=useRef<Map<string,CharacterPosition>>(new Map())
  const frameRef=useRef<number>(0)
  const animationRef=useRef<number>(0)
- const prevDimensionsRef=useRef({width:0,height:0})
+ const summonOrderRef=useRef<Map<string,number>>(new Map())
+ const summonCounterRef=useRef<number>(0)
 
- const ROOM_X=0.68
- const ROOM_WIDTH=0.30
- const PLATFORM_X=0.03
- const PLATFORM_WIDTH=0.35
-
+ // Canvas resize handling
  useEffect(()=>{
   const container=containerRef.current
   const canvas=canvasRef.current
@@ -54,284 +74,386 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    if(rect.width===0||rect.height===0)return
 
    const dpr=window.devicePixelRatio||1
-
    canvas.width=rect.width*dpr
    canvas.height=rect.height*dpr
-
    canvas.style.width=`${rect.width}px`
    canvas.style.height=`${rect.height}px`
 
    const ctx=canvas.getContext('2d')
-   if(ctx){
-    ctx.scale(dpr,dpr)
-   }
+   if(ctx)ctx.scale(dpr,dpr)
 
    setDimensions({width:rect.width,height:rect.height})
   }
 
-  const resizeObserver=new ResizeObserver(()=>{
-   updateDimensions()
-  })
+  const resizeObserver=new ResizeObserver(()=>updateDimensions())
   resizeObserver.observe(container)
-
-  return()=>{
-   resizeObserver.disconnect()
-  }
+  return()=>resizeObserver.disconnect()
  },[])
 
+ // Group characters by hierarchy
+ const groupCharacters=useCallback(()=>{
+  const orchestrator=characters.find(c=>getAgentLevel(c.agentType)==='orchestrator')
+  const divisions:Map<AgentType,{division?:CharacterState,workers:CharacterState[]}>=new Map()
+
+  DIVISION_AGENTS.forEach(div=>{
+   const workerTypes=getAgentsByDivision(div)
+   const divChar=characters.find(c=>c.agentType===div)
+   const workers=characters.filter(c=>workerTypes.includes(c.agentType))
+   if(divChar||workers.length>0){
+    divisions.set(div,{division:divChar,workers})
+   }
+  })
+
+  return{orchestrator,divisions}
+ },[characters])
+
+ // Calculate division layouts dynamically
+ const calculateDivisionLayouts=useCallback((
+  divisions:Map<AgentType,{division?:CharacterState,workers:CharacterState[]}>
+ ):DivisionLayout[]=>{
+  const layouts:DivisionLayout[]=[]
+  const activeDivisions=Array.from(divisions.entries()).filter(([_,v])=>v.division||v.workers.length>0)
+  const count=activeDivisions.length
+  if(count===0)return layouts
+
+  const padding=20
+  const orchestraHeight=dimensions.height*0.22
+  const availableHeight=dimensions.height-orchestraHeight-padding*2
+  const availableWidth=dimensions.width-padding*2
+
+  // Calculate grid layout for divisions
+  const cols=count<=2?count:2
+  const rows=Math.ceil(count/cols)
+  const divWidth=(availableWidth-padding*(cols-1))/cols
+  const divHeight=(availableHeight-padding*(rows-1))/rows
+  const minDivSize=Math.min(divWidth,divHeight,200)
+
+  activeDivisions.forEach(([agentType,data],index)=>{
+   const col=index%cols
+   const row=Math.floor(index/cols)
+   const itemsInRow=row===rows-1?(count-row*cols):cols
+   const rowStartX=padding+(availableWidth-itemsInRow*(minDivSize+padding)+padding)/2
+
+   layouts.push({
+    x:rowStartX+col*(minDivSize+padding),
+    y:orchestraHeight+padding+row*(minDivSize+padding),
+    width:minDivSize,
+    height:minDivSize,
+    agentType,
+    workers:data.workers,
+    divisionChar:data.division
+   })
+  })
+
+  return layouts
+ },[dimensions])
+
+ // Update character positions
  useEffect(()=>{
   const positions=positionsRef.current
-  const roomStartX=dimensions.width*ROOM_X
-  const roomWidth=dimensions.width*ROOM_WIDTH
-  const roomStartY=dimensions.height*0.08
-  const roomHeight=dimensions.height*0.84
+  const summonOrder=summonOrderRef.current
 
-  const dimensionsChanged=prevDimensionsRef.current.width!==dimensions.width||
-   prevDimensionsRef.current.height!==dimensions.height
-  prevDimensionsRef.current={width:dimensions.width,height:dimensions.height}
-
-  const currentAgentIds=new Set(characters.map(c=>c.agentId))
-  for(const agentId of positions.keys()){
-   if(!currentAgentIds.has(agentId)){
-    positions.delete(agentId)
+  // Remove positions for characters that no longer exist
+  const currentIds=new Set(characters.map(c=>c.agentId))
+  for(const id of positions.keys()){
+   if(!currentIds.has(id)){
+    positions.delete(id)
+    summonOrder.delete(id)
    }
   }
 
-  const spriteSize=56*characterScale
-  const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
-  const gridRows=Math.ceil(characters.length/gridCols)
-  const cellWidth=(roomWidth-30)/gridCols
-  const cellHeight=(roomHeight-50)/Math.max(gridRows,4)
-
-  characters.forEach((char,index)=>{
-   const col=index%gridCols
-   const row=Math.floor(index/gridCols)
-   const x=roomStartX+20+col*cellWidth+cellWidth/2
-   const y=roomStartY+35+row*cellHeight+cellHeight/2
-   const existing=positions.get(char.agentId)
-   if(existing){
-    if(dimensionsChanged&&char.status!=='working'){
-     existing.x=x
-     existing.y=y
-     existing.targetX=x
-     existing.targetY=y
-    }
-   }else{
-    positions.set(char.agentId,{
-     x,y,
-     targetX:x,
-     targetY:y,
-     wanderTimer:0,
-     rotation:0,
-     wasWorking:char.status==='working'
-    })
+  // Track new characters for summon animation
+  characters.forEach(char=>{
+   if(!summonOrder.has(char.agentId)){
+    summonOrder.set(char.agentId,summonCounterRef.current++)
    }
   })
- },[characters,dimensions,characterScale])
 
+  const{orchestrator,divisions}=groupCharacters()
+  const layouts=calculateDivisionLayouts(divisions)
+  const spriteSize=48*characterScale
 
- const drawPlatform=useCallback((
-  ctx:CanvasRenderingContext2D,
-  x:number,
-  y:number,
-  width:number,
-  height:number,
-  serviceType:AIServiceType,
-  hasWorkers:boolean,
-  frame:number
-):{centerX:number;centerY:number}=>{
-  const config=SERVICE_CONFIG[serviceType]
-
-  ctx.fillStyle=hasWorkers?NIER_COLORS.backgroundDark : NIER_COLORS.background
-  ctx.fillRect(x,y,width,height)
-
-  ctx.strokeStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primaryDim
-  ctx.lineWidth=hasWorkers?2 : 1
-  ctx.strokeRect(x,y,width,height)
-
-  const cs=8
-  ctx.fillStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primary
-  ctx.fillRect(x,y,cs,2)
-  ctx.fillRect(x,y,2,cs)
-  ctx.fillRect(x+width-cs,y,cs,2)
-  ctx.fillRect(x+width-2,y,2,cs)
-  ctx.fillRect(x,y+height-2,cs,2)
-  ctx.fillRect(x,y+height-cs,2,cs)
-  ctx.fillRect(x+width-cs,y+height-2,cs,2)
-  ctx.fillRect(x+width-2,y+height-cs,2,cs)
-
-  ctx.fillStyle=NIER_COLORS.textMain
-  ctx.font='bold 13px "Courier New", monospace'
-  ctx.textAlign='left'
-  ctx.fillText(serviceType.toUpperCase(),x+12,y+20)
-
-  ctx.font='10px "Courier New", monospace'
-  ctx.fillStyle=NIER_COLORS.textDim
-  ctx.fillText(config.description,x+12,y+36)
-
-  const indicatorY=y+height-15
-  if(hasWorkers){
-   ctx.shadowColor=NIER_COLORS.accent
-   ctx.shadowBlur=8+Math.sin(frame*0.1)*4
+  // Position orchestrator at top center
+  if(orchestrator){
+   const x=dimensions.width/2
+   const y=dimensions.height*0.11
+   const existing=positions.get(orchestrator.agentId)
+   if(existing){
+    existing.targetX=x
+    existing.targetY=y
+    existing.targetScale=1.3
+    existing.targetOpacity=1
+   }else{
+    positions.set(orchestrator.agentId,{
+     x,y,targetX:x,targetY:y,
+     scale:0,targetScale:1.3,
+     opacity:0,targetOpacity:1,
+     summoned:false,summonProgress:0
+    })
+   }
   }
-  ctx.beginPath()
-  ctx.arc(x+width/2,indicatorY,4,0,Math.PI*2)
-  ctx.fillStyle=hasWorkers?NIER_COLORS.accent : NIER_COLORS.primaryDim
-  ctx.fill()
+
+  // Position division agents and their workers
+  layouts.forEach(layout=>{
+   // Position division agent at top of its box
+   if(layout.divisionChar){
+    const x=layout.x+layout.width/2
+    const y=layout.y+spriteSize/2+15
+    const existing=positions.get(layout.divisionChar.agentId)
+    if(existing){
+     existing.targetX=x
+     existing.targetY=y
+     existing.targetScale=1.0
+     existing.targetOpacity=1
+    }else{
+     positions.set(layout.divisionChar.agentId,{
+      x,y,targetX:x,targetY:y,
+      scale:0,targetScale:1.0,
+      opacity:0,targetOpacity:1,
+      summoned:false,summonProgress:0
+     })
+    }
+   }
+
+   // Position workers inside the division box
+   const visibleWorkers=layout.workers.slice(0,MAX_VISIBLE_WORKERS)
+   const workerCount=Math.min(visibleWorkers.length,MAX_VISIBLE_WORKERS)
+   const workerAreaY=layout.y+spriteSize+40
+   const workerAreaHeight=layout.height-spriteSize-50
+   const workerSpacing=Math.min(spriteSize+10,workerAreaHeight/Math.max(workerCount,1))
+
+   visibleWorkers.forEach((worker,index)=>{
+    const x=layout.x+layout.width/2
+    const y=workerAreaY+workerSpacing*index+workerSpacing/2
+    const existing=positions.get(worker.agentId)
+    if(existing){
+     existing.targetX=x
+     existing.targetY=y
+     existing.targetScale=0.85
+     existing.targetOpacity=1
+    }else{
+     // New workers spawn from division center
+     const spawnX=layout.x+layout.width/2
+     const spawnY=layout.y+spriteSize/2+15
+     positions.set(worker.agentId,{
+      x:spawnX,y:spawnY,targetX:x,targetY:y,
+      scale:0,targetScale:0.85,
+      opacity:0,targetOpacity:1,
+      summoned:false,summonProgress:0
+     })
+    }
+   })
+  })
+ },[characters,dimensions,characterScale,groupCharacters,calculateDivisionLayouts])
+
+ // Draw orchestrator area
+ const drawOrchestraArea=useCallback((
+  ctx:CanvasRenderingContext2D,
+  orchestrator:CharacterState|undefined,
+  frame:number
+ )=>{
+  const centerX=dimensions.width/2
+  const y=dimensions.height*0.02
+  const width=Math.min(dimensions.width*0.5,280)
+  const height=dimensions.height*0.18
+
+  // Background with subtle glow when active
+  const isActive=orchestrator?.status==='working'
+  if(isActive){
+   ctx.shadowColor=NIER_COLORS.activeGlow
+   ctx.shadowBlur=15+Math.sin(frame*0.08)*5
+  }
+  ctx.fillStyle=NIER_COLORS.orchestraBg
+  ctx.fillRect(centerX-width/2,y,width,height)
   ctx.shadowBlur=0
 
-  if(hasWorkers){
-   const barW=width-30
-   const barX=x+15
-   const barY=y+height-30
-   ctx.fillStyle=NIER_COLORS.primaryDim
-   ctx.fillRect(barX,barY,barW,3)
-   ctx.fillStyle=NIER_COLORS.accent
-   ctx.fillRect(barX,barY,barW*((Math.sin(frame*0.05)+1)/2),3)
-  }
-
-  return{centerX:x+width/2,centerY:y+height/2}
- },[])
-
- const drawRoom=useCallback((
-  ctx:CanvasRenderingContext2D,
-  x:number,
-  y:number,
-  width:number,
-  height:number
-)=>{
-  ctx.fillStyle=NIER_COLORS.backgroundDark
-  ctx.fillRect(x,y,width,height)
-
-  ctx.strokeStyle=NIER_COLORS.primary
+  // Border
+  ctx.strokeStyle=NIER_COLORS.orchestraBorder
   ctx.lineWidth=2
+  ctx.strokeRect(centerX-width/2,y,width,height)
+
+  // Corner decorations
+  const cs=12
+  ctx.fillStyle=NIER_COLORS.primary
+  const corners=[
+   [centerX-width/2,y],
+   [centerX+width/2-cs,y],
+   [centerX-width/2,y+height-cs],
+   [centerX+width/2-cs,y+height-cs]
+  ]
+  corners.forEach(([cx,cy])=>{
+   ctx.fillRect(cx,cy,cs,2)
+   ctx.fillRect(cx,cy,2,cs)
+  })
+
+  // Title
+  ctx.fillStyle=NIER_COLORS.textMain
+  ctx.font='bold 12px "Courier New", monospace'
+  ctx.textAlign='center'
+  ctx.fillText('[ ORCHESTRATOR ]',centerX,y+height-8)
+ },[dimensions])
+
+ // Draw division box
+ const drawDivisionBox=useCallback((
+  ctx:CanvasRenderingContext2D,
+  layout:DivisionLayout,
+  frame:number
+ )=>{
+  const{x,y,width,height,agentType,workers,divisionChar}=layout
+  const isActive=divisionChar?.status==='working'||workers.some(w=>w.status==='working')
+  const hierarchy=AGENT_HIERARCHY[agentType]
+
+  // Background with glow when active
+  if(isActive){
+   ctx.shadowColor=NIER_COLORS.summonGlow
+   ctx.shadowBlur=10+Math.sin(frame*0.1)*5
+  }
+  ctx.fillStyle=NIER_COLORS.divisionBg
+  ctx.fillRect(x,y,width,height)
+  ctx.shadowBlur=0
+
+  // Border
+  ctx.strokeStyle=isActive?NIER_COLORS.accent:NIER_COLORS.divisionBorder
+  ctx.lineWidth=isActive?2:1
   ctx.strokeRect(x,y,width,height)
 
-  const cl=15
-  ctx.fillStyle=NIER_COLORS.primary
-  ctx.fillRect(x,y,cl,2)
-  ctx.fillRect(x,y,2,cl)
-  ctx.fillRect(x+width-cl,y,cl,2)
-  ctx.fillRect(x+width-2,y,2,cl)
-  ctx.fillRect(x,y+height-2,cl,2)
-  ctx.fillRect(x,y+height-cl,2,cl)
-  ctx.fillRect(x+width-cl,y+height-2,cl,2)
-  ctx.fillRect(x+width-2,y+height-cl,2,cl)
+  // Corner decorations
+  const cs=8
+  ctx.fillStyle=isActive?NIER_COLORS.accent:NIER_COLORS.primaryDim
+  ;[[x,y],[x+width-cs,y],[x,y+height-cs],[x+width-cs,y+height-cs]].forEach(([cx,cy])=>{
+   ctx.fillRect(cx,cy,cs,2)
+   ctx.fillRect(cx,cy,2,cs)
+  })
 
-  ctx.fillStyle=NIER_COLORS.textMain
-  ctx.font='bold 11px "Courier New", monospace'
+  // Division label at bottom
+  ctx.fillStyle=NIER_COLORS.textDim
+  ctx.font='10px "Courier New", monospace'
   ctx.textAlign='center'
-  ctx.fillText('[ AGENTS ]',x+width/2,y+15)
- },[])
+  ctx.fillText(`[ ${hierarchy?.groupLabel||agentType} ]`,x+width/2,y+height-6)
 
- const drawDataLine=useCallback((
-  ctx:CanvasRenderingContext2D,
-  platformRight:number,
-  platformCenterY:number,
-  roomLeft:number,
-  roomCenterY:number,
-  frame:number
-)=>{
-  ctx.strokeStyle=NIER_COLORS.primaryDim
-  ctx.lineWidth=2
-  ctx.setLineDash([])
-  ctx.beginPath()
-  ctx.moveTo(platformRight,platformCenterY)
-  ctx.lineTo(roomLeft,roomCenterY)
-  ctx.stroke()
-
-  const dx=roomLeft-platformRight
-  const dy=roomCenterY-platformCenterY
-  const len=Math.sqrt(dx*dx+dy*dy)
-
-  const packetsToApi=4
-  for(let i=0;i<packetsToApi;i++){
-   const t=((frame*0.015+i/packetsToApi)%1)
-   const px=roomLeft-dx*t
-   const py=roomCenterY-dy*t
-
+  // Worker count indicator if more than MAX_VISIBLE_WORKERS
+  if(workers.length>MAX_VISIBLE_WORKERS){
+   const extraCount=workers.length-MAX_VISIBLE_WORKERS
    ctx.fillStyle=NIER_COLORS.accent
-   ctx.beginPath()
-   ctx.arc(px,py,4,0,Math.PI*2)
-   ctx.fill()
-  }
+   ctx.font='bold 11px "Courier New", monospace'
+   ctx.textAlign='right'
+   ctx.fillText(`+${extraCount}`,x+width-8,y+height-6)
 
-  const packetsFromApi=4
-  for(let i=0;i<packetsFromApi;i++){
-   const t=((frame*0.012+i/packetsFromApi+0.5)%1)
-   const px=platformRight+dx*t
-   const py=platformCenterY+dy*t
-
-   ctx.fillStyle='#7a7a7a'
-   ctx.beginPath()
-   ctx.rect(px-3,py-3,6,6)
-   ctx.fill()
+   // Power-up indicator (multiple rings)
+   const indicatorX=x+width-20
+   const indicatorY=y+height-25
+   for(let i=0;i<Math.min(extraCount,3);i++){
+    ctx.strokeStyle=`rgba(180,160,120,${0.6-i*0.15})`
+    ctx.lineWidth=1
+    ctx.beginPath()
+    ctx.arc(indicatorX,indicatorY,6+i*4+Math.sin(frame*0.1+i)*1,0,Math.PI*2)
+    ctx.stroke()
+   }
   }
  },[])
 
+ // Draw speech bubble
  const drawSpeechBubble=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
-  text:string
-)=>{
-  ctx.font='11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  text:string,
+  scale:number
+ )=>{
+  ctx.font=`${11*scale}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
 
-  const padding=6
-  const lineHeight=14
-  const maxLineWidth=140
+  const padding=6*scale
+  const lineHeight=14*scale
+  const maxLineWidth=160*scale
 
+  // Word wrap
   let lines:string[]=[]
-  const textWidth=ctx.measureText(text).width
-  if(textWidth<=maxLineWidth){
-   lines=[text]
-  }else{
-   let currentLine=''
-   for(const char of text.split('')){
-    const testLine=currentLine+char
-    if(ctx.measureText(testLine).width>maxLineWidth){
-     if(currentLine)lines.push(currentLine)
-     currentLine=char
-    }else{
-     currentLine=testLine
-    }
-   }
-   if(currentLine)lines.push(currentLine)
-   if(lines.length>2){
-    lines=lines.slice(0,2)
-    lines[1]=lines[1].slice(0,-3)+'...'
+  const words=text.split('')
+  let currentLine=''
+  for(const char of words){
+   const testLine=currentLine+char
+   if(ctx.measureText(testLine).width>maxLineWidth){
+    if(currentLine)lines.push(currentLine)
+    currentLine=char
+   }else{
+    currentLine=testLine
    }
   }
+  if(currentLine)lines.push(currentLine)
 
-  const actualTextWidth=Math.max(...lines.map(l=>ctx.measureText(l).width))
-  const bubbleWidth=actualTextWidth+padding*2+4
+  // Limit to 3 lines
+  if(lines.length>3){
+   lines=lines.slice(0,3)
+   lines[2]=lines[2].slice(0,-3)+'...'
+  }
+
+  const actualWidth=Math.max(...lines.map(l=>ctx.measureText(l).width))
+  const bubbleWidth=actualWidth+padding*2+4
   const bubbleHeight=lines.length*lineHeight+padding*2
 
-  const bubbleX=Math.round(x+35)
+  const bubbleX=Math.round(x+40*scale)
   const bubbleY=Math.round(y-bubbleHeight/2)
 
+  // Bubble background
   ctx.fillStyle='#e8e4d8'
   ctx.fillRect(bubbleX,bubbleY,bubbleWidth,bubbleHeight)
-
   ctx.strokeStyle='#8a8070'
   ctx.lineWidth=1
   ctx.strokeRect(bubbleX+0.5,bubbleY+0.5,bubbleWidth-1,bubbleHeight-1)
 
+  // Pointer
   ctx.fillStyle='#e8e4d8'
   ctx.beginPath()
-  ctx.moveTo(bubbleX,y-5)
-  ctx.lineTo(bubbleX-8,y)
-  ctx.lineTo(bubbleX,y+5)
+  ctx.moveTo(bubbleX,y-5*scale)
+  ctx.lineTo(bubbleX-8*scale,y)
+  ctx.lineTo(bubbleX,y+5*scale)
   ctx.closePath()
   ctx.fill()
 
+  // Text
   ctx.fillStyle='#3a3530'
   ctx.textAlign='left'
   lines.forEach((line,i)=>{
-   ctx.fillText(line,bubbleX+padding,bubbleY+padding+(i+1)*lineHeight-3)
+   ctx.fillText(line,bubbleX+padding,bubbleY+padding+(i+1)*lineHeight-3*scale)
   })
  },[])
 
+ // Draw connection line between orchestrator and divisions
+ const drawConnectionLine=useCallback((
+  ctx:CanvasRenderingContext2D,
+  fromX:number,
+  fromY:number,
+  toX:number,
+  toY:number,
+  isActive:boolean,
+  frame:number
+ )=>{
+  ctx.strokeStyle=isActive?NIER_COLORS.accent:NIER_COLORS.primaryDim
+  ctx.lineWidth=isActive?2:1
+  ctx.setLineDash(isActive?[]:[4,4])
+  ctx.beginPath()
+  ctx.moveTo(fromX,fromY)
+  ctx.lineTo(toX,toY)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // Animated particles on active connections
+  if(isActive){
+   const dx=toX-fromX
+   const dy=toY-fromY
+   for(let i=0;i<3;i++){
+    const t=((frame*0.02+i/3)%1)
+    const px=fromX+dx*t
+    const py=fromY+dy*t
+    ctx.fillStyle=`rgba(200,180,120,${0.8-t*0.6})`
+    ctx.beginPath()
+    ctx.arc(px,py,3,0,Math.PI*2)
+    ctx.fill()
+   }
+  }
+ },[])
+
+ // Main render loop
  useEffect(()=>{
   const canvas=canvasRef.current
   if(!canvas)return
@@ -342,129 +464,113 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const render=()=>{
    frameRef.current++
    const frame=frameRef.current
-
    const dpr=window.devicePixelRatio||1
    ctx.setTransform(dpr,0,0,dpr,0,0)
 
+   // Clear canvas
    ctx.fillStyle=NIER_COLORS.background
    ctx.fillRect(0,0,dimensions.width,dimensions.height)
 
-   const platformX=dimensions.width*PLATFORM_X
-   const platformWidth=dimensions.width*PLATFORM_WIDTH
-   const roomX=dimensions.width*ROOM_X
-   const roomWidth=dimensions.width*ROOM_WIDTH
-   const roomY=dimensions.height*0.08
-   const roomHeight=dimensions.height*0.84
-
-   const services=Object.keys(SERVICE_CONFIG)as AIServiceType[]
-   const numServices=services.length
-   const platformGap=dimensions.height*0.02
-   const totalGapHeight=(numServices-1)*platformGap
-   const platformHeight=(roomHeight-totalGapHeight)/numServices
-   const platformCenters:Record<AIServiceType,{centerX:number;centerY:number}>={}as any
-
-   services.forEach((service,index)=>{
-    const py=roomY+index*(platformHeight+platformGap)
-    const hasWorkers=characters.some(c=>c.status==='working'&&c.targetService===service)
-    platformCenters[service]=drawPlatform(ctx,platformX,py,platformWidth,platformHeight,service,hasWorkers,frame)
-   })
-
-   drawRoom(ctx,roomX,roomY,roomWidth,roomHeight)
-
+   const{orchestrator,divisions}=groupCharacters()
+   const layouts=calculateDivisionLayouts(divisions)
    const positions=positionsRef.current
-   const spriteSize=56*characterScale
-   const workingAgents:{char:CharacterState;pos:CharacterPosition}[]=[]
+   const spriteSize=48*characterScale
 
-   const workingPerService:Record<AIServiceType,number>={}as Record<AIServiceType,number>
-   services.forEach(s=>{ workingPerService[s]=0 })
-   const workingIndexMap=new Map<string,number>()
+   // Draw orchestrator area
+   drawOrchestraArea(ctx,orchestrator,frame)
 
-   characters.forEach((char)=>{
-    if(char.status==='working'&&char.targetService){
-     workingIndexMap.set(char.agentId,workingPerService[char.targetService])
-     workingPerService[char.targetService]++
-    }
+   // Draw division boxes
+   layouts.forEach(layout=>{
+    drawDivisionBox(ctx,layout,frame)
    })
 
-   const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
-   const cellWidth=(roomWidth-30)/gridCols
-   const cellHeight=(roomHeight-50)/Math.max(Math.ceil(characters.length/gridCols),4)
+   // Draw connection lines from orchestrator to divisions
+   if(orchestrator){
+    const orchPos=positions.get(orchestrator.agentId)
+    if(orchPos){
+     layouts.forEach(layout=>{
+      const isActive=layout.divisionChar?.status==='working'||layout.workers.some(w=>w.status==='working')
+      drawConnectionLine(
+       ctx,
+       orchPos.x,
+       orchPos.y+spriteSize*orchPos.scale/2+10,
+       layout.x+layout.width/2,
+       layout.y,
+       isActive,
+       frame
+      )
+     })
+    }
+   }
 
-   characters.forEach((char,index)=>{
+   // Update and draw all characters
+   characters.forEach(char=>{
     const pos=positions.get(char.agentId)
     if(!pos)return
 
-    const isWorking=char.status==='working'
+    // Smooth animation with easing
+    const easeSpeed=0.06
+    pos.x+=(pos.targetX-pos.x)*easeSpeed
+    pos.y+=(pos.targetY-pos.y)*easeSpeed
+    pos.scale+=(pos.targetScale-pos.scale)*easeSpeed
+    pos.opacity+=(pos.targetOpacity-pos.opacity)*easeSpeed
 
-    if(isWorking&&char.targetService){
-     const pc=platformCenters[char.targetService]
-     const workingIndex=workingIndexMap.get(char.agentId)||0
-     const totalWorking=workingPerService[char.targetService]
-
-     const lineX=platformX+platformWidth+20
-     const spreadY=totalWorking>1?(workingIndex-(totalWorking-1)/2)*25:0
-     pos.targetX=lineX
-     pos.targetY=pc.centerY+spreadY
-     pos.wasWorking=true
-     workingAgents.push({char,pos})
-    }else{
-     const col=index%gridCols
-     const row=Math.floor(index/gridCols)
-     pos.targetX=roomX+20+col*cellWidth+cellWidth/2
-     pos.targetY=roomY+35+row*cellHeight+cellHeight/2
-     pos.wasWorking=false
-    }
-
-    const speed=isWorking?0.08:0.06
-    pos.x+=(pos.targetX-pos.x)*speed
-    pos.y+=(pos.targetY-pos.y)*speed
-   })
-
-   const activeServices=new Set<AIServiceType>()
-   workingAgents.forEach(({char,pos})=>{
-    if(char.targetService){
-     const distToTarget=Math.sqrt(Math.pow(pos.x-pos.targetX,2)+Math.pow(pos.y-pos.targetY,2))
-     if(distToTarget<50){
-      activeServices.add(char.targetService)
+    // Summon animation progress
+    if(!pos.summoned){
+     pos.summonProgress++
+     if(pos.summonProgress>=SUMMON_DURATION){
+      pos.summoned=true
      }
     }
-   })
 
-   activeServices.forEach((service)=>{
-    const pc=platformCenters[service]
-    const platformRightEdge=platformX+platformWidth
-    drawDataLine(ctx,platformRightEdge,pc.centerY,roomX,roomY+roomHeight/2,frame)
-   })
-
-   characters.forEach((char)=>{
-    const pos=positions.get(char.agentId)
-    if(!pos)return
+    // Skip if not visible
+    if(pos.opacity<0.01||pos.scale<0.01)return
 
     const isWorking=char.status==='working'
     const isActive=char.isActive??isWorking
     const config=getAgentDisplayConfig(char.agentType)
 
-    if(!isActive){
-     ctx.globalAlpha=0.4
+    // Apply opacity for inactive or summoning agents
+    let alpha=pos.opacity
+    if(!isActive)alpha*=0.5
+    if(!pos.summoned)alpha*=pos.summonProgress/SUMMON_DURATION
+
+    ctx.globalAlpha=alpha
+
+    // Draw summon effect for new agents
+    if(!pos.summoned&&pos.summonProgress<SUMMON_DURATION){
+     const progress=pos.summonProgress/SUMMON_DURATION
+     ctx.strokeStyle=NIER_COLORS.summonGlow
+     ctx.lineWidth=2
+     ctx.beginPath()
+     ctx.arc(pos.x,pos.y,spriteSize*pos.scale*(1.5-progress*0.5),0,Math.PI*2*progress)
+     ctx.stroke()
     }
-    drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking,frame,characterScale)
+
+    // Draw character
+    drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking,frame,pos.scale*characterScale)
+
     ctx.globalAlpha=1.0
 
-    ctx.font='10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
-    ctx.fillStyle=isActive?NIER_COLORS.textMain : NIER_COLORS.textDim
+    // Draw label (never truncated)
+    ctx.font=`${10*pos.scale}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+    ctx.fillStyle=isActive?NIER_COLORS.textMain:NIER_COLORS.textDim
     ctx.textAlign='center'
-    ctx.fillText(config.label,pos.x,pos.y+spriteSize/2+12)
+    ctx.fillText(config.label,pos.x,pos.y+spriteSize*pos.scale/2+12*pos.scale)
 
+    // Draw speech bubble for working agents (never truncated severely)
     if(isWorking&&char.request){
-     drawSpeechBubble(ctx,pos.x,pos.y,char.request.input)
+     drawSpeechBubble(ctx,pos.x,pos.y,char.request.input,pos.scale)
     }
    })
 
+   // Status display
+   const activeCount=characters.filter(c=>c.status==='working').length
    ctx.fillStyle=NIER_COLORS.textDim
    ctx.font='10px "Courier New", monospace'
    ctx.textAlign='left'
    ctx.fillText(`AGENTS: ${characters.length}`,10,dimensions.height-8)
-   ctx.fillText(`ACTIVE: ${workingAgents.length}`,90,dimensions.height-8)
+   ctx.fillText(`ACTIVE: ${activeCount}`,90,dimensions.height-8)
 
    animationRef.current=requestAnimationFrame(render)
   }
@@ -472,12 +578,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   render()
 
   return()=>{
-   if(animationRef.current){
-    cancelAnimationFrame(animationRef.current)
-   }
+   if(animationRef.current)cancelAnimationFrame(animationRef.current)
   }
- },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble])
+ },[characters,dimensions,characterScale,groupCharacters,calculateDivisionLayouts,drawOrchestraArea,drawDivisionBox,drawSpeechBubble,drawConnectionLine])
 
+ // Click handler
  const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return
 
@@ -487,13 +592,13 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const rect=canvas.getBoundingClientRect()
   const x=e.clientX-rect.left
   const y=e.clientY-rect.top
-  const spriteSize=56*characterScale
-
   const positions=positionsRef.current
+
   for(const char of characters){
    const pos=positions.get(char.agentId)
    if(!pos)continue
 
+   const spriteSize=48*characterScale*pos.scale
    const dist=Math.sqrt(Math.pow(x-pos.x,2)+Math.pow(y-pos.y,2))
    if(dist<spriteSize/2+12){
     onCharacterClick(char)
@@ -510,5 +615,5 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     className="cursor-pointer"
    />
   </div>
-)
+ )
 }
