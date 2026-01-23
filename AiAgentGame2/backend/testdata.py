@@ -8,6 +8,7 @@ import random
 
 from asset_scanner import scan_all_testdata,get_testdata_path
 from agent_settings import get_default_quality_settings,QualityCheckConfig
+from config_loader import get_agent_definitions
 
 CHECKPOINT_TO_CATEGORY={
     "concept_review":"document",
@@ -122,40 +123,12 @@ class TestDataStore:
 
 
 
+        agent_defs = get_agent_definitions()
         agents_data = [
-
-            {"type":"concept","name":"コンセプト","phase":0},
-
-            {"type":"task_split_1","name":"タスク分割1","phase":1},
-
-            {"type":"concept_detail","name":"コンセプト詳細","phase":2},
-            {"type":"scenario","name":"シナリオ","phase":2},
-            {"type":"world","name":"世界観","phase":2},
-            {"type":"game_design","name":"ゲームデザイン","phase":2},
-            {"type":"tech_spec","name":"技術仕様","phase":2},
-
-            {"type":"task_split_2","name":"タスク分割2","phase":3},
-
-            {"type":"asset_character","name":"キャラ","phase":4},
-            {"type":"asset_background","name":"背景","phase":4},
-            {"type":"asset_ui","name":"UI","phase":4},
-            {"type":"asset_effect","name":"エフェクト","phase":4},
-            {"type":"asset_bgm","name":"BGM","phase":4},
-            {"type":"asset_voice","name":"ボイス","phase":4},
-            {"type":"asset_sfx","name":"効果音","phase":4},
-
-            {"type":"task_split_3","name":"タスク分割3","phase":5},
-
-            {"type":"code","name":"コード","phase":6},
-            {"type":"event","name":"イベント","phase":6},
-            {"type":"ui_integration","name":"UI統合","phase":6},
-            {"type":"asset_integration","name":"アセット統合","phase":6},
-
-            {"type":"task_split_4","name":"タスク分割4","phase":7},
-
-            {"type":"unit_test","name":"単体テスト","phase":8},
-            {"type":"integration_test","name":"統合テスト","phase":8},
+            {"type":agent_type,"name":info["label"],"phase":info["phase"]}
+            for agent_type,info in agent_defs.items()
         ]
+        agents_data.sort(key=lambda x:(x["phase"],x["type"]))
 
         for data in agents_data:
             agent_id = f"agent-{proj_id}-{data['type']}"
