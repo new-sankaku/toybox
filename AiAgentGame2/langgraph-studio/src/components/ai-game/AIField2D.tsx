@@ -28,10 +28,11 @@ const NIER_COLORS={
  lightning:'#f0e060',
  magicCircle:'#c0a060',
  warpGate:'#80c0e0',
- roadLine:'rgba(120,110,90,0.3)'
+ roadLine:'rgba(120,110,90,0.25)',
+ roadCenter:'rgba(100,90,70,0.15)',
+ intersection:'rgba(140,120,80,0.3)'
 }
 
-// 召喚エフェクトタイプ
 type SummonEffectType='magic_circle'|'lightning'|'warp_gate'|'merge'
 
 interface CharacterPosition{
@@ -46,10 +47,9 @@ interface CharacterPosition{
  summoned:boolean
  summonProgress:number
  summonEffect:SummonEffectType
- // 道路移動用
  pathPoints:Array<{x:number,y:number}>
  pathIndex:number
- lane:number // 0=左車線, 1=右車線
+ lane:number
 }
 
 interface DivisionLayout{
@@ -62,33 +62,59 @@ interface DivisionLayout{
  divisionChar?:CharacterState
 }
 
-// 道路ノード
 interface RoadNode{
  x:number
  y:number
  id:string
+ isIntersection?:boolean
 }
 
-// 道路セグメント
 interface RoadSegment{
  from:RoadNode
  to:RoadNode
  width:number
 }
 
-const MAX_VISIBLE_WORKERS=3
-const SUMMON_DURATION=90 // フレーム数
-const ROAD_WIDTH=40 // 道路幅（2車線分）
-const LANE_OFFSET=8 // 車線中心からのオフセット
+// 動的に計算されるレイアウト設定
+interface LayoutConfig{
+ orchestraHeight:number
+ orchestraY:number
+ padding:number
+ roadWidth:number
+ laneOffset:number
+ nodeRadius:number
+ spriteSize:number
+}
 
-// Agentの重要度からエフェクトを決定
+const MAX_VISIBLE_WORKERS=3
+const SUMMON_DURATION=90
+
 function getSummonEffect(agentType:AgentType):SummonEffectType{
  const level=getAgentLevel(agentType)
  if(level==='orchestrator')return'magic_circle'
  if(level==='division')return'lightning'
- // workerはランダムまたはワープゲート
  const hash=agentType.split('').reduce((a,c)=>a+c.charCodeAt(0),0)
  return hash%3===0?'merge':'warp_gate'
+}
+
+// 2つの線分の交点を計算
+function getLineIntersection(
+ p1:{x:number,y:number},p2:{x:number,y:number},
+ p3:{x:number,y:number},p4:{x:number,y:number}
+):{x:number,y:number}|null{
+ const d=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x)
+ if(Math.abs(d)<0.0001)return null
+
+ const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/d
+ const u=-((p1.x-p2.x)*(p1.y-p3.y)-(p1.y-p2.y)*(p1.x-p3.x))/d
+
+ if(t>0.05&&t<0.95&&u>0.05&&u<0.95){
+  return{
+   x:p1.x+t*(p2.x-p1.x),
+   y:p1.y+t*(p2.y-p1.y)
+  }
+ }
+ return null
 }
 
 export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIField2DProps):JSX.Element{
@@ -100,8 +126,24 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
  const animationRef=useRef<number>(0)
  const roadNodesRef=useRef<RoadNode[]>([])
  const roadSegmentsRef=useRef<RoadSegment[]>([])
+ const layoutConfigRef=useRef<LayoutConfig|null>(null)
 
- // Canvas resize handling
+ // レイアウト設定を動的に計算
+ const calculateLayoutConfig=useCallback(():LayoutConfig=>{
+  const minDim=Math.min(dimensions.width,dimensions.height)
+  const spriteSize=48*characterScale
+
+  return{
+   orchestraHeight:dimensions.height*0.20,
+   orchestraY:dimensions.height*0.02,
+   padding:minDim*0.03,
+   roadWidth:minDim*0.05,
+   laneOffset:minDim*0.012,
+   nodeRadius:minDim*0.015,
+   spriteSize
+  }
+ },[dimensions,characterScale])
+
  useEffect(()=>{
   const container=containerRef.current
   const canvas=canvasRef.current
@@ -128,7 +170,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   return()=>resizeObserver.disconnect()
  },[])
 
- // Group characters by hierarchy
  const groupCharacters=useCallback(()=>{
   const orchestrator=characters.find(c=>getAgentLevel(c.agentType)==='orchestrator')
   const divisions:Map<AgentType,{division?:CharacterState,workers:CharacterState[]}>=new Map()
@@ -145,7 +186,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   return{orchestrator,divisions}
  },[characters])
 
- // Calculate division layouts dynamically
  const calculateDivisionLayouts=useCallback((
   divisions:Map<AgentType,{division?:CharacterState,workers:CharacterState[]}>
  ):DivisionLayout[]=>{
@@ -154,16 +194,17 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const count=activeDivisions.length
   if(count===0)return layouts
 
-  const padding=20
-  const orchestraHeight=dimensions.height*0.22
-  const availableHeight=dimensions.height-orchestraHeight-padding*2
+  const config=calculateLayoutConfig()
+  const padding=config.padding
+  const orchestraBottom=config.orchestraY+config.orchestraHeight
+  const availableHeight=dimensions.height-orchestraBottom-padding*2
   const availableWidth=dimensions.width-padding*2
 
   const cols=count<=2?count:2
   const rows=Math.ceil(count/cols)
   const divWidth=(availableWidth-padding*(cols-1))/cols
   const divHeight=(availableHeight-padding*(rows-1))/rows
-  const minDivSize=Math.min(divWidth,divHeight,200)
+  const minDivSize=Math.min(divWidth,divHeight,dimensions.width*0.25)
 
   activeDivisions.forEach(([agentType,data],index)=>{
    const col=index%cols
@@ -173,7 +214,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
    layouts.push({
     x:rowStartX+col*(minDivSize+padding),
-    y:orchestraHeight+padding+row*(minDivSize+padding),
+    y:orchestraBottom+padding+row*(minDivSize+padding),
     width:minDivSize,
     height:minDivSize,
     agentType,
@@ -183,85 +224,153 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   })
 
   return layouts
- },[dimensions])
+ },[dimensions,calculateLayoutConfig])
 
- // 道路ネットワークを構築（障害物間の中心線）
+ // 道路ネットワークを動的に構築（交差点検出付き）
  const buildRoadNetwork=useCallback((layouts:DivisionLayout[])=>{
+  const config=calculateLayoutConfig()
+  layoutConfigRef.current=config
+
   const nodes:RoadNode[]=[]
   const segments:RoadSegment[]=[]
 
-  // オーケストラ位置
+  // オーケストラ位置（動的計算）
   const orchX=dimensions.width/2
-  const orchY=dimensions.height*0.11
-  const orchNode:RoadNode={x:orchX,y:orchY+40,id:'orch'}
+  const orchY=config.orchestraY+config.orchestraHeight*0.5
+  const orchExitY=config.orchestraY+config.orchestraHeight+config.padding*0.5
+
+  const orchNode:RoadNode={x:orchX,y:orchExitY,id:'orch'}
   nodes.push(orchNode)
 
-  // 各Division boxの入口ノード
+  // 各Division boxのノードを生成
+  const divisionNodes:Array<{entry:RoadNode,inner:RoadNode,layout:DivisionLayout}>=[]
+
   layouts.forEach((layout,i)=>{
+   const entryPadding=layout.height*0.05
    const entryNode:RoadNode={
     x:layout.x+layout.width/2,
-    y:layout.y-10,
+    y:layout.y-entryPadding,
     id:`div_entry_${i}`
    }
    const innerNode:RoadNode={
     x:layout.x+layout.width/2,
-    y:layout.y+layout.height/2,
+    y:layout.y+layout.height*0.5,
     id:`div_inner_${i}`
    }
    nodes.push(entryNode,innerNode)
+   divisionNodes.push({entry:entryNode,inner:innerNode,layout})
 
    // オーケストラからDivision入口への道路
-   segments.push({from:orchNode,to:entryNode,width:ROAD_WIDTH})
+   segments.push({from:orchNode,to:entryNode,width:config.roadWidth})
    // Division入口から内部への道路
-   segments.push({from:entryNode,to:innerNode,width:ROAD_WIDTH*0.7})
+   segments.push({from:entryNode,to:innerNode,width:config.roadWidth*0.7})
   })
 
-  // 横方向の接続道路（Division間）
+  // 横方向の接続道路（同じ行のDivision間）
+  const rowThreshold=layouts.length>0?layouts[0].height*0.3:50
   const sortedByY=layouts.map((l,i)=>({layout:l,index:i}))
    .sort((a,b)=>a.layout.y-b.layout.y)
 
-  for(let i=0;i<sortedByY.length-1;i++){
-   const curr=sortedByY[i]
-   const next=sortedByY[i+1]
-   if(Math.abs(curr.layout.y-next.layout.y)<50){
-    // 同じ行にあるDivision間を接続
-    const midY=(curr.layout.y+next.layout.y)/2-10
-    const leftNode=nodes.find(n=>n.id===`div_entry_${curr.index}`)
-    const rightNode=nodes.find(n=>n.id===`div_entry_${next.index}`)
-    if(leftNode&&rightNode){
-     const midNode:RoadNode={
-      x:(leftNode.x+rightNode.x)/2,
-      y:midY,
-      id:`mid_${i}`
+  for(let i=0;i<sortedByY.length;i++){
+   for(let j=i+1;j<sortedByY.length;j++){
+    const curr=sortedByY[i]
+    const next=sortedByY[j]
+    if(Math.abs(curr.layout.y-next.layout.y)<rowThreshold){
+     const leftNode=nodes.find(n=>n.id===`div_entry_${curr.index}`)
+     const rightNode=nodes.find(n=>n.id===`div_entry_${next.index}`)
+     if(leftNode&&rightNode){
+      // 直接接続
+      segments.push({from:leftNode,to:rightNode,width:config.roadWidth*0.6})
      }
-     nodes.push(midNode)
-     segments.push({from:leftNode,to:midNode,width:ROAD_WIDTH*0.6})
-     segments.push({from:midNode,to:rightNode,width:ROAD_WIDTH*0.6})
     }
    }
   }
 
+  // 交差点を検出して追加
+  const intersections:RoadNode[]=[]
+  for(let i=0;i<segments.length;i++){
+   for(let j=i+1;j<segments.length;j++){
+    const seg1=segments[i]
+    const seg2=segments[j]
+
+    // 同じノードを共有している場合はスキップ
+    if(seg1.from.id===seg2.from.id||seg1.from.id===seg2.to.id||
+       seg1.to.id===seg2.from.id||seg1.to.id===seg2.to.id)continue
+
+    const intersection=getLineIntersection(seg1.from,seg1.to,seg2.from,seg2.to)
+    if(intersection){
+     // 既存の交差点と近すぎないかチェック
+     const tooClose=intersections.some(n=>
+      Math.hypot(n.x-intersection.x,n.y-intersection.y)<config.nodeRadius*2
+     )
+     if(!tooClose){
+      const intNode:RoadNode={
+       x:intersection.x,
+       y:intersection.y,
+       id:`intersection_${intersections.length}`,
+       isIntersection:true
+      }
+      intersections.push(intNode)
+     }
+    }
+   }
+  }
+
+  // 交差点をノードに追加し、セグメントを分割
+  intersections.forEach(intNode=>{
+   nodes.push(intNode)
+
+   // この交差点を通るセグメントを見つけて分割
+   const newSegments:RoadSegment[]=[]
+   const toRemove:number[]=[]
+
+   segments.forEach((seg,idx)=>{
+    const onSegment=isPointOnSegment(intNode,seg.from,seg.to,config.nodeRadius)
+    if(onSegment){
+     toRemove.push(idx)
+     newSegments.push({from:seg.from,to:intNode,width:seg.width})
+     newSegments.push({from:intNode,to:seg.to,width:seg.width})
+    }
+   })
+
+   // 古いセグメントを削除して新しいものを追加
+   for(let i=toRemove.length-1;i>=0;i--){
+    segments.splice(toRemove[i],1)
+   }
+   segments.push(...newSegments)
+  })
+
   roadNodesRef.current=nodes
   roadSegmentsRef.current=segments
- },[dimensions])
+ },[dimensions,calculateLayoutConfig])
 
- // A*による経路探索（2車線対応）
+ // 点がセグメント上にあるかチェック
+ function isPointOnSegment(
+  p:{x:number,y:number},
+  a:{x:number,y:number},
+  b:{x:number,y:number},
+  tolerance:number
+ ):boolean{
+  const d1=Math.hypot(p.x-a.x,p.y-a.y)
+  const d2=Math.hypot(p.x-b.x,p.y-b.y)
+  const lineLen=Math.hypot(b.x-a.x,b.y-a.y)
+  return Math.abs(d1+d2-lineLen)<tolerance
+ }
+
+ // A*による経路探索
  const findPath=useCallback((
-  fromX:number,
-  fromY:number,
-  toX:number,
-  toY:number,
+  fromX:number,fromY:number,
+  toX:number,toY:number,
   lane:number
  ):Array<{x:number,y:number}>=>{
   const nodes=roadNodesRef.current
   const segments=roadSegmentsRef.current
+  const config=layoutConfigRef.current
 
-  if(nodes.length===0||segments.length===0){
-   // 道路がない場合は直線
+  if(nodes.length===0||segments.length===0||!config){
    return[{x:fromX,y:fromY},{x:toX,y:toY}]
   }
 
-  // 最寄りのノードを探す
   const findNearest=(x:number,y:number):RoadNode|null=>{
    let nearest:RoadNode|null=null
    let minDist=Infinity
@@ -282,12 +391,21 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    return[{x:fromX,y:fromY},{x:toX,y:toY}]
   }
 
-  // 簡易A*実装
+  if(startNode.id===endNode.id){
+   return[{x:fromX,y:fromY},{x:toX,y:toY}]
+  }
+
   const getNeighbors=(node:RoadNode):RoadNode[]=>{
    const neighbors:RoadNode[]=[]
    for(const seg of segments){
-    if(seg.from.id===node.id)neighbors.push(seg.to)
-    if(seg.to.id===node.id)neighbors.push(seg.from)
+    if(seg.from.id===node.id){
+     const n=nodes.find(n=>n.id===seg.to.id)
+     if(n)neighbors.push(n)
+    }
+    if(seg.to.id===node.id){
+     const n=nodes.find(n=>n.id===seg.from.id)
+     if(n)neighbors.push(n)
+    }
    }
    return neighbors
   }
@@ -302,8 +420,10 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   gScore.set(startNode.id,0)
   fScore.set(startNode.id,heuristic(startNode,endNode))
 
-  while(openSet.size>0){
-   // fScoreが最小のノードを取得
+  let iterations=0
+  const maxIterations=nodes.length*10
+
+  while(openSet.size>0&&iterations++<maxIterations){
    let current:RoadNode|null=null
    let minF=Infinity
    for(const id of openSet){
@@ -317,16 +437,25 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    if(!current)break
 
    if(current.id===endNode.id){
-    // パスを再構築
     const path:Array<{x:number,y:number}>=[]
     let curr:RoadNode|undefined=current
     while(curr){
-     // 車線オフセットを適用
-     const laneOff=lane===0?-LANE_OFFSET:LANE_OFFSET
-     path.unshift({x:curr.x+laneOff,y:curr.y})
+     // 車線オフセットを適用（進行方向に垂直）
+     const prev=cameFrom.get(curr.id)
+     let laneOffX=0,laneOffY=0
+     if(prev){
+      const dx=curr.x-prev.x
+      const dy=curr.y-prev.y
+      const len=Math.hypot(dx,dy)
+      if(len>0){
+       // 垂直方向にオフセット
+       laneOffX=(-dy/len)*config.laneOffset*(lane===0?-1:1)
+       laneOffY=(dx/len)*config.laneOffset*(lane===0?-1:1)
+      }
+     }
+     path.unshift({x:curr.x+laneOffX,y:curr.y+laneOffY})
      curr=cameFrom.get(curr.id)
     }
-    // 開始点と終了点を追加
     path.unshift({x:fromX,y:fromY})
     path.push({x:toX,y:toY})
     return path
@@ -345,7 +474,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
   }
 
-  // パスが見つからない場合は直線
   return[{x:fromX,y:fromY},{x:toX,y:toY}]
  },[])
 
@@ -354,8 +482,8 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const positions=positionsRef.current
   const{orchestrator,divisions}=groupCharacters()
   const layouts=calculateDivisionLayouts(divisions)
+  const config=calculateLayoutConfig()
 
-  // 道路ネットワークを構築
   buildRoadNetwork(layouts)
 
   const currentIds=new Set(characters.map(c=>c.agentId))
@@ -365,13 +493,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
   }
 
-  const spriteSize=48*characterScale
-  let laneCounter=0 // 車線割り当て用
+  let laneCounter=0
 
-  // Position orchestrator at top center
   if(orchestrator){
    const x=dimensions.width/2
-   const y=dimensions.height*0.11
+   const y=config.orchestraY+config.orchestraHeight*0.5
    const existing=positions.get(orchestrator.agentId)
    if(existing){
     existing.targetX=x
@@ -390,15 +516,13 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
   }
 
-  // Position division agents and their workers
   layouts.forEach(layout=>{
    if(layout.divisionChar){
     const x=layout.x+layout.width/2
-    const y=layout.y+spriteSize/2+15
+    const y=layout.y+config.spriteSize/2+layout.height*0.08
     const existing=positions.get(layout.divisionChar.agentId)
     if(existing){
      if(Math.hypot(existing.targetX-x,existing.targetY-y)>5){
-      // 位置が変わった場合は経路を再計算
       existing.pathPoints=findPath(existing.x,existing.y,x,y,existing.lane)
       existing.pathIndex=0
      }
@@ -408,14 +532,15 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      existing.targetOpacity=1
     }else{
      const lane=laneCounter++%2
+     const startY=config.orchestraY+config.orchestraHeight+config.padding*0.5
      positions.set(layout.divisionChar.agentId,{
-      x:dimensions.width/2,y:dimensions.height*0.11+40,
+      x:dimensions.width/2,y:startY,
       targetX:x,targetY:y,
       scale:0,targetScale:1.0,
       opacity:0,targetOpacity:1,
       summoned:false,summonProgress:0,
       summonEffect:getSummonEffect(layout.divisionChar.agentType),
-      pathPoints:findPath(dimensions.width/2,dimensions.height*0.11+40,x,y,lane),
+      pathPoints:findPath(dimensions.width/2,startY,x,y,lane),
       pathIndex:0,lane
      })
     }
@@ -423,9 +548,9 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
    const visibleWorkers=layout.workers.slice(0,MAX_VISIBLE_WORKERS)
    const workerCount=Math.min(visibleWorkers.length,MAX_VISIBLE_WORKERS)
-   const workerAreaY=layout.y+spriteSize+40
-   const workerAreaHeight=layout.height-spriteSize-50
-   const workerSpacing=Math.min(spriteSize+10,workerAreaHeight/Math.max(workerCount,1))
+   const workerAreaY=layout.y+config.spriteSize+layout.height*0.2
+   const workerAreaHeight=layout.height-config.spriteSize-layout.height*0.25
+   const workerSpacing=Math.min(config.spriteSize+layout.height*0.05,workerAreaHeight/Math.max(workerCount,1))
 
    visibleWorkers.forEach((worker,index)=>{
     const x=layout.x+layout.width/2
@@ -442,7 +567,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      existing.targetOpacity=1
     }else{
      const spawnX=layout.x+layout.width/2
-     const spawnY=layout.y+spriteSize/2+15
+     const spawnY=layout.y+config.spriteSize/2+layout.height*0.08
      const lane=laneCounter++%2
      positions.set(worker.agentId,{
       x:spawnX,y:spawnY,targetX:x,targetY:y,
@@ -456,11 +581,9 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     }
    })
   })
- },[characters,dimensions,characterScale,groupCharacters,calculateDivisionLayouts,buildRoadNetwork,findPath])
+ },[characters,dimensions,characterScale,groupCharacters,calculateDivisionLayouts,calculateLayoutConfig,buildRoadNetwork,findPath])
 
- // ===== 召喚エフェクト描画関数 =====
-
- // 魔法陣エフェクト（オーケストラ用）
+ // 召喚エフェクト描画関数
  const drawMagicCircle=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,y:number,
@@ -474,7 +597,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.save()
   ctx.translate(x,y)
 
-  // 外側の円
   ctx.strokeStyle=NIER_COLORS.magicCircle
   ctx.lineWidth=2
   ctx.globalAlpha=progress*0.8
@@ -482,7 +604,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.arc(0,0,radius,0,Math.PI*2)
   ctx.stroke()
 
-  // 内側の回転する六芒星
   ctx.rotate(rotation)
   ctx.beginPath()
   for(let i=0;i<6;i++){
@@ -496,13 +617,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.closePath()
   ctx.stroke()
 
-  // 逆回転する内側の円
   ctx.rotate(-rotation*2)
   ctx.beginPath()
   ctx.arc(0,0,radius*0.4,0,Math.PI*2)
   ctx.stroke()
 
-  // ルーン文字風の装飾
   const runeCount=8
   for(let i=0;i<runeCount;i++){
    const angle=(i/runeCount)*Math.PI*2+rotation*0.5
@@ -513,7 +632,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    ctx.fillRect(rx-2,ry-4,4,8)
   }
 
-  // 中央の光
   const gradient=ctx.createRadialGradient(0,0,0,0,0,radius*0.3)
   gradient.addColorStop(0,`rgba(255,240,180,${progress*0.6})`)
   gradient.addColorStop(1,'rgba(255,240,180,0)')
@@ -526,7 +644,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.restore()
  },[])
 
- // 稲妻エフェクト（Division用）
  const drawLightning=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,y:number,
@@ -539,7 +656,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.save()
   ctx.globalAlpha=Math.min(1,(1-progress)*3)*0.9
 
-  // 複数の稲妻を描画
   const boltCount=3
   for(let b=0;b<boltCount;b++){
    const seed=frame*0.3+b*100
@@ -547,34 +663,29 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    ctx.lineWidth=b===0?3:1
 
    ctx.beginPath()
-   let bx=x+(Math.sin(seed+b)*20)
+   let bx=x+(Math.sin(seed+b)*size*0.4)
    let by=y-size*1.5
    ctx.moveTo(bx,by)
 
-   // ジグザグに下へ
    const segments=6+Math.floor(progress*4)
    for(let i=0;i<segments;i++){
     const t=i/segments
-    bx+=(Math.random()-0.5)*30*progress
+    bx+=(Math.random()-0.5)*size*0.6*progress
     by+=size*1.5/segments
-    if(t<progress){
-     ctx.lineTo(bx,by)
-    }
+    if(t<progress)ctx.lineTo(bx,by)
    }
    ctx.stroke()
 
-   // 分岐
    if(progress>0.5&&b===0){
     ctx.lineWidth=1
     ctx.beginPath()
     ctx.moveTo(bx,by-size*0.3)
-    ctx.lineTo(bx+20*(Math.random()-0.5),by+10)
-    ctx.lineTo(bx+30*(Math.random()-0.5),by+25)
+    ctx.lineTo(bx+size*0.4*(Math.random()-0.5),by+10)
+    ctx.lineTo(bx+size*0.6*(Math.random()-0.5),by+25)
     ctx.stroke()
    }
   }
 
-  // 着弾点の光
   if(progress>0.3){
    const impactRadius=size*0.4*(1-(progress-0.3)/0.7)
    const gradient=ctx.createRadialGradient(x,y,0,x,y,impactRadius)
@@ -590,7 +701,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.restore()
  },[])
 
- // ワープゲートエフェクト（Worker用）
  const drawWarpGate=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,y:number,
@@ -605,7 +715,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const gateWidth=size*0.8
   const openProgress=Math.min(1,progress*2)
 
-  // ゲートの枠（楕円形のポータル）
   ctx.strokeStyle=NIER_COLORS.warpGate
   ctx.lineWidth=3
   ctx.globalAlpha=openProgress*0.8
@@ -614,7 +723,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.ellipse(0,0,gateWidth/2*openProgress,gateHeight/2,0,0,Math.PI*2)
   ctx.stroke()
 
-  // 内側の渦
   if(openProgress>0.3){
    const spiralAlpha=(openProgress-0.3)/0.7
    for(let i=0;i<5;i++){
@@ -628,7 +736,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
   }
 
-  // 中央のエネルギー
   if(progress>0.5){
    const energyProgress=(progress-0.5)/0.5
    const gradient=ctx.createRadialGradient(0,0,0,0,0,gateWidth/3)
@@ -643,7 +750,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.restore()
  },[])
 
- // 分裂結合エフェクト（特殊Worker用）
  const drawMergeEffect=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,y:number,
@@ -663,26 +769,21 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    const fy=y+Math.sin(angle)*distance
    const fragSize=size*0.15*(0.5+mergeProgress*0.5)
 
-   // フラグメントの軌跡
    if(mergeProgress<0.8){
     ctx.strokeStyle=`rgba(180,160,120,${(1-mergeProgress)*0.5})`
     ctx.lineWidth=1
     ctx.beginPath()
     ctx.moveTo(fx,fy)
-    const trailX=x+Math.cos(angle)*distance*1.3
-    const trailY=y+Math.sin(angle)*distance*1.3
-    ctx.lineTo(trailX,trailY)
+    ctx.lineTo(x+Math.cos(angle)*distance*1.3,y+Math.sin(angle)*distance*1.3)
     ctx.stroke()
    }
 
-   // フラグメント本体
    ctx.fillStyle=`rgba(200,180,140,${0.5+mergeProgress*0.5})`
    ctx.beginPath()
    ctx.arc(fx,fy,fragSize,0,Math.PI*2)
    ctx.fill()
   }
 
-  // 結合時の光
   if(progress>0.6){
    const burstProgress=(progress-0.6)/0.4
    const gradient=ctx.createRadialGradient(x,y,0,x,y,size*0.5*burstProgress)
@@ -697,13 +798,15 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.restore()
  },[])
 
- // 道路を描画
+ // 道路と交差点を描画
  const drawRoads=useCallback((ctx:CanvasRenderingContext2D)=>{
   const segments=roadSegmentsRef.current
+  const nodes=roadNodesRef.current
 
   ctx.save()
+
+  // 道路セグメントを描画
   segments.forEach(seg=>{
-   // 道路の背景
    ctx.strokeStyle=NIER_COLORS.roadLine
    ctx.lineWidth=seg.width
    ctx.lineCap='round'
@@ -712,29 +815,51 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    ctx.lineTo(seg.to.x,seg.to.y)
    ctx.stroke()
 
-   // 中央線（破線）
-   ctx.strokeStyle='rgba(100,90,70,0.2)'
+   // 中央線
+   ctx.strokeStyle=NIER_COLORS.roadCenter
    ctx.lineWidth=1
-   ctx.setLineDash([8,8])
+   ctx.setLineDash([seg.width*0.2,seg.width*0.2])
    ctx.beginPath()
    ctx.moveTo(seg.from.x,seg.from.y)
    ctx.lineTo(seg.to.x,seg.to.y)
    ctx.stroke()
    ctx.setLineDash([])
   })
+
+  // 交差点を描画
+  nodes.filter(n=>n.isIntersection).forEach(node=>{
+   const config=layoutConfigRef.current
+   if(!config)return
+
+   // 交差点マーカー
+   ctx.fillStyle=NIER_COLORS.intersection
+   ctx.beginPath()
+   ctx.arc(node.x,node.y,config.nodeRadius*1.5,0,Math.PI*2)
+   ctx.fill()
+
+   // 交差点の枠
+   ctx.strokeStyle=NIER_COLORS.primaryDim
+   ctx.lineWidth=1
+   ctx.beginPath()
+   ctx.arc(node.x,node.y,config.nodeRadius*1.5,0,Math.PI*2)
+   ctx.stroke()
+  })
+
   ctx.restore()
  },[])
 
- // Draw orchestrator area
  const drawOrchestraArea=useCallback((
   ctx:CanvasRenderingContext2D,
   orchestrator:CharacterState|undefined,
   frame:number
  )=>{
+  const config=layoutConfigRef.current
+  if(!config)return
+
   const centerX=dimensions.width/2
-  const y=dimensions.height*0.02
-  const width=Math.min(dimensions.width*0.5,280)
-  const height=dimensions.height*0.18
+  const y=config.orchestraY
+  const width=Math.min(dimensions.width*0.5,dimensions.width-config.padding*4)
+  const height=config.orchestraHeight
 
   const isActive=orchestrator?.status==='working'
   if(isActive){
@@ -749,7 +874,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.lineWidth=2
   ctx.strokeRect(centerX-width/2,y,width,height)
 
-  const cs=12
+  const cs=width*0.04
   ctx.fillStyle=NIER_COLORS.primary
   ;[[centerX-width/2,y],[centerX+width/2-cs,y],[centerX-width/2,y+height-cs],[centerX+width/2-cs,y+height-cs]]
    .forEach(([cx,cy])=>{
@@ -758,12 +883,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    })
 
   ctx.fillStyle=NIER_COLORS.textMain
-  ctx.font='bold 12px "Courier New", monospace'
+  ctx.font=`bold ${Math.max(10,width*0.04)}px "Courier New", monospace`
   ctx.textAlign='center'
-  ctx.fillText('[ ORCHESTRATOR ]',centerX,y+height-8)
+  ctx.fillText('[ ORCHESTRATOR ]',centerX,y+height-height*0.08)
  },[dimensions])
 
- // Draw division box
  const drawDivisionBox=useCallback((
   ctx:CanvasRenderingContext2D,
   layout:DivisionLayout,
@@ -785,7 +909,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.lineWidth=isActive?2:1
   ctx.strokeRect(x,y,width,height)
 
-  const cs=8
+  const cs=width*0.04
   ctx.fillStyle=isActive?NIER_COLORS.accent:NIER_COLORS.primaryDim
   ;[[x,y],[x+width-cs,y],[x,y+height-cs],[x+width-cs,y+height-cs]].forEach(([cx,cy])=>{
    ctx.fillRect(cx,cy,cs,2)
@@ -793,41 +917,44 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   })
 
   ctx.fillStyle=NIER_COLORS.textDim
-  ctx.font='10px "Courier New", monospace'
+  ctx.font=`${Math.max(8,width*0.05)}px "Courier New", monospace`
   ctx.textAlign='center'
-  ctx.fillText(`[ ${hierarchy?.groupLabel||agentType} ]`,x+width/2,y+height-6)
+  ctx.fillText(`[ ${hierarchy?.groupLabel||agentType} ]`,x+width/2,y+height-height*0.04)
 
   if(workers.length>MAX_VISIBLE_WORKERS){
    const extraCount=workers.length-MAX_VISIBLE_WORKERS
    ctx.fillStyle=NIER_COLORS.accent
-   ctx.font='bold 11px "Courier New", monospace'
+   ctx.font=`bold ${Math.max(9,width*0.055)}px "Courier New", monospace`
    ctx.textAlign='right'
-   ctx.fillText(`+${extraCount}`,x+width-8,y+height-6)
+   ctx.fillText(`+${extraCount}`,x+width-width*0.04,y+height-height*0.04)
 
-   const indicatorX=x+width-20
-   const indicatorY=y+height-25
+   const indicatorX=x+width-width*0.1
+   const indicatorY=y+height-height*0.15
    for(let i=0;i<Math.min(extraCount,3);i++){
     ctx.strokeStyle=`rgba(180,160,120,${0.6-i*0.15})`
     ctx.lineWidth=1
     ctx.beginPath()
-    ctx.arc(indicatorX,indicatorY,6+i*4+Math.sin(frame*0.1+i)*1,0,Math.PI*2)
+    ctx.arc(indicatorX,indicatorY,width*0.03+i*width*0.02+Math.sin(frame*0.1+i)*1,0,Math.PI*2)
     ctx.stroke()
    }
   }
  },[])
 
- // Draw speech bubble
  const drawSpeechBubble=useCallback((
   ctx:CanvasRenderingContext2D,
   x:number,y:number,
   text:string,
   scale:number
  )=>{
-  ctx.font=`${11*scale}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  const config=layoutConfigRef.current
+  if(!config)return
 
-  const padding=6*scale
-  const lineHeight=14*scale
-  const maxLineWidth=160*scale
+  const fontSize=Math.max(9,config.spriteSize*0.22*scale)
+  ctx.font=`${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+
+  const padding=fontSize*0.5
+  const lineHeight=fontSize*1.3
+  const maxLineWidth=config.spriteSize*3*scale
 
   let lines:string[]=[]
   let currentLine=''
@@ -851,7 +978,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const bubbleWidth=actualWidth+padding*2+4
   const bubbleHeight=lines.length*lineHeight+padding*2
 
-  const bubbleX=Math.round(x+40*scale)
+  const bubbleX=Math.round(x+config.spriteSize*scale*0.8)
   const bubbleY=Math.round(y-bubbleHeight/2)
 
   ctx.fillStyle='#e8e4d8'
@@ -862,20 +989,19 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
   ctx.fillStyle='#e8e4d8'
   ctx.beginPath()
-  ctx.moveTo(bubbleX,y-5*scale)
-  ctx.lineTo(bubbleX-8*scale,y)
-  ctx.lineTo(bubbleX,y+5*scale)
+  ctx.moveTo(bubbleX,y-fontSize*0.4)
+  ctx.lineTo(bubbleX-fontSize*0.7,y)
+  ctx.lineTo(bubbleX,y+fontSize*0.4)
   ctx.closePath()
   ctx.fill()
 
   ctx.fillStyle='#3a3530'
   ctx.textAlign='left'
   lines.forEach((line,i)=>{
-   ctx.fillText(line,bubbleX+padding,bubbleY+padding+(i+1)*lineHeight-3*scale)
+   ctx.fillText(line,bubbleX+padding,bubbleY+padding+(i+1)*lineHeight-fontSize*0.25)
   })
  },[])
 
- // Draw connection line
  const drawConnectionLine=useCallback((
   ctx:CanvasRenderingContext2D,
   fromX:number,fromY:number,
@@ -925,7 +1051,12 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    const{orchestrator,divisions}=groupCharacters()
    const layouts=calculateDivisionLayouts(divisions)
    const positions=positionsRef.current
-   const spriteSize=48*characterScale
+   const config=layoutConfigRef.current
+
+   if(!config){
+    animationRef.current=requestAnimationFrame(render)
+    return
+   }
 
    // 道路を描画
    drawRoads(ctx)
@@ -942,7 +1073,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
       const isActive=layout.divisionChar?.status==='working'||layout.workers.some(w=>w.status==='working')
       drawConnectionLine(
        ctx,
-       orchPos.x,orchPos.y+spriteSize*orchPos.scale/2+10,
+       orchPos.x,orchPos.y+config.spriteSize*orchPos.scale/2+config.padding*0.5,
        layout.x+layout.width/2,layout.y,
        isActive,frame
       )
@@ -951,6 +1082,8 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
 
    // Update and draw all characters
+   const moveSpeed=dimensions.width*0.004
+
    characters.forEach(char=>{
     const pos=positions.get(char.agentId)
     if(!pos)return
@@ -961,18 +1094,16 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      const dx=target.x-pos.x
      const dy=target.y-pos.y
      const dist=Math.hypot(dx,dy)
-     const speed=2.5 // 移動速度
 
-     if(dist<speed){
+     if(dist<moveSpeed){
       pos.x=target.x
       pos.y=target.y
       pos.pathIndex++
      }else{
-      pos.x+=dx/dist*speed
-      pos.y+=dy/dist*speed
+      pos.x+=dx/dist*moveSpeed
+      pos.y+=dy/dist*moveSpeed
      }
     }else{
-     // パスがない場合は直接移動
      const easeSpeed=0.06
      pos.x+=(pos.targetX-pos.x)*easeSpeed
      pos.y+=(pos.targetY-pos.y)*easeSpeed
@@ -981,7 +1112,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     pos.scale+=(pos.targetScale-pos.scale)*0.08
     pos.opacity+=(pos.targetOpacity-pos.opacity)*0.08
 
-    // Summon animation
     if(!pos.summoned){
      pos.summonProgress++
      if(pos.summonProgress>=SUMMON_DURATION){
@@ -993,12 +1123,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
     const isWorking=char.status==='working'
     const isActive=char.isActive??isWorking
-    const config=getAgentDisplayConfig(char.agentType)
+    const charConfig=getAgentDisplayConfig(char.agentType)
     const progress=pos.summonProgress/SUMMON_DURATION
 
-    // 召喚エフェクトを描画
     if(!pos.summoned){
-     const effectSize=spriteSize*pos.targetScale
+     const effectSize=config.spriteSize*pos.targetScale
      switch(pos.summonEffect){
       case'magic_circle':
        drawMagicCircle(ctx,pos.x,pos.y,progress,frame,effectSize)
@@ -1015,11 +1144,9 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      }
     }
 
-    // キャラクター本体（召喚完了後or途中から表示）
     let alpha=pos.opacity
     if(!isActive)alpha*=0.5
     if(!pos.summoned){
-     // エフェクトに応じて表示タイミングを調整
      const showThreshold=pos.summonEffect==='magic_circle'?0.7:
       pos.summonEffect==='lightning'?0.4:0.5
      if(progress<showThreshold)alpha=0
@@ -1031,10 +1158,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking,frame,pos.scale*characterScale)
      ctx.globalAlpha=1.0
 
-     ctx.font=`${10*pos.scale}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+     const labelSize=Math.max(8,config.spriteSize*0.2*pos.scale)
+     ctx.font=`${labelSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
      ctx.fillStyle=isActive?NIER_COLORS.textMain:NIER_COLORS.textDim
      ctx.textAlign='center'
-     ctx.fillText(config.label,pos.x,pos.y+spriteSize*pos.scale/2+12*pos.scale)
+     ctx.fillText(charConfig.label,pos.x,pos.y+config.spriteSize*pos.scale/2+labelSize*1.2)
 
      if(isWorking&&char.request){
       drawSpeechBubble(ctx,pos.x,pos.y,char.request.input,pos.scale)
@@ -1044,11 +1172,12 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
    // Status display
    const activeCount=characters.filter(c=>c.status==='working').length
+   const statusFontSize=Math.max(9,dimensions.width*0.012)
    ctx.fillStyle=NIER_COLORS.textDim
-   ctx.font='10px "Courier New", monospace'
+   ctx.font=`${statusFontSize}px "Courier New", monospace`
    ctx.textAlign='left'
-   ctx.fillText(`AGENTS: ${characters.length}`,10,dimensions.height-8)
-   ctx.fillText(`ACTIVE: ${activeCount}`,90,dimensions.height-8)
+   ctx.fillText(`AGENTS: ${characters.length}`,config.padding,dimensions.height-config.padding*0.5)
+   ctx.fillText(`ACTIVE: ${activeCount}`,config.padding+dimensions.width*0.12,dimensions.height-config.padding*0.5)
 
    animationRef.current=requestAnimationFrame(render)
   }
@@ -1062,7 +1191,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   drawOrchestraArea,drawDivisionBox,drawSpeechBubble,drawConnectionLine,drawRoads,
   drawMagicCircle,drawLightning,drawWarpGate,drawMergeEffect])
 
- // Click handler
  const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return
 
@@ -1073,19 +1201,22 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const x=e.clientX-rect.left
   const y=e.clientY-rect.top
   const positions=positionsRef.current
+  const config=layoutConfigRef.current
+
+  if(!config)return
 
   for(const char of characters){
    const pos=positions.get(char.agentId)
    if(!pos)continue
 
-   const spriteSize=48*characterScale*pos.scale
+   const spriteSize=config.spriteSize*pos.scale
    const dist=Math.hypot(x-pos.x,y-pos.y)
-   if(dist<spriteSize/2+12){
+   if(dist<spriteSize/2+spriteSize*0.25){
     onCharacterClick(char)
     return
    }
   }
- },[characters,onCharacterClick,characterScale])
+ },[characters,onCharacterClick])
 
  return(
   <div ref={containerRef} className="w-full h-full" style={{backgroundColor:'#d4cdb8'}}>
