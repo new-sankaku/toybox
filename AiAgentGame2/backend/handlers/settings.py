@@ -1,5 +1,5 @@
 from flask import Flask,request,jsonify
-from testdata import TestDataStore
+from testdata import TestDataStore,DEFAULT_AUTO_APPROVAL_RULES,CHECKPOINT_TO_CATEGORY
 from agent_settings import (
     get_default_quality_settings,
     QualityCheckConfig,
@@ -160,5 +160,55 @@ def register_settings_routes(app:Flask,data_store:TestDataStore):
 
     @app.route('/api/config/agents',methods=['GET'])
     def get_agents_config_api():
-        """エージェント定義設定を取得"""
         return jsonify(get_agent_definitions_config())
+
+    @app.route('/api/projects/<project_id>/settings/auto-approval',methods=['GET'])
+    def get_auto_approval_settings(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+        config = project.get("config",{})
+        rules = data_store.get_auto_approval_settings(project_id)
+        return jsonify({
+            "enabled":config.get("enableAutoApproval",False),
+            "rules":rules,
+            "categoryMapping":CHECKPOINT_TO_CATEGORY,
+        })
+
+    @app.route('/api/projects/<project_id>/settings/auto-approval',methods=['PATCH'])
+    def update_auto_approval_settings(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+        data = request.json or {}
+        if "enabled" in data:
+            if "config" not in project:
+                project["config"] = {}
+            project["config"]["enableAutoApproval"] = bool(data["enabled"])
+        if "rules" in data:
+            data_store.set_auto_approval_settings(project_id,data["rules"])
+        config = project.get("config",{})
+        rules = data_store.get_auto_approval_settings(project_id)
+        return jsonify({
+            "enabled":config.get("enableAutoApproval",False),
+            "rules":rules,
+        })
+
+    @app.route('/api/projects/<project_id>/settings/auto-approval/reset',methods=['POST'])
+    def reset_auto_approval_settings(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+        data_store.reset_auto_approval_settings(project_id)
+        rules = data_store.get_auto_approval_settings(project_id)
+        return jsonify({
+            "message":"Auto approval settings reset to default",
+            "rules":rules,
+        })
+
+    @app.route('/api/settings/auto-approval/defaults',methods=['GET'])
+    def get_default_auto_approval_settings():
+        return jsonify({
+            "rules":DEFAULT_AUTO_APPROVAL_RULES,
+            "categoryMapping":CHECKPOINT_TO_CATEGORY,
+        })
