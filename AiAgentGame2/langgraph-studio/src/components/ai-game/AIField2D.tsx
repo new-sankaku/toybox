@@ -226,7 +226,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   return layouts
  },[dimensions,calculateLayoutConfig])
 
- // 道路ネットワークを動的に構築（交差点検出付き）
+ // 道路ネットワークを動的に構築（Division box間を通る道路）
  const buildRoadNetwork=useCallback((layouts:DivisionLayout[])=>{
   const config=calculateLayoutConfig()
   layoutConfigRef.current=config
@@ -234,17 +234,161 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const nodes:RoadNode[]=[]
   const segments:RoadSegment[]=[]
 
-  // オーケストラ位置（動的計算）
+  if(layouts.length===0){
+   roadNodesRef.current=nodes
+   roadSegmentsRef.current=segments
+   return
+  }
+
+  // オーケストラ位置
   const orchX=dimensions.width/2
-  const orchY=config.orchestraY+config.orchestraHeight*0.5
-  const orchExitY=config.orchestraY+config.orchestraHeight+config.padding*0.5
+  const orchExitY=config.orchestraY+config.orchestraHeight+config.padding*0.3
 
   const orchNode:RoadNode={x:orchX,y:orchExitY,id:'orch'}
   nodes.push(orchNode)
 
-  // 各Division boxのノードを生成
-  const divisionNodes:Array<{entry:RoadNode,inner:RoadNode,layout:DivisionLayout}>=[]
+  // レイアウト情報を分析
+  const rowThreshold=layouts[0].height*0.3
+  const rowsMap=new Map<number,DivisionLayout[]>()
+  layouts.forEach(l=>{
+   let foundRow=-1
+   for(const[rowY]of rowsMap){
+    if(Math.abs(l.y-rowY)<rowThreshold){
+     foundRow=rowY
+     break
+    }
+   }
+   if(foundRow>=0){
+    rowsMap.get(foundRow)!.push(l)
+   }else{
+    rowsMap.set(l.y,[l])
+   }
+  })
+  const rows=Array.from(rowsMap.entries())
+   .sort((a,b)=>a[0]-b[0])
+   .map(([_,items])=>items.sort((a,b)=>a.x-b.x))
 
+  // 外周道路の座標
+  const outerPadding=config.padding*0.5
+  const outerLeft=outerPadding
+  const outerRight=dimensions.width-outerPadding
+  const outerTop=orchExitY+config.padding*0.3
+  const outerBottom=dimensions.height-config.padding*1.5
+
+  // 外周ノードを作成
+  const perimeterTopLeft:RoadNode={x:outerLeft,y:outerTop,id:'perimeter_tl'}
+  const perimeterTopRight:RoadNode={x:outerRight,y:outerTop,id:'perimeter_tr'}
+  const perimeterBottomLeft:RoadNode={x:outerLeft,y:outerBottom,id:'perimeter_bl'}
+  const perimeterBottomRight:RoadNode={x:outerRight,y:outerBottom,id:'perimeter_br'}
+  nodes.push(perimeterTopLeft,perimeterTopRight,perimeterBottomLeft,perimeterBottomRight)
+
+  // 外周道路を接続
+  segments.push({from:perimeterTopLeft,to:perimeterTopRight,width:config.roadWidth*0.6})
+  segments.push({from:perimeterTopLeft,to:perimeterBottomLeft,width:config.roadWidth*0.6})
+  segments.push({from:perimeterTopRight,to:perimeterBottomRight,width:config.roadWidth*0.6})
+  segments.push({from:perimeterBottomLeft,to:perimeterBottomRight,width:config.roadWidth*0.6})
+
+  // オーケストラを外周上部中央に接続
+  const orchConnection:RoadNode={x:orchX,y:outerTop,id:'orch_conn'}
+  nodes.push(orchConnection)
+  segments.push({from:orchNode,to:orchConnection,width:config.roadWidth})
+
+  // orchConnectionを外周トップラインに統合
+  segments.push({from:perimeterTopLeft,to:orchConnection,width:config.roadWidth*0.6})
+  segments.push({from:orchConnection,to:perimeterTopRight,width:config.roadWidth*0.6})
+  // 元のトップライン接続を削除する代わりに、分割されたセグメントを使用
+  const topLineIdx=segments.findIndex(s=>s.from.id==='perimeter_tl'&&s.to.id==='perimeter_tr')
+  if(topLineIdx>=0)segments.splice(topLineIdx,1)
+
+  // 各行の間にギャップ道路を作成
+  const gapNodes:RoadNode[][]=[]
+
+  rows.forEach((rowLayouts,rowIndex)=>{
+   const rowGapNodes:RoadNode[]=[]
+
+   // この行のY座標（Division box上部のすぐ上）
+   const rowY=rowLayouts[0].y-config.padding*0.3
+
+   // 左側ギャップノード
+   const leftGap:RoadNode={
+    x:outerLeft,
+    y:rowY,
+    id:`gap_row${rowIndex}_left`
+   }
+   nodes.push(leftGap)
+   rowGapNodes.push(leftGap)
+
+   // Division box間のギャップノード
+   for(let i=0;i<rowLayouts.length-1;i++){
+    const current=rowLayouts[i]
+    const next=rowLayouts[i+1]
+    const gapX=(current.x+current.width+next.x)/2
+
+    const gapNode:RoadNode={
+     x:gapX,
+     y:rowY,
+     id:`gap_row${rowIndex}_col${i}`
+    }
+    nodes.push(gapNode)
+    rowGapNodes.push(gapNode)
+   }
+
+   // 右側ギャップノード
+   const rightGap:RoadNode={
+    x:outerRight,
+    y:rowY,
+    id:`gap_row${rowIndex}_right`
+   }
+   nodes.push(rightGap)
+   rowGapNodes.push(rightGap)
+
+   // 横方向の道路を接続
+   for(let i=0;i<rowGapNodes.length-1;i++){
+    segments.push({from:rowGapNodes[i],to:rowGapNodes[i+1],width:config.roadWidth*0.7})
+   }
+
+   gapNodes.push(rowGapNodes)
+  })
+
+  // 縦方向のギャップ道路を作成（外周と各行を接続）
+  // 左側外周を各行の左端に接続
+  if(gapNodes.length>0){
+   segments.push({from:perimeterTopLeft,to:gapNodes[0][0],width:config.roadWidth*0.6})
+   for(let i=0;i<gapNodes.length-1;i++){
+    segments.push({from:gapNodes[i][0],to:gapNodes[i+1][0],width:config.roadWidth*0.6})
+   }
+   segments.push({from:gapNodes[gapNodes.length-1][0],to:perimeterBottomLeft,width:config.roadWidth*0.6})
+
+   // 右側外周を各行の右端に接続
+   const lastColIdx=(n:RoadNode[])=>n.length-1
+   segments.push({from:perimeterTopRight,to:gapNodes[0][lastColIdx(gapNodes[0])],width:config.roadWidth*0.6})
+   for(let i=0;i<gapNodes.length-1;i++){
+    segments.push({
+     from:gapNodes[i][lastColIdx(gapNodes[i])],
+     to:gapNodes[i+1][lastColIdx(gapNodes[i+1])],
+     width:config.roadWidth*0.6
+    })
+   }
+   segments.push({
+    from:gapNodes[gapNodes.length-1][lastColIdx(gapNodes[gapNodes.length-1])],
+    to:perimeterBottomRight,
+    width:config.roadWidth*0.6
+   })
+
+   // Division box間の縦方向道路を接続
+   for(let rowIdx=0;rowIdx<gapNodes.length-1;rowIdx++){
+    const currentRow=gapNodes[rowIdx]
+    const nextRow=gapNodes[rowIdx+1]
+
+    // 内部ギャップノード同士を接続
+    const minLen=Math.min(currentRow.length,nextRow.length)
+    for(let colIdx=1;colIdx<minLen-1;colIdx++){
+     segments.push({from:currentRow[colIdx],to:nextRow[colIdx],width:config.roadWidth*0.5})
+    }
+   }
+  }
+
+  // 各Division boxのエントリーノードを作成し、最寄りのギャップノードに接続
   layouts.forEach((layout,i)=>{
    const entryPadding=layout.height*0.05
    const entryNode:RoadNode={
@@ -258,33 +402,24 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     id:`div_inner_${i}`
    }
    nodes.push(entryNode,innerNode)
-   divisionNodes.push({entry:entryNode,inner:innerNode,layout})
 
-   // オーケストラからDivision入口への道路
-   segments.push({from:orchNode,to:entryNode,width:config.roadWidth})
    // Division入口から内部への道路
    segments.push({from:entryNode,to:innerNode,width:config.roadWidth*0.7})
-  })
 
-  // 横方向の接続道路（同じ行のDivision間）
-  const rowThreshold=layouts.length>0?layouts[0].height*0.3:50
-  const sortedByY=layouts.map((l,i)=>({layout:l,index:i}))
-   .sort((a,b)=>a.layout.y-b.layout.y)
-
-  for(let i=0;i<sortedByY.length;i++){
-   for(let j=i+1;j<sortedByY.length;j++){
-    const curr=sortedByY[i]
-    const next=sortedByY[j]
-    if(Math.abs(curr.layout.y-next.layout.y)<rowThreshold){
-     const leftNode=nodes.find(n=>n.id===`div_entry_${curr.index}`)
-     const rightNode=nodes.find(n=>n.id===`div_entry_${next.index}`)
-     if(leftNode&&rightNode){
-      // 直接接続
-      segments.push({from:leftNode,to:rightNode,width:config.roadWidth*0.6})
-     }
+   // 最寄りのギャップノードを見つけて接続
+   let nearestGap:RoadNode|null=null
+   let minDist=Infinity
+   gapNodes.flat().forEach(gapNode=>{
+    const dist=Math.hypot(gapNode.x-entryNode.x,gapNode.y-entryNode.y)
+    if(dist<minDist){
+     minDist=dist
+     nearestGap=gapNode
     }
+   })
+   if(nearestGap){
+    segments.push({from:nearestGap,to:entryNode,width:config.roadWidth*0.6})
    }
-  }
+  })
 
   // 交差点を検出して追加
   const intersections:RoadNode[]=[]
@@ -299,9 +434,9 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
     const intersection=getLineIntersection(seg1.from,seg1.to,seg2.from,seg2.to)
     if(intersection){
-     // 既存の交差点と近すぎないかチェック
-     const tooClose=intersections.some(n=>
-      Math.hypot(n.x-intersection.x,n.y-intersection.y)<config.nodeRadius*2
+     // 既存のノードや交差点と近すぎないかチェック
+     const tooClose=[...nodes,...intersections].some(n=>
+      Math.hypot(n.x-intersection.x,n.y-intersection.y)<config.nodeRadius*3
      )
      if(!tooClose){
       const intNode:RoadNode={
@@ -320,12 +455,11 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   intersections.forEach(intNode=>{
    nodes.push(intNode)
 
-   // この交差点を通るセグメントを見つけて分割
    const newSegments:RoadSegment[]=[]
    const toRemove:number[]=[]
 
    segments.forEach((seg,idx)=>{
-    const onSegment=isPointOnSegment(intNode,seg.from,seg.to,config.nodeRadius)
+    const onSegment=isPointOnSegment(intNode,seg.from,seg.to,config.nodeRadius*2)
     if(onSegment){
      toRemove.push(idx)
      newSegments.push({from:seg.from,to:intNode,width:seg.width})
@@ -333,7 +467,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     }
    })
 
-   // 古いセグメントを削除して新しいものを追加
    for(let i=toRemove.length-1;i>=0;i--){
     segments.splice(toRemove[i],1)
    }
