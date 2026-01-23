@@ -12,6 +12,7 @@ const tabs:Tab[]=[
  {id:'checkpoints',label:'チェックポイント',icon:'✦'},
  {id:'intervention',label:'連絡',icon:'⊕'},
  {id:'agents',label:'エージェント',icon:'⚔'},
+ {id:'ai',label:'AI',icon:'◇'},
  {id:'data',label:'生成素材',icon:'☰'},
  {id:'cost',label:'コスト',icon:'¤'},
  {id:'logs',label:'ログ',icon:'◈'},
