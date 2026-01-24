@@ -1,10 +1,11 @@
-import{useState,useMemo,useCallback}from'react'
+import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
 import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle}from'lucide-react'
+import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 
 const getDisplayName=(agent:Agent):string=>{
  return(agent.metadata?.displayName as string)||agent.type
@@ -37,6 +38,11 @@ export default function AgentListView({
  loading=false
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
+ const{getPhase,fetchDefinitions,loaded}=useAgentDefinitionStore()
+
+ useEffect(()=>{
+  if(!loaded)fetchDefinitions()
+ },[loaded,fetchDefinitions])
 
  const filteredAgents=useMemo(()=>{
   if(filterStatus==='all')return agents
@@ -59,17 +65,13 @@ export default function AgentListView({
  },[agents])
 
  const agentsByPhase=useMemo(()=>{
-  const phase1Types=['concept','design','scenario','character','world','task_split',
-   'concept_leader','design_leader','scenario_leader','character_leader','world_leader','task_split_leader']
-  const phase2Types=['code_leader','asset_leader','code_worker','asset_worker']
-  const phase3Types=['integrator','tester','reviewer']
-
+  const getAgentPhase=(a:Agent)=>a.phase??getPhase(a.type)
   return{
-   phase1:filteredAgents.filter((a)=>phase1Types.includes(a.type)),
-   phase2:filteredAgents.filter((a)=>phase2Types.includes(a.type)),
-   phase3:filteredAgents.filter((a)=>phase3Types.includes(a.type))
+   phase1:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=0&&p<=2}),
+   phase2:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=3&&p<=6}),
+   phase3:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=7&&p<=8})
   }
- },[filteredAgents])
+ },[filteredAgents,getPhase])
 
  const getWaitingFor=useCallback((agent:Agent):string|undefined=>{
   if(agent.status!=='pending')return undefined

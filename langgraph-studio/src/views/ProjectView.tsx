@@ -261,6 +261,22 @@ export default function ProjectView():JSX.Element{
   }
  }
 
+ const handleResumeProject=async()=>{
+  if(!currentProject)return
+  setIsLoading(true)
+  try{
+   const updated=await projectApi.resume(currentProject.id)
+   setProjects(projects.map(p=>p.id===currentProject.id?updated : p))
+   setCurrentProject(updated)
+  }catch(err){
+   console.error('Failed to resume project:',err)
+   const apiError=extractApiError(err)
+   setError(`プロジェクトの再開に失敗: ${apiError.message}`)
+  }finally{
+   setIsLoading(false)
+  }
+ }
+
  const handlePauseProject=async()=>{
   if(!currentProject)return
   setIsLoading(true)
@@ -994,11 +1010,18 @@ export default function ProjectView():JSX.Element{
         </CardHeader>
         <CardContent>
          <div className="flex gap-3">
-          {/*開始/再開: draft または paused の時のみ*/}
-          {(currentProject.status==='draft'||currentProject.status==='paused')&&(
+          {/*開始: draft の時のみ*/}
+          {currentProject.status==='draft'&&(
            <Button onClick={handleStartProject} disabled={isLoading}>
             {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
-            {currentProject.status==='paused'?'再開' : '開始'}
+            開始
+           </Button>
+)}
+          {/*再開: paused の時のみ（サーバー側エージェントを再開）*/}
+          {currentProject.status==='paused'&&(
+           <Button onClick={handleResumeProject} disabled={isLoading}>
+            {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
+            再開
            </Button>
 )}
           {/*一時停止: running の時のみ*/}
