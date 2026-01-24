@@ -1,4 +1,4 @@
-import { useRef,useEffect,useCallback } from 'react'
+import { useRef,useEffect } from 'react'
 import 'pixi.js/unsafe-eval'
 import { Application,Graphics,Text,Container } from 'pixi.js'
 import type {
@@ -27,20 +27,6 @@ interface Props {
  connections: readonly Connection[]
  width: number
  height: number
-}
-
-interface RenderState {
- positions: Map<string,AgentPositionState>
- frame: number
-}
-
-interface CanvasState {
- zoom: number
- panX: number
- panY: number
- isDragging: boolean
- dragStartX: number
- dragStartY: number
 }
 
 const CONNECTION_COLORS: Record<ConnectionType,number>={
@@ -84,15 +70,10 @@ function computeAgentTarget(
    const count=atThisAI.length
    const angleSpread=LAYOUT.AI_ORBIT_ANGLE_SPREAD
    const baseAngle=Math.PI/2
-   const angle=count===1
-    ? baseAngle
-    : baseAngle-angleSpread/2+(angleSpread*idx)/(count-1)
+   const angle=count===1 ? baseAngle : baseAngle-angleSpread/2+(angleSpread*idx)/(count-1)
    const layer=Math.floor(idx/6)
    const radius=LAYOUT.AI_ORBIT_RADIUS_BASE+layer*LAYOUT.AI_ORBIT_RADIUS_STEP
-   return {
-    x: ai.x+Math.cos(angle)*radius,
-    y: ai.y+Math.sin(angle)*radius,
-   }
+   return { x: ai.x+Math.cos(angle)*radius,y: ai.y+Math.sin(angle)*radius }
   }
  }
 
@@ -108,10 +89,7 @@ function computeAgentTarget(
    const colCount=Math.min(count,6)
    const startX=parentPos.x-spread/2
    const xStep=spread/Math.max(colCount-1,1)
-   return {
-    x: startX+col*xStep,
-    y: parentPos.y+LAYOUT.CHILD_VERTICAL_GAP+row*LAYOUT.CHILD_ROW_GAP,
-   }
+   return { x: startX+col*xStep,y: parentPos.y+LAYOUT.CHILD_VERTICAL_GAP+row*LAYOUT.CHILD_ROW_GAP }
   }
  }
 
@@ -122,57 +100,6 @@ function computeAgentTarget(
  const spacing=Math.min(LAYOUT.LEADER_SPACING_MAX,availableWidth/Math.max(count,1))
  const startX=width/2-((count-1)*spacing)/2
  return { x: startX+idx*spacing,y: workZoneTop+LAYOUT.LEADER_OFFSET_Y }
-}
-
-function findAvoidanceDirection(
- positions: Map<string,AgentPositionState>,
- currentId: string,
- pos: AgentPositionState,
- dirX: number,
- dirY: number
-): Vec2 {
- const avoidRadius=PHYSICS.REPULSION_RADIUS
- const avoidRadiusSq=avoidRadius*avoidRadius*4
- let closestDistSq=Infinity
- let closestX=0
- let closestY=0
-
- positions.forEach((other,otherId)=>{
-  if (otherId===currentId) return
-  const toOtherX=other.x-pos.x
-  const toOtherY=other.y-pos.y
-  const distSq=toOtherX*toOtherX+toOtherY*toOtherY
-  if (distSq<avoidRadiusSq&&distSq>PHYSICS.EPSILON) {
-   const dotProduct=dirX*toOtherX+dirY*toOtherY
-   if (dotProduct>0&&distSq<closestDistSq) {
-    closestDistSq=distSq
-    closestX=other.x
-    closestY=other.y
-   }
-  }
- })
-
- if (closestDistSq===Infinity) return { x: dirX,y: dirY }
-
- const toObsX=closestX-pos.x
- const toObsY=closestY-pos.y
- const perpX=-toObsY
- const perpY=toObsX
- const perpLenSq=perpX*perpX+perpY*perpY
- if (perpLenSq<PHYSICS.EPSILON) return { x: dirX,y: dirY }
-
- const perpLen=Math.sqrt(perpLenSq)
- const normPerpX=perpX/perpLen
- const normPerpY=perpY/perpLen
- const cross=dirX*toObsY-dirY*toObsX
- const sign=cross>=0 ? 1 :-1
- const strength=PHYSICS.AVOIDANCE_STRENGTH
- const newDirX=dirX*(1-strength)+normPerpX*sign*strength
- const newDirY=dirY*(1-strength)+normPerpY*sign*strength
- const lenSq=newDirX*newDirX+newDirY*newDirY
- if (lenSq<PHYSICS.EPSILON) return { x: dirX,y: dirY }
- const len=Math.sqrt(lenSq)
- return { x: newDirX/len,y: newDirY/len }
 }
 
 function updatePhysics(
@@ -194,9 +121,8 @@ function updatePhysics(
 
  const dirX=dx/dist
  const dirY=dy/dist
- const adjusted=findAvoidanceDirection(positions,id,pos,dirX,dirY)
- pos.vx+=adjusted.x*dist*PHYSICS.SPRING_STIFFNESS
- pos.vy+=adjusted.y*dist*PHYSICS.SPRING_STIFFNESS
+ pos.vx+=dirX*dist*PHYSICS.SPRING_STIFFNESS
+ pos.vy+=dirY*dist*PHYSICS.SPRING_STIFFNESS
  pos.vx*=PHYSICS.DAMPING
  pos.vy*=PHYSICS.DAMPING
  if (Math.abs(pos.vx)<PHYSICS.MIN_VELOCITY) pos.vx=0
@@ -225,70 +151,49 @@ export default function StrategyMapPixi({
 }: Props) {
  const containerRef=useRef<HTMLDivElement>(null)
  const appRef=useRef<Application|null>(null)
+ const initedRef=useRef(false)
 
- const renderStateRef=useRef<RenderState>({
-  positions: new Map(),
+ const dataRef=useRef({
+  agents,
+  aiServices,
+  user,
+  connections,
+  width,
+  height,
+  positions: new Map<string,AgentPositionState>(),
   frame: 0,
- })
-
- const canvasStateRef=useRef<CanvasState>({
   zoom: 1,
   panX: 0,
   panY: 0,
   isDragging: false,
   dragStartX: 0,
   dragStartY: 0,
+  world: null as Container|null,
+  aiNodes: new Map<string,Container>(),
+  userNode: null as Container|null,
+  agentNodes: new Map<string,Container>(),
+  packets: null as Graphics|null,
  })
 
- const objectsRef=useRef<{
-  world: Container|null
-  aiNodes: Map<string,Container>
-  userNode: Container|null
-  agentNodes: Map<string,Container>
-  packets: Graphics|null
- }>({
-  world: null,
-  aiNodes: new Map(),
-  userNode: null,
-  agentNodes: new Map(),
-  packets: null,
- })
-
- const updatePositions=useCallback(()=>{
-  const state=renderStateRef.current
-  const { positions }=state
-  const agentIdsSet=new Set(agents.map(a=>a.id))
-
-  for (const agent of agents) {
-   const target=computeAgentTarget(agent,agents,positions,aiServices,user,width,height)
-   let pos=positions.get(agent.id)
-   if (!pos) {
-    pos={ x: target.x,y: target.y,vx: 0,vy: 0,targetX: target.x,targetY: target.y }
-    positions.set(agent.id,pos)
-   } else {
-    pos.targetX=target.x
-    pos.targetY=target.y
-   }
-  }
-
-  positions.forEach((_,id)=>{
-   if (!agentIdsSet.has(id)) positions.delete(id)
-  })
-
-  positions.forEach((pos,id)=>updatePhysics(positions,id,pos))
- },[agents,aiServices,user,width,height])
+ dataRef.current.agents=agents
+ dataRef.current.aiServices=aiServices
+ dataRef.current.user=user
+ dataRef.current.connections=connections
+ dataRef.current.width=width
+ dataRef.current.height=height
 
  useEffect(()=>{
-  if (!containerRef.current) return
+  if (!containerRef.current||initedRef.current) return
+  initedRef.current=true
 
-  let app: Application|null=null
+  const data=dataRef.current
   let destroyed=false
 
   const init=async ()=>{
-   app=new Application()
+   const app=new Application()
    await app.init({
-    width,
-    height,
+    width: data.width,
+    height: data.height,
     backgroundColor: hexToNumber(COLORS.BACKGROUND),
     antialias: true,
     resolution: window.devicePixelRatio||1,
@@ -305,25 +210,25 @@ export default function StrategyMapPixi({
 
    const world=new Container()
    app.stage.addChild(world)
-   objectsRef.current.world=world
+   data.world=world
 
    const packets=new Graphics()
    world.addChild(packets)
-   objectsRef.current.packets=packets
+   data.packets=packets
 
-   for (const ai of aiServices) {
+   for (const ai of data.aiServices) {
     const node=createAINode(ai)
     world.addChild(node)
-    objectsRef.current.aiNodes.set(ai.id,node)
+    data.aiNodes.set(ai.id,node)
    }
 
-   const userNode=createUserNode(user)
+   const userNode=createUserNode()
    world.addChild(userNode)
-   objectsRef.current.userNode=userNode
+   data.userNode=userNode
 
    app.ticker.add(()=>{
     if (destroyed) return
-    renderStateRef.current.frame++
+    data.frame++
     updatePositions()
     updateWorld()
    })
@@ -335,12 +240,9 @@ export default function StrategyMapPixi({
    container.y=ai.y
 
    const g=new Graphics()
-   g.fill({ color: 0xF5F0E8 })
    drawHexagon(g,0,0,SIZES.AI_NODE_RADIUS)
-   g.fill()
+   g.fill(0xF5F0E8)
    g.stroke({ color: hexToNumber(COLORS.TEXT_SECONDARY),width: 1.5 })
-   drawHexagon(g,0,0,SIZES.AI_NODE_RADIUS)
-   g.stroke()
    container.addChild(g)
 
    const text=new Text({
@@ -353,18 +255,15 @@ export default function StrategyMapPixi({
    return container
   }
 
-  const createUserNode=(u: UserNode): Container=>{
+  const createUserNode=(): Container=>{
    const container=new Container()
-   container.x=u.x
-   container.y=u.y
+   container.x=data.user.x
+   container.y=data.user.y
 
    const g=new Graphics()
-   g.fill({ color: 0xF5F0E8 })
    drawHexagon(g,0,0,SIZES.USER_NODE_RADIUS)
-   g.fill()
+   g.fill(0xF5F0E8)
    g.stroke({ color: hexToNumber(COLORS.TEXT_SECONDARY),width: 1.5 })
-   drawHexagon(g,0,0,SIZES.USER_NODE_RADIUS)
-   g.stroke()
    container.addChild(g)
 
    const title=new Text({
@@ -392,7 +291,7 @@ export default function StrategyMapPixi({
 
    const g=new Graphics()
    g.circle(0,0,12)
-   g.fill({ color: 0xF5F0E8 })
+   g.fill(0xF5F0E8)
    g.stroke({ color: hexToNumber(COLORS.TEXT_SECONDARY),width: 1 })
    container.addChild(g)
 
@@ -414,25 +313,45 @@ export default function StrategyMapPixi({
    return container
   }
 
+  const updatePositions=()=>{
+   const { agents,positions,aiServices,user,width,height }=data
+   const agentIdsSet=new Set(agents.map(a=>a.id))
+
+   for (const agent of agents) {
+    const target=computeAgentTarget(agent,agents,positions,aiServices,user,width,height)
+    let pos=positions.get(agent.id)
+    if (!pos) {
+     pos={ x: target.x,y: target.y,vx: 0,vy: 0,targetX: target.x,targetY: target.y }
+     positions.set(agent.id,pos)
+    } else {
+     pos.targetX=target.x
+     pos.targetY=target.y
+    }
+   }
+
+   positions.forEach((_,id)=>{
+    if (!agentIdsSet.has(id)) positions.delete(id)
+   })
+
+   positions.forEach((pos,id)=>updatePhysics(positions,id,pos))
+  }
+
   const updateWorld=()=>{
-   const state=renderStateRef.current
-   const canvasState=canvasStateRef.current
-   const world=objectsRef.current.world
+   const { world,width,height,zoom,panX,panY,user,aiServices,agents,positions,connections,frame }=data
    if (!world) return
 
    world.x=width/2
    world.y=height/2
-   world.scale.set(canvasState.zoom)
-   world.pivot.set(width/2-canvasState.panX,height/2-canvasState.panY)
+   world.scale.set(zoom)
+   world.pivot.set(width/2-panX,height/2-panY)
 
-   const userNode=objectsRef.current.userNode
-   if (userNode) {
-    userNode.x=user.x
-    userNode.y=user.y
+   if (data.userNode) {
+    data.userNode.x=user.x
+    data.userNode.y=user.y
    }
 
    for (const ai of aiServices) {
-    const node=objectsRef.current.aiNodes.get(ai.id)
+    const node=data.aiNodes.get(ai.id)
     if (node) {
      node.x=ai.x
      node.y=ai.y
@@ -440,21 +359,21 @@ export default function StrategyMapPixi({
    }
 
    const agentIdsSet=new Set(agents.map(a=>a.id))
-   objectsRef.current.agentNodes.forEach((node,id)=>{
+   data.agentNodes.forEach((node,id)=>{
     if (!agentIdsSet.has(id)) {
      node.destroy()
-     objectsRef.current.agentNodes.delete(id)
+     data.agentNodes.delete(id)
     }
    })
 
    for (const agent of agents) {
-    let node=objectsRef.current.agentNodes.get(agent.id)
+    let node=data.agentNodes.get(agent.id)
     if (!node) {
      node=createAgentNode(agent)
      world.addChild(node)
-     objectsRef.current.agentNodes.set(agent.id,node)
+     data.agentNodes.set(agent.id,node)
     }
-    const pos=state.positions.get(agent.id)
+    const pos=positions.get(agent.id)
     if (pos) {
      node.x=pos.x
      node.y=pos.y
@@ -462,27 +381,27 @@ export default function StrategyMapPixi({
     }
    }
 
-   const packets=objectsRef.current.packets
+   const packets=data.packets
    if (packets) {
     packets.clear()
     for (const conn of connections) {
      if (!conn.active) continue
-     const fromPos=state.positions.get(conn.fromId)
+     const fromPos=positions.get(conn.fromId)
      if (!fromPos) continue
 
      let toX=0,toY=0
-     const toPos=state.positions.get(conn.toId)
+     const toPos=positions.get(conn.toId)
      const toAI=aiServices.find(s=>s.id===conn.toId)
      if (toPos) { toX=toPos.x;toY=toPos.y }
      else if (toAI) { toX=toAI.x;toY=toAI.y }
      else if (conn.toId==='user') { toX=user.x;toY=user.y }
      else continue
 
-     const t=(state.frame%TIMING.PACKET_SPAWN_INTERVAL)/TIMING.PACKET_SPAWN_INTERVAL
+     const t=(frame%TIMING.PACKET_SPAWN_INTERVAL)/TIMING.PACKET_SPAWN_INTERVAL
      const px=fromPos.x+(toX-fromPos.x)*t
      const py=fromPos.y+(toY-fromPos.y)*t
      packets.circle(px,py,4)
-     packets.fill({ color: CONNECTION_COLORS[conn.type] })
+     packets.fill(CONNECTION_COLORS[conn.type])
     }
    }
   }
@@ -495,33 +414,41 @@ export default function StrategyMapPixi({
     appRef.current.destroy(true)
     appRef.current=null
    }
+   initedRef.current=false
   }
- },[width,height,aiServices,user,agents,connections,updatePositions])
+ },[])
 
- const handleWheel=useCallback((e: React.WheelEvent)=>{
+ useEffect(()=>{
+  const app=appRef.current
+  if (app) {
+   app.renderer.resize(width,height)
+  }
+ },[width,height])
+
+ const handleWheel=(e: React.WheelEvent)=>{
   e.preventDefault()
-  const state=canvasStateRef.current
+  const data=dataRef.current
   const factor=e.deltaY>0 ? 1-ZOOM.STEP : 1+ZOOM.STEP
-  state.zoom=Math.max(ZOOM.MIN,Math.min(ZOOM.MAX,state.zoom*factor))
- },[])
+  data.zoom=Math.max(ZOOM.MIN,Math.min(ZOOM.MAX,data.zoom*factor))
+ }
 
- const handleMouseDown=useCallback((e: React.MouseEvent)=>{
-  const state=canvasStateRef.current
-  state.isDragging=true
-  state.dragStartX=e.clientX-state.panX
-  state.dragStartY=e.clientY-state.panY
- },[])
+ const handleMouseDown=(e: React.MouseEvent)=>{
+  const data=dataRef.current
+  data.isDragging=true
+  data.dragStartX=e.clientX-data.panX
+  data.dragStartY=e.clientY-data.panY
+ }
 
- const handleMouseMove=useCallback((e: React.MouseEvent)=>{
-  const state=canvasStateRef.current
-  if (!state.isDragging) return
-  state.panX=e.clientX-state.dragStartX
-  state.panY=e.clientY-state.dragStartY
- },[])
+ const handleMouseMove=(e: React.MouseEvent)=>{
+  const data=dataRef.current
+  if (!data.isDragging) return
+  data.panX=e.clientX-data.dragStartX
+  data.panY=e.clientY-data.dragStartY
+ }
 
- const handleMouseUp=useCallback(()=>{
-  canvasStateRef.current.isDragging=false
- },[])
+ const handleMouseUp=()=>{
+  dataRef.current.isDragging=false
+ }
 
  return (
   <div
