@@ -77,6 +77,83 @@ function createParticle(x: number, y: number, color: string, spread: number): Pa
   }
 }
 
+function findGroupLeader(
+  agent: MapAgent,
+  allAgents: readonly MapAgent[]
+): MapAgent {
+  if (!agent.parentId) return agent
+  const parent = allAgents.find(a => a.id === agent.parentId)
+  return parent ? findGroupLeader(parent, allAgents) : agent
+}
+
+function getGroupMembers(
+  leaderId: string,
+  allAgents: readonly MapAgent[]
+): MapAgent[] {
+  const members: MapAgent[] = []
+  const leader = allAgents.find(a => a.id === leaderId)
+  if (leader) members.push(leader)
+
+  const children = allAgents.filter(a => a.parentId === leaderId)
+  for (const child of children) {
+    members.push(...getGroupMembers(child.id, allAgents))
+  }
+  return members
+}
+
+function computeGroupCenter(
+  leader: MapAgent,
+  allAgents: readonly MapAgent[],
+  aiServices: readonly AIService[],
+  user: UserNode,
+  width: number,
+  height: number
+): Vec2 {
+  const userZoneY = height * LAYOUT.USER_ZONE_Y
+  const workZoneTop = height * LAYOUT.WORK_ZONE_TOP
+
+  const group = getGroupMembers(leader.id, allAgents)
+
+  const waitingMember = group.find(m => m.status === 'waiting_approval')
+  if (waitingMember) {
+    const allWaiting = allAgents.filter(a => a.status === 'waiting_approval')
+    const leaderIds = [...new Set(allWaiting.map(a => findGroupLeader(a, allAgents).id))]
+    const groupIdx = leaderIds.indexOf(leader.id)
+    const spacing = Math.min(LAYOUT.APPROVAL_QUEUE_SPACING * 2, (width * 0.75) / Math.max(leaderIds.length, 1))
+    const startX = user.x - ((leaderIds.length - 1) * spacing) / 2
+    return { x: startX + groupIdx * spacing, y: userZoneY - LAYOUT.APPROVAL_QUEUE_OFFSET_Y - 30 }
+  }
+
+  const workingMember = group.find(m => m.aiTarget && m.status === 'running')
+  if (workingMember && workingMember.aiTarget) {
+    const ai = aiServices.find(s => s.id === workingMember.aiTarget)
+    if (ai) {
+      const allWorking = allAgents.filter(a => a.aiTarget === workingMember.aiTarget && a.status === 'running')
+      const workingLeaderIds = [...new Set(allWorking.map(a => findGroupLeader(a, allAgents).id))]
+      const groupIdx = workingLeaderIds.indexOf(leader.id)
+      const count = workingLeaderIds.length
+      const angleSpread = LAYOUT.AI_ORBIT_ANGLE_SPREAD
+      const baseAngle = Math.PI / 2
+      const angle = count === 1
+        ? baseAngle
+        : baseAngle - angleSpread / 2 + (angleSpread * groupIdx) / (count - 1)
+      const radius = LAYOUT.AI_ORBIT_RADIUS_BASE + 20
+      return {
+        x: ai.x + Math.cos(angle) * radius,
+        y: ai.y + Math.sin(angle) * radius,
+      }
+    }
+  }
+
+  const leaders = allAgents.filter(a => !a.parentId)
+  const idx = leaders.findIndex(a => a.id === leader.id)
+  const count = leaders.length
+  const availableWidth = width - LAYOUT.MARGIN_X * 2
+  const spacing = Math.min(LAYOUT.LEADER_SPACING_MAX, availableWidth / Math.max(count, 1))
+  const startX = width / 2 - ((count - 1) * spacing) / 2
+  return { x: startX + idx * spacing, y: workZoneTop + LAYOUT.LEADER_OFFSET_Y }
+}
+
 function computeAgentTarget(
   agent: MapAgent,
   allAgents: readonly MapAgent[],
@@ -86,64 +163,35 @@ function computeAgentTarget(
   width: number,
   height: number
 ): Vec2 {
-  const userZoneY = height * LAYOUT.USER_ZONE_Y
-  const workZoneTop = height * LAYOUT.WORK_ZONE_TOP
+  const leader = findGroupLeader(agent, allAgents)
+  const groupCenter = computeGroupCenter(leader, allAgents, aiServices, user, width, height)
 
-  if (agent.status === 'waiting_approval') {
-    const waiting = allAgents.filter(a => a.status === 'waiting_approval')
-    const idx = waiting.findIndex(a => a.id === agent.id)
-    const count = waiting.length
-    const spacing = Math.min(LAYOUT.APPROVAL_QUEUE_SPACING, (width * 0.75) / Math.max(count, 1))
-    const startX = user.x - ((count - 1) * spacing) / 2
-    return { x: startX + idx * spacing, y: userZoneY - LAYOUT.APPROVAL_QUEUE_OFFSET_Y }
+  if (agent.id === leader.id) {
+    return groupCenter
   }
 
-  if (agent.aiTarget && agent.status === 'running') {
-    const ai = aiServices.find(s => s.id === agent.aiTarget)
-    if (ai) {
-      const atThisAI = allAgents.filter(a => a.aiTarget === agent.aiTarget && a.status === 'running')
-      const idx = atThisAI.findIndex(a => a.id === agent.id)
-      const count = atThisAI.length
-      const angleSpread = LAYOUT.AI_ORBIT_ANGLE_SPREAD
-      const baseAngle = Math.PI / 2
-      const angle = count === 1
-        ? baseAngle
-        : baseAngle - angleSpread / 2 + (angleSpread * idx) / (count - 1)
-      const layer = Math.floor(idx / 6)
-      const radius = LAYOUT.AI_ORBIT_RADIUS_BASE + layer * LAYOUT.AI_ORBIT_RADIUS_STEP
-      return {
-        x: ai.x + Math.cos(angle) * radius,
-        y: ai.y + Math.sin(angle) * radius,
-      }
-    }
-  }
+  const parent = allAgents.find(a => a.id === agent.parentId)
+  if (!parent) return groupCenter
 
-  if (agent.parentId) {
-    const parentPos = positions.get(agent.parentId)
-    if (parentPos) {
-      const siblings = allAgents.filter(a => a.parentId === agent.parentId)
-      const idx = siblings.findIndex(a => a.id === agent.id)
-      const count = siblings.length
-      const spread = Math.min(count * LAYOUT.CHILD_SPREAD_FACTOR, LAYOUT.CHILD_SPREAD_MAX)
-      const col = idx % 6
-      const row = Math.floor(idx / 6)
-      const colCount = Math.min(count, 6)
-      const startX = parentPos.x - spread / 2
-      const xStep = spread / Math.max(colCount - 1, 1)
-      return {
-        x: startX + col * xStep,
-        y: parentPos.y + LAYOUT.CHILD_VERTICAL_GAP + row * LAYOUT.CHILD_ROW_GAP,
-      }
-    }
-  }
+  const parentPos = positions.get(parent.id)
+  const baseX = parentPos?.x ?? groupCenter.x
+  const baseY = parentPos?.y ?? groupCenter.y
 
-  const leaders = allAgents.filter(a => !a.parentId)
-  const idx = leaders.findIndex(a => a.id === agent.id)
-  const count = leaders.length
-  const availableWidth = width - LAYOUT.MARGIN_X * 2
-  const spacing = Math.min(LAYOUT.LEADER_SPACING_MAX, availableWidth / Math.max(count, 1))
-  const startX = width / 2 - ((count - 1) * spacing) / 2
-  return { x: startX + idx * spacing, y: workZoneTop + LAYOUT.LEADER_OFFSET_Y }
+  const siblings = allAgents.filter(a => a.parentId === agent.parentId)
+  const idx = siblings.findIndex(a => a.id === agent.id)
+  const count = siblings.length
+
+  const spread = Math.min(count * 35, 200)
+  const col = idx % 4
+  const row = Math.floor(idx / 4)
+  const colCount = Math.min(count, 4)
+  const xStep = colCount > 1 ? spread / (colCount - 1) : 0
+  const startX = baseX - spread / 2
+
+  return {
+    x: startX + col * xStep,
+    y: baseY + 50 + row * 45,
+  }
 }
 
 function findAvoidanceDirection(
