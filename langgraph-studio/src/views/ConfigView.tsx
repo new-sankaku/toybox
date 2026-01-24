@@ -3,11 +3,14 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{Save,FolderOpen}from'lucide-react'
+import{Save,FolderOpen,RefreshCw}from'lucide-react'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
 import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
 import{CostSettings}from'@/components/settings/CostSettings'
 import{useProjectStore}from'@/stores/projectStore'
+import{useAIServiceStore}from'@/stores/aiServiceStore'
+import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
+import{useCostSettingsStore}from'@/stores/costSettingsStore'
 import{projectSettingsApi}from'@/services/apiService'
 
 interface ConfigSection{
@@ -24,6 +27,9 @@ const configSections:ConfigSection[]=[
 
 export default function ConfigView():JSX.Element{
  const{currentProject}=useProjectStore()
+ const{saveProviderConfigs,resetProviderConfigs}=useAIServiceStore()
+ const{saveToServer:saveAutoApproval}=useAutoApprovalStore()
+ const{saveToServer:saveCostSettings,resetToDefaults:resetCostSettings}=useCostSettingsStore()
  const[activeSection,setActiveSection]=useState('ai-services')
  const[outputDir,setOutputDir]=useState('./output')
  const[saving,setSaving]=useState(false)
@@ -42,17 +48,43 @@ export default function ConfigView():JSX.Element{
   loadOutputSettings()
  },[loadOutputSettings])
 
- const handleSaveOutput=async()=>{
+ const handleSave=useCallback(async()=>{
   if(!currentProject)return
   setSaving(true)
   try{
-   await projectSettingsApi.updateOutputSettings(currentProject.id,{default_dir:outputDir})
+   switch(activeSection){
+    case'ai-services':
+     await saveProviderConfigs(currentProject.id)
+     break
+    case'auto-approval':
+     await saveAutoApproval()
+     break
+    case'cost':
+     await saveCostSettings(currentProject.id)
+     break
+    case'output':
+     await projectSettingsApi.updateOutputSettings(currentProject.id,{default_dir:outputDir})
+     break
+   }
   }catch(error){
-   console.error('Failed to save output settings:',error)
+   console.error('Failed to save settings:',error)
   }finally{
    setSaving(false)
   }
- }
+ },[currentProject,activeSection,saveProviderConfigs,saveAutoApproval,saveCostSettings,outputDir])
+
+ const handleReset=useCallback(()=>{
+  switch(activeSection){
+   case'ai-services':
+    resetProviderConfigs()
+    break
+   case'cost':
+    resetCostSettings()
+    break
+  }
+ },[activeSection,resetProviderConfigs,resetCostSettings])
+
+ const hasReset=activeSection==='ai-services'||activeSection==='cost'
 
  if(!currentProject){
   return(
@@ -70,10 +102,10 @@ export default function ConfigView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-start">
-    <div>
-     <Card>
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
+   <div className="flex-1 flex gap-3 overflow-hidden">
+    <div className="w-48 flex-shrink-0 flex flex-col overflow-hidden">
+     <Card className="flex flex-col overflow-hidden">
       <CardHeader>
        <DiamondMarker>設定カテゴリ</DiamondMarker>
       </CardHeader>
@@ -94,11 +126,23 @@ export default function ConfigView():JSX.Element{
          </button>
 ))}
        </div>
+       <div className="p-3 border-t border-nier-border-light space-y-2">
+        {hasReset&&(
+         <Button variant="ghost" size="sm" className="w-full" onClick={handleReset}>
+          <RefreshCw size={14}/>
+          <span className="ml-1">リセット</span>
+         </Button>
+)}
+        <Button variant="primary" size="sm" className="w-full" onClick={handleSave} disabled={saving}>
+         <Save size={14}/>
+         <span className="ml-1">{saving?'保存中...':'保存'}</span>
+        </Button>
+       </div>
       </CardContent>
      </Card>
     </div>
 
-    <div className="md:col-span-3 space-y-4">
+    <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
      {activeSection==='ai-services'&&<AIProviderSettings projectId={currentProject.id}/>}
 
      {activeSection==='auto-approval'&&<AutoApprovalSettings projectId={currentProject.id}/>}
@@ -111,28 +155,20 @@ export default function ConfigView():JSX.Element{
         <DiamondMarker>出力設定</DiamondMarker>
        </CardHeader>
        <CardContent>
-        <div className="space-y-4">
-         <div>
-          <label className="block text-nier-caption text-nier-text-light mb-1">
-           出力ディレクトリ
-          </label>
-          <div className="flex gap-2">
-           <input
-            type="text"
-            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
-            value={outputDir}
-            onChange={(e)=>setOutputDir(e.target.value)}
-           />
-           <button className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors">
-            <FolderOpen size={16}/>
-           </button>
-          </div>
-         </div>
-         <div className="flex justify-end">
-          <Button variant="primary" size="sm" onClick={handleSaveOutput} disabled={saving}>
-           <Save size={14}/>
-           <span className="ml-1.5">{saving?'保存中...':'保存'}</span>
-          </Button>
+        <div>
+         <label className="block text-nier-caption text-nier-text-light mb-1">
+          出力ディレクトリ
+         </label>
+         <div className="flex gap-2">
+          <input
+           type="text"
+           className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+           value={outputDir}
+           onChange={(e)=>setOutputDir(e.target.value)}
+          />
+          <button className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors">
+           <FolderOpen size={16}/>
+          </button>
          </div>
         </div>
        </CardContent>

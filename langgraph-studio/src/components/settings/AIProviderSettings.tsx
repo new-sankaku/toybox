@@ -1,24 +1,19 @@
-import{useState,useEffect,useCallback}from'react'
+import{useState,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{
- ToggleLeft,ToggleRight,RefreshCw,Save,
+ ToggleLeft,ToggleRight,RefreshCw,
  Eye,EyeOff,ChevronDown,ChevronRight,FolderOpen
 }from'lucide-react'
-import{useAIProviderStore}from'@/stores/aiProviderStore'
 import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{
  type AIProviderConfig,
  type LLMProviderConfig,
  type ComfyUIConfig,
  type VoicevoxConfig,
- type MusicGeneratorConfig,
- type AIServiceCategory,
- PROVIDER_TYPE_LABELS,
- SERVICE_CATEGORIES,
- getServiceCategory
+ type MusicGeneratorConfig
 }from'@/types/aiProvider'
 
 interface AIProviderSettingsProps{
@@ -314,7 +309,6 @@ function ProviderCard({provider,onUpdate,onToggle}:ProviderCardProps){
     <div className="flex items-center gap-3">
      {expanded?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
      <span className="text-nier-small text-nier-text-main">{provider.name}</span>
-     <span className="text-nier-caption text-nier-text-light">({PROVIDER_TYPE_LABELS[provider.type]})</span>
     </div>
     <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
      <button
@@ -359,26 +353,31 @@ function ProviderCard({provider,onUpdate,onToggle}:ProviderCardProps){
 }
 
 export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Element{
- const{providers,updateProvider,toggleProvider,resetToDefaults,loadFromServer,saveToServer,loading}=useAIProviderStore()
- const{fetchMaster}=useAIServiceStore()
- const[saving,setSaving]=useState(false)
+ const{
+  providerConfigs,
+  updateProviderConfig,
+  toggleProviderConfig,
+  loadProviderConfigs,
+  providerLoading,
+  fetchMaster,
+  master
+ }=useAIServiceStore()
 
  useEffect(()=>{
   fetchMaster()
-  loadFromServer(projectId)
+  loadProviderConfigs(projectId)
  },[projectId])
 
- const handleSave=useCallback(async()=>{
-  setSaving(true)
-  await saveToServer(projectId)
-  setSaving(false)
- },[projectId,saveToServer])
-
- const getProvidersByCategory=(category:AIServiceCategory)=>{
-  return providers.filter(p=>getServiceCategory(p.type)===category)
+ const getProvidersByServiceType=(serviceType:string)=>{
+  return providerConfigs.filter(p=>p.serviceType===serviceType)
  }
 
- if(loading){
+ const getServiceLabel=(serviceType:string)=>{
+  if(!master)return serviceType
+  return master.services[serviceType]?.label||serviceType
+ }
+
+ if(providerLoading){
   return(
    <Card>
     <CardContent>
@@ -388,43 +387,33 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
 )
  }
 
+ const serviceTypes=master?.serviceTypes||[]
+
  return(
   <div className="space-y-4">
    <Card>
     <CardHeader>
      <DiamondMarker>AIサービス設定</DiamondMarker>
     </CardHeader>
-    <CardContent className="space-y-4">
-     <div className="flex items-center justify-between">
-      <div className="text-nier-small text-nier-text-light">
-       {providers.filter(p=>p.enabled).length}/{providers.length} サービスが有効
-      </div>
-      <div className="flex gap-2">
-       <Button variant="ghost" size="sm" onClick={resetToDefaults}>
-        <RefreshCw size={14}/>
-        <span className="ml-1">リセット</span>
-       </Button>
-       <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
-        <Save size={14}/>
-        <span className="ml-1">{saving?'保存中...':'保存'}</span>
-       </Button>
-      </div>
+    <CardContent>
+     <div className="text-nier-small text-nier-text-light">
+      {providerConfigs.filter(p=>p.enabled).length}/{providerConfigs.length} サービスが有効
      </div>
     </CardContent>
    </Card>
 
-   {(Object.entries(SERVICE_CATEGORIES)as[AIServiceCategory,typeof SERVICE_CATEGORIES[AIServiceCategory]][]).map(([category,info])=>{
-    const categoryProviders=getProvidersByCategory(category)
+   {serviceTypes.map(serviceType=>{
+    const categoryProviders=getProvidersByServiceType(serviceType)
     if(categoryProviders.length===0)return null
     return(
-     <div key={category} className="space-y-2">
-      <div className="text-nier-small text-nier-text-light font-medium px-1">{info.label}</div>
+     <div key={serviceType} className="space-y-2">
+      <div className="text-nier-small text-nier-text-light font-medium px-1">{getServiceLabel(serviceType)}</div>
       {categoryProviders.map(provider=>(
        <ProviderCard
         key={provider.id}
         provider={provider}
-        onUpdate={updates=>updateProvider(provider.id,updates)}
-        onToggle={()=>toggleProvider(provider.id)}
+        onUpdate={updates=>updateProviderConfig(provider.id,updates)}
+        onToggle={()=>toggleProviderConfig(provider.id)}
        />
 ))}
      </div>

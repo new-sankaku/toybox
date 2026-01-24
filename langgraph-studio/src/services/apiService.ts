@@ -692,8 +692,19 @@ export interface AIServiceMasterService{
  default:{provider:string;model:string}
 }
 
+export interface UsageCategory{
+ id:string
+ label:string
+ service_type:AIServiceType
+ default:{
+  provider:string
+  model:string
+ }
+}
+
 export interface AIServiceMasterData{
  serviceTypes:AIServiceType[]
+ usageCategories:UsageCategory[]
  services:Record<AIServiceType,AIServiceMasterService>
  providers:Record<string,{
   label:string
@@ -768,18 +779,11 @@ export interface ScopeOption{
  description:string
 }
 
-export interface LLMProviderOption{
- value:string
- label:string
- recommended?:boolean
-}
-
 export interface ProjectOptionsConfig{
  platforms:PlatformOption[]
  scopes:ScopeOption[]
- llmProviders:LLMProviderOption[]
  projectTemplates:{value:string;label:string}[]
- defaults:{platform:string;scope:string;llmProvider:string;projectTemplate:string}
+ defaults:{platform:string;scope:string;projectTemplate:string}
 }
 
 export interface FileExtensionCategory{

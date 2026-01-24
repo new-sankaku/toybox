@@ -139,7 +139,7 @@ export default function AgentListView({
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Agent List-Main Content*/}
    <div className="flex-1 flex flex-col overflow-hidden">
     {loading&&agents.length===0?(
@@ -171,7 +171,7 @@ export default function AgentListView({
    </div>
 
    {/*Filter Sidebar*/}
-   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
     {/*Status Filter*/}
     <Card>
      <CardHeader>

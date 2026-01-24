@@ -370,10 +370,26 @@ class DataStore:
     if not existing:
      self._create_asset(session,agent,asset_type,asset_name,asset_size)
 
+ def _should_auto_approve_asset(self,session,project_id:str,asset_type:str)->bool:
+  proj_repo=ProjectRepository(session)
+  project=proj_repo.get(project_id)
+  if not project:
+   return False
+  rules=(project.config or {}).get("autoApprovalRules",[])
+  if not rules:
+   return False
+  for rule in rules:
+   if rule.get("category")==asset_type:
+    return rule.get("enabled",False)
+  return False
+
  def _create_asset(self,session,agent,asset_type:str,name:str,size:str):
   testdata_path=get_testdata_path()
   real_file=self._find_real_file(session,testdata_path,asset_type,agent.project_id)
   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+  actual_type=real_file["type"] if real_file else asset_type
+  auto_approve=self._should_auto_approve_asset(session,agent.project_id,actual_type)
+  approval_status="approved" if auto_approve else "pending"
   from models.tables import Asset
   if real_file:
    asset=Asset(
@@ -386,10 +402,11 @@ class DataStore:
     url=real_file["url"],
     thumbnail=real_file["thumbnail"],
     duration=self._random_duration() if real_file["type"]=="audio" else None,
-    approval_status="pending",
+    approval_status=approval_status,
     created_at=datetime.now()
    )
-   self._add_system_log_internal(session,agent.project_id,"info",display_name,f"アセット生成: {real_file['name']}")
+   log_msg=f"アセット生成: {real_file['name']}" + (" (自動承認)" if auto_approve else "")
+   self._add_system_log_internal(session,agent.project_id,"info",display_name,log_msg)
   else:
    url=f"/assets/{name}" if asset_type in ("image","audio") else None
    thumbnail=f"/thumbnails/{name}" if asset_type=="image" else None
@@ -403,16 +420,18 @@ class DataStore:
     url=url,
     thumbnail=thumbnail,
     duration=self._random_duration() if asset_type=="audio" else None,
-    approval_status="pending",
+    approval_status=approval_status,
     created_at=datetime.now()
    )
-   self._add_system_log_internal(session,agent.project_id,"info",display_name,f"アセット生成: {name}")
+   log_msg=f"アセット生成: {name}" + (" (自動承認)" if auto_approve else "")
+   self._add_system_log_internal(session,agent.project_id,"info",display_name,log_msg)
   session.add(asset)
   session.flush()
   asset_repo=AssetRepository(session)
   self._emit_event("asset:created",{
    "projectId":agent.project_id,
-   "asset":asset_repo.to_dict(asset)
+   "asset":asset_repo.to_dict(asset),
+   "autoApproved":auto_approve
   },agent.project_id)
 
  def _find_real_file(self,session,testdata_path:str,asset_type:str,project_id:str)->Optional[Dict]:
@@ -1016,6 +1035,7 @@ class DataStore:
    project.updated_at=datetime.now()
    session.flush()
    self._auto_approve_pending_checkpoints(session,project_id,rules)
+   self._auto_approve_pending_assets(session,project_id,rules)
    return rules
 
 def _auto_approve_pending_checkpoints(self,session,project_id:str,rules:List[Dict]):
@@ -1051,6 +1071,27 @@ def _auto_approve_pending_checkpoints(self,session,project_id:str,rules:List[Dic
     if not other_pending:
      agent.status="running"
      session.flush()
+
+ def _auto_approve_pending_assets(self,session,project_id:str,rules:List[Dict]):
+  enabled_categories={r["category"] for r in rules if r.get("enabled")}
+  if not enabled_categories:
+   return
+  from models.tables import Asset
+  pending_assets=session.query(Asset).filter(
+   Asset.project_id==project_id,
+   Asset.approval_status=="pending"
+  ).all()
+  asset_repo=AssetRepository(session)
+  for asset in pending_assets:
+   if asset.type in enabled_categories:
+    asset.approval_status="approved"
+    session.flush()
+    self._add_system_log_internal(session,project_id,"info","System",f"アセット自動承認(設定変更): {asset.name}")
+    self._emit_event("asset:updated",{
+     "projectId":project_id,
+     "asset":asset_repo.to_dict(asset),
+     "autoApproved":True
+    },project_id)
 
  def get_ai_services(self,project_id:str)->Dict[str,Dict]:
   with session_scope() as session:

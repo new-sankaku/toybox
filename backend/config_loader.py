@@ -70,8 +70,11 @@ def reload_config(filename:Optional[str] = None):
 
 
 def get_models_config()->Dict[str,Any]:
-    """モデル設定を取得"""
-    return load_json_config("models.json")
+    """モデル設定を取得（非推奨: ai_providers.yamlを使用してください）"""
+    try:
+        return load_json_config("models.json")
+    except FileNotFoundError:
+        return {"providers":{},"tokenPricing":{},"defaults":{"temperature":0.7,"maxTokens":4096},"currency":"USD"}
 
 
 def get_token_pricing(model_id:str)->Dict[str,float]:

@@ -8,7 +8,8 @@ from ai_config import (
  get_providers,
  get_providers_for_service,
  get_pricing_config,
- get_all_model_pricing
+ get_all_model_pricing,
+ get_usage_categories
 )
 
 
@@ -75,6 +76,7 @@ def register_ai_service_routes(app:Flask):
     providers_out[pid]['schedulers'] = pdata['schedulers']
   return jsonify({
    'serviceTypes':get_service_types(),
+   'usageCategories':get_usage_categories(),
    'services':services,
    'providers':providers_out
   })

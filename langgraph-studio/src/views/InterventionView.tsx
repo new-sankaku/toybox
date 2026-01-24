@@ -166,7 +166,7 @@ export default function InterventionView():JSX.Element{
  const selectedIntervention=interventions.find(i=>i.id===selectedId)
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full flex flex-col">
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
    <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 flex-1 overflow-hidden">
     {/*Left: Chat Room List*/}
     <Card className="flex flex-col overflow-hidden">

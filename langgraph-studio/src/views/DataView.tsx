@@ -1,4 +1,4 @@
-import{useState,useEffect,useRef}from'react'
+import{useState,useEffect,useRef,useMemo}from'react'
 import ReactMarkdown from'react-markdown'
 import remarkGfm from'remark-gfm'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
@@ -6,6 +6,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
+import{useAssetStore}from'@/stores/assetStore'
 import{assetApi,fileUploadApi,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{
@@ -100,7 +101,7 @@ const typeColors:Record<AssetType,string>={
 export default function DataView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter}=useNavigationStore()
- const[assets,setAssets]=useState<Asset[]>([])
+ const assetStore=useAssetStore()
  const[loading,setLoading]=useState(false)
  const[filterType,setFilterType]=useState<AssetType|'all'>('all')
  const[approvalFilter,setApprovalFilter]=useState<ApprovalFilter>('pending')
@@ -108,6 +109,8 @@ export default function DataView():JSX.Element{
  const[selectedAsset,setSelectedAsset]=useState<Asset|null>(null)
  const[playingAudio,setPlayingAudio]=useState<string|null>(null)
  const audioRef=useRef<HTMLAudioElement|null>(null)
+
+ const assets=useMemo(()=>assetStore.assets.map(convertApiAsset),[assetStore.assets])
 
  useEffect(()=>{
   setSelectedAsset(null)
@@ -119,7 +122,7 @@ export default function DataView():JSX.Element{
 
  useEffect(()=>{
   if(!currentProject){
-   setAssets([])
+   assetStore.setAssets([])
    return
   }
 
@@ -127,17 +130,17 @@ export default function DataView():JSX.Element{
    setLoading(true)
    try{
     const data=await assetApi.listByProject(currentProject.id)
-    setAssets(data.map(convertApiAsset))
+    assetStore.setAssets(data)
    }catch(error){
     console.error('Failed to fetch assets:',error)
-    setAssets([])
+    assetStore.setAssets([])
    }finally{
     setLoading(false)
    }
   }
 
   fetchAssets()
- },[currentProject?.id])
+ },[currentProject?.id,assetStore])
 
  if(!currentProject){
   return(
@@ -214,8 +217,8 @@ export default function DataView():JSX.Element{
   try{
    await assetApi.updateStatus(currentProject.id,assetId,'approved')
    const data=await assetApi.listByProject(currentProject.id)
+   assetStore.setAssets(data)
    const updatedAssets=data.map(convertApiAsset)
-   setAssets(updatedAssets)
    if(selectedAsset?.id===assetId){
     selectNextPending(updatedAssets,currentId)
    }
@@ -230,8 +233,8 @@ export default function DataView():JSX.Element{
   try{
    await assetApi.updateStatus(currentProject.id,assetId,'rejected')
    const data=await assetApi.listByProject(currentProject.id)
+   assetStore.setAssets(data)
    const updatedAssets=data.map(convertApiAsset)
-   setAssets(updatedAssets)
    if(selectedAsset?.id===assetId){
     selectNextPending(updatedAssets,currentId)
    }
@@ -241,7 +244,7 @@ export default function DataView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Asset Grid/List-Main Content*/}
    <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader className="flex-shrink-0">
@@ -435,7 +438,7 @@ export default function DataView():JSX.Element{
    </Card>
 
    {/*Filter Sidebar*/}
-   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
     {/*Type Filter*/}
     <Card>
      <CardHeader>

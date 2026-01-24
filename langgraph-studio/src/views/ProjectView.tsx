@@ -5,6 +5,7 @@ import{Button}from'@/components/ui/Button'
 import{AssetFileUploader}from'@/components/project/AssetFileUploader'
 import{useProjectStore}from'@/stores/projectStore'
 import{useProjectOptionsStore}from'@/stores/projectOptionsStore'
+import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{projectApi,fileUploadApi,extractApiError}from'@/services/apiService'
 import type{Project,ProjectStatus}from'@/types/project'
 import type{FileCategory}from'@/types/uploadedFile'
@@ -18,7 +19,6 @@ import{
  type Platform,
  type Scope,
  type ProjectScale,
- type LLMProvider,
  type AssetGenerationOptions,
  type ContentPermissions
 }from'@/config/projectOptions'
@@ -55,19 +55,19 @@ interface NewProjectForm{
  platform:Platform
  scope:Scope
  scale:ProjectScale
- llmProvider:LLMProvider
+ aiServiceSettings:Record<string,string>
  assetGeneration:AssetGenerationOptions
  contentPermissions:ContentPermissions
 }
 
-const getInitialForm=(defaults:{platform:string;scope:string;llmProvider:string}):NewProjectForm=>({
+const getInitialForm=(defaults:{platform:string;scope:string;projectTemplate:string}):NewProjectForm=>({
  name:'',
  userIdea:'',
  references:'',
  platform:defaults.platform as Platform,
  scope:defaults.scope as Scope,
  scale:'medium' as ProjectScale,
- llmProvider:defaults.llmProvider as LLMProvider,
+ aiServiceSettings:{},
  assetGeneration:{...PROJECT_DEFAULTS.assetGeneration},
  contentPermissions:{...PROJECT_DEFAULTS.contentPermissions}
 })
@@ -90,7 +90,8 @@ const statusColors:Record<ProjectStatus,string>={
 
 export default function ProjectView():JSX.Element{
  const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
- const{platforms,scopes,llmProviders,defaults,fetchOptions}=useProjectOptionsStore()
+ const{platforms,scopes,defaults,fetchOptions}=useProjectOptionsStore()
+ const{master,fetchMaster}=useAIServiceStore()
  const{getLabel:getAgentLabel}=useAgentDefinitionStore()
  const initialForm=getInitialForm(defaults)
  const[showNewForm,setShowNewForm]=useState(false)
@@ -139,6 +140,7 @@ export default function ProjectView():JSX.Element{
  useEffect(()=>{
   fetchProjects()
   fetchOptions()
+  fetchMaster()
  },[])
 
  useEffect(()=>{
@@ -164,7 +166,7 @@ export default function ProjectView():JSX.Element{
      references:form.references||undefined
     },
     config:{
-     llmProvider:form.llmProvider,
+     aiServiceSettings:form.aiServiceSettings,
      scale:form.scale,
      assetGeneration:form.assetGeneration,
      contentPermissions:form.contentPermissions
@@ -209,6 +211,15 @@ export default function ProjectView():JSX.Element{
   setCurrentProject(project)
  }
 
+ const buildAIServiceDefaults=():Record<string,string>=>{
+  if(!master?.usageCategories)return{}
+  const result:Record<string,string>={}
+  master.usageCategories.forEach(cat=>{
+   result[cat.id]=`${cat.default.provider}:${cat.default.model}`
+  })
+  return result
+ }
+
  const handleEditProjectFromList=(project:Project)=>{
   if(currentProject?.id!==project.id){
    incrementDataVersion()
@@ -221,7 +232,7 @@ export default function ProjectView():JSX.Element{
    platform:(project.concept?.platform as Platform)||defaults.platform,
    scope:(project.concept?.scope as Scope)||defaults.scope,
    scale:(project.config?.scale as ProjectScale)||'medium',
-   llmProvider:(project.config?.llmProvider as LLMProvider)||defaults.llmProvider,
+   aiServiceSettings:{...buildAIServiceDefaults(),...(project.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...project.config?.assetGeneration},
    contentPermissions:{
     allowViolence:project.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
@@ -392,7 +403,7 @@ export default function ProjectView():JSX.Element{
    platform:(currentProject.concept?.platform as Platform)||defaults.platform,
    scope:(currentProject.concept?.scope as Scope)||defaults.scope,
    scale:(currentProject.config?.scale as ProjectScale)||'medium',
-   llmProvider:(currentProject.config?.llmProvider as LLMProvider)||defaults.llmProvider,
+   aiServiceSettings:{...buildAIServiceDefaults(),...(currentProject.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...currentProject.config?.assetGeneration},
    contentPermissions:{
     allowViolence:currentProject.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
@@ -423,7 +434,7 @@ export default function ProjectView():JSX.Element{
     },
     config:{
      ...currentProject.config,
-     llmProvider:editForm.llmProvider,
+     aiServiceSettings:editForm.aiServiceSettings,
      scale:editForm.scale,
      assetGeneration:editForm.assetGeneration,
      contentPermissions:editForm.contentPermissions
@@ -442,10 +453,10 @@ export default function ProjectView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in">
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
    {/*Error Message*/}
    {error&&(
-    <div className="mb-4 p-3 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main text-nier-small">
+    <div className="mb-4 p-3 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main text-nier-small flex-shrink-0">
      {error}
      <button
       onClick={()=>setError(null)}
@@ -456,10 +467,10 @@ export default function ProjectView():JSX.Element{
     </div>
 )}
 
-   <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+   <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 overflow-hidden">
     {/*Left: Project List*/}
-    <div className="lg:col-span-1 space-y-3">
-     <Card>
+    <div className="lg:col-span-1 flex flex-col overflow-hidden">
+     <Card className="flex flex-col overflow-hidden">
       <CardHeader>
        <div className="flex items-center justify-between w-full">
         <DiamondMarker>プロジェクト一覧</DiamondMarker>
@@ -482,7 +493,7 @@ export default function ProjectView():JSX.Element{
         </div>
        </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex-1 overflow-y-auto">
        {isLoading&&projects.length===0?(
         <div className="text-center text-nier-text-light py-8">
          <Loader2 size={24} className="mx-auto mb-2 animate-spin"/>
@@ -493,7 +504,7 @@ export default function ProjectView():JSX.Element{
          プロジェクトがありません
         </div>
 ) : (
-        <div className="space-y-2 nier-scroll-list-short">
+        <div className="space-y-2">
          {projects.map((project)=>(
           <div
            key={project.id}
@@ -552,13 +563,13 @@ export default function ProjectView():JSX.Element{
     </div>
 
     {/*Right: New Project Form or Project Details*/}
-    <div className="lg:col-span-2">
+    <div className="lg:col-span-2 overflow-y-auto">
      {showNewForm?(
       <Card>
        <CardHeader>
         <DiamondMarker>新規プロジェクト作成</DiamondMarker>
        </CardHeader>
-       <CardContent className="max-h-[calc(100vh-200px)] overflow-y-auto">
+       <CardContent>
         <div className="space-y-4">
          {/*Project Name*/}
          <div>
@@ -678,21 +689,52 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*LLM Provider*/}
+         {/*AI Service Settings*/}
+         {master&&master.usageCategories&&(
          <div>
-          <label className="block text-nier-small text-nier-text-light mb-1">
-           LLMプロバイダー
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           AI サービス設定
           </label>
-          <select
-           value={form.llmProvider}
-           onChange={(e)=>setForm({...form,llmProvider:e.target.value as LLMProvider})}
-           className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
-          >
-           {llmProviders.map((opt)=>(
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-))}
-          </select>
+          <div className="space-y-2">
+           {master.usageCategories.map((cat)=>{
+            const providers=Object.entries(master.providers||{}).filter(
+             ([,p])=>p.serviceTypes.includes(cat.service_type)
+)
+            const defaultValue=`${cat.default.provider}:${cat.default.model}`
+            return(
+            <div key={cat.id} className="flex items-center gap-3">
+             <label className="w-44 text-nier-small text-nier-text-light flex-shrink-0">
+              {cat.label}
+             </label>
+             <select
+              value={form.aiServiceSettings[cat.id]||defaultValue}
+              onChange={(e)=>setForm({
+               ...form,
+               aiServiceSettings:{...form.aiServiceSettings,[cat.id]:e.target.value}
+              })}
+              className="flex-1 px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none"
+             >
+              {providers.flatMap(([providerId,provider])=>{
+               if(providerId.startsWith('local-')){
+                return[
+                 <option key={providerId} value={`${providerId}:${provider.defaultModel}`}>
+                  {provider.label}
+                 </option>
+]
+               }
+               return provider.models.map((model)=>(
+                <option key={`${providerId}:${model.id}`} value={`${providerId}:${model.id}`}>
+                 {model.label}
+                </option>
+))
+              })}
+             </select>
+            </div>
+)
+           })}
+          </div>
          </div>
+)}
 
          {/*Asset Generation Options*/}
          <div>

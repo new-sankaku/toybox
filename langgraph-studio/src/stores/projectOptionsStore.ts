@@ -1,12 +1,11 @@
 import{create}from'zustand'
-import{configApi,type ProjectOptionsConfig,type PlatformOption,type ScopeOption,type LLMProviderOption}from'@/services/apiService'
+import{configApi,type ProjectOptionsConfig,type PlatformOption,type ScopeOption}from'@/services/apiService'
 
 interface ProjectOptionsState{
  platforms:PlatformOption[]
  scopes:ScopeOption[]
- llmProviders:LLMProviderOption[]
  projectTemplates:{value:string;label:string}[]
- defaults:{platform:string;scope:string;llmProvider:string;projectTemplate:string}
+ defaults:{platform:string;scope:string;projectTemplate:string}
  loaded:boolean
  loading:boolean
  error:string|null
@@ -16,9 +15,8 @@ interface ProjectOptionsState{
 const DEFAULT_OPTIONS:ProjectOptionsConfig={
  platforms:[],
  scopes:[],
- llmProviders:[],
  projectTemplates:[],
- defaults:{platform:'web',scope:'demo',llmProvider:'claude',projectTemplate:'rpg'}
+ defaults:{platform:'web',scope:'demo',projectTemplate:'rpg'}
 }
 
 export const useProjectOptionsStore=create<ProjectOptionsState>((set,get)=>({
@@ -34,7 +32,6 @@ export const useProjectOptionsStore=create<ProjectOptionsState>((set,get)=>({
    set({
     platforms:options.platforms,
     scopes:options.scopes,
-    llmProviders:options.llmProviders,
     projectTemplates:options.projectTemplates,
     defaults:options.defaults,
     loaded:true,

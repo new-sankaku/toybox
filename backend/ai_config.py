@@ -27,6 +27,9 @@ def get_defaults()->Dict[str,Dict[str,str]]:
 def get_providers()->Dict[str,Dict[str,Any]]:
  return _load_config().get('providers',{})
 
+def get_usage_categories()->List[Dict[str,Any]]:
+ return _load_config().get('usage_categories',[])
+
 def get_providers_for_service(service_type:str)->List[Dict[str,Any]]:
  result = []
  for provider_id,provider in get_providers().items():

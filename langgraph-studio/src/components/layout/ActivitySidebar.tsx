@@ -5,7 +5,10 @@ import{useNavigatorStore}from'@/stores/navigatorStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
 import{useMetricsStore}from'@/stores/metricsStore'
-import{logsApi,metricsApi,agentApi,checkpointApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiAsset}from'@/services/apiService'
+import{useAssetStore}from'@/stores/assetStore'
+import{useLogStore}from'@/stores/logStore'
+import{useAIStatsStore}from'@/stores/aiStatsStore'
+import{metricsApi,agentApi,checkpointApi}from'@/services/apiService'
 import type{Agent}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{ProjectMetrics}from'@/types/project'
@@ -62,11 +65,31 @@ export default function ActivitySidebar():JSX.Element{
  const agentStore=useAgentStore()
  const checkpointStore=useCheckpointStore()
  const metricsStore=useMetricsStore()
+ const assetStore=useAssetStore()
+ const logStore=useLogStore()
+ const aiStatsStore=useAIStatsStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
- const[assets,setAssets]=useState<ApiAsset[]>([])
- const[logs,setLogs]=useState<ApiSystemLog[]>([])
- const[aiGenerating,setAiGenerating]=useState(0)
  const lastProjectIdRef=useRef<string|null>(null)
+
+ useEffect(()=>{
+  if(!currentProject){
+   lastProjectIdRef.current=null
+   return
+  }
+  if(lastProjectIdRef.current===currentProject.id){
+   return
+  }
+  lastProjectIdRef.current=currentProject.id
+  Promise.all([
+   metricsApi.getByProject(currentProject.id),
+   agentApi.listByProject(currentProject.id),
+   checkpointApi.listByProject(currentProject.id)
+]).then(([metricsData,agentsData,checkpointsData])=>{
+   metricsStore.setProjectMetrics(metricsData as ProjectMetrics)
+   agentStore.setAgents(agentsData as Agent[])
+   checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
+  }).catch(err=>console.error('Failed to fetch initial sidebar data:',err))
+ },[currentProject?.id,metricsStore,agentStore,checkpointStore])
 
  const agents:Agent[]=currentProject
   ?agentStore.agents.filter(a=>a.projectId===currentProject.id)
@@ -75,45 +98,9 @@ export default function ActivitySidebar():JSX.Element{
   ?checkpointStore.checkpoints.filter(cp=>cp.projectId===currentProject.id)
   :[]
  const metrics:ProjectMetrics|null=metricsStore.projectMetrics
-
- useEffect(()=>{
-  if(!currentProject){
-   setAssets([])
-   setLogs([])
-   setAiGenerating(0)
-   lastProjectIdRef.current=null
-   return
-  }
-
-  if(lastProjectIdRef.current===currentProject.id){
-   return
-  }
-
-  const fetchData=async()=>{
-   try{
-    const[metricsData,agentsData,checkpointsData,assetsData,logsData,aiStats]=await Promise.all([
-     metricsApi.getByProject(currentProject.id),
-     agentApi.listByProject(currentProject.id),
-     checkpointApi.listByProject(currentProject.id),
-     assetApi.listByProject(currentProject.id),
-     logsApi.getByProject(currentProject.id),
-     aiRequestApi.getStats(currentProject.id)
-])
-
-    metricsStore.setProjectMetrics(metricsData as ProjectMetrics)
-    agentStore.setAgents(agentsData as Agent[])
-    checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
-    setAssets(assetsData)
-    setLogs(logsData)
-    setAiGenerating(aiStats.processing+aiStats.pending)
-    lastProjectIdRef.current=currentProject.id
-   }catch(error){
-    console.error('Failed to fetch sidebar data:',error)
-   }
-  }
-
-  fetchData()
- },[currentProject?.id,metricsStore,agentStore,checkpointStore])
+ const assets=assetStore.assets
+ const logs=logStore.logs
+ const aiGenerating=aiStatsStore.stats?(aiStatsStore.stats.processing+aiStatsStore.stats.pending):0
 
  const completedAgents=agents.filter(a=>a.status==='completed').length
  const totalAgents=agents.length
@@ -142,7 +129,22 @@ export default function ActivitySidebar():JSX.Element{
    assets:pendingAssets,
    logs:logs.length,
    errors:errorLogs,
-   generating:generatingCount
+   generating:generatingCount,
+   elapsed:metrics?.elapsedTimeSeconds||0,
+   remaining:metrics?.estimatedRemainingSeconds||0,
+   characters:metrics?.generationCounts?.characters?.count||0,
+   backgrounds:metrics?.generationCounts?.backgrounds?.count||0,
+   ui:metrics?.generationCounts?.ui?.count||0,
+   effects:metrics?.generationCounts?.effects?.count||0,
+   music:metrics?.generationCounts?.music?.count||0,
+   sfx:metrics?.generationCounts?.sfx?.count||0,
+   voice:metrics?.generationCounts?.voice?.count||0,
+   video:metrics?.generationCounts?.video?.count||0,
+   scenarios:metrics?.generationCounts?.scenarios?.count||0,
+   code:metrics?.generationCounts?.code?.count||0,
+   documents:metrics?.generationCounts?.documents?.count||0,
+   totalAssets:totalAssets,
+   totalSize:totalProjectSize
   }
 
   const newHighlights:Record<string,boolean>={}
@@ -152,7 +154,6 @@ export default function ActivitySidebar():JSX.Element{
     newHighlights[key]=true
    }
   })
-
 
   if(prevValues.current.checkpoints!==undefined&&pendingCheckpoints>prevValues.current.checkpoints){
    showMessage('オペレーター',`新しい承認が${pendingCheckpoints-prevValues.current.checkpoints}件追加されました。承認をお願いします。`)
@@ -179,7 +180,7 @@ export default function ActivitySidebar():JSX.Element{
   }
 
   prevValues.current=currentValues
- },[metrics?.totalTokensUsed,completedAgents,pendingCheckpoints,pendingAssets,logs.length,errorLogs,generatingCount,showMessage])
+ },[metrics,completedAgents,pendingCheckpoints,pendingAssets,logs.length,errorLogs,generatingCount,totalAssets,totalProjectSize,showMessage])
 
  if(!currentProject){
   return(
@@ -195,8 +196,11 @@ export default function ActivitySidebar():JSX.Element{
     </button>
 
     {!isCollapsed&&(
-     <div className="flex-1 flex items-center justify-center text-nier-text-light text-nier-caption p-4 text-center">
-      プロジェクト未選択
+     <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex items-center justify-center text-nier-text-light text-nier-caption p-4 text-center">
+       プロジェクト未選択
+      </div>
+      <OperatorPanel/>
      </div>
 )}
    </div>
@@ -222,9 +226,9 @@ export default function ActivitySidebar():JSX.Element{
    </div>
 
    {!isCollapsed&&(
-    <>
+    <div className="flex-1 flex flex-col overflow-hidden">
      {/*Project Status-Compact*/}
-     <div className="px-2 py-1.5 border-b border-nier-border-light">
+     <div className="px-2 py-1.5 border-b border-nier-border-light flex-shrink-0">
       <div className="flex items-center justify-between">
        <div className="text-[11px] truncate flex-1 font-medium">{currentProject.name}</div>
        <span className="text-[10px] px-1 py-0.5 border ml-1 bg-nier-bg-selected border-nier-border-light text-nier-text-light">
@@ -245,8 +249,10 @@ export default function ActivitySidebar():JSX.Element{
 )}
      </div>
 
-     {/*Summary List*/}
-     <div className="px-2 py-1.5 text-[11px] space-y-1">
+     {/*Scrollable content area*/}
+     <div className="flex-1 overflow-y-auto">
+      {/*Summary List*/}
+      <div className="px-2 py-1.5 text-[11px] space-y-1">
       <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">Token</span>
        <span className="text-nier-text-main">{metrics?formatTokenCount(metrics.totalTokensUsed) : 0}</span>
@@ -259,11 +265,11 @@ export default function ActivitySidebar():JSX.Element{
        <span className="text-nier-text-light">Agent</span>
        <span className="text-nier-text-main">{completedAgents}/{totalAgents}</span>
       </div>
-      <div className="flex justify-between">
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.elapsed&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">経過時間</span>
        <span className="text-nier-text-main">{metrics?formatTime(metrics.elapsedTimeSeconds) : '-'}</span>
       </div>
-      <div className="flex justify-between">
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.remaining&&'bg-nier-accent-yellow/30')}>
        <span className="text-nier-text-light">残り時間</span>
        <span className="text-nier-text-main">{metrics?.estimatedRemainingSeconds?formatTime(metrics.estimatedRemainingSeconds) : '-'}</span>
       </div>
@@ -289,60 +295,61 @@ export default function ActivitySidebar():JSX.Element{
      <div className="px-2 py-1.5 text-[11px] border-t border-nier-border-light">
       <div className="text-nier-text-light text-[9px] tracking-wider mb-1">OUTPUT</div>
       <div className="space-y-0.5">
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.characters&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">キャラクター</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.characters?.count||0}{metrics?.generationCounts?.characters?.unit||'体'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.backgrounds&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">背景</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.backgrounds?.count||0}{metrics?.generationCounts?.backgrounds?.unit||'枚'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.ui&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">UIパーツ</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.ui?.count||0}{metrics?.generationCounts?.ui?.unit||'点'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.effects&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">エフェクト</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.effects?.count||0}{metrics?.generationCounts?.effects?.unit||'種'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.music&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">BGM</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.music?.count||0}{metrics?.generationCounts?.music?.unit||'曲'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.sfx&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">効果音</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.sfx?.count||0}{metrics?.generationCounts?.sfx?.unit||'個'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.voice&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">ボイス</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.voice?.count||0}{metrics?.generationCounts?.voice?.unit||'件'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.video&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">動画</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.video?.count||0}{metrics?.generationCounts?.video?.unit||'本'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.scenarios&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">シナリオ</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.scenarios?.count||0}{metrics?.generationCounts?.scenarios?.unit||'本'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.code&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">コード</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.code?.count||0}{metrics?.generationCounts?.code?.unit||'行'}</span>
        </div>
-       <div className="flex justify-between">
+       <div className={cn('flex justify-between transition-colors duration-300',highlights.documents&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">ドキュメント</span>
         <span className="text-nier-text-main">{metrics?.generationCounts?.documents?.count||0}{metrics?.generationCounts?.documents?.unit||'件'}</span>
        </div>
-       <div className="flex justify-between pt-1 border-t border-nier-border-light mt-1">
+       <div className={cn('flex justify-between pt-1 border-t border-nier-border-light mt-1 transition-colors duration-300',(highlights.totalAssets||highlights.totalSize)&&'bg-nier-accent-yellow/30')}>
         <span className="text-nier-text-light">ファイル合計</span>
         <span className="text-nier-text-main">{totalAssets}件/{formatSize(totalProjectSize)}</span>
        </div>
       </div>
      </div>
+     </div>
 
      {/*Operator Panel*/}
      <OperatorPanel/>
-    </>
+    </div>
 )}
   </div>
 )

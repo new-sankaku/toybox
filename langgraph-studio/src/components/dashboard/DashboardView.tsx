@@ -3,7 +3,7 @@ import AIFieldSection from'./AIFieldSection'
 
 export default function DashboardView():JSX.Element{
  return(
-  <div className="p-4 animate-nier-fade-in">
+  <div className="p-4 animate-nier-fade-in h-full overflow-y-auto">
    {/*Workflow Diagram*/}
    <WorkflowDiagram/>
 

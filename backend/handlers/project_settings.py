@@ -21,7 +21,8 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
   project = data_store.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
-  settings = project.get("outputSettings",get_output_settings_defaults())
+  config = project.get("config",{})
+  settings = config.get("outputSettings",get_output_settings_defaults())
   return jsonify(settings)
 
  @app.route('/api/projects/<project_id>/settings/output',methods=['PUT'])
@@ -30,11 +31,11 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
   if not project:
    return jsonify({"error":"Project not found"}),404
   data = request.json or {}
-  if "outputSettings" not in project:
-   project["outputSettings"] = get_output_settings_defaults()
-  project["outputSettings"].update(data)
-  data_store.update_project(project_id,{"outputSettings":project["outputSettings"]})
-  return jsonify(project["outputSettings"])
+  config = project.get("config",{})
+  output_settings = config.get("outputSettings",get_output_settings_defaults())
+  output_settings.update(data)
+  data_store.update_project(project_id,{"outputSettings":output_settings})
+  return jsonify(output_settings)
 
  @app.route('/api/projects/<project_id>/settings/cost',methods=['GET'])
  def get_project_cost_settings(project_id:str):

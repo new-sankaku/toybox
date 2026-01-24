@@ -140,7 +140,7 @@ export default function CheckpointReviewView({
  }
 
  return(
-  <div className="p-6 animate-nier-fade-in">
+  <div className="p-6 animate-nier-fade-in h-full overflow-y-auto">
    {/*Header*/}
    <div className="flex items-center justify-between mb-6">
     <div>

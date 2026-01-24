@@ -2,22 +2,31 @@ import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
+import{useAIStatsStore}from'@/stores/aiStatsStore'
 import{AIField2D}from'@/components/ai-game'
 import type{CharacterState,AIServiceType,AIRequest,CharacterEmotion}from'@/components/ai-game/types'
 import{FolderOpen,Pause}from'lucide-react'
 import{Button}from'@/components/ui/Button'
 import type{AgentType}from'@/types/agent'
-import{projectSettingsApi}from'@/services/apiService'
+import{projectSettingsApi,aiRequestApi}from'@/services/apiService'
 
 export default function AIView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{agents}=useAgentStore()
+ const aiStatsStore=useAIStatsStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
  const[agentServiceMap,setAgentServiceMap]=useState<Record<string,string>>({})
 
  useEffect(()=>{
   projectSettingsApi.getAgentServiceMap().then(setAgentServiceMap).catch(console.error)
  },[])
+
+ useEffect(()=>{
+  if(!currentProject)return
+  aiRequestApi.getStats(currentProject.id)
+   .then(stats=>aiStatsStore.setStats(stats))
+   .catch(console.error)
+ },[currentProject?.id,aiStatsStore])
 
  const projectAgents=useMemo(()=>{
   if(!currentProject)return[]
@@ -93,8 +102,8 @@ export default function AIView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   <div className="nier-page-header-row">
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
+   <div className="nier-page-header-row flex-shrink-0">
     <div className="nier-page-header-left">
      <h1 className="nier-page-title">AI</h1>
      <span className="nier-page-subtitle">-外部AI連携</span>
@@ -102,7 +111,7 @@ export default function AIView():JSX.Element{
     <div className="nier-page-header-right"/>
    </div>
 
-   <Card className="mb-4">
+   <Card className="mb-4 flex-1 min-h-0">
     <CardContent className="p-0">
      <div className="h-[50vh] min-h-[300px] max-h-[600px] rounded-lg overflow-hidden">
       <AIField2D

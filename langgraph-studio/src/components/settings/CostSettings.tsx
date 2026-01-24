@@ -1,9 +1,8 @@
-import{useState,useEffect,useCallback}from'react'
+import{useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
-import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{ToggleLeft,ToggleRight,RefreshCw,DollarSign,Info,Save}from'lucide-react'
+import{ToggleLeft,ToggleRight,DollarSign,Info}from'lucide-react'
 import{useCostSettingsStore}from'@/stores/costSettingsStore'
 import{useAIServiceStore}from'@/stores/aiServiceStore'
 
@@ -29,7 +28,7 @@ interface ModelPricing{
 function formatPricing(pricing:ModelPricing|undefined):string{
  if(!pricing)return'-'
  if(pricing.input!==undefined&&pricing.output!==undefined){
-  return`入力: ${pricing.input} / 出力: ${pricing.output}`
+  return`In ${pricing.input} / Out ${pricing.output}`
  }
  if(pricing.per_image!==undefined)return`${pricing.per_image}/画像`
  if(pricing.per_track!==undefined)return`${pricing.per_track}/曲`
@@ -109,16 +108,26 @@ function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
      <div className="pt-2 border-t border-nier-border-light">
       <div className="flex items-center gap-1 text-nier-caption text-nier-text-light mb-2">
        <Info size={12}/>
-       <span>参考単価</span>
+       <span>参考単価 ($/1Mトークン)</span>
       </div>
-      <div className="space-y-1">
-       {providerPricings.map((pp,i)=>(
-        <div key={i} className="flex justify-between text-nier-caption">
-         <span className="text-nier-text-light">{pp.provider}/{pp.model}</span>
-         <span className="text-nier-text-main">{formatPricing(pp.pricing)}</span>
-        </div>
+      <table className="text-nier-caption">
+       <thead>
+        <tr className="text-nier-text-light">
+         <th className="text-left font-normal pb-1 pr-4">モデル</th>
+         <th className="text-left font-normal pb-1 pr-4">In</th>
+         <th className="text-left font-normal pb-1">Out</th>
+        </tr>
+       </thead>
+       <tbody>
+        {providerPricings.map((pp,i)=>(
+         <tr key={i}>
+          <td className="text-nier-text-light py-0.5 pr-4">{pp.model}</td>
+          <td className="text-nier-text-main py-0.5 pr-4">{pp.pricing?.input!==undefined?`${pp.pricing.input}`:'-'}</td>
+          <td className="text-nier-text-main py-0.5">{pp.pricing?.output!==undefined?`${pp.pricing.output}`:'-'}</td>
+         </tr>
 ))}
-      </div>
+       </tbody>
+      </table>
      </div>
 )}
    </CardContent>
@@ -135,23 +144,15 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
   updateGlobalLimit,
   fetchPricing,
   resetToDefaults,
-  loadFromServer,
-  saveToServer
+  loadFromServer
  }=useCostSettingsStore()
  const{fetchMaster}=useAIServiceStore()
- const[saving,setSaving]=useState(false)
 
  useEffect(()=>{
   fetchPricing()
   fetchMaster()
   loadFromServer(projectId)
  },[projectId])
-
- const handleSave=useCallback(async()=>{
-  setSaving(true)
-  await saveToServer(projectId)
-  setSaving(false)
- },[projectId,saveToServer])
 
  if(loading){
   return(
@@ -169,27 +170,10 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
     <CardHeader>
      <DiamondMarker>コスト設定</DiamondMarker>
     </CardHeader>
-    <CardContent className="space-y-4">
-     <div className="flex items-center justify-between">
-      <div className="text-nier-small text-nier-text-light">
-       月額コスト上限を設定して使用量を管理
-      </div>
-      <div className="flex gap-2">
-       <Button variant="ghost" size="sm" onClick={resetToDefaults}>
-        <RefreshCw size={14}/>
-        <span className="ml-1">リセット</span>
-       </Button>
-       <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
-        <Save size={14}/>
-        <span className="ml-1">{saving?'保存中...':'保存'}</span>
-       </Button>
-      </div>
+    <CardContent>
+     <div className="text-nier-small text-nier-text-light">
+      ※コストは概算です
      </div>
-     {pricing&&(
-      <div className="text-nier-caption text-nier-text-light">
-       通貨: {pricing.currency}
-      </div>
-)}
     </CardContent>
    </Card>
 

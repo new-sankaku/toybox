@@ -3,6 +3,7 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useLogStore}from'@/stores/logStore'
 import{logsApi,type ApiSystemLog}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{Search,AlertCircle,Info,AlertTriangle,Bug,FolderOpen,ChevronDown,Check}from'lucide-react'
@@ -39,7 +40,7 @@ const levelConfig={
 export default function LogsView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{definitions:_definitions,getLabel}=useAgentDefinitionStore()
- const[logs,setLogs]=useState<SystemLog[]>([])
+ const logStore=useLogStore()
  const[initialLoading,setInitialLoading]=useState(true)
  const[filterLevel,setFilterLevel]=useState<LogLevel>('all')
  const[selectedAgents,setSelectedAgents]=useState<Set<string>>(new Set())
@@ -47,6 +48,8 @@ export default function LogsView():JSX.Element{
  const[selectedLog,setSelectedLog]=useState<SystemLog|null>(null)
  const[dropdownOpen,setDropdownOpen]=useState(false)
  const dropdownRef=useRef<HTMLDivElement>(null)
+
+ const logs=useMemo(()=>logStore.logs.map(convertApiLog),[logStore.logs])
 
  const availableSources=useMemo(()=>{
   const sources=new Set<string>()
@@ -71,7 +74,7 @@ export default function LogsView():JSX.Element{
 
  useEffect(()=>{
   if(!currentProject){
-   setLogs([])
+   logStore.setLogs([])
    setInitialLoading(false)
    return
   }
@@ -80,17 +83,17 @@ export default function LogsView():JSX.Element{
    setInitialLoading(true)
    try{
     const data=await logsApi.getByProject(currentProject.id)
-    setLogs(data.map(convertApiLog))
+    logStore.setLogs(data)
    }catch(error){
     console.error('Failed to fetch logs:',error)
-    setLogs([])
+    logStore.setLogs([])
    }finally{
     setInitialLoading(false)
    }
   }
 
   fetchLogs()
- },[currentProject?.id])
+ },[currentProject?.id,logStore])
 
  if(!currentProject){
   return(
@@ -180,9 +183,9 @@ export default function LogsView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Log List and Details-Main Content*/}
-   <div className="flex-1 flex flex-col gap-3">
+   <div className="flex-1 flex flex-col gap-3 overflow-hidden">
     <Card className="flex-1 flex flex-col overflow-hidden">
       <CardHeader className="flex-shrink-0">
        <DiamondMarker>ログ一覧</DiamondMarker>
@@ -279,7 +282,7 @@ export default function LogsView():JSX.Element{
    </div>
 
    {/*Filter Sidebar*/}
-   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
     {/*Search*/}
     <Card>
      <CardHeader>

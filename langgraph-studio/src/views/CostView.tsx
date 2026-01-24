@@ -231,9 +231,9 @@ export default function CostView():JSX.Element{
  const chartData=groupedData.map(g=>({label:g.label,value:g.cost}))
 
  return(
-  <div className="p-4 animate-nier-fade-in">
-   <div className="flex gap-3">
-    <Card className="flex-[2]">
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
+   <div className="flex-1 flex gap-3 overflow-hidden">
+    <Card className="flex-[2] flex flex-col overflow-hidden">
      <CardHeader>
       <div className="flex items-center justify-between w-full">
        <DiamondMarker>エージェント別</DiamondMarker>
@@ -251,7 +251,7 @@ export default function CostView():JSX.Element{
        </div>
       </div>
      </CardHeader>
-     <CardContent className="p-2">
+     <CardContent className="p-2 flex-1 overflow-y-auto">
       {loading&&groupedData.length===0?(
        <div className="text-nier-text-light text-nier-small">読み込み中...</div>
 ):groupedData.length===0?(
@@ -293,11 +293,11 @@ export default function CostView():JSX.Element{
      </CardContent>
     </Card>
 
-    <Card className="flex-1">
-     <CardHeader>
+    <Card className="flex-1 flex flex-col overflow-hidden">
+     <CardHeader className="flex-shrink-0">
       <DiamondMarker>サマリー</DiamondMarker>
      </CardHeader>
-     <CardContent className="p-2 space-y-3">
+     <CardContent className="p-2 space-y-3 flex-1 overflow-y-auto">
       <div>
        <div className="text-nier-caption text-nier-text-light mb-1">コスト内訳</div>
        <div className="flex items-center gap-3">

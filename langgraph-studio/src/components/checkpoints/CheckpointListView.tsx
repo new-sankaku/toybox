@@ -64,7 +64,7 @@ export default function CheckpointListView({
  },[checkpoints])
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full flex gap-3">
+  <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Checkpoint List-Main Content*/}
    <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader className="flex-shrink-0">
@@ -103,7 +103,7 @@ export default function CheckpointListView({
    </Card>
 
    {/*Filter Sidebar*/}
-   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
     {/*Status Filter*/}
     <Card>
      <CardHeader>

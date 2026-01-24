@@ -1,0 +1,62 @@
+import{create}from'zustand'
+import type{ApiAsset}from'@/services/apiService'
+
+interface AssetState{
+ assets:ApiAsset[]
+ isLoading:boolean
+ error:string|null
+ setAssets:(assets:ApiAsset[])=>void
+ updateAsset:(id:string,updates:Partial<ApiAsset>)=>void
+ setLoading:(loading:boolean)=>void
+ setError:(error:string|null)=>void
+ reset:()=>void
+ getAssetsByProject:(projectId:string)=>ApiAsset[]
+ getPendingCount:()=>number
+}
+
+export const useAssetStore=create<AssetState>((set,get)=>({
+ assets:[],
+ isLoading:false,
+ error:null,
+
+ setAssets:(assets)=>set({assets}),
+
+ updateAsset:(id,updates)=>
+  set((state)=>({
+   assets:state.assets.map((asset)=>
+    asset.id===id?{...asset,...updates}:asset
+)
+  })),
+
+ setLoading:(loading)=>set({isLoading:loading}),
+
+ setError:(error)=>set({error}),
+
+ reset:()=>set({
+  assets:[],
+  isLoading:false,
+  error:null
+ }),
+
+ getAssetsByProject:(projectId)=>{
+  return get().assets.filter((asset)=>
+   asset.id.startsWith(projectId)||true
+)
+ },
+
+ getPendingCount:()=>{
+  return get().assets.filter((a)=>a.approvalStatus==='pending').length
+ }
+}))
+
+export const usePendingAssetsCount=()=>{
+ return useAssetStore((state)=>
+  state.assets.filter((a)=>a.approvalStatus==='pending').length
+)
+}
+
+export const useAssetsByApprovalStatus=(status:'approved'|'pending'|'rejected')=>{
+ return useAssetStore((state)=>
+  state.assets.filter((a)=>a.approvalStatus===status)
+)
+}

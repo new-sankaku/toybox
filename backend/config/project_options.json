@@ -38,34 +38,6 @@
       "description": "商用レベルの完成度"
     }
   ],
-  "llmProviders": [
-    {
-      "value": "anthropic",
-      "label": "Anthropic (Claude)",
-      "recommended": true,
-      "models": ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
-    },
-    {
-      "value": "openai",
-      "label": "OpenAI",
-      "models": ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]
-    },
-    {
-      "value": "google",
-      "label": "Google (Gemini)",
-      "models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
-    },
-    {
-      "value": "xai",
-      "label": "xAI (Grok)",
-      "models": ["grok-3", "grok-3-mini", "grok-2"]
-    },
-    {
-      "value": "mock",
-      "label": "Mock (テスト用)",
-      "models": ["mock-fast", "mock-standard"]
-    }
-  ],
   "projectTemplates": [
     {"value": "rpg", "label": "RPG (ロールプレイングゲーム)"},
     {"value": "action", "label": "アクションゲーム"},
@@ -77,8 +49,6 @@
   "defaults": {
     "platform": "web",
     "scope": "demo",
-    "llmProvider": "anthropic",
-    "llmModel": "claude-sonnet-4-20250514",
     "projectTemplate": "rpg"
   }
 }

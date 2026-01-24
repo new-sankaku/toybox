@@ -10,19 +10,67 @@ service_labels:
   music: 音楽生成
   audio: 音声生成
 
-defaults:
-  llm:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
-  image:
-    provider: comfyui
-    model: stable-diffusion-xl
-  music:
-    provider: suno
-    model: suno-v3
-  audio:
-    provider: voicevox
-    model: voicevox-default
+usage_categories:
+  - id: llm_high
+    label: LLM 高難易度 Task
+    service_type: llm
+    default:
+      provider: anthropic
+      model: claude-opus-4-5-20251101
+  - id: llm_mid
+    label: LLM 中難易度 Task
+    service_type: llm
+    default:
+      provider: anthropic
+      model: claude-sonnet-4-5-20250116
+  - id: llm_low
+    label: LLM 低難易度 Task
+    service_type: llm
+    default:
+      provider: anthropic
+      model: claude-haiku-4-5-20250116
+  - id: image_background
+    label: 画像 背景
+    service_type: image
+    default:
+      provider: local-comfyui
+      model: stable-diffusion-xl
+  - id: image_character
+    label: 画像 キャラクター
+    service_type: image
+    default:
+      provider: local-comfyui
+      model: stable-diffusion-xl
+  - id: image_upscaler
+    label: 画像 アップスケーラー
+    service_type: image
+    default:
+      provider: local-comfyui
+      model: stable-diffusion-xl
+  - id: image_bg_removal
+    label: 画像 背景削除
+    service_type: image
+    default:
+      provider: local-comfyui
+      model: stable-diffusion-xl
+  - id: bgm
+    label: BGM
+    service_type: music
+    default:
+      provider: local-audiocraft
+      model: musicgen-large
+  - id: sfx
+    label: 効果音
+    service_type: audio
+    default:
+      provider: local-audiocraft
+      model: audiogen-medium
+  - id: voice
+    label: 声
+    service_type: audio
+    default:
+      provider: local-coqui-tts
+      model: xtts-v2
 
 pricing:
   currency: USD
@@ -40,59 +88,62 @@ providers:
     service_types:
       - llm
     models:
-      - id: claude-sonnet-4-20250514
-        label: Claude Sonnet 4
+      - id: claude-opus-4-5-20251101
+        label: Claude Opus 4.5
         recommended: true
         pricing:
-          input: 3.0
-          output: 15.0
-      - id: claude-opus-4-20250514
-        label: Claude Opus 4
-        pricing:
-          input: 15.0
-          output: 75.0
-      - id: claude-3-5-sonnet-20241022
-        label: Claude 3.5 Sonnet
+          input: 5.0
+          output: 25.0
+      - id: claude-sonnet-4-5-20250116
+        label: Claude Sonnet 4.5
         pricing:
           input: 3.0
           output: 15.0
-      - id: claude-3-5-haiku-20241022
-        label: Claude 3.5 Haiku
+      - id: claude-haiku-4-5-20250116
+        label: Claude Haiku 4.5
         pricing:
-          input: 0.8
-          output: 4.0
-    default_model: claude-sonnet-4-20250514
+          input: 1.0
+          output: 5.0
+    default_model: claude-opus-4-5-20251101
 
-  openai:
-    label: OpenAI
+  zhipu:
+    label: Zhipu AI
     service_types:
       - llm
     models:
-      - id: gpt-4o
-        label: GPT-4o
+      - id: glm-4.7
+        label: Zhipu GLM-4.7
         recommended: true
         pricing:
-          input: 2.5
-          output: 10.0
-      - id: gpt-4-turbo
-        label: GPT-4 Turbo
+          input: 0.6
+          output: 2.2
+      - id: glm-4.7-flash
+        label: Zhipu GLM-4.7 Flash
         pricing:
-          input: 10.0
-          output: 30.0
-      - id: gpt-4
-        label: GPT-4
-        pricing:
-          input: 30.0
-          output: 60.0
-      - id: gpt-3.5-turbo
-        label: GPT-3.5 Turbo
-        pricing:
-          input: 0.5
-          output: 1.5
-    default_model: gpt-4o
+          input: 0.1
+          output: 0.1
+    default_model: glm-4.7
 
-  comfyui:
-    label: ComfyUI
+  deepseek:
+    label: DeepSeek
+    service_types:
+      - llm
+    models:
+      - id: deepseek-chat
+        label: DeepSeek-V3
+        recommended: true
+        pricing:
+          input: 0.27
+          output: 1.68
+      - id: deepseek-reasoner
+        label: DeepSeek-R1
+        pricing:
+          input: 0.55
+          output: 2.19
+    default_model: deepseek-chat
+
+  local-comfyui:
+    label: Local ComfyUI
     service_types:
       - image
     models:
@@ -114,81 +165,40 @@ providers:
         pricing:
           per_image: 0.0
     default_model: stable-diffusion-xl
-    samplers:
-      - euler
-      - euler_ancestral
-      - heun
-      - dpm_2
-      - dpm_2_ancestral
-      - lms
-      - dpm_fast
-      - dpm_adaptive
-      - dpmpp_2s_ancestral
-      - dpmpp_sde
-      - dpmpp_2m
-      - dpmpp_2m_sde
-      - ddim
-      - uni_pc
-    schedulers:
-      - normal
-      - karras
-      - exponential
-      - sgm_uniform
-      - simple
-      - ddim_uniform
 
-  suno:
-    label: Suno AI
+  local-audiocraft:
+    label: Local AudioCraft
     service_types:
+      - audio
       - music
     models:
-      - id: suno-v3
-        label: Suno v3
+      - id: musicgen-large
+        label: MusicGen Large
         recommended: true
         pricing:
-          per_track: 0.10
-      - id: suno-v4
-        label: Suno v4
+          per_track: 0.0
+      - id: musicgen-medium
+        label: MusicGen Medium
         pricing:
-          per_track: 0.10
-    default_model: suno-v3
+          per_track: 0.0
+      - id: audiogen-medium
+        label: AudioGen Medium
+        pricing:
+          per_track: 0.0
+    default_model: musicgen-large
 
-  voicevox:
-    label: VOICEVOX
+  local-coqui-tts:
+    label: Local Coqui TTS
     service_types:
       - audio
     models:
-      - id: voicevox-default
-        label: VOICEVOX標準
+      - id: xtts-v2
+        label: XTTS v2
         recommended: true
         pricing:
           per_1k_chars: 0.0
-    default_model: voicevox-default
-
-  elevenlabs:
-    label: ElevenLabs
-    service_types:
-      - audio
-    models:
-      - id: eleven-multilingual-v2
-        label: Multilingual v2
-        recommended: true
+      - id: vits
+        label: VITS
         pricing:
-          per_1k_chars: 0.30
-      - id: eleven-turbo-v2
-        label: Turbo v2
-        pricing:
-          per_1k_chars: 0.15
-    default_model: eleven-multilingual-v2
-
-  udio:
-    label: Udio
-    service_types:
-      - music
-    models:
-      - id: udio-v1
-        label: Udio v1
-        recommended: true
-        pricing:
-          per_track: 0.05
-    default_model: udio-v1
+          per_1k_chars: 0.0
+    default_model: xtts-v2

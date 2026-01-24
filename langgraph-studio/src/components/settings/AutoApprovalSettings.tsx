@@ -1,9 +1,9 @@
-import{useState,useEffect,useCallback}from'react'
+import{useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{CheckCircle2,XCircle,Loader2,Save}from'lucide-react'
+import{CheckCircle2,XCircle,Loader2}from'lucide-react'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
 
 interface AutoApprovalSettingsProps{
@@ -17,20 +17,12 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
   setRuleEnabled,
   setAllEnabled,
   getEnabledCount,
-  loadFromServer,
-  saveToServer
+  loadFromServer
  }=useAutoApprovalStore()
- const[saving,setSaving]=useState(false)
 
  useEffect(()=>{
   loadFromServer(projectId)
  },[projectId,loadFromServer])
-
- const handleSave=useCallback(async()=>{
-  setSaving(true)
-  await saveToServer()
-  setSaving(false)
- },[saveToServer])
 
  if(loading){
   return(
@@ -64,10 +56,6 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
       <Button variant="ghost" size="sm" onClick={()=>setAllEnabled(false)}>
        <XCircle size={14}/>
        <span className="ml-1">全てOFF</span>
-      </Button>
-      <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
-       <Save size={14}/>
-       <span className="ml-1">{saving?'保存中...':'保存'}</span>
       </Button>
      </div>
     </div>

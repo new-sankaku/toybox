@@ -189,7 +189,7 @@ function App():JSX.Element{
     <div key={`dashboard-${dataKey}`} style={{display:activeTab==='system'?'block':'none'}}>
      <DashboardView/>
     </div>
-    {activeTab!=='system'&&<div key={`content-${dataKey}`}>{renderOtherContent()}</div>}
+    {activeTab!=='system'&&<div key={`content-${dataKey}`} className="h-full">{renderOtherContent()}</div>}
    </AppLayout>
   </QueryClientProvider>
 )
