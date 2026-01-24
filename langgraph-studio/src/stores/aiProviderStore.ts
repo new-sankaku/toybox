@@ -11,19 +11,17 @@ import{
 
 interface AIProviderState{
  providers:AIProviderConfig[]
- addProvider:(config:AIProviderConfig)=>void
+ currentProjectId:string|null
+ loading:boolean
  updateProvider:(id:string,updates:Partial<AIProviderConfig>)=>void
- removeProvider:(id:string)=>void
  toggleProvider:(id:string)=>void
  getProvider:(id:string)=>AIProviderConfig|undefined
  getProvidersByType:(type:AIProviderType)=>AIProviderConfig[]
  getEnabledProviders:()=>AIProviderConfig[]
- exportSettings:()=>string
- importSettings:(json:string)=>boolean
  resetToDefaults:()=>void
+ loadFromServer:(projectId:string)=>Promise<void>
+ saveToServer:(projectId:string)=>Promise<void>
 }
-
-const generateId=()=>`provider-${Date.now()}-${Math.random().toString(36).slice(2,9)}`
 
 const DEFAULT_PROVIDERS:AIProviderConfig[]=[
  {
@@ -61,24 +59,14 @@ export const useAIProviderStore=create<AIProviderState>()(
  persist(
   (set,get)=>({
    providers:[...DEFAULT_PROVIDERS],
-
-   addProvider:(config)=>{
-    set(state=>({
-     providers:[...state.providers,{...config,id:config.id||generateId()}]
-    }))
-   },
+   currentProjectId:null,
+   loading:false,
 
    updateProvider:(id,updates)=>{
     set(state=>({
      providers:state.providers.map(p=>
       p.id===id?{...p,...updates}as AIProviderConfig:p
 )
-    }))
-   },
-
-   removeProvider:(id)=>{
-    set(state=>({
-     providers:state.providers.filter(p=>p.id!==id)
     }))
    },
 
@@ -102,35 +90,40 @@ export const useAIProviderStore=create<AIProviderState>()(
     return get().providers.filter(p=>p.enabled)
    },
 
-   exportSettings:()=>{
-    const providers=get().providers.map(p=>{
-     if('apiKey'in p){
-      return{...p,apiKey:''}
-     }
-     return p
-    })
-    return JSON.stringify({providers,version:1},null,2)
+   resetToDefaults:()=>{
+    set({providers:[...DEFAULT_PROVIDERS]})
    },
 
-   importSettings:(json)=>{
+   loadFromServer:async(projectId)=>{
+    if(get().currentProjectId===projectId&&get().providers.length>0)return
+    set({loading:true})
     try{
-     const data=JSON.parse(json)
-     if(data.providers&&Array.isArray(data.providers)){
-      set({providers:data.providers})
-      return true
+     const{projectSettingsApi}=await import('@/services/apiService')
+     const serverProviders=await projectSettingsApi.getAIProviders(projectId)
+     if(serverProviders&&Array.isArray(serverProviders)&&serverProviders.length>0){
+      set({providers:serverProviders as AIProviderConfig[],currentProjectId:projectId})
+     }else{
+      set({currentProjectId:projectId})
      }
-     return false
-    }catch{
-     return false
+    }catch(error){
+     console.error('Failed to load AI providers from server:',error)
+    }finally{
+     set({loading:false})
     }
    },
 
-   resetToDefaults:()=>{
-    set({providers:[...DEFAULT_PROVIDERS]})
+   saveToServer:async(projectId)=>{
+    try{
+     const{projectSettingsApi}=await import('@/services/apiService')
+     await projectSettingsApi.updateAIProviders(projectId,get().providers)
+    }catch(error){
+     console.error('Failed to save AI providers to server:',error)
+    }
    }
   }),
   {
-   name:'ai-provider-settings'
+   name:'ai-provider-settings',
+   partialize:(state)=>({providers:state.providers})
   }
 )
 )

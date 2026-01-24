@@ -1,0 +1,46 @@
+output:
+  default_dir: ./output
+
+cost:
+  global_enabled: true
+  global_monthly_limit: 100.0
+  alert_threshold: 80
+  stop_on_budget_exceeded: false
+  services:
+    llm:
+      enabled: true
+      monthly_limit: 50.0
+    image:
+      enabled: true
+      monthly_limit: 20.0
+    audio:
+      enabled: true
+      monthly_limit: 15.0
+    music:
+      enabled: true
+      monthly_limit: 15.0
+
+agent_service_map:
+  concept: llm
+  task_split_1: llm
+  concept_detail: llm
+  scenario: llm
+  world: llm
+  game_design: llm
+  tech_spec: llm
+  task_split_2: llm
+  task_split_3: llm
+  task_split_4: llm
+  code: llm
+  event: llm
+  ui_integration: llm
+  asset_integration: llm
+  unit_test: llm
+  integration_test: llm
+  asset_character: image
+  asset_background: image
+  asset_ui: image
+  asset_effect: image
+  asset_bgm: music
+  asset_voice: audio
+  asset_sfx: audio

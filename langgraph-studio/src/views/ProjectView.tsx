@@ -2,9 +2,8 @@ import{useState,useEffect,useCallback}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
-import{FileUploader}from'@/components/project/FileUploader'
+import{AssetFileUploader}from'@/components/project/AssetFileUploader'
 import{useProjectStore}from'@/stores/projectStore'
-import{useNavigationStore}from'@/stores/navigationStore'
 import{useProjectOptionsStore}from'@/stores/projectOptionsStore'
 import{projectApi,fileUploadApi,extractApiError}from'@/services/apiService'
 import type{Project,ProjectStatus}from'@/types/project'
@@ -15,12 +14,22 @@ import{
  PROJECT_DEFAULTS,
  ASSET_SERVICE_OPTIONS,
  CONTENT_PERMISSION_OPTIONS,
+ PROJECT_SCALE_OPTIONS,
  type Platform,
  type Scope,
+ type ProjectScale,
  type LLMProvider,
  type AssetGenerationOptions,
  type ContentPermissions
 }from'@/config/projectOptions'
+import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+
+const BRUSHUP_PHASES=[
+ {id:'design',label:'設計',agents:['concept','concept_detail','scenario','world','game_design','tech_spec']},
+ {id:'assets',label:'アセット',agents:['asset_character','asset_background','asset_ui','asset_effect','asset_bgm','asset_voice','asset_sfx']},
+ {id:'impl',label:'実装',agents:['code','event','ui_integration','asset_integration']},
+ {id:'test',label:'テスト',agents:['unit_test','integration_test']}
+]
 
 interface SelectedFile{
  file:File
@@ -45,6 +54,7 @@ interface NewProjectForm{
  references:string
  platform:Platform
  scope:Scope
+ scale:ProjectScale
  llmProvider:LLMProvider
  assetGeneration:AssetGenerationOptions
  contentPermissions:ContentPermissions
@@ -56,6 +66,7 @@ const getInitialForm=(defaults:{platform:string;scope:string;llmProvider:string}
  references:'',
  platform:defaults.platform as Platform,
  scope:defaults.scope as Scope,
+ scale:'medium' as ProjectScale,
  llmProvider:defaults.llmProvider as LLMProvider,
  assetGeneration:{...PROJECT_DEFAULTS.assetGeneration},
  contentPermissions:{...PROJECT_DEFAULTS.contentPermissions}
@@ -79,13 +90,16 @@ const statusColors:Record<ProjectStatus,string>={
 
 export default function ProjectView():JSX.Element{
  const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
- const{setActiveTab}=useNavigationStore()
  const{platforms,scopes,llmProviders,defaults,fetchOptions}=useProjectOptionsStore()
+ const{getLabel:getAgentLabel}=useAgentDefinitionStore()
  const initialForm=getInitialForm(defaults)
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
  const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
  const[showInitializeDialog,setShowInitializeDialog]=useState(false)
+ const[showBrushupDialog,setShowBrushupDialog]=useState(false)
+ const[brushupSelectedAgents,setBrushupSelectedAgents]=useState<Set<string>>(new Set())
+ const[brushupClearAssets,setBrushupClearAssets]=useState(false)
  const[isLoading,setIsLoading]=useState(false)
  const[uploadProgress,setUploadProgress]=useState<string|null>(null)
  const[error,setError]=useState<string|null>(null)
@@ -146,10 +160,12 @@ export default function ProjectView():JSX.Element{
     concept:{
      description:form.userIdea,
      platform:form.platform,
-     scope:form.scope
+     scope:form.scope,
+     references:form.references||undefined
     },
     config:{
      llmProvider:form.llmProvider,
+     scale:form.scale,
      assetGeneration:form.assetGeneration,
      contentPermissions:form.contentPermissions
     }
@@ -201,12 +217,16 @@ export default function ProjectView():JSX.Element{
   setEditForm({
    name:project.name,
    userIdea:project.concept?.description||'',
-   references:'',
+   references:project.concept?.references||'',
    platform:(project.concept?.platform as Platform)||defaults.platform,
    scope:(project.concept?.scope as Scope)||defaults.scope,
+   scale:(project.config?.scale as ProjectScale)||'medium',
    llmProvider:(project.config?.llmProvider as LLMProvider)||defaults.llmProvider,
-   assetGeneration:project.config?.assetGeneration||{...PROJECT_DEFAULTS.assetGeneration},
-   contentPermissions:project.config?.contentPermissions||{...PROJECT_DEFAULTS.contentPermissions}
+   assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...project.config?.assetGeneration},
+   contentPermissions:{
+    allowViolence:project.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
+    allowSexualContent:project.config?.contentPermissions?.allowSexualContent??PROJECT_DEFAULTS.contentPermissions.allowSexualContent
+   }
   })
   setIsEditing(true)
  }
@@ -292,18 +312,76 @@ export default function ProjectView():JSX.Element{
  }
 
  const canInitialize=currentProject&&(currentProject.status!=='draft'||currentProject.currentPhase>1)
+ const canBrushup=currentProject?.status==='completed'
+
+ const handleBrushupProject=async()=>{
+  if(!currentProject)return
+  if(brushupSelectedAgents.size===0){
+   setError('少なくとも1つのエージェントを選択してください')
+   return
+  }
+  setIsLoading(true)
+  try{
+   const options={
+    selectedAgents:Array.from(brushupSelectedAgents),
+    clearAssets:brushupClearAssets
+   }
+   const updated=await projectApi.brushup(currentProject.id,options)
+   incrementDataVersion()
+   setProjects(projects.map(p=>p.id===currentProject.id?updated : p))
+   setCurrentProject(updated)
+   setShowBrushupDialog(false)
+   setBrushupSelectedAgents(new Set())
+   setBrushupClearAssets(false)
+  }catch(err){
+   console.error('Failed to brushup project:',err)
+   const apiError=extractApiError(err)
+   setError(`ブラッシュアップに失敗: ${apiError.message}`)
+  }finally{
+   setIsLoading(false)
+  }
+ }
+
+ const toggleBrushupAgent=(agentType:string)=>{
+  setBrushupSelectedAgents(prev=>{
+   const next=new Set(prev)
+   if(next.has(agentType)){
+    next.delete(agentType)
+   }else{
+    next.add(agentType)
+   }
+   return next
+  })
+ }
+
+ const toggleBrushupPhase=(agents:string[])=>{
+  setBrushupSelectedAgents(prev=>{
+   const next=new Set(prev)
+   const allSelected=agents.every(a=>prev.has(a))
+   if(allSelected){
+    agents.forEach(a=>next.delete(a))
+   }else{
+    agents.forEach(a=>next.add(a))
+   }
+   return next
+  })
+ }
 
  const handleStartEdit=()=>{
   if(!currentProject)return
   setEditForm({
    name:currentProject.name,
    userIdea:currentProject.concept?.description||'',
-   references:'',
+   references:currentProject.concept?.references||'',
    platform:(currentProject.concept?.platform as Platform)||defaults.platform,
    scope:(currentProject.concept?.scope as Scope)||defaults.scope,
+   scale:(currentProject.config?.scale as ProjectScale)||'medium',
    llmProvider:(currentProject.config?.llmProvider as LLMProvider)||defaults.llmProvider,
-   assetGeneration:currentProject.config?.assetGeneration||{...PROJECT_DEFAULTS.assetGeneration},
-   contentPermissions:currentProject.config?.contentPermissions||{...PROJECT_DEFAULTS.contentPermissions}
+   assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...currentProject.config?.assetGeneration},
+   contentPermissions:{
+    allowViolence:currentProject.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
+    allowSexualContent:currentProject.config?.contentPermissions?.allowSexualContent??PROJECT_DEFAULTS.contentPermissions.allowSexualContent
+   }
   })
   setIsEditing(true)
  }
@@ -324,11 +402,13 @@ export default function ProjectView():JSX.Element{
      ...currentProject.concept,
      description:editForm.userIdea,
      platform:editForm.platform,
-     scope:editForm.scope
+     scope:editForm.scope,
+     references:editForm.references||undefined
     },
     config:{
      ...currentProject.config,
      llmProvider:editForm.llmProvider,
+     scale:editForm.scale,
      assetGeneration:editForm.assetGeneration,
      contentPermissions:editForm.contentPermissions
     }
@@ -360,9 +440,9 @@ export default function ProjectView():JSX.Element{
     </div>
 )}
 
-   <div className="grid grid-cols-3 gap-3">
+   <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
     {/*Left: Project List*/}
-    <div className="col-span-1 space-y-3">
+    <div className="lg:col-span-1 space-y-3">
      <Card>
       <CardHeader>
        <div className="flex items-center justify-between w-full">
@@ -456,13 +536,13 @@ export default function ProjectView():JSX.Element{
     </div>
 
     {/*Right: New Project Form or Project Details*/}
-    <div className="col-span-2">
+    <div className="lg:col-span-2">
      {showNewForm?(
       <Card>
        <CardHeader>
         <DiamondMarker>新規プロジェクト作成</DiamondMarker>
        </CardHeader>
-       <CardContent>
+       <CardContent className="max-h-[calc(100vh-200px)] overflow-y-auto">
         <div className="space-y-4">
          {/*Project Name*/}
          <div>
@@ -534,7 +614,7 @@ export default function ProjectView():JSX.Element{
          {/*Scope Selection*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
-           スコープ（ゲームの規模）
+           スコープ
           </label>
           <div className="grid grid-cols-4 gap-2">
            {scopes.map((opt)=>(
@@ -551,6 +631,32 @@ export default function ProjectView():JSX.Element{
             >
              <div className="text-nier-small font-medium">{opt.label}</div>
              <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
+            </button>
+))}
+          </div>
+         </div>
+
+         {/*Project Scale Selection*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           プロジェクト規模
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+           {PROJECT_SCALE_OPTIONS.map((opt)=>(
+            <button
+             key={opt.value}
+             type="button"
+             onClick={()=>setForm({...form,scale:opt.value})}
+             className={cn(
+              'p-2 border text-left transition-colors',
+              form.scale===opt.value
+               ?'border-nier-accent-gold bg-nier-bg-selected'
+               : 'border-nier-border-light hover:bg-nier-bg-hover'
+)}
+            >
+             <div className="text-nier-small font-medium">{opt.label}</div>
+             <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
+             <div className="text-nier-caption text-nier-text-light">{opt.estimatedHours}</div>
             </button>
 ))}
           </div>
@@ -637,9 +743,9 @@ export default function ProjectView():JSX.Element{
            初期ファイル（オプション）
           </label>
           <p className="text-nier-caption text-nier-text-light mb-2">
-           企画書、仕様書、参考資料、アセットなどをアップロードできます
+           カテゴリごとにファイルをアップロードできます
           </p>
-          <FileUploader
+          <AssetFileUploader
            files={selectedFiles}
            onFilesChange={setSelectedFiles}
            disabled={isLoading}
@@ -909,6 +1015,13 @@ export default function ProjectView():JSX.Element{
             停止
            </Button>
 )}
+          {/*ブラッシュアップ: completed の時のみ*/}
+          {canBrushup&&(
+           <Button onClick={()=>setShowBrushupDialog(true)}>
+            <RefreshCw size={14} className="mr-1.5"/>
+            ブラッシュアップ
+           </Button>
+)}
           {/*初期化: draft以外の時（進捗がある時）*/}
           {canInitialize&&(
            <Button
@@ -999,8 +1112,8 @@ export default function ProjectView():JSX.Element{
 
    {/*Initialize Confirmation Dialog*/}
    {showInitializeDialog&&currentProject&&(
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-     <Card className="w-96">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+     <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
       <CardHeader>
        <div className="flex items-center gap-2 text-nier-text-main">
         <AlertTriangle size={18}/>
@@ -1025,6 +1138,101 @@ export default function ProjectView():JSX.Element{
         >
          {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>: null}
          初期化する
+        </Button>
+       </div>
+      </CardContent>
+     </Card>
+    </div>
+)}
+
+   {/*Brushup Dialog*/}
+   {showBrushupDialog&&currentProject&&(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+     <Card className="w-full max-w-lg">
+      <CardHeader>
+       <div className="flex items-center gap-2 text-nier-text-main">
+        <RefreshCw size={18}/>
+        <span>ブラッシュアップ設定</span>
+       </div>
+      </CardHeader>
+      <CardContent>
+       <p className="text-nier-small text-nier-text-light mb-4">
+        再実行するエージェントを選択してください。選択したエージェントのみリセットされ、他は保持されます。
+       </p>
+       <div className="space-y-3 max-h-[400px] overflow-y-auto">
+        {BRUSHUP_PHASES.map(phase=>{
+         const phaseSelected=phase.agents.filter(a=>brushupSelectedAgents.has(a)).length
+         const allSelected=phaseSelected===phase.agents.length
+         return(
+          <div key={phase.id} className="border border-nier-border-light p-3">
+           <button
+            type="button"
+            onClick={()=>toggleBrushupPhase(phase.agents)}
+            className="flex items-center gap-2 w-full text-left mb-2"
+           >
+            <span className={cn('w-4 h-4 border flex items-center justify-center',
+             allSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+)}>
+             {allSelected&&<Check size={12}/>}
+             {phaseSelected>0&&!allSelected&&<span className="w-2 h-2 bg-nier-text-light"/>}
+            </span>
+            <span className="text-nier-body font-medium">{phase.label}</span>
+            <span className="text-nier-caption text-nier-text-light ml-auto">
+             {phaseSelected}/{phase.agents.length}
+            </span>
+           </button>
+           <div className="grid grid-cols-2 gap-1 pl-6">
+            {phase.agents.map(agentType=>(
+             <button
+              key={agentType}
+              type="button"
+              onClick={()=>toggleBrushupAgent(agentType)}
+              className="flex items-center gap-2 py-1 text-left"
+             >
+              <span className={cn('w-3 h-3 border flex items-center justify-center',
+               brushupSelectedAgents.has(agentType)?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+)}>
+               {brushupSelectedAgents.has(agentType)&&<Check size={10}/>}
+              </span>
+              <span className="text-nier-small">{getAgentLabel(agentType)}</span>
+             </button>
+))}
+           </div>
+          </div>
+)
+        })}
+       </div>
+       <div className="mt-4 pt-3 border-t border-nier-border-light">
+        <button
+         type="button"
+         onClick={()=>setBrushupClearAssets(!brushupClearAssets)}
+         className="flex items-center gap-2"
+        >
+         <span className={cn('w-4 h-4 border flex items-center justify-center',
+          brushupClearAssets?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+)}>
+          {brushupClearAssets&&<Check size={12}/>}
+         </span>
+         <span className="text-nier-small">選択したエージェントが生成したアセットも削除する</span>
+        </button>
+       </div>
+       <div className="flex gap-3 justify-end mt-6">
+        <Button
+         variant="secondary"
+         onClick={()=>{
+          setShowBrushupDialog(false)
+          setBrushupSelectedAgents(new Set())
+          setBrushupClearAssets(false)
+         }}
+        >
+         キャンセル
+        </Button>
+        <Button
+         onClick={handleBrushupProject}
+         disabled={isLoading||brushupSelectedAgents.size===0}
+        >
+         {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:null}
+         ブラッシュアップ開始
         </Button>
        </div>
       </CardContent>

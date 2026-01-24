@@ -5,7 +5,21 @@
 
 export type Platform=string
 export type Scope=string
+export type ProjectScale=string
 export type LLMProvider=string
+
+export interface ProjectScaleOption{
+ value:ProjectScale
+ label:string
+ description:string
+ estimatedHours:string
+}
+
+export const PROJECT_SCALE_OPTIONS:ProjectScaleOption[]=[
+ {value:'small',label:'小規模',description:'個人開発',estimatedHours:'~100時間'},
+ {value:'medium',label:'中規模',description:'小チーム開発',estimatedHours:'100~500時間'},
+ {value:'large',label:'大規模',description:'フルチーム開発',estimatedHours:'500時間以上'}
+]
 
 export interface AssetGenerationOptions {
  enableImageGeneration: boolean

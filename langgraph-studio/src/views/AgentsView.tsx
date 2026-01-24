@@ -23,7 +23,7 @@ function convertApiAgent(apiAgent:ApiAgent):Agent{
   parentAgentId:apiAgent.parentAgentId,
   metadata:apiAgent.metadata,
   createdAt:apiAgent.createdAt,
-  phase:apiAgent.phase
+  phase:apiAgent.phase as Agent['phase']
  }
 }
 

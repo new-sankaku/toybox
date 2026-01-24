@@ -1,16 +1,9 @@
 from flask import Flask,request,jsonify
-from testdata import TestDataStore
-
-STATUS_LABELS = {
-    "draft":"下書き",
-    "running":"実行中",
-    "paused":"一時停止",
-    "completed":"完了",
-    "failed":"エラー"
-}
+from datastore import DataStore
+from config_loader import get_status_labels
 
 
-def register_project_routes(app:Flask,data_store:TestDataStore,sio):
+def register_project_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/projects',methods=['GET'])
     def list_projects():
@@ -58,7 +51,7 @@ def register_project_routes(app:Flask,data_store:TestDataStore,sio):
 
         current_status = project["status"]
         if current_status not in ("draft","paused"):
-            status_label = STATUS_LABELS.get(current_status,current_status)
+            status_label = get_status_labels().get(current_status,current_status)
             return jsonify({
                 "error":f"プロジェクトを開始できません。現在のステータス「{status_label}」では開始操作は実行できません。下書きまたは一時停止状態のプロジェクトのみ開始できます。"
             }),400
@@ -81,7 +74,7 @@ def register_project_routes(app:Flask,data_store:TestDataStore,sio):
 
         current_status = project["status"]
         if current_status != "running":
-            status_label = STATUS_LABELS.get(current_status,current_status)
+            status_label = get_status_labels().get(current_status,current_status)
             return jsonify({
                 "error":f"プロジェクトを一時停止できません。現在のステータス「{status_label}」では一時停止操作は実行できません。実行中のプロジェクトのみ一時停止できます。"
             }),400
@@ -104,7 +97,7 @@ def register_project_routes(app:Flask,data_store:TestDataStore,sio):
 
         current_status = project["status"]
         if current_status != "paused":
-            status_label = STATUS_LABELS.get(current_status,current_status)
+            status_label = get_status_labels().get(current_status,current_status)
             return jsonify({
                 "error":f"プロジェクトを再開できません。現在のステータス「{status_label}」では再開操作は実行できません。一時停止中のプロジェクトのみ再開できます。"
             }),400
@@ -130,3 +123,64 @@ def register_project_routes(app:Flask,data_store:TestDataStore,sio):
         })
 
         return jsonify(project)
+
+    @app.route('/api/projects/<project_id>/brushup',methods=['POST'])
+    def brushup_project(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
+
+        if project["status"] != "completed":
+            return jsonify({"error":"完了したプロジェクトのみブラッシュアップできます"}),400
+
+        data = request.get_json() or {}
+        options = {
+            "selectedAgents":data.get("selectedAgents",[]),
+            "clearAssets":data.get("clearAssets",False)
+        }
+
+        project = data_store.brushup_project(project_id,options)
+        sio.emit('project:status_changed',{
+            "projectId":project_id,
+            "status":"draft",
+            "previousStatus":"completed"
+        })
+
+        return jsonify(project)
+
+    @app.route('/api/projects/<project_id>/ai-services',methods=['GET'])
+    def get_project_ai_services(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
+
+        ai_services = data_store.get_ai_services(project_id)
+        return jsonify(ai_services)
+
+    @app.route('/api/projects/<project_id>/ai-services',methods=['PUT'])
+    def update_project_ai_services(project_id:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
+
+        data = request.get_json() or {}
+        ai_services = data_store.update_ai_services(project_id,data)
+        if ai_services is None:
+            return jsonify({"error":"AI設定の更新に失敗しました"}),400
+
+        sio.emit('project:updated',data_store.get_project(project_id))
+        return jsonify(ai_services)
+
+    @app.route('/api/projects/<project_id>/ai-services/<service_type>',methods=['PATCH'])
+    def update_project_ai_service(project_id:str,service_type:str):
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
+
+        data = request.get_json() or {}
+        result = data_store.update_ai_service(project_id,service_type,data)
+        if result is None:
+            return jsonify({"error":f"サービスが見つかりません: {service_type}"}),404
+
+        sio.emit('project:updated',data_store.get_project(project_id))
+        return jsonify(result)

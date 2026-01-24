@@ -3,14 +3,13 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
+import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{AIField2D}from'@/components/ai-game'
 import type{CharacterState,AIServiceType,CharacterEmotion}from'@/components/ai-game/types'
-import{getAgentDisplayConfig}from'@/components/ai-game/pixelCharacters'
 import{Pause}from'lucide-react'
 import type{AgentType}from'@/types/agent'
 
-const AGENT_SERVICE_MAP:Record<AgentType,AIServiceType>={
- orchestrator:'llm',
+const AGENT_SERVICE_MAP:Record<string,AIServiceType>={
  director_phase1:'llm',
  director_phase2:'llm',
  director_phase3:'llm',
@@ -57,14 +56,19 @@ const AGENT_SERVICE_MAP:Record<AgentType,AIServiceType>={
 export default function AIFieldSection():JSX.Element|null{
  const{currentProject}=useProjectStore()
  const{agents,exitedAgentIds}=useAgentStore()
+ const{getLabel}=useAgentDefinitionStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
 
  const characters=useMemo(():CharacterState[]=>{
   if(!currentProject)return[]
 
-  const projectAgents=agents.filter(a=>
-   a.projectId===currentProject.id&&!exitedAgentIds.has(a.id)
-)
+  const projectAgents=agents.filter(a=>{
+   if(a.projectId!==currentProject.id)return false
+   if(exitedAgentIds.has(a.id))return false
+   if(a.status==='running'||a.status==='waiting_approval')return true
+   if(a.status==='completed')return true
+   return false
+  })
 
   return projectAgents.map((agent)=>{
    const isRunning=agent.status==='running'
@@ -125,7 +129,7 @@ export default function AIFieldSection():JSX.Element|null{
      <DiamondMarker>エージェント作業場</DiamondMarker>
     </CardHeader>
     <CardContent className="p-0">
-     <div className="h-[380px] rounded-lg overflow-hidden">
+     <div className="h-[40vh] min-h-[280px] max-h-[500px] rounded-lg overflow-hidden">
       <AIField2D
        key={currentProject.id}
        characters={characters}
@@ -141,7 +145,7 @@ export default function AIFieldSection():JSX.Element|null{
       <div className="flex items-start justify-between">
        <div>
         <h3 className="text-nier-body font-medium text-nier-text-main">
-         {getAgentDisplayConfig(selectedCharacter.agentType).label}
+         {getLabel(selectedCharacter.agentType)}
         </h3>
         <p className="text-nier-small text-nier-text-light mt-1">
          ステータス: {selectedCharacter.status==='idle'?'待機中':

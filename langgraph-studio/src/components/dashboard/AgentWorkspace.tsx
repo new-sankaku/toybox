@@ -1162,8 +1162,8 @@ export default function AgentWorkspace():JSX.Element{
     const agentsConverted:Agent[]=agentsData.map(a=>({
      id:a.id,
      projectId:a.projectId,
-     type:a.type,
-     phase:a.phase,
+     type:a.type as Agent['type'],
+     phase:a.phase as Agent['phase'],
      status:a.status as AgentStatus,
      progress:a.progress,
      currentTask:a.currentTask,
@@ -1171,9 +1171,9 @@ export default function AgentWorkspace():JSX.Element{
      startedAt:a.startedAt,
      completedAt:a.completedAt,
      error:a.error,
-     parentAgentId:null,
+     parentAgentId:a.parentAgentId,
      metadata:a.metadata,
-     createdAt:a.startedAt||new Date().toISOString()
+     createdAt:a.createdAt
     }))
     setAgents(agentsConverted)
    }catch(error){
@@ -1193,7 +1193,9 @@ export default function AgentWorkspace():JSX.Element{
 
   return projectAgents
    .sort((a,b)=>{
-    if(a.phase!==b.phase)return a.phase-b.phase
+    const phaseA=a.phase??0
+    const phaseB=b.phase??0
+    if(phaseA!==phaseB)return phaseA-phaseB
     return a.type.localeCompare(b.type)
    })
    .slice(0,16)

@@ -2,7 +2,7 @@ import{useState,useMemo,useCallback}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
-import type{Agent,AgentStatus,AgentType}from'@/types/agent'
+import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
 import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle}from'lucide-react'
 
@@ -83,12 +83,6 @@ export default function AgentListView({
    return`${runningNames.join(', ')} 完了待ち`
   }
 
-  const notCompletedAgents=agents.filter(a=>
-   a.id!==agent.id&&
-      a.status!=='completed'&&
-      a.status!=='failed'
-)
-
   const pendingBeforeMe=agents.filter(a=>
    a.id!==agent.id&&
       (a.status==='pending'||a.status==='running')
@@ -101,11 +95,6 @@ export default function AgentListView({
    }
    return'開始待機'
   }
-
-  const waitingForAgents=agents.filter(a=>
-   a.id!==agent.id&&
-      (a.status==='running'||a.status==='pending')
-)
 
   if(runningAgents.length>0){
    const names=runningAgents.map(a=>getDisplayName(a))
@@ -180,7 +169,7 @@ export default function AgentListView({
    </div>
 
    {/*Filter Sidebar*/}
-   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
     {/*Status Filter*/}
     <Card>
      <CardHeader>

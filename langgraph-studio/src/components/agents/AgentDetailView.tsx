@@ -5,7 +5,6 @@ import{Progress}from'@/components/ui/Progress'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentLogStreaming}from'./AgentLog'
 import type{Agent,AgentLogEntry}from'@/types/agent'
-import{cn}from'@/lib/utils'
 import{
  ArrowLeft,
  Pause,
@@ -85,7 +84,7 @@ export default function AgentDetailView({
    </div>
 
    {/*Main Content*/}
-   <div className="grid grid-cols-3 gap-5">
+   <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
     {/*Left Column-Status&Controls*/}
     <div className="space-y-4">
      {/*Progress Card*/}

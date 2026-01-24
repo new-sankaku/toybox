@@ -8,6 +8,7 @@ import{useAgentStore}from'@/stores/agentStore'
 import{metricsApi,agentApi}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import type{Agent,AgentStatus}from'@/types/agent'
+import type{PhaseNumber}from'@/types/project'
 
 interface Phase{
  id:number
@@ -44,14 +45,17 @@ export default function PhaseProgress():JSX.Element{
      completedTasks:metricsData.completedTasks,
      totalTasks:metricsData.totalTasks,
      progressPercent:metricsData.progressPercent,
-     currentPhase:metricsData.currentPhase,
-     phaseName:metricsData.phaseName
+     currentPhase:metricsData.currentPhase as PhaseNumber,
+     phaseName:metricsData.phaseName,
+     elapsedTimeSeconds:metricsData.elapsedTimeSeconds,
+     estimatedRemainingSeconds:metricsData.estimatedRemainingSeconds,
+     estimatedEndTime:metricsData.estimatedEndTime
     })
     const agentsConverted:Agent[]=agentsData.map(a=>({
      id:a.id,
      projectId:a.projectId,
-     type:a.type,
-     phase:a.phase,
+     type:a.type as Agent['type'],
+     phase:a.phase as Agent['phase'],
      status:a.status as AgentStatus,
      progress:a.progress,
      currentTask:a.currentTask,
@@ -59,7 +63,9 @@ export default function PhaseProgress():JSX.Element{
      startedAt:a.startedAt,
      completedAt:a.completedAt,
      error:a.error,
-     metadata:a.metadata
+     parentAgentId:a.parentAgentId,
+     metadata:a.metadata,
+     createdAt:a.createdAt
     }))
     setAgents(agentsConverted)
    }catch(error){

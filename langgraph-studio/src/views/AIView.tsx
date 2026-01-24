@@ -1,4 +1,4 @@
-import{useState,useMemo,useCallback}from'react'
+import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
@@ -7,37 +7,17 @@ import type{CharacterState,AIServiceType,AIRequest,CharacterEmotion}from'@/compo
 import{FolderOpen,Pause}from'lucide-react'
 import{Button}from'@/components/ui/Button'
 import type{AgentType}from'@/types/agent'
-
-const AGENT_SERVICE_MAP:Record<AgentType,AIServiceType>={
- concept:'llm',
- task_split_1:'llm',
- concept_detail:'llm',
- scenario:'llm',
- world:'llm',
- game_design:'llm',
- tech_spec:'llm',
- task_split_2:'llm',
- task_split_3:'llm',
- task_split_4:'llm',
- code:'llm',
- event:'llm',
- ui_integration:'llm',
- asset_integration:'llm',
- unit_test:'llm',
- integration_test:'llm',
- asset_character:'image',
- asset_background:'image',
- asset_ui:'image',
- asset_effect:'image',
- asset_bgm:'music',
- asset_voice:'audio',
- asset_sfx:'audio'
-}
+import{projectSettingsApi}from'@/services/apiService'
 
 export default function AIView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{agents}=useAgentStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
+ const[agentServiceMap,setAgentServiceMap]=useState<Record<string,string>>({})
+
+ useEffect(()=>{
+  projectSettingsApi.getAgentServiceMap().then(setAgentServiceMap).catch(console.error)
+ },[])
 
  const projectAgents=useMemo(()=>{
   if(!currentProject)return[]
@@ -47,7 +27,7 @@ export default function AIView():JSX.Element{
  const characters=useMemo(():CharacterState[]=>{
   return projectAgents.map((agent)=>{
    const agentType=agent.type as AgentType
-   const serviceType=AGENT_SERVICE_MAP[agentType]||'llm'
+   const serviceType=(agentServiceMap[agentType]||'llm')as AIServiceType
 
    let status:CharacterState['status']='idle'
    let emotion:CharacterEmotion='idle'
@@ -84,7 +64,7 @@ export default function AIView():JSX.Element{
     position:{x:0,y:0}
    }
   })
- },[projectAgents])
+ },[projectAgents,agentServiceMap])
 
  const handleCharacterClick=useCallback((character:CharacterState)=>{
   setSelectedCharacter(character)
@@ -124,7 +104,7 @@ export default function AIView():JSX.Element{
 
    <Card className="mb-4">
     <CardContent className="p-0">
-     <div className="h-[500px] rounded-lg overflow-hidden">
+     <div className="h-[50vh] min-h-[300px] max-h-[600px] rounded-lg overflow-hidden">
       <AIField2D
        characters={characters}
        onCharacterClick={handleCharacterClick}

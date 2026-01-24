@@ -303,7 +303,7 @@
            transition-colors duration-nier-fast
            hover:bg-white/10;
     line-height: 1 !important;
-    height: 36px;
+    height: clamp(32px, 5vh, 40px);
     padding-left: clamp(0.5rem, 1.5vw, 1rem);
     padding-right: clamp(0.5rem, 1.5vw, 1rem);
     font-size: clamp(10px, 1.2vw, 13px);
@@ -343,7 +343,7 @@
   }
 
   .nier-scroll-list-short {
-    max-height: 300px;
+    max-height: min(300px, 40vh);
     overflow-y: auto;
   }
 
@@ -487,11 +487,17 @@
   /* Navigator Character - Right Bottom */
   .navigator-character {
     position: fixed;
-    right: 24px;
-    bottom: 100px;
-    width: 150px;
-    height: 150px;
+    right: clamp(12px, 2vw, 24px);
+    bottom: clamp(60px, 10vh, 100px);
+    width: clamp(100px, 12vw, 150px);
+    height: clamp(100px, 12vw, 150px);
     animation: navigator-slide-in 0.4s ease-out;
+  }
+
+  @media (max-width: 768px) {
+    .navigator-character {
+      display: none;
+    }
   }
 
   @keyframes navigator-slide-in {
@@ -575,8 +581,8 @@
   }
 
   .navigator-portrait-inner {
-    width: 80px;
-    height: 80px;
+    width: clamp(60px, 8vw, 80px);
+    height: clamp(60px, 8vw, 80px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -637,18 +643,24 @@
   .dialogue-bar-container {
     position: fixed;
     left: 0;
-    right: 264px;
+    right: clamp(0px, 20vw, 264px);
     bottom: 0;
     z-index: 100;
     background: rgba(0, 0, 0, 0.9);
     color: #fff;
-    padding: 16px 24px;
-    min-height: 80px;
+    padding: clamp(12px, 2vw, 16px) clamp(16px, 3vw, 24px);
+    min-height: clamp(60px, 10vh, 80px);
     display: flex;
     flex-direction: column;
     justify-content: center;
     animation: dialogue-slide-up 0.3s ease-out;
     cursor: pointer;
+  }
+
+  @media (max-width: 768px) {
+    .dialogue-bar-container {
+      right: 0;
+    }
   }
 
   @keyframes dialogue-slide-up {
@@ -663,7 +675,7 @@
   }
 
   .dialogue-content {
-    max-width: 800px;
+    max-width: min(800px, 90vw);
   }
 
   .dialogue-speaker {
@@ -689,12 +701,18 @@
 
   .dialogue-hint {
     position: absolute;
-    right: 288px;
-    bottom: 16px;
-    font-size: 11px;
+    right: clamp(16px, 22vw, 288px);
+    bottom: clamp(12px, 2vh, 16px);
+    font-size: clamp(9px, 1vw, 11px);
     color: rgba(255, 255, 255, 0.4);
     letter-spacing: 0.1em;
     animation: hint-blink 1.5s ease-in-out infinite;
+  }
+
+  @media (max-width: 768px) {
+    .dialogue-hint {
+      right: 16px;
+    }
   }
 
   @keyframes hint-blink {
@@ -718,7 +736,7 @@
   }
 
   .operator-frame {
-    width: 150px;
+    width: clamp(120px, 12vw, 150px);
     background: var(--bg-panel);
     border: 2px solid var(--border-dark);
     display: flex;
@@ -817,8 +835,8 @@
   }
 
   .operator-portrait-inner {
-    width: 75px;
-    height: 75px;
+    width: clamp(55px, 7vw, 75px);
+    height: clamp(55px, 7vw, 75px);
     display: flex;
     align-items: center;
     justify-content: center;

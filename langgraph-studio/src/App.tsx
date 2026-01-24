@@ -2,7 +2,7 @@ import{useEffect,useRef,useCallback}from'react'
 import{QueryClient,QueryClientProvider}from'@tanstack/react-query'
 import AppLayout from'./components/layout/AppLayout'
 import DashboardView from'./components/dashboard/DashboardView'
-import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,CostView,ConfigView,StrategyMapView}from'./views'
+import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,CostView,ConfigView}from'./views'
 import{useNavigationStore}from'./stores/navigationStore'
 import{useProjectStore}from'./stores/projectStore'
 import{useAgentStore}from'./stores/agentStore'
@@ -47,8 +47,8 @@ function App():JSX.Element{
    const agentsConverted:Agent[]=agentsData.map(a=>({
     id:a.id,
     projectId:a.projectId,
-    type:a.type,
-    phase:a.phase,
+    type:a.type as Agent['type'],
+    phase:a.phase as Agent['phase'],
     status:a.status as AgentStatus,
     progress:a.progress,
     currentTask:a.currentTask,
@@ -56,9 +56,9 @@ function App():JSX.Element{
     startedAt:a.startedAt,
     completedAt:a.completedAt,
     error:a.error,
-    parentAgentId:null,
+    parentAgentId:a.parentAgentId,
     metadata:a.metadata,
-    createdAt:a.startedAt||new Date().toISOString()
+    createdAt:a.createdAt
    }))
    setAgents(agentsConverted)
   }catch(error){
@@ -96,7 +96,7 @@ function App():JSX.Element{
  },[currentProject?.id,fetchAgentsForProject])
 
  useEffect(()=>{
-  const backendUrl=import.meta.env.VITE_BACKEND_URL||'http://localhost:5000'
+  const backendUrl=(import.meta as unknown as{env:Record<string,string>}).env.VITE_BACKEND_URL||'http://localhost:5000'
   websocketService.connect(backendUrl)
 
   fetchDefinitions()
@@ -174,8 +174,6 @@ function App():JSX.Element{
     return<CostView/>
    case'config':
     return<ConfigView/>
-   case'strategy-map':
-    return<StrategyMapView/>
    default:
     return null
   }

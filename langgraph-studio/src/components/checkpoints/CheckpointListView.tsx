@@ -68,7 +68,7 @@ export default function CheckpointListView({
    {/*Checkpoint List-Main Content*/}
    <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader className="flex-shrink-0">
-     <DiamondMarker>チェックポイント一覧</DiamondMarker>
+     <DiamondMarker>承認一覧</DiamondMarker>
      <span className="text-nier-caption text-nier-text-light ml-2">
       ({filteredCheckpoints.length}件)
      </span>
@@ -80,10 +80,10 @@ export default function CheckpointListView({
       </div>
 ):filteredCheckpoints.length===0?(
       <div className="py-12 text-center text-nier-text-light">
-       <p className="text-nier-body mb-2">チェックポイントがありません</p>
+       <p className="text-nier-body mb-2">承認がありません</p>
        <p className="text-nier-small">
         {filterStatus!=='all'
-         ?`「${filterOptions.find(o=>o.value===filterStatus)?.label}」のチェックポイントはありません`
+         ?`「${filterOptions.find(o=>o.value===filterStatus)?.label}」の承認はありません`
          :'エージェントの実行を開始してください'}
        </p>
       </div>
@@ -103,7 +103,7 @@ export default function CheckpointListView({
    </Card>
 
    {/*Filter Sidebar*/}
-   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
     {/*Status Filter*/}
     <Card>
      <CardHeader>

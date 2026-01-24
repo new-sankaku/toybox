@@ -2,7 +2,13 @@ import{useState,useEffect,useRef}from'react'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
 import{useNavigatorStore}from'@/stores/navigatorStore'
-import{logsApi,checkpointApi,metricsApi,agentApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiCheckpoint,type ApiProjectMetrics,type ApiAgent,type ApiAsset}from'@/services/apiService'
+import{useAgentStore}from'@/stores/agentStore'
+import{useCheckpointStore}from'@/stores/checkpointStore'
+import{useMetricsStore}from'@/stores/metricsStore'
+import{logsApi,metricsApi,agentApi,checkpointApi,assetApi,aiRequestApi,type ApiSystemLog,type ApiAsset}from'@/services/apiService'
+import type{Agent}from'@/types/agent'
+import type{Checkpoint}from'@/types/checkpoint'
+import type{ProjectMetrics}from'@/types/project'
 import{cn}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
 import{ChevronRight,ChevronLeft}from'lucide-react'
@@ -50,25 +56,36 @@ function formatSize(bytes:number):string{
 }
 
 export default function ActivitySidebar():JSX.Element{
- const{currentProject,dataVersion}=useProjectStore()
+ const{currentProject}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
  const{showMessage}=useNavigatorStore()
+ const agentStore=useAgentStore()
+ const checkpointStore=useCheckpointStore()
+ const metricsStore=useMetricsStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
- const[metrics,setMetrics]=useState<ApiProjectMetrics|null>(null)
- const[agents,setAgents]=useState<ApiAgent[]>([])
- const[checkpoints,setCheckpoints]=useState<ApiCheckpoint[]>([])
  const[assets,setAssets]=useState<ApiAsset[]>([])
  const[logs,setLogs]=useState<ApiSystemLog[]>([])
  const[aiGenerating,setAiGenerating]=useState(0)
+ const lastProjectIdRef=useRef<string|null>(null)
+
+ const agents:Agent[]=currentProject
+  ?agentStore.agents.filter(a=>a.projectId===currentProject.id)
+  :[]
+ const checkpoints:Checkpoint[]=currentProject
+  ?checkpointStore.checkpoints.filter(cp=>cp.projectId===currentProject.id)
+  :[]
+ const metrics:ProjectMetrics|null=metricsStore.projectMetrics
 
  useEffect(()=>{
   if(!currentProject){
-   setMetrics(null)
-   setAgents([])
-   setCheckpoints([])
    setAssets([])
    setLogs([])
    setAiGenerating(0)
+   lastProjectIdRef.current=null
+   return
+  }
+
+  if(lastProjectIdRef.current===currentProject.id){
    return
   }
 
@@ -83,27 +100,25 @@ export default function ActivitySidebar():JSX.Element{
      aiRequestApi.getStats(currentProject.id)
 ])
 
-    setMetrics(metricsData)
-    setAgents(agentsData)
-    setCheckpoints(checkpointsData)
+    metricsStore.setProjectMetrics(metricsData as ProjectMetrics)
+    agentStore.setAgents(agentsData as Agent[])
+    checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
     setAssets(assetsData)
     setLogs(logsData)
     setAiGenerating(aiStats.processing+aiStats.pending)
+    lastProjectIdRef.current=currentProject.id
    }catch(error){
     console.error('Failed to fetch sidebar data:',error)
    }
   }
 
   fetchData()
- },[currentProject?.id,dataVersion])
+ },[currentProject?.id,metricsStore,agentStore,checkpointStore])
 
- const runningAgents=agents.filter(a=>a.status==='running').length
  const completedAgents=agents.filter(a=>a.status==='completed').length
- const failedAgents=agents.filter(a=>a.status==='failed').length
  const totalAgents=agents.length
 
  const pendingCheckpoints=checkpoints.filter(cp=>cp.status==='pending').length
- const totalCheckpoints=checkpoints.length
 
  const errorLogs=logs.filter(l=>l.level==='error').length
 
@@ -140,7 +155,7 @@ export default function ActivitySidebar():JSX.Element{
 
 
   if(prevValues.current.checkpoints!==undefined&&pendingCheckpoints>prevValues.current.checkpoints){
-   showMessage('オペレーター',`新しいチェックポイントが${pendingCheckpoints-prevValues.current.checkpoints}件追加されました。承認をお願いします。`)
+   showMessage('オペレーター',`新しい承認が${pendingCheckpoints-prevValues.current.checkpoints}件追加されました。承認をお願いします。`)
   }
   if(prevValues.current.assets!==undefined&&pendingAssets>prevValues.current.assets){
    showMessage('オペレーター',`新しいアセットが${pendingAssets-prevValues.current.assets}件生成されました。確認をお願いします。`)
@@ -253,11 +268,11 @@ export default function ActivitySidebar():JSX.Element{
        <span className="text-nier-text-main">{metrics?.estimatedRemainingSeconds?formatTime(metrics.estimatedRemainingSeconds) : '-'}</span>
       </div>
       <button onClick={()=>setActiveTab('checkpoints')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.checkpoints&&'bg-nier-accent-yellow/30')}>
-       <span className="text-nier-text-light">CheckPoints未承認</span>
+       <span className="text-nier-text-light">承認待ち</span>
        <span className="text-nier-text-main">{pendingCheckpoints}件</span>
       </button>
       <button onClick={()=>setActiveTab('data')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.assets&&'bg-nier-accent-yellow/30')}>
-       <span className="text-nier-text-light">Asset未承認</span>
+       <span className="text-nier-text-light">生成素材承認待ち</span>
        <span className="text-nier-text-main">{pendingAssets}件</span>
       </button>
       <button onClick={()=>setActiveTab('logs')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.logs&&'bg-nier-accent-yellow/30')}>

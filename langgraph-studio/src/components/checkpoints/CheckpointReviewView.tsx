@@ -163,9 +163,9 @@ export default function CheckpointReviewView({
    </div>
 
    {/*Main Content*/}
-   <div className="grid grid-cols-4 gap-4">
+   <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
     {/*Output Preview (3 columns)*/}
-    <div className="col-span-3">
+    <div className="lg:col-span-3">
      <Card>
       <CardHeader className="flex flex-row items-center justify-between">
        <DiamondMarker>出力プレビュー</DiamondMarker>
@@ -194,7 +194,7 @@ export default function CheckpointReviewView({
         </button>
        </div>
       </CardHeader>
-      <CardContent className="max-h-[500px] overflow-auto">
+      <CardContent className="max-h-[50vh] min-h-[200px] overflow-auto">
        {renderOutput()}
       </CardContent>
      </Card>

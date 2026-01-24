@@ -4,10 +4,10 @@ import io
 import zipfile
 from flask import Flask, jsonify, request, send_file
 from werkzeug.utils import secure_filename
-from testdata import TestDataStore
+from datastore import DataStore
 
 
-def register_project_tree_routes(app: Flask, data_store: TestDataStore, output_folder: str):
+def register_project_tree_routes(app: Flask, data_store: DataStore, output_folder: str):
     """Register project tree related routes"""
 
     os.makedirs(output_folder, exist_ok=True)

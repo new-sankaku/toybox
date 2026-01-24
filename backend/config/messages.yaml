@@ -1,0 +1,340 @@
+initial_tasks:
+  concept: "[1/4] 初期化: プロジェクト情報を読み込み中"
+  task_split_1: "[1/4] 初期化: コンセプト成果物を分析中"
+  concept_detail: "[1/5] 初期化: コンセプト詳細化を準備中"
+  scenario: "[1/5] 初期化: シナリオ設計を準備中"
+  world: "[1/5] 初期化: 世界観設計を準備中"
+  game_design: "[1/5] 初期化: ゲームデザインを準備中"
+  tech_spec: "[1/5] 初期化: 技術仕様を準備中"
+  task_split_2: "[1/4] 初期化: 設計成果物を分析中"
+  asset_character: "[1/5] 初期化: キャラアセット生成を準備中"
+  asset_background: "[1/5] 初期化: 背景アセット生成を準備中"
+  asset_ui: "[1/5] 初期化: UIアセット生成を準備中"
+  asset_effect: "[1/5] 初期化: エフェクト生成を準備中"
+  asset_bgm: "[1/5] 初期化: BGM生成を準備中"
+  asset_voice: "[1/5] 初期化: ボイス生成を準備中"
+  asset_sfx: "[1/5] 初期化: 効果音生成を準備中"
+  task_split_3: "[1/4] 初期化: アセット成果物を分析中"
+  code: "[1/6] 初期化: コード生成を準備中"
+  event: "[1/5] 初期化: イベント実装を準備中"
+  ui_integration: "[1/5] 初期化: UI統合を準備中"
+  asset_integration: "[1/5] 初期化: アセット統合を準備中"
+  task_split_4: "[1/4] 初期化: 実装成果物を分析中"
+  unit_test: "[1/5] 初期化: 単体テストを準備中"
+  integration_test: "[1/5] 初期化: 統合テストを準備中"
+  default: "[1/3] 初期化: 処理中..."
+
+progress_tasks:
+  concept:
+    - progress: 0
+      task: "[1/4] 初期化: プロジェクト情報を読み込み中"
+    - progress: 25
+      task: "[2/4] LLM呼び出し: ゲームコンセプトを生成中"
+    - progress: 50
+      task: "[3/4] 検証: 出力形式をチェック中"
+    - progress: 75
+      task: "[4/4] ファイル保存: concept.md を保存中"
+
+  task_split_1:
+    - progress: 0
+      task: "[1/4] 初期化: コンセプト成果物を分析中"
+    - progress: 25
+      task: "[2/4] LLM呼び出し: タスク分解を生成中"
+    - progress: 50
+      task: "[3/4] 検証: 依存関係をチェック中"
+    - progress: 75
+      task: "[4/4] ファイル保存: tasks_1.md を保存中"
+
+  concept_detail:
+    - progress: 0
+      task: "[1/5] 初期化: コンセプト詳細化を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 詳細コンセプトを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] 検証: 詳細内容をチェック中"
+    - progress: 80
+      task: "[5/5] ファイル保存: concept_detail.md を保存中"
+
+  scenario:
+    - progress: 0
+      task: "[1/5] 初期化: シナリオ設計を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: シナリオ構成を生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] 検証: シナリオ整合性をチェック中"
+    - progress: 80
+      task: "[5/5] ファイル保存: scenario.md を保存中"
+
+  world:
+    - progress: 0
+      task: "[1/5] 初期化: 世界観設計を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 世界観を生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] 検証: 世界観整合性をチェック中"
+    - progress: 80
+      task: "[5/5] ファイル保存: world.md を保存中"
+
+  game_design:
+    - progress: 0
+      task: "[1/5] 初期化: ゲームデザインを準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: ゲームデザインを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] 検証: デザイン整合性をチェック中"
+    - progress: 80
+      task: "[5/5] ファイル保存: game_design.md を保存中"
+
+  tech_spec:
+    - progress: 0
+      task: "[1/5] 初期化: 技術仕様を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 技術仕様を生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] 検証: 仕様整合性をチェック中"
+    - progress: 80
+      task: "[5/5] ファイル保存: tech_spec.md を保存中"
+
+  task_split_2:
+    - progress: 0
+      task: "[1/4] 初期化: 設計成果物を分析中"
+    - progress: 25
+      task: "[2/4] LLM呼び出し: アセットタスク分解を生成中"
+    - progress: 50
+      task: "[3/4] 検証: 依存関係をチェック中"
+    - progress: 75
+      task: "[4/4] ファイル保存: tasks_2.md を保存中"
+
+  asset_character:
+    - progress: 0
+      task: "[1/5] 初期化: キャラアセット生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: キャラ画像を生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: character.png を保存中"
+    - progress: 60
+      task: "[4/5] 検証: アセット品質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: キャラアセット生成完了"
+
+  asset_background:
+    - progress: 0
+      task: "[1/5] 初期化: 背景アセット生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 背景画像を生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: background.png を保存中"
+    - progress: 60
+      task: "[4/5] 検証: アセット品質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: 背景アセット生成完了"
+
+  asset_ui:
+    - progress: 0
+      task: "[1/5] 初期化: UIアセット生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: UI画像を生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: ui_elements.png を保存中"
+    - progress: 60
+      task: "[4/5] 検証: アセット品質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: UIアセット生成完了"
+
+  asset_effect:
+    - progress: 0
+      task: "[1/5] 初期化: エフェクト生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: エフェクト画像を生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: effect.png を保存中"
+    - progress: 60
+      task: "[4/5] 検証: アセット品質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: エフェクト生成完了"
+
+  asset_bgm:
+    - progress: 0
+      task: "[1/5] 初期化: BGM生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: BGMを生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: bgm.mp3 を保存中"
+    - progress: 60
+      task: "[4/5] 検証: 音質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: BGM生成完了"
+
+  asset_voice:
+    - progress: 0
+      task: "[1/5] 初期化: ボイス生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: ボイスを生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: voice.mp3 を保存中"
+    - progress: 60
+      task: "[4/5] 検証: 音質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: ボイス生成完了"
+
+  asset_sfx:
+    - progress: 0
+      task: "[1/5] 初期化: 効果音生成を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 効果音を生成中"
+    - progress: 40
+      task: "[3/5] ファイル保存: sfx.mp3 を保存中"
+    - progress: 60
+      task: "[4/5] 検証: 音質をチェック中"
+    - progress: 80
+      task: "[5/5] 完了: 効果音生成完了"
+
+  task_split_3:
+    - progress: 0
+      task: "[1/4] 初期化: アセット成果物を分析中"
+    - progress: 25
+      task: "[2/4] LLM呼び出し: 実装タスク分解を生成中"
+    - progress: 50
+      task: "[3/4] 検証: 依存関係をチェック中"
+    - progress: 75
+      task: "[4/4] ファイル保存: tasks_3.md を保存中"
+
+  code:
+    - progress: 0
+      task: "[1/6] 初期化: コード生成を準備中"
+    - progress: 15
+      task: "[2/6] LLM呼び出し: コード生成中 (main.ts)"
+    - progress: 30
+      task: "[3/6] ファイル保存: main.ts を保存中"
+    - progress: 50
+      task: "[4/6] L/Wループ: Leader-Worker確認中"
+    - progress: 70
+      task: "[5/6] LLM呼び出し: コード生成中 (utils.ts)"
+    - progress: 85
+      task: "[6/6] ファイル保存: utils.ts を保存中"
+
+  event:
+    - progress: 0
+      task: "[1/5] 初期化: イベント実装を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: イベントコードを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] ファイル保存: events.ts を保存中"
+    - progress: 80
+      task: "[5/5] 検証: イベント実装をチェック中"
+
+  ui_integration:
+    - progress: 0
+      task: "[1/5] 初期化: UI統合を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: UIコードを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] ファイル保存: ui.tsx を保存中"
+    - progress: 80
+      task: "[5/5] 検証: UI統合をチェック中"
+
+  asset_integration:
+    - progress: 0
+      task: "[1/5] 初期化: アセット統合を準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: 統合コードを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] ファイル保存: assets.ts を保存中"
+    - progress: 80
+      task: "[5/5] 検証: アセット統合をチェック中"
+
+  task_split_4:
+    - progress: 0
+      task: "[1/4] 初期化: 実装成果物を分析中"
+    - progress: 25
+      task: "[2/4] LLM呼び出し: テストタスク分解を生成中"
+    - progress: 50
+      task: "[3/4] 検証: 依存関係をチェック中"
+    - progress: 75
+      task: "[4/4] ファイル保存: tasks_4.md を保存中"
+
+  unit_test:
+    - progress: 0
+      task: "[1/5] 初期化: 単体テストを準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: テストコードを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] テスト実行: 単体テストを実行中"
+    - progress: 80
+      task: "[5/5] ファイル保存: unit_test_result.md を保存中"
+
+  integration_test:
+    - progress: 0
+      task: "[1/5] 初期化: 統合テストを準備中"
+    - progress: 20
+      task: "[2/5] LLM呼び出し: テストコードを生成中"
+    - progress: 40
+      task: "[3/5] L/Wループ: Leader-Worker確認中"
+    - progress: 60
+      task: "[4/5] テスト実行: 統合テストを実行中"
+    - progress: 80
+      task: "[5/5] ファイル保存: integration_test_result.md を保存中"
+
+milestones:
+  concept:
+    - progress: 10
+      level: info
+      message: プロジェクト情報読み込み完了
+    - progress: 30
+      level: info
+      message: ゲームコンセプト生成開始
+    - progress: 60
+      level: info
+      message: 出力形式チェック完了
+    - progress: 90
+      level: info
+      message: concept.md 保存完了
+
+  task_split_1:
+    - progress: 15
+      level: info
+      message: コンセプト成果物分析完了
+    - progress: 40
+      level: info
+      message: タスク分解生成中
+    - progress: 70
+      level: info
+      message: 依存関係チェック完了
+    - progress: 90
+      level: info
+      message: tasks_1.md 保存完了
+
+  concept_detail:
+    - progress: 15
+      level: info
+      message: コンセプト詳細化準備完了
+    - progress: 35
+      level: info
+      message: 詳細コンセプト生成中
+    - progress: 50
+      level: info
+      message: L/Wループ確認中
+    - progress: 70
+      level: info
+      message: 詳細内容チェック完了
+    - progress: 90
+      level: info
+      message: concept_detail.md 保存完了

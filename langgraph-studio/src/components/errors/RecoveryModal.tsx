@@ -1,6 +1,5 @@
 import{AlertTriangle,RefreshCw,SkipForward,Pause,ArrowRight}from'lucide-react'
 import{Modal}from'@/components/ui/Modal'
-import{Button}from'@/components/ui/Button'
 import{Card,CardContent}from'@/components/ui/Card'
 
 interface RecoveryOption{
@@ -54,7 +53,7 @@ export function RecoveryModal({
  onClose,
  errorType,
  errorMessage,
- agentId,
+ agentId:_agentId,
  agentName,
  taskName,
  retryCount=0,

@@ -1,5 +1,4 @@
-import{CheckCircle,Circle,Play,Clock}from'lucide-react'
-import{cn}from'@/lib/utils'
+import{CheckCircle,Play,Clock}from'lucide-react'
 import type{PhaseNumber}from'@/types/project'
 
 interface TimelinePhase{

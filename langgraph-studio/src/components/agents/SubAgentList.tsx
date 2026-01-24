@@ -16,7 +16,8 @@ const statusIcons:Record<AgentStatus,typeof Play>={
  running:Play,
  completed:CheckCircle,
  failed:XCircle,
- blocked:Pause
+ blocked:Pause,
+ waiting_approval:Clock
 }
 
 const statusColors:Record<AgentStatus,string>={
@@ -24,7 +25,8 @@ const statusColors:Record<AgentStatus,string>={
  running:'text-nier-accent-orange',
  completed:'text-nier-accent-green',
  failed:'text-nier-accent-red',
- blocked:'text-nier-accent-yellow'
+ blocked:'text-nier-accent-yellow',
+ waiting_approval:'text-nier-accent-orange'
 }
 
 export function SubAgentList({
@@ -87,9 +89,6 @@ export function SubAgentList({
         <div className="flex-1 min-w-0">
          <div className="flex items-center gap-2">
           <span className="text-nier-small font-medium truncate">
-           {agent.name||agent.type}
-          </span>
-          <span className="text-nier-caption text-nier-text-light">
            {agent.type}
           </span>
          </div>
@@ -97,7 +96,7 @@ export function SubAgentList({
          {/*Progress for running agents*/}
          {agent.status==='running'&&(
           <div className="mt-1">
-           <Progress value={agent.progress} size="sm"/>
+           <Progress value={agent.progress}/>
           </div>
 )}
 

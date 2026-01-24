@@ -32,13 +32,13 @@ type LogLevel='all'|'debug'|'info'|'warn'|'error'
 const levelConfig={
  debug:{icon:Bug,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
  info:{icon:Info,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
- warn:{icon:AlertTriangle,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
- error:{icon:AlertCircle,color:'text-nier-text-light',bg:'bg-nier-bg-panel'}
+ warn:{icon:AlertTriangle,color:'text-nier-accent-orange',bg:'bg-nier-bg-panel'},
+ error:{icon:AlertCircle,color:'text-nier-accent-orange',bg:'bg-nier-bg-panel'}
 }
 
 export default function LogsView():JSX.Element{
  const{currentProject}=useProjectStore()
- const{definitions,getLabel}=useAgentDefinitionStore()
+ const{definitions:_definitions,getLabel}=useAgentDefinitionStore()
  const[logs,setLogs]=useState<SystemLog[]>([])
  const[initialLoading,setInitialLoading]=useState(true)
  const[filterLevel,setFilterLevel]=useState<LogLevel>('all')
@@ -213,15 +213,15 @@ export default function LogsView():JSX.Element{
 )}
             onClick={()=>setSelectedLog(log)}
            >
-            <div className="flex items-start gap-3">
-             <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
+            <div className="grid grid-cols-[70px_20px_100px_1fr] items-start gap-2">
+             <span className="text-nier-caption text-nier-text-light">
               {formatTime(log.timestamp)}
              </span>
-             <span className={cn('flex items-center gap-1',config.color)}>
+             <span className={cn('flex items-center justify-center',config.color)}>
               <Icon size={12}/>
              </span>
-             <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
-              [{log.source}]
+             <span className={cn('text-nier-caption truncate',config.color)}>
+              {getSourceLabel(log.source)}
              </span>
              <span className="text-nier-small text-nier-text-main truncate">
               {log.message}
@@ -279,7 +279,7 @@ export default function LogsView():JSX.Element{
    </div>
 
    {/*Filter Sidebar*/}
-   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
     {/*Search*/}
     <Card>
      <CardHeader>

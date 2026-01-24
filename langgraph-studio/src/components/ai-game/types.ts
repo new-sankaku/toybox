@@ -1,7 +1,7 @@
 import type{AgentType}from'@/types/agent'
 
 export type AIServiceType='llm'|'image'|'audio'|'music'
-export type RequestStatus='pending'|'processing'|'completed'|'failed'
+export type RequestStatus='pending'|'processing'|'completed'|'failed'|'waiting'
 export type CharacterEmotion='idle'|'happy'|'working'|'sleepy'|'sad'|'excited'
 
 export interface AIRequest{
@@ -43,7 +43,6 @@ export interface ServiceZoneState{
 const SPIRIT_TYPES=['spirit_fire','spirit_water','spirit_earth','spirit_light','spirit_wind']as const
 
 export const AGENT_MODEL_MAP:Record<AgentType,string>={
- orchestrator:SPIRIT_TYPES[0],
  director_phase1:SPIRIT_TYPES[1],
  director_phase2:SPIRIT_TYPES[2],
  director_phase3:SPIRIT_TYPES[3],
@@ -87,9 +86,9 @@ export const AGENT_MODEL_MAP:Record<AgentType,string>={
  reviewer:SPIRIT_TYPES[4]
 }
 
-export const SERVICE_CONFIG:Record<AIServiceType,{label:string;description:string}>={
- llm:{label:'LLM',description:'Claude 3.5 Sonnet'},
- image:{label:'画像生成',description:'DALL-E 3'},
- music:{label:'音楽生成',description:'Suno AI'},
- audio:{label:'音声生成',description:'ElevenLabs'}
+export const DEFAULT_SERVICE_CONFIG:Record<AIServiceType,{label:string;description:string}>={
+ llm:{label:'LLM',description:'-'},
+ image:{label:'画像生成',description:'-'},
+ music:{label:'音楽生成',description:'-'},
+ audio:{label:'音声生成',description:'-'}
 }

@@ -3,6 +3,8 @@ flask-cors>=4.0.0
 python-socketio>=5.10.0
 eventlet>=0.35.0
 python-dotenv>=1.0.0
+sqlalchemy>=2.0.0
+pyyaml>=6.0.0
 
 # For langgraph mode (optional)
 anthropic>=0.40.0

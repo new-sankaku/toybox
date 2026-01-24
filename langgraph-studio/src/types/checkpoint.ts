@@ -18,7 +18,7 @@ export interface Checkpoint{
  id:string
  projectId:string
  agentId:string
- type:CheckpointType
+ type:string
  title:string
  description:string|null
  output:CheckpointOutput

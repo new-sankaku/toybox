@@ -2,7 +2,6 @@ import{AlertCircle,RefreshCw,XCircle,ChevronDown,ChevronUp}from'lucide-react'
 import{useState}from'react'
 import{Card,CardContent,CardHeader}from'@/components/ui/Card'
 import{Button}from'@/components/ui/Button'
-import{cn}from'@/lib/utils'
 
 export interface ErrorAction{
  label:string
@@ -29,13 +28,6 @@ interface ErrorPanelProps{
  expanded?:boolean
 }
 
-const categoryColors={
- connection:'bg-nier-accent-blue',
- llm:'bg-nier-accent-orange',
- agent:'bg-nier-accent-red',
- state:'bg-nier-accent-yellow',
- user:'bg-nier-accent-green'
-}
 
 export function ErrorPanel({error,onAction,onDismiss,expanded:initialExpanded=false}:ErrorPanelProps){
  const[expanded,setExpanded]=useState(initialExpanded)

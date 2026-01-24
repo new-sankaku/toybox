@@ -1,0 +1,194 @@
+service_types:
+  - llm
+  - image
+  - music
+  - audio
+
+service_labels:
+  llm: LLM
+  image: 画像生成
+  music: 音楽生成
+  audio: 音声生成
+
+defaults:
+  llm:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+  image:
+    provider: comfyui
+    model: stable-diffusion-xl
+  music:
+    provider: suno
+    model: suno-v3
+  audio:
+    provider: voicevox
+    model: voicevox-default
+
+pricing:
+  currency: USD
+  units:
+    llm:
+      input: per_1m_tokens
+      output: per_1m_tokens
+    image: per_image
+    music: per_track
+    audio: per_1k_chars
+
+providers:
+  anthropic:
+    label: Anthropic
+    service_types:
+      - llm
+    models:
+      - id: claude-sonnet-4-20250514
+        label: Claude Sonnet 4
+        recommended: true
+        pricing:
+          input: 3.0
+          output: 15.0
+      - id: claude-opus-4-20250514
+        label: Claude Opus 4
+        pricing:
+          input: 15.0
+          output: 75.0
+      - id: claude-3-5-sonnet-20241022
+        label: Claude 3.5 Sonnet
+        pricing:
+          input: 3.0
+          output: 15.0
+      - id: claude-3-5-haiku-20241022
+        label: Claude 3.5 Haiku
+        pricing:
+          input: 0.8
+          output: 4.0
+    default_model: claude-sonnet-4-20250514
+
+  openai:
+    label: OpenAI
+    service_types:
+      - llm
+    models:
+      - id: gpt-4o
+        label: GPT-4o
+        recommended: true
+        pricing:
+          input: 2.5
+          output: 10.0
+      - id: gpt-4-turbo
+        label: GPT-4 Turbo
+        pricing:
+          input: 10.0
+          output: 30.0
+      - id: gpt-4
+        label: GPT-4
+        pricing:
+          input: 30.0
+          output: 60.0
+      - id: gpt-3.5-turbo
+        label: GPT-3.5 Turbo
+        pricing:
+          input: 0.5
+          output: 1.5
+    default_model: gpt-4o
+
+  comfyui:
+    label: ComfyUI
+    service_types:
+      - image
+    models:
+      - id: stable-diffusion-xl
+        label: Stable Diffusion XL
+        recommended: true
+        pricing:
+          per_image: 0.0
+      - id: stable-diffusion-3
+        label: Stable Diffusion 3
+        pricing:
+          per_image: 0.0
+      - id: flux-dev
+        label: FLUX.1 Dev
+        pricing:
+          per_image: 0.0
+      - id: flux-schnell
+        label: FLUX.1 Schnell
+        pricing:
+          per_image: 0.0
+    default_model: stable-diffusion-xl
+    samplers:
+      - euler
+      - euler_ancestral
+      - heun
+      - dpm_2
+      - dpm_2_ancestral
+      - lms
+      - dpm_fast
+      - dpm_adaptive
+      - dpmpp_2s_ancestral
+      - dpmpp_sde
+      - dpmpp_2m
+      - dpmpp_2m_sde
+      - ddim
+      - uni_pc
+    schedulers:
+      - normal
+      - karras
+      - exponential
+      - sgm_uniform
+      - simple
+      - ddim_uniform
+
+  suno:
+    label: Suno AI
+    service_types:
+      - music
+    models:
+      - id: suno-v3
+        label: Suno v3
+        recommended: true
+        pricing:
+          per_track: 0.10
+      - id: suno-v4
+        label: Suno v4
+        pricing:
+          per_track: 0.10
+    default_model: suno-v3
+
+  voicevox:
+    label: VOICEVOX
+    service_types:
+      - audio
+    models:
+      - id: voicevox-default
+        label: VOICEVOX標準
+        recommended: true
+        pricing:
+          per_1k_chars: 0.0
+    default_model: voicevox-default
+
+  elevenlabs:
+    label: ElevenLabs
+    service_types:
+      - audio
+    models:
+      - id: eleven-multilingual-v2
+        label: Multilingual v2
+        recommended: true
+        pricing:
+          per_1k_chars: 0.30
+      - id: eleven-turbo-v2
+        label: Turbo v2
+        pricing:
+          per_1k_chars: 0.15
+    default_model: eleven-multilingual-v2
+
+  udio:
+    label: Udio
+    service_types:
+      - music
+    models:
+      - id: udio-v1
+        label: Udio v1
+        recommended: true
+        pricing:
+          per_track: 0.05
+    default_model: udio-v1

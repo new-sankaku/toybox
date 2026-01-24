@@ -1,0 +1,47 @@
+default_primary: ja
+default_languages:
+  - ja
+
+languages:
+  - code: ja
+    label: 日本語
+    native_name: 日本語
+  - code: en
+    label: 英語
+    native_name: English
+  - code: zh-Hans
+    label: 中国語(簡体)
+    native_name: 简体中文
+  - code: zh-Hant
+    label: 中国語(繁体)
+    native_name: 繁體中文
+  - code: ko
+    label: 韓国語
+    native_name: 한국어
+  - code: es
+    label: スペイン語
+    native_name: Español
+  - code: pt
+    label: ポルトガル語
+    native_name: Português
+  - code: fr
+    label: フランス語
+    native_name: Français
+  - code: de
+    label: ドイツ語
+    native_name: Deutsch
+  - code: ru
+    label: ロシア語
+    native_name: Русский
+  - code: ar
+    label: アラビア語
+    native_name: العربية
+  - code: th
+    label: タイ語
+    native_name: ไทย
+  - code: vi
+    label: ベトナム語
+    native_name: Tiếng Việt
+  - code: id
+    label: インドネシア語
+    native_name: Bahasa Indonesia

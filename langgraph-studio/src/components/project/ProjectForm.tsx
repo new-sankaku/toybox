@@ -1,10 +1,12 @@
-import{useState}from'react'
+import{useState,useEffect}from'react'
 import{Input}from'@/components/ui/Input'
 import{Select,SelectOption}from'@/components/ui/Select'
 import{Textarea}from'@/components/ui/Textarea'
 import{Button}from'@/components/ui/Button'
 import{Panel}from'@/components/ui/Panel'
+import{Checkbox}from'@/components/ui/Checkbox'
 import{FileUploader}from'./FileUploader'
+import{useLanguageStore}from'@/stores/languageStore'
 import type{CreateProjectInput,GameConcept}from'@/types/project'
 import type{FileCategory}from'@/types/uploadedFile'
 
@@ -43,13 +45,30 @@ const genreOptions:SelectOption[]=[
 ]
 
 export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFormProps){
+ const{languages:languageOptions,defaultPrimary,defaultLanguages,fetchLanguages}=useLanguageStore()
+
  const[name,setName]=useState(initialData?.name||'')
  const[description,setDescription]=useState(initialData?.description||'')
  const[conceptDescription,setConceptDescription]=useState(initialData?.concept?.description||'')
  const[platform,setPlatform]=useState<GameConcept['platform']>(initialData?.concept?.platform||'web')
  const[scope,setScope]=useState<GameConcept['scope']>(initialData?.concept?.scope||'mvp')
  const[genre,setGenre]=useState(initialData?.concept?.genre||'')
+ const[primaryLanguage,setPrimaryLanguage]=useState(initialData?.concept?.primaryLanguage||'')
+ const[languages,setLanguages]=useState<string[]>(initialData?.concept?.languages||[])
  const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
+
+ useEffect(()=>{
+  fetchLanguages()
+ },[fetchLanguages])
+
+ useEffect(()=>{
+  if(!primaryLanguage&&defaultPrimary){
+   setPrimaryLanguage(defaultPrimary)
+  }
+  if(languages.length===0&&defaultLanguages.length>0){
+   setLanguages(defaultLanguages)
+  }
+ },[defaultPrimary,defaultLanguages])
 
  const[errors,setErrors]=useState<Record<string,string>>({})
 
@@ -81,7 +100,9 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     description:conceptDescription.trim(),
     platform,
     scope,
-    genre:genre||undefined
+    genre:genre||undefined,
+    primaryLanguage,
+    languages
    }
   },selectedFiles.map(sf=>sf.file))
  }
@@ -122,7 +143,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
       error={errors.conceptDescription}
       disabled={isLoading}
      />
-     <div className="grid grid-cols-3 gap-4">
+     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <Select
        label="Platform"
        options={platformOptions}
@@ -148,6 +169,47 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
      </div>
     </div>
    </Panel>
+
+   {/*Language Settings*/}
+   {languageOptions.length>0&&(
+   <Panel title="LANGUAGE SETTINGS">
+    <div className="space-y-4">
+     <Select
+      label="主要言語"
+      options={languageOptions.map(l=>({value:l.value,label:`${l.label} (${l.nativeName})`}))}
+      value={primaryLanguage}
+      onChange={(e)=>{
+       setPrimaryLanguage(e.target.value)
+       if(!languages.includes(e.target.value)){
+        setLanguages([...languages,e.target.value])
+       }
+      }}
+      disabled={isLoading}
+     />
+     <div>
+      <label className="block text-nier-small text-nier-text-light mb-2">対応言語</label>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+       {languageOptions.map(lang=>(
+        <Checkbox
+         key={lang.value}
+         label={`${lang.label}`}
+         checked={languages.includes(lang.value)}
+         onChange={(checked)=>{
+          if(checked){
+           setLanguages([...languages,lang.value])
+          }else if(lang.value!==primaryLanguage){
+           setLanguages(languages.filter(l=>l!==lang.value))
+          }
+         }}
+         disabled={isLoading||lang.value===primaryLanguage}
+        />
+))}
+      </div>
+      <p className="text-nier-caption text-nier-text-light mt-2">主要言語は必ず対応言語に含まれます</p>
+     </div>
+    </div>
+   </Panel>
+)}
 
    {/*Initial Files*/}
    <Panel title="INITIAL FILES (Optional)">

@@ -6,7 +6,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
-import{assetApi,type ApiAsset}from'@/services/apiService'
+import{assetApi,fileUploadApi,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{
  Image,
@@ -22,8 +22,7 @@ import{
  Grid,
  List,
  Check,
- XCircle,
- Filter
+ XCircle
 }from'lucide-react'
 
 type AssetType='image'|'audio'|'document'|'code'|'other'
@@ -67,11 +66,6 @@ const approvalStatusLabels:Record<ApprovalStatus,string>={
  rejected:'却下'
 }
 
-const approvalStatusColors:Record<ApprovalStatus,string>={
- approved:'text-nier-text-light',
- pending:'text-nier-text-light',
- rejected:'text-nier-text-light'
-}
 
 const approvalBgColors:Record<ApprovalStatus,string>={
  approved:'bg-nier-bg-selected border-nier-border-light',
@@ -267,7 +261,7 @@ export default function DataView():JSX.Element{
        <p className="text-nier-small">アセットがありません</p>
       </div>
 ):viewMode==='grid'?(
-      <div className="grid grid-cols-6 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
      {filteredAssets.map(asset=>{
       const Icon=typeIcons[asset.type]||FolderOpen
       return(
@@ -441,7 +435,7 @@ export default function DataView():JSX.Element{
    </Card>
 
    {/*Filter Sidebar*/}
-   <div className="w-48 flex-shrink-0 flex flex-col gap-3">
+   <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3">
     {/*Type Filter*/}
     <Card>
      <CardHeader>
@@ -538,8 +532,8 @@ export default function DataView():JSX.Element{
 
    {/*Preview Modal*/}
    {selectedAsset&&(
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-     <div className="bg-nier-bg-main border border-nier-border-light max-w-4xl max-h-[90vh] w-full overflow-hidden">
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+     <div className="bg-nier-bg-main border border-nier-border-light w-full max-w-[95vw] md:max-w-4xl max-h-[90vh] overflow-hidden">
       {/*Modal Header*/}
       <div className="flex items-center justify-between px-4 py-3 bg-nier-bg-header border-b border-nier-border-light">
        <div className="flex items-center gap-2">
@@ -643,7 +637,7 @@ export default function DataView():JSX.Element{
 
        {/*Asset Info*/}
        <div className="mt-6 pt-6 border-t border-nier-border-light">
-        <div className="grid grid-cols-5 gap-4 text-nier-small">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 text-nier-small">
          <div>
           <span className="text-nier-text-light block">タイプ</span>
           <span className={typeColors[selectedAsset.type]}>
@@ -688,7 +682,13 @@ export default function DataView():JSX.Element{
           却下
          </Button>
 )}
-        <Button variant="secondary">
+        <Button
+         variant="secondary"
+         onClick={()=>{
+          const url=fileUploadApi.getDownloadUrl(selectedAsset.id)
+          window.open(url,'_blank')
+         }}
+        >
          <Download size={14} className="mr-1.5"/>
          ダウンロード
         </Button>

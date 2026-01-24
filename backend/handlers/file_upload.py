@@ -2,7 +2,7 @@ import os
 import uuid
 from flask import Flask,request,jsonify,send_from_directory
 from werkzeug.utils import secure_filename
-from testdata import TestDataStore
+from datastore import DataStore
 
 ALLOWED_EXTENSIONS = {
 
@@ -76,7 +76,7 @@ def get_mime_type(filename:str)->str:
     return mime_types.get(ext,'application/octet-stream')
 
 
-def register_file_upload_routes(app:Flask,data_store:TestDataStore,upload_folder:str):
+def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str):
     os.makedirs(upload_folder,exist_ok=True)
 
     @app.route('/api/projects/<project_id>/files',methods=['GET'])

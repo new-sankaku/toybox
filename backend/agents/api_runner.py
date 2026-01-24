@@ -120,7 +120,7 @@ class ApiAgentRunner(AgentRunner):
 
             yield {
                 "type":"progress",
-                "data":{"progress":90,"current_task":"チェックポイント準備"}
+                "data":{"progress":90,"current_task":"承認準備"}
             }
 
             checkpoint_data = self._generate_checkpoint(context,output)
@@ -1878,7 +1878,7 @@ class LeaderWorkerOrchestrator:
         results["final_output"] = final_output
 
 
-        self._emit_progress(leader_context.agent_type.value,95,"チェックポイント生成")
+        self._emit_progress(leader_context.agent_type.value,95,"承認生成")
 
         checkpoint_data = {
             "type":f"{leader_context.agent_type.value}_review",

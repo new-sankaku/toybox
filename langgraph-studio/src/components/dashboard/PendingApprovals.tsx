@@ -5,7 +5,7 @@ import{CategoryMarker}from'@/components/ui/CategoryMarker'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
-import{checkpointApi,type ApiCheckpoint}from'@/services/apiService'
+import{checkpointApi}from'@/services/apiService'
 import type{Checkpoint,CheckpointType,CheckpointStatus}from'@/types/checkpoint'
 import{cn}from'@/lib/utils'
 
@@ -35,8 +35,13 @@ export default function PendingApprovals():JSX.Element{
      title:cp.title,
      description:cp.description,
      status:cp.status as CheckpointStatus,
-     content:cp.content,
+     output:{
+      type:cp.output?.type,
+      format:cp.output?.format,
+      content:cp.output?.content
+     },
      feedback:cp.feedback,
+     resolvedAt:cp.resolvedAt,
      createdAt:cp.createdAt,
      updatedAt:cp.updatedAt
     }))

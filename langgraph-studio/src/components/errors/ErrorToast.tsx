@@ -1,5 +1,4 @@
 import{AlertCircle,X,RefreshCw}from'lucide-react'
-import{cn}from'@/lib/utils'
 
 interface ErrorToastProps{
  message:string
@@ -11,7 +10,7 @@ interface ErrorToastProps{
 
 export function ErrorToast({message,code,onRetry,onDismiss,canRetry=false}:ErrorToastProps){
  return(
-  <div className="nier-toast border-l-4 border-nier-accent-red min-w-[320px] animate-nier-slide-in">
+  <div className="nier-toast border-l-4 border-nier-accent-red min-w-[280px] md:min-w-[320px] max-w-[90vw] animate-nier-slide-in">
    <AlertCircle size={18} className="text-nier-accent-red flex-shrink-0"/>
 
    <div className="flex-1 min-w-0">

@@ -1,4 +1,4 @@
-from testdata import TestDataStore
+from datastore import DataStore
 
 
 def broadcast_navigator_message(sio,project_id:str,speaker:str,text:str,priority:str = "normal"):
@@ -27,7 +27,7 @@ def broadcast_navigator_message(sio,project_id:str,speaker:str,text:str,priority
     print(f"[Navigator] Sent message to {project_id}: {text[:50]}...")
 
 
-def register_websocket_handlers(sio,data_store:TestDataStore):
+def register_websocket_handlers(sio,data_store:DataStore):
 
     @sio.event
     def connect(sid,environ):
@@ -104,7 +104,7 @@ def register_websocket_handlers(sio,data_store:TestDataStore):
 
         project_id = checkpoint["projectId"]
         agent_id = checkpoint["agentId"]
-        agent = data_store.agents.get(agent_id)
+        agent = data_store.get_agent(agent_id)
         agent_status = agent["status"] if agent else None
         sio.emit('checkpoint:resolved',{
             "checkpointId":checkpoint_id,

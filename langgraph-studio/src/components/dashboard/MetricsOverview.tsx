@@ -4,8 +4,9 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{Progress}from'@/components/ui/Progress'
 import{useProjectStore}from'@/stores/projectStore'
 import{useMetricsStore}from'@/stores/metricsStore'
-import{metricsApi,type ApiProjectMetrics}from'@/services/apiService'
-import{formatNumber,cn}from'@/lib/utils'
+import{metricsApi}from'@/services/apiService'
+import{formatNumber}from'@/lib/utils'
+import type{PhaseNumber}from'@/types/project'
 
 export default function MetricsOverview():JSX.Element{
  const{currentProject}=useProjectStore()
@@ -30,8 +31,11 @@ export default function MetricsOverview():JSX.Element{
      completedTasks:data.completedTasks,
      totalTasks:data.totalTasks,
      progressPercent:data.progressPercent,
-     currentPhase:data.currentPhase,
-     phaseName:data.phaseName
+     currentPhase:data.currentPhase as PhaseNumber,
+     phaseName:data.phaseName,
+     elapsedTimeSeconds:data.elapsedTimeSeconds,
+     estimatedRemainingSeconds:data.estimatedRemainingSeconds,
+     estimatedEndTime:data.estimatedEndTime
     })
    }catch(error){
     console.error('Failed to fetch metrics:',error)

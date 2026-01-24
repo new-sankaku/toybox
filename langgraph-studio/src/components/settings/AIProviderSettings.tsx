@@ -1,41 +1,42 @@
-import{useState,useRef}from'react'
+import{useState,useEffect,useCallback}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{
- ToggleLeft,ToggleRight,RefreshCw,Plus,Trash2,
- Eye,EyeOff,Download,Upload,ChevronDown,ChevronRight,FolderOpen
+ ToggleLeft,ToggleRight,RefreshCw,Save,
+ Eye,EyeOff,ChevronDown,ChevronRight,FolderOpen
 }from'lucide-react'
 import{useAIProviderStore}from'@/stores/aiProviderStore'
+import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{
  type AIProviderConfig,
- type AIProviderType,
  type LLMProviderConfig,
  type ComfyUIConfig,
  type VoicevoxConfig,
  type MusicGeneratorConfig,
+ type AIServiceCategory,
  PROVIDER_TYPE_LABELS,
- CLAUDE_MODELS,
- OPENAI_MODELS,
- COMFYUI_SAMPLERS,
- COMFYUI_SCHEDULERS,
- DEFAULT_LLM_CONFIG,
- DEFAULT_COMFYUI_CONFIG,
- DEFAULT_VOICEVOX_CONFIG,
- DEFAULT_SUNO_CONFIG
+ SERVICE_CATEGORIES,
+ getServiceCategory
 }from'@/types/aiProvider'
+
+interface AIProviderSettingsProps{
+ projectId:string
+}
 
 interface ProviderCardProps{
  provider:AIProviderConfig
  onUpdate:(updates:Partial<AIProviderConfig>)=>void
  onToggle:()=>void
- onRemove:()=>void
 }
 
 function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdate:(u:Partial<LLMProviderConfig>)=>void}){
  const[showKey,setShowKey]=useState(false)
- const models=provider.type==='claude'?CLAUDE_MODELS:OPENAI_MODELS
+ const{master}=useAIServiceStore()
+ const providerId=provider.type==='claude'?'anthropic':'openai'
+ const providerMaster=master?.providers[providerId]
+ const models=providerMaster?.models||[]
 
  return(
   <div className="space-y-3">
@@ -104,6 +105,11 @@ function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdat
 }
 
 function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Partial<ComfyUIConfig>)=>void}){
+ const{master}=useAIServiceStore()
+ const comfyuiMaster=master?.providers['comfyui']as{samplers?:string[],schedulers?:string[]}|undefined
+ const samplers=comfyuiMaster?.samplers||[]
+ const schedulers=comfyuiMaster?.schedulers||[]
+
  return(
   <div className="space-y-3">
    <div>
@@ -169,7 +175,7 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
       value={provider.sampler}
       onChange={e=>onUpdate({sampler:e.target.value})}
      >
-      {COMFYUI_SAMPLERS.map(s=><option key={s} value={s}>{s}</option>)}
+      {samplers.map(s=><option key={s} value={s}>{s}</option>)}
      </select>
     </div>
     <div>
@@ -179,7 +185,7 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
       value={provider.scheduler}
       onChange={e=>onUpdate({scheduler:e.target.value})}
      >
-      {COMFYUI_SCHEDULERS.map(s=><option key={s} value={s}>{s}</option>)}
+      {schedulers.map(s=><option key={s} value={s}>{s}</option>)}
      </select>
     </div>
    </div>
@@ -260,7 +266,7 @@ function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(
 )
 }
 
-function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
+function ProviderCard({provider,onUpdate,onToggle}:ProviderCardProps){
  const[expanded,setExpanded]=useState(false)
  const[testing,setTesting]=useState(false)
  const[testResult,setTestResult]=useState<{success:boolean,message:string}|null>(null)
@@ -327,12 +333,6 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
        </div>
 )}
      </button>
-     <button
-      onClick={onRemove}
-      className="p-1 text-nier-text-light hover:text-nier-accent-red transition-colors"
-     >
-      <Trash2 size={16}/>
-     </button>
     </div>
    </div>
    {expanded&&(
@@ -358,120 +358,78 @@ function ProviderCard({provider,onUpdate,onToggle,onRemove}:ProviderCardProps){
 )
 }
 
-export function AIProviderSettings():JSX.Element{
- const{providers,addProvider,updateProvider,toggleProvider,removeProvider,exportSettings,importSettings,resetToDefaults}=useAIProviderStore()
- const fileInputRef=useRef<HTMLInputElement>(null)
- const[showAddMenu,setShowAddMenu]=useState(false)
+export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Element{
+ const{providers,updateProvider,toggleProvider,resetToDefaults,loadFromServer,saveToServer,loading}=useAIProviderStore()
+ const{fetchMaster}=useAIServiceStore()
+ const[saving,setSaving]=useState(false)
 
- const handleExport=()=>{
-  const json=exportSettings()
-  const blob=new Blob([json],{type:'application/json'})
-  const url=URL.createObjectURL(blob)
-  const a=document.createElement('a')
-  a.href=url
-  a.download='ai-providers.json'
-  a.click()
-  URL.revokeObjectURL(url)
+ useEffect(()=>{
+  fetchMaster()
+  loadFromServer(projectId)
+ },[projectId])
+
+ const handleSave=useCallback(async()=>{
+  setSaving(true)
+  await saveToServer(projectId)
+  setSaving(false)
+ },[projectId,saveToServer])
+
+ const getProvidersByCategory=(category:AIServiceCategory)=>{
+  return providers.filter(p=>getServiceCategory(p.type)===category)
  }
 
- const handleImport=(e:React.ChangeEvent<HTMLInputElement>)=>{
-  const file=e.target.files?.[0]
-  if(!file)return
-  const reader=new FileReader()
-  reader.onload=ev=>{
-   const json=ev.target?.result as string
-   importSettings(json)
-  }
-  reader.readAsText(file)
- }
-
- const handleAddProvider=(type:AIProviderType)=>{
-  const id=`${type}-${Date.now()}`
-  let config:AIProviderConfig
-  switch(type){
-   case'claude':
-    config={id,name:'Claude (新規)',...DEFAULT_LLM_CONFIG,type:'claude'}
-    break
-   case'openai':
-    config={id,name:'OpenAI (新規)',...DEFAULT_LLM_CONFIG,type:'openai',model:'gpt-4o',endpoint:'https://api.openai.com/v1'}
-    break
-   case'comfyui':
-    config={id,name:'ComfyUI (新規)',...DEFAULT_COMFYUI_CONFIG}
-    break
-   case'voicevox':
-    config={id,name:'VOICEVOX (新規)',...DEFAULT_VOICEVOX_CONFIG}
-    break
-   case'suno':
-    config={id,name:'Suno AI (新規)',...DEFAULT_SUNO_CONFIG}
-    break
-   default:
-    config={id,name:'カスタム',type:'custom',enabled:false,endpoint:'',apiKey:'',settings:{}}
-  }
-  addProvider(config)
-  setShowAddMenu(false)
+ if(loading){
+  return(
+   <Card>
+    <CardContent>
+     <div className="text-center py-8 text-nier-text-light">読み込み中...</div>
+    </CardContent>
+   </Card>
+)
  }
 
  return(
   <div className="space-y-4">
    <Card>
     <CardHeader>
-     <DiamondMarker>AI Provider設定</DiamondMarker>
+     <DiamondMarker>AIサービス設定</DiamondMarker>
     </CardHeader>
     <CardContent className="space-y-4">
      <div className="flex items-center justify-between">
       <div className="text-nier-small text-nier-text-light">
-       {providers.filter(p=>p.enabled).length}/{providers.length} プロバイダーが有効
+       {providers.filter(p=>p.enabled).length}/{providers.length} サービスが有効
       </div>
       <div className="flex gap-2">
-       <div className="relative">
-        <Button variant="ghost" size="sm" onClick={()=>setShowAddMenu(!showAddMenu)}>
-         <Plus size={14}/>
-         <span className="ml-1">新規追加</span>
-        </Button>
-        {showAddMenu&&(
-         <div className="absolute right-0 top-full mt-1 z-10 bg-nier-bg-main border border-nier-border-dark shadow-lg">
-          {(['claude','openai','comfyui','voicevox','suno']as AIProviderType[]).map(type=>(
-           <button
-            key={type}
-            className="block w-full px-4 py-2 text-left text-nier-small hover:bg-nier-bg-selected"
-            onClick={()=>handleAddProvider(type)}
-           >
-            {PROVIDER_TYPE_LABELS[type]}
-           </button>
-))}
-         </div>
-)}
-       </div>
-       <Button variant="ghost" size="sm" onClick={handleExport}>
-        <Download size={14}/>
-        <span className="ml-1">エクスポート</span>
-       </Button>
-       <Button variant="ghost" size="sm" onClick={()=>fileInputRef.current?.click()}>
-        <Upload size={14}/>
-        <span className="ml-1">インポート</span>
-       </Button>
-       <input ref={fileInputRef} type="file" accept=".json" className="hidden" onChange={handleImport}/>
        <Button variant="ghost" size="sm" onClick={resetToDefaults}>
         <RefreshCw size={14}/>
         <span className="ml-1">リセット</span>
        </Button>
+       <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+        <Save size={14}/>
+        <span className="ml-1">{saving?'保存中...':'保存'}</span>
+       </Button>
       </div>
-     </div>
-     <div className="p-3 bg-nier-bg-panel border border-nier-border-light text-nier-caption text-nier-text-light">
-      APIキーはエクスポート時に除外されます。インポート後に再設定してください。
      </div>
     </CardContent>
    </Card>
 
-   {providers.map(provider=>(
-    <ProviderCard
-     key={provider.id}
-     provider={provider}
-     onUpdate={updates=>updateProvider(provider.id,updates)}
-     onToggle={()=>toggleProvider(provider.id)}
-     onRemove={()=>removeProvider(provider.id)}
-    />
+   {(Object.entries(SERVICE_CATEGORIES)as[AIServiceCategory,typeof SERVICE_CATEGORIES[AIServiceCategory]][]).map(([category,info])=>{
+    const categoryProviders=getProvidersByCategory(category)
+    if(categoryProviders.length===0)return null
+    return(
+     <div key={category} className="space-y-2">
+      <div className="text-nier-small text-nier-text-light font-medium px-1">{info.label}</div>
+      {categoryProviders.map(provider=>(
+       <ProviderCard
+        key={provider.id}
+        provider={provider}
+        onUpdate={updates=>updateProvider(provider.id,updates)}
+        onToggle={()=>toggleProvider(provider.id)}
+       />
 ))}
+     </div>
+)
+   })}
   </div>
 )
 }

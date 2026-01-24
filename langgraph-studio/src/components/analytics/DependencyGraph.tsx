@@ -202,7 +202,7 @@ export default function DependencyGraph({
    </CardHeader>
    <CardContent>
     {nodes.length===0?(
-     <div className="flex items-center justify-center h-[400px] text-nier-text-light">
+     <div className="flex items-center justify-center h-[40vh] min-h-[200px] text-nier-text-light">
       グラフデータがありません
      </div>
 ) : (

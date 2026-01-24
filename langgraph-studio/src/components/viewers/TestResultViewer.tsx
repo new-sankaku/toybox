@@ -118,7 +118,7 @@ export function TestResultViewer({result,expandedByDefault=false}:TestResultView
     </div>
 
     {/*Stats*/}
-    <div className="grid grid-cols-4 gap-2 mb-6">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
      <div className="text-center p-2 bg-nier-bg-main">
       <div className="text-nier-h2 font-medium">{result.totalTests}</div>
       <div className="text-nier-caption text-nier-text-light">Total</div>

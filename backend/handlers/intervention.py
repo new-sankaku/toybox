@@ -1,8 +1,8 @@
 from flask import Flask,request,jsonify
-from testdata import TestDataStore
+from datastore import DataStore
 
 
-def register_intervention_routes(app:Flask,data_store:TestDataStore,sio):
+def register_intervention_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/projects/<project_id>/interventions',methods=['GET'])
     def list_interventions(project_id:str):

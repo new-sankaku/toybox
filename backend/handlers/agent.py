@@ -1,8 +1,8 @@
 from flask import Flask,jsonify
-from testdata import TestDataStore
+from datastore import DataStore
 
 
-def register_agent_routes(app:Flask,data_store:TestDataStore,sio):
+def register_agent_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/projects/<project_id>/agents',methods=['GET'])
     def list_project_agents(project_id:str):

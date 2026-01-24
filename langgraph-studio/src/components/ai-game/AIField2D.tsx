@@ -1,7 +1,9 @@
-import{useRef,useEffect,useCallback,useState}from'react'
+import{useRef,useEffect,useCallback,useState,useMemo}from'react'
 import type{CharacterState,AIServiceType}from'./types'
-import{SERVICE_CONFIG}from'./types'
-import{drawPixelCharacter,getAgentDisplayConfig}from'./pixelCharacters'
+import{DEFAULT_SERVICE_CONFIG}from'./types'
+import{drawPixelCharacter}from'./pixelCharacters'
+import{useAIServiceStore}from'@/stores/aiServiceStore'
+import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 
 interface AIField2DProps{
  characters:CharacterState[]
@@ -38,6 +40,18 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
  const frameRef=useRef<number>(0)
  const animationRef=useRef<number>(0)
  const prevDimensionsRef=useRef({width:0,height:0})
+
+ const{services,fetchServices,loaded}=useAIServiceStore()
+ const{getLabel}=useAgentDefinitionStore()
+
+ useEffect(()=>{
+  fetchServices()
+ },[fetchServices])
+
+ const SERVICE_CONFIG=useMemo(()=>{
+  if(!loaded)return DEFAULT_SERVICE_CONFIG
+  return services
+ },[services,loaded])
 
  const ROOM_X=0.68
  const ROOM_WIDTH=0.30
@@ -191,7 +205,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   }
 
   return{centerX:x+width/2,centerY:y+height/2}
- },[])
+ },[SERVICE_CONFIG])
 
  const drawRoom=useCallback((
   ctx:CanvasRenderingContext2D,
@@ -242,7 +256,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
   const dx=roomLeft-platformRight
   const dy=roomCenterY-platformCenterY
-  const len=Math.sqrt(dx*dx+dy*dy)
 
   const packetsToApi=4
   for(let i=0;i<packetsToApi;i++){
@@ -442,7 +455,6 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
     const isWorking=char.status==='working'
     const isActive=char.isActive??isWorking
-    const config=getAgentDisplayConfig(char.agentType)
 
     if(!isActive){
      ctx.globalAlpha=0.4
@@ -453,7 +465,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     ctx.font='10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
     ctx.fillStyle=isActive?NIER_COLORS.textMain : NIER_COLORS.textDim
     ctx.textAlign='center'
-    ctx.fillText(config.label,pos.x,pos.y+spriteSize/2+12)
+    ctx.fillText(getLabel(char.agentType),pos.x,pos.y+spriteSize/2+12)
 
     if(isWorking&&char.request){
      drawSpeechBubble(ctx,pos.x,pos.y,char.request.input)
@@ -476,7 +488,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     cancelAnimationFrame(animationRef.current)
    }
   }
- },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble])
+ },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble,SERVICE_CONFIG,getLabel])
 
  const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return

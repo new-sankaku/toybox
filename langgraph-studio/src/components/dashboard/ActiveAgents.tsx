@@ -15,7 +15,8 @@ const statusLabels:Record<AgentStatus,string>={
  pending:'待機',
  completed:'完了',
  failed:'失敗',
- blocked:'ブロック'
+ blocked:'ブロック',
+ waiting_approval:'承認待ち'
 }
 
 const formatElapsedTime=(startedAt:string|null,completedAt:string|null):string=>{
@@ -52,8 +53,7 @@ export default function ActiveAgents():JSX.Element{
     const agentsData:Agent[]=data.map(a=>({
      id:a.id,
      projectId:a.projectId,
-     type:a.type,
-     phase:a.phase,
+     type:a.type as Agent['type'],
      status:a.status as AgentStatus,
      progress:a.progress,
      currentTask:a.currentTask,
@@ -61,7 +61,9 @@ export default function ActiveAgents():JSX.Element{
      startedAt:a.startedAt,
      completedAt:a.completedAt,
      error:a.error,
-     metadata:a.metadata
+     parentAgentId:a.parentAgentId,
+     metadata:a.metadata,
+     createdAt:a.createdAt
     }))
     setAgents(agentsData)
    }catch(error){
@@ -137,7 +139,12 @@ export default function ActiveAgents():JSX.Element{
           isRunning&&'animate-nier-pulse'
 )}
         >
-         <CategoryMarker status={agent.status==='completed'?'complete' : agent.status}/>
+         <CategoryMarker status={
+          agent.status==='completed'?'complete':
+          agent.status==='running'?'running':
+          agent.status==='pending'?'pending':
+          'info'
+         }/>
          <span className="text-nier-small font-medium truncate flex-1 min-w-0">{displayName}</span>
          <div className="flex items-center gap-2 ml-auto shrink-0">
           <span className="text-nier-caption w-12 text-nier-text-light">

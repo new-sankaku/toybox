@@ -63,29 +63,21 @@ export const PROVIDER_TYPE_LABELS:Record<AIProviderType,string>={
  custom:'カスタム'
 }
 
-export const CLAUDE_MODELS=[
- {id:'claude-sonnet-4-20250514',label:'Claude Sonnet 4'},
- {id:'claude-opus-4-20250514',label:'Claude Opus 4'},
- {id:'claude-3-5-sonnet-20241022',label:'Claude 3.5 Sonnet'},
- {id:'claude-3-5-haiku-20241022',label:'Claude 3.5 Haiku'},
-]
+export type AIServiceCategory='llm'|'image'|'voice'|'music'
 
-export const OPENAI_MODELS=[
- {id:'gpt-4o',label:'GPT-4o'},
- {id:'gpt-4-turbo',label:'GPT-4 Turbo'},
- {id:'gpt-4',label:'GPT-4'},
- {id:'gpt-3.5-turbo',label:'GPT-3.5 Turbo'},
-]
+export const SERVICE_CATEGORIES:Record<AIServiceCategory,{label:string,types:AIProviderType[]}>={
+ llm:{label:'LLM（テキスト生成）',types:['claude','openai']},
+ image:{label:'画像生成',types:['comfyui']},
+ voice:{label:'音声合成',types:['voicevox']},
+ music:{label:'音楽生成',types:['suno']}
+}
 
-export const COMFYUI_SAMPLERS=[
- 'euler','euler_ancestral','heun','dpm_2','dpm_2_ancestral',
- 'lms','dpm_fast','dpm_adaptive','dpmpp_2s_ancestral','dpmpp_sde',
- 'dpmpp_2m','dpmpp_2m_sde','ddim','uni_pc'
-]
-
-export const COMFYUI_SCHEDULERS=[
- 'normal','karras','exponential','sgm_uniform','simple','ddim_uniform'
-]
+export const getServiceCategory=(type:AIProviderType):AIServiceCategory|null=>{
+ for(const[cat,info]of Object.entries(SERVICE_CATEGORIES)){
+  if(info.types.includes(type))return cat as AIServiceCategory
+ }
+ return null
+}
 
 export const DEFAULT_LLM_CONFIG:Omit<LLMProviderConfig,'id'|'name'>={
  type:'claude',

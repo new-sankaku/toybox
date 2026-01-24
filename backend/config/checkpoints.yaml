@@ -1,0 +1,41 @@
+category_map:
+  concept_review: document
+  task_review_1: document
+  concept_detail_review: document
+  scenario_review: document
+  world_review: document
+  game_design_review: document
+  tech_spec_review: document
+  task_review_2: document
+  task_review_3: document
+  task_review_4: document
+  character_review: image
+  ui_review: image
+  code_review: code
+  ui_integration_review: code
+  unit_test_review: code
+  integration_test_review: code
+
+auto_approval_rules:
+  - category: code
+    enabled: false
+  - category: image
+    enabled: false
+  - category: audio
+    enabled: false
+  - category: music
+    enabled: false
+  - category: document
+    enabled: false
+
+status_labels:
+  draft: 下書き
+  running: 実行中
+  paused: 一時停止
+  completed: 完了
+  failed: エラー
+
+resolution_labels:
+  approved: 承認
+  rejected: 却下
+  revision_requested: 修正依頼

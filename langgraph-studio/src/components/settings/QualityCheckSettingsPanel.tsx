@@ -4,7 +4,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{DollarSign,ToggleLeft,ToggleRight,RefreshCw,CheckCircle2,XCircle}from'lucide-react'
-import{qualitySettingsApi,type QualityCheckConfig,type QualitySettingsResponse}from'@/services/apiService'
+import{qualitySettingsApi,type QualityCheckConfig}from'@/services/apiService'
 
 interface QualityCheckSettingsPanelProps{
  projectId:string
@@ -228,7 +228,7 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
    {phaseGroups.map(phase=>(
     <Card key={phase.id}>
      <CardHeader>
-      <DiamondMarker variant="secondary">{phase.label}</DiamondMarker>
+      <DiamondMarker>{phase.label}</DiamondMarker>
      </CardHeader>
      <CardContent className="p-0">
       <div className="divide-y divide-nier-border-light">
@@ -251,7 +251,6 @@ export function QualityCheckSettingsPanel({projectId}:QualityCheckSettingsPanelP
              <DollarSign
               size={14}
               className="text-nier-accent-yellow"
-              title="高コストエージェント"
              />
 )}
             <div>

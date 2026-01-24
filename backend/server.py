@@ -8,13 +8,18 @@ from handlers.agent import register_agent_routes
 from handlers.checkpoint import register_checkpoint_routes
 from handlers.metrics import register_metrics_routes
 from handlers.websocket import register_websocket_handlers
-from handlers.settings import register_settings_routes
+from handlers.quality_settings import register_quality_settings_routes
+from handlers.static_config import register_static_config_routes
+from handlers.auto_approval import register_auto_approval_routes
 from handlers.intervention import register_intervention_routes
 from handlers.file_upload import register_file_upload_routes
 from handlers.project_tree import register_project_tree_routes
 from handlers.ai_provider import register_ai_provider_routes
+from handlers.ai_service import register_ai_service_routes
+from handlers.language import register_language_routes
 from handlers.navigator import register_navigator_routes
-from testdata import TestDataStore
+from handlers.project_settings import register_project_settings_routes
+from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
 from asset_scanner import get_testdata_path
@@ -33,7 +38,7 @@ def create_app():
     )
 
     app_wsgi = socketio.WSGIApp(sio,app)
-    data_store = TestDataStore()
+    data_store = DataStore()
     data_store.set_sio(sio)
     data_store.start_simulation()
 
@@ -51,7 +56,9 @@ def create_app():
     register_agent_routes(app,data_store,sio)
     register_checkpoint_routes(app,data_store,sio)
     register_metrics_routes(app,data_store)
-    register_settings_routes(app,data_store)
+    register_quality_settings_routes(app,data_store)
+    register_static_config_routes(app)
+    register_auto_approval_routes(app,data_store)
     register_intervention_routes(app,data_store,sio)
     register_websocket_handlers(sio,data_store)
     register_navigator_routes(app,sio)
@@ -62,6 +69,9 @@ def create_app():
     register_file_upload_routes(app,data_store,upload_folder)
     register_project_tree_routes(app,data_store,output_folder)
     register_ai_provider_routes(app)
+    register_ai_service_routes(app)
+    register_language_routes(app)
+    register_project_settings_routes(app,data_store)
 
     @app.route('/health')
     def health():

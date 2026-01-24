@@ -1,10 +1,7 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
-import type{Agent,AgentLogEntry}from'@/types/agent'
-import type{Checkpoint}from'@/types/checkpoint'
 
-
-const API_BASE_URL=import.meta.env.VITE_API_BASE_URL||'http://localhost:5000'
+const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||'http://localhost:5000'
 
 export interface ApiErrorDetail{
  message:string
@@ -117,6 +114,11 @@ export const projectApi={
  initialize:async(projectId:string):Promise<Project>=>{
   const response=await api.post(`/api/projects/${projectId}/initialize`)
   return response.data
+ },
+
+ brushup:async(projectId:string,options?:{selectedAgents?:string[],clearAssets?:boolean}):Promise<Project>=>{
+  const response=await api.post(`/api/projects/${projectId}/brushup`,options||{})
+  return response.data
  }
 }
 
@@ -124,7 +126,8 @@ export interface ApiAgent{
  id:string
  projectId:string
  type:string
- status:'pending'|'running'|'completed'|'failed'|'blocked'
+ phase?:number
+ status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -222,19 +225,6 @@ export interface ApiProjectMetrics{
  currentPhase:number
  phaseName:string
  activeGenerations:number
- generationCounts?:{
-  characters:{count:number;unit:string;calls:number}
-  backgrounds:{count:number;unit:string;calls:number}
-  ui:{count:number;unit:string;calls:number}
-  effects:{count:number;unit:string;calls:number}
-  music:{count:number;unit:string;calls:number}
-  sfx:{count:number;unit:string;calls:number}
-  voice:{count:number;unit:string;calls:number}
-  video:{count:number;unit:string;calls:number}
-  scenarios:{count:number;unit:string;calls:number}
-  code:{count:number;unit:string;calls:number}
-  documents:{count:number;unit:string;calls:number}
- }
 }
 
 export const metricsApi={
@@ -668,7 +658,77 @@ export const aiProviderApi={
  }
 }
 
+export interface AIServiceConfig{
+ label:string
+ description:string
+ provider:string
+ model:string
+}
 
+export type AIServiceType='llm'|'image'|'audio'|'music'
+
+export interface ProjectAIServiceConfig{
+ enabled:boolean
+ provider:string
+ model:string
+}
+
+export interface AIServiceMasterModel{
+ id:string
+ label:string
+ recommended?:boolean
+}
+
+export interface AIServiceMasterProvider{
+ id:string
+ label:string
+ models:AIServiceMasterModel[]
+ defaultModel:string
+}
+
+export interface AIServiceMasterService{
+ label:string
+ providers:AIServiceMasterProvider[]
+ default:{provider:string;model:string}
+}
+
+export interface AIServiceMasterData{
+ serviceTypes:AIServiceType[]
+ services:Record<AIServiceType,AIServiceMasterService>
+ providers:Record<string,{
+  label:string
+  serviceTypes:string[]
+  models:AIServiceMasterModel[]
+  defaultModel:string
+ }>
+}
+
+export const aiServiceApi={
+ list:async():Promise<Record<AIServiceType,AIServiceConfig>>=>{
+  const response=await api.get('/api/ai-services')
+  return response.data
+ },
+ get:async(serviceType:AIServiceType):Promise<AIServiceConfig>=>{
+  const response=await api.get(`/api/ai-services/${serviceType}`)
+  return response.data
+ },
+ getMaster:async():Promise<AIServiceMasterData>=>{
+  const response=await api.get('/api/config/ai-services')
+  return response.data
+ },
+ getByProject:async(projectId:string):Promise<Record<AIServiceType,ProjectAIServiceConfig>>=>{
+  const response=await api.get(`/api/projects/${projectId}/ai-services`)
+  return response.data
+ },
+ updateByProject:async(projectId:string,aiServices:Record<AIServiceType,Partial<ProjectAIServiceConfig>>):Promise<Record<AIServiceType,ProjectAIServiceConfig>>=>{
+  const response=await api.put(`/api/projects/${projectId}/ai-services`,aiServices)
+  return response.data
+ },
+ updateServiceByProject:async(projectId:string,serviceType:AIServiceType,config:Partial<ProjectAIServiceConfig>):Promise<ProjectAIServiceConfig>=>{
+  const response=await api.patch(`/api/projects/${projectId}/ai-services/${serviceType}`,config)
+  return response.data
+ }
+}
 
 export interface ModelInfo{
  id:string
@@ -763,8 +823,30 @@ export const configApi={
 
 export interface AutoApprovalRuleApi{
  category:string
- action:string
  enabled:boolean
+}
+
+export interface PricingUnit{
+ input?:string
+ output?:string
+}
+
+export interface ModelPricingInfo{
+ provider:string
+ pricing:Record<string,number>
+}
+
+export interface PricingConfigResponse{
+ currency:string
+ units:Record<string,PricingUnit>
+ models:Record<string,ModelPricingInfo>
+}
+
+export const costApi={
+ getPricing:async():Promise<PricingConfigResponse>=>{
+  const response=await api.get('/api/config/pricing')
+  return response.data
+ }
 }
 
 export const autoApprovalApi={
@@ -775,6 +857,79 @@ export const autoApprovalApi={
 
  updateRules:async(projectId:string,rules:AutoApprovalRuleApi[]):Promise<{rules:AutoApprovalRuleApi[]}>=>{
   const response=await api.put(`/api/projects/${projectId}/auto-approval-rules`,{rules})
+  return response.data
+ }
+}
+
+export interface LanguageOption{
+ value:string
+ label:string
+ nativeName:string
+}
+
+export interface LanguagesConfigResponse{
+ defaultPrimary:string
+ defaultLanguages:string[]
+ languages:LanguageOption[]
+}
+
+export const languagesApi={
+ getConfig:async():Promise<LanguagesConfigResponse>=>{
+  const response=await api.get('/api/languages')
+  return response.data
+ }
+}
+
+export interface OutputSettings{
+ default_dir:string
+}
+
+export interface CostServiceSettings{
+ enabled:boolean
+ monthly_limit:number
+}
+
+export interface CostSettings{
+ global_enabled:boolean
+ global_monthly_limit:number
+ alert_threshold:number
+ stop_on_budget_exceeded:boolean
+ services:Record<string,CostServiceSettings>
+}
+
+export const projectSettingsApi={
+ getAgentServiceMap:async():Promise<Record<string,string>>=>{
+  const response=await api.get('/api/config/agent-service-map')
+  return response.data
+ },
+
+ getOutputSettings:async(projectId:string):Promise<OutputSettings>=>{
+  const response=await api.get(`/api/projects/${projectId}/settings/output`)
+  return response.data
+ },
+
+ updateOutputSettings:async(projectId:string,settings:Partial<OutputSettings>):Promise<OutputSettings>=>{
+  const response=await api.put(`/api/projects/${projectId}/settings/output`,settings)
+  return response.data
+ },
+
+ getCostSettings:async(projectId:string):Promise<CostSettings>=>{
+  const response=await api.get(`/api/projects/${projectId}/settings/cost`)
+  return response.data
+ },
+
+ updateCostSettings:async(projectId:string,settings:Partial<CostSettings>):Promise<CostSettings>=>{
+  const response=await api.put(`/api/projects/${projectId}/settings/cost`,settings)
+  return response.data
+ },
+
+ getAIProviders:async(projectId:string):Promise<unknown[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/settings/ai-providers`)
+  return response.data
+ },
+
+ updateAIProviders:async(projectId:string,providers:unknown[]):Promise<unknown[]>=>{
+  const response=await api.put(`/api/projects/${projectId}/settings/ai-providers`,providers)
   return response.data
  }
 }

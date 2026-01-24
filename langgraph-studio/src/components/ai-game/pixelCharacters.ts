@@ -6,7 +6,6 @@ export type CharacterType=
  |'mech'|'dragon'|'turtle'
 
 export interface AgentDisplayConfig{
- label:string
  bodyColor:string
  accentColor:string
  characterType:CharacterType
@@ -14,50 +13,31 @@ export interface AgentDisplayConfig{
 
 export function getAgentDisplayConfig(agentType:string):AgentDisplayConfig{
  const configs:Record<string,AgentDisplayConfig>={
-  orchestrator:{label:'ORCHESTRATOR',bodyColor:'#8b0000',accentColor:'#ff4040',characterType:'dragon'},
-  director_phase1:{label:'DIRECTOR (企画)',bodyColor:'#4a0080',accentColor:'#9040c0',characterType:'wizard'},
-  director_phase2:{label:'DIRECTOR (開発)',bodyColor:'#004080',accentColor:'#4080c0',characterType:'mech'},
-  director_phase3:{label:'DIRECTOR (品質)',bodyColor:'#006040',accentColor:'#40a080',characterType:'golem'},
-  leader_concept:{label:'LEADER (コンセプト)',bodyColor:'#602080',accentColor:'#a050c0',characterType:'princess'},
-  leader_scenario:{label:'LEADER (シナリオ)',bodyColor:'#403080',accentColor:'#7060b0',characterType:'bard'},
-  leader_design:{label:'LEADER (設計)',bodyColor:'#604020',accentColor:'#a08050',characterType:'alchemist'},
-  leader_task_split:{label:'LEADER (タスク分割)',bodyColor:'#204060',accentColor:'#5080a0',characterType:'engineer'},
-  leader_code:{label:'LEADER (コード)',bodyColor:'#304060',accentColor:'#6080b0',characterType:'knight'},
-  leader_asset:{label:'LEADER (アセット)',bodyColor:'#604030',accentColor:'#a08060',characterType:'druid'},
-  worker_concept:{label:'WORKER (コンセプト)',bodyColor:'#805090',accentColor:'#b080c0',characterType:'fairy'},
-  worker_scenario:{label:'WORKER (シナリオ)',bodyColor:'#504080',accentColor:'#8070b0',characterType:'puppet'},
-  worker_design:{label:'WORKER (設計)',bodyColor:'#705030',accentColor:'#b09060',characterType:'fox'},
-  worker_task_split:{label:'WORKER (タスク分割)',bodyColor:'#305070',accentColor:'#6090b0',characterType:'owl'},
-  worker_code:{label:'WORKER (コード)',bodyColor:'#405070',accentColor:'#7090b0',characterType:'ninja'},
-  worker_asset:{label:'WORKER (アセット)',bodyColor:'#705040',accentColor:'#b09070',characterType:'cat'},
-  character:{label:'WORKER (キャラ)',bodyColor:'#804050',accentColor:'#c07080',characterType:'princess'},
-  integrator:{label:'WORKER (統合)',bodyColor:'#306050',accentColor:'#60a080',characterType:'clockwork'},
-  reviewer:{label:'WORKER (検証)',bodyColor:'#405050',accentColor:'#709090',characterType:'samurai'},
-  concept:{label:'WORKER (コンセプト)',bodyColor:'#1a4080',accentColor:'#4080c0',characterType:'wizard'},
-  task_split_1:{label:'WORKER (分割1)',bodyColor:'#704010',accentColor:'#b08040',characterType:'knight'},
-  task_split_2:{label:'WORKER (分割2)',bodyColor:'#302050',accentColor:'#6050a0',characterType:'ninja'},
-  task_split_3:{label:'WORKER (分割3)',bodyColor:'#801020',accentColor:'#c04060',characterType:'samurai'},
-  task_split_4:{label:'WORKER (分割4)',bodyColor:'#205030',accentColor:'#408060',characterType:'archer'},
-  concept_detail:{label:'WORKER (詳細企画)',bodyColor:'#a02050',accentColor:'#e070a0',characterType:'princess'},
-  scenario:{label:'WORKER (シナリオ)',bodyColor:'#502080',accentColor:'#9060c0',characterType:'bard'},
-  world:{label:'WORKER (世界観)',bodyColor:'#106030',accentColor:'#40a060',characterType:'druid'},
-  game_design:{label:'WORKER (ゲーム設計)',bodyColor:'#806010',accentColor:'#c0a030',characterType:'alchemist'},
-  tech_spec:{label:'WORKER (技術仕様)',bodyColor:'#105070',accentColor:'#3090b0',characterType:'engineer'},
-  asset_character:{label:'WORKER (キャラ素材)',bodyColor:'#904020',accentColor:'#d08050',characterType:'cat'},
-  asset_background:{label:'WORKER (背景素材)',bodyColor:'#304060',accentColor:'#6080b0',characterType:'owl'},
-  asset_ui:{label:'WORKER (UI素材)',bodyColor:'#804010',accentColor:'#c08040',characterType:'fox'},
-  asset_effect:{label:'WORKER (エフェクト)',bodyColor:'#603080',accentColor:'#a060c0',characterType:'fairy'},
-  asset_bgm:{label:'WORKER (BGM)',bodyColor:'#802010',accentColor:'#c06040',characterType:'phoenix'},
-  asset_voice:{label:'WORKER (ボイス)',bodyColor:'#106060',accentColor:'#40a0a0',characterType:'mermaid'},
-  asset_sfx:{label:'WORKER (効果音)',bodyColor:'#404050',accentColor:'#707090',characterType:'wolf'},
-  code:{label:'WORKER (コード)',bodyColor:'#303060',accentColor:'#6060a0',characterType:'golem'},
-  event:{label:'WORKER (イベント)',bodyColor:'#503050',accentColor:'#906090',characterType:'puppet'},
-  ui_integration:{label:'WORKER (UI統合)',bodyColor:'#504030',accentColor:'#908060',characterType:'clockwork'},
-  asset_integration:{label:'WORKER (素材統合)',bodyColor:'#204050',accentColor:'#508090',characterType:'mech'},
-  unit_test:{label:'WORKER (単体テスト)',bodyColor:'#106020',accentColor:'#40a050',characterType:'dragon'},
-  integration_test:{label:'WORKER (結合テスト)',bodyColor:'#205040',accentColor:'#409070',characterType:'turtle'},
+  concept:{bodyColor:'#1a4080',accentColor:'#4080c0',characterType:'wizard'},
+  task_split_1:{bodyColor:'#704010',accentColor:'#b08040',characterType:'knight'},
+  task_split_2:{bodyColor:'#302050',accentColor:'#6050a0',characterType:'ninja'},
+  task_split_3:{bodyColor:'#801020',accentColor:'#c04060',characterType:'samurai'},
+  task_split_4:{bodyColor:'#205030',accentColor:'#408060',characterType:'archer'},
+  concept_detail:{bodyColor:'#a02050',accentColor:'#e070a0',characterType:'princess'},
+  scenario:{bodyColor:'#502080',accentColor:'#9060c0',characterType:'bard'},
+  world:{bodyColor:'#106030',accentColor:'#40a060',characterType:'druid'},
+  game_design:{bodyColor:'#806010',accentColor:'#c0a030',characterType:'alchemist'},
+  tech_spec:{bodyColor:'#105070',accentColor:'#3090b0',characterType:'engineer'},
+  asset_character:{bodyColor:'#904020',accentColor:'#d08050',characterType:'cat'},
+  asset_background:{bodyColor:'#304060',accentColor:'#6080b0',characterType:'owl'},
+  asset_ui:{bodyColor:'#804010',accentColor:'#c08040',characterType:'fox'},
+  asset_effect:{bodyColor:'#603080',accentColor:'#a060c0',characterType:'fairy'},
+  asset_bgm:{bodyColor:'#802010',accentColor:'#c06040',characterType:'phoenix'},
+  asset_voice:{bodyColor:'#106060',accentColor:'#40a0a0',characterType:'mermaid'},
+  asset_sfx:{bodyColor:'#404050',accentColor:'#707090',characterType:'wolf'},
+  code:{bodyColor:'#303060',accentColor:'#6060a0',characterType:'golem'},
+  event:{bodyColor:'#503050',accentColor:'#906090',characterType:'puppet'},
+  ui_integration:{bodyColor:'#504030',accentColor:'#908060',characterType:'clockwork'},
+  asset_integration:{bodyColor:'#204050',accentColor:'#508090',characterType:'mech'},
+  unit_test:{bodyColor:'#106020',accentColor:'#40a050',characterType:'dragon'},
+  integration_test:{bodyColor:'#205040',accentColor:'#409070',characterType:'turtle'},
  }
- return configs[agentType]||{label:'Agent',bodyColor:'#505050',accentColor:'#808080',characterType:'wizard'}
+ return configs[agentType]||{bodyColor:'#505050',accentColor:'#808080',characterType:'wizard'}
 }
 
 export function drawPixelCharacter(
@@ -290,7 +270,7 @@ function drawArcher(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDispl
  drawPx(centerX+1,baseY+14,2,5)
 }
 
-function drawPrincess(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawPrincess(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const sway=Math.sin(frame*0.08)*0.5
 
@@ -360,7 +340,7 @@ function drawBard(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplay
  drawPx(centerX+1,baseY+14,2,5)
 }
 
-function drawDruid(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawDruid(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const leafSway=Math.sin(frame*0.1)*1
 
@@ -503,7 +483,7 @@ function drawCat(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayC
  drawPx(centerX+2,baseY+16,2,4-anim)
 }
 
-function drawOwl(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawOwl(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const blink=Math.floor(frame/30)%5===0
  const headTilt=Math.sin(frame*0.05)*1
@@ -649,7 +629,7 @@ function drawPhoenix(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisp
  drawPx(centerX-0.5,baseY+6+fly,1,1)
 }
 
-function drawMermaid(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawMermaid(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const swim=Math.sin(frame*0.1)*1.5
  const tailWave=Math.sin(frame*0.15)*2
@@ -748,7 +728,7 @@ function drawGolem(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDispla
  drawPx(centerX+1,baseY+15,3,5)
 }
 
-function drawPuppet(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawPuppet(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const dangle=Math.sin(frame*0.15)*2
  const armSwing=Math.sin(frame*0.2)*3
@@ -782,7 +762,7 @@ function drawPuppet(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDispl
  drawPx(centerX+1,baseY+14+dangle,2,4)
 }
 
-function drawClockwork(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,isWorking:boolean,frame:number,baseY:number){
+function drawClockwork(ctx:CanvasRenderingContext2D,drawPx:DrawPx,config:AgentDisplayConfig,_isWorking:boolean,frame:number,baseY:number){
  const centerX=14
  const gearRotate=(frame*2)%360
  const tick=Math.floor(frame/10)%2

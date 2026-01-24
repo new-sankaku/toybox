@@ -96,7 +96,7 @@ function ToastItem({toast,onClose}:ToastItemProps){
  return(
   <div
    className={cn(
-    'nier-toast min-w-[300px] animate-nier-slide-in border-l-4',
+    'nier-toast min-w-[260px] md:min-w-[300px] max-w-[90vw] animate-nier-slide-in border-l-4',
     colorMap[toast.type]
 )}
   >

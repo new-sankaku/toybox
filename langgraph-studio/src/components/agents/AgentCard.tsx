@@ -106,7 +106,7 @@ export function AgentCard({
   if(agent.status==='running'){
    return agent.currentTask||'処理中'
   }
-  if(agent.status==='waiting_approval')return'チェックポイント承認待ち'
+  if(agent.status==='waiting_approval')return'承認待ち'
   if(agent.status==='pending')return waitingFor||'開始待機'
   if(agent.status==='blocked')return'ブロック'
   if(agent.status==='completed')return'完了'
@@ -150,7 +150,7 @@ export function AgentCard({
     {/*Col 4: Task/Status Text*/}
     <div className="flex items-center gap-2 min-w-0 pl-4">
      {isUsingLLM&&(
-      <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse" title="LLM生成中"/>
+      <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse"/>
 )}
      <span className="text-nier-caption truncate text-nier-text-light">
       {getTaskText()}

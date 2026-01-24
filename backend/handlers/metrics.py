@@ -1,8 +1,8 @@
 from flask import Flask,jsonify,request
-from testdata import TestDataStore
+from datastore import DataStore
 
 
-def register_metrics_routes(app:Flask,data_store:TestDataStore):
+def register_metrics_routes(app:Flask,data_store:DataStore):
 
     @app.route('/api/projects/<project_id>/ai-requests/stats',methods=['GET'])
     def get_ai_request_stats(project_id:str):

@@ -127,7 +127,7 @@ function TreeNode({node,depth,onDownload,onReplace}:TreeNodeProps){
 }
 
 export function ProjectTreeView({
- projectId,
+ projectId:_projectId,
  rootNode,
  onDownload,
  onReplace,

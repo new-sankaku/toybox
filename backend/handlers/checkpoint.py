@@ -1,8 +1,8 @@
 from flask import Flask,request,jsonify
-from testdata import TestDataStore
+from datastore import DataStore
 
 
-def register_checkpoint_routes(app:Flask,data_store:TestDataStore,sio):
+def register_checkpoint_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/projects/<project_id>/checkpoints',methods=['GET'])
     def list_project_checkpoints(project_id:str):
@@ -28,7 +28,7 @@ def register_checkpoint_routes(app:Flask,data_store:TestDataStore,sio):
             return jsonify({"error":"Checkpoint not found"}),404
 
         agent_id = checkpoint["agentId"]
-        agent = data_store.agents.get(agent_id)
+        agent = data_store.get_agent(agent_id)
         agent_status = agent["status"] if agent else None
         sio.emit('checkpoint:resolved',{
             "checkpointId":checkpoint_id,

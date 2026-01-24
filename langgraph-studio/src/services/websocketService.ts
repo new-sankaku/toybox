@@ -26,8 +26,8 @@ interface ServerToClientEvents{
  'agent:log':(data:{agentId:string;entry:AgentLogEntry})=>void
  'agent:completed':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:failed':(data:{agentId:string;error:string})=>void
- 'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string})=>void
- 'checkpoint:resolved':(data:{checkpoint:Checkpoint})=>void
+ 'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string;agentStatus?:string})=>void
+ 'checkpoint:resolved':(data:{checkpoint:Checkpoint;checkpointId?:string;agentId?:string;agentStatus?:string})=>void
  'project:updated':(data:{projectId:string;updates:Partial<Project>})=>void
  'phase:changed':(data:{projectId:string;phase:PhaseNumber;phaseName:string})=>void
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
@@ -170,7 +170,7 @@ class WebSocketService{
     useCheckpointStore.getState().addCheckpoint(data.checkpoint)
    }
    if(data.agentId&&data.agentStatus){
-    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus)
+    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus as Agent['status'])
    }
   })
 
@@ -180,7 +180,7 @@ class WebSocketService{
     useCheckpointStore.getState().updateCheckpoint(data.checkpoint.id,data.checkpoint)
    }
    if(data.agentId&&data.agentStatus){
-    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus)
+    useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus as Agent['status'])
    }
   })
 

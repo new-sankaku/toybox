@@ -20,7 +20,10 @@ export interface GameConcept{
  platform:string
  scope:string
  genre?:string
+ references?:string
  targetAudience?:string
+ primaryLanguage?:string
+ languages?:string[]
 }
 
 export interface AssetGenerationConfig {
@@ -41,6 +44,7 @@ export interface ProjectConfig{
  enableAssetGeneration?:boolean
  assetGeneration?:AssetGenerationConfig
  contentPermissions?:ContentPermissionsConfig
+ scale?:string
 }
 
 export interface CreateProjectInput{
@@ -50,16 +54,41 @@ export interface CreateProjectInput{
  config?:ProjectConfig
 }
 
+export interface GenerationCountItem{
+ count:number
+ unit:string
+ calls?:number
+}
+
+export interface GenerationCounts{
+ characters?:GenerationCountItem
+ backgrounds?:GenerationCountItem
+ ui?:GenerationCountItem
+ effects?:GenerationCountItem
+ music?:GenerationCountItem
+ sfx?:GenerationCountItem
+ voice?:GenerationCountItem
+ video?:GenerationCountItem
+ scenarios?:GenerationCountItem
+ code?:GenerationCountItem
+ documents?:GenerationCountItem
+}
+
 export interface ProjectMetrics{
  projectId:string
  totalTokensUsed:number
+ totalInputTokens?:number
+ totalOutputTokens?:number
  estimatedTotalTokens:number
+ tokensByType?:Record<string,{input:number;output:number}>
+ generationCounts?:GenerationCounts
  elapsedTimeSeconds:number
  estimatedRemainingSeconds:number
  estimatedEndTime:string|null
  completedTasks:number
  totalTasks:number
  progressPercent:number
- currentPhase:PhaseNumber
+ currentPhase:number
  phaseName:string
+ activeGenerations?:number
 }

@@ -1,4 +1,4 @@
-export type FileCategory='code'|'image'|'audio'|'video'|'document'|'archive'|'other'
+export type FileCategory='code'|'image'|'bgm'|'sfx'|'voice'|'audio'|'video'|'document'|'archive'|'other'
 
 export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'
 
@@ -58,6 +58,22 @@ export const ALLOWED_MIME_TYPES:Record<FileCategory,string[]>={
   'audio/flac',
   'audio/aac'
 ],
+ bgm:[
+  'audio/mpeg',
+  'audio/wav',
+  'audio/ogg',
+  'audio/flac'
+],
+ sfx:[
+  'audio/mpeg',
+  'audio/wav',
+  'audio/ogg'
+],
+ voice:[
+  'audio/mpeg',
+  'audio/wav',
+  'audio/ogg'
+],
  video:[
   'video/mp4',
   'video/webm',
@@ -69,6 +85,13 @@ export const ALLOWED_MIME_TYPES:Record<FileCategory,string[]>={
   'application/pdf',
   'text/plain',
   'text/markdown'
+],
+ archive:[
+  'application/zip',
+  'application/x-tar',
+  'application/gzip',
+  'application/x-7z-compressed',
+  'application/x-rar-compressed'
 ],
  other:[]
 }

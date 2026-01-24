@@ -1,7 +1,6 @@
 export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
 
 export type AgentType=
- |'orchestrator'
  |'director_phase1'
  |'director_phase2'
  |'director_phase3'
@@ -47,12 +46,14 @@ export type AgentType=
 export interface Agent{
  id:string
  projectId:string
- type:AgentType
- phase?:0|1|2|3|4|5|6|7|8
+ type:string
+ phase?:number
  status:AgentStatus
  progress:number
  currentTask:string|null
  tokensUsed:number
+ inputTokens?:number
+ outputTokens?:number
  startedAt:string|null
  completedAt:string|null
  error:string|null

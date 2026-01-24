@@ -1,0 +1,241 @@
+agents:
+  concept:
+    label: コンセプト
+    short_label: コンセプト
+    phase: 0
+    speech_bubble: 企画を立案します
+    quality_check: true
+    high_cost: false
+
+  task_split_1:
+    label: タスク分割1
+    short_label: 分割1
+    phase: 1
+    speech_bubble: 設計タスクを分配します
+    quality_check: true
+    high_cost: false
+
+  concept_detail:
+    label: コンセプト
+    short_label: コンセプト
+    phase: 2
+    speech_bubble: 企画を練り上げます
+    quality_check: true
+    high_cost: false
+
+  scenario:
+    label: シナリオ
+    short_label: シナリオ
+    phase: 2
+    speech_bubble: 物語を紡ぎます
+    quality_check: true
+    high_cost: false
+
+  world:
+    label: 世界観
+    short_label: 世界観
+    phase: 2
+    speech_bubble: 世界を創造します
+    quality_check: true
+    high_cost: false
+
+  game_design:
+    label: ゲームデザイン
+    short_label: デザイン
+    phase: 2
+    speech_bubble: システムを設計します
+    quality_check: true
+    high_cost: false
+
+  tech_spec:
+    label: 技術仕様
+    short_label: テック
+    phase: 2
+    speech_bubble: 技術を検証します
+    quality_check: true
+    high_cost: false
+
+  task_split_2:
+    label: タスク分割2
+    short_label: 分割2
+    phase: 3
+    speech_bubble: アセットタスクを分配
+    quality_check: true
+    high_cost: false
+
+  asset_character:
+    label: キャラクター
+    short_label: キャラ
+    phase: 4
+    speech_bubble: キャラを描くにゃ
+    quality_check: true
+    high_cost: true
+
+  asset_background:
+    label: 背景
+    short_label: 背景
+    phase: 4
+    speech_bubble: 背景を観察中...
+    quality_check: true
+    high_cost: true
+
+  asset_ui:
+    label: UI
+    short_label: UI
+    phase: 4
+    speech_bubble: UIをデザイン中
+    quality_check: true
+    high_cost: true
+
+  asset_effect:
+    label: エフェクト
+    short_label: エフェクト
+    phase: 4
+    speech_bubble: キラキラを作るよ
+    quality_check: true
+    high_cost: true
+
+  asset_bgm:
+    label: BGM
+    short_label: BGM
+    phase: 4
+    speech_bubble: 旋律を奏でます
+    quality_check: true
+    high_cost: true
+
+  asset_voice:
+    label: ボイス
+    short_label: ボイス
+    phase: 4
+    speech_bubble: 声を届けます
+    quality_check: true
+    high_cost: true
+
+  asset_sfx:
+    label: 効果音
+    short_label: 効果音
+    phase: 4
+    speech_bubble: 音を探索中...
+    quality_check: true
+    high_cost: true
+
+  task_split_3:
+    label: タスク分割3
+    short_label: 分割3
+    phase: 5
+    speech_bubble: 実装タスクを分配
+    quality_check: true
+    high_cost: false
+
+  code:
+    label: コード
+    short_label: コード
+    phase: 6
+    speech_bubble: コード...実装中...
+    quality_check: true
+    high_cost: false
+
+  event:
+    label: イベント
+    short_label: イベント
+    phase: 6
+    speech_bubble: イベントを仕込む
+    quality_check: true
+    high_cost: false
+
+  ui_integration:
+    label: UI統合
+    short_label: UI統合
+    phase: 6
+    speech_bubble: UI部品を組み立て中
+    quality_check: true
+    high_cost: false
+
+  asset_integration:
+    label: アセット統合
+    short_label: 統合
+    phase: 6
+    speech_bubble: アセットを統合中
+    quality_check: true
+    high_cost: false
+
+  task_split_4:
+    label: タスク分割4
+    short_label: 分割4
+    phase: 7
+    speech_bubble: テストタスクを分配
+    quality_check: true
+    high_cost: false
+
+  unit_test:
+    label: 単体テスト
+    short_label: テスト1
+    phase: 8
+    speech_bubble: バグを焼き尽くす！
+    quality_check: true
+    high_cost: false
+
+  integration_test:
+    label: 統合テスト
+    short_label: テスト2
+    phase: 8
+    speech_bubble: 慎重にテスト中...
+    quality_check: true
+    high_cost: false
+
+workflow_dependencies:
+  concept: []
+  task_split_1: [concept]
+  concept_detail: [task_split_1]
+  scenario: [task_split_1]
+  world: [task_split_1]
+  game_design: [task_split_1]
+  tech_spec: [task_split_1]
+  task_split_2: [concept_detail, scenario, world, game_design, tech_spec]
+  asset_character: [task_split_2]
+  asset_background: [task_split_2]
+  asset_ui: [task_split_2]
+  asset_effect: [task_split_2]
+  asset_bgm: [task_split_2]
+  asset_voice: [task_split_2]
+  asset_sfx: [task_split_2]
+  task_split_3: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
+  code: [task_split_3]
+  event: [task_split_3]
+  ui_integration: [task_split_3]
+  asset_integration: [task_split_3]
+  task_split_4: [code, event, ui_integration, asset_integration]
+  unit_test: [task_split_4]
+  integration_test: [task_split_4]
+
+phases:
+  phase0_concept:
+    label: 企画
+    agents: [concept]
+  phase1_task_split:
+    label: 分割1
+    agents: [task_split_1]
+  phase2_design:
+    label: 設計
+    agents: [concept_detail, scenario, world, game_design, tech_spec]
+  phase3_task_split:
+    label: 分割2
+    agents: [task_split_2]
+  phase4_assets:
+    label: アセット
+    agents: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
+  phase5_task_split:
+    label: 分割3
+    agents: [task_split_3]
+  phase6_implementation:
+    label: 実装
+    agents: [code, event, ui_integration, asset_integration]
+  phase7_task_split:
+    label: 分割4
+    agents: [task_split_4]
+  phase8_testing:
+    label: テスト
+    agents: [unit_test, integration_test]
+
+quality_check_defaults:
+  max_retries: 3

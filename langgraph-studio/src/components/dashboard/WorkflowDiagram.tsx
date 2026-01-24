@@ -32,7 +32,7 @@ interface AgentNodeDef{
 const AGENT_NODES:AgentNodeDef[]=[
  {id:'concept',type:'concept',label:'コンセプト',phase:0},
  {id:'task_split_1',type:'task_split_1',label:'タスク分割1',phase:1},
- {id:'concept_detail',type:'concept_detail',label:'コンセプト詳細',phase:2,hasLW:true},
+ {id:'concept_detail',type:'concept_detail',label:'コンセプト',phase:2,hasLW:true},
  {id:'scenario',type:'scenario',label:'シナリオ',phase:2,hasLW:true},
  {id:'world',type:'world',label:'世界観',phase:2,hasLW:true},
  {id:'game_design',type:'game_design',label:'ゲームデザイン',phase:2,hasLW:true},
@@ -152,7 +152,7 @@ const DEFAULT_LAYOUT_CONFIG:LayoutConfig={
 }
 
 function getColumnLayout(
- statusMap:Record<string,AgentStatus|undefined>,
+ _statusMap:Record<string,AgentStatus|undefined>,
  config:LayoutConfig
 ):{
  positions:Record<string,{x:number;y:number}>
@@ -501,8 +501,8 @@ export default function WorkflowDiagram():JSX.Element{
     const agentsConverted:Agent[]=agentsData.map(a=>({
      id:a.id,
      projectId:a.projectId,
-     type:a.type,
-     phase:a.phase,
+     type:a.type as Agent['type'],
+     phase:a.phase as Agent['phase'],
      status:a.status as AgentStatus,
      progress:a.progress,
      currentTask:a.currentTask,
@@ -510,9 +510,9 @@ export default function WorkflowDiagram():JSX.Element{
      startedAt:a.startedAt,
      completedAt:a.completedAt,
      error:a.error,
-     parentAgentId:null,
+     parentAgentId:a.parentAgentId,
      metadata:a.metadata,
-     createdAt:a.startedAt||new Date().toISOString()
+     createdAt:a.createdAt
     }))
     setAgents(agentsConverted)
    }catch(error){
