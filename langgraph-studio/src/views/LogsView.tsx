@@ -93,7 +93,7 @@ export default function LogsView():JSX.Element{
   }
 
   fetchLogs()
- },[currentProject?.id,logStore])
+ },[currentProject?.id])
 
  if(!currentProject){
   return(

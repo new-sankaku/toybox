@@ -89,7 +89,7 @@ export default function ActivitySidebar():JSX.Element{
    agentStore.setAgents(agentsData as Agent[])
    checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
   }).catch(err=>console.error('Failed to fetch initial sidebar data:',err))
- },[currentProject?.id,metricsStore,agentStore,checkpointStore])
+ },[currentProject?.id])
 
  const agents:Agent[]=currentProject
   ?agentStore.agents.filter(a=>a.projectId===currentProject.id)

@@ -3,6 +3,7 @@ from datastore import DataStore
 from config_loader import (
  get_output_settings_defaults,
  get_cost_settings_defaults,
+ get_agent_service_map,
 )
 
 
@@ -15,6 +16,10 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
  @app.route('/api/config/cost-settings/defaults',methods=['GET'])
  def get_cost_defaults():
   return jsonify(get_cost_settings_defaults())
+
+ @app.route('/api/config/agent-service-map',methods=['GET'])
+ def get_agent_service_map_endpoint():
+  return jsonify(get_agent_service_map())
 
  @app.route('/api/projects/<project_id>/settings/output',methods=['GET'])
  def get_project_output_settings(project_id:str):

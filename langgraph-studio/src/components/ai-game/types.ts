@@ -24,13 +24,14 @@ export interface AIRequest{
 export interface CharacterState{
  agentId:string
  agentType:AgentType
- status:'idle'|'departing'|'working'|'returning'
+ status:'idle'|'departing'|'working'|'returning'|'waiting_approval'
  emotion:CharacterEmotion
  targetService?:AIServiceType
  request?:AIRequest
  position:{x:number;y:number}
  speechBubble?:string
  isActive?:boolean
+ phase?:number
 }
 
 export interface ServiceZoneState{

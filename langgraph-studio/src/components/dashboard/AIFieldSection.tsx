@@ -59,6 +59,16 @@ export default function AIFieldSection():JSX.Element|null{
  const{getLabel}=useAgentDefinitionStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
 
+ const currentPhase=useMemo(()=>{
+  if(!currentProject)return-1
+  const projectAgents=agents.filter(a=>a.projectId===currentProject.id)
+  const runningAgent=projectAgents.find(a=>a.status==='running'||a.status==='waiting_approval')
+  if(runningAgent&&runningAgent.phase!==undefined)return runningAgent.phase
+  const completedAgents=projectAgents.filter(a=>a.status==='completed'&&a.phase!==undefined)
+  if(completedAgents.length===0)return 0
+  return Math.max(...completedAgents.map(a=>a.phase as number))
+ },[agents,currentProject])
+
  const characters=useMemo(():CharacterState[]=>{
   if(!currentProject)return[]
 
@@ -66,8 +76,10 @@ export default function AIFieldSection():JSX.Element|null{
    if(a.projectId!==currentProject.id)return false
    if(exitedAgentIds.has(a.id))return false
    if(a.status==='running'||a.status==='waiting_approval')return true
-   if(a.status==='completed')return true
    return false
+  }).filter(a=>{
+   if(a.phase===undefined)return true
+   return a.phase===currentPhase
   })
 
   return projectAgents.map((agent)=>{
@@ -83,6 +95,9 @@ export default function AIFieldSection():JSX.Element|null{
    if(isRunning){
     status='working'
     emotion='working'
+   }else if(isWaitingApproval){
+    status='waiting_approval'
+    emotion='idle'
    }
 
    return{
@@ -91,7 +106,7 @@ export default function AIFieldSection():JSX.Element|null{
     status,
     emotion,
     isActive:isActiveAgent,
-    targetService:isRunning?targetService:undefined,
+    targetService:isRunning?targetService:(isWaitingApproval?targetService:undefined),
     request:isRunning?{
      id:`req-${agent.id}`,
      serviceType:targetService,
@@ -111,10 +126,11 @@ export default function AIFieldSection():JSX.Element|null{
      status:'waiting',
      createdAt:agent.startedAt||new Date().toISOString()
     }:undefined),
-    position:{x:0,y:0}
+    position:{x:0,y:0},
+    phase:agent.phase
    }
   })
- },[agents,currentProject,exitedAgentIds])
+ },[agents,currentProject,exitedAgentIds,currentPhase])
 
  const handleCharacterClick=useCallback((character:CharacterState)=>{
   setSelectedCharacter(character)
@@ -150,7 +166,8 @@ export default function AIFieldSection():JSX.Element|null{
         <p className="text-nier-small text-nier-text-light mt-1">
          ステータス: {selectedCharacter.status==='idle'?'待機中':
           selectedCharacter.status==='working'?'作業中':
-           selectedCharacter.status==='departing'?'移動中':'帰還中'}
+           selectedCharacter.status==='waiting_approval'?'承認待ち':
+            selectedCharacter.status==='departing'?'移動中':'帰還中'}
         </p>
         {selectedCharacter.targetService&&(
          <p className="text-nier-small text-nier-text-light">

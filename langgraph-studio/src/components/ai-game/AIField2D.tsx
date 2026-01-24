@@ -53,8 +53,8 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   return services
  },[services,loaded])
 
- const ROOM_X=0.68
- const ROOM_WIDTH=0.30
+ const ROOM_X=0.60
+ const ROOM_WIDTH=0.38
  const PLATFORM_X=0.03
  const PLATFORM_WIDTH=0.35
 
@@ -97,8 +97,8 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const positions=positionsRef.current
   const roomStartX=dimensions.width*ROOM_X
   const roomWidth=dimensions.width*ROOM_WIDTH
-  const roomStartY=dimensions.height*0.08
-  const roomHeight=dimensions.height*0.84
+  const topY=dimensions.height*0.06
+  const totalHeight=dimensions.height*0.88
 
   const dimensionsChanged=prevDimensionsRef.current.width!==dimensions.width||
    prevDimensionsRef.current.height!==dimensions.height
@@ -112,19 +112,32 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   }
 
   const spriteSize=56*characterScale
-  const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
-  const gridRows=Math.ceil(characters.length/gridCols)
+  const idleChars=characters.filter(c=>c.status!=='working'&&c.status!=='waiting_approval')
+  const gridCols=Math.max(1,Math.floor((roomWidth-30)/(spriteSize+10)))
+  const gridRows=Math.max(Math.ceil(idleChars.length/gridCols),4)
   const cellWidth=(roomWidth-30)/gridCols
-  const cellHeight=(roomHeight-50)/Math.max(gridRows,4)
+  const cellHeight=(totalHeight-50)/gridRows
 
-  characters.forEach((char,index)=>{
-   const col=index%gridCols
-   const row=Math.floor(index/gridCols)
-   const x=roomStartX+20+col*cellWidth+cellWidth/2
-   const y=roomStartY+35+row*cellHeight+cellHeight/2
+  let idleIndex=0
+  characters.forEach((char)=>{
+   const isWorking=char.status==='working'
+   const isWaiting=char.status==='waiting_approval'
+   let x:number,y:number
+
+   if(isWorking||isWaiting){
+    x=dimensions.width/2
+    y=dimensions.height/2
+   }else{
+    const col=idleIndex%gridCols
+    const row=Math.floor(idleIndex/gridCols)
+    x=roomStartX+20+col*cellWidth+cellWidth/2
+    y=topY+35+row*cellHeight+cellHeight/2
+    idleIndex++
+   }
+
    const existing=positions.get(char.agentId)
    if(existing){
-    if(dimensionsChanged&&char.status!=='working'){
+    if(dimensionsChanged&&!isWorking&&!isWaiting){
      existing.x=x
      existing.y=y
      existing.targetX=x
@@ -137,7 +150,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      targetY:y,
      wanderTimer:0,
      rotation:0,
-     wasWorking:char.status==='working'
+     wasWorking:isWorking
     })
    }
   })
@@ -238,6 +251,64 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx.fillText('[ AGENTS ]',x+width/2,y+15)
  },[])
 
+ const drawUserArea=useCallback((
+  ctx:CanvasRenderingContext2D,
+  x:number,
+  y:number,
+  width:number,
+  height:number,
+  hasWaiting:boolean,
+  frame:number
+)=>{
+  ctx.fillStyle=hasWaiting?NIER_COLORS.backgroundDark : NIER_COLORS.background
+  ctx.fillRect(x,y,width,height)
+
+  ctx.strokeStyle=hasWaiting?NIER_COLORS.accent : NIER_COLORS.primaryDim
+  ctx.lineWidth=hasWaiting?2 : 1
+  ctx.strokeRect(x,y,width,height)
+
+  const cs=8
+  ctx.fillStyle=hasWaiting?NIER_COLORS.accent : NIER_COLORS.primary
+  ctx.fillRect(x,y,cs,2)
+  ctx.fillRect(x,y,2,cs)
+  ctx.fillRect(x+width-cs,y,cs,2)
+  ctx.fillRect(x+width-2,y,2,cs)
+  ctx.fillRect(x,y+height-2,cs,2)
+  ctx.fillRect(x,y+height-cs,2,cs)
+  ctx.fillRect(x+width-cs,y+height-2,cs,2)
+  ctx.fillRect(x+width-2,y+height-cs,2,cs)
+
+  ctx.fillStyle=NIER_COLORS.textMain
+  ctx.font='bold 13px "Courier New", monospace'
+  ctx.textAlign='left'
+  ctx.fillText('USER',x+12,y+20)
+
+  ctx.font='10px "Courier New", monospace'
+  ctx.fillStyle=NIER_COLORS.textDim
+  ctx.fillText('承認待ち',x+12,y+36)
+
+  const indicatorY=y+height-15
+  if(hasWaiting){
+   ctx.shadowColor=NIER_COLORS.accent
+   ctx.shadowBlur=8+Math.sin(frame*0.1)*4
+  }
+  ctx.beginPath()
+  ctx.arc(x+width/2,indicatorY,4,0,Math.PI*2)
+  ctx.fillStyle=hasWaiting?NIER_COLORS.accent : NIER_COLORS.primaryDim
+  ctx.fill()
+  ctx.shadowBlur=0
+
+  if(hasWaiting){
+   const barW=width-30
+   const barX=x+15
+   const barY=y+height-30
+   ctx.fillStyle=NIER_COLORS.primaryDim
+   ctx.fillRect(barX,barY,barW,3)
+   ctx.fillStyle=NIER_COLORS.accent
+   ctx.fillRect(barX,barY,barW*((Math.sin(frame*0.05)+1)/2),3)
+  }
+ },[])
+
  const drawDataLine=useCallback((
   ctx:CanvasRenderingContext2D,
   platformRight:number,
@@ -286,13 +357,14 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   ctx:CanvasRenderingContext2D,
   x:number,
   y:number,
-  text:string
+  text:string,
+  direction:'top-right'|'top-left'|'bottom-right'|'bottom-left'='top-right'
 )=>{
   ctx.font='11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 
   const padding=6
   const lineHeight=14
-  const maxLineWidth=140
+  const maxLineWidth=240
 
   let lines:string[]=[]
   const textWidth=ctx.measureText(text).width
@@ -319,9 +391,22 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   const actualTextWidth=Math.max(...lines.map(l=>ctx.measureText(l).width))
   const bubbleWidth=actualTextWidth+padding*2+4
   const bubbleHeight=lines.length*lineHeight+padding*2
+  const offset=30
 
-  const bubbleX=Math.round(x+35)
-  const bubbleY=Math.round(y-bubbleHeight/2)
+  let bubbleX:number,bubbleY:number
+  if(direction==='top-right'){
+   bubbleX=Math.round(x+offset)
+   bubbleY=Math.round(y-bubbleHeight-15)
+  }else if(direction==='top-left'){
+   bubbleX=Math.round(x-bubbleWidth-offset)
+   bubbleY=Math.round(y-bubbleHeight-15)
+  }else if(direction==='bottom-right'){
+   bubbleX=Math.round(x+offset)
+   bubbleY=Math.round(y+25)
+  }else{
+   bubbleX=Math.round(x-bubbleWidth-offset)
+   bubbleY=Math.round(y+25)
+  }
 
   ctx.fillStyle='#e8e4d8'
   ctx.fillRect(bubbleX,bubbleY,bubbleWidth,bubbleHeight)
@@ -332,9 +417,23 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
   ctx.fillStyle='#e8e4d8'
   ctx.beginPath()
-  ctx.moveTo(bubbleX,y-5)
-  ctx.lineTo(bubbleX-8,y)
-  ctx.lineTo(bubbleX,y+5)
+  if(direction==='top-right'){
+   ctx.moveTo(bubbleX,bubbleY+bubbleHeight)
+   ctx.lineTo(x+15,y-5)
+   ctx.lineTo(bubbleX+15,bubbleY+bubbleHeight)
+  }else if(direction==='top-left'){
+   ctx.moveTo(bubbleX+bubbleWidth,bubbleY+bubbleHeight)
+   ctx.lineTo(x-15,y-5)
+   ctx.lineTo(bubbleX+bubbleWidth-15,bubbleY+bubbleHeight)
+  }else if(direction==='bottom-right'){
+   ctx.moveTo(bubbleX,bubbleY)
+   ctx.lineTo(x+15,y+15)
+   ctx.lineTo(bubbleX+15,bubbleY)
+  }else{
+   ctx.moveTo(bubbleX+bubbleWidth,bubbleY)
+   ctx.lineTo(x-15,y+15)
+   ctx.lineTo(bubbleX+bubbleWidth-15,bubbleY)
+  }
   ctx.closePath()
   ctx.fill()
 
@@ -366,23 +465,29 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    const platformWidth=dimensions.width*PLATFORM_WIDTH
    const roomX=dimensions.width*ROOM_X
    const roomWidth=dimensions.width*ROOM_WIDTH
-   const roomY=dimensions.height*0.08
-   const roomHeight=dimensions.height*0.84
+   const topY=dimensions.height*0.06
+   const totalHeight=dimensions.height*0.88
+
+   const waitingAgentsCount=characters.filter(c=>c.status==='waiting_approval').length
 
    const services=Object.keys(SERVICE_CONFIG)as AIServiceType[]
    const numServices=services.length
-   const platformGap=dimensions.height*0.02
-   const totalGapHeight=(numServices-1)*platformGap
-   const platformHeight=(roomHeight-totalGapHeight)/numServices
+   const totalSlots=numServices+1
+   const platformGap=dimensions.height*0.015
+   const totalGapHeight=(totalSlots-1)*platformGap
+   const platformHeight=(totalHeight-totalGapHeight)/totalSlots
    const platformCenters:Record<AIServiceType,{centerX:number;centerY:number}>={}as any
 
    services.forEach((service,index)=>{
-    const py=roomY+index*(platformHeight+platformGap)
+    const py=topY+index*(platformHeight+platformGap)
     const hasWorkers=characters.some(c=>c.status==='working'&&c.targetService===service)
     platformCenters[service]=drawPlatform(ctx,platformX,py,platformWidth,platformHeight,service,hasWorkers,frame)
    })
 
-   drawRoom(ctx,roomX,roomY,roomWidth,roomHeight)
+   const userAreaY=topY+numServices*(platformHeight+platformGap)
+   drawUserArea(ctx,platformX,userAreaY,platformWidth,platformHeight,waitingAgentsCount>0,frame)
+
+   drawRoom(ctx,roomX,topY,roomWidth,totalHeight)
 
    const positions=positionsRef.current
    const spriteSize=56*characterScale
@@ -392,43 +497,61 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    services.forEach(s=>{ workingPerService[s]=0 })
    const workingIndexMap=new Map<string,number>()
 
+   const waitingIndexMap=new Map<string,number>()
+   let waitingIndex=0
+
    characters.forEach((char)=>{
     if(char.status==='working'&&char.targetService){
      workingIndexMap.set(char.agentId,workingPerService[char.targetService])
      workingPerService[char.targetService]++
+    }else if(char.status==='waiting_approval'){
+     waitingIndexMap.set(char.agentId,waitingIndex)
+     waitingIndex++
     }
    })
 
-   const gridCols=Math.floor((roomWidth-30)/(spriteSize+10))
+   const idleChars=characters.filter(c=>c.status!=='working'&&c.status!=='waiting_approval')
+   const gridCols=Math.max(1,Math.floor((roomWidth-30)/(spriteSize+10)))
    const cellWidth=(roomWidth-30)/gridCols
-   const cellHeight=(roomHeight-50)/Math.max(Math.ceil(characters.length/gridCols),4)
+   const gridRows=Math.max(Math.ceil(idleChars.length/gridCols),4)
+   const cellHeight=(totalHeight-50)/gridRows
 
-   characters.forEach((char,index)=>{
+   let idleIndex=0
+   characters.forEach((char)=>{
     const pos=positions.get(char.agentId)
     if(!pos)return
 
     const isWorking=char.status==='working'
+    const isWaiting=char.status==='waiting_approval'
 
     if(isWorking&&char.targetService){
      const pc=platformCenters[char.targetService]
-     const workingIndex=workingIndexMap.get(char.agentId)||0
-     const totalWorking=workingPerService[char.targetService]
-
-     const lineX=platformX+platformWidth+20
-     const spreadY=totalWorking>1?(workingIndex-(totalWorking-1)/2)*25:0
-     pos.targetX=lineX
-     pos.targetY=pc.centerY+spreadY
+     const workingIdx=workingIndexMap.get(char.agentId)||0
+     const agentSpacing=spriteSize+20
+     pos.targetX=platformX+50+workingIdx*agentSpacing
+     pos.targetY=pc.centerY
      pos.wasWorking=true
      workingAgents.push({char,pos})
-    }else{
-     const col=index%gridCols
-     const row=Math.floor(index/gridCols)
-     pos.targetX=roomX+20+col*cellWidth+cellWidth/2
-     pos.targetY=roomY+35+row*cellHeight+cellHeight/2
+    }else if(isWaiting){
+     const waitIdx=waitingIndexMap.get(char.agentId)||0
+     const waitCols=Math.max(1,Math.floor((platformWidth-30)/(spriteSize+5)))
+     const waitCol=waitIdx%waitCols
+     const waitRow=Math.floor(waitIdx/waitCols)
+     const waitCellW=(platformWidth-30)/waitCols
+     const waitCellH=(platformHeight-45)/Math.max(Math.ceil(waitingAgentsCount/waitCols),1)
+     pos.targetX=platformX+15+waitCol*waitCellW+waitCellW/2
+     pos.targetY=userAreaY+40+waitRow*waitCellH+waitCellH/2
      pos.wasWorking=false
+    }else{
+     const col=idleIndex%gridCols
+     const row=Math.floor(idleIndex/gridCols)
+     pos.targetX=roomX+20+col*cellWidth+cellWidth/2
+     pos.targetY=topY+35+row*cellHeight+cellHeight/2
+     pos.wasWorking=false
+     idleIndex++
     }
 
-    const speed=isWorking?0.08:0.06
+    const speed=isWorking?0.08:(isWaiting?0.07:0.06)
     pos.x+=(pos.targetX-pos.x)*speed
     pos.y+=(pos.targetY-pos.y)*speed
    })
@@ -446,7 +569,55 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    activeServices.forEach((service)=>{
     const pc=platformCenters[service]
     const platformRightEdge=platformX+platformWidth
-    drawDataLine(ctx,platformRightEdge,pc.centerY,roomX,roomY+roomHeight/2,frame)
+    drawDataLine(ctx,platformRightEdge,pc.centerY,roomX,topY+totalHeight/2,frame)
+   })
+
+   type BubbleDir='top-right'|'top-left'|'bottom-right'|'bottom-left'
+   const bubbleOffset=30
+   const defaultBubbleW=260
+   const defaultBubbleH=50
+
+   const getBubbleRect=(
+    x:number,y:number,dir:BubbleDir
+   ):{x1:number;y1:number;x2:number;y2:number}=>{
+    if(dir==='top-right')return{x1:x+bubbleOffset,y1:y-defaultBubbleH-15,x2:x+bubbleOffset+defaultBubbleW,y2:y-15}
+    if(dir==='top-left')return{x1:x-defaultBubbleW-bubbleOffset,y1:y-defaultBubbleH-15,x2:x-bubbleOffset,y2:y-15}
+    if(dir==='bottom-right')return{x1:x+bubbleOffset,y1:y+25,x2:x+bubbleOffset+defaultBubbleW,y2:y+25+defaultBubbleH}
+    return{x1:x-defaultBubbleW-bubbleOffset,y1:y+25,x2:x-bubbleOffset,y2:y+25+defaultBubbleH}
+   }
+
+   const rectsOverlap=(
+    a:{x1:number;y1:number;x2:number;y2:number},
+    b:{x1:number;y1:number;x2:number;y2:number}
+   ):boolean=>{
+    return!(a.x2<b.x1||b.x2<a.x1||a.y2<b.y1||b.y2<a.y1)
+   }
+
+   const workingCharsWithPos=characters
+    .filter(c=>c.status==='working'&&c.request)
+    .map(c=>({char:c,pos:positions.get(c.agentId)!}))
+    .filter(cp=>cp.pos)
+
+   const assignedBubbles:Map<string,{dir:BubbleDir;rect:{x1:number;y1:number;x2:number;y2:number}}>=new Map()
+   const directions:BubbleDir[]=['top-right','bottom-right','bottom-left','top-left']
+
+   workingCharsWithPos.forEach(({char,pos})=>{
+    let chosenDir:BubbleDir='top-right'
+    for(const dir of directions){
+     const candidateRect=getBubbleRect(pos.x,pos.y,dir)
+     let overlaps=false
+     for(const[,assigned]of assignedBubbles){
+      if(rectsOverlap(candidateRect,assigned.rect)){
+       overlaps=true
+       break
+      }
+     }
+     if(!overlaps){
+      chosenDir=dir
+      break
+     }
+    }
+    assignedBubbles.set(char.agentId,{dir:chosenDir,rect:getBubbleRect(pos.x,pos.y,chosenDir)})
    })
 
    characters.forEach((char)=>{
@@ -454,29 +625,29 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     if(!pos)return
 
     const isWorking=char.status==='working'
-    const isActive=char.isActive??isWorking
+    const isWaiting=char.status==='waiting_approval'
+    const isActive=char.isActive??(isWorking||isWaiting)
 
     if(!isActive){
      ctx.globalAlpha=0.4
     }
-    drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking,frame,characterScale)
+    drawPixelCharacter(ctx,pos.x,pos.y,char.agentType,isWorking||isWaiting,frame,characterScale)
     ctx.globalAlpha=1.0
 
     ctx.font='10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
     ctx.fillStyle=isActive?NIER_COLORS.textMain : NIER_COLORS.textDim
     ctx.textAlign='center'
     ctx.fillText(getLabel(char.agentType),pos.x,pos.y+spriteSize/2+12)
-
-    if(isWorking&&char.request){
-     drawSpeechBubble(ctx,pos.x,pos.y,char.request.input)
-    }
    })
 
-   ctx.fillStyle=NIER_COLORS.textDim
-   ctx.font='10px "Courier New", monospace'
-   ctx.textAlign='left'
-   ctx.fillText(`AGENTS: ${characters.length}`,10,dimensions.height-8)
-   ctx.fillText(`ACTIVE: ${workingAgents.length}`,90,dimensions.height-8)
+   characters.forEach((char)=>{
+    if(char.status!=='working'||!char.request)return
+    const pos=positions.get(char.agentId)
+    if(!pos)return
+    const bubbleInfo=assignedBubbles.get(char.agentId)
+    const bubbleDir=bubbleInfo?.dir||'top-right'
+    drawSpeechBubble(ctx,pos.x,pos.y,char.request.input,bubbleDir)
+   })
 
    animationRef.current=requestAnimationFrame(render)
   }
@@ -488,7 +659,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     cancelAnimationFrame(animationRef.current)
    }
   }
- },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawDataLine,drawSpeechBubble,SERVICE_CONFIG,getLabel])
+ },[characters,dimensions,characterScale,drawPlatform,drawRoom,drawUserArea,drawDataLine,drawSpeechBubble,SERVICE_CONFIG,getLabel])
 
  const handleClick=useCallback((e:React.MouseEvent<HTMLCanvasElement>)=>{
   if(!onCharacterClick)return
