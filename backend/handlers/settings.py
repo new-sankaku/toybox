@@ -132,7 +132,7 @@ def register_settings_routes(app:Flask,data_store:TestDataStore):
     def get_agent_definitions():
         return jsonify(AGENT_DEFINITIONS)
 
-    # === System Configuration APIs ===
+
 
     @app.route('/api/config/models',methods=['GET'])
     def get_models_config_api():
@@ -144,8 +144,8 @@ def register_settings_routes(app:Flask,data_store:TestDataStore):
         """特定モデルのトークン料金を取得"""
         pricing = get_token_pricing(model_id)
         return jsonify({
-            "modelId": model_id,
-            "pricing": pricing,
+            "modelId":model_id,
+            "pricing":pricing,
         })
 
     @app.route('/api/config/project-options',methods=['GET'])
@@ -162,3 +162,23 @@ def register_settings_routes(app:Flask,data_store:TestDataStore):
     def get_agents_config_api():
         """エージェント定義設定を取得"""
         return jsonify(get_agent_definitions_config())
+
+    @app.route('/api/projects/<project_id>/auto-approval-rules',methods=['GET'])
+    def get_auto_approval_rules(project_id:str):
+        """プロジェクトの自動承認ルールを取得"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+        rules = data_store.get_auto_approval_rules(project_id)
+        return jsonify({"rules":rules})
+
+    @app.route('/api/projects/<project_id>/auto-approval-rules',methods=['PUT'])
+    def update_auto_approval_rules(project_id:str):
+        """プロジェクトの自動承認ルールを更新"""
+        project = data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+        data = request.json or {}
+        rules = data.get("rules",[])
+        updated_rules = data_store.set_auto_approval_rules(project_id,rules)
+        return jsonify({"rules":updated_rules})

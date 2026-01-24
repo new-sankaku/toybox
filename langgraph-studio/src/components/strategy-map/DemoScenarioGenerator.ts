@@ -55,7 +55,7 @@ interface AgentDef {
  type: AgentType
  name: string
  parentId: string|null
- steps: Array<{action: string; detail: string; duration: number; aiService?: 'claude'|'openai'|'gemini'}>
+ steps: Array<{action: string;detail: string;duration: number;aiService?: 'claude'|'openai'|'gemini'}>
 }
 
 function createAgentWorkflow(
@@ -160,7 +160,7 @@ export function createFullDemoScenario(): DemoScenario {
    { action: ACTIONS.LLM_CALL,detail: 'ゲームコンセプトを生成中',duration: 2500,aiService: 'claude' },
    { action: ACTIONS.VALIDATE,detail: '出力形式をチェック中',duration: 600 },
    { action: ACTIONS.FILE_SAVE,detail: 'concept.md を保存中',duration: 400 },
-  ],
+],
  },t,events)
 
  events.push({
@@ -1278,7 +1278,7 @@ export class DemoRunner {
   scenario: DemoScenario,
   onEvent: (event: DemoEvent)=>void,
   onComplete: ()=>void
- ) {
+) {
   this.scenario=scenario
   this.onEvent=onEvent
   this.onComplete=onComplete

@@ -11,7 +11,7 @@ def register_metrics_routes(app:Flask,data_store:TestDataStore):
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        # Calculate stats from agents
+
         agents = data_store.get_agents_by_project(project_id)
 
         total = len(agents)
@@ -21,11 +21,11 @@ def register_metrics_routes(app:Flask,data_store:TestDataStore):
         failed = len([a for a in agents if a["status"] == "failed"])
 
         return jsonify({
-            "total": total,
-            "processing": processing,
-            "pending": pending,
-            "completed": completed,
-            "failed": failed
+            "total":total,
+            "processing":processing,
+            "pending":pending,
+            "completed":completed,
+            "failed":failed
         })
 
     @app.route('/api/projects/<project_id>/metrics',methods=['GET'])

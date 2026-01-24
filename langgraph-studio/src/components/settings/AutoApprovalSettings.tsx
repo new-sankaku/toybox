@@ -1,15 +1,50 @@
+import{useEffect,useCallback}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{ToggleLeft,ToggleRight,RefreshCw,CheckCircle2,XCircle}from'lucide-react'
+import{ToggleLeft,ToggleRight,RefreshCw,CheckCircle2,XCircle,Save,Download,Loader2}from'lucide-react'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
 import{type ContentCategory,CATEGORY_LABELS}from'@/types/autoApproval'
 
 const CATEGORY_ORDER:ContentCategory[]=['code','image','audio','music','document','system']
 
-export function AutoApprovalSettings():JSX.Element{
- const{rules,setRuleEnabled,setAllEnabled,resetToDefaults,getEnabledCount,getRulesByCategory}=useAutoApprovalStore()
+interface AutoApprovalSettingsProps{
+ projectId?:string
+}
+
+export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.Element{
+ const{
+  rules,
+  setRuleEnabled,
+  setAllEnabled,
+  resetToDefaults,
+  getEnabledCount,
+  getRulesByCategory,
+  syncFromServer,
+  saveToServer,
+  isSyncing,
+  lastSyncError,
+  currentProjectId
+ }=useAutoApprovalStore()
+
+ useEffect(()=>{
+  if(projectId&&projectId!==currentProjectId){
+   syncFromServer(projectId)
+  }
+ },[projectId,currentProjectId,syncFromServer])
+
+ const handleSave=useCallback(()=>{
+  if(projectId){
+   saveToServer(projectId)
+  }
+ },[projectId,saveToServer])
+
+ const handleSync=useCallback(()=>{
+  if(projectId){
+   syncFromServer(projectId)
+  }
+ },[projectId,syncFromServer])
 
  return(
   <div className="space-y-4">
@@ -38,6 +73,27 @@ export function AutoApprovalSettings():JSX.Element{
        </Button>
       </div>
      </div>
+     {projectId&&(
+      <div className="flex items-center justify-between pt-2 border-t border-nier-border-light">
+       <div className="text-nier-caption text-nier-text-light">
+        {lastSyncError?(
+         <span className="text-nier-accent-orange">{lastSyncError}</span>
+):(
+         <span>プロジェクト: {projectId}</span>
+)}
+       </div>
+       <div className="flex gap-2">
+        <Button variant="ghost" size="sm" onClick={handleSync} disabled={isSyncing}>
+         {isSyncing?<Loader2 size={14} className="animate-spin"/>:<Download size={14}/>}
+         <span className="ml-1">読込</span>
+        </Button>
+        <Button variant="primary" size="sm" onClick={handleSave} disabled={isSyncing}>
+         {isSyncing?<Loader2 size={14} className="animate-spin"/>:<Save size={14}/>}
+         <span className="ml-1">保存</span>
+        </Button>
+       </div>
+      </div>
+)}
      <div className="p-3 bg-nier-bg-panel border border-nier-border-light text-nier-caption text-nier-text-light">
       ONにすると、該当カテゴリのCHECKPOINTは人間の確認なしで自動的に承認されます。削除操作はデフォルトでOFFです。
      </div>

@@ -9,6 +9,45 @@ import random
 from asset_scanner import scan_all_testdata,get_testdata_path
 from agent_settings import get_default_quality_settings,QualityCheckConfig
 
+CHECKPOINT_CATEGORY_MAP:Dict[str,str]={
+    "concept_review":"document",
+    "task_review_1":"document",
+    "concept_detail_review":"document",
+    "scenario_review":"document",
+    "world_review":"document",
+    "game_design_review":"document",
+    "tech_spec_review":"document",
+    "task_review_2":"document",
+    "task_review_3":"document",
+    "task_review_4":"document",
+    "character_review":"image",
+    "ui_review":"image",
+    "code_review":"code",
+    "ui_integration_review":"code",
+    "unit_test_review":"code",
+    "integration_test_review":"code",
+}
+
+DEFAULT_AUTO_APPROVAL_RULES:List[Dict[str,Any]]=[
+    {"category":"code","action":"create","enabled":True},
+    {"category":"code","action":"edit","enabled":True},
+    {"category":"code","action":"delete","enabled":False},
+    {"category":"image","action":"create","enabled":True},
+    {"category":"image","action":"edit","enabled":False},
+    {"category":"image","action":"delete","enabled":False},
+    {"category":"audio","action":"create","enabled":True},
+    {"category":"audio","action":"edit","enabled":False},
+    {"category":"audio","action":"delete","enabled":False},
+    {"category":"music","action":"create","enabled":True},
+    {"category":"music","action":"edit","enabled":False},
+    {"category":"music","action":"delete","enabled":False},
+    {"category":"document","action":"create","enabled":True},
+    {"category":"document","action":"edit","enabled":True},
+    {"category":"document","action":"delete","enabled":False},
+    {"category":"system","action":"create","enabled":False},
+    {"category":"system","action":"edit","enabled":False},
+]
+
 
 class TestDataStore:
     def __init__(self):
@@ -55,7 +94,7 @@ class TestDataStore:
             "concept":{
                 "description":"ボールを転がしてゴールを目指すパズル。重力や摩擦をリアルに再現。",
                 "platform":"web",
-                "scope":"mvp",
+                "scope":"demo",
                 "genre":"Puzzle",
                 "targetAudience":"全年齢"
             },
@@ -64,8 +103,9 @@ class TestDataStore:
             "state":{},
             "config":{
                 "maxTokensPerAgent":100000,
-                "enableAutoApproval":False,
-                "llmProvider":"mock"
+                "autoApprovalRules":list(DEFAULT_AUTO_APPROVAL_RULES),
+                "llmProvider":"mock",
+                "llmModel":"mock-standard"
             },
             "createdAt":now.isoformat(),
             "updatedAt":now.isoformat()
@@ -224,7 +264,7 @@ class TestDataStore:
             dep_agent = next((a for a in agents if a["type"] == dep_type),None)
             if not dep_agent or dep_agent["status"] != "completed":
                 return False
-            # Also check if dependency has pending checkpoints
+
             pending_checkpoints = [c for c in self.checkpoints.values()
                                   if c["agentId"] == dep_agent["id"] and c["status"] == "pending"]
             if pending_checkpoints:
@@ -364,11 +404,26 @@ class TestDataStore:
                 if not existing:
                     self._create_agent_checkpoint(agent,cp_type,cp_title)
 
+    def _should_auto_approve(self,project_id:str,cp_type:str)->bool:
+        project = self.projects.get(project_id)
+        if not project:
+            return False
+        rules = project.get("config",{}).get("autoApprovalRules",[])
+        if not rules:
+            return False
+        category = CHECKPOINT_CATEGORY_MAP.get(cp_type,"document")
+        action = "create"
+        for rule in rules:
+            if rule.get("category") == category and rule.get("action") == action:
+                return rule.get("enabled",False)
+        return False
+
     def _create_agent_checkpoint(self,agent:Dict,cp_type:str,title:str):
         checkpoint_id = f"cp-{uuid.uuid4().hex[:8]}"
         now = datetime.now().isoformat()
-
         content = self._generate_checkpoint_content(agent["type"],cp_type)
+        auto_approve = self._should_auto_approve(agent["projectId"],cp_type)
+        category = CHECKPOINT_CATEGORY_MAP.get(cp_type,"document")
 
         checkpoint = {
             "id":checkpoint_id,
@@ -377,29 +432,33 @@ class TestDataStore:
             "type":cp_type,
             "title":title,
             "description":f"{agent['metadata'].get('displayName', agent['type'])}の成果物を確認してください",
+            "contentCategory":category,
             "output":{
                 "type":"document",
                 "format":"markdown",
                 "content":content
             },
-            "status":"pending",
+            "status":"approved" if auto_approve else "pending",
             "feedback":None,
-            "resolvedAt":None,
+            "resolvedAt":now if auto_approve else None,
             "createdAt":now,
             "updatedAt":now
         }
         self.checkpoints[checkpoint_id] = checkpoint
 
-        agent["status"] = "waiting_approval"
-        agent["updatedAt"] = now
-
-        self._add_system_log(agent["projectId"],"info","System",f"チェックポイント作成: {title}")
+        if auto_approve:
+            self._add_system_log(agent["projectId"],"info","System",f"自動承認: {title}")
+        else:
+            agent["status"] = "waiting_approval"
+            agent["updatedAt"] = now
+            self._add_system_log(agent["projectId"],"info","System",f"チェックポイント作成: {title}")
 
         self._emit_event("checkpoint:created",{
             "checkpointId":checkpoint_id,
             "projectId":agent["projectId"],
             "agentId":agent["id"],
-            "checkpoint":checkpoint
+            "checkpoint":checkpoint,
+            "autoApproved":auto_approve
         },agent["projectId"])
 
     def _check_asset_generation(self,agent:Dict,old_progress:int,new_progress:int):
@@ -1565,17 +1624,17 @@ class TestDataStore:
         current_phase = project.get("currentPhase",1)
         project_checkpoints = [c for c in self.checkpoints.values() if c["projectId"] == project_id]
 
-
-        phase1_types = {"concept_review","design_review","scenario_review","character_review","world_review","task_review"}
+        phase1_types = {
+            "concept_review","task_review_1",
+            "concept_detail_review","scenario_review","world_review",
+            "game_design_review","tech_spec_review"
+        }
 
         if current_phase == 1:
-
             phase1_checkpoints = [c for c in project_checkpoints if c["type"] in phase1_types]
             if phase1_checkpoints and all(c["status"] == "approved" for c in phase1_checkpoints):
-
                 project["currentPhase"] = 2
                 project["updatedAt"] = datetime.now().isoformat()
-
 
                 if project_id in self.metrics:
                     self.metrics[project_id]["currentPhase"] = 2
@@ -1821,3 +1880,21 @@ class TestDataStore:
                 return None
             self.uploaded_files[file_id].update(data)
             return self.uploaded_files[file_id]
+
+    def get_auto_approval_rules(self,project_id:str)->List[Dict]:
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return []
+            return project.get("config",{}).get("autoApprovalRules",list(DEFAULT_AUTO_APPROVAL_RULES))
+
+    def set_auto_approval_rules(self,project_id:str,rules:List[Dict])->List[Dict]:
+        with self._lock:
+            project = self.projects.get(project_id)
+            if not project:
+                return []
+            if "config" not in project:
+                project["config"] = {}
+            project["config"]["autoApprovalRules"] = rules
+            project["updatedAt"] = datetime.now().isoformat()
+            return rules

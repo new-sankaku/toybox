@@ -109,7 +109,7 @@ export default function AIView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
  return(
@@ -150,12 +150,12 @@ export default function AIView():JSX.Element{
          <p className="text-nier-small text-nier-text-light">
           サービス: {selectedCharacter.targetService.toUpperCase()}
          </p>
-        )}
+)}
         {selectedCharacter.request&&(
          <p className="text-nier-small text-nier-text-light mt-1 truncate max-w-md">
           タスク: {selectedCharacter.request.input}
          </p>
-        )}
+)}
        </div>
        <div className="flex gap-2 items-center">
         {selectedCharacter.status==='working'&&(
@@ -163,12 +163,12 @@ export default function AIView():JSX.Element{
           <Pause size={14} className="mr-1 animate-pulse"/>
           処理中...
          </span>
-        )}
+)}
         {selectedCharacter.status==='idle'&&(
          <span className="text-nier-small text-nier-text-light">
           待機中
          </span>
-        )}
+)}
         <Button
          size="sm"
          variant="ghost"
@@ -180,7 +180,7 @@ export default function AIView():JSX.Element{
       </div>
      </CardContent>
     </Card>
-   )}
+)}
   </div>
- )
+)
 }

@@ -1,9 +1,52 @@
-import type { AgentType, AgentStatus } from '../../types/agent'
+import type { AgentType,AgentStatus } from '../../types/agent'
 import type { AIServiceId } from './strategyMapConfig'
 
 export interface Vec2 {
   x: number
   y: number
+}
+
+export type AgentTier='orchestrator'|'director'|'leader'|'worker'
+
+export type SummonEffectType='magicCircle'|'warpGate'|'lightning'|'splitMerge'
+
+export interface HierarchyNode {
+  id: string
+  agentType: AgentType
+  tier: AgentTier
+  parentId: string|null
+  children: HierarchyNode[]
+  depth: number
+  x: number
+  y: number
+  frameId: string|null
+}
+
+export interface FrameBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface AgentFrameData {
+  id: string
+  ownerId: string
+  bounds: FrameBounds
+  childIds: string[]
+  overflowCount: number
+}
+
+export interface RoadSegment {
+  id: string
+  start: Vec2
+  end: Vec2
+  isIntersection: boolean
+}
+
+export interface RoadNetwork {
+  segments: RoadSegment[]
+  intersections: Vec2[]
 }
 
 export interface PhysicsBody extends Vec2 {
@@ -15,15 +58,15 @@ export interface MapAgent {
   readonly id: string
   readonly type: AgentType
   readonly status: AgentStatus
-  readonly parentId: string | null
-  readonly currentTask: string | null
-  readonly aiTarget: AIServiceId | null
-  readonly bubble: string | null
-  readonly bubbleType: BubbleType | null
+  readonly parentId: string|null
+  readonly currentTask: string|null
+  readonly aiTarget: AIServiceId|null
+  readonly bubble: string|null
+  readonly bubbleType: BubbleType|null
   readonly spawnProgress: number
 }
 
-export type BubbleType = 'info' | 'question' | 'success' | 'warning'
+export type BubbleType='info'|'question'|'success'|'warning'
 
 export interface AIService {
   readonly id: AIServiceId
@@ -37,12 +80,12 @@ export interface UserNode extends Vec2 {
   readonly queue: readonly string[]
 }
 
-export type ConnectionType =
-  | 'instruction'
-  | 'confirm'
-  | 'delivery'
-  | 'ai-request'
-  | 'user-contact'
+export type ConnectionType=
+  |'instruction'
+  |'confirm'
+  |'delivery'
+  |'ai-request'
+  |'user-contact'
 
 export interface Connection {
   readonly id: string

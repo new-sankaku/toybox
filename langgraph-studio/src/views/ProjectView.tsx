@@ -5,18 +5,21 @@ import{Button}from'@/components/ui/Button'
 import{FileUploader}from'@/components/project/FileUploader'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
+import{useProjectOptionsStore}from'@/stores/projectOptionsStore'
 import{projectApi,fileUploadApi,extractApiError}from'@/services/apiService'
 import type{Project,ProjectStatus}from'@/types/project'
 import type{FileCategory}from'@/types/uploadedFile'
 import{cn}from'@/lib/utils'
 import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload,FileText,Image,Music,File}from'lucide-react'
 import{
- PLATFORM_OPTIONS,
- SCOPE_OPTIONS,
  PROJECT_DEFAULTS,
+ ASSET_SERVICE_OPTIONS,
+ CONTENT_PERMISSION_OPTIONS,
  type Platform,
  type Scope,
- type LLMProvider
+ type LLMProvider,
+ type AssetGenerationOptions,
+ type ContentPermissions
 }from'@/config/projectOptions'
 
 interface SelectedFile{
@@ -43,16 +46,20 @@ interface NewProjectForm{
  platform:Platform
  scope:Scope
  llmProvider:LLMProvider
+ assetGeneration:AssetGenerationOptions
+ contentPermissions:ContentPermissions
 }
 
-const initialForm:NewProjectForm={
+const getInitialForm=(defaults:{platform:string;scope:string;llmProvider:string}):NewProjectForm=>({
  name:'',
  userIdea:'',
  references:'',
- platform:PROJECT_DEFAULTS.platform,
- scope:PROJECT_DEFAULTS.scope,
- llmProvider:PROJECT_DEFAULTS.llmProvider
-}
+ platform:defaults.platform as Platform,
+ scope:defaults.scope as Scope,
+ llmProvider:defaults.llmProvider as LLMProvider,
+ assetGeneration:{...PROJECT_DEFAULTS.assetGeneration},
+ contentPermissions:{...PROJECT_DEFAULTS.contentPermissions}
+})
 
 const statusLabels:Record<ProjectStatus,string>={
  draft:'下書き',
@@ -73,6 +80,8 @@ const statusColors:Record<ProjectStatus,string>={
 export default function ProjectView():JSX.Element{
  const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
  const{setActiveTab}=useNavigationStore()
+ const{platforms,scopes,llmProviders,defaults,fetchOptions}=useProjectOptionsStore()
+ const initialForm=getInitialForm(defaults)
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
  const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
@@ -115,6 +124,7 @@ export default function ProjectView():JSX.Element{
 
  useEffect(()=>{
   fetchProjects()
+  fetchOptions()
  },[])
 
  useEffect(()=>{
@@ -139,7 +149,9 @@ export default function ProjectView():JSX.Element{
      scope:form.scope
     },
     config:{
-     llmProvider:form.llmProvider
+     llmProvider:form.llmProvider,
+     assetGeneration:form.assetGeneration,
+     contentPermissions:form.contentPermissions
     }
    })
 
@@ -190,9 +202,11 @@ export default function ProjectView():JSX.Element{
    name:project.name,
    userIdea:project.concept?.description||'',
    references:'',
-   platform:(project.concept?.platform as Platform)||'web-canvas',
-   scope:(project.concept?.scope as Scope)||'demo',
-   llmProvider:(project.config?.llmProvider as LLMProvider)||'claude'
+   platform:(project.concept?.platform as Platform)||defaults.platform,
+   scope:(project.concept?.scope as Scope)||defaults.scope,
+   llmProvider:(project.config?.llmProvider as LLMProvider)||defaults.llmProvider,
+   assetGeneration:project.config?.assetGeneration||{...PROJECT_DEFAULTS.assetGeneration},
+   contentPermissions:project.config?.contentPermissions||{...PROJECT_DEFAULTS.contentPermissions}
   })
   setIsEditing(true)
  }
@@ -285,9 +299,11 @@ export default function ProjectView():JSX.Element{
    name:currentProject.name,
    userIdea:currentProject.concept?.description||'',
    references:'',
-   platform:(currentProject.concept?.platform as Platform)||'web-canvas',
-   scope:(currentProject.concept?.scope as Scope)||'demo',
-   llmProvider:(currentProject.config?.llmProvider as LLMProvider)||'claude'
+   platform:(currentProject.concept?.platform as Platform)||defaults.platform,
+   scope:(currentProject.concept?.scope as Scope)||defaults.scope,
+   llmProvider:(currentProject.config?.llmProvider as LLMProvider)||defaults.llmProvider,
+   assetGeneration:currentProject.config?.assetGeneration||{...PROJECT_DEFAULTS.assetGeneration},
+   contentPermissions:currentProject.config?.contentPermissions||{...PROJECT_DEFAULTS.contentPermissions}
   })
   setIsEditing(true)
  }
@@ -312,7 +328,9 @@ export default function ProjectView():JSX.Element{
     },
     config:{
      ...currentProject.config,
-     llmProvider:editForm.llmProvider
+     llmProvider:editForm.llmProvider,
+     assetGeneration:editForm.assetGeneration,
+     contentPermissions:editForm.contentPermissions
     }
    })
    setProjects(projects.map(p=>p.id===currentProject.id?updated : p))
@@ -494,7 +512,7 @@ export default function ProjectView():JSX.Element{
            プラットフォーム
           </label>
           <div className="grid grid-cols-3 gap-2">
-           {PLATFORM_OPTIONS.map((opt)=>(
+           {platforms.map((opt)=>(
             <button
              key={opt.value}
              type="button"
@@ -519,7 +537,7 @@ export default function ProjectView():JSX.Element{
            スコープ（ゲームの規模）
           </label>
           <div className="grid grid-cols-4 gap-2">
-           {SCOPE_OPTIONS.map((opt)=>(
+           {scopes.map((opt)=>(
             <button
              key={opt.value}
              type="button"
@@ -548,9 +566,68 @@ export default function ProjectView():JSX.Element{
            onChange={(e)=>setForm({...form,llmProvider:e.target.value as LLMProvider})}
            className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
           >
-           <option value="claude">Claude (推奨)</option>
-           <option value="gpt4">GPT-4</option>
+           {llmProviders.map((opt)=>(
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+))}
           </select>
+         </div>
+
+         {/*Asset Generation Options*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           アセット自動生成
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+           {ASSET_SERVICE_OPTIONS.map((opt)=>(
+            <label
+             key={opt.key}
+             className="flex items-center gap-2 p-2 border border-nier-border-light hover:bg-nier-bg-hover cursor-pointer"
+            >
+             <input
+              type="checkbox"
+              checked={form.assetGeneration[opt.key]}
+              onChange={(e)=>setForm({
+               ...form,
+               assetGeneration:{...form.assetGeneration,[opt.key]:e.target.checked}
+              })}
+              className="w-4 h-4"
+             />
+             <div className="flex-1">
+              <span className="text-nier-small">{opt.label}</span>
+              <span className="text-nier-caption text-nier-text-light ml-2">{opt.service}</span>
+             </div>
+            </label>
+))}
+          </div>
+          <p className="text-nier-caption text-nier-text-light mt-1">
+           使用するにはConfigタブでサービス設定が必要です
+          </p>
+         </div>
+
+         {/*Content Permissions*/}
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           コンテンツ許可
+          </label>
+          <div className="flex gap-4">
+           {CONTENT_PERMISSION_OPTIONS.map((opt)=>(
+            <label
+             key={opt.key}
+             className="flex items-center gap-2 cursor-pointer"
+            >
+             <input
+              type="checkbox"
+              checked={form.contentPermissions[opt.key]}
+              onChange={(e)=>setForm({
+               ...form,
+               contentPermissions:{...form.contentPermissions,[opt.key]:e.target.checked}
+              })}
+              className="w-4 h-4"
+             />
+             <span className="text-nier-small">{opt.label}</span>
+            </label>
+))}
+          </div>
          </div>
 
          {/*Initial Files*/}
@@ -642,7 +719,7 @@ export default function ProjectView():JSX.Element{
              プラットフォーム
             </label>
             <div className="grid grid-cols-3 gap-2">
-             {PLATFORM_OPTIONS.map((opt)=>(
+             {platforms.map((opt)=>(
               <button
                key={opt.value}
                type="button"
@@ -667,7 +744,7 @@ export default function ProjectView():JSX.Element{
              スコープ
             </label>
             <div className="grid grid-cols-4 gap-2">
-             {SCOPE_OPTIONS.map((opt)=>(
+             {scopes.map((opt)=>(
               <button
                key={opt.value}
                type="button"
@@ -682,6 +759,61 @@ export default function ProjectView():JSX.Element{
                <div className="text-nier-small font-medium">{opt.label}</div>
                <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
               </button>
+))}
+            </div>
+           </div>
+
+           {/*Asset Generation Options*/}
+           <div>
+            <label className="block text-nier-small text-nier-text-light mb-2">
+             アセット自動生成
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+             {ASSET_SERVICE_OPTIONS.map((opt)=>(
+              <label
+               key={opt.key}
+               className="flex items-center gap-2 p-2 border border-nier-border-light hover:bg-nier-bg-hover cursor-pointer"
+              >
+               <input
+                type="checkbox"
+                checked={editForm.assetGeneration[opt.key]}
+                onChange={(e)=>setEditForm({
+                 ...editForm,
+                 assetGeneration:{...editForm.assetGeneration,[opt.key]:e.target.checked}
+                })}
+                className="w-4 h-4"
+               />
+               <div className="flex-1">
+                <span className="text-nier-small">{opt.label}</span>
+                <span className="text-nier-caption text-nier-text-light ml-2">{opt.service}</span>
+               </div>
+              </label>
+))}
+            </div>
+           </div>
+
+           {/*Content Permissions*/}
+           <div>
+            <label className="block text-nier-small text-nier-text-light mb-2">
+             コンテンツ許可
+            </label>
+            <div className="flex gap-4">
+             {CONTENT_PERMISSION_OPTIONS.map((opt)=>(
+              <label
+               key={opt.key}
+               className="flex items-center gap-2 cursor-pointer"
+              >
+               <input
+                type="checkbox"
+                checked={editForm.contentPermissions[opt.key]}
+                onChange={(e)=>setEditForm({
+                 ...editForm,
+                 contentPermissions:{...editForm.contentPermissions,[opt.key]:e.target.checked}
+                })}
+                className="w-4 h-4"
+               />
+               <span className="text-nier-small">{opt.label}</span>
+              </label>
 ))}
             </div>
            </div>
@@ -837,11 +969,11 @@ export default function ProjectView():JSX.Element{
               <div className="flex-1 min-w-0">
                <div className="text-nier-small truncate">{file.originalFilename}</div>
                <div className="text-nier-caption text-nier-text-light">
-                {file.category} / {sizeKB}KB
+                {file.category}/{sizeKB}KB
                </div>
               </div>
              </div>
-            )
+)
            })}
           </div>
 )}

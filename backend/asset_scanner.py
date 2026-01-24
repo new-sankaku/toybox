@@ -4,14 +4,14 @@ from datetime import datetime
 from typing import List,Dict,Optional,Set
 from pathlib import Path
 
-from config_loader import get_all_extension_categories, get_scan_directories, get_file_extensions_config
+from config_loader import get_all_extension_categories,get_scan_directories,get_file_extensions_config
 
 
-# キャッシュ用変数
-_extension_categories: Optional[Dict[str, Set[str]]] = None
+
+_extension_categories:Optional[Dict[str,Set[str]]] = None
 
 
-def _get_extension_categories() -> Dict[str, Set[str]]:
+def _get_extension_categories()->Dict[str,Set[str]]:
     """拡張子カテゴリマップを取得（キャッシュ付き）"""
     global _extension_categories
     if _extension_categories is None:
@@ -23,7 +23,7 @@ def get_file_type(filename:str)->str:
     ext = Path(filename).suffix.lower()
     categories = _get_extension_categories()
 
-    for category, extensions in categories.items():
+    for category,extensions in categories.items():
         if ext in extensions:
             return category
 

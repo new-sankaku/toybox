@@ -19,7 +19,7 @@ export default function OperatorPanel():JSX.Element{
      'operator-frame',
      !isActive&&'operator-idle',
      !isActive&&'cursor-pointer'
-    )}
+)}
     onClick={handleIdleClick}
     title={!isActive?'クリックでオペレーター呼び出し':undefined}
    >
@@ -30,7 +30,7 @@ export default function OperatorPanel():JSX.Element{
       <span className={cn(
        'operator-status-dot',
        isActive?'operator-status-online':'operator-status-offline'
-      )}/>
+)}/>
       <span className="operator-status-text">
        {isActive?'ONLINE':'STANDBY'}
       </span>
@@ -52,12 +52,12 @@ export default function OperatorPanel():JSX.Element{
         <path d="M30 55 Q50 65, 70 55 L75 75 Q50 85, 25 75 Z" fill="currentColor" opacity="0.3" stroke="currentColor" strokeWidth="1.5"/>
         <path d="M40 58 L50 68 L60 58" fill="none" stroke="currentColor" strokeWidth="1.5"/>
        </svg>
-      ):(
+):(
        <svg viewBox="0 0 100 100" className="operator-icon-idle">
         <circle cx="50" cy="50" r="25" fill="none" stroke="currentColor" strokeWidth="1" strokeDasharray="4 4"/>
         <circle cx="50" cy="50" r="8" fill="none" stroke="currentColor" strokeWidth="1"/>
        </svg>
-      )}
+)}
      </div>
      {isActive&&<div className="operator-scanline"/>}
     </div>
@@ -71,5 +71,5 @@ export default function OperatorPanel():JSX.Element{
     </div>
    </div>
   </div>
- )
+)
 }

@@ -1,19 +1,19 @@
 {
   "platforms": [
     {
-      "value": "web-canvas",
-      "label": "ブラウザゲーム (Canvas)",
-      "description": "2D/3Dゲーム、HTML5 Canvas+JavaScript"
+      "value": "web",
+      "label": "Webブラウザ",
+      "description": ""
     },
     {
-      "value": "web-dom",
-      "label": "ブラウザゲーム (DOM)",
-      "description": "テキストベース、カードゲーム、HTML+CSS+JavaScript"
+      "value": "desktop",
+      "label": "デスクトップ",
+      "description": ""
     },
     {
-      "value": "electron",
-      "label": "デスクトップアプリ",
-      "description": "Win/Mac/Linux対応、Electron+JavaScript"
+      "value": "mobile",
+      "label": "モバイル",
+      "description": ""
     }
   ],
   "scopes": [
@@ -40,13 +40,30 @@
   ],
   "llmProviders": [
     {
-      "value": "claude",
-      "label": "Claude (推奨)",
-      "recommended": true
+      "value": "anthropic",
+      "label": "Anthropic (Claude)",
+      "recommended": true,
+      "models": ["claude-sonnet-4-20250514", "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"]
     },
     {
-      "value": "gpt4",
-      "label": "GPT-4"
+      "value": "openai",
+      "label": "OpenAI",
+      "models": ["gpt-4o", "gpt-4o-mini", "o1", "o1-mini"]
+    },
+    {
+      "value": "google",
+      "label": "Google (Gemini)",
+      "models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+    },
+    {
+      "value": "xai",
+      "label": "xAI (Grok)",
+      "models": ["grok-3", "grok-3-mini", "grok-2"]
+    },
+    {
+      "value": "mock",
+      "label": "Mock (テスト用)",
+      "models": ["mock-fast", "mock-standard"]
     }
   ],
   "projectTemplates": [
@@ -58,9 +75,10 @@
     {"value": "custom", "label": "カスタム"}
   ],
   "defaults": {
-    "platform": "web-canvas",
+    "platform": "web",
     "scope": "demo",
-    "llmProvider": "claude",
+    "llmProvider": "anthropic",
+    "llmModel": "claude-sonnet-4-20250514",
     "projectTemplate": "rpg"
   }
 }

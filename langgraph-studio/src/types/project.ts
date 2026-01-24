@@ -17,16 +17,30 @@ export interface Project{
 
 export interface GameConcept{
  description:string
- platform:'web'|'desktop'|'mobile'
- scope:'mvp'|'full'
+ platform:string
+ scope:string
  genre?:string
  targetAudience?:string
 }
 
+export interface AssetGenerationConfig {
+ enableImageGeneration?:boolean
+ enableBGMGeneration?:boolean
+ enableVoiceSynthesis?:boolean
+ enableVideoGeneration?:boolean
+}
+
+export interface ContentPermissionsConfig {
+ allowViolence?:boolean
+ allowSexualContent?:boolean
+}
+
 export interface ProjectConfig{
- llmProvider?:'claude'|'gpt4'
+ llmProvider?:string
  maxTokensPerAgent?:number
  enableAssetGeneration?:boolean
+ assetGeneration?:AssetGenerationConfig
+ contentPermissions?:ContentPermissionsConfig
 }
 
 export interface CreateProjectInput{

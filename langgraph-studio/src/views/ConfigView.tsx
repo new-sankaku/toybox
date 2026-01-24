@@ -16,6 +16,7 @@ interface ConfigSection{
 
 const configSections:ConfigSection[]=[
  {id:'ai-providers',label:'AI Provider設定'},
+ {id:'asset-services',label:'アセット生成サービス'},
  {id:'auto-approval',label:'自動承認設定'},
  {id:'api',label:'API設定'},
  {id:'model',label:'モデル設定'},
@@ -47,7 +48,12 @@ export default function ConfigView():JSX.Element{
   outputTokenPrice:0.015,
   letterSpacing:'normal'as'tight'|'normal'|'wide',
   lineHeight:1.0,
-  padding:4
+  padding:4,
+  comfyuiEndpoint:'',
+  sunoApiKey:'',
+  voicevoxEndpoint:'',
+  videoProvider:'runway'as'runway'|'pika'|'stable',
+  videoApiKey:''
  })
 
  const handleLetterSpacingChange=(value:'tight'|'normal'|'wide')=>{
@@ -130,8 +136,114 @@ export default function ConfigView():JSX.Element{
      {/*AI Provider Settings*/}
      {activeSection==='ai-providers'&&<AIProviderSettings/>}
 
+     {/*Asset Services Settings*/}
+     {activeSection==='asset-services'&&(
+      <Card>
+       <CardHeader>
+        <DiamondMarker>アセット生成サービス</DiamondMarker>
+       </CardHeader>
+       <CardContent className="space-y-6">
+        {/*ComfyUI*/}
+        <div className="p-3 border border-nier-border-light">
+         <h4 className="text-nier-small font-medium mb-3">画像生成 (ComfyUI)</h4>
+         <div>
+          <label className="block text-nier-caption text-nier-text-light mb-1">
+           エンドポイントURL
+          </label>
+          <div className="flex gap-2">
+           <input
+            type="text"
+            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+            placeholder="http://localhost:8188"
+            value={config.comfyuiEndpoint}
+            onChange={(e)=>setConfig({...config,comfyuiEndpoint:e.target.value})}
+           />
+           <Button variant="ghost" size="sm">接続テスト</Button>
+          </div>
+         </div>
+        </div>
+
+        {/*Suno AI*/}
+        <div className="p-3 border border-nier-border-light">
+         <h4 className="text-nier-small font-medium mb-3">BGM/効果音 (Suno AI)</h4>
+         <div>
+          <label className="block text-nier-caption text-nier-text-light mb-1">
+           APIキー
+          </label>
+          <div className="flex gap-2">
+           <input
+            type="password"
+            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+            placeholder="suno_..."
+            value={config.sunoApiKey}
+            onChange={(e)=>setConfig({...config,sunoApiKey:e.target.value})}
+           />
+           <Button variant="ghost" size="sm">接続テスト</Button>
+          </div>
+         </div>
+        </div>
+
+        {/*VOICEVOX*/}
+        <div className="p-3 border border-nier-border-light">
+         <h4 className="text-nier-small font-medium mb-3">ボイス合成 (VOICEVOX)</h4>
+         <div>
+          <label className="block text-nier-caption text-nier-text-light mb-1">
+           エンドポイントURL
+          </label>
+          <div className="flex gap-2">
+           <input
+            type="text"
+            className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+            placeholder="http://localhost:50021"
+            value={config.voicevoxEndpoint}
+            onChange={(e)=>setConfig({...config,voicevoxEndpoint:e.target.value})}
+           />
+           <Button variant="ghost" size="sm">接続テスト</Button>
+          </div>
+         </div>
+        </div>
+
+        {/*Video Generation*/}
+        <div className="p-3 border border-nier-border-light">
+         <h4 className="text-nier-small font-medium mb-3">動画生成</h4>
+         <div className="space-y-3">
+          <div>
+           <label className="block text-nier-caption text-nier-text-light mb-1">
+            プロバイダー
+           </label>
+           <select
+            className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+            value={config.videoProvider}
+            onChange={(e)=>setConfig({...config,videoProvider:e.target.value as'runway'|'pika'|'stable'})}
+           >
+            <option value="runway">Runway</option>
+            <option value="pika">Pika</option>
+            <option value="stable">Stable Video</option>
+           </select>
+          </div>
+          <div>
+           <label className="block text-nier-caption text-nier-text-light mb-1">
+            APIキー
+           </label>
+           <div className="flex gap-2">
+            <input
+             type="password"
+             className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+             placeholder="API key..."
+             value={config.videoApiKey}
+             onChange={(e)=>setConfig({...config,videoApiKey:e.target.value})}
+            />
+            <Button variant="ghost" size="sm">接続テスト</Button>
+           </div>
+          </div>
+         </div>
+        </div>
+       </CardContent>
+      </Card>
+)}
+
      {/*Auto Approval Settings*/}
-     {activeSection==='auto-approval'&&<AutoApprovalSettings/>}
+     {activeSection==='auto-approval'&&<AutoApprovalSettings projectId="proj-001"/>}
 
      {/*API Settings*/}
      {activeSection==='api'&&(
@@ -208,12 +320,12 @@ export default function ConfigView():JSX.Element{
           <optgroup label="Anthropic">
            {CLAUDE_MODELS.map(model=>(
             <option key={model.id} value={model.id}>{model.label}</option>
-           ))}
+))}
           </optgroup>
           <optgroup label="OpenAI">
            {OPENAI_MODELS.map(model=>(
             <option key={model.id} value={model.id}>{model.label}</option>
-           ))}
+))}
           </optgroup>
          </select>
         </div>

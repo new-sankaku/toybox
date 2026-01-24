@@ -3,7 +3,7 @@ import type{Project}from'@/types/project'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 
-// 環境変数からURLを取得（未設定の場合はデフォルト値を使用）
+
 const API_BASE_URL=import.meta.env.VITE_API_BASE_URL||'http://localhost:5000'
 
 export interface ApiErrorDetail{
@@ -571,14 +571,104 @@ export interface AIProviderTestResult{
  latency?:number
 }
 
+export interface AIProviderModel{
+ id:string
+ name:string
+ maxTokens:number
+ supportsVision:boolean
+ supportsTools:boolean
+ inputCostPer1k:number|null
+ outputCostPer1k:number|null
+}
+
+export interface AIProviderInfo{
+ id:string
+ name:string
+ models:string[]|AIProviderModel[]
+}
+
+export interface AIChatMessage{
+ role:'system'|'user'|'assistant'
+ content:string
+}
+
+export interface AIChatRequest{
+ provider?:string
+ model?:string
+ messages:AIChatMessage[]
+ maxTokens?:number
+ temperature?:number
+ apiKey?:string
+}
+
+export interface AIChatResponse{
+ content:string
+ model:string
+ usage:{
+  inputTokens:number
+  outputTokens:number
+  totalTokens:number
+ }
+ finishReason:string|null
+ latency:number
+}
+
 export const aiProviderApi={
+ list:async():Promise<AIProviderInfo[]>=>{
+  const response=await api.get('/api/ai-providers')
+  return response.data
+ },
+
+ get:async(providerId:string):Promise<AIProviderInfo>=>{
+  const response=await api.get(`/api/ai-providers/${providerId}`)
+  return response.data
+ },
+
+ getModels:async(providerId:string):Promise<AIProviderModel[]>=>{
+  const response=await api.get(`/api/ai-providers/${providerId}/models`)
+  return response.data
+ },
+
  testConnection:async(providerType:string,config:Record<string,unknown>):Promise<AIProviderTestResult>=>{
   const response=await api.post('/api/ai-providers/test',{providerType,config})
   return response.data
+ },
+
+ chat:async(request:AIChatRequest):Promise<AIChatResponse>=>{
+  const response=await api.post('/api/ai/chat',request)
+  return response.data
+ },
+
+ chatStream:async function*(request:AIChatRequest):AsyncGenerator<{content?:string;done?:boolean;usage?:{inputTokens:number;outputTokens:number};error?:string}>{
+  const response=await fetch(`${API_BASE_URL}/api/ai/chat/stream`,{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify(request)
+  })
+  if(!response.ok){
+   throw new Error(`HTTP ${response.status}`)
+  }
+  const reader=response.body?.getReader()
+  if(!reader)return
+  const decoder=new TextDecoder()
+  let buffer=''
+  while(true){
+   const{done,value}=await reader.read()
+   if(done)break
+   buffer+=decoder.decode(value,{stream:true})
+   const lines=buffer.split('\n')
+   buffer=lines.pop()||''
+   for(const line of lines){
+    if(line.startsWith('data: ')){
+     const data=JSON.parse(line.slice(6))
+     yield data
+    }
+   }
+  }
  }
 }
 
-// === System Configuration APIs ===
+
 
 export interface ModelInfo{
  id:string
@@ -667,6 +757,24 @@ export const configApi={
 
  getAgentsConfig:async():Promise<Record<string,unknown>>=>{
   const response=await api.get('/api/config/agents')
+  return response.data
+ }
+}
+
+export interface AutoApprovalRuleApi{
+ category:string
+ action:string
+ enabled:boolean
+}
+
+export const autoApprovalApi={
+ getRules:async(projectId:string):Promise<{rules:AutoApprovalRuleApi[]}>=>{
+  const response=await api.get(`/api/projects/${projectId}/auto-approval-rules`)
+  return response.data
+ },
+
+ updateRules:async(projectId:string,rules:AutoApprovalRuleApi[]):Promise<{rules:AutoApprovalRuleApi[]}>=>{
+  const response=await api.put(`/api/projects/${projectId}/auto-approval-rules`,{rules})
   return response.data
  }
 }

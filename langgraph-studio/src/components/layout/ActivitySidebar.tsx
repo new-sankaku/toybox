@@ -138,7 +138,7 @@ export default function ActivitySidebar():JSX.Element{
    }
   })
 
-  // Show navigator messages for important changes
+
   if(prevValues.current.checkpoints!==undefined&&pendingCheckpoints>prevValues.current.checkpoints){
    showMessage('オペレーター',`新しいチェックポイントが${pendingCheckpoints-prevValues.current.checkpoints}件追加されました。承認をお願いします。`)
   }
@@ -320,7 +320,7 @@ export default function ActivitySidebar():JSX.Element{
        </div>
        <div className="flex justify-between pt-1 border-t border-nier-border-light mt-1">
         <span className="text-nier-text-light">ファイル合計</span>
-        <span className="text-nier-text-main">{totalAssets}件 / {formatSize(totalProjectSize)}</span>
+        <span className="text-nier-text-main">{totalAssets}件/{formatSize(totalProjectSize)}</span>
        </div>
       </div>
      </div>

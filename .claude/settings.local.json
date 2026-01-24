@@ -4,31 +4,13 @@
       "Bash(xargs:*)",
       "Bash(curl:*)",
       "Bash(dir:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(npm run lint:fix:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run format:*)"
     ]
   },
   "hooks": {
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -Command \"(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\tada.wav').PlaySync()\""
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "powershell -Command \"(New-Object Media.SoundPlayer 'C:\\Windows\\Media\\tada.wav').PlaySync()\""
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "matcher": "",

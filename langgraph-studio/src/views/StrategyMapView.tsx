@@ -1,7 +1,7 @@
 import { useState,useEffect,useRef,useMemo,useCallback } from 'react'
 import { useAgentStore } from '../stores/agentStore'
 import { useProjectStore } from '../stores/projectStore'
-import StrategyMapCanvas from '../components/strategy-map/StrategyMapCanvas'
+import StrategyMapPixi from '../components/strategy-map/StrategyMapPixi'
 import { AI_SERVICES_CONFIG,TIMING,LAYOUT } from '../components/strategy-map/strategyMapConfig'
 import { createFullDemoScenario,DemoRunner } from '../components/strategy-map/DemoScenarioGenerator'
 import type { DemoEvent } from '../components/strategy-map/DemoScenarioGenerator'
@@ -27,7 +27,7 @@ interface DemoAgentState {
  spawnTime: number
 }
 
-function determineBubble(agent: Agent): { text: string|null; type: BubbleType|null } {
+function determineBubble(agent: Agent): { text: string|null;type: BubbleType|null } {
  switch (agent.status) {
   case 'running':
    return agent.currentTask
@@ -46,7 +46,7 @@ function determineBubble(agent: Agent): { text: string|null; type: BubbleType|nu
  }
 }
 
-function determineDemoBubble(agent: DemoAgentState): { text: string|null; type: BubbleType|null } {
+function determineDemoBubble(agent: DemoAgentState): { text: string|null;type: BubbleType|null } {
  switch (agent.status) {
   case 'running':
    return agent.currentTask
@@ -389,7 +389,7 @@ export default function StrategyMapView() {
 
    const mapped=projectAgents.map((agent,index)=>
     convertAgentToMapAgent(agent,index,now,tracker)
-   )
+)
 
    tracker.previousIds=new Set(projectAgents.map(a=>a.id))
 
@@ -410,7 +410,7 @@ export default function StrategyMapView() {
 
    const mapped=agentsList.map((agent,index)=>
     convertDemoAgentToMapAgent(agent,index,now,aiTargets.get(agent.id))
-   )
+)
 
    setMapAgents(mapped)
    setConnections(generateConnections(mapped))
@@ -430,7 +430,7 @@ export default function StrategyMapView() {
      const newProgress=Math.min(1,agent.spawnProgress+0.025)
      return { ...agent,spawnProgress: newProgress }
     })
-   )
+)
   },16)
 
   return ()=>clearInterval(intervalId)
@@ -439,7 +439,7 @@ export default function StrategyMapView() {
  const aiServices=useMemo(
   ()=>positionAIServices(dimensions.width),
   [dimensions.width]
- )
+)
 
  const stats=useMemo(()=>({
   running: mapAgents.filter(a=>a.status==='running').length,
@@ -459,7 +459,7 @@ export default function StrategyMapView() {
       <span className="text-nier-small text-nier-accent-orange font-medium">
        {phaseLabels[currentPhase]||`Phase${currentPhase}`}
       </span>
-     )}
+)}
     </div>
     <div className="flex items-center gap-4">
      <div className="flex gap-4 text-nier-small">
@@ -471,39 +471,39 @@ export default function StrategyMapView() {
      <div className="flex gap-2">
       {!demoMode?(
        <Button size="sm" onClick={startDemo}>
-        <Play className="w-3 h-3 mr-1" />
+        <Play className="w-3 h-3 mr-1"/>
         デモ開始
        </Button>
-      ):(
+):(
        <>
         {demoRunning?(
          <Button size="sm" onClick={pauseDemo}>
-          <Pause className="w-3 h-3 mr-1" />
+          <Pause className="w-3 h-3 mr-1"/>
           一時停止
          </Button>
-        ):(
+):(
          <Button size="sm" onClick={resumeDemo}>
-          <Play className="w-3 h-3 mr-1" />
+          <Play className="w-3 h-3 mr-1"/>
           再開
          </Button>
-        )}
+)}
         <Button size="sm" variant="secondary" onClick={resetDemo}>
-         <RotateCcw className="w-3 h-3 mr-1" />
+         <RotateCcw className="w-3 h-3 mr-1"/>
          リセット
         </Button>
        </>
-      )}
+)}
      </div>
     </div>
    </div>
    <div className="text-nier-caption text-nier-text-light mb-1">
-    ホイール: ズーム / ドラッグ: パン
+    ホイール: ズーム/ドラッグ: パン
    </div>
    <div
     ref={containerRef}
     className="flex-1 border border-nier-border-light rounded overflow-hidden bg-nier-bg-main"
    >
-    <StrategyMapCanvas
+    <StrategyMapPixi
      agents={mapAgents}
      aiServices={aiServices}
      user={userNode}
@@ -513,5 +513,5 @@ export default function StrategyMapView() {
     />
    </div>
   </div>
- )
+)
 }

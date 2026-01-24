@@ -27,5 +27,5 @@ export default function DialogueBar():JSX.Element|null{
    </div>
    <div className="dialogue-hint">Click to close</div>
   </div>
- )
+)
 }

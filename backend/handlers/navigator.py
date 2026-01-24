@@ -1,11 +1,11 @@
-from flask import request, jsonify
+from flask import request,jsonify
 from handlers.websocket import broadcast_navigator_message
 
 
-def register_navigator_routes(app, sio):
+def register_navigator_routes(app,sio):
     """Register navigator message routes."""
 
-    @app.route('/api/navigator/message', methods=['POST'])
+    @app.route('/api/navigator/message',methods=['POST'])
     def send_navigator_message():
         """
         Send a navigator message to clients.
@@ -21,33 +21,33 @@ def register_navigator_routes(app, sio):
         data = request.get_json()
 
         if not data:
-            return jsonify({"error": "Request body required"}), 400
+            return jsonify({"error":"Request body required"}),400
 
-        project_id = data.get('projectId', 'global')
-        speaker = data.get('speaker', 'オペレーター')
+        project_id = data.get('projectId','global')
+        speaker = data.get('speaker','オペレーター')
         text = data.get('text')
-        priority = data.get('priority', 'normal')
+        priority = data.get('priority','normal')
 
         if not text:
-            return jsonify({"error": "text field is required"}), 400
+            return jsonify({"error":"text field is required"}),400
 
-        if priority not in ('low', 'normal', 'high', 'critical'):
-            return jsonify({"error": "Invalid priority. Must be: low, normal, high, critical"}), 400
+        if priority not in ('low','normal','high','critical'):
+            return jsonify({"error":"Invalid priority. Must be: low, normal, high, critical"}),400
 
-        broadcast_navigator_message(sio, project_id, speaker, text, priority)
+        broadcast_navigator_message(sio,project_id,speaker,text,priority)
 
         return jsonify({
-            "success": True,
-            "message": "Navigator message sent",
-            "data": {
-                "projectId": project_id,
-                "speaker": speaker,
-                "text": text,
-                "priority": priority
+            "success":True,
+            "message":"Navigator message sent",
+            "data":{
+                "projectId":project_id,
+                "speaker":speaker,
+                "text":text,
+                "priority":priority
             }
         })
 
-    @app.route('/api/navigator/broadcast', methods=['POST'])
+    @app.route('/api/navigator/broadcast',methods=['POST'])
     def broadcast_system_message():
         """
         Broadcast a system-wide navigator message to all connected clients.
@@ -61,17 +61,17 @@ def register_navigator_routes(app, sio):
         data = request.get_json()
 
         if not data:
-            return jsonify({"error": "Request body required"}), 400
+            return jsonify({"error":"Request body required"}),400
 
         text = data.get('text')
-        priority = data.get('priority', 'high')
+        priority = data.get('priority','high')
 
         if not text:
-            return jsonify({"error": "text field is required"}), 400
+            return jsonify({"error":"text field is required"}),400
 
-        broadcast_navigator_message(sio, 'global', 'システム', text, priority)
+        broadcast_navigator_message(sio,'global','システム',text,priority)
 
         return jsonify({
-            "success": True,
-            "message": "System broadcast sent"
+            "success":True,
+            "message":"System broadcast sent"
         })

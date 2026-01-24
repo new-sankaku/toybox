@@ -242,7 +242,7 @@ export default function CostView():JSX.Element{
            <span className="text-right text-nier-text-light">{formatNumber(group.output)}</span>
            <span className="text-right">${group.cost.toFixed(2)}</span>
           </div>
-         )
+)
         })}
         {(()=>{
          const total=getTotalGeneration(metrics?.generationCounts)
@@ -255,7 +255,7 @@ export default function CostView():JSX.Element{
            <span className="text-right font-medium">{formatNumber(totals.output)}</span>
            <span className="text-right font-medium">${totals.cost.toFixed(2)}</span>
           </div>
-         )
+)
         })()}
        </div>
 )}
@@ -326,7 +326,7 @@ export default function CostView():JSX.Element{
           <span className="text-right">${totals.cost.toFixed(2)}</span>
          </div>
         </>
-       )
+)
       })()}
       <div className="flex justify-between text-nier-small py-0.5 border-t border-nier-border-light mt-1 pt-1">
        <span className="text-nier-text-light">予算</span>
