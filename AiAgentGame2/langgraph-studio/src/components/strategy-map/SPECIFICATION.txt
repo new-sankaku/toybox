@@ -1,0 +1,375 @@
+================================================================================
+戦略マップ (Strategy Map) 実装仕様書
+================================================================================
+
+概要
+----
+エージェントの活動状況を2Dキャンバス上でリアルタイム可視化する。
+エージェント間の階層関係、AIサービスへのリクエスト、ユーザー承認フローを
+パケットアニメーションで表現する。
+
+
+================================================================================
+ファイル構成
+================================================================================
+
+src/components/strategy-map/
+  strategyMapConfig.ts   ... 全定数
+  strategyMapTypes.ts    ... 型定義
+  StrategyMapCanvas.tsx  ... Canvas描画エンジン
+
+src/views/
+  StrategyMapView.tsx    ... Viewコンポーネント（状態管理、データ変換）
+
+
+================================================================================
+定数設定 (strategyMapConfig.ts)
+================================================================================
+
+PHYSICS (物理演算)
+  SPRING_STIFFNESS    0.025   バネ定数（目標への引力）
+  DAMPING             0.92    減衰係数（速度の減衰）
+  MIN_VELOCITY        0.01    最小速度閾値（これ以下は0に）
+  EPSILON             0.001   数値安定性用微小値
+  REPULSION_RADIUS    50      回避検出半径 (px)
+  AVOIDANCE_STRENGTH  0.4     回避強度 (0-1)
+  PARTICLE_FRICTION   0.98    パーティクル摩擦係数
+
+LAYOUT (レイアウト比率・間隔)
+  AI_ZONE_Y               0.12    AIノードのY位置（画面高さ比）
+  USER_ZONE_Y             0.88    ユーザーノードのY位置
+  WORK_ZONE_TOP           0.22    作業エリア上端
+  WORK_ZONE_BOTTOM        0.72    作業エリア下端
+  LEADER_SPACING_MAX      180     リーダー間最大間隔 (px)
+  LEADER_OFFSET_Y         40      リーダーのY基準からのオフセット
+  CHILD_SPREAD_FACTOR     45      子エージェント横展開係数
+  CHILD_SPREAD_MAX        300     子エージェント横展開最大値
+  CHILD_VERTICAL_GAP      70      親子間縦距離
+  CHILD_ROW_GAP           55      子の行間距離
+  APPROVAL_QUEUE_SPACING  55      承認キュー間隔
+  APPROVAL_QUEUE_OFFSET_Y 70      ユーザーノードからの距離
+  AI_ORBIT_RADIUS_BASE    65      AI周囲配置の基本半径
+  AI_ORBIT_RADIUS_STEP    35      層ごとの半径増分
+  AI_ORBIT_ANGLE_SPREAD   PI*0.7  扇形の角度範囲
+  MARGIN_X                100     画面左右マージン
+
+TIMING (タイミング)
+  SPAWN_DURATION_MS       800     スポーン演出時間 (ms)
+  SPAWN_PARTICLE_COUNT    10      スポーン時パーティクル数
+  DESPAWN_PARTICLE_COUNT  6       デスポーン時パーティクル数
+  PACKET_SPAWN_INTERVAL   25      パケット生成間隔 (frame)
+  PACKET_SPEED            0.035   パケット移動速度 (0-1/frame)
+  PACKET_ARRIVAL_PARTICLES 4      パケット到着時パーティクル数
+  PACKET_ARRIVAL_SPREAD   1.8     パケット到着時パーティクル拡散
+  PARTICLE_GRAVITY        0.12    パーティクル重力加速度
+  PARTICLE_INITIAL_LIFE   35      パーティクル寿命 (frame)
+  SPAWN_PARTICLE_SPREAD   3.5     スポーン時パーティクル拡散速度
+  DESPAWN_PARTICLE_SPREAD 2.5     デスポーン時パーティクル拡散速度
+
+ANIMATION (アニメーション速度・振幅)
+  AI_PULSE_SPEED              0.04    AIノードパルス速度
+  AI_PULSE_AMPLITUDE          0.025   AIノードパルス振幅
+  USER_ALERT_SPEED            0.07    ユーザー警告パルス速度
+  USER_ALERT_BASE             0.18    ユーザー警告基本透明度
+  USER_ALERT_AMPLITUDE        0.12    ユーザー警告振幅
+  BUBBLE_FLOAT_SPEED          0.055   吹き出し浮遊速度
+  BUBBLE_FLOAT_AMPLITUDE      1.8     吹き出し浮遊振幅 (px)
+  AGENT_BOB_SPEED             0.08    エージェント揺れ速度
+  AGENT_BOB_AMPLITUDE         1.2     エージェント揺れ振幅 (px)
+  AGENT_WORK_GLOW_SPEED       0.1     稼働グロー速度
+  AGENT_WORK_GLOW_BASE        0.12    稼働グロー基本透明度
+  AGENT_WORK_GLOW_AMPLITUDE   0.08    稼働グロー振幅
+  WAITING_DASH_SPEED          0.25    待機点線アニメ速度
+  PENDING_ZZZ_SPEED           0.05    zzz表示揺れ速度
+  PENDING_ZZZ_AMPLITUDE       1.2     zzz表示揺れ振幅
+  SPAWN_GLOW_SHRINK           0.6     スポーングロー縮小率
+
+SIZES (サイズ)
+  AI_NODE_RADIUS              38      AIノード半径
+  AI_BADGE_RADIUS             13      AIバッジ半径
+  AI_BADGE_OFFSET             0.72    AIバッジ位置（半径比）
+  USER_NODE_RADIUS            34      ユーザーノード半径
+  USER_ALERT_BASE_OFFSET      18      ユーザー警告円基本オフセット
+  USER_ALERT_QUEUE_FACTOR     2.5     キュー数による警告円拡大係数
+  USER_GRADIENT_OFFSET_Y      6       ユーザーグラデーション中心オフセット
+  AGENT_SCALE                 0.85    エージェント描画スケール
+  AGENT_OFFSET_Y              8       エージェント描画Y位置オフセット
+  AGENT_LABEL_OFFSET_Y        19      エージェントラベルY位置
+  AGENT_WORK_GLOW_RADIUS      32      稼働グロー半径
+  AGENT_WAITING_CIRCLE_RADIUS 26      待機円半径
+  AGENT_SPAWN_GLOW_RADIUS     45      スポーングロー半径
+  PENDING_ZZZ_OFFSET_X        14      zzz表示Xオフセット
+  PENDING_ZZZ_OFFSET_Y        14      zzz表示Yオフセット
+  BUBBLE_OFFSET_Y             40      吹き出しY位置オフセット
+  BUBBLE_MAX_WIDTH            140     吹き出し最大幅
+  BUBBLE_HEIGHT               20      吹き出し高さ
+  BUBBLE_PADDING              14      吹き出し内余白
+  BUBBLE_MIN_WIDTH            48      吹き出し最小幅
+  BUBBLE_BORDER_RADIUS        3       吹き出し角丸
+  BUBBLE_TAIL_WIDTH           3       吹き出し尻尾幅
+  BUBBLE_TAIL_HEIGHT          4       吹き出し尻尾高さ
+  PACKET_OUTER_RADIUS         7       パケット外側半径
+  PACKET_INNER_RADIUS         2.5     パケット内側半径
+  WAITING_DASH_ON             4       待機点線ON長さ
+  WAITING_DASH_OFF            3       待機点線OFF長さ
+
+COLORS (カラー)
+  BACKGROUND          #E8E4D4     背景色
+  TEXT_PRIMARY        #454138     主テキスト色
+  TEXT_SECONDARY      #6B6558     副テキスト色
+  INSTRUCTION         #5080B0     指示パケット色（青）
+  CONFIRM             #C49060     確認パケット色（オレンジ）
+  DELIVERY            #60A060     納品パケット色（緑）
+  AI_REQUEST          #9060B0     AIリクエスト色（紫）
+  USER_CONTACT        #B05050     ユーザー通信色（赤）
+  USER_NODE_INNER     #C85858     ユーザーノード内側
+  USER_NODE_OUTER     #A04848     ユーザーノード外側
+  USER_NODE_BORDER    #803838     ユーザーノード境界
+  SPAWN_GLOW          rgba(255,240,180,0.7)   スポーングロー
+  SPAWN_GLOW_END      rgba(255,240,180,0)     スポーングロー終端
+  SPAWN_PARTICLE      #FFD080     スポーンパーティクル色
+  DESPAWN_PARTICLE    #888888     デスポーンパーティクル色
+  BUBBLE_DEFAULT_BG       #F8F6F0     吹き出し背景（通常）
+  BUBBLE_DEFAULT_BORDER   #454138     吹き出し境界（通常）
+  BUBBLE_SUCCESS_BG       #E6F4E6     吹き出し背景（成功）
+  BUBBLE_SUCCESS_BORDER   #5A9A5A     吹き出し境界（成功）
+  BUBBLE_QUESTION_BG      #FFF6E6     吹き出し背景（質問）
+  BUBBLE_QUESTION_BORDER  #C49060     吹き出し境界（質問）
+  BUBBLE_WARNING_BG       #FFE8E8     吹き出し背景（警告）
+  BUBBLE_WARNING_BORDER   #B05050     吹き出し境界（警告）
+
+ZOOM (ズーム)
+  MIN   0.35    最小倍率
+  MAX   2.8     最大倍率
+  STEP  0.07    ホイール1回の変化率
+
+AI_SERVICES_CONFIG (AIサービス定義)
+  claude    Claude    #D97706
+  openai    OpenAI    #10B981
+  gemini    Gemini    #3B82F6
+
+
+================================================================================
+型定義 (strategyMapTypes.ts)
+================================================================================
+
+Vec2
+  x: number
+  y: number
+
+PhysicsBody extends Vec2
+  vx: number   速度X
+  vy: number   速度Y
+
+AgentPositionState extends PhysicsBody
+  targetX: number   目標X
+  targetY: number   目標Y
+
+MapAgent
+  id: string
+  type: AgentType
+  status: AgentStatus
+  parentId: string | null
+  currentTask: string | null
+  aiTarget: AIServiceId | null
+  bubble: string | null
+  bubbleType: BubbleType | null
+  spawnProgress: number (0-1)
+
+AIService
+  id: AIServiceId
+  name: string
+  color: string
+  x: number
+  y: number
+
+UserNode extends Vec2
+  queue: string[]   承認待ちエージェントIDリスト
+
+ConnectionType
+  'instruction'   リーダー→ワーカー指示
+  'confirm'       ワーカー→リーダー確認
+  'delivery'      ワーカー→リーダー納品
+  'ai-request'    エージェント→AIサービス
+  'user-contact'  エージェント→ユーザー
+
+Connection
+  id: string
+  fromId: string
+  toId: string
+  type: ConnectionType
+  active: boolean
+
+Particle extends PhysicsBody
+  life: number      残り寿命
+  maxLife: number   初期寿命
+  color: string
+  size: number
+
+DataPacket
+  id: string
+  fromX, fromY: number   始点
+  toX, toY: number       終点
+  color: string
+  progress: number (0-1)
+
+BubbleType
+  'info' | 'question' | 'success' | 'warning'
+
+
+================================================================================
+計算ロジック
+================================================================================
+
+[エージェント位置決定] computeAgentTarget(agent, allAgents, positions, aiServices, user, width, height)
+
+優先順位:
+1. status === 'waiting_approval'
+   → ユーザーノード上部に横一列で配置
+   → y = USER_ZONE_Y * height - APPROVAL_QUEUE_OFFSET_Y
+   → x = user.x を中心に APPROVAL_QUEUE_SPACING 間隔で配列
+
+2. aiTarget !== null && status === 'running'
+   → AIサービスノードの周囲に扇状配置
+   → 同じAIを使用中のエージェント数でインデックス計算
+   → 角度 = PI/2 を中心に AI_ORBIT_ANGLE_SPREAD の範囲で分散
+   → 半径 = AI_ORBIT_RADIUS_BASE + (層番号 * AI_ORBIT_RADIUS_STEP)
+   → 6体ごとに層を増やす
+
+3. parentId !== null
+   → 親エージェントの下にグリッド配置
+   → 6列、行間 CHILD_ROW_GAP
+   → 横幅 = min(count * CHILD_SPREAD_FACTOR, CHILD_SPREAD_MAX)
+
+4. それ以外（リーダー）
+   → 画面中央上部に横並び
+   → y = WORK_ZONE_TOP * height + LEADER_OFFSET_Y
+   → x = 中央から LEADER_SPACING_MAX 間隔で配列
+
+
+[障害物回避] findAvoidanceDirection(positions, currentId, pos, dirX, dirY)
+
+1. 進行方向前方の全エージェントをスキャン
+2. 距離の二乗で比較（sqrt削減）
+3. 条件: distSq < (REPULSION_RADIUS * 2)² かつ dotProduct > 0
+4. 最も近い障害物を選択
+5. 外積で回避方向（左/右）を決定:
+   cross = dirX * toObsY - dirY * toObsX
+   sign = cross >= 0 ? 1 : -1
+6. 垂直方向を計算: perp = (-toObsY, toObsX)
+7. 新方向 = dir * (1 - AVOIDANCE_STRENGTH) + perp * sign * AVOIDANCE_STRENGTH
+8. 正規化して返却
+
+
+[物理シミュレーション] updatePhysics(positions, id, pos)
+
+毎フレーム実行:
+  dx = targetX - x
+  dy = targetY - y
+  dist = sqrt(dx² + dy²)
+
+  if dist < 1:
+    減衰のみ適用して終了
+
+  dir = (dx/dist, dy/dist)
+  adjustedDir = findAvoidanceDirection(...)
+
+  vx += adjustedDir.x * dist * SPRING_STIFFNESS
+  vy += adjustedDir.y * dist * SPRING_STIFFNESS
+  vx *= DAMPING
+  vy *= DAMPING
+
+  if |vx| < MIN_VELOCITY: vx = 0
+  if |vy| < MIN_VELOCITY: vy = 0
+
+  x += vx
+  y += vy
+
+
+[パーティクル更新] updateParticles()
+
+毎フレーム:
+  x += vx
+  y += vy
+  vy += PARTICLE_GRAVITY
+  vx *= PARTICLE_FRICTION
+  life--
+  life <= 0 で削除
+
+
+[パケット更新] updatePackets()
+
+毎フレーム:
+  progress += PACKET_SPEED
+  progress >= 1 で到着パーティクル生成して削除
+
+
+================================================================================
+描画順序
+================================================================================
+
+1. 背景塗りつぶし (COLORS.BACKGROUND)
+2. ズーム・パン変換適用
+3. パケット描画
+4. AIサービスノード描画（グロー → 本体 → 名前 → バッジ）
+5. ユーザーノード描画（警告円 → グラデーション円 → テキスト）
+6. エージェント描画（Y座標でソート、手前から奥へ）
+   - スポーングロー
+   - 稼働グロー (running)
+   - 待機点線円 (waiting_approval)
+   - ピクセルキャラクター
+   - ラベル
+   - zzz表示 (pending)
+   - 吹き出し
+7. パーティクル描画
+
+
+================================================================================
+状態管理 (StrategyMapView)
+================================================================================
+
+入力:
+  agents: Agent[]        ... agentStoreから取得
+  currentProject         ... projectStoreから取得
+
+状態:
+  dimensions             ... コンテナサイズ
+  mapAgents: MapAgent[]  ... 描画用に変換したエージェント
+  connections            ... アクティブな接続
+  userNode               ... ユーザーノード位置とキュー
+
+変換処理:
+  Agent → MapAgent
+    - spawnProgress計算（経過時間 / SPAWN_DURATION_MS）
+    - bubble/bubbleType決定（statusに基づく）
+    - aiTarget決定（typeのハッシュ + index でAIサービス割当）
+
+接続生成:
+  parentIdあり → instruction/confirm/delivery（statusに応じて方向決定）
+  aiTargetあり && running → ai-request
+  waiting_approval → user-contact
+
+
+================================================================================
+インタラクション
+================================================================================
+
+ズーム:
+  onWheel: zoom *= (deltaY > 0 ? 1-STEP : 1+STEP)
+  範囲: ZOOM.MIN - ZOOM.MAX
+
+パン:
+  onMouseDown: ドラッグ開始、開始位置記録
+  onMouseMove: pan = clientPos - dragStart
+  onMouseUp: ドラッグ終了
+
+
+================================================================================
+パフォーマンス考慮
+================================================================================
+
+- 距離比較は二乗で行い、必要時のみsqrt
+- AIカウントは1回のループでMap集計
+- ソートはY座標のみ抽出した軽量配列で実行
+- 全定数は as const で型安全かつ最適化
+- グラデーションは毎フレーム再生成（キャッシュ困難のため許容）
