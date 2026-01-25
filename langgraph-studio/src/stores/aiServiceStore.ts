@@ -25,6 +25,7 @@ interface AIServiceState{
  loading:boolean
  error:string|null
  providerConfigs:AIProviderConfig[]
+ originalProviderConfigs:AIProviderConfig[]
  currentProjectId:string|null
  providerLoading:boolean
  fetchServices:()=>Promise<void>
@@ -46,6 +47,8 @@ interface AIServiceState{
  getEnabledProviderConfigs:()=>AIProviderConfig[]
  resetProviderConfigs:()=>void
  buildDefaultProviderConfigs:()=>AIProviderConfig[]
+ hasProviderChanges:()=>boolean
+ isProviderFieldChanged:(id:string,field:string)=>boolean
 }
 
 const DEFAULT_SERVICES:Record<AIServiceType,AIServiceConfig>={
@@ -66,6 +69,7 @@ export const useAIServiceStore=create<AIServiceState>()(
    loading:false,
    error:null,
    providerConfigs:[],
+   originalProviderConfigs:[],
    currentProjectId:null,
    providerLoading:false,
 
@@ -228,15 +232,16 @@ export const useAIServiceStore=create<AIServiceState>()(
     try{
      const serverConfigs=await projectSettingsApi.getAIProviders(projectId)
      if(serverConfigs&&Array.isArray(serverConfigs)&&serverConfigs.length>0){
-      set({providerConfigs:serverConfigs as AIProviderConfig[],currentProjectId:projectId})
+      const configs=serverConfigs as AIProviderConfig[]
+      set({providerConfigs:configs,originalProviderConfigs:JSON.parse(JSON.stringify(configs)),currentProjectId:projectId})
      }else{
       const defaults=get().buildDefaultProviderConfigs()
-      set({providerConfigs:defaults,currentProjectId:projectId})
+      set({providerConfigs:defaults,originalProviderConfigs:JSON.parse(JSON.stringify(defaults)),currentProjectId:projectId})
      }
     }catch(error){
      console.error('Failed to load provider configs:',error)
      const defaults=get().buildDefaultProviderConfigs()
-     set({providerConfigs:defaults,currentProjectId:projectId})
+     set({providerConfigs:defaults,originalProviderConfigs:JSON.parse(JSON.stringify(defaults)),currentProjectId:projectId})
     }finally{
      set({providerLoading:false})
     }
@@ -245,6 +250,8 @@ export const useAIServiceStore=create<AIServiceState>()(
    saveProviderConfigs:async(projectId:string)=>{
     try{
      await projectSettingsApi.updateAIProviders(projectId,get().providerConfigs)
+     const configs=get().providerConfigs
+     set({originalProviderConfigs:JSON.parse(JSON.stringify(configs))})
     }catch(error){
      console.error('Failed to save provider configs:',error)
     }
@@ -281,6 +288,19 @@ export const useAIServiceStore=create<AIServiceState>()(
    resetProviderConfigs:()=>{
     const defaults=get().buildDefaultProviderConfigs()
     set({providerConfigs:defaults})
+   },
+
+   hasProviderChanges:()=>{
+    const{providerConfigs,originalProviderConfigs}=get()
+    return JSON.stringify(providerConfigs)!==JSON.stringify(originalProviderConfigs)
+   },
+
+   isProviderFieldChanged:(id,field)=>{
+    const{providerConfigs,originalProviderConfigs}=get()
+    const current=providerConfigs.find(p=>p.id===id)
+    const original=originalProviderConfigs.find(p=>p.id===id)
+    if(!current||!original)return false
+    return(current as Record<string,unknown>)[field]!==(original as Record<string,unknown>)[field]
    }
   }),
   {

@@ -19,6 +19,7 @@ from handlers.ai_service import register_ai_service_routes
 from handlers.language import register_language_routes
 from handlers.navigator import register_navigator_routes
 from handlers.project_settings import register_project_settings_routes
+from handlers.brushup import register_brushup_routes
 from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
@@ -72,6 +73,7 @@ def create_app():
     register_ai_service_routes(app)
     register_language_routes(app)
     register_project_settings_routes(app,data_store)
+    register_brushup_routes(app,data_store,sio)
 
     @app.route('/health')
     def health():

@@ -8,6 +8,7 @@ import{autoApprovalApi}from'@/services/apiService'
 
 interface AutoApprovalState{
  rules:AutoApprovalRule[]
+ originalRules:AutoApprovalRule[]
  projectId:string|null
  loading:boolean
  setRuleEnabled:(category:ContentCategory,enabled:boolean)=>void
@@ -16,10 +17,13 @@ interface AutoApprovalState{
  getEnabledCount:()=>number
  loadFromServer:(projectId:string)=>Promise<void>
  saveToServer:()=>Promise<void>
+ hasChanges:()=>boolean
+ isRuleChanged:(category:ContentCategory)=>boolean
 }
 
 export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
  rules:[...DEFAULT_AUTO_APPROVAL_RULES],
+ originalRules:[...DEFAULT_AUTO_APPROVAL_RULES],
  projectId:null,
  loading:false,
 
@@ -58,7 +62,7 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
      enabled:serverRule?.enabled??defaultRule.enabled
     }
    })
-   set({rules:mergedRules,loading:false})
+   set({rules:mergedRules,originalRules:JSON.parse(JSON.stringify(mergedRules)),loading:false})
   }catch(error){
    console.error('Failed to load auto-approval rules:',error)
    set({loading:false})
@@ -73,8 +77,21 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
     category:r.category,
     enabled:r.enabled
    })))
+   set({originalRules:JSON.parse(JSON.stringify(rules))})
   }catch(error){
    console.error('Failed to save auto-approval rules:',error)
   }
+ },
+
+ hasChanges:()=>{
+  const{rules,originalRules}=get()
+  return JSON.stringify(rules)!==JSON.stringify(originalRules)
+ },
+
+ isRuleChanged:(category)=>{
+  const{rules,originalRules}=get()
+  const current=rules.find(r=>r.category===category)
+  const original=originalRules.find(r=>r.category===category)
+  return current?.enabled!==original?.enabled
  }
 }))

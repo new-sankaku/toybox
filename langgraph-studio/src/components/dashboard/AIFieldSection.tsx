@@ -1,6 +1,7 @@
 import{useMemo,useCallback,useState}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
+import{Modal}from'@/components/ui/Modal'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
@@ -155,31 +156,18 @@ export default function AIFieldSection():JSX.Element|null{
     </CardContent>
    </Card>
 
-   {selectedCharacter&&(
-    <Card className="mt-3">
-     <CardContent>
+   <Modal
+    isOpen={!!selectedCharacter}
+    onClose={()=>setSelectedCharacter(null)}
+    title="エージェント詳細"
+    size="md"
+   >
+    {selectedCharacter&&(
+     <div className="space-y-4">
       <div className="flex items-start justify-between">
-       <div>
-        <h3 className="text-nier-body font-medium text-nier-text-main">
-         {getLabel(selectedCharacter.agentType)}
-        </h3>
-        <p className="text-nier-small text-nier-text-light mt-1">
-         ステータス: {selectedCharacter.status==='idle'?'待機中':
-          selectedCharacter.status==='working'?'作業中':
-           selectedCharacter.status==='waiting_approval'?'承認待ち':
-            selectedCharacter.status==='departing'?'移動中':'帰還中'}
-        </p>
-        {selectedCharacter.targetService&&(
-         <p className="text-nier-small text-nier-text-light">
-          サービス: {selectedCharacter.targetService.toUpperCase()}
-         </p>
-)}
-        {selectedCharacter.request&&(
-         <p className="text-nier-small text-nier-text-light mt-1 truncate max-w-md">
-          タスク: {selectedCharacter.request.input}
-         </p>
-)}
-       </div>
+       <h3 className="text-nier-body font-medium text-nier-text-main">
+        {getLabel(selectedCharacter.agentType)}
+       </h3>
        <div className="flex gap-2 items-center">
         {selectedCharacter.status==='working'&&(
          <span className="text-nier-small text-nier-accent-orange flex items-center">
@@ -187,7 +175,7 @@ export default function AIFieldSection():JSX.Element|null{
           処理中...
          </span>
 )}
-        {selectedCharacter.status==='idle'&&selectedCharacter.request?.status==='waiting'&&(
+        {selectedCharacter.status==='waiting_approval'&&(
          <span className="text-nier-small text-nier-accent-orange">
           承認待ち
          </span>
@@ -199,9 +187,32 @@ export default function AIFieldSection():JSX.Element|null{
 )}
        </div>
       </div>
-     </CardContent>
-    </Card>
+      <div className="grid grid-cols-2 gap-4">
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">ステータス</span>
+        <span className="text-nier-small text-nier-text-main">
+         {selectedCharacter.status==='idle'?'待機中':
+          selectedCharacter.status==='working'?'作業中':
+           selectedCharacter.status==='waiting_approval'?'承認待ち':
+            selectedCharacter.status==='departing'?'移動中':'帰還中'}
+        </span>
+       </div>
+       {selectedCharacter.targetService&&(
+        <div>
+         <span className="text-nier-caption text-nier-text-light block mb-1">サービス</span>
+         <span className="text-nier-small text-nier-text-main">{selectedCharacter.targetService.toUpperCase()}</span>
+        </div>
 )}
+      </div>
+      {selectedCharacter.request&&(
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">タスク</span>
+        <span className="text-nier-small text-nier-text-main">{selectedCharacter.request.input}</span>
+       </div>
+)}
+     </div>
+)}
+   </Modal>
   </>
 )
 }

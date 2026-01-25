@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/scripts/log-tool-use.sh"
+            "command": "node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
           }
         ]
       }

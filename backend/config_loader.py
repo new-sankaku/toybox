@@ -339,3 +339,12 @@ def get_agent_display_names_from_yaml()->Dict[str,str]:
     config = get_agents_config()
     agents = config.get("agents",{})
     return {k:v.get("label","") for k,v in agents.items()}
+
+
+def get_brushup_presets_config()->Dict[str,Any]:
+    return load_yaml_config("brushup_presets.yaml")
+
+
+def get_brushup_presets()->List[Dict[str,Any]]:
+    config = get_brushup_presets_config()
+    return config.get("presets",[])

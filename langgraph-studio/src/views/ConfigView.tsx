@@ -32,13 +32,17 @@ export default function ConfigView():JSX.Element{
  const{saveToServer:saveCostSettings,resetToDefaults:resetCostSettings}=useCostSettingsStore()
  const[activeSection,setActiveSection]=useState('ai-services')
  const[outputDir,setOutputDir]=useState('./output')
+ const[originalOutputDir,setOriginalOutputDir]=useState('./output')
  const[saving,setSaving]=useState(false)
+ const outputDirChanged=outputDir!==originalOutputDir
 
  const loadOutputSettings=useCallback(async()=>{
   if(!currentProject)return
   try{
    const settings=await projectSettingsApi.getOutputSettings(currentProject.id)
-   setOutputDir(settings.default_dir||'./output')
+   const dir=settings.default_dir||'./output'
+   setOutputDir(dir)
+   setOriginalOutputDir(dir)
   }catch(error){
    console.error('Failed to load output settings:',error)
   }
@@ -52,26 +56,17 @@ export default function ConfigView():JSX.Element{
   if(!currentProject)return
   setSaving(true)
   try{
-   switch(activeSection){
-    case'ai-services':
-     await saveProviderConfigs(currentProject.id)
-     break
-    case'auto-approval':
-     await saveAutoApproval()
-     break
-    case'cost':
-     await saveCostSettings(currentProject.id)
-     break
-    case'output':
-     await projectSettingsApi.updateOutputSettings(currentProject.id,{default_dir:outputDir})
-     break
-   }
+   await saveProviderConfigs(currentProject.id)
+   await saveAutoApproval()
+   await saveCostSettings(currentProject.id)
+   await projectSettingsApi.updateOutputSettings(currentProject.id,{default_dir:outputDir})
+   setOriginalOutputDir(outputDir)
   }catch(error){
    console.error('Failed to save settings:',error)
   }finally{
    setSaving(false)
   }
- },[currentProject,activeSection,saveProviderConfigs,saveAutoApproval,saveCostSettings,outputDir])
+ },[currentProject,saveProviderConfigs,saveAutoApproval,saveCostSettings,outputDir])
 
  const handleReset=useCallback(()=>{
   switch(activeSection){
@@ -156,13 +151,16 @@ export default function ConfigView():JSX.Element{
        </CardHeader>
        <CardContent>
         <div>
-         <label className="block text-nier-caption text-nier-text-light mb-1">
+         <label className={cn('block text-nier-caption mb-1',outputDirChanged?'text-nier-accent-red':'text-nier-text-light')}>
           出力ディレクトリ
          </label>
          <div className="flex gap-2">
           <input
            type="text"
-           className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+           className={cn(
+            'flex-1 bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark',
+            outputDirChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
+)}
            value={outputDir}
            onChange={(e)=>setOutputDir(e.target.value)}
           />

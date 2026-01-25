@@ -42,9 +42,11 @@ interface ServiceCostCardProps{
 }
 
 function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
- const{settings,pricing,updateServiceLimit}=useCostSettingsStore()
+ const{settings,pricing,updateServiceLimit,isServiceFieldChanged}=useCostSettingsStore()
  const service=settings.services[serviceType]
  const{master}=useAIServiceStore()
+ const enabledChanged=isServiceFieldChanged(serviceType,'enabled')
+ const limitChanged=isServiceFieldChanged(serviceType,'monthlyLimit')
 
  const getProviderPricing=()=>{
   if(!pricing||!master)return[]
@@ -67,20 +69,20 @@ function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
   <Card>
    <div className="flex items-center justify-between px-4 py-3">
     <div className="flex items-center gap-3">
-     <DollarSign size={16} className="text-nier-text-light"/>
-     <span className="text-nier-small text-nier-text-main">{label}</span>
+     <DollarSign size={16} className={enabledChanged?'text-nier-accent-red':'text-nier-text-light'}/>
+     <span className={cn('text-nier-small',enabledChanged?'text-nier-accent-red':'text-nier-text-main')}>{label}</span>
     </div>
     <button
      onClick={()=>updateServiceLimit(serviceType,{enabled:!service?.enabled})}
      className="p-1 rounded transition-colors focus:outline-none"
     >
      {service?.enabled?(
-      <div className="flex items-center gap-1 text-nier-accent-green">
+      <div className={cn('flex items-center gap-1',enabledChanged?'text-nier-accent-red':'text-nier-accent-green')}>
        <ToggleRight size={20}/>
        <span className="text-nier-caption">有効</span>
       </div>
 ):(
-      <div className="flex items-center gap-1 text-nier-text-light">
+      <div className={cn('flex items-center gap-1',enabledChanged?'text-nier-accent-red':'text-nier-text-light')}>
        <ToggleLeft size={20}/>
        <span className="text-nier-caption">無効</span>
       </div>
@@ -89,15 +91,16 @@ function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
    </div>
    <CardContent className="border-t border-nier-border-light space-y-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">月額上限 ($)</label>
+     <label className={cn('block text-nier-caption mb-1',limitChanged?'text-nier-accent-red':'text-nier-text-light')}>月額上限 ($)</label>
      <input
       type="number"
       min="0"
       step="1"
       className={cn(
-       'w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small',
+       'w-full bg-nier-bg-panel border px-3 py-2 text-nier-small',
        'focus:outline-none focus:border-nier-border-dark',
-       !service?.enabled&&'opacity-50'
+       !service?.enabled&&'opacity-50',
+       limitChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
 )}
       value={service?.monthlyLimit||0}
       onChange={e=>updateServiceLimit(serviceType,{monthlyLimit:parseFloat(e.target.value)||0})}
@@ -144,9 +147,12 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
   updateGlobalLimit,
   fetchPricing,
   resetToDefaults,
-  loadFromServer
+  loadFromServer,
+  isFieldChanged
  }=useCostSettingsStore()
  const{fetchMaster}=useAIServiceStore()
+ const globalEnabledChanged=isFieldChanged('globalEnabled')
+ const globalLimitChanged=isFieldChanged('globalMonthlyLimit')
 
  useEffect(()=>{
   fetchPricing()
@@ -180,20 +186,20 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
    <Card>
     <div className="flex items-center justify-between px-4 py-3">
      <div className="flex items-center gap-3">
-      <DollarSign size={16} className="text-nier-text-light"/>
-      <span className="text-nier-small text-nier-text-main font-medium">全体コスト上限</span>
+      <DollarSign size={16} className={globalEnabledChanged?'text-nier-accent-red':'text-nier-text-light'}/>
+      <span className={cn('text-nier-small font-medium',globalEnabledChanged?'text-nier-accent-red':'text-nier-text-main')}>全体コスト上限</span>
      </div>
      <button
       onClick={()=>updateGlobalEnabled(!settings.globalEnabled)}
       className="p-1 rounded transition-colors focus:outline-none"
      >
       {settings.globalEnabled?(
-       <div className="flex items-center gap-1 text-nier-accent-green">
+       <div className={cn('flex items-center gap-1',globalEnabledChanged?'text-nier-accent-red':'text-nier-accent-green')}>
         <ToggleRight size={20}/>
         <span className="text-nier-caption">有効</span>
        </div>
 ):(
-       <div className="flex items-center gap-1 text-nier-text-light">
+       <div className={cn('flex items-center gap-1',globalEnabledChanged?'text-nier-accent-red':'text-nier-text-light')}>
         <ToggleLeft size={20}/>
         <span className="text-nier-caption">無効</span>
        </div>
@@ -202,15 +208,16 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
     </div>
     <CardContent className="border-t border-nier-border-light">
      <div>
-      <label className="block text-nier-caption text-nier-text-light mb-1">月額上限 ($)</label>
+      <label className={cn('block text-nier-caption mb-1',globalLimitChanged?'text-nier-accent-red':'text-nier-text-light')}>月額上限 ($)</label>
       <input
        type="number"
        min="0"
        step="1"
        className={cn(
-        'w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small',
+        'w-full bg-nier-bg-panel border px-3 py-2 text-nier-small',
         'focus:outline-none focus:border-nier-border-dark',
-        !settings.globalEnabled&&'opacity-50'
+        !settings.globalEnabled&&'opacity-50',
+        globalLimitChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
 )}
        value={settings.globalMonthlyLimit}
        onChange={e=>updateGlobalLimit(parseFloat(e.target.value)||0)}

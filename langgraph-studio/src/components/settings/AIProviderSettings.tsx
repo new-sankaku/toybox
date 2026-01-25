@@ -24,23 +24,26 @@ interface ProviderCardProps{
  provider:AIProviderConfig
  onUpdate:(updates:Partial<AIProviderConfig>)=>void
  onToggle:()=>void
+ isFieldChanged:(field:string)=>boolean
 }
 
-function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdate:(u:Partial<LLMProviderConfig>)=>void}){
+function LLMProviderForm({provider,onUpdate,isFieldChanged}:{provider:LLMProviderConfig,onUpdate:(u:Partial<LLMProviderConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const[showKey,setShowKey]=useState(false)
  const{master}=useAIServiceStore()
  const providerId=provider.type==='claude'?'anthropic':'openai'
  const providerMaster=master?.providers[providerId]
  const models=providerMaster?.models||[]
+ const changedInputClass='border-nier-accent-red text-nier-accent-red'
+ const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
 
  return(
   <div className="space-y-3">
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">API Key</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('apiKey')?'text-nier-accent-red':'text-nier-text-light')}>API Key</label>
     <div className="flex gap-2">
      <input
       type={showKey?'text':'password'}
-      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('flex-1',baseInputClass,isFieldChanged('apiKey')?changedInputClass:'border-nier-border-light')}
       placeholder="sk-..."
       value={provider.apiKey}
       onChange={e=>onUpdate({apiKey:e.target.value})}
@@ -54,9 +57,9 @@ function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdat
     </div>
    </div>
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">Model</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('model')?'text-nier-accent-red':'text-nier-text-light')}>Model</label>
     <select
-     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     className={cn('w-full',baseInputClass,isFieldChanged('model')?changedInputClass:'border-nier-border-light')}
      value={provider.model}
      onChange={e=>onUpdate({model:e.target.value})}
     >
@@ -64,26 +67,26 @@ function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdat
     </select>
    </div>
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">Endpoint</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
     <input
      type="text"
-     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
      value={provider.endpoint}
      onChange={e=>onUpdate({endpoint:e.target.value})}
     />
    </div>
    <div className="grid grid-cols-2 gap-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Max Tokens</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('maxTokens')?'text-nier-accent-red':'text-nier-text-light')}>Max Tokens</label>
      <input
       type="number"
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('maxTokens')?changedInputClass:'border-nier-border-light')}
       value={provider.maxTokens}
       onChange={e=>onUpdate({maxTokens:parseInt(e.target.value)||4096})}
      />
     </div>
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Temperature: {provider.temperature}</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('temperature')?'text-nier-accent-red':'text-nier-text-light')}>Temperature: {provider.temperature}</label>
      <input
       type="range"
       min="0"
@@ -99,30 +102,32 @@ function LLMProviderForm({provider,onUpdate}:{provider:LLMProviderConfig,onUpdat
 )
 }
 
-function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Partial<ComfyUIConfig>)=>void}){
+function ComfyUIForm({provider,onUpdate,isFieldChanged}:{provider:ComfyUIConfig,onUpdate:(u:Partial<ComfyUIConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const{master}=useAIServiceStore()
  const comfyuiMaster=master?.providers['comfyui']as{samplers?:string[],schedulers?:string[]}|undefined
  const samplers=comfyuiMaster?.samplers||[]
  const schedulers=comfyuiMaster?.schedulers||[]
+ const changedInputClass='border-nier-accent-red text-nier-accent-red'
+ const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
 
  return(
   <div className="space-y-3">
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">Endpoint</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
     <input
      type="text"
-     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
      value={provider.endpoint}
      onChange={e=>onUpdate({endpoint:e.target.value})}
     />
    </div>
    <div className="grid grid-cols-2 gap-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Workflow File</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('workflowFile')?'text-nier-accent-red':'text-nier-text-light')}>Workflow File</label>
      <div className="flex gap-2">
       <input
        type="text"
-       className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+       className={cn('flex-1',baseInputClass,isFieldChanged('workflowFile')?changedInputClass:'border-nier-border-light')}
        value={provider.workflowFile}
        onChange={e=>onUpdate({workflowFile:e.target.value})}
       />
@@ -132,10 +137,10 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
      </div>
     </div>
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Output Dir</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('outputDir')?'text-nier-accent-red':'text-nier-text-light')}>Output Dir</label>
      <input
       type="text"
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('outputDir')?changedInputClass:'border-nier-border-light')}
       value={provider.outputDir}
       onChange={e=>onUpdate({outputDir:e.target.value})}
      />
@@ -143,20 +148,20 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
    </div>
    <div className="grid grid-cols-2 gap-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Steps</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('steps')?'text-nier-accent-red':'text-nier-text-light')}>Steps</label>
      <input
       type="number"
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('steps')?changedInputClass:'border-nier-border-light')}
       value={provider.steps}
       onChange={e=>onUpdate({steps:parseInt(e.target.value)||20})}
      />
     </div>
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">CFG Scale</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('cfgScale')?'text-nier-accent-red':'text-nier-text-light')}>CFG Scale</label>
      <input
       type="number"
       step="0.5"
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('cfgScale')?changedInputClass:'border-nier-border-light')}
       value={provider.cfgScale}
       onChange={e=>onUpdate({cfgScale:parseFloat(e.target.value)||7.0})}
      />
@@ -164,9 +169,9 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
    </div>
    <div className="grid grid-cols-2 gap-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Sampler</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('sampler')?'text-nier-accent-red':'text-nier-text-light')}>Sampler</label>
      <select
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('sampler')?changedInputClass:'border-nier-border-light')}
       value={provider.sampler}
       onChange={e=>onUpdate({sampler:e.target.value})}
      >
@@ -174,9 +179,9 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
      </select>
     </div>
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Scheduler</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('scheduler')?'text-nier-accent-red':'text-nier-text-light')}>Scheduler</label>
      <select
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('scheduler')?changedInputClass:'border-nier-border-light')}
       value={provider.scheduler}
       onChange={e=>onUpdate({scheduler:e.target.value})}
      >
@@ -188,30 +193,33 @@ function ComfyUIForm({provider,onUpdate}:{provider:ComfyUIConfig,onUpdate:(u:Par
 )
 }
 
-function VoicevoxForm({provider,onUpdate}:{provider:VoicevoxConfig,onUpdate:(u:Partial<VoicevoxConfig>)=>void}){
+function VoicevoxForm({provider,onUpdate,isFieldChanged}:{provider:VoicevoxConfig,onUpdate:(u:Partial<VoicevoxConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
+ const changedInputClass='border-nier-accent-red text-nier-accent-red'
+ const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
+
  return(
   <div className="space-y-3">
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">Endpoint</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
     <input
      type="text"
-     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
      value={provider.endpoint}
      onChange={e=>onUpdate({endpoint:e.target.value})}
     />
    </div>
    <div className="grid grid-cols-2 gap-3">
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Speaker ID</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('speakerId')?'text-nier-accent-red':'text-nier-text-light')}>Speaker ID</label>
      <input
       type="number"
-      className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('w-full',baseInputClass,isFieldChanged('speakerId')?changedInputClass:'border-nier-border-light')}
       value={provider.speakerId}
       onChange={e=>onUpdate({speakerId:parseInt(e.target.value)||1})}
      />
     </div>
     <div>
-     <label className="block text-nier-caption text-nier-text-light mb-1">Speed: {provider.speed}</label>
+     <label className={cn('block text-nier-caption mb-1',isFieldChanged('speed')?'text-nier-accent-red':'text-nier-text-light')}>Speed: {provider.speed}</label>
      <input
       type="range"
       min="0.5"
@@ -227,16 +235,19 @@ function VoicevoxForm({provider,onUpdate}:{provider:VoicevoxConfig,onUpdate:(u:P
 )
 }
 
-function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(u:Partial<MusicGeneratorConfig>)=>void}){
+function MusicForm({provider,onUpdate,isFieldChanged}:{provider:MusicGeneratorConfig,onUpdate:(u:Partial<MusicGeneratorConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const[showKey,setShowKey]=useState(false)
+ const changedInputClass='border-nier-accent-red text-nier-accent-red'
+ const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
+
  return(
   <div className="space-y-3">
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">API Key</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('apiKey')?'text-nier-accent-red':'text-nier-text-light')}>API Key</label>
     <div className="flex gap-2">
      <input
       type={showKey?'text':'password'}
-      className="flex-1 bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+      className={cn('flex-1',baseInputClass,isFieldChanged('apiKey')?changedInputClass:'border-nier-border-light')}
       value={provider.apiKey}
       onChange={e=>onUpdate({apiKey:e.target.value})}
      />
@@ -249,10 +260,10 @@ function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(
     </div>
    </div>
    <div>
-    <label className="block text-nier-caption text-nier-text-light mb-1">Endpoint</label>
+    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
     <input
      type="text"
-     className="w-full bg-nier-bg-panel border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
      value={provider.endpoint}
      onChange={e=>onUpdate({endpoint:e.target.value})}
     />
@@ -261,7 +272,7 @@ function MusicForm({provider,onUpdate}:{provider:MusicGeneratorConfig,onUpdate:(
 )
 }
 
-function ProviderCard({provider,onUpdate,onToggle}:ProviderCardProps){
+function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardProps){
  const[expanded,setExpanded]=useState(false)
  const[testing,setTesting]=useState(false)
  const[testResult,setTestResult]=useState<{success:boolean,message:string}|null>(null)
@@ -285,13 +296,13 @@ function ProviderCard({provider,onUpdate,onToggle}:ProviderCardProps){
   switch(provider.type){
    case'claude':
    case'openai':
-    return<LLMProviderForm provider={provider as LLMProviderConfig} onUpdate={onUpdate}/>
+    return<LLMProviderForm provider={provider as LLMProviderConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'comfyui':
-    return<ComfyUIForm provider={provider as ComfyUIConfig} onUpdate={onUpdate}/>
+    return<ComfyUIForm provider={provider as ComfyUIConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'voicevox':
-    return<VoicevoxForm provider={provider as VoicevoxConfig} onUpdate={onUpdate}/>
+    return<VoicevoxForm provider={provider as VoicevoxConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'suno':
-    return<MusicForm provider={provider as MusicGeneratorConfig} onUpdate={onUpdate}/>
+    return<MusicForm provider={provider as MusicGeneratorConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    default:
     return null
   }
@@ -360,7 +371,8 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
   loadProviderConfigs,
   providerLoading,
   fetchMaster,
-  master
+  master,
+  isProviderFieldChanged
  }=useAIServiceStore()
 
  useEffect(()=>{
@@ -414,6 +426,7 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
         provider={provider}
         onUpdate={updates=>updateProviderConfig(provider.id,updates)}
         onToggle={()=>toggleProviderConfig(provider.id)}
+        isFieldChanged={field=>isProviderFieldChanged(provider.id,field)}
        />
 ))}
      </div>

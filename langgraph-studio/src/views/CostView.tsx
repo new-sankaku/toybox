@@ -88,13 +88,21 @@ export default function CostView():JSX.Element{
  },[agentServiceMap])
 
  const calculateCost=useCallback((input:number,output:number):number=>{
-  if(!pricing)return 0
+  console.log('[CostView] calculateCost:',{input,output,pricing,models:pricing?.models})
+  if(!pricing){
+   console.log('[CostView] pricing is null')
+   return 0
+  }
   const defaultModel=Object.keys(pricing.models)[0]
-  if(!defaultModel)return 0
+  if(!defaultModel){
+   console.log('[CostView] no default model')
+   return 0
+  }
   const modelPricing=pricing.models[defaultModel]?.pricing
-  const inputPer1K=modelPricing?.input||0
-  const outputPer1K=modelPricing?.output||0
-  return(input/1000)*inputPer1K+(output/1000)*outputPer1K
+  const inputPer1M=modelPricing?.input||0
+  const outputPer1M=modelPricing?.output||0
+  console.log('[CostView] calc:',{defaultModel,inputPer1M,outputPer1M})
+  return(input/1000000)*inputPer1M+(output/1000000)*outputPer1M
  },[pricing])
 
  const agentTokenMap=useMemo(()=>{
@@ -162,7 +170,7 @@ export default function CostView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
  const renderGroupTable=(data:ReturnType<typeof createGroupedData>,title:string)=>(
@@ -177,7 +185,7 @@ export default function CostView():JSX.Element{
      <div className="text-nier-text-light text-nier-small">データがありません</div>
 ):(
      <div>
-      <div className="grid grid-cols-[1fr_45px_45px_55px] text-nier-small py-0.5 border-b border-nier-border-light mb-1 pb-1">
+      <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 border-b border-nier-border-light mb-1 pb-1">
        <span className="font-medium"></span>
        <span className="text-right font-medium">In</span>
        <span className="text-right font-medium">Out</span>
@@ -185,14 +193,14 @@ export default function CostView():JSX.Element{
       </div>
       {data.map(group=>(
        <div key={group.key}>
-        <div className="grid grid-cols-[1fr_45px_45px_55px] text-nier-small py-0.5 bg-nier-bg-panel">
+        <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 bg-nier-bg-panel">
          <span className="font-medium text-nier-text-main">{group.label}</span>
          <span className="text-right text-nier-text-light">{formatTokens(group.input)}</span>
          <span className="text-right text-nier-text-light">{formatTokens(group.output)}</span>
          <span className="text-right font-medium">${group.cost.toFixed(2)}</span>
         </div>
         {group.agents.map(agent=>(
-         <div key={agent.key} className="grid grid-cols-[1fr_45px_45px_55px] text-nier-small py-0.5 pl-3">
+         <div key={agent.key} className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 pl-3">
           <span className="text-nier-text-light truncate">{agent.name}</span>
           <span className="text-right text-nier-text-light">{formatTokens(agent.input)}</span>
           <span className="text-right text-nier-text-light">{formatTokens(agent.output)}</span>
@@ -205,7 +213,7 @@ export default function CostView():JSX.Element{
 )}
    </CardContent>
   </Card>
- )
+)
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
@@ -249,5 +257,5 @@ export default function CostView():JSX.Element{
     </Card>
    </div>
   </div>
- )
+)
 }

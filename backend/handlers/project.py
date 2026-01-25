@@ -136,7 +136,10 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         data = request.get_json() or {}
         options = {
             "selectedAgents":data.get("selectedAgents",[]),
-            "clearAssets":data.get("clearAssets",False)
+            "clearAssets":data.get("clearAssets",False),
+            "presets":data.get("presets",[]),
+            "customInstruction":data.get("customInstruction",""),
+            "referenceImageIds":data.get("referenceImageIds",[])
         }
 
         project = data_store.brushup_project(project_id,options)

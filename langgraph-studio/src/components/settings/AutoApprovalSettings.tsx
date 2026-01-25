@@ -17,7 +17,8 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
   setRuleEnabled,
   setAllEnabled,
   getEnabledCount,
-  loadFromServer
+  loadFromServer,
+  isRuleChanged
  }=useAutoApprovalStore()
 
  useEffect(()=>{
@@ -61,25 +62,31 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
     </div>
 
     <div className="divide-y divide-nier-border-light border border-nier-border-light">
-     {rules.map(rule=>(
-      <div
-       key={rule.category}
-       className="flex items-center justify-between px-4 py-2 hover:bg-nier-bg-panel transition-colors"
-      >
-       <span className="text-nier-small text-nier-text-main">{rule.label}</span>
-       <button
-        onClick={()=>setRuleEnabled(rule.category,!rule.enabled)}
+     {rules.map(rule=>{
+      const changed=isRuleChanged(rule.category)
+      return(
+       <div
+        key={rule.category}
         className={cn(
-         'px-3 py-1 text-nier-caption border transition-colors min-w-[52px]',
-         rule.enabled
-          ?'border-nier-border-dark bg-nier-bg-selected text-nier-text-main font-medium'
-          :'border-nier-border-light text-nier-text-light hover:bg-nier-bg-panel'
+         'flex items-center justify-between px-4 py-2 hover:bg-nier-bg-panel transition-colors',
+         changed&&'border-l-2 border-l-nier-accent-red'
 )}
        >
-        {rule.enabled?'ON':'OFF'}
-       </button>
-      </div>
-))}
+        <span className={cn('text-nier-small',changed?'text-nier-accent-red':'text-nier-text-main')}>{rule.label}</span>
+        <button
+         onClick={()=>setRuleEnabled(rule.category,!rule.enabled)}
+         className={cn(
+          'px-3 py-1 text-nier-caption border transition-colors min-w-[52px]',
+          changed?'border-nier-accent-red':'',
+          rule.enabled
+           ?cn('bg-nier-bg-selected font-medium',changed?'border-nier-accent-red text-nier-accent-red':'border-nier-border-dark text-nier-text-main')
+           :cn('hover:bg-nier-bg-panel',changed?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light text-nier-text-light')
+)}
+        >
+         {rule.enabled?'ON':'OFF'}
+        </button>
+       </div>
+)})}
     </div>
 
     <div className="p-3 bg-nier-bg-panel border border-nier-border-light text-nier-caption text-nier-text-light">

@@ -9,6 +9,7 @@ import{
 
 interface CostSettingsState{
  settings:CostSettings
+ originalSettings:CostSettings
  pricing:PricingConfig|null
  pricingLoaded:boolean
  currentProjectId:string|null
@@ -21,12 +22,16 @@ interface CostSettingsState{
  resetToDefaults:()=>void
  loadFromServer:(projectId:string)=>Promise<void>
  saveToServer:(projectId:string)=>Promise<void>
+ hasChanges:()=>boolean
+ isFieldChanged:(field:string)=>boolean
+ isServiceFieldChanged:(serviceType:string,field:string)=>boolean
 }
 
 export const useCostSettingsStore=create<CostSettingsState>()(
  persist(
   (set,get)=>({
    settings:{...DEFAULT_COST_SETTINGS},
+   originalSettings:{...DEFAULT_COST_SETTINGS},
    pricing:null,
    pricingLoaded:false,
    currentProjectId:null,
@@ -85,21 +90,23 @@ export const useCostSettingsStore=create<CostSettingsState>()(
      const{projectSettingsApi}=await import('@/services/apiService')
      const serverSettings=await projectSettingsApi.getCostSettings(projectId)
      if(serverSettings){
-      set({
-       settings:{
-        globalEnabled:serverSettings.global_enabled??DEFAULT_COST_SETTINGS.globalEnabled,
-        globalMonthlyLimit:serverSettings.global_monthly_limit??DEFAULT_COST_SETTINGS.globalMonthlyLimit,
-        services:Object.fromEntries(
-         Object.entries(serverSettings.services||{}).map(([k,v])=>[k,{
-          enabled:v.enabled,
-          monthlyLimit:v.monthly_limit
-         }])
+      const newSettings={
+       globalEnabled:serverSettings.global_enabled??DEFAULT_COST_SETTINGS.globalEnabled,
+       globalMonthlyLimit:serverSettings.global_monthly_limit??DEFAULT_COST_SETTINGS.globalMonthlyLimit,
+       services:Object.fromEntries(
+        Object.entries(serverSettings.services||{}).map(([k,v])=>[k,{
+         enabled:v.enabled,
+         monthlyLimit:v.monthly_limit
+        }])
 )||DEFAULT_COST_SETTINGS.services
-       },
+      }
+      set({
+       settings:newSettings,
+       originalSettings:JSON.parse(JSON.stringify(newSettings)),
        currentProjectId:projectId
       })
      }else{
-      set({currentProjectId:projectId})
+      set({currentProjectId:projectId,originalSettings:JSON.parse(JSON.stringify(get().settings))})
      }
     }catch(error){
      console.error('Failed to load cost settings from server:',error)
@@ -125,9 +132,28 @@ export const useCostSettingsStore=create<CostSettingsState>()(
        }])
 )
      })
+     set({originalSettings:JSON.parse(JSON.stringify(settings))})
     }catch(error){
      console.error('Failed to save cost settings to server:',error)
     }
+   },
+
+   hasChanges:()=>{
+    const{settings,originalSettings}=get()
+    return JSON.stringify(settings)!==JSON.stringify(originalSettings)
+   },
+
+   isFieldChanged:(field)=>{
+    const{settings,originalSettings}=get()
+    return(settings as Record<string,unknown>)[field]!==(originalSettings as Record<string,unknown>)[field]
+   },
+
+   isServiceFieldChanged:(serviceType,field)=>{
+    const{settings,originalSettings}=get()
+    const current=settings.services[serviceType]
+    const original=originalSettings.services[serviceType]
+    if(!current||!original)return false
+    return(current as Record<string,unknown>)[field]!==(original as Record<string,unknown>)[field]
    }
   }),
   {

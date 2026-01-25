@@ -1,5 +1,6 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
+import type{BrushupPreset,BrushupSuggestImage}from'@/types/brushup'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||'http://localhost:5000'
 
@@ -116,8 +117,23 @@ export const projectApi={
   return response.data
  },
 
- brushup:async(projectId:string,options?:{selectedAgents?:string[],clearAssets?:boolean}):Promise<Project>=>{
+ brushup:async(projectId:string,options?:{
+  selectedAgents?:string[]
+  clearAssets?:boolean
+  presets?:string[]
+  customInstruction?:string
+  referenceImageIds?:string[]
+ }):Promise<Project>=>{
   const response=await api.post(`/api/projects/${projectId}/brushup`,options||{})
+  return response.data
+ },
+
+ suggestBrushupImages:async(projectId:string,options:{
+  presets:string[]
+  customInstruction?:string
+  count?:number
+ }):Promise<{images:BrushupSuggestImage[]}>=>{
+  const response=await api.post(`/api/projects/${projectId}/brushup/suggest-images`,options)
   return response.data
  }
 }
@@ -821,6 +837,11 @@ export const configApi={
 
  getAgentsConfig:async():Promise<Record<string,unknown>>=>{
   const response=await api.get('/api/config/agents')
+  return response.data
+ },
+
+ getBrushupPresets:async():Promise<{presets:BrushupPreset[]}>=>{
+  const response=await api.get('/api/config/brushup-presets')
   return response.data
  }
 }

@@ -1,6 +1,7 @@
 import{useState,useMemo,useEffect,useRef}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
+import{Modal}from'@/components/ui/Modal'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useLogStore}from'@/stores/logStore'
@@ -238,47 +239,6 @@ export default function LogsView():JSX.Element{
       </CardContent>
      </Card>
 
-    {/*Log Details-Below Log List*/}
-    <Card className="flex-shrink-0">
-     <CardHeader>
-      <DiamondMarker>詳細</DiamondMarker>
-     </CardHeader>
-     <CardContent>
-      {selectedLog?(
-       <div className="flex gap-6">
-        <div className="flex gap-4">
-         <div>
-          <span className="text-nier-caption text-nier-text-light block">タイムスタンプ</span>
-          <span className="text-nier-small">{new Date(selectedLog.timestamp).toLocaleString('ja-JP')}</span>
-         </div>
-         <div>
-          <span className="text-nier-caption text-nier-text-light block">レベル</span>
-          <span className={cn('text-nier-small',levelConfig[selectedLog.level].color)}>
-           {selectedLog.level.toUpperCase()}
-          </span>
-         </div>
-         <div>
-          <span className="text-nier-caption text-nier-text-light block">ソース</span>
-          <span className="text-nier-small">{getSourceLabel(selectedLog.source)}</span>
-         </div>
-        </div>
-        <div className="flex-1">
-         <span className="text-nier-caption text-nier-text-light block">メッセージ</span>
-         <span className="text-nier-small">{selectedLog.message}</span>
-         {selectedLog.details&&(
-          <pre className="text-nier-caption bg-nier-bg-selected p-2 mt-2 overflow-auto max-h-20 text-nier-text-main">
-           {selectedLog.details}
-          </pre>
-)}
-        </div>
-       </div>
-) : (
-       <div className="text-center text-nier-text-light py-2 text-nier-small">
-        ログを選択してください
-       </div>
-)}
-     </CardContent>
-    </Card>
    </div>
 
    {/*Filter Sidebar*/}
@@ -414,6 +374,46 @@ export default function LogsView():JSX.Element{
      </CardContent>
     </Card>
    </div>
+
+   <Modal
+    isOpen={!!selectedLog}
+    onClose={()=>setSelectedLog(null)}
+    title="ログ詳細"
+    size="lg"
+   >
+    {selectedLog&&(
+     <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-4">
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">タイムスタンプ</span>
+        <span className="text-nier-small text-nier-text-main">{new Date(selectedLog.timestamp).toLocaleString('ja-JP')}</span>
+       </div>
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">レベル</span>
+        <span className={cn('text-nier-small',levelConfig[selectedLog.level].color)}>
+         {selectedLog.level.toUpperCase()}
+        </span>
+       </div>
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">ソース</span>
+        <span className="text-nier-small text-nier-text-main">{getSourceLabel(selectedLog.source)}</span>
+       </div>
+      </div>
+      <div>
+       <span className="text-nier-caption text-nier-text-light block mb-1">メッセージ</span>
+       <span className="text-nier-small text-nier-text-main">{selectedLog.message}</span>
+      </div>
+      {selectedLog.details&&(
+       <div>
+        <span className="text-nier-caption text-nier-text-light block mb-1">詳細情報</span>
+        <pre className="text-nier-caption bg-nier-bg-selected p-3 overflow-auto max-h-60 text-nier-text-main">
+         {selectedLog.details}
+        </pre>
+       </div>
+)}
+     </div>
+)}
+   </Modal>
   </div>
 )
 }

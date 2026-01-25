@@ -775,9 +775,23 @@ class DataStore:
     return None
    opts=options or {}
    selected_agents:List[str]=opts.get("selectedAgents",[])
+   presets:List[str]=opts.get("presets",[])
+   custom_instruction:str=opts.get("customInstruction","")
+   reference_image_ids:List[str]=opts.get("referenceImageIds",[])
    project.status="draft"
    project.current_phase=1
    project.updated_at=datetime.now()
+   if presets or custom_instruction or reference_image_ids:
+    brushup_config={
+     "presets":presets,
+     "customInstruction":custom_instruction,
+     "referenceImageIds":reference_image_ids
+    }
+    if project.config:
+     import json
+     config=json.loads(project.config) if isinstance(project.config,str) else project.config
+     config["brushupConfig"]=brushup_config
+     project.config=json.dumps(config) if isinstance(project.config,str) else config
    agents=agent_repo.get_by_project(project_id)
    for agent_dict in agents:
     should_reset=len(selected_agents)==0 or agent_dict["type"] in selected_agents
@@ -791,7 +805,11 @@ class DataStore:
      agent.error=None
    session.flush()
    agent_names=",".join(selected_agents) if selected_agents else "全エージェント"
-   self._add_system_log_internal(session,project_id,"info","System",f"ブラッシュアップ開始: {agent_names}")
+   preset_names=",".join(presets) if presets else "なし"
+   log_msg=f"ブラッシュアップ開始: エージェント={agent_names}, プリセット={preset_names}"
+   if custom_instruction:
+    log_msg+=f", カスタム指示あり"
+   self._add_system_log_internal(session,project_id,"info","System",log_msg)
    print(f"[DataStore] Project {project_id} brushup started: {agent_names}")
    return proj_repo.to_dict(project)
 
@@ -1038,39 +1056,39 @@ class DataStore:
    self._auto_approve_pending_assets(session,project_id,rules)
    return rules
 
-def _auto_approve_pending_checkpoints(self,session,project_id:str,rules:List[Dict]):
- enabled_categories={r["category"] for r in rules if r.get("enabled")}
- if not enabled_categories:
-  return
- category_map=get_checkpoint_category_map()
- from models.tables import Checkpoint
- pending_cps=session.query(Checkpoint).filter(
-  Checkpoint.project_id==project_id,
-  Checkpoint.status=="pending"
- ).all()
- cp_repo=CheckpointRepository(session)
- agent_repo=AgentRepository(session)
- now=datetime.now()
- for cp in pending_cps:
-  cp_category=category_map.get(cp.type,"document")
-  if cp_category in enabled_categories:
-   cp.status="approved"
-   cp.resolved_at=now
-   cp.updated_at=now
-   session.flush()
-   self._add_system_log_internal(session,project_id,"info","System",f"自動承認(設定変更): {cp.title}")
-   self._emit_event("checkpoint:resolved",{
-    "checkpointId":cp.id,
-    "projectId":project_id,
-    "checkpoint":cp_repo.to_dict(cp),
-    "resolution":"approved"
-   },project_id)
-   agent=agent_repo.get(cp.agent_id)
-   if agent and agent.status=="waiting_approval":
-    other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
-    if not other_pending:
-     agent.status="running"
-     session.flush()
+ def _auto_approve_pending_checkpoints(self,session,project_id:str,rules:List[Dict]):
+  enabled_categories={r["category"] for r in rules if r.get("enabled")}
+  if not enabled_categories:
+   return
+  category_map=get_checkpoint_category_map()
+  from models.tables import Checkpoint
+  pending_cps=session.query(Checkpoint).filter(
+   Checkpoint.project_id==project_id,
+   Checkpoint.status=="pending"
+  ).all()
+  cp_repo=CheckpointRepository(session)
+  agent_repo=AgentRepository(session)
+  now=datetime.now()
+  for cp in pending_cps:
+   cp_category=category_map.get(cp.type,"document")
+   if cp_category in enabled_categories:
+    cp.status="approved"
+    cp.resolved_at=now
+    cp.updated_at=now
+    session.flush()
+    self._add_system_log_internal(session,project_id,"info","System",f"自動承認(設定変更): {cp.title}")
+    self._emit_event("checkpoint:resolved",{
+     "checkpointId":cp.id,
+     "projectId":project_id,
+     "checkpoint":cp_repo.to_dict(cp),
+     "resolution":"approved"
+    },project_id)
+    agent=agent_repo.get(cp.agent_id)
+    if agent and agent.status=="waiting_approval":
+     other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
+     if not other_pending:
+      agent.status="running"
+      session.flush()
 
  def _auto_approve_pending_assets(self,session,project_id:str,rules:List[Dict]):
   enabled_categories={r["category"] for r in rules if r.get("enabled")}

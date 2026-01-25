@@ -23,6 +23,8 @@ import{
  type ContentPermissions
 }from'@/config/projectOptions'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useBrushupStore}from'@/stores/brushupStore'
+import{BrushupPresetSelector,BrushupReferenceImages,BrushupSuggestImages}from'@/components/brushup'
 
 const BRUSHUP_PHASES=[
  {id:'design',label:'設計',agents:['concept','concept_detail','scenario','world','game_design','tech_spec']},
@@ -93,6 +95,7 @@ export default function ProjectView():JSX.Element{
  const{platforms,scopes,defaults,fetchOptions}=useProjectOptionsStore()
  const{master,fetchMaster}=useAIServiceStore()
  const{getLabel:getAgentLabel}=useAgentDefinitionStore()
+ const brushupStore=useBrushupStore()
  const initialForm=getInitialForm(defaults)
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
@@ -351,7 +354,10 @@ export default function ProjectView():JSX.Element{
   try{
    const options={
     selectedAgents:Array.from(brushupSelectedAgents),
-    clearAssets:brushupClearAssets
+    clearAssets:brushupClearAssets,
+    presets:Array.from(brushupStore.selectedPresets),
+    customInstruction:brushupStore.customInstruction,
+    referenceImageIds:Array.from(brushupStore.selectedSuggestedImageIds)
    }
    const updated=await projectApi.brushup(currentProject.id,options)
    incrementDataVersion()
@@ -360,6 +366,7 @@ export default function ProjectView():JSX.Element{
    setShowBrushupDialog(false)
    setBrushupSelectedAgents(new Set())
    setBrushupClearAssets(false)
+   brushupStore.reset()
   }catch(err){
    console.error('Failed to brushup project:',err)
    const apiError=extractApiError(err)
@@ -1213,81 +1220,126 @@ export default function ProjectView():JSX.Element{
    {/*Brushup Dialog*/}
    {showBrushupDialog&&currentProject&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-     <Card className="w-full max-w-lg">
+     <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col">
       <CardHeader>
        <div className="flex items-center gap-2 text-nier-text-main">
         <RefreshCw size={18}/>
         <span>ブラッシュアップ設定</span>
        </div>
       </CardHeader>
-      <CardContent>
-       <p className="text-nier-small text-nier-text-light mb-4">
-        再実行するエージェントを選択してください。選択したエージェントのみリセットされ、他は保持されます。
-       </p>
-       <div className="space-y-3 max-h-[400px] overflow-y-auto">
-        {BRUSHUP_PHASES.map(phase=>{
-         const phaseSelected=phase.agents.filter(a=>brushupSelectedAgents.has(a)).length
-         const allSelected=phaseSelected===phase.agents.length
-         return(
-          <div key={phase.id} className="border border-nier-border-light p-3">
-           <button
-            type="button"
-            onClick={()=>toggleBrushupPhase(phase.agents)}
-            className="flex items-center gap-2 w-full text-left mb-2"
-           >
-            <span className={cn('w-4 h-4 border flex items-center justify-center',
-             allSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
-)}>
-             {allSelected&&<Check size={12}/>}
-             {phaseSelected>0&&!allSelected&&<span className="w-2 h-2 bg-nier-text-light"/>}
-            </span>
-            <span className="text-nier-body font-medium">{phase.label}</span>
-            <span className="text-nier-caption text-nier-text-light ml-auto">
-             {phaseSelected}/{phase.agents.length}
-            </span>
-           </button>
-           <div className="grid grid-cols-2 gap-1 pl-6">
-            {phase.agents.map(agentType=>(
-             <button
-              key={agentType}
-              type="button"
-              onClick={()=>toggleBrushupAgent(agentType)}
-              className="flex items-center gap-2 py-1 text-left"
-             >
-              <span className={cn('w-3 h-3 border flex items-center justify-center',
-               brushupSelectedAgents.has(agentType)?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
-)}>
-               {brushupSelectedAgents.has(agentType)&&<Check size={10}/>}
-              </span>
-              <span className="text-nier-small">{getAgentLabel(agentType)}</span>
-             </button>
-))}
-           </div>
+      <CardContent className="flex-1 overflow-y-auto">
+       <div className="space-y-6">
+        {/*Section 1: Direction*/}
+        <div>
+         <h3 className="text-nier-body font-medium mb-3">ブラッシュアップの方向性</h3>
+         <div className="space-y-3">
+          <div>
+           <label className="block text-nier-small text-nier-text-light mb-2">プリセット選択（複数可）</label>
+           <BrushupPresetSelector/>
           </div>
-)
-        })}
-       </div>
-       <div className="mt-4 pt-3 border-t border-nier-border-light">
-        <button
-         type="button"
-         onClick={()=>setBrushupClearAssets(!brushupClearAssets)}
-         className="flex items-center gap-2"
-        >
-         <span className={cn('w-4 h-4 border flex items-center justify-center',
-          brushupClearAssets?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+          <div>
+           <label className="block text-nier-small text-nier-text-light mb-1">カスタム指示（任意）</label>
+           <textarea
+            value={brushupStore.customInstruction}
+            onChange={(e)=>brushupStore.setCustomInstruction(e.target.value)}
+            placeholder="ブラッシュアップの方向性を自由に記述してください..."
+            rows={3}
+            className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none resize-none"
+           />
+          </div>
+         </div>
+        </div>
+
+        {/*Section 2: Reference Images*/}
+        <div className="border-t border-nier-border-light pt-4">
+         <h3 className="text-nier-body font-medium mb-3">参考画像</h3>
+         <div className="space-y-3">
+          <div>
+           <label className="block text-nier-small text-nier-text-light mb-2">アップロード</label>
+           <BrushupReferenceImages/>
+          </div>
+          <div>
+           <label className="block text-nier-small text-nier-text-light mb-2">AIサジェスト</label>
+           <BrushupSuggestImages projectId={currentProject.id}/>
+          </div>
+         </div>
+        </div>
+
+        {/*Section 3: Agent Selection*/}
+        <div className="border-t border-nier-border-light pt-4">
+         <h3 className="text-nier-body font-medium mb-3">対象エージェント選択</h3>
+         <p className="text-nier-small text-nier-text-light mb-3">
+          再実行するエージェントを選択してください。選択したエージェントのみリセットされます。
+         </p>
+         <div className="space-y-3">
+          {BRUSHUP_PHASES.map(phase=>{
+           const phaseSelected=phase.agents.filter(a=>brushupSelectedAgents.has(a)).length
+           const allSelected=phaseSelected===phase.agents.length
+           return(
+            <div key={phase.id} className="border border-nier-border-light p-3">
+             <button
+              type="button"
+              onClick={()=>toggleBrushupPhase(phase.agents)}
+              className="flex items-center gap-2 w-full text-left mb-2"
+             >
+              <span className={cn('w-4 h-4 border flex items-center justify-center',
+               allSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
 )}>
-          {brushupClearAssets&&<Check size={12}/>}
-         </span>
-         <span className="text-nier-small">選択したエージェントが生成したアセットも削除する</span>
-        </button>
+               {allSelected&&<Check size={12}/>}
+               {phaseSelected>0&&!allSelected&&<span className="w-2 h-2 bg-nier-text-light"/>}
+              </span>
+              <span className="text-nier-body font-medium">{phase.label}</span>
+              <span className="text-nier-caption text-nier-text-light ml-auto">
+               {phaseSelected}/{phase.agents.length}
+              </span>
+             </button>
+             <div className="grid grid-cols-2 gap-1 pl-6">
+              {phase.agents.map(agentType=>(
+               <button
+                key={agentType}
+                type="button"
+                onClick={()=>toggleBrushupAgent(agentType)}
+                className="flex items-center gap-2 py-1 text-left"
+               >
+                <span className={cn('w-3 h-3 border flex items-center justify-center',
+                 brushupSelectedAgents.has(agentType)?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+)}>
+                 {brushupSelectedAgents.has(agentType)&&<Check size={10}/>}
+                </span>
+                <span className="text-nier-small">{getAgentLabel(agentType)}</span>
+               </button>
+))}
+             </div>
+            </div>
+)
+          })}
+         </div>
+         <div className="mt-3">
+          <button
+           type="button"
+           onClick={()=>setBrushupClearAssets(!brushupClearAssets)}
+           className="flex items-center gap-2"
+          >
+           <span className={cn('w-4 h-4 border flex items-center justify-center',
+            brushupClearAssets?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+)}>
+            {brushupClearAssets&&<Check size={12}/>}
+           </span>
+           <span className="text-nier-small">選択したエージェントが生成したアセットも削除する</span>
+          </button>
+         </div>
+        </div>
        </div>
-       <div className="flex gap-3 justify-end mt-6">
+
+       {/*Buttons*/}
+       <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-nier-border-light">
         <Button
          variant="secondary"
          onClick={()=>{
           setShowBrushupDialog(false)
           setBrushupSelectedAgents(new Set())
           setBrushupClearAssets(false)
+          brushupStore.reset()
          }}
         >
          キャンセル

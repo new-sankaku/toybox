@@ -579,7 +579,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
    const getBubbleRect=(
     x:number,y:number,dir:BubbleDir
-   ):{x1:number;y1:number;x2:number;y2:number}=>{
+):{x1:number;y1:number;x2:number;y2:number}=>{
     if(dir==='top-right')return{x1:x+bubbleOffset,y1:y-defaultBubbleH-15,x2:x+bubbleOffset+defaultBubbleW,y2:y-15}
     if(dir==='top-left')return{x1:x-defaultBubbleW-bubbleOffset,y1:y-defaultBubbleH-15,x2:x-bubbleOffset,y2:y-15}
     if(dir==='bottom-right')return{x1:x+bubbleOffset,y1:y+25,x2:x+bubbleOffset+defaultBubbleW,y2:y+25+defaultBubbleH}
@@ -589,7 +589,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    const rectsOverlap=(
     a:{x1:number;y1:number;x2:number;y2:number},
     b:{x1:number;y1:number;x2:number;y2:number}
-   ):boolean=>{
+):boolean=>{
     return!(a.x2<b.x1||b.x2<a.x1||a.y2<b.y1||b.y2<a.y1)
    }
 
