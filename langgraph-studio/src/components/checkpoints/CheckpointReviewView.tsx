@@ -6,7 +6,7 @@ import{DocumentViewer}from'@/components/viewers/DocumentViewer'
 import{CodeViewer}from'@/components/viewers/CodeViewer'
 import type{Checkpoint}from'@/types/checkpoint'
 import{cn}from'@/lib/utils'
-import{CheckCircle,XCircle,RotateCcw,MessageSquare,Send,X}from'lucide-react'
+import{CheckCircle,XCircle,RotateCcw,Send,X}from'lucide-react'
 
 interface CheckpointReviewViewProps{
  checkpoint:Checkpoint
@@ -308,16 +308,6 @@ export default function CheckpointReviewView({
         却下
        </Button>
 
-       {!showFeedbackForm&&(
-        <Button
-         variant="ghost"
-         className="w-full justify-start gap-3 text-nier-text-light"
-         onClick={()=>setShowFeedbackForm(true)}
-        >
-         <MessageSquare size={18}/>
-         コメントを追加
-        </Button>
-)}
       </CardContent>
      </Card>
     </div>

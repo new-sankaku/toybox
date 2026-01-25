@@ -89,9 +89,13 @@ def register_all_providers()->None:
  from .google import GoogleProvider
  from .xai import XAIProvider
  from .mock import MockProvider
+ from .zhipu import ZhipuProvider
+ from .deepseek import DeepSeekProvider
 
  ProviderRegistry.register(AnthropicProvider)
  ProviderRegistry.register(OpenAIProvider)
  ProviderRegistry.register(GoogleProvider)
  ProviderRegistry.register(XAIProvider)
  ProviderRegistry.register(MockProvider)
+ ProviderRegistry.register(ZhipuProvider)
+ ProviderRegistry.register(DeepSeekProvider)

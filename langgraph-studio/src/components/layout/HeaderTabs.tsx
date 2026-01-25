@@ -15,6 +15,7 @@ const tabs:Tab[]=[
  {id:'data',label:'生成素材',icon:'☰'},
  {id:'cost',label:'コスト',icon:'¤'},
  {id:'logs',label:'ログ',icon:'◈'},
+ {id:'trace',label:'トレース',icon:'⟐'},
  {id:'config',label:'設定',icon:'⚙'}
 ]
 

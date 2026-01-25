@@ -79,6 +79,7 @@ export default function AIFieldSection():JSX.Element|null{
    if(a.status==='running'||a.status==='waiting_approval')return true
    return false
   }).filter(a=>{
+   if(a.status==='waiting_approval')return true
    if(a.phase===undefined)return true
    return a.phase===currentPhase
   })

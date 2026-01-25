@@ -3,6 +3,7 @@ from abc import ABC,abstractmethod
 from dataclasses import dataclass,field
 from typing import List,Optional,Dict,Any,Iterator
 from enum import Enum
+from datetime import datetime
 
 
 class MessageRole(str,Enum):
@@ -59,6 +60,24 @@ class ModelInfo:
  output_cost_per_1k:Optional[float] = None
 
 
+@dataclass
+class HealthCheckResult:
+ available:bool
+ latency_ms:Optional[int] = None
+ error:Optional[str] = None
+ checked_at:Optional[datetime] = None
+ model_used:Optional[str] = None
+
+ def to_dict(self)->Dict[str,Any]:
+  return {
+   "available":self.available,
+   "latency_ms":self.latency_ms,
+   "error":self.error,
+   "checked_at":self.checked_at.isoformat() if self.checked_at else None,
+   "model_used":self.model_used,
+  }
+
+
 class AIProvider(ABC):
  """AIプロバイダー抽象基底クラス"""
 
@@ -111,6 +130,28 @@ class AIProvider(ABC):
  def test_connection(self)->Dict[str,Any]:
   """接続テスト"""
   pass
+
+ def health_check(self)->HealthCheckResult:
+  """ヘルスチェック（デフォルト実装）"""
+  import time
+  start = time.time()
+  try:
+   result = self.test_connection()
+   latency = int((time.time() - start) * 1000)
+   return HealthCheckResult(
+    available=result.get("success",False),
+    latency_ms=latency,
+    error=result.get("message") if not result.get("success") else None,
+    checked_at=datetime.now(),
+   )
+  except Exception as e:
+   latency = int((time.time() - start) * 1000)
+   return HealthCheckResult(
+    available=False,
+    latency_ms=latency,
+    error=str(e),
+    checked_at=datetime.now(),
+   )
 
  def validate_config(self)->bool:
   """設定の検証"""

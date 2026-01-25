@@ -4,6 +4,7 @@ from flask import Flask,jsonify,request,Response
 from providers import get_provider,list_providers,AIProviderConfig
 from providers.base import ChatMessage,MessageRole
 from providers.registry import register_all_providers
+from providers.health_monitor import get_health_monitor
 
 
 def register_ai_provider_routes(app:Flask):
@@ -230,3 +231,106 @@ def register_ai_provider_routes(app:Flask):
     'X-Accel-Buffering':'no'
    }
   )
+
+ @app.route('/api/providers/health',methods=['GET'])
+ def get_providers_health():
+  """全プロバイダーのヘルス状態を取得"""
+  monitor = get_health_monitor()
+  return jsonify(monitor.get_all_health_status())
+
+ @app.route('/api/providers/<provider_id>/health',methods=['GET'])
+ def get_provider_health(provider_id:str):
+  """特定プロバイダーのヘルスチェックを実行"""
+  monitor = get_health_monitor()
+  result = monitor.check_provider_now(provider_id)
+  return jsonify(result.to_dict())
+
+ @app.route('/api/api-keys',methods=['GET'])
+ def get_api_keys():
+  """保存済みAPIキー一覧（ヒントのみ）"""
+  from models.database import get_db_session
+  from repositories import ApiKeyRepository
+  session = get_db_session()
+  try:
+   repo = ApiKeyRepository(session)
+   hints = repo.get_all_hints()
+   return jsonify(hints)
+  finally:
+   session.close()
+
+ @app.route('/api/api-keys/<provider_id>',methods=['PUT'])
+ def save_api_key(provider_id:str):
+  """APIキーを保存"""
+  from models.database import get_db_session
+  from repositories import ApiKeyRepository
+  data = request.get_json()
+  if not data or not data.get('apiKey'):
+   return jsonify({"error":"apiKeyは必須です"}),400
+  api_key = data['apiKey']
+  session = get_db_session()
+  try:
+   repo = ApiKeyRepository(session)
+   key_store = repo.save(provider_id,api_key)
+   session.commit()
+   return jsonify({
+    "success":True,
+    "hint":key_store.key_hint,
+    "message":"APIキーが保存されました"
+   })
+  except Exception as e:
+   session.rollback()
+   return jsonify({"error":str(e)}),500
+  finally:
+   session.close()
+
+ @app.route('/api/api-keys/<provider_id>',methods=['DELETE'])
+ def delete_api_key(provider_id:str):
+  """APIキーを削除"""
+  from models.database import get_db_session
+  from repositories import ApiKeyRepository
+  session = get_db_session()
+  try:
+   repo = ApiKeyRepository(session)
+   deleted = repo.delete(provider_id)
+   session.commit()
+   if deleted:
+    return jsonify({"success":True,"message":"APIキーが削除されました"})
+   else:
+    return jsonify({"error":"APIキーが見つかりません"}),404
+  except Exception as e:
+   session.rollback()
+   return jsonify({"error":str(e)}),500
+  finally:
+   session.close()
+
+ @app.route('/api/api-keys/<provider_id>/validate',methods=['POST'])
+ def validate_api_key(provider_id:str):
+  """APIキーの有効性を検証"""
+  from models.database import get_db_session
+  from repositories import ApiKeyRepository
+  session = get_db_session()
+  try:
+   repo = ApiKeyRepository(session)
+   api_key = repo.get_decrypted_key(provider_id)
+   if not api_key:
+    return jsonify({"success":False,"error":"APIキーが保存されていません"}),404
+   config = AIProviderConfig(api_key=api_key)
+   provider = get_provider(provider_id,config)
+   if not provider:
+    return jsonify({"success":False,"error":"未対応のプロバイダーです"}),400
+   start_time = time.time()
+   result = provider.test_connection()
+   latency = int((time.time() - start_time) * 1000)
+   is_valid = result.get("success",False)
+   repo.update_validation_status(provider_id,is_valid)
+   session.commit()
+   return jsonify({
+    "success":is_valid,
+    "message":result.get("message",""),
+    "latency":latency
+   })
+  except Exception as e:
+   session.rollback()
+   return jsonify({"success":False,"error":str(e)}),500
+  finally:
+   session.close()

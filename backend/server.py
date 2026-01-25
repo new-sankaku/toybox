@@ -16,10 +16,13 @@ from handlers.file_upload import register_file_upload_routes
 from handlers.project_tree import register_project_tree_routes
 from handlers.ai_provider import register_ai_provider_routes
 from handlers.ai_service import register_ai_service_routes
+from providers.health_monitor import get_health_monitor
+from providers.registry import register_all_providers
 from handlers.language import register_language_routes
 from handlers.navigator import register_navigator_routes
 from handlers.project_settings import register_project_settings_routes
 from handlers.brushup import register_brushup_routes
+from handlers.trace import register_trace_routes
 from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
@@ -52,6 +55,8 @@ def create_app():
             model=config.agent.model,
             max_tokens=config.agent.max_tokens,
         )
+        if agent_runner and hasattr(agent_runner,'set_data_store'):
+            agent_runner.set_data_store(data_store)
 
     register_project_routes(app,data_store,sio)
     register_agent_routes(app,data_store,sio)
@@ -72,8 +77,14 @@ def create_app():
     register_ai_provider_routes(app)
     register_ai_service_routes(app)
     register_language_routes(app)
+
+    register_all_providers()
+    health_monitor = get_health_monitor()
+    health_monitor.set_socketio(sio)
+    health_monitor.start()
     register_project_settings_routes(app,data_store)
     register_brushup_routes(app,data_store,sio)
+    register_trace_routes(app,data_store,sio)
 
     @app.route('/health')
     def health():

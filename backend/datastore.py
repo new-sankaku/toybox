@@ -12,7 +12,7 @@ from repositories import (
  ProjectRepository,AgentRepository,CheckpointRepository,
  AgentLogRepository,SystemLogRepository,AssetRepository,
  InterventionRepository,UploadedFileRepository,MetricsRepository,
- QualitySettingsRepository
+ QualitySettingsRepository,AgentTraceRepository
 )
 from agent_settings import get_default_quality_settings,QualityCheckConfig
 from ai_config import build_default_ai_services
@@ -252,6 +252,7 @@ class DataStore:
   self._check_milestone_logs(session,agent,old_progress,new_progress)
   self._check_checkpoint_creation(session,agent,old_progress,new_progress)
   self._check_asset_generation(session,agent,old_progress,new_progress)
+  self._check_trace_generation(session,agent,old_progress,new_progress)
   agent=agent_repo.get(agent_dict["id"])
   if agent.status=="waiting_approval":
    self._emit_event("agent:progress",{
@@ -369,6 +370,59 @@ class DataStore:
               if a["name"]==asset_name and a["agent"]==(agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type)]
     if not existing:
      self._create_asset(session,agent,asset_type,asset_name,asset_size)
+
+ def _check_trace_generation(self,session,agent,old_progress:int,new_progress:int):
+  trace_points=[20,50,80]
+  for point in trace_points:
+   if old_progress<point<=new_progress:
+    self._create_simulation_trace(session,agent,point)
+
+ def _create_simulation_trace(self,session,agent,progress:int):
+  trace_repo=AgentTraceRepository(session)
+  display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+  input_tokens=random.randint(500,2000)
+  output_tokens=random.randint(200,1000)
+  duration_ms=random.randint(1000,5000)
+  sample_prompt=f"""あなたは{display_name}エージェントです。
+以下のタスクを実行してください。
+
+## タスク
+プロジェクトの{agent.type}フェーズの処理を行います。
+
+## 入力
+進捗: {progress}%
+"""
+  sample_response=f"""## 処理結果
+
+{display_name}の処理が完了しました。
+
+### 実行内容
+- データ分析を実施
+- 結果を生成
+- 品質チェックを実行
+
+### 出力
+処理は正常に完了しました。次のステップに進む準備ができています。
+"""
+  trace_repo.create_trace(
+   project_id=agent.project_id,
+   agent_id=agent.id,
+   agent_type=agent.type,
+   input_context={"progress":progress,"phase":agent.phase},
+   model_used="claude-sonnet-4-20250514 (simulation)"
+  )
+  traces=trace_repo.get_by_agent(agent.id)
+  if traces:
+   latest_trace_id=traces[0]["id"]
+   trace_repo.update_prompt(latest_trace_id,sample_prompt)
+   trace_repo.complete_trace(
+    trace_id=latest_trace_id,
+    llm_response=sample_response,
+    output_data={"type":"document","progress":progress},
+    tokens_input=input_tokens,
+    tokens_output=output_tokens,
+    status="completed"
+   )
 
  def _should_auto_approve_asset(self,session,project_id:str,asset_type:str)->bool:
   proj_repo=ProjectRepository(session)
@@ -871,11 +925,33 @@ class DataStore:
    self._add_system_log_internal(session,project_id,"info","System",f"チェックポイント{status_text.get(resolution,resolution)}: {cp.title}")
    agent=agent_repo.get(cp.agent_id)
    if agent:
-    other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
-    other_pending=[c for c in other_pending if c.id!=checkpoint_id]
-    if not other_pending and agent.status=="waiting_approval":
-     agent.status="running"
+    if resolution=="rejected":
+     agent.status="failed"
+     agent.current_task="却下により中止"
      session.flush()
+     self._add_system_log_internal(session,project_id,"warn","System",f"{agent.type}が却下されました")
+     self._emit_event("agent:failed",{"agentId":agent.id,"projectId":project_id,"reason":"rejected"},project_id)
+    elif resolution=="revision_requested":
+     cp_repo.delete(checkpoint_id)
+     agent.progress=80
+     agent.status="running"
+     agent.current_task="修正中..."
+     session.flush()
+     self._add_system_log_internal(session,project_id,"info","System",f"{agent.type}が修正を開始")
+     self._emit_event("agent:progress",{
+      "agentId":agent.id,
+      "projectId":project_id,
+      "progress":80,
+      "currentTask":"修正中...",
+      "tokensUsed":agent.tokens_used,
+      "message":"修正要求により再実行"
+     },project_id)
+    else:
+     other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
+     other_pending=[c for c in other_pending if c.id!=checkpoint_id]
+     if not other_pending and agent.status=="waiting_approval":
+      agent.status="running"
+      session.flush()
    if resolution=="approved":
     self._check_phase_advancement(session,project_id)
    return result
@@ -1165,3 +1241,44 @@ class DataStore:
    for cp in session.query(repo.model).all():
     result[cp.id]=repo.to_dict(cp)
   return result
+
+ def get_traces_by_project(self,project_id:str,limit:int=100)->List[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.get_by_project(project_id,limit)
+
+ def get_traces_by_agent(self,agent_id:str)->List[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.get_by_agent(agent_id)
+
+ def get_trace(self,trace_id:str)->Optional[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   trace=repo.get(trace_id)
+   return repo.to_dict(trace) if trace else None
+
+ def create_trace(self,project_id:str,agent_id:str,agent_type:str,input_context:Optional[Dict]=None,model_used:Optional[str]=None)->Dict:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.create_trace(project_id,agent_id,agent_type,input_context,model_used)
+
+ def update_trace_prompt(self,trace_id:str,prompt:str)->Optional[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.update_prompt(trace_id,prompt)
+
+ def complete_trace(self,trace_id:str,llm_response:str,output_data:Optional[Dict]=None,tokens_input:int=0,tokens_output:int=0,status:str="completed")->Optional[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.complete_trace(trace_id,llm_response,output_data,tokens_input,tokens_output,status)
+
+ def fail_trace(self,trace_id:str,error_message:str)->Optional[Dict]:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.fail_trace(trace_id,error_message)
+
+ def delete_traces_by_project(self,project_id:str)->int:
+  with session_scope() as session:
+   repo=AgentTraceRepository(session)
+   return repo.delete_by_project(project_id)

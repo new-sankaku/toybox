@@ -11,6 +11,8 @@ from .base import (
     AgentType,
     AgentStatus,
 )
+from .retry_strategy import RetryConfig,retry_with_backoff,is_retryable_error
+from .exceptions import ProviderUnavailableError,MaxRetriesExceededError
 
 
 class ApiAgentRunner(AgentRunner):
@@ -19,6 +21,8 @@ class ApiAgentRunner(AgentRunner):
         api_key:Optional[str] = None,
         model:str = "claude-sonnet-4-20250514",
         max_tokens:int = 4096,
+        retry_config:Optional[RetryConfig] = None,
+        data_store=None,
         **kwargs
     ):
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
@@ -27,6 +31,31 @@ class ApiAgentRunner(AgentRunner):
         self._llm_client = None
         self._graphs:Dict[AgentType,Any] = {}
         self._prompts = self._load_prompts()
+        self._retry_config = retry_config or RetryConfig(max_retries=3)
+        self._health_monitor = None
+        self._on_status_change:Optional[Callable[[str,AgentStatus],None]] = None
+        self._data_store = data_store
+
+    def set_data_store(self,data_store)->None:
+        self._data_store = data_store
+
+    def set_health_monitor(self,monitor)->None:
+        self._health_monitor = monitor
+
+    def set_status_callback(self,callback:Callable[[str,AgentStatus],None])->None:
+        self._on_status_change = callback
+
+    def _check_provider_health(self)->bool:
+        if not self._health_monitor:
+            return True
+        health = self._health_monitor.get_health_status("anthropic")
+        if health and not health.available:
+            return False
+        return True
+
+    def _emit_status(self,agent_id:str,status:AgentStatus)->None:
+        if self._on_status_change:
+            self._on_status_change(agent_id,status)
 
     def _get_llm_client(self):
         if self._llm_client is None:
@@ -43,6 +72,12 @@ class ApiAgentRunner(AgentRunner):
         started_at = datetime.now().isoformat()
         tokens_used = 0
         output = {}
+
+        if not self._check_provider_health():
+            self._emit_status(context.agent_id,AgentStatus.WAITING_PROVIDER)
+            await self._wait_for_provider_recovery()
+
+        self._emit_status(context.agent_id,AgentStatus.RUNNING)
 
         try:
             async for event in self.run_agent_stream(context):
@@ -62,6 +97,17 @@ class ApiAgentRunner(AgentRunner):
                 completed_at=datetime.now().isoformat(),
             )
 
+        except MaxRetriesExceededError as e:
+            return AgentOutput(
+                agent_id=context.agent_id,
+                agent_type=context.agent_type,
+                status=AgentStatus.FAILED,
+                error=f"最大リトライ回数超過: {str(e)}",
+                tokens_used=tokens_used,
+                started_at=started_at,
+                completed_at=datetime.now().isoformat(),
+            )
+
         except Exception as e:
             return AgentOutput(
                 agent_id=context.agent_id,
@@ -73,11 +119,38 @@ class ApiAgentRunner(AgentRunner):
                 completed_at=datetime.now().isoformat(),
             )
 
+    async def _wait_for_provider_recovery(self,max_wait:float = 300)->None:
+        import time
+        start = time.time()
+        while time.time() - start < max_wait:
+            if self._check_provider_health():
+                return
+            await asyncio.sleep(5)
+        raise ProviderUnavailableError("anthropic","プロバイダー復旧待機タイムアウト")
+
     async def run_agent_stream(
         self,
         context:AgentContext
     )->AsyncGenerator[Dict[str,Any],None]:
         agent_type = context.agent_type
+        trace_id = None
+
+        if self._data_store:
+            try:
+                input_ctx = {
+                    "project_concept":context.project_concept,
+                    "config":context.config,
+                }
+                trace = self._data_store.create_trace(
+                    project_id=context.project_id,
+                    agent_id=context.agent_id,
+                    agent_type=agent_type.value,
+                    input_context=input_ctx,
+                    model_used=self.model
+                )
+                trace_id = trace.get("id")
+            except Exception as e:
+                print(f"[ApiAgentRunner] Failed to create trace: {e}")
 
         yield {
             "type":"log",
@@ -94,6 +167,12 @@ class ApiAgentRunner(AgentRunner):
         }
 
         prompt = self._build_prompt(context)
+
+        if self._data_store and trace_id:
+            try:
+                self._data_store.update_trace_prompt(trace_id,prompt)
+            except Exception as e:
+                print(f"[ApiAgentRunner] Failed to update trace prompt: {e}")
 
         yield {
             "type":"progress",
@@ -117,6 +196,25 @@ class ApiAgentRunner(AgentRunner):
             }
 
             output = self._process_output(result,context)
+
+            if self._data_store and trace_id:
+                try:
+                    input_tokens = result.get("input_tokens",0)
+                    output_tokens = result.get("output_tokens",0)
+                    if input_tokens == 0 and output_tokens == 0:
+                        total = result.get("tokens_used",0)
+                        input_tokens = int(total * 0.3)
+                        output_tokens = total - input_tokens
+                    self._data_store.complete_trace(
+                        trace_id=trace_id,
+                        llm_response=result.get("content",""),
+                        output_data=output,
+                        tokens_input=input_tokens,
+                        tokens_output=output_tokens,
+                        status="completed"
+                    )
+                except Exception as e:
+                    print(f"[ApiAgentRunner] Failed to complete trace: {e}")
 
             yield {
                 "type":"progress",
@@ -143,6 +241,12 @@ class ApiAgentRunner(AgentRunner):
             }
 
         except Exception as e:
+            if self._data_store and trace_id:
+                try:
+                    self._data_store.fail_trace(trace_id,str(e))
+                except Exception as te:
+                    print(f"[ApiAgentRunner] Failed to fail trace: {te}")
+
             yield {
                 "type":"log",
                 "data":{
@@ -167,25 +271,38 @@ class ApiAgentRunner(AgentRunner):
         }
 
     async def _call_llm(self,prompt:str,context:AgentContext)->Dict[str,Any]:
-        client = self._get_llm_client()
-
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda:client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                messages=[
-                    {"role":"user","content":prompt}
-                ]
+        async def _execute_llm_call():
+            client = self._get_llm_client()
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda:client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    messages=[
+                        {"role":"user","content":prompt}
+                    ]
+                )
             )
-        )
+            return {
+                "content":response.content[0].text,
+                "tokens_used":response.usage.input_tokens + response.usage.output_tokens,
+                "model":response.model,
+            }
 
-        return {
-            "content":response.content[0].text,
-            "tokens_used":response.usage.input_tokens + response.usage.output_tokens,
-            "model":response.model,
-        }
+        def on_retry(attempt:int,error:Exception,delay:float):
+            if context.on_log:
+                context.on_log(
+                    "warning",
+                    f"LLM呼び出しリトライ ({attempt}/{self._retry_config.max_retries}): {str(error)}, {delay:.1f}秒後に再試行"
+                )
+
+        return await retry_with_backoff(
+            _execute_llm_call,
+            operation_name="LLM呼び出し",
+            config=self._retry_config,
+            on_retry=on_retry,
+        )
 
     def _build_prompt(self,context:AgentContext)->str:
         agent_type = context.agent_type.value

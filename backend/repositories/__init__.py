@@ -8,3 +8,6 @@ from .intervention import InterventionRepository
 from .uploaded_file import UploadedFileRepository
 from .metrics import MetricsRepository
 from .quality_settings import QualitySettingsRepository
+from .api_key import ApiKeyRepository
+from .project_ai_config import ProjectAiConfigRepository
+from .trace import AgentTraceRepository

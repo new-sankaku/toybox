@@ -976,4 +976,45 @@ export const projectSettingsApi={
  }
 }
 
+export interface ApiAgentTrace{
+ id:string
+ projectId:string
+ agentId:string
+ agentType:string
+ status:'running'|'completed'|'error'
+ inputContext:Record<string,unknown>|null
+ promptSent:string|null
+ llmResponse:string|null
+ outputData:Record<string,unknown>|null
+ tokensInput:number
+ tokensOutput:number
+ durationMs:number
+ errorMessage:string|null
+ modelUsed:string|null
+ startedAt:string|null
+ completedAt:string|null
+}
+
+export const traceApi={
+ listByProject:async(projectId:string,limit:number=100):Promise<ApiAgentTrace[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/traces`,{params:{limit}})
+  return response.data
+ },
+
+ listByAgent:async(agentId:string):Promise<ApiAgentTrace[]>=>{
+  const response=await api.get(`/api/agents/${agentId}/traces`)
+  return response.data
+ },
+
+ get:async(traceId:string):Promise<ApiAgentTrace>=>{
+  const response=await api.get(`/api/traces/${traceId}`)
+  return response.data
+ },
+
+ deleteByProject:async(projectId:string):Promise<{deleted:number}>=>{
+  const response=await api.delete(`/api/projects/${projectId}/traces`)
+  return response.data
+ }
+}
+
 export{api}

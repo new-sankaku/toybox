@@ -79,6 +79,7 @@ class AgentStatus(str,Enum):
     PENDING = "pending"
     RUNNING = "running"
     WAITING_APPROVAL = "waiting_approval"
+    WAITING_PROVIDER = "waiting_provider"
     COMPLETED = "completed"
     FAILED = "failed"
 

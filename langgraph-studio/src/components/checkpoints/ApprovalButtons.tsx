@@ -1,12 +1,11 @@
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{CheckCircle,XCircle,RotateCcw,MessageSquare}from'lucide-react'
+import{CheckCircle,XCircle,RotateCcw}from'lucide-react'
 
 interface ApprovalButtonsProps{
  onApprove:()=>void
  onReject:()=>void
  onRequestChanges:()=>void
- onAddComment?:()=>void
  disabled?:boolean
  layout?:'horizontal'|'vertical'
  size?:'sm'|'md'|'lg'
@@ -16,7 +15,6 @@ export function ApprovalButtons({
  onApprove,
  onReject,
  onRequestChanges,
- onAddComment,
  disabled=false,
  layout='vertical',
  size='md'
@@ -66,19 +64,6 @@ export function ApprovalButtons({
     <XCircle size={size==='sm'?14 : size==='lg'?20 : 18}/>
     {!isHorizontal&&<span>却下</span>}
    </Button>
-
-   {/*Add Comment Button (Optional)*/}
-   {onAddComment&&!isHorizontal&&(
-    <Button
-     variant="ghost"
-     className={cn(buttonClasses,'text-nier-text-light')}
-     onClick={onAddComment}
-     disabled={disabled}
-    >
-     <MessageSquare size={size==='sm'?14 : size==='lg'?20 : 18}/>
-     <span>コメントを追加</span>
-    </Button>
-)}
   </div>
 )
 }
@@ -88,7 +73,7 @@ export function ApprovalButtonsCompact({
  onReject,
  onRequestChanges,
  disabled=false
-}:Omit<ApprovalButtonsProps,'onAddComment'|'layout'|'size'>):JSX.Element{
+}:Omit<ApprovalButtonsProps,'layout'|'size'>):JSX.Element{
  return(
   <div className="flex items-center gap-2">
    <button

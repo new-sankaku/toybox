@@ -159,3 +159,45 @@ class QualitySetting(Base):
  agent_type=Column(String(50),nullable=False)
  config=Column(JSON)
  project=relationship("Project",back_populates="quality_settings")
+
+
+class ApiKeyStore(Base):
+ __tablename__="api_key_store"
+ provider_id=Column(String(50),primary_key=True)
+ encrypted_key=Column(Text,nullable=False)
+ key_hint=Column(String(20))
+ is_valid=Column(Boolean,default=False)
+ last_validated_at=Column(DateTime)
+ created_at=Column(DateTime,default=datetime.now)
+ updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+
+
+class ProjectAiConfig(Base):
+ __tablename__="project_ai_configs"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ usage_category=Column(String(50),nullable=False)
+ provider_id=Column(String(50),nullable=False)
+ model_id=Column(String(100),nullable=False)
+ custom_params=Column(JSON)
+ created_at=Column(DateTime,default=datetime.now)
+ updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+
+class AgentTrace(Base):
+ __tablename__="agent_traces"
+ id=Column(String(50),primary_key=True)
+ project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ agent_id=Column(String(50),ForeignKey("agents.id"),nullable=False)
+ agent_type=Column(String(50),nullable=False)
+ status=Column(String(20),default="running")
+ input_context=Column(JSON)
+ prompt_sent=Column(Text)
+ llm_response=Column(Text)
+ output_data=Column(JSON)
+ tokens_input=Column(Integer,default=0)
+ tokens_output=Column(Integer,default=0)
+ duration_ms=Column(Integer,default=0)
+ error_message=Column(Text)
+ model_used=Column(String(100))
+ started_at=Column(DateTime,default=datetime.now)
+ completed_at=Column(DateTime)
