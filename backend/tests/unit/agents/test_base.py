@@ -1,4 +1,3 @@
-"""エージェント基底クラスのテスト"""
 import pytest
 from agents.base import (
  AgentType,AgentStatus,AgentContext,AgentOutput,

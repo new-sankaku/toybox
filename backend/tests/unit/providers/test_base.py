@@ -1,4 +1,3 @@
-"""プロバイダー基底クラスのテスト"""
 import pytest
 from datetime import datetime
 from providers.base import (

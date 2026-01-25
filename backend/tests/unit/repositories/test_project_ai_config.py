@@ -1,4 +1,3 @@
-"""プロジェクトAI設定リポジトリのテスト"""
 import pytest
 from repositories.project_ai_config import ProjectAiConfigRepository
 from models.tables import ProjectAiConfig

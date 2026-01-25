@@ -1,4 +1,3 @@
-"""例外クラスのテスト"""
 import pytest
 from agents.exceptions import (
  AgentException,

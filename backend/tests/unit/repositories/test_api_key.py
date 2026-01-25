@@ -1,4 +1,3 @@
-"""APIキーリポジトリのテスト"""
 import pytest
 from repositories.api_key import ApiKeyRepository
 from models.tables import ApiKeyStore

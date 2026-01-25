@@ -248,9 +248,9 @@ def register_ai_provider_routes(app:Flask):
  @app.route('/api/api-keys',methods=['GET'])
  def get_api_keys():
   """保存済みAPIキー一覧（ヒントのみ）"""
-  from models.database import get_db_session
+  from models.database import get_session
   from repositories import ApiKeyRepository
-  session = get_db_session()
+  session = get_session()
   try:
    repo = ApiKeyRepository(session)
    hints = repo.get_all_hints()
@@ -261,13 +261,13 @@ def register_ai_provider_routes(app:Flask):
  @app.route('/api/api-keys/<provider_id>',methods=['PUT'])
  def save_api_key(provider_id:str):
   """APIキーを保存"""
-  from models.database import get_db_session
+  from models.database import get_session
   from repositories import ApiKeyRepository
   data = request.get_json()
   if not data or not data.get('apiKey'):
    return jsonify({"error":"apiKeyは必須です"}),400
   api_key = data['apiKey']
-  session = get_db_session()
+  session = get_session()
   try:
    repo = ApiKeyRepository(session)
    key_store = repo.save(provider_id,api_key)
@@ -286,9 +286,9 @@ def register_ai_provider_routes(app:Flask):
  @app.route('/api/api-keys/<provider_id>',methods=['DELETE'])
  def delete_api_key(provider_id:str):
   """APIキーを削除"""
-  from models.database import get_db_session
+  from models.database import get_session
   from repositories import ApiKeyRepository
-  session = get_db_session()
+  session = get_session()
   try:
    repo = ApiKeyRepository(session)
    deleted = repo.delete(provider_id)
@@ -306,9 +306,9 @@ def register_ai_provider_routes(app:Flask):
  @app.route('/api/api-keys/<provider_id>/validate',methods=['POST'])
  def validate_api_key(provider_id:str):
   """APIキーの有効性を検証"""
-  from models.database import get_db_session
+  from models.database import get_session
   from repositories import ApiKeyRepository
-  session = get_db_session()
+  session = get_session()
   try:
    repo = ApiKeyRepository(session)
    api_key = repo.get_decrypted_key(provider_id)

@@ -1,4 +1,3 @@
-"""プロバイダーレジストリのテスト"""
 import pytest
 from providers.registry import ProviderRegistry,register_all_providers,get_provider,list_providers
 from providers.mock import MockProvider

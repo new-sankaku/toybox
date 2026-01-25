@@ -1,4 +1,3 @@
-"""暗号化モジュールのテスト"""
 import pytest
 from security.encryption import (
  encrypt_api_key,

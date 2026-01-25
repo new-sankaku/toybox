@@ -1,4 +1,3 @@
-"""リトライ戦略のテスト"""
 import pytest
 import asyncio
 from agents.retry_strategy import (

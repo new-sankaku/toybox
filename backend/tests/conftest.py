@@ -1,4 +1,3 @@
-"""テスト共通フィクスチャ"""
 import os
 import sys
 import pytest
@@ -6,6 +5,30 @@ from datetime import datetime
 from typing import Generator
 
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+
+from test_descriptions import DESCRIPTIONS
+
+
+def pytest_html_results_table_header(cells):
+ cells.insert(2,"""<th class="sortable" data-column-type="description">説明</th>""")
+
+
+def pytest_html_results_table_row(report,cells):
+ desc = getattr(report,"description","")
+ cells.insert(2,f"<td>{desc}</td>")
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item,call):
+ outcome = yield
+ report = outcome.get_result()
+ if report.when == "call":
+  file_name = os.path.basename(item.fspath)
+  class_name = item.cls.__name__ if item.cls else ""
+  func_name = item.name
+  key = f"{file_name}::{class_name}::{func_name}"
+  report.description = DESCRIPTIONS.get(key,"")
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker,Session
