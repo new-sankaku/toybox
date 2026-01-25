@@ -18,6 +18,9 @@ class OpenAIProvider(AIProvider):
   return "OpenAI"
 
  def get_available_models(self)->List[ModelInfo]:
+  models = self.load_models_from_config(self.provider_id)
+  if models:
+   return models
   return [
    ModelInfo(
     id="gpt-4o",
@@ -27,51 +30,6 @@ class OpenAIProvider(AIProvider):
     supports_tools=True,
     input_cost_per_1k=0.0025,
     output_cost_per_1k=0.01
-   ),
-   ModelInfo(
-    id="gpt-4o-mini",
-    name="GPT-4o Mini",
-    max_tokens=16384,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.00015,
-    output_cost_per_1k=0.0006
-   ),
-   ModelInfo(
-    id="gpt-4-turbo",
-    name="GPT-4 Turbo",
-    max_tokens=4096,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.01,
-    output_cost_per_1k=0.03
-   ),
-   ModelInfo(
-    id="gpt-3.5-turbo",
-    name="GPT-3.5 Turbo",
-    max_tokens=4096,
-    supports_vision=False,
-    supports_tools=True,
-    input_cost_per_1k=0.0005,
-    output_cost_per_1k=0.0015
-   ),
-   ModelInfo(
-    id="o1",
-    name="O1",
-    max_tokens=100000,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.015,
-    output_cost_per_1k=0.06
-   ),
-   ModelInfo(
-    id="o1-mini",
-    name="O1 Mini",
-    max_tokens=65536,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.003,
-    output_cost_per_1k=0.012
    ),
   ]
 
@@ -158,8 +116,11 @@ class OpenAIProvider(AIProvider):
  def test_connection(self)->Dict[str,Any]:
   try:
    client = self._get_client()
+   test_model = self.get_test_model_from_config(self.provider_id)
+   if not test_model:
+    test_model = "gpt-4o-mini"
    response = client.chat.completions.create(
-    model="gpt-3.5-turbo",
+    model=test_model,
     max_tokens=10,
     messages=[{"role":"user","content":"Hi"}]
    )

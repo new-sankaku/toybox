@@ -42,6 +42,7 @@ export default function LogsView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{definitions:_definitions,getLabel}=useAgentDefinitionStore()
  const logStore=useLogStore()
+ const logVersion=useLogStore(s=>s.version)
  const[initialLoading,setInitialLoading]=useState(true)
  const[filterLevel,setFilterLevel]=useState<LogLevel>('all')
  const[selectedAgents,setSelectedAgents]=useState<Set<string>>(new Set())
@@ -74,6 +75,13 @@ export default function LogsView():JSX.Element{
  },[])
 
  useEffect(()=>{
+  setFilterLevel('all')
+  setSelectedAgents(new Set())
+  setSearchQuery('')
+  setSelectedLog(null)
+ },[logVersion])
+
+ useEffect(()=>{
   if(!currentProject){
    logStore.setLogs([])
    setInitialLoading(false)
@@ -94,7 +102,7 @@ export default function LogsView():JSX.Element{
   }
 
   fetchLogs()
- },[currentProject?.id])
+ },[currentProject?.id,logVersion])
 
  if(!currentProject){
   return(

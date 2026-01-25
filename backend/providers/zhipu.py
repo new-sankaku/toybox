@@ -18,33 +18,18 @@ class ZhipuProvider(AIProvider):
   return "Zhipu AI (智谱清言)"
 
  def get_available_models(self)->List[ModelInfo]:
+  models = self.load_models_from_config(self.provider_id)
+  if models:
+   return models
   return [
    ModelInfo(
-    id="glm-4-plus",
-    name="GLM-4 Plus",
+    id="glm-4.7",
+    name="GLM-4.7",
     max_tokens=128000,
     supports_vision=False,
     supports_tools=True,
-    input_cost_per_1k=0.05,
-    output_cost_per_1k=0.05
-   ),
-   ModelInfo(
-    id="glm-4-flash",
-    name="GLM-4 Flash",
-    max_tokens=128000,
-    supports_vision=False,
-    supports_tools=True,
-    input_cost_per_1k=0.0001,
-    output_cost_per_1k=0.0001
-   ),
-   ModelInfo(
-    id="glm-4v-plus",
-    name="GLM-4V Plus",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=False,
-    input_cost_per_1k=0.01,
-    output_cost_per_1k=0.01
+    input_cost_per_1k=0.0006,
+    output_cost_per_1k=0.0022
    ),
   ]
 
@@ -134,8 +119,11 @@ class ZhipuProvider(AIProvider):
  def test_connection(self)->Dict[str,Any]:
   try:
    client = self._get_client()
+   test_model = self.get_test_model_from_config(self.provider_id)
+   if not test_model:
+    test_model = "glm-4.7-flash"
    response = client.chat.completions.create(
-    model="glm-4-flash",
+    model=test_model,
     messages=[{"role":"user","content":"Hi"}],
     max_tokens=10,
    )

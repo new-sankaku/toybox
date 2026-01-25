@@ -1,0 +1,181 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - navigation [ref=e5]:
+      - button "◉ プロジェクト" [ref=e6] [cursor=pointer]:
+        - generic [ref=e7]: ◉
+        - generic [ref=e8]: プロジェクト
+      - button "⬡ ダッシュボード" [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: ⬡
+        - generic [ref=e11]: ダッシュボード
+      - button "✦ 承認" [active] [ref=e12] [cursor=pointer]:
+        - generic [ref=e13]: ✦
+        - generic [ref=e14]: 承認
+      - button "⊕ 連絡" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: ⊕
+        - generic [ref=e17]: 連絡
+      - button "⚔ エージェント" [ref=e18] [cursor=pointer]:
+        - generic [ref=e19]: ⚔
+        - generic [ref=e20]: エージェント
+      - button "☰ 生成素材" [ref=e21] [cursor=pointer]:
+        - generic [ref=e22]: ☰
+        - generic [ref=e23]: 生成素材
+      - button "¤ コスト" [ref=e24] [cursor=pointer]:
+        - generic [ref=e25]: ¤
+        - generic [ref=e26]: コスト
+      - button "◈ ログ" [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: ◈
+        - generic [ref=e29]: ログ
+      - button "⚙ 設定" [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]: ⚙
+        - generic [ref=e32]: 設定
+    - generic [ref=e36]: Connected
+  - generic [ref=e37]:
+    - main [ref=e38]:
+      - text: ◇ ◇
+      - generic [ref=e40]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - generic [ref=e43]: ◇ 承認一覧
+            - generic [ref=e44]: (0件)
+          - generic [ref=e46]:
+            - paragraph [ref=e47]: 承認がありません
+            - paragraph [ref=e48]: 「未完了」の承認はありません
+        - generic [ref=e49]:
+          - generic [ref=e50]:
+            - generic [ref=e52]: ◇ ステータス
+            - generic [ref=e54]:
+              - button "全て (0)" [ref=e55] [cursor=pointer]:
+                - img [ref=e56]
+                - generic [ref=e58]: 全て
+                - generic [ref=e59]: (0)
+              - button "未完了 (0)" [ref=e60] [cursor=pointer]:
+                - img [ref=e61]
+                - generic [ref=e70]: 未完了
+                - generic [ref=e71]: (0)
+              - button "承認待ち (0)" [ref=e72] [cursor=pointer]:
+                - img [ref=e73]
+                - generic [ref=e76]: 承認待ち
+                - generic [ref=e77]: (0)
+              - button "承認済み (0)" [ref=e78] [cursor=pointer]:
+                - img [ref=e79]
+                - generic [ref=e82]: 承認済み
+                - generic [ref=e83]: (0)
+              - button "却下 (0)" [ref=e84] [cursor=pointer]:
+                - img [ref=e85]
+                - generic [ref=e89]: 却下
+                - generic [ref=e90]: (0)
+              - button "修正要求 (0)" [ref=e91] [cursor=pointer]:
+                - img [ref=e92]
+                - generic [ref=e95]: 修正要求
+                - generic [ref=e96]: (0)
+          - generic [ref=e97]:
+            - generic [ref=e99]: ◇ 並び順
+            - generic [ref=e101]:
+              - button "新しい順" [ref=e102] [cursor=pointer]
+              - button "古い順" [ref=e103] [cursor=pointer]
+          - generic [ref=e104]:
+            - generic [ref=e106]: ◇ 統計
+            - generic [ref=e108]:
+              - generic [ref=e109]:
+                - generic [ref=e110]: 総数
+                - generic [ref=e111]: "0"
+              - generic [ref=e112]:
+                - generic [ref=e113]: 承認率
+                - generic [ref=e114]: 0%
+              - generic [ref=e115]:
+                - generic [ref=e116]: 表示中
+                - generic [ref=e117]: 0件
+    - generic [ref=e118]:
+      - generic [ref=e119]:
+        - button [ref=e120] [cursor=pointer]:
+          - img [ref=e121]
+        - generic [ref=e123]: SUMMARY
+      - generic [ref=e124]:
+        - generic [ref=e125]:
+          - generic [ref=e126]:
+            - generic [ref=e127]: E2E_data_detail1_1769342199274
+            - generic [ref=e128]: 実行中
+          - generic [ref=e129]:
+            - generic [ref=e130]:
+              - generic [ref=e131]: Phase 1
+              - generic [ref=e132]: 0%
+            - progressbar [ref=e133]
+        - generic [ref=e134]:
+          - generic [ref=e135]:
+            - generic [ref=e136]:
+              - generic [ref=e137]: Token
+              - generic [ref=e138]: "0"
+            - generic [ref=e139]:
+              - generic [ref=e140]: 料金
+              - generic [ref=e141]: $0.0000
+            - generic [ref=e142]:
+              - generic [ref=e143]: Agent
+              - generic [ref=e144]: 0/0
+            - generic [ref=e145]:
+              - generic [ref=e146]: 経過時間
+              - generic [ref=e147]: 2秒
+            - generic [ref=e148]:
+              - generic [ref=e149]: 残り時間
+              - generic [ref=e150]: "-"
+            - button "承認待ち 0件" [ref=e151] [cursor=pointer]:
+              - generic [ref=e152]: 承認待ち
+              - generic [ref=e153]: 0件
+            - button "生成素材承認待ち 0件" [ref=e154] [cursor=pointer]:
+              - generic [ref=e155]: 生成素材承認待ち
+              - generic [ref=e156]: 0件
+            - button "Log 0件" [ref=e157] [cursor=pointer]:
+              - generic [ref=e158]: Log
+              - generic [ref=e159]: 0件
+            - button "AI生成中 0件" [ref=e160] [cursor=pointer]:
+              - generic [ref=e161]: AI生成中
+              - generic [ref=e162]: 0件
+          - generic [ref=e163]:
+            - generic [ref=e164]: OUTPUT
+            - generic [ref=e165]:
+              - generic [ref=e166]:
+                - generic [ref=e167]: キャラクター
+                - generic [ref=e168]: 0体
+              - generic [ref=e169]:
+                - generic [ref=e170]: 背景
+                - generic [ref=e171]: 0枚
+              - generic [ref=e172]:
+                - generic [ref=e173]: UIパーツ
+                - generic [ref=e174]: 0点
+              - generic [ref=e175]:
+                - generic [ref=e176]: エフェクト
+                - generic [ref=e177]: 0種
+              - generic [ref=e178]:
+                - generic [ref=e179]: BGM
+                - generic [ref=e180]: 0曲
+              - generic [ref=e181]:
+                - generic [ref=e182]: 効果音
+                - generic [ref=e183]: 0個
+              - generic [ref=e184]:
+                - generic [ref=e185]: ボイス
+                - generic [ref=e186]: 0件
+              - generic [ref=e187]:
+                - generic [ref=e188]: 動画
+                - generic [ref=e189]: 0本
+              - generic [ref=e190]:
+                - generic [ref=e191]: シナリオ
+                - generic [ref=e192]: 0本
+              - generic [ref=e193]:
+                - generic [ref=e194]: コード
+                - generic [ref=e195]: 0行
+              - generic [ref=e196]:
+                - generic [ref=e197]: ドキュメント
+                - generic [ref=e198]: 0件
+              - generic [ref=e199]:
+                - generic [ref=e200]: ファイル合計
+                - generic [ref=e201]: 0件/0B
+        - generic "クリックでオペレーター呼び出し" [ref=e203] [cursor=pointer]:
+          - generic [ref=e204]:
+            - generic [ref=e205]: ◇
+            - generic [ref=e206]: OPERATOR
+            - generic [ref=e209]: STANDBY
+          - img [ref=e212]
+          - generic [ref=e217]: NO SIGNAL
+```

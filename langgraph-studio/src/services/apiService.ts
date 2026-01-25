@@ -382,6 +382,8 @@ export interface AgentDefinition{
  shortLabel:string
  phase:number
  speechBubble:string
+ role?:string
+ highCost?:boolean
 }
 
 export interface UIPhase{
@@ -400,6 +402,34 @@ export interface AgentDefinitionsResponse{
 export const agentDefinitionApi={
  getAll:async():Promise<AgentDefinitionsResponse>=>{
   const response=await api.get('/api/agent-definitions')
+  return response.data
+ }
+}
+
+export interface UISettingsAgent{
+ label:string
+ shortLabel:string
+ phase:number
+ role:string
+ highCost:boolean
+}
+
+export interface UISettingsResponse{
+ uiPhases:UIPhase[]
+ agentServiceMap:Record<string,string>
+ serviceLabels:Record<string,string>
+ statusLabels:Record<string,string>
+ agentStatusLabels:Record<string,string>
+ approvalStatusLabels:Record<string,string>
+ resolutionLabels:Record<string,string>
+ roleLabels:Record<string,string>
+ agentRoles:Record<string,string>
+ agents:Record<string,UISettingsAgent>
+}
+
+export const uiSettingsApi={
+ get:async():Promise<UISettingsResponse>=>{
+  const response=await api.get('/api/config/ui-settings')
   return response.data
  }
 }
@@ -745,6 +775,8 @@ export interface AIServiceMasterData{
   models:AIServiceMasterModel[]
   defaultModel:string
  }>
+ providerTypeMapping?:Record<string,string>
+ reverseProviderTypeMapping?:Record<string,string>
 }
 
 export const aiServiceApi={

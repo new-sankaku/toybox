@@ -161,3 +161,33 @@ class AIProvider(ABC):
   """デフォルトモデルを返す"""
   models = self.get_available_models()
   return models[0].id if models else ""
+
+ @classmethod
+ def load_models_from_config(cls,provider_id:str)->List["ModelInfo"]:
+  from config_loader import get_provider_models
+  models_config = get_provider_models(provider_id)
+  result = []
+  for model in models_config:
+   pricing = model.get("pricing",{})
+   input_cost = pricing.get("input",0.0)
+   output_cost = pricing.get("output",0.0)
+   result.append(ModelInfo(
+    id=model.get("id",""),
+    name=model.get("label",""),
+    max_tokens=model.get("max_tokens",4096),
+    supports_vision=model.get("supports_vision",False),
+    supports_tools=model.get("supports_tools",False),
+    input_cost_per_1k=input_cost / 1000.0 if input_cost else None,
+    output_cost_per_1k=output_cost / 1000.0 if output_cost else None,
+   ))
+  return result
+
+ @classmethod
+ def get_test_model_from_config(cls,provider_id:str)->str:
+  from config_loader import get_provider_test_model
+  return get_provider_test_model(provider_id)
+
+ @classmethod
+ def get_default_model_from_config(cls,provider_id:str)->str:
+  from config_loader import get_provider_default_model
+  return get_provider_default_model(provider_id)

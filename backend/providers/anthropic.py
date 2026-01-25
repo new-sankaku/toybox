@@ -18,6 +18,9 @@ class AnthropicProvider(AIProvider):
   return "Anthropic (Claude)"
 
  def get_available_models(self)->List[ModelInfo]:
+  models = self.load_models_from_config(self.provider_id)
+  if models:
+   return models
   return [
    ModelInfo(
     id="claude-sonnet-4-20250514",
@@ -27,33 +30,6 @@ class AnthropicProvider(AIProvider):
     supports_tools=True,
     input_cost_per_1k=0.003,
     output_cost_per_1k=0.015
-   ),
-   ModelInfo(
-    id="claude-3-5-sonnet-20241022",
-    name="Claude 3.5 Sonnet",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.003,
-    output_cost_per_1k=0.015
-   ),
-   ModelInfo(
-    id="claude-3-5-haiku-20241022",
-    name="Claude 3.5 Haiku",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.001,
-    output_cost_per_1k=0.005
-   ),
-   ModelInfo(
-    id="claude-3-haiku-20240307",
-    name="Claude 3 Haiku",
-    max_tokens=4096,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.00025,
-    output_cost_per_1k=0.00125
    ),
   ]
 
@@ -156,8 +132,11 @@ class AnthropicProvider(AIProvider):
  def test_connection(self)->Dict[str,Any]:
   try:
    client = self._get_client()
+   test_model = self.get_test_model_from_config(self.provider_id)
+   if not test_model:
+    test_model = "claude-haiku-4-5-20250116"
    response = client.messages.create(
-    model="claude-3-haiku-20240307",
+    model=test_model,
     max_tokens=10,
     messages=[{"role":"user","content":"Hi"}]
    )

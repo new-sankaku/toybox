@@ -16,7 +16,10 @@
     "build:linux": "npm run build && electron-builder --linux",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "format": "node scripts/remove-spaces.cjs"
+    "format": "node scripts/remove-spaces.cjs",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:report": "playwright show-report"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -56,6 +59,7 @@
     "@electron-toolkit/eslint-config-ts": "^2.0.0",
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@playwright/test": "^1.58.0",
     "@stylistic/eslint-plugin": "^2.12.0",
     "@types/d3": "^7.4.3",
     "@types/node": "^22.10.2",

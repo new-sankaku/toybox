@@ -5,14 +5,12 @@ import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{
  ToggleLeft,ToggleRight,RefreshCw,
- Eye,EyeOff,ChevronDown,ChevronRight,FolderOpen
+ Eye,EyeOff,ChevronDown,ChevronRight
 }from'lucide-react'
 import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{
  type AIProviderConfig,
  type LLMProviderConfig,
- type ComfyUIConfig,
- type VoicevoxConfig,
  type MusicGeneratorConfig
 }from'@/types/aiProvider'
 
@@ -29,10 +27,6 @@ interface ProviderCardProps{
 
 function LLMProviderForm({provider,onUpdate,isFieldChanged}:{provider:LLMProviderConfig,onUpdate:(u:Partial<LLMProviderConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const[showKey,setShowKey]=useState(false)
- const{master}=useAIServiceStore()
- const providerId=provider.type==='claude'?'anthropic':'openai'
- const providerMaster=master?.providers[providerId]
- const models=providerMaster?.models||[]
  const changedInputClass='border-nier-accent-red text-nier-accent-red'
  const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
 
@@ -57,16 +51,6 @@ function LLMProviderForm({provider,onUpdate,isFieldChanged}:{provider:LLMProvide
     </div>
    </div>
    <div>
-    <label className={cn('block text-nier-caption mb-1',isFieldChanged('model')?'text-nier-accent-red':'text-nier-text-light')}>Model</label>
-    <select
-     className={cn('w-full',baseInputClass,isFieldChanged('model')?changedInputClass:'border-nier-border-light')}
-     value={provider.model}
-     onChange={e=>onUpdate({model:e.target.value})}
-    >
-     {models.map(m=><option key={m.id} value={m.id}>{m.label}</option>)}
-    </select>
-   </div>
-   <div>
     <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
     <input
      type="text"
@@ -75,165 +59,27 @@ function LLMProviderForm({provider,onUpdate,isFieldChanged}:{provider:LLMProvide
      onChange={e=>onUpdate({endpoint:e.target.value})}
     />
    </div>
-   <div className="grid grid-cols-2 gap-3">
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('maxTokens')?'text-nier-accent-red':'text-nier-text-light')}>Max Tokens</label>
-     <input
-      type="number"
-      className={cn('w-full',baseInputClass,isFieldChanged('maxTokens')?changedInputClass:'border-nier-border-light')}
-      value={provider.maxTokens}
-      onChange={e=>onUpdate({maxTokens:parseInt(e.target.value)||4096})}
-     />
-    </div>
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('temperature')?'text-nier-accent-red':'text-nier-text-light')}>Temperature: {provider.temperature}</label>
-     <input
-      type="range"
-      min="0"
-      max="1"
-      step="0.1"
-      className="w-full"
-      value={provider.temperature}
-      onChange={e=>onUpdate({temperature:parseFloat(e.target.value)})}
-     />
-    </div>
-   </div>
   </div>
 )
 }
 
-function ComfyUIForm({provider,onUpdate,isFieldChanged}:{provider:ComfyUIConfig,onUpdate:(u:Partial<ComfyUIConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
- const{master}=useAIServiceStore()
- const comfyuiMaster=master?.providers['comfyui']as{samplers?:string[],schedulers?:string[]}|undefined
- const samplers=comfyuiMaster?.samplers||[]
- const schedulers=comfyuiMaster?.schedulers||[]
+function EndpointOnlyForm({provider,onUpdate,isFieldChanged}:{provider:{endpoint:string},onUpdate:(u:{endpoint:string})=>void,isFieldChanged:(field:string)=>boolean}){
  const changedInputClass='border-nier-accent-red text-nier-accent-red'
  const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
 
  return(
-  <div className="space-y-3">
-   <div>
-    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
-    <input
-     type="text"
-     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
-     value={provider.endpoint}
-     onChange={e=>onUpdate({endpoint:e.target.value})}
-    />
-   </div>
-   <div className="grid grid-cols-2 gap-3">
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('workflowFile')?'text-nier-accent-red':'text-nier-text-light')}>Workflow File</label>
-     <div className="flex gap-2">
-      <input
-       type="text"
-       className={cn('flex-1',baseInputClass,isFieldChanged('workflowFile')?changedInputClass:'border-nier-border-light')}
-       value={provider.workflowFile}
-       onChange={e=>onUpdate({workflowFile:e.target.value})}
-      />
-      <button className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors">
-       <FolderOpen size={16}/>
-      </button>
-     </div>
-    </div>
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('outputDir')?'text-nier-accent-red':'text-nier-text-light')}>Output Dir</label>
-     <input
-      type="text"
-      className={cn('w-full',baseInputClass,isFieldChanged('outputDir')?changedInputClass:'border-nier-border-light')}
-      value={provider.outputDir}
-      onChange={e=>onUpdate({outputDir:e.target.value})}
-     />
-    </div>
-   </div>
-   <div className="grid grid-cols-2 gap-3">
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('steps')?'text-nier-accent-red':'text-nier-text-light')}>Steps</label>
-     <input
-      type="number"
-      className={cn('w-full',baseInputClass,isFieldChanged('steps')?changedInputClass:'border-nier-border-light')}
-      value={provider.steps}
-      onChange={e=>onUpdate({steps:parseInt(e.target.value)||20})}
-     />
-    </div>
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('cfgScale')?'text-nier-accent-red':'text-nier-text-light')}>CFG Scale</label>
-     <input
-      type="number"
-      step="0.5"
-      className={cn('w-full',baseInputClass,isFieldChanged('cfgScale')?changedInputClass:'border-nier-border-light')}
-      value={provider.cfgScale}
-      onChange={e=>onUpdate({cfgScale:parseFloat(e.target.value)||7.0})}
-     />
-    </div>
-   </div>
-   <div className="grid grid-cols-2 gap-3">
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('sampler')?'text-nier-accent-red':'text-nier-text-light')}>Sampler</label>
-     <select
-      className={cn('w-full',baseInputClass,isFieldChanged('sampler')?changedInputClass:'border-nier-border-light')}
-      value={provider.sampler}
-      onChange={e=>onUpdate({sampler:e.target.value})}
-     >
-      {samplers.map(s=><option key={s} value={s}>{s}</option>)}
-     </select>
-    </div>
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('scheduler')?'text-nier-accent-red':'text-nier-text-light')}>Scheduler</label>
-     <select
-      className={cn('w-full',baseInputClass,isFieldChanged('scheduler')?changedInputClass:'border-nier-border-light')}
-      value={provider.scheduler}
-      onChange={e=>onUpdate({scheduler:e.target.value})}
-     >
-      {schedulers.map(s=><option key={s} value={s}>{s}</option>)}
-     </select>
-    </div>
-   </div>
+  <div>
+   <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
+   <input
+    type="text"
+    className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
+    value={provider.endpoint}
+    onChange={e=>onUpdate({endpoint:e.target.value})}
+   />
   </div>
 )
 }
 
-function VoicevoxForm({provider,onUpdate,isFieldChanged}:{provider:VoicevoxConfig,onUpdate:(u:Partial<VoicevoxConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
- const changedInputClass='border-nier-accent-red text-nier-accent-red'
- const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
-
- return(
-  <div className="space-y-3">
-   <div>
-    <label className={cn('block text-nier-caption mb-1',isFieldChanged('endpoint')?'text-nier-accent-red':'text-nier-text-light')}>Endpoint</label>
-    <input
-     type="text"
-     className={cn('w-full',baseInputClass,isFieldChanged('endpoint')?changedInputClass:'border-nier-border-light')}
-     value={provider.endpoint}
-     onChange={e=>onUpdate({endpoint:e.target.value})}
-    />
-   </div>
-   <div className="grid grid-cols-2 gap-3">
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('speakerId')?'text-nier-accent-red':'text-nier-text-light')}>Speaker ID</label>
-     <input
-      type="number"
-      className={cn('w-full',baseInputClass,isFieldChanged('speakerId')?changedInputClass:'border-nier-border-light')}
-      value={provider.speakerId}
-      onChange={e=>onUpdate({speakerId:parseInt(e.target.value)||1})}
-     />
-    </div>
-    <div>
-     <label className={cn('block text-nier-caption mb-1',isFieldChanged('speed')?'text-nier-accent-red':'text-nier-text-light')}>Speed: {provider.speed}</label>
-     <input
-      type="range"
-      min="0.5"
-      max="2.0"
-      step="0.1"
-      className="w-full"
-      value={provider.speed}
-      onChange={e=>onUpdate({speed:parseFloat(e.target.value)})}
-     />
-    </div>
-   </div>
-  </div>
-)
-}
 
 function MusicForm({provider,onUpdate,isFieldChanged}:{provider:MusicGeneratorConfig,onUpdate:(u:Partial<MusicGeneratorConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const[showKey,setShowKey]=useState(false)
@@ -277,12 +123,14 @@ function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardPr
  const[testing,setTesting]=useState(false)
  const[testResult,setTestResult]=useState<{success:boolean,message:string}|null>(null)
 
+ const{master}=useAIServiceStore()
+
  const handleTest=async()=>{
   setTesting(true)
   setTestResult(null)
   try{
    const{aiProviderApi}=await import('@/services/apiService')
-   const providerType=provider.type==='claude'?'anthropic':provider.type
+   const providerType=master?.providerTypeMapping?.[provider.type]||provider.type
    const config:Record<string,unknown>={apiKey:(provider as LLMProviderConfig).apiKey}
    const result=await aiProviderApi.testConnection(providerType,config)
    setTestResult({success:result.success,message:result.message})
@@ -298,9 +146,8 @@ function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardPr
    case'openai':
     return<LLMProviderForm provider={provider as LLMProviderConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'comfyui':
-    return<ComfyUIForm provider={provider as ComfyUIConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'voicevox':
-    return<VoicevoxForm provider={provider as VoicevoxConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
+    return<EndpointOnlyForm provider={provider as{endpoint:string}} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'suno':
     return<MusicForm provider={provider as MusicGeneratorConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    default:
@@ -386,7 +233,7 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
 
  const getServiceLabel=(serviceType:string)=>{
   if(!master)return serviceType
-  return master.services[serviceType]?.label||serviceType
+  return master.services[serviceType as keyof typeof master.services]?.label||serviceType
  }
 
  if(providerLoading){

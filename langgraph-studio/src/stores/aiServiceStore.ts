@@ -12,7 +12,6 @@ import{
  type AIProviderConfig,
  type LLMProviderConfig,
  type ComfyUIConfig,
- type VoicevoxConfig,
  type MusicGeneratorConfig
 }from'@/types/aiProvider'
 
@@ -161,59 +160,52 @@ export const useAIServiceStore=create<AIServiceState>()(
    buildDefaultProviderConfigs:()=>{
     const master=get().master
     if(!master)return[]
+    const reverseMapping=master.reverseProviderTypeMapping||{}
     const configs:AIProviderConfig[]=[]
     for(const[pid,pdata]of Object.entries(master.providers)){
      if(pdata.serviceTypes.includes('llm')){
-      const isAnthropic=pid==='anthropic'
+      const providerType=reverseMapping[pid]||'openai'
       configs.push({
        id:`${pid}-llm-default`,
        name:pdata.label,
-       type:isAnthropic?'claude':'openai',
+       type:providerType as LLMProviderConfig['type'],
        serviceType:'llm',
        providerId:pid,
        enabled:false,
        apiKey:'',
-       model:pdata.defaultModel,
-       endpoint:isAnthropic?'https://api.anthropic.com':'',
-       maxTokens:4096,
-       temperature:0.7
+       endpoint:''
       }as LLMProviderConfig)
      }
      if(pdata.serviceTypes.includes('image')){
+      const providerType=reverseMapping[pid]||'comfyui'
       configs.push({
        id:`${pid}-image-default`,
        name:pdata.label,
-       type:'comfyui',
+       type:providerType as ComfyUIConfig['type'],
        serviceType:'image',
        providerId:pid,
        enabled:false,
-       endpoint:'http://localhost:8188',
-       workflowFile:'default.json',
-       outputDir:'./outputs',
-       steps:20,
-       cfgScale:7.0,
-       sampler:(pdata as{samplers?:string[]}).samplers?.[0]||'euler_ancestral',
-       scheduler:(pdata as{schedulers?:string[]}).schedulers?.[0]||'normal'
+       endpoint:'http://localhost:8188'
       }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('audio')){
+      const providerType=reverseMapping[pid]||'voicevox'
       configs.push({
        id:`${pid}-audio-default`,
        name:pdata.label,
-       type:'voicevox',
+       type:providerType as ComfyUIConfig['type'],
        serviceType:'audio',
        providerId:pid,
        enabled:false,
-       endpoint:'http://localhost:50021',
-       speakerId:1,
-       speed:1.0
-      }as VoicevoxConfig)
+       endpoint:'http://localhost:50021'
+      }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('music')){
+      const providerType=reverseMapping[pid]||'suno'
       configs.push({
        id:`${pid}-music-default`,
        name:pdata.label,
-       type:'suno',
+       type:providerType as MusicGeneratorConfig['type'],
        serviceType:'music',
        providerId:pid,
        enabled:false,

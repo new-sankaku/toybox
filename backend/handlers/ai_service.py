@@ -9,7 +9,9 @@ from ai_config import (
  get_providers_for_service,
  get_pricing_config,
  get_all_model_pricing,
- get_usage_categories
+ get_usage_categories,
+ get_provider_type_mapping,
+ get_reverse_provider_type_mapping
 )
 
 
@@ -78,7 +80,9 @@ def register_ai_service_routes(app:Flask):
    'serviceTypes':get_service_types(),
    'usageCategories':get_usage_categories(),
    'services':services,
-   'providers':providers_out
+   'providers':providers_out,
+   'providerTypeMapping':get_provider_type_mapping(),
+   'reverseProviderTypeMapping':get_reverse_provider_type_mapping()
   })
 
  @app.route('/api/config/ai-providers',methods=['GET'])

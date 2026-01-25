@@ -35,7 +35,29 @@ status_labels:
   completed: 完了
   failed: エラー
 
+agent_status_labels:
+  running: 実行中
+  waiting_approval: 承認待ち
+  pending: 待機中
+  blocked: ブロック
+  completed: 完了
+  failed: エラー
+  idle: 待機
+
+approval_status_labels:
+  pending: 未承認
+  approved: 承認済
+  rejected: 却下
+
 resolution_labels:
   approved: 承認
   rejected: 却下
   revision_requested: 修正依頼
+
+role_labels:
+  leader: リーダー
+  worker: ワーカー
+  splitter: 分割
+  integrator: 統合
+  tester: テスト
+  reviewer: レビュー

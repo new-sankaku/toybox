@@ -18,6 +18,9 @@ class XAIProvider(AIProvider):
   return "xAI (Grok)"
 
  def get_available_models(self)->List[ModelInfo]:
+  models = self.load_models_from_config(self.provider_id)
+  if models:
+   return models
   return [
    ModelInfo(
     id="grok-3",
@@ -27,24 +30,6 @@ class XAIProvider(AIProvider):
     supports_tools=True,
     input_cost_per_1k=0.003,
     output_cost_per_1k=0.015
-   ),
-   ModelInfo(
-    id="grok-3-mini",
-    name="Grok 3 Mini",
-    max_tokens=131072,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.0003,
-    output_cost_per_1k=0.0005
-   ),
-   ModelInfo(
-    id="grok-2",
-    name="Grok 2",
-    max_tokens=131072,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.002,
-    output_cost_per_1k=0.01
    ),
   ]
 
@@ -127,8 +112,11 @@ class XAIProvider(AIProvider):
  def test_connection(self)->Dict[str,Any]:
   try:
    client = self._get_client()
+   test_model = self.get_test_model_from_config(self.provider_id)
+   if not test_model:
+    test_model = "grok-3-mini"
    response = client.chat.completions.create(
-    model="grok-2",
+    model=test_model,
     max_tokens=10,
     messages=[{"role":"user","content":"Hi"}]
    )

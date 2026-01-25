@@ -18,6 +18,7 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{agentApi}from'@/services/apiService'
 import type{Agent,AgentType,AgentStatus}from'@/types/agent'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -426,6 +427,7 @@ export default function WorkflowDiagram():JSX.Element{
  const{currentProject}=useProjectStore()
  const{agents,setAgents}=useAgentStore()
  const{getLabel,getFilteredUIPhases,getWorkflowDependencies,fetchDefinitions,loaded:definitionsLoaded}=useAgentDefinitionStore()
+ const{agentRoles}=useUIConfigStore()
  const[containerSize,setContainerSize]=useState({width:0,height:0})
 
  const handleContainerResize=useCallback((width:number,height:number)=>{
@@ -444,20 +446,19 @@ export default function WorkflowDiagram():JSX.Element{
   const nodes:AgentNodeDef[]=[]
   uiPhases.forEach((phase,phaseIndex)=>{
    phase.agents.forEach(agentType=>{
-    const isDesignAgent=['concept_detail','scenario','world','game_design','tech_spec'].includes(agentType)
-    const isImplAgent=['code','event','ui_integration','asset_integration'].includes(agentType)
-    const isTestAgent=['unit_test','integration_test'].includes(agentType)
+    const role=agentRoles[agentType]||'worker'
+    const hasLW=role==='worker'||role==='tester'
     nodes.push({
      id:agentType,
      type:agentType as AgentType,
      label:agentType,
      uiPhaseIndex:phaseIndex,
-     hasLW:isDesignAgent||isImplAgent||isTestAgent
+     hasLW
     })
    })
   })
   return nodes
- },[uiPhases])
+ },[uiPhases,agentRoles])
 
  const edgeDefs=useMemo<{source:string;target:string}[]>(()=>{
   const edges:{source:string;target:string}[]=[]

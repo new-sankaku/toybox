@@ -41,14 +41,15 @@ function convertApiLog(apiLog:ApiAgentLog):AgentLogEntry{
 export default function AgentsView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter}=useNavigationStore()
- const{agents,setAgents,agentLogs,isLoading}=useAgentStore()
+ const{agents,setAgents,agentLogs,isLoading,version}=useAgentStore()
  const[selectedAgent,setSelectedAgent]=useState<Agent|null>(null)
  const[initialLoading,setInitialLoading]=useState(true)
  const[initialLogsFetched,setInitialLogsFetched]=useState<Record<string,boolean>>({})
 
  useEffect(()=>{
   setSelectedAgent(null)
- },[tabResetCounter])
+  setInitialLogsFetched({})
+ },[tabResetCounter,version])
 
  useEffect(()=>{
   if(!currentProject){
@@ -70,7 +71,7 @@ export default function AgentsView():JSX.Element{
   }
 
   fetchAgents()
- },[currentProject?.id,setAgents])
+ },[currentProject?.id,setAgents,version])
 
  useEffect(()=>{
   if(!selectedAgent)return

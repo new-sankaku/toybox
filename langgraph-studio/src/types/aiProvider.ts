@@ -12,28 +12,17 @@ export interface BaseProviderConfig{
 export interface LLMProviderConfig extends BaseProviderConfig{
  type:'claude'|'openai'
  apiKey:string
- model:string
  endpoint:string
- maxTokens:number
- temperature:number
 }
 
 export interface ComfyUIConfig extends BaseProviderConfig{
  type:'comfyui'
  endpoint:string
- workflowFile:string
- outputDir:string
- steps:number
- cfgScale:number
- sampler:string
- scheduler:string
 }
 
 export interface VoicevoxConfig extends BaseProviderConfig{
  type:'voicevox'
  endpoint:string
- speakerId:number
- speed:number
 }
 
 export interface MusicGeneratorConfig extends BaseProviderConfig{

@@ -6,6 +6,7 @@ agents:
     speech_bubble: 企画を立案します
     quality_check: true
     high_cost: false
+    role: leader
 
   task_split_1:
     label: タスク分割1
@@ -14,6 +15,7 @@ agents:
     speech_bubble: 設計タスクを分配します
     quality_check: true
     high_cost: false
+    role: splitter
 
   concept_detail:
     label: コンセプト
@@ -22,6 +24,7 @@ agents:
     speech_bubble: 企画を練り上げます
     quality_check: true
     high_cost: false
+    role: worker
 
   scenario:
     label: シナリオ
@@ -30,6 +33,7 @@ agents:
     speech_bubble: 物語を紡ぎます
     quality_check: true
     high_cost: false
+    role: worker
 
   world:
     label: 世界観
@@ -38,6 +42,7 @@ agents:
     speech_bubble: 世界を創造します
     quality_check: true
     high_cost: false
+    role: worker
 
   game_design:
     label: ゲームデザイン
@@ -46,6 +51,7 @@ agents:
     speech_bubble: システムを設計します
     quality_check: true
     high_cost: false
+    role: worker
 
   tech_spec:
     label: 技術仕様
@@ -54,6 +60,7 @@ agents:
     speech_bubble: 技術を検証します
     quality_check: true
     high_cost: false
+    role: worker
 
   task_split_2:
     label: タスク分割2
@@ -62,6 +69,7 @@ agents:
     speech_bubble: アセットタスクを分配
     quality_check: true
     high_cost: false
+    role: splitter
 
   asset_character:
     label: キャラクター
@@ -70,6 +78,7 @@ agents:
     speech_bubble: キャラを描くにゃ
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_background:
     label: 背景
@@ -78,6 +87,7 @@ agents:
     speech_bubble: 背景を観察中...
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_ui:
     label: UI
@@ -86,6 +96,7 @@ agents:
     speech_bubble: UIをデザイン中
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_effect:
     label: エフェクト
@@ -94,6 +105,7 @@ agents:
     speech_bubble: キラキラを作るよ
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_bgm:
     label: BGM
@@ -102,6 +114,7 @@ agents:
     speech_bubble: 旋律を奏でます
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_voice:
     label: ボイス
@@ -110,6 +123,7 @@ agents:
     speech_bubble: 声を届けます
     quality_check: true
     high_cost: true
+    role: worker
 
   asset_sfx:
     label: 効果音
@@ -118,6 +132,7 @@ agents:
     speech_bubble: 音を探索中...
     quality_check: true
     high_cost: true
+    role: worker
 
   task_split_3:
     label: タスク分割3
@@ -126,6 +141,7 @@ agents:
     speech_bubble: 実装タスクを分配
     quality_check: true
     high_cost: false
+    role: splitter
 
   code:
     label: コード
@@ -134,6 +150,7 @@ agents:
     speech_bubble: コード...実装中...
     quality_check: true
     high_cost: false
+    role: worker
 
   event:
     label: イベント
@@ -142,6 +159,7 @@ agents:
     speech_bubble: イベントを仕込む
     quality_check: true
     high_cost: false
+    role: worker
 
   ui_integration:
     label: UI統合
@@ -150,6 +168,7 @@ agents:
     speech_bubble: UI部品を組み立て中
     quality_check: true
     high_cost: false
+    role: worker
 
   asset_integration:
     label: アセット統合
@@ -158,6 +177,7 @@ agents:
     speech_bubble: アセットを統合中
     quality_check: true
     high_cost: false
+    role: integrator
 
   task_split_4:
     label: タスク分割4
@@ -166,6 +186,7 @@ agents:
     speech_bubble: テストタスクを分配
     quality_check: true
     high_cost: false
+    role: splitter
 
   unit_test:
     label: 単体テスト
@@ -174,6 +195,7 @@ agents:
     speech_bubble: バグを焼き尽くす！
     quality_check: true
     high_cost: false
+    role: tester
 
   integration_test:
     label: 統合テスト
@@ -182,6 +204,7 @@ agents:
     speech_bubble: 慎重にテスト中...
     quality_check: true
     high_cost: false
+    role: tester
 
 workflow_dependencies:
   concept: []
@@ -281,3 +304,252 @@ agent_asset_mapping:
 
 quality_check_defaults:
   max_retries: 3
+
+agent_generation_types:
+  llm:
+    - concept
+    - task_split_1
+    - concept_detail
+    - game_design
+    - tech_spec
+    - code
+    - event
+    - ui_integration
+    - asset_integration
+    - unit_test
+    - integration_test
+    - task_split_2
+    - task_split_3
+    - task_split_4
+  image:
+    - asset_character
+    - asset_background
+    - asset_ui
+    - asset_effect
+  audio:
+    - world
+    - asset_bgm
+    - asset_voice
+    - asset_sfx
+  dialogue:
+    - scenario
+
+agent_assets:
+  concept:
+    - progress: 50
+      type: document
+      name: concept_draft.md
+      size: 12KB
+    - progress: 90
+      type: document
+      name: concept_final.md
+      size: 28KB
+
+  task_split_1:
+    - progress: 50
+      type: document
+      name: task_breakdown.md
+      size: 25KB
+    - progress: 90
+      type: document
+      name: iteration_plan.md
+      size: 35KB
+
+  concept_detail:
+    - progress: 50
+      type: document
+      name: concept_detail_draft.md
+      size: 18KB
+    - progress: 90
+      type: document
+      name: concept_detail.md
+      size: 32KB
+
+  scenario:
+    - progress: 40
+      type: document
+      name: story_outline.md
+      size: 15KB
+    - progress: 70
+      type: document
+      name: stage_design.md
+      size: 22KB
+    - progress: 90
+      type: document
+      name: dialogue_script.md
+      size: 35KB
+
+  world:
+    - progress: 25
+      type: image
+      name: bg_grassland.png
+      size: 1.8MB
+    - progress: 45
+      type: image
+      name: bg_cave.png
+      size: 2.1MB
+    - progress: 60
+      type: image
+      name: bg_sky.png
+      size: 1.6MB
+    - progress: 75
+      type: audio
+      name: bgm_grassland.wav
+      size: 3.2MB
+    - progress: 85
+      type: audio
+      name: bgm_cave.wav
+      size: 2.8MB
+    - progress: 95
+      type: audio
+      name: bgm_sky.wav
+      size: 3.5MB
+
+  game_design:
+    - progress: 30
+      type: document
+      name: mechanics_spec.md
+      size: 18KB
+    - progress: 45
+      type: image
+      name: ui_wireframe_01.png
+      size: 245KB
+    - progress: 55
+      type: image
+      name: ui_wireframe_02.png
+      size: 312KB
+    - progress: 70
+      type: document
+      name: sound_spec.md
+      size: 8KB
+    - progress: 95
+      type: document
+      name: game_design.md
+      size: 42KB
+
+  tech_spec:
+    - progress: 50
+      type: document
+      name: tech_spec_draft.md
+      size: 20KB
+    - progress: 90
+      type: document
+      name: tech_spec.md
+      size: 38KB
+
+  asset_character:
+    - progress: 35
+      type: image
+      name: ball_concept.png
+      size: 156KB
+    - progress: 50
+      type: image
+      name: ball_sprite_sheet.png
+      size: 512KB
+    - progress: 65
+      type: image
+      name: guide_character.png
+      size: 234KB
+    - progress: 80
+      type: image
+      name: boss_enemy.png
+      size: 445KB
+    - progress: 95
+      type: document
+      name: character_specs.md
+      size: 18KB
+
+  code:
+    - progress: 30
+      type: document
+      name: main.ts
+      size: 8KB
+    - progress: 60
+      type: document
+      name: utils.ts
+      size: 4KB
+    - progress: 90
+      type: document
+      name: game.ts
+      size: 12KB
+
+agent_checkpoints:
+  concept:
+    - progress: 90
+      type: concept_review
+      title: ゲームコンセプトの承認
+
+  task_split_1:
+    - progress: 90
+      type: task_review_1
+      title: タスク分割1のレビュー
+
+  concept_detail:
+    - progress: 90
+      type: concept_detail_review
+      title: コンセプト詳細のレビュー
+
+  scenario:
+    - progress: 90
+      type: scenario_review
+      title: シナリオ構成のレビュー
+
+  world:
+    - progress: 90
+      type: world_review
+      title: 世界観設計のレビュー
+
+  game_design:
+    - progress: 90
+      type: game_design_review
+      title: ゲームデザインのレビュー
+
+  tech_spec:
+    - progress: 90
+      type: tech_spec_review
+      title: 技術仕様のレビュー
+
+  task_split_2:
+    - progress: 90
+      type: task_review_2
+      title: タスク分割2のレビュー
+
+  asset_character:
+    - progress: 90
+      type: character_review
+      title: キャラアセットのレビュー
+
+  asset_ui:
+    - progress: 90
+      type: ui_review
+      title: UIアセットのレビュー
+
+  task_split_3:
+    - progress: 90
+      type: task_review_3
+      title: タスク分割3のレビュー
+
+  code:
+    - progress: 90
+      type: code_review
+      title: コード実装のレビュー
+
+  ui_integration:
+    - progress: 90
+      type: ui_integration_review
+      title: UI統合のレビュー
+
+  task_split_4:
+    - progress: 90
+      type: task_review_4
+      title: タスク分割4のレビュー
+
+  unit_test:
+    - progress: 90
+      type: unit_test_review
+      title: 単体テスト結果のレビュー
+
+  integration_test:
+    - progress: 90
+      type: integration_test_review
+      title: 統合テスト結果のレビュー

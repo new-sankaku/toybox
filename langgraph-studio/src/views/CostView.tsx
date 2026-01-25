@@ -4,28 +4,10 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Progress}from'@/components/ui/Progress'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{useCostSettingsStore}from'@/stores/costSettingsStore'
-import{agentApi,projectSettingsApi,type ApiAgent}from'@/services/apiService'
+import{agentApi,type ApiAgent}from'@/services/apiService'
 import{FolderOpen}from'lucide-react'
-
-const PHASE_GROUPS:Record<string,{label:string;agents:string[]}>={
- phase0:{label:'企画',agents:['concept']},
- phase1:{label:'分割1',agents:['task_split_1']},
- phase2:{label:'設計',agents:['concept_detail','scenario','world','game_design','tech_spec']},
- phase3:{label:'分割2',agents:['task_split_2']},
- phase4:{label:'アセット',agents:['asset_character','asset_background','asset_ui','asset_effect','asset_bgm','asset_voice','asset_sfx']},
- phase5:{label:'分割3',agents:['task_split_3']},
- phase6:{label:'実装',agents:['code','event','ui_integration','asset_integration']},
- phase7:{label:'分割4',agents:['task_split_4']},
- phase8:{label:'テスト',agents:['unit_test','integration_test']}
-}
-
-const SERVICE_LABELS:Record<string,string>={
- llm:'LLM',
- image:'画像',
- music:'音楽',
- audio:'音声'
-}
 
 function formatTokens(num:number):string{
  if(num>=1000000)return`${(num/1000000).toFixed(1)}m`
@@ -40,18 +22,25 @@ function getAgentKey(type:string):string{
 }
 
 export default function CostView():JSX.Element{
- const{currentProject}=useProjectStore()
+ const{currentProject,dataVersion}=useProjectStore()
  const{getLabel}=useAgentDefinitionStore()
+ const{uiPhases,agentServiceMap,serviceLabels}=useUIConfigStore()
  const{pricing,settings,fetchPricing}=useCostSettingsStore()
  const[agents,setAgents]=useState<ApiAgent[]>([])
- const[agentServiceMap,setAgentServiceMap]=useState<Record<string,string>>({})
  const[loading,setLoading]=useState(false)
  const intervalRef=useRef<ReturnType<typeof setInterval>|null>(null)
 
  useEffect(()=>{
   fetchPricing()
-  projectSettingsApi.getAgentServiceMap().then(setAgentServiceMap).catch(console.error)
  },[fetchPricing])
+
+ const phaseGroups=useMemo(()=>{
+  const groups:Record<string,{label:string;agents:string[]}>={}
+  uiPhases.forEach((phase,idx)=>{
+   groups[`phase${idx}`]={label:phase.label,agents:phase.agents}
+  })
+  return groups
+ },[uiPhases])
 
  const fetchData=useCallback(async()=>{
   if(!currentProject)return
@@ -74,18 +63,18 @@ export default function CostView():JSX.Element{
   return()=>{
    if(intervalRef.current)clearInterval(intervalRef.current)
   }
- },[currentProject?.id,fetchData])
+ },[currentProject?.id,fetchData,dataVersion])
 
  const aiServiceGroups=useMemo(()=>{
   const groups:Record<string,{label:string;agents:string[]}>={}
   Object.entries(agentServiceMap).forEach(([agent,service])=>{
    if(!groups[service]){
-    groups[service]={label:SERVICE_LABELS[service]||service,agents:[]}
+    groups[service]={label:serviceLabels[service]||service,agents:[]}
    }
    groups[service].agents.push(agent)
   })
   return groups
- },[agentServiceMap])
+ },[agentServiceMap,serviceLabels])
 
  const calculateCost=useCallback((input:number,output:number):number=>{
   console.log('[CostView] calculateCost:',{input,output,pricing,models:pricing?.models})
@@ -144,7 +133,7 @@ export default function CostView():JSX.Element{
  }
 
  const serviceGroupedData=useMemo(()=>createGroupedData(aiServiceGroups),[agentTokenMap,getLabel,aiServiceGroups,calculateCost])
- const phaseGroupedData=useMemo(()=>createGroupedData(PHASE_GROUPS),[agentTokenMap,getLabel,calculateCost])
+ const phaseGroupedData=useMemo(()=>createGroupedData(phaseGroups),[agentTokenMap,getLabel,phaseGroups,calculateCost])
 
  const totals=useMemo(()=>{
   const input=agents.reduce((sum,a)=>sum+(a.inputTokens||0),0)

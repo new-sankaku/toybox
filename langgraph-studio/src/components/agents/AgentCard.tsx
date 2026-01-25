@@ -1,6 +1,7 @@
 import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle}from'lucide-react'
 
 interface AgentCardProps{
@@ -55,28 +56,6 @@ const getDisplayName=(agent:Agent):string=>{
  return(agent.metadata?.displayName as string)||agent.type
 }
 
-const getAgentRole=(type:string):{role:string}=>{
- if(type.endsWith('_leader')){
-  return{role:'Leader'}
- }
- if(type.endsWith('_worker')){
-  return{role:'Worker'}
- }
- if(type==='integrator'){
-  return{role:'Leader'}
- }
- if(type==='tester'){
-  return{role:'Worker'}
- }
- if(type==='reviewer'){
-  return{role:'Leader'}
- }
- if(['concept','design','scenario','character','world','task_split'].includes(type)){
-  return{role:'Leader'}
- }
- return{role:'Worker'}
-}
-
 export function AgentCard({
  agent,
  onSelect,
@@ -86,7 +65,9 @@ export function AgentCard({
 }:AgentCardProps):JSX.Element{
  const status=statusConfig[agent.status]
  const StatusIcon=status.icon
- const agentRole=getAgentRole(agent.type)
+ const{getAgentRole,getRoleLabel}=useUIConfigStore()
+ const role=getAgentRole(agent.type)
+ const roleLabel=getRoleLabel(role)
 
  const getRuntime=()=>{
   if(!agent.startedAt)return'-'
@@ -136,7 +117,7 @@ export function AgentCard({
 
     {/*Col 2: Role badge*/}
     <span className="text-nier-caption text-nier-text-light">
-     [{agentRole.role}]
+     [{roleLabel}]
     </span>
 
     {/*Col 3: Agent Type*/}

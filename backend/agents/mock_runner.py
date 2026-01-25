@@ -9,17 +9,10 @@ from .base import (
     AgentType,
     AgentStatus,
 )
+from config_loader import get_mock_content,get_checkpoint_title_config
 
 
 class MockAgentRunner(AgentRunner):
-    SUPPORTED_AGENTS = [
-        "concept","task_split_1","concept_detail","scenario","world",
-        "game_design","tech_spec","task_split_2","asset_character",
-        "asset_background","asset_ui","asset_effect","asset_bgm",
-        "asset_voice","asset_sfx","task_split_3","code","event",
-        "ui_integration","asset_integration","task_split_4",
-        "unit_test","integration_test"
-    ]
 
     def __init__(self,data_store=None,**kwargs):
         self.data_store = data_store
@@ -137,17 +130,7 @@ class MockAgentRunner(AgentRunner):
 
     def _generate_mock_output(self,context:AgentContext)->Dict[str,Any]:
         agent_type = context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
-
-        mock_contents = {
-            "concept":"# ゲームコンセプト\n\n## 概要\nモックによる自動生成コンセプト。",
-            "game_design":"# ゲームデザイン\n\n## メカニクス\nモックによる自動生成デザイン。",
-            "scenario":"# シナリオ\n\n## ストーリー\nモックによる自動生成シナリオ。",
-            "world":"# 世界観\n\n## 設定\nモックによる自動生成世界観。",
-            "tech_spec":"# 技術仕様\n\n## アーキテクチャ\nモックによる自動生成仕様。",
-            "code":"// モック生成コード\nconsole.log('Hello, Game!');",
-        }
-
-        content = mock_contents.get(agent_type,f"# {agent_type}\n\nモックによる自動生成出力。")
+        content = get_mock_content(agent_type)
 
         return {
             "type":"document",
@@ -162,18 +145,9 @@ class MockAgentRunner(AgentRunner):
 
     def _generate_checkpoint(self,context:AgentContext,output:Dict[str,Any])->Dict[str,Any]:
         agent_type = context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
-
-        checkpoint_titles = {
-            "concept":("concept_review","ゲームコンセプトのレビュー"),
-            "game_design":("design_review","ゲームデザインのレビュー"),
-            "scenario":("scenario_review","シナリオのレビュー"),
-            "world":("world_review","世界観設定のレビュー"),
-            "tech_spec":("tech_review","技術仕様のレビュー"),
-            "code":("code_review","コード実装のレビュー"),
-            "unit_test":("test_review","テスト結果のレビュー"),
-        }
-
-        cp_type,title = checkpoint_titles.get(agent_type,("review","レビュー依頼"))
+        cp_config = get_checkpoint_title_config(agent_type)
+        cp_type = cp_config.get("type","review")
+        title = cp_config.get("title","レビュー依頼")
 
         return {
             "type":cp_type,
@@ -184,18 +158,7 @@ class MockAgentRunner(AgentRunner):
         }
 
     def get_supported_agents(self)->List[AgentType]:
-        result = []
-        for agent_str in self.SUPPORTED_AGENTS:
-            try:
-                result.append(AgentType(agent_str))
-            except ValueError:
-                pass
-
-        for agent_type in AgentType:
-            if agent_type not in result:
-                result.append(agent_type)
-
-        return result
+        return list(AgentType)
 
     def validate_context(self,context:AgentContext)->bool:
         return True

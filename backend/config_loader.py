@@ -358,3 +358,142 @@ def get_ui_phases()->List[Dict[str,Any]]:
 def get_agent_asset_mapping()->Dict[str,List[str]]:
     config = get_agents_config()
     return config.get("agent_asset_mapping",{})
+
+
+def get_agent_status_labels()->Dict[str,str]:
+    return get_checkpoints_config().get("agent_status_labels",{})
+
+
+def get_approval_status_labels()->Dict[str,str]:
+    return get_checkpoints_config().get("approval_status_labels",{})
+
+
+def get_role_labels()->Dict[str,str]:
+    return get_checkpoints_config().get("role_labels",{})
+
+
+def get_agent_roles()->Dict[str,str]:
+    config = get_agents_config()
+    agents = config.get("agents",{})
+    return {k:v.get("role","worker") for k,v in agents.items()}
+
+
+_prompt_cache:Dict[str,str] = {}
+
+
+def load_prompt(agent_type:str)->str:
+    global _prompt_cache
+    if agent_type in _prompt_cache:
+        return _prompt_cache[agent_type]
+    prompts_dir = get_config_dir() / "prompts"
+    prompt_file = prompts_dir / f"{agent_type}.md"
+    if not prompt_file.exists():
+        prompt_file = prompts_dir / "_default.md"
+    if not prompt_file.exists():
+        return ""
+    with open(prompt_file,"r",encoding="utf-8") as f:
+        content = f.read()
+    _prompt_cache[agent_type] = content
+    return content
+
+
+def get_all_prompts()->Dict[str,str]:
+    prompts_dir = get_config_dir() / "prompts"
+    if not prompts_dir.exists():
+        return {}
+    result = {}
+    for prompt_file in prompts_dir.glob("*.md"):
+        if prompt_file.name.startswith("_"):
+            continue
+        agent_type = prompt_file.stem
+        result[agent_type] = load_prompt(agent_type)
+    return result
+
+
+def clear_prompt_cache()->None:
+    global _prompt_cache
+    _prompt_cache.clear()
+
+
+def get_mock_data_config()->Dict[str,Any]:
+    return load_yaml_config("mock_data.yaml")
+
+
+def get_mock_content(agent_type:str)->str:
+    config = get_mock_data_config()
+    mock_contents = config.get("mock_contents",{})
+    content = mock_contents.get(agent_type)
+    if content is None:
+        default_content = mock_contents.get("default","# {agent_type}\n\nモックによる自動生成出力。")
+        return default_content.replace("{agent_type}",agent_type)
+    return content
+
+
+def get_checkpoint_title_config(agent_type:str)->Dict[str,str]:
+    config = get_mock_data_config()
+    titles = config.get("checkpoint_titles",{})
+    return titles.get(agent_type,titles.get("default",{"type":"review","title":"レビュー依頼"}))
+
+
+def get_checkpoint_content(checkpoint_type:str)->str:
+    config = get_mock_data_config()
+    contents = config.get("checkpoint_contents",{})
+    content = contents.get(checkpoint_type)
+    if content is None:
+        default_content = contents.get("default","# {checkpoint_type}\n\n内容を確認してください。")
+        return default_content.replace("{checkpoint_type}",checkpoint_type)
+    return content
+
+
+def get_api_runner_checkpoint_config(agent_type:str)->Dict[str,str]:
+    config = get_mock_data_config()
+    configs = config.get("api_runner_checkpoint_config",{})
+    return configs.get(agent_type,configs.get("default",{"type":"review","title":"レビュー依頼"}))
+
+
+def get_generation_type_for_agent(agent_type:str)->str:
+    config = get_agents_config()
+    gen_types = config.get("agent_generation_types",{})
+    for gen_type,agents in gen_types.items():
+        if agent_type in agents:
+            return gen_type
+    return "llm"
+
+
+def get_agent_assets(agent_type:str)->List[Dict[str,Any]]:
+    config = get_agents_config()
+    assets = config.get("agent_assets",{})
+    return assets.get(agent_type,[])
+
+
+def get_agent_checkpoints(agent_type:str)->List[Dict[str,Any]]:
+    config = get_agents_config()
+    checkpoints = config.get("agent_checkpoints",{})
+    return checkpoints.get(agent_type,[])
+
+
+def get_provider_config(provider_id:str)->Dict[str,Any]:
+    config = get_ai_providers_config()
+    providers = config.get("providers",{})
+    return providers.get(provider_id,{})
+
+
+def get_provider_models(provider_id:str)->List[Dict[str,Any]]:
+    provider = get_provider_config(provider_id)
+    return provider.get("models",[])
+
+
+def get_provider_test_model(provider_id:str)->str:
+    provider = get_provider_config(provider_id)
+    test_model = provider.get("test_model")
+    if test_model:
+        return test_model
+    models = provider.get("models",[])
+    if models:
+        return models[0].get("id","")
+    return ""
+
+
+def get_provider_default_model(provider_id:str)->str:
+    provider = get_provider_config(provider_id)
+    return provider.get("default_model","")

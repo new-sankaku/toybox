@@ -1,0 +1,193 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - navigation [ref=e5]:
+      - button "◉ プロジェクト" [ref=e6] [cursor=pointer]:
+        - generic [ref=e7]: ◉
+        - generic [ref=e8]: プロジェクト
+      - button "⬡ ダッシュボード" [ref=e9] [cursor=pointer]:
+        - generic [ref=e10]: ⬡
+        - generic [ref=e11]: ダッシュボード
+      - button "✦ 承認" [ref=e12] [cursor=pointer]:
+        - generic [ref=e13]: ✦
+        - generic [ref=e14]: 承認
+      - button "⊕ 連絡" [ref=e15] [cursor=pointer]:
+        - generic [ref=e16]: ⊕
+        - generic [ref=e17]: 連絡
+      - button "⚔ エージェント" [ref=e18] [cursor=pointer]:
+        - generic [ref=e19]: ⚔
+        - generic [ref=e20]: エージェント
+      - button "☰ 生成素材" [ref=e21] [cursor=pointer]:
+        - generic [ref=e22]: ☰
+        - generic [ref=e23]: 生成素材
+      - button "¤ コスト" [ref=e24] [cursor=pointer]:
+        - generic [ref=e25]: ¤
+        - generic [ref=e26]: コスト
+      - button "◈ ログ" [active] [ref=e27] [cursor=pointer]:
+        - generic [ref=e28]: ◈
+        - generic [ref=e29]: ログ
+      - button "⚙ 設定" [ref=e30] [cursor=pointer]:
+        - generic [ref=e31]: ⚙
+        - generic [ref=e32]: 設定
+    - generic [ref=e36]: Connected
+  - generic [ref=e37]:
+    - main [ref=e38]:
+      - text: ◇ ◇
+      - generic [ref=e40]:
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e44]: ◇ ログ一覧
+            - generic [ref=e45]: 1件
+          - generic [ref=e49] [cursor=pointer]:
+            - generic [ref=e50]: 20:58:41
+            - img [ref=e52]
+            - generic [ref=e54]: System
+            - generic [ref=e55]: プロジェクト作成
+        - generic [ref=e56]:
+          - generic [ref=e57]:
+            - generic [ref=e59]: ◇ 検索
+            - generic [ref=e61]:
+              - img [ref=e62]
+              - textbox "検索..." [ref=e65]
+          - generic [ref=e66]:
+            - generic [ref=e68]: ◇ レベル
+            - generic [ref=e70]:
+              - button "全て (1)" [ref=e71] [cursor=pointer]:
+                - generic [ref=e72]: 全て
+                - generic [ref=e73]: (1)
+              - button "ERROR (0)" [ref=e74] [cursor=pointer]:
+                - img [ref=e75]
+                - generic [ref=e77]: ERROR
+                - generic [ref=e78]: (0)
+              - button "WARN (0)" [ref=e79] [cursor=pointer]:
+                - img [ref=e80]
+                - generic [ref=e82]: WARN
+                - generic [ref=e83]: (0)
+              - button "INFO (1)" [ref=e84] [cursor=pointer]:
+                - img [ref=e85]
+                - generic [ref=e87]: INFO
+                - generic [ref=e88]: (1)
+              - button "DEBUG (0)" [ref=e89] [cursor=pointer]:
+                - img [ref=e90]
+                - generic [ref=e99]: DEBUG
+                - generic [ref=e100]: (0)
+          - generic [ref=e101]:
+            - generic [ref=e103]: ◇ エージェント
+            - button "全て" [ref=e106] [cursor=pointer]:
+              - generic [ref=e107]: 全て
+              - img [ref=e108]
+          - generic [ref=e110]:
+            - generic [ref=e112]: ◇ 統計
+            - generic [ref=e114]:
+              - generic [ref=e115]:
+                - generic [ref=e116]: エラー
+                - generic [ref=e117]: "0"
+              - generic [ref=e118]:
+                - generic [ref=e119]: 警告
+                - generic [ref=e120]: "0"
+              - generic [ref=e121]:
+                - generic [ref=e122]: 情報
+                - generic [ref=e123]: "1"
+              - generic [ref=e124]:
+                - generic [ref=e125]: デバッグ
+                - generic [ref=e126]: "0"
+    - generic [ref=e127]:
+      - generic [ref=e128]:
+        - button [ref=e129] [cursor=pointer]:
+          - img [ref=e130]
+        - generic [ref=e132]: SUMMARY
+      - generic [ref=e133]:
+        - generic [ref=e134]:
+          - generic [ref=e135]:
+            - generic [ref=e136]: E2E_log_agent1_1769342316121
+            - generic [ref=e137]: 下書き
+          - generic [ref=e138]:
+            - generic [ref=e139]:
+              - generic [ref=e140]: "Phase 1: 企画・設計"
+              - generic [ref=e141]: 0%
+            - progressbar [ref=e142]
+        - generic [ref=e143]:
+          - generic [ref=e144]:
+            - generic [ref=e145]:
+              - generic [ref=e146]: Token
+              - generic [ref=e147]: "0"
+            - generic [ref=e148]:
+              - generic [ref=e149]: 料金
+              - generic [ref=e150]: $0.0000
+            - generic [ref=e151]:
+              - generic [ref=e152]: Agent
+              - generic [ref=e153]: 0/0
+            - generic [ref=e154]:
+              - generic [ref=e155]: 経過時間
+              - generic [ref=e156]: 0秒
+            - generic [ref=e157]:
+              - generic [ref=e158]: 残り時間
+              - generic [ref=e159]: "-"
+            - button "承認待ち 0件" [ref=e160] [cursor=pointer]:
+              - generic [ref=e161]: 承認待ち
+              - generic [ref=e162]: 0件
+            - button "生成素材承認待ち 0件" [ref=e163] [cursor=pointer]:
+              - generic [ref=e164]: 生成素材承認待ち
+              - generic [ref=e165]: 0件
+            - button "Log 1件" [ref=e166] [cursor=pointer]:
+              - generic [ref=e167]: Log
+              - generic [ref=e168]: 1件
+            - button "AI生成中 0件" [ref=e169] [cursor=pointer]:
+              - generic [ref=e170]: AI生成中
+              - generic [ref=e171]: 0件
+          - generic [ref=e172]:
+            - generic [ref=e173]: OUTPUT
+            - generic [ref=e174]:
+              - generic [ref=e175]:
+                - generic [ref=e176]: キャラクター
+                - generic [ref=e177]: 0体
+              - generic [ref=e178]:
+                - generic [ref=e179]: 背景
+                - generic [ref=e180]: 0枚
+              - generic [ref=e181]:
+                - generic [ref=e182]: UIパーツ
+                - generic [ref=e183]: 0点
+              - generic [ref=e184]:
+                - generic [ref=e185]: エフェクト
+                - generic [ref=e186]: 0種
+              - generic [ref=e187]:
+                - generic [ref=e188]: BGM
+                - generic [ref=e189]: 0曲
+              - generic [ref=e190]:
+                - generic [ref=e191]: 効果音
+                - generic [ref=e192]: 0個
+              - generic [ref=e193]:
+                - generic [ref=e194]: ボイス
+                - generic [ref=e195]: 0件
+              - generic [ref=e196]:
+                - generic [ref=e197]: 動画
+                - generic [ref=e198]: 0本
+              - generic [ref=e199]:
+                - generic [ref=e200]: シナリオ
+                - generic [ref=e201]: 0本
+              - generic [ref=e202]:
+                - generic [ref=e203]: コード
+                - generic [ref=e204]: 0行
+              - generic [ref=e205]:
+                - generic [ref=e206]: ドキュメント
+                - generic [ref=e207]: 0件
+              - generic [ref=e208]:
+                - generic [ref=e209]: ファイル合計
+                - generic [ref=e210]: 0件/0B
+        - generic [ref=e212]:
+          - generic [ref=e213]:
+            - generic [ref=e214]: ◇
+            - generic [ref=e215]: OPERATOR
+            - generic [ref=e218]: ONLINE
+          - img [ref=e221]
+          - generic [ref=e235]: TRANSMISSION
+  - generic [ref=e237] [cursor=pointer]:
+    - generic [ref=e238]:
+      - generic [ref=e239]:
+        - generic [ref=e240]: ◇
+        - text: オペレーター
+      - paragraph [ref=e241]: プロジェクト「E2E_log_agent1_1769342316121」を選択しました。ダッシュボードで進捗を確認できます。
+    - generic [ref=e242]: Click to close
+```

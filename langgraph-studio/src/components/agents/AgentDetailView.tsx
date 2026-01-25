@@ -4,6 +4,7 @@ import{Button}from'@/components/ui/Button'
 import{Progress}from'@/components/ui/Progress'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentLogStreaming}from'./AgentLog'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import{
  ArrowLeft,
@@ -23,14 +24,6 @@ interface AgentDetailViewProps{
  onPause?:()=>void
 }
 
-const statusLabels:Record<string,{text:string;color:string}>={
- pending:{text:'待機中',color:'text-nier-text-light'},
- running:{text:'実行中',color:'text-nier-text-light'},
- completed:{text:'完了',color:'text-nier-text-light'},
- failed:{text:'エラー',color:'text-nier-text-light'},
- blocked:{text:'ブロック',color:'text-nier-text-light'}
-}
-
 const getDisplayName=(agent:Agent):string=>{
  return(agent.metadata?.displayName as string)||agent.type
 }
@@ -43,8 +36,7 @@ export default function AgentDetailView({
  onPause
 }:AgentDetailViewProps):JSX.Element{
  const[showMetadata,setShowMetadata]=useState(false)
-
- const status=statusLabels[agent.status]
+ const getAgentStatusLabel=useUIConfigStore(s=>s.getAgentStatusLabel)
 
  const getRuntime=()=>{
   if(!agent.startedAt)return'-'
@@ -72,7 +64,7 @@ export default function AgentDetailView({
       </h1>
      </div>
      <div className="flex items-center gap-4 text-nier-small text-nier-text-light ml-4">
-      <span className={status.color}>{status.text}</span>
+      <span>{getAgentStatusLabel(agent.status)}</span>
       <span>|</span>
       <span>ID: {agent.id.slice(0,8)}...</span>
      </div>

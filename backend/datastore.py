@@ -23,6 +23,10 @@ from config_loader import (
  get_initial_task,
  get_task_for_progress,
  get_milestones,
+ get_generation_type_for_agent,
+ get_agent_assets,
+ get_agent_checkpoints,
+ get_checkpoint_content,
 )
 from asset_scanner import get_testdata_path
 
@@ -531,46 +535,15 @@ class DataStore:
   return f"{mins}:{secs:02d}"
 
  def _get_asset_points(self,agent_type:str)->List[tuple]:
-  assets={
-   "concept":[(50,"document","concept_draft.md","12KB"),(90,"document","concept_final.md","28KB")],
-   "task_split_1":[(50,"document","task_breakdown.md","25KB"),(90,"document","iteration_plan.md","35KB")],
-   "concept_detail":[(50,"document","concept_detail_draft.md","18KB"),(90,"document","concept_detail.md","32KB")],
-   "scenario":[(40,"document","story_outline.md","15KB"),(70,"document","stage_design.md","22KB"),(90,"document","dialogue_script.md","35KB")],
-   "world":[(25,"image","bg_grassland.png","1.8MB"),(45,"image","bg_cave.png","2.1MB"),(60,"image","bg_sky.png","1.6MB"),(75,"audio","bgm_grassland.wav","3.2MB"),(85,"audio","bgm_cave.wav","2.8MB"),(95,"audio","bgm_sky.wav","3.5MB")],
-   "game_design":[(30,"document","mechanics_spec.md","18KB"),(45,"image","ui_wireframe_01.png","245KB"),(55,"image","ui_wireframe_02.png","312KB"),(70,"document","sound_spec.md","8KB"),(95,"document","game_design.md","42KB")],
-   "tech_spec":[(50,"document","tech_spec_draft.md","20KB"),(90,"document","tech_spec.md","38KB")],
-   "asset_character":[(35,"image","ball_concept.png","156KB"),(50,"image","ball_sprite_sheet.png","512KB"),(65,"image","guide_character.png","234KB"),(80,"image","boss_enemy.png","445KB"),(95,"document","character_specs.md","18KB")],
-   "code":[(30,"document","main.ts","8KB"),(60,"document","utils.ts","4KB"),(90,"document","game.ts","12KB")],
-  }
-  return assets.get(agent_type,[])
+  assets = get_agent_assets(agent_type)
+  return [(a.get("progress",0),a.get("type","document"),a.get("name",""),a.get("size","")) for a in assets]
 
  def _get_checkpoint_points(self,agent_type:str)->List[tuple]:
-  checkpoints={
-   "concept":[(90,"concept_review","ゲームコンセプトの承認")],
-   "task_split_1":[(90,"task_review_1","タスク分割1のレビュー")],
-   "concept_detail":[(90,"concept_detail_review","コンセプト詳細のレビュー")],
-   "scenario":[(90,"scenario_review","シナリオ構成のレビュー")],
-   "world":[(90,"world_review","世界観設計のレビュー")],
-   "game_design":[(90,"game_design_review","ゲームデザインのレビュー")],
-   "tech_spec":[(90,"tech_spec_review","技術仕様のレビュー")],
-   "task_split_2":[(90,"task_review_2","タスク分割2のレビュー")],
-   "asset_character":[(90,"character_review","キャラアセットのレビュー")],
-   "asset_ui":[(90,"ui_review","UIアセットのレビュー")],
-   "task_split_3":[(90,"task_review_3","タスク分割3のレビュー")],
-   "code":[(90,"code_review","コード実装のレビュー")],
-   "ui_integration":[(90,"ui_integration_review","UI統合のレビュー")],
-   "task_split_4":[(90,"task_review_4","タスク分割4のレビュー")],
-   "unit_test":[(90,"unit_test_review","単体テスト結果のレビュー")],
-   "integration_test":[(90,"integration_test_review","統合テスト結果のレビュー")],
-  }
-  return checkpoints.get(agent_type,[])
+  checkpoints = get_agent_checkpoints(agent_type)
+  return [(c.get("progress",90),c.get("type","review"),c.get("title","レビュー")) for c in checkpoints]
 
  def _generate_checkpoint_content(self,agent_type:str,cp_type:str)->str:
-  contents={
-   "concept_review":"# ゲームコンセプト\n\n## 概要\nボールを操作してゴールを目指すシンプルなパズルゲーム。\n\n## 特徴\n- 物理演算ベースのリアルな挙動\n- 全30ステージ\n- スコアシステム（タイム + コイン収集）\n\n## ターゲット\n全年齢向け、カジュアルゲーマー",
-   "design_review":"# ゲームデザイン\n\n## 操作方法\n- 矢印キー: ボールの移動\n- スペースキー: ジャンプ\n- R: リスタート\n\n## 物理パラメータ\n- 重力: 9.8 m/s²\n- 摩擦係数: 0.3\n- 反発係数: 0.7",
-  }
-  return contents.get(cp_type,f"# {cp_type}\n\n内容を確認してください。")
+  return get_checkpoint_content(cp_type)
 
  def _add_agent_log_internal(self,session,agent_id:str,level:str,message:str,progress:int=None):
   repo=AgentLogRepository(session)
@@ -581,17 +554,7 @@ class DataStore:
   repo.add_log(project_id,level,source,message)
 
  def _get_generation_type(self,agent_type:str)->str:
-  llm_types=['concept','task_split_1','concept_detail','game_design','tech_spec','code','event','ui_integration','asset_integration','unit_test','integration_test']
-  image_types=['asset_character','asset_background','asset_ui','asset_effect']
-  audio_types=['world','asset_bgm','asset_voice','asset_sfx']
-  dialogue_types=['scenario']
-  if agent_type in dialogue_types:
-   return 'dialogue'
-  if agent_type in audio_types:
-   return 'audio'
-  if agent_type in image_types:
-   return 'image'
-  return 'llm'
+  return get_generation_type_for_agent(agent_type)
 
  def _calculate_generation_counts(self,agents:List[Dict])->Dict:
   counts={

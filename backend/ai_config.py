@@ -21,6 +21,13 @@ def get_service_types()->List[str]:
 def get_service_labels()->Dict[str,str]:
  return _load_config().get('service_labels',{})
 
+def get_provider_type_mapping()->Dict[str,str]:
+ return _load_config().get('provider_type_mapping',{})
+
+def get_reverse_provider_type_mapping()->Dict[str,str]:
+ mapping = get_provider_type_mapping()
+ return {v:k for k,v in mapping.items()}
+
 def get_defaults()->Dict[str,Dict[str,str]]:
  return _load_config().get('defaults',{})
 

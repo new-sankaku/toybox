@@ -2,13 +2,15 @@ import{useEffect,useRef,useCallback}from'react'
 import{QueryClient,QueryClientProvider}from'@tanstack/react-query'
 import AppLayout from'./components/layout/AppLayout'
 import DashboardView from'./components/dashboard/DashboardView'
-import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,TraceView,DataView,CostView,ConfigView}from'./views'
+import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,CostView,ConfigView}from'./views'
 import{useNavigationStore}from'./stores/navigationStore'
 import{useProjectStore}from'./stores/projectStore'
 import{useAgentStore}from'./stores/agentStore'
 import{useCheckpointStore}from'./stores/checkpointStore'
 import{useMetricsStore}from'./stores/metricsStore'
+import{useLogStore}from'./stores/logStore'
 import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
+import{useUIConfigStore}from'./stores/uiConfigStore'
 import{useNavigatorStore}from'./stores/navigatorStore'
 import{websocketService}from'./services/websocketService'
 import{agentApi}from'./services/apiService'
@@ -33,7 +35,9 @@ function App():JSX.Element{
  const{setAgents,reset:resetAgentStore}=useAgentStore()
  const resetCheckpointStore=useCheckpointStore(s=>s.reset)
  const resetMetricsStore=useMetricsStore(s=>s.reset)
+ const resetLogStore=useLogStore(s=>s.reset)
  const{fetchDefinitions}=useAgentDefinitionStore()
+ const{fetchSettings:fetchUISettings}=useUIConfigStore()
  const{showMessage}=useNavigatorStore()
  const previousProjectIdRef=useRef<string|null>(null)
  const previousDataVersionRef=useRef<number>(dataVersion)
@@ -100,6 +104,7 @@ function App():JSX.Element{
   websocketService.connect(backendUrl)
 
   fetchDefinitions()
+  fetchUISettings()
 
   if(!hasShownWelcomeRef.current){
    hasShownWelcomeRef.current=true
@@ -111,7 +116,7 @@ function App():JSX.Element{
   return()=>{
    websocketService.disconnect()
   }
- },[fetchDefinitions,showMessage])
+ },[fetchDefinitions,fetchUISettings,showMessage])
 
  useEffect(()=>{
   const projectId=currentProject?.id ?? null
@@ -152,9 +157,10 @@ function App():JSX.Element{
    resetAgentStore()
    resetCheckpointStore()
    resetMetricsStore()
+   resetLogStore()
    previousDataVersionRef.current=dataVersion
   }
- },[dataVersion,resetAgentStore,resetCheckpointStore,resetMetricsStore])
+ },[dataVersion,resetAgentStore,resetCheckpointStore,resetMetricsStore,resetLogStore])
 
  const renderOtherContent=()=>{
   switch(activeTab){
@@ -168,8 +174,6 @@ function App():JSX.Element{
     return<AgentsView/>
    case'logs':
     return<LogsView/>
-   case'trace':
-    return<TraceView/>
    case'data':
     return<DataView/>
    case'cost':

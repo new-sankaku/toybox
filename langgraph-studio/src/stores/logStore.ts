@@ -5,6 +5,7 @@ interface LogState{
  logs:ApiSystemLog[]
  isLoading:boolean
  error:string|null
+ version:number
  setLogs:(logs:ApiSystemLog[])=>void
  addLog:(log:ApiSystemLog)=>void
  setLoading:(loading:boolean)=>void
@@ -18,6 +19,7 @@ export const useLogStore=create<LogState>((set,get)=>({
  logs:[],
  isLoading:false,
  error:null,
+ version:0,
 
  setLogs:(logs)=>set({logs}),
 
@@ -30,11 +32,12 @@ export const useLogStore=create<LogState>((set,get)=>({
 
  setError:(error)=>set({error}),
 
- reset:()=>set({
+ reset:()=>set((state)=>({
   logs:[],
   isLoading:false,
-  error:null
- }),
+  error:null,
+  version:state.version+1
+ })),
 
  getLogsByLevel:(level)=>{
   return get().logs.filter((log)=>log.level===level)

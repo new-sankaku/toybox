@@ -1,0 +1,154 @@
+mock_contents:
+  concept: |
+    # ゲームコンセプト
+
+    ## 概要
+    モックによる自動生成コンセプト。
+
+  game_design: |
+    # ゲームデザイン
+
+    ## メカニクス
+    モックによる自動生成デザイン。
+
+  scenario: |
+    # シナリオ
+
+    ## ストーリー
+    モックによる自動生成シナリオ。
+
+  world: |
+    # 世界観
+
+    ## 設定
+    モックによる自動生成世界観。
+
+  tech_spec: |
+    # 技術仕様
+
+    ## アーキテクチャ
+    モックによる自動生成仕様。
+
+  code: |
+    // モック生成コード
+    console.log('Hello, Game!');
+
+  default: |
+    # {agent_type}
+
+    モックによる自動生成出力。
+
+checkpoint_titles:
+  concept:
+    type: concept_review
+    title: ゲームコンセプトのレビュー
+
+  game_design:
+    type: design_review
+    title: ゲームデザインのレビュー
+
+  scenario:
+    type: scenario_review
+    title: シナリオのレビュー
+
+  world:
+    type: world_review
+    title: 世界観設定のレビュー
+
+  tech_spec:
+    type: tech_review
+    title: 技術仕様のレビュー
+
+  code:
+    type: code_review
+    title: コード実装のレビュー
+
+  unit_test:
+    type: test_review
+    title: テスト結果のレビュー
+
+  default:
+    type: review
+    title: レビュー依頼
+
+checkpoint_contents:
+  concept_review: |
+    # ゲームコンセプト
+
+    ## 概要
+    ボールを操作してゴールを目指すシンプルなパズルゲーム。
+
+    ## 特徴
+    - 物理演算ベースのリアルな挙動
+    - 全30ステージ
+    - スコアシステム（タイム + コイン収集）
+
+    ## ターゲット
+    全年齢向け、カジュアルゲーマー
+
+  design_review: |
+    # ゲームデザイン
+
+    ## 操作方法
+    - 矢印キー: ボールの移動
+    - スペースキー: ジャンプ
+    - R: リスタート
+
+    ## 物理パラメータ
+    - 重力: 9.8 m/s²
+    - 摩擦係数: 0.3
+    - 反発係数: 0.7
+
+  default: |
+    # {checkpoint_type}
+
+    内容を確認してください。
+
+api_runner_checkpoint_config:
+  concept_leader:
+    type: concept_review
+    title: ゲームコンセプトのレビュー
+
+  design_leader:
+    type: design_review
+    title: ゲームデザインのレビュー
+
+  scenario_leader:
+    type: scenario_review
+    title: シナリオのレビュー
+
+  character_leader:
+    type: character_review
+    title: キャラクターのレビュー
+
+  world_leader:
+    type: world_review
+    title: ワールド設定のレビュー
+
+  task_split_leader:
+    type: task_review
+    title: タスク分割のレビュー
+
+  code_leader:
+    type: code_plan_review
+    title: コード計画のレビュー
+
+  asset_leader:
+    type: asset_plan_review
+    title: アセット計画のレビュー
+
+  integrator_leader:
+    type: integration_review
+    title: 統合結果のレビュー
+
+  tester_leader:
+    type: test_review
+    title: テスト結果のレビュー
+
+  reviewer_leader:
+    type: final_review
+    title: 最終レビュー
+
+  default:
+    type: review
+    title: レビュー依頼

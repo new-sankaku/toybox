@@ -10,6 +10,13 @@ service_labels:
   music: 音楽生成
   audio: 音声生成
 
+provider_type_mapping:
+  claude: anthropic
+  openai: openai
+  comfyui: local-comfyui
+  voicevox: local-coqui-tts
+  suno: local-audiocraft
+
 usage_categories:
   - id: llm_high
     label: LLM 高難易度 Task
@@ -87,20 +94,30 @@ providers:
     label: Anthropic
     service_types:
       - llm
+    test_model: claude-haiku-4-5-20250116
     models:
       - id: claude-opus-4-5-20251101
         label: Claude Opus 4.5
         recommended: true
+        max_tokens: 8192
+        supports_vision: true
+        supports_tools: true
         pricing:
           input: 5.0
           output: 25.0
       - id: claude-sonnet-4-5-20250116
         label: Claude Sonnet 4.5
+        max_tokens: 8192
+        supports_vision: true
+        supports_tools: true
         pricing:
           input: 3.0
           output: 15.0
       - id: claude-haiku-4-5-20250116
         label: Claude Haiku 4.5
+        max_tokens: 8192
+        supports_vision: true
+        supports_tools: true
         pricing:
           input: 1.0
           output: 5.0
@@ -110,15 +127,22 @@ providers:
     label: Zhipu AI
     service_types:
       - llm
+    test_model: glm-4.7-flash
     models:
       - id: glm-4.7
         label: Zhipu GLM-4.7
         recommended: true
+        max_tokens: 128000
+        supports_vision: false
+        supports_tools: true
         pricing:
           input: 0.6
           output: 2.2
       - id: glm-4.7-flash
         label: Zhipu GLM-4.7 Flash
+        max_tokens: 128000
+        supports_vision: false
+        supports_tools: true
         pricing:
           input: 0.1
           output: 0.1
@@ -128,15 +152,22 @@ providers:
     label: DeepSeek
     service_types:
       - llm
+    test_model: deepseek-chat
     models:
       - id: deepseek-chat
         label: DeepSeek-V3
         recommended: true
+        max_tokens: 8192
+        supports_vision: false
+        supports_tools: true
         pricing:
           input: 0.27
           output: 1.68
       - id: deepseek-reasoner
         label: DeepSeek-R1
+        max_tokens: 8192
+        supports_vision: false
+        supports_tools: false
         pricing:
           input: 0.55
           output: 2.19

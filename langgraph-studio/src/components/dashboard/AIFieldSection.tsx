@@ -5,59 +5,17 @@ import{FloatingPanel}from'@/components/ui/FloatingPanel'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{AIField2D}from'@/components/ai-game'
 import type{CharacterState,AIServiceType,CharacterEmotion}from'@/components/ai-game/types'
 import{Pause}from'lucide-react'
 import type{AgentType}from'@/types/agent'
 
-const AGENT_SERVICE_MAP:Record<string,AIServiceType>={
- director_phase1:'llm',
- director_phase2:'llm',
- director_phase3:'llm',
- leader_concept:'llm',
- leader_scenario:'llm',
- leader_design:'llm',
- leader_task_split:'llm',
- leader_code:'llm',
- leader_asset:'llm',
- worker_concept:'llm',
- worker_scenario:'llm',
- worker_design:'llm',
- worker_task_split:'llm',
- worker_code:'llm',
- worker_asset:'image',
- concept:'llm',
- task_split_1:'llm',
- concept_detail:'llm',
- scenario:'llm',
- world:'llm',
- character:'llm',
- game_design:'llm',
- tech_spec:'llm',
- task_split_2:'llm',
- task_split_3:'llm',
- task_split_4:'llm',
- code:'llm',
- event:'llm',
- ui_integration:'llm',
- asset_integration:'llm',
- unit_test:'llm',
- integration_test:'llm',
- integrator:'llm',
- reviewer:'llm',
- asset_character:'image',
- asset_background:'image',
- asset_ui:'image',
- asset_effect:'image',
- asset_bgm:'music',
- asset_voice:'audio',
- asset_sfx:'audio'
-}
-
 export default function AIFieldSection():JSX.Element|null{
  const{currentProject}=useProjectStore()
  const{agents,exitedAgentIds}=useAgentStore()
  const{getLabel}=useAgentDefinitionStore()
+ const{agentServiceMap}=useUIConfigStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
 
  const currentPhase=useMemo(()=>{
@@ -89,7 +47,7 @@ export default function AIFieldSection():JSX.Element|null{
    const isWaitingApproval=agent.status==='waiting_approval'
    const isActiveAgent=isRunning||isWaitingApproval
    const agentType=agent.type as AgentType
-   const targetService=AGENT_SERVICE_MAP[agentType]||'llm'
+   const targetService=(agentServiceMap[agentType]||'llm') as AIServiceType
 
    let status:CharacterState['status']='idle'
    let emotion:CharacterEmotion='idle'

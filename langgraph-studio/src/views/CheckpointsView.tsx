@@ -39,7 +39,7 @@ function convertApiCheckpoint(apiCheckpoint:ApiCheckpoint):Checkpoint{
 export default function CheckpointsView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter,pendingCheckpointId,clearPendingCheckpoint}=useNavigationStore()
- const{checkpoints,setCheckpoints,isLoading}=useCheckpointStore()
+ const{checkpoints,setCheckpoints,isLoading,version}=useCheckpointStore()
  const[selectedCheckpoint,setSelectedCheckpoint]=useState<Checkpoint|null>(null)
  const[initialLoading,setInitialLoading]=useState(true)
 
@@ -47,7 +47,7 @@ export default function CheckpointsView():JSX.Element{
   if(!pendingCheckpointId){
    setSelectedCheckpoint(null)
   }
- },[tabResetCounter,pendingCheckpointId])
+ },[tabResetCounter,pendingCheckpointId,version])
 
  const projectCheckpoints=currentProject
   ?checkpoints.filter(cp=>cp.projectId===currentProject.id)
@@ -83,7 +83,7 @@ export default function CheckpointsView():JSX.Element{
   }
 
   fetchCheckpoints()
- },[currentProject?.id,setCheckpoints])
+ },[currentProject?.id,setCheckpoints,version])
 
  if(!currentProject){
   return(

@@ -18,6 +18,9 @@ class GoogleProvider(AIProvider):
   return "Google (Gemini)"
 
  def get_available_models(self)->List[ModelInfo]:
+  models = self.load_models_from_config(self.provider_id)
+  if models:
+   return models
   return [
    ModelInfo(
     id="gemini-2.0-flash",
@@ -27,33 +30,6 @@ class GoogleProvider(AIProvider):
     supports_tools=True,
     input_cost_per_1k=0.0001,
     output_cost_per_1k=0.0004
-   ),
-   ModelInfo(
-    id="gemini-2.0-flash-lite",
-    name="Gemini 2.0 Flash Lite",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.000075,
-    output_cost_per_1k=0.0003
-   ),
-   ModelInfo(
-    id="gemini-1.5-pro",
-    name="Gemini 1.5 Pro",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.00125,
-    output_cost_per_1k=0.005
-   ),
-   ModelInfo(
-    id="gemini-1.5-flash",
-    name="Gemini 1.5 Flash",
-    max_tokens=8192,
-    supports_vision=True,
-    supports_tools=True,
-    input_cost_per_1k=0.000075,
-    output_cost_per_1k=0.0003
    ),
   ]
 
@@ -167,7 +143,10 @@ class GoogleProvider(AIProvider):
  def test_connection(self)->Dict[str,Any]:
   try:
    genai = self._get_client()
-   model = genai.GenerativeModel("gemini-1.5-flash")
+   test_model = self.get_test_model_from_config(self.provider_id)
+   if not test_model:
+    test_model = "gemini-2.0-flash"
+   model = genai.GenerativeModel(test_model)
    response = model.generate_content("Hi")
    return {
     "success":True,
