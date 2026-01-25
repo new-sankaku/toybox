@@ -64,3 +64,5 @@ coverage/
 
 # Test data (not tracked)
 testdata/
+
+.claude/tool-history.jsonl
