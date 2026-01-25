@@ -98,14 +98,12 @@ export default function CheckpointReviewView({
   const{output}=checkpoint
 
   if(viewMode==='raw'){
-   const rawContent=typeof output.content==='string'
-    ?output.content
-    : JSON.stringify(output.content,null,2)
+   const rawContent=getContentString(output.content)
    return(
     <CodeViewer
      code={rawContent||'(no content)'}
-     language={typeof output.content==='string'?'markdown' : 'json'}
-     filename={typeof output.content==='string'?'output.md' : 'output.json'}
+     language="markdown"
+     filename="output.md"
     />
 )
   }
