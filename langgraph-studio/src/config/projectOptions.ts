@@ -42,21 +42,35 @@ export const ASSET_SERVICE_OPTIONS: AssetServiceOption[]=[
 ]
 
 
+export type ContentRatingLevel=0|1|2|3|4
+
 export interface ContentPermissions {
- allowViolence: boolean
- allowSexualContent: boolean
+ violenceLevel: ContentRatingLevel
+ sexualLevel: ContentRatingLevel
 }
 
-export interface ContentPermissionOption {
- key: keyof ContentPermissions
+export interface ContentRatingOption {
+ level: ContentRatingLevel
  label: string
+ age: string
+ description: string
 }
 
-export const CONTENT_PERMISSION_OPTIONS: ContentPermissionOption[]=[
- { key: 'allowViolence',label: '暴力表現を許可' },
- { key: 'allowSexualContent',label: '性表現を許可' }
+export const VIOLENCE_RATING_OPTIONS: ContentRatingOption[]=[
+ {level:0,label:'なし',age:'全年齢',description:'暴力表現を含まない'},
+ {level:1,label:'軽度',age:'12+',description:'軽い衝突、コミカルな表現'},
+ {level:2,label:'中程度',age:'15+',description:'戦闘シーン、軽度の流血'},
+ {level:3,label:'強め',age:'17+',description:'リアルな戦闘、負傷表現'},
+ {level:4,label:'過激',age:'18+',description:'グロテスク、残虐表現'}
 ]
 
+export const SEXUAL_RATING_OPTIONS: ContentRatingOption[]=[
+ {level:0,label:'なし',age:'全年齢',description:'性的表現を含まない'},
+ {level:1,label:'軽度',age:'12+',description:'軽いロマンス、着衣'},
+ {level:2,label:'中程度',age:'15+',description:'キスシーン、水着'},
+ {level:3,label:'強め',age:'17+',description:'セクシー表現、露出'},
+ {level:4,label:'過激',age:'18+',description:'成人向け表現'}
+]
 
 export const PROJECT_DEFAULTS={
  assetGeneration: {
@@ -66,7 +80,7 @@ export const PROJECT_DEFAULTS={
   enableVideoGeneration: false
  } as AssetGenerationOptions,
  contentPermissions: {
-  allowViolence: false,
-  allowSexualContent: false
+  violenceLevel: 0,
+  sexualLevel: 0
  } as ContentPermissions
 }

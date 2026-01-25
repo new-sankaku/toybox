@@ -205,6 +205,12 @@
            placeholder:text-nier-text-light;
   }
 
+  /* NieR Slider */
+  .nier-slider {
+    @apply w-full cursor-pointer;
+    accent-color: var(--text-main);
+  }
+
   /* Diamond Marker */
   .nier-diamond {
     @apply flex items-center gap-2 text-nier-caption;

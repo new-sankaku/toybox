@@ -14,13 +14,15 @@ import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,
 import{
  PROJECT_DEFAULTS,
  ASSET_SERVICE_OPTIONS,
- CONTENT_PERMISSION_OPTIONS,
+ VIOLENCE_RATING_OPTIONS,
+ SEXUAL_RATING_OPTIONS,
  PROJECT_SCALE_OPTIONS,
  type Platform,
  type Scope,
  type ProjectScale,
  type AssetGenerationOptions,
- type ContentPermissions
+ type ContentPermissions,
+ type ContentRatingLevel
 }from'@/config/projectOptions'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useBrushupStore}from'@/stores/brushupStore'
@@ -241,8 +243,8 @@ export default function ProjectView():JSX.Element{
    aiServiceSettings:{...buildAIServiceDefaults(),...(project.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...project.config?.assetGeneration},
    contentPermissions:{
-    allowViolence:project.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
-    allowSexualContent:project.config?.contentPermissions?.allowSexualContent??PROJECT_DEFAULTS.contentPermissions.allowSexualContent
+    violenceLevel:(project.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.violenceLevel,
+    sexualLevel:(project.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.sexualLevel
    }
   })
   setIsEditing(true)
@@ -416,8 +418,8 @@ export default function ProjectView():JSX.Element{
    aiServiceSettings:{...buildAIServiceDefaults(),...(currentProject.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...currentProject.config?.assetGeneration},
    contentPermissions:{
-    allowViolence:currentProject.config?.contentPermissions?.allowViolence??PROJECT_DEFAULTS.contentPermissions.allowViolence,
-    allowSexualContent:currentProject.config?.contentPermissions?.allowSexualContent??PROJECT_DEFAULTS.contentPermissions.allowSexualContent
+    violenceLevel:(currentProject.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.violenceLevel,
+    sexualLevel:(currentProject.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.sexualLevel
    }
   })
   setIsEditing(true)
@@ -699,53 +701,6 @@ export default function ProjectView():JSX.Element{
           </div>
          </div>
 
-         {/*AI Service Settings*/}
-         {master&&master.usageCategories&&(
-         <div>
-          <label className="block text-nier-small text-nier-text-light mb-2">
-           AI サービス設定
-          </label>
-          <div className="space-y-2">
-           {master.usageCategories.map((cat)=>{
-            const providers=Object.entries(master.providers||{}).filter(
-             ([,p])=>p.serviceTypes.includes(cat.service_type)
-)
-            const defaultValue=`${cat.default.provider}:${cat.default.model}`
-            return(
-            <div key={cat.id} className="flex items-center gap-3">
-             <label className="w-44 text-nier-small text-nier-text-light flex-shrink-0">
-              {cat.label}
-             </label>
-             <select
-              value={form.aiServiceSettings[cat.id]||defaultValue}
-              onChange={(e)=>setForm({
-               ...form,
-               aiServiceSettings:{...form.aiServiceSettings,[cat.id]:e.target.value}
-              })}
-              className="flex-1 px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none"
-             >
-              {providers.flatMap(([providerId,provider])=>{
-               if(providerId.startsWith('local-')){
-                return[
-                 <option key={providerId} value={`${providerId}:${provider.defaultModel}`}>
-                  {provider.label}
-                 </option>
-]
-               }
-               return provider.models.map((model)=>(
-                <option key={`${providerId}:${model.id}`} value={`${providerId}:${model.id}`}>
-                 {model.label}
-                </option>
-))
-              })}
-             </select>
-            </div>
-)
-           })}
-          </div>
-         </div>
-)}
-
          {/*Asset Generation Options*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
@@ -778,29 +733,100 @@ export default function ProjectView():JSX.Element{
           </p>
          </div>
 
+         {/*AI Service Settings*/}
+         {master&&master.usageCategories&&(
+         <div>
+          <label className="block text-nier-small text-nier-text-light mb-2">
+           AI サービス設定
+          </label>
+          <div className="space-y-2">
+           {master.usageCategories.map((cat)=>{
+            const providers=Object.entries(master.providers||{}).filter(
+             ([,p])=>p.serviceTypes.includes(cat.service_type)
+)
+            const defaultValue=`${cat.default.provider}:${cat.default.model}`
+            const isDisabled=
+             (cat.service_type==='image'&&!form.assetGeneration.enableImageGeneration)||
+             (cat.service_type==='music'&&!form.assetGeneration.enableBGMGeneration)||
+             (cat.service_type==='audio'&&!form.assetGeneration.enableVoiceSynthesis)
+            return(
+            <div key={cat.id} className="flex items-center gap-3">
+             <label className={cn('w-44 text-nier-small flex-shrink-0',isDisabled?'text-nier-text-light/50':'text-nier-text-light')}>
+              {cat.label}
+             </label>
+             <select
+              value={form.aiServiceSettings[cat.id]||defaultValue}
+              onChange={(e)=>setForm({
+               ...form,
+               aiServiceSettings:{...form.aiServiceSettings,[cat.id]:e.target.value}
+              })}
+              disabled={isDisabled}
+              className={cn('flex-1 px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none',isDisabled&&'opacity-50 cursor-not-allowed')}
+             >
+              {providers.flatMap(([providerId,provider])=>{
+               if(providerId.startsWith('local-')){
+                return[
+                 <option key={providerId} value={`${providerId}:${provider.defaultModel}`}>
+                  {provider.label}
+                 </option>
+]
+               }
+               return provider.models.map((model)=>(
+                <option key={`${providerId}:${model.id}`} value={`${providerId}:${model.id}`}>
+                 {model.label}
+                </option>
+))
+              })}
+             </select>
+            </div>
+)
+           })}
+          </div>
+         </div>
+)}
+
          {/*Content Permissions*/}
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
-           コンテンツ許可
+           コンテンツレーティング
           </label>
-          <div className="flex gap-4">
-           {CONTENT_PERMISSION_OPTIONS.map((opt)=>(
-            <label
-             key={opt.key}
-             className="flex items-center gap-2 cursor-pointer"
-            >
-             <input
-              type="checkbox"
-              checked={form.contentPermissions[opt.key]}
-              onChange={(e)=>setForm({
-               ...form,
-               contentPermissions:{...form.contentPermissions,[opt.key]:e.target.checked}
-              })}
-              className="w-4 h-4"
-             />
-             <span className="text-nier-small">{opt.label}</span>
-            </label>
-))}
+          <div className="grid grid-cols-2 gap-3">
+           <div className="p-2 border border-nier-border-light">
+            <div className="flex items-center justify-between mb-1">
+             <span className="text-nier-small text-nier-text-main">暴力表現</span>
+             <span className="text-nier-small text-nier-text-main">{VIOLENCE_RATING_OPTIONS[form.contentPermissions.violenceLevel].age}</span>
+            </div>
+            <input
+             type="range"
+             min={0}
+             max={4}
+             value={form.contentPermissions.violenceLevel}
+             onChange={(e)=>setForm({
+              ...form,
+              contentPermissions:{...form.contentPermissions,violenceLevel:Number(e.target.value) as ContentRatingLevel}
+             })}
+             className="nier-slider"
+            />
+            <p className="text-nier-caption text-nier-text-light mt-1">{VIOLENCE_RATING_OPTIONS[form.contentPermissions.violenceLevel].description}</p>
+           </div>
+           <div className="p-2 border border-nier-border-light">
+            <div className="flex items-center justify-between mb-1">
+             <span className="text-nier-small text-nier-text-main">性表現</span>
+             <span className="text-nier-small text-nier-text-main">{SEXUAL_RATING_OPTIONS[form.contentPermissions.sexualLevel].age}</span>
+            </div>
+            <input
+             type="range"
+             min={0}
+             max={4}
+             value={form.contentPermissions.sexualLevel}
+             onChange={(e)=>setForm({
+              ...form,
+              contentPermissions:{...form.contentPermissions,sexualLevel:Number(e.target.value) as ContentRatingLevel}
+             })}
+             className="nier-slider"
+            />
+            <p className="text-nier-caption text-nier-text-light mt-1">{SEXUAL_RATING_OPTIONS[form.contentPermissions.sexualLevel].description}</p>
+           </div>
           </div>
          </div>
 
@@ -966,29 +992,100 @@ export default function ProjectView():JSX.Element{
             </div>
            </div>
 
+           {/*AI Service Settings*/}
+           {master&&master.usageCategories&&(
+           <div>
+            <label className="block text-nier-small text-nier-text-light mb-2">
+             AI サービス設定
+            </label>
+            <div className="space-y-2">
+             {master.usageCategories.map((cat)=>{
+              const providers=Object.entries(master.providers||{}).filter(
+               ([,p])=>p.serviceTypes.includes(cat.service_type)
+)
+              const defaultValue=`${cat.default.provider}:${cat.default.model}`
+              const isDisabled=
+               (cat.service_type==='image'&&!editForm.assetGeneration.enableImageGeneration)||
+               (cat.service_type==='music'&&!editForm.assetGeneration.enableBGMGeneration)||
+               (cat.service_type==='audio'&&!editForm.assetGeneration.enableVoiceSynthesis)
+              return(
+              <div key={cat.id} className="flex items-center gap-3">
+               <label className={cn('w-44 text-nier-small flex-shrink-0',isDisabled?'text-nier-text-light/50':'text-nier-text-light')}>
+                {cat.label}
+               </label>
+               <select
+                value={editForm.aiServiceSettings[cat.id]||defaultValue}
+                onChange={(e)=>setEditForm({
+                 ...editForm,
+                 aiServiceSettings:{...editForm.aiServiceSettings,[cat.id]:e.target.value}
+                })}
+                disabled={isDisabled}
+                className={cn('flex-1 px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none',isDisabled&&'opacity-50 cursor-not-allowed')}
+               >
+                {providers.flatMap(([providerId,provider])=>{
+                 if(providerId.startsWith('local-')){
+                  return[
+                   <option key={providerId} value={`${providerId}:${provider.defaultModel}`}>
+                    {provider.label}
+                   </option>
+]
+                 }
+                 return provider.models.map((model)=>(
+                  <option key={`${providerId}:${model.id}`} value={`${providerId}:${model.id}`}>
+                   {model.label}
+                  </option>
+))
+                })}
+               </select>
+              </div>
+)
+             })}
+            </div>
+           </div>
+)}
+
            {/*Content Permissions*/}
            <div>
             <label className="block text-nier-small text-nier-text-light mb-2">
-             コンテンツ許可
+             コンテンツレーティング
             </label>
-            <div className="flex gap-4">
-             {CONTENT_PERMISSION_OPTIONS.map((opt)=>(
-              <label
-               key={opt.key}
-               className="flex items-center gap-2 cursor-pointer"
-              >
-               <input
-                type="checkbox"
-                checked={editForm.contentPermissions[opt.key]}
-                onChange={(e)=>setEditForm({
-                 ...editForm,
-                 contentPermissions:{...editForm.contentPermissions,[opt.key]:e.target.checked}
-                })}
-                className="w-4 h-4"
-               />
-               <span className="text-nier-small">{opt.label}</span>
-              </label>
-))}
+            <div className="grid grid-cols-2 gap-3">
+             <div className="p-2 border border-nier-border-light">
+              <div className="flex items-center justify-between mb-1">
+               <span className="text-nier-small text-nier-text-main">暴力表現</span>
+               <span className="text-nier-small text-nier-text-main">{VIOLENCE_RATING_OPTIONS[editForm.contentPermissions.violenceLevel].age}</span>
+              </div>
+              <input
+               type="range"
+               min={0}
+               max={4}
+               value={editForm.contentPermissions.violenceLevel}
+               onChange={(e)=>setEditForm({
+                ...editForm,
+                contentPermissions:{...editForm.contentPermissions,violenceLevel:Number(e.target.value) as ContentRatingLevel}
+               })}
+               className="nier-slider"
+              />
+              <p className="text-nier-caption text-nier-text-light mt-1">{VIOLENCE_RATING_OPTIONS[editForm.contentPermissions.violenceLevel].description}</p>
+             </div>
+             <div className="p-2 border border-nier-border-light">
+              <div className="flex items-center justify-between mb-1">
+               <span className="text-nier-small text-nier-text-main">性表現</span>
+               <span className="text-nier-small text-nier-text-main">{SEXUAL_RATING_OPTIONS[editForm.contentPermissions.sexualLevel].age}</span>
+              </div>
+              <input
+               type="range"
+               min={0}
+               max={4}
+               value={editForm.contentPermissions.sexualLevel}
+               onChange={(e)=>setEditForm({
+                ...editForm,
+                contentPermissions:{...editForm.contentPermissions,sexualLevel:Number(e.target.value) as ContentRatingLevel}
+               })}
+               className="nier-slider"
+              />
+              <p className="text-nier-caption text-nier-text-light mt-1">{SEXUAL_RATING_OPTIONS[editForm.contentPermissions.sexualLevel].description}</p>
+             </div>
             </div>
            </div>
 

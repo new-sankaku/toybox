@@ -112,32 +112,24 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
   }
 
   const spriteSize=56*characterScale
-  const idleChars=characters.filter(c=>c.status!=='working'&&c.status!=='waiting_approval')
+  const sortedChars=[...characters].sort((a,b)=>(a.phase??0)-(b.phase??0)||(a.agentType<b.agentType?-1:1))
+  const agentIndexMap=new Map<string,number>()
+  sortedChars.forEach((c,i)=>agentIndexMap.set(c.agentId,i))
   const gridCols=Math.max(1,Math.floor((roomWidth-30)/(spriteSize+10)))
-  const gridRows=Math.max(Math.ceil(idleChars.length/gridCols),4)
+  const gridRows=Math.max(Math.ceil(sortedChars.length/gridCols),4)
   const cellWidth=(roomWidth-30)/gridCols
   const cellHeight=(totalHeight-50)/gridRows
 
-  let idleIndex=0
   characters.forEach((char)=>{
-   const isWorking=char.status==='working'
-   const isWaiting=char.status==='waiting_approval'
-   let x:number,y:number
-
-   if(isWorking||isWaiting){
-    x=dimensions.width/2
-    y=dimensions.height/2
-   }else{
-    const col=idleIndex%gridCols
-    const row=Math.floor(idleIndex/gridCols)
-    x=roomStartX+20+col*cellWidth+cellWidth/2
-    y=topY+35+row*cellHeight+cellHeight/2
-    idleIndex++
-   }
+   const idx=agentIndexMap.get(char.agentId)??0
+   const col=idx%gridCols
+   const row=Math.floor(idx/gridCols)
+   const x=roomStartX+20+col*cellWidth+cellWidth/2
+   const y=topY+35+row*cellHeight+cellHeight/2
 
    const existing=positions.get(char.agentId)
    if(existing){
-    if(dimensionsChanged&&!isWorking&&!isWaiting){
+    if(dimensionsChanged){
      existing.x=x
      existing.y=y
      existing.targetX=x
@@ -150,7 +142,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      targetY:y,
      wanderTimer:0,
      rotation:0,
-     wasWorking:isWorking
+     wasWorking:false
     })
    }
   })
@@ -494,7 +486,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    const workingAgents:{char:CharacterState;pos:CharacterPosition}[]=[]
 
    const workingPerService:Record<AIServiceType,number>={}as Record<AIServiceType,number>
-   services.forEach(s=>{ workingPerService[s]=0 })
+   services.forEach(s=>{workingPerService[s]=0})
    const workingIndexMap=new Map<string,number>()
 
    const waitingIndexMap=new Map<string,number>()
@@ -510,13 +502,14 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
     }
    })
 
-   const idleChars=characters.filter(c=>c.status!=='working'&&c.status!=='waiting_approval')
+   const sortedChars=[...characters].sort((a,b)=>(a.phase??0)-(b.phase??0)||(a.agentType<b.agentType?-1:1))
+   const agentIndexMap=new Map<string,number>()
+   sortedChars.forEach((c,i)=>agentIndexMap.set(c.agentId,i))
    const gridCols=Math.max(1,Math.floor((roomWidth-30)/(spriteSize+10)))
    const cellWidth=(roomWidth-30)/gridCols
-   const gridRows=Math.max(Math.ceil(idleChars.length/gridCols),4)
+   const gridRows=Math.max(Math.ceil(sortedChars.length/gridCols),4)
    const cellHeight=(totalHeight-50)/gridRows
 
-   let idleIndex=0
    characters.forEach((char)=>{
     const pos=positions.get(char.agentId)
     if(!pos)return
@@ -543,12 +536,12 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
      pos.targetY=userAreaY+40+waitRow*waitCellH+waitCellH/2
      pos.wasWorking=false
     }else{
-     const col=idleIndex%gridCols
-     const row=Math.floor(idleIndex/gridCols)
+     const idx=agentIndexMap.get(char.agentId)??0
+     const col=idx%gridCols
+     const row=Math.floor(idx/gridCols)
      pos.targetX=roomX+20+col*cellWidth+cellWidth/2
      pos.targetY=topY+35+row*cellHeight+cellHeight/2
      pos.wasWorking=false
-     idleIndex++
     }
 
     const speed=isWorking?0.08:(isWaiting?0.07:0.06)

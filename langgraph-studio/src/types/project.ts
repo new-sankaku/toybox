@@ -34,8 +34,8 @@ export interface AssetGenerationConfig {
 }
 
 export interface ContentPermissionsConfig {
- allowViolence?:boolean
- allowSexualContent?:boolean
+ violenceLevel?:number
+ sexualLevel?:number
 }
 
 export interface ProjectConfig{
@@ -44,6 +44,7 @@ export interface ProjectConfig{
  enableAssetGeneration?:boolean
  assetGeneration?:AssetGenerationConfig
  contentPermissions?:ContentPermissionsConfig
+ aiServiceSettings?:Record<string,string>
  scale?:string
 }
 

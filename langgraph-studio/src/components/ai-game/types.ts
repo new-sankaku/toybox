@@ -24,7 +24,7 @@ export interface AIRequest{
 export interface CharacterState{
  agentId:string
  agentType:AgentType
- status:'idle'|'departing'|'working'|'returning'|'waiting_approval'
+ status:'idle'|'departing'|'working'|'returning'|'waiting_approval'|'completed'|'failed'|'blocked'
  emotion:CharacterEmotion
  targetService?:AIServiceType
  request?:AIRequest

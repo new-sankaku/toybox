@@ -34,12 +34,7 @@ export default function AIFieldSection():JSX.Element|null{
   const projectAgents=agents.filter(a=>{
    if(a.projectId!==currentProject.id)return false
    if(exitedAgentIds.has(a.id))return false
-   if(a.status==='running'||a.status==='waiting_approval')return true
-   return false
-  }).filter(a=>{
-   if(a.status==='waiting_approval')return true
-   if(a.phase===undefined)return true
-   return a.phase===currentPhase
+   return true
   })
 
   return projectAgents.map((agent)=>{
@@ -58,6 +53,15 @@ export default function AIFieldSection():JSX.Element|null{
    }else if(isWaitingApproval){
     status='waiting_approval'
     emotion='idle'
+   }else if(agent.status==='completed'){
+    status='completed'
+    emotion='happy'
+   }else if(agent.status==='failed'){
+    status='failed'
+    emotion='sad'
+   }else if(agent.status==='blocked'){
+    status='blocked'
+    emotion='sleepy'
    }
 
    return{
@@ -136,14 +140,19 @@ export default function AIFieldSection():JSX.Element|null{
          </span>
 )}
         {selectedCharacter.status==='waiting_approval'&&(
-         <span className="text-nier-small text-nier-accent-orange">
-          承認待ち
-         </span>
+         <span className="text-nier-small text-nier-accent-orange">承認待ち</span>
 )}
-        {selectedCharacter.status==='idle'&&!selectedCharacter.request&&(
-         <span className="text-nier-small text-nier-text-light">
-          待機中
-         </span>
+        {selectedCharacter.status==='idle'&&(
+         <span className="text-nier-small text-nier-text-light">待機中</span>
+)}
+        {selectedCharacter.status==='completed'&&(
+         <span className="text-nier-small text-nier-accent-green">完了</span>
+)}
+        {selectedCharacter.status==='failed'&&(
+         <span className="text-nier-small text-nier-accent-red">失敗</span>
+)}
+        {selectedCharacter.status==='blocked'&&(
+         <span className="text-nier-small text-nier-text-light">ブロック</span>
 )}
        </div>
       </div>
@@ -153,8 +162,11 @@ export default function AIFieldSection():JSX.Element|null{
         <span className="text-nier-small text-nier-text-main">
          {selectedCharacter.status==='idle'?'待機中':
           selectedCharacter.status==='working'?'作業中':
-           selectedCharacter.status==='waiting_approval'?'承認待ち':
-            selectedCharacter.status==='departing'?'移動中':'帰還中'}
+          selectedCharacter.status==='waiting_approval'?'承認待ち':
+          selectedCharacter.status==='completed'?'完了':
+          selectedCharacter.status==='failed'?'失敗':
+          selectedCharacter.status==='blocked'?'ブロック':
+          selectedCharacter.status==='departing'?'移動中':'帰還中'}
         </span>
        </div>
        {selectedCharacter.targetService&&(
