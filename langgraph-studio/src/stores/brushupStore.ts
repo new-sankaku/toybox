@@ -1,21 +1,22 @@
 import{create}from'zustand'
-import type{BrushupPreset,BrushupSuggestImage}from'@/types/brushup'
+import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
+import{projectApi}from'@/services/apiService'
 
 interface BrushupState{
- presets:BrushupPreset[]
- presetsLoading:boolean
- presetsError:string|null
- selectedPresets:Set<string>
+ optionsConfig:BrushupOptionsConfig|null
+ optionsLoading:boolean
+ optionsError:string|null
+ agentOptions:Record<string,string[]>
  customInstruction:string
  referenceImages:File[]
  suggestedImages:BrushupSuggestImage[]
  selectedSuggestedImageIds:Set<string>
  suggestLoading:boolean
  suggestError:string|null
- setPresets:(presets:BrushupPreset[])=>void
- setPresetsLoading:(loading:boolean)=>void
- setPresetsError:(error:string|null)=>void
- togglePreset:(id:string)=>void
+ fetchOptions:()=>Promise<void>
+ setAgentOptions:(agentType:string,options:string[])=>void
+ toggleAgentOption:(agentType:string,optionId:string)=>void
+ clearAgentOptions:(agentType:string)=>void
  setCustomInstruction:(instruction:string)=>void
  addReferenceImages:(files:File[])=>void
  removeReferenceImage:(index:number)=>void
@@ -28,35 +29,47 @@ interface BrushupState{
 }
 
 const initialState={
- presets:[],
- presetsLoading:false,
- presetsError:null,
- selectedPresets:new Set<string>(),
+ optionsConfig:null as BrushupOptionsConfig|null,
+ optionsLoading:false,
+ optionsError:null as string|null,
+ agentOptions:{} as Record<string,string[]>,
  customInstruction:'',
- referenceImages:[],
- suggestedImages:[],
+ referenceImages:[] as File[],
+ suggestedImages:[] as BrushupSuggestImage[],
  selectedSuggestedImageIds:new Set<string>(),
  suggestLoading:false,
- suggestError:null
+ suggestError:null as string|null
 }
 
-export const useBrushupStore=create<BrushupState>((set)=>({
+export const useBrushupStore=create<BrushupState>((set,get)=>({
  ...initialState,
 
- setPresets:(presets)=>set({presets}),
-
- setPresetsLoading:(presetsLoading)=>set({presetsLoading}),
-
- setPresetsError:(presetsError)=>set({presetsError}),
-
- togglePreset:(id)=>set((state)=>{
-  const next=new Set(state.selectedPresets)
-  if(next.has(id)){
-   next.delete(id)
-  }else{
-   next.add(id)
+ fetchOptions:async()=>{
+  if(get().optionsConfig)return
+  set({optionsLoading:true,optionsError:null})
+  try{
+   const config=await projectApi.getBrushupOptions()
+   set({optionsConfig:config,optionsLoading:false})
+  }catch(err){
+   set({optionsError:'オプションの取得に失敗しました',optionsLoading:false})
   }
-  return{selectedPresets:next}
+ },
+
+ setAgentOptions:(agentType,options)=>set((state)=>({
+  agentOptions:{...state.agentOptions,[agentType]:options}
+ })),
+
+ toggleAgentOption:(agentType,optionId)=>set((state)=>{
+  const current=state.agentOptions[agentType]||[]
+  const next=current.includes(optionId)
+   ?current.filter(id=>id!==optionId)
+   :[...current,optionId]
+  return{agentOptions:{...state.agentOptions,[agentType]:next}}
+ }),
+
+ clearAgentOptions:(agentType)=>set((state)=>{
+  const{[agentType]:_,...rest}=state.agentOptions
+  return{agentOptions:rest}
  }),
 
  setCustomInstruction:(customInstruction)=>set({customInstruction}),
@@ -89,6 +102,6 @@ export const useBrushupStore=create<BrushupState>((set)=>({
 
  reset:()=>set((state)=>({
   ...initialState,
-  presets:state.presets
+  optionsConfig:state.optionsConfig
  }))
 }))

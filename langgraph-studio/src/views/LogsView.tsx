@@ -1,7 +1,7 @@
 import{useState,useMemo,useEffect,useRef}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
-import{Modal}from'@/components/ui/Modal'
+import{FloatingPanel}from'@/components/ui/FloatingPanel'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useLogStore}from'@/stores/logStore'
@@ -375,11 +375,12 @@ export default function LogsView():JSX.Element{
     </Card>
    </div>
 
-   <Modal
+   <FloatingPanel
     isOpen={!!selectedLog}
     onClose={()=>setSelectedLog(null)}
     title="ログ詳細"
     size="lg"
+    panelId="log-detail"
    >
     {selectedLog&&(
      <div className="space-y-4">
@@ -413,7 +414,7 @@ export default function LogsView():JSX.Element{
 )}
      </div>
 )}
-   </Modal>
+   </FloatingPanel>
   </div>
 )
 }

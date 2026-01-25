@@ -8,6 +8,9 @@ from config_loader import (
  get_quality_check_defaults_from_yaml as _get_quality_check_defaults,
  get_agent_phases_from_yaml as _get_agent_phases,
  get_agent_display_names_from_yaml as _get_agent_display_names,
+ get_ui_phases as _get_ui_phases,
+ get_agent_asset_mapping as _get_agent_asset_mapping,
+ get_workflow_dependencies as _get_workflow_dependencies,
 )
 
 
@@ -73,3 +76,6 @@ AGENT_DEFINITIONS = _get_agent_definitions()
 HIGH_COST_AGENTS:Set[str] = _get_high_cost_agents()
 AGENT_PHASES = _get_agent_phases()
 AGENT_DISPLAY_NAMES = _get_agent_display_names()
+UI_PHASES = _get_ui_phases()
+AGENT_ASSET_MAPPING = _get_agent_asset_mapping()
+WORKFLOW_DEPENDENCIES = _get_workflow_dependencies()

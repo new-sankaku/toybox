@@ -7,6 +7,9 @@ from agent_settings import (
  AGENT_DISPLAY_NAMES,
  HIGH_COST_AGENTS,
  AGENT_DEFINITIONS,
+ UI_PHASES,
+ AGENT_ASSET_MAPPING,
+ WORKFLOW_DEPENDENCIES,
 )
 
 
@@ -105,4 +108,9 @@ def register_quality_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/agent-definitions',methods=['GET'])
  def get_agent_definitions():
-  return jsonify(AGENT_DEFINITIONS)
+  return jsonify({
+   "agents":AGENT_DEFINITIONS,
+   "uiPhases":UI_PHASES,
+   "agentAssetMapping":AGENT_ASSET_MAPPING,
+   "workflowDependencies":WORKFLOW_DEPENDENCIES,
+  })

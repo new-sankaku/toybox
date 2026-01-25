@@ -1,8 +1,14 @@
-export interface BrushupPreset{
+export interface BrushupOption{
  id:string
  label:string
- description:string
- targetPhases:string[]
+}
+
+export interface BrushupAgentOptions{
+ options:BrushupOption[]
+}
+
+export interface BrushupOptionsConfig{
+ agents:Record<string,BrushupAgentOptions>
 }
 
 export interface BrushupSuggestImage{
@@ -12,10 +18,9 @@ export interface BrushupSuggestImage{
 }
 
 export interface BrushupConfig{
- presets:string[]
+ agentOptions:Record<string,string[]>
  customInstruction:string
  referenceImageIds:string[]
- suggestedImageIds:string[]
  selectedAgents:string[]
  clearAssets:boolean
 }

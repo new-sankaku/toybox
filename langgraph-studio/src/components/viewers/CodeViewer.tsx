@@ -1,14 +1,11 @@
 import{useCallback,useState}from'react'
 import Editor,{loader}from'@monaco-editor/react'
+import*as monaco from'monaco-editor'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{Copy,Check,Download}from'lucide-react'
 
-loader.config({
- paths:{
-  vs:'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs'
- }
-})
+loader.config({monaco})
 
 interface CodeViewerProps{
  code:string

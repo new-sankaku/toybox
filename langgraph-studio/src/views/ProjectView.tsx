@@ -1,4 +1,4 @@
-import{useState,useEffect,useCallback}from'react'
+import{useState,useEffect,useCallback,useMemo}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
@@ -24,14 +24,7 @@ import{
 }from'@/config/projectOptions'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useBrushupStore}from'@/stores/brushupStore'
-import{BrushupPresetSelector,BrushupReferenceImages,BrushupSuggestImages}from'@/components/brushup'
-
-const BRUSHUP_PHASES=[
- {id:'design',label:'設計',agents:['concept','concept_detail','scenario','world','game_design','tech_spec']},
- {id:'assets',label:'アセット',agents:['asset_character','asset_background','asset_ui','asset_effect','asset_bgm','asset_voice','asset_sfx']},
- {id:'impl',label:'実装',agents:['code','event','ui_integration','asset_integration']},
- {id:'test',label:'テスト',agents:['unit_test','integration_test']}
-]
+import{BrushupReferenceImages}from'@/components/brushup'
 
 interface SelectedFile{
  file:File
@@ -94,7 +87,7 @@ export default function ProjectView():JSX.Element{
  const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
  const{platforms,scopes,defaults,fetchOptions}=useProjectOptionsStore()
  const{master,fetchMaster}=useAIServiceStore()
- const{getLabel:getAgentLabel}=useAgentDefinitionStore()
+ const{getLabel:getAgentLabel,getFilteredUIPhases,fetchDefinitions,loaded:definitionsLoaded}=useAgentDefinitionStore()
  const brushupStore=useBrushupStore()
  const initialForm=getInitialForm(defaults)
  const[showNewForm,setShowNewForm]=useState(false)
@@ -111,6 +104,9 @@ export default function ProjectView():JSX.Element{
  const[editForm,setEditForm]=useState<NewProjectForm>(initialForm)
  const[uploadedFiles,setUploadedFiles]=useState<UploadedFile[]>([])
  const[filesLoading,setFilesLoading]=useState(false)
+
+ const assetGeneration=currentProject?.config?.assetGeneration as AssetGenerationOptions|undefined
+ const brushupPhases=useMemo(()=>getFilteredUIPhases(assetGeneration),[assetGeneration,getFilteredUIPhases])
 
  const fetchProjects=async()=>{
   setIsLoading(true)
@@ -144,7 +140,8 @@ export default function ProjectView():JSX.Element{
   fetchProjects()
   fetchOptions()
   fetchMaster()
- },[])
+  if(!definitionsLoaded)fetchDefinitions()
+ },[definitionsLoaded])
 
  useEffect(()=>{
   if(currentProject){
@@ -153,6 +150,12 @@ export default function ProjectView():JSX.Element{
    setUploadedFiles([])
   }
  },[currentProject,fetchUploadedFiles])
+
+ useEffect(()=>{
+  if(showBrushupDialog){
+   brushupStore.fetchOptions()
+  }
+ },[showBrushupDialog])
 
  const handleCreateProject=async()=>{
   if(!form.name.trim()||!form.userIdea.trim())return
@@ -354,8 +357,8 @@ export default function ProjectView():JSX.Element{
   try{
    const options={
     selectedAgents:Array.from(brushupSelectedAgents),
+    agentOptions:brushupStore.agentOptions,
     clearAssets:brushupClearAssets,
-    presets:Array.from(brushupStore.selectedPresets),
     customInstruction:brushupStore.customInstruction,
     referenceImageIds:Array.from(brushupStore.selectedSuggestedImageIds)
    }
@@ -1220,59 +1223,37 @@ export default function ProjectView():JSX.Element{
    {/*Brushup Dialog*/}
    {showBrushupDialog&&currentProject&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-     <Card className="w-full max-w-2xl max-h-[90vh] flex flex-col">
+     <Card className="w-[70vw] max-h-[90vh] flex flex-col">
       <CardHeader>
-       <div className="flex items-center gap-2 text-nier-text-main">
-        <RefreshCw size={18}/>
-        <span>ブラッシュアップ設定</span>
+       <div className="flex items-center justify-between w-full">
+        <div className="flex items-center gap-2">
+         <RefreshCw size={18}/>
+         <span>ブラッシュアップ設定</span>
+        </div>
+        <button
+         type="button"
+         onClick={()=>{
+          setShowBrushupDialog(false)
+          setBrushupSelectedAgents(new Set())
+          setBrushupClearAssets(false)
+          brushupStore.reset()
+         }}
+         className="p-1 hover:bg-black/20 transition-colors"
+        >
+         <X size={16}/>
+        </button>
        </div>
       </CardHeader>
       <CardContent className="flex-1 overflow-y-auto">
        <div className="space-y-6">
-        {/*Section 1: Direction*/}
+        {/*Section 1: Agent Selection with Options*/}
         <div>
-         <h3 className="text-nier-body font-medium mb-3">ブラッシュアップの方向性</h3>
-         <div className="space-y-3">
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">プリセット選択（複数可）</label>
-           <BrushupPresetSelector/>
-          </div>
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-1">カスタム指示（任意）</label>
-           <textarea
-            value={brushupStore.customInstruction}
-            onChange={(e)=>brushupStore.setCustomInstruction(e.target.value)}
-            placeholder="ブラッシュアップの方向性を自由に記述してください..."
-            rows={3}
-            className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none resize-none"
-           />
-          </div>
-         </div>
-        </div>
-
-        {/*Section 2: Reference Images*/}
-        <div className="border-t border-nier-border-light pt-4">
-         <h3 className="text-nier-body font-medium mb-3">参考画像</h3>
-         <div className="space-y-3">
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">アップロード</label>
-           <BrushupReferenceImages/>
-          </div>
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">AIサジェスト</label>
-           <BrushupSuggestImages projectId={currentProject.id}/>
-          </div>
-         </div>
-        </div>
-
-        {/*Section 3: Agent Selection*/}
-        <div className="border-t border-nier-border-light pt-4">
-         <h3 className="text-nier-body font-medium mb-3">対象エージェント選択</h3>
+         <h3 className="text-nier-body font-medium mb-3">ブラッシュアップ対象エージェント</h3>
          <p className="text-nier-small text-nier-text-light mb-3">
-          再実行するエージェントを選択してください。選択したエージェントのみリセットされます。
+          エージェントを選択し、改善項目を指定してください。
          </p>
          <div className="space-y-3">
-          {BRUSHUP_PHASES.map(phase=>{
+          {brushupPhases.map(phase=>{
            const phaseSelected=phase.agents.filter(a=>brushupSelectedAgents.has(a)).length
            const allSelected=phaseSelected===phase.agents.length
            return(
@@ -1293,22 +1274,48 @@ export default function ProjectView():JSX.Element{
                {phaseSelected}/{phase.agents.length}
               </span>
              </button>
-             <div className="grid grid-cols-2 gap-1 pl-6">
-              {phase.agents.map(agentType=>(
-               <button
-                key={agentType}
-                type="button"
-                onClick={()=>toggleBrushupAgent(agentType)}
-                className="flex items-center gap-2 py-1 text-left"
-               >
-                <span className={cn('w-3 h-3 border flex items-center justify-center',
-                 brushupSelectedAgents.has(agentType)?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
+             <div className="space-y-2 pl-6">
+              {phase.agents.map(agentType=>{
+               const agentOpts=brushupStore.optionsConfig?.agents[agentType]?.options||[]
+               const selectedOpts=brushupStore.agentOptions[agentType]||[]
+               const isSelected=brushupSelectedAgents.has(agentType)
+               return(
+                <div key={agentType} className="flex items-start gap-2">
+                 <button
+                  type="button"
+                  onClick={()=>toggleBrushupAgent(agentType)}
+                  className="flex items-center gap-2 py-1 min-w-[140px]"
+                 >
+                  <span className={cn('w-3 h-3 border flex items-center justify-center flex-shrink-0',
+                   isSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
 )}>
-                 {brushupSelectedAgents.has(agentType)&&<Check size={10}/>}
-                </span>
-                <span className="text-nier-small">{getAgentLabel(agentType)}</span>
-               </button>
-))}
+                   {isSelected&&<Check size={10}/>}
+                  </span>
+                  <span className="text-nier-small">{getAgentLabel(agentType)}</span>
+                 </button>
+                 {isSelected&&agentOpts.length>0&&(
+                  <div className="flex-1 relative">
+                   <select
+                    multiple
+                    value={selectedOpts}
+                    onChange={(e)=>{
+                     const values=Array.from(e.target.selectedOptions,o=>o.value)
+                     brushupStore.setAgentOptions(agentType,values)
+                    }}
+                    className="w-full px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none min-h-[60px]"
+                   >
+                    {agentOpts.map(opt=>(
+                     <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                   </select>
+                   <span className="text-nier-caption text-nier-text-light mt-1 block">
+                    {selectedOpts.length>0?`${selectedOpts.length}件選択中`:'Ctrl+クリックで複数選択'}
+                   </span>
+                  </div>
+                 )}
+                </div>
+               )
+              })}
              </div>
             </div>
 )
@@ -1328,6 +1335,24 @@ export default function ProjectView():JSX.Element{
            <span className="text-nier-small">選択したエージェントが生成したアセットも削除する</span>
           </button>
          </div>
+        </div>
+
+        {/*Section 2: Reference Images*/}
+        <div className="border-t border-nier-border-light pt-4">
+         <h3 className="text-nier-body font-medium mb-3">参考画像</h3>
+         <BrushupReferenceImages/>
+        </div>
+
+        {/*Section 3: Custom Instruction*/}
+        <div className="border-t border-nier-border-light pt-4">
+         <h3 className="text-nier-body font-medium mb-3">全体への追加指示（任意）</h3>
+         <textarea
+          value={brushupStore.customInstruction}
+          onChange={(e)=>brushupStore.setCustomInstruction(e.target.value)}
+          placeholder="全エージェントに共通する追加指示があれば記述してください..."
+          rows={3}
+          className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none resize-y min-h-[84px] max-h-[196px]"
+         />
         </div>
        </div>
 

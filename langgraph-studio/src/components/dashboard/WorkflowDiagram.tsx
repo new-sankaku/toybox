@@ -20,78 +20,15 @@ import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{agentApi}from'@/services/apiService'
 import type{Agent,AgentType,AgentStatus}from'@/types/agent'
+import type{AssetGenerationOptions}from'@/config/projectOptions'
 
 interface AgentNodeDef{
  id:string
  type:AgentType
  label:string
- phase:number
+ uiPhaseIndex:number
  hasLW?:boolean
 }
-
-const AGENT_NODES:AgentNodeDef[]=[
- {id:'concept',type:'concept',label:'コンセプト',phase:0},
- {id:'task_split_1',type:'task_split_1',label:'タスク分割1',phase:1},
- {id:'concept_detail',type:'concept_detail',label:'コンセプト',phase:2,hasLW:true},
- {id:'scenario',type:'scenario',label:'シナリオ',phase:2,hasLW:true},
- {id:'world',type:'world',label:'世界観',phase:2,hasLW:true},
- {id:'game_design',type:'game_design',label:'ゲームデザイン',phase:2,hasLW:true},
- {id:'tech_spec',type:'tech_spec',label:'技術仕様',phase:2,hasLW:true},
- {id:'task_split_2',type:'task_split_2',label:'タスク分割2',phase:3},
- {id:'asset_character',type:'asset_character',label:'キャラ',phase:4},
- {id:'asset_background',type:'asset_background',label:'背景',phase:4},
- {id:'asset_ui',type:'asset_ui',label:'UI',phase:4},
- {id:'asset_effect',type:'asset_effect',label:'エフェクト',phase:4},
- {id:'asset_bgm',type:'asset_bgm',label:'BGM',phase:4},
- {id:'asset_voice',type:'asset_voice',label:'ボイス',phase:4},
- {id:'asset_sfx',type:'asset_sfx',label:'効果音',phase:4},
- {id:'task_split_3',type:'task_split_3',label:'タスク分割3',phase:5},
- {id:'code',type:'code',label:'コード',phase:6,hasLW:true},
- {id:'event',type:'event',label:'イベント',phase:6,hasLW:true},
- {id:'ui_integration',type:'ui_integration',label:'UI統合',phase:6,hasLW:true},
- {id:'asset_integration',type:'asset_integration',label:'アセット統合',phase:6,hasLW:true},
- {id:'task_split_4',type:'task_split_4',label:'タスク分割4',phase:7},
- {id:'unit_test',type:'unit_test',label:'単体テスト',phase:8,hasLW:true},
- {id:'integration_test',type:'integration_test',label:'統合テスト',phase:8,hasLW:true},
-]
-
-const EDGE_DEFS:Array<{source:string;target:string}>=[
- {source:'concept',target:'task_split_1'},
- {source:'task_split_1',target:'concept_detail'},
- {source:'task_split_1',target:'scenario'},
- {source:'task_split_1',target:'world'},
- {source:'task_split_1',target:'game_design'},
- {source:'task_split_1',target:'tech_spec'},
- {source:'concept_detail',target:'task_split_2'},
- {source:'scenario',target:'task_split_2'},
- {source:'world',target:'task_split_2'},
- {source:'game_design',target:'task_split_2'},
- {source:'tech_spec',target:'task_split_2'},
- {source:'task_split_2',target:'asset_character'},
- {source:'task_split_2',target:'asset_background'},
- {source:'task_split_2',target:'asset_ui'},
- {source:'task_split_2',target:'asset_effect'},
- {source:'task_split_2',target:'asset_bgm'},
- {source:'task_split_2',target:'asset_voice'},
- {source:'task_split_2',target:'asset_sfx'},
- {source:'asset_character',target:'task_split_3'},
- {source:'asset_background',target:'task_split_3'},
- {source:'asset_ui',target:'task_split_3'},
- {source:'asset_effect',target:'task_split_3'},
- {source:'asset_bgm',target:'task_split_3'},
- {source:'asset_voice',target:'task_split_3'},
- {source:'asset_sfx',target:'task_split_3'},
- {source:'task_split_3',target:'code'},
- {source:'task_split_3',target:'event'},
- {source:'task_split_3',target:'ui_integration'},
- {source:'task_split_3',target:'asset_integration'},
- {source:'code',target:'task_split_4'},
- {source:'event',target:'task_split_4'},
- {source:'ui_integration',target:'task_split_4'},
- {source:'asset_integration',target:'task_split_4'},
- {source:'task_split_4',target:'unit_test'},
- {source:'task_split_4',target:'integration_test'},
-]
 
 interface LayoutConfig{
  nodeHeight:number
@@ -102,11 +39,16 @@ interface LayoutConfig{
  fontSize:number
 }
 
-const MAX_LABEL_LENGTH=Math.max(...AGENT_NODES.map(n=>n.label.length))
-
-function calculateLayoutConfig(containerWidth:number,containerHeight:number):LayoutConfig{
- const NUM_PHASES=9
- const MAX_NODES_IN_PHASE=7
+function calculateLayoutConfig(
+ containerWidth:number,
+ containerHeight:number,
+ numPhases:number,
+ maxNodesInPhase:number,
+ maxLabelLength:number
+):LayoutConfig{
+ const NUM_PHASES=numPhases||4
+ const MAX_NODES_IN_PHASE=maxNodesInPhase||7
+ const MAX_LABEL_LENGTH=maxLabelLength||6
  const MIN_NODE_HEIGHT=28
  const MAX_NODE_HEIGHT=60
  const MIN_FONT_SIZE=9
@@ -123,14 +65,14 @@ function calculateLayoutConfig(containerWidth:number,containerHeight:number):Lay
  const horizontalFactor=NUM_PHASES+0.6*(NUM_PHASES-1)+0.4
  let nodeWidth=availableWidth/horizontalFactor
 
- const maxFontSizeForWidth=(nodeWidth-NODE_PADDING_X*2)/MAX_LABEL_LENGTH
+ const maxFontSizeForWidth=(nodeWidth-NODE_PADDING_X*2)/(MAX_LABEL_LENGTH||6)
 
  const maxFontSizeForHeight=(nodeHeight-8)/1.5
 
  let fontSize=Math.min(maxFontSizeForWidth,maxFontSizeForHeight)
  fontSize=Math.max(MIN_FONT_SIZE,Math.min(MAX_FONT_SIZE,fontSize))
 
- nodeWidth=fontSize*MAX_LABEL_LENGTH+NODE_PADDING_X*2
+ nodeWidth=fontSize*(MAX_LABEL_LENGTH||6)+NODE_PADDING_X*2
 
  return{
   nodeHeight:Math.round(nodeHeight),
@@ -152,7 +94,8 @@ const DEFAULT_LAYOUT_CONFIG:LayoutConfig={
 }
 
 function getColumnLayout(
- _statusMap:Record<string,AgentStatus|undefined>,
+ agentNodes:AgentNodeDef[],
+ numPhases:number,
  config:LayoutConfig
 ):{
  positions:Record<string,{x:number;y:number}>
@@ -166,19 +109,19 @@ function getColumnLayout(
  const widths:Record<string,number>={}
  const heights:Record<string,number>={}
 
- AGENT_NODES.forEach(node=>{
+ agentNodes.forEach(node=>{
   widths[node.id]=nodeWidth
   heights[node.id]=nodeHeight
  })
 
- const phaseNodes:(typeof AGENT_NODES)[]=[]
- for(let i=0;i<=8;i++){
-  phaseNodes[i]=AGENT_NODES.filter(n=>n.phase===i)
+ const phaseNodes:AgentNodeDef[][]=[]
+ for(let i=0;i<numPhases;i++){
+  phaseNodes[i]=agentNodes.filter(n=>n.uiPhaseIndex===i)
  }
 
  const phaseWidths=phaseNodes.map(nodes=>nodes.length>0?nodeWidth : 0)
 
- const calcPhaseHeight=(nodes:typeof AGENT_NODES)=>{
+ const calcPhaseHeight=(nodes:AgentNodeDef[])=>{
   if(nodes.length===0)return 0
   const totalNodeHeights=nodes.length*nodeHeight
   const totalGaps=(nodes.length-1)*nodeGapY
@@ -186,15 +129,15 @@ function getColumnLayout(
  }
 
  const phaseHeights=phaseNodes.map(calcPhaseHeight)
- const maxHeight=Math.max(...phaseHeights)
+ const maxHeight=Math.max(...phaseHeights,0)
 
  const phaseX:number[]=[]
  phaseX[0]=phasePadding
- for(let i=1;i<=8;i++){
+ for(let i=1;i<numPhases;i++){
   phaseX[i]=phaseX[i-1]+(phaseWidths[i-1]>0?phaseWidths[i-1]+phaseGapX : 0)
  }
 
- const positionPhaseNodes=(nodes:typeof AGENT_NODES,x:number)=>{
+ const positionPhaseNodes=(nodes:AgentNodeDef[],x:number)=>{
   let currentY=phasePadding
   nodes.forEach((node)=>{
    positions[node.id]={
@@ -205,33 +148,37 @@ function getColumnLayout(
   })
  }
 
- for(let i=0;i<=8;i++){
+ for(let i=0;i<numPhases;i++){
   if(phaseNodes[i].length>0){
    positionPhaseNodes(phaseNodes[i],phaseX[i])
   }
  }
 
- const totalWidth=phaseX[8]+phaseWidths[8]+phasePadding
+ const lastPhaseIdx=numPhases-1
+ const totalWidth=(phaseX[lastPhaseIdx]||0)+(phaseWidths[lastPhaseIdx]||0)+phasePadding
  const totalHeight=maxHeight+phasePadding*2
 
  return{positions,widths,heights,width:totalWidth,height:totalHeight}
 }
 
 function calculatePhaseBounds(
- phase:number,
+ phaseIndex:number,
+ agentNodes:AgentNodeDef[],
  positions:Record<string,{x:number;y:number}>,
  widths:Record<string,number>,
  heights:Record<string,number>,
  config:LayoutConfig
 ):{x:number;y:number;width:number;height:number}{
- const phaseNodes=AGENT_NODES.filter(n=>n.phase===phase)
+ const phaseNodes=agentNodes.filter(n=>n.uiPhaseIndex===phaseIndex)
  if(phaseNodes.length===0){
   return{x:0,y:0,width:0,height:0}
  }
 
- const nodePositions=phaseNodes.map(n=>positions[n.id])
- const nodeWidths=phaseNodes.map(n=>widths[n.id])
- const nodeHeights=phaseNodes.map(n=>heights[n.id])
+ const nodePositions=phaseNodes.map(n=>positions[n.id]).filter(Boolean)
+ if(nodePositions.length===0)return{x:0,y:0,width:0,height:0}
+
+ const nodeWidths=phaseNodes.map(n=>widths[n.id]||0)
+ const nodeHeights=phaseNodes.map(n=>heights[n.id]||0)
 
  const minX=Math.min(...nodePositions.map(p=>p.x))
  const maxX=Math.max(...nodePositions.map((p,i)=>p.x+nodeWidths[i]))
@@ -478,19 +425,70 @@ function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
 export default function WorkflowDiagram():JSX.Element{
  const{currentProject}=useProjectStore()
  const{agents,setAgents}=useAgentStore()
- const{getLabel}=useAgentDefinitionStore()
+ const{getLabel,getFilteredUIPhases,getWorkflowDependencies,fetchDefinitions,loaded:definitionsLoaded}=useAgentDefinitionStore()
  const[containerSize,setContainerSize]=useState({width:0,height:0})
 
  const handleContainerResize=useCallback((width:number,height:number)=>{
   setContainerSize({width,height})
  },[])
 
+ useEffect(()=>{
+  if(!definitionsLoaded)fetchDefinitions()
+ },[definitionsLoaded,fetchDefinitions])
+
+ const assetGeneration=currentProject?.config?.assetGeneration as AssetGenerationOptions|undefined
+ const uiPhases=useMemo(()=>getFilteredUIPhases(assetGeneration),[assetGeneration,getFilteredUIPhases])
+ const workflowDeps=useMemo(()=>getWorkflowDependencies(),[getWorkflowDependencies])
+
+ const agentNodes=useMemo<AgentNodeDef[]>(()=>{
+  const nodes:AgentNodeDef[]=[]
+  uiPhases.forEach((phase,phaseIndex)=>{
+   phase.agents.forEach(agentType=>{
+    const isDesignAgent=['concept_detail','scenario','world','game_design','tech_spec'].includes(agentType)
+    const isImplAgent=['code','event','ui_integration','asset_integration'].includes(agentType)
+    const isTestAgent=['unit_test','integration_test'].includes(agentType)
+    nodes.push({
+     id:agentType,
+     type:agentType as AgentType,
+     label:agentType,
+     uiPhaseIndex:phaseIndex,
+     hasLW:isDesignAgent||isImplAgent||isTestAgent
+    })
+   })
+  })
+  return nodes
+ },[uiPhases])
+
+ const edgeDefs=useMemo<{source:string;target:string}[]>(()=>{
+  const edges:{source:string;target:string}[]=[]
+  const agentSet=new Set(agentNodes.map(n=>n.id))
+  for(const[target,sources]of Object.entries(workflowDeps)){
+   if(!agentSet.has(target))continue
+   for(const source of sources){
+    if(agentSet.has(source)){
+     edges.push({source,target})
+    }
+   }
+  }
+  return edges
+ },[agentNodes,workflowDeps])
+
+ const maxLabelLength=useMemo(()=>{
+  if(agentNodes.length===0)return 6
+  return Math.max(...agentNodes.map(n=>getLabel(n.type).length),6)
+ },[agentNodes,getLabel])
+
+ const maxNodesInPhase=useMemo(()=>{
+  if(uiPhases.length===0)return 7
+  return Math.max(...uiPhases.map(p=>p.agents.length),1)
+ },[uiPhases])
+
  const layoutConfig=useMemo(()=>{
   if(containerSize.width>0&&containerSize.height>0){
-   return calculateLayoutConfig(containerSize.width,containerSize.height)
+   return calculateLayoutConfig(containerSize.width,containerSize.height,uiPhases.length,maxNodesInPhase,maxLabelLength)
   }
   return DEFAULT_LAYOUT_CONFIG
- },[containerSize])
+ },[containerSize,uiPhases.length,maxNodesInPhase,maxLabelLength])
 
  useEffect(()=>{
   if(!currentProject)return
@@ -535,36 +533,18 @@ export default function WorkflowDiagram():JSX.Element{
   return agent
  },[agents,currentProject?.id])
 
- const statusMap=useMemo(()=>{
-  const map:Record<string,AgentStatus|undefined>={}
-  AGENT_NODES.forEach(nodeDef=>{
-   const agent=getAgentByType(nodeDef.type)
-   map[nodeDef.id]=agent?.status
-  })
-  return map
- },[getAgentByType])
-
  const layout=useMemo(()=>{
-  return getColumnLayout(statusMap,layoutConfig)
- },[statusMap,layoutConfig])
+  return getColumnLayout(agentNodes,uiPhases.length,layoutConfig)
+ },[agentNodes,uiPhases.length,layoutConfig])
 
  const phaseGroups=useMemo(()=>{
-  const groups=[
-   {id:'phase-0',label:'P0: 企画',phase:0},
-   {id:'phase-1',label:'P1: 分割1',phase:1},
-   {id:'phase-2',label:'P2: 設計',phase:2},
-   {id:'phase-3',label:'P3: 分割2',phase:3},
-   {id:'phase-4',label:'P4: アセット',phase:4},
-   {id:'phase-5',label:'P5: 分割3',phase:5},
-   {id:'phase-6',label:'P6: 実装',phase:6},
-   {id:'phase-7',label:'P7: 分割4',phase:7},
-   {id:'phase-8',label:'P8: テスト',phase:8},
-]
-  return groups.map(g=>({
-   ...g,
-   ...calculatePhaseBounds(g.phase,layout.positions,layout.widths,layout.heights,layoutConfig),
+  return uiPhases.map((phase,idx)=>({
+   id:`phase-${idx}`,
+   label:`P${idx+1}: ${phase.label}`,
+   phaseIndex:idx,
+   ...calculatePhaseBounds(idx,agentNodes,layout.positions,layout.widths,layout.heights,layoutConfig),
   }))
- },[layout,layoutConfig])
+ },[uiPhases,agentNodes,layout,layoutConfig])
 
  const nodes:Node[]=useMemo(()=>{
   const groupNodes:Node[]=phaseGroups.map(group=>({
@@ -577,13 +557,13 @@ export default function WorkflowDiagram():JSX.Element{
    zIndex:-1,
   }))
 
-  const agentNodes:Node[]=AGENT_NODES.map(nodeDef=>{
+  const agentNodeList:Node[]=agentNodes.map(nodeDef=>{
    const agent=getAgentByType(nodeDef.type)
    const pos=layout.positions[nodeDef.id]
    return{
     id:nodeDef.id,
     type:'agent',
-    position:pos,
+    position:pos||{x:0,y:0},
     data:{
      label:getLabel(nodeDef.type),
      status:agent?.status,
@@ -599,16 +579,16 @@ export default function WorkflowDiagram():JSX.Element{
    }
   })
 
-  return[...groupNodes,...agentNodes]
- },[getAgentByType,layout,phaseGroups,layoutConfig,getLabel])
+  return[...groupNodes,...agentNodeList]
+ },[getAgentByType,layout,phaseGroups,layoutConfig,getLabel,agentNodes])
 
  const edges:Edge[]=useMemo(()=>{
   const getNodePhase=(nodeId:string):number=>{
-   const node=AGENT_NODES.find(n=>n.id===nodeId)
-   return node?.phase ?? 1
+   const node=agentNodes.find(n=>n.id===nodeId)
+   return node?.uiPhaseIndex ?? 0
   }
 
-  return EDGE_DEFS.map((edgeDef,index)=>{
+  return edgeDefs.map((edgeDef,index)=>{
    const sourceAgent=getAgentByType(edgeDef.source as AgentType)
    const isCompleted=sourceAgent?.status==='completed'
    const isRunning=sourceAgent?.status==='running'
@@ -637,13 +617,13 @@ export default function WorkflowDiagram():JSX.Element{
     },
    }
   })
- },[getAgentByType])
+ },[getAgentByType,agentNodes,edgeDefs])
 
  const projectAgents=agents.filter(a=>a.projectId===currentProject?.id)
  const completedCount=projectAgents.filter(a=>a.status==='completed').length
  const runningCount=projectAgents.filter(a=>a.status==='running').length
  const waitingApprovalCount=projectAgents.filter(a=>a.status==='waiting_approval').length
- const totalCount=AGENT_NODES.length
+ const totalCount=agentNodes.length
  const overallProgress=totalCount>0
   ?Math.round((completedCount/totalCount)*100+
         (projectAgents.filter(a=>a.status==='running').reduce((sum,a)=>sum+(a.progress||0),0)/totalCount))

@@ -11,13 +11,46 @@
     ]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "set CLAUDE_HOOK_TYPE=PreToolUse && node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
+            "command": "set CLAUDE_HOOK_TYPE=PostToolUse && node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "set CLAUDE_HOOK_TYPE=Notification && node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "set CLAUDE_HOOK_TYPE=Stop && node \"%USERPROFILE%/.claude/scripts/log-tool-use.js\""
           }
         ]
       }

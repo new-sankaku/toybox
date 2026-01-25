@@ -15,6 +15,7 @@
 ・常に敬語を使う。
 ・コメントはTODO以外は不要
 ・Sonnet Haikuをサブエージェントとすることは禁止、サブエージェントは基本的にOpusを使用する。
+・曖昧な可能性で直すな。論理的な根拠を持って直せ。
 
 - **Agent**: AIエージェント（concept_leader, design_workerなど）。独立した実行単位。1つのAgentは特定の役割を持つ。
 - **Task**: Agentが実行する個別の作業単位。1つのAgentが複数のTaskを実行することがある。AgentとTaskは別物であり、混同しないこと。
@@ -30,10 +31,10 @@
 
 トークン削減のためコードを圧縮する:
 ```bash
-# TypeScript（langgraph-studio）
-cd langgraph-studio
-npm run lint:fix    # ESLint適用（インデント1スペース等）
-npm run format      # 演算子スペース削除
+  # TypeScript（langgraph-studio）
+  cd langgraph-studio
+  npm run lint        # ESLint適用
+  npm run format      # 演算子スペース削除
 
 # Python（backend）
 cd backend
@@ -48,3 +49,65 @@ python scripts/remove-spaces.py
 
 **TypeScript追加ルール:**
 - インデント: 1スペース
+
+
+
+## 2. Color System
+
+### 2.1 Primary Palette (Source: index.html)
+
+```css
+:root {
+  /* ===== Background Colors ===== */
+  --bg-main: #E8E4D4;        /* メイン背景 */
+  --bg-panel: #DAD5C3;       /* パネル背景 */
+  --bg-selected: #CCC7B5;    /* 選択状態 */
+  --bg-header: #57534A;      /* ヘッダー/フッター */
+  --bg-footer: #57534A;
+
+  /* ===== Text Colors ===== */
+  --text-main: #454138;      /* メインテキスト */
+  --text-light: #7A756A;     /* サブテキスト */
+  --text-header: #E8E4D4;    /* ヘッダー内テキスト */
+  --text-footer: #E8E4D4;    /* フッター内テキスト */
+
+  /* ===== Accent Colors (Category Markers) ===== */
+  --accent-red: #B85C5C;     /* システム/エラー/Critical */
+  --accent-orange: #C4956C;  /* 実行中/Warning */
+  --accent-yellow: #C9C078;  /* 待機中/Pending */
+  --accent-green: #7AAA7A;   /* 完了/Success */
+  --accent-blue: #6B8FAA;    /* 情報/Info */
+
+  /* ===== Borders ===== */
+  --border-light: rgba(69, 65, 56, 0.2);
+  --border-dark: rgba(69, 65, 56, 0.4);
+}
+```
+
+### 2.2 Color Usage Matrix
+
+| 用途 | カラー | CSS変数 |
+|------|--------|---------|
+| メイン背景 | `#E8E4D4` | `--bg-main` |
+| パネル背景 | `#DAD5C3` | `--bg-panel` |
+| 選択状態 | `#CCC7B5` | `--bg-selected` |
+| ヘッダー/フッター | `#57534A` | `--bg-header` |
+| メインテキスト | `#454138` | `--text-main` |
+| サブテキスト | `#7A756A` | `--text-light` |
+| ヘッダー/フッターテキスト | `#E8E4D4` | `--text-header` |
+
+### 2.3 Category Color System
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  CATEGORY MARKERS - 状態を示す4px縦線                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ██  --accent-red     #B85C5C   システム/エラー/Critical        │
+│  ██  --accent-orange  #C4956C   実行中/Warning/進行中           │
+│  ██  --accent-yellow  #C9C078   待機中/Pending/Human待ち        │
+│  ██  --accent-green   #7AAA7A   完了/Success/承認済み           │
+│  ██  --accent-blue    #6B8FAA   情報/Info/参照                  │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```

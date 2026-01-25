@@ -1,7 +1,7 @@
 import{useMemo,useCallback,useState}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
-import{Modal}from'@/components/ui/Modal'
+import{FloatingPanel}from'@/components/ui/FloatingPanel'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
@@ -156,11 +156,12 @@ export default function AIFieldSection():JSX.Element|null{
     </CardContent>
    </Card>
 
-   <Modal
+   <FloatingPanel
     isOpen={!!selectedCharacter}
     onClose={()=>setSelectedCharacter(null)}
     title="エージェント詳細"
     size="md"
+    panelId="agent-detail"
    >
     {selectedCharacter&&(
      <div className="space-y-4">
@@ -212,7 +213,7 @@ export default function AIFieldSection():JSX.Element|null{
 )}
      </div>
 )}
-   </Modal>
+   </FloatingPanel>
   </>
 )
 }

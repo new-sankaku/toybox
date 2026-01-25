@@ -237,5 +237,32 @@ phases:
     label: テスト
     agents: [unit_test, integration_test]
 
+ui_phases:
+  - id: design
+    label: 設計
+    agents: [concept, task_split_1, concept_detail, scenario, world, game_design, tech_spec, task_split_2]
+  - id: assets
+    label: アセット
+    agents: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx, task_split_3]
+  - id: impl
+    label: 実装
+    agents: [code, event, ui_integration, asset_integration, task_split_4]
+  - id: test
+    label: テスト
+    agents: [unit_test, integration_test]
+
+agent_asset_mapping:
+  enableImageGeneration:
+    - asset_character
+    - asset_background
+    - asset_ui
+    - asset_effect
+  enableBGMGeneration:
+    - asset_bgm
+    - asset_sfx
+  enableVoiceSynthesis:
+    - asset_voice
+  enableVideoGeneration: []
+
 quality_check_defaults:
   max_retries: 3

@@ -348,3 +348,13 @@ def get_brushup_presets_config()->Dict[str,Any]:
 def get_brushup_presets()->List[Dict[str,Any]]:
     config = get_brushup_presets_config()
     return config.get("presets",[])
+
+
+def get_ui_phases()->List[Dict[str,Any]]:
+    config = get_agents_config()
+    return config.get("ui_phases",[])
+
+
+def get_agent_asset_mapping()->Dict[str,List[str]]:
+    config = get_agents_config()
+    return config.get("agent_asset_mapping",{})

@@ -1,6 +1,6 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
-import type{BrushupPreset,BrushupSuggestImage}from'@/types/brushup'
+import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||'http://localhost:5000'
 
@@ -119,8 +119,8 @@ export const projectApi={
 
  brushup:async(projectId:string,options?:{
   selectedAgents?:string[]
+  agentOptions?:Record<string,string[]>
   clearAssets?:boolean
-  presets?:string[]
   customInstruction?:string
   referenceImageIds?:string[]
  }):Promise<Project>=>{
@@ -128,8 +128,12 @@ export const projectApi={
   return response.data
  },
 
+ getBrushupOptions:async():Promise<BrushupOptionsConfig>=>{
+  const response=await api.get('/api/brushup/options')
+  return response.data
+ },
+
  suggestBrushupImages:async(projectId:string,options:{
-  presets:string[]
   customInstruction?:string
   count?:number
  }):Promise<{images:BrushupSuggestImage[]}>=>{
@@ -380,8 +384,21 @@ export interface AgentDefinition{
  speechBubble:string
 }
 
+export interface UIPhase{
+ id:string
+ label:string
+ agents:string[]
+}
+
+export interface AgentDefinitionsResponse{
+ agents:Record<string,AgentDefinition>
+ uiPhases:UIPhase[]
+ agentAssetMapping:Record<string,string[]>
+ workflowDependencies:Record<string,string[]>
+}
+
 export const agentDefinitionApi={
- getAll:async():Promise<Record<string,AgentDefinition>>=>{
+ getAll:async():Promise<AgentDefinitionsResponse>=>{
   const response=await api.get('/api/agent-definitions')
   return response.data
  }
@@ -840,8 +857,8 @@ export const configApi={
   return response.data
  },
 
- getBrushupPresets:async():Promise<{presets:BrushupPreset[]}>=>{
-  const response=await api.get('/api/config/brushup-presets')
+ getBrushupOptions:async():Promise<BrushupOptionsConfig>=>{
+  const response=await api.get('/api/brushup/options')
   return response.data
  }
 }

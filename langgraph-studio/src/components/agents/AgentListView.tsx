@@ -6,6 +6,8 @@ import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
 import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
+import{useProjectStore}from'@/stores/projectStore'
+import type{AssetGenerationOptions}from'@/config/projectOptions'
 
 const getDisplayName=(agent:Agent):string=>{
  return(agent.metadata?.displayName as string)||agent.type
@@ -38,40 +40,47 @@ export default function AgentListView({
  loading=false
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
- const{getPhase,fetchDefinitions,loaded}=useAgentDefinitionStore()
+ const{fetchDefinitions,loaded,getFilteredUIPhases,getEnabledAgents}=useAgentDefinitionStore()
+ const{currentProject}=useProjectStore()
 
  useEffect(()=>{
   if(!loaded)fetchDefinitions()
  },[loaded,fetchDefinitions])
 
+ const assetGeneration=currentProject?.config?.assetGeneration as AssetGenerationOptions|undefined
+ const enabledAgents=useMemo(()=>getEnabledAgents(assetGeneration),[assetGeneration,getEnabledAgents])
+ const uiPhases=useMemo(()=>getFilteredUIPhases(assetGeneration),[assetGeneration,getFilteredUIPhases])
+
  const filteredAgents=useMemo(()=>{
-  if(filterStatus==='all')return agents
-  if(filterStatus==='incomplete')return agents.filter((agent)=>agent.status!=='completed')
-  return agents.filter((agent)=>agent.status===filterStatus)
- },[agents,filterStatus])
+  const enabledList=agents.filter(a=>enabledAgents.has(a.type))
+  if(filterStatus==='all')return enabledList
+  if(filterStatus==='incomplete')return enabledList.filter((agent)=>agent.status!=='completed')
+  return enabledList.filter((agent)=>agent.status===filterStatus)
+ },[agents,filterStatus,enabledAgents])
 
  const statusCounts=useMemo(()=>{
-  const incomplete=agents.filter((a)=>a.status!=='completed').length
+  const enabledList=agents.filter(a=>enabledAgents.has(a.type))
+  const incomplete=enabledList.filter((a)=>a.status!=='completed').length
   return{
-   all:agents.length,
+   all:enabledList.length,
    incomplete,
-   running:agents.filter((a)=>a.status==='running').length,
-   waiting_approval:agents.filter((a)=>a.status==='waiting_approval').length,
-   pending:agents.filter((a)=>a.status==='pending').length,
-   completed:agents.filter((a)=>a.status==='completed').length,
-   failed:agents.filter((a)=>a.status==='failed').length,
-   blocked:agents.filter((a)=>a.status==='blocked').length
+   running:enabledList.filter((a)=>a.status==='running').length,
+   waiting_approval:enabledList.filter((a)=>a.status==='waiting_approval').length,
+   pending:enabledList.filter((a)=>a.status==='pending').length,
+   completed:enabledList.filter((a)=>a.status==='completed').length,
+   failed:enabledList.filter((a)=>a.status==='failed').length,
+   blocked:enabledList.filter((a)=>a.status==='blocked').length
   }
- },[agents])
+ },[agents,enabledAgents])
 
  const agentsByPhase=useMemo(()=>{
-  const getAgentPhase=(a:Agent)=>a.phase??getPhase(a.type)
-  return{
-   phase1:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=0&&p<=2}),
-   phase2:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=3&&p<=6}),
-   phase3:filteredAgents.filter((a)=>{const p=getAgentPhase(a);return p>=7&&p<=8})
+  const result:Record<string,Agent[]>={}
+  for(const phase of uiPhases){
+   const phaseAgentSet=new Set(phase.agents)
+   result[phase.id]=filteredAgents.filter(a=>phaseAgentSet.has(a.type))
   }
- },[filteredAgents,getPhase])
+  return result
+ },[filteredAgents,uiPhases])
 
  const getWaitingFor=useCallback((agent:Agent):string|undefined=>{
   if(agent.status!=='pending')return undefined
@@ -106,38 +115,6 @@ export default function AgentListView({
   return'プロジェクト開始待ち'
  },[agents])
 
- const renderPhaseSection=(title:string,phaseAgents:Agent[])=>{
-  if(phaseAgents.length===0)return null
-
-  const completed=phaseAgents.filter(a=>a.status==='completed').length
-  const running=phaseAgents.filter(a=>a.status==='running').length
-
-  return(
-   <Card className="mb-3">
-    <CardHeader>
-     <DiamondMarker>{title}</DiamondMarker>
-     <span className="ml-auto text-nier-caption text-nier-text-light">
-      {completed}/{phaseAgents.length}完了
-      {running>0&&<span className="ml-2 text-nier-text-light">{running}稼働中</span>}
-     </span>
-    </CardHeader>
-    <CardContent className="p-0">
-     <div className="divide-y divide-nier-border-light">
-      {phaseAgents.map((agent)=>(
-       <AgentCard
-        key={agent.id}
-        agent={agent}
-        onSelect={onSelectAgent}
-        isSelected={selectedAgentId===agent.id}
-        waitingFor={getWaitingFor(agent)}
-       />
-))}
-     </div>
-    </CardContent>
-   </Card>
-)
- }
-
  return(
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Agent List-Main Content*/}
@@ -163,9 +140,36 @@ export default function AgentListView({
      </Card>
 ) : (
      <div className="nier-scroll-list flex-1 overflow-y-auto">
-      {renderPhaseSection('PHASE 1 - Planning',agentsByPhase.phase1)}
-      {renderPhaseSection('PHASE 2 - Development',agentsByPhase.phase2)}
-      {renderPhaseSection('PHASE 3 - Quality',agentsByPhase.phase3)}
+      {uiPhases.map((phase,idx)=>{
+       const phaseAgents=agentsByPhase[phase.id]||[]
+       if(phaseAgents.length===0)return null
+       return(
+        <Card key={phase.id} className="mb-3">
+         <CardHeader>
+          <DiamondMarker>{`PHASE ${idx+1} - ${phase.label}`}</DiamondMarker>
+          <span className="ml-auto text-nier-caption text-nier-text-light">
+           {phaseAgents.filter(a=>a.status==='completed').length}/{phaseAgents.length}完了
+           {phaseAgents.filter(a=>a.status==='running').length>0&&(
+            <span className="ml-2 text-nier-text-light">{phaseAgents.filter(a=>a.status==='running').length}稼働中</span>
+           )}
+          </span>
+         </CardHeader>
+         <CardContent className="p-0">
+          <div className="divide-y divide-nier-border-light">
+           {phaseAgents.map((agent)=>(
+            <AgentCard
+             key={agent.id}
+             agent={agent}
+             onSelect={onSelectAgent}
+             isSelected={selectedAgentId===agent.id}
+             waitingFor={getWaitingFor(agent)}
+            />
+           ))}
+          </div>
+         </CardContent>
+        </Card>
+       )
+      })}
      </div>
 )}
    </div>

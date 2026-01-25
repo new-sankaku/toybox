@@ -1,0 +1,165 @@
+agents:
+  concept:
+    options:
+      - id: expand_core_concept
+        label: コアコンセプトの深掘り
+      - id: add_unique_selling_point
+        label: 差別化要素の追加
+
+  concept_detail:
+    options:
+      - id: add_sub_systems
+        label: サブシステム追加
+      - id: detail_mechanics
+        label: メカニクス詳細化
+
+  scenario:
+    options:
+      - id: add_side_quests
+        label: サブクエスト追加
+      - id: add_branching
+        label: 分岐シナリオ追加
+      - id: deepen_character_arcs
+        label: キャラクターアーク深化
+
+  world:
+    options:
+      - id: expand_lore
+        label: 世界設定・歴史の拡充
+      - id: add_locations
+        label: ロケーション追加
+      - id: add_factions
+        label: 勢力・組織追加
+
+  game_design:
+    options:
+      - id: balance_difficulty
+        label: 難易度バランス調整
+      - id: add_reward_systems
+        label: 報酬システム追加
+      - id: improve_progression
+        label: 進行曲線の改善
+
+  tech_spec:
+    options:
+      - id: optimize_architecture
+        label: アーキテクチャ最適化
+      - id: add_error_handling
+        label: エラーハンドリング強化
+
+  asset_character:
+    options:
+      - id: upscale
+        label: アップスケール（高解像度化）
+      - id: expression_variants
+        label: 表情バリエーション追加
+      - id: character_variants
+        label: キャラ差分追加（衣装・髪型等）
+      - id: pose_variants
+        label: ポーズバリエーション追加
+
+  asset_background:
+    options:
+      - id: upscale
+        label: アップスケール（高解像度化）
+      - id: detail_increase
+        label: 描き込み量増加
+      - id: time_variants
+        label: 時間帯バリエーション追加（朝・昼・夜）
+      - id: weather_variants
+        label: 天候バリエーション追加
+
+  asset_ui:
+    options:
+      - id: upscale
+        label: アップスケール（高解像度化）
+      - id: add_hover_states
+        label: ホバー状態追加
+      - id: add_animations
+        label: アニメーション追加
+      - id: style_consistency
+        label: スタイル統一
+
+  asset_effect:
+    options:
+      - id: add_particle_effects
+        label: パーティクルエフェクト追加
+      - id: improve_impact
+        label: ヒットエフェクト強化
+      - id: add_ambient_effects
+        label: 環境エフェクト追加
+
+  asset_bgm:
+    options:
+      - id: add_sad_tracks
+        label: 悲しい曲追加
+      - id: add_battle_tracks
+        label: 戦闘曲追加
+      - id: add_ambient_tracks
+        label: 環境音楽追加
+      - id: loop_optimization
+        label: ループポイント最適化
+
+  asset_voice:
+    options:
+      - id: add_emotion_variants
+        label: 感情バリエーション追加
+      - id: add_battle_voices
+        label: 戦闘ボイス追加
+      - id: improve_clarity
+        label: 音声クリア化
+
+  asset_sfx:
+    options:
+      - id: add_ui_sounds
+        label: UI効果音追加
+      - id: add_environment_sounds
+        label: 環境音追加
+      - id: improve_impact_sounds
+        label: インパクト音強化
+
+  code:
+    options:
+      - id: refactor_structure
+        label: コード構造リファクタリング
+      - id: add_comments
+        label: コメント追加
+      - id: optimize_performance
+        label: パフォーマンス最適化
+
+  event:
+    options:
+      - id: add_event_variations
+        label: イベントバリエーション追加
+      - id: improve_triggers
+        label: トリガー条件改善
+
+  ui_integration:
+    options:
+      - id: improve_responsiveness
+        label: レスポンシブ対応強化
+      - id: add_transitions
+        label: 画面遷移追加
+      - id: improve_feedback
+        label: フィードバック強化
+
+  asset_integration:
+    options:
+      - id: optimize_loading
+        label: 読み込み最適化
+      - id: add_fallbacks
+        label: フォールバック追加
+
+  unit_test:
+    options:
+      - id: increase_coverage
+        label: カバレッジ向上
+      - id: add_edge_cases
+        label: エッジケース追加
+
+  integration_test:
+    options:
+      - id: add_scenarios
+        label: テストシナリオ追加
+      - id: improve_stability
+        label: 安定性テスト強化
