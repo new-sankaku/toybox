@@ -15,20 +15,20 @@ def pytest_html_results_table_header(cells):
 
 
 def pytest_html_results_table_row(report,cells):
- desc = getattr(report,"description","")
+ desc=getattr(report,"description","")
  cells.insert(2,f"<td>{desc}</td>")
 
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item,call):
- outcome = yield
- report = outcome.get_result()
- if report.when == "call":
-  file_name = os.path.basename(item.fspath)
-  class_name = item.cls.__name__ if item.cls else ""
-  func_name = item.name
-  key = f"{file_name}::{class_name}::{func_name}"
-  report.description = DESCRIPTIONS.get(key,"")
+ outcome=yield
+ report=outcome.get_result()
+ if report.when=="call":
+  file_name=os.path.basename(item.fspath)
+  class_name=item.cls.__name__ if item.cls else""
+  func_name=item.name
+  key=f"{file_name}::{class_name}::{func_name}"
+  report.description=DESCRIPTIONS.get(key,"")
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker,Session
@@ -38,7 +38,7 @@ from models.tables import Base
 @pytest.fixture(scope="session")
 def test_db_engine():
  """インメモリSQLiteエンジン"""
- engine = create_engine(
+ engine=create_engine(
   "sqlite:///:memory:",
   echo=False,
   connect_args={"check_same_thread":False}
@@ -51,8 +51,8 @@ def test_db_engine():
 @pytest.fixture
 def db_session(test_db_engine)->Generator[Session,None,None]:
  """テストごとにロールバックするセッション"""
- Session = sessionmaker(bind=test_db_engine)
- session = Session()
+ Session=sessionmaker(bind=test_db_engine)
+ session=Session()
  try:
   yield session
   session.rollback()
@@ -78,7 +78,7 @@ def mock_provider_config():
 def sample_project(db_session):
  """サンプルプロジェクト"""
  from models.tables import Project
- project = Project(
+ project=Project(
   id="test-project-001",
   name="テストプロジェクト",
   description="テスト用のプロジェクトです",
@@ -133,14 +133,14 @@ def api_key_data():
 class MockSocketIO:
  """SocketIOモック"""
  def __init__(self):
-  self.emitted = []
+  self.emitted=[]
 
  def emit(self,event:str,data:dict,**kwargs):
   self.emitted.append({"event":event,"data":data})
 
- def get_emitted(self,event:str = None)->list:
+ def get_emitted(self,event:str=None)->list:
   if event:
-   return [e for e in self.emitted if e["event"] == event]
+   return [e for e in self.emitted if e["event"]==event]
   return self.emitted
 
 

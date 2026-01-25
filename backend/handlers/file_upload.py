@@ -4,7 +4,7 @@ from flask import Flask,request,jsonify,send_from_directory
 from werkzeug.utils import secure_filename
 from datastore import DataStore
 
-ALLOWED_EXTENSIONS = {
+ALLOWED_EXTENSIONS={
 
     'txt','md','py','js','ts','jsx','tsx','html','css','json','xml','yaml','yml',
     'java','c','cpp','h','cs','go','rs','rb','php','swift','kt',
@@ -20,7 +20,7 @@ ALLOWED_EXTENSIONS = {
     'zip','tar','gz','tgz','7z','rar',
 }
 
-CATEGORY_MAP = {
+CATEGORY_MAP={
 
     'txt':'document','md':'document','pdf':'document',
     'py':'code','js':'code','ts':'code','jsx':'code','tsx':'code',
@@ -41,23 +41,23 @@ CATEGORY_MAP = {
     '7z':'archive','rar':'archive',
 }
 
-MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024
+MAX_FILE_SIZE=4*1024*1024*1024
 
 
 def allowed_file(filename:str)->bool:
-    return '.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
+    return'.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def get_category(filename:str)->str:
-    if '.' not in filename:
-        return 'other'
-    ext = filename.rsplit('.',1)[1].lower()
+    if'.' not in filename:
+        return'other'
+    ext=filename.rsplit('.',1)[1].lower()
     return CATEGORY_MAP.get(ext,'other')
 
 
 def get_mime_type(filename:str)->str:
-    ext = filename.rsplit('.',1)[1].lower() if '.' in filename else ''
-    mime_types = {
+    ext=filename.rsplit('.',1)[1].lower() if'.' in filename else''
+    mime_types={
 
         'txt':'text/plain','md':'text/markdown','json':'application/json',
         'py':'text/x-python','js':'text/javascript','ts':'text/typescript',
@@ -81,24 +81,24 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
     @app.route('/api/projects/<project_id>/files',methods=['GET'])
     def list_uploaded_files(project_id:str):
-        project = data_store.get_project(project_id)
+        project=data_store.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        files = data_store.get_uploaded_files_by_project(project_id)
+        files=data_store.get_uploaded_files_by_project(project_id)
         return jsonify(files)
 
     @app.route('/api/projects/<project_id>/files',methods=['POST'])
     def upload_file(project_id:str):
-        project = data_store.get_project(project_id)
+        project=data_store.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        if 'file' not in request.files:
+        if'file' not in request.files:
             return jsonify({"error":"No file part in request"}),400
 
-        file = request.files['file']
-        if file.filename == '':
+        file=request.files['file']
+        if file.filename=='':
             return jsonify({"error":"No selected file"}),400
 
         if not allowed_file(file.filename):
@@ -106,29 +106,29 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
 
         file.seek(0,2)
-        file_size = file.tell()
+        file_size=file.tell()
         file.seek(0)
 
-        if file_size > MAX_FILE_SIZE:
+        if file_size>MAX_FILE_SIZE:
             return jsonify({"error":f"File too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB"}),400
 
 
-        original_filename = secure_filename(file.filename)
-        file_id = uuid.uuid4().hex[:12]
-        ext = original_filename.rsplit('.',1)[1].lower() if '.' in original_filename else ''
-        stored_filename = f"{file_id}.{ext}" if ext else file_id
+        original_filename=secure_filename(file.filename)
+        file_id=uuid.uuid4().hex[:12]
+        ext=original_filename.rsplit('.',1)[1].lower() if'.' in original_filename else''
+        stored_filename=f"{file_id}.{ext}" if ext else file_id
 
 
-        project_folder = os.path.join(upload_folder,project_id)
+        project_folder=os.path.join(upload_folder,project_id)
         os.makedirs(project_folder,exist_ok=True)
-        file_path = os.path.join(project_folder,stored_filename)
+        file_path=os.path.join(project_folder,stored_filename)
         file.save(file_path)
 
 
-        description = request.form.get('description','')
+        description=request.form.get('description','')
 
 
-        uploaded_file = data_store.create_uploaded_file(
+        uploaded_file=data_store.create_uploaded_file(
             project_id=project_id,
             filename=stored_filename,
             original_filename=original_filename,
@@ -142,22 +142,22 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
     @app.route('/api/projects/<project_id>/files/batch',methods=['POST'])
     def upload_files_batch(project_id:str):
-        project = data_store.get_project(project_id)
+        project=data_store.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        if 'files' not in request.files:
+        if'files' not in request.files:
             return jsonify({"error":"No files in request"}),400
 
-        files = request.files.getlist('files')
+        files=request.files.getlist('files')
         if not files:
             return jsonify({"error":"No files selected"}),400
 
-        results = []
-        errors = []
+        results=[]
+        errors=[]
 
         for file in files:
-            if file.filename == '':
+            if file.filename=='':
                 continue
 
             if not allowed_file(file.filename):
@@ -169,10 +169,10 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
 
             file.seek(0,2)
-            file_size = file.tell()
+            file_size=file.tell()
             file.seek(0)
 
-            if file_size > MAX_FILE_SIZE:
+            if file_size>MAX_FILE_SIZE:
                 errors.append({
                     "filename":file.filename,
                     "error":f"File too large (max {MAX_FILE_SIZE // (1024 * 1024)}MB)"
@@ -180,19 +180,19 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
                 continue
 
 
-            original_filename = secure_filename(file.filename)
-            file_id = uuid.uuid4().hex[:12]
-            ext = original_filename.rsplit('.',1)[1].lower() if '.' in original_filename else ''
-            stored_filename = f"{file_id}.{ext}" if ext else file_id
+            original_filename=secure_filename(file.filename)
+            file_id=uuid.uuid4().hex[:12]
+            ext=original_filename.rsplit('.',1)[1].lower() if'.' in original_filename else''
+            stored_filename=f"{file_id}.{ext}" if ext else file_id
 
 
-            project_folder = os.path.join(upload_folder,project_id)
+            project_folder=os.path.join(upload_folder,project_id)
             os.makedirs(project_folder,exist_ok=True)
-            file_path = os.path.join(project_folder,stored_filename)
+            file_path=os.path.join(project_folder,stored_filename)
             file.save(file_path)
 
 
-            uploaded_file = data_store.create_uploaded_file(
+            uploaded_file=data_store.create_uploaded_file(
                 project_id=project_id,
                 filename=stored_filename,
                 original_filename=original_filename,
@@ -212,20 +212,20 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
     @app.route('/api/files/<file_id>',methods=['GET'])
     def get_uploaded_file_info(file_id:str):
-        file_record = data_store.get_uploaded_file(file_id)
+        file_record=data_store.get_uploaded_file(file_id)
         if not file_record:
             return jsonify({"error":"File not found"}),404
         return jsonify(file_record)
 
     @app.route('/api/files/<file_id>',methods=['DELETE'])
     def delete_uploaded_file(file_id:str):
-        file_record = data_store.get_uploaded_file(file_id)
+        file_record=data_store.get_uploaded_file(file_id)
         if not file_record:
             return jsonify({"error":"File not found"}),404
 
 
-        project_folder = os.path.join(upload_folder,file_record["projectId"])
-        file_path = os.path.join(project_folder,file_record["filename"])
+        project_folder=os.path.join(upload_folder,file_record["projectId"])
+        file_path=os.path.join(project_folder,file_record["filename"])
         if os.path.exists(file_path):
             os.remove(file_path)
 
@@ -236,11 +236,11 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
     @app.route('/api/files/<file_id>/download',methods=['GET'])
     def download_file(file_id:str):
-        file_record = data_store.get_uploaded_file(file_id)
+        file_record=data_store.get_uploaded_file(file_id)
         if not file_record:
             return jsonify({"error":"File not found"}),404
 
-        project_folder = os.path.join(upload_folder,file_record["projectId"])
+        project_folder=os.path.join(upload_folder,file_record["projectId"])
         return send_from_directory(
             project_folder,
             file_record["filename"],
@@ -250,5 +250,5 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
 
     @app.route('/uploads/<project_id>/<filename>',methods=['GET'])
     def serve_uploaded_file(project_id:str,filename:str):
-        project_folder = os.path.join(upload_folder,project_id)
+        project_folder=os.path.join(upload_folder,project_id)
         return send_from_directory(project_folder,filename)

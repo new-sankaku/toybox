@@ -16,7 +16,7 @@ class ProjectRepository(BaseRepository[Project]):
   result={
    "id":p.id,
    "name":p.name,
-   "description":p.description or "",
+   "description":p.description or"",
    "concept":p.concept or {},
    "status":p.status,
    "currentPhase":p.current_phase,
@@ -26,7 +26,7 @@ class ProjectRepository(BaseRepository[Project]):
    "createdAt":p.created_at.isoformat() if p.created_at else None,
    "updatedAt":p.updated_at.isoformat() if p.updated_at else None,
   }
-  if "outputSettings" in config:
+  if"outputSettings" in config:
    result["outputSettings"]=config["outputSettings"]
   return result
 
@@ -41,7 +41,7 @@ class ProjectRepository(BaseRepository[Project]):
   from uuid import uuid4
   now=datetime.now()
   config=data.get("config",{})
-  if "outputSettings" not in config:
+  if"outputSettings" not in config:
    config["outputSettings"]={"default_dir":generate_output_dir()}
   project=Project(
    id=f"proj-{uuid4().hex[:8]}",
@@ -63,23 +63,23 @@ class ProjectRepository(BaseRepository[Project]):
   p=self.get(id)
   if not p:
    return None
-  if "name" in data:
+  if"name" in data:
    p.name=data["name"]
-  if "description" in data:
+  if"description" in data:
    p.description=data["description"]
-  if "concept" in data:
+  if"concept" in data:
    p.concept=data["concept"]
-  if "status" in data:
+  if"status" in data:
    p.status=data["status"]
-  if "currentPhase" in data:
+  if"currentPhase" in data:
    p.current_phase=data["currentPhase"]
-  if "state" in data:
+  if"state" in data:
    p.state=data["state"]
-  if "config" in data:
+  if"config" in data:
    p.config=data["config"]
-  if "aiServices" in data:
+  if"aiServices" in data:
    p.ai_services=data["aiServices"]
-  if "outputSettings" in data:
+  if"outputSettings" in data:
    config=p.config or {}
    config["outputSettings"]=data["outputSettings"]
    p.config=config

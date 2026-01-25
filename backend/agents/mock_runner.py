@@ -15,20 +15,20 @@ from config_loader import get_mock_content,get_checkpoint_title_config
 class MockAgentRunner(AgentRunner):
 
     def __init__(self,data_store=None,**kwargs):
-        self.data_store = data_store
-        self._simulation_speed = kwargs.get("simulation_speed",1.0)
+        self.data_store=data_store
+        self._simulation_speed=kwargs.get("simulation_speed",1.0)
 
     async def run_agent(self,context:AgentContext)->AgentOutput:
-        started_at = datetime.now().isoformat()
-        tokens_used = 0
-        output = {}
+        started_at=datetime.now().isoformat()
+        tokens_used=0
+        output={}
 
         try:
             async for event in self.run_agent_stream(context):
-                if event["type"] == "output":
-                    output = event["data"]
-                elif event["type"] == "tokens":
-                    tokens_used += event["data"].get("count",0)
+                if event["type"]=="output":
+                    output=event["data"]
+                elif event["type"]=="tokens":
+                    tokens_used+=event["data"].get("count",0)
 
             return AgentOutput(
                 agent_id=context.agent_id,
@@ -36,7 +36,7 @@ class MockAgentRunner(AgentRunner):
                 status=AgentStatus.COMPLETED,
                 output=output,
                 tokens_used=tokens_used,
-                duration_seconds=(datetime.now() - datetime.fromisoformat(started_at)).total_seconds(),
+                duration_seconds=(datetime.now()-datetime.fromisoformat(started_at)).total_seconds(),
                 started_at=started_at,
                 completed_at=datetime.now().isoformat(),
             )
@@ -55,7 +55,7 @@ class MockAgentRunner(AgentRunner):
         self,
         context:AgentContext
     )->AsyncGenerator[Dict[str,Any],None]:
-        agent_type = context.agent_type
+        agent_type=context.agent_type
 
         yield {
             "type":"log",
@@ -71,16 +71,16 @@ class MockAgentRunner(AgentRunner):
             "data":{"progress":10,"current_task":"初期化中"}
         }
 
-        await asyncio.sleep(0.5 * self._simulation_speed)
+        await asyncio.sleep(0.5*self._simulation_speed)
 
         yield {
             "type":"progress",
             "data":{"progress":30,"current_task":"処理中"}
         }
 
-        await asyncio.sleep(0.5 * self._simulation_speed)
+        await asyncio.sleep(0.5*self._simulation_speed)
 
-        tokens = 500 + int(1500 * self._simulation_speed)
+        tokens=500+int(1500*self._simulation_speed)
         yield {
             "type":"tokens",
             "data":{"count":tokens,"total":tokens}
@@ -91,16 +91,16 @@ class MockAgentRunner(AgentRunner):
             "data":{"progress":70,"current_task":"出力生成中"}
         }
 
-        await asyncio.sleep(0.3 * self._simulation_speed)
+        await asyncio.sleep(0.3*self._simulation_speed)
 
-        output = self._generate_mock_output(context)
+        output=self._generate_mock_output(context)
 
         yield {
             "type":"progress",
             "data":{"progress":90,"current_task":"完了処理中"}
         }
 
-        checkpoint_data = self._generate_checkpoint(context,output)
+        checkpoint_data=self._generate_checkpoint(context,output)
         yield {
             "type":"checkpoint",
             "data":checkpoint_data
@@ -129,8 +129,8 @@ class MockAgentRunner(AgentRunner):
         }
 
     def _generate_mock_output(self,context:AgentContext)->Dict[str,Any]:
-        agent_type = context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
-        content = get_mock_content(agent_type)
+        agent_type=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+        content=get_mock_content(agent_type)
 
         return {
             "type":"document",
@@ -144,10 +144,10 @@ class MockAgentRunner(AgentRunner):
         }
 
     def _generate_checkpoint(self,context:AgentContext,output:Dict[str,Any])->Dict[str,Any]:
-        agent_type = context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
-        cp_config = get_checkpoint_title_config(agent_type)
-        cp_type = cp_config.get("type","review")
-        title = cp_config.get("title","レビュー依頼")
+        agent_type=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+        cp_config=get_checkpoint_title_config(agent_type)
+        cp_type=cp_config.get("type","review")
+        title=cp_config.get("title","レビュー依頼")
 
         return {
             "type":cp_type,

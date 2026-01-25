@@ -11,14 +11,14 @@ class AnthropicProvider(AIProvider):
 
  @property
  def provider_id(self)->str:
-  return "anthropic"
+  return"anthropic"
 
  @property
  def display_name(self)->str:
-  return "Anthropic (Claude)"
+  return"Anthropic (Claude)"
 
  def get_available_models(self)->List[ModelInfo]:
-  models = self.load_models_from_config(self.provider_id)
+  models=self.load_models_from_config(self.provider_id)
   if models:
    return models
   return [
@@ -37,12 +37,12 @@ class AnthropicProvider(AIProvider):
   if self._client is None:
    try:
     import anthropic
-    api_key = self.config.api_key
+    api_key=self.config.api_key
     if not api_key:
      from config import get_config
-     app_config = get_config()
-     api_key = app_config.agent.anthropic_api_key
-    self._client = anthropic.Anthropic(
+     app_config=get_config()
+     api_key=app_config.agent.anthropic_api_key
+    self._client=anthropic.Anthropic(
      api_key=api_key,
      timeout=self.config.timeout,
      max_retries=self.config.max_retries
@@ -52,11 +52,11 @@ class AnthropicProvider(AIProvider):
   return self._client
 
  def _convert_messages(self,messages:List[ChatMessage])->tuple:
-  system = None
-  converted = []
+  system=None
+  converted=[]
   for msg in messages:
-   if msg.role == MessageRole.SYSTEM:
-    system = msg.content
+   if msg.role==MessageRole.SYSTEM:
+    system=msg.content
    else:
     converted.append({"role":msg.role.value,"content":msg.content})
   return system,converted
@@ -65,34 +65,34 @@ class AnthropicProvider(AIProvider):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->ChatResponse:
-  client = self._get_client()
-  system,msgs = self._convert_messages(messages)
+  client=self._get_client()
+  system,msgs=self._convert_messages(messages)
 
-  params = {
+  params={
    "model":model,
    "max_tokens":max_tokens,
    "temperature":temperature,
    "messages":msgs,
   }
   if system:
-   params["system"] = system
+   params["system"]=system
 
-  response = client.messages.create(**params)
+  response=client.messages.create(**params)
 
-  content = ""
+  content=""
   if response.content:
-   content = response.content[0].text
+   content=response.content[0].text
 
   return ChatResponse(
    content=content,
    model=response.model,
    input_tokens=response.usage.input_tokens,
    output_tokens=response.usage.output_tokens,
-   total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+   total_tokens=response.usage.input_tokens+response.usage.output_tokens,
    finish_reason=response.stop_reason,
    raw_response=response
   )
@@ -101,27 +101,27 @@ class AnthropicProvider(AIProvider):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->Iterator[StreamChunk]:
-  client = self._get_client()
-  system,msgs = self._convert_messages(messages)
+  client=self._get_client()
+  system,msgs=self._convert_messages(messages)
 
-  params = {
+  params={
    "model":model,
    "max_tokens":max_tokens,
    "temperature":temperature,
    "messages":msgs,
   }
   if system:
-   params["system"] = system
+   params["system"]=system
 
   with client.messages.stream(**params) as stream:
    for text in stream.text_stream:
     yield StreamChunk(content=text)
 
-   final_message = stream.get_final_message()
+   final_message=stream.get_final_message()
    yield StreamChunk(
     content="",
     is_final=True,
@@ -131,11 +131,11 @@ class AnthropicProvider(AIProvider):
 
  def test_connection(self)->Dict[str,Any]:
   try:
-   client = self._get_client()
-   test_model = self.get_test_model_from_config(self.provider_id)
+   client=self._get_client()
+   test_model=self.get_test_model_from_config(self.provider_id)
    if not test_model:
-    test_model = "claude-haiku-4-5-20250116"
-   response = client.messages.create(
+    test_model="claude-haiku-4-5-20250116"
+   response=client.messages.create(
     model=test_model,
     max_tokens=10,
     messages=[{"role":"user","content":"Hi"}]
@@ -145,19 +145,19 @@ class AnthropicProvider(AIProvider):
     "message":"Anthropic API: 正常に接続できました"
    }
   except Exception as e:
-   error_type = type(e).__name__
-   if "AuthenticationError" in error_type:
+   error_type=type(e).__name__
+   if"AuthenticationError" in error_type:
     return {"success":False,"message":"認証エラー: APIキーが無効です"}
-   elif "RateLimitError" in error_type:
+   elif"RateLimitError" in error_type:
     return {"success":False,"message":"レート制限: しばらく待ってから再試行してください"}
-   elif "APIConnectionError" in error_type:
+   elif"APIConnectionError" in error_type:
     return {"success":False,"message":"接続エラー: APIサーバーに接続できません"}
    return {"success":False,"message":f"エラー: {str(e)}"}
 
  def validate_config(self)->bool:
-  api_key = self.config.api_key
+  api_key=self.config.api_key
   if not api_key:
    from config import get_config
-   app_config = get_config()
-   api_key = app_config.agent.anthropic_api_key
+   app_config=get_config()
+   api_key=app_config.agent.anthropic_api_key
   return bool(api_key)

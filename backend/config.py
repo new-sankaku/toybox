@@ -42,7 +42,7 @@ class Config:
 
 def load_config()->Config:
  agent_mode=os.environ.get("AGENT_MODE","testdata")
- db_name="testdata.db" if agent_mode=="testdata" else "production.db"
+ db_name="testdata.db" if agent_mode=="testdata" else"production.db"
  return Config(
   agent=AgentConfig(
    mode=agent_mode,
@@ -63,7 +63,7 @@ def load_config()->Config:
  )
 
 
-config = load_config()
+config=load_config()
 
 
 def get_config()->Config:
@@ -72,4 +72,4 @@ def get_config()->Config:
 
 def reload_config():
     global config
-    config = load_config()
+    config=load_config()

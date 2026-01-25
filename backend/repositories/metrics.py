@@ -36,35 +36,35 @@ class MetricsRepository:
   if not m:
    m=Metric(project_id=project_id)
    self.session.add(m)
-  if "totalTokensUsed" in data:
+  if"totalTokensUsed" in data:
    m.total_tokens_used=data["totalTokensUsed"]
-  if "totalInputTokens" in data:
+  if"totalInputTokens" in data:
    m.total_input_tokens=data["totalInputTokens"]
-  if "totalOutputTokens" in data:
+  if"totalOutputTokens" in data:
    m.total_output_tokens=data["totalOutputTokens"]
-  if "estimatedTotalTokens" in data:
+  if"estimatedTotalTokens" in data:
    m.estimated_total_tokens=data["estimatedTotalTokens"]
-  if "tokensByType" in data:
+  if"tokensByType" in data:
    m.tokens_by_type=data["tokensByType"]
-  if "generationCounts" in data:
+  if"generationCounts" in data:
    m.generation_counts=data["generationCounts"]
-  if "elapsedTimeSeconds" in data:
+  if"elapsedTimeSeconds" in data:
    m.elapsed_time_seconds=data["elapsedTimeSeconds"]
-  if "estimatedRemainingSeconds" in data:
+  if"estimatedRemainingSeconds" in data:
    m.estimated_remaining_seconds=data["estimatedRemainingSeconds"]
-  if "estimatedEndTime" in data:
+  if"estimatedEndTime" in data:
    m.estimated_end_time=datetime.fromisoformat(data["estimatedEndTime"]) if data["estimatedEndTime"] else None
-  if "completedTasks" in data:
+  if"completedTasks" in data:
    m.completed_tasks=data["completedTasks"]
-  if "totalTasks" in data:
+  if"totalTasks" in data:
    m.total_tasks=data["totalTasks"]
-  if "progressPercent" in data:
+  if"progressPercent" in data:
    m.progress_percent=data["progressPercent"]
-  if "currentPhase" in data:
+  if"currentPhase" in data:
    m.current_phase=data["currentPhase"]
-  if "phaseName" in data:
+  if"phaseName" in data:
    m.phase_name=data["phaseName"]
-  if "activeGenerations" in data:
+  if"activeGenerations" in data:
    m.active_generations=data["activeGenerations"]
   self.session.flush()
   return self.to_dict(m)

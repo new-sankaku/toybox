@@ -8,22 +8,22 @@ def register_brushup_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/brushup/options',methods=['GET'])
     def get_brushup_options():
-        config = load_yaml_config('brushup_options.yaml')
+        config=load_yaml_config('brushup_options.yaml')
         if not config:
             return jsonify({"error":"設定ファイルが見つかりません"}),500
         return jsonify(config)
 
     @app.route('/api/projects/<project_id>/brushup/suggest-images',methods=['POST'])
     def suggest_brushup_images(project_id:str):
-        project = data_store.get_project(project_id)
+        project=data_store.get_project(project_id)
         if not project:
             return jsonify({"error":"プロジェクトが見つかりません"}),404
 
-        data = request.get_json() or {}
-        custom_instruction = data.get("customInstruction","")
-        count = min(data.get("count",3),5)
+        data=request.get_json() or {}
+        custom_instruction=data.get("customInstruction","")
+        count=min(data.get("count",3),5)
 
-        images = []
+        images=[]
         for i in range(count):
             images.append({
                 "id":str(uuid.uuid4()),

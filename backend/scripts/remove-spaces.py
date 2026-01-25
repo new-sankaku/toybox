@@ -1,17 +1,17 @@
 """
 Pythonファイルから不要なスペースとコメントを削除するスクリプト
-使用方法: python scripts/remove-spaces.py
+使用方法:python scripts/remove-spaces.py
 
 削除対象:
-- コメント（TODO/FIXME以外）
-- カンマ後のスペース
-- コロン後のスペース
-- アロー演算子周りのスペース
+-コメント（TODO/FIXME以外）
+-カンマ後のスペース
+-コロン後のスペース
+-アロー演算子周りのスペース
 
 保持対象:
-- 文字列リテラル内のスペース
-- TODO/FIXMEコメント
-- インデント
+-文字列リテラル内のスペース
+-TODO/FIXMEコメント
+-インデント
 """
 import os
 import sys
@@ -69,7 +69,7 @@ def remove_spaces_and_comments(code:str)->str:
   tok_type,tok_string,start,end,line=tok
 
   if tok_type==tokenize.COMMENT:
-   if 'TODO' in tok_string or 'FIXME' in tok_string:
+   if'TODO' in tok_string or'FIXME' in tok_string:
     result_tokens.append(tok)
    continue
 
@@ -114,7 +114,7 @@ def remove_spaces_and_comments(code:str)->str:
   new_content=_compress_line(content)
   processed_lines.append(indent+new_content)
 
- return '\n'.join(processed_lines)
+ return'\n'.join(processed_lines)
 
 def _compress_line(content:str)->str:
  """行内のスペースを圧縮（文字列リテラルを保護）"""
@@ -140,7 +140,7 @@ def _compress_line(content:str)->str:
     i+=3
     continue
    elif c in ('"',"'"):
-    if i>0 and content[i-1] in 'fFrRbBuU':
+    if i>0 and content[i-1] in'fFrRbBuU':
      pass
     if current:
      segments.append(('code',current))
@@ -199,7 +199,7 @@ def _compress_line(content:str)->str:
    compressed=_compress_operators(seg_content)
    result_parts.append(compressed)
 
- return ''.join(result_parts)
+ return''.join(result_parts)
 
 def _compress_operators(code:str)->str:
  """演算子周りのスペースを削除"""

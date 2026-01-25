@@ -30,26 +30,26 @@ from asset_scanner import get_testdata_path
 
 
 def create_app():
-    config = get_config()
-    app = Flask(__name__)
+    config=get_config()
+    app=Flask(__name__)
     CORS(app,origins=config.server.cors_origins)
 
-    sio = socketio.Server(
+    sio=socketio.Server(
         cors_allowed_origins=config.server.cors_origins,
         async_mode='eventlet',
         logger=config.server.debug,
         engineio_logger=False
     )
 
-    app_wsgi = socketio.WSGIApp(sio,app)
-    data_store = DataStore()
+    app_wsgi=socketio.WSGIApp(sio,app)
+    data_store=DataStore()
     data_store.set_sio(sio)
     data_store.start_simulation()
 
 
-    agent_runner = None
-    if config.agent.mode == "api":
-        agent_runner = create_agent_runner(
+    agent_runner=None
+    if config.agent.mode=="api":
+        agent_runner=create_agent_runner(
             mode=config.agent.mode,
             api_key=config.agent.anthropic_api_key,
             model=config.agent.model,
@@ -70,8 +70,8 @@ def create_app():
     register_navigator_routes(app,sio)
 
 
-    upload_folder = os.path.join(os.path.dirname(__file__),'uploads')
-    output_folder = os.path.join(os.path.dirname(__file__),'outputs')
+    upload_folder=os.path.join(os.path.dirname(__file__),'uploads')
+    output_folder=os.path.join(os.path.dirname(__file__),'outputs')
     register_file_upload_routes(app,data_store,upload_folder)
     register_project_tree_routes(app,data_store,output_folder)
     register_ai_provider_routes(app)
@@ -79,7 +79,7 @@ def create_app():
     register_language_routes(app)
 
     register_all_providers()
-    health_monitor = get_health_monitor()
+    health_monitor=get_health_monitor()
     health_monitor.set_socketio(sio)
     health_monitor.start()
     register_project_settings_routes(app,data_store)
@@ -94,7 +94,7 @@ def create_app():
             'agent_mode':config.agent.mode,
         }
 
-    testdata_path = get_testdata_path()
+    testdata_path=get_testdata_path()
 
     @app.route('/testdata/<path:filepath>')
     def serve_testdata(filepath):
@@ -104,11 +104,11 @@ def create_app():
             print(f"[Server] Error serving {filepath}: {e}")
             abort(404)
 
-    app.data_store = data_store
-    app.agent_runner = agent_runner
-    app.config_obj = config
-    app.sio = sio
-    app.wsgi_app_wrapper = app_wsgi
+    app.data_store=data_store
+    app.agent_runner=agent_runner
+    app.config_obj=config
+    app.sio=sio
+    app.wsgi_app_wrapper=app_wsgi
 
     return app,sio
 
@@ -119,5 +119,5 @@ def run_server(app,sio,host='127.0.0.1',port=8765,debug=False):
     print(f"Server running at http://{host}:{port}")
     print(f"WebSocket available at ws://{host}:{port}")
 
-    listener = eventlet.listen((host,port))
+    listener=eventlet.listen((host,port))
     eventlet.wsgi.server(listener,app.wsgi_app_wrapper,log_output=debug)

@@ -80,7 +80,7 @@ def seed_sample_project():
     project_id=proj_id,
     type=data["type"],
     phase=data["phase"],
-    status="completed" if data["phase"]<4 else "pending",
+    status="completed" if data["phase"]<4 else"pending",
     progress=100 if data["phase"]<4 else 0,
     tokens_used=input_t+output_t,
     input_tokens=input_t,

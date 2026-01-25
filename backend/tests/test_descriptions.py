@@ -1,6 +1,6 @@
 """テスト説明データ（HTMLレポート表示用）"""
 
-DESCRIPTIONS = {
+DESCRIPTIONS={
  "test_base.py::TestAgentType::test_leader_types":"AgentType.CONCEPT_LEADERが'concept_leader'、DESIGN_LEADERが'design_leader'を返す",
  "test_base.py::TestAgentType::test_worker_types":"AgentType.RESEARCH_WORKERが'research_worker'、CODE_WORKERが'code_worker'を返す",
  "test_base.py::TestAgentStatus::test_all_statuses":"6種類のステータス値が存在し、それぞれの文字列値が一致する",

@@ -63,25 +63,25 @@ class AgentRepository(BaseRepository[Agent]):
   a=self.get(id)
   if not a:
    return None
-  if "status" in data:
+  if"status" in data:
    a.status=data["status"]
-  if "progress" in data:
+  if"progress" in data:
    a.progress=data["progress"]
-  if "currentTask" in data:
+  if"currentTask" in data:
    a.current_task=data["currentTask"]
-  if "tokensUsed" in data:
+  if"tokensUsed" in data:
    a.tokens_used=data["tokensUsed"]
-  if "inputTokens" in data:
+  if"inputTokens" in data:
    a.input_tokens=data["inputTokens"]
-  if "outputTokens" in data:
+  if"outputTokens" in data:
    a.output_tokens=data["outputTokens"]
-  if "startedAt" in data:
+  if"startedAt" in data:
    a.started_at=datetime.fromisoformat(data["startedAt"]) if data["startedAt"] else None
-  if "completedAt" in data:
+  if"completedAt" in data:
    a.completed_at=datetime.fromisoformat(data["completedAt"]) if data["completedAt"] else None
-  if "error" in data:
+  if"error" in data:
    a.error=data["error"]
-  if "metadata" in data:
+  if"metadata" in data:
    a.metadata_=data["metadata"]
   self.update(a)
   return self.to_dict(a)

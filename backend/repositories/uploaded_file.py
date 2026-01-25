@@ -53,9 +53,9 @@ class UploadedFileRepository(BaseRepository[UploadedFile]):
   f=self.get(id)
   if not f:
    return None
-  if "status" in data:
+  if"status" in data:
    f.status=data["status"]
-  if "description" in data:
+  if"description" in data:
    f.description=data["description"]
   self.update(f)
   return self.to_dict(f)

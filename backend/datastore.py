@@ -343,7 +343,7 @@ class DataStore:
    description=f"{agent.metadata_.get('displayName',agent.type) if agent.metadata_ else agent.type}の成果物を確認してください",
    content_category=category,
    output={"type":"document","format":"markdown","content":content},
-   status="approved" if auto_approve else "pending",
+   status="approved" if auto_approve else"pending",
    resolved_at=now if auto_approve else None,
    created_at=now,
    updated_at=now
@@ -394,16 +394,16 @@ class DataStore:
 プロジェクトの{agent.type}フェーズの処理を行います。
 
 ## 入力
-進捗: {progress}%
+進捗:{progress}%
 """
   sample_response=f"""## 処理結果
 
 {display_name}の処理が完了しました。
 
 ### 実行内容
-- データ分析を実施
-- 結果を生成
-- 品質チェックを実行
+-データ分析を実施
+-結果を生成
+-品質チェックを実行
 
 ### 出力
 処理は正常に完了しました。次のステップに進む準備ができています。
@@ -447,7 +447,7 @@ class DataStore:
   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
   actual_type=real_file["type"] if real_file else asset_type
   auto_approve=self._should_auto_approve_asset(session,agent.project_id,actual_type)
-  approval_status="approved" if auto_approve else "pending"
+  approval_status="approved" if auto_approve else"pending"
   from models.tables import Asset
   if real_file:
    asset=Asset(
@@ -463,7 +463,7 @@ class DataStore:
     approval_status=approval_status,
     created_at=datetime.now()
    )
-   log_msg=f"アセット生成: {real_file['name']}" + (" (自動承認)" if auto_approve else "")
+   log_msg=f"アセット生成: {real_file['name']}"+(" (自動承認)" if auto_approve else"")
    self._add_system_log_internal(session,agent.project_id,"info",display_name,log_msg)
   else:
    url=f"/assets/{name}" if asset_type in ("image","audio") else None
@@ -481,7 +481,7 @@ class DataStore:
     approval_status=approval_status,
     created_at=datetime.now()
    )
-   log_msg=f"アセット生成: {name}" + (" (自動承認)" if auto_approve else "")
+   log_msg=f"アセット生成: {name}"+(" (自動承認)" if auto_approve else"")
    self._add_system_log_internal(session,agent.project_id,"info",display_name,log_msg)
   session.add(asset)
   session.flush()
@@ -535,11 +535,11 @@ class DataStore:
   return f"{mins}:{secs:02d}"
 
  def _get_asset_points(self,agent_type:str)->List[tuple]:
-  assets = get_agent_assets(agent_type)
+  assets=get_agent_assets(agent_type)
   return [(a.get("progress",0),a.get("type","document"),a.get("name",""),a.get("size","")) for a in assets]
 
  def _get_checkpoint_points(self,agent_type:str)->List[tuple]:
-  checkpoints = get_agent_checkpoints(agent_type)
+  checkpoints=get_agent_checkpoints(agent_type)
   return [(c.get("progress",90),c.get("type","review"),c.get("title","レビュー")) for c in checkpoints]
 
  def _generate_checkpoint_content(self,agent_type:str,cp_type:str)->str:
@@ -672,7 +672,7 @@ class DataStore:
  def create_project(self,data:Dict)->Dict:
   with session_scope() as session:
    repo=ProjectRepository(session)
-   if "aiServices" not in data or not data["aiServices"]:
+   if"aiServices" not in data or not data["aiServices"]:
     data["aiServices"]=dict(build_default_ai_services())
    project=repo.create_from_dict(data)
    syslog_repo=SystemLogRepository(session)
@@ -821,8 +821,8 @@ class DataStore:
      agent.completed_at=None
      agent.error=None
    session.flush()
-   agent_names=",".join(selected_agents) if selected_agents else "全エージェント"
-   preset_names=",".join(presets) if presets else "なし"
+   agent_names=",".join(selected_agents) if selected_agents else"全エージェント"
+   preset_names=",".join(presets) if presets else"なし"
    log_msg=f"ブラッシュアップ開始: エージェント={agent_names}, プリセット={preset_names}"
    if custom_instruction:
     log_msg+=f", カスタム指示あり"
@@ -1019,7 +1019,7 @@ class DataStore:
     "priority":priority,"message":message,"attachedFileIds":attached_file_ids
    })
    target_desc="全エージェント" if target_type=="all" else f"エージェント {target_agent_id}"
-   priority_desc="緊急" if priority=="urgent" else "通常"
+   priority_desc="緊急" if priority=="urgent" else"通常"
    self._add_system_log_internal(session,project_id,"info","Human",f"[{priority_desc}] {target_desc}への介入: {message[:50]}...")
    return intervention
 
@@ -1040,6 +1040,18 @@ class DataStore:
   with session_scope() as session:
    repo=InterventionRepository(session)
    return repo.deliver(intervention_id)
+
+ def delete_intervention(self,intervention_id:str)->bool:
+  with session_scope() as session:
+   repo=InterventionRepository(session)
+   intervention=repo.get(intervention_id)
+   if not intervention:
+    return False
+   project_id=intervention.project_id
+   result=repo.delete(intervention_id)
+   if result:
+    self._add_system_log_internal(session,project_id,"info","System",f"介入削除: {intervention.message[:30]}...")
+   return result
 
  def get_uploaded_files_by_project(self,project_id:str)->List[Dict]:
   with session_scope() as session:

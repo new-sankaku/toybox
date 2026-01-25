@@ -11,14 +11,14 @@ class XAIProvider(AIProvider):
 
  @property
  def provider_id(self)->str:
-  return "xai"
+  return"xai"
 
  @property
  def display_name(self)->str:
-  return "xAI (Grok)"
+  return"xAI (Grok)"
 
  def get_available_models(self)->List[ModelInfo]:
-  models = self.load_models_from_config(self.provider_id)
+  models=self.load_models_from_config(self.provider_id)
   if models:
    return models
   return [
@@ -37,9 +37,9 @@ class XAIProvider(AIProvider):
   if self._client is None:
    try:
     import openai
-    api_key = self.config.api_key
-    base_url = self.config.base_url or "https://api.x.ai/v1"
-    self._client = openai.OpenAI(
+    api_key=self.config.api_key
+    base_url=self.config.base_url or"https://api.x.ai/v1"
+    self._client=openai.OpenAI(
      api_key=api_key,
      base_url=base_url,
      timeout=self.config.timeout
@@ -55,14 +55,14 @@ class XAIProvider(AIProvider):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->ChatResponse:
-  client = self._get_client()
-  msgs = self._convert_messages(messages)
+  client=self._get_client()
+  msgs=self._convert_messages(messages)
 
-  response = client.chat.completions.create(
+  response=client.chat.completions.create(
    model=model,
    messages=msgs,
    max_tokens=max_tokens,
@@ -70,8 +70,8 @@ class XAIProvider(AIProvider):
    **kwargs
   )
 
-  choice = response.choices[0]
-  content = choice.message.content or ""
+  choice=response.choices[0]
+  content=choice.message.content or""
 
   return ChatResponse(
    content=content,
@@ -87,14 +87,14 @@ class XAIProvider(AIProvider):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->Iterator[StreamChunk]:
-  client = self._get_client()
-  msgs = self._convert_messages(messages)
+  client=self._get_client()
+  msgs=self._convert_messages(messages)
 
-  stream = client.chat.completions.create(
+  stream=client.chat.completions.create(
    model=model,
    messages=msgs,
    max_tokens=max_tokens,
@@ -111,11 +111,11 @@ class XAIProvider(AIProvider):
 
  def test_connection(self)->Dict[str,Any]:
   try:
-   client = self._get_client()
-   test_model = self.get_test_model_from_config(self.provider_id)
+   client=self._get_client()
+   test_model=self.get_test_model_from_config(self.provider_id)
    if not test_model:
-    test_model = "grok-3-mini"
-   response = client.chat.completions.create(
+    test_model="grok-3-mini"
+   response=client.chat.completions.create(
     model=test_model,
     max_tokens=10,
     messages=[{"role":"user","content":"Hi"}]
@@ -125,10 +125,10 @@ class XAIProvider(AIProvider):
     "message":"xAI Grok API: 正常に接続できました"
    }
   except Exception as e:
-   error_type = type(e).__name__
-   if "AuthenticationError" in error_type:
+   error_type=type(e).__name__
+   if"AuthenticationError" in error_type:
     return {"success":False,"message":"認証エラー: APIキーが無効です"}
-   elif "RateLimitError" in error_type:
+   elif"RateLimitError" in error_type:
     return {"success":False,"message":"レート制限: しばらく待ってから再試行してください"}
    return {"success":False,"message":f"エラー: {str(e)}"}
 

@@ -27,9 +27,9 @@ def get_agent_definitions()->Dict[str,AgentDefinition]:
 
 @dataclass
 class QualityCheckConfig:
- enabled:bool = True
- max_retries:int = 3
- is_high_cost:bool = False
+ enabled:bool=True
+ max_retries:int=3
+ is_high_cost:bool=False
 
  def to_dict(self)->Dict:
   return {
@@ -48,11 +48,11 @@ class QualityCheckConfig:
 
 
 def get_default_quality_settings()->Dict[str,QualityCheckConfig]:
- defaults = _get_quality_check_defaults()
- high_cost = _get_high_cost_agents()
- settings = {}
+ defaults=_get_quality_check_defaults()
+ high_cost=_get_high_cost_agents()
+ settings={}
  for agent_type,enabled in defaults.items():
-  settings[agent_type] = QualityCheckConfig(
+  settings[agent_type]=QualityCheckConfig(
    enabled=enabled,
    max_retries=3,
    is_high_cost=agent_type in high_cost,
@@ -72,10 +72,10 @@ def get_agent_display_names()->Dict[str,str]:
  return _get_agent_display_names()
 
 
-AGENT_DEFINITIONS = _get_agent_definitions()
-HIGH_COST_AGENTS:Set[str] = _get_high_cost_agents()
-AGENT_PHASES = _get_agent_phases()
-AGENT_DISPLAY_NAMES = _get_agent_display_names()
-UI_PHASES = _get_ui_phases()
-AGENT_ASSET_MAPPING = _get_agent_asset_mapping()
-WORKFLOW_DEPENDENCIES = _get_workflow_dependencies()
+AGENT_DEFINITIONS=_get_agent_definitions()
+HIGH_COST_AGENTS:Set[str]=_get_high_cost_agents()
+AGENT_PHASES=_get_agent_phases()
+AGENT_DISPLAY_NAMES=_get_agent_display_names()
+UI_PHASES=_get_ui_phases()
+AGENT_ASSET_MAPPING=_get_agent_asset_mapping()
+WORKFLOW_DEPENDENCIES=_get_workflow_dependencies()

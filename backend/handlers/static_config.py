@@ -28,7 +28,7 @@ def register_static_config_routes(app:Flask):
 
  @app.route('/api/config/models/pricing/<model_id>',methods=['GET'])
  def get_model_pricing_api(model_id:str):
-  pricing = get_token_pricing(model_id)
+  pricing=get_token_pricing(model_id)
   return jsonify({
    "modelId":model_id,
    "pricing":pricing,
@@ -56,11 +56,11 @@ def register_static_config_routes(app:Flask):
 
  @app.route('/api/config/ui-settings',methods=['GET'])
  def get_ui_settings_api():
-  agents_config = get_agents_config()
-  agents = agents_config.get("agents",{})
-  agents_out = {}
+  agents_config=get_agents_config()
+  agents=agents_config.get("agents",{})
+  agents_out={}
   for agent_id,agent in agents.items():
-   agents_out[agent_id] = {
+   agents_out[agent_id]={
     "label":agent.get("label",""),
     "shortLabel":agent.get("short_label",""),
     "phase":agent.get("phase",0),

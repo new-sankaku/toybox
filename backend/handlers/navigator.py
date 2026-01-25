@@ -12,21 +12,21 @@ def register_navigator_routes(app,sio):
 
         Request body:
         {
-            "projectId": "project-1" or "global",
-            "speaker": "オペレーター",
-            "text": "メッセージ内容",
-            "priority": "normal"  # optional: low, normal, high, critical
+            "projectId":"project-1" or"global",
+            "speaker":"オペレーター",
+            "text":"メッセージ内容",
+            "priority":"normal"  # optional:low,normal,high,critical
         }
         """
-        data = request.get_json()
+        data=request.get_json()
 
         if not data:
             return jsonify({"error":"Request body required"}),400
 
-        project_id = data.get('projectId','global')
-        speaker = data.get('speaker','オペレーター')
-        text = data.get('text')
-        priority = data.get('priority','normal')
+        project_id=data.get('projectId','global')
+        speaker=data.get('speaker','オペレーター')
+        text=data.get('text')
+        priority=data.get('priority','normal')
 
         if not text:
             return jsonify({"error":"text field is required"}),400
@@ -54,17 +54,17 @@ def register_navigator_routes(app,sio):
 
         Request body:
         {
-            "text": "システムメッセージ",
-            "priority": "high"  # optional
+            "text":"システムメッセージ",
+            "priority":"high"  # optional
         }
         """
-        data = request.get_json()
+        data=request.get_json()
 
         if not data:
             return jsonify({"error":"Request body required"}),400
 
-        text = data.get('text')
-        priority = data.get('priority','high')
+        text=data.get('text')
+        priority=data.get('priority','high')
 
         if not text:
             return jsonify({"error":"text field is required"}),400

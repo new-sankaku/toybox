@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker,Session
 from contextlib import contextmanager
 
 AGENT_MODE=os.getenv("AGENT_MODE","testdata")
-DB_NAME="testdata.db" if AGENT_MODE=="testdata" else "production.db"
+DB_NAME="testdata.db" if AGENT_MODE=="testdata" else"production.db"
 DATA_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"data")
 os.makedirs(DATA_DIR,exist_ok=True)
 DATABASE_URL=f"sqlite:///{os.path.join(DATA_DIR,DB_NAME)}"

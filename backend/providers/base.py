@@ -7,9 +7,9 @@ from datetime import datetime
 
 
 class MessageRole(str,Enum):
- SYSTEM = "system"
- USER = "user"
- ASSISTANT = "assistant"
+ SYSTEM="system"
+ USER="user"
+ ASSISTANT="assistant"
 
 
 @dataclass
@@ -28,25 +28,25 @@ class ChatResponse:
  input_tokens:int
  output_tokens:int
  total_tokens:int
- finish_reason:Optional[str] = None
- raw_response:Optional[Any] = None
+ finish_reason:Optional[str]=None
+ raw_response:Optional[Any]=None
 
 
 @dataclass
 class StreamChunk:
  content:str
- is_final:bool = False
- input_tokens:Optional[int] = None
- output_tokens:Optional[int] = None
+ is_final:bool=False
+ input_tokens:Optional[int]=None
+ output_tokens:Optional[int]=None
 
 
 @dataclass
 class AIProviderConfig:
- api_key:Optional[str] = None
- base_url:Optional[str] = None
- timeout:int = 60
- max_retries:int = 2
- extra:Dict[str,Any] = field(default_factory=dict)
+ api_key:Optional[str]=None
+ base_url:Optional[str]=None
+ timeout:int=60
+ max_retries:int=2
+ extra:Dict[str,Any]=field(default_factory=dict)
 
 
 @dataclass
@@ -54,19 +54,19 @@ class ModelInfo:
  id:str
  name:str
  max_tokens:int
- supports_vision:bool = False
- supports_tools:bool = False
- input_cost_per_1k:Optional[float] = None
- output_cost_per_1k:Optional[float] = None
+ supports_vision:bool=False
+ supports_tools:bool=False
+ input_cost_per_1k:Optional[float]=None
+ output_cost_per_1k:Optional[float]=None
 
 
 @dataclass
 class HealthCheckResult:
  available:bool
- latency_ms:Optional[int] = None
- error:Optional[str] = None
- checked_at:Optional[datetime] = None
- model_used:Optional[str] = None
+ latency_ms:Optional[int]=None
+ error:Optional[str]=None
+ checked_at:Optional[datetime]=None
+ model_used:Optional[str]=None
 
  def to_dict(self)->Dict[str,Any]:
   return {
@@ -81,9 +81,9 @@ class HealthCheckResult:
 class AIProvider(ABC):
  """AIプロバイダー抽象基底クラス"""
 
- def __init__(self,config:Optional[AIProviderConfig] = None):
-  self.config = config or AIProviderConfig()
-  self._client = None
+ def __init__(self,config:Optional[AIProviderConfig]=None):
+  self.config=config or AIProviderConfig()
+  self._client=None
 
  @property
  @abstractmethod
@@ -107,8 +107,8 @@ class AIProvider(ABC):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->ChatResponse:
   """チャットcompletion API"""
@@ -119,8 +119,8 @@ class AIProvider(ABC):
   self,
   messages:List[ChatMessage],
   model:str,
-  max_tokens:int = 1024,
-  temperature:float = 0.7,
+  max_tokens:int=1024,
+  temperature:float=0.7,
   **kwargs
  )->Iterator[StreamChunk]:
   """ストリーミングチャットAPI"""
@@ -134,10 +134,10 @@ class AIProvider(ABC):
  def health_check(self)->HealthCheckResult:
   """ヘルスチェック（デフォルト実装）"""
   import time
-  start = time.time()
+  start=time.time()
   try:
-   result = self.test_connection()
-   latency = int((time.time() - start) * 1000)
+   result=self.test_connection()
+   latency=int((time.time()-start)*1000)
    return HealthCheckResult(
     available=result.get("success",False),
     latency_ms=latency,
@@ -145,7 +145,7 @@ class AIProvider(ABC):
     checked_at=datetime.now(),
    )
   except Exception as e:
-   latency = int((time.time() - start) * 1000)
+   latency=int((time.time()-start)*1000)
    return HealthCheckResult(
     available=False,
     latency_ms=latency,
@@ -159,26 +159,26 @@ class AIProvider(ABC):
 
  def get_default_model(self)->str:
   """デフォルトモデルを返す"""
-  models = self.get_available_models()
-  return models[0].id if models else ""
+  models=self.get_available_models()
+  return models[0].id if models else""
 
  @classmethod
  def load_models_from_config(cls,provider_id:str)->List["ModelInfo"]:
   from config_loader import get_provider_models
-  models_config = get_provider_models(provider_id)
-  result = []
+  models_config=get_provider_models(provider_id)
+  result=[]
   for model in models_config:
-   pricing = model.get("pricing",{})
-   input_cost = pricing.get("input",0.0)
-   output_cost = pricing.get("output",0.0)
+   pricing=model.get("pricing",{})
+   input_cost=pricing.get("input",0.0)
+   output_cost=pricing.get("output",0.0)
    result.append(ModelInfo(
     id=model.get("id",""),
     name=model.get("label",""),
     max_tokens=model.get("max_tokens",4096),
     supports_vision=model.get("supports_vision",False),
     supports_tools=model.get("supports_tools",False),
-    input_cost_per_1k=input_cost / 1000.0 if input_cost else None,
-    output_cost_per_1k=output_cost / 1000.0 if output_cost else None,
+    input_cost_per_1k=input_cost/1000.0 if input_cost else None,
+    output_cost_per_1k=output_cost/1000.0 if output_cost else None,
    ))
   return result
 

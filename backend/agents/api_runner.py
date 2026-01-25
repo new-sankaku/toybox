@@ -25,16 +25,16 @@ from providers.base import AIProviderConfig
 class ApiAgentRunner(AgentRunner):
     def __init__(
         self,
-        provider_id:str = "anthropic",
-        api_key:Optional[str] = None,
-        model:Optional[str] = None,
-        max_tokens:int = 4096,
-        retry_config:Optional[RetryConfig] = None,
+        provider_id:str="anthropic",
+        api_key:Optional[str]=None,
+        model:Optional[str]=None,
+        max_tokens:int=4096,
+        retry_config:Optional[RetryConfig]=None,
         data_store=None,
         **kwargs
     ):
-        self._provider_id = provider_id
-        env_key_map = {
+        self._provider_id=provider_id
+        env_key_map={
             "anthropic":"ANTHROPIC_API_KEY",
             "openai":"OPENAI_API_KEY",
             "google":"GOOGLE_API_KEY",
@@ -42,31 +42,31 @@ class ApiAgentRunner(AgentRunner):
             "zhipu":"ZHIPU_API_KEY",
             "deepseek":"DEEPSEEK_API_KEY",
         }
-        self.api_key = api_key or os.environ.get(env_key_map.get(provider_id,"ANTHROPIC_API_KEY"))
-        self.model = model or get_provider_default_model(provider_id) or "claude-sonnet-4-20250514"
-        self.max_tokens = max_tokens
-        self._provider = None
-        self._graphs:Dict[AgentType,Any] = {}
-        self._prompts = self._load_prompts()
-        self._retry_config = retry_config or RetryConfig(max_retries=3)
-        self._health_monitor = None
-        self._on_status_change:Optional[Callable[[str,AgentStatus],None]] = None
-        self._data_store = data_store
+        self.api_key=api_key or os.environ.get(env_key_map.get(provider_id,"ANTHROPIC_API_KEY"))
+        self.model=model or get_provider_default_model(provider_id) or"claude-sonnet-4-20250514"
+        self.max_tokens=max_tokens
+        self._provider=None
+        self._graphs:Dict[AgentType,Any]={}
+        self._prompts=self._load_prompts()
+        self._retry_config=retry_config or RetryConfig(max_retries=3)
+        self._health_monitor=None
+        self._on_status_change:Optional[Callable[[str,AgentStatus],None]]=None
+        self._data_store=data_store
         register_all_providers()
 
     def set_data_store(self,data_store)->None:
-        self._data_store = data_store
+        self._data_store=data_store
 
     def set_health_monitor(self,monitor)->None:
-        self._health_monitor = monitor
+        self._health_monitor=monitor
 
     def set_status_callback(self,callback:Callable[[str,AgentStatus],None])->None:
-        self._on_status_change = callback
+        self._on_status_change=callback
 
     def _check_provider_health(self)->bool:
         if not self._health_monitor:
             return True
-        health = self._health_monitor.get_health_status(self._provider_id)
+        health=self._health_monitor.get_health_status(self._provider_id)
         if health and not health.available:
             return False
         return True
@@ -77,16 +77,16 @@ class ApiAgentRunner(AgentRunner):
 
     def _get_provider(self):
         if self._provider is None:
-            config = AIProviderConfig(api_key=self.api_key,timeout=120)
-            self._provider = get_provider(self._provider_id,config)
+            config=AIProviderConfig(api_key=self.api_key,timeout=120)
+            self._provider=get_provider(self._provider_id,config)
             if self._provider is None:
                 raise ValueError(f"Unknown provider: {self._provider_id}")
         return self._provider
 
     async def run_agent(self,context:AgentContext)->AgentOutput:
-        started_at = datetime.now().isoformat()
-        tokens_used = 0
-        output = {}
+        started_at=datetime.now().isoformat()
+        tokens_used=0
+        output={}
 
         if not self._check_provider_health():
             self._emit_status(context.agent_id,AgentStatus.WAITING_PROVIDER)
@@ -96,10 +96,10 @@ class ApiAgentRunner(AgentRunner):
 
         try:
             async for event in self.run_agent_stream(context):
-                if event["type"] == "output":
-                    output = event["data"]
-                elif event["type"] == "tokens":
-                    tokens_used += event["data"].get("count",0)
+                if event["type"]=="output":
+                    output=event["data"]
+                elif event["type"]=="tokens":
+                    tokens_used+=event["data"].get("count",0)
 
             return AgentOutput(
                 agent_id=context.agent_id,
@@ -107,7 +107,7 @@ class ApiAgentRunner(AgentRunner):
                 status=AgentStatus.COMPLETED,
                 output=output,
                 tokens_used=tokens_used,
-                duration_seconds=(datetime.now() - datetime.fromisoformat(started_at)).total_seconds(),
+                duration_seconds=(datetime.now()-datetime.fromisoformat(started_at)).total_seconds(),
                 started_at=started_at,
                 completed_at=datetime.now().isoformat(),
             )
@@ -134,10 +134,10 @@ class ApiAgentRunner(AgentRunner):
                 completed_at=datetime.now().isoformat(),
             )
 
-    async def _wait_for_provider_recovery(self,max_wait:float = 300)->None:
+    async def _wait_for_provider_recovery(self,max_wait:float=300)->None:
         import time
-        start = time.time()
-        while time.time() - start < max_wait:
+        start=time.time()
+        while time.time()-start<max_wait:
             if self._check_provider_health():
                 return
             await asyncio.sleep(5)
@@ -147,23 +147,23 @@ class ApiAgentRunner(AgentRunner):
         self,
         context:AgentContext
     )->AsyncGenerator[Dict[str,Any],None]:
-        agent_type = context.agent_type
-        trace_id = None
+        agent_type=context.agent_type
+        trace_id=None
 
         if self._data_store:
             try:
-                input_ctx = {
+                input_ctx={
                     "project_concept":context.project_concept,
                     "config":context.config,
                 }
-                trace = self._data_store.create_trace(
+                trace=self._data_store.create_trace(
                     project_id=context.project_id,
                     agent_id=context.agent_id,
                     agent_type=agent_type.value,
                     input_context=input_ctx,
                     model_used=self.model
                 )
-                trace_id = trace.get("id")
+                trace_id=trace.get("id")
             except Exception as e:
                 print(f"[ApiAgentRunner] Failed to create trace: {e}")
 
@@ -181,7 +181,7 @@ class ApiAgentRunner(AgentRunner):
             "data":{"progress":10,"current_task":"プロンプト準備中"}
         }
 
-        prompt = self._build_prompt(context)
+        prompt=self._build_prompt(context)
 
         if self._data_store and trace_id:
             try:
@@ -195,7 +195,7 @@ class ApiAgentRunner(AgentRunner):
         }
 
         try:
-            result = await self._call_llm(prompt,context)
+            result=await self._call_llm(prompt,context)
 
             yield {
                 "type":"tokens",
@@ -210,16 +210,16 @@ class ApiAgentRunner(AgentRunner):
                 "data":{"progress":80,"current_task":"出力処理中"}
             }
 
-            output = self._process_output(result,context)
+            output=self._process_output(result,context)
 
             if self._data_store and trace_id:
                 try:
-                    input_tokens = result.get("input_tokens",0)
-                    output_tokens = result.get("output_tokens",0)
-                    if input_tokens == 0 and output_tokens == 0:
-                        total = result.get("tokens_used",0)
-                        input_tokens = int(total * 0.3)
-                        output_tokens = total - input_tokens
+                    input_tokens=result.get("input_tokens",0)
+                    output_tokens=result.get("output_tokens",0)
+                    if input_tokens==0 and output_tokens==0:
+                        total=result.get("tokens_used",0)
+                        input_tokens=int(total*0.3)
+                        output_tokens=total-input_tokens
                     self._data_store.complete_trace(
                         trace_id=trace_id,
                         llm_response=result.get("content",""),
@@ -236,7 +236,7 @@ class ApiAgentRunner(AgentRunner):
                 "data":{"progress":90,"current_task":"承認準備"}
             }
 
-            checkpoint_data = self._generate_checkpoint(context,output)
+            checkpoint_data=self._generate_checkpoint(context,output)
             yield {
                 "type":"checkpoint",
                 "data":checkpoint_data
@@ -288,10 +288,10 @@ class ApiAgentRunner(AgentRunner):
     async def _call_llm(self,prompt:str,context:AgentContext)->Dict[str,Any]:
         from providers.base import ChatMessage,MessageRole
         async def _execute_llm_call():
-            provider = self._get_provider()
-            loop = asyncio.get_event_loop()
-            messages = [ChatMessage(role=MessageRole.USER,content=prompt)]
-            response = await loop.run_in_executor(
+            provider=self._get_provider()
+            loop=asyncio.get_event_loop()
+            messages=[ChatMessage(role=MessageRole.USER,content=prompt)]
+            response=await loop.run_in_executor(
                 None,
                 lambda:provider.chat(
                     messages=messages,
@@ -322,10 +322,10 @@ class ApiAgentRunner(AgentRunner):
         )
 
     def _build_prompt(self,context:AgentContext)->str:
-        agent_type = context.agent_type.value
-        base_prompt = self._prompts.get(agent_type,self._default_prompt())
-        prompt = base_prompt.format(
-            project_concept=context.project_concept or "（未定義）",
+        agent_type=context.agent_type.value
+        base_prompt=self._prompts.get(agent_type,self._default_prompt())
+        prompt=base_prompt.format(
+            project_concept=context.project_concept or"（未定義）",
             previous_outputs=self._format_previous_outputs(context.previous_outputs),
             config=context.config,
         )
@@ -334,16 +334,16 @@ class ApiAgentRunner(AgentRunner):
 
     def _format_previous_outputs(self,outputs:Dict[str,Any])->str:
         if not outputs:
-            return "（なし）"
+            return"（なし）"
 
-        parts = []
+        parts=[]
         for agent,output in outputs.items():
-            if isinstance(output,dict) and "content" in output:
+            if isinstance(output,dict) and"content" in output:
                 parts.append(f"## {agent}の出力\n{output['content']}")
             else:
                 parts.append(f"## {agent}の出力\n{output}")
 
-        return "\n\n".join(parts)
+        return"\n\n".join(parts)
 
     def _process_output(self,result:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
         return {
@@ -358,10 +358,10 @@ class ApiAgentRunner(AgentRunner):
         }
 
     def _generate_checkpoint(self,context:AgentContext,output:Dict[str,Any])->Dict[str,Any]:
-        agent_type = context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
-        cp_config = get_api_runner_checkpoint_config(agent_type)
-        cp_type = cp_config.get("type","review")
-        title = cp_config.get("title","レビュー依頼")
+        agent_type=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+        cp_config=get_api_runner_checkpoint_config(agent_type)
+        cp_type=cp_config.get("type","review")
+        title=cp_config.get("title","レビュー依頼")
         return {
             "type":cp_type,
             "title":title,
@@ -441,7 +441,7 @@ class ApiAgentRunner(AgentRunner):
 
     def _default_prompt(self)->str:
         """デフォルトプロンプト"""
-        return """あなたはゲーム開発の専門家です。
+        return"""あなたはゲーム開発の専門家です。
 
 以下の情報に基づいて、適切なドキュメントを作成してください。
 
@@ -459,20 +459,20 @@ class ApiAgentRunner(AgentRunner):
 @dataclass
 class QualityCheckResult:
     passed:bool
-    issues:List[str] = field(default_factory=list)
-    score:float = 1.0
-    retry_needed:bool = False
-    human_review_needed:bool = False
+    issues:List[str]=field(default_factory=list)
+    score:float=1.0
+    retry_needed:bool=False
+    human_review_needed:bool=False
 
 
 @dataclass
 class WorkerTaskResult:
     worker_type:str
     status:str
-    output:Dict[str,Any] = field(default_factory=dict)
-    quality_check:Optional[QualityCheckResult] = None
-    retries:int = 0
-    error:Optional[str] = None
+    output:Dict[str,Any]=field(default_factory=dict)
+    quality_check:Optional[QualityCheckResult]=None
+    retries:int=0
+    error:Optional[str]=None
 
 
 class LeaderWorkerOrchestrator:
@@ -482,16 +482,16 @@ class LeaderWorkerOrchestrator:
         self,
         agent_runner:ApiAgentRunner,
         quality_settings:Dict[str,Any],
-        on_progress:Optional[Callable[[str,int,str],None]] = None,
-        on_checkpoint:Optional[Callable[[str,Dict],None]] = None,
+        on_progress:Optional[Callable[[str,int,str],None]]=None,
+        on_checkpoint:Optional[Callable[[str,Dict],None]]=None,
     ):
-        self.agent_runner = agent_runner
-        self.quality_settings = quality_settings
-        self.on_progress = on_progress
-        self.on_checkpoint = on_checkpoint
+        self.agent_runner=agent_runner
+        self.quality_settings=quality_settings
+        self.on_progress=on_progress
+        self.on_checkpoint=on_checkpoint
 
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
-        results = {
+        results={
             "leader_output":{},
             "worker_results":[],
             "final_output":{},
@@ -502,33 +502,33 @@ class LeaderWorkerOrchestrator:
 
         self._emit_progress(leader_context.agent_type.value,10,"Leader分析開始")
 
-        leader_output = await self.agent_runner.run_agent(leader_context)
-        results["leader_output"] = leader_output.output
+        leader_output=await self.agent_runner.run_agent(leader_context)
+        results["leader_output"]=leader_output.output
 
-        if leader_output.status == AgentStatus.FAILED:
+        if leader_output.status==AgentStatus.FAILED:
             return results
 
 
-        worker_tasks = self._extract_worker_tasks(leader_output.output)
+        worker_tasks=self._extract_worker_tasks(leader_output.output)
 
         self._emit_progress(leader_context.agent_type.value,30,f"Worker実行開始 ({len(worker_tasks)}タスク)")
 
 
-        total_workers = len(worker_tasks)
+        total_workers=len(worker_tasks)
         for i,worker_task in enumerate(worker_tasks):
-            worker_type = worker_task.get("worker","")
-            task_description = worker_task.get("task","")
+            worker_type=worker_task.get("worker","")
+            task_description=worker_task.get("task","")
 
-            progress = 30 + int((i / total_workers) * 50)
+            progress=30+int((i/total_workers)*50)
             self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中: {task_description}")
 
 
-            qc_config = self.quality_settings.get(worker_type,{})
-            qc_enabled = qc_config.get("enabled",True)
-            max_retries = qc_config.get("maxRetries",3)
+            qc_config=self.quality_settings.get(worker_type,{})
+            qc_enabled=qc_config.get("enabled",True)
+            max_retries=qc_config.get("maxRetries",3)
 
 
-            worker_result = await self._execute_worker(
+            worker_result=await self._execute_worker(
                 leader_context=leader_context,
                 worker_type=worker_type,
                 task=task_description,
@@ -539,7 +539,7 @@ class LeaderWorkerOrchestrator:
             results["worker_results"].append(worker_result.__dict__)
 
 
-            if worker_result.status == "needs_human_review":
+            if worker_result.status=="needs_human_review":
                 results["human_review_required"].append({
                     "worker_type":worker_type,
                     "task":task_description,
@@ -549,29 +549,29 @@ class LeaderWorkerOrchestrator:
 
         self._emit_progress(leader_context.agent_type.value,85,"Leader統合中")
 
-        final_output = await self._integrate_outputs(
+        final_output=await self._integrate_outputs(
             leader_context=leader_context,
             leader_output=leader_output.output,
             worker_results=results["worker_results"],
         )
-        results["final_output"] = final_output
+        results["final_output"]=final_output
 
 
         self._emit_progress(leader_context.agent_type.value,95,"承認生成")
 
-        checkpoint_data = {
+        checkpoint_data={
             "type":f"{leader_context.agent_type.value}_review",
             "title":f"{leader_context.agent_type.value} 成果物レビュー",
             "output":final_output,
             "worker_summary":{
                 "total":total_workers,
-                "completed":sum(1 for r in results["worker_results"] if r["status"] == "completed"),
-                "failed":sum(1 for r in results["worker_results"] if r["status"] == "failed"),
+                "completed":sum(1 for r in results["worker_results"] if r["status"]=="completed"),
+                "failed":sum(1 for r in results["worker_results"] if r["status"]=="failed"),
                 "needs_review":len(results["human_review_required"]),
             },
             "human_review_required":results["human_review_required"],
         }
-        results["checkpoint"] = checkpoint_data
+        results["checkpoint"]=checkpoint_data
 
         if self.on_checkpoint:
             self.on_checkpoint(checkpoint_data["type"],checkpoint_data)
@@ -591,18 +591,18 @@ class LeaderWorkerOrchestrator:
         """
         Workerを実行（品質チェック有無で分岐）
         """
-        result = WorkerTaskResult(worker_type=worker_type)
+        result=WorkerTaskResult(worker_type=worker_type)
 
         try:
 
             try:
-                agent_type = AgentType(worker_type)
+                agent_type=AgentType(worker_type)
             except ValueError:
-                result.status = "failed"
-                result.error = f"Unknown worker type: {worker_type}"
+                result.status="failed"
+                result.error=f"Unknown worker type: {worker_type}"
                 return result
 
-            worker_context = AgentContext(
+            worker_context=AgentContext(
                 project_id=leader_context.project_id,
                 agent_id=f"{leader_context.agent_id}-{worker_type}",
                 agent_type=agent_type,
@@ -612,21 +612,21 @@ class LeaderWorkerOrchestrator:
             )
 
             if quality_check_enabled:
-                result = await self._run_with_quality_check(
+                result=await self._run_with_quality_check(
                     worker_context=worker_context,
                     worker_type=worker_type,
                     max_retries=max_retries,
                 )
             else:
-                output = await self.agent_runner.run_agent(worker_context)
-                result.status = "completed" if output.status == AgentStatus.COMPLETED else "failed"
-                result.output = output.output
+                output=await self.agent_runner.run_agent(worker_context)
+                result.status="completed" if output.status==AgentStatus.COMPLETED else"failed"
+                result.output=output.output
                 if output.error:
-                    result.error = output.error
+                    result.error=output.error
 
         except Exception as e:
-            result.status = "failed"
-            result.error = str(e)
+            result.status="failed"
+            result.error=str(e)
 
         return result
 
@@ -634,62 +634,62 @@ class LeaderWorkerOrchestrator:
         self,
         worker_context:AgentContext,
         worker_type:str,
-        max_retries:int = 3,
+        max_retries:int=3,
     )->WorkerTaskResult:
         """失敗時は最大max_retries回リトライ、それでも失敗ならHuman Review要求"""
-        result = WorkerTaskResult(worker_type=worker_type)
+        result=WorkerTaskResult(worker_type=worker_type)
 
         for retry in range(max_retries):
-            result.retries = retry
-            output = await self.agent_runner.run_agent(worker_context)
+            result.retries=retry
+            output=await self.agent_runner.run_agent(worker_context)
 
-            if output.status == AgentStatus.FAILED:
-                result.error = output.error
+            if output.status==AgentStatus.FAILED:
+                result.error=output.error
                 continue
 
-            result.output = output.output
-            qc_result = self._perform_quality_check(output.output,worker_type)
-            result.quality_check = qc_result
+            result.output=output.output
+            qc_result=self._perform_quality_check(output.output,worker_type)
+            result.quality_check=qc_result
 
             if qc_result.passed:
-                result.status = "completed"
+                result.status="completed"
                 return result
 
-            if retry < max_retries - 1:
-                result.status = "needs_retry"
-                worker_context.previous_outputs[f"{worker_type}_previous_attempt"] = {
+            if retry<max_retries-1:
+                result.status="needs_retry"
+                worker_context.previous_outputs[f"{worker_type}_previous_attempt"]={
                     "output":output.output,
                     "issues":qc_result.issues,
                 }
             else:
-                result.status = "needs_human_review"
-                result.quality_check.human_review_needed = True
+                result.status="needs_human_review"
+                result.quality_check.human_review_needed=True
                 return result
 
         return result
 
     def _perform_quality_check(self,output:Dict[str,Any],worker_type:str)->QualityCheckResult:
         """簡易的なルールベースチェック（本番ではLLMで品質評価）"""
-        issues = []
-        score = 1.0
-        content = output.get("content","")
+        issues=[]
+        score=1.0
+        content=output.get("content","")
 
-        if not content or len(str(content)) < 50:
+        if not content or len(str(content))<50:
             issues.append("出力内容が不十分です")
-            score -= 0.3
+            score-=0.3
 
-        if "```json" in str(content):
+        if"```json" in str(content):
             import json
             import re
-            json_match = re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
+            json_match=re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
             if json_match:
                 try:
                     json.loads(json_match.group(1))
                 except json.JSONDecodeError:
                     issues.append("JSON形式が不正です")
-                    score -= 0.2
+                    score-=0.2
 
-        passed = score >= 0.7 and len(issues) == 0
+        passed=score>=0.7 and len(issues)==0
 
         return QualityCheckResult(
             passed=passed,
@@ -699,19 +699,19 @@ class LeaderWorkerOrchestrator:
         )
 
     def _extract_worker_tasks(self,leader_output:Dict[str,Any])->List[Dict[str,Any]]:
-        content = leader_output.get("content","")
+        content=leader_output.get("content","")
         import json
         import re
 
-        json_match = re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
+        json_match=re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
         if json_match:
             try:
-                data = json.loads(json_match.group(1))
+                data=json.loads(json_match.group(1))
                 return data.get("worker_tasks",[])
             except json.JSONDecodeError:
                 pass
 
-        if isinstance(leader_output,dict) and "worker_tasks" in leader_output:
+        if isinstance(leader_output,dict) and"worker_tasks" in leader_output:
             return leader_output.get("worker_tasks",[])
 
         return []
@@ -723,7 +723,7 @@ class LeaderWorkerOrchestrator:
         worker_results:List[Dict[str,Any]],
     )->Dict[str,Any]:
         """Worker結果をマージ（本番ではLeaderに再度LLM呼び出しで統合）"""
-        integrated = {
+        integrated={
             "type":"document",
             "format":"markdown",
             "leader_summary":leader_output,
@@ -731,13 +731,13 @@ class LeaderWorkerOrchestrator:
             "metadata":{
                 "agent_type":leader_context.agent_type.value,
                 "worker_count":len(worker_results),
-                "completed_count":sum(1 for r in worker_results if r.get("status") == "completed"),
+                "completed_count":sum(1 for r in worker_results if r.get("status")=="completed"),
             }
         }
 
         for result in worker_results:
-            worker_type = result.get("worker_type","unknown")
-            integrated["worker_outputs"][worker_type] = {
+            worker_type=result.get("worker_type","unknown")
+            integrated["worker_outputs"][worker_type]={
                 "status":result.get("status"),
                 "output":result.get("output",{}),
             }

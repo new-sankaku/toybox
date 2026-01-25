@@ -48,9 +48,9 @@ class AssetRepository(BaseRepository[Asset]):
   a=self.session.query(Asset).filter(Asset.id==asset_id,Asset.project_id==project_id).first()
   if not a:
    return None
-  if "approvalStatus" in data:
+  if"approvalStatus" in data:
    a.approval_status=data["approvalStatus"]
-  if "name" in data:
+  if"name" in data:
    a.name=data["name"]
   self.update(a)
   return self.to_dict(a)
