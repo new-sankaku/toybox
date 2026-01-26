@@ -19,6 +19,7 @@ class InterventionRepository(BaseRepository[Intervention]):
    "message":i.message,
    "attachedFileIds":i.attached_file_ids or [],
    "status":i.status,
+   "responses":i.responses or [],
    "createdAt":i.created_at.isoformat() if i.created_at else None,
    "deliveredAt":i.delivered_at.isoformat() if i.delivered_at else None,
    "acknowledgedAt":i.acknowledged_at.isoformat() if i.acknowledged_at else None,
@@ -72,5 +73,32 @@ class InterventionRepository(BaseRepository[Intervention]):
    return None
   i.status="delivered"
   i.delivered_at=datetime.now()
+  self.update(i)
+  return self.to_dict(i)
+
+ def add_response(self,id:str,sender:str,message:str,agent_id:str=None)->Optional[Dict]:
+  from sqlalchemy.orm.attributes import flag_modified
+  i=self.get(id)
+  if not i:
+   return None
+  responses=list(i.responses or [])
+  responses.append({
+   "sender":sender,
+   "agentId":agent_id,
+   "message":message,
+   "createdAt":datetime.now().isoformat()
+  })
+  i.responses=responses
+  flag_modified(i,"responses")
+  if sender=="agent":
+   i.status="waiting_response"
+  self.update(i)
+  return self.to_dict(i)
+
+ def set_status(self,id:str,status:str)->Optional[Dict]:
+  i=self.get(id)
+  if not i:
+   return None
+  i.status=status
   self.update(i)
   return self.to_dict(i)

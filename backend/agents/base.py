@@ -79,7 +79,9 @@ class AgentStatus(str,Enum):
     PENDING="pending"
     RUNNING="running"
     WAITING_APPROVAL="waiting_approval"
+    WAITING_RESPONSE="waiting_response"
     WAITING_PROVIDER="waiting_provider"
+    PAUSED="paused"
     COMPLETED="completed"
     FAILED="failed"
 

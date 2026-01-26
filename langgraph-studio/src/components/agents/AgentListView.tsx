@@ -4,7 +4,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -28,6 +28,8 @@ const filterOptions:{value:FilterStatus;label:string;icon:typeof Filter}[]=[
  {value:'incomplete',label:'未完了',icon:CircleDashed},
  {value:'running',label:'実行中',icon:Play},
  {value:'waiting_approval',label:'承認待ち',icon:AlertCircle},
+ {value:'waiting_response',label:'返答待ち',icon:MessageCircle},
+ {value:'paused',label:'一時停止',icon:Pause},
  {value:'pending',label:'待機中',icon:Clock},
  {value:'completed',label:'完了',icon:CheckCircle},
  {value:'failed',label:'エラー',icon:XCircle},
@@ -70,6 +72,8 @@ export default function AgentListView({
    incomplete,
    running:enabledList.filter((a)=>a.status==='running').length,
    waiting_approval:enabledList.filter((a)=>a.status==='waiting_approval').length,
+   waiting_response:enabledList.filter((a)=>a.status==='waiting_response').length,
+   paused:enabledList.filter((a)=>a.status==='paused').length,
    pending:enabledList.filter((a)=>a.status==='pending').length,
    completed:enabledList.filter((a)=>a.status==='completed').length,
    failed:enabledList.filter((a)=>a.status==='failed').length,

@@ -131,6 +131,7 @@ class Intervention(Base):
  message=Column(Text)
  attached_file_ids=Column(JSON)
  status=Column(String(50),default="pending")
+ responses=Column(JSON,default=list)
  created_at=Column(DateTime,default=datetime.now)
  delivered_at=Column(DateTime)
  acknowledged_at=Column(DateTime)

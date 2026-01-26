@@ -142,14 +142,53 @@ export default function AgentsView():JSX.Element{
   }
  },[selectedAgent,setAgents])
 
+ const handlePause=useCallback(async(agent:Agent)=>{
+  try{
+   const result=await agentApi.pause(agent.id)
+   if(result.success){
+    const updatedAgent=convertApiAgent(result.agent)
+    const currentAgents=useAgentStore.getState().agents
+    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+    setAgents(newAgents)
+    if(selectedAgent?.id===agent.id){
+     setSelectedAgent(updatedAgent)
+    }
+   }
+  }catch(error){
+   console.error('Failed to pause agent:',error)
+  }
+ },[selectedAgent,setAgents])
+
+ const handleResume=useCallback(async(agent:Agent)=>{
+  try{
+   const result=await agentApi.resume(agent.id)
+   if(result.success){
+    const updatedAgent=convertApiAgent(result.agent)
+    const currentAgents=useAgentStore.getState().agents
+    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+    setAgents(newAgents)
+    if(selectedAgent?.id===agent.id){
+     setSelectedAgent(updatedAgent)
+    }
+   }
+  }catch(error){
+   console.error('Failed to resume agent:',error)
+  }
+ },[selectedAgent,setAgents])
+
  if(selectedAgent){
   const currentAgentData=projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
+  const canRetry=['failed','interrupted','cancelled'].includes(currentAgentData.status)
+  const canPause=['running','waiting_approval'].includes(currentAgentData.status)
+  const canResume=['paused','waiting_response'].includes(currentAgentData.status)
   return(
    <AgentDetailView
     agent={currentAgentData}
     logs={selectedAgentLogs}
     onBack={handleBack}
-    onRetry={(currentAgentData.status==='failed'||currentAgentData.status==='interrupted'||currentAgentData.status==='cancelled')?()=>handleRetry(currentAgentData) : undefined}
+    onRetry={canRetry?()=>handleRetry(currentAgentData):undefined}
+    onPause={canPause?()=>handlePause(currentAgentData):undefined}
+    onResume={canResume?()=>handleResume(currentAgentData):undefined}
    />
 )
  }

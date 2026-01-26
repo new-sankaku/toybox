@@ -151,7 +151,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'interrupted'|'cancelled'
+ status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'paused'|'interrupted'|'cancelled'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -197,6 +197,16 @@ export const agentApi={
 
  getInterrupted:async(projectId:string):Promise<ApiAgent[]>=>{
   const response=await api.get(`/api/projects/${projectId}/agents/interrupted`)
+  return response.data
+ },
+
+ pause:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
+  const response=await api.post(`/api/agents/${agentId}/pause`)
+  return response.data
+ },
+
+ resume:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
+  const response=await api.post(`/api/agents/${agentId}/resume`)
   return response.data
  }
 }
@@ -456,7 +466,14 @@ export const uiSettingsApi={
 
 export type InterventionPriority='normal'|'urgent'
 export type InterventionTarget='all'|'specific'
-export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'
+export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'|'waiting_response'
+
+export interface InterventionResponse{
+ sender:'agent'|'operator'
+ agentId:string|null
+ message:string
+ createdAt:string
+}
 
 export interface ApiIntervention{
  id:string
@@ -467,6 +484,7 @@ export interface ApiIntervention{
  message:string
  attachedFileIds:string[]
  status:InterventionStatus
+ responses:InterventionResponse[]
  createdAt:string
  deliveredAt:string|null
  acknowledgedAt:string|null
@@ -509,6 +527,11 @@ export const interventionApi={
 
  delete:async(interventionId:string):Promise<void>=>{
   await api.delete(`/api/interventions/${interventionId}`)
+ },
+
+ respond:async(interventionId:string,message:string):Promise<ApiIntervention>=>{
+  const response=await api.post(`/api/interventions/${interventionId}/respond`,{message})
+  return response.data
  }
 }
 

@@ -134,6 +134,44 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   else:
    raise ApiError("Failed to retry agent",code="RETRY_ERROR",status_code=500)
 
+ @app.route('/api/agents/<agent_id>/pause',methods=['POST'])
+ def pause_agent(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  pausable_statuses={"running","waiting_approval"}
+  if agent.get("status") not in pausable_statuses:
+   raise ValidationError(f"Agent status must be one of {pausable_statuses} to pause","status")
+  result=data_store.pause_agent(agent_id)
+  if result:
+   sio.emit('agent:paused',{
+    "agentId":agent_id,
+    "projectId":result["projectId"],
+    "agent":result
+   },room=f"project:{result['projectId']}")
+   return jsonify({"success":True,"agent":result})
+  else:
+   raise ApiError("Failed to pause agent",code="PAUSE_ERROR",status_code=500)
+
+ @app.route('/api/agents/<agent_id>/resume',methods=['POST'])
+ def resume_agent(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  resumable_statuses={"paused","waiting_response"}
+  if agent.get("status") not in resumable_statuses:
+   raise ValidationError(f"Agent status must be one of {resumable_statuses} to resume","status")
+  result=data_store.resume_agent(agent_id)
+  if result:
+   sio.emit('agent:resumed',{
+    "agentId":agent_id,
+    "projectId":result["projectId"],
+    "agent":result
+   },room=f"project:{result['projectId']}")
+   return jsonify({"success":True,"agent":result})
+  else:
+   raise ApiError("Failed to resume agent",code="RESUME_ERROR",status_code=500)
+
  @app.route('/api/projects/<project_id>/agents/retryable',methods=['GET'])
  def get_retryable_agents(project_id:str):
   project=data_store.get_project(project_id)
