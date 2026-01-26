@@ -2,11 +2,7 @@ import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
 
-const API_BASE_URL=(()=>{
- const url=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL
- if(!url)throw new Error('VITE_API_BASE_URL環境変数が設定されていません')
- return url
-})()
+const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||''
 
 export interface ApiErrorDetail{
  message:string

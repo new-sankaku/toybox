@@ -77,20 +77,14 @@ export default function CostView():JSX.Element{
  },[agentServiceMap,serviceLabels])
 
  const calculateCost=useCallback((input:number,output:number):number=>{
-  console.log('[CostView] calculateCost:',{input,output,pricing,models:pricing?.models})
-  if(!pricing){
-   console.log('[CostView] pricing is null')
-   return 0
-  }
-  const defaultModel=Object.keys(pricing.models)[0]
-  if(!defaultModel){
-   console.log('[CostView] no default model')
-   return 0
-  }
-  const modelPricing=pricing.models[defaultModel]?.pricing
+  if(!pricing)return 0
+  const llmModel=Object.entries(pricing.models).find(
+   ([,m])=>m.pricing&&(m.pricing.input!==undefined||m.pricing.output!==undefined)
+  )
+  if(!llmModel)return 0
+  const modelPricing=llmModel[1].pricing
   const inputPer1M=modelPricing?.input||0
   const outputPer1M=modelPricing?.output||0
-  console.log('[CostView] calc:',{defaultModel,inputPer1M,outputPer1M})
   return(input/1000000)*inputPer1M+(output/1000000)*outputPer1M
  },[pricing])
 

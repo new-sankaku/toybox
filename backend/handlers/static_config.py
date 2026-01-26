@@ -16,6 +16,7 @@ from config_loader import (
  get_role_labels,
  get_agent_roles,
  get_agents_config,
+ get_websocket_config,
 )
 from ai_config import get_service_labels
 
@@ -79,3 +80,7 @@ def register_static_config_routes(app:Flask):
    "agentRoles":get_agent_roles(),
    "agents":agents_out,
   })
+
+ @app.route('/api/config/websocket',methods=['GET'])
+ def get_websocket_config_api():
+  return jsonify(get_websocket_config())

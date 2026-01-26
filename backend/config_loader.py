@@ -204,6 +204,16 @@ def get_output_settings_defaults()->Dict[str,Any]:
     return config.get("output",{"default_dir":"./output"})
 
 
+def get_websocket_config()->Dict[str,Any]:
+    config=get_project_settings_config()
+    return config.get("websocket",{
+        "maxReconnectAttempts":5,
+        "reconnectDelay":1000,
+        "reconnectDelayMax":5000,
+        "timeout":10000
+    })
+
+
 def get_cost_settings_defaults()->Dict[str,Any]:
     config=get_project_settings_config()
     return config.get("cost",{

@@ -1,6 +1,12 @@
 output:
   default_dir: ./output
 
+websocket:
+  maxReconnectAttempts: 5
+  reconnectDelay: 1000
+  reconnectDelayMax: 5000
+  timeout: 10000
+
 cost:
   global_enabled: true
   global_monthly_limit: 100.0

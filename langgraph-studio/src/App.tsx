@@ -100,18 +100,12 @@ function App():JSX.Element{
  },[currentProject?.id,fetchAgentsForProject])
 
  useEffect(()=>{
-  const backendUrl=(import.meta as unknown as{env:Record<string,string>}).env.VITE_BACKEND_URL
-  if(!backendUrl){
-   console.error('VITE_BACKEND_URL環境変数が設定されていません')
-   return
-  }
-
   const initWebSocket=async()=>{
    try{
     const wsConfig=await configApi.getWebSocketConfig()
-    websocketService.connect(backendUrl,wsConfig)
+    websocketService.connect('',wsConfig)
    }catch{
-    websocketService.connect(backendUrl)
+    websocketService.connect('')
    }
   }
   initWebSocket()
