@@ -103,9 +103,18 @@ def register_ai_provider_routes(app:Flask):
 
   except Exception as e:
    latency=int((time.time()-start_time)*1000)
+   error_type=type(e).__name__
+   if"AuthenticationError" in error_type:
+    message="認証エラー: APIキーを確認してください"
+   elif"RateLimitError" in error_type:
+    message="レート制限に達しました"
+   elif"Connection" in error_type or"Timeout" in error_type:
+    message="接続エラー: ネットワークを確認してください"
+   else:
+    message="接続テストに失敗しました"
    return jsonify({
     "success":False,
-    "message":f"接続エラー: {str(e)}",
+    "message":message,
     "latency":latency
    })
 
@@ -168,7 +177,14 @@ def register_ai_provider_routes(app:Flask):
    })
 
   except Exception as e:
-   return jsonify({"error":f"チャットエラー: {str(e)}"}),500
+   error_type=type(e).__name__
+   if"AuthenticationError" in error_type:
+    return jsonify({"error":"認証エラー: APIキーを確認してください"}),401
+   elif"RateLimitError" in error_type:
+    return jsonify({"error":"レート制限に達しました。しばらく待ってから再試行してください"}),429
+   elif"Connection" in error_type or"Timeout" in error_type:
+    return jsonify({"error":"接続エラー: ネットワークを確認してください"}),503
+   return jsonify({"error":"チャット処理中にエラーが発生しました"}),500
 
  @app.route('/api/ai/chat/stream',methods=['POST'])
  def ai_chat_stream():
@@ -221,7 +237,14 @@ def register_ai_provider_routes(app:Flask):
       yield f"data: {json.dumps({'content':chunk.content})}\n\n"
    except Exception as e:
     import json
-    yield f"data: {json.dumps({'error':str(e)})}\n\n"
+    error_type=type(e).__name__
+    if"AuthenticationError" in error_type:
+     message="認証エラー: APIキーを確認してください"
+    elif"RateLimitError" in error_type:
+     message="レート制限に達しました"
+    else:
+     message="ストリーミング処理中にエラーが発生しました"
+    yield f"data: {json.dumps({'error':message})}\n\n"
 
   return Response(
    generate(),
@@ -279,7 +302,7 @@ def register_ai_provider_routes(app:Flask):
    })
   except Exception as e:
    session.rollback()
-   return jsonify({"error":str(e)}),500
+   return jsonify({"error":"APIキーの保存に失敗しました"}),500
   finally:
    session.close()
 
@@ -299,7 +322,7 @@ def register_ai_provider_routes(app:Flask):
     return jsonify({"error":"APIキーが見つかりません"}),404
   except Exception as e:
    session.rollback()
-   return jsonify({"error":str(e)}),500
+   return jsonify({"error":"APIキーの削除に失敗しました"}),500
   finally:
    session.close()
 
@@ -331,6 +354,6 @@ def register_ai_provider_routes(app:Flask):
    })
   except Exception as e:
    session.rollback()
-   return jsonify({"success":False,"error":str(e)}),500
+   return jsonify({"success":False,"error":"APIキーの検証に失敗しました"}),500
   finally:
    session.close()

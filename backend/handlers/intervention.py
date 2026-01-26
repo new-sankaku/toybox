@@ -8,7 +8,7 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
     def list_interventions(project_id:str):
         project=data_store.get_project(project_id)
         if not project:
-            return jsonify({"error":"Project not found"}),404
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
 
         interventions=data_store.get_interventions_by_project(project_id)
         return jsonify(interventions)
@@ -17,30 +17,30 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
     def create_intervention(project_id:str):
         project=data_store.get_project(project_id)
         if not project:
-            return jsonify({"error":"Project not found"}),404
+            return jsonify({"error":"プロジェクトが見つかりません"}),404
 
         data=request.get_json() or {}
 
         target_type=data.get("targetType","all")
         if target_type not in ("all","specific"):
-            return jsonify({"error":"Invalid targetType. Must be: all or specific"}),400
+            return jsonify({"error":"対象タイプが不正です。all または specific を指定してください"}),400
 
         target_agent_id=data.get("targetAgentId")
         if target_type=="specific" and not target_agent_id:
-            return jsonify({"error":"targetAgentId is required when targetType is 'specific'"}),400
+            return jsonify({"error":"specific の場合は targetAgentId が必須です"}),400
 
         if target_agent_id:
             agent=data_store.get_agent(target_agent_id)
             if not agent or agent["projectId"]!=project_id:
-                return jsonify({"error":"Agent not found in this project"}),404
+                return jsonify({"error":"このプロジェクトにエージェントが見つかりません"}),404
 
         priority=data.get("priority","normal")
         if priority not in ("normal","urgent"):
-            return jsonify({"error":"Invalid priority. Must be: normal or urgent"}),400
+            return jsonify({"error":"優先度が不正です。normal または urgent を指定してください"}),400
 
         message=data.get("message","").strip()
         if not message:
-            return jsonify({"error":"Message is required"}),400
+            return jsonify({"error":"メッセージは必須です"}),400
 
         attached_file_ids=data.get("attachedFileIds",[])
 
@@ -75,14 +75,14 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
     def get_intervention(intervention_id:str):
         intervention=data_store.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"Intervention not found"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
         return jsonify(intervention)
 
     @app.route('/api/interventions/<intervention_id>/acknowledge',methods=['POST'])
     def acknowledge_intervention(intervention_id:str):
         intervention=data_store.acknowledge_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"Intervention not found"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         sio.emit('intervention:acknowledged',{
             "interventionId":intervention_id,
@@ -96,7 +96,7 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
     def process_intervention(intervention_id:str):
         intervention=data_store.process_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"Intervention not found"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         sio.emit('intervention:processed',{
             "interventionId":intervention_id,
@@ -110,12 +110,12 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
     def delete_intervention(intervention_id:str):
         intervention=data_store.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"Intervention not found"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         project_id=intervention["projectId"]
         success=data_store.delete_intervention(intervention_id)
         if not success:
-            return jsonify({"error":"Failed to delete intervention"}),500
+            return jsonify({"error":"介入の削除に失敗しました"}),500
 
         sio.emit('intervention:deleted',{
             "interventionId":intervention_id,

@@ -23,6 +23,9 @@ def register_backup_routes(app:Flask,backup_service:BackupService,archive_servic
 
  @app.route('/api/backups/<backup_name>/restore',methods=['POST'])
  def restore_backup(backup_name:str):
+  import re
+  if not re.match(r'^[\w\-\.]+\.db$',backup_name):
+   raise ValidationError("不正なバックアップ名です","backup_name")
   success=backup_service.restore_backup(backup_name)
   if success:
    return jsonify({"success":True,"message":f"Restored from {backup_name}"})
@@ -31,6 +34,9 @@ def register_backup_routes(app:Flask,backup_service:BackupService,archive_servic
 
  @app.route('/api/backups/<backup_name>',methods=['DELETE'])
  def delete_backup(backup_name:str):
+  import re
+  if not re.match(r'^[\w\-\.]+\.db$',backup_name):
+   raise ValidationError("不正なバックアップ名です","backup_name")
   success=backup_service.delete_backup(backup_name)
   if success:
    return jsonify({"success":True})
@@ -113,6 +119,9 @@ def register_backup_routes(app:Flask,backup_service:BackupService,archive_servic
 
  @app.route('/api/archives/<archive_name>',methods=['DELETE'])
  def delete_archive(archive_name:str):
+  import re
+  if not re.match(r'^[\w\-\.]+\.zip$',archive_name):
+   raise ValidationError("不正なアーカイブ名です","archive_name")
   success=archive_service.delete_archive(archive_name)
   if success:
    return jsonify({"success":True})
@@ -122,7 +131,13 @@ def register_backup_routes(app:Flask,backup_service:BackupService,archive_servic
  @app.route('/api/archives/<archive_name>/download',methods=['GET'])
  def download_archive(archive_name:str):
   import os
-  archive_path=os.path.join(archive_service._archive_dir,archive_name)
+  import re
+  if not re.match(r'^[\w\-\.]+\.zip$',archive_name):
+   raise ValidationError("不正なアーカイブ名です","archive_name")
+  archive_path=os.path.normpath(os.path.join(archive_service._archive_dir,archive_name))
+  base_dir=os.path.normpath(archive_service._archive_dir)
+  if not archive_path.startswith(base_dir+os.sep):
+   raise ValidationError("不正なパスです","archive_name")
   if not os.path.exists(archive_path):
    raise NotFoundError("Archive",archive_name)
   return send_file(archive_path,as_attachment=True,download_name=archive_name)

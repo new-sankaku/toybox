@@ -1,6 +1,8 @@
 import{create}from'zustand'
 import type{Agent,AgentStatus,AgentLogEntry}from'@/types/agent'
 
+const MAX_LOG_ENTRIES_PER_AGENT=1000
+
 interface AgentState{
  agents:Agent[]
  selectedAgentId:string|null
@@ -74,12 +76,19 @@ export const useAgentStore=create<AgentState>((set,get)=>({
  selectAgent:(id)=>set({selectedAgentId:id}),
 
  addLogEntry:(agentId,entry)=>
-  set((state)=>({
-   agentLogs:{
-    ...state.agentLogs,
-    [agentId]:[...(state.agentLogs[agentId]||[]),entry]
+  set((state)=>{
+   const currentLogs=state.agentLogs[agentId]||[]
+   const newLogs=[...currentLogs,entry]
+   const trimmedLogs=newLogs.length>MAX_LOG_ENTRIES_PER_AGENT
+    ?newLogs.slice(-MAX_LOG_ENTRIES_PER_AGENT)
+    :newLogs
+   return{
+    agentLogs:{
+     ...state.agentLogs,
+     [agentId]:trimmedLogs
+    }
    }
-  })),
+  }),
 
  clearLogs:(agentId)=>
   set((state)=>({

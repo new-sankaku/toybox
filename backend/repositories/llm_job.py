@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional,List,Dict,Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_,update
 from .base import BaseRepository
 from models.tables import LlmJob
 
@@ -46,13 +46,14 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   return self.session.query(LlmJob).filter(LlmJob.status=="running").count()
 
  def claim_job(self,job_id:str)->Optional[LlmJob]:
-  job=self.get(job_id)
-  if job and job.status=="pending":
-   job.status="running"
-   job.started_at=datetime.now()
-   self.session.flush()
-   return job
-  return None
+  stmt=update(LlmJob).where(
+   and_(LlmJob.id==job_id,LlmJob.status=="pending")
+  ).values(status="running",started_at=datetime.now())
+  result=self.session.execute(stmt)
+  self.session.flush()
+  if result.rowcount==0:
+   return None
+  return self.get(job_id)
 
  def complete_job(
   self,
