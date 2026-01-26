@@ -151,7 +151,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'
+ status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'interrupted'|'cancelled'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -182,6 +182,21 @@ export const agentApi={
 
  getLogs:async(agentId:string):Promise<ApiAgentLog[]>=>{
   const response=await api.get(`/api/agents/${agentId}/logs`)
+  return response.data
+ },
+
+ retry:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
+  const response=await api.post(`/api/agents/${agentId}/retry`)
+  return response.data
+ },
+
+ getRetryable:async(projectId:string):Promise<ApiAgent[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/agents/retryable`)
+  return response.data
+ },
+
+ getInterrupted:async(projectId:string):Promise<ApiAgent[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/agents/interrupted`)
   return response.data
  }
 }
