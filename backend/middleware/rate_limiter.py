@@ -1,0 +1,103 @@
+import time
+from functools import wraps
+from typing import Dict,Optional,Callable
+from flask import Flask,request,jsonify
+from collections import defaultdict
+import threading
+
+
+class RateLimiter:
+ def __init__(self,default_limit:int=60,default_window:int=60):
+  self._default_limit=default_limit
+  self._default_window=default_window
+  self._requests:Dict[str,list]=defaultdict(list)
+  self._lock=threading.Lock()
+  self._endpoint_limits:Dict[str,tuple]={}
+
+ def set_limit(self,endpoint:str,limit:int,window:int=60)->None:
+  self._endpoint_limits[endpoint]=( limit,window)
+
+ def _get_client_id(self)->str:
+  return request.remote_addr or"unknown"
+
+ def _get_limit_for_endpoint(self,endpoint:str)->tuple:
+  return self._endpoint_limits.get(endpoint,(self._default_limit,self._default_window))
+
+ def _cleanup_old_requests(self,client_id:str,window:int)->None:
+  now=time.time()
+  self._requests[client_id]=[t for t in self._requests[client_id] if now-t<window]
+
+ def is_allowed(self,endpoint:Optional[str]=None)->tuple:
+  client_id=self._get_client_id()
+  limit,window=self._get_limit_for_endpoint(endpoint or"")
+  with self._lock:
+   self._cleanup_old_requests(client_id,window)
+   current_count=len(self._requests[client_id])
+   if current_count>=limit:
+    retry_after=int(window-(time.time()-self._requests[client_id][0]))
+    return False,{"limit":limit,"remaining":0,"retry_after":max(1,retry_after)}
+   self._requests[client_id].append(time.time())
+   return True,{"limit":limit,"remaining":limit-current_count-1,"retry_after":0}
+
+ def get_stats(self)->Dict[str,any]:
+  with self._lock:
+   return {
+    "total_clients":len(self._requests),
+    "endpoint_limits":dict(self._endpoint_limits),
+    "default_limit":self._default_limit,
+    "default_window":self._default_window,
+   }
+
+
+_limiter:Optional[RateLimiter]=None
+
+
+def create_limiter(default_limit:int=60,default_window:int=60)->RateLimiter:
+ global _limiter
+ _limiter=RateLimiter(default_limit,default_window)
+ return _limiter
+
+
+def get_limiter()->Optional[RateLimiter]:
+ return _limiter
+
+
+def rate_limit(limit:Optional[int]=None,window:Optional[int]=None)->Callable:
+ def decorator(f:Callable)->Callable:
+  @wraps(f)
+  def wrapped(*args,**kwargs):
+   limiter=get_limiter()
+   if limiter is None:
+    return f(*args,**kwargs)
+   endpoint=request.endpoint or f.__name__
+   if limit is not None:
+    limiter.set_limit(endpoint,limit,window or 60)
+   allowed,info=limiter.is_allowed(endpoint)
+   if not allowed:
+    response=jsonify({
+     "error":{
+      "code":"RATE_LIMIT_EXCEEDED",
+      "message":"Too many requests",
+      "details":info
+     }
+    })
+    response.headers["X-RateLimit-Limit"]=str(info["limit"])
+    response.headers["X-RateLimit-Remaining"]=str(info["remaining"])
+    response.headers["Retry-After"]=str(info["retry_after"])
+    return response,429
+   response=f(*args,**kwargs)
+   if hasattr(response,"headers"):
+    response.headers["X-RateLimit-Limit"]=str(info["limit"])
+    response.headers["X-RateLimit-Remaining"]=str(info["remaining"])
+   return response
+  return wrapped
+ return decorator
+
+
+def init_rate_limiter(app:Flask,default_limit:int=60,default_window:int=60)->RateLimiter:
+ limiter=create_limiter(default_limit,default_window)
+ limiter.set_limit("/api/ai/chat",30,60)
+ limiter.set_limit("/api/ai/chat/stream",30,60)
+ limiter.set_limit("/api/projects/<project_id>/start",10,60)
+ limiter.set_limit("/api/agents/<agent_id>/execute",10,60)
+ return limiter
