@@ -62,6 +62,12 @@ export default function AIFieldSection():JSX.Element|null{
    }else if(agent.status==='blocked'){
     status='blocked'
     emotion='sleepy'
+   }else if(agent.status==='interrupted'){
+    status='failed'
+    emotion='sad'
+   }else if(agent.status==='cancelled'){
+    status='blocked'
+    emotion='sleepy'
    }
 
    return{
@@ -149,7 +155,7 @@ export default function AIFieldSection():JSX.Element|null{
          <span className="text-nier-small text-nier-accent-green">完了</span>
 )}
         {selectedCharacter.status==='failed'&&(
-         <span className="text-nier-small text-nier-accent-red">失敗</span>
+         <span className="text-nier-small text-nier-accent-red">失敗/中断</span>
 )}
         {selectedCharacter.status==='blocked'&&(
          <span className="text-nier-small text-nier-text-light">ブロック</span>
