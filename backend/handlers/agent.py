@@ -119,3 +119,33 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
    return jsonify({"success":True,"message":"Agent cancelled"})
   else:
    return jsonify({"success":False,"message":"Agent not running or already completed"})
+
+ @app.route('/api/agents/<agent_id>/retry',methods=['POST'])
+ def retry_agent(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  retryable_statuses={"failed","interrupted","cancelled"}
+  if agent.get("status") not in retryable_statuses:
+   raise ValidationError(f"Agent status must be one of {retryable_statuses} to retry","status")
+  result=data_store.retry_agent(agent_id)
+  if result:
+   return jsonify({"success":True,"agent":result})
+  else:
+   raise ApiError("Failed to retry agent",code="RETRY_ERROR",status_code=500)
+
+ @app.route('/api/projects/<project_id>/agents/retryable',methods=['GET'])
+ def get_retryable_agents(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   raise NotFoundError("Project",project_id)
+  agents=data_store.get_retryable_agents(project_id)
+  return jsonify(agents)
+
+ @app.route('/api/projects/<project_id>/agents/interrupted',methods=['GET'])
+ def get_interrupted_agents(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   raise NotFoundError("Project",project_id)
+  agents=data_store.get_interrupted_agents(project_id)
+  return jsonify(agents)

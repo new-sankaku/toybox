@@ -24,6 +24,7 @@ from handlers.navigator import register_navigator_routes
 from handlers.project_settings import register_project_settings_routes
 from handlers.brushup import register_brushup_routes
 from handlers.trace import register_trace_routes
+from handlers.recovery import register_recovery_routes
 from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
@@ -34,6 +35,7 @@ from middleware.logger import setup_logging,get_logger
 from services.agent_execution_service import AgentExecutionService
 from services.backup_service import BackupService
 from services.archive_service import ArchiveService
+from services.recovery_service import RecoveryService
 
 
 def create_app():
@@ -64,6 +66,10 @@ def create_app():
     backup_service=BackupService(db_path=db_path,max_backups=10)
     backup_service.create_startup_backup()
     archive_service=ArchiveService(retention_days=30)
+    recovery_service=RecoveryService(data_store=data_store,sio=sio)
+    recovery_result=recovery_service.recover_interrupted_agents()
+    if recovery_result["recovered_agents"]:
+        logger.info(f"Recovered {len(recovery_result['recovered_agents'])} interrupted agents")
 
     agent_runner=None
     agent_execution_service=AgentExecutionService(data_store,sio)
@@ -111,6 +117,7 @@ def create_app():
     register_project_settings_routes(app,data_store)
     register_brushup_routes(app,data_store,sio)
     register_trace_routes(app,data_store,sio)
+    register_recovery_routes(app,data_store)
 
     @app.route('/health')
     def health():
@@ -145,6 +152,7 @@ def create_app():
     app.agent_execution_service=agent_execution_service
     app.backup_service=backup_service
     app.archive_service=archive_service
+    app.recovery_service=recovery_service
     app.config_obj=config
     app.sio=sio
     app.wsgi_app_wrapper=app_wsgi
