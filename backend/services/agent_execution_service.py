@@ -32,7 +32,9 @@ class AgentExecutionService:
    AgentStatus.PENDING:"pending",
    AgentStatus.RUNNING:"running",
    AgentStatus.WAITING_APPROVAL:"waiting_approval",
+   AgentStatus.WAITING_RESPONSE:"waiting_response",
    AgentStatus.WAITING_PROVIDER:"waiting_provider",
+   AgentStatus.PAUSED:"paused",
    AgentStatus.COMPLETED:"completed",
    AgentStatus.FAILED:"failed",
   }
@@ -302,6 +304,32 @@ class AgentExecutionService:
    "projectId":project_id,
    "progress":progress,
    "currentTask":task,
+  },project_id)
+  self._check_pending_interventions(agent_id,project_id)
+
+ def _check_pending_interventions(self,agent_id:str,project_id:str)->None:
+  pending=self._data_store.get_pending_interventions_for_agent(agent_id)
+  if not pending:
+   return
+  agent=self._data_store.get_agent(agent_id)
+  if not agent or agent.get("status")!="running":
+   return
+  for intervention in pending:
+   self._data_store.acknowledge_intervention(intervention["id"])
+   self._emit_event("intervention:acknowledged",{
+    "interventionId":intervention["id"],
+    "projectId":project_id,
+    "agentId":agent_id,
+   },project_id)
+  self._data_store.update_agent(agent_id,{
+   "status":"waiting_response",
+   "currentTask":"連絡を確認中",
+  })
+  self._emit_event("agent:waiting_response",{
+   "agentId":agent_id,
+   "projectId":project_id,
+   "agent":self._data_store.get_agent(agent_id),
+   "interventionCount":len(pending),
   },project_id)
 
  def _on_log(self,agent_id:str,project_id:str,level:str,message:str)->None:
