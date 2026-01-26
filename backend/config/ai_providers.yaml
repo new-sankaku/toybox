@@ -252,7 +252,7 @@ providers:
     label: Claude Code (CLI)
     service_types:
       - llm
-    max_concurrent: 1
+    max_concurrent: 4
     test_model: sonnet
     models:
       - id: opus
