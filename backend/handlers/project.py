@@ -117,6 +117,12 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         if not project:
             return jsonify({"error":"プロジェクトが見つかりません"}),404
 
+        from services.llm_job_queue import get_llm_job_queue
+        job_queue=get_llm_job_queue()
+        cleaned=job_queue.cleanup_project_jobs(project_id)
+        if cleaned>0:
+            print(f"[initialize_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+
         project=data_store.initialize_project(project_id)
         sio.emit('project:initialized',{
             "projectId":project_id,

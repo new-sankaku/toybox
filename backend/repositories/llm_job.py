@@ -109,17 +109,13 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   jobs=self.session.query(LlmJob).filter(LlmJob.agent_id==agent_id).order_by(LlmJob.created_at.desc()).all()
   return [self.to_dict(j) for j in jobs]
 
- def cleanup_stale_jobs(self,stale_minutes:int=30)->int:
-  from datetime import timedelta
-  cutoff=datetime.now()-timedelta(minutes=stale_minutes)
-  stale_jobs=self.session.query(LlmJob).filter(
-   and_(LlmJob.status=="running",LlmJob.started_at<cutoff)
+ def cleanup_project_jobs(self,project_id:str)->int:
+  incomplete_jobs=self.session.query(LlmJob).filter(
+   and_(LlmJob.project_id==project_id,LlmJob.status.in_(["pending","running"]))
   ).all()
-  count=0
-  for job in stale_jobs:
-   job.status="pending"
-   job.started_at=None
-   count+=1
+  count=len(incomplete_jobs)
+  for job in incomplete_jobs:
+   self.session.delete(job)
   self.session.flush()
   return count
 

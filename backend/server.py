@@ -84,9 +84,8 @@ def create_app():
             if hasattr(agent_runner,'set_health_monitor'):
                 agent_runner.set_health_monitor(health_monitor)
         llm_job_queue=get_llm_job_queue()
-        llm_job_queue.set_socketio(sio)
         llm_job_queue.start()
-        logger.info(f"LLM Job Queue started with max_concurrent={llm_job_queue._max_concurrent}")
+        logger.info("LLM Job Queue started")
     logger.info(f"Agent mode: {config.agent.mode}")
 
     register_project_routes(app,data_store,sio)
@@ -134,7 +133,6 @@ def create_app():
             'backup_info':backup_service.get_backup_info(),
             'archive_stats':archive_service.get_data_statistics(),
             'rate_limiter':limiter.get_stats() if limiter else{},
-            'llm_job_queue':llm_job_queue.get_stats() if llm_job_queue else None,
         }
 
     testdata_path=get_testdata_path()

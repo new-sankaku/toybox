@@ -1,13 +1,12 @@
 import asyncio
 import threading
 import time
-from datetime import datetime
 from typing import Optional,Dict,Any,Callable
 from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
-from config_loader import get_llm_queue_config
+from config_loader import get_provider_max_concurrent
 
 
 class LlmJobQueue:
@@ -25,22 +24,12 @@ class LlmJobQueue:
  def __init__(self):
   if self._initialized:
    return
-  config=get_llm_queue_config()
-  self._max_concurrent=config.get("max_concurrent",3)
-  self._poll_interval=config.get("poll_interval",1.0)
-  self._stale_timeout_minutes=config.get("stale_timeout_minutes",30)
+  self._poll_interval=1.0
   self._running=False
   self._thread:Optional[threading.Thread]=None
-  self._active_jobs:Dict[str,bool]={}
+  self._active_jobs_by_provider:Dict[str,Dict[str,bool]]={}
   self._job_callbacks:Dict[str,Callable[[Dict],None]]={}
-  self._sio=None
   self._initialized=True
-
- def set_socketio(self,sio)->None:
-  self._sio=sio
-
- def set_max_concurrent(self,limit:int)->None:
-  self._max_concurrent=max(1,limit)
 
  def start(self)->None:
   if self._running:
@@ -48,7 +37,7 @@ class LlmJobQueue:
   self._running=True
   self._thread=threading.Thread(target=self._worker_loop,daemon=True)
   self._thread.start()
-  print(f"[LlmJobQueue] Started with max_concurrent={self._max_concurrent}")
+  print("[LlmJobQueue] Started")
 
  def stop(self)->None:
   self._running=False
@@ -56,6 +45,11 @@ class LlmJobQueue:
    self._thread.join(timeout=5)
    self._thread=None
   print("[LlmJobQueue] Stopped")
+
+ def cleanup_project_jobs(self,project_id:str)->int:
+  with session_scope() as session:
+   repo=LlmJobRepository(session)
+   return repo.cleanup_project_jobs(project_id)
 
  def submit_job(
   self,
@@ -110,36 +104,36 @@ class LlmJobQueue:
  def _worker_loop(self)->None:
   while self._running:
    try:
-    self._cleanup_stale_jobs()
     self._process_pending_jobs()
    except Exception as e:
     print(f"[LlmJobQueue] Worker error: {e}")
    time.sleep(self._poll_interval)
 
- def _cleanup_stale_jobs(self)->None:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   count=repo.cleanup_stale_jobs(self._stale_timeout_minutes)
-   if count>0:
-    print(f"[LlmJobQueue] Reset {count} stale jobs")
+ def _get_active_count(self,provider_id:str)->int:
+  provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
+  return len([j for j in provider_jobs.values() if j])
 
  def _process_pending_jobs(self)->None:
-  active_count=len([j for j in self._active_jobs.values() if j])
-  available_slots=self._max_concurrent-active_count
-  if available_slots<=0:
-   return
   with session_scope() as session:
    repo=LlmJobRepository(session)
-   pending_jobs=repo.get_pending_jobs(limit=available_slots)
+   pending_jobs=repo.get_pending_jobs(limit=20)
    for job in pending_jobs:
-    if job.id not in self._active_jobs:
-     claimed=repo.claim_job(job.id)
-     if claimed:
-      self._active_jobs[job.id]=True
-      thread=threading.Thread(target=self._execute_job,args=(job.id,),daemon=True)
-      thread.start()
+    provider_id=job.provider_id
+    max_concurrent=get_provider_max_concurrent(provider_id)
+    active_count=self._get_active_count(provider_id)
+    if active_count>=max_concurrent:
+     continue
+    if job.id in self._active_jobs_by_provider.get(provider_id,{}):
+     continue
+    claimed=repo.claim_job(job.id)
+    if claimed:
+     if provider_id not in self._active_jobs_by_provider:
+      self._active_jobs_by_provider[provider_id]={}
+     self._active_jobs_by_provider[provider_id][job.id]=True
+     thread=threading.Thread(target=self._execute_job,args=(job.id,provider_id),daemon=True)
+     thread.start()
 
- def _execute_job(self,job_id:str)->None:
+ def _execute_job(self,job_id:str,provider_id:str)->None:
   try:
    with session_scope() as session:
     repo=LlmJobRepository(session)
@@ -166,7 +160,8 @@ class LlmJobQueue:
     repo.fail_job(job_id,str(e))
    self._notify_completion(job_id)
   finally:
-   self._active_jobs.pop(job_id,None)
+   if provider_id in self._active_jobs_by_provider:
+    self._active_jobs_by_provider[provider_id].pop(job_id,None)
 
  def _notify_completion(self,job_id:str)->None:
   job=self.get_job_status(job_id)
@@ -178,20 +173,6 @@ class LlmJobQueue:
     callback(job)
    except Exception as e:
     print(f"[LlmJobQueue] Callback error: {e}")
-  if self._sio:
-   self._sio.emit("llm_job:completed",{"jobId":job_id,"job":job})
-
- def get_stats(self)->Dict[str,Any]:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   running=repo.get_running_count()
-   pending=len(repo.get_pending_jobs(limit=100))
-  return {
-   "maxConcurrent":self._max_concurrent,
-   "activeJobs":len([j for j in self._active_jobs.values() if j]),
-   "runningInDb":running,
-   "pendingInDb":pending,
-  }
 
 
 def get_llm_job_queue()->LlmJobQueue:

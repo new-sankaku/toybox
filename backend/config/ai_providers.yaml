@@ -94,6 +94,7 @@ providers:
     label: Anthropic
     service_types:
       - llm
+    max_concurrent: 3
     test_model: claude-haiku-4-5-20250116
     models:
       - id: claude-opus-4-5-20251101
@@ -127,6 +128,7 @@ providers:
     label: Zhipu AI
     service_types:
       - llm
+    max_concurrent: 3
     test_model: glm-4.7-flash
     models:
       - id: glm-4.7
@@ -152,6 +154,7 @@ providers:
     label: DeepSeek
     service_types:
       - llm
+    max_concurrent: 3
     test_model: deepseek-chat
     models:
       - id: deepseek-chat
