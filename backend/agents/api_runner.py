@@ -23,6 +23,20 @@ from providers.base import AIProviderConfig
 
 
 class ApiAgentRunner(AgentRunner):
+    _llm_semaphore:Optional[asyncio.Semaphore]=None
+    _max_concurrent_llm_calls:int=3
+
+    @classmethod
+    def set_max_concurrent_llm_calls(cls,limit:int)->None:
+        cls._max_concurrent_llm_calls=max(1,limit)
+        cls._llm_semaphore=None
+
+    @classmethod
+    def _get_semaphore(cls)->asyncio.Semaphore:
+        if cls._llm_semaphore is None:
+            cls._llm_semaphore=asyncio.Semaphore(cls._max_concurrent_llm_calls)
+        return cls._llm_semaphore
+
     def __init__(
         self,
         provider_id:str="anthropic",
@@ -287,25 +301,27 @@ class ApiAgentRunner(AgentRunner):
 
     async def _call_llm(self,prompt:str,context:AgentContext)->Dict[str,Any]:
         from providers.base import ChatMessage,MessageRole
+        semaphore=self._get_semaphore()
         async def _execute_llm_call():
-            provider=self._get_provider()
-            loop=asyncio.get_event_loop()
-            messages=[ChatMessage(role=MessageRole.USER,content=prompt)]
-            response=await loop.run_in_executor(
-                None,
-                lambda:provider.chat(
-                    messages=messages,
-                    model=self.model,
-                    max_tokens=self.max_tokens,
+            async with semaphore:
+                provider=self._get_provider()
+                loop=asyncio.get_event_loop()
+                messages=[ChatMessage(role=MessageRole.USER,content=prompt)]
+                response=await loop.run_in_executor(
+                    None,
+                    lambda:provider.chat(
+                        messages=messages,
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                    )
                 )
-            )
-            return {
-                "content":response.content,
-                "tokens_used":response.total_tokens,
-                "input_tokens":response.input_tokens,
-                "output_tokens":response.output_tokens,
-                "model":response.model,
-            }
+                return {
+                    "content":response.content,
+                    "tokens_used":response.total_tokens,
+                    "input_tokens":response.input_tokens,
+                    "output_tokens":response.output_tokens,
+                    "model":response.model,
+                }
 
         def on_retry(attempt:int,error:Exception,delay:float):
             if context.on_log:
