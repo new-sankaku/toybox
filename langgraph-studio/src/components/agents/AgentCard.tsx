@@ -2,7 +2,7 @@ import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
-import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle}from'lucide-react'
+import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Ban,Zap}from'lucide-react'
 
 interface AgentCardProps{
  agent:Agent
@@ -11,6 +11,8 @@ interface AgentCardProps{
  qualityCheckConfig?:QualityCheckConfig
  /**待機中の場合、何を待っているかの説明*/
  waitingFor?:string
+ /**再試行ボタンクリック時のコールバック*/
+ onRetry?:(agent:Agent)=>void
 }
 
 const statusConfig={
@@ -49,6 +51,18 @@ const statusConfig={
   icon:Pause,
   text:'ブロック',
   pulse:false
+ },
+ interrupted:{
+  color:'bg-nier-accent-orange',
+  icon:Zap,
+  text:'中断',
+  pulse:false
+ },
+ cancelled:{
+  color:'bg-nier-border-dark',
+  icon:Ban,
+  text:'キャンセル',
+  pulse:false
  }
 }
 
@@ -61,13 +75,15 @@ export function AgentCard({
  onSelect,
  isSelected=false,
  qualityCheckConfig,
- waitingFor
+ waitingFor,
+ onRetry
 }:AgentCardProps):JSX.Element{
- const status=statusConfig[agent.status]
+ const status=statusConfig[agent.status]||statusConfig.pending
  const StatusIcon=status.icon
  const{getAgentRole,getRoleLabel}=useUIConfigStore()
  const role=getAgentRole(agent.type)
  const roleLabel=getRoleLabel(role)
+ const isRetryable=agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled'
 
  const getRuntime=()=>{
   if(!agent.startedAt)return'-'
@@ -92,7 +108,16 @@ export function AgentCard({
   if(agent.status==='blocked')return'ブロック'
   if(agent.status==='completed')return'完了'
   if(agent.status==='failed')return agent.error||'エラー発生'
+  if(agent.status==='interrupted')return agent.currentTask||'サーバー再起動により中断'
+  if(agent.status==='cancelled')return'キャンセル済み'
   return''
+ }
+
+ const handleRetryClick=(e:React.MouseEvent)=>{
+  e.stopPropagation()
+  if(onRetry&&isRetryable){
+   onRetry(agent)
+  }
  }
 
  const isUsingLLM=agent.status==='running'&&agent.progress>0
@@ -171,7 +196,21 @@ export function AgentCard({
        QC
       </span>
 )}
-     <span className="text-nier-caption text-nier-text-light flex items-center gap-1 w-14">
+     {/*Retry Button*/}
+     {isRetryable&&onRetry&&(
+      <button
+       onClick={handleRetryClick}
+       className="text-nier-caption text-nier-accent-blue hover:text-nier-text-main flex items-center gap-1 px-1.5 py-0.5 border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
+       title="再試行"
+      >
+       <RotateCcw size={10}/>
+       再試行
+      </button>
+)}
+     <span className={cn(
+      'text-nier-caption flex items-center gap-1 w-14',
+      isRetryable?'text-nier-accent-orange':'text-nier-text-light'
+)}>
       <StatusIcon size={10}/>
       {status.text}
      </span>

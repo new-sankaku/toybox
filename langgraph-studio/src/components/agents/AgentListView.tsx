@@ -4,7 +4,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -18,6 +18,7 @@ interface AgentListViewProps{
  onSelectAgent:(agent:Agent)=>void
  selectedAgentId?:string
  loading?:boolean
+ onRetryAgent?:(agent:Agent)=>void
 }
 
 type FilterStatus='all'|'incomplete'|AgentStatus
@@ -30,14 +31,17 @@ const filterOptions:{value:FilterStatus;label:string;icon:typeof Filter}[]=[
  {value:'pending',label:'待機中',icon:Clock},
  {value:'completed',label:'完了',icon:CheckCircle},
  {value:'failed',label:'エラー',icon:XCircle},
- {value:'blocked',label:'ブロック',icon:Pause}
+ {value:'blocked',label:'ブロック',icon:Pause},
+ {value:'interrupted',label:'中断',icon:Zap},
+ {value:'cancelled',label:'キャンセル',icon:Ban}
 ]
 
 export default function AgentListView({
  agents,
  onSelectAgent,
  selectedAgentId,
- loading=false
+ loading=false,
+ onRetryAgent
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
  const{fetchDefinitions,loaded,getFilteredUIPhases,getEnabledAgents}=useAgentDefinitionStore()
@@ -69,7 +73,9 @@ export default function AgentListView({
    pending:enabledList.filter((a)=>a.status==='pending').length,
    completed:enabledList.filter((a)=>a.status==='completed').length,
    failed:enabledList.filter((a)=>a.status==='failed').length,
-   blocked:enabledList.filter((a)=>a.status==='blocked').length
+   blocked:enabledList.filter((a)=>a.status==='blocked').length,
+   interrupted:enabledList.filter((a)=>a.status==='interrupted').length,
+   cancelled:enabledList.filter((a)=>a.status==='cancelled').length
   }
  },[agents,enabledAgents])
 
@@ -163,6 +169,7 @@ export default function AgentListView({
              onSelect={onSelectAgent}
              isSelected={selectedAgentId===agent.id}
              waitingFor={getWaitingFor(agent)}
+             onRetry={onRetryAgent}
             />
            ))}
           </div>

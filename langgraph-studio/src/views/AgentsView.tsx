@@ -1,4 +1,4 @@
-import{useState,useEffect}from'react'
+import{useState,useEffect,useCallback}from'react'
 import{AgentListView,AgentDetailView}from'@/components/agents'
 import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
@@ -125,9 +125,22 @@ export default function AgentsView():JSX.Element{
   setSelectedAgent(null)
  }
 
- const handleRetry=()=>{
-  console.log('Retry agent:',selectedAgent?.id)
- }
+ const handleRetry=useCallback(async(agent:Agent)=>{
+  try{
+   const result=await agentApi.retry(agent.id)
+   if(result.success){
+    const updatedAgent=convertApiAgent(result.agent)
+    const currentAgents=useAgentStore.getState().agents
+    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+    setAgents(newAgents)
+    if(selectedAgent?.id===agent.id){
+     setSelectedAgent(updatedAgent)
+    }
+   }
+  }catch(error){
+   console.error('Failed to retry agent:',error)
+  }
+ },[selectedAgent,setAgents])
 
  if(selectedAgent){
   const currentAgentData=projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
@@ -136,7 +149,7 @@ export default function AgentsView():JSX.Element{
     agent={currentAgentData}
     logs={selectedAgentLogs}
     onBack={handleBack}
-    onRetry={currentAgentData.status==='failed'?handleRetry : undefined}
+    onRetry={(currentAgentData.status==='failed'||currentAgentData.status==='interrupted'||currentAgentData.status==='cancelled')?()=>handleRetry(currentAgentData) : undefined}
    />
 )
  }
@@ -147,6 +160,7 @@ export default function AgentsView():JSX.Element{
    onSelectAgent={handleSelectAgent}
    selectedAgentId={undefined}
    loading={initialLoading||isLoading}
+   onRetryAgent={handleRetry}
   />
 )
 }

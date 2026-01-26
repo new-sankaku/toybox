@@ -1237,6 +1237,64 @@ class DataStore:
    repo=AgentTraceRepository(session)
    return repo.get_by_agent(agent_id)
 
+ def retry_agent(self,agent_id:str)->Optional[Dict]:
+  """
+  失敗/中断/キャンセルされたAgentを再試行可能な状態にリセットする
+  """
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   agent=agent_repo.get(agent_id)
+   if not agent:
+    return None
+   retryable_statuses={"failed","interrupted","cancelled"}
+   if agent.status not in retryable_statuses:
+    return None
+   old_status=agent.status
+   agent.status="pending"
+   agent.progress=0
+   agent.current_task=None
+   agent.started_at=None
+   agent.completed_at=None
+   agent.error=None
+   agent.updated_at=datetime.now()
+   session.flush()
+   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+   syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を再試行待ちに設定（前状態: {old_status}）")
+   result=agent_repo.to_dict(agent)
+   self._emit_event("agent:retry",{
+    "agentId":agent.id,
+    "projectId":agent.project_id,
+    "agent":result,
+    "previousStatus":old_status
+   },agent.project_id)
+   return result
+
+ def get_retryable_agents(self,project_id:str)->List[Dict]:
+  """
+  再試行可能なAgent（failed, interrupted, cancelled）の一覧を取得
+  """
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   agents=agent_repo.get_by_project(project_id)
+   retryable_statuses={"failed","interrupted","cancelled"}
+   return [a for a in agents if a["status"] in retryable_statuses]
+
+ def get_interrupted_agents(self,project_id:Optional[str]=None)->List[Dict]:
+  """
+  中断されたAgentの一覧を取得
+  """
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   if project_id:
+    agents=agent_repo.get_by_project(project_id)
+   else:
+    all_projects=ProjectRepository(session).get_all()
+    agents=[]
+    for p in all_projects:
+     agents.extend(agent_repo.get_by_project(p.id))
+   return [a for a in agents if a["status"]=="interrupted"]
+
  def get_trace(self,trace_id:str)->Optional[Dict]:
   with session_scope() as session:
    repo=AgentTraceRepository(session)
