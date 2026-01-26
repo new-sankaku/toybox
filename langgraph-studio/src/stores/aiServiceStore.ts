@@ -185,7 +185,7 @@ export const useAIServiceStore=create<AIServiceState>()(
        serviceType:'image',
        providerId:pid,
        enabled:false,
-       endpoint:'http://localhost:8188'
+       endpoint:''
       }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('audio')){
@@ -197,7 +197,7 @@ export const useAIServiceStore=create<AIServiceState>()(
        serviceType:'audio',
        providerId:pid,
        enabled:false,
-       endpoint:'http://localhost:50021'
+       endpoint:''
       }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('music')){

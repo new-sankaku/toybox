@@ -185,10 +185,7 @@ export default function DataView():JSX.Element{
    setPlayingAudio(null)
   }else{
    if(audioRef.current&&audioUrl){
-    const fullUrl=audioUrl.startsWith('http')
-     ?audioUrl
-     : `http://localhost:8000${audioUrl}`
-    audioRef.current.src=fullUrl
+    audioRef.current.src=audioUrl
     audioRef.current.play().catch(err=>{
      console.error('Failed to play audio:',err)
     })
