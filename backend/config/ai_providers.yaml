@@ -93,14 +93,10 @@ provider_groups:
   local:
     label: ローカル
     max_concurrent: 1
-  cloud:
-    label: クラウド
-    max_concurrent: 5
 
 providers:
   anthropic:
     label: Anthropic
-    group: cloud
     service_types:
       - llm
     max_concurrent: 3
@@ -135,7 +131,6 @@ providers:
 
   zhipu:
     label: Zhipu AI
-    group: cloud
     service_types:
       - llm
     max_concurrent: 3
@@ -162,7 +157,6 @@ providers:
 
   deepseek:
     label: DeepSeek
-    group: cloud
     service_types:
       - llm
     max_concurrent: 3

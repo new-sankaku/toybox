@@ -121,13 +121,14 @@ class LlmJobQueue:
  def _can_start_job(self,provider_id:str,job_id:str)->bool:
   if job_id in self._active_jobs_by_provider.get(provider_id,{}):
    return False
-  provider_max=get_provider_max_concurrent(provider_id)
-  if self._get_provider_active_count(provider_id)>=provider_max:
-   return False
   group_id=get_provider_group(provider_id)
   if group_id:
    group_max=get_group_max_concurrent(group_id)
    if self._get_group_active_count(group_id)>=group_max:
+    return False
+  else:
+   provider_max=get_provider_max_concurrent(provider_id)
+   if self._get_provider_active_count(provider_id)>=provider_max:
     return False
   return True
 
