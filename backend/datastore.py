@@ -295,6 +295,33 @@ class DataStore:
    "projectId":agent.project_id,
    "agent":agent_repo.to_dict(agent)
   },agent.project_id)
+  self._resume_paused_subsequent_agents(session,agent)
+
+ def _resume_paused_subsequent_agents(self,session,completed_agent):
+  agent_repo=AgentRepository(session)
+  syslog_repo=SystemLogRepository(session)
+  agents=agent_repo.get_by_project(completed_agent.project_id)
+  completed_phase=completed_agent.phase or 0
+  for agent_dict in agents:
+   if agent_dict["status"]!="paused":
+    continue
+   agent_phase=agent_dict.get("phase",0)
+   if agent_phase<=completed_phase:
+    continue
+   if not self._can_start_agent(session,agent_dict["type"],completed_agent.project_id):
+    continue
+   agent=agent_repo.get(agent_dict["id"])
+   agent.status="running"
+   agent.updated_at=datetime.now()
+   session.flush()
+   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+   syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を自動再開")
+   self._emit_event("agent:resumed",{
+    "agentId":agent.id,
+    "projectId":agent.project_id,
+    "agent":agent_repo.to_dict(agent),
+    "reason":"previous_agent_completed"
+   },agent.project_id)
 
  def _check_milestone_logs(self,session,agent,old_progress:int,new_progress:int):
   milestones=get_milestones(agent.type)

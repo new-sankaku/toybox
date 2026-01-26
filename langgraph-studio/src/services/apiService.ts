@@ -151,7 +151,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'interrupted'|'cancelled'
+ status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'paused'|'interrupted'|'cancelled'
  progress:number
  currentTask:string|null
  tokensUsed:number
