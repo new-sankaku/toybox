@@ -194,6 +194,35 @@ skills:
       timeout: 120
       require_provider: local-coqui-tts
 
+  code_search:
+    enabled: true
+    description: "コード内をテキスト検索します"
+    category: file
+    allowed_agents: all
+    restrictions:
+      max_results: 200
+
+  file_search:
+    enabled: true
+    description: "ファイル名でファイルを検索します"
+    category: file
+    allowed_agents: all
+    restrictions:
+      max_results: 200
+
+  web_fetch:
+    enabled: true
+    description: "WebページやAPIからデータを取得します"
+    category: file
+    allowed_agents:
+      - code_worker
+      - research_worker
+      - story_worker
+      - lore_worker
+    restrictions:
+      timeout: 30
+      sandbox_enabled: true
+
 agent_skill_mapping:
   code_worker:
     - file_read
@@ -205,12 +234,17 @@ agent_skill_mapping:
     - code_build
     - code_test
     - code_lint
+    - code_search
+    - file_search
+    - web_fetch
 
   code_leader:
     - file_read
     - file_list
     - project_analyze
     - code_lint
+    - code_search
+    - file_search
 
   asset_worker:
     - file_read
@@ -222,11 +256,13 @@ agent_skill_mapping:
     - bgm_generate
     - sfx_generate
     - voice_generate
+    - file_search
 
   asset_leader:
     - file_read
     - file_list
     - project_analyze
+    - file_search
 
   build_worker:
     - file_read
@@ -236,6 +272,8 @@ agent_skill_mapping:
     - code_build
     - code_test
     - code_lint
+    - code_search
+    - file_search
 
   unit_test_worker:
     - file_read
@@ -244,6 +282,8 @@ agent_skill_mapping:
     - python_execute
     - project_analyze
     - code_test
+    - code_search
+    - file_search
 
   integration_test_worker:
     - file_read
@@ -251,6 +291,8 @@ agent_skill_mapping:
     - bash_execute
     - project_analyze
     - code_test
+    - code_search
+    - file_search
 
   e2e_test_worker:
     - file_read
@@ -258,17 +300,31 @@ agent_skill_mapping:
     - bash_execute
     - project_analyze
     - code_test
+    - code_search
+    - file_search
 
   code_review_worker:
     - file_read
     - file_list
     - project_analyze
     - code_lint
+    - code_search
+    - file_search
+
+  research_worker:
+    - file_read
+    - file_list
+    - project_analyze
+    - web_fetch
+    - code_search
+    - file_search
 
   default:
     - file_read
     - file_list
     - project_analyze
+    - code_search
+    - file_search
 
 sandbox:
   enabled: true
