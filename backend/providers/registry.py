@@ -94,6 +94,7 @@ def register_all_providers()->None:
  from .local_comfyui import LocalComfyUIProvider
  from .local_audiocraft import LocalAudioCraftProvider
  from .local_coqui_tts import LocalCoquiTTSProvider
+ from .claude_code import ClaudeCodeProvider
 
  ProviderRegistry.register(AnthropicProvider)
  ProviderRegistry.register(OpenAIProvider)
@@ -105,3 +106,4 @@ def register_all_providers()->None:
  ProviderRegistry.register(LocalComfyUIProvider)
  ProviderRegistry.register(LocalAudioCraftProvider)
  ProviderRegistry.register(LocalCoquiTTSProvider)
+ ProviderRegistry.register(ClaudeCodeProvider)

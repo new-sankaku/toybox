@@ -247,3 +247,37 @@ providers:
         pricing:
           per_1k_chars: 0.0
     default_model: xtts-v2
+
+  claude-code:
+    label: Claude Code (CLI)
+    service_types:
+      - llm
+    max_concurrent: 4
+    test_model: sonnet
+    models:
+      - id: opus
+        label: Claude Opus (via CLI)
+        recommended: true
+        max_tokens: 8192
+        supports_vision: false
+        supports_tools: true
+        pricing:
+          input: 0.0
+          output: 0.0
+      - id: sonnet
+        label: Claude Sonnet (via CLI)
+        max_tokens: 8192
+        supports_vision: false
+        supports_tools: true
+        pricing:
+          input: 0.0
+          output: 0.0
+      - id: haiku
+        label: Claude Haiku (via CLI)
+        max_tokens: 8192
+        supports_vision: false
+        supports_tools: true
+        pricing:
+          input: 0.0
+          output: 0.0
+    default_model: opus
