@@ -5,6 +5,7 @@ from .bash_skill import BashExecuteSkill
 from .python_skill import PythonExecuteSkill
 from .project_skill import ProjectAnalyzeSkill
 from .build_skills import CodeBuildSkill,CodeTestSkill,CodeLintSkill
+from .asset_skills import ImageGenerateSkill,BgmGenerateSkill,SfxGenerateSkill,VoiceGenerateSkill
 from .executor import SkillExecutor,SkillExecutionConfig,create_skill_executor
 
 __all__=[
@@ -24,6 +25,10 @@ __all__=[
  "CodeBuildSkill",
  "CodeTestSkill",
  "CodeLintSkill",
+ "ImageGenerateSkill",
+ "BgmGenerateSkill",
+ "SfxGenerateSkill",
+ "VoiceGenerateSkill",
  "SkillExecutor",
  "SkillExecutionConfig",
  "create_skill_executor",

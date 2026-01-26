@@ -148,6 +148,52 @@ skills:
     restrictions:
       timeout: 120
 
+  image_generate:
+    enabled: true
+    description: "画像を生成します（ComfyUI/Stable Diffusion）"
+    category: asset
+    allowed_agents:
+      - asset_worker
+      - main_character_worker
+      - npc_worker
+      - geography_worker
+    restrictions:
+      timeout: 300
+      require_provider: local-comfyui
+
+  bgm_generate:
+    enabled: true
+    description: "BGMを生成します"
+    category: asset
+    allowed_agents:
+      - asset_worker
+    restrictions:
+      timeout: 600
+      max_duration: 120
+      require_provider: local-audiocraft
+
+  sfx_generate:
+    enabled: true
+    description: "効果音を生成します"
+    category: asset
+    allowed_agents:
+      - asset_worker
+    restrictions:
+      timeout: 300
+      max_duration: 10
+      require_provider: local-audiocraft
+
+  voice_generate:
+    enabled: true
+    description: "テキストから音声を生成します"
+    category: asset
+    allowed_agents:
+      - asset_worker
+      - dialog_worker
+    restrictions:
+      timeout: 120
+      require_provider: local-coqui-tts
+
 agent_skill_mapping:
   code_worker:
     - file_read
@@ -172,6 +218,10 @@ agent_skill_mapping:
     - file_list
     - python_execute
     - project_analyze
+    - image_generate
+    - bgm_generate
+    - sfx_generate
+    - voice_generate
 
   asset_leader:
     - file_read
