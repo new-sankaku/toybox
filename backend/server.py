@@ -65,6 +65,10 @@ def create_app():
     backup_service.create_startup_backup()
     archive_service=ArchiveService(retention_days=30)
 
+    recovery_result=data_store.recover_interrupted_agents()
+    if any(v>0 for v in recovery_result.values()):
+        logger.warning(f"Recovered from abnormal shutdown: {recovery_result}")
+
     agent_runner=None
     agent_execution_service=AgentExecutionService(data_store,sio)
 
