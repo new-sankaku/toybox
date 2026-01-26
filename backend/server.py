@@ -16,6 +16,7 @@ from handlers.file_upload import register_file_upload_routes
 from handlers.project_tree import register_project_tree_routes
 from handlers.ai_provider import register_ai_provider_routes
 from handlers.ai_service import register_ai_service_routes
+from handlers.backup import register_backup_routes
 from providers.health_monitor import get_health_monitor
 from providers.registry import register_all_providers
 from handlers.language import register_language_routes
@@ -27,12 +28,25 @@ from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
 from asset_scanner import get_testdata_path
+from middleware.error_handler import register_error_handlers
+from middleware.rate_limiter import init_rate_limiter
+from middleware.logger import setup_logging,get_logger
+from services.agent_execution_service import AgentExecutionService
+from services.backup_service import BackupService
+from services.archive_service import ArchiveService
 
 
 def create_app():
     config=get_config()
     app=Flask(__name__)
     CORS(app,origins=config.server.cors_origins)
+
+    log_dir=os.path.join(os.path.dirname(__file__),"logs")
+    logger=setup_logging(log_dir=log_dir,log_level=20 if not config.server.debug else 10)
+    logger.info("Starting server initialization...")
+
+    register_error_handlers(app)
+    init_rate_limiter(app,default_limit=120,default_window=60)
 
     sio=socketio.Server(
         cors_allowed_origins=config.server.cors_origins,
@@ -46,8 +60,14 @@ def create_app():
     data_store.set_sio(sio)
     data_store.start_simulation()
 
+    db_path=os.path.join(os.path.dirname(__file__),"data","testdata.db" if config.agent.mode=="testdata" else"production.db")
+    backup_service=BackupService(db_path=db_path,max_backups=10)
+    backup_service.create_startup_backup()
+    archive_service=ArchiveService(retention_days=30)
 
     agent_runner=None
+    agent_execution_service=AgentExecutionService(data_store,sio)
+
     if config.agent.mode=="api":
         agent_runner=create_agent_runner(
             mode=config.agent.mode,
@@ -55,8 +75,13 @@ def create_app():
             model=config.agent.model,
             max_tokens=config.agent.max_tokens,
         )
-        if agent_runner and hasattr(agent_runner,'set_data_store'):
+        if agent_runner:
             agent_runner.set_data_store(data_store)
+            agent_execution_service.set_agent_runner(agent_runner)
+            health_monitor=get_health_monitor()
+            if hasattr(agent_runner,'set_health_monitor'):
+                agent_runner.set_health_monitor(health_monitor)
+    logger.info(f"Agent mode: {config.agent.mode}")
 
     register_project_routes(app,data_store,sio)
     register_agent_routes(app,data_store,sio)
@@ -77,6 +102,7 @@ def create_app():
     register_ai_provider_routes(app)
     register_ai_service_routes(app)
     register_language_routes(app)
+    register_backup_routes(app,backup_service,archive_service)
 
     register_all_providers()
     health_monitor=get_health_monitor()
@@ -94,6 +120,16 @@ def create_app():
             'agent_mode':config.agent.mode,
         }
 
+    @app.route('/api/system/stats',methods=['GET'])
+    def system_stats():
+        from middleware.rate_limiter import get_limiter
+        limiter=get_limiter()
+        return {
+            'backup_info':backup_service.get_backup_info(),
+            'archive_stats':archive_service.get_data_statistics(),
+            'rate_limiter':limiter.get_stats() if limiter else{},
+        }
+
     testdata_path=get_testdata_path()
 
     @app.route('/testdata/<path:filepath>')
@@ -101,15 +137,19 @@ def create_app():
         try:
             return send_from_directory(testdata_path,filepath)
         except Exception as e:
-            print(f"[Server] Error serving {filepath}: {e}")
+            logger.error(f"Error serving {filepath}: {e}")
             abort(404)
 
     app.data_store=data_store
     app.agent_runner=agent_runner
+    app.agent_execution_service=agent_execution_service
+    app.backup_service=backup_service
+    app.archive_service=archive_service
     app.config_obj=config
     app.sio=sio
     app.wsgi_app_wrapper=app_wsgi
 
+    logger.info("Server initialization completed")
     return app,sio
 
 

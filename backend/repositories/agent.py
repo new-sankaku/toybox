@@ -28,8 +28,18 @@ class AgentRepository(BaseRepository[Agent]):
    "createdAt":a.created_at.isoformat() if a.created_at else None,
   }
 
- def get_by_project(self,project_id:str)->List[Dict]:
-  agents=self.session.query(Agent).filter(Agent.project_id==project_id).all()
+ def get_by_project(self,project_id:str,include_workers:bool=True)->List[Dict]:
+  query=self.session.query(Agent).filter(Agent.project_id==project_id)
+  if not include_workers:
+   query=query.filter(Agent.parent_agent_id==None)
+  agents=query.all()
+  return [self.to_dict(a) for a in agents]
+
+ def get_leaders_only(self,project_id:str)->List[Dict]:
+  return self.get_by_project(project_id,include_workers=False)
+
+ def get_workers_by_parent(self,parent_agent_id:str)->List[Dict]:
+  agents=self.session.query(Agent).filter(Agent.parent_agent_id==parent_agent_id).all()
   return [self.to_dict(a) for a in agents]
 
  def get_dict(self,id:str)->Optional[Dict]:
@@ -52,8 +62,33 @@ class AgentRepository(BaseRepository[Agent]):
    started_at=None,
    completed_at=None,
    error=None,
-   parent_agent_id=None,
+   parent_agent_id=data.get("parentAgentId"),
    metadata_=data.get("metadata",{}),
+   created_at=now
+  )
+  self.create(agent)
+  return self.to_dict(agent)
+
+ def create_worker(self,project_id:str,parent_agent_id:str,worker_type:str,task:str)->Dict:
+  from uuid import uuid4
+  now=datetime.now()
+  worker_id=f"worker-{uuid4().hex[:8]}"
+  agent=Agent(
+   id=worker_id,
+   project_id=project_id,
+   type=worker_type,
+   phase=0,
+   status="pending",
+   progress=0,
+   current_task=task,
+   tokens_used=0,
+   input_tokens=0,
+   output_tokens=0,
+   started_at=None,
+   completed_at=None,
+   error=None,
+   parent_agent_id=parent_agent_id,
+   metadata_={"task":task},
    created_at=now
   )
   self.create(agent)

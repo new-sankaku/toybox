@@ -484,11 +484,15 @@ class LeaderWorkerOrchestrator:
         quality_settings:Dict[str,Any],
         on_progress:Optional[Callable[[str,int,str],None]]=None,
         on_checkpoint:Optional[Callable[[str,Dict],None]]=None,
+        on_worker_created:Optional[Callable[[str,str],str]]=None,
+        on_worker_status:Optional[Callable[[str,str,Dict],None]]=None,
     ):
         self.agent_runner=agent_runner
         self.quality_settings=quality_settings
         self.on_progress=on_progress
         self.on_checkpoint=on_checkpoint
+        self.on_worker_created=on_worker_created
+        self.on_worker_status=on_worker_status
 
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
         results={
@@ -602,14 +606,21 @@ class LeaderWorkerOrchestrator:
                 result.error=f"Unknown worker type: {worker_type}"
                 return result
 
+            worker_id=f"{leader_context.agent_id}-{worker_type}"
+            if self.on_worker_created:
+                worker_id=self.on_worker_created(worker_type,task) or worker_id
+
             worker_context=AgentContext(
                 project_id=leader_context.project_id,
-                agent_id=f"{leader_context.agent_id}-{worker_type}",
+                agent_id=worker_id,
                 agent_type=agent_type,
                 project_concept=leader_context.project_concept,
                 previous_outputs=leader_context.previous_outputs,
                 config=leader_context.config,
             )
+
+            if self.on_worker_status:
+                self.on_worker_status(worker_id,"running",{"currentTask":task})
 
             if quality_check_enabled:
                 result=await self._run_with_quality_check(
@@ -621,12 +632,27 @@ class LeaderWorkerOrchestrator:
                 output=await self.agent_runner.run_agent(worker_context)
                 result.status="completed" if output.status==AgentStatus.COMPLETED else"failed"
                 result.output=output.output
+                result.tokens_used=output.tokens_used
                 if output.error:
                     result.error=output.error
+
+            if self.on_worker_status:
+                if result.status=="completed":
+                    self.on_worker_status(worker_id,"completed",{
+                        "tokensUsed":result.tokens_used,
+                        "inputTokens":getattr(result,"input_tokens",0),
+                        "outputTokens":getattr(result,"output_tokens",0),
+                    })
+                elif result.status=="failed":
+                    self.on_worker_status(worker_id,"failed",{"error":result.error})
+                elif result.status=="needs_human_review":
+                    self.on_worker_status(worker_id,"waiting_approval",{"currentTask":"レビュー待ち"})
 
         except Exception as e:
             result.status="failed"
             result.error=str(e)
+            if self.on_worker_status and 'worker_id' in locals():
+                self.on_worker_status(worker_id,"failed",{"error":str(e)})
 
         return result
 
