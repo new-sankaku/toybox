@@ -24,9 +24,9 @@ class ValidationError(ApiError):
 
 class NotFoundError(ApiError):
  def __init__(self,resource:str,resource_id:Optional[str]=None):
-  message=f"{resource} not found"
+  message=f"{resource}が見つかりません"
   if resource_id:
-   message=f"{resource} with id '{resource_id}' not found"
+   message=f"{resource} (ID: {resource_id}) が見つかりません"
   super().__init__(
    message=message,
    code="NOT_FOUND",
@@ -36,7 +36,7 @@ class NotFoundError(ApiError):
 
 
 class ServerError(ApiError):
- def __init__(self,message:str="Internal server error",details:Optional[Dict[str,Any]]=None):
+ def __init__(self,message:str="サーバー内部エラーが発生しました",details:Optional[Dict[str,Any]]=None):
   super().__init__(
    message=message,
    code="SERVER_ERROR",
@@ -46,7 +46,7 @@ class ServerError(ApiError):
 
 
 class RateLimitExceededError(ApiError):
- def __init__(self,message:str="Rate limit exceeded",retry_after:Optional[int]=None):
+ def __init__(self,message:str="リクエスト制限を超過しました。しばらく待ってから再試行してください",retry_after:Optional[int]=None):
   super().__init__(
    message=message,
    code="RATE_LIMIT_EXCEEDED",
@@ -86,7 +86,7 @@ def register_error_handlers(app:Flask)->None:
   response={
    "error":{
     "code":"INTERNAL_ERROR",
-    "message":"An unexpected error occurred",
+    "message":"予期しないエラーが発生しました",
    }
   }
   if app.debug:

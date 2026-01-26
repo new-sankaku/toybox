@@ -1,5 +1,7 @@
 import os
+import errno
 import uuid
+import shutil
 from flask import Flask,request,jsonify,send_from_directory
 from werkzeug.utils import secure_filename
 from datastore import DataStore
@@ -42,6 +44,15 @@ CATEGORY_MAP={
 }
 
 MAX_FILE_SIZE=4*1024*1024*1024
+MIN_FREE_DISK_SPACE=100*1024*1024
+
+
+def check_disk_space(path:str,required_bytes:int)->bool:
+    try:
+        usage=shutil.disk_usage(path)
+        return usage.free>(required_bytes+MIN_FREE_DISK_SPACE)
+    except OSError:
+        return False
 
 
 def allowed_file(filename:str)->bool:
@@ -122,7 +133,16 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
         project_folder=os.path.join(upload_folder,project_id)
         os.makedirs(project_folder,exist_ok=True)
         file_path=os.path.join(project_folder,stored_filename)
-        file.save(file_path)
+
+        if not check_disk_space(project_folder,file_size):
+            return jsonify({"error":"ディスク容量が不足しています"}),507
+
+        try:
+            file.save(file_path)
+        except OSError as e:
+            if e.errno==errno.ENOSPC:
+                return jsonify({"error":"ディスク容量が不足しています"}),507
+            return jsonify({"error":f"ファイル保存に失敗しました: {e.strerror}"}),500
 
 
         description=request.form.get('description','')
@@ -189,7 +209,16 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
             project_folder=os.path.join(upload_folder,project_id)
             os.makedirs(project_folder,exist_ok=True)
             file_path=os.path.join(project_folder,stored_filename)
-            file.save(file_path)
+
+            if not check_disk_space(project_folder,file_size):
+                errors.append({"filename":file.filename,"error":"ディスク容量が不足しています"})
+                continue
+
+            try:
+                file.save(file_path)
+            except OSError as e:
+                errors.append({"filename":file.filename,"error":f"ファイル保存失敗: {e.strerror}"})
+                continue
 
 
             uploaded_file=data_store.create_uploaded_file(

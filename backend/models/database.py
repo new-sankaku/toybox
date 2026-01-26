@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine,event
 from sqlalchemy.orm import sessionmaker,Session
 from contextlib import contextmanager
 
@@ -9,7 +9,21 @@ DATA_DIR=os.path.join(os.path.dirname(os.path.dirname(__file__)),"data")
 os.makedirs(DATA_DIR,exist_ok=True)
 DATABASE_URL=f"sqlite:///{os.path.join(DATA_DIR,DB_NAME)}"
 
-engine=create_engine(DATABASE_URL,echo=False,connect_args={"check_same_thread":False})
+engine=create_engine(
+ DATABASE_URL,
+ echo=False,
+ connect_args={"check_same_thread":False,"timeout":30},
+ pool_pre_ping=True,
+)
+
+
+@event.listens_for(engine,"connect")
+def set_sqlite_pragma(dbapi_connection,connection_record):
+ cursor=dbapi_connection.cursor()
+ cursor.execute("PRAGMA journal_mode=WAL")
+ cursor.execute("PRAGMA busy_timeout=30000")
+ cursor.execute("PRAGMA synchronous=NORMAL")
+ cursor.close()
 SessionLocal=sessionmaker(bind=engine,autocommit=False,autoflush=False)
 
 def get_session()->Session:

@@ -42,6 +42,7 @@ from services.recovery_service import RecoveryService
 def create_app():
     config=get_config()
     app=Flask(__name__)
+    app.config['MAX_CONTENT_LENGTH']=4*1024*1024*1024
     CORS(app,origins=config.server.cors_origins)
 
     log_dir=os.path.join(os.path.dirname(__file__),"logs")

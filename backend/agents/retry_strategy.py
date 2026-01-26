@@ -158,16 +158,27 @@ def retry_sync_with_backoff(
  raise MaxRetriesExceededError(operation_name,config.max_retries) from last_error
 
 
+class ProviderWaitTimeoutError(Exception):
+ """プロバイダー待機のタイムアウトエラー"""
+ def __init__(self,provider_id:str,max_wait:float):
+  self.provider_id=provider_id
+  self.max_wait=max_wait
+  super().__init__(f"プロバイダー {provider_id} の待機が {max_wait} 秒を超過しました")
+
+
 async def wait_for_provider_available(
  health_monitor,
  provider_id:str,
  check_interval:float=10.0,
+ max_wait:float=1800.0,
  on_waiting:Optional[Callable[[int],None]]=None,
  on_recovered:Optional[Callable[[int],None]]=None,
 )->bool:
  """プロバイダーが利用可能になるまで待機（フラグ確認のみ、API呼び出しなし）"""
+ import time
  attempt=0
- while True:
+ start_time=time.time()
+ while time.time()-start_time<max_wait:
   health=health_monitor.get_health_status(provider_id)
   if health and health.available:
    if attempt>0 and on_recovered:
@@ -177,6 +188,7 @@ async def wait_for_provider_available(
   if on_waiting:
    on_waiting(attempt)
   await asyncio.sleep(check_interval)
+ raise ProviderWaitTimeoutError(provider_id,max_wait)
 
 
 class RetryContext:
