@@ -56,6 +56,12 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
                 "error":f"プロジェクトを開始できません。現在のステータス「{status_label}」では開始操作は実行できません。下書きまたは一時停止状態のプロジェクトのみ開始できます。"
             }),400
 
+        from services.llm_job_queue import get_llm_job_queue
+        job_queue=get_llm_job_queue()
+        cleaned=job_queue.cleanup_project_jobs(project_id)
+        if cleaned>0:
+            print(f"[start_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+
         project=data_store.update_project(project_id,{"status":"running"})
         sio.emit('project:status_changed',{
             "projectId":project_id,
@@ -102,6 +108,12 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
                 "error":f"プロジェクトを再開できません。現在のステータス「{status_label}」では再開操作は実行できません。一時停止中のプロジェクトのみ再開できます。"
             }),400
 
+        from services.llm_job_queue import get_llm_job_queue
+        job_queue=get_llm_job_queue()
+        cleaned=job_queue.cleanup_project_jobs(project_id)
+        if cleaned>0:
+            print(f"[resume_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+
         project=data_store.update_project(project_id,{"status":"running"})
         sio.emit('project:status_changed',{
             "projectId":project_id,
@@ -116,6 +128,12 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         project=data_store.get_project(project_id)
         if not project:
             return jsonify({"error":"プロジェクトが見つかりません"}),404
+
+        from services.llm_job_queue import get_llm_job_queue
+        job_queue=get_llm_job_queue()
+        cleaned=job_queue.cleanup_project_jobs(project_id)
+        if cleaned>0:
+            print(f"[initialize_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
 
         project=data_store.initialize_project(project_id)
         sio.emit('project:initialized',{

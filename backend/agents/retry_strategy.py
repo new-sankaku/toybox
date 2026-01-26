@@ -23,6 +23,16 @@ class RetryConfig:
  jitter_factor:float=0.5
 
 
+@dataclass
+class ProviderRetryConfig:
+ """AI API接続エラー用の無限リトライ設定"""
+ base_delay:float=30.0
+ max_delay:float=300.0
+ exponential_base:float=1.5
+ jitter:bool=True
+ jitter_factor:float=0.3
+
+
 RETRYABLE_EXCEPTIONS:Set[type]={
  ProviderUnavailableError,
  RateLimitError,
@@ -65,6 +75,26 @@ def calculate_delay(
   delay=delay+random.uniform(-jitter_range,jitter_range)
   delay=max(0.1,delay)
  return delay
+
+
+def calculate_provider_delay(attempt:int,config:ProviderRetryConfig)->float:
+ delay=config.base_delay*(config.exponential_base**min(attempt,10))
+ delay=min(delay,config.max_delay)
+ if config.jitter:
+  jitter_range=delay*config.jitter_factor
+  delay=delay+random.uniform(-jitter_range,jitter_range)
+  delay=max(1.0,delay)
+ return delay
+
+
+def is_provider_unavailable_error(error:Exception)->bool:
+ if isinstance(error,ProviderUnavailableError):
+  return True
+ if isinstance(error,(ConnectionError,TimeoutError)):
+  return True
+ error_str=str(error).lower()
+ patterns=["connection","timeout","unavailable","503","overloaded","api key","authentication"]
+ return any(p in error_str for p in patterns)
 
 
 async def retry_with_backoff(
@@ -126,6 +156,27 @@ def retry_sync_with_backoff(
     on_retry(attempt+1,e,delay)
    time.sleep(delay)
  raise MaxRetriesExceededError(operation_name,config.max_retries) from last_error
+
+
+async def wait_for_provider_available(
+ health_monitor,
+ provider_id:str,
+ check_interval:float=10.0,
+ on_waiting:Optional[Callable[[int],None]]=None,
+ on_recovered:Optional[Callable[[int],None]]=None,
+)->bool:
+ """プロバイダーが利用可能になるまで待機（フラグ確認のみ、API呼び出しなし）"""
+ attempt=0
+ while True:
+  health=health_monitor.get_health_status(provider_id)
+  if health and health.available:
+   if attempt>0 and on_recovered:
+    on_recovered(attempt)
+   return True
+  attempt+=1
+  if on_waiting:
+   on_waiting(attempt)
+  await asyncio.sleep(check_interval)
 
 
 class RetryContext:

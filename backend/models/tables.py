@@ -201,3 +201,25 @@ class AgentTrace(Base):
  model_used=Column(String(100))
  started_at=Column(DateTime,default=datetime.now)
  completed_at=Column(DateTime)
+
+
+class LlmJob(Base):
+ __tablename__="llm_jobs"
+ id=Column(String(50),primary_key=True)
+ project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ agent_id=Column(String(50),ForeignKey("agents.id"),nullable=False)
+ provider_id=Column(String(50),nullable=False)
+ model=Column(String(100),nullable=False)
+ status=Column(String(20),default="pending")
+ priority=Column(Integer,default=0)
+ prompt=Column(Text,nullable=False)
+ max_tokens=Column(Integer,default=4096)
+ response_content=Column(Text)
+ tokens_input=Column(Integer,default=0)
+ tokens_output=Column(Integer,default=0)
+ error_message=Column(Text)
+ retry_count=Column(Integer,default=0)
+ external_job_id=Column(String(100))
+ created_at=Column(DateTime,default=datetime.now)
+ started_at=Column(DateTime)
+ completed_at=Column(DateTime)

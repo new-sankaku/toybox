@@ -11,3 +11,4 @@ from .quality_settings import QualitySettingsRepository
 from .api_key import ApiKeyRepository
 from .project_ai_config import ProjectAiConfigRepository
 from .trace import AgentTraceRepository
+from .llm_job import LlmJobRepository
