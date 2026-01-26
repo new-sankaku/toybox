@@ -114,6 +114,40 @@ skills:
     restrictions:
       max_depth: 5
 
+  code_build:
+    enabled: true
+    description: "プロジェクトをビルドします"
+    category: build
+    allowed_agents:
+      - code_worker
+      - build_worker
+    restrictions:
+      timeout: 300
+
+  code_test:
+    enabled: true
+    description: "テストを実行します"
+    category: build
+    allowed_agents:
+      - code_worker
+      - build_worker
+      - unit_test_worker
+      - integration_test_worker
+      - e2e_test_worker
+    restrictions:
+      timeout: 180
+
+  code_lint:
+    enabled: true
+    description: "リンターを実行します"
+    category: build
+    allowed_agents:
+      - code_worker
+      - code_review_worker
+      - build_worker
+    restrictions:
+      timeout: 120
+
 agent_skill_mapping:
   code_worker:
     - file_read
@@ -122,11 +156,15 @@ agent_skill_mapping:
     - bash_execute
     - python_execute
     - project_analyze
+    - code_build
+    - code_test
+    - code_lint
 
   code_leader:
     - file_read
     - file_list
     - project_analyze
+    - code_lint
 
   asset_worker:
     - file_read
@@ -145,6 +183,9 @@ agent_skill_mapping:
     - file_list
     - bash_execute
     - project_analyze
+    - code_build
+    - code_test
+    - code_lint
 
   unit_test_worker:
     - file_read
@@ -152,23 +193,27 @@ agent_skill_mapping:
     - bash_execute
     - python_execute
     - project_analyze
+    - code_test
 
   integration_test_worker:
     - file_read
     - file_list
     - bash_execute
     - project_analyze
+    - code_test
 
   e2e_test_worker:
     - file_read
     - file_list
     - bash_execute
     - project_analyze
+    - code_test
 
   code_review_worker:
     - file_read
     - file_list
     - project_analyze
+    - code_lint
 
   default:
     - file_read

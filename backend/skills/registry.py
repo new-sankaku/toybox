@@ -56,9 +56,13 @@ def _register_default_skills(registry:SkillRegistry)->None:
  from .bash_skill import BashExecuteSkill
  from .python_skill import PythonExecuteSkill
  from .project_skill import ProjectAnalyzeSkill
+ from .build_skills import CodeBuildSkill,CodeTestSkill,CodeLintSkill
  registry.register(FileReadSkill())
  registry.register(FileWriteSkill())
  registry.register(FileListSkill())
  registry.register(BashExecuteSkill())
  registry.register(PythonExecuteSkill())
  registry.register(ProjectAnalyzeSkill())
+ registry.register(CodeBuildSkill())
+ registry.register(CodeTestSkill())
+ registry.register(CodeLintSkill())
