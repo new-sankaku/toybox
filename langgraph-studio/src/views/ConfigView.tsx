@@ -3,7 +3,7 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{Save,FolderOpen,RefreshCw}from'lucide-react'
+import{Save,RefreshCw,AlertTriangle,FolderOpen}from'lucide-react'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
 import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
 import{CostSettings}from'@/components/settings/CostSettings'
@@ -34,6 +34,7 @@ export default function ConfigView():JSX.Element{
  const[outputDir,setOutputDir]=useState('./output')
  const[originalOutputDir,setOriginalOutputDir]=useState('./output')
  const[saving,setSaving]=useState(false)
+ const[showResetDialog,setShowResetDialog]=useState(false)
  const outputDirChanged=outputDir!==originalOutputDir
 
  const loadOutputSettings=useCallback(async()=>{
@@ -123,7 +124,7 @@ export default function ConfigView():JSX.Element{
        </div>
        <div className="p-3 border-t border-nier-border-light space-y-2">
         {hasReset&&(
-         <Button variant="ghost" size="sm" className="w-full" onClick={handleReset}>
+         <Button variant="ghost" size="sm" className="w-full" onClick={()=>setShowResetDialog(true)}>
           <RefreshCw size={14}/>
           <span className="ml-1">リセット</span>
          </Button>
@@ -154,26 +155,57 @@ export default function ConfigView():JSX.Element{
          <label className={cn('block text-nier-caption mb-1',outputDirChanged?'text-nier-accent-red':'text-nier-text-light')}>
           出力ディレクトリ
          </label>
-         <div className="flex gap-2">
-          <input
-           type="text"
-           className={cn(
-            'flex-1 bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark',
-            outputDirChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
+         <input
+          type="text"
+          className={cn(
+           'w-full bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark',
+           outputDirChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
 )}
-           value={outputDir}
-           onChange={(e)=>setOutputDir(e.target.value)}
-          />
-          <button className="p-2 bg-nier-bg-panel border border-nier-border-light hover:bg-nier-bg-selected transition-colors">
-           <FolderOpen size={16}/>
-          </button>
-         </div>
+          value={outputDir}
+          onChange={(e)=>setOutputDir(e.target.value)}
+         />
         </div>
        </CardContent>
       </Card>
 )}
     </div>
    </div>
+
+   {/*Reset Confirmation Dialog*/}
+   {showResetDialog&&(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+     <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
+      <CardHeader>
+       <div className="flex items-center gap-2 text-nier-text-main">
+        <AlertTriangle size={18}/>
+        <span>リセットの確認</span>
+       </div>
+      </CardHeader>
+      <CardContent>
+       <p className="text-nier-body mb-4">
+        {activeSection==='ai-services'?'AIサービス設定':'コスト設定'}をデフォルト値にリセットしますか？
+       </p>
+       <p className="text-nier-small text-nier-text-main mb-6">
+        現在の設定は失われます。
+       </p>
+       <div className="flex gap-3 justify-end">
+        <Button variant="secondary" onClick={()=>setShowResetDialog(false)}>
+         キャンセル
+        </Button>
+        <Button
+         variant="danger"
+         onClick={()=>{
+          handleReset()
+          setShowResetDialog(false)
+         }}
+        >
+         リセットする
+        </Button>
+       </div>
+      </CardContent>
+     </Card>
+    </div>
+   )}
   </div>
 )
 }

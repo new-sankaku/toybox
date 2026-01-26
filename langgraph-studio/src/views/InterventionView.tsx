@@ -1,5 +1,6 @@
 import{useState,useEffect,useRef}from'react'
 import{Card,CardContent,CardHeader}from'@/components/ui/Card'
+import{Button}from'@/components/ui/Button'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{useProjectStore}from'@/stores/projectStore'
 import{interventionApi,agentApi,type ApiIntervention,type ApiAgent}from'@/services/apiService'
@@ -22,6 +23,7 @@ export default function InterventionView():JSX.Element{
  const[priority,setPriority]=useState<InterventionPriority>('normal')
  const[message,setMessage]=useState('')
  const[showNewForm,setShowNewForm]=useState(false)
+ const[showDeleteDialog,setShowDeleteDialog]=useState<string|null>(null)
 
  useEffect(()=>{
   if(!currentProject)return
@@ -220,7 +222,7 @@ export default function InterventionView():JSX.Element{
              <AlertTriangle size={12} className="text-nier-accent-orange"/>
 )}
             <button
-             onClick={(e)=>{e.stopPropagation();handleDelete(intervention.id)}}
+             onClick={(e)=>{e.stopPropagation();setShowDeleteDialog(intervention.id)}}
              className="p-1 hover:bg-nier-bg-main transition-colors text-nier-text-light hover:text-nier-text-main"
              title="削除"
             >
@@ -454,6 +456,42 @@ export default function InterventionView():JSX.Element{
      </Card>
     </div>
    </div>
+
+   {/*Delete Confirmation Dialog*/}
+   {showDeleteDialog&&(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+     <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
+      <CardHeader>
+       <div className="flex items-center gap-2 text-nier-text-main">
+        <AlertTriangle size={18}/>
+        <span>削除の確認</span>
+       </div>
+      </CardHeader>
+      <CardContent>
+       <p className="text-nier-body mb-4">
+        このチャットを削除しますか？
+       </p>
+       <p className="text-nier-small text-nier-text-main mb-6">
+        この操作は取り消せません。
+       </p>
+       <div className="flex gap-3 justify-end">
+        <Button variant="secondary" onClick={()=>setShowDeleteDialog(null)}>
+         キャンセル
+        </Button>
+        <Button
+         variant="danger"
+         onClick={()=>{
+          handleDelete(showDeleteDialog)
+          setShowDeleteDialog(null)
+         }}
+        >
+         削除する
+        </Button>
+       </div>
+      </CardContent>
+     </Card>
+    </div>
+   )}
   </div>
 )
 }

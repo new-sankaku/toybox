@@ -69,9 +69,9 @@ const approvalStatusLabels:Record<ApprovalStatus,string>={
 
 
 const approvalBgColors:Record<ApprovalStatus,string>={
- approved:'bg-nier-bg-selected border-nier-border-light',
- pending:'bg-nier-bg-selected border-nier-border-light',
- rejected:'bg-nier-bg-selected border-nier-border-light'
+ approved:'bg-nier-bg-selected border-nier-accent-green',
+ pending:'bg-nier-bg-selected border-nier-accent-yellow',
+ rejected:'bg-nier-bg-selected border-nier-accent-red'
 }
 
 const typeIcons:Record<AssetType,typeof Image>={
@@ -315,10 +315,10 @@ export default function DataView():JSX.Element{
              e.stopPropagation()
              handleApprove(asset.id)
             }}
-            className="p-0.5 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
+            className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-accent-green"
             title="承認"
            >
-            <Check size={12}/>
+            <Check size={14}/>
            </button>
 )}
           {asset.approvalStatus!=='rejected'&&(
@@ -327,10 +327,10 @@ export default function DataView():JSX.Element{
              e.stopPropagation()
              handleReject(asset.id)
             }}
-            className="p-0.5 hover:bg-nier-bg-selected transition-colors text-nier-text-light"
+            className="p-1 hover:bg-nier-bg-selected transition-colors text-nier-accent-red"
             title="却下"
            >
-            <XCircle size={12}/>
+            <XCircle size={14}/>
            </button>
 )}
          </div>
