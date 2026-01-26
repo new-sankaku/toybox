@@ -6,7 +6,7 @@ from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
-from config_loader import get_provider_max_concurrent
+from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent
 
 
 class LlmJobQueue:
@@ -28,6 +28,7 @@ class LlmJobQueue:
   self._running=False
   self._thread:Optional[threading.Thread]=None
   self._active_jobs_by_provider:Dict[str,Dict[str,bool]]={}
+  self._active_jobs_by_group:Dict[str,Dict[str,bool]]={}
   self._job_callbacks:Dict[str,Callable[[Dict],None]]={}
   self._initialized=True
 
@@ -109,9 +110,26 @@ class LlmJobQueue:
     print(f"[LlmJobQueue] Worker error: {e}")
    time.sleep(self._poll_interval)
 
- def _get_active_count(self,provider_id:str)->int:
+ def _get_provider_active_count(self,provider_id:str)->int:
   provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
   return len([j for j in provider_jobs.values() if j])
+
+ def _get_group_active_count(self,group_id:str)->int:
+  group_jobs=self._active_jobs_by_group.get(group_id,{})
+  return len([j for j in group_jobs.values() if j])
+
+ def _can_start_job(self,provider_id:str,job_id:str)->bool:
+  if job_id in self._active_jobs_by_provider.get(provider_id,{}):
+   return False
+  provider_max=get_provider_max_concurrent(provider_id)
+  if self._get_provider_active_count(provider_id)>=provider_max:
+   return False
+  group_id=get_provider_group(provider_id)
+  if group_id:
+   group_max=get_group_max_concurrent(group_id)
+   if self._get_group_active_count(group_id)>=group_max:
+    return False
+  return True
 
  def _process_pending_jobs(self)->None:
   with session_scope() as session:
@@ -119,17 +137,18 @@ class LlmJobQueue:
    pending_jobs=repo.get_pending_jobs(limit=20)
    for job in pending_jobs:
     provider_id=job.provider_id
-    max_concurrent=get_provider_max_concurrent(provider_id)
-    active_count=self._get_active_count(provider_id)
-    if active_count>=max_concurrent:
-     continue
-    if job.id in self._active_jobs_by_provider.get(provider_id,{}):
+    if not self._can_start_job(provider_id,job.id):
      continue
     claimed=repo.claim_job(job.id)
     if claimed:
      if provider_id not in self._active_jobs_by_provider:
       self._active_jobs_by_provider[provider_id]={}
      self._active_jobs_by_provider[provider_id][job.id]=True
+     group_id=get_provider_group(provider_id)
+     if group_id:
+      if group_id not in self._active_jobs_by_group:
+       self._active_jobs_by_group[group_id]={}
+      self._active_jobs_by_group[group_id][job.id]=True
      thread=threading.Thread(target=self._execute_job,args=(job.id,provider_id),daemon=True)
      thread.start()
 
@@ -162,6 +181,9 @@ class LlmJobQueue:
   finally:
    if provider_id in self._active_jobs_by_provider:
     self._active_jobs_by_provider[provider_id].pop(job_id,None)
+   group_id=get_provider_group(provider_id)
+   if group_id and group_id in self._active_jobs_by_group:
+    self._active_jobs_by_group[group_id].pop(job_id,None)
 
  def _notify_completion(self,job_id:str)->None:
   job=self.get_job_status(job_id)

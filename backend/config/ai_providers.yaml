@@ -89,9 +89,18 @@ pricing:
     music: per_track
     audio: per_1k_chars
 
+provider_groups:
+  local:
+    label: ローカル
+    max_concurrent: 1
+  cloud:
+    label: クラウド
+    max_concurrent: 5
+
 providers:
   anthropic:
     label: Anthropic
+    group: cloud
     service_types:
       - llm
     max_concurrent: 3
@@ -126,6 +135,7 @@ providers:
 
   zhipu:
     label: Zhipu AI
+    group: cloud
     service_types:
       - llm
     max_concurrent: 3
@@ -152,6 +162,7 @@ providers:
 
   deepseek:
     label: DeepSeek
+    group: cloud
     service_types:
       - llm
     max_concurrent: 3
@@ -178,8 +189,10 @@ providers:
 
   local-comfyui:
     label: Local ComfyUI
+    group: local
     service_types:
       - image
+    max_concurrent: 1
     models:
       - id: stable-diffusion-xl
         label: Stable Diffusion XL
@@ -202,9 +215,11 @@ providers:
 
   local-audiocraft:
     label: Local AudioCraft
+    group: local
     service_types:
       - audio
       - music
+    max_concurrent: 1
     models:
       - id: musicgen-large
         label: MusicGen Large
@@ -223,8 +238,10 @@ providers:
 
   local-coqui-tts:
     label: Local Coqui TTS
+    group: local
     service_types:
       - audio
+    max_concurrent: 1
     models:
       - id: xtts-v2
         label: XTTS v2

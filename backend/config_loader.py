@@ -424,6 +424,18 @@ def get_provider_max_concurrent(provider_id:str)->int:
     return provider.get("max_concurrent",3)
 
 
+def get_provider_group(provider_id:str)->Optional[str]:
+    provider=get_provider_config(provider_id)
+    return provider.get("group")
+
+
+def get_group_max_concurrent(group_id:str)->int:
+    config=get_ai_providers_config()
+    groups=config.get("provider_groups",{})
+    group=groups.get(group_id,{})
+    return group.get("max_concurrent",5)
+
+
 def get_mock_content(agent_type:str)->str:
     config=get_mock_data_config()
     mock_contents=config.get("mock_contents",{})
