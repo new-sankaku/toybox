@@ -72,6 +72,8 @@ export default function AgentListView({
    incomplete,
    running:enabledList.filter((a)=>a.status==='running').length,
    waiting_approval:enabledList.filter((a)=>a.status==='waiting_approval').length,
+   waiting_response:enabledList.filter((a)=>a.status==='waiting_response').length,
+   paused:enabledList.filter((a)=>a.status==='paused').length,
    pending:enabledList.filter((a)=>a.status==='pending').length,
    completed:enabledList.filter((a)=>a.status==='completed').length,
    failed:enabledList.filter((a)=>a.status==='failed').length,

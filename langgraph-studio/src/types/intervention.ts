@@ -2,7 +2,14 @@ export type InterventionPriority='normal'|'urgent'
 
 export type InterventionTarget='all'|'specific'
 
-export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'
+export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'|'waiting_response'
+
+export interface InterventionResponse{
+ sender:'agent'|'operator'
+ agentId:string|null
+ message:string
+ createdAt:string
+}
 
 export interface Intervention{
  id:string
@@ -13,9 +20,7 @@ export interface Intervention{
  message:string
  attachedFileIds:string[]
  status:InterventionStatus
- response?:string
- respondedBy?:string
- respondedAt?:string
+ responses:InterventionResponse[]
  createdAt:string
  deliveredAt:string|null
  acknowledgedAt:string|null
