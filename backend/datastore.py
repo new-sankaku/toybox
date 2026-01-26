@@ -58,26 +58,6 @@ class DataStore:
     return
    self._create_sample_project(session)
 
- def _recover_project_agents(self,session,project_id:str)->Dict[str,int]:
-  """プロジェクト内の異常終了したエージェント/トレースを検出し、ステータスを修復する"""
-  recovered={"agents":0,"traces":0}
-  from models.tables import Agent,AgentTrace
-  running_agents=session.query(Agent).filter(Agent.project_id==project_id,Agent.status=="running").all()
-  for agent in running_agents:
-   agent.status="interrupted"
-   agent.current_task="異常終了により中断"
-   recovered["agents"]+=1
-   self._add_system_log_internal(session,project_id,"warn","System",f"リカバリ: {agent.type}を中断状態に変更")
-  running_traces=session.query(AgentTrace).filter(AgentTrace.project_id==project_id,AgentTrace.status=="running").all()
-  for trace in running_traces:
-   trace.status="interrupted"
-   trace.error_message="サーバー異常終了により中断"
-   trace.completed_at=datetime.now()
-   recovered["traces"]+=1
-  if any(v>0 for v in recovered.values()):
-   print(f"[DataStore] Project {project_id} recovery: {recovered}")
-  return recovered
-
  def _create_sample_project(self,session):
   now=datetime.now()
   proj_id="proj-001"
@@ -715,7 +695,6 @@ class DataStore:
    p=repo.get(project_id)
    if not p:
     return None
-   self._recover_project_agents(session,project_id)
    if p.status in ("draft","paused"):
     p.status="running"
     p.updated_at=datetime.now()
@@ -742,7 +721,6 @@ class DataStore:
    p=repo.get(project_id)
    if not p:
     return None
-   self._recover_project_agents(session,project_id)
    if p.status=="paused":
     p.status="running"
     p.updated_at=datetime.now()
