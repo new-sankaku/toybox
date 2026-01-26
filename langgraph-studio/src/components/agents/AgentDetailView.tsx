@@ -9,11 +9,13 @@ import type{Agent,AgentLogEntry}from'@/types/agent'
 import{
  ArrowLeft,
  Pause,
+ Play,
  RotateCcw,
  Clock,
  Cpu,
  Activity,
- FileText
+ FileText,
+ MessageCircle
 }from'lucide-react'
 
 interface AgentDetailViewProps{
@@ -22,6 +24,7 @@ interface AgentDetailViewProps{
  onBack:()=>void
  onRetry?:()=>void
  onPause?:()=>void
+ onResume?:()=>void
 }
 
 const getDisplayName=(agent:Agent):string=>{
@@ -33,7 +36,8 @@ export default function AgentDetailView({
  logs,
  onBack,
  onRetry,
- onPause
+ onPause,
+ onResume
 }:AgentDetailViewProps):JSX.Element{
  const[showMetadata,setShowMetadata]=useState(false)
  const getAgentStatusLabel=useUIConfigStore(s=>s.getAgentStatusLabel)
@@ -150,13 +154,29 @@ export default function AgentDetailView({
        </span>
       </CardHeader>
       <CardContent className="space-y-3">
-       {agent.status==='running'&&onPause&&(
+       {(agent.status==='running'||agent.status==='waiting_approval')&&onPause&&(
         <Button className="w-full justify-start gap-3" onClick={onPause}>
          <Pause size={16}/>
          一時停止
         </Button>
 )}
-       {(agent.status==='failed'||agent.status==='blocked')&&onRetry&&(
+       {(agent.status==='paused'||agent.status==='waiting_response')&&onResume&&(
+        <Button
+         variant="success"
+         className="w-full justify-start gap-3"
+         onClick={onResume}
+        >
+         <Play size={16}/>
+         {agent.status==='waiting_response'?'返答して再開':'再開'}
+        </Button>
+)}
+       {agent.status==='waiting_response'&&(
+        <div className="flex items-center gap-2 p-2 bg-nier-accent-yellow/10 border border-nier-accent-yellow/30 rounded text-nier-small text-nier-accent-yellow">
+         <MessageCircle size={14}/>
+         オペレーターの返答を待っています
+        </div>
+)}
+       {(agent.status==='failed'||agent.status==='blocked'||agent.status==='cancelled'||agent.status==='interrupted')&&onRetry&&(
         <Button
          variant="success"
          className="w-full justify-start gap-3"

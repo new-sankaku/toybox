@@ -60,7 +60,6 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
             "intervention":intervention
         },room=f"project:{project_id}")
 
-
         if priority=="urgent":
             data_store.pause_project(project_id)
             sio.emit('project:paused',{
@@ -68,6 +67,26 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
                 "reason":"urgent_intervention",
                 "interventionId":intervention["id"]
             },room=f"project:{project_id}")
+
+        if target_type=="specific" and target_agent_id:
+            activation_result=data_store.activate_agent_for_intervention(target_agent_id,intervention["id"])
+            if activation_result.get("activated"):
+                activated_agent=activation_result["agent"]
+                sio.emit('agent:activated',{
+                    "agentId":target_agent_id,
+                    "projectId":project_id,
+                    "agent":activated_agent,
+                    "previousStatus":activation_result.get("previousStatus"),
+                    "interventionId":intervention["id"]
+                },room=f"project:{project_id}")
+                for paused_agent in activation_result.get("pausedAgents",[]):
+                    sio.emit('agent:paused',{
+                        "agentId":paused_agent["id"],
+                        "projectId":project_id,
+                        "agent":paused_agent,
+                        "reason":"subsequent_phase_pause"
+                    },room=f"project:{project_id}")
+            intervention["activationResult"]=activation_result
 
         return jsonify(intervention),201
 
@@ -123,3 +142,79 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
         },room=f"project:{project_id}")
 
         return'',204
+
+    @app.route('/api/interventions/<intervention_id>/respond',methods=['POST'])
+    def respond_to_intervention(intervention_id:str):
+        intervention=data_store.get_intervention(intervention_id)
+        if not intervention:
+            return jsonify({"error":"介入が見つかりません"}),404
+
+        data=request.get_json() or {}
+        message=data.get("message","").strip()
+        if not message:
+            return jsonify({"error":"メッセージは必須です"}),400
+
+        result=data_store.respond_to_intervention(intervention_id,message)
+        if not result:
+            return jsonify({"error":"返答の追加に失敗しました"}),500
+
+        project_id=intervention["projectId"]
+        sio.emit('intervention:response_added',{
+            "interventionId":intervention_id,
+            "projectId":project_id,
+            "intervention":result,
+            "sender":"operator"
+        },room=f"project:{project_id}")
+
+        if intervention.get("targetAgentId"):
+            agent=data_store.get_agent(intervention["targetAgentId"])
+            if agent and agent.get("status")=="running":
+                sio.emit('agent:resumed',{
+                    "agentId":agent["id"],
+                    "projectId":project_id,
+                    "agent":agent,
+                    "reason":"operator_response"
+                },room=f"project:{project_id}")
+
+        return jsonify(result)
+
+    @app.route('/api/interventions/<intervention_id>/agent-question',methods=['POST'])
+    def agent_question(intervention_id:str):
+        intervention=data_store.get_intervention(intervention_id)
+        if not intervention:
+            return jsonify({"error":"介入が見つかりません"}),404
+
+        data=request.get_json() or {}
+        message=data.get("message","").strip()
+        agent_id=data.get("agentId")
+
+        if not message:
+            return jsonify({"error":"メッセージは必須です"}),400
+        if not agent_id:
+            return jsonify({"error":"agentIdは必須です"}),400
+
+        result=data_store.add_intervention_response(intervention_id,"agent",message,agent_id)
+        if not result:
+            return jsonify({"error":"質問の追加に失敗しました"}),500
+
+        project_id=intervention["projectId"]
+        agent=data_store.get_agent(agent_id)
+
+        sio.emit('intervention:response_added',{
+            "interventionId":intervention_id,
+            "projectId":project_id,
+            "intervention":result,
+            "sender":"agent",
+            "agentId":agent_id
+        },room=f"project:{project_id}")
+
+        if agent:
+            sio.emit('agent:waiting_response',{
+                "agentId":agent_id,
+                "projectId":project_id,
+                "agent":agent,
+                "interventionId":intervention_id,
+                "question":message
+            },room=f"project:{project_id}")
+
+        return jsonify(result)

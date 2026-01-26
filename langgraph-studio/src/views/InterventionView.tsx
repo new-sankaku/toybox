@@ -86,13 +86,8 @@ export default function InterventionView():JSX.Element{
 
   setSending(true)
   try{
-   const newIntervention=await interventionApi.create(currentProject.id,{
-    targetType:selected.targetType,
-    targetAgentId:selected.targetAgentId||undefined,
-    priority:selected.priority,
-    message:message.trim()
-   })
-   setInterventions([...interventions,newIntervention])
+   const updatedIntervention=await interventionApi.respond(selectedId,message.trim())
+   setInterventions(interventions.map(i=>i.id===selectedId?updatedIntervention:i))
    setMessage('')
   }catch(error){
    console.error('Failed to send reply:',error)
@@ -142,6 +137,7 @@ export default function InterventionView():JSX.Element{
    case'delivered':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-light">配信済み</span>
    case'acknowledged':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-light">確認済み</span>
    case'processed':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-main">処理完了</span>
+   case'waiting_response':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-accent-yellow/20 text-nier-accent-yellow">返答待ち</span>
    default:return null
   }
  }
@@ -394,33 +390,44 @@ export default function InterventionView():JSX.Element{
              </p>
             </div>
             <div className="flex justify-end mt-1">
-             {getStatusBadge(selectedIntervention.status)}
+             {!selectedIntervention.responses?.length&&getStatusBadge(selectedIntervention.status)}
             </div>
            </div>
           </div>
 
-          {(selectedIntervention as any).response&&(
-           <div className="flex justify-start">
+          {selectedIntervention.responses?.map((response,idx)=>(
+           <div key={idx} className={`flex ${response.sender==='operator'?'justify-end':'justify-start'}`}>
             <div className="max-w-[70%]">
-             <div className="flex items-center gap-2 mb-1">
-              <Bot size={14} className="text-nier-text-light"/>
+             <div className={`flex items-center gap-2 mb-1 ${response.sender==='operator'?'justify-end':''}`}>
+              {response.sender==='agent'&&<Bot size={14} className="text-nier-accent-blue"/>}
               <span className="text-nier-caption text-nier-text-light">
-               {(selectedIntervention as any).respondedBy||'AI'}
+               {response.sender==='agent'
+                ?(response.agentId?getLabel(agents.find(a=>a.id===response.agentId)?.type||''):'Agent')
+                :'オペレーター'}
               </span>
-              {(selectedIntervention as any).respondedAt&&(
-               <span className="text-nier-caption text-nier-text-light">
-                {formatTime((selectedIntervention as any).respondedAt)}
-               </span>
-)}
+              <span className="text-nier-caption text-nier-text-light">
+               {formatTime(response.createdAt)}
+              </span>
+              {response.sender==='operator'&&<UserCircle size={14} className="text-nier-text-light"/>}
              </div>
-             <div className="p-3 rounded-lg bg-nier-bg-panel border border-nier-border">
+             <div className={`p-3 rounded-lg ${
+              response.sender==='agent'
+               ?'bg-nier-bg-panel border border-nier-accent-blue/30'
+               :'bg-nier-bg-selected border border-nier-border'
+             }`}>
               <p className="text-nier-body text-nier-text-main whitespace-pre-wrap">
-               {(selectedIntervention as any).response}
+               {response.message}
               </p>
              </div>
             </div>
            </div>
-)}
+          ))}
+
+          {selectedIntervention.responses?.length>0&&(
+           <div className="flex justify-center">
+            {getStatusBadge(selectedIntervention.status)}
+           </div>
+          )}
           <div ref={chatEndRef}/>
          </div>
 

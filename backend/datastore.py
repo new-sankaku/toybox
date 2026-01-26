@@ -1063,6 +1063,128 @@ class DataStore:
     self._add_system_log_internal(session,project_id,"info","System",f"介入削除: {intervention.message[:30]}...")
    return result
 
+ def activate_agent_for_intervention(self,agent_id:str,intervention_id:str)->Dict:
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   intervention_repo=InterventionRepository(session)
+   agent=agent_repo.get(agent_id)
+   if not agent:
+    return {"activated":False,"reason":"agent_not_found"}
+   intervention=intervention_repo.get(intervention_id)
+   if not intervention:
+    return {"activated":False,"reason":"intervention_not_found"}
+   activatable_statuses={"completed","failed","cancelled","paused","pending"}
+   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+   if agent.status in activatable_statuses:
+    old_status=agent.status
+    agent.status="running"
+    agent.current_task=f"追加タスク: {intervention.message[:30]}..."
+    agent.updated_at=datetime.now()
+    if not agent.started_at:
+     agent.started_at=datetime.now()
+    session.flush()
+    syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を連絡により起動（前状態: {old_status}）")
+    paused_agents=self._pause_subsequent_agents(session,agent)
+    return {
+     "activated":True,
+     "agent":agent_repo.to_dict(agent),
+     "previousStatus":old_status,
+     "pausedAgents":paused_agents
+    }
+   elif agent.status=="running":
+    return {"activated":False,"reason":"already_running","agent":agent_repo.to_dict(agent)}
+   elif agent.status=="waiting_approval":
+    return {"activated":False,"reason":"waiting_approval","agent":agent_repo.to_dict(agent)}
+   elif agent.status=="waiting_response":
+    agent.status="running"
+    agent.current_task=f"追加タスク: {intervention.message[:30]}..."
+    agent.updated_at=datetime.now()
+    session.flush()
+    syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} が返答を受けて再開")
+    return {"activated":True,"agent":agent_repo.to_dict(agent),"previousStatus":"waiting_response","pausedAgents":[]}
+   return {"activated":False,"reason":"invalid_status","currentStatus":agent.status}
+
+ def _pause_subsequent_agents(self,session,target_agent)->List[Dict]:
+  agent_repo=AgentRepository(session)
+  syslog_repo=SystemLogRepository(session)
+  agents=agent_repo.get_by_project(target_agent.project_id)
+  target_phase=target_agent.phase or 0
+  paused_agents=[]
+  for agent_dict in agents:
+   agent_phase=agent_dict.get("phase",0)
+   if agent_phase>target_phase and agent_dict["status"]=="running":
+    agent=agent_repo.get(agent_dict["id"])
+    agent.status="paused"
+    agent.updated_at=datetime.now()
+    session.flush()
+    display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+    syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を後続フェーズとして一時停止")
+    paused_agents.append(agent_repo.to_dict(agent))
+  return paused_agents
+
+ def get_pending_interventions_for_agent(self,agent_id:str)->List[Dict]:
+  with session_scope() as session:
+   intervention_repo=InterventionRepository(session)
+   agent_repo=AgentRepository(session)
+   agent=agent_repo.get(agent_id)
+   if not agent:
+    return []
+   all_interventions=intervention_repo.get_by_project(agent.project_id)
+   pending_interventions=[]
+   for iv in all_interventions:
+    if iv["status"] not in ("pending","acknowledged"):
+     continue
+    if iv["targetType"]=="all":
+     pending_interventions.append(iv)
+    elif iv["targetType"]=="specific" and iv.get("targetAgentId")==agent_id:
+     pending_interventions.append(iv)
+   return pending_interventions
+
+ def add_intervention_response(self,intervention_id:str,sender:str,message:str,agent_id:str=None)->Optional[Dict]:
+  with session_scope() as session:
+   intervention_repo=InterventionRepository(session)
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   intervention=intervention_repo.get(intervention_id)
+   if not intervention:
+    return None
+   result=intervention_repo.add_response(intervention_id,sender,message,agent_id)
+   if sender=="agent" and agent_id:
+    agent=agent_repo.get(agent_id)
+    if agent:
+     agent.status="waiting_response"
+     agent.current_task="オペレーターの返答待ち"
+     agent.updated_at=datetime.now()
+     session.flush()
+     display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+     syslog_repo.add_log(intervention.project_id,"info",display_name,f"質問: {message[:50]}...")
+   elif sender=="operator":
+    syslog_repo.add_log(intervention.project_id,"info","Human",f"返答: {message[:50]}...")
+   return result
+
+ def respond_to_intervention(self,intervention_id:str,message:str)->Optional[Dict]:
+  with session_scope() as session:
+   intervention_repo=InterventionRepository(session)
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   intervention=intervention_repo.get(intervention_id)
+   if not intervention:
+    return None
+   result=intervention_repo.add_response(intervention_id,"operator",message)
+   if intervention.target_agent_id:
+    agent=agent_repo.get(intervention.target_agent_id)
+    if agent and agent.status=="waiting_response":
+     agent.status="running"
+     agent.current_task=f"返答を受けて処理再開"
+     agent.updated_at=datetime.now()
+     session.flush()
+     display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+     syslog_repo.add_log(intervention.project_id,"info","System",f"エージェント {display_name} が返答を受けて再開")
+   if result:
+    intervention_repo.set_status(intervention_id,"acknowledged")
+   return result
+
  def get_uploaded_files_by_project(self,project_id:str)->List[Dict]:
   with session_scope() as session:
    repo=UploadedFileRepository(session)
@@ -1268,6 +1390,44 @@ class DataStore:
     "agent":result,
     "previousStatus":old_status
    },agent.project_id)
+   return result
+
+ def pause_agent(self,agent_id:str)->Optional[Dict]:
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   agent=agent_repo.get(agent_id)
+   if not agent:
+    return None
+   pausable_statuses={"running","waiting_approval"}
+   if agent.status not in pausable_statuses:
+    return None
+   old_status=agent.status
+   agent.status="paused"
+   agent.updated_at=datetime.now()
+   session.flush()
+   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+   syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を一時停止（前状態: {old_status}）")
+   result=agent_repo.to_dict(agent)
+   return result
+
+ def resume_agent(self,agent_id:str)->Optional[Dict]:
+  with session_scope() as session:
+   agent_repo=AgentRepository(session)
+   syslog_repo=SystemLogRepository(session)
+   agent=agent_repo.get(agent_id)
+   if not agent:
+    return None
+   resumable_statuses={"paused","waiting_response"}
+   if agent.status not in resumable_statuses:
+    return None
+   old_status=agent.status
+   agent.status="running"
+   agent.updated_at=datetime.now()
+   session.flush()
+   display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
+   syslog_repo.add_log(agent.project_id,"info","System",f"エージェント {display_name} を再開（前状態: {old_status}）")
+   result=agent_repo.to_dict(agent)
    return result
 
  def get_retryable_agents(self,project_id:str)->List[Dict]:

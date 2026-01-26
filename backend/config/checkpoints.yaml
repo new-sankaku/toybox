@@ -38,10 +38,14 @@ status_labels:
 agent_status_labels:
   running: 実行中
   waiting_approval: 承認待ち
+  waiting_response: 返答待ち
   pending: 待機中
+  paused: 一時停止
   blocked: ブロック
   completed: 完了
   failed: エラー
+  interrupted: 中断
+  cancelled: キャンセル
   idle: 待機
 
 approval_status_labels:

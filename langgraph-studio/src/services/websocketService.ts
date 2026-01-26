@@ -179,6 +179,42 @@ class WebSocketService{
    })
   })
 
+  this.socket.on('agent:paused',(data)=>{
+   console.log('[WS] Agent paused:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'paused')
+  })
+
+  this.socket.on('agent:resumed',(data)=>{
+   console.log('[WS] Agent resumed:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'running')
+  })
+
+  this.socket.on('agent:activated',(data)=>{
+   console.log('[WS] Agent activated:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'running')
+  })
+
+  this.socket.on('agent:waiting_response',(data)=>{
+   console.log('[WS] Agent waiting response:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'waiting_response')
+  })
+
   this.socket.on('checkpoint:created',(data)=>{
    console.log('[WS] Checkpoint created:',data.checkpointId)
    if(data.checkpoint){
