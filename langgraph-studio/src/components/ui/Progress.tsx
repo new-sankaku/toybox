@@ -15,11 +15,11 @@ const Progress=React.forwardRef<
  <ProgressPrimitive.Root
   ref={ref}
   className={cn('nier-progress',className)}
+  style={{'--progress-value':`${Math.min(100,Math.max(0,value))}%`}as React.CSSProperties}
   {...props}
  >
   <ProgressPrimitive.Indicator
-   className={cn('nier-progress-fill',indicatorClassName)}
-   style={{width:`${Math.min(100,Math.max(0,value))}%`}}
+   className={cn('nier-progress-fill w-[var(--progress-value)]',indicatorClassName)}
   />
  </ProgressPrimitive.Root>
 ))
