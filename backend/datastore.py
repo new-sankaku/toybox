@@ -830,10 +830,15 @@ class DataStore:
    print(f"[DataStore] Project {project_id} brushup started: {agent_names}")
    return proj_repo.to_dict(project)
 
- def get_agents_by_project(self,project_id:str)->List[Dict]:
+ def get_agents_by_project(self,project_id:str,include_workers:bool=True)->List[Dict]:
   with session_scope() as session:
    repo=AgentRepository(session)
-   return repo.get_by_project(project_id)
+   return repo.get_by_project(project_id,include_workers=include_workers)
+
+ def get_workers_by_parent(self,parent_agent_id:str)->List[Dict]:
+  with session_scope() as session:
+   repo=AgentRepository(session)
+   return repo.get_workers_by_parent(parent_agent_id)
 
  def get_agent(self,agent_id:str)->Optional[Dict]:
   with session_scope() as session:
@@ -849,6 +854,11 @@ class DataStore:
   with session_scope() as session:
    repo=AgentRepository(session)
    return repo.create_from_dict(project_id,{"type":agent_type})
+
+ def create_worker_agent(self,project_id:str,parent_agent_id:str,worker_type:str,task:str)->Dict:
+  with session_scope() as session:
+   repo=AgentRepository(session)
+   return repo.create_worker(project_id,parent_agent_id,worker_type,task)
 
  def update_agent(self,agent_id:str,data:Dict)->Optional[Dict]:
   with session_scope() as session:

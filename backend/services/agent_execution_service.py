@@ -145,6 +145,8 @@ class AgentExecutionService:
    quality_settings=quality_dict,
    on_progress=lambda t,p,m:self._on_progress(leader_agent_id,project_id,p,m),
    on_checkpoint=lambda t,d:self._on_checkpoint(leader_agent_id,project_id,t,d),
+   on_worker_created=lambda w,t:self._on_worker_created(project_id,leader_agent_id,w,t),
+   on_worker_status=lambda w,s,d:self._on_worker_status(project_id,w,s,d),
   )
   self._data_store.update_agent(leader_agent_id,{
    "status":"running",
@@ -249,6 +251,39 @@ class AgentExecutionService:
    "projectId":project_id,
    "agentId":agent_id,
    "checkpoint":data,
+  },project_id)
+
+ def _on_worker_created(self,project_id:str,parent_agent_id:str,worker_type:str,task:str)->str:
+  worker=self._data_store.create_worker_agent(project_id,parent_agent_id,worker_type,task)
+  worker_id=worker["id"]
+  self._emit_event("agent:created",{
+   "agentId":worker_id,
+   "projectId":project_id,
+   "parentAgentId":parent_agent_id,
+   "agent":worker
+  },project_id)
+  return worker_id
+
+ def _on_worker_status(self,project_id:str,worker_id:str,status:str,data:Dict)->None:
+  update_data={"status":status}
+  if status=="running":
+   update_data["startedAt"]=datetime.now().isoformat()
+   update_data["progress"]=data.get("progress",0)
+  elif status=="completed":
+   update_data["completedAt"]=datetime.now().isoformat()
+   update_data["progress"]=100
+   update_data["tokensUsed"]=data.get("tokensUsed",0)
+   update_data["inputTokens"]=data.get("inputTokens",0)
+   update_data["outputTokens"]=data.get("outputTokens",0)
+  elif status=="failed":
+   update_data["error"]=data.get("error","")
+  if "currentTask" in data:
+   update_data["currentTask"]=data["currentTask"]
+  self._data_store.update_agent(worker_id,update_data)
+  self._emit_event(f"agent:{status}",{
+   "agentId":worker_id,
+   "projectId":project_id,
+   "agent":self._data_store.get_agent(worker_id)
   },project_id)
 
  def get_running_agents(self)->Dict[str,str]:

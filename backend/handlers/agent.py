@@ -20,8 +20,25 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   project=data_store.get_project(project_id)
   if not project:
    raise NotFoundError("Project",project_id)
-  agents=data_store.get_agents_by_project(project_id)
+  include_workers=request.args.get("includeWorkers","true").lower()=="true"
+  agents=data_store.get_agents_by_project(project_id,include_workers=include_workers)
   return jsonify(agents)
+
+ @app.route('/api/projects/<project_id>/agents/leaders',methods=['GET'])
+ def list_project_leaders(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   raise NotFoundError("Project",project_id)
+  agents=data_store.get_agents_by_project(project_id,include_workers=False)
+  return jsonify(agents)
+
+ @app.route('/api/agents/<agent_id>/workers',methods=['GET'])
+ def list_agent_workers(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  workers=data_store.get_workers_by_parent(agent_id)
+  return jsonify(workers)
 
  @app.route('/api/agents/<agent_id>/logs',methods=['GET'])
  def get_agent_logs(agent_id:str):
