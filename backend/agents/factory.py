@@ -8,17 +8,30 @@ AGENT_MODE=os.environ.get("AGENT_MODE","testdata")
 
 def create_agent_runner(mode:Optional[str]=None,**kwargs)->AgentRunner:
     actual_mode=mode or AGENT_MODE
+    working_dir=kwargs.pop("working_dir",None)
 
     if actual_mode=="api":
         from .api_runner import ApiAgentRunner
         return ApiAgentRunner(**kwargs)
+
+    elif actual_mode=="api_with_skills":
+        from .api_runner import ApiAgentRunner
+        from .skill_runner import SkillEnabledAgentRunner
+        if not working_dir:
+            working_dir=os.environ.get("PROJECT_WORKING_DIR","/tmp/toybox/projects")
+        base_runner=ApiAgentRunner(**kwargs)
+        return SkillEnabledAgentRunner(
+            base_runner=base_runner,
+            working_dir=working_dir,
+            max_tool_iterations=kwargs.get("max_tool_iterations",10),
+        )
 
     elif actual_mode=="testdata" or actual_mode=="mock":
         from .mock_runner import MockAgentRunner
         return MockAgentRunner(**kwargs)
 
     else:
-        raise ValueError(f"Unknown agent mode: {actual_mode}. Use 'testdata', 'mock', or 'api'")
+        raise ValueError(f"Unknown agent mode: {actual_mode}. Use 'testdata', 'mock', 'api', or 'api_with_skills'")
 
 
 def get_current_mode()->str:
@@ -26,4 +39,4 @@ def get_current_mode()->str:
 
 
 def get_available_modes()->list:
-    return ["testdata","mock","api"]
+    return ["testdata","mock","api","api_with_skills"]

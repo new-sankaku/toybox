@@ -514,3 +514,32 @@ def get_provider_test_model(provider_id:str)->str:
 def get_provider_default_model(provider_id:str)->str:
     provider=get_provider_config(provider_id)
     return provider.get("default_model","")
+
+
+def get_skills_config()->Dict[str,Any]:
+    return load_yaml_config("skills.yaml")
+
+
+def get_skill_definitions()->Dict[str,Dict[str,Any]]:
+    config=get_skills_config()
+    return config.get("skills",{})
+
+
+def get_agent_skill_mapping()->Dict[str,List[str]]:
+    config=get_skills_config()
+    return config.get("agent_skill_mapping",{})
+
+
+def get_skills_for_agent(agent_type:str)->List[str]:
+    mapping=get_agent_skill_mapping()
+    return mapping.get(agent_type,mapping.get("default",[]))
+
+
+def get_sandbox_config()->Dict[str,Any]:
+    config=get_skills_config()
+    return config.get("sandbox",{
+        "enabled":True,
+        "working_dir_base":"/tmp/toybox/projects",
+        "timeout_seconds":120,
+        "max_output_size":100000,
+    })

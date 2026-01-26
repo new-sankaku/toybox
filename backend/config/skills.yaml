@@ -1,0 +1,191 @@
+skills:
+  file_read:
+    enabled: true
+    description: "ファイルの内容を読み取ります"
+    category: file
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - asset_worker
+      - asset_leader
+      - unit_test_worker
+      - integration_test_worker
+      - e2e_test_worker
+      - build_worker
+      - code_review_worker
+    restrictions:
+      max_file_size: 1048576
+      allowed_extensions:
+        - .py
+        - .js
+        - .ts
+        - .tsx
+        - .jsx
+        - .json
+        - .yaml
+        - .yml
+        - .md
+        - .txt
+        - .html
+        - .css
+        - .scss
+        - .lua
+        - .gdscript
+        - .gd
+        - .tscn
+        - .tres
+
+  file_write:
+    enabled: true
+    description: "ファイルに内容を書き込みます"
+    category: file
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - asset_worker
+    restrictions:
+      max_file_size: 1048576
+      require_approval: false
+      denied_paths:
+        - /etc
+        - /usr
+        - /bin
+        - /sbin
+
+  file_list:
+    enabled: true
+    description: "ディレクトリの内容を一覧表示します"
+    category: file
+    allowed_agents: all
+    restrictions:
+      max_items: 500
+
+  bash_execute:
+    enabled: true
+    description: "Bashコマンドを実行します"
+    category: execute
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - build_worker
+      - unit_test_worker
+      - integration_test_worker
+      - e2e_test_worker
+    restrictions:
+      timeout: 120
+      sandbox_enabled: true
+      allowed_commands:
+        - npm
+        - npx
+        - yarn
+        - pnpm
+        - python
+        - pip
+        - pytest
+        - node
+        - git
+        - ls
+        - cat
+        - grep
+        - find
+        - mkdir
+        - cp
+        - mv
+        - godot
+
+  python_execute:
+    enabled: true
+    description: "Pythonコードを実行します"
+    category: execute
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - unit_test_worker
+      - asset_worker
+    restrictions:
+      timeout: 60
+      sandbox_enabled: true
+
+  project_analyze:
+    enabled: true
+    description: "プロジェクトの構造を解析します"
+    category: project
+    allowed_agents: all
+    restrictions:
+      max_depth: 5
+
+agent_skill_mapping:
+  code_worker:
+    - file_read
+    - file_write
+    - file_list
+    - bash_execute
+    - python_execute
+    - project_analyze
+
+  code_leader:
+    - file_read
+    - file_list
+    - project_analyze
+
+  asset_worker:
+    - file_read
+    - file_write
+    - file_list
+    - python_execute
+    - project_analyze
+
+  asset_leader:
+    - file_read
+    - file_list
+    - project_analyze
+
+  build_worker:
+    - file_read
+    - file_list
+    - bash_execute
+    - project_analyze
+
+  unit_test_worker:
+    - file_read
+    - file_list
+    - bash_execute
+    - python_execute
+    - project_analyze
+
+  integration_test_worker:
+    - file_read
+    - file_list
+    - bash_execute
+    - project_analyze
+
+  e2e_test_worker:
+    - file_read
+    - file_list
+    - bash_execute
+    - project_analyze
+
+  code_review_worker:
+    - file_read
+    - file_list
+    - project_analyze
+
+  default:
+    - file_read
+    - file_list
+    - project_analyze
+
+sandbox:
+  enabled: true
+  working_dir_base: "/tmp/toybox/projects"
+  allowed_paths: []
+  denied_paths:
+    - /etc
+    - /usr
+    - /bin
+    - /sbin
+    - /var
+    - /root
+    - /home
+  timeout_seconds: 120
+  max_output_size: 100000
