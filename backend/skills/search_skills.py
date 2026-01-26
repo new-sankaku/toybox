@@ -1,0 +1,174 @@
+import os
+import re
+import asyncio
+import fnmatch
+from typing import List,Dict,Any,Optional
+from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
+
+
+class CodeSearchSkill(Skill):
+ name="code_search"
+ description="コード内をテキスト検索します（grep的な機能）"
+ category=SkillCategory.FILE
+ parameters=[
+  SkillParameter(name="pattern",type="string",description="検索パターン（正規表現対応）"),
+  SkillParameter(name="path",type="string",description="検索対象ディレクトリ",required=False,default="."),
+  SkillParameter(name="file_pattern",type="string",description="ファイルパターン（例: *.py, *.ts）",required=False,default="*"),
+  SkillParameter(name="case_sensitive",type="boolean",description="大文字小文字を区別",required=False,default=True),
+  SkillParameter(name="max_results",type="integer",description="最大結果数",required=False,default=100),
+  SkillParameter(name="context_lines",type="integer",description="前後の行数",required=False,default=2),
+ ]
+
+ BINARY_EXTENSIONS={".png",".jpg",".jpeg",".gif",".bmp",".ico",".webp",".mp3",".wav",".ogg",".mp4",".avi",".mov",".webm",".zip",".tar",".gz",".7z",".rar",".exe",".dll",".so",".dylib",".pyc",".pyo",".class",".o",".obj",".pdf",".doc",".docx",".xls",".xlsx",".ttf",".otf",".woff",".woff2",".eot"}
+
+ IGNORE_DIRS={"node_modules","__pycache__",".git",".venv","venv","dist","build",".next","target","vendor",".idea",".vscode"}
+
+ def __init__(self):
+  super().__init__()
+
+ async def execute(self,context:SkillContext,**kwargs)->SkillResult:
+  pattern=kwargs.get("pattern","")
+  path=kwargs.get("path",".")
+  file_pattern=kwargs.get("file_pattern","*")
+  case_sensitive=kwargs.get("case_sensitive",True)
+  max_results=kwargs.get("max_results",100)
+  context_lines=kwargs.get("context_lines",2)
+  if not pattern:
+   return SkillResult(success=False,error="pattern is required")
+  if path==".":
+   full_path=context.working_dir
+  elif os.path.isabs(path):
+   full_path=path
+  else:
+   full_path=os.path.join(context.working_dir,path)
+  if not os.path.exists(full_path):
+   return SkillResult(success=False,error=f"Path not found: {path}")
+  try:
+   results=await asyncio.to_thread(
+    self._search,full_path,pattern,file_pattern,case_sensitive,max_results,context_lines
+   )
+   return SkillResult(
+    success=True,
+    output=results,
+    metadata={"pattern":pattern,"total_matches":len(results),"truncated":len(results)>=max_results}
+   )
+  except re.error as e:
+   return SkillResult(success=False,error=f"Invalid regex pattern: {e}")
+  except Exception as e:
+   return SkillResult(success=False,error=str(e))
+
+ def _search(self,path:str,pattern:str,file_pattern:str,case_sensitive:bool,max_results:int,context_lines:int)->List[Dict[str,Any]]:
+  flags=0 if case_sensitive else re.IGNORECASE
+  try:
+   regex=re.compile(pattern,flags)
+  except re.error:
+   regex=re.compile(re.escape(pattern),flags)
+  results=[]
+  for root,dirs,files in os.walk(path):
+   dirs[:]=[d for d in dirs if d not in self.IGNORE_DIRS]
+   for filename in files:
+    if len(results)>=max_results:
+     return results
+    if not fnmatch.fnmatch(filename,file_pattern):
+     continue
+    ext=os.path.splitext(filename)[1].lower()
+    if ext in self.BINARY_EXTENSIONS:
+     continue
+    filepath=os.path.join(root,filename)
+    try:
+     matches=self._search_file(filepath,regex,context_lines,path)
+     for match in matches:
+      if len(results)>=max_results:
+       return results
+      results.append(match)
+    except Exception:
+     continue
+  return results
+
+ def _search_file(self,filepath:str,regex:re.Pattern,context_lines:int,base_path:str)->List[Dict[str,Any]]:
+  results=[]
+  try:
+   with open(filepath,"r",encoding="utf-8",errors="ignore") as f:
+    lines=f.readlines()
+  except Exception:
+   return results
+  rel_path=os.path.relpath(filepath,base_path)
+  for i,line in enumerate(lines):
+   if regex.search(line):
+    start=max(0,i-context_lines)
+    end=min(len(lines),i+context_lines+1)
+    context=[{"line_no":j+1,"content":lines[j].rstrip(),"is_match":j==i} for j in range(start,end)]
+    results.append({
+     "file":rel_path,
+     "line_no":i+1,
+     "line":line.rstrip(),
+     "context":context,
+    })
+  return results
+
+
+class FileSearchSkill(Skill):
+ name="file_search"
+ description="ファイル名でファイルを検索します"
+ category=SkillCategory.FILE
+ parameters=[
+  SkillParameter(name="pattern",type="string",description="ファイル名パターン（glob形式、例: *.py, test_*.ts）"),
+  SkillParameter(name="path",type="string",description="検索対象ディレクトリ",required=False,default="."),
+  SkillParameter(name="max_results",type="integer",description="最大結果数",required=False,default=100),
+  SkillParameter(name="include_hidden",type="boolean",description="隠しファイルを含める",required=False,default=False),
+ ]
+
+ IGNORE_DIRS={"node_modules","__pycache__",".git",".venv","venv","dist","build",".next","target","vendor"}
+
+ def __init__(self):
+  super().__init__()
+
+ async def execute(self,context:SkillContext,**kwargs)->SkillResult:
+  pattern=kwargs.get("pattern","*")
+  path=kwargs.get("path",".")
+  max_results=kwargs.get("max_results",100)
+  include_hidden=kwargs.get("include_hidden",False)
+  if path==".":
+   full_path=context.working_dir
+  elif os.path.isabs(path):
+   full_path=path
+  else:
+   full_path=os.path.join(context.working_dir,path)
+  if not os.path.exists(full_path):
+   return SkillResult(success=False,error=f"Path not found: {path}")
+  try:
+   results=await asyncio.to_thread(self._search,full_path,pattern,max_results,include_hidden)
+   return SkillResult(
+    success=True,
+    output=results,
+    metadata={"pattern":pattern,"total_found":len(results),"truncated":len(results)>=max_results}
+   )
+  except Exception as e:
+   return SkillResult(success=False,error=str(e))
+
+ def _search(self,path:str,pattern:str,max_results:int,include_hidden:bool)->List[Dict[str,Any]]:
+  results=[]
+  for root,dirs,files in os.walk(path):
+   if not include_hidden:
+    dirs[:]=[d for d in dirs if not d.startswith(".") and d not in self.IGNORE_DIRS]
+   else:
+    dirs[:]=[d for d in dirs if d not in self.IGNORE_DIRS]
+   for filename in files:
+    if len(results)>=max_results:
+     return results
+    if not include_hidden and filename.startswith("."):
+     continue
+    if fnmatch.fnmatch(filename,pattern):
+     filepath=os.path.join(root,filename)
+     rel_path=os.path.relpath(filepath,path)
+     try:
+      stat=os.stat(filepath)
+      results.append({
+       "name":filename,
+       "path":rel_path,
+       "size":stat.st_size,
+       "modified":stat.st_mtime,
+      })
+     except Exception:
+      results.append({"name":filename,"path":rel_path})
+  return results
