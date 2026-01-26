@@ -191,8 +191,9 @@ export default function ActivitySidebar():JSX.Element{
     <button
      onClick={()=>setIsCollapsed(!isCollapsed)}
      className="p-2 hover:bg-nier-bg-hover transition-colors border-b border-nier-border-light"
+     title={isCollapsed?'サイドバーを開く':'サイドバーを閉じる'}
     >
-     {isCollapsed?<ChevronLeft size={16}/>:<ChevronRight size={16}/>}
+     {isCollapsed?<ChevronRight size={16}/>:<ChevronLeft size={16}/>}
     </button>
 
     {!isCollapsed&&(
@@ -217,8 +218,9 @@ export default function ActivitySidebar():JSX.Element{
     <button
      onClick={()=>setIsCollapsed(!isCollapsed)}
      className="p-2 hover:bg-nier-bg-hover transition-colors"
+     title={isCollapsed?'サイドバーを開く':'サイドバーを閉じる'}
     >
-     {isCollapsed?<ChevronLeft size={16}/>:<ChevronRight size={16}/>}
+     {isCollapsed?<ChevronRight size={16}/>:<ChevronLeft size={16}/>}
     </button>
     {!isCollapsed&&(
      <span className="text-nier-caption text-nier-text-light pr-3">SUMMARY</span>

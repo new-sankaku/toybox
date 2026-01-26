@@ -145,7 +145,7 @@ export const useCostSettingsStore=create<CostSettingsState>()(
 
    isFieldChanged:(field)=>{
     const{settings,originalSettings}=get()
-    return(settings as Record<string,unknown>)[field]!==(originalSettings as Record<string,unknown>)[field]
+    return(settings as unknown as Record<string,unknown>)[field]!==(originalSettings as unknown as Record<string,unknown>)[field]
    },
 
    isServiceFieldChanged:(serviceType,field)=>{
@@ -153,7 +153,7 @@ export const useCostSettingsStore=create<CostSettingsState>()(
     const current=settings.services[serviceType]
     const original=originalSettings.services[serviceType]
     if(!current||!original)return false
-    return(current as Record<string,unknown>)[field]!==(original as Record<string,unknown>)[field]
+    return(current as unknown as Record<string,unknown>)[field]!==(original as unknown as Record<string,unknown>)[field]
    }
   }),
   {

@@ -7,14 +7,14 @@ interface Tab{
 }
 
 const tabs:Tab[]=[
- {id:'project',label:'プロジェクト',icon:'◉'},
- {id:'system',label:'ダッシュボード',icon:'⬡'},
- {id:'checkpoints',label:'承認',icon:'✦'},
- {id:'intervention',label:'連絡',icon:'⊕'},
- {id:'agents',label:'エージェント',icon:'⚔'},
- {id:'data',label:'生成素材',icon:'☰'},
- {id:'cost',label:'コスト',icon:'¤'},
- {id:'logs',label:'ログ',icon:'◈'},
+ {id:'project',label:'プロジェクト',icon:'◎'},
+ {id:'system',label:'ダッシュボード',icon:'⬢'},
+ {id:'checkpoints',label:'承認',icon:'✓'},
+ {id:'intervention',label:'連絡',icon:'✉'},
+ {id:'agents',label:'エージェント',icon:'⚙'},
+ {id:'data',label:'生成素材',icon:'≡'},
+ {id:'cost',label:'コスト',icon:'¥'},
+ {id:'logs',label:'ログ',icon:'≫'},
  {id:'config',label:'設定',icon:'⚙'}
 ]
 

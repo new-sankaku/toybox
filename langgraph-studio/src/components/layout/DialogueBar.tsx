@@ -25,7 +25,7 @@ export default function DialogueBar():JSX.Element|null{
     </span>
     <p className="dialogue-text">{currentMessage.text}</p>
    </div>
-   <div className="dialogue-hint">Click to close</div>
+   <div className="dialogue-hint">クリックで閉じる</div>
   </div>
 )
 }

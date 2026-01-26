@@ -33,9 +33,9 @@ type LogLevel='all'|'debug'|'info'|'warn'|'error'
 
 const levelConfig={
  debug:{icon:Bug,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
- info:{icon:Info,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
- warn:{icon:AlertTriangle,color:'text-nier-accent-orange',bg:'bg-nier-bg-panel'},
- error:{icon:AlertCircle,color:'text-nier-accent-orange',bg:'bg-nier-bg-panel'}
+ info:{icon:Info,color:'text-nier-accent-blue',bg:'bg-nier-bg-panel'},
+ warn:{icon:AlertTriangle,color:'text-nier-accent-yellow',bg:'bg-nier-bg-panel'},
+ error:{icon:AlertCircle,color:'text-nier-accent-red',bg:'bg-nier-bg-panel'}
 }
 
 export default function LogsView():JSX.Element{

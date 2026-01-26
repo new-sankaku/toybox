@@ -79,10 +79,10 @@ const statusLabels:Record<ProjectStatus,string>={
 
 const statusColors:Record<ProjectStatus,string>={
  draft:'text-nier-text-light',
- running:'text-nier-text-light',
- paused:'text-nier-text-light',
- completed:'text-nier-text-light',
- failed:'text-nier-text-light'
+ running:'text-nier-accent-orange',
+ paused:'text-nier-accent-yellow',
+ completed:'text-nier-accent-green',
+ failed:'text-nier-accent-red'
 }
 
 export default function ProjectView():JSX.Element{
@@ -97,6 +97,7 @@ export default function ProjectView():JSX.Element{
  const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
  const[showInitializeDialog,setShowInitializeDialog]=useState(false)
  const[showBrushupDialog,setShowBrushupDialog]=useState(false)
+ const[showDeleteDialog,setShowDeleteDialog]=useState<string|null>(null)
  const[brushupSelectedAgents,setBrushupSelectedAgents]=useState<Set<string>>(new Set())
  const[brushupClearAssets,setBrushupClearAssets]=useState(false)
  const[isLoading,setIsLoading]=useState(false)
@@ -554,7 +555,7 @@ export default function ProjectView():JSX.Element{
              <button
               onClick={(e)=>{
                e.stopPropagation()
-               handleDeleteProject(project.id)
+               setShowDeleteDialog(project.id)
               }}
               className="p-1 hover:bg-nier-bg-main transition-colors text-nier-text-light hover:text-nier-text-main"
               title="削除"
@@ -1316,6 +1317,44 @@ export default function ProjectView():JSX.Element{
      </Card>
     </div>
 )}
+
+   {/*Delete Confirmation Dialog*/}
+   {showDeleteDialog&&(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+     <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
+      <CardHeader>
+       <div className="flex items-center gap-2 text-nier-text-main">
+        <AlertTriangle size={18}/>
+        <span>削除の確認</span>
+       </div>
+      </CardHeader>
+      <CardContent>
+       <p className="text-nier-body mb-4">
+        プロジェクト「{projects.find(p=>p.id===showDeleteDialog)?.name}」を削除しますか？
+       </p>
+       <p className="text-nier-small text-nier-text-main mb-6">
+        この操作は取り消せません。
+       </p>
+       <div className="flex gap-3 justify-end">
+        <Button variant="secondary" onClick={()=>setShowDeleteDialog(null)}>
+         キャンセル
+        </Button>
+        <Button
+         variant="danger"
+         onClick={()=>{
+          handleDeleteProject(showDeleteDialog)
+          setShowDeleteDialog(null)
+         }}
+         disabled={isLoading}
+        >
+         {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>: null}
+         削除する
+        </Button>
+       </div>
+      </CardContent>
+     </Card>
+    </div>
+   )}
 
    {/*Brushup Dialog*/}
    {showBrushupDialog&&currentProject&&(

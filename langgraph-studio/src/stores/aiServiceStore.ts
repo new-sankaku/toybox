@@ -292,7 +292,7 @@ export const useAIServiceStore=create<AIServiceState>()(
     const current=providerConfigs.find(p=>p.id===id)
     const original=originalProviderConfigs.find(p=>p.id===id)
     if(!current||!original)return false
-    return(current as Record<string,unknown>)[field]!==(original as Record<string,unknown>)[field]
+    return(current as unknown as Record<string,unknown>)[field]!==(original as unknown as Record<string,unknown>)[field]
    }
   }),
   {

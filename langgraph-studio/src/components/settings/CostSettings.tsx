@@ -17,25 +17,6 @@ const SERVICE_LABELS:Record<string,string>={
  music:'音楽生成'
 }
 
-interface ModelPricing{
- input?:number
- output?:number
- per_image?:number
- per_track?:number
- per_1k_chars?:number
-}
-
-function formatPricing(pricing:ModelPricing|undefined):string{
- if(!pricing)return'-'
- if(pricing.input!==undefined&&pricing.output!==undefined){
-  return`In ${pricing.input} / Out ${pricing.output}`
- }
- if(pricing.per_image!==undefined)return`${pricing.per_image}/画像`
- if(pricing.per_track!==undefined)return`${pricing.per_track}/曲`
- if(pricing.per_1k_chars!==undefined)return`${pricing.per_1k_chars}/1000文字`
- return'-'
-}
-
 interface ServiceCostCardProps{
  serviceType:string
  label:string
@@ -141,12 +122,10 @@ function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
 export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
  const{
   settings,
-  pricing,
   loading,
   updateGlobalEnabled,
   updateGlobalLimit,
   fetchPricing,
-  resetToDefaults,
   loadFromServer,
   isFieldChanged
  }=useCostSettingsStore()

@@ -32,7 +32,7 @@ export default function OperatorPanel():JSX.Element{
        isActive?'operator-status-online':'operator-status-offline'
 )}/>
       <span className="operator-status-text">
-       {isActive?'ONLINE':'STANDBY'}
+       {isActive?'通信中':'待機中'}
       </span>
      </div>
     </div>
@@ -65,7 +65,7 @@ export default function OperatorPanel():JSX.Element{
     <div className="operator-footer">
      <div className="operator-line"/>
      <span className="operator-label">
-      {isActive?'TRANSMISSION':'NO SIGNAL'}
+      {isActive?'送信中':'待機'}
      </span>
      <div className="operator-line"/>
     </div>
