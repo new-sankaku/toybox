@@ -42,17 +42,32 @@ interface ClientToServerEvents{
 
 type TypedSocket=Socket<ServerToClientEvents,ClientToServerEvents>
 
+export interface WebSocketConfig{
+ maxReconnectAttempts?:number
+ reconnectDelay?:number
+ reconnectDelayMax?:number
+ timeout?:number
+}
+
 class WebSocketService{
  private socket:TypedSocket|null=null
- private maxReconnectAttempts=5
- private reconnectDelay=1000
+ private config:Required<WebSocketConfig>={
+  maxReconnectAttempts:5,
+  reconnectDelay:1000,
+  reconnectDelayMax:5000,
+  timeout:10000
+ }
  private pendingProjectId:string|null=null
  private currentProjectId:string|null=null
 
- connect(backendUrl:string):void{
+ connect(backendUrl:string,config?:WebSocketConfig):void{
   if(this.socket?.connected){
    console.log('[WS] Already connected')
    return
+  }
+
+  if(config){
+   this.config={...this.config,...config}
   }
 
   const connectionStore=useConnectionStore.getState()
@@ -63,10 +78,10 @@ class WebSocketService{
   this.socket=io(backendUrl,{
    transports:['websocket','polling'],
    reconnection:true,
-   reconnectionAttempts:this.maxReconnectAttempts,
-   reconnectionDelay:this.reconnectDelay,
-   reconnectionDelayMax:5000,
-   timeout:10000
+   reconnectionAttempts:this.config.maxReconnectAttempts,
+   reconnectionDelay:this.config.reconnectDelay,
+   reconnectionDelayMax:this.config.reconnectDelayMax,
+   timeout:this.config.timeout
   })
 
   this.setupEventHandlers()

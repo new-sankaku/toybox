@@ -2,7 +2,11 @@ import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
 
-const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||'http://localhost:5000'
+const API_BASE_URL=(()=>{
+ const url=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL
+ if(!url)throw new Error('VITE_API_BASE_URL環境変数が設定されていません')
+ return url
+})()
 
 export interface ApiErrorDetail{
  message:string
@@ -863,6 +867,13 @@ export interface FileExtensionsConfig{
  defaultCategory:string
 }
 
+export interface WebSocketConfig{
+ maxReconnectAttempts:number
+ reconnectDelay:number
+ reconnectDelayMax:number
+ timeout:number
+}
+
 export const configApi={
  getModels:async():Promise<ModelsConfig>=>{
   const response=await api.get('/api/config/models')
@@ -891,6 +902,11 @@ export const configApi={
 
  getBrushupOptions:async():Promise<BrushupOptionsConfig>=>{
   const response=await api.get('/api/brushup/options')
+  return response.data
+ },
+
+ getWebSocketConfig:async():Promise<WebSocketConfig>=>{
+  const response=await api.get('/api/config/websocket')
   return response.data
  }
 }

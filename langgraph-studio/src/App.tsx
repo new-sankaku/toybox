@@ -13,7 +13,7 @@ import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
 import{useUIConfigStore}from'./stores/uiConfigStore'
 import{useNavigatorStore}from'./stores/navigatorStore'
 import{websocketService}from'./services/websocketService'
-import{agentApi}from'./services/apiService'
+import{agentApi,configApi}from'./services/apiService'
 import type{Agent,AgentStatus}from'./types/agent'
 
 const queryClient=new QueryClient({
@@ -100,8 +100,21 @@ function App():JSX.Element{
  },[currentProject?.id,fetchAgentsForProject])
 
  useEffect(()=>{
-  const backendUrl=(import.meta as unknown as{env:Record<string,string>}).env.VITE_BACKEND_URL||'http://localhost:5000'
-  websocketService.connect(backendUrl)
+  const backendUrl=(import.meta as unknown as{env:Record<string,string>}).env.VITE_BACKEND_URL
+  if(!backendUrl){
+   console.error('VITE_BACKEND_URL環境変数が設定されていません')
+   return
+  }
+
+  const initWebSocket=async()=>{
+   try{
+    const wsConfig=await configApi.getWebSocketConfig()
+    websocketService.connect(backendUrl,wsConfig)
+   }catch{
+    websocketService.connect(backendUrl)
+   }
+  }
+  initWebSocket()
 
   fetchDefinitions()
   fetchUISettings()
@@ -190,9 +203,7 @@ function App():JSX.Element{
  return(
   <QueryClientProvider client={queryClient}>
    <AppLayout activeTab={activeTab} onTabChange={setActiveTab}>
-    {/*DASHBOARDは常にマウント、非表示時はdisplay:noneで隠す*/}
-    {/*key変更でコンポーネント再マウント→データ再取得*/}
-    <div key={`dashboard-${dataKey}`} style={{display:activeTab==='system'?'block':'none'}}>
+    <div key={`dashboard-${dataKey}`} className={activeTab==='system'?'block':'hidden'}>
      <DashboardView/>
     </div>
     {activeTab!=='system'&&<div key={`content-${dataKey}`} className="h-full">{renderOtherContent()}</div>}

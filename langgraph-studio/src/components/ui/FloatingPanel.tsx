@@ -90,15 +90,11 @@ export function FloatingPanel({
   <div
    ref={panelRef}
    className={cn(
-    'fixed bg-nier-bg-panel border border-nier-border-dark shadow-lg z-[150]',
+    'fixed bg-nier-bg-panel border border-nier-border-dark shadow-lg z-[150] max-h-[80vh]',
     sizeClasses[size],
     isDragging&&'cursor-grabbing select-none'
    )}
-   style={{
-    left:position.x,
-    top:position.y,
-    maxHeight:'80vh'
-   }}
+   style={{left:`${position.x}px`,top:`${position.y}px`}}
   >
    {title&&(
     <div
