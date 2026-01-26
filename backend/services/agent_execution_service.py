@@ -5,7 +5,8 @@ from typing import Optional,Dict,Any,Callable
 from agents.base import AgentContext,AgentType,AgentStatus,AgentOutput
 from agents.api_runner import ApiAgentRunner,LeaderWorkerOrchestrator
 from agents.exceptions import ProviderUnavailableError,MaxRetriesExceededError
-from agents.retry_strategy import retry_until_provider_available,is_provider_unavailable_error,ProviderRetryConfig
+from agents.retry_strategy import wait_for_provider_available
+from providers.health_monitor import get_health_monitor
 from config_loader import get_workflow_dependencies
 
 
@@ -82,35 +83,40 @@ class AgentExecutionService:
    on_checkpoint=lambda t,d:self._on_checkpoint(agent_id,project_id,t,d),
   )
   try:
-   def on_waiting(attempt:int,error:Exception,delay:float)->None:
-    self._data_store.update_agent(agent_id,{
-     "status":"waiting_provider",
-     "currentTask":f"API接続待機中 (試行{attempt}回, 次回{int(delay)}秒後)",
-    })
-    self._emit_event("agent:waiting_provider",{
-     "agentId":agent_id,
-     "projectId":project_id,
-     "attempt":attempt,
-     "error":str(error),
-     "nextRetrySeconds":int(delay),
-    },project_id)
-   def on_recovered(attempt:int)->None:
-    self._data_store.update_agent(agent_id,{
-     "status":"running",
-     "currentTask":"API接続回復、処理再開",
-    })
-    self._emit_event("agent:progress",{
-     "agentId":agent_id,
-     "projectId":project_id,
-     "message":f"API接続回復 ({attempt}回の試行後)",
-    },project_id)
-   output=await retry_until_provider_available(
-    self._agent_runner.run_agent,
-    operation_name=f"agent_{agent['type']}",
-    on_waiting=on_waiting,
-    on_recovered=on_recovered,
-    context=context,
-   )
+   provider_id=self._get_provider_id_for_agent(project,agent["type"])
+   if provider_id:
+    health_monitor=get_health_monitor()
+    health=health_monitor.get_health_status(provider_id)
+    if health and not health.available:
+     def on_waiting(attempt:int)->None:
+      self._data_store.update_agent(agent_id,{
+       "status":"waiting_provider",
+       "currentTask":f"API接続待機中 ({provider_id}, 確認{attempt}回目)",
+      })
+      self._emit_event("agent:waiting_provider",{
+       "agentId":agent_id,
+       "projectId":project_id,
+       "providerId":provider_id,
+       "attempt":attempt,
+      },project_id)
+     def on_recovered(attempt:int)->None:
+      self._data_store.update_agent(agent_id,{
+       "status":"running",
+       "currentTask":"API接続回復、処理再開",
+      })
+      self._emit_event("agent:progress",{
+       "agentId":agent_id,
+       "projectId":project_id,
+       "message":f"API接続回復 ({attempt}回の確認後)",
+      },project_id)
+     await wait_for_provider_available(
+      health_monitor,
+      provider_id,
+      check_interval=10.0,
+      on_waiting=on_waiting,
+      on_recovered=on_recovered,
+     )
+   output=await self._agent_runner.run_agent(context)
    if output.status==AgentStatus.COMPLETED:
     self._data_store.update_agent(agent_id,{
      "status":"completed",
@@ -197,30 +203,35 @@ class AgentExecutionService:
    config=project.get("config",{}),
   )
   try:
-   def on_waiting_leader(attempt:int,error:Exception,delay:float)->None:
-    self._data_store.update_agent(leader_agent_id,{
-     "status":"waiting_provider",
-     "currentTask":f"API接続待機中 (試行{attempt}回, 次回{int(delay)}秒後)",
-    })
-    self._emit_event("agent:waiting_provider",{
-     "agentId":leader_agent_id,
-     "projectId":project_id,
-     "attempt":attempt,
-     "error":str(error),
-     "nextRetrySeconds":int(delay),
-    },project_id)
-   def on_recovered_leader(attempt:int)->None:
-    self._data_store.update_agent(leader_agent_id,{
-     "status":"running",
-     "currentTask":"API接続回復、処理再開",
-    })
-   results=await retry_until_provider_available(
-    orchestrator.run_leader_with_workers,
-    operation_name=f"leader_{agent['type']}",
-    on_waiting=on_waiting_leader,
-    on_recovered=on_recovered_leader,
-    context=context,
-   )
+   provider_id=self._get_provider_id_for_agent(project,agent["type"])
+   if provider_id:
+    health_monitor=get_health_monitor()
+    health=health_monitor.get_health_status(provider_id)
+    if health and not health.available:
+     def on_waiting_leader(attempt:int)->None:
+      self._data_store.update_agent(leader_agent_id,{
+       "status":"waiting_provider",
+       "currentTask":f"API接続待機中 ({provider_id}, 確認{attempt}回目)",
+      })
+      self._emit_event("agent:waiting_provider",{
+       "agentId":leader_agent_id,
+       "projectId":project_id,
+       "providerId":provider_id,
+       "attempt":attempt,
+      },project_id)
+     def on_recovered_leader(attempt:int)->None:
+      self._data_store.update_agent(leader_agent_id,{
+       "status":"running",
+       "currentTask":"API接続回復、処理再開",
+      })
+     await wait_for_provider_available(
+      health_monitor,
+      provider_id,
+      check_interval=10.0,
+      on_waiting=on_waiting_leader,
+      on_recovered=on_recovered_leader,
+     )
+   results=await orchestrator.run_leader_with_workers(context)
    if results.get("human_review_required"):
     self._data_store.update_agent(leader_agent_id,{
      "status":"waiting_approval",
@@ -251,6 +262,11 @@ class AgentExecutionService:
     "error":str(e)
    },project_id)
    return {"success":False,"error":str(e)}
+
+ def _get_provider_id_for_agent(self,project:Dict,agent_type:str)->Optional[str]:
+  ai_services=project.get("aiServices",{})
+  text_service=ai_services.get("text",{})
+  return text_service.get("provider")
 
  def _can_start_agent(self,project_id:str,agent_type:str)->bool:
   workflow_deps=get_workflow_dependencies()

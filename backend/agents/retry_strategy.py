@@ -158,32 +158,25 @@ def retry_sync_with_backoff(
  raise MaxRetriesExceededError(operation_name,config.max_retries) from last_error
 
 
-async def retry_until_provider_available(
- operation:Callable[...,T],
- operation_name:str="API call",
- config:Optional[ProviderRetryConfig]=None,
- on_waiting:Optional[Callable[[int,Exception,float],None]]=None,
+async def wait_for_provider_available(
+ health_monitor,
+ provider_id:str,
+ check_interval:float=10.0,
+ on_waiting:Optional[Callable[[int],None]]=None,
  on_recovered:Optional[Callable[[int],None]]=None,
- *args,
- **kwargs
-)->T:
- """AI API接続エラー時に無限リトライする"""
- config=config or ProviderRetryConfig()
+)->bool:
+ """プロバイダーが利用可能になるまで待機（フラグ確認のみ、API呼び出しなし）"""
  attempt=0
  while True:
-  try:
-   result=await operation(*args,**kwargs)
+  health=health_monitor.get_health_status(provider_id)
+  if health and health.available:
    if attempt>0 and on_recovered:
     on_recovered(attempt)
-   return result
-  except Exception as e:
-   if not is_provider_unavailable_error(e):
-    raise
-   delay=calculate_provider_delay(attempt,config)
-   if on_waiting:
-    on_waiting(attempt+1,e,delay)
-   await asyncio.sleep(delay)
-   attempt+=1
+   return True
+  attempt+=1
+  if on_waiting:
+   on_waiting(attempt)
+  await asyncio.sleep(check_interval)
 
 
 class RetryContext:
