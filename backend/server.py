@@ -34,6 +34,7 @@ from middleware.logger import setup_logging,get_logger
 from services.agent_execution_service import AgentExecutionService
 from services.backup_service import BackupService
 from services.archive_service import ArchiveService
+from services.llm_job_queue import get_llm_job_queue
 
 
 def create_app():
@@ -68,6 +69,7 @@ def create_app():
     agent_runner=None
     agent_execution_service=AgentExecutionService(data_store,sio)
 
+    llm_job_queue=None
     if config.agent.mode=="api":
         agent_runner=create_agent_runner(
             mode=config.agent.mode,
@@ -81,6 +83,10 @@ def create_app():
             health_monitor=get_health_monitor()
             if hasattr(agent_runner,'set_health_monitor'):
                 agent_runner.set_health_monitor(health_monitor)
+        llm_job_queue=get_llm_job_queue()
+        llm_job_queue.set_socketio(sio)
+        llm_job_queue.start()
+        logger.info(f"LLM Job Queue started with max_concurrent={llm_job_queue._max_concurrent}")
     logger.info(f"Agent mode: {config.agent.mode}")
 
     register_project_routes(app,data_store,sio)
@@ -128,6 +134,7 @@ def create_app():
             'backup_info':backup_service.get_backup_info(),
             'archive_stats':archive_service.get_data_statistics(),
             'rate_limiter':limiter.get_stats() if limiter else{},
+            'llm_job_queue':llm_job_queue.get_stats() if llm_job_queue else None,
         }
 
     testdata_path=get_testdata_path()
@@ -145,6 +152,7 @@ def create_app():
     app.agent_execution_service=agent_execution_service
     app.backup_service=backup_service
     app.archive_service=archive_service
+    app.llm_job_queue=llm_job_queue
     app.config_obj=config
     app.sio=sio
     app.wsgi_app_wrapper=app_wsgi

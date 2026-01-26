@@ -419,6 +419,13 @@ def get_mock_data_config()->Dict[str,Any]:
     return load_yaml_config("mock_data.yaml")
 
 
+def get_llm_queue_config()->Dict[str,Any]:
+    try:
+        return load_yaml_config("llm_queue.yaml")
+    except FileNotFoundError:
+        return {"max_concurrent":3,"poll_interval":1.0,"stale_timeout_minutes":30}
+
+
 def get_mock_content(agent_type:str)->str:
     config=get_mock_data_config()
     mock_contents=config.get("mock_contents",{})
