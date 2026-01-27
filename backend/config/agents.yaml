@@ -305,6 +305,11 @@ agent_asset_mapping:
 quality_check_defaults:
   max_retries: 3
 
+task_limits:
+  default_max_tool_iterations: 50
+  loop_detection_window: 6
+  loop_detection_repeat_threshold: 3
+
 agent_generation_types:
   llm:
     - concept
