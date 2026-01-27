@@ -216,6 +216,8 @@ class AgentExecutionService:
    project_concept=project.get("concept",{}),
    previous_outputs=self._get_previous_outputs(project_id,agent["type"]),
    config=project.get("config",{}),
+   on_progress=lambda p,t:self._on_progress(leader_agent_id,project_id,p,t),
+   on_log=lambda l,m:self._on_log(leader_agent_id,project_id,l,m),
   )
   with self._lock:
    self._running_agents[leader_agent_id]=True
@@ -353,6 +355,15 @@ class AgentExecutionService:
 
  def _on_log(self,agent_id:str,project_id:str,level:str,message:str)->None:
   self._data_store.add_agent_log(agent_id,level,message)
+  self._emit_event("agent:log",{
+   "agentId":agent_id,
+   "entry":{
+    "id":f"{agent_id}_{datetime.now().timestamp()}",
+    "timestamp":datetime.now().isoformat(),
+    "level":level,
+    "message":message,
+   }
+  },project_id)
 
  def _on_checkpoint(self,agent_id:str,project_id:str,cp_type:str,data:Dict)->None:
   self._data_store.create_checkpoint(project_id,agent_id,{

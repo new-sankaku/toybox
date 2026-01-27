@@ -114,6 +114,14 @@ class ApiAgentRunner(AgentRunner):
                     output=event["data"]
                 elif event["type"]=="tokens":
                     tokens_used+=event["data"].get("count",0)
+                elif event["type"]=="progress":
+                    d=event["data"]
+                    if context.on_progress:
+                        context.on_progress(d.get("progress",0),d.get("current_task",""))
+                elif event["type"]=="log":
+                    d=event["data"]
+                    if context.on_log:
+                        context.on_log(d.get("level","info"),d.get("message",""))
 
             return AgentOutput(
                 agent_id=context.agent_id,
