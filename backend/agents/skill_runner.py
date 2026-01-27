@@ -1,9 +1,10 @@
 import asyncio
 import json
 import re
+from collections import Counter
 from datetime import datetime
 from typing import Any,Dict,List,AsyncGenerator,Optional,Callable
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 
 from .base import (
  AgentRunner,
@@ -15,6 +16,11 @@ from .base import (
 from .api_runner import ApiAgentRunner
 from skills import create_skill_executor,SkillExecutor,SkillResult
 
+DEFAULT_MAX_ITERATIONS=50
+LOOP_DETECTION_WINDOW=6
+LOOP_DETECTION_REPEAT_THRESHOLD=3
+FINALIZING_BUDGET=1
+
 
 @dataclass
 class ToolCall:
@@ -23,12 +29,46 @@ class ToolCall:
  input:Dict[str,Any]
 
 
+@dataclass
+class IterationRecord:
+ iteration:int
+ skill_names:List[str]=field(default_factory=list)
+ skill_results:List[bool]=field(default_factory=list)
+
+
+class LoopDetector:
+ def __init__(self,window:int=LOOP_DETECTION_WINDOW,repeat_threshold:int=LOOP_DETECTION_REPEAT_THRESHOLD):
+  self._window=window
+  self._repeat_threshold=repeat_threshold
+  self._history:List[str]=[]
+
+ def record(self,skill_names:List[str]):
+  key=",".join(sorted(skill_names))
+  self._history.append(key)
+
+ def is_looping(self)->bool:
+  if len(self._history)<self._window:
+   return False
+  recent=self._history[-self._window:]
+  counts=Counter(recent)
+  most_common_count=counts.most_common(1)[0][1]
+  return most_common_count>=self._repeat_threshold
+
+ def get_loop_info(self)->Optional[str]:
+  if not self.is_looping():
+   return None
+  recent=self._history[-self._window:]
+  counts=Counter(recent)
+  pattern,count=counts.most_common(1)[0]
+  return f"直近{self._window}回中{count}回同一パターン: [{pattern}]"
+
+
 class SkillEnabledAgentRunner(AgentRunner):
  def __init__(
   self,
   base_runner:ApiAgentRunner,
   working_dir:str,
-  max_tool_iterations:int=10,
+  max_tool_iterations:int=DEFAULT_MAX_ITERATIONS,
  ):
   self._base=base_runner
   self._working_dir=working_dir
@@ -115,13 +155,21 @@ class SkillEnabledAgentRunner(AgentRunner):
   total_tokens=0
   final_output=None
   last_response_content=""
+  loop_detector=LoopDetector()
+  stop_reason=None
   try:
    while iteration<self._max_iterations:
     iteration+=1
+    remaining=self._max_iterations-iteration
+    progress=min(85,10+int((iteration/self._max_iterations)*75))
     yield {
      "type":"progress",
-     "data":{"progress":10+iteration*5,"current_task":f"LLM呼び出し中 (iteration {iteration})"}
+     "data":{"progress":progress,"current_task":f"LLM呼び出し中 (iteration {iteration}/{self._max_iterations})"}
     }
+    if remaining<=FINALIZING_BUDGET and iteration>1:
+     messages.append({"role":"user","content":self._build_finalize_prompt(remaining)})
+    elif iteration>1 and iteration%10==0:
+     messages.append({"role":"user","content":self._build_progress_check_prompt(iteration,remaining)})
     response=await self._call_llm_with_tools(messages,skill_schemas,context)
     tokens_used=response.get("tokens_used",0)
     total_tokens+=tokens_used
@@ -142,6 +190,19 @@ class SkillEnabledAgentRunner(AgentRunner):
       "timestamp":datetime.now().isoformat()
      }
     }
+    loop_detector.record([tc.name for tc in tool_calls])
+    if loop_detector.is_looping():
+     loop_info=loop_detector.get_loop_info()
+     stop_reason=f"ループ検出: {loop_info}"
+     yield {
+      "type":"log",
+      "data":{
+       "level":"warning",
+       "message":f"無限ループを検出しました。成果をまとめます。({loop_info})",
+       "timestamp":datetime.now().isoformat()
+      }
+     }
+     break
     messages.append({"role":"assistant","content":last_response_content})
     tool_results=[]
     for tc in tool_calls:
@@ -157,7 +218,10 @@ class SkillEnabledAgentRunner(AgentRunner):
      tool_results.append(self._format_tool_result(tc,result))
     messages.append({"role":"user","content":"\n\n".join(tool_results)})
    if final_output is None:
-    final_output={"type":"document","format":"markdown","content":"最大イテレーション数に達しました","metadata":{}}
+    if stop_reason is None:
+     stop_reason=f"最大イテレーション数({self._max_iterations})に到達"
+    final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason)
+    total_tokens+=final_output.get("metadata",{}).get("summary_tokens",0)
    if data_store and trace_id:
     try:
      input_tokens=int(total_tokens*0.3)
@@ -200,6 +264,53 @@ class SkillEnabledAgentRunner(AgentRunner):
    "type":"output",
    "data":final_output
   }
+
+ def _build_progress_check_prompt(self,iteration:int,remaining:int)->str:
+  return f"""[システム通知] 現在{iteration}イテレーション目です。残り{remaining}回のイテレーションが可能です。
+
+以下を確認してください:
+- 作業は進捗していますか？同じ操作を繰り返していませんか？
+- 問題が解決に向かっていない場合、別のアプローチを検討してください。
+- 残りイテレーション内で完了できない場合、現時点の成果をまとめて最終出力としてください。
+- 最終出力を行う場合はtool_callブロックを含めないでください。"""
+
+ def _build_finalize_prompt(self,remaining:int)->str:
+  return f"""[システム通知] 残りイテレーションは{remaining}回です。これが最後の作業機会です。
+
+これ以上のスキル呼び出しは行わず、ここまでの作業成果を最終出力としてまとめてください。
+tool_callブロックを含めず、成果物を出力してください。"""
+
+ async def _generate_summary_output(self,messages:List[Dict],skill_schemas:List[Dict],context:AgentContext,stop_reason:str)->Dict[str,Any]:
+  summary_prompt=f"""[システム通知] {stop_reason}のため、作業を終了します。
+
+これまでの作業内容と成果を最終出力としてまとめてください。
+- 完了した作業の成果をすべて含めてください。
+- 未完了の作業がある場合、何が残っているかを明記してください。
+- tool_callブロックは含めないでください。"""
+  messages_copy=list(messages)
+  messages_copy.append({"role":"user","content":summary_prompt})
+  try:
+   response=await self._call_llm_with_tools(messages_copy,skill_schemas,context)
+   output=self._process_final_response(response,context)
+   output["metadata"]["stop_reason"]=stop_reason
+   output["metadata"]["summary_tokens"]=response.get("tokens_used",0)
+   return output
+  except Exception as e:
+   last_content=""
+   for msg in reversed(messages):
+    if msg.get("role")=="assistant" and msg.get("content"):
+     last_content=msg["content"]
+     break
+   return {
+    "type":"document",
+    "format":"markdown",
+    "content":last_content or f"作業は{stop_reason}により中断されました。まとめ生成にも失敗しました: {e}",
+    "metadata":{
+     "agent_type":context.agent_type.value,
+     "stop_reason":stop_reason,
+     "summary_error":str(e),
+    }
+   }
 
  def _build_initial_prompt(self,context:AgentContext,skill_schemas:List[Dict])->str:
   skills_desc="\n".join([
