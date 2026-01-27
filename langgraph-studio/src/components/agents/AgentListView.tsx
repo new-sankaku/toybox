@@ -4,7 +4,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle,ChevronDown,ChevronRight,Users}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -46,6 +46,7 @@ export default function AgentListView({
  onRetryAgent
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
+ const[collapsedWorkers,setCollapsedWorkers]=useState<Record<string,boolean>>({})
  const{fetchDefinitions,loaded,getFilteredUIPhases,getEnabledAgents}=useAgentDefinitionStore()
  const{currentProject}=useProjectStore()
 
@@ -57,45 +58,66 @@ export default function AgentListView({
  const enabledAgents=useMemo(()=>getEnabledAgents(assetGeneration),[assetGeneration,getEnabledAgents])
  const uiPhases=useMemo(()=>getFilteredUIPhases(assetGeneration),[assetGeneration,getFilteredUIPhases])
 
- const filteredAgents=useMemo(()=>{
-  const enabledList=agents.filter(a=>enabledAgents.has(a.type))
-  if(filterStatus==='all')return enabledList
-  if(filterStatus==='incomplete')return enabledList.filter((agent)=>agent.status!=='completed')
-  return enabledList.filter((agent)=>agent.status===filterStatus)
- },[agents,filterStatus,enabledAgents])
+ const workersByParent=useMemo(()=>{
+  const map:Record<string,Agent[]>={}
+  for(const agent of agents){
+   if(agent.parentAgentId){
+    if(!map[agent.parentAgentId])map[agent.parentAgentId]=[]
+    map[agent.parentAgentId].push(agent)
+   }
+  }
+  return map
+ },[agents])
+
+ const leaderAgents=useMemo(()=>{
+  return agents.filter(a=>enabledAgents.has(a.type)&&!a.parentAgentId)
+ },[agents,enabledAgents])
+
+ const applyFilter=(agentList:Agent[]):Agent[]=>{
+  if(filterStatus==='all')return agentList
+  if(filterStatus==='incomplete')return agentList.filter(a=>a.status!=='completed')
+  return agentList.filter(a=>a.status===filterStatus)
+ }
+
+ const filteredLeaders=useMemo(()=>applyFilter(leaderAgents),[leaderAgents,filterStatus])
+
+ const allAgentsForCount=useMemo(()=>{
+  const leaders=agents.filter(a=>enabledAgents.has(a.type)&&!a.parentAgentId)
+  const workers=agents.filter(a=>!!a.parentAgentId)
+  return[...leaders,...workers]
+ },[agents,enabledAgents])
 
  const statusCounts=useMemo(()=>{
-  const enabledList=agents.filter(a=>enabledAgents.has(a.type))
-  const incomplete=enabledList.filter((a)=>a.status!=='completed').length
+  const list=allAgentsForCount
   return{
-   all:enabledList.length,
-   incomplete,
-   running:enabledList.filter((a)=>a.status==='running').length,
-   waiting_approval:enabledList.filter((a)=>a.status==='waiting_approval').length,
-   waiting_response:enabledList.filter((a)=>a.status==='waiting_response').length,
-   paused:enabledList.filter((a)=>a.status==='paused').length,
-   pending:enabledList.filter((a)=>a.status==='pending').length,
-   completed:enabledList.filter((a)=>a.status==='completed').length,
-   failed:enabledList.filter((a)=>a.status==='failed').length,
-   blocked:enabledList.filter((a)=>a.status==='blocked').length,
-   interrupted:enabledList.filter((a)=>a.status==='interrupted').length,
-   cancelled:enabledList.filter((a)=>a.status==='cancelled').length
+   all:list.length,
+   incomplete:list.filter(a=>a.status!=='completed').length,
+   running:list.filter(a=>a.status==='running').length,
+   waiting_approval:list.filter(a=>a.status==='waiting_approval').length,
+   waiting_response:list.filter(a=>a.status==='waiting_response').length,
+   paused:list.filter(a=>a.status==='paused').length,
+   pending:list.filter(a=>a.status==='pending').length,
+   completed:list.filter(a=>a.status==='completed').length,
+   failed:list.filter(a=>a.status==='failed').length,
+   blocked:list.filter(a=>a.status==='blocked').length,
+   interrupted:list.filter(a=>a.status==='interrupted').length,
+   cancelled:list.filter(a=>a.status==='cancelled').length
   }
- },[agents,enabledAgents])
+ },[allAgentsForCount])
 
  const agentsByPhase=useMemo(()=>{
   const result:Record<string,Agent[]>={}
   for(const phase of uiPhases){
    const phaseAgentSet=new Set(phase.agents)
-   result[phase.id]=filteredAgents.filter(a=>phaseAgentSet.has(a.type))
+   result[phase.id]=filteredLeaders.filter(a=>phaseAgentSet.has(a.type))
   }
   return result
- },[filteredAgents,uiPhases])
+ },[filteredLeaders,uiPhases])
 
  const getWaitingFor=useCallback((agent:Agent):string|undefined=>{
   if(agent.status!=='pending')return undefined
 
-  const runningAgents=agents.filter(a=>a.status==='running')
+  const runningAgents=agents.filter(a=>a.status==='running'&&!a.parentAgentId)
   if(runningAgents.length>0){
    const runningNames=runningAgents.map(a=>getDisplayName(a))
    if(runningNames.length===1){
@@ -105,7 +127,7 @@ export default function AgentListView({
   }
 
   const pendingBeforeMe=agents.filter(a=>
-   a.id!==agent.id&&
+   a.id!==agent.id&&!a.parentAgentId&&
       (a.status==='pending'||a.status==='running')
 )
 
@@ -117,13 +139,39 @@ export default function AgentListView({
    return'開始待機'
   }
 
-  if(runningAgents.length>0){
-   const names=runningAgents.map(a=>getDisplayName(a))
-   return`${names.join(', ')} 完了待ち`
-  }
-
   return'プロジェクト開始待ち'
  },[agents])
+
+ const toggleWorkerCollapse=useCallback((agentId:string)=>{
+  setCollapsedWorkers(prev=>({...prev,[agentId]:!prev[agentId]}))
+ },[])
+
+ const getFilteredWorkers=(parentId:string):Agent[]=>{
+  const workers=workersByParent[parentId]||[]
+  return applyFilter(workers)
+ }
+
+ const getPhaseAgentCount=(phaseId:string)=>{
+  const phaseAgents=agentsByPhase[phaseId]||[]
+  let total=phaseAgents.length
+  let completed=phaseAgents.filter(a=>a.status==='completed').length
+  let running=phaseAgents.filter(a=>a.status==='running').length
+  for(const agent of phaseAgents){
+   const workers=workersByParent[agent.id]||[]
+   total+=workers.length
+   completed+=workers.filter(w=>w.status==='completed').length
+   running+=workers.filter(w=>w.status==='running').length
+  }
+  return{total,completed,running}
+ }
+
+ const displayCount=useMemo(()=>{
+  let count=filteredLeaders.length
+  for(const agent of filteredLeaders){
+   count+=getFilteredWorkers(agent.id).length
+  }
+  return count
+ },[filteredLeaders,workersByParent,filterStatus])
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
@@ -137,7 +185,7 @@ export default function AgentListView({
        </div>
       </CardContent>
      </Card>
-) : filteredAgents.length===0?(
+) : filteredLeaders.length===0&&Object.values(workersByParent).every(w=>applyFilter(w).length===0)?(
      <Card className="flex-1">
       <CardContent className="py-12 text-center">
        <div className="text-nier-text-light">
@@ -153,29 +201,71 @@ export default function AgentListView({
       {uiPhases.map((phase,idx)=>{
        const phaseAgents=agentsByPhase[phase.id]||[]
        if(phaseAgents.length===0)return null
+       const counts=getPhaseAgentCount(phase.id)
        return(
         <Card key={phase.id} className="mb-3">
          <CardHeader>
           <DiamondMarker>{`PHASE ${idx+1} - ${phase.label}`}</DiamondMarker>
           <span className="ml-auto text-nier-caption text-nier-text-light">
-           {phaseAgents.filter(a=>a.status==='completed').length}/{phaseAgents.length}完了
-           {phaseAgents.filter(a=>a.status==='running').length>0&&(
-            <span className="ml-2 text-nier-text-light">{phaseAgents.filter(a=>a.status==='running').length}稼働中</span>
+           {counts.completed}/{counts.total}完了
+           {counts.running>0&&(
+            <span className="ml-2 text-nier-text-light">{counts.running}稼働中</span>
 )}
           </span>
          </CardHeader>
          <CardContent className="p-0">
           <div className="divide-y divide-nier-border-light">
-           {phaseAgents.map((agent)=>(
-            <AgentCard
-             key={agent.id}
-             agent={agent}
-             onSelect={onSelectAgent}
-             isSelected={selectedAgentId===agent.id}
-             waitingFor={getWaitingFor(agent)}
-             onRetry={onRetryAgent}
-            />
+           {phaseAgents.map((agent)=>{
+            const workers=getFilteredWorkers(agent.id)
+            const allWorkers=workersByParent[agent.id]||[]
+            const hasWorkers=allWorkers.length>0
+            const isCollapsed=collapsedWorkers[agent.id]??false
+            return(
+             <div key={agent.id}>
+              <div className="flex items-stretch">
+               <div className="flex-1">
+                <AgentCard
+                 agent={agent}
+                 onSelect={onSelectAgent}
+                 isSelected={selectedAgentId===agent.id}
+                 waitingFor={getWaitingFor(agent)}
+                 onRetry={onRetryAgent}
+                />
+               </div>
+               {hasWorkers&&(
+                <button
+                 className="flex items-center gap-1 px-2 text-nier-caption text-nier-text-light hover:text-nier-text-main hover:bg-nier-bg-selected transition-colors border-l border-nier-border-light"
+                 onClick={()=>toggleWorkerCollapse(agent.id)}
+                 title={isCollapsed?'Workers展開':'Workers折りたたみ'}
+                >
+                 <Users size={12}/>
+                 <span>{allWorkers.length}</span>
+                 {isCollapsed?<ChevronRight size={12}/>:<ChevronDown size={12}/>}
+                </button>
+)}
+              </div>
+              {hasWorkers&&!isCollapsed&&workers.length>0&&(
+               <div className="border-t border-nier-border-light/50">
+                {workers.map(worker=>(
+                 <AgentCard
+                  key={worker.id}
+                  agent={worker}
+                  onSelect={onSelectAgent}
+                  isSelected={selectedAgentId===worker.id}
+                  onRetry={onRetryAgent}
+                  isWorker
+                 />
 ))}
+               </div>
+)}
+              {hasWorkers&&!isCollapsed&&workers.length===0&&allWorkers.length>0&&(
+               <div className="pl-8 py-1.5 text-nier-caption text-nier-text-light border-t border-nier-border-light/50">
+                Workers: {allWorkers.length}件（フィルタにより非表示）
+               </div>
+)}
+             </div>
+)
+           })}
           </div>
          </CardContent>
         </Card>
@@ -244,7 +334,7 @@ export default function AgentListView({
 )}
        <div className="flex justify-between border-t border-nier-border-light pt-1 mt-1">
         <span className="text-nier-text-light">表示中</span>
-        <span className="text-nier-text-main">{filteredAgents.length}件</span>
+        <span className="text-nier-text-main">{displayCount}件</span>
        </div>
       </div>
      </CardContent>
