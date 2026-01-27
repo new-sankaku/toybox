@@ -345,6 +345,15 @@ class AgentExecutionService:
 
  def _on_log(self,agent_id:str,project_id:str,level:str,message:str)->None:
   self._data_store.add_agent_log(agent_id,level,message)
+  self._emit_event("agent:log",{
+   "agentId":agent_id,
+   "entry":{
+    "id":f"{agent_id}_{datetime.now().timestamp()}",
+    "timestamp":datetime.now().isoformat(),
+    "level":level,
+    "message":message,
+   }
+  },project_id)
 
  def _on_checkpoint(self,agent_id:str,project_id:str,cp_type:str,data:Dict)->None:
   self._data_store.create_checkpoint(project_id,agent_id,{

@@ -56,6 +56,30 @@ class SkillEnabledAgentRunner(AgentRunner):
      output=event["data"]
     elif event["type"]=="tokens":
      tokens_used+=event["data"].get("count",0)
+    elif event["type"]=="progress":
+     d=event["data"]
+     if context.on_progress:
+      context.on_progress(d.get("progress",0),d.get("current_task",""))
+    elif event["type"]=="log":
+     d=event["data"]
+     if context.on_log:
+      context.on_log(d.get("level","info"),d.get("message",""))
+    elif event["type"]=="skill_call":
+     d=event["data"]
+     if context.on_log:
+      context.on_log("info",f"スキル実行開始: {d['skill']}")
+    elif event["type"]=="skill_result":
+     d=event["data"]
+     if context.on_log:
+      if d.get("success"):
+       context.on_log("info",f"スキル成功: {d['skill']}")
+      else:
+       err=d.get("error") or d.get("output","")
+       context.on_log("error",f"スキル失敗: {d['skill']} - {err}")
+    elif event["type"]=="checkpoint":
+     if context.on_checkpoint:
+      d=event["data"]
+      context.on_checkpoint(d.get("type","review"),d)
    return AgentOutput(
     agent_id=context.agent_id,
     agent_type=context.agent_type,
@@ -152,7 +176,7 @@ class SkillEnabledAgentRunner(AgentRunner):
      result=await executor.execute_skill(tc.name,**tc.input)
      yield {
       "type":"skill_result",
-      "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:500]}
+      "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:500],"error":result.error}
      }
      tool_results.append(self._format_tool_result(tc,result))
     messages.append({"role":"user","content":"\n\n".join(tool_results)})
