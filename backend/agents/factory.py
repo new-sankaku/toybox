@@ -27,8 +27,10 @@ def create_agent_runner(mode:Optional[str]=None,**kwargs)->AgentRunner:
         )
 
     elif actual_mode=="testdata" or actual_mode=="mock":
-        from .mock_runner import MockAgentRunner
-        return MockAgentRunner(**kwargs)
+        if not working_dir:
+            working_dir=os.environ.get("PROJECT_WORKING_DIR","/tmp/toybox/projects")
+        from .mock_skill_runner import MockSkillRunner
+        return MockSkillRunner(working_dir=working_dir,**kwargs)
 
     else:
         raise ValueError(f"Unknown agent mode: {actual_mode}. Use 'testdata', 'mock', 'api', or 'api_with_skills'")
