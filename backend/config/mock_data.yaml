@@ -71,6 +71,269 @@ checkpoint_titles:
     type: review
     title: レビュー依頼
 
+mock_skill_sequences:
+  code_worker:
+    - content: |
+        まずプロジェクト構造を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        プロジェクトのメインファイルを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/main.js", "content": "import { Game } from './game/Game.js';\nimport { InputManager } from './input/InputManager.js';\nimport { Renderer } from './rendering/Renderer.js';\n\nconst canvas = document.getElementById('gameCanvas');\nconst game = new Game(canvas);\nconst input = new InputManager(canvas);\nconst renderer = new Renderer(canvas);\n\nfunction gameLoop(timestamp) {\n  input.update();\n  game.update(timestamp, input.getState());\n  renderer.render(game.getState());\n  requestAnimationFrame(gameLoop);\n}\n\ngame.init().then(() => {\n  requestAnimationFrame(gameLoop);\n});\n"}}
+        ```
+
+    - content: |
+        ゲームコアロジックを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/game/Game.js", "content": "export class Game {\n  constructor(canvas) {\n    this.canvas = canvas;\n    this.state = {\n      ball: { x: 100, y: 100, vx: 0, vy: 0, radius: 15 },\n      goal: { x: 700, y: 500, width: 40, height: 40 },\n      obstacles: [],\n      score: 0,\n      level: 1,\n      status: 'playing'\n    };\n    this.gravity = 9.8;\n    this.friction = 0.3;\n    this.restitution = 0.7;\n    this.lastTimestamp = 0;\n  }\n\n  async init() {\n    this.loadLevel(1);\n  }\n\n  loadLevel(level) {\n    this.state.obstacles = [\n      { x: 300, y: 200, width: 100, height: 20 },\n      { x: 500, y: 350, width: 150, height: 20 },\n      { x: 200, y: 450, width: 80, height: 20 }\n    ];\n    this.state.ball = { x: 100, y: 100, vx: 0, vy: 0, radius: 15 };\n    this.state.level = level;\n    this.state.status = 'playing';\n  }\n\n  update(timestamp, inputState) {\n    if (this.state.status !== 'playing') return;\n    const dt = Math.min((timestamp - this.lastTimestamp) / 1000, 0.05);\n    this.lastTimestamp = timestamp;\n    const ball = this.state.ball;\n    if (inputState.left) ball.vx -= 300 * dt;\n    if (inputState.right) ball.vx += 300 * dt;\n    if (inputState.jump && ball.onGround) ball.vy = -400;\n    ball.vy += this.gravity * 60 * dt;\n    ball.vx *= (1 - this.friction * dt);\n    ball.x += ball.vx * dt;\n    ball.y += ball.vy * dt;\n    ball.onGround = false;\n    this.checkCollisions();\n    this.checkGoal();\n  }\n\n  checkCollisions() {\n    const ball = this.state.ball;\n    const canvas = this.canvas;\n    if (ball.y + ball.radius > canvas.height) {\n      ball.y = canvas.height - ball.radius;\n      ball.vy *= -this.restitution;\n      ball.onGround = true;\n    }\n    if (ball.x - ball.radius < 0) { ball.x = ball.radius; ball.vx *= -this.restitution; }\n    if (ball.x + ball.radius > canvas.width) { ball.x = canvas.width - ball.radius; ball.vx *= -this.restitution; }\n    if (ball.y - ball.radius < 0) { ball.y = ball.radius; ball.vy *= -this.restitution; }\n    for (const obs of this.state.obstacles) {\n      if (ball.x + ball.radius > obs.x && ball.x - ball.radius < obs.x + obs.width &&\n          ball.y + ball.radius > obs.y && ball.y - ball.radius < obs.y + obs.height) {\n        ball.y = obs.y - ball.radius;\n        ball.vy *= -this.restitution;\n        ball.onGround = true;\n      }\n    }\n  }\n\n  checkGoal() {\n    const ball = this.state.ball;\n    const goal = this.state.goal;\n    if (ball.x > goal.x && ball.x < goal.x + goal.width &&\n        ball.y > goal.y && ball.y < goal.y + goal.height) {\n      this.state.status = 'cleared';\n      this.state.score += 1000;\n    }\n  }\n\n  getState() { return this.state; }\n}\n"}}
+        ```
+
+    - content: |
+        入力管理クラスを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/input/InputManager.js", "content": "export class InputManager {\n  constructor(canvas) {\n    this.keys = {};\n    this.state = { left: false, right: false, jump: false, restart: false };\n    window.addEventListener('keydown', (e) => { this.keys[e.key] = true; });\n    window.addEventListener('keyup', (e) => { this.keys[e.key] = false; });\n  }\n\n  update() {\n    this.state.left = this.keys['ArrowLeft'] || false;\n    this.state.right = this.keys['ArrowRight'] || false;\n    this.state.jump = this.keys[' '] || this.keys['ArrowUp'] || false;\n    this.state.restart = this.keys['r'] || this.keys['R'] || false;\n  }\n\n  getState() { return { ...this.state }; }\n}\n"}}
+        ```
+
+    - content: |
+        レンダリングクラスを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/rendering/Renderer.js", "content": "export class Renderer {\n  constructor(canvas) {\n    this.canvas = canvas;\n    this.ctx = canvas.getContext('2d');\n  }\n\n  render(state) {\n    const ctx = this.ctx;\n    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);\n    ctx.fillStyle = '#E8E4D4';\n    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);\n    ctx.fillStyle = '#7AAA7A';\n    const goal = state.goal;\n    ctx.fillRect(goal.x, goal.y, goal.width, goal.height);\n    ctx.fillStyle = '#57534A';\n    for (const obs of state.obstacles) {\n      ctx.fillRect(obs.x, obs.y, obs.width, obs.height);\n    }\n    ctx.fillStyle = '#B85C5C';\n    ctx.beginPath();\n    ctx.arc(state.ball.x, state.ball.y, state.ball.radius, 0, Math.PI * 2);\n    ctx.fill();\n    ctx.fillStyle = '#454138';\n    ctx.font = '16px monospace';\n    ctx.fillText('Score: ' + state.score, 10, 25);\n    ctx.fillText('Level: ' + state.level, 10, 45);\n    if (state.status === 'cleared') {\n      ctx.fillStyle = 'rgba(0,0,0,0.5)';\n      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);\n      ctx.fillStyle = '#7AAA7A';\n      ctx.font = '48px monospace';\n      ctx.textAlign = 'center';\n      ctx.fillText('STAGE CLEAR!', this.canvas.width/2, this.canvas.height/2);\n      ctx.textAlign = 'start';\n    }\n  }\n}\n"}}
+        ```
+
+    - content: |
+        HTMLエントリポイントを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "index.html", "content": "<!DOCTYPE html>\n<html lang=\"ja\">\n<head>\n  <meta charset=\"UTF-8\">\n  <title>パズルアクションゲーム</title>\n  <style>\n    body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background: #DAD5C3; }\n    canvas { border: 2px solid #57534A; }\n  </style>\n</head>\n<body>\n  <canvas id=\"gameCanvas\" width=\"800\" height=\"600\"></canvas>\n  <script type=\"module\" src=\"src/main.js\"></script>\n</body>\n</html>\n"}}
+        ```
+
+    - content: |
+        # コード生成完了
+
+        以下のファイルを作成しました:
+
+        ## ファイル一覧
+        - `index.html` - ゲームのHTMLエントリポイント
+        - `src/main.js` - メインエントリポイント（ゲームループ）
+        - `src/game/Game.js` - ゲームコアロジック（物理演算・衝突判定）
+        - `src/input/InputManager.js` - キーボード入力管理
+        - `src/rendering/Renderer.js` - Canvas2Dレンダリング
+
+        ## 実装仕様
+        - 物理演算: 重力 9.8m/s², 摩擦 0.3, 反発 0.7
+        - 操作: 矢印キーで移動、スペースでジャンプ
+        - ゴール判定によるステージクリア機能
+        - スコアシステム搭載
+
+  asset_worker:
+    - content: |
+        プロジェクトのアセットディレクトリ構造を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        メインキャラクター画像を生成します。
+
+        ```tool_call
+        {"name": "image_generate", "input": {"prompt": "cute round ball character with face, game sprite, transparent background", "width": 256, "height": 256, "style": "pixel_art", "output_path": "assets/images/character_ball.png"}}
+        ```
+
+    - content: |
+        ゴールオブジェクトの画像を生成します。
+
+        ```tool_call
+        {"name": "image_generate", "input": {"prompt": "golden star goal marker, glowing, game sprite", "width": 128, "height": 128, "style": "pixel_art", "output_path": "assets/images/goal_star.png"}}
+        ```
+
+    - content: |
+        背景タイル画像を生成します。
+
+        ```tool_call
+        {"name": "image_generate", "input": {"prompt": "stone brick wall tile seamless texture for puzzle game", "width": 64, "height": 64, "style": "pixel_art", "output_path": "assets/images/tile_stone.png"}}
+        ```
+
+    - content: |
+        障害物の画像を生成します。
+
+        ```tool_call
+        {"name": "image_generate", "input": {"prompt": "wooden platform obstacle, side view, game asset", "width": 256, "height": 64, "style": "pixel_art", "output_path": "assets/images/obstacle_wood.png"}}
+        ```
+
+    - content: |
+        UIアイコンを生成します。
+
+        ```tool_call
+        {"name": "image_generate", "input": {"prompt": "game UI heart icon, health point indicator", "width": 64, "height": 64, "style": "pixel_art", "output_path": "assets/images/ui_heart.png"}}
+        ```
+
+    - content: |
+        アセットメタデータファイルを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "assets/manifest.json", "content": "{\n  \"version\": \"1.0.0\",\n  \"assets\": {\n    \"images\": [\n      {\"id\": \"character_ball\", \"path\": \"images/character_ball.png\", \"type\": \"sprite\", \"width\": 256, \"height\": 256},\n      {\"id\": \"goal_star\", \"path\": \"images/goal_star.png\", \"type\": \"sprite\", \"width\": 128, \"height\": 128},\n      {\"id\": \"tile_stone\", \"path\": \"images/tile_stone.png\", \"type\": \"tile\", \"width\": 64, \"height\": 64},\n      {\"id\": \"obstacle_wood\", \"path\": \"images/obstacle_wood.png\", \"type\": \"sprite\", \"width\": 256, \"height\": 64},\n      {\"id\": \"ui_heart\", \"path\": \"images/ui_heart.png\", \"type\": \"ui\", \"width\": 64, \"height\": 64}\n    ]\n  }\n}\n"}}
+        ```
+
+    - content: |
+        # アセット生成完了
+
+        以下のアセットを生成しました:
+
+        ## 画像アセット
+        - `assets/images/character_ball.png` (256x256) - メインキャラクター
+        - `assets/images/goal_star.png` (128x128) - ゴールマーカー
+        - `assets/images/tile_stone.png` (64x64) - 石タイル（シームレス）
+        - `assets/images/obstacle_wood.png` (256x64) - 木の障害物
+        - `assets/images/ui_heart.png` (64x64) - ハートアイコン
+
+        ## メタデータ
+        - `assets/manifest.json` - アセット管理マニフェスト
+
+  concept_leader:
+    - content: |
+        プロジェクトの既存情報を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        コンセプトドキュメントを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "docs/concept.md", "content": "# ゲームコンセプト: パズルアクションゲーム\n\n## コアコンセプト\nボールを転がしてゴールを目指す物理演算パズルゲーム。\nシンプルな操作と奥深い物理パズルを組み合わせ、カジュアルに遊べるゲーム体験を提供する。\n\n## ゲームの柱\n1. **物理演算**: リアルな重力・摩擦・反発で直感的な操作感\n2. **パズル要素**: 障害物の配置を読み解くルート探索\n3. **スコアシステム**: タイムアタック+コイン収集で繰り返し遊べる\n\n## ターゲットユーザー\n- 全年齢向け\n- カジュアルゲーマー\n- 短時間で遊びたいユーザー\n\n## プラットフォーム\n- Web（HTML5 Canvas）\n- レスポンシブ対応\n\n## 技術スタック\n- Vanilla JavaScript (ES Modules)\n- Canvas 2D API\n- Web Audio API\n\n## ステージ構成\n- チュートリアル: 5ステージ\n- メイン: 25ステージ\n- 隠しステージ: 5ステージ\n\n## 差別化ポイント\n- 軽量・インストール不要\n- 物理演算のリアルさとパズルの面白さの両立\n- ステージエディタによるUGC対応\n"}}
+        ```
+
+    - content: |
+        # コンセプト策定完了
+
+        ## 概要
+        「パズルアクションゲーム」のコンセプトを策定し、`docs/concept.md`に保存しました。
+
+        ## 決定事項
+        - ジャンル: 物理演算パズルアクション
+        - プラットフォーム: Web (HTML5)
+        - ターゲット: 全年齢カジュアルゲーマー
+        - 技術: Vanilla JS + Canvas 2D
+        - ステージ: 全35ステージ（チュートリアル5 + メイン25 + 隠し5）
+
+  design_leader:
+    - content: |
+        コンセプトドキュメントを確認します。
+
+        ```tool_call
+        {"name": "file_read", "input": {"path": "docs/concept.md"}}
+        ```
+
+    - content: |
+        ゲームデザインドキュメントを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "docs/game_design.md", "content": "# ゲームデザインドキュメント\n\n## 操作方法\n| 入力 | アクション |\n|------|--------|\n| ←→ | ボールの移動 |\n| ↑/Space | ジャンプ |\n| R | リスタート |\n| P | ポーズ |\n\n## 物理パラメータ\n| パラメータ | 値 | 備考 |\n|-----------|-----|------|\n| 重力 | 9.8 m/s² | 標準的な地球の重力 |\n| 摩擦係数 | 0.3 | 地面との摩擦 |\n| 反発係数 | 0.7 | 壁・障害物との反発 |\n| 最大速度 | 500 px/s | 水平方向の速度制限 |\n| ジャンプ力 | 400 px/s | 上方向の初速度 |\n\n## スコアリング\n- ステージクリア: 1000点\n- タイムボーナス: 最大 500点\n- コイン収集: 各100点\n- 隠しアイテム: 各500点\n\n## ステージ要素\n- **地面ブロック**: 基本的な足場\n- **動く足場**: 一定パターンで動く\n- **壊れる足場**: 一定時間で壊れる\n- **バネ**: ボールを跳ね上げる\n- **スイッチ**: ギミックの起動\n- **ワープホール**: 別の場所にテレポート\n\n## 難易度設計\n- Lv1-5: 基本操作の習得\n- Lv6-15: 障害物の組み合わせ\n- Lv16-25: 動くギミック導入\n- Lv26-30: 複合パズル\n- Lv31-35: 高難度チャレンジ\n"}}
+        ```
+
+    - content: |
+        # ゲームデザイン策定完了
+
+        ## 概要
+        コンセプトに基づきゲームデザインを策定し、`docs/game_design.md`に保存しました。
+
+        ## 主要設計
+        - 操作系: 4ボタン（左右移動・ジャンプ・リスタート・ポーズ）
+        - 物理演算: 重力9.8, 摩擦0.3, 反発0.7
+        - スコア: クリアボーナス+タイム+コイン+隠しアイテム
+        - 難易度: 5段階に分かれた35ステージ
+
+  build_worker:
+    - content: |
+        プロジェクトの構造を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": ".", "recursive": true, "pattern": "*.js"}}
+        ```
+
+    - content: |
+        package.jsonを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "package.json", "content": "{\n  \"name\": \"puzzle-action-game\",\n  \"version\": \"1.0.0\",\n  \"description\": \"物理演算パズルアクションゲーム\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"npx serve .\",\n    \"build\": \"echo 'No build step needed (vanilla JS)'\",\n    \"test\": \"echo 'Tests passed'\",\n    \"lint\": \"echo 'Lint passed'\"\n  },\n  \"license\": \"MIT\"\n}\n"}}
+        ```
+
+    - content: |
+        # ビルド設定完了
+
+        ## 成果物
+        - `package.json` - プロジェクト設定ファイル
+
+        ## 実行方法
+        - 開発: `npm run dev` (ローカルサーバー起動)
+        - ビルド: ビルドステップ不要 (Vanilla JS)
+        - テスト: `npm test`
+
+  unit_test_worker:
+    - content: |
+        テスト対象のコードを確認します。
+
+        ```tool_call
+        {"name": "file_read", "input": {"path": "src/game/Game.js"}}
+        ```
+
+    - content: |
+        テストファイルを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "tests/game.test.js", "content": "import { describe, it, expect } from './test-utils.js';\n\nconst mockCanvas = { width: 800, height: 600, getContext: () => ({}) };\n\ndescribe('Game', () => {\n  it('initializes with correct default state', () => {\n    const { Game } = require('../src/game/Game.js');\n    const game = new Game(mockCanvas);\n    expect(game.state.ball.x).toBe(100);\n    expect(game.state.ball.y).toBe(100);\n    expect(game.state.score).toBe(0);\n    expect(game.state.level).toBe(1);\n    expect(game.state.status).toBe('playing');\n  });\n\n  it('applies gravity correctly', () => {\n    const { Game } = require('../src/game/Game.js');\n    const game = new Game(mockCanvas);\n    const prevVy = game.state.ball.vy;\n    game.update(16, { left: false, right: false, jump: false });\n    expect(game.state.ball.vy).toBeGreaterThan(prevVy);\n  });\n\n  it('detects goal collision', () => {\n    const { Game } = require('../src/game/Game.js');\n    const game = new Game(mockCanvas);\n    game.state.ball.x = game.state.goal.x + 10;\n    game.state.ball.y = game.state.goal.y + 10;\n    game.checkGoal();\n    expect(game.state.status).toBe('cleared');\n    expect(game.state.score).toBe(1000);\n  });\n\n  it('bounces ball off floor', () => {\n    const { Game } = require('../src/game/Game.js');\n    const game = new Game(mockCanvas);\n    game.state.ball.y = 590;\n    game.state.ball.vy = 100;\n    game.checkCollisions();\n    expect(game.state.ball.vy).toBeLessThan(0);\n    expect(game.state.ball.onGround).toBe(true);\n  });\n});\n"}}
+        ```
+
+    - content: |
+        テストユーティリティを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "tests/test-utils.js", "content": "let currentSuite = '';\nlet results = { passed: 0, failed: 0, errors: [] };\n\nexport function describe(name, fn) {\n  currentSuite = name;\n  fn();\n}\n\nexport function it(name, fn) {\n  try {\n    fn();\n    results.passed++;\n    console.log(`  ✓ ${currentSuite} > ${name}`);\n  } catch (e) {\n    results.failed++;\n    results.errors.push(`${currentSuite} > ${name}: ${e.message}`);\n    console.log(`  ✗ ${currentSuite} > ${name}: ${e.message}`);\n  }\n}\n\nexport function expect(actual) {\n  return {\n    toBe: (expected) => { if (actual !== expected) throw new Error(`Expected ${expected} but got ${actual}`); },\n    toBeGreaterThan: (expected) => { if (!(actual > expected)) throw new Error(`Expected ${actual} > ${expected}`); },\n    toBeLessThan: (expected) => { if (!(actual < expected)) throw new Error(`Expected ${actual} < ${expected}`); },\n    toBeTruthy: () => { if (!actual) throw new Error(`Expected truthy but got ${actual}`); },\n  };\n}\n\nexport function require(path) {\n  console.log(`[mock require] ${path}`);\n  return {};\n}\n"}}
+        ```
+
+    - content: |
+        # テスト作成完了
+
+        ## テストファイル
+        - `tests/game.test.js` - Gameクラスのユニットテスト (4テストケース)
+        - `tests/test-utils.js` - テストユーティリティ
+
+        ## テストケース
+        1. ゲーム初期状態の確認
+        2. 重力の適用確認
+        3. ゴール衝突判定の確認
+        4. 床での反発確認
+
+  default:
+    - content: |
+        プロジェクトの現在の状態を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        成果物ドキュメントを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "docs/output.md", "content": "# エージェント出力\n\nこのドキュメントはモックスキルランナーによって自動生成されました。\n\n## 概要\nプロジェクトの現在の状態を確認し、必要な成果物を生成しました。\n\n## 生成日時\n自動生成\n"}}
+        ```
+
+    - content: |
+        # 処理完了
+
+        プロジェクトの状態を確認し、成果物を`docs/output.md`に保存しました。
+
 checkpoint_contents:
   concept_review: |
     # ゲームコンセプト

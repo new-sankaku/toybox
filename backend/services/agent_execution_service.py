@@ -384,7 +384,7 @@ class AgentExecutionService:
    update_data["outputTokens"]=data.get("outputTokens",0)
   elif status=="failed":
    update_data["error"]=data.get("error","")
-  if "currentTask" in data:
+  if"currentTask" in data:
    update_data["currentTask"]=data["currentTask"]
   self._data_store.update_agent(worker_id,update_data)
   self._emit_event(f"agent:{status}",{

@@ -221,7 +221,7 @@ class SkillEnabledAgentRunner(AgentRunner):
 スキルを使う場合は、以下の形式でJSONブロックを記述してください:
 
 ```tool_call
-{{"name": "スキル名", "input": {{"param1": "value1"}}}}
+{{"name":"スキル名","input":{{"param1":"value1"}}}}
 ```
 
 複数のスキルを呼び出す場合は、複数のtool_callブロックを記述できます。
@@ -230,7 +230,7 @@ class SkillEnabledAgentRunner(AgentRunner):
 最終的な回答を出力する場合は、tool_callブロックを含めないでください。
 
 ## プロジェクト情報
-{context.project_concept or "（未定義）"}
+{context.project_concept or"（未定義）"}
 
 ## 前のエージェントの出力
 {self._format_previous_outputs(context.previous_outputs)}
@@ -319,13 +319,13 @@ class SkillEnabledAgentRunner(AgentRunner):
    if isinstance(output,(dict,list)):
     output=json.dumps(output,ensure_ascii=False,indent=2)
    return f"""[ツール実行結果: {tc.name}]
-成功: はい
+成功:はい
 出力:
 {str(output)[:5000]}"""
   else:
    return f"""[ツール実行結果: {tc.name}]
-成功: いいえ
-エラー: {result.error}"""
+成功:いいえ
+エラー:{result.error}"""
 
  def _process_final_response(self,response:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
   return {

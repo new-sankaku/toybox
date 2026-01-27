@@ -429,6 +429,12 @@ def get_mock_data_config()->Dict[str,Any]:
     return load_yaml_config("mock_data.yaml")
 
 
+def get_mock_skill_sequences(agent_type:str)->List[Dict[str,Any]]:
+    config=get_mock_data_config()
+    sequences=config.get("mock_skill_sequences",{})
+    return sequences.get(agent_type,sequences.get("default",[]))
+
+
 def get_provider_max_concurrent(provider_id:str)->int:
     provider=get_provider_config(provider_id)
     return provider.get("max_concurrent",3)

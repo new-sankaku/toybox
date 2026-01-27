@@ -687,7 +687,7 @@ class LeaderWorkerOrchestrator:
         except Exception as e:
             result.status="failed"
             result.error=str(e)
-            if self.on_worker_status and 'worker_id' in locals():
+            if self.on_worker_status and'worker_id' in locals():
                 self.on_worker_status(worker_id,"failed",{"error":str(e)})
 
         return result

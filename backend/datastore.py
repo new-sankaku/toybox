@@ -1467,7 +1467,7 @@ class DataStore:
 
  def get_retryable_agents(self,project_id:str)->List[Dict]:
   """
-  再試行可能なAgent（failed, interrupted, cancelled）の一覧を取得
+  再試行可能なAgent（failed,interrupted,cancelled）の一覧を取得
   """
   with session_scope() as session:
    agent_repo=AgentRepository(session)
