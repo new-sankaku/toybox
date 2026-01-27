@@ -211,7 +211,6 @@ class AgentExecutionService:
    config=project.get("config",{}),
    on_progress=lambda p,t:self._on_progress(leader_agent_id,project_id,p,t),
    on_log=lambda l,m:self._on_log(leader_agent_id,project_id,l,m),
-   on_checkpoint=lambda t,d:self._on_checkpoint(leader_agent_id,project_id,t,d),
   )
   with self._lock:
    self._running_agents[leader_agent_id]=True
