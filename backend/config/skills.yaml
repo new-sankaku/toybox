@@ -43,6 +43,15 @@ skills:
       - code_worker
       - code_leader
       - asset_worker
+      - concept_leader
+      - design_leader
+      - scenario_leader
+      - character_leader
+      - world_leader
+      - asset_leader
+      - integrator_leader
+      - tester_leader
+      - reviewer_leader
     restrictions:
       max_file_size: 1048576
       require_approval: false
@@ -219,6 +228,16 @@ skills:
       - research_worker
       - story_worker
       - lore_worker
+      - concept_leader
+      - design_leader
+      - scenario_leader
+      - character_leader
+      - world_leader
+      - code_leader
+      - asset_leader
+      - integrator_leader
+      - tester_leader
+      - reviewer_leader
     restrictions:
       timeout: 30
       sandbox_enabled: true
@@ -240,11 +259,90 @@ agent_skill_mapping:
 
   code_leader:
     - file_read
+    - file_write
     - file_list
     - project_analyze
     - code_lint
     - code_search
     - file_search
+    - web_fetch
+
+  asset_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - file_search
+    - web_fetch
+
+  concept_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
+
+  design_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
+
+  scenario_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - file_search
+    - web_fetch
+
+  character_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - file_search
+    - web_fetch
+
+  world_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - file_search
+    - web_fetch
+
+  integrator_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
+
+  tester_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
+
+  reviewer_leader:
+    - file_read
+    - file_write
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
 
   asset_worker:
     - file_read
@@ -256,12 +354,6 @@ agent_skill_mapping:
     - bgm_generate
     - sfx_generate
     - voice_generate
-    - file_search
-
-  asset_leader:
-    - file_read
-    - file_list
-    - project_analyze
     - file_search
 
   build_worker:

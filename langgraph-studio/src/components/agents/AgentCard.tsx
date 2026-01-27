@@ -13,6 +13,8 @@ interface AgentCardProps{
  waitingFor?:string
  /**再試行ボタンクリック時のコールバック*/
  onRetry?:(agent:Agent)=>void
+ /**Worker表示（インデント付き）*/
+ isWorker?:boolean
 }
 
 const statusConfig={
@@ -94,7 +96,8 @@ export function AgentCard({
  isSelected=false,
  qualityCheckConfig,
  waitingFor,
- onRetry
+ onRetry,
+ isWorker=false
 }:AgentCardProps):JSX.Element{
  const status=statusConfig[agent.status]||statusConfig.pending
  const StatusIcon=status.icon
@@ -149,7 +152,8 @@ export function AgentCard({
     'cursor-pointer transition-all duration-nier-normal px-3 py-2',
     'hover:bg-nier-bg-selected',
     isSelected&&'bg-nier-bg-selected',
-    status.pulse&&'animate-nier-pulse'
+    status.pulse&&'animate-nier-pulse',
+    isWorker&&'pl-8 bg-nier-bg-main/30'
 )}
    onClick={()=>onSelect(agent)}
   >

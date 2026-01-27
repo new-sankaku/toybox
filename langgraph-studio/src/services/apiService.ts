@@ -176,6 +176,11 @@ export const agentApi={
   return response.data
  },
 
+ listWorkers:async(agentId:string):Promise<ApiAgent[]>=>{
+  const response=await api.get(`/api/agents/${agentId}/workers`)
+  return response.data
+ },
+
  getLogs:async(agentId:string):Promise<ApiAgentLog[]>=>{
   const response=await api.get(`/api/agents/${agentId}/logs`)
   return response.data
