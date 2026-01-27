@@ -159,7 +159,13 @@ class SkillEnabledAgentRunner(AgentRunner):
    f"- {s['name']}: {s['description']}"
    for s in skill_schemas
   ])
-  return f"""あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
+  assigned_task_section=""
+  if context.assigned_task:
+   assigned_task_section=f"""## あなたへの指示（Leader からの割当タスク）
+{context.assigned_task}
+
+"""
+  return f"""{assigned_task_section}あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
 
 ## 利用可能なスキル
 {skills_desc}
@@ -209,6 +215,8 @@ class SkillEnabledAgentRunner(AgentRunner):
    previous_outputs=context.previous_outputs,
    config=enhanced_config,
    quality_check=context.quality_check,
+   assigned_task=context.assigned_task,
+   leader_analysis=context.leader_analysis,
    on_progress=context.on_progress,
    on_log=context.on_log,
    on_checkpoint=context.on_checkpoint,

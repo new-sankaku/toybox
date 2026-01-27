@@ -332,6 +332,12 @@ class ApiAgentRunner(AgentRunner):
             config=context.config,
         )
 
+        if context.assigned_task:
+            prompt=f"""## あなたへの指示（Leader からの割当タスク）
+{context.assigned_task}
+
+{prompt}"""
+
         return prompt
 
     def _format_previous_outputs(self,outputs:Dict[str,Any])->str:
@@ -538,6 +544,7 @@ class LeaderWorkerOrchestrator:
                 leader_context=leader_context,
                 worker_type=worker_type,
                 task=task_description,
+                leader_output=leader_output.output,
                 quality_check_enabled=qc_enabled,
                 max_retries=max_retries,
             )
@@ -591,6 +598,7 @@ class LeaderWorkerOrchestrator:
         leader_context:AgentContext,
         worker_type:str,
         task:str,
+        leader_output:Dict[str,Any],
         quality_check_enabled:bool,
         max_retries:int,
     )->WorkerTaskResult:
@@ -619,6 +627,8 @@ class LeaderWorkerOrchestrator:
                 project_concept=leader_context.project_concept,
                 previous_outputs=leader_context.previous_outputs,
                 config=leader_context.config,
+                assigned_task=task,
+                leader_analysis=leader_output,
             )
 
             if self.on_worker_status:
