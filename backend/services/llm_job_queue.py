@@ -62,7 +62,7 @@ class LlmJobQueue:
   provider_id:str,
   model:str,
   prompt:str,
-  max_tokens:int=16384,
+  max_tokens:int=32768,
   priority:int=0,
   callback:Optional[Callable[[Dict],None]]=None,
   system_prompt:Optional[str]=None,

@@ -18,7 +18,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   provider_id:str,
   model:str,
   prompt:str,
-  max_tokens:int=16384,
+  max_tokens:int=32768,
   priority:int=0,
   system_prompt:Optional[str]=None,
  )->Dict[str,Any]:

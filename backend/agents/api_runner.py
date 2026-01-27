@@ -43,7 +43,7 @@ class ApiAgentRunner(AgentRunner):
         provider_id:str="anthropic",
         api_key:Optional[str]=None,
         model:Optional[str]=None,
-        max_tokens:int=16384,
+        max_tokens:int=32768,
         retry_config:Optional[RetryConfig]=None,
         data_store=None,
         **kwargs

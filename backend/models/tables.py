@@ -216,7 +216,7 @@ class LlmJob(Base):
  priority=Column(Integer,default=0)
  system_prompt=Column(Text)
  prompt=Column(Text,nullable=False)
- max_tokens=Column(Integer,default=16384)
+ max_tokens=Column(Integer,default=32768)
  response_content=Column(Text)
  tokens_input=Column(Integer,default=0)
  tokens_output=Column(Integer,default=0)
