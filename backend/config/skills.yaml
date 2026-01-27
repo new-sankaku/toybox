@@ -61,6 +61,32 @@ skills:
         - /bin
         - /sbin
 
+  file_edit:
+    enabled: true
+    description: "ファイルの内容を部分的に編集します（文字列置換方式）"
+    category: file
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - asset_worker
+      - concept_leader
+      - design_leader
+      - scenario_leader
+      - character_leader
+      - world_leader
+      - asset_leader
+      - integrator_leader
+      - tester_leader
+      - reviewer_leader
+    restrictions:
+      max_file_size: 1048576
+      require_approval: false
+      denied_paths:
+        - /etc
+        - /usr
+        - /bin
+        - /sbin
+
   file_list:
     enabled: true
     description: "ディレクトリの内容を一覧表示します"
@@ -246,6 +272,7 @@ agent_skill_mapping:
   code_worker:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - bash_execute
     - python_execute
@@ -260,6 +287,7 @@ agent_skill_mapping:
   code_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_lint
@@ -270,6 +298,7 @@ agent_skill_mapping:
   asset_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - file_search
@@ -278,6 +307,7 @@ agent_skill_mapping:
   concept_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_search
@@ -287,6 +317,7 @@ agent_skill_mapping:
   design_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_search
@@ -296,6 +327,7 @@ agent_skill_mapping:
   scenario_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - file_search
@@ -304,6 +336,7 @@ agent_skill_mapping:
   character_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - file_search
@@ -312,6 +345,7 @@ agent_skill_mapping:
   world_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - file_search
@@ -320,6 +354,7 @@ agent_skill_mapping:
   integrator_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_search
@@ -329,6 +364,7 @@ agent_skill_mapping:
   tester_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_search
@@ -338,6 +374,7 @@ agent_skill_mapping:
   reviewer_leader:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - project_analyze
     - code_search
@@ -347,6 +384,7 @@ agent_skill_mapping:
   asset_worker:
     - file_read
     - file_write
+    - file_edit
     - file_list
     - python_execute
     - project_analyze

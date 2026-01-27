@@ -138,6 +138,89 @@ class FileWriteSkill(Skill):
   return False
 
 
+class FileEditSkill(Skill):
+ name="file_edit"
+ description="ファイルの内容を部分的に編集します（文字列置換方式）"
+ category=SkillCategory.FILE
+ parameters=[
+  SkillParameter(name="path",type="string",description="編集するファイルのパス"),
+  SkillParameter(name="old_string",type="string",description="置換対象の文字列"),
+  SkillParameter(name="new_string",type="string",description="置換後の文字列"),
+  SkillParameter(name="encoding",type="string",description="エンコーディング",required=False,default="utf-8"),
+  SkillParameter(name="replace_all",type="boolean",description="全ての出現箇所を置換するか",required=False,default=False),
+ ]
+
+ def __init__(self):
+  super().__init__()
+
+ async def execute(self,context:SkillContext,**kwargs)->SkillResult:
+  path=kwargs.get("path","")
+  old_string=kwargs.get("old_string","")
+  new_string=kwargs.get("new_string","")
+  encoding=kwargs.get("encoding","utf-8")
+  replace_all=kwargs.get("replace_all",False)
+  if not path:
+   return SkillResult(success=False,error="path is required")
+  if not old_string:
+   return SkillResult(success=False,error="old_string is required")
+  if old_string==new_string:
+   return SkillResult(success=False,error="old_string and new_string must be different")
+  full_path=self._resolve_path(path,context)
+  if not self._is_allowed(full_path,context):
+   return SkillResult(success=False,error=f"Access denied: {path}")
+  try:
+   if not os.path.exists(full_path):
+    return SkillResult(success=False,error=f"File not found: {path}")
+   if not os.path.isfile(full_path):
+    return SkillResult(success=False,error=f"Not a file: {path}")
+   result=await asyncio.to_thread(self._edit_file,full_path,old_string,new_string,encoding,replace_all)
+   if result["error"]:
+    return SkillResult(success=False,error=result["error"])
+   return SkillResult(
+    success=True,
+    output=f"Replaced {result['count']} occurrence(s) in {path}",
+    metadata={"path":full_path,"replacements":result["count"]}
+   )
+  except Exception as e:
+   return SkillResult(success=False,error=str(e))
+
+ def _edit_file(self,path:str,old_string:str,new_string:str,encoding:str,replace_all:bool)->dict:
+  with open(path,"r",encoding=encoding) as f:
+   content=f.read()
+  count=content.count(old_string)
+  if count==0:
+   return {"error":"old_string not found in file","count":0}
+  if not replace_all and count>1:
+   return {"error":f"old_string found {count} times. Use replace_all=true or provide a more specific string","count":0}
+  if replace_all:
+   new_content=content.replace(old_string,new_string)
+  else:
+   new_content=content.replace(old_string,new_string,1)
+  with open(path,"w",encoding=encoding) as f:
+   f.write(new_content)
+  return {"error":None,"count":count if replace_all else 1}
+
+ def _resolve_path(self,path:str,context:SkillContext)->str:
+  if os.path.isabs(path):
+   return os.path.normpath(path)
+  return os.path.normpath(os.path.join(context.working_dir,path))
+
+ def _is_allowed(self,path:str,context:SkillContext)->bool:
+  if not context.sandbox_enabled:
+   return True
+  real_path=os.path.realpath(path)
+  for denied in context.denied_paths:
+   if real_path.startswith(os.path.realpath(denied)):
+    return False
+  working_dir_real=os.path.realpath(context.working_dir)
+  if not context.allowed_paths:
+   return real_path.startswith(working_dir_real)
+  for allowed in context.allowed_paths:
+   if real_path.startswith(os.path.realpath(allowed)):
+    return True
+  return False
+
+
 class FileListSkill(Skill):
  name="file_list"
  description="ディレクトリの内容を一覧表示します"
