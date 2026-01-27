@@ -16,6 +16,7 @@
 ・サーバー側に設定値を持たせ、クライアント側ではべた書きなど設定値は持たない。
 ・常に敬語を使う。
 ・コメントはTODO以外は不要
+・バックエンドでprint()は禁止。必ず`from middleware.logger import get_logger`を使用し、`get_logger().info/warning/error()`で出力する。例外ハンドラ内のerrorログには`exc_info=True`を付与してスタックトレースを残す。
 ・Sonnet Haikuをサブエージェントとすることは禁止、サブエージェントは基本的にOpusを使用する。
 ・曖昧な可能性で直すな。論理的な根拠を持って直せ。
 ・ドキュメントは全てdocフォルダに格納する。
