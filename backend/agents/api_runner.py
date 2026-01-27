@@ -17,6 +17,8 @@ from config_loader import (
     get_all_prompts,
     get_api_runner_checkpoint_config,
     get_provider_default_model,
+    get_agent_max_tokens,
+    get_workflow_context_policy,
 )
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
@@ -41,7 +43,7 @@ class ApiAgentRunner(AgentRunner):
         provider_id:str="anthropic",
         api_key:Optional[str]=None,
         model:Optional[str]=None,
-        max_tokens:int=4096,
+        max_tokens:int=16384,
         retry_config:Optional[RetryConfig]=None,
         data_store=None,
         **kwargs
@@ -194,11 +196,12 @@ class ApiAgentRunner(AgentRunner):
             "data":{"progress":10,"current_task":"プロンプト準備中"}
         }
 
-        prompt=self._build_prompt(context)
+        system_prompt,user_prompt=self._build_prompt(context)
 
         if self._data_store and trace_id:
             try:
-                self._data_store.update_trace_prompt(trace_id,prompt)
+                trace_prompt=f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}" if system_prompt else user_prompt
+                self._data_store.update_trace_prompt(trace_id,trace_prompt)
             except Exception as e:
                 print(f"[ApiAgentRunner] Failed to update trace prompt: {e}")
 
@@ -208,7 +211,7 @@ class ApiAgentRunner(AgentRunner):
         }
 
         try:
-            result=await self._call_llm(prompt,context)
+            result=await self._call_llm(user_prompt,context,system_prompt=system_prompt)
 
             yield {
                 "type":"tokens",
@@ -233,13 +236,16 @@ class ApiAgentRunner(AgentRunner):
                         total=result.get("tokens_used",0)
                         input_tokens=int(total*0.3)
                         output_tokens=total-input_tokens
+                    llm_content=result.get("content","")
+                    summary=self._extract_summary(llm_content)
                     self._data_store.complete_trace(
                         trace_id=trace_id,
-                        llm_response=result.get("content",""),
+                        llm_response=llm_content,
                         output_data=output,
                         tokens_input=input_tokens,
                         tokens_output=output_tokens,
-                        status="completed"
+                        status="completed",
+                        output_summary=summary,
                     )
                 except Exception as e:
                     print(f"[ApiAgentRunner] Failed to complete trace: {e}")
@@ -298,7 +304,8 @@ class ApiAgentRunner(AgentRunner):
             }
         }
 
-    async def _call_llm(self,prompt:str,context:AgentContext)->Dict[str,Any]:
+    async def _call_llm(self,prompt:str,context:AgentContext,system_prompt:Optional[str]=None)->Dict[str,Any]:
+        agent_max_tokens=self._get_agent_max_tokens(context.agent_type.value)
         job_queue=self.get_job_queue()
         job=job_queue.submit_job(
             project_id=context.project_id,
@@ -306,7 +313,8 @@ class ApiAgentRunner(AgentRunner):
             provider_id=self._provider_id,
             model=self.model,
             prompt=prompt,
-            max_tokens=self.max_tokens,
+            max_tokens=agent_max_tokens,
+            system_prompt=system_prompt,
         )
         if context.on_log:
             context.on_log("info",f"LLMジョブ投入: {job['id']}")
@@ -323,12 +331,25 @@ class ApiAgentRunner(AgentRunner):
             "model":self.model,
         }
 
-    def _build_prompt(self,context:AgentContext)->str:
+    def _get_agent_max_tokens(self,agent_type:str)->int:
+        configured=get_agent_max_tokens(agent_type)
+        if configured:
+            return configured
+        return self.max_tokens
+
+    def _build_prompt(self,context:AgentContext)->tuple:
         agent_type=context.agent_type.value
         base_prompt=self._prompts.get(agent_type,self._default_prompt())
+
+        system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
+
+        context_policy=get_workflow_context_policy(agent_type)
+        filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy)
+        previous_text=self._format_previous_outputs(filtered_outputs)
+
         prompt=base_prompt.format(
-            project_concept=context.project_concept or"（未定義）",
-            previous_outputs=self._format_previous_outputs(context.previous_outputs),
+            project_concept="（system promptに記載）",
+            previous_outputs=previous_text,
         )
 
         if context.assigned_task:
@@ -349,7 +370,32 @@ class ApiAgentRunner(AgentRunner):
 以下の問題点が指摘されました。これらを改善した出力を生成してください。
 {issues_text}"""
 
-        return prompt
+        return system_prompt,prompt
+
+    def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,str])->Dict[str,Any]:
+        if not policy:
+            return outputs
+        filtered={}
+        for agent_key,output in outputs.items():
+            if agent_key.endswith("_previous_attempt"):
+                continue
+            level=policy.get(agent_key,"full")
+            if level=="none":
+                continue
+            elif level=="summary":
+                if isinstance(output,dict) and output.get("summary"):
+                    filtered[agent_key]={"content":output["summary"]}
+                elif isinstance(output,dict) and output.get("content"):
+                    content=str(output["content"])
+                    if len(content)>1500:
+                        filtered[agent_key]={"content":content[:1500]+"\n\n（以降省略）"}
+                    else:
+                        filtered[agent_key]=output
+                else:
+                    filtered[agent_key]=output
+            else:
+                filtered[agent_key]=output
+        return filtered
 
     def _format_previous_outputs(self,outputs:Dict[str,Any])->str:
         if not outputs:
@@ -363,6 +409,29 @@ class ApiAgentRunner(AgentRunner):
                 parts.append(f"## {agent}の出力\n{output}")
 
         return"\n\n".join(parts)
+
+    def _extract_summary(self,content:str,max_length:int=1500)->str:
+        if not content:
+            return""
+        import re
+        json_match=re.search(r'```json\s*([\s\S]*?)\s*```',content)
+        if json_match:
+            import json
+            try:
+                data=json.loads(json_match.group(1))
+                keys_to_keep=["summary","title","name","description","type","tasks","worker_tasks"]
+                filtered={k:v for k,v in data.items() if k in keys_to_keep}
+                if filtered:
+                    return json.dumps(filtered,ensure_ascii=False)[:max_length]
+            except (json.JSONDecodeError,AttributeError):
+                pass
+        headers=re.findall(r'^#{1,3}\s+(.+)$',content,re.MULTILINE)
+        if headers:
+            header_summary="# 構成\n"+"\n".join(f"- {h}" for h in headers[:20])
+            first_section=content[:500]
+            summary=f"{first_section}\n\n{header_summary}"
+            return summary[:max_length]
+        return content[:max_length]
 
     def _process_output(self,result:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
         return {
@@ -720,7 +789,6 @@ class LeaderWorkerOrchestrator:
             if retry<max_retries-1:
                 result.status="needs_retry"
                 worker_context.previous_outputs[f"{worker_type}_previous_attempt"]={
-                    "output":output.output,
                     "issues":qc_result.issues,
                 }
             else:

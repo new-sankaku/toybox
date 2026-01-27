@@ -62,9 +62,10 @@ class LlmJobQueue:
   provider_id:str,
   model:str,
   prompt:str,
-  max_tokens:int=4096,
+  max_tokens:int=16384,
   priority:int=0,
   callback:Optional[Callable[[Dict],None]]=None,
+  system_prompt:Optional[str]=None,
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
@@ -76,6 +77,7 @@ class LlmJobQueue:
     prompt=prompt,
     max_tokens=max_tokens,
     priority=priority,
+    system_prompt=system_prompt,
    )
    if callback:
     self._job_callbacks[job["id"]]=callback
@@ -185,7 +187,10 @@ class LlmJobQueue:
      repo.fail_job(job_id,f"Provider not found: {job.provider_id}")
      self._notify_completion(job_id)
      return
-    messages=[ChatMessage(role=MessageRole.USER,content=job.prompt)]
+    messages=[]
+    if job.system_prompt:
+     messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
+    messages.append(ChatMessage(role=MessageRole.USER,content=job.prompt))
     response=provider.chat(messages=messages,model=job.model,max_tokens=job.max_tokens)
     repo.complete_job(
      job_id=job_id,

@@ -18,8 +18,9 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   provider_id:str,
   model:str,
   prompt:str,
-  max_tokens:int=4096,
+  max_tokens:int=16384,
   priority:int=0,
+  system_prompt:Optional[str]=None,
  )->Dict[str,Any]:
   job=LlmJob(
    id=f"job-{uuid.uuid4().hex[:12]}",
@@ -27,6 +28,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    agent_id=agent_id,
    provider_id=provider_id,
    model=model,
+   system_prompt=system_prompt,
    prompt=prompt,
    max_tokens=max_tokens,
    priority=priority,
@@ -129,6 +131,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    "model":job.model,
    "status":job.status,
    "priority":job.priority,
+   "systemPrompt":job.system_prompt,
    "prompt":job.prompt,
    "maxTokens":job.max_tokens,
    "responseContent":job.response_content,

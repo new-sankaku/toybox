@@ -265,7 +265,29 @@ def get_agent_types()->List[str]:
 
 
 def get_workflow_dependencies()->Dict[str,List[str]]:
-    return get_agents_config().get("workflow_dependencies",{})
+    raw=get_agents_config().get("workflow_dependencies",{})
+    result={}
+    for agent,deps in raw.items():
+        if isinstance(deps,list):
+            result[agent]=deps
+        elif isinstance(deps,dict):
+            result[agent]=deps.get("depends_on",[])
+    return result
+
+
+def get_workflow_context_policy(agent_type:str)->Dict[str,str]:
+    raw=get_agents_config().get("workflow_dependencies",{})
+    entry=raw.get(agent_type)
+    if isinstance(entry,dict):
+        return entry.get("context_from",{})
+    return {}
+
+
+def get_agent_max_tokens(agent_type:str)->Optional[int]:
+    config=get_agents_config()
+    agents=config.get("agents",{})
+    agent=agents.get(agent_type,{})
+    return agent.get("max_tokens")
 
 
 def get_checkpoint_category_map()->Dict[str,str]:
