@@ -20,6 +20,7 @@ class AgentTraceRepository(BaseRepository[AgentTrace]):
    "inputContext":t.input_context,
    "promptSent":t.prompt_sent,
    "llmResponse":t.llm_response,
+   "outputSummary":t.output_summary,
    "outputData":t.output_data,
    "tokensInput":t.tokens_input,
    "tokensOutput":t.tokens_output,
@@ -78,7 +79,8 @@ class AgentTraceRepository(BaseRepository[AgentTrace]):
   output_data:Optional[Dict]=None,
   tokens_input:int=0,
   tokens_output:int=0,
-  status:str="completed"
+  status:str="completed",
+  output_summary:Optional[str]=None,
  )->Optional[Dict]:
   trace=self.get(trace_id)
   if trace:
@@ -87,6 +89,8 @@ class AgentTraceRepository(BaseRepository[AgentTrace]):
    trace.tokens_input=tokens_input
    trace.tokens_output=tokens_output
    trace.status=status
+   if output_summary:
+    trace.output_summary=output_summary
    trace.completed_at=datetime.now()
    if trace.started_at:
     trace.duration_ms=int((trace.completed_at-trace.started_at).total_seconds()*1000)

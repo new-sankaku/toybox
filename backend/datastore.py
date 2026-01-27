@@ -1508,10 +1508,10 @@ class DataStore:
    repo=AgentTraceRepository(session)
    return repo.update_prompt(trace_id,prompt)
 
- def complete_trace(self,trace_id:str,llm_response:str,output_data:Optional[Dict]=None,tokens_input:int=0,tokens_output:int=0,status:str="completed")->Optional[Dict]:
+ def complete_trace(self,trace_id:str,llm_response:str,output_data:Optional[Dict]=None,tokens_input:int=0,tokens_output:int=0,status:str="completed",output_summary:Optional[str]=None)->Optional[Dict]:
   with session_scope() as session:
    repo=AgentTraceRepository(session)
-   return repo.complete_trace(trace_id,llm_response,output_data,tokens_input,tokens_output,status)
+   return repo.complete_trace(trace_id,llm_response,output_data,tokens_input,tokens_output,status,output_summary=output_summary)
 
  def fail_trace(self,trace_id:str,error_message:str)->Optional[Dict]:
   with session_scope() as session:

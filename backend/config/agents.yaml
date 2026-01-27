@@ -16,6 +16,7 @@ agents:
     quality_check: true
     high_cost: false
     role: splitter
+    max_tokens: 8192
 
   concept_detail:
     label: コンセプト
@@ -70,6 +71,7 @@ agents:
     quality_check: true
     high_cost: false
     role: splitter
+    max_tokens: 8192
 
   asset_character:
     label: キャラクター
@@ -142,6 +144,7 @@ agents:
     quality_check: true
     high_cost: false
     role: splitter
+    max_tokens: 8192
 
   code:
     label: コード
@@ -187,6 +190,7 @@ agents:
     quality_check: true
     high_cost: false
     role: splitter
+    max_tokens: 8192
 
   unit_test:
     label: 単体テスト
@@ -214,22 +218,83 @@ workflow_dependencies:
   world: [task_split_1]
   game_design: [task_split_1]
   tech_spec: [task_split_1]
-  task_split_2: [concept_detail, scenario, world, game_design, tech_spec]
-  asset_character: [task_split_2]
-  asset_background: [task_split_2]
-  asset_ui: [task_split_2]
-  asset_effect: [task_split_2]
-  asset_bgm: [task_split_2]
-  asset_voice: [task_split_2]
-  asset_sfx: [task_split_2]
-  task_split_3: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
-  code: [task_split_3]
-  event: [task_split_3]
-  ui_integration: [task_split_3]
-  asset_integration: [task_split_3]
-  task_split_4: [code, event, ui_integration, asset_integration]
-  unit_test: [task_split_4]
-  integration_test: [task_split_4]
+  task_split_2:
+    depends_on: [concept_detail, scenario, world, game_design, tech_spec]
+    context_from:
+      concept_detail: summary
+      scenario: summary
+      world: summary
+      game_design: full
+      tech_spec: full
+  asset_character:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_background:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_ui:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_effect:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_bgm:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_voice:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  asset_sfx:
+    depends_on: [task_split_2]
+    context_from:
+      task_split_2: full
+  task_split_3:
+    depends_on: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
+    context_from:
+      asset_character: summary
+      asset_background: summary
+      asset_ui: summary
+      asset_effect: summary
+      asset_bgm: summary
+      asset_voice: summary
+      asset_sfx: summary
+  code:
+    depends_on: [task_split_3]
+    context_from:
+      task_split_3: full
+  event:
+    depends_on: [task_split_3]
+    context_from:
+      task_split_3: full
+  ui_integration:
+    depends_on: [task_split_3]
+    context_from:
+      task_split_3: full
+  asset_integration:
+    depends_on: [task_split_3]
+    context_from:
+      task_split_3: full
+  task_split_4:
+    depends_on: [code, event, ui_integration, asset_integration]
+    context_from:
+      code: summary
+      event: summary
+      ui_integration: summary
+      asset_integration: summary
+  unit_test:
+    depends_on: [task_split_4]
+    context_from:
+      task_split_4: full
+  integration_test:
+    depends_on: [task_split_4]
+    context_from:
+      task_split_4: full
 
 phases:
   phase0_concept:

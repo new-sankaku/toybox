@@ -312,7 +312,11 @@ class AgentExecutionService:
     traces=self._data_store.get_traces_by_agent(dep_agent["id"])
     if traces:
      latest=traces[0]
-     outputs[dep_type]={"content":latest.get("llmResponse","")}
+     entry={"content":latest.get("llmResponse","")}
+     summary=latest.get("outputSummary") or latest.get("output_summary")
+     if summary:
+      entry["summary"]=summary
+     outputs[dep_type]=entry
   return outputs
 
  def _on_progress(self,agent_id:str,project_id:str,progress:int,task:str)->None:

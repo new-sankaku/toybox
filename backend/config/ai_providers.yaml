@@ -105,7 +105,7 @@ providers:
       - id: claude-opus-4-5-20251101
         label: Claude Opus 4.5
         recommended: true
-        max_tokens: 8192
+        max_tokens: 32768
         supports_vision: true
         supports_tools: true
         pricing:
@@ -113,7 +113,7 @@ providers:
           output: 25.0
       - id: claude-sonnet-4-5-20250116
         label: Claude Sonnet 4.5
-        max_tokens: 8192
+        max_tokens: 16384
         supports_vision: true
         supports_tools: true
         pricing:
@@ -121,7 +121,7 @@ providers:
           output: 15.0
       - id: claude-haiku-4-5-20250116
         label: Claude Haiku 4.5
-        max_tokens: 8192
+        max_tokens: 16384
         supports_vision: true
         supports_tools: true
         pricing:
@@ -173,7 +173,7 @@ providers:
           output: 1.68
       - id: deepseek-reasoner
         label: DeepSeek-R1
-        max_tokens: 8192
+        max_tokens: 32768
         supports_vision: false
         supports_tools: false
         pricing:
@@ -258,7 +258,7 @@ providers:
       - id: opus
         label: Claude Opus (via CLI)
         recommended: true
-        max_tokens: 8192
+        max_tokens: 32768
         supports_vision: false
         supports_tools: true
         pricing:
@@ -266,7 +266,7 @@ providers:
           output: 0.0
       - id: sonnet
         label: Claude Sonnet (via CLI)
-        max_tokens: 8192
+        max_tokens: 16384
         supports_vision: false
         supports_tools: true
         pricing:
@@ -274,7 +274,7 @@ providers:
           output: 0.0
       - id: haiku
         label: Claude Haiku (via CLI)
-        max_tokens: 8192
+        max_tokens: 16384
         supports_vision: false
         supports_tools: true
         pricing:
