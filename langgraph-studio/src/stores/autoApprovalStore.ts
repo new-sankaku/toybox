@@ -1,8 +1,7 @@
 import{create}from'zustand'
 import{
  type AutoApprovalRule,
- type ContentCategory,
- DEFAULT_AUTO_APPROVAL_RULES
+ type ContentCategory
 }from'@/types/autoApproval'
 import{autoApprovalApi}from'@/services/apiService'
 
@@ -11,6 +10,7 @@ interface AutoApprovalState{
  originalRules:AutoApprovalRule[]
  projectId:string|null
  loading:boolean
+ error:string|null
  setRuleEnabled:(category:ContentCategory,enabled:boolean)=>void
  setAllEnabled:(enabled:boolean)=>void
  isAutoApproved:(category:ContentCategory)=>boolean
@@ -22,10 +22,11 @@ interface AutoApprovalState{
 }
 
 export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
- rules:[...DEFAULT_AUTO_APPROVAL_RULES],
- originalRules:[...DEFAULT_AUTO_APPROVAL_RULES],
+ rules:[],
+ originalRules:[],
  projectId:null,
  loading:false,
+ error:null,
 
  setRuleEnabled:(category,enabled)=>{
   set(state=>({
@@ -51,21 +52,21 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
  },
 
  loadFromServer:async(projectId:string)=>{
-  set({loading:true,projectId})
+  set({loading:true,projectId,error:null})
   try{
    const response=await autoApprovalApi.getRules(projectId)
-   const serverRules=response.rules
-   const mergedRules=DEFAULT_AUTO_APPROVAL_RULES.map(defaultRule=>{
-    const serverRule=serverRules.find(sr=>sr.category===defaultRule.category)
-    return{
-     ...defaultRule,
-     enabled:serverRule?.enabled??defaultRule.enabled
-    }
-   })
-   set({rules:mergedRules,originalRules:JSON.parse(JSON.stringify(mergedRules)),loading:false})
+   const serverRules:AutoApprovalRule[]=response.rules.map((r:{category:ContentCategory;enabled:boolean;label?:string})=>({
+    category:r.category,
+    enabled:r.enabled,
+    label:r.label||r.category
+   }))
+   set({rules:serverRules,originalRules:JSON.parse(JSON.stringify(serverRules)),loading:false})
   }catch(error){
    console.error('Failed to load auto-approval rules:',error)
-   set({loading:false})
+   set({
+    error:error instanceof Error?error.message:'自動承認ルールの取得に失敗しました',
+    loading:false
+   })
   }
  },
 

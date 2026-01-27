@@ -8,6 +8,7 @@ interface UIConfigState{
  statusLabels:Record<string,string>
  agentStatusLabels:Record<string,string>
  approvalStatusLabels:Record<string,string>
+ assetTypeLabels:Record<string,string>
  resolutionLabels:Record<string,string>
  roleLabels:Record<string,string>
  agentRoles:Record<string,string>
@@ -20,6 +21,7 @@ interface UIConfigState{
  getStatusLabel:(status:string)=>string
  getAgentStatusLabel:(status:string)=>string
  getApprovalStatusLabel:(status:string)=>string
+ getAssetTypeLabel:(assetType:string)=>string
  getResolutionLabel:(resolution:string)=>string
  getRoleLabel:(role:string)=>string
  getAgentRole:(agentType:string)=>string
@@ -33,6 +35,7 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
  statusLabels:{},
  agentStatusLabels:{},
  approvalStatusLabels:{},
+ assetTypeLabels:{},
  resolutionLabels:{},
  roleLabels:{},
  agentRoles:{},
@@ -52,6 +55,7 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
     statusLabels:response.statusLabels||{},
     agentStatusLabels:response.agentStatusLabels||{},
     approvalStatusLabels:response.approvalStatusLabels||{},
+    assetTypeLabels:response.assetTypeLabels||{},
     resolutionLabels:response.resolutionLabels||{},
     roleLabels:response.roleLabels||{},
     agentRoles:response.agentRoles||{},
@@ -62,7 +66,7 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
   }catch(error){
    console.error('Failed to fetch UI settings:',error)
    set({
-    error:error instanceof Error?error.message:'Failed to fetch UI settings',
+    error:error instanceof Error?error.message:'UI設定の取得に失敗しました',
     loading:false,
    })
   }
@@ -79,6 +83,9 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
  getApprovalStatusLabel:(status:string)=>{
   return get().approvalStatusLabels[status]||status
  },
+ getAssetTypeLabel:(assetType:string)=>{
+  return get().assetTypeLabels[assetType]||assetType
+ },
  getResolutionLabel:(resolution:string)=>{
   return get().resolutionLabels[resolution]||resolution
  },
@@ -86,9 +93,9 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
   return get().roleLabels[role]||role
  },
  getAgentRole:(agentType:string)=>{
-  return get().agentRoles[agentType]||'worker'
+  return get().agentRoles[agentType]||agentType
  },
  getAgentServiceType:(agentType:string)=>{
-  return get().agentServiceMap[agentType]||'llm'
+  return get().agentServiceMap[agentType]||agentType
  },
 }))

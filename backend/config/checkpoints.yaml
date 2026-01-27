@@ -19,14 +19,26 @@ category_map:
 auto_approval_rules:
   - category: code
     enabled: false
+    label: コード
   - category: image
     enabled: false
+    label: 画像
   - category: audio
     enabled: false
+    label: 音声
   - category: music
     enabled: false
+    label: 音楽
   - category: document
     enabled: false
+    label: ドキュメント
+
+asset_type_labels:
+  image: 画像
+  audio: 音声
+  document: ドキュメント
+  code: コード
+  other: その他
 
 status_labels:
   draft: 下書き

@@ -3,17 +3,17 @@ import{persist}from'zustand/middleware'
 import{
  type CostSettings,
  type ServiceCostLimit,
- type PricingConfig,
- DEFAULT_COST_SETTINGS
+ type PricingConfig
 }from'@/types/costSettings'
 
 interface CostSettingsState{
- settings:CostSettings
- originalSettings:CostSettings
+ settings:CostSettings|null
+ originalSettings:CostSettings|null
  pricing:PricingConfig|null
  pricingLoaded:boolean
  currentProjectId:string|null
  loading:boolean
+ error:string|null
  updateGlobalEnabled:(enabled:boolean)=>void
  updateGlobalLimit:(limit:number)=>void
  updateServiceLimit:(serviceType:string,updates:Partial<ServiceCostLimit>)=>void
@@ -30,38 +30,44 @@ interface CostSettingsState{
 export const useCostSettingsStore=create<CostSettingsState>()(
  persist(
   (set,get)=>({
-   settings:{...DEFAULT_COST_SETTINGS},
-   originalSettings:{...DEFAULT_COST_SETTINGS},
+   settings:null,
+   originalSettings:null,
    pricing:null,
    pricingLoaded:false,
    currentProjectId:null,
    loading:false,
+   error:null,
 
    updateGlobalEnabled:(enabled)=>{
-    set(state=>({
-     settings:{...state.settings,globalEnabled:enabled}
-    }))
+    set(state=>{
+     if(!state.settings)return state
+     return{settings:{...state.settings,globalEnabled:enabled}}
+    })
    },
 
    updateGlobalLimit:(limit)=>{
-    set(state=>({
-     settings:{...state.settings,globalMonthlyLimit:limit}
-    }))
+    set(state=>{
+     if(!state.settings)return state
+     return{settings:{...state.settings,globalMonthlyLimit:limit}}
+    })
    },
 
    updateServiceLimit:(serviceType,updates)=>{
-    set(state=>({
-     settings:{
-      ...state.settings,
-      services:{
-       ...state.settings.services,
-       [serviceType]:{
-        ...state.settings.services[serviceType],
-        ...updates
+    set(state=>{
+     if(!state.settings)return state
+     return{
+      settings:{
+       ...state.settings,
+       services:{
+        ...state.settings.services,
+        [serviceType]:{
+         ...state.settings.services[serviceType],
+         ...updates
+        }
        }
       }
      }
-    }))
+    })
    },
 
    setPricing:(pricing)=>{
@@ -80,25 +86,33 @@ export const useCostSettingsStore=create<CostSettingsState>()(
    },
 
    resetToDefaults:()=>{
-    set({settings:{...DEFAULT_COST_SETTINGS}})
+    set({settings:null})
    },
 
    loadFromServer:async(projectId)=>{
     if(get().currentProjectId===projectId)return
-    set({loading:true})
+    set({loading:true,error:null})
     try{
      const{projectSettingsApi}=await import('@/services/apiService')
      const serverSettings=await projectSettingsApi.getCostSettings(projectId)
      if(serverSettings){
-      const newSettings={
-       globalEnabled:serverSettings.global_enabled??DEFAULT_COST_SETTINGS.globalEnabled,
-       globalMonthlyLimit:serverSettings.global_monthly_limit??DEFAULT_COST_SETTINGS.globalMonthlyLimit,
+      if(serverSettings.global_enabled==null||serverSettings.global_monthly_limit==null){
+       set({
+        error:'コスト設定のデータが不完全です',
+        currentProjectId:projectId,
+        loading:false
+       })
+       return
+      }
+      const newSettings:CostSettings={
+       globalEnabled:serverSettings.global_enabled,
+       globalMonthlyLimit:serverSettings.global_monthly_limit,
        services:Object.fromEntries(
         Object.entries(serverSettings.services||{}).map(([k,v])=>[k,{
          enabled:v.enabled,
          monthlyLimit:v.monthly_limit
         }])
-)||DEFAULT_COST_SETTINGS.services
+)
       }
       set({
        settings:newSettings,
@@ -106,11 +120,17 @@ export const useCostSettingsStore=create<CostSettingsState>()(
        currentProjectId:projectId
       })
      }else{
-      set({currentProjectId:projectId,originalSettings:JSON.parse(JSON.stringify(get().settings))})
+      set({
+       error:'コスト設定の取得結果が空です',
+       currentProjectId:projectId
+      })
      }
     }catch(error){
      console.error('Failed to load cost settings from server:',error)
-     set({currentProjectId:projectId})
+     set({
+      error:error instanceof Error?error.message:'コスト設定の取得に失敗しました',
+      currentProjectId:projectId
+     })
     }finally{
      set({loading:false})
     }
@@ -120,6 +140,7 @@ export const useCostSettingsStore=create<CostSettingsState>()(
     try{
      const{projectSettingsApi}=await import('@/services/apiService')
      const settings=get().settings
+     if(!settings)return
      await projectSettingsApi.updateCostSettings(projectId,{
       global_enabled:settings.globalEnabled,
       global_monthly_limit:settings.globalMonthlyLimit,
@@ -145,11 +166,13 @@ export const useCostSettingsStore=create<CostSettingsState>()(
 
    isFieldChanged:(field)=>{
     const{settings,originalSettings}=get()
+    if(!settings||!originalSettings)return false
     return(settings as unknown as Record<string,unknown>)[field]!==(originalSettings as unknown as Record<string,unknown>)[field]
    },
 
    isServiceFieldChanged:(serviceType,field)=>{
     const{settings,originalSettings}=get()
+    if(!settings||!originalSettings)return false
     const current=settings.services[serviceType]
     const original=originalSettings.services[serviceType]
     if(!current||!original)return false

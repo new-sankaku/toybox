@@ -95,7 +95,7 @@ export default function LogsView():JSX.Element{
     logStore.setLogs(data)
    }catch(error){
     console.error('Failed to fetch logs:',error)
-    logStore.setLogs([])
+    logStore.setError(error instanceof Error?error.message:'ログの取得に失敗しました')
    }finally{
     setInitialLoading(false)
    }

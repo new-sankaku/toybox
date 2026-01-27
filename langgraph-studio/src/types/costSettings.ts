@@ -35,14 +35,3 @@ export interface PricingConfig{
  units:Record<string,PricingUnit>
  models:Record<string,ModelPricingInfo>
 }
-
-export const DEFAULT_COST_SETTINGS:CostSettings={
- globalEnabled:false,
- globalMonthlyLimit:100,
- services:{
-  llm:{enabled:false,monthlyLimit:50},
-  image:{enabled:false,monthlyLimit:20},
-  audio:{enabled:false,monthlyLimit:10},
-  music:{enabled:false,monthlyLimit:10}
- }
-}
