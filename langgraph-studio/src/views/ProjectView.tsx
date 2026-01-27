@@ -830,7 +830,7 @@ export default function ProjectView():JSX.Element{
            </div>
           </div>
          </div>
-         )}
+)}
 
          {/*Initial Files*/}
          <div>
@@ -1091,7 +1091,7 @@ export default function ProjectView():JSX.Element{
              </div>
             </div>
            </div>
-           )}
+)}
 
            {/*Buttons*/}
            <div className="flex gap-3 pt-2">
