@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Dict,List,Optional
 from models.database import session_scope
 from repositories import ProjectRepository,AgentRepository,SystemLogRepository
+from middleware.logger import get_logger
 
 
 class RecoveryService:
@@ -20,7 +21,7 @@ class RecoveryService:
    try:
     self._sio.emit(event,data,room=f"project:{project_id}")
    except Exception as e:
-    print(f"[RecoveryService] Error emitting {event}: {e}")
+    get_logger().warning(f"RecoveryService: error emitting {event}: {e}")
 
  def recover_interrupted_agents(self)->Dict[str,any]:
   """
@@ -56,9 +57,9 @@ class RecoveryService:
        syslog_repo.add_log(project.id,"warn","System",f"エージェント {agent.type} が中断されました（再試行可能）")
    session.flush()
   if result["recovered_agents"]:
-   print(f"[RecoveryService] Recovered {len(result['recovered_agents'])} interrupted agents")
+   get_logger().info(f"RecoveryService: recovered {len(result['recovered_agents'])} interrupted agents")
   if result["recovered_projects"]:
-   print(f"[RecoveryService] Recovered {len(result['recovered_projects'])} interrupted projects")
+   get_logger().info(f"RecoveryService: recovered {len(result['recovered_projects'])} interrupted projects")
   return result
 
  def get_interrupted_agents(self,project_id:Optional[str]=None)->List[Dict]:

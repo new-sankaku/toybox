@@ -4,6 +4,7 @@ import asyncio
 import fnmatch
 from typing import List,Dict,Any,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
+from middleware.logger import get_logger
 
 
 class CodeSearchSkill(Skill):
@@ -81,7 +82,8 @@ class CodeSearchSkill(Skill):
       if len(results)>=max_results:
        return results
       results.append(match)
-    except Exception:
+    except Exception as e:
+     get_logger().debug(f"Skipped file during search {filepath}: {e}")
      continue
   return results
 
@@ -90,7 +92,8 @@ class CodeSearchSkill(Skill):
   try:
    with open(filepath,"r",encoding="utf-8",errors="ignore") as f:
     lines=f.readlines()
-  except Exception:
+  except Exception as e:
+   get_logger().debug(f"Failed to read file {filepath}: {e}")
    return results
   rel_path=os.path.relpath(filepath,base_path)
   for i,line in enumerate(lines):
@@ -169,6 +172,7 @@ class FileSearchSkill(Skill):
        "size":stat.st_size,
        "modified":stat.st_mtime,
       })
-     except Exception:
+     except Exception as e:
+      get_logger().debug(f"Failed to stat file {filepath}: {e}")
       results.append({"name":filename,"path":rel_path})
   return results

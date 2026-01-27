@@ -9,6 +9,7 @@ from agents.exceptions import ProviderUnavailableError,MaxRetriesExceededError
 from agents.retry_strategy import wait_for_provider_available
 from providers.health_monitor import get_health_monitor
 from config_loader import get_workflow_dependencies
+from middleware.logger import get_logger
 
 
 class AgentExecutionService:
@@ -18,6 +19,7 @@ class AgentExecutionService:
   self._agent_runner:Optional[ApiAgentRunner]=None
   self._running_agents:Dict[str,bool]={}
   self._lock=threading.Lock()
+  self._logger=get_logger()
 
  def set_agent_runner(self,runner:ApiAgentRunner)->None:
   self._agent_runner=runner
@@ -46,18 +48,22 @@ class AgentExecutionService:
    try:
     self._sio.emit(event,data,room=f"project:{project_id}")
    except Exception as e:
-    print(f"[AgentExecutionService] Error emitting {event}: {e}")
+    self._logger.error(f"Error emitting {event}: {e}",exc_info=True)
 
  async def execute_agent(self,project_id:str,agent_id:str)->Dict[str,Any]:
   if not self._agent_runner:
+   self._logger.warning(f"execute_agent called but agent_runner not configured: agent_id={agent_id}")
    return {"success":False,"error":"Agent runner not configured"}
   agent=self._data_store.get_agent(agent_id)
   if not agent:
+   self._logger.warning(f"execute_agent: agent not found: agent_id={agent_id}")
    return {"success":False,"error":"Agent not found"}
   project=self._data_store.get_project(project_id)
   if not project:
+   self._logger.warning(f"execute_agent: project not found: project_id={project_id}")
    return {"success":False,"error":"Project not found"}
   if not self._can_start_agent(project_id,agent["type"]):
+   self._logger.info(f"execute_agent: dependencies not met: agent_type={agent['type']} project_id={project_id}")
    return {"success":False,"error":"Dependencies not met"}
   try:
    agent_type=AgentType(agent["type"])
@@ -149,6 +155,7 @@ class AgentExecutionService:
     },project_id)
     return {"success":False,"error":output.error}
   except Exception as e:
+   self._logger.error(f"execute_agent failed: agent_id={agent_id} project_id={project_id} error={e}",exc_info=True)
    self._data_store.update_agent(agent_id,{
     "status":"failed",
     "error":str(e),
@@ -261,6 +268,7 @@ class AgentExecutionService:
     },project_id)
    return {"success":True,"results":results}
   except Exception as e:
+   self._logger.error(f"execute_leader_with_workers failed: leader_id={leader_agent_id} project_id={project_id} error={e}",exc_info=True)
    self._data_store.update_agent(leader_agent_id,{
     "status":"failed",
     "error":str(e),
@@ -423,10 +431,16 @@ class AgentExecutionService:
    asyncio.set_event_loop(loop)
    try:
     agent=self._data_store.get_agent(agent_id)
-    if agent and agent.get("type","").endswith("_leader"):
+    if not agent:
+     self._logger.warning(f"re_execute_agent: agent not found: agent_id={agent_id}")
+     return
+    self._logger.info(f"re_execute_agent: starting agent_id={agent_id} type={agent.get('type','')} project_id={project_id}")
+    if agent.get("type","").endswith("_leader"):
      loop.run_until_complete(self.execute_leader_with_workers(project_id,agent_id))
     else:
      loop.run_until_complete(self.execute_agent(project_id,agent_id))
+   except Exception as e:
+    self._logger.error(f"re_execute_agent failed: agent_id={agent_id} error={e}",exc_info=True)
    finally:
     loop.close()
   thread=threading.Thread(target=_run,daemon=True)

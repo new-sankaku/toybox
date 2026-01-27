@@ -5,6 +5,7 @@ from typing import Dict,List,Any,Optional
 from dataclasses import dataclass,field
 from .base import SkillContext,SkillResult,SkillCategory
 from .registry import get_skill_registry
+from middleware.logger import get_logger
 
 
 @dataclass
@@ -106,7 +107,8 @@ def create_skill_executor(
  if skill_config is None:
   try:
    skill_config=load_yaml_config("skills.yaml")
-  except Exception:
+  except Exception as e:
+   get_logger().error(f"Failed to load skills.yaml: {e}")
    skill_config={}
  mapping=skill_config.get("agent_skill_mapping",{})
  allowed_skills=mapping.get(agent_type,mapping.get("default",[]))

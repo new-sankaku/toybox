@@ -4,6 +4,7 @@ import re
 import time
 from typing import Optional,Dict,Any,List
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
+from middleware.logger import get_logger
 
 
 class WebFetchSkill(Skill):
@@ -83,9 +84,9 @@ class WebFetchSkill(Skill):
     validated_hosts=self._get_validated_hosts()
     if host_with_port not in validated_hosts and host not in validated_hosts:
      return f"Local access requires validated AI provider. Use connection test first: {host_with_port}"
-  except Exception:
-   pass
-  return None
+  except Exception as e:
+   get_logger().warning(f"URL security check failed for {url}, blocking access: {e}")
+   return f"URL security check failed: {e}"
 
  def _get_validated_hosts(self)->List[str]:
   now=time.time()

@@ -1,6 +1,7 @@
 from flask import Flask,request,jsonify
 from datastore import DataStore
 from config_loader import get_status_labels
+from middleware.logger import get_logger
 
 
 def register_project_routes(app:Flask,data_store:DataStore,sio):
@@ -60,7 +61,7 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         job_queue=get_llm_job_queue()
         cleaned=job_queue.cleanup_project_jobs(project_id)
         if cleaned>0:
-            print(f"[start_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+            get_logger().info(f"start_project: cleaned {cleaned} incomplete jobs for project {project_id}")
 
         project=data_store.update_project(project_id,{"status":"running"})
         sio.emit('project:status_changed',{
@@ -112,7 +113,7 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         job_queue=get_llm_job_queue()
         cleaned=job_queue.cleanup_project_jobs(project_id)
         if cleaned>0:
-            print(f"[resume_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+            get_logger().info(f"resume_project: cleaned {cleaned} incomplete jobs for project {project_id}")
 
         project=data_store.update_project(project_id,{"status":"running"})
         sio.emit('project:status_changed',{
@@ -133,7 +134,7 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         job_queue=get_llm_job_queue()
         cleaned=job_queue.cleanup_project_jobs(project_id)
         if cleaned>0:
-            print(f"[initialize_project] Cleaned {cleaned} incomplete jobs for project {project_id}")
+            get_logger().info(f"initialize_project: cleaned {cleaned} incomplete jobs for project {project_id}")
 
         project=data_store.initialize_project(project_id)
         sio.emit('project:initialized',{
