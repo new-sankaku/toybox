@@ -52,7 +52,7 @@ def get_skill_registry()->SkillRegistry:
 
 
 def _register_default_skills(registry:SkillRegistry)->None:
- from .file_skills import FileReadSkill,FileWriteSkill,FileListSkill
+ from .file_skills import FileReadSkill,FileWriteSkill,FileEditSkill,FileListSkill
  from .bash_skill import BashExecuteSkill
  from .python_skill import PythonExecuteSkill
  from .project_skill import ProjectAnalyzeSkill
@@ -62,6 +62,7 @@ def _register_default_skills(registry:SkillRegistry)->None:
  from .web_skills import WebFetchSkill
  registry.register(FileReadSkill())
  registry.register(FileWriteSkill())
+ registry.register(FileEditSkill())
  registry.register(FileListSkill())
  registry.register(BashExecuteSkill())
  registry.register(PythonExecuteSkill())
