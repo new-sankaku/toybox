@@ -237,8 +237,8 @@ export default function ProjectView():JSX.Element{
    name:project.name,
    userIdea:project.concept?.description||'',
    references:project.concept?.references||'',
-   platform:(project.concept?.platform as Platform)||defaults.platform,
-   scope:(project.concept?.scope as Scope)||defaults.scope,
+   platform:(project.concept?.platform as Platform)||defaults?.platform||'',
+   scope:(project.concept?.scope as Scope)||defaults?.scope||'',
    scale:(project.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(project.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...(projectDefaults?.assetGeneration||{}),...project.config?.assetGeneration},
@@ -412,8 +412,8 @@ export default function ProjectView():JSX.Element{
    name:currentProject.name,
    userIdea:currentProject.concept?.description||'',
    references:currentProject.concept?.references||'',
-   platform:(currentProject.concept?.platform as Platform)||defaults.platform,
-   scope:(currentProject.concept?.scope as Scope)||defaults.scope,
+   platform:(currentProject.concept?.platform as Platform)||defaults?.platform||'',
+   scope:(currentProject.concept?.scope as Scope)||defaults?.scope||'',
    scale:(currentProject.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(currentProject.config?.aiServiceSettings as Record<string,string>||{})},
    assetGeneration:{...(projectDefaults?.assetGeneration||{}),...currentProject.config?.assetGeneration},
@@ -786,6 +786,7 @@ export default function ProjectView():JSX.Element{
 )}
 
          {/*Content Permissions*/}
+         {violenceRatingOptions.length>0&&sexualRatingOptions.length>0&&(
          <div>
           <label className="block text-nier-small text-nier-text-light mb-2">
            コンテンツレーティング
@@ -794,7 +795,7 @@ export default function ProjectView():JSX.Element{
            <div className="p-2 border border-nier-border-light">
             <div className="flex items-center justify-between mb-1">
              <span className="text-nier-small text-nier-text-main">暴力表現</span>
-             <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[form.contentPermissions.violenceLevel].age}</span>
+             <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[form.contentPermissions.violenceLevel]?.age??''}</span>
             </div>
             <input
              type="range"
@@ -807,12 +808,12 @@ export default function ProjectView():JSX.Element{
              })}
              className="nier-slider"
             />
-            <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[form.contentPermissions.violenceLevel].description}</p>
+            <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[form.contentPermissions.violenceLevel]?.description??''}</p>
            </div>
            <div className="p-2 border border-nier-border-light">
             <div className="flex items-center justify-between mb-1">
              <span className="text-nier-small text-nier-text-main">性表現</span>
-             <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[form.contentPermissions.sexualLevel].age}</span>
+             <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[form.contentPermissions.sexualLevel]?.age??''}</span>
             </div>
             <input
              type="range"
@@ -825,10 +826,11 @@ export default function ProjectView():JSX.Element{
              })}
              className="nier-slider"
             />
-            <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[form.contentPermissions.sexualLevel].description}</p>
+            <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[form.contentPermissions.sexualLevel]?.description??''}</p>
            </div>
           </div>
          </div>
+         )}
 
          {/*Initial Files*/}
          <div>
@@ -1045,6 +1047,7 @@ export default function ProjectView():JSX.Element{
 )}
 
            {/*Content Permissions*/}
+           {violenceRatingOptions.length>0&&sexualRatingOptions.length>0&&(
            <div>
             <label className="block text-nier-small text-nier-text-light mb-2">
              コンテンツレーティング
@@ -1053,7 +1056,7 @@ export default function ProjectView():JSX.Element{
              <div className="p-2 border border-nier-border-light">
               <div className="flex items-center justify-between mb-1">
                <span className="text-nier-small text-nier-text-main">暴力表現</span>
-               <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[editForm.contentPermissions.violenceLevel].age}</span>
+               <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[editForm.contentPermissions.violenceLevel]?.age??''}</span>
               </div>
               <input
                type="range"
@@ -1066,12 +1069,12 @@ export default function ProjectView():JSX.Element{
                })}
                className="nier-slider"
               />
-              <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[editForm.contentPermissions.violenceLevel].description}</p>
+              <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[editForm.contentPermissions.violenceLevel]?.description??''}</p>
              </div>
              <div className="p-2 border border-nier-border-light">
               <div className="flex items-center justify-between mb-1">
                <span className="text-nier-small text-nier-text-main">性表現</span>
-               <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[editForm.contentPermissions.sexualLevel].age}</span>
+               <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[editForm.contentPermissions.sexualLevel]?.age??''}</span>
               </div>
               <input
                type="range"
@@ -1084,10 +1087,11 @@ export default function ProjectView():JSX.Element{
                })}
                className="nier-slider"
               />
-              <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[editForm.contentPermissions.sexualLevel].description}</p>
+              <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[editForm.contentPermissions.sexualLevel]?.description??''}</p>
              </div>
             </div>
            </div>
+           )}
 
            {/*Buttons*/}
            <div className="flex gap-3 pt-2">
@@ -1221,6 +1225,10 @@ export default function ProjectView():JSX.Element{
           <div className="text-center py-4 text-nier-text-light">
            <Loader2 size={20} className="mx-auto mb-2 animate-spin"/>
            読み込み中...
+          </div>
+) : filesError?(
+          <div className="text-center py-4 text-nier-text-light">
+           {filesError}
           </div>
 ) : uploadedFiles.length===0?(
           <div className="text-center py-4 text-nier-text-light">

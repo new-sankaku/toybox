@@ -455,6 +455,7 @@ export interface UISettingsResponse{
  roleLabels:Record<string,string>
  agentRoles:Record<string,string>
  agents:Record<string,UISettingsAgent>
+ assetTypeLabels?:Record<string,string>
 }
 
 export const uiSettingsApi={
@@ -891,6 +892,11 @@ export interface ProjectOptionsConfig{
  platforms:PlatformOption[]
  scopes:ScopeOption[]
  projectTemplates:{value:string;label:string}[]
+ scaleOptions?:import('@/config/projectOptions').ProjectScaleOption[]
+ assetServiceOptions?:import('@/config/projectOptions').AssetServiceOption[]
+ violenceRatingOptions?:import('@/config/projectOptions').ContentRatingOption[]
+ sexualRatingOptions?:import('@/config/projectOptions').ContentRatingOption[]
+ projectDefaults?:{assetGeneration:import('@/config/projectOptions').AssetGenerationOptions;contentPermissions:import('@/config/projectOptions').ContentPermissions}
  defaults:{platform:string;scope:string;projectTemplate:string}
 }
 
