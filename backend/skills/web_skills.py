@@ -1,7 +1,8 @@
 import asyncio
 import json
 import re
-from typing import Optional,Dict,Any
+import time
+from typing import Optional,Dict,Any,List
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
 
@@ -18,30 +19,25 @@ class WebFetchSkill(Skill):
   SkillParameter(name="extract_text",type="boolean",description="HTMLからテキストを抽出",required=False,default=False),
  ]
 
- BLOCKED_DOMAINS=[
+ PRIVATE_NETWORK_PATTERNS=[
+  "169.254.",
+  "10.",
+  "172.16.","172.17.","172.18.","172.19.",
+  "172.20.","172.21.","172.22.","172.23.",
+  "172.24.","172.25.","172.26.","172.27.",
+  "172.28.","172.29.","172.30.","172.31.",
+  "192.168.",
+ ]
+
+ LOCAL_HOST_PATTERNS=[
   "localhost",
   "127.0.0.1",
   "0.0.0.0",
-  "169.254.",
-  "10.",
-  "172.16.",
-  "172.17.",
-  "172.18.",
-  "172.19.",
-  "172.20.",
-  "172.21.",
-  "172.22.",
-  "172.23.",
-  "172.24.",
-  "172.25.",
-  "172.26.",
-  "172.27.",
-  "172.28.",
-  "172.29.",
-  "172.30.",
-  "172.31.",
-  "192.168.",
  ]
+
+ _validated_hosts_cache:Optional[List[str]]=None
+ _cache_time:Optional[float]=None
+ CACHE_TTL=60
 
  def __init__(self):
   super().__init__()
@@ -74,12 +70,43 @@ class WebFetchSkill(Skill):
   try:
    parsed=urlparse(url)
    host=parsed.hostname or""
-   for blocked in self.BLOCKED_DOMAINS:
-    if host==blocked or host.startswith(blocked) or host.endswith("."+blocked):
-     return f"Internal/private network access blocked: {host}"
+   port=parsed.port
+   for pattern in self.PRIVATE_NETWORK_PATTERNS:
+    if host.startswith(pattern):
+     return f"Private network access blocked: {host}"
+   is_localhost=any(
+    host==p or host.endswith("."+p)
+    for p in self.LOCAL_HOST_PATTERNS
+   )
+   if is_localhost:
+    host_with_port=f"{host}:{port}" if port else host
+    validated_hosts=self._get_validated_hosts()
+    if host_with_port not in validated_hosts and host not in validated_hosts:
+     return f"Local access requires validated AI provider. Use connection test first: {host_with_port}"
   except Exception:
    pass
   return None
+
+ def _get_validated_hosts(self)->List[str]:
+  now=time.time()
+  if(WebFetchSkill._validated_hosts_cache is not None and
+    WebFetchSkill._cache_time is not None and
+    now-WebFetchSkill._cache_time<self.CACHE_TTL):
+   return WebFetchSkill._validated_hosts_cache
+  try:
+   from models.database import get_session
+   from repositories import LocalProviderConfigRepository
+   session=get_session()
+   try:
+    repo=LocalProviderConfigRepository(session)
+    hosts=repo.get_validated_hosts()
+    WebFetchSkill._validated_hosts_cache=hosts
+    WebFetchSkill._cache_time=now
+    return hosts
+   finally:
+    session.close()
+  except Exception:
+   return WebFetchSkill._validated_hosts_cache or []
 
  def _fetch(self,url:str,method:str,headers:Dict,body:Optional[str],timeout:int,extract_text:bool,max_size:int)->SkillResult:
   import urllib.request

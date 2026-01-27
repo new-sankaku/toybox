@@ -81,11 +81,12 @@ def register_ai_provider_routes(app:Flask):
    return jsonify({"error":"providerType is required"}),400
 
   start_time=time.time()
+  base_url=config_data.get('baseUrl')
 
   try:
    config=AIProviderConfig(
     api_key=config_data.get('apiKey'),
-    base_url=config_data.get('baseUrl'),
+    base_url=base_url,
    )
    provider=get_provider(provider_type,config)
 
@@ -98,6 +99,9 @@ def register_ai_provider_routes(app:Flask):
    result=provider.test_connection()
    latency=int((time.time()-start_time)*1000)
    result["latency"]=latency
+
+   if result.get("success") and provider_type.startswith("local-"):
+    _save_validated_local_provider(provider_type,base_url or provider._get_base_url())
 
    return jsonify(result)
 
@@ -117,6 +121,19 @@ def register_ai_provider_routes(app:Flask):
     "message":message,
     "latency":latency
    })
+
+ def _save_validated_local_provider(provider_id:str,base_url:str):
+  from models.database import get_session
+  from repositories import LocalProviderConfigRepository
+  session=get_session()
+  try:
+   repo=LocalProviderConfigRepository(session)
+   repo.save(provider_id,base_url,is_validated=True)
+   session.commit()
+  except Exception:
+   session.rollback()
+  finally:
+   session.close()
 
  @app.route('/api/ai/chat',methods=['POST'])
  def ai_chat():

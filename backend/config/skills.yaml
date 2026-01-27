@@ -328,8 +328,7 @@ agent_skill_mapping:
 
 sandbox:
   enabled: true
-  working_dir_base: "/tmp/toybox/projects"
-  allowed_paths: []
+  output_base: "./output"
   denied_paths:
     - /etc
     - /usr
@@ -338,5 +337,8 @@ sandbox:
     - /var
     - /root
     - /home
+    - /proc
+    - /sys
+    - /dev
   timeout_seconds: 120
   max_output_size: 100000

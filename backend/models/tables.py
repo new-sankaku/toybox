@@ -224,3 +224,13 @@ class LlmJob(Base):
  created_at=Column(DateTime,default=datetime.now)
  started_at=Column(DateTime)
  completed_at=Column(DateTime)
+
+
+class LocalProviderConfig(Base):
+ __tablename__="local_provider_configs"
+ provider_id=Column(String(50),primary_key=True)
+ base_url=Column(String(500),nullable=False)
+ is_validated=Column(Boolean,default=False)
+ last_validated_at=Column(DateTime)
+ created_at=Column(DateTime,default=datetime.now)
+ updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
