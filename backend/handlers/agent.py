@@ -107,15 +107,8 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   agent=data_store.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  try:
-   loop=asyncio.new_event_loop()
-   asyncio.set_event_loop(loop)
-   cancelled=loop.run_until_complete(execution_service.cancel_agent(agent_id))
-   loop.close()
-  except Exception as e:
-   raise ApiError(f"Cancel failed: {str(e)}",code="CANCEL_ERROR",status_code=500)
+  cancelled=execution_service.cancel_agent(agent_id)
   if cancelled:
-   data_store.update_agent(agent_id,{"status":"cancelled","currentTask":None})
    return jsonify({"success":True,"message":"Agent cancelled"})
   else:
    return jsonify({"success":False,"message":"Agent not running or already completed"})

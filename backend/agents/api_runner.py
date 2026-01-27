@@ -329,7 +329,6 @@ class ApiAgentRunner(AgentRunner):
         prompt=base_prompt.format(
             project_concept=context.project_concept or"（未定義）",
             previous_outputs=self._format_previous_outputs(context.previous_outputs),
-            config=context.config,
         )
 
         if context.assigned_task:
@@ -337,6 +336,18 @@ class ApiAgentRunner(AgentRunner):
 {context.assigned_task}
 
 {prompt}"""
+
+        retry_key=f"{agent_type}_previous_attempt"
+        if retry_key in context.previous_outputs:
+            attempt=context.previous_outputs[retry_key]
+            issues=attempt.get("issues",[])
+            if issues:
+                issues_text="\n".join(f"- {i}" for i in issues)
+                prompt+=f"""
+
+## 前回の品質チェック結果（修正が必要）
+以下の問題点が指摘されました。これらを改善した出力を生成してください。
+{issues_text}"""
 
         return prompt
 
@@ -476,11 +487,14 @@ class QualityCheckResult:
 @dataclass
 class WorkerTaskResult:
     worker_type:str
-    status:str
+    status:str="pending"
     output:Dict[str,Any]=field(default_factory=dict)
     quality_check:Optional[QualityCheckResult]=None
     retries:int=0
     error:Optional[str]=None
+    tokens_used:int=0
+    input_tokens:int=0
+    output_tokens:int=0
 
 
 class LeaderWorkerOrchestrator:
@@ -620,6 +634,14 @@ class LeaderWorkerOrchestrator:
             if self.on_worker_created:
                 worker_id=self.on_worker_created(worker_type,task) or worker_id
 
+            worker_on_progress=None
+            if self.on_worker_status:
+                def _make_progress_cb(wid):
+                    def cb(p,t):
+                        self.on_worker_status(wid,"running",{"progress":p,"currentTask":t})
+                    return cb
+                worker_on_progress=_make_progress_cb(worker_id)
+
             worker_context=AgentContext(
                 project_id=leader_context.project_id,
                 agent_id=worker_id,
@@ -629,6 +651,8 @@ class LeaderWorkerOrchestrator:
                 config=leader_context.config,
                 assigned_task=task,
                 leader_analysis=leader_output,
+                on_progress=worker_on_progress,
+                on_log=leader_context.on_log,
             )
 
             if self.on_worker_status:
@@ -652,8 +676,8 @@ class LeaderWorkerOrchestrator:
                 if result.status=="completed":
                     self.on_worker_status(worker_id,"completed",{
                         "tokensUsed":result.tokens_used,
-                        "inputTokens":getattr(result,"input_tokens",0),
-                        "outputTokens":getattr(result,"output_tokens",0),
+                        "inputTokens":result.input_tokens,
+                        "outputTokens":result.output_tokens,
                     })
                 elif result.status=="failed":
                     self.on_worker_status(worker_id,"failed",{"error":result.error})
