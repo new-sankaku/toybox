@@ -12,11 +12,6 @@ import type{FileCategory}from'@/types/uploadedFile'
 import{cn}from'@/lib/utils'
 import{Play,Pause,Square,Trash2,Plus,FolderOpen,RotateCcw,AlertTriangle,Loader2,RefreshCw,Pencil,X,Check,Upload,FileText,Image,Music,File}from'lucide-react'
 import{
- PROJECT_DEFAULTS,
- ASSET_SERVICE_OPTIONS,
- VIOLENCE_RATING_OPTIONS,
- SEXUAL_RATING_OPTIONS,
- PROJECT_SCALE_OPTIONS,
  type Platform,
  type Scope,
  type ProjectScale,
@@ -57,16 +52,19 @@ interface NewProjectForm{
  contentPermissions:ContentPermissions
 }
 
-const getInitialForm=(defaults:{platform:string;scope:string;projectTemplate:string}):NewProjectForm=>({
+const getInitialForm=(
+ defaults:{platform:string;scope:string;projectTemplate:string}|null,
+ projDefaults:{assetGeneration:AssetGenerationOptions;contentPermissions:ContentPermissions}|null
+):NewProjectForm=>({
  name:'',
  userIdea:'',
  references:'',
- platform:defaults.platform as Platform,
- scope:defaults.scope as Scope,
- scale:'medium' as ProjectScale,
+ platform:(defaults?.platform||'') as Platform,
+ scope:(defaults?.scope||'') as Scope,
+ scale:'' as ProjectScale,
  aiServiceSettings:{},
- assetGeneration:{...PROJECT_DEFAULTS.assetGeneration},
- contentPermissions:{...PROJECT_DEFAULTS.contentPermissions}
+ assetGeneration:projDefaults?{...projDefaults.assetGeneration}:{enableImageGeneration:false,enableBGMGeneration:false,enableVoiceSynthesis:false,enableVideoGeneration:false},
+ contentPermissions:projDefaults?{...projDefaults.contentPermissions}:{violenceLevel:0 as ContentRatingLevel,sexualLevel:0 as ContentRatingLevel}
 })
 
 const statusLabels:Record<ProjectStatus,string>={
@@ -87,11 +85,11 @@ const statusColors:Record<ProjectStatus,string>={
 
 export default function ProjectView():JSX.Element{
  const{currentProject,setCurrentProject,projects,setProjects,incrementDataVersion}=useProjectStore()
- const{platforms,scopes,defaults,fetchOptions}=useProjectOptionsStore()
+ const{platforms,scopes,defaults,scaleOptions,assetServiceOptions,violenceRatingOptions,sexualRatingOptions,projectDefaults,fetchOptions}=useProjectOptionsStore()
  const{master,fetchMaster}=useAIServiceStore()
  const{getLabel:getAgentLabel,getFilteredUIPhases,fetchDefinitions,loaded:definitionsLoaded}=useAgentDefinitionStore()
  const brushupStore=useBrushupStore()
- const initialForm=getInitialForm(defaults)
+ const initialForm=getInitialForm(defaults,projectDefaults)
  const[showNewForm,setShowNewForm]=useState(false)
  const[form,setForm]=useState<NewProjectForm>(initialForm)
  const[selectedFiles,setSelectedFiles]=useState<SelectedFile[]>([])
@@ -107,6 +105,7 @@ export default function ProjectView():JSX.Element{
  const[editForm,setEditForm]=useState<NewProjectForm>(initialForm)
  const[uploadedFiles,setUploadedFiles]=useState<UploadedFile[]>([])
  const[filesLoading,setFilesLoading]=useState(false)
+ const[filesError,setFilesError]=useState<string|null>(null)
 
  const assetGeneration=currentProject?.config?.assetGeneration as AssetGenerationOptions|undefined
  const brushupPhases=useMemo(()=>getFilteredUIPhases(assetGeneration),[assetGeneration,getFilteredUIPhases])
@@ -133,7 +132,7 @@ export default function ProjectView():JSX.Element{
    setUploadedFiles(files)
   }catch(err){
    console.error('Failed to fetch uploaded files:',err)
-   setUploadedFiles([])
+   setFilesError(err instanceof Error?err.message:'ファイル一覧の取得に失敗しました')
   }finally{
    setFilesLoading(false)
   }
@@ -242,10 +241,10 @@ export default function ProjectView():JSX.Element{
    scope:(project.concept?.scope as Scope)||defaults.scope,
    scale:(project.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(project.config?.aiServiceSettings as Record<string,string>||{})},
-   assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...project.config?.assetGeneration},
+   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...project.config?.assetGeneration},
    contentPermissions:{
-    violenceLevel:(project.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.violenceLevel,
-    sexualLevel:(project.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.sexualLevel
+    violenceLevel:(project.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.violenceLevel??0 as ContentRatingLevel),
+    sexualLevel:(project.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.sexualLevel??0 as ContentRatingLevel)
    }
   })
   setIsEditing(true)
@@ -417,10 +416,10 @@ export default function ProjectView():JSX.Element{
    scope:(currentProject.concept?.scope as Scope)||defaults.scope,
    scale:(currentProject.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(currentProject.config?.aiServiceSettings as Record<string,string>||{})},
-   assetGeneration:{...PROJECT_DEFAULTS.assetGeneration,...currentProject.config?.assetGeneration},
+   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...currentProject.config?.assetGeneration},
    contentPermissions:{
-    violenceLevel:(currentProject.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.violenceLevel,
-    sexualLevel:(currentProject.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??PROJECT_DEFAULTS.contentPermissions.sexualLevel
+    violenceLevel:(currentProject.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.violenceLevel??0 as ContentRatingLevel),
+    sexualLevel:(currentProject.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.sexualLevel??0 as ContentRatingLevel)
    }
   })
   setIsEditing(true)
@@ -682,7 +681,7 @@ export default function ProjectView():JSX.Element{
            プロジェクト規模
           </label>
           <div className="grid grid-cols-3 gap-2">
-           {PROJECT_SCALE_OPTIONS.map((opt)=>(
+           {scaleOptions.map((opt)=>(
             <button
              key={opt.value}
              type="button"
@@ -708,7 +707,7 @@ export default function ProjectView():JSX.Element{
            アセット自動生成
           </label>
           <div className="grid grid-cols-2 gap-2">
-           {ASSET_SERVICE_OPTIONS.map((opt)=>(
+           {assetServiceOptions.map((opt)=>(
             <label
              key={opt.key}
              className="flex items-center gap-2 p-2 border border-nier-border-light hover:bg-nier-bg-hover cursor-pointer"
@@ -795,7 +794,7 @@ export default function ProjectView():JSX.Element{
            <div className="p-2 border border-nier-border-light">
             <div className="flex items-center justify-between mb-1">
              <span className="text-nier-small text-nier-text-main">暴力表現</span>
-             <span className="text-nier-small text-nier-text-main">{VIOLENCE_RATING_OPTIONS[form.contentPermissions.violenceLevel].age}</span>
+             <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[form.contentPermissions.violenceLevel].age}</span>
             </div>
             <input
              type="range"
@@ -808,12 +807,12 @@ export default function ProjectView():JSX.Element{
              })}
              className="nier-slider"
             />
-            <p className="text-nier-caption text-nier-text-light mt-1">{VIOLENCE_RATING_OPTIONS[form.contentPermissions.violenceLevel].description}</p>
+            <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[form.contentPermissions.violenceLevel].description}</p>
            </div>
            <div className="p-2 border border-nier-border-light">
             <div className="flex items-center justify-between mb-1">
              <span className="text-nier-small text-nier-text-main">性表現</span>
-             <span className="text-nier-small text-nier-text-main">{SEXUAL_RATING_OPTIONS[form.contentPermissions.sexualLevel].age}</span>
+             <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[form.contentPermissions.sexualLevel].age}</span>
             </div>
             <input
              type="range"
@@ -826,7 +825,7 @@ export default function ProjectView():JSX.Element{
              })}
              className="nier-slider"
             />
-            <p className="text-nier-caption text-nier-text-light mt-1">{SEXUAL_RATING_OPTIONS[form.contentPermissions.sexualLevel].description}</p>
+            <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[form.contentPermissions.sexualLevel].description}</p>
            </div>
           </div>
          </div>
@@ -970,7 +969,7 @@ export default function ProjectView():JSX.Element{
              アセット自動生成
             </label>
             <div className="grid grid-cols-2 gap-2">
-             {ASSET_SERVICE_OPTIONS.map((opt)=>(
+             {assetServiceOptions.map((opt)=>(
               <label
                key={opt.key}
                className="flex items-center gap-2 p-2 border border-nier-border-light hover:bg-nier-bg-hover cursor-pointer"
@@ -1054,7 +1053,7 @@ export default function ProjectView():JSX.Element{
              <div className="p-2 border border-nier-border-light">
               <div className="flex items-center justify-between mb-1">
                <span className="text-nier-small text-nier-text-main">暴力表現</span>
-               <span className="text-nier-small text-nier-text-main">{VIOLENCE_RATING_OPTIONS[editForm.contentPermissions.violenceLevel].age}</span>
+               <span className="text-nier-small text-nier-text-main">{violenceRatingOptions[editForm.contentPermissions.violenceLevel].age}</span>
               </div>
               <input
                type="range"
@@ -1067,12 +1066,12 @@ export default function ProjectView():JSX.Element{
                })}
                className="nier-slider"
               />
-              <p className="text-nier-caption text-nier-text-light mt-1">{VIOLENCE_RATING_OPTIONS[editForm.contentPermissions.violenceLevel].description}</p>
+              <p className="text-nier-caption text-nier-text-light mt-1">{violenceRatingOptions[editForm.contentPermissions.violenceLevel].description}</p>
              </div>
              <div className="p-2 border border-nier-border-light">
               <div className="flex items-center justify-between mb-1">
                <span className="text-nier-small text-nier-text-main">性表現</span>
-               <span className="text-nier-small text-nier-text-main">{SEXUAL_RATING_OPTIONS[editForm.contentPermissions.sexualLevel].age}</span>
+               <span className="text-nier-small text-nier-text-main">{sexualRatingOptions[editForm.contentPermissions.sexualLevel].age}</span>
               </div>
               <input
                type="range"
@@ -1085,7 +1084,7 @@ export default function ProjectView():JSX.Element{
                })}
                className="nier-slider"
               />
-              <p className="text-nier-caption text-nier-text-light mt-1">{SEXUAL_RATING_OPTIONS[editForm.contentPermissions.sexualLevel].description}</p>
+              <p className="text-nier-caption text-nier-text-light mt-1">{sexualRatingOptions[editForm.contentPermissions.sexualLevel].description}</p>
              </div>
             </div>
            </div>

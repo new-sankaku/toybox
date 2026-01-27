@@ -27,6 +27,7 @@ interface AIServiceState{
  originalProviderConfigs:AIProviderConfig[]
  currentProjectId:string|null
  providerLoading:boolean
+ providerError:string|null
  fetchServices:()=>Promise<void>
  fetchMaster:()=>Promise<void>
  fetchProjectServices:(projectId:string)=>Promise<void>
@@ -50,17 +51,10 @@ interface AIServiceState{
  isProviderFieldChanged:(id:string,field:string)=>boolean
 }
 
-const DEFAULT_SERVICES:Record<AIServiceType,AIServiceConfig>={
- llm:{label:'LLM',description:'-',provider:'',model:''},
- image:{label:'画像生成',description:'-',provider:'',model:''},
- music:{label:'音楽生成',description:'-',provider:'',model:''},
- audio:{label:'音声生成',description:'-',provider:'',model:''}
-}
-
 export const useAIServiceStore=create<AIServiceState>()(
  persist(
   (set,get)=>({
-   services:{...DEFAULT_SERVICES},
+   services:{} as Record<AIServiceType,AIServiceConfig>,
    master:null,
    projectServices:{},
    loaded:false,
@@ -71,6 +65,7 @@ export const useAIServiceStore=create<AIServiceState>()(
    originalProviderConfigs:[],
    currentProjectId:null,
    providerLoading:false,
+   providerError:null,
 
    fetchServices:async()=>{
     if(get().loaded||get().loading)return
@@ -81,7 +76,7 @@ export const useAIServiceStore=create<AIServiceState>()(
     }catch(error){
      console.error('Failed to fetch AI services:',error)
      set({
-      error:error instanceof Error?error.message:'Failed to fetch AI services',
+      error:error instanceof Error?error.message:'AIサービスの取得に失敗しました',
       loading:false
      })
     }
@@ -164,7 +159,8 @@ export const useAIServiceStore=create<AIServiceState>()(
     const configs:AIProviderConfig[]=[]
     for(const[pid,pdata]of Object.entries(master.providers)){
      if(pdata.serviceTypes.includes('llm')){
-      const providerType=reverseMapping[pid]||'openai'
+      const providerType=reverseMapping[pid]
+      if(!providerType)continue
       configs.push({
        id:`${pid}-llm-default`,
        name:pdata.label,
@@ -177,7 +173,8 @@ export const useAIServiceStore=create<AIServiceState>()(
       }as LLMProviderConfig)
      }
      if(pdata.serviceTypes.includes('image')){
-      const providerType=reverseMapping[pid]||'comfyui'
+      const providerType=reverseMapping[pid]
+      if(!providerType)continue
       configs.push({
        id:`${pid}-image-default`,
        name:pdata.label,
@@ -189,7 +186,8 @@ export const useAIServiceStore=create<AIServiceState>()(
       }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('audio')){
-      const providerType=reverseMapping[pid]||'voicevox'
+      const providerType=reverseMapping[pid]
+      if(!providerType)continue
       configs.push({
        id:`${pid}-audio-default`,
        name:pdata.label,
@@ -201,7 +199,8 @@ export const useAIServiceStore=create<AIServiceState>()(
       }as ComfyUIConfig)
      }
      if(pdata.serviceTypes.includes('music')){
-      const providerType=reverseMapping[pid]||'suno'
+      const providerType=reverseMapping[pid]
+      if(!providerType)continue
       configs.push({
        id:`${pid}-music-default`,
        name:pdata.label,
@@ -220,7 +219,7 @@ export const useAIServiceStore=create<AIServiceState>()(
    loadProviderConfigs:async(projectId:string)=>{
     const state=get()
     if(state.currentProjectId===projectId&&state.providerConfigs.length>0)return
-    set({providerLoading:true})
+    set({providerLoading:true,providerError:null})
     try{
      const serverConfigs=await projectSettingsApi.getAIProviders(projectId)
      if(serverConfigs&&Array.isArray(serverConfigs)&&serverConfigs.length>0){
@@ -232,8 +231,10 @@ export const useAIServiceStore=create<AIServiceState>()(
      }
     }catch(error){
      console.error('Failed to load provider configs:',error)
-     const defaults=get().buildDefaultProviderConfigs()
-     set({providerConfigs:defaults,originalProviderConfigs:JSON.parse(JSON.stringify(defaults)),currentProjectId:projectId})
+     set({
+      providerError:error instanceof Error?error.message:'プロバイダー設定の取得に失敗しました',
+      currentProjectId:projectId
+     })
     }finally{
      set({providerLoading:false})
     }

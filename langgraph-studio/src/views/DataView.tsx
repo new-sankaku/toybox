@@ -7,6 +7,7 @@ import{Button}from'@/components/ui/Button'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
 import{useAssetStore}from'@/stores/assetStore'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{assetApi,fileUploadApi,type ApiAsset}from'@/services/apiService'
 import{cn}from'@/lib/utils'
 import{
@@ -61,13 +62,6 @@ function convertApiAsset(apiAsset:ApiAsset):Asset{
  }
 }
 
-const approvalStatusLabels:Record<ApprovalStatus,string>={
- approved:'承認済',
- pending:'未承認',
- rejected:'却下'
-}
-
-
 const approvalBgColors:Record<ApprovalStatus,string>={
  approved:'bg-nier-bg-selected border-nier-accent-green',
  pending:'bg-nier-bg-selected border-nier-accent-yellow',
@@ -79,15 +73,7 @@ const typeIcons:Record<AssetType,typeof Image>={
  audio:Music,
  document:FileText,
  code:Code,
- other:FolderOpen
-}
-
-const typeLabels:Record<AssetType,string>={
- image:'画像',
- audio:'音声',
- document:'ドキュメント',
- code:'コード',
- other:'その他'
+ other:FileText
 }
 
 const typeColors:Record<AssetType,string>={
@@ -102,6 +88,7 @@ export default function DataView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter}=useNavigationStore()
  const assetStore=useAssetStore()
+ const uiConfig=useUIConfigStore()
  const[loading,setLoading]=useState(false)
  const[filterType,setFilterType]=useState<AssetType|'all'>('all')
  const[approvalFilter,setApprovalFilter]=useState<ApprovalFilter>('pending')
@@ -133,7 +120,7 @@ export default function DataView():JSX.Element{
     assetStore.setAssets(data)
    }catch(error){
     console.error('Failed to fetch assets:',error)
-    assetStore.setAssets([])
+    assetStore.setError(error instanceof Error?error.message:'アセットの取得に失敗しました')
    }finally{
     setLoading(false)
    }
@@ -263,7 +250,7 @@ export default function DataView():JSX.Element{
 ):viewMode==='grid'?(
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
      {filteredAssets.map(asset=>{
-      const Icon=typeIcons[asset.type]||FolderOpen
+      const Icon=typeIcons[asset.type]||FileText
       return(
        <div
         key={asset.id}
@@ -354,7 +341,7 @@ export default function DataView():JSX.Element{
        </thead>
        <tbody className="divide-y divide-nier-border-light">
         {filteredAssets.map(asset=>{
-         const Icon=typeIcons[asset.type]||FolderOpen
+         const Icon=typeIcons[asset.type]||FileText
          return(
           <tr key={asset.id} className="hover:bg-nier-bg-panel transition-colors">
            <td className="px-4 py-3">
@@ -364,11 +351,11 @@ export default function DataView():JSX.Element{
             </div>
            </td>
            <td className={cn('px-4 py-3 text-nier-small',typeColors[asset.type])}>
-            {typeLabels[asset.type]}
+            {uiConfig.getAssetTypeLabel(asset.type)}
            </td>
            <td className="px-4 py-3">
             <span className={cn('text-nier-caption px-1.5 py-0.5 border',approvalBgColors[asset.approvalStatus])}>
-             {approvalStatusLabels[asset.approvalStatus]}
+             {uiConfig.getApprovalStatusLabel(asset.approvalStatus)}
             </span>
            </td>
            <td className="px-4 py-3 text-nier-small text-nier-text-light">
@@ -445,7 +432,7 @@ export default function DataView():JSX.Element{
       <div className="flex flex-col gap-1">
        {(['all','image','audio','document','code']as const).map(type=>{
         const Icon=type==='all'?FolderOpen : typeIcons[type]
-        const label=type==='all'?'全て' : typeLabels[type]
+        const label=type==='all'?'全て' : uiConfig.getAssetTypeLabel(type)
         const count=assetCounts[type]
         return(
          <button
@@ -476,7 +463,7 @@ export default function DataView():JSX.Element{
      <CardContent className="py-2">
       <div className="flex flex-col gap-1">
        {(['all','pending','approved','rejected']as const).map(status=>{
-        const label=status==='all'?'全状態' : approvalStatusLabels[status]
+        const label=status==='all'?'全状態' : uiConfig.getApprovalStatusLabel(status)
         const count=approvalCounts[status]
         return(
          <button
@@ -538,7 +525,7 @@ export default function DataView():JSX.Element{
       <div className="flex items-center justify-between px-4 py-3 bg-nier-bg-header border-b border-nier-border-light">
        <div className="flex items-center gap-2">
         {(()=>{
-         const Icon=typeIcons[selectedAsset.type]||FolderOpen
+         const Icon=typeIcons[selectedAsset.type]||FileText
          return<Icon size={16} className={typeColors[selectedAsset.type]}/>
         })()}
         <span className="text-nier-body font-medium text-nier-text-header">{selectedAsset.name}</span>
@@ -622,7 +609,7 @@ export default function DataView():JSX.Element{
            em:({children})=><em className="italic text-nier-text-light">{children}</em>,
           }}
          >
-          {selectedAsset.content||`# ${selectedAsset.name}\n\nコンテンツが利用できません。`}
+          {selectedAsset.content||''}
          </ReactMarkdown>
         </div>
 )}
@@ -630,7 +617,7 @@ export default function DataView():JSX.Element{
        {selectedAsset.type==='code'&&(
         <div className="bg-nier-bg-panel border border-nier-border-light p-6 overflow-auto max-h-[60vh]">
          <pre className="text-nier-small font-mono whitespace-pre-wrap text-nier-text-main">
-          {selectedAsset.content||`// ${selectedAsset.name}\n\n// コンテンツが利用できません`}
+          {selectedAsset.content||''}
          </pre>
         </div>
 )}
@@ -641,13 +628,13 @@ export default function DataView():JSX.Element{
          <div>
           <span className="text-nier-text-light block">タイプ</span>
           <span className={typeColors[selectedAsset.type]}>
-           {typeLabels[selectedAsset.type]}
+           {uiConfig.getAssetTypeLabel(selectedAsset.type)}
           </span>
          </div>
          <div>
           <span className="text-nier-text-light block">状態</span>
           <span className={cn('px-1.5 py-0.5 border inline-block',approvalBgColors[selectedAsset.approvalStatus])}>
-           {approvalStatusLabels[selectedAsset.approvalStatus]}
+           {uiConfig.getApprovalStatusLabel(selectedAsset.approvalStatus)}
           </span>
          </div>
          <div>
