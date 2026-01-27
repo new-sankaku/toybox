@@ -147,7 +147,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'paused'|'interrupted'|'cancelled'
+ status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'|'cancelled'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -203,6 +203,11 @@ export const agentApi={
 
  resume:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
   const response=await api.post(`/api/agents/${agentId}/resume`)
+  return response.data
+ },
+
+ cancel:async(agentId:string):Promise<{success:boolean;message:string}>=>{
+  const response=await api.post(`/api/agents/${agentId}/cancel`)
   return response.data
  }
 }

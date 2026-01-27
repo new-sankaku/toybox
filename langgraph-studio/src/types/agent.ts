@@ -1,4 +1,4 @@
-export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'paused'|'interrupted'|'cancelled'
+export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'|'cancelled'
 
 export type AgentType=
  |'director_phase1'
