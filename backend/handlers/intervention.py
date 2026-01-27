@@ -91,9 +91,10 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
                         "agent":paused_agent,
                         "reason":"subsequent_phase_pause"
                     },room=f"project:{project_id}")
-                execution_service=_get_execution_service()
-                if execution_service:
-                    execution_service.re_execute_agent(project_id,target_agent_id)
+                if activation_result.get("previousStatus")!="waiting_response":
+                    execution_service=_get_execution_service()
+                    if execution_service:
+                        execution_service.re_execute_agent(project_id,target_agent_id)
             intervention["activationResult"]=activation_result
 
         return jsonify(intervention),201
