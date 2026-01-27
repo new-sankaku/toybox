@@ -73,7 +73,7 @@ class PythonExecuteSkill(Skill):
   stdout_capture=io.StringIO()
   stderr_capture=io.StringIO()
   local_vars={"__name__":"__main__","__file__":"<agent>"}
-  local_vars["print"]=lambda *args,**kw:print(*args,file=stdout_capture,**kw)
+  local_vars["print"]=lambda*args,**kw:print(*args,file=stdout_capture,**kw)
   safe_builtins=self._get_safe_builtins()
   local_vars["__builtins__"]=safe_builtins
   original_cwd=os.getcwd()

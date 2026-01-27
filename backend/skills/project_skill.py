@@ -154,26 +154,26 @@ class ProjectAnalyzeSkill(Skill):
   return items
 
  def _detect_project_type(self,important_files:Dict,languages:Dict)->Optional[str]:
-  if "package.json" in important_files:
+  if"package.json" in important_files:
    content=important_files["package.json"].get("content","")
-   if "react" in content.lower():
+   if"react" in content.lower():
     return"React Application"
-   if "vue" in content.lower():
+   if"vue" in content.lower():
     return"Vue.js Application"
-   if "next" in content.lower():
+   if"next" in content.lower():
     return"Next.js Application"
-   if "electron" in content.lower():
+   if"electron" in content.lower():
     return"Electron Application"
    return"Node.js Project"
-  if "requirements.txt" in important_files or"pyproject.toml" in important_files:
-   if "GDScript" in languages:
+  if"requirements.txt" in important_files or"pyproject.toml" in important_files:
+   if"GDScript" in languages:
     return"Godot Game (Python tools)"
    return"Python Project"
-  if "Cargo.toml" in important_files:
+  if"Cargo.toml" in important_files:
    return"Rust Project"
-  if "go.mod" in important_files:
+  if"go.mod" in important_files:
    return"Go Project"
-  if "pom.xml" in important_files or"build.gradle" in important_files:
+  if"pom.xml" in important_files or"build.gradle" in important_files:
    return"Java Project"
   if languages:
    primary=max(languages,key=languages.get)
