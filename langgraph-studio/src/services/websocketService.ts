@@ -5,9 +5,16 @@ import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
 import{useMetricsStore}from'@/stores/metricsStore'
 import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
+import{useToastStore}from'@/stores/toastStore'
+import{useActivityFeedStore}from'@/stores/activityFeedStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
+
+function getAgentDisplayName(agent?:Agent):string{
+ if(!agent)return'不明なエージェント'
+ return(agent.metadata?.displayName as string)||agent.type
+}
 
 interface ServerToClientEvents{
  connect:()=>void
@@ -149,6 +156,8 @@ class WebSocketService{
     agentStore.addAgent(data.agent)
     agentStore.updateAgentStatus(data.agent.id,'running')
    }
+   const name=getAgentDisplayName(data.agent)
+   useActivityFeedStore.getState().addEvent('agent_started',name,`${name} が開始しました`,data.agentId)
   })
 
   this.socket.on('agent:created',(data)=>{
@@ -175,6 +184,9 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'waiting_provider')
+   const name=getAgentDisplayName(data.agent)
+   useToastStore.getState().addToast('warning',`${name}: プロバイダ接続待機中`)
+   useActivityFeedStore.getState().addEvent('agent_waiting_provider',name,`${name} がプロバイダ待機中`,data.agentId)
   })
 
   this.socket.on('agent:progress',(data)=>{
@@ -198,6 +210,12 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'completed')
+   const name=getAgentDisplayName(data.agent)
+   const isLeader=!data.agent?.parentAgentId
+   if(isLeader){
+    useToastStore.getState().addToast('success',`${name} が完了しました`)
+   }
+   useActivityFeedStore.getState().addEvent('agent_completed',name,`${name} が完了しました`,data.agentId)
   })
 
   this.socket.on('agent:failed',(data)=>{
@@ -214,6 +232,9 @@ class WebSocketService{
     level:'error',
     message:data.error
    })
+   const name=getAgentDisplayName(data.agent)
+   useToastStore.getState().addToast('error',`${name} がエラーで停止しました`)
+   useActivityFeedStore.getState().addEvent('agent_failed',name,`${name} がエラーで停止: ${data.error}`,data.agentId)
   })
 
   this.socket.on('agent:paused',(data)=>{
@@ -223,6 +244,8 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'paused')
+   const name=getAgentDisplayName(data.agent)
+   useActivityFeedStore.getState().addEvent('agent_paused',name,`${name} が一時停止しました`,data.agentId)
   })
 
   this.socket.on('agent:resumed',(data)=>{
@@ -232,6 +255,8 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'running')
+   const name=getAgentDisplayName(data.agent)
+   useActivityFeedStore.getState().addEvent('agent_resumed',name,`${name} が再開しました`,data.agentId)
   })
 
   this.socket.on('agent:activated',(data)=>{
@@ -250,6 +275,9 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'waiting_response')
+   const name=getAgentDisplayName(data.agent)
+   useToastStore.getState().addToast('warning',`${name} がオペレーターの返答を待っています`)
+   useActivityFeedStore.getState().addEvent('agent_waiting_response',name,`${name} がオペレーターの返答を待っています`,data.agentId)
   })
 
   this.socket.on('checkpoint:created',(data)=>{
@@ -260,6 +288,10 @@ class WebSocketService{
    if(data.agentId&&data.agentStatus){
     useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus as Agent['status'])
    }
+   const agent=useAgentStore.getState().agents.find(a=>a.id===data.agentId)
+   const name=getAgentDisplayName(agent)
+   useToastStore.getState().addToast('warning',`${name} が承認を待っています`)
+   useActivityFeedStore.getState().addEvent('checkpoint_created',name,`${name} が承認を待っています`,data.agentId)
   })
 
   this.socket.on('checkpoint:resolved',(data)=>{
@@ -269,6 +301,11 @@ class WebSocketService{
    }
    if(data.agentId&&data.agentStatus){
     useAgentStore.getState().updateAgentStatus(data.agentId,data.agentStatus as Agent['status'])
+   }
+   if(data.agentId){
+    const agent=useAgentStore.getState().agents.find(a=>a.id===data.agentId)
+    const name=getAgentDisplayName(agent)
+    useActivityFeedStore.getState().addEvent('checkpoint_resolved',name,`${name} の承認が処理されました`,data.agentId)
    }
   })
 
@@ -280,6 +317,8 @@ class WebSocketService{
   this.socket.on('phase:changed',({projectId,phase,phaseName})=>{
    console.log('[WS] Phase changed:',projectId,phase,phaseName)
    useProjectStore.getState().updateProject(projectId,{currentPhase:phase})
+   useToastStore.getState().addToast('info',`PHASE ${phase} - ${phaseName} に移行しました`)
+   useActivityFeedStore.getState().addEvent('phase_changed','System',`PHASE ${phase} - ${phaseName} に移行しました`)
   })
 
   this.socket.on('metrics:update',({projectId,metrics})=>{

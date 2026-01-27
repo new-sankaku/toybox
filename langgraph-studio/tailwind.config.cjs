@@ -63,7 +63,8 @@ module.exports = {
       animation: {
         'nier-pulse': 'nier-pulse 2s ease-in-out infinite',
         'nier-fade-in': 'nier-fade-in 0.3s ease-out',
-        'nier-slide-in': 'nier-slide-in 0.3s ease-out'
+        'nier-slide-in': 'nier-slide-in 0.3s ease-out',
+        'nier-slide-in-right': 'nier-slide-in-right 0.3s ease-out'
       },
       keyframes: {
         'nier-pulse': {
@@ -76,6 +77,10 @@ module.exports = {
         },
         'nier-slide-in': {
           '0%': { opacity: '0', transform: 'translateX(-10px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' }
+        },
+        'nier-slide-in-right': {
+          '0%': { opacity: '0', transform: 'translateX(100%)' },
           '100%': { opacity: '1', transform: 'translateX(0)' }
         }
       },

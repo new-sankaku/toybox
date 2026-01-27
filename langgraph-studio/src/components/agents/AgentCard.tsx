@@ -20,66 +20,77 @@ interface AgentCardProps{
 const statusConfig={
  pending:{
   color:'bg-nier-border-dark',
+  textColor:'text-nier-text-light',
   icon:Clock,
   text:'待機中',
   pulse:false
  },
  running:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-orange',
+  textColor:'text-nier-accent-orange',
   icon:Play,
   text:'実行中',
   pulse:true
  },
  waiting_approval:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-yellow',
+  textColor:'text-nier-accent-yellow',
   icon:AlertCircle,
   text:'承認待ち',
   pulse:true
  },
  completed:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-green',
+  textColor:'text-nier-accent-green',
   icon:CheckCircle,
   text:'完了',
   pulse:false
  },
  failed:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-red',
+  textColor:'text-nier-accent-red',
   icon:XCircle,
   text:'エラー',
   pulse:false
  },
  blocked:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-red',
+  textColor:'text-nier-accent-red',
   icon:Pause,
   text:'ブロック',
   pulse:false
  },
  interrupted:{
   color:'bg-nier-accent-orange',
+  textColor:'text-nier-accent-orange',
   icon:Zap,
   text:'中断',
   pulse:false
  },
  cancelled:{
   color:'bg-nier-border-dark',
+  textColor:'text-nier-text-light',
   icon:Ban,
   text:'キャンセル',
   pulse:false
  },
  paused:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-blue',
+  textColor:'text-nier-accent-blue',
   icon:Pause,
   text:'一時停止',
   pulse:false
  },
  waiting_response:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-yellow',
+  textColor:'text-nier-accent-yellow',
   icon:AlertCircle,
   text:'応答待ち',
   pulse:true
  },
  waiting_provider:{
-  color:'bg-nier-border-dark',
+  color:'bg-nier-accent-blue',
+  textColor:'text-nier-accent-blue',
   icon:Clock,
   text:'プロバイダ待ち',
   pulse:true
@@ -161,7 +172,8 @@ export function AgentCard({
    <div className="grid grid-cols-[4px_55px_180px_1fr_140px_auto] items-center gap-2">
     {/*Col 1: Status Indicator*/}
     <div className={cn(
-     'w-1 h-6 bg-nier-border-dark transition-opacity',
+     'w-1 h-6 transition-opacity',
+     status.color,
      status.pulse&&'animate-pulse'
 )}/>
 
@@ -234,7 +246,7 @@ export function AgentCard({
 )}
      <span className={cn(
       'text-nier-caption flex items-center gap-1 w-14',
-      isRetryable?'text-nier-accent-orange':'text-nier-text-light'
+      status.textColor
 )}>
       <StatusIcon size={10}/>
       {status.text}

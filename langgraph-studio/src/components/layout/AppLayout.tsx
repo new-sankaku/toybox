@@ -3,6 +3,7 @@ import HeaderTabs from'./HeaderTabs'
 import ConnectionStatus from'./ConnectionStatus'
 import ActivitySidebar from'./ActivitySidebar'
 import DialogueBar from'./DialogueBar'
+import{ToastContainer}from'@/components/ui/Toast'
 import type{TabId}from'../../App'
 
 interface AppLayoutProps{
@@ -36,6 +37,7 @@ export default function AppLayout({
 
    {/*Dialogue overlay*/}
    <DialogueBar/>
+   <ToastContainer/>
   </div>
 )
 }
