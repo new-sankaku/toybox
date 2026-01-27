@@ -63,6 +63,24 @@ const statusConfig={
   icon:Ban,
   text:'キャンセル',
   pulse:false
+ },
+ paused:{
+  color:'bg-nier-border-dark',
+  icon:Pause,
+  text:'一時停止',
+  pulse:false
+ },
+ waiting_response:{
+  color:'bg-nier-border-dark',
+  icon:AlertCircle,
+  text:'応答待ち',
+  pulse:true
+ },
+ waiting_provider:{
+  color:'bg-nier-border-dark',
+  icon:Clock,
+  text:'プロバイダ待ち',
+  pulse:true
  }
 }
 
@@ -110,6 +128,9 @@ export function AgentCard({
   if(agent.status==='failed')return agent.error||'エラー発生'
   if(agent.status==='interrupted')return agent.currentTask||'サーバー再起動により中断'
   if(agent.status==='cancelled')return'キャンセル済み'
+  if(agent.status==='paused')return'一時停止中'
+  if(agent.status==='waiting_response')return'応答待ち'
+  if(agent.status==='waiting_provider')return'プロバイダ待ち'
   return''
  }
 

@@ -282,32 +282,39 @@ export default function CheckpointReviewView({
        </span>
       </CardHeader>
       <CardContent className="space-y-3">
-       <Button
-        variant="success"
-        className="w-full justify-start gap-3"
-        onClick={handleApprove}
-       >
-        <CheckCircle size={18}/>
-        承認
-       </Button>
+       {checkpoint.status==='pending'?(
+        <>
+         <Button
+          variant="success"
+          className="w-full justify-start gap-3"
+          onClick={handleApprove}
+         >
+          <CheckCircle size={18}/>
+          承認
+         </Button>
 
-       <Button
-        className="w-full justify-start gap-3"
-        onClick={handleRequestChanges}
-       >
-        <RotateCcw size={18}/>
-        変更を要求
-       </Button>
+         <Button
+          className="w-full justify-start gap-3"
+          onClick={handleRequestChanges}
+         >
+          <RotateCcw size={18}/>
+          変更を要求
+         </Button>
 
-       <Button
-        variant="danger"
-        className="w-full justify-start gap-3"
-        onClick={handleReject}
-       >
-        <XCircle size={18}/>
-        却下
-       </Button>
-
+         <Button
+          variant="danger"
+          className="w-full justify-start gap-3"
+          onClick={handleReject}
+         >
+          <XCircle size={18}/>
+          却下
+         </Button>
+        </>
+):(
+        <div className="text-nier-small text-nier-text-light py-2">
+         このチェックポイントは解決済みです（{checkpoint.status}）
+        </div>
+)}
       </CardContent>
      </Card>
     </div>

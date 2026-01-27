@@ -80,7 +80,7 @@ export default function CostView():JSX.Element{
   if(!pricing)return 0
   const llmModel=Object.entries(pricing.models).find(
    ([,m])=>m.pricing&&(m.pricing.input!==undefined||m.pricing.output!==undefined)
-  )
+)
   if(!llmModel)return 0
   const modelPricing=llmModel[1].pricing
   const inputPer1M=modelPricing?.input||0

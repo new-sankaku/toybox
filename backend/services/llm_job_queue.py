@@ -8,6 +8,8 @@ from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
 from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent
 
+MAX_JOB_RETRIES=3
+
 
 class LlmJobQueue:
  _instance:Optional["LlmJobQueue"]=None
@@ -29,6 +31,7 @@ class LlmJobQueue:
   self._thread:Optional[threading.Thread]=None
   self._active_jobs_by_provider:Dict[str,Dict[str,bool]]={}
   self._active_jobs_by_group:Dict[str,Dict[str,bool]]={}
+  self._active_jobs_lock=threading.Lock()
   self._job_callbacks:Dict[str,Callable[[Dict],None]]={}
   self._initialized=True
 
@@ -111,26 +114,50 @@ class LlmJobQueue:
    time.sleep(self._poll_interval)
 
  def _get_provider_active_count(self,provider_id:str)->int:
-  provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
-  return len([j for j in provider_jobs.values() if j])
+  with self._active_jobs_lock:
+   provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
+   return len([j for j in provider_jobs.values() if j])
 
  def _get_group_active_count(self,group_id:str)->int:
-  group_jobs=self._active_jobs_by_group.get(group_id,{})
-  return len([j for j in group_jobs.values() if j])
+  with self._active_jobs_lock:
+   group_jobs=self._active_jobs_by_group.get(group_id,{})
+   return len([j for j in group_jobs.values() if j])
 
  def _can_start_job(self,provider_id:str,job_id:str)->bool:
-  if job_id in self._active_jobs_by_provider.get(provider_id,{}):
-   return False
-  group_id=get_provider_group(provider_id)
-  if group_id:
-   group_max=get_group_max_concurrent(group_id)
-   if self._get_group_active_count(group_id)>=group_max:
+  with self._active_jobs_lock:
+   if job_id in self._active_jobs_by_provider.get(provider_id,{}):
     return False
-  else:
-   provider_max=get_provider_max_concurrent(provider_id)
-   if self._get_provider_active_count(provider_id)>=provider_max:
-    return False
+   group_id=get_provider_group(provider_id)
+   if group_id:
+    group_max=get_group_max_concurrent(group_id)
+    group_jobs=self._active_jobs_by_group.get(group_id,{})
+    if len([j for j in group_jobs.values() if j])>=group_max:
+     return False
+   else:
+    provider_max=get_provider_max_concurrent(provider_id)
+    provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
+    if len([j for j in provider_jobs.values() if j])>=provider_max:
+     return False
   return True
+
+ def _register_active_job(self,job_id:str,provider_id:str)->None:
+  with self._active_jobs_lock:
+   if provider_id not in self._active_jobs_by_provider:
+    self._active_jobs_by_provider[provider_id]={}
+   self._active_jobs_by_provider[provider_id][job_id]=True
+   group_id=get_provider_group(provider_id)
+   if group_id:
+    if group_id not in self._active_jobs_by_group:
+     self._active_jobs_by_group[group_id]={}
+    self._active_jobs_by_group[group_id][job_id]=True
+
+ def _unregister_active_job(self,job_id:str,provider_id:str)->None:
+  with self._active_jobs_lock:
+   if provider_id in self._active_jobs_by_provider:
+    self._active_jobs_by_provider[provider_id].pop(job_id,None)
+   group_id=get_provider_group(provider_id)
+   if group_id and group_id in self._active_jobs_by_group:
+    self._active_jobs_by_group[group_id].pop(job_id,None)
 
  def _process_pending_jobs(self)->None:
   with session_scope() as session:
@@ -142,14 +169,7 @@ class LlmJobQueue:
      continue
     claimed=repo.claim_job(job.id)
     if claimed:
-     if provider_id not in self._active_jobs_by_provider:
-      self._active_jobs_by_provider[provider_id]={}
-     self._active_jobs_by_provider[provider_id][job.id]=True
-     group_id=get_provider_group(provider_id)
-     if group_id:
-      if group_id not in self._active_jobs_by_group:
-       self._active_jobs_by_group[group_id]={}
-      self._active_jobs_by_group[group_id][job.id]=True
+     self._register_active_job(job.id,provider_id)
      thread=threading.Thread(target=self._execute_job,args=(job.id,provider_id),daemon=True)
      thread.start()
 
@@ -177,14 +197,15 @@ class LlmJobQueue:
   except Exception as e:
    with session_scope() as session:
     repo=LlmJobRepository(session)
-    repo.fail_job(job_id,str(e))
-   self._notify_completion(job_id)
+    job=repo.get(job_id)
+    if job and job.retry_count<MAX_JOB_RETRIES:
+     repo.retry_job(job_id)
+     print(f"[LlmJobQueue] Job {job_id} retry ({job.retry_count+1}/{MAX_JOB_RETRIES}): {e}")
+    else:
+     repo.fail_job(job_id,str(e))
+     self._notify_completion(job_id)
   finally:
-   if provider_id in self._active_jobs_by_provider:
-    self._active_jobs_by_provider[provider_id].pop(job_id,None)
-   group_id=get_provider_group(provider_id)
-   if group_id and group_id in self._active_jobs_by_group:
-    self._active_jobs_by_group[group_id].pop(job_id,None)
+   self._unregister_active_job(job_id,provider_id)
 
  def _notify_completion(self,job_id:str)->None:
   job=self.get_job_status(job_id)

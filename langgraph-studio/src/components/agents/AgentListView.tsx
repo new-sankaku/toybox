@@ -161,7 +161,7 @@ export default function AgentListView({
            {phaseAgents.filter(a=>a.status==='completed').length}/{phaseAgents.length}完了
            {phaseAgents.filter(a=>a.status==='running').length>0&&(
             <span className="ml-2 text-nier-text-light">{phaseAgents.filter(a=>a.status==='running').length}稼働中</span>
-           )}
+)}
           </span>
          </CardHeader>
          <CardContent className="p-0">
@@ -175,11 +175,11 @@ export default function AgentListView({
              waitingFor={getWaitingFor(agent)}
              onRetry={onRetryAgent}
             />
-           ))}
+))}
           </div>
          </CardContent>
         </Card>
-       )
+)
       })}
      </div>
 )}

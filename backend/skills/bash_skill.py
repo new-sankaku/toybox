@@ -1,5 +1,6 @@
 import asyncio
 import os
+import platform
 import shlex
 from typing import List,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
@@ -7,14 +8,14 @@ from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
 class BashExecuteSkill(Skill):
  name="bash_execute"
- description="Bashコマンドを実行します"
+ description="シェルコマンドを実行します"
  category=SkillCategory.EXECUTE
  parameters=[
   SkillParameter(name="command",type="string",description="実行するコマンド"),
   SkillParameter(name="timeout",type="integer",description="タイムアウト秒数",required=False,default=60),
  ]
 
- BLOCKED_COMMANDS=[
+ BLOCKED_COMMANDS_LINUX=[
   "rm -rf /",
   "rm -rf /*",
   "mkfs",
@@ -25,7 +26,7 @@ class BashExecuteSkill(Skill):
   "chown -R",
  ]
 
- BLOCKED_PATTERNS=[
+ BLOCKED_PATTERNS_LINUX=[
   "sudo ",
   "su ",
   "> /dev/",
@@ -34,8 +35,44 @@ class BashExecuteSkill(Skill):
   "; sudo",
  ]
 
+ BLOCKED_COMMANDS_WINDOWS=[
+  "format c:",
+  "format d:",
+  "del /s /q c:\\",
+  "del /s /q c:/",
+  "rmdir /s /q c:\\",
+  "rmdir /s /q c:/",
+  "rd /s /q c:\\",
+  "rd /s /q c:/",
+  "reg delete hklm",
+  "reg delete hkcu",
+  "shutdown /s",
+  "shutdown /r",
+  "bcdedit",
+  "diskpart",
+ ]
+
+ BLOCKED_PATTERNS_WINDOWS=[
+  "format ",
+  "del /s /q c:",
+  "rmdir /s /q c:",
+  "rd /s /q c:",
+  "reg delete ",
+  "net user ",
+  "net localgroup ",
+  "runas ",
+ ]
+
+ BLOCKED_COMMANDS_COMMON=[
+  "curl | sh",
+  "curl | bash",
+  "wget | sh",
+  "wget | bash",
+ ]
+
  def __init__(self):
   super().__init__()
+  self._is_windows=platform.system().lower()=="windows"
 
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   command=kwargs.get("command","")
@@ -56,10 +93,19 @@ class BashExecuteSkill(Skill):
 
  def _check_blocked(self,command:str)->Optional[str]:
   cmd_lower=command.lower().strip()
-  for blocked in self.BLOCKED_COMMANDS:
+  for blocked in self.BLOCKED_COMMANDS_COMMON:
    if blocked in cmd_lower:
     return f"Dangerous command pattern: {blocked}"
-  for pattern in self.BLOCKED_PATTERNS:
+  if self._is_windows:
+   blocked_commands=self.BLOCKED_COMMANDS_WINDOWS
+   blocked_patterns=self.BLOCKED_PATTERNS_WINDOWS
+  else:
+   blocked_commands=self.BLOCKED_COMMANDS_LINUX
+   blocked_patterns=self.BLOCKED_PATTERNS_LINUX
+  for blocked in blocked_commands:
+   if blocked in cmd_lower:
+    return f"Dangerous command pattern: {blocked}"
+  for pattern in blocked_patterns:
    if pattern in cmd_lower:
     return f"Blocked pattern: {pattern}"
   return None

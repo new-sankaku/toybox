@@ -421,13 +421,13 @@ export default function InterventionView():JSX.Element{
              </div>
             </div>
            </div>
-          ))}
+))}
 
           {selectedIntervention.responses?.length>0&&(
            <div className="flex justify-center">
             {getStatusBadge(selectedIntervention.status)}
            </div>
-          )}
+)}
           <div ref={chatEndRef}/>
          </div>
 
@@ -498,7 +498,7 @@ export default function InterventionView():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
 )
 }

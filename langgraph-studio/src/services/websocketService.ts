@@ -22,10 +22,17 @@ interface ServerToClientEvents{
   metrics?:ProjectMetrics
  })=>void
  'agent:started':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:created':(data:{agent:Agent;agentId:string;projectId:string;parentAgentId?:string})=>void
+ 'agent:running':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:progress':(data:{agentId:string;projectId:string;progress:number;currentTask:string;tokensUsed:number;message:string})=>void
  'agent:log':(data:{agentId:string;entry:AgentLogEntry})=>void
  'agent:completed':(data:{agent:Agent;agentId:string;projectId:string})=>void
- 'agent:failed':(data:{agentId:string;error:string})=>void
+ 'agent:failed':(data:{agentId:string;projectId?:string;agent?:Agent;error:string})=>void
+ 'agent:waiting_provider':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:paused':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:resumed':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:activated':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:waiting_response':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string;agentStatus?:string})=>void
  'checkpoint:resolved':(data:{checkpoint:Checkpoint;checkpointId?:string;agentId?:string;agentStatus?:string})=>void
  'project:updated':(data:{projectId:string;updates:Partial<Project>})=>void
@@ -144,6 +151,32 @@ class WebSocketService{
    }
   })
 
+  this.socket.on('agent:created',(data)=>{
+   console.log('[WS] Agent created:',data.agentId,'parent:',data.parentAgentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.addAgent(data.agent)
+   }
+  })
+
+  this.socket.on('agent:running',(data)=>{
+   console.log('[WS] Agent running:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'running')
+  })
+
+  this.socket.on('agent:waiting_provider',(data)=>{
+   console.log('[WS] Agent waiting provider:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'waiting_provider')
+  })
+
   this.socket.on('agent:progress',(data)=>{
    console.log('[WS] Agent progress:',data.agentId,data.progress+'%')
    const agentStore=useAgentStore.getState()
@@ -167,15 +200,19 @@ class WebSocketService{
    agentStore.updateAgentStatus(data.agentId,'completed')
   })
 
-  this.socket.on('agent:failed',({agentId,error})=>{
-   console.error('[WS] Agent failed:',agentId,error)
+  this.socket.on('agent:failed',(data)=>{
+   console.error('[WS] Agent failed:',data.agentId,data.error)
    const agentStore=useAgentStore.getState()
-   agentStore.updateAgentStatus(agentId,'failed')
-   agentStore.addLogEntry(agentId,{
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgent(data.agentId,{error:data.error})
+   agentStore.updateAgentStatus(data.agentId,'failed')
+   agentStore.addLogEntry(data.agentId,{
     id:crypto.randomUUID(),
     timestamp:new Date().toISOString(),
     level:'error',
-    message:error
+    message:data.error
    })
   })
 

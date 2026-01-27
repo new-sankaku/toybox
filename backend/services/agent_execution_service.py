@@ -1,5 +1,6 @@
 import asyncio
 import os
+import threading
 from datetime import datetime
 from typing import Optional,Dict,Any,Callable
 from agents.base import AgentContext,AgentType,AgentStatus,AgentOutput
@@ -15,8 +16,8 @@ class AgentExecutionService:
   self._data_store=data_store
   self._sio=sio
   self._agent_runner:Optional[ApiAgentRunner]=None
-  self._running_agents:Dict[str,asyncio.Task]={}
-  self._lock=asyncio.Lock()
+  self._running_agents:Dict[str,bool]={}
+  self._lock=threading.Lock()
 
  def set_agent_runner(self,runner:ApiAgentRunner)->None:
   self._agent_runner=runner
@@ -84,6 +85,8 @@ class AgentExecutionService:
    on_log=lambda l,m:self._on_log(agent_id,project_id,l,m),
    on_checkpoint=lambda t,d:self._on_checkpoint(agent_id,project_id,t,d),
   )
+  with self._lock:
+   self._running_agents[agent_id]=True
   try:
    provider_id=self._get_provider_id_for_agent(project,agent["type"])
    if provider_id:
@@ -157,6 +160,9 @@ class AgentExecutionService:
     "error":str(e)
    },project_id)
    return {"success":False,"error":str(e)}
+  finally:
+   with self._lock:
+    self._running_agents.pop(agent_id,None)
 
  async def execute_leader_with_workers(
   self,
@@ -204,6 +210,8 @@ class AgentExecutionService:
    previous_outputs=self._get_previous_outputs(project_id,agent["type"]),
    config=project.get("config",{}),
   )
+  with self._lock:
+   self._running_agents[leader_agent_id]=True
   try:
    provider_id=self._get_provider_id_for_agent(project,agent["type"])
    if provider_id:
@@ -264,6 +272,9 @@ class AgentExecutionService:
     "error":str(e)
    },project_id)
    return {"success":False,"error":str(e)}
+  finally:
+   with self._lock:
+    self._running_agents.pop(leader_agent_id,None)
 
  def _get_provider_id_for_agent(self,project:Dict,agent_type:str)->Optional[str]:
   ai_services=project.get("aiServices",{})
@@ -382,15 +393,41 @@ class AgentExecutionService:
    "agent":self._data_store.get_agent(worker_id)
   },project_id)
 
- def get_running_agents(self)->Dict[str,str]:
-  return {k:v for k,v in self._running_agents.items() if not v.done()}
+ def get_running_agents(self)->Dict[str,bool]:
+  with self._lock:
+   return dict(self._running_agents)
 
- async def cancel_agent(self,agent_id:str)->bool:
-  async with self._lock:
+ def cancel_agent(self,agent_id:str)->bool:
+  with self._lock:
    if agent_id in self._running_agents:
-    task=self._running_agents[agent_id]
-    if not task.done():
-     task.cancel()
-     del self._running_agents[agent_id]
-     return True
+    self._running_agents.pop(agent_id,None)
+    self._data_store.update_agent(agent_id,{
+     "status":"failed",
+     "error":"キャンセルされました",
+     "currentTask":None,
+    })
+    agent=self._data_store.get_agent(agent_id)
+    if agent:
+     project_id=agent.get("projectId","")
+     self._emit_event("agent:failed",{
+      "agentId":agent_id,
+      "projectId":project_id,
+      "error":"キャンセルされました"
+     },project_id)
+    return True
   return False
+
+ def re_execute_agent(self,project_id:str,agent_id:str)->None:
+  def _run():
+   loop=asyncio.new_event_loop()
+   asyncio.set_event_loop(loop)
+   try:
+    agent=self._data_store.get_agent(agent_id)
+    if agent and agent.get("type","").endswith("_leader"):
+     loop.run_until_complete(self.execute_leader_with_workers(project_id,agent_id))
+    else:
+     loop.run_until_complete(self.execute_agent(project_id,agent_id))
+   finally:
+    loop.close()
+  thread=threading.Thread(target=_run,daemon=True)
+  thread.start()

@@ -1354,7 +1354,7 @@ export default function ProjectView():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
 
    {/*Brushup Dialog*/}
    {showBrushupDialog&&currentProject&&(
@@ -1442,15 +1442,15 @@ export default function ProjectView():JSX.Element{
                    >
                     {agentOpts.map(opt=>(
                      <option key={opt.id} value={opt.id}>{opt.label}</option>
-                    ))}
+))}
                    </select>
                    <span className="text-nier-caption text-nier-text-light mt-1 block">
                     {selectedOpts.length>0?`${selectedOpts.length}件選択中`:'Ctrl+クリックで複数選択'}
                    </span>
                   </div>
-                 )}
+)}
                 </div>
-               )
+)
               })}
              </div>
             </div>

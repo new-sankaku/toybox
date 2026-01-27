@@ -93,7 +93,7 @@ export function FloatingPanel({
     'fixed bg-nier-bg-panel border border-nier-border-dark shadow-lg z-[150] max-h-[80vh]',
     sizeClasses[size],
     isDragging&&'cursor-grabbing select-none'
-   )}
+)}
    style={{left:`${position.x}px`,top:`${position.y}px`}}
   >
    {title&&(
@@ -101,7 +101,7 @@ export function FloatingPanel({
      className={cn(
       'flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2',
       'cursor-grab active:cursor-grabbing'
-     )}
+)}
      onMouseDown={handleMouseDown}
     >
      <div className="flex items-center gap-2">
@@ -117,7 +117,7 @@ export function FloatingPanel({
       <X size={14}/>
      </Button>
     </div>
-   )}
+)}
    <div className="p-4 max-h-[60vh] overflow-y-auto">
     {children}
    </div>
@@ -125,8 +125,8 @@ export function FloatingPanel({
     <div className="flex items-center justify-end gap-3 px-4 py-3 border-t border-nier-border-light bg-nier-bg-selected/50">
      {footer}
     </div>
-   )}
+)}
   </div>,
   document.body
- )
+)
 }

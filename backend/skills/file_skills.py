@@ -62,14 +62,15 @@ class FileReadSkill(Skill):
  def _is_allowed(self,path:str,context:SkillContext)->bool:
   if not context.sandbox_enabled:
    return True
-  norm_path=os.path.normpath(path)
+  real_path=os.path.realpath(path)
   for denied in context.denied_paths:
-   if norm_path.startswith(os.path.normpath(denied)):
+   if real_path.startswith(os.path.realpath(denied)):
     return False
+  working_dir_real=os.path.realpath(context.working_dir)
   if not context.allowed_paths:
-   return norm_path.startswith(os.path.normpath(context.working_dir))
+   return real_path.startswith(working_dir_real)
   for allowed in context.allowed_paths:
-   if norm_path.startswith(os.path.normpath(allowed)):
+   if real_path.startswith(os.path.realpath(allowed)):
     return True
   return False
 
@@ -124,14 +125,15 @@ class FileWriteSkill(Skill):
  def _is_allowed(self,path:str,context:SkillContext)->bool:
   if not context.sandbox_enabled:
    return True
-  norm_path=os.path.normpath(path)
+  real_path=os.path.realpath(path)
   for denied in context.denied_paths:
-   if norm_path.startswith(os.path.normpath(denied)):
+   if real_path.startswith(os.path.realpath(denied)):
     return False
+  working_dir_real=os.path.realpath(context.working_dir)
   if not context.allowed_paths:
-   return norm_path.startswith(os.path.normpath(context.working_dir))
+   return real_path.startswith(working_dir_real)
   for allowed in context.allowed_paths:
-   if norm_path.startswith(os.path.normpath(allowed)):
+   if real_path.startswith(os.path.realpath(allowed)):
     return True
   return False
 
@@ -211,13 +213,14 @@ class FileListSkill(Skill):
  def _is_allowed(self,path:str,context:SkillContext)->bool:
   if not context.sandbox_enabled:
    return True
-  norm_path=os.path.normpath(path)
+  real_path=os.path.realpath(path)
   for denied in context.denied_paths:
-   if norm_path.startswith(os.path.normpath(denied)):
+   if real_path.startswith(os.path.realpath(denied)):
     return False
+  working_dir_real=os.path.realpath(context.working_dir)
   if not context.allowed_paths:
-   return norm_path.startswith(os.path.normpath(context.working_dir))
+   return real_path.startswith(working_dir_real)
   for allowed in context.allowed_paths:
-   if norm_path.startswith(os.path.normpath(allowed)):
+   if real_path.startswith(os.path.realpath(allowed)):
     return True
   return False

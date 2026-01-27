@@ -950,8 +950,16 @@ class DataStore:
      other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
      other_pending=[c for c in other_pending if c.id!=checkpoint_id]
      if not other_pending and agent.status=="waiting_approval":
-      agent.status="running"
+      agent.status="completed"
+      agent.progress=100
+      agent.completed_at=datetime.now()
+      agent.current_task=None
       session.flush()
+      self._add_system_log_internal(session,project_id,"info","System",f"{agent.type}が承認されました")
+      self._emit_event("agent:completed",{
+       "agentId":agent.id,
+       "projectId":project_id,
+      },project_id)
    if resolution=="approved":
     self._check_phase_advancement(session,project_id)
    return result

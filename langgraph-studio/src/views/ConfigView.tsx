@@ -205,7 +205,7 @@ export default function ConfigView():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
 )
 }

@@ -117,6 +117,8 @@ class AgentContext:
     previous_outputs:Dict[str,Any]=field(default_factory=dict)
     config:Dict[str,Any]=field(default_factory=dict)
     quality_check:Optional[QualityCheckSettings]=None
+    assigned_task:Optional[str]=None
+    leader_analysis:Optional[Dict[str,Any]]=None
     on_progress:Optional[Callable[[int,str],None]]=None
     on_log:Optional[Callable[[str,str],None]]=None
     on_checkpoint:Optional[Callable[[str,Dict],None]]=None

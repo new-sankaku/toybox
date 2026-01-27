@@ -1,149 +1,75 @@
-export interface ProjectStatusEvent{
- projectId:string
- oldStatus:string
- newStatus:string
- timestamp:string
+import type{Agent,AgentLogEntry}from'./agent'
+import type{Checkpoint}from'./checkpoint'
+import type{Project,ProjectMetrics,PhaseNumber}from'./project'
+import type{MessagePriority}from'@/stores/navigatorStore'
+
+export interface StateSyncData{
+ status?:string
+ sid?:string
+ project?:Project
+ agents?:Agent[]
+ checkpoints?:Checkpoint[]
+ metrics?:ProjectMetrics
 }
 
-export interface PhaseChangeEvent{
- projectId:string
- phase:number
- phaseName:string
- timestamp:string
-}
-
-export interface AgentStartedEvent{
+export interface AgentEventData{
+ agent:Agent
  agentId:string
- agentType:string
  projectId:string
- timestamp:string
+ parentAgentId?:string
 }
 
-export interface AgentProgressEvent{
+export interface AgentProgressData{
  agentId:string
+ projectId:string
  progress:number
  currentTask:string
- completedTasks:number
- totalTasks:number
- timestamp:string
-}
-
-export interface AgentCompletedEvent{
- agentId:string
- duration:number
  tokensUsed:number
- outputSummary:string
- timestamp:string
-}
-
-export interface AgentFailedEvent{
- agentId:string
- errorType:'timeout'|'llm_error'|'validation_error'|'dependency_error'
- errorMessage:string
- canRetry:boolean
- retryCount:number
- maxRetries:number
- timestamp:string
-}
-
-export interface AgentLogEvent{
- agentId:string
- level:'DEBUG'|'INFO'|'WARN'|'ERROR'
  message:string
- metadata?:Record<string,unknown>
- timestamp:string
 }
 
-export interface CheckpointCreatedEvent{
+export interface AgentFailedData{
+ agentId:string
+ projectId?:string
+ agent?:Agent
+ error:string
+}
+
+export interface CheckpointCreatedData{
+ checkpoint:Checkpoint
  checkpointId:string
  projectId:string
  agentId:string
- checkpointType:string
- title:string
- outputPreview:string
- timestamp:string
+ agentStatus?:string
 }
 
-export interface CheckpointResolvedEvent{
- checkpointId:string
- resolution:'approved'|'rejected'|'changes_requested'
- feedback?:string
- timestamp:string
-}
-
-export interface MetricsUpdateEvent{
- projectId:string
- totalTokens:number
- estimatedTotalTokens:number
- elapsedSeconds:number
- estimatedRemainingSeconds:number
- completedTasks:number
- totalTasks:number
- timestamp:string
-}
-
-export interface TokensUpdateEvent{
- agentId:string
- tokensUsed:number
- tokensTotal:number
- timestamp:string
-}
-
-export interface AgentErrorEvent{
- agentId:string
- errorType:string
- errorMessage:string
- suggestions:string[]
- actions:Array<{label:string;action:string}>
- timestamp:string
-}
-
-export interface LLMErrorEvent{
- errorType:'rate_limit'|'token_limit'|'api_error'|'invalid_response'
- errorMessage:string
- retryAfter?:number
- timestamp:string
-}
-
-export interface StateErrorEvent{
- errorType:'sync_failed'|'checkpoint_failed'|'restore_failed'
- errorMessage:string
- timestamp:string
-}
-
-export interface StateSyncEvent{
- projectId:string
- serverState:{
-  currentAgent:string
-  progress:number
-  completedTasks:number
-  totalTasks:number
- }
- hasDiff:boolean
- timestamp:string
+export interface CheckpointResolvedData{
+ checkpoint:Checkpoint
+ checkpointId?:string
+ agentId?:string
+ agentStatus?:string
 }
 
 export interface WebSocketEventMap{
- 'project:status_changed':ProjectStatusEvent
- 'project:phase_changed':PhaseChangeEvent
-
- 'agent:started':AgentStartedEvent
- 'agent:progress':AgentProgressEvent
- 'agent:completed':AgentCompletedEvent
- 'agent:failed':AgentFailedEvent
- 'agent:log':AgentLogEvent
-
- 'checkpoint:created':CheckpointCreatedEvent
- 'checkpoint:resolved':CheckpointResolvedEvent
-
- 'metrics:update':MetricsUpdateEvent
- 'metrics:tokens':TokensUpdateEvent
-
- 'error:agent':AgentErrorEvent
- 'error:llm':LLMErrorEvent
- 'error:state':StateErrorEvent
-
- 'connection:state_sync':StateSyncEvent
+ 'connection:state_sync':StateSyncData
+ 'agent:started':AgentEventData
+ 'agent:created':AgentEventData
+ 'agent:running':AgentEventData
+ 'agent:progress':AgentProgressData
+ 'agent:log':{agentId:string;entry:AgentLogEntry}
+ 'agent:completed':AgentEventData
+ 'agent:failed':AgentFailedData
+ 'agent:waiting_provider':AgentEventData
+ 'agent:paused':AgentEventData
+ 'agent:resumed':AgentEventData
+ 'agent:activated':AgentEventData
+ 'agent:waiting_response':AgentEventData
+ 'checkpoint:created':CheckpointCreatedData
+ 'checkpoint:resolved':CheckpointResolvedData
+ 'project:updated':{projectId:string;updates:Partial<Project>}
+ 'phase:changed':{projectId:string;phase:PhaseNumber;phaseName:string}
+ 'metrics:update':{projectId:string;metrics:ProjectMetrics}
+ 'navigator:message':{speaker:string;text:string;priority:MessagePriority;source:'server'}
 }
 
 export type WebSocketEventName=keyof WebSocketEventMap

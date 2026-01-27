@@ -80,6 +80,20 @@ class SkillEnabledAgentRunner(AgentRunner):
  async def run_agent_stream(self,context:AgentContext)->AsyncGenerator[Dict[str,Any],None]:
   executor=self._get_executor(context)
   available_skills=executor.get_available_skills()
+  data_store=self._base._data_store
+  trace_id=None
+  if data_store:
+   try:
+    trace=data_store.create_trace(
+     project_id=context.project_id,
+     agent_id=context.agent_id,
+     agent_type=context.agent_type.value,
+     input_context={"project_concept":context.project_concept,"config":context.config},
+     model_used=self._base.model
+    )
+    trace_id=trace.get("id")
+   except Exception as e:
+    print(f"[SkillRunner] Failed to create trace: {e}")
   yield {
    "type":"log",
    "data":{
@@ -90,48 +104,81 @@ class SkillEnabledAgentRunner(AgentRunner):
   }
   skill_schemas=executor.get_skill_schemas_for_llm()
   enhanced_context=self._enhance_context_with_skills(context,skill_schemas)
-  messages=[{"role":"user","content":self._build_initial_prompt(enhanced_context,skill_schemas)}]
+  initial_prompt=self._build_initial_prompt(enhanced_context,skill_schemas)
+  if data_store and trace_id:
+   try:
+    data_store.update_trace_prompt(trace_id,initial_prompt)
+   except Exception as e:
+    print(f"[SkillRunner] Failed to update trace prompt: {e}")
+  messages=[{"role":"user","content":initial_prompt}]
   iteration=0
+  total_tokens=0
   final_output=None
-  while iteration<self._max_iterations:
-   iteration+=1
-   yield {
-    "type":"progress",
-    "data":{"progress":10+iteration*5,"current_task":f"LLM呼び出し中 (iteration {iteration})"}
-   }
-   response=await self._call_llm_with_tools(messages,skill_schemas,context)
-   yield {
-    "type":"tokens",
-    "data":{"count":response.get("tokens_used",0)}
-   }
-   tool_calls=self._extract_tool_calls(response.get("content",""))
-   if not tool_calls:
-    final_output=self._process_final_response(response,context)
-    break
-   yield {
-    "type":"log",
-    "data":{
-     "level":"info",
-     "message":f"ツール呼び出し: {[tc.name for tc in tool_calls]}",
-     "timestamp":datetime.now().isoformat()
-    }
-   }
-   messages.append({"role":"assistant","content":response.get("content","")})
-   tool_results=[]
-   for tc in tool_calls:
+  last_response_content=""
+  try:
+   while iteration<self._max_iterations:
+    iteration+=1
     yield {
-     "type":"skill_call",
-     "data":{"skill":tc.name,"params":tc.input}
+     "type":"progress",
+     "data":{"progress":10+iteration*5,"current_task":f"LLM呼び出し中 (iteration {iteration})"}
     }
-    result=await executor.execute_skill(tc.name,**tc.input)
+    response=await self._call_llm_with_tools(messages,skill_schemas,context)
+    tokens_used=response.get("tokens_used",0)
+    total_tokens+=tokens_used
     yield {
-     "type":"skill_result",
-     "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:500]}
+     "type":"tokens",
+     "data":{"count":tokens_used}
     }
-    tool_results.append(self._format_tool_result(tc,result))
-   messages.append({"role":"user","content":"\n\n".join(tool_results)})
-  if final_output is None:
-   final_output={"type":"document","format":"markdown","content":"最大イテレーション数に達しました","metadata":{}}
+    last_response_content=response.get("content","")
+    tool_calls=self._extract_tool_calls(last_response_content)
+    if not tool_calls:
+     final_output=self._process_final_response(response,context)
+     break
+    yield {
+     "type":"log",
+     "data":{
+      "level":"info",
+      "message":f"ツール呼び出し: {[tc.name for tc in tool_calls]}",
+      "timestamp":datetime.now().isoformat()
+     }
+    }
+    messages.append({"role":"assistant","content":last_response_content})
+    tool_results=[]
+    for tc in tool_calls:
+     yield {
+      "type":"skill_call",
+      "data":{"skill":tc.name,"params":tc.input}
+     }
+     result=await executor.execute_skill(tc.name,**tc.input)
+     yield {
+      "type":"skill_result",
+      "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:500]}
+     }
+     tool_results.append(self._format_tool_result(tc,result))
+    messages.append({"role":"user","content":"\n\n".join(tool_results)})
+   if final_output is None:
+    final_output={"type":"document","format":"markdown","content":"最大イテレーション数に達しました","metadata":{}}
+   if data_store and trace_id:
+    try:
+     input_tokens=int(total_tokens*0.3)
+     output_tokens=total_tokens-input_tokens
+     data_store.complete_trace(
+      trace_id=trace_id,
+      llm_response=last_response_content,
+      output_data=final_output,
+      tokens_input=input_tokens,
+      tokens_output=output_tokens,
+      status="completed"
+     )
+    except Exception as e:
+     print(f"[SkillRunner] Failed to complete trace: {e}")
+  except Exception as e:
+   if data_store and trace_id:
+    try:
+     data_store.fail_trace(trace_id,str(e))
+    except Exception as te:
+     print(f"[SkillRunner] Failed to fail trace: {te}")
+   raise
   yield {
    "type":"progress",
    "data":{"progress":90,"current_task":"完了処理中"}
@@ -159,7 +206,13 @@ class SkillEnabledAgentRunner(AgentRunner):
    f"- {s['name']}: {s['description']}"
    for s in skill_schemas
   ])
-  return f"""あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
+  assigned_task_section=""
+  if context.assigned_task:
+   assigned_task_section=f"""## あなたへの指示（Leader からの割当タスク）
+{context.assigned_task}
+
+"""
+  return f"""{assigned_task_section}あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
 
 ## 利用可能なスキル
 {skills_desc}
@@ -209,6 +262,8 @@ class SkillEnabledAgentRunner(AgentRunner):
    previous_outputs=context.previous_outputs,
    config=enhanced_config,
    quality_check=context.quality_check,
+   assigned_task=context.assigned_task,
+   leader_analysis=context.leader_analysis,
    on_progress=context.on_progress,
    on_log=context.on_log,
    on_checkpoint=context.on_checkpoint,
