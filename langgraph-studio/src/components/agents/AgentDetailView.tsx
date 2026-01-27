@@ -6,6 +6,7 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentLogStreaming}from'./AgentLog'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
+import{cn}from'@/lib/utils'
 import{
  ArrowLeft,
  Pause,
@@ -17,6 +18,20 @@ import{
  FileText,
  MessageCircle
 }from'lucide-react'
+
+const statusBarColorMap:Record<string,string>={
+ running:'bg-nier-accent-orange',
+ waiting_approval:'bg-nier-accent-yellow',
+ waiting_response:'bg-nier-accent-yellow',
+ completed:'bg-nier-accent-green',
+ failed:'bg-nier-accent-red',
+ blocked:'bg-nier-accent-red',
+ interrupted:'bg-nier-accent-orange',
+ paused:'bg-nier-accent-blue',
+ waiting_provider:'bg-nier-accent-blue',
+ pending:'bg-nier-border-dark',
+ cancelled:'bg-nier-border-dark'
+}
 
 interface AgentDetailViewProps{
  agent:Agent
@@ -41,6 +56,7 @@ export default function AgentDetailView({
 }:AgentDetailViewProps):JSX.Element{
  const[showMetadata,setShowMetadata]=useState(false)
  const getAgentStatusLabel=useUIConfigStore(s=>s.getAgentStatusLabel)
+ const statusBarColor=statusBarColorMap[agent.status]||'bg-nier-border-dark'
 
  const getRuntime=()=>{
   if(!agent.startedAt)return'-'
@@ -62,7 +78,7 @@ export default function AgentDetailView({
    <div className="flex items-center justify-between mb-6">
     <div>
      <div className="flex items-center gap-3 mb-2">
-      <div className="w-1.5 h-6 bg-nier-border-dark"/>
+      <div className={cn('w-1.5 h-6',statusBarColor)}/>
       <h1 className="text-nier-h1 font-medium tracking-nier-wide">
        {getDisplayName(agent)}
       </h1>

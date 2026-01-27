@@ -1,5 +1,6 @@
 import{useState,useEffect,useCallback}from'react'
-import{AgentListView,AgentDetailView}from'@/components/agents'
+import{AgentListView}from'@/components/agents'
+import{AgentSlideOver}from'@/components/agents/AgentSlideOver'
 import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
@@ -118,10 +119,10 @@ export default function AgentsView():JSX.Element{
  }
 
  const handleSelectAgent=(agent:Agent)=>{
-  setSelectedAgent(agent)
+  setSelectedAgent(prev=>prev?.id===agent.id?null:agent)
  }
 
- const handleBack=()=>{
+ const handleCloseSlideOver=()=>{
   setSelectedAgent(null)
  }
 
@@ -176,30 +177,30 @@ export default function AgentsView():JSX.Element{
   }
  },[selectedAgent,setAgents])
 
- if(selectedAgent){
-  const currentAgentData=projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
-  const canRetry=['failed','interrupted','cancelled'].includes(currentAgentData.status)
-  const canPause=['running','waiting_approval'].includes(currentAgentData.status)
-  const canResume=['paused','waiting_response'].includes(currentAgentData.status)
-  return(
-   <AgentDetailView
-    agent={currentAgentData}
-    logs={selectedAgentLogs}
-    onBack={handleBack}
-    onRetry={canRetry?()=>handleRetry(currentAgentData):undefined}
-    onPause={canPause?()=>handlePause(currentAgentData):undefined}
-    onResume={canResume?()=>handleResume(currentAgentData):undefined}
-   />
-)
- }
+ const currentAgentData=selectedAgent
+  ?projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
+  :null
+ const canRetry=currentAgentData?['failed','interrupted','cancelled'].includes(currentAgentData.status):false
+ const canPause=currentAgentData?['running','waiting_approval'].includes(currentAgentData.status):false
+ const canResume=currentAgentData?['paused','waiting_response'].includes(currentAgentData.status):false
 
  return(
-  <AgentListView
-   agents={projectAgents}
-   onSelectAgent={handleSelectAgent}
-   selectedAgentId={undefined}
-   loading={initialLoading||isLoading}
-   onRetryAgent={handleRetry}
-  />
+  <>
+   <AgentListView
+    agents={projectAgents}
+    onSelectAgent={handleSelectAgent}
+    selectedAgentId={selectedAgent?.id}
+    loading={initialLoading||isLoading}
+    onRetryAgent={handleRetry}
+   />
+   <AgentSlideOver
+    agent={currentAgentData}
+    logs={selectedAgentLogs}
+    onClose={handleCloseSlideOver}
+    onRetry={canRetry&&currentAgentData?()=>handleRetry(currentAgentData):undefined}
+    onPause={canPause&&currentAgentData?()=>handlePause(currentAgentData):undefined}
+    onResume={canResume&&currentAgentData?()=>handleResume(currentAgentData):undefined}
+   />
+  </>
 )
 }

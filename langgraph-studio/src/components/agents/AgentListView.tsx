@@ -2,6 +2,8 @@ import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
+import{ActivityFeed}from'./ActivityFeed'
+import{PhasePipelineBar}from'./PhasePipelineBar'
 import type{Agent,AgentStatus}from'@/types/agent'
 import{cn}from'@/lib/utils'
 import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle,ChevronDown,ChevronRight,Users}from'lucide-react'
@@ -177,6 +179,7 @@ export default function AgentListView({
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Agent List-Main Content*/}
    <div className="flex-1 flex flex-col overflow-hidden">
+    <PhasePipelineBar uiPhases={uiPhases} agentsByPhase={agentsByPhase} workersByParent={workersByParent}/>
     {loading&&agents.length===0?(
      <Card className="flex-1">
       <CardContent className="py-12 text-center">
@@ -337,6 +340,16 @@ export default function AgentListView({
         <span className="text-nier-text-main">{displayCount}件</span>
        </div>
       </div>
+     </CardContent>
+    </Card>
+
+    {/*Activity Feed*/}
+    <Card className="flex-1 overflow-hidden flex flex-col">
+     <CardHeader>
+      <DiamondMarker>アクティビティ</DiamondMarker>
+     </CardHeader>
+     <CardContent className="flex-1 overflow-hidden p-2">
+      <ActivityFeed/>
      </CardContent>
     </Card>
    </div>
