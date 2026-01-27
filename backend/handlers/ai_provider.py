@@ -5,6 +5,7 @@ from providers import get_provider,list_providers,AIProviderConfig
 from providers.base import ChatMessage,MessageRole
 from providers.registry import register_all_providers
 from providers.health_monitor import get_health_monitor
+from middleware.logger import get_logger
 
 
 def register_ai_provider_routes(app:Flask):
@@ -130,7 +131,8 @@ def register_ai_provider_routes(app:Flask):
    repo=LocalProviderConfigRepository(session)
    repo.save(provider_id,base_url,is_validated=True)
    session.commit()
-  except Exception:
+  except Exception as e:
+   get_logger().error(f"Failed to save validated local provider: {e}",exc_info=True)
    session.rollback()
   finally:
    session.close()
@@ -318,6 +320,7 @@ def register_ai_provider_routes(app:Flask):
     "message":"APIキーが保存されました"
    })
   except Exception as e:
+   get_logger().error(f"Failed to save API key for {provider_id}: {e}",exc_info=True)
    session.rollback()
    return jsonify({"error":"APIキーの保存に失敗しました"}),500
   finally:
@@ -338,6 +341,7 @@ def register_ai_provider_routes(app:Flask):
    else:
     return jsonify({"error":"APIキーが見つかりません"}),404
   except Exception as e:
+   get_logger().error(f"Failed to delete API key for {provider_id}: {e}",exc_info=True)
    session.rollback()
    return jsonify({"error":"APIキーの削除に失敗しました"}),500
   finally:
@@ -370,6 +374,7 @@ def register_ai_provider_routes(app:Flask):
     "latency":latency
    })
   except Exception as e:
+   get_logger().error(f"Failed to validate API key for {provider_id}: {e}",exc_info=True)
    session.rollback()
    return jsonify({"success":False,"error":"APIキーの検証に失敗しました"}),500
   finally:

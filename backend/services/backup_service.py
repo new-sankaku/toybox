@@ -3,6 +3,7 @@ import shutil
 from datetime import datetime
 from typing import List,Optional
 from pathlib import Path
+from middleware.logger import get_logger
 
 
 class BackupService:
@@ -17,7 +18,7 @@ class BackupService:
 
  def create_backup(self,tag:Optional[str]=None)->Optional[str]:
   if not os.path.exists(self._db_path):
-   print(f"[BackupService] Database not found: {self._db_path}")
+   get_logger().warning(f"BackupService: database not found: {self._db_path}")
    return None
   timestamp=datetime.now().strftime("%Y%m%d_%H%M%S")
   tag_suffix=f"_{tag}" if tag else""
@@ -26,11 +27,11 @@ class BackupService:
   backup_path=os.path.join(self._backup_dir,backup_name)
   try:
    shutil.copy2(self._db_path,backup_path)
-   print(f"[BackupService] Backup created: {backup_path}")
+   get_logger().info(f"BackupService: backup created: {backup_path}")
    self._cleanup_old_backups()
    return backup_path
   except Exception as e:
-   print(f"[BackupService] Backup failed: {e}")
+   get_logger().error(f"BackupService: backup failed: {e}",exc_info=True)
    return None
 
  def create_startup_backup(self)->Optional[str]:
@@ -43,11 +44,11 @@ class BackupService:
     for old_backup in backups[self._max_backups:]:
      try:
       os.remove(old_backup["path"])
-      print(f"[BackupService] Removed old backup: {old_backup['path']}")
+      get_logger().info(f"BackupService: removed old backup: {old_backup['path']}")
      except Exception as e:
-      print(f"[BackupService] Failed to remove backup: {e}")
+      get_logger().error(f"BackupService: failed to remove backup: {e}")
   except Exception as e:
-   print(f"[BackupService] Cleanup failed: {e}")
+   get_logger().error(f"BackupService: cleanup failed: {e}",exc_info=True)
 
  def list_backups(self)->List[dict]:
   if not os.path.exists(self._backup_dir):
@@ -69,15 +70,15 @@ class BackupService:
  def restore_backup(self,backup_name:str)->bool:
   backup_path=os.path.join(self._backup_dir,backup_name)
   if not os.path.exists(backup_path):
-   print(f"[BackupService] Backup not found: {backup_path}")
+   get_logger().warning(f"BackupService: backup not found: {backup_path}")
    return False
   try:
    self.create_backup(tag="pre_restore")
    shutil.copy2(backup_path,self._db_path)
-   print(f"[BackupService] Restored from: {backup_path}")
+   get_logger().info(f"BackupService: restored from: {backup_path}")
    return True
   except Exception as e:
-   print(f"[BackupService] Restore failed: {e}")
+   get_logger().error(f"BackupService: restore failed: {e}",exc_info=True)
    return False
 
  def delete_backup(self,backup_name:str)->bool:
@@ -86,10 +87,10 @@ class BackupService:
    return False
   try:
    os.remove(backup_path)
-   print(f"[BackupService] Deleted backup: {backup_path}")
+   get_logger().info(f"BackupService: deleted backup: {backup_path}")
    return True
   except Exception as e:
-   print(f"[BackupService] Delete failed: {e}")
+   get_logger().error(f"BackupService: delete failed: {e}")
    return False
 
  def get_backup_info(self)->dict:

@@ -29,6 +29,7 @@ from config_loader import (
  get_checkpoint_content,
 )
 from asset_scanner import get_testdata_path
+from middleware.logger import get_logger
 
 
 class DataStore:
@@ -49,7 +50,7 @@ class DataStore:
    try:
     self._sio.emit(event,data,room=f"project:{project_id}")
    except Exception as e:
-    print(f"[DataStore] Error emitting {event}: {e}")
+    get_logger().warning(f"Error emitting {event}: {e}")
 
  def _init_sample_data_if_empty(self):
   with session_scope() as session:
@@ -141,7 +142,7 @@ class DataStore:
   )
   session.add(metric)
   session.flush()
-  print(f"[DataStore] Sample project {proj_id} created")
+  get_logger().info(f"Sample project {proj_id} created")
 
  def start_simulation(self):
   if self._simulation_running:
@@ -149,13 +150,13 @@ class DataStore:
   self._simulation_running=True
   self._simulation_thread=threading.Thread(target=self._simulation_loop,daemon=True)
   self._simulation_thread.start()
-  print("[Simulation] Started")
+  get_logger().info("Simulation started")
 
  def stop_simulation(self):
   self._simulation_running=False
   if self._simulation_thread:
    self._simulation_thread.join(timeout=2)
-  print("[Simulation] Stopped")
+  get_logger().info("Simulation stopped")
 
  def _simulation_loop(self):
   while self._simulation_running:
@@ -163,7 +164,7 @@ class DataStore:
     with self._lock:
      self._tick_simulation()
    except Exception as e:
-    print(f"[Simulation] Error: {e}")
+    get_logger().error(f"Simulation tick error: {e}",exc_info=True)
    time.sleep(1)
 
  def _tick_simulation(self):
@@ -552,7 +553,8 @@ class DataStore:
     "url":f"/testdata/{chosen['relative']}",
     "thumbnail":f"/testdata/{chosen['relative']}" if file_type=="image" else None
    }
-  except Exception:
+  except Exception as e:
+   get_logger().debug(f"Error reading file stat: {chosen['path']}: {e}")
    return None
 
  def _random_duration(self)->str:
@@ -807,7 +809,7 @@ class DataStore:
     "progressPercent":0,"currentPhase":1,"phaseName":"Phase 1: 企画・設計","activeGenerations":0
    })
    self._add_system_log_internal(session,project_id,"info","System","プロジェクト初期化完了")
-   print(f"[DataStore] Project {project_id} initialized")
+   get_logger().info(f"Project {project_id} initialized")
    return proj_repo.to_dict(project)
 
  def brushup_project(self,project_id:str,options:Optional[Dict]=None)->Optional[Dict]:
@@ -854,7 +856,7 @@ class DataStore:
    if custom_instruction:
     log_msg+=f", カスタム指示あり"
    self._add_system_log_internal(session,project_id,"info","System",log_msg)
-   print(f"[DataStore] Project {project_id} brushup started: {agent_names}")
+   get_logger().info(f"Project {project_id} brushup started: {agent_names}")
    return proj_repo.to_dict(project)
 
  def get_agents_by_project(self,project_id:str,include_workers:bool=True)->List[Dict]:
@@ -980,7 +982,7 @@ class DataStore:
     project.updated_at=datetime.now()
     session.flush()
     self._add_system_log_internal(session,project_id,"info","System","Phase 2: 実装 に移行しました")
-    print(f"[DataStore] Project {project_id} advanced to Phase 2")
+    get_logger().info(f"Project {project_id} advanced to Phase 2")
 
  def get_system_logs(self,project_id:str)->List[Dict]:
   with session_scope() as session:

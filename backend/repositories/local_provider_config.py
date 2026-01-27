@@ -4,6 +4,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 from models.tables import LocalProviderConfig
+from middleware.logger import get_logger
 
 
 class LocalProviderConfigRepository:
@@ -36,8 +37,9 @@ class LocalProviderConfigRepository:
      hosts.append(f"{host}:{port}")
     else:
      hosts.append(host)
-   except Exception:
-    pass
+   except Exception as e:
+    get_logger().debug(f"URL parse error in get_validated_hosts: {e}")
+    continue
   return hosts
 
  def save(self,provider_id:str,base_url:str,is_validated:bool=False)->LocalProviderConfig:
@@ -89,5 +91,6 @@ class LocalProviderConfigRepository:
     target_host=host
    validated_hosts=self.get_validated_hosts()
    return target_host in validated_hosts
-  except Exception:
+  except Exception as e:
+   get_logger().debug(f"URL validation check failed: {e}")
    return False

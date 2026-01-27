@@ -3,6 +3,7 @@ import subprocess
 import json
 import os
 from typing import List,Optional,Dict,Any,Iterator
+from middleware.logger import get_logger
 from enum import Enum
 from .base import (
  AIProvider,AIProviderConfig,ChatMessage,ChatResponse,
@@ -93,7 +94,8 @@ class ClaudeCodeProvider(AIProvider):
        "action":action_map.get(status[0],"unknown")
       })
    return changes
-  except Exception:
+  except Exception as e:
+   get_logger().debug(f"ClaudeCode git diff error: {e}")
    return []
 
  def chat(
@@ -222,6 +224,7 @@ class ClaudeCodeProvider(AIProvider):
     "message":"Claude Code CLI not found"
    }
   except Exception as e:
+   get_logger().error(f"ClaudeCode test_connection error: {e}",exc_info=True)
    return {
     "success":False,
     "message":f"Error: {str(e)}"

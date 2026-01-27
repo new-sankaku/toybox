@@ -5,6 +5,7 @@ from typing import List,Dict,Optional,Set
 from pathlib import Path
 
 from config_loader import get_all_extension_categories,get_scan_directories,get_file_extensions_config
+from middleware.logger import get_logger
 
 
 
@@ -45,7 +46,7 @@ def scan_directory(base_path:str,subdir:str)->List[Dict]:
     scan_path=os.path.join(base_path,subdir)
 
     if not os.path.exists(scan_path):
-        print(f"[AssetScanner] Directory not found: {scan_path}")
+        get_logger().warning(f"AssetScanner: directory not found: {scan_path}")
         return assets
 
     for root,dirs,files in os.walk(scan_path):
@@ -76,7 +77,7 @@ def scan_directory(base_path:str,subdir:str)->List[Dict]:
                 }
                 assets.append(asset)
             except Exception as e:
-                print(f"[AssetScanner] Error scanning {file_path}: {e}")
+                get_logger().error(f"AssetScanner: error scanning {file_path}: {e}")
 
     return assets
 
@@ -88,9 +89,9 @@ def scan_all_testdata(testdata_path:str)->List[Dict]:
     for subdir in scan_dirs:
         assets=scan_directory(testdata_path,subdir)
         all_assets.extend(assets)
-        print(f"[AssetScanner] Found {len(assets)} files in {subdir}/")
+        get_logger().info(f"AssetScanner: found {len(assets)} files in {subdir}/")
 
-    print(f"[AssetScanner] Total assets: {len(all_assets)}")
+    get_logger().info(f"AssetScanner: total assets: {len(all_assets)}")
     return all_assets
 
 

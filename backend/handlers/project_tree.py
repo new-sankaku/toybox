@@ -5,6 +5,7 @@ import zipfile
 from flask import Flask,jsonify,request,send_file
 from werkzeug.utils import secure_filename
 from datastore import DataStore
+from middleware.logger import get_logger
 
 
 def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:str):
@@ -42,7 +43,8 @@ def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:st
             try:
                 stat=os.stat(path)
                 size=stat.st_size
-            except:
+            except Exception as e:
+                get_logger().warning(f"Failed to get file size for {path}: {e}")
                 size=0
 
                                  

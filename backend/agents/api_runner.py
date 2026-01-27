@@ -20,6 +20,7 @@ from config_loader import (
 )
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
+from middleware.logger import get_logger
 
 
 class ApiAgentRunner(AgentRunner):
@@ -178,7 +179,7 @@ class ApiAgentRunner(AgentRunner):
                 )
                 trace_id=trace.get("id")
             except Exception as e:
-                print(f"[ApiAgentRunner] Failed to create trace: {e}")
+                get_logger().error(f"ApiAgentRunner: failed to create trace: {e}",exc_info=True)
 
         yield {
             "type":"log",
@@ -200,7 +201,7 @@ class ApiAgentRunner(AgentRunner):
             try:
                 self._data_store.update_trace_prompt(trace_id,prompt)
             except Exception as e:
-                print(f"[ApiAgentRunner] Failed to update trace prompt: {e}")
+                get_logger().error(f"ApiAgentRunner: failed to update trace prompt: {e}",exc_info=True)
 
         yield {
             "type":"progress",
@@ -242,7 +243,7 @@ class ApiAgentRunner(AgentRunner):
                         status="completed"
                     )
                 except Exception as e:
-                    print(f"[ApiAgentRunner] Failed to complete trace: {e}")
+                    get_logger().error(f"ApiAgentRunner: failed to complete trace: {e}",exc_info=True)
 
             yield {
                 "type":"progress",
@@ -273,7 +274,7 @@ class ApiAgentRunner(AgentRunner):
                 try:
                     self._data_store.fail_trace(trace_id,str(e))
                 except Exception as te:
-                    print(f"[ApiAgentRunner] Failed to fail trace: {te}")
+                    get_logger().error(f"ApiAgentRunner: failed to record trace failure: {te}",exc_info=True)
 
             yield {
                 "type":"log",

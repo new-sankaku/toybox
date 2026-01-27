@@ -14,6 +14,7 @@ from .base import (
 )
 from .api_runner import ApiAgentRunner
 from skills import create_skill_executor,SkillExecutor,SkillResult
+from middleware.logger import get_logger
 
 
 @dataclass
@@ -93,7 +94,7 @@ class SkillEnabledAgentRunner(AgentRunner):
     )
     trace_id=trace.get("id")
    except Exception as e:
-    print(f"[SkillRunner] Failed to create trace: {e}")
+    get_logger().error(f"SkillRunner: failed to create trace: {e}",exc_info=True)
   yield {
    "type":"log",
    "data":{
@@ -109,7 +110,7 @@ class SkillEnabledAgentRunner(AgentRunner):
    try:
     data_store.update_trace_prompt(trace_id,initial_prompt)
    except Exception as e:
-    print(f"[SkillRunner] Failed to update trace prompt: {e}")
+    get_logger().error(f"SkillRunner: failed to update trace prompt: {e}",exc_info=True)
   messages=[{"role":"user","content":initial_prompt}]
   iteration=0
   total_tokens=0
@@ -171,13 +172,13 @@ class SkillEnabledAgentRunner(AgentRunner):
       status="completed"
      )
     except Exception as e:
-     print(f"[SkillRunner] Failed to complete trace: {e}")
+     get_logger().error(f"SkillRunner: failed to complete trace: {e}",exc_info=True)
   except Exception as e:
    if data_store and trace_id:
     try:
      data_store.fail_trace(trace_id,str(e))
     except Exception as te:
-     print(f"[SkillRunner] Failed to fail trace: {te}")
+     get_logger().error(f"SkillRunner: failed to record trace failure: {te}",exc_info=True)
    raise
   yield {
    "type":"progress",

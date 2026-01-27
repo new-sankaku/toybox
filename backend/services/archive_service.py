@@ -6,6 +6,7 @@ from typing import Optional,Dict,List
 from pathlib import Path
 from models.database import session_scope
 from models.tables import AgentTrace,AgentLog,SystemLog
+from middleware.logger import get_logger
 
 
 class ArchiveService:
@@ -34,7 +35,7 @@ class ArchiveService:
    session.commit()
   total=sum(deleted_counts.values())
   if total>0:
-   print(f"[ArchiveService] Cleaned up {total} old records: {deleted_counts}")
+   get_logger().info(f"ArchiveService: cleaned up {total} old records: {deleted_counts}")
   return deleted_counts
 
  def cleanup_completed_project_data(self,project_id:str,keep_recent_days:int=7)->Dict[str,int]:
@@ -55,7 +56,7 @@ class ArchiveService:
    session.commit()
   total=sum(deleted_counts.values())
   if total>0:
-   print(f"[ArchiveService] Cleaned up project {project_id}: {deleted_counts}")
+   get_logger().info(f"ArchiveService: cleaned up project {project_id}: {deleted_counts}")
   return deleted_counts
 
  def get_data_statistics(self,project_id:Optional[str]=None)->Dict[str,any]:
@@ -151,7 +152,7 @@ class ArchiveService:
      "logCount":len(log_data),
     }
     zf.writestr("metadata.json",json.dumps(metadata,ensure_ascii=False,indent=2))
-  print(f"[ArchiveService] Exported {len(trace_data)} traces to {zip_path}")
+  get_logger().info(f"ArchiveService: exported {len(trace_data)} traces to {zip_path}")
   return zip_path
 
  def archive_and_cleanup(self,project_id:str,agent_id:Optional[str]=None)->Dict[str,any]:
@@ -246,7 +247,8 @@ class ArchiveService:
   try:
    os.remove(archive_path)
    return True
-  except Exception:
+  except Exception as e:
+   get_logger().error(f"ArchiveService: failed to delete archive {archive_name}: {e}")
    return False
 
  def get_archive_info(self)->Dict[str,any]:

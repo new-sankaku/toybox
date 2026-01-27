@@ -7,6 +7,7 @@ from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
 from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent
+from middleware.logger import get_logger
 
 MAX_JOB_RETRIES=3
 
@@ -41,14 +42,14 @@ class LlmJobQueue:
   self._running=True
   self._thread=threading.Thread(target=self._worker_loop,daemon=True)
   self._thread.start()
-  print("[LlmJobQueue] Started")
+  get_logger().info("LlmJobQueue started")
 
  def stop(self)->None:
   self._running=False
   if self._thread:
    self._thread.join(timeout=5)
    self._thread=None
-  print("[LlmJobQueue] Stopped")
+  get_logger().info("LlmJobQueue stopped")
 
  def cleanup_project_jobs(self,project_id:str)->int:
   with session_scope() as session:
@@ -110,7 +111,7 @@ class LlmJobQueue:
    try:
     self._process_pending_jobs()
    except Exception as e:
-    print(f"[LlmJobQueue] Worker error: {e}")
+    get_logger().error(f"LlmJobQueue worker error: {e}",exc_info=True)
    time.sleep(self._poll_interval)
 
  def _get_provider_active_count(self,provider_id:str)->int:
@@ -200,7 +201,7 @@ class LlmJobQueue:
     job=repo.get(job_id)
     if job and job.retry_count<MAX_JOB_RETRIES:
      repo.retry_job(job_id)
-     print(f"[LlmJobQueue] Job {job_id} retry ({job.retry_count+1}/{MAX_JOB_RETRIES}): {e}")
+     get_logger().warning(f"LlmJobQueue job {job_id} retry ({job.retry_count+1}/{MAX_JOB_RETRIES}): {e}")
     else:
      repo.fail_job(job_id,str(e))
      self._notify_completion(job_id)
@@ -216,7 +217,7 @@ class LlmJobQueue:
    try:
     callback(job)
    except Exception as e:
-    print(f"[LlmJobQueue] Callback error: {e}")
+    get_logger().error(f"LlmJobQueue callback error for job {job_id}: {e}",exc_info=True)
 
 
 def get_llm_job_queue()->LlmJobQueue:

@@ -1,5 +1,6 @@
 """Zhipu AI (智谱清言) プロバイダー"""
 from typing import List,Optional,Dict,Any,Iterator
+from middleware.logger import get_logger
 from .base import (
  AIProvider,AIProviderConfig,ChatMessage,ChatResponse,
  StreamChunk,ModelInfo,MessageRole
@@ -132,6 +133,7 @@ class ZhipuProvider(AIProvider):
     "message":"Zhipu AI: 正常に接続できました"
    }
   except Exception as e:
+   get_logger().error(f"Zhipu test_connection error: {e}",exc_info=True)
    error_str=str(e)
    if"api_key" in error_str.lower() or"auth" in error_str.lower():
     return {"success":False,"message":"認証エラー: APIキーが無効です"}
@@ -144,6 +146,6 @@ class ZhipuProvider(AIProvider):
     from config import get_config
     app_config=get_config()
     api_key=getattr(app_config.agent,"zhipu_api_key",None)
-   except:
-    pass
+   except Exception as e:
+    get_logger().debug(f"Zhipu config validation: {e}")
   return bool(api_key)
