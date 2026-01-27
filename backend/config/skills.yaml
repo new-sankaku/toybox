@@ -329,7 +329,7 @@ agent_skill_mapping:
 sandbox:
   enabled: true
   output_base: "./output"
-  denied_paths:
+  denied_paths_linux:
     - /etc
     - /usr
     - /bin
@@ -340,5 +340,13 @@ sandbox:
     - /proc
     - /sys
     - /dev
+  denied_paths_windows:
+    - C:\Windows
+    - C:\Program Files
+    - C:\Program Files (x86)
+    - C:\ProgramData
+    - C:\Users
+    - C:\System Volume Information
+    - C:\$Recycle.Bin
   timeout_seconds: 120
   max_output_size: 100000

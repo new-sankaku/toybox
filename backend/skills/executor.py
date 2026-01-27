@@ -1,5 +1,6 @@
 import os
 import asyncio
+import platform
 from typing import Dict,List,Any,Optional
 from dataclasses import dataclass,field
 from .base import SkillContext,SkillResult,SkillCategory
@@ -111,16 +112,25 @@ def create_skill_executor(
  allowed_skills=mapping.get(agent_type,mapping.get("default",[]))
  sandbox_cfg=skill_config.get("sandbox",{})
  effective_working_dir=_get_project_output_dir(project_id,sandbox_cfg,working_dir)
+ denied_paths=_get_denied_paths_for_platform(sandbox_cfg)
  config=SkillExecutionConfig(
   working_dir=effective_working_dir,
   allowed_skills=allowed_skills,
   sandbox_enabled=sandbox_cfg.get("enabled",True),
   allowed_paths=[effective_working_dir],
-  denied_paths=sandbox_cfg.get("denied_paths",[]),
+  denied_paths=denied_paths,
   timeout_seconds=sandbox_cfg.get("timeout_seconds",120),
   max_output_size=sandbox_cfg.get("max_output_size",100000),
  )
  return SkillExecutor(project_id,agent_id,config)
+
+
+def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
+ is_windows=platform.system().lower()=="windows"
+ if is_windows:
+  return sandbox_cfg.get("denied_paths_windows",[])
+ else:
+  return sandbox_cfg.get("denied_paths_linux",[])
 
 
 def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any],fallback_dir:str)->str:
