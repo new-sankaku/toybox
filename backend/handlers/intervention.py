@@ -4,6 +4,11 @@ from datastore import DataStore
 
 def register_intervention_routes(app:Flask,data_store:DataStore,sio):
 
+    def _get_execution_service():
+        if hasattr(app,"agent_execution_service"):
+            return app.agent_execution_service
+        return None
+
     @app.route('/api/projects/<project_id>/interventions',methods=['GET'])
     def list_interventions(project_id:str):
         project=data_store.get_project(project_id)
@@ -86,6 +91,10 @@ def register_intervention_routes(app:Flask,data_store:DataStore,sio):
                         "agent":paused_agent,
                         "reason":"subsequent_phase_pause"
                     },room=f"project:{project_id}")
+                if activation_result.get("previousStatus")!="waiting_response":
+                    execution_service=_get_execution_service()
+                    if execution_service:
+                        execution_service.re_execute_agent(project_id,target_agent_id)
             intervention["activationResult"]=activation_result
 
         return jsonify(intervention),201
