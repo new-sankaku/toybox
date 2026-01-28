@@ -1,0 +1,37 @@
+module.exports={
+ content:['./index.html','./src/**/*.{js,ts,jsx,tsx}'],
+ theme:{
+  extend:{
+   colors:{
+    nier:{
+     'bg-main':'#E8E4D4',
+     'bg-panel':'#DAD5C3',
+     'bg-selected':'#CCC7B5',
+     'bg-header':'#57534A',
+     'bg-footer':'#57534A',
+     'text-main':'#454138',
+     'text-light':'#5A5548',
+     'text-header':'#E8E4D4',
+     'text-footer':'#E8E4D4',
+     'accent-red':'#B85C5C',
+     'accent-orange':'#C4956C',
+     'accent-yellow':'#C9C078',
+     'accent-green':'#7AAA7A',
+     'accent-blue':'#6B8FAA',
+     'border-light':'rgba(69,65,56,0.2)',
+     'border-dark':'rgba(69,65,56,0.4)'
+    }
+   },
+   fontFamily:{'nier':['"Noto Sans JP"','sans-serif']},
+   fontSize:{
+    'nier-display':'28px',
+    'nier-h1':'20px',
+    'nier-h2':'16px',
+    'nier-body':'14px',
+    'nier-small':'13px',
+    'nier-caption':'12px'
+   }
+  }
+ },
+ plugins:[]
+}
