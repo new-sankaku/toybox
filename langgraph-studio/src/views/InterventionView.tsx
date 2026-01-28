@@ -2,6 +2,8 @@ import{useState,useEffect,useRef}from'react'
 import{Card,CardContent,CardHeader}from'@/components/ui/Card'
 import{Button}from'@/components/ui/Button'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
+import{Select}from'@/components/ui/Select'
+import{Textarea}from'@/components/ui/Textarea'
 import{useProjectStore}from'@/stores/projectStore'
 import{interventionApi,agentApi,type ApiIntervention,type ApiAgent}from'@/services/apiService'
 import{FolderOpen,AlertTriangle,Send,Users,User,MessageSquare,Bot,UserCircle,Plus,Trash2}from'lucide-react'
@@ -254,116 +256,113 @@ export default function InterventionView():JSX.Element{
       </CardHeader>
       <CardContent className="flex-1 flex flex-col overflow-hidden p-0">
        {showNewForm&&!selectedId?(
-        <div className="flex-1 overflow-y-auto p-4">
-         <div className="max-w-lg mx-auto space-y-4">
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">
-            送信先
-           </label>
-           <div className="flex gap-2">
+        <div className="flex-1 overflow-y-auto p-3">
+         <div className="max-w-lg mx-auto space-y-2">
+          <div className="border border-nier-border-light px-3 py-2 bg-nier-bg-panel/30">
+           <DiamondMarker>送信先</DiamondMarker>
+           <div className="grid grid-cols-2 gap-2 mt-2">
             <button
              type="button"
              onClick={()=>setTargetType('all')}
-             className={`nier-button flex-1 flex items-center justify-center gap-2 ${
-              targetType==='all'?'bg-nier-bg-selected border-nier-accent':'bg-nier-bg-panel'
+             className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
+              targetType==='all'
+               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
+               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
+             {targetType==='all'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}
              <Users size={14}/>
-             全エージェント
+             <span>全エージェント</span>
             </button>
             <button
              type="button"
              onClick={()=>setTargetType('specific')}
-             className={`nier-button flex-1 flex items-center justify-center gap-2 ${
-              targetType==='specific'?'bg-nier-bg-selected border-nier-accent':'bg-nier-bg-panel'
+             className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
+              targetType==='specific'
+               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
+               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
+             {targetType==='specific'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}
              <User size={14}/>
-             特定エージェント
+             <span>特定エージェント</span>
             </button>
            </div>
+
+           {targetType==='specific'&&(
+            <div className="mt-2">
+             <Select
+              value={targetAgentId}
+              onChange={(e)=>setTargetAgentId(e.target.value)}
+              placeholder="エージェントを選択..."
+              options={
+               (runningAgents.length>0?runningAgents:agents).map(agent=>({
+                value:agent.id,
+                label:`${getLabel(agent.type)}${runningAgents.length>0?' (実行中)':''}`
+               }))
+              }
+             />
+            </div>
+)}
           </div>
 
-          {targetType==='specific'&&(
-           <div>
-            <label className="block text-nier-small text-nier-text-light mb-2">
-             対象エージェント
-            </label>
-            <select
-             value={targetAgentId}
-             onChange={(e)=>setTargetAgentId(e.target.value)}
-             className="nier-input w-full"
-            >
-             <option value="">選択...</option>
-             {runningAgents.length>0?(
-              runningAgents.map(agent=>(
-               <option key={agent.id} value={agent.id}>
-                {getLabel(agent.type)} (実行中)
-               </option>
-))
-):(
-              agents.map(agent=>(
-               <option key={agent.id} value={agent.id}>
-                {getLabel(agent.type)}
-               </option>
-))
-)}
-            </select>
-           </div>
-)}
-
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">
-            緊急度
-           </label>
-           <div className="flex gap-2">
+          <div className="border border-nier-border-light px-3 py-2 bg-nier-bg-panel/30">
+           <DiamondMarker>緊急度</DiamondMarker>
+           <div className="grid grid-cols-2 gap-2 mt-2">
             <button
              type="button"
              onClick={()=>setPriority('normal')}
-             className={`nier-button flex-1 flex items-center justify-center gap-2 ${
-              priority==='normal'?'bg-nier-bg-selected border-nier-accent':'bg-nier-bg-panel'
+             className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
+              priority==='normal'
+               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
+               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
+             {priority==='normal'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}
              <MessageSquare size={14}/>
-             通常
+             <span>通常</span>
             </button>
             <button
              type="button"
              onClick={()=>setPriority('urgent')}
-             className={`nier-button flex-1 flex items-center justify-center gap-2 ${
-              priority==='urgent'?'bg-nier-bg-selected border-nier-accent-orange text-nier-accent-orange':'bg-nier-bg-panel'
+             className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
+              priority==='urgent'
+               ?'bg-nier-bg-selected border-nier-accent-red text-nier-accent-red'
+               :'bg-nier-bg-panel border-nier-border-light text-nier-accent-red hover:bg-nier-bg-selected'
              }`}
             >
+             {priority==='urgent'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-accent-red"/>}
              <AlertTriangle size={14}/>
-             緊急
+             <span>緊急</span>
             </button>
            </div>
           </div>
 
-          <div>
-           <label className="block text-nier-small text-nier-text-light mb-2">
-            メッセージ
-           </label>
-           <textarea
-            value={message}
-            onChange={(e)=>setMessage(e.target.value)}
-            placeholder="エージェントへの指示を入力..."
-            className="nier-input w-full h-32 resize-none"
-           />
+          <div className="border border-nier-border-light px-3 py-2 bg-nier-bg-panel/30">
+           <DiamondMarker>メッセージ</DiamondMarker>
+           <div className="mt-2">
+            <Textarea
+             value={message}
+             onChange={(e)=>setMessage(e.target.value)}
+             placeholder="エージェントへの指示を入力..."
+             className="h-28"
+            />
+           </div>
           </div>
 
-          <button
+          <Button
+           variant="primary"
            onClick={handleSubmit}
            disabled={sending||!message.trim()||(targetType==='specific'&&!targetAgentId)}
-           className="nier-button w-full bg-nier-bg-panel border-nier-border hover:bg-nier-bg-selected disabled:opacity-50 flex items-center justify-center gap-2"
+           className="w-full"
           >
            {sending?'送信中...':(
             <>
              <Send size={14}/>
-             送信
+             介入を送信
             </>
 )}
-          </button>
+          </Button>
          </div>
         </div>
 ):selectedIntervention?(

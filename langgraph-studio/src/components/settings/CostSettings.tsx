@@ -24,7 +24,7 @@ interface ServiceCostCardProps{
 
 function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
  const{settings,pricing,updateServiceLimit,isServiceFieldChanged}=useCostSettingsStore()
- const service=settings.services[serviceType]
+ const service=settings?.services[serviceType]
  const{master}=useAIServiceStore()
  const enabledChanged=isServiceFieldChanged(serviceType,'enabled')
  const limitChanged=isServiceFieldChanged(serviceType,'monthlyLimit')
@@ -139,7 +139,7 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
   loadFromServer(projectId)
  },[projectId])
 
- if(loading){
+ if(loading||!settings){
   return(
    <Card>
     <CardContent>

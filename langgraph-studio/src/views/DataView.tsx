@@ -87,7 +87,9 @@ const typeColors:Record<AssetType,string>={
 export default function DataView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter}=useNavigationStore()
- const assetStore=useAssetStore()
+ const assetStoreAssets=useAssetStore(s=>s.assets)
+ const setAssets=useAssetStore(s=>s.setAssets)
+ const setAssetError=useAssetStore(s=>s.setError)
  const uiConfig=useUIConfigStore()
  const[loading,setLoading]=useState(false)
  const[filterType,setFilterType]=useState<AssetType|'all'>('all')
@@ -97,7 +99,7 @@ export default function DataView():JSX.Element{
  const[playingAudio,setPlayingAudio]=useState<string|null>(null)
  const audioRef=useRef<HTMLAudioElement|null>(null)
 
- const assets=useMemo(()=>assetStore.assets.map(convertApiAsset),[assetStore.assets])
+ const assets=useMemo(()=>assetStoreAssets.map(convertApiAsset),[assetStoreAssets])
 
  useEffect(()=>{
   setSelectedAsset(null)
@@ -109,7 +111,7 @@ export default function DataView():JSX.Element{
 
  useEffect(()=>{
   if(!currentProject){
-   assetStore.setAssets([])
+   setAssets([])
    return
   }
 
@@ -117,17 +119,17 @@ export default function DataView():JSX.Element{
    setLoading(true)
    try{
     const data=await assetApi.listByProject(currentProject.id)
-    assetStore.setAssets(data)
+    setAssets(data)
    }catch(error){
     console.error('Failed to fetch assets:',error)
-    assetStore.setError(error instanceof Error?error.message:'アセットの取得に失敗しました')
+    setAssetError(error instanceof Error?error.message:'アセットの取得に失敗しました')
    }finally{
     setLoading(false)
    }
   }
 
   fetchAssets()
- },[currentProject?.id,assetStore])
+ },[currentProject?.id])
 
  if(!currentProject){
   return(
@@ -201,7 +203,7 @@ export default function DataView():JSX.Element{
   try{
    await assetApi.updateStatus(currentProject.id,assetId,'approved')
    const data=await assetApi.listByProject(currentProject.id)
-   assetStore.setAssets(data)
+   setAssets(data)
    const updatedAssets=data.map(convertApiAsset)
    if(selectedAsset?.id===assetId){
     selectNextPending(updatedAssets,currentId)
@@ -217,7 +219,7 @@ export default function DataView():JSX.Element{
   try{
    await assetApi.updateStatus(currentProject.id,assetId,'rejected')
    const data=await assetApi.listByProject(currentProject.id)
-   assetStore.setAssets(data)
+   setAssets(data)
    const updatedAssets=data.map(convertApiAsset)
    if(selectedAsset?.id===assetId){
     selectNextPending(updatedAssets,currentId)

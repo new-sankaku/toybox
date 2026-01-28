@@ -25,7 +25,7 @@ class AgentLogRepository(BaseRepository[AgentLog]):
 
  def add_log(self,agent_id:str,level:str,message:str,progress:int=None)->Dict:
   log=AgentLog(
-   id=f"log-{uuid4().hex[:8]}",
+   id=f"log-{uuid4().hex[:16]}",
    agent_id=agent_id,
    level=level,
    message=message,

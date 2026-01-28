@@ -139,7 +139,7 @@ export default function CostView():JSX.Element{
   }
  },[agents,calculateCost])
 
- const budgetLimit=settings.globalMonthlyLimit
+ const budgetLimit=settings?.globalMonthlyLimit??0
 
  if(!currentProject){
   return(

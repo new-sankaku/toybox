@@ -19,7 +19,7 @@ interface CostSettingsState{
  updateServiceLimit:(serviceType:string,updates:Partial<ServiceCostLimit>)=>void
  setPricing:(pricing:PricingConfig)=>void
  fetchPricing:()=>Promise<void>
- resetToDefaults:()=>void
+ resetToDefaults:()=>Promise<void>
  loadFromServer:(projectId:string)=>Promise<void>
  saveToServer:(projectId:string)=>Promise<void>
  hasChanges:()=>boolean
@@ -85,8 +85,34 @@ export const useCostSettingsStore=create<CostSettingsState>()(
     }
    },
 
-   resetToDefaults:()=>{
-    set({settings:null})
+   resetToDefaults:async()=>{
+    set({loading:true,error:null})
+    try{
+     const{configApi}=await import('@/services/apiService')
+     const defaults=await configApi.getCostSettingsDefaults()
+     if(defaults){
+      const newSettings:CostSettings={
+       globalEnabled:defaults.global_enabled,
+       globalMonthlyLimit:defaults.global_monthly_limit,
+       services:Object.fromEntries(
+        Object.entries(defaults.services||{}).map(([k,v])=>[k,{
+         enabled:v.enabled,
+         monthlyLimit:v.monthly_limit
+        }])
+)
+      }
+      set({
+       settings:newSettings,
+       originalSettings:JSON.parse(JSON.stringify(newSettings)),
+       currentProjectId:null
+      })
+     }
+    }catch(error){
+     console.error('Failed to fetch cost settings defaults:',error)
+     set({error:error instanceof Error?error.message:'デフォルト値の取得に失敗しました'})
+    }finally{
+     set({loading:false})
+    }
    },
 
    loadFromServer:async(projectId)=>{

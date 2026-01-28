@@ -2,7 +2,7 @@ from flask import Flask,jsonify,request
 from datastore import DataStore
 
 
-def register_metrics_routes(app:Flask,data_store:DataStore):
+def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
 
     @app.route('/api/projects/<project_id>/ai-requests/stats',methods=['GET'])
     def get_ai_request_stats(project_id:str):
@@ -91,6 +91,12 @@ def register_metrics_routes(app:Flask,data_store:DataStore):
 
         if not asset:
             return jsonify({"error":"Asset not found"}),404
+
+        if sio:
+            sio.emit('asset:updated',{
+                "projectId":project_id,
+                "asset":asset
+            },room=f"project:{project_id}")
 
         return jsonify(asset)
 

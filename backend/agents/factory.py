@@ -27,7 +27,12 @@ def create_agent_runner(mode:Optional[str]=None,**kwargs)->AgentRunner:
 
     elif actual_mode=="api_with_skills":
         from .api_runner import ApiAgentRunner
-        from .skill_runner import SkillEnabledAgentRunner,DEFAULT_MAX_ITERATIONS
+        from .skill_runner import (
+            SkillEnabledAgentRunner,
+            DEFAULT_MAX_ITERATIONS,
+            DEFAULT_MESSAGE_WINDOW_SIZE,
+            DEFAULT_MESSAGE_COMPACTION_TRIGGER,
+        )
         if not working_dir:
             working_dir=os.environ.get("PROJECT_WORKING_DIR","/tmp/toybox/projects")
         task_limits=_load_task_limits()
@@ -35,11 +40,16 @@ def create_agent_runner(mode:Optional[str]=None,**kwargs)->AgentRunner:
             "max_tool_iterations",
             task_limits.get("default_max_tool_iterations",DEFAULT_MAX_ITERATIONS)
         )
+        msg_window=task_limits.get("message_window_size",DEFAULT_MESSAGE_WINDOW_SIZE)
+        msg_compaction=task_limits.get("message_compaction_trigger",DEFAULT_MESSAGE_COMPACTION_TRIGGER)
         base_runner=ApiAgentRunner(**kwargs)
         return SkillEnabledAgentRunner(
             base_runner=base_runner,
             working_dir=working_dir,
             max_tool_iterations=max_iterations,
+            message_window_size=msg_window,
+            message_compaction_trigger=msg_compaction,
+            task_limits=task_limits,
         )
 
     elif actual_mode=="testdata" or actual_mode=="mock":

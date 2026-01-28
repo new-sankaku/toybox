@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional,List,Dict,Any
 from sqlalchemy.orm import Session
-from sqlalchemy import and_,update
+from sqlalchemy import and_,update,func
 from .base import BaseRepository
 from models.tables import LlmJob
 
@@ -111,6 +111,14 @@ class LlmJobRepository(BaseRepository[LlmJob]):
  def get_by_agent(self,agent_id:str)->List[Dict[str,Any]]:
   jobs=self.session.query(LlmJob).filter(LlmJob.agent_id==agent_id).order_by(LlmJob.created_at.desc()).all()
   return [self.to_dict(j) for j in jobs]
+
+ def get_project_token_usage(self,project_id:str)->int:
+  result=self.session.query(
+   func.coalesce(func.sum(LlmJob.tokens_input+LlmJob.tokens_output),0)
+  ).filter(
+   and_(LlmJob.project_id==project_id,LlmJob.status=="completed")
+  ).scalar()
+  return int(result)
 
  def cleanup_project_jobs(self,project_id:str)->int:
   incomplete_jobs=self.session.query(LlmJob).filter(

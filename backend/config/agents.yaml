@@ -213,19 +213,34 @@ agents:
 workflow_dependencies:
   concept: []
   task_split_1: [concept]
-  concept_detail: [task_split_1]
-  scenario: [task_split_1]
-  world: [task_split_1]
-  game_design: [task_split_1]
-  tech_spec: [task_split_1]
+  concept_detail:
+    depends_on: [task_split_1]
+    context_from:
+      task_split_1: summary
+  scenario:
+    depends_on: [task_split_1]
+    context_from:
+      task_split_1: summary
+  world:
+    depends_on: [task_split_1]
+    context_from:
+      task_split_1: summary
+  game_design:
+    depends_on: [task_split_1]
+    context_from:
+      task_split_1: summary
+  tech_spec:
+    depends_on: [task_split_1]
+    context_from:
+      task_split_1: summary
   task_split_2:
     depends_on: [concept_detail, scenario, world, game_design, tech_spec]
     context_from:
       concept_detail: summary
       scenario: summary
       world: summary
-      game_design: full
-      tech_spec: full
+      game_design: summary
+      tech_spec: summary
   asset_character:
     depends_on: [task_split_2]
     context_from:
@@ -367,13 +382,81 @@ agent_asset_mapping:
     - asset_voice
   enableVideoGeneration: []
 
-quality_check_defaults:
-  max_retries: 3
+# --- トークン予算 ---
+# プロジェクト全体のトークン使用量を制御する
+token_budget:
+  default_limit: 500000              # プロジェクトあたりの最大トークン数
+  warning_threshold_percent: 80      # 警告を出す使用率(%)
+  enforcement: hard                  # hard=超過時にエラー, soft=警告のみ
 
+# --- コンテキストポリシー ---
+# エージェント間で渡すコンテキストのサイズ制御
+context_policy_settings:
+  auto_downgrade_threshold: 15000    # full指定でもこの文字数を超えたらsummaryに自動切替(文字)
+  summary_max_length: 10000          # summaryモード時の最大文字数
+  leader_output_max_for_worker: 5000 # WorkerへのLeader出力の最大文字数
+  retry_previous_output_max: 3000    # 品質チェックリトライ時に渡す前回出力の最大文字数
+  # LLMによる要約生成
+  llm_summary:
+    enabled: true                    # LLM要約を使用するか(falseならテキスト切り詰め)
+    provider: anthropic              # 要約生成に使うプロバイダー
+    model: claude-haiku-4-5-20250116 # 要約生成に使うモデル(軽量モデル推奨)
+    max_tokens: 2048                 # 要約の最大出力トークン数
+    min_content_length: 500          # この文字数未満なら要約せずそのまま返す
+    input_max_length: 30000          # 要約LLMに渡すコンテンツの最大文字数
+
+# --- 品質チェック ---
+quality_check_defaults:
+  max_retries: 3                     # 品質チェック不合格時の最大リトライ回数
+
+# --- Skill Runnerのタスク制限 ---
+# マルチターンツール実行ループの制御パラメータ
 task_limits:
-  default_max_tool_iterations: 50
-  loop_detection_window: 6
-  loop_detection_repeat_threshold: 3
+  default_max_tool_iterations: 50    # ツール実行ループの最大イテレーション数
+  loop_detection_window: 6           # ループ検出の直近N回を監視
+  loop_detection_repeat_threshold: 3 # window内で同一パターンがN回以上でループ判定
+  message_window_size: 6             # 圧縮後に保持する直近メッセージ数
+  message_compaction_trigger: 10     # この数を超えたら古いメッセージを圧縮
+  tool_result_max_length: 5000       # ツール実行結果をLLMに渡す際の最大文字数
+  previous_output_max_length: 2000   # 前エージェント出力をSkill Runnerに渡す際の最大文字数
+  skill_log_output_max: 500          # スキル実行結果のログ出力の最大文字数
+  compaction_assistant_max: 300      # メッセージ圧縮時のassistant応答要約の最大文字数
+  compaction_system_max: 200         # メッセージ圧縮時のシステム通知要約の最大文字数
+  compaction_user_max: 200           # メッセージ圧縮時のユーザーメッセージ要約の最大文字数
+
+agent_principles:
+  concept: [game_experience, game_mechanics]
+  concept_detail: [game_experience, game_mechanics]
+  scenario: [narrative_design, character_design]
+  world: [world_building, narrative_design]
+  game_design: [game_mechanics, game_experience]
+  tech_spec: [technical_quality]
+  asset_character: [character_design, visual_direction]
+  asset_background: [world_building, visual_direction]
+  asset_ui: [visual_direction, game_mechanics]
+  asset_effect: [visual_direction]
+  asset_bgm: [game_experience]
+  asset_voice: [character_design, narrative_design]
+  asset_sfx: [game_experience]
+  code: [technical_quality, game_mechanics]
+  event: [narrative_design, game_mechanics]
+  ui_integration: [visual_direction, technical_quality]
+  asset_integration: [visual_direction, technical_quality]
+  unit_test: [technical_quality]
+  integration_test: [technical_quality]
+  task_split_1: [game_experience]
+  task_split_2: [game_experience]
+  task_split_3: [technical_quality]
+  task_split_4: [technical_quality]
+  _default: [game_experience]
+
+principle_settings:
+  max_chars_per_agent: 12000
+  injection_mode: system
+  quality_check_model: claude-haiku-4-5-20250116
+  quality_check_provider: anthropic
+  quality_check_max_tokens: 2048
+  quality_threshold: 0.6
 
 agent_generation_types:
   llm:

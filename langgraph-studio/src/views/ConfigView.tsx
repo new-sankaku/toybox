@@ -7,6 +7,7 @@ import{Save,RefreshCw,AlertTriangle,FolderOpen}from'lucide-react'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
 import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
 import{CostSettings}from'@/components/settings/CostSettings'
+import{ApiKeySettings}from'@/components/settings/ApiKeySettings'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
@@ -22,7 +23,8 @@ const configSections:ConfigSection[]=[
  {id:'ai-services',label:'AIサービス設定'},
  {id:'auto-approval',label:'自動承認設定'},
  {id:'cost',label:'コスト設定'},
- {id:'output',label:'出力設定'}
+ {id:'output',label:'出力設定'},
+ {id:'api-keys',label:'APIキー管理'}
 ]
 
 export default function ConfigView():JSX.Element{
@@ -144,6 +146,8 @@ export default function ConfigView():JSX.Element{
      {activeSection==='auto-approval'&&<AutoApprovalSettings projectId={currentProject.id}/>}
 
      {activeSection==='cost'&&<CostSettings projectId={currentProject.id}/>}
+
+     {activeSection==='api-keys'&&<ApiKeySettings projectId={currentProject.id}/>}
 
      {activeSection==='output'&&(
       <Card>

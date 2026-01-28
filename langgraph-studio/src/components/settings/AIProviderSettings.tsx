@@ -13,6 +13,7 @@ import{
  type LLMProviderConfig,
  type MusicGeneratorConfig
 }from'@/types/aiProvider'
+import{providerHealthApi,type ApiProviderHealth}from'@/services/apiService'
 
 interface AIProviderSettingsProps{
  projectId:string
@@ -23,6 +24,9 @@ interface ProviderCardProps{
  onUpdate:(updates:Partial<AIProviderConfig>)=>void
  onToggle:()=>void
  isFieldChanged:(field:string)=>boolean
+ health?:ApiProviderHealth|null
+ onCheckHealth?:()=>void
+ healthChecking?:boolean
 }
 
 function LLMProviderForm({provider,onUpdate,isFieldChanged}:{provider:LLMProviderConfig,onUpdate:(u:Partial<LLMProviderConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
@@ -118,7 +122,7 @@ function MusicForm({provider,onUpdate,isFieldChanged}:{provider:MusicGeneratorCo
 )
 }
 
-function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardProps){
+function ProviderCard({provider,onUpdate,onToggle,isFieldChanged,health,onCheckHealth,healthChecking}:ProviderCardProps){
  const[expanded,setExpanded]=useState(false)
  const[testing,setTesting]=useState(false)
  const[testResult,setTestResult]=useState<{success:boolean,message:string}|null>(null)
@@ -167,6 +171,9 @@ function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardPr
     <div className="flex items-center gap-3">
      {expanded?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
      <span className="text-nier-small text-nier-text-main">{provider.name}</span>
+     {health&&(
+      <span className={cn('inline-block w-2 h-2 rounded-full',health.healthy?'bg-nier-accent-green':health.error?'bg-nier-accent-red':'bg-nier-text-light')}/>
+)}
     </div>
     <div className="flex items-center gap-2" onClick={e=>e.stopPropagation()}>
      <button
@@ -190,11 +197,24 @@ function ProviderCard({provider,onUpdate,onToggle,isFieldChanged}:ProviderCardPr
    {expanded&&(
     <CardContent className="border-t border-nier-border-light space-y-4">
      {renderForm()}
+     {health&&(
+      <div className="flex items-center gap-3 text-nier-caption text-nier-text-light">
+       <span>ヘルス: {health.healthy?'正常':'異常'}</span>
+       {health.latencyMs!=null&&<span>{health.latencyMs}ms</span>}
+       {health.lastChecked&&<span>最終チェック: {new Date(health.lastChecked).toLocaleTimeString('ja-JP')}</span>}
+      </div>
+)}
      <div className="flex items-center gap-2 pt-2 border-t border-nier-border-light">
       <Button variant="ghost" size="sm" onClick={handleTest} disabled={testing}>
        <RefreshCw size={14} className={testing?'animate-spin':''}/>
        <span className="ml-1">{testing?'テスト中...':'テスト接続'}</span>
       </Button>
+      {onCheckHealth&&(
+       <Button variant="ghost" size="sm" onClick={onCheckHealth} disabled={healthChecking}>
+        <RefreshCw size={14} className={healthChecking?'animate-spin':''}/>
+        <span className="ml-1">{healthChecking?'チェック中':'ヘルスチェック'}</span>
+       </Button>
+)}
       {testResult&&(
        <span className={cn(
         'text-nier-caption',
@@ -222,10 +242,27 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
   isProviderFieldChanged
  }=useAIServiceStore()
 
+ const[healthMap,setHealthMap]=useState<Record<string,ApiProviderHealth>>({})
+ const[healthChecking,setHealthChecking]=useState<Record<string,boolean>>({})
+
  useEffect(()=>{
   fetchMaster()
   loadProviderConfigs(projectId)
+  providerHealthApi.getAll().then(list=>{
+   const map:Record<string,ApiProviderHealth>={}
+   list.forEach(h=>{map[h.providerId]=h})
+   setHealthMap(map)
+  }).catch(()=>{})
  },[projectId])
+
+ const handleCheckHealth=async(providerId:string)=>{
+  setHealthChecking(prev=>({...prev,[providerId]:true}))
+  try{
+   const result=await providerHealthApi.check(providerId)
+   setHealthMap(prev=>({...prev,[providerId]:result}))
+  }catch{}
+  setHealthChecking(prev=>({...prev,[providerId]:false}))
+ }
 
  const getProvidersByServiceType=(serviceType:string)=>{
   return providerConfigs.filter(p=>p.serviceType===serviceType)
@@ -274,6 +311,9 @@ export function AIProviderSettings({projectId}:AIProviderSettingsProps):JSX.Elem
         onUpdate={updates=>updateProviderConfig(provider.id,updates)}
         onToggle={()=>toggleProviderConfig(provider.id)}
         isFieldChanged={field=>isProviderFieldChanged(provider.id,field)}
+        health={healthMap[provider.type]||null}
+        onCheckHealth={()=>handleCheckHealth(provider.type)}
+        healthChecking={!!healthChecking[provider.type]}
        />
 ))}
      </div>

@@ -3,6 +3,7 @@ import{useConnectionStore}from'@/stores/connectionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
+import{useAssetStore}from'@/stores/assetStore'
 import{useMetricsStore}from'@/stores/metricsStore'
 import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
 import{useToastStore}from'@/stores/toastStore'
@@ -10,6 +11,7 @@ import{useActivityFeedStore}from'@/stores/activityFeedStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
+import type{ApiAsset}from'@/services/apiService'
 
 function getAgentDisplayName(agent?:Agent):string{
  if(!agent)return'不明なエージェント'
@@ -42,6 +44,8 @@ interface ServerToClientEvents{
  'agent:waiting_response':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string;agentStatus?:string})=>void
  'checkpoint:resolved':(data:{checkpoint:Checkpoint;checkpointId?:string;agentId?:string;agentStatus?:string})=>void
+ 'asset:created':(data:{projectId:string;asset:ApiAsset;autoApproved?:boolean})=>void
+ 'asset:updated':(data:{projectId:string;asset:ApiAsset;autoApproved?:boolean})=>void
  'project:updated':(data:{projectId:string;updates:Partial<Project>})=>void
  'phase:changed':(data:{projectId:string;phase:PhaseNumber;phaseName:string})=>void
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
@@ -306,6 +310,20 @@ class WebSocketService{
     const agent=useAgentStore.getState().agents.find(a=>a.id===data.agentId)
     const name=getAgentDisplayName(agent)
     useActivityFeedStore.getState().addEvent('checkpoint_resolved',name,`${name} の承認が処理されました`,data.agentId)
+   }
+  })
+
+  this.socket.on('asset:created',(data)=>{
+   console.log('[WS] Asset created:',data.asset?.id)
+   if(data.asset){
+    useAssetStore.getState().addOrUpdateAsset(data.asset)
+   }
+  })
+
+  this.socket.on('asset:updated',(data)=>{
+   console.log('[WS] Asset updated:',data.asset?.id)
+   if(data.asset){
+    useAssetStore.getState().addOrUpdateAsset(data.asset)
    }
   })
 

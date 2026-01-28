@@ -55,10 +55,10 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
   set({loading:true,projectId,error:null})
   try{
    const response=await autoApprovalApi.getRules(projectId)
-   const serverRules:AutoApprovalRule[]=response.rules.map((r:{category:ContentCategory;enabled:boolean;label?:string})=>({
-    category:r.category,
+   const serverRules:AutoApprovalRule[]=response.rules.map((r)=>({
+    category:r.category as ContentCategory,
     enabled:r.enabled,
-    label:r.label||r.category
+    label:r.category
    }))
    set({rules:serverRules,originalRules:JSON.parse(JSON.stringify(serverRules)),loading:false})
   }catch(error){

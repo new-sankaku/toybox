@@ -241,7 +241,7 @@ export default function ProjectView():JSX.Element{
    scope:(project.concept?.scope as Scope)||defaults?.scope||'',
    scale:(project.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(project.config?.aiServiceSettings as Record<string,string>||{})},
-   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...project.config?.assetGeneration},
+   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...project.config?.assetGeneration} as AssetGenerationOptions,
    contentPermissions:{
     violenceLevel:(project.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.violenceLevel??0 as ContentRatingLevel),
     sexualLevel:(project.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.sexualLevel??0 as ContentRatingLevel)
@@ -416,7 +416,7 @@ export default function ProjectView():JSX.Element{
    scope:(currentProject.concept?.scope as Scope)||defaults?.scope||'',
    scale:(currentProject.config?.scale as ProjectScale)||'medium',
    aiServiceSettings:{...buildAIServiceDefaults(),...(currentProject.config?.aiServiceSettings as Record<string,string>||{})},
-   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...currentProject.config?.assetGeneration},
+   assetGeneration:{...(projectDefaults?.assetGeneration||{}),...currentProject.config?.assetGeneration} as AssetGenerationOptions,
    contentPermissions:{
     violenceLevel:(currentProject.config?.contentPermissions?.violenceLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.violenceLevel??0 as ContentRatingLevel),
     sexualLevel:(currentProject.config?.contentPermissions?.sexualLevel as ContentRatingLevel)??(projectDefaults?.contentPermissions.sexualLevel??0 as ContentRatingLevel)

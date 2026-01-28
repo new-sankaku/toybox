@@ -54,6 +54,16 @@ class MaxRetriesExceededError(AgentException):
   self.max_retries=max_retries
 
 
+class TokenBudgetExceededError(AgentException):
+ """トークン予算超過"""
+ def __init__(self,project_id:str,used:int,limit:int):
+  message=f"プロジェクト '{project_id}' のトークン予算を超過しました ({used}/{limit})"
+  super().__init__(message,recoverable=False)
+  self.project_id=project_id
+  self.used=used
+  self.limit=limit
+
+
 class RateLimitError(AgentException):
  """レート制限エラー"""
  def __init__(self,provider_id:str,retry_after:int=None):

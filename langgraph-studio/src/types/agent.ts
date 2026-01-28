@@ -129,6 +129,36 @@ export interface QualityCheckConfig{
  isHighCost:boolean
 }
 
+export interface SequenceParticipant{
+ id:string
+ label:string
+ type:'external'|'leader'|'agent'|'api'|'worker'
+}
+
+export interface SequenceMessage{
+ id:string
+ from:string
+ to:string
+ type:'input'|'output'|'request'|'response'|'error'|'delegation'|'result'
+ label:string
+ timestamp:string|null
+ tokens:{input?:number;output?:number}|null
+ durationMs:number|null
+ sourceId:string|null
+ sourceType:'trace'|'job'|null
+ pairId:string|null
+}
+
+export interface SequenceData{
+ agentId:string
+ agentType:string
+ participants:SequenceParticipant[]
+ messages:SequenceMessage[]
+ status:AgentStatus
+ totalDurationMs:number|null
+ totalTokens:{input:number;output:number}
+}
+
 export interface QualityCheckResult{
  passed:boolean
  issues:string[]

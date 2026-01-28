@@ -98,7 +98,7 @@ def create_app():
     register_project_routes(app,data_store,sio)
     register_agent_routes(app,data_store,sio)
     register_checkpoint_routes(app,data_store,sio)
-    register_metrics_routes(app,data_store)
+    register_metrics_routes(app,data_store,sio)
     register_quality_settings_routes(app,data_store)
     register_static_config_routes(app)
     register_auto_approval_routes(app,data_store)

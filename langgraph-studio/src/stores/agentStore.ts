@@ -78,6 +78,7 @@ export const useAgentStore=create<AgentState>((set,get)=>({
  addLogEntry:(agentId,entry)=>
   set((state)=>{
    const currentLogs=state.agentLogs[agentId]||[]
+   if(currentLogs.some(l=>l.id===entry.id))return state
    const newLogs=[...currentLogs,entry]
    const trimmedLogs=newLogs.length>MAX_LOG_ENTRIES_PER_AGENT
     ?newLogs.slice(-MAX_LOG_ENTRIES_PER_AGENT)

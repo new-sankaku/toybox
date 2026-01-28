@@ -21,6 +21,8 @@ DEFAULT_MAX_ITERATIONS=50
 LOOP_DETECTION_WINDOW=6
 LOOP_DETECTION_REPEAT_THRESHOLD=3
 FINALIZING_BUDGET=1
+DEFAULT_MESSAGE_WINDOW_SIZE=6
+DEFAULT_MESSAGE_COMPACTION_TRIGGER=10
 
 
 @dataclass
@@ -70,10 +72,22 @@ class SkillEnabledAgentRunner(AgentRunner):
   base_runner:ApiAgentRunner,
   working_dir:str,
   max_tool_iterations:int=DEFAULT_MAX_ITERATIONS,
+  message_window_size:int=DEFAULT_MESSAGE_WINDOW_SIZE,
+  message_compaction_trigger:int=DEFAULT_MESSAGE_COMPACTION_TRIGGER,
+  task_limits:Optional[Dict[str,Any]]=None,
  ):
   self._base=base_runner
   self._working_dir=working_dir
   self._max_iterations=max_tool_iterations
+  self._message_window_size=message_window_size
+  self._message_compaction_trigger=message_compaction_trigger
+  tl=task_limits or {}
+  self._tool_result_max=tl.get("tool_result_max_length",5000)
+  self._prev_output_max=tl.get("previous_output_max_length",2000)
+  self._skill_log_max=tl.get("skill_log_output_max",500)
+  self._compact_assistant_max=tl.get("compaction_assistant_max",300)
+  self._compact_system_max=tl.get("compaction_system_max",200)
+  self._compact_user_max=tl.get("compaction_user_max",200)
   self._skill_executor:Optional[SkillExecutor]=None
 
  def _get_executor(self,context:AgentContext)->SkillExecutor:
@@ -169,13 +183,14 @@ class SkillEnabledAgentRunner(AgentRunner):
   }
   skill_schemas=executor.get_skill_schemas_for_llm()
   enhanced_context=self._enhance_context_with_skills(context,skill_schemas)
-  initial_prompt=self._build_initial_prompt(enhanced_context,skill_schemas)
+  system_prompt=self._build_system_prompt(enhanced_context,skill_schemas)
+  user_prompt=self._build_user_prompt(enhanced_context)
   if data_store and trace_id:
    try:
-    data_store.update_trace_prompt(trace_id,initial_prompt)
+    data_store.update_trace_prompt(trace_id,f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}")
    except Exception as e:
     get_logger().error(f"SkillRunner: failed to update trace prompt: {e}",exc_info=True)
-  messages=[{"role":"user","content":initial_prompt}]
+  messages=[{"role":"user","content":user_prompt}]
   iteration=0
   total_tokens=0
   final_output=None
@@ -195,7 +210,9 @@ class SkillEnabledAgentRunner(AgentRunner):
      messages.append({"role":"user","content":self._build_finalize_prompt(remaining)})
     elif iteration>1 and iteration%10==0:
      messages.append({"role":"user","content":self._build_progress_check_prompt(iteration,remaining)})
-    response=await self._call_llm_with_tools(messages,skill_schemas,context)
+    if len(messages)>self._message_compaction_trigger:
+     messages=self._compact_messages(messages)
+    response=await self._call_llm_with_tools(messages,skill_schemas,context,system_prompt=system_prompt)
     tokens_used=response.get("tokens_used",0)
     total_tokens+=tokens_used
     yield {
@@ -238,14 +255,14 @@ class SkillEnabledAgentRunner(AgentRunner):
      result=await executor.execute_skill(tc.name,**tc.input)
      yield {
       "type":"skill_result",
-      "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:500],"error":result.error}
+      "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:self._skill_log_max],"error":result.error}
      }
      tool_results.append(self._format_tool_result(tc,result))
     messages.append({"role":"user","content":"\n\n".join(tool_results)})
    if final_output is None:
     if stop_reason is None:
      stop_reason=f"最大イテレーション数({self._max_iterations})に到達"
-    final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason)
+    final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason,system_prompt=system_prompt)
     total_tokens+=final_output.get("metadata",{}).get("summary_tokens",0)
    if data_store and trace_id:
     try:
@@ -294,10 +311,10 @@ class SkillEnabledAgentRunner(AgentRunner):
   return f"""[システム通知] 現在{iteration}イテレーション目です。残り{remaining}回のイテレーションが可能です。
 
 以下を確認してください:
-- 作業は進捗していますか？同じ操作を繰り返していませんか？
-- 問題が解決に向かっていない場合、別のアプローチを検討してください。
-- 残りイテレーション内で完了できない場合、現時点の成果をまとめて最終出力としてください。
-- 最終出力を行う場合はtool_callブロックを含めないでください。"""
+-作業は進捗していますか？同じ操作を繰り返していませんか？
+-問題が解決に向かっていない場合、別のアプローチを検討してください。
+-残りイテレーション内で完了できない場合、現時点の成果をまとめて最終出力としてください。
+-最終出力を行う場合はtool_callブロックを含めないでください。"""
 
  def _build_finalize_prompt(self,remaining:int)->str:
   return f"""[システム通知] 残りイテレーションは{remaining}回です。これが最後の作業機会です。
@@ -305,17 +322,17 @@ class SkillEnabledAgentRunner(AgentRunner):
 これ以上のスキル呼び出しは行わず、ここまでの作業成果を最終出力としてまとめてください。
 tool_callブロックを含めず、成果物を出力してください。"""
 
- async def _generate_summary_output(self,messages:List[Dict],skill_schemas:List[Dict],context:AgentContext,stop_reason:str)->Dict[str,Any]:
+ async def _generate_summary_output(self,messages:List[Dict],skill_schemas:List[Dict],context:AgentContext,stop_reason:str,system_prompt:Optional[str]=None)->Dict[str,Any]:
   summary_prompt=f"""[システム通知] {stop_reason}のため、作業を終了します。
 
 これまでの作業内容と成果を最終出力としてまとめてください。
-- 完了した作業の成果をすべて含めてください。
-- 未完了の作業がある場合、何が残っているかを明記してください。
-- tool_callブロックは含めないでください。"""
+-完了した作業の成果をすべて含めてください。
+-未完了の作業がある場合、何が残っているかを明記してください。
+-tool_callブロックは含めないでください。"""
   messages_copy=list(messages)
   messages_copy.append({"role":"user","content":summary_prompt})
   try:
-   response=await self._call_llm_with_tools(messages_copy,skill_schemas,context)
+   response=await self._call_llm_with_tools(messages_copy,skill_schemas,context,system_prompt=system_prompt)
    output=self._process_final_response(response,context)
    output["metadata"]["stop_reason"]=stop_reason
    output["metadata"]["summary_tokens"]=response.get("tokens_used",0)
@@ -337,18 +354,12 @@ tool_callブロックを含めず、成果物を出力してください。"""
     }
    }
 
- def _build_initial_prompt(self,context:AgentContext,skill_schemas:List[Dict])->str:
+ def _build_system_prompt(self,context:AgentContext,skill_schemas:List[Dict])->str:
   skills_desc="\n".join([
    f"- {s['name']}: {s['description']}"
    for s in skill_schemas
   ])
-  assigned_task_section=""
-  if context.assigned_task:
-   assigned_task_section=f"""## あなたへの指示（Leader からの割当タスク）
-{context.assigned_task}
-
-"""
-  return f"""{assigned_task_section}あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
+  return f"""あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
 
 ## 利用可能なスキル
 {skills_desc}
@@ -366,9 +377,16 @@ tool_callブロックを含めず、成果物を出力してください。"""
 最終的な回答を出力する場合は、tool_callブロックを含めないでください。
 
 ## プロジェクト情報
-{context.project_concept or"（未定義）"}
+{context.project_concept or"（未定義）"}"""
 
-## 前のエージェントの出力
+ def _build_user_prompt(self,context:AgentContext)->str:
+  assigned_task_section=""
+  if context.assigned_task:
+   assigned_task_section=f"""## あなたへの指示（Leader からの割当タスク）
+{context.assigned_task}
+
+"""
+  return f"""{assigned_task_section}## 前のエージェントの出力
 {self._format_previous_outputs(context.previous_outputs)}
 
 ## あなたのタスク
@@ -382,9 +400,9 @@ tool_callブロックを含めず、成果物を出力してください。"""
   parts=[]
   for agent,output in outputs.items():
    if isinstance(output,dict) and"content" in output:
-    parts.append(f"## {agent}の出力\n{output['content'][:2000]}")
+    parts.append(f"## {agent}の出力\n{output['content'][:self._prev_output_max]}")
    else:
-    parts.append(f"## {agent}の出力\n{str(output)[:2000]}")
+    parts.append(f"## {agent}の出力\n{str(output)[:self._prev_output_max]}")
   return"\n\n".join(parts)
 
  def _enhance_context_with_skills(self,context:AgentContext,skill_schemas:List[Dict])->AgentContext:
@@ -409,7 +427,8 @@ tool_callブロックを含めず、成果物を出力してください。"""
   self,
   messages:List[Dict],
   skill_schemas:List[Dict],
-  context:AgentContext
+  context:AgentContext,
+  system_prompt:Optional[str]=None,
  )->Dict[str,Any]:
   full_prompt="\n\n---\n\n".join([
    f"[{m['role']}]\n{m['content']}" for m in messages
@@ -422,6 +441,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
    model=self._base.model,
    prompt=full_prompt,
    max_tokens=self._base.max_tokens,
+   system_prompt=system_prompt,
   )
   result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
   if not result:
@@ -457,11 +477,44 @@ tool_callブロックを含めず、成果物を出力してください。"""
    return f"""[ツール実行結果: {tc.name}]
 成功:はい
 出力:
-{str(output)[:5000]}"""
+{str(output)[:self._tool_result_max]}"""
   else:
    return f"""[ツール実行結果: {tc.name}]
 成功:いいえ
 エラー:{result.error}"""
+
+ def _compact_messages(self,messages:List[Dict])->List[Dict]:
+  if len(messages)<=self._message_window_size:
+   return messages
+  first_msg=messages[0]
+  keep_count=self._message_window_size
+  old_messages=messages[1:-keep_count]
+  recent_messages=messages[-keep_count:]
+  if not old_messages:
+   return messages
+  summary_parts=[]
+  for m in old_messages:
+   role=m["role"]
+   content=m["content"]
+   if role=="assistant":
+    has_tool=("```tool_call" in content)
+    text=content[:self._compact_assistant_max]
+    if has_tool:
+     summary_parts.append(f"[assistant] ツール呼び出しを実行 (要約: {text}...)")
+    else:
+     summary_parts.append(f"[assistant] {text}...")
+   elif role=="user":
+    if content.startswith("[ツール実行結果:"):
+     lines=content.split("\n")
+     header=lines[0] if lines else content[:self._compact_system_max]
+     summary_parts.append(f"[tool_result] {header}")
+    elif content.startswith("[システム通知]"):
+     summary_parts.append(f"[system] {content[:self._compact_system_max]}")
+    else:
+     summary_parts.append(f"[user] {content[:self._compact_user_max]}...")
+  compacted_summary="\n".join(summary_parts)
+  summary_msg={"role":"user","content":f"[過去の会話要約]\n以下は過去のイテレーションの要約です:\n{compacted_summary}"}
+  return [first_msg,summary_msg]+recent_messages
 
  def _process_final_response(self,response:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
   return {

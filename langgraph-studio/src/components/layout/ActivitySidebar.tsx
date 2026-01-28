@@ -8,7 +8,7 @@ import{useMetricsStore}from'@/stores/metricsStore'
 import{useAssetStore}from'@/stores/assetStore'
 import{useLogStore}from'@/stores/logStore'
 import{useAIStatsStore}from'@/stores/aiStatsStore'
-import{metricsApi,agentApi,checkpointApi}from'@/services/apiService'
+import{metricsApi,agentApi,checkpointApi,assetApi}from'@/services/apiService'
 import type{Agent}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{ProjectMetrics}from'@/types/project'
@@ -16,6 +16,7 @@ import{cn}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
 import{ChevronRight,ChevronLeft}from'lucide-react'
 import OperatorPanel from'./OperatorPanel'
+import NavigatorSendForm from'./NavigatorSendForm'
 
 function formatTime(seconds:number):string{
  if(seconds<60)return`${Math.round(seconds)}秒`
@@ -83,11 +84,13 @@ export default function ActivitySidebar():JSX.Element{
   Promise.all([
    metricsApi.getByProject(currentProject.id),
    agentApi.listByProject(currentProject.id),
-   checkpointApi.listByProject(currentProject.id)
-]).then(([metricsData,agentsData,checkpointsData])=>{
+   checkpointApi.listByProject(currentProject.id),
+   assetApi.listByProject(currentProject.id)
+]).then(([metricsData,agentsData,checkpointsData,assetsData])=>{
    metricsStore.setProjectMetrics(metricsData as ProjectMetrics)
    agentStore.setAgents(agentsData as Agent[])
    checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
+   assetStore.setAssets(assetsData)
   }).catch(err=>console.error('Failed to fetch initial sidebar data:',err))
  },[currentProject?.id])
 
@@ -180,7 +183,7 @@ export default function ActivitySidebar():JSX.Element{
   }
 
   prevValues.current=currentValues
- },[metrics,completedAgents,pendingCheckpoints,pendingAssets,logs.length,errorLogs,generatingCount,totalAssets,totalProjectSize,showMessage])
+ },[metrics,completedAgents,pendingCheckpoints,pendingAssets,logs.length,errorLogs,generatingCount,totalAssets,totalProjectSize])
 
  if(!currentProject){
   return(
@@ -201,6 +204,7 @@ export default function ActivitySidebar():JSX.Element{
       <div className="flex-1 flex items-center justify-center text-nier-text-light text-nier-caption p-4 text-center">
        プロジェクト未選択
       </div>
+      <NavigatorSendForm/>
       <OperatorPanel/>
      </div>
 )}
@@ -349,6 +353,8 @@ export default function ActivitySidebar():JSX.Element{
      </div>
      </div>
 
+     {/*Navigator Send Form*/}
+     <NavigatorSendForm/>
      {/*Operator Panel*/}
      <OperatorPanel/>
     </div>

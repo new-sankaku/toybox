@@ -1,6 +1,7 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
+import type{SequenceData}from'@/types/agent'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||''
 
@@ -214,6 +215,26 @@ export const agentApi={
  cancel:async(agentId:string):Promise<{success:boolean;message:string}>=>{
   const response=await api.post(`/api/agents/${agentId}/cancel`)
   return response.data
+ },
+
+ getSequence:async(agentId:string):Promise<SequenceData>=>{
+  const response=await api.get(`/api/agents/${agentId}/sequence`)
+  return response.data
+ },
+
+ listLeaders:async(projectId:string):Promise<ApiAgent[]>=>{
+  const response=await api.get(`/api/projects/${projectId}/agents/leaders`)
+  return response.data
+ },
+
+ execute:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
+  const response=await api.post(`/api/agents/${agentId}/execute`)
+  return response.data
+ },
+
+ executeWithWorkers:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
+  const response=await api.post(`/api/agents/${agentId}/execute-with-workers`)
+  return response.data
  }
 }
 
@@ -367,22 +388,22 @@ export const qualitySettingsApi={
   projectId:string,
   agentType:string,
   config:Partial<QualityCheckConfig>
-):Promise<{agentType:string;config:QualityCheckConfig}>=>{
+ ):Promise<{agentType:string;config:QualityCheckConfig}>=>{
   const response=await api.patch(
    `/api/projects/${projectId}/settings/quality-check/${agentType}`,
    config
-)
+  )
   return response.data
  },
 
  bulkUpdate:async(
   projectId:string,
   settings:Record<string,Partial<QualityCheckConfig>>
-):Promise<{updated:Record<string,QualityCheckConfig>;count:number}>=>{
+ ):Promise<{updated:Record<string,QualityCheckConfig>;count:number}>=>{
   const response=await api.patch(
    `/api/projects/${projectId}/settings/quality-check/bulk`,
    {settings}
-)
+  )
   return response.data
  },
 
@@ -958,6 +979,16 @@ export const configApi={
  getWebSocketConfig:async():Promise<WebSocketConfig>=>{
   const response=await api.get('/api/config/websocket')
   return response.data
+ },
+
+ getCostSettingsDefaults:async():Promise<CostSettings>=>{
+  const response=await api.get('/api/config/cost-settings/defaults')
+  return response.data
+ },
+
+ getOutputSettingsDefaults:async():Promise<OutputSettings>=>{
+  const response=await api.get('/api/config/output-settings/defaults')
+  return response.data
  }
 }
 
@@ -1111,6 +1142,209 @@ export const traceApi={
 
  deleteByProject:async(projectId:string):Promise<{deleted:number}>=>{
   const response=await api.delete(`/api/projects/${projectId}/traces`)
+  return response.data
+ }
+}
+
+export interface ApiLlmJob{
+ id:string
+ projectId:string
+ agentId:string
+ providerId:string
+ model:string
+ status:string
+ priority:number
+ systemPrompt:string|null
+ prompt:string|null
+ maxTokens:number
+ responseContent:string|null
+ tokensInput:number
+ tokensOutput:number
+ errorMessage:string|null
+ retryCount:number
+ externalJobId:string|null
+ createdAt:string|null
+ startedAt:string|null
+ completedAt:string|null
+}
+
+export const llmJobApi={
+ get:async(jobId:string):Promise<ApiLlmJob>=>{
+  const response=await api.get(`/api/llm-jobs/${jobId}`)
+  return response.data
+ }
+}
+
+export interface ApiBackupEntry{
+ name:string
+ size:number
+ createdAt:string
+}
+
+export const backupApi={
+ list:async():Promise<ApiBackupEntry[]>=>{
+  const response=await api.get('/api/backups')
+  return response.data
+ },
+ create:async():Promise<ApiBackupEntry>=>{
+  const response=await api.post('/api/backups')
+  return response.data
+ },
+ restore:async(backupName:string):Promise<{success:boolean;message:string}>=>{
+  const response=await api.post(`/api/backups/${backupName}/restore`)
+  return response.data
+ },
+ delete:async(backupName:string):Promise<void>=>{
+  await api.delete(`/api/backups/${backupName}`)
+ }
+}
+
+export interface ApiArchiveEntry{
+ name:string
+ size:number
+ createdAt:string
+}
+
+export interface ApiArchiveStats{
+ totalArchives:number
+ totalSize:number
+ oldestArchive:string|null
+ newestArchive:string|null
+}
+
+export interface ApiCleanupEstimate{
+ tracesCount:number
+ estimatedSize:number
+}
+
+export const archiveApi={
+ getStats:async(projectId?:string):Promise<ApiArchiveStats>=>{
+  const response=await api.get('/api/archive/stats',{params:projectId?{projectId}:undefined})
+  return response.data
+ },
+ cleanup:async(projectId?:string):Promise<{deleted:number}>=>{
+  const response=await api.post('/api/archive/cleanup',projectId?{projectId}:{})
+  return response.data
+ },
+ estimate:async(projectId?:string):Promise<ApiCleanupEstimate>=>{
+  const response=await api.get('/api/archive/estimate',{params:projectId?{projectId}:undefined})
+  return response.data
+ },
+ setRetention:async(days:number):Promise<{retentionDays:number}>=>{
+  const response=await api.put('/api/archive/retention',{days})
+  return response.data
+ },
+ export:async(projectId:string):Promise<{filename:string}>=>{
+  const response=await api.post('/api/archive/export',{projectId})
+  return response.data
+ },
+ exportAndCleanup:async(projectId:string):Promise<{filename:string;deleted:number}>=>{
+  const response=await api.post('/api/archive/export-and-cleanup',{projectId})
+  return response.data
+ },
+ autoArchive:async():Promise<{archived:number}>=>{
+  const response=await api.post('/api/archive/auto-archive')
+  return response.data
+ },
+ list:async():Promise<ApiArchiveEntry[]>=>{
+  const response=await api.get('/api/archives')
+  return response.data
+ },
+ delete:async(archiveName:string):Promise<void>=>{
+  await api.delete(`/api/archives/${archiveName}`)
+ },
+ getDownloadUrl:(archiveName:string):string=>{
+  return`${API_BASE_URL}/api/archives/${archiveName}/download`
+ }
+}
+
+export interface ApiRecoveryStatus{
+ interruptedAgents:number
+ interruptedProjects:number
+}
+
+export const recoveryApi={
+ getStatus:async():Promise<ApiRecoveryStatus>=>{
+  const response=await api.get('/api/recovery/status')
+  return response.data
+ },
+ retryAll:async():Promise<{retriedCount:number}>=>{
+  const response=await api.post('/api/recovery/retry-all')
+  return response.data
+ }
+}
+
+export interface ApiSystemStats{
+ backups:{count:number;totalSize:number}
+ archives:ApiArchiveStats
+ rateLimiter:{activeKeys:number}
+}
+
+export const systemApi={
+ getStats:async():Promise<ApiSystemStats>=>{
+  const response=await api.get('/api/system/stats')
+  return response.data
+ }
+}
+
+export interface ApiKeyInfo{
+ providerId:string
+ hint:string
+ validated:boolean
+ validatedAt:string|null
+ latencyMs:number|null
+}
+
+export interface ApiKeyValidationResult{
+ success:boolean
+ message:string
+ latencyMs:number
+}
+
+export const apiKeyApi={
+ list:async():Promise<ApiKeyInfo[]>=>{
+  const response=await api.get('/api/api-keys')
+  return response.data
+ },
+ save:async(providerId:string,apiKey:string):Promise<{success:boolean}>=>{
+  const response=await api.put(`/api/api-keys/${providerId}`,{apiKey})
+  return response.data
+ },
+ delete:async(providerId:string):Promise<void>=>{
+  await api.delete(`/api/api-keys/${providerId}`)
+ },
+ validate:async(providerId:string):Promise<ApiKeyValidationResult>=>{
+  const response=await api.post(`/api/api-keys/${providerId}/validate`)
+  return response.data
+ }
+}
+
+export interface ApiProviderHealth{
+ providerId:string
+ healthy:boolean
+ latencyMs:number|null
+ lastChecked:string|null
+ error:string|null
+}
+
+export const providerHealthApi={
+ getAll:async():Promise<ApiProviderHealth[]>=>{
+  const response=await api.get('/api/providers/health')
+  return response.data
+ },
+ check:async(providerId:string):Promise<ApiProviderHealth>=>{
+  const response=await api.get(`/api/providers/${providerId}/health`)
+  return response.data
+ }
+}
+
+export const navigatorApi={
+ sendMessage:async(data:{projectId?:string;text:string;priority?:string}):Promise<{success:boolean}>=>{
+  const response=await api.post('/api/navigator/message',data)
+  return response.data
+ },
+ broadcast:async(data:{text:string;priority?:string}):Promise<{success:boolean}>=>{
+  const response=await api.post('/api/navigator/broadcast',data)
   return response.data
  }
 }

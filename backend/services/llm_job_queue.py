@@ -6,7 +6,8 @@ from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
-from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent
+from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent,get_token_budget_settings
+from agents.exceptions import TokenBudgetExceededError
 from middleware.logger import get_logger
 
 MAX_JOB_RETRIES=3
@@ -70,6 +71,16 @@ class LlmJobQueue:
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
+   budget=get_token_budget_settings()
+   limit=budget.get("default_limit",500000)
+   warning_pct=budget.get("warning_threshold_percent",80)
+   enforcement=budget.get("enforcement","hard")
+   used=repo.get_project_token_usage(project_id)
+   warning_at=int(limit*warning_pct/100)
+   if used>=warning_at:
+    get_logger().warning(f"token budget warning: project={project_id} used={used}/{limit} ({int(used/limit*100)}%)")
+   if enforcement=="hard" and used>=limit:
+    raise TokenBudgetExceededError(project_id,used,limit)
    job=repo.create_job(
     project_id=project_id,
     agent_id=agent_id,

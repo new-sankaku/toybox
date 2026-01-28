@@ -27,42 +27,42 @@ const statusConfig={
  },
  running:{
   color:'bg-nier-accent-orange',
-  textColor:'text-nier-accent-orange',
+  textColor:'text-nier-text-light',
   icon:Play,
   text:'実行中',
   pulse:true
  },
  waiting_approval:{
   color:'bg-nier-accent-yellow',
-  textColor:'text-nier-accent-yellow',
+  textColor:'text-nier-text-light',
   icon:AlertCircle,
   text:'承認待ち',
   pulse:true
  },
  completed:{
   color:'bg-nier-accent-green',
-  textColor:'text-nier-accent-green',
+  textColor:'text-nier-text-light',
   icon:CheckCircle,
   text:'完了',
   pulse:false
  },
  failed:{
   color:'bg-nier-accent-red',
-  textColor:'text-nier-accent-red',
+  textColor:'text-nier-text-light',
   icon:XCircle,
   text:'エラー',
   pulse:false
  },
  blocked:{
   color:'bg-nier-accent-red',
-  textColor:'text-nier-accent-red',
+  textColor:'text-nier-text-light',
   icon:Pause,
   text:'ブロック',
   pulse:false
  },
  interrupted:{
   color:'bg-nier-accent-orange',
-  textColor:'text-nier-accent-orange',
+  textColor:'text-nier-text-light',
   icon:Zap,
   text:'中断',
   pulse:false
@@ -76,21 +76,21 @@ const statusConfig={
  },
  paused:{
   color:'bg-nier-accent-blue',
-  textColor:'text-nier-accent-blue',
+  textColor:'text-nier-text-light',
   icon:Pause,
   text:'一時停止',
   pulse:false
  },
  waiting_response:{
   color:'bg-nier-accent-yellow',
-  textColor:'text-nier-accent-yellow',
+  textColor:'text-nier-text-light',
   icon:AlertCircle,
   text:'応答待ち',
   pulse:true
  },
  waiting_provider:{
   color:'bg-nier-accent-blue',
-  textColor:'text-nier-accent-blue',
+  textColor:'text-nier-text-light',
   icon:Clock,
   text:'プロバイダ待ち',
   pulse:true
@@ -168,76 +168,67 @@ export function AgentCard({
 )}
    onClick={()=>onSelect(agent)}
   >
-   {/*Grid Layout for aligned columns*/}
-   <div className="grid grid-cols-[4px_55px_180px_1fr_140px_auto] items-center gap-2">
-    {/*Col 1: Status Indicator*/}
+   <div className="grid grid-cols-[4px_clamp(40px,3.5vw,56px)_2fr_3fr_clamp(100px,9vw,150px)_clamp(70px,7vw,110px)] items-center gap-x-[clamp(4px,0.5vw,8px)]">
     <div className={cn(
      'w-1 h-6 transition-opacity',
      status.color,
      status.pulse&&'animate-pulse'
 )}/>
 
-    {/*Col 2: Role badge*/}
-    <span className="text-nier-caption text-nier-text-light">
+    <span className="text-[clamp(9px,0.65vw,11px)] text-nier-text-light whitespace-nowrap leading-none">
      [{roleLabel}]
     </span>
 
-    {/*Col 3: Agent Type*/}
-    <div className="flex items-center gap-1.5 min-w-0">
+    <div className="flex items-center gap-1 min-w-0">
      <Cpu size={12} className="text-nier-text-light flex-shrink-0"/>
-     <span className="text-nier-small font-medium text-nier-text-main truncate">
+     <span className="text-[clamp(10px,0.75vw,13px)] font-medium text-nier-text-main truncate leading-tight">
       {getDisplayName(agent)}
      </span>
     </div>
 
-    {/*Col 4: Task/Status Text*/}
-    <div className="flex items-center gap-2 min-w-0 pl-4">
+    <div className="flex items-center gap-1.5 min-w-0 pl-2">
      {isUsingLLM&&(
       <Sparkles size={12} className="text-nier-accent-gold flex-shrink-0 animate-pulse"/>
 )}
-     <span className="text-nier-caption truncate text-nier-text-light">
+     <span className="text-[clamp(9px,0.6vw,11px)] truncate text-nier-text-light leading-tight">
       {getTaskText()}
      </span>
     </div>
 
-    {/*Col 5: Progress Bar+Time*/}
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5 whitespace-nowrap">
      {(agent.status==='running'||agent.status==='waiting_approval')?(
       <>
-       <Progress value={agent.progress} className="h-1.5 w-12"/>
-       <span className="text-nier-caption text-nier-text-light w-8">
+       <Progress value={agent.progress} className="h-1.5 w-[clamp(32px,3vw,48px)]"/>
+       <span className="text-[clamp(9px,0.6vw,11px)] text-nier-text-light">
         {agent.progress}%
        </span>
       </>
 ) : (
-      <span className="w-[76px]"/>
+      <span className="w-[clamp(50px,4.5vw,76px)]"/>
 )}
-     <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
-      <Clock size={10}/>
+     <span className="text-[clamp(9px,0.6vw,11px)] text-nier-text-light flex items-center gap-0.5">
+      <Clock size={10} className="flex-shrink-0"/>
       {getRuntime()}
      </span>
     </div>
 
-    {/*Col 6: Right side info*/}
-    <div className="flex items-center gap-3">
-     <span className="text-nier-caption text-nier-text-light w-14 text-right">
+    <div className="flex items-center gap-2 whitespace-nowrap">
+     <span className="text-[clamp(9px,0.6vw,11px)] text-nier-text-light tabular-nums text-right min-w-[3em]">
       {agent.tokensUsed.toLocaleString()}tk
      </span>
-     {/*Quality Check Badge*/}
      {qualityCheckConfig&&(
       <span
-       className="text-nier-caption text-nier-text-light flex items-center gap-1"
+       className="text-[clamp(9px,0.6vw,11px)] text-nier-text-light flex items-center gap-0.5"
        title={qualityCheckConfig.enabled?'品質チェックON' : '品質チェックOFF'}
       >
        {qualityCheckConfig.enabled?<Shield size={10}/>:<ShieldOff size={10}/>}
        QC
       </span>
 )}
-     {/*Retry Button*/}
      {isRetryable&&onRetry&&(
       <button
        onClick={handleRetryClick}
-       className="text-nier-caption text-nier-accent-blue hover:text-nier-text-main flex items-center gap-1 px-1.5 py-0.5 border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
+       className="text-[clamp(9px,0.6vw,11px)] text-nier-accent-blue hover:text-nier-text-main flex items-center gap-0.5 px-1 py-0.5 border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
        title="再試行"
       >
        <RotateCcw size={10}/>
@@ -245,7 +236,7 @@ export function AgentCard({
       </button>
 )}
      <span className={cn(
-      'text-nier-caption flex items-center gap-1 w-14',
+      'text-[clamp(9px,0.6vw,11px)] flex items-center gap-0.5',
       status.textColor
 )}>
       <StatusIcon size={10}/>

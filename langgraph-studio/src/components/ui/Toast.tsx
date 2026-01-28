@@ -1,4 +1,4 @@
-import{useEffect}from'react'
+import{useEffect,useCallback}from'react'
 import{createPortal}from'react-dom'
 import{X,CheckCircle,AlertCircle,AlertTriangle,Info}from'lucide-react'
 import{cn}from'@/lib/utils'
@@ -20,18 +20,19 @@ const colorMap={
 
 interface ToastItemProps{
  toast:ToastItem
- onClose:()=>void
 }
 
-function ToastItemComponent({toast,onClose}:ToastItemProps){
+function ToastItemComponent({toast}:ToastItemProps){
  const Icon=iconMap[toast.type]
+ const removeToast=useToastStore(s=>s.removeToast)
+ const handleClose=useCallback(()=>removeToast(toast.id),[removeToast,toast.id])
 
  useEffect(()=>{
   if(toast.duration>0){
-   const timer=setTimeout(onClose,toast.duration)
+   const timer=setTimeout(handleClose,toast.duration)
    return()=>clearTimeout(timer)
   }
- },[toast.duration,onClose])
+ },[toast.duration,handleClose])
 
  return(
   <div
@@ -43,7 +44,7 @@ function ToastItemComponent({toast,onClose}:ToastItemProps){
    <Icon size={18} className={colorMap[toast.type].split(' ')[0]}/>
    <span className="flex-1 text-nier-small text-nier-text-main">{toast.message}</span>
    <button
-    onClick={onClose}
+    onClick={handleClose}
     className="text-nier-text-light hover:text-nier-text-main transition-colors"
    >
     <X size={16}/>
@@ -53,14 +54,14 @@ function ToastItemComponent({toast,onClose}:ToastItemProps){
 }
 
 export function ToastContainer(){
- const{toasts,removeToast}=useToastStore()
+ const toasts=useToastStore(s=>s.toasts)
 
  if(toasts.length===0)return null
 
  return createPortal(
   <div className="fixed bottom-4 right-4 z-[300] flex flex-col gap-2">
    {toasts.map((toast)=>(
-    <ToastItemComponent key={toast.id} toast={toast} onClose={()=>removeToast(toast.id)}/>
+    <ToastItemComponent key={toast.id} toast={toast}/>
 ))}
   </div>,
   document.body

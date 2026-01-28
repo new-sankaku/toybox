@@ -1,6 +1,5 @@
 import{useState,useEffect,useCallback}from'react'
 import{AgentListView}from'@/components/agents'
-import{AgentSlideOver}from'@/components/agents/AgentSlideOver'
 import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
@@ -8,6 +7,7 @@ import{useAgentStore}from'@/stores/agentStore'
 import{agentApi,type ApiAgent,type ApiAgentLog}from'@/services/apiService'
 import type{Agent,AgentLogEntry,AgentType,AgentStatus}from'@/types/agent'
 import{FolderOpen}from'lucide-react'
+import{useToastStore}from'@/stores/toastStore'
 
 function convertApiAgent(apiAgent:ApiAgent):Agent{
  return{
@@ -43,12 +43,13 @@ export default function AgentsView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{tabResetCounter}=useNavigationStore()
  const{agents,setAgents,agentLogs,isLoading,version}=useAgentStore()
- const[selectedAgent,setSelectedAgent]=useState<Agent|null>(null)
+ const addToast=useToastStore(s=>s.addToast)
+ const[openAgentIds,setOpenAgentIds]=useState<Set<string>>(new Set())
  const[initialLoading,setInitialLoading]=useState(true)
  const[initialLogsFetched,setInitialLogsFetched]=useState<Record<string,boolean>>({})
 
  useEffect(()=>{
-  setSelectedAgent(null)
+  setOpenAgentIds(new Set())
   setInitialLogsFetched({})
  },[tabResetCounter,version])
 
@@ -75,29 +76,24 @@ export default function AgentsView():JSX.Element{
  },[currentProject?.id,setAgents,version])
 
  useEffect(()=>{
-  if(!selectedAgent)return
-  if(initialLogsFetched[selectedAgent.id])return
+  if(openAgentIds.size===0)return
+  const idsToFetch=[...openAgentIds].filter(id=>!initialLogsFetched[id])
+  if(idsToFetch.length===0)return
 
-  const fetchLogs=async()=>{
+  const fetchLogs=async(agentId:string)=>{
    try{
-    const data=await agentApi.getLogs(selectedAgent.id)
+    const data=await agentApi.getLogs(agentId)
     const logs=data.map(convertApiLog)
     const{addLogEntry}=useAgentStore.getState()
-    logs.forEach(log=>addLogEntry(selectedAgent.id,log))
-    setInitialLogsFetched(prev=>({...prev,[selectedAgent.id]:true}))
+    logs.forEach(log=>addLogEntry(agentId,log))
+    setInitialLogsFetched(prev=>({...prev,[agentId]:true}))
    }catch(error){
     console.error('Failed to fetch agent logs:',error)
    }
   }
 
-  fetchLogs()
- },[selectedAgent?.id,initialLogsFetched])
-
- const selectedAgentLogs=selectedAgent
-  ?(agentLogs[selectedAgent.id]||[])
-   .slice()
-   .sort((a,b)=>new Date(b.timestamp).getTime()-new Date(a.timestamp).getTime())
-  : []
+  idsToFetch.forEach(id=>fetchLogs(id))
+ },[openAgentIds,initialLogsFetched])
 
  const projectAgents=currentProject
   ?agents.filter(a=>a.projectId===currentProject.id)
@@ -118,12 +114,13 @@ export default function AgentsView():JSX.Element{
 )
  }
 
- const handleSelectAgent=(agent:Agent)=>{
-  setSelectedAgent(prev=>prev?.id===agent.id?null:agent)
- }
-
- const handleCloseSlideOver=()=>{
-  setSelectedAgent(null)
+ const handleToggleAgent=(agent:Agent)=>{
+  setOpenAgentIds(prev=>{
+   const next=new Set(prev)
+   if(next.has(agent.id))next.delete(agent.id)
+   else next.add(agent.id)
+   return next
+  })
  }
 
  const handleRetry=useCallback(async(agent:Agent)=>{
@@ -134,14 +131,11 @@ export default function AgentsView():JSX.Element{
     const currentAgents=useAgentStore.getState().agents
     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
     setAgents(newAgents)
-    if(selectedAgent?.id===agent.id){
-     setSelectedAgent(updatedAgent)
-    }
    }
   }catch(error){
    console.error('Failed to retry agent:',error)
   }
- },[selectedAgent,setAgents])
+ },[setAgents])
 
  const handlePause=useCallback(async(agent:Agent)=>{
   try{
@@ -151,14 +145,11 @@ export default function AgentsView():JSX.Element{
     const currentAgents=useAgentStore.getState().agents
     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
     setAgents(newAgents)
-    if(selectedAgent?.id===agent.id){
-     setSelectedAgent(updatedAgent)
-    }
    }
   }catch(error){
    console.error('Failed to pause agent:',error)
   }
- },[selectedAgent,setAgents])
+ },[setAgents])
 
  const handleResume=useCallback(async(agent:Agent)=>{
   try{
@@ -168,39 +159,66 @@ export default function AgentsView():JSX.Element{
     const currentAgents=useAgentStore.getState().agents
     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
     setAgents(newAgents)
-    if(selectedAgent?.id===agent.id){
-     setSelectedAgent(updatedAgent)
-    }
    }
   }catch(error){
    console.error('Failed to resume agent:',error)
   }
- },[selectedAgent,setAgents])
+ },[setAgents])
 
- const currentAgentData=selectedAgent
-  ?projectAgents.find(a=>a.id===selectedAgent.id)||selectedAgent
-  :null
- const canRetry=currentAgentData?['failed','interrupted','cancelled'].includes(currentAgentData.status):false
- const canPause=currentAgentData?['running','waiting_approval'].includes(currentAgentData.status):false
- const canResume=currentAgentData?['paused','waiting_response'].includes(currentAgentData.status):false
+ const handleExecute=useCallback(async(agent:Agent)=>{
+  try{
+   const result=await agentApi.execute(agent.id)
+   if(result.success){
+    const updatedAgent=convertApiAgent(result.agent)
+    const currentAgents=useAgentStore.getState().agents
+    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+    setAgents(newAgents)
+    addToast('エージェントを実行しました','success')
+   }
+  }catch(error:unknown){
+   const axiosErr=error as{response?:{status:number}}
+   if(axiosErr.response?.status===429){
+    addToast('レート制限に達しました。しばらくお待ちください。','error')
+   }else{
+    console.error('Failed to execute agent:',error)
+    addToast('エージェントの実行に失敗しました','error')
+   }
+  }
+ },[setAgents,addToast])
+
+ const handleExecuteWithWorkers=useCallback(async(agent:Agent)=>{
+  try{
+   const result=await agentApi.executeWithWorkers(agent.id)
+   if(result.success){
+    const updatedAgent=convertApiAgent(result.agent)
+    const currentAgents=useAgentStore.getState().agents
+    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+    setAgents(newAgents)
+    addToast('エージェント（Workers含む）を実行しました','success')
+   }
+  }catch(error:unknown){
+   const axiosErr=error as{response?:{status:number}}
+   if(axiosErr.response?.status===429){
+    addToast('レート制限に達しました。しばらくお待ちください。','error')
+   }else{
+    console.error('Failed to execute agent with workers:',error)
+    addToast('エージェントの実行に失敗しました','error')
+   }
+  }
+ },[setAgents,addToast])
 
  return(
-  <>
-   <AgentListView
-    agents={projectAgents}
-    onSelectAgent={handleSelectAgent}
-    selectedAgentId={selectedAgent?.id}
-    loading={initialLoading||isLoading}
-    onRetryAgent={handleRetry}
-   />
-   <AgentSlideOver
-    agent={currentAgentData}
-    logs={selectedAgentLogs}
-    onClose={handleCloseSlideOver}
-    onRetry={canRetry&&currentAgentData?()=>handleRetry(currentAgentData):undefined}
-    onPause={canPause&&currentAgentData?()=>handlePause(currentAgentData):undefined}
-    onResume={canResume&&currentAgentData?()=>handleResume(currentAgentData):undefined}
-   />
-  </>
+  <AgentListView
+   agents={projectAgents}
+   onToggleAgent={handleToggleAgent}
+   openAgentIds={openAgentIds}
+   loading={initialLoading||isLoading}
+   onRetryAgent={handleRetry}
+   onPauseAgent={handlePause}
+   onResumeAgent={handleResume}
+   onExecuteAgent={handleExecute}
+   onExecuteWithWorkers={handleExecuteWithWorkers}
+   agentLogsMap={agentLogs}
+  />
 )
 }

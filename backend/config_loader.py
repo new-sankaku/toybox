@@ -11,6 +11,7 @@ import yaml
 
 _config_cache:Dict[str,Any]={}
 _config_dir:Optional[Path]=None
+_principle_cache:Dict[str,str]={}
 
 
 def get_config_dir()->Path:
@@ -260,6 +261,23 @@ def get_messages_config()->Dict[str,Any]:
     return load_yaml_config("messages.yaml")
 
 
+def get_token_budget_settings()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("token_budget",{
+        "default_limit":500000,
+        "warning_threshold_percent":80,
+        "enforcement":"hard",
+    })
+
+
+def get_context_policy_settings()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("context_policy_settings",{
+        "auto_downgrade_threshold":15000,
+        "summary_max_length":10000,
+    })
+
+
 def get_agent_types()->List[str]:
     return list(get_agents_config().get("agents",{}).keys())
 
@@ -459,6 +477,101 @@ def get_mock_skill_sequences(agent_type:str)->List[Dict[str,Any]]:
     config=get_mock_data_config()
     sequences=config.get("mock_skill_sequences",{})
     return sequences.get(agent_type,sequences.get("default",[]))
+
+
+def load_principle(name:str)->str:
+    global _principle_cache
+    if name in _principle_cache:
+        return _principle_cache[name]
+    principle_path=get_config_dir()/"principles"/f"{name}.md"
+    if not principle_path.exists():
+        return""
+    with open(principle_path,"r",encoding="utf-8") as f:
+        content=f.read()
+    _principle_cache[name]=content
+    return content
+
+
+def get_agent_principles(agent_type:str)->List[str]:
+    config=get_agents_config()
+    mapping=config.get("agent_principles",{})
+    principles=mapping.get(agent_type)
+    if principles is None:
+        principles=mapping.get("_default",[])
+    return principles
+
+
+def load_principles_for_agent(agent_type:str)->str:
+    principle_names=get_agent_principles(agent_type)
+    if not principle_names:
+        return""
+    config=get_agents_config()
+    settings=config.get("principle_settings",{})
+    max_chars=settings.get("max_chars_per_agent",12000)
+    parts=[]
+    total_len=0
+    for name in principle_names:
+        content=load_principle(name)
+        if not content:
+            continue
+        if total_len+len(content)>max_chars:
+            compact=_extract_compact_principle(content)
+            if total_len+len(compact)<=max_chars:
+                parts.append(compact)
+                total_len+=len(compact)
+        else:
+            parts.append(content)
+            total_len+=len(content)
+    return"\n\n---\n\n".join(parts)
+
+
+def _extract_compact_principle(content:str)->str:
+    import re
+    lines=content.split("\n")
+    result=[]
+    in_overview=False
+    in_rubric=False
+    for line in lines:
+        if line.startswith("# 原則:"):
+            result.append(line)
+            continue
+        if line.strip()=="## 概要":
+            in_overview=True
+            result.append(line)
+            continue
+        if in_overview:
+            if line.startswith("## ") and line.strip()!="## 概要":
+                in_overview=False
+            else:
+                result.append(line)
+                continue
+        if line.strip()=="## 評価ルーブリック":
+            in_rubric=True
+            result.append(line)
+            continue
+        if in_rubric:
+            if line.startswith("## ") and line.strip()!="## 評価ルーブリック":
+                in_rubric=False
+            else:
+                result.append(line)
+                continue
+    return"\n".join(result)
+
+
+def clear_principle_cache()->None:
+    global _principle_cache
+    _principle_cache.clear()
+
+
+def get_principle_settings()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("principle_settings",{
+        "max_chars_per_agent":12000,
+        "injection_mode":"system",
+        "quality_check_model":"claude-haiku-4-5-20250116",
+        "quality_check_provider":"anthropic",
+        "quality_check_max_tokens":2048,
+    })
 
 
 def get_provider_max_concurrent(provider_id:str)->int:

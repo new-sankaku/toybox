@@ -19,6 +19,8 @@ from config_loader import (
     get_provider_default_model,
     get_agent_max_tokens,
     get_workflow_context_policy,
+    get_context_policy_settings,
+    load_principles_for_agent,
 )
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
@@ -246,7 +248,12 @@ class ApiAgentRunner(AgentRunner):
                         input_tokens=int(total*0.3)
                         output_tokens=total-input_tokens
                     llm_content=result.get("content","")
-                    summary=self._extract_summary(llm_content)
+                    from services.summary_service import get_summary_service
+                    summary=get_summary_service().generate_summary(
+                        llm_content,
+                        agent_type.value,
+                        fallback_func=self._extract_summary,
+                    )
                     self._data_store.complete_trace(
                         trace_id=trace_id,
                         llm_response=llm_content,
@@ -350,10 +357,19 @@ class ApiAgentRunner(AgentRunner):
         agent_type=context.agent_type.value
         base_prompt=self._prompts.get(agent_type,self._default_prompt())
 
+        principles_text=load_principles_for_agent(agent_type)
         system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
+        if principles_text:
+            system_prompt+=f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}"
 
         context_policy=get_workflow_context_policy(agent_type)
         filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy)
+        if context.leader_analysis and not filtered_outputs:
+            leader_content=context.leader_analysis.get("content","")
+            if leader_content:
+                settings=get_context_policy_settings()
+                leader_max=settings.get("leader_output_max_for_worker",5000)
+                filtered_outputs={"leader":{"content":leader_content[:leader_max]}}
         previous_text=self._format_previous_outputs(filtered_outputs)
 
         prompt=base_prompt.format(
@@ -371,19 +387,31 @@ class ApiAgentRunner(AgentRunner):
         if retry_key in context.previous_outputs:
             attempt=context.previous_outputs[retry_key]
             issues=attempt.get("issues",[])
-            if issues:
-                issues_text="\n".join(f"- {i}" for i in issues)
-                prompt+=f"""
-
-## 前回の品質チェック結果（修正が必要）
-以下の問題点が指摘されました。これらを改善した出力を生成してください。
-{issues_text}"""
+            failed_criteria=attempt.get("failed_criteria",[])
+            suggestions=attempt.get("improvement_suggestions",[])
+            prev_output=attempt.get("previous_output","")
+            if issues or failed_criteria:
+                prompt+="\n\n## 前回の品質チェック結果（修正が必要）"
+                if failed_criteria:
+                    criteria_text="\n".join(f"- {c}" for c in failed_criteria)
+                    prompt+=f"\n### 不合格の評価基準:\n{criteria_text}"
+                if suggestions:
+                    suggestions_text="\n".join(f"- {s}" for s in suggestions)
+                    prompt+=f"\n### 改善提案:\n{suggestions_text}"
+                elif issues:
+                    issues_text="\n".join(f"- {i}" for i in issues)
+                    prompt+=f"\n### 問題点:\n{issues_text}"
+                if prev_output:
+                    prompt+=f"\n### 前回の出力（修正のベースにしてください）:\n{prev_output}"
 
         return system_prompt,prompt
 
     def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,str])->Dict[str,Any]:
         if not policy:
             return outputs
+        settings=get_context_policy_settings()
+        summary_max=settings.get("summary_max_length",10000)
+        auto_downgrade=settings.get("auto_downgrade_threshold",15000)
         filtered={}
         for agent_key,output in outputs.items():
             if agent_key.endswith("_previous_attempt"):
@@ -391,13 +419,18 @@ class ApiAgentRunner(AgentRunner):
             level=policy.get(agent_key,"full")
             if level=="none":
                 continue
-            elif level=="summary":
+            if level=="full" and isinstance(output,dict) and output.get("content"):
+                content_len=len(str(output["content"]))
+                if content_len>auto_downgrade:
+                    get_logger().info(f"context auto-downgrade: {agent_key} ({content_len}文字) full→summary")
+                    level="summary"
+            if level=="summary":
                 if isinstance(output,dict) and output.get("summary"):
                     filtered[agent_key]={"content":output["summary"]}
                 elif isinstance(output,dict) and output.get("content"):
                     content=str(output["content"])
-                    if len(content)>1500:
-                        filtered[agent_key]={"content":content[:1500]+"\n\n（以降省略）"}
+                    if len(content)>summary_max:
+                        filtered[agent_key]={"content":content[:summary_max]+"\n\n（以降省略）"}
                     else:
                         filtered[agent_key]=output
                 else:
@@ -419,7 +452,10 @@ class ApiAgentRunner(AgentRunner):
 
         return"\n\n".join(parts)
 
-    def _extract_summary(self,content:str,max_length:int=1500)->str:
+    def _extract_summary(self,content:str,max_length:int=0)->str:
+        if max_length<=0:
+            settings=get_context_policy_settings()
+            max_length=settings.get("summary_max_length",10000)
         if not content:
             return""
         import re
@@ -560,6 +596,9 @@ class QualityCheckResult:
     score:float=1.0
     retry_needed:bool=False
     human_review_needed:bool=False
+    failed_criteria:List[str]=field(default_factory=list)
+    improvement_suggestions:List[str]=field(default_factory=list)
+    strengths:List[str]=field(default_factory=list)
 
 
 @dataclass
@@ -725,7 +764,7 @@ class LeaderWorkerOrchestrator:
                 agent_id=worker_id,
                 agent_type=agent_type,
                 project_concept=leader_context.project_concept,
-                previous_outputs=leader_context.previous_outputs,
+                previous_outputs={},
                 config=leader_context.config,
                 assigned_task=task,
                 leader_analysis=leader_output,
@@ -788,18 +827,27 @@ class LeaderWorkerOrchestrator:
                 continue
 
             result.output=output.output
-            qc_result=self._perform_quality_check(output.output,worker_type)
+            qc_result=await self._perform_quality_check(output.output,worker_type)
             result.quality_check=qc_result
 
             if qc_result.passed:
                 result.status="completed"
+                if qc_result.strengths:
+                    get_logger().info(f"品質チェック合格 [{worker_type}] 強み: {', '.join(qc_result.strengths[:3])}")
                 return result
 
+            get_logger().info(f"品質チェック不合格 [{worker_type}] score={qc_result.score:.2f} retry={retry+1}/{max_retries}")
             if retry<max_retries-1:
                 result.status="needs_retry"
-                worker_context.previous_outputs[f"{worker_type}_previous_attempt"]={
+                prev_content=output.output.get("content","")
+                retry_max=get_context_policy_settings().get("retry_previous_output_max",3000)
+                retry_feedback={
                     "issues":qc_result.issues,
+                    "previous_output":prev_content[:retry_max],
+                    "failed_criteria":qc_result.failed_criteria,
+                    "improvement_suggestions":qc_result.improvement_suggestions,
                 }
+                worker_context.previous_outputs[f"{worker_type}_previous_attempt"]=retry_feedback
             else:
                 result.status="needs_human_review"
                 result.quality_check.human_review_needed=True
@@ -807,35 +855,26 @@ class LeaderWorkerOrchestrator:
 
         return result
 
-    def _perform_quality_check(self,output:Dict[str,Any],worker_type:str)->QualityCheckResult:
-        """簡易的なルールベースチェック（本番ではLLMで品質評価）"""
-        issues=[]
-        score=1.0
-        content=output.get("content","")
-
-        if not content or len(str(content))<50:
-            issues.append("出力内容が不十分です")
-            score-=0.3
-
-        if"```json" in str(content):
-            import json
-            import re
-            json_match=re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
-            if json_match:
-                try:
-                    json.loads(json_match.group(1))
-                except json.JSONDecodeError:
-                    issues.append("JSON形式が不正です")
-                    score-=0.2
-
-        passed=score>=0.7 and len(issues)==0
-
-        return QualityCheckResult(
-            passed=passed,
-            issues=issues,
-            score=score,
-            retry_needed=not passed,
-        )
+    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str)->QualityCheckResult:
+        from .quality_evaluator import get_quality_evaluator
+        evaluator=get_quality_evaluator()
+        try:
+            return await evaluator.evaluate(output,worker_type)
+        except Exception as e:
+            get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
+            issues=[]
+            score=1.0
+            content=output.get("content","")
+            if not content or len(str(content))<50:
+                issues.append("出力内容が不十分です")
+                score-=0.3
+            passed=score>=0.7 and len(issues)==0
+            return QualityCheckResult(
+                passed=passed,
+                issues=issues,
+                score=score,
+                retry_needed=not passed,
+            )
 
     def _extract_worker_tasks(self,leader_output:Dict[str,Any])->List[Dict[str,Any]]:
         content=leader_output.get("content","")
@@ -861,12 +900,23 @@ class LeaderWorkerOrchestrator:
         leader_output:Dict[str,Any],
         worker_results:List[Dict[str,Any]],
     )->Dict[str,Any]:
-        """Worker結果をマージ（本番ではLeaderに再度LLM呼び出しで統合）"""
+        worker_outputs={}
+        worker_texts=[]
+        for result in worker_results:
+            wt=result.get("worker_type","unknown")
+            worker_outputs[wt]={
+                "status":result.get("status"),
+                "output":result.get("output",{}),
+            }
+            content=result.get("output",{}).get("content","")
+            if content and result.get("status")=="completed":
+                worker_texts.append(f"### {wt}\n{str(content)[:3000]}")
+
         integrated={
             "type":"document",
             "format":"markdown",
             "leader_summary":leader_output,
-            "worker_outputs":{},
+            "worker_outputs":worker_outputs,
             "metadata":{
                 "agent_type":leader_context.agent_type.value,
                 "worker_count":len(worker_results),
@@ -874,12 +924,54 @@ class LeaderWorkerOrchestrator:
             }
         }
 
-        for result in worker_results:
-            worker_type=result.get("worker_type","unknown")
-            integrated["worker_outputs"][worker_type]={
-                "status":result.get("status"),
-                "output":result.get("output",{}),
-            }
+        if not worker_texts:
+            return integrated
+
+        try:
+            principles_text=load_principles_for_agent(leader_context.agent_type.value)
+            leader_content=leader_output.get("content","")[:3000] if isinstance(leader_output,dict) else""
+            workers_combined="\n\n".join(worker_texts)[:10000]
+
+            integration_prompt=f"""## Leader分析
+{leader_content}
+
+## Worker出力一覧
+{workers_combined}
+
+## 指示
+上記のLeader分析とWorker出力を統合し、一貫性のある統合ドキュメントを生成してください。
+以下の観点で統合してください:
+-全体の一貫性（矛盾がないか）
+-コアファンタジーとの整合性
+-重複の排除と情報の補完
+-各Worker出力の長所を活かした統合
+
+統合ドキュメントをMarkdown形式で出力してください。"""
+
+            system_prompt="あなたはゲーム開発プロジェクトの統合リーダーです。複数の専門家の出力を一貫性のあるドキュメントに統合します。"
+            if principles_text:
+                rubric_section=principles_text[:4000]
+                system_prompt+=f"\n\n## 品質基準\n{rubric_section}"
+
+            job_queue=self.agent_runner.get_job_queue()
+            job=job_queue.submit_job(
+                project_id=leader_context.project_id,
+                agent_id=f"{leader_context.agent_id}-integration",
+                provider_id=self.agent_runner._provider_id,
+                model=self.agent_runner.model,
+                prompt=integration_prompt,
+                max_tokens=self.agent_runner.max_tokens,
+                system_prompt=system_prompt,
+            )
+            result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
+            if result and result["status"]=="completed":
+                integrated["content"]=result["responseContent"]
+                integrated["metadata"]["integration_method"]="llm"
+                get_logger().info(f"LLM統合完了: {leader_context.agent_type.value}")
+            else:
+                get_logger().warning(f"LLM統合失敗、マージモードで出力: {leader_context.agent_type.value}")
+        except Exception as e:
+            get_logger().error(f"統合LLM呼び出しエラー: {e}",exc_info=True)
 
         return integrated
 

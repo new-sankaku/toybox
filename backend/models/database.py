@@ -41,6 +41,21 @@ def session_scope():
  finally:
   session.close()
 
+def _run_migrations():
+ from sqlalchemy import inspect,text
+ inspector=inspect(engine)
+ if"llm_jobs" in inspector.get_table_names():
+  columns={c["name"] for c in inspector.get_columns("llm_jobs")}
+  if"system_prompt" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE llm_jobs ADD COLUMN system_prompt TEXT"))
+ if"agent_traces" in inspector.get_table_names():
+  columns={c["name"] for c in inspector.get_columns("agent_traces")}
+  if"output_summary" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE agent_traces ADD COLUMN output_summary TEXT"))
+
 def init_db():
  from .tables import Base
  Base.metadata.create_all(bind=engine)
+ _run_migrations()

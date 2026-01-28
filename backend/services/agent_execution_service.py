@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional,Dict,Any,Callable
 from agents.base import AgentContext,AgentType,AgentStatus,AgentOutput
 from agents.api_runner import ApiAgentRunner,LeaderWorkerOrchestrator
-from agents.exceptions import ProviderUnavailableError,MaxRetriesExceededError
+from agents.exceptions import ProviderUnavailableError,MaxRetriesExceededError,TokenBudgetExceededError
 from agents.retry_strategy import wait_for_provider_available
 from providers.health_monitor import get_health_monitor
 from config_loader import get_workflow_dependencies
@@ -154,6 +154,21 @@ class AgentExecutionService:
      "error":output.error
     },project_id)
     return {"success":False,"error":output.error}
+  except TokenBudgetExceededError as e:
+   self._logger.warning(f"token budget exceeded: agent_id={agent_id} project_id={project_id} used={e.used} limit={e.limit}")
+   self._data_store.update_agent(agent_id,{
+    "status":"failed",
+    "error":str(e),
+    "currentTask":None,
+   })
+   self._emit_event("agent:budget_exceeded",{
+    "agentId":agent_id,
+    "projectId":project_id,
+    "used":e.used,
+    "limit":e.limit,
+    "error":str(e),
+   },project_id)
+   return {"success":False,"error":str(e)}
   except Exception as e:
    self._logger.error(f"execute_agent failed: agent_id={agent_id} project_id={project_id} error={e}",exc_info=True)
    self._data_store.update_agent(agent_id,{

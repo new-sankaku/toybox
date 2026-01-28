@@ -1,5 +1,5 @@
 import{create}from'zustand'
-import{configApi,type ProjectOptionsConfig,type PlatformOption,type ScopeOption}from'@/services/apiService'
+import{configApi,type PlatformOption,type ScopeOption}from'@/services/apiService'
 import type{ProjectScaleOption,AssetServiceOption,ContentRatingOption,AssetGenerationOptions,ContentPermissions}from'@/config/projectOptions'
 
 interface ProjectOptionsState{

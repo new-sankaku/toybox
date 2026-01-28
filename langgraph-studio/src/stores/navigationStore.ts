@@ -1,6 +1,6 @@
 import{create}from'zustand'
 
-export type TabId='project'|'checkpoints'|'intervention'|'system'|'agents'|'logs'|'data'|'cost'|'config'
+export type TabId='project'|'checkpoints'|'intervention'|'system'|'agents'|'logs'|'data'|'cost'|'config'|'data-management'
 
 interface NavigationState{
  activeTab:TabId

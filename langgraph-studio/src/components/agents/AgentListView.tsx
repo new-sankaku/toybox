@@ -2,11 +2,11 @@ import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
+import{AgentAccordionDetail}from'./AgentAccordionDetail'
 import{ActivityFeed}from'./ActivityFeed'
-import{PhasePipelineBar}from'./PhasePipelineBar'
-import type{Agent,AgentStatus}from'@/types/agent'
+import type{Agent,AgentStatus,AgentLogEntry}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle,ChevronDown,ChevronRight,Users}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle,ChevronDown,ChevronRight,Users,Loader}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -17,10 +17,15 @@ const getDisplayName=(agent:Agent):string=>{
 
 interface AgentListViewProps{
  agents:Agent[]
- onSelectAgent:(agent:Agent)=>void
- selectedAgentId?:string
+ onToggleAgent:(agent:Agent)=>void
+ openAgentIds:Set<string>
  loading?:boolean
  onRetryAgent?:(agent:Agent)=>void
+ onPauseAgent?:(agent:Agent)=>void
+ onResumeAgent?:(agent:Agent)=>void
+ onExecuteAgent?:(agent:Agent)=>void
+ onExecuteWithWorkers?:(agent:Agent)=>void
+ agentLogsMap:Record<string,AgentLogEntry[]>
 }
 
 type FilterStatus='all'|'incomplete'|AgentStatus
@@ -37,15 +42,21 @@ const filterOptions:{value:FilterStatus;label:string;icon:typeof Filter}[]=[
  {value:'failed',label:'エラー',icon:XCircle},
  {value:'blocked',label:'ブロック',icon:Pause},
  {value:'interrupted',label:'中断',icon:Zap},
- {value:'cancelled',label:'キャンセル',icon:Ban}
+ {value:'cancelled',label:'キャンセル',icon:Ban},
+ {value:'waiting_provider',label:'プロバイダ待ち',icon:Loader}
 ]
 
 export default function AgentListView({
  agents,
- onSelectAgent,
- selectedAgentId,
+ onToggleAgent,
+ openAgentIds,
  loading=false,
- onRetryAgent
+ onRetryAgent,
+ onPauseAgent,
+ onResumeAgent,
+ onExecuteAgent,
+ onExecuteWithWorkers,
+ agentLogsMap
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
  const[collapsedWorkers,setCollapsedWorkers]=useState<Record<string,boolean>>({})
@@ -103,7 +114,8 @@ export default function AgentListView({
    failed:list.filter(a=>a.status==='failed').length,
    blocked:list.filter(a=>a.status==='blocked').length,
    interrupted:list.filter(a=>a.status==='interrupted').length,
-   cancelled:list.filter(a=>a.status==='cancelled').length
+   cancelled:list.filter(a=>a.status==='cancelled').length,
+   waiting_provider:list.filter(a=>a.status==='waiting_provider').length
   }
  },[allAgentsForCount])
 
@@ -179,7 +191,6 @@ export default function AgentListView({
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
    {/*Agent List-Main Content*/}
    <div className="flex-1 flex flex-col overflow-hidden">
-    <PhasePipelineBar uiPhases={uiPhases} agentsByPhase={agentsByPhase} workersByParent={workersByParent}/>
     {loading&&agents.length===0?(
      <Card className="flex-1">
       <CardContent className="py-12 text-center">
@@ -229,8 +240,8 @@ export default function AgentListView({
                <div className="flex-1">
                 <AgentCard
                  agent={agent}
-                 onSelect={onSelectAgent}
-                 isSelected={selectedAgentId===agent.id}
+                 onSelect={onToggleAgent}
+                 isSelected={openAgentIds.has(agent.id)}
                  waitingFor={getWaitingFor(agent)}
                  onRetry={onRetryAgent}
                 />
@@ -247,17 +258,39 @@ export default function AgentListView({
                 </button>
 )}
               </div>
+              {openAgentIds.has(agent.id)&&(
+               <AgentAccordionDetail
+                agent={agent}
+                logs={agentLogsMap[agent.id]||[]}
+                onRetry={['failed','interrupted','cancelled'].includes(agent.status)&&onRetryAgent?()=>onRetryAgent(agent):undefined}
+                onPause={['running','waiting_approval'].includes(agent.status)&&onPauseAgent?()=>onPauseAgent(agent):undefined}
+                onResume={['paused','waiting_response'].includes(agent.status)&&onResumeAgent?()=>onResumeAgent(agent):undefined}
+                onExecute={['completed','failed','cancelled'].includes(agent.status)&&onExecuteAgent?()=>onExecuteAgent(agent):undefined}
+                onExecuteWithWorkers={['completed','failed','cancelled'].includes(agent.status)&&agent.type.endsWith('_leader')&&onExecuteWithWorkers?()=>onExecuteWithWorkers(agent):undefined}
+               />
+)}
               {hasWorkers&&!isCollapsed&&workers.length>0&&(
                <div className="border-t border-nier-border-light/50">
                 {workers.map(worker=>(
-                 <AgentCard
-                  key={worker.id}
-                  agent={worker}
-                  onSelect={onSelectAgent}
-                  isSelected={selectedAgentId===worker.id}
-                  onRetry={onRetryAgent}
-                  isWorker
-                 />
+                 <div key={worker.id}>
+                  <AgentCard
+                   agent={worker}
+                   onSelect={onToggleAgent}
+                   isSelected={openAgentIds.has(worker.id)}
+                   onRetry={onRetryAgent}
+                   isWorker
+                  />
+                  {openAgentIds.has(worker.id)&&(
+                   <AgentAccordionDetail
+                    agent={worker}
+                    logs={agentLogsMap[worker.id]||[]}
+                    onRetry={['failed','interrupted','cancelled'].includes(worker.status)&&onRetryAgent?()=>onRetryAgent(worker):undefined}
+                    onPause={['running','waiting_approval'].includes(worker.status)&&onPauseAgent?()=>onPauseAgent(worker):undefined}
+                    onResume={['paused','waiting_response'].includes(worker.status)&&onResumeAgent?()=>onResumeAgent(worker):undefined}
+                    onExecute={['completed','failed','cancelled'].includes(worker.status)&&onExecuteAgent?()=>onExecuteAgent(worker):undefined}
+                   />
+)}
+                 </div>
 ))}
                </div>
 )}
