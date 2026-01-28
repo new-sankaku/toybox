@@ -143,11 +143,11 @@ function ApiKeyManagement():JSX.Element{
      <Card key={provider.id}>
       <CardHeader>
        <div className="flex items-center gap-2">
-        <span className="text-nier-small text-nier-text-main">{provider.name}</span>
+        <span className="text-nier-small">{provider.name}</span>
         {keyInfo&&(
          keyInfo.validated
           ?<CheckCircle size={14} className="text-nier-accent-green"/>
-          :<XCircle size={14} className="text-nier-text-light"/>
+          :<XCircle size={14} className="text-nier-text-header opacity-60"/>
         )}
        </div>
        <div className="ml-auto flex items-center gap-1">
@@ -179,7 +179,7 @@ function ApiKeyManagement():JSX.Element{
          <div className="flex-1 flex gap-2">
           <input
            type={showKey[provider.id]?'text':'password'}
-           className="flex-1 bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
+           className="flex-1 bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main placeholder:text-nier-text-light focus:outline-none focus:border-nier-border-dark"
            placeholder={keyInfo?'新しいキーを入力...':'APIキーを入力...'}
            value={editingKey[provider.id]||''}
            onChange={e=>setEditingKey(p=>({...p,[provider.id]:e.target.value}))}
@@ -415,7 +415,7 @@ function DataManagement():JSX.Element{
       <label className="text-nier-small text-nier-text-light">保持期間</label>
       <input
        type="number" min={1} max={365}
-       className="w-20 bg-nier-bg-main border border-nier-border-light px-2 py-1 text-nier-small focus:outline-none focus:border-nier-border-dark"
+       className="w-20 bg-nier-bg-main border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
        value={retentionDays}
        onChange={e=>setRetentionDays(Number(e.target.value))}
       />

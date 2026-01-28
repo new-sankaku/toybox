@@ -26,9 +26,9 @@ class ArchiveService:
    if project_id:
     query=query.filter(AgentTrace.project_id==project_id)
    deleted_counts["traces"]=query.delete(synchronize_session=False)
-   query=session.query(AgentLog).filter(AgentLog.timestamp<cutoff_date)
+   query=session.query(AgentLog).filter(AgentLog.created_at<cutoff_date)
    deleted_counts["agent_logs"]=query.delete(synchronize_session=False)
-   query=session.query(SystemLog).filter(SystemLog.timestamp<cutoff_date)
+   query=session.query(SystemLog).filter(SystemLog.created_at<cutoff_date)
    if project_id:
     query=query.filter(SystemLog.project_id==project_id)
    deleted_counts["system_logs"]=query.delete(synchronize_session=False)
@@ -51,7 +51,7 @@ class ArchiveService:
    if agent_ids:
     deleted_counts["agent_logs"]=session.query(AgentLog).filter(
      AgentLog.agent_id.in_(agent_ids),
-     AgentLog.timestamp<cutoff_date
+     AgentLog.created_at<cutoff_date
     ).delete(synchronize_session=False)
    session.commit()
   total=sum(deleted_counts.values())
@@ -72,8 +72,8 @@ class ArchiveService:
    system_log_count=system_log_query.count()
    cutoff_date=datetime.now()-timedelta(days=self._retention_days)
    old_trace_count=trace_query.filter(AgentTrace.created_at<cutoff_date).count()
-   old_agent_log_count=agent_log_query.filter(AgentLog.timestamp<cutoff_date).count()
-   old_system_log_count=system_log_query.filter(SystemLog.timestamp<cutoff_date).count()
+   old_agent_log_count=agent_log_query.filter(AgentLog.created_at<cutoff_date).count()
+   old_system_log_count=system_log_query.filter(SystemLog.created_at<cutoff_date).count()
    return {
     "total":{
      "traces":trace_count,
@@ -138,7 +138,7 @@ class ArchiveService:
        "level":log.level,
        "message":log.message,
        "progress":log.progress,
-       "timestamp":log.timestamp.isoformat() if log.timestamp else None,
+       "timestamp":log.created_at.isoformat() if log.created_at else None,
       })
    with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED,compresslevel=9) as zf:
     zf.writestr("traces.json",json.dumps(trace_data,ensure_ascii=False,indent=2))
