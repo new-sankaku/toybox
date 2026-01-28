@@ -17,6 +17,7 @@ from handlers.project_tree import register_project_tree_routes
 from handlers.ai_provider import register_ai_provider_routes
 from handlers.ai_service import register_ai_service_routes
 from handlers.backup import register_backup_routes
+from handlers.admin import register_admin_routes
 from providers.health_monitor import get_health_monitor
 from providers.registry import register_all_providers
 from handlers.language import register_language_routes
@@ -65,6 +66,7 @@ def create_app():
     data_store.start_simulation()
 
     db_path=os.path.join(os.path.dirname(__file__),"data","testdata.db" if config.agent.mode=="testdata" else"production.db")
+    app.config['DB_PATH']=db_path
     backup_service=BackupService(db_path=db_path,max_backups=10)
     backup_service.create_startup_backup()
     archive_service=ArchiveService(retention_days=30)
@@ -115,6 +117,7 @@ def create_app():
     register_ai_service_routes(app)
     register_language_routes(app)
     register_backup_routes(app,backup_service,archive_service)
+    register_admin_routes(app,backup_service,archive_service)
 
     register_all_providers()
     health_monitor=get_health_monitor()
