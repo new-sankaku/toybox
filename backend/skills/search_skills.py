@@ -60,7 +60,9 @@ class CodeSearchSkill(Skill):
    truncated=len(results)>=max_results
    metadata={"pattern":pattern,"total_matches":len(results),"truncated":truncated,"max_results_applied":max_results}
    if skipped:
-    metadata["skipped_files"]=skipped
+    max_skipped_detail=10
+    metadata["skipped_count"]=len(skipped)
+    metadata["skipped_files"]=skipped[:max_skipped_detail]
     metadata["skipped_reason"]=f"{len(skipped)} file(s) skipped due to size limit ({MAX_SEARCH_FILE_SIZE} bytes)"
    return SkillResult(success=True,output=results,metadata=metadata)
   except re.error as e:
