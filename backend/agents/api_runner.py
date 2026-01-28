@@ -961,6 +961,8 @@ class LeaderWorkerOrchestrator:
                 system_prompt+=f"\n\n## 品質基準\n{rubric_section}"
 
             job_queue=self.agent_runner.get_job_queue()
+            from config_loader import get_agent_temperature
+            temperature=get_agent_temperature(leader_context.agent_type.value)
             job=job_queue.submit_job(
                 project_id=leader_context.project_id,
                 agent_id=f"{leader_context.agent_id}-integration",
@@ -969,6 +971,7 @@ class LeaderWorkerOrchestrator:
                 prompt=integration_prompt,
                 max_tokens=self.agent_runner.max_tokens,
                 system_prompt=system_prompt,
+                temperature=str(temperature),
             )
             result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
             if result and result["status"]=="completed":

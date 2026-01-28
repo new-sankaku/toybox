@@ -147,6 +147,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    "prompt":job.prompt,
    "maxTokens":job.max_tokens,
    "temperature":job.temperature,
+   "messagesJson":job.messages_json,
    "responseContent":job.response_content,
    "tokensInput":job.tokens_input,
    "tokensOutput":job.tokens_output,
