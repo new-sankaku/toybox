@@ -12,10 +12,9 @@ service_labels:
 
 provider_type_mapping:
   claude: anthropic
-  openai: openai
   comfyui: local-comfyui
-  voicevox: local-coqui-tts
-  suno: local-audiocraft
+  tts: local-coqui-tts
+  audiocraft: local-audiocraft
 
 usage_categories:
   - id: llm_high

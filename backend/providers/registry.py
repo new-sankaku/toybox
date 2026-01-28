@@ -85,9 +85,6 @@ def list_providers()->List[Dict[str,Any]]:
 def register_all_providers()->None:
  """全プロバイダーを登録"""
  from .anthropic import AnthropicProvider
- from .openai_provider import OpenAIProvider
- from .google import GoogleProvider
- from .xai import XAIProvider
  from .mock import MockProvider
  from .zhipu import ZhipuProvider
  from .deepseek import DeepSeekProvider
@@ -97,9 +94,6 @@ def register_all_providers()->None:
  from .claude_code import ClaudeCodeProvider
 
  ProviderRegistry.register(AnthropicProvider)
- ProviderRegistry.register(OpenAIProvider)
- ProviderRegistry.register(GoogleProvider)
- ProviderRegistry.register(XAIProvider)
  ProviderRegistry.register(MockProvider)
  ProviderRegistry.register(ZhipuProvider)
  ProviderRegistry.register(DeepSeekProvider)

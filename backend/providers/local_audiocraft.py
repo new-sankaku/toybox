@@ -24,44 +24,7 @@ class LocalAudioCraftProvider(AIProvider):
   return self.config.base_url or self.DEFAULT_BASE_URL
 
  def get_available_models(self)->List[ModelInfo]:
-  return [
-   ModelInfo(
-    id="musicgen-small",
-    name="MusicGen Small",
-    max_tokens=0,
-    supports_vision=False,
-    supports_tools=False,
-    input_cost_per_1k=0,
-    output_cost_per_1k=0
-   ),
-   ModelInfo(
-    id="musicgen-medium",
-    name="MusicGen Medium",
-    max_tokens=0,
-    supports_vision=False,
-    supports_tools=False,
-    input_cost_per_1k=0,
-    output_cost_per_1k=0
-   ),
-   ModelInfo(
-    id="musicgen-large",
-    name="MusicGen Large",
-    max_tokens=0,
-    supports_vision=False,
-    supports_tools=False,
-    input_cost_per_1k=0,
-    output_cost_per_1k=0
-   ),
-   ModelInfo(
-    id="audiogen-medium",
-    name="AudioGen Medium (効果音)",
-    max_tokens=0,
-    supports_vision=False,
-    supports_tools=False,
-    input_cost_per_1k=0,
-    output_cost_per_1k=0
-   ),
-  ]
+  return self.load_models_from_config(self.provider_id)
 
  def chat(
   self,

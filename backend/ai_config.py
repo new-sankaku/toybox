@@ -29,7 +29,13 @@ def get_reverse_provider_type_mapping()->Dict[str,str]:
  return {v:k for k,v in mapping.items()}
 
 def get_defaults()->Dict[str,Dict[str,str]]:
- return _load_config().get('defaults',{})
+ result={}
+ for cat in get_usage_categories():
+  stype=cat.get('service_type','')
+  if stype and stype not in result:
+   d=cat.get('default',{})
+   result[stype]={'provider':d.get('provider',''),'model':d.get('model','')}
+ return result
 
 def get_providers()->Dict[str,Dict[str,Any]]:
  return _load_config().get('providers',{})
