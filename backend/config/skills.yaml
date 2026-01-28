@@ -15,6 +15,7 @@ skills:
       - code_review_worker
     restrictions:
       max_file_size: 1048576
+      max_lines: 2000
       allowed_extensions:
         - .py
         - .js
@@ -236,6 +237,8 @@ skills:
     allowed_agents: all
     restrictions:
       max_results: 200
+      max_search_file_size: 524288
+      max_context_lines: 5
       max_skipped_detail: 10
 
   file_search:
