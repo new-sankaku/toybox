@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import List,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
-HARD_MAX_FILE_SIZE=1048576
+HARD_MAX_FILE_SIZE_READ=1048576
+HARD_MAX_FILE_SIZE_WRITE=1073741824
 HARD_MAX_LINES=2000
 HARD_MAX_ITEMS=500
 
@@ -43,8 +44,8 @@ class FileReadSkill(Skill):
     if ext and ext not in allowed_ext:
      return SkillResult(success=False,error=f"Extension not allowed: {ext}. Allowed: {', '.join(allowed_ext)}")
    file_size=os.path.getsize(full_path)
-   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
-   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE_READ)
+   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE_READ)
    if file_size>max_file_size:
     return SkillResult(success=False,error=f"File too large: {file_size} bytes (limit: {max_file_size} bytes). Use max_lines to read partial content, or split the operation.")
    content=await asyncio.to_thread(self._read_file,full_path,encoding,max_lines)
@@ -109,8 +110,8 @@ class FileWriteSkill(Skill):
   create_dirs=kwargs.get("create_dirs",True)
   if not path:
    return SkillResult(success=False,error="path is required")
-  max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
-  max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+  max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE_WRITE)
+  max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE_WRITE)
   content_size=len(content.encode(encoding))
   if content_size>max_file_size:
    return SkillResult(success=False,error=f"Content too large: {content_size} bytes (limit: {max_file_size} bytes). Split into smaller writes.")
@@ -191,8 +192,8 @@ class FileEditSkill(Skill):
     return SkillResult(success=False,error=f"File not found: {path}")
    if not os.path.isfile(full_path):
     return SkillResult(success=False,error=f"Not a file: {path}")
-   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
-   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE_READ)
+   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE_READ)
    file_size=os.path.getsize(full_path)
    if file_size>max_file_size:
     return SkillResult(success=False,error=f"File too large to edit: {file_size} bytes (limit: {max_file_size} bytes). Consider editing a smaller file or splitting the operation.")

@@ -6,7 +6,7 @@ from typing import List,Dict,Any,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
 
-HARD_MAX_DEPTH=5
+HARD_MAX_DEPTH=10
 
 
 class ProjectAnalyzeSkill(Skill):

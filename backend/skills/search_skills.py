@@ -52,32 +52,35 @@ class CodeSearchSkill(Skill):
   if not os.path.exists(full_path):
    return SkillResult(success=False,error=f"Path not found: {path}")
   try:
-   results=await asyncio.to_thread(
+   search_result=await asyncio.to_thread(
     self._search,full_path,pattern,file_pattern,case_sensitive,max_results,context_lines
    )
+   results=search_result["results"]
+   skipped=search_result["skipped_files"]
    truncated=len(results)>=max_results
-   return SkillResult(
-    success=True,
-    output=results,
-    metadata={"pattern":pattern,"total_matches":len(results),"truncated":truncated,"max_results_applied":max_results}
-   )
+   metadata={"pattern":pattern,"total_matches":len(results),"truncated":truncated,"max_results_applied":max_results}
+   if skipped:
+    metadata["skipped_files"]=skipped
+    metadata["skipped_reason"]=f"{len(skipped)} file(s) skipped due to size limit ({MAX_SEARCH_FILE_SIZE} bytes)"
+   return SkillResult(success=True,output=results,metadata=metadata)
   except re.error as e:
    return SkillResult(success=False,error=f"Invalid regex pattern: {e}")
   except Exception as e:
    return SkillResult(success=False,error=str(e))
 
- def _search(self,path:str,pattern:str,file_pattern:str,case_sensitive:bool,max_results:int,context_lines:int)->List[Dict[str,Any]]:
+ def _search(self,path:str,pattern:str,file_pattern:str,case_sensitive:bool,max_results:int,context_lines:int)->Dict[str,Any]:
   flags=0 if case_sensitive else re.IGNORECASE
   try:
    regex=re.compile(pattern,flags)
   except re.error:
    regex=re.compile(re.escape(pattern),flags)
   results=[]
+  skipped_files=[]
   for root,dirs,files in os.walk(path):
    dirs[:]=[d for d in dirs if d not in self.IGNORE_DIRS]
    for filename in files:
     if len(results)>=max_results:
-     return results
+     return {"results":results,"skipped_files":skipped_files}
     if not fnmatch.fnmatch(filename,file_pattern):
      continue
     ext=os.path.splitext(filename)[1].lower()
@@ -87,17 +90,19 @@ class CodeSearchSkill(Skill):
     try:
      file_size=os.path.getsize(filepath)
      if file_size>MAX_SEARCH_FILE_SIZE:
+      rel_path=os.path.relpath(filepath,path)
+      skipped_files.append({"file":rel_path,"size":file_size,"reason":f"exceeds {MAX_SEARCH_FILE_SIZE} bytes"})
       get_logger().debug(f"Skipped large file during search {filepath}: {file_size} bytes > {MAX_SEARCH_FILE_SIZE}")
       continue
      matches=self._search_file(filepath,regex,context_lines,path)
      for match in matches:
       if len(results)>=max_results:
-       return results
+       return {"results":results,"skipped_files":skipped_files}
       results.append(match)
     except Exception as e:
      get_logger().debug(f"Skipped file during search {filepath}: {e}")
      continue
-  return results
+  return {"results":results,"skipped_files":skipped_files}
 
  def _search_file(self,filepath:str,regex:re.Pattern,context_lines:int,base_path:str)->List[Dict[str,Any]]:
   results=[]

@@ -53,7 +53,7 @@ skills:
       - tester_leader
       - reviewer_leader
     restrictions:
-      max_file_size: 1048576
+      max_file_size: 1073741824
       require_approval: false
       denied_paths:
         - /etc
@@ -147,7 +147,7 @@ skills:
     category: project
     allowed_agents: all
     restrictions:
-      max_depth: 5
+      max_depth: 10
 
   code_build:
     enabled: true
