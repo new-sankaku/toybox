@@ -678,6 +678,7 @@ class LeaderWorkerOrchestrator:
         self.on_worker_speech=on_worker_speech
 
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
+        from config_loader import is_dag_execution_enabled
         results={
             "leader_output":{},
             "worker_results":[],
@@ -697,43 +698,12 @@ class LeaderWorkerOrchestrator:
 
 
         worker_tasks=self._extract_worker_tasks(leader_output.output)
-
-        self._emit_progress(leader_context.agent_type.value,30,f"Worker実行開始 ({len(worker_tasks)}タスク)")
-
-
         total_workers=len(worker_tasks)
-        for i,worker_task in enumerate(worker_tasks):
-            worker_type=worker_task.get("worker","")
-            task_description=worker_task.get("task","")
 
-            progress=30+int((i/total_workers)*50)
-            self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中: {task_description}")
-
-
-            qc_config=self.quality_settings.get(worker_type,{})
-            qc_enabled=qc_config.get("enabled",True)
-            max_retries=qc_config.get("maxRetries",3)
-
-
-            worker_result=await self._execute_worker(
-                leader_context=leader_context,
-                worker_type=worker_type,
-                task=task_description,
-                leader_output=leader_output.output,
-                quality_check_enabled=qc_enabled,
-                max_retries=max_retries,
-            )
-
-            results["worker_results"].append(worker_result.__dict__)
-
-
-            if worker_result.status=="needs_human_review":
-                results["human_review_required"].append({
-                    "worker_type":worker_type,
-                    "task":task_description,
-                    "issues":worker_result.quality_check.issues if worker_result.quality_check else [],
-                })
-
+        if is_dag_execution_enabled():
+            results=await self._run_workers_dag(leader_context,leader_output,worker_tasks,results)
+        else:
+            results=await self._run_workers_sequential(leader_context,leader_output,worker_tasks,results)
 
         self._emit_progress(leader_context.agent_type.value,85,"Leader統合中")
 
@@ -743,7 +713,6 @@ class LeaderWorkerOrchestrator:
             worker_results=results["worker_results"],
         )
         results["final_output"]=final_output
-
 
         self._emit_progress(leader_context.agent_type.value,95,"承認生成")
 
@@ -766,6 +735,99 @@ class LeaderWorkerOrchestrator:
 
         self._emit_progress(leader_context.agent_type.value,100,"完了")
 
+        return results
+
+    async def _run_workers_dag(
+        self,
+        leader_context:AgentContext,
+        leader_output,
+        worker_tasks:List[Dict[str,Any]],
+        results:Dict[str,Any],
+    )->Dict[str,Any]:
+        from .task_dispatcher import TaskDAG,execute_dag_parallel
+        total_workers=len(worker_tasks)
+        dag=TaskDAG(worker_tasks)
+        layers=dag.get_execution_layers()
+        layer_count=len(layers)
+        get_logger().info(f"DAG構築完了: {total_workers}タスク, {layer_count}レイヤー, レイヤー構成={[len(l) for l in layers]}")
+        self._emit_progress(leader_context.agent_type.value,30,f"Worker並列実行開始 ({total_workers}タスク, {layer_count}レイヤー)")
+
+        async def _exec_single(task_data:Dict[str,Any])->WorkerTaskResult:
+            worker_type=task_data.get("worker","")
+            task_description=task_data.get("task","")
+            qc_config=self.quality_settings.get(worker_type,{})
+            qc_enabled=qc_config.get("enabled",True)
+            max_retries=qc_config.get("maxRetries",3)
+            return await self._execute_worker(
+                leader_context=leader_context,
+                worker_type=worker_type,
+                task=task_description,
+                leader_output=leader_output.output,
+                quality_check_enabled=qc_enabled,
+                max_retries=max_retries,
+            )
+
+        def _on_layer_start(layer_idx:int,layer_task_ids:list)->None:
+            progress=30+int(((layer_idx)/max(layer_count,1))*50)
+            parallel_label="並列" if len(layer_task_ids)>1 else"単独"
+            task_names=[dag.get_task(tid).get("worker","?") for tid in layer_task_ids if dag.get_task(tid)]
+            self._emit_progress(
+                leader_context.agent_type.value,
+                progress,
+                f"Layer {layer_idx+1}/{layer_count} ({parallel_label}): {', '.join(task_names)}"
+            )
+
+        dag_results=await execute_dag_parallel(dag,_exec_single,on_layer_start=_on_layer_start)
+
+        for tid,result in dag_results:
+            if isinstance(result,Exception):
+                task_data=dag.get_task(tid)
+                wt=task_data.get("worker",tid) if task_data else tid
+                wr=WorkerTaskResult(worker_type=wt,status="failed",error=str(result))
+            else:
+                wr=result
+            results["worker_results"].append(wr.__dict__)
+            if wr.status=="needs_human_review":
+                task_data=dag.get_task(tid)
+                results["human_review_required"].append({
+                    "worker_type":wr.worker_type,
+                    "task":task_data.get("task","") if task_data else"",
+                    "issues":wr.quality_check.issues if wr.quality_check else[],
+                })
+        return results
+
+    async def _run_workers_sequential(
+        self,
+        leader_context:AgentContext,
+        leader_output,
+        worker_tasks:List[Dict[str,Any]],
+        results:Dict[str,Any],
+    )->Dict[str,Any]:
+        total_workers=len(worker_tasks)
+        self._emit_progress(leader_context.agent_type.value,30,f"Worker逐次実行開始 ({total_workers}タスク)")
+        for i,worker_task in enumerate(worker_tasks):
+            worker_type=worker_task.get("worker","")
+            task_description=worker_task.get("task","")
+            progress=30+int((i/max(total_workers,1))*50)
+            self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中")
+            qc_config=self.quality_settings.get(worker_type,{})
+            qc_enabled=qc_config.get("enabled",True)
+            max_retries=qc_config.get("maxRetries",3)
+            worker_result=await self._execute_worker(
+                leader_context=leader_context,
+                worker_type=worker_type,
+                task=task_description,
+                leader_output=leader_output.output,
+                quality_check_enabled=qc_enabled,
+                max_retries=max_retries,
+            )
+            results["worker_results"].append(worker_result.__dict__)
+            if worker_result.status=="needs_human_review":
+                results["human_review_required"].append({
+                    "worker_type":worker_type,
+                    "task":task_description,
+                    "issues":worker_result.quality_check.issues if worker_result.quality_check else[],
+                })
         return results
 
     async def _execute_worker(
@@ -940,17 +1002,20 @@ class LeaderWorkerOrchestrator:
         content=leader_output.get("content","")
         import json
         import re
+        from .task_dispatcher import normalize_worker_tasks
 
         json_match=re.search(r'```json\s*([\s\S]*?)\s*```',str(content))
         if json_match:
             try:
                 data=json.loads(json_match.group(1))
-                return data.get("worker_tasks",[])
+                raw=data.get("worker_tasks",[])
+                return normalize_worker_tasks(raw)
             except json.JSONDecodeError:
                 pass
 
         if isinstance(leader_output,dict) and"worker_tasks" in leader_output:
-            return leader_output.get("worker_tasks",[])
+            raw=leader_output.get("worker_tasks",[])
+            return normalize_worker_tasks(raw)
 
         return []
 
