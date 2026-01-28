@@ -34,9 +34,6 @@ def resolve_with_env_key(provider_id:str)->str:
  import os
  env_key_map={
   "anthropic":"ANTHROPIC_API_KEY",
-  "openai":"OPENAI_API_KEY",
-  "google":"GOOGLE_API_KEY",
-  "xai":"XAI_API_KEY",
   "zhipu":"ZHIPU_API_KEY",
   "deepseek":"DEEPSEEK_API_KEY",
  }

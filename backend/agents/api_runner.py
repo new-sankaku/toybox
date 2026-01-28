@@ -70,9 +70,6 @@ class ApiAgentRunner(AgentRunner):
     def _env_key_for(provider_id:str)->str:
         m={
             "anthropic":"ANTHROPIC_API_KEY",
-            "openai":"OPENAI_API_KEY",
-            "google":"GOOGLE_API_KEY",
-            "xai":"XAI_API_KEY",
             "zhipu":"ZHIPU_API_KEY",
             "deepseek":"DEEPSEEK_API_KEY",
         }
