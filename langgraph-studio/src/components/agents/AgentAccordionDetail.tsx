@@ -149,46 +149,46 @@ export function AgentAccordionDetail({
         <Pause size={12}/>
         一時停止
        </Button>
-      )}
+)}
       {(agent.status==='paused'||agent.status==='waiting_response')&&onResume&&(
        <Button size="sm" variant="success" onClick={onResume} className="gap-1.5">
         <Play size={12}/>
         {agent.status==='waiting_response'?'返答して再開':'再開'}
        </Button>
-      )}
+)}
       {agent.status==='waiting_response'&&(
        <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
         <MessageCircle size={10}/>
         オペレーター返答待ち
        </span>
-      )}
+)}
       {(agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled')&&onRetry&&(
        <Button size="sm" variant="success" onClick={onRetry} className="gap-1.5">
         <RotateCcw size={12}/>
         リトライ
        </Button>
-      )}
+)}
       {onExecute&&(
        <Button size="sm" onClick={onExecute} className="gap-1.5">
         <Play size={12}/>
         実行
        </Button>
-      )}
+)}
       {onExecuteWithWorkers&&(
        <Button size="sm" onClick={onExecuteWithWorkers} className="gap-1.5">
         <Play size={12}/>
         Workers含め実行
        </Button>
-      )}
+)}
      </div>
-    )}
+)}
 
     {agent.status==='failed'&&agent.error&&(
      <div className="flex items-start gap-1.5 px-2 py-1.5 border border-nier-accent-red bg-nier-bg-panel">
       <AlertTriangle size={12} className="text-nier-accent-red flex-shrink-0 mt-0.5"/>
       <p className="text-nier-caption text-nier-accent-red">{agent.error}</p>
      </div>
-    )}
+)}
 
     <div className="flex gap-1 border-b border-nier-border-light">
      <button
@@ -198,7 +198,7 @@ export function AgentAccordionDetail({
        activeTab==='log'
         ?'text-nier-text-main border-b-2 border-nier-text-main'
         :'text-nier-text-light hover:text-nier-text-main'
-      )}
+)}
      >
       ログ
      </button>
@@ -209,7 +209,7 @@ export function AgentAccordionDetail({
        activeTab==='sequence'
         ?'text-nier-text-main border-b-2 border-nier-text-main'
         :'text-nier-text-light hover:text-nier-text-main'
-      )}
+)}
      >
       シーケンス
      </button>
@@ -226,7 +226,7 @@ export function AgentAccordionDetail({
         <div className="w-1.5 h-1.5 bg-nier-accent-green rounded-full animate-pulse"/>
         LIVE
        </div>
-      )}
+)}
       {sortedLogs.map((log,i)=>(
        <div key={log.id} data-log-row className={cn('flex gap-2 py-px',i%2===0?'bg-nier-bg-panel':'bg-nier-bg-main/40')} style={{lineHeight:'1.3'}}>
         <span className="text-nier-text-light flex-shrink-0 opacity-60 px-1">{formatTimestamp(log.timestamp)}</span>
@@ -234,15 +234,15 @@ export function AgentAccordionDetail({
          {log.message}
         </span>
        </div>
-      ))}
+))}
      </div>
-    )}
+)}
 
     {activeTab==='log'&&sortedLogs.length===0&&(
      <div className="py-4 text-center text-nier-text-light text-nier-caption">
       ログがありません
      </div>
-    )}
+)}
 
     {activeTab==='sequence'&&(
      <div className="min-h-[100px]">
@@ -250,15 +250,15 @@ export function AgentAccordionDetail({
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         読み込み中...
        </div>
-      )}
+)}
       {seqError&&(
        <div className="flex items-center justify-center py-8 text-nier-accent-red text-nier-caption">
         {seqError}
        </div>
-      )}
+)}
       {!seqLoading&&!seqError&&seqData&&(
        <SequenceDiagram data={seqData} onMessageClick={handleMessageClick}/>
-      )}
+)}
       <SequenceDetailPanel
        isOpen={detailPanelOpen}
        onClose={()=>setDetailPanelOpen(false)}
@@ -268,10 +268,10 @@ export function AgentAccordionDetail({
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         シーケンスデータがありません
        </div>
-      )}
+)}
      </div>
-    )}
+)}
    </div>
   </div>
- )
+)
 }

@@ -8,6 +8,7 @@ from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole
 from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent,get_token_budget_settings
 from agents.exceptions import TokenBudgetExceededError
+from services.stream_comment_parser import StreamCommentParser
 from middleware.logger import get_logger
 
 MAX_JOB_RETRIES=3
@@ -35,6 +36,7 @@ class LlmJobQueue:
   self._active_jobs_by_group:Dict[str,Dict[str,bool]]={}
   self._active_jobs_lock=threading.Lock()
   self._job_callbacks:Dict[str,Callable[[Dict],None]]={}
+  self._speech_callbacks:Dict[str,Callable[[str],None]]={}
   self._initialized=True
 
  def start(self)->None:
@@ -70,6 +72,7 @@ class LlmJobQueue:
   system_prompt:Optional[str]=None,
   temperature:Optional[str]=None,
   messages_json:Optional[str]=None,
+  on_speech:Optional[Callable[[str],None]]=None,
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
@@ -97,6 +100,8 @@ class LlmJobQueue:
    )
    if callback:
     self._job_callbacks[job["id"]]=callback
+   if on_speech:
+    self._speech_callbacks[job["id"]]=on_speech
    return job
 
  def get_job_status(self,job_id:str)->Optional[Dict[str,Any]]:
@@ -224,15 +229,50 @@ class LlmJobQueue:
     chat_kwargs={"messages":messages,"model":job.model,"max_tokens":job.max_tokens}
     if job.temperature:
      chat_kwargs["temperature"]=float(job.temperature)
-    response=provider.chat(**chat_kwargs)
-    repo.complete_job(
-     job_id=job_id,
-     response_content=response.content,
-     tokens_input=response.input_tokens,
-     tokens_output=response.output_tokens,
-    )
+    speech_cb=self._speech_callbacks.pop(job_id,None)
+    parser=StreamCommentParser(on_comment=speech_cb) if speech_cb else None
+    try:
+     full_content=""
+     input_tokens=0
+     output_tokens=0
+     for chunk in provider.chat_stream(**chat_kwargs):
+      if chunk.is_final:
+       if chunk.input_tokens is not None:
+        input_tokens=chunk.input_tokens
+       if chunk.output_tokens is not None:
+        output_tokens=chunk.output_tokens
+      else:
+       full_content+=chunk.content
+       if parser and not parser.done:
+        parser.feed(chunk.content)
+     if parser:
+      full_content=StreamCommentParser.strip_comment(full_content)
+     repo.complete_job(
+      job_id=job_id,
+      response_content=full_content,
+      tokens_input=input_tokens,
+      tokens_output=output_tokens,
+     )
+    except Exception as stream_err:
+     get_logger().warning(f"LlmJobQueue stream fallback for job {job_id}: {stream_err}")
+     response=provider.chat(**chat_kwargs)
+     fallback_content=response.content
+     if speech_cb and fallback_content:
+      from services.stream_comment_parser import StreamCommentParser as SCP
+      import re
+      m=re.search(r'\[COMMENT\](.*?)\[/COMMENT\]',fallback_content,re.DOTALL)
+      if m:
+       speech_cb(m.group(1).strip())
+      fallback_content=SCP.strip_comment(fallback_content)
+     repo.complete_job(
+      job_id=job_id,
+      response_content=fallback_content,
+      tokens_input=response.input_tokens,
+      tokens_output=response.output_tokens,
+     )
     self._notify_completion(job_id)
   except Exception as e:
+   self._speech_callbacks.pop(job_id,None)
    with session_scope() as session:
     repo=LlmJobRepository(session)
     job=repo.get(job_id)

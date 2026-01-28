@@ -105,17 +105,23 @@ class ZhipuProvider(AIProvider):
    stream=True,
   )
 
-  total_content=""
+  has_usage=False
   for chunk in response:
    if chunk.choices and chunk.choices[0].delta.content:
     content=chunk.choices[0].delta.content
-    total_content+=content
     yield StreamChunk(content=content)
+   usage=getattr(chunk,'usage',None)
+   if usage:
+    has_usage=True
+    yield StreamChunk(
+     content="",
+     is_final=True,
+     input_tokens=getattr(usage,'prompt_tokens',None),
+     output_tokens=getattr(usage,'completion_tokens',None)
+    )
 
-  yield StreamChunk(
-   content="",
-   is_final=True,
-  )
+  if not has_usage:
+   yield StreamChunk(content="",is_final=True)
 
  def test_connection(self)->Dict[str,Any]:
   try:

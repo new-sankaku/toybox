@@ -80,6 +80,7 @@ class AgentExecutionService:
    "projectId":project_id,
    "agent":self._data_store.get_agent(agent_id)
   },project_id)
+  self._emit_pool_speech(agent_id,project_id,"started")
   context=AgentContext(
    project_id=project_id,
    agent_id=agent_id,
@@ -90,6 +91,7 @@ class AgentExecutionService:
    on_progress=lambda p,t:self._on_progress(agent_id,project_id,p,t),
    on_log=lambda l,m:self._on_log(agent_id,project_id,l,m),
    on_checkpoint=lambda t,d:self._on_checkpoint(agent_id,project_id,t,d),
+   on_speech=lambda msg:self._on_speech(agent_id,project_id,msg,"llm"),
   )
   with self._lock:
    self._running_agents[agent_id]=True
@@ -110,6 +112,7 @@ class AgentExecutionService:
        "providerId":provider_id,
        "attempt":attempt,
       },project_id)
+      self._emit_pool_speech(agent_id,project_id,"waiting_provider")
      def on_recovered(attempt:int)->None:
       self._data_store.update_agent(agent_id,{
        "status":"running",
@@ -212,6 +215,7 @@ class AgentExecutionService:
    on_checkpoint=lambda t,d:self._on_checkpoint(leader_agent_id,project_id,t,d),
    on_worker_created=lambda w,t:self._on_worker_created(project_id,leader_agent_id,w,t),
    on_worker_status=lambda w,s,d:self._on_worker_status(project_id,w,s,d),
+   on_worker_speech=lambda wid,msg:self._on_speech(wid,project_id,msg,"llm"),
   )
   self._data_store.update_agent(leader_agent_id,{
    "status":"running",
@@ -233,6 +237,7 @@ class AgentExecutionService:
    config=project.get("config",{}),
    on_progress=lambda p,t:self._on_progress(leader_agent_id,project_id,p,t),
    on_log=lambda l,m:self._on_log(leader_agent_id,project_id,l,m),
+   on_speech=lambda msg:self._on_speech(leader_agent_id,project_id,msg,"llm"),
   )
   with self._lock:
    self._running_agents[leader_agent_id]=True
@@ -372,6 +377,28 @@ class AgentExecutionService:
    "interventionCount":len(pending),
   },project_id)
 
+ def _on_speech(self,agent_id:str,project_id:str,message:str,source:str="llm")->None:
+  self._emit_event("agent:speech",{
+   "agentId":agent_id,
+   "projectId":project_id,
+   "message":message,
+   "source":source,
+   "timestamp":datetime.now().isoformat(),
+  },project_id)
+
+ def _emit_pool_speech(self,agent_id:str,project_id:str,condition:str)->None:
+  try:
+   agent=self._data_store.get_agent(agent_id)
+   if not agent:
+    return
+   agent_type=agent.get("type","")
+   from services.agent_speech_service import get_agent_speech_service
+   comment=get_agent_speech_service().get_pool_comment(agent_type,condition)
+   if comment:
+    self._on_speech(agent_id,project_id,comment,"pool")
+  except Exception as e:
+   self._logger.error(f"_emit_pool_speech error: {e}",exc_info=True)
+
  def _on_log(self,agent_id:str,project_id:str,level:str,message:str)->None:
   self._data_store.add_agent_log(agent_id,level,message)
   self._emit_event("agent:log",{
@@ -397,6 +424,7 @@ class AgentExecutionService:
    "agentId":agent_id,
    "checkpoint":data,
   },project_id)
+  self._emit_pool_speech(agent_id,project_id,"waiting_approval")
 
  def _on_worker_created(self,project_id:str,parent_agent_id:str,worker_type:str,task:str)->str:
   worker=self._data_store.create_worker_agent(project_id,parent_agent_id,worker_type,task)

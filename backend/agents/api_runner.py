@@ -360,6 +360,7 @@ class ApiAgentRunner(AgentRunner):
             max_tokens=agent_max_tokens,
             system_prompt=system_prompt,
             temperature=str(temperature),
+            on_speech=context.on_speech,
         )
         if context.on_log:
             context.on_log("info",f"LLMジョブ投入: {job['id']} model={resolved_model}")
@@ -390,6 +391,14 @@ class ApiAgentRunner(AgentRunner):
         system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
         if principles_text:
             system_prompt+=f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}"
+        if context.on_speech:
+            try:
+                from services.agent_speech_service import get_agent_speech_service
+                comment_instruction=get_agent_speech_service().get_comment_instruction(agent_type)
+                system_prompt+=f"\n\n## 一言コメント\n{comment_instruction}"
+            except Exception as e:
+                from middleware.logger import get_logger
+                get_logger().warning(f"Failed to load comment instruction for {agent_type}: {e}")
 
         context_policy=get_workflow_context_policy(agent_type)
         filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy)
@@ -661,6 +670,7 @@ class LeaderWorkerOrchestrator:
         on_checkpoint:Optional[Callable[[str,Dict],None]]=None,
         on_worker_created:Optional[Callable[[str,str],str]]=None,
         on_worker_status:Optional[Callable[[str,str,Dict],None]]=None,
+        on_worker_speech:Optional[Callable[[str,str],None]]=None,
     ):
         self.agent_runner=agent_runner
         self.quality_settings=quality_settings
@@ -668,6 +678,7 @@ class LeaderWorkerOrchestrator:
         self.on_checkpoint=on_checkpoint
         self.on_worker_created=on_worker_created
         self.on_worker_status=on_worker_status
+        self.on_worker_speech=on_worker_speech
 
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
         results={
@@ -792,6 +803,14 @@ class LeaderWorkerOrchestrator:
                     return cb
                 worker_on_progress=_make_progress_cb(worker_id)
 
+            worker_on_speech=None
+            if self.on_worker_speech:
+                def _make_speech_cb(wid):
+                    def cb(msg):
+                        self.on_worker_speech(wid,msg)
+                    return cb
+                worker_on_speech=_make_speech_cb(worker_id)
+
             worker_context=AgentContext(
                 project_id=leader_context.project_id,
                 agent_id=worker_id,
@@ -803,6 +822,7 @@ class LeaderWorkerOrchestrator:
                 leader_analysis=leader_output,
                 on_progress=worker_on_progress,
                 on_log=leader_context.on_log,
+                on_speech=worker_on_speech,
             )
 
             if self.on_worker_status:

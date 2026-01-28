@@ -388,22 +388,22 @@ export const qualitySettingsApi={
   projectId:string,
   agentType:string,
   config:Partial<QualityCheckConfig>
- ):Promise<{agentType:string;config:QualityCheckConfig}>=>{
+):Promise<{agentType:string;config:QualityCheckConfig}>=>{
   const response=await api.patch(
    `/api/projects/${projectId}/settings/quality-check/${agentType}`,
    config
-  )
+)
   return response.data
  },
 
  bulkUpdate:async(
   projectId:string,
   settings:Record<string,Partial<QualityCheckConfig>>
- ):Promise<{updated:Record<string,QualityCheckConfig>;count:number}>=>{
+):Promise<{updated:Record<string,QualityCheckConfig>;count:number}>=>{
   const response=await api.patch(
    `/api/projects/${projectId}/settings/quality-check/bulk`,
    {settings}
-  )
+)
   return response.data
  },
 

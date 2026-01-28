@@ -70,6 +70,7 @@ export interface WebSocketEventMap{
  'phase:changed':{projectId:string;phase:PhaseNumber;phaseName:string}
  'metrics:update':{projectId:string;metrics:ProjectMetrics}
  'navigator:message':{speaker:string;text:string;priority:MessagePriority;source:'server'}
+ 'agent:speech':{agentId:string;projectId:string;message:string;source:'llm'|'pool';timestamp:string}
 }
 
 export type WebSocketEventName=keyof WebSocketEventMap

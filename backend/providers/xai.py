@@ -100,14 +100,20 @@ class XAIProvider(AIProvider):
    max_tokens=max_tokens,
    temperature=temperature,
    stream=True,
+   stream_options={"include_usage":True},
    **kwargs
   )
 
   for chunk in stream:
    if chunk.choices and chunk.choices[0].delta.content:
     yield StreamChunk(content=chunk.choices[0].delta.content)
-
-  yield StreamChunk(content="",is_final=True)
+   if chunk.usage:
+    yield StreamChunk(
+     content="",
+     is_final=True,
+     input_tokens=chunk.usage.prompt_tokens,
+     output_tokens=chunk.usage.completion_tokens
+    )
 
  def test_connection(self)->Dict[str,Any]:
   try:
