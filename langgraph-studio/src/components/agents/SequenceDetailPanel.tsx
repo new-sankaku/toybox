@@ -28,9 +28,9 @@ function CollapsibleSection({title,content}:{title:string;content:string|null}){
     <div className="px-2 py-1 border-t border-nier-border-light bg-nier-bg-selected max-h-[300px] overflow-y-auto">
      <pre className="text-[10px] text-nier-text-light whitespace-pre-wrap break-all font-mono leading-relaxed">{content}</pre>
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 function InfoRow({label,value}:{label:string;value:string|number|null|undefined}){
@@ -40,7 +40,7 @@ function InfoRow({label,value}:{label:string;value:string|number|null|undefined}
    <span className="text-nier-text-light flex-shrink-0 w-24">{label}</span>
    <span className="text-nier-text-main">{value}</span>
   </div>
- )
+)
 }
 
 function durationStr(startedAt:string|null|undefined,completedAt:string|null|undefined):string|null{
@@ -99,12 +99,12 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
     <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
      読み込み中...
     </div>
-   )}
+)}
    {error&&(
     <div className="flex items-center justify-center py-8 text-nier-accent-red text-nier-caption">
      {error}
     </div>
-   )}
+)}
    {!loading&&!error&&traceDetail&&(
     <div className="space-y-2">
      <InfoRow label="モデル" value={traceDetail.modelUsed}/>
@@ -114,13 +114,13 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
      <InfoRow label="所要時間" value={durationStr(traceDetail.startedAt,traceDetail.completedAt)}/>
      {traceDetail.errorMessage&&(
       <InfoRow label="エラー" value={traceDetail.errorMessage}/>
-     )}
+)}
      <div className="pt-1 space-y-1">
       <CollapsibleSection title="プロンプト送信内容" content={traceDetail.promptSent}/>
       <CollapsibleSection title="LLM応答内容" content={traceDetail.llmResponse}/>
      </div>
     </div>
-   )}
+)}
    {!loading&&!error&&jobDetail&&(
     <div className="space-y-2">
      <InfoRow label="モデル" value={jobDetail.model}/>
@@ -130,21 +130,21 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
      <InfoRow label="所要時間" value={durationStr(jobDetail.createdAt,jobDetail.completedAt)}/>
      {jobDetail.errorMessage&&(
       <InfoRow label="エラー" value={jobDetail.errorMessage}/>
-     )}
+)}
      <div className="pt-1 space-y-1">
       {jobDetail.systemPrompt&&(
        <CollapsibleSection title="システムプロンプト" content={jobDetail.systemPrompt}/>
-      )}
+)}
       <CollapsibleSection title="プロンプト" content={jobDetail.prompt}/>
       <CollapsibleSection title="レスポンス" content={jobDetail.responseContent}/>
      </div>
     </div>
-   )}
+)}
    {!loading&&!error&&!traceDetail&&!jobDetail&&(
     <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
      メッセージを選択してください
     </div>
-   )}
+)}
   </FloatingPanel>
- )
+)
 }

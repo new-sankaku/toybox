@@ -103,7 +103,7 @@ function ArrowRow({
    className={cn(
     'relative',
     clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors'
-   )}
+)}
    style={{minHeight:'32px'}}
    onClick={clickable?onClick:undefined}
   >
@@ -112,7 +112,7 @@ function ArrowRow({
      <span className={cn('text-[10px] leading-tight whitespace-nowrap',style.text)}>{msg.label}</span>
      {subLabel&&<span className="text-[9px] text-nier-text-light opacity-80 whitespace-nowrap">{subLabel}</span>}
     </div>
-   ):(
+):(
     <>
      <div
       className="absolute flex flex-col items-center justify-center"
@@ -130,9 +130,9 @@ function ArrowRow({
       {!isLeft&&<span className={cn('text-xs leading-none -mr-1',style.text)}>{'▷'}</span>}
      </div>
     </>
-   )}
+)}
   </div>
- )
+)
 }
 
 function Lifelines({count}:{count:number}){
@@ -144,9 +144,9 @@ function Lifelines({count}:{count:number}){
      className="absolute top-0 bottom-0 w-px border-l border-dashed border-nier-border-light"
      style={{left:`${colCenter(i,count)}%`}}
     />
-   ))}
+))}
   </div>
- )
+)
 }
 
 export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.Element{
@@ -165,7 +165,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
    <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
     シーケンスデータがありません
    </div>
-  )
+)
  }
 
  return(
@@ -182,16 +182,16 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
         'flex items-center justify-center py-2 px-1',
         'border-b-2',
         PARTICIPANT_BORDER[p.type]||'border-nier-text-main'
-       )}
+)}
       >
        <span className={cn(
         'text-[11px] truncate max-w-full',
         p.type==='api'?'font-bold text-nier-text-main':'text-nier-text-main'
-       )}>
+)}>
         {p.label}
        </span>
       </div>
-     ))}
+))}
     </div>
 
     <div className="relative py-1">
@@ -203,7 +203,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
         key={group.pairId||`single-${gIdx}`}
         className={cn(
          isPair&&'border-l-2 border-nier-accent-orange ml-1 bg-nier-bg-main/20 my-0.5'
-        )}
+)}
        >
         {group.messages.map(msg=>(
          <ArrowRow
@@ -214,9 +214,9 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
           clickable={!!msg.sourceId&&!!onMessageClick}
           onClick={()=>onMessageClick?.(msg)}
          />
-        ))}
+))}
        </div>
-      )
+)
      })}
     </div>
 
@@ -225,8 +225,8 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
       {`Total: in ${data.totalTokens.input.toLocaleString()} / out ${data.totalTokens.output.toLocaleString()} tokens`}
       {data.totalDurationMs?` / ${formatDuration(data.totalDurationMs)}`:''}
      </div>
-    )}
+)}
    </div>
   </div>
- )
+)
 }
