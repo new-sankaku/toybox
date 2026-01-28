@@ -46,7 +46,8 @@ class ImageGenerateSkill(Skill):
   try:
    from providers.local_comfyui import LocalComfyUIProvider
    from providers.base import AIProviderConfig
-   config=AIProviderConfig(timeout=300)
+   timeout=context.restrictions.get("timeout",context.timeout_seconds)
+   config=AIProviderConfig(timeout=timeout)
    provider=LocalComfyUIProvider(config)
    test=provider.test_connection()
    if not test.get("success"):
@@ -105,6 +106,9 @@ class BgmGenerateSkill(Skill):
   style=kwargs.get("style","")
   if not prompt:
    return SkillResult(success=False,error="prompt is required")
+  max_duration=context.restrictions.get("max_duration",120)
+  if duration>max_duration:
+   return SkillResult(success=False,error=f"Duration too long: {duration}s (limit: {max_duration}s)")
   if style and style in self.STYLE_PROMPTS:
    prompt=self.STYLE_PROMPTS[style]+prompt
   result=await asyncio.to_thread(self._generate_bgm,prompt,duration,output_path,context)
@@ -114,7 +118,8 @@ class BgmGenerateSkill(Skill):
   try:
    from providers.local_audiocraft import LocalAudioCraftProvider
    from providers.base import AIProviderConfig
-   config=AIProviderConfig(timeout=600)
+   timeout=context.restrictions.get("timeout",context.timeout_seconds)
+   config=AIProviderConfig(timeout=timeout)
    provider=LocalAudioCraftProvider(config)
    test=provider.test_connection()
    if not test.get("success"):
@@ -159,6 +164,9 @@ class SfxGenerateSkill(Skill):
   output_path=kwargs.get("output_path")
   if not prompt:
    return SkillResult(success=False,error="prompt is required")
+  max_duration=context.restrictions.get("max_duration",10)
+  if duration>max_duration:
+   return SkillResult(success=False,error=f"Duration too long: {duration}s (limit: {max_duration}s)")
   result=await asyncio.to_thread(self._generate_sfx,prompt,duration,output_path,context)
   return result
 
@@ -166,7 +174,8 @@ class SfxGenerateSkill(Skill):
   try:
    from providers.local_audiocraft import LocalAudioCraftProvider
    from providers.base import AIProviderConfig
-   config=AIProviderConfig(timeout=300)
+   timeout=context.restrictions.get("timeout",context.timeout_seconds)
+   config=AIProviderConfig(timeout=timeout)
    provider=LocalAudioCraftProvider(config)
    test=provider.test_connection()
    if not test.get("success"):
@@ -222,7 +231,8 @@ class VoiceGenerateSkill(Skill):
   try:
    from providers.local_coqui_tts import LocalCoquiTTSProvider
    from providers.base import AIProviderConfig
-   config=AIProviderConfig(timeout=120)
+   timeout=context.restrictions.get("timeout",context.timeout_seconds)
+   config=AIProviderConfig(timeout=timeout)
    provider=LocalCoquiTTSProvider(config)
    test=provider.test_connection()
    if not test.get("success"):

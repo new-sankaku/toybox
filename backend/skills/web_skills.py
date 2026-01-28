@@ -48,7 +48,9 @@ class WebFetchSkill(Skill):
   method=kwargs.get("method","GET").upper()
   headers=kwargs.get("headers",{})
   body=kwargs.get("body")
-  timeout=kwargs.get("timeout",30)
+  timeout=kwargs.get("timeout",context.timeout_seconds)
+  config_timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  timeout=min(timeout,config_timeout)
   extract_text=kwargs.get("extract_text",False)
   if not url:
    return SkillResult(success=False,error="url is required")

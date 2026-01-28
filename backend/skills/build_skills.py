@@ -45,7 +45,8 @@ class CodeBuildSkill(Skill):
    if build_type not in self.BUILD_COMMANDS:
     return SkillResult(success=False,error=f"不明なビルドタイプ: {build_type}")
    command=f"{self.BUILD_COMMANDS[build_type]} {args}".strip()
-  result=await self._bash.execute(context,command=command,timeout=300)
+  timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  result=await self._bash.execute(context,command=command,timeout=timeout)
   if result.success:
    return SkillResult(
     success=True,
@@ -121,7 +122,8 @@ class CodeTestSkill(Skill):
     return SkillResult(success=False,error=f"不明なテストタイプ: {test_type}")
    base_cmd=self.TEST_COMMANDS[test_type]
    command=f"{base_cmd} {path} {args}".strip()
-  result=await self._bash.execute(context,command=command,timeout=180)
+  timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  result=await self._bash.execute(context,command=command,timeout=timeout)
   test_summary=self._parse_test_output(result.output or"",test_type)
   return SkillResult(
    success=result.success,
@@ -210,7 +212,8 @@ class CodeLintSkill(Skill):
    mode="fix" if fix else"check"
    base_cmd=self.LINT_COMMANDS[lint_type][mode]
    command=f"{base_cmd} {path}".strip()
-  result=await self._bash.execute(context,command=command,timeout=120)
+  timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  result=await self._bash.execute(context,command=command,timeout=timeout)
   issues=self._parse_lint_output(result.output or"",lint_type)
   return SkillResult(
    success=result.success or len(issues)==0,

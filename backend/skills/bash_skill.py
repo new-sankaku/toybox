@@ -77,6 +77,8 @@ class BashExecuteSkill(Skill):
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   command=kwargs.get("command","")
   timeout=kwargs.get("timeout",context.timeout_seconds)
+  config_timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  timeout=min(timeout,config_timeout)
   if not command:
    return SkillResult(success=False,error="command is required")
   if context.sandbox_enabled:

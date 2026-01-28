@@ -42,7 +42,9 @@ class PythonExecuteSkill(Skill):
 
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   code=kwargs.get("code","")
-  timeout=kwargs.get("timeout",30)
+  timeout=kwargs.get("timeout",context.timeout_seconds)
+  config_timeout=context.restrictions.get("timeout",context.timeout_seconds)
+  timeout=min(timeout,config_timeout)
   if not code:
    return SkillResult(success=False,error="code is required")
   if context.sandbox_enabled:
