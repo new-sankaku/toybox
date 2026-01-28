@@ -719,7 +719,6 @@ class LeaderWorkerOrchestrator:
 
         self._emit_progress(leader_context.agent_type.value,95,"承認生成")
 
-        total_workers=len(worker_tasks)
         checkpoint_data={
             "type":f"{leader_context.agent_type.value}_review",
             "title":f"{leader_context.agent_type.value} 成果物レビュー",
@@ -785,7 +784,9 @@ class LeaderWorkerOrchestrator:
 
         for tid,result in dag_results:
             if isinstance(result,Exception):
-                wr=WorkerTaskResult(worker_type=tid,status="failed",error=str(result))
+                task_data=dag.get_task(tid)
+                wt=task_data.get("worker",tid) if task_data else tid
+                wr=WorkerTaskResult(worker_type=wt,status="failed",error=str(result))
             else:
                 wr=result
             results["worker_results"].append(wr.__dict__)
