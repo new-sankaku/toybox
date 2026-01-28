@@ -16,10 +16,7 @@ from .base import (
  AgentStatus,
 )
 from skills import create_skill_executor,SkillExecutor,SkillResult
-from config_loader import get_mock_skill_sequences,get_checkpoint_title_config
-
-
-ASSET_SKILLS={"image_generate","bgm_generate","sfx_generate","voice_generate"}
+from config_loader import get_mock_skill_sequences,get_checkpoint_title_config,get_mock_handlers_config,get_mock_handler_config
 
 
 @dataclass
@@ -132,8 +129,9 @@ class MockSkillRunner(AgentRunner):
       "type":"skill_call",
       "data":{"skill":tc.name,"params":tc.input}
      }
-     if tc.name in ASSET_SKILLS:
-      result=await self._execute_mock_asset_skill(tc,context,executor)
+     handler_config=get_mock_handler_config(tc.name)
+     if handler_config:
+      result=await self._execute_mock_asset_skill(tc,context,executor,handler_config)
      else:
       result=await executor.execute_skill(tc.name,**tc.input)
      yield {
@@ -230,19 +228,21 @@ class MockSkillRunner(AgentRunner):
     continue
   return tool_calls
 
- async def _execute_mock_asset_skill(self,tc:MockToolCall,context:AgentContext,executor:SkillExecutor)->SkillResult:
+ async def _execute_mock_asset_skill(self,tc:MockToolCall,context:AgentContext,executor:SkillExecutor,handler_config:Dict[str,Any])->SkillResult:
   output_dir=executor.config.working_dir
-  if tc.name=="image_generate":
-   return await self._generate_placeholder_image(tc.input,output_dir)
-  elif tc.name=="bgm_generate":
-   return self._generate_placeholder_audio(tc.input,output_dir,"bgm","wav")
-  elif tc.name=="sfx_generate":
-   return self._generate_placeholder_audio(tc.input,output_dir,"sfx","wav")
-  elif tc.name=="voice_generate":
-   return self._generate_placeholder_audio(tc.input,output_dir,"voice","wav")
-  return SkillResult(success=False,error=f"Unknown asset skill: {tc.name}")
+  handler_type=handler_config.get("handler_type","")
+  if handler_type=="image":
+   default_output_dir=handler_config.get("output_dir","assets/images")
+   output_format=handler_config.get("output_format","png")
+   return await self._generate_placeholder_image(tc.input,output_dir,default_output_dir,output_format)
+  elif handler_type=="audio":
+   audio_type=handler_config.get("audio_type","audio")
+   output_format=handler_config.get("output_format","wav")
+   default_output_dir=handler_config.get("output_dir","assets/audio")
+   return self._generate_placeholder_audio(tc.input,output_dir,audio_type,output_format,default_output_dir)
+  return SkillResult(success=False,error=f"Unknown handler type: {handler_type}")
 
- async def _generate_placeholder_image(self,params:Dict[str,Any],output_dir:str)->SkillResult:
+ async def _generate_placeholder_image(self,params:Dict[str,Any],output_dir:str,default_output_dir:str="assets/images",output_format:str="png")->SkillResult:
   prompt=params.get("prompt","placeholder")
   width=params.get("width",512)
   height=params.get("height",512)
@@ -250,7 +250,7 @@ class MockSkillRunner(AgentRunner):
   style=params.get("style","")
   if not output_path:
    safe_name=re.sub(r'[^\w\-]','_',prompt[:30])
-   output_path=f"assets/images/{safe_name}.png"
+   output_path=f"{default_output_dir}/{safe_name}.{output_format}"
   if not os.path.isabs(output_path):
    full_path=os.path.join(output_dir,output_path)
   else:
@@ -271,13 +271,13 @@ class MockSkillRunner(AgentRunner):
    }
   )
 
- def _generate_placeholder_audio(self,params:Dict[str,Any],output_dir:str,audio_type:str,ext:str)->SkillResult:
+ def _generate_placeholder_audio(self,params:Dict[str,Any],output_dir:str,audio_type:str,ext:str,default_output_dir:str="assets/audio")->SkillResult:
   prompt=params.get("prompt","") or params.get("text","")
   duration=params.get("duration",3.0)
   output_path=params.get("output_path")
   if not output_path:
    safe_name=re.sub(r'[^\w\-]','_',prompt[:30])
-   output_path=f"assets/audio/{audio_type}_{safe_name}.{ext}"
+   output_path=f"{default_output_dir}/{audio_type}_{safe_name}.{ext}"
   if not os.path.isabs(output_path):
    full_path=os.path.join(output_dir,output_path)
   else:

@@ -70,32 +70,6 @@ def reload_config(filename:Optional[str]=None):
 
 
 
-def get_models_config()->Dict[str,Any]:
-    """モデル設定を取得（非推奨: ai_providers.yamlを使用してください）"""
-    try:
-        return load_json_config("models.json")
-    except FileNotFoundError:
-        return {"providers":{},"tokenPricing":{},"defaults":{"temperature":0.7,"maxTokens":4096},"currency":"USD"}
-
-
-def get_token_pricing(model_id:str)->Dict[str,float]:
-    """特定モデルのトークン料金を取得"""
-    config=get_models_config()
-    pricing=config.get("tokenPricing",{})
-    return pricing.get(model_id,pricing.get("_default",{"input":0.003,"output":0.015}))
-
-
-def get_available_models(provider:str)->List[Dict[str,Any]]:
-    """指定プロバイダの利用可能モデル一覧を取得"""
-    config=get_models_config()
-    provider_config=config.get("providers",{}).get(provider,{})
-    return provider_config.get("models",[])
-
-
-def get_default_model_settings()->Dict[str,Any]:
-    """デフォルトのモデル設定を取得"""
-    config=get_models_config()
-    return config.get("defaults",{"temperature":0.7,"maxTokens":4096})
 
 
 
@@ -163,8 +137,30 @@ def get_scan_directories()->List[str]:
 
 
 def get_agent_definitions_config()->Dict[str,Any]:
-    """エージェント定義設定を取得"""
-    return load_json_config("agent_definitions.json")
+    """エージェント定義設定を取得（agents.yamlから生成）"""
+    config=get_agents_config()
+    agents=config.get("agents",{})
+    agents_out={}
+    for agent_id,agent in agents.items():
+        agents_out[agent_id]={
+            "label":agent.get("label",""),
+            "shortLabel":agent.get("short_label",""),
+            "phase":agent.get("phase",0),
+            "speechBubble":agent.get("speech_bubble",""),
+        }
+    high_cost_agents=[k for k,v in agents.items() if v.get("high_cost",False)]
+    quality_defaults=config.get("quality_check_defaults",{"max_retries":3})
+    phases={}
+    for phase_id,phase in config.get("phases",{}).items():
+        phases[phase_id]=phase.get("agents",[])
+    display_names={k:v.get("label","") for k,v in agents.items()}
+    return {
+        "agents":agents_out,
+        "highCostAgents":high_cost_agents,
+        "qualityCheckDefaults":{"enabled":True,"maxRetries":quality_defaults.get("max_retries",3)},
+        "phases":phases,
+        "displayNames":display_names,
+    }
 
 
 def get_agent_definitions()->Dict[str,Dict[str,Any]]:
@@ -207,28 +203,18 @@ def get_output_settings_defaults()->Dict[str,Any]:
 
 def get_websocket_config()->Dict[str,Any]:
     config=get_project_settings_config()
-    return config.get("websocket",{
-        "maxReconnectAttempts":5,
-        "reconnectDelay":1000,
-        "reconnectDelayMax":5000,
-        "timeout":10000
-    })
+    return config.get("websocket",{})
 
 
 def get_cost_settings_defaults()->Dict[str,Any]:
     config=get_project_settings_config()
-    return config.get("cost",{
-        "global_enabled":True,
-        "global_monthly_limit":100.0,
-        "alert_threshold":80,
-        "stop_on_budget_exceeded":False,
-        "services":{}
-    })
+    return config.get("cost",{})
 
 
 def get_agent_service_map()->Dict[str,str]:
-    config=get_project_settings_config()
-    return config.get("agent_service_map",{})
+    config=get_agents_config()
+    agents=config.get("agents",{})
+    return {k:v.get("output_type","llm") for k,v in agents.items()}
 
 
 def get_ai_providers_config()->Dict[str,Any]:
@@ -263,19 +249,12 @@ def get_messages_config()->Dict[str,Any]:
 
 def get_token_budget_settings()->Dict[str,Any]:
     config=get_agents_config()
-    return config.get("token_budget",{
-        "default_limit":500000,
-        "warning_threshold_percent":80,
-        "enforcement":"hard",
-    })
+    return config.get("token_budget",{})
 
 
 def get_context_policy_settings()->Dict[str,Any]:
     config=get_agents_config()
-    return config.get("context_policy_settings",{
-        "auto_downgrade_threshold":15000,
-        "summary_max_length":10000,
-    })
+    return config.get("context_policy_settings",{})
 
 
 def get_agent_types()->List[str]:
@@ -417,13 +396,6 @@ def get_agent_display_names_from_yaml()->Dict[str,str]:
     return {k:v.get("label","") for k,v in agents.items()}
 
 
-def get_brushup_presets_config()->Dict[str,Any]:
-    return load_yaml_config("brushup_presets.yaml")
-
-
-def get_brushup_presets()->List[Dict[str,Any]]:
-    config=get_brushup_presets_config()
-    return config.get("presets",[])
 
 
 def get_ui_phases()->List[Dict[str,Any]]:
@@ -591,12 +563,7 @@ def clear_principle_cache()->None:
 
 def get_principle_settings()->Dict[str,Any]:
     config=get_agents_config()
-    return config.get("principle_settings",{
-        "max_chars_per_agent":12000,
-        "injection_mode":"system",
-        "quality_check_usage_category":"llm_low",
-        "quality_check_max_tokens":2048,
-    })
+    return config.get("principle_settings",{})
 
 
 def get_output_requirements(agent_type:str)->Dict[str,Any]:
@@ -694,6 +661,11 @@ def get_provider_config(provider_id:str)->Dict[str,Any]:
     return providers.get(provider_id,{})
 
 
+def get_provider_env_key(provider_id:str)->str:
+    provider=get_provider_config(provider_id)
+    return provider.get("env_key","")
+
+
 def get_provider_models(provider_id:str)->List[Dict[str,Any]]:
     provider=get_provider_config(provider_id)
     return provider.get("models",[])
@@ -711,8 +683,19 @@ def get_provider_test_model(provider_id:str)->str:
 
 
 def get_provider_default_model(provider_id:str)->str:
+    config=get_ai_providers_config()
+    for cat in config.get("usage_categories",[]):
+        default=cat.get("default",{})
+        if default.get("provider")==provider_id:
+            return default.get("model","")
     provider=get_provider_config(provider_id)
-    return provider.get("default_model","")
+    models=provider.get("models",[])
+    if models:
+        recommended=[m for m in models if m.get("recommended")]
+        if recommended:
+            return recommended[0].get("id","")
+        return models[0].get("id","")
+    return""
 
 
 def get_skills_config()->Dict[str,Any]:
@@ -742,3 +725,29 @@ def get_sandbox_config()->Dict[str,Any]:
         "timeout_seconds":120,
         "max_output_size":100000,
     })
+
+
+def get_mock_handlers_config()->Dict[str,Dict[str,Any]]:
+    config=get_skills_config()
+    return config.get("mock_handlers",{})
+
+
+def get_mock_handler_config(skill_name:str)->Optional[Dict[str,Any]]:
+    handlers=get_mock_handlers_config()
+    return handlers.get(skill_name)
+
+
+def get_generation_metrics_config()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("generation_metrics",{})
+
+
+def get_generation_metrics_categories()->Dict[str,Dict[str,str]]:
+    metrics=get_generation_metrics_config()
+    return metrics.get("categories",{})
+
+
+def get_agent_generation_metrics(agent_type:str)->Optional[Dict[str,Any]]:
+    metrics=get_generation_metrics_config()
+    agent_metrics=metrics.get("agent_metrics",{})
+    return agent_metrics.get(agent_type)

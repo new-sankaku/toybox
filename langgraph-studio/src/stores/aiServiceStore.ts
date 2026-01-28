@@ -16,9 +16,9 @@ import{
 }from'@/types/aiProvider'
 
 interface AIServiceState{
- services:Record<AIServiceType,AIServiceConfig>
+ services:Partial<Record<AIServiceType,AIServiceConfig>>
  master:AIServiceMasterData|null
- projectServices:Record<string,Record<AIServiceType,ProjectAIServiceConfig>>
+ projectServices:Record<string,Partial<Record<AIServiceType,ProjectAIServiceConfig>>>
  loaded:boolean
  masterLoaded:boolean
  loading:boolean
@@ -54,7 +54,7 @@ interface AIServiceState{
 export const useAIServiceStore=create<AIServiceState>()(
  persist(
   (set,get)=>({
-   services:{} as Record<AIServiceType,AIServiceConfig>,
+   services:{},
    master:null,
    projectServices:{},
    loaded:false,

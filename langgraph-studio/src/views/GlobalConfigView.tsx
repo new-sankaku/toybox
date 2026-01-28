@@ -9,7 +9,7 @@ import{
 }from'lucide-react'
 import{
  apiKeyApi,aiProviderApi,backupApi,archiveApi,
- type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry
+ type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry,type ApiArchiveStats
 }from'@/services/apiService'
 
 interface ConfigSection{
@@ -227,17 +227,10 @@ function ApiKeyManagement():JSX.Element{
  )
 }
 
-interface DataStats{
- total:{traces:number;agent_logs:number;system_logs:number}
- older_than_retention:{traces:number;agent_logs:number;system_logs:number}
- retention_days:number
- cutoff_date:string
-}
-
 function DataManagement():JSX.Element{
  const[backups,setBackups]=useState<ApiBackupEntry[]>([])
  const[archives,setArchives]=useState<ApiArchiveEntry[]>([])
- const[stats,setStats]=useState<DataStats|null>(null)
+ const[stats,setStats]=useState<ApiArchiveStats|null>(null)
  const[loading,setLoading]=useState(true)
  const[creating,setCreating]=useState(false)
  const[retentionDays,setRetentionDays]=useState(30)
@@ -256,7 +249,7 @@ function DataManagement():JSX.Element{
    setBackups(backupData)
    setArchives(archiveData)
    if(statsData){
-    setStats(statsData as unknown as DataStats)
+    setStats(statsData)
    }
   }catch(e){
    console.error('Failed to fetch data:',e)
@@ -322,7 +315,8 @@ function DataManagement():JSX.Element{
   setOperating('cleanup')
   try{
    const r=await archiveApi.cleanup()
-   showMsg(`${r.deleted}件のデータをクリーンアップしました`,'success')
+   const total=(r.deleted?.traces||0)+(r.deleted?.agent_logs||0)+(r.deleted?.system_logs||0)
+   showMsg(`${total}件のデータをクリーンアップしました`,'success')
    await fetchAll()
   }catch{
    showMsg('クリーンアップに失敗しました','error')

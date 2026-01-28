@@ -62,6 +62,10 @@ coverage/
 *.bak
 ~$*
 
+# Auto-generated types
+langgraph-studio/src/types/openapi.json
+langgraph-studio/src/types/api-generated.ts
+
 # Test data (not tracked)
 testdata/
 

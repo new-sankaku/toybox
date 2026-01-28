@@ -2,6 +2,7 @@ import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
 import type{SequenceData}from'@/types/agent'
+import{API_ENDPOINTS}from'@/constants/api'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||''
 
@@ -80,41 +81,41 @@ function toFullUrl(path:string|null):string|null{
 
 export const projectApi={
  list:async():Promise<Project[]>=>{
-  const response=await api.get('/api/projects')
+  const response=await api.get(API_ENDPOINTS.projects.list)
   return response.data
  },
 
  create:async(data:Partial<Project>):Promise<Project>=>{
-  const response=await api.post('/api/projects',data)
+  const response=await api.post(API_ENDPOINTS.projects.create,data)
   return response.data
  },
 
  update:async(projectId:string,data:Partial<Project>):Promise<Project>=>{
-  const response=await api.patch(`/api/projects/${projectId}`,data)
+  const response=await api.patch(API_ENDPOINTS.projects.update(projectId),data)
   return response.data
  },
 
  delete:async(projectId:string):Promise<void>=>{
-  await api.delete(`/api/projects/${projectId}`)
+  await api.delete(API_ENDPOINTS.projects.delete(projectId))
  },
 
  start:async(projectId:string):Promise<Project>=>{
-  const response=await api.post(`/api/projects/${projectId}/start`)
+  const response=await api.post(API_ENDPOINTS.projects.start(projectId))
   return response.data
  },
 
  pause:async(projectId:string):Promise<Project>=>{
-  const response=await api.post(`/api/projects/${projectId}/pause`)
+  const response=await api.post(API_ENDPOINTS.projects.pause(projectId))
   return response.data
  },
 
  resume:async(projectId:string):Promise<Project>=>{
-  const response=await api.post(`/api/projects/${projectId}/resume`)
+  const response=await api.post(API_ENDPOINTS.projects.resume(projectId))
   return response.data
  },
 
  initialize:async(projectId:string):Promise<Project>=>{
-  const response=await api.post(`/api/projects/${projectId}/initialize`)
+  const response=await api.post(API_ENDPOINTS.projects.initialize(projectId))
   return response.data
  },
 
@@ -126,12 +127,12 @@ export const projectApi={
   customInstruction?:string
   referenceImageIds?:string[]
  }):Promise<Project>=>{
-  const response=await api.post(`/api/projects/${projectId}/brushup`,options||{})
+  const response=await api.post(API_ENDPOINTS.projects.brushup(projectId),options||{})
   return response.data
  },
 
  getBrushupOptions:async():Promise<BrushupOptionsConfig>=>{
-  const response=await api.get('/api/brushup/options')
+  const response=await api.get(API_ENDPOINTS.brushup.options)
   return response.data
  },
 
@@ -139,7 +140,7 @@ export const projectApi={
   customInstruction?:string
   count?:number
  }):Promise<{images:BrushupSuggestImage[]}>=>{
-  const response=await api.post(`/api/projects/${projectId}/brushup/suggest-images`,options)
+  const response=await api.post(API_ENDPOINTS.projects.brushupSuggestImages(projectId),options)
   return response.data
  }
 }
@@ -174,72 +175,72 @@ export interface ApiAgentLog{
 
 export const agentApi={
  listByProject:async(projectId:string):Promise<ApiAgent[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/agents`)
+  const response=await api.get(API_ENDPOINTS.projects.agents(projectId))
   return response.data
  },
 
  get:async(agentId:string):Promise<ApiAgent>=>{
-  const response=await api.get(`/api/agents/${agentId}`)
+  const response=await api.get(API_ENDPOINTS.agents.get(agentId))
   return response.data
  },
 
  listWorkers:async(agentId:string):Promise<ApiAgent[]>=>{
-  const response=await api.get(`/api/agents/${agentId}/workers`)
+  const response=await api.get(API_ENDPOINTS.agents.workers(agentId))
   return response.data
  },
 
  getLogs:async(agentId:string):Promise<ApiAgentLog[]>=>{
-  const response=await api.get(`/api/agents/${agentId}/logs`)
+  const response=await api.get(API_ENDPOINTS.agents.logs(agentId))
   return response.data
  },
 
  retry:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(`/api/agents/${agentId}/retry`)
+  const response=await api.post(API_ENDPOINTS.agents.retry(agentId))
   return response.data
  },
 
  getRetryable:async(projectId:string):Promise<ApiAgent[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/agents/retryable`)
+  const response=await api.get(API_ENDPOINTS.projects.agentsRetryable(projectId))
   return response.data
  },
 
  getInterrupted:async(projectId:string):Promise<ApiAgent[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/agents/interrupted`)
+  const response=await api.get(API_ENDPOINTS.projects.agentsInterrupted(projectId))
   return response.data
  },
 
  pause:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(`/api/agents/${agentId}/pause`)
+  const response=await api.post(API_ENDPOINTS.agents.pause(agentId))
   return response.data
  },
 
  resume:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(`/api/agents/${agentId}/resume`)
+  const response=await api.post(API_ENDPOINTS.agents.resume(agentId))
   return response.data
  },
 
  cancel:async(agentId:string):Promise<{success:boolean;message:string}>=>{
-  const response=await api.post(`/api/agents/${agentId}/cancel`)
+  const response=await api.post(API_ENDPOINTS.agents.cancel(agentId))
   return response.data
  },
 
  getSequence:async(agentId:string):Promise<SequenceData>=>{
-  const response=await api.get(`/api/agents/${agentId}/sequence`)
+  const response=await api.get(API_ENDPOINTS.agents.sequence(agentId))
   return response.data
  },
 
  listLeaders:async(projectId:string):Promise<ApiAgent[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/agents/leaders`)
+  const response=await api.get(API_ENDPOINTS.projects.agentsLeaders(projectId))
   return response.data
  },
 
  execute:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(`/api/agents/${agentId}/execute`)
+  const response=await api.post(API_ENDPOINTS.agents.execute(agentId))
   return response.data
  },
 
  executeWithWorkers:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(`/api/agents/${agentId}/execute-with-workers`)
+  const response=await api.post(API_ENDPOINTS.agents.executeWithWorkers(agentId))
   return response.data
  }
 }
@@ -266,12 +267,12 @@ export interface ApiCheckpoint{
 
 export const checkpointApi={
  listByProject:async(projectId:string):Promise<ApiCheckpoint[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/checkpoints`)
+  const response=await api.get(API_ENDPOINTS.projects.checkpoints(projectId))
   return response.data
  },
 
  resolve:async(checkpointId:string,resolution:'approved'|'rejected'|'revision_requested',feedback?:string):Promise<ApiCheckpoint>=>{
-  const response=await api.post(`/api/checkpoints/${checkpointId}/resolve`,{
+  const response=await api.post(API_ENDPOINTS.checkpoints.resolve(checkpointId),{
    resolution,
    feedback
   })
@@ -311,7 +312,7 @@ export interface ApiProjectMetrics{
 
 export const metricsApi={
  getByProject:async(projectId:string):Promise<ApiProjectMetrics>=>{
-  const response=await api.get(`/api/projects/${projectId}/metrics`)
+  const response=await api.get(API_ENDPOINTS.projects.metrics(projectId))
   return response.data
  }
 }
@@ -327,7 +328,7 @@ export interface ApiSystemLog{
 
 export const logsApi={
  getByProject:async(projectId:string):Promise<ApiSystemLog[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/logs`)
+  const response=await api.get(API_ENDPOINTS.projects.logs(projectId))
   return response.data
  }
 }
@@ -348,7 +349,7 @@ export interface ApiAsset{
 
 export const assetApi={
  listByProject:async(projectId:string):Promise<ApiAsset[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/assets`)
+  const response=await api.get(API_ENDPOINTS.projects.assets(projectId))
   return response.data.map((asset:ApiAsset)=>({
    ...asset,
    url:toFullUrl(asset.url),
@@ -357,7 +358,7 @@ export const assetApi={
  },
 
  updateStatus:async(projectId:string,assetId:string,status:'approved'|'rejected'):Promise<ApiAsset>=>{
-  const response=await api.patch(`/api/projects/${projectId}/assets/${assetId}`,{
+  const response=await api.patch(API_ENDPOINTS.projects.asset(projectId,assetId),{
    approvalStatus:status
   })
   return{
@@ -386,7 +387,7 @@ export interface QualitySettingsDefaultsResponse extends QualitySettingsResponse
 
 export const qualitySettingsApi={
  getByProject:async(projectId:string):Promise<QualitySettingsResponse>=>{
-  const response=await api.get(`/api/projects/${projectId}/settings/quality-check`)
+  const response=await api.get(API_ENDPOINTS.projects.settings.qualityCheck(projectId))
   return response.data
  },
 
@@ -396,7 +397,7 @@ export const qualitySettingsApi={
   config:Partial<QualityCheckConfig>
 ):Promise<{agentType:string;config:QualityCheckConfig}>=>{
   const response=await api.patch(
-   `/api/projects/${projectId}/settings/quality-check/${agentType}`,
+   API_ENDPOINTS.projects.settings.qualityCheckAgent(projectId,agentType),
    config
 )
   return response.data
@@ -407,19 +408,19 @@ export const qualitySettingsApi={
   settings:Record<string,Partial<QualityCheckConfig>>
 ):Promise<{updated:Record<string,QualityCheckConfig>;count:number}>=>{
   const response=await api.patch(
-   `/api/projects/${projectId}/settings/quality-check/bulk`,
+   API_ENDPOINTS.projects.settings.qualityCheckBulk(projectId),
    {settings}
 )
   return response.data
  },
 
  getDefaults:async():Promise<QualitySettingsDefaultsResponse>=>{
-  const response=await api.get('/api/settings/quality-check/defaults')
+  const response=await api.get(API_ENDPOINTS.settings.qualityCheckDefaults)
   return response.data
  },
 
  resetToDefaults:async(projectId:string):Promise<{message:string;settings:Record<string,QualityCheckConfig>}>=>{
-  const response=await api.post(`/api/projects/${projectId}/settings/quality-check/reset`)
+  const response=await api.post(API_ENDPOINTS.projects.settings.qualityCheckReset(projectId))
   return response.data
  }
 }
@@ -434,7 +435,7 @@ export interface ApiAIRequestStats{
 
 export const aiRequestApi={
  getStats:async(projectId:string):Promise<ApiAIRequestStats>=>{
-  const response=await api.get(`/api/projects/${projectId}/ai-requests/stats`)
+  const response=await api.get(API_ENDPOINTS.projects.aiRequests(projectId))
   return response.data
  }
 }
@@ -463,7 +464,7 @@ export interface AgentDefinitionsResponse{
 
 export const agentDefinitionApi={
  getAll:async():Promise<AgentDefinitionsResponse>=>{
-  const response=await api.get('/api/agent-definitions')
+  const response=await api.get(API_ENDPOINTS.agentDefinitions)
   return response.data
  }
 }
@@ -492,7 +493,7 @@ export interface UISettingsResponse{
 
 export const uiSettingsApi={
  get:async():Promise<UISettingsResponse>=>{
-  const response=await api.get('/api/config/ui-settings')
+  const response=await api.get(API_ENDPOINTS.config.uiSettings)
   return response.data
  }
 }
@@ -535,36 +536,36 @@ export interface CreateInterventionInput{
 
 export const interventionApi={
  listByProject:async(projectId:string):Promise<ApiIntervention[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/interventions`)
+  const response=await api.get(API_ENDPOINTS.projects.interventions(projectId))
   return response.data
  },
 
  create:async(projectId:string,data:CreateInterventionInput):Promise<ApiIntervention>=>{
-  const response=await api.post(`/api/projects/${projectId}/interventions`,data)
+  const response=await api.post(API_ENDPOINTS.projects.interventions(projectId),data)
   return response.data
  },
 
  get:async(interventionId:string):Promise<ApiIntervention>=>{
-  const response=await api.get(`/api/interventions/${interventionId}`)
+  const response=await api.get(API_ENDPOINTS.interventions.get(interventionId))
   return response.data
  },
 
  acknowledge:async(interventionId:string):Promise<ApiIntervention>=>{
-  const response=await api.post(`/api/interventions/${interventionId}/acknowledge`)
+  const response=await api.post(API_ENDPOINTS.interventions.acknowledge(interventionId))
   return response.data
  },
 
  process:async(interventionId:string):Promise<ApiIntervention>=>{
-  const response=await api.post(`/api/interventions/${interventionId}/process`)
+  const response=await api.post(API_ENDPOINTS.interventions.process(interventionId))
   return response.data
  },
 
  delete:async(interventionId:string):Promise<void>=>{
-  await api.delete(`/api/interventions/${interventionId}`)
+  await api.delete(API_ENDPOINTS.interventions.delete(interventionId))
  },
 
  respond:async(interventionId:string,message:string):Promise<ApiIntervention>=>{
-  const response=await api.post(`/api/interventions/${interventionId}/respond`,{message})
+  const response=await api.post(API_ENDPOINTS.interventions.respond(interventionId),{message})
   return response.data
  }
 }
@@ -596,7 +597,7 @@ export interface BatchUploadResult{
 
 export const fileUploadApi={
  listByProject:async(projectId:string):Promise<ApiUploadedFile[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/files`)
+  const response=await api.get(API_ENDPOINTS.projects.files(projectId))
   return response.data.map((file:ApiUploadedFile)=>({
    ...file,
    url:toFullUrl(file.url)
@@ -609,7 +610,7 @@ export const fileUploadApi={
   if(description){
    formData.append('description',description)
   }
-  const response=await api.post(`/api/projects/${projectId}/files`,formData,{
+  const response=await api.post(API_ENDPOINTS.projects.files(projectId),formData,{
    headers:{'Content-Type':'multipart/form-data'}
   })
   return{
@@ -623,7 +624,7 @@ export const fileUploadApi={
   files.forEach(file=>{
    formData.append('files',file)
   })
-  const response=await api.post(`/api/projects/${projectId}/files/batch`,formData,{
+  const response=await api.post(API_ENDPOINTS.projects.filesBatch(projectId),formData,{
    headers:{'Content-Type':'multipart/form-data'}
   })
   return{
@@ -636,7 +637,7 @@ export const fileUploadApi={
  },
 
  get:async(fileId:string):Promise<ApiUploadedFile>=>{
-  const response=await api.get(`/api/files/${fileId}`)
+  const response=await api.get(API_ENDPOINTS.files.get(fileId))
   return{
    ...response.data,
    url:toFullUrl(response.data.url)
@@ -644,11 +645,11 @@ export const fileUploadApi={
  },
 
  delete:async(fileId:string):Promise<void>=>{
-  await api.delete(`/api/files/${fileId}`)
+  await api.delete(API_ENDPOINTS.files.delete(fileId))
  },
 
  getDownloadUrl:(fileId:string):string=>{
-  return`${API_BASE_URL}/api/files/${fileId}/download`
+  return`${API_BASE_URL}${API_ENDPOINTS.files.download(fileId)}`
  }
 }
 
@@ -665,12 +666,12 @@ export interface ProjectTreeNode{
 
 export const projectTreeApi={
  getTree:async(projectId:string):Promise<ProjectTreeNode>=>{
-  const response=await api.get(`/api/projects/${projectId}/tree`)
+  const response=await api.get(API_ENDPOINTS.projects.tree(projectId))
   return response.data
  },
 
  downloadFile:async(projectId:string,filePath:string):Promise<Blob>=>{
-  const response=await api.get(`/api/projects/${projectId}/tree/download`,{
+  const response=await api.get(API_ENDPOINTS.projects.treeDownload(projectId),{
    params:{path:filePath},
    responseType:'blob'
   })
@@ -681,13 +682,13 @@ export const projectTreeApi={
   const formData=new FormData()
   formData.append('file',file)
   formData.append('path',filePath)
-  await api.post(`/api/projects/${projectId}/tree/replace`,formData,{
+  await api.post(API_ENDPOINTS.projects.treeReplace(projectId),formData,{
    headers:{'Content-Type':'multipart/form-data'}
   })
  },
 
  downloadAll:async(projectId:string):Promise<Blob>=>{
-  const response=await api.get(`/api/projects/${projectId}/tree/download-all`,{
+  const response=await api.get(API_ENDPOINTS.projects.treeDownloadAll(projectId),{
    responseType:'blob'
   })
   return response.data
@@ -744,32 +745,32 @@ export interface AIChatResponse{
 
 export const aiProviderApi={
  list:async():Promise<AIProviderInfo[]>=>{
-  const response=await api.get('/api/ai-providers')
+  const response=await api.get(API_ENDPOINTS.aiProviders.list)
   return response.data
  },
 
  get:async(providerId:string):Promise<AIProviderInfo>=>{
-  const response=await api.get(`/api/ai-providers/${providerId}`)
+  const response=await api.get(API_ENDPOINTS.aiProviders.get(providerId))
   return response.data
  },
 
  getModels:async(providerId:string):Promise<AIProviderModel[]>=>{
-  const response=await api.get(`/api/ai-providers/${providerId}/models`)
+  const response=await api.get(API_ENDPOINTS.aiProviders.models(providerId))
   return response.data
  },
 
  testConnection:async(providerType:string,config:Record<string,unknown>):Promise<AIProviderTestResult>=>{
-  const response=await api.post('/api/ai-providers/test',{providerType,config})
+  const response=await api.post(API_ENDPOINTS.aiProviders.test,{providerType,config})
   return response.data
  },
 
  chat:async(request:AIChatRequest):Promise<AIChatResponse>=>{
-  const response=await api.post('/api/ai/chat',request)
+  const response=await api.post(API_ENDPOINTS.ai.chat,request)
   return response.data
  },
 
  chatStream:async function*(request:AIChatRequest):AsyncGenerator<{content?:string;done?:boolean;usage?:{inputTokens:number;outputTokens:number};error?:string}>{
-  const response=await fetch(`${API_BASE_URL}/api/ai/chat/stream`,{
+  const response=await fetch(`${API_BASE_URL}${API_ENDPOINTS.ai.chatStream}`,{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify(request)
@@ -857,55 +858,29 @@ export interface AIServiceMasterData{
 
 export const aiServiceApi={
  list:async():Promise<Record<AIServiceType,AIServiceConfig>>=>{
-  const response=await api.get('/api/ai-services')
+  const response=await api.get(API_ENDPOINTS.aiServices.list)
   return response.data
  },
  get:async(serviceType:AIServiceType):Promise<AIServiceConfig>=>{
-  const response=await api.get(`/api/ai-services/${serviceType}`)
+  const response=await api.get(API_ENDPOINTS.aiServices.get(serviceType))
   return response.data
  },
  getMaster:async():Promise<AIServiceMasterData>=>{
-  const response=await api.get('/api/config/ai-services')
+  const response=await api.get(API_ENDPOINTS.aiServices.master)
   return response.data
  },
  getByProject:async(projectId:string):Promise<Record<AIServiceType,ProjectAIServiceConfig>>=>{
-  const response=await api.get(`/api/projects/${projectId}/ai-services`)
+  const response=await api.get(API_ENDPOINTS.projects.aiServices(projectId))
   return response.data
  },
  updateByProject:async(projectId:string,aiServices:Record<AIServiceType,Partial<ProjectAIServiceConfig>>):Promise<Record<AIServiceType,ProjectAIServiceConfig>>=>{
-  const response=await api.put(`/api/projects/${projectId}/ai-services`,aiServices)
+  const response=await api.put(API_ENDPOINTS.projects.aiServices(projectId),aiServices)
   return response.data
  },
  updateServiceByProject:async(projectId:string,serviceType:AIServiceType,config:Partial<ProjectAIServiceConfig>):Promise<ProjectAIServiceConfig>=>{
-  const response=await api.patch(`/api/projects/${projectId}/ai-services/${serviceType}`,config)
+  const response=await api.patch(API_ENDPOINTS.projects.aiService(projectId,serviceType),config)
   return response.data
  }
-}
-
-export interface ModelInfo{
- id:string
- label:string
- recommended?:boolean
-}
-
-export interface ProviderConfig{
- label:string
- models:ModelInfo[]
- defaultModel:string
- endpoint:string
-}
-
-export interface TokenPricing{
- input:number
- output:number
- unit:string
-}
-
-export interface ModelsConfig{
- providers:Record<string,ProviderConfig>
- tokenPricing:Record<string,TokenPricing>
- defaults:{temperature:number;maxTokens:number}
- currency:string
 }
 
 export interface PlatformOption{
@@ -952,48 +927,38 @@ export interface WebSocketConfig{
 }
 
 export const configApi={
- getModels:async():Promise<ModelsConfig>=>{
-  const response=await api.get('/api/config/models')
-  return response.data
- },
-
- getModelPricing:async(modelId:string):Promise<{modelId:string;pricing:TokenPricing}>=>{
-  const response=await api.get(`/api/config/models/pricing/${modelId}`)
-  return response.data
- },
-
  getProjectOptions:async():Promise<ProjectOptionsConfig>=>{
-  const response=await api.get('/api/config/project-options')
+  const response=await api.get(API_ENDPOINTS.config.projectOptions)
   return response.data
  },
 
  getFileExtensions:async():Promise<FileExtensionsConfig>=>{
-  const response=await api.get('/api/config/file-extensions')
+  const response=await api.get(API_ENDPOINTS.config.fileExtensions)
   return response.data
  },
 
  getAgentsConfig:async():Promise<Record<string,unknown>>=>{
-  const response=await api.get('/api/config/agents')
+  const response=await api.get(API_ENDPOINTS.config.agents)
   return response.data
  },
 
  getBrushupOptions:async():Promise<BrushupOptionsConfig>=>{
-  const response=await api.get('/api/brushup/options')
+  const response=await api.get(API_ENDPOINTS.brushup.options)
   return response.data
  },
 
  getWebSocketConfig:async():Promise<WebSocketConfig>=>{
-  const response=await api.get('/api/config/websocket')
+  const response=await api.get(API_ENDPOINTS.config.websocket)
   return response.data
  },
 
  getCostSettingsDefaults:async():Promise<CostSettings>=>{
-  const response=await api.get('/api/config/cost-settings/defaults')
+  const response=await api.get(API_ENDPOINTS.config.costSettingsDefaults)
   return response.data
  },
 
  getOutputSettingsDefaults:async():Promise<OutputSettings>=>{
-  const response=await api.get('/api/config/output-settings/defaults')
+  const response=await api.get(API_ENDPOINTS.config.outputSettingsDefaults)
   return response.data
  }
 }
@@ -1021,19 +986,19 @@ export interface PricingConfigResponse{
 
 export const costApi={
  getPricing:async():Promise<PricingConfigResponse>=>{
-  const response=await api.get('/api/config/pricing')
+  const response=await api.get(API_ENDPOINTS.config.pricing)
   return response.data
  }
 }
 
 export const autoApprovalApi={
  getRules:async(projectId:string):Promise<{rules:AutoApprovalRuleApi[]}>=>{
-  const response=await api.get(`/api/projects/${projectId}/auto-approval-rules`)
+  const response=await api.get(API_ENDPOINTS.projects.autoApprovalRules(projectId))
   return response.data
  },
 
  updateRules:async(projectId:string,rules:AutoApprovalRuleApi[]):Promise<{rules:AutoApprovalRuleApi[]}>=>{
-  const response=await api.put(`/api/projects/${projectId}/auto-approval-rules`,{rules})
+  const response=await api.put(API_ENDPOINTS.projects.autoApprovalRules(projectId),{rules})
   return response.data
  }
 }
@@ -1052,7 +1017,7 @@ export interface LanguagesConfigResponse{
 
 export const languagesApi={
  getConfig:async():Promise<LanguagesConfigResponse>=>{
-  const response=await api.get('/api/languages')
+  const response=await api.get(API_ENDPOINTS.languages)
   return response.data
  }
 }
@@ -1076,37 +1041,37 @@ export interface CostSettings{
 
 export const projectSettingsApi={
  getAgentServiceMap:async():Promise<Record<string,string>>=>{
-  const response=await api.get('/api/config/agent-service-map')
+  const response=await api.get(API_ENDPOINTS.config.agentServiceMap)
   return response.data
  },
 
  getOutputSettings:async(projectId:string):Promise<OutputSettings>=>{
-  const response=await api.get(`/api/projects/${projectId}/settings/output`)
+  const response=await api.get(API_ENDPOINTS.projects.settings.output(projectId))
   return response.data
  },
 
  updateOutputSettings:async(projectId:string,settings:Partial<OutputSettings>):Promise<OutputSettings>=>{
-  const response=await api.put(`/api/projects/${projectId}/settings/output`,settings)
+  const response=await api.put(API_ENDPOINTS.projects.settings.output(projectId),settings)
   return response.data
  },
 
  getCostSettings:async(projectId:string):Promise<CostSettings>=>{
-  const response=await api.get(`/api/projects/${projectId}/settings/cost`)
+  const response=await api.get(API_ENDPOINTS.projects.settings.cost(projectId))
   return response.data
  },
 
  updateCostSettings:async(projectId:string,settings:Partial<CostSettings>):Promise<CostSettings>=>{
-  const response=await api.put(`/api/projects/${projectId}/settings/cost`,settings)
+  const response=await api.put(API_ENDPOINTS.projects.settings.cost(projectId),settings)
   return response.data
  },
 
  getAIProviders:async(projectId:string):Promise<unknown[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/settings/ai-providers`)
+  const response=await api.get(API_ENDPOINTS.projects.settings.aiProviders(projectId))
   return response.data
  },
 
  updateAIProviders:async(projectId:string,providers:unknown[]):Promise<unknown[]>=>{
-  const response=await api.put(`/api/projects/${projectId}/settings/ai-providers`,providers)
+  const response=await api.put(API_ENDPOINTS.projects.settings.aiProviders(projectId),providers)
   return response.data
  }
 }
@@ -1132,22 +1097,22 @@ export interface ApiAgentTrace{
 
 export const traceApi={
  listByProject:async(projectId:string,limit:number=100):Promise<ApiAgentTrace[]>=>{
-  const response=await api.get(`/api/projects/${projectId}/traces`,{params:{limit}})
+  const response=await api.get(API_ENDPOINTS.projects.traces(projectId),{params:{limit}})
   return response.data
  },
 
  listByAgent:async(agentId:string):Promise<ApiAgentTrace[]>=>{
-  const response=await api.get(`/api/agents/${agentId}/traces`)
+  const response=await api.get(API_ENDPOINTS.agents.traces(agentId))
   return response.data
  },
 
  get:async(traceId:string):Promise<ApiAgentTrace>=>{
-  const response=await api.get(`/api/traces/${traceId}`)
+  const response=await api.get(API_ENDPOINTS.traces.get(traceId))
   return response.data
  },
 
  deleteByProject:async(projectId:string):Promise<{deleted:number}>=>{
-  const response=await api.delete(`/api/projects/${projectId}/traces`)
+  const response=await api.delete(API_ENDPOINTS.projects.traces(projectId))
   return response.data
  }
 }
@@ -1176,7 +1141,7 @@ export interface ApiLlmJob{
 
 export const llmJobApi={
  get:async(jobId:string):Promise<ApiLlmJob>=>{
-  const response=await api.get(`/api/llm-jobs/${jobId}`)
+  const response=await api.get(API_ENDPOINTS.llmJobs.get(jobId))
   return response.data
  }
 }
@@ -1189,19 +1154,19 @@ export interface ApiBackupEntry{
 
 export const backupApi={
  list:async():Promise<ApiBackupEntry[]>=>{
-  const response=await api.get('/api/backups')
-  return response.data
+  const response=await api.get(API_ENDPOINTS.backups.list)
+  return response.data.backups||[]
  },
  create:async():Promise<ApiBackupEntry>=>{
-  const response=await api.post('/api/backups')
+  const response=await api.post(API_ENDPOINTS.backups.create)
   return response.data
  },
  restore:async(backupName:string):Promise<{success:boolean;message:string}>=>{
-  const response=await api.post(`/api/backups/${backupName}/restore`)
+  const response=await api.post(API_ENDPOINTS.backups.restore(backupName))
   return response.data
  },
  delete:async(backupName:string):Promise<void>=>{
-  await api.delete(`/api/backups/${backupName}`)
+  await api.delete(API_ENDPOINTS.backups.delete(backupName))
  }
 }
 
@@ -1212,55 +1177,61 @@ export interface ApiArchiveEntry{
 }
 
 export interface ApiArchiveStats{
- totalArchives:number
- totalSize:number
- oldestArchive:string|null
- newestArchive:string|null
+ total:{traces:number;agent_logs:number;system_logs:number}
+ older_than_retention:{traces:number;agent_logs:number;system_logs:number}
+ retention_days:number
+ cutoff_date:string
 }
 
 export interface ApiCleanupEstimate{
- tracesCount:number
- estimatedSize:number
+ traces:number
+ agent_logs:number
+ system_logs:number
+}
+
+export interface ApiCleanupResult{
+ success:boolean
+ deleted:{traces:number;agent_logs:number;system_logs:number}
 }
 
 export const archiveApi={
  getStats:async(projectId?:string):Promise<ApiArchiveStats>=>{
-  const response=await api.get('/api/archive/stats',{params:projectId?{projectId}:undefined})
+  const response=await api.get(API_ENDPOINTS.archives.stats,{params:projectId?{projectId}:undefined})
   return response.data
  },
- cleanup:async(projectId?:string):Promise<{deleted:number}>=>{
-  const response=await api.post('/api/archive/cleanup',projectId?{projectId}:{})
+ cleanup:async(projectId?:string):Promise<ApiCleanupResult>=>{
+  const response=await api.post(API_ENDPOINTS.archives.cleanup,projectId?{projectId}:{})
   return response.data
  },
  estimate:async(projectId?:string):Promise<ApiCleanupEstimate>=>{
-  const response=await api.get('/api/archive/estimate',{params:projectId?{projectId}:undefined})
+  const response=await api.get(API_ENDPOINTS.archives.estimate,{params:projectId?{projectId}:undefined})
   return response.data
  },
  setRetention:async(days:number):Promise<{retentionDays:number}>=>{
-  const response=await api.put('/api/archive/retention',{days})
+  const response=await api.put(API_ENDPOINTS.archives.retention,{retentionDays:days})
   return response.data
  },
  export:async(projectId:string):Promise<{filename:string}>=>{
-  const response=await api.post('/api/archive/export',{projectId})
+  const response=await api.post(API_ENDPOINTS.archives.export,{projectId})
   return response.data
  },
  exportAndCleanup:async(projectId:string):Promise<{filename:string;deleted:number}>=>{
-  const response=await api.post('/api/archive/export-and-cleanup',{projectId})
+  const response=await api.post(API_ENDPOINTS.archives.exportAndCleanup,{projectId})
   return response.data
  },
  autoArchive:async():Promise<{archived:number}>=>{
-  const response=await api.post('/api/archive/auto-archive')
+  const response=await api.post(API_ENDPOINTS.archives.autoArchive)
   return response.data
  },
  list:async():Promise<ApiArchiveEntry[]>=>{
-  const response=await api.get('/api/archives')
-  return response.data
+  const response=await api.get(API_ENDPOINTS.archives.list)
+  return response.data.archives||[]
  },
  delete:async(archiveName:string):Promise<void>=>{
-  await api.delete(`/api/archives/${archiveName}`)
+  await api.delete(API_ENDPOINTS.archives.delete(archiveName))
  },
  getDownloadUrl:(archiveName:string):string=>{
-  return`${API_BASE_URL}/api/archives/${archiveName}/download`
+  return`${API_BASE_URL}${API_ENDPOINTS.archives.download(archiveName)}`
  }
 }
 
@@ -1271,11 +1242,11 @@ export interface ApiRecoveryStatus{
 
 export const recoveryApi={
  getStatus:async():Promise<ApiRecoveryStatus>=>{
-  const response=await api.get('/api/recovery/status')
+  const response=await api.get(API_ENDPOINTS.recovery.status)
   return response.data
  },
  retryAll:async():Promise<{retriedCount:number}>=>{
-  const response=await api.post('/api/recovery/retry-all')
+  const response=await api.post(API_ENDPOINTS.recovery.retryAll)
   return response.data
  }
 }
@@ -1288,7 +1259,7 @@ export interface ApiSystemStats{
 
 export const systemApi={
  getStats:async():Promise<ApiSystemStats>=>{
-  const response=await api.get('/api/system/stats')
+  const response=await api.get(API_ENDPOINTS.system.stats)
   return response.data
  }
 }
@@ -1309,7 +1280,7 @@ export interface ApiKeyValidationResult{
 
 export const apiKeyApi={
  list:async():Promise<ApiKeyInfo[]>=>{
-  const response=await api.get('/api/api-keys')
+  const response=await api.get(API_ENDPOINTS.apiKeys.list)
   const data=response.data as Record<string,{hint:string;isValid:boolean;lastValidatedAt:string|null}>
   return Object.entries(data).map(([providerId,info])=>({
    providerId,
@@ -1320,14 +1291,14 @@ export const apiKeyApi={
   }))
  },
  save:async(providerId:string,apiKey:string):Promise<{success:boolean}>=>{
-  const response=await api.put(`/api/api-keys/${providerId}`,{apiKey})
+  const response=await api.put(API_ENDPOINTS.apiKeys.save(providerId),{apiKey})
   return response.data
  },
  delete:async(providerId:string):Promise<void>=>{
-  await api.delete(`/api/api-keys/${providerId}`)
+  await api.delete(API_ENDPOINTS.apiKeys.delete(providerId))
  },
  validate:async(providerId:string):Promise<ApiKeyValidationResult>=>{
-  const response=await api.post(`/api/api-keys/${providerId}/validate`)
+  const response=await api.post(API_ENDPOINTS.apiKeys.validate(providerId))
   return response.data
  }
 }
@@ -1342,22 +1313,22 @@ export interface ApiProviderHealth{
 
 export const providerHealthApi={
  getAll:async():Promise<ApiProviderHealth[]>=>{
-  const response=await api.get('/api/providers/health')
+  const response=await api.get(API_ENDPOINTS.providers.health)
   return response.data
  },
  check:async(providerId:string):Promise<ApiProviderHealth>=>{
-  const response=await api.get(`/api/providers/${providerId}/health`)
+  const response=await api.get(API_ENDPOINTS.providers.healthCheck(providerId))
   return response.data
  }
 }
 
 export const navigatorApi={
  sendMessage:async(data:{projectId?:string;text:string;priority?:string}):Promise<{success:boolean}>=>{
-  const response=await api.post('/api/navigator/message',data)
+  const response=await api.post(API_ENDPOINTS.navigator.message,data)
   return response.data
  },
  broadcast:async(data:{text:string;priority?:string}):Promise<{success:boolean}>=>{
-  const response=await api.post('/api/navigator/broadcast',data)
+  const response=await api.post(API_ENDPOINTS.navigator.broadcast,data)
   return response.data
  }
 }

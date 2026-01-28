@@ -19,7 +19,8 @@
     "format": "node scripts/remove-spaces.cjs",
     "test": "playwright test",
     "test:ui": "playwright test --ui",
-    "test:report": "playwright show-report"
+    "test:report": "playwright show-report",
+    "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api-generated.ts"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -73,6 +74,7 @@
     "electron-vite": "^2.3.0",
     "eslint": "^8.57.1",
     "glob": "^13.0.0",
+    "openapi-typescript": "^7.10.1",
     "postcss": "^8.4.49",
     "puppeteer": "^24.36.0",
     "react": "^18.3.1",

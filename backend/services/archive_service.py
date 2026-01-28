@@ -22,7 +22,7 @@ class ArchiveService:
   cutoff_date=datetime.now()-timedelta(days=self._retention_days)
   deleted_counts={"traces":0,"agent_logs":0,"system_logs":0}
   with session_scope() as session:
-   query=session.query(AgentTrace).filter(AgentTrace.created_at<cutoff_date)
+   query=session.query(AgentTrace).filter(AgentTrace.started_at<cutoff_date)
    if project_id:
     query=query.filter(AgentTrace.project_id==project_id)
    deleted_counts["traces"]=query.delete(synchronize_session=False)
@@ -44,7 +44,7 @@ class ArchiveService:
   with session_scope() as session:
    deleted_counts["traces"]=session.query(AgentTrace).filter(
     AgentTrace.project_id==project_id,
-    AgentTrace.created_at<cutoff_date
+    AgentTrace.started_at<cutoff_date
    ).delete(synchronize_session=False)
    from models.tables import Agent
    agent_ids=[a.id for a in session.query(Agent).filter(Agent.project_id==project_id).all()]
@@ -71,7 +71,7 @@ class ArchiveService:
    agent_log_count=agent_log_query.count()
    system_log_count=system_log_query.count()
    cutoff_date=datetime.now()-timedelta(days=self._retention_days)
-   old_trace_count=trace_query.filter(AgentTrace.created_at<cutoff_date).count()
+   old_trace_count=trace_query.filter(AgentTrace.started_at<cutoff_date).count()
    old_agent_log_count=agent_log_query.filter(AgentLog.created_at<cutoff_date).count()
    old_system_log_count=system_log_query.filter(SystemLog.created_at<cutoff_date).count()
    return {
@@ -182,7 +182,7 @@ class ArchiveService:
   zip_name=f"archive_old_{timestamp}.zip"
   zip_path=os.path.join(self._archive_dir,zip_name)
   with session_scope() as session:
-   traces=session.query(AgentTrace).filter(AgentTrace.created_at<cutoff_date).all()
+   traces=session.query(AgentTrace).filter(AgentTrace.started_at<cutoff_date).all()
    if not traces:
     return {"success":True,"message":"No old traces to archive","archived":0}
    trace_data=[]
@@ -213,7 +213,7 @@ class ArchiveService:
      "traceCount":len(trace_data),
     }
     zf.writestr("metadata.json",json.dumps(metadata,ensure_ascii=False,indent=2))
-   deleted=session.query(AgentTrace).filter(AgentTrace.created_at<cutoff_date).delete(synchronize_session=False)
+   deleted=session.query(AgentTrace).filter(AgentTrace.started_at<cutoff_date).delete(synchronize_session=False)
    session.commit()
   return {
    "success":True,

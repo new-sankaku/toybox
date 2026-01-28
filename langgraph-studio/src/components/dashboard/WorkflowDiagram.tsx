@@ -20,6 +20,9 @@ import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{agentApi}from'@/services/apiService'
+import{convertApiAgents}from'@/services/converters/agentConverter'
+import{COLORS}from'@/constants/colors'
+import{TIMING}from'@/constants/timing'
 import type{Agent,AgentType,AgentStatus}from'@/types/agent'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
 
@@ -201,18 +204,16 @@ function getStatusStyle(status:AgentStatus|undefined):{
 }{
  switch(status){
   case'completed':
-   return{background:'#A8A090',border:'#454138',color:'#454138'}
+   return{background:COLORS.status.completed.bg,border:COLORS.status.completed.border,color:COLORS.status.completed.text}
   case'running':
-   return{background:'#C4956C',border:'#8B6914',color:'#454138'}
+   return{background:COLORS.status.running.bg,border:COLORS.status.running.border,color:COLORS.status.running.text}
   case'waiting_approval':
-   return{background:'#D4C896',border:'#8B7914',color:'#454138'}
+   return{background:COLORS.status.waitingApproval.bg,border:COLORS.status.waitingApproval.border,color:COLORS.status.waitingApproval.text}
   case'failed':
-   return{background:'#B85C5C',border:'#8B2020',color:'#E8E4D4'}
-  case'blocked':
-   return{background:'#DAD5C3',border:'#B85C5C',color:'#5A5548'}
+   return{background:COLORS.status.failed.bg,border:COLORS.status.failed.border,color:COLORS.status.failed.text}
   case'pending':
   default:
-   return{background:'#E8E4D4',border:'rgba(69, 65, 56, 0.3)',color:'#8A8578'}
+   return{background:COLORS.status.pending.bg,border:COLORS.status.pending.border,color:COLORS.status.pending.text}
  }
 }
 
@@ -260,12 +261,12 @@ function AgentNode({data }:{data:AgentNodeData}){
        className="h-full transition-all duration-300"
        style={{
         width:`${progress}%`,
-        background:isCompleted?'#7AAA7A' : '#8B6914',
+        background:isCompleted?COLORS.progress.completed:COLORS.progress.running,
        }}
       />
      </div>
      {isRunning&&(
-      <div className="mt-0.5" style={{fontSize:fontSize*0.8,color:'#8B6914'}}>
+      <div className="mt-0.5" style={{fontSize:fontSize*0.8,color:COLORS.progress.running}}>
        {progress}%
       </div>
 )}
@@ -288,8 +289,8 @@ function AgentNode({data }:{data:AgentNodeData}){
 )}
    {isCompleted&&(
     <div
-     className="absolute -top-1 -right-1 w-4 h-4 bg-[#7AAA7A] rounded-full flex items-center justify-center"
-     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
+     className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.progress.completed}}
     >
      ✓
     </div>
@@ -297,8 +298,8 @@ function AgentNode({data }:{data:AgentNodeData}){
    {isWaitingApproval&&(
     <>
      <div
-      className="absolute -top-1 -right-1 w-4 h-4 bg-[#8B7914] rounded-full flex items-center justify-center"
-      style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold'}}
+      className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+      style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.badge.waitingApproval}}
      >
       !
      </div>
@@ -307,7 +308,7 @@ function AgentNode({data }:{data:AgentNodeData}){
       style={{
        bottom:'-14px',
        fontSize:fontSize*0.75,
-       color:'#8B7914',
+       color:COLORS.badge.waitingApproval,
        fontWeight:'bold',
        whiteSpace:'nowrap'
       }}
@@ -326,8 +327,8 @@ function PhaseGroupNode({data }:{data:{label:string;width:number;height:number}}
    style={{
     width:data.width,
     height:data.height,
-    background:'rgba(69, 65, 56, 0.04)',
-    border:'1px dashed rgba(69, 65, 56, 0.2)',
+    background:COLORS.canvas.phaseGroup.bg,
+    border:`1px dashed ${COLORS.canvas.phaseGroup.border}`,
     borderRadius:'4px',
     position:'relative',
    }}
@@ -338,7 +339,7 @@ function PhaseGroupNode({data }:{data:{label:string;width:number;height:number}}
      bottom:'4px',
      left:'8px',
      fontSize:'11px',
-     color:'#5A5548',
+     color:COLORS.canvas.phaseGroup.text,
      fontWeight:500,
     }}
    >
@@ -384,7 +385,7 @@ function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
   if(containerSize.width>0&&containerSize.height>0&&nodes.length>0){
    const timer=setTimeout(()=>{
     fitView({padding:0.05,duration:200})
-   },50)
+   },TIMING.animation.fitViewDelay)
    return()=>clearTimeout(timer)
   }
  },[containerSize,nodes,fitView])
@@ -416,7 +417,7 @@ function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
      variant={BackgroundVariant.Dots}
      gap={16}
      size={0.5}
-     color="rgba(69, 65, 56, 0.08)"
+     color={COLORS.canvas.background}
     />
    </ReactFlow>
   </div>
@@ -497,23 +498,7 @@ export default function WorkflowDiagram():JSX.Element{
   const fetchAgents=async()=>{
    try{
     const agentsData=await agentApi.listByProject(currentProject.id)
-    const agentsConverted:Agent[]=agentsData.map(a=>({
-     id:a.id,
-     projectId:a.projectId,
-     type:a.type as Agent['type'],
-     phase:a.phase as Agent['phase'],
-     status:a.status as AgentStatus,
-     progress:a.progress,
-     currentTask:a.currentTask,
-     tokensUsed:a.tokensUsed,
-     startedAt:a.startedAt,
-     completedAt:a.completedAt,
-     error:a.error,
-     parentAgentId:a.parentAgentId,
-     metadata:a.metadata,
-     createdAt:a.createdAt
-    }))
-    setAgents(agentsConverted)
+    setAgents(convertApiAgents(agentsData))
    }catch(error){
     console.error('Failed to fetch agents:',error)
    }
@@ -598,6 +583,7 @@ export default function WorkflowDiagram():JSX.Element{
    const targetPhase=getNodePhase(edgeDef.target)
    const isCrossPhase=sourcePhase!==targetPhase
 
+   const edgeColor=isCompleted?COLORS.edge.completed:isRunning?COLORS.edge.running:COLORS.edge.default
    return{
     id:`e-${index}`,
     source:edgeDef.source,
@@ -607,14 +593,14 @@ export default function WorkflowDiagram():JSX.Element{
     type:'straight',
     animated:isRunning,
     style:{
-     stroke:isCompleted?'rgba(69, 65, 56, 0.5)' : isRunning?'#C4956C' : 'rgba(69, 65, 56, 0.15)',
+     stroke:edgeColor,
      strokeWidth:isRunning?2 : 1,
     },
     markerEnd:{
      type:MarkerType.ArrowClosed,
      width:10,
      height:10,
-     color:isCompleted?'rgba(69, 65, 56, 0.5)' : isRunning?'#C4956C' : 'rgba(69, 65, 56, 0.15)',
+     color:edgeColor,
     },
    }
   })

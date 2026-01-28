@@ -96,6 +96,7 @@ provider_groups:
 providers:
   anthropic:
     label: Anthropic
+    env_key: ANTHROPIC_API_KEY
     service_types:
       - llm
     max_concurrent: 3
@@ -126,10 +127,10 @@ providers:
         pricing:
           input: 1.0
           output: 5.0
-    default_model: claude-opus-4-5-20251101
 
   zhipu:
     label: Zhipu AI
+    env_key: ZHIPU_API_KEY
     service_types:
       - llm
     max_concurrent: 3
@@ -152,10 +153,10 @@ providers:
         pricing:
           input: 0.1
           output: 0.1
-    default_model: glm-4.7
 
   deepseek:
     label: DeepSeek
+    env_key: DEEPSEEK_API_KEY
     service_types:
       - llm
     max_concurrent: 3
@@ -178,7 +179,6 @@ providers:
         pricing:
           input: 0.55
           output: 2.19
-    default_model: deepseek-chat
 
   local-comfyui:
     label: Local ComfyUI
@@ -204,7 +204,6 @@ providers:
         label: FLUX.1 Schnell
         pricing:
           per_image: 0.0
-    default_model: stable-diffusion-xl
 
   local-audiocraft:
     label: Local AudioCraft
@@ -227,7 +226,6 @@ providers:
         label: AudioGen Medium
         pricing:
           per_track: 0.0
-    default_model: musicgen-large
 
   local-coqui-tts:
     label: Local Coqui TTS
@@ -245,7 +243,6 @@ providers:
         label: VITS
         pricing:
           per_1k_chars: 0.0
-    default_model: xtts-v2
 
   claude-code:
     label: Claude Code (CLI)
@@ -279,4 +276,3 @@ providers:
         pricing:
           input: 0.0
           output: 0.0
-    default_model: opus

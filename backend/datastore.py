@@ -27,6 +27,8 @@ from config_loader import (
  get_agent_assets,
  get_agent_checkpoints,
  get_checkpoint_content,
+ get_generation_metrics_categories,
+ get_agent_generation_metrics,
 )
 from asset_scanner import get_testdata_path
 from middleware.logger import get_logger
@@ -586,54 +588,26 @@ class DataStore:
   return get_generation_type_for_agent(agent_type)
 
  def _calculate_generation_counts(self,agents:List[Dict])->Dict:
-  counts={
-   "characters":{"count":0,"unit":"体","calls":0},
-   "backgrounds":{"count":0,"unit":"枚","calls":0},
-   "ui":{"count":0,"unit":"点","calls":0},
-   "effects":{"count":0,"unit":"種","calls":0},
-   "music":{"count":0,"unit":"曲","calls":0},
-   "sfx":{"count":0,"unit":"個","calls":0},
-   "voice":{"count":0,"unit":"件","calls":0},
-   "video":{"count":0,"unit":"本","calls":0},
-   "scenarios":{"count":0,"unit":"本","calls":0},
-   "code":{"count":0,"unit":"行","calls":0},
-   "documents":{"count":0,"unit":"件","calls":0},
-  }
+  categories=get_generation_metrics_categories()
+  counts={}
+  for cat_name,cat_config in categories.items():
+   counts[cat_name]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
+  if "video" not in counts:
+   counts["video"]={"count":0,"unit":"本","calls":0}
   for agent in agents:
    if agent["status"] not in ["completed","waiting_approval"]:
     continue
    progress_factor=agent["progress"]/100.0
    agent_type=agent["type"]
-   if agent_type=="asset_character":
-    counts["characters"]["count"]+=int(random.randint(3,8)*progress_factor)
-    counts["characters"]["calls"]+=int(random.randint(2,5)*progress_factor)
-   elif agent_type=="asset_background":
-    counts["backgrounds"]["count"]+=int(random.randint(3,6)*progress_factor)
-    counts["backgrounds"]["calls"]+=int(random.randint(2,4)*progress_factor)
-   elif agent_type=="asset_ui":
-    counts["ui"]["count"]+=int(random.randint(5,15)*progress_factor)
-    counts["ui"]["calls"]+=int(random.randint(3,8)*progress_factor)
-   elif agent_type=="asset_effect":
-    counts["effects"]["count"]+=int(random.randint(3,10)*progress_factor)
-    counts["effects"]["calls"]+=int(random.randint(2,5)*progress_factor)
-   elif agent_type=="asset_bgm":
-    counts["music"]["count"]+=int(random.randint(2,5)*progress_factor)
-    counts["music"]["calls"]+=int(random.randint(1,3)*progress_factor)
-   elif agent_type=="asset_sfx":
-    counts["sfx"]["count"]+=int(random.randint(10,25)*progress_factor)
-    counts["sfx"]["calls"]+=int(random.randint(5,15)*progress_factor)
-   elif agent_type=="asset_voice":
-    counts["voice"]["count"]+=int(random.randint(20,50)*progress_factor)
-    counts["voice"]["calls"]+=int(random.randint(10,30)*progress_factor)
-   elif agent_type in ["code","event","ui_integration","asset_integration"]:
-    counts["code"]["count"]+=int(random.randint(200,800)*progress_factor)
-    counts["code"]["calls"]+=int(random.randint(5,15)*progress_factor)
-   elif agent_type=="scenario":
-    counts["scenarios"]["count"]+=int(random.randint(1,3)*progress_factor)
-    counts["scenarios"]["calls"]+=int(random.randint(2,5)*progress_factor)
-   elif agent_type in ["concept","concept_detail","game_design","tech_spec","world"]:
-    counts["documents"]["count"]+=int(random.randint(1,3)*progress_factor)
-    counts["documents"]["calls"]+=int(random.randint(3,8)*progress_factor)
+   metrics=get_agent_generation_metrics(agent_type)
+   if not metrics:
+    continue
+   category=metrics.get("category")
+   if category and category in counts:
+    count_range=metrics.get("count_range",[1,3])
+    calls_range=metrics.get("calls_range",[1,3])
+    counts[category]["count"]+=int(random.randint(count_range[0],count_range[1])*progress_factor)
+    counts[category]["calls"]+=int(random.randint(calls_range[0],calls_range[1])*progress_factor)
   return counts
 
  def _update_project_metrics(self,session,project_id:str):

@@ -4,16 +4,10 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{cn}from'@/lib/utils'
 import{ToggleLeft,ToggleRight,DollarSign}from'lucide-react'
 import{useCostSettingsStore}from'@/stores/costSettingsStore'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 
 interface CostSettingsProps{
  projectId:string
-}
-
-const SERVICE_LABELS:Record<string,string>={
- llm:'LLM（テキスト生成）',
- image:'画像生成',
- audio:'音声合成',
- music:'音楽生成'
 }
 
 interface ServiceCostCardProps{
@@ -83,6 +77,7 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
   loadFromServer,
   isFieldChanged
  }=useCostSettingsStore()
+ const{serviceLabels,getServiceLabel}=useUIConfigStore()
  const globalEnabledChanged=isFieldChanged('globalEnabled')
  const globalLimitChanged=isFieldChanged('globalMonthlyLimit')
 
@@ -159,8 +154,8 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
 
    <div className="space-y-2">
     <div className="text-nier-small text-nier-text-light font-medium px-1">サービス別コスト上限</div>
-    {Object.entries(SERVICE_LABELS).map(([type,label])=>(
-     <ServiceCostCard key={type} serviceType={type} label={label}/>
+    {Object.keys(serviceLabels).map((type)=>(
+     <ServiceCostCard key={type} serviceType={type} label={getServiceLabel(type)}/>
 ))}
    </div>
   </div>

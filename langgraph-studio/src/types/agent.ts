@@ -52,8 +52,8 @@ export interface Agent{
  progress:number
  currentTask:string|null
  tokensUsed:number
- inputTokens?:number
- outputTokens?:number
+ inputTokens:number
+ outputTokens:number
  startedAt:string|null
  completedAt:string|null
  error:string|null

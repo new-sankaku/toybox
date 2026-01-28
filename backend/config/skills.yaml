@@ -460,6 +460,27 @@ agent_skill_mapping:
     - code_search
     - file_search
 
+mock_handlers:
+  image_generate:
+    handler_type: image
+    output_format: png
+    output_dir: assets/images
+  bgm_generate:
+    handler_type: audio
+    audio_type: bgm
+    output_format: wav
+    output_dir: assets/audio
+  sfx_generate:
+    handler_type: audio
+    audio_type: sfx
+    output_format: wav
+    output_dir: assets/audio
+  voice_generate:
+    handler_type: audio
+    audio_type: voice
+    output_format: wav
+    output_dir: assets/audio
+
 sandbox:
   enabled: true
   output_base: "./output"

@@ -4,40 +4,11 @@ import{Card,CardContent}from'@/components/ui/Card'
 import{useProjectStore}from'@/stores/projectStore'
 import{useNavigationStore}from'@/stores/navigationStore'
 import{useAgentStore}from'@/stores/agentStore'
-import{agentApi,type ApiAgent,type ApiAgentLog}from'@/services/apiService'
-import type{Agent,AgentLogEntry,AgentType,AgentStatus}from'@/types/agent'
+import{agentApi}from'@/services/apiService'
+import{convertApiAgent,convertApiAgents,convertApiLogs}from'@/services/converters/agentConverter'
+import type{Agent}from'@/types/agent'
 import{FolderOpen}from'lucide-react'
 import{useToastStore}from'@/stores/toastStore'
-
-function convertApiAgent(apiAgent:ApiAgent):Agent{
- return{
-  id:apiAgent.id,
-  projectId:apiAgent.projectId,
-  type:apiAgent.type as AgentType,
-  status:apiAgent.status as AgentStatus,
-  progress:apiAgent.progress,
-  currentTask:apiAgent.currentTask,
-  tokensUsed:apiAgent.tokensUsed,
-  startedAt:apiAgent.startedAt,
-  completedAt:apiAgent.completedAt,
-  error:apiAgent.error,
-  parentAgentId:apiAgent.parentAgentId,
-  metadata:apiAgent.metadata,
-  createdAt:apiAgent.createdAt,
-  phase:apiAgent.phase as Agent['phase']
- }
-}
-
-function convertApiLog(apiLog:ApiAgentLog):AgentLogEntry{
- return{
-  id:apiLog.id,
-  timestamp:apiLog.timestamp,
-  level:apiLog.level,
-  message:apiLog.message,
-  progress:apiLog.progress||undefined,
-  metadata:apiLog.metadata,
- }
-}
 
 export default function AgentsView():JSX.Element{
  const{currentProject}=useProjectStore()
@@ -64,7 +35,7 @@ export default function AgentsView():JSX.Element{
    setInitialLoading(true)
    try{
     const data=await agentApi.listByProject(currentProject.id)
-    setAgents(data.map(convertApiAgent))
+    setAgents(convertApiAgents(data))
    }catch(error){
     console.error('Failed to fetch agents:',error)
    }finally{
@@ -83,7 +54,7 @@ export default function AgentsView():JSX.Element{
   const fetchLogs=async(agentId:string)=>{
    try{
     const data=await agentApi.getLogs(agentId)
-    const logs=data.map(convertApiLog)
+    const logs=convertApiLogs(data)
     const{addLogEntry}=useAgentStore.getState()
     logs.forEach(log=>addLogEntry(agentId,log))
     setInitialLogsFetched(prev=>({...prev,[agentId]:true}))

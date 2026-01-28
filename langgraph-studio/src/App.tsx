@@ -14,7 +14,8 @@ import{useUIConfigStore}from'./stores/uiConfigStore'
 import{useNavigatorStore}from'./stores/navigatorStore'
 import{websocketService}from'./services/websocketService'
 import{agentApi,configApi}from'./services/apiService'
-import type{Agent,AgentStatus}from'./types/agent'
+import{convertApiAgents}from'./services/converters/agentConverter'
+import{TIMING}from'./constants/timing'
 
 const queryClient=new QueryClient({
  defaultOptions:{
@@ -27,7 +28,7 @@ const queryClient=new QueryClient({
 
 export type{TabId}from'./stores/navigationStore'
 
-const BACKGROUND_POLL_INTERVAL=1000
+const BACKGROUND_POLL_INTERVAL=TIMING.polling.background
 
 function App():JSX.Element{
  const{activeTab,setActiveTab}=useNavigationStore()
@@ -48,23 +49,7 @@ function App():JSX.Element{
  const fetchAgentsForProject=useCallback(async(projectId:string)=>{
   try{
    const agentsData=await agentApi.listByProject(projectId)
-   const agentsConverted:Agent[]=agentsData.map(a=>({
-    id:a.id,
-    projectId:a.projectId,
-    type:a.type as Agent['type'],
-    phase:a.phase as Agent['phase'],
-    status:a.status as AgentStatus,
-    progress:a.progress,
-    currentTask:a.currentTask,
-    tokensUsed:a.tokensUsed,
-    startedAt:a.startedAt,
-    completedAt:a.completedAt,
-    error:a.error,
-    parentAgentId:a.parentAgentId,
-    metadata:a.metadata,
-    createdAt:a.createdAt
-   }))
-   setAgents(agentsConverted)
+   setAgents(convertApiAgents(agentsData))
   }catch(error){
    console.error('[App] Background poll failed:',error)
   }
@@ -117,7 +102,7 @@ function App():JSX.Element{
    hasShownWelcomeRef.current=true
    setTimeout(()=>{
     showMessage('オペレーター','システム起動完了。LangGraph Studio へようこそ。プロジェクトを選択して作業を開始してください。')
-   },500)
+   },TIMING.animation.welcomeDelay)
   }
 
   return()=>{

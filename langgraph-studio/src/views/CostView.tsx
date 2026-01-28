@@ -7,6 +7,7 @@ import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{useCostSettingsStore}from'@/stores/costSettingsStore'
 import{agentApi,type ApiAgent}from'@/services/apiService'
+import{TIMING}from'@/constants/timing'
 import{FolderOpen}from'lucide-react'
 
 function formatTokens(num:number):string{
@@ -59,7 +60,7 @@ export default function CostView():JSX.Element{
   }
   setLoading(true)
   fetchData().finally(()=>setLoading(false))
-  intervalRef.current=setInterval(fetchData,3000)
+  intervalRef.current=setInterval(fetchData,TIMING.polling.metrics)
   return()=>{
    if(intervalRef.current)clearInterval(intervalRef.current)
   }

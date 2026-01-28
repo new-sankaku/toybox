@@ -52,10 +52,10 @@
     {"value": "large", "label": "大規模", "description": "フルチーム開発", "estimatedHours": "500時間以上"}
   ],
   "assetServiceOptions": [
-    {"key": "enableImageGeneration", "label": "画像生成", "service": "ComfyUI"},
-    {"key": "enableBGMGeneration", "label": "BGM/効果音", "service": "Suno AI"},
-    {"key": "enableVoiceSynthesis", "label": "ボイス合成", "service": "VOICEVOX"},
-    {"key": "enableVideoGeneration", "label": "動画生成", "service": "Runway"}
+    {"key": "enableImageGeneration", "label": "画像生成", "service": "Local ComfyUI", "providerId": "local-comfyui"},
+    {"key": "enableBGMGeneration", "label": "BGM/効果音", "service": "Local AudioCraft", "providerId": "local-audiocraft"},
+    {"key": "enableVoiceSynthesis", "label": "ボイス合成", "service": "Local Coqui TTS", "providerId": "local-coqui-tts"},
+    {"key": "enableVideoGeneration", "label": "動画生成", "service": "-", "providerId": null}
   ],
   "violenceRatingOptions": [
     {"level": 0, "label": "なし", "age": "全年齢", "description": "暴力表現を含まない"},

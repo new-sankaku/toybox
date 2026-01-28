@@ -32,9 +32,6 @@ def _get_usage_category_default(usage_category:str)->Dict[str,str]:
 
 def resolve_with_env_key(provider_id:str)->str:
  import os
- env_key_map={
-  "anthropic":"ANTHROPIC_API_KEY",
-  "zhipu":"ZHIPU_API_KEY",
-  "deepseek":"DEEPSEEK_API_KEY",
- }
- return os.environ.get(env_key_map.get(provider_id,""),"")
+ from config_loader import get_provider_env_key
+ env_key=get_provider_env_key(provider_id)
+ return os.environ.get(env_key,"") if env_key else""

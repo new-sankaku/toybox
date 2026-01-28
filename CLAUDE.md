@@ -19,50 +19,82 @@
 ・常に敬語を使う。
 ・コメントはTODO以外は不要
 ・バックエンドでprint()は禁止。必ず`from middleware.logger import get_logger`を使用し、`get_logger().info/warning/error()`で出力する。例外ハンドラ内のerrorログには`exc_info=True`を付与してスタックトレースを残す。
-・Sonnet Haikuをサブエージェントとすることは禁止、サブエージェントは基本的にOpusを使用する。
+・Sonnet Haikuをサブエージェントとすることは禁止、サブエージェントはOpusを使用する。
 ・曖昧な可能性で直すな。論理的な根拠を持って直せ。
 ・ドキュメントは全てdocフォルダに格納する。
 ・エージェントシステムのため、プロンプトを固めるのではなく普遍的な方針を記載し、各エージェントが判断できるようにする。硬直化したプロンプトは記載しない。
 ・CSSの固定幅指定は行わない。フレキシブルデザインにする。
-
-- **Agent**: AIエージェント（concept_leader, design_workerなど）。独立した実行単位。1つのAgentは特定の役割を持つ。
-- **Task**: Agentが実行する個別の作業単位。1つのAgentが複数のTaskを実行することがある。AgentとTaskは別物であり、混同しないこと。
-- **nulファイルの作成禁止** - Windowsで出力を破棄する場合、`> nul` を使用しない（`nul`という名前のファイルが作成されてしまう）。代わりに `> /dev/null 2>&1` を使用するか、出力リダイレクトを使わない。
-- **応急処置の禁止** - インラインスタイル（`style={{ }}`）でのべた書きは禁止。必ずTailwindクラスまたはCSSファイルを使用すること。
-- **推測での修正禁止** - 「たぶんこれだろう」で修正を始めない。必ず問題の要素を特定してから修正すること。
-- **同じ調査の繰り返し禁止** - 同じ問題が再度発生した場合、前回と同じ視点で調査しない。別の観点（親要素、子要素、関連コンポーネント、CSS継承、Tailwind設定など）から調べ直すこと。
-- **誤認させるデフォルト値禁止** - API取得失敗時などに、実際とは異なる値をデフォルト値として画面に表示しない。取得失敗時は「-」や空欄、または「取得失敗」等の明示的な表示にすること。ユーザーを誤認させる情報を表示してはならない。
-- **文言の統一** - 画面に表示する文言（ラベル、ボタン、メッセージ等）は他の画面と統一的な表現にすること。新しい文言を追加する前に、既存の画面で使われている表現を確認して合わせる。
+・TaskはAgentが実行する個別の作業単位。AgentとTaskは別物。
+・nulファイルの作成禁止 Windowsで出力を破棄する場合、`> nul` を使用しない。代わりに `> /dev/null 2>&1` を使用するか、出力リダイレクトを使わない。
+・応急処置の禁止。インラインスタイル（`style={{ }}`）でのべた書きは禁止。必ずTailwindクラスまたはCSSファイルを使用すること。
+・推測での修正禁止。「たぶんこれだろう」で修正を始めない。必ず問題の要素を特定してから修正すること。
+・同じ調査の繰り返し禁止。同じ問題が再度発生した場合、前回と同じ視点で調査しない。別の観点（親要素、子要素、関連コンポーネント、CSS継承、Tailwind設定など）から調べ直すこと。
+・誤認させるデフォルト値禁止** - API取得失敗時などに、実際とは異なる値をデフォルト値として画面に表示しない。取得失敗時は「-」や空欄、または「取得失敗」等の明示的な表示にすること。ユーザーを誤認させる情報を表示してはならない。
+・文言の統一、画面に表示する文言（ラベル、ボタン、メッセージ等）は他の画面と統一的な表現にすること。新しい文言を追加する前に、既存の画面で使われている表現を確認して合わせる。
 
 
+## 修正後の動作確認方法
 
-## コード圧縮
+コード修正後は以下のコマンドで動作確認を行う（サーバー起動不要）。
 
-トークン削減のためコードを圧縮する:
+### フロントエンド（langgraph-studio）
 ```bash
-  # TypeScript（langgraph-studio）
-  cd langgraph-studio
-  npm run lint        # ESLint適用
-  npm run format      # 演算子スペース削除
+cd langgraph-studio
+npm run lint              # ESLint - コード品質チェック
+npm run typecheck         # TypeScript型チェック
+npm run build             # ビルド確認
+```
 
-# Python（backend）
+### バックエンド（backend）
+```bash
+cd backend
+python -m py_compile server.py   # 構文チェック（任意のファイル）
+```
+
+### API型の整合性チェック（バックエンド変更時）
+```bash
+cd backend && python scripts/generate_openapi.py   # OpenAPIスペック生成
+cd langgraph-studio && npm run generate-types      # TypeScript型生成
+cd langgraph-studio && npm run typecheck           # 型チェック
+```
+
+### コード圧縮（コミット前）
+```bash
+# TypeScript
+cd langgraph-studio
+npm run lint              # ESLint適用
+npm run format            # 演算子スペース削除
+
+# Python
 cd backend
 python scripts/remove-spaces.py
 ```
 
-**圧縮ルール（共通）:**
+**圧縮ルール:**
 - コロン/カンマ後: スペースなし
 - アロー演算子前後: スペースなし
 - コメント: 削除（TODO/FIXME以外）
-- 文字列内: 保持
-
-**TypeScript追加ルール:**
-- インデント: 1スペース
+- TypeScriptインデント: 1スペース
 
 
+## OpenAPI + TypeScript型自動生成
+
+バックエンドのPydanticスキーマからOpenAPIスペックを生成し、フロントエンドのTypeScript型を自動生成する仕組み。
+
+**構成:**
+- `backend/schemas/` - Pydanticスキーマ（camelCase alias自動生成）
+- `backend/openapi/generator.py` - OpenAPIスペック生成
+- `backend/scripts/generate_openapi.py` - OpenAPIスペックをJSONファイルに出力
+- `langgraph-studio/src/types/openapi.json` - 生成されたOpenAPIスペック（.gitignore対象）
+- `langgraph-studio/src/types/api-generated.ts` - 自動生成されるTypeScript型（.gitignore対象）
+
+**スキーマ追加時:**
+- `backend/schemas/` に新規スキーマファイルを作成
+- `backend/schemas/__init__.py` でエクスポート
+- `backend/openapi/generator.py` のスキーマリストとパス定義に追加
+- 「API型の整合性チェック」を実行して確認
 
 ## 2. Color System
-
 ### 2.1 Primary Palette (Source: index.html)
 
 ```css

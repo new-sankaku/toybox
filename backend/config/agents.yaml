@@ -8,6 +8,7 @@ agents:
     high_cost: false
     role: leader
     usage_category: llm_high
+    output_type: llm
 
   task_split_1:
     label: タスク分割1
@@ -19,6 +20,7 @@ agents:
     role: splitter
     max_tokens: 8192
     usage_category: llm_mid
+    output_type: llm
 
   concept_detail:
     label: コンセプト
@@ -29,6 +31,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   scenario:
     label: シナリオ
@@ -39,6 +42,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   world:
     label: 世界観
@@ -49,6 +53,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   game_design:
     label: ゲームデザイン
@@ -59,6 +64,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   tech_spec:
     label: 技術仕様
@@ -69,6 +75,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   task_split_2:
     label: タスク分割2
@@ -80,6 +87,7 @@ agents:
     role: splitter
     max_tokens: 8192
     usage_category: llm_mid
+    output_type: llm
 
   asset_character:
     label: キャラクター
@@ -90,6 +98,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: image
 
   asset_background:
     label: 背景
@@ -100,6 +109,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: image
 
   asset_ui:
     label: UI
@@ -110,6 +120,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: image
 
   asset_effect:
     label: エフェクト
@@ -120,6 +131,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: image
 
   asset_bgm:
     label: BGM
@@ -130,6 +142,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: music
 
   asset_voice:
     label: ボイス
@@ -140,6 +153,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: audio
 
   asset_sfx:
     label: 効果音
@@ -150,6 +164,7 @@ agents:
     high_cost: true
     role: worker
     usage_category: llm_mid
+    output_type: audio
 
   task_split_3:
     label: タスク分割3
@@ -161,6 +176,7 @@ agents:
     role: splitter
     max_tokens: 8192
     usage_category: llm_mid
+    output_type: llm
 
   code:
     label: コード
@@ -171,6 +187,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   event:
     label: イベント
@@ -181,6 +198,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_high
+    output_type: llm
 
   ui_integration:
     label: UI統合
@@ -191,6 +209,7 @@ agents:
     high_cost: false
     role: worker
     usage_category: llm_mid
+    output_type: llm
 
   asset_integration:
     label: アセット統合
@@ -201,6 +220,7 @@ agents:
     high_cost: false
     role: integrator
     usage_category: llm_mid
+    output_type: llm
 
   task_split_4:
     label: タスク分割4
@@ -212,6 +232,7 @@ agents:
     role: splitter
     max_tokens: 8192
     usage_category: llm_mid
+    output_type: llm
 
   unit_test:
     label: 単体テスト
@@ -222,6 +243,7 @@ agents:
     high_cost: false
     role: tester
     usage_category: llm_mid
+    output_type: llm
 
   integration_test:
     label: 統合テスト
@@ -232,6 +254,7 @@ agents:
     high_cost: false
     role: tester
     usage_category: llm_mid
+    output_type: llm
 
 workflow_dependencies:
   concept: []
@@ -772,6 +795,100 @@ agent_assets:
       type: document
       name: game.ts
       size: 12KB
+
+generation_metrics:
+  categories:
+    characters:
+      unit: 体
+    backgrounds:
+      unit: 枚
+    ui:
+      unit: 点
+    effects:
+      unit: 種
+    music:
+      unit: 曲
+    sfx:
+      unit: 個
+    voice:
+      unit: 件
+    video:
+      unit: 本
+    scenarios:
+      unit: 本
+    code:
+      unit: 行
+    documents:
+      unit: 件
+  agent_metrics:
+    asset_character:
+      category: characters
+      count_range: [3, 8]
+      calls_range: [2, 5]
+    asset_background:
+      category: backgrounds
+      count_range: [3, 6]
+      calls_range: [2, 4]
+    asset_ui:
+      category: ui
+      count_range: [5, 15]
+      calls_range: [3, 8]
+    asset_effect:
+      category: effects
+      count_range: [3, 10]
+      calls_range: [2, 5]
+    asset_bgm:
+      category: music
+      count_range: [2, 5]
+      calls_range: [1, 3]
+    asset_sfx:
+      category: sfx
+      count_range: [10, 25]
+      calls_range: [5, 15]
+    asset_voice:
+      category: voice
+      count_range: [20, 50]
+      calls_range: [10, 30]
+    scenario:
+      category: scenarios
+      count_range: [1, 3]
+      calls_range: [2, 5]
+    code:
+      category: code
+      count_range: [200, 800]
+      calls_range: [5, 15]
+    event:
+      category: code
+      count_range: [200, 800]
+      calls_range: [5, 15]
+    ui_integration:
+      category: code
+      count_range: [200, 800]
+      calls_range: [5, 15]
+    asset_integration:
+      category: code
+      count_range: [200, 800]
+      calls_range: [5, 15]
+    concept:
+      category: documents
+      count_range: [1, 3]
+      calls_range: [3, 8]
+    concept_detail:
+      category: documents
+      count_range: [1, 3]
+      calls_range: [3, 8]
+    game_design:
+      category: documents
+      count_range: [1, 3]
+      calls_range: [3, 8]
+    tech_spec:
+      category: documents
+      count_range: [1, 3]
+      calls_range: [3, 8]
+    world:
+      category: documents
+      count_range: [1, 3]
+      calls_range: [3, 8]
 
 agent_checkpoints:
   concept:

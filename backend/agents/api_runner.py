@@ -23,6 +23,7 @@ from config_loader import (
     get_context_policy_settings,
     load_principles_for_agent,
     get_agent_usage_category,
+    get_provider_env_key,
 )
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
@@ -68,12 +69,7 @@ class ApiAgentRunner(AgentRunner):
 
     @staticmethod
     def _env_key_for(provider_id:str)->str:
-        m={
-            "anthropic":"ANTHROPIC_API_KEY",
-            "zhipu":"ZHIPU_API_KEY",
-            "deepseek":"DEEPSEEK_API_KEY",
-        }
-        return m.get(provider_id,"")
+        return get_provider_env_key(provider_id)
 
     def set_data_store(self,data_store)->None:
         self._data_store=data_store
