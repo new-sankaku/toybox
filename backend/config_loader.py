@@ -588,10 +588,28 @@ def get_principle_settings()->Dict[str,Any]:
     return config.get("principle_settings",{
         "max_chars_per_agent":12000,
         "injection_mode":"system",
-        "quality_check_model":"claude-haiku-4-5-20250116",
-        "quality_check_provider":"anthropic",
+        "quality_check_usage_category":"llm_low",
         "quality_check_max_tokens":2048,
     })
+
+
+def get_output_requirements(agent_type:str)->Dict[str,Any]:
+    config=get_agents_config()
+    reqs=config.get("output_requirements",{})
+    return reqs.get(agent_type,reqs.get("_default",{"min_length":200}))
+
+
+def get_summary_directive()->str:
+    config=get_agents_config()
+    settings=config.get("context_policy_settings",{})
+    return settings.get("summary_directive","")
+
+
+def get_agent_usage_category(agent_type:str)->str:
+    config=get_agents_config()
+    agents=config.get("agents",{})
+    agent=agents.get(agent_type,{})
+    return agent.get("usage_category","llm_mid")
 
 
 def get_provider_max_concurrent(provider_id:str)->int:

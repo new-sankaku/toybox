@@ -7,6 +7,7 @@ agents:
     quality_check: true
     high_cost: false
     role: leader
+    usage_category: llm_high
 
   task_split_1:
     label: タスク分割1
@@ -17,6 +18,7 @@ agents:
     high_cost: false
     role: splitter
     max_tokens: 8192
+    usage_category: llm_mid
 
   concept_detail:
     label: コンセプト
@@ -26,6 +28,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   scenario:
     label: シナリオ
@@ -35,6 +38,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   world:
     label: 世界観
@@ -44,6 +48,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   game_design:
     label: ゲームデザイン
@@ -53,6 +58,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   tech_spec:
     label: 技術仕様
@@ -62,6 +68,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   task_split_2:
     label: タスク分割2
@@ -72,6 +79,7 @@ agents:
     high_cost: false
     role: splitter
     max_tokens: 8192
+    usage_category: llm_mid
 
   asset_character:
     label: キャラクター
@@ -81,6 +89,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_background:
     label: 背景
@@ -90,6 +99,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_ui:
     label: UI
@@ -99,6 +109,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_effect:
     label: エフェクト
@@ -108,6 +119,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_bgm:
     label: BGM
@@ -117,6 +129,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_voice:
     label: ボイス
@@ -126,6 +139,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   asset_sfx:
     label: 効果音
@@ -135,6 +149,7 @@ agents:
     quality_check: true
     high_cost: true
     role: worker
+    usage_category: llm_mid
 
   task_split_3:
     label: タスク分割3
@@ -145,6 +160,7 @@ agents:
     high_cost: false
     role: splitter
     max_tokens: 8192
+    usage_category: llm_mid
 
   code:
     label: コード
@@ -154,6 +170,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   event:
     label: イベント
@@ -163,6 +180,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_high
 
   ui_integration:
     label: UI統合
@@ -172,6 +190,7 @@ agents:
     quality_check: true
     high_cost: false
     role: worker
+    usage_category: llm_mid
 
   asset_integration:
     label: アセット統合
@@ -181,6 +200,7 @@ agents:
     quality_check: true
     high_cost: false
     role: integrator
+    usage_category: llm_mid
 
   task_split_4:
     label: タスク分割4
@@ -191,6 +211,7 @@ agents:
     high_cost: false
     role: splitter
     max_tokens: 8192
+    usage_category: llm_mid
 
   unit_test:
     label: 単体テスト
@@ -200,6 +221,7 @@ agents:
     quality_check: true
     high_cost: false
     role: tester
+    usage_category: llm_mid
 
   integration_test:
     label: 統合テスト
@@ -209,6 +231,7 @@ agents:
     quality_check: true
     high_cost: false
     role: tester
+    usage_category: llm_mid
 
 workflow_dependencies:
   concept: []
@@ -467,11 +490,18 @@ context_policy_settings:
   # LLMによる要約生成
   llm_summary:
     enabled: true                    # LLM要約を使用するか(falseならテキスト切り詰め)
-    provider: anthropic              # 要約生成に使うプロバイダー
-    model: claude-haiku-4-5-20250116 # 要約生成に使うモデル(軽量モデル推奨)
+    usage_category: llm_low          # 要約に使うLLMのusage_category（プロジェクト設定から解決）
     max_tokens: 2048                 # 要約の最大出力トークン数
     min_content_length: 500          # この文字数未満なら要約せずそのまま返す
     input_max_length: 30000          # 要約LLMに渡すコンテンツの最大文字数
+  # 要約時の保持方針（LLMへの指示）
+  summary_directive: |
+    以下の情報カテゴリのうち、元の出力に存在するものを優先的に保持してください。
+    存在しないカテゴリは無視してください。
+    - 固有名詞（名称・用語など、後続の作業で参照される識別子）
+    - 数値・仕様（数量、サイズ、制限値など定量的な情報）
+    - 構造的決定事項（採用した方式、選択した手法、確定した仕様）
+    - 依存関係（他のエージェント出力と関連する情報）
 
 # --- Temperature設定 ---
 # roleごとのデフォルトtemperature（個別エージェントでtemperatureを指定すれば上書き可能）
@@ -531,10 +561,44 @@ agent_principles:
 principle_settings:
   max_chars_per_agent: 12000
   injection_mode: system
-  quality_check_model: claude-haiku-4-5-20250116
-  quality_check_provider: anthropic
+  quality_check_usage_category: llm_low  # 品質チェックLLMのusage_category（プロジェクト設定から解決）
   quality_check_max_tokens: 2048
   quality_threshold: 0.6
+  # 品質チェックエスカレーション: 境界スコアの場合に上位モデルで再評価
+  escalation:
+    enabled: true
+    tier2_usage_category: llm_mid    # エスカレーション先のusage_category
+    tier2_score_min: 0.5             # この範囲のスコアをTier2で再評価
+    tier2_score_max: 0.7
+
+# --- エージェント出力の構造要件 ---
+output_requirements:
+  concept:
+    required_sections: [コアファンタジー, ターゲット, メカニクス概要]
+    min_length: 500
+  concept_detail:
+    required_sections: [ゲーム概要, 主要機能, ユーザー体験]
+    min_length: 800
+  scenario:
+    required_sections: [あらすじ, イベント構成]
+    min_length: 800
+  world:
+    required_sections: [世界観概要, 舞台設定]
+    min_length: 500
+  game_design:
+    required_sections: [コアループ, 操作体系]
+    min_length: 1000
+  tech_spec:
+    required_sections: [アーキテクチャ, 技術スタック]
+    min_length: 800
+  code:
+    min_length: 200
+  unit_test:
+    min_length: 200
+  integration_test:
+    min_length: 200
+  _default:
+    min_length: 200
 
 agent_generation_types:
   llm:

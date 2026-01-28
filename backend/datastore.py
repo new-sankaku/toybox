@@ -441,7 +441,7 @@ class DataStore:
    agent_id=agent.id,
    agent_type=agent.type,
    input_context={"progress":progress,"phase":agent.phase},
-   model_used="claude-sonnet-4-20250514 (simulation)"
+   model_used="simulation"
   )
   traces=trace_repo.get_by_agent(agent.id)
   if traces:

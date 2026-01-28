@@ -7,7 +7,7 @@ from typing import Optional
 class AgentConfig:
  mode:str="testdata"
  anthropic_api_key:Optional[str]=None
- model:str="claude-sonnet-4-20250514"
+ model:str=""
  max_tokens:int=4096
 
 
@@ -47,7 +47,7 @@ def load_config()->Config:
   agent=AgentConfig(
    mode=agent_mode,
    anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
-   model=os.environ.get("AGENT_MODEL","claude-sonnet-4-20250514"),
+   model=os.environ.get("AGENT_MODEL",""),
    max_tokens=int(os.environ.get("AGENT_MAX_TOKENS","4096")),
   ),
   server=ServerConfig(
