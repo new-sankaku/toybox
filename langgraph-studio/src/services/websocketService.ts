@@ -8,6 +8,7 @@ import{useMetricsStore}from'@/stores/metricsStore'
 import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
 import{useToastStore}from'@/stores/toastStore'
 import{useActivityFeedStore}from'@/stores/activityFeedStore'
+import{useSpeechStore}from'@/stores/speechStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
@@ -50,6 +51,7 @@ interface ServerToClientEvents{
  'phase:changed':(data:{projectId:string;phase:PhaseNumber;phaseName:string})=>void
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
  'navigator:message':(data:{speaker:string;text:string;priority:MessagePriority;source:'server'})=>void
+ 'agent:speech':(data:{agentId:string;projectId:string;message:string;source:'llm'|'pool';timestamp:string})=>void
 }
 
 interface ClientToServerEvents{
@@ -342,6 +344,10 @@ class WebSocketService{
   this.socket.on('metrics:update',({projectId,metrics})=>{
    console.log('[WS] Metrics updated:',projectId,'Progress:',metrics.progressPercent+'%')
    useMetricsStore.getState().setProjectMetrics(metrics)
+  })
+
+  this.socket.on('agent:speech',(data)=>{
+   useSpeechStore.getState().addSpeech(data.agentId,data.message,data.source)
   })
 
   this.socket.on('navigator:message',({speaker,text,priority})=>{

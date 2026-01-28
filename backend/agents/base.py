@@ -122,6 +122,7 @@ class AgentContext:
     on_progress:Optional[Callable[[int,str],None]]=None
     on_log:Optional[Callable[[str,str],None]]=None
     on_checkpoint:Optional[Callable[[str,Dict],None]]=None
+    on_speech:Optional[Callable[[str],None]]=None
 
 
 @dataclass

@@ -360,6 +360,7 @@ class ApiAgentRunner(AgentRunner):
             max_tokens=agent_max_tokens,
             system_prompt=system_prompt,
             temperature=str(temperature),
+            on_speech=context.on_speech,
         )
         if context.on_log:
             context.on_log("info",f"LLMジョブ投入: {job['id']} model={resolved_model}")
@@ -390,6 +391,13 @@ class ApiAgentRunner(AgentRunner):
         system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
         if principles_text:
             system_prompt+=f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}"
+        if context.on_speech:
+            try:
+                from services.agent_speech_service import get_agent_speech_service
+                comment_instruction=get_agent_speech_service().get_comment_instruction(agent_type)
+                system_prompt+=f"\n\n## 一言コメント\n{comment_instruction}"
+            except Exception:
+                pass
 
         context_policy=get_workflow_context_policy(agent_type)
         filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy)

@@ -1,4 +1,4 @@
-import{useMemo,useCallback,useState}from'react'
+import{useMemo,useCallback,useState,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{FloatingPanel}from'@/components/ui/FloatingPanel'
@@ -6,6 +6,7 @@ import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
+import{useSpeechStore}from'@/stores/speechStore'
 import{AIField2D}from'@/components/ai-game'
 import type{CharacterState,AIServiceType,CharacterEmotion}from'@/components/ai-game/types'
 import{Pause}from'lucide-react'
@@ -16,7 +17,13 @@ export default function AIFieldSection():JSX.Element|null{
  const{agents,exitedAgentIds}=useAgentStore()
  const{getLabel}=useAgentDefinitionStore()
  const{agentServiceMap}=useUIConfigStore()
+ const{speeches,cleanup:cleanupSpeeches}=useSpeechStore()
  const[selectedCharacter,setSelectedCharacter]=useState<CharacterState|null>(null)
+
+ useEffect(()=>{
+  const interval=setInterval(cleanupSpeeches,2000)
+  return()=>clearInterval(interval)
+ },[cleanupSpeeches])
 
  const currentPhase=useMemo(()=>{
   if(!currentProject)return-1
@@ -70,12 +77,16 @@ export default function AIFieldSection():JSX.Element|null{
     emotion='sleepy'
    }
 
+   const now=Date.now()
+   const speech=speeches.find(s=>s.agentId===agent.id&&s.expiresAt>now)
+
    return{
     agentId:agent.id,
     agentType,
     status,
     emotion,
     isActive:isActiveAgent,
+    speechBubble:speech?.message,
     targetService:isRunning?targetService:(isWaitingApproval?targetService:undefined),
     request:isRunning?{
      id:`req-${agent.id}`,
@@ -100,7 +111,7 @@ export default function AIFieldSection():JSX.Element|null{
     phase:agent.phase
    }
   })
- },[agents,currentProject,exitedAgentIds,currentPhase])
+ },[agents,currentProject,exitedAgentIds,currentPhase,speeches])
 
  const handleCharacterClick=useCallback((character:CharacterState)=>{
   setSelectedCharacter(character)

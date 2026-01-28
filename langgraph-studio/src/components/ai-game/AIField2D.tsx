@@ -587,7 +587,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    }
 
    const workingCharsWithPos=characters
-    .filter(c=>c.status==='working'&&c.request)
+    .filter(c=>c.speechBubble||(c.status==='working'&&c.request))
     .map(c=>({char:c,pos:positions.get(c.agentId)!}))
     .filter(cp=>cp.pos)
 
@@ -634,12 +634,13 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
    })
 
    characters.forEach((char)=>{
-    if(char.status!=='working'||!char.request)return
     const pos=positions.get(char.agentId)
     if(!pos)return
+    const bubbleText=char.speechBubble||(char.status==='working'&&char.request?char.request.input:null)
+    if(!bubbleText)return
     const bubbleInfo=assignedBubbles.get(char.agentId)
     const bubbleDir=bubbleInfo?.dir||'top-right'
-    drawSpeechBubble(ctx,pos.x,pos.y,char.request.input,bubbleDir)
+    drawSpeechBubble(ctx,pos.x,pos.y,bubbleText,bubbleDir)
    })
 
    animationRef.current=requestAnimationFrame(render)
