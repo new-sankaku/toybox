@@ -76,13 +76,26 @@ export function ArchivePage(){
   }
  }
 
- const handleDownload=(name:string)=>{
-  const token=sessionStorage.getItem('admin_token')||''
-  const url=archiveApi.getDownloadUrl(name)
-  const a=document.createElement('a')
-  a.href=`${url}?token=${encodeURIComponent(token)}`
-  a.download=name
-  a.click()
+ const handleDownload=async(name:string)=>{
+  try{
+   const token=sessionStorage.getItem('admin_token')||''
+   const res=await fetch(archiveApi.getDownloadUrl(name),{
+    headers:{'Authorization':`Bearer ${token}`}
+   })
+   if(!res.ok){
+    showMsg('ダウンロードに失敗しました','error')
+    return
+   }
+   const blob=await res.blob()
+   const url=URL.createObjectURL(blob)
+   const a=document.createElement('a')
+   a.href=url
+   a.download=name
+   a.click()
+   URL.revokeObjectURL(url)
+  }catch{
+   showMsg('ダウンロードに失敗しました','error')
+  }
  }
 
  if(loading){
