@@ -186,7 +186,7 @@ export function AIField2D({characters,onCharacterClick,characterScale=1.0}:AIFie
 
   ctx.font='10px "Courier New", monospace'
   ctx.fillStyle=NIER_COLORS.textDim
-  ctx.fillText(config.description,x+12,y+36)
+  ctx.fillText(config?.description??'',x+12,y+36)
 
   const indicatorY=y+height-15
   if(hasWorkers){

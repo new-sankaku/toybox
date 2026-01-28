@@ -14,7 +14,7 @@
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
-    "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
+    "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "format": "node scripts/remove-spaces.cjs",
     "test": "playwright test",

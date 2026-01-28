@@ -66,9 +66,6 @@ export default function AIFieldSection():JSX.Element|null{
    }else if(agent.status==='failed'){
     status='failed'
     emotion='sad'
-   }else if(agent.status==='blocked'){
-    status='blocked'
-    emotion='sleepy'
    }else if(agent.status==='interrupted'){
     status='failed'
     emotion='sad'

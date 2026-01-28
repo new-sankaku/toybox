@@ -120,7 +120,7 @@ function TimelineRow({
     'grid-cols-[70px_1fr]',
     clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors',
     !isLast&&'border-b border-nier-border-light'
-   )}
+)}
    style={{paddingLeft:`${8+indentPx}px`}}
    onClick={clickable?()=>onMessageClick?.(pairedResponse||msg):undefined}
   >
@@ -130,7 +130,7 @@ function TimelineRow({
      <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
       {[tokenStr,durationStr].filter(Boolean).join(' ')}
      </span>
-    )}
+)}
    </div>
    <div className="flex flex-col gap-0.5">
     <div className="flex items-center gap-2">
@@ -146,10 +146,10 @@ function TimelineRow({
      <div className="ml-3 text-[10px] text-nier-text-light opacity-80">
       ← {pairedResponse.label.length>80?pairedResponse.label.slice(0,80)+'...':pairedResponse.label}
      </div>
-    )}
+)}
    </div>
   </div>
- )
+)
 }
 
 function TimelineGroup({
@@ -176,7 +176,7 @@ function TimelineGroup({
      'grid gap-2 py-1.5 px-2',
      'grid-cols-[70px_1fr]',
      'hover:bg-nier-bg-main/40 transition-colors cursor-pointer'
-    )}
+)}
     style={{paddingLeft:`${8+indentPx}px`}}
     onClick={()=>setExpanded(!expanded)}
    >
@@ -186,7 +186,7 @@ function TimelineGroup({
       <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
        {[tokenStr,durationStr].filter(Boolean).join(' ')}
       </span>
-     )}
+)}
     </div>
     <div className="flex flex-col gap-0.5">
      <div className="flex items-center gap-2">
@@ -205,7 +205,7 @@ function TimelineGroup({
         className="text-[10px] text-nier-text-light hover:text-nier-text-main underline ml-auto"
         onClick={(e)=>{e.stopPropagation();onMessageClick?.(msg)}}
        >詳細</button>
-      )}
+)}
      </div>
      <div className="ml-5 text-[11px] text-nier-text-main">{msg.label}</div>
     </div>
@@ -219,11 +219,11 @@ function TimelineGroup({
        onMessageClick={onMessageClick}
        isLast={idx===children.length-1}
       />
-     ))}
+))}
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 function TimelineNodeRenderer({
@@ -236,7 +236,7 @@ function TimelineNodeRenderer({
  isLast:boolean
 }){
  if(node.isGroupParent){
-  return <TimelineGroup node={node} onMessageClick={onMessageClick} isLast={isLast}/>
+  return<TimelineGroup node={node} onMessageClick={onMessageClick} isLast={isLast}/>
  }
  return(
   <TimelineRow
@@ -244,7 +244,7 @@ function TimelineNodeRenderer({
    onMessageClick={onMessageClick}
    isLast={isLast}
   />
- )
+)
 }
 
 export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.Element{
@@ -255,7 +255,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
    <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
     シーケンスデータがありません
    </div>
-  )
+)
  }
  const totalIn=data.totalTokens?.input??0
  const totalOut=data.totalTokens?.output??0
@@ -267,7 +267,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
      {`Total: in ${totalIn.toLocaleString()} / out ${totalOut.toLocaleString()} tokens`}
      {totalDur?` / ${totalDur}`:''}
     </div>
-   )}
+)}
    <div className="max-h-[400px] overflow-y-auto">
     {timeline.map((node,idx)=>(
      <TimelineNodeRenderer
@@ -276,8 +276,8 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
       onMessageClick={onMessageClick}
       isLast={idx===timeline.length-1}
      />
-    ))}
+))}
    </div>
   </div>
- )
+)
 }

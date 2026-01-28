@@ -385,7 +385,7 @@ export default function AgentListView({
       <RotateCcw size={14}/>
       <span className="ml-1">全エージェント再起動</span>
      </Button>
-    )}
+)}
 
    </div>
   </div>

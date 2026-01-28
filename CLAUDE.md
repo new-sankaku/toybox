@@ -35,39 +35,23 @@
 
 ## 修正後の動作確認方法
 
-コード修正後は以下のコマンドで動作確認を行う（サーバー起動不要）。
+コード修正後は `10_build_check.bat` を実行する（サーバー起動不要）。
 
-### フロントエンド（langgraph-studio）
+**10_build_check.batの内容:**
+1. Backend構文チェック
+2. OpenAPIスペック生成
+3. TypeScript型生成
+4. ESLint
+5. TypeScript型チェック
+
+### コミット前の追加作業
 ```bash
-cd langgraph-studio
-npm run lint              # ESLint - コード品質チェック
-npm run typecheck         # TypeScript型チェック
-npm run build             # ビルド確認
-```
+# フルビルド確認
+cd langgraph-studio && npm run build
 
-### バックエンド（backend）
-```bash
-cd backend
-python -m py_compile server.py   # 構文チェック（任意のファイル）
-```
-
-### API型の整合性チェック（バックエンド変更時）
-```bash
-cd backend && python scripts/generate_openapi.py   # OpenAPIスペック生成
-cd langgraph-studio && npm run generate-types      # TypeScript型生成
-cd langgraph-studio && npm run typecheck           # 型チェック
-```
-
-### コード圧縮（コミット前）
-```bash
-# TypeScript
-cd langgraph-studio
-npm run lint              # ESLint適用
-npm run format            # 演算子スペース削除
-
-# Python
-cd backend
-python scripts/remove-spaces.py
+# コード圧縮
+cd langgraph-studio && npm run format   # スペース削除
+cd backend && python scripts/remove-spaces.py
 ```
 
 **圧縮ルール:**

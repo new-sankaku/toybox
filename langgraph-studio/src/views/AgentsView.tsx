@@ -144,15 +144,15 @@ export default function AgentsView():JSX.Element{
     const currentAgents=useAgentStore.getState().agents
     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
     setAgents(newAgents)
-    addToast('エージェントを実行しました','success')
+    addToast('success','エージェントを実行しました')
    }
   }catch(error:unknown){
    const axiosErr=error as{response?:{status:number}}
    if(axiosErr.response?.status===429){
-    addToast('レート制限に達しました。しばらくお待ちください。','error')
+    addToast('error','レート制限に達しました。しばらくお待ちください。')
    }else{
     console.error('Failed to execute agent:',error)
-    addToast('エージェントの実行に失敗しました','error')
+    addToast('error','エージェントの実行に失敗しました')
    }
   }
  },[setAgents,addToast])
@@ -165,15 +165,15 @@ export default function AgentsView():JSX.Element{
     const currentAgents=useAgentStore.getState().agents
     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
     setAgents(newAgents)
-    addToast('エージェント（Workers含む）を実行しました','success')
+    addToast('success','エージェント（Workers含む）を実行しました')
    }
   }catch(error:unknown){
    const axiosErr=error as{response?:{status:number}}
    if(axiosErr.response?.status===429){
-    addToast('レート制限に達しました。しばらくお待ちください。','error')
+    addToast('error','レート制限に達しました。しばらくお待ちください。')
    }else{
     console.error('Failed to execute agent with workers:',error)
-    addToast('エージェントの実行に失敗しました','error')
+    addToast('error','エージェントの実行に失敗しました')
    }
   }
  },[setAgents,addToast])
@@ -197,7 +197,7 @@ export default function AgentsView():JSX.Element{
    }
   }
   if(retriedCount>0){
-   addToast(`${retriedCount}件のエージェントを再起動しました`,'success')
+   addToast('success',`${retriedCount}件のエージェントを再起動しました`)
   }
   return retriedCount
  },[projectAgents,setAgents,addToast])

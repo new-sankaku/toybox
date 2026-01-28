@@ -70,7 +70,7 @@ export default function ConfigView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
  return(
@@ -91,12 +91,12 @@ export default function ConfigView():JSX.Element{
            activeSection===section.id
             ?'bg-nier-bg-selected text-nier-text-main'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
+)}
           onClick={()=>setActiveSection(section.id)}
          >
           {section.label}
          </button>
-        ))}
+))}
        </div>
        <div className="p-3 border-t border-nier-border-light">
         <Button variant="primary" size="sm" className="w-full" onClick={handleSave} disabled={saving}>
@@ -126,16 +126,16 @@ export default function ConfigView():JSX.Element{
           className={cn(
            'w-full bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark',
            outputDirChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
-          )}
+)}
           value={outputDir}
           onChange={(e)=>setOutputDir(e.target.value)}
          />
         </div>
        </CardContent>
       </Card>
-     )}
+)}
     </div>
    </div>
   </div>
- )
+)
 }

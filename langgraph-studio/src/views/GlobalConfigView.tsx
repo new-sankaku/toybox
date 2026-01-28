@@ -50,7 +50,7 @@ function ApiKeyManagement():JSX.Element{
    const[keyData,providerData]=await Promise.all([
     apiKeyApi.list(),
     aiProviderApi.list()
-   ])
+])
    setKeys(keyData)
    setProviders(providerData)
   }catch(e){
@@ -132,10 +132,10 @@ function ApiKeyManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    {providers.map(provider=>{
     const keyInfo=getKeyInfo(provider.id)
@@ -148,7 +148,7 @@ function ApiKeyManagement():JSX.Element{
          keyInfo.validated
           ?<CheckCircle size={14} className="text-nier-accent-green"/>
           :<XCircle size={14} className="text-nier-text-header opacity-60"/>
-        )}
+)}
        </div>
        <div className="ml-auto flex items-center gap-1">
         {keyInfo&&(
@@ -161,7 +161,7 @@ function ApiKeyManagement():JSX.Element{
            <Trash2 size={12}/>
           </Button>
          </>
-        )}
+)}
        </div>
       </CardHeader>
       <CardContent className="border-t border-nier-border-light">
@@ -172,9 +172,9 @@ function ApiKeyManagement():JSX.Element{
           <span className="text-nier-text-main font-mono">{keyInfo.hint}</span>
           {keyInfo.latencyMs!=null&&(
            <span className="text-nier-caption text-nier-text-light ml-auto">{keyInfo.latencyMs}ms</span>
-          )}
+)}
          </div>
-        )}
+)}
         <div className="flex gap-2">
          <div className="flex-1 flex gap-2">
           <input
@@ -203,7 +203,7 @@ function ApiKeyManagement():JSX.Element{
        </div>
       </CardContent>
      </Card>
-    )
+)
    })}
 
    {confirmDelete&&(
@@ -222,9 +222,9 @@ function ApiKeyManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 function DataManagement():JSX.Element{
@@ -245,7 +245,7 @@ function DataManagement():JSX.Element{
     backupApi.list(),
     archiveApi.list(),
     archiveApi.getStats()
-   ])
+])
    setBackups(backupData)
    setArchives(archiveData)
    if(statsData){
@@ -356,10 +356,10 @@ function DataManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    <Card>
     <CardHeader>
@@ -372,14 +372,14 @@ function DataManagement():JSX.Element{
     <CardContent className="border-t border-nier-border-light">
      {backups.length===0?(
       <div className="text-center py-4 text-nier-text-light">バックアップがありません</div>
-     ):(
+):(
       <div className="divide-y divide-nier-border-light">
        {backups.map(b=>(
         <div key={b.name} className="flex items-center justify-between py-3">
          <div className="flex-1 min-w-0">
           <div className="text-nier-small text-nier-text-main truncate">{b.name}</div>
           <div className="text-nier-caption text-nier-text-light">
-           {formatSize(b.size)} / {formatDate(b.createdAt)}
+           {formatSize(b.size)}/{formatDate(b.createdAt)}
           </div>
          </div>
          <div className="flex items-center gap-1 ml-2">
@@ -392,9 +392,9 @@ function DataManagement():JSX.Element{
           </Button>
          </div>
         </div>
-       ))}
+))}
       </div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -444,7 +444,7 @@ function DataManagement():JSX.Element{
         </div>
        </div>
       </div>
-     )}
+)}
      <Button
       variant="default" size="sm"
       onClick={()=>setConfirmDialog({type:'cleanup'})}
@@ -463,14 +463,14 @@ function DataManagement():JSX.Element{
     <CardContent className="border-t border-nier-border-light">
      {archives.length===0?(
       <div className="text-center py-4 text-nier-text-light">アーカイブがありません</div>
-     ):(
+):(
       <div className="divide-y divide-nier-border-light">
        {archives.map(a=>(
         <div key={a.name} className="flex items-center justify-between py-3">
          <div className="flex-1 min-w-0">
           <div className="text-nier-small text-nier-text-main truncate">{a.name}</div>
           <div className="text-nier-caption text-nier-text-light">
-           {formatSize(a.size)} / {formatDate(a.createdAt)}
+           {formatSize(a.size)}/{formatDate(a.createdAt)}
           </div>
          </div>
          <div className="flex items-center gap-1 ml-2">
@@ -482,9 +482,9 @@ function DataManagement():JSX.Element{
           </Button>
          </div>
         </div>
-       ))}
+))}
       </div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -511,7 +511,7 @@ function DataManagement():JSX.Element{
       </div>
      </CardContent>
     </Card>
-   )}
+)}
 
    {confirmDialog&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -549,9 +549,9 @@ function DataManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 export default function GlobalConfigView():JSX.Element{
@@ -575,12 +575,12 @@ export default function GlobalConfigView():JSX.Element{
            activeSection===section.id
             ?'bg-nier-bg-selected text-nier-text-main'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
+)}
           onClick={()=>setActiveSection(section.id)}
          >
           {section.label}
          </button>
-        ))}
+))}
        </div>
       </CardContent>
      </Card>
@@ -592,5 +592,5 @@ export default function GlobalConfigView():JSX.Element{
     </div>
    </div>
   </div>
- )
+)
 }

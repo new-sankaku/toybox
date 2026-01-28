@@ -592,7 +592,7 @@ class DataStore:
   counts={}
   for cat_name,cat_config in categories.items():
    counts[cat_name]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
-  if "video" not in counts:
+  if"video" not in counts:
    counts["video"]={"count":0,"unit":"本","calls":0}
   for agent in agents:
    if agent["status"] not in ["completed","waiting_approval"]:

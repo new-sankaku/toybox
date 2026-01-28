@@ -93,7 +93,7 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
       <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
        {traceDetail.errorMessage}
       </div>
-     )}
+)}
      <ExpandedSection title="プロンプト送信内容" content={traceDetail.promptSent}/>
      <ExpandedSection title="LLM応答内容" content={traceDetail.llmResponse}/>
     </div>
@@ -104,10 +104,10 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
       <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
        {jobDetail.errorMessage}
       </div>
-     )}
+)}
      {jobDetail.systemPrompt&&(
       <ExpandedSection title="システムプロンプト" content={jobDetail.systemPrompt}/>
-     )}
+)}
      <ExpandedSection title="プロンプト" content={jobDetail.prompt}/>
      <ExpandedSection title="レスポンス" content={jobDetail.responseContent}/>
     </div>
@@ -118,13 +118,13 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
       <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
        {agentDetail.error}
       </div>
-     )}
+)}
      {agentDetail.currentTask&&(
       <ExpandedSection title="現在のタスク" content={agentDetail.currentTask}/>
-     )}
+)}
      {agentDetail.metadata&&(
       <ExpandedSection title="メタデータ" content={JSON.stringify(agentDetail.metadata,null,2)}/>
-     )}
+)}
     </div>
 )}
    {!loading&&!error&&!traceDetail&&!jobDetail&&!agentDetail&&(
