@@ -73,6 +73,8 @@ class ProjectAnalyzeSkill(Skill):
   path=kwargs.get("path",".")
   depth=kwargs.get("depth",3)
   include_content=kwargs.get("include_content",False)
+  config_max_depth=context.restrictions.get("max_depth",3)
+  depth=min(depth,config_max_depth)
   if path==".":
    full_path=context.working_dir
   elif os.path.isabs(path):

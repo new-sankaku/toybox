@@ -22,6 +22,7 @@ class SkillContext:
  timeout_seconds:int=60
  max_output_size:int=100000
  sandbox_enabled:bool=True
+ restrictions:Dict[str,Any]=field(default_factory=dict)
 
 
 @dataclass
