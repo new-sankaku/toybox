@@ -1,4 +1,4 @@
-export type AIProviderType='claude'|'openai'|'comfyui'|'voicevox'|'suno'|'custom'
+export type AIProviderType='claude'|'comfyui'|'tts'|'audiocraft'|'custom'
 
 export interface BaseProviderConfig{
  id:string
@@ -10,7 +10,7 @@ export interface BaseProviderConfig{
 }
 
 export interface LLMProviderConfig extends BaseProviderConfig{
- type:'claude'|'openai'
+ type:'claude'
  apiKey:string
  endpoint:string
 }
@@ -20,13 +20,13 @@ export interface ComfyUIConfig extends BaseProviderConfig{
  endpoint:string
 }
 
-export interface VoicevoxConfig extends BaseProviderConfig{
- type:'voicevox'
+export interface TTSConfig extends BaseProviderConfig{
+ type:'tts'
  endpoint:string
 }
 
-export interface MusicGeneratorConfig extends BaseProviderConfig{
- type:'suno'
+export interface AudioCraftConfig extends BaseProviderConfig{
+ type:'audiocraft'
  apiKey:string
  endpoint:string
 }
@@ -41,6 +41,6 @@ export interface CustomProviderConfig extends BaseProviderConfig{
 export type AIProviderConfig=
  |LLMProviderConfig
  |ComfyUIConfig
- |VoicevoxConfig
- |MusicGeneratorConfig
+ |TTSConfig
+ |AudioCraftConfig
  |CustomProviderConfig

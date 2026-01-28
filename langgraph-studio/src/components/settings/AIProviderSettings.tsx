@@ -11,7 +11,7 @@ import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{
  type AIProviderConfig,
  type LLMProviderConfig,
- type MusicGeneratorConfig
+ type AudioCraftConfig
 }from'@/types/aiProvider'
 import{providerHealthApi,type ApiProviderHealth}from'@/services/apiService'
 
@@ -85,7 +85,7 @@ function EndpointOnlyForm({provider,onUpdate,isFieldChanged}:{provider:{endpoint
 }
 
 
-function MusicForm({provider,onUpdate,isFieldChanged}:{provider:MusicGeneratorConfig,onUpdate:(u:Partial<MusicGeneratorConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
+function AudioCraftForm({provider,onUpdate,isFieldChanged}:{provider:AudioCraftConfig,onUpdate:(u:Partial<AudioCraftConfig>)=>void,isFieldChanged:(field:string)=>boolean}){
  const[showKey,setShowKey]=useState(false)
  const changedInputClass='border-nier-accent-red text-nier-accent-red'
  const baseInputClass='bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark'
@@ -147,13 +147,12 @@ function ProviderCard({provider,onUpdate,onToggle,isFieldChanged,health,onCheckH
  const renderForm=()=>{
   switch(provider.type){
    case'claude':
-   case'openai':
     return<LLMProviderForm provider={provider as LLMProviderConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    case'comfyui':
-   case'voicevox':
+   case'tts':
     return<EndpointOnlyForm provider={provider as{endpoint:string}} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
-   case'suno':
-    return<MusicForm provider={provider as MusicGeneratorConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
+   case'audiocraft':
+    return<AudioCraftForm provider={provider as AudioCraftConfig} onUpdate={onUpdate} isFieldChanged={isFieldChanged}/>
    default:
     return null
   }

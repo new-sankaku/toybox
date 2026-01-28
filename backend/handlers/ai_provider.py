@@ -262,6 +262,7 @@ def register_ai_provider_routes(app:Flask):
       yield f"data: {json.dumps({'content':chunk.content})}\n\n"
    except Exception as e:
     import json
+    get_logger().error(f"ストリーミングチャットエラー: {e}",exc_info=True)
     error_type=type(e).__name__
     if"AuthenticationError" in error_type:
      message="認証エラー: APIキーを確認してください"

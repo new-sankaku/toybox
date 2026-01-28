@@ -1,8 +1,9 @@
 """AIプロバイダーヘルスモニター"""
 import threading
 import time
-from typing import Dict,Optional,Callable,Any
+from typing import Dict,Optional,Callable,Any,Set
 from datetime import datetime
+from middleware.logger import get_logger
 from .base import HealthCheckResult
 from .registry import ProviderRegistry
 
@@ -80,25 +81,36 @@ class ProviderHealthMonitor:
   self._update_health_state(provider_id,result)
   return result
 
+ def _get_active_provider_ids(self)->Set[str]:
+  from ai_config import get_usage_categories
+  ids=set()
+  for cat in get_usage_categories():
+   d=cat.get('default',{})
+   pid=d.get('provider','')
+   if pid:
+    ids.add(pid)
+  return ids
+
  def _monitor_loop(self)->None:
   while self._running:
    self._check_all_providers()
    time.sleep(self._check_interval)
 
  def _check_all_providers(self)->None:
-  providers=ProviderRegistry.list_providers()
-  for provider_info in providers:
-   provider_id=provider_info["id"]
+  active_ids=self._get_active_provider_ids()
+  for provider_id in active_ids:
    if provider_id=="mock":
+    continue
+   if not ProviderRegistry.is_registered(provider_id):
     continue
    try:
     self.check_provider_now(provider_id)
-   except Exception as e:
+   except Exception:
     self._update_health_state(
      provider_id,
      HealthCheckResult(
       available=False,
-      error=str(e),
+      error="ヘルスチェック中に例外が発生しました",
       checked_at=datetime.now(),
      )
     )
@@ -111,6 +123,11 @@ class ProviderHealthMonitor:
    previous.available!=result.available
   )
   if state_changed:
+   status="available" if result.available else"unavailable"
+   msg=f"プロバイダー {provider_id} の状態が変化: {status}"
+   if result.error:
+    msg+=f" ({result.error})"
+   get_logger().info(msg)
    if self._on_health_change:
     self._on_health_change(provider_id,result)
    if self._sio:

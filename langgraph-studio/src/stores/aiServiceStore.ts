@@ -12,7 +12,7 @@ import{
  type AIProviderConfig,
  type LLMProviderConfig,
  type ComfyUIConfig,
- type MusicGeneratorConfig
+ type AudioCraftConfig
 }from'@/types/aiProvider'
 
 interface AIServiceState{
@@ -204,13 +204,13 @@ export const useAIServiceStore=create<AIServiceState>()(
       configs.push({
        id:`${pid}-music-default`,
        name:pdata.label,
-       type:providerType as MusicGeneratorConfig['type'],
+       type:providerType as AudioCraftConfig['type'],
        serviceType:'music',
        providerId:pid,
        enabled:false,
        apiKey:'',
        endpoint:''
-      }as MusicGeneratorConfig)
+      }as AudioCraftConfig)
      }
     }
     return configs

@@ -28,25 +28,7 @@ class ClaudeCodeProvider(AIProvider):
   return"Claude Code (CLI)"
 
  def get_available_models(self)->List[ModelInfo]:
-  models=self.load_models_from_config(self.provider_id)
-  if models:
-   return models
-  return [
-   ModelInfo(
-    id="opus",
-    name="Claude Opus (via CLI)",
-    max_tokens=8192,
-    supports_vision=False,
-    supports_tools=True,
-   ),
-   ModelInfo(
-    id="sonnet",
-    name="Claude Sonnet (via CLI)",
-    max_tokens=8192,
-    supports_vision=False,
-    supports_tools=True,
-   ),
-  ]
+  return self.load_models_from_config(self.provider_id)
 
  def _build_command(
   self,

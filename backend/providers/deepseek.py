@@ -21,20 +21,7 @@ class DeepSeekProvider(AIProvider):
   return"DeepSeek"
 
  def get_available_models(self)->List[ModelInfo]:
-  models=self.load_models_from_config(self.provider_id)
-  if models:
-   return models
-  return [
-   ModelInfo(
-    id="deepseek-chat",
-    name="DeepSeek Chat (V3)",
-    max_tokens=8192,
-    supports_vision=False,
-    supports_tools=True,
-    input_cost_per_1k=0.00014,
-    output_cost_per_1k=0.00028
-   ),
-  ]
+  return self.load_models_from_config(self.provider_id)
 
  def _get_client(self):
   if self._client is None:
@@ -130,8 +117,6 @@ class DeepSeekProvider(AIProvider):
   try:
    client=self._get_client()
    test_model=self.get_test_model_from_config(self.provider_id)
-   if not test_model:
-    test_model="deepseek-chat"
    response=client.chat.completions.create(
     model=test_model,
     messages=[{"role":"user","content":"Hi"}],
