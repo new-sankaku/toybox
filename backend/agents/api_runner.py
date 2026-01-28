@@ -21,6 +21,7 @@ from config_loader import (
     get_workflow_context_policy,
     get_context_policy_settings,
     load_principles_for_agent,
+    get_agent_usage_category,
 )
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
@@ -43,7 +44,7 @@ class ApiAgentRunner(AgentRunner):
 
     def __init__(
         self,
-        provider_id:str="anthropic",
+        provider_id:Optional[str]=None,
         api_key:Optional[str]=None,
         model:Optional[str]=None,
         max_tokens:int=32768,
@@ -51,17 +52,9 @@ class ApiAgentRunner(AgentRunner):
         data_store=None,
         **kwargs
     ):
-        self._provider_id=provider_id
-        env_key_map={
-            "anthropic":"ANTHROPIC_API_KEY",
-            "openai":"OPENAI_API_KEY",
-            "google":"GOOGLE_API_KEY",
-            "xai":"XAI_API_KEY",
-            "zhipu":"ZHIPU_API_KEY",
-            "deepseek":"DEEPSEEK_API_KEY",
-        }
-        self.api_key=api_key or os.environ.get(env_key_map.get(provider_id,"ANTHROPIC_API_KEY"))
-        self.model=model or get_provider_default_model(provider_id) or"claude-sonnet-4-20250514"
+        self._provider_id=provider_id or""
+        self.api_key=api_key or (os.environ.get(self._env_key_for(provider_id)) if provider_id else None)
+        self.model=model or (get_provider_default_model(provider_id) if provider_id else "") or""
         self.max_tokens=max_tokens
         self._provider=None
         self._graphs:Dict[AgentType,Any]={}
@@ -71,6 +64,18 @@ class ApiAgentRunner(AgentRunner):
         self._on_status_change:Optional[Callable[[str,AgentStatus],None]]=None
         self._data_store=data_store
         register_all_providers()
+
+    @staticmethod
+    def _env_key_for(provider_id:str)->str:
+        m={
+            "anthropic":"ANTHROPIC_API_KEY",
+            "openai":"OPENAI_API_KEY",
+            "google":"GOOGLE_API_KEY",
+            "xai":"XAI_API_KEY",
+            "zhipu":"ZHIPU_API_KEY",
+            "deepseek":"DEEPSEEK_API_KEY",
+        }
+        return m.get(provider_id,"")
 
     def set_data_store(self,data_store)->None:
         self._data_store=data_store
@@ -187,7 +192,7 @@ class ApiAgentRunner(AgentRunner):
                     agent_id=context.agent_id,
                     agent_type=agent_type.value,
                     input_context=input_ctx,
-                    model_used=self.model
+                    model_used=self._resolve_model_for_agent(context)
                 )
                 trace_id=trace.get("id")
             except Exception as e:
@@ -253,6 +258,7 @@ class ApiAgentRunner(AgentRunner):
                         llm_content,
                         agent_type.value,
                         fallback_func=self._extract_summary,
+                        project_id=context.project_id,
                     )
                     self._data_store.complete_trace(
                         trace_id=trace_id,
@@ -320,20 +326,40 @@ class ApiAgentRunner(AgentRunner):
             }
         }
 
+    def _resolve_model_for_agent(self,context:AgentContext)->str:
+        from services.llm_resolver import resolve_llm_for_project
+        agent_type_str=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+        usage_cat=get_agent_usage_category(agent_type_str)
+        resolved=resolve_llm_for_project(context.project_id,usage_cat)
+        if resolved["model"]:
+            return resolved["model"]
+        return self.model
+
+    def _resolve_provider_for_agent(self,context:AgentContext)->str:
+        from services.llm_resolver import resolve_llm_for_project
+        agent_type_str=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+        usage_cat=get_agent_usage_category(agent_type_str)
+        resolved=resolve_llm_for_project(context.project_id,usage_cat)
+        if resolved["provider"]:
+            return resolved["provider"]
+        return self._provider_id
+
     async def _call_llm(self,prompt:str,context:AgentContext,system_prompt:Optional[str]=None)->Dict[str,Any]:
         agent_max_tokens=self._get_agent_max_tokens(context.agent_type.value)
+        resolved_model=self._resolve_model_for_agent(context)
+        resolved_provider=self._resolve_provider_for_agent(context)
         job_queue=self.get_job_queue()
         job=job_queue.submit_job(
             project_id=context.project_id,
             agent_id=context.agent_id,
-            provider_id=self._provider_id,
-            model=self.model,
+            provider_id=resolved_provider,
+            model=resolved_model,
             prompt=prompt,
             max_tokens=agent_max_tokens,
             system_prompt=system_prompt,
         )
         if context.on_log:
-            context.on_log("info",f"LLMジョブ投入: {job['id']}")
+            context.on_log("info",f"LLMジョブ投入: {job['id']} model={resolved_model}")
         result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
         if not result:
             raise TimeoutError(f"LLMジョブがタイムアウトしました: {job['id']}")
@@ -344,7 +370,7 @@ class ApiAgentRunner(AgentRunner):
             "tokens_used":result["tokensInput"]+result["tokensOutput"],
             "input_tokens":result["tokensInput"],
             "output_tokens":result["tokensOutput"],
-            "model":self.model,
+            "model":resolved_model,
         }
 
     def _get_agent_max_tokens(self,agent_type:str)->int:
@@ -573,7 +599,6 @@ class ApiAgentRunner(AgentRunner):
         return get_all_prompts()
 
     def _default_prompt(self)->str:
-        """デフォルトプロンプト"""
         return"""あなたはゲーム開発の専門家です。
 
 以下の情報に基づいて、適切なドキュメントを作成してください。
@@ -612,10 +637,11 @@ class WorkerTaskResult:
     tokens_used:int=0
     input_tokens:int=0
     output_tokens:int=0
+    attempt_history:List[Dict[str,Any]]=field(default_factory=list)
+    best_attempt_index:int=0
 
 
 class LeaderWorkerOrchestrator:
-    """Leaderの分析結果に基づいてWorkerを実行し、品質チェックに応じてリトライやHuman Review要求を行う"""
 
     def __init__(
         self,
@@ -733,9 +759,6 @@ class LeaderWorkerOrchestrator:
         quality_check_enabled:bool,
         max_retries:int,
     )->WorkerTaskResult:
-        """
-        Workerを実行（品質チェック有無で分岐）
-        """
         result=WorkerTaskResult(worker_type=worker_type)
 
         try:
@@ -815,7 +838,6 @@ class LeaderWorkerOrchestrator:
         worker_type:str,
         max_retries:int=3,
     )->WorkerTaskResult:
-        """失敗時は最大max_retries回リトライ、それでも失敗ならHuman Review要求"""
         result=WorkerTaskResult(worker_type=worker_type)
 
         for retry in range(max_retries):
@@ -823,15 +845,23 @@ class LeaderWorkerOrchestrator:
             output=await self.agent_runner.run_agent(worker_context)
 
             if output.status==AgentStatus.FAILED:
+                result.attempt_history.append({
+                    "attempt":retry,"score":0.0,"output":{},"error":output.error,
+                })
                 result.error=output.error
                 continue
 
             result.output=output.output
-            qc_result=await self._perform_quality_check(output.output,worker_type)
+            qc_result=await self._perform_quality_check(output.output,worker_type,worker_context.project_id)
             result.quality_check=qc_result
+
+            result.attempt_history.append({
+                "attempt":retry,"score":qc_result.score,"output":output.output,
+            })
 
             if qc_result.passed:
                 result.status="completed"
+                result.best_attempt_index=retry
                 if qc_result.strengths:
                     get_logger().info(f"品質チェック合格 [{worker_type}] 強み: {', '.join(qc_result.strengths[:3])}")
                 return result
@@ -849,17 +879,23 @@ class LeaderWorkerOrchestrator:
                 }
                 worker_context.previous_outputs[f"{worker_type}_previous_attempt"]=retry_feedback
             else:
+                best_idx=max(range(len(result.attempt_history)),key=lambda i:result.attempt_history[i].get("score",0))
+                result.best_attempt_index=best_idx
+                best=result.attempt_history[best_idx]
+                if best.get("output"):
+                    result.output=best["output"]
+                    get_logger().info(f"品質チェック最大リトライ到達 [{worker_type}] 最良スコア={best.get('score',0):.2f} (attempt {best_idx})")
                 result.status="needs_human_review"
                 result.quality_check.human_review_needed=True
                 return result
 
         return result
 
-    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str)->QualityCheckResult:
+    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str,project_id:Optional[str]=None)->QualityCheckResult:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type)
+            return await evaluator.evaluate(output,worker_type,project_id=project_id)
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]
@@ -953,12 +989,15 @@ class LeaderWorkerOrchestrator:
                 rubric_section=principles_text[:4000]
                 system_prompt+=f"\n\n## 品質基準\n{rubric_section}"
 
+            resolved_model=self.agent_runner._resolve_model_for_agent(leader_context)
+            resolved_provider=self.agent_runner._resolve_provider_for_agent(leader_context)
+
             job_queue=self.agent_runner.get_job_queue()
             job=job_queue.submit_job(
                 project_id=leader_context.project_id,
                 agent_id=f"{leader_context.agent_id}-integration",
-                provider_id=self.agent_runner._provider_id,
-                model=self.agent_runner.model,
+                provider_id=resolved_provider,
+                model=resolved_model,
                 prompt=integration_prompt,
                 max_tokens=self.agent_runner.max_tokens,
                 system_prompt=system_prompt,
@@ -968,6 +1007,31 @@ class LeaderWorkerOrchestrator:
                 integrated["content"]=result["responseContent"]
                 integrated["metadata"]["integration_method"]="llm"
                 get_logger().info(f"LLM統合完了: {leader_context.agent_type.value}")
+
+                qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id)
+                if not qc_result.passed:
+                    get_logger().info(f"統合出力の品質チェック不合格 score={qc_result.score:.2f}、再統合実行")
+                    feedback="\n".join(f"- {s}" for s in qc_result.improvement_suggestions) if qc_result.improvement_suggestions else""
+                    retry_prompt=f"""{integration_prompt}
+
+## 品質チェックフィードバック（前回統合の指摘事項）
+{feedback}
+
+上記の指摘を踏まえ、改善した統合ドキュメントを出力してください。"""
+                    retry_job=job_queue.submit_job(
+                        project_id=leader_context.project_id,
+                        agent_id=f"{leader_context.agent_id}-integration-retry",
+                        provider_id=resolved_provider,
+                        model=resolved_model,
+                        prompt=retry_prompt,
+                        max_tokens=self.agent_runner.max_tokens,
+                        system_prompt=system_prompt,
+                    )
+                    retry_result=await job_queue.wait_for_job_async(retry_job["id"],timeout=300.0)
+                    if retry_result and retry_result["status"]=="completed":
+                        integrated["content"]=retry_result["responseContent"]
+                        integrated["metadata"]["integration_retried"]=True
+                        get_logger().info(f"統合再実行完了: {leader_context.agent_type.value}")
             else:
                 get_logger().warning(f"LLM統合失敗、マージモードで出力: {leader_context.agent_type.value}")
         except Exception as e:
