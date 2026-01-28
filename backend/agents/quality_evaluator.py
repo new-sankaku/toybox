@@ -50,6 +50,10 @@ def _build_evaluation_prompt(output_text:str,rubrics:str)->tuple:
 
 ## 指示
 上記ルーブリックの各観点について1-5のスコアで評価してください。
+加えて、Hallucination（幻覚）チェックを行ってください:
+-出力に含まれる固有名詞・数値・仕様値が、入力コンテキストに存在するか確認する
+-入力に存在しない情報が推測で追加されている場合、hallucination_warningsに記載する
+
 以下のJSON形式で回答してください。他のテキストは不要です。
 
 ```json
@@ -58,7 +62,8 @@ def _build_evaluation_prompt(output_text:str,rubrics:str)->tuple:
   "average_score":平均スコア数値,
   "failed_criteria":["スコア2以下の観点名"],
   "improvement_suggestions":["改善提案"],
-  "strengths":["良かった点"]
+  "strengths":["良かった点"],
+  "hallucination_warnings":["入力に根拠のない情報があれば記載"]
 }}
 ```"""
     return system,user
@@ -95,14 +100,20 @@ class PrincipleBasedQualityEvaluator:
             llm_result=await self._llm_evaluate(str(content),rubrics)
             threshold=self._settings.get("quality_threshold",0.6)
             normalized=llm_result.get("average_score",3.0)/5.0
-            passed=normalized>=threshold
+            hallucinations=llm_result.get("hallucination_warnings",[])
+            if hallucinations:
+                get_logger().warning(f"QualityEvaluator: Hallucination検出 [{agent_type}]: {hallucinations}")
+            all_issues=llm_result.get("improvement_suggestions",[])
+            if hallucinations:
+                all_issues=[f"[Hallucination] {h}" for h in hallucinations]+all_issues
+            passed=normalized>=threshold and not hallucinations
             return QualityCheckResult(
                 passed=passed,
-                issues=llm_result.get("improvement_suggestions",[]) if not passed else [],
+                issues=all_issues if not passed else [],
                 score=normalized,
                 retry_needed=not passed,
                 failed_criteria=llm_result.get("failed_criteria",[]),
-                improvement_suggestions=llm_result.get("improvement_suggestions",[]),
+                improvement_suggestions=all_issues,
                 strengths=llm_result.get("strengths",[]),
             )
         except Exception as e:

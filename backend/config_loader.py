@@ -293,11 +293,20 @@ def get_workflow_dependencies()->Dict[str,List[str]]:
     return result
 
 
-def get_workflow_context_policy(agent_type:str)->Dict[str,str]:
+def get_workflow_context_policy(agent_type:str)->Dict[str,Any]:
     raw=get_agents_config().get("workflow_dependencies",{})
     entry=raw.get(agent_type)
     if isinstance(entry,dict):
-        return entry.get("context_from",{})
+        context_from=entry.get("context_from",{})
+        result={}
+        for dep_key,policy in context_from.items():
+            if isinstance(policy,str):
+                result[dep_key]={"level":policy}
+            elif isinstance(policy,dict):
+                result[dep_key]=policy
+            else:
+                result[dep_key]={"level":"full"}
+        return result
     return {}
 
 
@@ -306,6 +315,17 @@ def get_agent_max_tokens(agent_type:str)->Optional[int]:
     agents=config.get("agents",{})
     agent=agents.get(agent_type,{})
     return agent.get("max_tokens")
+
+
+def get_agent_temperature(agent_type:str)->float:
+    config=get_agents_config()
+    agents=config.get("agents",{})
+    agent=agents.get(agent_type,{})
+    if"temperature" in agent:
+        return float(agent["temperature"])
+    role=agent.get("role","default")
+    temp_defaults=config.get("temperature_defaults",{})
+    return float(temp_defaults.get(role,temp_defaults.get("default",0.7)))
 
 
 def get_checkpoint_category_map()->Dict[str,str]:

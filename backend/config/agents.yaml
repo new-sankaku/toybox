@@ -216,100 +216,168 @@ workflow_dependencies:
   concept_detail:
     depends_on: [task_split_1]
     context_from:
-      task_split_1: summary
+      task_split_1:
+        level: summary
+        focus: コンセプト詳細化に必要なタスク構成と企画の核心要素
   scenario:
     depends_on: [task_split_1]
     context_from:
-      task_split_1: summary
+      task_split_1:
+        level: summary
+        focus: シナリオ構成に必要なタスク分割結果と世界観・キャラクター設定の要点
   world:
     depends_on: [task_split_1]
     context_from:
-      task_split_1: summary
+      task_split_1:
+        level: summary
+        focus: 世界観構築に必要な舞台設定・地理・文化に関するタスクと設定要素
   game_design:
     depends_on: [task_split_1]
     context_from:
-      task_split_1: summary
+      task_split_1:
+        level: summary
+        focus: ゲームシステム設計に必要なメカニクス・バランス・プレイヤー体験に関する要素
   tech_spec:
     depends_on: [task_split_1]
     context_from:
-      task_split_1: summary
+      task_split_1:
+        level: summary
+        focus: 技術仕様策定に必要なプラットフォーム・技術スタック・パフォーマンス要件
   task_split_2:
     depends_on: [concept_detail, scenario, world, game_design, tech_spec]
     context_from:
-      concept_detail: summary
-      scenario: summary
-      world: summary
-      game_design: summary
-      tech_spec: summary
+      concept_detail:
+        level: summary
+        focus: アセット制作タスク分割に必要なコンセプトの決定事項と仕様値
+      scenario:
+        level: summary
+        focus: アセット制作に必要なシーン構成・登場キャラクター・演出要件
+      world:
+        level: summary
+        focus: アセット制作に必要な世界観ビジュアル・雰囲気・環境設定
+      game_design:
+        level: summary
+        focus: アセット制作に必要なUI仕様・ゲームメカニクスが求めるビジュアル要素
+      tech_spec:
+        level: summary
+        focus: アセット制作の技術制約（解像度・フォーマット・パフォーマンス上限）
   asset_character:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: キャラクターアセット制作に関するタスク指示と仕様
   asset_background:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: 背景アセット制作に関するタスク指示と仕様
   asset_ui:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: UIアセット制作に関するタスク指示と仕様
   asset_effect:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: エフェクトアセット制作に関するタスク指示と仕様
   asset_bgm:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: BGM制作に関するタスク指示と音楽的要件
   asset_voice:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: ボイス制作に関するタスク指示とキャラクター音声要件
   asset_sfx:
     depends_on: [task_split_2]
     context_from:
-      task_split_2: full
+      task_split_2:
+        level: full
+        focus: 効果音制作に関するタスク指示とサウンド要件
   task_split_3:
     depends_on: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
     context_from:
-      asset_character: summary
-      asset_background: summary
-      asset_ui: summary
-      asset_effect: summary
-      asset_bgm: summary
-      asset_voice: summary
-      asset_sfx: summary
+      asset_character:
+        level: summary
+        focus: 実装フェーズで利用するキャラクターアセットの成果物一覧と仕様
+      asset_background:
+        level: summary
+        focus: 実装フェーズで利用する背景アセットの成果物一覧と仕様
+      asset_ui:
+        level: summary
+        focus: 実装フェーズで利用するUIアセットの成果物一覧と仕様
+      asset_effect:
+        level: summary
+        focus: 実装フェーズで利用するエフェクトアセットの成果物一覧
+      asset_bgm:
+        level: summary
+        focus: 実装フェーズで利用するBGMアセットの成果物一覧
+      asset_voice:
+        level: summary
+        focus: 実装フェーズで利用するボイスアセットの成果物一覧
+      asset_sfx:
+        level: summary
+        focus: 実装フェーズで利用する効果音アセットの成果物一覧
   code:
     depends_on: [task_split_3]
     context_from:
-      task_split_3: full
+      task_split_3:
+        level: full
+        focus: コード実装に関するタスク指示・技術仕様・利用アセット情報
   event:
     depends_on: [task_split_3]
     context_from:
-      task_split_3: full
+      task_split_3:
+        level: full
+        focus: イベント実装に関するタスク指示・シナリオ連携・演出仕様
   ui_integration:
     depends_on: [task_split_3]
     context_from:
-      task_split_3: full
+      task_split_3:
+        level: full
+        focus: UI統合に関するタスク指示・UIアセット配置・画面遷移仕様
   asset_integration:
     depends_on: [task_split_3]
     context_from:
-      task_split_3: full
+      task_split_3:
+        level: full
+        focus: アセット統合に関するタスク指示・ファイルパス・リソース管理仕様
   task_split_4:
     depends_on: [code, event, ui_integration, asset_integration]
     context_from:
-      code: summary
-      event: summary
-      ui_integration: summary
-      asset_integration: summary
+      code:
+        level: summary
+        focus: テスト対象となるコード実装の構成・エントリポイント・主要関数
+      event:
+        level: summary
+        focus: テスト対象となるイベント処理の構成と期待動作
+      ui_integration:
+        level: summary
+        focus: テスト対象となるUI統合の画面構成と操作フロー
+      asset_integration:
+        level: summary
+        focus: テスト対象となるアセット統合のリソース構成と読み込みフロー
   unit_test:
     depends_on: [task_split_4]
     context_from:
-      task_split_4: full
+      task_split_4:
+        level: full
+        focus: 単体テストに関するタスク指示・テスト対象・期待動作
   integration_test:
     depends_on: [task_split_4]
     context_from:
-      task_split_4: full
+      task_split_4:
+        level: full
+        focus: 統合テストに関するタスク指示・テストシナリオ・期待動作
 
 phases:
   phase0_concept:
@@ -404,6 +472,16 @@ context_policy_settings:
     max_tokens: 2048                 # 要約の最大出力トークン数
     min_content_length: 500          # この文字数未満なら要約せずそのまま返す
     input_max_length: 30000          # 要約LLMに渡すコンテンツの最大文字数
+
+# --- Temperature設定 ---
+# roleごとのデフォルトtemperature（個別エージェントでtemperatureを指定すれば上書き可能）
+temperature_defaults:
+  leader: 0.7
+  worker: 0.5
+  splitter: 0.3
+  integrator: 0.4
+  tester: 0.3
+  default: 0.7
 
 # --- 品質チェック ---
 quality_check_defaults:

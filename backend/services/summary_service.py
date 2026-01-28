@@ -20,7 +20,7 @@ class SummaryService:
    return
   self._initialized=True
 
- def generate_summary(self,content:str,agent_type:str,fallback_func=None)->str:
+ def generate_summary(self,content:str,agent_type:str,fallback_func=None,focus:Optional[str]=None)->str:
   if not content:
    return""
   settings=get_context_policy_settings()
@@ -30,17 +30,22 @@ class SummaryService:
     return fallback_func(content)
    return content[:settings.get("summary_max_length",10000)]
   min_len=llm_cfg.get("min_content_length",500)
-  if len(content)<min_len:
+  if len(content)<min_len and not focus:
    return content
   try:
-   return self._call_llm_summary(content,agent_type,llm_cfg)
+   return self._call_llm_summary(content,agent_type,llm_cfg,focus=focus)
   except Exception as e:
    get_logger().error(f"SummaryService LLM summary failed, using fallback: {e}",exc_info=True)
    if fallback_func:
     return fallback_func(content)
    return content[:settings.get("summary_max_length",10000)]
 
- def _call_llm_summary(self,content:str,agent_type:str,llm_cfg:dict)->str:
+ def generate_focused_extraction(self,content:str,agent_type:str,focus:str)->str:
+  if not content:
+   return""
+  return self.generate_summary(content,agent_type,focus=focus)
+
+ def _call_llm_summary(self,content:str,agent_type:str,llm_cfg:dict,focus:Optional[str]=None)->str:
   provider_id=llm_cfg.get("provider","anthropic")
   model=llm_cfg.get("model","claude-haiku-4-5-20250116")
   max_tokens=llm_cfg.get("max_tokens",2048)
@@ -57,7 +62,24 @@ class SummaryService:
   provider=get_provider(provider_id,config)
   if not provider:
    raise RuntimeError(f"Summary provider not found: {provider_id}")
-  prompt=f"""以下のエージェント出力を要約してください。
+  if focus:
+   prompt=f"""以下のエージェント出力から、指定された観点に関連する情報のみを抽出してください。
+
+抽出の観点:{focus}
+
+抽出の要件:
+-指定された観点に直接関連する情報のみを抽出する
+-関連しない情報は除外する
+-数値・名称・仕様値などの具体的データは正確に保持する
+-抽出結果はJSON形式で構造化して出力する
+-元の出力に存在しない情報を推測で追加しない
+
+エージェントタイプ:{agent_type}
+
+---出力内容---
+{content[:input_max]}"""
+  else:
+   prompt=f"""以下のエージェント出力を要約してください。
 
 要約の要件:
 -重要な決定事項を箇条書きで列挙

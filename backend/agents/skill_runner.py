@@ -430,18 +430,21 @@ tool_callブロックを含めず、成果物を出力してください。"""
   context:AgentContext,
   system_prompt:Optional[str]=None,
  )->Dict[str,Any]:
-  full_prompt="\n\n---\n\n".join([
-   f"[{m['role']}]\n{m['content']}" for m in messages
-  ])
+  from config_loader import get_agent_temperature
+  temperature=get_agent_temperature(context.agent_type.value)
+  messages_json_str=json.dumps(messages,ensure_ascii=False)
+  prompt_fallback=messages[-1].get("content","") if messages else""
   job_queue=self._base.get_job_queue()
   job=job_queue.submit_job(
    project_id=context.project_id,
    agent_id=context.agent_id,
    provider_id=self._base._provider_id,
    model=self._base.model,
-   prompt=full_prompt,
+   prompt=prompt_fallback,
    max_tokens=self._base.max_tokens,
    system_prompt=system_prompt,
+   temperature=str(temperature),
+   messages_json=messages_json_str,
   )
   result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
   if not result:
@@ -492,6 +495,41 @@ tool_callブロックを含めず、成果物を出力してください。"""
   recent_messages=messages[-keep_count:]
   if not old_messages:
    return messages
+  compacted_summary=self._generate_compaction_summary(old_messages)
+  summary_msg={"role":"user","content":f"[過去の会話要約]\n{compacted_summary}"}
+  return [first_msg,summary_msg]+recent_messages
+
+ def _generate_compaction_summary(self,old_messages:List[Dict])->str:
+  from config_loader import get_context_policy_settings
+  settings=get_context_policy_settings()
+  llm_cfg=settings.get("llm_summary",{})
+  if not llm_cfg.get("enabled",False):
+   return self._fallback_compact(old_messages)
+  try:
+   from services.summary_service import get_summary_service
+   conversation_text=self._serialize_messages_for_summary(old_messages)
+   return get_summary_service().generate_summary(
+    conversation_text,
+    "skill_compaction",
+    fallback_func=lambda c:self._fallback_compact(old_messages),
+    focus="実行したスキル名と結果、判明した事実、未解決の問題、次に行うべきアクション",
+   )
+  except Exception as e:
+   get_logger().error(f"SkillRunner: LLM compaction failed, using fallback: {e}",exc_info=True)
+   return self._fallback_compact(old_messages)
+
+ def _serialize_messages_for_summary(self,messages:List[Dict])->str:
+  parts=[]
+  for m in messages:
+   role=m["role"]
+   content=m["content"]
+   if role=="assistant":
+    parts.append(f"[assistant] {content[:2000]}")
+   elif role=="user":
+    parts.append(f"[user] {content[:2000]}")
+  return"\n---\n".join(parts)
+
+ def _fallback_compact(self,old_messages:List[Dict])->str:
   summary_parts=[]
   for m in old_messages:
    role=m["role"]
@@ -512,9 +550,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
      summary_parts.append(f"[system] {content[:self._compact_system_max]}")
     else:
      summary_parts.append(f"[user] {content[:self._compact_user_max]}...")
-  compacted_summary="\n".join(summary_parts)
-  summary_msg={"role":"user","content":f"[過去の会話要約]\n以下は過去のイテレーションの要約です:\n{compacted_summary}"}
-  return [first_msg,summary_msg]+recent_messages
+  return"\n".join(summary_parts)
 
  def _process_final_response(self,response:Dict[str,Any],context:AgentContext)->Dict[str,Any]:
   return {

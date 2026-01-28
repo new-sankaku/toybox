@@ -18,6 +18,7 @@ from config_loader import (
     get_api_runner_checkpoint_config,
     get_provider_default_model,
     get_agent_max_tokens,
+    get_agent_temperature,
     get_workflow_context_policy,
     get_context_policy_settings,
     load_principles_for_agent,
@@ -322,6 +323,7 @@ class ApiAgentRunner(AgentRunner):
 
     async def _call_llm(self,prompt:str,context:AgentContext,system_prompt:Optional[str]=None)->Dict[str,Any]:
         agent_max_tokens=self._get_agent_max_tokens(context.agent_type.value)
+        temperature=get_agent_temperature(context.agent_type.value)
         job_queue=self.get_job_queue()
         job=job_queue.submit_job(
             project_id=context.project_id,
@@ -331,6 +333,7 @@ class ApiAgentRunner(AgentRunner):
             prompt=prompt,
             max_tokens=agent_max_tokens,
             system_prompt=system_prompt,
+            temperature=str(temperature),
         )
         if context.on_log:
             context.on_log("info",f"LLMジョブ投入: {job['id']}")
@@ -372,41 +375,37 @@ class ApiAgentRunner(AgentRunner):
                 filtered_outputs={"leader":{"content":leader_content[:leader_max]}}
         previous_text=self._format_previous_outputs(filtered_outputs)
 
-        prompt=base_prompt.format(
-            project_concept="（system promptに記載）",
-            previous_outputs=previous_text,
-        )
-
-        if context.assigned_task:
-            prompt=f"""## あなたへの指示（Leader からの割当タスク）
-{context.assigned_task}
-
-{prompt}"""
-
+        prompt_parts=[]
+        prompt_parts.append(f"## 参照データ\n{previous_text}")
         retry_key=f"{agent_type}_previous_attempt"
         if retry_key in context.previous_outputs:
             attempt=context.previous_outputs[retry_key]
             issues=attempt.get("issues",[])
             failed_criteria=attempt.get("failed_criteria",[])
             suggestions=attempt.get("improvement_suggestions",[])
-            prev_output=attempt.get("previous_output","")
             if issues or failed_criteria:
-                prompt+="\n\n## 前回の品質チェック結果（修正が必要）"
+                retry_parts=["## 前回の品質チェック結果（修正が必要）"]
                 if failed_criteria:
                     criteria_text="\n".join(f"- {c}" for c in failed_criteria)
-                    prompt+=f"\n### 不合格の評価基準:\n{criteria_text}"
+                    retry_parts.append(f"### 不合格の評価基準:\n{criteria_text}")
                 if suggestions:
                     suggestions_text="\n".join(f"- {s}" for s in suggestions)
-                    prompt+=f"\n### 改善提案:\n{suggestions_text}"
+                    retry_parts.append(f"### 改善提案:\n{suggestions_text}")
                 elif issues:
                     issues_text="\n".join(f"- {i}" for i in issues)
-                    prompt+=f"\n### 問題点:\n{issues_text}"
-                if prev_output:
-                    prompt+=f"\n### 前回の出力（修正のベースにしてください）:\n{prev_output}"
-
+                    retry_parts.append(f"### 問題点:\n{issues_text}")
+                prompt_parts.append("\n".join(retry_parts))
+        task_prompt=base_prompt.format(
+            project_concept="（system promptに記載）",
+            previous_outputs="（上記の参照データを参照）",
+        )
+        if context.assigned_task:
+            prompt_parts.append(f"## あなたへの指示（Leader からの割当タスク）\n{context.assigned_task}")
+        prompt_parts.append(task_prompt)
+        prompt="\n\n".join(prompt_parts)
         return system_prompt,prompt
 
-    def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,str])->Dict[str,Any]:
+    def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,Any])->Dict[str,Any]:
         if not policy:
             return outputs
         settings=get_context_policy_settings()
@@ -416,21 +415,29 @@ class ApiAgentRunner(AgentRunner):
         for agent_key,output in outputs.items():
             if agent_key.endswith("_previous_attempt"):
                 continue
-            level=policy.get(agent_key,"full")
+            agent_policy=policy.get(agent_key,{"level":"full"})
+            if isinstance(agent_policy,str):
+                agent_policy={"level":agent_policy}
+            level=agent_policy.get("level","full")
+            focus=agent_policy.get("focus")
             if level=="none":
                 continue
-            if level=="full" and isinstance(output,dict) and output.get("content"):
-                content_len=len(str(output["content"]))
-                if content_len>auto_downgrade:
-                    get_logger().info(f"context auto-downgrade: {agent_key} ({content_len}文字) full→summary")
-                    level="summary"
-            if level=="summary":
+            content_str=""
+            if isinstance(output,dict) and output.get("content"):
+                content_str=str(output["content"])
+            if level=="full" and content_str and len(content_str)>auto_downgrade:
+                get_logger().info(f"context auto-downgrade: {agent_key} ({len(content_str)}文字) full→summary")
+                level="summary"
+            if focus and content_str:
+                from services.summary_service import get_summary_service
+                focused=get_summary_service().generate_focused_extraction(content_str,agent_key,focus)
+                filtered[agent_key]={"content":focused,"focus":focus}
+            elif level=="summary":
                 if isinstance(output,dict) and output.get("summary"):
                     filtered[agent_key]={"content":output["summary"]}
-                elif isinstance(output,dict) and output.get("content"):
-                    content=str(output["content"])
-                    if len(content)>summary_max:
-                        filtered[agent_key]={"content":content[:summary_max]+"\n\n（以降省略）"}
+                elif content_str:
+                    if len(content_str)>summary_max:
+                        filtered[agent_key]={"content":content_str[:summary_max]+"\n\n（以降省略）"}
                     else:
                         filtered[agent_key]=output
                 else:
@@ -442,15 +449,16 @@ class ApiAgentRunner(AgentRunner):
     def _format_previous_outputs(self,outputs:Dict[str,Any])->str:
         if not outputs:
             return"（なし）"
-
-        parts=[]
+        import json
+        structured={}
         for agent,output in outputs.items():
             if isinstance(output,dict) and"content" in output:
-                parts.append(f"## {agent}の出力\n{output['content']}")
+                structured[agent]={"content":output["content"]}
+                if output.get("focus"):
+                    structured[agent]["extraction_focus"]=output["focus"]
             else:
-                parts.append(f"## {agent}の出力\n{output}")
-
-        return"\n\n".join(parts)
+                structured[agent]={"content":str(output)}
+        return f"```json\n{json.dumps(structured,ensure_ascii=False,indent=1)}\n```"
 
     def _extract_summary(self,content:str,max_length:int=0)->str:
         if max_length<=0:
@@ -459,15 +467,17 @@ class ApiAgentRunner(AgentRunner):
         if not content:
             return""
         import re
+        import json
         json_match=re.search(r'```json\s*([\s\S]*?)\s*```',content)
         if json_match:
-            import json
             try:
                 data=json.loads(json_match.group(1))
-                keys_to_keep=["summary","title","name","description","type","tasks","worker_tasks"]
-                filtered={k:v for k,v in data.items() if k in keys_to_keep}
-                if filtered:
-                    return json.dumps(filtered,ensure_ascii=False)[:max_length]
+                full_json=json.dumps(data,ensure_ascii=False)
+                if len(full_json)<=max_length:
+                    return full_json
+                exclude_keys={"reasoning","thinking","explanation","details","verbose","raw"}
+                filtered={k:v for k,v in data.items() if k not in exclude_keys}
+                return json.dumps(filtered,ensure_ascii=False)[:max_length]
             except (json.JSONDecodeError,AttributeError):
                 pass
         headers=re.findall(r'^#{1,3}\s+(.+)$',content,re.MULTILINE)
@@ -839,11 +849,8 @@ class LeaderWorkerOrchestrator:
             get_logger().info(f"品質チェック不合格 [{worker_type}] score={qc_result.score:.2f} retry={retry+1}/{max_retries}")
             if retry<max_retries-1:
                 result.status="needs_retry"
-                prev_content=output.output.get("content","")
-                retry_max=get_context_policy_settings().get("retry_previous_output_max",3000)
                 retry_feedback={
                     "issues":qc_result.issues,
-                    "previous_output":prev_content[:retry_max],
                     "failed_criteria":qc_result.failed_criteria,
                     "improvement_suggestions":qc_result.improvement_suggestions,
                 }
