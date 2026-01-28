@@ -68,6 +68,8 @@ class LlmJobQueue:
   priority:int=0,
   callback:Optional[Callable[[Dict],None]]=None,
   system_prompt:Optional[str]=None,
+  temperature:Optional[str]=None,
+  messages_json:Optional[str]=None,
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
@@ -90,6 +92,8 @@ class LlmJobQueue:
     max_tokens=max_tokens,
     priority=priority,
     system_prompt=system_prompt,
+    temperature=temperature,
+    messages_json=messages_json,
    )
    if callback:
     self._job_callbacks[job["id"]]=callback
@@ -200,10 +204,27 @@ class LlmJobQueue:
      self._notify_completion(job_id)
      return
     messages=[]
-    if job.system_prompt:
-     messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
-    messages.append(ChatMessage(role=MessageRole.USER,content=job.prompt))
-    response=provider.chat(messages=messages,model=job.model,max_tokens=job.max_tokens)
+    if job.messages_json:
+     import json
+     raw_msgs=json.loads(job.messages_json)
+     if job.system_prompt:
+      messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
+     for m in raw_msgs:
+      role_str=m.get("role","user")
+      if role_str=="system":
+       messages.append(ChatMessage(role=MessageRole.SYSTEM,content=m["content"]))
+      elif role_str=="assistant":
+       messages.append(ChatMessage(role=MessageRole.ASSISTANT,content=m["content"]))
+      else:
+       messages.append(ChatMessage(role=MessageRole.USER,content=m["content"]))
+    else:
+     if job.system_prompt:
+      messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
+     messages.append(ChatMessage(role=MessageRole.USER,content=job.prompt))
+    chat_kwargs={"messages":messages,"model":job.model,"max_tokens":job.max_tokens}
+    if job.temperature:
+     chat_kwargs["temperature"]=float(job.temperature)
+    response=provider.chat(**chat_kwargs)
     repo.complete_job(
      job_id=job_id,
      response_content=response.content,

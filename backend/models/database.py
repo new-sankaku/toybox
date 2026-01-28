@@ -49,6 +49,12 @@ def _run_migrations():
   if"system_prompt" not in columns:
    with engine.begin() as conn:
     conn.execute(text("ALTER TABLE llm_jobs ADD COLUMN system_prompt TEXT"))
+  if"temperature" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE llm_jobs ADD COLUMN temperature VARCHAR(10)"))
+  if"messages_json" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE llm_jobs ADD COLUMN messages_json TEXT"))
  if"agent_traces" in inspector.get_table_names():
   columns={c["name"] for c in inspector.get_columns("agent_traces")}
   if"output_summary" not in columns:

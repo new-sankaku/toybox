@@ -19,7 +19,7 @@ class SummaryService:
    return
   self._initialized=True
 
- def generate_summary(self,content:str,agent_type:str,fallback_func=None,project_id:Optional[str]=None)->str:
+ def generate_summary(self,content:str,agent_type:str,fallback_func=None,project_id:Optional[str]=None,focus:Optional[str]=None)->str:
   if not content:
    return""
   settings=get_context_policy_settings()
@@ -29,17 +29,22 @@ class SummaryService:
     return fallback_func(content)
    return content[:settings.get("summary_max_length",10000)]
   min_len=llm_cfg.get("min_content_length",500)
-  if len(content)<min_len:
+  if len(content)<min_len and not focus:
    return content
   try:
-   return self._call_llm_summary(content,agent_type,llm_cfg,project_id)
+   return self._call_llm_summary(content,agent_type,llm_cfg,project_id,focus=focus)
   except Exception as e:
    get_logger().error(f"SummaryService LLM summary failed, using fallback: {e}",exc_info=True)
    if fallback_func:
     return fallback_func(content)
    return content[:settings.get("summary_max_length",10000)]
 
- def _call_llm_summary(self,content:str,agent_type:str,llm_cfg:dict,project_id:Optional[str]=None)->str:
+ def generate_focused_extraction(self,content:str,agent_type:str,focus:str,project_id:Optional[str]=None)->str:
+  if not content:
+   return""
+  return self.generate_summary(content,agent_type,project_id=project_id,focus=focus)
+
+ def _call_llm_summary(self,content:str,agent_type:str,llm_cfg:dict,project_id:Optional[str]=None,focus:Optional[str]=None)->str:
   from services.llm_resolver import resolve_llm_for_project,resolve_with_env_key
 
   usage_category=llm_cfg.get("usage_category","llm_low")
@@ -59,12 +64,29 @@ class SummaryService:
   if not provider:
    raise RuntimeError(f"Summary provider not found: {provider_id}")
 
-  directive=get_summary_directive()
-  directive_section=""
-  if directive:
-   directive_section=f"\n\n## 保持方針\n{directive}"
+  if focus:
+   prompt=f"""以下のエージェント出力から、指定された観点に関連する情報のみを抽出してください。
 
-  prompt=f"""以下のエージェント出力を要約してください。
+抽出の観点:{focus}
+
+抽出の要件:
+-指定された観点に直接関連する情報のみを抽出する
+-関連しない情報は除外する
+-数値・名称・仕様値などの具体的データは正確に保持する
+-抽出結果はJSON形式で構造化して出力する
+-元の出力に存在しない情報を推測で追加しない
+
+エージェントタイプ:{agent_type}
+
+---出力内容---
+{content[:input_max]}"""
+  else:
+   directive=get_summary_directive()
+   directive_section=""
+   if directive:
+    directive_section=f"\n\n## 保持方針\n{directive}"
+
+   prompt=f"""以下のエージェント出力を要約してください。
 
 要約の要件:
 -重要な決定事項を箇条書きで列挙

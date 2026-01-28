@@ -21,6 +21,8 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   max_tokens:int=32768,
   priority:int=0,
   system_prompt:Optional[str]=None,
+  temperature:Optional[str]=None,
+  messages_json:Optional[str]=None,
  )->Dict[str,Any]:
   job=LlmJob(
    id=f"job-{uuid.uuid4().hex[:12]}",
@@ -30,7 +32,9 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    model=model,
    system_prompt=system_prompt,
    prompt=prompt,
+   messages_json=messages_json,
    max_tokens=max_tokens,
+   temperature=temperature,
    priority=priority,
    status="pending",
    created_at=datetime.now(),
@@ -142,6 +146,8 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    "systemPrompt":job.system_prompt,
    "prompt":job.prompt,
    "maxTokens":job.max_tokens,
+   "temperature":job.temperature,
+   "messagesJson":job.messages_json,
    "responseContent":job.response_content,
    "tokensInput":job.tokens_input,
    "tokensOutput":job.tokens_output,
