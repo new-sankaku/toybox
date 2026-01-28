@@ -1,9 +1,7 @@
-import{useState,useEffect,useCallback}from'react'
-import{ChevronDown,ChevronRight}from'lucide-react'
-import{cn}from'@/lib/utils'
+import{useEffect,useCallback,useState}from'react'
 import{FloatingPanel}from'@/components/ui/FloatingPanel'
-import{traceApi,llmJobApi}from'@/services/apiService'
-import type{ApiAgentTrace,ApiLlmJob}from'@/services/apiService'
+import{traceApi,llmJobApi,agentApi}from'@/services/apiService'
+import type{ApiAgentTrace,ApiLlmJob,ApiAgent}from'@/services/apiService'
 import type{SequenceMessage}from'@/types/agent'
 
 interface SequenceDetailPanelProps{
@@ -12,47 +10,24 @@ interface SequenceDetailPanelProps{
  selectedMessage:SequenceMessage|null
 }
 
-function CollapsibleSection({title,content}:{title:string;content:string|null}){
- const[open,setOpen]=useState(false)
+function ExpandedSection({title,content}:{title:string;content:string|null}){
  if(!content)return null
  return(
   <div className="border border-nier-border-light">
-   <button
-    className="flex items-center gap-1 w-full px-2 py-1 text-left text-nier-caption text-nier-text-main hover:bg-nier-bg-main/40 transition-colors"
-    onClick={()=>setOpen(!open)}
-   >
-    {open?<ChevronDown size={12}/>:<ChevronRight size={12}/>}
+   <div className="px-2 py-1 text-nier-caption text-nier-text-main bg-nier-bg-panel border-b border-nier-border-light">
     {title}
-   </button>
-   {open&&(
-    <div className="px-2 py-1 border-t border-nier-border-light bg-nier-bg-selected max-h-[300px] overflow-y-auto">
-     <pre className="text-[10px] text-nier-text-light whitespace-pre-wrap break-all font-mono leading-relaxed">{content}</pre>
-    </div>
-)}
+   </div>
+   <div className="px-2 py-1 bg-nier-bg-selected overflow-y-auto" style={{maxHeight:'40vh'}}>
+    <pre className="text-[10px] text-nier-text-light whitespace-pre-wrap break-all font-mono leading-relaxed">{content}</pre>
+   </div>
   </div>
 )
-}
-
-function InfoRow({label,value}:{label:string;value:string|number|null|undefined}){
- if(value===null||value===undefined||value==='')return null
- return(
-  <div className="flex gap-2 text-nier-caption">
-   <span className="text-nier-text-light flex-shrink-0 w-24">{label}</span>
-   <span className="text-nier-text-main">{value}</span>
-  </div>
-)
-}
-
-function durationStr(startedAt:string|null|undefined,completedAt:string|null|undefined):string|null{
- if(!startedAt||!completedAt)return null
- const ms=new Date(completedAt).getTime()-new Date(startedAt).getTime()
- if(ms<1000)return`${ms}ms`
- return`${(ms/1000).toFixed(1)}s`
 }
 
 export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDetailPanelProps){
  const[traceDetail,setTraceDetail]=useState<ApiAgentTrace|null>(null)
  const[jobDetail,setJobDetail]=useState<ApiLlmJob|null>(null)
+ const[agentDetail,setAgentDetail]=useState<ApiAgent|null>(null)
  const[loading,setLoading]=useState(false)
  const[error,setError]=useState<string|null>(null)
 
@@ -62,6 +37,7 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
   setError(null)
   setTraceDetail(null)
   setJobDetail(null)
+  setAgentDetail(null)
   try{
    if(msg.sourceType==='trace'){
     const data=await traceApi.get(msg.sourceId)
@@ -69,6 +45,9 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
    }else if(msg.sourceType==='job'){
     const data=await llmJobApi.get(msg.sourceId)
     setJobDetail(data)
+   }else if(msg.sourceType==='agent'){
+    const data=await agentApi.get(msg.sourceId)
+    setAgentDetail(data)
    }
   }catch{
    setError('詳細データの取得に失敗しました')
@@ -84,7 +63,9 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
  },[isOpen,selectedMessage?.sourceId,selectedMessage?.sourceType,fetchDetail])
 
  const title=selectedMessage?
-  (selectedMessage.sourceType==='trace'?'トレース詳細':'LLMジョブ詳細')
+  (selectedMessage.sourceType==='trace'?'トレース詳細':
+   selectedMessage.sourceType==='job'?'LLMジョブ詳細':
+   selectedMessage.sourceType==='agent'?'エージェント詳細':'詳細')
   :'詳細'
 
  return(
@@ -94,6 +75,7 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
    title={title}
    size="lg"
    panelId="sequence-detail"
+   resizable
   >
    {loading&&(
     <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
@@ -107,40 +89,45 @@ export function SequenceDetailPanel({isOpen,onClose,selectedMessage}:SequenceDet
 )}
    {!loading&&!error&&traceDetail&&(
     <div className="space-y-2">
-     <InfoRow label="モデル" value={traceDetail.modelUsed}/>
-     <InfoRow label="ステータス" value={traceDetail.status}/>
-     <InfoRow label="入力トークン" value={traceDetail.tokensInput?.toLocaleString()}/>
-     <InfoRow label="出力トークン" value={traceDetail.tokensOutput?.toLocaleString()}/>
-     <InfoRow label="所要時間" value={durationStr(traceDetail.startedAt,traceDetail.completedAt)}/>
      {traceDetail.errorMessage&&(
-      <InfoRow label="エラー" value={traceDetail.errorMessage}/>
-)}
-     <div className="pt-1 space-y-1">
-      <CollapsibleSection title="プロンプト送信内容" content={traceDetail.promptSent}/>
-      <CollapsibleSection title="LLM応答内容" content={traceDetail.llmResponse}/>
-     </div>
+      <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
+       {traceDetail.errorMessage}
+      </div>
+     )}
+     <ExpandedSection title="プロンプト送信内容" content={traceDetail.promptSent}/>
+     <ExpandedSection title="LLM応答内容" content={traceDetail.llmResponse}/>
     </div>
 )}
    {!loading&&!error&&jobDetail&&(
     <div className="space-y-2">
-     <InfoRow label="モデル" value={jobDetail.model}/>
-     <InfoRow label="ステータス" value={jobDetail.status}/>
-     <InfoRow label="入力トークン" value={jobDetail.tokensInput?.toLocaleString()}/>
-     <InfoRow label="出力トークン" value={jobDetail.tokensOutput?.toLocaleString()}/>
-     <InfoRow label="所要時間" value={durationStr(jobDetail.createdAt,jobDetail.completedAt)}/>
      {jobDetail.errorMessage&&(
-      <InfoRow label="エラー" value={jobDetail.errorMessage}/>
-)}
-     <div className="pt-1 space-y-1">
-      {jobDetail.systemPrompt&&(
-       <CollapsibleSection title="システムプロンプト" content={jobDetail.systemPrompt}/>
-)}
-      <CollapsibleSection title="プロンプト" content={jobDetail.prompt}/>
-      <CollapsibleSection title="レスポンス" content={jobDetail.responseContent}/>
-     </div>
+      <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
+       {jobDetail.errorMessage}
+      </div>
+     )}
+     {jobDetail.systemPrompt&&(
+      <ExpandedSection title="システムプロンプト" content={jobDetail.systemPrompt}/>
+     )}
+     <ExpandedSection title="プロンプト" content={jobDetail.prompt}/>
+     <ExpandedSection title="レスポンス" content={jobDetail.responseContent}/>
     </div>
 )}
-   {!loading&&!error&&!traceDetail&&!jobDetail&&(
+   {!loading&&!error&&agentDetail&&(
+    <div className="space-y-2">
+     {agentDetail.error&&(
+      <div className="px-2 py-1 text-nier-caption text-nier-accent-red border border-nier-accent-red bg-nier-bg-selected">
+       {agentDetail.error}
+      </div>
+     )}
+     {agentDetail.currentTask&&(
+      <ExpandedSection title="現在のタスク" content={agentDetail.currentTask}/>
+     )}
+     {agentDetail.metadata&&(
+      <ExpandedSection title="メタデータ" content={JSON.stringify(agentDetail.metadata,null,2)}/>
+     )}
+    </div>
+)}
+   {!loading&&!error&&!traceDetail&&!jobDetail&&!agentDetail&&(
     <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
      メッセージを選択してください
     </div>

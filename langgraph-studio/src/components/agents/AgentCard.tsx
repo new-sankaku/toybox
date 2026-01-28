@@ -2,7 +2,7 @@ import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
 import{useUIConfigStore}from'@/stores/uiConfigStore'
-import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Ban,Zap}from'lucide-react'
+import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Zap}from'lucide-react'
 
 interface AgentCardProps{
  agent:Agent
@@ -53,25 +53,11 @@ const statusConfig={
   text:'エラー',
   pulse:false
  },
- blocked:{
-  color:'bg-nier-accent-red',
-  textColor:'text-nier-text-light',
-  icon:Pause,
-  text:'ブロック',
-  pulse:false
- },
  interrupted:{
   color:'bg-nier-accent-orange',
   textColor:'text-nier-text-light',
   icon:Zap,
   text:'中断',
-  pulse:false
- },
- cancelled:{
-  color:'bg-nier-border-dark',
-  textColor:'text-nier-text-light',
-  icon:Ban,
-  text:'キャンセル',
   pulse:false
  },
  paused:{
@@ -115,7 +101,7 @@ export function AgentCard({
  const{getAgentRole,getRoleLabel}=useUIConfigStore()
  const role=getAgentRole(agent.type)
  const roleLabel=getRoleLabel(role)
- const isRetryable=agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled'
+ const isRetryable=agent.status==='failed'||agent.status==='interrupted'
 
  const getRuntime=()=>{
   if(!agent.startedAt)return'-'
@@ -137,11 +123,9 @@ export function AgentCard({
   }
   if(agent.status==='waiting_approval')return'承認待ち'
   if(agent.status==='pending')return waitingFor||'開始待機'
-  if(agent.status==='blocked')return'ブロック'
   if(agent.status==='completed')return'完了'
   if(agent.status==='failed')return agent.error||'エラー発生'
   if(agent.status==='interrupted')return agent.currentTask||'サーバー再起動により中断'
-  if(agent.status==='cancelled')return'キャンセル済み'
   if(agent.status==='paused')return'一時停止中'
   if(agent.status==='waiting_response')return'応答待ち'
   if(agent.status==='waiting_provider')return'プロバイダ待ち'

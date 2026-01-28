@@ -3,15 +3,10 @@ import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{Save,RefreshCw,AlertTriangle,FolderOpen}from'lucide-react'
+import{Save,FolderOpen}from'lucide-react'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
-import{AIProviderSettings}from'@/components/settings/AIProviderSettings'
-import{CostSettings}from'@/components/settings/CostSettings'
-import{ApiKeySettings}from'@/components/settings/ApiKeySettings'
 import{useProjectStore}from'@/stores/projectStore'
-import{useAIServiceStore}from'@/stores/aiServiceStore'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
-import{useCostSettingsStore}from'@/stores/costSettingsStore'
 import{projectSettingsApi}from'@/services/apiService'
 
 interface ConfigSection{
@@ -20,23 +15,17 @@ interface ConfigSection{
 }
 
 const configSections:ConfigSection[]=[
- {id:'ai-services',label:'AIサービス設定'},
  {id:'auto-approval',label:'自動承認設定'},
- {id:'cost',label:'コスト設定'},
- {id:'output',label:'出力設定'},
- {id:'api-keys',label:'APIキー管理'}
+ {id:'output',label:'出力設定'}
 ]
 
 export default function ConfigView():JSX.Element{
  const{currentProject}=useProjectStore()
- const{saveProviderConfigs,resetProviderConfigs}=useAIServiceStore()
  const{saveToServer:saveAutoApproval}=useAutoApprovalStore()
- const{saveToServer:saveCostSettings,resetToDefaults:resetCostSettings}=useCostSettingsStore()
- const[activeSection,setActiveSection]=useState('ai-services')
+ const[activeSection,setActiveSection]=useState('auto-approval')
  const[outputDir,setOutputDir]=useState('./output')
  const[originalOutputDir,setOriginalOutputDir]=useState('./output')
  const[saving,setSaving]=useState(false)
- const[showResetDialog,setShowResetDialog]=useState(false)
  const outputDirChanged=outputDir!==originalOutputDir
 
  const loadOutputSettings=useCallback(async()=>{
@@ -59,9 +48,7 @@ export default function ConfigView():JSX.Element{
   if(!currentProject)return
   setSaving(true)
   try{
-   await saveProviderConfigs(currentProject.id)
    await saveAutoApproval()
-   await saveCostSettings(currentProject.id)
    await projectSettingsApi.updateOutputSettings(currentProject.id,{default_dir:outputDir})
    setOriginalOutputDir(outputDir)
   }catch(error){
@@ -69,20 +56,7 @@ export default function ConfigView():JSX.Element{
   }finally{
    setSaving(false)
   }
- },[currentProject,saveProviderConfigs,saveAutoApproval,saveCostSettings,outputDir])
-
- const handleReset=useCallback(()=>{
-  switch(activeSection){
-   case'ai-services':
-    resetProviderConfigs()
-    break
-   case'cost':
-    resetCostSettings()
-    break
-  }
- },[activeSection,resetProviderConfigs,resetCostSettings])
-
- const hasReset=activeSection==='ai-services'||activeSection==='cost'
+ },[currentProject,saveAutoApproval,outputDir])
 
  if(!currentProject){
   return(
@@ -96,7 +70,7 @@ export default function ConfigView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-)
+  )
  }
 
  return(
@@ -105,7 +79,7 @@ export default function ConfigView():JSX.Element{
     <div className="w-48 flex-shrink-0 flex flex-col overflow-hidden">
      <Card className="flex flex-col overflow-hidden">
       <CardHeader>
-       <DiamondMarker>設定カテゴリ</DiamondMarker>
+       <DiamondMarker>プロジェクト設定</DiamondMarker>
       </CardHeader>
       <CardContent className="p-0">
        <div className="divide-y divide-nier-border-light">
@@ -117,20 +91,14 @@ export default function ConfigView():JSX.Element{
            activeSection===section.id
             ?'bg-nier-bg-selected text-nier-text-main'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-)}
+          )}
           onClick={()=>setActiveSection(section.id)}
          >
           {section.label}
          </button>
-))}
+        ))}
        </div>
-       <div className="p-3 border-t border-nier-border-light space-y-2">
-        {hasReset&&(
-         <Button variant="ghost" size="sm" className="w-full" onClick={()=>setShowResetDialog(true)}>
-          <RefreshCw size={14}/>
-          <span className="ml-1">リセット</span>
-         </Button>
-)}
+       <div className="p-3 border-t border-nier-border-light">
         <Button variant="primary" size="sm" className="w-full" onClick={handleSave} disabled={saving}>
          <Save size={14}/>
          <span className="ml-1">{saving?'保存中...':'保存'}</span>
@@ -141,13 +109,7 @@ export default function ConfigView():JSX.Element{
     </div>
 
     <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
-     {activeSection==='ai-services'&&<AIProviderSettings projectId={currentProject.id}/>}
-
      {activeSection==='auto-approval'&&<AutoApprovalSettings projectId={currentProject.id}/>}
-
-     {activeSection==='cost'&&<CostSettings projectId={currentProject.id}/>}
-
-     {activeSection==='api-keys'&&<ApiKeySettings projectId={currentProject.id}/>}
 
      {activeSection==='output'&&(
       <Card>
@@ -164,52 +126,16 @@ export default function ConfigView():JSX.Element{
           className={cn(
            'w-full bg-nier-bg-panel border px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark',
            outputDirChanged?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light'
-)}
+          )}
           value={outputDir}
           onChange={(e)=>setOutputDir(e.target.value)}
          />
         </div>
        </CardContent>
       </Card>
-)}
+     )}
     </div>
    </div>
-
-   {/*Reset Confirmation Dialog*/}
-   {showResetDialog&&(
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-     <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
-      <CardHeader>
-       <div className="flex items-center gap-2 text-nier-text-main">
-        <AlertTriangle size={18}/>
-        <span>リセットの確認</span>
-       </div>
-      </CardHeader>
-      <CardContent>
-       <p className="text-nier-body mb-4">
-        {activeSection==='ai-services'?'AIサービス設定':'コスト設定'}をデフォルト値にリセットしますか？
-       </p>
-       <p className="text-nier-small text-nier-text-main mb-6">
-        現在の設定は失われます。
-       </p>
-       <div className="flex gap-3 justify-end">
-        <Button variant="secondary" onClick={()=>setShowResetDialog(false)}>
-         キャンセル
-        </Button>
-        <Button
-         variant="danger"
-         onClick={()=>{
-          handleReset()
-          setShowResetDialog(false)
-         }}
-        >
-         リセットする
-        </Button>
-       </div>
-      </CardContent>
-     </Card>
-    </div>
-)}
   </div>
-)
+ )
 }

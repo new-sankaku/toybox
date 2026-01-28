@@ -96,7 +96,7 @@ def register_admin_routes(app:Flask,backup_service,archive_service):
    result=provider.test_connection()
    latency=int((time.time()-start_time)*1000)
    is_valid=result.get("success",False)
-   repo.update_validation_status(provider_id,is_valid)
+   repo.update_validation_status(provider_id,is_valid,latency)
    session.commit()
    return jsonify({"success":is_valid,"message":result.get("message",""),"latency":latency})
   except Exception as e:

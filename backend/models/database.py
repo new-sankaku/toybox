@@ -60,6 +60,11 @@ def _run_migrations():
   if"output_summary" not in columns:
    with engine.begin() as conn:
     conn.execute(text("ALTER TABLE agent_traces ADD COLUMN output_summary TEXT"))
+ if"api_key_store" in inspector.get_table_names():
+  columns={c["name"] for c in inspector.get_columns("api_key_store")}
+  if"latency_ms" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE api_key_store ADD COLUMN latency_ms INTEGER"))
 
 def init_db():
  from .tables import Base

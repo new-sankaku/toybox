@@ -1,12 +1,12 @@
 import{useState,useMemo,useCallback,useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
+import{Button}from'@/components/ui/Button'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{AgentCard}from'./AgentCard'
 import{AgentAccordionDetail}from'./AgentAccordionDetail'
-import{ActivityFeed}from'./ActivityFeed'
 import type{Agent,AgentStatus,AgentLogEntry}from'@/types/agent'
 import{cn}from'@/lib/utils'
-import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,Ban,MessageCircle,ChevronDown,ChevronRight,Users,Loader}from'lucide-react'
+import{Filter,Play,CheckCircle,XCircle,Clock,Pause,CircleDashed,AlertCircle,Zap,MessageCircle,ChevronDown,ChevronRight,Users,Loader,RotateCcw}from'lucide-react'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 import{useProjectStore}from'@/stores/projectStore'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
@@ -25,6 +25,7 @@ interface AgentListViewProps{
  onResumeAgent?:(agent:Agent)=>void
  onExecuteAgent?:(agent:Agent)=>void
  onExecuteWithWorkers?:(agent:Agent)=>void
+ onRetryAll?:()=>Promise<number>
  agentLogsMap:Record<string,AgentLogEntry[]>
 }
 
@@ -40,9 +41,7 @@ const filterOptions:{value:FilterStatus;label:string;icon:typeof Filter}[]=[
  {value:'pending',label:'待機中',icon:Clock},
  {value:'completed',label:'完了',icon:CheckCircle},
  {value:'failed',label:'エラー',icon:XCircle},
- {value:'blocked',label:'ブロック',icon:Pause},
  {value:'interrupted',label:'中断',icon:Zap},
- {value:'cancelled',label:'キャンセル',icon:Ban},
  {value:'waiting_provider',label:'プロバイダ待ち',icon:Loader}
 ]
 
@@ -56,6 +55,7 @@ export default function AgentListView({
  onResumeAgent,
  onExecuteAgent,
  onExecuteWithWorkers,
+ onRetryAll,
  agentLogsMap
 }:AgentListViewProps):JSX.Element{
  const[filterStatus,setFilterStatus]=useState<FilterStatus>('incomplete')
@@ -88,11 +88,11 @@ export default function AgentListView({
 
  const applyFilter=(agentList:Agent[]):Agent[]=>{
   if(filterStatus==='all')return agentList
-  if(filterStatus==='incomplete')return agentList.filter(a=>a.status!=='completed')
-  return agentList.filter(a=>a.status===filterStatus)
+  if(filterStatus==='incomplete')return agentList.filter(a=>a.status!=='completed'||openAgentIds.has(a.id))
+  return agentList.filter(a=>a.status===filterStatus||openAgentIds.has(a.id))
  }
 
- const filteredLeaders=useMemo(()=>applyFilter(leaderAgents),[leaderAgents,filterStatus])
+ const filteredLeaders=useMemo(()=>applyFilter(leaderAgents),[leaderAgents,filterStatus,openAgentIds])
 
  const allAgentsForCount=useMemo(()=>{
   const leaders=agents.filter(a=>enabledAgents.has(a.type)&&!a.parentAgentId)
@@ -112,9 +112,7 @@ export default function AgentListView({
    pending:list.filter(a=>a.status==='pending').length,
    completed:list.filter(a=>a.status==='completed').length,
    failed:list.filter(a=>a.status==='failed').length,
-   blocked:list.filter(a=>a.status==='blocked').length,
    interrupted:list.filter(a=>a.status==='interrupted').length,
-   cancelled:list.filter(a=>a.status==='cancelled').length,
    waiting_provider:list.filter(a=>a.status==='waiting_provider').length
   }
  },[allAgentsForCount])
@@ -185,7 +183,7 @@ export default function AgentListView({
    count+=getFilteredWorkers(agent.id).length
   }
   return count
- },[filteredLeaders,workersByParent,filterStatus])
+ },[filteredLeaders,workersByParent,filterStatus,openAgentIds])
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
@@ -376,15 +374,19 @@ export default function AgentListView({
      </CardContent>
     </Card>
 
-    {/*Activity Feed*/}
-    <Card className="flex-1 overflow-hidden flex flex-col">
-     <CardHeader>
-      <DiamondMarker>アクティビティ</DiamondMarker>
-     </CardHeader>
-     <CardContent className="flex-1 overflow-hidden p-2">
-      <ActivityFeed/>
-     </CardContent>
-    </Card>
+    {/*Retry All Button*/}
+    {onRetryAll&&(statusCounts.failed+statusCounts.interrupted)>0&&(
+     <Button
+      variant="primary"
+      size="sm"
+      className="w-full"
+      onClick={onRetryAll}
+     >
+      <RotateCcw size={14}/>
+      <span className="ml-1">全エージェント再起動</span>
+     </Button>
+    )}
+
    </div>
   </div>
 )

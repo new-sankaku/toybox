@@ -7,6 +7,7 @@ interface BrushupState{
  optionsLoading:boolean
  optionsError:string|null
  agentOptions:Record<string,string[]>
+ agentInstructions:Record<string,string>
  customInstruction:string
  referenceImages:File[]
  suggestedImages:BrushupSuggestImage[]
@@ -17,6 +18,7 @@ interface BrushupState{
  setAgentOptions:(agentType:string,options:string[])=>void
  toggleAgentOption:(agentType:string,optionId:string)=>void
  clearAgentOptions:(agentType:string)=>void
+ setAgentInstruction:(agentType:string,instruction:string)=>void
  setCustomInstruction:(instruction:string)=>void
  addReferenceImages:(files:File[])=>void
  removeReferenceImage:(index:number)=>void
@@ -33,6 +35,7 @@ const initialState={
  optionsLoading:false,
  optionsError:null as string|null,
  agentOptions:{} as Record<string,string[]>,
+ agentInstructions:{} as Record<string,string>,
  customInstruction:'',
  referenceImages:[] as File[],
  suggestedImages:[] as BrushupSuggestImage[],
@@ -71,6 +74,10 @@ export const useBrushupStore=create<BrushupState>((set,get)=>({
   const{[agentType]:_,...rest}=state.agentOptions
   return{agentOptions:rest}
  }),
+
+ setAgentInstruction:(agentType,instruction)=>set((state)=>({
+  agentInstructions:{...state.agentInstructions,[agentType]:instruction}
+ })),
 
  setCustomInstruction:(customInstruction)=>set({customInstruction}),
 

@@ -16,12 +16,10 @@ const statusBarColorMap:Record<string,string>={
  waiting_response:'bg-nier-accent-yellow',
  completed:'bg-nier-accent-green',
  failed:'bg-nier-accent-red',
- blocked:'bg-nier-accent-red',
  interrupted:'bg-nier-accent-orange',
  paused:'bg-nier-accent-blue',
  waiting_provider:'bg-nier-accent-blue',
- pending:'bg-nier-border-dark',
- cancelled:'bg-nier-border-dark'
+ pending:'bg-nier-border-dark'
 }
 
 interface AgentSlideOverProps{
@@ -152,7 +150,7 @@ export function AgentSlideOver({
          オペレーター返答待ち
         </div>
 )}
-       {(agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled')&&onRetry&&(
+       {(agent.status==='failed'||agent.status==='interrupted')&&onRetry&&(
         <Button size="sm" variant="success" onClick={onRetry} className="flex-1 gap-2">
          <RotateCcw size={14}/>
          リトライ

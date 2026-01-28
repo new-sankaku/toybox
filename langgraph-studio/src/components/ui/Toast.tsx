@@ -23,7 +23,8 @@ interface ToastItemProps{
 }
 
 function ToastItemComponent({toast}:ToastItemProps){
- const Icon=iconMap[toast.type]
+ const Icon=iconMap[toast.type]??Info
+ const colorClass=colorMap[toast.type]??colorMap.info
  const removeToast=useToastStore(s=>s.removeToast)
  const handleClose=useCallback(()=>removeToast(toast.id),[removeToast,toast.id])
 
@@ -38,10 +39,10 @@ function ToastItemComponent({toast}:ToastItemProps){
   <div
    className={cn(
     'nier-toast min-w-[260px] md:min-w-[300px] max-w-[90vw] animate-nier-slide-in border-l-4',
-    colorMap[toast.type]
+    colorClass
 )}
   >
-   <Icon size={18} className={colorMap[toast.type].split(' ')[0]}/>
+   <Icon size={18} className={colorClass.split(' ')[0]}/>
    <span className="flex-1 text-nier-small text-nier-text-main">{toast.message}</span>
    <button
     onClick={handleClose}

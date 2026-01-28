@@ -25,12 +25,10 @@ const statusBarColorMap:Record<string,string>={
  waiting_response:'bg-nier-accent-yellow',
  completed:'bg-nier-accent-green',
  failed:'bg-nier-accent-red',
- blocked:'bg-nier-accent-red',
  interrupted:'bg-nier-accent-orange',
  paused:'bg-nier-accent-blue',
  waiting_provider:'bg-nier-accent-blue',
- pending:'bg-nier-border-dark',
- cancelled:'bg-nier-border-dark'
+ pending:'bg-nier-border-dark'
 }
 
 interface AgentDetailViewProps{
@@ -192,7 +190,7 @@ export default function AgentDetailView({
          オペレーターの返答を待っています
         </div>
 )}
-       {(agent.status==='failed'||agent.status==='blocked'||agent.status==='cancelled'||agent.status==='interrupted')&&onRetry&&(
+       {(agent.status==='failed'||agent.status==='interrupted')&&onRetry&&(
         <Button
          variant="success"
          className="w-full justify-start gap-3"

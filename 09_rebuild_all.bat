@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 > nul
+chcp 65001 > /dev/null
 echo ========================================
 echo   Rebuild - Backend + Frontend
 echo ========================================

@@ -821,15 +821,19 @@ class DataStore:
     return None
    opts=options or {}
    selected_agents:List[str]=opts.get("selectedAgents",[])
+   agent_options:Dict[str,List[str]]=opts.get("agentOptions",{})
+   agent_instructions:Dict[str,str]=opts.get("agentInstructions",{})
    presets:List[str]=opts.get("presets",[])
    custom_instruction:str=opts.get("customInstruction","")
    reference_image_ids:List[str]=opts.get("referenceImageIds",[])
    project.status="draft"
    project.current_phase=1
    project.updated_at=datetime.now()
-   if presets or custom_instruction or reference_image_ids:
+   if presets or custom_instruction or reference_image_ids or agent_options or agent_instructions:
     brushup_config={
      "presets":presets,
+     "agentOptions":agent_options,
+     "agentInstructions":agent_instructions,
      "customInstruction":custom_instruction,
      "referenceImageIds":reference_image_ids
     }
@@ -853,8 +857,12 @@ class DataStore:
    agent_names=",".join(selected_agents) if selected_agents else"全エージェント"
    preset_names=",".join(presets) if presets else"なし"
    log_msg=f"ブラッシュアップ開始: エージェント={agent_names}, プリセット={preset_names}"
+   if agent_options:
+    log_msg+=f", オプション指定あり"
+   if agent_instructions:
+    log_msg+=f", 個別指示あり"
    if custom_instruction:
-    log_msg+=f", カスタム指示あり"
+    log_msg+=f", 全体指示あり"
    self._add_system_log_internal(session,project_id,"info","System",log_msg)
    get_logger().info(f"Project {project_id} brushup started: {agent_names}")
    return proj_repo.to_dict(project)
@@ -1111,7 +1119,7 @@ class DataStore:
    intervention=intervention_repo.get(intervention_id)
    if not intervention:
     return {"activated":False,"reason":"intervention_not_found"}
-   activatable_statuses={"completed","failed","cancelled","paused","pending"}
+   activatable_statuses={"completed","failed","paused","pending"}
    display_name=agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type
    if agent.status in activatable_statuses:
     old_status=agent.status
@@ -1406,7 +1414,7 @@ class DataStore:
    agent=agent_repo.get(agent_id)
    if not agent:
     return None
-   retryable_statuses={"failed","interrupted","cancelled"}
+   retryable_statuses={"failed","interrupted"}
    if agent.status not in retryable_statuses:
     return None
    old_status=agent.status
@@ -1469,12 +1477,12 @@ class DataStore:
 
  def get_retryable_agents(self,project_id:str)->List[Dict]:
   """
-  再試行可能なAgent（failed,interrupted,cancelled）の一覧を取得
+  再試行可能なAgent（failed,interrupted）の一覧を取得
   """
   with session_scope() as session:
    agent_repo=AgentRepository(session)
    agents=agent_repo.get_by_project(project_id)
-   retryable_statuses={"failed","interrupted","cancelled"}
+   retryable_statuses={"failed","interrupted"}
    return [a for a in agents if a["status"] in retryable_statuses]
 
  def get_interrupted_agents(self,project_id:Optional[str]=None)->List[Dict]:

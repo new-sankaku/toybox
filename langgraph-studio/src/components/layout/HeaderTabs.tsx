@@ -18,8 +18,8 @@ const tabs:Tab[]=[
  {id:'data',label:'生成素材',icon:'≡',hasBadge:true},
  {id:'cost',label:'コスト',icon:'¥'},
  {id:'logs',label:'ログ',icon:'≫'},
- {id:'config',label:'設定',icon:'⚙'},
- {id:'data-management',label:'データ管理',icon:'⛁'}
+ {id:'config',label:'プロジェクト設定',icon:'⚙'},
+ {id:'global-config',label:'共通設定',icon:'⚙'}
 ]
 
 function formatBadgeCount(count:number):string{

@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 > nul
+chcp 65001 > /dev/null
 echo ========================================
 echo   AiAgentGame2 - Install
 echo ========================================
@@ -58,7 +58,7 @@ echo ========================================
 echo   Install completed
 echo ========================================
 echo.
-echo Run: 20_run_all_testdata.bat
+echo Run: 99_run_all_testdata.bat
 echo.
 
 pause

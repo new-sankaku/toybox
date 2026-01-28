@@ -2,9 +2,8 @@ import{useEffect}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{cn}from'@/lib/utils'
-import{ToggleLeft,ToggleRight,DollarSign,Info}from'lucide-react'
+import{ToggleLeft,ToggleRight,DollarSign}from'lucide-react'
 import{useCostSettingsStore}from'@/stores/costSettingsStore'
-import{useAIServiceStore}from'@/stores/aiServiceStore'
 
 interface CostSettingsProps{
  projectId:string
@@ -23,28 +22,10 @@ interface ServiceCostCardProps{
 }
 
 function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
- const{settings,pricing,updateServiceLimit,isServiceFieldChanged}=useCostSettingsStore()
+ const{settings,updateServiceLimit,isServiceFieldChanged}=useCostSettingsStore()
  const service=settings?.services[serviceType]
- const{master}=useAIServiceStore()
  const enabledChanged=isServiceFieldChanged(serviceType,'enabled')
  const limitChanged=isServiceFieldChanged(serviceType,'monthlyLimit')
-
- const getProviderPricing=()=>{
-  if(!pricing||!master)return[]
-  const serviceProviders=master.services[serviceType as keyof typeof master.services]?.providers||[]
-  return serviceProviders.flatMap(p=>
-   p.models.map(m=>{
-    const modelPricing=pricing.models[m.id]
-    return{
-     provider:p.label,
-     model:m.label,
-     pricing:modelPricing?.pricing
-    }
-   })
-)
- }
-
- const providerPricings=getProviderPricing()
 
  return(
   <Card>
@@ -88,32 +69,6 @@ function ServiceCostCard({serviceType,label}:ServiceCostCardProps):JSX.Element{
       disabled={!service?.enabled}
      />
     </div>
-    {providerPricings.length>0&&(
-     <div className="pt-2 border-t border-nier-border-light">
-      <div className="flex items-center gap-1 text-nier-caption text-nier-text-light mb-2">
-       <Info size={12}/>
-       <span>参考単価 ($/1Mトークン)</span>
-      </div>
-      <table className="text-nier-caption">
-       <thead>
-        <tr className="text-nier-text-light">
-         <th className="text-left font-normal pb-1 pr-4">モデル</th>
-         <th className="text-left font-normal pb-1 pr-4">In</th>
-         <th className="text-left font-normal pb-1">Out</th>
-        </tr>
-       </thead>
-       <tbody>
-        {providerPricings.map((pp,i)=>(
-         <tr key={i}>
-          <td className="text-nier-text-light py-0.5 pr-4">{pp.model}</td>
-          <td className="text-nier-text-main py-0.5 pr-4">{pp.pricing?.input!==undefined?`${pp.pricing.input}`:'-'}</td>
-          <td className="text-nier-text-main py-0.5">{pp.pricing?.output!==undefined?`${pp.pricing.output}`:'-'}</td>
-         </tr>
-))}
-       </tbody>
-      </table>
-     </div>
-)}
    </CardContent>
   </Card>
 )
@@ -125,17 +80,13 @@ export function CostSettings({projectId}:CostSettingsProps):JSX.Element{
   loading,
   updateGlobalEnabled,
   updateGlobalLimit,
-  fetchPricing,
   loadFromServer,
   isFieldChanged
  }=useCostSettingsStore()
- const{fetchMaster}=useAIServiceStore()
  const globalEnabledChanged=isFieldChanged('globalEnabled')
  const globalLimitChanged=isFieldChanged('globalMonthlyLimit')
 
  useEffect(()=>{
-  fetchPricing()
-  fetchMaster()
   loadFromServer(projectId)
  },[projectId])
 

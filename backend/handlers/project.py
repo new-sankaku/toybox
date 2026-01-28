@@ -103,10 +103,11 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
             return jsonify({"error":"プロジェクトが見つかりません"}),404
 
         current_status=project["status"]
-        if current_status!="paused":
+        resumable_statuses={"paused","interrupted"}
+        if current_status not in resumable_statuses:
             status_label=get_status_labels().get(current_status,current_status)
             return jsonify({
-                "error":f"プロジェクトを再開できません。現在のステータス「{status_label}」では再開操作は実行できません。一時停止中のプロジェクトのみ再開できます。"
+                "error":f"プロジェクトを再開できません。現在のステータス「{status_label}」では再開操作は実行できません。一時停止中または中断されたプロジェクトのみ再開できます。"
             }),400
 
         from services.llm_job_queue import get_llm_job_queue
@@ -115,11 +116,22 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         if cleaned>0:
             get_logger().info(f"resume_project: cleaned {cleaned} incomplete jobs for project {project_id}")
 
+        retried_count=0
+        if current_status=="interrupted":
+            interrupted_agents=data_store.get_interrupted_agents(project_id)
+            for agent in interrupted_agents:
+                result=data_store.retry_agent(agent["id"])
+                if result:
+                    retried_count+=1
+            if retried_count>0:
+                get_logger().info(f"resume_project: auto-retried {retried_count} interrupted agents for project {project_id}")
+
         project=data_store.update_project(project_id,{"status":"running"})
         sio.emit('project:status_changed',{
             "projectId":project_id,
             "status":"running",
-            "previousStatus":"paused"
+            "previousStatus":current_status,
+            "retriedAgents":retried_count
         })
 
         return jsonify(project)
@@ -155,6 +167,8 @@ def register_project_routes(app:Flask,data_store:DataStore,sio):
         data=request.get_json() or {}
         options={
             "selectedAgents":data.get("selectedAgents",[]),
+            "agentOptions":data.get("agentOptions",{}),
+            "agentInstructions":data.get("agentInstructions",{}),
             "clearAssets":data.get("clearAssets",False),
             "presets":data.get("presets",[]),
             "customInstruction":data.get("customInstruction",""),

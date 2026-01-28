@@ -18,16 +18,18 @@ class ApiKeyRepository:
  def get_all(self)->List[ApiKeyStore]:
   return self.session.query(ApiKeyStore).all()
 
- def get_all_hints(self)->Dict[str,Dict[str,Any]]:
+ def get_all_hints(self)->List[Dict[str,Any]]:
   keys=self.get_all()
-  return {
-   key.provider_id:{
+  return [
+   {
+    "providerId":key.provider_id,
     "hint":key.key_hint,
-    "isValid":key.is_valid,
+    "validated":key.is_valid,
+    "latencyMs":key.latency_ms,
     "lastValidatedAt":key.last_validated_at.isoformat() if key.last_validated_at else None,
    }
    for key in keys
-  }
+  ]
 
  def save(self,provider_id:str,api_key:str)->ApiKeyStore:
   encrypted=encrypt_api_key(api_key)
@@ -68,11 +70,13 @@ class ApiKeyRepository:
  def update_validation_status(
   self,
   provider_id:str,
-  is_valid:bool
+  is_valid:bool,
+  latency_ms:Optional[int]=None
  )->Optional[ApiKeyStore]:
   key_store=self.get(provider_id)
   if key_store:
    key_store.is_valid=is_valid
+   key_store.latency_ms=latency_ms
    key_store.last_validated_at=datetime.now()
    self.session.flush()
   return key_store

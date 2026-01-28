@@ -7,6 +7,8 @@ echo.
 
 cd /d "%~dp0"
 
+set ADMIN_TOKEN=admin-secret-token
+
 if not exist "backend\.env" (
     echo 警告: backend\.env が見つかりません
     echo ANTHROPIC_API_KEY を設定してください

@@ -32,6 +32,13 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   agents=data_store.get_agents_by_project(project_id,include_workers=False)
   return jsonify(agents)
 
+ @app.route('/api/agents/<agent_id>',methods=['GET'])
+ def get_agent(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  return jsonify(agent)
+
  @app.route('/api/agents/<agent_id>/workers',methods=['GET'])
  def list_agent_workers(agent_id:str):
   agent=data_store.get_agent(agent_id)
@@ -118,7 +125,7 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   agent=data_store.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  retryable_statuses={"failed","interrupted","cancelled"}
+  retryable_statuses={"failed","interrupted"}
   if agent.get("status") not in retryable_statuses:
    raise ValidationError(f"Agent status must be one of {retryable_statuses} to retry","status")
   result=data_store.retry_agent(agent_id)

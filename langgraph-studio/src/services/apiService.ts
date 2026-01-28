@@ -121,6 +121,7 @@ export const projectApi={
  brushup:async(projectId:string,options?:{
   selectedAgents?:string[]
   agentOptions?:Record<string,string[]>
+  agentInstructions?:Record<string,string>
   clearAssets?:boolean
   customInstruction?:string
   referenceImageIds?:string[]
@@ -148,7 +149,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'|'cancelled'
+ status:'pending'|'running'|'completed'|'failed'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -174,6 +175,11 @@ export interface ApiAgentLog{
 export const agentApi={
  listByProject:async(projectId:string):Promise<ApiAgent[]>=>{
   const response=await api.get(`/api/projects/${projectId}/agents`)
+  return response.data
+ },
+
+ get:async(agentId:string):Promise<ApiAgent>=>{
+  const response=await api.get(`/api/agents/${agentId}`)
   return response.data
  },
 
@@ -1304,7 +1310,14 @@ export interface ApiKeyValidationResult{
 export const apiKeyApi={
  list:async():Promise<ApiKeyInfo[]>=>{
   const response=await api.get('/api/api-keys')
-  return response.data
+  const data=response.data as Record<string,{hint:string;isValid:boolean;lastValidatedAt:string|null}>
+  return Object.entries(data).map(([providerId,info])=>({
+   providerId,
+   hint:info.hint,
+   validated:info.isValid,
+   validatedAt:info.lastValidatedAt,
+   latencyMs:null
+  }))
  },
  save:async(providerId:string,apiKey:string):Promise<{success:boolean}>=>{
   const response=await api.put(`/api/api-keys/${providerId}`,{apiKey})

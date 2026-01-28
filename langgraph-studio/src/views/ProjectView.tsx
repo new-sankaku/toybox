@@ -360,6 +360,7 @@ export default function ProjectView():JSX.Element{
    const options={
     selectedAgents:Array.from(brushupSelectedAgents),
     agentOptions:brushupStore.agentOptions,
+    agentInstructions:brushupStore.agentInstructions,
     clearAssets:brushupClearAssets,
     customInstruction:brushupStore.customInstruction,
     referenceImageIds:Array.from(brushupStore.selectedSuggestedImageIds)
@@ -1417,43 +1418,39 @@ export default function ProjectView():JSX.Element{
                {phaseSelected}/{phase.agents.length}
               </span>
              </button>
-             <div className="space-y-2 pl-6">
+             <div className="space-y-3 pl-6">
               {phase.agents.map(agentType=>{
-               const agentOpts=brushupStore.optionsConfig?.agents[agentType]?.options||[]
-               const selectedOpts=brushupStore.agentOptions[agentType]||[]
+               const agentInstruction=brushupStore.agentInstructions[agentType]||''
                const isSelected=brushupSelectedAgents.has(agentType)
                return(
-                <div key={agentType} className="flex items-start gap-2">
+                <div key={agentType} className="border-b border-nier-border-light pb-3 last:border-b-0 last:pb-0">
                  <button
                   type="button"
                   onClick={()=>toggleBrushupAgent(agentType)}
-                  className="flex items-center gap-2 py-1 min-w-[140px]"
+                  className="flex items-center gap-2 py-1"
                  >
                   <span className={cn('w-3 h-3 border flex items-center justify-center flex-shrink-0',
                    isSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
 )}>
                    {isSelected&&<Check size={10}/>}
                   </span>
-                  <span className="text-nier-small">{getAgentLabel(agentType)}</span>
+                  <span className="text-nier-small font-medium">{getAgentLabel(agentType)}</span>
                  </button>
-                 {isSelected&&agentOpts.length>0&&(
-                  <div className="flex-1 relative">
-                   <select
-                    multiple
-                    value={selectedOpts}
-                    onChange={(e)=>{
-                     const values=Array.from(e.target.selectedOptions,o=>o.value)
-                     brushupStore.setAgentOptions(agentType,values)
+                 {isSelected&&(
+                  <div className="mt-2 pl-5">
+                   <textarea
+                    value={agentInstruction}
+                    onChange={(e)=>brushupStore.setAgentInstruction(agentType,e.target.value)}
+                    placeholder="改善指示を入力..."
+                    rows={1}
+                    className="w-full px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none resize-none overflow-hidden"
+                    style={{minHeight:'28px',maxHeight:'112px'}}
+                    onInput={(e)=>{
+                     const target=e.target as HTMLTextAreaElement
+                     target.style.height='auto'
+                     target.style.height=Math.min(target.scrollHeight,112)+'px'
                     }}
-                    className="w-full px-2 py-1 bg-nier-bg-main border border-nier-border-light text-nier-small focus:border-nier-accent-gold focus:outline-none min-h-[60px]"
-                   >
-                    {agentOpts.map(opt=>(
-                     <option key={opt.id} value={opt.id}>{opt.label}</option>
-))}
-                   </select>
-                   <span className="text-nier-caption text-nier-text-light mt-1 block">
-                    {selectedOpts.length>0?`${selectedOpts.length}件選択中`:'Ctrl+クリックで複数選択'}
-                   </span>
+                   />
                   </div>
 )}
                 </div>
@@ -1498,29 +1495,28 @@ export default function ProjectView():JSX.Element{
          />
         </div>
        </div>
-
-       {/*Buttons*/}
-       <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-nier-border-light">
-        <Button
-         variant="secondary"
-         onClick={()=>{
-          setShowBrushupDialog(false)
-          setBrushupSelectedAgents(new Set())
-          setBrushupClearAssets(false)
-          brushupStore.reset()
-         }}
-        >
-         キャンセル
-        </Button>
-        <Button
-         onClick={handleBrushupProject}
-         disabled={isLoading||brushupSelectedAgents.size===0}
-        >
-         {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:null}
-         ブラッシュアップ開始
-        </Button>
-       </div>
       </CardContent>
+      {/*Fixed Footer*/}
+      <div className="flex-shrink-0 flex gap-3 justify-end p-4 border-t border-nier-border-light bg-nier-bg-panel">
+       <Button
+        variant="secondary"
+        onClick={()=>{
+         setShowBrushupDialog(false)
+         setBrushupSelectedAgents(new Set())
+         setBrushupClearAssets(false)
+         brushupStore.reset()
+        }}
+       >
+        キャンセル
+       </Button>
+       <Button
+        onClick={handleBrushupProject}
+        disabled={isLoading||brushupSelectedAgents.size===0}
+       >
+        {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:null}
+        ブラッシュアップ開始
+       </Button>
+      </div>
      </Card>
     </div>
 )}

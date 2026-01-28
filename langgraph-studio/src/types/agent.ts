@@ -1,4 +1,4 @@
-export type AgentStatus='pending'|'running'|'completed'|'failed'|'blocked'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'|'cancelled'
+export type AgentStatus='pending'|'running'|'completed'|'failed'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'
 
 export type AgentType=
  |'director_phase1'
@@ -145,7 +145,7 @@ export interface SequenceMessage{
  tokens:{input?:number;output?:number}|null
  durationMs:number|null
  sourceId:string|null
- sourceType:'trace'|'job'|null
+ sourceType:'trace'|'job'|'agent'|null
  pairId:string|null
 }
 

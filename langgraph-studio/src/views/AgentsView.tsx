@@ -51,7 +51,7 @@ export default function AgentsView():JSX.Element{
  useEffect(()=>{
   setOpenAgentIds(new Set())
   setInitialLogsFetched({})
- },[tabResetCounter,version])
+ },[tabResetCounter])
 
  useEffect(()=>{
   if(!currentProject){
@@ -207,6 +207,30 @@ export default function AgentsView():JSX.Element{
   }
  },[setAgents,addToast])
 
+ const handleRetryAll=useCallback(async()=>{
+  const retryableAgents=projectAgents.filter(a=>['failed','interrupted'].includes(a.status))
+  if(retryableAgents.length===0)return 0
+  let retriedCount=0
+  for(const agent of retryableAgents){
+   try{
+    const result=await agentApi.retry(agent.id)
+    if(result.success){
+     retriedCount++
+     const updatedAgent=convertApiAgent(result.agent)
+     const currentAgents=useAgentStore.getState().agents
+     const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
+     setAgents(newAgents)
+    }
+   }catch(error){
+    console.error('Failed to retry agent:',error)
+   }
+  }
+  if(retriedCount>0){
+   addToast(`${retriedCount}件のエージェントを再起動しました`,'success')
+  }
+  return retriedCount
+ },[projectAgents,setAgents,addToast])
+
  return(
   <AgentListView
    agents={projectAgents}
@@ -218,6 +242,7 @@ export default function AgentsView():JSX.Element{
    onResumeAgent={handleResume}
    onExecuteAgent={handleExecute}
    onExecuteWithWorkers={handleExecuteWithWorkers}
+   onRetryAll={handleRetryAll}
    agentLogsMap={agentLogs}
   />
 )

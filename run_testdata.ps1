@@ -3,10 +3,10 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "Starting Backend + Frontend..."
 Write-Host ""
-Write-Host "  Backend: http://localhost:5000"
+Write-Host "  Backend:  http://localhost:5000"
 Write-Host "  Frontend: http://localhost:5173"
 Write-Host ""
-Write-Host "Press Ctrl+C to stop both servers."
+Write-Host "Press Ctrl+C to stop all servers."
 Write-Host "========================================"
 
 $backend = $null

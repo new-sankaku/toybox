@@ -136,8 +136,8 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
    "label":"入力コンテキスト受信",
    "tokens":None,
    "durationMs":None,
-   "sourceId":None,
-   "sourceType":None,
+   "sourceId":agent_id,
+   "sourceType":"agent",
    "pairId":None
   })
  for t in sorted(traces,key=lambda x:x.get("startedAt") or""):
@@ -195,8 +195,8 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
    "label":"出力完了",
    "tokens":None,
    "durationMs":None,
-   "sourceId":None,
-   "sourceType":None,
+   "sourceId":agent_id,
+   "sourceType":"agent",
    "pairId":None
   })
  events.sort(key=lambda x:x.get("timestamp") or"")

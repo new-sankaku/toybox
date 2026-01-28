@@ -76,10 +76,10 @@ class RecoveryService:
 
  def get_retryable_agents(self,project_id:str)->List[Dict]:
   """
-  再試行可能なAgent（failed,interrupted,cancelled）の一覧を取得
+  再試行可能なAgent（failed,interrupted）の一覧を取得
   """
   with session_scope() as session:
    agent_repo=AgentRepository(session)
    agents=agent_repo.get_by_project(project_id)
-   retryable_statuses={"failed","interrupted","cancelled"}
+   retryable_statuses={"failed","interrupted"}
    return [a for a in agents if a["status"] in retryable_statuses]

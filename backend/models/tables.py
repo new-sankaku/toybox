@@ -168,6 +168,7 @@ class ApiKeyStore(Base):
  encrypted_key=Column(Text,nullable=False)
  key_hint=Column(String(20))
  is_valid=Column(Boolean,default=False)
+ latency_ms=Column(Integer)
  last_validated_at=Column(DateTime)
  created_at=Column(DateTime,default=datetime.now)
  updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)

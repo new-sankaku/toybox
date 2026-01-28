@@ -1,28 +1,21 @@
-import{useMemo}from'react'
+import{useState,useMemo}from'react'
 import{cn}from'@/lib/utils'
-import type{SequenceData,SequenceMessage,SequenceParticipant}from'@/types/agent'
+import{ChevronDown,ChevronRight}from'lucide-react'
+import type{SequenceData,SequenceMessage}from'@/types/agent'
 
 interface SequenceDiagramProps{
  data:SequenceData
  onMessageClick?:(msg:SequenceMessage)=>void
 }
 
-const PARTICIPANT_BORDER:Record<string,string>={
- external:'border-nier-text-light',
- leader:'border-nier-text-main',
- agent:'border-nier-text-main',
- api:'border-nier-text-light',
- worker:'border-nier-text-light',
-}
-
-const MSG_STYLE:Record<string,{text:string;border:string;dashed?:boolean}>={
- input:{text:'text-nier-text-main',border:'border-nier-text-main'},
- output:{text:'text-nier-text-main',border:'border-nier-text-main'},
- request:{text:'text-nier-text-main',border:'border-nier-text-main'},
- response:{text:'text-nier-text-light',border:'border-nier-text-light',dashed:true},
- error:{text:'text-nier-accent-red',border:'border-nier-accent-red'},
- delegation:{text:'text-nier-accent-orange',border:'border-nier-accent-orange'},
- result:{text:'text-nier-text-light',border:'border-nier-text-light',dashed:true},
+const TIMELINE_MSG_STYLE:Record<string,{text:string;marker:string;dashed?:boolean}>={
+ input:{text:'text-nier-text-main',marker:'bg-nier-text-main'},
+ output:{text:'text-nier-text-main',marker:'bg-nier-text-main'},
+ request:{text:'text-nier-text-main',marker:'bg-nier-text-main'},
+ response:{text:'text-nier-text-light',marker:'bg-nier-text-light',dashed:true},
+ error:{text:'text-nier-accent-red',marker:'bg-nier-accent-red'},
+ delegation:{text:'text-nier-accent-orange',marker:'bg-nier-accent-orange'},
+ result:{text:'text-nier-text-light',marker:'bg-nier-text-light',dashed:true},
 }
 
 function formatTokens(tokens:SequenceMessage['tokens']):string{
@@ -30,7 +23,7 @@ function formatTokens(tokens:SequenceMessage['tokens']):string{
  const parts:string[]=[]
  if(tokens.input)parts.push(`in:${tokens.input.toLocaleString()}`)
  if(tokens.output)parts.push(`out:${tokens.output.toLocaleString()}`)
- return parts.join(' ')
+ return parts.join(' / ')
 }
 
 function formatDuration(ms:number|null):string{
@@ -39,194 +32,252 @@ function formatDuration(ms:number|null):string{
  return`${(ms/1000).toFixed(1)}s`
 }
 
-interface MessageGroup{
- pairId:string|null
- messages:SequenceMessage[]
+function formatTimestamp(timestamp:string|null):string{
+ if(!timestamp)return''
+ const d=new Date(timestamp)
+ const hh=String(d.getHours()).padStart(2,'0')
+ const mm=String(d.getMinutes()).padStart(2,'0')
+ const ss=String(d.getSeconds()).padStart(2,'0')
+ return`${hh}:${mm}:${ss}`
 }
 
-function groupMessages(messages:SequenceMessage[]):MessageGroup[]{
- const groups:MessageGroup[]=[]
- let i=0
- while(i<messages.length){
-  const msg=messages[i]
-  if(msg.pairId){
-   const group:SequenceMessage[]=[msg]
-   let j=i+1
-   while(j<messages.length&&messages[j].pairId===msg.pairId){
-    group.push(messages[j])
-    j++
-   }
-   groups.push({pairId:msg.pairId,messages:group})
-   i=j
-  }else{
-   groups.push({pairId:null,messages:[msg]})
-   i++
+interface TimelineNode{
+ message:SequenceMessage
+ depth:number
+ children:TimelineNode[]
+ isGroupParent:boolean
+ pairedResponse?:SequenceMessage
+}
+
+function buildTimelineStructure(messages:SequenceMessage[]):TimelineNode[]{
+ const result:TimelineNode[]=[]
+ const pairStack:{pairId:string;node:TimelineNode}[]=[]
+ const responseMap=new Map<string,SequenceMessage>()
+ for(const msg of messages){
+  if(msg.type==='response'&&msg.pairId){
+   responseMap.set(msg.pairId,msg)
   }
  }
- return groups
+ for(const msg of messages){
+  if(msg.type==='response')continue
+  const depth=pairStack.length
+  const node:TimelineNode={message:msg,depth,children:[],isGroupParent:false}
+  if(msg.type==='request'&&msg.pairId){
+   node.pairedResponse=responseMap.get(msg.pairId)
+  }
+  if(msg.type==='delegation'&&msg.pairId){
+   node.isGroupParent=true
+   if(pairStack.length>0){
+    pairStack[pairStack.length-1].node.children.push(node)
+   }else{
+    result.push(node)
+   }
+   pairStack.push({pairId:msg.pairId,node})
+  }else if(msg.type==='result'&&msg.pairId){
+   const stackIdx=pairStack.findIndex(s=>s.pairId===msg.pairId)
+   if(stackIdx>=0){
+    pairStack[stackIdx].node.children.push(node)
+    pairStack.splice(stackIdx,1)
+   }else{
+    if(pairStack.length>0){
+     pairStack[pairStack.length-1].node.children.push(node)
+    }else{
+     result.push(node)
+    }
+   }
+  }else{
+   if(pairStack.length>0){
+    pairStack[pairStack.length-1].node.children.push(node)
+   }else{
+    result.push(node)
+   }
+  }
+ }
+ return result
 }
 
-function colCenter(idx:number,total:number):number{
- return((idx+0.5)/total)*100
-}
-
-function ArrowRow({
- msg,
- participantCount,
- pMap,
- clickable,
- onClick
+function TimelineRow({
+ node,
+ onMessageClick,
+ isLast
 }:{
- msg:SequenceMessage
- participantCount:number
- pMap:Record<string,number>
- clickable:boolean
- onClick?:()=>void
+ node:TimelineNode
+ onMessageClick?:(msg:SequenceMessage)=>void
+ isLast:boolean
 }){
- const fromIdx=pMap[msg.from]
- const toIdx=pMap[msg.to]
- if(fromIdx===undefined||toIdx===undefined)return null
- const isLeft=fromIdx>toIdx
- const minIdx=Math.min(fromIdx,toIdx)
- const maxIdx=Math.max(fromIdx,toIdx)
- const style=MSG_STYLE[msg.type]||MSG_STYLE.request
- const tokenStr=formatTokens(msg.tokens)
- const durationStr=formatDuration(msg.durationMs)
- const subLabel=[tokenStr,durationStr].filter(Boolean).join(' / ')
- const fromPct=colCenter(fromIdx,participantCount)
- const toPct=colCenter(toIdx,participantCount)
- const leftPct=Math.min(fromPct,toPct)
- const widthPct=Math.abs(fromPct-toPct)
- const isSelf=fromIdx===toIdx
+ const{message:msg,depth,pairedResponse}=node
+ const style=TIMELINE_MSG_STYLE[msg.type]||TIMELINE_MSG_STYLE.request
+ const timeStr=formatTimestamp(msg.timestamp)
+ const durationStr=formatDuration(msg.durationMs||(pairedResponse?.durationMs??null))
+ const tokens=pairedResponse?.tokens||msg.tokens
+ const tokenStr=formatTokens(tokens)
+ const indentPx=depth*16
+ const clickable=!!msg.sourceId&&!!onMessageClick
  return(
   <div
    className={cn(
-    'relative',
-    clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors'
-)}
-   style={{minHeight:'32px'}}
-   onClick={clickable?onClick:undefined}
+    'grid gap-2 py-1.5 px-2',
+    'grid-cols-[70px_1fr]',
+    clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors',
+    !isLast&&'border-b border-nier-border-light'
+   )}
+   style={{paddingLeft:`${8+indentPx}px`}}
+   onClick={clickable?()=>onMessageClick?.(pairedResponse||msg):undefined}
   >
-   {isSelf?(
-    <div className="flex flex-col items-center justify-center h-full py-1" style={{paddingLeft:`${fromPct-10}%`,paddingRight:`${100-fromPct-10}%`}}>
-     <span className={cn('text-[10px] leading-tight whitespace-nowrap',style.text)}>{msg.label}</span>
-     {subLabel&&<span className="text-[9px] text-nier-text-light opacity-80 whitespace-nowrap">{subLabel}</span>}
+   <div className="flex flex-col items-start">
+    <span className="text-[11px] text-nier-text-light font-mono">{timeStr}</span>
+    {(tokenStr||durationStr)&&(
+     <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
+      {[tokenStr,durationStr].filter(Boolean).join(' ')}
+     </span>
+    )}
+   </div>
+   <div className="flex flex-col gap-0.5">
+    <div className="flex items-center gap-2">
+     <div className={cn('w-1 h-4 rounded-sm flex-shrink-0',style.marker,style.dashed&&'opacity-50')}/>
+     <span className={cn('text-[11px] font-medium',style.text)}>
+      {msg.from}
+      <span className="text-nier-text-light mx-1">→</span>
+      {msg.to}
+     </span>
     </div>
-):(
-    <>
-     <div
-      className="absolute flex flex-col items-center justify-center"
-      style={{left:`${leftPct}%`,width:`${widthPct}%`,top:'2px'}}
-     >
-      <span className={cn('text-[10px] leading-tight whitespace-nowrap',style.text)}>{msg.label}</span>
-      {subLabel&&<span className="text-[9px] text-nier-text-light opacity-80 whitespace-nowrap">{subLabel}</span>}
+    <div className="ml-3 text-[11px] text-nier-text-main">{msg.label}</div>
+    {pairedResponse&&pairedResponse.label&&(
+     <div className="ml-3 text-[10px] text-nier-text-light opacity-80">
+      ← {pairedResponse.label.length>80?pairedResponse.label.slice(0,80)+'...':pairedResponse.label}
      </div>
-     <div
-      className="absolute flex items-center"
-      style={{left:`${leftPct}%`,width:`${widthPct}%`,bottom:'4px',height:'1px'}}
-     >
-      {isLeft&&<span className={cn('text-xs leading-none -ml-1',style.text)}>{'◁'}</span>}
-      <div className={cn('flex-1 border-t',style.border,style.dashed&&'border-dashed')}/>
-      {!isLeft&&<span className={cn('text-xs leading-none -mr-1',style.text)}>{'▷'}</span>}
-     </div>
-    </>
-)}
+    )}
+   </div>
   </div>
-)
+ )
 }
 
-function Lifelines({count}:{count:number}){
+function TimelineGroup({
+ node,
+ onMessageClick,
+ isLast
+}:{
+ node:TimelineNode
+ onMessageClick?:(msg:SequenceMessage)=>void
+ isLast:boolean
+}){
+ const[expanded,setExpanded]=useState(true)
+ const{message:msg,depth,children}=node
+ const style=TIMELINE_MSG_STYLE[msg.type]||TIMELINE_MSG_STYLE.delegation
+ const timeStr=formatTimestamp(msg.timestamp)
+ const durationStr=formatDuration(msg.durationMs)
+ const tokenStr=formatTokens(msg.tokens)
+ const indentPx=depth*16
+ const hasClickHandler=!!msg.sourceId&&!!onMessageClick
  return(
-  <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-   {Array.from({length:count},(_,i)=>(
-    <div
-     key={i}
-     className="absolute top-0 bottom-0 w-px border-l border-dashed border-nier-border-light"
-     style={{left:`${colCenter(i,count)}%`}}
-    />
-))}
+  <div className={cn(!isLast&&'border-b border-nier-border-light')}>
+   <div
+    className={cn(
+     'grid gap-2 py-1.5 px-2',
+     'grid-cols-[70px_1fr]',
+     'hover:bg-nier-bg-main/40 transition-colors cursor-pointer'
+    )}
+    style={{paddingLeft:`${8+indentPx}px`}}
+    onClick={()=>setExpanded(!expanded)}
+   >
+    <div className="flex flex-col items-start">
+     <span className="text-[11px] text-nier-text-light font-mono">{timeStr}</span>
+     {(tokenStr||durationStr)&&(
+      <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
+       {[tokenStr,durationStr].filter(Boolean).join(' ')}
+      </span>
+     )}
+    </div>
+    <div className="flex flex-col gap-0.5">
+     <div className="flex items-center gap-2">
+      {expanded?
+       <ChevronDown className="w-3 h-3 text-nier-text-light flex-shrink-0"/>:
+       <ChevronRight className="w-3 h-3 text-nier-text-light flex-shrink-0"/>
+      }
+      <div className={cn('w-1 h-4 rounded-sm flex-shrink-0',style.marker)}/>
+      <span className={cn('text-[11px] font-medium',style.text)}>
+       {msg.from}
+       <span className="text-nier-text-light mx-1">→</span>
+       {msg.to}
+      </span>
+      {hasClickHandler&&(
+       <button
+        className="text-[10px] text-nier-text-light hover:text-nier-text-main underline ml-auto"
+        onClick={(e)=>{e.stopPropagation();onMessageClick?.(msg)}}
+       >詳細</button>
+      )}
+     </div>
+     <div className="ml-5 text-[11px] text-nier-text-main">{msg.label}</div>
+    </div>
+   </div>
+   {expanded&&children.length>0&&(
+    <div className="border-l-2 border-nier-accent-orange ml-4" style={{marginLeft:`${16+indentPx}px`}}>
+     {children.map((child,idx)=>(
+      <TimelineNodeRenderer
+       key={child.message.id}
+       node={child}
+       onMessageClick={onMessageClick}
+       isLast={idx===children.length-1}
+      />
+     ))}
+    </div>
+   )}
   </div>
-)
+ )
+}
+
+function TimelineNodeRenderer({
+ node,
+ onMessageClick,
+ isLast
+}:{
+ node:TimelineNode
+ onMessageClick?:(msg:SequenceMessage)=>void
+ isLast:boolean
+}){
+ if(node.isGroupParent){
+  return <TimelineGroup node={node} onMessageClick={onMessageClick} isLast={isLast}/>
+ }
+ return(
+  <TimelineRow
+   node={node}
+   onMessageClick={onMessageClick}
+   isLast={isLast}
+  />
+ )
 }
 
 export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.Element{
- const{participants,messages}=data
-
- const pMap=useMemo(()=>{
-  const m:Record<string,number>={}
-  participants.forEach((p,i)=>{m[p.id]=i})
-  return m
- },[participants])
-
- const groups=useMemo(()=>groupMessages(messages),[messages])
-
+ const{messages}=data
+ const timeline=useMemo(()=>buildTimelineStructure(messages),[messages])
  if(!messages.length){
   return(
    <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
     シーケンスデータがありません
    </div>
-)
+  )
  }
-
+ const totalIn=data.totalTokens?.input??0
+ const totalOut=data.totalTokens?.output??0
+ const totalDur=formatDuration(data.totalDurationMs??null)
  return(
-  <div className="w-full overflow-x-auto bg-nier-bg-panel border border-nier-border-light font-mono text-[11px]">
-   <div style={{minWidth:`${participants.length*120}px`}}>
-    <div
-     className="grid border-b border-nier-border-light bg-nier-bg-selected"
-     style={{gridTemplateColumns:`repeat(${participants.length},1fr)`}}
-    >
-     {participants.map(p=>(
-      <div
-       key={p.id}
-       className={cn(
-        'flex items-center justify-center py-2 px-1',
-        'border-b-2',
-        PARTICIPANT_BORDER[p.type]||'border-nier-text-main'
-)}
-      >
-       <span className={cn(
-        'text-[11px] truncate max-w-full',
-        p.type==='api'?'font-bold text-nier-text-main':'text-nier-text-main'
-)}>
-        {p.label}
-       </span>
-      </div>
-))}
+  <div className="w-full bg-nier-bg-panel border border-nier-border-light font-mono">
+   {(totalIn>0||totalOut>0||totalDur)&&(
+    <div className="border-b border-nier-border-light px-3 py-1.5 text-[10px] text-nier-text-light bg-nier-bg-selected">
+     {`Total: in ${totalIn.toLocaleString()} / out ${totalOut.toLocaleString()} tokens`}
+     {totalDur?` / ${totalDur}`:''}
     </div>
-
-    <div className="relative py-1">
-     <Lifelines count={participants.length}/>
-     {groups.map((group,gIdx)=>{
-      const isPair=group.pairId!==null&&group.messages.length>1
-      return(
-       <div
-        key={group.pairId||`single-${gIdx}`}
-        className={cn(
-         isPair&&'border-l-2 border-nier-accent-orange ml-1 bg-nier-bg-main/20 my-0.5'
-)}
-       >
-        {group.messages.map(msg=>(
-         <ArrowRow
-          key={msg.id}
-          msg={msg}
-          participantCount={participants.length}
-          pMap={pMap}
-          clickable={!!msg.sourceId&&!!onMessageClick}
-          onClick={()=>onMessageClick?.(msg)}
-         />
-))}
-       </div>
-)
-     })}
-    </div>
-
-    {data.totalTokens&&(
-     <div className="border-t border-nier-border-light px-3 py-1.5 text-[10px] text-nier-text-light">
-      {`Total: in ${data.totalTokens.input.toLocaleString()} / out ${data.totalTokens.output.toLocaleString()} tokens`}
-      {data.totalDurationMs?` / ${formatDuration(data.totalDurationMs)}`:''}
-     </div>
-)}
+   )}
+   <div className="max-h-[400px] overflow-y-auto">
+    {timeline.map((node,idx)=>(
+     <TimelineNodeRenderer
+      key={node.message.id}
+      node={node}
+      onMessageClick={onMessageClick}
+      isLast={idx===timeline.length-1}
+     />
+    ))}
    </div>
   </div>
-)
+ )
 }

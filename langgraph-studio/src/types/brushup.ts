@@ -19,6 +19,7 @@ export interface BrushupSuggestImage{
 
 export interface BrushupConfig{
  agentOptions:Record<string,string[]>
+ agentInstructions:Record<string,string>
  customInstruction:string
  referenceImageIds:string[]
  selectedAgents:string[]

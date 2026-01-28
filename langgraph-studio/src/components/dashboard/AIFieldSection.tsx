@@ -72,9 +72,6 @@ export default function AIFieldSection():JSX.Element|null{
    }else if(agent.status==='interrupted'){
     status='failed'
     emotion='sad'
-   }else if(agent.status==='cancelled'){
-    status='blocked'
-    emotion='sleepy'
    }
 
    const now=Date.now()

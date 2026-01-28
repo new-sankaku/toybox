@@ -50,8 +50,10 @@ export function AgentAccordionDetail({
 }:AgentAccordionDetailProps):JSX.Element{
  const contentRef=useRef<HTMLDivElement>(null)
  const logRef=useRef<HTMLDivElement>(null)
+ const seqRef=useRef<HTMLDivElement>(null)
  const[maxH,setMaxH]=useState(0)
  const prevLogCountRef=useRef(logs.length)
+ const seqScrollPosRef=useRef(0)
  const[activeTab,setActiveTab]=useState<TabId>('log')
  const[seqData,setSeqData]=useState<SequenceData|null>(null)
  const[seqLoading,setSeqLoading]=useState(false)
@@ -71,14 +73,13 @@ export function AgentAccordionDetail({
   const el=logRef.current
   const prevCount=prevLogCountRef.current
   const newCount=logs.length
-  if(newCount>prevCount&&el.scrollTop>0){
-   const addedCount=newCount-prevCount
-   const rows=el.querySelectorAll('[data-log-row]')
-   let addedHeight=0
-   for(let i=0;i<Math.min(addedCount,rows.length);i++){
-    addedHeight+=rows[i].getBoundingClientRect().height
+  if(newCount>prevCount){
+   const isAtBottom=el.scrollHeight-el.scrollTop-el.clientHeight<50
+   if(isAtBottom){
+    requestAnimationFrame(()=>{
+     el.scrollTop=el.scrollHeight
+    })
    }
-   el.scrollTop+=addedHeight
   }
   prevLogCountRef.current=newCount
  },[logs.length])
@@ -86,11 +87,15 @@ export function AgentAccordionDetail({
  const seqFetchedRef=useRef(false)
 
  const fetchSequence=useCallback(async()=>{
+  if(seqRef.current)seqScrollPosRef.current=seqRef.current.scrollTop
   setSeqLoading(true)
   setSeqError(null)
   try{
    const result=await agentApi.getSequence(agent.id)
    setSeqData(result)
+   requestAnimationFrame(()=>{
+    if(seqRef.current)seqRef.current.scrollTop=seqScrollPosRef.current
+   })
   }catch{
    setSeqError('シーケンスデータの取得に失敗しました')
   }finally{
@@ -109,7 +114,7 @@ export function AgentAccordionDetail({
   const prev=prevStatusRef.current
   const curr=agent.status
   prevStatusRef.current=curr
-  const terminalStatuses=['completed','failed','cancelled']
+  const terminalStatuses=['completed','failed']
   if(terminalStatuses.includes(curr)&&!terminalStatuses.includes(prev)){
    seqFetchedRef.current=false
    if(activeTab==='sequence'){
@@ -127,12 +132,12 @@ export function AgentAccordionDetail({
  },[])
 
  const sortedLogs=useMemo(()=>
-  [...logs].sort((a,b)=>new Date(b.timestamp).getTime()-new Date(a.timestamp).getTime())
+  [...logs].sort((a,b)=>new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime())
  ,[logs])
 
  const hasControls=(agent.status==='running'||agent.status==='waiting_approval')&&onPause
   ||(agent.status==='paused'||agent.status==='waiting_response')&&onResume
-  ||(agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled')&&onRetry
+  ||(agent.status==='failed'||agent.status==='interrupted')&&onRetry
   ||onExecute||onExecuteWithWorkers
 
  return(
@@ -162,7 +167,7 @@ export function AgentAccordionDetail({
         オペレーター返答待ち
        </span>
 )}
-      {(agent.status==='failed'||agent.status==='interrupted'||agent.status==='cancelled')&&onRetry&&(
+      {(agent.status==='failed'||agent.status==='interrupted')&&onRetry&&(
        <Button size="sm" variant="success" onClick={onRetry} className="gap-1.5">
         <RotateCcw size={12}/>
         リトライ
@@ -245,7 +250,7 @@ export function AgentAccordionDetail({
 )}
 
     {activeTab==='sequence'&&(
-     <div className="min-h-[100px]">
+     <div ref={seqRef} className="min-h-[100px] max-h-[400px] overflow-auto" style={{overscrollBehavior:'contain'}}>
       {seqLoading&&(
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         読み込み中...

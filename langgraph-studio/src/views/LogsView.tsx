@@ -138,7 +138,7 @@ export default function LogsView():JSX.Element{
 )
   }
 
-  return filtered.sort((a,b)=>new Date(b.timestamp).getTime()-new Date(a.timestamp).getTime())
+  return filtered.sort((a,b)=>new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime())
  },[logs,filterLevel,selectedAgents,searchQuery])
 
  const levelCounts=useMemo(()=>({
