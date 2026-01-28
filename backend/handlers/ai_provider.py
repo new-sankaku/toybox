@@ -145,12 +145,15 @@ def register_ai_provider_routes(app:Flask):
   if not data:
    return jsonify({"error":"Request body is required"}),400
 
-  provider_id=data.get('provider','anthropic')
+  provider_id=data.get('provider')
   model=data.get('model')
   messages_data=data.get('messages',[])
   max_tokens=data.get('maxTokens',1024)
   temperature=data.get('temperature',0.7)
   api_key=data.get('apiKey')
+
+  if not provider_id:
+   return jsonify({"error":"providerは必須です"}),400
 
   if not messages_data:
    return jsonify({"error":"messages is required"}),400
@@ -213,12 +216,15 @@ def register_ai_provider_routes(app:Flask):
   if not data:
    return jsonify({"error":"Request body is required"}),400
 
-  provider_id=data.get('provider','anthropic')
+  provider_id=data.get('provider')
   model=data.get('model')
   messages_data=data.get('messages',[])
   max_tokens=data.get('maxTokens',1024)
   temperature=data.get('temperature',0.7)
   api_key=data.get('apiKey')
+
+  if not provider_id:
+   return jsonify({"error":"providerは必須です"}),400
 
   if not messages_data:
    return jsonify({"error":"messages is required"}),400

@@ -44,7 +44,7 @@ class ApiAgentRunner(AgentRunner):
 
     def __init__(
         self,
-        provider_id:str="anthropic",
+        provider_id:Optional[str]=None,
         api_key:Optional[str]=None,
         model:Optional[str]=None,
         max_tokens:int=32768,
@@ -52,9 +52,9 @@ class ApiAgentRunner(AgentRunner):
         data_store=None,
         **kwargs
     ):
-        self._provider_id=provider_id
-        self.api_key=api_key or os.environ.get(self._env_key_for(provider_id))
-        self.model=model or get_provider_default_model(provider_id) or""
+        self._provider_id=provider_id or""
+        self.api_key=api_key or (os.environ.get(self._env_key_for(provider_id)) if provider_id else None)
+        self.model=model or (get_provider_default_model(provider_id) if provider_id else "") or""
         self.max_tokens=max_tokens
         self._provider=None
         self._graphs:Dict[AgentType,Any]={}
