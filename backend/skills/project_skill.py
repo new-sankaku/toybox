@@ -6,6 +6,9 @@ from typing import List,Dict,Any,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
 
+HARD_MAX_DEPTH=5
+
+
 class ProjectAnalyzeSkill(Skill):
  name="project_analyze"
  description="プロジェクトの構造を解析し、概要を返します"
@@ -73,6 +76,8 @@ class ProjectAnalyzeSkill(Skill):
   path=kwargs.get("path",".")
   depth=kwargs.get("depth",3)
   include_content=kwargs.get("include_content",False)
+  config_max_depth=context.restrictions.get("max_depth",HARD_MAX_DEPTH)
+  depth=min(depth,config_max_depth,HARD_MAX_DEPTH)
   if path==".":
    full_path=context.working_dir
   elif os.path.isabs(path):

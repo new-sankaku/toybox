@@ -6,6 +6,9 @@ from typing import List,Dict,Any,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 from middleware.logger import get_logger
 
+HARD_MAX_RESULTS=200
+MAX_SEARCH_FILE_SIZE=524288
+
 
 class CodeSearchSkill(Skill):
  name="code_search"
@@ -36,6 +39,10 @@ class CodeSearchSkill(Skill):
   context_lines=kwargs.get("context_lines",2)
   if not pattern:
    return SkillResult(success=False,error="pattern is required")
+  config_max=context.restrictions.get("max_results",HARD_MAX_RESULTS)
+  hard_max=min(config_max,HARD_MAX_RESULTS)
+  max_results=min(max_results,hard_max)
+  context_lines=min(context_lines,5)
   if path==".":
    full_path=context.working_dir
   elif os.path.isabs(path):
@@ -48,10 +55,11 @@ class CodeSearchSkill(Skill):
    results=await asyncio.to_thread(
     self._search,full_path,pattern,file_pattern,case_sensitive,max_results,context_lines
    )
+   truncated=len(results)>=max_results
    return SkillResult(
     success=True,
     output=results,
-    metadata={"pattern":pattern,"total_matches":len(results),"truncated":len(results)>=max_results}
+    metadata={"pattern":pattern,"total_matches":len(results),"truncated":truncated,"max_results_applied":max_results}
    )
   except re.error as e:
    return SkillResult(success=False,error=f"Invalid regex pattern: {e}")
@@ -77,6 +85,10 @@ class CodeSearchSkill(Skill):
      continue
     filepath=os.path.join(root,filename)
     try:
+     file_size=os.path.getsize(filepath)
+     if file_size>MAX_SEARCH_FILE_SIZE:
+      get_logger().debug(f"Skipped large file during search {filepath}: {file_size} bytes > {MAX_SEARCH_FILE_SIZE}")
+      continue
      matches=self._search_file(filepath,regex,context_lines,path)
      for match in matches:
       if len(results)>=max_results:
@@ -131,6 +143,9 @@ class FileSearchSkill(Skill):
   path=kwargs.get("path",".")
   max_results=kwargs.get("max_results",100)
   include_hidden=kwargs.get("include_hidden",False)
+  config_max=context.restrictions.get("max_results",HARD_MAX_RESULTS)
+  hard_max=min(config_max,HARD_MAX_RESULTS)
+  max_results=min(max_results,hard_max)
   if path==".":
    full_path=context.working_dir
   elif os.path.isabs(path):
@@ -141,10 +156,11 @@ class FileSearchSkill(Skill):
    return SkillResult(success=False,error=f"Path not found: {path}")
   try:
    results=await asyncio.to_thread(self._search,full_path,pattern,max_results,include_hidden)
+   truncated=len(results)>=max_results
    return SkillResult(
     success=True,
     output=results,
-    metadata={"pattern":pattern,"total_found":len(results),"truncated":len(results)>=max_results}
+    metadata={"pattern":pattern,"total_found":len(results),"truncated":truncated,"max_results_applied":max_results}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))

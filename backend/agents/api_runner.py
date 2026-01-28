@@ -55,7 +55,7 @@ class ApiAgentRunner(AgentRunner):
     ):
         self._provider_id=provider_id or""
         self.api_key=api_key or (os.environ.get(self._env_key_for(provider_id)) if provider_id else None)
-        self.model=model or (get_provider_default_model(provider_id) if provider_id else "") or""
+        self.model=model or (get_provider_default_model(provider_id) if provider_id else"") or""
         self.max_tokens=max_tokens
         self._provider=None
         self._graphs:Dict[AgentType,Any]={}

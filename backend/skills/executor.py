@@ -20,12 +20,13 @@ class SkillExecutionConfig:
 
 
 class SkillExecutor:
- def __init__(self,project_id:str,agent_id:str,config:SkillExecutionConfig):
+ def __init__(self,project_id:str,agent_id:str,config:SkillExecutionConfig,skill_restrictions:Optional[Dict[str,Dict[str,Any]]]=None):
   self.project_id=project_id
   self.agent_id=agent_id
   self.config=config
   self._registry=get_skill_registry()
   self._execution_history:List[Dict[str,Any]]=[]
+  self._skill_restrictions=skill_restrictions or {}
 
  def get_available_skills(self)->List[Dict[str,Any]]:
   all_skills=self._registry.get_schemas()
@@ -47,6 +48,7 @@ class SkillExecutor:
  async def execute_skill(self,skill_name:str,**kwargs)->SkillResult:
   if self.config.allowed_skills and skill_name not in self.config.allowed_skills:
    return SkillResult(success=False,error=f"Skill not allowed: {skill_name}")
+  restrictions=self._skill_restrictions.get(skill_name,{})
   context=SkillContext(
    project_id=self.project_id,
    agent_id=self.agent_id,
@@ -56,6 +58,7 @@ class SkillExecutor:
    timeout_seconds=self.config.timeout_seconds,
    max_output_size=self.config.max_output_size,
    sandbox_enabled=self.config.sandbox_enabled,
+   restrictions=restrictions,
   )
   result=await self._registry.execute(skill_name,context,**kwargs)
   self._execution_history.append({
@@ -124,7 +127,8 @@ def create_skill_executor(
   timeout_seconds=sandbox_cfg.get("timeout_seconds",120),
   max_output_size=sandbox_cfg.get("max_output_size",100000),
  )
- return SkillExecutor(project_id,agent_id,config)
+ skill_restrictions=_extract_skill_restrictions(skill_config)
+ return SkillExecutor(project_id,agent_id,config,skill_restrictions)
 
 
 def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
@@ -143,3 +147,13 @@ def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any],fallback_di
  project_output_dir=os.path.join(output_base,project_id)
  os.makedirs(project_output_dir,exist_ok=True)
  return project_output_dir
+
+
+def _extract_skill_restrictions(skill_config:Dict[str,Any])->Dict[str,Dict[str,Any]]:
+ skills_cfg=skill_config.get("skills",{})
+ result={}
+ for skill_name,cfg in skills_cfg.items():
+  restrictions=cfg.get("restrictions",{})
+  if restrictions:
+   result[skill_name]=restrictions
+ return result

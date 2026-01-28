@@ -4,6 +4,10 @@ from pathlib import Path
 from typing import List,Optional
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
+HARD_MAX_FILE_SIZE=1048576
+HARD_MAX_LINES=2000
+HARD_MAX_ITEMS=500
+
 
 class FileReadSkill(Skill):
  name="file_read"
@@ -24,6 +28,7 @@ class FileReadSkill(Skill):
   max_lines=kwargs.get("max_lines",1000)
   if not path:
    return SkillResult(success=False,error="path is required")
+  max_lines=min(max_lines,HARD_MAX_LINES)
   full_path=self._resolve_path(path,context)
   if not self._is_allowed(full_path,context):
    return SkillResult(success=False,error=f"Access denied: {path}")
@@ -32,14 +37,22 @@ class FileReadSkill(Skill):
     return SkillResult(success=False,error=f"File not found: {path}")
    if not os.path.isfile(full_path):
     return SkillResult(success=False,error=f"Not a file: {path}")
+   allowed_ext=context.restrictions.get("allowed_extensions")
+   if allowed_ext:
+    ext=os.path.splitext(full_path)[1].lower()
+    if ext and ext not in allowed_ext:
+     return SkillResult(success=False,error=f"Extension not allowed: {ext}. Allowed: {', '.join(allowed_ext)}")
    file_size=os.path.getsize(full_path)
-   if file_size>context.max_output_size:
-    return SkillResult(success=False,error=f"File too large: {file_size} bytes")
+   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
+   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+   if file_size>max_file_size:
+    return SkillResult(success=False,error=f"File too large: {file_size} bytes (limit: {max_file_size} bytes). Use max_lines to read partial content, or split the operation.")
    content=await asyncio.to_thread(self._read_file,full_path,encoding,max_lines)
+   line_count=len(content.splitlines())
    return SkillResult(
     success=True,
     output=content,
-    metadata={"path":full_path,"size":file_size,"lines":len(content.splitlines())}
+    metadata={"path":full_path,"size":file_size,"lines":line_count,"truncated":line_count>=max_lines}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
@@ -49,7 +62,7 @@ class FileReadSkill(Skill):
    lines=[]
    for i,line in enumerate(f):
     if i>=max_lines:
-     lines.append(f"\n... (truncated at {max_lines} lines)")
+     lines.append(f"\n... (truncated at {max_lines} lines, hard limit: {HARD_MAX_LINES})")
      break
     lines.append(line)
    return"".join(lines)
@@ -96,6 +109,11 @@ class FileWriteSkill(Skill):
   create_dirs=kwargs.get("create_dirs",True)
   if not path:
    return SkillResult(success=False,error="path is required")
+  max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
+  max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+  content_size=len(content.encode(encoding))
+  if content_size>max_file_size:
+   return SkillResult(success=False,error=f"Content too large: {content_size} bytes (limit: {max_file_size} bytes). Split into smaller writes.")
   full_path=self._resolve_path(path,context)
   if not self._is_allowed(full_path,context):
    return SkillResult(success=False,error=f"Access denied: {path}")
@@ -107,8 +125,8 @@ class FileWriteSkill(Skill):
    await asyncio.to_thread(self._write_file,full_path,content,encoding)
    return SkillResult(
     success=True,
-    output=f"Written {len(content)} bytes to {path}",
-    metadata={"path":full_path,"size":len(content.encode(encoding))}
+    output=f"Written {content_size} bytes to {path}",
+    metadata={"path":full_path,"size":content_size}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
@@ -173,6 +191,11 @@ class FileEditSkill(Skill):
     return SkillResult(success=False,error=f"File not found: {path}")
    if not os.path.isfile(full_path):
     return SkillResult(success=False,error=f"Not a file: {path}")
+   max_file_size=context.restrictions.get("max_file_size",HARD_MAX_FILE_SIZE)
+   max_file_size=min(max_file_size,HARD_MAX_FILE_SIZE)
+   file_size=os.path.getsize(full_path)
+   if file_size>max_file_size:
+    return SkillResult(success=False,error=f"File too large to edit: {file_size} bytes (limit: {max_file_size} bytes). Consider editing a smaller file or splitting the operation.")
    result=await asyncio.to_thread(self._edit_file,full_path,old_string,new_string,encoding,replace_all)
    if result["error"]:
     return SkillResult(success=False,error=result["error"])
@@ -240,6 +263,9 @@ class FileListSkill(Skill):
   pattern=kwargs.get("pattern","*")
   recursive=kwargs.get("recursive",False)
   max_items=kwargs.get("max_items",100)
+  config_max=context.restrictions.get("max_items",HARD_MAX_ITEMS)
+  hard_max=min(config_max,HARD_MAX_ITEMS)
+  max_items=min(max_items,hard_max)
   full_path=self._resolve_path(path,context)
   if not self._is_allowed(full_path,context):
    return SkillResult(success=False,error=f"Access denied: {path}")
@@ -249,10 +275,11 @@ class FileListSkill(Skill):
    if not os.path.isdir(full_path):
     return SkillResult(success=False,error=f"Not a directory: {path}")
    items=await asyncio.to_thread(self._list_dir,full_path,pattern,recursive,max_items)
+   truncated=len(items)>=max_items
    return SkillResult(
     success=True,
     output=items,
-    metadata={"path":full_path,"count":len(items),"truncated":len(items)>=max_items}
+    metadata={"path":full_path,"count":len(items),"truncated":truncated,"max_items_applied":max_items}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
