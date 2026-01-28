@@ -84,6 +84,14 @@ class MockSkillRunner(AgentRunner):
    "data":{"progress":5,"current_task":"AI API接続中"}
   }
   await asyncio.sleep(0.3*self._simulation_speed)
+  if context.on_speech:
+   try:
+    from services.agent_speech_service import get_agent_speech_service
+    comment=get_agent_speech_service().get_pool_comment(agent_type,"started")
+    if comment:
+     context.on_speech(comment)
+   except Exception:
+    pass
   total_steps=len(sequences)
   total_tokens=0
   final_content=""

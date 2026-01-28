@@ -377,7 +377,19 @@ tool_callブロックを含めず、成果物を出力してください。"""
 最終的な回答を出力する場合は、tool_callブロックを含めないでください。
 
 ## プロジェクト情報
-{context.project_concept or"（未定義）"}"""
+{context.project_concept or"（未定義）"}
+{self._get_comment_section(context)}"""
+
+ def _get_comment_section(self,context:AgentContext)->str:
+  if not context.on_speech:
+   return""
+  try:
+   from services.agent_speech_service import get_agent_speech_service
+   agent_type=context.agent_type.value if hasattr(context.agent_type,'value') else str(context.agent_type)
+   instruction=get_agent_speech_service().get_comment_instruction(agent_type)
+   return f"\n## 一言コメント\n{instruction}"
+  except Exception:
+   return""
 
  def _build_user_prompt(self,context:AgentContext)->str:
   assigned_task_section=""
@@ -421,6 +433,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
    on_progress=context.on_progress,
    on_log=context.on_log,
    on_checkpoint=context.on_checkpoint,
+   on_speech=context.on_speech,
   )
 
  async def _call_llm_with_tools(
@@ -445,6 +458,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
    system_prompt=system_prompt,
    temperature=str(temperature),
    messages_json=messages_json_str,
+   on_speech=context.on_speech,
   )
   result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
   if not result:

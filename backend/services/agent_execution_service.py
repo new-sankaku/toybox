@@ -215,6 +215,7 @@ class AgentExecutionService:
    on_checkpoint=lambda t,d:self._on_checkpoint(leader_agent_id,project_id,t,d),
    on_worker_created=lambda w,t:self._on_worker_created(project_id,leader_agent_id,w,t),
    on_worker_status=lambda w,s,d:self._on_worker_status(project_id,w,s,d),
+   on_worker_speech=lambda wid,msg:self._on_speech(wid,project_id,msg,"llm"),
   )
   self._data_store.update_agent(leader_agent_id,{
    "status":"running",
