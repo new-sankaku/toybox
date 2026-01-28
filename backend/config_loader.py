@@ -293,6 +293,12 @@ def get_workflow_dependencies()->Dict[str,List[str]]:
     return result
 
 
+def is_dag_execution_enabled()->bool:
+    config=get_agents_config()
+    dag_config=config.get("dag_execution",{})
+    return dag_config.get("enabled",True)
+
+
 def get_workflow_context_policy(agent_type:str)->Dict[str,Any]:
     raw=get_agents_config().get("workflow_dependencies",{})
     entry=raw.get(agent_type)

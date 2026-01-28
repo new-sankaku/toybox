@@ -513,6 +513,11 @@ temperature_defaults:
   tester: 0.3
   default: 0.7
 
+# --- DAG並列実行 ---
+# task_splitが出力するworker_tasksのDAG依存関係に基づき並列実行する
+dag_execution:
+  enabled: true                      # DAG並列実行を有効にするか（falseなら従来の逐次実行）
+
 # --- 品質チェック ---
 quality_check_defaults:
   max_retries: 3                     # 品質チェック不合格時の最大リトライ回数
