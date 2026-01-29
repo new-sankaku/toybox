@@ -63,15 +63,12 @@ class RequestLogger:
    self.init_app(app)
 
  def init_app(self,app)->None:
-  @app.before_request
-  def log_request():
-   from flask import request
-   logger=get_logger()
-   logger.info(f"Request: {request.method} {request.path}")
+  pass
 
-  @app.after_request
-  def log_response(response):
-   from flask import request
-   logger=get_logger()
-   logger.info(f"Response: {request.method} {request.path} - {response.status_code}")
-   return response
+
+async def request_logging_middleware(request,call_next):
+ logger=get_logger()
+ logger.info(f"Request: {request.method} {request.url.path}")
+ response=await call_next(request)
+ logger.info(f"Response: {request.method} {request.url.path} - {response.status_code}")
+ return response

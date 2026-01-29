@@ -13,9 +13,9 @@ from middleware.logger import get_logger
 
 
 class AgentExecutionService:
- def __init__(self,data_store,sio=None):
+ def __init__(self,data_store,socket_manager=None,sio=None):
   self._data_store=data_store
-  self._sio=sio
+  self._socket_manager=socket_manager
   self._agent_runner:Optional[ApiAgentRunner]=None
   self._running_agents:Dict[str,bool]={}
   self._lock=threading.Lock()
@@ -44,9 +44,9 @@ class AgentExecutionService:
   self._data_store.update_agent(agent_id,{"status":status_map.get(status,"running")})
 
  def _emit_event(self,event:str,data:Dict,project_id:str)->None:
-  if self._sio:
+  if self._socket_manager:
    try:
-    self._sio.emit(event,data,room=f"project:{project_id}")
+    asyncio.create_task(self._socket_manager.emit_to_project(event,data,project_id))
    except Exception as e:
     self._logger.error(f"Error emitting {event}: {e}",exc_info=True)
 
@@ -483,23 +483,16 @@ class AgentExecutionService:
     return True
   return False
 
- def re_execute_agent(self,project_id:str,agent_id:str)->None:
-  def _run():
-   loop=asyncio.new_event_loop()
-   asyncio.set_event_loop(loop)
-   try:
-    agent=self._data_store.get_agent(agent_id)
-    if not agent:
-     self._logger.warning(f"re_execute_agent: agent not found: agent_id={agent_id}")
-     return
-    self._logger.info(f"re_execute_agent: starting agent_id={agent_id} type={agent.get('type','')} project_id={project_id}")
-    if agent.get("type","").endswith("_leader"):
-     loop.run_until_complete(self.execute_leader_with_workers(project_id,agent_id))
-    else:
-     loop.run_until_complete(self.execute_agent(project_id,agent_id))
-   except Exception as e:
-    self._logger.error(f"re_execute_agent failed: agent_id={agent_id} error={e}",exc_info=True)
-   finally:
-    loop.close()
-  thread=threading.Thread(target=_run,daemon=True)
-  thread.start()
+ async def re_execute_agent(self,project_id:str,agent_id:str)->None:
+  try:
+   agent=self._data_store.get_agent(agent_id)
+   if not agent:
+    self._logger.warning(f"re_execute_agent: agent not found: agent_id={agent_id}")
+    return
+   self._logger.info(f"re_execute_agent: starting agent_id={agent_id} type={agent.get('type','')} project_id={project_id}")
+   if agent.get("type","").endswith("_leader"):
+    asyncio.create_task(self.execute_leader_with_workers(project_id,agent_id))
+   else:
+    asyncio.create_task(self.execute_agent(project_id,agent_id))
+  except Exception as e:
+   self._logger.error(f"re_execute_agent failed: agent_id={agent_id} error={e}",exc_info=True)
