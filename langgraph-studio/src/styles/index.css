@@ -158,6 +158,30 @@
 }
 
 @layer components {
+  /* ===== Surface Classes =====
+   * 背景色と文字色をペアにしたクラス
+   * 背景と文字の組み合わせミスを防ぐため、これらを優先的に使用する
+   */
+  .nier-surface-main {
+    @apply bg-nier-bg-main text-nier-text-main;
+  }
+
+  .nier-surface-panel {
+    @apply bg-nier-bg-panel text-nier-text-main;
+  }
+
+  .nier-surface-header {
+    @apply bg-nier-bg-header text-nier-text-header;
+  }
+
+  .nier-surface-footer {
+    @apply bg-nier-bg-footer text-nier-text-footer;
+  }
+
+  .nier-surface-selected {
+    @apply bg-nier-bg-selected text-nier-text-main;
+  }
+
   /* NieR Button Styles */
   .nier-btn {
     @apply px-4 py-1.5 bg-nier-bg-panel border border-nier-border-dark

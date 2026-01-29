@@ -78,61 +78,76 @@ cd backend && python scripts/remove-spaces.py
 - `backend/openapi/generator.py` のスキーマリストとパス定義に追加
 - 「API型の整合性チェック」を実行して確認
 
-## 2. Color System
-### 2.1 Primary Palette (Source: index.html)
+## CSS/デザインルール
 
-```css
-:root {
-  /* ===== Background Colors ===== */
-  --bg-main: #E8E4D4;        /* メイン背景 */
-  --bg-panel: #DAD5C3;       /* パネル背景 */
-  --bg-selected: #CCC7B5;    /* 選択状態 */
-  --bg-header: #57534A;      /* ヘッダー/フッター */
-  --bg-footer: #57534A;
+### サーフェスクラス（必須）
 
-  /* ===== Text Colors ===== */
-  --text-main: #454138;      /* メインテキスト */
-  --text-light: #7A756A;     /* サブテキスト */
-  --text-header: #E8E4D4;    /* ヘッダー内テキスト */
-  --text-footer: #E8E4D4;    /* フッター内テキスト */
+背景色と文字色の組み合わせミスを防ぐため、**サーフェスクラス**を優先的に使用する。
 
-  /* ===== Accent Colors (Category Markers) ===== */
-  --accent-red: #B85C5C;     /* システム/エラー/Critical */
-  --accent-orange: #C4956C;  /* 実行中/Warning */
-  --accent-yellow: #C9C078;  /* 待機中/Pending */
-  --accent-green: #7AAA7A;   /* 完了/Success */
-  --accent-blue: #6B8FAA;    /* 情報/Info */
+| クラス | 用途 | 背景 | 文字 |
+|--------|------|------|------|
+| `nier-surface-main` | メインエリア | 明るいベージュ | 暗い茶色 |
+| `nier-surface-panel` | パネル/カード | やや暗いベージュ | 暗い茶色 |
+| `nier-surface-header` | ヘッダー/ダーク領域 | 暗い茶色 | 明るいベージュ |
+| `nier-surface-footer` | フッター | 暗い茶色 | 明るいベージュ |
+| `nier-surface-selected` | 選択状態 | 中間ベージュ | 暗い茶色 |
 
-  /* ===== Borders ===== */
-  --border-light: rgba(69, 65, 56, 0.2);
-  --border-dark: rgba(69, 65, 56, 0.4);
-}
+**使用ルール:**
+1. UIコンポーネント（Card, Button等）を優先的に使用する
+2. 直接divを使う場合は `.nier-surface-*` クラスを使用する
+3. `bg-nier-bg-*` と `text-nier-text-*` を直接組み合わせない（組み合わせミスの原因）
+
+**禁止パターン:**
+```tsx
+// NG: 背景と文字を別々に指定（ミスしやすい）
+<div className="bg-nier-bg-header text-nier-text-main">
+
+// OK: サーフェスクラスを使用
+<div className="nier-surface-header">
+
+// OK: コンポーネントを使用
+<Card><CardHeader>...</CardHeader></Card>
 ```
 
-### 2.2 Color Usage Matrix
+### コンポーネントクラス
 
-| 用途 | カラー | CSS変数 |
-|------|--------|---------|
-| メイン背景 | `#E8E4D4` | `--bg-main` |
-| パネル背景 | `#DAD5C3` | `--bg-panel` |
-| 選択状態 | `#CCC7B5` | `--bg-selected` |
-| ヘッダー/フッター | `#57534A` | `--bg-header` |
-| メインテキスト | `#454138` | `--text-main` |
-| サブテキスト | `#7A756A` | `--text-light` |
-| ヘッダー/フッターテキスト | `#E8E4D4` | `--text-header` |
+| クラス | 用途 |
+|--------|------|
+| `.nier-card` | カード外枠 |
+| `.nier-card-header` | カードヘッダー（ダーク背景） |
+| `.nier-card-body` | カード本体（パネル背景） |
+| `.nier-btn` | 標準ボタン |
+| `.nier-btn-primary` | プライマリボタン |
+| `.nier-btn-danger` | 危険アクションボタン |
+| `.nier-input` | 入力フィールド |
 
-### 2.3 Category Color System
+### アクセントカラー（状態表示用）
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  CATEGORY MARKERS - 状態を示す4px縦線                           │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ██  --accent-red     #B85C5C   システム/エラー/Critical        │
-│  ██  --accent-orange  #C4956C   実行中/Warning/進行中           │
-│  ██  --accent-yellow  #C9C078   待機中/Pending/Human待ち        │
-│  ██  --accent-green   #7AAA7A   完了/Success/承認済み           │
-│  ██  --accent-blue    #6B8FAA   情報/Info/参照                  │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+| 変数 | 用途 |
+|------|------|
+| `--accent-red` | エラー/Critical |
+| `--accent-orange` | 実行中/Warning |
+| `--accent-yellow` | 待機中/Pending |
+| `--accent-green` | 完了/Success |
+| `--accent-blue` | 情報/Info |
+
+## API/WebSocket変更時のチェックリスト
+
+APIやWebSocketイベントを変更・追加する際は、以下を必ず確認する。
+
+**バックエンド変更時:**
+1. `backend/schemas/` の型定義を更新
+2. OpenAPIスペック再生成（`10_build_check.bat`で自動実行）
+3. WebSocketイベントを送信している場合、room指定が正しいか確認
+
+**フロントエンド変更時:**
+1. `langgraph-studio/src/services/apiService.ts` の型定義を更新
+2. `langgraph-studio/src/types/websocket.ts` のイベント型を更新（WebSocket関連の場合）
+3. 該当Storeのイベントハンドラを更新
+4. WebSocketServiceの接続処理を確認
+
+**よくあるミス（BUG_CHECKLIST.mdより）:**
+- WebSocket型定義がサーバー側イベントと一致していない（×4）
+- WebSocketイベントハンドラが未接続（×1）
+- WebSocketイベント型にフィールドが不足（×1）
+- API型定義にサーバー側で追加されたフィールドが反映されていない（×2）
