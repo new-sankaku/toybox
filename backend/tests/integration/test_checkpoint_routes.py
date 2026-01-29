@@ -1,6 +1,7 @@
 """チェックポイントAPIルートの統合テスト"""
 
 import pytest
+from typing import Optional
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from routers import checkpoint
@@ -20,7 +21,7 @@ class MockDataStore:
     def get_checkpoints_by_project(self, project_id: str):
         return [c for c in self.checkpoints.values() if c.get("projectId") == project_id]
 
-    def resolve_checkpoint(self, checkpoint_id: str, resolution: str, feedback: str = None):
+    def resolve_checkpoint(self, checkpoint_id: str, resolution: str, feedback: Optional[str] = None):
         if checkpoint_id not in self.checkpoints:
             return None
         self.checkpoints[checkpoint_id]["resolution"] = resolution

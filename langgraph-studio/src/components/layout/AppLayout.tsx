@@ -4,7 +4,7 @@ import ConnectionStatus from'./ConnectionStatus'
 import ActivitySidebar from'./ActivitySidebar'
 import DialogueBar from'./DialogueBar'
 import{ToastContainer}from'@/components/ui/Toast'
-import type{TabId}from'../../App'
+import type{TabId}from'@/stores/navigationStore'
 
 interface AppLayoutProps{
  children:ReactNode

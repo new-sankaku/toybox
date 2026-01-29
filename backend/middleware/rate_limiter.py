@@ -121,3 +121,14 @@ async def rate_limit_middleware(request: Request, call_next: Callable) -> Respon
     response.headers["X-RateLimit-Limit"] = str(info["limit"])
     response.headers["X-RateLimit-Remaining"] = str(info["remaining"])
     return response
+
+
+def rate_limit(limit: int = 60, window: int = 60):
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator

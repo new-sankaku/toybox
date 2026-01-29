@@ -32,6 +32,7 @@ class ProviderHealthMonitor:
         self._thread: Optional[threading.Thread] = None
         self._on_health_change: Optional[Callable[[str, HealthCheckResult], None]] = None
         self._socket_manager = None
+        self._sio = None
         self._initialized = True
 
     def set_check_interval(self, seconds: int) -> None:
@@ -41,7 +42,7 @@ class ProviderHealthMonitor:
         self._socket_manager = socket_manager
 
     def set_socketio(self, sio) -> None:
-        pass
+        self._sio = sio
 
     def set_health_change_callback(self, callback: Callable[[str, HealthCheckResult], None]) -> None:
         self._on_health_change = callback
@@ -131,6 +132,14 @@ class ProviderHealthMonitor:
             get_logger().info(msg)
             if self._on_health_change:
                 self._on_health_change(provider_id, result)
+            if self._sio:
+                try:
+                    self._sio.emit(
+                        "provider_health_changed",
+                        {"provider_id": provider_id, "health": result.to_dict()},
+                    )
+                except Exception as e:
+                    get_logger().warning(f"Error emitting health change via sio: {e}")
             if self._socket_manager:
                 try:
                     import asyncio
