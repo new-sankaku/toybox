@@ -38,23 +38,28 @@
 コード修正後は `10_build_check.bat` を実行する（サーバー起動不要）。
 
 **10_build_check.batの内容:**
-1. Backend構文チェック
-2. OpenAPIスペック生成
-3. TypeScript型生成
-4. ESLint
-5. TypeScript型チェック
+1. Ruff Lint（Pythonリンター）
+2. mypy（Python型チェック）
+3. Backend Import Test
+4. OpenAPIスペック生成
+5. TypeScript型生成
+6. ESLint
+7. TypeScript型チェック
+8. Vitest Unit Tests（フロントエンドユニットテスト）
+
+**詳細は** `doc/DEVELOPER_TOOLS.md` **を参照**
 
 ### コミット前の追加作業
 ```bash
 # フルビルド確認
 cd langgraph-studio && npm run build
 
-# コード圧縮
-cd langgraph-studio && npm run format   # スペース削除
-cd backend && python scripts/remove-spaces.py
+# コードフォーマット
+cd backend && ruff format .
+cd langgraph-studio && npm run format  # スペース削除
 ```
 
-**圧縮ルール:**
+**フロントエンド圧縮ルール:**
 - コロン/カンマ後: スペースなし
 - アロー演算子前後: スペースなし
 - コメント: 削除（TODO/FIXME以外）

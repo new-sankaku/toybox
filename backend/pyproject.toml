@@ -1,0 +1,125 @@
+[project]
+name = "toybox-backend"
+version = "0.1.0"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "*.pyc",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes (unused imports, undefined vars)
+    "B",      # flake8-bugbear (likely bugs)
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E402",   # module level import not at top (eventlet.monkey_patch needs this)
+    "E501",   # line too long (handled by formatter)
+    "E701",   # multiple statements on one line
+    "E702",   # multiple statements on one line (semicolon)
+    "E703",   # statement ends with semicolon
+    "E711",   # comparison to None
+    "E712",   # comparison to True/False
+    "E721",   # type comparison instead of isinstance
+    "E731",   # lambda assignment
+    "E741",   # ambiguous variable name
+    "B007",   # loop control variable not used (common pattern)
+    "B008",   # do not perform function calls in argument defaults
+    "B017",   # assertRaises(Exception)
+    "B028",   # no explicit stacklevel in warnings
+    "B904",   # raise without from (legacy code)
+    "B905",   # zip without strict (legacy code)
+    "F401",   # unused import (legacy code has many)
+    "F541",   # f-string without placeholders (legacy code)
+    "F811",   # redefinition of unused name (test fixtures)
+    "F821",   # undefined name (forward references with TYPE_CHECKING)
+    "F841",   # unused variable (legacy code)
+    "E722",   # bare except (legacy code)
+    "RUF001", # ambiguous unicode
+    "RUF002", # ambiguous unicode
+    "RUF003", # ambiguous unicode
+    "RUF005", # list concatenation (legacy code)
+    "RUF006", # asyncio dangling task (legacy code)
+    "RUF010", # explicit conversion flag
+    "RUF012", # mutable class attributes (legacy code)
+    "RUF013", # implicit Optional
+    "RUF022", # __all__ not sorted
+    "RUF059", # unused unpacked variables (legacy code)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["handlers","middleware","repositories","agents","providers","schemas","skills","services","security"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["PLR2004","B011"]
+"scripts/**/*.py" = ["T201"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = false
+warn_unused_configs = false
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+ignore_missing_imports = true
+no_implicit_optional = false
+strict_optional = false
+disable_error_code = [
+    "override",
+    "arg-type",
+    "return-value",
+    "assignment",
+    "operator",
+    "index",
+    "attr-defined",
+    "misc",
+    "import-untyped",
+    "name-defined",
+    "var-annotated",
+    "dict-item",
+    "valid-type",
+    "return",
+]
+exclude = [
+    "venv/",
+    ".venv/",
+    "tests/",
+    "scripts/",
+    "models/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "flask.*",
+    "flask_cors.*",
+    "socketio.*",
+    "eventlet.*",
+    "anthropic.*",
+    "openai.*",
+    "yaml.*",
+    "sqlalchemy.*",
+    "requests.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "models.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+addopts = "-v --tb=short"

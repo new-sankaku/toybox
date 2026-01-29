@@ -1,301 +1,312 @@
 import asyncio
 import threading
 import time
-from typing import Optional,Dict,Any,Callable
+from typing import Optional, Dict, Any, Callable
 from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
-from providers.base import AIProviderConfig,ChatMessage,MessageRole
-from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent,get_token_budget_settings
+from providers.base import AIProviderConfig, ChatMessage, MessageRole
+from config_loader import (
+    get_provider_max_concurrent,
+    get_provider_group,
+    get_group_max_concurrent,
+    get_token_budget_settings,
+)
 from agents.exceptions import TokenBudgetExceededError
 from services.stream_comment_parser import StreamCommentParser
 from middleware.logger import get_logger
 
-MAX_JOB_RETRIES=3
+MAX_JOB_RETRIES = 3
 
 
 class LlmJobQueue:
- _instance:Optional["LlmJobQueue"]=None
- _lock=threading.Lock()
+    _instance: Optional["LlmJobQueue"] = None
+    _lock = threading.Lock()
 
- def __new__(cls):
-  if cls._instance is None:
-   with cls._lock:
-    if cls._instance is None:
-     cls._instance=super().__new__(cls)
-     cls._instance._initialized=False
-  return cls._instance
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
 
- def __init__(self):
-  if self._initialized:
-   return
-  self._poll_interval=1.0
-  self._running=False
-  self._thread:Optional[threading.Thread]=None
-  self._active_jobs_by_provider:Dict[str,Dict[str,bool]]={}
-  self._active_jobs_by_group:Dict[str,Dict[str,bool]]={}
-  self._active_jobs_lock=threading.Lock()
-  self._job_callbacks:Dict[str,Callable[[Dict],None]]={}
-  self._speech_callbacks:Dict[str,Callable[[str],None]]={}
-  self._initialized=True
+    def __init__(self):
+        if self._initialized:
+            return
+        self._poll_interval = 1.0
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._active_jobs_by_provider: Dict[str, Dict[str, bool]] = {}
+        self._active_jobs_by_group: Dict[str, Dict[str, bool]] = {}
+        self._active_jobs_lock = threading.Lock()
+        self._job_callbacks: Dict[str, Callable[[Dict], None]] = {}
+        self._speech_callbacks: Dict[str, Callable[[str], None]] = {}
+        self._initialized = True
 
- def start(self)->None:
-  if self._running:
-   return
-  self._running=True
-  self._thread=threading.Thread(target=self._worker_loop,daemon=True)
-  self._thread.start()
-  get_logger().info("LlmJobQueue started")
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._thread.start()
+        get_logger().info("LlmJobQueue started")
 
- def stop(self)->None:
-  self._running=False
-  if self._thread:
-   self._thread.join(timeout=5)
-   self._thread=None
-  get_logger().info("LlmJobQueue stopped")
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+            self._thread = None
+        get_logger().info("LlmJobQueue stopped")
 
- def cleanup_project_jobs(self,project_id:str)->int:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   return repo.cleanup_project_jobs(project_id)
+    def cleanup_project_jobs(self, project_id: str) -> int:
+        with session_scope() as session:
+            repo = LlmJobRepository(session)
+            return repo.cleanup_project_jobs(project_id)
 
- def submit_job(
-  self,
-  project_id:str,
-  agent_id:str,
-  provider_id:str,
-  model:str,
-  prompt:str,
-  max_tokens:int=32768,
-  priority:int=0,
-  callback:Optional[Callable[[Dict],None]]=None,
-  system_prompt:Optional[str]=None,
-  temperature:Optional[str]=None,
-  messages_json:Optional[str]=None,
-  on_speech:Optional[Callable[[str],None]]=None,
- )->Dict[str,Any]:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   budget=get_token_budget_settings()
-   limit=budget.get("default_limit",500000)
-   warning_pct=budget.get("warning_threshold_percent",80)
-   enforcement=budget.get("enforcement","hard")
-   used=repo.get_project_token_usage(project_id)
-   warning_at=int(limit*warning_pct/100)
-   if used>=warning_at:
-    get_logger().warning(f"token budget warning: project={project_id} used={used}/{limit} ({int(used/limit*100)}%)")
-   if enforcement=="hard" and used>=limit:
-    raise TokenBudgetExceededError(project_id,used,limit)
-   job=repo.create_job(
-    project_id=project_id,
-    agent_id=agent_id,
-    provider_id=provider_id,
-    model=model,
-    prompt=prompt,
-    max_tokens=max_tokens,
-    priority=priority,
-    system_prompt=system_prompt,
-    temperature=temperature,
-    messages_json=messages_json,
-   )
-   if callback:
-    self._job_callbacks[job["id"]]=callback
-   if on_speech:
-    self._speech_callbacks[job["id"]]=on_speech
-   return job
+    def submit_job(
+        self,
+        project_id: str,
+        agent_id: str,
+        provider_id: str,
+        model: str,
+        prompt: str,
+        max_tokens: int = 32768,
+        priority: int = 0,
+        callback: Optional[Callable[[Dict], None]] = None,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[str] = None,
+        messages_json: Optional[str] = None,
+        on_speech: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        with session_scope() as session:
+            repo = LlmJobRepository(session)
+            budget = get_token_budget_settings()
+            limit = budget.get("default_limit", 500000)
+            warning_pct = budget.get("warning_threshold_percent", 80)
+            enforcement = budget.get("enforcement", "hard")
+            used = repo.get_project_token_usage(project_id)
+            warning_at = int(limit * warning_pct / 100)
+            if used >= warning_at:
+                get_logger().warning(
+                    f"token budget warning: project={project_id} used={used}/{limit} ({int(used / limit * 100)}%)"
+                )
+            if enforcement == "hard" and used >= limit:
+                raise TokenBudgetExceededError(project_id, used, limit)
+            job = repo.create_job(
+                project_id=project_id,
+                agent_id=agent_id,
+                provider_id=provider_id,
+                model=model,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                priority=priority,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                messages_json=messages_json,
+            )
+            if callback:
+                self._job_callbacks[job["id"]] = callback
+            if on_speech:
+                self._speech_callbacks[job["id"]] = on_speech
+            return job
 
- def get_job_status(self,job_id:str)->Optional[Dict[str,Any]]:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   job=repo.get(job_id)
-   return repo.to_dict(job) if job else None
+    def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with session_scope() as session:
+            repo = LlmJobRepository(session)
+            job = repo.get(job_id)
+            return repo.to_dict(job) if job else None
 
- def wait_for_job(self,job_id:str,timeout:float=300.0)->Optional[Dict[str,Any]]:
-  start=time.time()
-  while time.time()-start<timeout:
-   job=self.get_job_status(job_id)
-   if job and job["status"] in ("completed","failed"):
-    return job
-   time.sleep(0.5)
-  return None
+    def wait_for_job(self, job_id: str, timeout: float = 300.0) -> Optional[Dict[str, Any]]:
+        start = time.time()
+        while time.time() - start < timeout:
+            job = self.get_job_status(job_id)
+            if job and job["status"] in ("completed", "failed"):
+                return job
+            time.sleep(0.5)
+        return None
 
- async def wait_for_job_async(self,job_id:str,timeout:float=300.0)->Optional[Dict[str,Any]]:
-  start=time.time()
-  while time.time()-start<timeout:
-   job=self.get_job_status(job_id)
-   if job and job["status"] in ("completed","failed"):
-    return job
-   await asyncio.sleep(0.5)
-  return None
+    async def wait_for_job_async(self, job_id: str, timeout: float = 300.0) -> Optional[Dict[str, Any]]:
+        start = time.time()
+        while time.time() - start < timeout:
+            job = self.get_job_status(job_id)
+            if job and job["status"] in ("completed", "failed"):
+                return job
+            await asyncio.sleep(0.5)
+        return None
 
- def _worker_loop(self)->None:
-  while self._running:
-   try:
-    self._process_pending_jobs()
-   except Exception as e:
-    get_logger().error(f"LlmJobQueue worker error: {e}",exc_info=True)
-   time.sleep(self._poll_interval)
+    def _worker_loop(self) -> None:
+        while self._running:
+            try:
+                self._process_pending_jobs()
+            except Exception as e:
+                get_logger().error(f"LlmJobQueue worker error: {e}", exc_info=True)
+            time.sleep(self._poll_interval)
 
- def _get_provider_active_count(self,provider_id:str)->int:
-  with self._active_jobs_lock:
-   provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
-   return len([j for j in provider_jobs.values() if j])
+    def _get_provider_active_count(self, provider_id: str) -> int:
+        with self._active_jobs_lock:
+            provider_jobs = self._active_jobs_by_provider.get(provider_id, {})
+            return len([j for j in provider_jobs.values() if j])
 
- def _get_group_active_count(self,group_id:str)->int:
-  with self._active_jobs_lock:
-   group_jobs=self._active_jobs_by_group.get(group_id,{})
-   return len([j for j in group_jobs.values() if j])
+    def _get_group_active_count(self, group_id: str) -> int:
+        with self._active_jobs_lock:
+            group_jobs = self._active_jobs_by_group.get(group_id, {})
+            return len([j for j in group_jobs.values() if j])
 
- def _can_start_job(self,provider_id:str,job_id:str)->bool:
-  with self._active_jobs_lock:
-   if job_id in self._active_jobs_by_provider.get(provider_id,{}):
-    return False
-   group_id=get_provider_group(provider_id)
-   if group_id:
-    group_max=get_group_max_concurrent(group_id)
-    group_jobs=self._active_jobs_by_group.get(group_id,{})
-    if len([j for j in group_jobs.values() if j])>=group_max:
-     return False
-   else:
-    provider_max=get_provider_max_concurrent(provider_id)
-    provider_jobs=self._active_jobs_by_provider.get(provider_id,{})
-    if len([j for j in provider_jobs.values() if j])>=provider_max:
-     return False
-  return True
+    def _can_start_job(self, provider_id: str, job_id: str) -> bool:
+        with self._active_jobs_lock:
+            if job_id in self._active_jobs_by_provider.get(provider_id, {}):
+                return False
+            group_id = get_provider_group(provider_id)
+            if group_id:
+                group_max = get_group_max_concurrent(group_id)
+                group_jobs = self._active_jobs_by_group.get(group_id, {})
+                if len([j for j in group_jobs.values() if j]) >= group_max:
+                    return False
+            else:
+                provider_max = get_provider_max_concurrent(provider_id)
+                provider_jobs = self._active_jobs_by_provider.get(provider_id, {})
+                if len([j for j in provider_jobs.values() if j]) >= provider_max:
+                    return False
+        return True
 
- def _register_active_job(self,job_id:str,provider_id:str)->None:
-  with self._active_jobs_lock:
-   if provider_id not in self._active_jobs_by_provider:
-    self._active_jobs_by_provider[provider_id]={}
-   self._active_jobs_by_provider[provider_id][job_id]=True
-   group_id=get_provider_group(provider_id)
-   if group_id:
-    if group_id not in self._active_jobs_by_group:
-     self._active_jobs_by_group[group_id]={}
-    self._active_jobs_by_group[group_id][job_id]=True
+    def _register_active_job(self, job_id: str, provider_id: str) -> None:
+        with self._active_jobs_lock:
+            if provider_id not in self._active_jobs_by_provider:
+                self._active_jobs_by_provider[provider_id] = {}
+            self._active_jobs_by_provider[provider_id][job_id] = True
+            group_id = get_provider_group(provider_id)
+            if group_id:
+                if group_id not in self._active_jobs_by_group:
+                    self._active_jobs_by_group[group_id] = {}
+                self._active_jobs_by_group[group_id][job_id] = True
 
- def _unregister_active_job(self,job_id:str,provider_id:str)->None:
-  with self._active_jobs_lock:
-   if provider_id in self._active_jobs_by_provider:
-    self._active_jobs_by_provider[provider_id].pop(job_id,None)
-   group_id=get_provider_group(provider_id)
-   if group_id and group_id in self._active_jobs_by_group:
-    self._active_jobs_by_group[group_id].pop(job_id,None)
+    def _unregister_active_job(self, job_id: str, provider_id: str) -> None:
+        with self._active_jobs_lock:
+            if provider_id in self._active_jobs_by_provider:
+                self._active_jobs_by_provider[provider_id].pop(job_id, None)
+            group_id = get_provider_group(provider_id)
+            if group_id and group_id in self._active_jobs_by_group:
+                self._active_jobs_by_group[group_id].pop(job_id, None)
 
- def _process_pending_jobs(self)->None:
-  with session_scope() as session:
-   repo=LlmJobRepository(session)
-   pending_jobs=repo.get_pending_jobs(limit=20)
-   for job in pending_jobs:
-    provider_id=job.provider_id
-    if not self._can_start_job(provider_id,job.id):
-     continue
-    claimed=repo.claim_job(job.id)
-    if claimed:
-     self._register_active_job(job.id,provider_id)
-     thread=threading.Thread(target=self._execute_job,args=(job.id,provider_id),daemon=True)
-     thread.start()
+    def _process_pending_jobs(self) -> None:
+        with session_scope() as session:
+            repo = LlmJobRepository(session)
+            pending_jobs = repo.get_pending_jobs(limit=20)
+            for job in pending_jobs:
+                provider_id = job.provider_id
+                if not self._can_start_job(provider_id, job.id):
+                    continue
+                claimed = repo.claim_job(job.id)
+                if claimed:
+                    self._register_active_job(job.id, provider_id)
+                    thread = threading.Thread(target=self._execute_job, args=(job.id, provider_id), daemon=True)
+                    thread.start()
 
- def _execute_job(self,job_id:str,provider_id:str)->None:
-  try:
-   with session_scope() as session:
-    repo=LlmJobRepository(session)
-    job=repo.get(job_id)
-    if not job:
-     return
-    provider=get_provider(job.provider_id,AIProviderConfig(timeout=120))
-    if not provider:
-     repo.fail_job(job_id,f"Provider not found: {job.provider_id}")
-     self._notify_completion(job_id)
-     return
-    messages=[]
-    if job.messages_json:
-     import json
-     raw_msgs=json.loads(job.messages_json)
-     if job.system_prompt:
-      messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
-     for m in raw_msgs:
-      role_str=m.get("role","user")
-      if role_str=="system":
-       messages.append(ChatMessage(role=MessageRole.SYSTEM,content=m["content"]))
-      elif role_str=="assistant":
-       messages.append(ChatMessage(role=MessageRole.ASSISTANT,content=m["content"]))
-      else:
-       messages.append(ChatMessage(role=MessageRole.USER,content=m["content"]))
-    else:
-     if job.system_prompt:
-      messages.append(ChatMessage(role=MessageRole.SYSTEM,content=job.system_prompt))
-     messages.append(ChatMessage(role=MessageRole.USER,content=job.prompt))
-    chat_kwargs={"messages":messages,"model":job.model,"max_tokens":job.max_tokens}
-    if job.temperature:
-     chat_kwargs["temperature"]=float(job.temperature)
-    speech_cb=self._speech_callbacks.pop(job_id,None)
-    parser=StreamCommentParser(on_comment=speech_cb) if speech_cb else None
-    try:
-     full_content=""
-     input_tokens=0
-     output_tokens=0
-     for chunk in provider.chat_stream(**chat_kwargs):
-      if chunk.is_final:
-       if chunk.input_tokens is not None:
-        input_tokens=chunk.input_tokens
-       if chunk.output_tokens is not None:
-        output_tokens=chunk.output_tokens
-      else:
-       full_content+=chunk.content
-       if parser and not parser.done:
-        parser.feed(chunk.content)
-     if parser:
-      full_content=StreamCommentParser.strip_comment(full_content)
-     repo.complete_job(
-      job_id=job_id,
-      response_content=full_content,
-      tokens_input=input_tokens,
-      tokens_output=output_tokens,
-     )
-    except Exception as stream_err:
-     get_logger().warning(f"LlmJobQueue stream fallback for job {job_id}: {stream_err}")
-     response=provider.chat(**chat_kwargs)
-     fallback_content=response.content
-     if speech_cb and fallback_content:
-      from services.stream_comment_parser import StreamCommentParser as SCP
-      import re
-      m=re.search(r'\[COMMENT\](.*?)\[/COMMENT\]',fallback_content,re.DOTALL)
-      if m:
-       speech_cb(m.group(1).strip())
-      fallback_content=SCP.strip_comment(fallback_content)
-     repo.complete_job(
-      job_id=job_id,
-      response_content=fallback_content,
-      tokens_input=response.input_tokens,
-      tokens_output=response.output_tokens,
-     )
-    self._notify_completion(job_id)
-  except Exception as e:
-   self._speech_callbacks.pop(job_id,None)
-   with session_scope() as session:
-    repo=LlmJobRepository(session)
-    job=repo.get(job_id)
-    if job and job.retry_count<MAX_JOB_RETRIES:
-     repo.retry_job(job_id)
-     get_logger().warning(f"LlmJobQueue job {job_id} retry ({job.retry_count+1}/{MAX_JOB_RETRIES}): {e}")
-    else:
-     repo.fail_job(job_id,str(e))
-     self._notify_completion(job_id)
-  finally:
-   self._unregister_active_job(job_id,provider_id)
+    def _execute_job(self, job_id: str, provider_id: str) -> None:
+        try:
+            with session_scope() as session:
+                repo = LlmJobRepository(session)
+                job = repo.get(job_id)
+                if not job:
+                    return
+                provider = get_provider(job.provider_id, AIProviderConfig(timeout=120))
+                if not provider:
+                    repo.fail_job(job_id, f"Provider not found: {job.provider_id}")
+                    self._notify_completion(job_id)
+                    return
+                messages = []
+                if job.messages_json:
+                    import json
 
- def _notify_completion(self,job_id:str)->None:
-  job=self.get_job_status(job_id)
-  if not job:
-   return
-  callback=self._job_callbacks.pop(job_id,None)
-  if callback:
-   try:
-    callback(job)
-   except Exception as e:
-    get_logger().error(f"LlmJobQueue callback error for job {job_id}: {e}",exc_info=True)
+                    raw_msgs = json.loads(job.messages_json)
+                    if job.system_prompt:
+                        messages.append(ChatMessage(role=MessageRole.SYSTEM, content=job.system_prompt))
+                    for m in raw_msgs:
+                        role_str = m.get("role", "user")
+                        if role_str == "system":
+                            messages.append(ChatMessage(role=MessageRole.SYSTEM, content=m["content"]))
+                        elif role_str == "assistant":
+                            messages.append(ChatMessage(role=MessageRole.ASSISTANT, content=m["content"]))
+                        else:
+                            messages.append(ChatMessage(role=MessageRole.USER, content=m["content"]))
+                else:
+                    if job.system_prompt:
+                        messages.append(ChatMessage(role=MessageRole.SYSTEM, content=job.system_prompt))
+                    messages.append(ChatMessage(role=MessageRole.USER, content=job.prompt))
+                chat_kwargs = {"messages": messages, "model": job.model, "max_tokens": job.max_tokens}
+                if job.temperature:
+                    chat_kwargs["temperature"] = float(job.temperature)
+                speech_cb = self._speech_callbacks.pop(job_id, None)
+                parser = StreamCommentParser(on_comment=speech_cb) if speech_cb else None
+                try:
+                    full_content = ""
+                    input_tokens = 0
+                    output_tokens = 0
+                    for chunk in provider.chat_stream(**chat_kwargs):
+                        if chunk.is_final:
+                            if chunk.input_tokens is not None:
+                                input_tokens = chunk.input_tokens
+                            if chunk.output_tokens is not None:
+                                output_tokens = chunk.output_tokens
+                        else:
+                            full_content += chunk.content
+                            if parser and not parser.done:
+                                parser.feed(chunk.content)
+                    if parser:
+                        full_content = StreamCommentParser.strip_comment(full_content)
+                    repo.complete_job(
+                        job_id=job_id,
+                        response_content=full_content,
+                        tokens_input=input_tokens,
+                        tokens_output=output_tokens,
+                    )
+                except Exception as stream_err:
+                    get_logger().warning(f"LlmJobQueue stream fallback for job {job_id}: {stream_err}")
+                    response = provider.chat(**chat_kwargs)
+                    fallback_content = response.content
+                    if speech_cb and fallback_content:
+                        from services.stream_comment_parser import StreamCommentParser as SCP
+                        import re
+
+                        m = re.search(r"\[COMMENT\](.*?)\[/COMMENT\]", fallback_content, re.DOTALL)
+                        if m:
+                            speech_cb(m.group(1).strip())
+                        fallback_content = SCP.strip_comment(fallback_content)
+                    repo.complete_job(
+                        job_id=job_id,
+                        response_content=fallback_content,
+                        tokens_input=response.input_tokens,
+                        tokens_output=response.output_tokens,
+                    )
+                self._notify_completion(job_id)
+        except Exception as e:
+            self._speech_callbacks.pop(job_id, None)
+            with session_scope() as session:
+                repo = LlmJobRepository(session)
+                job = repo.get(job_id)
+                if job and job.retry_count < MAX_JOB_RETRIES:
+                    repo.retry_job(job_id)
+                    get_logger().warning(
+                        f"LlmJobQueue job {job_id} retry ({job.retry_count + 1}/{MAX_JOB_RETRIES}): {e}"
+                    )
+                else:
+                    repo.fail_job(job_id, str(e))
+                    self._notify_completion(job_id)
+        finally:
+            self._unregister_active_job(job_id, provider_id)
+
+    def _notify_completion(self, job_id: str) -> None:
+        job = self.get_job_status(job_id)
+        if not job:
+            return
+        callback = self._job_callbacks.pop(job_id, None)
+        if callback:
+            try:
+                callback(job)
+            except Exception as e:
+                get_logger().error(f"LlmJobQueue callback error for job {job_id}: {e}", exc_info=True)
 
 
-def get_llm_job_queue()->LlmJobQueue:
- return LlmJobQueue()
+def get_llm_job_queue() -> LlmJobQueue:
+    return LlmJobQueue()

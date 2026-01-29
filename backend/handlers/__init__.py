@@ -9,11 +9,11 @@ from .metrics import register_metrics_routes
 from .websocket import register_websocket_handlers
 from .backup import register_backup_routes
 
-__all__=[
-    'register_project_routes',
-    'register_agent_routes',
-    'register_checkpoint_routes',
-    'register_metrics_routes',
-    'register_websocket_handlers',
-    'register_backup_routes',
+__all__ = [
+    "register_project_routes",
+    "register_agent_routes",
+    "register_checkpoint_routes",
+    "register_metrics_routes",
+    "register_websocket_handlers",
+    "register_backup_routes",
 ]

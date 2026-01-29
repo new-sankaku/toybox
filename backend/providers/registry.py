@@ -1,103 +1,96 @@
 """プロバイダーレジストリ - プロバイダーの登録と取得を管理"""
-from typing import Dict,Type,Optional,List,Any
-from .base import AIProvider,AIProviderConfig
+
+from typing import Dict, Type, Optional, List, Any
+from .base import AIProvider, AIProviderConfig
 
 
 class ProviderRegistry:
- """プロバイダーレジストリ（シングルトン）"""
- _instance:Optional["ProviderRegistry"]=None
- _providers:Dict[str,Type[AIProvider]]={}
- _instances:Dict[str,AIProvider]={}
+    """プロバイダーレジストリ（シングルトン）"""
 
- def __new__(cls):
-  if cls._instance is None:
-   cls._instance=super().__new__(cls)
-  return cls._instance
+    _instance: Optional["ProviderRegistry"] = None
+    _providers: Dict[str, Type[AIProvider]] = {}
+    _instances: Dict[str, AIProvider] = {}
 
- @classmethod
- def register(cls,provider_class:Type[AIProvider])->None:
-  """プロバイダークラスを登録"""
-  temp=provider_class()
-  cls._providers[temp.provider_id]=provider_class
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
- @classmethod
- def get(
-  cls,
-  provider_id:str,
-  config:Optional[AIProviderConfig]=None
- )->Optional[AIProvider]:
-  """プロバイダーインスタンスを取得"""
-  if provider_id not in cls._providers:
-   return None
-  cache_key=f"{provider_id}:{id(config)}"
-  if cache_key not in cls._instances:
-   cls._instances[cache_key]=cls._providers[provider_id](config)
-  return cls._instances[cache_key]
+    @classmethod
+    def register(cls, provider_class: Type[AIProvider]) -> None:
+        """プロバイダークラスを登録"""
+        temp = provider_class()
+        cls._providers[temp.provider_id] = provider_class
 
- @classmethod
- def get_fresh(
-  cls,
-  provider_id:str,
-  config:Optional[AIProviderConfig]=None
- )->Optional[AIProvider]:
-  """新しいプロバイダーインスタンスを取得（キャッシュなし）"""
-  if provider_id not in cls._providers:
-   return None
-  return cls._providers[provider_id](config)
+    @classmethod
+    def get(cls, provider_id: str, config: Optional[AIProviderConfig] = None) -> Optional[AIProvider]:
+        """プロバイダーインスタンスを取得"""
+        if provider_id not in cls._providers:
+            return None
+        cache_key = f"{provider_id}:{id(config)}"
+        if cache_key not in cls._instances:
+            cls._instances[cache_key] = cls._providers[provider_id](config)
+        return cls._instances[cache_key]
 
- @classmethod
- def list_providers(cls)->List[Dict[str,Any]]:
-  """登録済みプロバイダー一覧"""
-  result=[]
-  for provider_id,provider_class in cls._providers.items():
-   temp=provider_class()
-   result.append({
-    "id":temp.provider_id,
-    "name":temp.display_name,
-    "models":[m.id for m in temp.get_available_models()]
-   })
-  return result
+    @classmethod
+    def get_fresh(cls, provider_id: str, config: Optional[AIProviderConfig] = None) -> Optional[AIProvider]:
+        """新しいプロバイダーインスタンスを取得（キャッシュなし）"""
+        if provider_id not in cls._providers:
+            return None
+        return cls._providers[provider_id](config)
 
- @classmethod
- def is_registered(cls,provider_id:str)->bool:
-  """プロバイダーが登録されているか"""
-  return provider_id in cls._providers
+    @classmethod
+    def list_providers(cls) -> List[Dict[str, Any]]:
+        """登録済みプロバイダー一覧"""
+        result = []
+        for provider_id, provider_class in cls._providers.items():
+            temp = provider_class()
+            result.append(
+                {
+                    "id": temp.provider_id,
+                    "name": temp.display_name,
+                    "models": [m.id for m in temp.get_available_models()],
+                }
+            )
+        return result
 
- @classmethod
- def clear_cache(cls)->None:
-  """インスタンスキャッシュをクリア"""
-  cls._instances.clear()
+    @classmethod
+    def is_registered(cls, provider_id: str) -> bool:
+        """プロバイダーが登録されているか"""
+        return provider_id in cls._providers
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """インスタンスキャッシュをクリア"""
+        cls._instances.clear()
 
 
-def get_provider(
- provider_id:str,
- config:Optional[AIProviderConfig]=None
-)->Optional[AIProvider]:
- """プロバイダー取得のショートカット"""
- return ProviderRegistry.get(provider_id,config)
+def get_provider(provider_id: str, config: Optional[AIProviderConfig] = None) -> Optional[AIProvider]:
+    """プロバイダー取得のショートカット"""
+    return ProviderRegistry.get(provider_id, config)
 
 
-def list_providers()->List[Dict[str,Any]]:
- """プロバイダー一覧取得のショートカット"""
- return ProviderRegistry.list_providers()
+def list_providers() -> List[Dict[str, Any]]:
+    """プロバイダー一覧取得のショートカット"""
+    return ProviderRegistry.list_providers()
 
 
-def register_all_providers()->None:
- """全プロバイダーを登録"""
- from .anthropic import AnthropicProvider
- from .mock import MockProvider
- from .zhipu import ZhipuProvider
- from .deepseek import DeepSeekProvider
- from .local_comfyui import LocalComfyUIProvider
- from .local_audiocraft import LocalAudioCraftProvider
- from .local_coqui_tts import LocalCoquiTTSProvider
- from .claude_code import ClaudeCodeProvider
+def register_all_providers() -> None:
+    """全プロバイダーを登録"""
+    from .anthropic import AnthropicProvider
+    from .mock import MockProvider
+    from .zhipu import ZhipuProvider
+    from .deepseek import DeepSeekProvider
+    from .local_comfyui import LocalComfyUIProvider
+    from .local_audiocraft import LocalAudioCraftProvider
+    from .local_coqui_tts import LocalCoquiTTSProvider
+    from .claude_code import ClaudeCodeProvider
 
- ProviderRegistry.register(AnthropicProvider)
- ProviderRegistry.register(MockProvider)
- ProviderRegistry.register(ZhipuProvider)
- ProviderRegistry.register(DeepSeekProvider)
- ProviderRegistry.register(LocalComfyUIProvider)
- ProviderRegistry.register(LocalAudioCraftProvider)
- ProviderRegistry.register(LocalCoquiTTSProvider)
- ProviderRegistry.register(ClaudeCodeProvider)
+    ProviderRegistry.register(AnthropicProvider)
+    ProviderRegistry.register(MockProvider)
+    ProviderRegistry.register(ZhipuProvider)
+    ProviderRegistry.register(DeepSeekProvider)
+    ProviderRegistry.register(LocalComfyUIProvider)
+    ProviderRegistry.register(LocalAudioCraftProvider)
+    ProviderRegistry.register(LocalCoquiTTSProvider)
+    ProviderRegistry.register(ClaudeCodeProvider)

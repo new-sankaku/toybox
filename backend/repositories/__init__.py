@@ -2,7 +2,7 @@ from .base import BaseRepository
 from .project import ProjectRepository
 from .agent import AgentRepository
 from .checkpoint import CheckpointRepository
-from .log import AgentLogRepository,SystemLogRepository
+from .log import AgentLogRepository, SystemLogRepository
 from .asset import AssetRepository
 from .intervention import InterventionRepository
 from .uploaded_file import UploadedFileRepository
