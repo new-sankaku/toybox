@@ -71,11 +71,11 @@ export function ProjectList({
       <Loader2 size={24} className="mx-auto mb-2 animate-spin"/>
       読み込み中...
      </div>
-    ):projects.length===0?(
+):projects.length===0?(
      <div className="text-center text-nier-text-light py-8">
       プロジェクトがありません
      </div>
-    ):(
+):(
      <div className="space-y-2">
       {projects.map((project)=>(
        <div
@@ -86,7 +86,7 @@ export function ProjectList({
          currentProject?.id===project.id
           ?'border-nier-border-light bg-nier-bg-selected'
           :'border-nier-border-light hover:bg-nier-bg-hover'
-        )}
+)}
        >
         <div className="flex items-start justify-between">
          <div className="flex-1 min-w-0">
@@ -127,10 +127,10 @@ export function ProjectList({
          Phase {project.currentPhase}
         </div>
        </div>
-      ))}
+))}
      </div>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }

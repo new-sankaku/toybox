@@ -40,39 +40,39 @@ export function ProjectControls({
        {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
        開始
       </Button>
-     )}
+)}
      {project.status==='paused'&&(
       <Button onClick={onResume} disabled={isLoading}>
        {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
        再開
       </Button>
-     )}
+)}
      {project.status==='running'&&(
       <Button onClick={onPause} disabled={isLoading}>
        {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Pause size={14} className="mr-1.5"/>}
        一時停止
       </Button>
-     )}
+)}
      {(project.status==='running'||project.status==='paused')&&(
       <Button variant="secondary" onClick={onStop} disabled={isLoading}>
        <Square size={14} className="mr-1.5"/>
        停止
       </Button>
-     )}
+)}
      {canBrushup&&(
       <Button onClick={onBrushup}>
        <RefreshCw size={14} className="mr-1.5"/>
        ブラッシュアップ
       </Button>
-     )}
+)}
      {canInitialize&&(
       <Button variant="danger" onClick={onInitialize}>
        <RotateCcw size={14} className="mr-1.5"/>
        初期化
       </Button>
-     )}
+)}
     </div>
    </CardContent>
   </Card>
- )
+)
 }

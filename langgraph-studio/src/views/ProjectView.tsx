@@ -490,7 +490,7 @@ export default function ProjectView():JSX.Element{
       className="w-full px-3 py-2 bg-nier-bg-main border border-nier-border-light text-nier-body focus:border-nier-accent-gold focus:outline-none"
      />
     </div>
-   )}
+)}
    <div>
     <label className="block text-nier-small text-nier-text-light mb-2">プラットフォーム</label>
     <div className="grid grid-cols-3 gap-2">
@@ -504,7 +504,7 @@ export default function ProjectView():JSX.Element{
        <div className="text-nier-small font-medium">{opt.label}</div>
        <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
       </button>
-     ))}
+))}
     </div>
    </div>
    <div>
@@ -520,7 +520,7 @@ export default function ProjectView():JSX.Element{
        <div className="text-nier-small font-medium">{opt.label}</div>
        <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
       </button>
-     ))}
+))}
     </div>
    </div>
    {mode==='create'&&(
@@ -538,10 +538,10 @@ export default function ProjectView():JSX.Element{
         <div className="text-nier-caption text-nier-text-light">{opt.description}</div>
         <div className="text-nier-caption text-nier-text-light">{opt.estimatedHours}</div>
        </button>
-      ))}
+))}
      </div>
     </div>
-   )}
+)}
    <div>
     <label className="block text-nier-small text-nier-text-light mb-2">アセット自動生成</label>
     <div className="grid grid-cols-2 gap-2">
@@ -558,7 +558,7 @@ export default function ProjectView():JSX.Element{
         <span className="text-nier-caption text-nier-text-light ml-2">{opt.service}</span>
        </div>
       </label>
-     ))}
+))}
     </div>
     {mode==='create'&&<p className="text-nier-caption text-nier-text-light mt-1">使用するにはConfigタブでサービス設定が必要です</p>}
    </div>
@@ -587,11 +587,11 @@ export default function ProjectView():JSX.Element{
           })}
          </select>
         </div>
-       )
+)
       })}
      </div>
     </div>
-   )}
+)}
    {violenceRatingOptions.length>0&&sexualRatingOptions.length>0&&(
     <div>
      <label className="block text-nier-small text-nier-text-light mb-2">コンテンツレーティング</label>
@@ -614,9 +614,9 @@ export default function ProjectView():JSX.Element{
       </div>
      </div>
     </div>
-   )}
+)}
   </div>
- )
+)
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
@@ -625,7 +625,7 @@ export default function ProjectView():JSX.Element{
      {error}
      <button onClick={()=>setError(null)} className="ml-2 underline hover:no-underline">閉じる</button>
     </div>
-   )}
+)}
 
    <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 overflow-hidden">
     <div className="lg:col-span-1 flex flex-col overflow-hidden">
@@ -663,7 +663,7 @@ export default function ProjectView():JSX.Element{
         </div>
        </CardContent>
       </Card>
-     ):currentProject?(
+):currentProject?(
       <div className="space-y-3">
        <Card>
         <CardHeader>
@@ -671,7 +671,7 @@ export default function ProjectView():JSX.Element{
           <DiamondMarker>プロジェクト詳細</DiamondMarker>
           {!isEditing&&currentProject.status!=='running'&&(
            <button onClick={handleStartEdit} className="p-1.5 hover:bg-nier-bg-selected transition-colors" title="編集"><Pencil size={16}/></button>
-          )}
+)}
          </div>
         </CardHeader>
         <CardContent>
@@ -685,9 +685,9 @@ export default function ProjectView():JSX.Element{
             <Button variant="secondary" onClick={handleCancelEdit}>キャンセル</Button>
            </div>
           </>
-         ):(
+):(
           <ProjectDetail project={currentProject}/>
-         )}
+)}
         </CardContent>
        </Card>
        <ProjectControls
@@ -702,7 +702,7 @@ export default function ProjectView():JSX.Element{
        />
        <ProjectFiles files={uploadedFiles} isLoading={filesLoading} error={filesError}/>
       </div>
-     ):(
+):(
       <Card>
        <CardContent>
         <div className="text-center py-12 text-nier-text-light">
@@ -712,7 +712,7 @@ export default function ProjectView():JSX.Element{
         </div>
        </CardContent>
       </Card>
-     )}
+)}
     </div>
    </div>
 
@@ -727,7 +727,7 @@ export default function ProjectView():JSX.Element{
      isLoading={isLoading}
      variant="danger"
     />
-   )}
+)}
 
    {showDeleteDialog&&(
     <ConfirmDialog
@@ -743,7 +743,7 @@ export default function ProjectView():JSX.Element{
      isLoading={isLoading}
      variant="danger"
     />
-   )}
+)}
 
    {showBrushupDialog&&currentProject&&(
     <BrushupDialog
@@ -757,7 +757,7 @@ export default function ProjectView():JSX.Element{
      onSubmit={handleBrushupProject}
      onClose={handleCloseBrushupDialog}
     />
-   )}
+)}
   </div>
- )
+)
 }

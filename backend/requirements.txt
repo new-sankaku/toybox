@@ -28,3 +28,5 @@ pytest-html>=4.0.0
 ruff>=0.4.0
 mypy>=1.10.0
 schemathesis>=3.27.0
+pip-audit>=2.7.0
+vulture>=2.11

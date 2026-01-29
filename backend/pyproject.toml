@@ -123,3 +123,8 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
+
+[tool.vulture]
+min_confidence = 80
+paths = ["handlers", "middleware", "repositories", "routers", "schemas", "services", "providers"]
+exclude = ["venv/", ".venv/", "tests/", "scripts/", "models/"]

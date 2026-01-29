@@ -1,0 +1,7 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/main.tsx", "src/renderer.tsx", "electron/main/index.ts", "electron/preload/index.ts"],
+  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts"],
+  "ignore": ["src/types/api-generated.ts", "src/test/**/*", "**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
+  "ignoreDependencies": ["@electron-toolkit/*", "electron-builder", "autoprefixer", "postcss", "tailwindcss"]
+}
