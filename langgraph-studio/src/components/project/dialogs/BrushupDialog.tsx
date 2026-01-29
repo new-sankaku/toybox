@@ -13,7 +13,6 @@ interface BrushupPhase{
 }
 
 interface BrushupDialogProps{
- projectName:string
  phases:BrushupPhase[]
  selectedAgents:Set<string>
  clearAssets:boolean
@@ -26,7 +25,6 @@ interface BrushupDialogProps{
 }
 
 export function BrushupDialog({
- projectName,
  phases,
  selectedAgents,
  clearAssets,

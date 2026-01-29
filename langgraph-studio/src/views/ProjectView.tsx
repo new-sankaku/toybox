@@ -747,7 +747,6 @@ export default function ProjectView():JSX.Element{
 
    {showBrushupDialog&&currentProject&&(
     <BrushupDialog
-     projectName={currentProject.name}
      phases={brushupPhases}
      selectedAgents={brushupSelectedAgents}
      clearAssets={brushupClearAssets}
