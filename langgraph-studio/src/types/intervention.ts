@@ -1,3 +1,7 @@
+import type{components}from'./api-generated'
+
+export type InterventionSchema=components['schemas']['InterventionSchema']
+
 export type InterventionPriority='normal'|'urgent'
 
 export type InterventionTarget='all'|'specific'

@@ -26,7 +26,8 @@
     "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api-generated.ts",
     "analyze:bundle": "vite build --mode analyze",
     "analyze:circular": "npx madge --circular --extensions ts,tsx src/",
-    "analyze:deadcode": "npx knip"
+    "analyze:deadcode": "npx knip",
+    "check:manual-types": "node scripts/check_manual_types.cjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",

@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Request, HTTPException
 from typing import Dict, Any, Optional, List
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from config_loader import get_status_labels
 from core.dependencies import get_data_store, get_socket_manager
 from middleware.logger import get_logger
+from schemas import ProjectSchema, BrushupSuggestImagesResponse
 
 router = APIRouter()
 
@@ -33,13 +34,13 @@ class BrushupOptions(BaseModel):
     referenceImageIds: List[str] = []
 
 
-@router.get("/projects")
+@router.get("/projects", response_model=List[ProjectSchema])
 async def list_projects():
     data_store = get_data_store()
     return data_store.get_projects()
 
 
-@router.post("/projects", status_code=201)
+@router.post("/projects", status_code=201, response_model=ProjectSchema)
 async def create_project(data: ProjectCreate):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -48,7 +49,7 @@ async def create_project(data: ProjectCreate):
     return project
 
 
-@router.patch("/projects/{project_id}")
+@router.patch("/projects/{project_id}", response_model=ProjectSchema)
 async def update_project(project_id: str, data: ProjectUpdate):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -68,7 +69,7 @@ async def delete_project(project_id: str):
     return None
 
 
-@router.post("/projects/{project_id}/start")
+@router.post("/projects/{project_id}/start", response_model=ProjectSchema)
 async def start_project(project_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -97,7 +98,7 @@ async def start_project(project_id: str):
     return project
 
 
-@router.post("/projects/{project_id}/pause")
+@router.post("/projects/{project_id}/pause", response_model=ProjectSchema)
 async def pause_project(project_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -118,7 +119,7 @@ async def pause_project(project_id: str):
     return project
 
 
-@router.post("/projects/{project_id}/resume")
+@router.post("/projects/{project_id}/resume", response_model=ProjectSchema)
 async def resume_project(project_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -164,7 +165,7 @@ async def resume_project(project_id: str):
     return project
 
 
-@router.post("/projects/{project_id}/initialize")
+@router.post("/projects/{project_id}/initialize", response_model=ProjectSchema)
 async def initialize_project(project_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -182,7 +183,7 @@ async def initialize_project(project_id: str):
     return project
 
 
-@router.post("/projects/{project_id}/brushup")
+@router.post("/projects/{project_id}/brushup", response_model=ProjectSchema)
 async def brushup_project(project_id: str, options: BrushupOptions):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -200,7 +201,33 @@ async def brushup_project(project_id: str, options: BrushupOptions):
     return project
 
 
-@router.get("/projects/{project_id}/ai-services")
+class BrushupSuggestRequest(BaseModel):
+    customInstruction: Optional[str] = ""
+    count: Optional[int] = 5
+
+
+@router.post("/projects/{project_id}/brushup/suggest-images", response_model=BrushupSuggestImagesResponse)
+async def suggest_brushup_images(project_id: str, data: BrushupSuggestRequest):
+    import uuid
+
+    data_store = get_data_store()
+    project = data_store.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="プロジェクトが見つかりません")
+    count = min(data.count or 3, 5)
+    images = []
+    for i in range(count):
+        images.append(
+            {
+                "id": str(uuid.uuid4()),
+                "url": f"/api/placeholder/brushup-suggest-{i + 1}.png",
+                "prompt": f"Generated suggestion {i + 1}",
+            }
+        )
+    return {"images": images}
+
+
+@router.get("/projects/{project_id}/ai-services", response_model=Dict[str, Any])
 async def get_project_ai_services(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -209,7 +236,7 @@ async def get_project_ai_services(project_id: str):
     return data_store.get_ai_services(project_id)
 
 
-@router.put("/projects/{project_id}/ai-services")
+@router.put("/projects/{project_id}/ai-services", response_model=Dict[str, Any])
 async def update_project_ai_services(project_id: str, data: Dict[str, Any]):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -223,7 +250,7 @@ async def update_project_ai_services(project_id: str, data: Dict[str, Any]):
     return ai_services
 
 
-@router.patch("/projects/{project_id}/ai-services/{service_type}")
+@router.patch("/projects/{project_id}/ai-services/{service_type}", response_model=Dict[str, Any])
 async def update_project_ai_service(project_id: str, service_type: str, data: Dict[str, Any]):
     data_store = get_data_store()
     socket_manager = get_socket_manager()

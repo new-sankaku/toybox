@@ -1,17 +1,18 @@
+from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Request, HTTPException, Depends
-from typing import Optional, List
 from pydantic import BaseModel
 from middleware.logger import get_logger
-from middleware.admin_auth import require_admin_auth
+from middleware.admin_auth import require_admin_auth_fastapi
+from schemas import AdminStatsResponse, AdminArchiveResponse, AdminCleanupResponse
 
-router = APIRouter(dependencies=[Depends(require_admin_auth)])
+router = APIRouter(dependencies=[Depends(require_admin_auth_fastapi)])
 
 
 class ArchiveRequest(BaseModel):
     projectIds: Optional[List[str]] = None
 
 
-@router.get("/admin/stats")
+@router.get("/admin/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(request: Request):
     backup_service = request.app.state.backup_service
     archive_service = request.app.state.archive_service
@@ -21,7 +22,7 @@ async def get_admin_stats(request: Request):
     }
 
 
-@router.post("/admin/archive")
+@router.post("/admin/archive", response_model=AdminArchiveResponse)
 async def archive_old_data(data: ArchiveRequest, request: Request):
     archive_service = request.app.state.archive_service
     try:
@@ -32,7 +33,7 @@ async def archive_old_data(data: ArchiveRequest, request: Request):
         raise HTTPException(status_code=500, detail="アーカイブに失敗しました")
 
 
-@router.post("/admin/cleanup")
+@router.post("/admin/cleanup", response_model=AdminCleanupResponse)
 async def cleanup_old_data(request: Request):
     archive_service = request.app.state.archive_service
     try:
@@ -43,7 +44,7 @@ async def cleanup_old_data(request: Request):
         raise HTTPException(status_code=500, detail="クリーンアップに失敗しました")
 
 
-@router.get("/admin/archives")
+@router.get("/admin/archives", response_model=List[Dict[str, Any]])
 async def list_archives(request: Request):
     archive_service = request.app.state.archive_service
     return archive_service.list_archives()

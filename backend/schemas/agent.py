@@ -1,6 +1,39 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Literal
 from datetime import datetime
+from pydantic import Field
 from .base import BaseSchema
+
+
+class SequenceParticipantSchema(BaseSchema):
+    id: str
+    label: str
+    type: Literal["external", "leader", "agent", "worker", "api"]
+
+
+class SequenceMessageSchema(BaseSchema):
+    id: str
+    timestamp: Optional[str] = None
+    from_field: str = Field(alias="from")
+    to: str
+    type: Literal["input", "output", "request", "response", "error", "delegation", "result"]
+    label: str
+    source_id: Optional[str] = None
+    source_type: Optional[str] = None
+    pair_id: Optional[str] = None
+    duration_ms: Optional[int] = None
+    tokens: Optional[Dict[str, int]] = None
+
+    model_config = {"populate_by_name": True}
+
+
+class SequenceDataSchema(BaseSchema):
+    agent_id: str
+    agent_type: str
+    participants: List[SequenceParticipantSchema]
+    messages: List[SequenceMessageSchema]
+    status: str
+    total_duration_ms: Optional[int] = None
+    total_tokens: Optional[Dict[str, int]] = None
 
 
 class AgentSchema(BaseSchema):

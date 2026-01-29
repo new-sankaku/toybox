@@ -13,6 +13,14 @@ from agent_settings import (
     AGENT_ASSET_MAPPING,
     WORKFLOW_DEPENDENCIES,
 )
+from schemas import (
+    QualitySettingsResponse,
+    QualitySettingUpdateResponse,
+    BulkQualityUpdateResponse,
+    DefaultQualitySettingsResponse,
+    QualitySettingsResetResponse,
+    AgentDefinitionsResponse,
+)
 
 router = APIRouter()
 
@@ -26,7 +34,7 @@ class BulkQualityUpdate(BaseModel):
     settings: Dict[str, QualitySettingUpdate]
 
 
-@router.get("/projects/{project_id}/settings/quality-check")
+@router.get("/projects/{project_id}/settings/quality-check", response_model=QualitySettingsResponse)
 async def get_quality_settings(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -39,11 +47,11 @@ async def get_quality_settings(project_id: str):
     return {
         "settings": settings_dict,
         "phases": AGENT_PHASES,
-        "displayNames": AGENT_DISPLAY_NAMES,
+        "display_names": AGENT_DISPLAY_NAMES,
     }
 
 
-@router.patch("/projects/{project_id}/settings/quality-check/{agent_type}")
+@router.patch("/projects/{project_id}/settings/quality-check/{agent_type}", response_model=QualitySettingUpdateResponse)
 async def update_quality_setting(project_id: str, agent_type: str, data: QualitySettingUpdate):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -60,12 +68,12 @@ async def update_quality_setting(project_id: str, agent_type: str, data: Quality
     )
     data_store.set_quality_setting(project_id, agent_type, updated_config)
     return {
-        "agentType": agent_type,
+        "agent_type": agent_type,
         "config": updated_config.to_dict(),
     }
 
 
-@router.patch("/projects/{project_id}/settings/quality-check/bulk")
+@router.patch("/projects/{project_id}/settings/quality-check/bulk", response_model=BulkQualityUpdateResponse)
 async def bulk_update_quality_settings(project_id: str, data: BulkQualityUpdate):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -92,7 +100,7 @@ async def bulk_update_quality_settings(project_id: str, data: BulkQualityUpdate)
     }
 
 
-@router.get("/settings/quality-check/defaults")
+@router.get("/settings/quality-check/defaults", response_model=DefaultQualitySettingsResponse)
 async def get_default_settings():
     default_settings = get_default_quality_settings()
     settings_dict = {}
@@ -101,12 +109,12 @@ async def get_default_settings():
     return {
         "settings": settings_dict,
         "phases": AGENT_PHASES,
-        "displayNames": AGENT_DISPLAY_NAMES,
-        "highCostAgents": list(HIGH_COST_AGENTS),
+        "display_names": AGENT_DISPLAY_NAMES,
+        "high_cost_agents": list(HIGH_COST_AGENTS),
     }
 
 
-@router.post("/projects/{project_id}/settings/quality-check/reset")
+@router.post("/projects/{project_id}/settings/quality-check/reset", response_model=QualitySettingsResetResponse)
 async def reset_quality_settings(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -123,11 +131,11 @@ async def reset_quality_settings(project_id: str):
     }
 
 
-@router.get("/agent-definitions")
+@router.get("/agent-definitions", response_model=AgentDefinitionsResponse)
 async def get_agent_definitions():
     return {
         "agents": AGENT_DEFINITIONS,
-        "uiPhases": UI_PHASES,
-        "agentAssetMapping": AGENT_ASSET_MAPPING,
-        "workflowDependencies": WORKFLOW_DEPENDENCIES,
+        "ui_phases": UI_PHASES,
+        "agent_asset_mapping": AGENT_ASSET_MAPPING,
+        "workflow_dependencies": WORKFLOW_DEPENDENCIES,
     }

@@ -1,3 +1,7 @@
+import type{components}from'./api-generated'
+
+export type CostSettingsSchema=components['schemas']['CostSettingsSchema']
+
 export interface ServiceCostLimit{
  enabled:boolean
  monthlyLimit:number

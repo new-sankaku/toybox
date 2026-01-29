@@ -2,10 +2,12 @@ import os
 import uuid
 import shutil
 import aiofiles
+from typing import List
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
 from typing import Optional
 from core.dependencies import get_data_store
+from schemas import UploadedFileSchema, FileBatchUploadResponse
 
 router = APIRouter()
 
@@ -165,7 +167,7 @@ def get_mime_type(filename: str) -> str:
     return mime_types.get(ext, "application/octet-stream")
 
 
-@router.get("/projects/{project_id}/files")
+@router.get("/projects/{project_id}/files", response_model=List[UploadedFileSchema])
 async def list_uploaded_files(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -174,7 +176,7 @@ async def list_uploaded_files(project_id: str):
     return data_store.get_uploaded_files_by_project(project_id)
 
 
-@router.post("/projects/{project_id}/files")
+@router.post("/projects/{project_id}/files", response_model=UploadedFileSchema)
 async def upload_file(project_id: str, file: UploadFile = File(...), description: str = Form("")):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -208,7 +210,55 @@ async def upload_file(project_id: str, file: UploadFile = File(...), description
     return uploaded_file
 
 
-@router.get("/files/{file_id}")
+@router.post("/projects/{project_id}/files/batch", response_model=FileBatchUploadResponse)
+async def upload_files_batch(project_id: str, files: list[UploadFile] = File(...)):
+    data_store = get_data_store()
+    project = data_store.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    success = []
+    errors = []
+    project_folder = os.path.join(UPLOAD_FOLDER, project_id)
+    os.makedirs(project_folder, exist_ok=True)
+    for file in files:
+        if not file.filename:
+            errors.append({"filename": "unknown", "error": "No filename provided"})
+            continue
+        if not allowed_file(file.filename):
+            errors.append({"filename": file.filename, "error": "File type not allowed"})
+            continue
+        try:
+            original_filename = file.filename
+            ext = original_filename.rsplit(".", 1)[1].lower() if "." in original_filename else ""
+            unique_filename = f"{uuid.uuid4().hex}.{ext}" if ext else uuid.uuid4().hex
+            file_path = os.path.join(project_folder, unique_filename)
+            content = await file.read()
+            size_bytes = len(content)
+            async with aiofiles.open(file_path, "wb") as f:
+                await f.write(content)
+            category = get_category(original_filename)
+            mime_type = get_mime_type(original_filename)
+            uploaded_file = data_store.create_uploaded_file(
+                project_id=project_id,
+                filename=unique_filename,
+                original_filename=original_filename,
+                mime_type=mime_type,
+                category=category,
+                size_bytes=size_bytes,
+                description="",
+            )
+            success.append(uploaded_file)
+        except Exception as e:
+            errors.append({"filename": file.filename, "error": str(e)})
+    return {
+        "success": success,
+        "errors": errors,
+        "total_uploaded": len(success),
+        "total_errors": len(errors),
+    }
+
+
+@router.get("/files/{file_id}", response_model=UploadedFileSchema)
 async def get_file_info(file_id: str):
     data_store = get_data_store()
     file_info = data_store.get_uploaded_file(file_id)

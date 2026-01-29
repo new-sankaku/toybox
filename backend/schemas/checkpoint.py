@@ -5,14 +5,17 @@ from .base import BaseSchema
 
 class CheckpointSchema(BaseSchema):
     id: str
-    project_id: str
-    agent_id: str
+    project_id: Optional[str] = None
+    projectId: Optional[str] = None
+    agent_id: Optional[str] = None
+    agentId: Optional[str] = None
     type: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     content_category: Optional[str] = None
     output: Optional[Dict[str, Any]] = None
     status: str
+    resolution: Optional[str] = None
     feedback: Optional[str] = None
     resolved_at: Optional[datetime] = None
     created_at: Optional[datetime] = None

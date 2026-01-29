@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Request
 from config import get_config
+from schemas import HealthResponse, SystemStatsResponse
 
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/health", response_model=HealthResponse)
 async def health(request: Request):
     config = request.app.state.config
     return {
@@ -14,7 +15,7 @@ async def health(request: Request):
     }
 
 
-@router.get("/api/system/stats")
+@router.get("/api/system/stats", response_model=SystemStatsResponse)
 async def system_stats(request: Request):
     backup_service = request.app.state.backup_service
     archive_service = request.app.state.archive_service

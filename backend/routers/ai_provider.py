@@ -1,12 +1,19 @@
 import time
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from providers import get_provider, list_providers, AIProviderConfig
 from providers.base import ChatMessage, MessageRole
 from providers.health_monitor import get_health_monitor
 from middleware.logger import get_logger
+from schemas import (
+    ProviderListItemSchema,
+    ProviderDetailResponse,
+    ModelSchema,
+    TestProviderResponse,
+    ChatResponse,
+)
 
 router = APIRouter()
 
@@ -25,12 +32,12 @@ class ChatRequest(BaseModel):
     stream: bool = False
 
 
-@router.get("/ai-providers")
+@router.get("/ai-providers", response_model=List[ProviderListItemSchema])
 async def get_ai_providers():
     return list_providers()
 
 
-@router.get("/ai-providers/{provider_id}")
+@router.get("/ai-providers/{provider_id}", response_model=ProviderDetailResponse)
 async def get_ai_provider(provider_id: str):
     provider = get_provider(provider_id)
     if not provider:
@@ -39,18 +46,18 @@ async def get_ai_provider(provider_id: str):
         {
             "id": m.id,
             "name": m.name,
-            "maxTokens": m.max_tokens,
-            "supportsVision": m.supports_vision,
-            "supportsTools": m.supports_tools,
-            "inputCostPer1k": m.input_cost_per_1k,
-            "outputCostPer1k": m.output_cost_per_1k,
+            "max_tokens": m.max_tokens,
+            "supports_vision": m.supports_vision,
+            "supports_tools": m.supports_tools,
+            "input_cost_per_1k": m.input_cost_per_1k,
+            "output_cost_per_1k": m.output_cost_per_1k,
         }
         for m in provider.get_available_models()
     ]
     return {"id": provider.provider_id, "name": provider.display_name, "models": models}
 
 
-@router.get("/ai-providers/{provider_id}/models")
+@router.get("/ai-providers/{provider_id}/models", response_model=List[ModelSchema])
 async def get_ai_provider_models(provider_id: str):
     provider = get_provider(provider_id)
     if not provider:
@@ -59,17 +66,17 @@ async def get_ai_provider_models(provider_id: str):
         {
             "id": m.id,
             "name": m.name,
-            "maxTokens": m.max_tokens,
-            "supportsVision": m.supports_vision,
-            "supportsTools": m.supports_tools,
-            "inputCostPer1k": m.input_cost_per_1k,
-            "outputCostPer1k": m.output_cost_per_1k,
+            "max_tokens": m.max_tokens,
+            "supports_vision": m.supports_vision,
+            "supports_tools": m.supports_tools,
+            "input_cost_per_1k": m.input_cost_per_1k,
+            "output_cost_per_1k": m.output_cost_per_1k,
         }
         for m in provider.get_available_models()
     ]
 
 
-@router.post("/ai-providers/test")
+@router.post("/ai-providers/test", response_model=TestProviderResponse)
 async def test_ai_provider(data: TestProviderRequest):
     if not data.providerType:
         raise HTTPException(status_code=400, detail="providerType is required")
@@ -119,7 +126,15 @@ def _save_validated_local_provider(provider_id: str, base_url: str):
         session.close()
 
 
-@router.post("/ai/chat")
+class ChatStreamRequest(BaseModel):
+    provider: str
+    model: str
+    messages: List[Dict[str, str]]
+    maxTokens: Optional[int] = None
+    temperature: Optional[float] = None
+
+
+@router.post("/ai/chat", response_model=ChatResponse)
 async def ai_chat(data: ChatRequest):
     if not data.provider:
         raise HTTPException(status_code=400, detail="provider is required")
@@ -164,13 +179,55 @@ async def ai_chat(data: ChatRequest):
                 "content": result.content,
                 "model": result.model,
                 "usage": {
-                    "inputTokens": result.input_tokens,
-                    "outputTokens": result.output_tokens,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
                 },
-                "finishReason": result.finish_reason,
+                "finish_reason": result.finish_reason,
             }
     except Exception as e:
         get_logger().error(f"Chat error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/ai/chat/stream")
+async def ai_chat_stream(data: ChatStreamRequest):
+    if not data.provider:
+        raise HTTPException(status_code=400, detail="provider is required")
+    if not data.model:
+        raise HTTPException(status_code=400, detail="model is required")
+    if not data.messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+    api_key = _get_api_key_for_provider(data.provider)
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"APIキーが設定されていません: {data.provider}")
+    config = AIProviderConfig(api_key=api_key)
+    provider = get_provider(data.provider, config)
+    if not provider:
+        raise HTTPException(status_code=400, detail=f"未対応のプロバイダー: {data.provider}")
+    chat_messages = []
+    for msg in data.messages:
+        role_str = msg.get("role", "user")
+        role = (
+            MessageRole.ASSISTANT
+            if role_str == "assistant"
+            else MessageRole.SYSTEM
+            if role_str == "system"
+            else MessageRole.USER
+        )
+        chat_messages.append(ChatMessage(role=role, content=msg.get("content", "")))
+    try:
+        import json
+
+        async def generate():
+            async for chunk in provider.chat_stream(
+                messages=chat_messages, model=data.model, max_tokens=data.maxTokens, temperature=data.temperature
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+            yield 'data: {"done": true}\n\n'
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
+    except Exception as e:
+        get_logger().error(f"Chat stream error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -186,7 +243,7 @@ def _get_api_key_for_provider(provider_id: str) -> Optional[str]:
         session.close()
 
 
-@router.get("/ai-providers/health/status")
+@router.get("/ai-providers/health/status", response_model=Dict[str, Any])
 async def get_health_status():
     monitor = get_health_monitor()
-    return monitor.get_all_status()
+    return monitor.get_all_health_status()

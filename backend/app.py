@@ -134,6 +134,10 @@ def create_app() -> FastAPI:
         recovery,
         openapi_spec,
         health,
+        archive,
+        api_keys,
+        llm_job,
+        provider_health,
     )
 
     app.include_router(project.router, prefix="/api", tags=["projects"])
@@ -158,6 +162,10 @@ def create_app() -> FastAPI:
     app.include_router(recovery.router, prefix="/api", tags=["recovery"])
     app.include_router(openapi_spec.router, prefix="/api", tags=["openapi"])
     app.include_router(health.router, tags=["health"])
+    app.include_router(archive.router, prefix="/api", tags=["archive"])
+    app.include_router(api_keys.router, prefix="/api", tags=["api-keys"])
+    app.include_router(llm_job.router, prefix="/api", tags=["llm-jobs"])
+    app.include_router(provider_health.router, prefix="/api", tags=["providers"])
 
     testdata_path = get_testdata_path()
     if os.path.exists(testdata_path):

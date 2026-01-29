@@ -7,6 +7,7 @@ export*from'./uploadedFile'
 export*from'./autoApproval'
 export*from'./aiProvider'
 export*from'./brushup'
+export*from'./costSettings'
 
 export interface ElectronAPI{
  backend:{

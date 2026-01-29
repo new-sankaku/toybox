@@ -1,3 +1,7 @@
+import type{components}from'./api-generated'
+
+export type UploadedFileSchema=components['schemas']['UploadedFileSchema']
+
 export type FileCategory='code'|'image'|'bgm'|'sfx'|'voice'|'audio'|'video'|'document'|'archive'|'other'
 
 export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'

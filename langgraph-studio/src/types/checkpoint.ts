@@ -1,3 +1,8 @@
+import type{components}from'./api-generated'
+
+export type CheckpointSchema=components['schemas']['CheckpointSchema']
+export type CheckpointResolveSchema=components['schemas']['CheckpointResolveSchema']
+
 export type CheckpointStatus='pending'|'approved'|'rejected'|'revision_requested'
 
 export type CheckpointType=

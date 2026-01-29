@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Request, HTTPException
 from typing import List, Optional
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from core.dependencies import get_data_store, get_socket_manager
+from schemas import InterventionSchema
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ class InterventionResponse(BaseModel):
     message: str
 
 
-@router.get("/projects/{project_id}/interventions")
+@router.get("/projects/{project_id}/interventions", response_model=List[InterventionSchema])
 async def list_interventions(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -27,7 +28,7 @@ async def list_interventions(project_id: str):
     return data_store.get_interventions_by_project(project_id)
 
 
-@router.post("/projects/{project_id}/interventions", status_code=201)
+@router.post("/projects/{project_id}/interventions", status_code=201, response_model=InterventionSchema)
 async def create_intervention(project_id: str, data: InterventionCreate, request: Request):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -100,13 +101,47 @@ async def create_intervention(project_id: str, data: InterventionCreate, request
     return intervention
 
 
-@router.get("/interventions/{intervention_id}")
+@router.get("/interventions/{intervention_id}", response_model=InterventionSchema)
 async def get_intervention(intervention_id: str):
     data_store = get_data_store()
     intervention = data_store.get_intervention(intervention_id)
     if not intervention:
         raise HTTPException(status_code=404, detail="介入が見つかりません")
     return intervention
+
+
+@router.post("/interventions/{intervention_id}/acknowledge", response_model=InterventionSchema)
+async def acknowledge_intervention(intervention_id: str):
+    data_store = get_data_store()
+    socket_manager = get_socket_manager()
+    intervention = data_store.get_intervention(intervention_id)
+    if not intervention:
+        raise HTTPException(status_code=404, detail="介入が見つかりません")
+    result = data_store.acknowledge_intervention(intervention_id)
+    if result:
+        await socket_manager.emit_to_project(
+            "intervention:acknowledged",
+            {"interventionId": intervention_id, "projectId": intervention["projectId"]},
+            intervention["projectId"],
+        )
+    return result
+
+
+@router.post("/interventions/{intervention_id}/process", response_model=InterventionSchema)
+async def process_intervention(intervention_id: str):
+    data_store = get_data_store()
+    socket_manager = get_socket_manager()
+    intervention = data_store.get_intervention(intervention_id)
+    if not intervention:
+        raise HTTPException(status_code=404, detail="介入が見つかりません")
+    result = data_store.process_intervention(intervention_id)
+    if result:
+        await socket_manager.emit_to_project(
+            "intervention:processed",
+            {"interventionId": intervention_id, "projectId": intervention["projectId"]},
+            intervention["projectId"],
+        )
+    return result
 
 
 @router.delete("/interventions/{intervention_id}", status_code=204)
@@ -125,7 +160,7 @@ async def delete_intervention(intervention_id: str):
     return None
 
 
-@router.post("/interventions/{intervention_id}/respond")
+@router.post("/interventions/{intervention_id}/respond", response_model=InterventionSchema)
 async def respond_to_intervention(intervention_id: str, data: InterventionResponse):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -142,7 +177,7 @@ async def respond_to_intervention(intervention_id: str, data: InterventionRespon
     return result
 
 
-@router.get("/agents/{agent_id}/pending-interventions")
+@router.get("/agents/{agent_id}/pending-interventions", response_model=List[InterventionSchema])
 async def get_pending_interventions_for_agent(agent_id: str):
     data_store = get_data_store()
     return data_store.get_pending_interventions_for_agent(agent_id)

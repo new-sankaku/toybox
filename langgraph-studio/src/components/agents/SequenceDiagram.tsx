@@ -50,6 +50,7 @@ interface TimelineNode{
 }
 
 function buildTimelineStructure(messages:SequenceMessage[]):TimelineNode[]{
+ if(!Array.isArray(messages))return[]
  const result:TimelineNode[]=[]
  const pairStack:{pairId:string;node:TimelineNode}[]=[]
  const responseMap=new Map<string,SequenceMessage>()
@@ -250,7 +251,7 @@ function TimelineNodeRenderer({
 export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.Element{
  const{messages}=data
  const timeline=useMemo(()=>buildTimelineStructure(messages),[messages])
- if(!messages.length){
+ if(!messages||!messages.length){
   return(
    <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
     シーケンスデータがありません

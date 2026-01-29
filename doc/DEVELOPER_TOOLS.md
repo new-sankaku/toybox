@@ -19,6 +19,8 @@
 | TypeScript | Frontend | 型チェック |
 | madge | Frontend | 循環依存の検出 |
 | Vitest | Frontend | ユニットテスト |
+| API整合性チェック | Full-stack | フロントエンド/バックエンド間のAPI整合性検証 |
+| WebSocket整合性チェック | Full-stack | WebSocketイベント型の整合性検証 |
 
 ### 手動実行ツール
 
@@ -41,19 +43,22 @@
 10_build_check.bat
 ```
 
-実行内容（12ステップ）:
+実行内容（15ステップ）:
 1. Ruff Lint
 2. mypy Type Check
 3. Import Test
 4. pytest Unit Tests
 5. Circular Import Check (Python)
 6. Security Audit (pip-audit)
-7. OpenAPI Spec Generation
-8. TypeScript Type Generation
-9. ESLint
-10. TypeScript Type Check
-11. Circular Import Check (madge)
-12. Vitest Unit Tests
+7. Response Model Check
+8. OpenAPI Spec Generation
+9. TypeScript Type Generation
+10. ESLint
+11. TypeScript Type Check
+12. Circular Import Check (madge)
+13. Vitest Unit Tests
+14. API Consistency Check（フロントエンド/バックエンド間のAPI整合性）
+15. WebSocket Event Type Check（WebSocketイベント型整合性）
 
 ### 個別実行
 
@@ -194,6 +199,37 @@ npm run analyze:deadcode
 ```
 
 設定は `knip.json` で管理されています。
+
+### API整合性チェック
+
+フロントエンドの`API_ENDPOINTS`定義とバックエンドのルート定義を比較し、不整合を検出します。
+
+```bash
+cd backend
+python scripts/check_api_consistency.py
+```
+
+検出する問題:
+- フロントエンドで定義されているがバックエンドに存在しないエンドポイント
+- バックエンドに存在するがフロントエンドで未定義のエンドポイント（警告のみ）
+
+このチェックにより、API変更時のフロントエンド/バックエンド間の同期漏れを防止できます。
+
+### WebSocket整合性チェック
+
+バックエンドのWebSocket emit呼び出しとフロントエンドのWebSocketEventMap型定義を比較し、不整合を検出します。
+
+```bash
+cd backend
+python scripts/check_websocket_types.py
+```
+
+検出する問題:
+- バックエンドで使用されているがフロントエンドで未定義のイベント
+- フロントエンドで定義されているがバックエンドで使用されていないイベント
+- イベントデータのフィールド名の不一致
+
+このチェックにより、WebSocketイベント変更時の型定義の同期漏れを防止できます。
 
 ### rollup-plugin-visualizer（バンドル分析）
 

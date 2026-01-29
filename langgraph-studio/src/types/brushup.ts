@@ -1,3 +1,7 @@
+import type{components}from'./api-generated'
+
+export type BrushupImageSchema=components['schemas']['BrushupImageSchema']
+
 export interface BrushupOption{
  id:string
  label:string

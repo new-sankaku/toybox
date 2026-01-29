@@ -1,3 +1,10 @@
+import type{components}from'./api-generated'
+
+export type AgentSchema=components['schemas']['AgentSchema']
+export type SequenceParticipantSchema=components['schemas']['SequenceParticipantSchema']
+export type SequenceMessageSchema=components['schemas']['SequenceMessageSchema']
+export type SequenceDataSchema=components['schemas']['SequenceDataSchema']
+
 export type AgentStatus='pending'|'running'|'completed'|'failed'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'
 
 export type AgentType=
@@ -47,7 +54,7 @@ export interface Agent{
  id:string
  projectId:string
  type:string
- phase?:number
+ phase:number
  status:AgentStatus
  progress:number
  currentTask:string|null

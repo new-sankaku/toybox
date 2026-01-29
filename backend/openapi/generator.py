@@ -1,4 +1,4 @@
-from typing import Dict, Any, Type, get_type_hints, get_origin, get_args
+from typing import Dict, Any, Type, get_type_hints, get_origin, get_args, Literal
 from datetime import datetime
 from pydantic import BaseModel
 from schemas import (
@@ -8,10 +8,82 @@ from schemas import (
     AgentSchema,
     AgentCreateSchema,
     AgentUpdateSchema,
+    SequenceParticipantSchema,
+    SequenceMessageSchema,
+    SequenceDataSchema,
     CheckpointSchema,
     CheckpointCreateSchema,
     CheckpointResolveSchema,
     ApiErrorSchema,
+    SuccessResponse,
+    SuccessMessageResponse,
+    SuccessOutputResponse,
+    SuccessResultsResponse,
+    SuccessAgentResponse,
+    SuccessBackupResponse,
+    HealthResponse,
+    SystemStatsResponse,
+    LanguageSchema,
+    AiRequestStatsResponse,
+    ProjectMetricsResponse,
+    AssetSchema,
+    SystemLogSchema,
+    AutoApprovalRulesResponse,
+    QualitySettingsResponse,
+    QualitySettingUpdateResponse,
+    BulkQualityUpdateResponse,
+    DefaultQualitySettingsResponse,
+    QualitySettingsResetResponse,
+    AgentDefinitionsResponse,
+    ApiKeyHintSchema,
+    ApiKeySaveResponse,
+    ApiKeySetResponse,
+    ApiKeyValidationResponse,
+    LlmJobSchema,
+    AiServiceInfoSchema,
+    AiServicesMasterResponse,
+    UsageCategorySchema,
+    ServiceProviderSchema,
+    BrushupOptionsResponse,
+    BrushupImageSchema,
+    BrushupSuggestImagesResponse,
+    UiSettingsResponse,
+    CostSettingsDefaultsResponse,
+    OutputSettingsDefaultsResponse,
+    InterventionSchema,
+    NavigatorSuccessResponse,
+    RecoveryStatusResponse,
+    RecoveryRetryAllResponse,
+    UploadedFileSchema,
+    FileBatchUploadResponse,
+    TreeItemSchema,
+    ProjectTreeResponse,
+    TreeReplaceResponse,
+    BackupInfoSchema,
+    CreateBackupResponse,
+    RestoreBackupResponse,
+    AdminStatsResponse,
+    AdminArchiveResponse,
+    AdminCleanupResponse,
+    ArchiveStatsResponse,
+    ArchiveCleanupResponse,
+    ArchiveEstimateResponse,
+    ArchiveRetentionResponse,
+    ArchiveExportResponse,
+    ArchiveExportAndCleanupResponse,
+    AutoArchiveResponse,
+    ArchiveInfoSchema,
+    ArchiveListResponse,
+    OutputSettingsSchema,
+    CostSettingsSchema,
+    ProviderHealthSchema,
+    ProviderListItemSchema,
+    ModelSchema,
+    ProviderDetailResponse,
+    TestProviderResponse,
+    ChatUsageSchema,
+    ChatResponse,
+    TraceSchema,
 )
 
 
@@ -46,9 +118,13 @@ def _type_to_schema(t) -> Dict[str, Any]:
             return {"type": "string", "format": "date-time"}
         elif t is dict or t is Dict:
             return {"type": "object", "additionalProperties": {}}
+        elif isinstance(t, type) and issubclass(t, BaseModel):
+            return {"$ref": f"#/components/schemas/{t.__name__}"}
         else:
             return {"type": "string"}
     args = get_args(t)
+    if origin is Literal:
+        return {"type": "string", "enum": list(args)}
     if origin is dict or origin is Dict:
         return {"type": "object", "additionalProperties": {}}
     from typing import Union
@@ -74,10 +150,82 @@ def generate_openapi_spec() -> Dict[str, Any]:
         ("AgentSchema", AgentSchema),
         ("AgentCreateSchema", AgentCreateSchema),
         ("AgentUpdateSchema", AgentUpdateSchema),
+        ("SequenceParticipantSchema", SequenceParticipantSchema),
+        ("SequenceMessageSchema", SequenceMessageSchema),
+        ("SequenceDataSchema", SequenceDataSchema),
         ("CheckpointSchema", CheckpointSchema),
         ("CheckpointCreateSchema", CheckpointCreateSchema),
         ("CheckpointResolveSchema", CheckpointResolveSchema),
         ("ApiErrorSchema", ApiErrorSchema),
+        ("SuccessResponse", SuccessResponse),
+        ("SuccessMessageResponse", SuccessMessageResponse),
+        ("SuccessOutputResponse", SuccessOutputResponse),
+        ("SuccessResultsResponse", SuccessResultsResponse),
+        ("SuccessAgentResponse", SuccessAgentResponse),
+        ("SuccessBackupResponse", SuccessBackupResponse),
+        ("HealthResponse", HealthResponse),
+        ("SystemStatsResponse", SystemStatsResponse),
+        ("LanguageSchema", LanguageSchema),
+        ("AiRequestStatsResponse", AiRequestStatsResponse),
+        ("ProjectMetricsResponse", ProjectMetricsResponse),
+        ("AssetSchema", AssetSchema),
+        ("SystemLogSchema", SystemLogSchema),
+        ("AutoApprovalRulesResponse", AutoApprovalRulesResponse),
+        ("QualitySettingsResponse", QualitySettingsResponse),
+        ("QualitySettingUpdateResponse", QualitySettingUpdateResponse),
+        ("BulkQualityUpdateResponse", BulkQualityUpdateResponse),
+        ("DefaultQualitySettingsResponse", DefaultQualitySettingsResponse),
+        ("QualitySettingsResetResponse", QualitySettingsResetResponse),
+        ("AgentDefinitionsResponse", AgentDefinitionsResponse),
+        ("ApiKeyHintSchema", ApiKeyHintSchema),
+        ("ApiKeySaveResponse", ApiKeySaveResponse),
+        ("ApiKeySetResponse", ApiKeySetResponse),
+        ("ApiKeyValidationResponse", ApiKeyValidationResponse),
+        ("LlmJobSchema", LlmJobSchema),
+        ("AiServiceInfoSchema", AiServiceInfoSchema),
+        ("AiServicesMasterResponse", AiServicesMasterResponse),
+        ("UsageCategorySchema", UsageCategorySchema),
+        ("ServiceProviderSchema", ServiceProviderSchema),
+        ("BrushupOptionsResponse", BrushupOptionsResponse),
+        ("BrushupImageSchema", BrushupImageSchema),
+        ("BrushupSuggestImagesResponse", BrushupSuggestImagesResponse),
+        ("UiSettingsResponse", UiSettingsResponse),
+        ("CostSettingsDefaultsResponse", CostSettingsDefaultsResponse),
+        ("OutputSettingsDefaultsResponse", OutputSettingsDefaultsResponse),
+        ("InterventionSchema", InterventionSchema),
+        ("NavigatorSuccessResponse", NavigatorSuccessResponse),
+        ("RecoveryStatusResponse", RecoveryStatusResponse),
+        ("RecoveryRetryAllResponse", RecoveryRetryAllResponse),
+        ("UploadedFileSchema", UploadedFileSchema),
+        ("FileBatchUploadResponse", FileBatchUploadResponse),
+        ("TreeItemSchema", TreeItemSchema),
+        ("ProjectTreeResponse", ProjectTreeResponse),
+        ("TreeReplaceResponse", TreeReplaceResponse),
+        ("BackupInfoSchema", BackupInfoSchema),
+        ("CreateBackupResponse", CreateBackupResponse),
+        ("RestoreBackupResponse", RestoreBackupResponse),
+        ("AdminStatsResponse", AdminStatsResponse),
+        ("AdminArchiveResponse", AdminArchiveResponse),
+        ("AdminCleanupResponse", AdminCleanupResponse),
+        ("ArchiveStatsResponse", ArchiveStatsResponse),
+        ("ArchiveCleanupResponse", ArchiveCleanupResponse),
+        ("ArchiveEstimateResponse", ArchiveEstimateResponse),
+        ("ArchiveRetentionResponse", ArchiveRetentionResponse),
+        ("ArchiveExportResponse", ArchiveExportResponse),
+        ("ArchiveExportAndCleanupResponse", ArchiveExportAndCleanupResponse),
+        ("AutoArchiveResponse", AutoArchiveResponse),
+        ("ArchiveInfoSchema", ArchiveInfoSchema),
+        ("ArchiveListResponse", ArchiveListResponse),
+        ("OutputSettingsSchema", OutputSettingsSchema),
+        ("CostSettingsSchema", CostSettingsSchema),
+        ("ProviderHealthSchema", ProviderHealthSchema),
+        ("ProviderListItemSchema", ProviderListItemSchema),
+        ("ModelSchema", ModelSchema),
+        ("ProviderDetailResponse", ProviderDetailResponse),
+        ("TestProviderResponse", TestProviderResponse),
+        ("ChatUsageSchema", ChatUsageSchema),
+        ("ChatResponse", ChatResponse),
+        ("TraceSchema", TraceSchema),
     ]
     schemas = {name: pydantic_to_openapi_schema(model) for name, model in schemas_list}
     spec = {
@@ -89,6 +237,7 @@ def generate_openapi_spec() -> Dict[str, Any]:
     _add_project_paths(spec)
     _add_agent_paths(spec)
     _add_checkpoint_paths(spec)
+    _add_sequence_paths(spec)
     return spec
 
 
@@ -297,6 +446,26 @@ def _add_checkpoint_paths(spec: Dict):
                     "description": "Resolved checkpoint",
                     "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CheckpointSchema"}}},
                 }
+            },
+        },
+    }
+
+
+def _add_sequence_paths(spec: Dict):
+    spec["paths"]["/api/agents/{agentId}/sequence"] = {
+        "get": {
+            "summary": "Get sequence data for agent",
+            "tags": ["Agents"],
+            "parameters": [{"name": "agentId", "in": "path", "required": True, "schema": {"type": "string"}}],
+            "responses": {
+                "200": {
+                    "description": "Sequence data",
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/SequenceDataSchema"}}},
+                },
+                "404": {
+                    "description": "Agent not found",
+                    "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ApiErrorSchema"}}},
+                },
             },
         },
     }

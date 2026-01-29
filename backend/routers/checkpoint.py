@@ -1,7 +1,8 @@
+from typing import List, Optional
 from fastapi import APIRouter, Request, HTTPException
-from typing import Optional
 from pydantic import BaseModel
 from core.dependencies import get_data_store, get_socket_manager
+from schemas import CheckpointSchema
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ class ResolveCheckpoint(BaseModel):
     feedback: Optional[str] = None
 
 
-@router.get("/projects/{project_id}/checkpoints")
+@router.get("/projects/{project_id}/checkpoints", response_model=List[CheckpointSchema])
 async def list_project_checkpoints(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -20,7 +21,7 @@ async def list_project_checkpoints(project_id: str):
     return data_store.get_checkpoints_by_project(project_id)
 
 
-@router.post("/checkpoints/{checkpoint_id}/resolve")
+@router.post("/checkpoints/{checkpoint_id}/resolve", response_model=CheckpointSchema)
 async def resolve_checkpoint(checkpoint_id: str, data: ResolveCheckpoint, request: Request):
     data_store = get_data_store()
     socket_manager = get_socket_manager()

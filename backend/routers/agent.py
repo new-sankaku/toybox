@@ -1,6 +1,8 @@
+from typing import List
 from fastapi import APIRouter, Request, HTTPException, Query
 from core.dependencies import get_data_store, get_socket_manager
 from middleware.error_handler import NotFoundError, ValidationError, ApiError
+from schemas import AgentSchema, SuccessOutputResponse, SuccessResultsResponse, SuccessAgentResponse, SystemLogSchema
 
 router = APIRouter()
 
@@ -9,7 +11,7 @@ def _get_execution_service(request: Request):
     return getattr(request.app.state, "agent_execution_service", None)
 
 
-@router.get("/projects/{project_id}/agents")
+@router.get("/projects/{project_id}/agents", response_model=List[AgentSchema])
 async def list_project_agents(project_id: str, includeWorkers: bool = True):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -18,7 +20,7 @@ async def list_project_agents(project_id: str, includeWorkers: bool = True):
     return data_store.get_agents_by_project(project_id, include_workers=includeWorkers)
 
 
-@router.get("/projects/{project_id}/agents/leaders")
+@router.get("/projects/{project_id}/agents/leaders", response_model=List[AgentSchema])
 async def list_project_leaders(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -27,7 +29,7 @@ async def list_project_leaders(project_id: str):
     return data_store.get_agents_by_project(project_id, include_workers=False)
 
 
-@router.get("/agents/{agent_id}")
+@router.get("/agents/{agent_id}", response_model=AgentSchema)
 async def get_agent(agent_id: str):
     data_store = get_data_store()
     agent = data_store.get_agent(agent_id)
@@ -36,7 +38,7 @@ async def get_agent(agent_id: str):
     return agent
 
 
-@router.get("/agents/{agent_id}/workers")
+@router.get("/agents/{agent_id}/workers", response_model=List[AgentSchema])
 async def list_agent_workers(agent_id: str):
     data_store = get_data_store()
     agent = data_store.get_agent(agent_id)
@@ -45,7 +47,7 @@ async def list_agent_workers(agent_id: str):
     return data_store.get_workers_by_parent(agent_id)
 
 
-@router.get("/agents/{agent_id}/logs")
+@router.get("/agents/{agent_id}/logs", response_model=List[SystemLogSchema])
 async def get_agent_logs(agent_id: str):
     data_store = get_data_store()
     agent = data_store.get_agent(agent_id)
@@ -54,7 +56,7 @@ async def get_agent_logs(agent_id: str):
     return data_store.get_agent_logs(agent_id)
 
 
-@router.post("/agents/{agent_id}/execute")
+@router.post("/agents/{agent_id}/execute", response_model=SuccessOutputResponse)
 async def execute_agent(agent_id: str, request: Request):
     data_store = get_data_store()
     execution_service = _get_execution_service(request)
@@ -76,7 +78,7 @@ async def execute_agent(agent_id: str, request: Request):
         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
 
 
-@router.post("/agents/{agent_id}/execute-with-workers")
+@router.post("/agents/{agent_id}/execute-with-workers", response_model=SuccessResultsResponse)
 async def execute_leader_with_workers(agent_id: str, request: Request):
     data_store = get_data_store()
     execution_service = _get_execution_service(request)
@@ -101,7 +103,7 @@ async def execute_leader_with_workers(agent_id: str, request: Request):
         raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
 
 
-@router.post("/agents/{agent_id}/cancel")
+@router.post("/agents/{agent_id}/cancel", response_model=SuccessAgentResponse)
 async def cancel_agent(agent_id: str, request: Request):
     data_store = get_data_store()
     execution_service = _get_execution_service(request)
@@ -117,7 +119,7 @@ async def cancel_agent(agent_id: str, request: Request):
         return {"success": False, "message": "Agent not running or already completed"}
 
 
-@router.post("/agents/{agent_id}/retry")
+@router.post("/agents/{agent_id}/retry", response_model=SuccessAgentResponse)
 async def retry_agent(agent_id: str):
     data_store = get_data_store()
     agent = data_store.get_agent(agent_id)
@@ -133,7 +135,7 @@ async def retry_agent(agent_id: str):
         raise HTTPException(status_code=500, detail="Failed to retry agent")
 
 
-@router.post("/agents/{agent_id}/pause")
+@router.post("/agents/{agent_id}/pause", response_model=SuccessAgentResponse)
 async def pause_agent(agent_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -155,7 +157,7 @@ async def pause_agent(agent_id: str):
         raise HTTPException(status_code=500, detail="Failed to pause agent")
 
 
-@router.post("/agents/{agent_id}/resume")
+@router.post("/agents/{agent_id}/resume", response_model=SuccessAgentResponse)
 async def resume_agent(agent_id: str):
     data_store = get_data_store()
     socket_manager = get_socket_manager()
@@ -177,7 +179,7 @@ async def resume_agent(agent_id: str):
         raise HTTPException(status_code=500, detail="Failed to resume agent")
 
 
-@router.get("/projects/{project_id}/agents/retryable")
+@router.get("/projects/{project_id}/agents/retryable", response_model=List[AgentSchema])
 async def get_retryable_agents(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -186,7 +188,7 @@ async def get_retryable_agents(project_id: str):
     return data_store.get_retryable_agents(project_id)
 
 
-@router.get("/projects/{project_id}/agents/interrupted")
+@router.get("/projects/{project_id}/agents/interrupted", response_model=List[AgentSchema])
 async def get_interrupted_agents(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)

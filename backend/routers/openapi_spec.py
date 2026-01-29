@@ -1,3 +1,4 @@
+from typing import Dict, Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 import json
@@ -6,7 +7,7 @@ import os
 router = APIRouter()
 
 
-@router.get("/openapi.json")
+@router.get("/openapi.json", response_model=Dict[str, Any])
 async def get_openapi_spec():
     spec_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "openapi", "openapi.json")
     if os.path.exists(spec_path):

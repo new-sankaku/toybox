@@ -1,3 +1,9 @@
+import type{components}from'./api-generated'
+
+export type ProjectSchema=components['schemas']['ProjectSchema']
+export type ProjectCreateSchema=components['schemas']['ProjectCreateSchema']
+export type ProjectMetricsResponse=components['schemas']['ProjectMetricsResponse']
+
 export type ProjectStatus='draft'|'running'|'paused'|'completed'|'failed'
 
 export type PhaseNumber=1|2|3

@@ -6,7 +6,7 @@ export function convertApiAgent(apiAgent:ApiAgent):Agent{
   id:apiAgent.id,
   projectId:apiAgent.projectId,
   type:apiAgent.type,
-  phase:apiAgent.phase,
+  phase:apiAgent.phase??0,
   status:apiAgent.status,
   progress:apiAgent.progress,
   currentTask:apiAgent.currentTask,

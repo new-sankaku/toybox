@@ -1,7 +1,8 @@
+from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
-from typing import Dict, Any
 from pydantic import BaseModel
 from core.dependencies import get_data_store, get_socket_manager
+from schemas import AiRequestStatsResponse, ProjectMetricsResponse, AssetSchema, SystemLogSchema
 
 router = APIRouter()
 
@@ -11,7 +12,7 @@ def _get_phase_name(phase: int) -> str:
     return phase_names.get(phase, f"Phase {phase}")
 
 
-@router.get("/projects/{project_id}/ai-requests/stats")
+@router.get("/projects/{project_id}/ai-requests/stats", response_model=AiRequestStatsResponse)
 async def get_ai_request_stats(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -26,7 +27,7 @@ async def get_ai_request_stats(project_id: str):
     return {"total": total, "processing": processing, "pending": pending, "completed": completed, "failed": failed}
 
 
-@router.get("/projects/{project_id}/metrics")
+@router.get("/projects/{project_id}/metrics", response_model=ProjectMetricsResponse)
 async def get_project_metrics(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -59,7 +60,7 @@ async def get_project_metrics(project_id: str):
     return metrics
 
 
-@router.get("/projects/{project_id}/logs")
+@router.get("/projects/{project_id}/logs", response_model=List[SystemLogSchema])
 async def get_project_logs(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -68,7 +69,7 @@ async def get_project_logs(project_id: str):
     return data_store.get_system_logs(project_id)
 
 
-@router.get("/projects/{project_id}/assets")
+@router.get("/projects/{project_id}/assets", response_model=List[AssetSchema])
 async def get_project_assets(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -77,7 +78,7 @@ async def get_project_assets(project_id: str):
     return data_store.get_assets_by_project(project_id)
 
 
-@router.patch("/projects/{project_id}/assets/{asset_id}")
+@router.patch("/projects/{project_id}/assets/{asset_id}", response_model=AssetSchema)
 async def update_project_asset(project_id: str, asset_id: str, data: Dict[str, Any]):
     data_store = get_data_store()
     socket_manager = get_socket_manager()

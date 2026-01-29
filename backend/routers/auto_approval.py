@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from core.dependencies import get_data_store
+from schemas import AutoApprovalRulesResponse
 
 router = APIRouter()
 
@@ -10,7 +11,7 @@ class AutoApprovalRulesUpdate(BaseModel):
     rules: List[Dict[str, Any]]
 
 
-@router.get("/projects/{project_id}/auto-approval-rules")
+@router.get("/projects/{project_id}/auto-approval-rules", response_model=AutoApprovalRulesResponse)
 async def get_auto_approval_rules(project_id: str):
     data_store = get_data_store()
     project = data_store.get_project(project_id)
@@ -20,7 +21,7 @@ async def get_auto_approval_rules(project_id: str):
     return {"rules": rules}
 
 
-@router.put("/projects/{project_id}/auto-approval-rules")
+@router.put("/projects/{project_id}/auto-approval-rules", response_model=AutoApprovalRulesResponse)
 async def update_auto_approval_rules(project_id: str, data: AutoApprovalRulesUpdate):
     data_store = get_data_store()
     project = data_store.get_project(project_id)

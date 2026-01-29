@@ -1,7 +1,9 @@
+from typing import List
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import FileResponse
 from typing import Optional
 from pydantic import BaseModel
+from schemas import BackupInfoSchema, CreateBackupResponse, RestoreBackupResponse
 
 router = APIRouter()
 
@@ -10,13 +12,13 @@ class RestoreRequest(BaseModel):
     filename: str
 
 
-@router.get("/backups")
+@router.get("/backups", response_model=List[BackupInfoSchema])
 async def list_backups(request: Request):
     backup_service = request.app.state.backup_service
     return backup_service.list_backups()
 
 
-@router.post("/backups")
+@router.post("/backups", response_model=CreateBackupResponse)
 async def create_backup(request: Request):
     backup_service = request.app.state.backup_service
     result = backup_service.create_backup()
@@ -25,10 +27,19 @@ async def create_backup(request: Request):
     raise HTTPException(status_code=500, detail="バックアップ作成に失敗しました")
 
 
-@router.post("/backups/restore")
-async def restore_backup(data: RestoreRequest, request: Request):
+@router.post("/backups/restore", response_model=RestoreBackupResponse)
+async def restore_backup_legacy(data: RestoreRequest, request: Request):
     backup_service = request.app.state.backup_service
     success = backup_service.restore_backup(data.filename)
+    if success:
+        return {"success": True, "message": "復元が完了しました"}
+    raise HTTPException(status_code=400, detail="復元に失敗しました")
+
+
+@router.post("/backups/{filename}/restore", response_model=RestoreBackupResponse)
+async def restore_backup_by_name(filename: str, request: Request):
+    backup_service = request.app.state.backup_service
+    success = backup_service.restore_backup(filename)
     if success:
         return {"success": True, "message": "復元が完了しました"}
     raise HTTPException(status_code=400, detail="復元に失敗しました")
@@ -45,8 +56,10 @@ async def delete_backup(filename: str, request: Request):
 
 @router.get("/backups/{filename}/download")
 async def download_backup(filename: str, request: Request):
+    import os
+
     backup_service = request.app.state.backup_service
-    file_path = backup_service.get_backup_path(filename)
-    if not file_path:
+    file_path = os.path.join(backup_service._backup_dir, filename)
+    if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="バックアップが見つかりません")
     return FileResponse(path=file_path, filename=filename, media_type="application/octet-stream")
