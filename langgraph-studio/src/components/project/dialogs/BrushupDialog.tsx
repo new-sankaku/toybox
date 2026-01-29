@@ -76,7 +76,7 @@ export function BrushupDialog({
            >
             <span className={cn('w-4 h-4 border flex items-center justify-center',
              allSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
-            )}>
+)}>
              {allSelected&&<Check size={12}/>}
              {phaseSelected>0&&!allSelected&&<span className="w-2 h-2 bg-nier-text-light"/>}
             </span>
@@ -98,7 +98,7 @@ export function BrushupDialog({
                >
                 <span className={cn('w-3 h-3 border flex items-center justify-center flex-shrink-0',
                  isSelected?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
-                )}>
+)}>
                  {isSelected&&<Check size={10}/>}
                 </span>
                 <span className="text-nier-small font-medium">{getAgentLabel(agentType)}</span>
@@ -119,13 +119,13 @@ export function BrushupDialog({
                   }}
                  />
                 </div>
-               )}
+)}
               </div>
-             )
+)
             })}
            </div>
           </div>
-         )
+)
         })}
        </div>
        <div className="mt-3">
@@ -136,7 +136,7 @@ export function BrushupDialog({
         >
          <span className={cn('w-4 h-4 border flex items-center justify-center',
           clearAssets?'bg-nier-bg-selected border-nier-border-dark':'border-nier-border-light'
-         )}>
+)}>
           {clearAssets&&<Check size={12}/>}
          </span>
          <span className="text-nier-small">選択したエージェントが生成したアセットも削除する</span>
@@ -175,5 +175,5 @@ export function BrushupDialog({
     </div>
    </Card>
   </div>
- )
+)
 }

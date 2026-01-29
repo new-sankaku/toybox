@@ -23,7 +23,10 @@
     "test:unit": "vitest run",
     "test:unit:watch": "vitest",
     "test:unit:coverage": "vitest run --coverage",
-    "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api-generated.ts"
+    "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api-generated.ts",
+    "analyze:bundle": "vite build --mode analyze",
+    "analyze:circular": "npx madge --circular --extensions ts,tsx src/",
+    "analyze:deadcode": "npx knip"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.6.0",
@@ -91,6 +94,9 @@
     "@vitest/coverage-v8": "^2.0.0",
     "@testing-library/react": "^16.0.0",
     "@testing-library/jest-dom": "^6.4.0",
-    "jsdom": "^24.0.0"
+    "jsdom": "^24.0.0",
+    "madge": "^8.0.0",
+    "knip": "^5.0.0",
+    "rollup-plugin-visualizer": "^5.12.0"
   }
 }
