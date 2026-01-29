@@ -1,4 +1,4 @@
-import type{TabId}from'../../App'
+import type{TabId}from'@/stores/navigationStore'
 import{usePendingCheckpointsCount}from'@/stores/checkpointStore'
 import{usePendingAssetsCount}from'@/stores/assetStore'
 

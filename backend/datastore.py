@@ -4,7 +4,7 @@ import threading
 import time
 import random
 from datetime import datetime, timedelta
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, cast
 
 from sqlalchemy.orm.attributes import flag_modified
 from models.database import get_session, session_scope, init_db
@@ -379,7 +379,7 @@ class DataStore:
         project = proj_repo.get(project_id)
         if not project:
             return False
-        rules = (project.config or {}).get("autoApprovalRules", [])
+        rules = cast(Dict[str, Any], project.config or {}).get("autoApprovalRules", [])
         if not rules:
             return False
         category = get_checkpoint_category_map().get(cp_type, "document")
@@ -504,7 +504,7 @@ class DataStore:
         project = proj_repo.get(project_id)
         if not project:
             return False
-        rules = (project.config or {}).get("autoApprovalRules", [])
+        rules = cast(Dict[str, Any], project.config or {}).get("autoApprovalRules", [])
         if not rules:
             return False
         for rule in rules:
@@ -1387,7 +1387,7 @@ class DataStore:
             project = repo.get(project_id)
             if not project:
                 return []
-            return (project.config or {}).get("autoApprovalRules", get_config_auto_approval_rules())
+            return cast(Dict[str, Any], project.config or {}).get("autoApprovalRules", get_config_auto_approval_rules())
 
     def set_auto_approval_rules(self, project_id: str, rules: List[Dict]) -> List[Dict]:
         with session_scope() as session:
