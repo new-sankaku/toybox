@@ -41,16 +41,25 @@ class DataStore:
   self._simulation_running=False
   self._simulation_thread:Optional[threading.Thread]=None
   self._lock=threading.Lock()
-  self._sio=None
+  self._socket_manager=None
+  self._event_queue:List[tuple]=[]
   self._init_sample_data_if_empty()
 
+ def set_socket_manager(self,socket_manager):
+  self._socket_manager=socket_manager
+
  def set_sio(self,sio):
-  self._sio=sio
+  pass
 
  def _emit_event(self,event:str,data:Dict,project_id:str):
-  if self._sio:
+  if self._socket_manager:
    try:
-    self._sio.emit(event,data,room=f"project:{project_id}")
+    import asyncio
+    try:
+     loop=asyncio.get_running_loop()
+     asyncio.create_task(self._socket_manager.emit_to_project(event,data,project_id))
+    except RuntimeError:
+     self._event_queue.append((event,data,project_id))
    except Exception as e:
     get_logger().warning(f"Error emitting {event}: {e}")
 

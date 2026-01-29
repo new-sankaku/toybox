@@ -1,6 +1,6 @@
-from flask import Flask,jsonify
+from fastapi import FastAPI,Request
+from fastapi.responses import JSONResponse
 from typing import Optional,Dict,Any
-from werkzeug.exceptions import HTTPException
 
 
 class ApiError(Exception):
@@ -55,9 +55,9 @@ class RateLimitExceededError(ApiError):
   )
 
 
-def register_error_handlers(app:Flask)->None:
- @app.errorhandler(ApiError)
- def handle_api_error(error:ApiError):
+def register_fastapi_error_handlers(app:FastAPI)->None:
+ @app.exception_handler(ApiError)
+ async def handle_api_error(request:Request,error:ApiError):
   response={
    "error":{
     "code":error.code,
@@ -66,20 +66,10 @@ def register_error_handlers(app:Flask)->None:
   }
   if error.details:
    response["error"]["details"]=error.details
-  return jsonify(response),error.status_code
+  return JSONResponse(status_code=error.status_code,content=response)
 
- @app.errorhandler(HTTPException)
- def handle_http_exception(error:HTTPException):
-  response={
-   "error":{
-    "code":error.name.upper().replace(" ","_"),
-    "message":error.description,
-   }
-  }
-  return jsonify(response),error.code
-
- @app.errorhandler(Exception)
- def handle_generic_exception(error:Exception):
+ @app.exception_handler(Exception)
+ async def handle_generic_exception(request:Request,error:Exception):
   from middleware.logger import get_logger
   logger=get_logger()
   logger.error(f"Unhandled exception: {str(error)}",exc_info=True)
@@ -91,4 +81,8 @@ def register_error_handlers(app:Flask)->None:
   }
   if app.debug:
    response["error"]["debug_message"]=str(error)
-  return jsonify(response),500
+  return JSONResponse(status_code=500,content=response)
+
+
+def register_error_handlers(app)->None:
+ pass

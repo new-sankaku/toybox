@@ -6,20 +6,28 @@ from middleware.logger import get_logger
 
 
 class RecoveryService:
- def __init__(self,data_store=None,sio=None):
+ def __init__(self,data_store=None,socket_manager=None,sio=None):
   self._data_store=data_store
-  self._sio=sio
+  self._socket_manager=socket_manager
 
  def set_data_store(self,data_store)->None:
   self._data_store=data_store
 
+ def set_socket_manager(self,socket_manager)->None:
+  self._socket_manager=socket_manager
+
  def set_sio(self,sio)->None:
-  self._sio=sio
+  pass
 
  def _emit_event(self,event:str,data:Dict,project_id:str)->None:
-  if self._sio:
+  if self._socket_manager:
    try:
-    self._sio.emit(event,data,room=f"project:{project_id}")
+    import asyncio
+    try:
+     loop=asyncio.get_running_loop()
+     asyncio.create_task(self._socket_manager.emit_to_project(event,data,project_id))
+    except RuntimeError:
+     pass
    except Exception as e:
     get_logger().warning(f"RecoveryService: error emitting {event}: {e}")
 
