@@ -79,6 +79,10 @@ function toFullUrl(path:string|null):string|null{
  return`${API_BASE_URL}${path}`
 }
 
+// ============================================================
+// PROJECT API
+// ============================================================
+
 export const projectApi={
  list:async():Promise<Project[]>=>{
   const response=await api.get(API_ENDPOINTS.projects.list)
@@ -144,6 +148,10 @@ export const projectApi={
   return response.data
  }
 }
+
+// ============================================================
+// AGENT API
+// ============================================================
 
 export interface ApiAgent{
  id:string
@@ -245,6 +253,10 @@ export const agentApi={
  }
 }
 
+// ============================================================
+// CHECKPOINT API
+// ============================================================
+
 export interface ApiCheckpoint{
  id:string
  projectId:string
@@ -279,6 +291,10 @@ export const checkpointApi={
   return response.data
  }
 }
+
+// ============================================================
+// METRICS API
+// ============================================================
 
 export interface TokensByTypeEntry{
  input:number
@@ -317,6 +333,10 @@ export const metricsApi={
  }
 }
 
+// ============================================================
+// LOGS API
+// ============================================================
+
 export interface ApiSystemLog{
  id:string
  timestamp:string
@@ -332,6 +352,10 @@ export const logsApi={
   return response.data
  }
 }
+
+// ============================================================
+// ASSET API
+// ============================================================
 
 export interface ApiAsset{
  id:string
@@ -368,6 +392,10 @@ export const assetApi={
   }
  }
 }
+
+// ============================================================
+// QUALITY SETTINGS API
+// ============================================================
 
 export interface QualityCheckConfig{
  enabled:boolean
@@ -499,6 +527,10 @@ export const uiSettingsApi={
 }
 
 
+// ============================================================
+// INTERVENTION API
+// ============================================================
+
 export type InterventionPriority='normal'|'urgent'
 export type InterventionTarget='all'|'specific'
 export type InterventionStatus='pending'|'delivered'|'acknowledged'|'processed'|'waiting_response'
@@ -570,6 +602,10 @@ export const interventionApi={
  }
 }
 
+
+// ============================================================
+// FILE UPLOAD API
+// ============================================================
 
 export type FileCategory='code'|'image'|'audio'|'video'|'document'|'archive'|'other'
 export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'
@@ -653,6 +689,10 @@ export const fileUploadApi={
  }
 }
 
+// ============================================================
+// PROJECT TREE API
+// ============================================================
+
 export interface ProjectTreeNode{
  id:string
  name:string
@@ -694,6 +734,10 @@ export const projectTreeApi={
   return response.data
  }
 }
+
+// ============================================================
+// AI PROVIDER API
+// ============================================================
 
 export interface AIProviderTestResult{
  success:boolean
@@ -798,6 +842,10 @@ export const aiProviderApi={
  }
 }
 
+// ============================================================
+// AI SERVICE API
+// ============================================================
+
 export interface AIServiceConfig{
  label:string
  description:string
@@ -882,6 +930,10 @@ export const aiServiceApi={
   return response.data
  }
 }
+
+// ============================================================
+// CONFIG API
+// ============================================================
 
 export interface PlatformOption{
  value:string
@@ -1146,6 +1198,10 @@ export const llmJobApi={
  }
 }
 
+// ============================================================
+// BACKUP & ARCHIVE API
+// ============================================================
+
 export interface ApiBackupEntry{
  name:string
  size:number
@@ -1251,6 +1307,10 @@ export const recoveryApi={
  }
 }
 
+// ============================================================
+// SYSTEM API
+// ============================================================
+
 export interface ApiSystemStats{
  backups:{count:number;totalSize:number}
  archives:ApiArchiveStats
@@ -1263,6 +1323,10 @@ export const systemApi={
   return response.data
  }
 }
+
+// ============================================================
+// API KEY MANAGEMENT
+// ============================================================
 
 export interface ApiKeyInfo{
  providerId:string
@@ -1303,6 +1367,10 @@ export const apiKeyApi={
  }
 }
 
+// ============================================================
+// PROVIDER HEALTH API
+// ============================================================
+
 export interface ApiProviderHealth{
  providerId:string
  healthy:boolean
@@ -1321,6 +1389,10 @@ export const providerHealthApi={
   return response.data
  }
 }
+
+// ============================================================
+// NAVIGATOR API
+// ============================================================
 
 export const navigatorApi={
  sendMessage:async(data:{projectId?:string;text:string;priority?:string}):Promise<{success:boolean}>=>{
