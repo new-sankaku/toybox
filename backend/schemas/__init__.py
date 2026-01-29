@@ -26,6 +26,7 @@ from .metrics import (
     ProjectMetricsResponse,
     AssetSchema,
     SystemLogSchema,
+    AgentLogSchema,
 )
 from .auto_approval import AutoApprovalRulesResponse
 from .quality_settings import (
@@ -127,6 +128,7 @@ __all__ = [
     "ProjectMetricsResponse",
     "AssetSchema",
     "SystemLogSchema",
+    "AgentLogSchema",
     "AutoApprovalRulesResponse",
     "QualitySettingsResponse",
     "QualitySettingUpdateResponse",

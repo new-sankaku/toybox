@@ -29,6 +29,7 @@ export default function CostView():JSX.Element{
  const{pricing,settings,fetchPricing}=useCostSettingsStore()
  const[agents,setAgents]=useState<ApiAgent[]>([])
  const[loading,setLoading]=useState(false)
+ const[error,setError]=useState<string|null>(null)
  const intervalRef=useRef<ReturnType<typeof setInterval>|null>(null)
 
  useEffect(()=>{
@@ -48,8 +49,10 @@ export default function CostView():JSX.Element{
   try{
    const agentsData=await agentApi.listByProject(currentProject.id)
    setAgents(agentsData)
-  }catch(error){
-   console.error('Failed to fetch cost data:',error)
+   setError(null)
+  }catch(e){
+   setError('データ取得失敗')
+   setAgents([])
   }
  },[currentProject?.id])
 
@@ -163,7 +166,9 @@ export default function CostView():JSX.Element{
     <DiamondMarker>{title}</DiamondMarker>
    </CardHeader>
    <CardContent className="p-2 flex-1 overflow-y-auto">
-    {loading&&data.length===0?(
+    {error?(
+     <div className="text-nier-accent-orange text-nier-small">{error}</div>
+):loading&&data.length===0?(
      <div className="text-nier-text-light text-nier-small">読み込み中...</div>
 ):data.length===0?(
      <div className="text-nier-text-light text-nier-small">データがありません</div>
@@ -209,34 +214,40 @@ export default function CostView():JSX.Element{
       <DiamondMarker>サマリー</DiamondMarker>
      </CardHeader>
      <CardContent className="p-2 space-y-3 flex-1 overflow-y-auto">
-      <div className="border-b border-nier-border-light pb-2">
-       <div className="flex justify-between text-nier-small py-0.5">
-        <span className="text-nier-text-light">入力</span>
-        <span className="font-medium">{formatTokens(totals.input)}</span>
-       </div>
-       <div className="flex justify-between text-nier-small py-0.5">
-        <span className="text-nier-text-light">出力</span>
-        <span className="font-medium">{formatTokens(totals.output)}</span>
-       </div>
-       <div className="flex justify-between text-nier-small py-0.5">
-        <span className="text-nier-text-light">合計コスト</span>
-        <span className="font-medium">${totals.cost.toFixed(2)}</span>
-       </div>
-      </div>
-      <div>
-       <div className="flex justify-between text-nier-small py-0.5">
-        <span className="text-nier-text-light">予算</span>
-        <span>${budgetLimit.toFixed(2)}</span>
-       </div>
-       <div className="flex justify-between text-nier-small py-0.5">
-        <span className="text-nier-text-light">残り</span>
-        <span>${(budgetLimit-totals.cost).toFixed(2)}</span>
-       </div>
-       <Progress value={(totals.cost/budgetLimit)*100} className="h-1.5 mt-1"/>
-       <div className="text-nier-caption text-nier-text-light text-center mt-0.5">
-        {((totals.cost/budgetLimit)*100).toFixed(1)}%使用
-       </div>
-      </div>
+      {error?(
+       <div className="text-nier-accent-orange text-nier-small">{error}</div>
+      ):(
+       <>
+        <div className="border-b border-nier-border-light pb-2">
+         <div className="flex justify-between text-nier-small py-0.5">
+          <span className="text-nier-text-light">入力</span>
+          <span className="font-medium">{formatTokens(totals.input)}</span>
+         </div>
+         <div className="flex justify-between text-nier-small py-0.5">
+          <span className="text-nier-text-light">出力</span>
+          <span className="font-medium">{formatTokens(totals.output)}</span>
+         </div>
+         <div className="flex justify-between text-nier-small py-0.5">
+          <span className="text-nier-text-light">合計コスト</span>
+          <span className="font-medium">${totals.cost.toFixed(2)}</span>
+         </div>
+        </div>
+        <div>
+         <div className="flex justify-between text-nier-small py-0.5">
+          <span className="text-nier-text-light">予算</span>
+          <span>${budgetLimit.toFixed(2)}</span>
+         </div>
+         <div className="flex justify-between text-nier-small py-0.5">
+          <span className="text-nier-text-light">残り</span>
+          <span>${(budgetLimit-totals.cost).toFixed(2)}</span>
+         </div>
+         <Progress value={(totals.cost/budgetLimit)*100} className="h-1.5 mt-1"/>
+         <div className="text-nier-caption text-nier-text-light text-center mt-0.5">
+          {((totals.cost/budgetLimit)*100).toFixed(1)}%使用
+         </div>
+        </div>
+       </>
+      )}
      </CardContent>
     </Card>
    </div>

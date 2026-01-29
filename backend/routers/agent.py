@@ -2,7 +2,7 @@ from typing import List
 from fastapi import APIRouter, Request, HTTPException, Query
 from core.dependencies import get_data_store, get_socket_manager
 from middleware.error_handler import NotFoundError, ValidationError, ApiError
-from schemas import AgentSchema, SuccessOutputResponse, SuccessResultsResponse, SuccessAgentResponse, SystemLogSchema
+from schemas import AgentSchema, SuccessOutputResponse, SuccessResultsResponse, SuccessAgentResponse, AgentLogSchema
 
 router = APIRouter()
 
@@ -47,7 +47,7 @@ async def list_agent_workers(agent_id: str):
     return data_store.get_workers_by_parent(agent_id)
 
 
-@router.get("/agents/{agent_id}/logs", response_model=List[SystemLogSchema])
+@router.get("/agents/{agent_id}/logs", response_model=List[AgentLogSchema])
 async def get_agent_logs(agent_id: str):
     data_store = get_data_store()
     agent = data_store.get_agent(agent_id)
