@@ -34,8 +34,9 @@ class TestApiKeyRepository:
         repo = ApiKeyRepository(db_session)
         repo.save("anthropic", "sk-ant-test-key")
         hints = repo.get_all_hints()
-        assert "anthropic" in hints
-        assert "hint" in hints["anthropic"]
+        assert len(hints) == 1
+        assert hints[0]["providerId"] == "anthropic"
+        assert "hint" in hints[0]
 
     def test_delete(self, db_session):
         repo = ApiKeyRepository(db_session)

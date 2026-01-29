@@ -264,7 +264,7 @@ class DataStore:
         agent_repo = AgentRepository(session)
         agent = agent_repo.get(agent_dict["id"])
         increment = random.randint(2, 5)
-        new_progress = min(100, agent.progress + increment)
+        new_progress = min(100, int(agent.progress or 0) + increment)
         token_increment = random.randint(30, 80)
         input_increment = int(token_increment * 0.3)
         output_increment = token_increment - input_increment

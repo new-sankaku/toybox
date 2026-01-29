@@ -1,6 +1,7 @@
 import pytest
 import asyncio
 import os
+import platform
 import tempfile
 from pathlib import Path
 
@@ -109,7 +110,11 @@ class TestBashExecuteSkill:
     @pytest.mark.asyncio
     async def test_blocked_dangerous_command(self, skill_context):
         skill = BashExecuteSkill()
-        result = await skill.execute(skill_context, command="rm -rf /")
+        if platform.system().lower() == "windows":
+            dangerous_cmd = "format c:"
+        else:
+            dangerous_cmd = "rm -rf /"
+        result = await skill.execute(skill_context, command=dangerous_cmd)
         assert not result.success
         assert "blocked" in result.error.lower()
 

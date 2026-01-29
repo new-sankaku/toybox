@@ -55,7 +55,16 @@ class TestRegisterAllProviders:
         ProviderRegistry._providers.clear()
         ProviderRegistry._instances.clear()
         register_all_providers()
-        expected = ["anthropic", "openai", "google", "xai", "mock", "zhipu", "deepseek"]
+        expected = [
+            "anthropic",
+            "mock",
+            "zhipu",
+            "deepseek",
+            "local-comfyui",
+            "local-audiocraft",
+            "local-coqui-tts",
+            "claude-code",
+        ]
         for provider_id in expected:
             assert ProviderRegistry.is_registered(provider_id), f"{provider_id} not registered"
 

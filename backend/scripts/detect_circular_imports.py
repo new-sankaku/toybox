@@ -37,7 +37,7 @@ def extract_imports(file_path: Path, base_path: Path) -> list[str]:
     except (SyntaxError, UnicodeDecodeError):
         return []
     imports = []
-    for node in ast.walk(tree):
+    for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 imports.append(alias.name.split(".")[0])
