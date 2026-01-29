@@ -1,148 +1,132 @@
 """Anthropic (Claude) プロバイダー"""
-from typing import List,Optional,Dict,Any,Iterator
-from .base import (
- AIProvider,AIProviderConfig,ChatMessage,ChatResponse,
- StreamChunk,ModelInfo,MessageRole
-)
+
+from typing import List, Optional, Dict, Any, Iterator
+from .base import AIProvider, AIProviderConfig, ChatMessage, ChatResponse, StreamChunk, ModelInfo, MessageRole
 
 
 class AnthropicProvider(AIProvider):
- """Anthropicプロバイダー"""
+    """Anthropicプロバイダー"""
 
- @property
- def provider_id(self)->str:
-  return"anthropic"
+    @property
+    def provider_id(self) -> str:
+        return "anthropic"
 
- @property
- def display_name(self)->str:
-  return"Anthropic (Claude)"
+    @property
+    def display_name(self) -> str:
+        return "Anthropic (Claude)"
 
- def get_available_models(self)->List[ModelInfo]:
-  return self.load_models_from_config(self.provider_id)
+    def get_available_models(self) -> List[ModelInfo]:
+        return self.load_models_from_config(self.provider_id)
 
- def _get_client(self):
-  if self._client is None:
-   try:
-    import anthropic
-    api_key=self.config.api_key
-    if not api_key:
-     from config import get_config
-     app_config=get_config()
-     api_key=app_config.agent.anthropic_api_key
-    self._client=anthropic.Anthropic(
-     api_key=api_key,
-     timeout=self.config.timeout,
-     max_retries=self.config.max_retries
-    )
-   except ImportError:
-    raise ImportError("anthropicパッケージがインストールされていません")
-  return self._client
+    def _get_client(self):
+        if self._client is None:
+            try:
+                import anthropic
 
- def _convert_messages(self,messages:List[ChatMessage])->tuple:
-  system=None
-  converted=[]
-  for msg in messages:
-   if msg.role==MessageRole.SYSTEM:
-    system=msg.content
-   else:
-    converted.append({"role":msg.role.value,"content":msg.content})
-  return system,converted
+                api_key = self.config.api_key
+                if not api_key:
+                    from config import get_config
 
- def chat(
-  self,
-  messages:List[ChatMessage],
-  model:str,
-  max_tokens:int=1024,
-  temperature:float=0.7,
-  **kwargs
- )->ChatResponse:
-  client=self._get_client()
-  system,msgs=self._convert_messages(messages)
+                    app_config = get_config()
+                    api_key = app_config.agent.anthropic_api_key
+                self._client = anthropic.Anthropic(
+                    api_key=api_key, timeout=self.config.timeout, max_retries=self.config.max_retries
+                )
+            except ImportError:
+                raise ImportError("anthropicパッケージがインストールされていません")
+        return self._client
 
-  params={
-   "model":model,
-   "max_tokens":max_tokens,
-   "temperature":temperature,
-   "messages":msgs,
-  }
-  if system:
-   params["system"]=system
+    def _convert_messages(self, messages: List[ChatMessage]) -> tuple:
+        system = None
+        converted = []
+        for msg in messages:
+            if msg.role == MessageRole.SYSTEM:
+                system = msg.content
+            else:
+                converted.append({"role": msg.role.value, "content": msg.content})
+        return system, converted
 
-  response=client.messages.create(**params)
+    def chat(
+        self, messages: List[ChatMessage], model: str, max_tokens: int = 1024, temperature: float = 0.7, **kwargs
+    ) -> ChatResponse:
+        client = self._get_client()
+        system, msgs = self._convert_messages(messages)
 
-  content=""
-  if response.content:
-   content=response.content[0].text
+        params = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": msgs,
+        }
+        if system:
+            params["system"] = system
 
-  return ChatResponse(
-   content=content,
-   model=response.model,
-   input_tokens=response.usage.input_tokens,
-   output_tokens=response.usage.output_tokens,
-   total_tokens=response.usage.input_tokens+response.usage.output_tokens,
-   finish_reason=response.stop_reason,
-   raw_response=response
-  )
+        response = client.messages.create(**params)
 
- def chat_stream(
-  self,
-  messages:List[ChatMessage],
-  model:str,
-  max_tokens:int=1024,
-  temperature:float=0.7,
-  **kwargs
- )->Iterator[StreamChunk]:
-  client=self._get_client()
-  system,msgs=self._convert_messages(messages)
+        content = ""
+        if response.content:
+            content = response.content[0].text
 
-  params={
-   "model":model,
-   "max_tokens":max_tokens,
-   "temperature":temperature,
-   "messages":msgs,
-  }
-  if system:
-   params["system"]=system
+        return ChatResponse(
+            content=content,
+            model=response.model,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            total_tokens=response.usage.input_tokens + response.usage.output_tokens,
+            finish_reason=response.stop_reason,
+            raw_response=response,
+        )
 
-  with client.messages.stream(**params) as stream:
-   for text in stream.text_stream:
-    yield StreamChunk(content=text)
+    def chat_stream(
+        self, messages: List[ChatMessage], model: str, max_tokens: int = 1024, temperature: float = 0.7, **kwargs
+    ) -> Iterator[StreamChunk]:
+        client = self._get_client()
+        system, msgs = self._convert_messages(messages)
 
-   final_message=stream.get_final_message()
-   yield StreamChunk(
-    content="",
-    is_final=True,
-    input_tokens=final_message.usage.input_tokens,
-    output_tokens=final_message.usage.output_tokens
-   )
+        params = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": msgs,
+        }
+        if system:
+            params["system"] = system
 
- def test_connection(self)->Dict[str,Any]:
-  try:
-   client=self._get_client()
-   test_model=self.get_test_model_from_config(self.provider_id)
-   response=client.messages.create(
-    model=test_model,
-    max_tokens=10,
-    messages=[{"role":"user","content":"Hi"}]
-   )
-   return {
-    "success":True,
-    "message":"Anthropic API: 正常に接続できました"
-   }
-  except Exception as e:
-   error_type=type(e).__name__
-   if"AuthenticationError" in error_type:
-    return {"success":False,"message":"認証エラー: APIキーが無効です"}
-   elif"RateLimitError" in error_type:
-    return {"success":False,"message":"レート制限: しばらく待ってから再試行してください"}
-   elif"APIConnectionError" in error_type:
-    return {"success":False,"message":"接続エラー: APIサーバーに接続できません"}
-   return {"success":False,"message":f"エラー: {str(e)}"}
+        with client.messages.stream(**params) as stream:
+            for text in stream.text_stream:
+                yield StreamChunk(content=text)
 
- def validate_config(self)->bool:
-  api_key=self.config.api_key
-  if not api_key:
-   from config import get_config
-   app_config=get_config()
-   api_key=app_config.agent.anthropic_api_key
-  return bool(api_key)
+            final_message = stream.get_final_message()
+            yield StreamChunk(
+                content="",
+                is_final=True,
+                input_tokens=final_message.usage.input_tokens,
+                output_tokens=final_message.usage.output_tokens,
+            )
+
+    def test_connection(self) -> Dict[str, Any]:
+        try:
+            client = self._get_client()
+            test_model = self.get_test_model_from_config(self.provider_id)
+            response = client.messages.create(
+                model=test_model, max_tokens=10, messages=[{"role": "user", "content": "Hi"}]
+            )
+            return {"success": True, "message": "Anthropic API: 正常に接続できました"}
+        except Exception as e:
+            error_type = type(e).__name__
+            if "AuthenticationError" in error_type:
+                return {"success": False, "message": "認証エラー: APIキーが無効です"}
+            elif "RateLimitError" in error_type:
+                return {"success": False, "message": "レート制限: しばらく待ってから再試行してください"}
+            elif "APIConnectionError" in error_type:
+                return {"success": False, "message": "接続エラー: APIサーバーに接続できません"}
+            return {"success": False, "message": f"エラー: {str(e)}"}
+
+    def validate_config(self) -> bool:
+        api_key = self.config.api_key
+        if not api_key:
+            from config import get_config
+
+            app_config = get_config()
+            api_key = app_config.agent.anthropic_api_key
+        return bool(api_key)

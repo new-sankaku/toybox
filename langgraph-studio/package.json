@@ -20,6 +20,9 @@
     "test": "playwright test",
     "test:ui": "playwright test --ui",
     "test:report": "playwright show-report",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:unit:coverage": "vitest run --coverage",
     "generate-types": "openapi-typescript src/types/openapi.json -o src/types/api-generated.ts"
   },
   "dependencies": {
@@ -83,6 +86,11 @@
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.53.1",
     "vite": "^5.4.11",
-    "vite-plugin-monaco-editor": "^1.1.0"
+    "vite-plugin-monaco-editor": "^1.1.0",
+    "vitest": "^2.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.4.0",
+    "jsdom": "^24.0.0"
   }
 }

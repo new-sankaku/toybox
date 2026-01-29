@@ -1,0 +1,20 @@
+{
+ "name":"toybox",
+ "version":"1.0.0",
+ "private":true,
+ "scripts":{
+  "prepare":"husky",
+  "lint:frontend":"cd langgraph-studio && npm run lint",
+  "lint:backend":"cd backend && ruff check .",
+  "typecheck:frontend":"cd langgraph-studio && npm run typecheck",
+  "typecheck:backend":"cd backend && mypy .",
+  "check:all":"npm run lint:backend && npm run typecheck:backend && npm run lint:frontend && npm run typecheck:frontend"
+ },
+ "devDependencies":{
+  "husky":"^9.0.0",
+  "lint-staged":"^15.2.0"
+ },
+ "lint-staged":{
+  "backend/**/*.py":["ruff check --fix","ruff format"]
+ }
+}

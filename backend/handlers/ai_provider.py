@@ -1,388 +1,366 @@
 """AI Provider API - AIプロバイダーの管理とチャットAPI"""
+
 import time
-from flask import Flask,jsonify,request,Response
-from providers import get_provider,list_providers,AIProviderConfig
-from providers.base import ChatMessage,MessageRole
+from flask import Flask, jsonify, request, Response
+from providers import get_provider, list_providers, AIProviderConfig
+from providers.base import ChatMessage, MessageRole
 from providers.registry import register_all_providers
 from providers.health_monitor import get_health_monitor
 from middleware.logger import get_logger
 
 
-def register_ai_provider_routes(app:Flask):
- """Register AI provider related routes"""
+def register_ai_provider_routes(app: Flask):
+    """Register AI provider related routes"""
 
- register_all_providers()
+    register_all_providers()
 
- @app.route('/api/ai-providers',methods=['GET'])
- def get_ai_providers():
-  """Get list of available AI providers"""
-  providers=list_providers()
-  return jsonify(providers)
+    @app.route("/api/ai-providers", methods=["GET"])
+    def get_ai_providers():
+        """Get list of available AI providers"""
+        providers = list_providers()
+        return jsonify(providers)
 
- @app.route('/api/ai-providers/<provider_id>',methods=['GET'])
- def get_ai_provider(provider_id:str):
-  """Get specific AI provider details"""
-  provider=get_provider(provider_id)
-  if not provider:
-   return jsonify({"error":f"プロバイダーが見つかりません: {provider_id}"}),404
+    @app.route("/api/ai-providers/<provider_id>", methods=["GET"])
+    def get_ai_provider(provider_id: str):
+        """Get specific AI provider details"""
+        provider = get_provider(provider_id)
+        if not provider:
+            return jsonify({"error": f"プロバイダーが見つかりません: {provider_id}"}), 404
 
-  models=[
-   {
-    "id":m.id,
-    "name":m.name,
-    "maxTokens":m.max_tokens,
-    "supportsVision":m.supports_vision,
-    "supportsTools":m.supports_tools,
-    "inputCostPer1k":m.input_cost_per_1k,
-    "outputCostPer1k":m.output_cost_per_1k,
-   }
-   for m in provider.get_available_models()
-  ]
+        models = [
+            {
+                "id": m.id,
+                "name": m.name,
+                "maxTokens": m.max_tokens,
+                "supportsVision": m.supports_vision,
+                "supportsTools": m.supports_tools,
+                "inputCostPer1k": m.input_cost_per_1k,
+                "outputCostPer1k": m.output_cost_per_1k,
+            }
+            for m in provider.get_available_models()
+        ]
 
-  return jsonify({
-   "id":provider.provider_id,
-   "name":provider.display_name,
-   "models":models
-  })
+        return jsonify({"id": provider.provider_id, "name": provider.display_name, "models": models})
 
- @app.route('/api/ai-providers/<provider_id>/models',methods=['GET'])
- def get_ai_provider_models(provider_id:str):
-  """Get available models for a provider"""
-  provider=get_provider(provider_id)
-  if not provider:
-   return jsonify({"error":f"プロバイダーが見つかりません: {provider_id}"}),404
+    @app.route("/api/ai-providers/<provider_id>/models", methods=["GET"])
+    def get_ai_provider_models(provider_id: str):
+        """Get available models for a provider"""
+        provider = get_provider(provider_id)
+        if not provider:
+            return jsonify({"error": f"プロバイダーが見つかりません: {provider_id}"}), 404
 
-  models=[
-   {
-    "id":m.id,
-    "name":m.name,
-    "maxTokens":m.max_tokens,
-    "supportsVision":m.supports_vision,
-    "supportsTools":m.supports_tools,
-    "inputCostPer1k":m.input_cost_per_1k,
-    "outputCostPer1k":m.output_cost_per_1k,
-   }
-   for m in provider.get_available_models()
-  ]
+        models = [
+            {
+                "id": m.id,
+                "name": m.name,
+                "maxTokens": m.max_tokens,
+                "supportsVision": m.supports_vision,
+                "supportsTools": m.supports_tools,
+                "inputCostPer1k": m.input_cost_per_1k,
+                "outputCostPer1k": m.output_cost_per_1k,
+            }
+            for m in provider.get_available_models()
+        ]
 
-  return jsonify(models)
+        return jsonify(models)
 
- @app.route('/api/ai-providers/test',methods=['POST'])
- def test_ai_provider():
-  """Test connection to an AI provider"""
-  data=request.get_json()
+    @app.route("/api/ai-providers/test", methods=["POST"])
+    def test_ai_provider():
+        """Test connection to an AI provider"""
+        data = request.get_json()
 
-  if not data:
-   return jsonify({"error":"Request body is required"}),400
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
 
-  provider_type=data.get('providerType','')
-  config_data=data.get('config',{})
+        provider_type = data.get("providerType", "")
+        config_data = data.get("config", {})
 
-  if not provider_type:
-   return jsonify({"error":"providerType is required"}),400
+        if not provider_type:
+            return jsonify({"error": "providerType is required"}), 400
 
-  start_time=time.time()
-  base_url=config_data.get('baseUrl')
+        start_time = time.time()
+        base_url = config_data.get("baseUrl")
 
-  try:
-   config=AIProviderConfig(
-    api_key=config_data.get('apiKey'),
-    base_url=base_url,
-   )
-   provider=get_provider(provider_type,config)
+        try:
+            config = AIProviderConfig(
+                api_key=config_data.get("apiKey"),
+                base_url=base_url,
+            )
+            provider = get_provider(provider_type, config)
 
-   if not provider:
-    return jsonify({
-     "success":False,
-     "message":f"未対応のプロバイダー: {provider_type}"
-    }),400
+            if not provider:
+                return jsonify({"success": False, "message": f"未対応のプロバイダー: {provider_type}"}), 400
 
-   result=provider.test_connection()
-   latency=int((time.time()-start_time)*1000)
-   result["latency"]=latency
+            result = provider.test_connection()
+            latency = int((time.time() - start_time) * 1000)
+            result["latency"] = latency
 
-   if result.get("success") and provider_type.startswith("local-"):
-    _save_validated_local_provider(provider_type,base_url or provider._get_base_url())
+            if result.get("success") and provider_type.startswith("local-"):
+                _save_validated_local_provider(provider_type, base_url or provider._get_base_url())
 
-   return jsonify(result)
+            return jsonify(result)
 
-  except Exception as e:
-   latency=int((time.time()-start_time)*1000)
-   error_type=type(e).__name__
-   if"AuthenticationError" in error_type:
-    message="認証エラー: APIキーを確認してください"
-   elif"RateLimitError" in error_type:
-    message="レート制限に達しました"
-   elif"Connection" in error_type or"Timeout" in error_type:
-    message="接続エラー: ネットワークを確認してください"
-   else:
-    message="接続テストに失敗しました"
-   return jsonify({
-    "success":False,
-    "message":message,
-    "latency":latency
-   })
+        except Exception as e:
+            latency = int((time.time() - start_time) * 1000)
+            error_type = type(e).__name__
+            if "AuthenticationError" in error_type:
+                message = "認証エラー: APIキーを確認してください"
+            elif "RateLimitError" in error_type:
+                message = "レート制限に達しました"
+            elif "Connection" in error_type or "Timeout" in error_type:
+                message = "接続エラー: ネットワークを確認してください"
+            else:
+                message = "接続テストに失敗しました"
+            return jsonify({"success": False, "message": message, "latency": latency})
 
- def _save_validated_local_provider(provider_id:str,base_url:str):
-  from models.database import get_session
-  from repositories import LocalProviderConfigRepository
-  session=get_session()
-  try:
-   repo=LocalProviderConfigRepository(session)
-   repo.save(provider_id,base_url,is_validated=True)
-   session.commit()
-  except Exception as e:
-   get_logger().error(f"Failed to save validated local provider: {e}",exc_info=True)
-   session.rollback()
-  finally:
-   session.close()
+    def _save_validated_local_provider(provider_id: str, base_url: str):
+        from models.database import get_session
+        from repositories import LocalProviderConfigRepository
 
- @app.route('/api/ai/chat',methods=['POST'])
- def ai_chat():
-  """Chat completion API"""
-  data=request.get_json()
+        session = get_session()
+        try:
+            repo = LocalProviderConfigRepository(session)
+            repo.save(provider_id, base_url, is_validated=True)
+            session.commit()
+        except Exception as e:
+            get_logger().error(f"Failed to save validated local provider: {e}", exc_info=True)
+            session.rollback()
+        finally:
+            session.close()
 
-  if not data:
-   return jsonify({"error":"Request body is required"}),400
+    @app.route("/api/ai/chat", methods=["POST"])
+    def ai_chat():
+        """Chat completion API"""
+        data = request.get_json()
 
-  provider_id=data.get('provider')
-  model=data.get('model')
-  messages_data=data.get('messages',[])
-  max_tokens=data.get('maxTokens',1024)
-  temperature=data.get('temperature',0.7)
-  api_key=data.get('apiKey')
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
 
-  if not provider_id:
-   return jsonify({"error":"providerは必須です"}),400
+        provider_id = data.get("provider")
+        model = data.get("model")
+        messages_data = data.get("messages", [])
+        max_tokens = data.get("maxTokens", 1024)
+        temperature = data.get("temperature", 0.7)
+        api_key = data.get("apiKey")
 
-  if not messages_data:
-   return jsonify({"error":"messages is required"}),400
+        if not provider_id:
+            return jsonify({"error": "providerは必須です"}), 400
 
-  config=AIProviderConfig(api_key=api_key) if api_key else None
-  provider=get_provider(provider_id,config)
+        if not messages_data:
+            return jsonify({"error": "messages is required"}), 400
 
-  if not provider:
-   return jsonify({"error":f"未対応のプロバイダー: {provider_id}"}),400
+        config = AIProviderConfig(api_key=api_key) if api_key else None
+        provider = get_provider(provider_id, config)
 
-  if not model:
-   model=provider.get_default_model()
+        if not provider:
+            return jsonify({"error": f"未対応のプロバイダー: {provider_id}"}), 400
 
-  messages=[]
-  for msg in messages_data:
-   role_str=msg.get('role','user')
-   try:
-    role=MessageRole(role_str)
-   except ValueError:
-    role=MessageRole.USER
-   messages.append(ChatMessage(role=role,content=msg.get('content','')))
+        if not model:
+            model = provider.get_default_model()
 
-  try:
-   start_time=time.time()
-   response=provider.chat(
-    messages=messages,
-    model=model,
-    max_tokens=max_tokens,
-    temperature=temperature
-   )
-   latency=int((time.time()-start_time)*1000)
+        messages = []
+        for msg in messages_data:
+            role_str = msg.get("role", "user")
+            try:
+                role = MessageRole(role_str)
+            except ValueError:
+                role = MessageRole.USER
+            messages.append(ChatMessage(role=role, content=msg.get("content", "")))
 
-   return jsonify({
-    "content":response.content,
-    "model":response.model,
-    "usage":{
-     "inputTokens":response.input_tokens,
-     "outputTokens":response.output_tokens,
-     "totalTokens":response.total_tokens
-    },
-    "finishReason":response.finish_reason,
-    "latency":latency
-   })
+        try:
+            start_time = time.time()
+            response = provider.chat(messages=messages, model=model, max_tokens=max_tokens, temperature=temperature)
+            latency = int((time.time() - start_time) * 1000)
 
-  except Exception as e:
-   error_type=type(e).__name__
-   if"AuthenticationError" in error_type:
-    return jsonify({"error":"認証エラー: APIキーを確認してください"}),401
-   elif"RateLimitError" in error_type:
-    return jsonify({"error":"レート制限に達しました。しばらく待ってから再試行してください"}),429
-   elif"Connection" in error_type or"Timeout" in error_type:
-    return jsonify({"error":"接続エラー: ネットワークを確認してください"}),503
-   return jsonify({"error":"チャット処理中にエラーが発生しました"}),500
+            return jsonify(
+                {
+                    "content": response.content,
+                    "model": response.model,
+                    "usage": {
+                        "inputTokens": response.input_tokens,
+                        "outputTokens": response.output_tokens,
+                        "totalTokens": response.total_tokens,
+                    },
+                    "finishReason": response.finish_reason,
+                    "latency": latency,
+                }
+            )
 
- @app.route('/api/ai/chat/stream',methods=['POST'])
- def ai_chat_stream():
-  """Streaming chat completion API"""
-  data=request.get_json()
+        except Exception as e:
+            error_type = type(e).__name__
+            if "AuthenticationError" in error_type:
+                return jsonify({"error": "認証エラー: APIキーを確認してください"}), 401
+            elif "RateLimitError" in error_type:
+                return jsonify({"error": "レート制限に達しました。しばらく待ってから再試行してください"}), 429
+            elif "Connection" in error_type or "Timeout" in error_type:
+                return jsonify({"error": "接続エラー: ネットワークを確認してください"}), 503
+            return jsonify({"error": "チャット処理中にエラーが発生しました"}), 500
 
-  if not data:
-   return jsonify({"error":"Request body is required"}),400
+    @app.route("/api/ai/chat/stream", methods=["POST"])
+    def ai_chat_stream():
+        """Streaming chat completion API"""
+        data = request.get_json()
 
-  provider_id=data.get('provider')
-  model=data.get('model')
-  messages_data=data.get('messages',[])
-  max_tokens=data.get('maxTokens',1024)
-  temperature=data.get('temperature',0.7)
-  api_key=data.get('apiKey')
+        if not data:
+            return jsonify({"error": "Request body is required"}), 400
 
-  if not provider_id:
-   return jsonify({"error":"providerは必須です"}),400
+        provider_id = data.get("provider")
+        model = data.get("model")
+        messages_data = data.get("messages", [])
+        max_tokens = data.get("maxTokens", 1024)
+        temperature = data.get("temperature", 0.7)
+        api_key = data.get("apiKey")
 
-  if not messages_data:
-   return jsonify({"error":"messages is required"}),400
+        if not provider_id:
+            return jsonify({"error": "providerは必須です"}), 400
 
-  config=AIProviderConfig(api_key=api_key) if api_key else None
-  provider=get_provider(provider_id,config)
+        if not messages_data:
+            return jsonify({"error": "messages is required"}), 400
 
-  if not provider:
-   return jsonify({"error":f"未対応のプロバイダー: {provider_id}"}),400
+        config = AIProviderConfig(api_key=api_key) if api_key else None
+        provider = get_provider(provider_id, config)
 
-  if not model:
-   model=provider.get_default_model()
+        if not provider:
+            return jsonify({"error": f"未対応のプロバイダー: {provider_id}"}), 400
 
-  messages=[]
-  for msg in messages_data:
-   role_str=msg.get('role','user')
-   try:
-    role=MessageRole(role_str)
-   except ValueError:
-    role=MessageRole.USER
-   messages.append(ChatMessage(role=role,content=msg.get('content','')))
+        if not model:
+            model = provider.get_default_model()
 
-  def generate():
-   try:
-    import json
-    for chunk in provider.chat_stream(
-     messages=messages,
-     model=model,
-     max_tokens=max_tokens,
-     temperature=temperature
-    ):
-     if chunk.is_final:
-      yield f"data: {json.dumps({'done':True,'usage':{'inputTokens':chunk.input_tokens,'outputTokens':chunk.output_tokens}})}\n\n"
-     else:
-      yield f"data: {json.dumps({'content':chunk.content})}\n\n"
-   except Exception as e:
-    import json
-    get_logger().error(f"ストリーミングチャットエラー: {e}",exc_info=True)
-    error_type=type(e).__name__
-    if"AuthenticationError" in error_type:
-     message="認証エラー: APIキーを確認してください"
-    elif"RateLimitError" in error_type:
-     message="レート制限に達しました"
-    else:
-     message="ストリーミング処理中にエラーが発生しました"
-    yield f"data: {json.dumps({'error':message})}\n\n"
+        messages = []
+        for msg in messages_data:
+            role_str = msg.get("role", "user")
+            try:
+                role = MessageRole(role_str)
+            except ValueError:
+                role = MessageRole.USER
+            messages.append(ChatMessage(role=role, content=msg.get("content", "")))
 
-  return Response(
-   generate(),
-   mimetype='text/event-stream',
-   headers={
-    'Cache-Control':'no-cache',
-    'X-Accel-Buffering':'no'
-   }
-  )
+        def generate():
+            try:
+                import json
 
- @app.route('/api/providers/health',methods=['GET'])
- def get_providers_health():
-  """全プロバイダーのヘルス状態を取得"""
-  monitor=get_health_monitor()
-  return jsonify(monitor.get_all_health_status())
+                for chunk in provider.chat_stream(
+                    messages=messages, model=model, max_tokens=max_tokens, temperature=temperature
+                ):
+                    if chunk.is_final:
+                        yield f"data: {json.dumps({'done': True, 'usage': {'inputTokens': chunk.input_tokens, 'outputTokens': chunk.output_tokens}})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'content': chunk.content})}\n\n"
+            except Exception as e:
+                import json
 
- @app.route('/api/providers/<provider_id>/health',methods=['GET'])
- def get_provider_health(provider_id:str):
-  """特定プロバイダーのヘルスチェックを実行"""
-  monitor=get_health_monitor()
-  result=monitor.check_provider_now(provider_id)
-  return jsonify(result.to_dict())
+                get_logger().error(f"ストリーミングチャットエラー: {e}", exc_info=True)
+                error_type = type(e).__name__
+                if "AuthenticationError" in error_type:
+                    message = "認証エラー: APIキーを確認してください"
+                elif "RateLimitError" in error_type:
+                    message = "レート制限に達しました"
+                else:
+                    message = "ストリーミング処理中にエラーが発生しました"
+                yield f"data: {json.dumps({'error': message})}\n\n"
 
- @app.route('/api/api-keys',methods=['GET'])
- def get_api_keys():
-  """保存済みAPIキー一覧（ヒントのみ）"""
-  from models.database import get_session
-  from repositories import ApiKeyRepository
-  session=get_session()
-  try:
-   repo=ApiKeyRepository(session)
-   hints=repo.get_all_hints()
-   return jsonify(hints)
-  finally:
-   session.close()
+        return Response(
+            generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )
 
- @app.route('/api/api-keys/<provider_id>',methods=['PUT'])
- def save_api_key(provider_id:str):
-  """APIキーを保存"""
-  from models.database import get_session
-  from repositories import ApiKeyRepository
-  data=request.get_json()
-  if not data or not data.get('apiKey'):
-   return jsonify({"error":"apiKeyは必須です"}),400
-  api_key=data['apiKey']
-  session=get_session()
-  try:
-   repo=ApiKeyRepository(session)
-   key_store=repo.save(provider_id,api_key)
-   session.commit()
-   return jsonify({
-    "success":True,
-    "hint":key_store.key_hint,
-    "message":"APIキーが保存されました"
-   })
-  except Exception as e:
-   get_logger().error(f"Failed to save API key for {provider_id}: {e}",exc_info=True)
-   session.rollback()
-   return jsonify({"error":"APIキーの保存に失敗しました"}),500
-  finally:
-   session.close()
+    @app.route("/api/providers/health", methods=["GET"])
+    def get_providers_health():
+        """全プロバイダーのヘルス状態を取得"""
+        monitor = get_health_monitor()
+        return jsonify(monitor.get_all_health_status())
 
- @app.route('/api/api-keys/<provider_id>',methods=['DELETE'])
- def delete_api_key(provider_id:str):
-  """APIキーを削除"""
-  from models.database import get_session
-  from repositories import ApiKeyRepository
-  session=get_session()
-  try:
-   repo=ApiKeyRepository(session)
-   deleted=repo.delete(provider_id)
-   session.commit()
-   if deleted:
-    return jsonify({"success":True,"message":"APIキーが削除されました"})
-   else:
-    return jsonify({"error":"APIキーが見つかりません"}),404
-  except Exception as e:
-   get_logger().error(f"Failed to delete API key for {provider_id}: {e}",exc_info=True)
-   session.rollback()
-   return jsonify({"error":"APIキーの削除に失敗しました"}),500
-  finally:
-   session.close()
+    @app.route("/api/providers/<provider_id>/health", methods=["GET"])
+    def get_provider_health(provider_id: str):
+        """特定プロバイダーのヘルスチェックを実行"""
+        monitor = get_health_monitor()
+        result = monitor.check_provider_now(provider_id)
+        return jsonify(result.to_dict())
 
- @app.route('/api/api-keys/<provider_id>/validate',methods=['POST'])
- def validate_api_key(provider_id:str):
-  """APIキーの有効性を検証"""
-  from models.database import get_session
-  from repositories import ApiKeyRepository
-  session=get_session()
-  try:
-   repo=ApiKeyRepository(session)
-   api_key=repo.get_decrypted_key(provider_id)
-   if not api_key:
-    return jsonify({"success":False,"error":"APIキーが保存されていません"}),404
-   config=AIProviderConfig(api_key=api_key)
-   provider=get_provider(provider_id,config)
-   if not provider:
-    return jsonify({"success":False,"error":"未対応のプロバイダーです"}),400
-   start_time=time.time()
-   result=provider.test_connection()
-   latency=int((time.time()-start_time)*1000)
-   is_valid=result.get("success",False)
-   repo.update_validation_status(provider_id,is_valid)
-   session.commit()
-   return jsonify({
-    "success":is_valid,
-    "message":result.get("message",""),
-    "latency":latency
-   })
-  except Exception as e:
-   get_logger().error(f"Failed to validate API key for {provider_id}: {e}",exc_info=True)
-   session.rollback()
-   return jsonify({"success":False,"error":"APIキーの検証に失敗しました"}),500
-  finally:
-   session.close()
+    @app.route("/api/api-keys", methods=["GET"])
+    def get_api_keys():
+        """保存済みAPIキー一覧（ヒントのみ）"""
+        from models.database import get_session
+        from repositories import ApiKeyRepository
+
+        session = get_session()
+        try:
+            repo = ApiKeyRepository(session)
+            hints = repo.get_all_hints()
+            return jsonify(hints)
+        finally:
+            session.close()
+
+    @app.route("/api/api-keys/<provider_id>", methods=["PUT"])
+    def save_api_key(provider_id: str):
+        """APIキーを保存"""
+        from models.database import get_session
+        from repositories import ApiKeyRepository
+
+        data = request.get_json()
+        if not data or not data.get("apiKey"):
+            return jsonify({"error": "apiKeyは必須です"}), 400
+        api_key = data["apiKey"]
+        session = get_session()
+        try:
+            repo = ApiKeyRepository(session)
+            key_store = repo.save(provider_id, api_key)
+            session.commit()
+            return jsonify({"success": True, "hint": key_store.key_hint, "message": "APIキーが保存されました"})
+        except Exception as e:
+            get_logger().error(f"Failed to save API key for {provider_id}: {e}", exc_info=True)
+            session.rollback()
+            return jsonify({"error": "APIキーの保存に失敗しました"}), 500
+        finally:
+            session.close()
+
+    @app.route("/api/api-keys/<provider_id>", methods=["DELETE"])
+    def delete_api_key(provider_id: str):
+        """APIキーを削除"""
+        from models.database import get_session
+        from repositories import ApiKeyRepository
+
+        session = get_session()
+        try:
+            repo = ApiKeyRepository(session)
+            deleted = repo.delete(provider_id)
+            session.commit()
+            if deleted:
+                return jsonify({"success": True, "message": "APIキーが削除されました"})
+            else:
+                return jsonify({"error": "APIキーが見つかりません"}), 404
+        except Exception as e:
+            get_logger().error(f"Failed to delete API key for {provider_id}: {e}", exc_info=True)
+            session.rollback()
+            return jsonify({"error": "APIキーの削除に失敗しました"}), 500
+        finally:
+            session.close()
+
+    @app.route("/api/api-keys/<provider_id>/validate", methods=["POST"])
+    def validate_api_key(provider_id: str):
+        """APIキーの有効性を検証"""
+        from models.database import get_session
+        from repositories import ApiKeyRepository
+
+        session = get_session()
+        try:
+            repo = ApiKeyRepository(session)
+            api_key = repo.get_decrypted_key(provider_id)
+            if not api_key:
+                return jsonify({"success": False, "error": "APIキーが保存されていません"}), 404
+            config = AIProviderConfig(api_key=api_key)
+            provider = get_provider(provider_id, config)
+            if not provider:
+                return jsonify({"success": False, "error": "未対応のプロバイダーです"}), 400
+            start_time = time.time()
+            result = provider.test_connection()
+            latency = int((time.time() - start_time) * 1000)
+            is_valid = result.get("success", False)
+            repo.update_validation_status(provider_id, is_valid)
+            session.commit()
+            return jsonify({"success": is_valid, "message": result.get("message", ""), "latency": latency})
+        except Exception as e:
+            get_logger().error(f"Failed to validate API key for {provider_id}: {e}", exc_info=True)
+            session.rollback()
+            return jsonify({"success": False, "error": "APIキーの検証に失敗しました"}), 500
+        finally:
+            session.close()

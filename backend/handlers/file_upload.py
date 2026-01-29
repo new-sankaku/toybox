@@ -2,282 +2,344 @@ import os
 import errno
 import uuid
 import shutil
-from flask import Flask,request,jsonify,send_from_directory
+from flask import Flask, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from datastore import DataStore
 
-ALLOWED_EXTENSIONS={
-
-    'txt','md','py','js','ts','jsx','tsx','html','css','json','xml','yaml','yml',
-    'java','c','cpp','h','cs','go','rs','rb','php','swift','kt',
-
-    'png','jpg','jpeg','gif','webp','svg','bmp','ico',
-
-    'mp3','wav','ogg','flac','aac','m4a','wma',
-
-    'mp4','webm','mov','avi','mkv','wmv',
-
-    'pdf',
-
-    'zip','tar','gz','tgz','7z','rar',
+ALLOWED_EXTENSIONS = {
+    "txt",
+    "md",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "html",
+    "css",
+    "json",
+    "xml",
+    "yaml",
+    "yml",
+    "java",
+    "c",
+    "cpp",
+    "h",
+    "cs",
+    "go",
+    "rs",
+    "rb",
+    "php",
+    "swift",
+    "kt",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "svg",
+    "bmp",
+    "ico",
+    "mp3",
+    "wav",
+    "ogg",
+    "flac",
+    "aac",
+    "m4a",
+    "wma",
+    "mp4",
+    "webm",
+    "mov",
+    "avi",
+    "mkv",
+    "wmv",
+    "pdf",
+    "zip",
+    "tar",
+    "gz",
+    "tgz",
+    "7z",
+    "rar",
 }
 
-CATEGORY_MAP={
-
-    'txt':'document','md':'document','pdf':'document',
-    'py':'code','js':'code','ts':'code','jsx':'code','tsx':'code',
-    'html':'code','css':'code','json':'code','xml':'code','yaml':'code','yml':'code',
-    'java':'code','c':'code','cpp':'code','h':'code','cs':'code',
-    'go':'code','rs':'code','rb':'code','php':'code','swift':'code','kt':'code',
-
-    'png':'image','jpg':'image','jpeg':'image','gif':'image',
-    'webp':'image','svg':'image','bmp':'image','ico':'image',
-
-    'mp3':'audio','wav':'audio','ogg':'audio','flac':'audio',
-    'aac':'audio','m4a':'audio','wma':'audio',
-
-    'mp4':'video','webm':'video','mov':'video','avi':'video',
-    'mkv':'video','wmv':'video',
-
-    'zip':'archive','tar':'archive','gz':'archive','tgz':'archive',
-    '7z':'archive','rar':'archive',
+CATEGORY_MAP = {
+    "txt": "document",
+    "md": "document",
+    "pdf": "document",
+    "py": "code",
+    "js": "code",
+    "ts": "code",
+    "jsx": "code",
+    "tsx": "code",
+    "html": "code",
+    "css": "code",
+    "json": "code",
+    "xml": "code",
+    "yaml": "code",
+    "yml": "code",
+    "java": "code",
+    "c": "code",
+    "cpp": "code",
+    "h": "code",
+    "cs": "code",
+    "go": "code",
+    "rs": "code",
+    "rb": "code",
+    "php": "code",
+    "swift": "code",
+    "kt": "code",
+    "png": "image",
+    "jpg": "image",
+    "jpeg": "image",
+    "gif": "image",
+    "webp": "image",
+    "svg": "image",
+    "bmp": "image",
+    "ico": "image",
+    "mp3": "audio",
+    "wav": "audio",
+    "ogg": "audio",
+    "flac": "audio",
+    "aac": "audio",
+    "m4a": "audio",
+    "wma": "audio",
+    "mp4": "video",
+    "webm": "video",
+    "mov": "video",
+    "avi": "video",
+    "mkv": "video",
+    "wmv": "video",
+    "zip": "archive",
+    "tar": "archive",
+    "gz": "archive",
+    "tgz": "archive",
+    "7z": "archive",
+    "rar": "archive",
 }
 
-MAX_FILE_SIZE=4*1024*1024*1024
-MIN_FREE_DISK_SPACE=100*1024*1024
+MAX_FILE_SIZE = 4 * 1024 * 1024 * 1024
+MIN_FREE_DISK_SPACE = 100 * 1024 * 1024
 
 
-def check_disk_space(path:str,required_bytes:int)->bool:
+def check_disk_space(path: str, required_bytes: int) -> bool:
     try:
-        usage=shutil.disk_usage(path)
-        return usage.free>(required_bytes+MIN_FREE_DISK_SPACE)
+        usage = shutil.disk_usage(path)
+        return usage.free > (required_bytes + MIN_FREE_DISK_SPACE)
     except OSError:
         return False
 
 
-def allowed_file(filename:str)->bool:
-    return'.' in filename and filename.rsplit('.',1)[1].lower() in ALLOWED_EXTENSIONS
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
-def get_category(filename:str)->str:
-    if'.' not in filename:
-        return'other'
-    ext=filename.rsplit('.',1)[1].lower()
-    return CATEGORY_MAP.get(ext,'other')
+def get_category(filename: str) -> str:
+    if "." not in filename:
+        return "other"
+    ext = filename.rsplit(".", 1)[1].lower()
+    return CATEGORY_MAP.get(ext, "other")
 
 
-def get_mime_type(filename:str)->str:
-    ext=filename.rsplit('.',1)[1].lower() if'.' in filename else''
-    mime_types={
-
-        'txt':'text/plain','md':'text/markdown','json':'application/json',
-        'py':'text/x-python','js':'text/javascript','ts':'text/typescript',
-        'html':'text/html','css':'text/css','xml':'application/xml',
-
-        'png':'image/png','jpg':'image/jpeg','jpeg':'image/jpeg',
-        'gif':'image/gif','webp':'image/webp','svg':'image/svg+xml',
-
-        'mp3':'audio/mpeg','wav':'audio/wav','ogg':'audio/ogg',
-        'flac':'audio/flac','m4a':'audio/mp4',
-
-        'mp4':'video/mp4','webm':'video/webm','mov':'video/quicktime',
-
-        'pdf':'application/pdf',
+def get_mime_type(filename: str) -> str:
+    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+    mime_types = {
+        "txt": "text/plain",
+        "md": "text/markdown",
+        "json": "application/json",
+        "py": "text/x-python",
+        "js": "text/javascript",
+        "ts": "text/typescript",
+        "html": "text/html",
+        "css": "text/css",
+        "xml": "application/xml",
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "mp3": "audio/mpeg",
+        "wav": "audio/wav",
+        "ogg": "audio/ogg",
+        "flac": "audio/flac",
+        "m4a": "audio/mp4",
+        "mp4": "video/mp4",
+        "webm": "video/webm",
+        "mov": "video/quicktime",
+        "pdf": "application/pdf",
     }
-    return mime_types.get(ext,'application/octet-stream')
+    return mime_types.get(ext, "application/octet-stream")
 
 
-def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str):
-    os.makedirs(upload_folder,exist_ok=True)
+def register_file_upload_routes(app: Flask, data_store: DataStore, upload_folder: str):
+    os.makedirs(upload_folder, exist_ok=True)
 
-    @app.route('/api/projects/<project_id>/files',methods=['GET'])
-    def list_uploaded_files(project_id:str):
-        project=data_store.get_project(project_id)
+    @app.route("/api/projects/<project_id>/files", methods=["GET"])
+    def list_uploaded_files(project_id: str):
+        project = data_store.get_project(project_id)
         if not project:
-            return jsonify({"error":"Project not found"}),404
+            return jsonify({"error": "Project not found"}), 404
 
-        files=data_store.get_uploaded_files_by_project(project_id)
+        files = data_store.get_uploaded_files_by_project(project_id)
         return jsonify(files)
 
-    @app.route('/api/projects/<project_id>/files',methods=['POST'])
-    def upload_file(project_id:str):
-        project=data_store.get_project(project_id)
+    @app.route("/api/projects/<project_id>/files", methods=["POST"])
+    def upload_file(project_id: str):
+        project = data_store.get_project(project_id)
         if not project:
-            return jsonify({"error":"Project not found"}),404
+            return jsonify({"error": "Project not found"}), 404
 
-        if'file' not in request.files:
-            return jsonify({"error":"No file part in request"}),400
+        if "file" not in request.files:
+            return jsonify({"error": "No file part in request"}), 400
 
-        file=request.files['file']
-        if file.filename=='':
-            return jsonify({"error":"No selected file"}),400
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "No selected file"}), 400
 
         if not allowed_file(file.filename):
-            return jsonify({"error":f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}),400
+            return jsonify({"error": f"File type not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"}), 400
 
-
-        file.seek(0,2)
-        file_size=file.tell()
+        file.seek(0, 2)
+        file_size = file.tell()
         file.seek(0)
 
-        if file_size>MAX_FILE_SIZE:
-            return jsonify({"error":f"File too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB"}),400
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({"error": f"File too large. Max size: {MAX_FILE_SIZE // (1024 * 1024)}MB"}), 400
 
+        original_filename = secure_filename(file.filename)
+        file_id = uuid.uuid4().hex[:12]
+        ext = original_filename.rsplit(".", 1)[1].lower() if "." in original_filename else ""
+        stored_filename = f"{file_id}.{ext}" if ext else file_id
 
-        original_filename=secure_filename(file.filename)
-        file_id=uuid.uuid4().hex[:12]
-        ext=original_filename.rsplit('.',1)[1].lower() if'.' in original_filename else''
-        stored_filename=f"{file_id}.{ext}" if ext else file_id
+        project_folder = os.path.join(upload_folder, project_id)
+        os.makedirs(project_folder, exist_ok=True)
+        file_path = os.path.join(project_folder, stored_filename)
 
-
-        project_folder=os.path.join(upload_folder,project_id)
-        os.makedirs(project_folder,exist_ok=True)
-        file_path=os.path.join(project_folder,stored_filename)
-
-        if not check_disk_space(project_folder,file_size):
-            return jsonify({"error":"ディスク容量が不足しています"}),507
+        if not check_disk_space(project_folder, file_size):
+            return jsonify({"error": "ディスク容量が不足しています"}), 507
 
         try:
             file.save(file_path)
         except OSError as e:
-            if e.errno==errno.ENOSPC:
-                return jsonify({"error":"ディスク容量が不足しています"}),507
-            return jsonify({"error":f"ファイル保存に失敗しました: {e.strerror}"}),500
+            if e.errno == errno.ENOSPC:
+                return jsonify({"error": "ディスク容量が不足しています"}), 507
+            return jsonify({"error": f"ファイル保存に失敗しました: {e.strerror}"}), 500
 
+        description = request.form.get("description", "")
 
-        description=request.form.get('description','')
-
-
-        uploaded_file=data_store.create_uploaded_file(
+        uploaded_file = data_store.create_uploaded_file(
             project_id=project_id,
             filename=stored_filename,
             original_filename=original_filename,
             mime_type=get_mime_type(original_filename),
             category=get_category(original_filename),
             size_bytes=file_size,
-            description=description
+            description=description,
         )
 
-        return jsonify(uploaded_file),201
+        return jsonify(uploaded_file), 201
 
-    @app.route('/api/projects/<project_id>/files/batch',methods=['POST'])
-    def upload_files_batch(project_id:str):
-        project=data_store.get_project(project_id)
+    @app.route("/api/projects/<project_id>/files/batch", methods=["POST"])
+    def upload_files_batch(project_id: str):
+        project = data_store.get_project(project_id)
         if not project:
-            return jsonify({"error":"Project not found"}),404
+            return jsonify({"error": "Project not found"}), 404
 
-        if'files' not in request.files:
-            return jsonify({"error":"No files in request"}),400
+        if "files" not in request.files:
+            return jsonify({"error": "No files in request"}), 400
 
-        files=request.files.getlist('files')
+        files = request.files.getlist("files")
         if not files:
-            return jsonify({"error":"No files selected"}),400
+            return jsonify({"error": "No files selected"}), 400
 
-        results=[]
-        errors=[]
+        results = []
+        errors = []
 
         for file in files:
-            if file.filename=='':
+            if file.filename == "":
                 continue
 
             if not allowed_file(file.filename):
-                errors.append({
-                    "filename":file.filename,
-                    "error":"File type not allowed"
-                })
+                errors.append({"filename": file.filename, "error": "File type not allowed"})
                 continue
 
-
-            file.seek(0,2)
-            file_size=file.tell()
+            file.seek(0, 2)
+            file_size = file.tell()
             file.seek(0)
 
-            if file_size>MAX_FILE_SIZE:
-                errors.append({
-                    "filename":file.filename,
-                    "error":f"File too large (max {MAX_FILE_SIZE // (1024 * 1024)}MB)"
-                })
+            if file_size > MAX_FILE_SIZE:
+                errors.append(
+                    {"filename": file.filename, "error": f"File too large (max {MAX_FILE_SIZE // (1024 * 1024)}MB)"}
+                )
                 continue
 
+            original_filename = secure_filename(file.filename)
+            file_id = uuid.uuid4().hex[:12]
+            ext = original_filename.rsplit(".", 1)[1].lower() if "." in original_filename else ""
+            stored_filename = f"{file_id}.{ext}" if ext else file_id
 
-            original_filename=secure_filename(file.filename)
-            file_id=uuid.uuid4().hex[:12]
-            ext=original_filename.rsplit('.',1)[1].lower() if'.' in original_filename else''
-            stored_filename=f"{file_id}.{ext}" if ext else file_id
+            project_folder = os.path.join(upload_folder, project_id)
+            os.makedirs(project_folder, exist_ok=True)
+            file_path = os.path.join(project_folder, stored_filename)
 
-
-            project_folder=os.path.join(upload_folder,project_id)
-            os.makedirs(project_folder,exist_ok=True)
-            file_path=os.path.join(project_folder,stored_filename)
-
-            if not check_disk_space(project_folder,file_size):
-                errors.append({"filename":file.filename,"error":"ディスク容量が不足しています"})
+            if not check_disk_space(project_folder, file_size):
+                errors.append({"filename": file.filename, "error": "ディスク容量が不足しています"})
                 continue
 
             try:
                 file.save(file_path)
             except OSError as e:
-                errors.append({"filename":file.filename,"error":f"ファイル保存失敗: {e.strerror}"})
+                errors.append({"filename": file.filename, "error": f"ファイル保存失敗: {e.strerror}"})
                 continue
 
-
-            uploaded_file=data_store.create_uploaded_file(
+            uploaded_file = data_store.create_uploaded_file(
                 project_id=project_id,
                 filename=stored_filename,
                 original_filename=original_filename,
                 mime_type=get_mime_type(original_filename),
                 category=get_category(original_filename),
                 size_bytes=file_size,
-                description=""
+                description="",
             )
             results.append(uploaded_file)
 
-        return jsonify({
-            "success":results,
-            "errors":errors,
-            "totalUploaded":len(results),
-            "totalErrors":len(errors)
-        }),201 if results else 400
+        return jsonify(
+            {"success": results, "errors": errors, "totalUploaded": len(results), "totalErrors": len(errors)}
+        ), 201 if results else 400
 
-    @app.route('/api/files/<file_id>',methods=['GET'])
-    def get_uploaded_file_info(file_id:str):
-        file_record=data_store.get_uploaded_file(file_id)
+    @app.route("/api/files/<file_id>", methods=["GET"])
+    def get_uploaded_file_info(file_id: str):
+        file_record = data_store.get_uploaded_file(file_id)
         if not file_record:
-            return jsonify({"error":"File not found"}),404
+            return jsonify({"error": "File not found"}), 404
         return jsonify(file_record)
 
-    @app.route('/api/files/<file_id>',methods=['DELETE'])
-    def delete_uploaded_file(file_id:str):
-        file_record=data_store.get_uploaded_file(file_id)
+    @app.route("/api/files/<file_id>", methods=["DELETE"])
+    def delete_uploaded_file(file_id: str):
+        file_record = data_store.get_uploaded_file(file_id)
         if not file_record:
-            return jsonify({"error":"File not found"}),404
+            return jsonify({"error": "File not found"}), 404
 
-
-        project_folder=os.path.join(upload_folder,file_record["projectId"])
-        file_path=os.path.join(project_folder,file_record["filename"])
+        project_folder = os.path.join(upload_folder, file_record["projectId"])
+        file_path = os.path.join(project_folder, file_record["filename"])
         if os.path.exists(file_path):
             os.remove(file_path)
 
-
         data_store.delete_uploaded_file(file_id)
 
-        return jsonify({"success":True})
+        return jsonify({"success": True})
 
-    @app.route('/api/files/<file_id>/download',methods=['GET'])
-    def download_file(file_id:str):
-        file_record=data_store.get_uploaded_file(file_id)
+    @app.route("/api/files/<file_id>/download", methods=["GET"])
+    def download_file(file_id: str):
+        file_record = data_store.get_uploaded_file(file_id)
         if not file_record:
-            return jsonify({"error":"File not found"}),404
+            return jsonify({"error": "File not found"}), 404
 
-        project_folder=os.path.join(upload_folder,file_record["projectId"])
+        project_folder = os.path.join(upload_folder, file_record["projectId"])
         return send_from_directory(
-            project_folder,
-            file_record["filename"],
-            download_name=file_record["originalFilename"],
-            as_attachment=True
+            project_folder, file_record["filename"], download_name=file_record["originalFilename"], as_attachment=True
         )
 
-    @app.route('/uploads/<project_id>/<filename>',methods=['GET'])
-    def serve_uploaded_file(project_id:str,filename:str):
-        project_folder=os.path.join(upload_folder,project_id)
-        return send_from_directory(project_folder,filename)
+    @app.route("/uploads/<project_id>/<filename>", methods=["GET"])
+    def serve_uploaded_file(project_id: str, filename: str):
+        project_folder = os.path.join(upload_folder, project_id)
+        return send_from_directory(project_folder, filename)
