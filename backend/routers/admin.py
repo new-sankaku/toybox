@@ -1,9 +1,10 @@
-from fastapi import APIRouter,Request,HTTPException
+from fastapi import APIRouter,Request,HTTPException,Depends
 from typing import Optional,List
 from pydantic import BaseModel
 from middleware.logger import get_logger
+from middleware.admin_auth import require_admin_auth
 
-router=APIRouter()
+router=APIRouter(dependencies=[Depends(require_admin_auth)])
 
 
 class ArchiveRequest(BaseModel):
