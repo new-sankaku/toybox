@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
 """Detect circular imports in Python codebase."""
+
 import ast
 import sys
 from pathlib import Path
 from collections import defaultdict
 
-TARGET_DIRS = ["handlers", "middleware", "repositories", "routers", "schemas", "services", "providers", "agents", "skills"]
+TARGET_DIRS = [
+    "handlers",
+    "middleware",
+    "repositories",
+    "routers",
+    "schemas",
+    "services",
+    "providers",
+    "agents",
+    "skills",
+]
 EXCLUDE_DIRS = {"venv", ".venv", "__pycache__", "tests", "models"}
+
 
 def get_module_name(file_path: Path, base_path: Path) -> str:
     relative = file_path.relative_to(base_path)
@@ -16,6 +28,7 @@ def get_module_name(file_path: Path, base_path: Path) -> str:
     else:
         parts[-1] = parts[-1].replace(".py", "")
     return ".".join(parts)
+
 
 def extract_imports(file_path: Path, base_path: Path) -> list[str]:
     try:
@@ -33,11 +46,13 @@ def extract_imports(file_path: Path, base_path: Path) -> list[str]:
                 imports.append(node.module.split(".")[0])
     return list(set(imports))
 
+
 def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
     cycles = []
     visited = set()
     rec_stack = set()
     path = []
+
     def dfs(node: str) -> None:
         visited.add(node)
         rec_stack.add(node)
@@ -52,10 +67,12 @@ def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
                     cycles.append(cycle)
         path.pop()
         rec_stack.remove(node)
+
     for node in graph:
         if node not in visited:
             dfs(node)
     return cycles
+
 
 def main() -> int:
     base_path = Path(__file__).parent.parent
@@ -90,6 +107,7 @@ def main() -> int:
         return 1
     print("No circular imports detected")
     return 0
+
 
 if __name__ == "__main__":
     sys.exit(main())
