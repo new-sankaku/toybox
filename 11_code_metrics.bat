@@ -31,22 +31,32 @@ if not exist "%REPORT_DIR%" mkdir "%REPORT_DIR%"
 set "TIMESTAMP=%date:~0,4%%date:~5,2%%date:~8,2%_%time:~0,2%%time:~3,2%"
 set "TIMESTAMP=%TIMESTAMP: =0%"
 
-echo %CYAN%[1/4] Project Overview%RESET%
+echo %CYAN%[1/6] Project Overview%RESET%
 echo.
-%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=json,lock,png,jpg,jpeg,gif,svg,ico,csv backend langgraph-studio
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=lock,png,jpg,jpeg,gif,svg,ico backend langgraph-studio
 echo.
 
-echo %CYAN%[2/4] Backend (Python)%RESET%
+echo %CYAN%[2/6] Backend (Python)%RESET%
 echo.
 %CLOC_CMD% --exclude-dir=venv,.venv,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache --include-lang=Python backend
 echo.
 
-echo %CYAN%[3/4] Frontend (TypeScript/JavaScript)%RESET%
+echo %CYAN%[3/6] Frontend (TypeScript/JavaScript/CSS)%RESET%
 echo.
 %CLOC_CMD% --exclude-dir=node_modules,dist,build,playwright-report --include-lang=TypeScript,JavaScript,CSS langgraph-studio
 echo.
 
-echo %CYAN%[4/4] Generating Report...%RESET%
+echo %CYAN%[4/6] Config Files (YAML/TOML/INI/JSON)%RESET%
+echo.
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --include-lang=YAML,TOML,INI,JSON backend langgraph-studio
+echo.
+
+echo %CYAN%[5/6] Documentation (Markdown/HTML)%RESET%
+echo.
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --include-lang=Markdown,HTML backend langgraph-studio doc
+echo.
+
+echo %CYAN%[6/6] Generating Report...%RESET%
 echo.
 
 set "REPORT_FILE=%REPORT_DIR%\code_metrics_%TIMESTAMP%.md"
@@ -58,7 +68,7 @@ echo. >> "%REPORT_FILE%"
 echo ## Project Overview >> "%REPORT_FILE%"
 echo. >> "%REPORT_FILE%"
 echo ```>> "%REPORT_FILE%"
-%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=json,lock,png,jpg,jpeg,gif,svg,ico,csv backend langgraph-studio >> "%REPORT_FILE%"
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=lock,png,jpg,jpeg,gif,svg,ico backend langgraph-studio >> "%REPORT_FILE%"
 echo ```>> "%REPORT_FILE%"
 echo. >> "%REPORT_FILE%"
 
@@ -76,10 +86,24 @@ echo ```>> "%REPORT_FILE%"
 echo ```>> "%REPORT_FILE%"
 echo. >> "%REPORT_FILE%"
 
-echo ## By File (Top 30) >> "%REPORT_FILE%"
+echo ## Config Files (YAML/TOML/INI/JSON) >> "%REPORT_FILE%"
 echo. >> "%REPORT_FILE%"
 echo ```>> "%REPORT_FILE%"
-%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=json,lock,png,jpg,jpeg,gif,svg,ico,csv --by-file --include-lang=Python,TypeScript,JavaScript backend langgraph-studio | head -50 >> "%REPORT_FILE%"
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --include-lang=YAML,TOML,INI,JSON backend langgraph-studio >> "%REPORT_FILE%"
+echo ```>> "%REPORT_FILE%"
+echo. >> "%REPORT_FILE%"
+
+echo ## Documentation (Markdown/HTML) >> "%REPORT_FILE%"
+echo. >> "%REPORT_FILE%"
+echo ```>> "%REPORT_FILE%"
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --include-lang=Markdown,HTML backend langgraph-studio doc >> "%REPORT_FILE%"
+echo ```>> "%REPORT_FILE%"
+echo. >> "%REPORT_FILE%"
+
+echo ## By File (Top 50) >> "%REPORT_FILE%"
+echo. >> "%REPORT_FILE%"
+echo ```>> "%REPORT_FILE%"
+%CLOC_CMD% --exclude-dir=node_modules,venv,.venv,dist,build,.git,.mypy_cache,__pycache__,.pytest_cache,.hypothesis,cache,playwright-report --exclude-ext=lock,png,jpg,jpeg,gif,svg,ico --by-file backend langgraph-studio | head -70 >> "%REPORT_FILE%"
 echo ```>> "%REPORT_FILE%"
 
 echo %GREEN%Report saved to: %REPORT_FILE%%RESET%
