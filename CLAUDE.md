@@ -29,61 +29,29 @@
 ・応急処置の禁止。インラインスタイル（`style={{ }}`）でのべた書きは禁止。必ずTailwindクラスまたはCSSファイルを使用すること。
 ・推測での修正禁止。「たぶんこれだろう」で修正を始めない。必ず問題の要素を特定してから修正すること。
 ・同じ調査の繰り返し禁止。同じ問題が再度発生した場合、前回と同じ視点で調査しない。別の観点（親要素、子要素、関連コンポーネント、CSS継承、Tailwind設定など）から調べ直すこと。
-・誤認させるデフォルト値禁止** - API取得失敗時などに、実際とは異なる値をデフォルト値として画面に表示しない。取得失敗時は「-」や空欄、または「取得失敗」等の明示的な表示にすること。ユーザーを誤認させる情報を表示してはならない。
+・誤認させるデフォルト値禁止 - API取得失敗時などに、実際とは異なる値をデフォルト値として画面に表示しない。取得失敗時は「-」や空欄、または「取得失敗」等の明示的な表示にすること。ユーザーを誤認させる情報を表示してはならない。
 ・文言の統一、画面に表示する文言（ラベル、ボタン、メッセージ等）は他の画面と統一的な表現にすること。新しい文言を追加する前に、既存の画面で使われている表現を確認して合わせる。
 
-
 ## 修正後の動作確認方法
-
 コード修正後は `10_build_check.bat` を実行する（サーバー起動不要）。
-
-**10_build_check.batの内容:**
-1. Backend構文チェック
-2. OpenAPIスペック生成
-3. TypeScript型生成
-4. ESLint
-5. TypeScript型チェック
+**10_build_check.batの内容:** Backend構文チェック→OpenAPIスペック生成→TypeScript型生成→ESLint→TypeScript型チェック
 
 ### コミット前の追加作業
 ```bash
-# フルビルド確認
-cd langgraph-studio && npm run build
-
-# コード圧縮
-cd langgraph-studio && npm run format   # スペース削除
+cd langgraph-studio && npm run build      # フルビルド確認
+cd langgraph-studio && npm run format     # スペース削除
 cd backend && python scripts/remove-spaces.py
 ```
-
-**圧縮ルール:**
-- コロン/カンマ後: スペースなし
-- アロー演算子前後: スペースなし
-- コメント: 削除（TODO/FIXME以外）
-- TypeScriptインデント: 1スペース
-
+**圧縮ルール:** コロン/カンマ後スペースなし、アロー演算子前後スペースなし、コメント削除（TODO/FIXME以外）、TypeScriptインデント1スペース
 
 ## OpenAPI + TypeScript型自動生成
-
 バックエンドのPydanticスキーマからOpenAPIスペックを生成し、フロントエンドのTypeScript型を自動生成する仕組み。
-
-**構成:**
-- `backend/schemas/` - Pydanticスキーマ（camelCase alias自動生成）
-- `backend/openapi/generator.py` - OpenAPIスペック生成
-- `backend/scripts/generate_openapi.py` - OpenAPIスペックをJSONファイルに出力
-- `langgraph-studio/src/types/openapi.json` - 生成されたOpenAPIスペック（.gitignore対象）
-- `langgraph-studio/src/types/api-generated.ts` - 自動生成されるTypeScript型（.gitignore対象）
-
-**スキーマ追加時:**
-- `backend/schemas/` に新規スキーマファイルを作成
-- `backend/schemas/__init__.py` でエクスポート
-- `backend/openapi/generator.py` のスキーマリストとパス定義に追加
-- 「API型の整合性チェック」を実行して確認
+**構成:** `backend/schemas/`(Pydanticスキーマ)→`backend/openapi/generator.py`(生成)→`langgraph-studio/src/types/openapi.json`→`langgraph-studio/src/types/api-generated.ts`
+**スキーマ追加時:** `backend/schemas/`に作成→`__init__.py`でエクスポート→`generator.py`に追加→「API型の整合性チェック」実行
 
 ## CSS/デザインルール
-
 ### サーフェスクラス（必須）
-
 背景色と文字色の組み合わせミスを防ぐため、**サーフェスクラス**を優先的に使用する。
-
 | クラス | 用途 | 背景 | 文字 |
 |--------|------|------|------|
 | `nier-surface-main` | メインエリア | 明るいベージュ | 暗い茶色 |
@@ -92,62 +60,20 @@ cd backend && python scripts/remove-spaces.py
 | `nier-surface-footer` | フッター | 暗い茶色 | 明るいベージュ |
 | `nier-surface-selected` | 選択状態 | 中間ベージュ | 暗い茶色 |
 
-**使用ルール:**
-1. UIコンポーネント（Card, Button等）を優先的に使用する
-2. 直接divを使う場合は `.nier-surface-*` クラスを使用する
-3. `bg-nier-bg-*` と `text-nier-text-*` を直接組み合わせない（組み合わせミスの原因）
-
-**禁止パターン:**
+**使用ルール:** 1.UIコンポーネント優先 2.直接divを使う場合は`.nier-surface-*`クラス 3.`bg-nier-bg-*`と`text-nier-text-*`を直接組み合わせない
 ```tsx
-// NG: 背景と文字を別々に指定（ミスしやすい）
-<div className="bg-nier-bg-header text-nier-text-main">
-
-// OK: サーフェスクラスを使用
-<div className="nier-surface-header">
-
-// OK: コンポーネントを使用
-<Card><CardHeader>...</CardHeader></Card>
+// NG: <div className="bg-nier-bg-header text-nier-text-main">
+// OK: <div className="nier-surface-header">
+// OK: <Card><CardHeader>...</CardHeader></Card>
 ```
 
 ### コンポーネントクラス
+`.nier-card`(カード外枠) `.nier-card-header`(ダーク背景) `.nier-card-body`(パネル背景) `.nier-btn`(標準) `.nier-btn-primary`(プライマリ) `.nier-btn-danger`(危険) `.nier-input`(入力)
 
-| クラス | 用途 |
-|--------|------|
-| `.nier-card` | カード外枠 |
-| `.nier-card-header` | カードヘッダー（ダーク背景） |
-| `.nier-card-body` | カード本体（パネル背景） |
-| `.nier-btn` | 標準ボタン |
-| `.nier-btn-primary` | プライマリボタン |
-| `.nier-btn-danger` | 危険アクションボタン |
-| `.nier-input` | 入力フィールド |
-
-### アクセントカラー（状態表示用）
-
-| 変数 | 用途 |
-|------|------|
-| `--accent-red` | エラー/Critical |
-| `--accent-orange` | 実行中/Warning |
-| `--accent-yellow` | 待機中/Pending |
-| `--accent-green` | 完了/Success |
-| `--accent-blue` | 情報/Info |
+### アクセントカラー
+`--accent-red`(エラー) `--accent-orange`(実行中) `--accent-yellow`(待機) `--accent-green`(完了) `--accent-blue`(情報)
 
 ## API/WebSocket変更時のチェックリスト
-
-APIやWebSocketイベントを変更・追加する際は、以下を必ず確認する。
-
-**バックエンド変更時:**
-1. `backend/schemas/` の型定義を更新
-2. OpenAPIスペック再生成（`10_build_check.bat`で自動実行）
-3. WebSocketイベントを送信している場合、room指定が正しいか確認
-
-**フロントエンド変更時:**
-1. `langgraph-studio/src/services/apiService.ts` の型定義を更新
-2. `langgraph-studio/src/types/websocket.ts` のイベント型を更新（WebSocket関連の場合）
-3. 該当Storeのイベントハンドラを更新
-4. WebSocketServiceの接続処理を確認
-
-**よくあるミス（BUG_CHECKLIST.mdより）:**
-- WebSocket型定義がサーバー側イベントと一致していない（×4）
-- WebSocketイベントハンドラが未接続（×1）
-- WebSocketイベント型にフィールドが不足（×1）
-- API型定義にサーバー側で追加されたフィールドが反映されていない（×2）
+**バックエンド:** 1.`backend/schemas/`更新 2.OpenAPIスペック再生成 3.WebSocket room指定確認
+**フロントエンド:** 1.`apiService.ts`型更新 2.`websocket.ts`イベント型更新 3.Storeハンドラ更新 4.WebSocketService接続確認
+**よくあるミス:** WebSocket型不一致(×4) ハンドラ未接続(×1) イベント型フィールド不足(×1) API型フィールド未反映(×2)

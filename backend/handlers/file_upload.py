@@ -144,19 +144,21 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
                 return jsonify({"error":"ディスク容量が不足しています"}),507
             return jsonify({"error":f"ファイル保存に失敗しました: {e.strerror}"}),500
 
-
         description=request.form.get('description','')
-
-
-        uploaded_file=data_store.create_uploaded_file(
-            project_id=project_id,
-            filename=stored_filename,
-            original_filename=original_filename,
-            mime_type=get_mime_type(original_filename),
-            category=get_category(original_filename),
-            size_bytes=file_size,
-            description=description
-        )
+        try:
+            uploaded_file=data_store.create_uploaded_file(
+                project_id=project_id,
+                filename=stored_filename,
+                original_filename=original_filename,
+                mime_type=get_mime_type(original_filename),
+                category=get_category(original_filename),
+                size_bytes=file_size,
+                description=description
+            )
+        except Exception:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            raise
 
         return jsonify(uploaded_file),201
 
@@ -220,17 +222,21 @@ def register_file_upload_routes(app:Flask,data_store:DataStore,upload_folder:str
                 errors.append({"filename":file.filename,"error":f"ファイル保存失敗: {e.strerror}"})
                 continue
 
-
-            uploaded_file=data_store.create_uploaded_file(
-                project_id=project_id,
-                filename=stored_filename,
-                original_filename=original_filename,
-                mime_type=get_mime_type(original_filename),
-                category=get_category(original_filename),
-                size_bytes=file_size,
-                description=""
-            )
-            results.append(uploaded_file)
+            try:
+                uploaded_file=data_store.create_uploaded_file(
+                    project_id=project_id,
+                    filename=stored_filename,
+                    original_filename=original_filename,
+                    mime_type=get_mime_type(original_filename),
+                    category=get_category(original_filename),
+                    size_bytes=file_size,
+                    description=""
+                )
+                results.append(uploaded_file)
+            except Exception:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                errors.append({"filename":file.filename,"error":"DB登録失敗"})
 
         return jsonify({
             "success":results,
