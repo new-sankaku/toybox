@@ -13,6 +13,8 @@ skills:
       - e2e_test_worker
       - build_worker
       - code_review_worker
+      - architecture_leader
+      - environment_setup_worker
     restrictions:
       max_file_size: 1048576
       max_lines: 2000
@@ -53,6 +55,8 @@ skills:
       - integrator_leader
       - tester_leader
       - reviewer_leader
+      - architecture_leader
+      - environment_setup_worker
     restrictions:
       max_file_size: 1073741824
       require_approval: false
@@ -79,6 +83,8 @@ skills:
       - integrator_leader
       - tester_leader
       - reviewer_leader
+      - architecture_leader
+      - environment_setup_worker
     restrictions:
       max_file_size: 1048576
       require_approval: false
@@ -107,6 +113,7 @@ skills:
       - unit_test_worker
       - integration_test_worker
       - e2e_test_worker
+      - environment_setup_worker
     restrictions:
       timeout: 120
       sandbox_enabled: true
@@ -241,6 +248,52 @@ skills:
       max_context_lines: 5
       max_skipped_detail: 10
 
+  linter_setup:
+    enabled: true
+    description: "Linter設定ファイルを生成・適用します"
+    category: environment
+    allowed_agents:
+      - environment_setup_worker
+      - architecture_leader
+    restrictions:
+      timeout: 60
+
+  build_tool_setup:
+    enabled: true
+    description: "ビルドツールを導入・設定します"
+    category: environment
+    allowed_agents:
+      - environment_setup_worker
+    restrictions:
+      timeout: 120
+
+  dev_server_setup:
+    enabled: true
+    description: "開発サーバーを構築します（ホットリロード等）"
+    category: environment
+    allowed_agents:
+      - environment_setup_worker
+    restrictions:
+      timeout: 180
+
+  ci_cd_setup:
+    enabled: true
+    description: "CI/CD設定ファイルを生成します（GitHub Actions等）"
+    category: environment
+    allowed_agents:
+      - environment_setup_worker
+    restrictions:
+      timeout: 60
+
+  skill_register:
+    enabled: true
+    description: "品質管理Serviceにスキルを動的登録します"
+    category: environment
+    allowed_agents:
+      - environment_setup_worker
+    restrictions:
+      timeout: 30
+
   file_search:
     enabled: true
     description: "ファイル名でファイルを検索します"
@@ -268,6 +321,7 @@ skills:
       - integrator_leader
       - tester_leader
       - reviewer_leader
+      - architecture_leader
     restrictions:
       timeout: 30
       sandbox_enabled: true
@@ -444,6 +498,32 @@ agent_skill_mapping:
     - code_lint
     - code_search
     - file_search
+
+  architecture_leader:
+    - file_read
+    - file_write
+    - file_edit
+    - file_list
+    - project_analyze
+    - code_search
+    - file_search
+    - web_fetch
+    - linter_setup
+
+  environment_setup_worker:
+    - file_read
+    - file_write
+    - file_edit
+    - file_list
+    - bash_execute
+    - project_analyze
+    - code_search
+    - file_search
+    - linter_setup
+    - build_tool_setup
+    - dev_server_setup
+    - ci_cd_setup
+    - skill_register
 
   research_worker:
     - file_read

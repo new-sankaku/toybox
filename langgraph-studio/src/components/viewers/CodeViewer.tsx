@@ -98,7 +98,7 @@ export function CodeViewer({
   <div className={cn('code-viewer border border-nier-border-light',className)}>
    {/*Header*/}
    {filename&&(
-    <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2">
+    <div className="flex items-center justify-between nier-surface-header px-4 py-2">
      <div className="flex items-center gap-3">
       <span className="text-nier-small tracking-nier">{filename}</span>
       <span className="text-nier-caption text-nier-text-header/70">

@@ -3,6 +3,7 @@ import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import type{Checkpoint}from'@/types/checkpoint'
 import{Clock,FileText,Code}from'lucide-react'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 
 interface CheckpointCardProps{
  checkpoint:Checkpoint
@@ -13,33 +14,27 @@ interface CheckpointCardProps{
 const statusConfig={
  pending:{
   color:'bg-nier-border-dark',
-  text:'承認待ち',
   pulse:false
  },
  approved:{
   color:'bg-nier-border-dark',
-  text:'承認済み',
   pulse:false
  },
  rejected:{
   color:'bg-nier-border-dark',
-  text:'却下',
   pulse:false
  },
  revision_requested:{
   color:'bg-nier-border-dark',
-  text:'修正要求',
   pulse:false
  }
 }
 
-const typeConfig:Record<string,{icon:typeof FileText;label:string}>={
- concept_review:{icon:FileText,label:'コンセプト'},
- design_review:{icon:FileText,label:'デザイン'},
- scenario_review:{icon:FileText,label:'シナリオ'},
- character_review:{icon:FileText,label:'キャラクター'},
- world_review:{icon:FileText,label:'ワールド'},
- task_review:{icon:Code,label:'タスク分割'}
+const typeIconMap:Record<string,typeof FileText>={
+ code_review:Code,
+ ui_integration_review:Code,
+ unit_test_review:Code,
+ integration_test_review:Code
 }
 
 export function CheckpointCard({
@@ -47,9 +42,11 @@ export function CheckpointCard({
  onSelect,
  isSelected=false
 }:CheckpointCardProps):JSX.Element{
+ const{getCheckpointTypeLabel,getApprovalStatusLabel}=useUIConfigStore()
  const status=statusConfig[checkpoint.status]
- const type=typeConfig[checkpoint.type]||{icon:FileText,label:checkpoint.type}
- const TypeIcon=type.icon
+ const TypeIcon=typeIconMap[checkpoint.type]||FileText
+ const typeLabel=getCheckpointTypeLabel(checkpoint.type)
+ const statusText=getApprovalStatusLabel(checkpoint.status)
 
  const getWaitingTime=()=>{
   const created=new Date(checkpoint.createdAt)
@@ -86,7 +83,7 @@ export function CheckpointCard({
        <div className="flex items-center gap-1.5 mb-0.5">
         <TypeIcon size={12} className="text-nier-text-light"/>
         <span className="text-nier-caption text-nier-text-light tracking-nier">
-         {type.label}
+         {typeLabel}
         </span>
        </div>
        <h3 className="text-nier-small font-medium text-nier-text-main">
@@ -107,7 +104,7 @@ export function CheckpointCard({
        </span>
 )}
       <div className="px-1.5 py-0.5 text-nier-caption tracking-nier bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
-       {status.text}
+       {statusText}
       </div>
       <Button
        variant="ghost"

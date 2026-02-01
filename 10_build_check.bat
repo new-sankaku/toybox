@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 > /dev/null
+chcp 65001 >nul
 echo ========================================
 echo   Build Check - All Validations
 echo ========================================
@@ -7,12 +7,25 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/5] Backend - Syntax Check...
+echo [1/12] Check for 'nul' files...
 echo.
-cd /d "%~dp0\backend"
+cd /d "%~dp0backend"
 call venv\Scripts\activate.bat
-python -m py_compile server.py
+python scripts/build_checks.py nul
 if %errorlevel% neq 0 (
+    echo.
+    echo Error: Delete 'nul' files and retry.
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [2/12] Backend - Syntax Check (all .py files)...
+echo.
+python scripts/build_checks.py syntax
+if %errorlevel% neq 0 (
+    echo.
     echo Error: Backend syntax check failed
     pause
     exit /b 1
@@ -20,7 +33,32 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [2/5] Backend - OpenAPI Spec Generation...
+echo [3/12] Backend - print() usage check...
+echo.
+python scripts/build_checks.py print
+if errorlevel 1 goto print_error
+echo OK
+echo.
+goto print_done
+:print_error
+echo.
+echo Error: Use get_logger instead of print
+pause
+exit /b 1
+:print_done
+
+echo [4/12] Backend - Ruff linter...
+echo.
+python -m ruff check . --exclude venv,__pycache__,tests,seeds,scripts --select E9,F63,F7,F82
+if %errorlevel% neq 0 (
+    echo Error: Ruff check failed - critical errors found
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [5/12] Backend - OpenAPI Spec Generation...
 echo.
 python scripts/generate_openapi.py
 if %errorlevel% neq 0 (
@@ -30,7 +68,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [3/5] Frontend - TypeScript Type Generation...
+echo [6/12] Frontend - TypeScript Type Generation...
 echo.
 cd /d "%~dp0\langgraph-studio"
 call npm run generate-types
@@ -41,7 +79,22 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [4/5] Frontend - ESLint...
+echo [7/12] API Type Consistency Check...
+echo.
+set "OPENAPI_JSON=%~dp0langgraph-studio\src\types\openapi.json"
+set "API_GENERATED=%~dp0langgraph-studio\src\types\api-generated.ts"
+for %%A in ("%OPENAPI_JSON%") do set "OPENAPI_TIME=%%~tA"
+for %%A in ("%API_GENERATED%") do set "GENERATED_TIME=%%~tA"
+if "%OPENAPI_TIME%" gtr "%GENERATED_TIME%" (
+    echo Error: openapi.json is newer than api-generated.ts
+    echo Run: npm run generate-types
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [8/12] Frontend - ESLint...
 echo.
 call npm run lint
 if %errorlevel% neq 0 (
@@ -51,7 +104,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [5/5] Frontend - TypeScript Type Check...
+echo [9/12] Frontend - TypeScript Type Check...
 echo.
 call npm run typecheck
 if %errorlevel% neq 0 (
@@ -61,8 +114,41 @@ if %errorlevel% neq 0 (
 )
 echo.
 
+echo [10/12] Frontend - Surface class usage...
+echo.
+node scripts/build_checks.cjs surface
+if %errorlevel% neq 0 (
+    echo Error: Use nier-surface-* instead of bg/text combination
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [11/12] Frontend - Color emoji check...
+echo.
+node scripts/build_checks.cjs emoji
+if %errorlevel% neq 0 (
+    echo Error: Use Lucide icons instead of color emojis
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [12/12] Frontend - Inline style check...
+echo.
+node scripts/build_checks.cjs inline-style
+if %errorlevel% neq 0 (
+    echo Error: Use Tailwind classes instead of inline styles
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
 echo ========================================
-echo   All checks passed!
+echo   All 12 checks passed!
 echo ========================================
 echo.
 echo Note: Run "npm run build" for full build check before commit.

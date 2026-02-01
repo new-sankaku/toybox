@@ -91,6 +91,7 @@ class Asset(Base):
  __tablename__="assets"
  id=Column(String(50),primary_key=True)
  project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ agent_id=Column(String(50),ForeignKey("agents.id"),nullable=True)
  name=Column(String(255))
  type=Column(String(50))
  agent=Column(String(100))
@@ -238,4 +239,30 @@ class LocalProviderConfig(Base):
  is_validated=Column(Boolean,default=False)
  last_validated_at=Column(DateTime)
  created_at=Column(DateTime,default=datetime.now)
+ updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+
+class CostHistory(Base):
+ __tablename__="cost_history"
+ id=Column(String(50),primary_key=True)
+ project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ agent_id=Column(String(50),nullable=True)
+ agent_type=Column(String(50))
+ service_type=Column(String(50),nullable=False)
+ provider_id=Column(String(50))
+ model_id=Column(String(100))
+ input_tokens=Column(Integer,default=0)
+ output_tokens=Column(Integer,default=0)
+ unit_count=Column(Integer,default=1)
+ cost_usd=Column(String(20))
+ recorded_at=Column(DateTime,default=datetime.now)
+ metadata_=Column("metadata",JSON)
+
+class GlobalCostSettings(Base):
+ __tablename__="global_cost_settings"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ global_enabled=Column(Boolean,default=True)
+ global_monthly_limit=Column(String(20),default="100.0")
+ alert_threshold=Column(Integer,default=80)
+ stop_on_budget_exceeded=Column(Boolean,default=False)
+ services=Column(JSON)
  updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)

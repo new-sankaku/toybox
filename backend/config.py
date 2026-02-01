@@ -6,7 +6,7 @@ from typing import Optional
 @dataclass
 class AgentConfig:
  mode:str="testdata"
- anthropic_api_key:Optional[str]=None
+ openrouter_api_key:Optional[str]=None
  model:str=""
  max_tokens:int=4096
 
@@ -46,7 +46,7 @@ def load_config()->Config:
  return Config(
   agent=AgentConfig(
    mode=agent_mode,
-   anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+   openrouter_api_key=os.environ.get("OPENROUTER_API_KEY"),
    model=os.environ.get("AGENT_MODEL",""),
    max_tokens=int(os.environ.get("AGENT_MAX_TOKENS","4096")),
   ),

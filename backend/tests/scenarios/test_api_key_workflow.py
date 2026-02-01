@@ -68,9 +68,9 @@ class TestProjectAiConfigWorkflow:
   repo=ProjectAiConfigRepository(db_session)
 
   configs=[
-   ("concept","anthropic","claude-sonnet-4",{"temperature":0.7}),
-   ("design","anthropic","claude-sonnet-4",{"temperature":0.5}),
-   ("code","openai","gpt-4-turbo",{"temperature":0.3}),
+   ("concept","openrouter","anthropic/claude-sonnet-4",{"temperature":0.7}),
+   ("design","openrouter","anthropic/claude-sonnet-4",{"temperature":0.5}),
+   ("code","openrouter","openai/gpt-4o",{"temperature":0.3}),
    ("test","mock","mock-model",None),
   ]
 
@@ -87,9 +87,9 @@ class TestProjectAiConfigWorkflow:
   assert len(project_configs)==4
 
   concept_config=repo.get(sample_project.id,"concept")
-  assert concept_config.provider_id=="anthropic"
+  assert concept_config.provider_id=="openrouter"
   assert concept_config.custom_params["temperature"]==0.7
 
-  repo.save(sample_project.id,"concept","deepseek","deepseek-chat",{})
+  repo.save(sample_project.id,"concept","openrouter","deepseek/deepseek-chat",{})
   updated=repo.get(sample_project.id,"concept")
-  assert updated.provider_id=="deepseek"
+  assert updated.provider_id=="openrouter"

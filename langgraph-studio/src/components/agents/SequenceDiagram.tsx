@@ -18,14 +18,6 @@ const TIMELINE_MSG_STYLE:Record<string,{text:string;marker:string;dashed?:boolea
  result:{text:'text-nier-text-light',marker:'bg-nier-text-light',dashed:true},
 }
 
-function formatTokens(tokens:SequenceMessage['tokens']):string{
- if(!tokens)return''
- const parts:string[]=[]
- if(tokens.input)parts.push(`in:${tokens.input.toLocaleString()}`)
- if(tokens.output)parts.push(`out:${tokens.output.toLocaleString()}`)
- return parts.join(' / ')
-}
-
 function formatDuration(ms:number|null):string{
  if(!ms)return''
  if(ms<1000)return`${ms}ms`
@@ -35,10 +27,12 @@ function formatDuration(ms:number|null):string{
 function formatTimestamp(timestamp:string|null):string{
  if(!timestamp)return''
  const d=new Date(timestamp)
+ const mo=String(d.getMonth()+1).padStart(2,'0')
+ const dd=String(d.getDate()).padStart(2,'0')
  const hh=String(d.getHours()).padStart(2,'0')
  const mm=String(d.getMinutes()).padStart(2,'0')
  const ss=String(d.getSeconds()).padStart(2,'0')
- return`${hh}:${mm}:${ss}`
+ return`${mo}/${dd} ${hh}:${mm}:${ss}`
 }
 
 interface TimelineNode{
@@ -99,25 +93,27 @@ function buildTimelineStructure(messages:SequenceMessage[]):TimelineNode[]{
 function TimelineRow({
  node,
  onMessageClick,
- isLast
+ isLast,
+ labelMap
 }:{
  node:TimelineNode
  onMessageClick?:(msg:SequenceMessage)=>void
  isLast:boolean
+ labelMap:Map<string,string>
 }){
  const{message:msg,depth,pairedResponse}=node
  const style=TIMELINE_MSG_STYLE[msg.type]||TIMELINE_MSG_STYLE.request
  const timeStr=formatTimestamp(msg.timestamp)
  const durationStr=formatDuration(msg.durationMs||(pairedResponse?.durationMs??null))
- const tokens=pairedResponse?.tokens||msg.tokens
- const tokenStr=formatTokens(tokens)
  const indentPx=depth*16
  const clickable=!!msg.sourceId&&!!onMessageClick
+ const fromLabel=labelMap.get(msg.from)||msg.from
+ const toLabel=labelMap.get(msg.to)||msg.to
  return(
   <div
    className={cn(
     'grid gap-2 py-1.5 px-2',
-    'grid-cols-[70px_1fr]',
+    'grid-cols-[100px_1fr]',
     clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors',
     !isLast&&'border-b border-nier-border-light'
 )}
@@ -126,9 +122,9 @@ function TimelineRow({
   >
    <div className="flex flex-col items-start">
     <span className="text-[11px] text-nier-text-light font-mono">{timeStr}</span>
-    {(tokenStr||durationStr)&&(
+    {durationStr&&(
      <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
-      {[tokenStr,durationStr].filter(Boolean).join(' ')}
+      {durationStr}
      </span>
 )}
    </div>
@@ -136,13 +132,13 @@ function TimelineRow({
     <div className="flex items-center gap-2">
      <div className={cn('w-1 h-4 rounded-sm flex-shrink-0',style.marker,style.dashed&&'opacity-50')}/>
      <span className={cn('text-[11px] font-medium',style.text)}>
-      {msg.from}
+      {fromLabel}
       <span className="text-nier-text-light mx-1">→</span>
-      {msg.to}
+      {toLabel}
      </span>
     </div>
-    <div className="ml-3 text-[11px] text-nier-text-main">{msg.label}</div>
-    {pairedResponse&&pairedResponse.label&&(
+    {msg.label&&<div className="ml-3 text-[11px] text-nier-text-main">{msg.label}</div>}
+    {pairedResponse?.label&&(
      <div className="ml-3 text-[10px] text-nier-text-light opacity-80">
       ← {pairedResponse.label.length>80?pairedResponse.label.slice(0,80)+'...':pairedResponse.label}
      </div>
@@ -155,26 +151,29 @@ function TimelineRow({
 function TimelineGroup({
  node,
  onMessageClick,
- isLast
+ isLast,
+ labelMap
 }:{
  node:TimelineNode
  onMessageClick?:(msg:SequenceMessage)=>void
  isLast:boolean
+ labelMap:Map<string,string>
 }){
  const[expanded,setExpanded]=useState(true)
  const{message:msg,depth,children}=node
  const style=TIMELINE_MSG_STYLE[msg.type]||TIMELINE_MSG_STYLE.delegation
  const timeStr=formatTimestamp(msg.timestamp)
  const durationStr=formatDuration(msg.durationMs)
- const tokenStr=formatTokens(msg.tokens)
  const indentPx=depth*16
  const hasClickHandler=!!msg.sourceId&&!!onMessageClick
+ const fromLabel=labelMap.get(msg.from)||msg.from
+ const toLabel=labelMap.get(msg.to)||msg.to
  return(
   <div className={cn(!isLast&&'border-b border-nier-border-light')}>
    <div
     className={cn(
      'grid gap-2 py-1.5 px-2',
-     'grid-cols-[70px_1fr]',
+     'grid-cols-[100px_1fr]',
      'hover:bg-nier-bg-main/40 transition-colors cursor-pointer'
 )}
     style={{paddingLeft:`${8+indentPx}px`}}
@@ -182,9 +181,9 @@ function TimelineGroup({
    >
     <div className="flex flex-col items-start">
      <span className="text-[11px] text-nier-text-light font-mono">{timeStr}</span>
-     {(tokenStr||durationStr)&&(
+     {durationStr&&(
       <span className="text-[9px] text-nier-text-light font-mono opacity-70 whitespace-nowrap">
-       {[tokenStr,durationStr].filter(Boolean).join(' ')}
+       {durationStr}
       </span>
 )}
     </div>
@@ -196,9 +195,9 @@ function TimelineGroup({
       }
       <div className={cn('w-1 h-4 rounded-sm flex-shrink-0',style.marker)}/>
       <span className={cn('text-[11px] font-medium',style.text)}>
-       {msg.from}
+       {fromLabel}
        <span className="text-nier-text-light mx-1">→</span>
-       {msg.to}
+       {toLabel}
       </span>
       {hasClickHandler&&(
        <button
@@ -207,7 +206,7 @@ function TimelineGroup({
        >詳細</button>
 )}
      </div>
-     <div className="ml-5 text-[11px] text-nier-text-main">{msg.label}</div>
+     {msg.label&&<div className="ml-5 text-[11px] text-nier-text-main">{msg.label}</div>}
     </div>
    </div>
    {expanded&&children.length>0&&(
@@ -218,6 +217,7 @@ function TimelineGroup({
        node={child}
        onMessageClick={onMessageClick}
        isLast={idx===children.length-1}
+       labelMap={labelMap}
       />
 ))}
     </div>
@@ -229,26 +229,36 @@ function TimelineGroup({
 function TimelineNodeRenderer({
  node,
  onMessageClick,
- isLast
+ isLast,
+ labelMap
 }:{
  node:TimelineNode
  onMessageClick?:(msg:SequenceMessage)=>void
  isLast:boolean
+ labelMap:Map<string,string>
 }){
  if(node.isGroupParent){
-  return<TimelineGroup node={node} onMessageClick={onMessageClick} isLast={isLast}/>
+  return<TimelineGroup node={node} onMessageClick={onMessageClick} isLast={isLast} labelMap={labelMap}/>
  }
  return(
   <TimelineRow
    node={node}
    onMessageClick={onMessageClick}
    isLast={isLast}
+   labelMap={labelMap}
   />
 )
 }
 
 export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.Element{
- const{messages}=data
+ const{messages,participants}=data
+ const labelMap=useMemo(()=>{
+  const m=new Map<string,string>()
+  for(const p of participants){
+   m.set(p.id,p.label)
+  }
+  return m
+ },[participants])
  const timeline=useMemo(()=>buildTimelineStructure(messages),[messages])
  if(!messages.length){
   return(
@@ -268,13 +278,14 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
      {totalDur?` / ${totalDur}`:''}
     </div>
 )}
-   <div className="max-h-[400px] overflow-y-auto">
+   <div className="max-h-sequence-panel overflow-y-auto">
     {timeline.map((node,idx)=>(
      <TimelineNodeRenderer
       key={node.message.id}
       node={node}
       onMessageClick={onMessageClick}
       isLast={idx===timeline.length-1}
+      labelMap={labelMap}
      />
 ))}
    </div>

@@ -19,6 +19,15 @@ def register_ai_provider_routes(app:Flask):
   providers=list_providers()
   return jsonify(providers)
 
+ @app.route('/api/ai-service-types',methods=['GET'])
+ def get_ai_service_types():
+  """Get service types and labels"""
+  from ai_config import get_service_types,get_service_labels
+  return jsonify({
+   "types":get_service_types(),
+   "labels":get_service_labels()
+  })
+
  @app.route('/api/ai-providers/<provider_id>',methods=['GET'])
  def get_ai_provider(provider_id:str):
   """Get specific AI provider details"""

@@ -144,6 +144,9 @@ class AgentExecutionService:
      "projectId":project_id,
      "agent":self._data_store.get_agent(agent_id)
     },project_id)
+    started_agents=self._data_store.start_next_agents(project_id)
+    if started_agents:
+     self._logger.info(f"Started {len(started_agents)} next agents after {agent_id} completed")
     return {"success":True,"output":output.output}
    else:
     self._data_store.update_agent(agent_id,{

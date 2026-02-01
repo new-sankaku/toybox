@@ -48,13 +48,18 @@ class ProviderRegistry:
  @classmethod
  def list_providers(cls)->List[Dict[str,Any]]:
   """登録済みプロバイダー一覧"""
+  from ai_config import get_providers as get_yaml_providers
+  yaml_providers=get_yaml_providers()
   result=[]
   for provider_id,provider_class in cls._providers.items():
    temp=provider_class()
+   yaml_data=yaml_providers.get(provider_id,{})
+   service_types=yaml_data.get('service_types',[])
    result.append({
     "id":temp.provider_id,
     "name":temp.display_name,
-    "models":[m.id for m in temp.get_available_models()]
+    "models":[m.id for m in temp.get_available_models()],
+    "serviceTypes":service_types
    })
   return result
 
@@ -84,19 +89,13 @@ def list_providers()->List[Dict[str,Any]]:
 
 def register_all_providers()->None:
  """全プロバイダーを登録"""
- from .anthropic import AnthropicProvider
- from .mock import MockProvider
- from .zhipu import ZhipuProvider
- from .deepseek import DeepSeekProvider
+ from .openrouter import OpenRouterProvider
  from .local_comfyui import LocalComfyUIProvider
  from .local_audiocraft import LocalAudioCraftProvider
  from .local_coqui_tts import LocalCoquiTTSProvider
  from .claude_code import ClaudeCodeProvider
 
- ProviderRegistry.register(AnthropicProvider)
- ProviderRegistry.register(MockProvider)
- ProviderRegistry.register(ZhipuProvider)
- ProviderRegistry.register(DeepSeekProvider)
+ ProviderRegistry.register(OpenRouterProvider)
  ProviderRegistry.register(LocalComfyUIProvider)
  ProviderRegistry.register(LocalAudioCraftProvider)
  ProviderRegistry.register(LocalCoquiTTSProvider)

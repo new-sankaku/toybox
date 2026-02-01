@@ -31,6 +31,14 @@
     --border-light: rgba(69, 65, 56, 0.2);
     --border-dark: rgba(69, 65, 56, 0.4);
 
+    /* Sidebar - Flexible widths */
+    --sidebar-width-collapsed: 3vw;
+    --sidebar-width-expanded: 14vw;
+
+    /* Log/Sequence Panels - Flexible heights */
+    --log-panel-max-height: clamp(200px, 40vh, 500px);
+    --sequence-panel-max-height: clamp(200px, 45vh, 600px);
+
     /* Spacing - Compact defaults */
     --space-xs: 2px;
     --space-sm: 4px;
@@ -179,6 +187,60 @@
   }
 
   .nier-surface-selected {
+    @apply bg-nier-bg-selected text-nier-text-main;
+  }
+
+  /* ===== Status Badge Classes =====
+   * ステータス表示用（ボタンと区別するため控えめなデザイン）
+   * - 背景色なし（透明）
+   * - 下線＋文字色で状態を表現
+   * - ホバー効果なし
+   * - 赤（未対応）→ オレンジ（処理中）→ 緑（完了）
+   */
+  .nier-status-badge {
+    @apply px-1.5 py-0.5 text-[10px] tracking-nier bg-transparent border-b-2;
+  }
+
+  .nier-status-badge-pending {
+    @apply nier-status-badge text-nier-accent-red border-b-nier-accent-red;
+  }
+
+  .nier-status-badge-approved {
+    @apply nier-status-badge text-nier-accent-green border-b-nier-accent-green;
+  }
+
+  .nier-status-badge-rejected {
+    @apply nier-status-badge text-nier-accent-red border-b-nier-accent-red;
+  }
+
+  .nier-status-badge-running {
+    @apply nier-status-badge text-nier-accent-orange border-b-nier-accent-orange;
+  }
+
+  .nier-status-badge-paused {
+    @apply nier-status-badge text-nier-accent-yellow border-b-nier-accent-yellow;
+  }
+
+  .nier-status-badge-completed {
+    @apply nier-status-badge text-nier-accent-green border-b-nier-accent-green;
+  }
+
+  .nier-status-badge-failed {
+    @apply nier-status-badge text-nier-accent-red border-b-nier-accent-red;
+  }
+
+  .nier-status-badge-neutral {
+    @apply nier-status-badge text-nier-text-light border-b-nier-border-dark;
+  }
+
+  /* Tab Toggle - CardHeader内のタブ切り替え用 */
+  .nier-tab-toggle {
+    @apply px-3 py-1 text-nier-caption tracking-nier transition-colors
+           bg-transparent text-nier-text-header/70
+           hover:bg-white/10;
+  }
+
+  .nier-tab-toggle.active {
     @apply bg-nier-bg-selected text-nier-text-main;
   }
 
@@ -337,6 +399,9 @@
     padding-left: clamp(0.5rem, 1.5vw, 1rem);
     padding-right: clamp(0.5rem, 1.5vw, 1rem);
     font-size: clamp(10px, 1.2vw, 13px);
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
   }
 
   .nier-tab span {
@@ -396,6 +461,20 @@
 
   .nier-page-subtitle {
     @apply text-nier-small text-nier-text-light leading-none;
+  }
+
+  /* Log Panel - Flexible height */
+  .nier-log-panel {
+    max-height: var(--log-panel-max-height);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Sequence Panel - Flexible height */
+  .nier-sequence-panel {
+    max-height: var(--sequence-panel-max-height);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 

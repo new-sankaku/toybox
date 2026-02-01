@@ -60,6 +60,8 @@ export const AGENT_MODEL_MAP:Record<AgentType,string>={
  worker_code:SPIRIT_TYPES[4],
  worker_asset:SPIRIT_TYPES[0],
  concept:SPIRIT_TYPES[0],
+ architecture:SPIRIT_TYPES[1],
+ environment_setup:SPIRIT_TYPES[2],
  task_split_1:SPIRIT_TYPES[1],
  concept_detail:SPIRIT_TYPES[2],
  scenario:SPIRIT_TYPES[3],

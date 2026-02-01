@@ -61,7 +61,7 @@ DESCRIPTIONS={
  "test_registry.py::TestProviderRegistry::test_list_providers":"list_providers()→[{'id':'mock',...}]形式のリストを返す",
  "test_registry.py::TestProviderRegistry::test_clear_cache":"clear_cache()で_instancesが空になる",
  "test_registry.py::TestProviderRegistry::test_get_fresh":"get_fresh()→キャッシュと異なる新規インスタンスを返す",
- "test_registry.py::TestRegisterAllProviders::test_all_providers_registered":"register_all_providers()でanthropicからdeepseekまで7種類が登録される",
+ "test_registry.py::TestRegisterAllProviders::test_all_providers_registered":"register_all_providers()でmockとopenrouterが登録される",
  "test_registry.py::TestShortcuts::test_get_provider_shortcut":"get_provider('mock')→ProviderRegistry.get('mock')と同じ結果",
  "test_registry.py::TestShortcuts::test_list_providers_shortcut":"list_providers()→ProviderRegistry.list_providers()と同じ結果",
  "test_api_key.py::TestApiKeyRepository::test_save_new_key":"save('anthropic','sk-test-key-12345')→key_hint='sk-...345',is_valid=False",

@@ -1,6 +1,6 @@
 import{useActivityFeedStore,type ActivityType}from'@/stores/activityFeedStore'
 import{cn}from'@/lib/utils'
-import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle}from'lucide-react'
+import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle,DollarSign}from'lucide-react'
 
 const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_started:{icon:Play,color:'text-nier-accent-orange'},
@@ -13,7 +13,9 @@ const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  phase_changed:{icon:ArrowRight,color:'text-nier-accent-blue'},
  agent_waiting_response:{icon:MessageCircle,color:'text-nier-accent-yellow'},
  agent_waiting_provider:{icon:Clock,color:'text-nier-accent-blue'},
- agent_progress:{icon:Play,color:'text-nier-accent-orange'}
+ agent_progress:{icon:Play,color:'text-nier-accent-orange'},
+ intervention_agent_question:{icon:MessageCircle,color:'text-nier-accent-orange'},
+ budget_warning:{icon:DollarSign,color:'text-nier-accent-orange'}
 }
 
 function formatTimestamp(ts:string):string{
@@ -42,7 +44,7 @@ export function ActivityFeed():JSX.Element{
     const Icon=config.icon
     return(
      <div key={event.id} className="flex items-start gap-1.5 px-1 py-1 text-[11px] animate-nier-fade-in">
-      <span className="text-nier-text-light flex-shrink-0 w-[52px]">
+      <span className="text-nier-text-light flex-shrink-0" style={{width:'clamp(40px,4vw,60px)'}}>
        {formatTimestamp(event.timestamp)}
       </span>
       <Icon size={12} className={cn('flex-shrink-0 mt-0.5',config.color)}/>

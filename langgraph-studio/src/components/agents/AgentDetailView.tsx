@@ -231,7 +231,6 @@ export default function AgentDetailView({
      <AgentLogStreaming
       logs={logs}
       isStreaming={agent.status==='running'}
-      maxHeight="600px"
      />
 
      {/*Error Details*/}

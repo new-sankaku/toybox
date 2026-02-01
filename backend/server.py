@@ -27,6 +27,9 @@ from handlers.brushup import register_brushup_routes
 from handlers.trace import register_trace_routes
 from handlers.recovery import register_recovery_routes
 from handlers.openapi import register_openapi_routes
+from handlers.system_prompt import register_system_prompt_routes
+from handlers.global_cost_settings import register_global_cost_settings_routes
+from handlers.cost_reports import register_cost_reports_routes
 from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
@@ -129,6 +132,9 @@ def create_app():
     register_trace_routes(app,data_store,sio)
     register_recovery_routes(app,data_store)
     register_openapi_routes(app)
+    register_system_prompt_routes(app,data_store)
+    register_global_cost_settings_routes(app,sio)
+    register_cost_reports_routes(app)
 
     @app.route('/health')
     def health():

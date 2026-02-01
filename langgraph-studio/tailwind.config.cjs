@@ -89,7 +89,13 @@ module.exports = {
         'nier-sm': '8px',
         'nier-md': '16px',
         'nier-lg': '24px',
-        'nier-xl': '32px'
+        'nier-xl': '32px',
+        'sidebar-collapsed': 'var(--sidebar-width-collapsed)',
+        'sidebar-expanded': 'var(--sidebar-width-expanded)'
+      },
+      maxHeight: {
+        'log-panel': 'var(--log-panel-max-height)',
+        'sequence-panel': 'var(--sequence-panel-max-height)'
       }
     }
   },

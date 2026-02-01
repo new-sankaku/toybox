@@ -4,6 +4,7 @@ import{useProjectStore}from'@/stores/projectStore'
 import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
 import{useAssetStore}from'@/stores/assetStore'
+import{useInterventionStore}from'@/stores/interventionStore'
 import{useMetricsStore}from'@/stores/metricsStore'
 import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
 import{useToastStore}from'@/stores/toastStore'
@@ -11,12 +12,25 @@ import{useActivityFeedStore}from'@/stores/activityFeedStore'
 import{useSpeechStore}from'@/stores/speechStore'
 import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
+import type{Intervention}from'@/types/intervention'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
 import type{ApiAsset}from'@/services/apiService'
 
 function getAgentDisplayName(agent?:Agent):string{
  if(!agent)return'不明なエージェント'
  return(agent.metadata?.displayName as string)||agent.type
+}
+
+interface BudgetWarningStatus{
+ current_usage:number
+ monthly_limit:number
+ remaining:number
+ usage_percent:number
+ alert_threshold:number
+ is_over_budget:boolean
+ is_warning:boolean
+ stop_on_budget_exceeded:boolean
+ global_enabled:boolean
 }
 
 interface ServerToClientEvents{
@@ -47,11 +61,17 @@ interface ServerToClientEvents{
  'checkpoint:resolved':(data:{checkpoint:Checkpoint;checkpointId?:string;agentId?:string;agentStatus?:string})=>void
  'asset:created':(data:{projectId:string;asset:ApiAsset;autoApproved?:boolean})=>void
  'asset:updated':(data:{projectId:string;asset:ApiAsset;autoApproved?:boolean})=>void
+ 'intervention:created':(data:{interventionId:string;projectId:string;intervention:Intervention})=>void
+ 'intervention:acknowledged':(data:{interventionId:string;projectId:string;intervention:Intervention})=>void
+ 'intervention:processed':(data:{interventionId:string;projectId:string;intervention:Intervention})=>void
+ 'intervention:deleted':(data:{interventionId:string;projectId:string})=>void
+ 'intervention:response_added':(data:{interventionId:string;projectId:string;intervention:Intervention;sender:'agent'|'operator';agentId?:string})=>void
  'project:updated':(data:{projectId:string;updates:Partial<Project>})=>void
  'phase:changed':(data:{projectId:string;phase:PhaseNumber;phaseName:string})=>void
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
  'navigator:message':(data:{speaker:string;text:string;priority:MessagePriority;source:'server'})=>void
  'agent:speech':(data:{agentId:string;projectId:string;message:string;source:'llm'|'pool';timestamp:string})=>void
+ 'budget_warning':(data:{type:string;status:BudgetWarningStatus})=>void
 }
 
 interface ClientToServerEvents{
@@ -329,6 +349,45 @@ class WebSocketService{
    }
   })
 
+  this.socket.on('intervention:created',(data)=>{
+   console.log('[WS] Intervention created:',data.interventionId)
+   if(data.intervention){
+    useInterventionStore.getState().addIntervention(data.intervention)
+   }
+  })
+
+  this.socket.on('intervention:acknowledged',(data)=>{
+   console.log('[WS] Intervention acknowledged:',data.interventionId)
+   if(data.intervention){
+    useInterventionStore.getState().updateIntervention(data.interventionId,data.intervention)
+   }
+  })
+
+  this.socket.on('intervention:processed',(data)=>{
+   console.log('[WS] Intervention processed:',data.interventionId)
+   if(data.intervention){
+    useInterventionStore.getState().updateIntervention(data.interventionId,data.intervention)
+   }
+  })
+
+  this.socket.on('intervention:deleted',(data)=>{
+   console.log('[WS] Intervention deleted:',data.interventionId)
+   useInterventionStore.getState().removeIntervention(data.interventionId)
+  })
+
+  this.socket.on('intervention:response_added',(data)=>{
+   console.log('[WS] Intervention response added:',data.interventionId,'sender:',data.sender)
+   if(data.intervention){
+    useInterventionStore.getState().updateIntervention(data.interventionId,data.intervention)
+   }
+   if(data.sender==='agent'){
+    const agent=useAgentStore.getState().agents.find(a=>a.id===data.agentId)
+    const name=getAgentDisplayName(agent)
+    useToastStore.getState().addToast('warning',`${name} からの連絡があります`)
+    useActivityFeedStore.getState().addEvent('intervention_agent_question',name,`${name} から質問が届きました`,data.agentId)
+   }
+  })
+
   this.socket.on('project:updated',({projectId,updates})=>{
    console.log('[WS] Project updated:',projectId)
    useProjectStore.getState().updateProject(projectId,updates)
@@ -353,6 +412,16 @@ class WebSocketService{
   this.socket.on('navigator:message',({speaker,text,priority})=>{
    console.log('[WS] Navigator message received:',speaker,text.substring(0,50)+'...')
    useNavigatorStore.getState().showServerMessage(speaker,text,priority)
+  })
+
+  this.socket.on('budget_warning',(data)=>{
+   console.log('[WS] Budget warning received:',data.type)
+   if(data.type==='budget_exceeded'){
+    useToastStore.getState().addToast('error',`予算を超過しました ($${data.status.current_usage.toFixed(2)}/$${data.status.monthly_limit.toFixed(2)})`)
+   }else if(data.type==='budget_warning'||data.type==='threshold_warning'){
+    useToastStore.getState().addToast('warning',`予算警告: ${data.status.usage_percent.toFixed(1)}%使用中`)
+   }
+   useActivityFeedStore.getState().addEvent('budget_warning','System',`予算使用率: ${data.status.usage_percent.toFixed(1)}%`)
   })
  }
 

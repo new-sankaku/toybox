@@ -157,47 +157,61 @@ export default function CostView():JSX.Element{
 )
  }
 
- const renderGroupTable=(data:ReturnType<typeof createGroupedData>,title:string)=>(
-  <Card className="flex-1 flex flex-col overflow-hidden">
-   <CardHeader>
-    <DiamondMarker>{title}</DiamondMarker>
-   </CardHeader>
-   <CardContent className="p-2 flex-1 overflow-y-auto">
-    {loading&&data.length===0?(
-     <div className="text-nier-text-light text-nier-small">読み込み中...</div>
+ const renderGroupTable=(data:ReturnType<typeof createGroupedData>,title:string)=>{
+  const totalInput=data.reduce((s,g)=>s+g.input,0)
+  const totalOutput=data.reduce((s,g)=>s+g.output,0)
+  const totalCost=calculateCost(totalInput,totalOutput)
+  return(
+   <Card className="flex-1 flex flex-col overflow-hidden">
+    <CardHeader>
+     <DiamondMarker>{title}</DiamondMarker>
+    </CardHeader>
+    <CardContent className="p-2 flex-1 overflow-y-auto flex flex-col">
+     {loading&&data.length===0?(
+      <div className="text-nier-text-light text-nier-small">読み込み中...</div>
 ):data.length===0?(
-     <div className="text-nier-text-light text-nier-small">データがありません</div>
+      <div className="text-nier-text-light text-nier-small">データがありません</div>
 ):(
-     <div>
-      <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 border-b border-nier-border-light mb-1 pb-1">
-       <span className="font-medium"></span>
-       <span className="text-right font-medium">In</span>
-       <span className="text-right font-medium">Out</span>
-       <span className="text-right font-medium">コスト</span>
-      </div>
-      {data.map(group=>(
-       <div key={group.key}>
-        <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 bg-nier-bg-panel">
-         <span className="font-medium text-nier-text-main">{group.label}</span>
-         <span className="text-right text-nier-text-light">{formatTokens(group.input)}</span>
-         <span className="text-right text-nier-text-light">{formatTokens(group.output)}</span>
-         <span className="text-right font-medium">${group.cost.toFixed(2)}</span>
+      <>
+       <div>
+        <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 border-b border-nier-border-light pb-1">
+         <span className="font-medium"></span>
+         <span className="text-right font-medium">In</span>
+         <span className="text-right font-medium">Out</span>
+         <span className="text-right font-medium">コスト</span>
         </div>
-        {group.agents.map(agent=>(
-         <div key={agent.key} className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 pl-3">
-          <span className="text-nier-text-light truncate">{agent.name}</span>
-          <span className="text-right text-nier-text-light">{formatTokens(agent.input)}</span>
-          <span className="text-right text-nier-text-light">{formatTokens(agent.output)}</span>
-          <span className="text-right text-nier-text-light">${agent.cost.toFixed(2)}</span>
+        <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-1 border-b border-nier-border-dark mb-2">
+         <span className="font-medium text-nier-text-main">合計</span>
+         <span className="text-right font-medium">{formatTokens(totalInput)}</span>
+         <span className="text-right font-medium">{formatTokens(totalOutput)}</span>
+         <span className="text-right font-medium">${totalCost.toFixed(2)}</span>
+        </div>
+       </div>
+       <div className="flex-1 overflow-y-auto">
+        {data.map(group=>(
+         <div key={group.key}>
+          <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 bg-nier-bg-panel">
+           <span className="font-medium text-nier-text-main">{group.label}</span>
+           <span className="text-right text-nier-text-light">{formatTokens(group.input)}</span>
+           <span className="text-right text-nier-text-light">{formatTokens(group.output)}</span>
+           <span className="text-right font-medium">${group.cost.toFixed(2)}</span>
+          </div>
+          {group.agents.map(agent=>(
+           <div key={agent.key} className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 pl-3">
+            <span className="text-nier-text-light truncate">{agent.name}</span>
+            <span className="text-right text-nier-text-light">{formatTokens(agent.input)}</span>
+            <span className="text-right text-nier-text-light">{formatTokens(agent.output)}</span>
+            <span className="text-right text-nier-text-light">${agent.cost.toFixed(2)}</span>
+           </div>
+))}
          </div>
 ))}
        </div>
-))}
-     </div>
+      </>
 )}
-   </CardContent>
-  </Card>
-)
+    </CardContent>
+   </Card>
+)}
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">

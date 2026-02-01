@@ -12,6 +12,7 @@ class AssetRepository(BaseRepository[Asset]):
  def to_dict(self,a:Asset)->Dict[str,Any]:
   return {
    "id":a.id,
+   "agentId":a.agent_id,
    "name":a.name,
    "type":a.type,
    "agent":a.agent,
@@ -27,10 +28,14 @@ class AssetRepository(BaseRepository[Asset]):
   assets=self.session.query(Asset).filter(Asset.project_id==project_id).all()
   return [self.to_dict(a) for a in assets]
 
+ def get_pending_by_agent(self,agent_id:str)->List[Asset]:
+  return self.session.query(Asset).filter(Asset.agent_id==agent_id,Asset.approval_status=="pending").all()
+
  def create_from_dict(self,project_id:str,data:Dict)->Dict:
   asset=Asset(
    id=data.get("id",f"asset-{uuid4().hex[:8]}"),
    project_id=project_id,
+   agent_id=data.get("agentId"),
    name=data["name"],
    type=data["type"],
    agent=data.get("agent"),

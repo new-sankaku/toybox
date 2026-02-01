@@ -6,6 +6,7 @@ category_map:
   world_review: document
   game_design_review: document
   tech_spec_review: document
+  data_design_review: document
   task_review_2: document
   task_review_3: document
   task_review_4: document
@@ -29,6 +30,9 @@ auto_approval_rules:
   - category: music
     enabled: false
     label: 音楽
+  - category: video
+    enabled: false
+    label: 動画
   - category: document
     enabled: false
     label: ドキュメント
@@ -36,6 +40,7 @@ auto_approval_rules:
 asset_type_labels:
   image: 画像
   audio: 音声
+  video: 動画
   document: ドキュメント
   code: コード
   other: その他
@@ -75,3 +80,22 @@ role_labels:
   integrator: 統合
   tester: テスト
   reviewer: レビュー
+
+checkpoint_type_labels:
+  concept_review: コンセプト
+  task_review_1: タスク分割1
+  concept_detail_review: コンセプト詳細
+  scenario_review: シナリオ
+  world_review: ワールド
+  game_design_review: ゲームデザイン
+  tech_spec_review: 技術仕様
+  data_design_review: データ設計
+  task_review_2: タスク分割2
+  task_review_3: タスク分割3
+  task_review_4: タスク分割4
+  character_review: キャラクター
+  ui_review: UI
+  code_review: コード
+  ui_integration_review: UI統合
+  unit_test_review: ユニットテスト
+  integration_test_review: 統合テスト

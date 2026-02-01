@@ -78,7 +78,7 @@ export function AgentSlideOver({
     ref={panelRef}
     className="absolute right-0 top-0 h-full w-[480px] max-w-[90vw] bg-nier-bg-panel border-l border-nier-border-dark shadow-lg flex flex-col animate-nier-slide-in-right"
    >
-    <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2.5">
+    <div className="flex items-center justify-between nier-surface-header px-4 py-2.5">
      <div className="flex items-center gap-2 min-w-0">
       <div className={cn('w-1 h-5 flex-shrink-0',statusBarColor)}/>
       <h2 className="text-nier-body tracking-nier-wide truncate">{getDisplayName(agent)}</h2>
@@ -172,7 +172,6 @@ export function AgentSlideOver({
       <AgentLogStreaming
        logs={logs}
        isStreaming={agent.status==='running'}
-       maxHeight="400px"
       />
      </div>
     </div>

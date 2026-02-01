@@ -93,7 +93,7 @@ export function DocumentViewer({
        </div>
 ),
       thead:({children})=>(
-       <thead className="bg-nier-bg-header text-nier-text-header">
+       <thead className="nier-surface-header">
         {children}
        </thead>
 ),

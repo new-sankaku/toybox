@@ -13,3 +13,5 @@ from .project_ai_config import ProjectAiConfigRepository
 from .trace import AgentTraceRepository
 from .llm_job import LlmJobRepository
 from .local_provider_config import LocalProviderConfigRepository
+from .cost_history import CostHistoryRepository
+from .global_cost_settings import GlobalCostSettingsRepository

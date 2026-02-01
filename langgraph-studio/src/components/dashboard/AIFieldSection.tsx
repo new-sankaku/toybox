@@ -120,7 +120,7 @@ export default function AIFieldSection():JSX.Element|null{
      <DiamondMarker>エージェント作業場</DiamondMarker>
     </CardHeader>
     <CardContent className="p-0">
-     <div className="h-[40vh] min-h-[280px] max-h-[500px] rounded-lg overflow-hidden">
+     <div className="h-[40vh] min-h-[200px] max-h-[50vh] rounded-lg overflow-hidden">
       <AIField2D
        key={currentProject.id}
        characters={characters}

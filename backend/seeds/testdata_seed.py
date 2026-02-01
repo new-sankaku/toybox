@@ -5,9 +5,10 @@ sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime
 from models.database import engine,get_session,init_db
-from models.tables import Base,Project,Agent,Metric
-from config_loader import get_auto_approval_rules as get_config_auto_approval_rules
+from models.tables import Base,Project,Agent,Metric,Intervention,Asset
+from config_loader import get_auto_approval_rules as get_config_auto_approval_rules,get_ui_phases,get_agent_definitions
 from ai_config import build_default_ai_services
+from asset_scanner import scan_all_testdata,get_testdata_path
 
 def reset_database():
  Base.metadata.drop_all(bind=engine)
@@ -43,52 +44,34 @@ def seed_sample_project():
    updated_at=now
   )
   session.add(project)
-  agents_data=[
-   {"type":"concept","name":"コンセプト","phase":0,"input":1250000,"output":450000},
-   {"type":"task_split_1","name":"タスク分割1","phase":1,"input":850000,"output":320000},
-   {"type":"concept_detail","name":"コンセプト詳細","phase":2,"input":2300000,"output":950000},
-   {"type":"scenario","name":"シナリオ","phase":2,"input":4500000,"output":1800000},
-   {"type":"world","name":"世界観","phase":2,"input":1800000,"output":720000},
-   {"type":"game_design","name":"ゲームデザイン","phase":2,"input":3200000,"output":1250000},
-   {"type":"tech_spec","name":"技術仕様","phase":2,"input":2750000,"output":980000},
-   {"type":"task_split_2","name":"タスク分割2","phase":3,"input":950000,"output":380000},
-   {"type":"asset_character","name":"キャラ","phase":4,"input":520000,"output":180000},
-   {"type":"asset_background","name":"背景","phase":4,"input":480000,"output":150000},
-   {"type":"asset_ui","name":"UI","phase":4,"input":350000,"output":120000},
-   {"type":"asset_effect","name":"エフェクト","phase":4,"input":280000,"output":95000},
-   {"type":"asset_bgm","name":"BGM","phase":4,"input":150000,"output":52000},
-   {"type":"asset_voice","name":"ボイス","phase":4,"input":420000,"output":140000},
-   {"type":"asset_sfx","name":"効果音","phase":4,"input":180000,"output":65000},
-   {"type":"task_split_3","name":"タスク分割3","phase":5,"input":720000,"output":280000},
-   {"type":"code","name":"コード","phase":6,"input":8900000,"output":4200000},
-   {"type":"event","name":"イベント","phase":6,"input":1850000,"output":750000},
-   {"type":"ui_integration","name":"UI統合","phase":6,"input":1450000,"output":580000},
-   {"type":"asset_integration","name":"アセット統合","phase":6,"input":950000,"output":380000},
-   {"type":"task_split_4","name":"タスク分割4","phase":7,"input":550000,"output":220000},
-   {"type":"unit_test","name":"単体テスト","phase":8,"input":3200000,"output":1450000},
-   {"type":"integration_test","name":"統合テスト","phase":8,"input":2800000,"output":1150000},
-  ]
+  ui_phases=get_ui_phases()
+  agent_defs=get_agent_definitions()
+  completed_before_phase=4
   total_input=0
   total_output=0
-  for data in agents_data:
-   input_t=data.get("input",0)
-   output_t=data.get("output",0)
-   total_input+=input_t
-   total_output+=output_t
-   agent=Agent(
-    id=f"agent-{proj_id}-{data['type']}",
-    project_id=proj_id,
-    type=data["type"],
-    phase=data["phase"],
-    status="completed" if data["phase"]<4 else"pending",
-    progress=100 if data["phase"]<4 else 0,
-    tokens_used=input_t+output_t,
-    input_tokens=input_t,
-    output_tokens=output_t,
-    metadata_={"displayName":data["name"]},
-    created_at=now
-   )
-   session.add(agent)
+  for phase_idx,phase in enumerate(ui_phases):
+   for agent_type in phase.get("agents",[]):
+    agent_def=agent_defs.get(agent_type,{})
+    display_name=agent_def.get("shortLabel") or agent_def.get("label") or agent_type
+    is_completed=phase_idx<completed_before_phase
+    input_t=500000 if is_completed else 0
+    output_t=200000 if is_completed else 0
+    total_input+=input_t
+    total_output+=output_t
+    agent=Agent(
+     id=f"agent-{proj_id}-{agent_type}",
+     project_id=proj_id,
+     type=agent_type,
+     phase=phase_idx,
+     status="completed" if is_completed else"pending",
+     progress=100 if is_completed else 0,
+     tokens_used=input_t+output_t,
+     input_tokens=input_t,
+     output_tokens=output_t,
+     metadata_={"displayName":display_name},
+     created_at=now
+    )
+    session.add(agent)
   metric=Metric(
    project_id=proj_id,
    total_tokens_used=total_input+total_output,
@@ -106,23 +89,119 @@ def seed_sample_project():
     "voice":{"count":45,"unit":"件"},
     "scenarios":{"count":3,"unit":"本"},
     "code":{"count":4500,"unit":"行"},
-    "documents":{"count":8,"unit":"件"}
+    "documents":{"count":10,"unit":"件"}
    },
    elapsed_time_seconds=7245,
    estimated_remaining_seconds=3600,
-   completed_tasks=8,
-   total_tasks=23,
+   completed_tasks=10,
+   total_tasks=25,
    progress_percent=35,
    current_phase=4,
    phase_name="Phase 4: アセット生成",
    active_generations=3
   )
   session.add(metric)
+  interventions_data=[
+   {
+    "id":"intv-001",
+    "target_type":"specific",
+    "target_agent_id":"agent-proj-001-asset_character",
+    "priority":"normal",
+    "message":"キャラクターのデザインについて確認です。主人公の髪の色は設定資料では茶色ですが、青にした方がゲームの世界観に合うと思います。変更してもよろしいでしょうか？",
+    "status":"waiting_response",
+    "responses":[
+     {"sender":"agent","agentId":"agent-proj-001-asset_character","message":"キャラクターのデザインについて確認です。主人公の髪の色は設定資料では茶色ですが、青にした方がゲームの世界観に合うと思います。変更してもよろしいでしょうか？","createdAt":now.isoformat()}
+    ]
+   },
+   {
+    "id":"intv-002",
+    "target_type":"all",
+    "target_agent_id":None,
+    "priority":"urgent",
+    "message":"全エージェントへ: 本日18時までにフェーズ4のタスクを完了してください。",
+    "status":"delivered",
+    "responses":[]
+   },
+   {
+    "id":"intv-003",
+    "target_type":"specific",
+    "target_agent_id":"agent-proj-001-game_design",
+    "priority":"normal",
+    "message":"ゲームバランスの調整について相談があります。",
+    "status":"processed",
+    "responses":[
+     {"sender":"operator","agentId":None,"message":"ゲームバランスの調整について相談があります。","createdAt":now.isoformat()},
+     {"sender":"agent","agentId":"agent-proj-001-game_design","message":"承知しました。現在のバランス設定を確認し、調整案を作成します。","createdAt":now.isoformat()},
+     {"sender":"operator","agentId":None,"message":"よろしくお願いします。","createdAt":now.isoformat()}
+    ]
+   }
+  ]
+  for data in interventions_data:
+   intervention=Intervention(
+    id=data["id"],
+    project_id=proj_id,
+    target_type=data["target_type"],
+    target_agent_id=data["target_agent_id"],
+    priority=data["priority"],
+    message=data["message"],
+    attached_file_ids=[],
+    status=data["status"],
+    responses=data["responses"],
+    created_at=now,
+    delivered_at=now if data["status"] in ("delivered","acknowledged","processed","waiting_response") else None,
+    acknowledged_at=now if data["status"] in ("acknowledged","processed") else None,
+    processed_at=now if data["status"]=="processed" else None
+   )
+   session.add(intervention)
   session.commit()
-  print(f"[Seed] Sample project {proj_id} created with {len(agents_data)} agents")
+  print(f"[Seed] Sample project {proj_id} created with {len(agents_data)} agents and {len(interventions_data)} interventions")
  except Exception as e:
   session.rollback()
   print(f"[Seed] Error: {e}")
+  raise
+ finally:
+  session.close()
+
+def seed_testdata_assets(project_id:str="proj-001"):
+ testdata_path=get_testdata_path()
+ if not os.path.exists(testdata_path):
+  print(f"[Seed] testdata directory not found: {testdata_path}")
+  return
+ scanned_assets=scan_all_testdata(testdata_path)
+ if not scanned_assets:
+  print("[Seed] No assets found in testdata")
+  return
+ session=get_session()
+ try:
+  existing_names={a.name for a in session.query(Asset).filter(Asset.project_id==project_id).all()}
+  now=datetime.now()
+  added=0
+  for data in scanned_assets:
+   if data["name"] in existing_names:
+    continue
+   asset=Asset(
+    id=data["id"],
+    project_id=project_id,
+    name=data["name"],
+    type=data["type"],
+    agent=data["agent"],
+    size=data["size"],
+    url=data["url"],
+    thumbnail=data.get("thumbnail"),
+    duration=data.get("duration"),
+    approval_status=data.get("approvalStatus","pending"),
+    created_at=now
+   )
+   session.add(asset)
+   added+=1
+  session.commit()
+  if added>0:
+   print(f"[Seed] Added {added} new assets from testdata to {project_id}")
+  else:
+   print(f"[Seed] No new assets to add for {project_id}")
+ except Exception as e:
+  session.rollback()
+  print(f"[Seed] Error seeding assets: {e}")
   raise
  finally:
   session.close()
@@ -137,6 +216,7 @@ def main():
  else:
   init_db()
  seed_sample_project()
+ seed_testdata_assets()
  print("[Seed] Done")
 
 if __name__=="__main__":

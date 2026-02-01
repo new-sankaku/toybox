@@ -100,6 +100,63 @@ def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
 
         return jsonify(asset)
 
+    @app.route('/api/projects/<project_id>/assets/bulk',methods=['PATCH'])
+    def bulk_update_assets(project_id:str):
+        project=data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+
+        data=request.get_json() or {}
+        asset_ids=data.get("assetIds",[])
+        new_status=data.get("approvalStatus")
+
+        if not asset_ids:
+            return jsonify({"error":"assetIds is required"}),400
+        if new_status not in ("approved","rejected"):
+            return jsonify({"error":"approvalStatus must be 'approved' or 'rejected'"}),400
+
+        updated_assets=[]
+        for asset_id in asset_ids:
+            asset=data_store.update_asset(project_id,asset_id,{"approvalStatus":new_status})
+            if asset:
+                updated_assets.append(asset)
+
+        if sio:
+            sio.emit('assets:bulk_updated',{
+                "projectId":project_id,
+                "assets":updated_assets,
+                "status":new_status
+            },room=f"project:{project_id}")
+
+        return jsonify({"updated":len(updated_assets),"assets":updated_assets})
+
+    @app.route('/api/projects/<project_id>/assets/<asset_id>/regenerate',methods=['POST'])
+    def request_asset_regeneration(project_id:str,asset_id:str):
+        project=data_store.get_project(project_id)
+        if not project:
+            return jsonify({"error":"Project not found"}),404
+
+        data=request.get_json() or {}
+        feedback=data.get("feedback","")
+
+        if not feedback:
+            return jsonify({"error":"feedback is required"}),400
+
+        asset=data_store.update_asset(project_id,asset_id,{"approvalStatus":"rejected"})
+        if not asset:
+            return jsonify({"error":"Asset not found"}),404
+
+        data_store.request_asset_regeneration(project_id,asset_id,feedback)
+
+        if sio:
+            sio.emit('asset:regeneration_requested',{
+                "projectId":project_id,
+                "assetId":asset_id,
+                "feedback":feedback
+            },room=f"project:{project_id}")
+
+        return jsonify({"success":True,"message":"再生成リクエストを送信しました"})
+
 
 def _get_phase_name(phase:int)->str:
     phase_names={

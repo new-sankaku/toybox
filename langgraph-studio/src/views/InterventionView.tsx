@@ -5,20 +5,22 @@ import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Select}from'@/components/ui/Select'
 import{Textarea}from'@/components/ui/Textarea'
 import{useProjectStore}from'@/stores/projectStore'
+import{useInterventionStore}from'@/stores/interventionStore'
 import{interventionApi,agentApi,type ApiIntervention,type ApiAgent}from'@/services/apiService'
 import{FolderOpen,AlertTriangle,Send,Users,User,MessageSquare,Bot,UserCircle,Plus,Trash2}from'lucide-react'
-import type{InterventionPriority,InterventionTarget}from'@/types/intervention'
+import type{InterventionPriority,InterventionTarget,Intervention}from'@/types/intervention'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
 
 export default function InterventionView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{getLabel}=useAgentDefinitionStore()
- const[interventions,setInterventions]=useState<ApiIntervention[]>([])
+ const{interventions:storeInterventions,setInterventions:setStoreInterventions,addIntervention,updateIntervention,removeIntervention}=useInterventionStore()
  const[agents,setAgents]=useState<ApiAgent[]>([])
  const[loading,setLoading]=useState(true)
  const[sending,setSending]=useState(false)
  const[selectedId,setSelectedId]=useState<string|null>(null)
  const chatEndRef=useRef<HTMLDivElement>(null)
+ const interventions=storeInterventions.filter(i=>i.projectId===currentProject?.id)
 
  const[targetType,setTargetType]=useState<InterventionTarget>('all')
  const[targetAgentId,setTargetAgentId]=useState<string>('')
@@ -37,7 +39,7 @@ export default function InterventionView():JSX.Element{
      interventionApi.listByProject(currentProject.id),
      agentApi.listByProject(currentProject.id)
 ])
-    setInterventions(interventionsData)
+    setStoreInterventions(interventionsData as Intervention[])
     setAgents(agentsData)
     if(interventionsData.length>0&&!selectedId){
      setSelectedId(interventionsData[0].id)
@@ -68,7 +70,7 @@ export default function InterventionView():JSX.Element{
     priority,
     message:message.trim()
    })
-   setInterventions([...interventions,newIntervention])
+   addIntervention(newIntervention as Intervention)
    setSelectedId(newIntervention.id)
    setMessage('')
    setShowNewForm(false)
@@ -89,7 +91,7 @@ export default function InterventionView():JSX.Element{
   setSending(true)
   try{
    const updatedIntervention=await interventionApi.respond(selectedId,message.trim())
-   setInterventions(interventions.map(i=>i.id===selectedId?updatedIntervention:i))
+   updateIntervention(selectedId,updatedIntervention as Intervention)
    setMessage('')
   }catch(error){
    console.error('Failed to send reply:',error)
@@ -103,13 +105,13 @@ export default function InterventionView():JSX.Element{
  const handleDelete=async(interventionId:string)=>{
   try{
    await interventionApi.delete(interventionId)
-   setInterventions(interventions.filter(i=>i.id!==interventionId))
+   removeIntervention(interventionId)
    if(selectedId===interventionId){
     setSelectedId(null)
    }
   }catch(error){
    console.error('Failed to delete intervention:',error)
-   setInterventions(interventions.filter(i=>i.id!==interventionId))
+   removeIntervention(interventionId)
    if(selectedId===interventionId){
     setSelectedId(null)
    }

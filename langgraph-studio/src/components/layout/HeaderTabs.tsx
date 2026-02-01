@@ -1,6 +1,7 @@
 import type{TabId}from'../../App'
 import{usePendingCheckpointsCount}from'@/stores/checkpointStore'
 import{usePendingAssetsCount}from'@/stores/assetStore'
+import{useWaitingResponseCount}from'@/stores/interventionStore'
 
 interface Tab{
  id:TabId
@@ -13,10 +14,10 @@ const tabs:Tab[]=[
  {id:'project',label:'プロジェクト',icon:'◎'},
  {id:'system',label:'ダッシュボード',icon:'⬢'},
  {id:'checkpoints',label:'承認',icon:'✓',hasBadge:true},
- {id:'intervention',label:'連絡',icon:'✉'},
+ {id:'intervention',label:'連絡',icon:'✉',hasBadge:true},
  {id:'agents',label:'エージェント',icon:'⚙'},
  {id:'data',label:'生成素材',icon:'≡',hasBadge:true},
- {id:'cost',label:'コスト',icon:'¥'},
+ {id:'cost',label:'コスト',icon:'$'},
  {id:'logs',label:'ログ',icon:'≫'},
  {id:'config',label:'プロジェクト設定',icon:'⚙'},
  {id:'global-config',label:'共通設定',icon:'⚙'}
@@ -37,12 +38,14 @@ export default function HeaderTabs({
 }:HeaderTabsProps):JSX.Element{
  const pendingCheckpoints=usePendingCheckpointsCount()
  const pendingAssets=usePendingAssetsCount()
+ const waitingResponse=useWaitingResponseCount()
  const badgeCounts:Record<string,number>={
   checkpoints:pendingCheckpoints,
+  intervention:waitingResponse,
   data:pendingAssets
  }
  return(
-  <nav className="flex">
+  <nav className="flex min-w-0">
    {tabs.map((tab)=>{
     const count=tab.hasBadge?badgeCounts[tab.id]??0:0
     return(
@@ -56,7 +59,7 @@ export default function HeaderTabs({
        {tab.label}
        {tab.hasBadge&&(
         <span
-         className={`absolute -top-2 -right-2 inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 text-[10px] font-bold leading-none rounded-full ${count>0?'bg-nier-accent-orange text-white':'invisible'}`}
+         className={`absolute -top-2 -right-2 inline-flex items-center justify-center min-w-[1.4em] h-[1.4em] px-[0.3em] text-[10px] font-bold leading-none rounded-full ${count>0?'bg-nier-accent-orange text-white':'invisible'}`}
         >
          {count>0?formatBadgeCount(count):'0'}
         </span>

@@ -1,4 +1,4 @@
-"""DeepSeek プロバイダー"""
+"""OpenRouter プロバイダー"""
 from typing import List,Optional,Dict,Any,Iterator
 from middleware.logger import get_logger
 from .base import (
@@ -7,18 +7,18 @@ from .base import (
 )
 
 
-class DeepSeekProvider(AIProvider):
- """DeepSeekプロバイダー（OpenAI互換API）"""
+class OpenRouterProvider(AIProvider):
+ """OpenRouterプロバイダー（OpenAI互換API）"""
 
- DEEPSEEK_BASE_URL="https://api.deepseek.com"
+ OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
 
  @property
  def provider_id(self)->str:
-  return"deepseek"
+  return"openrouter"
 
  @property
  def display_name(self)->str:
-  return"DeepSeek"
+  return"OpenRouter"
 
  def get_available_models(self)->List[ModelInfo]:
   return self.load_models_from_config(self.provider_id)
@@ -31,13 +31,17 @@ class DeepSeekProvider(AIProvider):
     if not api_key:
      from config import get_config
      app_config=get_config()
-     api_key=getattr(app_config.agent,"deepseek_api_key",None)
-    base_url=self.config.base_url or self.DEEPSEEK_BASE_URL
+     api_key=getattr(app_config.agent,"openrouter_api_key",None)
+    base_url=self.config.base_url or self.OPENROUTER_BASE_URL
     self._client=OpenAI(
      api_key=api_key,
      base_url=base_url,
      timeout=self.config.timeout,
      max_retries=self.config.max_retries,
+     default_headers={
+      "HTTP-Referer":"https://toybox.local",
+      "X-Title":"Toybox"
+     }
     )
    except ImportError:
     raise ImportError("openaiパッケージがインストールされていません: pip install openai")
@@ -124,10 +128,10 @@ class DeepSeekProvider(AIProvider):
    )
    return {
     "success":True,
-    "message":"DeepSeek: 正常に接続できました"
+    "message":"OpenRouter: 正常に接続できました"
    }
   except Exception as e:
-   get_logger().error(f"DeepSeek test_connection error: {e}",exc_info=True)
+   get_logger().error(f"OpenRouter test_connection error: {e}",exc_info=True)
    error_str=str(e)
    if"api_key" in error_str.lower() or"auth" in error_str.lower() or"401" in error_str:
     return {"success":False,"message":"認証エラー: APIキーが無効です"}
@@ -141,7 +145,7 @@ class DeepSeekProvider(AIProvider):
    try:
     from config import get_config
     app_config=get_config()
-    api_key=getattr(app_config.agent,"deepseek_api_key",None)
+    api_key=getattr(app_config.agent,"openrouter_api_key",None)
    except Exception as e:
-    get_logger().debug(f"DeepSeek config validation: {e}")
+    get_logger().debug(f"OpenRouter config validation: {e}")
   return bool(api_key)

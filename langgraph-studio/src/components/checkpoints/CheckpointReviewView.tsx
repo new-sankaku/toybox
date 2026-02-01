@@ -7,6 +7,7 @@ import{CodeViewer}from'@/components/viewers/CodeViewer'
 import type{Checkpoint}from'@/types/checkpoint'
 import{cn}from'@/lib/utils'
 import{CheckCircle,XCircle,RotateCcw,Send,X}from'lucide-react'
+import{useUIConfigStore}from'@/stores/uiConfigStore'
 
 interface CheckpointReviewViewProps{
  checkpoint:Checkpoint
@@ -26,6 +27,7 @@ export default function CheckpointReviewView({
  onRequestChanges,
  onClose
 }:CheckpointReviewViewProps):JSX.Element{
+ const{getCheckpointTypeLabel,getApprovalStatusLabel,getResolutionLabel}=useUIConfigStore()
  const[viewMode,setViewMode]=useState<ViewMode>('preview')
  const[feedback,setFeedback]=useState('')
  const[showFeedbackForm,setShowFeedbackForm]=useState(false)
@@ -169,23 +171,13 @@ export default function CheckpointReviewView({
        <DiamondMarker>出力プレビュー</DiamondMarker>
        <div className="flex gap-1">
         <button
-         className={cn(
-          'px-3 py-1 text-nier-caption tracking-nier transition-colors',
-          viewMode==='preview'
-           ?'bg-nier-bg-selected'
-           : 'hover:bg-nier-bg-selected'
-)}
+         className={cn('nier-tab-toggle',viewMode==='preview'&&'active')}
          onClick={()=>setViewMode('preview')}
         >
          PREVIEW
         </button>
         <button
-         className={cn(
-          'px-3 py-1 text-nier-caption tracking-nier transition-colors',
-          viewMode==='raw'
-           ?'bg-nier-bg-selected'
-           : 'hover:bg-nier-bg-selected'
-)}
+         className={cn('nier-tab-toggle',viewMode==='raw'&&'active')}
          onClick={()=>setViewMode('raw')}
         >
          RAW
@@ -222,13 +214,11 @@ export default function CheckpointReviewView({
        <div className="space-y-2">
         <div className="nier-status-row">
          <span className="nier-status-label">種別:</span>
-         <span className="nier-status-value">{checkpoint.type}</span>
+         <span className="nier-status-value">{getCheckpointTypeLabel(checkpoint.type)}</span>
         </div>
         <div className="nier-status-row">
          <span className="nier-status-label">状態:</span>
-         <span className="nier-status-value text-nier-accent-yellow">
-          {checkpoint.status==='pending'?'承認待ち' : checkpoint.status}
-         </span>
+         <span className="nier-status-value">{getApprovalStatusLabel(checkpoint.status)}</span>
         </div>
        </div>
       </CardContent>
@@ -312,7 +302,7 @@ export default function CheckpointReviewView({
         </>
 ):(
         <div className="text-nier-small text-nier-text-light py-2">
-         このチェックポイントは解決済みです（{checkpoint.status}）
+         このチェックポイントは解決済みです（{getResolutionLabel(checkpoint.status)}）
         </div>
 )}
       </CardContent>

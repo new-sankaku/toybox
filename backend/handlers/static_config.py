@@ -12,6 +12,7 @@ from config_loader import (
  get_asset_type_labels,
  get_resolution_labels,
  get_role_labels,
+ get_checkpoint_type_labels,
  get_agent_roles,
  get_agents_config,
  get_websocket_config,
@@ -60,6 +61,7 @@ def register_static_config_routes(app:Flask):
    "assetTypeLabels":get_asset_type_labels(),
    "resolutionLabels":get_resolution_labels(),
    "roleLabels":get_role_labels(),
+   "checkpointTypeLabels":get_checkpoint_type_labels(),
    "agentRoles":get_agent_roles(),
    "agents":agents_out,
   })

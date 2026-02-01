@@ -123,10 +123,8 @@ def sample_messages():
 def api_key_data():
  """APIキーテストデータ"""
  return {
-  "anthropic":"sk-ant-test-key-12345",
+  "openrouter":"sk-or-test-key-12345",
   "openai":"sk-openai-test-key-67890",
-  "zhipu":"zhipu-test-key-abcde",
-  "deepseek":"deepseek-test-key-fghij",
  }
 
 

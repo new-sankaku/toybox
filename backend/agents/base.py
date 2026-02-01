@@ -14,6 +14,7 @@ class AgentType(str,Enum):
     GAME_DESIGN="game_design"
     TECH_SPEC="tech_spec"
     TASK_SPLIT_2="task_split_2"
+    DATA_DESIGN="data_design"
     ASSET_CHARACTER="asset_character"
     ASSET_BACKGROUND="asset_background"
     ASSET_UI="asset_ui"

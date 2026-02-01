@@ -424,6 +424,10 @@ def get_role_labels()->Dict[str,str]:
     return get_checkpoints_config().get("role_labels",{})
 
 
+def get_checkpoint_type_labels()->Dict[str,str]:
+    return get_checkpoints_config().get("checkpoint_type_labels",{})
+
+
 def get_agent_roles()->Dict[str,str]:
     config=get_agents_config()
     agents=config.get("agents",{})

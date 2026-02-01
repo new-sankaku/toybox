@@ -29,6 +29,12 @@ mock_contents:
     ## アーキテクチャ
     モックによる自動生成仕様。
 
+  data_design: |
+    # データ設計
+
+    ## データ構造
+    モックによる自動生成データ設計。
+
   code: |
     // モック生成コード
     console.log('Hello, Game!');
@@ -58,6 +64,10 @@ checkpoint_titles:
   tech_spec:
     type: tech_review
     title: 技術仕様のレビュー
+
+  data_design:
+    type: data_design_review
+    title: データ設計のレビュー
 
   code:
     type: code_review

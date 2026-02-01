@@ -28,7 +28,7 @@ class TestProviderRoutes:
   data=json.loads(response.data)
   assert isinstance(data,list)
   provider_ids=[p["id"] for p in data]
-  assert"anthropic" in provider_ids
+  assert"openrouter" in provider_ids
   assert"mock" in provider_ids
 
  def test_get_provider_detail(self,client):

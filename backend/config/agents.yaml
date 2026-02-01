@@ -10,6 +10,28 @@ agents:
     usage_category: llm_high
     output_type: llm
 
+  architecture:
+    label: アーキテクチャ
+    short_label: アーキ
+    phase: 0
+    speech_bubble: 技術基盤を設計します
+    quality_check: true
+    high_cost: false
+    role: leader
+    usage_category: llm_high
+    output_type: llm
+
+  environment_setup:
+    label: 環境構築
+    short_label: 環境
+    phase: 0
+    speech_bubble: 開発環境を整備します
+    quality_check: true
+    high_cost: false
+    role: worker
+    usage_category: llm_mid
+    output_type: llm
+
   task_split_1:
     label: タスク分割1
     short_label: 分割1
@@ -87,6 +109,17 @@ agents:
     role: splitter
     max_tokens: 8192
     usage_category: llm_mid
+    output_type: llm
+
+  data_design:
+    label: データ設計
+    short_label: データ
+    phase: 3
+    speech_bubble: データ構造を設計します
+    quality_check: true
+    high_cost: false
+    role: worker
+    usage_category: llm_high
     output_type: llm
 
   asset_character:
@@ -258,7 +291,19 @@ agents:
 
 workflow_dependencies:
   concept: []
-  task_split_1: [concept]
+  architecture:
+    depends_on: [concept]
+    context_from:
+      concept:
+        level: full
+        focus: 技術選定・アーキテクチャ設計に必要なゲームコンセプトと要件
+  environment_setup:
+    depends_on: [architecture]
+    context_from:
+      architecture:
+        level: full
+        focus: 開発環境構築に必要な技術スタック・ディレクトリ構造・コーディング規約
+  task_split_1: [concept, architecture, environment_setup]
   concept_detail:
     depends_on: [task_split_1]
     context_from:
@@ -307,6 +352,15 @@ workflow_dependencies:
       tech_spec:
         level: summary
         focus: アセット制作の技術制約（解像度・フォーマット・パフォーマンス上限）
+  data_design:
+    depends_on: [game_design, tech_spec]
+    context_from:
+      game_design:
+        level: summary
+        focus: キャラクター・アイテム・バトルシステムのメカニクス仕様
+      tech_spec:
+        level: summary
+        focus: データフォーマット・ストレージ形式・パフォーマンス制約
   asset_character:
     depends_on: [task_split_2]
     context_from:
@@ -428,7 +482,7 @@ workflow_dependencies:
 phases:
   phase0_concept:
     label: 企画
-    agents: [concept]
+    agents: [concept, architecture, environment_setup]
   phase1_task_split:
     label: 分割1
     agents: [task_split_1]
@@ -437,7 +491,7 @@ phases:
     agents: [concept_detail, scenario, world, game_design, tech_spec]
   phase3_task_split:
     label: 分割2
-    agents: [task_split_2]
+    agents: [task_split_2, data_design]
   phase4_assets:
     label: アセット
     agents: [asset_character, asset_background, asset_ui, asset_effect, asset_bgm, asset_voice, asset_sfx]
@@ -457,13 +511,13 @@ phases:
 ui_phases:
   - id: concept
     label: 企画
-    agents: [concept]
+    agents: [concept, architecture, environment_setup]
   - id: split1
     label: 分割1
     agents: [task_split_1]
   - id: design
     label: 設計
-    agents: [concept_detail, scenario, world, game_design, tech_spec]
+    agents: [concept_detail, scenario, world, game_design, tech_spec, data_design]
   - id: split2
     label: 分割2
     agents: [task_split_2]
@@ -562,6 +616,8 @@ task_limits:
 
 agent_principles:
   concept: [game_experience, game_mechanics]
+  architecture: [technical_quality, game_mechanics]
+  environment_setup: [technical_quality]
   concept_detail: [game_experience, game_mechanics]
   scenario: [narrative_design, character_design]
   world: [world_building, narrative_design]
@@ -582,6 +638,7 @@ agent_principles:
   integration_test: [technical_quality]
   task_split_1: [game_experience]
   task_split_2: [game_experience]
+  data_design: [technical_quality, game_mechanics]
   task_split_3: [technical_quality]
   task_split_4: [technical_quality]
   _default: [game_experience]
@@ -604,6 +661,12 @@ output_requirements:
   concept:
     required_sections: [コアファンタジー, ターゲット, メカニクス概要]
     min_length: 500
+  architecture:
+    required_sections: [技術スタック, ディレクトリ構造, 命名規則, コーディング規約]
+    min_length: 800
+  environment_setup:
+    required_sections: [開発環境, ビルド設定, 登録スキル]
+    min_length: 500
   concept_detail:
     required_sections: [ゲーム概要, 主要機能, ユーザー体験]
     min_length: 800
@@ -619,6 +682,9 @@ output_requirements:
   tech_spec:
     required_sections: [アーキテクチャ, 技術スタック]
     min_length: 800
+  data_design:
+    required_sections: [データ設計概要, エンティティ定義]
+    min_length: 600
   code:
     min_length: 200
   unit_test:
@@ -631,6 +697,8 @@ output_requirements:
 agent_generation_types:
   llm:
     - concept
+    - architecture
+    - environment_setup
     - task_split_1
     - concept_detail
     - game_design
@@ -642,6 +710,7 @@ agent_generation_types:
     - unit_test
     - integration_test
     - task_split_2
+    - data_design
     - task_split_3
     - task_split_4
   image:
@@ -658,49 +727,25 @@ agent_generation_types:
     - scenario
 
 agent_assets:
-  concept:
-    - progress: 50
-      type: document
-      name: concept_draft.md
-      size: 12KB
-    - progress: 90
-      type: document
-      name: concept_final.md
-      size: 28KB
+  architecture:
+    - progress: 95
+      type: config
+      name: .eslintrc.json
+      size: 3KB
 
-  task_split_1:
+  environment_setup:
+    - progress: 30
+      type: config
+      name: package.json
+      size: 2KB
     - progress: 50
-      type: document
-      name: task_breakdown.md
-      size: 25KB
-    - progress: 90
-      type: document
-      name: iteration_plan.md
-      size: 35KB
-
-  concept_detail:
-    - progress: 50
-      type: document
-      name: concept_detail_draft.md
-      size: 18KB
-    - progress: 90
-      type: document
-      name: concept_detail.md
-      size: 32KB
-
-  scenario:
-    - progress: 40
-      type: document
-      name: story_outline.md
-      size: 15KB
+      type: config
+      name: tsconfig.json
+      size: 1KB
     - progress: 70
-      type: document
-      name: stage_design.md
-      size: 22KB
-    - progress: 90
-      type: document
-      name: dialogue_script.md
-      size: 35KB
+      type: config
+      name: .github/workflows/ci.yml
+      size: 2KB
 
   world:
     - progress: 25
@@ -729,10 +774,6 @@ agent_assets:
       size: 3.5MB
 
   game_design:
-    - progress: 30
-      type: document
-      name: mechanics_spec.md
-      size: 18KB
     - progress: 45
       type: image
       name: ui_wireframe_01.png
@@ -741,24 +782,6 @@ agent_assets:
       type: image
       name: ui_wireframe_02.png
       size: 312KB
-    - progress: 70
-      type: document
-      name: sound_spec.md
-      size: 8KB
-    - progress: 95
-      type: document
-      name: game_design.md
-      size: 42KB
-
-  tech_spec:
-    - progress: 50
-      type: document
-      name: tech_spec_draft.md
-      size: 20KB
-    - progress: 90
-      type: document
-      name: tech_spec.md
-      size: 38KB
 
   asset_character:
     - progress: 35
@@ -777,22 +800,18 @@ agent_assets:
       type: image
       name: boss_enemy.png
       size: 445KB
-    - progress: 95
-      type: document
-      name: character_specs.md
-      size: 18KB
 
   code:
     - progress: 30
-      type: document
+      type: code
       name: main.ts
       size: 8KB
     - progress: 60
-      type: document
+      type: code
       name: utils.ts
       size: 4KB
     - progress: 90
-      type: document
+      type: code
       name: game.ts
       size: 12KB
 
@@ -873,6 +892,14 @@ generation_metrics:
       category: documents
       count_range: [1, 3]
       calls_range: [3, 8]
+    architecture:
+      category: documents
+      count_range: [1, 2]
+      calls_range: [2, 5]
+    environment_setup:
+      category: documents
+      count_range: [1, 2]
+      calls_range: [3, 6]
     concept_detail:
       category: documents
       count_range: [1, 3]
@@ -895,6 +922,16 @@ agent_checkpoints:
     - progress: 90
       type: concept_review
       title: ゲームコンセプトの承認
+
+  architecture:
+    - progress: 90
+      type: architecture_review
+      title: アーキテクチャ設計のレビュー
+
+  environment_setup:
+    - progress: 90
+      type: environment_review
+      title: 開発環境構築のレビュー
 
   task_split_1:
     - progress: 90
@@ -930,6 +967,11 @@ agent_checkpoints:
     - progress: 90
       type: task_review_2
       title: タスク分割2のレビュー
+
+  data_design:
+    - progress: 90
+      type: data_design_review
+      title: データ設計のレビュー
 
   asset_character:
     - progress: 90

@@ -1,6 +1,6 @@
 import{create}from'zustand'
 
-export type ActivityType='agent_started'|'agent_completed'|'agent_failed'|'agent_paused'|'agent_resumed'|'checkpoint_created'|'checkpoint_resolved'|'phase_changed'|'agent_waiting_response'|'agent_waiting_provider'|'agent_progress'
+export type ActivityType='agent_started'|'agent_completed'|'agent_failed'|'agent_paused'|'agent_resumed'|'checkpoint_created'|'checkpoint_resolved'|'phase_changed'|'agent_waiting_response'|'agent_waiting_provider'|'agent_progress'|'intervention_agent_question'|'budget_warning'
 
 export interface ActivityEvent{
  id:string

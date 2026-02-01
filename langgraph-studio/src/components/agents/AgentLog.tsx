@@ -7,7 +7,6 @@ import{AlertCircle,Info,AlertTriangle,Bug}from'lucide-react'
 
 interface AgentLogProps{
  logs:AgentLogEntry[]
- maxHeight?:string
  autoScroll?:boolean
 }
 
@@ -36,7 +35,6 @@ const levelConfig:Record<LogLevel,{icon:typeof Info;color:string;label:string}>=
 
 export function AgentLog({
  logs,
- maxHeight='400px',
  autoScroll=true
 }:AgentLogProps):JSX.Element{
  const scrollRef=useRef<HTMLDivElement>(null)
@@ -68,8 +66,7 @@ export function AgentLog({
    <CardContent>
     <div
      ref={scrollRef}
-     className="font-mono text-nier-small bg-nier-bg-main overflow-auto"
-     style={{maxHeight}}
+     className="font-mono text-nier-small bg-nier-bg-main nier-log-panel"
     >
      {logs.length===0?(
       <div className="p-4 text-center text-nier-text-light">
@@ -140,12 +137,11 @@ export function AgentLog({
 
 export function AgentLogStreaming({
  logs,
- isStreaming=false,
- maxHeight='400px'
+ isStreaming=false
 }:AgentLogProps&{isStreaming?:boolean}):JSX.Element{
  return(
   <div className="relative">
-   <AgentLog logs={logs} maxHeight={maxHeight} autoScroll={isStreaming}/>
+   <AgentLog logs={logs} autoScroll={isStreaming}/>
    {isStreaming&&(
     <div className="absolute bottom-4 right-4">
      <div className="flex items-center gap-2 bg-nier-bg-panel px-2 py-1 text-nier-caption">

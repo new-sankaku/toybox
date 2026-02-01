@@ -4,8 +4,9 @@ import{cn}from'@/lib/utils'
 import{Button}from'@/components/ui/Button'
 import{SequenceDiagram}from'./SequenceDiagram'
 import{SequenceDetailPanel}from'./SequenceDetailPanel'
+import{SystemPromptPanel}from'./SystemPromptPanel'
 import{agentApi}from'@/services/apiService'
-import type{Agent,AgentLogEntry,SequenceData,SequenceMessage}from'@/types/agent'
+import type{Agent,AgentLogEntry,SequenceData,SequenceMessage,AgentSystemPrompt}from'@/types/agent'
 
 interface AgentAccordionDetailProps{
  agent:Agent
@@ -17,7 +18,7 @@ interface AgentAccordionDetailProps{
  onExecuteWithWorkers?:()=>void
 }
 
-type TabId='log'|'sequence'
+type TabId='log'|'sequence'|'prompt'
 
 const formatTimestamp=(timestamp:string)=>{
  const d=new Date(timestamp)
@@ -58,6 +59,10 @@ export function AgentAccordionDetail({
  const[seqData,setSeqData]=useState<SequenceData|null>(null)
  const[seqLoading,setSeqLoading]=useState(false)
  const[seqError,setSeqError]=useState<string|null>(null)
+ const[promptData,setPromptData]=useState<AgentSystemPrompt|null>(null)
+ const[promptLoading,setPromptLoading]=useState(false)
+ const[promptError,setPromptError]=useState<string|null>(null)
+ const promptFetchedRef=useRef(false)
  const[detailPanelOpen,setDetailPanelOpen]=useState(false)
  const[selectedMessage,setSelectedMessage]=useState<SequenceMessage|null>(null)
  const prevStatusRef=useRef(agent.status)
@@ -110,6 +115,26 @@ export function AgentAccordionDetail({
   }
  },[activeTab,seqLoading,fetchSequence])
 
+ const fetchPrompt=useCallback(async()=>{
+  setPromptLoading(true)
+  setPromptError(null)
+  try{
+   const result=await agentApi.getSystemPrompt(agent.id)
+   setPromptData(result)
+  }catch{
+   setPromptError('システムプロンプトの取得に失敗しました')
+  }finally{
+   setPromptLoading(false)
+   promptFetchedRef.current=true
+  }
+ },[agent.id])
+
+ useEffect(()=>{
+  if(activeTab==='prompt'&&!promptFetchedRef.current&&!promptLoading){
+   fetchPrompt()
+  }
+ },[activeTab,promptLoading,fetchPrompt])
+
  useEffect(()=>{
   const prev=prevStatusRef.current
   const curr=agent.status
@@ -119,8 +144,6 @@ export function AgentAccordionDetail({
    seqFetchedRef.current=false
    if(activeTab==='sequence'){
     fetchSequence()
-   }else{
-    setSeqData(null)
    }
   }
  },[agent.status,activeTab,fetchSequence])
@@ -218,13 +241,23 @@ export function AgentAccordionDetail({
      >
       シーケンス
      </button>
+     <button
+      onClick={()=>setActiveTab('prompt')}
+      className={cn(
+       'px-3 py-1 text-nier-caption transition-colors',
+       activeTab==='prompt'
+        ?'text-nier-text-main border-b-2 border-nier-text-main'
+        :'text-nier-text-light hover:text-nier-text-main'
+)}
+     >
+      プロンプト
+     </button>
     </div>
 
     {activeTab==='log'&&sortedLogs.length>0&&(
      <div
       ref={logRef}
-      className="font-mono text-nier-caption overflow-auto bg-nier-bg-panel border border-nier-border-light px-2 py-1"
-      style={{maxHeight:'400px',lineHeight:'1.3',overscrollBehavior:'contain'}}
+      className="font-mono text-nier-caption bg-nier-bg-panel border border-nier-border-light px-2 py-1 nier-log-panel"
      >
       {agent.status==='running'&&(
        <div className="flex items-center gap-1.5 py-0.5 text-nier-accent-green">
@@ -250,7 +283,7 @@ export function AgentAccordionDetail({
 )}
 
     {activeTab==='sequence'&&(
-     <div ref={seqRef} className="min-h-[100px] max-h-[400px] overflow-auto" style={{overscrollBehavior:'contain'}}>
+     <div ref={seqRef} className="min-h-[100px] nier-sequence-panel">
       {seqLoading&&(
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         読み込み中...
@@ -272,6 +305,29 @@ export function AgentAccordionDetail({
       {!seqLoading&&!seqError&&!seqData&&(
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         シーケンスデータがありません
+       </div>
+)}
+     </div>
+)}
+
+    {activeTab==='prompt'&&(
+     <div className="min-h-[100px] nier-sequence-panel">
+      {promptLoading&&(
+       <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
+        読み込み中...
+       </div>
+)}
+      {promptError&&(
+       <div className="flex items-center justify-center py-8 text-nier-accent-red text-nier-caption">
+        {promptError}
+       </div>
+)}
+      {!promptLoading&&!promptError&&promptData&&(
+       <SystemPromptPanel data={promptData}/>
+)}
+      {!promptLoading&&!promptError&&!promptData&&(
+       <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
+        プロンプトデータがありません
        </div>
 )}
      </div>

@@ -27,7 +27,7 @@ export function ConfirmDialog({
   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
    <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
     <CardHeader>
-     <div className="flex items-center gap-2 text-nier-text-main">
+     <div className="flex items-center gap-2">
       <AlertTriangle size={18}/>
       <span>{title}</span>
      </div>

@@ -627,8 +627,8 @@ export default function ProjectView():JSX.Element{
     </div>
    )}
 
-   <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 overflow-hidden">
-    <div className="lg:col-span-1 flex flex-col overflow-hidden">
+   <div className="flex-1 flex gap-3 overflow-hidden min-w-0">
+    <div className="w-[23vw] flex-shrink flex flex-col overflow-hidden min-w-0">
      <ProjectList
       projects={projects}
       currentProject={currentProject}
@@ -641,7 +641,7 @@ export default function ProjectView():JSX.Element{
      />
     </div>
 
-    <div className="lg:col-span-2 overflow-y-auto">
+    <div className="flex-1 overflow-y-auto min-w-0">
      {showNewForm?(
       <Card>
        <CardHeader><DiamondMarker>新規プロジェクト作成</DiamondMarker></CardHeader>

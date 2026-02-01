@@ -1,7 +1,7 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
-import type{SequenceData}from'@/types/agent'
+import type{SequenceData,AgentSystemPrompt}from'@/types/agent'
 import{API_ENDPOINTS}from'@/constants/api'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||''
@@ -250,6 +250,11 @@ export const agentApi={
  executeWithWorkers:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
   const response=await api.post(API_ENDPOINTS.agents.executeWithWorkers(agentId))
   return response.data
+ },
+
+ getSystemPrompt:async(agentId:string):Promise<AgentSystemPrompt>=>{
+  const response=await api.get(API_ENDPOINTS.agents.systemPrompt(agentId))
+  return response.data
  }
 }
 
@@ -359,8 +364,9 @@ export const logsApi={
 
 export interface ApiAsset{
  id:string
+ agentId:string|null
  name:string
- type:'image'|'audio'|'document'|'code'|'other'
+ type:'image'|'audio'|'video'|'document'|'code'|'other'
  agent:string
  size:string
  createdAt:string
@@ -390,6 +396,28 @@ export const assetApi={
    url:toFullUrl(response.data.url),
    thumbnail:toFullUrl(response.data.thumbnail),
   }
+ },
+
+ bulkUpdateStatus:async(projectId:string,assetIds:string[],status:'approved'|'rejected'):Promise<{updated:number;assets:ApiAsset[]}>=>{
+  const response=await api.patch(API_ENDPOINTS.projects.assetsBulk(projectId),{
+   assetIds,
+   approvalStatus:status
+  })
+  return{
+   updated:response.data.updated,
+   assets:response.data.assets.map((a:ApiAsset)=>({
+    ...a,
+    url:toFullUrl(a.url),
+    thumbnail:toFullUrl(a.thumbnail),
+   }))
+  }
+ },
+
+ requestRegeneration:async(projectId:string,assetId:string,feedback:string):Promise<{success:boolean;message:string}>=>{
+  const response=await api.post(API_ENDPOINTS.projects.assetRegenerate(projectId,assetId),{
+   feedback
+  })
+  return response.data
  }
 }
 
@@ -514,6 +542,7 @@ export interface UISettingsResponse{
  approvalStatusLabels:Record<string,string>
  resolutionLabels:Record<string,string>
  roleLabels:Record<string,string>
+ checkpointTypeLabels:Record<string,string>
  agentRoles:Record<string,string>
  agents:Record<string,UISettingsAgent>
  assetTypeLabels?:Record<string,string>
@@ -759,6 +788,7 @@ export interface AIProviderInfo{
  id:string
  name:string
  models:string[]|AIProviderModel[]
+ serviceTypes?:string[]
 }
 
 export interface AIChatMessage{
@@ -787,6 +817,11 @@ export interface AIChatResponse{
  latency:number
 }
 
+export interface AIServiceTypesInfo{
+ types:string[]
+ labels:Record<string,string>
+}
+
 export const aiProviderApi={
  list:async():Promise<AIProviderInfo[]>=>{
   const response=await api.get(API_ENDPOINTS.aiProviders.list)
@@ -795,6 +830,11 @@ export const aiProviderApi={
 
  get:async(providerId:string):Promise<AIProviderInfo>=>{
   const response=await api.get(API_ENDPOINTS.aiProviders.get(providerId))
+  return response.data
+ },
+
+ getServiceTypes:async():Promise<AIServiceTypesInfo>=>{
+  const response=await api.get(API_ENDPOINTS.aiProviders.serviceTypes)
   return response.data
  },
 
@@ -1402,6 +1442,108 @@ export const navigatorApi={
  broadcast:async(data:{text:string;priority?:string}):Promise<{success:boolean}>=>{
   const response=await api.post(API_ENDPOINTS.navigator.broadcast,data)
   return response.data
+ }
+}
+
+// ============================================================
+// GLOBAL COST SETTINGS API
+// ============================================================
+
+export interface GlobalCostSettings{
+ global_enabled:boolean
+ global_monthly_limit:number
+ alert_threshold:number
+ stop_on_budget_exceeded:boolean
+ services:Record<string,{enabled:boolean;monthly_limit:number}>
+ updated_at:string|null
+}
+
+export interface BudgetStatus{
+ current_usage:number
+ monthly_limit:number
+ remaining:number
+ usage_percent:number
+ alert_threshold:number
+ is_over_budget:boolean
+ is_warning:boolean
+ stop_on_budget_exceeded:boolean
+ global_enabled:boolean
+}
+
+export const globalCostApi={
+ getSettings:async():Promise<GlobalCostSettings>=>{
+  const response=await api.get(API_ENDPOINTS.globalCost.settings)
+  return response.data
+ },
+ updateSettings:async(data:Partial<GlobalCostSettings>):Promise<GlobalCostSettings>=>{
+  const response=await api.put(API_ENDPOINTS.globalCost.settings,data)
+  return response.data
+ },
+ getBudgetStatus:async():Promise<BudgetStatus>=>{
+  const response=await api.get(API_ENDPOINTS.globalCost.budgetStatus)
+  return response.data
+ }
+}
+
+// ============================================================
+// COST REPORTS API
+// ============================================================
+
+export interface CostHistoryItem{
+ id:string
+ project_id:string
+ agent_id:string|null
+ agent_type:string|null
+ service_type:string
+ provider_id:string|null
+ model_id:string|null
+ input_tokens:number
+ output_tokens:number
+ unit_count:number
+ cost_usd:number
+ recorded_at:string|null
+ metadata:Record<string,unknown>|null
+}
+
+export interface CostHistoryResponse{
+ items:CostHistoryItem[]
+ total:number
+ limit:number
+ offset:number
+}
+
+export interface CostSummary{
+ year:number
+ month:number
+ total_cost:number
+ by_service:Record<string,{input_tokens:number;output_tokens:number;call_count:number}>
+ by_project:Record<string,{call_count:number}>
+}
+
+export const costReportApi={
+ getHistory:async(params?:{project_id?:string;year?:number;month?:number;limit?:number;offset?:number}):Promise<CostHistoryResponse>=>{
+  const response=await api.get(API_ENDPOINTS.cost.history,{params})
+  return response.data
+ },
+ getSummary:async(params?:{year?:number;month?:number}):Promise<CostSummary>=>{
+  const response=await api.get(API_ENDPOINTS.cost.summary,{params})
+  return response.data
+ },
+ getExportCsvUrl:(params?:{year?:number;month?:number;project_id?:string}):string=>{
+  const query=new URLSearchParams()
+  if(params?.year)query.set('year',String(params.year))
+  if(params?.month)query.set('month',String(params.month))
+  if(params?.project_id)query.set('project_id',params.project_id)
+  const qs=query.toString()
+  return`${API_BASE_URL}${API_ENDPOINTS.cost.exportCsv}${qs?'?'+qs:''}`
+ },
+ getExportJsonUrl:(params?:{year?:number;month?:number;project_id?:string}):string=>{
+  const query=new URLSearchParams()
+  if(params?.year)query.set('year',String(params.year))
+  if(params?.month)query.set('month',String(params.month))
+  if(params?.project_id)query.set('project_id',params.project_id)
+  const qs=query.toString()
+  return`${API_BASE_URL}${API_ENDPOINTS.cost.exportJson}${qs?'?'+qs:''}`
  }
 }
 

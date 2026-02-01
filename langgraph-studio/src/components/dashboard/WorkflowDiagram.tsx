@@ -272,6 +272,11 @@ function AgentNode({data }:{data:AgentNodeData}){
 )}
     </div>
 )}
+   {isWaitingApproval&&(
+    <div className="mt-0.5" style={{fontSize:fontSize*0.8,color:COLORS.badge.waitingApproval,fontWeight:'bold'}}>
+     承認待ち
+    </div>
+)}
    {/*L/W indicator in bottom right*/}
    {data.hasLW&&(
     <div
@@ -296,26 +301,12 @@ function AgentNode({data }:{data:AgentNodeData}){
     </div>
 )}
    {isWaitingApproval&&(
-    <>
-     <div
-      className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-      style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.badge.waitingApproval}}
-     >
-      !
-     </div>
-     <div
-      className="absolute left-1/2 -translate-x-1/2"
-      style={{
-       bottom:'-14px',
-       fontSize:fontSize*0.75,
-       color:COLORS.badge.waitingApproval,
-       fontWeight:'bold',
-       whiteSpace:'nowrap'
-      }}
-     >
-      承認待ち
-     </div>
-    </>
+    <div
+     className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.badge.waitingApproval}}
+    >
+     !
+    </div>
 )}
   </div>
 )

@@ -11,6 +11,7 @@ interface UIConfigState{
  assetTypeLabels:Record<string,string>
  resolutionLabels:Record<string,string>
  roleLabels:Record<string,string>
+ checkpointTypeLabels:Record<string,string>
  agentRoles:Record<string,string>
  agents:Record<string,UISettingsAgent>
  loaded:boolean
@@ -24,6 +25,7 @@ interface UIConfigState{
  getAssetTypeLabel:(assetType:string)=>string
  getResolutionLabel:(resolution:string)=>string
  getRoleLabel:(role:string)=>string
+ getCheckpointTypeLabel:(checkpointType:string)=>string
  getAgentRole:(agentType:string)=>string
  getAgentServiceType:(agentType:string)=>string
 }
@@ -38,6 +40,7 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
  assetTypeLabels:{},
  resolutionLabels:{},
  roleLabels:{},
+ checkpointTypeLabels:{},
  agentRoles:{},
  agents:{},
  loaded:false,
@@ -58,6 +61,7 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
     assetTypeLabels:response.assetTypeLabels||{},
     resolutionLabels:response.resolutionLabels||{},
     roleLabels:response.roleLabels||{},
+    checkpointTypeLabels:response.checkpointTypeLabels||{},
     agentRoles:response.agentRoles||{},
     agents:response.agents||{},
     loaded:true,
@@ -91,6 +95,9 @@ export const useUIConfigStore=create<UIConfigState>((set,get)=>({
  },
  getRoleLabel:(role:string)=>{
   return get().roleLabels[role]||role
+ },
+ getCheckpointTypeLabel:(checkpointType:string)=>{
+  return get().checkpointTypeLabels[checkpointType]||checkpointType
  },
  getAgentRole:(agentType:string)=>{
   return get().agentRoles[agentType]||agentType

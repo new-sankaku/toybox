@@ -189,7 +189,7 @@ export default function ActivitySidebar():JSX.Element{
   return(
    <div className={cn(
     'bg-nier-bg-panel border-l border-nier-border-light flex flex-col transition-all duration-200',
-    isCollapsed?'w-10' : 'w-64'
+    isCollapsed?'w-sidebar-collapsed' : 'w-sidebar-expanded'
 )}>
     <button
      onClick={()=>setIsCollapsed(!isCollapsed)}
@@ -215,7 +215,7 @@ export default function ActivitySidebar():JSX.Element{
  return(
   <div className={cn(
    'bg-nier-bg-panel border-l border-nier-border-light flex flex-col transition-all duration-200',
-   isCollapsed?'w-10' : 'w-64'
+   isCollapsed?'w-sidebar-collapsed' : 'w-sidebar-expanded'
 )}>
    {/*Header*/}
    <div className="flex items-center justify-between border-b border-nier-border-light">
@@ -237,7 +237,11 @@ export default function ActivitySidebar():JSX.Element{
      <div className="px-2 py-1.5 border-b border-nier-border-light flex-shrink-0">
       <div className="flex items-center justify-between">
        <div className="text-[11px] truncate flex-1 font-medium">{currentProject.name}</div>
-       <span className="text-[10px] px-1 py-0.5 border ml-1 bg-nier-bg-selected border-nier-border-light text-nier-text-light">
+       <span className={`ml-1 ${
+        currentProject.status==='running'?'nier-status-badge-running' :
+         currentProject.status==='paused'?'nier-status-badge-paused' :
+          currentProject.status==='completed'?'nier-status-badge-completed' :
+           currentProject.status==='failed'?'nier-status-badge-failed' : 'nier-status-badge-neutral'}`}>
         {currentProject.status==='running'?'実行中' :
          currentProject.status==='paused'?'一時停止' :
           currentProject.status==='completed'?'完了' :

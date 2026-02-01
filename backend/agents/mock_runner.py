@@ -9,13 +9,14 @@ from .base import (
     AgentType,
     AgentStatus,
 )
-from config_loader import get_mock_content,get_checkpoint_title_config
+from config_loader import get_mock_content,get_checkpoint_title_config,get_provider_default_model
+from middleware.logger import get_logger
 
 
 class MockAgentRunner(AgentRunner):
 
     def __init__(self,data_store=None,**kwargs):
-        self.data_store=data_store
+        self._data_store=data_store
         self._simulation_speed=kwargs.get("simulation_speed",1.0)
 
     async def run_agent(self,context:AgentContext)->AgentOutput:
@@ -56,12 +57,29 @@ class MockAgentRunner(AgentRunner):
         context:AgentContext
     )->AsyncGenerator[Dict[str,Any],None]:
         agent_type=context.agent_type
+        agent_type_str=agent_type.value if hasattr(agent_type,'value') else str(agent_type)
+        trace_id=None
+        start_time=datetime.now()
+
+        if self._data_store:
+            try:
+                model=get_provider_default_model("anthropic")
+                trace=self._data_store.create_trace(
+                    project_id=context.project_id,
+                    agent_id=context.agent_id,
+                    agent_type=agent_type_str,
+                    input_context={"mock":True},
+                    model_used=f"{model} (simulation)"
+                )
+                trace_id=trace.get("id")
+            except Exception as e:
+                get_logger().error(f"MockAgentRunner: failed to create trace: {e}",exc_info=True)
 
         yield {
             "type":"log",
             "data":{
                 "level":"info",
-                "message":f"Mock Agent開始: {agent_type.value if hasattr(agent_type, 'value') else agent_type}",
+                "message":f"Mock Agent開始: {agent_type_str}",
                 "timestamp":datetime.now().isoformat()
             }
         }
@@ -71,16 +89,18 @@ class MockAgentRunner(AgentRunner):
             "data":{"progress":10,"current_task":"初期化中"}
         }
 
-        await asyncio.sleep(0.5*self._simulation_speed)
+        await asyncio.sleep(0.25*self._simulation_speed)
 
         yield {
             "type":"progress",
             "data":{"progress":30,"current_task":"処理中"}
         }
 
-        await asyncio.sleep(0.5*self._simulation_speed)
+        await asyncio.sleep(0.25*self._simulation_speed)
 
         tokens=500+int(1500*self._simulation_speed)
+        input_tokens=int(tokens*0.3)
+        output_tokens=tokens-input_tokens
         yield {
             "type":"tokens",
             "data":{"count":tokens,"total":tokens}
@@ -91,9 +111,26 @@ class MockAgentRunner(AgentRunner):
             "data":{"progress":70,"current_task":"出力生成中"}
         }
 
-        await asyncio.sleep(0.3*self._simulation_speed)
+        await asyncio.sleep(0.15*self._simulation_speed)
 
         output=self._generate_mock_output(context)
+        content=output.get("content","")
+        summary=content[:100] if content else f"{agent_type_str}のモック出力"
+
+        if self._data_store and trace_id:
+            try:
+                duration_ms=int((datetime.now()-start_time).total_seconds()*1000)
+                self._data_store.complete_trace(
+                    trace_id=trace_id,
+                    llm_response=content[:500] if content else "",
+                    output_data=output,
+                    tokens_input=input_tokens,
+                    tokens_output=output_tokens,
+                    status="completed",
+                    output_summary=summary
+                )
+            except Exception as e:
+                get_logger().error(f"MockAgentRunner: failed to complete trace: {e}",exc_info=True)
 
         yield {
             "type":"progress",

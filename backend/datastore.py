@@ -29,6 +29,8 @@ from config_loader import (
  get_checkpoint_content,
  get_generation_metrics_categories,
  get_agent_generation_metrics,
+ get_ui_phases,
+ get_agent_definitions,
 )
 from asset_scanner import get_testdata_path
 from middleware.logger import get_logger
@@ -94,6 +96,7 @@ class DataStore:
    {"type":"game_design","name":"ゲームデザイン","phase":2},
    {"type":"tech_spec","name":"技術仕様","phase":2},
    {"type":"task_split_2","name":"タスク分割2","phase":3},
+   {"type":"data_design","name":"データ設計","phase":3},
    {"type":"asset_character","name":"キャラ","phase":4},
    {"type":"asset_background","name":"背景","phase":4},
    {"type":"asset_ui","name":"UI","phase":4},
@@ -189,6 +192,10 @@ class DataStore:
    pending_cps=[c for c in cp_repo.get_by_agent(dep_agent["id"]) if c["status"]=="pending"]
    if pending_cps:
     return False
+   asset_repo=AssetRepository(session)
+   pending_assets=asset_repo.get_pending_by_agent(dep_agent["id"])
+   if pending_assets:
+    return False
   return True
 
  def _get_next_agents_to_start(self,session,project_id:str)->List[Dict]:
@@ -238,6 +245,19 @@ class DataStore:
    "projectId":agent.project_id,
    "agent":agent_repo.to_dict(agent)
   },agent.project_id)
+
+ def start_next_agents(self,project_id:str)->List[Dict]:
+  with session_scope() as session:
+   proj_repo=ProjectRepository(session)
+   project=proj_repo.get(project_id)
+   if not project or project.status!="running":
+    return []
+   ready_agents=self._get_next_agents_to_start(session,project_id)
+   started=[]
+   for agent in ready_agents:
+    self._start_agent(session,agent)
+    started.append(agent)
+   return started
 
  def _simulate_agent(self,session,agent_dict:Dict):
   if agent_dict["status"]=="waiting_approval":
@@ -483,6 +503,7 @@ class DataStore:
    asset=Asset(
     id=f"asset-{uuid.uuid4().hex[:8]}",
     project_id=agent.project_id,
+    agent_id=agent.id,
     name=real_file["name"],
     type=real_file["type"],
     agent=display_name,
@@ -501,6 +522,7 @@ class DataStore:
    asset=Asset(
     id=f"asset-{uuid.uuid4().hex[:8]}",
     project_id=agent.project_id,
+    agent_id=agent.id,
     name=name,
     type=asset_type,
     agent=display_name,
@@ -515,6 +537,9 @@ class DataStore:
    self._add_system_log_internal(session,agent.project_id,"info",display_name,log_msg)
   session.add(asset)
   session.flush()
+  if not auto_approve:
+   agent.status="waiting_approval"
+   session.flush()
   asset_repo=AssetRepository(session)
   self._emit_event("asset:created",{
    "projectId":agent.project_id,
@@ -750,33 +775,13 @@ class DataStore:
    cp_repo.delete_by_project(project_id)
    syslog_repo.delete_by_project(project_id)
    asset_repo.delete_by_project(project_id)
-   agents_data=[
-    {"type":"concept","name":"コンセプト","phase":0},
-    {"type":"task_split_1","name":"タスク分割1","phase":1},
-    {"type":"concept_detail","name":"コンセプト詳細","phase":2},
-    {"type":"scenario","name":"シナリオ","phase":2},
-    {"type":"world","name":"世界観","phase":2},
-    {"type":"game_design","name":"ゲームデザイン","phase":2},
-    {"type":"tech_spec","name":"技術仕様","phase":2},
-    {"type":"task_split_2","name":"タスク分割2","phase":3},
-    {"type":"asset_character","name":"キャラ","phase":4},
-    {"type":"asset_background","name":"背景","phase":4},
-    {"type":"asset_ui","name":"UI","phase":4},
-    {"type":"asset_effect","name":"エフェクト","phase":4},
-    {"type":"asset_bgm","name":"BGM","phase":4},
-    {"type":"asset_voice","name":"ボイス","phase":4},
-    {"type":"asset_sfx","name":"効果音","phase":4},
-    {"type":"task_split_3","name":"タスク分割3","phase":5},
-    {"type":"code","name":"コード","phase":6},
-    {"type":"event","name":"イベント","phase":6},
-    {"type":"ui_integration","name":"UI統合","phase":6},
-    {"type":"asset_integration","name":"アセット統合","phase":6},
-    {"type":"task_split_4","name":"タスク分割4","phase":7},
-    {"type":"unit_test","name":"単体テスト","phase":8},
-    {"type":"integration_test","name":"統合テスト","phase":8},
-   ]
-   for data in agents_data:
-    agent_repo.create_from_dict(project_id,{"type":data["type"],"phase":data["phase"],"metadata":{"displayName":data["name"]}})
+   ui_phases=get_ui_phases()
+   agent_defs=get_agent_definitions()
+   for phase_idx,phase in enumerate(ui_phases):
+    for agent_type in phase.get("agents",[]):
+     agent_def=agent_defs.get(agent_type,{})
+     display_name=agent_def.get("shortLabel") or agent_def.get("label") or agent_type
+     agent_repo.create_from_dict(project_id,{"type":agent_type,"phase":phase_idx,"metadata":{"displayName":display_name}})
    metrics_repo.create_or_update(project_id,{
     "totalTokensUsed":0,"estimatedTotalTokens":50000,"elapsedTimeSeconds":0,
     "estimatedRemainingSeconds":0,"completedTasks":0,"totalTasks":6,
@@ -979,7 +984,46 @@ class DataStore:
  def update_asset(self,project_id:str,asset_id:str,data:Dict)->Optional[Dict]:
   with session_scope() as session:
    repo=AssetRepository(session)
-   return repo.update_from_dict(project_id,asset_id,data)
+   asset=repo.get(asset_id)
+   if not asset or asset.project_id!=project_id:
+    return None
+   old_status=asset.approval_status
+   result=repo.update_from_dict(project_id,asset_id,data)
+   new_status=data.get("approvalStatus")
+   if new_status and old_status=="pending" and new_status=="approved":
+    self._handle_asset_approval(session,asset,project_id)
+   return result
+
+ def _handle_asset_approval(self,session,asset,project_id:str):
+  if not asset.agent_id:
+   return
+  agent_repo=AgentRepository(session)
+  cp_repo=CheckpointRepository(session)
+  asset_repo=AssetRepository(session)
+  agent=agent_repo.get(asset.agent_id)
+  if not agent:
+   return
+  pending_assets=[a for a in asset_repo.get_pending_by_agent(asset.agent_id) if a.id!=asset.id]
+  pending_cps=cp_repo.get_pending_by_agent(asset.agent_id)
+  if not pending_assets and not pending_cps and agent.status=="waiting_approval":
+   agent.status="completed"
+   agent.progress=100
+   agent.completed_at=datetime.now()
+   agent.current_task=None
+   session.flush()
+   self._add_system_log_internal(session,project_id,"info","System",f"{agent.type}が承認されました")
+   self._emit_event("agent:completed",{"agentId":agent.id,"projectId":project_id},project_id)
+
+ def request_asset_regeneration(self,project_id:str,asset_id:str,feedback:str)->None:
+  with session_scope() as session:
+   asset_repo=AssetRepository(session)
+   asset=asset_repo.get(asset_id)
+   if not asset or asset.project_id!=project_id:
+    return
+   self._add_system_log_internal(
+    session,project_id,"info","System",
+    f"アセット「{asset.name}」の再生成がリクエストされました: {feedback[:100]}"
+   )
 
  def get_project_metrics(self,project_id:str)->Optional[Dict]:
   with session_scope() as session:

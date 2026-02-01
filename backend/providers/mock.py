@@ -65,7 +65,7 @@ class MockProvider(AIProvider):
   temperature:float=0.7,
   **kwargs
  )->ChatResponse:
-  time.sleep(random.uniform(0.1,0.3))
+  time.sleep(random.uniform(0.05,0.15))
 
   content=self._generate_mock_response(messages)
   input_tokens=sum(len(m.content.split())*2 for m in messages)
@@ -93,7 +93,7 @@ class MockProvider(AIProvider):
   words=content.split()
 
   for word in words:
-   time.sleep(random.uniform(0.02,0.05))
+   time.sleep(random.uniform(0.01,0.025))
    yield StreamChunk(content=word+" ")
 
   input_tokens=sum(len(m.content.split())*2 for m in messages)

@@ -20,6 +20,8 @@ export const API_ENDPOINTS={
   logs:(id:string)=>`/api/projects/${id}/logs`,
   assets:(id:string)=>`/api/projects/${id}/assets`,
   asset:(projectId:string,assetId:string)=>`/api/projects/${projectId}/assets/${assetId}`,
+  assetRegenerate:(projectId:string,assetId:string)=>`/api/projects/${projectId}/assets/${assetId}/regenerate`,
+  assetsBulk:(projectId:string)=>`/api/projects/${projectId}/assets/bulk`,
   interventions:(id:string)=>`/api/projects/${id}/interventions`,
   files:(id:string)=>`/api/projects/${id}/files`,
   filesBatch:(id:string)=>`/api/projects/${id}/files/batch`,
@@ -53,7 +55,8 @@ export const API_ENDPOINTS={
   sequence:(id:string)=>`/api/agents/${id}/sequence`,
   execute:(id:string)=>`/api/agents/${id}/execute`,
   executeWithWorkers:(id:string)=>`/api/agents/${id}/execute-with-workers`,
-  traces:(id:string)=>`/api/agents/${id}/traces`
+  traces:(id:string)=>`/api/agents/${id}/traces`,
+  systemPrompt:(id:string)=>`/api/agents/${id}/system-prompt`
  },
  checkpoints:{
   resolve:(id:string)=>`/api/checkpoints/${id}/resolve`
@@ -80,7 +83,8 @@ export const API_ENDPOINTS={
   list:'/api/ai-providers',
   get:(id:string)=>`/api/ai-providers/${id}`,
   models:(id:string)=>`/api/ai-providers/${id}/models`,
-  test:'/api/ai-providers/test'
+  test:'/api/ai-providers/test',
+  serviceTypes:'/api/ai-service-types'
  },
  ai:{
   chat:'/api/ai/chat',
@@ -148,5 +152,15 @@ export const API_ENDPOINTS={
  navigator:{
   message:'/api/navigator/message',
   broadcast:'/api/navigator/broadcast'
+ },
+ globalCost:{
+  settings:'/api/config/global-cost-settings',
+  budgetStatus:'/api/cost/budget-status'
+ },
+ cost:{
+  history:'/api/cost/history',
+  summary:'/api/cost/summary',
+  exportCsv:'/api/cost/export/csv',
+  exportJson:'/api/cost/export/json'
  }
 }as const

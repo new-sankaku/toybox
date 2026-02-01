@@ -65,7 +65,7 @@ export function Modal({
    >
     {/*Header*/}
     {title&&(
-     <div className="flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-3">
+     <div className="flex items-center justify-between nier-surface-header px-4 py-3">
       <h2 className="text-nier-h2 tracking-nier-wide">{title}</h2>
       <Button
        variant="ghost"

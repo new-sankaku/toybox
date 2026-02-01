@@ -6,6 +6,10 @@ from schemas import (
  AgentSchema,AgentCreateSchema,AgentUpdateSchema,
  CheckpointSchema,CheckpointCreateSchema,CheckpointResolveSchema,
  ApiErrorSchema,
+ PromptComponentSchema,AgentSystemPromptSchema,
+ GlobalCostSettingsSchema,GlobalCostSettingsUpdateSchema,
+ BudgetStatusSchema,CostHistoryItemSchema,CostHistoryResponseSchema,
+ CostSummarySchema,
 )
 
 def pydantic_to_openapi_schema(model:Type[BaseModel])->Dict[str,Any]:
@@ -68,6 +72,14 @@ def generate_openapi_spec()->Dict[str,Any]:
   ("CheckpointCreateSchema",CheckpointCreateSchema),
   ("CheckpointResolveSchema",CheckpointResolveSchema),
   ("ApiErrorSchema",ApiErrorSchema),
+  ("PromptComponentSchema",PromptComponentSchema),
+  ("AgentSystemPromptSchema",AgentSystemPromptSchema),
+  ("GlobalCostSettingsSchema",GlobalCostSettingsSchema),
+  ("GlobalCostSettingsUpdateSchema",GlobalCostSettingsUpdateSchema),
+  ("BudgetStatusSchema",BudgetStatusSchema),
+  ("CostHistoryItemSchema",CostHistoryItemSchema),
+  ("CostHistoryResponseSchema",CostHistoryResponseSchema),
+  ("CostSummarySchema",CostSummarySchema),
  ]
  schemas={name:pydantic_to_openapi_schema(model) for name,model in schemas_list}
  spec={
@@ -79,6 +91,7 @@ def generate_openapi_spec()->Dict[str,Any]:
  _add_project_paths(spec)
  _add_agent_paths(spec)
  _add_checkpoint_paths(spec)
+ _add_cost_paths(spec)
  return spec
 
 def _add_project_paths(spec:Dict):
@@ -148,6 +161,14 @@ def _add_agent_paths(spec:Dict):
    "responses":{"200":{"description":"Updated agent","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentSchema"}}}}},
   },
  }
+ spec["paths"]["/api/agents/{agentId}/system-prompt"]={
+  "get":{
+   "summary":"Get agent system prompt configuration",
+   "tags":["Agents"],
+   "parameters":[{"name":"agentId","in":"path","required":True,"schema":{"type":"string"}}],
+   "responses":{"200":{"description":"Agent system prompt","content":{"application/json":{"schema":{"$ref":"#/components/schemas/AgentSystemPromptSchema"}}}},"404":{"description":"Agent not found"}},
+  },
+ }
 
 def _add_checkpoint_paths(spec:Dict):
  spec["paths"]["/api/projects/{projectId}/checkpoints"]={
@@ -180,6 +201,77 @@ def _add_checkpoint_paths(spec:Dict):
    "parameters":[{"name":"checkpointId","in":"path","required":True,"schema":{"type":"string"}}],
    "requestBody":{"required":True,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CheckpointResolveSchema"}}}},
    "responses":{"200":{"description":"Resolved checkpoint","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CheckpointSchema"}}}}},
+  },
+ }
+
+def _add_cost_paths(spec:Dict):
+ spec["paths"]["/api/config/global-cost-settings"]={
+  "get":{
+   "summary":"Get global cost settings",
+   "tags":["Cost"],
+   "responses":{"200":{"description":"Global cost settings","content":{"application/json":{"schema":{"$ref":"#/components/schemas/GlobalCostSettingsSchema"}}}}},
+  },
+  "put":{
+   "summary":"Update global cost settings",
+   "tags":["Cost"],
+   "requestBody":{"required":True,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/GlobalCostSettingsUpdateSchema"}}}},
+   "responses":{"200":{"description":"Updated settings","content":{"application/json":{"schema":{"$ref":"#/components/schemas/GlobalCostSettingsSchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/budget-status"]={
+  "get":{
+   "summary":"Get current budget status",
+   "tags":["Cost"],
+   "responses":{"200":{"description":"Budget status","content":{"application/json":{"schema":{"$ref":"#/components/schemas/BudgetStatusSchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/history"]={
+  "get":{
+   "summary":"Get cost history",
+   "tags":["Cost"],
+   "parameters":[
+    {"name":"project_id","in":"query","schema":{"type":"string"}},
+    {"name":"year","in":"query","schema":{"type":"integer"}},
+    {"name":"month","in":"query","schema":{"type":"integer"}},
+    {"name":"limit","in":"query","schema":{"type":"integer","default":100}},
+    {"name":"offset","in":"query","schema":{"type":"integer","default":0}},
+   ],
+   "responses":{"200":{"description":"Cost history","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CostHistoryResponseSchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/summary"]={
+  "get":{
+   "summary":"Get cost summary",
+   "tags":["Cost"],
+   "parameters":[
+    {"name":"year","in":"query","schema":{"type":"integer"}},
+    {"name":"month","in":"query","schema":{"type":"integer"}},
+   ],
+   "responses":{"200":{"description":"Cost summary","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CostSummarySchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/export/csv"]={
+  "get":{
+   "summary":"Export cost history as CSV",
+   "tags":["Cost"],
+   "parameters":[
+    {"name":"year","in":"query","schema":{"type":"integer"}},
+    {"name":"month","in":"query","schema":{"type":"integer"}},
+    {"name":"project_id","in":"query","schema":{"type":"string"}},
+   ],
+   "responses":{"200":{"description":"CSV file","content":{"text/csv":{"schema":{"type":"string"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/export/json"]={
+  "get":{
+   "summary":"Export cost history as JSON",
+   "tags":["Cost"],
+   "parameters":[
+    {"name":"year","in":"query","schema":{"type":"integer"}},
+    {"name":"month","in":"query","schema":{"type":"integer"}},
+    {"name":"project_id","in":"query","schema":{"type":"string"}},
+   ],
+   "responses":{"200":{"description":"JSON file","content":{"application/json":{"schema":{"type":"object"}}}}},
   },
  }
 

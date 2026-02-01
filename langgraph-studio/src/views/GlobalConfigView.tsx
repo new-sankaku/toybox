@@ -7,9 +7,11 @@ import{
  Eye,EyeOff,RefreshCw,Trash2,CheckCircle,XCircle,AlertTriangle,
  Key,HardDrive,Archive,RotateCcw,Download,Database,Clock,Save
 }from'lucide-react'
+import{GlobalCostManagement}from'@/components/settings/GlobalCostManagement'
+import{CostReportPanel}from'@/components/settings/CostReportPanel'
 import{
  apiKeyApi,aiProviderApi,backupApi,archiveApi,
- type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry,type ApiArchiveStats
+ type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry,type ApiArchiveStats,type AIServiceTypesInfo
 }from'@/services/apiService'
 
 interface ConfigSection{
@@ -19,6 +21,7 @@ interface ConfigSection{
 
 const configSections:ConfigSection[]=[
  {id:'api-keys',label:'APIキー管理'},
+ {id:'cost-management',label:'コスト管理'},
  {id:'data-management',label:'データ管理'}
 ]
 
@@ -36,6 +39,7 @@ function formatDate(dateStr:string):string{
 function ApiKeyManagement():JSX.Element{
  const[keys,setKeys]=useState<ApiKeyInfo[]>([])
  const[providers,setProviders]=useState<AIProviderInfo[]>([])
+ const[serviceTypesInfo,setServiceTypesInfo]=useState<AIServiceTypesInfo|null>(null)
  const[loading,setLoading]=useState(true)
  const[editingKey,setEditingKey]=useState<Record<string,string>>({})
  const[showKey,setShowKey]=useState<Record<string,boolean>>({})
@@ -47,12 +51,14 @@ function ApiKeyManagement():JSX.Element{
  const fetchData=useCallback(async()=>{
   setLoading(true)
   try{
-   const[keyData,providerData]=await Promise.all([
+   const[keyData,providerData,typesData]=await Promise.all([
     apiKeyApi.list(),
-    aiProviderApi.list()
-])
+    aiProviderApi.list(),
+    aiProviderApi.getServiceTypes()
+   ])
    setKeys(keyData)
    setProviders(providerData)
+   setServiceTypesInfo(typesData)
   }catch(e){
    console.error('Failed to fetch:',e)
   }finally{
@@ -109,17 +115,85 @@ function ApiKeyManagement():JSX.Element{
   }
  }
 
+ const groupedProviders=useCallback(()=>{
+  if(!serviceTypesInfo)return{}
+  const groups:Record<string,AIProviderInfo[]>={}
+  for(const t of serviceTypesInfo.types){
+   groups[t]=[]
+  }
+  for(const p of providers){
+   const types=p.serviceTypes||[]
+   if(types.length>0){
+    const primary=types[0]
+    if(!groups[primary])groups[primary]=[]
+    groups[primary].push(p)
+   }
+  }
+  return groups
+ },[providers,serviceTypesInfo])
+
  if(loading){
   return<div className="text-center py-8 text-nier-text-light">読み込み中...</div>
+ }
+
+ const groups=groupedProviders()
+
+ const renderProviderRow=(provider:AIProviderInfo)=>{
+  const keyInfo=getKeyInfo(provider.id)
+  return(
+   <div key={provider.id} className="grid grid-cols-[minmax(100px,140px)_1fr_auto_auto] gap-2 items-center py-2 border-b border-nier-border-light last:border-b-0">
+    <div className="flex items-center gap-1 min-w-0">
+     <span className="text-nier-small truncate">{provider.name}</span>
+     {keyInfo&&(
+      keyInfo.validated
+       ?<CheckCircle size={12} className="text-nier-accent-green flex-shrink-0"/>
+       :<XCircle size={12} className="text-nier-text-light flex-shrink-0"/>
+     )}
+    </div>
+    <div className="flex items-center gap-1 min-w-0">
+     <input
+      type={showKey[provider.id]?'text':'password'}
+      className="flex-1 min-w-0 bg-nier-bg-main border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main placeholder:text-nier-text-light focus:outline-none focus:border-nier-border-dark"
+      placeholder={keyInfo?keyInfo.hint:'APIキーを入力...'}
+      value={editingKey[provider.id]||''}
+      onChange={e=>setEditingKey(p=>({...p,[provider.id]:e.target.value}))}
+     />
+     <button
+      className="p-1 bg-nier-bg-main border border-nier-border-light hover:bg-nier-bg-selected transition-colors flex-shrink-0"
+      onClick={()=>setShowKey(p=>({...p,[provider.id]:!p[provider.id]}))}
+     >
+      {showKey[provider.id]?<EyeOff size={14}/>:<Eye size={14}/>}
+     </button>
+    </div>
+    <Button
+     variant="ghost" size="sm"
+     onClick={()=>handleValidate(provider.id)}
+     disabled={!keyInfo||!!validating[provider.id]}
+     className="flex-shrink-0"
+    >
+     <RefreshCw size={12} className={validating[provider.id]?'animate-spin':''}/>
+     <span className="ml-1 hidden sm:inline">{validating[provider.id]?'検証中':'検証'}</span>
+    </Button>
+    <Button
+     variant="primary" size="sm"
+     onClick={()=>handleSave(provider.id)}
+     disabled={!editingKey[provider.id]||!!saving[provider.id]}
+     className="flex-shrink-0"
+    >
+     <Save size={12}/>
+     <span className="ml-1 hidden sm:inline">{saving[provider.id]?'保存中':'保存'}</span>
+    </Button>
+   </div>
+  )
  }
 
  return(
   <div className="space-y-4">
    <Card>
     <CardHeader>
-     <Key size={16} className="text-nier-text-light"/>
+     <Key size={16}/>
      <span className="text-nier-small font-medium">APIキー管理</span>
-     <span className="text-nier-caption text-nier-text-light ml-2">全プロジェクト共通</span>
+     <span className="text-nier-caption opacity-60 ml-2">全プロジェクト共通</span>
     </CardHeader>
     <CardContent className="border-t border-nier-border-light">
      <div className="text-nier-small text-nier-text-light">
@@ -132,78 +206,47 @@ function ApiKeyManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-)}>
+    )}>
      {message.text}
     </div>
-)}
+   )}
 
-   {providers.map(provider=>{
-    const keyInfo=getKeyInfo(provider.id)
+   {serviceTypesInfo?.types.map(serviceType=>{
+    const providersInGroup=groups[serviceType]||[]
+    if(providersInGroup.length===0)return null
+    const label=serviceTypesInfo.labels[serviceType]||serviceType
+    const half=Math.ceil(providersInGroup.length/2)
+    const leftColumn=providersInGroup.slice(0,half)
+    const rightColumn=providersInGroup.slice(half)
+    const maxRows=Math.max(leftColumn.length,rightColumn.length)
     return(
-     <Card key={provider.id}>
+     <Card key={serviceType}>
       <CardHeader>
-       <div className="flex items-center gap-2">
-        <span className="text-nier-small">{provider.name}</span>
-        {keyInfo&&(
-         keyInfo.validated
-          ?<CheckCircle size={14} className="text-nier-accent-green"/>
-          :<XCircle size={14} className="text-nier-text-header opacity-60"/>
-)}
-       </div>
-       <div className="ml-auto flex items-center gap-1">
-        {keyInfo&&(
-         <>
-          <Button variant="ghost" size="sm" onClick={()=>handleValidate(provider.id)} disabled={!!validating[provider.id]}>
-           <RefreshCw size={12} className={validating[provider.id]?'animate-spin':''}/>
-           <span className="ml-1">{validating[provider.id]?'検証中':'検証'}</span>
-          </Button>
-          <Button variant="ghost" size="sm" onClick={()=>setConfirmDelete(provider.id)}>
-           <Trash2 size={12}/>
-          </Button>
-         </>
-)}
-       </div>
+       <span className="text-nier-small font-medium">{label}</span>
       </CardHeader>
       <CardContent className="border-t border-nier-border-light">
-       <div className="space-y-2">
-        {keyInfo&&editingKey[provider.id]===undefined&&(
-         <div className="flex items-center gap-2 text-nier-small">
-          <span className="text-nier-text-light">キー:</span>
-          <span className="text-nier-text-main font-mono">{keyInfo.hint}</span>
-          {keyInfo.latencyMs!=null&&(
-           <span className="text-nier-caption text-nier-text-light ml-auto">{keyInfo.latencyMs}ms</span>
-)}
-         </div>
-)}
-        <div className="flex gap-2">
-         <div className="flex-1 flex gap-2">
-          <input
-           type={showKey[provider.id]?'text':'password'}
-           className="flex-1 bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main placeholder:text-nier-text-light focus:outline-none focus:border-nier-border-dark"
-           placeholder={keyInfo?'新しいキーを入力...':'APIキーを入力...'}
-           value={editingKey[provider.id]||''}
-           onChange={e=>setEditingKey(p=>({...p,[provider.id]:e.target.value}))}
-          />
-          <button
-           className="p-2 bg-nier-bg-main border border-nier-border-light hover:bg-nier-bg-selected transition-colors"
-           onClick={()=>setShowKey(p=>({...p,[provider.id]:!p[provider.id]}))}
-          >
-           {showKey[provider.id]?<EyeOff size={16}/>:<Eye size={16}/>}
-          </button>
-         </div>
-         <Button
-          variant="primary" size="sm"
-          onClick={()=>handleSave(provider.id)}
-          disabled={!editingKey[provider.id]||!!saving[provider.id]}
-         >
-          <Save size={12}/>
-          <span className="ml-1">{saving[provider.id]?'保存中...':'保存'}</span>
-         </Button>
+       <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6">
+        <div>
+         {Array.from({length:maxRows}).map((_,i)=>{
+          const p=leftColumn[i]
+          if(!p)return<div key={`left-empty-${i}`} className="py-2 border-b border-transparent last:border-b-0">&nbsp;</div>
+          return renderProviderRow(p)
+         })}
+        </div>
+        <div className="border-l border-nier-border-light pl-6 hidden lg:block">
+         {Array.from({length:maxRows}).map((_,i)=>{
+          const p=rightColumn[i]
+          if(!p)return<div key={`right-empty-${i}`} className="py-2 border-b border-transparent last:border-b-0">&nbsp;</div>
+          return renderProviderRow(p)
+         })}
+        </div>
+        <div className="lg:hidden">
+         {rightColumn.map(p=>renderProviderRow(p))}
         </div>
        </div>
       </CardContent>
      </Card>
-)
+    )
    })}
 
    {confirmDelete&&(
@@ -222,9 +265,9 @@ function ApiKeyManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-)}
+   )}
   </div>
-)
+ )
 }
 
 function DataManagement():JSX.Element{
@@ -363,7 +406,7 @@ function DataManagement():JSX.Element{
 
    <Card>
     <CardHeader>
-     <HardDrive size={16} className="text-nier-text-light"/>
+     <HardDrive size={16}/>
      <span className="text-nier-small font-medium">バックアップ管理</span>
      <Button variant="primary" size="sm" className="ml-auto" onClick={handleCreateBackup} disabled={creating}>
       {creating?'作成中...':'新規作成'}
@@ -400,9 +443,9 @@ function DataManagement():JSX.Element{
 
    <Card>
     <CardHeader>
-     <Clock size={14} className="text-nier-text-light"/>
+     <Clock size={14}/>
      <span className="text-nier-small font-medium">クリーンアップ</span>
-     <span className="text-nier-caption text-nier-text-light ml-2">保持期間より古いデータを削除</span>
+     <span className="text-nier-caption opacity-60 ml-2">保持期間より古いデータを削除</span>
     </CardHeader>
     <CardContent className="border-t border-nier-border-light space-y-4">
      <div className="flex items-center gap-3">
@@ -457,7 +500,7 @@ function DataManagement():JSX.Element{
 
    <Card>
     <CardHeader>
-     <Archive size={16} className="text-nier-text-light"/>
+     <Archive size={16}/>
      <span className="text-nier-small font-medium">アーカイブ一覧</span>
     </CardHeader>
     <CardContent className="border-t border-nier-border-light">
@@ -588,6 +631,12 @@ export default function GlobalConfigView():JSX.Element{
 
     <div className="flex-1 min-h-0 overflow-y-auto">
      {activeSection==='api-keys'&&<ApiKeyManagement/>}
+     {activeSection==='cost-management'&&(
+      <div className="space-y-6">
+       <GlobalCostManagement/>
+       <CostReportPanel/>
+      </div>
+     )}
      {activeSection==='data-management'&&<DataManagement/>}
     </div>
    </div>

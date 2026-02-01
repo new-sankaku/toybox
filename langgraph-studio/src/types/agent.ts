@@ -17,6 +17,8 @@ export type AgentType=
  |'worker_code'
  |'worker_asset'
  |'concept'
+ |'architecture'
+ |'environment_setup'
  |'task_split_1'
  |'concept_detail'
  |'scenario'
@@ -165,4 +167,23 @@ export interface QualityCheckResult{
  score:number
  retryNeeded:boolean
  humanReviewNeeded:boolean
+}
+
+export interface PromptComponent{
+ label:string
+ content:string
+ source:string|null
+ order:number
+}
+
+export interface AgentSystemPrompt{
+ agentId:string
+ agentType:string
+ systemPrompt:string
+ systemComponents:PromptComponent[]
+ userPrompt:string|null
+ userComponents:PromptComponent[]
+ principles:string[]
+ basePromptFile:string|null
+ hasQualityFeedback:boolean
 }

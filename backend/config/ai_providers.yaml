@@ -11,7 +11,6 @@ service_labels:
   audio: 音声生成
 
 provider_type_mapping:
-  claude: anthropic
   comfyui: local-comfyui
   tts: local-coqui-tts
   audiocraft: local-audiocraft
@@ -21,20 +20,20 @@ usage_categories:
     label: LLM 高難易度 Task
     service_type: llm
     default:
-      provider: anthropic
-      model: claude-opus-4-5-20251101
+      provider: openrouter
+      model: anthropic/claude-opus-4
   - id: llm_mid
     label: LLM 中難易度 Task
     service_type: llm
     default:
-      provider: anthropic
-      model: claude-sonnet-4-5-20250116
+      provider: openrouter
+      model: anthropic/claude-sonnet-4
   - id: llm_low
     label: LLM 低難易度 Task
     service_type: llm
     default:
-      provider: anthropic
-      model: claude-haiku-4-5-20250116
+      provider: openrouter
+      model: anthropic/claude-haiku-4
   - id: image_background
     label: 画像 背景
     service_type: image
@@ -94,91 +93,71 @@ provider_groups:
     max_concurrent: 1
 
 providers:
-  anthropic:
-    label: Anthropic
-    env_key: ANTHROPIC_API_KEY
+  openrouter:
+    label: OpenRouter
+    env_key: OPENROUTER_API_KEY
     service_types:
       - llm
-    max_concurrent: 3
-    test_model: claude-haiku-4-5-20250116
+    max_concurrent: 5
+    test_model: anthropic/claude-haiku-4
     models:
-      - id: claude-opus-4-5-20251101
-        label: Claude Opus 4.5
+      - id: anthropic/claude-opus-4
+        label: Claude Opus 4
         recommended: true
         max_tokens: 32768
         supports_vision: true
         supports_tools: true
         pricing:
-          input: 5.0
-          output: 25.0
-      - id: claude-sonnet-4-5-20250116
-        label: Claude Sonnet 4.5
+          input: 15.0
+          output: 75.0
+      - id: anthropic/claude-sonnet-4
+        label: Claude Sonnet 4
         max_tokens: 16384
         supports_vision: true
         supports_tools: true
         pricing:
           input: 3.0
           output: 15.0
-      - id: claude-haiku-4-5-20250116
-        label: Claude Haiku 4.5
+      - id: anthropic/claude-haiku-4
+        label: Claude Haiku 4
         max_tokens: 16384
         supports_vision: true
         supports_tools: true
         pricing:
-          input: 1.0
-          output: 5.0
-
-  zhipu:
-    label: Zhipu AI
-    env_key: ZHIPU_API_KEY
-    service_types:
-      - llm
-    max_concurrent: 3
-    test_model: glm-4.7-flash
-    models:
-      - id: glm-4.7
-        label: Zhipu GLM-4.7
-        recommended: true
-        max_tokens: 128000
-        supports_vision: false
+          input: 0.8
+          output: 4.0
+      - id: openai/gpt-4o
+        label: GPT-4o
+        max_tokens: 4096
+        supports_vision: true
         supports_tools: true
         pricing:
-          input: 0.6
-          output: 2.2
-      - id: glm-4.7-flash
-        label: Zhipu GLM-4.7 Flash
-        max_tokens: 128000
-        supports_vision: false
+          input: 2.5
+          output: 10.0
+      - id: openai/gpt-4o-mini
+        label: GPT-4o Mini
+        max_tokens: 4096
+        supports_vision: true
+        supports_tools: true
+        pricing:
+          input: 0.15
+          output: 0.6
+      - id: google/gemini-2.0-flash
+        label: Gemini 2.0 Flash
+        max_tokens: 8192
+        supports_vision: true
         supports_tools: true
         pricing:
           input: 0.1
-          output: 0.1
-
-  deepseek:
-    label: DeepSeek
-    env_key: DEEPSEEK_API_KEY
-    service_types:
-      - llm
-    max_concurrent: 3
-    test_model: deepseek-chat
-    models:
-      - id: deepseek-chat
+          output: 0.4
+      - id: deepseek/deepseek-chat
         label: DeepSeek-V3
-        recommended: true
         max_tokens: 8192
         supports_vision: false
         supports_tools: true
         pricing:
           input: 0.27
           output: 1.68
-      - id: deepseek-reasoner
-        label: DeepSeek-R1
-        max_tokens: 32768
-        supports_vision: false
-        supports_tools: false
-        pricing:
-          input: 0.55
-          output: 2.19
 
   local-comfyui:
     label: Local ComfyUI

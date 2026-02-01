@@ -3,6 +3,23 @@ from flask import Flask,jsonify,request
 from datastore import DataStore
 from middleware.logger import get_logger
 
+def _extract_service_name(model:str)->str:
+ provider_map={
+  "anthropic":"Claude",
+  "openai":"OpenAI",
+  "google":"Gemini",
+  "local-comfyui":"ComfyUI",
+  "local":"Local",
+  "azure":"Azure",
+  "aws":"AWS",
+  "cohere":"Cohere",
+  "mistral":"Mistral"
+ }
+ if not model:
+  return"API"
+ provider=model.split("/")[0].lower() if"/"in model else""
+ return provider_map.get(provider,"API")
+
 def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  traces=data_store.get_traces_by_agent(agent_id)
  llm_jobs=data_store.get_llm_jobs_by_agent(agent_id)
@@ -21,9 +38,9 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  api_participant_map={}
  for model in sorted(api_models):
   pid=f"api:{model}"
-  short_label=model.split("/")[-1].split("(")[0].strip()
+  service_label=_extract_service_name(model)
   api_participant_map[model]=pid
-  participants.append({"id":pid,"label":short_label,"type":"api"})
+  participants.append({"id":pid,"label":service_label,"type":"api"})
  if not api_models:
   participants.append({"id":"api:unknown","label":"AI API","type":"api"})
   api_participant_map["__default__"]="api:unknown"
@@ -36,6 +53,7 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  def _trace_events(t,from_id,api_id):
   trace_id=t.get("id","")
   pair_id=f"pair-{trace_id}" if trace_id else None
+  summary=t.get("outputSummary") or""
   evs=[]
   if t.get("startedAt"):
    evs.append({
@@ -43,7 +61,7 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "from":from_id,
     "to":api_id,
     "type":"request",
-    "label":"プロンプト送信",
+    "label":"",
     "tokens":{"input":t.get("tokensInput",0)} if t.get("tokensInput") else None,
     "durationMs":None,
     "sourceId":trace_id,
@@ -51,12 +69,13 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "pairId":pair_id
    })
   if t.get("completedAt") and t.get("status")=="completed":
+   resp_label=summary[:80] if summary else""
    evs.append({
     "timestamp":t["completedAt"],
     "from":api_id,
     "to":from_id,
     "type":"response",
-    "label":"LLM応答",
+    "label":resp_label,
     "tokens":{"output":t.get("tokensOutput",0)} if t.get("tokensOutput") else None,
     "durationMs":t.get("durationMs"),
     "sourceId":trace_id,
@@ -81,6 +100,7 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  def _job_events(j,from_id,api_id):
   job_id=j.get("id","")
   pair_id=f"pair-{job_id}" if job_id else None
+  resp_content=j.get("responseContent") or""
   evs=[]
   if j.get("createdAt"):
    evs.append({
@@ -88,7 +108,7 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "from":from_id,
     "to":api_id,
     "type":"request",
-    "label":"LLMジョブ送信",
+    "label":"",
     "tokens":{"input":j.get("tokensInput",0)} if j.get("tokensInput") else None,
     "durationMs":None,
     "sourceId":job_id,
@@ -96,12 +116,13 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "pairId":pair_id
    })
   if j.get("completedAt") and j.get("status")=="completed":
+   resp_label=resp_content[:80] if resp_content else""
    evs.append({
     "timestamp":j["completedAt"],
     "from":api_id,
     "to":from_id,
     "type":"response",
-    "label":"LLMジョブ応答",
+    "label":resp_label,
     "tokens":{"output":j.get("tokensOutput",0)} if j.get("tokensOutput") else None,
     "durationMs":int((
      datetime.fromisoformat(j["completedAt"])-
@@ -150,18 +171,20 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
   events.extend(_job_events(j,agent_id,api_id))
  for w in workers:
   w_id=w["id"]
+  w_task_name=w.get("metadata",{}).get("task","")
+  w_pair_id=f"worker-{w_id}"
   if w.get("startedAt"):
    events.append({
     "timestamp":w["startedAt"],
     "from":agent_id,
     "to":w_id,
     "type":"delegation",
-    "label":"タスク委譲",
+    "label":w_task_name,
     "tokens":None,
     "durationMs":None,
     "sourceId":None,
     "sourceType":None,
-    "pairId":None
+    "pairId":w_pair_id
    })
   w_traces=data_store.get_traces_by_agent(w_id)
   w_llm_jobs=data_store.get_llm_jobs_by_agent(w_id)
@@ -179,12 +202,12 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "from":w_id,
     "to":agent_id,
     "type":"result",
-    "label":"結果返却",
+    "label":w_task_name,
     "tokens":None,
     "durationMs":None,
     "sourceId":None,
     "sourceType":None,
-    "pairId":None
+    "pairId":w_pair_id
    })
  if agent.get("completedAt"):
   events.append({
