@@ -129,6 +129,51 @@ function checkInlineStyles() {
   return true;
 }
 
+function checkWebSocketHandlers() {
+  const wsServicePath = path.join(__dirname, '..', 'src', 'services', 'websocketService.ts');
+  const content = fs.readFileSync(wsServicePath, 'utf-8');
+
+  const interfaceMatch = content.match(/interface ServerToClientEvents\s*\{([\s\S]*?)\n\}/);
+  if (!interfaceMatch) {
+    console.log('  ServerToClientEvents interface not found');
+    return false;
+  }
+
+  const definedEvents = [];
+  const eventPattern = /'([^']+)':/g;
+  let match;
+  while ((match = eventPattern.exec(interfaceMatch[1])) !== null) {
+    definedEvents.push(match[1]);
+  }
+
+  const handlerPattern = /this\.socket\.on\s*\(\s*'([^']+)'/g;
+  const handledEvents = [];
+  while ((match = handlerPattern.exec(content)) !== null) {
+    handledEvents.push(match[1]);
+  }
+
+  const builtinEvents = ['connect', 'disconnect', 'error'];
+  const missingHandlers = definedEvents.filter(
+    e => !handledEvents.includes(e) && !builtinEvents.includes(e)
+  );
+  const extraHandlers = handledEvents.filter(
+    e => !definedEvents.includes(e) && !builtinEvents.includes(e)
+  );
+
+  if (missingHandlers.length > 0 || extraHandlers.length > 0) {
+    if (missingHandlers.length > 0) {
+      console.log('  Missing handlers for defined events:');
+      missingHandlers.forEach(e => console.log(`    - ${e}`));
+    }
+    if (extraHandlers.length > 0) {
+      console.log('  Handlers for undefined events:');
+      extraHandlers.forEach(e => console.log(`    - ${e}`));
+    }
+    return false;
+  }
+  return true;
+}
+
 let result = true;
 
 switch (CHECK_TYPE) {
@@ -141,8 +186,11 @@ switch (CHECK_TYPE) {
   case 'inline-style':
     result = checkInlineStyles();
     break;
+  case 'websocket':
+    result = checkWebSocketHandlers();
+    break;
   default:
-    console.log('Usage: build_checks.cjs <surface|emoji|inline-style>');
+    console.log('Usage: build_checks.cjs <surface|emoji|inline-style|websocket>');
     process.exit(1);
 }
 

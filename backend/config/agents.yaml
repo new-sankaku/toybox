@@ -335,7 +335,7 @@ workflow_dependencies:
         level: summary
         focus: 技術仕様策定に必要なプラットフォーム・技術スタック・パフォーマンス要件
   task_split_2:
-    depends_on: [concept_detail, scenario, world, game_design, tech_spec]
+    depends_on: [concept_detail, scenario, world, game_design, tech_spec, data_design]
     context_from:
       concept_detail:
         level: summary
@@ -352,9 +352,15 @@ workflow_dependencies:
       tech_spec:
         level: summary
         focus: アセット制作の技術制約（解像度・フォーマット・パフォーマンス上限）
+      data_design:
+        level: summary
+        focus: アセット制作に必要なデータ構造・エンティティ定義・リソース管理仕様
   data_design:
-    depends_on: [game_design, tech_spec]
+    depends_on: [task_split_1, game_design, tech_spec]
     context_from:
+      task_split_1:
+        level: summary
+        focus: データ設計に必要なタスク構成と設計方針
       game_design:
         level: summary
         focus: キャラクター・アイテム・バトルシステムのメカニクス仕様

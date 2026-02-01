@@ -39,6 +39,16 @@
 ## 修正後の動作確認方法
 コード修正後は `10_build_check.bat` を実行する（サーバー起動不要）。
 
+### 10_build_check.bat の自動検証項目（14項目）
+| # | 検証内容 | 検出するバグ |
+|---|----------|-------------|
+| 1-4 | 構文・print禁止・Ruff | Python基本エラー |
+| 5-7 | OpenAPI生成・TS型生成・整合性 | API型定義漏れ |
+| 8-9 | ESLint・TypeScript | フロントエンド基本エラー |
+| 10-12 | Surface class・絵文字・inline-style | CSS規約違反 |
+| **13** | **スキーマ登録チェーン** | `__init__.py` → `generator.py` 登録漏れ |
+| **14** | **WebSocketハンドラ接続** | `ServerToClientEvents` → `socket.on()` 漏れ |
+
 ### コミット前の追加作業
 ```bash
 cd langgraph-studio && npm run build      # フルビルド確認

@@ -58,6 +58,46 @@ def check_nul_files(project_root:Path)->bool:
         return False
     return True
 
+def check_schema_chain(backend_root:Path)->bool:
+    init_path=backend_root/"schemas"/"__init__.py"
+    generator_path=backend_root/"openapi"/"generator.py"
+    if not init_path.exists() or not generator_path.exists():
+        print("  Required files not found")
+        return False
+    with open(init_path,"r",encoding="utf-8") as f:
+        init_content=f.read()
+    all_match=re.search(r'__all__\s*=\s*\[([\s\S]*?)\]',init_content)
+    if not all_match:
+        print("  __all__ not found in schemas/__init__.py")
+        return False
+    exported=set(re.findall(r'"(\w+)"',all_match.group(1)))
+    with open(generator_path,"r",encoding="utf-8") as f:
+        gen_content=f.read()
+    list_match=re.search(r'schemas_list\s*=\s*\[([\s\S]*?)\]',gen_content)
+    if not list_match:
+        print("  schemas_list not found in generator.py")
+        return False
+    registered=set(re.findall(r'\("(\w+)"',list_match.group(1)))
+    import_match=re.search(r'from schemas import \(([\s\S]*?)\)',gen_content)
+    if not import_match:
+        print("  schemas import not found in generator.py")
+        return False
+    imported=set(re.findall(r'(\w+Schema\w*)',import_match.group(1)))
+    skip_schemas={"BaseSchema","ApiErrorSchema"}
+    exported_schemas={s for s in exported if s.endswith("Schema") and s not in skip_schemas}
+    missing_import=exported_schemas-imported
+    missing_register=imported-registered-skip_schemas
+    errors=[]
+    if missing_import:
+        errors.append(f"  Not imported in generator.py: {missing_import}")
+    if missing_register:
+        errors.append(f"  Imported but not in schemas_list: {missing_register}")
+    if errors:
+        for e in errors:
+            print(e)
+        return False
+    return True
+
 if __name__=="__main__":
     if len(sys.argv)<2:
         print("Usage: build_checks.py <check_type>")
@@ -71,6 +111,8 @@ if __name__=="__main__":
         sys.exit(0 if check_print_usage(backend_root) else 1)
     elif check_type=="nul":
         sys.exit(0 if check_nul_files(project_root) else 1)
+    elif check_type=="schema":
+        sys.exit(0 if check_schema_chain(backend_root) else 1)
     else:
         print(f"Unknown check: {check_type}")
         sys.exit(1)
