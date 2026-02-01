@@ -189,7 +189,7 @@ def seed_testdata_assets(project_id:str="proj-001"):
     url=data["url"],
     thumbnail=data.get("thumbnail"),
     duration=data.get("duration"),
-    approval_status=data.get("approvalStatus","pending"),
+    approval_status=data.get("approvalStatus","approved"),
     created_at=now
    )
    session.add(asset)

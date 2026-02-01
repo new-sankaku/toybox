@@ -39,7 +39,7 @@
 ## 修正後の動作確認方法
 コード修正後は `10_build_check.bat` を実行する（サーバー起動不要）。
 
-### 10_build_check.bat の自動検証項目（14項目）
+### 10_build_check.bat の自動検証項目（16項目）
 | # | 検証内容 | 検出するバグ |
 |---|----------|-------------|
 | 1-4 | 構文・print禁止・Ruff | Python基本エラー |
@@ -48,6 +48,8 @@
 | 10-12 | Surface class・絵文字・inline-style | CSS規約違反 |
 | **13** | **スキーマ登録チェーン** | `__init__.py` → `generator.py` 登録漏れ |
 | **14** | **WebSocketハンドラ接続** | `ServerToClientEvents` → `socket.on()` 漏れ |
+| **15** | **WebSocketイベント整合性** | Backend emit ↔ Frontend型 の不一致 |
+| **16** | **スキーマAPI使用状況** | `schemas_list` 登録済みだがAPI未使用（警告） |
 
 ### コミット前の追加作業
 ```bash

@@ -1,6 +1,6 @@
 import{useActivityFeedStore,type ActivityType}from'@/stores/activityFeedStore'
 import{cn}from'@/lib/utils'
-import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle,DollarSign}from'lucide-react'
+import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle,DollarSign,RotateCcw}from'lucide-react'
 
 const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_started:{icon:Play,color:'text-nier-accent-orange'},
@@ -8,6 +8,7 @@ const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_failed:{icon:XCircle,color:'text-nier-accent-red'},
  agent_paused:{icon:Pause,color:'text-nier-accent-blue'},
  agent_resumed:{icon:Play,color:'text-nier-accent-orange'},
+ agent_retry:{icon:RotateCcw,color:'text-nier-accent-blue'},
  checkpoint_created:{icon:AlertCircle,color:'text-nier-accent-yellow'},
  checkpoint_resolved:{icon:CheckCircle,color:'text-nier-accent-green'},
  phase_changed:{icon:ArrowRight,color:'text-nier-accent-blue'},

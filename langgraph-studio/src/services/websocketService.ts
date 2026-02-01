@@ -55,6 +55,7 @@ interface ServerToClientEvents{
  'agent:waiting_provider':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:paused':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:resumed':(data:{agent:Agent;agentId:string;projectId:string})=>void
+ 'agent:retry':(data:{agent:Agent;agentId:string;projectId:string;previousStatus:string})=>void
  'agent:activated':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:waiting_response':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string;agentStatus?:string})=>void
@@ -283,6 +284,17 @@ class WebSocketService{
    agentStore.updateAgentStatus(data.agentId,'running')
    const name=getAgentDisplayName(data.agent)
    useActivityFeedStore.getState().addEvent('agent_resumed',name,`${name} が再開しました`,data.agentId)
+  })
+
+  this.socket.on('agent:retry',(data)=>{
+   console.log('[WS] Agent retry:',data.agentId)
+   const agentStore=useAgentStore.getState()
+   if(data.agent){
+    agentStore.updateAgent(data.agent.id,data.agent)
+   }
+   agentStore.updateAgentStatus(data.agentId,'pending')
+   const name=getAgentDisplayName(data.agent)
+   useActivityFeedStore.getState().addEvent('agent_retry',name,`${name} が再試行待ちに設定されました`,data.agentId)
   })
 
   this.socket.on('agent:activated',(data)=>{

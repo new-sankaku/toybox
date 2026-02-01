@@ -62,6 +62,7 @@ export interface WebSocketEventMap{
  'agent:waiting_provider':AgentEventData
  'agent:paused':AgentEventData
  'agent:resumed':AgentEventData
+ 'agent:retry':AgentEventData&{previousStatus:string}
  'agent:activated':AgentEventData
  'agent:waiting_response':AgentEventData
  'checkpoint:created':CheckpointCreatedData

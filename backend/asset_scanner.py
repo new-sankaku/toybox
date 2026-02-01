@@ -71,7 +71,7 @@ def scan_directory(base_path:str,subdir:str)->List[Dict]:
                     "url":f"/testdata/{relative_path.replace(os.sep, '/')}",
                     "thumbnail":f"/testdata/{relative_path.replace(os.sep, '/')}" if file_type=='image' else None,
                     "duration":None,
-                    "approvalStatus":"pending",
+                    "approvalStatus":"approved",
                     "filePath":file_path,
                     "relativePath":relative_path.replace(os.sep,'/'),
                 }

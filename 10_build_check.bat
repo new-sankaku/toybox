@@ -7,7 +7,7 @@ echo.
 
 cd /d "%~dp0"
 
-echo [1/14] Check for 'nul' files...
+echo [1/16] Check for 'nul' files...
 echo.
 cd /d "%~dp0backend"
 call venv\Scripts\activate.bat
@@ -21,7 +21,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [2/14] Backend - Syntax Check (all .py files)...
+echo [2/16] Backend - Syntax Check (all .py files)...
 echo.
 python scripts/build_checks.py syntax
 if %errorlevel% neq 0 (
@@ -33,7 +33,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [3/14] Backend - print() usage check...
+echo [3/16] Backend - print() usage check...
 echo.
 python scripts/build_checks.py print
 if errorlevel 1 goto print_error
@@ -47,7 +47,7 @@ pause
 exit /b 1
 :print_done
 
-echo [4/14] Backend - Ruff linter...
+echo [4/16] Backend - Ruff linter...
 echo.
 python -m ruff check . --exclude venv,__pycache__,tests,seeds,scripts --select E9,F63,F7,F82
 if %errorlevel% neq 0 (
@@ -58,7 +58,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [5/14] Backend - OpenAPI Spec Generation...
+echo [5/16] Backend - OpenAPI Spec Generation...
 echo.
 python scripts/generate_openapi.py
 if %errorlevel% neq 0 (
@@ -68,7 +68,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [6/14] Frontend - TypeScript Type Generation...
+echo [6/16] Frontend - TypeScript Type Generation...
 echo.
 cd /d "%~dp0\langgraph-studio"
 call npm run generate-types
@@ -79,7 +79,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [7/14] API Type Consistency Check...
+echo [7/16] API Type Consistency Check...
 echo.
 set "OPENAPI_JSON=%~dp0langgraph-studio\src\types\openapi.json"
 set "API_GENERATED=%~dp0langgraph-studio\src\types\api-generated.ts"
@@ -94,7 +94,7 @@ if "%OPENAPI_TIME%" gtr "%GENERATED_TIME%" (
 echo OK
 echo.
 
-echo [8/14] Frontend - ESLint...
+echo [8/16] Frontend - ESLint...
 echo.
 call npm run lint
 if %errorlevel% neq 0 (
@@ -104,7 +104,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [9/14] Frontend - TypeScript Type Check...
+echo [9/16] Frontend - TypeScript Type Check...
 echo.
 call npm run typecheck
 if %errorlevel% neq 0 (
@@ -114,7 +114,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [10/14] Frontend - Surface class usage...
+echo [10/16] Frontend - Surface class usage...
 echo.
 node scripts/build_checks.cjs surface
 if %errorlevel% neq 0 (
@@ -125,7 +125,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [11/14] Frontend - Color emoji check...
+echo [11/16] Frontend - Color emoji check...
 echo.
 node scripts/build_checks.cjs emoji
 if %errorlevel% neq 0 (
@@ -136,7 +136,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [12/14] Frontend - Inline style check...
+echo [12/16] Frontend - Inline style check...
 echo.
 node scripts/build_checks.cjs inline-style
 if %errorlevel% neq 0 (
@@ -147,7 +147,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [13/14] Backend - Schema registration chain...
+echo [13/16] Backend - Schema registration chain...
 echo.
 cd /d "%~dp0backend"
 python scripts/build_checks.py schema
@@ -160,7 +160,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [14/14] Frontend - WebSocket handler check...
+echo [14/16] Frontend - WebSocket handler check...
 echo.
 cd /d "%~dp0\langgraph-studio"
 node scripts/build_checks.cjs websocket
@@ -173,8 +173,30 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
+echo [15/16] Backend/Frontend - WebSocket events consistency...
+echo.
+cd /d "%~dp0backend"
+python scripts/build_checks.py websocket-events
+if %errorlevel% neq 0 (
+    echo Error: WebSocket events mismatch between Backend and Frontend
+    echo Check: Backend emit calls vs Frontend ServerToClientEvents
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [16/16] Backend - Schema API usage check...
+echo.
+python scripts/build_checks.py schema-usage
+if %errorlevel% neq 0 (
+    echo Warning: Some schemas not used in API paths
+)
+echo OK
+echo.
+
 echo ========================================
-echo   All 14 checks passed!
+echo   All 16 checks passed!
 echo ========================================
 echo.
 echo Note: Run "npm run build" for full build check before commit.

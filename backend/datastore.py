@@ -969,6 +969,7 @@ class DataStore:
     project.updated_at=datetime.now()
     session.flush()
     self._add_system_log_internal(session,project_id,"info","System","Phase 2: 実装 に移行しました")
+    self._emit_event("phase:changed",{"projectId":project_id,"phase":2,"phaseName":"Phase 2: 実装"},project_id)
     get_logger().info(f"Project {project_id} advanced to Phase 2")
 
  def get_system_logs(self,project_id:str)->List[Dict]:

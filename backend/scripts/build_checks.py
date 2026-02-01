@@ -58,6 +58,76 @@ def check_nul_files(project_root:Path)->bool:
         return False
     return True
 
+def check_websocket_events(backend_root:Path)->bool:
+    project_root=backend_root.parent
+    frontend_ws=project_root/"langgraph-studio"/"src"/"services"/"websocketService.ts"
+    if not frontend_ws.exists():
+        print("  websocketService.ts not found")
+        return False
+    with open(frontend_ws,"r",encoding="utf-8") as f:
+        ws_content=f.read()
+    interface_match=re.search(r'interface ServerToClientEvents\s*\{([\s\S]*?)\n\}',ws_content)
+    if not interface_match:
+        print("  ServerToClientEvents interface not found")
+        return False
+    frontend_events=set(re.findall(r"'([^']+)':",interface_match.group(1)))
+    builtin_events={"connect","disconnect","error"}
+    frontend_events-=builtin_events
+    backend_events=set()
+    emit_patterns=[
+        re.compile(r"\.emit\s*\(\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"_emit_event\s*\(\s*['\"]([^'\"]+)['\"]"),
+    ]
+    dynamic_patterns=["f\"agent:{","f'agent:{"]
+    for py_file in backend_root.rglob("*.py"):
+        if"venv" in py_file.parts or"__pycache__" in py_file.parts:
+            continue
+        try:
+            with open(py_file,"r",encoding="utf-8") as f:
+                content=f.read()
+                for pattern in emit_patterns:
+                    for match in pattern.finditer(content):
+                        backend_events.add(match.group(1))
+                for dp in dynamic_patterns:
+                    if dp in content:
+                        backend_events.update(["agent:running","agent:completed","agent:failed","agent:paused"])
+        except Exception:
+            pass
+    internal_events={"provider_health_changed","project:paused","project:status_changed","project:initialized","assets:bulk_updated","asset:regeneration_requested","error:state","agent:budget_exceeded"}
+    backend_public=backend_events-internal_events
+    missing_in_frontend=backend_public-frontend_events
+    missing_in_backend=frontend_events-backend_events
+    errors=[]
+    if missing_in_frontend:
+        errors.append(f"  Backend emits but Frontend missing: {missing_in_frontend}")
+    if missing_in_backend:
+        errors.append(f"  Frontend defines but Backend never emits: {missing_in_backend}")
+    if errors:
+        for e in errors:
+            print(e)
+        return False
+    return True
+
+def check_schema_usage(backend_root:Path)->bool:
+    generator_path=backend_root/"openapi"/"generator.py"
+    if not generator_path.exists():
+        print("  generator.py not found")
+        return False
+    with open(generator_path,"r",encoding="utf-8") as f:
+        gen_content=f.read()
+    list_match=re.search(r'schemas_list\s*=\s*\[([\s\S]*?)\]',gen_content)
+    if not list_match:
+        print("  schemas_list not found")
+        return False
+    registered=set(re.findall(r'\("(\w+)"',list_match.group(1)))
+    paths_section=gen_content[gen_content.find("def _add_"):]
+    used_in_paths=set(re.findall(r'#/components/schemas/(\w+)',paths_section))
+    utility_schemas={"ApiErrorSchema"}
+    unused=registered-used_in_paths-utility_schemas
+    if unused:
+        print(f"  Warning: Schemas in schemas_list but not used in API paths: {unused}")
+    return True
+
 def check_schema_chain(backend_root:Path)->bool:
     init_path=backend_root/"schemas"/"__init__.py"
     generator_path=backend_root/"openapi"/"generator.py"
@@ -113,6 +183,10 @@ if __name__=="__main__":
         sys.exit(0 if check_nul_files(project_root) else 1)
     elif check_type=="schema":
         sys.exit(0 if check_schema_chain(backend_root) else 1)
+    elif check_type=="websocket-events":
+        sys.exit(0 if check_websocket_events(backend_root) else 1)
+    elif check_type=="schema-usage":
+        sys.exit(0 if check_schema_usage(backend_root) else 1)
     else:
         print(f"Unknown check: {check_type}")
         sys.exit(1)
