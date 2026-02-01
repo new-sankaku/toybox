@@ -29,15 +29,15 @@ class GlobalCostSettingsRepository:
 
  def update(self,data:Dict[str,Any])->GlobalCostSettings:
   settings=self.get_or_create_default()
-  if "global_enabled" in data:
+  if"global_enabled" in data:
    settings.global_enabled=data["global_enabled"]
-  if "global_monthly_limit" in data:
+  if"global_monthly_limit" in data:
    settings.global_monthly_limit=str(data["global_monthly_limit"])
-  if "alert_threshold" in data:
+  if"alert_threshold" in data:
    settings.alert_threshold=data["alert_threshold"]
-  if "stop_on_budget_exceeded" in data:
+  if"stop_on_budget_exceeded" in data:
    settings.stop_on_budget_exceeded=data["stop_on_budget_exceeded"]
-  if "services" in data:
+  if"services" in data:
    settings.services=data["services"]
   settings.updated_at=datetime.now()
   self.session.flush()

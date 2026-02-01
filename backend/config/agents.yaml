@@ -599,6 +599,20 @@ dag_execution:
 quality_check_defaults:
   max_retries: 3                     # 品質チェック不合格時の最大リトライ回数
 
+# --- 品質チェック詳細設定 ---
+advanced_quality_check:
+  quality_threshold: 0.6             # 品質スコアの合格閾値(0.0-1.0)
+  escalation:
+    enabled: true                    # 境界スコアの場合に上位モデルで再評価
+    tier2_score_min: 0.5             # エスカレーション対象の下限スコア
+    tier2_score_max: 0.7             # エスカレーション対象の上限スコア
+
+# --- ツール実行制限 ---
+tool_execution_limits:
+  max_iterations: 50                 # ツール実行ループの最大イテレーション数
+  timeout_seconds: 300               # タスク全体のタイムアウト(秒)
+  loop_detection_threshold: 3        # 同一パターン検出でループ判定する回数
+
 # --- Skill Runnerのタスク制限 ---
 # マルチターンツール実行ループの制御パラメータ
 task_limits:

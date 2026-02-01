@@ -1,12 +1,15 @@
 import os
 import asyncio
 import platform
-from typing import Dict,List,Any,Optional
+from typing import Dict,List,Any,Optional,TYPE_CHECKING
 from dataclasses import dataclass,field
 from .base import SkillContext,SkillResult,SkillCategory
 from .registry import get_skill_registry
 from middleware.logger import get_logger
+if TYPE_CHECKING:
+ from cache import FileManager
 
+_file_manager_instance:Optional["FileManager"]=None
 
 @dataclass
 class SkillExecutionConfig:
@@ -18,7 +21,6 @@ class SkillExecutionConfig:
  timeout_seconds:int=120
  max_output_size:int=100000
 
-
 class SkillExecutor:
  def __init__(self,project_id:str,agent_id:str,config:SkillExecutionConfig,skill_restrictions:Optional[Dict[str,Dict[str,Any]]]=None):
   self.project_id=project_id
@@ -27,13 +29,11 @@ class SkillExecutor:
   self._registry=get_skill_registry()
   self._execution_history:List[Dict[str,Any]]=[]
   self._skill_restrictions=skill_restrictions or {}
-
  def get_available_skills(self)->List[Dict[str,Any]]:
   all_skills=self._registry.get_schemas()
   if not self.config.allowed_skills:
    return all_skills
   return [s for s in all_skills if s["name"] in self.config.allowed_skills]
-
  def get_skill_schemas_for_llm(self)->List[Dict[str,Any]]:
   skills=self.get_available_skills()
   tools=[]
@@ -44,7 +44,6 @@ class SkillExecutor:
     "input_schema":skill["parameters"],
    })
   return tools
-
  async def execute_skill(self,skill_name:str,**kwargs)->SkillResult:
   if self.config.allowed_skills and skill_name not in self.config.allowed_skills:
    return SkillResult(success=False,error=f"Skill not allowed: {skill_name}")
@@ -68,7 +67,6 @@ class SkillExecutor:
    "error":result.error,
   })
   return result
-
  async def execute_tool_call(self,tool_call:Dict[str,Any])->Dict[str,Any]:
   skill_name=tool_call.get("name","")
   params=tool_call.get("input",{})
@@ -79,7 +77,6 @@ class SkillExecutor:
    "content":self._format_result(result),
    "is_error":not result.success,
   }
-
  def _format_result(self,result:SkillResult)->str:
   if not result.success:
    return f"Error: {result.error}"
@@ -91,13 +88,30 @@ class SkillExecutor:
    import json
    return json.dumps(output,ensure_ascii=False,indent=2)
   return str(output)
-
  def get_execution_history(self)->List[Dict[str,Any]]:
   return self._execution_history.copy()
-
  def clear_history(self)->None:
   self._execution_history.clear()
 
+def _initialize_file_manager(project_id:str,working_dir:str)->Optional["FileManager"]:
+ global _file_manager_instance
+ try:
+  from cache import FileManager
+  from cache.config import get_file_cache_config
+  config=get_file_cache_config()
+  if not config.enabled:
+   return None
+  _file_manager_instance=FileManager(project_id,working_dir)
+  from .file_skills import FileSkillMixin
+  FileSkillMixin.set_file_manager(_file_manager_instance)
+  get_logger().info(f"FileManager initialized for project {project_id}")
+  return _file_manager_instance
+ except Exception as e:
+  get_logger().warning(f"Failed to initialize FileManager: {e}")
+  return None
+
+def get_file_manager()->Optional["FileManager"]:
+ return _file_manager_instance
 
 def create_skill_executor(
  project_id:str,
@@ -127,9 +141,9 @@ def create_skill_executor(
   timeout_seconds=sandbox_cfg.get("timeout_seconds",120),
   max_output_size=sandbox_cfg.get("max_output_size",100000),
  )
+ _initialize_file_manager(project_id,effective_working_dir)
  skill_restrictions=_extract_skill_restrictions(skill_config)
  return SkillExecutor(project_id,agent_id,config,skill_restrictions)
-
 
 def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
  is_windows=platform.system().lower()=="windows"
@@ -137,7 +151,6 @@ def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
   return sandbox_cfg.get("denied_paths_windows",[])
  else:
   return sandbox_cfg.get("denied_paths_linux",[])
-
 
 def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any],fallback_dir:str)->str:
  output_base=sandbox_cfg.get("output_base","./output")
@@ -147,7 +160,6 @@ def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any],fallback_di
  project_output_dir=os.path.join(output_base,project_id)
  os.makedirs(project_output_dir,exist_ok=True)
  return project_output_dir
-
 
 def _extract_skill_restrictions(skill_config:Dict[str,Any])->Dict[str,Dict[str,Any]]:
  skills_cfg=skill_config.get("skills",{})

@@ -15,3 +15,4 @@ from .llm_job import LlmJobRepository
 from .local_provider_config import LocalProviderConfigRepository
 from .cost_history import CostHistoryRepository
 from .global_cost_settings import GlobalCostSettingsRepository
+from .global_execution_settings import GlobalExecutionSettingsRepository

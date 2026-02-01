@@ -36,7 +36,7 @@ export function ConfirmDialog({
      <p className="text-nier-body mb-4">{message}</p>
      {subMessage&&(
       <p className="text-nier-small text-nier-text-main mb-6">{subMessage}</p>
-     )}
+)}
      <div className="flex gap-3 justify-end">
       <Button variant="secondary" onClick={onCancel}>
        キャンセル
@@ -53,5 +53,5 @@ export function ConfirmDialog({
     </CardContent>
    </Card>
   </div>
- )
+)
 }

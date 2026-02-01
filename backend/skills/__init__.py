@@ -8,6 +8,7 @@ from .build_skills import CodeBuildSkill,CodeTestSkill,CodeLintSkill
 from .asset_skills import ImageGenerateSkill,BgmGenerateSkill,SfxGenerateSkill,VoiceGenerateSkill
 from .search_skills import CodeSearchSkill,FileSearchSkill
 from .web_skills import WebFetchSkill
+from .cache_skills import FileMetadataSkill
 from .executor import SkillExecutor,SkillExecutionConfig,create_skill_executor
 
 __all__=[
@@ -35,6 +36,7 @@ __all__=[
  "CodeSearchSkill",
  "FileSearchSkill",
  "WebFetchSkill",
+ "FileMetadataSkill",
  "SkillExecutor",
  "SkillExecutionConfig",
  "create_skill_executor",

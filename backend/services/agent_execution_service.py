@@ -81,13 +81,16 @@ class AgentExecutionService:
    "agent":self._data_store.get_agent(agent_id)
   },project_id)
   self._emit_pool_speech(agent_id,project_id,"started")
+  advanced_settings=project.get("advancedSettings",{})
+  agent_config=dict(project.get("config",{}))
+  agent_config["advancedSettings"]=advanced_settings
   context=AgentContext(
    project_id=project_id,
    agent_id=agent_id,
    agent_type=agent_type,
    project_concept=project.get("concept",{}),
    previous_outputs=self._get_previous_outputs(project_id,agent["type"]),
-   config=project.get("config",{}),
+   config=agent_config,
    on_progress=lambda p,t:self._on_progress(agent_id,project_id,p,t),
    on_log=lambda l,m:self._on_log(agent_id,project_id,l,m),
    on_checkpoint=lambda t,d:self._on_checkpoint(agent_id,project_id,t,d),
@@ -231,13 +234,16 @@ class AgentExecutionService:
    "projectId":project_id,
    "agent":self._data_store.get_agent(leader_agent_id)
   },project_id)
+  advanced_settings_leader=project.get("advancedSettings",{})
+  leader_config=dict(project.get("config",{}))
+  leader_config["advancedSettings"]=advanced_settings_leader
   context=AgentContext(
    project_id=project_id,
    agent_id=leader_agent_id,
    agent_type=agent_type,
    project_concept=project.get("concept",{}),
    previous_outputs=self._get_previous_outputs(project_id,agent["type"]),
-   config=project.get("config",{}),
+   config=leader_config,
    on_progress=lambda p,t:self._on_progress(leader_agent_id,project_id,p,t),
    on_log=lambda l,m:self._on_log(leader_agent_id,project_id,l,m),
    on_speech=lambda msg:self._on_speech(leader_agent_id,project_id,msg,"llm"),

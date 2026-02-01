@@ -31,7 +31,7 @@ export const useInterventionStore=create<InterventionState>((set,get)=>({
     return{
      interventions:state.interventions.map((i)=>
       i.id===intervention.id?intervention:i
-     )
+)
     }
    }
    return{interventions:[...state.interventions,intervention]}
@@ -40,7 +40,7 @@ export const useInterventionStore=create<InterventionState>((set,get)=>({
   set((state)=>({
    interventions:state.interventions.map((i)=>
     i.id===id?{...i,...updates}:i
-   )
+)
   })),
  removeIntervention:(id)=>
   set((state)=>({
@@ -67,11 +67,11 @@ export const useInterventionStore=create<InterventionState>((set,get)=>({
 export const useWaitingResponseCount=()=>{
  return useInterventionStore((state)=>
   state.interventions.filter((i)=>i.status==='waiting_response').length
- )
+)
 }
 
 export const useInterventionsByProject=(projectId:string)=>{
  return useInterventionStore((state)=>
   state.interventions.filter((i)=>i.projectId===projectId)
- )
+)
 }

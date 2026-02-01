@@ -119,7 +119,7 @@ export default function DataView():JSX.Element{
  ,[assets,filterType,approvalFilter])
 
  const selectedAssetIndex=useMemo(()=>{
-  if(!selectedAsset)return -1
+  if(!selectedAsset)return-1
   return filteredAssets.findIndex(a=>a.id===selectedAsset.id)
  },[selectedAsset,filteredAssets])
 
@@ -176,7 +176,7 @@ export default function DataView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
  const assetCounts={
@@ -363,18 +363,18 @@ export default function DataView():JSX.Element{
        選択解除
       </Button>
      </div>
-    )}
+)}
     <CardContent className="flex-1 overflow-y-auto">
      {loading&&assets.length===0?(
       <div className="text-center py-8 text-nier-text-light">
        <p className="text-nier-small">読み込み中...</p>
       </div>
-     ):filteredAssets.length===0?(
+):filteredAssets.length===0?(
       <div className="text-center py-8 text-nier-text-light">
        <FolderOpen size={32} className="mx-auto mb-2 opacity-50"/>
        <p className="text-nier-small">アセットがありません</p>
       </div>
-     ):viewMode==='grid'?(
+):viewMode==='grid'?(
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
        {filteredAssets.map(asset=>{
         const Icon=typeIcons[asset.type]||FileText
@@ -385,7 +385,7 @@ export default function DataView():JSX.Element{
           className={cn(
            "bg-nier-bg-panel border cursor-pointer hover:border-nier-accent-gold transition-colors p-2 relative",
            isSelected?"border-nier-accent-orange":"border-nier-border-light"
-          )}
+)}
           onClick={()=>setSelectedAsset(asset)}
          >
           <button
@@ -404,7 +404,19 @@ export default function DataView():JSX.Element{
              alt={asset.name}
              className="w-full h-full object-cover"
             />
-           ):asset.type==='audio'?(
+):asset.type==='video'&&asset.url?(
+            <div className="relative w-full h-full">
+             <video
+              src={asset.url}
+              className="w-full h-full object-cover"
+              muted
+              preload="metadata"
+             />
+             <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+              <Play size={24} className="text-white"/>
+             </div>
+            </div>
+):asset.type==='audio'?(
             <button
              onClick={(e)=>{
               e.stopPropagation()
@@ -414,13 +426,13 @@ export default function DataView():JSX.Element{
             >
              {playingAudio===asset.id?(
               <Pause size={16} className="text-nier-text-main"/>
-             ):(
+):(
               <Play size={16} className="text-nier-text-main ml-0.5"/>
-             )}
+)}
             </button>
-           ):(
+):(
             <Icon size={24} className={typeColors[asset.type]}/>
-           )}
+)}
           </div>
           <div className="text-nier-caption font-medium truncate" title={asset.name}>
            {asset.name}
@@ -442,7 +454,7 @@ export default function DataView():JSX.Element{
              >
               <Check size={14}/>
              </button>
-            )}
+)}
             {asset.approvalStatus!=='rejected'&&(
              <button
               onClick={(e)=>{
@@ -454,14 +466,14 @@ export default function DataView():JSX.Element{
              >
               <XCircle size={14}/>
              </button>
-            )}
+)}
            </div>
           </div>
          </div>
-        )
+)
        })}
       </div>
-     ):(
+):(
       <table className="w-full">
        <thead className="nier-surface-header">
         <tr>
@@ -491,7 +503,7 @@ export default function DataView():JSX.Element{
            className={cn(
             "hover:bg-nier-bg-panel transition-colors cursor-pointer",
             isSelected&&"bg-nier-bg-selected"
-           )}
+)}
            onClick={()=>setSelectedAsset(asset)}
           >
            <td className="px-2 py-3">
@@ -533,7 +545,7 @@ export default function DataView():JSX.Element{
               >
                {playingAudio===asset.id?<Pause size={14}/>:<Play size={14}/>}
               </button>
-             )}
+)}
              {asset.approvalStatus!=='approved'&&(
               <button
                onClick={(e)=>{e.stopPropagation();handleApprove(asset.id)}}
@@ -542,7 +554,7 @@ export default function DataView():JSX.Element{
               >
                <Check size={14}/>
               </button>
-             )}
+)}
              {asset.approvalStatus!=='rejected'&&(
               <button
                onClick={(e)=>{e.stopPropagation();handleReject(asset.id)}}
@@ -551,7 +563,7 @@ export default function DataView():JSX.Element{
               >
                <XCircle size={14}/>
               </button>
-             )}
+)}
              <button
               onClick={(e)=>{
                e.stopPropagation()
@@ -566,11 +578,11 @@ export default function DataView():JSX.Element{
             </div>
            </td>
           </tr>
-         )
+)
         })}
        </tbody>
       </table>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -593,14 +605,14 @@ export default function DataView():JSX.Element{
            filterType===type
             ?'bg-nier-bg-selected text-nier-text-main'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
+)}
           onClick={()=>setFilterType(type)}
          >
           <Icon size={14}/>
           <span className="flex-1">{label}</span>
           <span className="text-nier-caption opacity-70">({count})</span>
          </button>
-        )
+)
        })}
       </div>
      </CardContent>
@@ -623,13 +635,13 @@ export default function DataView():JSX.Element{
            approvalFilter===status
             ?'bg-nier-bg-selected text-nier-text-main'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
+)}
           onClick={()=>setApprovalFilter(status)}
          >
           <span>{label}</span>
           <span className="text-nier-caption opacity-70">({count})</span>
          </button>
-        )
+)
        })}
       </div>
      </CardContent>
@@ -646,7 +658,7 @@ export default function DataView():JSX.Element{
         className={cn(
          'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
          viewMode==='grid'?'bg-nier-bg-selected text-nier-text-main':'text-nier-text-light hover:bg-nier-bg-hover'
-        )}
+)}
        >
         <Grid size={14}/>
         グリッド
@@ -656,7 +668,7 @@ export default function DataView():JSX.Element{
         className={cn(
          'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
          viewMode==='list'?'bg-nier-bg-selected text-nier-text-main':'text-nier-text-light hover:bg-nier-bg-hover'
-        )}
+)}
        >
         <List size={14}/>
         リスト
@@ -677,7 +689,7 @@ export default function DataView():JSX.Element{
          className={cn(
           "p-1 transition-colors",
           selectedAssetIndex>0?"text-nier-text-header hover:bg-white/10":"text-nier-text-light/50 cursor-not-allowed"
-         )}
+)}
          title="前のアセット"
         >
          <ChevronLeft size={20}/>
@@ -688,7 +700,7 @@ export default function DataView():JSX.Element{
          className={cn(
           "p-1 transition-colors",
           selectedAssetIndex<filteredAssets.length-1?"text-nier-text-header hover:bg-white/10":"text-nier-text-light/50 cursor-not-allowed"
-         )}
+)}
          title="次のアセット"
         >
          <ChevronRight size={20}/>
@@ -720,7 +732,7 @@ export default function DataView():JSX.Element{
           alt={selectedAsset.name}
           className="max-w-full max-h-full object-contain"
          />
-        )}
+)}
 
         {selectedAsset.type==='audio'&&(
          <div className="flex flex-col items-center">
@@ -740,15 +752,30 @@ export default function DataView():JSX.Element{
              <Pause size={20}/>
              停止
             </>
-           ):(
+):(
             <>
              <Play size={20}/>
              再生
             </>
-           )}
+)}
           </button>
          </div>
-        )}
+)}
+
+        {selectedAsset.type==='video'&&selectedAsset.url&&(
+         <div className="flex flex-col items-center w-full max-w-2xl">
+          <video
+           src={selectedAsset.url}
+           controls
+           className="w-full max-h-[70vh] bg-black"
+           preload="metadata"
+          />
+          <div className="text-nier-small text-nier-text-light mt-4">
+           {selectedAsset.duration&&<span>{selectedAsset.duration}|</span>}
+           {selectedAsset.size}
+          </div>
+         </div>
+)}
 
         {selectedAsset.type==='document'&&(
          <div className="bg-nier-bg-panel border border-nier-border-light p-6 prose prose-sm max-w-none w-full h-full overflow-auto">
@@ -767,9 +794,9 @@ export default function DataView():JSX.Element{
              const isBlock=className?.includes('language-')
              return isBlock?(
               <code className="block bg-nier-bg-main p-4 text-nier-caption font-mono text-nier-text-main overflow-x-auto">{children}</code>
-             ):(
+):(
               <code className="bg-nier-bg-main px-1 py-0.5 text-nier-caption font-mono text-nier-text-main">{children}</code>
-             )
+)
             },
             pre:({children})=><pre className="mb-4">{children}</pre>,
             blockquote:({children})=><blockquote className="border-l-4 border-nier-border-dark pl-4 italic text-nier-text-light mb-3">{children}</blockquote>,
@@ -784,7 +811,7 @@ export default function DataView():JSX.Element{
            {selectedAsset.content||''}
           </ReactMarkdown>
          </div>
-        )}
+)}
 
         {selectedAsset.type==='code'&&(
          <div className="bg-nier-bg-panel border border-nier-border-light p-6 overflow-auto w-full h-full">
@@ -792,7 +819,7 @@ export default function DataView():JSX.Element{
            {selectedAsset.content||''}
           </pre>
          </div>
-        )}
+)}
        </div>
 
        <div className="w-64 flex-shrink-0 border-l border-nier-border-light overflow-y-auto bg-nier-bg-panel">
@@ -830,7 +857,7 @@ export default function DataView():JSX.Element{
             <Check size={14} className="mr-1.5"/>
             承認
            </Button>
-          )}
+)}
           {selectedAsset.approvalStatus!=='rejected'&&(
            <Button
             className="w-full"
@@ -840,7 +867,7 @@ export default function DataView():JSX.Element{
             <XCircle size={14} className="mr-1.5"/>
             却下
            </Button>
-          )}
+)}
           <Button
            className="w-full"
            variant="secondary"
@@ -879,7 +906,7 @@ export default function DataView():JSX.Element{
       </div>
      </div>
     </div>
-   )}
+)}
 
    <audio
     ref={audioRef}
@@ -890,5 +917,5 @@ export default function DataView():JSX.Element{
     }}
    />
   </div>
- )
+)
 }

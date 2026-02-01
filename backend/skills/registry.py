@@ -60,6 +60,7 @@ def _register_default_skills(registry:SkillRegistry)->None:
  from .asset_skills import ImageGenerateSkill,BgmGenerateSkill,SfxGenerateSkill,VoiceGenerateSkill
  from .search_skills import CodeSearchSkill,FileSearchSkill
  from .web_skills import WebFetchSkill
+ from .cache_skills import FileMetadataSkill
  registry.register(FileReadSkill())
  registry.register(FileWriteSkill())
  registry.register(FileEditSkill())
@@ -77,3 +78,4 @@ def _register_default_skills(registry:SkillRegistry)->None:
  registry.register(CodeSearchSkill())
  registry.register(FileSearchSkill())
  registry.register(WebFetchSkill())
+ registry.register(FileMetadataSkill())

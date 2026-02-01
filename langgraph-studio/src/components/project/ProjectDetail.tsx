@@ -58,10 +58,10 @@ export function ProjectDetail({project}:ProjectDetailProps){
         <span className="text-nier-caption text-nier-text-light block">ジャンル</span>
         <span className="text-nier-body">{project.concept.genre}</span>
        </div>
-      )}
+)}
      </div>
     </>
-   )}
+)}
    <div>
     <span className="text-nier-caption text-nier-text-light block">作成日時</span>
     <span className="text-nier-body">
@@ -69,5 +69,5 @@ export function ProjectDetail({project}:ProjectDetailProps){
     </span>
    </div>
   </div>
- )
+)
 }

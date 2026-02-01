@@ -1,535 +1,1182 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LangGraph Game Studio</title>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
-  <style>
-    /*
-     * NieR:Automata UI Style v2
-     * Based on actual game screenshots
-     */
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width,initial-scale=1.0">
+ <title>LangGraph Game Studio</title>
+ <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+ <style>
+  /*
+   * NieR:Automata UI Style v3
+   * Enhanced with depth, microinteractions, and SF aesthetics
+   */
 
-    :root {
-      /* Background colors */
-      --bg-main: #E8E4D4;
-      --bg-panel: #DAD5C3;
-      --bg-selected: #CCC7B5;
-      --bg-header: #57534A;
-      --bg-footer: #57534A;
+  :root {
+   /* Background colors */
+   --bg-main:#E8E4D4;
+   --bg-panel:#DAD5C3;
+   --bg-selected:#CCC7B5;
+   --bg-header:#57534A;
+   --bg-footer:#57534A;
 
-      /* Text colors */
-      --text-main: #454138;
-      --text-light: #7A756A;
-      --text-header: #E8E4D4;
-      --text-footer: #E8E4D4;
+   /* Text colors */
+   --text-main:#454138;
+   --text-light:#7A756A;
+   --text-header:#E8E4D4;
+   --text-footer:#E8E4D4;
 
-      /* Accent colors (category markers) */
-      --accent-red: #B85C5C;
-      --accent-orange: #C4956C;
-      --accent-yellow: #C9C078;
-      --accent-green: #7AAA7A;
-      --accent-blue: #6B8FAA;
+   /* Accent colors */
+   --accent-red:#B85C5C;
+   --accent-orange:#C4956C;
+   --accent-yellow:#C9C078;
+   --accent-green:#7AAA7A;
+   --accent-blue:#6B8FAA;
 
-      /* Borders */
-      --border-light: rgba(69, 65, 56, 0.2);
-      --border-dark: rgba(69, 65, 56, 0.4);
-    }
+   /* Borders */
+   --border-light:rgba(69,65,56,0.2);
+   --border-dark:rgba(69,65,56,0.4);
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+   /* Shadows for depth */
+   --shadow-sm:0 1px 2px rgba(69,65,56,0.08);
+   --shadow-md:0 2px 4px rgba(69,65,56,0.12),0 1px 2px rgba(69,65,56,0.06);
+   --shadow-lg:0 4px 8px rgba(69,65,56,0.15),0 2px 4px rgba(69,65,56,0.08);
+   --shadow-xl:0 8px 16px rgba(69,65,56,0.18),0 4px 8px rgba(69,65,56,0.1);
 
-    body {
-      font-family: 'Noto Sans JP', sans-serif;
-      font-weight: 400;
-      font-size: 14px;
-      background: var(--bg-main);
-      color: var(--text-main);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
+   /* Glow effects */
+   --glow-accent:0 0 8px rgba(184,92,92,0.4);
+  }
 
-    /* ===== Header Tab Navigation ===== */
-    .header-tabs {
-      display: flex;
-      background: var(--bg-header);
-      border-bottom: 2px solid #3D3A33;
-    }
+  * {margin:0;padding:0;box-sizing:border-box;}
 
-    .tab {
-      padding: 12px 24px;
-      color: var(--text-header);
-      font-size: 13px;
-      letter-spacing: 0.1em;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-right: 1px solid rgba(255,255,255,0.1);
-      transition: background 0.15s;
-    }
+  /* ===== Animations ===== */
+  @keyframes scanline {
+   0% {transform:translateY(-100%);}
+   100% {transform:translateY(100vh);}
+  }
 
-    .tab:hover {
-      background: rgba(255,255,255,0.1);
-    }
 
-    .tab.active {
-      background: rgba(255,255,255,0.15);
-    }
+  @keyframes glitch {
+   0%,100% {transform:translate(0);filter:none;}
+   20% {transform:translate(-2px,1px);filter:hue-rotate(90deg);}
+   40% {transform:translate(2px,-1px);filter:hue-rotate(-90deg);}
+   60% {transform:translate(-1px,2px);filter:hue-rotate(180deg);}
+   80% {transform:translate(1px,-2px);filter:none;}
+  }
 
-    .tab-icon {
-      font-size: 11px;
-      opacity: 0.8;
-    }
+  @keyframes slideIn {
+   from {transform:translateX(-8px);opacity:0;}
+   to {transform:translateX(0);opacity:1;}
+  }
 
-    /* Diamond cursor for active tab */
-    .tab.active::before {
-      content: '◇';
-      position: absolute;
-      left: -20px;
-      font-size: 10px;
-    }
+  @keyframes fadeIn {
+   from {opacity:0;}
+   to {opacity:1;}
+  }
 
-    /* ===== Main Content ===== */
-    .main-content {
-      flex: 1;
-      display: flex;
-      padding: 20px;
-      gap: 20px;
-    }
+  @keyframes ripple {
+   0% {transform:scale(0);opacity:0.6;}
+   100% {transform:scale(2);opacity:0;}
+  }
 
-    /* ===== Page Title ===== */
-    .page-title {
-      font-size: 28px;
-      font-weight: 300;
-      letter-spacing: 0.15em;
-      margin-bottom: 20px;
-      display: flex;
-      align-items: baseline;
-      gap: 12px;
-    }
 
-    .page-title-sub {
-      font-size: 14px;
-      color: var(--text-light);
-    }
 
-    /* ===== Left Panel (List) ===== */
-    .left-panel {
-      width: 320px;
-      display: flex;
-      flex-direction: column;
-    }
+  @keyframes toastEnter {
+   0% {transform:translateX(100%);opacity:0;}
+   60% {transform:translateX(-8px);}
+   100% {transform:translateX(0);opacity:1;}
+  }
 
-    /* Diamond marker */
-    .diamond-marker {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      color: var(--text-light);
-      font-size: 12px;
-    }
+  @keyframes toastProgress {
+   from {width:100%;}
+   to {width:0%;}
+  }
 
-    .diamond-marker::before {
-      content: '◇';
-      font-size: 14px;
-    }
+  @keyframes modalEnter {
+   from {transform:scale(0.95);opacity:0;}
+   to {transform:scale(1);opacity:1;}
+  }
 
-    /* List items */
-    .list-container {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-      flex: 1;
-      overflow-y: auto;
-    }
 
-    .list-item {
-      display: flex;
-      align-items: center;
-      padding: 10px 16px;
-      gap: 12px;
-      cursor: pointer;
-      border-bottom: 1px solid var(--border-light);
-      transition: background 0.1s;
-    }
+  @keyframes spinnerRotate {
+   to {transform:rotate(360deg);}
+  }
 
-    .list-item:hover {
-      background: var(--bg-selected);
-    }
+  @keyframes skeletonShimmer {
+   0% {background-position:-200% 0;}
+   100% {background-position:200% 0;}
+  }
 
-    .list-item.selected {
-      background: var(--bg-selected);
-    }
+  /* ===== Base styles ===== */
+  body {
+   font-family:'Noto Sans JP',sans-serif;
+   font-weight:400;
+   font-size:14px;
+   background:linear-gradient(180deg,var(--bg-main) 0%,#DDD8C8 100%);
+   color:var(--text-main);
+   min-height:100vh;
+   display:flex;
+   flex-direction:column;
+   position:relative;
+   overflow-x:hidden;
+  }
 
-    /* Category color marker */
-    .category-marker {
-      width: 4px;
-      height: 16px;
-    }
 
-    .category-marker.system { background: var(--accent-red); }
-    .category-marker.attack { background: var(--accent-orange); }
-    .category-marker.defense { background: var(--accent-yellow); }
-    .category-marker.support { background: var(--accent-green); }
-    .category-marker.hacking { background: var(--accent-blue); }
+  /* ===== Header Tab Navigation ===== */
+  .header-tabs {
+   display:flex;
+   background:linear-gradient(180deg,var(--bg-header) 0%,#4A4740 100%);
+   border-bottom:2px solid #3D3A33;
+   box-shadow:var(--shadow-md);
+   position:relative;
+   z-index:100;
+  }
 
-    .list-item-text {
-      flex: 1;
-    }
+  .tab {
+   padding:12px 24px;
+   color:var(--text-header);
+   font-size:13px;
+   letter-spacing:0.1em;
+   cursor:pointer;
+   display:flex;
+   align-items:center;
+   gap:8px;
+   border-right:1px solid rgba(255,255,255,0.1);
+   transition:all 0.2s ease;
+   position:relative;
+   overflow:hidden;
+  }
 
-    .list-item-value {
-      color: var(--text-light);
-      font-size: 13px;
-    }
+  .tab::before {
+   content:'';
+   position:absolute;
+   bottom:0;left:0;right:0;
+   height:2px;
+   background:var(--text-header);
+   transform:scaleX(0);
+   transition:transform 0.25s ease;
+  }
 
-    .badge-new {
-      background: var(--accent-red);
-      color: white;
-      font-size: 10px;
-      padding: 2px 6px;
-      letter-spacing: 0.05em;
-    }
+  .tab:hover {
+   background:rgba(255,255,255,0.1);
+  }
 
-    /* ===== Right Panel (Detail) ===== */
-    .right-panel {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
+  .tab:hover::before {
+   transform:scaleX(1);
+  }
 
-    /* Detail card */
-    .detail-card {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-    }
+  .tab:active {
+   transform:scale(0.98);
+  }
 
-    .detail-header {
-      background: var(--bg-header);
-      color: var(--text-header);
-      padding: 8px 16px;
-      font-size: 13px;
-      letter-spacing: 0.1em;
-    }
+  .tab.active {
+   background:rgba(255,255,255,0.15);
+  }
 
-    .detail-body {
-      padding: 16px;
-    }
+  .tab.active::before {
+   transform:scaleX(1);
+  }
 
-    /* Status display */
-    .status-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 6px 0;
-      border-bottom: 1px solid var(--border-light);
-    }
+  /* Diamond cursor */
+  .tab.active::after {
+   content:'◇';
+   position:absolute;
+   left:8px;
+   font-size:10px;
+  }
 
-    .status-row:last-child {
-      border-bottom: none;
-    }
+  .tab-icon {
+   font-size:11px;
+   opacity:0.8;
+   transition:transform 0.2s ease;
+  }
 
-    .status-label {
-      color: var(--text-light);
-    }
+  .tab:hover .tab-icon {
+   transform:scale(1.1);
+  }
 
-    .status-value {
-      font-weight: 500;
-    }
+  /* ===== Main Content ===== */
+  .main-content {
+   flex:1;
+   display:flex;
+   padding:20px;
+   gap:20px;
+   animation:fadeIn 0.4s ease;
+  }
 
-    .status-change-up {
-      color: var(--accent-green);
-    }
+  /* ===== Page Title ===== */
+  .page-title {
+   font-size:28px;
+   font-weight:300;
+   letter-spacing:0.15em;
+   margin-bottom:20px;
+   display:flex;
+   align-items:baseline;
+   gap:12px;
+   animation:slideIn 0.4s ease;
+  }
 
-    .status-change-down {
-      color: var(--accent-red);
-    }
+  .page-title-sub {
+   font-size:14px;
+   color:var(--text-light);
+  }
 
-    /* Icon display area */
-    .icon-display {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 120px;
-      background: var(--bg-main);
-      border: 1px solid var(--border-light);
-      margin-bottom: 12px;
-    }
+  /* ===== Left Panel ===== */
+  .left-panel {
+   width:320px;
+   display:flex;
+   flex-direction:column;
+  }
 
-    .icon-symbol {
-      font-size: 48px;
-      color: var(--text-light);
-    }
+  /* Diamond marker */
+  .diamond-marker {
+   display:flex;
+   align-items:center;
+   gap:8px;
+   margin-bottom:8px;
+   color:var(--text-light);
+   font-size:12px;
+  }
 
-    .detail-description {
-      font-size: 13px;
-      line-height: 1.6;
-      color: var(--text-light);
-    }
+  .diamond-marker::before {
+   content:'◇';
+   font-size:14px;
+  }
 
-    /* Progress bar */
-    .progress-bar {
-      height: 8px;
-      background: var(--border-light);
-      margin-top: 8px;
-    }
+  /* List container with depth */
+  .list-container {
+   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
+   border:1px solid var(--border-light);
+   box-shadow:var(--shadow-md);
+   flex:1;
+   overflow-y:auto;
+   transition:box-shadow 0.3s ease;
+  }
 
-    .progress-fill {
-      height: 100%;
-      background: var(--text-main);
-    }
+  .list-container:hover {
+   box-shadow:var(--shadow-lg);
+  }
 
-    /* ===== Footer ===== */
-    .footer {
-      background: var(--bg-footer);
-      color: var(--text-footer);
-      padding: 12px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-top: 2px solid #3D3A33;
-    }
+  /* List items with enhanced interactions */
+  .list-item {
+   display:flex;
+   align-items:center;
+   padding:10px 16px;
+   gap:12px;
+   cursor:pointer;
+   border-bottom:1px solid var(--border-light);
+   transition:all 0.15s ease;
+   position:relative;
+   overflow:hidden;
+  }
 
-    .footer-message {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
+  /* Slide indicator on hover */
+  .list-item::before {
+   content:'';
+   position:absolute;
+   left:0;top:0;bottom:0;
+   width:3px;
+   background:var(--text-main);
+   transform:scaleY(0);
+   transition:transform 0.2s ease;
+  }
 
-    .footer-message::before {
-      content: '';
-      width: 3px;
-      height: 16px;
-      background: var(--text-footer);
-    }
+  .list-item:hover {
+   background:var(--bg-selected);
+   padding-left:20px;
+  }
 
-    .footer-controls {
-      display: flex;
-      gap: 24px;
-      font-size: 13px;
-    }
+  .list-item:hover::before {
+   transform:scaleY(1);
+  }
 
-    .footer-control {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+  .list-item:active {
+   transform:scale(0.99);
+  }
 
-    .control-icon {
-      opacity: 0.7;
-    }
+  .list-item.selected {
+   background:var(--bg-selected);
+   box-shadow:inset 0 0 0 1px var(--border-dark);
+  }
 
-    /* ===== Decorative elements ===== */
-    .corner-dots {
-      position: relative;
-    }
+  .list-item.selected::before {
+   transform:scaleY(1);
+   background:var(--accent-orange);
+  }
 
-    .corner-dots::before,
-    .corner-dots::after {
-      content: '• • •';
-      position: absolute;
-      font-size: 8px;
-      color: var(--text-light);
-      letter-spacing: 4px;
-    }
+  /* Click ripple effect */
+  .list-item .ripple {
+   position:absolute;
+   border-radius:50%;
+   background:rgba(69,65,56,0.15);
+   animation:ripple 0.6s ease-out;
+   pointer-events:none;
+  }
 
-    .corner-dots::before {
-      top: 8px;
-      right: 16px;
-    }
+  /* Category marker with glow */
+  .category-marker {
+   width:4px;
+   height:16px;
+   transition:all 0.2s ease;
+  }
 
-    .corner-dots::after {
-      bottom: 8px;
-      left: 16px;
-    }
+  .list-item:hover .category-marker {
+   box-shadow:0 0 8px currentColor;
+   height:20px;
+  }
 
-    /* ===== Scrollbar ===== */
-    ::-webkit-scrollbar {
-      width: 6px;
-    }
+  .category-marker.system {background:var(--accent-red);color:var(--accent-red);}
+  .category-marker.attack {background:var(--accent-orange);color:var(--accent-orange);}
+  .category-marker.defense {background:var(--accent-yellow);color:var(--accent-yellow);}
+  .category-marker.support {background:var(--accent-green);color:var(--accent-green);}
+  .category-marker.hacking {background:var(--accent-blue);color:var(--accent-blue);}
 
-    ::-webkit-scrollbar-track {
-      background: var(--bg-main);
-    }
+  .list-item-text {
+   flex:1;
+   transition:transform 0.15s ease;
+  }
 
-    ::-webkit-scrollbar-thumb {
-      background: var(--border-dark);
-    }
+  .list-item:hover .list-item-text {
+   transform:translateX(4px);
+  }
 
-    /* ===== Category Legend ===== */
-    .category-legend {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 12px 16px;
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-      margin-bottom: 16px;
-    }
+  .list-item-value {
+   color:var(--text-light);
+   font-size:13px;
+   font-variant-numeric:tabular-nums;
+  }
 
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 13px;
-    }
+  .badge-new {
+   background:var(--accent-red);
+   color:white;
+   font-size:10px;
+   padding:2px 6px;
+   letter-spacing:0.05em;
+  }
 
-    .legend-marker {
-      width: 4px;
-      height: 14px;
-    }
-  </style>
+  /* ===== Right Panel ===== */
+  .right-panel {
+   flex:1;
+   display:flex;
+   flex-direction:column;
+   gap:16px;
+  }
+
+  /* Detail card with enhanced depth */
+  .detail-card {
+   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
+   border:1px solid var(--border-light);
+   box-shadow:var(--shadow-md);
+   transition:all 0.25s ease;
+   animation:slideIn 0.4s ease backwards;
+  }
+
+  .detail-card:nth-child(1) {animation-delay:0.1s;}
+  .detail-card:nth-child(2) {animation-delay:0.2s;}
+  .detail-card:nth-child(3) {animation-delay:0.3s;}
+
+  .detail-card:hover {
+   box-shadow:var(--shadow-lg);
+  }
+
+  .detail-header {
+   background:linear-gradient(90deg,var(--bg-header) 0%,#4A4740 100%);
+   color:var(--text-header);
+   padding:8px 16px;
+   font-size:13px;
+   letter-spacing:0.1em;
+   position:relative;
+   overflow:hidden;
+  }
+
+  /* Subtle shine effect on header */
+  .detail-header::after {
+   content:'';
+   position:absolute;
+   top:0;left:-100%;
+   width:50%;height:100%;
+   background:linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent);
+   transition:left 0.5s ease;
+  }
+
+  .detail-card:hover .detail-header::after {
+   left:150%;
+  }
+
+  .detail-body {
+   padding:16px;
+  }
+
+  /* Status rows with hover */
+  .status-row {
+   display:flex;
+   justify-content:space-between;
+   padding:8px 0;
+   border-bottom:1px solid var(--border-light);
+   transition:all 0.15s ease;
+  }
+
+  .status-row:last-child {
+   border-bottom:none;
+  }
+
+  .status-row:hover {
+   padding-left:4px;
+   background:rgba(69,65,56,0.03);
+  }
+
+  .status-label {
+   color:var(--text-light);
+  }
+
+  .status-value {
+   font-weight:500;
+  }
+
+  .status-change-up {
+   color:var(--accent-green);
+  }
+
+  .status-change-down {
+   color:var(--accent-red);
+  }
+
+  /* Icon display with float animation */
+  .icon-display {
+   display:flex;
+   align-items:center;
+   justify-content:center;
+   height:120px;
+   background:linear-gradient(180deg,var(--bg-main) 0%,#E0DCD0 100%);
+   border:1px solid var(--border-light);
+   margin-bottom:12px;
+   position:relative;
+   overflow:hidden;
+  }
+
+  /* Decorative corner brackets */
+  .icon-display::before,
+  .icon-display::after {
+   content:'';
+   position:absolute;
+   width:16px;height:16px;
+   border:1px solid var(--border-dark);
+  }
+
+  .icon-display::before {
+   top:8px;left:8px;
+   border-right:none;border-bottom:none;
+  }
+
+  .icon-display::after {
+   bottom:8px;right:8px;
+   border-left:none;border-top:none;
+  }
+
+  .icon-symbol {
+   font-size:48px;
+   color:var(--text-light);
+   transition:all 0.3s ease;
+  }
+
+  .icon-display:hover .icon-symbol {
+   transform:scale(1.1);
+   color:var(--text-main);
+  }
+
+  .detail-description {
+   font-size:13px;
+   line-height:1.6;
+   color:var(--text-light);
+  }
+
+  /* Enhanced progress bar */
+  .progress-bar {
+   height:8px;
+   background:var(--border-light);
+   margin-top:12px;
+   position:relative;
+   overflow:hidden;
+  }
+
+  .progress-fill {
+   height:100%;
+   background:linear-gradient(90deg,var(--text-main) 0%,var(--accent-orange) 100%);
+   position:relative;
+   transition:width 0.5s ease;
+  }
+
+
+  /* Checkpoint card special styling */
+  .checkpoint-card .detail-header {
+   background:linear-gradient(90deg,var(--accent-red) 0%,#A04E4E 100%);
+  }
+
+  .checkpoint-card .detail-header::before {
+   content:'';
+   position:absolute;
+   left:0;top:0;bottom:0;
+   width:4px;
+   background:white;
+   opacity:0.3;
+  }
+
+  /* Status dot indicator */
+  .status-dot {
+   display:inline-block;
+   width:8px;height:8px;
+   border-radius:50%;
+   margin-right:8px;
+  }
+
+  .status-dot.active {
+   background:var(--accent-orange);
+  }
+
+  .status-dot.waiting {
+   background:var(--accent-yellow);
+  }
+
+  .status-dot.complete {
+   background:var(--accent-green);
+  }
+
+  /* ===== Category Legend ===== */
+  .category-legend {
+   display:flex;
+   flex-direction:column;
+   gap:8px;
+   padding:12px 16px;
+   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
+   border:1px solid var(--border-light);
+   box-shadow:var(--shadow-sm);
+   margin-bottom:16px;
+  }
+
+  .legend-item {
+   display:flex;
+   align-items:center;
+   gap:8px;
+   font-size:13px;
+   transition:all 0.15s ease;
+   padding:4px;
+   margin:-4px;
+   cursor:default;
+  }
+
+  .legend-item:hover {
+   background:rgba(69,65,56,0.05);
+   padding-left:8px;
+  }
+
+  .legend-marker {
+   width:4px;
+   height:14px;
+   transition:all 0.2s ease;
+  }
+
+  .legend-item:hover .legend-marker {
+   width:6px;
+   height:18px;
+  }
+
+  /* ===== Footer ===== */
+  .footer {
+   background:linear-gradient(180deg,var(--bg-footer) 0%,#4A4740 100%);
+   color:var(--text-footer);
+   padding:12px 24px;
+   display:flex;
+   justify-content:space-between;
+   align-items:center;
+   border-top:2px solid #3D3A33;
+   box-shadow:0 -2px 8px rgba(69,65,56,0.1);
+  }
+
+  .footer-message {
+   display:flex;
+   align-items:center;
+   gap:8px;
+  }
+
+  .footer-message::before {
+   content:'';
+   width:3px;
+   height:16px;
+   background:var(--text-footer);
+  }
+
+  .footer-controls {
+   display:flex;
+   gap:24px;
+   font-size:13px;
+  }
+
+  .footer-control {
+   display:flex;
+   align-items:center;
+   gap:6px;
+   cursor:pointer;
+   padding:4px 8px;
+   transition:all 0.15s ease;
+  }
+
+  .footer-control:hover {
+   background:rgba(255,255,255,0.1);
+  }
+
+  .footer-control:active {
+   transform:scale(0.95);
+  }
+
+  .control-icon {
+   opacity:0.7;
+   transition:opacity 0.15s ease;
+  }
+
+  .footer-control:hover .control-icon {
+   opacity:1;
+  }
+
+  /* ===== Decorative elements ===== */
+  .corner-dots {
+   position:relative;
+  }
+
+  .corner-dots::before,
+  .corner-dots::after {
+   content:'• • •';
+   position:absolute;
+   font-size:8px;
+   color:var(--text-light);
+   letter-spacing:4px;
+   opacity:0.5;
+  }
+
+  .corner-dots::before {
+   top:8px;right:16px;
+  }
+
+  .corner-dots::after {
+   bottom:8px;left:16px;
+  }
+
+  /* ===== Scrollbar ===== */
+  ::-webkit-scrollbar {
+   width:6px;
+  }
+
+  ::-webkit-scrollbar-track {
+   background:var(--bg-main);
+  }
+
+  ::-webkit-scrollbar-thumb {
+   background:var(--border-dark);
+   transition:background 0.2s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+   background:var(--text-light);
+  }
+
+  /* ===== Focus styles for keyboard navigation ===== */
+  .tab:focus-visible,
+  .list-item:focus-visible,
+  .footer-control:focus-visible,
+  .btn:focus-visible {
+   outline:2px solid var(--accent-blue);
+   outline-offset:2px;
+  }
+
+  /* ===== Buttons ===== */
+  .btn {
+   padding:8px 16px;
+   font-size:13px;
+   letter-spacing:0.05em;
+   border:1px solid var(--border-dark);
+   background:var(--bg-panel);
+   color:var(--text-main);
+   cursor:pointer;
+   transition:all 0.15s ease;
+   position:relative;
+   overflow:hidden;
+  }
+
+  .btn:hover {
+   background:var(--bg-selected);
+   box-shadow:var(--shadow-sm);
+  }
+
+  .btn:active {
+   transform:scale(0.98);
+  }
+
+  .btn-primary {
+   background:var(--bg-header);
+   color:var(--text-header);
+   border-color:var(--bg-header);
+  }
+
+  .btn-primary:hover {
+   background:#4A4740;
+  }
+
+  .btn-danger {
+   background:var(--accent-red);
+   color:white;
+   border-color:var(--accent-red);
+  }
+
+  .btn-danger:hover {
+   background:#A04E4E;
+  }
+
+  /* ===== Toast notifications ===== */
+  .toast-container {
+   position:fixed;
+   top:80px;right:20px;
+   display:flex;
+   flex-direction:column;
+   gap:12px;
+   z-index:1000;
+  }
+
+  .toast {
+   background:var(--bg-header);
+   color:var(--text-header);
+   padding:12px 16px;
+   min-width:280px;
+   box-shadow:var(--shadow-xl);
+   animation:toastEnter 0.4s ease;
+   position:relative;
+   overflow:hidden;
+  }
+
+  .toast-progress {
+   position:absolute;
+   bottom:0;left:0;
+   height:3px;
+   background:var(--accent-orange);
+   animation:toastProgress 4s linear forwards;
+  }
+
+  .toast-content {
+   display:flex;
+   align-items:center;
+   gap:12px;
+  }
+
+  .toast-icon {
+   font-size:16px;
+  }
+
+  .toast.success .toast-icon {color:var(--accent-green);}
+  .toast.error .toast-icon {color:var(--accent-red);}
+  .toast.warning .toast-icon {color:var(--accent-yellow);}
+  .toast.info .toast-icon {color:var(--accent-blue);}
+
+  /* ===== Modal ===== */
+  .modal-overlay {
+   position:fixed;
+   inset:0;
+   background:rgba(69,65,56,0.6);
+   display:flex;
+   align-items:center;
+   justify-content:center;
+   z-index:1001;
+   animation:fadeIn 0.2s ease;
+  }
+
+  .modal {
+   background:var(--bg-panel);
+   border:1px solid var(--border-dark);
+   box-shadow:var(--shadow-xl);
+   min-width:400px;
+   max-width:90vw;
+   animation:modalEnter 0.3s ease;
+  }
+
+  .modal-header {
+   background:var(--bg-header);
+   color:var(--text-header);
+   padding:12px 16px;
+   font-size:14px;
+   letter-spacing:0.1em;
+  }
+
+  .modal-body {
+   padding:20px;
+  }
+
+  .modal-footer {
+   padding:12px 16px;
+   display:flex;
+   justify-content:flex-end;
+   gap:12px;
+   border-top:1px solid var(--border-light);
+  }
+
+  /* ===== Tooltip ===== */
+  .tooltip {
+   position:relative;
+  }
+
+  .tooltip::after {
+   content:attr(data-tooltip);
+   position:absolute;
+   bottom:calc(100% + 8px);
+   left:50%;
+   transform:translateX(-50%) scale(0.95);
+   background:var(--bg-header);
+   color:var(--text-header);
+   padding:6px 10px;
+   font-size:12px;
+   white-space:nowrap;
+   opacity:0;
+   pointer-events:none;
+   transition:all 0.2s ease;
+   z-index:100;
+  }
+
+  .tooltip:hover::after {
+   opacity:1;
+   transform:translateX(-50%) scale(1);
+  }
+
+  /* ===== Loading states ===== */
+  .skeleton {
+   background:linear-gradient(90deg,var(--bg-selected) 0%,var(--bg-panel) 50%,var(--bg-selected) 100%);
+   background-size:200% 100%;
+   animation:skeletonShimmer 1.5s infinite;
+  }
+
+  .spinner {
+   width:24px;height:24px;
+   border:2px solid var(--border-light);
+   border-top-color:var(--text-main);
+   border-radius:50%;
+   animation:spinnerRotate 0.8s linear infinite;
+  }
+
+  /* ===== Glitch effect for errors ===== */
+  .glitch {
+   animation:glitch 0.3s ease;
+  }
+
+  .glitch-text {
+   position:relative;
+  }
+
+  .glitch-text::before,
+  .glitch-text::after {
+   content:attr(data-text);
+   position:absolute;
+   top:0;left:0;
+   opacity:0.8;
+  }
+
+  .glitch-text:hover::before {
+   animation:glitch 0.3s ease infinite;
+   color:var(--accent-red);
+   clip-path:polygon(0 0,100% 0,100% 45%,0 45%);
+  }
+
+  .glitch-text:hover::after {
+   animation:glitch 0.3s ease infinite reverse;
+   color:var(--accent-blue);
+   clip-path:polygon(0 55%,100% 55%,100% 100%,0 100%);
+  }
+ </style>
 </head>
 <body>
 
-  <!-- Header Tabs -->
-  <nav class="header-tabs">
-    <div class="tab"><span class="tab-icon">⊞</span> MAP</div>
-    <div class="tab"><span class="tab-icon">✦</span> QUEST</div>
-    <div class="tab active"><span class="tab-icon">⚙</span> SYSTEM</div>
-    <div class="tab"><span class="tab-icon">⚔</span> AGENTS</div>
-    <div class="tab"><span class="tab-icon">◈</span> LOGS</div>
-    <div class="tab"><span class="tab-icon">☰</span> DATA</div>
-  </nav>
+ <!-- Header Tabs -->
+ <nav class="header-tabs">
+  <div class="tab" tabindex="0"><span class="tab-icon">⊞</span> MAP</div>
+  <div class="tab" tabindex="0"><span class="tab-icon">✦</span> QUEST</div>
+  <div class="tab active" tabindex="0"><span class="tab-icon">⚙</span> SYSTEM</div>
+  <div class="tab" tabindex="0"><span class="tab-icon">⚔</span> AGENTS</div>
+  <div class="tab" tabindex="0"><span class="tab-icon">◈</span> LOGS</div>
+  <div class="tab" tabindex="0"><span class="tab-icon">☰</span> DATA</div>
+ </nav>
 
-  <!-- Main Content -->
-  <div class="main-content corner-dots">
-    <div class="left-panel">
-      <div class="page-title">
-        SYSTEM <span class="page-title-sub">- エージェント管理</span>
-      </div>
+ <!-- Toast Container -->
+ <div class="toast-container" id="toastContainer"></div>
 
-      <!-- Category Legend -->
-      <div class="category-legend">
-        <div class="legend-item">
-          <div class="legend-marker" style="background: var(--accent-red)"></div>
-          システム
-        </div>
-        <div class="legend-item">
-          <div class="legend-marker" style="background: var(--accent-orange)"></div>
-          実行中
-        </div>
-        <div class="legend-item">
-          <div class="legend-marker" style="background: var(--accent-yellow)"></div>
-          待機中
-        </div>
-        <div class="legend-item">
-          <div class="legend-marker" style="background: var(--accent-green)"></div>
-          完了
-        </div>
-      </div>
+ <!-- Main Content -->
+ <div class="main-content corner-dots">
+  <div class="left-panel">
+   <div class="page-title">
+    SYSTEM <span class="page-title-sub">- エージェント管理</span>
+   </div>
 
-      <div class="diamond-marker">エージェント一覧</div>
-
-      <div class="list-container">
-        <div class="list-item selected">
-          <div class="category-marker attack"></div>
-          <div class="list-item-text">CodeLeader</div>
-          <div class="list-item-value">67%</div>
-        </div>
-        <div class="list-item">
-          <div class="category-marker attack"></div>
-          <div class="list-item-text">AssetLeader</div>
-          <div class="list-item-value">45%</div>
-        </div>
-        <div class="list-item">
-          <div class="category-marker defense"></div>
-          <div class="list-item-text">Tester</div>
-          <div class="list-item-value">--</div>
-        </div>
-        <div class="list-item">
-          <div class="category-marker defense"></div>
-          <div class="list-item-text">Reviewer</div>
-          <div class="list-item-value">--</div>
-        </div>
-        <div class="list-item">
-          <div class="category-marker support"></div>
-          <div class="list-item-text">Integrator</div>
-          <div class="list-item-value">--</div>
-        </div>
-      </div>
+   <!-- Category Legend -->
+   <div class="category-legend">
+    <div class="legend-item">
+     <div class="legend-marker" style="background:var(--accent-red)"></div>
+     システム
     </div>
-
-    <div class="right-panel">
-      <!-- Agent Detail -->
-      <div class="detail-card">
-        <div class="detail-header">CodeLeader</div>
-        <div class="detail-body">
-          <div class="icon-display">
-            <div class="icon-symbol">◈</div>
-          </div>
-          <div class="detail-description">
-            コード実装を統括するリーダーエージェント。<br>
-            配下のCodeWorkerに対してタスクを分配し、進捗を管理する。
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: 67%"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Status -->
-      <div class="detail-card">
-        <div class="detail-header">ステータス</div>
-        <div class="detail-body">
-          <div class="status-row">
-            <span class="status-label">プロジェクト：</span>
-            <span class="status-value">Untitled RPG</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">フェーズ：</span>
-            <span class="status-value">Phase 2 - Development</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">実行時間：</span>
-            <span class="status-value">00:45:23</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">タスク完了：</span>
-            <span class="status-value">12 / 28</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">サブエージェント：</span>
-            <span class="status-value">3 active</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Checkpoint -->
-      <div class="detail-card">
-        <div class="detail-header" style="background: var(--accent-red);">
-          ◈ CHECKPOINT - 承認待ち
-        </div>
-        <div class="detail-body">
-          <div class="status-row">
-            <span class="status-label">種別：</span>
-            <span class="status-value">Design Document Review</span>
-          </div>
-          <div class="status-row">
-            <span class="status-label">待機時間：</span>
-            <span class="status-value status-change-down">1h 23m</span>
-          </div>
-        </div>
-      </div>
+    <div class="legend-item">
+     <div class="legend-marker" style="background:var(--accent-orange)"></div>
+     実行中
     </div>
+    <div class="legend-item">
+     <div class="legend-marker" style="background:var(--accent-yellow)"></div>
+     待機中
+    </div>
+    <div class="legend-item">
+     <div class="legend-marker" style="background:var(--accent-green)"></div>
+     完了
+    </div>
+   </div>
+
+   <div class="diamond-marker">エージェント一覧</div>
+
+   <div class="list-container">
+    <div class="list-item selected" tabindex="0">
+     <div class="category-marker attack"></div>
+     <span class="status-dot active"></span>
+     <div class="list-item-text">CodeLeader</div>
+     <div class="list-item-value">67%</div>
+    </div>
+    <div class="list-item" tabindex="0">
+     <div class="category-marker attack"></div>
+     <span class="status-dot active"></span>
+     <div class="list-item-text">AssetLeader</div>
+     <div class="list-item-value">45%</div>
+    </div>
+    <div class="list-item" tabindex="0">
+     <div class="category-marker defense"></div>
+     <span class="status-dot waiting"></span>
+     <div class="list-item-text">Tester</div>
+     <div class="list-item-value">--</div>
+    </div>
+    <div class="list-item" tabindex="0">
+     <div class="category-marker defense"></div>
+     <span class="status-dot waiting"></span>
+     <div class="list-item-text">Reviewer</div>
+     <div class="list-item-value">--</div>
+    </div>
+    <div class="list-item" tabindex="0">
+     <div class="category-marker support"></div>
+     <span class="status-dot complete"></span>
+     <div class="list-item-text">Integrator</div>
+     <div class="list-item-value">--</div>
+     <span class="badge-new">NEW</span>
+    </div>
+   </div>
+
+   <div style="margin-top:16px;display:flex;gap:8px;">
+    <button class="btn btn-primary" id="btnShowToast">通知テスト</button>
+    <button class="btn" id="btnShowModal">モーダル</button>
+   </div>
   </div>
 
-  <!-- Footer -->
-  <footer class="footer">
-    <div class="footer-message">プロジェクトを選択してください。</div>
-    <div class="footer-controls">
-      <div class="footer-control">
-        <span class="control-icon">↕</span> 選択
-      </div>
-      <div class="footer-control">
-        <span class="control-icon">◉</span> 決定
-      </div>
-      <div class="footer-control">
-        <span class="control-icon">⊗</span> 戻る
-      </div>
+  <div class="right-panel">
+   <!-- Agent Detail -->
+   <div class="detail-card">
+    <div class="detail-header">CodeLeader</div>
+    <div class="detail-body">
+     <div class="icon-display">
+      <div class="icon-symbol">◈</div>
+     </div>
+     <div class="detail-description">
+      コード実装を統括するリーダーエージェント。<br>
+      配下のCodeWorkerに対してタスクを分配し、進捗を管理する。
+     </div>
+     <div class="progress-bar">
+      <div class="progress-fill" style="width:67%"></div>
+     </div>
     </div>
-  </footer>
+   </div>
+
+   <!-- Status -->
+   <div class="detail-card">
+    <div class="detail-header">ステータス</div>
+    <div class="detail-body">
+     <div class="status-row">
+      <span class="status-label">プロジェクト：</span>
+      <span class="status-value">Untitled RPG</span>
+     </div>
+     <div class="status-row">
+      <span class="status-label">フェーズ：</span>
+      <span class="status-value">Phase 2 - Development</span>
+     </div>
+     <div class="status-row">
+      <span class="status-label">実行時間：</span>
+      <span class="status-value" id="runningTime">00:45:23</span>
+     </div>
+     <div class="status-row">
+      <span class="status-label">タスク完了：</span>
+      <span class="status-value">12 / 28</span>
+     </div>
+     <div class="status-row">
+      <span class="status-label">サブエージェント：</span>
+      <span class="status-value"><span class="status-dot active"></span>3 active</span>
+     </div>
+    </div>
+   </div>
+
+   <!-- Checkpoint -->
+   <div class="detail-card checkpoint-card">
+    <div class="detail-header">
+     ◈ CHECKPOINT - 承認待ち
+    </div>
+    <div class="detail-body">
+     <div class="status-row">
+      <span class="status-label">種別：</span>
+      <span class="status-value">Design Document Review</span>
+     </div>
+     <div class="status-row">
+      <span class="status-label">待機時間：</span>
+      <span class="status-value status-change-down">1h 23m</span>
+     </div>
+     <div style="margin-top:12px;display:flex;gap:8px;">
+      <button class="btn btn-primary tooltip" data-tooltip="承認してタスクを続行">承認</button>
+      <button class="btn btn-danger tooltip" data-tooltip="タスクを中断">却下</button>
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+
+ <!-- Footer -->
+ <footer class="footer">
+  <div class="footer-message">プロジェクトを選択してください。</div>
+  <div class="footer-controls">
+   <div class="footer-control" tabindex="0">
+    <span class="control-icon">↕</span> 選択
+   </div>
+   <div class="footer-control" tabindex="0">
+    <span class="control-icon">◉</span> 決定
+   </div>
+   <div class="footer-control" tabindex="0">
+    <span class="control-icon">⊗</span> 戻る
+   </div>
+  </div>
+ </footer>
+
+ <!-- Modal Template -->
+ <div class="modal-overlay" id="modalOverlay" style="display:none;">
+  <div class="modal">
+   <div class="modal-header">確認</div>
+   <div class="modal-body">
+    <p>この操作を実行しますか？</p>
+    <p style="margin-top:12px;color:var(--text-light);font-size:13px;">
+     選択したエージェントの設定が変更されます。
+    </p>
+   </div>
+   <div class="modal-footer">
+    <button class="btn" id="btnModalCancel">キャンセル</button>
+    <button class="btn btn-primary" id="btnModalConfirm">確認</button>
+   </div>
+  </div>
+ </div>
+
+ <script>
+  // Tab switching
+  document.querySelectorAll('.tab').forEach(tab=>{
+   tab.addEventListener('click',function(){
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    this.classList.add('active');
+   });
+  });
+
+  // List item selection with ripple
+  document.querySelectorAll('.list-item').forEach(item=>{
+   item.addEventListener('click',function(e){
+    document.querySelectorAll('.list-item').forEach(i=>i.classList.remove('selected'));
+    this.classList.add('selected');
+
+    // Ripple effect
+    const ripple=document.createElement('span');
+    ripple.className='ripple';
+    const rect=this.getBoundingClientRect();
+    const size=Math.max(rect.width,rect.height);
+    ripple.style.width=ripple.style.height=size+'px';
+    ripple.style.left=(e.clientX-rect.left-size/2)+'px';
+    ripple.style.top=(e.clientY-rect.top-size/2)+'px';
+    this.appendChild(ripple);
+    setTimeout(()=>ripple.remove(),600);
+   });
+  });
+
+  // Toast notification
+  let toastCount=0;
+  const toastTypes=['success','error','warning','info'];
+  const toastIcons={'success':'✓','error':'✕','warning':'⚠','info':'ℹ'};
+  const toastMessages={
+   'success':'タスクが正常に完了しました',
+   'error':'エラーが発生しました',
+   'warning':'警告：確認が必要です',
+   'info':'新しい情報があります'
+  };
+
+  function showToast(type){
+   const container=document.getElementById('toastContainer');
+   const toast=document.createElement('div');
+   toast.className='toast '+type;
+   toast.innerHTML=`
+    <div class="toast-content">
+     <span class="toast-icon">${toastIcons[type]}</span>
+     <span>${toastMessages[type]}</span>
+    </div>
+    <div class="toast-progress"></div>
+   `;
+   container.appendChild(toast);
+   setTimeout(()=>{
+    toast.style.opacity='0';
+    toast.style.transform='translateX(100%)';
+    toast.style.transition='all 0.3s ease';
+    setTimeout(()=>toast.remove(),300);
+   },4000);
+  }
+
+  document.getElementById('btnShowToast').addEventListener('click',function(){
+   showToast(toastTypes[toastCount%4]);
+   toastCount++;
+  });
+
+  // Modal
+  const modalOverlay=document.getElementById('modalOverlay');
+
+  document.getElementById('btnShowModal').addEventListener('click',function(){
+   modalOverlay.style.display='flex';
+  });
+
+  document.getElementById('btnModalCancel').addEventListener('click',function(){
+   modalOverlay.style.display='none';
+  });
+
+  document.getElementById('btnModalConfirm').addEventListener('click',function(){
+   modalOverlay.style.display='none';
+   showToast('success');
+  });
+
+  modalOverlay.addEventListener('click',function(e){
+   if(e.target===this){
+    this.style.display='none';
+   }
+  });
+
+  // Running time counter (demo)
+  let seconds=45*60+23;
+  setInterval(()=>{
+   seconds++;
+   const h=Math.floor(seconds/3600);
+   const m=Math.floor((seconds%3600)/60);
+   const s=seconds%60;
+   document.getElementById('runningTime').textContent=
+    String(h).padStart(2,'0')+':'+
+    String(m).padStart(2,'0')+':'+
+    String(s).padStart(2,'0');
+  },1000);
+
+  // Keyboard navigation
+  document.addEventListener('keydown',function(e){
+   if(e.key==='Escape'&&modalOverlay.style.display==='flex'){
+    modalOverlay.style.display='none';
+   }
+  });
+ </script>
 
 </body>
 </html>

@@ -94,10 +94,10 @@ export function CostReportPanel():JSX.Element{
             <div className="text-nier-caption text-nier-text-light">{service}</div>
             <div className="text-nier-small font-mono">{data.call_count}回</div>
            </div>
-          ))}
+))}
          </div>
         </div>
-       )}
+)}
 
        <div className="flex gap-2">
         <Button variant="default" size="sm" onClick={handleExportCsv}>
@@ -110,9 +110,9 @@ export function CostReportPanel():JSX.Element{
         </Button>
        </div>
       </div>
-     ):(
+):(
       <div className="text-center py-4 text-nier-text-light">データなし</div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -123,12 +123,12 @@ export function CostReportPanel():JSX.Element{
       <span className="text-nier-caption text-nier-text-light ml-2">
        {history.total}件中 {page*pageSize+1}-{Math.min((page+1)*pageSize,history.total)}件
       </span>
-     )}
+)}
     </CardHeader>
     <CardContent className="border-t border-nier-border-light p-0">
      {loading?(
       <div className="text-center py-8 text-nier-text-light">読み込み中...</div>
-     ):history&&history.items.length>0?(
+):history&&history.items.length>0?(
       <>
        <div className="overflow-x-auto">
         <table className="w-full text-nier-small">
@@ -154,7 +154,7 @@ export function CostReportPanel():JSX.Element{
             </td>
             <td className="px-3 py-2 text-right font-mono text-nier-text-main">${item.cost_usd.toFixed(4)}</td>
            </tr>
-          ))}
+))}
          </tbody>
         </table>
        </div>
@@ -168,13 +168,13 @@ export function CostReportPanel():JSX.Element{
           <ChevronRight size={14}/>
          </Button>
         </div>
-       )}
+)}
       </>
-     ):(
+):(
       <div className="text-center py-8 text-nier-text-light">履歴がありません</div>
-     )}
+)}
     </CardContent>
    </Card>
   </div>
- )
+)
 }

@@ -73,10 +73,11 @@ class LlmJobQueue:
   temperature:Optional[str]=None,
   messages_json:Optional[str]=None,
   on_speech:Optional[Callable[[str],None]]=None,
+  token_budget:Optional[Dict[str,Any]]=None,
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
-   budget=get_token_budget_settings()
+   budget=token_budget if token_budget else get_token_budget_settings()
    limit=budget.get("default_limit",500000)
    warning_pct=budget.get("warning_threshold_percent",80)
    enforcement=budget.get("enforcement","hard")

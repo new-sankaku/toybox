@@ -29,9 +29,9 @@ function CollapsibleSection({title,icon,children,defaultOpen=true}:CollapsibleSe
     <div className="px-3 py-2 bg-nier-bg-main">
      {children}
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 interface ComponentItemProps{
@@ -52,7 +52,7 @@ function ComponentItem({component}:ComponentItemProps){
        <span className="text-nier-caption text-nier-text-light truncate" style={{maxWidth:'clamp(100px,25%,250px)'}} title={component.source}>
         [{component.source.split('/').pop()}]
        </span>
-      )}
+)}
      </div>
      <div className="mt-1">
       <pre className="text-nier-caption text-nier-text-light whitespace-pre-wrap font-mono bg-nier-bg-panel p-2 border border-nier-border-light overflow-x-auto">
@@ -66,12 +66,12 @@ function ComponentItem({component}:ComponentItemProps){
        >
         {expanded?'折りたたむ':'すべて表示'}
        </button>
-      )}
+)}
      </div>
     </div>
    </div>
   </div>
- )
+)
 }
 
 export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
@@ -84,7 +84,7 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
       このエージェントは品質チェックフィードバックを受けてリトライされました
      </p>
     </div>
-   )}
+)}
 
    <CollapsibleSection
     title="System Prompt 構成"
@@ -97,11 +97,11 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
        .sort((a,b)=>a.order-b.order)
        .map((comp,idx)=>(
         <ComponentItem key={idx} component={comp}/>
-       ))}
+))}
      </div>
-    ):(
+):(
      <p className="text-nier-caption text-nier-text-light py-2">構成要素がありません</p>
-    )}
+)}
    </CollapsibleSection>
 
    <CollapsibleSection
@@ -115,11 +115,11 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
        .sort((a,b)=>a.order-b.order)
        .map((comp,idx)=>(
         <ComponentItem key={idx} component={comp}/>
-       ))}
+))}
      </div>
-    ):(
+):(
      <p className="text-nier-caption text-nier-text-light py-2">構成要素がありません</p>
-    )}
+)}
    </CollapsibleSection>
 
    {data.principles.length>0&&(
@@ -133,18 +133,18 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
        >
         {p}
        </span>
-      ))}
+))}
      </div>
     </div>
-   )}
+)}
 
    {data.basePromptFile&&(
     <div className="px-3 py-2 bg-nier-bg-panel border border-nier-border-light">
      <p className="text-nier-caption text-nier-text-light">
-      ベースプロンプトファイル: <span className="font-mono">{data.basePromptFile}</span>
+      ベースプロンプトファイル:<span className="font-mono">{data.basePromptFile}</span>
      </p>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

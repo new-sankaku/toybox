@@ -7,6 +7,15 @@ websocket:
   reconnectDelayMax: 5000
   timeout: 10000
 
+concurrent_limits:
+  default_max_concurrent: 5
+  provider_overrides:
+    openrouter: 5
+    claude-code: 4
+    local-comfyui: 1
+    local-audiocraft: 1
+    local-coqui-tts: 1
+
 cost:
   global_enabled: true
   global_monthly_limit: 100.0

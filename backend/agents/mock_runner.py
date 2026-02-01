@@ -122,7 +122,7 @@ class MockAgentRunner(AgentRunner):
                 duration_ms=int((datetime.now()-start_time).total_seconds()*1000)
                 self._data_store.complete_trace(
                     trace_id=trace_id,
-                    llm_response=content[:500] if content else "",
+                    llm_response=content[:500] if content else"",
                     output_data=output,
                     tokens_input=input_tokens,
                     tokens_output=output_tokens,

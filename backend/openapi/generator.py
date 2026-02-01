@@ -10,6 +10,8 @@ from schemas import (
  GlobalCostSettingsSchema,GlobalCostSettingsUpdateSchema,
  BudgetStatusSchema,CostHistoryItemSchema,CostHistoryResponseSchema,
  CostSummarySchema,
+ ConcurrentLimitsSchema,WebSocketSettingsSchema,
+ AdvancedSettingsSchema,UsageCategorySettingSchema,UsageCategoryUpdateSchema,
 )
 
 def pydantic_to_openapi_schema(model:Type[BaseModel])->Dict[str,Any]:
@@ -80,6 +82,11 @@ def generate_openapi_spec()->Dict[str,Any]:
   ("CostHistoryItemSchema",CostHistoryItemSchema),
   ("CostHistoryResponseSchema",CostHistoryResponseSchema),
   ("CostSummarySchema",CostSummarySchema),
+  ("ConcurrentLimitsSchema",ConcurrentLimitsSchema),
+  ("WebSocketSettingsSchema",WebSocketSettingsSchema),
+  ("AdvancedSettingsSchema",AdvancedSettingsSchema),
+  ("UsageCategorySettingSchema",UsageCategorySettingSchema),
+  ("UsageCategoryUpdateSchema",UsageCategoryUpdateSchema),
  ]
  schemas={name:pydantic_to_openapi_schema(model) for name,model in schemas_list}
  spec={

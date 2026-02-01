@@ -60,16 +60,16 @@ export function GlobalCostManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    {error&&(
     <div className="px-4 py-2 text-nier-small border border-nier-accent-red text-nier-accent-red">
      {error}
     </div>
-   )}
+)}
 
    <Card>
     <CardHeader>
@@ -101,7 +101,7 @@ export function GlobalCostManagement():JSX.Element{
           budgetStatus.is_over_budget?'text-nier-accent-red':
           budgetStatus.is_warning?'text-nier-accent-orange':
           'text-nier-text-main'
-         )}>{budgetStatus.usage_percent.toFixed(1)}%</span>
+)}>{budgetStatus.usage_percent.toFixed(1)}%</span>
         </div>
         <div className="h-2 bg-nier-bg-main border border-nier-border-light">
          <div
@@ -110,7 +110,7 @@ export function GlobalCostManagement():JSX.Element{
            budgetStatus.is_over_budget?'bg-nier-accent-red':
            budgetStatus.is_warning?'bg-nier-accent-orange':
            'bg-nier-accent-green'
-          )}
+)}
           style={{width:`${Math.min(100,budgetStatus.usage_percent)}%`}}
          />
         </div>
@@ -120,17 +120,17 @@ export function GlobalCostManagement():JSX.Element{
          <AlertTriangle size={14} className="text-nier-accent-red"/>
          <span className="text-nier-small text-nier-accent-red">予算を超過しています</span>
         </div>
-       )}
+)}
        {budgetStatus.is_warning&&!budgetStatus.is_over_budget&&(
         <div className="flex items-center gap-2 px-3 py-2 bg-nier-bg-main border border-nier-accent-orange">
          <AlertTriangle size={14} className="text-nier-accent-orange"/>
          <span className="text-nier-small text-nier-accent-orange">警告しきい値({budgetStatus.alert_threshold}%)を超えています</span>
         </div>
-       )}
+)}
       </div>
-     ):(
+):(
       <div className="text-center py-4 text-nier-text-light">データなし</div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -201,5 +201,5 @@ export function GlobalCostManagement():JSX.Element{
     </CardContent>
    </Card>
   </div>
- )
+)
 }

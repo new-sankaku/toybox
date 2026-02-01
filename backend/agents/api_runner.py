@@ -338,9 +338,57 @@ class ApiAgentRunner(AgentRunner):
             return resolved["provider"]
         return self._provider_id
 
+    def _get_project_temperature(self,context:AgentContext,agent_type:str)->float:
+        adv=context.config.get("advancedSettings",{}) if context.config else{}
+        temp_defaults=adv.get("temperatureDefaults",{})
+        role=self._get_agent_role(agent_type)
+        if role in temp_defaults:
+            return temp_defaults[role]
+        return get_agent_temperature(agent_type)
+
+    def _get_agent_role(self,agent_type:str)->str:
+        if "leader" in agent_type.lower():
+            return "leader"
+        if "worker" in agent_type.lower():
+            return "worker"
+        if "splitter" in agent_type.lower():
+            return "splitter"
+        if "quality" in agent_type.lower():
+            return "quality_checker"
+        if "integrator" in agent_type.lower():
+            return "integrator"
+        return "default"
+
+    def _get_project_context_policy(self,context:Optional[AgentContext])->Dict[str,Any]:
+        if context and context.config:
+            adv=context.config.get("advancedSettings",{})
+            proj_policy=adv.get("contextPolicy",{})
+            if proj_policy:
+                base=get_context_policy_settings()
+                base.update(proj_policy)
+                return base
+        return get_context_policy_settings()
+
+    def _get_project_dag_enabled(self,context:AgentContext)->bool:
+        if context and context.config:
+            adv=context.config.get("advancedSettings",{})
+            dag=adv.get("dagExecution",{})
+            if "enabled" in dag:
+                return dag["enabled"]
+        from config_loader import is_dag_execution_enabled
+        return is_dag_execution_enabled()
+
+    def _get_project_token_budget(self,context:Optional[AgentContext])->Optional[Dict[str,Any]]:
+        if context and context.config:
+            adv=context.config.get("advancedSettings",{})
+            budget=adv.get("tokenBudget")
+            if budget:
+                return budget
+        return None
+
     async def _call_llm(self,prompt:str,context:AgentContext,system_prompt:Optional[str]=None)->Dict[str,Any]:
         agent_max_tokens=self._get_agent_max_tokens(context.agent_type.value)
-        temperature=get_agent_temperature(context.agent_type.value)
+        temperature=self._get_project_temperature(context,context.agent_type.value)
         resolved_model=self._resolve_model_for_agent(context)
         resolved_provider=self._resolve_provider_for_agent(context)
         job_queue=self.get_job_queue()
@@ -354,6 +402,7 @@ class ApiAgentRunner(AgentRunner):
             system_prompt=system_prompt,
             temperature=str(temperature),
             on_speech=context.on_speech,
+            token_budget=self._get_project_token_budget(context),
         )
         if context.on_log:
             context.on_log("info",f"LLMジョブ投入: {job['id']} model={resolved_model}")
@@ -380,7 +429,8 @@ class ApiAgentRunner(AgentRunner):
         agent_type=context.agent_type.value
         base_prompt=self._prompts.get(agent_type,self._default_prompt())
 
-        principles_text=load_principles_for_agent(agent_type)
+        enabled_principles=context.config.get("advancedSettings",{}).get("enabledPrinciples") if context.config else None
+        principles_text=load_principles_for_agent(agent_type,enabled_principles)
         system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
         if principles_text:
             system_prompt+=f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}"
@@ -394,11 +444,11 @@ class ApiAgentRunner(AgentRunner):
                 get_logger().warning(f"Failed to load comment instruction for {agent_type}: {e}")
 
         context_policy=get_workflow_context_policy(agent_type)
-        filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy)
+        filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy,context)
         if context.leader_analysis and not filtered_outputs:
             leader_content=context.leader_analysis.get("content","")
             if leader_content:
-                settings=get_context_policy_settings()
+                settings=self._get_project_context_policy(context)
                 leader_max=settings.get("leader_output_max_for_worker",5000)
                 filtered_outputs={"leader":{"content":leader_content[:leader_max]}}
         previous_text=self._format_previous_outputs(filtered_outputs)
@@ -433,10 +483,10 @@ class ApiAgentRunner(AgentRunner):
         prompt="\n\n".join(prompt_parts)
         return system_prompt,prompt
 
-    def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,Any])->Dict[str,Any]:
+    def _filter_outputs_by_policy(self,outputs:Dict[str,Any],policy:Dict[str,Any],context:Optional[AgentContext]=None)->Dict[str,Any]:
         if not policy:
             return outputs
-        settings=get_context_policy_settings()
+        settings=self._get_project_context_policy(context)
         summary_max=settings.get("summary_max_length",10000)
         auto_downgrade=settings.get("auto_downgrade_threshold",15000)
         filtered={}
@@ -696,7 +746,7 @@ class LeaderWorkerOrchestrator:
         worker_tasks=self._extract_worker_tasks(leader_output.output)
         total_workers=len(worker_tasks)
 
-        if is_dag_execution_enabled():
+        if self.agent_runner._get_project_dag_enabled(leader_context):
             results=await self._run_workers_dag(leader_context,leader_output,worker_tasks,results)
         else:
             results=await self._run_workers_sequential(leader_context,leader_output,worker_tasks,results)
@@ -937,7 +987,10 @@ class LeaderWorkerOrchestrator:
                 continue
 
             result.output=output.output
-            qc_result=await self._perform_quality_check(output.output,worker_type,worker_context.project_id)
+            worker_adv=worker_context.config.get("advancedSettings",{}) if worker_context.config else{}
+            worker_enabled_principles=worker_adv.get("enabledPrinciples")
+            worker_quality_settings=worker_adv.get("qualityCheck")
+            qc_result=await self._perform_quality_check(output.output,worker_type,worker_context.project_id,worker_enabled_principles,worker_quality_settings)
             result.quality_check=qc_result
 
             result.attempt_history.append({
@@ -973,11 +1026,11 @@ class LeaderWorkerOrchestrator:
 
         return result
 
-    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str,project_id:Optional[str]=None)->QualityCheckResult:
+    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None)->QualityCheckResult:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type,project_id=project_id)
+            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings)
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]
@@ -1049,7 +1102,8 @@ class LeaderWorkerOrchestrator:
             return integrated
 
         try:
-            principles_text=load_principles_for_agent(leader_context.agent_type.value)
+            enabled_principles_integration=leader_context.config.get("advancedSettings",{}).get("enabledPrinciples") if leader_context.config else None
+            principles_text=load_principles_for_agent(leader_context.agent_type.value,enabled_principles_integration)
             leader_content=leader_output.get("content","")[:3000] if isinstance(leader_output,dict) else""
             workers_combined="\n\n".join(worker_texts)[:10000]
 
@@ -1078,8 +1132,7 @@ class LeaderWorkerOrchestrator:
             resolved_provider=self.agent_runner._resolve_provider_for_agent(leader_context)
 
             job_queue=self.agent_runner.get_job_queue()
-            from config_loader import get_agent_temperature
-            temperature=get_agent_temperature(leader_context.agent_type.value)
+            temperature=self.agent_runner._get_project_temperature(leader_context,leader_context.agent_type.value)
             job=job_queue.submit_job(
                 project_id=leader_context.project_id,
                 agent_id=f"{leader_context.agent_id}-integration",
@@ -1089,6 +1142,7 @@ class LeaderWorkerOrchestrator:
                 max_tokens=self.agent_runner.max_tokens,
                 system_prompt=system_prompt,
                 temperature=str(temperature),
+                token_budget=self.agent_runner._get_project_token_budget(leader_context),
             )
             result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
             if result and result["status"]=="completed":
@@ -1096,7 +1150,10 @@ class LeaderWorkerOrchestrator:
                 integrated["metadata"]["integration_method"]="llm"
                 get_logger().info(f"LLM統合完了: {leader_context.agent_type.value}")
 
-                qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id)
+                leader_adv_qc=leader_context.config.get("advancedSettings",{}) if leader_context.config else{}
+                leader_enabled_principles_qc=leader_adv_qc.get("enabledPrinciples")
+                leader_quality_settings=leader_adv_qc.get("qualityCheck")
+                qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id,leader_enabled_principles_qc,leader_quality_settings)
                 if not qc_result.passed:
                     get_logger().info(f"統合出力の品質チェック不合格 score={qc_result.score:.2f}、再統合実行")
                     feedback="\n".join(f"- {s}" for s in qc_result.improvement_suggestions) if qc_result.improvement_suggestions else""
@@ -1114,6 +1171,7 @@ class LeaderWorkerOrchestrator:
                         prompt=retry_prompt,
                         max_tokens=self.agent_runner.max_tokens,
                         system_prompt=system_prompt,
+                        token_budget=self.agent_runner._get_project_token_budget(leader_context),
                     )
                     retry_result=await job_queue.wait_for_job_async(retry_job["id"],timeout=300.0)
                     if retry_result and retry_result["status"]=="completed":

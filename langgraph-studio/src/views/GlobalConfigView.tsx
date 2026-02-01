@@ -5,13 +5,14 @@ import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
 import{
  Eye,EyeOff,RefreshCw,Trash2,CheckCircle,XCircle,AlertTriangle,
- Key,HardDrive,Archive,RotateCcw,Download,Database,Clock,Save
+ Key,HardDrive,Archive,RotateCcw,Download,Database,Clock,Save,Settings2
 }from'lucide-react'
 import{GlobalCostManagement}from'@/components/settings/GlobalCostManagement'
 import{CostReportPanel}from'@/components/settings/CostReportPanel'
 import{
- apiKeyApi,aiProviderApi,backupApi,archiveApi,
- type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry,type ApiArchiveStats,type AIServiceTypesInfo
+ apiKeyApi,aiProviderApi,backupApi,archiveApi,projectSettingsApi,configApi,
+ type ApiKeyInfo,type AIProviderInfo,type ApiBackupEntry,type ApiArchiveEntry,type ApiArchiveStats,type AIServiceTypesInfo,
+ type ConcurrentLimitsSettings,type WebSocketConfig
 }from'@/services/apiService'
 
 interface ConfigSection{
@@ -22,6 +23,7 @@ interface ConfigSection{
 const configSections:ConfigSection[]=[
  {id:'api-keys',label:'APIキー管理'},
  {id:'cost-management',label:'コスト管理'},
+ {id:'execution-settings',label:'実行設定'},
  {id:'data-management',label:'データ管理'}
 ]
 
@@ -55,7 +57,7 @@ function ApiKeyManagement():JSX.Element{
     apiKeyApi.list(),
     aiProviderApi.list(),
     aiProviderApi.getServiceTypes()
-   ])
+])
    setKeys(keyData)
    setProviders(providerData)
    setServiceTypesInfo(typesData)
@@ -148,7 +150,7 @@ function ApiKeyManagement():JSX.Element{
       keyInfo.validated
        ?<CheckCircle size={12} className="text-nier-accent-green flex-shrink-0"/>
        :<XCircle size={12} className="text-nier-text-light flex-shrink-0"/>
-     )}
+)}
     </div>
     <div className="flex items-center gap-1 min-w-0">
      <input
@@ -184,7 +186,7 @@ function ApiKeyManagement():JSX.Element{
      <span className="ml-1 hidden sm:inline">{saving[provider.id]?'保存中':'保存'}</span>
     </Button>
    </div>
-  )
+)
  }
 
  return(
@@ -206,10 +208,10 @@ function ApiKeyManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    {serviceTypesInfo?.types.map(serviceType=>{
     const providersInGroup=groups[serviceType]||[]
@@ -246,7 +248,7 @@ function ApiKeyManagement():JSX.Element{
        </div>
       </CardContent>
      </Card>
-    )
+)
    })}
 
    {confirmDelete&&(
@@ -265,9 +267,9 @@ function ApiKeyManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
- )
+)
 }
 
 function DataManagement():JSX.Element{
@@ -597,6 +599,214 @@ function DataManagement():JSX.Element{
 )
 }
 
+function ExecutionSettings():JSX.Element{
+ const[concurrentLimits,setConcurrentLimits]=useState<ConcurrentLimitsSettings|null>(null)
+ const[originalConcurrentLimits,setOriginalConcurrentLimits]=useState<ConcurrentLimitsSettings|null>(null)
+ const[wsConfig,setWsConfig]=useState<WebSocketConfig|null>(null)
+ const[originalWsConfig,setOriginalWsConfig]=useState<WebSocketConfig|null>(null)
+ const[loading,setLoading]=useState(true)
+ const[saving,setSaving]=useState(false)
+ const[message,setMessage]=useState<{text:string;type:'success'|'error'}|null>(null)
+
+ const fetchSettings=useCallback(async()=>{
+  setLoading(true)
+  try{
+   const[limits,ws]=await Promise.all([
+    projectSettingsApi.getConcurrentLimits(),
+    configApi.getWebSocketConfig()
+])
+   setConcurrentLimits(limits)
+   setOriginalConcurrentLimits(JSON.parse(JSON.stringify(limits)))
+   setWsConfig(ws)
+   setOriginalWsConfig(JSON.parse(JSON.stringify(ws)))
+  }catch(e){
+   console.error('Failed to fetch execution settings:',e)
+  }finally{
+   setLoading(false)
+  }
+ },[])
+
+ useEffect(()=>{fetchSettings()},[fetchSettings])
+
+ const showMsg=(text:string,type:'success'|'error')=>{
+  setMessage({text,type})
+  setTimeout(()=>setMessage(null),3000)
+ }
+
+ const hasConcurrentChanges=concurrentLimits&&originalConcurrentLimits&&JSON.stringify(concurrentLimits)!==JSON.stringify(originalConcurrentLimits)
+ const hasWsChanges=wsConfig&&originalWsConfig&&JSON.stringify(wsConfig)!==JSON.stringify(originalWsConfig)
+
+ const handleSaveConcurrent=async()=>{
+  if(!concurrentLimits)return
+  setSaving(true)
+  try{
+   const updated=await projectSettingsApi.updateConcurrentLimits(concurrentLimits)
+   setConcurrentLimits(updated)
+   setOriginalConcurrentLimits(JSON.parse(JSON.stringify(updated)))
+   showMsg('同時実行設定を保存しました','success')
+  }catch{
+   showMsg('保存に失敗しました','error')
+  }finally{
+   setSaving(false)
+  }
+ }
+
+ const handleSaveWs=async()=>{
+  if(!wsConfig)return
+  setSaving(true)
+  try{
+   const updated=await projectSettingsApi.updateWebSocketConfig(wsConfig)
+   setWsConfig(updated)
+   setOriginalWsConfig(JSON.parse(JSON.stringify(updated)))
+   showMsg('WebSocket設定を保存しました','success')
+  }catch{
+   showMsg('保存に失敗しました','error')
+  }finally{
+   setSaving(false)
+  }
+ }
+
+ const handleProviderOverrideChange=(provider:string,value:number)=>{
+  if(!concurrentLimits)return
+  setConcurrentLimits({
+   ...concurrentLimits,
+   provider_overrides:{...concurrentLimits.provider_overrides,[provider]:value}
+  })
+ }
+
+ if(loading){
+  return<div className="text-center py-8 text-nier-text-light">読み込み中...</div>
+ }
+
+ return(
+  <div className="space-y-4">
+   {message&&(
+    <div className={cn(
+     'px-4 py-2 text-nier-small border',
+     message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
+)}>
+     {message.text}
+    </div>
+)}
+   <Card>
+    <CardHeader>
+     <Settings2 size={16} className="text-nier-text-light"/>
+     <span className="text-nier-small font-medium">同時実行制限</span>
+     <span className="text-nier-caption opacity-60 ml-2">プロバイダー別の同時リクエスト数</span>
+     {hasConcurrentChanges&&(
+      <Button variant="primary" size="sm" className="ml-auto" onClick={handleSaveConcurrent} disabled={saving}>
+       <Save size={12}/>
+       <span className="ml-1">{saving?'保存中...':'保存'}</span>
+      </Button>
+)}
+    </CardHeader>
+    <CardContent className="border-t border-nier-border-light">
+     {concurrentLimits?(
+      <div className="space-y-4">
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-1">デフォルト最大同時実行数</label>
+        <input
+         type="number"
+         min={1}
+         max={20}
+         className="w-32 bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         value={concurrentLimits.default_max_concurrent}
+         onChange={(e)=>setConcurrentLimits({...concurrentLimits,default_max_concurrent:parseInt(e.target.value)||1})}
+        />
+       </div>
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-2">プロバイダー別設定</label>
+        <div className="grid grid-cols-2 gap-3">
+         {Object.entries(concurrentLimits.provider_overrides).map(([provider,limit])=>(
+          <div key={provider} className="flex items-center gap-2 bg-nier-bg-main p-2 border border-nier-border-light">
+           <span className="text-nier-small text-nier-text-main flex-1">{provider}</span>
+           <input
+            type="number"
+            min={1}
+            max={20}
+            className="w-16 bg-nier-bg-panel border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+            value={limit}
+            onChange={(e)=>handleProviderOverrideChange(provider,parseInt(e.target.value)||1)}
+           />
+          </div>
+))}
+        </div>
+       </div>
+      </div>
+):(
+      <div className="text-nier-text-light">同時実行設定を取得できませんでした</div>
+)}
+    </CardContent>
+   </Card>
+
+   <Card>
+    <CardHeader>
+     <RefreshCw size={16} className="text-nier-text-light"/>
+     <span className="text-nier-small font-medium">WebSocket再接続設定</span>
+     {hasWsChanges&&(
+      <Button variant="primary" size="sm" className="ml-auto" onClick={handleSaveWs} disabled={saving}>
+       <Save size={12}/>
+       <span className="ml-1">{saving?'保存中...':'保存'}</span>
+      </Button>
+)}
+    </CardHeader>
+    <CardContent className="border-t border-nier-border-light">
+     {wsConfig?(
+      <div className="grid grid-cols-2 gap-4">
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-1">最大再接続試行回数</label>
+        <input
+         type="number"
+         min={1}
+         max={100}
+         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         value={wsConfig.maxReconnectAttempts}
+         onChange={(e)=>setWsConfig({...wsConfig,maxReconnectAttempts:parseInt(e.target.value)||10})}
+        />
+       </div>
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-1">再接続遅延 (ms)</label>
+        <input
+         type="number"
+         min={100}
+         step={100}
+         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         value={wsConfig.reconnectDelay}
+         onChange={(e)=>setWsConfig({...wsConfig,reconnectDelay:parseInt(e.target.value)||1000})}
+        />
+       </div>
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-1">最大再接続遅延 (ms)</label>
+        <input
+         type="number"
+         min={1000}
+         step={1000}
+         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         value={wsConfig.reconnectDelayMax}
+         onChange={(e)=>setWsConfig({...wsConfig,reconnectDelayMax:parseInt(e.target.value)||30000})}
+        />
+       </div>
+       <div>
+        <label className="block text-nier-caption text-nier-text-light mb-1">タイムアウト (ms)</label>
+        <input
+         type="number"
+         min={1000}
+         step={1000}
+         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         value={wsConfig.timeout}
+         onChange={(e)=>setWsConfig({...wsConfig,timeout:parseInt(e.target.value)||20000})}
+        />
+       </div>
+      </div>
+):(
+      <div className="text-nier-text-light">WebSocket設定を取得できませんでした</div>
+)}
+    </CardContent>
+   </Card>
+  </div>
+)
+}
+
 export default function GlobalConfigView():JSX.Element{
  const[activeSection,setActiveSection]=useState('api-keys')
 
@@ -636,7 +846,8 @@ export default function GlobalConfigView():JSX.Element{
        <GlobalCostManagement/>
        <CostReportPanel/>
       </div>
-     )}
+)}
+     {activeSection==='execution-settings'&&<ExecutionSettings/>}
      {activeSection==='data-management'&&<DataManagement/>}
     </div>
    </div>

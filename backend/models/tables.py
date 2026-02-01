@@ -266,3 +266,41 @@ class GlobalCostSettings(Base):
  stop_on_budget_exceeded=Column(Boolean,default=False)
  services=Column(JSON)
  updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+
+class GlobalExecutionSettings(Base):
+ __tablename__="global_execution_settings"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ concurrent_limits=Column(JSON)
+ websocket_settings=Column(JSON)
+ updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+
+class FileMetadata(Base):
+ __tablename__="file_metadata"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ project_id=Column(String(50),nullable=False,index=True)
+ path=Column(String(1000),nullable=False)
+ file_type=Column(String(50))
+ mime_type=Column(String(100))
+ size=Column(Integer,default=0)
+ hash=Column(String(64))
+ encoding=Column(String(20),default="utf-8")
+ language=Column(String(50))
+ line_count=Column(Integer,default=0)
+ dependencies=Column(JSON)
+ dependents=Column(JSON)
+ tags=Column(JSON)
+ description=Column(Text)
+ agent_modified=Column(String(50))
+ access_count=Column(Integer,default=0)
+ created_at=Column(DateTime,default=datetime.now)
+ modified_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
+ last_accessed_at=Column(DateTime,default=datetime.now)
+
+class FileTreeCacheTable(Base):
+ __tablename__="file_tree_cache"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ project_id=Column(String(50),nullable=False,index=True)
+ cache_key=Column(String(2000),nullable=False)
+ items_json=Column(Text,nullable=False)
+ created_at=Column(DateTime,default=datetime.now)
+

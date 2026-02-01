@@ -36,7 +36,9 @@ def register_system_prompt_routes(app:Flask,data_store:DataStore):
   })
   order+=1
 
-  principles_text=load_principles_for_agent(agent_type)
+  advanced_settings=project.get("advancedSettings",{}) if project else{}
+  enabled_principles=advanced_settings.get("enabledPrinciples")
+  principles_text=load_principles_for_agent(agent_type,enabled_principles)
   principle_names=get_agent_principles(agent_type)
   if principles_text:
    system_prompt_parts.append(f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}")

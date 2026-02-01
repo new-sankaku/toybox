@@ -197,14 +197,17 @@ class SkillEnabledAgentRunner(AgentRunner):
   last_response_content=""
   loop_detector=LoopDetector()
   stop_reason=None
+  adv_settings=context.config.get("advancedSettings",{}) if context.config else{}
+  tool_exec=adv_settings.get("toolExecution",{})
+  max_iter=tool_exec.get("max_iterations",self._max_iterations)
   try:
-   while iteration<self._max_iterations:
+   while iteration<max_iter:
     iteration+=1
-    remaining=self._max_iterations-iteration
-    progress=min(85,10+int((iteration/self._max_iterations)*75))
+    remaining=max_iter-iteration
+    progress=min(85,10+int((iteration/max_iter)*75))
     yield {
      "type":"progress",
-     "data":{"progress":progress,"current_task":f"LLM呼び出し中 (iteration {iteration}/{self._max_iterations})"}
+     "data":{"progress":progress,"current_task":f"LLM呼び出し中 (iteration {iteration}/{max_iter})"}
     }
     if remaining<=FINALIZING_BUDGET and iteration>1:
      messages.append({"role":"user","content":self._build_finalize_prompt(remaining)})
@@ -261,7 +264,7 @@ class SkillEnabledAgentRunner(AgentRunner):
     messages.append({"role":"user","content":"\n\n".join(tool_results)})
    if final_output is None:
     if stop_reason is None:
-     stop_reason=f"最大イテレーション数({self._max_iterations})に到達"
+     stop_reason=f"最大イテレーション数({max_iter})に到達"
     final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason,system_prompt=system_prompt)
     total_tokens+=final_output.get("metadata",{}).get("summary_tokens",0)
    if data_store and trace_id:

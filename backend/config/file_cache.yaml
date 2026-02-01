@@ -1,0 +1,16 @@
+file_cache:
+  enabled: true
+  content_cache:
+    max_size_mb: 100
+    max_items: 500
+    max_age_seconds: 3600
+  tree_cache:
+    ttl_seconds: 300
+    persist_to_db: true
+  metadata:
+    track_access_stats: true
+  watcher:
+    enabled: false
+    debounce_ms: 500
+  export:
+    include_hidden: false

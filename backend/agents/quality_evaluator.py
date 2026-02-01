@@ -74,9 +74,12 @@ class PrincipleBasedQualityEvaluator:
  def __init__(self):
   self._settings=get_principle_settings()
 
- async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None)->Dict[str,Any]:
+ async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None)->Dict[str,Any]:
   from .api_runner import QualityCheckResult
   content=output.get("content","")
+  settings=dict(self._settings)
+  if quality_settings:
+   settings.update(quality_settings)
 
   rule_result=self._rule_based_check(content,agent_type)
   if not rule_result["passed"]:
@@ -89,7 +92,7 @@ class PrincipleBasedQualityEvaluator:
     improvement_suggestions=rule_result.get("issues",[]),
    )
 
-  principles_text=load_principles_for_agent(agent_type)
+  principles_text=load_principles_for_agent(agent_type,enabled_principles)
   if not principles_text:
    return QualityCheckResult(passed=True,score=1.0)
 
@@ -98,12 +101,12 @@ class PrincipleBasedQualityEvaluator:
    return QualityCheckResult(passed=True,score=1.0)
 
   try:
-   usage_cat=self._settings.get("quality_check_usage_category","llm_low")
+   usage_cat=settings.get("quality_check_usage_category","llm_low")
    llm_result=await self._llm_evaluate(str(content),rubrics,project_id,usage_cat)
-   threshold=self._settings.get("quality_threshold",0.6)
+   threshold=settings.get("quality_threshold",0.6)
    normalized=llm_result.get("average_score",3.0)/5.0
 
-   escalation=self._settings.get("escalation",{})
+   escalation=settings.get("escalation",{})
    if escalation.get("enabled",False):
     tier2_min=escalation.get("tier2_score_min",0.5)
     tier2_max=escalation.get("tier2_score_max",0.7)

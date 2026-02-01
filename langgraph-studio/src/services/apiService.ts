@@ -79,9 +79,9 @@ function toFullUrl(path:string|null):string|null{
  return`${API_BASE_URL}${path}`
 }
 
-// ============================================================
-// PROJECT API
-// ============================================================
+
+
+
 
 export const projectApi={
  list:async():Promise<Project[]>=>{
@@ -149,9 +149,9 @@ export const projectApi={
  }
 }
 
-// ============================================================
-// AGENT API
-// ============================================================
+
+
+
 
 export interface ApiAgent{
  id:string
@@ -258,9 +258,9 @@ export const agentApi={
  }
 }
 
-// ============================================================
-// CHECKPOINT API
-// ============================================================
+
+
+
 
 export interface ApiCheckpoint{
  id:string
@@ -297,9 +297,9 @@ export const checkpointApi={
  }
 }
 
-// ============================================================
-// METRICS API
-// ============================================================
+
+
+
 
 export interface TokensByTypeEntry{
  input:number
@@ -338,9 +338,9 @@ export const metricsApi={
  }
 }
 
-// ============================================================
-// LOGS API
-// ============================================================
+
+
+
 
 export interface ApiSystemLog{
  id:string
@@ -358,9 +358,9 @@ export const logsApi={
  }
 }
 
-// ============================================================
-// ASSET API
-// ============================================================
+
+
+
 
 export interface ApiAsset{
  id:string
@@ -421,9 +421,9 @@ export const assetApi={
  }
 }
 
-// ============================================================
-// QUALITY SETTINGS API
-// ============================================================
+
+
+
 
 export interface QualityCheckConfig{
  enabled:boolean
@@ -556,9 +556,9 @@ export const uiSettingsApi={
 }
 
 
-// ============================================================
-// INTERVENTION API
-// ============================================================
+
+
+
 
 export type InterventionPriority='normal'|'urgent'
 export type InterventionTarget='all'|'specific'
@@ -632,9 +632,9 @@ export const interventionApi={
 }
 
 
-// ============================================================
-// FILE UPLOAD API
-// ============================================================
+
+
+
 
 export type FileCategory='code'|'image'|'audio'|'video'|'document'|'archive'|'other'
 export type UploadedFileStatus='uploading'|'ready'|'processing'|'error'
@@ -718,9 +718,9 @@ export const fileUploadApi={
  }
 }
 
-// ============================================================
-// PROJECT TREE API
-// ============================================================
+
+
+
 
 export interface ProjectTreeNode{
  id:string
@@ -764,9 +764,9 @@ export const projectTreeApi={
  }
 }
 
-// ============================================================
-// AI PROVIDER API
-// ============================================================
+
+
+
 
 export interface AIProviderTestResult{
  success:boolean
@@ -882,9 +882,9 @@ export const aiProviderApi={
  }
 }
 
-// ============================================================
-// AI SERVICE API
-// ============================================================
+
+
+
 
 export interface AIServiceConfig{
  label:string
@@ -971,9 +971,9 @@ export const aiServiceApi={
  }
 }
 
-// ============================================================
-// CONFIG API
-// ============================================================
+
+
+
 
 export interface PlatformOption{
  value:string
@@ -1131,6 +1131,60 @@ export interface CostSettings{
  services:Record<string,CostServiceSettings>
 }
 
+export interface AdvancedQualityCheckSettings{
+ quality_threshold:number
+ escalation:{
+  enabled:boolean
+  tier2_score_min:number
+  tier2_score_max:number
+ }
+}
+
+export interface ToolExecutionLimits{
+ max_iterations:number
+ timeout_seconds:number
+ loop_detection_threshold:number
+}
+
+export interface DagExecutionSettings{
+ enabled:boolean
+}
+
+export interface TokenBudgetSettings{
+ default_limit:number
+ warning_threshold_percent:number
+ enforcement:'hard'|'soft'
+}
+
+export interface ContextPolicySettings{
+ auto_downgrade_threshold:number
+ summary_max_length:number
+ leader_output_max_for_worker:number
+ retry_previous_output_max:number
+ llm_summary:{
+  enabled:boolean
+  usage_category:string
+  max_tokens:number
+  min_content_length:number
+  input_max_length:number
+ }
+ summary_directive:string
+}
+
+export interface AdvancedSettingsResponse{
+ qualityCheck:AdvancedQualityCheckSettings
+ toolExecution:ToolExecutionLimits
+ dagExecution:DagExecutionSettings
+ temperatureDefaults:Record<string,number>
+ tokenBudget:TokenBudgetSettings
+ contextPolicy:ContextPolicySettings
+}
+
+export interface ConcurrentLimitsSettings{
+ default_max_concurrent:number
+ provider_overrides:Record<string,number>
+}
+
 export const projectSettingsApi={
  getAgentServiceMap:async():Promise<Record<string,string>>=>{
   const response=await api.get(API_ENDPOINTS.config.agentServiceMap)
@@ -1165,7 +1219,97 @@ export const projectSettingsApi={
  updateAIProviders:async(projectId:string,providers:unknown[]):Promise<unknown[]>=>{
   const response=await api.put(API_ENDPOINTS.projects.settings.aiProviders(projectId),providers)
   return response.data
+ },
+
+ getAdvancedSettingsDefaults:async():Promise<AdvancedSettingsResponse>=>{
+  const response=await api.get(API_ENDPOINTS.config.advancedSettingsDefaults)
+  return response.data
+ },
+
+ getAdvancedSettings:async(projectId:string):Promise<AdvancedSettingsResponse>=>{
+  const response=await api.get(API_ENDPOINTS.projects.settings.advanced(projectId))
+  return response.data
+ },
+
+ updateAdvancedSettings:async(projectId:string,settings:Partial<AdvancedSettingsResponse>):Promise<AdvancedSettingsResponse>=>{
+  const response=await api.put(API_ENDPOINTS.projects.settings.advanced(projectId),settings)
+  return response.data
+ },
+
+ getConcurrentLimitsDefaults:async():Promise<ConcurrentLimitsSettings>=>{
+  const response=await api.get(API_ENDPOINTS.config.concurrentLimitsDefaults)
+  return response.data
+ },
+
+ getConcurrentLimits:async():Promise<ConcurrentLimitsSettings>=>{
+  const response=await api.get(API_ENDPOINTS.config.concurrentLimits)
+  return response.data
+ },
+
+ updateConcurrentLimits:async(settings:Partial<ConcurrentLimitsSettings>):Promise<ConcurrentLimitsSettings>=>{
+  const response=await api.put(API_ENDPOINTS.config.concurrentLimits,settings)
+  return response.data
+ },
+
+ updateWebSocketConfig:async(settings:Partial<WebSocketConfig>):Promise<WebSocketConfig>=>{
+  const response=await api.put(API_ENDPOINTS.config.websocket,settings)
+  return response.data
+ },
+
+ getUsageCategories:async(projectId:string):Promise<UsageCategorySetting[]>=>{
+  const response=await api.get(API_ENDPOINTS.projects.settings.usageCategories(projectId))
+  return response.data
+ },
+
+ updateUsageCategory:async(projectId:string,categoryId:string,settings:{provider:string;model:string}):Promise<UsageCategorySetting>=>{
+  const response=await api.put(API_ENDPOINTS.projects.settings.usageCategory(projectId,categoryId),settings)
+  return response.data
+ },
+
+ resetUsageCategory:async(projectId:string,categoryId:string):Promise<UsageCategorySetting>=>{
+  const response=await api.delete(API_ENDPOINTS.projects.settings.usageCategory(projectId,categoryId))
+  return response.data
+ },
+
+ getPrinciplesList:async():Promise<PrinciplesListResponse>=>{
+  const response=await api.get(API_ENDPOINTS.config.principles)
+  return response.data
+ },
+
+ getProjectPrinciples:async(projectId:string):Promise<ProjectPrinciplesResponse>=>{
+  const response=await api.get(API_ENDPOINTS.projects.settings.principles(projectId))
+  return response.data
+ },
+
+ updateProjectPrinciples:async(projectId:string,settings:{overrides?:Record<string,string[]>;enabledPrinciples?:string[]}):Promise<ProjectPrinciplesResponse>=>{
+  const response=await api.put(API_ENDPOINTS.projects.settings.principles(projectId),settings)
+  return response.data
  }
+}
+
+export interface PrincipleInfo{
+ id:string
+ label:string
+ description:string
+}
+
+export interface PrinciplesListResponse{
+ principles:PrincipleInfo[]
+ defaults:Record<string,string[]>
+}
+
+export interface ProjectPrinciplesResponse{
+ defaults:Record<string,string[]>
+ overrides:Record<string,string[]>
+ enabledPrinciples:string[]|null
+}
+
+export interface UsageCategorySetting{
+ id:string
+ label:string
+ service_type:string
+ provider:string
+ model:string
 }
 
 export interface ApiAgentTrace{
@@ -1238,9 +1382,9 @@ export const llmJobApi={
  }
 }
 
-// ============================================================
-// BACKUP & ARCHIVE API
-// ============================================================
+
+
+
 
 export interface ApiBackupEntry{
  name:string
@@ -1347,9 +1491,9 @@ export const recoveryApi={
  }
 }
 
-// ============================================================
-// SYSTEM API
-// ============================================================
+
+
+
 
 export interface ApiSystemStats{
  backups:{count:number;totalSize:number}
@@ -1364,9 +1508,9 @@ export const systemApi={
  }
 }
 
-// ============================================================
-// API KEY MANAGEMENT
-// ============================================================
+
+
+
 
 export interface ApiKeyInfo{
  providerId:string
@@ -1407,9 +1551,9 @@ export const apiKeyApi={
  }
 }
 
-// ============================================================
-// PROVIDER HEALTH API
-// ============================================================
+
+
+
 
 export interface ApiProviderHealth{
  providerId:string
@@ -1430,9 +1574,9 @@ export const providerHealthApi={
  }
 }
 
-// ============================================================
-// NAVIGATOR API
-// ============================================================
+
+
+
 
 export const navigatorApi={
  sendMessage:async(data:{projectId?:string;text:string;priority?:string}):Promise<{success:boolean}>=>{
@@ -1445,9 +1589,9 @@ export const navigatorApi={
  }
 }
 
-// ============================================================
-// GLOBAL COST SETTINGS API
-// ============================================================
+
+
+
 
 export interface GlobalCostSettings{
  global_enabled:boolean
@@ -1485,9 +1629,9 @@ export const globalCostApi={
  }
 }
 
-// ============================================================
-// COST REPORTS API
-// ============================================================
+
+
+
 
 export interface CostHistoryItem{
  id:string

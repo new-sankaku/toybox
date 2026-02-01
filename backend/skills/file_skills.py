@@ -1,10 +1,39 @@
 import os
 import asyncio
 from pathlib import Path
-from typing import List,Optional
+from typing import List,Optional,TYPE_CHECKING
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
+if TYPE_CHECKING:
+ from cache import FileManager
 
-class FileReadSkill(Skill):
+class FileSkillMixin:
+ _file_manager:Optional["FileManager"]=None
+ @classmethod
+ def set_file_manager(cls,manager:"FileManager")->None:
+  cls._file_manager=manager
+ @classmethod
+ def get_file_manager(cls)->Optional["FileManager"]:
+  return cls._file_manager
+ def _resolve_path(self,path:str,context:SkillContext)->str:
+  if os.path.isabs(path):
+   return os.path.normpath(path)
+  return os.path.normpath(os.path.join(context.working_dir,path))
+ def _is_allowed(self,path:str,context:SkillContext)->bool:
+  if not context.sandbox_enabled:
+   return True
+  real_path=os.path.realpath(path)
+  for denied in context.denied_paths:
+   if real_path.startswith(os.path.realpath(denied)):
+    return False
+  working_dir_real=os.path.realpath(context.working_dir)
+  if not context.allowed_paths:
+   return real_path.startswith(working_dir_real)
+  for allowed in context.allowed_paths:
+   if real_path.startswith(os.path.realpath(allowed)):
+    return True
+  return False
+
+class FileReadSkill(FileSkillMixin,Skill):
  name="file_read"
  description="ファイルの内容を読み取ります"
  category=SkillCategory.FILE
@@ -13,10 +42,8 @@ class FileReadSkill(Skill):
   SkillParameter(name="encoding",type="string",description="エンコーディング",required=False,default="utf-8"),
   SkillParameter(name="max_lines",type="integer",description="最大行数",required=False,default=1000),
  ]
-
  def __init__(self):
   super().__init__()
-
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   path=kwargs.get("path","")
   encoding=kwargs.get("encoding","utf-8")
@@ -42,16 +69,22 @@ class FileReadSkill(Skill):
    max_file_size=context.restrictions.get("max_file_size",context.max_output_size)
    if file_size>max_file_size:
     return SkillResult(success=False,error=f"File too large: {file_size} bytes (limit: {max_file_size} bytes). Use max_lines to read partial content, or split the operation.")
-   content=await asyncio.to_thread(self._read_file,full_path,encoding,max_lines)
+   fm=self.get_file_manager()
+   if fm:
+    result=await fm.read_file(full_path,encoding,max_lines)
+    content=result.get("content","")
+    from_cache=result.get("from_cache",False)
+   else:
+    content=await asyncio.to_thread(self._read_file,full_path,encoding,max_lines)
+    from_cache=False
    line_count=len(content.splitlines())
    return SkillResult(
     success=True,
     output=content,
-    metadata={"path":full_path,"size":file_size,"lines":line_count,"truncated":line_count>=max_lines}
+    metadata={"path":full_path,"size":file_size,"lines":line_count,"truncated":line_count>=max_lines,"from_cache":from_cache}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
-
  def _read_file(self,path:str,encoding:str,max_lines:int)->str:
   with open(path,"r",encoding=encoding) as f:
    lines=[]
@@ -62,28 +95,7 @@ class FileReadSkill(Skill):
     lines.append(line)
    return"".join(lines)
 
- def _resolve_path(self,path:str,context:SkillContext)->str:
-  if os.path.isabs(path):
-   return os.path.normpath(path)
-  return os.path.normpath(os.path.join(context.working_dir,path))
-
- def _is_allowed(self,path:str,context:SkillContext)->bool:
-  if not context.sandbox_enabled:
-   return True
-  real_path=os.path.realpath(path)
-  for denied in context.denied_paths:
-   if real_path.startswith(os.path.realpath(denied)):
-    return False
-  working_dir_real=os.path.realpath(context.working_dir)
-  if not context.allowed_paths:
-   return real_path.startswith(working_dir_real)
-  for allowed in context.allowed_paths:
-   if real_path.startswith(os.path.realpath(allowed)):
-    return True
-  return False
-
-
-class FileWriteSkill(Skill):
+class FileWriteSkill(FileSkillMixin,Skill):
  name="file_write"
  description="ファイルに内容を書き込みます"
  category=SkillCategory.FILE
@@ -93,10 +105,8 @@ class FileWriteSkill(Skill):
   SkillParameter(name="encoding",type="string",description="エンコーディング",required=False,default="utf-8"),
   SkillParameter(name="create_dirs",type="boolean",description="親ディレクトリを作成するか",required=False,default=True),
  ]
-
  def __init__(self):
   super().__init__()
-
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   path=kwargs.get("path","")
   content=kwargs.get("content","")
@@ -116,7 +126,13 @@ class FileWriteSkill(Skill):
     parent=os.path.dirname(full_path)
     if parent and not os.path.exists(parent):
      os.makedirs(parent,exist_ok=True)
-   await asyncio.to_thread(self._write_file,full_path,content,encoding)
+   fm=self.get_file_manager()
+   if fm:
+    result=await fm.write_file(full_path,content,encoding,context.agent_id)
+    if not result.get("success"):
+     return SkillResult(success=False,error=result.get("error","Write failed"))
+   else:
+    await asyncio.to_thread(self._write_file,full_path,content,encoding)
    return SkillResult(
     success=True,
     output=f"Written {content_size} bytes to {path}",
@@ -124,33 +140,11 @@ class FileWriteSkill(Skill):
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
-
  def _write_file(self,path:str,content:str,encoding:str)->None:
   with open(path,"w",encoding=encoding) as f:
    f.write(content)
 
- def _resolve_path(self,path:str,context:SkillContext)->str:
-  if os.path.isabs(path):
-   return os.path.normpath(path)
-  return os.path.normpath(os.path.join(context.working_dir,path))
-
- def _is_allowed(self,path:str,context:SkillContext)->bool:
-  if not context.sandbox_enabled:
-   return True
-  real_path=os.path.realpath(path)
-  for denied in context.denied_paths:
-   if real_path.startswith(os.path.realpath(denied)):
-    return False
-  working_dir_real=os.path.realpath(context.working_dir)
-  if not context.allowed_paths:
-   return real_path.startswith(working_dir_real)
-  for allowed in context.allowed_paths:
-   if real_path.startswith(os.path.realpath(allowed)):
-    return True
-  return False
-
-
-class FileEditSkill(Skill):
+class FileEditSkill(FileSkillMixin,Skill):
  name="file_edit"
  description="ファイルの内容を部分的に編集します（文字列置換方式）"
  category=SkillCategory.FILE
@@ -161,10 +155,8 @@ class FileEditSkill(Skill):
   SkillParameter(name="encoding",type="string",description="エンコーディング",required=False,default="utf-8"),
   SkillParameter(name="replace_all",type="boolean",description="全ての出現箇所を置換するか",required=False,default=False),
  ]
-
  def __init__(self):
   super().__init__()
-
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   path=kwargs.get("path","")
   old_string=kwargs.get("old_string","")
@@ -189,17 +181,24 @@ class FileEditSkill(Skill):
    file_size=os.path.getsize(full_path)
    if file_size>max_file_size:
     return SkillResult(success=False,error=f"File too large to edit: {file_size} bytes (limit: {max_file_size} bytes). Consider editing a smaller file or splitting the operation.")
-   result=await asyncio.to_thread(self._edit_file,full_path,old_string,new_string,encoding,replace_all)
-   if result["error"]:
-    return SkillResult(success=False,error=result["error"])
+   fm=self.get_file_manager()
+   if fm:
+    result=await fm.edit_file(full_path,old_string,new_string,encoding,replace_all,context.agent_id)
+    if not result.get("success"):
+     return SkillResult(success=False,error=result.get("error","Edit failed"))
+    replacements=result.get("replacements",0)
+   else:
+    result=await asyncio.to_thread(self._edit_file,full_path,old_string,new_string,encoding,replace_all)
+    if result["error"]:
+     return SkillResult(success=False,error=result["error"])
+    replacements=result["count"]
    return SkillResult(
     success=True,
-    output=f"Replaced {result['count']} occurrence(s) in {path}",
-    metadata={"path":full_path,"replacements":result["count"]}
+    output=f"Replaced {replacements} occurrence(s) in {path}",
+    metadata={"path":full_path,"replacements":replacements}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
-
  def _edit_file(self,path:str,old_string:str,new_string:str,encoding:str,replace_all:bool)->dict:
   with open(path,"r",encoding=encoding) as f:
    content=f.read()
@@ -216,28 +215,7 @@ class FileEditSkill(Skill):
    f.write(new_content)
   return {"error":None,"count":count if replace_all else 1}
 
- def _resolve_path(self,path:str,context:SkillContext)->str:
-  if os.path.isabs(path):
-   return os.path.normpath(path)
-  return os.path.normpath(os.path.join(context.working_dir,path))
-
- def _is_allowed(self,path:str,context:SkillContext)->bool:
-  if not context.sandbox_enabled:
-   return True
-  real_path=os.path.realpath(path)
-  for denied in context.denied_paths:
-   if real_path.startswith(os.path.realpath(denied)):
-    return False
-  working_dir_real=os.path.realpath(context.working_dir)
-  if not context.allowed_paths:
-   return real_path.startswith(working_dir_real)
-  for allowed in context.allowed_paths:
-   if real_path.startswith(os.path.realpath(allowed)):
-    return True
-  return False
-
-
-class FileListSkill(Skill):
+class FileListSkill(FileSkillMixin,Skill):
  name="file_list"
  description="ディレクトリの内容を一覧表示します"
  category=SkillCategory.FILE
@@ -247,10 +225,8 @@ class FileListSkill(Skill):
   SkillParameter(name="recursive",type="boolean",description="再帰的に検索するか",required=False,default=False),
   SkillParameter(name="max_items",type="integer",description="最大表示件数",required=False,default=100),
  ]
-
  def __init__(self):
   super().__init__()
-
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   path=kwargs.get("path",".")
   pattern=kwargs.get("pattern","*")
@@ -266,16 +242,22 @@ class FileListSkill(Skill):
     return SkillResult(success=False,error=f"Directory not found: {path}")
    if not os.path.isdir(full_path):
     return SkillResult(success=False,error=f"Not a directory: {path}")
-   items=await asyncio.to_thread(self._list_dir,full_path,pattern,recursive,max_items)
+   fm=self.get_file_manager()
+   if fm:
+    result=await fm.list_directory(full_path,pattern,recursive,max_items)
+    items=result.get("items",[])
+    from_cache=result.get("from_cache",False)
+   else:
+    items=await asyncio.to_thread(self._list_dir,full_path,pattern,recursive,max_items)
+    from_cache=False
    truncated=len(items)>=max_items
    return SkillResult(
     success=True,
     output=items,
-    metadata={"path":full_path,"count":len(items),"truncated":truncated,"max_items_applied":max_items}
+    metadata={"path":full_path,"count":len(items),"truncated":truncated,"max_items_applied":max_items,"from_cache":from_cache}
    )
   except Exception as e:
    return SkillResult(success=False,error=str(e))
-
  def _list_dir(self,path:str,pattern:str,recursive:bool,max_items:int)->List[dict]:
   import fnmatch
   items=[]
@@ -295,7 +277,6 @@ class FileListSkill(Skill):
      full=os.path.join(path,name)
      items.append(self._get_item_info(full,path))
   return items
-
  def _get_item_info(self,full_path:str,base_path:str)->dict:
   stat=os.stat(full_path)
   rel_path=os.path.relpath(full_path,base_path)
@@ -306,23 +287,3 @@ class FileListSkill(Skill):
    "size":stat.st_size if os.path.isfile(full_path) else 0,
    "modified":stat.st_mtime,
   }
-
- def _resolve_path(self,path:str,context:SkillContext)->str:
-  if os.path.isabs(path):
-   return os.path.normpath(path)
-  return os.path.normpath(os.path.join(context.working_dir,path))
-
- def _is_allowed(self,path:str,context:SkillContext)->bool:
-  if not context.sandbox_enabled:
-   return True
-  real_path=os.path.realpath(path)
-  for denied in context.denied_paths:
-   if real_path.startswith(os.path.realpath(denied)):
-    return False
-  working_dir_real=os.path.realpath(context.working_dir)
-  if not context.allowed_paths:
-   return real_path.startswith(working_dir_real)
-  for allowed in context.allowed_paths:
-   if real_path.startswith(os.path.realpath(allowed)):
-    return True
-  return False

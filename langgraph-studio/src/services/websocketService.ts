@@ -417,7 +417,7 @@ class WebSocketService{
   this.socket.on('budget_warning',(data)=>{
    console.log('[WS] Budget warning received:',data.type)
    if(data.type==='budget_exceeded'){
-    useToastStore.getState().addToast('error',`予算を超過しました ($${data.status.current_usage.toFixed(2)}/$${data.status.monthly_limit.toFixed(2)})`)
+    useToastStore.getState().addToast('error',`予算を超過しました (${data.status.current_usage.toFixed(2)}/${data.status.monthly_limit.toFixed(2)})`)
    }else if(data.type==='budget_warning'||data.type==='threshold_warning'){
     useToastStore.getState().addToast('warning',`予算警告: ${data.status.usage_percent.toFixed(1)}%使用中`)
    }

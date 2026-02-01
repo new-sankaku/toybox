@@ -28,6 +28,8 @@ class ProjectRepository(BaseRepository[Project]):
   }
   if"outputSettings" in config:
    result["outputSettings"]=config["outputSettings"]
+  if"advancedSettings" in config:
+   result["advancedSettings"]=config["advancedSettings"]
   return result
 
  def get_all_dict(self)->List[Dict]:
@@ -82,6 +84,10 @@ class ProjectRepository(BaseRepository[Project]):
   if"outputSettings" in data:
    config=p.config or {}
    config["outputSettings"]=data["outputSettings"]
+   p.config=config
+  if"advancedSettings" in data:
+   config=p.config or {}
+   config["advancedSettings"]=data["advancedSettings"]
    p.config=config
   p.updated_at=datetime.now()
   self.update(p)

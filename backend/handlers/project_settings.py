@@ -4,7 +4,22 @@ from config_loader import (
  get_output_settings_defaults,
  get_cost_settings_defaults,
  get_agent_service_map,
+ get_advanced_quality_check_settings,
+ get_tool_execution_limits,
+ get_concurrent_limits,
+ get_dag_execution_settings,
+ get_temperature_defaults,
+ get_token_budget_settings,
+ get_context_policy_settings,
+ get_websocket_config,
+ get_available_principles,
+ get_default_agent_principles,
 )
+from ai_config import get_usage_categories
+from models.database import session_scope
+from repositories.project_ai_config import ProjectAiConfigRepository
+from repositories.global_execution_settings import GlobalExecutionSettingsRepository
+from middleware.logger import get_logger
 
 
 def register_project_settings_routes(app:Flask,data_store:DataStore):
@@ -78,3 +93,216 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
   data=request.json or []
   data_store.update_project(project_id,{"aiProviderSettings":data})
   return jsonify(data)
+
+ @app.route('/api/config/advanced-settings/defaults',methods=['GET'])
+ def get_advanced_settings_defaults():
+  return jsonify({
+   "qualityCheck":get_advanced_quality_check_settings(),
+   "toolExecution":get_tool_execution_limits(),
+   "dagExecution":get_dag_execution_settings(),
+   "temperatureDefaults":get_temperature_defaults(),
+   "tokenBudget":get_token_budget_settings(),
+   "contextPolicy":get_context_policy_settings()
+  })
+
+ @app.route('/api/config/concurrent-limits/defaults',methods=['GET'])
+ def get_concurrent_limits_defaults():
+  return jsonify(get_concurrent_limits())
+
+ @app.route('/api/config/websocket/defaults',methods=['GET'])
+ def get_websocket_defaults():
+  return jsonify(get_websocket_config())
+
+ @app.route('/api/projects/<project_id>/settings/advanced',methods=['GET'])
+ def get_project_advanced_settings(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  defaults={
+   "qualityCheck":get_advanced_quality_check_settings(),
+   "toolExecution":get_tool_execution_limits(),
+   "dagExecution":get_dag_execution_settings(),
+   "temperatureDefaults":get_temperature_defaults(),
+   "tokenBudget":get_token_budget_settings(),
+   "contextPolicy":get_context_policy_settings()
+  }
+  settings=project.get("advancedSettings",defaults)
+  for k,v in defaults.items():
+   if k not in settings:
+    settings[k]=v
+  return jsonify(settings)
+
+ @app.route('/api/projects/<project_id>/settings/advanced',methods=['PUT'])
+ def update_project_advanced_settings(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  data=request.json or {}
+  current=project.get("advancedSettings",{})
+  current.update(data)
+  data_store.update_project(project_id,{"advancedSettings":current})
+  return jsonify(current)
+
+ @app.route('/api/config/concurrent-limits',methods=['GET'])
+ def get_global_concurrent_limits():
+  try:
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    return jsonify(repo.get_concurrent_limits())
+  except Exception as e:
+   get_logger().error(f"Failed to get concurrent limits: {e}",exc_info=True)
+   return jsonify(get_concurrent_limits())
+
+ @app.route('/api/config/concurrent-limits',methods=['PUT'])
+ def update_global_concurrent_limits():
+  try:
+   data=request.json or {}
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    repo.update_concurrent_limits(data)
+    session.commit()
+    return jsonify(repo.get_concurrent_limits())
+  except Exception as e:
+   get_logger().error(f"Failed to update concurrent limits: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/config/websocket',methods=['GET'])
+ def get_global_websocket_settings():
+  try:
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    return jsonify(repo.get_websocket_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to get websocket settings: {e}",exc_info=True)
+   return jsonify(get_websocket_config())
+
+ @app.route('/api/config/websocket',methods=['PUT'])
+ def update_global_websocket_settings():
+  try:
+   data=request.json or {}
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    repo.update_websocket_settings(data)
+    session.commit()
+    return jsonify(repo.get_websocket_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to update websocket settings: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/projects/<project_id>/settings/usage-categories',methods=['GET'])
+ def get_project_usage_categories(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  try:
+   defaults=get_usage_categories()
+   with session_scope() as session:
+    repo=ProjectAiConfigRepository(session)
+    configs=repo.get_by_project(project_id)
+    result=[]
+    config_map={c.usage_category:c for c in configs}
+    for cat in defaults:
+     cat_id=cat.get("id","")
+     if cat_id in config_map:
+      c=config_map[cat_id]
+      result.append({
+       "id":cat_id,
+       "label":cat.get("label",""),
+       "service_type":cat.get("service_type",""),
+       "provider":c.provider_id,
+       "model":c.model_id
+      })
+     else:
+      default=cat.get("default",{})
+      result.append({
+       "id":cat_id,
+       "label":cat.get("label",""),
+       "service_type":cat.get("service_type",""),
+       "provider":default.get("provider",""),
+       "model":default.get("model","")
+      })
+    return jsonify(result)
+  except Exception as e:
+   get_logger().error(f"Failed to get usage categories: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/projects/<project_id>/settings/usage-categories/<category_id>',methods=['PUT'])
+ def update_project_usage_category(project_id:str,category_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  data=request.json or {}
+  provider=data.get("provider","")
+  model=data.get("model","")
+  if not provider or not model:
+   return jsonify({"error":"provider and model are required"}),400
+  try:
+   with session_scope() as session:
+    repo=ProjectAiConfigRepository(session)
+    config=repo.save(project_id,category_id,provider,model)
+    return jsonify({
+     "id":config.usage_category,
+     "provider":config.provider_id,
+     "model":config.model_id
+    })
+  except Exception as e:
+   get_logger().error(f"Failed to update usage category: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/projects/<project_id>/settings/usage-categories/<category_id>',methods=['DELETE'])
+ def reset_project_usage_category(project_id:str,category_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  try:
+   with session_scope() as session:
+    repo=ProjectAiConfigRepository(session)
+    repo.delete(project_id,category_id)
+    defaults=get_usage_categories()
+    for cat in defaults:
+     if cat.get("id")==category_id:
+      default=cat.get("default",{})
+      return jsonify({
+       "id":category_id,
+       "provider":default.get("provider",""),
+       "model":default.get("model","")
+      })
+    return jsonify({"id":category_id,"provider":"","model":""})
+  except Exception as e:
+   get_logger().error(f"Failed to reset usage category: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/config/principles',methods=['GET'])
+ def get_principles_list():
+  try:
+   principles=get_available_principles()
+   defaults=get_default_agent_principles()
+   return jsonify({"principles":principles,"defaults":defaults})
+  except Exception as e:
+   get_logger().error(f"Failed to get principles: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/projects/<project_id>/settings/principles',methods=['GET'])
+ def get_project_principles(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  defaults=get_default_agent_principles()
+  advanced=project.get("advancedSettings",{})
+  overrides=advanced.get("principleOverrides",{})
+  enabled=advanced.get("enabledPrinciples")
+  return jsonify({"defaults":defaults,"overrides":overrides,"enabledPrinciples":enabled})
+
+ @app.route('/api/projects/<project_id>/settings/principles',methods=['PUT'])
+ def update_project_principles(project_id:str):
+  project=data_store.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  data=request.json or {}
+  advanced=project.get("advancedSettings",{})
+  if "overrides" in data:
+   advanced["principleOverrides"]=data["overrides"]
+  if "enabledPrinciples" in data:
+   advanced["enabledPrinciples"]=data["enabledPrinciples"]
+  data_store.update_project(project_id,{"advancedSettings":advanced})
+  return jsonify({"overrides":advanced.get("principleOverrides",{}),"enabledPrinciples":advanced.get("enabledPrinciples")})

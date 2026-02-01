@@ -39,7 +39,11 @@ export const API_ENDPOINTS={
    qualityCheckReset:(id:string)=>`/api/projects/${id}/settings/quality-check/reset`,
    output:(id:string)=>`/api/projects/${id}/settings/output`,
    cost:(id:string)=>`/api/projects/${id}/settings/cost`,
-   aiProviders:(id:string)=>`/api/projects/${id}/settings/ai-providers`
+   aiProviders:(id:string)=>`/api/projects/${id}/settings/ai-providers`,
+   advanced:(id:string)=>`/api/projects/${id}/settings/advanced`,
+   usageCategories:(id:string)=>`/api/projects/${id}/settings/usage-categories`,
+   usageCategory:(projectId:string,categoryId:string)=>`/api/projects/${projectId}/settings/usage-categories/${categoryId}`,
+   principles:(id:string)=>`/api/projects/${id}/settings/principles`
   },
   aiServices:(id:string)=>`/api/projects/${id}/ai-services`,
   aiService:(projectId:string,serviceType:string)=>`/api/projects/${projectId}/ai-services/${serviceType}`
@@ -104,7 +108,11 @@ export const API_ENDPOINTS={
   outputSettingsDefaults:'/api/config/output-settings/defaults',
   uiSettings:'/api/config/ui-settings',
   agentServiceMap:'/api/config/agent-service-map',
-  pricing:'/api/config/pricing'
+  pricing:'/api/config/pricing',
+  advancedSettingsDefaults:'/api/config/advanced-settings/defaults',
+  concurrentLimitsDefaults:'/api/config/concurrent-limits/defaults',
+  concurrentLimits:'/api/config/concurrent-limits',
+  principles:'/api/config/principles'
  },
  brushup:{
   options:'/api/brushup/options'

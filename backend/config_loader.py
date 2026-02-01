@@ -278,6 +278,52 @@ def is_dag_execution_enabled()->bool:
     return dag_config.get("enabled",True)
 
 
+def get_dag_execution_settings()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("dag_execution",{"enabled":True})
+
+
+def get_advanced_quality_check_settings()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("advanced_quality_check",{
+        "quality_threshold":0.6,
+        "escalation":{
+            "enabled":True,
+            "tier2_score_min":0.5,
+            "tier2_score_max":0.7
+        }
+    })
+
+
+def get_tool_execution_limits()->Dict[str,Any]:
+    config=get_agents_config()
+    return config.get("tool_execution_limits",{
+        "max_iterations":50,
+        "timeout_seconds":300,
+        "loop_detection_threshold":3
+    })
+
+
+def get_concurrent_limits()->Dict[str,Any]:
+    config=get_project_settings_config()
+    return config.get("concurrent_limits",{
+        "default_max_concurrent":5,
+        "provider_overrides":{}
+    })
+
+
+def get_temperature_defaults()->Dict[str,float]:
+    config=get_agents_config()
+    return config.get("temperature_defaults",{
+        "leader":0.7,
+        "worker":0.5,
+        "splitter":0.3,
+        "integrator":0.4,
+        "tester":0.3,
+        "default":0.7
+    })
+
+
 def get_workflow_context_policy(agent_type:str)->Dict[str,Any]:
     raw=get_agents_config().get("workflow_dependencies",{})
     entry=raw.get(agent_type)
@@ -503,8 +549,10 @@ def get_agent_principles(agent_type:str)->List[str]:
     return principles
 
 
-def load_principles_for_agent(agent_type:str)->str:
+def load_principles_for_agent(agent_type:str,enabled_principles:Optional[List[str]]=None)->str:
     principle_names=get_agent_principles(agent_type)
+    if enabled_principles is not None:
+        principle_names=[p for p in principle_names if p in enabled_principles]
     if not principle_names:
         return""
     config=get_agents_config()
@@ -568,6 +616,31 @@ def clear_principle_cache()->None:
 def get_principle_settings()->Dict[str,Any]:
     config=get_agents_config()
     return config.get("principle_settings",{})
+
+
+def get_available_principles()->List[Dict[str,str]]:
+    principles_dir=get_config_dir()/"principles"
+    if not principles_dir.exists():
+        return[]
+    result=[]
+    for f in principles_dir.glob("*.md"):
+        name=f.stem
+        content=load_principle(name)
+        title=name
+        description=""
+        for line in content.split("\n"):
+            if line.startswith("# 原則:"):
+                title=line.replace("# 原則:","").strip()
+            elif line.strip() and not line.startswith("#") and not description:
+                description=line.strip()
+                break
+        result.append({"id":name,"label":title,"description":description})
+    return result
+
+
+def get_default_agent_principles()->Dict[str,List[str]]:
+    config=get_agents_config()
+    return config.get("agent_principles",{})
 
 
 def get_output_requirements(agent_type:str)->Dict[str,Any]:

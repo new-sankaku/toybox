@@ -3,6 +3,7 @@ import asyncio
 import base64
 from typing import Optional,Dict,Any,List
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
+from .file_skills import FileSkillMixin
 
 
 class ImageGenerateSkill(Skill):
@@ -75,7 +76,7 @@ class ImageGenerateSkill(Skill):
    return SkillResult(success=False,error=str(e))
 
 
-class BgmGenerateSkill(Skill):
+class BgmGenerateSkill(FileSkillMixin,Skill):
  name="bgm_generate"
  description="BGM（背景音楽）を生成します"
  category=SkillCategory.ASSET
@@ -128,6 +129,7 @@ class BgmGenerateSkill(Skill):
      with open(full_path,"wb") as f:
       f.write(base64.b64decode(result["audio_base64"]))
      output_info["saved_to"]=full_path
+     self._save_asset_metadata(full_path,prompt,"bgm",context.agent_id)
     return SkillResult(
      success=True,
      output=f"BGM生成完了: {prompt[:50]}...",
@@ -138,9 +140,23 @@ class BgmGenerateSkill(Skill):
    return SkillResult(success=False,error="AudioCraftプロバイダーが利用できません")
   except Exception as e:
    return SkillResult(success=False,error=str(e))
+ def _save_asset_metadata(self,path:str,description:str,asset_type:str,agent_id:str)->None:
+  try:
+   fm=self.get_file_manager()
+   if fm:
+    store=fm._get_metadata_store()
+    store.upsert({
+     "path":path,
+     "file_type":"asset",
+     "description":description,
+     "tags":[asset_type],
+     "agent_modified":agent_id,
+    })
+  except Exception:
+   pass
 
 
-class SfxGenerateSkill(Skill):
+class SfxGenerateSkill(FileSkillMixin,Skill):
  name="sfx_generate"
  description="効果音を生成します"
  category=SkillCategory.ASSET
@@ -180,6 +196,7 @@ class SfxGenerateSkill(Skill):
      with open(full_path,"wb") as f:
       f.write(base64.b64decode(result["audio_base64"]))
      output_info["saved_to"]=full_path
+     self._save_asset_metadata(full_path,prompt,"sfx",context.agent_id)
     return SkillResult(
      success=True,
      output=f"効果音生成完了: {prompt[:50]}",
@@ -190,9 +207,23 @@ class SfxGenerateSkill(Skill):
    return SkillResult(success=False,error="AudioCraftプロバイダーが利用できません")
   except Exception as e:
    return SkillResult(success=False,error=str(e))
+ def _save_asset_metadata(self,path:str,description:str,asset_type:str,agent_id:str)->None:
+  try:
+   fm=self.get_file_manager()
+   if fm:
+    store=fm._get_metadata_store()
+    store.upsert({
+     "path":path,
+     "file_type":"asset",
+     "description":description,
+     "tags":[asset_type],
+     "agent_modified":agent_id,
+    })
+  except Exception:
+   pass
 
 
-class VoiceGenerateSkill(Skill):
+class VoiceGenerateSkill(FileSkillMixin,Skill):
  name="voice_generate"
  description="テキストから音声を生成します（TTS）"
  category=SkillCategory.ASSET
@@ -236,6 +267,7 @@ class VoiceGenerateSkill(Skill):
      with open(full_path,"wb") as f:
       f.write(base64.b64decode(result["audio_base64"]))
      output_info["saved_to"]=full_path
+     self._save_asset_metadata(full_path,f"Voice: {text[:100]}","voice",context.agent_id)
     return SkillResult(
      success=True,
      output=f"音声生成完了: {text[:30]}...",
@@ -246,3 +278,17 @@ class VoiceGenerateSkill(Skill):
    return SkillResult(success=False,error="Coqui TTSプロバイダーが利用できません")
   except Exception as e:
    return SkillResult(success=False,error=str(e))
+ def _save_asset_metadata(self,path:str,description:str,asset_type:str,agent_id:str)->None:
+  try:
+   fm=self.get_file_manager()
+   if fm:
+    store=fm._get_metadata_store()
+    store.upsert({
+     "path":path,
+     "file_type":"asset",
+     "description":description,
+     "tags":[asset_type],
+     "agent_modified":agent_id,
+    })
+  except Exception:
+   pass
