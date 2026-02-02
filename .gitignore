@@ -57,6 +57,10 @@ pnpm-debug.log*
 # Test coverage
 coverage/
 
+# Test results
+test-results/
+playwright-report/
+
 # Misc
 *.orig
 *.bak
@@ -74,3 +78,5 @@ testdata/
 *.db-shm
 
 .claude/tool-history.jsonl
+tool-history.csv
+=*
