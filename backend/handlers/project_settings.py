@@ -300,9 +300,9 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
   advanced=project.get("advancedSettings",{})
-  if "overrides" in data:
+  if"overrides" in data:
    advanced["principleOverrides"]=data["overrides"]
-  if "enabledPrinciples" in data:
+  if"enabledPrinciples" in data:
    advanced["enabledPrinciples"]=data["enabledPrinciples"]
   data_store.update_project(project_id,{"advancedSettings":advanced})
   return jsonify({"overrides":advanced.get("principleOverrides",{}),"enabledPrinciples":advanced.get("enabledPrinciples")})

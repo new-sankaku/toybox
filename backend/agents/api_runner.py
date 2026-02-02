@@ -347,17 +347,17 @@ class ApiAgentRunner(AgentRunner):
         return get_agent_temperature(agent_type)
 
     def _get_agent_role(self,agent_type:str)->str:
-        if "leader" in agent_type.lower():
-            return "leader"
-        if "worker" in agent_type.lower():
-            return "worker"
-        if "splitter" in agent_type.lower():
-            return "splitter"
-        if "quality" in agent_type.lower():
-            return "quality_checker"
-        if "integrator" in agent_type.lower():
-            return "integrator"
-        return "default"
+        if"leader" in agent_type.lower():
+            return"leader"
+        if"worker" in agent_type.lower():
+            return"worker"
+        if"splitter" in agent_type.lower():
+            return"splitter"
+        if"quality" in agent_type.lower():
+            return"quality_checker"
+        if"integrator" in agent_type.lower():
+            return"integrator"
+        return"default"
 
     def _get_project_context_policy(self,context:Optional[AgentContext])->Dict[str,Any]:
         if context and context.config:
@@ -373,7 +373,7 @@ class ApiAgentRunner(AgentRunner):
         if context and context.config:
             adv=context.config.get("advancedSettings",{})
             dag=adv.get("dagExecution",{})
-            if "enabled" in dag:
+            if"enabled" in dag:
                 return dag["enabled"]
         from config_loader import is_dag_execution_enabled
         return is_dag_execution_enabled()
