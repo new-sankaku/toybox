@@ -40,6 +40,14 @@ class ProjectFileCache:
     def is_loaded(self)->bool:
         return self._loaded
     def _is_binary_content(self,data:bytes,sample_size:int=8192)->bool:
+        if data.startswith((
+            b'\xef\xbb\xbf',
+            b'\xff\xfe\x00\x00',
+            b'\x00\x00\xfe\xff',
+            b'\xff\xfe',
+            b'\xfe\xff',
+        )):
+            return False
         sample=data[:sample_size]
         return b'\x00' in sample
     def load_all(self)->Dict[str,Any]:
