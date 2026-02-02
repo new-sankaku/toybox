@@ -39,13 +39,15 @@ class ProjectFileCache:
     @property
     def is_loaded(self)->bool:
         return self._loaded
+    def _is_binary_content(self,data:bytes,sample_size:int=8192)->bool:
+        sample=data[:sample_size]
+        return b'\x00' in sample
     def load_all(self)->Dict[str,Any]:
         with self._lock:
             self._files.clear()
             self._dirs.clear()
             self._current_size_bytes=0
             stats={"files":0,"dirs":0,"binary":0,"skipped":0,"total_size":0}
-            binary_exts=self._config.binary_extensions
             ignore_dirs=self._config.ignore_dirs
             max_file_size=self._config.max_file_size_bytes
             for root,dirs,files in os.walk(self._working_dir):
@@ -71,26 +73,24 @@ class ProjectFileCache:
                     rel_path=os.path.join(rel_root,filename) if rel_root else filename
                     try:
                         file_stat=os.stat(filepath)
-                        ext=os.path.splitext(filename)[1].lower()
-                        is_binary=ext in binary_exts
                         entry=FileEntry(
                             path=rel_path,
                             size=file_stat.st_size,
                             mtime=file_stat.st_mtime,
-                            is_binary=is_binary,
                         )
-                        if is_binary:
-                            stats["binary"]+=1
-                        elif file_stat.st_size>max_file_size:
+                        if file_stat.st_size>max_file_size:
+                            entry.is_binary=True
                             stats["skipped"]+=1
                         else:
-                            try:
-                                with open(filepath,"r",encoding="utf-8",errors="replace") as f:
-                                    entry.content=f.read()
-                                self._current_size_bytes+=len(entry.content.encode("utf-8"))
-                            except Exception:
+                            with open(filepath,"rb") as f:
+                                data=f.read()
+                            if self._is_binary_content(data):
                                 entry.is_binary=True
                                 stats["binary"]+=1
+                            else:
+                                entry.content=data.decode("utf-8",errors="replace")
+                                entry.is_binary=False
+                                self._current_size_bytes+=len(data)
                         self._files[rel_path]=entry
                         stats["files"]+=1
                         stats["total_size"]+=file_stat.st_size
