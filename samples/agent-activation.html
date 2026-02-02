@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Activation Sequence</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #1a1a1a;
+      color: #c0b8a0;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+    }
+
+    #app {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    .ui-layer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .ui-layer > * {
+      pointer-events: auto;
+    }
+
+    .terminal {
+      position: absolute;
+      top: 40px;
+      left: 40px;
+      width: 400px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .terminal-line {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+
+    .terminal-line.visible {
+      opacity: 1;
+      transform: translateX(0);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+
+    .terminal-line.processing::after {
+      content: '█';
+      animation: cursor-blink 0.5s step-end infinite;
+    }
+
+    @keyframes cursor-blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+
+    .prompt { color: #7a9a6a; }
+    .data { color: #a0a0a0; }
+    .success { color: #8ab87a; }
+    .highlight { color: #d4c4a0; }
+
+    .input-section {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 500px;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .input-section.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .input-label {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      margin-bottom: 12px;
+      color: #888;
+    }
+
+    .input-field {
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid #444;
+      color: #d4c4a0;
+      font-family: inherit;
+      font-size: 18px;
+      padding: 8px 0;
+      outline: none;
+    }
+
+    .input-field:focus {
+      border-bottom-color: #888;
+    }
+
+    .input-hint {
+      margin-top: 16px;
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.1em;
+    }
+
+    .agent-display {
+      position: absolute;
+      bottom: 100px;
+      left: 0;
+      right: 0;
+      display: flex;
+      justify-content: center;
+      gap: 60px;
+    }
+
+    .agent-slot {
+      width: 80px;
+      text-align: center;
+      opacity: 0.2;
+    }
+
+    .agent-slot.standby {
+      opacity: 0.5;
+    }
+
+    .agent-slot.active {
+      opacity: 1;
+    }
+
+    .agent-avatar {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 8px;
+      position: relative;
+    }
+
+    .agent-name {
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: #888;
+    }
+
+    .agent-slot.active .agent-name {
+      color: #c0b8a0;
+    }
+
+    .agent-status {
+      font-size: 9px;
+      margin-top: 4px;
+      letter-spacing: 0.1em;
+    }
+
+    .agent-slot.standby .agent-status { color: #666; }
+    .agent-slot.active .agent-status { color: #8ab87a; }
+
+    .status-bar {
+      position: absolute;
+      bottom: 40px;
+      left: 40px;
+      right: 40px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #555;
+      letter-spacing: 0.1em;
+    }
+
+    .launch-prompt {
+      position: absolute;
+      bottom: 200px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .launch-prompt.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .launch-text {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      color: #888;
+      margin-bottom: 20px;
+    }
+
+    .launch-btn {
+      background: transparent;
+      border: 1px solid #555;
+      color: #c0b8a0;
+      padding: 16px 48px;
+      font-family: inherit;
+      font-size: 14px;
+      letter-spacing: 0.2em;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .launch-btn:hover {
+      border-color: #888;
+      background: rgba(255,255,255,0.05);
+    }
+
+    .countdown {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 120px;
+      font-weight: 100;
+      color: #c0b8a0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .countdown.active {
+      opacity: 1;
+    }
+
+    .mission-ready {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      opacity: 0;
+    }
+
+    .mission-ready.active {
+      opacity: 1;
+    }
+
+    .mission-ready-title {
+      font-size: 32px;
+      letter-spacing: 0.3em;
+      margin-bottom: 16px;
+    }
+
+    .mission-ready-sub {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <canvas id="bgCanvas"></canvas>
+    <canvas id="agentCanvas"></canvas>
+
+    <div class="ui-layer">
+      <div class="terminal" id="terminal"></div>
+
+      <div class="input-section" id="inputSection">
+        <div class="input-label">PROJECT DESIGNATION</div>
+        <input type="text" class="input-field" id="projectInput" placeholder="" autocomplete="off">
+        <div class="input-hint">ENTER TO CONFIRM</div>
+      </div>
+
+      <div class="agent-display" id="agentDisplay">
+        <div class="agent-slot" data-agent="concept">
+          <div class="agent-avatar" id="avatar-concept"></div>
+          <div class="agent-name">CONCEPT</div>
+          <div class="agent-status">OFFLINE</div>
+        </div>
+        <div class="agent-slot" data-agent="scenario">
+          <div class="agent-avatar" id="avatar-scenario"></div>
+          <div class="agent-name">SCENARIO</div>
+          <div class="agent-status">OFFLINE</div>
+        </div>
+        <div class="agent-slot" data-agent="character">
+          <div class="agent-avatar" id="avatar-character"></div>
+          <div class="agent-name">CHARACTER</div>
+          <div class="agent-status">OFFLINE</div>
+        </div>
+        <div class="agent-slot" data-agent="code">
+          <div class="agent-avatar" id="avatar-code"></div>
+          <div class="agent-name">CODE</div>
+          <div class="agent-status">OFFLINE</div>
+        </div>
+      </div>
+
+      <div class="launch-prompt" id="launchPrompt">
+        <div class="launch-text">ALL AGENTS STANDING BY</div>
+        <button class="launch-btn" id="launchBtn">INITIALIZE MISSION</button>
+      </div>
+
+      <div class="countdown" id="countdown"></div>
+
+      <div class="mission-ready" id="missionReady">
+        <div class="mission-ready-title">MISSION READY</div>
+        <div class="mission-ready-sub">ALL SYSTEMS OPERATIONAL</div>
+      </div>
+
+      <div class="status-bar">
+        <span id="statusLeft">SYSTEM STANDBY</span>
+        <span id="statusRight"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const AudioSystem = {
+      ctx: null,
+
+      init() {
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      },
+
+      resume() {
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      },
+
+      playTone(freq, duration, type = 'sine', volume = 0.1) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = type;
+        gain.gain.setValueAtTime(volume, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+        osc.start();
+        osc.stop(this.ctx.currentTime + duration);
+      },
+
+      keyPress() {
+        this.playTone(800, 0.05, 'square', 0.03);
+      },
+
+      confirm() {
+        this.playTone(440, 0.1, 'sine', 0.08);
+        setTimeout(() => this.playTone(554, 0.1, 'sine', 0.08), 80);
+        setTimeout(() => this.playTone(659, 0.15, 'sine', 0.1), 160);
+      },
+
+      agentActivate() {
+        this.playTone(220, 0.3, 'sawtooth', 0.05);
+        setTimeout(() => this.playTone(330, 0.2, 'sine', 0.08), 100);
+        setTimeout(() => this.playTone(440, 0.3, 'sine', 0.1), 200);
+      },
+
+      countdown(num) {
+        const freq = num === 0 ? 880 : 440;
+        const dur = num === 0 ? 0.5 : 0.2;
+        this.playTone(freq, dur, 'sine', 0.15);
+        if (num === 0) {
+          setTimeout(() => this.playTone(1108, 0.4, 'sine', 0.12), 150);
+          setTimeout(() => this.playTone(1318, 0.5, 'sine', 0.1), 300);
+        }
+      },
+
+      ambientHum() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.frequency.value = 60;
+        osc.type = 'sawtooth';
+        filter.type = 'lowpass';
+        filter.frequency.value = 200;
+        gain.gain.value = 0.02;
+        osc.start();
+        return { osc, gain };
+      }
+    };
+
+    const bgCanvas = document.getElementById('bgCanvas');
+    const bgCtx = bgCanvas.getContext('2d');
+    const agentCanvas = document.getElementById('agentCanvas');
+    const agentCtx = agentCanvas.getContext('2d');
+
+    let width, height;
+    function resize() {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      bgCanvas.width = width;
+      bgCanvas.height = height;
+      agentCanvas.width = width;
+      agentCanvas.height = height;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    const gridLines = [];
+    for (let i = 0; i < 50; i++) {
+      gridLines.push({
+        y: Math.random() * height,
+        speed: 0.2 + Math.random() * 0.3,
+        alpha: 0.02 + Math.random() * 0.03
+      });
+    }
+
+    function drawBackground(time) {
+      bgCtx.fillStyle = '#1a1a1a';
+      bgCtx.fillRect(0, 0, width, height);
+
+      gridLines.forEach(line => {
+        line.y += line.speed;
+        if (line.y > height) line.y = 0;
+        bgCtx.strokeStyle = `rgba(100, 95, 80, ${line.alpha})`;
+        bgCtx.beginPath();
+        bgCtx.moveTo(0, line.y);
+        bgCtx.lineTo(width, line.y);
+        bgCtx.stroke();
+      });
+
+      const scanY = (time * 0.05) % height;
+      bgCtx.fillStyle = 'rgba(192, 184, 160, 0.02)';
+      bgCtx.fillRect(0, scanY, width, 2);
+    }
+
+    const agents = {
+      concept: { x: 0, y: 0, state: 'offline', breathPhase: 0, eyeBlink: 0 },
+      scenario: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI * 0.5, eyeBlink: 0 },
+      character: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI, eyeBlink: 0 },
+      code: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI * 1.5, eyeBlink: 0 }
+    };
+
+    function updateAgentPositions() {
+      const slots = document.querySelectorAll('.agent-slot');
+      slots.forEach(slot => {
+        const name = slot.dataset.agent;
+        const avatar = slot.querySelector('.agent-avatar');
+        const rect = avatar.getBoundingClientRect();
+        agents[name].x = rect.left + rect.width / 2;
+        agents[name].y = rect.top + rect.height / 2;
+      });
+    }
+
+    function drawAgent(agent, name, time) {
+      const { x, y, state, breathPhase } = agent;
+      if (state === 'offline') return;
+
+      const breathOffset = Math.sin(time * 0.003 + breathPhase) * 2;
+      const centerY = y + breathOffset;
+
+      agentCtx.save();
+      agentCtx.translate(x, centerY);
+
+      if (state === 'activating') {
+        const flicker = Math.random() > 0.1 ? 1 : 0.3;
+        agentCtx.globalAlpha = flicker;
+      }
+
+      const baseColor = state === 'active' ? '#c0b8a0' : '#666';
+
+      agentCtx.strokeStyle = baseColor;
+      agentCtx.lineWidth = 1.5;
+      agentCtx.beginPath();
+      agentCtx.arc(0, -8, 12, 0, Math.PI * 2);
+      agentCtx.stroke();
+
+      agentCtx.beginPath();
+      agentCtx.moveTo(0, 4);
+      agentCtx.lineTo(0, 24);
+      agentCtx.moveTo(-12, 12);
+      agentCtx.lineTo(12, 12);
+      agentCtx.moveTo(0, 24);
+      agentCtx.lineTo(-8, 36);
+      agentCtx.moveTo(0, 24);
+      agentCtx.lineTo(8, 36);
+      agentCtx.stroke();
+
+      if (state === 'active') {
+        agent.eyeBlink -= 1;
+        if (agent.eyeBlink <= 0 && Math.random() < 0.005) {
+          agent.eyeBlink = 10;
+        }
+
+        if (agent.eyeBlink <= 0) {
+          agentCtx.fillStyle = baseColor;
+          agentCtx.beginPath();
+          agentCtx.arc(-4, -10, 2, 0, Math.PI * 2);
+          agentCtx.arc(4, -10, 2, 0, Math.PI * 2);
+          agentCtx.fill();
+        }
+      }
+
+      agentCtx.restore();
+    }
+
+    function drawAgents(time) {
+      agentCtx.clearRect(0, 0, width, height);
+      updateAgentPositions();
+      Object.entries(agents).forEach(([name, agent]) => {
+        drawAgent(agent, name, time);
+      });
+    }
+
+    let animationId;
+    function animate(time) {
+      drawBackground(time);
+      drawAgents(time);
+      animationId = requestAnimationFrame(animate);
+    }
+
+    const terminal = document.getElementById('terminal');
+    const terminalLines = [];
+
+    function addTerminalLine(text, className = '', processing = false) {
+      return new Promise(resolve => {
+        const line = document.createElement('div');
+        line.className = 'terminal-line' + (className ? ' ' + className : '');
+        if (processing) line.classList.add('processing');
+        line.innerHTML = text;
+        terminal.appendChild(line);
+        terminalLines.push(line);
+
+        setTimeout(() => {
+          line.classList.add('visible');
+          if (processing) {
+            setTimeout(() => {
+              line.classList.remove('processing');
+              resolve();
+            }, 500 + Math.random() * 500);
+          } else {
+            resolve();
+          }
+        }, 50);
+      });
+    }
+
+    function clearTerminal() {
+      terminal.innerHTML = '';
+      terminalLines.length = 0;
+    }
+
+    function updateAgentSlot(name, state) {
+      const slot = document.querySelector(`[data-agent="${name}"]`);
+      const status = slot.querySelector('.agent-status');
+
+      slot.classList.remove('standby', 'active');
+      if (state !== 'offline') slot.classList.add(state);
+
+      agents[name].state = state;
+
+      const statusText = {
+        offline: 'OFFLINE',
+        standby: 'STANDBY',
+        activating: 'ACTIVATING',
+        active: 'ONLINE'
+      };
+      status.textContent = statusText[state] || state.toUpperCase();
+    }
+
+    async function activateAgent(name) {
+      updateAgentSlot(name, 'activating');
+      AudioSystem.agentActivate();
+
+      await addTerminalLine(`<span class="prompt">></span> Initializing ${name.toUpperCase()} agent...`, '', true);
+
+      await new Promise(r => setTimeout(r, 300));
+
+      updateAgentSlot(name, 'active');
+      await addTerminalLine(`<span class="success">[OK]</span> ${name.toUpperCase()} agent online`);
+    }
+
+    const inputSection = document.getElementById('inputSection');
+    const projectInput = document.getElementById('projectInput');
+    const launchPrompt = document.getElementById('launchPrompt');
+    const launchBtn = document.getElementById('launchBtn');
+    const countdown = document.getElementById('countdown');
+    const missionReady = document.getElementById('missionReady');
+    const statusLeft = document.getElementById('statusLeft');
+    const statusRight = document.getElementById('statusRight');
+
+    let projectName = '';
+    let state = 'init';
+
+    async function runSequence() {
+      AudioSystem.init();
+
+      await new Promise(r => setTimeout(r, 500));
+
+      await addTerminalLine('<span class="prompt">></span> System initialization...');
+      await new Promise(r => setTimeout(r, 300));
+      await addTerminalLine('<span class="success">[OK]</span> Core systems ready');
+      await addTerminalLine('<span class="prompt">></span> Awaiting project designation...');
+
+      statusLeft.textContent = 'AWAITING INPUT';
+
+      inputSection.classList.add('active');
+      projectInput.focus();
+      state = 'input';
+    }
+
+    projectInput.addEventListener('keydown', (e) => {
+      AudioSystem.resume();
+      if (e.key !== 'Enter') {
+        AudioSystem.keyPress();
+      }
+    });
+
+    projectInput.addEventListener('keyup', async (e) => {
+      if (e.key === 'Enter' && state === 'input' && projectInput.value.trim()) {
+        projectName = projectInput.value.trim();
+        state = 'activating';
+
+        AudioSystem.confirm();
+
+        inputSection.classList.remove('active');
+
+        await addTerminalLine(`<span class="highlight">PROJECT: ${projectName}</span>`);
+        await addTerminalLine('<span class="prompt">></span> Project registered');
+        await new Promise(r => setTimeout(r, 500));
+
+        statusLeft.textContent = 'ACTIVATING AGENTS';
+        statusRight.textContent = `PROJECT: ${projectName}`;
+
+        await addTerminalLine('<span class="prompt">></span> Beginning agent activation sequence...');
+        await new Promise(r => setTimeout(r, 500));
+
+        Object.keys(agents).forEach(name => updateAgentSlot(name, 'standby'));
+        await new Promise(r => setTimeout(r, 800));
+
+        for (const name of Object.keys(agents)) {
+          await activateAgent(name);
+          await new Promise(r => setTimeout(r, 400));
+        }
+
+        await new Promise(r => setTimeout(r, 500));
+        await addTerminalLine('<span class="success">[COMPLETE]</span> All agents activated');
+
+        statusLeft.textContent = 'READY FOR LAUNCH';
+
+        launchPrompt.classList.add('active');
+        state = 'ready';
+      }
+    });
+
+    launchBtn.addEventListener('click', async () => {
+      if (state !== 'ready') return;
+      state = 'launching';
+
+      AudioSystem.resume();
+      launchPrompt.classList.remove('active');
+      clearTerminal();
+
+      statusLeft.textContent = 'INITIALIZING MISSION';
+
+      for (let i = 3; i >= 0; i--) {
+        countdown.textContent = i === 0 ? 'GO' : i;
+        countdown.classList.add('active');
+        AudioSystem.countdown(i);
+
+        await new Promise(r => setTimeout(r, i === 0 ? 500 : 800));
+
+        if (i > 0) {
+          countdown.classList.remove('active');
+          await new Promise(r => setTimeout(r, 200));
+        }
+      }
+
+      countdown.classList.remove('active');
+
+      document.querySelectorAll('.agent-slot').forEach(slot => {
+        slot.style.transition = 'opacity 0.5s';
+        slot.style.opacity = '0';
+      });
+
+      await new Promise(r => setTimeout(r, 300));
+
+      missionReady.classList.add('active');
+      statusLeft.textContent = 'MISSION ACTIVE';
+
+      await new Promise(r => setTimeout(r, 2000));
+
+      alert(`Project "${projectName}" initialized!\n(実際の実装ではダッシュボードに遷移します)`);
+      location.reload();
+    });
+
+    animate(0);
+    runSequence();
+  </script>
+</body>
+</html>
