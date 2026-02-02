@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Team Assembly - Project Creation</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-main: #E8E4D4;
+      --bg-panel: #DAD5C3;
+      --bg-selected: #CCC7B5;
+      --bg-header: #57534A;
+      --bg-dark: #3a3632;
+      --text-main: #454138;
+      --text-light: #5A5548;
+      --text-header: #E8E4D4;
+      --accent-green: #7AAA7A;
+      --accent-orange: #C4956C;
+      --accent-yellow: #C9C078;
+      --accent-blue: #6B8FAA;
+      --accent-red: #B85C5C;
+      --border-light: rgba(69, 65, 56, 0.2);
+      --border-dark: rgba(69, 65, 56, 0.4);
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+      background: var(--bg-main);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dark);
+    }
+
+    .header {
+      background: var(--bg-header);
+      color: var(--text-header);
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: 0.15em;
+    }
+
+    .diamond {
+      opacity: 0.7;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+    }
+
+    .left-panel {
+      padding: 24px;
+      border-right: 1px solid var(--border-light);
+    }
+
+    .right-panel {
+      padding: 24px;
+      background: var(--bg-main);
+    }
+
+    .section-title {
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      color: var(--text-light);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-dark);
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 0.05em;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-input:focus {
+      border-color: var(--text-main);
+    }
+
+    textarea.form-input {
+      resize: none;
+      min-height: 80px;
+    }
+
+    .toggle-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toggle-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .toggle-item:hover {
+      border-color: var(--border-dark);
+    }
+
+    .toggle-item.active {
+      border-color: var(--accent-green);
+      background: var(--bg-selected);
+    }
+
+    .toggle-checkbox {
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--border-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--accent-green);
+    }
+
+    .toggle-item.active .toggle-checkbox {
+      background: var(--accent-green);
+      border-color: var(--accent-green);
+      color: white;
+    }
+
+    .toggle-label {
+      font-size: 12px;
+    }
+
+    .toggle-service {
+      margin-left: auto;
+      font-size: 10px;
+      color: var(--text-light);
+    }
+
+    .team-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .agent-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      padding: 12px;
+      text-align: center;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .agent-card.locked {
+      opacity: 0.4;
+    }
+
+    .agent-card.standby {
+      opacity: 0.7;
+      border-color: var(--accent-yellow);
+    }
+
+    .agent-card.ready {
+      border-color: var(--accent-green);
+      box-shadow: 0 0 12px rgba(122, 170, 122, 0.3);
+    }
+
+    .agent-card.ready .agent-icon {
+      animation: ready-pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes ready-pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+    }
+
+    .agent-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+      transition: transform 0.3s;
+    }
+
+    .agent-name {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+
+    .agent-role {
+      font-size: 9px;
+      color: var(--text-light);
+      margin-bottom: 8px;
+    }
+
+    .agent-status {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      padding: 2px 8px;
+      display: inline-block;
+    }
+
+    .agent-status.locked {
+      color: var(--text-light);
+      border-bottom: 1px solid var(--text-light);
+    }
+
+    .agent-status.standby {
+      color: var(--accent-yellow);
+      border-bottom: 1px solid var(--accent-yellow);
+    }
+
+    .agent-status.ready {
+      color: var(--accent-green);
+      border-bottom: 1px solid var(--accent-green);
+    }
+
+    .agent-unlock-hint {
+      position: absolute;
+      bottom: 4px;
+      left: 0;
+      right: 0;
+      font-size: 8px;
+      color: var(--text-light);
+    }
+
+    .footer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border-light);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-panel);
+    }
+
+    .team-status {
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+    }
+
+    .team-status span {
+      color: var(--accent-green);
+      font-weight: 500;
+    }
+
+    .btn {
+      padding: 12px 32px;
+      background: var(--bg-header);
+      color: var(--text-header);
+      border: none;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn:hover {
+      background: var(--text-main);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn.ready {
+      background: var(--accent-green);
+      animation: btn-glow 1.5s ease-in-out infinite;
+    }
+
+    @keyframes btn-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(122, 170, 122, 0.4); }
+      50% { box-shadow: 0 0 20px 4px rgba(122, 170, 122, 0.4); }
+    }
+
+    .assembly-animation {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.9);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 1000;
+    }
+
+    .assembly-animation.show {
+      display: flex;
+    }
+
+    .assembly-title {
+      color: var(--text-header);
+      font-size: 24px;
+      letter-spacing: 0.2em;
+      margin-bottom: 40px;
+    }
+
+    .assembly-agents {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 40px;
+    }
+
+    .assembly-agent {
+      text-align: center;
+      color: var(--text-header);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.5s ease;
+    }
+
+    .assembly-agent.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .assembly-agent-icon {
+      font-size: 40px;
+      margin-bottom: 8px;
+    }
+
+    .assembly-agent-name {
+      font-size: 11px;
+      letter-spacing: 0.15em;
+    }
+
+    .assembly-status {
+      color: var(--accent-green);
+      font-size: 14px;
+      letter-spacing: 0.15em;
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+
+    .assembly-status.show {
+      opacity: 1;
+    }
+
+    .option-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .option-btn {
+      padding: 10px 8px;
+      background: var(--bg-main);
+      border: 1px solid var(--border-light);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+    }
+
+    .option-btn:hover {
+      border-color: var(--border-dark);
+    }
+
+    .option-btn.selected {
+      border-color: var(--accent-green);
+      background: var(--bg-selected);
+    }
+
+    .option-btn-title {
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .option-btn-desc {
+      font-size: 9px;
+      color: var(--text-light);
+      margin-top: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="diamond">◇</span>
+      <span>ASSEMBLE YOUR DEVELOPMENT TEAM</span>
+    </div>
+
+    <div class="content">
+      <div class="left-panel">
+        <div class="section-title">
+          <span class="diamond">◇</span>
+          <span>MISSION SETUP</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">MISSION NAME</label>
+          <input type="text" class="form-input" id="projectName" placeholder="プロジェクト名">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">MISSION BRIEF</label>
+          <textarea class="form-input" id="projectIdea" placeholder="作りたいゲームのアイデア..."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">PLATFORM</label>
+          <div class="option-buttons">
+            <div class="option-btn" data-type="platform" data-value="web">
+              <div class="option-btn-title">Web</div>
+              <div class="option-btn-desc">ブラウザ</div>
+            </div>
+            <div class="option-btn" data-type="platform" data-value="desktop">
+              <div class="option-btn-title">Desktop</div>
+              <div class="option-btn-desc">PC</div>
+            </div>
+            <div class="option-btn" data-type="platform" data-value="mobile">
+              <div class="option-btn-title">Mobile</div>
+              <div class="option-btn-desc">スマホ</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">ASSET GENERATION</label>
+          <div class="toggle-group">
+            <div class="toggle-item" data-agent="image">
+              <div class="toggle-checkbox">✓</div>
+              <span class="toggle-label">画像生成</span>
+              <span class="toggle-service">Image AI</span>
+            </div>
+            <div class="toggle-item" data-agent="bgm">
+              <div class="toggle-checkbox">✓</div>
+              <span class="toggle-label">BGM生成</span>
+              <span class="toggle-service">Music AI</span>
+            </div>
+            <div class="toggle-item" data-agent="voice">
+              <div class="toggle-checkbox">✓</div>
+              <span class="toggle-label">音声合成</span>
+              <span class="toggle-service">Voice AI</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="section-title">
+          <span class="diamond">◇</span>
+          <span>TEAM MEMBERS</span>
+        </div>
+
+        <div class="team-grid">
+          <div class="agent-card standby" data-agent="concept">
+            <div class="agent-icon">🧙</div>
+            <div class="agent-name">Concept</div>
+            <div class="agent-role">Artist</div>
+            <div class="agent-status standby">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="scenario">
+            <div class="agent-icon">🎭</div>
+            <div class="agent-name">Scenario</div>
+            <div class="agent-role">Writer</div>
+            <div class="agent-status standby">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="character">
+            <div class="agent-icon">👤</div>
+            <div class="agent-name">Character</div>
+            <div class="agent-role">Designer</div>
+            <div class="agent-status standby">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="code">
+            <div class="agent-icon">💻</div>
+            <div class="agent-name">Code</div>
+            <div class="agent-role">Programmer</div>
+            <div class="agent-status standby">STANDBY</div>
+          </div>
+          <div class="agent-card locked" data-agent="image">
+            <div class="agent-icon">🎨</div>
+            <div class="agent-name">Asset</div>
+            <div class="agent-role">Image Creator</div>
+            <div class="agent-status locked">LOCKED</div>
+            <div class="agent-unlock-hint">画像生成をONで解除</div>
+          </div>
+          <div class="agent-card locked" data-agent="bgm">
+            <div class="agent-icon">🎵</div>
+            <div class="agent-name">Sound</div>
+            <div class="agent-role">Composer</div>
+            <div class="agent-status locked">LOCKED</div>
+            <div class="agent-unlock-hint">BGM生成をONで解除</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div class="team-status">
+        READY: <span id="readyCount">0</span> / <span id="totalCount">4</span> AGENTS
+      </div>
+      <button class="btn" id="launchBtn" disabled>ASSEMBLE TEAM</button>
+    </div>
+  </div>
+
+  <div class="assembly-animation" id="assemblyAnimation">
+    <div class="assembly-title">TEAM ASSEMBLED</div>
+    <div class="assembly-agents" id="assemblyAgents"></div>
+    <div class="assembly-status" id="assemblyStatus">READY TO LAUNCH</div>
+  </div>
+
+  <script>
+    const state = {
+      name: '',
+      idea: '',
+      platform: '',
+      assets: {
+        image: false,
+        bgm: false,
+        voice: false
+      }
+    };
+
+    const baseAgents = ['concept', 'scenario', 'character', 'code'];
+    const assetAgents = {
+      image: 'image',
+      bgm: 'bgm',
+      voice: 'voice'
+    };
+
+    const agentInfo = {
+      concept: { icon: '🧙', name: 'Concept' },
+      scenario: { icon: '🎭', name: 'Scenario' },
+      character: { icon: '👤', name: 'Character' },
+      code: { icon: '💻', name: 'Code' },
+      image: { icon: '🎨', name: 'Asset' },
+      bgm: { icon: '🎵', name: 'Sound' },
+      voice: { icon: '🎤', name: 'Voice' }
+    };
+
+    function updateAgentStatus() {
+      const hasName = document.getElementById('projectName').value.trim() !== '';
+      const hasIdea = document.getElementById('projectIdea').value.trim() !== '';
+      const hasPlatform = state.platform !== '';
+
+      baseAgents.forEach(agent => {
+        const card = document.querySelector(`.agent-card[data-agent="${agent}"]`);
+        const status = card.querySelector('.agent-status');
+
+        if (hasName && hasIdea && hasPlatform) {
+          card.classList.remove('standby', 'locked');
+          card.classList.add('ready');
+          status.classList.remove('standby', 'locked');
+          status.classList.add('ready');
+          status.textContent = 'READY';
+        } else {
+          card.classList.remove('ready', 'locked');
+          card.classList.add('standby');
+          status.classList.remove('ready', 'locked');
+          status.classList.add('standby');
+          status.textContent = 'STANDBY';
+        }
+      });
+
+      Object.entries(assetAgents).forEach(([key, agent]) => {
+        const card = document.querySelector(`.agent-card[data-agent="${agent}"]`);
+        const status = card.querySelector('.agent-status');
+        const hint = card.querySelector('.agent-unlock-hint');
+
+        if (state.assets[key]) {
+          if (hasName && hasIdea && hasPlatform) {
+            card.classList.remove('standby', 'locked');
+            card.classList.add('ready');
+            status.classList.remove('standby', 'locked');
+            status.classList.add('ready');
+            status.textContent = 'READY';
+          } else {
+            card.classList.remove('ready', 'locked');
+            card.classList.add('standby');
+            status.classList.remove('ready', 'locked');
+            status.classList.add('standby');
+            status.textContent = 'STANDBY';
+          }
+          if (hint) hint.style.display = 'none';
+        } else {
+          card.classList.remove('ready', 'standby');
+          card.classList.add('locked');
+          status.classList.remove('ready', 'standby');
+          status.classList.add('locked');
+          status.textContent = 'LOCKED';
+          if (hint) hint.style.display = 'block';
+        }
+      });
+
+      updateCounts();
+    }
+
+    function updateCounts() {
+      const readyCards = document.querySelectorAll('.agent-card.ready');
+      const allCards = document.querySelectorAll('.agent-card:not(.locked)');
+
+      document.getElementById('readyCount').textContent = readyCards.length;
+      document.getElementById('totalCount').textContent = allCards.length;
+
+      const launchBtn = document.getElementById('launchBtn');
+      if (readyCards.length >= 4) {
+        launchBtn.disabled = false;
+        launchBtn.classList.add('ready');
+      } else {
+        launchBtn.disabled = true;
+        launchBtn.classList.remove('ready');
+      }
+    }
+
+    function startAssemblyAnimation() {
+      const animation = document.getElementById('assemblyAnimation');
+      const agentsContainer = document.getElementById('assemblyAgents');
+      const statusEl = document.getElementById('assemblyStatus');
+
+      const readyAgents = [];
+      baseAgents.forEach(a => readyAgents.push(a));
+      Object.entries(assetAgents).forEach(([key, agent]) => {
+        if (state.assets[key]) readyAgents.push(agent);
+      });
+
+      agentsContainer.innerHTML = readyAgents.map(agent => `
+        <div class="assembly-agent" data-agent="${agent}">
+          <div class="assembly-agent-icon">${agentInfo[agent].icon}</div>
+          <div class="assembly-agent-name">${agentInfo[agent].name}</div>
+        </div>
+      `).join('');
+
+      animation.classList.add('show');
+
+      readyAgents.forEach((agent, index) => {
+        setTimeout(() => {
+          const el = agentsContainer.querySelector(`[data-agent="${agent}"]`);
+          el.classList.add('show');
+        }, 300 * (index + 1));
+      });
+
+      setTimeout(() => {
+        statusEl.classList.add('show');
+      }, 300 * readyAgents.length + 500);
+
+      setTimeout(() => {
+        alert('チームが編成されました！\n（実際の実装ではダッシュボードに遷移します）');
+        location.reload();
+      }, 300 * readyAgents.length + 2000);
+    }
+
+    document.getElementById('projectName').addEventListener('input', updateAgentStatus);
+    document.getElementById('projectIdea').addEventListener('input', updateAgentStatus);
+
+    document.querySelectorAll('.option-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const type = btn.dataset.type;
+        document.querySelectorAll(`.option-btn[data-type="${type}"]`).forEach(b => {
+          b.classList.remove('selected');
+        });
+        btn.classList.add('selected');
+        state.platform = btn.dataset.value;
+        updateAgentStatus();
+      });
+    });
+
+    document.querySelectorAll('.toggle-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const agent = item.dataset.agent;
+        item.classList.toggle('active');
+        state.assets[agent] = item.classList.contains('active');
+        updateAgentStatus();
+      });
+    });
+
+    document.getElementById('launchBtn').addEventListener('click', startAssemblyAnimation);
+
+    updateAgentStatus();
+  </script>
+</body>
+</html>
