@@ -1,11 +1,28 @@
 import os
 import sys
+import shutil
 import pytest
+from pathlib import Path
 from datetime import datetime
 from typing import Generator
 
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+
+BACKEND_DIR=Path(__file__).parent.parent
+
+
+def pytest_unconfigure(config):
+    """pytest終了時にゴミファイルを削除"""
+    reports_dir=BACKEND_DIR/"reports"
+    if reports_dir.exists():
+        shutil.rmtree(reports_dir,ignore_errors=True)
+    cache_assets_dir=BACKEND_DIR/"cache"/"assets"
+    if cache_assets_dir.exists():
+        for f in cache_assets_dir.glob("*.cache"):
+            f.unlink(missing_ok=True)
+        for f in cache_assets_dir.glob("*.meta"):
+            f.unlink(missing_ok=True)
 
 from test_descriptions import DESCRIPTIONS
 
