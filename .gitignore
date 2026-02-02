@@ -57,6 +57,9 @@ pnpm-debug.log*
 # Test coverage
 coverage/
 
+# Test results
+test-results/
+
 # Misc
 *.orig
 *.bak
