@@ -3,9 +3,9 @@ import os
 import sys
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datetime import datetime
+from datetime import datetime,timedelta
 from models.database import engine,get_session,init_db
-from models.tables import Base,Project,Agent,Metric,Intervention,Asset
+from models.tables import Base,Project,Agent,Metric,Intervention,Asset,AgentTrace
 from config_loader import get_auto_approval_rules as get_config_auto_approval_rules,get_ui_phases,get_agent_definitions
 from ai_config import build_default_ai_services
 from asset_scanner import scan_all_testdata,get_testdata_path
@@ -58,6 +58,8 @@ def seed_sample_project():
     output_t=200000 if is_completed else 0
     total_input+=input_t
     total_output+=output_t
+    started_at=now-timedelta(hours=3-phase_idx) if is_completed else None
+    completed_at=now-timedelta(hours=2-phase_idx) if is_completed else None
     agent=Agent(
      id=f"agent-{proj_id}-{agent_type}",
      project_id=proj_id,
@@ -69,7 +71,9 @@ def seed_sample_project():
      input_tokens=input_t,
      output_tokens=output_t,
      metadata_={"displayName":display_name},
-     created_at=now
+     created_at=now,
+     started_at=started_at,
+     completed_at=completed_at
     )
     session.add(agent)
   metric=Metric(
@@ -154,10 +158,71 @@ def seed_sample_project():
    )
    session.add(intervention)
   session.commit()
-  print(f"[Seed] Sample project {proj_id} created with {len(agents_data)} agents and {len(interventions_data)} interventions")
+  print(f"[Seed] Sample project {proj_id} created")
  except Exception as e:
   session.rollback()
   print(f"[Seed] Error: {e}")
+  raise
+ finally:
+  session.close()
+
+def seed_agent_traces(project_id:str="proj-001"):
+ session=get_session()
+ try:
+  existing=session.query(AgentTrace).filter(AgentTrace.project_id==project_id).first()
+  if existing:
+   print("[Seed] Agent traces already exist, skipping")
+   return
+  base_time=datetime.now()-timedelta(hours=2)
+  traces_data=[
+   {
+    "agent_id":"agent-proj-001-leader_concept",
+    "agent_type":"leader_concept",
+    "tasks":["タスク分割","コンセプト概要の生成","ワールド設定の具体化","ゲームシステムの詳細化"]
+   },
+   {
+    "agent_id":"agent-proj-001-worker_concept",
+    "agent_type":"worker_concept",
+    "tasks":["コンセプトの戦闘システムを具体化","キャラクター設定の詳細化","ストーリーライン作成"]
+   },
+   {
+    "agent_id":"agent-proj-001-leader_scenario",
+    "agent_type":"leader_scenario",
+    "tasks":["シナリオ構成の検討","メインストーリー作成","サブクエスト設計"]
+   }
+  ]
+  trace_idx=0
+  for agent_data in traces_data:
+   agent_id=agent_data["agent_id"]
+   agent_type=agent_data["agent_type"]
+   for task_idx,task in enumerate(agent_data["tasks"]):
+    trace_idx+=1
+    start_time=base_time+timedelta(minutes=trace_idx*3)
+    end_time=start_time+timedelta(seconds=1500+task_idx*200)
+    tokens_in=80000+task_idx*20000
+    tokens_out=150000+task_idx*30000
+    trace=AgentTrace(
+     id=f"trace-{project_id}-{trace_idx:03d}",
+     project_id=project_id,
+     agent_id=agent_id,
+     agent_type=agent_type,
+     status="completed",
+     prompt_sent=f"[システムプロンプト]\n{task}を実行してください。",
+     llm_response=f"{task}の結果を生成しました。詳細な設計ドキュメントを作成しました。",
+     output_summary=task,
+     tokens_input=tokens_in,
+     tokens_output=tokens_out,
+     duration_ms=int((end_time-start_time).total_seconds()*1000),
+     model_used="anthropic/claude-opus-4",
+     started_at=start_time,
+     completed_at=end_time
+    )
+    session.add(trace)
+  session.commit()
+  print(f"[Seed] Added {trace_idx} agent traces")
+ except Exception as e:
+  session.rollback()
+  print(f"[Seed] Error seeding traces: {e}")
   raise
  finally:
   session.close()
@@ -216,6 +281,7 @@ def main():
  else:
   init_db()
  seed_sample_project()
+ seed_agent_traces()
  seed_testdata_assets()
  print("[Seed] Done")
 
