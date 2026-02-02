@@ -3,15 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Project Initialization</title>
+  <title>Project Ignition</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@200;300;400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #DAD6C8;
-      --text: #2E2A24;
-      --text-mid: #5A564E;
-      --text-light: #8A867E;
-      --line: #B8B4A8;
+      --bg: #1A1816;
+      --bg-warm: #DAD6C8;
+      --text: #E8E4D4;
+      --text-dark: #2E2A24;
+      --dim: #4A4640;
+      --accent: #C4A882;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -21,7 +22,6 @@
       background: var(--bg);
       color: var(--text);
       overflow: hidden;
-      cursor: default;
     }
 
     .app {
@@ -30,789 +30,1100 @@
       position: relative;
     }
 
-    /* Shared transition layer */
-    .wipe {
+    /* Boot sequence - the very beginning */
+    .boot {
       position: fixed;
       inset: 0;
-      background: var(--text);
-      transform: translateX(-100%);
-      z-index: 1000;
-      pointer-events: none;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      transition: opacity 1.5s ease;
     }
 
-    .wipe.in {
-      animation: wipeIn 0.5s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+    .boot.fade { opacity: 0; pointer-events: none; }
+
+    .boot-text {
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      color: var(--dim);
+      opacity: 0;
     }
 
-    .wipe.out {
-      animation: wipeOut 0.5s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+    .boot-text.show {
+      opacity: 1;
+      animation: bootPulse 2s ease-in-out;
     }
 
-    @keyframes wipeIn {
-      from { transform: translateX(-100%); }
-      to { transform: translateX(0); }
+    @keyframes bootPulse {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 1; }
     }
 
-    @keyframes wipeOut {
-      from { transform: translateX(0); }
-      to { transform: translateX(100%); }
-    }
-
-    .scene {
-      position: absolute;
+    /* Main interface */
+    .interface {
+      position: fixed;
       inset: 0;
       opacity: 0;
       visibility: hidden;
+      transition: opacity 1s ease 0.5s;
     }
 
-    .scene.active {
+    .interface.active {
       opacity: 1;
       visibility: visible;
     }
 
-    /* ========== SCENE 1: NAME ========== */
-    .s1 {
+    /* Dormant state - system waiting */
+    .dormant {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      cursor: pointer;
+    }
+
+    .dormant-line {
+      width: 1px;
+      height: 0;
+      background: var(--dim);
+      transition: height 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+      margin-bottom: 40px;
+    }
+
+    .interface.active .dormant-line {
+      height: 100px;
+    }
+
+    .dormant-prompt {
+      font-size: 10px;
+      letter-spacing: 0.5em;
+      color: var(--dim);
+      opacity: 0;
+      transition: opacity 0.6s ease 0.8s;
+    }
+
+    .interface.active .dormant-prompt {
+      opacity: 1;
+      animation: promptBreathe 3s ease-in-out infinite;
+    }
+
+    @keyframes promptBreathe {
+      0%, 100% { opacity: 0.4; }
+      50% { opacity: 1; }
+    }
+
+    .dormant.hidden { display: none; }
+
+    /* Awakening */
+    .awakening {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: column;
+    }
+
+    .awakening.active { display: flex; }
+
+    /* Header bar */
+    .header {
+      height: 60px;
+      border-bottom: 1px solid var(--dim);
+      display: flex;
+      align-items: center;
+      padding: 0 40px;
+      opacity: 0;
+      transform: translateY(-20px);
+      transition: all 0.6s ease;
+    }
+
+    .header.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .header-status {
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      color: var(--dim);
+    }
+
+    .header-status.live { color: var(--accent); }
+
+    .header-time {
+      margin-left: auto;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Main content area */
+    .main {
+      flex: 1;
+      display: flex;
+      position: relative;
+    }
+
+    /* Phase container */
+    .phase {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.8s ease;
+    }
+
+    .phase.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    /* Phase 1: Identity */
+    .p1-left {
+      width: 40%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 0 60px;
+      border-right: 1px solid var(--dim);
+    }
+
+    .p1-label {
+      font-size: 9px;
+      letter-spacing: 0.4em;
+      color: var(--dim);
+      margin-bottom: 12px;
+    }
+
+    .p1-title {
+      font-size: 13px;
+      letter-spacing: 0.2em;
+      color: var(--text);
+      margin-bottom: 60px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.8s ease 0.3s;
+    }
+
+    .phase.active .p1-title {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .p1-input-area {
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.8s ease 0.5s;
+    }
+
+    .phase.active .p1-input-area {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .p1-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--dim);
+      font-family: inherit;
+      font-size: 28px;
+      font-weight: 300;
+      color: var(--text);
+      padding: 16px 0;
+      outline: none;
+      transition: border-color 0.3s;
+    }
+
+    .p1-input:focus {
+      border-color: var(--accent);
+    }
+
+    .p1-input::placeholder {
+      color: var(--dim);
+    }
+
+    .p1-right {
+      flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
-    .s1-wrap {
-      width: 100%;
-      max-width: 700px;
-      padding: 0 40px;
-    }
-
-    .s1-num {
+    .p1-num {
       font-size: 200px;
       font-weight: 200;
-      line-height: 0.8;
-      color: var(--line);
-      position: absolute;
-      right: 10%;
-      top: 50%;
-      transform: translateY(-50%);
-      pointer-events: none;
+      color: var(--dim);
+      opacity: 0.15;
       user-select: none;
     }
 
-    .s1-label {
-      font-size: 10px;
-      font-weight: 500;
-      letter-spacing: 0.4em;
-      color: var(--text-light);
-      margin-bottom: 40px;
-    }
-
-    .s1-input-wrap {
-      position: relative;
-      margin-bottom: 80px;
-    }
-
-    .s1-input {
-      width: 100%;
-      background: transparent;
-      border: none;
-      font-family: inherit;
-      font-size: 42px;
-      font-weight: 300;
-      color: var(--text);
-      outline: none;
-      padding: 20px 0;
-      border-bottom: 2px solid var(--line);
-      transition: border-color 0.3s;
-    }
-
-    .s1-input:focus {
-      border-color: var(--text);
-    }
-
-    .s1-input::placeholder {
-      color: var(--line);
-    }
-
-    .s1-hint {
-      position: absolute;
-      right: 0;
-      bottom: -30px;
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      color: var(--text-light);
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-
-    .s1-input:focus ~ .s1-hint {
-      opacity: 1;
-    }
-
-    /* ========== SCENE 2: CONCEPT ========== */
-    .s2 {
-      display: flex;
-    }
-
-    .s2-left {
-      width: 50%;
+    /* Phase 2: Vision */
+    .p2-content {
+      flex: 1;
       display: flex;
       flex-direction: column;
       justify-content: center;
       padding: 60px 80px;
-      border-right: 1px solid var(--line);
+      max-width: 800px;
+      margin: 0 auto;
     }
 
-    .s2-right {
-      width: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-    }
-
-    .s2-num {
-      font-size: 300px;
-      font-weight: 200;
-      color: var(--line);
-      opacity: 0.5;
-    }
-
-    .s2-label {
+    .p2-registered {
       font-size: 10px;
-      font-weight: 500;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+      margin-bottom: 8px;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .phase.active .p2-registered { opacity: 1; }
+
+    .p2-name {
+      font-size: 32px;
+      font-weight: 300;
+      letter-spacing: 0.05em;
+      margin-bottom: 60px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.8s ease 0.2s;
+    }
+
+    .phase.active .p2-name {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .p2-label {
+      font-size: 9px;
       letter-spacing: 0.4em;
-      color: var(--text-light);
-      margin-bottom: 24px;
+      color: var(--dim);
+      margin-bottom: 16px;
+      opacity: 0;
+      transition: opacity 0.5s ease 0.4s;
     }
 
-    .s2-project {
-      font-size: 11px;
-      letter-spacing: 0.15em;
-      color: var(--text-mid);
-      margin-bottom: 48px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--line);
-    }
+    .phase.active .p2-label { opacity: 1; }
 
-    .s2-textarea {
+    .p2-textarea {
       width: 100%;
       background: transparent;
       border: none;
+      border-left: 2px solid var(--dim);
       font-family: inherit;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 300;
       line-height: 2.2;
       color: var(--text);
+      padding: 0 24px;
       outline: none;
       resize: none;
-      min-height: 200px;
+      min-height: 180px;
+      opacity: 0;
+      transition: opacity 0.5s ease 0.6s;
     }
 
-    .s2-textarea::placeholder {
-      color: var(--line);
+    .phase.active .p2-textarea { opacity: 1; }
+
+    .p2-textarea:focus {
+      border-color: var(--accent);
     }
 
-    .s2-next {
-      margin-top: 60px;
-      align-self: flex-start;
+    .p2-textarea::placeholder {
+      color: var(--dim);
     }
 
-    /* ========== SCENE 3: AGENTS ========== */
-    .s3 {
-      display: flex;
+    /* Phase 3: Assembly */
+    .p3 {
       flex-direction: column;
     }
 
-    .s3-header {
+    .p3-header {
       padding: 30px 60px;
+      border-bottom: 1px solid var(--dim);
       display: flex;
-      align-items: baseline;
-      gap: 24px;
-      border-bottom: 1px solid var(--line);
+      align-items: center;
+      justify-content: space-between;
     }
 
-    .s3-title {
-      font-size: 12px;
-      font-weight: 500;
+    .p3-title {
+      font-size: 11px;
       letter-spacing: 0.3em;
     }
 
-    .s3-project {
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      color: var(--text-light);
+    .p3-project {
+      font-size: 10px;
+      color: var(--dim);
     }
 
-    .s3-body {
+    .p3-body {
       flex: 1;
       display: flex;
     }
 
-    .s3-list {
+    .p3-list {
       flex: 1;
       padding: 40px 60px;
     }
 
-    .s3-agent {
+    .p3-agent {
       display: flex;
       align-items: center;
-      padding: 24px 0;
-      border-bottom: 1px solid var(--line);
-      opacity: 0.25;
-      transform: translateX(-30px);
-      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      padding: 28px 0;
+      border-bottom: 1px solid rgba(74, 70, 64, 0.3);
+      opacity: 0;
+      transform: translateX(-40px);
     }
 
-    .s3-agent.loading {
-      opacity: 0.5;
+    .p3-agent.pending {
+      opacity: 0.2;
+      transform: translateX(-20px);
+      transition: all 0.4s ease;
     }
 
-    .s3-agent.on {
+    .p3-agent.calling {
+      opacity: 0.6;
+      transform: translateX(-10px);
+      transition: all 0.3s ease;
+    }
+
+    .p3-agent.online {
       opacity: 1;
       transform: translateX(0);
+      transition: all 0.5s cubic-bezier(0.2, 0, 0.2, 1);
     }
 
-    .s3-agent-num {
-      width: 60px;
-      font-size: 32px;
+    .p3-agent-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--dim);
+      margin-right: 24px;
+      transition: all 0.3s ease;
+    }
+
+    .p3-agent.calling .p3-agent-indicator {
+      background: var(--accent);
+      animation: indicatorPulse 0.6s ease infinite;
+    }
+
+    .p3-agent.online .p3-agent-indicator {
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+    }
+
+    @keyframes indicatorPulse {
+      0%, 100% { opacity: 0.3; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+    }
+
+    .p3-agent-id {
+      width: 50px;
+      font-size: 24px;
       font-weight: 200;
-      color: var(--text-light);
+      color: var(--dim);
+      transition: color 0.3s ease;
     }
 
-    .s3-agent.on .s3-agent-num {
-      color: var(--text);
-    }
+    .p3-agent.online .p3-agent-id { color: var(--text); }
 
-    .s3-agent-info {
-      flex: 1;
-    }
+    .p3-agent-info { flex: 1; }
 
-    .s3-agent-name {
-      font-size: 15px;
+    .p3-agent-name {
+      font-size: 14px;
       font-weight: 400;
       letter-spacing: 0.08em;
       margin-bottom: 4px;
     }
 
-    .s3-agent-role {
-      font-size: 10px;
-      letter-spacing: 0.15em;
-      color: var(--text-light);
-    }
-
-    .s3-agent-status {
-      font-size: 10px;
+    .p3-agent-role {
+      font-size: 9px;
       letter-spacing: 0.2em;
-      color: var(--text-light);
+      color: var(--dim);
     }
 
-    .s3-agent.on .s3-agent-status {
-      color: var(--text-mid);
+    .p3-agent-status {
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      color: var(--dim);
+      text-align: right;
+      min-width: 80px;
     }
 
-    .s3-visual {
-      width: 35%;
+    .p3-agent.online .p3-agent-status { color: var(--accent); }
+
+    .p3-side {
+      width: 280px;
+      border-left: 1px solid var(--dim);
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      border-left: 1px solid var(--line);
     }
 
-    .s3-counter {
-      text-align: center;
-    }
-
-    .s3-counter-num {
-      font-size: 140px;
+    .p3-count {
+      font-size: 100px;
       font-weight: 200;
+      color: var(--dim);
       line-height: 1;
-      color: var(--line);
-      transition: color 0.3s;
+      transition: color 0.3s ease;
     }
 
-    .s3-counter-num.active {
-      color: var(--text);
-    }
+    .p3-count.active { color: var(--text); }
 
-    .s3-counter-label {
-      font-size: 10px;
+    .p3-count-label {
+      font-size: 9px;
       letter-spacing: 0.3em;
-      color: var(--text-light);
+      color: var(--dim);
       margin-top: 16px;
     }
 
-    .s3-footer {
-      padding: 24px 60px;
-      border-top: 1px solid var(--line);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .s3-status {
-      font-size: 11px;
-      letter-spacing: 0.1em;
-      color: var(--text-light);
-    }
-
-    /* ========== SCENE 4: CONFIRM ========== */
-    .s4 {
-      display: flex;
+    /* Phase 4: Ignition */
+    .p4 {
       align-items: center;
       justify-content: center;
       flex-direction: column;
     }
 
-    .s4-block {
+    .p4-summary {
       text-align: center;
+      margin-bottom: 80px;
       opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+      transform: translateY(30px);
+      transition: all 1s ease;
     }
 
-    .s4-block.show {
+    .p4-summary.show {
       opacity: 1;
       transform: translateY(0);
     }
 
-    .s4-label {
-      font-size: 10px;
-      letter-spacing: 0.4em;
-      color: var(--text-light);
-      margin-bottom: 16px;
+    .p4-ready {
+      font-size: 9px;
+      letter-spacing: 0.5em;
+      color: var(--dim);
+      margin-bottom: 20px;
     }
 
-    .s4-name {
-      font-size: 48px;
+    .p4-name {
+      font-size: 42px;
       font-weight: 300;
-      letter-spacing: 0.05em;
-      margin-bottom: 60px;
+      letter-spacing: 0.08em;
+      margin-bottom: 40px;
     }
 
-    .s4-agents {
+    .p4-agents {
       display: flex;
-      gap: 48px;
-      margin-bottom: 80px;
+      gap: 32px;
     }
 
-    .s4-agent {
-      font-size: 11px;
+    .p4-agent-badge {
+      font-size: 10px;
       letter-spacing: 0.15em;
-      color: var(--text-mid);
+      color: var(--accent);
       opacity: 0;
-      transform: scale(0.9);
-      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      transform: translateY(10px);
+      transition: all 0.4s ease;
     }
 
-    .s4-agent.show {
+    .p4-agent-badge.show {
       opacity: 1;
-      transform: scale(1);
+      transform: translateY(0);
     }
 
-    .s4-btn {
+    .p4-ignite {
+      position: relative;
       background: none;
       border: 1px solid var(--text);
       font-family: inherit;
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.3em;
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 0.4em;
       color: var(--text);
-      padding: 20px 60px;
+      padding: 24px 80px;
       cursor: pointer;
       opacity: 0;
-      transition: all 0.3s;
+      transition: all 0.4s ease;
     }
 
-    .s4-btn.show {
-      opacity: 1;
-    }
+    .p4-ignite.show { opacity: 1; }
 
-    .s4-btn:hover {
+    .p4-ignite:hover {
       background: var(--text);
       color: var(--bg);
     }
 
-    /* ========== SCENE 5: COUNTDOWN ========== */
-    .s5 {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+    .p4-ignite::before,
+    .p4-ignite::after {
+      content: '';
+      position: absolute;
+      width: 20px;
+      height: 1px;
+      background: var(--dim);
+      top: 50%;
     }
 
-    .s5-num {
-      font-size: 280px;
+    .p4-ignite::before { right: 100%; margin-right: 20px; }
+    .p4-ignite::after { left: 100%; margin-left: 20px; }
+
+    /* Countdown */
+    .countdown {
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+
+    .countdown.active { display: flex; }
+
+    .countdown-num {
+      font-size: 300px;
       font-weight: 200;
       color: var(--text);
       opacity: 0;
-      transform: scale(0.7);
-      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      transform: scale(0.5);
     }
 
-    .s5-num.show {
+    .countdown-num.show {
       opacity: 1;
       transform: scale(1);
+      transition: all 0.2s cubic-bezier(0.2, 0, 0.2, 1);
     }
 
-    .s5-num.out {
+    .countdown-num.out {
       opacity: 0;
-      transform: scale(1.2);
+      transform: scale(1.3);
+      transition: all 0.15s ease-out;
     }
 
-    /* ========== SCENE 6: COMPLETE ========== */
-    .s6 {
-      display: flex;
+    /* Launch - the moment of ignition */
+    .launch {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-warm);
+      display: none;
       align-items: center;
       justify-content: center;
       flex-direction: column;
+      z-index: 60;
     }
 
-    .s6-line {
-      width: 80px;
-      height: 1px;
-      background: var(--text);
-      transform: scaleX(0);
-      margin-bottom: 40px;
-      transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-    }
+    .launch.active { display: flex; }
 
-    .s6-line.show {
-      transform: scaleX(1);
-    }
-
-    .s6-title {
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.5em;
+    .launch-flash {
+      position: fixed;
+      inset: 0;
+      background: #fff;
       opacity: 0;
-      transform: translateY(15px);
-      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s;
+      pointer-events: none;
     }
 
-    .s6-title.show {
+    .launch-flash.show {
+      animation: flashBang 0.6s ease-out;
+    }
+
+    @keyframes flashBang {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    .launch-content {
+      text-align: center;
+      color: var(--text-dark);
+    }
+
+    .launch-status {
+      font-size: 10px;
+      letter-spacing: 0.4em;
+      margin-bottom: 24px;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.8s ease;
+    }
+
+    .launch-status.show {
       opacity: 1;
       transform: translateY(0);
     }
 
-    .s6-sub {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      color: var(--text-light);
-      margin-top: 12px;
+    .launch-name {
+      font-size: 48px;
+      font-weight: 300;
+      letter-spacing: 0.1em;
+      margin-bottom: 16px;
+      opacity: 0;
+      transition: opacity 0.8s ease 0.3s;
+    }
+
+    .launch-name.show { opacity: 1; }
+
+    .launch-sub {
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      color: #5A564E;
       opacity: 0;
       transition: opacity 0.6s ease 0.6s;
     }
 
-    .s6-sub.show {
-      opacity: 1;
+    .launch-sub.show { opacity: 1; }
+
+    /* Footer */
+    .footer {
+      height: 50px;
+      border-top: 1px solid var(--dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 40px;
+      opacity: 0;
+      transition: opacity 0.5s ease 0.3s;
     }
 
-    /* Button base */
-    .btn {
+    .awakening.active .footer { opacity: 1; }
+
+    .footer-phase {
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--dim);
+    }
+
+    .footer-action {
       background: none;
       border: none;
       font-family: inherit;
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.25em;
+      font-size: 10px;
+      letter-spacing: 0.2em;
       color: var(--text);
       cursor: pointer;
-      padding: 16px 0;
-      position: relative;
+      padding: 12px 0;
+      opacity: 0.4;
+      transition: opacity 0.3s;
     }
 
-    .btn::after {
-      content: '';
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 12px;
-      height: 1px;
-      background: var(--text);
-      transform: scaleX(0);
-      transform-origin: right;
-      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-    }
+    .footer-action:hover { opacity: 1; }
 
-    .btn:hover::after {
-      transform: scaleX(1);
-      transform-origin: left;
-    }
-
-    /* Corner decorations */
-    .corner {
-      position: fixed;
-      width: 30px;
-      height: 30px;
-      border: 1px solid var(--line);
-      pointer-events: none;
-    }
-
-    .corner-tl { top: 24px; left: 24px; border-right: none; border-bottom: none; }
-    .corner-tr { top: 24px; right: 24px; border-left: none; border-bottom: none; }
-    .corner-bl { bottom: 24px; left: 24px; border-right: none; border-top: none; }
-    .corner-br { bottom: 24px; right: 24px; border-left: none; border-top: none; }
+    .footer-action.ready { opacity: 1; color: var(--accent); }
   </style>
 </head>
 <body>
   <div class="app">
-    <div class="wipe" id="wipe"></div>
+    <!-- Boot sequence -->
+    <div class="boot" id="boot">
+      <div class="boot-text" id="bootText">INITIALIZING</div>
+    </div>
 
-    <div class="corner corner-tl"></div>
-    <div class="corner corner-tr"></div>
-    <div class="corner corner-bl"></div>
-    <div class="corner corner-br"></div>
+    <!-- Main interface -->
+    <div class="interface" id="interface">
+      <!-- Dormant state -->
+      <div class="dormant" id="dormant">
+        <div class="dormant-line"></div>
+        <div class="dormant-prompt">CLICK TO AWAKEN</div>
+      </div>
 
-    <div class="scene s1 active" id="s1">
-      <div class="s1-num">01</div>
-      <div class="s1-wrap">
-        <div class="s1-label">PROJECT NAME</div>
-        <div class="s1-input-wrap">
-          <input type="text" class="s1-input" id="inputName" placeholder="Enter name" autofocus>
-          <div class="s1-hint">ENTER で次へ</div>
+      <!-- Awakening state -->
+      <div class="awakening" id="awakening">
+        <div class="header" id="header">
+          <div class="header-status" id="headerStatus">SYSTEM STANDBY</div>
+          <div class="header-time" id="headerTime">--:--:--</div>
+        </div>
+
+        <div class="main">
+          <!-- Phase 1: Identity -->
+          <div class="phase p1 active" id="phase1">
+            <div class="p1-left">
+              <div class="p1-label">PHASE 01</div>
+              <div class="p1-title">プロジェクトの名前を設定してください</div>
+              <div class="p1-input-area">
+                <input type="text" class="p1-input" id="inputName" placeholder="Project Name">
+              </div>
+            </div>
+            <div class="p1-right">
+              <div class="p1-num">01</div>
+            </div>
+          </div>
+
+          <!-- Phase 2: Vision -->
+          <div class="phase p2" id="phase2">
+            <div class="p2-content">
+              <div class="p2-registered">REGISTERED</div>
+              <div class="p2-name" id="p2Name">-</div>
+              <div class="p2-label">DEFINE YOUR VISION</div>
+              <textarea class="p2-textarea" id="inputVision" placeholder="このプロジェクトで実現したいことを記述してください..."></textarea>
+            </div>
+          </div>
+
+          <!-- Phase 3: Assembly -->
+          <div class="phase p3" id="phase3">
+            <div class="p3-header">
+              <div class="p3-title">AGENT ASSEMBLY</div>
+              <div class="p3-project" id="p3Project">-</div>
+            </div>
+            <div class="p3-body">
+              <div class="p3-list" id="agentList">
+                <div class="p3-agent" data-id="concept">
+                  <div class="p3-agent-indicator"></div>
+                  <div class="p3-agent-id">01</div>
+                  <div class="p3-agent-info">
+                    <div class="p3-agent-name">Concept Agent</div>
+                    <div class="p3-agent-role">CREATIVE DIRECTION</div>
+                  </div>
+                  <div class="p3-agent-status">-</div>
+                </div>
+                <div class="p3-agent" data-id="scenario">
+                  <div class="p3-agent-indicator"></div>
+                  <div class="p3-agent-id">02</div>
+                  <div class="p3-agent-info">
+                    <div class="p3-agent-name">Scenario Agent</div>
+                    <div class="p3-agent-role">NARRATIVE DESIGN</div>
+                  </div>
+                  <div class="p3-agent-status">-</div>
+                </div>
+                <div class="p3-agent" data-id="character">
+                  <div class="p3-agent-indicator"></div>
+                  <div class="p3-agent-id">03</div>
+                  <div class="p3-agent-info">
+                    <div class="p3-agent-name">Character Agent</div>
+                    <div class="p3-agent-role">CHARACTER DESIGN</div>
+                  </div>
+                  <div class="p3-agent-status">-</div>
+                </div>
+                <div class="p3-agent" data-id="code">
+                  <div class="p3-agent-indicator"></div>
+                  <div class="p3-agent-id">04</div>
+                  <div class="p3-agent-info">
+                    <div class="p3-agent-name">Code Agent</div>
+                    <div class="p3-agent-role">IMPLEMENTATION</div>
+                  </div>
+                  <div class="p3-agent-status">-</div>
+                </div>
+              </div>
+              <div class="p3-side">
+                <div class="p3-count" id="p3Count">0</div>
+                <div class="p3-count-label">ASSEMBLED</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Phase 4: Ignition -->
+          <div class="phase p4" id="phase4">
+            <div class="p4-summary" id="p4Summary">
+              <div class="p4-ready">ALL SYSTEMS READY</div>
+              <div class="p4-name" id="p4Name">-</div>
+              <div class="p4-agents">
+                <span class="p4-agent-badge">CONCEPT</span>
+                <span class="p4-agent-badge">SCENARIO</span>
+                <span class="p4-agent-badge">CHARACTER</span>
+                <span class="p4-agent-badge">CODE</span>
+              </div>
+            </div>
+            <button class="p4-ignite" id="btnIgnite">IGNITE</button>
+          </div>
+        </div>
+
+        <div class="footer">
+          <div class="footer-phase" id="footerPhase">PHASE 1 / 4</div>
+          <button class="footer-action" id="footerAction">PROCEED</button>
         </div>
       </div>
     </div>
 
-    <div class="scene s2" id="s2">
-      <div class="s2-left">
-        <div class="s2-label">CONCEPT</div>
-        <div class="s2-project" id="s2Project">PROJECT: -</div>
-        <textarea class="s2-textarea" id="inputConcept" placeholder="ゲームのコンセプトを入力..."></textarea>
-        <button class="btn s2-next" id="btnS2">NEXT</button>
-      </div>
-      <div class="s2-right">
-        <div class="s2-num">02</div>
-      </div>
+    <!-- Countdown overlay -->
+    <div class="countdown" id="countdown">
+      <div class="countdown-num" id="countdownNum">3</div>
     </div>
 
-    <div class="scene s3" id="s3">
-      <div class="s3-header">
-        <div class="s3-title">AGENT ACTIVATION</div>
-        <div class="s3-project" id="s3Project">-</div>
+    <!-- Launch screen -->
+    <div class="launch" id="launch">
+      <div class="launch-flash" id="launchFlash"></div>
+      <div class="launch-content">
+        <div class="launch-status" id="launchStatus">PROJECT INITIALIZED</div>
+        <div class="launch-name" id="launchName">-</div>
+        <div class="launch-sub" id="launchSub">全エージェント稼働開始</div>
       </div>
-      <div class="s3-body">
-        <div class="s3-list">
-          <div class="s3-agent" data-agent="concept">
-            <div class="s3-agent-num">01</div>
-            <div class="s3-agent-info">
-              <div class="s3-agent-name">Concept Agent</div>
-              <div class="s3-agent-role">CREATIVE DIRECTION</div>
-            </div>
-            <div class="s3-agent-status">STANDBY</div>
-          </div>
-          <div class="s3-agent" data-agent="scenario">
-            <div class="s3-agent-num">02</div>
-            <div class="s3-agent-info">
-              <div class="s3-agent-name">Scenario Agent</div>
-              <div class="s3-agent-role">NARRATIVE DESIGN</div>
-            </div>
-            <div class="s3-agent-status">STANDBY</div>
-          </div>
-          <div class="s3-agent" data-agent="character">
-            <div class="s3-agent-num">03</div>
-            <div class="s3-agent-info">
-              <div class="s3-agent-name">Character Agent</div>
-              <div class="s3-agent-role">CHARACTER DESIGN</div>
-            </div>
-            <div class="s3-agent-status">STANDBY</div>
-          </div>
-          <div class="s3-agent" data-agent="code">
-            <div class="s3-agent-num">04</div>
-            <div class="s3-agent-info">
-              <div class="s3-agent-name">Code Agent</div>
-              <div class="s3-agent-role">IMPLEMENTATION</div>
-            </div>
-            <div class="s3-agent-status">STANDBY</div>
-          </div>
-        </div>
-        <div class="s3-visual">
-          <div class="s3-counter">
-            <div class="s3-counter-num" id="s3Count">0</div>
-            <div class="s3-counter-label">ONLINE</div>
-          </div>
-        </div>
-      </div>
-      <div class="s3-footer">
-        <div class="s3-status" id="s3Status">READY</div>
-        <button class="btn" id="btnS3">ACTIVATE</button>
-      </div>
-    </div>
-
-    <div class="scene s4" id="s4">
-      <div class="s4-block" id="s4Block">
-        <div class="s4-label">PROJECT</div>
-        <div class="s4-name" id="s4Name">-</div>
-        <div class="s4-agents">
-          <span class="s4-agent">CONCEPT</span>
-          <span class="s4-agent">SCENARIO</span>
-          <span class="s4-agent">CHARACTER</span>
-          <span class="s4-agent">CODE</span>
-        </div>
-        <button class="s4-btn" id="btnS4">INITIALIZE</button>
-      </div>
-    </div>
-
-    <div class="scene s5" id="s5">
-      <div class="s5-num" id="s5Num">3</div>
-    </div>
-
-    <div class="scene s6" id="s6">
-      <div class="s6-line"></div>
-      <div class="s6-title">INITIALIZATION COMPLETE</div>
-      <div class="s6-sub">全システム稼働中</div>
     </div>
   </div>
 
   <script>
-    const Sound = {
+    const Audio = {
       ctx: null,
       init() {
         if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         if (this.ctx.state === 'suspended') this.ctx.resume();
       },
-      tone(f, d, delay = 0, v = 0.06) {
+      play(freq, duration, delay = 0, vol = 0.04, type = 'sine') {
         if (!this.ctx) return;
         const t = this.ctx.currentTime + delay;
-        const o = this.ctx.createOscillator();
-        const g = this.ctx.createGain();
-        o.connect(g); g.connect(this.ctx.destination);
-        o.frequency.value = f;
-        g.gain.setValueAtTime(0, t);
-        g.gain.linearRampToValueAtTime(v, t + 0.01);
-        g.gain.exponentialRampToValueAtTime(0.001, t + d);
-        o.start(t); o.stop(t + d);
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(vol, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+        osc.start(t);
+        osc.stop(t + duration);
       },
-      wipe() { this.tone(180, 0.15, 0, 0.04); },
+      boot() {
+        this.play(80, 0.8, 0, 0.03);
+        this.play(120, 0.6, 0.2, 0.02);
+      },
+      awaken() {
+        this.play(220, 0.3, 0, 0.05);
+        this.play(330, 0.25, 0.1, 0.04);
+        this.play(440, 0.3, 0.2, 0.03);
+      },
       confirm() {
-        this.tone(440, 0.12); this.tone(554, 0.12, 0.06); this.tone(659, 0.18, 0.12);
+        this.play(523, 0.15, 0, 0.05);
+        this.play(659, 0.12, 0.08, 0.04);
       },
-      agent(i) {
-        const f = 220 * Math.pow(1.26, i);
-        this.tone(f, 0.15); this.tone(f * 1.5, 0.12, 0.08, 0.04);
+      agentCall(index) {
+        const base = 200 + (index * 60);
+        this.play(base, 0.2, 0, 0.03);
+        this.play(base * 1.5, 0.15, 0.1, 0.02);
       },
-      count(n) {
-        n > 0 ? this.tone(440, 0.1, 0, 0.08) : (this.tone(880, 0.25, 0, 0.1), this.tone(1100, 0.2, 0.08, 0.06));
+      agentOnline(index) {
+        const base = 300 + (index * 80);
+        this.play(base, 0.25, 0, 0.06);
+        this.play(base * 1.25, 0.2, 0.08, 0.04);
+        this.play(base * 1.5, 0.15, 0.15, 0.03);
       },
-      done() { this.tone(523, 0.15); this.tone(659, 0.15, 0.12); this.tone(784, 0.25, 0.24, 0.08); }
+      countdown(n) {
+        if (n > 0) {
+          this.play(440, 0.12, 0, 0.08);
+        }
+      },
+      ignite() {
+        this.play(200, 0.8, 0, 0.08);
+        this.play(400, 0.6, 0.05, 0.06);
+        this.play(600, 0.5, 0.1, 0.05);
+        this.play(800, 0.4, 0.15, 0.04);
+      },
+      launch() {
+        this.play(523, 0.3, 0, 0.06);
+        this.play(659, 0.25, 0.15, 0.05);
+        this.play(784, 0.35, 0.3, 0.06);
+      }
     };
 
-    const D = {
+    const State = {
       name: '',
-      concept: '',
-      agents: ['concept', 'scenario', 'character', 'code'],
-      count: 0
+      vision: '',
+      phase: 0,
+      agentsOnline: 0
     };
 
     const $ = id => document.getElementById(id);
-    const wipe = $('wipe');
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-    async function transition(from, to) {
-      Sound.wipe();
-      wipe.classList.remove('out');
-      wipe.classList.add('in');
-      await sleep(500);
-      $(from).classList.remove('active');
-      $(to).classList.add('active');
-      wipe.classList.remove('in');
-      wipe.classList.add('out');
-      await sleep(500);
-      wipe.classList.remove('out');
+    function updateTime() {
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      const s = String(now.getSeconds()).padStart(2, '0');
+      $('headerTime').textContent = `${h}:${m}:${s}`;
     }
 
-    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+    async function bootSequence() {
+      await sleep(800);
+      $('bootText').classList.add('show');
+      Audio.init();
+      Audio.boot();
+      await sleep(2500);
+      $('boot').classList.add('fade');
+      await sleep(500);
+      $('interface').classList.add('active');
+    }
 
-    $('inputName').addEventListener('keydown', async e => {
-      if (e.key === 'Enter') {
-        Sound.init();
-        const v = $('inputName').value.trim();
-        if (!v) return;
-        D.name = v;
-        Sound.confirm();
-        await transition('s1', 's2');
-        $('s2Project').textContent = `PROJECT: ${D.name}`;
-        $('inputConcept').focus();
-      }
-    });
-
-    $('btnS2').addEventListener('click', async () => {
-      Sound.init();
-      D.concept = $('inputConcept').value.trim();
-      Sound.confirm();
-      await transition('s2', 's3');
-      $('s3Project').textContent = D.name;
-    });
-
-    $('btnS3').addEventListener('click', async () => {
-      Sound.init();
-      $('btnS3').style.display = 'none';
-      $('s3Status').textContent = 'ACTIVATING...';
-
-      for (let i = 0; i < D.agents.length; i++) {
-        const row = document.querySelector(`[data-agent="${D.agents[i]}"]`);
-        row.classList.add('loading');
-        row.querySelector('.s3-agent-status').textContent = 'LOADING';
-        await sleep(250);
-
-        row.classList.remove('loading');
-        row.classList.add('on');
-        row.querySelector('.s3-agent-status').textContent = 'ONLINE';
-        D.count++;
-        $('s3Count').textContent = D.count;
-        $('s3Count').classList.toggle('active', D.count > 0);
-        Sound.agent(i);
-        await sleep(350);
-      }
-
-      $('s3Status').textContent = 'ALL SYSTEMS READY';
-      await sleep(600);
-      Sound.confirm();
-      await transition('s3', 's4');
-
+    async function awakenSystem() {
+      Audio.init();
+      Audio.awaken();
+      $('dormant').classList.add('hidden');
+      $('awakening').classList.add('active');
+      await sleep(100);
+      $('header').classList.add('show');
+      $('headerStatus').textContent = 'SYSTEM ACTIVE';
+      $('headerStatus').classList.add('live');
+      updateTime();
+      setInterval(updateTime, 1000);
       await sleep(300);
-      $('s4Name').textContent = D.name;
-      $('s4Block').classList.add('show');
+      $('inputName').focus();
+    }
 
-      const agents = document.querySelectorAll('.s4-agent');
+    async function toPhase(n) {
+      const phases = ['phase1', 'phase2', 'phase3', 'phase4'];
+      phases.forEach((p, i) => {
+        $(p).classList.toggle('active', i === n - 1);
+      });
+      State.phase = n;
+      $('footerPhase').textContent = `PHASE ${n} / 4`;
+
+      if (n === 4) {
+        $('footerAction').style.display = 'none';
+      } else {
+        $('footerAction').style.display = '';
+        $('footerAction').classList.remove('ready');
+      }
+    }
+
+    async function assembleAgents() {
+      const agents = document.querySelectorAll('.p3-agent');
+
       for (let i = 0; i < agents.length; i++) {
-        await sleep(120);
-        agents[i].classList.add('show');
+        const agent = agents[i];
+        agent.classList.add('pending');
+        agent.querySelector('.p3-agent-status').textContent = 'STANDBY';
       }
-      await sleep(300);
-      $('btnS4').classList.add('show');
-    });
 
-    $('btnS4').addEventListener('click', async () => {
-      Sound.init();
-      await transition('s4', 's5');
+      await sleep(500);
 
-      const num = $('s5Num');
+      for (let i = 0; i < agents.length; i++) {
+        const agent = agents[i];
+
+        agent.classList.remove('pending');
+        agent.classList.add('calling');
+        agent.querySelector('.p3-agent-status').textContent = 'CALLING';
+        Audio.agentCall(i);
+
+        await sleep(400 + Math.random() * 200);
+
+        agent.classList.remove('calling');
+        agent.classList.add('online');
+        agent.querySelector('.p3-agent-status').textContent = 'ONLINE';
+        Audio.agentOnline(i);
+
+        State.agentsOnline++;
+        $('p3Count').textContent = State.agentsOnline;
+        $('p3Count').classList.add('active');
+
+        await sleep(300);
+      }
+
       await sleep(400);
+      $('footerAction').classList.add('ready');
+      Audio.confirm();
+    }
 
-      for (let i = 3; i >= 0; i--) {
-        num.textContent = i === 0 ? 'GO' : i;
+    async function showIgnitionScreen() {
+      $('p4Name').textContent = State.name;
+      $('p4Summary').classList.add('show');
+
+      await sleep(500);
+
+      const badges = document.querySelectorAll('.p4-agent-badge');
+      for (let i = 0; i < badges.length; i++) {
+        await sleep(100);
+        badges[i].classList.add('show');
+      }
+
+      await sleep(400);
+      $('btnIgnite').classList.add('show');
+    }
+
+    async function runCountdown() {
+      $('countdown').classList.add('active');
+      const num = $('countdownNum');
+
+      await sleep(300);
+
+      for (let i = 3; i >= 1; i--) {
+        num.textContent = i;
         num.classList.remove('show', 'out');
-        await sleep(30);
+        await sleep(50);
         num.classList.add('show');
-        Sound.count(i);
-        await sleep(500);
+        Audio.countdown(i);
+        await sleep(600);
         num.classList.add('out');
         num.classList.remove('show');
-        await sleep(180);
+        await sleep(200);
       }
 
-      await transition('s5', 's6');
-      await sleep(400);
-      document.querySelector('.s6-line').classList.add('show');
-      await sleep(250);
-      document.querySelector('.s6-title').classList.add('show');
-      Sound.done();
-      await sleep(150);
-      document.querySelector('.s6-sub').classList.add('show');
+      num.textContent = '0';
+      num.classList.remove('out');
+      num.classList.add('show');
+      Audio.ignite();
+      await sleep(300);
+    }
 
-      await sleep(2500);
-      alert(`"${D.name}" の初期化が完了しました`);
-      location.reload();
+    async function launchProject() {
+      $('countdown').classList.remove('active');
+      $('launch').classList.add('active');
+      $('launchFlash').classList.add('show');
+
+      await sleep(200);
+
+      $('launchName').textContent = State.name;
+      $('launchStatus').classList.add('show');
+
+      await sleep(400);
+      $('launchName').classList.add('show');
+      Audio.launch();
+
+      await sleep(300);
+      $('launchSub').classList.add('show');
+    }
+
+    $('dormant').addEventListener('click', awakenSystem);
+
+    $('inputName').addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const val = $('inputName').value.trim();
+        if (val) {
+          State.name = val;
+          Audio.confirm();
+          $('p2Name').textContent = State.name;
+          toPhase(2);
+          setTimeout(() => $('inputVision').focus(), 500);
+        }
+      }
     });
 
-    document.addEventListener('click', () => Sound.init());
+    $('footerAction').addEventListener('click', async () => {
+      Audio.init();
+
+      if (State.phase === 1) {
+        const val = $('inputName').value.trim();
+        if (val) {
+          State.name = val;
+          Audio.confirm();
+          $('p2Name').textContent = State.name;
+          toPhase(2);
+          setTimeout(() => $('inputVision').focus(), 500);
+        }
+      } else if (State.phase === 2) {
+        State.vision = $('inputVision').value.trim();
+        Audio.confirm();
+        $('p3Project').textContent = State.name;
+        toPhase(3);
+        await sleep(300);
+        assembleAgents();
+      } else if (State.phase === 3) {
+        if (State.agentsOnline === 4) {
+          Audio.confirm();
+          toPhase(4);
+          await sleep(300);
+          showIgnitionScreen();
+        }
+      }
+    });
+
+    $('btnIgnite').addEventListener('click', async () => {
+      Audio.init();
+      await runCountdown();
+      await launchProject();
+    });
+
+    bootSequence();
   </script>
 </body>
 </html>
