@@ -332,7 +332,7 @@ class FileDeleteSkill(FileSkillMixin,Skill):
     shutil.rmtree(path)
    else:
     os.rmdir(path)
-   return "directory"
+   return"directory"
   else:
    os.remove(path)
-   return "file"
+   return"file"

@@ -186,7 +186,7 @@ class TestFileDeleteSkill:
   skill=FileDeleteSkill()
   result=await skill.execute(skill_context,path="subdir",recursive=False)
   assert not result.success
-  assert"recursive" in result.error.lower() or "not empty" in result.error.lower()
+  assert"recursive" in result.error.lower() or"not empty" in result.error.lower()
   assert os.path.exists(test_dir)
 
  @pytest.mark.asyncio

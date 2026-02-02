@@ -194,9 +194,9 @@ class FileManager:
                 else:
                     cache.remove_file(rel_path)
                     store.delete(full_path)
-            return {"success":True,"path":full_path,"type":"directory" if is_dir else "file"}
+            return {"success":True,"path":full_path,"type":"directory" if is_dir else"file"}
         except OSError as e:
-            if is_dir and not recursive and "not empty" in str(e).lower():
+            if is_dir and not recursive and"not empty" in str(e).lower():
                 return {"success":False,"path":full_path,"error":"Directory not empty. Use recursive=true to delete non-empty directories"}
             return {"success":False,"path":full_path,"error":str(e)}
         except Exception as e:

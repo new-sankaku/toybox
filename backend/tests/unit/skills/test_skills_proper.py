@@ -2,10 +2,10 @@
 Skillsの適切なユニットテスト
 
 各テストは以下を検証:
-- 入力→出力の正確性
-- 副作用（ファイル作成、キャッシュ更新等）
-- メタデータの正確性
-- エラー条件の正確なメッセージ
+-入力→出力の正確性
+-副作用（ファイル作成、キャッシュ更新等）
+-メタデータの正確性
+-エラー条件の正確なメッセージ
 """
 import pytest
 import os
@@ -206,7 +206,7 @@ class TestFileEditSkillDataVerification:
         skill=FileEditSkill()
         result=await skill.execute(ctx,path="test.txt",old_string="foo",new_string="baz")
         assert not result.success
-        assert "2 times" in result.error,"エラーメッセージに出現回数が含まれていない"
+        assert"2 times" in result.error,"エラーメッセージに出現回数が含まれていない"
 
     @pytest.mark.asyncio
     async def test_file_unchanged_on_no_match(self,temp_dir,ctx):
@@ -244,7 +244,7 @@ class TestFileListSkillDataVerification:
         result=await skill.execute(ctx,path=".",pattern="*.py")
         names=[item["name"] for item in result.output]
         assert set(names)=={"test1.py","test2.py"},"パターンフィルタリングが正しくない"
-        assert "other.txt" not in names,"フィルタされるべきファイルが含まれている"
+        assert"other.txt" not in names,"フィルタされるべきファイルが含まれている"
 
     @pytest.mark.asyncio
     async def test_recursive_includes_subdirectory_files(self,temp_dir,ctx):
@@ -347,7 +347,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="rm -rf /")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_rm_rf_root_star(self,ctx):
@@ -355,7 +355,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="rm -rf /*")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_sudo_prefix(self,ctx):
@@ -363,7 +363,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="sudo apt update")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_dd_devzero(self,ctx):
@@ -371,7 +371,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="dd if=/dev/zero of=/dev/sda")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_mkfs(self,ctx):
@@ -379,7 +379,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="mkfs.ext4 /dev/sda1")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_fork_bomb(self,ctx):
@@ -387,7 +387,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command=":(){ :|:& };:")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_chmod_777_root(self,ctx):
@@ -395,7 +395,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="chmod -R 777 /")
         assert not result.success
-        assert "blocked" in result.error.lower() or "dangerous" in result.error.lower()
+        assert"blocked" in result.error.lower() or"dangerous" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_pipe_sudo(self,ctx):
@@ -403,7 +403,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="echo test | sudo tee /etc/passwd")
         assert not result.success
-        assert "blocked" in result.error.lower()
+        assert"blocked" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_curl_pipe_bash_exact(self,ctx):
@@ -411,7 +411,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="curl | bash")
         assert not result.success
-        assert "blocked" in result.error.lower() or "dangerous" in result.error.lower()
+        assert"blocked" in result.error.lower() or"dangerous" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_blocked_wget_pipe_sh(self,ctx):
@@ -419,7 +419,7 @@ class TestBashExecuteSkillBlockedPatterns:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="wget | sh")
         assert not result.success
-        assert "blocked" in result.error.lower() or "dangerous" in result.error.lower()
+        assert"blocked" in result.error.lower() or"dangerous" in result.error.lower()
 
 
 class TestBashExecuteSkillOutputVerification:
@@ -431,7 +431,7 @@ class TestBashExecuteSkillOutputVerification:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="echo 'hello world'")
         assert result.success
-        assert "hello world" in result.output,"stdoutがキャプチャされていない"
+        assert"hello world" in result.output,"stdoutがキャプチャされていない"
 
     @pytest.mark.asyncio
     async def test_return_code_zero_on_success(self,ctx):
@@ -454,7 +454,7 @@ class TestBashExecuteSkillOutputVerification:
         skill=BashExecuteSkill()
         result=await skill.execute(ctx,command="ls /nonexistent_path_12345")
         assert not result.success
-        assert "No such file" in result.error or "cannot access" in result.error,"stderrがerrorに含まれていない"
+        assert"No such file" in result.error or"cannot access" in result.error,"stderrがerrorに含まれていない"
 
 
 class TestPythonExecuteSkillOutputVerification:
@@ -466,7 +466,7 @@ class TestPythonExecuteSkillOutputVerification:
         skill=PythonExecuteSkill()
         result=await skill.execute(ctx,code="print('hello')")
         assert result.success
-        assert "hello" in result.output,"print出力がキャプチャされていない"
+        assert"hello" in result.output,"print出力がキャプチャされていない"
 
     @pytest.mark.asyncio
     async def test_expression_result_captured(self,ctx):
@@ -474,7 +474,7 @@ class TestPythonExecuteSkillOutputVerification:
         skill=PythonExecuteSkill()
         result=await skill.execute(ctx,code="print(2 + 3)")
         assert result.success
-        assert "5" in result.output,"式の結果がキャプチャされていない"
+        assert"5" in result.output,"式の結果がキャプチャされていない"
 
     @pytest.mark.asyncio
     async def test_syntax_error_message(self,ctx):
@@ -482,7 +482,7 @@ class TestPythonExecuteSkillOutputVerification:
         skill=PythonExecuteSkill()
         result=await skill.execute(ctx,code="def broken(")
         assert not result.success
-        assert "SyntaxError" in result.error or "syntax" in result.error.lower(),"構文エラーメッセージがない"
+        assert"SyntaxError" in result.error or"syntax" in result.error.lower(),"構文エラーメッセージがない"
 
     @pytest.mark.asyncio
     async def test_runtime_error_message(self,ctx):
@@ -490,7 +490,7 @@ class TestPythonExecuteSkillOutputVerification:
         skill=PythonExecuteSkill()
         result=await skill.execute(ctx,code="1/0")
         assert not result.success
-        assert "ZeroDivision" in result.error or "division" in result.error.lower(),"実行時エラーメッセージがない"
+        assert"ZeroDivision" in result.error or"division" in result.error.lower(),"実行時エラーメッセージがない"
 
 
 class TestSandboxEnforcement:
@@ -502,7 +502,7 @@ class TestSandboxEnforcement:
         skill=FileReadSkill()
         result=await skill.execute(ctx,path="/etc/passwd")
         assert not result.success
-        assert "denied" in result.error.lower(),"サンドボックス外読み取りが拒否されていない"
+        assert"denied" in result.error.lower(),"サンドボックス外読み取りが拒否されていない"
 
     @pytest.mark.asyncio
     async def test_write_outside_sandbox_denied(self,ctx):
@@ -510,7 +510,7 @@ class TestSandboxEnforcement:
         skill=FileWriteSkill()
         result=await skill.execute(ctx,path="/tmp/outside.txt",content="test")
         assert not result.success
-        assert "denied" in result.error.lower(),"サンドボックス外書き込みが拒否されていない"
+        assert"denied" in result.error.lower(),"サンドボックス外書き込みが拒否されていない"
 
     @pytest.mark.asyncio
     async def test_delete_outside_sandbox_denied(self,ctx):
@@ -518,7 +518,7 @@ class TestSandboxEnforcement:
         skill=FileDeleteSkill()
         result=await skill.execute(ctx,path="/etc/passwd")
         assert not result.success
-        assert "denied" in result.error.lower(),"サンドボックス外削除が拒否されていない"
+        assert"denied" in result.error.lower(),"サンドボックス外削除が拒否されていない"
 
     @pytest.mark.asyncio
     async def test_list_outside_sandbox_denied(self,ctx):
@@ -526,7 +526,7 @@ class TestSandboxEnforcement:
         skill=FileListSkill()
         result=await skill.execute(ctx,path="/etc")
         assert not result.success
-        assert "denied" in result.error.lower(),"サンドボックス外リストが拒否されていない"
+        assert"denied" in result.error.lower(),"サンドボックス外リストが拒否されていない"
 
     @pytest.mark.asyncio
     async def test_traversal_attack_blocked(self,ctx):
@@ -534,15 +534,15 @@ class TestSandboxEnforcement:
         skill=FileReadSkill()
         result=await skill.execute(ctx,path="../../../etc/passwd")
         assert not result.success
-        assert "denied" in result.error.lower(),"パストラバーサルが防がれていない"
+        assert"denied" in result.error.lower(),"パストラバーサルが防がれていない"
 
 
 class TestCacheIntegration:
     """キャッシュ連携の検証
 
     FileManagerを使用した場合に:
-    - 読み込み時にfrom_cache==Trueが返るか
-    - 書き込み後にキャッシュに反映されるか
+    -読み込み時にfrom_cache==Trueが返るか
+    -書き込み後にキャッシュに反映されるか
     を検証する
     """
 

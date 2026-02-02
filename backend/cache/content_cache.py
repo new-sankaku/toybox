@@ -197,7 +197,7 @@ class ProjectFileCache:
     def remove_dir(self,rel_path:str)->List[str]:
         removed_files=[]
         with self._lock:
-            prefix=rel_path+"/" if rel_path else ""
+            prefix=rel_path+"/" if rel_path else""
             files_to_remove=[p for p in self._files.keys() if p==rel_path or p.startswith(prefix)]
             for f in files_to_remove:
                 del self._files[f]
