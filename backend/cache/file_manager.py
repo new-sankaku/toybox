@@ -57,7 +57,10 @@ class FileManager:
             if event_type=="created":
                 cache.add_dir(rel_path)
             elif event_type=="deleted":
-                cache.remove_dir(rel_path)
+                removed_files=cache.remove_dir(rel_path)
+                store=self._get_metadata_store()
+                for rf in removed_files:
+                    store.delete(os.path.join(self._working_dir,rf))
         else:
             if event_type=="deleted":
                 cache.remove_file(rel_path)
