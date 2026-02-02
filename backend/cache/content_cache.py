@@ -194,15 +194,23 @@ class ProjectFileCache:
                 if parent_path and parent_path in self._dirs:
                     if rel_path not in self._dirs[parent_path].children:
                         self._dirs[parent_path].children.append(rel_path)
-    def remove_dir(self,rel_path:str)->None:
+    def remove_dir(self,rel_path:str)->List[str]:
+        removed_files=[]
         with self._lock:
-            if rel_path in self._dirs:
-                del self._dirs[rel_path]
+            prefix=rel_path+"/" if rel_path else ""
+            files_to_remove=[p for p in self._files.keys() if p==rel_path or p.startswith(prefix)]
+            for f in files_to_remove:
+                del self._files[f]
+                removed_files.append(f)
+            dirs_to_remove=[p for p in self._dirs.keys() if p==rel_path or p.startswith(prefix)]
+            for d in dirs_to_remove:
+                del self._dirs[d]
             parent_path=os.path.dirname(rel_path)
             if parent_path and parent_path in self._dirs:
                 children=self._dirs[parent_path].children
                 if rel_path in children:
                     children.remove(rel_path)
+        return removed_files
     def _update_dir_children(self,dir_path:str,child_path:str,add:bool)->None:
         if dir_path=="" or dir_path==".":
             dir_path=""

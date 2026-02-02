@@ -183,11 +183,14 @@ class FileManager:
             await asyncio.to_thread(delete_sync)
             if self._config.enabled:
                 cache=self._get_cache()
+                store=self._get_metadata_store()
                 if is_dir:
-                    cache.remove_dir(rel_path)
+                    removed_files=cache.remove_dir(rel_path)
+                    for rf in removed_files:
+                        store.delete(os.path.join(self._working_dir,rf))
                 else:
                     cache.remove_file(rel_path)
-                self._get_metadata_store().delete(full_path)
+                    store.delete(full_path)
             return {"success":True,"path":full_path,"type":"directory" if is_dir else "file"}
         except OSError as e:
             if is_dir and not recursive and "not empty" in str(e).lower():
