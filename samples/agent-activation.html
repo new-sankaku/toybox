@@ -3,660 +3,816 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Agent Activation Sequence</title>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+  <title>Project Initialization</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@200;300;400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-main: #E8E4D4;
-      --bg-panel: #DAD5C3;
-      --bg-selected: #CCC7B5;
-      --bg-header: #57534A;
-      --text-main: #454138;
-      --text-light: #5A5548;
-      --text-header: #E8E4D4;
-      --accent-green: #7AAA7A;
-      --accent-orange: #C4956C;
-      --border-light: rgba(69, 65, 56, 0.2);
-      --border-dark: rgba(69, 65, 56, 0.4);
+      --bg: #DAD6C8;
+      --text: #2E2A24;
+      --text-mid: #5A564E;
+      --text-light: #8A867E;
+      --line: #B8B4A8;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: 'Noto Sans JP', sans-serif;
-      background: var(--bg-main);
-      color: var(--text-main);
-      min-height: 100vh;
-      overflow-x: hidden;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      cursor: default;
     }
 
-    .container {
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 40px 20px;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border-dark);
-      margin-bottom: 32px;
-    }
-
-    .header-title {
-      font-size: 14px;
-      font-weight: 400;
-      letter-spacing: 0.15em;
-    }
-
-    .phase-indicator {
-      display: flex;
-      gap: 4px;
-      margin-left: auto;
-    }
-
-    .phase-dot {
-      width: 8px;
-      height: 8px;
-      border: 1px solid var(--border-dark);
-      transition: all 0.3s;
-    }
-
-    .phase-dot.active {
-      background: var(--text-main);
-    }
-
-    .phase-dot.completed {
-      background: var(--accent-green);
-      border-color: var(--accent-green);
-    }
-
-    .main-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .section {
-      display: none;
-      animation: section-in 0.4s ease-out;
-    }
-
-    .section.active {
-      display: block;
-    }
-
-    @keyframes section-in {
-      from {
-        opacity: 0;
-        transform: translateY(10px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
-    }
-
-    .section-label {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      color: var(--text-light);
-      margin-bottom: 8px;
-    }
-
-    .section-title {
-      font-size: 20px;
-      font-weight: 400;
-      letter-spacing: 0.1em;
-      margin-bottom: 32px;
-    }
-
-    .input-group {
-      margin-bottom: 24px;
-    }
-
-    .input-label {
-      display: block;
-      font-size: 12px;
-      letter-spacing: 0.1em;
-      color: var(--text-light);
-      margin-bottom: 8px;
-    }
-
-    .input-field {
-      width: 100%;
-      padding: 16px;
-      background: var(--bg-panel);
-      border: 1px solid var(--border-dark);
-      font-family: inherit;
-      font-size: 16px;
-      color: var(--text-main);
-      letter-spacing: 0.05em;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-
-    .input-field:focus {
-      border-color: var(--text-main);
-    }
-
-    .input-field::placeholder {
-      color: var(--text-light);
-      opacity: 0.6;
-    }
-
-    textarea.input-field {
-      resize: none;
-      min-height: 120px;
-    }
-
-    .btn {
-      padding: 14px 32px;
-      background: var(--bg-header);
-      color: var(--text-header);
-      border: none;
-      font-family: inherit;
-      font-size: 13px;
-      letter-spacing: 0.15em;
-      cursor: pointer;
-      transition: background 0.2s;
-    }
-
-    .btn:hover {
-      background: var(--text-main);
-    }
-
-    .btn:disabled {
-      opacity: 0.4;
-      cursor: not-allowed;
-    }
-
-    .btn-row {
-      display: flex;
-      gap: 12px;
-      margin-top: 32px;
-    }
-
-    .agent-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-
-    .agent-card {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-      padding: 20px 16px;
-      text-align: center;
-      transition: all 0.3s;
-    }
-
-    .agent-card.standby {
-      opacity: 0.5;
-    }
-
-    .agent-card.activating {
-      border-color: var(--accent-orange);
-    }
-
-    .agent-card.active {
-      border-color: var(--accent-green);
-      background: var(--bg-selected);
-    }
-
-    .agent-icon {
-      width: 48px;
-      height: 48px;
-      margin: 0 auto 12px;
+    .app {
+      width: 100vw;
+      height: 100vh;
       position: relative;
     }
 
-    .agent-icon svg {
+    /* Shared transition layer */
+    .wipe {
+      position: fixed;
+      inset: 0;
+      background: var(--text);
+      transform: translateX(-100%);
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .wipe.in {
+      animation: wipeIn 0.5s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+    }
+
+    .wipe.out {
+      animation: wipeOut 0.5s cubic-bezier(0.7, 0, 0.3, 1) forwards;
+    }
+
+    @keyframes wipeIn {
+      from { transform: translateX(-100%); }
+      to { transform: translateX(0); }
+    }
+
+    @keyframes wipeOut {
+      from { transform: translateX(0); }
+      to { transform: translateX(100%); }
+    }
+
+    .scene {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .scene.active {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    /* ========== SCENE 1: NAME ========== */
+    .s1 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .s1-wrap {
       width: 100%;
-      height: 100%;
-      stroke: var(--text-main);
-      stroke-width: 1.5;
-      fill: none;
+      max-width: 700px;
+      padding: 0 40px;
     }
 
-    .agent-card.standby .agent-icon svg {
-      stroke: var(--text-light);
+    .s1-num {
+      font-size: 200px;
+      font-weight: 200;
+      line-height: 0.8;
+      color: var(--line);
+      position: absolute;
+      right: 10%;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
+      user-select: none;
     }
 
-    .agent-name {
+    .s1-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.4em;
+      color: var(--text-light);
+      margin-bottom: 40px;
+    }
+
+    .s1-input-wrap {
+      position: relative;
+      margin-bottom: 80px;
+    }
+
+    .s1-input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+      font-size: 42px;
+      font-weight: 300;
+      color: var(--text);
+      outline: none;
+      padding: 20px 0;
+      border-bottom: 2px solid var(--line);
+      transition: border-color 0.3s;
+    }
+
+    .s1-input:focus {
+      border-color: var(--text);
+    }
+
+    .s1-input::placeholder {
+      color: var(--line);
+    }
+
+    .s1-hint {
+      position: absolute;
+      right: 0;
+      bottom: -30px;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--text-light);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .s1-input:focus ~ .s1-hint {
+      opacity: 1;
+    }
+
+    /* ========== SCENE 2: CONCEPT ========== */
+    .s2 {
+      display: flex;
+    }
+
+    .s2-left {
+      width: 50%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 60px 80px;
+      border-right: 1px solid var(--line);
+    }
+
+    .s2-right {
+      width: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .s2-num {
+      font-size: 300px;
+      font-weight: 200;
+      color: var(--line);
+      opacity: 0.5;
+    }
+
+    .s2-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.4em;
+      color: var(--text-light);
+      margin-bottom: 24px;
+    }
+
+    .s2-project {
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      color: var(--text-mid);
+      margin-bottom: 48px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .s2-textarea {
+      width: 100%;
+      background: transparent;
+      border: none;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 300;
+      line-height: 2.2;
+      color: var(--text);
+      outline: none;
+      resize: none;
+      min-height: 200px;
+    }
+
+    .s2-textarea::placeholder {
+      color: var(--line);
+    }
+
+    .s2-next {
+      margin-top: 60px;
+      align-self: flex-start;
+    }
+
+    /* ========== SCENE 3: AGENTS ========== */
+    .s3 {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .s3-header {
+      padding: 30px 60px;
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .s3-title {
       font-size: 12px;
       font-weight: 500;
-      letter-spacing: 0.1em;
-      margin-bottom: 4px;
+      letter-spacing: 0.3em;
     }
 
-    .agent-status {
-      font-size: 10px;
+    .s3-project {
+      font-size: 11px;
       letter-spacing: 0.1em;
       color: var(--text-light);
     }
 
-    .agent-card.active .agent-status {
-      color: var(--accent-green);
+    .s3-body {
+      flex: 1;
+      display: flex;
     }
 
-    .agent-card.activating .agent-status {
-      color: var(--accent-orange);
+    .s3-list {
+      flex: 1;
+      padding: 40px 60px;
     }
 
-    .log-area {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-      padding: 16px;
-      font-size: 12px;
-      line-height: 1.8;
-      max-height: 200px;
-      overflow-y: auto;
-      margin-bottom: 24px;
+    .s3-agent {
+      display: flex;
+      align-items: center;
+      padding: 24px 0;
+      border-bottom: 1px solid var(--line);
+      opacity: 0.25;
+      transform: translateX(-30px);
+      transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    .log-line {
-      opacity: 0;
-      transform: translateX(-5px);
-      transition: all 0.2s;
+    .s3-agent.loading {
+      opacity: 0.5;
     }
 
-    .log-line.visible {
+    .s3-agent.on {
       opacity: 1;
       transform: translateX(0);
     }
 
-    .log-prompt { color: var(--accent-green); }
-    .log-info { color: var(--text-light); }
-
-    .summary-section {
-      background: var(--bg-panel);
-      border: 1px solid var(--border-light);
-      padding: 24px;
-      margin-bottom: 24px;
-    }
-
-    .summary-row {
-      display: flex;
-      padding: 8px 0;
-      border-bottom: 1px solid var(--border-light);
-    }
-
-    .summary-row:last-child {
-      border-bottom: none;
-    }
-
-    .summary-label {
-      width: 140px;
-      font-size: 11px;
-      letter-spacing: 0.1em;
+    .s3-agent-num {
+      width: 60px;
+      font-size: 32px;
+      font-weight: 200;
       color: var(--text-light);
     }
 
-    .summary-value {
+    .s3-agent.on .s3-agent-num {
+      color: var(--text);
+    }
+
+    .s3-agent-info {
       flex: 1;
-      font-size: 13px;
     }
 
-    .countdown-display {
-      position: fixed;
-      inset: 0;
-      background: var(--bg-main);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      z-index: 100;
-    }
-
-    .countdown-display.active {
-      display: flex;
-    }
-
-    .countdown-number {
-      font-size: 120px;
-      font-weight: 300;
-      letter-spacing: 0.1em;
-      color: var(--text-main);
-    }
-
-    .countdown-label {
-      font-size: 12px;
-      letter-spacing: 0.2em;
-      color: var(--text-light);
-      margin-top: 16px;
-    }
-
-    .complete-display {
-      position: fixed;
-      inset: 0;
-      background: var(--bg-main);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      z-index: 100;
-    }
-
-    .complete-display.active {
-      display: flex;
-    }
-
-    .complete-title {
-      font-size: 28px;
+    .s3-agent-name {
+      font-size: 15px;
       font-weight: 400;
-      letter-spacing: 0.2em;
-      margin-bottom: 16px;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
     }
 
-    .complete-sub {
-      font-size: 12px;
+    .s3-agent-role {
+      font-size: 10px;
       letter-spacing: 0.15em;
       color: var(--text-light);
     }
 
-    .footer {
-      margin-top: auto;
-      padding-top: 24px;
-      border-top: 1px solid var(--border-light);
+    .s3-agent-status {
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--text-light);
+    }
+
+    .s3-agent.on .s3-agent-status {
+      color: var(--text-mid);
+    }
+
+    .s3-visual {
+      width: 35%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-left: 1px solid var(--line);
+    }
+
+    .s3-counter {
+      text-align: center;
+    }
+
+    .s3-counter-num {
+      font-size: 140px;
+      font-weight: 200;
+      line-height: 1;
+      color: var(--line);
+      transition: color 0.3s;
+    }
+
+    .s3-counter-num.active {
+      color: var(--text);
+    }
+
+    .s3-counter-label {
+      font-size: 10px;
+      letter-spacing: 0.3em;
+      color: var(--text-light);
+      margin-top: 16px;
+    }
+
+    .s3-footer {
+      padding: 24px 60px;
+      border-top: 1px solid var(--line);
       display: flex;
       justify-content: space-between;
-      font-size: 11px;
-      color: var(--text-light);
-      letter-spacing: 0.1em;
+      align-items: center;
     }
+
+    .s3-status {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+    }
+
+    /* ========== SCENE 4: CONFIRM ========== */
+    .s4 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+
+    .s4-block {
+      text-align: center;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .s4-block.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .s4-label {
+      font-size: 10px;
+      letter-spacing: 0.4em;
+      color: var(--text-light);
+      margin-bottom: 16px;
+    }
+
+    .s4-name {
+      font-size: 48px;
+      font-weight: 300;
+      letter-spacing: 0.05em;
+      margin-bottom: 60px;
+    }
+
+    .s4-agents {
+      display: flex;
+      gap: 48px;
+      margin-bottom: 80px;
+    }
+
+    .s4-agent {
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      color: var(--text-mid);
+      opacity: 0;
+      transform: scale(0.9);
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .s4-agent.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .s4-btn {
+      background: none;
+      border: 1px solid var(--text);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.3em;
+      color: var(--text);
+      padding: 20px 60px;
+      cursor: pointer;
+      opacity: 0;
+      transition: all 0.3s;
+    }
+
+    .s4-btn.show {
+      opacity: 1;
+    }
+
+    .s4-btn:hover {
+      background: var(--text);
+      color: var(--bg);
+    }
+
+    /* ========== SCENE 5: COUNTDOWN ========== */
+    .s5 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .s5-num {
+      font-size: 280px;
+      font-weight: 200;
+      color: var(--text);
+      opacity: 0;
+      transform: scale(0.7);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .s5-num.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .s5-num.out {
+      opacity: 0;
+      transform: scale(1.2);
+    }
+
+    /* ========== SCENE 6: COMPLETE ========== */
+    .s6 {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+
+    .s6-line {
+      width: 80px;
+      height: 1px;
+      background: var(--text);
+      transform: scaleX(0);
+      margin-bottom: 40px;
+      transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .s6-line.show {
+      transform: scaleX(1);
+    }
+
+    .s6-title {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.5em;
+      opacity: 0;
+      transform: translateY(15px);
+      transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1) 0.3s;
+    }
+
+    .s6-title.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .s6-sub {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: var(--text-light);
+      margin-top: 12px;
+      opacity: 0;
+      transition: opacity 0.6s ease 0.6s;
+    }
+
+    .s6-sub.show {
+      opacity: 1;
+    }
+
+    /* Button base */
+    .btn {
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.25em;
+      color: var(--text);
+      cursor: pointer;
+      padding: 16px 0;
+      position: relative;
+    }
+
+    .btn::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 12px;
+      height: 1px;
+      background: var(--text);
+      transform: scaleX(0);
+      transform-origin: right;
+      transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .btn:hover::after {
+      transform: scaleX(1);
+      transform-origin: left;
+    }
+
+    /* Corner decorations */
+    .corner {
+      position: fixed;
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--line);
+      pointer-events: none;
+    }
+
+    .corner-tl { top: 24px; left: 24px; border-right: none; border-bottom: none; }
+    .corner-tr { top: 24px; right: 24px; border-left: none; border-bottom: none; }
+    .corner-bl { bottom: 24px; left: 24px; border-right: none; border-top: none; }
+    .corner-br { bottom: 24px; right: 24px; border-left: none; border-top: none; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <span>◇</span>
-      <span class="header-title">PROJECT INITIALIZATION</span>
-      <div class="phase-indicator">
-        <div class="phase-dot active" data-phase="1"></div>
-        <div class="phase-dot" data-phase="2"></div>
-        <div class="phase-dot" data-phase="3"></div>
-        <div class="phase-dot" data-phase="4"></div>
-      </div>
-    </div>
+  <div class="app">
+    <div class="wipe" id="wipe"></div>
 
-    <div class="main-content">
-      <div class="section active" id="section1">
-        <div class="section-label">PHASE 1</div>
-        <div class="section-title">Project Information</div>
+    <div class="corner corner-tl"></div>
+    <div class="corner corner-tr"></div>
+    <div class="corner corner-bl"></div>
+    <div class="corner corner-br"></div>
 
-        <div class="input-group">
-          <label class="input-label">PROJECT NAME</label>
-          <input type="text" class="input-field" id="inputName" placeholder="Enter project name">
-        </div>
-
-        <div class="input-group">
-          <label class="input-label">PROJECT CONCEPT</label>
-          <textarea class="input-field" id="inputConcept" placeholder="Describe your game idea..."></textarea>
-        </div>
-
-        <div class="btn-row">
-          <button class="btn" id="btn1">NEXT</button>
-        </div>
-      </div>
-
-      <div class="section" id="section2">
-        <div class="section-label">PHASE 2</div>
-        <div class="section-title">Agent Activation</div>
-
-        <div class="agent-grid" id="agentGrid">
-          <div class="agent-card standby" data-agent="concept">
-            <div class="agent-icon">
-              <svg viewBox="0 0 48 48"><circle cx="24" cy="16" r="8"/><path d="M12 40 C12 28 36 28 36 40"/></svg>
-            </div>
-            <div class="agent-name">CONCEPT</div>
-            <div class="agent-status">STANDBY</div>
-          </div>
-          <div class="agent-card standby" data-agent="scenario">
-            <div class="agent-icon">
-              <svg viewBox="0 0 48 48"><rect x="10" y="8" width="28" height="32" rx="2"/><line x1="16" y1="16" x2="32" y2="16"/><line x1="16" y1="24" x2="32" y2="24"/><line x1="16" y1="32" x2="26" y2="32"/></svg>
-            </div>
-            <div class="agent-name">SCENARIO</div>
-            <div class="agent-status">STANDBY</div>
-          </div>
-          <div class="agent-card standby" data-agent="character">
-            <div class="agent-icon">
-              <svg viewBox="0 0 48 48"><circle cx="24" cy="14" r="6"/><path d="M16 44 V28 C16 24 20 22 24 22 C28 22 32 24 32 28 V44"/><circle cx="16" cy="32" r="4"/><circle cx="32" cy="32" r="4"/></svg>
-            </div>
-            <div class="agent-name">CHARACTER</div>
-            <div class="agent-status">STANDBY</div>
-          </div>
-          <div class="agent-card standby" data-agent="code">
-            <div class="agent-icon">
-              <svg viewBox="0 0 48 48"><polyline points="16,16 8,24 16,32"/><polyline points="32,16 40,24 32,32"/><line x1="28" y1="12" x2="20" y2="36"/></svg>
-            </div>
-            <div class="agent-name">CODE</div>
-            <div class="agent-status">STANDBY</div>
-          </div>
-        </div>
-
-        <div class="log-area" id="logArea"></div>
-
-        <div class="btn-row">
-          <button class="btn" id="btn2" disabled>ACTIVATE ALL</button>
-        </div>
-      </div>
-
-      <div class="section" id="section3">
-        <div class="section-label">PHASE 3</div>
-        <div class="section-title">Mission Briefing</div>
-
-        <div class="summary-section">
-          <div class="summary-row">
-            <div class="summary-label">PROJECT NAME</div>
-            <div class="summary-value" id="summaryName">-</div>
-          </div>
-          <div class="summary-row">
-            <div class="summary-label">CONCEPT</div>
-            <div class="summary-value" id="summaryConcept">-</div>
-          </div>
-          <div class="summary-row">
-            <div class="summary-label">ACTIVE AGENTS</div>
-            <div class="summary-value" id="summaryAgents">-</div>
-          </div>
-        </div>
-
-        <div class="btn-row">
-          <button class="btn" id="btn3">LAUNCH MISSION</button>
+    <div class="scene s1 active" id="s1">
+      <div class="s1-num">01</div>
+      <div class="s1-wrap">
+        <div class="s1-label">PROJECT NAME</div>
+        <div class="s1-input-wrap">
+          <input type="text" class="s1-input" id="inputName" placeholder="Enter name" autofocus>
+          <div class="s1-hint">ENTER で次へ</div>
         </div>
       </div>
     </div>
 
-    <div class="footer">
-      <span id="footerStatus">AWAITING INPUT</span>
-      <span id="footerProject">-</span>
+    <div class="scene s2" id="s2">
+      <div class="s2-left">
+        <div class="s2-label">CONCEPT</div>
+        <div class="s2-project" id="s2Project">PROJECT: -</div>
+        <textarea class="s2-textarea" id="inputConcept" placeholder="ゲームのコンセプトを入力..."></textarea>
+        <button class="btn s2-next" id="btnS2">NEXT</button>
+      </div>
+      <div class="s2-right">
+        <div class="s2-num">02</div>
+      </div>
     </div>
-  </div>
 
-  <div class="countdown-display" id="countdownDisplay">
-    <div class="countdown-number" id="countdownNumber">3</div>
-    <div class="countdown-label">INITIALIZING</div>
-  </div>
+    <div class="scene s3" id="s3">
+      <div class="s3-header">
+        <div class="s3-title">AGENT ACTIVATION</div>
+        <div class="s3-project" id="s3Project">-</div>
+      </div>
+      <div class="s3-body">
+        <div class="s3-list">
+          <div class="s3-agent" data-agent="concept">
+            <div class="s3-agent-num">01</div>
+            <div class="s3-agent-info">
+              <div class="s3-agent-name">Concept Agent</div>
+              <div class="s3-agent-role">CREATIVE DIRECTION</div>
+            </div>
+            <div class="s3-agent-status">STANDBY</div>
+          </div>
+          <div class="s3-agent" data-agent="scenario">
+            <div class="s3-agent-num">02</div>
+            <div class="s3-agent-info">
+              <div class="s3-agent-name">Scenario Agent</div>
+              <div class="s3-agent-role">NARRATIVE DESIGN</div>
+            </div>
+            <div class="s3-agent-status">STANDBY</div>
+          </div>
+          <div class="s3-agent" data-agent="character">
+            <div class="s3-agent-num">03</div>
+            <div class="s3-agent-info">
+              <div class="s3-agent-name">Character Agent</div>
+              <div class="s3-agent-role">CHARACTER DESIGN</div>
+            </div>
+            <div class="s3-agent-status">STANDBY</div>
+          </div>
+          <div class="s3-agent" data-agent="code">
+            <div class="s3-agent-num">04</div>
+            <div class="s3-agent-info">
+              <div class="s3-agent-name">Code Agent</div>
+              <div class="s3-agent-role">IMPLEMENTATION</div>
+            </div>
+            <div class="s3-agent-status">STANDBY</div>
+          </div>
+        </div>
+        <div class="s3-visual">
+          <div class="s3-counter">
+            <div class="s3-counter-num" id="s3Count">0</div>
+            <div class="s3-counter-label">ONLINE</div>
+          </div>
+        </div>
+      </div>
+      <div class="s3-footer">
+        <div class="s3-status" id="s3Status">READY</div>
+        <button class="btn" id="btnS3">ACTIVATE</button>
+      </div>
+    </div>
 
-  <div class="complete-display" id="completeDisplay">
-    <div class="complete-title">MISSION READY</div>
-    <div class="complete-sub">ALL SYSTEMS OPERATIONAL</div>
+    <div class="scene s4" id="s4">
+      <div class="s4-block" id="s4Block">
+        <div class="s4-label">PROJECT</div>
+        <div class="s4-name" id="s4Name">-</div>
+        <div class="s4-agents">
+          <span class="s4-agent">CONCEPT</span>
+          <span class="s4-agent">SCENARIO</span>
+          <span class="s4-agent">CHARACTER</span>
+          <span class="s4-agent">CODE</span>
+        </div>
+        <button class="s4-btn" id="btnS4">INITIALIZE</button>
+      </div>
+    </div>
+
+    <div class="scene s5" id="s5">
+      <div class="s5-num" id="s5Num">3</div>
+    </div>
+
+    <div class="scene s6" id="s6">
+      <div class="s6-line"></div>
+      <div class="s6-title">INITIALIZATION COMPLETE</div>
+      <div class="s6-sub">全システム稼働中</div>
+    </div>
   </div>
 
   <script>
-    const Audio = {
+    const Sound = {
       ctx: null,
       init() {
-        if (!this.ctx) {
-          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (this.ctx.state === 'suspended') {
-          this.ctx.resume();
-        }
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        if (this.ctx.state === 'suspended') this.ctx.resume();
       },
-      play(freq, dur, type = 'sine', vol = 0.1) {
+      tone(f, d, delay = 0, v = 0.06) {
         if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.frequency.value = freq;
-        osc.type = type;
-        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
-        osc.start();
-        osc.stop(this.ctx.currentTime + dur);
+        const t = this.ctx.currentTime + delay;
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.connect(g); g.connect(this.ctx.destination);
+        o.frequency.value = f;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(v, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + d);
+        o.start(t); o.stop(t + d);
       },
+      wipe() { this.tone(180, 0.15, 0, 0.04); },
       confirm() {
-        this.play(523, 0.1, 'sine', 0.08);
-        setTimeout(() => this.play(659, 0.15, 'sine', 0.1), 100);
+        this.tone(440, 0.12); this.tone(554, 0.12, 0.06); this.tone(659, 0.18, 0.12);
       },
-      activate() {
-        this.play(330, 0.15, 'sine', 0.06);
-        setTimeout(() => this.play(440, 0.2, 'sine', 0.08), 120);
+      agent(i) {
+        const f = 220 * Math.pow(1.26, i);
+        this.tone(f, 0.15); this.tone(f * 1.5, 0.12, 0.08, 0.04);
       },
-      countdown(n) {
-        this.play(n === 0 ? 880 : 440, n === 0 ? 0.4 : 0.15, 'sine', 0.12);
-      }
+      count(n) {
+        n > 0 ? this.tone(440, 0.1, 0, 0.08) : (this.tone(880, 0.25, 0, 0.1), this.tone(1100, 0.2, 0.08, 0.06));
+      },
+      done() { this.tone(523, 0.15); this.tone(659, 0.15, 0.12); this.tone(784, 0.25, 0.24, 0.08); }
     };
 
-    const state = {
-      phase: 1,
+    const D = {
       name: '',
       concept: '',
-      agents: ['concept', 'scenario', 'character', 'code']
+      agents: ['concept', 'scenario', 'character', 'code'],
+      count: 0
     };
 
     const $ = id => document.getElementById(id);
+    const wipe = $('wipe');
 
-    function updatePhase(phase) {
-      state.phase = phase;
-      document.querySelectorAll('.phase-dot').forEach((dot, i) => {
-        dot.classList.remove('active', 'completed');
-        if (i + 1 < phase) dot.classList.add('completed');
-        if (i + 1 === phase) dot.classList.add('active');
-      });
-      document.querySelectorAll('.section').forEach((sec, i) => {
-        sec.classList.toggle('active', i + 1 === phase);
-      });
+    async function transition(from, to) {
+      Sound.wipe();
+      wipe.classList.remove('out');
+      wipe.classList.add('in');
+      await sleep(500);
+      $(from).classList.remove('active');
+      $(to).classList.add('active');
+      wipe.classList.remove('in');
+      wipe.classList.add('out');
+      await sleep(500);
+      wipe.classList.remove('out');
     }
 
-    function addLog(text, type = 'info') {
-      const log = $('logArea');
-      const line = document.createElement('div');
-      line.className = 'log-line log-' + type;
-      line.textContent = text;
-      log.appendChild(line);
-      setTimeout(() => line.classList.add('visible'), 10);
-      log.scrollTop = log.scrollHeight;
-    }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    function updateAgent(name, status) {
-      const card = document.querySelector(`[data-agent="${name}"]`);
-      const statusEl = card.querySelector('.agent-status');
-      card.classList.remove('standby', 'activating', 'active');
-      card.classList.add(status);
-      const labels = { standby: 'STANDBY', activating: 'ACTIVATING...', active: 'ONLINE' };
-      statusEl.textContent = labels[status];
-    }
+    $('inputName').addEventListener('keydown', async e => {
+      if (e.key === 'Enter') {
+        Sound.init();
+        const v = $('inputName').value.trim();
+        if (!v) return;
+        D.name = v;
+        Sound.confirm();
+        await transition('s1', 's2');
+        $('s2Project').textContent = `PROJECT: ${D.name}`;
+        $('inputConcept').focus();
+      }
+    });
 
-    async function activateAgents() {
-      $('btn2').disabled = true;
-      $('footerStatus').textContent = 'ACTIVATING AGENTS';
+    $('btnS2').addEventListener('click', async () => {
+      Sound.init();
+      D.concept = $('inputConcept').value.trim();
+      Sound.confirm();
+      await transition('s2', 's3');
+      $('s3Project').textContent = D.name;
+    });
 
-      for (const agent of state.agents) {
-        updateAgent(agent, 'activating');
-        addLog(`> Initializing ${agent.toUpperCase()} agent...`, 'prompt');
-        Audio.activate();
+    $('btnS3').addEventListener('click', async () => {
+      Sound.init();
+      $('btnS3').style.display = 'none';
+      $('s3Status').textContent = 'ACTIVATING...';
 
-        await new Promise(r => setTimeout(r, 600 + Math.random() * 400));
+      for (let i = 0; i < D.agents.length; i++) {
+        const row = document.querySelector(`[data-agent="${D.agents[i]}"]`);
+        row.classList.add('loading');
+        row.querySelector('.s3-agent-status').textContent = 'LOADING';
+        await sleep(250);
 
-        updateAgent(agent, 'active');
-        addLog(`  ${agent.toUpperCase()} agent online`, 'info');
-
-        await new Promise(r => setTimeout(r, 300));
+        row.classList.remove('loading');
+        row.classList.add('on');
+        row.querySelector('.s3-agent-status').textContent = 'ONLINE';
+        D.count++;
+        $('s3Count').textContent = D.count;
+        $('s3Count').classList.toggle('active', D.count > 0);
+        Sound.agent(i);
+        await sleep(350);
       }
 
-      addLog('> All agents activated', 'prompt');
-      $('footerStatus').textContent = 'AGENTS READY';
+      $('s3Status').textContent = 'ALL SYSTEMS READY';
+      await sleep(600);
+      Sound.confirm();
+      await transition('s3', 's4');
 
-      await new Promise(r => setTimeout(r, 500));
-      Audio.confirm();
-      updatePhase(3);
+      await sleep(300);
+      $('s4Name').textContent = D.name;
+      $('s4Block').classList.add('show');
 
-      $('summaryName').textContent = state.name;
-      $('summaryConcept').textContent = state.concept;
-      $('summaryAgents').textContent = state.agents.map(a => a.toUpperCase()).join(', ');
-    }
+      const agents = document.querySelectorAll('.s4-agent');
+      for (let i = 0; i < agents.length; i++) {
+        await sleep(120);
+        agents[i].classList.add('show');
+      }
+      await sleep(300);
+      $('btnS4').classList.add('show');
+    });
 
-    async function launchMission() {
-      $('btn3').disabled = true;
-      $('footerStatus').textContent = 'LAUNCHING';
+    $('btnS4').addEventListener('click', async () => {
+      Sound.init();
+      await transition('s4', 's5');
 
-      const cd = $('countdownDisplay');
-      const num = $('countdownNumber');
-
-      cd.classList.add('active');
+      const num = $('s5Num');
+      await sleep(400);
 
       for (let i = 3; i >= 0; i--) {
         num.textContent = i === 0 ? 'GO' : i;
-        Audio.countdown(i);
-        await new Promise(r => setTimeout(r, 800));
+        num.classList.remove('show', 'out');
+        await sleep(30);
+        num.classList.add('show');
+        Sound.count(i);
+        await sleep(500);
+        num.classList.add('out');
+        num.classList.remove('show');
+        await sleep(180);
       }
 
-      cd.classList.remove('active');
-      $('completeDisplay').classList.add('active');
-      $('footerStatus').textContent = 'MISSION ACTIVE';
+      await transition('s5', 's6');
+      await sleep(400);
+      document.querySelector('.s6-line').classList.add('show');
+      await sleep(250);
+      document.querySelector('.s6-title').classList.add('show');
+      Sound.done();
+      await sleep(150);
+      document.querySelector('.s6-sub').classList.add('show');
 
-      await new Promise(r => setTimeout(r, 2000));
-      alert(`Project "${state.name}" initialized!\n(実際の実装ではダッシュボードに遷移します)`);
+      await sleep(2500);
+      alert(`"${D.name}" の初期化が完了しました`);
       location.reload();
-    }
-
-    $('btn1').addEventListener('click', () => {
-      Audio.init();
-      const name = $('inputName').value.trim();
-      const concept = $('inputConcept').value.trim();
-
-      if (!name || !concept) {
-        alert('Please fill in all fields');
-        return;
-      }
-
-      state.name = name;
-      state.concept = concept;
-
-      Audio.confirm();
-      $('footerProject').textContent = name;
-      $('footerStatus').textContent = 'PROJECT REGISTERED';
-
-      updatePhase(2);
-      $('btn2').disabled = false;
-
-      addLog('> System initialized', 'prompt');
-      addLog(`> Project: ${name}`, 'info');
-      addLog('> Agents standing by', 'info');
     });
 
-    $('btn2').addEventListener('click', () => {
-      Audio.init();
-      activateAgents();
-    });
-
-    $('btn3').addEventListener('click', () => {
-      Audio.init();
-      launchMission();
-    });
-
-    document.querySelectorAll('.input-field').forEach(input => {
-      input.addEventListener('focus', () => Audio.init());
-    });
+    document.addEventListener('click', () => Sound.init());
   </script>
 </body>
 </html>
