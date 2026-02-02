@@ -548,8 +548,10 @@ class TestCacheIntegration:
 
     @pytest.fixture
     def clear_global_caches(self):
-        """テスト間でグローバルキャッシュをクリア"""
+        """テスト間でグローバルキャッシュをクリア＆キャッシュファイル削除"""
         import cache.file_manager as fm_module
+        import glob
+        cache_dir=Path(__file__).parent.parent.parent.parent/"cache"/"assets"
         fm_module._project_caches.clear()
         fm_module._project_watchers.clear()
         fm_module._project_metadata_stores.clear()
@@ -557,6 +559,10 @@ class TestCacheIntegration:
         fm_module._project_caches.clear()
         fm_module._project_watchers.clear()
         fm_module._project_metadata_stores.clear()
+        for f in cache_dir.glob("*.cache"):
+            f.unlink(missing_ok=True)
+        for f in cache_dir.glob("*.meta"):
+            f.unlink(missing_ok=True)
 
     @pytest.fixture
     def file_manager(self,temp_dir,clear_global_caches):
