@@ -80,7 +80,7 @@ class MockSkillRunner(AgentRunner):
    "type":"progress",
    "data":{"progress":5,"current_task":"AI API接続中"}
   }
-  await asyncio.sleep(0.3*self._simulation_speed)
+  await asyncio.sleep(0.05*self._simulation_speed)
   if context.on_speech:
    try:
     from services.agent_speech_service import get_agent_speech_service
@@ -145,14 +145,14 @@ class MockSkillRunner(AgentRunner):
       "output":str(result.output)[:200],
       "error":result.error,
      })
-     await asyncio.sleep(0.2*self._simulation_speed)
+     await asyncio.sleep(0.03*self._simulation_speed)
    else:
     final_content=content
     yield {
      "type":"progress",
      "data":{"progress":step_progress,"current_task":"AI応答処理中"}
     }
-   await asyncio.sleep(0.3*self._simulation_speed)
+   await asyncio.sleep(0.05*self._simulation_speed)
   if not final_content and sequences:
    final_content=sequences[-1].get("content","")
   output={

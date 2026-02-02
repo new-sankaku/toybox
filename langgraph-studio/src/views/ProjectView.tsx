@@ -85,6 +85,7 @@ export default function ProjectView():JSX.Element{
  const[showInitializeDialog,setShowInitializeDialog]=useState(false)
  const[showBrushupDialog,setShowBrushupDialog]=useState(false)
  const[showDeleteDialog,setShowDeleteDialog]=useState<string|null>(null)
+ const[showBulkDeleteDialog,setShowBulkDeleteDialog]=useState<string[]|null>(null)
  const[brushupSelectedAgents,setBrushupSelectedAgents]=useState<Set<string>>(new Set())
  const[brushupClearAssets,setBrushupClearAssets]=useState(false)
  const[isLoading,setIsLoading]=useState(false)
@@ -245,6 +246,23 @@ export default function ProjectView():JSX.Element{
    console.error('Failed to delete project:',err)
    const apiError=extractApiError(err)
    setError(`プロジェクトの削除に失敗: ${apiError.message}`)
+  }
+ }
+
+ const handleBulkDeleteProjects=async(ids:string[])=>{
+  setIsLoading(true)
+  try{
+   await Promise.all(ids.map(id=>projectApi.delete(id)))
+   setProjects(projects.filter(p=>!ids.includes(p.id)))
+   if(currentProject&&ids.includes(currentProject.id)){
+    setCurrentProject(null)
+   }
+  }catch(err){
+   console.error('Failed to delete projects:',err)
+   const apiError=extractApiError(err)
+   setError(`プロジェクトの削除に失敗: ${apiError.message}`)
+  }finally{
+   setIsLoading(false)
   }
  }
 
@@ -636,6 +654,7 @@ export default function ProjectView():JSX.Element{
       onSelectProject={handleSelectProject}
       onEditProject={handleEditProjectFromList}
       onDeleteProject={(id)=>setShowDeleteDialog(id)}
+      onBulkDelete={(ids)=>setShowBulkDeleteDialog(ids)}
       onRefresh={fetchProjects}
       onNewProject={()=>setShowNewForm(true)}
      />
@@ -740,6 +759,22 @@ export default function ProjectView():JSX.Element{
       setShowDeleteDialog(null)
      }}
      onCancel={()=>setShowDeleteDialog(null)}
+     isLoading={isLoading}
+     variant="danger"
+    />
+)}
+
+   {showBulkDeleteDialog&&showBulkDeleteDialog.length>0&&(
+    <ConfirmDialog
+     title="一括削除の確認"
+     message={`${showBulkDeleteDialog.length}件のプロジェクトを削除しますか？`}
+     subMessage="この操作は取り消せません。"
+     confirmLabel="削除する"
+     onConfirm={()=>{
+      handleBulkDeleteProjects(showBulkDeleteDialog)
+      setShowBulkDeleteDialog(null)
+     }}
+     onCancel={()=>setShowBulkDeleteDialog(null)}
      isLoading={isLoading}
      variant="danger"
     />

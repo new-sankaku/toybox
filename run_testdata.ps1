@@ -22,14 +22,6 @@ function Test-PortOpen($port, $maxRetries = 10, $delayMs = 500) {
 }
 
 try {
-    Write-Host "Running seed script..." -NoNewline
-    $seedResult = Start-Process -FilePath "cmd" -ArgumentList "/c cd /d `"$scriptDir\backend`" && call venv\Scripts\activate.bat && python seeds/testdata_seed.py" -PassThru -NoNewWindow -Wait
-    if ($seedResult.ExitCode -eq 0) {
-        Write-Host " OK" -ForegroundColor Green
-    } else {
-        Write-Host " (skipped or failed)" -ForegroundColor Yellow
-    }
-
     $backend = Start-Process -FilePath "cmd" -ArgumentList "/c cd /d `"$scriptDir\backend`" && call venv\Scripts\activate.bat && python main.py --mode testdata" -PassThru -NoNewWindow
 
     Write-Host "Waiting for backend to start..." -NoNewline

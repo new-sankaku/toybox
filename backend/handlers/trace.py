@@ -20,14 +20,55 @@ def _extract_service_name(model:str)->str:
  provider=model.split("/")[0].lower() if"/"in model else""
  return provider_map.get(provider,"API")
 
+def _extract_model_display_name(model:str)->str:
+ if not model:
+  return"Unknown"
+ model_map={
+  "anthropic/claude-opus-4":"Claude Opus",
+  "anthropic/claude-sonnet-4":"Claude Sonnet",
+  "anthropic/claude-3-5-sonnet-20241022":"Claude Sonnet 3.5",
+  "anthropic/claude-3-opus-20240229":"Claude Opus 3",
+  "openai/gpt-4o":"GPT-4o",
+  "openai/gpt-4-turbo":"GPT-4 Turbo",
+  "google/gemini-1.5-pro":"Gemini 1.5 Pro",
+  "google/gemini-2.0-flash":"Gemini 2.0 Flash",
+ }
+ if model in model_map:
+  return model_map[model]
+ parts=model.split("/")
+ if len(parts)>1:
+  return parts[1]
+ return model
+
+def _calculate_cost(tokens_input:int,tokens_output:int,model:str)->float:
+ pricing={
+  "anthropic/claude-opus-4":{"input":15.0,"output":75.0},
+  "anthropic/claude-sonnet-4":{"input":3.0,"output":15.0},
+  "anthropic/claude-3-5-sonnet-20241022":{"input":3.0,"output":15.0},
+  "anthropic/claude-3-opus-20240229":{"input":15.0,"output":75.0},
+  "openai/gpt-4o":{"input":2.5,"output":10.0},
+  "openai/gpt-4-turbo":{"input":10.0,"output":30.0},
+  "google/gemini-1.5-pro":{"input":1.25,"output":5.0},
+  "google/gemini-2.0-flash":{"input":0.1,"output":0.4},
+ }
+ rates=pricing.get(model,{"input":3.0,"output":15.0})
+ cost=(tokens_input*rates["input"]+tokens_output*rates["output"])/1_000_000
+ return round(cost,4)
+
 def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  traces=data_store.get_traces_by_agent(agent_id)
  llm_jobs=data_store.get_llm_jobs_by_agent(agent_id)
  workers=data_store.get_workers_by_parent(agent_id)
  agent_type=agent["type"]
  display_name=agent.get("metadata",{}).get("displayName",agent_type)
- participants=[{"id":"external","label":"入力","type":"external"}]
- participants.append({"id":agent_id,"label":display_name,"type":"leader" if workers else"agent"})
+ participants=[{"id":"external","label":"入力","type":"external","role":""}]
+ has_parent=bool(agent.get("parentAgentId"))
+ has_workers=bool(workers)
+ if has_parent:
+  agent_role="Worker"
+ else:
+  agent_role="Leader"
+ participants.append({"id":agent_id,"label":display_name,"type":"leader" if has_workers else"agent","role":agent_role})
  api_models=set()
  for t in traces:
   if t.get("modelUsed"):
@@ -40,20 +81,25 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
   pid=f"api:{model}"
   service_label=_extract_service_name(model)
   api_participant_map[model]=pid
-  participants.append({"id":pid,"label":service_label,"type":"api"})
+  participants.append({"id":pid,"label":service_label,"type":"api","role":""})
  if not api_models:
-  participants.append({"id":"api:unknown","label":"AI API","type":"api"})
+  participants.append({"id":"api:unknown","label":"AI API","type":"api","role":""})
   api_participant_map["__default__"]="api:unknown"
  worker_map={}
  for idx,w in enumerate(workers):
   w_display=w.get("metadata",{}).get("displayName",w["type"])
   w_id=w["id"]
   worker_map[w_id]=w_id
-  participants.append({"id":w_id,"label":f"{w_display}","type":"worker"})
- def _trace_events(t,from_id,api_id):
+  participants.append({"id":w_id,"label":f"{w_display}","type":"worker","role":"Worker"})
+ def _trace_events(t,from_id,api_id,call_idx):
   trace_id=t.get("id","")
   pair_id=f"pair-{trace_id}" if trace_id else None
   summary=t.get("outputSummary") or""
+  model=t.get("modelUsed") or""
+  model_display=_extract_model_display_name(model)
+  tokens_in=t.get("tokensInput",0)
+  tokens_out=t.get("tokensOutput",0)
+  cost=_calculate_cost(tokens_in,tokens_out,model)
   evs=[]
   if t.get("startedAt"):
    evs.append({
@@ -62,11 +108,14 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "to":api_id,
     "type":"request",
     "label":"",
-    "tokens":{"input":t.get("tokensInput",0)} if t.get("tokensInput") else None,
+    "tokens":{"input":tokens_in} if tokens_in else None,
     "durationMs":None,
     "sourceId":trace_id,
     "sourceType":"trace",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":None,
+    "callIndex":call_idx
    })
   if t.get("completedAt") and t.get("status")=="completed":
    resp_label=summary[:80] if summary else""
@@ -76,11 +125,14 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "to":from_id,
     "type":"response",
     "label":resp_label,
-    "tokens":{"output":t.get("tokensOutput",0)} if t.get("tokensOutput") else None,
+    "tokens":{"output":tokens_out} if tokens_out else None,
     "durationMs":t.get("durationMs"),
     "sourceId":trace_id,
     "sourceType":"trace",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":cost if tokens_out>0 else None,
+    "callIndex":call_idx
    })
   elif t.get("completedAt") and t.get("status")=="error":
    evs.append({
@@ -93,14 +145,22 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "durationMs":t.get("durationMs"),
     "sourceId":trace_id,
     "sourceType":"trace",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":None,
+    "callIndex":call_idx
    })
   return evs
 
- def _job_events(j,from_id,api_id):
+ def _job_events(j,from_id,api_id,call_idx):
   job_id=j.get("id","")
   pair_id=f"pair-{job_id}" if job_id else None
   resp_content=j.get("responseContent") or""
+  model=j.get("model") or""
+  model_display=_extract_model_display_name(model)
+  tokens_in=j.get("tokensInput",0)
+  tokens_out=j.get("tokensOutput",0)
+  cost=_calculate_cost(tokens_in,tokens_out,model)
   evs=[]
   if j.get("createdAt"):
    evs.append({
@@ -109,11 +169,14 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "to":api_id,
     "type":"request",
     "label":"",
-    "tokens":{"input":j.get("tokensInput",0)} if j.get("tokensInput") else None,
+    "tokens":{"input":tokens_in} if tokens_in else None,
     "durationMs":None,
     "sourceId":job_id,
     "sourceType":"job",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":None,
+    "callIndex":call_idx
    })
   if j.get("completedAt") and j.get("status")=="completed":
    resp_label=resp_content[:80] if resp_content else""
@@ -123,14 +186,17 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "to":from_id,
     "type":"response",
     "label":resp_label,
-    "tokens":{"output":j.get("tokensOutput",0)} if j.get("tokensOutput") else None,
+    "tokens":{"output":tokens_out} if tokens_out else None,
     "durationMs":int((
      datetime.fromisoformat(j["completedAt"])-
      datetime.fromisoformat(j["createdAt"])
     ).total_seconds()*1000) if j.get("createdAt") and j.get("completedAt") else None,
     "sourceId":job_id,
     "sourceType":"job",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":cost if tokens_out>0 else None,
+    "callIndex":call_idx
    })
   elif j.get("completedAt") and j.get("status")=="failed":
    evs.append({
@@ -143,11 +209,18 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "durationMs":None,
     "sourceId":job_id,
     "sourceType":"job",
-    "pairId":pair_id
+    "pairId":pair_id,
+    "model":model_display,
+    "cost":None,
+    "callIndex":call_idx
    })
   return evs
 
  events=[]
+ call_counter={"idx":0}
+ def next_call_idx():
+  call_counter["idx"]+=1
+  return call_counter["idx"]
  if agent.get("startedAt"):
   events.append({
    "timestamp":agent["startedAt"],
@@ -159,16 +232,19 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
    "durationMs":None,
    "sourceId":agent_id,
    "sourceType":"agent",
-   "pairId":None
+   "pairId":None,
+   "model":None,
+   "cost":None,
+   "callIndex":None
   })
  for t in sorted(traces,key=lambda x:x.get("startedAt") or""):
   model=t.get("modelUsed") or""
   api_id=api_participant_map.get(model,api_participant_map.get("__default__","api:unknown"))
-  events.extend(_trace_events(t,agent_id,api_id))
+  events.extend(_trace_events(t,agent_id,api_id,next_call_idx()))
  for j in sorted(llm_jobs,key=lambda x:x.get("createdAt") or""):
   model=j.get("model") or""
   api_id=api_participant_map.get(model,api_participant_map.get("__default__","api:unknown"))
-  events.extend(_job_events(j,agent_id,api_id))
+  events.extend(_job_events(j,agent_id,api_id,next_call_idx()))
  for w in workers:
   w_id=w["id"]
   w_task_name=w.get("metadata",{}).get("task","")
@@ -184,18 +260,21 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "durationMs":None,
     "sourceId":None,
     "sourceType":None,
-    "pairId":w_pair_id
+    "pairId":w_pair_id,
+    "model":None,
+    "cost":None,
+    "callIndex":None
    })
   w_traces=data_store.get_traces_by_agent(w_id)
   w_llm_jobs=data_store.get_llm_jobs_by_agent(w_id)
   for t in sorted(w_traces,key=lambda x:x.get("startedAt") or""):
    model=t.get("modelUsed") or""
    api_id=api_participant_map.get(model,api_participant_map.get("__default__","api:unknown"))
-   events.extend(_trace_events(t,w_id,api_id))
+   events.extend(_trace_events(t,w_id,api_id,next_call_idx()))
   for j in sorted(w_llm_jobs,key=lambda x:x.get("createdAt") or""):
    model=j.get("model") or""
    api_id=api_participant_map.get(model,api_participant_map.get("__default__","api:unknown"))
-   events.extend(_job_events(j,w_id,api_id))
+   events.extend(_job_events(j,w_id,api_id,next_call_idx()))
   if w.get("completedAt"):
    events.append({
     "timestamp":w["completedAt"],
@@ -207,7 +286,10 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "durationMs":None,
     "sourceId":None,
     "sourceType":None,
-    "pairId":w_pair_id
+    "pairId":w_pair_id,
+    "model":None,
+    "cost":None,
+    "callIndex":None
    })
  if agent.get("completedAt"):
   events.append({
@@ -220,7 +302,10 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
    "durationMs":None,
    "sourceId":agent_id,
    "sourceType":"agent",
-   "pairId":None
+   "pairId":None,
+   "model":None,
+   "cost":None,
+   "callIndex":None
   })
  events.sort(key=lambda x:x.get("timestamp") or"")
  messages=[]
@@ -236,7 +321,10 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
    "durationMs":e["durationMs"],
    "sourceId":e.get("sourceId"),
    "sourceType":e.get("sourceType"),
-   "pairId":e.get("pairId")
+   "pairId":e.get("pairId"),
+   "model":e.get("model"),
+   "cost":e.get("cost"),
+   "callIndex":e.get("callIndex")
   })
  total_input=sum(t.get("tokensInput",0) for t in traces)
  total_output=sum(t.get("tokensOutput",0) for t in traces)

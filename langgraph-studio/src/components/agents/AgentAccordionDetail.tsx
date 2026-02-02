@@ -14,8 +14,6 @@ interface AgentAccordionDetailProps{
  onRetry?:()=>void
  onPause?:()=>void
  onResume?:()=>void
- onExecute?:()=>void
- onExecuteWithWorkers?:()=>void
 }
 
 type TabId='log'|'sequence'|'prompt'
@@ -45,9 +43,7 @@ export function AgentAccordionDetail({
  logs,
  onRetry,
  onPause,
- onResume,
- onExecute,
- onExecuteWithWorkers
+ onResume
 }:AgentAccordionDetailProps):JSX.Element{
  const contentRef=useRef<HTMLDivElement>(null)
  const logRef=useRef<HTMLDivElement>(null)
@@ -161,7 +157,6 @@ export function AgentAccordionDetail({
  const hasControls=(agent.status==='running'||agent.status==='waiting_approval')&&onPause
   ||(agent.status==='paused'||agent.status==='waiting_response')&&onResume
   ||(agent.status==='failed'||agent.status==='interrupted')&&onRetry
-  ||onExecute||onExecuteWithWorkers
 
  return(
   <div
@@ -194,18 +189,6 @@ export function AgentAccordionDetail({
        <Button size="sm" variant="success" onClick={onRetry} className="gap-1.5">
         <RotateCcw size={12}/>
         リトライ
-       </Button>
-)}
-      {onExecute&&(
-       <Button size="sm" onClick={onExecute} className="gap-1.5">
-        <Play size={12}/>
-        実行
-       </Button>
-)}
-      {onExecuteWithWorkers&&(
-       <Button size="sm" onClick={onExecuteWithWorkers} className="gap-1.5">
-        <Play size={12}/>
-        Workers含め実行
        </Button>
 )}
      </div>

@@ -187,7 +187,7 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
    const[listData,projectData]=await Promise.all([
     projectSettingsApi.getPrinciplesList(),
     projectSettingsApi.getProjectPrinciples(projectId)
-   ])
+])
    setPrinciples(listData.principles)
    const allIds=listData.principles.map(p=>p.id)
    const current=projectData.enabledPrinciples??allIds
@@ -245,7 +245,7 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
        <label key={p.id} className={cn(
         'flex items-start gap-3 p-3 border cursor-pointer transition-colors',
         enabled.includes(p.id)?'border-nier-border-dark bg-nier-bg-selected':'border-nier-border-light bg-nier-bg-panel hover:bg-nier-bg-selected'
-       )}>
+)}>
         <input
          type="checkbox"
          className="mt-1"
@@ -257,7 +257,7 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
          <div className="text-nier-caption text-nier-text-light">{p.description}</div>
         </div>
        </label>
-      ))}
+))}
      </div>
      <div className="flex gap-2 justify-end pt-2">
       <Button variant="ghost" size="sm" onClick={handleReset}>
@@ -272,7 +272,7 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
     </CardContent>
    </Card>
   </div>
- )
+)
 }
 
 function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{

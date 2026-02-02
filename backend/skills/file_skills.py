@@ -287,3 +287,52 @@ class FileListSkill(FileSkillMixin,Skill):
    "size":stat.st_size if os.path.isfile(full_path) else 0,
    "modified":stat.st_mtime,
   }
+
+class FileDeleteSkill(FileSkillMixin,Skill):
+ name="file_delete"
+ description="ファイルまたはディレクトリを削除します"
+ category=SkillCategory.FILE
+ parameters=[
+  SkillParameter(name="path",type="string",description="削除するファイルまたはディレクトリのパス"),
+  SkillParameter(name="recursive",type="boolean",description="ディレクトリを再帰的に削除するか（空でないディレクトリを削除する場合に必要）",required=False,default=False),
+ ]
+ def __init__(self):
+  super().__init__()
+ async def execute(self,context:SkillContext,**kwargs)->SkillResult:
+  path=kwargs.get("path","")
+  recursive=kwargs.get("recursive",False)
+  if not path:
+   return SkillResult(success=False,error="path is required")
+  full_path=self._resolve_path(path,context)
+  if not self._is_allowed(full_path,context):
+   return SkillResult(success=False,error=f"Access denied: {path}")
+  try:
+   if not os.path.exists(full_path):
+    return SkillResult(success=False,error=f"File or directory not found: {path}")
+   is_dir=os.path.isdir(full_path)
+   fm=self.get_file_manager()
+   if fm:
+    result=await fm.delete_file(full_path,recursive)
+    if not result.get("success"):
+     return SkillResult(success=False,error=result.get("error","Delete failed"))
+    deleted_type=result.get("type","file")
+   else:
+    deleted_type=await asyncio.to_thread(self._delete,full_path,recursive,is_dir)
+   return SkillResult(
+    success=True,
+    output=f"Deleted {deleted_type}: {path}",
+    metadata={"path":full_path,"type":deleted_type,"recursive":recursive if is_dir else None}
+   )
+  except Exception as e:
+   return SkillResult(success=False,error=str(e))
+ def _delete(self,path:str,recursive:bool,is_dir:bool)->str:
+  import shutil
+  if is_dir:
+   if recursive:
+    shutil.rmtree(path)
+   else:
+    os.rmdir(path)
+   return"directory"
+  else:
+   os.remove(path)
+   return"file"

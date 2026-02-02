@@ -82,6 +82,68 @@ checkpoint_titles:
     title: レビュー依頼
 
 mock_skill_sequences:
+  environment_setup:
+    - content: |
+        プロジェクトのディレクトリ構造を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        package.jsonを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "package.json", "content": "{\n  \"name\": \"game-project\",\n  \"version\": \"1.0.0\",\n  \"type\": \"module\",\n  \"scripts\": {\n    \"dev\": \"vite\",\n    \"build\": \"tsc && vite build\",\n    \"test\": \"vitest\",\n    \"lint\": \"eslint src\"\n  }\n}"}}
+        ```
+
+    - content: |
+        TypeScript設定を作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "tsconfig.json", "content": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2020\",\n    \"module\": \"ESNext\",\n    \"strict\": true,\n    \"jsx\": \"react-jsx\",\n    \"moduleResolution\": \"bundler\"\n  },\n  \"include\": [\"src\"]\n}"}}
+        ```
+
+    - content: |
+        # 開発環境構築完了
+
+        以下のファイルを作成しました:
+
+        ## 設定ファイル
+        - `package.json` - プロジェクト設定
+        - `tsconfig.json` - TypeScript設定
+
+        ## 実行方法
+        - 開発: `npm run dev`
+        - ビルド: `npm run build`
+        - テスト: `npm run test`
+        - Lint: `npm run lint`
+
+  architecture:
+    - content: |
+        プロジェクト構成を確認します。
+
+        ```tool_call
+        {"name": "file_list", "input": {"path": "."}}
+        ```
+
+    - content: |
+        アーキテクチャドキュメントを作成します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "docs/architecture.md", "content": "# アーキテクチャ設計\n\n## 概要\nゲームプロジェクトの技術アーキテクチャ\n\n## 技術スタック\n- TypeScript\n- Vite\n- Canvas 2D API\n\n## ディレクトリ構造\n```\nsrc/\n  game/     # ゲームコアロジック\n  input/    # 入力管理\n  rendering/ # 描画処理\n  audio/    # 音声処理\nassets/\n  images/   # 画像アセット\n  audio/    # 音声アセット\n```\n"}}
+        ```
+
+    - content: |
+        # アーキテクチャ設計完了
+
+        `docs/architecture.md`にアーキテクチャドキュメントを作成しました。
+
+        ## 設計内容
+        - 技術スタック: TypeScript + Vite + Canvas 2D
+        - モジュール構成: game/input/rendering/audio
+        - アセット管理: images/audio
+
   code_worker:
     - content: |
         まずプロジェクト構造を確認します。
@@ -371,6 +433,62 @@ checkpoint_contents:
     - 重力: 9.8 m/s²
     - 摩擦係数: 0.3
     - 反発係数: 0.7
+
+  environment_review: |
+    # 開発環境構築
+
+    ## パッケージ設定 (package.json)
+    ```json
+    {
+      "name": "game-project",
+      "version": "1.0.0",
+      "scripts": {
+        "dev": "vite",
+        "build": "tsc && vite build",
+        "test": "vitest",
+        "lint": "eslint src --ext .ts,.tsx"
+      },
+      "dependencies": {
+        "react": "^18.2.0",
+        "react-dom": "^18.2.0"
+      },
+      "devDependencies": {
+        "typescript": "^5.0.0",
+        "vite": "^5.0.0",
+        "vitest": "^1.0.0"
+      }
+    }
+    ```
+
+    ## TypeScript設定 (tsconfig.json)
+    ```json
+    {
+      "compilerOptions": {
+        "target": "ES2020",
+        "module": "ESNext",
+        "strict": true,
+        "jsx": "react-jsx",
+        "moduleResolution": "bundler"
+      },
+      "include": ["src"]
+    }
+    ```
+
+    ## CI/CD設定 (.github/workflows/ci.yml)
+    ```yaml
+    name: CI
+    on: [push, pull_request]
+    jobs:
+      build:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: actions/setup-node@v4
+          - run: npm ci
+          - run: npm run lint
+          - run: npm run test
+          - run: npm run build
+    ```
 
   default: |
     # {checkpoint_type}

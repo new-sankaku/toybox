@@ -102,9 +102,10 @@ def _initialize_file_manager(project_id:str,working_dir:str)->Optional["FileMana
   if not config.enabled:
    return None
   _file_manager_instance=FileManager(project_id,working_dir)
+  stats=_file_manager_instance.initialize()
   from .file_skills import FileSkillMixin
   FileSkillMixin.set_file_manager(_file_manager_instance)
-  get_logger().info(f"FileManager initialized for project {project_id}")
+  get_logger().info(f"FileManager initialized for project {project_id}: {stats}")
   return _file_manager_instance
  except Exception as e:
   get_logger().warning(f"Failed to initialize FileManager: {e}")
