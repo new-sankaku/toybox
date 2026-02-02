@@ -135,6 +135,7 @@ export interface SequenceParticipant{
  id:string
  label:string
  type:'external'|'leader'|'agent'|'api'|'worker'
+ role:string
 }
 
 export interface SequenceMessage{

@@ -45,13 +45,15 @@ function getDateKey(timestamp:string|null):string{
 interface CallEntry{
  request:SequenceMessage
  response:SequenceMessage|null
+ agentRole:string
  agentLabel:string
  dateKey:string
 }
 
 function buildCallEntries(
  messages:SequenceMessage[],
- labelMap:Map<string,string>
+ labelMap:Map<string,string>,
+ roleMap:Map<string,string>
 ):CallEntry[]{
  const responseMap=new Map<string,SequenceMessage>()
  for(const msg of messages){
@@ -65,8 +67,9 @@ function buildCallEntries(
   const response=msg.pairId?responseMap.get(msg.pairId):null
   const agentId=msg.from
   const agentLabel=labelMap.get(agentId)||agentId
+  const agentRole=roleMap.get(agentId)||''
   const dateKey=getDateKey(msg.timestamp)
-  entries.push({request:msg,response,agentLabel,dateKey})
+  entries.push({request:msg,response,agentRole,agentLabel,dateKey})
  }
  return entries
 }
@@ -108,7 +111,7 @@ function CallEntryRow({
  totalCalls:number
  onClick?:(msg:SequenceMessage)=>void
 }){
- const{request,response,agentLabel}=entry
+ const{request,response,agentRole,agentLabel}=entry
  const timeStr=formatTimeOnly(request.timestamp)
  const model=response?.model||request.model||'Unknown'
  const durationStr=formatDuration(response?.durationMs||null)
@@ -136,7 +139,9 @@ function CallEntryRow({
     <span className="text-nier-text-light">|</span>
     <span className="text-nier-text-main">LLM {model}</span>
     <span className="text-nier-text-light">|</span>
-    <span className={cn('text-nier-text-main',isError&&'text-nier-accent-red')}>{agentLabel}</span>
+    <span className={cn('text-nier-text-main',isError&&'text-nier-accent-red')}>
+     {agentRole}
+    </span>
    </div>
    <div className="flex items-center gap-2 text-[10px] font-mono text-nier-text-light mt-0.5">
     {durationStr&&<span>{durationStr}</span>}
@@ -169,6 +174,13 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
   }
   return m
  },[participants])
+ const roleMap=useMemo(()=>{
+  const m=new Map<string,string>()
+  for(const p of participants){
+   m.set(p.id,p.role)
+  }
+  return m
+ },[participants])
  const workerIds=useMemo(()=>{
   const s=new Set<string>()
   for(const p of participants){
@@ -176,7 +188,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
   }
   return s
  },[participants])
- const entries=useMemo(()=>buildCallEntries(messages,labelMap),[messages,labelMap])
+ const entries=useMemo(()=>buildCallEntries(messages,labelMap,roleMap),[messages,labelMap,roleMap])
  const dateGroups=useMemo(()=>groupByDate(entries,workerIds),[entries,workerIds])
  if(!messages.length){
   return(

@@ -1,7 +1,6 @@
 import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
-import{useUIConfigStore}from'@/stores/uiConfigStore'
 import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Zap}from'lucide-react'
 
 interface AgentCardProps{
@@ -98,9 +97,6 @@ export function AgentCard({
 }:AgentCardProps):JSX.Element{
  const status=statusConfig[agent.status]||statusConfig.pending
  const StatusIcon=status.icon
- const{getAgentRole,getRoleLabel}=useUIConfigStore()
- const role=getAgentRole(agent.type)
- const roleLabel=getRoleLabel(role)
  const isRetryable=agent.status==='failed'||agent.status==='interrupted'
 
  const getRuntime=()=>{
@@ -152,16 +148,12 @@ export function AgentCard({
 )}
    onClick={()=>onSelect(agent)}
   >
-   <div className="grid grid-cols-[4px_clamp(40px,3.5vw,56px)_2fr_3fr_clamp(100px,9vw,150px)_clamp(70px,7vw,110px)] items-center gap-x-[clamp(4px,0.5vw,8px)]">
+   <div className="grid grid-cols-[4px_2fr_3fr_clamp(100px,9vw,150px)_clamp(70px,7vw,110px)] items-center gap-x-[clamp(4px,0.5vw,8px)]">
     <div className={cn(
      'w-1 h-6 transition-opacity',
      status.color,
      status.pulse&&'animate-pulse'
 )}/>
-
-    <span className="text-[clamp(9px,0.65vw,11px)] text-nier-text-light whitespace-nowrap leading-none">
-     [{roleLabel}]
-    </span>
 
     <div className="flex items-center gap-1 min-w-0">
      <Cpu size={12} className="text-nier-text-light flex-shrink-0"/>

@@ -176,18 +176,13 @@ def seed_agent_traces(project_id:str="proj-001"):
   base_time=datetime.now()-timedelta(hours=2)
   traces_data=[
    {
-    "agent_id":"agent-proj-001-leader_concept",
-    "agent_type":"leader_concept",
+    "agent_id":"agent-proj-001-concept",
+    "agent_type":"concept",
     "tasks":["タスク分割","コンセプト概要の生成","ワールド設定の具体化","ゲームシステムの詳細化"]
    },
    {
-    "agent_id":"agent-proj-001-worker_concept",
-    "agent_type":"worker_concept",
-    "tasks":["コンセプトの戦闘システムを具体化","キャラクター設定の詳細化","ストーリーライン作成"]
-   },
-   {
-    "agent_id":"agent-proj-001-leader_scenario",
-    "agent_type":"leader_scenario",
+    "agent_id":"agent-proj-001-scenario",
+    "agent_type":"scenario",
     "tasks":["シナリオ構成の検討","メインストーリー作成","サブクエスト設計"]
    }
   ]

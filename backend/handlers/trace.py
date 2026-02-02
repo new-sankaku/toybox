@@ -61,8 +61,14 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  workers=data_store.get_workers_by_parent(agent_id)
  agent_type=agent["type"]
  display_name=agent.get("metadata",{}).get("displayName",agent_type)
- participants=[{"id":"external","label":"入力","type":"external"}]
- participants.append({"id":agent_id,"label":display_name,"type":"leader" if workers else"agent"})
+ participants=[{"id":"external","label":"入力","type":"external","role":""}]
+ has_parent=bool(agent.get("parentAgentId"))
+ has_workers=bool(workers)
+ if has_parent:
+  agent_role="Worker"
+ else:
+  agent_role="Leader"
+ participants.append({"id":agent_id,"label":display_name,"type":"leader" if has_workers else"agent","role":agent_role})
  api_models=set()
  for t in traces:
   if t.get("modelUsed"):
@@ -75,16 +81,16 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
   pid=f"api:{model}"
   service_label=_extract_service_name(model)
   api_participant_map[model]=pid
-  participants.append({"id":pid,"label":service_label,"type":"api"})
+  participants.append({"id":pid,"label":service_label,"type":"api","role":""})
  if not api_models:
-  participants.append({"id":"api:unknown","label":"AI API","type":"api"})
+  participants.append({"id":"api:unknown","label":"AI API","type":"api","role":""})
   api_participant_map["__default__"]="api:unknown"
  worker_map={}
  for idx,w in enumerate(workers):
   w_display=w.get("metadata",{}).get("displayName",w["type"])
   w_id=w["id"]
   worker_map[w_id]=w_id
-  participants.append({"id":w_id,"label":f"{w_display}","type":"worker"})
+  participants.append({"id":w_id,"label":f"{w_display}","type":"worker","role":"Worker"})
  def _trace_events(t,from_id,api_id,call_idx):
   trace_id=t.get("id","")
   pair_id=f"pair-{trace_id}" if trace_id else None
