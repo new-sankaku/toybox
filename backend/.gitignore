@@ -7,3 +7,5 @@ venv/
 reports/
 .pytest_cache/
 uploads/
+*.db-shm
+*.db-wal
