@@ -163,6 +163,38 @@ class FileManager:
             return {"success":True,"path":full_path,"replacements":result["count"]}
         except Exception as e:
             return {"success":False,"path":full_path,"error":str(e)}
+    async def delete_file(self,path:str,recursive:bool=False)->Dict[str,Any]:
+        import asyncio
+        import shutil
+        rel_path=self._to_rel_path(path)
+        full_path=self._to_full_path(path)
+        try:
+            if not os.path.exists(full_path):
+                return {"success":False,"path":full_path,"error":"File or directory not found"}
+            is_dir=os.path.isdir(full_path)
+            def delete_sync():
+                if is_dir:
+                    if recursive:
+                        shutil.rmtree(full_path)
+                    else:
+                        os.rmdir(full_path)
+                else:
+                    os.remove(full_path)
+            await asyncio.to_thread(delete_sync)
+            if self._config.enabled:
+                cache=self._get_cache()
+                if is_dir:
+                    cache.remove_dir(rel_path)
+                else:
+                    cache.remove_file(rel_path)
+                self._get_metadata_store().delete(full_path)
+            return {"success":True,"path":full_path,"type":"directory" if is_dir else "file"}
+        except OSError as e:
+            if is_dir and not recursive and "not empty" in str(e).lower():
+                return {"success":False,"path":full_path,"error":"Directory not empty. Use recursive=true to delete non-empty directories"}
+            return {"success":False,"path":full_path,"error":str(e)}
+        except Exception as e:
+            return {"success":False,"path":full_path,"error":str(e)}
     async def list_directory(self,path:str=".",pattern:str="*",recursive:bool=False,max_items:int=100)->Dict[str,Any]:
         rel_path=self._to_rel_path(path)
         full_path=self._to_full_path(path)

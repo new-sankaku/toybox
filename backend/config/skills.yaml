@@ -102,6 +102,24 @@ skills:
     restrictions:
       max_items: 500
 
+  file_delete:
+    enabled: true
+    description: "ファイルまたはディレクトリを削除します"
+    category: file
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - asset_worker
+      - asset_leader
+      - environment_setup_worker
+    restrictions:
+      require_approval: false
+      denied_paths:
+        - /etc
+        - /usr
+        - /bin
+        - /sbin
+
   bash_execute:
     enabled: true
     description: "Bashコマンドを実行します"
@@ -342,6 +360,7 @@ agent_skill_mapping:
     - file_read
     - file_write
     - file_edit
+    - file_delete
     - file_list
     - bash_execute
     - python_execute
@@ -358,6 +377,7 @@ agent_skill_mapping:
     - file_read
     - file_write
     - file_edit
+    - file_delete
     - file_list
     - project_analyze
     - code_lint
@@ -370,6 +390,7 @@ agent_skill_mapping:
     - file_read
     - file_write
     - file_edit
+    - file_delete
     - file_list
     - project_analyze
     - file_search
@@ -456,6 +477,7 @@ agent_skill_mapping:
     - file_read
     - file_write
     - file_edit
+    - file_delete
     - file_list
     - python_execute
     - project_analyze
@@ -528,6 +550,7 @@ agent_skill_mapping:
     - file_read
     - file_write
     - file_edit
+    - file_delete
     - file_list
     - bash_execute
     - project_analyze
