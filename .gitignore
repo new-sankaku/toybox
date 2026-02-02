@@ -74,3 +74,5 @@ langgraph-studio/src/types/api-generated.ts
 testdata/
 
 .claude/tool-history.jsonl
+tool-history.csv
+=*
