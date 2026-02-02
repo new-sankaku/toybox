@@ -9,7 +9,7 @@ sys.path.insert(0,str(Path(__file__).parent.parent.parent.parent))
 
 from skills.base import Skill,SkillResult,SkillContext,SkillCategory
 from skills.registry import SkillRegistry,get_skill_registry
-from skills.file_skills import FileReadSkill,FileWriteSkill,FileListSkill
+from skills.file_skills import FileReadSkill,FileWriteSkill,FileEditSkill,FileListSkill,FileDeleteSkill
 from skills.bash_skill import BashExecuteSkill
 from skills.python_skill import PythonExecuteSkill
 from skills.project_skill import ProjectAnalyzeSkill
@@ -79,6 +79,147 @@ class TestFileWriteSkill:
   assert result.success
   with open(os.path.join(temp_dir,"subdir","output.txt")) as f:
    assert f.read()=="Nested content"
+
+
+class TestFileEditSkill:
+ @pytest.mark.asyncio
+ async def test_edit_replace_single(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("Hello World")
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="test.txt",old_string="World",new_string="Python")
+  assert result.success
+  with open(test_file) as f:
+   assert f.read()=="Hello Python"
+
+ @pytest.mark.asyncio
+ async def test_edit_replace_all(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("foo bar foo baz foo")
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="test.txt",old_string="foo",new_string="qux",replace_all=True)
+  assert result.success
+  assert result.metadata["replacements"]==3
+  with open(test_file) as f:
+   assert f.read()=="qux bar qux baz qux"
+
+ @pytest.mark.asyncio
+ async def test_edit_multiple_without_replace_all_fails(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("foo bar foo")
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="test.txt",old_string="foo",new_string="qux")
+  assert not result.success
+  assert"2 times" in result.error
+
+ @pytest.mark.asyncio
+ async def test_edit_not_found(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("Hello World")
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="test.txt",old_string="NotExist",new_string="Replace")
+  assert not result.success
+  assert"not found" in result.error.lower()
+
+ @pytest.mark.asyncio
+ async def test_edit_nonexistent_file(self,skill_context):
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="nonexistent.txt",old_string="a",new_string="b")
+  assert not result.success
+  assert"not found" in result.error.lower()
+
+ @pytest.mark.asyncio
+ async def test_edit_same_string_error(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("Hello")
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="test.txt",old_string="Hello",new_string="Hello")
+  assert not result.success
+  assert"different" in result.error.lower()
+
+ @pytest.mark.asyncio
+ async def test_edit_outside_sandbox_blocked(self,skill_context):
+  skill=FileEditSkill()
+  result=await skill.execute(skill_context,path="/etc/passwd",old_string="a",new_string="b")
+  assert not result.success
+  assert"denied" in result.error.lower()
+
+
+class TestFileDeleteSkill:
+ @pytest.mark.asyncio
+ async def test_delete_file(self,temp_dir,skill_context):
+  test_file=os.path.join(temp_dir,"test.txt")
+  with open(test_file,"w") as f:
+   f.write("Hello")
+  assert os.path.exists(test_file)
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="test.txt")
+  assert result.success
+  assert result.metadata["type"]=="file"
+  assert not os.path.exists(test_file)
+
+ @pytest.mark.asyncio
+ async def test_delete_empty_directory(self,temp_dir,skill_context):
+  test_dir=os.path.join(temp_dir,"subdir")
+  os.makedirs(test_dir)
+  assert os.path.exists(test_dir)
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="subdir")
+  assert result.success
+  assert result.metadata["type"]=="directory"
+  assert not os.path.exists(test_dir)
+
+ @pytest.mark.asyncio
+ async def test_delete_nonempty_directory_without_recursive_fails(self,temp_dir,skill_context):
+  test_dir=os.path.join(temp_dir,"subdir")
+  os.makedirs(test_dir)
+  with open(os.path.join(test_dir,"file.txt"),"w") as f:
+   f.write("content")
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="subdir",recursive=False)
+  assert not result.success
+  assert"recursive" in result.error.lower() or "not empty" in result.error.lower()
+  assert os.path.exists(test_dir)
+
+ @pytest.mark.asyncio
+ async def test_delete_nonempty_directory_with_recursive(self,temp_dir,skill_context):
+  test_dir=os.path.join(temp_dir,"subdir")
+  nested_dir=os.path.join(test_dir,"nested")
+  os.makedirs(nested_dir)
+  with open(os.path.join(test_dir,"file1.txt"),"w") as f:
+   f.write("content1")
+  with open(os.path.join(nested_dir,"file2.txt"),"w") as f:
+   f.write("content2")
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="subdir",recursive=True)
+  assert result.success
+  assert not os.path.exists(test_dir)
+
+ @pytest.mark.asyncio
+ async def test_delete_nonexistent_file(self,skill_context):
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="nonexistent.txt")
+  assert not result.success
+  assert"not found" in result.error.lower()
+
+ @pytest.mark.asyncio
+ async def test_delete_outside_sandbox_blocked(self,skill_context):
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context,path="/etc/passwd")
+  assert not result.success
+  assert"denied" in result.error.lower()
+
+ @pytest.mark.asyncio
+ async def test_delete_missing_path_parameter(self,skill_context):
+  skill=FileDeleteSkill()
+  result=await skill.execute(skill_context)
+  assert not result.success
+  assert"required" in result.error.lower()
 
 
 class TestFileListSkill:
