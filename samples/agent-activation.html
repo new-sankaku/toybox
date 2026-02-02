@@ -4,335 +4,503 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Agent Activation Sequence</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg-main: #E8E4D4;
+      --bg-panel: #DAD5C3;
+      --bg-selected: #CCC7B5;
+      --bg-header: #57534A;
+      --text-main: #454138;
+      --text-light: #5A5548;
+      --text-header: #E8E4D4;
+      --accent-green: #7AAA7A;
+      --accent-orange: #C4956C;
+      --border-light: rgba(69, 65, 56, 0.2);
+      --border-dark: rgba(69, 65, 56, 0.4);
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
-      background: #1a1a1a;
-      color: #c0b8a0;
-      font-family: 'Courier New', monospace;
-      overflow: hidden;
+      font-family: 'Noto Sans JP', sans-serif;
+      background: var(--bg-main);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
     }
 
-    #app {
-      width: 100vw;
-      height: 100vh;
-      position: relative;
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 40px 20px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
     }
 
-    canvas {
-      position: absolute;
-      top: 0;
-      left: 0;
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-dark);
+      margin-bottom: 32px;
     }
 
-    .ui-layer {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
+    .header-title {
+      font-size: 14px;
+      font-weight: 400;
+      letter-spacing: 0.15em;
     }
 
-    .ui-layer > * {
-      pointer-events: auto;
+    .phase-indicator {
+      display: flex;
+      gap: 4px;
+      margin-left: auto;
     }
 
-    .terminal {
-      position: absolute;
-      top: 40px;
-      left: 40px;
-      width: 400px;
-      font-size: 13px;
-      line-height: 1.6;
+    .phase-dot {
+      width: 8px;
+      height: 8px;
+      border: 1px solid var(--border-dark);
+      transition: all 0.3s;
     }
 
-    .terminal-line {
-      opacity: 0;
-      transform: translateX(-10px);
+    .phase-dot.active {
+      background: var(--text-main);
     }
 
-    .terminal-line.visible {
-      opacity: 1;
-      transform: translateX(0);
-      transition: opacity 0.3s, transform 0.3s;
+    .phase-dot.completed {
+      background: var(--accent-green);
+      border-color: var(--accent-green);
     }
 
-    .terminal-line.processing::after {
-      content: '█';
-      animation: cursor-blink 0.5s step-end infinite;
+    .main-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
     }
 
-    @keyframes cursor-blink {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0; }
+    .section {
+      display: none;
+      animation: section-in 0.4s ease-out;
     }
 
-    .prompt { color: #7a9a6a; }
-    .data { color: #a0a0a0; }
-    .success { color: #8ab87a; }
-    .highlight { color: #d4c4a0; }
-
-    .input-section {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 500px;
-      opacity: 0;
-      pointer-events: none;
+    .section.active {
+      display: block;
     }
 
-    .input-section.active {
-      opacity: 1;
-      pointer-events: auto;
+    @keyframes section-in {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.2em;
+      color: var(--text-light);
+      margin-bottom: 8px;
+    }
+
+    .section-title {
+      font-size: 20px;
+      font-weight: 400;
+      letter-spacing: 0.1em;
+      margin-bottom: 32px;
+    }
+
+    .input-group {
+      margin-bottom: 24px;
     }
 
     .input-label {
-      font-size: 11px;
-      letter-spacing: 0.2em;
-      margin-bottom: 12px;
-      color: #888;
+      display: block;
+      font-size: 12px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+      margin-bottom: 8px;
     }
 
     .input-field {
       width: 100%;
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid #444;
-      color: #d4c4a0;
+      padding: 16px;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dark);
       font-family: inherit;
-      font-size: 18px;
-      padding: 8px 0;
+      font-size: 16px;
+      color: var(--text-main);
+      letter-spacing: 0.05em;
       outline: none;
+      transition: border-color 0.2s;
     }
 
     .input-field:focus {
-      border-bottom-color: #888;
+      border-color: var(--text-main);
     }
 
-    .input-hint {
-      margin-top: 16px;
-      font-size: 11px;
-      color: #555;
-      letter-spacing: 0.1em;
+    .input-field::placeholder {
+      color: var(--text-light);
+      opacity: 0.6;
     }
 
-    .agent-display {
-      position: absolute;
-      bottom: 100px;
-      left: 0;
-      right: 0;
+    textarea.input-field {
+      resize: none;
+      min-height: 120px;
+    }
+
+    .btn {
+      padding: 14px 32px;
+      background: var(--bg-header);
+      color: var(--text-header);
+      border: none;
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover {
+      background: var(--text-main);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-row {
       display: flex;
-      justify-content: center;
-      gap: 60px;
+      gap: 12px;
+      margin-top: 32px;
     }
 
-    .agent-slot {
-      width: 80px;
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+
+    .agent-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      padding: 20px 16px;
       text-align: center;
-      opacity: 0.2;
+      transition: all 0.3s;
     }
 
-    .agent-slot.standby {
+    .agent-card.standby {
       opacity: 0.5;
     }
 
-    .agent-slot.active {
-      opacity: 1;
+    .agent-card.activating {
+      border-color: var(--accent-orange);
     }
 
-    .agent-avatar {
-      width: 64px;
-      height: 64px;
-      margin: 0 auto 8px;
+    .agent-card.active {
+      border-color: var(--accent-green);
+      background: var(--bg-selected);
+    }
+
+    .agent-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 12px;
       position: relative;
     }
 
-    .agent-name {
-      font-size: 10px;
-      letter-spacing: 0.15em;
-      color: #888;
+    .agent-icon svg {
+      width: 100%;
+      height: 100%;
+      stroke: var(--text-main);
+      stroke-width: 1.5;
+      fill: none;
     }
 
-    .agent-slot.active .agent-name {
-      color: #c0b8a0;
+    .agent-card.standby .agent-icon svg {
+      stroke: var(--text-light);
+    }
+
+    .agent-name {
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
     }
 
     .agent-status {
-      font-size: 9px;
-      margin-top: 4px;
+      font-size: 10px;
       letter-spacing: 0.1em;
+      color: var(--text-light);
     }
 
-    .agent-slot.standby .agent-status { color: #666; }
-    .agent-slot.active .agent-status { color: #8ab87a; }
-
-    .status-bar {
-      position: absolute;
-      bottom: 40px;
-      left: 40px;
-      right: 40px;
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: #555;
-      letter-spacing: 0.1em;
+    .agent-card.active .agent-status {
+      color: var(--accent-green);
     }
 
-    .launch-prompt {
-      position: absolute;
-      bottom: 200px;
-      left: 50%;
-      transform: translateX(-50%);
-      text-align: center;
-      opacity: 0;
-      pointer-events: none;
+    .agent-card.activating .agent-status {
+      color: var(--accent-orange);
     }
 
-    .launch-prompt.active {
-      opacity: 1;
-      pointer-events: auto;
-    }
-
-    .launch-text {
+    .log-area {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      padding: 16px;
       font-size: 12px;
-      letter-spacing: 0.2em;
-      color: #888;
-      margin-bottom: 20px;
+      line-height: 1.8;
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 24px;
     }
 
-    .launch-btn {
-      background: transparent;
-      border: 1px solid #555;
-      color: #c0b8a0;
-      padding: 16px 48px;
-      font-family: inherit;
-      font-size: 14px;
-      letter-spacing: 0.2em;
-      cursor: pointer;
+    .log-line {
+      opacity: 0;
+      transform: translateX(-5px);
       transition: all 0.2s;
     }
 
-    .launch-btn:hover {
-      border-color: #888;
-      background: rgba(255,255,255,0.05);
+    .log-line.visible {
+      opacity: 1;
+      transform: translateX(0);
     }
 
-    .countdown {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
+    .log-prompt { color: var(--accent-green); }
+    .log-info { color: var(--text-light); }
+
+    .summary-section {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-light);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .summary-row {
+      display: flex;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .summary-row:last-child {
+      border-bottom: none;
+    }
+
+    .summary-label {
+      width: 140px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--text-light);
+    }
+
+    .summary-value {
+      flex: 1;
+      font-size: 13px;
+    }
+
+    .countdown-display {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-main);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 100;
+    }
+
+    .countdown-display.active {
+      display: flex;
+    }
+
+    .countdown-number {
       font-size: 120px;
-      font-weight: 100;
-      color: #c0b8a0;
-      opacity: 0;
-      pointer-events: none;
+      font-weight: 300;
+      letter-spacing: 0.1em;
+      color: var(--text-main);
     }
 
-    .countdown.active {
-      opacity: 1;
+    .countdown-label {
+      font-size: 12px;
+      letter-spacing: 0.2em;
+      color: var(--text-light);
+      margin-top: 16px;
     }
 
-    .mission-ready {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      text-align: center;
-      opacity: 0;
+    .complete-display {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-main);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      z-index: 100;
     }
 
-    .mission-ready.active {
-      opacity: 1;
+    .complete-display.active {
+      display: flex;
     }
 
-    .mission-ready-title {
-      font-size: 32px;
-      letter-spacing: 0.3em;
+    .complete-title {
+      font-size: 28px;
+      font-weight: 400;
+      letter-spacing: 0.2em;
       margin-bottom: 16px;
     }
 
-    .mission-ready-sub {
+    .complete-sub {
       font-size: 12px;
-      letter-spacing: 0.2em;
-      color: #888;
+      letter-spacing: 0.15em;
+      color: var(--text-light);
+    }
+
+    .footer {
+      margin-top: auto;
+      padding-top: 24px;
+      border-top: 1px solid var(--border-light);
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-light);
+      letter-spacing: 0.1em;
     }
   </style>
 </head>
 <body>
-  <div id="app">
-    <canvas id="bgCanvas"></canvas>
-    <canvas id="agentCanvas"></canvas>
-
-    <div class="ui-layer">
-      <div class="terminal" id="terminal"></div>
-
-      <div class="input-section" id="inputSection">
-        <div class="input-label">PROJECT DESIGNATION</div>
-        <input type="text" class="input-field" id="projectInput" placeholder="" autocomplete="off">
-        <div class="input-hint">ENTER TO CONFIRM</div>
+  <div class="container">
+    <div class="header">
+      <span>◇</span>
+      <span class="header-title">PROJECT INITIALIZATION</span>
+      <div class="phase-indicator">
+        <div class="phase-dot active" data-phase="1"></div>
+        <div class="phase-dot" data-phase="2"></div>
+        <div class="phase-dot" data-phase="3"></div>
+        <div class="phase-dot" data-phase="4"></div>
       </div>
+    </div>
 
-      <div class="agent-display" id="agentDisplay">
-        <div class="agent-slot" data-agent="concept">
-          <div class="agent-avatar" id="avatar-concept"></div>
-          <div class="agent-name">CONCEPT</div>
-          <div class="agent-status">OFFLINE</div>
+    <div class="main-content">
+      <div class="section active" id="section1">
+        <div class="section-label">PHASE 1</div>
+        <div class="section-title">Project Information</div>
+
+        <div class="input-group">
+          <label class="input-label">PROJECT NAME</label>
+          <input type="text" class="input-field" id="inputName" placeholder="Enter project name">
         </div>
-        <div class="agent-slot" data-agent="scenario">
-          <div class="agent-avatar" id="avatar-scenario"></div>
-          <div class="agent-name">SCENARIO</div>
-          <div class="agent-status">OFFLINE</div>
+
+        <div class="input-group">
+          <label class="input-label">PROJECT CONCEPT</label>
+          <textarea class="input-field" id="inputConcept" placeholder="Describe your game idea..."></textarea>
         </div>
-        <div class="agent-slot" data-agent="character">
-          <div class="agent-avatar" id="avatar-character"></div>
-          <div class="agent-name">CHARACTER</div>
-          <div class="agent-status">OFFLINE</div>
-        </div>
-        <div class="agent-slot" data-agent="code">
-          <div class="agent-avatar" id="avatar-code"></div>
-          <div class="agent-name">CODE</div>
-          <div class="agent-status">OFFLINE</div>
+
+        <div class="btn-row">
+          <button class="btn" id="btn1">NEXT</button>
         </div>
       </div>
 
-      <div class="launch-prompt" id="launchPrompt">
-        <div class="launch-text">ALL AGENTS STANDING BY</div>
-        <button class="launch-btn" id="launchBtn">INITIALIZE MISSION</button>
+      <div class="section" id="section2">
+        <div class="section-label">PHASE 2</div>
+        <div class="section-title">Agent Activation</div>
+
+        <div class="agent-grid" id="agentGrid">
+          <div class="agent-card standby" data-agent="concept">
+            <div class="agent-icon">
+              <svg viewBox="0 0 48 48"><circle cx="24" cy="16" r="8"/><path d="M12 40 C12 28 36 28 36 40"/></svg>
+            </div>
+            <div class="agent-name">CONCEPT</div>
+            <div class="agent-status">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="scenario">
+            <div class="agent-icon">
+              <svg viewBox="0 0 48 48"><rect x="10" y="8" width="28" height="32" rx="2"/><line x1="16" y1="16" x2="32" y2="16"/><line x1="16" y1="24" x2="32" y2="24"/><line x1="16" y1="32" x2="26" y2="32"/></svg>
+            </div>
+            <div class="agent-name">SCENARIO</div>
+            <div class="agent-status">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="character">
+            <div class="agent-icon">
+              <svg viewBox="0 0 48 48"><circle cx="24" cy="14" r="6"/><path d="M16 44 V28 C16 24 20 22 24 22 C28 22 32 24 32 28 V44"/><circle cx="16" cy="32" r="4"/><circle cx="32" cy="32" r="4"/></svg>
+            </div>
+            <div class="agent-name">CHARACTER</div>
+            <div class="agent-status">STANDBY</div>
+          </div>
+          <div class="agent-card standby" data-agent="code">
+            <div class="agent-icon">
+              <svg viewBox="0 0 48 48"><polyline points="16,16 8,24 16,32"/><polyline points="32,16 40,24 32,32"/><line x1="28" y1="12" x2="20" y2="36"/></svg>
+            </div>
+            <div class="agent-name">CODE</div>
+            <div class="agent-status">STANDBY</div>
+          </div>
+        </div>
+
+        <div class="log-area" id="logArea"></div>
+
+        <div class="btn-row">
+          <button class="btn" id="btn2" disabled>ACTIVATE ALL</button>
+        </div>
       </div>
 
-      <div class="countdown" id="countdown"></div>
+      <div class="section" id="section3">
+        <div class="section-label">PHASE 3</div>
+        <div class="section-title">Mission Briefing</div>
 
-      <div class="mission-ready" id="missionReady">
-        <div class="mission-ready-title">MISSION READY</div>
-        <div class="mission-ready-sub">ALL SYSTEMS OPERATIONAL</div>
-      </div>
+        <div class="summary-section">
+          <div class="summary-row">
+            <div class="summary-label">PROJECT NAME</div>
+            <div class="summary-value" id="summaryName">-</div>
+          </div>
+          <div class="summary-row">
+            <div class="summary-label">CONCEPT</div>
+            <div class="summary-value" id="summaryConcept">-</div>
+          </div>
+          <div class="summary-row">
+            <div class="summary-label">ACTIVE AGENTS</div>
+            <div class="summary-value" id="summaryAgents">-</div>
+          </div>
+        </div>
 
-      <div class="status-bar">
-        <span id="statusLeft">SYSTEM STANDBY</span>
-        <span id="statusRight"></span>
+        <div class="btn-row">
+          <button class="btn" id="btn3">LAUNCH MISSION</button>
+        </div>
       </div>
+    </div>
+
+    <div class="footer">
+      <span id="footerStatus">AWAITING INPUT</span>
+      <span id="footerProject">-</span>
     </div>
   </div>
 
+  <div class="countdown-display" id="countdownDisplay">
+    <div class="countdown-number" id="countdownNumber">3</div>
+    <div class="countdown-label">INITIALIZING</div>
+  </div>
+
+  <div class="complete-display" id="completeDisplay">
+    <div class="complete-title">MISSION READY</div>
+    <div class="complete-sub">ALL SYSTEMS OPERATIONAL</div>
+  </div>
+
   <script>
-    const AudioSystem = {
+    const Audio = {
       ctx: null,
-
       init() {
-        this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      },
-
-      resume() {
-        if (this.ctx && this.ctx.state === 'suspended') {
+        if (!this.ctx) {
+          this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (this.ctx.state === 'suspended') {
           this.ctx.resume();
         }
       },
-
-      playTone(freq, duration, type = 'sine', volume = 0.1) {
+      play(freq, dur, type = 'sine', vol = 0.1) {
         if (!this.ctx) return;
         const osc = this.ctx.createOscillator();
         const gain = this.ctx.createGain();
@@ -340,363 +508,155 @@
         gain.connect(this.ctx.destination);
         osc.frequency.value = freq;
         osc.type = type;
-        gain.gain.setValueAtTime(volume, this.ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+        gain.gain.setValueAtTime(vol, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
         osc.start();
-        osc.stop(this.ctx.currentTime + duration);
+        osc.stop(this.ctx.currentTime + dur);
       },
-
-      keyPress() {
-        this.playTone(800, 0.05, 'square', 0.03);
-      },
-
       confirm() {
-        this.playTone(440, 0.1, 'sine', 0.08);
-        setTimeout(() => this.playTone(554, 0.1, 'sine', 0.08), 80);
-        setTimeout(() => this.playTone(659, 0.15, 'sine', 0.1), 160);
+        this.play(523, 0.1, 'sine', 0.08);
+        setTimeout(() => this.play(659, 0.15, 'sine', 0.1), 100);
       },
-
-      agentActivate() {
-        this.playTone(220, 0.3, 'sawtooth', 0.05);
-        setTimeout(() => this.playTone(330, 0.2, 'sine', 0.08), 100);
-        setTimeout(() => this.playTone(440, 0.3, 'sine', 0.1), 200);
+      activate() {
+        this.play(330, 0.15, 'sine', 0.06);
+        setTimeout(() => this.play(440, 0.2, 'sine', 0.08), 120);
       },
-
-      countdown(num) {
-        const freq = num === 0 ? 880 : 440;
-        const dur = num === 0 ? 0.5 : 0.2;
-        this.playTone(freq, dur, 'sine', 0.15);
-        if (num === 0) {
-          setTimeout(() => this.playTone(1108, 0.4, 'sine', 0.12), 150);
-          setTimeout(() => this.playTone(1318, 0.5, 'sine', 0.1), 300);
-        }
-      },
-
-      ambientHum() {
-        if (!this.ctx) return;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        const filter = this.ctx.createBiquadFilter();
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.frequency.value = 60;
-        osc.type = 'sawtooth';
-        filter.type = 'lowpass';
-        filter.frequency.value = 200;
-        gain.gain.value = 0.02;
-        osc.start();
-        return { osc, gain };
+      countdown(n) {
+        this.play(n === 0 ? 880 : 440, n === 0 ? 0.4 : 0.15, 'sine', 0.12);
       }
     };
 
-    const bgCanvas = document.getElementById('bgCanvas');
-    const bgCtx = bgCanvas.getContext('2d');
-    const agentCanvas = document.getElementById('agentCanvas');
-    const agentCtx = agentCanvas.getContext('2d');
-
-    let width, height;
-    function resize() {
-      width = window.innerWidth;
-      height = window.innerHeight;
-      bgCanvas.width = width;
-      bgCanvas.height = height;
-      agentCanvas.width = width;
-      agentCanvas.height = height;
-    }
-    resize();
-    window.addEventListener('resize', resize);
-
-    const gridLines = [];
-    for (let i = 0; i < 50; i++) {
-      gridLines.push({
-        y: Math.random() * height,
-        speed: 0.2 + Math.random() * 0.3,
-        alpha: 0.02 + Math.random() * 0.03
-      });
-    }
-
-    function drawBackground(time) {
-      bgCtx.fillStyle = '#1a1a1a';
-      bgCtx.fillRect(0, 0, width, height);
-
-      gridLines.forEach(line => {
-        line.y += line.speed;
-        if (line.y > height) line.y = 0;
-        bgCtx.strokeStyle = `rgba(100, 95, 80, ${line.alpha})`;
-        bgCtx.beginPath();
-        bgCtx.moveTo(0, line.y);
-        bgCtx.lineTo(width, line.y);
-        bgCtx.stroke();
-      });
-
-      const scanY = (time * 0.05) % height;
-      bgCtx.fillStyle = 'rgba(192, 184, 160, 0.02)';
-      bgCtx.fillRect(0, scanY, width, 2);
-    }
-
-    const agents = {
-      concept: { x: 0, y: 0, state: 'offline', breathPhase: 0, eyeBlink: 0 },
-      scenario: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI * 0.5, eyeBlink: 0 },
-      character: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI, eyeBlink: 0 },
-      code: { x: 0, y: 0, state: 'offline', breathPhase: Math.PI * 1.5, eyeBlink: 0 }
+    const state = {
+      phase: 1,
+      name: '',
+      concept: '',
+      agents: ['concept', 'scenario', 'character', 'code']
     };
 
-    function updateAgentPositions() {
-      const slots = document.querySelectorAll('.agent-slot');
-      slots.forEach(slot => {
-        const name = slot.dataset.agent;
-        const avatar = slot.querySelector('.agent-avatar');
-        const rect = avatar.getBoundingClientRect();
-        agents[name].x = rect.left + rect.width / 2;
-        agents[name].y = rect.top + rect.height / 2;
+    const $ = id => document.getElementById(id);
+
+    function updatePhase(phase) {
+      state.phase = phase;
+      document.querySelectorAll('.phase-dot').forEach((dot, i) => {
+        dot.classList.remove('active', 'completed');
+        if (i + 1 < phase) dot.classList.add('completed');
+        if (i + 1 === phase) dot.classList.add('active');
+      });
+      document.querySelectorAll('.section').forEach((sec, i) => {
+        sec.classList.toggle('active', i + 1 === phase);
       });
     }
 
-    function drawAgent(agent, name, time) {
-      const { x, y, state, breathPhase } = agent;
-      if (state === 'offline') return;
+    function addLog(text, type = 'info') {
+      const log = $('logArea');
+      const line = document.createElement('div');
+      line.className = 'log-line log-' + type;
+      line.textContent = text;
+      log.appendChild(line);
+      setTimeout(() => line.classList.add('visible'), 10);
+      log.scrollTop = log.scrollHeight;
+    }
 
-      const breathOffset = Math.sin(time * 0.003 + breathPhase) * 2;
-      const centerY = y + breathOffset;
+    function updateAgent(name, status) {
+      const card = document.querySelector(`[data-agent="${name}"]`);
+      const statusEl = card.querySelector('.agent-status');
+      card.classList.remove('standby', 'activating', 'active');
+      card.classList.add(status);
+      const labels = { standby: 'STANDBY', activating: 'ACTIVATING...', active: 'ONLINE' };
+      statusEl.textContent = labels[status];
+    }
 
-      agentCtx.save();
-      agentCtx.translate(x, centerY);
+    async function activateAgents() {
+      $('btn2').disabled = true;
+      $('footerStatus').textContent = 'ACTIVATING AGENTS';
 
-      if (state === 'activating') {
-        const flicker = Math.random() > 0.1 ? 1 : 0.3;
-        agentCtx.globalAlpha = flicker;
+      for (const agent of state.agents) {
+        updateAgent(agent, 'activating');
+        addLog(`> Initializing ${agent.toUpperCase()} agent...`, 'prompt');
+        Audio.activate();
+
+        await new Promise(r => setTimeout(r, 600 + Math.random() * 400));
+
+        updateAgent(agent, 'active');
+        addLog(`  ${agent.toUpperCase()} agent online`, 'info');
+
+        await new Promise(r => setTimeout(r, 300));
       }
 
-      const baseColor = state === 'active' ? '#c0b8a0' : '#666';
-
-      agentCtx.strokeStyle = baseColor;
-      agentCtx.lineWidth = 1.5;
-      agentCtx.beginPath();
-      agentCtx.arc(0, -8, 12, 0, Math.PI * 2);
-      agentCtx.stroke();
-
-      agentCtx.beginPath();
-      agentCtx.moveTo(0, 4);
-      agentCtx.lineTo(0, 24);
-      agentCtx.moveTo(-12, 12);
-      agentCtx.lineTo(12, 12);
-      agentCtx.moveTo(0, 24);
-      agentCtx.lineTo(-8, 36);
-      agentCtx.moveTo(0, 24);
-      agentCtx.lineTo(8, 36);
-      agentCtx.stroke();
-
-      if (state === 'active') {
-        agent.eyeBlink -= 1;
-        if (agent.eyeBlink <= 0 && Math.random() < 0.005) {
-          agent.eyeBlink = 10;
-        }
-
-        if (agent.eyeBlink <= 0) {
-          agentCtx.fillStyle = baseColor;
-          agentCtx.beginPath();
-          agentCtx.arc(-4, -10, 2, 0, Math.PI * 2);
-          agentCtx.arc(4, -10, 2, 0, Math.PI * 2);
-          agentCtx.fill();
-        }
-      }
-
-      agentCtx.restore();
-    }
-
-    function drawAgents(time) {
-      agentCtx.clearRect(0, 0, width, height);
-      updateAgentPositions();
-      Object.entries(agents).forEach(([name, agent]) => {
-        drawAgent(agent, name, time);
-      });
-    }
-
-    let animationId;
-    function animate(time) {
-      drawBackground(time);
-      drawAgents(time);
-      animationId = requestAnimationFrame(animate);
-    }
-
-    const terminal = document.getElementById('terminal');
-    const terminalLines = [];
-
-    function addTerminalLine(text, className = '', processing = false) {
-      return new Promise(resolve => {
-        const line = document.createElement('div');
-        line.className = 'terminal-line' + (className ? ' ' + className : '');
-        if (processing) line.classList.add('processing');
-        line.innerHTML = text;
-        terminal.appendChild(line);
-        terminalLines.push(line);
-
-        setTimeout(() => {
-          line.classList.add('visible');
-          if (processing) {
-            setTimeout(() => {
-              line.classList.remove('processing');
-              resolve();
-            }, 500 + Math.random() * 500);
-          } else {
-            resolve();
-          }
-        }, 50);
-      });
-    }
-
-    function clearTerminal() {
-      terminal.innerHTML = '';
-      terminalLines.length = 0;
-    }
-
-    function updateAgentSlot(name, state) {
-      const slot = document.querySelector(`[data-agent="${name}"]`);
-      const status = slot.querySelector('.agent-status');
-
-      slot.classList.remove('standby', 'active');
-      if (state !== 'offline') slot.classList.add(state);
-
-      agents[name].state = state;
-
-      const statusText = {
-        offline: 'OFFLINE',
-        standby: 'STANDBY',
-        activating: 'ACTIVATING',
-        active: 'ONLINE'
-      };
-      status.textContent = statusText[state] || state.toUpperCase();
-    }
-
-    async function activateAgent(name) {
-      updateAgentSlot(name, 'activating');
-      AudioSystem.agentActivate();
-
-      await addTerminalLine(`<span class="prompt">></span> Initializing ${name.toUpperCase()} agent...`, '', true);
-
-      await new Promise(r => setTimeout(r, 300));
-
-      updateAgentSlot(name, 'active');
-      await addTerminalLine(`<span class="success">[OK]</span> ${name.toUpperCase()} agent online`);
-    }
-
-    const inputSection = document.getElementById('inputSection');
-    const projectInput = document.getElementById('projectInput');
-    const launchPrompt = document.getElementById('launchPrompt');
-    const launchBtn = document.getElementById('launchBtn');
-    const countdown = document.getElementById('countdown');
-    const missionReady = document.getElementById('missionReady');
-    const statusLeft = document.getElementById('statusLeft');
-    const statusRight = document.getElementById('statusRight');
-
-    let projectName = '';
-    let state = 'init';
-
-    async function runSequence() {
-      AudioSystem.init();
+      addLog('> All agents activated', 'prompt');
+      $('footerStatus').textContent = 'AGENTS READY';
 
       await new Promise(r => setTimeout(r, 500));
+      Audio.confirm();
+      updatePhase(3);
 
-      await addTerminalLine('<span class="prompt">></span> System initialization...');
-      await new Promise(r => setTimeout(r, 300));
-      await addTerminalLine('<span class="success">[OK]</span> Core systems ready');
-      await addTerminalLine('<span class="prompt">></span> Awaiting project designation...');
-
-      statusLeft.textContent = 'AWAITING INPUT';
-
-      inputSection.classList.add('active');
-      projectInput.focus();
-      state = 'input';
+      $('summaryName').textContent = state.name;
+      $('summaryConcept').textContent = state.concept;
+      $('summaryAgents').textContent = state.agents.map(a => a.toUpperCase()).join(', ');
     }
 
-    projectInput.addEventListener('keydown', (e) => {
-      AudioSystem.resume();
-      if (e.key !== 'Enter') {
-        AudioSystem.keyPress();
-      }
-    });
+    async function launchMission() {
+      $('btn3').disabled = true;
+      $('footerStatus').textContent = 'LAUNCHING';
 
-    projectInput.addEventListener('keyup', async (e) => {
-      if (e.key === 'Enter' && state === 'input' && projectInput.value.trim()) {
-        projectName = projectInput.value.trim();
-        state = 'activating';
+      const cd = $('countdownDisplay');
+      const num = $('countdownNumber');
 
-        AudioSystem.confirm();
-
-        inputSection.classList.remove('active');
-
-        await addTerminalLine(`<span class="highlight">PROJECT: ${projectName}</span>`);
-        await addTerminalLine('<span class="prompt">></span> Project registered');
-        await new Promise(r => setTimeout(r, 500));
-
-        statusLeft.textContent = 'ACTIVATING AGENTS';
-        statusRight.textContent = `PROJECT: ${projectName}`;
-
-        await addTerminalLine('<span class="prompt">></span> Beginning agent activation sequence...');
-        await new Promise(r => setTimeout(r, 500));
-
-        Object.keys(agents).forEach(name => updateAgentSlot(name, 'standby'));
-        await new Promise(r => setTimeout(r, 800));
-
-        for (const name of Object.keys(agents)) {
-          await activateAgent(name);
-          await new Promise(r => setTimeout(r, 400));
-        }
-
-        await new Promise(r => setTimeout(r, 500));
-        await addTerminalLine('<span class="success">[COMPLETE]</span> All agents activated');
-
-        statusLeft.textContent = 'READY FOR LAUNCH';
-
-        launchPrompt.classList.add('active');
-        state = 'ready';
-      }
-    });
-
-    launchBtn.addEventListener('click', async () => {
-      if (state !== 'ready') return;
-      state = 'launching';
-
-      AudioSystem.resume();
-      launchPrompt.classList.remove('active');
-      clearTerminal();
-
-      statusLeft.textContent = 'INITIALIZING MISSION';
+      cd.classList.add('active');
 
       for (let i = 3; i >= 0; i--) {
-        countdown.textContent = i === 0 ? 'GO' : i;
-        countdown.classList.add('active');
-        AudioSystem.countdown(i);
-
-        await new Promise(r => setTimeout(r, i === 0 ? 500 : 800));
-
-        if (i > 0) {
-          countdown.classList.remove('active');
-          await new Promise(r => setTimeout(r, 200));
-        }
+        num.textContent = i === 0 ? 'GO' : i;
+        Audio.countdown(i);
+        await new Promise(r => setTimeout(r, 800));
       }
 
-      countdown.classList.remove('active');
-
-      document.querySelectorAll('.agent-slot').forEach(slot => {
-        slot.style.transition = 'opacity 0.5s';
-        slot.style.opacity = '0';
-      });
-
-      await new Promise(r => setTimeout(r, 300));
-
-      missionReady.classList.add('active');
-      statusLeft.textContent = 'MISSION ACTIVE';
+      cd.classList.remove('active');
+      $('completeDisplay').classList.add('active');
+      $('footerStatus').textContent = 'MISSION ACTIVE';
 
       await new Promise(r => setTimeout(r, 2000));
-
-      alert(`Project "${projectName}" initialized!\n(実際の実装ではダッシュボードに遷移します)`);
+      alert(`Project "${state.name}" initialized!\n(実際の実装ではダッシュボードに遷移します)`);
       location.reload();
+    }
+
+    $('btn1').addEventListener('click', () => {
+      Audio.init();
+      const name = $('inputName').value.trim();
+      const concept = $('inputConcept').value.trim();
+
+      if (!name || !concept) {
+        alert('Please fill in all fields');
+        return;
+      }
+
+      state.name = name;
+      state.concept = concept;
+
+      Audio.confirm();
+      $('footerProject').textContent = name;
+      $('footerStatus').textContent = 'PROJECT REGISTERED';
+
+      updatePhase(2);
+      $('btn2').disabled = false;
+
+      addLog('> System initialized', 'prompt');
+      addLog(`> Project: ${name}`, 'info');
+      addLog('> Agents standing by', 'info');
     });
 
-    animate(0);
-    runSequence();
+    $('btn2').addEventListener('click', () => {
+      Audio.init();
+      activateAgents();
+    });
+
+    $('btn3').addEventListener('click', () => {
+      Audio.init();
+      launchMission();
+    });
+
+    document.querySelectorAll('.input-field').forEach(input => {
+      input.addEventListener('focus', () => Audio.init());
+    });
   </script>
 </body>
 </html>
