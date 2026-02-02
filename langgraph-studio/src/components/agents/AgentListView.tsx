@@ -23,8 +23,6 @@ interface AgentListViewProps{
  onRetryAgent?:(agent:Agent)=>void
  onPauseAgent?:(agent:Agent)=>void
  onResumeAgent?:(agent:Agent)=>void
- onExecuteAgent?:(agent:Agent)=>void
- onExecuteWithWorkers?:(agent:Agent)=>void
  onRetryAll?:()=>Promise<number>
  agentLogsMap:Record<string,AgentLogEntry[]>
 }
@@ -53,8 +51,6 @@ export default function AgentListView({
  onRetryAgent,
  onPauseAgent,
  onResumeAgent,
- onExecuteAgent,
- onExecuteWithWorkers,
  onRetryAll,
  agentLogsMap
 }:AgentListViewProps):JSX.Element{
@@ -263,8 +259,6 @@ export default function AgentListView({
                 onRetry={['failed','interrupted','cancelled'].includes(agent.status)&&onRetryAgent?()=>onRetryAgent(agent):undefined}
                 onPause={['running','waiting_approval'].includes(agent.status)&&onPauseAgent?()=>onPauseAgent(agent):undefined}
                 onResume={['paused','waiting_response'].includes(agent.status)&&onResumeAgent?()=>onResumeAgent(agent):undefined}
-                onExecute={['completed','failed','cancelled'].includes(agent.status)&&onExecuteAgent?()=>onExecuteAgent(agent):undefined}
-                onExecuteWithWorkers={['completed','failed','cancelled'].includes(agent.status)&&agent.type.endsWith('_leader')&&onExecuteWithWorkers?()=>onExecuteWithWorkers(agent):undefined}
                />
 )}
               {hasWorkers&&!isCollapsed&&workers.length>0&&(
@@ -285,7 +279,6 @@ export default function AgentListView({
                     onRetry={['failed','interrupted','cancelled'].includes(worker.status)&&onRetryAgent?()=>onRetryAgent(worker):undefined}
                     onPause={['running','waiting_approval'].includes(worker.status)&&onPauseAgent?()=>onPauseAgent(worker):undefined}
                     onResume={['paused','waiting_response'].includes(worker.status)&&onResumeAgent?()=>onResumeAgent(worker):undefined}
-                    onExecute={['completed','failed','cancelled'].includes(worker.status)&&onExecuteAgent?()=>onExecuteAgent(worker):undefined}
                    />
 )}
                  </div>
