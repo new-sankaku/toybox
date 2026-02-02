@@ -22,8 +22,8 @@ class BashExecuteSkill(Skill):
   "dd if=/dev/zero",
   ":(){ :|:& };:",
   "> /dev/sda",
-  "chmod -R 777 /",
-  "chown -R",
+  "chmod -r 777 /",
+  "chown -r",
  ]
 
  BLOCKED_PATTERNS_LINUX=[
