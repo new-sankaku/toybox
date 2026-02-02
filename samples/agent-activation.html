@@ -3,621 +3,490 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Project Ignition</title>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@200;300;400;500&display=swap" rel="stylesheet">
+  <title>New Project</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #1A1816;
-      --bg-warm: #DAD6C8;
-      --text: #E8E4D4;
-      --text-dark: #2E2A24;
-      --dim: #4A4640;
-      --accent: #C4A882;
+      --bg-main: #E8E4D4;
+      --bg-panel: #F2EFE5;
+      --bg-dark: #2E2A24;
+      --text-main: #2E2A24;
+      --text-light: #6A665C;
+      --text-dim: #9A968C;
+      --border: #C8C4B4;
+      --border-light: #D8D4C4;
+      --accent: #8B7355;
+      --accent-gold: #C4A882;
     }
 
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       font-family: 'Noto Sans JP', sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      overflow: hidden;
+      background: var(--bg-main);
+      color: var(--text-main);
+      line-height: 1.6;
     }
 
     .app {
-      width: 100vw;
-      height: 100vh;
-      position: relative;
-    }
-
-    /* Boot sequence - the very beginning */
-    .boot {
-      position: fixed;
-      inset: 0;
-      background: #000;
+      min-height: 100vh;
       display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 100;
-      transition: opacity 1.5s ease;
     }
 
-    .boot.fade { opacity: 0; pointer-events: none; }
+    /* Left: Form area */
+    .form-side {
+      flex: 1;
+      padding: 40px;
+      overflow-y: auto;
+      max-height: 100vh;
+    }
 
-    .boot-text {
+    .form-header {
+      margin-bottom: 32px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .form-title {
       font-size: 11px;
+      font-weight: 500;
       letter-spacing: 0.3em;
-      color: var(--dim);
-      opacity: 0;
-    }
-
-    .boot-text.show {
-      opacity: 1;
-      animation: bootPulse 2s ease-in-out;
-    }
-
-    @keyframes bootPulse {
-      0%, 100% { opacity: 0.3; }
-      50% { opacity: 1; }
-    }
-
-    /* Main interface */
-    .interface {
-      position: fixed;
-      inset: 0;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 1s ease 0.5s;
-    }
-
-    .interface.active {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    /* Dormant state - system waiting */
-    .dormant {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      cursor: pointer;
-    }
-
-    .dormant-line {
-      width: 1px;
-      height: 0;
-      background: var(--dim);
-      transition: height 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-      margin-bottom: 40px;
-    }
-
-    .interface.active .dormant-line {
-      height: 100px;
-    }
-
-    .dormant-prompt {
-      font-size: 10px;
-      letter-spacing: 0.5em;
-      color: var(--dim);
-      opacity: 0;
-      transition: opacity 0.6s ease 0.8s;
-    }
-
-    .interface.active .dormant-prompt {
-      opacity: 1;
-      animation: promptBreathe 3s ease-in-out infinite;
-    }
-
-    @keyframes promptBreathe {
-      0%, 100% { opacity: 0.4; }
-      50% { opacity: 1; }
-    }
-
-    .dormant.hidden { display: none; }
-
-    /* Awakening */
-    .awakening {
-      position: absolute;
-      inset: 0;
-      display: none;
-      flex-direction: column;
-    }
-
-    .awakening.active { display: flex; }
-
-    /* Header bar */
-    .header {
-      height: 60px;
-      border-bottom: 1px solid var(--dim);
-      display: flex;
-      align-items: center;
-      padding: 0 40px;
-      opacity: 0;
-      transform: translateY(-20px);
-      transition: all 0.6s ease;
-    }
-
-    .header.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .header-status {
-      font-size: 9px;
-      letter-spacing: 0.3em;
-      color: var(--dim);
-    }
-
-    .header-status.live { color: var(--accent); }
-
-    .header-time {
-      margin-left: auto;
-      font-size: 10px;
-      letter-spacing: 0.1em;
-      color: var(--dim);
-      font-variant-numeric: tabular-nums;
-    }
-
-    /* Main content area */
-    .main {
-      flex: 1;
-      display: flex;
-      position: relative;
-    }
-
-    /* Phase container */
-    .phase {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      opacity: 0;
-      visibility: hidden;
-      transition: opacity 0.8s ease;
-    }
-
-    .phase.active {
-      opacity: 1;
-      visibility: visible;
-    }
-
-    /* Phase 1: Identity */
-    .p1-left {
-      width: 40%;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 0 60px;
-      border-right: 1px solid var(--dim);
-    }
-
-    .p1-label {
-      font-size: 9px;
-      letter-spacing: 0.4em;
-      color: var(--dim);
-      margin-bottom: 12px;
-    }
-
-    .p1-title {
-      font-size: 13px;
-      letter-spacing: 0.2em;
-      color: var(--text);
-      margin-bottom: 60px;
-      opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.8s ease 0.3s;
-    }
-
-    .phase.active .p1-title {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .p1-input-area {
-      opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.8s ease 0.5s;
-    }
-
-    .phase.active .p1-input-area {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .p1-input {
-      width: 100%;
-      background: transparent;
-      border: none;
-      border-bottom: 1px solid var(--dim);
-      font-family: inherit;
-      font-size: 28px;
-      font-weight: 300;
-      color: var(--text);
-      padding: 16px 0;
-      outline: none;
-      transition: border-color 0.3s;
-    }
-
-    .p1-input:focus {
-      border-color: var(--accent);
-    }
-
-    .p1-input::placeholder {
-      color: var(--dim);
-    }
-
-    .p1-right {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .p1-num {
-      font-size: 200px;
-      font-weight: 200;
-      color: var(--dim);
-      opacity: 0.15;
-      user-select: none;
-    }
-
-    /* Phase 2: Vision */
-    .p2-content {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      padding: 60px 80px;
-      max-width: 800px;
-      margin: 0 auto;
-    }
-
-    .p2-registered {
-      font-size: 10px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
+      color: var(--text-light);
       margin-bottom: 8px;
-      opacity: 0;
-      transition: opacity 0.5s ease;
     }
 
-    .phase.active .p2-registered { opacity: 1; }
-
-    .p2-name {
-      font-size: 32px;
+    .form-subtitle {
+      font-size: 20px;
       font-weight: 300;
-      letter-spacing: 0.05em;
-      margin-bottom: 60px;
-      opacity: 0;
-      transform: translateY(20px);
-      transition: all 0.8s ease 0.2s;
     }
 
-    .phase.active .p2-name {
-      opacity: 1;
-      transform: translateY(0);
+    /* Panel */
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      margin-bottom: 24px;
+      transition: border-color 0.3s ease;
     }
 
-    .p2-label {
-      font-size: 9px;
-      letter-spacing: 0.4em;
-      color: var(--dim);
-      margin-bottom: 16px;
-      opacity: 0;
-      transition: opacity 0.5s ease 0.4s;
-    }
-
-    .phase.active .p2-label { opacity: 1; }
-
-    .p2-textarea {
-      width: 100%;
-      background: transparent;
-      border: none;
-      border-left: 2px solid var(--dim);
-      font-family: inherit;
-      font-size: 15px;
-      font-weight: 300;
-      line-height: 2.2;
-      color: var(--text);
-      padding: 0 24px;
-      outline: none;
-      resize: none;
-      min-height: 180px;
-      opacity: 0;
-      transition: opacity 0.5s ease 0.6s;
-    }
-
-    .phase.active .p2-textarea { opacity: 1; }
-
-    .p2-textarea:focus {
+    .panel.has-value {
       border-color: var(--accent);
     }
 
-    .p2-textarea::placeholder {
-      color: var(--dim);
-    }
-
-    /* Phase 3: Assembly */
-    .p3 {
-      flex-direction: column;
-    }
-
-    .p3-header {
-      padding: 30px 60px;
-      border-bottom: 1px solid var(--dim);
+    .panel-header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border-light);
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
 
-    .p3-title {
-      font-size: 11px;
-      letter-spacing: 0.3em;
-    }
-
-    .p3-project {
+    .panel-title {
       font-size: 10px;
-      color: var(--dim);
+      font-weight: 500;
+      letter-spacing: 0.25em;
+      color: var(--text-light);
     }
 
-    .p3-body {
-      flex: 1;
-      display: flex;
-    }
-
-    .p3-list {
-      flex: 1;
-      padding: 40px 60px;
-    }
-
-    .p3-agent {
-      display: flex;
-      align-items: center;
-      padding: 28px 0;
-      border-bottom: 1px solid rgba(74, 70, 64, 0.3);
-      opacity: 0;
-      transform: translateX(-40px);
-    }
-
-    .p3-agent.pending {
-      opacity: 0.2;
-      transform: translateX(-20px);
-      transition: all 0.4s ease;
-    }
-
-    .p3-agent.calling {
-      opacity: 0.6;
-      transform: translateX(-10px);
-      transition: all 0.3s ease;
-    }
-
-    .p3-agent.online {
-      opacity: 1;
-      transform: translateX(0);
-      transition: all 0.5s cubic-bezier(0.2, 0, 0.2, 1);
-    }
-
-    .p3-agent-indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--dim);
-      margin-right: 24px;
-      transition: all 0.3s ease;
-    }
-
-    .p3-agent.calling .p3-agent-indicator {
-      background: var(--accent);
-      animation: indicatorPulse 0.6s ease infinite;
-    }
-
-    .p3-agent.online .p3-agent-indicator {
-      background: var(--accent);
-      box-shadow: 0 0 12px var(--accent);
-    }
-
-    @keyframes indicatorPulse {
-      0%, 100% { opacity: 0.3; transform: scale(0.8); }
-      50% { opacity: 1; transform: scale(1.2); }
-    }
-
-    .p3-agent-id {
-      width: 50px;
-      font-size: 24px;
-      font-weight: 200;
-      color: var(--dim);
-      transition: color 0.3s ease;
-    }
-
-    .p3-agent.online .p3-agent-id { color: var(--text); }
-
-    .p3-agent-info { flex: 1; }
-
-    .p3-agent-name {
-      font-size: 14px;
-      font-weight: 400;
-      letter-spacing: 0.08em;
-      margin-bottom: 4px;
-    }
-
-    .p3-agent-role {
-      font-size: 9px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-    }
-
-    .p3-agent-status {
+    .panel-status {
       font-size: 9px;
       letter-spacing: 0.15em;
-      color: var(--dim);
-      text-align: right;
-      min-width: 80px;
+      color: var(--text-dim);
+      transition: color 0.3s;
     }
 
-    .p3-agent.online .p3-agent-status { color: var(--accent); }
-
-    .p3-side {
-      width: 280px;
-      border-left: 1px solid var(--dim);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+    .panel.has-value .panel-status {
+      color: var(--accent);
     }
 
-    .p3-count {
-      font-size: 100px;
-      font-weight: 200;
-      color: var(--dim);
-      line-height: 1;
-      transition: color 0.3s ease;
+    .panel-body {
+      padding: 20px;
     }
 
-    .p3-count.active { color: var(--text); }
-
-    .p3-count-label {
-      font-size: 9px;
-      letter-spacing: 0.3em;
-      color: var(--dim);
-      margin-top: 16px;
-    }
-
-    /* Phase 4: Ignition */
-    .p4 {
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-    }
-
-    .p4-summary {
-      text-align: center;
-      margin-bottom: 80px;
-      opacity: 0;
-      transform: translateY(30px);
-      transition: all 1s ease;
-    }
-
-    .p4-summary.show {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .p4-ready {
-      font-size: 9px;
-      letter-spacing: 0.5em;
-      color: var(--dim);
+    /* Form fields */
+    .field {
       margin-bottom: 20px;
     }
 
-    .p4-name {
-      font-size: 42px;
-      font-weight: 300;
-      letter-spacing: 0.08em;
-      margin-bottom: 40px;
+    .field:last-child {
+      margin-bottom: 0;
     }
 
-    .p4-agents {
+    .field-label {
+      font-size: 11px;
+      color: var(--text-light);
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .field-input {
+      width: 100%;
+      background: var(--bg-main);
+      border: 1px solid var(--border);
+      font-family: inherit;
+      font-size: 14px;
+      color: var(--text-main);
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .field-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(139, 115, 85, 0.1);
+    }
+
+    .field-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .field-textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+
+    .field-select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236A665C' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      padding-right: 36px;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+    }
+
+    /* Agent checkboxes */
+    .agent-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .agent-check {
       display: flex;
-      gap: 32px;
+      align-items: center;
+      padding: 14px 16px;
+      background: var(--bg-main);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
     }
 
-    .p4-agent-badge {
-      font-size: 10px;
-      letter-spacing: 0.15em;
-      color: var(--accent);
+    .agent-check:hover {
+      border-color: var(--text-dim);
+    }
+
+    .agent-check.checked {
+      border-color: var(--accent);
+      background: rgba(139, 115, 85, 0.05);
+    }
+
+    .agent-check-box {
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--border);
+      margin-right: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .agent-check.checked .agent-check-box {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .agent-check-box::after {
+      content: '';
+      width: 8px;
+      height: 8px;
+      background: var(--bg-panel);
       opacity: 0;
-      transform: translateY(10px);
-      transition: all 0.4s ease;
     }
 
-    .p4-agent-badge.show {
+    .agent-check.checked .agent-check-box::after {
+      opacity: 1;
+    }
+
+    .agent-check-label {
+      font-size: 12px;
+    }
+
+    .agent-check-role {
+      font-size: 9px;
+      color: var(--text-dim);
+      margin-left: auto;
+      letter-spacing: 0.1em;
+    }
+
+    /* Submit area */
+    .submit-area {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn {
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      padding: 14px 32px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-ghost {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-light);
+    }
+
+    .btn-ghost:hover {
+      border-color: var(--text-main);
+      color: var(--text-main);
+    }
+
+    .btn-primary {
+      background: var(--text-main);
+      border: 1px solid var(--text-main);
+      color: var(--bg-main);
+    }
+
+    .btn-primary:hover {
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .btn-primary:disabled {
+      background: var(--text-dim);
+      border-color: var(--text-dim);
+      cursor: not-allowed;
+    }
+
+    /* Right: Blueprint area */
+    .blueprint-side {
+      width: 360px;
+      background: var(--bg-dark);
+      color: #E8E4D4;
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .blueprint-header {
+      padding: 24px;
+      border-bottom: 1px solid #3E3A34;
+    }
+
+    .blueprint-title {
+      font-size: 9px;
+      letter-spacing: 0.4em;
+      color: #8A867E;
+      margin-bottom: 8px;
+    }
+
+    .blueprint-name {
+      font-size: 18px;
+      font-weight: 300;
+      min-height: 27px;
+      color: #6A665C;
+      transition: color 0.3s;
+    }
+
+    .blueprint-name.filled {
+      color: #E8E4D4;
+    }
+
+    .blueprint-body {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    /* Blueprint modules */
+    .bp-module {
+      margin-bottom: 20px;
+      opacity: 0.3;
+      transition: opacity 0.4s ease;
+    }
+
+    .bp-module.active {
+      opacity: 1;
+    }
+
+    .bp-module-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .bp-module-label {
+      font-size: 8px;
+      letter-spacing: 0.3em;
+      color: #6A665C;
+    }
+
+    .bp-module.active .bp-module-label {
+      color: var(--accent-gold);
+    }
+
+    .bp-module-status {
+      font-size: 8px;
+      letter-spacing: 0.15em;
+      color: #4A4640;
+    }
+
+    .bp-module.active .bp-module-status {
+      color: var(--accent-gold);
+    }
+
+    .bp-module-content {
+      padding: 12px;
+      border: 1px solid #3E3A34;
+      min-height: 40px;
+      font-size: 12px;
+      color: #9A968E;
+      transition: all 0.3s;
+    }
+
+    .bp-module.active .bp-module-content {
+      border-color: #5A5650;
+      color: #E8E4D4;
+    }
+
+    .bp-module-empty {
+      color: #4A4640;
+      font-style: italic;
+    }
+
+    .bp-module-value {
+      opacity: 0;
+      transform: translateY(5px);
+      transition: all 0.3s ease;
+    }
+
+    .bp-module-value.show {
       opacity: 1;
       transform: translateY(0);
     }
 
-    .p4-ignite {
-      position: relative;
-      background: none;
-      border: 1px solid var(--text);
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 400;
-      letter-spacing: 0.4em;
-      color: var(--text);
-      padding: 24px 80px;
-      cursor: pointer;
+    .bp-module-concept {
+      font-size: 11px;
+      line-height: 1.7;
+      max-height: 80px;
+      overflow: hidden;
+    }
+
+    /* Agent tags in blueprint */
+    .bp-agents {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .bp-agent-tag {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      padding: 6px 10px;
+      border: 1px solid #3E3A34;
+      color: #5A5650;
       opacity: 0;
-      transition: all 0.4s ease;
+      transform: scale(0.9);
+      transition: all 0.25s ease;
     }
 
-    .p4-ignite.show { opacity: 1; }
-
-    .p4-ignite:hover {
-      background: var(--text);
-      color: var(--bg);
-    }
-
-    .p4-ignite::before,
-    .p4-ignite::after {
-      content: '';
-      position: absolute;
-      width: 20px;
-      height: 1px;
-      background: var(--dim);
-      top: 50%;
-    }
-
-    .p4-ignite::before { right: 100%; margin-right: 20px; }
-    .p4-ignite::after { left: 100%; margin-left: 20px; }
-
-    /* Countdown */
-    .countdown {
-      position: fixed;
-      inset: 0;
-      background: var(--bg);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 50;
-    }
-
-    .countdown.active { display: flex; }
-
-    .countdown-num {
-      font-size: 300px;
-      font-weight: 200;
-      color: var(--text);
-      opacity: 0;
-      transform: scale(0.5);
-    }
-
-    .countdown-num.show {
+    .bp-agent-tag.show {
       opacity: 1;
       transform: scale(1);
-      transition: all 0.2s cubic-bezier(0.2, 0, 0.2, 1);
     }
 
-    .countdown-num.out {
-      opacity: 0;
-      transform: scale(1.3);
-      transition: all 0.15s ease-out;
+    .bp-agent-tag.active {
+      border-color: var(--accent-gold);
+      color: var(--accent-gold);
     }
 
-    /* Launch - the moment of ignition */
-    .launch {
+    /* Progress bar */
+    .bp-progress {
+      margin-top: auto;
+      padding-top: 20px;
+    }
+
+    .bp-progress-label {
+      font-size: 8px;
+      letter-spacing: 0.2em;
+      color: #5A5650;
+      margin-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .bp-progress-bar {
+      height: 2px;
+      background: #3E3A34;
+    }
+
+    .bp-progress-fill {
+      height: 100%;
+      background: var(--accent-gold);
+      width: 0%;
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Blueprint footer */
+    .blueprint-footer {
+      padding: 24px;
+      border-top: 1px solid #3E3A34;
+    }
+
+    .bp-launch-btn {
+      width: 100%;
+      background: transparent;
+      border: 1px solid #4A4640;
+      font-family: inherit;
+      font-size: 11px;
+      letter-spacing: 0.3em;
+      color: #5A5650;
+      padding: 18px;
+      cursor: not-allowed;
+      transition: all 0.3s ease;
+    }
+
+    .bp-launch-btn.ready {
+      border-color: var(--accent-gold);
+      color: var(--accent-gold);
+      cursor: pointer;
+    }
+
+    .bp-launch-btn.ready:hover {
+      background: var(--accent-gold);
+      color: var(--bg-dark);
+    }
+
+    /* Launch overlay */
+    .launch-overlay {
       position: fixed;
       inset: 0;
-      background: var(--bg-warm);
+      background: var(--bg-main);
       display: none;
       align-items: center;
       justify-content: center;
       flex-direction: column;
-      z-index: 60;
+      z-index: 100;
     }
 
-    .launch.active { display: flex; }
+    .launch-overlay.active {
+      display: flex;
+    }
 
     .launch-flash {
       position: fixed;
@@ -628,226 +497,278 @@
     }
 
     .launch-flash.show {
-      animation: flashBang 0.6s ease-out;
+      animation: flash 0.4s ease-out;
     }
 
-    @keyframes flashBang {
-      0% { opacity: 1; }
+    @keyframes flash {
+      0% { opacity: 0.8; }
       100% { opacity: 0; }
     }
 
     .launch-content {
       text-align: center;
-      color: var(--text-dark);
     }
 
-    .launch-status {
+    .launch-label {
       font-size: 10px;
       letter-spacing: 0.4em;
+      color: var(--text-light);
+      margin-bottom: 16px;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .launch-label.show { opacity: 1; }
+
+    .launch-name {
+      font-size: 36px;
+      font-weight: 300;
       margin-bottom: 24px;
       opacity: 0;
       transform: translateY(20px);
-      transition: all 0.8s ease;
+      transition: all 0.6s ease 0.2s;
     }
 
-    .launch-status.show {
+    .launch-name.show {
       opacity: 1;
       transform: translateY(0);
     }
 
-    .launch-name {
-      font-size: 48px;
-      font-weight: 300;
-      letter-spacing: 0.1em;
-      margin-bottom: 16px;
-      opacity: 0;
-      transition: opacity 0.8s ease 0.3s;
-    }
-
-    .launch-name.show { opacity: 1; }
-
-    .launch-sub {
-      font-size: 12px;
-      letter-spacing: 0.15em;
-      color: #5A564E;
-      opacity: 0;
-      transition: opacity 0.6s ease 0.6s;
-    }
-
-    .launch-sub.show { opacity: 1; }
-
-    /* Footer */
-    .footer {
-      height: 50px;
-      border-top: 1px solid var(--dim);
+    .launch-agents {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 40px;
-      opacity: 0;
-      transition: opacity 0.5s ease 0.3s;
+      gap: 20px;
+      justify-content: center;
     }
 
-    .awakening.active .footer { opacity: 1; }
-
-    .footer-phase {
-      font-size: 9px;
-      letter-spacing: 0.2em;
-      color: var(--dim);
-    }
-
-    .footer-action {
-      background: none;
-      border: none;
-      font-family: inherit;
+    .launch-agent {
       font-size: 10px;
-      letter-spacing: 0.2em;
-      color: var(--text);
-      cursor: pointer;
-      padding: 12px 0;
-      opacity: 0.4;
-      transition: opacity 0.3s;
+      letter-spacing: 0.12em;
+      color: var(--text-light);
+      opacity: 0;
+      transition: opacity 0.4s ease;
     }
 
-    .footer-action:hover { opacity: 1; }
+    .launch-agent.show {
+      opacity: 1;
+    }
 
-    .footer-action.ready { opacity: 1; color: var(--accent); }
+    /* Countdown */
+    .countdown {
+      position: fixed;
+      inset: 0;
+      background: var(--bg-dark);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 90;
+    }
+
+    .countdown.active { display: flex; }
+
+    .countdown-num {
+      font-size: 200px;
+      font-weight: 200;
+      color: #E8E4D4;
+      opacity: 0;
+      transform: scale(0.7);
+    }
+
+    .countdown-num.show {
+      opacity: 1;
+      transform: scale(1);
+      transition: all 0.12s cubic-bezier(0.2, 0, 0.2, 1);
+    }
+
+    .countdown-num.out {
+      opacity: 0;
+      transform: scale(1.15);
+      transition: all 0.08s ease-out;
+    }
   </style>
 </head>
 <body>
   <div class="app">
-    <!-- Boot sequence -->
-    <div class="boot" id="boot">
-      <div class="boot-text" id="bootText">INITIALIZING</div>
-    </div>
-
-    <!-- Main interface -->
-    <div class="interface" id="interface">
-      <!-- Dormant state -->
-      <div class="dormant" id="dormant">
-        <div class="dormant-line"></div>
-        <div class="dormant-prompt">CLICK TO AWAKEN</div>
+    <!-- Left: Form -->
+    <div class="form-side">
+      <div class="form-header">
+        <div class="form-title">NEW PROJECT</div>
+        <div class="form-subtitle">プロジェクト作成</div>
       </div>
 
-      <!-- Awakening state -->
-      <div class="awakening" id="awakening">
-        <div class="header" id="header">
-          <div class="header-status" id="headerStatus">SYSTEM STANDBY</div>
-          <div class="header-time" id="headerTime">--:--:--</div>
-        </div>
-
-        <div class="main">
-          <!-- Phase 1: Identity -->
-          <div class="phase p1 active" id="phase1">
-            <div class="p1-left">
-              <div class="p1-label">PHASE 01</div>
-              <div class="p1-title">プロジェクトの名前を設定してください</div>
-              <div class="p1-input-area">
-                <input type="text" class="p1-input" id="inputName" placeholder="Project Name">
-              </div>
-            </div>
-            <div class="p1-right">
-              <div class="p1-num">01</div>
-            </div>
+      <form id="projectForm">
+        <!-- Project Information -->
+        <div class="panel" id="panelInfo">
+          <div class="panel-header">
+            <div class="panel-title">PROJECT INFORMATION</div>
+            <div class="panel-status">WAITING</div>
           </div>
-
-          <!-- Phase 2: Vision -->
-          <div class="phase p2" id="phase2">
-            <div class="p2-content">
-              <div class="p2-registered">REGISTERED</div>
-              <div class="p2-name" id="p2Name">-</div>
-              <div class="p2-label">DEFINE YOUR VISION</div>
-              <textarea class="p2-textarea" id="inputVision" placeholder="このプロジェクトで実現したいことを記述してください..."></textarea>
+          <div class="panel-body">
+            <div class="field">
+              <label class="field-label">Project Name</label>
+              <input type="text" class="field-input" id="inputName" placeholder="My Awesome Game">
             </div>
-          </div>
-
-          <!-- Phase 3: Assembly -->
-          <div class="phase p3" id="phase3">
-            <div class="p3-header">
-              <div class="p3-title">AGENT ASSEMBLY</div>
-              <div class="p3-project" id="p3Project">-</div>
+            <div class="field">
+              <label class="field-label">Description (optional)</label>
+              <textarea class="field-input field-textarea" id="inputDesc" placeholder="Brief description of your project..." rows="2"></textarea>
             </div>
-            <div class="p3-body">
-              <div class="p3-list" id="agentList">
-                <div class="p3-agent" data-id="concept">
-                  <div class="p3-agent-indicator"></div>
-                  <div class="p3-agent-id">01</div>
-                  <div class="p3-agent-info">
-                    <div class="p3-agent-name">Concept Agent</div>
-                    <div class="p3-agent-role">CREATIVE DIRECTION</div>
-                  </div>
-                  <div class="p3-agent-status">-</div>
-                </div>
-                <div class="p3-agent" data-id="scenario">
-                  <div class="p3-agent-indicator"></div>
-                  <div class="p3-agent-id">02</div>
-                  <div class="p3-agent-info">
-                    <div class="p3-agent-name">Scenario Agent</div>
-                    <div class="p3-agent-role">NARRATIVE DESIGN</div>
-                  </div>
-                  <div class="p3-agent-status">-</div>
-                </div>
-                <div class="p3-agent" data-id="character">
-                  <div class="p3-agent-indicator"></div>
-                  <div class="p3-agent-id">03</div>
-                  <div class="p3-agent-info">
-                    <div class="p3-agent-name">Character Agent</div>
-                    <div class="p3-agent-role">CHARACTER DESIGN</div>
-                  </div>
-                  <div class="p3-agent-status">-</div>
-                </div>
-                <div class="p3-agent" data-id="code">
-                  <div class="p3-agent-indicator"></div>
-                  <div class="p3-agent-id">04</div>
-                  <div class="p3-agent-info">
-                    <div class="p3-agent-name">Code Agent</div>
-                    <div class="p3-agent-role">IMPLEMENTATION</div>
-                  </div>
-                  <div class="p3-agent-status">-</div>
-                </div>
-              </div>
-              <div class="p3-side">
-                <div class="p3-count" id="p3Count">0</div>
-                <div class="p3-count-label">ASSEMBLED</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Phase 4: Ignition -->
-          <div class="phase p4" id="phase4">
-            <div class="p4-summary" id="p4Summary">
-              <div class="p4-ready">ALL SYSTEMS READY</div>
-              <div class="p4-name" id="p4Name">-</div>
-              <div class="p4-agents">
-                <span class="p4-agent-badge">CONCEPT</span>
-                <span class="p4-agent-badge">SCENARIO</span>
-                <span class="p4-agent-badge">CHARACTER</span>
-                <span class="p4-agent-badge">CODE</span>
-              </div>
-            </div>
-            <button class="p4-ignite" id="btnIgnite">IGNITE</button>
           </div>
         </div>
 
-        <div class="footer">
-          <div class="footer-phase" id="footerPhase">PHASE 1 / 4</div>
-          <button class="footer-action" id="footerAction">PROCEED</button>
+        <!-- Game Concept -->
+        <div class="panel" id="panelConcept">
+          <div class="panel-header">
+            <div class="panel-title">GAME CONCEPT</div>
+            <div class="panel-status">WAITING</div>
+          </div>
+          <div class="panel-body">
+            <div class="field">
+              <label class="field-label">Game Concept</label>
+              <textarea class="field-input field-textarea" id="inputConcept" placeholder="Describe your game idea in detail. What is the gameplay like? What makes it unique?" rows="4"></textarea>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label class="field-label">Platform</label>
+                <select class="field-input field-select" id="inputPlatform">
+                  <option value="web">Web Browser</option>
+                  <option value="desktop">Desktop</option>
+                  <option value="mobile">Mobile (PWA)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">Scope</label>
+                <select class="field-input field-select" id="inputScope">
+                  <option value="mvp">MVP</option>
+                  <option value="full">Full Game</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">Genre</label>
+                <select class="field-input field-select" id="inputGenre">
+                  <option value="">Select...</option>
+                  <option value="rpg">RPG</option>
+                  <option value="action">Action</option>
+                  <option value="puzzle">Puzzle</option>
+                  <option value="adventure">Adventure</option>
+                  <option value="simulation">Simulation</option>
+                </select>
+              </div>
+            </div>
+          </div>
         </div>
+
+        <!-- Agent Selection -->
+        <div class="panel" id="panelAgents">
+          <div class="panel-header">
+            <div class="panel-title">AGENT TEAM</div>
+            <div class="panel-status">WAITING</div>
+          </div>
+          <div class="panel-body">
+            <div class="agent-grid">
+              <div class="agent-check" data-agent="concept">
+                <div class="agent-check-box"></div>
+                <span class="agent-check-label">Concept Agent</span>
+                <span class="agent-check-role">CREATIVE</span>
+              </div>
+              <div class="agent-check" data-agent="scenario">
+                <div class="agent-check-box"></div>
+                <span class="agent-check-label">Scenario Agent</span>
+                <span class="agent-check-role">NARRATIVE</span>
+              </div>
+              <div class="agent-check" data-agent="character">
+                <div class="agent-check-box"></div>
+                <span class="agent-check-label">Character Agent</span>
+                <span class="agent-check-role">DESIGN</span>
+              </div>
+              <div class="agent-check" data-agent="code">
+                <div class="agent-check-box"></div>
+                <span class="agent-check-label">Code Agent</span>
+                <span class="agent-check-role">IMPLEMENT</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="submit-area">
+          <button type="button" class="btn btn-ghost" id="btnCancel">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="btnSubmit" disabled>Create Project</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Right: Blueprint -->
+    <div class="blueprint-side">
+      <div class="blueprint-header">
+        <div class="blueprint-title">PROJECT BLUEPRINT</div>
+        <div class="blueprint-name" id="bpName">Untitled Project</div>
+      </div>
+
+      <div class="blueprint-body">
+        <div class="bp-module" id="bpModInfo">
+          <div class="bp-module-header">
+            <div class="bp-module-label">IDENTITY</div>
+            <div class="bp-module-status">-</div>
+          </div>
+          <div class="bp-module-content">
+            <div class="bp-module-empty">未設定</div>
+            <div class="bp-module-value" id="bpInfoValue"></div>
+          </div>
+        </div>
+
+        <div class="bp-module" id="bpModConcept">
+          <div class="bp-module-header">
+            <div class="bp-module-label">CONCEPT</div>
+            <div class="bp-module-status">-</div>
+          </div>
+          <div class="bp-module-content">
+            <div class="bp-module-empty">未設定</div>
+            <div class="bp-module-value bp-module-concept" id="bpConceptValue"></div>
+          </div>
+        </div>
+
+        <div class="bp-module" id="bpModAgents">
+          <div class="bp-module-header">
+            <div class="bp-module-label">AGENTS</div>
+            <div class="bp-module-status">-</div>
+          </div>
+          <div class="bp-module-content">
+            <div class="bp-agents">
+              <div class="bp-agent-tag show" data-for="concept">CONCEPT</div>
+              <div class="bp-agent-tag show" data-for="scenario">SCENARIO</div>
+              <div class="bp-agent-tag show" data-for="character">CHARACTER</div>
+              <div class="bp-agent-tag show" data-for="code">CODE</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bp-progress">
+          <div class="bp-progress-label">
+            <span>COMPLETION</span>
+            <span id="bpProgressPct">0%</span>
+          </div>
+          <div class="bp-progress-bar">
+            <div class="bp-progress-fill" id="bpProgressFill"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="blueprint-footer">
+        <button class="bp-launch-btn" id="bpLaunchBtn">INITIALIZE PROJECT</button>
       </div>
     </div>
 
-    <!-- Countdown overlay -->
+    <!-- Countdown -->
     <div class="countdown" id="countdown">
       <div class="countdown-num" id="countdownNum">3</div>
     </div>
 
-    <!-- Launch screen -->
-    <div class="launch" id="launch">
+    <!-- Launch overlay -->
+    <div class="launch-overlay" id="launchOverlay">
       <div class="launch-flash" id="launchFlash"></div>
       <div class="launch-content">
-        <div class="launch-status" id="launchStatus">PROJECT INITIALIZED</div>
+        <div class="launch-label" id="launchLabel">PROJECT INITIALIZED</div>
         <div class="launch-name" id="launchName">-</div>
-        <div class="launch-sub" id="launchSub">全エージェント稼働開始</div>
+        <div class="launch-agents" id="launchAgents"></div>
       </div>
     </div>
   </div>
@@ -859,271 +780,201 @@
         if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
         if (this.ctx.state === 'suspended') this.ctx.resume();
       },
-      play(freq, duration, delay = 0, vol = 0.04, type = 'sine') {
+      play(freq, dur, delay = 0, vol = 0.03) {
         if (!this.ctx) return;
         const t = this.ctx.currentTime + delay;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = type;
-        osc.connect(gain);
-        gain.connect(this.ctx.destination);
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0, t);
-        gain.gain.linearRampToValueAtTime(vol, t + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
-        osc.start(t);
-        osc.stop(t + duration);
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.connect(g); g.connect(this.ctx.destination);
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(vol, t + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        o.start(t); o.stop(t + dur);
       },
-      boot() {
-        this.play(80, 0.8, 0, 0.03);
-        this.play(120, 0.6, 0.2, 0.02);
-      },
-      awaken() {
-        this.play(220, 0.3, 0, 0.05);
-        this.play(330, 0.25, 0.1, 0.04);
-        this.play(440, 0.3, 0.2, 0.03);
-      },
-      confirm() {
-        this.play(523, 0.15, 0, 0.05);
-        this.play(659, 0.12, 0.08, 0.04);
-      },
-      agentCall(index) {
-        const base = 200 + (index * 60);
-        this.play(base, 0.2, 0, 0.03);
-        this.play(base * 1.5, 0.15, 0.1, 0.02);
-      },
-      agentOnline(index) {
-        const base = 300 + (index * 80);
-        this.play(base, 0.25, 0, 0.06);
-        this.play(base * 1.25, 0.2, 0.08, 0.04);
-        this.play(base * 1.5, 0.15, 0.15, 0.03);
-      },
-      countdown(n) {
-        if (n > 0) {
-          this.play(440, 0.12, 0, 0.08);
-        }
-      },
-      ignite() {
-        this.play(200, 0.8, 0, 0.08);
-        this.play(400, 0.6, 0.05, 0.06);
-        this.play(600, 0.5, 0.1, 0.05);
-        this.play(800, 0.4, 0.15, 0.04);
-      },
+      lock() { this.play(400, 0.1, 0, 0.04); this.play(600, 0.08, 0.05, 0.03); },
+      select() { this.play(350, 0.08, 0, 0.03); },
+      count() { this.play(440, 0.08, 0, 0.05); },
       launch() {
-        this.play(523, 0.3, 0, 0.06);
-        this.play(659, 0.25, 0.15, 0.05);
-        this.play(784, 0.35, 0.3, 0.06);
+        this.play(300, 0.4, 0, 0.06);
+        this.play(450, 0.35, 0.05, 0.05);
+        this.play(600, 0.3, 0.1, 0.04);
+      },
+      complete() {
+        this.play(523, 0.15, 0, 0.05);
+        this.play(659, 0.12, 0.1, 0.04);
+        this.play(784, 0.2, 0.2, 0.05);
       }
     };
 
     const State = {
       name: '',
-      vision: '',
-      phase: 0,
-      agentsOnline: 0
+      desc: '',
+      concept: '',
+      platform: 'web',
+      scope: 'mvp',
+      genre: '',
+      agents: new Set()
     };
 
     const $ = id => document.getElementById(id);
     const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-    function updateTime() {
-      const now = new Date();
-      const h = String(now.getHours()).padStart(2, '0');
-      const m = String(now.getMinutes()).padStart(2, '0');
-      const s = String(now.getSeconds()).padStart(2, '0');
-      $('headerTime').textContent = `${h}:${m}:${s}`;
+    function updateProgress() {
+      let score = 0;
+      if (State.name) score += 25;
+      if (State.concept && State.concept.length >= 20) score += 35;
+      if (State.agents.size > 0) score += 40;
+
+      $('bpProgressFill').style.width = score + '%';
+      $('bpProgressPct').textContent = score + '%';
+
+      const canSubmit = State.name && State.concept && State.concept.length >= 20 && State.agents.size > 0;
+      $('btnSubmit').disabled = !canSubmit;
+      $('bpLaunchBtn').classList.toggle('ready', canSubmit);
     }
 
-    async function bootSequence() {
-      await sleep(800);
-      $('bootText').classList.add('show');
-      Audio.init();
-      Audio.boot();
-      await sleep(2500);
-      $('boot').classList.add('fade');
-      await sleep(500);
-      $('interface').classList.add('active');
+    function updateModule(modId, panelId, isActive) {
+      const mod = $(modId);
+      const panel = $(panelId);
+      mod.classList.toggle('active', isActive);
+      panel.classList.toggle('has-value', isActive);
+
+      const status = isActive ? 'LOCKED' : '-';
+      mod.querySelector('.bp-module-status').textContent = status;
+      panel.querySelector('.panel-status').textContent = isActive ? 'SET' : 'WAITING';
     }
 
-    async function awakenSystem() {
-      Audio.init();
-      Audio.awaken();
-      $('dormant').classList.add('hidden');
-      $('awakening').classList.add('active');
-      await sleep(100);
-      $('header').classList.add('show');
-      $('headerStatus').textContent = 'SYSTEM ACTIVE';
-      $('headerStatus').classList.add('live');
-      updateTime();
-      setInterval(updateTime, 1000);
-      await sleep(300);
-      $('inputName').focus();
+    function onNameChange() {
+      const val = $('inputName').value.trim();
+      State.name = val;
+
+      $('bpName').textContent = val || 'Untitled Project';
+      $('bpName').classList.toggle('filled', !!val);
+
+      const isEmpty = !val;
+      $('bpModInfo').querySelector('.bp-module-empty').style.display = isEmpty ? '' : 'none';
+      $('bpInfoValue').textContent = val;
+      $('bpInfoValue').classList.toggle('show', !isEmpty);
+
+      updateModule('bpModInfo', 'panelInfo', !!val);
+      if (val) Audio.lock();
+      updateProgress();
     }
 
-    async function toPhase(n) {
-      const phases = ['phase1', 'phase2', 'phase3', 'phase4'];
-      phases.forEach((p, i) => {
-        $(p).classList.toggle('active', i === n - 1);
-      });
-      State.phase = n;
-      $('footerPhase').textContent = `PHASE ${n} / 4`;
+    function onConceptChange() {
+      const val = $('inputConcept').value.trim();
+      State.concept = val;
 
-      if (n === 4) {
-        $('footerAction').style.display = 'none';
+      const isValid = val.length >= 20;
+      const isEmpty = !val;
+
+      $('bpModConcept').querySelector('.bp-module-empty').style.display = isEmpty ? '' : 'none';
+      const display = val.length > 100 ? val.substring(0, 100) + '...' : val;
+      $('bpConceptValue').textContent = display;
+      $('bpConceptValue').classList.toggle('show', !isEmpty);
+
+      updateModule('bpModConcept', 'panelConcept', isValid);
+      updateProgress();
+    }
+
+    function toggleAgent(agent) {
+      const check = document.querySelector(`.agent-check[data-agent="${agent}"]`);
+      const tag = document.querySelector(`.bp-agent-tag[data-for="${agent}"]`);
+
+      if (State.agents.has(agent)) {
+        State.agents.delete(agent);
+        check.classList.remove('checked');
+        tag.classList.remove('active');
       } else {
-        $('footerAction').style.display = '';
-        $('footerAction').classList.remove('ready');
-      }
-    }
-
-    async function assembleAgents() {
-      const agents = document.querySelectorAll('.p3-agent');
-
-      for (let i = 0; i < agents.length; i++) {
-        const agent = agents[i];
-        agent.classList.add('pending');
-        agent.querySelector('.p3-agent-status').textContent = 'STANDBY';
+        State.agents.add(agent);
+        check.classList.add('checked');
+        tag.classList.add('active');
+        Audio.select();
       }
 
-      await sleep(500);
-
-      for (let i = 0; i < agents.length; i++) {
-        const agent = agents[i];
-
-        agent.classList.remove('pending');
-        agent.classList.add('calling');
-        agent.querySelector('.p3-agent-status').textContent = 'CALLING';
-        Audio.agentCall(i);
-
-        await sleep(400 + Math.random() * 200);
-
-        agent.classList.remove('calling');
-        agent.classList.add('online');
-        agent.querySelector('.p3-agent-status').textContent = 'ONLINE';
-        Audio.agentOnline(i);
-
-        State.agentsOnline++;
-        $('p3Count').textContent = State.agentsOnline;
-        $('p3Count').classList.add('active');
-
-        await sleep(300);
-      }
-
-      await sleep(400);
-      $('footerAction').classList.add('ready');
-      Audio.confirm();
-    }
-
-    async function showIgnitionScreen() {
-      $('p4Name').textContent = State.name;
-      $('p4Summary').classList.add('show');
-
-      await sleep(500);
-
-      const badges = document.querySelectorAll('.p4-agent-badge');
-      for (let i = 0; i < badges.length; i++) {
-        await sleep(100);
-        badges[i].classList.add('show');
-      }
-
-      await sleep(400);
-      $('btnIgnite').classList.add('show');
+      updateModule('bpModAgents', 'panelAgents', State.agents.size > 0);
+      updateProgress();
     }
 
     async function runCountdown() {
       $('countdown').classList.add('active');
       const num = $('countdownNum');
 
-      await sleep(300);
+      await sleep(200);
 
       for (let i = 3; i >= 1; i--) {
         num.textContent = i;
         num.classList.remove('show', 'out');
-        await sleep(50);
+        await sleep(30);
         num.classList.add('show');
-        Audio.countdown(i);
-        await sleep(600);
+        Audio.count();
+        await sleep(400);
         num.classList.add('out');
         num.classList.remove('show');
-        await sleep(200);
+        await sleep(120);
       }
 
-      num.textContent = '0';
-      num.classList.remove('out');
-      num.classList.add('show');
-      Audio.ignite();
-      await sleep(300);
-    }
-
-    async function launchProject() {
-      $('countdown').classList.remove('active');
-      $('launch').classList.add('active');
-      $('launchFlash').classList.add('show');
-
-      await sleep(200);
-
-      $('launchName').textContent = State.name;
-      $('launchStatus').classList.add('show');
-
-      await sleep(400);
-      $('launchName').classList.add('show');
       Audio.launch();
-
-      await sleep(300);
-      $('launchSub').classList.add('show');
+      await sleep(150);
     }
 
-    $('dormant').addEventListener('click', awakenSystem);
-
-    $('inputName').addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        const val = $('inputName').value.trim();
-        if (val) {
-          State.name = val;
-          Audio.confirm();
-          $('p2Name').textContent = State.name;
-          toPhase(2);
-          setTimeout(() => $('inputVision').focus(), 500);
-        }
-      }
-    });
-
-    $('footerAction').addEventListener('click', async () => {
-      Audio.init();
-
-      if (State.phase === 1) {
-        const val = $('inputName').value.trim();
-        if (val) {
-          State.name = val;
-          Audio.confirm();
-          $('p2Name').textContent = State.name;
-          toPhase(2);
-          setTimeout(() => $('inputVision').focus(), 500);
-        }
-      } else if (State.phase === 2) {
-        State.vision = $('inputVision').value.trim();
-        Audio.confirm();
-        $('p3Project').textContent = State.name;
-        toPhase(3);
-        await sleep(300);
-        assembleAgents();
-      } else if (State.phase === 3) {
-        if (State.agentsOnline === 4) {
-          Audio.confirm();
-          toPhase(4);
-          await sleep(300);
-          showIgnitionScreen();
-        }
-      }
-    });
-
-    $('btnIgnite').addEventListener('click', async () => {
+    async function launch() {
       Audio.init();
       await runCountdown();
-      await launchProject();
+
+      $('countdown').classList.remove('active');
+      $('launchOverlay').classList.add('active');
+      $('launchFlash').classList.add('show');
+
+      await sleep(250);
+      $('launchLabel').classList.add('show');
+
+      await sleep(150);
+      $('launchName').textContent = State.name;
+      $('launchName').classList.add('show');
+
+      await sleep(350);
+      const container = $('launchAgents');
+      let i = 0;
+      State.agents.forEach(agent => {
+        const span = document.createElement('span');
+        span.className = 'launch-agent';
+        span.textContent = agent.toUpperCase();
+        container.appendChild(span);
+        setTimeout(() => span.classList.add('show'), i * 80);
+        i++;
+      });
+
+      Audio.complete();
+    }
+
+    // Events
+    $('inputName').addEventListener('input', onNameChange);
+    $('inputName').addEventListener('blur', () => { if (State.name) Audio.lock(); });
+
+    $('inputConcept').addEventListener('input', onConceptChange);
+    $('inputConcept').addEventListener('blur', () => { if (State.concept.length >= 20) Audio.lock(); });
+
+    document.querySelectorAll('.agent-check').forEach(check => {
+      check.addEventListener('click', () => {
+        Audio.init();
+        toggleAgent(check.dataset.agent);
+      });
     });
 
-    bootSequence();
+    $('projectForm').addEventListener('submit', e => {
+      e.preventDefault();
+      launch();
+    });
+
+    $('bpLaunchBtn').addEventListener('click', () => {
+      if ($('bpLaunchBtn').classList.contains('ready')) {
+        launch();
+      }
+    });
+
+    document.addEventListener('click', () => Audio.init(), { once: true });
   </script>
 </body>
 </html>
