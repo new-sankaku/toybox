@@ -136,48 +136,6 @@ export default function AgentsView():JSX.Element{
   }
  },[setAgents])
 
- const handleExecute=useCallback(async(agent:Agent)=>{
-  try{
-   const result=await agentApi.execute(agent.id)
-   if(result.success){
-    const updatedAgent=convertApiAgent(result.agent)
-    const currentAgents=useAgentStore.getState().agents
-    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
-    setAgents(newAgents)
-    addToast('success','エージェントを実行しました')
-   }
-  }catch(error:unknown){
-   const axiosErr=error as{response?:{status:number}}
-   if(axiosErr.response?.status===429){
-    addToast('error','レート制限に達しました。しばらくお待ちください。')
-   }else{
-    console.error('Failed to execute agent:',error)
-    addToast('error','エージェントの実行に失敗しました')
-   }
-  }
- },[setAgents,addToast])
-
- const handleExecuteWithWorkers=useCallback(async(agent:Agent)=>{
-  try{
-   const result=await agentApi.executeWithWorkers(agent.id)
-   if(result.success){
-    const updatedAgent=convertApiAgent(result.agent)
-    const currentAgents=useAgentStore.getState().agents
-    const newAgents=currentAgents.map(a=>a.id===updatedAgent.id?updatedAgent:a)
-    setAgents(newAgents)
-    addToast('success','エージェント（Workers含む）を実行しました')
-   }
-  }catch(error:unknown){
-   const axiosErr=error as{response?:{status:number}}
-   if(axiosErr.response?.status===429){
-    addToast('error','レート制限に達しました。しばらくお待ちください。')
-   }else{
-    console.error('Failed to execute agent with workers:',error)
-    addToast('error','エージェントの実行に失敗しました')
-   }
-  }
- },[setAgents,addToast])
-
  const handleRetryAll=useCallback(async()=>{
   const retryableAgents=projectAgents.filter(a=>['failed','interrupted'].includes(a.status))
   if(retryableAgents.length===0)return 0
@@ -211,8 +169,6 @@ export default function AgentsView():JSX.Element{
    onRetryAgent={handleRetry}
    onPauseAgent={handlePause}
    onResumeAgent={handleResume}
-   onExecuteAgent={handleExecute}
-   onExecuteWithWorkers={handleExecuteWithWorkers}
    onRetryAll={handleRetryAll}
    agentLogsMap={agentLogs}
   />

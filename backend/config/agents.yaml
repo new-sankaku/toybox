@@ -753,20 +753,6 @@ agent_assets:
       name: .eslintrc.json
       size: 3KB
 
-  environment_setup:
-    - progress: 30
-      type: config
-      name: package.json
-      size: 2KB
-    - progress: 50
-      type: config
-      name: tsconfig.json
-      size: 1KB
-    - progress: 70
-      type: config
-      name: .github/workflows/ci.yml
-      size: 2KB
-
   world:
     - progress: 25
       type: image

@@ -73,6 +73,10 @@ langgraph-studio/src/types/api-generated.ts
 # Test data (not tracked)
 testdata/
 
+# SQLite WAL mode files
+*.db-wal
+*.db-shm
+
 .claude/tool-history.jsonl
 tool-history.csv
 =*

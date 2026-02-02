@@ -9,6 +9,7 @@ import{useAgentStore}from'./stores/agentStore'
 import{useCheckpointStore}from'./stores/checkpointStore'
 import{useMetricsStore}from'./stores/metricsStore'
 import{useLogStore}from'./stores/logStore'
+import{useAssetStore}from'./stores/assetStore'
 import{useAgentDefinitionStore}from'./stores/agentDefinitionStore'
 import{useUIConfigStore}from'./stores/uiConfigStore'
 import{useNavigatorStore}from'./stores/navigatorStore'
@@ -37,6 +38,7 @@ function App():JSX.Element{
  const resetCheckpointStore=useCheckpointStore(s=>s.reset)
  const resetMetricsStore=useMetricsStore(s=>s.reset)
  const resetLogStore=useLogStore(s=>s.reset)
+ const resetAssetStore=useAssetStore(s=>s.reset)
  const{fetchDefinitions}=useAgentDefinitionStore()
  const{fetchSettings:fetchUISettings}=useUIConfigStore()
  const{showMessage}=useNavigatorStore()
@@ -150,9 +152,10 @@ function App():JSX.Element{
    resetCheckpointStore()
    resetMetricsStore()
    resetLogStore()
+   resetAssetStore()
    previousDataVersionRef.current=dataVersion
   }
- },[dataVersion,resetAgentStore,resetCheckpointStore,resetMetricsStore,resetLogStore])
+ },[dataVersion,resetAgentStore,resetCheckpointStore,resetMetricsStore,resetLogStore,resetAssetStore])
 
  const renderOtherContent=()=>{
   switch(activeTab){
