@@ -1,13 +1,14 @@
 @echo off
 chcp 65001 >nul
+set TOTAL=17
 echo ========================================
-echo   Build Check - All Validations
+echo   Build Check - All Validations (%TOTAL% checks)
 echo ========================================
 echo.
 
 cd /d "%~dp0"
 
-echo [1/17] Check for 'nul' files...
+echo [1/%TOTAL%] Check for 'nul' files...
 echo.
 cd /d "%~dp0backend"
 call venv\Scripts\activate.bat
@@ -21,7 +22,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [2/17] Backend - Syntax Check (all .py files)...
+echo [2/%TOTAL%] Backend - Syntax Check (all .py files)...
 echo.
 python scripts/build_checks.py syntax
 if %errorlevel% neq 0 (
@@ -33,7 +34,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [3/17] Backend - print() usage check...
+echo [3/%TOTAL%] Backend - print() usage check...
 echo.
 python scripts/build_checks.py print
 if errorlevel 1 goto print_error
@@ -47,7 +48,7 @@ pause
 exit /b 1
 :print_done
 
-echo [4/17] Backend - Ruff linter...
+echo [4/%TOTAL%] Backend - Ruff linter...
 echo.
 python -m ruff check . --exclude venv,__pycache__,tests,seeds,scripts --select E9,F63,F7,F82
 if %errorlevel% neq 0 (
@@ -58,7 +59,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [5/17] Backend - OpenAPI Spec Generation...
+echo [5/%TOTAL%] Backend - OpenAPI Spec Generation...
 echo.
 python scripts/generate_openapi.py
 if %errorlevel% neq 0 (
@@ -68,7 +69,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [6/17] Frontend - TypeScript Type Generation...
+echo [6/%TOTAL%] Frontend - TypeScript Type Generation...
 echo.
 cd /d "%~dp0\langgraph-studio"
 call npm run generate-types
@@ -79,7 +80,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [7/17] API Type Consistency Check...
+echo [7/%TOTAL%] API Type Consistency Check...
 echo.
 set "OPENAPI_JSON=%~dp0langgraph-studio\src\types\openapi.json"
 set "API_GENERATED=%~dp0langgraph-studio\src\types\api-generated.ts"
@@ -94,7 +95,7 @@ if "%OPENAPI_TIME%" gtr "%GENERATED_TIME%" (
 echo OK
 echo.
 
-echo [8/17] Frontend - ESLint...
+echo [8/%TOTAL%] Frontend - ESLint...
 echo.
 call npm run lint
 if %errorlevel% neq 0 (
@@ -104,7 +105,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [9/17] Frontend - TypeScript Type Check...
+echo [9/%TOTAL%] Frontend - TypeScript Type Check...
 echo.
 call npm run typecheck
 if %errorlevel% neq 0 (
@@ -114,7 +115,7 @@ if %errorlevel% neq 0 (
 )
 echo.
 
-echo [10/17] Frontend - Surface class usage...
+echo [10/%TOTAL%] Frontend - Surface class usage...
 echo.
 node scripts/build_checks.cjs surface
 if %errorlevel% neq 0 (
@@ -125,7 +126,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [11/17] Frontend - Color emoji check...
+echo [11/%TOTAL%] Frontend - Color emoji check...
 echo.
 node scripts/build_checks.cjs emoji
 if %errorlevel% neq 0 (
@@ -136,7 +137,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [12/17] Frontend - Inline style check...
+echo [12/%TOTAL%] Frontend - Inline style check...
 echo.
 node scripts/build_checks.cjs inline-style
 if %errorlevel% neq 0 (
@@ -147,7 +148,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [13/17] Backend - Schema registration chain...
+echo [13/%TOTAL%] Backend - Schema registration chain...
 echo.
 cd /d "%~dp0backend"
 python scripts/build_checks.py schema
@@ -160,7 +161,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [14/17] Frontend - WebSocket handler check...
+echo [14/%TOTAL%] Frontend - WebSocket handler check...
 echo.
 cd /d "%~dp0\langgraph-studio"
 node scripts/build_checks.cjs websocket
@@ -173,7 +174,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [15/17] Backend/Frontend - WebSocket events consistency...
+echo [15/%TOTAL%] Backend/Frontend - WebSocket events consistency...
 echo.
 cd /d "%~dp0backend"
 python scripts/build_checks.py websocket-events
@@ -186,7 +187,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [16/17] Backend - Schema API usage check...
+echo [16/%TOTAL%] Backend - Schema API usage check...
 echo.
 python scripts/build_checks.py schema-usage
 if %errorlevel% neq 0 (
@@ -195,7 +196,7 @@ if %errorlevel% neq 0 (
 echo OK
 echo.
 
-echo [17/17] Backend - Data flow type check (Pydantic ↔ TypeScript)...
+echo [17/%TOTAL%] Backend - Data flow type check (Pydantic ↔ TypeScript)...
 echo.
 python scripts/analyze_dataflow.py --ci
 if %errorlevel% neq 0 (
@@ -209,7 +210,7 @@ echo OK
 echo.
 
 echo ========================================
-echo   All 17 checks passed!
+echo   All %TOTAL% checks passed!
 echo ========================================
 echo.
 echo Note: Run "npm run build" for full build check before commit.
