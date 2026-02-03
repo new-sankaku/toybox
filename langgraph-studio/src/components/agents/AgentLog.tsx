@@ -23,7 +23,7 @@ const levelConfig:Record<LogLevel,{icon:typeof Info;color:string;label:string}>=
  },
  warn:{
   icon:AlertTriangle,
-  color:'text-nier-accent-yellow',
+  color:'text-nier-accent-orange',
   label:'WARN'
  },
  error:{

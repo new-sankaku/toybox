@@ -603,7 +603,7 @@ export default function DataView():JSX.Element{
           className={cn(
            'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
            filterType===type
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             :'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setFilterType(type)}
@@ -633,7 +633,7 @@ export default function DataView():JSX.Element{
           className={cn(
            'flex items-center justify-between px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
            approvalFilter===status
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             :'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setApprovalFilter(status)}
@@ -657,7 +657,7 @@ export default function DataView():JSX.Element{
         onClick={()=>setViewMode('grid')}
         className={cn(
          'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
-         viewMode==='grid'?'bg-nier-bg-selected text-nier-text-main':'text-nier-text-light hover:bg-nier-bg-hover'
+         viewMode==='grid'?'nier-surface-selected':'text-nier-text-light hover:bg-nier-bg-hover'
 )}
        >
         <Grid size={14}/>
@@ -667,7 +667,7 @@ export default function DataView():JSX.Element{
         onClick={()=>setViewMode('list')}
         className={cn(
          'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
-         viewMode==='list'?'bg-nier-bg-selected text-nier-text-main':'text-nier-text-light hover:bg-nier-bg-hover'
+         viewMode==='list'?'nier-surface-selected':'text-nier-text-light hover:bg-nier-bg-hover'
 )}
        >
         <List size={14}/>
@@ -745,7 +745,7 @@ export default function DataView():JSX.Element{
           </div>
           <button
            onClick={()=>handlePlayAudio(selectedAsset.id,selectedAsset.url)}
-           className="px-6 py-2 bg-nier-bg-panel border border-nier-border-dark text-nier-text-main flex items-center gap-2 hover:bg-nier-bg-main transition-colors"
+           className="px-6 py-2 nier-surface-panel border border-nier-border-dark flex items-center gap-2 hover:bg-nier-bg-main transition-colors"
           >
            {playingAudio===selectedAsset.id?(
             <>
@@ -793,9 +793,9 @@ export default function DataView():JSX.Element{
             code:({children,className})=>{
              const isBlock=className?.includes('language-')
              return isBlock?(
-              <code className="block bg-nier-bg-main p-4 text-nier-caption font-mono text-nier-text-main overflow-x-auto">{children}</code>
+              <code className="block nier-surface-main p-4 text-nier-caption font-mono overflow-x-auto">{children}</code>
 ):(
-              <code className="bg-nier-bg-main px-1 py-0.5 text-nier-caption font-mono text-nier-text-main">{children}</code>
+              <code className="nier-surface-main px-1 py-0.5 text-nier-caption font-mono">{children}</code>
 )
             },
             pre:({children})=><pre className="mb-4">{children}</pre>,
@@ -889,7 +889,7 @@ export default function DataView():JSX.Element{
            value={regenFeedback}
            onChange={(e)=>setRegenFeedback(e.target.value)}
            placeholder="例: 背景をもう少し暗めにして..."
-           className="w-full h-24 p-2 text-nier-small bg-nier-bg-main border border-nier-border-light text-nier-text-main resize-none focus:outline-none focus:border-nier-accent-orange"
+           className="w-full h-24 p-2 text-nier-small nier-surface-main border border-nier-border-light resize-none focus:outline-none focus:border-nier-accent-orange"
           />
           <Button
            size="sm"

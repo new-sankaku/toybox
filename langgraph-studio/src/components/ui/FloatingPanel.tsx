@@ -134,7 +134,7 @@ export function FloatingPanel({
    {title&&(
     <div
      className={cn(
-      'flex items-center justify-between bg-nier-bg-header text-nier-text-header px-4 py-2 flex-shrink-0',
+      'flex items-center justify-between nier-surface-header px-4 py-2 flex-shrink-0',
       'cursor-grab active:cursor-grabbing'
 )}
      onMouseDown={handleMouseDown}

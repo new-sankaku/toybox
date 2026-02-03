@@ -103,7 +103,7 @@ export function CheckpointCard({
         {checkpoint.output.tokensUsed.toLocaleString()}tk
        </span>
 )}
-      <div className="px-1.5 py-0.5 text-nier-caption tracking-nier bg-nier-bg-selected text-nier-text-light border border-nier-border-light">
+      <div className="px-1.5 py-0.5 text-nier-caption tracking-nier nier-surface-selected-muted border border-nier-border-light">
        {statusText}
       </div>
       <Button

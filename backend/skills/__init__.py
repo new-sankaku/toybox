@@ -1,5 +1,5 @@
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
-from .registry import SkillRegistry,get_skill_registry
+from .registry import SkillRegistry,get_skill_registry,register_service_skills
 from .file_skills import FileReadSkill,FileWriteSkill,FileEditSkill,FileListSkill,FileDeleteSkill
 from .bash_skill import BashExecuteSkill
 from .python_skill import PythonExecuteSkill
@@ -10,6 +10,14 @@ from .search_skills import CodeSearchSkill,FileSearchSkill
 from .web_skills import WebFetchSkill
 from .cache_skills import FileMetadataSkill
 from .executor import SkillExecutor,SkillExecutionConfig,create_skill_executor
+from .knowledge_skills import AgentMemorySkill,AgentOutputQuerySkill
+from .git_skills import GitOperationSkill
+from .validation_skills import SchemaValidateSkill,DiffPatchSkill
+from .analysis_skills import DependencyGraphSkill
+from .game_skills import GameDataTransformSkill,SpriteSheetSkill
+from .progress_skills import TaskProgressSkill
+from .orchestration_skills import SpawnWorkerSkill
+from .asset_inspect_skill import AssetInspectSkill
 
 __all__=[
  "Skill",
@@ -19,6 +27,7 @@ __all__=[
  "SkillParameter",
  "SkillRegistry",
  "get_skill_registry",
+ "register_service_skills",
  "FileReadSkill",
  "FileWriteSkill",
  "FileEditSkill",
@@ -41,4 +50,15 @@ __all__=[
  "SkillExecutor",
  "SkillExecutionConfig",
  "create_skill_executor",
+ "AgentMemorySkill",
+ "AgentOutputQuerySkill",
+ "GitOperationSkill",
+ "SchemaValidateSkill",
+ "DiffPatchSkill",
+ "DependencyGraphSkill",
+ "GameDataTransformSkill",
+ "SpriteSheetSkill",
+ "TaskProgressSkill",
+ "SpawnWorkerSkill",
+ "AssetInspectSkill",
 ]

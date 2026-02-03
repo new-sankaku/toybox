@@ -55,7 +55,7 @@ function ComponentItem({component}:ComponentItemProps){
 )}
      </div>
      <div className="mt-1">
-      <pre className="text-nier-caption text-nier-text-light whitespace-pre-wrap font-mono bg-nier-bg-panel p-2 border border-nier-border-light overflow-x-auto">
+      <pre className="text-nier-caption whitespace-pre-wrap font-mono nier-surface-panel-muted p-2 border border-nier-border-light overflow-x-auto">
        {expanded?component.content:contentPreview}
        {hasMore&&!expanded&&'...'}
       </pre>
@@ -78,7 +78,7 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
  return(
   <div className="space-y-3">
    {data.hasQualityFeedback&&(
-    <div className="flex items-start gap-2 px-3 py-2 border border-nier-accent-orange bg-nier-bg-panel">
+    <div className="flex items-start gap-2 px-3 py-2 border border-nier-accent-orange nier-surface-panel">
      <AlertTriangle size={14} className="text-nier-accent-orange flex-shrink-0 mt-0.5"/>
      <p className="text-nier-caption text-nier-text-main">
       このエージェントは品質チェックフィードバックを受けてリトライされました
@@ -123,13 +123,13 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
    </CollapsibleSection>
 
    {data.principles.length>0&&(
-    <div className="px-3 py-2 bg-nier-bg-panel border border-nier-border-light">
+    <div className="px-3 py-2 nier-surface-panel border border-nier-border-light">
      <p className="text-nier-caption text-nier-text-light mb-1">適用原則:</p>
      <div className="flex flex-wrap gap-1">
       {data.principles.map((p,idx)=>(
        <span
         key={idx}
-        className="px-2 py-0.5 text-nier-caption bg-nier-bg-selected text-nier-text-main border border-nier-border-light"
+        className="px-2 py-0.5 text-nier-caption nier-surface-selected border border-nier-border-light"
        >
         {p}
        </span>
@@ -139,7 +139,7 @@ export function SystemPromptPanel({data}:SystemPromptPanelProps):JSX.Element{
 )}
 
    {data.basePromptFile&&(
-    <div className="px-3 py-2 bg-nier-bg-panel border border-nier-border-light">
+    <div className="px-3 py-2 nier-surface-panel border border-nier-border-light">
      <p className="text-nier-caption text-nier-text-light">
       ベースプロンプトファイル:<span className="font-mono">{data.basePromptFile}</span>
      </p>

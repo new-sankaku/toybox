@@ -149,7 +149,7 @@ export function CodeViewer({
       monaco.editor.defineTheme('nier-theme',nierTheme)
      }}
      loading={
-      <div className="flex items-center justify-center h-full bg-nier-bg-main text-nier-text-light">
+      <div className="flex items-center justify-center h-full nier-surface-main-muted">
        Loading editor...
       </div>
      }

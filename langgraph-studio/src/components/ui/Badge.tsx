@@ -7,11 +7,10 @@ const badgeVariants=cva(
  {
   variants:{
    variant:{
-    default:'bg-nier-bg-selected text-nier-text-main',
+    default:'nier-surface-selected',
     outline:'border border-nier-border-dark text-nier-text-main',
     red:'bg-nier-accent-red/20 text-nier-accent-red border border-nier-accent-red/40',
     orange:'bg-nier-accent-orange/20 text-nier-accent-orange border border-nier-accent-orange/40',
-    yellow:'bg-nier-accent-yellow/20 text-nier-accent-yellow border border-nier-accent-yellow/40',
     green:'bg-nier-accent-green/20 text-nier-accent-green border border-nier-accent-green/40',
     blue:'bg-nier-accent-blue/20 text-nier-accent-blue border border-nier-accent-blue/40'
    }

@@ -21,6 +21,7 @@ export interface Checkpoint{
  type:string
  title:string
  description:string|null
+ contentCategory?:string|null
  output:CheckpointOutput
  status:CheckpointStatus
  feedback:string|null

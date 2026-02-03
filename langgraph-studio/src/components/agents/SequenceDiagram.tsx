@@ -64,7 +64,7 @@ function buildCallEntries(
  const entries:CallEntry[]=[]
  for(const msg of messages){
   if(msg.type!=='request')continue
-  const response=msg.pairId?responseMap.get(msg.pairId):null
+  const response=msg.pairId?responseMap.get(msg.pairId)??null:null
   const agentId=msg.from
   const agentLabel=labelMap.get(agentId)||agentId
   const agentRole=roleMap.get(agentId)||''
@@ -103,15 +103,13 @@ function groupByDate(entries:CallEntry[],workerIds:Set<string>):DateGroup[]{
 function CallEntryRow({
  entry,
  callIndex,
- totalCalls,
  onClick
 }:{
  entry:CallEntry
  callIndex:number
- totalCalls:number
  onClick?:(msg:SequenceMessage)=>void
 }){
- const{request,response,agentRole,agentLabel}=entry
+ const{request,response,agentRole}=entry
  const timeStr=formatTimeOnly(request.timestamp)
  const model=response?.model||request.model||'Unknown'
  const durationStr=formatDuration(response?.durationMs||null)
@@ -129,38 +127,29 @@ function CallEntryRow({
  return(
   <div
    className={cn(
-    'py-2 border-b border-nier-border-light',
+    'py-1.5 border-b border-nier-border-light',
     clickable&&'cursor-pointer hover:bg-nier-bg-main/40 transition-colors'
 )}
    onClick={clickable?handleClick:undefined}
   >
-   <div className="flex items-center gap-2 text-[11px] font-mono">
-    <span className="text-nier-text-light">{timeStr}</span>
-    <span className="text-nier-text-light">|</span>
-    <span className="text-nier-text-main">LLM {model}</span>
-    <span className="text-nier-text-light">|</span>
-    <span className={cn('text-nier-text-main',isError&&'text-nier-accent-red')}>
-     {agentRole}
-    </span>
-   </div>
-   <div className="flex items-center gap-2 text-[10px] font-mono text-nier-text-light mt-0.5">
-    {durationStr&&<span>{durationStr}</span>}
-    {durationStr&&<span>|</span>}
-    <span>Call {callIndex}回</span>
-    <span>|</span>
-    <span>Token In {formatTokens(tokensIn)}/Out {formatTokens(tokensOut)}</span>
-    {cost!==null&&(
-     <>
-      <span>/</span>
-      <span>{formatCost(cost)}</span>
-     </>
-)}
-   </div>
    {label&&(
-    <div className={cn('text-[11px] mt-1',isError?'text-nier-accent-red':'text-nier-text-main')}>
+    <div className={cn('text-[11px] font-mono truncate',isError?'text-nier-accent-red':'text-nier-text-main')}>
      {label}
     </div>
 )}
+   <div className="flex items-center gap-1.5 text-[10px] font-mono text-nier-text-light">
+    <span>{timeStr}</span>
+    <span>|</span>
+    <span>{model}</span>
+    <span>|</span>
+    <span className={cn(isError&&'text-nier-accent-red')}>{agentRole}</span>
+    <span>|</span>
+    {durationStr&&<><span>{durationStr}</span><span>|</span></>}
+    <span>Call {callIndex}回</span>
+    <span>|</span>
+    <span>In {formatTokens(tokensIn)}/Out {formatTokens(tokensOut)}</span>
+    {cost!==null&&<><span>/</span><span>{formatCost(cost)}</span></>}
+   </div>
   </div>
 )
 }
@@ -204,7 +193,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
  return(
   <div className="w-full bg-nier-bg-panel border border-nier-border-light font-mono">
    {(totalIn>0||totalOut>0||totalDur)&&(
-    <div className="border-b border-nier-border-light px-3 py-1.5 text-[10px] text-nier-text-light bg-nier-bg-selected">
+    <div className="border-b border-nier-border-light px-3 py-1.5 text-[10px] nier-surface-selected-muted">
      Total: Token In {formatTokens(totalIn)}/Out {formatTokens(totalOut)}
      {totalDur?` / ${totalDur}`:''}
     </div>
@@ -212,7 +201,7 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
    <div className="max-h-sequence-panel overflow-y-auto">
     {dateGroups.map((group)=>(
      <div key={group.dateKey}>
-      <div className="px-3 py-1 text-[11px] text-nier-text-main bg-nier-bg-selected border-b border-nier-border-light">
+      <div className="px-3 py-1 text-[11px] nier-surface-selected border-b border-nier-border-light">
        {group.dateKey} {group.workerCount>0&&`Worker ${group.workerCount}体`}
       </div>
       <div className="px-3">
@@ -223,7 +212,6 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
           key={entry.request.id}
           entry={entry}
           callIndex={runningCallIndex}
-          totalCalls={entries.length}
           onClick={onMessageClick}
          />
 )

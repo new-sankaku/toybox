@@ -6,11 +6,13 @@ import{useAgentStore}from'@/stores/agentStore'
 import{useCheckpointStore}from'@/stores/checkpointStore'
 import{useMetricsStore}from'@/stores/metricsStore'
 import{useAssetStore}from'@/stores/assetStore'
+import{useInterventionStore}from'@/stores/interventionStore'
 import{useLogStore}from'@/stores/logStore'
 import{useAIStatsStore}from'@/stores/aiStatsStore'
-import{metricsApi,agentApi,checkpointApi,assetApi}from'@/services/apiService'
+import{metricsApi,agentApi,checkpointApi,interventionApi,assetApi,logsApi}from'@/services/apiService'
 import type{Agent}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
+import type{Intervention}from'@/types/intervention'
 import type{ProjectMetrics}from'@/types/project'
 import{cn}from'@/lib/utils'
 import{Progress}from'@/components/ui/Progress'
@@ -52,12 +54,6 @@ function formatFileSize(sizeStr:string):number{
  }
 }
 
-function formatSize(bytes:number):string{
- if(bytes>=1024*1024*1024)return`${(bytes/(1024*1024*1024)).toFixed(1)}GB`
- if(bytes>=1024*1024)return`${(bytes/(1024*1024)).toFixed(1)}MB`
- if(bytes>=1024)return`${(bytes/1024).toFixed(1)}KB`
- return`${bytes}B`
-}
 
 export default function ActivitySidebar():JSX.Element{
  const{currentProject}=useProjectStore()
@@ -65,34 +61,44 @@ export default function ActivitySidebar():JSX.Element{
  const{showMessage}=useNavigatorStore()
  const agentStore=useAgentStore()
  const checkpointStore=useCheckpointStore()
+ const interventionStore=useInterventionStore()
  const metricsStore=useMetricsStore()
  const assetStore=useAssetStore()
  const logStore=useLogStore()
  const aiStatsStore=useAIStatsStore()
  const[isCollapsed,setIsCollapsed]=useState(false)
+ const{dataVersion}=useProjectStore()
  const lastProjectIdRef=useRef<string|null>(null)
+ const lastDataVersionRef=useRef<number>(dataVersion)
 
  useEffect(()=>{
   if(!currentProject){
    lastProjectIdRef.current=null
    return
   }
-  if(lastProjectIdRef.current===currentProject.id){
+  const isSameProject=lastProjectIdRef.current===currentProject.id
+  const isSameVersion=lastDataVersionRef.current===dataVersion
+  if(isSameProject&&isSameVersion){
    return
   }
   lastProjectIdRef.current=currentProject.id
+  lastDataVersionRef.current=dataVersion
   Promise.all([
    metricsApi.getByProject(currentProject.id),
    agentApi.listByProject(currentProject.id),
    checkpointApi.listByProject(currentProject.id),
-   assetApi.listByProject(currentProject.id)
-]).then(([metricsData,agentsData,checkpointsData,assetsData])=>{
+   interventionApi.listByProject(currentProject.id),
+   assetApi.listByProject(currentProject.id),
+   logsApi.getByProject(currentProject.id)
+]).then(([metricsData,agentsData,checkpointsData,interventionsData,assetsData,logsData])=>{
    metricsStore.setProjectMetrics(metricsData as ProjectMetrics)
    agentStore.setAgents(agentsData as Agent[])
    checkpointStore.setCheckpoints(checkpointsData as Checkpoint[])
+   interventionStore.setInterventions(interventionsData as Intervention[])
    assetStore.setAssets(assetsData)
+   logStore.setLogs(logsData)
   }).catch(err=>console.error('Failed to fetch initial sidebar data:',err))
- },[currentProject?.id])
+ },[currentProject?.id,dataVersion])
 
  const agents:Agent[]=currentProject
   ?agentStore.agents.filter(a=>a.projectId===currentProject.id)
@@ -263,39 +269,39 @@ export default function ActivitySidebar():JSX.Element{
      <div className="flex-1 overflow-y-auto">
       {/*Summary List*/}
       <div className="px-2 py-1.5 text-[11px] space-y-1">
-      <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">Token</span>
        <span className="text-nier-text-main">{metrics?formatTokenCount(metrics.totalTokensUsed) : 0}</span>
       </div>
-      <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-yellow/30')}>
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">料金</span>
        <span className="text-nier-text-main">${metrics?formatCost(metrics.totalTokensUsed) : '0'}</span>
       </div>
-      <div className={cn('flex justify-between transition-colors duration-300',highlights.agent&&'bg-nier-accent-yellow/30')}>
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.agent&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">Agent</span>
        <span className="text-nier-text-main">{completedAgents}/{totalAgents}</span>
       </div>
-      <div className={cn('flex justify-between transition-colors duration-300',highlights.elapsed&&'bg-nier-accent-yellow/30')}>
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.elapsed&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">経過時間</span>
        <span className="text-nier-text-main">{metrics?formatTime(metrics.elapsedTimeSeconds) : '-'}</span>
       </div>
-      <div className={cn('flex justify-between transition-colors duration-300',highlights.remaining&&'bg-nier-accent-yellow/30')}>
+      <div className={cn('flex justify-between transition-colors duration-300',highlights.remaining&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">残り時間</span>
        <span className="text-nier-text-main">{metrics?.estimatedRemainingSeconds?formatTime(metrics.estimatedRemainingSeconds) : '-'}</span>
       </div>
-      <button onClick={()=>setActiveTab('checkpoints')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.checkpoints&&'bg-nier-accent-yellow/30')}>
+      <button onClick={()=>setActiveTab('checkpoints')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.checkpoints&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">承認待ち</span>
        <span className="text-nier-text-main">{pendingCheckpoints}件</span>
       </button>
-      <button onClick={()=>setActiveTab('data')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.assets&&'bg-nier-accent-yellow/30')}>
+      <button onClick={()=>setActiveTab('data')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.assets&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">生成素材承認待ち</span>
        <span className="text-nier-text-main">{pendingAssets}件</span>
       </button>
-      <button onClick={()=>setActiveTab('logs')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.logs&&'bg-nier-accent-yellow/30')}>
+      <button onClick={()=>setActiveTab('logs')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.logs&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">Log</span>
        <span className="text-nier-text-main">{logs.length}件</span>
       </button>
-      <button onClick={()=>setActiveTab('agents')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.generating&&'bg-nier-accent-yellow/30')}>
+      <button onClick={()=>setActiveTab('agents')} className={cn('w-full flex justify-between hover:bg-nier-bg-hover px-0.5 -mx-0.5 transition-colors duration-300',highlights.generating&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">AI生成中</span>
        <span className="text-nier-text-main">{generatingCount}件</span>
       </button>

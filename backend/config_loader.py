@@ -540,7 +540,9 @@ def load_principle(name:str)->str:
     return content
 
 
-def get_agent_principles(agent_type:str)->List[str]:
+def get_agent_principles(agent_type:str,overrides:Optional[Dict[str,List[str]]]=None)->List[str]:
+    if overrides and agent_type in overrides:
+        return list(overrides[agent_type])
     config=get_agents_config()
     mapping=config.get("agent_principles",{})
     principles=mapping.get(agent_type)
@@ -549,8 +551,8 @@ def get_agent_principles(agent_type:str)->List[str]:
     return principles
 
 
-def load_principles_for_agent(agent_type:str,enabled_principles:Optional[List[str]]=None)->str:
-    principle_names=get_agent_principles(agent_type)
+def load_principles_for_agent(agent_type:str,enabled_principles:Optional[List[str]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->str:
+    principle_names=get_agent_principles(agent_type,overrides=principle_overrides)
     if enabled_principles is not None:
         principle_names=[p for p in principle_names if p in enabled_principles]
     if not principle_names:

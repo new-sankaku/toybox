@@ -74,7 +74,7 @@ class PrincipleBasedQualityEvaluator:
  def __init__(self):
   self._settings=get_principle_settings()
 
- async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None)->Dict[str,Any]:
+ async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->Dict[str,Any]:
   from .api_runner import QualityCheckResult
   content=output.get("content","")
   settings=dict(self._settings)
@@ -92,7 +92,7 @@ class PrincipleBasedQualityEvaluator:
     improvement_suggestions=rule_result.get("issues",[]),
    )
 
-  principles_text=load_principles_for_agent(agent_type,enabled_principles)
+  principles_text=load_principles_for_agent(agent_type,enabled_principles,principle_overrides)
   if not principles_text:
    return QualityCheckResult(passed=True,score=1.0)
 

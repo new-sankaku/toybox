@@ -174,6 +174,130 @@ function checkWebSocketHandlers() {
   return true;
 }
 
+function checkSidebarInit() {
+  const sidebarPath = path.join(__dirname, '..', 'src', 'components', 'layout', 'ActivitySidebar.tsx');
+  const content = fs.readFileSync(sidebarPath, 'utf-8');
+
+  const storeVarPattern = /const\s+(\w+Store)\s*=\s*use(\w+Store)\(\)/g;
+  const storeVars = new Map();
+  let m;
+  while ((m = storeVarPattern.exec(content)) !== null) {
+    storeVars.set(m[1], m[2]);
+  }
+
+  const thenMatch = content.match(/\.then\(\(\[([\s\S]*?)\]\)\s*=>\s*\{([\s\S]*?)\}\)/);
+  if (!thenMatch) {
+    console.log('  .then() handler not found in ActivitySidebar.tsx');
+    return false;
+  }
+  const thenBody = thenMatch[2];
+
+  const storeSetPattern = /(\w+Store)\.set\w+\(/g;
+  const initializedStores = new Set();
+  while ((m = storeSetPattern.exec(thenBody)) !== null) {
+    initializedStores.add(m[1]);
+  }
+
+  const nonDataStores = new Set(['navigationStore', 'navigatorStore', 'aiStatsStore']);
+  const dataReadStores = new Set();
+  for (const [varName] of storeVars) {
+    if (nonDataStores.has(varName)) continue;
+    const accessPattern = new RegExp(`${varName}\\.(\\w+)(?!\\()`, 'g');
+    while ((m = accessPattern.exec(content)) !== null) {
+      if (!m[1].startsWith('set') && !m[1].startsWith('reset') && !m[1].startsWith('update')) {
+        dataReadStores.add(varName);
+        break;
+      }
+    }
+  }
+
+  const errors = [];
+  for (const storeName of dataReadStores) {
+    if (!initializedStores.has(storeName)) {
+      const originalName = storeVars.get(storeName) || storeName;
+      errors.push(`  ${storeName} (${originalName}) is read but not initialized in Promise.all`);
+    }
+  }
+
+  if (errors.length > 0) {
+    console.log('  Sidebar stores not initialized on startup:');
+    errors.forEach(e => console.log(e));
+    return false;
+  }
+  return true;
+}
+
+function checkStateSyncConsistency() {
+  const wsTypesPath = path.join(__dirname, '..', 'src', 'types', 'websocket.ts');
+  const wsServicePath = path.join(__dirname, '..', 'src', 'services', 'websocketService.ts');
+  const appPath = path.join(__dirname, '..', 'src', 'App.tsx');
+
+  const wsTypesContent = fs.readFileSync(wsTypesPath, 'utf-8');
+  const wsServiceContent = fs.readFileSync(wsServicePath, 'utf-8');
+  const appContent = fs.readFileSync(appPath, 'utf-8');
+
+  const syncMatch = wsTypesContent.match(/interface StateSyncData\s*\{([\s\S]*?)\n\}/);
+  if (!syncMatch) {
+    console.log('  StateSyncData interface not found in websocket.ts');
+    return false;
+  }
+
+  const metaFields = new Set(['status', 'sid', 'project']);
+  const fieldPattern = /^\s*(\w+)\??:/gm;
+  const dataFields = [];
+  let m;
+  while ((m = fieldPattern.exec(syncMatch[1])) !== null) {
+    if (!metaFields.has(m[1])) {
+      dataFields.push(m[1]);
+    }
+  }
+
+  const syncHandlerMatch = wsServiceContent.match(
+    /this\.socket\.on\('connection:state_sync'[\s\S]*?(?=this\.socket\.on\('agent:started')/
+  );
+  if (!syncHandlerMatch) {
+    console.log('  connection:state_sync handler not found in websocketService.ts');
+    return false;
+  }
+  const syncHandler = syncHandlerMatch[0];
+
+  const errors = [];
+
+  for (const field of dataFields) {
+    const accessPattern = new RegExp(`data\\.${field}\\b`);
+    if (!accessPattern.test(syncHandler)) {
+      errors.push(`  StateSyncData.${field} is defined but not processed in connection:state_sync handler`);
+    }
+  }
+
+  const storeResetMatch = appContent.match(/if\s*\(previousDataVersionRef[\s\S]*?\n\s*\}\s*\n\s*\},\s*\[([^\]]+)\]/);
+  if (storeResetMatch) {
+    const resetBlock = storeResetMatch[0];
+    const storeMapping = {
+      agents: 'AgentStore',
+      checkpoints: 'CheckpointStore',
+      interventions: 'InterventionStore',
+      metrics: 'MetricsStore',
+      logs: 'LogStore',
+    };
+    for (const field of dataFields) {
+      const expectedStore = storeMapping[field];
+      if (!expectedStore) continue;
+      const resetPattern = new RegExp(`reset${expectedStore}`, 'i');
+      if (!resetPattern.test(resetBlock)) {
+        errors.push(`  ${expectedStore} is not reset in App.tsx dataVersion handler (needed for StateSyncData.${field})`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    console.log('  State sync consistency errors:');
+    errors.forEach(e => console.log(e));
+    return false;
+  }
+  return true;
+}
+
 let result = true;
 
 switch (CHECK_TYPE) {
@@ -189,8 +313,14 @@ switch (CHECK_TYPE) {
   case 'websocket':
     result = checkWebSocketHandlers();
     break;
+  case 'sidebar-init':
+    result = checkSidebarInit();
+    break;
+  case 'state-sync':
+    result = checkStateSyncConsistency();
+    break;
   default:
-    console.log('Usage: build_checks.cjs <surface|emoji|inline-style|websocket>');
+    console.log('Usage: build_checks.cjs <surface|emoji|inline-style|websocket|sidebar-init|state-sync>');
     process.exit(1);
 }
 

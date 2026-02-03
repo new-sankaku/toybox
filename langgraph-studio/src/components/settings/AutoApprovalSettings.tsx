@@ -79,7 +79,7 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
           'px-3 py-1 text-nier-caption border transition-colors min-w-[52px]',
           changed?'border-nier-accent-red':'',
           rule.enabled
-           ?cn('bg-nier-bg-selected font-medium',changed?'border-nier-accent-red text-nier-accent-red':'border-nier-border-dark text-nier-text-main')
+           ?cn('nier-surface-selected font-medium',changed?'border-nier-accent-red text-nier-accent-red':'border-nier-border-dark')
            :cn('hover:bg-nier-bg-panel',changed?'border-nier-accent-red text-nier-accent-red':'border-nier-border-light text-nier-text-light')
 )}
         >
@@ -89,7 +89,7 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
 )})}
     </div>
 
-    <div className="p-3 bg-nier-bg-panel border border-nier-border-light text-nier-caption text-nier-text-light">
+    <div className="p-3 nier-surface-panel-muted border border-nier-border-light text-nier-caption">
      ONにすると、該当カテゴリのCHECKPOINTは人間の確認なしで自動的に承認されます。
     </div>
    </CardContent>

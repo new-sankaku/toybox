@@ -3,12 +3,12 @@ WebSocket Event Data Flow Map
 Each entry maps:event->direction,data fields,TS type,emit sources
 
 Fields:
-  event:     Event name
+  event:    Event name
   direction:"server_to_client"|"client_to_server"|"bidirectional"
-  ts_type:   TypeScript type from WebSocketEventMap
+  ts_type:  TypeScript type from WebSocketEventMap
   data_fields:Dict of field_name->python_type_hint
-  room:      Room scope ("project:{id}","sid","global")
-  sources:   List of"file::function" where this event is emitted
+  room:     Room scope ("project:{id}","sid","global")
+  sources:  List of"file::function" where this event is emitted
 """
 
 WS_EVENTS=[
@@ -23,6 +23,7 @@ WS_EVENTS=[
             "agents":"Optional[list]",
             "checkpoints":"Optional[list]",
             "metrics":"Optional[dict]",
+            "logs":"Optional[list]",
         },
         "room":"sid",
         "sources":[
@@ -316,8 +317,20 @@ WS_EVENTS=[
             "handlers/websocket.py::broadcast_navigator_message",
         ],
     },
+    {
+        "event":"system_log:created",
+        "direction":"server_to_client",
+        "ts_type":"{projectId: string; log: ApiSystemLog}",
+        "data_fields":{
+            "projectId":"str",
+            "log":"dict",
+        },
+        "room":"project:{id}",
+        "sources":[
+            "datastore.py::_add_system_log_internal",
+        ],
+    },
 
-                              
     {
         "event":"subscribe:project",
         "direction":"client_to_server",

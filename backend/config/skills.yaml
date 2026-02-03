@@ -355,6 +355,145 @@ skills:
     restrictions:
       max_results: 100
 
+  agent_memory:
+    enabled: true
+    description: "エージェント実行中のキー・バリューメモリを管理します"
+    category: knowledge
+    allowed_agents: all
+    restrictions:
+      max_entries: 1000
+
+  agent_output_query:
+    enabled: true
+    description: "他のエージェントの出力結果を参照します（read-only）"
+    category: knowledge
+    allowed_agents:
+      - concept_leader
+      - design_leader
+      - scenario_leader
+      - character_leader
+      - world_leader
+      - code_leader
+      - asset_leader
+      - integrator_leader
+      - tester_leader
+      - reviewer_leader
+      - architecture_leader
+    restrictions:
+      max_results: 50
+
+  dependency_graph:
+    enabled: true
+    description: "プロジェクトの依存関係グラフを解析します（import文解析）"
+    category: project
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - code_review_worker
+      - architecture_leader
+    restrictions:
+      max_files: 500
+      timeout: 60
+
+  git_operation:
+    enabled: true
+    description: "Gitリポジトリ操作を実行します（status/diff/log/blame/commit）"
+    category: execute
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - code_review_worker
+      - build_worker
+    restrictions:
+      timeout: 60
+      blocked_commands:
+        - push
+        - force-push
+        - reset --hard
+        - clean -f
+        - checkout .
+
+  schema_validate:
+    enabled: true
+    description: "JSON/YAMLデータをスキーマに対してバリデーションします"
+    category: project
+    allowed_agents:
+      - code_worker
+      - build_worker
+      - architecture_leader
+      - integrator_leader
+    restrictions:
+      max_data_size: 1048576
+
+  asset_inspect:
+    enabled: true
+    description: "画像・音声アセットのメタデータを検査します"
+    category: asset
+    allowed_agents:
+      - asset_worker
+      - asset_leader
+    restrictions:
+      timeout: 30
+
+  game_data_transform:
+    enabled: true
+    description: "ゲームデータのフォーマット変換（JSON⇔YAML、データ構造変換）"
+    category: project
+    allowed_agents:
+      - scenario_leader
+      - world_leader
+      - design_leader
+    restrictions:
+      max_data_size: 1048576
+
+  sprite_sheet:
+    enabled: true
+    description: "スプライトシートの生成・分割・情報取得を行います"
+    category: asset
+    allowed_agents:
+      - asset_worker
+    restrictions:
+      timeout: 120
+      max_frame_count: 256
+
+  diff_patch:
+    enabled: true
+    description: "テキスト間の差分を生成、または差分を適用します"
+    category: file
+    allowed_agents:
+      - code_worker
+      - code_leader
+      - code_review_worker
+    restrictions:
+      max_text_size: 1048576
+
+  task_progress:
+    enabled: true
+    description: "タスクの進捗状況を報告します"
+    category: project
+    allowed_agents: all
+    restrictions: {}
+
+  spawn_worker:
+    enabled: true
+    description: "新しいワーカーエージェントを生成して実行します（リーダー専用）"
+    category: orchestration
+    allowed_agents:
+      - concept_leader
+      - design_leader
+      - scenario_leader
+      - character_leader
+      - world_leader
+      - code_leader
+      - asset_leader
+      - integrator_leader
+      - tester_leader
+      - reviewer_leader
+      - architecture_leader
+    restrictions:
+      max_concurrent_workers: 5
+      timeout: 600
+
 agent_skill_mapping:
   code_worker:
     - file_read
@@ -372,6 +511,12 @@ agent_skill_mapping:
     - file_search
     - web_fetch
     - file_metadata
+    - task_progress
+    - agent_memory
+    - dependency_graph
+    - git_operation
+    - diff_patch
+    - schema_validate
 
   code_leader:
     - file_read
@@ -385,6 +530,13 @@ agent_skill_mapping:
     - file_search
     - web_fetch
     - file_metadata
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - dependency_graph
+    - git_operation
+    - diff_patch
 
   asset_leader:
     - file_read
@@ -395,6 +547,11 @@ agent_skill_mapping:
     - project_analyze
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - asset_inspect
 
   concept_leader:
     - file_read
@@ -405,6 +562,10 @@ agent_skill_mapping:
     - code_search
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
 
   design_leader:
     - file_read
@@ -415,6 +576,11 @@ agent_skill_mapping:
     - code_search
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - game_data_transform
 
   scenario_leader:
     - file_read
@@ -424,6 +590,11 @@ agent_skill_mapping:
     - project_analyze
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - game_data_transform
 
   character_leader:
     - file_read
@@ -433,6 +604,10 @@ agent_skill_mapping:
     - project_analyze
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
 
   world_leader:
     - file_read
@@ -442,6 +617,11 @@ agent_skill_mapping:
     - project_analyze
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - game_data_transform
 
   integrator_leader:
     - file_read
@@ -452,6 +632,11 @@ agent_skill_mapping:
     - code_search
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - schema_validate
 
   tester_leader:
     - file_read
@@ -462,6 +647,10 @@ agent_skill_mapping:
     - code_search
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
 
   reviewer_leader:
     - file_read
@@ -472,6 +661,10 @@ agent_skill_mapping:
     - code_search
     - file_search
     - web_fetch
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
 
   asset_worker:
     - file_read
@@ -486,6 +679,10 @@ agent_skill_mapping:
     - sfx_generate
     - voice_generate
     - file_search
+    - task_progress
+    - agent_memory
+    - asset_inspect
+    - sprite_sheet
 
   build_worker:
     - file_read
@@ -497,6 +694,10 @@ agent_skill_mapping:
     - code_lint
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
+    - git_operation
+    - schema_validate
 
   unit_test_worker:
     - file_read
@@ -507,6 +708,8 @@ agent_skill_mapping:
     - code_test
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
 
   integration_test_worker:
     - file_read
@@ -516,6 +719,8 @@ agent_skill_mapping:
     - code_test
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
 
   e2e_test_worker:
     - file_read
@@ -525,6 +730,8 @@ agent_skill_mapping:
     - code_test
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
 
   code_review_worker:
     - file_read
@@ -533,6 +740,11 @@ agent_skill_mapping:
     - code_lint
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
+    - dependency_graph
+    - git_operation
+    - diff_patch
 
   architecture_leader:
     - file_read
@@ -545,6 +757,12 @@ agent_skill_mapping:
     - web_fetch
     - linter_setup
     - file_metadata
+    - task_progress
+    - agent_memory
+    - agent_output_query
+    - spawn_worker
+    - dependency_graph
+    - schema_validate
 
   environment_setup_worker:
     - file_read
@@ -561,6 +779,8 @@ agent_skill_mapping:
     - dev_server_setup
     - ci_cd_setup
     - skill_register
+    - task_progress
+    - agent_memory
 
   research_worker:
     - file_read
@@ -569,6 +789,8 @@ agent_skill_mapping:
     - web_fetch
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
 
   default:
     - file_read
@@ -576,6 +798,8 @@ agent_skill_mapping:
     - project_analyze
     - code_search
     - file_search
+    - task_progress
+    - agent_memory
 
 mock_handlers:
   image_generate:
@@ -597,6 +821,15 @@ mock_handlers:
     audio_type: voice
     output_format: wav
     output_dir: assets/audio
+  spawn_worker:
+    handler_type: orchestration
+    mock_delay: 2
+  git_operation:
+    handler_type: execute
+    mock_output: "mock git output"
+  sprite_sheet:
+    handler_type: asset
+    mock_output: "mock sprite sheet info"
 
 sandbox:
   enabled: true

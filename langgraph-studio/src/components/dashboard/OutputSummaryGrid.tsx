@@ -22,14 +22,14 @@ const OUTPUT_CATEGORIES:OutputCategory[]=[
 
 export default function OutputSummaryGrid():JSX.Element{
  const metrics=useMetricsStore(state=>state.projectMetrics)
- const counts=metrics?.generationCounts||{}
+ const counts=metrics?.generationCounts
 
  return(
   <div className="nier-card h-full flex flex-col">
    <div className="flex-1 p-2 overflow-auto">
     <div className="grid grid-cols-4 gap-1.5">
      {OUTPUT_CATEGORIES.map(cat=>{
-      const data=counts[cat.key]
+      const data=counts?.[cat.key as keyof import('@/types/project').GenerationCounts]
       const count=data?.count||0
       const unit=data?.unit||cat.defaultUnit
       return(

@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-set TOTAL=17
+set TOTAL=19
 echo ========================================
 echo   Build Check - All Validations (%TOTAL% checks)
 echo ========================================
@@ -203,6 +203,32 @@ if %errorlevel% neq 0 (
     echo.
     echo Error: Field mismatch between Pydantic schemas and TypeScript interfaces
     echo Fix: Sync backend/schemas/ with langgraph-studio/src/types/
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [18/%TOTAL%] Frontend - Sidebar store initialization check...
+echo.
+cd /d "%~dp0\langgraph-studio"
+node scripts/build_checks.cjs sidebar-init
+if %errorlevel% neq 0 (
+    echo Error: Sidebar displays store data that is not initialized on startup
+    echo Fix: Add missing API fetch to ActivitySidebar's Promise.all
+    pause
+    exit /b 1
+)
+echo OK
+echo.
+
+echo [19/%TOTAL%] Frontend - State sync consistency check...
+echo.
+cd /d "%~dp0\langgraph-studio"
+node scripts/build_checks.cjs state-sync
+if %errorlevel% neq 0 (
+    echo Error: StateSyncData fields not fully processed
+    echo Fix: Ensure all StateSyncData fields are handled in websocketService.ts and reset in App.tsx
     pause
     exit /b 1
 )

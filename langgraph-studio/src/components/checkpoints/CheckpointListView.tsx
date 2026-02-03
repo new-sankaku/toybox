@@ -120,7 +120,7 @@ export default function CheckpointListView({
           className={cn(
            'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
            filterStatus===option.value
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setFilterStatus(option.value)}
@@ -146,7 +146,7 @@ export default function CheckpointListView({
         className={cn(
          'px-2 py-1.5 text-nier-small tracking-nier text-left',
          sortOrder==='newest'
-          ?'bg-nier-bg-selected text-nier-text-main'
+          ?'nier-surface-selected'
           : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
         onClick={()=>setSortOrder('newest')}
@@ -157,7 +157,7 @@ export default function CheckpointListView({
         className={cn(
          'px-2 py-1.5 text-nier-small tracking-nier text-left',
          sortOrder==='oldest'
-          ?'bg-nier-bg-selected text-nier-text-main'
+          ?'nier-surface-selected'
           : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
         onClick={()=>setSortOrder('oldest')}

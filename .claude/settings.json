@@ -7,7 +7,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "~/.claude/user-prompt-submit-hook.sh"
+                        "command": "node .claude/user-prompt-submit-hook.js"
                     }
                 ]
             }
@@ -18,7 +18,7 @@
                 "hooks": [
                     {
                         "type": "command",
-                        "command": "~/.claude/stop-hook-replay-prompt.sh"
+                        "command": "node .claude/stop-hook-replay-prompt.js"
                     }
                 ]
             }

@@ -34,7 +34,7 @@ type LogLevel='all'|'debug'|'info'|'warn'|'error'
 const levelConfig={
  debug:{icon:Bug,color:'text-nier-text-light',bg:'bg-nier-bg-panel'},
  info:{icon:Info,color:'text-nier-accent-blue',bg:'bg-nier-bg-panel'},
- warn:{icon:AlertTriangle,color:'text-nier-accent-yellow',bg:'bg-nier-bg-panel'},
+ warn:{icon:AlertTriangle,color:'text-nier-accent-orange',bg:'bg-nier-bg-panel'},
  error:{icon:AlertCircle,color:'text-nier-accent-red',bg:'bg-nier-bg-panel'}
 }
 
@@ -283,7 +283,7 @@ export default function LogsView():JSX.Element{
          className={cn(
           'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
           filterLevel===level
-           ?'bg-nier-bg-selected text-nier-text-main'
+           ?'nier-surface-selected'
            : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
          onClick={()=>setFilterLevel(level)}
@@ -415,7 +415,7 @@ export default function LogsView():JSX.Element{
       {selectedLog.details&&(
        <div>
         <span className="text-nier-caption text-nier-text-light block mb-1">詳細情報</span>
-        <pre className="text-nier-caption bg-nier-bg-selected p-3 overflow-auto max-h-60 text-nier-text-main">
+        <pre className="text-nier-caption nier-surface-selected p-3 overflow-auto max-h-60">
          {selectedLog.details}
         </pre>
        </div>

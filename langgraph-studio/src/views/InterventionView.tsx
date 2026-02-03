@@ -137,11 +137,11 @@ export default function InterventionView():JSX.Element{
 
  const getStatusBadge=(status:string)=>{
   switch(status){
-   case'pending':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-light">送信待ち</span>
-   case'delivered':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-light">配信済み</span>
-   case'acknowledged':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-light">確認済み</span>
-   case'processed':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-bg-selected text-nier-text-main">処理完了</span>
-   case'waiting_response':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-accent-yellow/20 text-nier-accent-yellow">返答待ち</span>
+   case'pending':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected-muted">送信待ち</span>
+   case'delivered':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected-muted">配信済み</span>
+   case'acknowledged':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected-muted">確認済み</span>
+   case'processed':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected">処理完了</span>
+   case'waiting_response':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-accent-orange/20 text-nier-accent-orange">返答待ち</span>
    default:return null
   }
  }
@@ -268,8 +268,8 @@ export default function InterventionView():JSX.Element{
              onClick={()=>setTargetType('all')}
              className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
               targetType==='all'
-               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
-               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
+               ?'nier-surface-selected border-nier-border-dark'
+               :'nier-surface-panel-muted border-nier-border-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
              {targetType==='all'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}
@@ -281,8 +281,8 @@ export default function InterventionView():JSX.Element{
              onClick={()=>setTargetType('specific')}
              className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
               targetType==='specific'
-               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
-               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
+               ?'nier-surface-selected border-nier-border-dark'
+               :'nier-surface-panel-muted border-nier-border-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
              {targetType==='specific'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}
@@ -316,8 +316,8 @@ export default function InterventionView():JSX.Element{
              onClick={()=>setPriority('normal')}
              className={`relative flex items-center gap-2 px-3 py-1.5 border transition-all duration-nier-fast tracking-nier text-nier-small ${
               priority==='normal'
-               ?'bg-nier-bg-selected border-nier-border-dark text-nier-text-main'
-               :'bg-nier-bg-panel border-nier-border-light text-nier-text-light hover:bg-nier-bg-selected hover:text-nier-text-main'
+               ?'nier-surface-selected border-nier-border-dark'
+               :'nier-surface-panel-muted border-nier-border-light hover:bg-nier-bg-selected hover:text-nier-text-main'
              }`}
             >
              {priority==='normal'&&<span className="absolute left-0 top-0 bottom-0 w-1 bg-nier-text-main"/>}

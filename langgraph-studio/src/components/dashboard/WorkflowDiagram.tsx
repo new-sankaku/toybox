@@ -643,7 +643,7 @@ export default function WorkflowDiagram():JSX.Element{
     </ReactFlowProvider>
 
     {/*Legend-図の右下に縦並び*/}
-    <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-nier-caption text-nier-text-light bg-nier-bg-main/90 p-2 rounded border border-nier-border-light">
+    <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-nier-caption nier-surface-main-muted p-2 rounded border border-nier-border-light">
      <div className="flex items-center gap-1">
       <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm"/>
       <span>完了</span>

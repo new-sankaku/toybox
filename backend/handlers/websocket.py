@@ -60,13 +60,17 @@ def register_websocket_handlers(sio,data_store:DataStore):
         sio.enter_room(sid,f"project:{project_id}")
         agents=data_store.get_agents_by_project(project_id)
         checkpoints=data_store.get_checkpoints_by_project(project_id)
+        interventions=data_store.get_interventions_by_project(project_id)
         metrics=data_store.get_project_metrics(project_id)
+        logs=data_store.get_system_logs(project_id)
 
         sio.emit('connection:state_sync',{
             "project":project,
             "agents":agents,
             "checkpoints":checkpoints,
-            "metrics":metrics
+            "interventions":interventions,
+            "metrics":metrics,
+            "logs":logs
         },room=sid)
 
         get_logger().debug(f"WebSocket sent state sync to {sid} for project {project_id}")

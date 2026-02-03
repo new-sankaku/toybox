@@ -1,6 +1,6 @@
 from abc import ABC,abstractmethod
 from dataclasses import dataclass,field
-from typing import Any,Dict,List,Optional
+from typing import Any,Callable,Dict,List,Optional
 from enum import Enum
 
 
@@ -10,6 +10,8 @@ class SkillCategory(str,Enum):
  PROJECT="project"
  ASSET="asset"
  BUILD="build"
+ KNOWLEDGE="knowledge"
+ ORCHESTRATION="orchestration"
 
 
 @dataclass
@@ -23,6 +25,7 @@ class SkillContext:
  max_output_size:int=100000
  sandbox_enabled:bool=True
  restrictions:Dict[str,Any]=field(default_factory=dict)
+ on_progress:Optional[Callable[[int,str],None]]=None
 
 
 @dataclass

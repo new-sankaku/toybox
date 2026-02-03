@@ -1,4 +1,4 @@
-from typing import Dict,List,Optional,Type
+from typing import Any,Dict,List,Optional,Type
 from .base import Skill,SkillCategory,SkillContext,SkillResult
 
 _registry:Optional["SkillRegistry"]=None
@@ -61,6 +61,13 @@ def _register_default_skills(registry:SkillRegistry)->None:
  from .search_skills import CodeSearchSkill,FileSearchSkill
  from .web_skills import WebFetchSkill
  from .cache_skills import FileMetadataSkill
+ from .knowledge_skills import AgentMemorySkill
+ from .git_skills import GitOperationSkill
+ from .validation_skills import SchemaValidateSkill,DiffPatchSkill
+ from .analysis_skills import DependencyGraphSkill
+ from .game_skills import GameDataTransformSkill,SpriteSheetSkill
+ from .progress_skills import TaskProgressSkill
+ from .asset_inspect_skill import AssetInspectSkill
  registry.register(FileReadSkill())
  registry.register(FileWriteSkill())
  registry.register(FileEditSkill())
@@ -80,3 +87,19 @@ def _register_default_skills(registry:SkillRegistry)->None:
  registry.register(FileSearchSkill())
  registry.register(WebFetchSkill())
  registry.register(FileMetadataSkill())
+ registry.register(AgentMemorySkill())
+ registry.register(GitOperationSkill())
+ registry.register(SchemaValidateSkill())
+ registry.register(DiffPatchSkill())
+ registry.register(DependencyGraphSkill())
+ registry.register(GameDataTransformSkill())
+ registry.register(SpriteSheetSkill())
+ registry.register(TaskProgressSkill())
+ registry.register(AssetInspectSkill())
+
+
+def register_service_skills(registry:SkillRegistry,data_store:Any,execution_service:Any,sio:Any=None)->None:
+ from .knowledge_skills import AgentOutputQuerySkill
+ from .orchestration_skills import SpawnWorkerSkill
+ registry.register(AgentOutputQuerySkill(data_store))
+ registry.register(SpawnWorkerSkill(data_store,execution_service,sio))

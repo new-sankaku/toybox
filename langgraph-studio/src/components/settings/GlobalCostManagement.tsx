@@ -161,7 +161,7 @@ export function GlobalCostManagement():JSX.Element{
         step={10}
         value={localSettings.global_monthly_limit}
         onChange={e=>setLocalSettings(s=>({...s,global_monthly_limit:Number(e.target.value)}))}
-        className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+        className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
         disabled={!localSettings.global_enabled}
        />
       </div>
@@ -173,7 +173,7 @@ export function GlobalCostManagement():JSX.Element{
         max={100}
         value={localSettings.alert_threshold}
         onChange={e=>setLocalSettings(s=>({...s,alert_threshold:Number(e.target.value)}))}
-        className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+        className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
         disabled={!localSettings.global_enabled}
        />
       </div>

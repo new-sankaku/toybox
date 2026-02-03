@@ -76,7 +76,7 @@ export function AgentMetrics({metrics,showHeader=true}:AgentMetricsProps){
 
       {/*Completion Rate*/}
       <div className="flex items-center gap-2 p-2 bg-nier-bg-main">
-       <TrendingUp size={16} className="text-nier-accent-yellow"/>
+       <TrendingUp size={16} className="text-nier-accent-orange"/>
        <div>
         <div className="text-nier-caption text-nier-text-light">Rate</div>
         <div className="text-nier-small font-medium">

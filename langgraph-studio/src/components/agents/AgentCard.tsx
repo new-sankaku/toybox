@@ -32,7 +32,7 @@ const statusConfig={
   pulse:true
  },
  waiting_approval:{
-  color:'bg-nier-accent-yellow',
+  color:'bg-nier-accent-orange',
   textColor:'text-nier-text-light',
   icon:AlertCircle,
   text:'承認待ち',
@@ -67,7 +67,7 @@ const statusConfig={
   pulse:false
  },
  waiting_response:{
-  color:'bg-nier-accent-yellow',
+  color:'bg-nier-accent-orange',
   textColor:'text-nier-text-light',
   icon:AlertCircle,
   text:'応答待ち',

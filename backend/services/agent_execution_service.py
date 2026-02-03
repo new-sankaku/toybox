@@ -20,6 +20,16 @@ class AgentExecutionService:
   self._running_agents:Dict[str,bool]={}
   self._lock=threading.Lock()
   self._logger=get_logger()
+  self._register_service_skills()
+
+ def _register_service_skills(self)->None:
+  try:
+   from skills.registry import get_skill_registry,register_service_skills
+   registry=get_skill_registry()
+   register_service_skills(registry,self._data_store,self,self._sio)
+   self._logger.info("Service-dependent skills registered (agent_output_query, spawn_worker)")
+  except Exception as e:
+   self._logger.warning(f"Failed to register service skills: {e}")
 
  def set_agent_runner(self,runner:ApiAgentRunner)->None:
   self._agent_runner=runner
@@ -135,6 +145,8 @@ class AgentExecutionService:
      )
    output=await self._agent_runner.run_agent(context)
    if output.status==AgentStatus.COMPLETED:
+    if output.generation_counts:
+     self._data_store.accumulate_generation_counts(project_id,output.generation_counts)
     self._data_store.update_agent(agent_id,{
      "status":"completed",
      "progress":100,
@@ -142,6 +154,7 @@ class AgentExecutionService:
      "currentTask":None,
      "tokensUsed":output.tokens_used,
     })
+    self._data_store.refresh_project_metrics(project_id)
     self._emit_event("agent:completed",{
      "agentId":agent_id,
      "projectId":project_id,

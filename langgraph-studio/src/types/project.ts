@@ -11,8 +11,10 @@ export interface Project{
  currentPhase:PhaseNumber
  state?:Record<string,unknown>
  config?:ProjectConfig
+ aiServices?:Record<string,unknown>
  createdAt:string
  updatedAt:string
+ outputSettings?:Record<string,unknown>
 }
 
 export interface GameConcept{

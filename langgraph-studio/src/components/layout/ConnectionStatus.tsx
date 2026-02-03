@@ -11,7 +11,7 @@ export default function ConnectionStatus():JSX.Element{
    pulse:false
   },
   connecting:{
-   color:'bg-nier-accent-yellow',
+   color:'bg-nier-accent-orange',
    text:'Connecting...',
    pulse:true
   },

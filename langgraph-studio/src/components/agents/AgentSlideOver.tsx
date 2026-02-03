@@ -12,8 +12,8 @@ import type{Agent,AgentLogEntry}from'@/types/agent'
 
 const statusBarColorMap:Record<string,string>={
  running:'bg-nier-accent-orange',
- waiting_approval:'bg-nier-accent-yellow',
- waiting_response:'bg-nier-accent-yellow',
+ waiting_approval:'bg-nier-accent-orange',
+ waiting_response:'bg-nier-accent-orange',
  completed:'bg-nier-accent-green',
  failed:'bg-nier-accent-red',
  interrupted:'bg-nier-accent-orange',
@@ -145,7 +145,7 @@ export function AgentSlideOver({
         </Button>
 )}
        {agent.status==='waiting_response'&&(
-        <div className="flex items-center gap-1.5 text-nier-caption text-nier-accent-yellow">
+        <div className="flex items-center gap-1.5 text-nier-caption text-nier-accent-orange">
          <MessageCircle size={12}/>
          オペレーター返答待ち
         </div>

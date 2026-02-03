@@ -155,7 +155,7 @@ function ApiKeyManagement():JSX.Element{
     <div className="flex items-center gap-1 min-w-0">
      <input
       type={showKey[provider.id]?'text':'password'}
-      className="flex-1 min-w-0 bg-nier-bg-main border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main placeholder:text-nier-text-light focus:outline-none focus:border-nier-border-dark"
+      className="flex-1 min-w-0 nier-surface-main border border-nier-border-light px-2 py-1 text-nier-small placeholder:text-nier-text-light focus:outline-none focus:border-nier-border-dark"
       placeholder={keyInfo?keyInfo.hint:'APIキーを入力...'}
       value={editingKey[provider.id]||''}
       onChange={e=>setEditingKey(p=>({...p,[provider.id]:e.target.value}))}
@@ -454,7 +454,7 @@ function DataManagement():JSX.Element{
       <label className="text-nier-small text-nier-text-light">保持期間</label>
       <input
        type="number" min={1} max={365}
-       className="w-20 bg-nier-bg-main border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+       className="w-20 nier-surface-main border border-nier-border-light px-2 py-1 text-nier-small focus:outline-none focus:border-nier-border-dark"
        value={retentionDays}
        onChange={e=>setRetentionDays(Number(e.target.value))}
       />
@@ -709,7 +709,7 @@ function ExecutionSettings():JSX.Element{
          type="number"
          min={1}
          max={20}
-         className="w-32 bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         className="w-32 nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
          value={concurrentLimits.default_max_concurrent}
          onChange={(e)=>setConcurrentLimits({...concurrentLimits,default_max_concurrent:parseInt(e.target.value)||1})}
         />
@@ -724,7 +724,7 @@ function ExecutionSettings():JSX.Element{
             type="number"
             min={1}
             max={20}
-            className="w-16 bg-nier-bg-panel border border-nier-border-light px-2 py-1 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+            className="w-16 nier-surface-panel border border-nier-border-light px-2 py-1 text-nier-small focus:outline-none focus:border-nier-border-dark"
             value={limit}
             onChange={(e)=>handleProviderOverrideChange(provider,parseInt(e.target.value)||1)}
            />
@@ -759,7 +759,7 @@ function ExecutionSettings():JSX.Element{
          type="number"
          min={1}
          max={100}
-         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
          value={wsConfig.maxReconnectAttempts}
          onChange={(e)=>setWsConfig({...wsConfig,maxReconnectAttempts:parseInt(e.target.value)||10})}
         />
@@ -770,7 +770,7 @@ function ExecutionSettings():JSX.Element{
          type="number"
          min={100}
          step={100}
-         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
          value={wsConfig.reconnectDelay}
          onChange={(e)=>setWsConfig({...wsConfig,reconnectDelay:parseInt(e.target.value)||1000})}
         />
@@ -781,7 +781,7 @@ function ExecutionSettings():JSX.Element{
          type="number"
          min={1000}
          step={1000}
-         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
          value={wsConfig.reconnectDelayMax}
          onChange={(e)=>setWsConfig({...wsConfig,reconnectDelayMax:parseInt(e.target.value)||30000})}
         />
@@ -792,7 +792,7 @@ function ExecutionSettings():JSX.Element{
          type="number"
          min={1000}
          step={1000}
-         className="w-full bg-nier-bg-main border border-nier-border-light px-3 py-2 text-nier-small text-nier-text-main focus:outline-none focus:border-nier-border-dark"
+         className="w-full nier-surface-main border border-nier-border-light px-3 py-2 text-nier-small focus:outline-none focus:border-nier-border-dark"
          value={wsConfig.timeout}
          onChange={(e)=>setWsConfig({...wsConfig,timeout:parseInt(e.target.value)||20000})}
         />
@@ -826,7 +826,7 @@ export default function GlobalConfigView():JSX.Element{
           className={cn(
            'w-full px-4 py-3 text-left text-nier-small tracking-nier transition-colors',
            activeSection===section.id
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             :'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setActiveSection(section.id)}

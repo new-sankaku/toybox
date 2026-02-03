@@ -3,6 +3,8 @@
 ・Sonnet Haikuは禁止。
 ・サブエージェントはOpusを使用する。
 ・TaskはAgentが実行する個別の作業単位。AgentとTaskは別物です。
+・クライアント修正時にデータフローを調査してサーバーの修正が不要か検討してください。逆にサーバーを修正するときもクライアントを調査します。
+・HookやMCPなどのスクリプトはWindows/Linuxで動作するようにしてください。
 
 ## 修正前の方針
 ・安易な解決策を採用しない。
@@ -54,11 +56,14 @@ cd backend && python scripts/remove-spaces.py
 ## CSS/デザインルール
 ### サーフェスクラス（必須）
 背景色と文字色の組み合わせミスを防ぐため、**サーフェスクラス**を使用する。定義が無い場合はサーフェスクラスを追加する。
-`nier-surface-main` メインエリア 
+`nier-surface-main` メインエリア
 `nier-surface-panel` パネル/カード
-`nier-surface-header` ヘッダー/ダーク領域 |
-`nier-surface-footer` フッター 
-`nier-surface-selected` 選択状態 
+`nier-surface-header` ヘッダー/ダーク領域
+`nier-surface-footer` フッター
+`nier-surface-selected` 選択状態
+`nier-surface-main-muted` メインエリア（補助テキスト）
+`nier-surface-panel-muted` パネル（補助テキスト）
+`nier-surface-selected-muted` 選択状態（補助テキスト）
 
 **使用ルール:** 1.UIコンポーネント優先 2.直接divを使う場合は`.nier-surface-*`クラス 3.`bg-nier-bg-*`と`text-nier-text-*`を直接組み合わせない
 
@@ -66,7 +71,7 @@ cd backend && python scripts/remove-spaces.py
 `.nier-card`(カード外枠) `.nier-card-header`(ダーク背景) `.nier-card-body`(パネル背景) `.nier-btn`(標準) `.nier-btn-primary`(プライマリ) `.nier-btn-danger`(危険) `.nier-input`(入力)
 
 ### アクセントカラー
-`--accent-red`(エラー) `--accent-orange`(実行中) `--accent-yellow`(待機) `--accent-green`(完了) `--accent-blue`(情報)
+`--accent-red`(エラー) `--accent-orange`(実行中/待機) `--accent-green`(完了) `--accent-blue`(情報)
 
 ## API/WebSocket変更時のチェックリスト
 **バックエンド:** 1.`backend/schemas/`更新 2.OpenAPIスペック再生成 3.WebSocket room指定確認

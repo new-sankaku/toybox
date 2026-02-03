@@ -21,8 +21,8 @@ import{
 
 const statusBarColorMap:Record<string,string>={
  running:'bg-nier-accent-orange',
- waiting_approval:'bg-nier-accent-yellow',
- waiting_response:'bg-nier-accent-yellow',
+ waiting_approval:'bg-nier-accent-orange',
+ waiting_response:'bg-nier-accent-orange',
  completed:'bg-nier-accent-green',
  failed:'bg-nier-accent-red',
  interrupted:'bg-nier-accent-orange',
@@ -185,7 +185,7 @@ export default function AgentDetailView({
         </Button>
 )}
        {agent.status==='waiting_response'&&(
-        <div className="flex items-center gap-2 p-2 bg-nier-accent-yellow/10 border border-nier-accent-yellow/30 rounded text-nier-small text-nier-accent-yellow">
+        <div className="flex items-center gap-2 p-2 bg-nier-accent-orange/10 border border-nier-accent-orange/30 rounded text-nier-small text-nier-accent-orange">
          <MessageCircle size={14}/>
          オペレーターの返答を待っています
         </div>
@@ -218,7 +218,7 @@ export default function AgentDetailView({
         <DiamondMarker>メタデータ</DiamondMarker>
        </CardHeader>
        <CardContent>
-        <pre className="text-nier-caption text-nier-text-light whitespace-pre-wrap bg-nier-bg-main p-3 overflow-auto max-h-[200px]">
+        <pre className="text-nier-caption whitespace-pre-wrap nier-surface-main-muted p-3 overflow-auto max-h-[200px]">
          {JSON.stringify(agent.metadata,null,2)}
         </pre>
        </CardContent>

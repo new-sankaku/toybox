@@ -29,5 +29,6 @@ class CheckpointCreateSchema(BaseSchema):
  status:Optional[str]="pending"
 
 class CheckpointResolveSchema(BaseSchema):
+ checkpoint_id:Optional[str]=None
  resolution:str
  feedback:Optional[str]=None

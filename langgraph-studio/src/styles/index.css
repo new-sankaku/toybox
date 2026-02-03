@@ -23,7 +23,6 @@
     /* Accent Colors (Category Markers) */
     --accent-red: #B85C5C;
     --accent-orange: #C4956C;
-    --accent-yellow: #C9C078;
     --accent-green: #7AAA7A;
     --accent-blue: #6B8FAA;
 
@@ -57,6 +56,12 @@
     --padding-card: 8px;
     --padding-section: 12px;
     --gap-base: 8px;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(69, 65, 56, 0.08);
+    --shadow-md: 0 2px 4px rgba(69, 65, 56, 0.12), 0 1px 2px rgba(69, 65, 56, 0.06);
+    --shadow-lg: 0 4px 8px rgba(69, 65, 56, 0.15), 0 2px 4px rgba(69, 65, 56, 0.08);
+    --shadow-xl: 0 8px 16px rgba(69, 65, 56, 0.18), 0 4px 8px rgba(69, 65, 56, 0.1);
 
     /* Transitions */
     --transition-fast: 150ms ease;
@@ -190,6 +195,18 @@
     @apply bg-nier-bg-selected text-nier-text-main;
   }
 
+  .nier-surface-main-muted {
+    @apply bg-nier-bg-main text-nier-text-light;
+  }
+
+  .nier-surface-panel-muted {
+    @apply bg-nier-bg-panel text-nier-text-light;
+  }
+
+  .nier-surface-selected-muted {
+    @apply bg-nier-bg-selected text-nier-text-light;
+  }
+
   /* ===== Status Badge Classes =====
    * ステータス表示用（ボタンと区別するため控えめなデザイン）
    * - 背景色なし（透明）
@@ -218,7 +235,7 @@
   }
 
   .nier-status-badge-paused {
-    @apply nier-status-badge text-nier-accent-yellow border-b-nier-accent-yellow;
+    @apply nier-status-badge text-nier-accent-orange border-b-nier-accent-orange;
   }
 
   .nier-status-badge-completed {
@@ -315,7 +332,7 @@
 
   .nier-category-marker.system { @apply bg-nier-accent-red; }
   .nier-category-marker.running { @apply bg-nier-accent-orange; }
-  .nier-category-marker.pending { @apply bg-nier-accent-yellow; }
+  .nier-category-marker.pending { @apply bg-nier-accent-orange; }
   .nier-category-marker.complete { @apply bg-nier-accent-green; }
   .nier-category-marker.info { @apply bg-nier-accent-blue; }
 
@@ -476,6 +493,231 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
+
+  /* ===== Status Dot =====
+   * 接続状態を示す小さなインジケーター
+   */
+  .nier-status-dot {
+    @apply w-2 h-2 rounded-full inline-block;
+  }
+
+  .nier-status-dot.online {
+    @apply bg-nier-accent-green;
+    animation: status-pulse 1.5s ease-in-out infinite;
+  }
+
+  .nier-status-dot.connecting {
+    @apply bg-nier-accent-orange;
+    animation: status-pulse 0.5s ease-in-out infinite;
+  }
+
+  .nier-status-dot.offline {
+    @apply bg-nier-border-dark;
+  }
+
+  /* ===== Skeleton Loading =====
+   * コンテンツ読み込み中のプレースホルダー
+   */
+  .nier-skeleton {
+    @apply h-4;
+    background: linear-gradient(
+      90deg,
+      var(--bg-selected) 0%,
+      var(--bg-panel) 50%,
+      var(--bg-selected) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+  }
+
+  @keyframes skeleton-shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  /* ===== Tooltip =====
+   * CSS-onlyのホバーツールチップ
+   */
+  .nier-tooltip {
+    @apply relative;
+  }
+
+  .nier-tooltip::after {
+    content: attr(data-tooltip);
+    @apply absolute text-nier-caption whitespace-nowrap pointer-events-none;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) scale(0.95);
+    background: var(--bg-header);
+    color: var(--text-header);
+    padding: 6px 10px;
+    opacity: 0;
+    transition: all 0.2s ease;
+    z-index: var(--z-tooltip);
+  }
+
+  .nier-tooltip:hover::after {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+
+  /* ===== Inline Alert =====
+   * インライン通知メッセージ
+   */
+  .nier-alert {
+    @apply px-4 py-3 border flex items-start gap-2 text-nier-small;
+  }
+
+  .nier-alert-info {
+    @apply nier-alert;
+    border-color: var(--accent-blue);
+    background: rgba(107, 143, 170, 0.08);
+    color: var(--accent-blue);
+  }
+
+  .nier-alert-success {
+    @apply nier-alert;
+    border-color: var(--accent-green);
+    background: rgba(122, 170, 122, 0.08);
+    color: var(--accent-green);
+  }
+
+  .nier-alert-warning {
+    @apply nier-alert;
+    border-color: var(--accent-orange);
+    background: rgba(196, 149, 108, 0.08);
+    color: var(--accent-orange);
+  }
+
+  .nier-alert-error {
+    @apply nier-alert;
+    border-color: var(--accent-red);
+    background: rgba(184, 92, 92, 0.08);
+    color: var(--accent-red);
+  }
+
+  /* ===== Error Panel =====
+   * エラー状態のパネル表示
+   */
+  .nier-error-panel {
+    @apply border bg-nier-bg-panel;
+    border-color: var(--accent-red);
+  }
+
+  .nier-error-panel-header {
+    @apply px-3 py-2 text-nier-small tracking-nier flex items-center gap-2 text-white;
+    background: var(--accent-red);
+  }
+
+  .nier-error-panel-body {
+    padding: var(--padding-card);
+  }
+
+  /* ===== Table =====
+   * データ表示用テーブル
+   */
+  .nier-table {
+    @apply w-full;
+    border-collapse: collapse;
+  }
+
+  .nier-table th {
+    @apply px-3 py-2 text-left text-nier-caption tracking-nier-wide font-medium;
+    background: var(--bg-header);
+    color: var(--text-header);
+  }
+
+  .nier-table td {
+    @apply px-3 py-2 text-nier-small;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .nier-table tr:hover td {
+    @apply bg-nier-bg-selected;
+  }
+
+  /* ===== Footer =====
+   * ページ下部の操作ガイド
+   */
+  .nier-footer {
+    @apply flex justify-between items-center;
+    background: var(--bg-footer);
+    color: var(--text-footer);
+    padding: 12px 24px;
+    border-top: 2px solid #3D3A33;
+  }
+
+  .nier-footer-message {
+    @apply flex items-center gap-2;
+  }
+
+  .nier-footer-message::before {
+    content: '';
+    @apply w-0.5 h-4;
+    background: var(--text-footer);
+  }
+
+  .nier-footer-controls {
+    @apply flex gap-6 text-nier-small;
+  }
+
+  .nier-footer-control {
+    @apply flex items-center gap-1.5 cursor-pointer px-2 py-1;
+    transition: all var(--transition-fast);
+  }
+
+  .nier-footer-control:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* ===== Toast Animations ===== */
+  @keyframes toast-enter {
+    0% {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    60% {
+      transform: translateX(-8px);
+    }
+    100% {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes toast-progress {
+    from {
+      width: 100%;
+    }
+    to {
+      width: 0%;
+    }
+  }
+
+  .nier-toast-progress {
+    @apply absolute bottom-0 left-0 h-0.5;
+    animation: toast-progress 5s linear forwards;
+  }
+
+  .nier-toast-progress.success {
+    @apply bg-nier-accent-green;
+  }
+
+  .nier-toast-progress.error {
+    @apply bg-nier-accent-red;
+  }
+
+  .nier-toast-progress.warning {
+    @apply bg-nier-accent-orange;
+  }
+
+  .nier-toast-progress.info {
+    @apply bg-nier-accent-blue;
+  }
 }
 
 @layer utilities {
@@ -508,6 +750,12 @@
     width: 10px;
     height: 10px;
     border-width: 1.5px;
+  }
+
+  .api-spinner-lg {
+    width: 24px;
+    height: 24px;
+    border-width: 3px;
   }
 
   @keyframes api-spin {
@@ -1164,6 +1412,65 @@
     }
     50% {
       border-color: #ff6b6b;
+    }
+  }
+
+  /* ===== Glitch Effect =====
+   * エラー・異常状態を演出するグリッチ効果 (hover)
+   */
+  .nier-glitch-text {
+    position: relative;
+    display: inline-block;
+  }
+
+  .nier-glitch-text::before,
+  .nier-glitch-text::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0.8;
+  }
+
+  .nier-glitch-text:hover::before {
+    animation: nier-glitch 0.3s ease infinite;
+    color: var(--accent-red);
+    clip-path: polygon(0 0, 100% 0, 100% 45%, 0 45%);
+  }
+
+  .nier-glitch-text:hover::after {
+    animation: nier-glitch 0.3s ease infinite reverse;
+    color: var(--accent-blue);
+    clip-path: polygon(0 55%, 100% 55%, 100% 100%, 0 100%);
+  }
+
+  @keyframes nier-glitch {
+    0%, 100% {
+      transform: translate(0);
+    }
+    20% {
+      transform: translate(-2px, 1px);
+    }
+    40% {
+      transform: translate(2px, -1px);
+    }
+    60% {
+      transform: translate(-1px, 2px);
+    }
+    80% {
+      transform: translate(1px, -2px);
+    }
+  }
+
+  /* ===== Ripple Effect ===== */
+  @keyframes nier-ripple {
+    0% {
+      transform: scale(0);
+      opacity: 0.6;
+    }
+    100% {
+      transform: scale(2);
+      opacity: 0;
     }
   }
 }

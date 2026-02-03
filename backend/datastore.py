@@ -313,6 +313,7 @@ class DataStore:
   self._add_agent_log_internal(session,agent.id,"info",f"{display_name}完了",100)
   self._add_system_log_internal(session,agent.project_id,"info",agent.type,f"{display_name}完了")
   agent_repo=AgentRepository(session)
+  self._finalize_generation_count(session,agent,agent.project_id)
   self._emit_event("agent:completed",{
    "agentId":agent.id,
    "projectId":agent.project_id,
@@ -424,6 +425,7 @@ class DataStore:
               if a["name"]==asset_name and a["agent"]==(agent.metadata_.get("displayName",agent.type) if agent.metadata_ else agent.type)]
     if not existing:
      self._create_asset(session,agent,asset_type,asset_name,asset_size)
+     self._increment_generation_count(session,agent.type,agent.project_id)
 
  def _check_trace_generation(self,session,agent,old_progress:int,new_progress:int):
   trace_points=[20,50,80]
@@ -607,33 +609,82 @@ class DataStore:
 
  def _add_system_log_internal(self,session,project_id:str,level:str,source:str,message:str):
   repo=SystemLogRepository(session)
-  repo.add_log(project_id,level,source,message)
+  log_dict=repo.add_log(project_id,level,source,message)
+  self._emit_event("system_log:created",{"projectId":project_id,"log":log_dict},project_id)
 
  def _get_generation_type(self,agent_type:str)->str:
   return get_generation_type_for_agent(agent_type)
 
- def _calculate_generation_counts(self,agents:List[Dict])->Dict:
+ def _increment_generation_count(self,session,agent_type:str,project_id:str):
+  metrics=get_agent_generation_metrics(agent_type)
+  if not metrics:
+   return
+  category=metrics.get("category")
+  if not category:
+   return
+  metrics_repo=MetricsRepository(session)
+  existing=metrics_repo.get(project_id)
+  generation_counts=existing.get("generationCounts",{}) if existing else {}
   categories=get_generation_metrics_categories()
-  counts={}
-  for cat_name,cat_config in categories.items():
-   counts[cat_name]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
-  if"video" not in counts:
-   counts["video"]={"count":0,"unit":"本","calls":0}
-  for agent in agents:
-   if agent["status"] not in ["completed","waiting_approval"]:
-    continue
-   progress_factor=agent["progress"]/100.0
-   agent_type=agent["type"]
-   metrics=get_agent_generation_metrics(agent_type)
-   if not metrics:
-    continue
-   category=metrics.get("category")
-   if category and category in counts:
-    count_range=metrics.get("count_range",[1,3])
-    calls_range=metrics.get("calls_range",[1,3])
-    counts[category]["count"]+=int(random.randint(count_range[0],count_range[1])*progress_factor)
-    counts[category]["calls"]+=int(random.randint(calls_range[0],calls_range[1])*progress_factor)
-  return counts
+  if category not in generation_counts:
+   cat_config=categories.get(category,{})
+   generation_counts[category]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
+  entry=generation_counts[category]
+  if"calls" not in entry:
+   entry["calls"]=0
+  entry["count"]=entry.get("count",0)+1
+  entry["calls"]+=1
+  metrics_repo.create_or_update(project_id,{"generationCounts":generation_counts})
+
+ def _finalize_generation_count(self,session,agent,project_id:str):
+  agent_type=agent.type
+  agent_assets=get_agent_assets(agent_type)
+  if agent_assets:
+   return
+  metrics=get_agent_generation_metrics(agent_type)
+  if not metrics:
+   return
+  category=metrics.get("category")
+  if not category:
+   return
+  count_range=metrics.get("count_range",[1,3])
+  calls_range=metrics.get("calls_range",[1,3])
+  count_val=random.randint(count_range[0],count_range[1])
+  calls_val=random.randint(calls_range[0],calls_range[1])
+  metrics_repo=MetricsRepository(session)
+  existing=metrics_repo.get(project_id)
+  generation_counts=existing.get("generationCounts",{}) if existing else {}
+  categories=get_generation_metrics_categories()
+  if category not in generation_counts:
+   cat_config=categories.get(category,{})
+   generation_counts[category]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
+  entry=generation_counts[category]
+  if"calls" not in entry:
+   entry["calls"]=0
+  entry["count"]=entry.get("count",0)+count_val
+  entry["calls"]+=calls_val
+  metrics_repo.create_or_update(project_id,{"generationCounts":generation_counts})
+
+ def accumulate_generation_counts(self,project_id:str,gen_counts:Dict[str,Any]):
+  with session_scope() as session:
+   metrics_repo=MetricsRepository(session)
+   existing=metrics_repo.get(project_id)
+   generation_counts=existing.get("generationCounts",{}) if existing else {}
+   categories=get_generation_metrics_categories()
+   for category,values in gen_counts.items():
+    if category not in generation_counts:
+     cat_config=categories.get(category,{})
+     generation_counts[category]={"count":0,"unit":cat_config.get("unit",""),"calls":0}
+    entry=generation_counts[category]
+    if"calls" not in entry:
+     entry["calls"]=0
+    entry["count"]=entry.get("count",0)+values.get("count",0)
+    entry["calls"]+=values.get("calls",0)
+   metrics_repo.create_or_update(project_id,{"generationCounts":generation_counts})
+
+ def refresh_project_metrics(self,project_id:str):
+  with session_scope() as session:
+   self._update_project_metrics(session,project_id)
 
  def _update_project_metrics(self,session,project_id:str):
   agent_repo=AgentRepository(session)
@@ -665,7 +716,8 @@ class DataStore:
    remaining_agents=len([a for a in agents if a["status"]=="pending"])
    estimated_remaining=(remaining_progress/rate)+(remaining_agents*100/rate) if rate>0 else 0
   active_generations=len([a for a in agents if a["status"]=="running"])
-  generation_counts=self._calculate_generation_counts(agents)
+  existing_metrics=metrics_repo.get(project_id)
+  generation_counts=existing_metrics.get("generationCounts",{}) if existing_metrics else {}
   metrics_data={
    "projectId":project_id,
    "totalTokensUsed":total_input+total_output,
@@ -782,10 +834,10 @@ class DataStore:
      agent_def=agent_defs.get(agent_type,{})
      display_name=agent_def.get("shortLabel") or agent_def.get("label") or agent_type
      agent_repo.create_from_dict(project_id,{"type":agent_type,"phase":phase_idx,"metadata":{"displayName":display_name}})
+   metrics_repo.delete(project_id)
    metrics_repo.create_or_update(project_id,{
-    "totalTokensUsed":0,"estimatedTotalTokens":50000,"elapsedTimeSeconds":0,
-    "estimatedRemainingSeconds":0,"completedTasks":0,"totalTasks":6,
-    "progressPercent":0,"currentPhase":1,"phaseName":"Phase 1: 企画・設計","activeGenerations":0
+    "estimatedTotalTokens":50000,"totalTasks":6,
+    "currentPhase":1,"phaseName":"Phase 1: 企画・設計"
    })
    self._add_system_log_internal(session,project_id,"info","System","プロジェクト初期化完了")
    get_logger().info(f"Project {project_id} initialized")

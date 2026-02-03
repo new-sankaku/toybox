@@ -137,6 +137,7 @@ class AgentOutput:
     error:Optional[str]=None
     started_at:Optional[str]=None
     completed_at:Optional[str]=None
+    generation_counts:Optional[Dict[str,Any]]=None
 
 
 class AgentRunner(ABC):

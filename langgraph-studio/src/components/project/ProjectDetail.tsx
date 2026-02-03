@@ -12,7 +12,7 @@ const statusLabels:Record<ProjectStatus,string>={
 const statusColors:Record<ProjectStatus,string>={
  draft:'text-nier-text-light',
  running:'text-nier-accent-orange',
- paused:'text-nier-accent-yellow',
+ paused:'text-nier-accent-orange',
  completed:'text-nier-accent-green',
  failed:'text-nier-accent-red'
 }

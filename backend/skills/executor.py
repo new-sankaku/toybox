@@ -22,13 +22,14 @@ class SkillExecutionConfig:
  max_output_size:int=100000
 
 class SkillExecutor:
- def __init__(self,project_id:str,agent_id:str,config:SkillExecutionConfig,skill_restrictions:Optional[Dict[str,Dict[str,Any]]]=None):
+ def __init__(self,project_id:str,agent_id:str,config:SkillExecutionConfig,skill_restrictions:Optional[Dict[str,Dict[str,Any]]]=None,on_progress:Optional[Any]=None):
   self.project_id=project_id
   self.agent_id=agent_id
   self.config=config
   self._registry=get_skill_registry()
   self._execution_history:List[Dict[str,Any]]=[]
   self._skill_restrictions=skill_restrictions or {}
+  self._on_progress=on_progress
  def get_available_skills(self)->List[Dict[str,Any]]:
   all_skills=self._registry.get_schemas()
   if not self.config.allowed_skills:
@@ -58,6 +59,7 @@ class SkillExecutor:
    max_output_size=self.config.max_output_size,
    sandbox_enabled=self.config.sandbox_enabled,
    restrictions=restrictions,
+   on_progress=self._on_progress,
   )
   result=await self._registry.execute(skill_name,context,**kwargs)
   self._execution_history.append({
@@ -119,7 +121,8 @@ def create_skill_executor(
  agent_id:str,
  agent_type:str,
  working_dir:str,
- skill_config:Optional[Dict[str,Any]]=None
+ skill_config:Optional[Dict[str,Any]]=None,
+ on_progress:Optional[Any]=None
 )->SkillExecutor:
  from config_loader import load_yaml_config
  if skill_config is None:
@@ -144,7 +147,7 @@ def create_skill_executor(
  )
  _initialize_file_manager(project_id,effective_working_dir)
  skill_restrictions=_extract_skill_restrictions(skill_config)
- return SkillExecutor(project_id,agent_id,config,skill_restrictions)
+ return SkillExecutor(project_id,agent_id,config,skill_restrictions,on_progress)
 
 def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
  is_windows=platform.system().lower()=="windows"

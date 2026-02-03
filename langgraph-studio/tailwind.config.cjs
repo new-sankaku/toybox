@@ -22,7 +22,6 @@ module.exports = {
           // Accent colors (category markers)
           'accent-red': '#B85C5C',
           'accent-orange': '#C4956C',
-          'accent-yellow': '#C9C078',
           'accent-green': '#7AAA7A',
           'accent-blue': '#6B8FAA',
           // Borders
@@ -49,6 +48,12 @@ module.exports = {
       },
       borderRadius: {
         'nier': '0'
+      },
+      boxShadow: {
+        'nier-sm': 'var(--shadow-sm)',
+        'nier-md': 'var(--shadow-md)',
+        'nier-lg': 'var(--shadow-lg)',
+        'nier-xl': 'var(--shadow-xl)'
       },
       transitionTimingFunction: {
         'nier-smooth': 'cubic-bezier(0.4, 0.0, 0.2, 1)',

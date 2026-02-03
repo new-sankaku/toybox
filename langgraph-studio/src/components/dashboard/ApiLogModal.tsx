@@ -108,8 +108,8 @@ export default function ApiLogModal({providerId,providerName,onClose}:ApiLogModa
          onClick={()=>setFilter(opt.value)}
          className={`px-2 py-0.5 text-xs tracking-nier transition-colors ${
           filter===opt.value
-           ?'bg-nier-bg-header text-nier-text-header'
-           :'bg-nier-bg-main text-nier-text-main hover:bg-nier-bg-selected'
+           ?'nier-surface-header'
+           :'nier-surface-main hover:bg-nier-bg-selected'
          }`}
         >
          {opt.label}

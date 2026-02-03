@@ -1,7 +1,9 @@
 import type{Agent,AgentLogEntry}from'./agent'
 import type{Checkpoint}from'./checkpoint'
+import type{Intervention}from'./intervention'
 import type{Project,ProjectMetrics,PhaseNumber}from'./project'
 import type{MessagePriority}from'@/stores/navigatorStore'
+import type{ApiSystemLog}from'@/services/apiService'
 
 export interface StateSyncData{
  status?:string
@@ -9,7 +11,9 @@ export interface StateSyncData{
  project?:Project
  agents?:Agent[]
  checkpoints?:Checkpoint[]
+ interventions?:Intervention[]
  metrics?:ProjectMetrics
+ logs?:ApiSystemLog[]
 }
 
 export interface AgentEventData{
@@ -72,6 +76,7 @@ export interface WebSocketEventMap{
  'metrics:update':{projectId:string;metrics:ProjectMetrics}
  'navigator:message':{speaker:string;text:string;priority:MessagePriority;source:'server'}
  'agent:speech':{agentId:string;projectId:string;message:string;source:'llm'|'pool';timestamp:string}
+ 'system_log:created':{projectId:string;log:ApiSystemLog}
 }
 
 export type WebSocketEventName=keyof WebSocketEventMap

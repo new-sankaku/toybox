@@ -3,1056 +3,1567 @@
 <head>
  <meta charset="UTF-8">
  <meta name="viewport" content="width=device-width,initial-scale=1.0">
- <title>LangGraph Game Studio</title>
+ <title>NieR:Automata Design System - Component Reference</title>
  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
  <style>
-  /*
-   * NieR:Automata UI Style v3
-   * Enhanced with depth, microinteractions, and SF aesthetics
-   */
-
   :root {
-   /* Background colors */
    --bg-main:#E8E4D4;
    --bg-panel:#DAD5C3;
    --bg-selected:#CCC7B5;
    --bg-header:#57534A;
    --bg-footer:#57534A;
-
-   /* Text colors */
    --text-main:#454138;
-   --text-light:#7A756A;
+   --text-light:#5A5548;
    --text-header:#E8E4D4;
    --text-footer:#E8E4D4;
-
-   /* Accent colors */
    --accent-red:#B85C5C;
    --accent-orange:#C4956C;
-   --accent-yellow:#C9C078;
    --accent-green:#7AAA7A;
    --accent-blue:#6B8FAA;
-
-   /* Borders */
    --border-light:rgba(69,65,56,0.2);
    --border-dark:rgba(69,65,56,0.4);
-
-   /* Shadows for depth */
    --shadow-sm:0 1px 2px rgba(69,65,56,0.08);
    --shadow-md:0 2px 4px rgba(69,65,56,0.12),0 1px 2px rgba(69,65,56,0.06);
    --shadow-lg:0 4px 8px rgba(69,65,56,0.15),0 2px 4px rgba(69,65,56,0.08);
    --shadow-xl:0 8px 16px rgba(69,65,56,0.18),0 4px 8px rgba(69,65,56,0.1);
-
-   /* Glow effects */
-   --glow-accent:0 0 8px rgba(184,92,92,0.4);
+   --transition-fast:150ms ease;
+   --transition-normal:300ms ease;
+   --transition-slow:500ms ease;
+   --z-dropdown:100;
+   --z-modal:200;
+   --z-toast:300;
+   --z-tooltip:400;
   }
 
-  * {margin:0;padding:0;box-sizing:border-box;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+
+  body{
+   font-family:'Noto Sans JP',sans-serif;
+   font-weight:400;font-size:14px;
+   background:var(--bg-main);color:var(--text-main);
+   letter-spacing:0.05em;line-height:1.4;
+   min-height:100vh;
+  }
+
+  ::selection{background:var(--bg-selected);color:var(--text-main);}
+  ::-webkit-scrollbar{width:6px;height:6px;}
+  ::-webkit-scrollbar-track{background:var(--bg-main);}
+  ::-webkit-scrollbar-thumb{background:var(--border-dark);}
+  ::-webkit-scrollbar-thumb:hover{background:var(--text-light);}
 
   /* ===== Animations ===== */
-  @keyframes scanline {
-   0% {transform:translateY(-100%);}
-   100% {transform:translateY(100vh);}
-  }
-
-
-  @keyframes glitch {
-   0%,100% {transform:translate(0);filter:none;}
-   20% {transform:translate(-2px,1px);filter:hue-rotate(90deg);}
-   40% {transform:translate(2px,-1px);filter:hue-rotate(-90deg);}
-   60% {transform:translate(-1px,2px);filter:hue-rotate(180deg);}
-   80% {transform:translate(1px,-2px);filter:none;}
-  }
-
-  @keyframes slideIn {
-   from {transform:translateX(-8px);opacity:0;}
-   to {transform:translateX(0);opacity:1;}
-  }
-
-  @keyframes fadeIn {
-   from {opacity:0;}
-   to {opacity:1;}
-  }
-
-  @keyframes ripple {
-   0% {transform:scale(0);opacity:0.6;}
-   100% {transform:scale(2);opacity:0;}
-  }
-
-
-
-  @keyframes toastEnter {
-   0% {transform:translateX(100%);opacity:0;}
-   60% {transform:translateX(-8px);}
-   100% {transform:translateX(0);opacity:1;}
-  }
-
-  @keyframes toastProgress {
-   from {width:100%;}
-   to {width:0%;}
-  }
-
-  @keyframes modalEnter {
-   from {transform:scale(0.95);opacity:0;}
-   to {transform:scale(1);opacity:1;}
-  }
-
-
-  @keyframes spinnerRotate {
-   to {transform:rotate(360deg);}
-  }
-
-  @keyframes skeletonShimmer {
-   0% {background-position:-200% 0;}
-   100% {background-position:200% 0;}
-  }
-
-  /* ===== Base styles ===== */
-  body {
-   font-family:'Noto Sans JP',sans-serif;
-   font-weight:400;
-   font-size:14px;
-   background:linear-gradient(180deg,var(--bg-main) 0%,#DDD8C8 100%);
-   color:var(--text-main);
-   min-height:100vh;
-   display:flex;
-   flex-direction:column;
-   position:relative;
-   overflow-x:hidden;
-  }
-
-
-  /* ===== Header Tab Navigation ===== */
-  .header-tabs {
-   display:flex;
-   background:linear-gradient(180deg,var(--bg-header) 0%,#4A4740 100%);
-   border-bottom:2px solid #3D3A33;
-   box-shadow:var(--shadow-md);
-   position:relative;
-   z-index:100;
-  }
-
-  .tab {
-   padding:12px 24px;
-   color:var(--text-header);
-   font-size:13px;
-   letter-spacing:0.1em;
-   cursor:pointer;
-   display:flex;
-   align-items:center;
-   gap:8px;
-   border-right:1px solid rgba(255,255,255,0.1);
-   transition:all 0.2s ease;
-   position:relative;
-   overflow:hidden;
-  }
-
-  .tab::before {
-   content:'';
-   position:absolute;
-   bottom:0;left:0;right:0;
-   height:2px;
-   background:var(--text-header);
-   transform:scaleX(0);
-   transition:transform 0.25s ease;
-  }
-
-  .tab:hover {
-   background:rgba(255,255,255,0.1);
-  }
-
-  .tab:hover::before {
-   transform:scaleX(1);
-  }
-
-  .tab:active {
-   transform:scale(0.98);
-  }
-
-  .tab.active {
-   background:rgba(255,255,255,0.15);
-  }
-
-  .tab.active::before {
-   transform:scaleX(1);
-  }
-
-  /* Diamond cursor */
-  .tab.active::after {
-   content:'◇';
-   position:absolute;
-   left:8px;
-   font-size:10px;
-  }
-
-  .tab-icon {
-   font-size:11px;
-   opacity:0.8;
-   transition:transform 0.2s ease;
-  }
-
-  .tab:hover .tab-icon {
-   transform:scale(1.1);
-  }
-
-  /* ===== Main Content ===== */
-  .main-content {
-   flex:1;
-   display:flex;
-   padding:20px;
-   gap:20px;
-   animation:fadeIn 0.4s ease;
-  }
-
-  /* ===== Page Title ===== */
-  .page-title {
-   font-size:28px;
-   font-weight:300;
-   letter-spacing:0.15em;
-   margin-bottom:20px;
-   display:flex;
-   align-items:baseline;
-   gap:12px;
-   animation:slideIn 0.4s ease;
-  }
-
-  .page-title-sub {
-   font-size:14px;
-   color:var(--text-light);
-  }
-
-  /* ===== Left Panel ===== */
-  .left-panel {
-   width:320px;
-   display:flex;
-   flex-direction:column;
-  }
-
-  /* Diamond marker */
-  .diamond-marker {
-   display:flex;
-   align-items:center;
-   gap:8px;
-   margin-bottom:8px;
-   color:var(--text-light);
-   font-size:12px;
-  }
-
-  .diamond-marker::before {
-   content:'◇';
-   font-size:14px;
-  }
-
-  /* List container with depth */
-  .list-container {
-   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
-   border:1px solid var(--border-light);
-   box-shadow:var(--shadow-md);
-   flex:1;
-   overflow-y:auto;
-   transition:box-shadow 0.3s ease;
-  }
-
-  .list-container:hover {
-   box-shadow:var(--shadow-lg);
-  }
-
-  /* List items with enhanced interactions */
-  .list-item {
-   display:flex;
-   align-items:center;
-   padding:10px 16px;
-   gap:12px;
-   cursor:pointer;
-   border-bottom:1px solid var(--border-light);
-   transition:all 0.15s ease;
-   position:relative;
-   overflow:hidden;
-  }
-
-  /* Slide indicator on hover */
-  .list-item::before {
-   content:'';
-   position:absolute;
-   left:0;top:0;bottom:0;
-   width:3px;
-   background:var(--text-main);
-   transform:scaleY(0);
-   transition:transform 0.2s ease;
-  }
-
-  .list-item:hover {
-   background:var(--bg-selected);
-   padding-left:20px;
-  }
-
-  .list-item:hover::before {
-   transform:scaleY(1);
-  }
-
-  .list-item:active {
-   transform:scale(0.99);
-  }
-
-  .list-item.selected {
-   background:var(--bg-selected);
-   box-shadow:inset 0 0 0 1px var(--border-dark);
-  }
-
-  .list-item.selected::before {
-   transform:scaleY(1);
-   background:var(--accent-orange);
-  }
-
-  /* Click ripple effect */
-  .list-item .ripple {
-   position:absolute;
-   border-radius:50%;
-   background:rgba(69,65,56,0.15);
-   animation:ripple 0.6s ease-out;
-   pointer-events:none;
-  }
-
-  /* Category marker with glow */
-  .category-marker {
-   width:4px;
-   height:16px;
-   transition:all 0.2s ease;
-  }
-
-  .list-item:hover .category-marker {
-   box-shadow:0 0 8px currentColor;
-   height:20px;
-  }
-
-  .category-marker.system {background:var(--accent-red);color:var(--accent-red);}
-  .category-marker.attack {background:var(--accent-orange);color:var(--accent-orange);}
-  .category-marker.defense {background:var(--accent-yellow);color:var(--accent-yellow);}
-  .category-marker.support {background:var(--accent-green);color:var(--accent-green);}
-  .category-marker.hacking {background:var(--accent-blue);color:var(--accent-blue);}
-
-  .list-item-text {
-   flex:1;
-   transition:transform 0.15s ease;
-  }
-
-  .list-item:hover .list-item-text {
-   transform:translateX(4px);
-  }
-
-  .list-item-value {
-   color:var(--text-light);
-   font-size:13px;
-   font-variant-numeric:tabular-nums;
-  }
-
-  .badge-new {
-   background:var(--accent-red);
-   color:white;
-   font-size:10px;
-   padding:2px 6px;
-   letter-spacing:0.05em;
-  }
-
-  /* ===== Right Panel ===== */
-  .right-panel {
-   flex:1;
-   display:flex;
-   flex-direction:column;
-   gap:16px;
-  }
-
-  /* Detail card with enhanced depth */
-  .detail-card {
-   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
-   border:1px solid var(--border-light);
-   box-shadow:var(--shadow-md);
-   transition:all 0.25s ease;
-   animation:slideIn 0.4s ease backwards;
-  }
-
-  .detail-card:nth-child(1) {animation-delay:0.1s;}
-  .detail-card:nth-child(2) {animation-delay:0.2s;}
-  .detail-card:nth-child(3) {animation-delay:0.3s;}
-
-  .detail-card:hover {
-   box-shadow:var(--shadow-lg);
-  }
-
-  .detail-header {
-   background:linear-gradient(90deg,var(--bg-header) 0%,#4A4740 100%);
-   color:var(--text-header);
-   padding:8px 16px;
-   font-size:13px;
-   letter-spacing:0.1em;
-   position:relative;
-   overflow:hidden;
-  }
-
-  /* Subtle shine effect on header */
-  .detail-header::after {
-   content:'';
-   position:absolute;
-   top:0;left:-100%;
-   width:50%;height:100%;
-   background:linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent);
-   transition:left 0.5s ease;
-  }
-
-  .detail-card:hover .detail-header::after {
-   left:150%;
-  }
-
-  .detail-body {
-   padding:16px;
-  }
-
-  /* Status rows with hover */
-  .status-row {
-   display:flex;
-   justify-content:space-between;
-   padding:8px 0;
-   border-bottom:1px solid var(--border-light);
-   transition:all 0.15s ease;
-  }
-
-  .status-row:last-child {
-   border-bottom:none;
-  }
-
-  .status-row:hover {
-   padding-left:4px;
-   background:rgba(69,65,56,0.03);
-  }
-
-  .status-label {
-   color:var(--text-light);
-  }
-
-  .status-value {
-   font-weight:500;
-  }
-
-  .status-change-up {
-   color:var(--accent-green);
-  }
-
-  .status-change-down {
-   color:var(--accent-red);
-  }
-
-  /* Icon display with float animation */
-  .icon-display {
-   display:flex;
-   align-items:center;
-   justify-content:center;
-   height:120px;
-   background:linear-gradient(180deg,var(--bg-main) 0%,#E0DCD0 100%);
-   border:1px solid var(--border-light);
-   margin-bottom:12px;
-   position:relative;
-   overflow:hidden;
-  }
-
-  /* Decorative corner brackets */
-  .icon-display::before,
-  .icon-display::after {
-   content:'';
-   position:absolute;
-   width:16px;height:16px;
-   border:1px solid var(--border-dark);
-  }
-
-  .icon-display::before {
-   top:8px;left:8px;
-   border-right:none;border-bottom:none;
-  }
-
-  .icon-display::after {
-   bottom:8px;right:8px;
-   border-left:none;border-top:none;
-  }
-
-  .icon-symbol {
-   font-size:48px;
-   color:var(--text-light);
-   transition:all 0.3s ease;
-  }
-
-  .icon-display:hover .icon-symbol {
-   transform:scale(1.1);
-   color:var(--text-main);
-  }
-
-  .detail-description {
-   font-size:13px;
-   line-height:1.6;
-   color:var(--text-light);
-  }
-
-  /* Enhanced progress bar */
-  .progress-bar {
-   height:8px;
-   background:var(--border-light);
-   margin-top:12px;
-   position:relative;
-   overflow:hidden;
-  }
-
-  .progress-fill {
-   height:100%;
-   background:linear-gradient(90deg,var(--text-main) 0%,var(--accent-orange) 100%);
-   position:relative;
-   transition:width 0.5s ease;
-  }
-
-
-  /* Checkpoint card special styling */
-  .checkpoint-card .detail-header {
-   background:linear-gradient(90deg,var(--accent-red) 0%,#A04E4E 100%);
-  }
-
-  .checkpoint-card .detail-header::before {
-   content:'';
-   position:absolute;
-   left:0;top:0;bottom:0;
-   width:4px;
-   background:white;
-   opacity:0.3;
-  }
-
-  /* Status dot indicator */
-  .status-dot {
-   display:inline-block;
-   width:8px;height:8px;
-   border-radius:50%;
-   margin-right:8px;
-  }
-
-  .status-dot.active {
-   background:var(--accent-orange);
-  }
-
-  .status-dot.waiting {
-   background:var(--accent-yellow);
-  }
-
-  .status-dot.complete {
-   background:var(--accent-green);
-  }
-
-  /* ===== Category Legend ===== */
-  .category-legend {
-   display:flex;
-   flex-direction:column;
-   gap:8px;
-   padding:12px 16px;
-   background:linear-gradient(180deg,var(--bg-panel) 0%,#D4CFBE 100%);
-   border:1px solid var(--border-light);
-   box-shadow:var(--shadow-sm);
-   margin-bottom:16px;
-  }
-
-  .legend-item {
-   display:flex;
-   align-items:center;
-   gap:8px;
-   font-size:13px;
-   transition:all 0.15s ease;
-   padding:4px;
-   margin:-4px;
-   cursor:default;
-  }
-
-  .legend-item:hover {
-   background:rgba(69,65,56,0.05);
-   padding-left:8px;
-  }
-
-  .legend-marker {
-   width:4px;
-   height:14px;
-   transition:all 0.2s ease;
-  }
-
-  .legend-item:hover .legend-marker {
-   width:6px;
-   height:18px;
-  }
-
-  /* ===== Footer ===== */
-  .footer {
-   background:linear-gradient(180deg,var(--bg-footer) 0%,#4A4740 100%);
-   color:var(--text-footer);
-   padding:12px 24px;
-   display:flex;
-   justify-content:space-between;
-   align-items:center;
-   border-top:2px solid #3D3A33;
-   box-shadow:0 -2px 8px rgba(69,65,56,0.1);
-  }
-
-  .footer-message {
-   display:flex;
-   align-items:center;
-   gap:8px;
-  }
-
-  .footer-message::before {
-   content:'';
-   width:3px;
-   height:16px;
-   background:var(--text-footer);
-  }
-
-  .footer-controls {
-   display:flex;
-   gap:24px;
-   font-size:13px;
-  }
-
-  .footer-control {
-   display:flex;
-   align-items:center;
-   gap:6px;
-   cursor:pointer;
-   padding:4px 8px;
-   transition:all 0.15s ease;
-  }
-
-  .footer-control:hover {
-   background:rgba(255,255,255,0.1);
-  }
-
-  .footer-control:active {
-   transform:scale(0.95);
-  }
-
-  .control-icon {
-   opacity:0.7;
-   transition:opacity 0.15s ease;
-  }
-
-  .footer-control:hover .control-icon {
-   opacity:1;
-  }
-
-  /* ===== Decorative elements ===== */
-  .corner-dots {
-   position:relative;
-  }
-
-  .corner-dots::before,
-  .corner-dots::after {
-   content:'• • •';
-   position:absolute;
-   font-size:8px;
-   color:var(--text-light);
-   letter-spacing:4px;
-   opacity:0.5;
-  }
-
-  .corner-dots::before {
-   top:8px;right:16px;
-  }
-
-  .corner-dots::after {
-   bottom:8px;left:16px;
-  }
-
-  /* ===== Scrollbar ===== */
-  ::-webkit-scrollbar {
-   width:6px;
-  }
-
-  ::-webkit-scrollbar-track {
-   background:var(--bg-main);
-  }
-
-  ::-webkit-scrollbar-thumb {
-   background:var(--border-dark);
-   transition:background 0.2s ease;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-   background:var(--text-light);
-  }
-
-  /* ===== Focus styles for keyboard navigation ===== */
-  .tab:focus-visible,
-  .list-item:focus-visible,
-  .footer-control:focus-visible,
-  .btn:focus-visible {
-   outline:2px solid var(--accent-blue);
-   outline-offset:2px;
-  }
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes slideIn{from{transform:translateX(-8px);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes slideInRight{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes pulseAnim{0%,100%{opacity:1}50%{opacity:0.6}}
+  @keyframes spinnerRotate{to{transform:rotate(360deg)}}
+  @keyframes progressShimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+  @keyframes skeletonShimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+  @keyframes toastEnter{0%{transform:translateX(100%);opacity:0}60%{transform:translateX(-8px)}100%{transform:translateX(0);opacity:1}}
+  @keyframes toastProgress{from{width:100%}to{width:0%}}
+  @keyframes modalEnter{from{transform:scale(0.95);opacity:0}to{transform:scale(1);opacity:1}}
+  @keyframes ripple{0%{transform:scale(0);opacity:0.6}100%{transform:scale(2);opacity:0}}
+  @keyframes glitch{0%,100%{transform:translate(0)}20%{transform:translate(-2px,1px)}40%{transform:translate(2px,-1px)}60%{transform:translate(-1px,2px)}80%{transform:translate(1px,-2px)}}
+  @keyframes scanline{from{top:0}to{top:100%}}
+  @keyframes pixelWork{0%,100%{transform:translateY(0)}25%{transform:translateY(-2px)}50%{transform:translateY(0)}75%{transform:translateY(-1px)}}
+  @keyframes pixelIdle{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+  @keyframes statusPulse{0%,100%{opacity:1}50%{opacity:0.4}}
+
+  /* ===== Layout ===== */
+  .page-wrapper{max-width:1200px;margin:0 auto;padding:24px;}
+
+  .header-tabs{
+   display:flex;background:var(--bg-header);
+   border-bottom:2px solid #3D3A33;box-shadow:var(--shadow-md);
+   position:sticky;top:0;z-index:100;
+  }
+
+  .tab{
+   padding:12px 24px;color:var(--text-header);font-size:13px;
+   letter-spacing:0.1em;cursor:pointer;display:flex;align-items:center;gap:8px;
+   border-right:1px solid rgba(255,255,255,0.1);transition:all 0.2s ease;
+  }
+  .tab:hover{background:rgba(255,255,255,0.1);}
+  .tab.active{background:rgba(255,255,255,0.15);}
+  .tab-icon{font-size:11px;opacity:0.8;}
+
+  .section{margin-bottom:48px;}
+  .section-title{
+   font-size:20px;font-weight:500;letter-spacing:0.08em;
+   margin-bottom:8px;display:flex;align-items:baseline;gap:12px;
+  }
+  .section-desc{font-size:13px;color:var(--text-light);margin-bottom:20px;}
+  .subsection{margin-bottom:24px;}
+  .subsection-title{
+   font-size:16px;font-weight:500;letter-spacing:0.05em;
+   margin-bottom:12px;padding-bottom:4px;border-bottom:1px solid var(--border-light);
+  }
+  .component-label{
+   font-size:12px;color:var(--text-light);letter-spacing:0.08em;
+   margin-bottom:6px;
+  }
+  .component-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px;}
+  .component-row.col{flex-direction:column;align-items:stretch;}
+  .code-hint{
+   font-size:11px;color:var(--text-light);font-family:monospace;
+   letter-spacing:0;background:var(--bg-selected);padding:2px 6px;
+   display:inline-block;margin-top:4px;
+  }
+
+  /* ===== Surface Classes ===== */
+  .surface-demo{padding:12px 16px;min-width:160px;border:1px solid var(--border-light);}
+  .nier-surface-main{background:var(--bg-main);color:var(--text-main);}
+  .nier-surface-panel{background:var(--bg-panel);color:var(--text-main);}
+  .nier-surface-header{background:var(--bg-header);color:var(--text-header);}
+  .nier-surface-footer{background:var(--bg-footer);color:var(--text-footer);}
+  .nier-surface-selected{background:var(--bg-selected);color:var(--text-main);}
+  .nier-surface-main-muted{background:var(--bg-main);color:var(--text-light);}
+  .nier-surface-panel-muted{background:var(--bg-panel);color:var(--text-light);}
+  .nier-surface-selected-muted{background:var(--bg-selected);color:var(--text-light);}
+
+  /* ===== Color Swatches ===== */
+  .color-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;}
+  .color-swatch{border:1px solid var(--border-light);}
+  .color-swatch-block{height:48px;}
+  .color-swatch-info{padding:6px 8px;background:var(--bg-panel);font-size:11px;}
+  .color-swatch-name{font-weight:500;margin-bottom:2px;}
+  .color-swatch-hex{color:var(--text-light);font-family:monospace;letter-spacing:0;}
 
   /* ===== Buttons ===== */
-  .btn {
-   padding:8px 16px;
-   font-size:13px;
-   letter-spacing:0.05em;
-   border:1px solid var(--border-dark);
-   background:var(--bg-panel);
-   color:var(--text-main);
-   cursor:pointer;
-   transition:all 0.15s ease;
-   position:relative;
-   overflow:hidden;
+  .btn{
+   padding:6px 16px;font-size:13px;letter-spacing:0.05em;
+   border:1px solid var(--border-dark);background:var(--bg-panel);
+   color:var(--text-main);cursor:pointer;transition:all var(--transition-fast);
+   font-family:inherit;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .btn:hover{background:var(--bg-selected);}
+  .btn:active{background:var(--bg-header);color:var(--text-header);}
+  .btn:disabled{opacity:0.5;pointer-events:none;}
+  .btn-primary{background:var(--bg-header);color:var(--text-header);border-color:var(--bg-header);}
+  .btn-primary:hover{background:var(--text-main);}
+  .btn-danger{border-color:var(--accent-red);color:var(--accent-red);background:var(--bg-panel);}
+  .btn-danger:hover{background:var(--accent-red);color:white;}
+  .btn-success{border-color:var(--accent-green);color:var(--accent-green);background:var(--bg-panel);}
+  .btn-success:hover{background:var(--accent-green);color:white;}
+  .btn-ghost{background:transparent;border-color:transparent;}
+  .btn-ghost:hover{background:var(--bg-selected);}
+  .btn-link{background:transparent;border:none;color:var(--text-main);text-decoration:none;}
+  .btn-link:hover{text-decoration:underline;}
+  .btn-sm{height:28px;padding:4px 12px;font-size:12px;}
+  .btn-md{height:32px;padding:6px 16px;font-size:13px;}
+  .btn-lg{height:40px;padding:8px 24px;font-size:14px;}
+  .btn-icon{width:32px;height:32px;padding:0;}
+
+  /* ===== Badges ===== */
+  .badge{
+   display:inline-flex;align-items:center;
+   padding:2px 8px;font-size:12px;letter-spacing:0.05em;
+  }
+  .badge-default{background:var(--bg-selected);color:var(--text-main);}
+  .badge-outline{background:transparent;border:1px solid var(--border-dark);color:var(--text-main);}
+  .badge-red{background:rgba(184,92,92,0.2);color:var(--accent-red);border:1px solid rgba(184,92,92,0.4);}
+  .badge-orange{background:rgba(196,149,108,0.2);color:var(--accent-orange);border:1px solid rgba(196,149,108,0.4);}
+  .badge-green{background:rgba(122,170,122,0.2);color:var(--accent-green);border:1px solid rgba(122,170,122,0.4);}
+  .badge-blue{background:rgba(107,143,170,0.2);color:var(--accent-blue);border:1px solid rgba(107,143,170,0.4);}
+
+  /* ===== Status Badges ===== */
+  .status-badge{
+   display:inline-block;padding:2px 6px;font-size:10px;
+   letter-spacing:0.05em;background:transparent;border-bottom:2px solid;
+  }
+  .status-badge-pending{color:var(--accent-red);border-bottom-color:var(--accent-red);}
+  .status-badge-running{color:var(--accent-orange);border-bottom-color:var(--accent-orange);}
+  .status-badge-paused{color:var(--accent-orange);border-bottom-color:var(--accent-orange);}
+  .status-badge-completed{color:var(--accent-green);border-bottom-color:var(--accent-green);}
+  .status-badge-approved{color:var(--accent-green);border-bottom-color:var(--accent-green);}
+  .status-badge-failed{color:var(--accent-red);border-bottom-color:var(--accent-red);}
+  .status-badge-rejected{color:var(--accent-red);border-bottom-color:var(--accent-red);}
+  .status-badge-neutral{color:var(--text-light);border-bottom-color:var(--border-dark);}
+
+  /* ===== Cards ===== */
+  .card{background:var(--bg-panel);border:1px solid var(--border-light);}
+  .card-header{
+   background:var(--bg-header);color:var(--text-header);
+   padding:8px 12px;font-size:13px;letter-spacing:0.05em;
+   display:flex;align-items:center;
+  }
+  .card-body{padding:12px;}
+
+  /* ===== Tab Toggle ===== */
+  .tab-toggle{
+   padding:6px 12px;font-size:12px;letter-spacing:0.05em;
+   background:transparent;color:var(--text-header);opacity:0.7;
+   cursor:pointer;border:none;font-family:inherit;transition:all var(--transition-fast);
+  }
+  .tab-toggle:hover{background:rgba(255,255,255,0.1);opacity:1;}
+  .tab-toggle.active{background:var(--bg-selected);color:var(--text-main);opacity:1;}
+
+  /* ===== Form Elements ===== */
+  .input{
+   width:100%;padding:8px 12px;background:var(--bg-main);
+   border:1px solid var(--border-dark);color:var(--text-main);
+   font-family:inherit;font-size:14px;letter-spacing:0.05em;
+   transition:border-color var(--transition-fast);
+  }
+  .input:focus{outline:none;border-color:var(--text-main);}
+  .input::placeholder{color:var(--text-light);}
+  .input-error{border-color:var(--accent-red);}
+  .input-error-msg{font-size:12px;color:var(--accent-red);margin-top:4px;}
+
+  .select{
+   width:100%;padding:8px 12px;background:var(--bg-main);
+   border:1px solid var(--border-dark);color:var(--text-main);
+   font-family:inherit;font-size:14px;letter-spacing:0.05em;
+   appearance:none;cursor:pointer;
+   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%23454138' fill='none'/%3E%3C/svg%3E");
+   background-repeat:no-repeat;background-position:right 12px center;
+   padding-right:32px;
+  }
+  .select:focus{outline:none;border-color:var(--text-main);}
+
+  .textarea{
+   width:100%;padding:8px 12px;background:var(--bg-main);
+   border:1px solid var(--border-dark);color:var(--text-main);
+   font-family:inherit;font-size:14px;letter-spacing:0.05em;
+   resize:none;min-height:80px;
+  }
+  .textarea:focus{outline:none;border-color:var(--text-main);}
+
+  .checkbox-wrapper{display:flex;align-items:center;gap:8px;cursor:pointer;}
+  .checkbox{
+   width:16px;height:16px;background:var(--bg-panel);
+   border:1px solid var(--border-light);accent-color:var(--accent-orange);cursor:pointer;
   }
 
-  .btn:hover {
-   background:var(--bg-selected);
-   box-shadow:var(--shadow-sm);
+  .slider{width:100%;cursor:pointer;accent-color:var(--text-main);}
+
+  /* ===== Category Markers ===== */
+  .category-marker{width:4px;height:16px;flex-shrink:0;}
+  .category-marker.sm{width:3px;height:12px;}
+  .category-marker.lg{width:6px;height:20px;}
+  .category-marker.system{background:var(--accent-red);}
+  .category-marker.running{background:var(--accent-orange);}
+  .category-marker.pending{background:var(--accent-orange);}
+  .category-marker.complete{background:var(--accent-green);}
+  .category-marker.info{background:var(--accent-blue);}
+
+  /* ===== Diamond Marker ===== */
+  .diamond-marker{display:flex;align-items:center;gap:8px;font-size:12px;color:inherit;}
+  .diamond-marker::before{content:'◇';font-size:14px;}
+
+  /* ===== Progress Bar ===== */
+  .progress{height:8px;background:var(--border-light);overflow:hidden;position:relative;}
+  .progress-fill{
+   height:100%;background:var(--text-main);transition:width 0.5s ease;
+   position:relative;overflow:hidden;
+  }
+  .progress-fill::after{
+   content:'';position:absolute;inset:0;
+   background:linear-gradient(90deg,transparent 0%,rgba(255,255,255,0.4) 50%,transparent 100%);
+   animation:progressShimmer 1.5s ease-in-out infinite;
   }
 
-  .btn:active {
-   transform:scale(0.98);
+  /* ===== Status Row ===== */
+  .status-row{
+   display:flex;justify-content:space-between;padding:6px 0;
+   border-bottom:1px solid var(--border-light);
   }
+  .status-row:last-child{border-bottom:none;}
+  .status-label{color:var(--text-light);}
+  .status-value{font-weight:500;}
 
-  .btn-primary {
-   background:var(--bg-header);
-   color:var(--text-header);
-   border-color:var(--bg-header);
+  /* ===== List Item ===== */
+  .list-item{
+   display:flex;align-items:center;gap:8px;padding:8px 12px;
+   border-bottom:1px solid var(--border-light);cursor:pointer;
+   transition:all var(--transition-fast);
   }
+  .list-item:hover{background:var(--bg-selected);}
+  .list-item.selected{background:var(--bg-selected);}
 
-  .btn-primary:hover {
-   background:#4A4740;
-  }
-
-  .btn-danger {
-   background:var(--accent-red);
-   color:white;
-   border-color:var(--accent-red);
-  }
-
-  .btn-danger:hover {
-   background:#A04E4E;
-  }
-
-  /* ===== Toast notifications ===== */
-  .toast-container {
-   position:fixed;
-   top:80px;right:20px;
-   display:flex;
-   flex-direction:column;
-   gap:12px;
-   z-index:1000;
-  }
-
-  .toast {
-   background:var(--bg-header);
-   color:var(--text-header);
-   padding:12px 16px;
-   min-width:280px;
-   box-shadow:var(--shadow-xl);
+  /* ===== Toast ===== */
+  .toast-container{position:fixed;top:80px;right:20px;display:flex;flex-direction:column;gap:12px;z-index:1000;}
+  .toast{
+   background:var(--bg-panel);border:1px solid var(--border-dark);
+   padding:12px 16px;min-width:280px;box-shadow:var(--shadow-xl);
+   display:flex;align-items:center;gap:12px;position:relative;overflow:hidden;
    animation:toastEnter 0.4s ease;
-   position:relative;
-   overflow:hidden;
   }
-
-  .toast-progress {
-   position:absolute;
-   bottom:0;left:0;
-   height:3px;
-   background:var(--accent-orange);
-   animation:toastProgress 4s linear forwards;
+  .toast-progress{
+   position:absolute;bottom:0;left:0;height:3px;
+   animation:toastProgress 5s linear forwards;
   }
+  .toast.success .toast-marker{background:var(--accent-green);}
+  .toast.success .toast-progress{background:var(--accent-green);}
+  .toast.error .toast-marker{background:var(--accent-red);}
+  .toast.error .toast-progress{background:var(--accent-red);}
+  .toast.warning .toast-marker{background:var(--accent-orange);}
+  .toast.warning .toast-progress{background:var(--accent-orange);}
+  .toast.info .toast-marker{background:var(--accent-blue);}
+  .toast.info .toast-progress{background:var(--accent-blue);}
+  .toast-marker{width:4px;height:20px;flex-shrink:0;}
 
-  .toast-content {
-   display:flex;
-   align-items:center;
-   gap:12px;
+  /* ===== Toast (static demos) ===== */
+  .toast-demo{
+   background:var(--bg-panel);border:1px solid var(--border-dark);
+   padding:12px 16px;display:flex;align-items:center;gap:12px;
+   position:relative;overflow:hidden;
   }
-
-  .toast-icon {
-   font-size:16px;
-  }
-
-  .toast.success .toast-icon {color:var(--accent-green);}
-  .toast.error .toast-icon {color:var(--accent-red);}
-  .toast.warning .toast-icon {color:var(--accent-yellow);}
-  .toast.info .toast-icon {color:var(--accent-blue);}
+  .toast-demo .toast-bar{position:absolute;bottom:0;left:0;height:3px;width:70%;}
 
   /* ===== Modal ===== */
-  .modal-overlay {
-   position:fixed;
-   inset:0;
-   background:rgba(69,65,56,0.6);
-   display:flex;
-   align-items:center;
-   justify-content:center;
-   z-index:1001;
-   animation:fadeIn 0.2s ease;
+  .modal-overlay{
+   position:fixed;inset:0;background:rgba(0,0,0,0.5);
+   display:flex;align-items:center;justify-content:center;
+   z-index:var(--z-modal);animation:fadeIn 0.2s ease;
   }
-
-  .modal {
-   background:var(--bg-panel);
-   border:1px solid var(--border-dark);
-   box-shadow:var(--shadow-xl);
-   min-width:400px;
-   max-width:90vw;
-   animation:modalEnter 0.3s ease;
+  .modal{
+   background:var(--bg-panel);border:1px solid var(--border-dark);
+   box-shadow:var(--shadow-xl);min-width:400px;max-width:90vw;
+   max-height:80vh;overflow:hidden;animation:modalEnter 0.3s ease;
   }
-
-  .modal-header {
-   background:var(--bg-header);
-   color:var(--text-header);
-   padding:12px 16px;
-   font-size:14px;
-   letter-spacing:0.1em;
+  .modal-header{
+   background:var(--bg-header);color:var(--text-header);
+   padding:12px 16px;font-size:14px;letter-spacing:0.1em;
   }
-
-  .modal-body {
-   padding:20px;
-  }
-
-  .modal-footer {
-   padding:12px 16px;
-   display:flex;
-   justify-content:flex-end;
-   gap:12px;
-   border-top:1px solid var(--border-light);
+  .modal-body{padding:20px;}
+  .modal-footer{
+   padding:12px 16px;display:flex;justify-content:flex-end;
+   gap:12px;border-top:1px solid var(--border-light);
   }
 
   /* ===== Tooltip ===== */
-  .tooltip {
-   position:relative;
-  }
-
-  .tooltip::after {
-   content:attr(data-tooltip);
-   position:absolute;
-   bottom:calc(100% + 8px);
-   left:50%;
+  .tooltip{position:relative;}
+  .tooltip::after{
+   content:attr(data-tooltip);position:absolute;
+   bottom:calc(100% + 8px);left:50%;
    transform:translateX(-50%) scale(0.95);
-   background:var(--bg-header);
-   color:var(--text-header);
-   padding:6px 10px;
-   font-size:12px;
-   white-space:nowrap;
-   opacity:0;
-   pointer-events:none;
-   transition:all 0.2s ease;
-   z-index:100;
+   background:var(--bg-header);color:var(--text-header);
+   padding:6px 10px;font-size:12px;white-space:nowrap;
+   opacity:0;pointer-events:none;transition:all 0.2s ease;z-index:var(--z-tooltip);
   }
+  .tooltip:hover::after{opacity:1;transform:translateX(-50%) scale(1);}
 
-  .tooltip:hover::after {
-   opacity:1;
-   transform:translateX(-50%) scale(1);
+  /* ===== Spinner ===== */
+  .spinner{
+   display:inline-block;width:14px;height:14px;
+   border:2px solid var(--border-light);border-top-color:var(--accent-orange);
+   border-radius:50%;animation:spinnerRotate 0.8s linear infinite;
   }
+  .spinner-sm{width:10px;height:10px;border-width:1.5px;}
+  .spinner-lg{width:24px;height:24px;border-width:3px;}
 
-  /* ===== Loading states ===== */
-  .skeleton {
+  /* ===== Skeleton ===== */
+  .skeleton{
    background:linear-gradient(90deg,var(--bg-selected) 0%,var(--bg-panel) 50%,var(--bg-selected) 100%);
-   background-size:200% 100%;
-   animation:skeletonShimmer 1.5s infinite;
+   background-size:200% 100%;animation:skeletonShimmer 1.5s infinite;
+   height:16px;
   }
 
-  .spinner {
-   width:24px;height:24px;
-   border:2px solid var(--border-light);
-   border-top-color:var(--text-main);
-   border-radius:50%;
-   animation:spinnerRotate 0.8s linear infinite;
-  }
+  /* ===== Status Dot ===== */
+  .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+  .status-dot.online{background:var(--accent-green);animation:statusPulse 1.5s ease-in-out infinite;}
+  .status-dot.connecting{background:var(--accent-orange);animation:statusPulse 0.5s ease-in-out infinite;}
+  .status-dot.offline{background:var(--border-dark);}
 
-  /* ===== Glitch effect for errors ===== */
-  .glitch {
-   animation:glitch 0.3s ease;
+  /* ===== Corner Dots Decoration ===== */
+  .corner-dots{position:relative;}
+  .corner-dots::before,.corner-dots::after{
+   content:'• • •';position:absolute;font-size:8px;
+   color:var(--text-light);letter-spacing:4px;opacity:0.5;
   }
+  .corner-dots::before{top:8px;right:16px;}
+  .corner-dots::after{bottom:8px;left:16px;}
 
-  .glitch-text {
-   position:relative;
+  /* ===== Glitch Effect ===== */
+  .glitch-text{position:relative;display:inline-block;}
+  .glitch-text::before,.glitch-text::after{
+   content:attr(data-text);position:absolute;top:0;left:0;opacity:0.8;
   }
-
-  .glitch-text::before,
-  .glitch-text::after {
-   content:attr(data-text);
-   position:absolute;
-   top:0;left:0;
-   opacity:0.8;
-  }
-
-  .glitch-text:hover::before {
-   animation:glitch 0.3s ease infinite;
-   color:var(--accent-red);
+  .glitch-text:hover::before{
+   animation:glitch 0.3s ease infinite;color:var(--accent-red);
    clip-path:polygon(0 0,100% 0,100% 45%,0 45%);
   }
-
-  .glitch-text:hover::after {
-   animation:glitch 0.3s ease infinite reverse;
-   color:var(--accent-blue);
+  .glitch-text:hover::after{
+   animation:glitch 0.3s ease infinite reverse;color:var(--accent-blue);
    clip-path:polygon(0 55%,100% 55%,100% 100%,0 100%);
   }
+
+  /* ===== Footer ===== */
+  .footer{
+   background:var(--bg-footer);color:var(--text-footer);
+   padding:12px 24px;display:flex;justify-content:space-between;align-items:center;
+   border-top:2px solid #3D3A33;
+  }
+  .footer-message{display:flex;align-items:center;gap:8px;}
+  .footer-message::before{content:'';width:3px;height:16px;background:var(--text-footer);}
+  .footer-controls{display:flex;gap:24px;font-size:13px;}
+  .footer-control{
+   display:flex;align-items:center;gap:6px;cursor:pointer;
+   padding:4px 8px;transition:all var(--transition-fast);
+  }
+  .footer-control:hover{background:rgba(255,255,255,0.1);}
+
+  /* ===== Page Header (unified) ===== */
+  .page-header-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;height:32px;}
+  .page-header-left{display:flex;align-items:baseline;gap:8px;}
+  .page-header-right{display:flex;align-items:center;gap:8px;}
+  .page-title{font-size:20px;font-weight:500;letter-spacing:0.08em;}
+  .page-subtitle{font-size:13px;color:var(--text-light);}
+
+  /* ===== Error Panel ===== */
+  .error-panel{border:1px solid var(--accent-red);background:var(--bg-panel);}
+  .error-panel-header{
+   background:var(--accent-red);color:white;padding:8px 12px;
+   font-size:13px;letter-spacing:0.05em;display:flex;align-items:center;gap:8px;
+  }
+  .error-panel-body{padding:12px;}
+
+  /* ===== Inline Alert ===== */
+  .alert{padding:12px 16px;border:1px solid;display:flex;align-items:flex-start;gap:8px;font-size:13px;}
+  .alert-info{border-color:var(--accent-blue);background:rgba(107,143,170,0.08);color:var(--accent-blue);}
+  .alert-success{border-color:var(--accent-green);background:rgba(122,170,122,0.08);color:var(--accent-green);}
+  .alert-warning{border-color:var(--accent-orange);background:rgba(196,149,108,0.08);color:var(--accent-orange);}
+  .alert-error{border-color:var(--accent-red);background:rgba(184,92,92,0.08);color:var(--accent-red);}
+
+  /* ===== Table ===== */
+  .table{width:100%;border-collapse:collapse;}
+  .table th{
+   background:var(--bg-header);color:var(--text-header);
+   padding:8px 12px;text-align:left;font-size:12px;letter-spacing:0.08em;font-weight:500;
+  }
+  .table td{
+   padding:8px 12px;border-bottom:1px solid var(--border-light);font-size:13px;
+  }
+  .table tr:hover td{background:var(--bg-selected);}
+
+  /* ===== Separator ===== */
+  .separator{height:1px;background:var(--border-light);margin:32px 0;}
+
+  /* ===== Scroll containers ===== */
+  .scroll-list{max-height:200px;overflow-y:auto;}
+
+  /* ===== Sidebar Nav ===== */
+  .toc{
+   position:fixed;left:0;top:50px;width:200px;
+   background:var(--bg-panel);border-right:1px solid var(--border-light);
+   height:calc(100vh - 50px);overflow-y:auto;padding:12px 0;z-index:50;
+  }
+  .toc a{
+   display:block;padding:6px 16px;font-size:12px;
+   color:var(--text-light);text-decoration:none;letter-spacing:0.05em;
+   transition:all var(--transition-fast);
+  }
+  .toc a:hover{color:var(--text-main);background:var(--bg-selected);padding-left:20px;}
+  .toc-section{font-size:10px;color:var(--text-light);padding:12px 16px 4px;letter-spacing:0.1em;font-weight:500;}
+
+  .main-content{margin-left:200px;}
+
+  @media(max-width:768px){
+   .toc{display:none;}
+   .main-content{margin-left:0;}
+  }
+
+  /* ===== Text utilities ===== */
+  .text-change-up{color:var(--accent-green);}
+  .text-change-down{color:var(--accent-red);}
  </style>
 </head>
 <body>
 
- <!-- Header Tabs -->
+ <!-- Header -->
  <nav class="header-tabs">
-  <div class="tab" tabindex="0"><span class="tab-icon">⊞</span> MAP</div>
-  <div class="tab" tabindex="0"><span class="tab-icon">✦</span> QUEST</div>
-  <div class="tab active" tabindex="0"><span class="tab-icon">⚙</span> SYSTEM</div>
-  <div class="tab" tabindex="0"><span class="tab-icon">⚔</span> AGENTS</div>
-  <div class="tab" tabindex="0"><span class="tab-icon">◈</span> LOGS</div>
-  <div class="tab" tabindex="0"><span class="tab-icon">☰</span> DATA</div>
+  <div class="tab active"><span class="tab-icon">⊞</span> DESIGN SYSTEM</div>
+  <div class="tab"><span class="tab-icon">◈</span> COMPONENTS</div>
+  <div class="tab"><span class="tab-icon">⚙</span> TOKENS</div>
+  <div class="tab"><span class="tab-icon">☰</span> PATTERNS</div>
  </nav>
 
- <!-- Toast Container -->
+ <!-- Toast Container (for live demo) -->
  <div class="toast-container" id="toastContainer"></div>
 
- <!-- Main Content -->
- <div class="main-content corner-dots">
-  <div class="left-panel">
-   <div class="page-title">
-    SYSTEM <span class="page-title-sub">- エージェント管理</span>
-   </div>
+ <!-- Sidebar TOC -->
+ <aside class="toc">
+  <div class="toc-section">FOUNDATIONS</div>
+  <a href="#colors">Color System</a>
+  <a href="#typography">Typography</a>
+  <a href="#surfaces">Surface Classes</a>
+  <a href="#spacing">Spacing</a>
+  <div class="toc-section">COMPONENTS</div>
+  <a href="#buttons">Buttons</a>
+  <a href="#badges">Badges</a>
+  <a href="#cards">Cards</a>
+  <a href="#forms">Form Elements</a>
+  <a href="#tables">Tables</a>
+  <a href="#lists">List Items</a>
+  <a href="#markers">Category Markers</a>
+  <a href="#diamonds">Diamond Markers</a>
+  <a href="#progress">Progress Bars</a>
+  <a href="#status-rows">Status Rows</a>
+  <a href="#tabs">Tabs</a>
+  <div class="toc-section">FEEDBACK</div>
+  <a href="#alerts">Alerts</a>
+  <a href="#toasts">Toasts</a>
+  <a href="#errors">Error States</a>
+  <a href="#modals">Modals</a>
+  <a href="#tooltips">Tooltips</a>
+  <div class="toc-section">STATUS</div>
+  <a href="#dots">Status Dots</a>
+  <a href="#spinners">Spinners</a>
+  <a href="#skeleton">Skeleton Loading</a>
+  <div class="toc-section">DECORATIVE</div>
+  <a href="#animations">Animations</a>
+  <a href="#glitch">Glitch Effect</a>
+  <a href="#decorations">Decorations</a>
+  <div class="toc-section">LAYOUT</div>
+  <a href="#page-header">Page Header</a>
+  <a href="#footer">Footer</a>
+  <a href="#modal-demo">Modal (Live)</a>
+ </aside>
 
-   <!-- Category Legend -->
-   <div class="category-legend">
-    <div class="legend-item">
-     <div class="legend-marker" style="background:var(--accent-red)"></div>
-     システム
-    </div>
-    <div class="legend-item">
-     <div class="legend-marker" style="background:var(--accent-orange)"></div>
-     実行中
-    </div>
-    <div class="legend-item">
-     <div class="legend-marker" style="background:var(--accent-yellow)"></div>
-     待機中
-    </div>
-    <div class="legend-item">
-     <div class="legend-marker" style="background:var(--accent-green)"></div>
-     完了
-    </div>
-   </div>
+ <div class="main-content">
+  <div class="page-wrapper">
 
-   <div class="diamond-marker">エージェント一覧</div>
+   <!-- ===== COLOR SYSTEM ===== -->
+   <div class="section" id="colors">
+    <div class="section-title">◇ Color System</div>
+    <div class="section-desc">NieR:Automataの世界観に基づくウォームモノクロームカラーパレット</div>
 
-   <div class="list-container">
-    <div class="list-item selected" tabindex="0">
-     <div class="category-marker attack"></div>
-     <span class="status-dot active"></span>
-     <div class="list-item-text">CodeLeader</div>
-     <div class="list-item-value">67%</div>
+    <div class="subsection">
+     <div class="subsection-title">Background Colors</div>
+     <div class="color-grid">
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#E8E4D4"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">bg-main</div><div class="color-swatch-hex">#E8E4D4</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#DAD5C3"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">bg-panel</div><div class="color-swatch-hex">#DAD5C3</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#CCC7B5"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">bg-selected</div><div class="color-swatch-hex">#CCC7B5</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#57534A"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">bg-header</div><div class="color-swatch-hex">#57534A</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#57534A"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">bg-footer</div><div class="color-swatch-hex">#57534A</div></div>
+      </div>
+     </div>
     </div>
-    <div class="list-item" tabindex="0">
-     <div class="category-marker attack"></div>
-     <span class="status-dot active"></span>
-     <div class="list-item-text">AssetLeader</div>
-     <div class="list-item-value">45%</div>
-    </div>
-    <div class="list-item" tabindex="0">
-     <div class="category-marker defense"></div>
-     <span class="status-dot waiting"></span>
-     <div class="list-item-text">Tester</div>
-     <div class="list-item-value">--</div>
-    </div>
-    <div class="list-item" tabindex="0">
-     <div class="category-marker defense"></div>
-     <span class="status-dot waiting"></span>
-     <div class="list-item-text">Reviewer</div>
-     <div class="list-item-value">--</div>
-    </div>
-    <div class="list-item" tabindex="0">
-     <div class="category-marker support"></div>
-     <span class="status-dot complete"></span>
-     <div class="list-item-text">Integrator</div>
-     <div class="list-item-value">--</div>
-     <span class="badge-new">NEW</span>
-    </div>
-   </div>
 
-   <div style="margin-top:16px;display:flex;gap:8px;">
-    <button class="btn btn-primary" id="btnShowToast">通知テスト</button>
-    <button class="btn" id="btnShowModal">モーダル</button>
-   </div>
-  </div>
-
-  <div class="right-panel">
-   <!-- Agent Detail -->
-   <div class="detail-card">
-    <div class="detail-header">CodeLeader</div>
-    <div class="detail-body">
-     <div class="icon-display">
-      <div class="icon-symbol">◈</div>
-     </div>
-     <div class="detail-description">
-      コード実装を統括するリーダーエージェント。<br>
-      配下のCodeWorkerに対してタスクを分配し、進捗を管理する。
-     </div>
-     <div class="progress-bar">
-      <div class="progress-fill" style="width:67%"></div>
+    <div class="subsection">
+     <div class="subsection-title">Text Colors</div>
+     <div class="color-grid">
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#454138"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">text-main</div><div class="color-swatch-hex">#454138</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#5A5548"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">text-light</div><div class="color-swatch-hex">#5A5548</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#E8E4D4"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">text-header</div><div class="color-swatch-hex">#E8E4D4</div></div>
+      </div>
      </div>
     </div>
-   </div>
 
-   <!-- Status -->
-   <div class="detail-card">
-    <div class="detail-header">ステータス</div>
-    <div class="detail-body">
-     <div class="status-row">
-      <span class="status-label">プロジェクト：</span>
-      <span class="status-value">Untitled RPG</span>
-     </div>
-     <div class="status-row">
-      <span class="status-label">フェーズ：</span>
-      <span class="status-value">Phase 2 - Development</span>
-     </div>
-     <div class="status-row">
-      <span class="status-label">実行時間：</span>
-      <span class="status-value" id="runningTime">00:45:23</span>
-     </div>
-     <div class="status-row">
-      <span class="status-label">タスク完了：</span>
-      <span class="status-value">12 / 28</span>
-     </div>
-     <div class="status-row">
-      <span class="status-label">サブエージェント：</span>
-      <span class="status-value"><span class="status-dot active"></span>3 active</span>
+    <div class="subsection">
+     <div class="subsection-title">Accent Colors (Semantic)</div>
+     <div class="color-grid">
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#B85C5C"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">accent-red</div><div class="color-swatch-hex">#B85C5C Error</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#C4956C"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">accent-orange</div><div class="color-swatch-hex">#C4956C Running/Pending</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#7AAA7A"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">accent-green</div><div class="color-swatch-hex">#7AAA7A Success</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:#6B8FAA"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">accent-blue</div><div class="color-swatch-hex">#6B8FAA Info</div></div>
+      </div>
      </div>
     </div>
-   </div>
 
-   <!-- Checkpoint -->
-   <div class="detail-card checkpoint-card">
-    <div class="detail-header">
-     ◈ CHECKPOINT - 承認待ち
-    </div>
-    <div class="detail-body">
-     <div class="status-row">
-      <span class="status-label">種別：</span>
-      <span class="status-value">Design Document Review</span>
-     </div>
-     <div class="status-row">
-      <span class="status-label">待機時間：</span>
-      <span class="status-value status-change-down">1h 23m</span>
-     </div>
-     <div style="margin-top:12px;display:flex;gap:8px;">
-      <button class="btn btn-primary tooltip" data-tooltip="承認してタスクを続行">承認</button>
-      <button class="btn btn-danger tooltip" data-tooltip="タスクを中断">却下</button>
+    <div class="subsection">
+     <div class="subsection-title">Borders</div>
+     <div class="color-grid">
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:rgba(69,65,56,0.2)"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">border-light</div><div class="color-swatch-hex">rgba(69,65,56,0.2)</div></div>
+      </div>
+      <div class="color-swatch">
+       <div class="color-swatch-block" style="background:rgba(69,65,56,0.4)"></div>
+       <div class="color-swatch-info"><div class="color-swatch-name">border-dark</div><div class="color-swatch-hex">rgba(69,65,56,0.4)</div></div>
+      </div>
      </div>
     </div>
    </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== TYPOGRAPHY ===== -->
+   <div class="section" id="typography">
+    <div class="section-title">◇ Typography</div>
+    <div class="section-desc">Noto Sans JP - weight: 300(本文), 400(見出し), 500(強調)</div>
+
+    <div class="subsection">
+     <div style="margin-bottom:16px">
+      <span style="font-size:28px;font-weight:300;letter-spacing:0.15em;">Display 28px</span>
+      <span class="code-hint">nier-display / weight:300</span>
+     </div>
+     <div style="margin-bottom:16px">
+      <span style="font-size:20px;font-weight:500;letter-spacing:0.08em;">Heading 1 — 20px</span>
+      <span class="code-hint">nier-h1 / weight:500</span>
+     </div>
+     <div style="margin-bottom:16px">
+      <span style="font-size:16px;font-weight:500;letter-spacing:0.05em;">Heading 2 — 16px</span>
+      <span class="code-hint">nier-h2 / weight:500</span>
+     </div>
+     <div style="margin-bottom:16px">
+      <span style="font-size:14px;">Body — 14px 本文テキストのサンプルです。</span>
+      <span class="code-hint">nier-body / weight:400</span>
+     </div>
+     <div style="margin-bottom:16px">
+      <span style="font-size:13px;">Small — 13px サブ情報テキスト</span>
+      <span class="code-hint">nier-small / weight:400</span>
+     </div>
+     <div style="margin-bottom:16px">
+      <span style="font-size:12px;color:var(--text-light);">Caption — 12px ラベル、タイムスタンプ</span>
+      <span class="code-hint">nier-caption</span>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Letter Spacing</div>
+     <div style="margin-bottom:8px"><span style="letter-spacing:0.02em;">tight: 0.02em — テキストサンプル SAMPLE TEXT</span> <span class="code-hint">tracking-nier-tight</span></div>
+     <div style="margin-bottom:8px"><span style="letter-spacing:0.05em;">normal: 0.05em — テキストサンプル SAMPLE TEXT</span> <span class="code-hint">tracking-nier</span></div>
+     <div style="margin-bottom:8px"><span style="letter-spacing:0.08em;">wide: 0.08em — テキストサンプル SAMPLE TEXT</span> <span class="code-hint">tracking-nier-wide</span></div>
+     <div style="margin-bottom:8px"><span style="letter-spacing:0.15em;">extra-wide: 0.15em — SAMPLE TEXT</span> <span class="code-hint">tracking-nier-extra-wide</span></div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Text Utilities</div>
+     <div class="component-row">
+      <span class="text-change-up">+12.5% (text-change-up)</span>
+      <span class="text-change-down">-8.3% (text-change-down)</span>
+      <span style="color:var(--text-light);">Muted text (text-light)</span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== SURFACE CLASSES ===== -->
+   <div class="section" id="surfaces">
+    <div class="section-title">◇ Surface Classes</div>
+    <div class="section-desc">背景色と文字色をペアにしたクラス。組み合わせミスを防ぐために使用する。</div>
+
+    <div class="component-row" style="flex-wrap:wrap;">
+     <div class="surface-demo nier-surface-main">nier-surface-main</div>
+     <div class="surface-demo nier-surface-panel">nier-surface-panel</div>
+     <div class="surface-demo nier-surface-selected">nier-surface-selected</div>
+     <div class="surface-demo nier-surface-header">nier-surface-header</div>
+     <div class="surface-demo nier-surface-footer">nier-surface-footer</div>
+    </div>
+    <div class="component-row" style="flex-wrap:wrap;">
+     <div class="surface-demo nier-surface-main-muted">nier-surface-main-muted</div>
+     <div class="surface-demo nier-surface-panel-muted">nier-surface-panel-muted</div>
+     <div class="surface-demo nier-surface-selected-muted">nier-surface-selected-muted</div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== SPACING ===== -->
+   <div class="section" id="spacing">
+    <div class="section-title">◇ Spacing</div>
+    <div class="section-desc">一貫した間隔のためのスペーシングスケール</div>
+
+    <div class="subsection">
+     <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+       <div style="width:4px;height:16px;background:var(--accent-blue);"></div>
+       <span style="font-size:12px;width:60px;">xs: 4px</span>
+       <span class="code-hint">--space-xs / nier-xs</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+       <div style="width:8px;height:16px;background:var(--accent-blue);"></div>
+       <span style="font-size:12px;width:60px;">sm: 8px</span>
+       <span class="code-hint">--space-sm / nier-sm</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+       <div style="width:16px;height:16px;background:var(--accent-blue);"></div>
+       <span style="font-size:12px;width:60px;">md: 16px</span>
+       <span class="code-hint">--space-md / nier-md</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+       <div style="width:24px;height:16px;background:var(--accent-blue);"></div>
+       <span style="font-size:12px;width:60px;">lg: 24px</span>
+       <span class="code-hint">--space-lg / nier-lg</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;">
+       <div style="width:32px;height:16px;background:var(--accent-blue);"></div>
+       <span style="font-size:12px;width:60px;">xl: 32px</span>
+       <span class="code-hint">--space-xl / nier-xl</span>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== BUTTONS ===== -->
+   <div class="section" id="buttons">
+    <div class="section-title">◇ Buttons</div>
+    <div class="section-desc">操作を促すインタラクティブ要素。角ばったデザイン (border-radius: 0)</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Variants</div>
+     <div class="component-row">
+      <button class="btn">Default</button>
+      <button class="btn btn-primary">Primary</button>
+      <button class="btn btn-danger">Danger</button>
+      <button class="btn btn-success">Success</button>
+      <button class="btn btn-ghost">Ghost</button>
+      <button class="btn btn-link">Link</button>
+     </div>
+     <div class="component-row">
+      <span class="code-hint">.nier-btn</span>
+      <span class="code-hint">.nier-btn-primary</span>
+      <span class="code-hint">.nier-btn-danger</span>
+      <span class="code-hint">.nier-btn-success</span>
+      <span class="code-hint">variant="ghost"</span>
+      <span class="code-hint">variant="link"</span>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Sizes</div>
+     <div class="component-row">
+      <button class="btn btn-sm">Small</button>
+      <button class="btn btn-md">Medium (Default)</button>
+      <button class="btn btn-lg">Large</button>
+      <button class="btn btn-icon">◈</button>
+     </div>
+     <div class="component-row">
+      <span class="code-hint">size="sm" h:28px</span>
+      <span class="code-hint">size="default" h:32px</span>
+      <span class="code-hint">size="lg" h:40px</span>
+      <span class="code-hint">size="icon" 32x32</span>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">States</div>
+     <div class="component-row">
+      <button class="btn" disabled>Disabled</button>
+      <button class="btn btn-primary" disabled>Disabled Primary</button>
+      <button class="btn btn-danger" disabled>Disabled Danger</button>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">With Icons</div>
+     <div class="component-row">
+      <button class="btn btn-primary">◈ 実行</button>
+      <button class="btn">⚙ 設定</button>
+      <button class="btn btn-danger">✕ 削除</button>
+      <button class="btn btn-success">✓ 承認</button>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== BADGES ===== -->
+   <div class="section" id="badges">
+    <div class="section-title">◇ Badges</div>
+    <div class="section-desc">ラベル・タグ表示に使用するバッジコンポーネント</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Color Variants (Badge Component)</div>
+     <div class="component-row">
+      <span class="badge badge-default">Default</span>
+      <span class="badge badge-outline">Outline</span>
+      <span class="badge badge-red">Red</span>
+      <span class="badge badge-orange">Orange</span>
+      <span class="badge badge-green">Green</span>
+      <span class="badge badge-blue">Blue</span>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Status Badges (underline style)</div>
+     <div class="section-desc">ボタンと区別するため、背景色なし・下線+文字色で状態を表現</div>
+     <div class="component-row">
+      <span class="status-badge status-badge-pending">PENDING</span>
+      <span class="status-badge status-badge-running">RUNNING</span>
+      <span class="status-badge status-badge-paused">PAUSED</span>
+      <span class="status-badge status-badge-completed">COMPLETED</span>
+      <span class="status-badge status-badge-approved">APPROVED</span>
+      <span class="status-badge status-badge-failed">FAILED</span>
+      <span class="status-badge status-badge-rejected">REJECTED</span>
+      <span class="status-badge status-badge-neutral">NEUTRAL</span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== CARDS ===== -->
+   <div class="section" id="cards">
+    <div class="section-title">◇ Cards</div>
+    <div class="section-desc">情報をグループ化するパネル。ヘッダー + ボディ構成。</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+     <div class="card">
+      <div class="card-header">◇ Card Header</div>
+      <div class="card-body">
+       <p>カードの内容が入ります。nier-card + nier-card-header + nier-card-body の構成。</p>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header" style="justify-content:space-between;">
+       <span>◇ With Tab Toggles</span>
+       <div>
+        <button class="tab-toggle active">TAB A</button>
+        <button class="tab-toggle">TAB B</button>
+        <button class="tab-toggle">TAB C</button>
+       </div>
+      </div>
+      <div class="card-body">
+       <p>ヘッダー内にタブ切り替え (nier-tab-toggle) を配置</p>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header" style="background:var(--accent-red);">◈ CHECKPOINT - Alert Card</div>
+      <div class="card-body">
+       <p style="margin-bottom:8px;">チェックポイント通知。ヘッダー色を accent-red に変更。</p>
+       <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary btn-sm">承認</button>
+        <button class="btn btn-danger btn-sm">却下</button>
+       </div>
+      </div>
+     </div>
+
+     <div class="card corner-dots">
+      <div class="card-header">◇ With Corner Dots</div>
+      <div class="card-body" style="min-height:80px;">
+       <p>角にドット装飾を付けたカード (corner-dots)</p>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== FORM ELEMENTS ===== -->
+   <div class="section" id="forms">
+    <div class="section-title">◇ Form Elements</div>
+    <div class="section-desc">入力・選択用のフォームコンポーネント</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+     <div class="subsection">
+      <div class="subsection-title">Input</div>
+      <div class="component-label">Default</div>
+      <input class="input" type="text" placeholder="テキストを入力...">
+      <div style="height:12px;"></div>
+      <div class="component-label">With Label</div>
+      <label style="font-size:12px;display:block;margin-bottom:4px;">プロジェクト名</label>
+      <input class="input" type="text" value="Untitled RPG">
+      <div style="height:12px;"></div>
+      <div class="component-label">Error State</div>
+      <input class="input input-error" type="text" value="invalid value">
+      <div class="input-error-msg">入力値が正しくありません</div>
+      <div style="height:12px;"></div>
+      <div class="component-label">Disabled</div>
+      <input class="input" type="text" value="Read only" disabled style="opacity:0.5;">
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Select</div>
+      <div class="component-label">Default</div>
+      <select class="select">
+       <option>Option 1</option>
+       <option>Option 2</option>
+       <option>Option 3</option>
+      </select>
+      <div style="height:24px;"></div>
+      <div class="subsection-title">Textarea</div>
+      <div class="component-label">Default</div>
+      <textarea class="textarea" placeholder="複数行テキスト入力..."></textarea>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Checkbox</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+       <label class="checkbox-wrapper">
+        <input type="checkbox" class="checkbox" checked> 自動保存を有効にする
+       </label>
+       <label class="checkbox-wrapper">
+        <input type="checkbox" class="checkbox"> 通知を表示する
+       </label>
+       <label class="checkbox-wrapper">
+        <input type="checkbox" class="checkbox" disabled> 無効な選択肢
+       </label>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Slider</div>
+      <div class="component-label">Temperature: <span id="sliderValue">0.7</span></div>
+      <input type="range" class="slider" min="0" max="1" step="0.1" value="0.7"
+             oninput="document.getElementById('sliderValue').textContent=this.value">
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-light);">
+       <span>0.0</span><span>1.0</span>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== TABLES ===== -->
+   <div class="section" id="tables">
+    <div class="section-title">◇ Tables</div>
+    <div class="section-desc">データ表示用テーブル</div>
+
+    <table class="table">
+     <thead>
+      <tr>
+       <th>Agent</th>
+       <th>Status</th>
+       <th>Progress</th>
+       <th>Tokens</th>
+       <th>Time</th>
+      </tr>
+     </thead>
+     <tbody>
+      <tr>
+       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker running" style="display:inline-block;"></span> CodeLeader</span></td>
+       <td><span class="status-badge status-badge-running">RUNNING</span></td>
+       <td>67%</td>
+       <td>12,450</td>
+       <td>00:45:23</td>
+      </tr>
+      <tr>
+       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker running" style="display:inline-block;"></span> AssetLeader</span></td>
+       <td><span class="status-badge status-badge-running">RUNNING</span></td>
+       <td>45%</td>
+       <td>8,320</td>
+       <td>00:32:11</td>
+      </tr>
+      <tr>
+       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker pending" style="display:inline-block;"></span> Tester</span></td>
+       <td><span class="status-badge status-badge-paused">PAUSED</span></td>
+       <td>--</td>
+       <td>0</td>
+       <td>--</td>
+      </tr>
+      <tr>
+       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker complete" style="display:inline-block;"></span> Planner</span></td>
+       <td><span class="status-badge status-badge-completed">COMPLETED</span></td>
+       <td>100%</td>
+       <td>5,280</td>
+       <td>00:18:42</td>
+      </tr>
+      <tr>
+       <td><span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker system" style="display:inline-block;"></span> Validator</span></td>
+       <td><span class="status-badge status-badge-failed">FAILED</span></td>
+       <td>23%</td>
+       <td>1,100</td>
+       <td>00:05:08</td>
+      </tr>
+     </tbody>
+    </table>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== LIST ITEMS ===== -->
+   <div class="section" id="lists">
+    <div class="section-title">◇ List Items</div>
+    <div class="section-desc">選択可能なリスト要素。Category Marker付き。</div>
+
+    <div style="max-width:400px;">
+     <div class="card">
+      <div class="card-header">◇ Agent List</div>
+      <div>
+       <div class="list-item selected">
+        <span class="category-marker running"></span>
+        <span class="status-dot online"></span>
+        <span style="flex:1;">CodeLeader</span>
+        <span style="font-size:13px;color:var(--text-light);">67%</span>
+       </div>
+       <div class="list-item">
+        <span class="category-marker running"></span>
+        <span class="status-dot online"></span>
+        <span style="flex:1;">AssetLeader</span>
+        <span style="font-size:13px;color:var(--text-light);">45%</span>
+       </div>
+       <div class="list-item">
+        <span class="category-marker pending"></span>
+        <span class="status-dot connecting"></span>
+        <span style="flex:1;">Tester</span>
+        <span style="font-size:13px;color:var(--text-light);">--</span>
+       </div>
+       <div class="list-item">
+        <span class="category-marker complete"></span>
+        <span class="status-dot offline"></span>
+        <span style="flex:1;">Planner</span>
+        <span style="font-size:13px;color:var(--text-light);">100%</span>
+       </div>
+       <div class="list-item">
+        <span class="category-marker system"></span>
+        <span class="status-dot offline"></span>
+        <span style="flex:1;">Validator</span>
+        <span class="badge badge-red" style="font-size:10px;">ERROR</span>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== CATEGORY MARKERS ===== -->
+   <div class="section" id="markers">
+    <div class="section-title">◇ Category Markers</div>
+    <div class="section-desc">4px縦線で状態を色分けするマーカー</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Colors</div>
+     <div class="component-row">
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker system"></span> system (red)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker running"></span> running (orange)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker pending"></span> pending (orange)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker complete"></span> complete (green)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker info"></span> info (blue)</span>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Sizes</div>
+     <div class="component-row">
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker sm running"></span> sm (3x12)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker running"></span> default (4x16)</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;"><span class="category-marker lg running"></span> lg (6x20)</span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== DIAMOND MARKERS ===== -->
+   <div class="section" id="diamonds">
+    <div class="section-title">◇ Diamond Markers</div>
+    <div class="section-desc">セクション区切りに使用するダイヤモンド記号</div>
+
+    <div class="component-row" style="flex-direction:column;align-items:flex-start;gap:8px;">
+     <div class="diamond-marker">Section Title</div>
+     <div class="diamond-marker" style="color:var(--text-light);">Muted Section</div>
+     <div class="diamond-marker" style="color:var(--accent-blue);">Info Section</div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== PROGRESS BAR ===== -->
+   <div class="section" id="progress">
+    <div class="section-title">◇ Progress Bars</div>
+    <div class="section-desc">進捗表示。shimmerアニメーション付き。</div>
+
+    <div style="display:flex;flex-direction:column;gap:16px;max-width:500px;">
+     <div>
+      <div class="component-label">0%</div>
+      <div class="progress"><div class="progress-fill" style="width:0%"></div></div>
+     </div>
+     <div>
+      <div class="component-label">25%</div>
+      <div class="progress"><div class="progress-fill" style="width:25%"></div></div>
+     </div>
+     <div>
+      <div class="component-label">50%</div>
+      <div class="progress"><div class="progress-fill" style="width:50%"></div></div>
+     </div>
+     <div>
+      <div class="component-label">75%</div>
+      <div class="progress"><div class="progress-fill" style="width:75%"></div></div>
+     </div>
+     <div>
+      <div class="component-label">100%</div>
+      <div class="progress"><div class="progress-fill" style="width:100%"></div></div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== STATUS ROWS ===== -->
+   <div class="section" id="status-rows">
+    <div class="section-title">◇ Status Rows</div>
+    <div class="section-desc">キー・バリュー形式の情報表示</div>
+
+    <div style="max-width:400px;">
+     <div class="card">
+      <div class="card-header">◇ Status</div>
+      <div class="card-body">
+       <div class="status-row"><span class="status-label">Project</span><span class="status-value">Untitled RPG</span></div>
+       <div class="status-row"><span class="status-label">Phase</span><span class="status-value">Development</span></div>
+       <div class="status-row"><span class="status-label">Runtime</span><span class="status-value">00:45:23</span></div>
+       <div class="status-row"><span class="status-label">Change</span><span class="status-value text-change-up">+12.5%</span></div>
+       <div class="status-row"><span class="status-label">Error Rate</span><span class="status-value text-change-down">-3.2%</span></div>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== TABS ===== -->
+   <div class="section" id="tabs">
+    <div class="section-title">◇ Tabs</div>
+    <div class="section-desc">ナビゲーション用タブ</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Header Tabs (nier-tab)</div>
+     <div style="background:var(--bg-header);display:inline-flex;">
+      <div class="tab active"><span class="tab-icon">⊞</span> MAP</div>
+      <div class="tab"><span class="tab-icon">✦</span> QUEST</div>
+      <div class="tab"><span class="tab-icon">⚙</span> SYSTEM</div>
+      <div class="tab"><span class="tab-icon">⚔</span> AGENTS</div>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Tab Toggles (nier-tab-toggle)</div>
+     <div style="background:var(--bg-header);display:inline-flex;padding:4px;">
+      <button class="tab-toggle active">OVERVIEW</button>
+      <button class="tab-toggle">DETAILS</button>
+      <button class="tab-toggle">LOGS</button>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== ALERTS ===== -->
+   <div class="section" id="alerts">
+    <div class="section-title">◇ Alerts</div>
+    <div class="section-desc">インライン通知メッセージ</div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;max-width:600px;">
+     <div class="alert alert-info">ℹ 新しいバージョンが利用可能です。</div>
+     <div class="alert alert-success">✓ 設定が正常に保存されました。</div>
+     <div class="alert alert-warning">⚠ API使用量が上限の80%に達しています。</div>
+     <div class="alert alert-error">✕ サーバーに接続できません。再試行してください。</div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== TOASTS ===== -->
+   <div class="section" id="toasts">
+    <div class="section-title">◇ Toasts</div>
+    <div class="section-desc">一時的な通知。右上に表示され自動消滅。Category Marker付き。</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Types (Static Preview)</div>
+     <div style="display:flex;flex-direction:column;gap:12px;max-width:360px;">
+      <div class="toast-demo success">
+       <div class="toast-marker" style="background:var(--accent-green)"></div>
+       <span>✓ タスクが正常に完了しました</span>
+       <div class="toast-bar" style="background:var(--accent-green);width:70%;"></div>
+      </div>
+      <div class="toast-demo error">
+       <div class="toast-marker" style="background:var(--accent-red)"></div>
+       <span>✕ エラーが発生しました</span>
+       <div class="toast-bar" style="background:var(--accent-red);width:50%;"></div>
+      </div>
+      <div class="toast-demo warning">
+       <div class="toast-marker" style="background:var(--accent-orange)"></div>
+       <span>⚠ 警告：確認が必要です</span>
+       <div class="toast-bar" style="background:var(--accent-orange);width:30%;"></div>
+      </div>
+      <div class="toast-demo info">
+       <div class="toast-marker" style="background:var(--accent-blue)"></div>
+       <span>ℹ 新しい情報があります</span>
+       <div class="toast-bar" style="background:var(--accent-blue);width:90%;"></div>
+      </div>
+     </div>
+    </div>
+
+    <div class="subsection">
+     <div class="subsection-title">Live Demo</div>
+     <div class="component-row">
+      <button class="btn btn-success btn-sm" onclick="showToast('success')">Success Toast</button>
+      <button class="btn btn-danger btn-sm" onclick="showToast('error')">Error Toast</button>
+      <button class="btn btn-sm" style="border-color:var(--accent-orange);color:var(--accent-orange);" onclick="showToast('warning')">Warning Toast</button>
+      <button class="btn btn-sm" style="border-color:var(--accent-blue);color:var(--accent-blue);" onclick="showToast('info')">Info Toast</button>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== ERROR STATES ===== -->
+   <div class="section" id="errors">
+    <div class="section-title">◇ Error States</div>
+    <div class="section-desc">エラー表現のパターン集</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+     <div class="subsection">
+      <div class="subsection-title">Input Error</div>
+      <label style="font-size:12px;display:block;margin-bottom:4px;">Email</label>
+      <input class="input input-error" type="text" value="not-an-email">
+      <div class="input-error-msg">有効なメールアドレスを入力してください</div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Error Panel</div>
+      <div class="error-panel">
+       <div class="error-panel-header">✕ CONNECTION ERROR</div>
+       <div class="error-panel-body">
+        <p style="font-size:13px;margin-bottom:8px;">WebSocket接続が切断されました。</p>
+        <button class="btn btn-sm">再接続</button>
+       </div>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Error Card</div>
+      <div class="card">
+       <div class="card-header" style="background:var(--accent-red);">◈ AGENT ERROR</div>
+       <div class="card-body">
+        <div class="status-row"><span class="status-label">Agent</span><span class="status-value">Validator</span></div>
+        <div class="status-row"><span class="status-label">Error</span><span class="status-value text-change-down">Rate limit exceeded</span></div>
+        <div style="margin-top:8px;display:flex;gap:8px;">
+         <button class="btn btn-sm">Retry</button>
+         <button class="btn btn-danger btn-sm">Abort</button>
+        </div>
+       </div>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Empty State</div>
+      <div class="card">
+       <div class="card-body" style="text-align:center;padding:32px;">
+        <div style="font-size:32px;color:var(--text-light);margin-bottom:8px;">◇</div>
+        <p style="color:var(--text-light);font-size:13px;">データがありません</p>
+        <button class="btn btn-sm" style="margin-top:12px;">更新</button>
+       </div>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== MODALS ===== -->
+   <div class="section" id="modals">
+    <div class="section-title">◇ Modals</div>
+    <div class="section-desc">確認ダイアログ・詳細表示用のモーダル</div>
+
+    <div class="subsection">
+     <div class="subsection-title">Static Preview</div>
+     <div style="position:relative;background:rgba(0,0,0,0.05);padding:32px;display:flex;justify-content:center;">
+      <div style="background:var(--bg-panel);border:1px solid var(--border-dark);box-shadow:var(--shadow-xl);min-width:400px;">
+       <div style="background:var(--bg-header);color:var(--text-header);padding:12px 16px;font-size:14px;letter-spacing:0.1em;">確認</div>
+       <div style="padding:20px;">
+        <p>この操作を実行しますか？</p>
+        <p style="margin-top:8px;color:var(--text-light);font-size:13px;">選択したエージェントの設定が変更されます。</p>
+       </div>
+       <div style="padding:12px 16px;display:flex;justify-content:flex-end;gap:12px;border-top:1px solid var(--border-light);">
+        <button class="btn btn-sm">キャンセル</button>
+        <button class="btn btn-primary btn-sm">確認</button>
+       </div>
+      </div>
+     </div>
+    </div>
+
+    <div class="subsection" id="modal-demo">
+     <div class="subsection-title">Live Demo</div>
+     <button class="btn" id="btnShowModal">モーダルを開く</button>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== TOOLTIPS ===== -->
+   <div class="section" id="tooltips">
+    <div class="section-title">◇ Tooltips</div>
+    <div class="section-desc">ホバーで表示される補足情報</div>
+
+    <div class="component-row">
+     <button class="btn tooltip" data-tooltip="デフォルトのボタン">Hover me</button>
+     <button class="btn btn-primary tooltip" data-tooltip="プライマリアクション">Primary</button>
+     <button class="btn btn-danger tooltip" data-tooltip="危険な操作です">Danger</button>
+     <span class="tooltip" data-tooltip="テキストにも使えます" style="cursor:help;border-bottom:1px dashed var(--border-dark);">Help text</span>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== STATUS DOTS ===== -->
+   <div class="section" id="dots">
+    <div class="section-title">◇ Status Dots</div>
+    <div class="section-desc">接続状態・ステータスを示すインジケーター</div>
+
+    <div class="component-row">
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="status-dot online"></span> Online (pulse)</span>
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="status-dot connecting"></span> Connecting (blink)</span>
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="status-dot offline"></span> Offline</span>
+    </div>
+
+    <div class="subsection" style="margin-top:16px;">
+     <div class="subsection-title">Connection Status (Header Usage)</div>
+     <div style="background:var(--bg-header);color:var(--text-header);padding:8px 16px;display:inline-flex;align-items:center;gap:16px;font-size:13px;">
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span class="status-dot online"></span> Connected</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span class="status-dot connecting"></span> Reconnecting...</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;"><span class="status-dot offline"></span> Disconnected</span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== SPINNERS ===== -->
+   <div class="section" id="spinners">
+    <div class="section-title">◇ Spinners</div>
+    <div class="section-desc">読み込み中を示すスピナー</div>
+
+    <div class="component-row">
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="spinner spinner-sm"></span> Small (10px)</span>
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="spinner"></span> Default (14px)</span>
+     <span style="display:inline-flex;align-items:center;gap:8px;"><span class="spinner spinner-lg"></span> Large (24px)</span>
+    </div>
+
+    <div class="subsection" style="margin-top:16px;">
+     <div class="subsection-title">Usage Example</div>
+     <div class="component-row">
+      <button class="btn btn-primary" disabled style="opacity:0.7;">
+       <span class="spinner spinner-sm" style="border-top-color:var(--text-header);border-color:rgba(232,228,212,0.3);"></span>
+       処理中...
+      </button>
+      <span style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text-light);">
+       <span class="spinner"></span> データを取得中...
+      </span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== SKELETON LOADING ===== -->
+   <div class="section" id="skeleton">
+    <div class="section-title">◇ Skeleton Loading</div>
+    <div class="section-desc">コンテンツ読み込み中のプレースホルダー</div>
+
+    <div style="max-width:400px;">
+     <div class="card">
+      <div class="card-header">◇ Loading...</div>
+      <div class="card-body" style="display:flex;flex-direction:column;gap:8px;">
+       <div class="skeleton" style="width:60%;height:20px;"></div>
+       <div class="skeleton" style="width:100%;height:14px;"></div>
+       <div class="skeleton" style="width:80%;height:14px;"></div>
+       <div class="skeleton" style="width:40%;height:14px;"></div>
+       <div class="skeleton" style="width:100%;height:8px;margin-top:8px;"></div>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== ANIMATIONS ===== -->
+   <div class="section" id="animations">
+    <div class="section-title">◇ Animations</div>
+    <div class="section-desc">UIの動きを表現するアニメーション</div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
+     <div class="card">
+      <div class="card-header">Pulse</div>
+      <div class="card-body" style="text-align:center;padding:24px;">
+       <span style="animation:pulseAnim 2s ease-in-out infinite;font-size:24px;">◈</span>
+       <div class="code-hint" style="margin-top:8px;">animate-nier-pulse</div>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header">Spinner</div>
+      <div class="card-body" style="text-align:center;padding:24px;">
+       <span class="spinner spinner-lg"></span>
+       <div class="code-hint" style="margin-top:8px;">api-spinner</div>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header">Pixel Work</div>
+      <div class="card-body" style="text-align:center;padding:24px;">
+       <span style="animation:pixelWork 0.6s ease-in-out infinite;display:inline-block;font-size:24px;">⚔</span>
+       <div class="code-hint" style="margin-top:8px;">animate-pixel-work</div>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header">Pixel Idle</div>
+      <div class="card-body" style="text-align:center;padding:24px;">
+       <span style="animation:pixelIdle 2s ease-in-out infinite;display:inline-block;font-size:24px;">✦</span>
+       <div class="code-hint" style="margin-top:8px;">animate-pixel-idle</div>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header">Shimmer</div>
+      <div class="card-body" style="padding:24px;">
+       <div class="skeleton" style="height:24px;"></div>
+       <div class="code-hint" style="margin-top:8px;">skeleton-shimmer</div>
+      </div>
+     </div>
+
+     <div class="card">
+      <div class="card-header">Status Pulse</div>
+      <div class="card-body" style="text-align:center;padding:24px;">
+       <span class="status-dot online" style="width:16px;height:16px;"></span>
+       <div class="code-hint" style="margin-top:8px;">status-pulse</div>
+      </div>
+     </div>
+    </div>
+
+    <div class="subsection" style="margin-top:16px;">
+     <div class="subsection-title">Transition Timing</div>
+     <div class="component-row">
+      <span class="code-hint">--transition-fast: 150ms</span>
+      <span class="code-hint">--transition-normal: 300ms</span>
+      <span class="code-hint">--transition-slow: 500ms</span>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== GLITCH EFFECT ===== -->
+   <div class="section" id="glitch">
+    <div class="section-title">◇ Glitch Effect</div>
+    <div class="section-desc">エラー・異常状態を演出するグリッチ効果 (hover)</div>
+
+    <div class="component-row">
+     <span class="glitch-text" data-text="SYSTEM ERROR" style="font-size:20px;font-weight:500;letter-spacing:0.1em;cursor:pointer;">SYSTEM ERROR</span>
+     <span class="glitch-text" data-text="WARNING" style="font-size:16px;letter-spacing:0.1em;cursor:pointer;">WARNING</span>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== DECORATIONS ===== -->
+   <div class="section" id="decorations">
+    <div class="section-title">◇ Decorative Elements</div>
+    <div class="section-desc">世界観を演出する装飾要素</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+     <div class="subsection">
+      <div class="subsection-title">Corner Dots</div>
+      <div class="card corner-dots">
+       <div class="card-body" style="min-height:80px;padding:24px;">
+        角にドット装飾 (corner-dots)
+       </div>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Corner Brackets</div>
+      <div style="height:100px;background:var(--bg-main);border:1px solid var(--border-light);position:relative;display:flex;align-items:center;justify-content:center;">
+       <div style="position:absolute;top:8px;left:8px;width:16px;height:16px;border-top:1px solid var(--border-dark);border-left:1px solid var(--border-dark);"></div>
+       <div style="position:absolute;bottom:8px;right:8px;width:16px;height:16px;border-bottom:1px solid var(--border-dark);border-right:1px solid var(--border-dark);"></div>
+       <span style="font-size:32px;color:var(--text-light);">◈</span>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Scanline Overlay</div>
+      <div style="height:100px;background:var(--bg-main);position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-light);">
+       <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(to right,transparent,rgba(69,65,56,0.3),transparent);animation:scanline 2s linear infinite;"></div>
+       <span style="font-size:13px;color:var(--text-light);">CRT Scanline Effect</span>
+      </div>
+     </div>
+
+     <div class="subsection">
+      <div class="subsection-title">Unicode Icons</div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:16px;">
+       <span title="Diamond">◇</span>
+       <span title="Diamond Fill">◈</span>
+       <span title="Status Active">●</span>
+       <span title="Status Half">◐</span>
+       <span title="Status Inactive">○</span>
+       <span title="Check">✓</span>
+       <span title="Cross">✕</span>
+       <span title="Warning">⚠</span>
+       <span title="Grid">⊞</span>
+       <span title="Star">✦</span>
+       <span title="Gear">⚙</span>
+       <span title="Swords">⚔</span>
+       <span title="Menu">☰</span>
+      </div>
+     </div>
+    </div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== PAGE HEADER ===== -->
+   <div class="section" id="page-header">
+    <div class="section-title">◇ Page Header</div>
+    <div class="section-desc">各ページの統一ヘッダー構造</div>
+
+    <div style="background:var(--bg-panel);border:1px solid var(--border-light);padding:12px;">
+     <div class="page-header-row">
+      <div class="page-header-left">
+       <span class="page-title">AGENTS</span>
+       <span class="page-subtitle">エージェント管理</span>
+      </div>
+      <div class="page-header-right">
+       <button class="btn btn-sm">⚙ 設定</button>
+       <button class="btn btn-primary btn-sm">+ 新規</button>
+      </div>
+     </div>
+    </div>
+    <div class="code-hint" style="margin-top:8px;">nier-page-header-row + nier-page-header-left + nier-page-header-right</div>
+   </div>
+
+   <div class="separator"></div>
+
+   <!-- ===== FOOTER ===== -->
+   <div class="section" id="footer">
+    <div class="section-title">◇ Footer</div>
+    <div class="section-desc">ページ下部の操作ガイド・メッセージ表示</div>
+
+    <div class="footer" style="position:relative;">
+     <div class="footer-message">プロジェクトを選択してください。</div>
+     <div class="footer-controls">
+      <div class="footer-control"><span>↕</span> 選択</div>
+      <div class="footer-control"><span>◉</span> 決定</div>
+      <div class="footer-control"><span>⊗</span> 戻る</div>
+     </div>
+    </div>
+   </div>
+
+   <div style="height:48px;"></div>
   </div>
  </div>
-
- <!-- Footer -->
- <footer class="footer">
-  <div class="footer-message">プロジェクトを選択してください。</div>
-  <div class="footer-controls">
-   <div class="footer-control" tabindex="0">
-    <span class="control-icon">↕</span> 選択
-   </div>
-   <div class="footer-control" tabindex="0">
-    <span class="control-icon">◉</span> 決定
-   </div>
-   <div class="footer-control" tabindex="0">
-    <span class="control-icon">⊗</span> 戻る
-   </div>
-  </div>
- </footer>
 
  <!-- Modal Template -->
  <div class="modal-overlay" id="modalOverlay" style="display:none;">
@@ -1073,41 +1584,42 @@
 
  <script>
   // Tab switching
-  document.querySelectorAll('.tab').forEach(tab=>{
+  document.querySelectorAll('.header-tabs .tab').forEach(tab=>{
    tab.addEventListener('click',function(){
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.querySelectorAll('.header-tabs .tab').forEach(t=>t.classList.remove('active'));
     this.classList.add('active');
    });
   });
 
-  // List item selection with ripple
-  document.querySelectorAll('.list-item').forEach(item=>{
-   item.addEventListener('click',function(e){
-    document.querySelectorAll('.list-item').forEach(i=>i.classList.remove('selected'));
-    this.classList.add('selected');
+  // Tab toggle switching
+  document.querySelectorAll('.tab-toggle').forEach(toggle=>{
+   toggle.addEventListener('click',function(){
+    this.parentElement.querySelectorAll('.tab-toggle').forEach(t=>t.classList.remove('active'));
+    this.classList.add('active');
+   });
+  });
 
-    // Ripple effect
-    const ripple=document.createElement('span');
-    ripple.className='ripple';
-    const rect=this.getBoundingClientRect();
-    const size=Math.max(rect.width,rect.height);
-    ripple.style.width=ripple.style.height=size+'px';
-    ripple.style.left=(e.clientX-rect.left-size/2)+'px';
-    ripple.style.top=(e.clientY-rect.top-size/2)+'px';
-    this.appendChild(ripple);
-    setTimeout(()=>ripple.remove(),600);
+  // List item selection
+  document.querySelectorAll('.list-item').forEach(item=>{
+   item.addEventListener('click',function(){
+    this.closest('.card,.list-container')?.querySelectorAll('.list-item').forEach(i=>i.classList.remove('selected'));
+    this.classList.add('selected');
    });
   });
 
   // Toast notification
-  let toastCount=0;
-  const toastTypes=['success','error','warning','info'];
-  const toastIcons={'success':'✓','error':'✕','warning':'⚠','info':'ℹ'};
+  const toastIcons={success:'✓',error:'✕',warning:'⚠',info:'ℹ'};
   const toastMessages={
-   'success':'タスクが正常に完了しました',
-   'error':'エラーが発生しました',
-   'warning':'警告：確認が必要です',
-   'info':'新しい情報があります'
+   success:'タスクが正常に完了しました',
+   error:'エラーが発生しました',
+   warning:'警告：確認が必要です',
+   info:'新しい情報があります'
+  };
+  const toastColors={
+   success:'var(--accent-green)',
+   error:'var(--accent-red)',
+   warning:'var(--accent-orange)',
+   info:'var(--accent-blue)'
   };
 
   function showToast(type){
@@ -1115,11 +1627,9 @@
    const toast=document.createElement('div');
    toast.className='toast '+type;
    toast.innerHTML=`
-    <div class="toast-content">
-     <span class="toast-icon">${toastIcons[type]}</span>
-     <span>${toastMessages[type]}</span>
-    </div>
-    <div class="toast-progress"></div>
+    <div class="toast-marker" style="background:${toastColors[type]}"></div>
+    <span>${toastIcons[type]} ${toastMessages[type]}</span>
+    <div class="toast-progress" style="background:${toastColors[type]}"></div>
    `;
    container.appendChild(toast);
    setTimeout(()=>{
@@ -1127,54 +1637,37 @@
     toast.style.transform='translateX(100%)';
     toast.style.transition='all 0.3s ease';
     setTimeout(()=>toast.remove(),300);
-   },4000);
+   },5000);
   }
-
-  document.getElementById('btnShowToast').addEventListener('click',function(){
-   showToast(toastTypes[toastCount%4]);
-   toastCount++;
-  });
 
   // Modal
   const modalOverlay=document.getElementById('modalOverlay');
-
-  document.getElementById('btnShowModal').addEventListener('click',function(){
+  document.getElementById('btnShowModal').addEventListener('click',()=>{
    modalOverlay.style.display='flex';
   });
-
-  document.getElementById('btnModalCancel').addEventListener('click',function(){
+  document.getElementById('btnModalCancel').addEventListener('click',()=>{
    modalOverlay.style.display='none';
   });
-
-  document.getElementById('btnModalConfirm').addEventListener('click',function(){
+  document.getElementById('btnModalConfirm').addEventListener('click',()=>{
    modalOverlay.style.display='none';
    showToast('success');
   });
-
   modalOverlay.addEventListener('click',function(e){
-   if(e.target===this){
-    this.style.display='none';
-   }
+   if(e.target===this) this.style.display='none';
   });
-
-  // Running time counter (demo)
-  let seconds=45*60+23;
-  setInterval(()=>{
-   seconds++;
-   const h=Math.floor(seconds/3600);
-   const m=Math.floor((seconds%3600)/60);
-   const s=seconds%60;
-   document.getElementById('runningTime').textContent=
-    String(h).padStart(2,'0')+':'+
-    String(m).padStart(2,'0')+':'+
-    String(s).padStart(2,'0');
-  },1000);
-
-  // Keyboard navigation
   document.addEventListener('keydown',function(e){
    if(e.key==='Escape'&&modalOverlay.style.display==='flex'){
     modalOverlay.style.display='none';
    }
+  });
+
+  // Smooth scroll for TOC links
+  document.querySelectorAll('.toc a').forEach(link=>{
+   link.addEventListener('click',function(e){
+    e.preventDefault();
+    const target=document.querySelector(this.getAttribute('href'));
+    if(target) target.scrollIntoView({behavior:'smooth',block:'start'});
+   });
   });
  </script>
 

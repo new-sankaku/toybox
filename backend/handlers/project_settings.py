@@ -14,6 +14,8 @@ from config_loader import (
  get_websocket_config,
  get_available_principles,
  get_default_agent_principles,
+ get_agents_config,
+ get_ui_phases,
 )
 from ai_config import get_usage_categories
 from models.database import session_scope
@@ -277,7 +279,17 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
   try:
    principles=get_available_principles()
    defaults=get_default_agent_principles()
-   return jsonify({"principles":principles,"defaults":defaults})
+   config=get_agents_config()
+   agents_raw=config.get("agents",{})
+   agents_meta={}
+   for agent_id,agent in agents_raw.items():
+    agents_meta[agent_id]={
+     "label":agent.get("label",agent_id),
+     "shortLabel":agent.get("short_label",""),
+     "phase":agent.get("phase",0),
+    }
+   ui_phases=get_ui_phases()
+   return jsonify({"principles":principles,"defaults":defaults,"agents":agents_meta,"uiPhases":ui_phases})
   except Exception as e:
    get_logger().error(f"Failed to get principles: {e}",exc_info=True)
    return jsonify({"error":str(e)}),500

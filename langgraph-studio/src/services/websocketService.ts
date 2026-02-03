@@ -7,6 +7,7 @@ import{useAssetStore}from'@/stores/assetStore'
 import{useInterventionStore}from'@/stores/interventionStore'
 import{useMetricsStore}from'@/stores/metricsStore'
 import{useNavigatorStore,type MessagePriority}from'@/stores/navigatorStore'
+import{useLogStore}from'@/stores/logStore'
 import{useToastStore}from'@/stores/toastStore'
 import{useActivityFeedStore}from'@/stores/activityFeedStore'
 import{useSpeechStore}from'@/stores/speechStore'
@@ -14,7 +15,7 @@ import type{Agent,AgentLogEntry}from'@/types/agent'
 import type{Checkpoint}from'@/types/checkpoint'
 import type{Intervention}from'@/types/intervention'
 import type{Project,ProjectMetrics,PhaseNumber}from'@/types/project'
-import type{ApiAsset}from'@/services/apiService'
+import type{ApiAsset,ApiSystemLog}from'@/services/apiService'
 
 function getAgentDisplayName(agent?:Agent):string{
  if(!agent)return'不明なエージェント'
@@ -43,7 +44,9 @@ interface ServerToClientEvents{
   project?:Project
   agents?:Agent[]
   checkpoints?:Checkpoint[]
+  interventions?:Intervention[]
   metrics?:ProjectMetrics
+  logs?:ApiSystemLog[]
  })=>void
  'agent:started':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:created':(data:{agent:Agent;agentId:string;projectId:string;parentAgentId?:string})=>void
@@ -72,6 +75,7 @@ interface ServerToClientEvents{
  'metrics:update':(data:{projectId:string;metrics:ProjectMetrics})=>void
  'navigator:message':(data:{speaker:string;text:string;priority:MessagePriority;source:'server'})=>void
  'agent:speech':(data:{agentId:string;projectId:string;message:string;source:'llm'|'pool';timestamp:string})=>void
+ 'system_log:created':(data:{projectId:string;log:ApiSystemLog})=>void
  'budget_warning':(data:{type:string;status:BudgetWarningStatus})=>void
 }
 
@@ -159,7 +163,9 @@ class WebSocketService{
    console.log('[WS] State sync received:',{
     hasAgents:data.agents?.length||0,
     hasCheckpoints:data.checkpoints?.length||0,
+    hasInterventions:data.interventions?.length||0,
     hasMetrics:!!data.metrics,
+    hasLogs:data.logs?.length||0,
     status:data.status
    })
 
@@ -171,8 +177,15 @@ class WebSocketService{
     const checkpointStore=useCheckpointStore.getState()
     data.checkpoints.forEach(cp=>checkpointStore.addCheckpoint(cp))
    }
+   if(data.interventions&&data.interventions.length>0){
+    console.log('[WS] Setting interventions from state sync:',data.interventions.length)
+    useInterventionStore.getState().setInterventions(data.interventions)
+   }
    if(data.metrics){
     useMetricsStore.getState().setProjectMetrics(data.metrics)
+   }
+   if(data.logs){
+    useLogStore.getState().setLogs(data.logs)
    }
   })
 
@@ -424,6 +437,13 @@ class WebSocketService{
   this.socket.on('navigator:message',({speaker,text,priority})=>{
    console.log('[WS] Navigator message received:',speaker,text.substring(0,50)+'...')
    useNavigatorStore.getState().showServerMessage(speaker,text,priority)
+  })
+
+  this.socket.on('system_log:created',(data)=>{
+   console.log('[WS] System log created:',data.log?.level,data.log?.source)
+   if(data.log){
+    useLogStore.getState().addLog(data.log)
+   }
   })
 
   this.socket.on('budget_warning',(data)=>{

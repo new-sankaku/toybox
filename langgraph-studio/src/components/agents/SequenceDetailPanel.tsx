@@ -14,7 +14,7 @@ function ExpandedSection({title,content}:{title:string;content:string|null}){
  if(!content)return null
  return(
   <div className="border border-nier-border-light">
-   <div className="px-2 py-1 text-nier-caption text-nier-text-main bg-nier-bg-panel border-b border-nier-border-light">
+   <div className="px-2 py-1 text-nier-caption nier-surface-panel border-b border-nier-border-light">
     {title}
    </div>
    <div className="px-2 py-1 bg-nier-bg-selected overflow-y-auto" style={{maxHeight:'40vh'}}>

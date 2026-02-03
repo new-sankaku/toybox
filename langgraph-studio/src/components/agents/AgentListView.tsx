@@ -321,7 +321,7 @@ export default function AgentListView({
           className={cn(
            'flex items-center gap-2 px-2 py-1.5 text-nier-small tracking-nier transition-colors text-left',
            filterStatus===option.value
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             : 'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setFilterStatus(option.value)}

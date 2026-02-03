@@ -429,8 +429,10 @@ class ApiAgentRunner(AgentRunner):
         agent_type=context.agent_type.value
         base_prompt=self._prompts.get(agent_type,self._default_prompt())
 
-        enabled_principles=context.config.get("advancedSettings",{}).get("enabledPrinciples") if context.config else None
-        principles_text=load_principles_for_agent(agent_type,enabled_principles)
+        adv=context.config.get("advancedSettings",{}) if context.config else{}
+        enabled_principles=adv.get("enabledPrinciples")
+        principle_overrides=adv.get("principleOverrides")
+        principles_text=load_principles_for_agent(agent_type,enabled_principles,principle_overrides)
         system_prompt=f"あなたはゲーム開発の専門家です。\n\n## プロジェクト情報\n{context.project_concept or'（未定義）'}"
         if principles_text:
             system_prompt+=f"\n\n## ゲームデザイン原則\n以下の原則に従って作業し、自己評価してください。\n{principles_text}"
@@ -989,8 +991,9 @@ class LeaderWorkerOrchestrator:
             result.output=output.output
             worker_adv=worker_context.config.get("advancedSettings",{}) if worker_context.config else{}
             worker_enabled_principles=worker_adv.get("enabledPrinciples")
+            worker_principle_overrides=worker_adv.get("principleOverrides")
             worker_quality_settings=worker_adv.get("qualityCheck")
-            qc_result=await self._perform_quality_check(output.output,worker_type,worker_context.project_id,worker_enabled_principles,worker_quality_settings)
+            qc_result=await self._perform_quality_check(output.output,worker_type,worker_context.project_id,worker_enabled_principles,worker_quality_settings,principle_overrides=worker_principle_overrides)
             result.quality_check=qc_result
 
             result.attempt_history.append({
@@ -1026,11 +1029,11 @@ class LeaderWorkerOrchestrator:
 
         return result
 
-    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None)->QualityCheckResult:
+    async def _perform_quality_check(self,output:Dict[str,Any],worker_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->QualityCheckResult:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings)
+            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides)
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]
@@ -1102,8 +1105,10 @@ class LeaderWorkerOrchestrator:
             return integrated
 
         try:
-            enabled_principles_integration=leader_context.config.get("advancedSettings",{}).get("enabledPrinciples") if leader_context.config else None
-            principles_text=load_principles_for_agent(leader_context.agent_type.value,enabled_principles_integration)
+            adv_integration=leader_context.config.get("advancedSettings",{}) if leader_context.config else{}
+            enabled_principles_integration=adv_integration.get("enabledPrinciples")
+            principle_overrides_integration=adv_integration.get("principleOverrides")
+            principles_text=load_principles_for_agent(leader_context.agent_type.value,enabled_principles_integration,principle_overrides_integration)
             leader_content=leader_output.get("content","")[:3000] if isinstance(leader_output,dict) else""
             workers_combined="\n\n".join(worker_texts)[:10000]
 
@@ -1152,8 +1157,9 @@ class LeaderWorkerOrchestrator:
 
                 leader_adv_qc=leader_context.config.get("advancedSettings",{}) if leader_context.config else{}
                 leader_enabled_principles_qc=leader_adv_qc.get("enabledPrinciples")
+                leader_principle_overrides_qc=leader_adv_qc.get("principleOverrides")
                 leader_quality_settings=leader_adv_qc.get("qualityCheck")
-                qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id,leader_enabled_principles_qc,leader_quality_settings)
+                qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id,leader_enabled_principles_qc,leader_quality_settings,principle_overrides=leader_principle_overrides_qc)
                 if not qc_result.passed:
                     get_logger().info(f"統合出力の品質チェック不合格 score={qc_result.score:.2f}、再統合実行")
                     feedback="\n".join(f"- {s}" for s in qc_result.improvement_suggestions) if qc_result.improvement_suggestions else""

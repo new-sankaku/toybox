@@ -1293,9 +1293,23 @@ export interface PrincipleInfo{
  description:string
 }
 
+export interface AgentPrincipleMeta{
+ label:string
+ shortLabel:string
+ phase:number
+}
+
+export interface UiPhaseInfo{
+ id:string
+ label:string
+ agents:string[]
+}
+
 export interface PrinciplesListResponse{
  principles:PrincipleInfo[]
  defaults:Record<string,string[]>
+ agents:Record<string,AgentPrincipleMeta>
+ uiPhases:UiPhaseInfo[]
 }
 
 export interface ProjectPrinciplesResponse{

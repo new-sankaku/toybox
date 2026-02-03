@@ -1,14 +1,15 @@
-import{useState,useEffect,useCallback}from'react'
+import{useState,useEffect,useCallback,Fragment}from'react'
 import{Card,CardHeader,CardContent}from'@/components/ui/Card'
 import{DiamondMarker}from'@/components/ui/DiamondMarker'
 import{Button}from'@/components/ui/Button'
 import{cn}from'@/lib/utils'
-import{Save,FolderOpen,ChevronDown,ChevronRight,RotateCcw}from'lucide-react'
+import{Save,FolderOpen,RotateCcw,ChevronDown,ChevronRight}from'lucide-react'
 import{AutoApprovalSettings}from'@/components/settings/AutoApprovalSettings'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
 import{useAIServiceStore}from'@/stores/aiServiceStore'
-import{projectSettingsApi,type AdvancedSettingsResponse,type UsageCategorySetting,type PrincipleInfo}from'@/services/apiService'
+import{projectSettingsApi,type AdvancedSettingsResponse,type UsageCategorySetting,type PrincipleInfo,type AgentPrincipleMeta,type UiPhaseInfo}from'@/services/apiService'
+import{Badge}from'@/components/ui/Badge'
 
 interface ConfigSection{
  id:string
@@ -178,6 +179,12 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
  const[principles,setPrinciples]=useState<PrincipleInfo[]>([])
  const[enabled,setEnabled]=useState<string[]>([])
  const[originalEnabled,setOriginalEnabled]=useState<string[]>([])
+ const[overrides,setOverrides]=useState<Record<string,string[]>>({})
+ const[originalOverrides,setOriginalOverrides]=useState<Record<string,string[]>>({})
+ const[defaults,setDefaults]=useState<Record<string,string[]>>({})
+ const[agentsMeta,setAgentsMeta]=useState<Record<string,AgentPrincipleMeta>>({})
+ const[uiPhases,setUiPhases]=useState<UiPhaseInfo[]>([])
+ const[expandedPhases,setExpandedPhases]=useState<Record<string,boolean>>({})
  const[loading,setLoading]=useState(true)
  const[saving,setSaving]=useState(false)
 
@@ -189,10 +196,16 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
     projectSettingsApi.getProjectPrinciples(projectId)
 ])
    setPrinciples(listData.principles)
+   setDefaults(listData.defaults)
+   setAgentsMeta(listData.agents??{})
+   setUiPhases(listData.uiPhases??[])
    const allIds=listData.principles.map(p=>p.id)
    const current=projectData.enabledPrinciples??allIds
    setEnabled(current)
    setOriginalEnabled(current)
+   const ov=projectData.overrides??{}
+   setOverrides(ov)
+   setOriginalOverrides(ov)
   }catch(e){
    console.error('Failed to load principles:',e)
   }finally{
@@ -202,17 +215,43 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
 
  useEffect(()=>{loadData()},[loadData])
 
- const hasChanges=JSON.stringify(enabled.sort())!==JSON.stringify(originalEnabled.sort())
+ const hasEnabledChanges=JSON.stringify([...enabled].sort())!==JSON.stringify([...originalEnabled].sort())
+ const hasOverrideChanges=JSON.stringify(overrides)!==JSON.stringify(originalOverrides)
+ const hasChanges=hasEnabledChanges||hasOverrideChanges
 
  const handleToggle=(id:string)=>{
   setEnabled(prev=>prev.includes(id)?prev.filter(p=>p!==id):[...prev,id])
  }
 
+ const getEffectivePrinciples=(agentType:string):string[]=>{
+  return overrides[agentType]??defaults[agentType]??defaults['_default']??[]
+ }
+
+ const handleAgentPrincipleToggle=(agentType:string,principleId:string)=>{
+  const effective=getEffectivePrinciples(agentType)
+  const updated=effective.includes(principleId)
+   ?effective.filter(p=>p!==principleId)
+   :[...effective,principleId]
+  setOverrides(prev=>({...prev,[agentType]:updated}))
+ }
+
+ const handleResetAgent=(agentType:string)=>{
+  setOverrides(prev=>{
+   const next={...prev}
+   delete next[agentType]
+   return next
+  })
+ }
+
  const handleSave=async()=>{
   setSaving(true)
   try{
-   await projectSettingsApi.updateProjectPrinciples(projectId,{enabledPrinciples:enabled})
+   await projectSettingsApi.updateProjectPrinciples(projectId,{
+    enabledPrinciples:enabled,
+    overrides:Object.keys(overrides).length>0?overrides:undefined
+   })
    setOriginalEnabled([...enabled])
+   setOriginalOverrides({...overrides})
   }catch(e){
    console.error('Failed to save principles:',e)
   }finally{
@@ -220,9 +259,18 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
   }
  }
 
- const handleReset=()=>{
+ const handleResetAll=()=>{
   const allIds=principles.map(p=>p.id)
   setEnabled(allIds)
+  setOverrides({})
+ }
+
+ const togglePhase=(phaseId:string)=>{
+  setExpandedPhases(prev=>({...prev,[phaseId]:!prev[phaseId]}))
+ }
+
+ const isAgentCustomized=(agentType:string):boolean=>{
+  return agentType in overrides
  }
 
  if(loading){
@@ -244,7 +292,7 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
       {principles.map(p=>(
        <label key={p.id} className={cn(
         'flex items-start gap-3 p-3 border cursor-pointer transition-colors',
-        enabled.includes(p.id)?'border-nier-border-dark bg-nier-bg-selected':'border-nier-border-light bg-nier-bg-panel hover:bg-nier-bg-selected'
+        enabled.includes(p.id)?'border-nier-border-dark nier-surface-selected':'border-nier-border-light nier-surface-panel hover:bg-nier-bg-selected'
 )}>
         <input
          type="checkbox"
@@ -259,10 +307,94 @@ function PrincipleSettings({projectId}:{projectId:string}):JSX.Element{
        </label>
 ))}
      </div>
+    </CardContent>
+   </Card>
+
+   <Card>
+    <CardHeader>
+     <DiamondMarker>エージェント別 原則割り当て</DiamondMarker>
+     <span className="text-nier-caption text-nier-text-light ml-2">各エージェントに適用する原則を個別設定</span>
+    </CardHeader>
+    <CardContent className="space-y-3">
+     <p className="text-nier-small text-nier-text-light">
+      エージェントごとに参照する原則を変更できます。上のグローバル設定で無効にした原則はここでも無効になります。
+     </p>
+     <div className="space-y-1">
+      {uiPhases.map(phase=>(
+       <div key={phase.id} className="border border-nier-border-light">
+        <button
+         className="w-full flex items-center gap-2 p-2 nier-surface-header text-left hover:opacity-80 transition-opacity"
+         onClick={()=>togglePhase(phase.id)}
+        >
+         {expandedPhases[phase.id]
+          ?<ChevronDown size={14}/>
+          :<ChevronRight size={14}/>
+         }
+         <span className="text-nier-small font-medium">{phase.label}</span>
+         <span className="text-nier-caption text-nier-text-light">({phase.agents.length})</span>
+        </button>
+        {expandedPhases[phase.id]&&(
+         <div className="p-2 nier-surface-panel overflow-x-auto">
+          <div className="grid gap-x-1 gap-y-1 items-center" style={{gridTemplateColumns:`minmax(0,1fr) repeat(${principles.length},2rem) auto`}}>
+           <div className="text-nier-caption text-nier-text-light font-medium px-1"/>
+           {principles.map(p=>(
+            <div key={p.id} className="text-center" title={p.label}>
+             <span className={cn('text-nier-caption',enabled.includes(p.id)?'text-nier-text-main':'text-nier-text-light opacity-40')}>
+              {p.id.slice(0,2).toUpperCase()}
+             </span>
+            </div>
+))}
+           <div/>
+           {phase.agents.map(agentType=>{
+            const meta=agentsMeta[agentType]
+            if(!meta)return null
+            const effective=getEffectivePrinciples(agentType)
+            const customized=isAgentCustomized(agentType)
+            return(
+             <Fragment key={agentType}>
+              <div className="text-nier-caption text-nier-text-main truncate px-1" title={meta.label}>
+               {meta.shortLabel||meta.label}
+               {customized&&<Badge variant="orange" className="ml-1 text-[0.6rem] px-1 py-0">custom</Badge>}
+              </div>
+              {principles.map(p=>{
+               const globalEnabled=enabled.includes(p.id)
+               const checked=effective.includes(p.id)
+               return(
+                <div key={p.id} className="flex justify-center">
+                 <input
+                  type="checkbox"
+                  className={cn('cursor-pointer',!globalEnabled&&'opacity-30')}
+                  checked={checked&&globalEnabled}
+                  disabled={!globalEnabled}
+                  onChange={()=>handleAgentPrincipleToggle(agentType,p.id)}
+                 />
+                </div>
+)
+              })}
+              <div className="flex justify-center">
+               {customized&&(
+                <button
+                 className="text-nier-text-light hover:text-nier-text-main transition-colors p-0.5"
+                 onClick={()=>handleResetAgent(agentType)}
+                 title="デフォルトに戻す"
+                >
+                 <RotateCcw size={10}/>
+                </button>
+)}
+              </div>
+             </Fragment>
+)
+           })}
+          </div>
+         </div>
+)}
+       </div>
+))}
+     </div>
      <div className="flex gap-2 justify-end pt-2">
-      <Button variant="ghost" size="sm" onClick={handleReset}>
+      <Button variant="ghost" size="sm" onClick={handleResetAll}>
        <RotateCcw size={12}/>
-       <span className="ml-1">全て有効</span>
+       <span className="ml-1">デフォルトに戻す</span>
       </Button>
       <Button variant="primary" size="sm" onClick={handleSave} disabled={!hasChanges||saving}>
        <Save size={12}/>
@@ -279,13 +411,6 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
  const[settings,setSettings]=useState<AdvancedSettingsResponse|null>(null)
  const[originalSettings,setOriginalSettings]=useState<AdvancedSettingsResponse|null>(null)
  const[loading,setLoading]=useState(true)
- const[expanded,setExpanded]=useState<Record<string,boolean>>({
-  quality:true,
-  token:false,
-  execution:false,
-  temperature:false,
-  context:false
- })
 
  const loadSettings=useCallback(async()=>{
   setLoading(true)
@@ -315,7 +440,6 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
   }
  }
 
- const toggle=(key:string)=>setExpanded(p=>({...p,[key]:!p[key]}))
 
  if(loading){
   return<div className="text-center py-8 text-nier-text-light">読み込み中...</div>
@@ -328,11 +452,9 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
  return(
   <div className="space-y-4">
    <Card>
-    <CardHeader className="cursor-pointer" onClick={()=>toggle('quality')}>
-     {expanded.quality?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+    <CardHeader>
      <DiamondMarker>品質チェック設定</DiamondMarker>
     </CardHeader>
-    {expanded.quality&&(
      <CardContent className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
        <div>
@@ -388,15 +510,12 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
        </div>
 )}
      </CardContent>
-)}
    </Card>
 
    <Card>
-    <CardHeader className="cursor-pointer" onClick={()=>toggle('token')}>
-     {expanded.token?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+    <CardHeader>
      <DiamondMarker>トークン予算設定</DiamondMarker>
     </CardHeader>
-    {expanded.token&&(
      <CardContent className="space-y-4">
       <div className="grid grid-cols-3 gap-4">
        <div>
@@ -434,15 +553,12 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
        </div>
       </div>
      </CardContent>
-)}
    </Card>
 
    <Card>
-    <CardHeader className="cursor-pointer" onClick={()=>toggle('execution')}>
-     {expanded.execution?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+    <CardHeader>
      <DiamondMarker>実行制限設定</DiamondMarker>
     </CardHeader>
-    {expanded.execution&&(
      <CardContent className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
        <div>
@@ -493,15 +609,12 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
        </div>
       </div>
      </CardContent>
-)}
    </Card>
 
    <Card>
-    <CardHeader className="cursor-pointer" onClick={()=>toggle('temperature')}>
-     {expanded.temperature?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+    <CardHeader>
      <DiamondMarker>Temperature設定</DiamondMarker>
     </CardHeader>
-    {expanded.temperature&&(
      <CardContent>
       <div className="grid grid-cols-3 gap-4">
        {Object.entries(settings.temperatureDefaults).map(([role,value])=>(
@@ -520,15 +633,12 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
 ))}
       </div>
      </CardContent>
-)}
    </Card>
 
    <Card>
-    <CardHeader className="cursor-pointer" onClick={()=>toggle('context')}>
-     {expanded.context?<ChevronDown size={16}/>:<ChevronRight size={16}/>}
+    <CardHeader>
      <DiamondMarker>コンテキストポリシー設定</DiamondMarker>
     </CardHeader>
-    {expanded.context&&(
      <CardContent className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
        <div>
@@ -617,7 +727,6 @@ function AdvancedSettings({projectId}:{projectId:string}):JSX.Element{
        </div>
       </div>
      </CardContent>
-)}
    </Card>
 
    {hasChanges&&(
@@ -702,7 +811,7 @@ export default function ConfigView():JSX.Element{
           className={cn(
            'w-full px-4 py-3 text-left text-nier-small tracking-nier transition-colors',
            activeSection===section.id
-            ?'bg-nier-bg-selected text-nier-text-main'
+            ?'nier-surface-selected'
             :'text-nier-text-light hover:bg-nier-bg-panel'
 )}
           onClick={()=>setActiveSection(section.id)}

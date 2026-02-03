@@ -406,6 +406,45 @@ mock_skill_sequences:
 
         プロジェクトの状態を確認し、成果物を`docs/output.md`に保存しました。
 
+  spawn_worker:
+    - content: |
+        ワーカーエージェントの生成を開始します。
+
+        ```tool_call
+        {"name": "spawn_worker", "input": {"operation": "spawn", "worker_type": "code_worker", "task": "メインモジュールの実装"}}
+        ```
+
+    - content: |
+        # ワーカー生成完了
+
+        ワーカーエージェントを生成し、タスクを割り当てました。
+
+  dependency_graph:
+    - content: |
+        プロジェクトの依存関係を解析します。
+
+        ```tool_call
+        {"name": "dependency_graph", "input": {"operation": "analyze", "path": "src", "language": "javascript"}}
+        ```
+
+    - content: |
+        # 依存関係解析完了
+
+        プロジェクトの依存関係グラフを生成しました。
+
+  git_operation:
+    - content: |
+        リポジトリの状態を確認します。
+
+        ```tool_call
+        {"name": "git_operation", "input": {"operation": "status"}}
+        ```
+
+    - content: |
+        # Git操作完了
+
+        リポジトリの状態を確認しました。
+
 checkpoint_contents:
   concept_review: |
     # ゲームコンセプト

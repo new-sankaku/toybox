@@ -98,6 +98,7 @@ class SkillEnabledAgentRunner(AgentRunner):
     agent_id=context.agent_id,
     agent_type=agent_type,
     working_dir=self._working_dir,
+    on_progress=context.on_progress,
    )
   return self._skill_executor
 

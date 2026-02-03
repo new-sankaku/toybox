@@ -37,7 +37,7 @@ const STATUS_CLASSES:Record<ProviderStatus,string>={
  disconnected:'text-nier-text-light border-b-nier-border-dark',
  api_error:'text-nier-accent-red border-b-nier-accent-red',
  cost_exceeded:'text-nier-accent-orange border-b-nier-accent-orange',
- unknown:'text-nier-accent-yellow border-b-nier-accent-yellow'
+ unknown:'text-nier-accent-orange border-b-nier-accent-orange'
 }
 
 const MARKER_CLASSES:Record<ProviderStatus,string>={
@@ -45,7 +45,7 @@ const MARKER_CLASSES:Record<ProviderStatus,string>={
  disconnected:'bg-nier-text-light',
  api_error:'bg-nier-accent-red',
  cost_exceeded:'bg-nier-accent-orange',
- unknown:'bg-nier-accent-yellow'
+ unknown:'bg-nier-accent-orange'
 }
 
 export default function ApiMonitorTable():JSX.Element{
