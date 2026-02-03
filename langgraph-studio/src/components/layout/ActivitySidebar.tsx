@@ -300,61 +300,6 @@ export default function ActivitySidebar():JSX.Element{
        <span className="text-nier-text-main">{generatingCount}件</span>
       </button>
      </div>
-
-     {/*Output*/}
-     <div className="px-2 py-1.5 text-[11px] border-t border-nier-border-light">
-      <div className="text-nier-text-light text-[9px] tracking-wider mb-1">OUTPUT</div>
-      <div className="space-y-0.5">
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.characters&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">キャラクター</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.characters?.count||0}{metrics?.generationCounts?.characters?.unit||'体'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.backgrounds&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">背景</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.backgrounds?.count||0}{metrics?.generationCounts?.backgrounds?.unit||'枚'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.ui&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">UIパーツ</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.ui?.count||0}{metrics?.generationCounts?.ui?.unit||'点'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.effects&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">エフェクト</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.effects?.count||0}{metrics?.generationCounts?.effects?.unit||'種'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.music&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">BGM</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.music?.count||0}{metrics?.generationCounts?.music?.unit||'曲'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.sfx&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">効果音</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.sfx?.count||0}{metrics?.generationCounts?.sfx?.unit||'個'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.voice&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">ボイス</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.voice?.count||0}{metrics?.generationCounts?.voice?.unit||'件'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.video&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">動画</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.video?.count||0}{metrics?.generationCounts?.video?.unit||'本'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.scenarios&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">シナリオ</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.scenarios?.count||0}{metrics?.generationCounts?.scenarios?.unit||'本'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.code&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">コード</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.code?.count||0}{metrics?.generationCounts?.code?.unit||'行'}</span>
-       </div>
-       <div className={cn('flex justify-between transition-colors duration-300',highlights.documents&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">ドキュメント</span>
-        <span className="text-nier-text-main">{metrics?.generationCounts?.documents?.count||0}{metrics?.generationCounts?.documents?.unit||'件'}</span>
-       </div>
-       <div className={cn('flex justify-between pt-1 border-t border-nier-border-light mt-1 transition-colors duration-300',(highlights.totalAssets||highlights.totalSize)&&'bg-nier-accent-yellow/30')}>
-        <span className="text-nier-text-light">ファイル合計</span>
-        <span className="text-nier-text-main">{totalAssets}件/{formatSize(totalProjectSize)}</span>
-       </div>
-      </div>
-     </div>
      </div>
 
      {/*Navigator Send Form*/}

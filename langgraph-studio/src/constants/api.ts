@@ -155,7 +155,9 @@ export const API_ENDPOINTS={
  },
  providers:{
   health:'/api/providers/health',
-  healthCheck:(providerId:string)=>`/api/providers/${providerId}/health`
+  healthCheck:(providerId:string)=>`/api/providers/${providerId}/health`,
+  monitor:'/api/providers/monitor',
+  logs:(providerId:string)=>`/api/providers/${providerId}/logs`
  },
  navigator:{
   message:'/api/navigator/message',

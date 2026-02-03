@@ -493,6 +493,28 @@
     animation: nier-pulse 2s ease-in-out infinite;
   }
 
+  /* API Spinner - エンジン風スピナー */
+  .api-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border-light);
+    border-top-color: var(--accent-orange);
+    border-radius: 50%;
+    animation: api-spin 0.8s linear infinite;
+  }
+
+  .api-spinner-sm {
+    width: 10px;
+    height: 10px;
+    border-width: 1.5px;
+  }
+
+  @keyframes api-spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
   /* Corner decoration */
   .corner-dots::before,
   .corner-dots::after {

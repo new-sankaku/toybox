@@ -296,6 +296,80 @@ def register_ai_provider_routes(app:Flask):
   monitor=get_health_monitor()
   return jsonify(monitor.get_all_health_status())
 
+ @app.route('/api/providers/monitor',methods=['GET'])
+ def get_providers_monitor():
+  """全プロバイダーのモニタリング情報を取得（ヘルス状態＋ジョブ統計）"""
+  from models.database import get_session
+  from repositories import LlmJobRepository
+  monitor=get_health_monitor()
+  health_status=monitor.get_all_health_status()
+  session=get_session()
+  try:
+   repo=LlmJobRepository(session)
+   job_stats=repo.get_stats_by_provider()
+   result={}
+   for provider_id,health in health_status.items():
+    stats=job_stats.get(provider_id,{"running":0,"failed":0})
+    status="connected"
+    if not health.get("available",False):
+     error_msg=(health.get("error")or"").lower()
+     if"cost"in error_msg or"budget"in error_msg:
+      status="cost_exceeded"
+     elif"auth"in error_msg or"key"in error_msg or"api"in error_msg:
+      status="api_error"
+     elif"connection"in error_msg or"timeout"in error_msg:
+      status="disconnected"
+     else:
+      status="unknown"
+    result[provider_id]={
+     "status":status,
+     "generating":stats["running"],
+     "failed":stats["failed"],
+     "lastChecked":health.get("checked_at"),
+     "latency":health.get("latency_ms"),
+     "errorMessage":health.get("error"),
+    }
+   return jsonify(result)
+  finally:
+   session.close()
+
+ @app.route('/api/providers/<provider_id>/logs',methods=['GET'])
+ def get_provider_logs(provider_id:str):
+  """特定プロバイダーのログを取得"""
+  from models.database import get_session
+  from repositories import LlmJobRepository
+  limit=request.args.get('limit',100,type=int)
+  status_filter=request.args.get('status')
+  session=get_session()
+  try:
+   repo=LlmJobRepository(session)
+   jobs=repo.get_by_provider(provider_id,limit)
+   if status_filter:
+    jobs=[j for j in jobs if j["status"]==status_filter]
+   logs=[]
+   for job in jobs:
+    log_type="start"
+    if job["status"]=="completed":
+     log_type="complete"
+    elif job["status"]=="failed":
+     log_type="error"
+    elif job["status"]=="running":
+     log_type="start"
+    logs.append({
+     "id":job["id"],
+     "timestamp":job["startedAt"]or job["createdAt"],
+     "type":log_type,
+     "model":job["model"],
+     "status":job["status"],
+     "errorMessage":job["errorMessage"],
+     "tokensInput":job["tokensInput"],
+     "tokensOutput":job["tokensOutput"],
+     "completedAt":job["completedAt"],
+    })
+   return jsonify(logs)
+  finally:
+   session.close()
+
  @app.route('/api/providers/<provider_id>/health',methods=['GET'])
  def get_provider_health(provider_id:str):
   """特定プロバイダーのヘルスチェックを実行"""
