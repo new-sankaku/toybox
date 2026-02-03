@@ -376,4 +376,4 @@
 ## AgentSystemPromptSchema ↔ AgentSystemPrompt — OK
 
 
-**Summary:** 13 schemas checked, 22 total issues found
+**Summary:** 13 schemas checked, 22 issues (4 errors, 18 warnings)

@@ -468,32 +468,37 @@ def generate_ws_coverage(ws_events:list)->str:
     return"\n".join(lines)
 
 
-def generate_type_check_report(ts_dir:str)->str:
+CRITICAL_ISSUES={"MISSING_IN_TS","MISSING_IN_PY"}
+
+SCHEMA_TO_TS={
+    "ProjectSchema":"Project",
+    "AgentSchema":"Agent",
+    "CheckpointSchema":"Checkpoint",
+    "CheckpointResolveSchema":"CheckpointResolution",
+    "GlobalCostSettingsSchema":"GlobalCostSettings",
+    "BudgetStatusSchema":"BudgetStatus",
+    "CostHistoryItemSchema":"CostHistoryItem",
+    "CostHistoryResponseSchema":"CostHistoryResponse",
+    "CostSummarySchema":"CostSummary",
+    "CostSummaryByServiceSchema":"CostSummaryByService",
+    "CostSummaryByProjectSchema":"CostSummaryByProject",
+    "PromptComponentSchema":"PromptComponent",
+    "AgentSystemPromptSchema":"AgentSystemPrompt",
+}
+
+
+def generate_type_check_report(ts_dir:str)->Tuple[str,dict]:
     lines=[]
     lines.append("\n# Type Mismatch Report\n")
 
     ts_interfaces=parse_ts_interfaces(ts_dir)
 
-    schema_to_ts={
-        "ProjectSchema":"Project",
-        "AgentSchema":"Agent",
-        "CheckpointSchema":"Checkpoint",
-        "CheckpointResolveSchema":"CheckpointResolution",
-        "GlobalCostSettingsSchema":"GlobalCostSettings",
-        "BudgetStatusSchema":"BudgetStatus",
-        "CostHistoryItemSchema":"CostHistoryItem",
-        "CostHistoryResponseSchema":"CostHistoryResponse",
-        "CostSummarySchema":"CostSummary",
-        "CostSummaryByServiceSchema":"CostSummaryByService",
-        "CostSummaryByProjectSchema":"CostSummaryByProject",
-        "PromptComponentSchema":"PromptComponent",
-        "AgentSystemPromptSchema":"AgentSystemPrompt",
-    }
-
     total_checked=0
     total_mismatches=0
+    errors=0
+    warnings=0
 
-    for schema_name,ts_name in schema_to_ts.items():
+    for schema_name,ts_name in SCHEMA_TO_TS.items():
         py_fields=get_pydantic_fields(schema_name)
         if not py_fields:
             lines.append(f"## {schema_name} ↔ {ts_name}")
@@ -516,6 +521,11 @@ def generate_type_check_report(ts_dir:str)->str:
 
         if mismatches:
             total_mismatches+=len(mismatches)
+            for m in mismatches:
+                if m["issue"] in CRITICAL_ISSUES:
+                    errors+=1
+                else:
+                    warnings+=1
             lines.append(f"## {schema_name} ↔ {ts_name} — {len(mismatches)} issue(s)\n")
             lines.append("| Field | Issue | Python | TypeScript |")
             lines.append("|-------|-------|--------|------------|")
@@ -529,15 +539,17 @@ def generate_type_check_report(ts_dir:str)->str:
         else:
             lines.append(f"## {schema_name} ↔ {ts_name} — OK\n")
 
-    lines.append(f"\n**Summary:** {total_checked} schemas checked, {total_mismatches} total issues found\n")
+    lines.append(f"\n**Summary:** {total_checked} schemas checked, {total_mismatches} issues ({errors} errors, {warnings} warnings)\n")
 
-    return"\n".join(lines)
+    stats={"checked":total_checked,"total":total_mismatches,"errors":errors,"warnings":warnings}
+    return"\n".join(lines),stats
 
 
 def main():
     parser=argparse.ArgumentParser(description="Data Flow Analyzer")
     parser.add_argument("--format",choices=["md","text"],default="md")
     parser.add_argument("--check",action="store_true",help="Type mismatch check only")
+    parser.add_argument("--ci",action="store_true",help="CI mode: exit 1 on MISSING_IN_TS/MISSING_IN_PY errors")
     parser.add_argument("--output","-o",help="Output file path")
     parser.add_argument("--ts-dir",default=None,help="TypeScript types directory")
     args=parser.parse_args()
@@ -546,15 +558,18 @@ def main():
     ts_dir=args.ts_dir or str(project_root/"langgraph-studio"/"src"/"types")
 
     sections=[]
+    stats=None
 
-    if args.check:
-        sections.append(generate_type_check_report(ts_dir))
+    if args.check or args.ci:
+        report_text,stats=generate_type_check_report(ts_dir)
+        sections.append(report_text)
     else:
         sections.append(generate_rest_table(API_MAP))
         sections.append(generate_ws_table(WS_EVENTS))
         sections.append(generate_schema_coverage(API_MAP))
         sections.append(generate_ws_coverage(WS_EVENTS))
-        sections.append(generate_type_check_report(ts_dir))
+        report_text,stats=generate_type_check_report(ts_dir)
+        sections.append(report_text)
 
     output="\n".join(sections)
 
@@ -563,6 +578,14 @@ def main():
         print(f"Report written to: {args.output}")
     else:
         print(output)
+
+    if args.ci and stats:
+        if stats["errors"]>0:
+            print(f"\nCI FAIL: {stats['errors']} field mismatch error(s) (MISSING_IN_TS/MISSING_IN_PY)")
+            sys.exit(1)
+        if stats["warnings"]>0:
+            print(f"\nCI WARN: {stats['warnings']} type warning(s) (non-blocking)")
+        sys.exit(0)
 
 
 if __name__=="__main__":
