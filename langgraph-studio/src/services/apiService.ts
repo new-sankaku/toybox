@@ -1574,6 +1574,40 @@ export const providerHealthApi={
  }
 }
 
+export type ProviderStatus='connected'|'disconnected'|'api_error'|'cost_exceeded'|'unknown'
+
+export interface ProviderMonitorInfo{
+ status:ProviderStatus
+ generating:number
+ failed:number
+ lastChecked:string|null
+ latency:number|null
+ errorMessage:string|null
+}
+
+export interface ProviderLogEntry{
+ id:string
+ timestamp:string|null
+ type:'start'|'complete'|'error'
+ model:string
+ status:string
+ errorMessage:string|null
+ tokensInput:number
+ tokensOutput:number
+ completedAt:string|null
+}
+
+export const providerMonitorApi={
+ getAll:async():Promise<Record<string,ProviderMonitorInfo>>=>{
+  const response=await api.get(API_ENDPOINTS.providers.monitor)
+  return response.data
+ },
+ getLogs:async(providerId:string,params?:{limit?:number;status?:string}):Promise<ProviderLogEntry[]>=>{
+  const response=await api.get(API_ENDPOINTS.providers.logs(providerId),{params})
+  return response.data
+ }
+}
+
 
 
 

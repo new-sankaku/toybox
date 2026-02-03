@@ -134,6 +134,25 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   self.session.flush()
   return count
 
+ def get_stats_by_provider(self)->Dict[str,Dict[str,int]]:
+  providers=self.session.query(LlmJob.provider_id).distinct().all()
+  stats={}
+  for(provider_id,)in providers:
+   running=self.session.query(LlmJob).filter(
+    and_(LlmJob.provider_id==provider_id,LlmJob.status=="running")
+   ).count()
+   failed=self.session.query(LlmJob).filter(
+    and_(LlmJob.provider_id==provider_id,LlmJob.status=="failed")
+   ).count()
+   stats[provider_id]={"running":running,"failed":failed}
+  return stats
+
+ def get_by_provider(self,provider_id:str,limit:int=100)->List[Dict[str,Any]]:
+  jobs=self.session.query(LlmJob).filter(
+   LlmJob.provider_id==provider_id
+  ).order_by(LlmJob.created_at.desc()).limit(limit).all()
+  return [self.to_dict(j)for j in jobs]
+
  def to_dict(self,job:LlmJob)->Dict[str,Any]:
   return {
    "id":job.id,
