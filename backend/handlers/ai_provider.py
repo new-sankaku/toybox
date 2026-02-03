@@ -311,13 +311,13 @@ def register_ai_provider_routes(app:Flask):
    for provider_id,health in health_status.items():
     stats=job_stats.get(provider_id,{"running":0,"failed":0})
     status="connected"
-    if not health.get("healthy",False):
-     error_type=health.get("errorType","")
-     if"cost"in error_type.lower()or"budget"in error_type.lower():
+    if not health.get("available",False):
+     error_msg=(health.get("error")or"").lower()
+     if"cost"in error_msg or"budget"in error_msg:
       status="cost_exceeded"
-     elif"auth"in error_type.lower()or"key"in error_type.lower():
+     elif"auth"in error_msg or"key"in error_msg or"api"in error_msg:
       status="api_error"
-     elif"connection"in error_type.lower()or"timeout"in error_type.lower():
+     elif"connection"in error_msg or"timeout"in error_msg:
       status="disconnected"
      else:
       status="unknown"
@@ -325,9 +325,9 @@ def register_ai_provider_routes(app:Flask):
      "status":status,
      "generating":stats["running"],
      "failed":stats["failed"],
-     "lastChecked":health.get("lastChecked"),
-     "latency":health.get("latency"),
-     "errorMessage":health.get("errorMessage"),
+     "lastChecked":health.get("checked_at"),
+     "latency":health.get("latency_ms"),
+     "errorMessage":health.get("error"),
     }
    return jsonify(result)
   finally:
