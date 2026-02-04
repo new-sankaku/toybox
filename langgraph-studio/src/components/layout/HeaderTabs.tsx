@@ -2,16 +2,18 @@ import type{TabId}from'../../App'
 import{usePendingCheckpointsCount}from'@/stores/checkpointStore'
 import{usePendingAssetsCount}from'@/stores/assetStore'
 import{useWaitingResponseCount}from'@/stores/interventionStore'
+import{useProjectStore}from'@/stores/projectStore'
 
 interface Tab{
  id:TabId
  label:string
  icon:string
  hasBadge?:boolean
+ alwaysEnabled?:boolean
 }
 
 const tabs:Tab[]=[
- {id:'project',label:'プロジェクト',icon:'◎'},
+ {id:'project',label:'プロジェクト',icon:'◎',alwaysEnabled:true},
  {id:'system',label:'ダッシュボード',icon:'⬢'},
  {id:'checkpoints',label:'承認',icon:'✓',hasBadge:true},
  {id:'intervention',label:'連絡',icon:'✉',hasBadge:true},
@@ -20,7 +22,7 @@ const tabs:Tab[]=[
  {id:'cost',label:'コスト',icon:'¥'},
  {id:'logs',label:'ログ',icon:'≫'},
  {id:'config',label:'プロジェクト設定',icon:'⚙'},
- {id:'global-config',label:'共通設定',icon:'⚙'}
+ {id:'global-config',label:'共通設定',icon:'⚙',alwaysEnabled:true}
 ]
 
 function formatBadgeCount(count:number):string{
@@ -39,6 +41,8 @@ export default function HeaderTabs({
  const pendingCheckpoints=usePendingCheckpointsCount()
  const pendingAssets=usePendingAssetsCount()
  const waitingResponse=useWaitingResponseCount()
+ const currentProject=useProjectStore(s=>s.currentProject)
+ const hasProject=!!currentProject
  const badgeCounts:Record<string,number>={
   checkpoints:pendingCheckpoints,
   intervention:waitingResponse,
@@ -48,11 +52,13 @@ export default function HeaderTabs({
   <nav className="flex min-w-0">
    {tabs.map((tab)=>{
     const count=tab.hasBadge?badgeCounts[tab.id]??0:0
+    const disabled=!hasProject&&!tab.alwaysEnabled
     return(
      <button
       key={tab.id}
-      className={`nier-tab ${activeTab===tab.id?'active':''}`}
-      onClick={()=>onTabChange(tab.id)}
+      className={`nier-tab ${activeTab===tab.id?'active':''} ${disabled?'nier-tab-disabled':''}`}
+      onClick={()=>{if(!disabled)onTabChange(tab.id)}}
+      disabled={disabled}
      >
       <span className="text-xs opacity-80">{tab.icon}</span>
       <span className={tab.hasBadge?'relative pr-2':undefined}>

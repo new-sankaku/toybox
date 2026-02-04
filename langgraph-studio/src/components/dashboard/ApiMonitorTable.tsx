@@ -1,5 +1,6 @@
 import{useState,useEffect,useCallback}from'react'
 import{providerMonitorApi,type ProviderMonitorInfo,type ProviderStatus}from'@/services/apiService'
+import{useNavigationStore}from'@/stores/navigationStore'
 import ApiLogModal from'./ApiLogModal'
 
 interface ProviderDisplayInfo{
@@ -28,8 +29,16 @@ const STATUS_LABELS:Record<ProviderStatus,string>={
  connected:'接続中',
  disconnected:'接続断',
  api_error:'APIエラー',
- cost_exceeded:'Cost超過',
- unknown:'Unknown'
+ cost_exceeded:'コスト超過',
+ unknown:'未設定'
+}
+
+const STATUS_HINTS:Record<ProviderStatus,string>={
+ connected:'',
+ disconnected:'サービスに接続できません。サービスが起動しているか確認してください',
+ api_error:'APIキーが無効または未設定です。共通設定で確認してください',
+ cost_exceeded:'コスト上限に達しました。共通設定でコスト管理を確認してください',
+ unknown:'APIキーが未設定です。共通設定で設定してください'
 }
 
 const STATUS_CLASSES:Record<ProviderStatus,string>={
@@ -52,6 +61,7 @@ export default function ApiMonitorTable():JSX.Element{
  const[providers,setProviders]=useState<ProviderDisplayInfo[]>([])
  const[selectedProviderId,setSelectedProviderId]=useState<string|null>(null)
  const[isModalOpen,setIsModalOpen]=useState(false)
+ const setActiveTab=useNavigationStore(s=>s.setActiveTab)
 
  const fetchMonitorData=useCallback(async()=>{
   try{
@@ -122,6 +132,15 @@ export default function ApiMonitorTable():JSX.Element{
           <span className={`px-1.5 py-0.5 text-[10px] tracking-nier border-b-2 ${STATUS_CLASSES[provider.status]}`}>
            {STATUS_LABELS[provider.status]}
           </span>
+          {STATUS_HINTS[provider.status]&&(
+           <button
+            className="block text-[9px] text-nier-text-light hover:text-nier-accent-orange transition-colors mt-0.5 text-left"
+            onClick={(e)=>{e.stopPropagation();setActiveTab('global-config')}}
+            title={STATUS_HINTS[provider.status]}
+           >
+            → 共通設定で確認
+           </button>
+)}
          </td>
          <td className="py-1.5 px-2 text-center">
           {provider.generating>0?(

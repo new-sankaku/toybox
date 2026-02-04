@@ -370,9 +370,10 @@ export default function DataView():JSX.Element{
        <p className="text-nier-small">読み込み中...</p>
       </div>
 ):filteredAssets.length===0?(
-      <div className="text-center py-8 text-nier-text-light">
-       <FolderOpen size={32} className="mx-auto mb-2 opacity-50"/>
-       <p className="text-nier-small">アセットがありません</p>
+      <div className="text-center py-12 text-nier-text-light">
+       <FolderOpen size={40} className="mx-auto mb-3 opacity-50"/>
+       <p className="text-nier-body mb-1">アセットがありません</p>
+       <p className="text-nier-caption">プロジェクトを実行すると、AIが生成した画像・音声・コードなどがここに表示されます</p>
       </div>
 ):viewMode==='grid'?(
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">

@@ -246,9 +246,9 @@ export default function CostView():JSX.Element{
         <span className="text-nier-text-light">残り</span>
         <span>${(budgetLimit-totals.cost).toFixed(2)}</span>
        </div>
-       <Progress value={(totals.cost/budgetLimit)*100} className="h-1.5 mt-1"/>
+       <Progress value={budgetLimit>0?(totals.cost/budgetLimit)*100:0} className="h-1.5 mt-1"/>
        <div className="text-nier-caption text-nier-text-light text-center mt-0.5">
-        {((totals.cost/budgetLimit)*100).toFixed(1)}%使用
+        {budgetLimit>0?`${((totals.cost/budgetLimit)*100).toFixed(1)}%使用`:'予算未設定'}
        </div>
       </div>
      </CardContent>

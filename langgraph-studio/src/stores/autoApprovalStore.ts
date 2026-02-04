@@ -5,6 +5,15 @@ import{
 }from'@/types/autoApproval'
 import{autoApprovalApi}from'@/services/apiService'
 
+const CATEGORY_LABELS:Record<string,string>={
+ code:'コード',
+ image:'画像',
+ audio:'音声',
+ music:'音楽',
+ document:'ドキュメント',
+ video:'動画'
+}
+
 interface AutoApprovalState{
  rules:AutoApprovalRule[]
  originalRules:AutoApprovalRule[]
@@ -58,7 +67,7 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
    const serverRules:AutoApprovalRule[]=response.rules.map((r)=>({
     category:r.category as ContentCategory,
     enabled:r.enabled,
-    label:r.category
+    label:CATEGORY_LABELS[r.category]||r.category
    }))
    set({rules:serverRules,originalRules:JSON.parse(JSON.stringify(serverRules)),loading:false})
   }catch(error){

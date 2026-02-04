@@ -48,6 +48,10 @@ cd langgraph-studio && npm run format     # スペース削除
 cd backend && python scripts/remove-spaces.py
 ```
 
+## スクリプト配置
+`langgraph-studio/scripts/` — `build_checks.cjs` `remove-spaces.cjs` `screenshot.cjs`
+`backend/scripts/` — `build_checks.py` `remove-spaces.py` `generate_openapi.py` `analyze_prompts.py` `analyze_dataflow.py` `line_count.py`
+
 ## OpenAPI + TypeScript型自動生成
 バックエンドのPydanticスキーマからOpenAPIスペックを生成し、フロントエンドのTypeScript型を自動生成する仕組み。
 **構成:** `backend/schemas/`(Pydanticスキーマ)→`backend/openapi/generator.py`(生成)→`langgraph-studio/src/types/openapi.json`→`langgraph-studio/src/types/api-generated.ts`

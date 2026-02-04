@@ -141,7 +141,7 @@ class SpriteSheetSkill(FileSkillMixin,Skill):
    if not input_dir:
     return SkillResult(success=False,error="input_dir is required for pack")
    full_input=self._resolve_path(input_dir,context)
-   full_output=self._resolve_path(path or "spritesheet.png",context)
+   full_output=self._resolve_path(path or"spritesheet.png",context)
    if not self._is_allowed(full_input,context) or not self._is_allowed(full_output,context):
     return SkillResult(success=False,error="Access denied")
    columns=kwargs.get("columns",4)
@@ -198,7 +198,7 @@ class SpriteSheetSkill(FileSkillMixin,Skill):
     col=i%columns
     row=i//columns
     sheet.paste(img,(col*frame_w,row*frame_h))
-   os.makedirs(os.path.dirname(output_path) or ".",exist_ok=True)
+   os.makedirs(os.path.dirname(output_path) or".",exist_ok=True)
    sheet.save(output_path)
    return SkillResult(success=True,output=f"Packed {len(images)} images into sprite sheet",metadata={
     "outputPath":output_path,"frameCount":len(images),"sheetWidth":sheet.width,"sheetHeight":sheet.height,
