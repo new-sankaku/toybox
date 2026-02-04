@@ -36,8 +36,8 @@ export function ProjectControls({
    <CardContent>
     <div className="flex gap-3">
      {project.status==='draft'&&(
-      <Button onClick={onStart} disabled={isLoading}>
-       {isLoading?<Loader2 size={14} className="mr-1.5 animate-spin"/>:<Play size={14} className="mr-1.5"/>}
+      <Button variant="primary" size="lg" onClick={onStart} disabled={isLoading}>
+       {isLoading?<Loader2 size={16} className="mr-2 animate-spin"/>:<Play size={16} className="mr-2"/>}
        開始
       </Button>
 )}

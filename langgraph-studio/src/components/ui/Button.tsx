@@ -8,7 +8,7 @@ const buttonVariants=cva(
   variants:{
    variant:{
     default:'nier-surface-panel border border-nier-border-light !text-nier-text-main hover:bg-nier-bg-selected hover:border-nier-border-dark',
-    primary:'nier-surface-panel border border-nier-border-dark !text-nier-text-main font-medium hover:bg-nier-bg-selected',
+    primary:'bg-nier-bg-header border border-nier-bg-header !text-nier-text-header font-medium hover:bg-nier-text-main hover:border-nier-text-main',
     secondary:'nier-surface-panel-muted border border-nier-border-light !text-nier-text-light hover:bg-nier-bg-selected hover:!text-nier-text-main',
     danger:'bg-nier-bg-panel border border-nier-accent-red !text-nier-accent-red hover:bg-nier-accent-red hover:!text-white',
     success:'bg-nier-bg-panel border border-nier-accent-green !text-nier-accent-green hover:bg-nier-accent-green hover:!text-white',
