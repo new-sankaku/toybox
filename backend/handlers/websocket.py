@@ -107,16 +107,3 @@ def register_websocket_handlers(sio,data_store:DataStore):
             },room=sid)
             return
 
-        project_id=checkpoint["projectId"]
-        agent_id=checkpoint["agentId"]
-        agent=data_store.get_agent(agent_id)
-        agent_status=agent["status"] if agent else None
-        sio.emit('checkpoint:resolved',{
-            "checkpointId":checkpoint_id,
-            "projectId":project_id,
-            "agentId":agent_id,
-            "resolution":resolution,
-            "feedback":feedback,
-            "checkpoint":checkpoint,
-            "agentStatus":agent_status
-        },room=f"project:{project_id}")

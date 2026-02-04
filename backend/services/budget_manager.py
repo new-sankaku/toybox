@@ -1,6 +1,6 @@
 from typing import Dict,Any,Optional,Tuple
 from datetime import datetime
-from datastore import get_session
+from models.database import get_session
 from repositories.global_cost_settings import GlobalCostSettingsRepository
 from repositories.cost_history import CostHistoryRepository
 from models.tables import CostHistory

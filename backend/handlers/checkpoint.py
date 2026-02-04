@@ -32,22 +32,11 @@ def register_checkpoint_routes(app:Flask,data_store:DataStore,sio):
         if not checkpoint:
             return jsonify({"error":"チェックポイントが見つかりません"}),404
 
-        agent_id=checkpoint["agentId"]
-        project_id=checkpoint["projectId"]
-        agent=data_store.get_agent(agent_id)
-        agent_status=agent["status"] if agent else None
-        sio.emit('checkpoint:resolved',{
-            "checkpointId":checkpoint_id,
-            "projectId":project_id,
-            "agentId":agent_id,
-            "resolution":resolution,
-            "feedback":feedback,
-            "agentStatus":agent_status
-        },room=f"project:{project_id}")
-
         if resolution=="revision_requested":
             execution_service=_get_execution_service()
             if execution_service:
-                execution_service.re_execute_agent(project_id,agent_id)
+                execution_service.re_execute_agent(
+                    checkpoint["projectId"],checkpoint["agentId"]
+                )
 
         return jsonify(checkpoint)

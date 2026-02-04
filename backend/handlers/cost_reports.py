@@ -1,6 +1,6 @@
 from flask import Flask,request,jsonify,Response
 from datetime import datetime
-from datastore import get_session
+from models.database import get_session
 from repositories.cost_history import CostHistoryRepository
 from middleware.logger import get_logger
 from middleware.error_handler import ApiError
