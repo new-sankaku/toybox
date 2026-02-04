@@ -429,6 +429,14 @@
     @apply bg-white/15;
   }
 
+  .nier-tab-disabled {
+    @apply opacity-35 cursor-not-allowed;
+  }
+
+  .nier-tab-disabled:hover {
+    background: transparent !important;
+  }
+
   /* Toast */
   .nier-toast {
     @apply flex items-center gap-3 px-4 py-3

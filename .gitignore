@@ -80,3 +80,5 @@ testdata/
 .claude/tool-history.jsonl
 tool-history.csv
 =*
+screenshots/
+backend/package-lock.json

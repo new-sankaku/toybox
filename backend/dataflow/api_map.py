@@ -3,15 +3,15 @@ REST API Data Flow Map
 Each entry maps:endpoint->handler,schemas,TS types,WS events
 
 Fields:
-  endpoint: URL path
-  method:   HTTP method
+  endpoint:   URL path
+  method:     HTTP method
   handler:"file::function_name"
   request_schema:Pydantic schema class name (or None)
   response_schema:Pydantic schema class name (or None for untyped)
   response_list:True if response is a list of response_schema
-  ts_request:TypeScript type name for request body
+  ts_request: TypeScript type name for request body
   ts_response:TypeScript type name for response
-  emits:    List of WebSocket events emitted
+  emits:      List of WebSocket events emitted
   query_params:Dict of query parameter names->type hints
 """
 
