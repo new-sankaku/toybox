@@ -147,6 +147,17 @@ class WorkflowService(BaseService):
                                 agent_id=agent.id,
                             )
                         )
+            agent_status=agent.status if agent else""
+            self._event_bus.publish(
+                CheckpointResolved(
+                    project_id=project_id,
+                    checkpoint_id=checkpoint_id,
+                    checkpoint=result or {},
+                    resolution=resolution,
+                    agent_id=cp.agent_id,
+                    agent_status=agent_status,
+                )
+            )
             if resolution=="approved":
                 self._check_phase_advancement(session,project_id)
             return result
@@ -370,20 +381,25 @@ class WorkflowService(BaseService):
                     "System",
                     f"自動承認(設定変更): {cp.title}",
                 )
+                agent=agent_repo.get(cp.agent_id)
+                agent_status=""
+                if agent and agent.status=="waiting_approval":
+                    other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
+                    if not other_pending:
+                        agent.status="running"
+                        session.flush()
+                if agent:
+                    agent_status=agent.status
                 self._event_bus.publish(
                     CheckpointResolved(
                         project_id=project_id,
                         checkpoint_id=cp.id,
                         checkpoint=cp_repo.to_dict(cp),
                         resolution="approved",
+                        agent_id=cp.agent_id,
+                        agent_status=agent_status,
                     )
                 )
-                agent=agent_repo.get(cp.agent_id)
-                if agent and agent.status=="waiting_approval":
-                    other_pending=cp_repo.get_pending_by_agent(cp.agent_id)
-                    if not other_pending:
-                        agent.status="running"
-                        session.flush()
 
     def _auto_approve_pending_assets(
         self,session,project_id:str,rules:List[Dict]

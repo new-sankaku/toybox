@@ -137,16 +137,17 @@ class WebSocketEmitter:
         )
 
     def _on_checkpoint_resolved(self,event:CheckpointResolved)->None:
-        self._emit(
-            "checkpoint:resolved",
-            {
-                "checkpointId":event.checkpoint_id,
-                "projectId":event.project_id,
-                "checkpoint":event.checkpoint,
-                "resolution":event.resolution,
-            },
-            event.project_id,
-        )
+        data={
+            "checkpointId":event.checkpoint_id,
+            "projectId":event.project_id,
+            "checkpoint":event.checkpoint,
+            "resolution":event.resolution,
+        }
+        if event.agent_id:
+            data["agentId"]=event.agent_id
+        if event.agent_status:
+            data["agentStatus"]=event.agent_status
+        self._emit("checkpoint:resolved",data,event.project_id)
 
     def _on_asset_created(self,event:AssetCreated)->None:
         self._emit(

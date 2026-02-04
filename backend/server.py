@@ -79,7 +79,6 @@ def create_app():
         intervention_service=container.intervention_service(),
         trace_service=container.trace_service(),
     )
-    data_store.set_sio(sio)
     data_store.start_simulation()
 
     db_path=os.path.join(os.path.dirname(__file__),"data","testdata.db" if config.agent.mode=="testdata" else"production.db")

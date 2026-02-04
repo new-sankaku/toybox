@@ -30,18 +30,7 @@ class DataStore:
         self._trace=trace_service
         self.subscriptions:Dict[str,set]={}
         self._lock=threading.Lock()
-        self._sio=None
         self._project.init_sample_data_if_empty()
-
-    def set_sio(self,sio):
-        self._sio=sio
-
-    def _emit_event(self,event:str,data:Dict,project_id:str):
-        if self._sio:
-            try:
-                self._sio.emit(event,data,room=f"project:{project_id}")
-            except Exception:
-                pass
 
     def start_simulation(self):
         self._simulation.start_simulation()

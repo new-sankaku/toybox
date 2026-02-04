@@ -70,6 +70,8 @@ class CheckpointResolved:
     checkpoint_id:str
     checkpoint:Dict[str,Any]=field(default_factory=dict)
     resolution:str=""
+    agent_id:str=""
+    agent_status:str=""
 
 
 @dataclass
