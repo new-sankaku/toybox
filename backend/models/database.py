@@ -70,6 +70,11 @@ def _run_migrations():
   if"agent_id" not in columns:
    with engine.begin() as conn:
     conn.execute(text("ALTER TABLE assets ADD COLUMN agent_id VARCHAR(50)"))
+ if"llm_jobs" in inspector.get_table_names():
+  columns={c["name"] for c in inspector.get_columns("llm_jobs")}
+  if"tools_json" not in columns:
+   with engine.begin() as conn:
+    conn.execute(text("ALTER TABLE llm_jobs ADD COLUMN tools_json TEXT"))
 
 def init_db():
  from .tables import Base

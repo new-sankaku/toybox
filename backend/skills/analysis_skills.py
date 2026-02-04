@@ -118,7 +118,7 @@ class DependencyGraphSkill(FileSkillMixin,Skill):
    for f in file_set:
     if f.replace(os.sep,"/").startswith(resolved+"/") and os.path.basename(f).startswith("index"):
      return f
-  return ""
+  return""
 
  def _analyze(self,base_path:str,language:str)->SkillResult:
   nodes,edges=self._build_graph(base_path,language)

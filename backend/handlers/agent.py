@@ -187,3 +187,32 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
    raise NotFoundError("Project",project_id)
   agents=data_store.get_interrupted_agents(project_id)
   return jsonify(agents)
+
+ @app.route('/api/agents/<agent_id>/snapshots',methods=['GET'])
+ def get_agent_snapshots(agent_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  snapshots=data_store.get_workflow_snapshots_by_agent(agent_id)
+  return jsonify(snapshots)
+
+ @app.route('/api/agents/<agent_id>/snapshots/<snapshot_id>/restore',methods=['POST'])
+ def restore_agent_snapshot(agent_id:str,snapshot_id:str):
+  agent=data_store.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+  snapshot=data_store.get_workflow_snapshot(snapshot_id)
+  if not snapshot:
+   raise NotFoundError("Snapshot",snapshot_id)
+  if snapshot.get("agentId")!=agent_id:
+   raise ValidationError("Snapshot does not belong to this agent","snapshotId")
+  result=data_store.restore_workflow_snapshot(snapshot_id)
+  if result:
+   sio.emit('agent:snapshot_restored',{
+    "agentId":agent_id,
+    "projectId":agent["projectId"],
+    "snapshotId":snapshot_id,
+    "snapshot":result,
+   },room=f"project:{agent['projectId']}")
+   return jsonify({"success":True,"snapshot":result})
+  raise ApiError("Failed to restore snapshot",code="RESTORE_ERROR",status_code=500)

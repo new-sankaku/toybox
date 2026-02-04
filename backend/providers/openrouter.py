@@ -1,9 +1,10 @@
 """OpenRouter プロバイダー"""
+import json
 from typing import List,Optional,Dict,Any,Iterator
 from middleware.logger import get_logger
 from .base import (
  AIProvider,AIProviderConfig,ChatMessage,ChatResponse,
- StreamChunk,ModelInfo,MessageRole
+ StreamChunk,ModelInfo,MessageRole,ToolCallData
 )
 
 
@@ -47,11 +48,29 @@ class OpenRouterProvider(AIProvider):
     raise ImportError("openaiパッケージがインストールされていません: pip install openai")
   return self._client
 
- def _convert_messages(self,messages:List[ChatMessage])->List[Dict[str,str]]:
+ def _convert_messages(self,messages:List[ChatMessage])->List[Dict[str,Any]]:
   converted=[]
   for msg in messages:
-   converted.append({"role":msg.role.value,"content":msg.content})
+   d:Dict[str,Any]={"role":msg.role.value,"content":msg.content}
+   if msg.tool_calls:
+    d["tool_calls"]=[tc.to_dict() for tc in msg.tool_calls]
+   if msg.tool_call_id:
+    d["tool_call_id"]=msg.tool_call_id
+   converted.append(d)
   return converted
+
+ def _parse_tool_calls(self,raw_tool_calls)->Optional[List[ToolCallData]]:
+  if not raw_tool_calls:
+   return None
+  result=[]
+  for tc in raw_tool_calls:
+   fn=tc.function
+   result.append(ToolCallData(
+    id=tc.id,
+    name=fn.name,
+    arguments=fn.arguments if isinstance(fn.arguments,str) else json.dumps(fn.arguments,ensure_ascii=False),
+   ))
+  return result if result else None
 
  def chat(
   self,
@@ -64,16 +83,24 @@ class OpenRouterProvider(AIProvider):
   client=self._get_client()
   msgs=self._convert_messages(messages)
 
-  response=client.chat.completions.create(
-   model=model,
-   messages=msgs,
-   max_tokens=max_tokens,
-   temperature=temperature,
-  )
+  create_kwargs:Dict[str,Any]={
+   "model":model,
+   "messages":msgs,
+   "max_tokens":max_tokens,
+   "temperature":temperature,
+  }
+  tools=kwargs.get("tools")
+  if tools:
+   create_kwargs["tools"]=tools
+
+  response=client.chat.completions.create(**create_kwargs)
 
   content=""
+  tool_calls=None
   if response.choices:
-   content=response.choices[0].message.content or""
+   msg=response.choices[0].message
+   content=msg.content or""
+   tool_calls=self._parse_tool_calls(getattr(msg,"tool_calls",None))
 
   return ChatResponse(
    content=content,
@@ -82,7 +109,8 @@ class OpenRouterProvider(AIProvider):
    output_tokens=response.usage.completion_tokens if response.usage else 0,
    total_tokens=response.usage.total_tokens if response.usage else 0,
    finish_reason=response.choices[0].finish_reason if response.choices else None,
-   raw_response=response
+   raw_response=response,
+   tool_calls=tool_calls,
   )
 
  def chat_stream(
@@ -96,25 +124,55 @@ class OpenRouterProvider(AIProvider):
   client=self._get_client()
   msgs=self._convert_messages(messages)
 
-  response=client.chat.completions.create(
-   model=model,
-   messages=msgs,
-   max_tokens=max_tokens,
-   temperature=temperature,
-   stream=True,
-   stream_options={"include_usage":True},
-  )
+  create_kwargs:Dict[str,Any]={
+   "model":model,
+   "messages":msgs,
+   "max_tokens":max_tokens,
+   "temperature":temperature,
+   "stream":True,
+   "stream_options":{"include_usage":True},
+  }
+  tools=kwargs.get("tools")
+  if tools:
+   create_kwargs["tools"]=tools
 
+  response=client.chat.completions.create(**create_kwargs)
+
+  pending_tool_calls:Dict[int,Dict[str,str]]={}
   for chunk in response:
-   if chunk.choices and chunk.choices[0].delta.content:
-    content=chunk.choices[0].delta.content
-    yield StreamChunk(content=content)
+   if chunk.choices:
+    delta=chunk.choices[0].delta
+    if delta.content:
+     yield StreamChunk(content=delta.content)
+    if delta.tool_calls:
+     for tc_delta in delta.tool_calls:
+      idx=tc_delta.index
+      if idx not in pending_tool_calls:
+       pending_tool_calls[idx]={"id":"","name":"","arguments":""}
+      if tc_delta.id:
+       pending_tool_calls[idx]["id"]=tc_delta.id
+      if tc_delta.function:
+       if tc_delta.function.name:
+        pending_tool_calls[idx]["name"]=tc_delta.function.name
+       if tc_delta.function.arguments:
+        pending_tool_calls[idx]["arguments"]+=tc_delta.function.arguments
    if chunk.usage:
+    collected_tool_calls=None
+    if pending_tool_calls:
+     collected_tool_calls=[
+      ToolCallData(
+       id=tc["id"],
+       name=tc["name"],
+       arguments=tc["arguments"],
+      )
+      for tc in sorted(pending_tool_calls.values(),key=lambda x:x["id"])
+     ]
     yield StreamChunk(
      content="",
      is_final=True,
      input_tokens=chunk.usage.prompt_tokens,
-     output_tokens=chunk.usage.completion_tokens
+     output_tokens=chunk.usage.completion_tokens,
+     tool_calls=collected_tool_calls,
     )
 
  def test_connection(self)->Dict[str,Any]:

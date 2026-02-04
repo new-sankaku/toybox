@@ -23,6 +23,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   system_prompt:Optional[str]=None,
   temperature:Optional[str]=None,
   messages_json:Optional[str]=None,
+  tools_json:Optional[str]=None,
  )->Dict[str,Any]:
   job=LlmJob(
    id=f"job-{uuid.uuid4().hex[:12]}",
@@ -36,6 +37,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    max_tokens=max_tokens,
    temperature=temperature,
    priority=priority,
+   tools_json=tools_json,
    status="pending",
    created_at=datetime.now(),
   )
@@ -173,6 +175,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
    "errorMessage":job.error_message,
    "retryCount":job.retry_count,
    "externalJobId":job.external_job_id,
+   "toolsJson":job.tools_json,
    "createdAt":job.created_at.isoformat() if job.created_at else None,
    "startedAt":job.started_at.isoformat() if job.started_at else None,
    "completedAt":job.completed_at.isoformat() if job.completed_at else None,

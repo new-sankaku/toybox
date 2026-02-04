@@ -1,7 +1,7 @@
 import axios,{AxiosError}from'axios'
 import type{Project}from'@/types/project'
 import type{BrushupOptionsConfig,BrushupSuggestImage}from'@/types/brushup'
-import type{SequenceData,AgentSystemPrompt}from'@/types/agent'
+import type{SequenceData,AgentSystemPrompt,WorkflowSnapshot}from'@/types/agent'
 import{API_ENDPOINTS}from'@/constants/api'
 
 const API_BASE_URL=(import.meta as unknown as{env:Record<string,string>}).env.VITE_API_BASE_URL||''
@@ -254,6 +254,16 @@ export const agentApi={
 
  getSystemPrompt:async(agentId:string):Promise<AgentSystemPrompt>=>{
   const response=await api.get(API_ENDPOINTS.agents.systemPrompt(agentId))
+  return response.data
+ },
+
+ getSnapshots:async(agentId:string):Promise<WorkflowSnapshot[]>=>{
+  const response=await api.get(API_ENDPOINTS.agents.snapshots(agentId))
+  return response.data
+ },
+
+ restoreSnapshot:async(agentId:string,snapshotId:string):Promise<{success:boolean;snapshot:WorkflowSnapshot}>=>{
+  const response=await api.post(API_ENDPOINTS.agents.restoreSnapshot(agentId,snapshotId))
   return response.data
  }
 }
