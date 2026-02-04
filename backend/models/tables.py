@@ -323,11 +323,4 @@ class AgentMemory(Base):
  access_count=Column(Integer,default=0)
  created_at=Column(DateTime,default=datetime.now)
 
-class FileTreeCacheTable(Base):
- __tablename__="file_tree_cache"
- id=Column(Integer,primary_key=True,autoincrement=True)
- project_id=Column(String(50),nullable=False,index=True)
- cache_key=Column(String(2000),nullable=False)
- items_json=Column(Text,nullable=False)
- created_at=Column(DateTime,default=datetime.now)
 

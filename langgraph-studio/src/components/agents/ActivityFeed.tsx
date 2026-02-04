@@ -11,6 +11,7 @@ const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_retry:{icon:RotateCcw,color:'text-nier-accent-blue'},
  checkpoint_created:{icon:AlertCircle,color:'text-nier-accent-orange'},
  checkpoint_resolved:{icon:CheckCircle,color:'text-nier-accent-green'},
+ snapshot_restored:{icon:RotateCcw,color:'text-nier-accent-blue'},
  phase_changed:{icon:ArrowRight,color:'text-nier-accent-blue'},
  agent_waiting_response:{icon:MessageCircle,color:'text-nier-accent-orange'},
  agent_waiting_provider:{icon:Clock,color:'text-nier-accent-blue'},

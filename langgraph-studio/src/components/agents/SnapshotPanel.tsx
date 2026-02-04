@@ -68,7 +68,7 @@ export function SnapshotPanel({snapshots,onRestore,restoring}:SnapshotPanelProps
       <span className="opacity-60">{runSnapshots.length}ステップ</span>
      </div>
      <div className="p-2 space-y-1">
-      {runSnapshots.map((snap,idx)=>(
+      {runSnapshots.map((snap)=>(
        <div
         key={snap.id}
         className={cn(

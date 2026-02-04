@@ -15,10 +15,15 @@ Usage:
 
 import sys
 import os
+import io
 import re
 import argparse
 from typing import Dict,List,Optional,Tuple,Any,Set
 from pathlib import Path
+
+if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-","")!="utf8":
+    sys.stdout=io.TextIOWrapper(sys.stdout.buffer,encoding="utf-8",errors="replace")
+    sys.stderr=io.TextIOWrapper(sys.stderr.buffer,encoding="utf-8",errors="replace")
 
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -44,9 +49,13 @@ PYTHON_TO_TS_TYPE={
 }
 
 
-def parse_ts_interfaces(ts_dir:str)->Dict[str,Dict[str,dict]]:
+def parse_ts_interfaces(ts_dirs)->Dict[str,Dict[str,dict]]:
     interfaces={}
-    ts_files=list(Path(ts_dir).glob("*.ts"))
+    if isinstance(ts_dirs,str):
+        ts_dirs=[ts_dirs]
+    ts_files=[]
+    for d in ts_dirs:
+        ts_files.extend(Path(d).glob("*.ts"))
 
     for ts_file in ts_files:
         content=ts_file.read_text(encoding="utf-8")
@@ -480,8 +489,6 @@ SCHEMA_TO_TS={
     "CostHistoryItemSchema":"CostHistoryItem",
     "CostHistoryResponseSchema":"CostHistoryResponse",
     "CostSummarySchema":"CostSummary",
-    "CostSummaryByServiceSchema":"CostSummaryByService",
-    "CostSummaryByProjectSchema":"CostSummaryByProject",
     "PromptComponentSchema":"PromptComponent",
     "AgentSystemPromptSchema":"AgentSystemPrompt",
 }
@@ -555,7 +562,11 @@ def main():
     args=parser.parse_args()
 
     project_root=Path(__file__).parent.parent.parent
-    ts_dir=args.ts_dir or str(project_root/"langgraph-studio"/"src"/"types")
+    src_root=project_root/"langgraph-studio"/"src"
+    if args.ts_dir:
+        ts_dir=[args.ts_dir]
+    else:
+        ts_dir=[str(src_root/"types"),str(src_root/"services")]
 
     sections=[]
     stats=None

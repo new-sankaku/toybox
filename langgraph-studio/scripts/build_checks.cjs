@@ -228,17 +228,15 @@ function checkSidebarInit() {
 }
 
 function checkStateSyncConsistency() {
-  const wsTypesPath = path.join(__dirname, '..', 'src', 'types', 'websocket.ts');
   const wsServicePath = path.join(__dirname, '..', 'src', 'services', 'websocketService.ts');
   const appPath = path.join(__dirname, '..', 'src', 'App.tsx');
 
-  const wsTypesContent = fs.readFileSync(wsTypesPath, 'utf-8');
   const wsServiceContent = fs.readFileSync(wsServicePath, 'utf-8');
   const appContent = fs.readFileSync(appPath, 'utf-8');
 
-  const syncMatch = wsTypesContent.match(/interface StateSyncData\s*\{([\s\S]*?)\n\}/);
+  const syncMatch = wsServiceContent.match(/'connection:state_sync':\(data:\{([\s\S]*?)\}\)=>void/);
   if (!syncMatch) {
-    console.log('  StateSyncData interface not found in websocket.ts');
+    console.log('  connection:state_sync type not found in websocketService.ts ServerToClientEvents');
     return false;
   }
 
