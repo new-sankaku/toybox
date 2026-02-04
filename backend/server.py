@@ -30,6 +30,7 @@ from handlers.openapi import register_openapi_routes
 from handlers.system_prompt import register_system_prompt_routes
 from handlers.global_cost_settings import register_global_cost_settings_routes
 from handlers.cost_reports import register_cost_reports_routes
+from container import Container
 from datastore import DataStore
 from config import get_config
 from agents import create_agent_runner
@@ -65,7 +66,19 @@ def create_app():
     )
 
     app_wsgi=socketio.WSGIApp(sio,app)
-    data_store=DataStore()
+
+    container=Container()
+    websocket_emitter=container.websocket_emitter()
+    websocket_emitter.set_sio(sio)
+
+    data_store=DataStore(
+        project_service=container.project_service(),
+        agent_service=container.agent_service(),
+        workflow_service=container.workflow_service(),
+        simulation_service=container.simulation_service(),
+        intervention_service=container.intervention_service(),
+        trace_service=container.trace_service(),
+    )
     data_store.set_sio(sio)
     data_store.start_simulation()
 
@@ -151,7 +164,7 @@ def create_app():
         return {
             'backup_info':backup_service.get_backup_info(),
             'archive_stats':archive_service.get_data_statistics(),
-            'rate_limiter':limiter.get_stats() if limiter else{},
+            'rate_limiter':limiter.get_stats() if limiter else {},
         }
 
     testdata_path=get_testdata_path()
@@ -174,6 +187,7 @@ def create_app():
     app.config_obj=config
     app.sio=sio
     app.wsgi_app_wrapper=app_wsgi
+    app.container=container
 
     logger.info("Server initialization completed")
     return app,sio

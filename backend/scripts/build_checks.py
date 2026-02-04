@@ -77,6 +77,7 @@ def check_websocket_events(backend_root:Path)->bool:
     emit_patterns=[
         re.compile(r"\.emit\s*\(\s*['\"]([^'\"]+)['\"]"),
         re.compile(r"_emit_event\s*\(\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"\._emit\s*\(\s*['\"]([^'\"]+)['\"]"),
     ]
     dynamic_patterns=["f\"agent:{","f'agent:{"]
     for py_file in backend_root.rglob("*.py"):
