@@ -49,10 +49,8 @@ cd backend && python scripts/remove-spaces.py
 ```
 
 ## スクリプト配置
-プロジェクト共通スクリプトは`scripts/`（TOPレベル）に配置する。
-- `scripts/screenshot.cjs` — PlaywrightによるUI全画面スクリーンショット取得（`node scripts/screenshot.cjs`）
-- `langgraph-studio/scripts/` — フロントエンド専用スクリプト（build_checks, remove-spaces）
-- `backend/scripts/` — バックエンド専用スクリプト
+`langgraph-studio/scripts/` — `build_checks.cjs` `remove-spaces.cjs` `screenshot.cjs`
+`backend/scripts/` — `build_checks.py` `remove-spaces.py` `generate_openapi.py` `analyze_prompts.py` `analyze_dataflow.py` `line_count.py`
 
 ## OpenAPI + TypeScript型自動生成
 バックエンドのPydanticスキーマからOpenAPIスペックを生成し、フロントエンドのTypeScript型を自動生成する仕組み。

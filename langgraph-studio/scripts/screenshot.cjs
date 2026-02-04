@@ -1,9 +1,9 @@
 const path=require('path')
 const fs=require('fs')
-const{chromium}=require(path.join(__dirname,'..','langgraph-studio','node_modules','playwright-core'))
+const{chromium}=require(path.join(__dirname,'..','node_modules','playwright-core'))
 
 const BASE_URL=process.env.APP_URL||'http://localhost:5173'
-const OUTPUT_DIR=process.env.SCREENSHOT_DIR||path.join(__dirname,'..','screenshots')
+const OUTPUT_DIR=process.env.SCREENSHOT_DIR||path.join(__dirname,'..','..','screenshots')
 
 const TABS=[
  {name:'プロジェクト',filename:'01_project'},
