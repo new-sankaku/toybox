@@ -97,6 +97,7 @@ class LlmJobRepository(BaseRepository[LlmJob]):
   if not job or job.status not in ("failed","running"):
    return None
   job.status="pending"
+  job.retry_count+=1
   job.started_at=None
   job.completed_at=None
   job.error_message=None

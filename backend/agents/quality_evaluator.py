@@ -74,10 +74,12 @@ class PrincipleBasedQualityEvaluator:
  def __init__(self):
   self._settings=get_principle_settings()
 
- def _save_quality_insights(self,agent_type:str,project_id:Optional[str],qc_result,llm_result:Dict[str,Any])->None:
+ def _save_quality_insights(self,agent_type:str,project_id:Optional[str],qc_result,llm_result:Dict[str,Any],data_store=None)->None:
   try:
-   from datastore import DataStore
-   ds=DataStore()
+   if data_store is None:
+    from datastore import DataStore
+    data_store=DataStore()
+   ds=data_store
    failed=llm_result.get("failed_criteria",[])
    suggestions=llm_result.get("improvement_suggestions",[])
    hallucinations=llm_result.get("hallucination_warnings",[])
@@ -111,7 +113,7 @@ class PrincipleBasedQualityEvaluator:
   except Exception as e:
    get_logger().error(f"QualityEvaluator: メモリ保存失敗: {e}",exc_info=True)
 
- async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->Dict[str,Any]:
+ async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None,data_store=None)->Dict[str,Any]:
   from .api_runner import QualityCheckResult
   content=output.get("content","")
   settings=dict(self._settings)
@@ -170,7 +172,7 @@ class PrincipleBasedQualityEvaluator:
     strengths=llm_result.get("strengths",[]),
    )
    if not passed:
-    self._save_quality_insights(agent_type,project_id,qc,llm_result)
+    self._save_quality_insights(agent_type,project_id,qc,llm_result,data_store=data_store)
    return qc
   except Exception as e:
    get_logger().error(f"QualityEvaluator: LLM評価失敗、ルールベースにフォールバック: {e}",exc_info=True)

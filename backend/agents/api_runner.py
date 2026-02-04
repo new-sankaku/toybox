@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from typing import Any,Dict,List,AsyncGenerator,Optional,Callable
 import os
-from dataclasses import dataclass,field
+from dataclasses import dataclass,field,asdict
 
 from .base import (
     AgentRunner,
@@ -935,7 +935,7 @@ class LeaderWorkerOrchestrator:
             if wr.status=="completed" and workflow_run_id:
                 self._save_snapshot(
                     leader_context,workflow_run_id,"worker_completed",worker_type,
-                    f"Worker完了: {worker_type}",wr.__dict__,worker_tasks,
+                    f"Worker完了: {worker_type}",asdict(wr),worker_tasks,
                 )
             return wr
 
@@ -958,7 +958,7 @@ class LeaderWorkerOrchestrator:
                 wr=WorkerTaskResult(worker_type=wt,status="failed",error=str(result))
             else:
                 wr=result
-            results["worker_results"].append(wr.__dict__)
+            results["worker_results"].append(asdict(wr))
             if wr.status=="needs_human_review":
                 task_data=dag.get_task(tid)
                 results["human_review_required"].append({
@@ -987,7 +987,7 @@ class LeaderWorkerOrchestrator:
             progress=30+int((i/max(total_workers,1))*50)
             if task_id in _completed or worker_type in _completed:
                 get_logger().info(f"スナップショットからスキップ: {worker_type}")
-                results["worker_results"].append(WorkerTaskResult(worker_type=worker_type,status="completed",output={"content":"(スナップショットから復元)","type":"document"}).__dict__)
+                results["worker_results"].append(asdict(WorkerTaskResult(worker_type=worker_type,status="completed",output={"content":"(スナップショットから復元)","type":"document"})))
                 continue
             self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中")
             qc_config=self.quality_settings.get(worker_type,{})
@@ -1001,11 +1001,11 @@ class LeaderWorkerOrchestrator:
                 quality_check_enabled=qc_enabled,
                 max_retries=max_retries,
             )
-            results["worker_results"].append(worker_result.__dict__)
+            results["worker_results"].append(asdict(worker_result))
             if worker_result.status=="completed" and workflow_run_id:
                 self._save_snapshot(
                     leader_context,workflow_run_id,"worker_completed",worker_type,
-                    f"Worker完了: {worker_type}",worker_result.__dict__,worker_tasks,
+                    f"Worker完了: {worker_type}",asdict(worker_result),worker_tasks,
                 )
             if worker_result.status=="needs_human_review":
                 results["human_review_required"].append({
@@ -1170,7 +1170,7 @@ class LeaderWorkerOrchestrator:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides)
+            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides,data_store=self._get_data_store())
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]
@@ -1328,6 +1328,7 @@ class LeaderWorkerOrchestrator:
                         prompt=retry_prompt,
                         max_tokens=self.agent_runner.max_tokens,
                         system_prompt=system_prompt,
+                        temperature=str(temperature),
                         token_budget=self.agent_runner._get_project_token_budget(leader_context),
                     )
                     retry_result=await job_queue.wait_for_job_async(retry_job["id"],timeout=300.0)
@@ -1424,7 +1425,7 @@ class LeaderWorkerOrchestrator:
                     quality_check_enabled=qc_config.get("enabled",True),
                     max_retries=qc_config.get("maxRetries",2),
                 )
-                additional_results.append(wr.__dict__)
+                additional_results.append(asdict(wr))
 
             return additional_results
 

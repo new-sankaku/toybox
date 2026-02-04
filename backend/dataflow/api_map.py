@@ -3,15 +3,15 @@ REST API Data Flow Map
 Each entry maps:endpoint->handler,schemas,TS types,WS events
 
 Fields:
-  endpoint:  URL path
-  method:    HTTP method
+  endpoint: URL path
+  method:   HTTP method
   handler:"file::function_name"
   request_schema:Pydantic schema class name (or None)
   response_schema:Pydantic schema class name (or None for untyped)
   response_list:True if response is a list of response_schema
   ts_request:TypeScript type name for request body
   ts_response:TypeScript type name for response
-  emits:     List of WebSocket events emitted
+  emits:    List of WebSocket events emitted
   query_params:Dict of query parameter names->type hints
 """
 
@@ -320,6 +320,31 @@ API_MAP=[
     },
 
                         
+    {
+        "endpoint":"/api/agents/<agent_id>/snapshots",
+        "method":"GET",
+        "handler":"handlers/agent.py::get_agent_snapshots",
+        "request_schema":None,
+        "response_schema":None,
+        "response_list":True,
+        "ts_request":None,
+        "ts_response":"WorkflowSnapshot[]",
+        "emits":[],
+        "query_params":{},
+    },
+    {
+        "endpoint":"/api/agents/<agent_id>/snapshots/<snapshot_id>/restore",
+        "method":"POST",
+        "handler":"handlers/agent.py::restore_agent_snapshot",
+        "request_schema":None,
+        "response_schema":None,
+        "response_list":False,
+        "ts_request":None,
+        "ts_response":"{success: boolean; snapshot: WorkflowSnapshot}",
+        "emits":["agent:snapshot_restored"],
+        "query_params":{},
+    },
+
     {
         "endpoint":"/api/projects/<project_id>/checkpoints",
         "method":"GET",

@@ -161,11 +161,11 @@ class OpenRouterProvider(AIProvider):
     if pending_tool_calls:
      collected_tool_calls=[
       ToolCallData(
-       id=tc["id"],
-       name=tc["name"],
-       arguments=tc["arguments"],
+       id=pending_tool_calls[idx]["id"],
+       name=pending_tool_calls[idx]["name"],
+       arguments=pending_tool_calls[idx]["arguments"],
       )
-      for tc in sorted(pending_tool_calls.values(),key=lambda x:x["id"])
+      for idx in sorted(pending_tool_calls.keys())
      ]
     yield StreamChunk(
      content="",

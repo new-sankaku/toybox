@@ -3,11 +3,11 @@ WebSocket Event Data Flow Map
 Each entry maps:event->direction,data fields,TS type,emit sources
 
 Fields:
-  event:  Event name
+  event: Event name
   direction:"server_to_client"|"client_to_server"|"bidirectional"
   ts_type:TypeScript type from WebSocketEventMap
   data_fields:Dict of field_name->python_type_hint
-  room:   Room scope ("project:{id}","sid","global")
+  room:  Room scope ("project:{id}","sid","global")
   sources:List of"file::function" where this event is emitted
 """
 
