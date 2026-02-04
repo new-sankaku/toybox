@@ -5,7 +5,7 @@ from typing import Optional,Dict,Any,Callable
 from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
-from providers.base import AIProviderConfig,ChatMessage,MessageRole
+from providers.base import AIProviderConfig,ChatMessage,MessageRole,ToolCallData
 from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent,get_token_budget_settings
 from agents.exceptions import TokenBudgetExceededError
 from services.stream_comment_parser import StreamCommentParser
@@ -74,6 +74,7 @@ class LlmJobQueue:
   messages_json:Optional[str]=None,
   on_speech:Optional[Callable[[str],None]]=None,
   token_budget:Optional[Dict[str,Any]]=None,
+  tools_json:Optional[str]=None,
  )->Dict[str,Any]:
   with session_scope() as session:
    repo=LlmJobRepository(session)
@@ -98,6 +99,7 @@ class LlmJobQueue:
     system_prompt=system_prompt,
     temperature=temperature,
     messages_json=messages_json,
+    tools_json=tools_json,
    )
    if callback:
     self._job_callbacks[job["id"]]=callback
@@ -197,6 +199,13 @@ class LlmJobQueue:
      thread=threading.Thread(target=self._execute_job,args=(job.id,provider_id),daemon=True)
      thread.start()
 
+ def _serialize_tool_calls_response(self,content:str,tool_calls)->str:
+  import json
+  if not tool_calls:
+   return content
+  tc_list=[{"id":tc.id,"name":tc.name,"arguments":tc.arguments} for tc in tool_calls]
+  return json.dumps({"content":content,"tool_calls":tc_list},ensure_ascii=False)
+
  def _execute_job(self,job_id:str,provider_id:str)->None:
   try:
    with session_scope() as session:
@@ -220,7 +229,13 @@ class LlmJobQueue:
       if role_str=="system":
        messages.append(ChatMessage(role=MessageRole.SYSTEM,content=m["content"]))
       elif role_str=="assistant":
-       messages.append(ChatMessage(role=MessageRole.ASSISTANT,content=m["content"]))
+       raw_tc=m.get("tool_calls")
+       tc_data=None
+       if raw_tc:
+        tc_data=[ToolCallData(id=t["id"],name=t["name"],arguments=t["arguments"]) for t in raw_tc]
+       messages.append(ChatMessage(role=MessageRole.ASSISTANT,content=m.get("content",""),tool_calls=tc_data))
+      elif role_str=="tool":
+       messages.append(ChatMessage(role=MessageRole.TOOL,content=m["content"],tool_call_id=m.get("tool_call_id")))
       else:
        messages.append(ChatMessage(role=MessageRole.USER,content=m["content"]))
     else:
@@ -230,27 +245,35 @@ class LlmJobQueue:
     chat_kwargs={"messages":messages,"model":job.model,"max_tokens":job.max_tokens}
     if job.temperature:
      chat_kwargs["temperature"]=float(job.temperature)
+    if job.tools_json:
+     import json as json_mod
+     tools=json_mod.loads(job.tools_json)
+     chat_kwargs["tools"]=tools
     speech_cb=self._speech_callbacks.pop(job_id,None)
     parser=StreamCommentParser(on_comment=speech_cb) if speech_cb else None
     try:
      full_content=""
      input_tokens=0
      output_tokens=0
+     collected_tool_calls=None
      for chunk in provider.chat_stream(**chat_kwargs):
       if chunk.is_final:
        if chunk.input_tokens is not None:
         input_tokens=chunk.input_tokens
        if chunk.output_tokens is not None:
         output_tokens=chunk.output_tokens
+       if chunk.tool_calls:
+        collected_tool_calls=chunk.tool_calls
       else:
        full_content+=chunk.content
        if parser and not parser.done:
         parser.feed(chunk.content)
      if parser:
       full_content=StreamCommentParser.strip_comment(full_content)
+     response_content=self._serialize_tool_calls_response(full_content,collected_tool_calls)
      repo.complete_job(
       job_id=job_id,
-      response_content=full_content,
+      response_content=response_content,
       tokens_input=input_tokens,
       tokens_output=output_tokens,
      )
@@ -265,9 +288,10 @@ class LlmJobQueue:
       if m:
        speech_cb(m.group(1).strip())
       fallback_content=SCP.strip_comment(fallback_content)
+     response_content=self._serialize_tool_calls_response(fallback_content,response.tool_calls)
      repo.complete_job(
       job_id=job_id,
-      response_content=fallback_content,
+      response_content=response_content,
       tokens_input=response.input_tokens,
       tokens_output=response.output_tokens,
      )

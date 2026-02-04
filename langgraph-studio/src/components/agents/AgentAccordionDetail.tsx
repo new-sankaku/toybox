@@ -5,8 +5,9 @@ import{Button}from'@/components/ui/Button'
 import{SequenceDiagram}from'./SequenceDiagram'
 import{SequenceDetailPanel}from'./SequenceDetailPanel'
 import{SystemPromptPanel}from'./SystemPromptPanel'
+import{SnapshotPanel}from'./SnapshotPanel'
 import{agentApi}from'@/services/apiService'
-import type{Agent,AgentLogEntry,SequenceData,SequenceMessage,AgentSystemPrompt}from'@/types/agent'
+import type{Agent,AgentLogEntry,SequenceData,SequenceMessage,AgentSystemPrompt,WorkflowSnapshot}from'@/types/agent'
 
 interface AgentAccordionDetailProps{
  agent:Agent
@@ -16,7 +17,7 @@ interface AgentAccordionDetailProps{
  onResume?:()=>void
 }
 
-type TabId='log'|'sequence'|'prompt'
+type TabId='log'|'sequence'|'snapshot'|'prompt'
 
 const formatTimestamp=(timestamp:string)=>{
  const d=new Date(timestamp)
@@ -59,6 +60,11 @@ export function AgentAccordionDetail({
  const[promptLoading,setPromptLoading]=useState(false)
  const[promptError,setPromptError]=useState<string|null>(null)
  const promptFetchedRef=useRef(false)
+ const[snapData,setSnapData]=useState<WorkflowSnapshot[]>([])
+ const[snapLoading,setSnapLoading]=useState(false)
+ const[snapError,setSnapError]=useState<string|null>(null)
+ const snapFetchedRef=useRef(false)
+ const[snapRestoring,setSnapRestoring]=useState(false)
  const[detailPanelOpen,setDetailPanelOpen]=useState(false)
  const[selectedMessage,setSelectedMessage]=useState<SequenceMessage|null>(null)
  const prevStatusRef=useRef(agent.status)
@@ -130,6 +136,38 @@ export function AgentAccordionDetail({
    fetchPrompt()
   }
  },[activeTab,promptLoading,fetchPrompt])
+
+ const fetchSnapshots=useCallback(async()=>{
+  setSnapLoading(true)
+  setSnapError(null)
+  try{
+   const result=await agentApi.getSnapshots(agent.id)
+   setSnapData(result)
+  }catch{
+   setSnapError('スナップショットの取得に失敗しました')
+  }finally{
+   setSnapLoading(false)
+   snapFetchedRef.current=true
+  }
+ },[agent.id])
+
+ useEffect(()=>{
+  if(activeTab==='snapshot'&&!snapFetchedRef.current&&!snapLoading){
+   fetchSnapshots()
+  }
+ },[activeTab,snapLoading,fetchSnapshots])
+
+ const handleRestore=useCallback(async(snapshotId:string)=>{
+  setSnapRestoring(true)
+  try{
+   await agentApi.restoreSnapshot(agent.id,snapshotId)
+   await fetchSnapshots()
+  }catch{
+   setSnapError('復元に失敗しました')
+  }finally{
+   setSnapRestoring(false)
+  }
+ },[agent.id,fetchSnapshots])
 
  useEffect(()=>{
   const prev=prevStatusRef.current
@@ -225,6 +263,17 @@ export function AgentAccordionDetail({
       シーケンス
      </button>
      <button
+      onClick={()=>setActiveTab('snapshot')}
+      className={cn(
+       'px-3 py-1 text-nier-caption transition-colors',
+       activeTab==='snapshot'
+        ?'text-nier-text-main border-b-2 border-nier-text-main'
+        :'text-nier-text-light hover:text-nier-text-main'
+)}
+     >
+      スナップショット
+     </button>
+     <button
       onClick={()=>setActiveTab('prompt')}
       className={cn(
        'px-3 py-1 text-nier-caption transition-colors',
@@ -289,6 +338,24 @@ export function AgentAccordionDetail({
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
         シーケンスデータがありません
        </div>
+)}
+     </div>
+)}
+
+    {activeTab==='snapshot'&&(
+     <div className="min-h-[100px] nier-sequence-panel">
+      {snapLoading&&(
+       <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">
+        読み込み中...
+       </div>
+)}
+      {snapError&&(
+       <div className="flex items-center justify-center py-8 text-nier-accent-red text-nier-caption">
+        {snapError}
+       </div>
+)}
+      {!snapLoading&&!snapError&&(
+       <SnapshotPanel snapshots={snapData} onRestore={handleRestore} restoring={snapRestoring}/>
 )}
      </div>
 )}

@@ -321,6 +321,31 @@ API_MAP=[
 
                         
     {
+        "endpoint":"/api/agents/<agent_id>/snapshots",
+        "method":"GET",
+        "handler":"handlers/agent.py::get_agent_snapshots",
+        "request_schema":None,
+        "response_schema":None,
+        "response_list":True,
+        "ts_request":None,
+        "ts_response":"WorkflowSnapshot[]",
+        "emits":[],
+        "query_params":{},
+    },
+    {
+        "endpoint":"/api/agents/<agent_id>/snapshots/<snapshot_id>/restore",
+        "method":"POST",
+        "handler":"handlers/agent.py::restore_agent_snapshot",
+        "request_schema":None,
+        "response_schema":None,
+        "response_list":False,
+        "ts_request":None,
+        "ts_response":"{success: boolean; snapshot: WorkflowSnapshot}",
+        "emits":["agent:snapshot_restored"],
+        "query_params":{},
+    },
+
+    {
         "endpoint":"/api/projects/<project_id>/checkpoints",
         "method":"GET",
         "handler":"handlers/checkpoint.py::list_project_checkpoints",

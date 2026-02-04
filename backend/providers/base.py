@@ -10,15 +10,37 @@ class MessageRole(str,Enum):
  SYSTEM="system"
  USER="user"
  ASSISTANT="assistant"
+ TOOL="tool"
+
+
+@dataclass
+class ToolCallData:
+ id:str
+ name:str
+ arguments:str
+
+ def to_dict(self)->Dict[str,Any]:
+  return {
+   "id":self.id,
+   "type":"function",
+   "function":{"name":self.name,"arguments":self.arguments},
+  }
 
 
 @dataclass
 class ChatMessage:
  role:MessageRole
  content:str
+ tool_calls:Optional[List["ToolCallData"]]=None
+ tool_call_id:Optional[str]=None
 
- def to_dict(self)->Dict[str,str]:
-  return {"role":self.role.value,"content":self.content}
+ def to_dict(self)->Dict[str,Any]:
+  d:Dict[str,Any]={"role":self.role.value,"content":self.content}
+  if self.tool_calls:
+   d["tool_calls"]=[tc.to_dict() for tc in self.tool_calls]
+  if self.tool_call_id:
+   d["tool_call_id"]=self.tool_call_id
+  return d
 
 
 @dataclass
@@ -30,6 +52,7 @@ class ChatResponse:
  total_tokens:int
  finish_reason:Optional[str]=None
  raw_response:Optional[Any]=None
+ tool_calls:Optional[List[ToolCallData]]=None
 
 
 @dataclass
@@ -38,6 +61,7 @@ class StreamChunk:
  is_final:bool=False
  input_tokens:Optional[int]=None
  output_tokens:Optional[int]=None
+ tool_calls:Optional[List[ToolCallData]]=None
 
 
 @dataclass

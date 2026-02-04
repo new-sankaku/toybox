@@ -191,3 +191,17 @@ export interface AgentSystemPrompt{
  basePromptFile:string|null
  hasQualityFeedback:boolean
 }
+
+export interface WorkflowSnapshot{
+ id:string
+ projectId:string
+ agentId:string
+ workflowRunId:string
+ stepType:'leader_completed'|'worker_completed'|'integration_completed'
+ stepId:string
+ label:string
+ stateData:Record<string,unknown>|null
+ workerTasks:Record<string,unknown>[]|null
+ status:'active'|'restored'|'invalidated'
+ createdAt:string
+}

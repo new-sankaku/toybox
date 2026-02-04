@@ -74,7 +74,46 @@ class PrincipleBasedQualityEvaluator:
  def __init__(self):
   self._settings=get_principle_settings()
 
- async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->Dict[str,Any]:
+ def _save_quality_insights(self,agent_type:str,project_id:Optional[str],qc_result,llm_result:Dict[str,Any],data_store=None)->None:
+  try:
+   if data_store is None:
+    from datastore import DataStore
+    data_store=DataStore()
+   ds=data_store
+   failed=llm_result.get("failed_criteria",[])
+   suggestions=llm_result.get("improvement_suggestions",[])
+   hallucinations=llm_result.get("hallucination_warnings",[])
+   if failed:
+    insight=f"[{agent_type}] 頻出の不合格基準: {', '.join(failed[:5])}"
+    ds.create_agent_memory(
+     category="quality_insight",
+     agent_type=agent_type,
+     content=insight,
+     project_id=project_id,
+     source_project_id=project_id,
+    )
+   if hallucinations:
+    insight=f"[{agent_type}] Hallucination傾向: {'; '.join(hallucinations[:3])}"
+    ds.create_agent_memory(
+     category="hallucination_pattern",
+     agent_type=agent_type,
+     content=insight,
+     project_id=project_id,
+     source_project_id=project_id,
+    )
+   if suggestions and not qc_result.passed:
+    insight=f"[{agent_type}] 改善ポイント: {'; '.join(suggestions[:3])}"
+    ds.create_agent_memory(
+     category="improvement_pattern",
+     agent_type=agent_type,
+     content=insight,
+     project_id=project_id,
+     source_project_id=project_id,
+    )
+  except Exception as e:
+   get_logger().error(f"QualityEvaluator: メモリ保存失敗: {e}",exc_info=True)
+
+ async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None,data_store=None)->Dict[str,Any]:
   from .api_runner import QualityCheckResult
   content=output.get("content","")
   settings=dict(self._settings)
@@ -123,7 +162,7 @@ class PrincipleBasedQualityEvaluator:
    if hallucinations:
     all_issues=[f"[Hallucination] {h}" for h in hallucinations]+all_issues
    passed=normalized>=threshold and not hallucinations
-   return QualityCheckResult(
+   qc=QualityCheckResult(
     passed=passed,
     issues=all_issues if not passed else [],
     score=normalized,
@@ -132,6 +171,9 @@ class PrincipleBasedQualityEvaluator:
     improvement_suggestions=all_issues,
     strengths=llm_result.get("strengths",[]),
    )
+   if not passed:
+    self._save_quality_insights(agent_type,project_id,qc,llm_result,data_store=data_store)
+   return qc
   except Exception as e:
    get_logger().error(f"QualityEvaluator: LLM評価失敗、ルールベースにフォールバック: {e}",exc_info=True)
    return QualityCheckResult(passed=True,score=0.8)

@@ -60,7 +60,9 @@ export const API_ENDPOINTS={
   execute:(id:string)=>`/api/agents/${id}/execute`,
   executeWithWorkers:(id:string)=>`/api/agents/${id}/execute-with-workers`,
   traces:(id:string)=>`/api/agents/${id}/traces`,
-  systemPrompt:(id:string)=>`/api/agents/${id}/system-prompt`
+  systemPrompt:(id:string)=>`/api/agents/${id}/system-prompt`,
+  snapshots:(id:string)=>`/api/agents/${id}/snapshots`,
+  restoreSnapshot:(agentId:string,snapshotId:string)=>`/api/agents/${agentId}/snapshots/${snapshotId}/restore`
  },
  checkpoints:{
   resolve:(id:string)=>`/api/checkpoints/${id}/resolve`

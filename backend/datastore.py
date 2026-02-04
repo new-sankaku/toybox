@@ -14,6 +14,8 @@ from repositories import (
  InterventionRepository,UploadedFileRepository,MetricsRepository,
  QualitySettingsRepository,AgentTraceRepository,LlmJobRepository
 )
+from repositories.workflow_snapshot import WorkflowSnapshotRepository
+from repositories.agent_memory import AgentMemoryRepository
 from agent_settings import get_default_quality_settings,QualityCheckConfig
 from ai_config import build_default_ai_services
 from config_loader import (
@@ -1612,3 +1614,53 @@ class DataStore:
   with session_scope() as session:
    repo=LlmJobRepository(session)
    return repo.get_by_agent(agent_id)
+
+ def create_workflow_snapshot(self,project_id:str,agent_id:str,workflow_run_id:str,step_type:str,step_id:str,label:str,state_data:Dict,worker_tasks:List)->Dict:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   return repo.create_snapshot(project_id,agent_id,workflow_run_id,step_type,step_id,label,state_data,worker_tasks)
+
+ def get_workflow_snapshots_by_agent(self,agent_id:str)->List[Dict]:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   return repo.get_by_agent(agent_id)
+
+ def get_latest_workflow_snapshots(self,agent_id:str)->List[Dict]:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   return repo.get_latest_run_snapshots(agent_id)
+
+ def get_workflow_snapshots_by_run(self,workflow_run_id:str)->List[Dict]:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   return repo.get_by_workflow_run(workflow_run_id)
+
+ def restore_workflow_snapshot(self,snapshot_id:str)->Optional[Dict]:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   snapshot=repo.get(snapshot_id)
+   if not snapshot:
+    return None
+   repo.invalidate_after(snapshot.workflow_run_id,snapshot_id)
+   return repo.mark_restored(snapshot_id)
+
+ def get_workflow_snapshot(self,snapshot_id:str)->Optional[Dict]:
+  with session_scope() as session:
+   repo=WorkflowSnapshotRepository(session)
+   snapshot=repo.get(snapshot_id)
+   return repo.to_dict(snapshot) if snapshot else None
+
+ def create_agent_memory(self,category:str,agent_type:str,content:str,project_id:Optional[str]=None,source_project_id:Optional[str]=None,relevance_score:int=100)->Dict:
+  with session_scope() as session:
+   repo=AgentMemoryRepository(session)
+   existing=repo.find_duplicate(agent_type,content,category)
+   if existing:
+    existing.relevance_score=min(existing.relevance_score+10,200)
+    session.flush()
+    return repo.to_dict(existing)
+   return repo.create_memory(category,agent_type,content,project_id,source_project_id,relevance_score)
+
+ def get_agent_memories(self,agent_type:str,project_id:Optional[str]=None,categories:Optional[List[str]]=None,limit:int=10)->List[Dict]:
+  with session_scope() as session:
+   repo=AgentMemoryRepository(session)
+   return repo.get_memories_for_agent(agent_type,project_id,categories,limit)

@@ -16,6 +16,7 @@ from .base import (
 from .api_runner import ApiAgentRunner
 from skills import create_skill_executor,SkillExecutor,SkillResult
 from middleware.logger import get_logger
+from providers.base import ToolCallData
 
 DEFAULT_MAX_ITERATIONS=50
 LOOP_DETECTION_WINDOW=6
@@ -183,8 +184,11 @@ class SkillEnabledAgentRunner(AgentRunner):
    }
   }
   skill_schemas=executor.get_skill_schemas_for_llm()
+  use_native_tools=self._check_native_tools_support()
+  if use_native_tools:
+   get_logger().info(f"SkillRunner: native tool calling enabled for model={self._base.model}")
   enhanced_context=self._enhance_context_with_skills(context,skill_schemas)
-  system_prompt=self._build_system_prompt(enhanced_context,skill_schemas)
+  system_prompt=self._build_system_prompt(enhanced_context,skill_schemas,use_native_tools=use_native_tools)
   user_prompt=self._build_user_prompt(enhanced_context)
   if data_store and trace_id:
    try:
@@ -216,7 +220,7 @@ class SkillEnabledAgentRunner(AgentRunner):
      messages.append({"role":"user","content":self._build_progress_check_prompt(iteration,remaining)})
     if len(messages)>self._message_compaction_trigger:
      messages=self._compact_messages(messages)
-    response=await self._call_llm_with_tools(messages,skill_schemas,context,system_prompt=system_prompt)
+    response=await self._call_llm_with_tools(messages,skill_schemas,context,system_prompt=system_prompt,use_native_tools=use_native_tools)
     tokens_used=response.get("tokens_used",0)
     total_tokens+=tokens_used
     yield {
@@ -224,7 +228,8 @@ class SkillEnabledAgentRunner(AgentRunner):
      "data":{"count":tokens_used}
     }
     last_response_content=response.get("content","")
-    tool_calls=self._extract_tool_calls(last_response_content)
+    native_tc=response.get("native_tool_calls")
+    tool_calls=self._extract_tool_calls(last_response_content,native_tool_calls=native_tc)
     if not tool_calls:
      final_output=self._process_final_response(response,context)
      break
@@ -249,7 +254,11 @@ class SkillEnabledAgentRunner(AgentRunner):
       }
      }
      break
-    messages.append({"role":"assistant","content":last_response_content})
+    if native_tc:
+     tc_msg_data=[{"id":tc.id,"name":tc.name,"arguments":json.dumps(tc.input,ensure_ascii=False)} for tc in tool_calls]
+     messages.append({"role":"assistant","content":last_response_content or"","tool_calls":tc_msg_data})
+    else:
+     messages.append({"role":"assistant","content":last_response_content})
     tool_results=[]
     for tc in tool_calls:
      yield {
@@ -261,12 +270,19 @@ class SkillEnabledAgentRunner(AgentRunner):
       "type":"skill_result",
       "data":{"skill":tc.name,"success":result.success,"output":str(result.output)[:self._skill_log_max],"error":result.error}
      }
-     tool_results.append(self._format_tool_result(tc,result))
-    messages.append({"role":"user","content":"\n\n".join(tool_results)})
+     if native_tc:
+      tool_results.append(self._format_tool_result_native(tc,result))
+     else:
+      tool_results.append(self._format_tool_result(tc,result))
+    if native_tc:
+     for tr in tool_results:
+      messages.append(tr)
+    else:
+     messages.append({"role":"user","content":"\n\n".join(tool_results)})
    if final_output is None:
     if stop_reason is None:
      stop_reason=f"最大イテレーション数({max_iter})に到達"
-    final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason,system_prompt=system_prompt)
+    final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason,system_prompt=system_prompt,use_native_tools=use_native_tools)
     total_tokens+=final_output.get("metadata",{}).get("summary_tokens",0)
    if data_store and trace_id:
     try:
@@ -326,7 +342,7 @@ class SkillEnabledAgentRunner(AgentRunner):
 これ以上のスキル呼び出しは行わず、ここまでの作業成果を最終出力としてまとめてください。
 tool_callブロックを含めず、成果物を出力してください。"""
 
- async def _generate_summary_output(self,messages:List[Dict],skill_schemas:List[Dict],context:AgentContext,stop_reason:str,system_prompt:Optional[str]=None)->Dict[str,Any]:
+ async def _generate_summary_output(self,messages:List[Dict],skill_schemas:List[Dict],context:AgentContext,stop_reason:str,system_prompt:Optional[str]=None,use_native_tools:bool=False)->Dict[str,Any]:
   summary_prompt=f"""[システム通知] {stop_reason}のため、作業を終了します。
 
 これまでの作業内容と成果を最終出力としてまとめてください。
@@ -358,11 +374,23 @@ tool_callブロックを含めず、成果物を出力してください。"""
     }
    }
 
- def _build_system_prompt(self,context:AgentContext,skill_schemas:List[Dict])->str:
+ def _build_system_prompt(self,context:AgentContext,skill_schemas:List[Dict],use_native_tools:bool=False)->str:
   skills_desc="\n".join([
    f"- {s['name']}: {s['description']}"
    for s in skill_schemas
   ])
+  if use_native_tools:
+   return f"""あなたはゲーム開発の専門家です。利用可能なツール（function calling）を使って作業を行えます。
+
+## 利用可能なスキル
+{skills_desc}
+
+ツールの実行結果を受け取った後、次のアクションを決定するか、最終的な回答を出力してください。
+最終的な回答を出力する場合はツール呼び出しを含めないでください。
+
+## プロジェクト情報
+{context.project_concept or"（未定義）"}
+{self._get_comment_section(context)}"""
   return f"""あなたはゲーム開発の専門家です。以下のスキル（ツール）を使って作業を行えます。
 
 ## 利用可能なスキル
@@ -421,6 +449,34 @@ tool_callブロックを含めず、成果物を出力してください。"""
     parts.append(f"## {agent}の出力\n{str(output)[:self._prev_output_max]}")
   return"\n\n".join(parts)
 
+ def _check_native_tools_support(self)->bool:
+  try:
+   from providers.registry import get_provider
+   from providers.base import AIProviderConfig
+   provider=get_provider(self._base._provider_id,AIProviderConfig())
+   if not provider:
+    return False
+   models=provider.get_available_models()
+   for m in models:
+    if m.id==self._base.model:
+     return m.supports_tools
+  except Exception:
+   pass
+  return False
+
+ def _convert_to_openai_tools(self,skill_schemas:List[Dict])->List[Dict[str,Any]]:
+  tools=[]
+  for s in skill_schemas:
+   tools.append({
+    "type":"function",
+    "function":{
+     "name":s["name"],
+     "description":s["description"],
+     "parameters":s.get("input_schema",{"type":"object","properties":{}}),
+    }
+   })
+  return tools
+
  def _enhance_context_with_skills(self,context:AgentContext,skill_schemas:List[Dict])->AgentContext:
   enhanced_config=dict(context.config)
   enhanced_config["available_skills"]=[s["name"] for s in skill_schemas]
@@ -446,11 +502,16 @@ tool_callブロックを含めず、成果物を出力してください。"""
   skill_schemas:List[Dict],
   context:AgentContext,
   system_prompt:Optional[str]=None,
+  use_native_tools:bool=False,
  )->Dict[str,Any]:
   from config_loader import get_agent_temperature
   temperature=get_agent_temperature(context.agent_type.value)
   messages_json_str=json.dumps(messages,ensure_ascii=False)
   prompt_fallback=messages[-1].get("content","") if messages else""
+  tools_json_str=None
+  if use_native_tools and skill_schemas:
+   openai_tools=self._convert_to_openai_tools(skill_schemas)
+   tools_json_str=json.dumps(openai_tools,ensure_ascii=False)
   job_queue=self._base.get_job_queue()
   job=job_queue.submit_job(
    project_id=context.project_id,
@@ -463,18 +524,46 @@ tool_callブロックを含めず、成果物を出力してください。"""
    temperature=str(temperature),
    messages_json=messages_json_str,
    on_speech=context.on_speech,
+   tools_json=tools_json_str,
   )
   result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
   if not result:
    raise TimeoutError(f"LLMジョブがタイムアウトしました: {job['id']}")
   if result["status"]=="failed":
    raise RuntimeError(f"LLMジョブ失敗: {result.get('errorMessage','Unknown error')}")
+  response_content=result["responseContent"]
+  native_tool_calls=None
+  try:
+   parsed=json.loads(response_content)
+   if isinstance(parsed,dict) and"tool_calls" in parsed:
+    native_tool_calls=parsed["tool_calls"]
+    response_content=parsed.get("content","")
+  except (json.JSONDecodeError,TypeError):
+   pass
   return {
-   "content":result["responseContent"],
+   "content":response_content,
    "tokens_used":result["tokensInput"]+result["tokensOutput"],
+   "native_tool_calls":native_tool_calls,
   }
 
- def _extract_tool_calls(self,content:str)->List[ToolCall]:
+ def _extract_tool_calls(self,content:str,native_tool_calls:Optional[List[Dict]]=None)->List[ToolCall]:
+  if native_tool_calls:
+   tool_calls=[]
+   for tc in native_tool_calls:
+    args=tc.get("arguments","{}")
+    if isinstance(args,str):
+     try:
+      parsed_args=json.loads(args)
+     except json.JSONDecodeError:
+      parsed_args={}
+    else:
+     parsed_args=args
+    tool_calls.append(ToolCall(
+     id=tc.get("id",f"tc_{len(tool_calls)}"),
+     name=tc.get("name",""),
+     input=parsed_args,
+    ))
+   return tool_calls
   pattern=r'```tool_call\s*\n?(.*?)\n?```'
   matches=re.findall(pattern,content,re.DOTALL)
   tool_calls=[]
@@ -503,6 +592,17 @@ tool_callブロックを含めず、成果物を出力してください。"""
    return f"""[ツール実行結果: {tc.name}]
 成功:いいえ
 エラー:{result.error}"""
+
+ def _format_tool_result_native(self,tc:ToolCall,result:SkillResult)->Dict[str,Any]:
+  if result.success:
+   output=result.output
+   if isinstance(output,(dict,list)):
+    content=json.dumps(output,ensure_ascii=False,indent=2)
+   else:
+    content=str(output)[:self._tool_result_max]
+  else:
+   content=f"Error: {result.error}"
+  return {"role":"tool","tool_call_id":tc.id,"content":content}
 
  def _compact_messages(self,messages:List[Dict])->List[Dict]:
   if len(messages)<=self._message_window_size:

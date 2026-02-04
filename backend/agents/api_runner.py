@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from typing import Any,Dict,List,AsyncGenerator,Optional,Callable
 import os
-from dataclasses import dataclass,field
+from dataclasses import dataclass,field,asdict
 
 from .base import (
     AgentRunner,
@@ -359,6 +359,26 @@ class ApiAgentRunner(AgentRunner):
             return"integrator"
         return"default"
 
+    def _build_memory_section(self,agent_type:str,project_id:Optional[str]=None)->str:
+        if not self._data_store:
+            return""
+        try:
+            memories=self._data_store.get_agent_memories(
+                agent_type=agent_type,
+                project_id=project_id,
+                categories=["quality_insight","hallucination_pattern","improvement_pattern"],
+                limit=5,
+            )
+            if not memories:
+                return""
+            items=[]
+            for m in memories:
+                items.append(f"- {m['content']}")
+            return f"## 過去の品質チェックからの知見\n以下は過去の品質チェック結果から得られた知見です。同様の問題を繰り返さないよう注意してください。\n"+"\n".join(items)
+        except Exception as e:
+            get_logger().error(f"Memory section build failed: {e}",exc_info=True)
+            return""
+
     def _get_project_context_policy(self,context:Optional[AgentContext])->Dict[str,Any]:
         if context and context.config:
             adv=context.config.get("advancedSettings",{})
@@ -444,6 +464,10 @@ class ApiAgentRunner(AgentRunner):
             except Exception as e:
                 from middleware.logger import get_logger
                 get_logger().warning(f"Failed to load comment instruction for {agent_type}: {e}")
+
+        memory_section=self._build_memory_section(agent_type,context.project_id)
+        if memory_section:
+            system_prompt+=f"\n\n{memory_section}"
 
         context_policy=get_workflow_context_policy(agent_type)
         filtered_outputs=self._filter_outputs_by_policy(context.previous_outputs,context_policy,context)
@@ -725,7 +749,60 @@ class LeaderWorkerOrchestrator:
         self.on_worker_status=on_worker_status
         self.on_worker_speech=on_worker_speech
 
+    def _get_data_store(self):
+        return self.agent_runner._data_store
+
+    def _save_snapshot(self,leader_context:AgentContext,workflow_run_id:str,step_type:str,step_id:str,label:str,state_data:Dict[str,Any],worker_tasks:List[Dict[str,Any]]):
+        ds=self._get_data_store()
+        if not ds:
+            return
+        try:
+            ds.create_workflow_snapshot(
+                project_id=leader_context.project_id,
+                agent_id=leader_context.agent_id,
+                workflow_run_id=workflow_run_id,
+                step_type=step_type,
+                step_id=step_id,
+                label=label,
+                state_data=state_data,
+                worker_tasks=worker_tasks,
+            )
+        except Exception as e:
+            get_logger().error(f"スナップショット保存失敗: {e}",exc_info=True)
+
+    def _load_completed_workers(self,agent_id:str)->Optional[Dict[str,Any]]:
+        ds=self._get_data_store()
+        if not ds:
+            return None
+        try:
+            snapshots=ds.get_latest_workflow_snapshots(agent_id)
+            if not snapshots:
+                return None
+            completed_workers={}
+            worker_tasks=None
+            workflow_run_id=None
+            for snap in snapshots:
+                if snap["status"]=="invalidated":
+                    continue
+                workflow_run_id=snap["workflowRunId"]
+                if snap["stepType"]=="worker_completed":
+                    state=snap.get("stateData",{})
+                    completed_workers[snap["stepId"]]=state
+                if snap.get("workerTasks"):
+                    worker_tasks=snap["workerTasks"]
+            if not completed_workers:
+                return None
+            return {
+                "workflow_run_id":workflow_run_id,
+                "completed_workers":completed_workers,
+                "worker_tasks":worker_tasks,
+            }
+        except Exception as e:
+            get_logger().error(f"スナップショット読み込み失敗: {e}",exc_info=True)
+            return None
+
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
+        import uuid as _uuid
         from config_loader import is_dag_execution_enabled
         results={
             "leader_output":{},
@@ -735,23 +812,52 @@ class LeaderWorkerOrchestrator:
             "human_review_required":[],
         }
 
+        resumable=self._load_completed_workers(leader_context.agent_id)
+        workflow_run_id=resumable["workflow_run_id"] if resumable else f"wf-{_uuid.uuid4().hex[:12]}"
 
-        self._emit_progress(leader_context.agent_type.value,10,"Leader分析開始")
+        if resumable and resumable.get("worker_tasks"):
+            get_logger().info(f"ワークフロー再開: {len(resumable['completed_workers'])}件のWorker完了済み")
+            worker_tasks=resumable["worker_tasks"]
+            leader_output_snap=None
+            snapshots=self._get_data_store().get_workflow_snapshots_by_run(workflow_run_id) if self._get_data_store() else []
+            for snap in snapshots:
+                if snap["stepType"]=="leader_completed" and snap["status"]!="invalidated":
+                    leader_output_snap=snap.get("stateData",{})
+                    break
+            if leader_output_snap:
+                results["leader_output"]=leader_output_snap
+                leader_output=AgentOutput(
+                    agent_id=leader_context.agent_id,
+                    agent_type=leader_context.agent_type,
+                    status=AgentStatus.COMPLETED,
+                    output=leader_output_snap,
+                )
+            else:
+                resumable=None
 
-        leader_output=await self.agent_runner.run_agent(leader_context)
-        results["leader_output"]=leader_output.output
+        if not resumable or not resumable.get("worker_tasks"):
+            self._emit_progress(leader_context.agent_type.value,10,"Leader分析開始")
 
-        if leader_output.status==AgentStatus.FAILED:
-            return results
+            leader_output=await self.agent_runner.run_agent(leader_context)
+            results["leader_output"]=leader_output.output
 
+            if leader_output.status==AgentStatus.FAILED:
+                return results
 
-        worker_tasks=self._extract_worker_tasks(leader_output.output)
+            worker_tasks=self._extract_worker_tasks(leader_output.output)
+
+            self._save_snapshot(
+                leader_context,workflow_run_id,"leader_completed","leader",
+                "Leader分析完了",leader_output.output,worker_tasks,
+            )
+
         total_workers=len(worker_tasks)
+        completed_worker_ids=set(resumable["completed_workers"].keys()) if resumable else set()
 
         if self.agent_runner._get_project_dag_enabled(leader_context):
-            results=await self._run_workers_dag(leader_context,leader_output,worker_tasks,results)
+            results=await self._run_workers_dag(leader_context,leader_output,worker_tasks,results,workflow_run_id,completed_worker_ids)
         else:
-            results=await self._run_workers_sequential(leader_context,leader_output,worker_tasks,results)
+            results=await self._run_workers_sequential(leader_context,leader_output,worker_tasks,results,workflow_run_id,completed_worker_ids)
 
         self._emit_progress(leader_context.agent_type.value,85,"Leader統合中")
 
@@ -761,6 +867,11 @@ class LeaderWorkerOrchestrator:
             worker_results=results["worker_results"],
         )
         results["final_output"]=final_output
+
+        self._save_snapshot(
+            leader_context,workflow_run_id,"integration_completed","integration",
+            "統合完了",final_output,worker_tasks,
+        )
 
         self._emit_progress(leader_context.agent_type.value,95,"承認生成")
 
@@ -791,8 +902,11 @@ class LeaderWorkerOrchestrator:
         leader_output,
         worker_tasks:List[Dict[str,Any]],
         results:Dict[str,Any],
+        workflow_run_id:str="",
+        completed_worker_ids:Optional[set]=None,
     )->Dict[str,Any]:
         from .task_dispatcher import TaskDAG,execute_dag_parallel
+        _completed=completed_worker_ids or set()
         total_workers=len(worker_tasks)
         dag=TaskDAG(worker_tasks)
         layers=dag.get_execution_layers()
@@ -802,11 +916,15 @@ class LeaderWorkerOrchestrator:
 
         async def _exec_single(task_data:Dict[str,Any])->WorkerTaskResult:
             worker_type=task_data.get("worker","")
+            task_id=task_data.get("id","")
+            if task_id in _completed or worker_type in _completed:
+                get_logger().info(f"スナップショットからスキップ: {worker_type}")
+                return WorkerTaskResult(worker_type=worker_type,status="completed",output={"content":"(スナップショットから復元)","type":"document"})
             task_description=task_data.get("task","")
             qc_config=self.quality_settings.get(worker_type,{})
             qc_enabled=qc_config.get("enabled",True)
             max_retries=qc_config.get("maxRetries",3)
-            return await self._execute_worker(
+            wr=await self._execute_worker(
                 leader_context=leader_context,
                 worker_type=worker_type,
                 task=task_description,
@@ -814,6 +932,12 @@ class LeaderWorkerOrchestrator:
                 quality_check_enabled=qc_enabled,
                 max_retries=max_retries,
             )
+            if wr.status=="completed" and workflow_run_id:
+                self._save_snapshot(
+                    leader_context,workflow_run_id,"worker_completed",worker_type,
+                    f"Worker完了: {worker_type}",asdict(wr),worker_tasks,
+                )
+            return wr
 
         def _on_layer_start(layer_idx:int,layer_task_ids:list)->None:
             progress=30+int(((layer_idx)/max(layer_count,1))*50)
@@ -834,7 +958,7 @@ class LeaderWorkerOrchestrator:
                 wr=WorkerTaskResult(worker_type=wt,status="failed",error=str(result))
             else:
                 wr=result
-            results["worker_results"].append(wr.__dict__)
+            results["worker_results"].append(asdict(wr))
             if wr.status=="needs_human_review":
                 task_data=dag.get_task(tid)
                 results["human_review_required"].append({
@@ -850,13 +974,21 @@ class LeaderWorkerOrchestrator:
         leader_output,
         worker_tasks:List[Dict[str,Any]],
         results:Dict[str,Any],
+        workflow_run_id:str="",
+        completed_worker_ids:Optional[set]=None,
     )->Dict[str,Any]:
+        _completed=completed_worker_ids or set()
         total_workers=len(worker_tasks)
         self._emit_progress(leader_context.agent_type.value,30,f"Worker逐次実行開始 ({total_workers}タスク)")
         for i,worker_task in enumerate(worker_tasks):
             worker_type=worker_task.get("worker","")
+            task_id=worker_task.get("id","")
             task_description=worker_task.get("task","")
             progress=30+int((i/max(total_workers,1))*50)
+            if task_id in _completed or worker_type in _completed:
+                get_logger().info(f"スナップショットからスキップ: {worker_type}")
+                results["worker_results"].append(asdict(WorkerTaskResult(worker_type=worker_type,status="completed",output={"content":"(スナップショットから復元)","type":"document"})))
+                continue
             self._emit_progress(leader_context.agent_type.value,progress,f"{worker_type} 実行中")
             qc_config=self.quality_settings.get(worker_type,{})
             qc_enabled=qc_config.get("enabled",True)
@@ -869,7 +1001,12 @@ class LeaderWorkerOrchestrator:
                 quality_check_enabled=qc_enabled,
                 max_retries=max_retries,
             )
-            results["worker_results"].append(worker_result.__dict__)
+            results["worker_results"].append(asdict(worker_result))
+            if worker_result.status=="completed" and workflow_run_id:
+                self._save_snapshot(
+                    leader_context,workflow_run_id,"worker_completed",worker_type,
+                    f"Worker完了: {worker_type}",asdict(worker_result),worker_tasks,
+                )
             if worker_result.status=="needs_human_review":
                 results["human_review_required"].append({
                     "worker_type":worker_type,
@@ -1033,7 +1170,7 @@ class LeaderWorkerOrchestrator:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides)
+            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides,data_store=self._get_data_store())
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]
@@ -1076,6 +1213,8 @@ class LeaderWorkerOrchestrator:
         leader_context:AgentContext,
         leader_output:Dict[str,Any],
         worker_results:List[Dict[str,Any]],
+        routing_cycle:int=0,
+        max_routing_cycles:int=2,
     )->Dict[str,Any]:
         worker_outputs={}
         worker_texts=[]
@@ -1098,6 +1237,7 @@ class LeaderWorkerOrchestrator:
                 "agent_type":leader_context.agent_type.value,
                 "worker_count":len(worker_results),
                 "completed_count":sum(1 for r in worker_results if r.get("status")=="completed"),
+                "routing_cycle":routing_cycle,
             }
         }
 
@@ -1161,7 +1301,18 @@ class LeaderWorkerOrchestrator:
                 leader_quality_settings=leader_adv_qc.get("qualityCheck")
                 qc_result=await self._perform_quality_check(integrated,leader_context.agent_type.value,leader_context.project_id,leader_enabled_principles_qc,leader_quality_settings,principle_overrides=leader_principle_overrides_qc)
                 if not qc_result.passed:
-                    get_logger().info(f"統合出力の品質チェック不合格 score={qc_result.score:.2f}、再統合実行")
+                    if routing_cycle<max_routing_cycles:
+                        get_logger().info(f"統合品質不合格 score={qc_result.score:.2f}、Leaderへ差し戻し (cycle {routing_cycle+1}/{max_routing_cycles})")
+                        additional_results=await self._route_back_to_leader(
+                            leader_context,leader_output,worker_results,qc_result,
+                        )
+                        if additional_results:
+                            combined_results=worker_results+additional_results
+                            return await self._integrate_outputs(
+                                leader_context,leader_output,combined_results,
+                                routing_cycle=routing_cycle+1,max_routing_cycles=max_routing_cycles,
+                            )
+                    get_logger().info(f"統合品質不合格 score={qc_result.score:.2f}、再統合実行 (最終リトライ)")
                     feedback="\n".join(f"- {s}" for s in qc_result.improvement_suggestions) if qc_result.improvement_suggestions else""
                     retry_prompt=f"""{integration_prompt}
 
@@ -1177,6 +1328,7 @@ class LeaderWorkerOrchestrator:
                         prompt=retry_prompt,
                         max_tokens=self.agent_runner.max_tokens,
                         system_prompt=system_prompt,
+                        temperature=str(temperature),
                         token_budget=self.agent_runner._get_project_token_budget(leader_context),
                     )
                     retry_result=await job_queue.wait_for_job_async(retry_job["id"],timeout=300.0)
@@ -1190,6 +1342,96 @@ class LeaderWorkerOrchestrator:
             get_logger().error(f"統合LLM呼び出しエラー: {e}",exc_info=True)
 
         return integrated
+
+    async def _route_back_to_leader(
+        self,
+        leader_context:AgentContext,
+        leader_output:Dict[str,Any],
+        current_worker_results:List[Dict[str,Any]],
+        qc_result:QualityCheckResult,
+    )->Optional[List[Dict[str,Any]]]:
+        issues_text="\n".join(f"- {i}" for i in qc_result.issues) if qc_result.issues else"品質スコアが基準に達していません"
+        suggestions_text="\n".join(f"- {s}" for s in qc_result.improvement_suggestions) if qc_result.improvement_suggestions else""
+        existing_workers=", ".join(r.get("worker_type","?") for r in current_worker_results)
+
+        routing_prompt=f"""## 統合品質チェック結果
+スコア:{qc_result.score:.2f}（基準未達）
+
+### 問題点
+{issues_text}
+
+### 改善提案
+{suggestions_text}
+
+### 既存Worker
+{existing_workers}
+
+## 指示
+上記の品質チェック結果を踏まえ、不足を補うための追加Workerタスクを生成してください。
+既存Workerと重複しないよう、新しい観点での作業を割り当ててください。
+出力はJSON形式でworker_tasksリストを含めてください。"""
+
+        try:
+            resolved_model=self.agent_runner._resolve_model_for_agent(leader_context)
+            resolved_provider=self.agent_runner._resolve_provider_for_agent(leader_context)
+            job_queue=self.agent_runner.get_job_queue()
+            temperature=self.agent_runner._get_project_temperature(leader_context,leader_context.agent_type.value)
+
+            system_prompt=f"あなたはゲーム開発の専門家です。品質向上のための追加作業を計画します。\n\n## プロジェクト情報\n{leader_context.project_concept or'（未定義）'}"
+
+            job=job_queue.submit_job(
+                project_id=leader_context.project_id,
+                agent_id=f"{leader_context.agent_id}-routing",
+                provider_id=resolved_provider,
+                model=resolved_model,
+                prompt=routing_prompt,
+                max_tokens=self.agent_runner.max_tokens,
+                system_prompt=system_prompt,
+                temperature=str(temperature),
+                token_budget=self.agent_runner._get_project_token_budget(leader_context),
+            )
+            result=await job_queue.wait_for_job_async(job["id"],timeout=300.0)
+            if not result or result["status"]!="completed":
+                get_logger().warning("Conditional Routing: Leader追加タスク生成失敗")
+                return None
+
+            import json,re
+            from .task_dispatcher import normalize_worker_tasks
+            content=result["responseContent"]
+            json_match=re.search(r'```json\s*([\s\S]*?)\s*```',content)
+            if json_match:
+                data=json.loads(json_match.group(1))
+                additional_tasks=normalize_worker_tasks(data.get("worker_tasks",[]))
+            else:
+                get_logger().warning("Conditional Routing: 追加タスクのJSON抽出失敗")
+                return None
+
+            if not additional_tasks:
+                return None
+
+            get_logger().info(f"Conditional Routing: 追加Worker {len(additional_tasks)}件を実行")
+            self._emit_progress(leader_context.agent_type.value,87,f"追加Worker実行中 ({len(additional_tasks)}件)")
+
+            additional_results=[]
+            for task_data in additional_tasks:
+                worker_type=task_data.get("worker","")
+                task_desc=task_data.get("task","")
+                qc_config=self.quality_settings.get(worker_type,{})
+                wr=await self._execute_worker(
+                    leader_context=leader_context,
+                    worker_type=worker_type,
+                    task=task_desc,
+                    leader_output=leader_output,
+                    quality_check_enabled=qc_config.get("enabled",True),
+                    max_retries=qc_config.get("maxRetries",2),
+                )
+                additional_results.append(asdict(wr))
+
+            return additional_results
+
+        except Exception as e:
+            get_logger().error(f"Conditional Routing失敗: {e}",exc_info=True)
+            return None
 
     def _emit_progress(self,agent_type:str,progress:int,message:str):
         if self.on_progress:

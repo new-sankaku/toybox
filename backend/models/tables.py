@@ -227,6 +227,7 @@ class LlmJob(Base):
  error_message=Column(Text)
  retry_count=Column(Integer,default=0)
  external_job_id=Column(String(100))
+ tools_json=Column(Text)
  created_at=Column(DateTime,default=datetime.now)
  started_at=Column(DateTime)
  completed_at=Column(DateTime)
@@ -295,6 +296,32 @@ class FileMetadata(Base):
  created_at=Column(DateTime,default=datetime.now)
  modified_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
  last_accessed_at=Column(DateTime,default=datetime.now)
+
+class WorkflowSnapshot(Base):
+ __tablename__="workflow_snapshots"
+ id=Column(String(50),primary_key=True)
+ project_id=Column(String(50),ForeignKey("projects.id"),nullable=False)
+ agent_id=Column(String(50),ForeignKey("agents.id"),nullable=False)
+ workflow_run_id=Column(String(50),nullable=False,index=True)
+ step_type=Column(String(50),nullable=False)
+ step_id=Column(String(100),nullable=False)
+ label=Column(String(255))
+ state_data=Column(JSON)
+ worker_tasks=Column(JSON)
+ status=Column(String(20),default="active")
+ created_at=Column(DateTime,default=datetime.now)
+
+class AgentMemory(Base):
+ __tablename__="agent_memories"
+ id=Column(Integer,primary_key=True,autoincrement=True)
+ project_id=Column(String(50),nullable=True,index=True)
+ category=Column(String(50),nullable=False)
+ agent_type=Column(String(50),nullable=False)
+ content=Column(Text,nullable=False)
+ source_project_id=Column(String(50))
+ relevance_score=Column(Integer,default=100)
+ access_count=Column(Integer,default=0)
+ created_at=Column(DateTime,default=datetime.now)
 
 class FileTreeCacheTable(Base):
  __tablename__="file_tree_cache"
