@@ -19,7 +19,7 @@ def resolve_llm_for_project(project_id:Optional[str],usage_category:str)->Dict[s
 
 def _get_usage_category_default(usage_category:str)->Dict[str,str]:
  try:
-  from config_loader import get_ai_providers_config
+  from config_loaders.ai_provider_config import get_ai_providers_config
   ai_config=get_ai_providers_config()
   for cat in ai_config.get("usage_categories",[]):
    if cat.get("id")==usage_category:
@@ -32,6 +32,6 @@ def _get_usage_category_default(usage_category:str)->Dict[str,str]:
 
 def resolve_with_env_key(provider_id:str)->str:
  import os
- from config_loader import get_provider_env_key
+ from config_loaders.ai_provider_config import get_provider_env_key
  env_key=get_provider_env_key(provider_id)
  return os.environ.get(env_key,"") if env_key else""

@@ -14,6 +14,7 @@ except ImportError:
 
 from server import create_app,run_server
 from config import get_config
+from middleware.logger import setup_logging,get_logger
 
 
 def main():
@@ -34,14 +35,18 @@ def main():
         reload_config()
         config=get_config()
 
-    print("="*50)
-    print("  AiAgentGame2 Backend Server")
-    print("="*50)
-    print(f"  Host: {args.host}")
-    print(f"  Port: {args.port}")
-    print(f"  Agent Mode: {config.agent.mode}")
-    print(f"  Debug: {args.debug}")
-    print("="*50)
+    log_dir=os.path.join(os.path.dirname(__file__),"logs")
+    setup_logging(log_dir=log_dir,log_level=20 if not config.server.debug else 10)
+    logger=get_logger()
+
+    logger.info("="*50)
+    logger.info("  AiAgentGame2 Backend Server")
+    logger.info("="*50)
+    logger.info(f"  Host: {args.host}")
+    logger.info(f"  Port: {args.port}")
+    logger.info(f"  Agent Mode: {config.agent.mode}")
+    logger.info(f"  Debug: {args.debug}")
+    logger.info("="*50)
 
     app,socketio=create_app()
     run_server(app,socketio,host=args.host,port=args.port,debug=args.debug)

@@ -1,30 +1,36 @@
 from flask import Flask,request,jsonify
-from datastore import DataStore
-from config_loader import (
+from services.project_service import ProjectService
+from config_loaders.project_option_config import (
  get_output_settings_defaults,
  get_cost_settings_defaults,
- get_agent_service_map,
- get_advanced_quality_check_settings,
- get_tool_execution_limits,
- get_concurrent_limits,
- get_dag_execution_settings,
- get_temperature_defaults,
- get_token_budget_settings,
- get_context_policy_settings,
  get_websocket_config,
- get_available_principles,
- get_default_agent_principles,
+ get_concurrent_limits,
+)
+from config_loaders.agent_config import (
+ get_agent_service_map,
  get_agents_config,
  get_ui_phases,
+ get_advanced_quality_check_settings,
+ get_tool_execution_limits,
+ get_temperature_defaults,
 )
-from ai_config import get_usage_categories
+from config_loaders.workflow_config import (
+ get_dag_execution_settings,
+ get_token_budget_settings,
+ get_context_policy_settings,
+)
+from config_loaders.principle_config import (
+ get_available_principles,
+ get_default_agent_principles,
+)
+from config_loaders.ai_provider_config import get_usage_categories
 from models.database import session_scope
 from repositories.project_ai_config import ProjectAiConfigRepository
 from repositories.global_execution_settings import GlobalExecutionSettingsRepository
 from middleware.logger import get_logger
 
 
-def register_project_settings_routes(app:Flask,data_store:DataStore):
+def register_project_settings_routes(app:Flask,project_service:ProjectService):
 
  @app.route('/api/config/output-settings/defaults',methods=['GET'])
  def get_output_defaults():
@@ -40,7 +46,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/output',methods=['GET'])
  def get_project_output_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   config=project.get("config",{})
@@ -49,19 +55,19 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/output',methods=['PUT'])
  def update_project_output_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
   config=project.get("config",{})
   output_settings=config.get("outputSettings",get_output_settings_defaults())
   output_settings.update(data)
-  data_store.update_project(project_id,{"outputSettings":output_settings})
+  project_service.update_project(project_id,{"outputSettings":output_settings})
   return jsonify(output_settings)
 
  @app.route('/api/projects/<project_id>/settings/cost',methods=['GET'])
  def get_project_cost_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   settings=project.get("costSettings",get_cost_settings_defaults())
@@ -69,19 +75,19 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/cost',methods=['PUT'])
  def update_project_cost_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
   if"costSettings" not in project:
    project["costSettings"]=get_cost_settings_defaults()
   project["costSettings"].update(data)
-  data_store.update_project(project_id,{"costSettings":project["costSettings"]})
+  project_service.update_project(project_id,{"costSettings":project["costSettings"]})
   return jsonify(project["costSettings"])
 
  @app.route('/api/projects/<project_id>/settings/ai-providers',methods=['GET'])
  def get_project_ai_providers(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   settings=project.get("aiProviderSettings",[])
@@ -89,11 +95,11 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/ai-providers',methods=['PUT'])
  def update_project_ai_providers(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or []
-  data_store.update_project(project_id,{"aiProviderSettings":data})
+  project_service.update_project(project_id,{"aiProviderSettings":data})
   return jsonify(data)
 
  @app.route('/api/config/advanced-settings/defaults',methods=['GET'])
@@ -117,7 +123,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/advanced',methods=['GET'])
  def get_project_advanced_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   defaults={
@@ -136,13 +142,13 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/advanced',methods=['PUT'])
  def update_project_advanced_settings(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
   current=project.get("advancedSettings",{})
   current.update(data)
-  data_store.update_project(project_id,{"advancedSettings":current})
+  project_service.update_project(project_id,{"advancedSettings":current})
   return jsonify(current)
 
  @app.route('/api/config/concurrent-limits',methods=['GET'])
@@ -193,7 +199,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/usage-categories',methods=['GET'])
  def get_project_usage_categories(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   try:
@@ -230,7 +236,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/usage-categories/<category_id>',methods=['PUT'])
  def update_project_usage_category(project_id:str,category_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
@@ -253,7 +259,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/usage-categories/<category_id>',methods=['DELETE'])
  def reset_project_usage_category(project_id:str,category_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   try:
@@ -296,7 +302,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/principles',methods=['GET'])
  def get_project_principles(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   defaults=get_default_agent_principles()
@@ -307,7 +313,7 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
 
  @app.route('/api/projects/<project_id>/settings/principles',methods=['PUT'])
  def update_project_principles(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   data=request.json or {}
@@ -316,5 +322,5 @@ def register_project_settings_routes(app:Flask,data_store:DataStore):
    advanced["principleOverrides"]=data["overrides"]
   if"enabledPrinciples" in data:
    advanced["enabledPrinciples"]=data["enabledPrinciples"]
-  data_store.update_project(project_id,{"advancedSettings":advanced})
+  project_service.update_project(project_id,{"advancedSettings":advanced})
   return jsonify({"overrides":advanced.get("principleOverrides",{}),"enabledPrinciples":advanced.get("enabledPrinciples")})

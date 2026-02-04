@@ -16,7 +16,8 @@ from .base import (
  AgentStatus,
 )
 from skills import create_skill_executor,SkillExecutor,SkillResult
-from config_loader import get_mock_skill_sequences,get_checkpoint_title_config,get_mock_handlers_config,get_mock_handler_config
+from config_loaders.mock_config import get_mock_skill_sequences,get_checkpoint_title_config
+from config_loaders.skill_config import get_mock_handlers_config,get_mock_handler_config
 
 
 @dataclass
@@ -28,8 +29,9 @@ class MockToolCall:
 
 class MockSkillRunner(AgentRunner):
 
- def __init__(self,data_store=None,**kwargs):
-  self.data_store=data_store
+ def __init__(self,trace_service=None,agent_service=None,**kwargs):
+  self._trace_service=trace_service
+  self._agent_service=agent_service
   self._simulation_speed=kwargs.get("simulation_speed",1.0)
   self._working_dir=kwargs.get("working_dir",None) or os.environ.get("PROJECT_WORKING_DIR","/tmp/toybox/projects")
 

@@ -1,11 +1,21 @@
 from flask import Flask,jsonify
-from config_loader import (
+from config_loaders.project_option_config import (
  get_project_options_config,
- get_file_extensions_config,
+ get_websocket_config,
+)
+from config_loaders.file_extension_config import get_file_extensions_config
+from config_loaders.agent_config import (
  get_agent_definitions_config,
- get_pricing_config,
  get_ui_phases,
  get_agent_service_map,
+ get_agent_roles,
+ get_agents_config,
+)
+from config_loaders.ai_provider_config import (
+ get_pricing_config,
+ get_service_labels,
+)
+from config_loaders.checkpoint_config import (
  get_status_labels,
  get_agent_status_labels,
  get_approval_status_labels,
@@ -13,11 +23,7 @@ from config_loader import (
  get_resolution_labels,
  get_role_labels,
  get_checkpoint_type_labels,
- get_agent_roles,
- get_agents_config,
- get_websocket_config,
 )
-from ai_config import get_service_labels
 
 
 def register_static_config_routes(app:Flask):

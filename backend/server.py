@@ -31,18 +31,14 @@ from handlers.system_prompt import register_system_prompt_routes
 from handlers.global_cost_settings import register_global_cost_settings_routes
 from handlers.cost_reports import register_cost_reports_routes
 from container import Container
-from datastore import DataStore
+from models.database import init_db
 from config import get_config
 from agents import create_agent_runner
 from asset_scanner import get_testdata_path
 from middleware.error_handler import register_error_handlers
 from middleware.rate_limiter import init_rate_limiter
 from middleware.logger import setup_logging,get_logger
-from services.agent_execution_service import AgentExecutionService
-from services.backup_service import BackupService
-from services.archive_service import ArchiveService
 from services.llm_job_queue import get_llm_job_queue
-from services.recovery_service import RecoveryService
 
 
 def create_app():
@@ -67,32 +63,30 @@ def create_app():
 
     app_wsgi=socketio.WSGIApp(sio,app)
 
+    db_path=os.path.join(os.path.dirname(__file__),"data","testdata.db" if config.agent.mode=="testdata" else"production.db")
+
     container=Container()
+    container.db_path.override(db_path)
+    container.sio.override(sio)
+    event_bus=container.event_bus()
     websocket_emitter=container.websocket_emitter()
     websocket_emitter.set_sio(sio)
 
-    data_store=DataStore(
-        project_service=container.project_service(),
-        agent_service=container.agent_service(),
-        workflow_service=container.workflow_service(),
-        simulation_service=container.simulation_service(),
-        intervention_service=container.intervention_service(),
-        trace_service=container.trace_service(),
-    )
-    data_store.start_simulation()
+    init_db()
+    container.project_service().init_sample_data_if_empty()
+    container.simulation_service().start_simulation()
 
-    db_path=os.path.join(os.path.dirname(__file__),"data","testdata.db" if config.agent.mode=="testdata" else"production.db")
     app.config['DB_PATH']=db_path
-    backup_service=BackupService(db_path=db_path,max_backups=10)
+    backup_service=container.backup_service()
     backup_service.create_startup_backup()
-    archive_service=ArchiveService(retention_days=30)
-    recovery_service=RecoveryService(data_store=data_store,sio=sio)
+    archive_service=container.archive_service()
+    recovery_service=container.recovery_service()
     recovery_result=recovery_service.recover_interrupted_agents()
     if recovery_result["recovered_agents"]:
         logger.info(f"Recovered {len(recovery_result['recovered_agents'])} interrupted agents")
 
     agent_runner=None
-    agent_execution_service=AgentExecutionService(data_store,sio)
+    agent_execution_service=container.agent_execution_service()
 
     llm_job_queue=None
     if config.agent.mode=="api":
@@ -103,7 +97,7 @@ def create_app():
             max_tokens=config.agent.max_tokens,
         )
         if agent_runner:
-            agent_runner.set_data_store(data_store)
+            agent_runner.set_services(container.trace_service(),container.agent_service())
             agent_execution_service.set_agent_runner(agent_runner)
             health_monitor=get_health_monitor()
             if hasattr(agent_runner,'set_health_monitor'):
@@ -113,22 +107,22 @@ def create_app():
         logger.info("LLM Job Queue started")
     logger.info(f"Agent mode: {config.agent.mode}")
 
-    register_project_routes(app,data_store,sio)
-    register_agent_routes(app,data_store,sio)
-    register_checkpoint_routes(app,data_store,sio)
-    register_metrics_routes(app,data_store,sio)
-    register_quality_settings_routes(app,data_store)
+    register_project_routes(app,container.project_service(),container.agent_service(),event_bus)
+    register_agent_routes(app,container.project_service(),container.agent_service(),container.trace_service(),event_bus)
+    register_checkpoint_routes(app,container.project_service(),container.workflow_service())
+    register_metrics_routes(app,container.project_service(),container.agent_service(),container.workflow_service(),event_bus)
+    register_quality_settings_routes(app,container.project_service(),container.workflow_service())
     register_static_config_routes(app)
-    register_auto_approval_routes(app,data_store)
-    register_intervention_routes(app,data_store,sio)
-    register_websocket_handlers(sio,data_store)
+    register_auto_approval_routes(app,container.project_service(),container.workflow_service())
+    register_intervention_routes(app,container.project_service(),container.agent_service(),container.intervention_service(),event_bus)
+    register_websocket_handlers(sio,container.project_service(),container.agent_service(),container.workflow_service(),container.intervention_service(),container.subscription_manager())
     register_navigator_routes(app,sio)
 
 
     upload_folder=os.path.join(os.path.dirname(__file__),'uploads')
     output_folder=os.path.join(os.path.dirname(__file__),'outputs')
-    register_file_upload_routes(app,data_store,upload_folder)
-    register_project_tree_routes(app,data_store,output_folder)
+    register_file_upload_routes(app,container.project_service(),container.intervention_service(),upload_folder)
+    register_project_tree_routes(app,container.project_service(),output_folder)
     register_ai_provider_routes(app)
     register_ai_service_routes(app)
     register_language_routes(app)
@@ -139,12 +133,12 @@ def create_app():
     health_monitor=get_health_monitor()
     health_monitor.set_socketio(sio)
     health_monitor.start()
-    register_project_settings_routes(app,data_store)
-    register_brushup_routes(app,data_store,sio)
-    register_trace_routes(app,data_store,sio)
-    register_recovery_routes(app,data_store)
+    register_project_settings_routes(app,container.project_service())
+    register_brushup_routes(app,container.project_service(),sio)
+    register_trace_routes(app,container.project_service(),container.agent_service(),container.trace_service(),sio)
+    register_recovery_routes(app,container.agent_service())
     register_openapi_routes(app)
-    register_system_prompt_routes(app,data_store)
+    register_system_prompt_routes(app,container.project_service(),container.agent_service(),container.trace_service())
     register_global_cost_settings_routes(app,sio)
     register_cost_reports_routes(app)
 
@@ -176,7 +170,6 @@ def create_app():
             logger.error(f"Error serving {filepath}: {e}")
             abort(404)
 
-    app.data_store=data_store
     app.agent_runner=agent_runner
     app.agent_execution_service=agent_execution_service
     app.backup_service=backup_service
@@ -195,8 +188,9 @@ def create_app():
 def run_server(app,sio,host='127.0.0.1',port=8765,debug=False):
     import eventlet
 
-    print(f"Server running at http://{host}:{port}")
-    print(f"WebSocket available at ws://{host}:{port}")
+    logger=get_logger()
+    logger.info(f"Server running at http://{host}:{port}")
+    logger.info(f"WebSocket available at ws://{host}:{port}")
 
     listener=eventlet.listen((host,port))
     eventlet.wsgi.server(listener,app.wsgi_app_wrapper,log_output=debug)

@@ -3,12 +3,8 @@ import json
 from typing import Dict,Any,List,Optional
 from dataclasses import dataclass
 
-from config_loader import (
- load_principles_for_agent,
- get_principle_settings,
- get_agents_config,
- get_output_requirements,
-)
+from config_loaders.principle_config import load_principles_for_agent,get_principle_settings
+from config_loaders.agent_config import get_agents_config,get_output_requirements
 from middleware.logger import get_logger
 
 
@@ -74,18 +70,16 @@ class PrincipleBasedQualityEvaluator:
  def __init__(self):
   self._settings=get_principle_settings()
 
- def _save_quality_insights(self,agent_type:str,project_id:Optional[str],qc_result,llm_result:Dict[str,Any],data_store=None)->None:
+ def _save_quality_insights(self,agent_type:str,project_id:Optional[str],qc_result,llm_result:Dict[str,Any],agent_service=None)->None:
   try:
-   if data_store is None:
-    from datastore import DataStore
-    data_store=DataStore()
-   ds=data_store
+   if agent_service is None:
+    return
    failed=llm_result.get("failed_criteria",[])
    suggestions=llm_result.get("improvement_suggestions",[])
    hallucinations=llm_result.get("hallucination_warnings",[])
    if failed:
     insight=f"[{agent_type}] 頻出の不合格基準: {', '.join(failed[:5])}"
-    ds.create_agent_memory(
+    agent_service.create_agent_memory(
      category="quality_insight",
      agent_type=agent_type,
      content=insight,
@@ -94,7 +88,7 @@ class PrincipleBasedQualityEvaluator:
     )
    if hallucinations:
     insight=f"[{agent_type}] Hallucination傾向: {'; '.join(hallucinations[:3])}"
-    ds.create_agent_memory(
+    agent_service.create_agent_memory(
      category="hallucination_pattern",
      agent_type=agent_type,
      content=insight,
@@ -103,7 +97,7 @@ class PrincipleBasedQualityEvaluator:
     )
    if suggestions and not qc_result.passed:
     insight=f"[{agent_type}] 改善ポイント: {'; '.join(suggestions[:3])}"
-    ds.create_agent_memory(
+    agent_service.create_agent_memory(
      category="improvement_pattern",
      agent_type=agent_type,
      content=insight,
@@ -113,7 +107,7 @@ class PrincipleBasedQualityEvaluator:
   except Exception as e:
    get_logger().error(f"QualityEvaluator: メモリ保存失敗: {e}",exc_info=True)
 
- async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None,data_store=None)->Dict[str,Any]:
+ async def evaluate(self,output:Dict[str,Any],agent_type:str,project_id:Optional[str]=None,enabled_principles:Optional[List[str]]=None,quality_settings:Optional[Dict[str,Any]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None,agent_service=None)->Dict[str,Any]:
   from .api_runner import QualityCheckResult
   content=output.get("content","")
   settings=dict(self._settings)
@@ -172,7 +166,7 @@ class PrincipleBasedQualityEvaluator:
     strengths=llm_result.get("strengths",[]),
    )
    if not passed:
-    self._save_quality_insights(agent_type,project_id,qc,llm_result,data_store=data_store)
+    self._save_quality_insights(agent_type,project_id,qc,llm_result,agent_service=agent_service)
    return qc
   except Exception as e:
    get_logger().error(f"QualityEvaluator: LLM評価失敗、ルールベースにフォールバック: {e}",exc_info=True)

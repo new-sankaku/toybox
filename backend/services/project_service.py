@@ -13,9 +13,9 @@ from repositories import (
     AssetRepository,
     MetricsRepository,
 )
-from ai_config import build_default_ai_services
-from config_loader import (
-    get_auto_approval_rules as get_config_auto_approval_rules,
+from config_loaders.ai_provider_config import build_default_ai_services
+from config_loaders.checkpoint_config import get_auto_approval_rules as get_config_auto_approval_rules
+from config_loaders.agent_config import (
     get_ui_phases,
     get_agent_definitions,
     get_generation_type_for_agent,
@@ -43,7 +43,7 @@ class ProjectService(BaseService):
         now=datetime.now()
         proj_id="proj-001"
         from models.tables import Project,Agent,Metric
-        from config_loader import get_auto_approval_rules as get_config_auto_approval_rules_fn
+        from config_loaders.checkpoint_config import get_auto_approval_rules as get_config_auto_approval_rules_fn
 
         project=Project(
             id=proj_id,

@@ -9,14 +9,15 @@ from .base import (
     AgentType,
     AgentStatus,
 )
-from config_loader import get_mock_content,get_checkpoint_title_config,get_provider_default_model
+from config_loaders.mock_config import get_mock_content,get_checkpoint_title_config
+from config_loaders.ai_provider_config import get_provider_default_model
 from middleware.logger import get_logger
 
 
 class MockAgentRunner(AgentRunner):
 
-    def __init__(self,data_store=None,**kwargs):
-        self._data_store=data_store
+    def __init__(self,trace_service=None,**kwargs):
+        self._trace_service=trace_service
         self._simulation_speed=kwargs.get("simulation_speed",1.0)
 
     async def run_agent(self,context:AgentContext)->AgentOutput:
@@ -61,10 +62,10 @@ class MockAgentRunner(AgentRunner):
         trace_id=None
         start_time=datetime.now()
 
-        if self._data_store:
+        if self._trace_service:
             try:
                 model=get_provider_default_model("anthropic")
-                trace=self._data_store.create_trace(
+                trace=self._trace_service.create_trace(
                     project_id=context.project_id,
                     agent_id=context.agent_id,
                     agent_type=agent_type_str,
@@ -117,10 +118,10 @@ class MockAgentRunner(AgentRunner):
         content=output.get("content","")
         summary=content[:100] if content else f"{agent_type_str}のモック出力"
 
-        if self._data_store and trace_id:
+        if self._trace_service and trace_id:
             try:
                 duration_ms=int((datetime.now()-start_time).total_seconds()*1000)
-                self._data_store.complete_trace(
+                self._trace_service.complete_trace(
                     trace_id=trace_id,
                     llm_response=content[:500] if content else"",
                     output_data=output,

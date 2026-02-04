@@ -188,7 +188,7 @@ class AIProvider(ABC):
 
  @classmethod
  def load_models_from_config(cls,provider_id:str)->List["ModelInfo"]:
-  from config_loader import get_provider_models
+  from config_loaders.ai_provider_config import get_provider_models
   models_config=get_provider_models(provider_id)
   result=[]
   for model in models_config:
@@ -208,10 +208,10 @@ class AIProvider(ABC):
 
  @classmethod
  def get_test_model_from_config(cls,provider_id:str)->str:
-  from config_loader import get_provider_test_model
+  from config_loaders.ai_provider_config import get_provider_test_model
   return get_provider_test_model(provider_id)
 
  @classmethod
  def get_default_model_from_config(cls,provider_id:str)->str:
-  from config_loader import get_provider_default_model
+  from config_loaders.ai_provider_config import get_provider_default_model
   return get_provider_default_model(provider_id)

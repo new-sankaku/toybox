@@ -1,11 +1,11 @@
 import asyncio
 from flask import Flask,jsonify,request
-from datastore import DataStore
+from events.events import AgentPaused,AgentResumed,AgentSnapshotRestored
 from middleware.error_handler import NotFoundError,ValidationError,ApiError
 from middleware.rate_limiter import rate_limit
 
 
-def register_agent_routes(app:Flask,data_store:DataStore,sio):
+def register_agent_routes(app:Flask,project_service,agent_service,trace_service,event_bus):
  _execution_service=None
 
  def _get_execution_service():
@@ -17,42 +17,42 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
 
  @app.route('/api/projects/<project_id>/agents',methods=['GET'])
  def list_project_agents(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    raise NotFoundError("Project",project_id)
   include_workers=request.args.get("includeWorkers","true").lower()=="true"
-  agents=data_store.get_agents_by_project(project_id,include_workers=include_workers)
+  agents=agent_service.get_agents_by_project(project_id,include_workers=include_workers)
   return jsonify(agents)
 
  @app.route('/api/projects/<project_id>/agents/leaders',methods=['GET'])
  def list_project_leaders(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    raise NotFoundError("Project",project_id)
-  agents=data_store.get_agents_by_project(project_id,include_workers=False)
+  agents=agent_service.get_agents_by_project(project_id,include_workers=False)
   return jsonify(agents)
 
  @app.route('/api/agents/<agent_id>',methods=['GET'])
  def get_agent(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   return jsonify(agent)
 
  @app.route('/api/agents/<agent_id>/workers',methods=['GET'])
  def list_agent_workers(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  workers=data_store.get_workers_by_parent(agent_id)
+  workers=agent_service.get_workers_by_parent(agent_id)
   return jsonify(workers)
 
  @app.route('/api/agents/<agent_id>/logs',methods=['GET'])
  def get_agent_logs(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  logs=data_store.get_agent_logs(agent_id)
+  logs=agent_service.get_agent_logs(agent_id)
   return jsonify(logs)
 
  @app.route('/api/agents/<agent_id>/execute',methods=['POST'])
@@ -61,7 +61,7 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   execution_service=_get_execution_service()
   if not execution_service:
    raise ApiError("Agent execution service not available",code="SERVICE_UNAVAILABLE",status_code=503)
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   project_id=agent.get("projectId")
@@ -85,7 +85,7 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   execution_service=_get_execution_service()
   if not execution_service:
    raise ApiError("Agent execution service not available",code="SERVICE_UNAVAILABLE",status_code=503)
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   project_id=agent.get("projectId")
@@ -111,7 +111,7 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
   execution_service=_get_execution_service()
   if not execution_service:
    raise ApiError("Agent execution service not available",code="SERVICE_UNAVAILABLE",status_code=503)
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   cancelled=execution_service.cancel_agent(agent_id)
@@ -122,13 +122,13 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
 
  @app.route('/api/agents/<agent_id>/retry',methods=['POST'])
  def retry_agent(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   retryable_statuses={"failed","interrupted"}
   if agent.get("status") not in retryable_statuses:
    raise ValidationError(f"Agent status must be one of {retryable_statuses} to retry","status")
-  result=data_store.retry_agent(agent_id)
+  result=agent_service.retry_agent(agent_id)
   if result:
    return jsonify({"success":True,"agent":result})
   else:
@@ -136,83 +136,70 @@ def register_agent_routes(app:Flask,data_store:DataStore,sio):
 
  @app.route('/api/agents/<agent_id>/pause',methods=['POST'])
  def pause_agent(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   pausable_statuses={"running","waiting_approval"}
   if agent.get("status") not in pausable_statuses:
    raise ValidationError(f"Agent status must be one of {pausable_statuses} to pause","status")
-  result=data_store.pause_agent(agent_id)
+  result=agent_service.pause_agent(agent_id)
   if result:
-   sio.emit('agent:paused',{
-    "agentId":agent_id,
-    "projectId":result["projectId"],
-    "agent":result
-   },room=f"project:{result['projectId']}")
+   event_bus.publish(AgentPaused(project_id=result["projectId"],agent_id=agent_id,agent=result))
    return jsonify({"success":True,"agent":result})
   else:
    raise ApiError("Failed to pause agent",code="PAUSE_ERROR",status_code=500)
 
  @app.route('/api/agents/<agent_id>/resume',methods=['POST'])
  def resume_agent(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
   resumable_statuses={"paused","waiting_response"}
   if agent.get("status") not in resumable_statuses:
    raise ValidationError(f"Agent status must be one of {resumable_statuses} to resume","status")
-  result=data_store.resume_agent(agent_id)
+  result=agent_service.resume_agent(agent_id)
   if result:
-   sio.emit('agent:resumed',{
-    "agentId":agent_id,
-    "projectId":result["projectId"],
-    "agent":result
-   },room=f"project:{result['projectId']}")
+   event_bus.publish(AgentResumed(project_id=result["projectId"],agent_id=agent_id,agent=result))
    return jsonify({"success":True,"agent":result})
   else:
    raise ApiError("Failed to resume agent",code="RESUME_ERROR",status_code=500)
 
  @app.route('/api/projects/<project_id>/agents/retryable',methods=['GET'])
  def get_retryable_agents(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    raise NotFoundError("Project",project_id)
-  agents=data_store.get_retryable_agents(project_id)
+  agents=agent_service.get_retryable_agents(project_id)
   return jsonify(agents)
 
  @app.route('/api/projects/<project_id>/agents/interrupted',methods=['GET'])
  def get_interrupted_agents(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    raise NotFoundError("Project",project_id)
-  agents=data_store.get_interrupted_agents(project_id)
+  agents=agent_service.get_interrupted_agents(project_id)
   return jsonify(agents)
 
  @app.route('/api/agents/<agent_id>/snapshots',methods=['GET'])
  def get_agent_snapshots(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  snapshots=data_store.get_workflow_snapshots_by_agent(agent_id)
+  snapshots=trace_service.get_workflow_snapshots_by_agent(agent_id)
   return jsonify(snapshots)
 
  @app.route('/api/agents/<agent_id>/snapshots/<snapshot_id>/restore',methods=['POST'])
  def restore_agent_snapshot(agent_id:str,snapshot_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
-  snapshot=data_store.get_workflow_snapshot(snapshot_id)
+  snapshot=trace_service.get_workflow_snapshot(snapshot_id)
   if not snapshot:
    raise NotFoundError("Snapshot",snapshot_id)
   if snapshot.get("agentId")!=agent_id:
    raise ValidationError("Snapshot does not belong to this agent","snapshotId")
-  result=data_store.restore_workflow_snapshot(snapshot_id)
+  result=trace_service.restore_workflow_snapshot(snapshot_id)
   if result:
-   sio.emit('agent:snapshot_restored',{
-    "agentId":agent_id,
-    "projectId":agent["projectId"],
-    "snapshotId":snapshot_id,
-    "snapshot":result,
-   },room=f"project:{agent['projectId']}")
+   event_bus.publish(AgentSnapshotRestored(project_id=agent["projectId"],agent_id=agent_id,snapshot_id=snapshot_id,snapshot=result))
    return jsonify({"success":True,"snapshot":result})
   raise ApiError("Failed to restore snapshot",code="RESTORE_ERROR",status_code=500)

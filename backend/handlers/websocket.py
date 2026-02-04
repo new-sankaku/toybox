@@ -1,5 +1,9 @@
-from datastore import DataStore
 from middleware.logger import get_logger
+from services.project_service import ProjectService
+from services.agent_service import AgentService
+from services.workflow_service import WorkflowService
+from services.intervention_service import InterventionService
+from services.subscription_manager import SubscriptionManager
 
 
 def broadcast_navigator_message(sio,project_id:str,speaker:str,text:str,priority:str="normal"):
@@ -28,7 +32,7 @@ def broadcast_navigator_message(sio,project_id:str,speaker:str,text:str,priority
     get_logger().info(f"Navigator message sent to {project_id}: {text[:50]}...")
 
 
-def register_websocket_handlers(sio,data_store:DataStore):
+def register_websocket_handlers(sio,project_service:ProjectService,agent_service:AgentService,workflow_service:WorkflowService,intervention_service:InterventionService,subscription_manager:SubscriptionManager):
 
     @sio.event
     def connect(sid,environ):
@@ -41,14 +45,14 @@ def register_websocket_handlers(sio,data_store:DataStore):
     @sio.event
     def disconnect(sid):
         get_logger().info(f"WebSocket client disconnected: {sid}")
-        data_store.remove_all_subscriptions(sid)
+        subscription_manager.remove_all_subscriptions(sid)
 
     @sio.on('subscribe:project')
     def subscribe_project(sid,data):
         project_id=data.get('projectId') if isinstance(data,dict) else data
         get_logger().debug(f"WebSocket client {sid} subscribing to project: {project_id}")
 
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             sio.emit('error:state',{
                 "message":f"Project not found: {project_id}",
@@ -56,13 +60,13 @@ def register_websocket_handlers(sio,data_store:DataStore):
             },room=sid)
             return
 
-        data_store.add_subscription(project_id,sid)
+        subscription_manager.add_subscription(project_id,sid)
         sio.enter_room(sid,f"project:{project_id}")
-        agents=data_store.get_agents_by_project(project_id)
-        checkpoints=data_store.get_checkpoints_by_project(project_id)
-        interventions=data_store.get_interventions_by_project(project_id)
-        metrics=data_store.get_project_metrics(project_id)
-        logs=data_store.get_system_logs(project_id)
+        agents=agent_service.get_agents_by_project(project_id)
+        checkpoints=workflow_service.get_checkpoints_by_project(project_id)
+        interventions=intervention_service.get_interventions_by_project(project_id)
+        metrics=project_service.get_project_metrics(project_id)
+        logs=project_service.get_system_logs(project_id)
 
         sio.emit('connection:state_sync',{
             "project":project,
@@ -80,7 +84,7 @@ def register_websocket_handlers(sio,data_store:DataStore):
         project_id=data.get('projectId') if isinstance(data,dict) else data
         get_logger().debug(f"WebSocket client {sid} unsubscribing from project: {project_id}")
 
-        data_store.remove_subscription(project_id,sid)
+        subscription_manager.remove_subscription(project_id,sid)
         sio.leave_room(sid,f"project:{project_id}")
 
     @sio.on('checkpoint:resolve')
@@ -98,7 +102,7 @@ def register_websocket_handlers(sio,data_store:DataStore):
             },room=sid)
             return
 
-        checkpoint=data_store.resolve_checkpoint(checkpoint_id,resolution,feedback)
+        checkpoint=workflow_service.resolve_checkpoint(checkpoint_id,resolution,feedback)
 
         if not checkpoint:
             sio.emit('error:state',{

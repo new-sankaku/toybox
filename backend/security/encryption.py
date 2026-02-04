@@ -18,6 +18,8 @@ def _get_encryption_key()->bytes:
 
 
 def _generate_default_key()->bytes:
+ from middleware.logger import get_logger
+ get_logger().warning("ENCRYPTION_KEY is not set. Using default key. Set ENCRYPTION_KEY environment variable for production.")
  import hashlib
  seed="toybox-default-encryption-key-2024"
  return hashlib.sha256(seed.encode()).digest()

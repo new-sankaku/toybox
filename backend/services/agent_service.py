@@ -12,7 +12,8 @@ from repositories import (
 )
 from repositories.workflow_snapshot import WorkflowSnapshotRepository
 from repositories.agent_memory import AgentMemoryRepository
-from config_loader import get_workflow_dependencies,get_initial_task
+from config_loaders.workflow_config import get_workflow_dependencies
+from config_loaders.message_config import get_initial_task
 from events.event_bus import EventBus
 from events.events import AgentStarted,AgentRetried
 from services.base_service import BaseService

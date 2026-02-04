@@ -48,7 +48,7 @@ class ProviderRegistry:
  @classmethod
  def list_providers(cls)->List[Dict[str,Any]]:
   """登録済みプロバイダー一覧"""
-  from ai_config import get_providers as get_yaml_providers
+  from config_loaders.ai_provider_config import get_providers as get_yaml_providers
   yaml_providers=get_yaml_providers()
   result=[]
   for provider_id,provider_class in cls._providers.items():

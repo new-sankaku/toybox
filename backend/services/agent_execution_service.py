@@ -8,13 +8,23 @@ from agents.api_runner import ApiAgentRunner,LeaderWorkerOrchestrator
 from agents.exceptions import ProviderUnavailableError,MaxRetriesExceededError,TokenBudgetExceededError
 from agents.retry_strategy import wait_for_provider_available
 from providers.health_monitor import get_health_monitor
-from config_loader import get_workflow_dependencies
+from config_loaders.workflow_config import get_workflow_dependencies
 from middleware.logger import get_logger
+from events.events import (
+    AgentStarted,AgentProgress,AgentCompleted,AgentFailed,
+    AgentCreated,AgentWaitingResponse,
+    CheckpointCreated,InterventionAcknowledged,
+)
 
 
 class AgentExecutionService:
- def __init__(self,data_store,sio=None):
-  self._data_store=data_store
+ def __init__(self,project_service,agent_service,workflow_service,intervention_service,trace_service,event_bus=None,sio=None):
+  self._project_service=project_service
+  self._agent_service=agent_service
+  self._workflow_service=workflow_service
+  self._intervention_service=intervention_service
+  self._trace_service=trace_service
+  self._event_bus=event_bus
   self._sio=sio
   self._agent_runner:Optional[ApiAgentRunner]=None
   self._running_agents:Dict[str,bool]={}
@@ -26,7 +36,7 @@ class AgentExecutionService:
   try:
    from skills.registry import get_skill_registry,register_service_skills
    registry=get_skill_registry()
-   register_service_skills(registry,self._data_store,self,self._sio)
+   register_service_skills(registry,self._agent_service,self._trace_service,self,self._event_bus)
    self._logger.info("Service-dependent skills registered (agent_output_query, spawn_worker)")
   except Exception as e:
    self._logger.warning(f"Failed to register service skills: {e}")
@@ -34,7 +44,7 @@ class AgentExecutionService:
  def set_agent_runner(self,runner:ApiAgentRunner)->None:
   self._agent_runner=runner
   if runner:
-   runner.set_data_store(self._data_store)
+   runner.set_services(self._trace_service,self._agent_service)
    runner.set_status_callback(self._on_agent_status_change)
 
  def _on_agent_status_change(self,agent_id:str,status:AgentStatus)->None:
@@ -51,7 +61,7 @@ class AgentExecutionService:
    AgentStatus.COMPLETED:"completed",
    AgentStatus.FAILED:"failed",
   }
-  self._data_store.update_agent(agent_id,{"status":status_map.get(status,"running")})
+  self._agent_service.update_agent(agent_id,{"status":status_map.get(status,"running")})
 
  def _emit_event(self,event:str,data:Dict,project_id:str)->None:
   if self._sio:
@@ -64,11 +74,11 @@ class AgentExecutionService:
   if not self._agent_runner:
    self._logger.warning(f"execute_agent called but agent_runner not configured: agent_id={agent_id}")
    return {"success":False,"error":"Agent runner not configured"}
-  agent=self._data_store.get_agent(agent_id)
+  agent=self._agent_service.get_agent(agent_id)
   if not agent:
    self._logger.warning(f"execute_agent: agent not found: agent_id={agent_id}")
    return {"success":False,"error":"Agent not found"}
-  project=self._data_store.get_project(project_id)
+  project=self._project_service.get_project(project_id)
   if not project:
    self._logger.warning(f"execute_agent: project not found: project_id={project_id}")
    return {"success":False,"error":"Project not found"}
@@ -79,17 +89,14 @@ class AgentExecutionService:
    agent_type=AgentType(agent["type"])
   except ValueError:
    return {"success":False,"error":f"Unknown agent type: {agent['type']}"}
-  self._data_store.update_agent(agent_id,{
+  self._agent_service.update_agent(agent_id,{
    "status":"running",
    "progress":0,
    "startedAt":datetime.now().isoformat(),
    "currentTask":"初期化中"
   })
-  self._emit_event("agent:started",{
-   "agentId":agent_id,
-   "projectId":project_id,
-   "agent":self._data_store.get_agent(agent_id)
-  },project_id)
+  if self._event_bus:
+   self._event_bus.publish(AgentStarted(project_id=project_id,agent_id=agent_id,agent=self._agent_service.get_agent(agent_id)))
   self._emit_pool_speech(agent_id,project_id,"started")
   advanced_settings=project.get("advancedSettings",{})
   agent_config=dict(project.get("config",{}))
@@ -115,7 +122,7 @@ class AgentExecutionService:
     health=health_monitor.get_health_status(provider_id)
     if health and not health.available:
      def on_waiting(attempt:int)->None:
-      self._data_store.update_agent(agent_id,{
+      self._agent_service.update_agent(agent_id,{
        "status":"waiting_provider",
        "currentTask":f"API接続待機中 ({provider_id}, 確認{attempt}回目)",
       })
@@ -127,15 +134,12 @@ class AgentExecutionService:
       },project_id)
       self._emit_pool_speech(agent_id,project_id,"waiting_provider")
      def on_recovered(attempt:int)->None:
-      self._data_store.update_agent(agent_id,{
+      self._agent_service.update_agent(agent_id,{
        "status":"running",
        "currentTask":"API接続回復、処理再開",
       })
-      self._emit_event("agent:progress",{
-       "agentId":agent_id,
-       "projectId":project_id,
-       "message":f"API接続回復 ({attempt}回の確認後)",
-      },project_id)
+      if self._event_bus:
+       self._event_bus.publish(AgentProgress(project_id=project_id,agent_id=agent_id,progress=0,current_task="",message=f"API接続回復 ({attempt}回の確認後)"))
      await wait_for_provider_available(
       health_monitor,
       provider_id,
@@ -146,63 +150,49 @@ class AgentExecutionService:
    output=await self._agent_runner.run_agent(context)
    if output.status==AgentStatus.COMPLETED:
     if output.generation_counts:
-     self._data_store.accumulate_generation_counts(project_id,output.generation_counts)
-    self._data_store.update_agent(agent_id,{
+     self._project_service.accumulate_generation_counts(project_id,output.generation_counts)
+    self._agent_service.update_agent(agent_id,{
      "status":"completed",
      "progress":100,
      "completedAt":datetime.now().isoformat(),
      "currentTask":None,
      "tokensUsed":output.tokens_used,
     })
-    self._data_store.refresh_project_metrics(project_id)
-    self._emit_event("agent:completed",{
-     "agentId":agent_id,
-     "projectId":project_id,
-     "agent":self._data_store.get_agent(agent_id)
-    },project_id)
-    started_agents=self._data_store.start_next_agents(project_id)
+    self._project_service.refresh_project_metrics(project_id)
+    if self._event_bus:
+     self._event_bus.publish(AgentCompleted(project_id=project_id,agent_id=agent_id,agent=self._agent_service.get_agent(agent_id)))
+    started_agents=self._agent_service.start_next_agents(project_id)
     if started_agents:
      self._logger.info(f"Started {len(started_agents)} next agents after {agent_id} completed")
     return {"success":True,"output":output.output}
    else:
-    self._data_store.update_agent(agent_id,{
+    self._agent_service.update_agent(agent_id,{
      "status":"failed",
      "error":output.error,
      "currentTask":None,
     })
-    self._emit_event("agent:failed",{
-     "agentId":agent_id,
-     "projectId":project_id,
-     "error":output.error
-    },project_id)
+    if self._event_bus:
+     self._event_bus.publish(AgentFailed(project_id=project_id,agent_id=agent_id,reason=output.error or""))
     return {"success":False,"error":output.error}
   except TokenBudgetExceededError as e:
    self._logger.warning(f"token budget exceeded: agent_id={agent_id} project_id={project_id} used={e.used} limit={e.limit}")
-   self._data_store.update_agent(agent_id,{
+   self._agent_service.update_agent(agent_id,{
     "status":"failed",
     "error":str(e),
     "currentTask":None,
    })
-   self._emit_event("agent:budget_exceeded",{
-    "agentId":agent_id,
-    "projectId":project_id,
-    "used":e.used,
-    "limit":e.limit,
-    "error":str(e),
-   },project_id)
+   if self._event_bus:
+    self._event_bus.publish(AgentFailed(project_id=project_id,agent_id=agent_id,reason=str(e)))
    return {"success":False,"error":str(e)}
   except Exception as e:
    self._logger.error(f"execute_agent failed: agent_id={agent_id} project_id={project_id} error={e}",exc_info=True)
-   self._data_store.update_agent(agent_id,{
+   self._agent_service.update_agent(agent_id,{
     "status":"failed",
     "error":str(e),
     "currentTask":None,
    })
-   self._emit_event("agent:failed",{
-    "agentId":agent_id,
-    "projectId":project_id,
-    "error":str(e)
-   },project_id)
+   if self._event_bus:
+    self._event_bus.publish(AgentFailed(project_id=project_id,agent_id=agent_id,reason=str(e)))
    return {"success":False,"error":str(e)}
   finally:
    with self._lock:
@@ -215,17 +205,17 @@ class AgentExecutionService:
  )->Dict[str,Any]:
   if not self._agent_runner:
    return {"success":False,"error":"Agent runner not configured"}
-  agent=self._data_store.get_agent(leader_agent_id)
+  agent=self._agent_service.get_agent(leader_agent_id)
   if not agent:
    return {"success":False,"error":"Leader agent not found"}
-  project=self._data_store.get_project(project_id)
+  project=self._project_service.get_project(project_id)
   if not project:
    return {"success":False,"error":"Project not found"}
   try:
    agent_type=AgentType(agent["type"])
   except ValueError:
    return {"success":False,"error":f"Unknown agent type: {agent['type']}"}
-  quality_settings=self._data_store.get_quality_settings(project_id)
+  quality_settings=self._workflow_service.get_quality_settings(project_id)
   quality_dict={k:{"enabled":v.enabled,"maxRetries":v.max_retries} for k,v in quality_settings.items()}
   orchestrator=LeaderWorkerOrchestrator(
    agent_runner=self._agent_runner,
@@ -236,17 +226,14 @@ class AgentExecutionService:
    on_worker_status=lambda w,s,d:self._on_worker_status(project_id,w,s,d),
    on_worker_speech=lambda wid,msg:self._on_speech(wid,project_id,msg,"llm"),
   )
-  self._data_store.update_agent(leader_agent_id,{
+  self._agent_service.update_agent(leader_agent_id,{
    "status":"running",
    "progress":0,
    "startedAt":datetime.now().isoformat(),
    "currentTask":"Leader実行開始"
   })
-  self._emit_event("agent:started",{
-   "agentId":leader_agent_id,
-   "projectId":project_id,
-   "agent":self._data_store.get_agent(leader_agent_id)
-  },project_id)
+  if self._event_bus:
+   self._event_bus.publish(AgentStarted(project_id=project_id,agent_id=leader_agent_id,agent=self._agent_service.get_agent(leader_agent_id)))
   advanced_settings_leader=project.get("advancedSettings",{})
   leader_config=dict(project.get("config",{}))
   leader_config["advancedSettings"]=advanced_settings_leader
@@ -270,7 +257,7 @@ class AgentExecutionService:
     health=health_monitor.get_health_status(provider_id)
     if health and not health.available:
      def on_waiting_leader(attempt:int)->None:
-      self._data_store.update_agent(leader_agent_id,{
+      self._agent_service.update_agent(leader_agent_id,{
        "status":"waiting_provider",
        "currentTask":f"API接続待機中 ({provider_id}, 確認{attempt}回目)",
       })
@@ -281,7 +268,7 @@ class AgentExecutionService:
        "attempt":attempt,
       },project_id)
      def on_recovered_leader(attempt:int)->None:
-      self._data_store.update_agent(leader_agent_id,{
+      self._agent_service.update_agent(leader_agent_id,{
        "status":"running",
        "currentTask":"API接続回復、処理再開",
       })
@@ -294,35 +281,29 @@ class AgentExecutionService:
      )
    results=await orchestrator.run_leader_with_workers(context)
    if results.get("human_review_required"):
-    self._data_store.update_agent(leader_agent_id,{
+    self._agent_service.update_agent(leader_agent_id,{
      "status":"waiting_approval",
      "currentTask":"レビュー待ち",
     })
    else:
-    self._data_store.update_agent(leader_agent_id,{
+    self._agent_service.update_agent(leader_agent_id,{
      "status":"completed",
      "progress":100,
      "completedAt":datetime.now().isoformat(),
      "currentTask":None,
     })
-    self._emit_event("agent:completed",{
-     "agentId":leader_agent_id,
-     "projectId":project_id,
-     "agent":self._data_store.get_agent(leader_agent_id)
-    },project_id)
+    if self._event_bus:
+     self._event_bus.publish(AgentCompleted(project_id=project_id,agent_id=leader_agent_id,agent=self._agent_service.get_agent(leader_agent_id)))
    return {"success":True,"results":results}
   except Exception as e:
    self._logger.error(f"execute_leader_with_workers failed: leader_id={leader_agent_id} project_id={project_id} error={e}",exc_info=True)
-   self._data_store.update_agent(leader_agent_id,{
+   self._agent_service.update_agent(leader_agent_id,{
     "status":"failed",
     "error":str(e),
     "currentTask":None,
    })
-   self._emit_event("agent:failed",{
-    "agentId":leader_agent_id,
-    "projectId":project_id,
-    "error":str(e)
-   },project_id)
+   if self._event_bus:
+    self._event_bus.publish(AgentFailed(project_id=project_id,agent_id=leader_agent_id,reason=str(e)))
    return {"success":False,"error":str(e)}
   finally:
    with self._lock:
@@ -336,7 +317,7 @@ class AgentExecutionService:
  def _can_start_agent(self,project_id:str,agent_type:str)->bool:
   workflow_deps=get_workflow_dependencies()
   dependencies=workflow_deps.get(agent_type,[])
-  agents=self._data_store.get_agents_by_project(project_id)
+  agents=self._agent_service.get_agents_by_project(project_id)
   for dep_type in dependencies:
    dep_agent=next((a for a in agents if a["type"]==dep_type),None)
    if not dep_agent or dep_agent["status"]!="completed":
@@ -346,12 +327,12 @@ class AgentExecutionService:
  def _get_previous_outputs(self,project_id:str,agent_type:str)->Dict[str,Any]:
   workflow_deps=get_workflow_dependencies()
   dependencies=workflow_deps.get(agent_type,[])
-  agents=self._data_store.get_agents_by_project(project_id)
+  agents=self._agent_service.get_agents_by_project(project_id)
   outputs={}
   for dep_type in dependencies:
    dep_agent=next((a for a in agents if a["type"]==dep_type),None)
    if dep_agent and dep_agent["status"]=="completed":
-    traces=self._data_store.get_traces_by_agent(dep_agent["id"])
+    traces=self._trace_service.get_traces_by_agent(dep_agent["id"])
     if traces:
      latest=traces[0]
      entry={"content":latest.get("llmResponse","")}
@@ -362,42 +343,31 @@ class AgentExecutionService:
   return outputs
 
  def _on_progress(self,agent_id:str,project_id:str,progress:int,task:str)->None:
-  self._data_store.update_agent(agent_id,{
+  self._agent_service.update_agent(agent_id,{
    "progress":progress,
    "currentTask":task,
   })
-  self._emit_event("agent:progress",{
-   "agentId":agent_id,
-   "projectId":project_id,
-   "progress":progress,
-   "currentTask":task,
-  },project_id)
+  if self._event_bus:
+   self._event_bus.publish(AgentProgress(project_id=project_id,agent_id=agent_id,progress=progress,current_task=task))
   self._check_pending_interventions(agent_id,project_id)
 
  def _check_pending_interventions(self,agent_id:str,project_id:str)->None:
-  pending=self._data_store.get_pending_interventions_for_agent(agent_id)
+  pending=self._intervention_service.get_pending_interventions_for_agent(agent_id)
   if not pending:
    return
-  agent=self._data_store.get_agent(agent_id)
+  agent=self._agent_service.get_agent(agent_id)
   if not agent or agent.get("status")!="running":
    return
   for intervention in pending:
-   self._data_store.acknowledge_intervention(intervention["id"])
-   self._emit_event("intervention:acknowledged",{
-    "interventionId":intervention["id"],
-    "projectId":project_id,
-    "agentId":agent_id,
-   },project_id)
-  self._data_store.update_agent(agent_id,{
+   acked=self._intervention_service.acknowledge_intervention(intervention["id"])
+   if self._event_bus:
+    self._event_bus.publish(InterventionAcknowledged(project_id=project_id,intervention_id=intervention["id"],intervention=acked))
+  self._agent_service.update_agent(agent_id,{
    "status":"waiting_response",
    "currentTask":"連絡を確認中",
   })
-  self._emit_event("agent:waiting_response",{
-   "agentId":agent_id,
-   "projectId":project_id,
-   "agent":self._data_store.get_agent(agent_id),
-   "interventionCount":len(pending),
-  },project_id)
+  if self._event_bus:
+   self._event_bus.publish(AgentWaitingResponse(project_id=project_id,agent_id=agent_id,agent=self._agent_service.get_agent(agent_id)))
 
  def _on_speech(self,agent_id:str,project_id:str,message:str,source:str="llm")->None:
   self._emit_event("agent:speech",{
@@ -410,7 +380,7 @@ class AgentExecutionService:
 
  def _emit_pool_speech(self,agent_id:str,project_id:str,condition:str)->None:
   try:
-   agent=self._data_store.get_agent(agent_id)
+   agent=self._agent_service.get_agent(agent_id)
    if not agent:
     return
    agent_type=agent.get("type","")
@@ -422,7 +392,7 @@ class AgentExecutionService:
    self._logger.error(f"_emit_pool_speech error: {e}",exc_info=True)
 
  def _on_log(self,agent_id:str,project_id:str,level:str,message:str)->None:
-  self._data_store.add_agent_log(agent_id,level,message)
+  self._agent_service.add_agent_log(agent_id,level,message)
   self._emit_event("agent:log",{
    "agentId":agent_id,
    "entry":{
@@ -434,29 +404,22 @@ class AgentExecutionService:
   },project_id)
 
  def _on_checkpoint(self,agent_id:str,project_id:str,cp_type:str,data:Dict)->None:
-  self._data_store.create_checkpoint(project_id,agent_id,{
+  checkpoint=self._workflow_service.create_checkpoint(project_id,agent_id,{
    "type":cp_type,
    "title":data.get("title","レビュー"),
    "description":data.get("description",""),
    "output":data.get("output",{}),
   })
-  self._data_store.update_agent(agent_id,{"status":"waiting_approval"})
-  self._emit_event("checkpoint:created",{
-   "projectId":project_id,
-   "agentId":agent_id,
-   "checkpoint":data,
-  },project_id)
+  self._agent_service.update_agent(agent_id,{"status":"waiting_approval"})
+  if self._event_bus:
+   self._event_bus.publish(CheckpointCreated(project_id=project_id,checkpoint_id=checkpoint.get("id",""),agent_id=agent_id,checkpoint=checkpoint))
   self._emit_pool_speech(agent_id,project_id,"waiting_approval")
 
  def _on_worker_created(self,project_id:str,parent_agent_id:str,worker_type:str,task:str)->str:
-  worker=self._data_store.create_worker_agent(project_id,parent_agent_id,worker_type,task)
+  worker=self._agent_service.create_worker_agent(project_id,parent_agent_id,worker_type,task)
   worker_id=worker["id"]
-  self._emit_event("agent:created",{
-   "agentId":worker_id,
-   "projectId":project_id,
-   "parentAgentId":parent_agent_id,
-   "agent":worker
-  },project_id)
+  if self._event_bus:
+   self._event_bus.publish(AgentCreated(project_id=project_id,agent_id=worker_id,parent_agent_id=parent_agent_id,agent=worker))
   return worker_id
 
  def _on_worker_status(self,project_id:str,worker_id:str,status:str,data:Dict)->None:
@@ -474,11 +437,11 @@ class AgentExecutionService:
    update_data["error"]=data.get("error","")
   if"currentTask" in data:
    update_data["currentTask"]=data["currentTask"]
-  self._data_store.update_agent(worker_id,update_data)
+  self._agent_service.update_agent(worker_id,update_data)
   self._emit_event(f"agent:{status}",{
    "agentId":worker_id,
    "projectId":project_id,
-   "agent":self._data_store.get_agent(worker_id)
+   "agent":self._agent_service.get_agent(worker_id)
   },project_id)
 
  def get_running_agents(self)->Dict[str,bool]:
@@ -489,19 +452,16 @@ class AgentExecutionService:
   with self._lock:
    if agent_id in self._running_agents:
     self._running_agents.pop(agent_id,None)
-    self._data_store.update_agent(agent_id,{
+    self._agent_service.update_agent(agent_id,{
      "status":"failed",
      "error":"キャンセルされました",
      "currentTask":None,
     })
-    agent=self._data_store.get_agent(agent_id)
+    agent=self._agent_service.get_agent(agent_id)
     if agent:
      project_id=agent.get("projectId","")
-     self._emit_event("agent:failed",{
-      "agentId":agent_id,
-      "projectId":project_id,
-      "error":"キャンセルされました"
-     },project_id)
+     if self._event_bus:
+      self._event_bus.publish(AgentFailed(project_id=project_id,agent_id=agent_id,reason="キャンセルされました"))
     return True
   return False
 
@@ -510,7 +470,7 @@ class AgentExecutionService:
    loop=asyncio.new_event_loop()
    asyncio.set_event_loop(loop)
    try:
-    agent=self._data_store.get_agent(agent_id)
+    agent=self._agent_service.get_agent(agent_id)
     if not agent:
      self._logger.warning(f"re_execute_agent: agent not found: agent_id={agent_id}")
      return

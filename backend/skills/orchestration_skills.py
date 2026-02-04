@@ -4,7 +4,7 @@ from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 from middleware.logger import get_logger
 
 if TYPE_CHECKING:
- from datastore import DataStore
+ from services.agent_service import AgentService
  from services.agent_execution_service import AgentExecutionService
 
 
@@ -19,11 +19,11 @@ class SpawnWorkerSkill(Skill):
   SkillParameter(name="workers",type="array",description="バッチ生成するワーカー定義のリスト（spawn_batch時）",required=False,default=[]),
  ]
 
- def __init__(self,data_store:"DataStore",execution_service:"AgentExecutionService",sio=None):
+ def __init__(self,agent_service:"AgentService",execution_service:"AgentExecutionService",event_bus=None):
   super().__init__()
-  self._data_store=data_store
+  self._agent_service=agent_service
   self._execution_service=execution_service
-  self._sio=sio
+  self._event_bus=event_bus
 
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   operation=kwargs.get("operation","")
@@ -44,20 +44,16 @@ class SpawnWorkerSkill(Skill):
   if not task:
    return SkillResult(success=False,error="task is required")
   try:
-   worker=self._data_store.create_worker_agent(
+   worker=self._agent_service.create_worker_agent(
     context.project_id,context.agent_id,worker_type,task
    )
    worker_id=worker["id"]
-   if self._sio:
+   if self._event_bus:
     try:
-     self._sio.emit("agent:created",{
-      "agentId":worker_id,
-      "projectId":context.project_id,
-      "parentAgentId":context.agent_id,
-      "agent":worker
-     },room=f"project:{context.project_id}")
+     from events.events import AgentCreated
+     self._event_bus.publish(AgentCreated(project_id=context.project_id,agent_id=worker_id,parent_agent_id=context.agent_id,agent=worker))
     except Exception as e:
-     get_logger().warning(f"Failed to emit agent:created: {e}")
+     get_logger().warning(f"Failed to publish AgentCreated: {e}")
    try:
     result=await self._execution_service.execute_agent(context.project_id,worker_id)
     return SkillResult(success=True,output={
@@ -101,7 +97,7 @@ class SpawnWorkerSkill(Skill):
 
  def _list_workers(self,context:SkillContext)->SkillResult:
   try:
-   workers=self._data_store.get_workers_by_parent(context.agent_id)
+   workers=self._agent_service.get_workers_by_parent(context.agent_id)
    summary=[{
     "id":w["id"],
     "type":w["type"],

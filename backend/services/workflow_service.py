@@ -12,7 +12,7 @@ from repositories import (
     QualitySettingsRepository,
 )
 from agent_settings import QualityCheckConfig
-from config_loader import (
+from config_loaders.checkpoint_config import (
     get_checkpoint_category_map,
     get_auto_approval_rules as get_config_auto_approval_rules,
 )

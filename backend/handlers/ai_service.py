@@ -1,17 +1,17 @@
 
 """AI Service API - AIサービスタイプの設定を提供"""
 from flask import Flask,jsonify
-from ai_config import (
+from config_loaders.ai_provider_config import (
  get_service_types,
  get_service_labels,
  get_defaults,
  get_providers,
  get_providers_for_service,
- get_pricing_config,
+ get_ai_pricing_config as get_pricing_config,
  get_all_model_pricing,
  get_usage_categories,
  get_provider_type_mapping,
- get_reverse_provider_type_mapping
+ get_reverse_provider_type_mapping,
 )
 
 

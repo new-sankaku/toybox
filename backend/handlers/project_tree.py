@@ -4,11 +4,11 @@ import io
 import zipfile
 from flask import Flask,jsonify,request,send_file
 from werkzeug.utils import secure_filename
-from datastore import DataStore
+from services.project_service import ProjectService
 from middleware.logger import get_logger
 
 
-def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:str):
+def register_project_tree_routes(app:Flask,project_service:ProjectService,output_folder:str):
     """Register project tree related routes"""
 
     os.makedirs(output_folder,exist_ok=True)
@@ -88,7 +88,7 @@ def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:st
     @app.route('/api/projects/<project_id>/tree',methods=['GET'])
     def get_project_tree(project_id:str):
         """Get the file tree for a project"""
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
@@ -116,7 +116,7 @@ def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:st
     @app.route('/api/projects/<project_id>/tree/download',methods=['GET'])
     def download_project_file(project_id:str):
         """Download a single file from the project"""
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
@@ -148,7 +148,7 @@ def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:st
     @app.route('/api/projects/<project_id>/tree/replace',methods=['POST'])
     def replace_project_file(project_id:str):
         """Replace a file in the project"""
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
@@ -181,7 +181,7 @@ def register_project_tree_routes(app:Flask,data_store:DataStore,output_folder:st
     @app.route('/api/projects/<project_id>/tree/download-all',methods=['GET'])
     def download_project_all(project_id:str):
         """Download the entire project as a ZIP file"""
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 

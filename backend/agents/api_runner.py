@@ -13,18 +13,12 @@ from .base import (
 )
 from .retry_strategy import RetryConfig,retry_with_backoff,is_retryable_error
 from .exceptions import ProviderUnavailableError,MaxRetriesExceededError
-from config_loader import (
-    get_all_prompts,
-    get_api_runner_checkpoint_config,
-    get_provider_default_model,
-    get_agent_max_tokens,
-    get_agent_temperature,
-    get_workflow_context_policy,
-    get_context_policy_settings,
-    load_principles_for_agent,
-    get_agent_usage_category,
-    get_provider_env_key,
-)
+from config_loaders.prompt_config import get_all_prompts
+from config_loaders.mock_config import get_api_runner_checkpoint_config
+from config_loaders.ai_provider_config import get_provider_default_model,get_provider_env_key
+from config_loaders.agent_config import get_agent_max_tokens,get_agent_temperature,get_agent_usage_category
+from config_loaders.workflow_config import get_workflow_context_policy,get_context_policy_settings
+from config_loaders.principle_config import load_principles_for_agent
 from providers.registry import get_provider,register_all_providers
 from providers.base import AIProviderConfig
 from middleware.logger import get_logger
@@ -51,7 +45,6 @@ class ApiAgentRunner(AgentRunner):
         model:Optional[str]=None,
         max_tokens:int=32768,
         retry_config:Optional[RetryConfig]=None,
-        data_store=None,
         **kwargs
     ):
         self._provider_id=provider_id or""
@@ -64,15 +57,17 @@ class ApiAgentRunner(AgentRunner):
         self._retry_config=retry_config or RetryConfig(max_retries=3)
         self._health_monitor=None
         self._on_status_change:Optional[Callable[[str,AgentStatus],None]]=None
-        self._data_store=data_store
+        self._trace_service=None
+        self._agent_service=None
         register_all_providers()
 
     @staticmethod
     def _env_key_for(provider_id:str)->str:
         return get_provider_env_key(provider_id)
 
-    def set_data_store(self,data_store)->None:
-        self._data_store=data_store
+    def set_services(self,trace_service,agent_service)->None:
+        self._trace_service=trace_service
+        self._agent_service=agent_service
 
     def set_health_monitor(self,monitor)->None:
         self._health_monitor=monitor
@@ -175,13 +170,13 @@ class ApiAgentRunner(AgentRunner):
         agent_type=context.agent_type
         trace_id=None
 
-        if self._data_store:
+        if self._trace_service:
             try:
                 input_ctx={
                     "project_concept":context.project_concept,
                     "config":context.config,
                 }
-                trace=self._data_store.create_trace(
+                trace=self._trace_service.create_trace(
                     project_id=context.project_id,
                     agent_id=context.agent_id,
                     agent_type=agent_type.value,
@@ -208,10 +203,10 @@ class ApiAgentRunner(AgentRunner):
 
         system_prompt,user_prompt=self._build_prompt(context)
 
-        if self._data_store and trace_id:
+        if self._trace_service and trace_id:
             try:
                 trace_prompt=f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}" if system_prompt else user_prompt
-                self._data_store.update_trace_prompt(trace_id,trace_prompt)
+                self._trace_service.update_trace_prompt(trace_id,trace_prompt)
             except Exception as e:
                 get_logger().error(f"ApiAgentRunner: failed to update trace prompt: {e}",exc_info=True)
 
@@ -238,7 +233,7 @@ class ApiAgentRunner(AgentRunner):
 
             output=self._process_output(result,context)
 
-            if self._data_store and trace_id:
+            if self._trace_service and trace_id:
                 try:
                     input_tokens=result.get("input_tokens",0)
                     output_tokens=result.get("output_tokens",0)
@@ -254,7 +249,7 @@ class ApiAgentRunner(AgentRunner):
                         fallback_func=self._extract_summary,
                         project_id=context.project_id,
                     )
-                    self._data_store.complete_trace(
+                    self._trace_service.complete_trace(
                         trace_id=trace_id,
                         llm_response=llm_content,
                         output_data=output,
@@ -291,9 +286,9 @@ class ApiAgentRunner(AgentRunner):
             }
 
         except Exception as e:
-            if self._data_store and trace_id:
+            if self._trace_service and trace_id:
                 try:
-                    self._data_store.fail_trace(trace_id,str(e))
+                    self._trace_service.fail_trace(trace_id,str(e))
                 except Exception as te:
                     get_logger().error(f"ApiAgentRunner: failed to record trace failure: {te}",exc_info=True)
 
@@ -360,10 +355,10 @@ class ApiAgentRunner(AgentRunner):
         return"default"
 
     def _build_memory_section(self,agent_type:str,project_id:Optional[str]=None)->str:
-        if not self._data_store:
+        if not self._agent_service:
             return""
         try:
-            memories=self._data_store.get_agent_memories(
+            memories=self._agent_service.get_agent_memories(
                 agent_type=agent_type,
                 project_id=project_id,
                 categories=["quality_insight","hallucination_pattern","improvement_pattern"],
@@ -395,7 +390,7 @@ class ApiAgentRunner(AgentRunner):
             dag=adv.get("dagExecution",{})
             if"enabled" in dag:
                 return dag["enabled"]
-        from config_loader import is_dag_execution_enabled
+        from config_loaders.workflow_config import is_dag_execution_enabled
         return is_dag_execution_enabled()
 
     def _get_project_token_budget(self,context:Optional[AgentContext])->Optional[Dict[str,Any]]:
@@ -749,15 +744,18 @@ class LeaderWorkerOrchestrator:
         self.on_worker_status=on_worker_status
         self.on_worker_speech=on_worker_speech
 
-    def _get_data_store(self):
-        return self.agent_runner._data_store
+    def _get_trace_service(self):
+        return self.agent_runner._trace_service
+
+    def _get_agent_service(self):
+        return self.agent_runner._agent_service
 
     def _save_snapshot(self,leader_context:AgentContext,workflow_run_id:str,step_type:str,step_id:str,label:str,state_data:Dict[str,Any],worker_tasks:List[Dict[str,Any]]):
-        ds=self._get_data_store()
-        if not ds:
+        ts=self._get_trace_service()
+        if not ts:
             return
         try:
-            ds.create_workflow_snapshot(
+            ts.create_workflow_snapshot(
                 project_id=leader_context.project_id,
                 agent_id=leader_context.agent_id,
                 workflow_run_id=workflow_run_id,
@@ -771,11 +769,11 @@ class LeaderWorkerOrchestrator:
             get_logger().error(f"スナップショット保存失敗: {e}",exc_info=True)
 
     def _load_completed_workers(self,agent_id:str)->Optional[Dict[str,Any]]:
-        ds=self._get_data_store()
-        if not ds:
+        ts=self._get_trace_service()
+        if not ts:
             return None
         try:
-            snapshots=ds.get_latest_workflow_snapshots(agent_id)
+            snapshots=ts.get_latest_workflow_snapshots(agent_id)
             if not snapshots:
                 return None
             completed_workers={}
@@ -803,7 +801,7 @@ class LeaderWorkerOrchestrator:
 
     async def run_leader_with_workers(self,leader_context:AgentContext)->Dict[str,Any]:
         import uuid as _uuid
-        from config_loader import is_dag_execution_enabled
+        from config_loaders.workflow_config import is_dag_execution_enabled
         results={
             "leader_output":{},
             "worker_results":[],
@@ -819,7 +817,7 @@ class LeaderWorkerOrchestrator:
             get_logger().info(f"ワークフロー再開: {len(resumable['completed_workers'])}件のWorker完了済み")
             worker_tasks=resumable["worker_tasks"]
             leader_output_snap=None
-            snapshots=self._get_data_store().get_workflow_snapshots_by_run(workflow_run_id) if self._get_data_store() else []
+            snapshots=self._get_trace_service().get_workflow_snapshots_by_run(workflow_run_id) if self._get_trace_service() else []
             for snap in snapshots:
                 if snap["stepType"]=="leader_completed" and snap["status"]!="invalidated":
                     leader_output_snap=snap.get("stateData",{})
@@ -1170,7 +1168,7 @@ class LeaderWorkerOrchestrator:
         from .quality_evaluator import get_quality_evaluator
         evaluator=get_quality_evaluator()
         try:
-            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides,data_store=self._get_data_store())
+            return await evaluator.evaluate(output,worker_type,project_id=project_id,enabled_principles=enabled_principles,quality_settings=quality_settings,principle_overrides=principle_overrides,agent_service=self._get_agent_service())
         except Exception as e:
             get_logger().error(f"品質評価エラー（ルールベースにフォールバック）: {e}",exc_info=True)
             issues=[]

@@ -161,11 +161,11 @@ class SkillEnabledAgentRunner(AgentRunner):
  async def run_agent_stream(self,context:AgentContext)->AsyncGenerator[Dict[str,Any],None]:
   executor=self._get_executor(context)
   available_skills=executor.get_available_skills()
-  data_store=self._base._data_store
+  trace_service=self._base._trace_service
   trace_id=None
-  if data_store:
+  if trace_service:
    try:
-    trace=data_store.create_trace(
+    trace=trace_service.create_trace(
      project_id=context.project_id,
      agent_id=context.agent_id,
      agent_type=context.agent_type.value,
@@ -190,9 +190,9 @@ class SkillEnabledAgentRunner(AgentRunner):
   enhanced_context=self._enhance_context_with_skills(context,skill_schemas)
   system_prompt=self._build_system_prompt(enhanced_context,skill_schemas,use_native_tools=use_native_tools)
   user_prompt=self._build_user_prompt(enhanced_context)
-  if data_store and trace_id:
+  if trace_service and trace_id:
    try:
-    data_store.update_trace_prompt(trace_id,f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}")
+    trace_service.update_trace_prompt(trace_id,f"[SYSTEM]\n{system_prompt}\n\n[USER]\n{user_prompt}")
    except Exception as e:
     get_logger().error(f"SkillRunner: failed to update trace prompt: {e}",exc_info=True)
   messages=[{"role":"user","content":user_prompt}]
@@ -284,11 +284,11 @@ class SkillEnabledAgentRunner(AgentRunner):
      stop_reason=f"最大イテレーション数({max_iter})に到達"
     final_output=await self._generate_summary_output(messages,skill_schemas,context,stop_reason,system_prompt=system_prompt,use_native_tools=use_native_tools)
     total_tokens+=final_output.get("metadata",{}).get("summary_tokens",0)
-   if data_store and trace_id:
+   if trace_service and trace_id:
     try:
      input_tokens=int(total_tokens*0.3)
      output_tokens=total_tokens-input_tokens
-     data_store.complete_trace(
+     trace_service.complete_trace(
       trace_id=trace_id,
       llm_response=last_response_content,
       output_data=final_output,
@@ -299,9 +299,9 @@ class SkillEnabledAgentRunner(AgentRunner):
     except Exception as e:
      get_logger().error(f"SkillRunner: failed to complete trace: {e}",exc_info=True)
   except Exception as e:
-   if data_store and trace_id:
+   if trace_service and trace_id:
     try:
-     data_store.fail_trace(trace_id,str(e))
+     trace_service.fail_trace(trace_id,str(e))
     except Exception as te:
      get_logger().error(f"SkillRunner: failed to record trace failure: {te}",exc_info=True)
    raise
@@ -504,7 +504,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
   system_prompt:Optional[str]=None,
   use_native_tools:bool=False,
  )->Dict[str,Any]:
-  from config_loader import get_agent_temperature
+  from config_loaders.agent_config import get_agent_temperature
   temperature=get_agent_temperature(context.agent_type.value)
   messages_json_str=json.dumps(messages,ensure_ascii=False)
   prompt_fallback=messages[-1].get("content","") if messages else""
@@ -618,7 +618,7 @@ tool_callブロックを含めず、成果物を出力してください。"""
   return [first_msg,summary_msg]+recent_messages
 
  def _generate_compaction_summary(self,old_messages:List[Dict])->str:
-  from config_loader import get_context_policy_settings
+  from config_loaders.workflow_config import get_context_policy_settings
   settings=get_context_policy_settings()
   llm_cfg=settings.get("llm_summary",{})
   if not llm_cfg.get("enabled",False):

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List,Dict,Optional,Set
 from pathlib import Path
 
-from config_loader import get_all_extension_categories,get_scan_directories,get_file_extensions_config
+from config_loaders.file_extension_config import get_all_extension_categories,get_scan_directories,get_file_extensions_config
 from middleware.logger import get_logger
 
 
@@ -105,7 +105,8 @@ def get_testdata_path()->str:
 if __name__=="__main__":
 
     testdata_path=get_testdata_path()
-    print(f"Scanning: {testdata_path}")
+    logger=get_logger()
+    logger.info(f"Scanning: {testdata_path}")
     assets=scan_all_testdata(testdata_path)
     for asset in assets[:10]:
-        print(f"  - {asset['name']} ({asset['type']}, {asset['size']})")
+        logger.info(f"  - {asset['name']} ({asset['type']}, {asset['size']})")

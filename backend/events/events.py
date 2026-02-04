@@ -99,3 +99,123 @@ class PhaseChanged:
 class MetricsUpdated:
     project_id:str
     metrics:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class ProjectUpdated:
+    project_id:str
+    project:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class ProjectStatusChanged:
+    project_id:str
+    status:str=""
+    previous_status:str=""
+    retried_agents:int=0
+    reason:str=""
+    intervention_id:str=""
+
+
+@dataclass
+class ProjectInitialized:
+    project_id:str
+
+
+@dataclass
+class ProjectPaused:
+    project_id:str
+    reason:str=""
+    intervention_id:str=""
+
+
+@dataclass
+class AgentPaused:
+    project_id:str
+    agent_id:str
+    agent:Dict[str,Any]=field(default_factory=dict)
+    reason:str=""
+
+
+@dataclass
+class AgentActivated:
+    project_id:str
+    agent_id:str
+    agent:Dict[str,Any]=field(default_factory=dict)
+    previous_status:str=""
+    intervention_id:str=""
+
+
+@dataclass
+class AgentCreated:
+    project_id:str
+    agent_id:str
+    parent_agent_id:str=""
+    agent:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class AgentWaitingResponse:
+    project_id:str
+    agent_id:str
+    agent:Dict[str,Any]=field(default_factory=dict)
+    intervention_id:str=""
+    question:str=""
+
+
+@dataclass
+class AgentSnapshotRestored:
+    project_id:str
+    agent_id:str
+    snapshot_id:str=""
+    snapshot:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class InterventionCreated:
+    project_id:str
+    intervention_id:str
+    intervention:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class InterventionAcknowledged:
+    project_id:str
+    intervention_id:str
+    intervention:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class InterventionProcessed:
+    project_id:str
+    intervention_id:str
+    intervention:Dict[str,Any]=field(default_factory=dict)
+
+
+@dataclass
+class InterventionDeleted:
+    project_id:str
+    intervention_id:str
+
+
+@dataclass
+class InterventionResponseAdded:
+    project_id:str
+    intervention_id:str
+    intervention:Dict[str,Any]=field(default_factory=dict)
+    sender:str=""
+    agent_id:str=""
+
+
+@dataclass
+class AssetBulkUpdated:
+    project_id:str
+    assets:list=field(default_factory=list)
+    status:str=""
+
+
+@dataclass
+class AssetRegenerationRequested:
+    project_id:str
+    asset_id:str
+    feedback:str=""

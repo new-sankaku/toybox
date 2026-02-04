@@ -124,7 +124,7 @@ def create_skill_executor(
  skill_config:Optional[Dict[str,Any]]=None,
  on_progress:Optional[Any]=None
 )->SkillExecutor:
- from config_loader import load_yaml_config
+ from config_loaders import load_yaml_config
  if skill_config is None:
   try:
    skill_config=load_yaml_config("skills.yaml")

@@ -6,7 +6,8 @@ from models.database import session_scope
 from repositories.llm_job import LlmJobRepository
 from providers.registry import get_provider
 from providers.base import AIProviderConfig,ChatMessage,MessageRole,ToolCallData
-from config_loader import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent,get_token_budget_settings
+from config_loaders.ai_provider_config import get_provider_max_concurrent,get_provider_group,get_group_max_concurrent
+from config_loaders.workflow_config import get_token_budget_settings
 from agents.exceptions import TokenBudgetExceededError
 from services.stream_comment_parser import StreamCommentParser
 from middleware.logger import get_logger

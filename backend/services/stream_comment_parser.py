@@ -1,5 +1,5 @@
 from typing import Optional,Callable
-from config_loader import load_yaml_config
+from config_loaders import load_yaml_config
 from middleware.logger import get_logger
 
 

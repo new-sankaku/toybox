@@ -2,7 +2,7 @@
 """Agent settings - wraps config_loader for agent configuration"""
 from typing import Dict,Set,TypedDict
 from dataclasses import dataclass
-from config_loader import (
+from config_loaders.agent_config import (
  get_agent_definitions_from_yaml as _get_agent_definitions,
  get_high_cost_agents_from_yaml as _get_high_cost_agents,
  get_quality_check_defaults_from_yaml as _get_quality_check_defaults,
@@ -10,6 +10,8 @@ from config_loader import (
  get_agent_display_names_from_yaml as _get_agent_display_names,
  get_ui_phases as _get_ui_phases,
  get_agent_asset_mapping as _get_agent_asset_mapping,
+)
+from config_loaders.workflow_config import (
  get_workflow_dependencies as _get_workflow_dependencies,
 )
 

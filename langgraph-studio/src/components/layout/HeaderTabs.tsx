@@ -15,9 +15,9 @@ interface Tab{
 const tabs:Tab[]=[
  {id:'project',label:'プロジェクト',icon:'◎',alwaysEnabled:true},
  {id:'system',label:'ダッシュボード',icon:'⬢'},
- {id:'checkpoints',label:'承認',icon:'✓',hasBadge:true},
- {id:'intervention',label:'連絡',icon:'✉',hasBadge:true},
  {id:'agents',label:'エージェント',icon:'⚙'},
+ {id:'intervention',label:'連絡',icon:'✉',hasBadge:true},
+ {id:'checkpoints',label:'承認',icon:'✓',hasBadge:true},
  {id:'data',label:'生成素材',icon:'≡',hasBadge:true},
  {id:'cost',label:'コスト',icon:'¥'},
  {id:'logs',label:'ログ',icon:'≫'},

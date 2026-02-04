@@ -1,6 +1,8 @@
 from datetime import datetime
 from flask import Flask,jsonify,request
-from datastore import DataStore
+from services.agent_service import AgentService
+from services.trace_service import TraceService
+from services.project_service import ProjectService
 from middleware.logger import get_logger
 
 def _extract_service_name(model:str)->str:
@@ -55,10 +57,10 @@ def _calculate_cost(tokens_input:int,tokens_output:int,model:str)->float:
  cost=(tokens_input*rates["input"]+tokens_output*rates["output"])/1_000_000
  return round(cost,4)
 
-def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
- traces=data_store.get_traces_by_agent(agent_id)
- llm_jobs=data_store.get_llm_jobs_by_agent(agent_id)
- workers=data_store.get_workers_by_parent(agent_id)
+def _build_sequence_data(agent_service:AgentService,trace_service:TraceService,agent_id:str,agent:dict)->dict:
+ traces=trace_service.get_traces_by_agent(agent_id)
+ llm_jobs=trace_service.get_llm_jobs_by_agent(agent_id)
+ workers=agent_service.get_workers_by_parent(agent_id)
  agent_type=agent["type"]
  display_name=agent.get("metadata",{}).get("displayName",agent_type)
  participants=[{"id":"external","label":"入力","type":"external","role":""}]
@@ -265,8 +267,8 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
     "cost":None,
     "callIndex":None
    })
-  w_traces=data_store.get_traces_by_agent(w_id)
-  w_llm_jobs=data_store.get_llm_jobs_by_agent(w_id)
+  w_traces=trace_service.get_traces_by_agent(w_id)
+  w_llm_jobs=trace_service.get_llm_jobs_by_agent(w_id)
   for t in sorted(w_traces,key=lambda x:x.get("startedAt") or""):
    model=t.get("modelUsed") or""
    api_id=api_participant_map.get(model,api_participant_map.get("__default__","api:unknown"))
@@ -329,7 +331,7 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
  total_input=sum(t.get("tokensInput",0) for t in traces)
  total_output=sum(t.get("tokensOutput",0) for t in traces)
  for w in workers:
-  w_traces=data_store.get_traces_by_agent(w["id"])
+  w_traces=trace_service.get_traces_by_agent(w["id"])
   total_input+=sum(t.get("tokensInput",0) for t in w_traces)
   total_output+=sum(t.get("tokensOutput",0) for t in w_traces)
  total_duration=None
@@ -347,46 +349,46 @@ def _build_sequence_data(data_store:DataStore,agent_id:str,agent:dict)->dict:
   "totalTokens":{"input":total_input,"output":total_output}
  }
 
-def register_trace_routes(app:Flask,data_store:DataStore,sio):
+def register_trace_routes(app:Flask,project_service:ProjectService,agent_service:AgentService,trace_service:TraceService,sio):
 
  @app.route('/api/projects/<project_id>/traces',methods=['GET'])
  def list_project_traces(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
   limit=request.args.get('limit',100,type=int)
-  traces=data_store.get_traces_by_project(project_id,limit)
+  traces=trace_service.get_traces_by_project(project_id,limit)
   return jsonify(traces)
 
  @app.route('/api/agents/<agent_id>/traces',methods=['GET'])
  def get_agent_traces(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    return jsonify({"error":"Agent not found"}),404
-  traces=data_store.get_traces_by_agent(agent_id)
+  traces=trace_service.get_traces_by_agent(agent_id)
   return jsonify(traces)
 
  @app.route('/api/traces/<trace_id>',methods=['GET'])
  def get_trace(trace_id:str):
-  trace=data_store.get_trace(trace_id)
+  trace=trace_service.get_trace(trace_id)
   if not trace:
    return jsonify({"error":"Trace not found"}),404
   return jsonify(trace)
 
  @app.route('/api/llm-jobs/<job_id>',methods=['GET'])
  def get_llm_job(job_id:str):
-  job=data_store.get_llm_job(job_id)
+  job=trace_service.get_llm_job(job_id)
   if not job:
    return jsonify({"error":"LLM job not found"}),404
   return jsonify(job)
 
  @app.route('/api/agents/<agent_id>/sequence',methods=['GET'])
  def get_agent_sequence(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    return jsonify({"error":"Agent not found"}),404
   try:
-   sequence=_build_sequence_data(data_store,agent_id,agent)
+   sequence=_build_sequence_data(agent_service,trace_service,agent_id,agent)
    return jsonify(sequence)
   except Exception as e:
    get_logger().error(f"Error building sequence for agent {agent_id}: {e}",exc_info=True)
@@ -394,8 +396,8 @@ def register_trace_routes(app:Flask,data_store:DataStore,sio):
 
  @app.route('/api/projects/<project_id>/traces',methods=['DELETE'])
  def delete_project_traces(project_id:str):
-  project=data_store.get_project(project_id)
+  project=project_service.get_project(project_id)
   if not project:
    return jsonify({"error":"Project not found"}),404
-  count=data_store.delete_traces_by_project(project_id)
+  count=trace_service.delete_traces_by_project(project_id)
   return jsonify({"deleted":count})

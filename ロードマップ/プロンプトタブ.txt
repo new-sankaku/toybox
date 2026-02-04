@@ -1,0 +1,10 @@
+これらの意味不明な表記は無くして。
+
+[api_runner.py:_build_prompt]
+[C:\01_work\00_Git\toybox\backend\conf
+[agent_speech_service]
+[api_runner.py:_build_prompt (previous_out
+
+また、プロンプトは編集して保存できるようにして。
+ボタンを二つ用意して、このプロジェクトに保存、全てのプロジェクトに保存　というボタンにして。
+

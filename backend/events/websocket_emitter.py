@@ -1,4 +1,4 @@
-from typing import Dict,Any,Optional
+from typing import Dict,Any
 from events.event_bus import EventBus
 from events.events import (
     SystemLogCreated,
@@ -8,12 +8,28 @@ from events.events import (
     AgentFailed,
     AgentResumed,
     AgentRetried,
+    AgentPaused,
+    AgentActivated,
+    AgentCreated,
+    AgentWaitingResponse,
+    AgentSnapshotRestored,
     CheckpointCreated,
     CheckpointResolved,
     AssetCreated,
     AssetUpdated,
+    AssetBulkUpdated,
+    AssetRegenerationRequested,
     PhaseChanged,
     MetricsUpdated,
+    ProjectUpdated,
+    ProjectStatusChanged,
+    ProjectInitialized,
+    ProjectPaused,
+    InterventionCreated,
+    InterventionAcknowledged,
+    InterventionProcessed,
+    InterventionDeleted,
+    InterventionResponseAdded,
 )
 from middleware.logger import get_logger
 
@@ -49,6 +65,22 @@ class WebSocketEmitter:
         self._event_bus.subscribe(AssetUpdated,self._on_asset_updated)
         self._event_bus.subscribe(PhaseChanged,self._on_phase_changed)
         self._event_bus.subscribe(MetricsUpdated,self._on_metrics_updated)
+        self._event_bus.subscribe(ProjectUpdated,self._on_project_updated)
+        self._event_bus.subscribe(ProjectStatusChanged,self._on_project_status_changed)
+        self._event_bus.subscribe(ProjectInitialized,self._on_project_initialized)
+        self._event_bus.subscribe(ProjectPaused,self._on_project_paused)
+        self._event_bus.subscribe(AgentPaused,self._on_agent_paused)
+        self._event_bus.subscribe(AgentActivated,self._on_agent_activated)
+        self._event_bus.subscribe(AgentCreated,self._on_agent_created)
+        self._event_bus.subscribe(AgentWaitingResponse,self._on_agent_waiting_response)
+        self._event_bus.subscribe(AgentSnapshotRestored,self._on_agent_snapshot_restored)
+        self._event_bus.subscribe(InterventionCreated,self._on_intervention_created)
+        self._event_bus.subscribe(InterventionAcknowledged,self._on_intervention_acknowledged)
+        self._event_bus.subscribe(InterventionProcessed,self._on_intervention_processed)
+        self._event_bus.subscribe(InterventionDeleted,self._on_intervention_deleted)
+        self._event_bus.subscribe(InterventionResponseAdded,self._on_intervention_response_added)
+        self._event_bus.subscribe(AssetBulkUpdated,self._on_asset_bulk_updated)
+        self._event_bus.subscribe(AssetRegenerationRequested,self._on_asset_regeneration_requested)
 
     def _on_system_log_created(self,event:SystemLogCreated)->None:
         self._emit(
@@ -94,7 +126,7 @@ class WebSocketEmitter:
             {
                 "agentId":event.agent_id,
                 "projectId":event.project_id,
-                "reason":event.reason,
+                "error":event.reason,
             },
             event.project_id,
         )
@@ -186,5 +218,175 @@ class WebSocketEmitter:
         self._emit(
             "metrics:update",
             {"projectId":event.project_id,"metrics":event.metrics},
+            event.project_id,
+        )
+
+    def _on_project_updated(self,event:ProjectUpdated)->None:
+        self._emit(
+            "project:updated",
+            {"projectId":event.project_id,"updates":event.project},
+            event.project_id,
+        )
+
+    def _on_project_status_changed(self,event:ProjectStatusChanged)->None:
+        data={
+            "projectId":event.project_id,
+            "status":event.status,
+            "previousStatus":event.previous_status,
+        }
+        if event.retried_agents:
+            data["retriedAgents"]=event.retried_agents
+        if event.reason:
+            data["reason"]=event.reason
+        if event.intervention_id:
+            data["interventionId"]=event.intervention_id
+        self._emit("project:status_changed",data,event.project_id)
+
+    def _on_project_initialized(self,event:ProjectInitialized)->None:
+        self._emit(
+            "project:initialized",
+            {"projectId":event.project_id},
+            event.project_id,
+        )
+
+    def _on_project_paused(self,event:ProjectPaused)->None:
+        data={"projectId":event.project_id}
+        if event.reason:
+            data["reason"]=event.reason
+        if event.intervention_id:
+            data["interventionId"]=event.intervention_id
+        self._emit("project:paused",data,event.project_id)
+
+    def _on_agent_paused(self,event:AgentPaused)->None:
+        self._emit(
+            "agent:paused",
+            {
+                "agentId":event.agent_id,
+                "projectId":event.project_id,
+                "agent":event.agent,
+                "reason":event.reason,
+            },
+            event.project_id,
+        )
+
+    def _on_agent_activated(self,event:AgentActivated)->None:
+        data={
+            "agentId":event.agent_id,
+            "projectId":event.project_id,
+            "agent":event.agent,
+            "previousStatus":event.previous_status,
+        }
+        if event.intervention_id:
+            data["interventionId"]=event.intervention_id
+        self._emit("agent:activated",data,event.project_id)
+
+    def _on_agent_created(self,event:AgentCreated)->None:
+        data={
+            "agentId":event.agent_id,
+            "projectId":event.project_id,
+            "agent":event.agent,
+        }
+        if event.parent_agent_id:
+            data["parentAgentId"]=event.parent_agent_id
+        self._emit("agent:created",data,event.project_id)
+
+    def _on_agent_waiting_response(self,event:AgentWaitingResponse)->None:
+        data={
+            "agentId":event.agent_id,
+            "projectId":event.project_id,
+            "agent":event.agent,
+        }
+        if event.intervention_id:
+            data["interventionId"]=event.intervention_id
+        if event.question:
+            data["question"]=event.question
+        self._emit("agent:waiting_response",data,event.project_id)
+
+    def _on_agent_snapshot_restored(self,event:AgentSnapshotRestored)->None:
+        self._emit(
+            "agent:snapshot_restored",
+            {
+                "agentId":event.agent_id,
+                "projectId":event.project_id,
+                "snapshotId":event.snapshot_id,
+                "snapshot":event.snapshot,
+            },
+            event.project_id,
+        )
+
+    def _on_intervention_created(self,event:InterventionCreated)->None:
+        self._emit(
+            "intervention:created",
+            {
+                "interventionId":event.intervention_id,
+                "projectId":event.project_id,
+                "intervention":event.intervention,
+            },
+            event.project_id,
+        )
+
+    def _on_intervention_acknowledged(self,event:InterventionAcknowledged)->None:
+        self._emit(
+            "intervention:acknowledged",
+            {
+                "interventionId":event.intervention_id,
+                "projectId":event.project_id,
+                "intervention":event.intervention,
+            },
+            event.project_id,
+        )
+
+    def _on_intervention_processed(self,event:InterventionProcessed)->None:
+        self._emit(
+            "intervention:processed",
+            {
+                "interventionId":event.intervention_id,
+                "projectId":event.project_id,
+                "intervention":event.intervention,
+            },
+            event.project_id,
+        )
+
+    def _on_intervention_deleted(self,event:InterventionDeleted)->None:
+        self._emit(
+            "intervention:deleted",
+            {
+                "interventionId":event.intervention_id,
+                "projectId":event.project_id,
+            },
+            event.project_id,
+        )
+
+    def _on_intervention_response_added(self,event:InterventionResponseAdded)->None:
+        data={
+            "interventionId":event.intervention_id,
+            "projectId":event.project_id,
+            "intervention":event.intervention,
+        }
+        if event.sender:
+            data["sender"]=event.sender
+        if event.agent_id:
+            data["agentId"]=event.agent_id
+        self._emit("intervention:response_added",data,event.project_id)
+
+    def _on_asset_bulk_updated(self,event:AssetBulkUpdated)->None:
+        self._emit(
+            "assets:bulk_updated",
+            {
+                "projectId":event.project_id,
+                "assets":event.assets,
+                "status":event.status,
+            },
+            event.project_id,
+        )
+
+    def _on_asset_regeneration_requested(self,event:AssetRegenerationRequested)->None:
+        self._emit(
+            "asset:regeneration_requested",
+            {
+                "projectId":event.project_id,
+                "assetId":event.asset_id,
+                "feedback":event.feedback,
+            },
             event.project_id,
         )

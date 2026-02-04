@@ -1,18 +1,18 @@
 from flask import Flask,jsonify,request
-from datastore import DataStore
+from events.events import AssetUpdated,AssetBulkUpdated,AssetRegenerationRequested
 
 
-def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
+def register_metrics_routes(app:Flask,project_service,agent_service,workflow_service,event_bus=None):
 
     @app.route('/api/projects/<project_id>/ai-requests/stats',methods=['GET'])
     def get_ai_request_stats(project_id:str):
         """Get AI request statistics for a project"""
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
 
-        agents=data_store.get_agents_by_project(project_id)
+        agents=agent_service.get_agents_by_project(project_id)
 
         total=len(agents)
         processing=len([a for a in agents if a["status"]=="running"])
@@ -30,11 +30,11 @@ def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
 
     @app.route('/api/projects/<project_id>/metrics',methods=['GET'])
     def get_project_metrics(project_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        metrics=data_store.get_project_metrics(project_id)
+        metrics=project_service.get_project_metrics(project_id)
 
         if not metrics:
             metrics={
@@ -64,45 +64,42 @@ def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
 
     @app.route('/api/projects/<project_id>/logs',methods=['GET'])
     def get_project_logs(project_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        logs=data_store.get_system_logs(project_id)
+        logs=project_service.get_system_logs(project_id)
         return jsonify(logs)
 
     @app.route('/api/projects/<project_id>/assets',methods=['GET'])
     def get_project_assets(project_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
-        assets=data_store.get_assets_by_project(project_id)
+        assets=workflow_service.get_assets_by_project(project_id)
         return jsonify(assets)
 
     @app.route('/api/projects/<project_id>/assets/<asset_id>',methods=['PATCH'])
     def update_project_asset(project_id:str,asset_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
         data=request.get_json()
-        asset=data_store.update_asset(project_id,asset_id,data)
+        asset=workflow_service.update_asset(project_id,asset_id,data)
 
         if not asset:
             return jsonify({"error":"Asset not found"}),404
 
-        if sio:
-            sio.emit('asset:updated',{
-                "projectId":project_id,
-                "asset":asset
-            },room=f"project:{project_id}")
+        if event_bus:
+            event_bus.publish(AssetUpdated(project_id=project_id,asset=asset))
 
         return jsonify(asset)
 
     @app.route('/api/projects/<project_id>/assets/bulk',methods=['PATCH'])
     def bulk_update_assets(project_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
@@ -117,22 +114,18 @@ def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
 
         updated_assets=[]
         for asset_id in asset_ids:
-            asset=data_store.update_asset(project_id,asset_id,{"approvalStatus":new_status})
+            asset=workflow_service.update_asset(project_id,asset_id,{"approvalStatus":new_status})
             if asset:
                 updated_assets.append(asset)
 
-        if sio:
-            sio.emit('assets:bulk_updated',{
-                "projectId":project_id,
-                "assets":updated_assets,
-                "status":new_status
-            },room=f"project:{project_id}")
+        if event_bus:
+            event_bus.publish(AssetBulkUpdated(project_id=project_id,assets=updated_assets,status=new_status))
 
         return jsonify({"updated":len(updated_assets),"assets":updated_assets})
 
     @app.route('/api/projects/<project_id>/assets/<asset_id>/regenerate',methods=['POST'])
     def request_asset_regeneration(project_id:str,asset_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"Project not found"}),404
 
@@ -142,18 +135,14 @@ def register_metrics_routes(app:Flask,data_store:DataStore,sio=None):
         if not feedback:
             return jsonify({"error":"feedback is required"}),400
 
-        asset=data_store.update_asset(project_id,asset_id,{"approvalStatus":"rejected"})
+        asset=workflow_service.update_asset(project_id,asset_id,{"approvalStatus":"rejected"})
         if not asset:
             return jsonify({"error":"Asset not found"}),404
 
-        data_store.request_asset_regeneration(project_id,asset_id,feedback)
+        workflow_service.request_asset_regeneration(project_id,asset_id,feedback)
 
-        if sio:
-            sio.emit('asset:regeneration_requested',{
-                "projectId":project_id,
-                "assetId":asset_id,
-                "feedback":feedback
-            },room=f"project:{project_id}")
+        if event_bus:
+            event_bus.publish(AssetRegenerationRequested(project_id=project_id,asset_id=asset_id,feedback=feedback))
 
         return jsonify({"success":True,"message":"再生成リクエストを送信しました"})
 

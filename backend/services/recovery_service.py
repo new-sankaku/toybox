@@ -6,12 +6,8 @@ from middleware.logger import get_logger
 
 
 class RecoveryService:
- def __init__(self,data_store=None,sio=None):
-  self._data_store=data_store
+ def __init__(self,sio=None):
   self._sio=sio
-
- def set_data_store(self,data_store)->None:
-  self._data_store=data_store
 
  def set_sio(self,sio)->None:
   self._sio=sio

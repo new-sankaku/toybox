@@ -1,10 +1,10 @@
 from flask import Flask,request,jsonify
-from datastore import DataStore
-from config_loader import load_yaml_config
+from services.project_service import ProjectService
+from config_loaders import load_yaml_config
 import uuid
 
 
-def register_brushup_routes(app:Flask,data_store:DataStore,sio):
+def register_brushup_routes(app:Flask,project_service:ProjectService,sio):
 
     @app.route('/api/brushup/options',methods=['GET'])
     def get_brushup_options():
@@ -15,7 +15,7 @@ def register_brushup_routes(app:Flask,data_store:DataStore,sio):
 
     @app.route('/api/projects/<project_id>/brushup/suggest-images',methods=['POST'])
     def suggest_brushup_images(project_id:str):
-        project=data_store.get_project(project_id)
+        project=project_service.get_project(project_id)
         if not project:
             return jsonify({"error":"プロジェクトが見つかりません"}),404
 

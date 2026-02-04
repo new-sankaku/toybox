@@ -2,7 +2,7 @@ from typing import Optional,Dict,Any
 from sqlalchemy.orm import Session
 from models.tables import GlobalCostSettings
 from datetime import datetime
-from config_loader import get_cost_settings_defaults
+from config_loaders.project_option_config import get_cost_settings_defaults
 
 class GlobalCostSettingsRepository:
  def __init__(self,session:Session):

@@ -17,19 +17,17 @@ from repositories import (
     SystemLogRepository,
 )
 from repositories.trace import AgentTraceRepository
-from config_loader import (
-    get_workflow_dependencies,
-    get_initial_task,
-    get_task_for_progress,
-    get_milestones,
+from config_loaders.workflow_config import get_workflow_dependencies
+from config_loaders.message_config import get_initial_task,get_task_for_progress,get_milestones
+from config_loaders.agent_config import (
     get_generation_type_for_agent,
     get_agent_assets,
     get_agent_checkpoints,
-    get_checkpoint_content,
     get_generation_metrics_categories,
     get_agent_generation_metrics,
-    get_checkpoint_category_map,
 )
+from config_loaders.mock_config import get_checkpoint_content
+from config_loaders.checkpoint_config import get_checkpoint_category_map
 from asset_scanner import get_testdata_path
 from events.event_bus import EventBus
 from events.events import (

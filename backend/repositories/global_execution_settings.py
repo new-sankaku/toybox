@@ -2,7 +2,7 @@ from typing import Optional,Dict,Any
 from sqlalchemy.orm import Session
 from models.tables import GlobalExecutionSettings
 from datetime import datetime
-from config_loader import get_concurrent_limits,get_websocket_config
+from config_loaders.project_option_config import get_concurrent_limits,get_websocket_config
 
 class GlobalExecutionSettingsRepository:
  def __init__(self,session:Session):

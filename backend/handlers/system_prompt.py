@@ -1,25 +1,27 @@
 from flask import Flask,jsonify
-from datastore import DataStore
+from services.project_service import ProjectService
+from services.agent_service import AgentService
+from services.trace_service import TraceService
 from middleware.error_handler import NotFoundError
-from config_loader import (
- load_prompt,
+from config_loaders import get_config_dir
+from config_loaders.prompt_config import load_prompt
+from config_loaders.principle_config import (
  load_principles_for_agent,
  get_agent_principles,
- get_config_dir,
 )
 from middleware.logger import get_logger
 
-def register_system_prompt_routes(app:Flask,data_store:DataStore):
+def register_system_prompt_routes(app:Flask,project_service:ProjectService,agent_service:AgentService,trace_service:TraceService):
 
  @app.route('/api/agents/<agent_id>/system-prompt',methods=['GET'])
  def get_agent_system_prompt(agent_id:str):
-  agent=data_store.get_agent(agent_id)
+  agent=agent_service.get_agent(agent_id)
   if not agent:
    raise NotFoundError("Agent",agent_id)
 
   agent_type=agent.get("type","")
   project_id=agent.get("projectId")
-  project=data_store.get_project(project_id) if project_id else None
+  project=project_service.get_project(project_id) if project_id else None
   project_concept=project.get("concept","") if project else""
 
   system_components=[]
@@ -111,7 +113,7 @@ def register_system_prompt_routes(app:Flask,data_store:DataStore):
    user_order+=1
 
   has_quality_feedback=False
-  traces=data_store.get_traces_by_agent(agent_id)
+  traces=trace_service.get_traces_by_agent(agent_id)
   if traces:
    for trace in traces:
     prompt_sent=trace.get("promptSent","") or""

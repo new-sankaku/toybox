@@ -3,7 +3,8 @@ from typing import Any,Dict,List,Optional,TYPE_CHECKING
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 
 if TYPE_CHECKING:
- from datastore import DataStore
+ from services.agent_service import AgentService
+ from services.trace_service import TraceService
 
 
 class AgentMemorySkill(Skill):
@@ -84,9 +85,10 @@ class AgentOutputQuerySkill(Skill):
   SkillParameter(name="limit",type="integer",description="取得件数上限",required=False,default=10),
  ]
 
- def __init__(self,data_store:"DataStore"):
+ def __init__(self,agent_service:"AgentService",trace_service:"TraceService"):
   super().__init__()
-  self._data_store=data_store
+  self._agent_service=agent_service
+  self._trace_service=trace_service
 
  async def execute(self,context:SkillContext,**kwargs)->SkillResult:
   operation=kwargs.get("operation","")
@@ -94,20 +96,20 @@ class AgentOutputQuerySkill(Skill):
   agent_id=kwargs.get("agent_id","")
   limit=kwargs.get("limit",10)
   if operation=="list_agents":
-   agents=self._data_store.get_agents_by_project(context.project_id)
+   agents=self._agent_service.get_agents_by_project(context.project_id)
    summary=[{"id":a["id"],"type":a["type"],"status":a["status"],"progress":a["progress"]} for a in agents]
    return SkillResult(success=True,output=summary,metadata={"count":len(summary)})
   elif operation=="get_agent_output":
    if not agent_type and not agent_id:
     return SkillResult(success=False,error="agent_type or agent_id is required")
    if agent_id:
-    traces=self._data_store.get_traces_by_agent(agent_id)
+    traces=self._trace_service.get_traces_by_agent(agent_id)
    else:
-    agents=self._data_store.get_agents_by_project(context.project_id)
+    agents=self._agent_service.get_agents_by_project(context.project_id)
     target=next((a for a in agents if a["type"]==agent_type),None)
     if not target:
      return SkillResult(success=False,error=f"Agent not found: {agent_type}")
-    traces=self._data_store.get_traces_by_agent(target["id"])
+    traces=self._trace_service.get_traces_by_agent(target["id"])
    if not traces:
     return SkillResult(success=True,output=None,metadata={"message":"No traces found"})
    latest=traces[0]
@@ -119,9 +121,9 @@ class AgentOutputQuerySkill(Skill):
    },metadata={"traceId":latest.get("id","")})
   elif operation=="get_traces":
    if not agent_id:
-    traces=self._data_store.get_traces_by_project(context.project_id,limit=limit)
+    traces=self._trace_service.get_traces_by_project(context.project_id,limit=limit)
    else:
-    traces=self._data_store.get_traces_by_agent(agent_id)
+    traces=self._trace_service.get_traces_by_agent(agent_id)
    summaries=[{
     "id":t.get("id",""),
     "agentType":t.get("agentType",""),

@@ -82,7 +82,7 @@ class ProviderHealthMonitor:
   return result
 
  def _get_active_provider_ids(self)->Set[str]:
-  from ai_config import get_usage_categories
+  from config_loaders.ai_provider_config import get_usage_categories
   ids=set()
   for cat in get_usage_categories():
    d=cat.get('default',{})

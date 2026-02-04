@@ -6,21 +6,23 @@ sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime,timedelta
 from models.database import engine,get_session,init_db
 from models.tables import Base,Project,Agent,Metric,Intervention,Asset,AgentTrace
-from config_loader import get_auto_approval_rules as get_config_auto_approval_rules,get_ui_phases,get_agent_definitions
-from ai_config import build_default_ai_services
+from config_loaders.checkpoint_config import get_auto_approval_rules as get_config_auto_approval_rules
+from config_loaders.agent_config import get_ui_phases,get_agent_definitions
+from config_loaders.ai_provider_config import build_default_ai_services
 from asset_scanner import scan_all_testdata,get_testdata_path
+from middleware.logger import get_logger
 
 def reset_database():
  Base.metadata.drop_all(bind=engine)
  Base.metadata.create_all(bind=engine)
- print("[Seed] Database reset complete")
+ get_logger().info("[Seed] Database reset complete")
 
 def seed_sample_project():
  session=get_session()
  try:
   existing=session.query(Project).filter(Project.id=="proj-001").first()
   if existing:
-   print("[Seed] Sample project already exists, skipping")
+   get_logger().info("[Seed] Sample project already exists, skipping")
    return
   now=datetime.now()
   proj_id="proj-001"
@@ -158,10 +160,10 @@ def seed_sample_project():
    )
    session.add(intervention)
   session.commit()
-  print(f"[Seed] Sample project {proj_id} created")
+  get_logger().info(f"[Seed] Sample project {proj_id} created")
  except Exception as e:
   session.rollback()
-  print(f"[Seed] Error: {e}")
+  get_logger().error(f"[Seed] Error: {e}",exc_info=True)
   raise
  finally:
   session.close()
@@ -171,7 +173,7 @@ def seed_agent_traces(project_id:str="proj-001"):
  try:
   existing=session.query(AgentTrace).filter(AgentTrace.project_id==project_id).first()
   if existing:
-   print("[Seed] Agent traces already exist, skipping")
+   get_logger().info("[Seed] Agent traces already exist, skipping")
    return
   base_time=datetime.now()-timedelta(hours=2)
   traces_data=[
@@ -214,10 +216,10 @@ def seed_agent_traces(project_id:str="proj-001"):
     )
     session.add(trace)
   session.commit()
-  print(f"[Seed] Added {trace_idx} agent traces")
+  get_logger().info(f"[Seed] Added {trace_idx} agent traces")
  except Exception as e:
   session.rollback()
-  print(f"[Seed] Error seeding traces: {e}")
+  get_logger().error(f"[Seed] Error seeding traces: {e}",exc_info=True)
   raise
  finally:
   session.close()
@@ -225,11 +227,11 @@ def seed_agent_traces(project_id:str="proj-001"):
 def seed_testdata_assets(project_id:str="proj-001"):
  testdata_path=get_testdata_path()
  if not os.path.exists(testdata_path):
-  print(f"[Seed] testdata directory not found: {testdata_path}")
+  get_logger().warning(f"[Seed] testdata directory not found: {testdata_path}")
   return
  scanned_assets=scan_all_testdata(testdata_path)
  if not scanned_assets:
-  print("[Seed] No assets found in testdata")
+  get_logger().info("[Seed] No assets found in testdata")
   return
  session=get_session()
  try:
@@ -256,12 +258,12 @@ def seed_testdata_assets(project_id:str="proj-001"):
    added+=1
   session.commit()
   if added>0:
-   print(f"[Seed] Added {added} new assets from testdata to {project_id}")
+   get_logger().info(f"[Seed] Added {added} new assets from testdata to {project_id}")
   else:
-   print(f"[Seed] No new assets to add for {project_id}")
+   get_logger().info(f"[Seed] No new assets to add for {project_id}")
  except Exception as e:
   session.rollback()
-  print(f"[Seed] Error seeding assets: {e}")
+  get_logger().error(f"[Seed] Error seeding assets: {e}",exc_info=True)
   raise
  finally:
   session.close()
@@ -278,7 +280,7 @@ def main():
  seed_sample_project()
  seed_agent_traces()
  seed_testdata_assets()
- print("[Seed] Done")
+ get_logger().info("[Seed] Done")
 
 if __name__=="__main__":
  main()
