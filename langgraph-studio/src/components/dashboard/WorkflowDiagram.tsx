@@ -247,7 +247,7 @@ function AgentNode({data }:{data:AgentNodeData}){
     boxShadow:isRunning?`0 0 8px ${style.border}` : isWaitingApproval?`0 0 6px ${style.border}` : 'none',
    }}
   >
-   {/*Connection handles-invisible but needed for edge connections*/}
+
    <Handle type="target" position={Position.Left} id="left" style={{opacity:0,width:1,height:1}}/>
    <Handle type="target" position={Position.Top} id="top" style={{opacity:0,width:1,height:1}}/>
    <Handle type="source" position={Position.Right} id="right" style={{opacity:0,width:1,height:1}}/>
@@ -277,7 +277,7 @@ function AgentNode({data }:{data:AgentNodeData}){
      承認待ち
     </div>
 )}
-   {/*L/W indicator in bottom right*/}
+
    {data.hasLW&&(
     <div
      className="absolute"
@@ -642,7 +642,7 @@ export default function WorkflowDiagram():JSX.Element{
      <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize}/>
     </ReactFlowProvider>
 
-    {/*Legend-図の右下に縦並び*/}
+
     <div className="absolute bottom-3 right-3 flex flex-col gap-1 text-nier-caption nier-surface-main-muted p-2 rounded border border-nier-border-light">
      <div className="flex items-center gap-1">
       <div className="w-3 h-2.5 bg-[#A8A090] border border-[#454138] rounded-sm"/>

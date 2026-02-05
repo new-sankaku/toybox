@@ -1,17 +1,17 @@
-/**
- * TS/TSXファイルから不要なスペースとコメントを削除するスクリプト
- * 使用方法: npm run format
- *
- * 削除対象:
- * - 演算子周りのスペース
- * - カンマ・セミコロン後のスペース
- * - 括弧内側のスペース
- * - インラインコメント（TODO/FIXME以外）
- *
- * 保持対象:
- * - 文字列リテラル内のスペース
- * - TODO/FIXMEコメント
- */
+// TS/TSXファイルから不要なスペースとコメントを削除するスクリプト
+// 使用方法: npm run format
+//
+// 削除対象:
+// - 演算子周りのスペース
+// - カンマ・セミコロン後のスペース
+// - 括弧内側のスペース
+// - インラインコメント（TODO/FIXME以外）
+// - JSXコメント {/* comment */}（TODO/FIXME以外）
+// - ブロックコメント /* comment */（TODO/FIXME以外）
+//
+// 保持対象:
+// - 文字列リテラル内のスペース
+// - TODO/FIXMEコメント
 const fs=require('fs');
 const path=require('path');
 const excludeDirs=['node_modules','.git','dist','out'];
@@ -26,8 +26,14 @@ function removeSpacesAndComments(code){
   return `__PRESERVED_${index++}__`;
  });
 
- // コメント削除（TODO/FIXME以外）
+ // インラインコメント削除（TODO/FIXME以外）
  result=result.replace(/\/\/(?!.*(?:TODO|FIXME))[^\n]*/g,'');
+
+ // JSXコメント削除 {/* ... */}（TODO/FIXME以外）
+ result=result.replace(/\{\/\*(?![\s\S]*?(?:TODO|FIXME))[\s\S]*?\*\/\}/g,'');
+
+ // ブロックコメント削除 /* ... */（TODO/FIXME以外）
+ result=result.replace(/\/\*(?![\s\S]*?(?:TODO|FIXME))[\s\S]*?\*\//g,'');
 
  // 演算子周りのスペース削除
  result=result.replace(/([=!<>+\-*/%&|^])[ \t]+(?=\S)/g,'$1');

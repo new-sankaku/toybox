@@ -96,7 +96,7 @@ export function CodeViewer({
 
  return(
   <div className={cn('code-viewer border border-nier-border-light',className)}>
-   {/*Header*/}
+
    {filename&&(
     <div className="flex items-center justify-between nier-surface-header px-4 py-2">
      <div className="flex items-center gap-3">
@@ -134,7 +134,7 @@ export function CodeViewer({
     </div>
 )}
 
-   {/*Editor*/}
+
    <div style={{height:maxHeight}}>
     <Editor
      height="100%"
@@ -156,7 +156,7 @@ export function CodeViewer({
     />
    </div>
 
-   {/*Footer*/}
+
    {!filename&&(
     <div className="flex items-center justify-between bg-nier-bg-panel px-4 py-2 border-t border-nier-border-light">
      <span className="text-nier-caption text-nier-text-light">

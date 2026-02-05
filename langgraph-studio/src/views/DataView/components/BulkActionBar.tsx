@@ -58,5 +58,5 @@ export function BulkActionBar({
     選択解除
    </Button>
   </div>
- )
+)
 }

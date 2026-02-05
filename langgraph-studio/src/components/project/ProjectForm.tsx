@@ -109,7 +109,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
 
  return(
   <form onSubmit={handleSubmit} className="space-y-6">
-   {/*Basic Info*/}
+
    <Panel title="PROJECT INFORMATION">
     <div className="space-y-4">
      <Input
@@ -131,7 +131,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     </div>
    </Panel>
 
-   {/*Game Concept*/}
+
    <Panel title="GAME CONCEPT">
     <div className="space-y-4">
      <Textarea
@@ -170,7 +170,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     </div>
    </Panel>
 
-   {/*Language Settings*/}
+
    {languageOptions.length>0&&(
    <Panel title="LANGUAGE SETTINGS">
     <div className="space-y-4">
@@ -211,7 +211,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
    </Panel>
 )}
 
-   {/*Initial Files*/}
+
    <Panel title="INITIAL FILES (Optional)">
     <div className="space-y-2">
      <p className="text-nier-caption text-nier-text-light">
@@ -225,7 +225,7 @@ export function ProjectForm({onSubmit,onCancel,isLoading,initialData}:ProjectFor
     </div>
    </Panel>
 
-   {/*Actions*/}
+
    <div className="flex items-center justify-end gap-3">
     {onCancel&&(
      <Button type="button" variant="ghost" onClick={onCancel} disabled={isLoading}>

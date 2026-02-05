@@ -1,16 +1,12 @@
 import{type ClassValue,clsx}from'clsx'
 import{twMerge}from'tailwind-merge'
 
-/**
-*Merge class names with Tailwind CSS support
- */
+
 export function cn(...inputs:ClassValue[]):string{
  return twMerge(clsx(inputs))
 }
 
-/**
-*Format seconds to HH:MM:SS
- */
+
 export function formatDuration(seconds:number):string{
  const hours=Math.floor(seconds/3600)
  const minutes=Math.floor((seconds%3600)/60)
@@ -21,16 +17,12 @@ export function formatDuration(seconds:number):string{
   .join(':')
 }
 
-/**
-*Format number with commas
- */
+
 export function formatNumber(num:number):string{
  return num.toLocaleString()
 }
 
-/**
-*Format bytes to human readable
- */
+
 export function formatBytes(bytes:number):string{
  if(bytes===0)return'0 B'
 
@@ -41,9 +33,7 @@ export function formatBytes(bytes:number):string{
  return`${parseFloat((bytes/Math.pow(k,i)).toFixed(1))} ${sizes[i]}`
 }
 
-/**
-*Format date to localized string
- */
+
 export function formatDate(date:Date|string):string{
  const d=typeof date==='string'?new Date(date) : date
  return d.toLocaleString('ja-JP',{
@@ -56,9 +46,7 @@ export function formatDate(date:Date|string):string{
  })
 }
 
-/**
-*Format relative time (e.g.,"5分前")
- */
+
 export function formatRelativeTime(date:Date|string):string{
  const d=typeof date==='string'?new Date(date) : date
  const now=new Date()

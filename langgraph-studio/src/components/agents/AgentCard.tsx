@@ -8,11 +8,11 @@ interface AgentCardProps{
  onSelect:(agent:Agent)=>void
  isSelected?:boolean
  qualityCheckConfig?:QualityCheckConfig
- /**待機中の場合、何を待っているかの説明*/
+
  waitingFor?:string
- /**再試行ボタンクリック時のコールバック*/
+
  onRetry?:(agent:Agent)=>void
- /**Worker表示（インデント付き）*/
+
  isWorker?:boolean
 }
 

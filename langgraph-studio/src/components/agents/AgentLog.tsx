@@ -87,12 +87,12 @@ export function AgentLog({
 )}
          >
           <div className="flex items-start gap-3">
-           {/*Timestamp*/}
+
            <span className="text-nier-caption text-nier-text-light whitespace-nowrap">
             {formatTime(entry.timestamp)}
            </span>
 
-           {/*Level Badge*/}
+
            <span
             className={cn(
              'flex items-center gap-1 text-nier-caption whitespace-nowrap',
@@ -103,12 +103,12 @@ export function AgentLog({
             <span>{config.label}</span>
            </span>
 
-           {/*Message*/}
+
            <span className="text-nier-text-main break-all">
             {entry.message}
            </span>
 
-           {/*Progress (if available)*/}
+
            {entry.progress!==undefined&&(
             <span className="text-nier-caption text-nier-accent-orange ml-auto whitespace-nowrap">
              {entry.progress}%
@@ -116,7 +116,7 @@ export function AgentLog({
 )}
           </div>
 
-          {/*Metadata (if available)*/}
+
           {entry.metadata&&Object.keys(entry.metadata).length>0&&(
            <div className="mt-1 ml-20 text-nier-caption text-nier-text-light">
             <pre className="whitespace-pre-wrap">

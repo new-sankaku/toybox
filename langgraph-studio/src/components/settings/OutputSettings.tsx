@@ -73,7 +73,7 @@ export function OutputSettings({projectId}:OutputSettingsProps):JSX.Element{
       className={cn(
        'nier-input w-full',
        outputDirChanged&&'border-nier-accent-red text-nier-accent-red'
-      )}
+)}
       value={outputDir}
       onChange={(e)=>setOutputDir(e.target.value)}
      />
@@ -89,8 +89,8 @@ export function OutputSettings({projectId}:OutputSettingsProps):JSX.Element{
        <span className="ml-1">{saving?'保存中...':'全てのプロジェクトに保存'}</span>
       </Button>
      </div>
-    )}
+)}
    </CardContent>
   </Card>
- )
+)
 }

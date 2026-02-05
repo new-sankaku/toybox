@@ -72,13 +72,13 @@ export function CheckpointCard({
    onClick={()=>onSelect(checkpoint)}
   >
    <CardContent className="p-3">
-    {/*Header Row*/}
+
     <div className="flex items-start justify-between mb-2">
      <div className="flex items-center gap-2">
-      {/*Category Marker*/}
+
       <div className={cn('w-1 h-8',status.color,status.pulse&&'animate-nier-pulse')}/>
 
-      {/*Type Icon&Title*/}
+
       <div>
        <div className="flex items-center gap-1.5 mb-0.5">
         <TypeIcon size={12} className="text-nier-text-light"/>
@@ -92,7 +92,7 @@ export function CheckpointCard({
       </div>
      </div>
 
-     {/*Status,Time,Tokens,Review Button*/}
+
      <div className="flex items-center gap-2">
       <span className="text-nier-caption text-nier-text-light flex items-center gap-1">
        <Clock size={10}/>
@@ -120,7 +120,7 @@ export function CheckpointCard({
      </div>
     </div>
 
-    {/*Summary*/}
+
     {checkpoint.output?.summary&&(
      <p className="text-nier-caption text-nier-text-light line-clamp-2 pl-3">
       {checkpoint.output.summary}

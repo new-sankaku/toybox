@@ -72,7 +72,7 @@ export default function AgentDetailView({
 
  return(
   <div className="p-6 animate-nier-fade-in h-full overflow-y-auto">
-   {/*Header*/}
+
    <div className="flex items-center justify-between mb-6">
     <div>
      <div className="flex items-center gap-3 mb-2">
@@ -93,11 +93,11 @@ export default function AgentDetailView({
     </Button>
    </div>
 
-   {/*Main Content*/}
+
    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-    {/*Left Column-Status&Controls*/}
+
     <div className="space-y-4">
-     {/*Progress Card*/}
+
      <Card>
       <CardHeader>
        <DiamondMarker>進捗</DiamondMarker>
@@ -121,7 +121,7 @@ export default function AgentDetailView({
       </CardContent>
      </Card>
 
-     {/*Metrics Card*/}
+
      <Card>
       <CardHeader>
        <DiamondMarker>メトリクス</DiamondMarker>
@@ -159,7 +159,7 @@ export default function AgentDetailView({
       </CardContent>
      </Card>
 
-     {/*Actions Card*/}
+
      <Card>
       <CardHeader className="bg-nier-accent-blue">
        <span className="flex items-center gap-2 text-white">
@@ -211,7 +211,7 @@ export default function AgentDetailView({
       </CardContent>
      </Card>
 
-     {/*Metadata (conditional)*/}
+
      {showMetadata&&agent.metadata&&Object.keys(agent.metadata).length>0&&(
       <Card>
        <CardHeader>
@@ -226,14 +226,14 @@ export default function AgentDetailView({
 )}
     </div>
 
-    {/*Right Column-Logs (2 columns wide)*/}
+
     <div className="col-span-2">
      <AgentLogStreaming
       logs={logs}
       isStreaming={agent.status==='running'}
      />
 
-     {/*Error Details*/}
+
      {agent.status==='failed'&&agent.error&&(
       <Card className="mt-4 border-nier-accent-red">
        <CardHeader className="bg-nier-accent-red">

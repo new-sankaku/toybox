@@ -27,7 +27,7 @@ export function DataManagement():JSX.Element{
     backupApi.list(),
     archiveApi.list(),
     archiveApi.getStats()
-   ])
+])
    setBackups(backupData)
    setArchives(archiveData)
    if(statsData){
@@ -138,10 +138,10 @@ export function DataManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    <Card>
     <CardHeader>
@@ -154,7 +154,7 @@ export function DataManagement():JSX.Element{
     <CardContent className="border-t border-nier-border-light">
      {backups.length===0?(
       <div className="text-center py-4 text-nier-text-light">バックアップがありません</div>
-     ):(
+):(
       <div className="divide-y divide-nier-border-light">
        {backups.map(b=>(
         <div key={b.name} className="flex items-center justify-between py-3">
@@ -174,9 +174,9 @@ export function DataManagement():JSX.Element{
           </Button>
          </div>
         </div>
-       ))}
+))}
       </div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -226,7 +226,7 @@ export function DataManagement():JSX.Element{
         </div>
        </div>
       </div>
-     )}
+)}
      <Button
       variant="default" size="sm"
       onClick={()=>setConfirmDialog({type:'cleanup'})}
@@ -245,7 +245,7 @@ export function DataManagement():JSX.Element{
     <CardContent className="border-t border-nier-border-light">
      {archives.length===0?(
       <div className="text-center py-4 text-nier-text-light">アーカイブがありません</div>
-     ):(
+):(
       <div className="divide-y divide-nier-border-light">
        {archives.map(a=>(
         <div key={a.name} className="flex items-center justify-between py-3">
@@ -264,9 +264,9 @@ export function DataManagement():JSX.Element{
           </Button>
          </div>
         </div>
-       ))}
+))}
       </div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -293,7 +293,7 @@ export function DataManagement():JSX.Element{
       </div>
      </CardContent>
     </Card>
-   )}
+)}
 
    {confirmDialog&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -331,7 +331,7 @@ export function DataManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

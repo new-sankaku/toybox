@@ -132,7 +132,7 @@ export function AdvancedSettings({projectId}:AdvancedSettingsProps):JSX.Element{
         />
        </div>
       </div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -254,7 +254,7 @@ export function AdvancedSettings({projectId}:AdvancedSettingsProps):JSX.Element{
          onChange={(e)=>setSettings({...settings,temperatureDefaults:{...settings.temperatureDefaults,[role]:parseFloat(e.target.value)||0}})}
         />
        </div>
-      ))}
+))}
      </div>
     </CardContent>
    </Card>
@@ -364,7 +364,7 @@ export function AdvancedSettings({projectId}:AdvancedSettingsProps):JSX.Element{
       <span className="ml-1">{saving?'保存中...':'全てのプロジェクトに保存'}</span>
      </Button>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

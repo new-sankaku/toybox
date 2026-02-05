@@ -65,7 +65,7 @@ export default function CheckpointListView({
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
-   {/*Checkpoint List-Main Content*/}
+
    <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader className="flex-shrink-0">
      <DiamondMarker>承認一覧</DiamondMarker>
@@ -102,9 +102,9 @@ export default function CheckpointListView({
     </CardContent>
    </Card>
 
-   {/*Filter Sidebar*/}
+
    <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
-    {/*Status Filter*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>ステータス</DiamondMarker>
@@ -135,7 +135,7 @@ export default function CheckpointListView({
      </CardContent>
     </Card>
 
-    {/*Sort Order*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>並び順</DiamondMarker>
@@ -168,7 +168,7 @@ export default function CheckpointListView({
      </CardContent>
     </Card>
 
-    {/*Summary Stats*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>統計</DiamondMarker>

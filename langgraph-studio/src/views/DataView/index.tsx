@@ -190,7 +190,7 @@ export default function DataView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-  )
+)
  }
 
  const assetCounts={
@@ -232,13 +232,13 @@ export default function DataView():JSX.Element{
       <div className="text-center py-8 text-nier-text-light">
        <p className="text-nier-small">読み込み中...</p>
       </div>
-     ):filteredAssets.length===0?(
+):filteredAssets.length===0?(
       <div className="text-center py-12 text-nier-text-light">
        <FolderOpen size={40} className="mx-auto mb-3 opacity-50"/>
        <p className="text-nier-body mb-1">アセットがありません</p>
        <p className="text-nier-caption">プロジェクトを実行すると、AIが生成した画像・音声・コードなどがここに表示されます</p>
       </div>
-     ):viewMode==='grid'?(
+):viewMode==='grid'?(
       <AssetGrid
        assets={filteredAssets}
        selectedIds={selectedIds}
@@ -249,7 +249,7 @@ export default function DataView():JSX.Element{
        onApprove={handleApprove}
        onReject={handleReject}
       />
-     ):(
+):(
       <AssetList
        assets={filteredAssets}
        selectedIds={selectedIds}
@@ -262,7 +262,7 @@ export default function DataView():JSX.Element{
        onApprove={handleApprove}
        onReject={handleReject}
       />
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -291,7 +291,7 @@ export default function DataView():JSX.Element{
      onReject={handleReject}
      onRequestRegeneration={handleRequestRegeneration}
     />
-   )}
+)}
 
    <audio
     ref={audioRef}
@@ -299,5 +299,5 @@ export default function DataView():JSX.Element{
     onError={handleError}
    />
   </div>
- )
+)
 }

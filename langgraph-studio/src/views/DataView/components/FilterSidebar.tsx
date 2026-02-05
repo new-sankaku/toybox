@@ -53,14 +53,14 @@ export function FilterSidebar({
           filterType===type
            ?'nier-surface-selected'
            :'text-nier-text-light hover:bg-nier-bg-panel'
-         )}
+)}
          onClick={()=>onFilterTypeChange(type)}
         >
          <Icon size={14}/>
          <span className="flex-1">{label}</span>
          <span className="text-nier-caption opacity-70">({count})</span>
         </button>
-       )
+)
       })}
      </div>
     </CardContent>
@@ -83,13 +83,13 @@ export function FilterSidebar({
           approvalFilter===status
            ?'nier-surface-selected'
            :'text-nier-text-light hover:bg-nier-bg-panel'
-         )}
+)}
          onClick={()=>onApprovalFilterChange(status)}
         >
          <span>{label}</span>
          <span className="text-nier-caption opacity-70">({count})</span>
         </button>
-       )
+)
       })}
      </div>
     </CardContent>
@@ -106,7 +106,7 @@ export function FilterSidebar({
        className={cn(
         'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
         viewMode==='grid'?'nier-surface-selected':'text-nier-text-light hover:bg-nier-bg-hover'
-       )}
+)}
       >
        <Grid size={14}/>
        グリッド
@@ -116,7 +116,7 @@ export function FilterSidebar({
        className={cn(
         'flex-1 flex items-center justify-center gap-1 p-1.5 transition-colors text-nier-small',
         viewMode==='list'?'nier-surface-selected':'text-nier-text-light hover:bg-nier-bg-hover'
-       )}
+)}
       >
        <List size={14}/>
        リスト
@@ -125,5 +125,5 @@ export function FilterSidebar({
     </CardContent>
    </Card>
   </div>
- )
+)
 }

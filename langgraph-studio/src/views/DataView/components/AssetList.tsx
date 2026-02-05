@@ -66,7 +66,7 @@ export function AssetList({
        className={cn(
         "hover:bg-nier-bg-panel transition-colors cursor-pointer",
         isSelected&&"bg-nier-bg-selected"
-       )}
+)}
        onClick={()=>onSelectAsset(asset)}
       >
        <td className="px-2 py-3">
@@ -108,7 +108,7 @@ export function AssetList({
           >
            {playingAudio===asset.id?<Pause size={14}/>:<Play size={14}/>}
           </button>
-         )}
+)}
          {asset.approvalStatus!=='approved'&&(
           <button
            onClick={(e)=>{e.stopPropagation();onApprove(asset.id)}}
@@ -117,7 +117,7 @@ export function AssetList({
           >
            <Check size={14}/>
           </button>
-         )}
+)}
          {asset.approvalStatus!=='rejected'&&(
           <button
            onClick={(e)=>{e.stopPropagation();onReject(asset.id)}}
@@ -126,7 +126,7 @@ export function AssetList({
           >
            <XCircle size={14}/>
           </button>
-         )}
+)}
          <button
           onClick={(e)=>{
            e.stopPropagation()
@@ -141,9 +141,9 @@ export function AssetList({
         </div>
        </td>
       </tr>
-     )
+)
     })}
    </tbody>
   </table>
- )
+)
 }

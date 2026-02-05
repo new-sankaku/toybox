@@ -193,7 +193,7 @@ export default function LogsView():JSX.Element{
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex gap-3 overflow-hidden">
-   {/*Log List and Details-Main Content*/}
+
    <div className="flex-1 flex flex-col gap-3 overflow-hidden">
     <Card className="flex-1 flex flex-col overflow-hidden">
       <CardHeader className="flex-shrink-0">
@@ -249,9 +249,9 @@ export default function LogsView():JSX.Element{
 
    </div>
 
-   {/*Filter Sidebar*/}
+
    <div className="w-40 md:w-48 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
-    {/*Search*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>検索</DiamondMarker>
@@ -270,7 +270,7 @@ export default function LogsView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/*Level Filter*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>レベル</DiamondMarker>
@@ -301,7 +301,7 @@ export default function LogsView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/*Agent Filter-Dropdown*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>エージェント</DiamondMarker>
@@ -355,7 +355,7 @@ export default function LogsView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/*Stats*/}
+
     <Card>
      <CardHeader>
       <DiamondMarker>統計</DiamondMarker>

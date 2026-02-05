@@ -223,7 +223,7 @@ export default function ActivitySidebar():JSX.Element{
    'bg-nier-bg-panel border-l border-nier-border-light flex flex-col transition-all duration-200',
    isCollapsed?'w-sidebar-collapsed' : 'w-sidebar-expanded'
 )}>
-   {/*Header*/}
+
    <div className="flex items-center justify-between border-b border-nier-border-light">
     <button
      onClick={()=>setIsCollapsed(!isCollapsed)}
@@ -239,7 +239,7 @@ export default function ActivitySidebar():JSX.Element{
 
    {!isCollapsed&&(
     <div className="flex-1 flex flex-col overflow-hidden">
-     {/*Project Status-Compact*/}
+
      <div className="px-2 py-1.5 border-b border-nier-border-light flex-shrink-0">
       <div className="flex items-center justify-between">
        <div className="text-[11px] truncate flex-1 font-medium">{currentProject.name}</div>
@@ -265,9 +265,9 @@ export default function ActivitySidebar():JSX.Element{
 )}
      </div>
 
-     {/*Scrollable content area*/}
+
      <div className="flex-1 overflow-y-auto">
-      {/*Summary List*/}
+
       <div className="px-2 py-1.5 text-[11px] space-y-1">
       <div className={cn('flex justify-between transition-colors duration-300',highlights.token&&'bg-nier-accent-orange/30')}>
        <span className="text-nier-text-light">Token</span>
@@ -308,9 +308,9 @@ export default function ActivitySidebar():JSX.Element{
      </div>
      </div>
 
-     {/*Navigator Send Form*/}
+
      <NavigatorSendForm/>
-     {/*Operator Panel*/}
+
      <OperatorPanel/>
     </div>
 )}

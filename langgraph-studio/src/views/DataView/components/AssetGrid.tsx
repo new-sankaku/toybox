@@ -39,7 +39,7 @@ export function AssetGrid({
       className={cn(
        "nier-surface-panel border cursor-pointer hover:border-nier-accent-gold transition-colors p-2 relative",
        isSelected?"border-nier-accent-orange":"border-nier-border-light"
-      )}
+)}
       onClick={()=>onSelectAsset(asset)}
      >
       <button
@@ -58,7 +58,7 @@ export function AssetGrid({
          alt={asset.name}
          className="w-full h-full object-cover"
         />
-       ):asset.type==='video'&&asset.url?(
+):asset.type==='video'&&asset.url?(
         <div className="relative w-full h-full">
          <video
           src={asset.url}
@@ -70,7 +70,7 @@ export function AssetGrid({
           <Play size={24} className="text-white"/>
          </div>
         </div>
-       ):asset.type==='audio'?(
+):asset.type==='audio'?(
         <button
          onClick={(e)=>{
           e.stopPropagation()
@@ -80,13 +80,13 @@ export function AssetGrid({
         >
          {playingAudio===asset.id?(
           <Pause size={16} className="text-nier-text-main"/>
-         ):(
+):(
           <Play size={16} className="text-nier-text-main ml-0.5"/>
-         )}
+)}
         </button>
-       ):(
+):(
         <Icon size={24} className={typeColors[asset.type]}/>
-       )}
+)}
       </div>
       <div className="text-nier-caption font-medium truncate" title={asset.name}>
        {asset.name}
@@ -108,7 +108,7 @@ export function AssetGrid({
          >
           <Check size={14}/>
          </button>
-        )}
+)}
         {asset.approvalStatus!=='rejected'&&(
          <button
           onClick={(e)=>{
@@ -120,12 +120,12 @@ export function AssetGrid({
          >
           <XCircle size={14}/>
          </button>
-        )}
+)}
        </div>
       </div>
      </div>
-    )
+)
    })}
   </div>
- )
+)
 }

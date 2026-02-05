@@ -33,7 +33,7 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
    const[listData,projectData]=await Promise.all([
     projectSettingsApi.getPrinciplesList(),
     projectSettingsApi.getProjectPrinciples(projectId)
-   ])
+])
    setPrinciples(listData.principles)
    setDefaults(listData.defaults)
    setAgentsMeta(listData.agents??{})
@@ -152,7 +152,7 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
        <label key={p.id} className={cn(
         'flex items-start gap-3 p-3 border cursor-pointer transition-colors',
         enabled.includes(p.id)?'border-nier-border-dark nier-surface-selected':'border-nier-border-light nier-surface-panel hover:bg-nier-bg-selected'
-       )}>
+)}>
         <input
          type="checkbox"
          className="mt-1"
@@ -164,7 +164,7 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
          <div className="text-nier-caption text-nier-text-light">{p.description}</div>
         </div>
        </label>
-      ))}
+))}
      </div>
     </CardContent>
    </Card>
@@ -202,7 +202,7 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
               {p.id.slice(0,2).toUpperCase()}
              </span>
             </div>
-           ))}
+))}
            <div/>
            {phase.agents.map(agentType=>{
             const meta=agentsMeta[agentType]
@@ -228,7 +228,7 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
                   onChange={()=>handleAgentPrincipleToggle(agentType,p.id)}
                  />
                 </div>
-               )
+)
               })}
               <div className="flex justify-center">
                {customized&&(
@@ -239,16 +239,16 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
                 >
                  <RotateCcw size={10}/>
                 </button>
-               )}
+)}
               </div>
              </Fragment>
-            )
+)
            })}
           </div>
          </div>
-        )}
+)}
        </div>
-      ))}
+))}
      </div>
      <div className="flex gap-2 justify-end pt-2">
       <Button variant="ghost" size="sm" onClick={handleResetAll}>
@@ -267,5 +267,5 @@ export function PrincipleSettings({projectId}:PrincipleSettingsProps):JSX.Elemen
     </CardContent>
    </Card>
   </div>
- )
+)
 }

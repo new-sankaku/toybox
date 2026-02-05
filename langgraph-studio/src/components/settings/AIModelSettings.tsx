@@ -149,7 +149,7 @@ export function AIModelSettings({projectId}:AIModelSettingsProps):JSX.Element{
            className={cn(
             'nier-input w-full',
             changed&&'border-nier-accent-orange'
-           )}
+)}
            value={cat.provider}
            onChange={(e)=>{
             handleChange(cat.id,'provider',e.target.value)
@@ -159,7 +159,7 @@ export function AIModelSettings({projectId}:AIModelSettingsProps):JSX.Element{
           >
            {providers.map(pid=>(
             <option key={pid} value={pid}>{getProviderLabel(pid)}</option>
-           ))}
+))}
           </select>
          </div>
          <div>
@@ -167,24 +167,24 @@ export function AIModelSettings({projectId}:AIModelSettingsProps):JSX.Element{
            className={cn(
             'nier-input w-full',
             changed&&'border-nier-accent-orange'
-           )}
+)}
            value={cat.model}
            onChange={(e)=>handleChange(cat.id,'model',e.target.value)}
           >
            {models.map(m=>(
             <option key={m.id} value={m.id}>{m.label||m.id}</option>
-           ))}
+))}
           </select>
          </div>
          <Button variant="ghost" size="sm" onClick={()=>handleReset(cat.id)} disabled={!!saving[cat.id]}>
           <RotateCcw size={12}/>
          </Button>
         </div>
-       )
+)
       })}
      </CardContent>
     </Card>
-   ))}
+))}
    {getChangedCategories().length>0&&(
     <div className="flex gap-2 justify-end">
      <Button variant="secondary" size="sm" onClick={handleSaveToProject} disabled={savingAll}>
@@ -196,7 +196,7 @@ export function AIModelSettings({projectId}:AIModelSettingsProps):JSX.Element{
       <span className="ml-1">{savingAll?'保存中...':'全てのプロジェクトに保存'}</span>
      </Button>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

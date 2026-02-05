@@ -27,7 +27,7 @@ export function ApiKeyManagement():JSX.Element{
     apiKeyApi.list(),
     aiProviderApi.list(),
     aiProviderApi.getServiceTypes()
-   ])
+])
    setKeys(keyData)
    setProviders(providerData)
    setServiceTypesInfo(typesData)
@@ -124,7 +124,7 @@ export function ApiKeyManagement():JSX.Element{
       keyInfo.validated
        ?<CheckCircle size={12} className="text-nier-accent-green flex-shrink-0"/>
        :<XCircle size={12} className="text-nier-text-light flex-shrink-0"/>
-     )}
+)}
     </div>
     <div className="flex items-center gap-1 min-w-0">
      <input
@@ -151,7 +151,7 @@ export function ApiKeyManagement():JSX.Element{
      <span className="ml-1 hidden sm:inline">{validating[provider.id]?'検証中':'検証'}</span>
     </Button>
    </div>
-  )
+)
  }
 
  return(
@@ -173,10 +173,10 @@ export function ApiKeyManagement():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
 
    {serviceTypesInfo?.types.map(serviceType=>{
     const providersInGroup=groups[serviceType]||[]
@@ -213,7 +213,7 @@ export function ApiKeyManagement():JSX.Element{
        </div>
       </CardContent>
      </Card>
-    )
+)
    })}
 
    {hasChanges&&(
@@ -223,7 +223,7 @@ export function ApiKeyManagement():JSX.Element{
       <span className="ml-1">{saving?'保存中...':'APIキーを保存'}</span>
      </Button>
     </div>
-   )}
+)}
 
    {confirmDelete&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -241,7 +241,7 @@ export function ApiKeyManagement():JSX.Element{
       </CardContent>
      </Card>
     </div>
-   )}
+)}
   </div>
- )
+)
 }

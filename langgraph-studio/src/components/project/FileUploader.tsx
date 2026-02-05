@@ -171,7 +171,7 @@ export function FileUploader({
 
  return(
   <div className="space-y-4">
-   {/*Drop Zone*/}
+
    <div
     className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
      dragActive?'border-nier-accent bg-nier-accent/5':
@@ -205,7 +205,7 @@ export function FileUploader({
     </p>
    </div>
 
-   {/*Error Message*/}
+
    {error&&(
     <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded text-red-700">
      <AlertCircle size={16} className="flex-shrink-0 mt-0.5"/>
@@ -213,7 +213,7 @@ export function FileUploader({
     </div>
 )}
 
-   {/*File List*/}
+
    {files.length>0&&(
     <div className="space-y-3">
      <div className="flex items-center justify-between text-nier-caption">

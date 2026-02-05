@@ -23,7 +23,7 @@ export function ExecutionSettings():JSX.Element{
    const[limits,ws]=await Promise.all([
     projectSettingsApi.getConcurrentLimits(),
     configApi.getWebSocketConfig()
-   ])
+])
    setConcurrentLimits(limits)
    setOriginalConcurrentLimits(JSON.parse(JSON.stringify(limits)))
    setWsConfig(ws)
@@ -93,10 +93,10 @@ export function ExecutionSettings():JSX.Element{
     <div className={cn(
      'px-4 py-2 text-nier-small border',
      message.type==='success'?'border-nier-accent-green text-nier-accent-green':'border-nier-accent-red text-nier-accent-red'
-    )}>
+)}>
      {message.text}
     </div>
-   )}
+)}
    <Card>
     <CardHeader>
      <Settings2 size={16} className="text-nier-text-light"/>
@@ -107,7 +107,7 @@ export function ExecutionSettings():JSX.Element{
        <Save size={12}/>
        <span className="ml-1">{saving?'保存中...':'保存'}</span>
       </Button>
-     )}
+)}
     </CardHeader>
     <CardContent className="border-t border-nier-border-light">
      {concurrentLimits?(
@@ -138,13 +138,13 @@ export function ExecutionSettings():JSX.Element{
             onChange={(e)=>handleProviderOverrideChange(provider,parseInt(e.target.value)||1)}
            />
           </div>
-         ))}
+))}
         </div>
        </div>
       </div>
-     ):(
+):(
       <div className="text-nier-text-light">同時実行設定を取得できませんでした</div>
-     )}
+)}
     </CardContent>
    </Card>
 
@@ -157,7 +157,7 @@ export function ExecutionSettings():JSX.Element{
        <Save size={12}/>
        <span className="ml-1">{saving?'保存中...':'保存'}</span>
       </Button>
-     )}
+)}
     </CardHeader>
     <CardContent className="border-t border-nier-border-light">
      {wsConfig?(
@@ -207,11 +207,11 @@ export function ExecutionSettings():JSX.Element{
         />
        </div>
       </div>
-     ):(
+):(
       <div className="text-nier-text-light">WebSocket設定を取得できませんでした</div>
-     )}
+)}
     </CardContent>
    </Card>
   </div>
- )
+)
 }

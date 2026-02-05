@@ -170,7 +170,7 @@ export default function InterventionView():JSX.Element{
  return(
   <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
    <div className="grid grid-cols-1 lg:grid-cols-4 gap-3 flex-1 overflow-hidden">
-    {/*Left: Chat Room List*/}
+
     <Card className="flex flex-col overflow-hidden">
      <CardHeader className="flex-shrink-0">
       <DiamondMarker>チャット部屋</DiamondMarker>
@@ -180,7 +180,7 @@ export default function InterventionView():JSX.Element{
      </CardHeader>
      <CardContent className="flex-1 overflow-y-auto p-0">
       <div className="divide-y divide-nier-border">
-       {/*New Chat Room Button*/}
+
        <button
         onClick={()=>{setShowNewForm(true);setSelectedId(null)}}
         className={`w-full p-3 text-left hover:bg-nier-bg-hover transition-colors flex items-center gap-2 ${
@@ -246,7 +246,7 @@ export default function InterventionView():JSX.Element{
      </CardContent>
     </Card>
 
-    {/*Right: Chat Conversation*/}
+
     <div className="lg:col-span-3">
      <Card className="h-full flex flex-col">
       <CardHeader className="flex-shrink-0">
@@ -465,7 +465,7 @@ export default function InterventionView():JSX.Element{
     </div>
    </div>
 
-   {/*Delete Confirmation Dialog*/}
+
    {showDeleteDialog&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
      <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">

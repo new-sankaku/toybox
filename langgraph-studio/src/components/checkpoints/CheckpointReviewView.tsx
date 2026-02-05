@@ -141,7 +141,7 @@ export default function CheckpointReviewView({
 
  return(
   <div className="p-6 animate-nier-fade-in h-full overflow-y-auto">
-   {/*Header*/}
+
    <div className="flex items-center justify-between mb-6">
     <div>
      <div className="flex items-center gap-3 mb-2">
@@ -162,9 +162,9 @@ export default function CheckpointReviewView({
     </Button>
    </div>
 
-   {/*Main Content*/}
+
    <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-    {/*Output Preview (3 columns)*/}
+
     <div className="lg:col-span-3">
      <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -189,7 +189,7 @@ export default function CheckpointReviewView({
       </CardContent>
      </Card>
 
-     {/*Metadata*/}
+
      <Card className="mt-4">
       <CardContent className="py-3">
        <div className="flex items-center gap-6 text-nier-small text-nier-text-light">
@@ -203,9 +203,9 @@ export default function CheckpointReviewView({
      </Card>
     </div>
 
-    {/*Actions Panel (1 column)*/}
+
     <div className="space-y-4">
-     {/*Status*/}
+
      <Card>
       <CardHeader>
        <DiamondMarker>ステータス</DiamondMarker>
@@ -224,7 +224,7 @@ export default function CheckpointReviewView({
       </CardContent>
      </Card>
 
-     {/*Feedback Form*/}
+
      {showFeedbackForm&&(
       <Card>
        <CardHeader>
@@ -263,7 +263,7 @@ export default function CheckpointReviewView({
       </Card>
 )}
 
-     {/*Action Buttons*/}
+
      <Card>
       <CardHeader className="bg-nier-accent-red">
        <span className="flex items-center gap-2">

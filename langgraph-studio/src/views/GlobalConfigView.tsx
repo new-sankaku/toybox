@@ -75,7 +75,7 @@ export default function GlobalConfigView():JSX.Element{
     </div>
    </CardContent>
   </Card>
- )
+)
 
  return(
   <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden">
@@ -95,12 +95,12 @@ export default function GlobalConfigView():JSX.Element{
            activeSection===section.id
             ?'nier-surface-selected'
             :'text-nier-text-light hover:bg-nier-bg-panel'
-          )}
+)}
           onClick={()=>setActiveSection(section.id)}
          >
           {section.label}
          </button>
-        ))}
+))}
        </div>
       </CardContent>
       {activeSection==='auto-approval'&&currentProject&&hasAutoApprovalChanges()&&(
@@ -114,37 +114,37 @@ export default function GlobalConfigView():JSX.Element{
          <span className="ml-1">{saving?'保存中...':'全てのプロジェクトに保存'}</span>
         </Button>
        </div>
-      )}
+)}
      </Card>
     </div>
 
     <div className="flex-1 min-h-0 overflow-y-auto space-y-4">
      {activeSection==='auto-approval'&&(
       currentProject?<AutoApprovalSettings projectId={currentProject.id}/>:renderNoProjectMessage()
-     )}
+)}
      {activeSection==='execution-settings'&&<ExecutionSettings/>}
      {activeSection==='ai-models'&&(
       currentProject?<AIModelSettings projectId={currentProject.id}/>:renderNoProjectMessage()
-     )}
+)}
      {activeSection==='cost-management'&&(
       <div className="space-y-6">
        <GlobalCostManagement/>
        <CostReportPanel/>
       </div>
-     )}
+)}
      {activeSection==='api-keys'&&<ApiKeyManagement/>}
      {activeSection==='advanced'&&(
       currentProject?<AdvancedSettings projectId={currentProject.id}/>:renderNoProjectMessage()
-     )}
+)}
      {activeSection==='principles'&&(
       currentProject?<PrincipleSettings projectId={currentProject.id}/>:renderNoProjectMessage()
-     )}
+)}
      {activeSection==='output'&&(
       currentProject?<OutputSettings projectId={currentProject.id}/>:renderNoProjectMessage()
-     )}
+)}
      {activeSection==='data-management'&&<DataManagement/>}
     </div>
    </div>
   </div>
- )
+)
 }

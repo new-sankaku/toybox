@@ -66,7 +66,7 @@ export function AssetDetailModal({
        className={cn(
         "p-1 transition-colors",
         assetIndex>0?"text-nier-text-header hover:bg-white/10":"text-nier-text-light/50 cursor-not-allowed"
-       )}
+)}
        title="前のアセット"
       >
        <ChevronLeft size={20}/>
@@ -77,7 +77,7 @@ export function AssetDetailModal({
        className={cn(
         "p-1 transition-colors",
         assetIndex<totalAssets-1?"text-nier-text-header hover:bg-white/10":"text-nier-text-light/50 cursor-not-allowed"
-       )}
+)}
        title="次のアセット"
       >
        <ChevronRight size={20}/>
@@ -106,7 +106,7 @@ export function AssetDetailModal({
         alt={asset.name}
         className="max-w-full max-h-full object-contain"
        />
-      )}
+)}
 
       {asset.type==='audio'&&(
        <div className="flex flex-col items-center">
@@ -126,15 +126,15 @@ export function AssetDetailModal({
            <Pause size={20}/>
            停止
           </>
-         ):(
+):(
           <>
            <Play size={20}/>
            再生
           </>
-         )}
+)}
         </button>
        </div>
-      )}
+)}
 
       {asset.type==='video'&&asset.url&&(
        <div className="flex flex-col items-center w-full max-w-2xl">
@@ -149,7 +149,7 @@ export function AssetDetailModal({
          {asset.size}
         </div>
        </div>
-      )}
+)}
 
       {asset.type==='document'&&(
        <div className="nier-surface-panel border border-nier-border-light p-6 prose prose-sm max-w-none w-full h-full overflow-auto">
@@ -168,9 +168,9 @@ export function AssetDetailModal({
            const isBlock=className?.includes('language-')
            return isBlock?(
             <code className="block nier-surface-main p-4 text-nier-caption font-mono overflow-x-auto">{children}</code>
-           ):(
+):(
             <code className="nier-surface-main px-1 py-0.5 text-nier-caption font-mono">{children}</code>
-           )
+)
           },
           pre:({children})=><pre className="mb-4">{children}</pre>,
           blockquote:({children})=><blockquote className="border-l-4 border-nier-border-dark pl-4 italic text-nier-text-light mb-3">{children}</blockquote>,
@@ -185,7 +185,7 @@ export function AssetDetailModal({
          {asset.content||''}
         </ReactMarkdown>
        </div>
-      )}
+)}
 
       {asset.type==='code'&&(
        <div className="nier-surface-panel border border-nier-border-light p-6 overflow-auto w-full h-full">
@@ -193,7 +193,7 @@ export function AssetDetailModal({
          {asset.content||''}
         </pre>
        </div>
-      )}
+)}
      </div>
 
      <div className="w-64 flex-shrink-0 border-l border-nier-border-light overflow-y-auto nier-surface-panel">
@@ -231,7 +231,7 @@ export function AssetDetailModal({
           <Check size={14} className="mr-1.5"/>
           承認
          </Button>
-        )}
+)}
         {asset.approvalStatus!=='rejected'&&(
          <Button
           className="w-full"
@@ -241,7 +241,7 @@ export function AssetDetailModal({
           <XCircle size={14} className="mr-1.5"/>
           却下
          </Button>
-        )}
+)}
         <Button
          className="w-full"
          variant="secondary"
@@ -280,5 +280,5 @@ export function AssetDetailModal({
     </div>
    </div>
   </div>
- )
+)
 }
