@@ -22,6 +22,8 @@ from config_loaders.workflow_config import (
 from config_loaders.principle_config import (
  get_available_principles,
  get_default_agent_principles,
+ get_principle_content,
+ save_principle_content,
 )
 from config_loaders.ai_provider_config import get_usage_categories
 from models.database import session_scope
@@ -324,3 +326,73 @@ def register_project_settings_routes(app:Flask,project_service:ProjectService):
    advanced["enabledPrinciples"]=data["enabledPrinciples"]
   project_service.update_project(project_id,{"advancedSettings":advanced})
   return jsonify({"overrides":advanced.get("principleOverrides",{}),"enabledPrinciples":advanced.get("enabledPrinciples")})
+
+ @app.route('/api/config/principles/<principle_id>/content',methods=['GET'])
+ def get_principle_content_endpoint(principle_id:str):
+  try:
+   content=get_principle_content(principle_id)
+   if not content:
+    return jsonify({"error":"Principle not found"}),404
+   return jsonify({"id":principle_id,"content":content})
+  except Exception as e:
+   get_logger().error(f"Failed to get principle content: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/config/principles/<principle_id>/content',methods=['PUT'])
+ def update_principle_content_global(principle_id:str):
+  try:
+   data=request.json or {}
+   content=data.get("content","")
+   if not content:
+    return jsonify({"error":"content is required"}),400
+   success=save_principle_content(principle_id,content)
+   if not success:
+    return jsonify({"error":"Principle not found"}),404
+   return jsonify({"id":principle_id,"saved":"global"})
+  except Exception as e:
+   get_logger().error(f"Failed to save principle content globally: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/projects/<project_id>/settings/principles/<principle_id>/content',methods=['GET'])
+ def get_project_principle_content(project_id:str,principle_id:str):
+  project=project_service.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  advanced=project.get("advancedSettings",{})
+  custom_contents=advanced.get("principleContents",{})
+  if principle_id in custom_contents:
+   return jsonify({"id":principle_id,"content":custom_contents[principle_id],"source":"project"})
+  content=get_principle_content(principle_id)
+  if not content:
+   return jsonify({"error":"Principle not found"}),404
+  return jsonify({"id":principle_id,"content":content,"source":"global"})
+
+ @app.route('/api/projects/<project_id>/settings/principles/<principle_id>/content',methods=['PUT'])
+ def update_project_principle_content(project_id:str,principle_id:str):
+  project=project_service.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  data=request.json or {}
+  content=data.get("content","")
+  if not content:
+   return jsonify({"error":"content is required"}),400
+  advanced=project.get("advancedSettings",{})
+  if"principleContents" not in advanced:
+   advanced["principleContents"]={}
+  advanced["principleContents"][principle_id]=content
+  project_service.update_project(project_id,{"advancedSettings":advanced})
+  return jsonify({"id":principle_id,"saved":"project"})
+
+ @app.route('/api/projects/<project_id>/settings/principles/<principle_id>/content',methods=['DELETE'])
+ def reset_project_principle_content(project_id:str,principle_id:str):
+  project=project_service.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+  advanced=project.get("advancedSettings",{})
+  custom_contents=advanced.get("principleContents",{})
+  if principle_id in custom_contents:
+   del custom_contents[principle_id]
+   advanced["principleContents"]=custom_contents
+   project_service.update_project(project_id,{"advancedSettings":advanced})
+  content=get_principle_content(principle_id)
+  return jsonify({"id":principle_id,"content":content,"source":"global"})

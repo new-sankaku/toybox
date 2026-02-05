@@ -55,7 +55,7 @@ def create_agent_runner(mode:Optional[str]=None,**kwargs)->AgentRunner:
     elif actual_mode=="testdata" or actual_mode=="mock":
         if not working_dir:
             working_dir=os.environ.get("PROJECT_WORKING_DIR","/tmp/toybox/projects")
-        from .mock_skill_runner import MockSkillRunner
+        from .mock import MockSkillRunner
         return MockSkillRunner(working_dir=working_dir,**kwargs)
 
     else:

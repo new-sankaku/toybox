@@ -90,7 +90,7 @@ export function AutoApprovalSettings({projectId}:AutoApprovalSettingsProps):JSX.
     </div>
 
     <div className="p-3 nier-surface-panel-muted border border-nier-border-light text-nier-caption">
-     ONにすると、該当カテゴリのCHECKPOINTは人間の確認なしで自動的に承認されます。
+     ONにすると、承認、生成素材承認は人間の確認なしで自動的に承認されます。
     </div>
    </CardContent>
   </Card>

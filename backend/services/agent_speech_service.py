@@ -1,7 +1,6 @@
 import random
 from typing import Optional,Dict,List
 from config_loaders import load_yaml_config
-from middleware.logger import get_logger
 
 
 class AgentSpeechService:

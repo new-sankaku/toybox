@@ -5,7 +5,7 @@ from events.websocket_emitter import WebSocketEmitter
 from services.project_service import ProjectService
 from services.agent_service import AgentService
 from services.workflow_service import WorkflowService
-from services.simulation_service import SimulationService
+from services.simulation import SimulationService
 from services.intervention_service import InterventionService
 from services.trace_service import TraceService
 from services.subscription_manager import SubscriptionManager

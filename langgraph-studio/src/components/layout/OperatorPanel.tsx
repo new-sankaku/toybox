@@ -23,7 +23,7 @@ export default function OperatorPanel():JSX.Element{
     onClick={handleIdleClick}
     title={!isActive?'クリックでオペレーター呼び出し':undefined}
    >
-    <div className="operator-header">
+    <div className="operator-header nier-surface-header">
      <span className="operator-diamond">◇</span>
      <span className="operator-title">OPERATOR</span>
      <div className="operator-status">

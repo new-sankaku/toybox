@@ -1,6 +1,5 @@
 from typing import Optional,Callable
 from config_loaders import load_yaml_config
-from middleware.logger import get_logger
 
 
 class StreamCommentParser:

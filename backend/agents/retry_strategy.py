@@ -2,7 +2,7 @@
 import asyncio
 import random
 from typing import Callable,TypeVar,Optional,Set
-from dataclasses import dataclass,field
+from dataclasses import dataclass
 from .exceptions import (
  AgentException,
  ProviderUnavailableError,

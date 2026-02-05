@@ -3,7 +3,7 @@ import{
  type AutoApprovalRule,
  type ContentCategory
 }from'@/types/autoApproval'
-import{autoApprovalApi}from'@/services/apiService'
+import{autoApprovalApi,projectApi}from'@/services/apiService'
 
 const CATEGORY_LABELS:Record<string,string>={
  code:'コード',
@@ -26,6 +26,7 @@ interface AutoApprovalState{
  getEnabledCount:()=>number
  loadFromServer:(projectId:string)=>Promise<void>
  saveToServer:()=>Promise<void>
+ saveToAllProjects:()=>Promise<void>
  hasChanges:()=>boolean
  isRuleChanged:(category:ContentCategory)=>boolean
 }
@@ -90,6 +91,23 @@ export const useAutoApprovalStore=create<AutoApprovalState>()((set,get)=>({
    set({originalRules:JSON.parse(JSON.stringify(rules))})
   }catch(error){
    console.error('Failed to save auto-approval rules:',error)
+  }
+ },
+
+ saveToAllProjects:async()=>{
+  const{rules}=get()
+  try{
+   const projects=await projectApi.list()
+   const rulesData=rules.map(r=>({
+    category:r.category,
+    enabled:r.enabled
+   }))
+   for(const project of projects){
+    await autoApprovalApi.updateRules(project.id,rulesData)
+   }
+   set({originalRules:JSON.parse(JSON.stringify(rules))})
+  }catch(error){
+   console.error('Failed to save auto-approval rules to all projects:',error)
   }
  },
 

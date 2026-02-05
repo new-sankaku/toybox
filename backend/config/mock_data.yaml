@@ -445,6 +445,209 @@ mock_skill_sequences:
 
         リポジトリの状態を確認しました。
 
+  api_error_recovery:
+    - content: |
+        外部APIを呼び出します。
+
+        ```tool_call
+        {"name": "api_call", "input": {"endpoint": "/generate", "method": "POST"}}
+        ```
+
+    - content: |
+        ⚠️ **警告**: API呼び出しでエラーが発生しました。
+
+        ```
+        Error: 429 Too Many Requests
+        Rate limit exceeded. Retry after 30 seconds.
+        ```
+
+        リトライを実行します...
+
+    - content: |
+        リトライ中 (1/3)...
+
+        ```tool_call
+        {"name": "api_call", "input": {"endpoint": "/generate", "method": "POST", "retry": 1}}
+        ```
+
+    - content: |
+        ✓ リトライ成功。処理を継続します。
+
+        # API呼び出し完了
+
+        リトライにより正常に完了しました。
+
+  validation_error_scenario:
+    - content: |
+        生成されたコードを検証します。
+
+        ```tool_call
+        {"name": "code_validate", "input": {"path": "src/main.ts"}}
+        ```
+
+    - content: |
+        ❌ **エラー**: 検証で問題が検出されました。
+
+        ```
+        Error: TypeScript compilation failed
+        src/main.ts(15,3): error TS2322: Type 'string' is not assignable to type 'number'.
+        src/main.ts(23,5): error TS2304: Cannot find name 'undefined_var'.
+        ```
+
+        問題を修正します...
+
+    - content: |
+        修正内容を適用します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/main.ts", "content": "// Fixed version\nconst score: number = 0;\nconst definedVar = 'initialized';\n// ... rest of the code"}}
+        ```
+
+    - content: |
+        再検証を実行します。
+
+        ```tool_call
+        {"name": "code_validate", "input": {"path": "src/main.ts"}}
+        ```
+
+    - content: |
+        ✓ 検証成功。すべての問題が修正されました。
+
+        # 検証完了
+
+        ## 修正内容
+        - 型不一致エラーを修正
+        - 未定義変数を初期化
+
+  timeout_recovery:
+    - content: |
+        大規模なデータを処理しています...
+
+        ```tool_call
+        {"name": "process_data", "input": {"size": "large", "timeout": 30000}}
+        ```
+
+    - content: |
+        ⚠️ **警告**: 処理がタイムアウトしました。
+
+        ```
+        Warning: Operation timed out after 30000ms
+        Partial result saved. Resuming from checkpoint...
+        ```
+
+        チェックポイントから再開します...
+
+    - content: |
+        処理を再開します (チャンク 2/3)...
+
+        ```tool_call
+        {"name": "process_data", "input": {"size": "large", "resume_from": "chunk_2"}}
+        ```
+
+    - content: |
+        # 処理完了
+
+        タイムアウト回復後、正常に完了しました。
+        - 処理時間: 45秒
+        - リトライ回数: 1回
+
+  resource_warning:
+    - content: |
+        リソース使用量を監視しています。
+
+        ```tool_call
+        {"name": "monitor_resources", "input": {"threshold": 0.8}}
+        ```
+
+    - content: |
+        ⚠️ **警告**: トークン使用量が閾値（80%）に達しました。
+
+        ```
+        Token Usage: 32,450 / 40,000 (81.1%)
+        Estimated remaining: 7,550 tokens
+        ```
+
+        出力を最適化して処理を継続します...
+
+    - content: |
+        出力の圧縮を適用します。
+
+        ```tool_call
+        {"name": "optimize_output", "input": {"compression": true}}
+        ```
+
+    - content: |
+        # 処理完了（最適化モード）
+
+        トークン節約により正常に完了しました。
+        - 最終使用量: 35,200 / 40,000 (88%)
+        - 節約量: 約 3,000 トークン
+
+  test_failure_recovery:
+    - content: |
+        テストを実行します。
+
+        ```tool_call
+        {"name": "run_tests", "input": {"path": "tests/", "coverage": true}}
+        ```
+
+    - content: |
+        ❌ **エラー**: テストが失敗しました。
+
+        ```
+        FAIL tests/game.test.js
+          ✗ Game > applies gravity correctly
+            Expected: 9.8
+            Received: 9.80000001
+
+          ✗ Game > detects goal collision
+            AssertionError: Expected status to be 'cleared'
+
+          ✗ Game > calculates score correctly
+            Expected: 1000
+            Received: 0
+
+        Tests: 3 failed, 5 passed, 8 total
+        Coverage: 65%
+        ```
+
+        失敗したテストを分析し、修正します...
+
+    - content: |
+        問題を特定しました:
+        1. 浮動小数点の比較精度
+        2. ゴール判定のタイミング
+        3. スコア計算のバグ
+
+        修正を適用します。
+
+        ```tool_call
+        {"name": "file_write", "input": {"path": "src/game/Game.js", "content": "// Fixed: Use approximate comparison for floats\n// Fixed: Check goal collision after position update\n// Fixed: Score calculation bug"}}
+        ```
+
+    - content: |
+        修正後のテストを再実行します。
+
+        ```tool_call
+        {"name": "run_tests", "input": {"path": "tests/", "coverage": true}}
+        ```
+
+    - content: |
+        ✓ すべてのテストが成功しました。
+
+        ```
+        PASS tests/game.test.js
+        Tests: 8 passed, 8 total
+        Coverage: 78%
+        ```
+
+        # テスト完了
+
+        ## 修正内容
+        - 浮動小数点比較をtoBeCloseTo()に変更
+        - ゴール判定の実行順序を修正
+        - スコア計算ロジックを修正
+
 checkpoint_contents:
   concept_review: |
     # ゲームコンセプト

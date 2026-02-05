@@ -556,12 +556,10 @@
 
   .nier-tooltip::after {
     content: attr(data-tooltip);
-    @apply absolute text-nier-caption whitespace-nowrap pointer-events-none;
+    @apply absolute text-nier-caption whitespace-nowrap pointer-events-none bg-nier-bg-header text-nier-text-header;
     bottom: calc(100% + 8px);
     left: 50%;
     transform: translateX(-50%) scale(0.95);
-    background: var(--bg-header);
-    color: var(--text-header);
     padding: 6px 10px;
     opacity: 0;
     transition: all 0.2s ease;
@@ -634,9 +632,7 @@
   }
 
   .nier-table th {
-    @apply px-3 py-2 text-left text-nier-caption tracking-nier-wide font-medium;
-    background: var(--bg-header);
-    color: var(--text-header);
+    @apply px-3 py-2 text-left text-nier-caption tracking-nier-wide font-medium bg-nier-bg-header text-nier-text-header;
   }
 
   .nier-table td {
@@ -909,8 +905,7 @@
   }
 
   .navigator-header {
-    background: var(--bg-header);
-    color: var(--text-header);
+    @apply bg-nier-bg-header text-nier-text-header;
     padding: 6px 8px;
     display: flex;
     align-items: center;
@@ -1033,8 +1028,7 @@
     right: clamp(0px, 20vw, 264px);
     bottom: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.9);
-    color: #fff;
+    border-left: 4px solid var(--accent-orange);
     padding: clamp(12px, 2vw, 16px) clamp(16px, 3vw, 24px);
     min-height: clamp(60px, 10vh, 80px);
     display: flex;
@@ -1154,8 +1148,6 @@
   }
 
   .operator-header {
-    background: var(--bg-header);
-    color: var(--text-header);
     padding: 4px 6px;
     display: flex;
     align-items: center;
@@ -1309,7 +1301,7 @@
   }
 
   .operator-message {
-    background: var(--bg-header);
+    @apply bg-nier-bg-header;
     border: 1px solid var(--border-dark);
     padding: 8px;
     text-align: left;
@@ -1340,14 +1332,14 @@
     gap: 4px;
     font-size: 9px;
     letter-spacing: 0.1em;
-    color: var(--text-header);
+    @apply text-nier-text-header;
     margin-bottom: 4px;
   }
 
   .operator-message-text {
     font-size: 11px;
     line-height: 1.5;
-    color: var(--text-header);
+    @apply text-nier-text-header;
     margin-bottom: 4px;
   }
 

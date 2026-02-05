@@ -1,245 +1,219 @@
 @echo off
 chcp 65001 >nul
-set TOTAL=19
-echo ========================================
-echo   Build Check - All Validations (%TOTAL% checks)
-echo ========================================
-echo.
+setlocal enabledelayedexpansion
+set TOTAL=20
+set TEMPFILE=%TEMP%\build_check_output.txt
 
-cd /d "%~dp0"
+echo Build Check - %TOTAL% checks
+echo ========================================
 
-echo [1/%TOTAL%] Check for 'nul' files...
-echo.
 cd /d "%~dp0backend"
-call venv\Scripts\activate.bat
-python scripts/build_checks.py nul
-if %errorlevel% neq 0 (
-    echo.
-    echo Error: Delete 'nul' files and retry.
-    pause
-    exit /b 1
+call venv\Scripts\activate.bat >nul 2>&1
+
+<nul set /p="[1/%TOTAL%] nul files... "
+python scripts/build_checks.py nul >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [2/%TOTAL%] Backend - Syntax Check (all .py files)...
-echo.
-python scripts/build_checks.py syntax
-if %errorlevel% neq 0 (
-    echo.
-    echo Error: Backend syntax check failed
-    pause
-    exit /b 1
+<nul set /p="[2/%TOTAL%] Backend syntax... "
+python scripts/build_checks.py syntax >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [3/%TOTAL%] Backend - print() usage check...
-echo.
-python scripts/build_checks.py print
-if errorlevel 1 goto print_error
-echo OK
-echo.
-goto print_done
-:print_error
-echo.
-echo Error: Use get_logger instead of print
-pause
-exit /b 1
-:print_done
-
-echo [4/%TOTAL%] Backend - Ruff linter...
-echo.
-python -m ruff check . --exclude venv,__pycache__,tests,seeds,scripts --select E9,F63,F7,F82
-if %errorlevel% neq 0 (
-    echo Error: Ruff check failed - critical errors found
-    pause
-    exit /b 1
+<nul set /p="[3/%TOTAL%] Backend imports... "
+python scripts/build_checks.py imports >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [5/%TOTAL%] Backend - OpenAPI Spec Generation...
-echo.
-python scripts/generate_openapi.py
-if %errorlevel% neq 0 (
-    echo Error: OpenAPI spec generation failed
-    pause
-    exit /b 1
+<nul set /p="[4/%TOTAL%] Backend print()... "
+python scripts/build_checks.py print >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
-echo.
+echo OK
 
-echo [6/%TOTAL%] Frontend - TypeScript Type Generation...
-echo.
-cd /d "%~dp0\langgraph-studio"
-call npm run generate-types
-if %errorlevel% neq 0 (
-    echo Error: TypeScript type generation failed
-    pause
-    exit /b 1
+<nul set /p="[5/%TOTAL%] Backend Ruff... "
+python -m ruff check . --exclude venv,__pycache__,tests,seeds,scripts --select E9,F63,F7,F82 >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
-echo.
+echo OK
 
-echo [7/%TOTAL%] API Type Consistency Check...
-echo.
+<nul set /p="[6/%TOTAL%] OpenAPI generation... "
+python scripts/generate_openapi.py >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
+cd /d "%~dp0langgraph-studio"
+
+<nul set /p="[7/%TOTAL%] TypeScript types... "
+call npm run generate-types >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
+<nul set /p="[8/%TOTAL%] API type consistency... "
 set "OPENAPI_JSON=%~dp0langgraph-studio\src\types\openapi.json"
 set "API_GENERATED=%~dp0langgraph-studio\src\types\api-generated.ts"
 for %%A in ("%OPENAPI_JSON%") do set "OPENAPI_TIME=%%~tA"
 for %%A in ("%API_GENERATED%") do set "GENERATED_TIME=%%~tA"
 if "%OPENAPI_TIME%" gtr "%GENERATED_TIME%" (
-    echo Error: openapi.json is newer than api-generated.ts
-    echo Run: npm run generate-types
-    pause
-    exit /b 1
+    echo NG
+    echo openapi.json is newer than api-generated.ts
+    goto :fail
 )
 echo OK
-echo.
 
-echo [8/%TOTAL%] Frontend - ESLint...
-echo.
-call npm run lint
-if %errorlevel% neq 0 (
-    echo Error: ESLint check failed
-    pause
-    exit /b 1
-)
-echo.
-
-echo [9/%TOTAL%] Frontend - TypeScript Type Check...
-echo.
-call npm run typecheck
-if %errorlevel% neq 0 (
-    echo Error: TypeScript type check failed
-    pause
-    exit /b 1
-)
-echo.
-
-echo [10/%TOTAL%] Frontend - Surface class usage...
-echo.
-node scripts/build_checks.cjs surface
-if %errorlevel% neq 0 (
-    echo Error: Use nier-surface-* instead of bg/text combination
-    pause
-    exit /b 1
+<nul set /p="[9/%TOTAL%] Frontend ESLint... "
+call npm run lint >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [11/%TOTAL%] Frontend - Color emoji check...
-echo.
-node scripts/build_checks.cjs emoji
-if %errorlevel% neq 0 (
-    echo Error: Use Lucide icons instead of color emojis
-    pause
-    exit /b 1
+<nul set /p="[10/%TOTAL%] Frontend TypeScript... "
+call npm run typecheck >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [12/%TOTAL%] Frontend - Inline style check...
-echo.
-node scripts/build_checks.cjs inline-style
-if %errorlevel% neq 0 (
-    echo Error: Use Tailwind classes instead of inline styles
-    pause
-    exit /b 1
+<nul set /p="[11/%TOTAL%] Surface class... "
+node scripts/build_checks.cjs surface >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [13/%TOTAL%] Backend - Schema registration chain...
-echo.
+<nul set /p="[12/%TOTAL%] Color emoji... "
+node scripts/build_checks.cjs emoji >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
+<nul set /p="[13/%TOTAL%] Inline style... "
+node scripts/build_checks.cjs inline-style >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
 cd /d "%~dp0backend"
-python scripts/build_checks.py schema
-if %errorlevel% neq 0 (
-    echo Error: Schema registration incomplete
-    echo Check: schemas/__init__.py -^> generator.py import -^> schemas_list
-    pause
-    exit /b 1
+
+<nul set /p="[14/%TOTAL%] Schema registration... "
+python scripts/build_checks.py schema >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [14/%TOTAL%] Frontend - WebSocket handler check...
-echo.
-cd /d "%~dp0\langgraph-studio"
-node scripts/build_checks.cjs websocket
-if %errorlevel% neq 0 (
-    echo Error: WebSocket event handlers incomplete
-    echo Check: ServerToClientEvents vs socket.on handlers
-    pause
-    exit /b 1
+cd /d "%~dp0langgraph-studio"
+
+<nul set /p="[15/%TOTAL%] WebSocket handler... "
+node scripts/build_checks.cjs websocket >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [15/%TOTAL%] Backend/Frontend - WebSocket events consistency...
-echo.
 cd /d "%~dp0backend"
-python scripts/build_checks.py websocket-events
-if %errorlevel% neq 0 (
-    echo Error: WebSocket events mismatch between Backend and Frontend
-    echo Check: Backend emit calls vs Frontend ServerToClientEvents
-    pause
-    exit /b 1
-)
-echo OK
-echo.
 
-echo [16/%TOTAL%] Backend - Schema API usage check...
-echo.
-python scripts/build_checks.py schema-usage
-if %errorlevel% neq 0 (
-    echo Warning: Some schemas not used in API paths
+<nul set /p="[16/%TOTAL%] WebSocket events... "
+python scripts/build_checks.py websocket-events >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [17/%TOTAL%] Backend - Data flow type check (Pydantic ↔ TypeScript)...
-echo.
-python scripts/analyze_dataflow.py --ci
-if %errorlevel% neq 0 (
-    echo.
-    echo Error: Field mismatch between Pydantic schemas and TypeScript interfaces
-    echo Fix: Sync backend/schemas/ with langgraph-studio/src/types/
-    pause
-    exit /b 1
+<nul set /p="[17/%TOTAL%] Schema API usage... "
+python scripts/build_checks.py schema-usage >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG ^(warning^)
+) else (
+    echo OK
 )
-echo OK
-echo.
 
-echo [18/%TOTAL%] Frontend - Sidebar store initialization check...
-echo.
-cd /d "%~dp0\langgraph-studio"
-node scripts/build_checks.cjs sidebar-init
-if %errorlevel% neq 0 (
-    echo Error: Sidebar displays store data that is not initialized on startup
-    echo Fix: Add missing API fetch to ActivitySidebar's Promise.all
-    pause
-    exit /b 1
+<nul set /p="[18/%TOTAL%] Data flow types... "
+python scripts/analyze_dataflow.py --ci >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
 
-echo [19/%TOTAL%] Frontend - State sync consistency check...
-echo.
-cd /d "%~dp0\langgraph-studio"
-node scripts/build_checks.cjs state-sync
-if %errorlevel% neq 0 (
-    echo Error: StateSyncData fields not fully processed
-    echo Fix: Ensure all StateSyncData fields are handled in websocketService.ts and reset in App.tsx
-    pause
-    exit /b 1
+cd /d "%~dp0langgraph-studio"
+
+<nul set /p="[19/%TOTAL%] Sidebar init... "
+node scripts/build_checks.cjs sidebar-init >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
 )
 echo OK
-echo.
+
+<nul set /p="[20/%TOTAL%] State sync... "
+node scripts/build_checks.cjs state-sync >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
 
 echo ========================================
-echo   All %TOTAL% checks passed!
+echo All %TOTAL% checks passed!
 echo ========================================
-echo.
-echo Note: Run "npm run build" for full build check before commit.
-echo.
-
+del "%TEMPFILE%" 2>nul
 pause
+exit /b 0
+
+:fail
+echo.
+echo ========================================
+echo Build check failed
+echo ========================================
+del "%TEMPFILE%" 2>nul
+pause
+exit /b 1

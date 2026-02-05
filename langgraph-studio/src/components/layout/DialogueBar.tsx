@@ -17,7 +17,7 @@ export default function DialogueBar():JSX.Element|null{
  }
 
  return(
-  <div className="dialogue-bar-container" onClick={dismissMessage}>
+  <div className="dialogue-bar-container nier-surface-header" onClick={dismissMessage}>
    <div className="dialogue-content">
     <span className="dialogue-speaker">
      <span className="dialogue-diamond">◇</span>

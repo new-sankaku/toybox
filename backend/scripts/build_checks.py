@@ -78,6 +78,7 @@ def check_websocket_events(backend_root:Path)->bool:
         re.compile(r"\.emit\s*\(\s*['\"]([^'\"]+)['\"]"),
         re.compile(r"_emit_event\s*\(\s*['\"]([^'\"]+)['\"]"),
         re.compile(r"\._emit\s*\(\s*['\"]([^'\"]+)['\"]"),
+        re.compile(r"_emit_socket\s*\(\s*['\"]([^'\"]+)['\"]"),
     ]
     dynamic_patterns=["f\"agent:{","f'agent:{"]
     for py_file in backend_root.rglob("*.py"):
@@ -129,6 +130,30 @@ def check_schema_usage(backend_root:Path)->bool:
         print(f"  Warning: Schemas in schemas_list but not used in API paths: {unused}")
     return True
 
+def check_imports(backend_root:Path)->bool:
+    import subprocess
+    modules_to_check=[
+        "container",
+        "server",
+    ]
+    errors=[]
+    for module in modules_to_check:
+        result=subprocess.run(
+            [sys.executable,"-c",f"import {module}"],
+            cwd=str(backend_root),
+            capture_output=True,
+            text=True
+        )
+        if result.returncode!=0:
+            error_lines=result.stderr.strip().split("\n")
+            last_line=error_lines[-1] if error_lines else "Unknown error"
+            errors.append(f"  {module}: {last_line}")
+    if errors:
+        for e in errors:
+            print(e)
+        return False
+    return True
+
 def check_schema_chain(backend_root:Path)->bool:
     init_path=backend_root/"schemas"/"__init__.py"
     generator_path=backend_root/"openapi"/"generator.py"
@@ -178,6 +203,8 @@ if __name__=="__main__":
     project_root=backend_root.parent
     if check_type=="syntax":
         sys.exit(0 if check_syntax(backend_root) else 1)
+    elif check_type=="imports":
+        sys.exit(0 if check_imports(backend_root) else 1)
     elif check_type=="print":
         sys.exit(0 if check_print_usage(backend_root) else 1)
     elif check_type=="nul":

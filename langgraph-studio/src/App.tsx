@@ -2,7 +2,7 @@ import{useEffect,useRef,useCallback}from'react'
 import{QueryClient,QueryClientProvider}from'@tanstack/react-query'
 import AppLayout from'./components/layout/AppLayout'
 import DashboardView from'./components/dashboard/DashboardView'
-import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,CostView,ConfigView,GlobalConfigView}from'./views'
+import{ProjectView,CheckpointsView,InterventionView,AgentsView,LogsView,DataView,CostView,GlobalConfigView}from'./views'
 import{useNavigationStore}from'./stores/navigationStore'
 import{useProjectStore}from'./stores/projectStore'
 import{useAgentStore}from'./stores/agentStore'
@@ -176,8 +176,6 @@ function App():JSX.Element{
     return<DataView/>
    case'cost':
     return<CostView/>
-   case'config':
-    return<ConfigView/>
    case'global-config':
     return<GlobalConfigView/>
    default:

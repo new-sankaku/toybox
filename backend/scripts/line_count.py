@@ -56,6 +56,8 @@ def print_by_directory(title:str,files:list[Path],base_dir:Path):
     print()
 
 def main():
+    print("ファイルをスキャン中...",flush=True)
+
     root=Path(__file__).parent.parent.parent
 
     backend_dir=root/"backend"

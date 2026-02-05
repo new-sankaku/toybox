@@ -1,6 +1,7 @@
 """Seed script for initializing test data in SQLite database"""
 import os
 import sys
+import random
 sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime,timedelta
@@ -11,6 +12,34 @@ from config_loaders.agent_config import get_ui_phases,get_agent_definitions
 from config_loaders.ai_provider_config import build_default_ai_services
 from asset_scanner import scan_all_testdata,get_testdata_path
 from middleware.logger import get_logger
+
+AGENT_TOKEN_RANGES={
+ "concept":{"input":(150000,350000),"output":(80000,180000)},
+ "scenario":{"input":(400000,700000),"output":(200000,400000)},
+ "game_design":{"input":(300000,550000),"output":(150000,300000)},
+ "character":{"input":(200000,400000),"output":(100000,250000)},
+ "world":{"input":(250000,450000),"output":(120000,280000)},
+ "tech_spec":{"input":(350000,600000),"output":(180000,350000)},
+ "architecture":{"input":(280000,520000),"output":(140000,300000)},
+ "data_design":{"input":(220000,420000),"output":(110000,240000)},
+ "environment_setup":{"input":(80000,180000),"output":(40000,100000)},
+ "code_worker":{"input":(450000,850000),"output":(250000,500000)},
+ "asset_character":{"input":(180000,380000),"output":(90000,200000)},
+ "asset_background":{"input":(160000,340000),"output":(80000,180000)},
+ "asset_ui":{"input":(140000,300000),"output":(70000,160000)},
+ "asset_audio":{"input":(120000,260000),"output":(60000,140000)},
+ "asset_effect":{"input":(100000,220000),"output":(50000,120000)},
+ "unit_test":{"input":(200000,400000),"output":(100000,220000)},
+ "integration":{"input":(300000,550000),"output":(150000,320000)},
+ "final_review":{"input":(180000,350000),"output":(90000,190000)},
+}
+
+def get_agent_tokens(agent_type:str)->tuple[int,int]:
+ """エージェントタイプに応じた多様なトークン数を生成"""
+ ranges=AGENT_TOKEN_RANGES.get(agent_type,{"input":(200000,500000),"output":(100000,250000)})
+ input_t=random.randint(*ranges["input"])
+ output_t=random.randint(*ranges["output"])
+ return input_t,output_t
 
 def reset_database():
  Base.metadata.drop_all(bind=engine)
@@ -56,8 +85,10 @@ def seed_sample_project():
     agent_def=agent_defs.get(agent_type,{})
     display_name=agent_def.get("shortLabel") or agent_def.get("label") or agent_type
     is_completed=phase_idx<completed_before_phase
-    input_t=500000 if is_completed else 0
-    output_t=200000 if is_completed else 0
+    if is_completed:
+     input_t,output_t=get_agent_tokens(agent_type)
+    else:
+     input_t,output_t=0,0
     total_input+=input_t
     total_output+=output_t
     started_at=now-timedelta(hours=3-phase_idx) if is_completed else None
@@ -186,6 +217,16 @@ def seed_agent_traces(project_id:str="proj-001"):
     "agent_id":"agent-proj-001-scenario",
     "agent_type":"scenario",
     "tasks":["シナリオ構成の検討","メインストーリー作成","サブクエスト設計"]
+   },
+   {
+    "agent_id":"agent-proj-001-game_design",
+    "agent_type":"game_design",
+    "tasks":["ゲームメカニクス設計","バランス調整","UI/UXフロー設計","プレイヤー体験設計"]
+   },
+   {
+    "agent_id":"agent-proj-001-architecture",
+    "agent_type":"architecture",
+    "tasks":["システム構成図作成","モジュール分割","API設計","データフロー定義"]
    }
   ]
   trace_idx=0
@@ -194,10 +235,13 @@ def seed_agent_traces(project_id:str="proj-001"):
    agent_type=agent_data["agent_type"]
    for task_idx,task in enumerate(agent_data["tasks"]):
     trace_idx+=1
-    start_time=base_time+timedelta(minutes=trace_idx*3)
-    end_time=start_time+timedelta(seconds=1500+task_idx*200)
-    tokens_in=80000+task_idx*20000
-    tokens_out=150000+task_idx*30000
+    start_time=base_time+timedelta(minutes=trace_idx*3+random.randint(0,5))
+    duration_base=1500+task_idx*200+random.randint(-300,500)
+    end_time=start_time+timedelta(seconds=max(800,duration_base))
+    base_input,base_output=get_agent_tokens(agent_type)
+    task_factor=0.15+task_idx*0.1+random.uniform(-0.05,0.1)
+    tokens_in=int(base_input*task_factor)
+    tokens_out=int(base_output*task_factor)
     trace=AgentTrace(
      id=f"trace-{project_id}-{trace_idx:03d}",
      project_id=project_id,

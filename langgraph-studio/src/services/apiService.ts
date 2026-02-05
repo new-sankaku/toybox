@@ -1294,6 +1294,31 @@ export const projectSettingsApi={
  updateProjectPrinciples:async(projectId:string,settings:{overrides?:Record<string,string[]>;enabledPrinciples?:string[]}):Promise<ProjectPrinciplesResponse>=>{
   const response=await api.put(API_ENDPOINTS.projects.settings.principles(projectId),settings)
   return response.data
+ },
+
+ getPrincipleContent:async(principleId:string):Promise<PrincipleContentResponse>=>{
+  const response=await api.get(`/api/config/principles/${principleId}/content`)
+  return response.data
+ },
+
+ savePrincipleContentGlobal:async(principleId:string,content:string):Promise<{id:string;saved:string}>=>{
+  const response=await api.put(`/api/config/principles/${principleId}/content`,{content})
+  return response.data
+ },
+
+ getProjectPrincipleContent:async(projectId:string,principleId:string):Promise<PrincipleContentResponse>=>{
+  const response=await api.get(`/api/projects/${projectId}/settings/principles/${principleId}/content`)
+  return response.data
+ },
+
+ saveProjectPrincipleContent:async(projectId:string,principleId:string,content:string):Promise<{id:string;saved:string}>=>{
+  const response=await api.put(`/api/projects/${projectId}/settings/principles/${principleId}/content`,{content})
+  return response.data
+ },
+
+ resetProjectPrincipleContent:async(projectId:string,principleId:string):Promise<PrincipleContentResponse>=>{
+  const response=await api.delete(`/api/projects/${projectId}/settings/principles/${principleId}/content`)
+  return response.data
  }
 }
 
@@ -1301,6 +1326,13 @@ export interface PrincipleInfo{
  id:string
  label:string
  description:string
+ shortLabel:string
+}
+
+export interface PrincipleContentResponse{
+ id:string
+ content:string
+ source?:'global'|'project'
 }
 
 export interface AgentPrincipleMeta{

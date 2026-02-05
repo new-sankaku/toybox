@@ -301,6 +301,9 @@ milestones:
     - progress: 30
       level: info
       message: ゲームコンセプト生成開始
+    - progress: 50
+      level: warn
+      message: トークン使用量が想定の80%に到達
     - progress: 60
       level: info
       message: 出力形式チェック完了
@@ -338,3 +341,340 @@ milestones:
     - progress: 90
       level: info
       message: concept_detail.md 保存完了
+
+  scenario:
+    - progress: 10
+      level: info
+      message: シナリオ設計準備完了
+    - progress: 25
+      level: info
+      message: シナリオ構成生成中
+    - progress: 45
+      level: warn
+      message: シナリオ分岐が複雑化（10分岐超過）
+    - progress: 65
+      level: info
+      message: シナリオ整合性チェック完了
+    - progress: 85
+      level: info
+      message: scenario.md 保存完了
+
+  world:
+    - progress: 10
+      level: info
+      message: 世界観設計準備完了
+    - progress: 30
+      level: info
+      message: 世界観生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: info
+      message: 世界観整合性チェック完了
+    - progress: 90
+      level: info
+      message: world.md 保存完了
+
+  game_design:
+    - progress: 10
+      level: info
+      message: ゲームデザイン準備完了
+    - progress: 30
+      level: info
+      message: ゲームデザイン生成中
+    - progress: 50
+      level: warn
+      message: バランス調整パラメータが多数（要確認）
+    - progress: 70
+      level: info
+      message: デザイン整合性チェック完了
+    - progress: 90
+      level: info
+      message: game_design.md 保存完了
+
+  tech_spec:
+    - progress: 10
+      level: info
+      message: 技術仕様準備完了
+    - progress: 30
+      level: info
+      message: 技術仕様生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: info
+      message: 仕様整合性チェック完了
+    - progress: 90
+      level: info
+      message: tech_spec.md 保存完了
+
+  task_split_2:
+    - progress: 15
+      level: info
+      message: 設計成果物分析完了
+    - progress: 40
+      level: info
+      message: アセットタスク分解生成中
+    - progress: 70
+      level: info
+      message: 依存関係チェック完了
+    - progress: 90
+      level: info
+      message: tasks_2.md 保存完了
+
+  asset_character:
+    - progress: 10
+      level: info
+      message: キャラアセット準備完了
+    - progress: 30
+      level: info
+      message: キャラ画像生成中
+    - progress: 50
+      level: warn
+      message: 画像生成API応答遅延（リトライ中）
+    - progress: 70
+      level: info
+      message: アセット品質チェック完了
+    - progress: 90
+      level: info
+      message: character.png 保存完了
+
+  asset_background:
+    - progress: 10
+      level: info
+      message: 背景アセット準備完了
+    - progress: 30
+      level: info
+      message: 背景画像生成中
+    - progress: 70
+      level: info
+      message: アセット品質チェック完了
+    - progress: 90
+      level: info
+      message: background.png 保存完了
+
+  asset_ui:
+    - progress: 10
+      level: info
+      message: UIアセット準備完了
+    - progress: 30
+      level: info
+      message: UI画像生成中
+    - progress: 70
+      level: info
+      message: アセット品質チェック完了
+    - progress: 90
+      level: info
+      message: ui_elements.png 保存完了
+
+  asset_effect:
+    - progress: 10
+      level: info
+      message: エフェクト準備完了
+    - progress: 30
+      level: info
+      message: エフェクト画像生成中
+    - progress: 70
+      level: info
+      message: アセット品質チェック完了
+    - progress: 90
+      level: info
+      message: effect.png 保存完了
+
+  asset_bgm:
+    - progress: 10
+      level: info
+      message: BGM生成準備完了
+    - progress: 30
+      level: info
+      message: BGM生成中
+    - progress: 55
+      level: warn
+      message: 音声生成API応答遅延（リトライ中）
+    - progress: 75
+      level: info
+      message: 音質チェック完了
+    - progress: 90
+      level: info
+      message: bgm.mp3 保存完了
+
+  asset_voice:
+    - progress: 10
+      level: info
+      message: ボイス生成準備完了
+    - progress: 30
+      level: info
+      message: ボイス生成中
+    - progress: 75
+      level: info
+      message: 音質チェック完了
+    - progress: 90
+      level: info
+      message: voice.mp3 保存完了
+
+  asset_sfx:
+    - progress: 10
+      level: info
+      message: 効果音生成準備完了
+    - progress: 30
+      level: info
+      message: 効果音生成中
+    - progress: 75
+      level: info
+      message: 音質チェック完了
+    - progress: 90
+      level: info
+      message: sfx.mp3 保存完了
+
+  task_split_3:
+    - progress: 15
+      level: info
+      message: アセット成果物分析完了
+    - progress: 40
+      level: info
+      message: 実装タスク分解生成中
+    - progress: 70
+      level: info
+      message: 依存関係チェック完了
+    - progress: 90
+      level: info
+      message: tasks_3.md 保存完了
+
+  code:
+    - progress: 10
+      level: info
+      message: コード生成準備完了
+    - progress: 25
+      level: info
+      message: main.ts 生成中
+    - progress: 45
+      level: warn
+      message: "生成コードの複雑度が高い（循環複雑度: 15）"
+    - progress: 60
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: error
+      message: コンパイルエラー検出（型不一致）
+    - progress: 80
+      level: info
+      message: エラー修正完了
+    - progress: 90
+      level: info
+      message: コード保存完了
+
+  event:
+    - progress: 10
+      level: info
+      message: イベント実装準備完了
+    - progress: 30
+      level: info
+      message: イベントコード生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: info
+      message: イベント実装チェック完了
+    - progress: 90
+      level: info
+      message: events.ts 保存完了
+
+  ui_integration:
+    - progress: 10
+      level: info
+      message: UI統合準備完了
+    - progress: 30
+      level: info
+      message: UIコード生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 70
+      level: warn
+      message: UIコンポーネント数が多い（パフォーマンス注意）
+    - progress: 85
+      level: info
+      message: UI統合チェック完了
+    - progress: 95
+      level: info
+      message: ui.tsx 保存完了
+
+  asset_integration:
+    - progress: 10
+      level: info
+      message: アセット統合準備完了
+    - progress: 30
+      level: info
+      message: 統合コード生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: info
+      message: アセット統合チェック完了
+    - progress: 90
+      level: info
+      message: assets.ts 保存完了
+
+  task_split_4:
+    - progress: 15
+      level: info
+      message: 実装成果物分析完了
+    - progress: 40
+      level: info
+      message: テストタスク分解生成中
+    - progress: 70
+      level: info
+      message: 依存関係チェック完了
+    - progress: 90
+      level: info
+      message: tasks_4.md 保存完了
+
+  unit_test:
+    - progress: 10
+      level: info
+      message: 単体テスト準備完了
+    - progress: 30
+      level: info
+      message: テストコード生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 70
+      level: warn
+      message: テストカバレッジ不足（65%）
+    - progress: 80
+      level: info
+      message: テスト実行中
+    - progress: 85
+      level: error
+      message: テスト失敗（3件）- アサーション不一致
+    - progress: 92
+      level: info
+      message: テスト修正・再実行完了
+    - progress: 97
+      level: info
+      message: unit_test_result.md 保存完了
+
+  integration_test:
+    - progress: 10
+      level: info
+      message: 統合テスト準備完了
+    - progress: 30
+      level: info
+      message: テストコード生成中
+    - progress: 55
+      level: info
+      message: L/Wループ確認中
+    - progress: 75
+      level: info
+      message: テスト実行中
+    - progress: 85
+      level: warn
+      message: テスト実行時間が長い（タイムアウト注意）
+    - progress: 95
+      level: info
+      message: integration_test_result.md 保存完了

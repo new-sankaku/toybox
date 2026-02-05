@@ -122,7 +122,7 @@ def sample_agent_context():
 @pytest.fixture
 def mock_agent_runner():
  """MockAgentRunner"""
- from agents.mock_runner import MockAgentRunner
+ from agents.mock import MockAgentRunner
  return MockAgentRunner()
 
 

@@ -36,9 +36,9 @@ const STATUS_LABELS:Record<ProviderStatus,string>={
 const STATUS_HINTS:Record<ProviderStatus,string>={
  connected:'',
  disconnected:'サービスに接続できません。サービスが起動しているか確認してください',
- api_error:'APIキーが無効または未設定です。共通設定で確認してください',
- cost_exceeded:'コスト上限に達しました。共通設定でコスト管理を確認してください',
- unknown:'APIキーが未設定です。共通設定で設定してください'
+ api_error:'APIキーが無効または未設定です。設定で確認してください',
+ cost_exceeded:'コスト上限に達しました。設定でコスト管理を確認してください',
+ unknown:'APIキーが未設定です。設定で設定してください'
 }
 
 const STATUS_CLASSES:Record<ProviderStatus,string>={
@@ -138,7 +138,7 @@ export default function ApiMonitorTable():JSX.Element{
             onClick={(e)=>{e.stopPropagation();setActiveTab('global-config')}}
             title={STATUS_HINTS[provider.status]}
            >
-            → 共通設定で確認
+            → 設定で確認
            </button>
 )}
          </td>

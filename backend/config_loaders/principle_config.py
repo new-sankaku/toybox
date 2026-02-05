@@ -30,7 +30,12 @@ def get_agent_principles(agent_type:str,overrides:Optional[Dict[str,List[str]]]=
     return principles
 
 
-def load_principles_for_agent(agent_type:str,enabled_principles:Optional[List[str]]=None,principle_overrides:Optional[Dict[str,List[str]]]=None)->str:
+def load_principles_for_agent(
+    agent_type:str,
+    enabled_principles:Optional[List[str]]=None,
+    principle_overrides:Optional[Dict[str,List[str]]]=None,
+    principle_contents:Optional[Dict[str,str]]=None
+)->str:
     principle_names=get_agent_principles(agent_type,overrides=principle_overrides)
     if enabled_principles is not None:
         principle_names=[p for p in principle_names if p in enabled_principles]
@@ -42,7 +47,10 @@ def load_principles_for_agent(agent_type:str,enabled_principles:Optional[List[st
     parts=[]
     total_len=0
     for name in principle_names:
-        content=load_principle(name)
+        if principle_contents and name in principle_contents:
+            content=principle_contents[name]
+        else:
+            content=load_principle(name)
         if not content:
             continue
         if total_len+len(content)>max_chars:
@@ -93,6 +101,17 @@ def get_principle_settings()->Dict[str,Any]:
     return config.get("principle_settings",{})
 
 
+PRINCIPLE_SHORT_LABELS:Dict[str,str]={
+    "character_design":"キャラ",
+    "game_experience":"体験",
+    "game_mechanics":"メカ",
+    "narrative_design":"ナラ",
+    "technical_quality":"技術",
+    "visual_direction":"ビジュ",
+    "world_building":"世界",
+}
+
+
 def get_available_principles()->List[Dict[str,str]]:
     principles_dir=get_config_dir()/"principles"
     if not principles_dir.exists():
@@ -109,8 +128,32 @@ def get_available_principles()->List[Dict[str,str]]:
             elif line.strip() and not line.startswith("#") and not description:
                 description=line.strip()
                 break
-        result.append({"id":name,"label":title,"description":description})
+        short_label=PRINCIPLE_SHORT_LABELS.get(name,name[:4])
+        result.append({"id":name,"label":title,"description":description,"shortLabel":short_label})
     return result
+
+
+def get_principle_content(principle_id:str)->str:
+    return load_principle(principle_id)
+
+
+def save_principle_content(principle_id:str,content:str)->bool:
+    global _principle_cache
+    principles_dir=get_config_dir()/"principles"
+    if not principles_dir.exists():
+        return False
+    principle_path=principles_dir/f"{principle_id}.md"
+    if not principle_path.exists():
+        return False
+    with open(principle_path,"w",encoding="utf-8") as f:
+        f.write(content)
+    _principle_cache[principle_id]=content
+    return True
+
+
+def clear_principle_cache():
+    global _principle_cache
+    _principle_cache={}
 
 
 def get_default_agent_principles()->Dict[str,List[str]]:
