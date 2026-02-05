@@ -296,6 +296,72 @@ function checkStateSyncConsistency() {
   return true;
 }
 
+function checkUnusedDirectories() {
+  const srcDir = path.join(__dirname, '..', 'src');
+  const componentsDir = path.join(srcDir, 'components');
+  const viewsDir = path.join(srcDir, 'views');
+
+  const allFiles = glob.sync('**/*.{ts,tsx}', { cwd: srcDir });
+  const allContent = allFiles.map(f => {
+    const filePath = path.join(srcDir, f);
+    return { file: f, content: fs.readFileSync(filePath, 'utf-8') };
+  });
+
+  const getSubDirs = (baseDir, prefix) => {
+    const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+    return entries
+      .filter(e => e.isDirectory())
+      .map(e => `${prefix}/${e.name}`);
+  };
+
+  const checkDirs = [
+    ...getSubDirs(componentsDir, 'components'),
+    ...getSubDirs(viewsDir, 'views'),
+  ];
+
+  const unused = [];
+  for (const dir of checkDirs) {
+    const dirName = path.basename(dir);
+    const importPatterns = [
+      new RegExp(`from\\s*['"]@/${dir}['"]`),
+      new RegExp(`from\\s*['"]@/${dir}/`),
+      new RegExp(`from\\s*['"]\\./${dir}['"]`),
+      new RegExp(`from\\s*['"]\\./${dir}/`),
+      new RegExp(`from\\s*['"]\\.\\./${dirName}['"]`),
+      new RegExp(`from\\s*['"]\\.\\./${dirName}/`),
+      new RegExp(`from\\s*['"]\\./${dirName}['"]`),
+      new RegExp(`from\\s*['"]\\./${dirName}/`),
+      new RegExp(`/${dirName}/[^'"]+['"]`),
+    ];
+
+    let isUsed = false;
+    for (const { file, content } of allContent) {
+      const normalizedFile = file.replace(/\\/g, '/');
+      if (normalizedFile.startsWith(dir + '/')) continue;
+      for (const pattern of importPatterns) {
+        if (pattern.test(content)) {
+          isUsed = true;
+          break;
+        }
+      }
+      if (isUsed) break;
+    }
+
+    if (!isUsed) {
+      unused.push(dir);
+    }
+  }
+
+  if (unused.length > 0) {
+    console.log('  Unused directories (no external imports):');
+    for (const dir of unused) {
+      console.log(`    - src/${dir}/`);
+    }
+    return false;
+  }
+  return true;
+}
+
 let result = true;
 
 switch (CHECK_TYPE) {
@@ -317,8 +383,11 @@ switch (CHECK_TYPE) {
   case 'state-sync':
     result = checkStateSyncConsistency();
     break;
+  case 'unused-dirs':
+    result = checkUnusedDirectories();
+    break;
   default:
-    console.log('Usage: build_checks.cjs <surface|emoji|inline-style|websocket|sidebar-init|state-sync>');
+    console.log('Usage: build_checks.cjs <surface|emoji|inline-style|websocket|sidebar-init|state-sync|unused-dirs>');
     process.exit(1);
 }
 

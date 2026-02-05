@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
-set TOTAL=20
+set TOTAL=22
 set TEMPFILE=%TEMP%\build_check_output.txt
 
 echo Build Check - %TOTAL% checks
@@ -195,6 +195,26 @@ echo OK
 
 <nul set /p="[20/%TOTAL%] State sync... "
 node scripts/build_checks.cjs state-sync >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
+<nul set /p="[21/%TOTAL%] Unused dirs... "
+node scripts/build_checks.cjs unused-dirs >"%TEMPFILE%" 2>&1
+if !errorlevel! neq 0 (
+    echo NG
+    type "%TEMPFILE%"
+    goto :fail
+)
+echo OK
+
+cd /d "%~dp0backend"
+
+<nul set /p="[22/%TOTAL%] Unused imports... "
+python scripts/build_checks.py unused-imports >"%TEMPFILE%" 2>&1
 if !errorlevel! neq 0 (
     echo NG
     type "%TEMPFILE%"

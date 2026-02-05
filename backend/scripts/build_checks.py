@@ -154,6 +154,33 @@ def check_imports(backend_root:Path)->bool:
         return False
     return True
 
+def check_unused_imports(backend_root:Path)->bool:
+    import subprocess
+    reexport_modules=["ai_config.py","config_loader.py"]
+    result=subprocess.run(
+        [sys.executable,"-m","ruff","check",".",
+         "--exclude","venv,__pycache__,tests,seeds,scripts",
+         "--select","F401",
+         "--output-format","text"],
+        cwd=str(backend_root),
+        capture_output=True,
+        text=True
+    )
+    if result.returncode!=0:
+        lines=result.stdout.strip().split("\n")
+        violations=[]
+        for line in lines:
+            if not line.strip():
+                continue
+            is_reexport=any(mod in line for mod in reexport_modules)
+            if not is_reexport:
+                violations.append(line)
+        if violations:
+            for v in violations:
+                print(f"  {v}")
+            return False
+    return True
+
 def check_schema_chain(backend_root:Path)->bool:
     init_path=backend_root/"schemas"/"__init__.py"
     generator_path=backend_root/"openapi"/"generator.py"
@@ -215,6 +242,8 @@ if __name__=="__main__":
         sys.exit(0 if check_websocket_events(backend_root) else 1)
     elif check_type=="schema-usage":
         sys.exit(0 if check_schema_usage(backend_root) else 1)
+    elif check_type=="unused-imports":
+        sys.exit(0 if check_unused_imports(backend_root) else 1)
     else:
         print(f"Unknown check: {check_type}")
         sys.exit(1)

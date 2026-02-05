@@ -134,7 +134,7 @@ def create_skill_executor(
  mapping=skill_config.get("agent_skill_mapping",{})
  allowed_skills=mapping.get(agent_type,mapping.get("default",[]))
  sandbox_cfg=skill_config.get("sandbox",{})
- effective_working_dir=_get_project_output_dir(project_id,sandbox_cfg,working_dir)
+ effective_working_dir=_get_project_output_dir(project_id,sandbox_cfg)
  denied_paths=_get_denied_paths_for_platform(sandbox_cfg)
  config=SkillExecutionConfig(
   working_dir=effective_working_dir,
@@ -156,7 +156,7 @@ def _get_denied_paths_for_platform(sandbox_cfg:Dict[str,Any])->List[str]:
  else:
   return sandbox_cfg.get("denied_paths_linux",[])
 
-def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any],fallback_dir:str)->str:
+def _get_project_output_dir(project_id:str,sandbox_cfg:Dict[str,Any])->str:
  output_base=sandbox_cfg.get("output_base","./output")
  if not os.path.isabs(output_base):
   backend_dir=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
