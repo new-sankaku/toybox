@@ -7,13 +7,13 @@ test.describe('CheckpointsView - 承認管理',()=>{
  test.describe('シナリオ1: チェックポイント一覧表示',()=>{
   test('Checkpointsタブをクリックして一覧が表示される',async({page})=>{
    await createProject(page,'cp_list')
-   await page.click('text=承認')
+   await page.click('text=進捗承認')
    await expect(page.locator('text=チェックポイント').first()).toBeVisible()
   })
 
   test('チェックポイントがない場合は空メッセージが表示される',async({page})=>{
    await createProject(page,'cp_empty')
-   await page.click('text=承認')
+   await page.click('text=進捗承認')
    await expect(page.locator('text=チェックポイントがありません').or(
     page.locator('text=チェックポイント').first()
    )).toBeVisible()

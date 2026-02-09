@@ -32,7 +32,7 @@ export async function stopProject(page:Page){
 }
 
 export async function waitForCheckpoint(page:Page,timeout=60000){
- await page.click('text=承認')
+ await page.click('text=進捗承認')
  const card=page.locator('[data-testid="checkpoint-card"]').or(
   page.locator('.cursor-pointer').filter({hasText:/pending|approved|承認待ち/})
  ).first()

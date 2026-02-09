@@ -4,7 +4,7 @@ from .asset_manager import AssetManager
 from .quality_settings_manager import QualitySettingsManager
 from .auto_approval_handler import AutoApprovalHandler
 
-__all__ = [
+__all__=[
     "CheckpointResolver",
     "PhaseManager",
     "AssetManager",

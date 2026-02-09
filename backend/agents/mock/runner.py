@@ -80,7 +80,7 @@ class MockAgentRunner(MockRunnerBase):
         if not self._trace_service or not trace_id:
             return
         try:
-            summary=content[:100] if content else "モック出力"
+            summary=content[:100] if content else"モック出力"
             self._trace_service.complete_trace(
                 trace_id=trace_id,
                 llm_response=content[:500] if content else"",

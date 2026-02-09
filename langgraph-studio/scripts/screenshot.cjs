@@ -8,7 +8,7 @@ const OUTPUT_DIR=process.env.SCREENSHOT_DIR||path.join(__dirname,'..','..','scre
 const TABS=[
  {name:'プロジェクト',filename:'01_project'},
  {name:'ダッシュボード',filename:'02_dashboard'},
- {name:'承認',filename:'03_checkpoints'},
+ {name:'進捗承認',filename:'03_checkpoints'},
  {name:'連絡',filename:'04_intervention'},
  {name:'エージェント',filename:'05_agents'},
  {name:'生成素材',filename:'06_data'},

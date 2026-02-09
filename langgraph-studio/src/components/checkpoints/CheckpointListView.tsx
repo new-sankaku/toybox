@@ -68,7 +68,7 @@ export default function CheckpointListView({
 
    <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader className="flex-shrink-0">
-     <DiamondMarker>承認一覧</DiamondMarker>
+     <DiamondMarker>進捗承認一覧</DiamondMarker>
      <span className="text-nier-caption opacity-60 ml-2">
       ({filteredCheckpoints.length}件)
      </span>
