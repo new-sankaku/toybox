@@ -1,44 +1,44 @@
-【大規模】リアルタイムゲームプレビュー
+【中規模】リアルタイムゲームプレビュー
 
-生成中のゲームをブラウザ内でリアルタイムにプレビュー・操作できる機能。
-開発の各段階で実際に動く状態を確認できる。
+生成されたゲームをプレビューできる機能。
 
 ■ 概要
-・Electron内のiframeまたは別ウィンドウでゲームをライブプレビュー
-・コード生成が進むたびに自動リロードしてプレビュー更新
-・HTML5/JavaScript/Canvas ベースのゲームを即座に実行
-・プレビュー中にスクリーンショットを撮ってCheckpointに添付可能
+・outputフォルダの成果物へのリンクを配置し、ブラウザまたは対応アプリで開く
+・build済みのHTML5ゲームはデフォルトブラウザで実行
+・ネイティブエンジン（Unity等）はエディタを直接起動
 
-■ 必要な修正
-・Backend: プレビュー用のローカルWebサーバー機能
-・Backend: ファイル変更監視→WebSocket通知
-・Frontend: プレビューパネルComponent（sandbox化されたiframe）
-・Frontend: ダッシュボードまたは専用タブにプレビューエリア追加
-・Frontend: プレビューのControls（リロード、スクリーンショット、フルスクリーン）
-・Security: sandboxによるファイルシステムアクセス制限
+■ プレビュー方式の整理
 
-■ 売り
-・「AIが作っている過程を見れる」体験としてのインパクト
-・Checkpointでの承認判断が格段にしやすくなる
-・デモ映えする機能
+生成物の種類によってpreview方式が異なる。
+iframe埋め込みはbuild必須のプロジェクト（TypeScript等）では動作しないため、
+リンク方式を基本とする。
 
-■ ゲームエンジン別のプレビュー方式
+リンク方式（基本）:
+・outputフォルダをファイルマネージャーで開く（shell.openPath()）
+・index.htmlがあればデフォルトブラウザで開く（shell.openExternal()）
+・実装コスト: ほぼゼロ。確実に動作する
 
-Tier 1: iframe直接実行（build不要）
-・Phaser（現状のデフォルト）、PixiJS、Three.js / Babylon.js、Kaplay（旧Kaboom）
-・現在のpreview設計（iframe + file serving）でそのまま対応可能
-・agents.yamlやpromptの指定frameworkを切り替えるだけ
+iframe方式（将来的にbuild step組み込み後）:
+・Agentのworkflowにbuild stepが組み込まれた段階で追加
+・build後のdist/をsandbox付きiframeで表示（sandbox="allow-scripts"）
+・build未完了やbuild失敗時はリンク方式にfallbackしない（混乱の元）
 
-Tier 2: build stepを挟めばiframe実行可能
+■ ゲームエンジン別の対応
+
+Tier 1: ブラウザで実行（HTML5系）
+・Phaser、PixiJS、Three.js / Babylon.js、Kaplay（旧Kaboom）
+・build後のHTML/JSをブラウザで開くだけ
+
+Tier 2: エンジンのHTML5 export
 ・Godot → HTML5 export（godot --headless --export-release "HTML5"）
-・Unity → WebGL build（-buildTarget WebGL）、ただしbuild時間が数分〜
-・CodeBuildSkillの拡張で対応できるが、engine自体のinstall・licenseが前提
+・Unity → WebGL build（-buildTarget WebGL）、build時間が数分〜
+・CodeBuildSkillの拡張で対応。engine自体のinstall・licenseが前提
 
-Tier 3: 外部起動（iframe preview不可）
-・Unity（native） → Unity Editorを起動してPlay mode
+Tier 3: 外部エディタ起動
+・Unity → Unity Editorを起動してPlay mode
 ・Unreal → Unreal Editorを起動
 ・SDL2 / C++ → compile → executable実行
-・preview画面に「エンジンで開く」ボタンを配置し、shell.openExternal()で起動
+・shell.openExternal()でエディタを起動
 
 ■ エンジン設定のpluggable化
 
@@ -46,15 +46,22 @@ preview方式をengine typeに応じて自動切り替えする設計にする�
 config/game_engines.yaml等でengine定義を管理。
 
 例:
-  phaser:   type: browser_native  / preview: iframe           / build不要
-  godot:    type: exportable      / preview: iframe_after_build / godot CLI必要
-  unity:    type: external        / preview: external_launch   / Unity Editor必要
+  phaser:   type: browser_native  / preview: open_in_browser    / build後にブラウザで開く
+  godot:    type: exportable      / preview: open_in_browser    / HTML5 export後にブラウザで開く
+  unity:    type: external        / preview: open_in_editor     / Unity Editorを起動
+
+■ 必要な修正
+・Frontend: outputフォルダを開くボタン（shell.openPath）
+・Frontend: index.htmlをブラウザで開くボタン（shell.openExternal）
+・Frontend: ダッシュボードまたはプロジェクト画面にリンクエリア追加
+・Config: game_engines.yaml（エンジン定義、preview方式、build command）
+
+■ 注意事項
+・architecture_worker.md / dependency_worker.mdにPhaserがhard codeされている
+・frameworkの指定はyaml設定化すべき（CLAUDE.mdの禁止事項: hard code禁止）
 
 ■ 対応方針
 
-短期: Phaser（HTML5）のiframe previewを実装。最もROIが高い
-中期: engine設定をyaml化してpluggableに。Godot HTML5 exportを追加
-長期: Unity/Unrealは「外部起動」modeとして対応。preview画面に起動ボタン
-
-HTML5系frameworkだけでも選択肢は豊富（Phaser, PixiJS, Three.js, Kaplay等）なので
-まずはそこを厚くし、native engine対応は外部起動方式で段階的に進める。
+短期: リンク方式でoutputフォルダ / index.htmlを開く機能を実装
+中期: engine設定をyaml化してpluggableに。build step組み込み後にiframe対応を検討
+長期: Unity/Unrealは外部エディタ起動modeとして対応
