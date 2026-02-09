@@ -1,0 +1,22 @@
+【小規模】Rate Limit設定のUI化
+
+現状、Rate limitはBackend codeで固定定義されている。
+管理画面からRate limit設定を変更できるようにする。
+
+修正内容:
+・Rate limit設定TableまたはConfig追加
+・Settings画面にRate limit設定UIを追加
+  - Endpoint group別の制限値設定
+  - 制限Window（秒/分/時）
+  - 制限超過時のResponse設定
+・設定変更のReal-time反映（再起動不要）
+・現在のRate limit状況のMonitor表示
+
+対象file:
+・backend/middleware/rate_limiter.py (Config化)
+・backend/handlers/settings_handler.py (API追加)
+・langgraph-studio/src/components/settings/ (UI追加)
+
+効果:
+・運用中のRate limit調整が容易に
+・LLM API負荷の柔軟な制御

@@ -1,0 +1,22 @@
+【小規模】Component Lazy Loadingの導入
+
+現状、全Viewが初期Loadで読み込まれる。
+使わないTabのComponentをLazy loadにして初期表示を高速化する。
+
+修正内容:
+・React.lazy() + Suspenseによる各Viewの遅延読み込み
+  - DashboardView, ProjectView, CheckpointsView等
+・Monaco Editor（大容量）のDynamic import
+・@xyflow/react のDynamic import
+・Loading skeletonの表示（Suspense fallback）
+・Vite のCode splitting設定最適化
+
+対象file:
+・langgraph-studio/src/App.tsx (lazy import化)
+・langgraph-studio/src/components/ui/Skeleton.tsx (新規)
+・langgraph-studio/vite.config.ts (chunk設定)
+
+効果:
+・初期Load timeの短縮
+・Bundle sizeの最適化
+・使わない機能のMemory節約

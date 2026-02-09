@@ -1,0 +1,22 @@
+【小規模】Keyboard Shortcutの追加
+
+現状、画面操作はMouse中心。
+Keyboard shortcutを追加してPower userの操作性を向上する。
+
+修正内容:
+・Tab切替（Ctrl+1〜9）
+・Project開始/停止（Ctrl+Enter / Ctrl+Shift+Enter）
+・Checkpoint承認/却下（Ctrl+Y / Ctrl+N）
+・検索Focus（Ctrl+K or /）
+・Modal close（Escape）
+・Shortcut一覧表示（?キー or Ctrl+/）
+・Shortcut設定のCustomize機能
+
+対象file:
+・langgraph-studio/src/hooks/useKeyboardShortcuts.ts (新規)
+・langgraph-studio/src/App.tsx (Hook登録)
+・langgraph-studio/src/components/ (各Component対応)
+
+効果:
+・操作効率の向上
+・Accessibilityの改善

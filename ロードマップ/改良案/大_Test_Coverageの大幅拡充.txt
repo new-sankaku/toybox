@@ -1,0 +1,27 @@
+【大規模】Test Coverageの大幅拡充
+
+現状のTest状況:
+・Backend: unit testはあるが、integration testは1 file、scenario testは2 file
+・Frontend: Playwright E2E testは4 spec fileのみ
+・Repository層、Service層のCoverageが不十分
+
+修正内容:
+・Backend Service層の unit test追加（agent, workflow, simulation, archive）
+・Backend Handler層の integration test追加（全27 handler module）
+・Repository層のCRUD test追加（全22 repository）
+・WebSocket event送受信のTest追加
+・Frontend Component testの導入（Vitest + Testing Library）
+・Zustand Store単体Testの追加（25 store）
+・API Service mockのTest追加
+・Coverage計測とReport生成の仕組み導入
+
+対象folder:
+・backend/tests/unit/ (拡充)
+・backend/tests/integration/ (拡充)
+・langgraph-studio/tests/ (拡充)
+・langgraph-studio/vitest.config.ts (新規)
+
+効果:
+・Refactoring時の安全性向上
+・Bug混入の早期発見
+・Codeの品質保証

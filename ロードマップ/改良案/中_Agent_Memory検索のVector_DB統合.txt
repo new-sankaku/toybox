@@ -1,0 +1,24 @@
+【中規模】Agent Memory検索のVector DB統合
+
+現状、Agent memoryはSQLiteのTextで保存されており、意味的検索ができない。
+Vector DBを統合し、過去の実行結果やInsightの類似検索を可能にする。
+
+修正内容:
+・Vector DB選定（ChromaDB or Qdrant: 軽量でLocal実行可能）
+・Embedding生成Providerの追加
+・Agent memory保存時のVector化
+・類似Memory検索APIの追加
+・Agent実行時のContext enrichment（過去の類似Task参照）
+・Memory管理UI（検索、削除、Export）
+
+対象file:
+・backend/providers/ (Embedding provider追加)
+・backend/repositories/agent_memory_repository.py (Vector DB統合)
+・backend/services/agent/memory_manager.py (検索Logic)
+・backend/handlers/ (検索API追加)
+・requirements.txt (Vector DB依存追加)
+
+効果:
+・Agentが過去のInsightを活用できる
+・類似Taskの処理効率向上
+・知識の蓄積と再利用

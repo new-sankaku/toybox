@@ -1,0 +1,24 @@
+【小規模】apiServiceの自動生成化
+
+現状、apiService.ts（1784行）は手動で保守されている。
+OpenAPI specから自動生成することで保守Cost削減と型安全性を向上する。
+
+修正内容:
+・OpenAPI spec → API client自動生成の導入
+  - 候補: openapi-fetch, orval, swagger-typescript-api
+・現在のapiService.tsの段階的置き換え
+・自動生成CodeのCustomize設定
+・生成scriptのpackage.json統合
+
+対象file:
+・langgraph-studio/src/services/apiService.ts (自動生成に置換)
+・langgraph-studio/package.json (生成script追加)
+・backend/openapi/generator.py (Spec精度向上)
+
+効果:
+・API変更時の手動修正が不要に
+・型の不整合Bugの根絶
+・保守工数の大幅削減
+
+注意:
+・既存のapiService.tsに含まれるCustom logicは別途保持が必要

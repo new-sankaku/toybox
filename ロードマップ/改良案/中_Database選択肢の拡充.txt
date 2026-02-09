@@ -1,0 +1,25 @@
+【中規模】Database選択肢の拡充（PostgreSQL対応）
+
+現状、SQLiteのみ対応。開発・個人利用には十分だが、
+Multi-user環境やProduction運用ではPostgreSQL等の選択肢が必要。
+
+修正内容:
+・SQLAlchemy URLのConfig化（既にある程度対応済みか確認）
+・PostgreSQL用のConnection pool設定
+・Migration scriptのDialect対応（SQLite固有構文の排除）
+・環境変数によるDB切替（DATABASE_URL）
+・Docker Compose にPostgreSQL service追加
+・Seed dataのDialect互換性確認
+・WAL mode等SQLite固有設定の条件分岐
+
+対象file:
+・backend/config.py (DatabaseConfig拡充)
+・backend/models/database.py (Connection pool, dialect対応)
+・backend/models/tables.py (SQLite固有型の確認)
+・docker-compose.yml (新規: PostgreSQL service)
+・.env.example (DATABASE_URL追加)
+
+効果:
+・Production環境での運用が現実的に
+・同時接続数の制限緩和
+・Data永続性の向上

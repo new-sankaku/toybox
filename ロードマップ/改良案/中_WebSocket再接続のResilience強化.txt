@@ -1,0 +1,24 @@
+【中規模】WebSocket再接続のResilience強化
+
+現状、WebSocket切断時のRecovery処理が限定的。
+長時間のAgent実行中にNetwork断が発生すると状態が不整合になる可能性がある。
+
+修正内容:
+・Exponential backoffによる再接続Strategy
+・再接続時のState sync protocol
+・未送信Message queueの実装（Offline buffer）
+・接続状態のHealth check interval
+・Server側のSession persistence（切断後も一定時間State保持）
+・再接続時のMissed event再送機構
+・Connection状態のUI表示改善（Retry count, 次回接続予定）
+
+対象file:
+・langgraph-studio/src/services/websocketService.ts (再接続Logic)
+・backend/events/websocket_emitter.py (Session persistence)
+・langgraph-studio/src/stores/connectionStore.ts (状態管理)
+・langgraph-studio/src/components/layout/ConnectionStatus.tsx (UI)
+
+効果:
+・不安定なNetwork環境でもData損失なし
+・長時間Agent実行の信頼性向上
+・Userの操作中断を最小化

@@ -1,0 +1,26 @@
+【中規模】Cost Dashboardの強化
+
+現状のCost表示は基本的な集計のみ。
+予算管理やCost最適化のための高度な分析機能を追加する。
+
+修正内容:
+・Cost推移のChart表示（日別、週別、月別）
+・Agent type別のCost breakdown
+・Model別のCost比較表示
+・予算Alert機能（閾値設定 → 通知）
+・Cost予測機能（現在のPace → 完了時推定Cost）
+・Project間のCost比較
+・Cost最適化のSuggestion表示（高Cost Agentの特定、Model変更提案）
+・Cost dataのCSV export
+
+対象file:
+・langgraph-studio/src/views/CostView.tsx (Dashboard拡充)
+・langgraph-studio/src/components/settings/CostReportPanel.tsx (Chart追加)
+・langgraph-studio/src/stores/globalCostSettingsStore.ts (Alert設定)
+・backend/services/project/metrics_calculator.py (Cost分析Logic)
+・backend/handlers/ (Cost分析API追加)
+
+効果:
+・Cost超過の早期検知
+・Model選択の最適化支援
+・Budget管理の精度向上

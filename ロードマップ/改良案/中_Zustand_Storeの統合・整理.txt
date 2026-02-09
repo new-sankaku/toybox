@@ -1,0 +1,25 @@
+【中規模】Zustand Storeの統合・整理
+
+現状、25個のStoreが存在し、責務の重複や密結合が見られる。
+Store設計を見直し、保守性を向上する。
+
+修正内容:
+・関連性の高いStoreの統合検討
+  - costSettingsStore + globalCostSettingsStore → costStore
+  - agentStore + agentDefinitionStore → 統合検討
+  - navigationStore + uiConfigStore → ui関連統合
+・Store間の依存関係整理（循環参照の排除）
+・Selector patternの徹底（不要なRe-render防止）
+・DevTools統合（Zustand devtools middleware）
+・Store State のPersistence対応（LocalStorage/IndexedDB）
+・大規模StateのNormalization（Agent list等）
+
+対象folder:
+・langgraph-studio/src/stores/ (全25 file見直し)
+・langgraph-studio/src/components/ (import path修正)
+・langgraph-studio/src/views/ (import path修正)
+
+効果:
+・不要なRe-renderの削減
+・Store管理の見通し改善
+・Memory効率の向上

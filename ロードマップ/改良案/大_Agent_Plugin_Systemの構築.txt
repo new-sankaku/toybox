@@ -1,0 +1,25 @@
+【大規模】Agent Plugin Systemの構築
+
+現状、Agent typeやSkillはCode内に直接定義されている。
+外部からAgentやSkillを追加できるPlugin機構を構築する。
+
+修正内容:
+・Plugin managerの実装（load/unload/validate）
+・Plugin定義formatの策定（YAML or JSON schema）
+・Custom Agent type のPlugin化
+・Custom Skill のPlugin化
+・Plugin用のSandbox実行環境
+・Plugin管理UIの追加（Install/Uninstall/有効化/無効化）
+・Plugin間の依存関係解決
+・Plugin version管理
+
+対象folder:
+・backend/plugins/ (新規)
+・backend/agents/plugin_runner/ (新規)
+・backend/skills/plugin_skill/ (新規)
+・langgraph-studio/src/views/PluginView/ (新規)
+
+効果:
+・Userが独自Agent/Skillを追加可能に
+・Core codeを変更せずに機能拡張
+・Community貢献の基盤

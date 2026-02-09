@@ -1,0 +1,20 @@
+【小規模】Config Validationの起動時Check
+
+現状、YAML/JSON configのValidationが起動時に十分行われていない。
+設定ミスが実行時まで検出されない場合がある。
+
+修正内容:
+・起動時のConfig schema validation追加（Pydantic model化）
+・必須項目の存在Check
+・型・範囲のValidation（port番号、URL format等）
+・Config間の整合性Check（agents.yamlとskills.yamlの参照整合性）
+・Validation errorの分かりやすいLog出力
+・.env.exampleとの差分Warning
+
+対象file:
+・backend/config_loaders/ (各loader にvalidation追加)
+・backend/main.py (起動時validation呼び出し)
+
+効果:
+・設定ミスの早期検出
+・起動失敗時の原因特定が容易に

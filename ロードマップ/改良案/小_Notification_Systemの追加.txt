@@ -1,0 +1,23 @@
+【小規模】Notification Systemの追加
+
+現状、Agent完了やCheckpoint作成の通知はToastのみ。
+Desktop Notificationやより高度な通知Systemを追加する。
+
+修正内容:
+・Desktop Notification（Electron Notification API）
+  - Agent完了時
+  - Checkpoint承認待ち
+  - Error発生時
+  - Budget警告
+・通知設定UI（種類別のOn/Off）
+・通知音の設定（VoiceVox統合の可能性）
+・通知履歴の管理
+
+対象file:
+・langgraph-studio/electron/main.ts (Notification API)
+・langgraph-studio/src/stores/notificationStore.ts (新規)
+・langgraph-studio/src/components/settings/ (通知設定UI)
+
+効果:
+・重要Eventの見逃し防止
+・Background実行中の状況把握
