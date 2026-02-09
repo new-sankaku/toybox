@@ -26,7 +26,7 @@ export function ConfirmDialog({
  return(
   <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
    <Card className="w-full max-w-[90vw] md:max-w-sm lg:max-w-md">
-    <CardHeader>
+    <CardHeader className="nier-surface-header">
      <div className="flex items-center gap-2">
       <AlertTriangle size={18}/>
       <span>{title}</span>

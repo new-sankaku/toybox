@@ -265,11 +265,8 @@ export default function CheckpointReviewView({
 
 
      <Card>
-      <CardHeader className="bg-nier-accent-red">
-       <span className="flex items-center gap-2">
-        <span>◈</span>
-        <span>アクション</span>
-       </span>
+      <CardHeader>
+       <DiamondMarker>アクション</DiamondMarker>
       </CardHeader>
       <CardContent className="space-y-3">
        {checkpoint.status==='pending'?(

@@ -215,7 +215,7 @@
    * - 赤（未対応）→ オレンジ（処理中）→ 緑（完了）
    */
   .nier-status-badge {
-    @apply px-1.5 py-0.5 text-[10px] tracking-nier bg-transparent border-b-2;
+    @apply text-[10px] tracking-nier bg-transparent border-b;
   }
 
   .nier-status-badge-pending {
@@ -290,7 +290,7 @@
   }
 
   .nier-card-header {
-    @apply bg-nier-bg-header text-nier-text-header
+    @apply nier-surface-header
            px-3 py-1.5 text-nier-small tracking-nier
            flex items-center;
   }
