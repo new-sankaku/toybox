@@ -1,0 +1,22 @@
+【中規模】バージョン比較ビュー
+
+プロジェクトの各段階や修正前後の成果物をdiffで比較できる機能。
+何が変わったかを直感的に確認できる。
+
+■ 概要
+・コード: Monaco Editorのdiffビューで変更箇所をハイライト
+・ドキュメント: Markdown diffで設計書の変更を可視化
+・画像: ビフォーアフターのスライダー比較
+・Snapshot間の比較（Agentの出力がどう変化したか）
+
+■ 必要な修正
+・Backend: SnapshotService拡張（差分計算API）
+・Backend: ファイルバージョン履歴の保持
+・Frontend: DiffViewer Component（Monaco diff editor統合）
+・Frontend: ImageCompare Component（スライダー式比較）
+・Frontend: Snapshotタブに「比較」モード追加
+
+■ 売り
+・品質改善のプロセスが見える
+・Checkpoint承認時に「何が変わったか」を即座に把握
+・開発者が慣れたdiffビューで安心感

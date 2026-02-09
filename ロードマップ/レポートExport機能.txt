@@ -1,0 +1,14 @@
+【小規模】レポートExport機能
+
+プロジェクトの実行結果・コストレポート・Agent成績をPDFやCSVでExport。
+チームへの報告や記録に使用。
+
+■ 概要
+・プロジェクトサマリーレポート（PDF）: 概要、Phase進捗、成果物リスト、コスト
+・コストレポート（CSV）: モデル別・Agent別・日別のコスト明細
+・Agent成績レポート（CSV）: 品質スコア、トークン消費、リトライ回数
+
+■ 必要な修正
+・Backend: ReportGenerator Service（PDF/CSV生成）
+・Backend: export用のAPIエンドポイント追加
+・Frontend: コストタブ・プロジェクト画面にExportボタン追加

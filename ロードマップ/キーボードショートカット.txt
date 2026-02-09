@@ -1,0 +1,16 @@
+【小規模】キーボードショートカット
+
+主要な操作をキーボードだけで行えるようにする。
+マウス操作を減らし、パワーユーザーの作業効率を向上。
+
+■ 概要
+・タブ切り替え: Ctrl+1〜9
+・プロジェクト開始/停止: Ctrl+Enter / Ctrl+Shift+Enter
+・Checkpoint承認: Ctrl+Shift+A、却下: Ctrl+Shift+R
+・検索パネル: Ctrl+K（コマンドパレット風）
+・ショートカット一覧表示: Ctrl+/
+
+■ 必要な修正
+・Frontend: KeyboardShortcut Managerの実装（グローバルイベントリスナー）
+・Frontend: ショートカット一覧のモーダル
+・Frontend: 各画面のハンドラ接続

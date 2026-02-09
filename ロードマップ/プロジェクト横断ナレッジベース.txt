@@ -1,0 +1,24 @@
+【大規模】プロジェクト横断ナレッジベース
+
+過去のプロジェクトで得た知見をAgent間で共有・再利用するシステム。
+Agentが経験から学び、プロジェクトを重ねるごとに品質が向上する。
+
+■ 概要
+・各Agentの成果物・Checkpointのフィードバック・品質評価を知識として蓄積
+・新規プロジェクト開始時に関連する知見をContextに自動注入
+・「前回のRPGプロジェクトではバトルバランスが難しすぎると指摘された」等の教訓を活用
+・ベクトルDBによる類似度検索で関連知識を取得
+
+■ 必要な修正
+・Backend: KnowledgeBase Service（保存・検索・ランキング）
+・Backend: Embedding生成（OpenAI or ローカルモデル）
+・Backend: ベクトルDB連携（ChromaDB or Qdrant）
+・Backend: PromptBuilder拡張（知識注入の仕組み）
+・Frontend: ナレッジベース管理画面（閲覧・編集・削除）
+・Frontend: Agent詳細に「参照した知識」セクション追加
+・Config: ai_providers.yamlにEmbedding model設定追加
+
+■ 売り
+・使うほど賢くなるAgentシステム
+・同じ失敗を繰り返さない自己改善メカニズム
+・プロジェクト間の知見を横断的に活用

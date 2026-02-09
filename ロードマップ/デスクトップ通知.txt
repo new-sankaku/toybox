@@ -1,0 +1,16 @@
+【小規模】デスクトップ通知
+
+Checkpointや重要イベント発生時にElectronのネイティブ通知を表示。
+アプリを最小化して別の作業をしていても見逃さない。
+
+■ 概要
+・Checkpoint発生時に通知（クリックで該当Checkpointへジャンプ）
+・プロジェクト完了/失敗時に通知
+・Agent異常停止時に通知
+・予算アラート到達時に通知
+・通知のON/OFF設定（カテゴリ別）
+
+■ 必要な修正
+・Frontend: Electronのnotification API連携
+・Frontend: 通知設定UIを共通設定に追加
+・Frontend: WebSocket eventと通知のバインド
