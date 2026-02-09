@@ -146,7 +146,7 @@ def check_imports(backend_root:Path)->bool:
         )
         if result.returncode!=0:
             error_lines=result.stderr.strip().split("\n")
-            last_line=error_lines[-1] if error_lines else "Unknown error"
+            last_line=error_lines[-1] if error_lines else"Unknown error"
             errors.append(f"  {module}: {last_line}")
     if errors:
         for e in errors:

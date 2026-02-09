@@ -298,7 +298,7 @@ export function DataManagement():JSX.Element{
    {confirmDialog&&(
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
      <Card className="w-full max-w-md">
-      <CardHeader>
+      <CardHeader className="nier-surface-header">
        <AlertTriangle size={18} className="text-nier-accent-orange"/>
        <span>
         {confirmDialog.type==='restore'&&'復元の確認'}
