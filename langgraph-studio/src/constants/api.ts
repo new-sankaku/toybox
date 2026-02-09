@@ -173,6 +173,8 @@ export const API_ENDPOINTS={
   history:'/api/cost/history',
   summary:'/api/cost/summary',
   exportCsv:'/api/cost/export/csv',
-  exportJson:'/api/cost/export/json'
+  exportJson:'/api/cost/export/json',
+  daily:'/api/cost/daily',
+  prediction:'/api/cost/prediction'
  }
 }as const

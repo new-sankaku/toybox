@@ -63,3 +63,34 @@ class CostSummarySchema(BaseModel):
  total_cost:float
  by_service:Dict[str,CostSummaryByServiceSchema]
  by_project:Dict[str,CostSummaryByProjectSchema]
+
+class DailyCostItemSchema(BaseModel):
+ date:str
+ cost:float=0.0
+ input_tokens:int=0
+ output_tokens:int=0
+ call_count:int=0
+
+class DailyCostByServiceItemSchema(BaseModel):
+ date:str
+ service_type:str
+ cost:float=0.0
+
+class DailyCostResponseSchema(BaseModel):
+ year:int
+ month:int
+ daily:List[DailyCostItemSchema]
+ by_service:List[DailyCostByServiceItemSchema]
+ service_types:List[str]
+
+class CostPredictionSchema(BaseModel):
+ current_usage:float
+ daily_average:float
+ projected_total:float
+ monthly_limit:float
+ projected_percent:float
+ will_exceed_budget:bool
+ remaining_days:int
+ elapsed_days:int
+ days_in_month:int
+ days_until_limit:float

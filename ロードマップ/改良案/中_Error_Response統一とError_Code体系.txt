@@ -1,0 +1,25 @@
+【中規模】Error Response統一とError Code体系
+
+現状、Error responseのFormatが統一されていない箇所がある。
+体系的なError code管理で、Debug効率とUser体験を向上する。
+
+修正内容:
+・Error code体系の策定（例: AGT-001, PRJ-002, LLM-003）
+・統一Error response format（code, message, details, trace_id）
+・Backend全handlerのError response統一
+・Custom Exception classの整備（domain別）
+・Error codeとUserメッセージの対応表（多言語対応可）
+・Frontend側のError表示標準化
+・Error code別のRecovery suggestion表示
+
+対象file:
+・backend/middleware/error_handler.py (Error format統一)
+・backend/exceptions/ (新規: Custom Exception)
+・backend/handlers/ (全handler修正)
+・langgraph-studio/src/services/apiService.ts (Error handling)
+・langgraph-studio/src/components/ui/Toast.tsx (Error表示)
+
+効果:
+・Error原因の特定が迅速に
+・UserへのError表示が分かりやすく
+・SupportのCommunication効率向上

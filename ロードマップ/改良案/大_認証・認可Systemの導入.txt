@@ -1,0 +1,26 @@
+【大規模】認証・認可Systemの導入
+
+現状、Multi-user対応の認証・認可Systemがない。
+Admin認証のmiddlewareはあるが、一般Userの管理機構がない。
+
+修正内容:
+・User管理Table追加（users, roles, permissions）
+・JWT認証の導入（Login/Logout/Token refresh）
+・Role-based access control（Admin / Editor / Viewer）
+・Projectごとのaccess権限管理
+・API key管理のUser紐づけ
+・Frontend Login画面の作成
+・認証状態のStore管理
+・Protected routeの実装
+
+対象file:
+・backend/models/tables.py (User table追加)
+・backend/middleware/ (auth middleware拡充)
+・backend/handlers/ (認証check追加)
+・langgraph-studio/src/views/ (Login画面新規)
+・langgraph-studio/src/stores/ (auth store新規)
+
+効果:
+・Multi-user環境での運用が可能に
+・API keyのSecurity向上
+・操作履歴のUser紐づけ

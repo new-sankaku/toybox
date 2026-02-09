@@ -1,0 +1,23 @@
+【小規模】Health Check Endpointの追加
+
+現状、Serverの稼働状態を確認するHealth check endpointがない。
+監視やLoad balancer連携のために追加する。
+
+修正内容:
+・GET /health endpoint追加
+  - Server status (up/degraded/down)
+  - Database接続Check
+  - WebSocket接続数
+  - Memory使用量
+  - 各Provider availability
+・GET /health/ready (Readiness probe)
+・GET /health/live (Liveness probe)
+
+対象file:
+・backend/handlers/health_handler.py (新規)
+・backend/server.py (route登録)
+
+効果:
+・Server監視の実現
+・Docker/K8s環境でのProbe対応
+・障害検知の迅速化

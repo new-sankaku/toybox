@@ -1781,4 +1781,50 @@ export const costReportApi={
  }
 }
 
+export interface DailyCostItem{
+ date:string
+ cost:number
+ input_tokens:number
+ output_tokens:number
+ call_count:number
+}
+
+export interface DailyCostByServiceItem{
+ date:string
+ service_type:string
+ cost:number
+}
+
+export interface DailyCostResponse{
+ year:number
+ month:number
+ daily:DailyCostItem[]
+ by_service:DailyCostByServiceItem[]
+ service_types:string[]
+}
+
+export interface CostPrediction{
+ current_usage:number
+ daily_average:number
+ projected_total:number
+ monthly_limit:number
+ projected_percent:number
+ will_exceed_budget:boolean
+ remaining_days:number
+ elapsed_days:number
+ days_in_month:number
+ days_until_limit:number
+}
+
+export const costAnalyticsApi={
+ getDaily:async(params?:{year?:number;month?:number;project_id?:string}):Promise<DailyCostResponse>=>{
+  const response=await api.get(API_ENDPOINTS.cost.daily,{params})
+  return response.data
+ },
+ getPrediction:async():Promise<CostPrediction>=>{
+  const response=await api.get(API_ENDPOINTS.cost.prediction)
+  return response.data
+ }
+}
+
 export{api}

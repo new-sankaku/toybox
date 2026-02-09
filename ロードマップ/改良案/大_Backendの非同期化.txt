@@ -1,0 +1,31 @@
+【大規模】Backendの非同期化（eventlet → asyncio）
+
+現状、eventletベースの同期的なFlask構成。
+Agent実行やLLM API callなど非同期処理が多い本Projectではasyncio化が有効。
+
+修正内容:
+・Flask → FastAPI or Quart への移行検討
+・eventlet → asyncioへの移行
+・Agent runner の async対応
+・LLM API call の async化（並列処理の最適化）
+・WebSocket handler の native async化
+・Repository層の async session対応
+・DI Container の async対応
+
+対象folder:
+・backend/server.py (Framework変更)
+・backend/main.py (起動処理変更)
+・backend/agents/ (async runner)
+・backend/providers/ (async API call)
+・backend/repositories/ (async session)
+・backend/services/ (async service)
+・backend/handlers/ (async handler)
+
+効果:
+・LLM API callの並列効率向上
+・多数Agent同時実行時のPerformance改善
+・I/O待ちのResource効率化
+
+注意:
+・影響範囲が非常に大きいため段階的移行が必要
+・まずProvider層のasync化から着手するのが現実的

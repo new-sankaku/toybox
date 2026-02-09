@@ -1,0 +1,23 @@
+【中規模】API Versioningの導入
+
+現状、API endpointにVersion管理がない。
+Breaking changeが入ると既存のClientが動作しなくなる。
+
+修正内容:
+・URL prefix方式のVersion管理（/api/v1/, /api/v2/）
+・Blueprint単位でのVersion routing
+・Version別のSchema定義
+・Deprecation headerの付与
+・OpenAPI specのVersion別生成
+・Frontend側のAPI version指定機構
+
+対象file:
+・backend/server.py (route prefix追加)
+・backend/handlers/ (version別handler)
+・backend/schemas/ (version別schema)
+・backend/openapi/generator.py (version対応)
+
+効果:
+・Breaking changeの安全な導入
+・Clientの段階的移行が可能に
+・API互換性の明示

@@ -1,0 +1,23 @@
+【小規模】Accessibility対応の強化
+
+現状、ARIA属性やFocus管理が不十分な箇所がある。
+WCAG 2.1準拠を目指してAccessibilityを強化する。
+
+修正内容:
+・全ComponentにARIA label/role追加
+・Focus管理の改善（Tab order、Focus trap on Modal）
+・Color contrastの確認と調整（NieR themeの視認性）
+・Screen reader対応（Live region for Toast/Agent status）
+・Reduce motionのMedia query対応
+・High contrast modeの対応検討
+
+対象file:
+・langgraph-studio/src/components/ui/ (全UI primitive)
+・langgraph-studio/src/components/layout/ (Layout component)
+・langgraph-studio/src/styles/ (Color contrast調整)
+・langgraph-studio/tailwind.config.cjs (A11y用token追加)
+
+効果:
+・Screen reader userへの対応
+・Keyboard only userの操作性向上
+・法令遵守（JIS X 8341-3）

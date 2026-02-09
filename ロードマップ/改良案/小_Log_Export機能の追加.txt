@@ -1,0 +1,22 @@
+【小規模】Log Export機能の追加
+
+現状、LogはUI上で閲覧するのみ。
+CSV/JSON形式でのExport機能を追加する。
+
+修正内容:
+・Log Export API追加（GET /api/projects/:id/logs/export）
+・Export format選択（CSV, JSON, Markdown）
+・期間Filter（from/to）
+・Agent別/Level別のFilter
+・Frontend のExport button追加
+・大量Log時のStreaming download
+
+対象file:
+・backend/handlers/log_handler.py (Export API追加)
+・backend/repositories/ (Log query拡充)
+・langgraph-studio/src/views/LogsView.tsx (Export button)
+
+効果:
+・Log分析のOffline実施
+・外部Toolでの分析が可能に
+・Debug情報の共有が容易に

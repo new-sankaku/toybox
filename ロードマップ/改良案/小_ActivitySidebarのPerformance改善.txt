@@ -1,0 +1,21 @@
+【小規模】ActivitySidebarのPerformance改善
+
+ActivitySidebar.tsxが13,500行と巨大。
+Component分割とVirtualizationでPerformanceを改善する。
+
+修正内容:
+・大規模ComponentのFile分割
+  - ActivitySidebar → 機能単位のSub component化
+  - ActivityList, ActivityItem, ActivityFilter等
+・長大なActivity listのVirtualization（react-window or @tanstack/virtual）
+・不要なRe-renderの抑制（React.memo, useMemo, useCallback）
+・Activity dataのPagination対応
+
+対象file:
+・langgraph-studio/src/components/layout/ActivitySidebar.tsx (分割)
+・langgraph-studio/src/components/layout/activity/ (新規folder)
+
+効果:
+・大量Activity時のScroll性能向上
+・Component保守性の向上
+・Memory使用量の削減

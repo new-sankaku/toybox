@@ -1,0 +1,23 @@
+【大規模】CI/CD Pipelineの構築
+
+現状、10_build_check.batによるLocal Build検証のみで、CI/CDの仕組みがない。
+GitHub Actionsなどで自動化Pipelineを構築する。
+
+修正内容:
+・GitHub Actions workflowの作成（PR時/merge時）
+・Backend: Python lint (ruff) + pytest実行
+・Frontend: ESLint + TypeScript typecheck + Playwright E2E test
+・Build check scriptのCI対応（bat → cross-platform script）
+・OpenAPI spec生成 + 型生成の自動検証
+・PR時のTest結果Report自動投稿
+・Main branchへのmerge時にRelease buildを自動生成
+
+対象file:
+・.github/workflows/ (新規)
+・10_build_check.bat → CI用scriptに変換
+・package.json (CI用script追加)
+
+効果:
+・Merge前のRegression検知
+・手動Build checkの工数削減
+・Release buildの自動化

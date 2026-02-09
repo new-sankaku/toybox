@@ -1,0 +1,27 @@
+【小規模】Docker化の整備
+
+現状、Docker構成が存在しない。
+開発環境・Production環境のDocker化を行う。
+
+修正内容:
+・Backend用Dockerfile作成
+・Frontend用Dockerfile作成（Web版として）
+・docker-compose.yml作成
+  - Backend service
+  - Frontend service（Electron除くWeb版）
+  - SQLite volume mount
+・.dockerignore作成
+・開発用docker-compose.override.yml（Hot reload対応）
+・環境変数のDocker対応
+
+対象file:
+・Dockerfile (新規: Backend)
+・Dockerfile.frontend (新規: Frontend Web版)
+・docker-compose.yml (新規)
+・docker-compose.override.yml (新規: 開発用)
+・.dockerignore (新規)
+
+効果:
+・環境構築の簡略化（docker-compose up で起動）
+・環境差異によるBug削減
+・Deployment環境への展開が容易に

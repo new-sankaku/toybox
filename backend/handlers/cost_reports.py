@@ -2,6 +2,7 @@ from flask import Flask,request,jsonify,Response
 from datetime import datetime
 from models.database import get_session
 from repositories.cost_history import CostHistoryRepository
+from services.budget_manager import get_budget_manager
 from middleware.logger import get_logger
 from middleware.error_handler import ApiError
 import csv
@@ -175,3 +176,26 @@ def register_cost_reports_routes(app:Flask):
   except Exception as e:
    get_logger().error(f"Failed to export JSON: {e}",exc_info=True)
    raise ApiError("JSONエクスポートに失敗しました",code="EXPORT_JSON_ERROR",status_code=500)
+
+ @app.route('/api/cost/daily',methods=['GET'])
+ def get_cost_daily():
+  try:
+   year=request.args.get('year',type=int)
+   month=request.args.get('month',type=int)
+   project_id=request.args.get('project_id')
+   manager=get_budget_manager()
+   result=manager.get_daily_breakdown(year,month,project_id)
+   return jsonify(result)
+  except Exception as e:
+   get_logger().error(f"Failed to get daily cost breakdown: {e}",exc_info=True)
+   raise ApiError("日別コストの取得に失敗しました",code="COST_DAILY_ERROR",status_code=500)
+
+ @app.route('/api/cost/prediction',methods=['GET'])
+ def get_cost_prediction():
+  try:
+   manager=get_budget_manager()
+   result=manager.get_cost_prediction()
+   return jsonify(result)
+  except Exception as e:
+   get_logger().error(f"Failed to get cost prediction: {e}",exc_info=True)
+   raise ApiError("コスト予測の取得に失敗しました",code="COST_PREDICTION_ERROR",status_code=500)

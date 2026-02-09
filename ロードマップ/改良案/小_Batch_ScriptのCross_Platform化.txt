@@ -1,0 +1,25 @@
+【小規模】Batch ScriptのCross-platform化
+
+現状、運用Scriptの多くが.bat形式でWindows専用。
+CLAUDE.mdにもHookやScriptはWindows/Linux動作必須と記載されている。
+
+修正内容:
+・.bat fileをPython scriptまたはnpm scriptに変換
+  - 10_build_check.bat → Python script or npm script
+  - run_testdata.ps1 → Python script
+  - その他運用Script
+・npm scriptsへのCross-platform command統合
+・package.json scriptsの整理
+・makefileの検討（make build, make test, make check）
+
+対象file:
+・*.bat (変換対象)
+・*.ps1 (変換対象)
+・backend/scripts/ (Python script化)
+・langgraph-studio/scripts/ (Node script化)
+・langgraph-studio/package.json (script追加)
+
+効果:
+・Linux/macOS環境での開発が容易に
+・CI環境での実行が可能に
+・Script管理の統一
