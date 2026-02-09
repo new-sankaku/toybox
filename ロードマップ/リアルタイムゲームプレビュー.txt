@@ -21,3 +21,40 @@
 ・「AIが作っている過程を見れる」体験としてのインパクト
 ・Checkpointでの承認判断が格段にしやすくなる
 ・デモ映えする機能
+
+■ ゲームエンジン別のプレビュー方式
+
+Tier 1: iframe直接実行（build不要）
+・Phaser（現状のデフォルト）、PixiJS、Three.js / Babylon.js、Kaplay（旧Kaboom）
+・現在のpreview設計（iframe + file serving）でそのまま対応可能
+・agents.yamlやpromptの指定frameworkを切り替えるだけ
+
+Tier 2: build stepを挟めばiframe実行可能
+・Godot → HTML5 export（godot --headless --export-release "HTML5"）
+・Unity → WebGL build（-buildTarget WebGL）、ただしbuild時間が数分〜
+・CodeBuildSkillの拡張で対応できるが、engine自体のinstall・licenseが前提
+
+Tier 3: 外部起動（iframe preview不可）
+・Unity（native） → Unity Editorを起動してPlay mode
+・Unreal → Unreal Editorを起動
+・SDL2 / C++ → compile → executable実行
+・preview画面に「エンジンで開く」ボタンを配置し、shell.openExternal()で起動
+
+■ エンジン設定のpluggable化
+
+preview方式をengine typeに応じて自動切り替えする設計にする。
+config/game_engines.yaml等でengine定義を管理。
+
+例:
+  phaser:   type: browser_native  / preview: iframe           / build不要
+  godot:    type: exportable      / preview: iframe_after_build / godot CLI必要
+  unity:    type: external        / preview: external_launch   / Unity Editor必要
+
+■ 対応方針
+
+短期: Phaser（HTML5）のiframe previewを実装。最もROIが高い
+中期: engine設定をyaml化してpluggableに。Godot HTML5 exportを追加
+長期: Unity/Unrealは「外部起動」modeとして対応。preview画面に起動ボタン
+
+HTML5系frameworkだけでも選択肢は豊富（Phaser, PixiJS, Three.js, Kaplay等）なので
+まずはそこを厚くし、native engine対応は外部起動方式で段階的に進める。
