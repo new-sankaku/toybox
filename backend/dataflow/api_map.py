@@ -11,7 +11,7 @@ Fields:
   response_list:True if response is a list of response_schema
   ts_request:TypeScript type name for request body
   ts_response:TypeScript type name for response
-  emits: List of WebSocket events emitted
+  emits:List of WebSocket events emitted
   query_params:Dict of query parameter names->type hints
 """
 
@@ -1264,5 +1264,29 @@ API_MAP=[
         "ts_response":"Blob(application/json)",
         "emits":[],
         "query_params":{"year":"int","month":"int","project_id":"str"},
+    },
+    {
+        "endpoint":"/api/cost/daily",
+        "method":"GET",
+        "handler":"handlers/cost_reports.py::get_cost_daily",
+        "request_schema":None,
+        "response_schema":"DailyCostResponseSchema",
+        "response_list":False,
+        "ts_request":None,
+        "ts_response":"DailyCostResponse",
+        "emits":[],
+        "query_params":{"year":"int","month":"int","project_id":"str"},
+    },
+    {
+        "endpoint":"/api/cost/prediction",
+        "method":"GET",
+        "handler":"handlers/cost_reports.py::get_cost_prediction",
+        "request_schema":None,
+        "response_schema":"CostPredictionSchema",
+        "response_list":False,
+        "ts_request":None,
+        "ts_response":"CostPrediction",
+        "emits":[],
+        "query_params":{},
     },
 ]

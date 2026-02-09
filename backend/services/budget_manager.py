@@ -1,5 +1,6 @@
-from typing import Dict,Any,Optional,Tuple
+from typing import Dict,Any,Optional,Tuple,List
 from datetime import datetime
+import calendar
 from models.database import get_session
 from repositories.global_cost_settings import GlobalCostSettingsRepository
 from repositories.cost_history import CostHistoryRepository
@@ -78,6 +79,59 @@ class BudgetManager:
    session.commit()
    self._check_and_notify_budget()
    return entry
+
+ def get_cost_prediction(self)->Dict[str,Any]:
+  now=datetime.now()
+  current_usage=self.get_current_month_usage()
+  days_in_month=calendar.monthrange(now.year,now.month)[1]
+  elapsed_days=now.day
+  remaining_days=days_in_month-elapsed_days
+  if elapsed_days>0:
+   daily_average=current_usage/elapsed_days
+  else:
+   daily_average=0.0
+  projected_total=current_usage+(daily_average*remaining_days)
+  with get_session() as session:
+   settings_repo=GlobalCostSettingsRepository(session)
+   settings=settings_repo.get_or_create_default()
+   monthly_limit=float(settings.global_monthly_limit)
+  projected_percent=0 if monthly_limit<=0 else(projected_total/monthly_limit)*100
+  will_exceed=projected_total>monthly_limit and monthly_limit>0
+  if monthly_limit>0 and daily_average>0:
+   days_until_limit=max(0,(monthly_limit-current_usage)/daily_average)
+  else:
+   days_until_limit=-1
+  return {
+   "current_usage":round(current_usage,4),
+   "daily_average":round(daily_average,4),
+   "projected_total":round(projected_total,4),
+   "monthly_limit":monthly_limit,
+   "projected_percent":round(projected_percent,1),
+   "will_exceed_budget":will_exceed,
+   "remaining_days":remaining_days,
+   "elapsed_days":elapsed_days,
+   "days_in_month":days_in_month,
+   "days_until_limit":round(days_until_limit,1)
+  }
+
+ def get_daily_breakdown(self,year:Optional[int]=None,month:Optional[int]=None,project_id:Optional[str]=None)->Dict[str,Any]:
+  now=datetime.now()
+  if not year:
+   year=now.year
+  if not month:
+   month=now.month
+  with get_session() as session:
+   repo=CostHistoryRepository(session)
+   daily=repo.get_daily_breakdown(year,month,project_id)
+   by_service=repo.get_daily_breakdown_by_service(year,month,project_id)
+  service_types=list({item["service_type"] for item in by_service})
+  return {
+   "year":year,
+   "month":month,
+   "daily":daily,
+   "by_service":by_service,
+   "service_types":service_types
+  }
 
  def _check_and_notify_budget(self)->None:
   if not self.sio:

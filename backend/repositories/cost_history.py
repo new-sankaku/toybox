@@ -1,4 +1,4 @@
-from typing import List,Optional
+from typing import List,Optional,Dict
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func,and_,Float
@@ -69,6 +69,46 @@ class CostHistoryRepository:
    and_(CostHistory.recorded_at>=start,CostHistory.recorded_at<end)
   ).group_by(CostHistory.project_id).all()
   return {r.project_id:{"call_count":r.call_count} for r in results}
+
+ def get_daily_breakdown(self,year:int,month:int,project_id:Optional[str]=None)->List[Dict]:
+  start=datetime(year,month,1)
+  if month==12:
+   end=datetime(year+1,1,1)
+  else:
+   end=datetime(year,month+1,1)
+  date_expr=func.date(CostHistory.recorded_at)
+  query=self.session.query(
+   date_expr.label("date"),
+   func.sum(func.cast(CostHistory.cost_usd,Float)).label("total_cost"),
+   func.sum(CostHistory.input_tokens).label("total_input"),
+   func.sum(CostHistory.output_tokens).label("total_output"),
+   func.count(CostHistory.id).label("call_count")
+  ).filter(
+   and_(CostHistory.recorded_at>=start,CostHistory.recorded_at<end)
+  )
+  if project_id:
+   query=query.filter(CostHistory.project_id==project_id)
+  results=query.group_by(date_expr).order_by(date_expr).all()
+  return [{"date":str(r.date),"cost":round(float(r.total_cost or 0),4),"input_tokens":r.total_input or 0,"output_tokens":r.total_output or 0,"call_count":r.call_count} for r in results]
+
+ def get_daily_breakdown_by_service(self,year:int,month:int,project_id:Optional[str]=None)->List[Dict]:
+  start=datetime(year,month,1)
+  if month==12:
+   end=datetime(year+1,1,1)
+  else:
+   end=datetime(year,month+1,1)
+  date_expr=func.date(CostHistory.recorded_at)
+  query=self.session.query(
+   date_expr.label("date"),
+   CostHistory.service_type,
+   func.sum(func.cast(CostHistory.cost_usd,Float)).label("total_cost")
+  ).filter(
+   and_(CostHistory.recorded_at>=start,CostHistory.recorded_at<end)
+  )
+  if project_id:
+   query=query.filter(CostHistory.project_id==project_id)
+  results=query.group_by(date_expr,CostHistory.service_type).order_by(date_expr).all()
+  return [{"date":str(r.date),"service_type":r.service_type,"cost":round(float(r.total_cost or 0),4)} for r in results]
 
  def delete_before(self,before_date:datetime)->int:
   count=self.session.query(CostHistory).filter(CostHistory.recorded_at<before_date).delete()
