@@ -1,0 +1,67 @@
+【中規模】リアルタイムゲームプレビュー
+
+生成されたゲームをプレビューできる機能。
+
+■ 概要
+・outputフォルダの成果物へのリンクを配置し、ブラウザまたは対応アプリで開く
+・build済みのHTML5ゲームはデフォルトブラウザで実行
+・ネイティブエンジン（Unity等）はエディタを直接起動
+
+■ プレビュー方式の整理
+
+生成物の種類によってpreview方式が異なる。
+iframe埋め込みはbuild必須のプロジェクト（TypeScript等）では動作しないため、
+リンク方式を基本とする。
+
+リンク方式（基本）:
+・outputフォルダをファイルマネージャーで開く（shell.openPath()）
+・index.htmlがあればデフォルトブラウザで開く（shell.openExternal()）
+・実装コスト: ほぼゼロ。確実に動作する
+
+iframe方式（将来的にbuild step組み込み後）:
+・Agentのworkflowにbuild stepが組み込まれた段階で追加
+・build後のdist/をsandbox付きiframeで表示（sandbox="allow-scripts"）
+・build未完了やbuild失敗時はリンク方式にfallbackしない（混乱の元）
+
+■ ゲームエンジン別の対応
+
+Tier 1: ブラウザで実行（HTML5系）
+・Phaser、PixiJS、Three.js / Babylon.js、Kaplay（旧Kaboom）
+・build後のHTML/JSをブラウザで開くだけ
+
+Tier 2: エンジンのHTML5 export
+・Godot → HTML5 export（godot --headless --export-release "HTML5"）
+・Unity → WebGL build（-buildTarget WebGL）、build時間が数分〜
+・CodeBuildSkillの拡張で対応。engine自体のinstall・licenseが前提
+
+Tier 3: 外部エディタ起動
+・Unity → Unity Editorを起動してPlay mode
+・Unreal → Unreal Editorを起動
+・SDL2 / C++ → compile → executable実行
+・shell.openExternal()でエディタを起動
+
+■ エンジン設定のpluggable化
+
+preview方式をengine typeに応じて自動切り替えする設計にする。
+config/game_engines.yaml等でengine定義を管理。
+
+例:
+  phaser:   type: browser_native  / preview: open_in_browser    / build後にブラウザで開く
+  godot:    type: exportable      / preview: open_in_browser    / HTML5 export後にブラウザで開く
+  unity:    type: external        / preview: open_in_editor     / Unity Editorを起動
+
+■ 必要な修正
+・Frontend: outputフォルダを開くボタン（shell.openPath）
+・Frontend: index.htmlをブラウザで開くボタン（shell.openExternal）
+・Frontend: ダッシュボードまたはプロジェクト画面にリンクエリア追加
+・Config: game_engines.yaml（エンジン定義、preview方式、build command）
+
+■ 注意事項
+・architecture_worker.md / dependency_worker.mdにPhaserがhard codeされている
+・frameworkの指定はyaml設定化すべき（CLAUDE.mdの禁止事項: hard code禁止）
+
+■ 対応方針
+
+短期: リンク方式でoutputフォルダ / index.htmlを開く機能を実装
+中期: engine設定をyaml化してpluggableに。build step組み込み後にiframe対応を検討
+長期: Unity/Unrealは外部エディタ起動modeとして対応

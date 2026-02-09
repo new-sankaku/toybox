@@ -1,0 +1,24 @@
+【大規模】ゲームエンジンExport
+
+生成されたゲームプロジェクトをUnity・Godot・Unreal等のゲームエンジン形式でExportする機能。
+プロトタイプから本格開発への橋渡し。
+
+■ 概要
+・生成物（コード、アセット、設定）をゲームエンジンのプロジェクト構造に変換
+・対応エンジン: Godot（優先）、Unity、Unreal Engine
+・エンジン固有のファイル形式（.tscn, .prefab等）を自動生成
+・Export後すぐにエンジンで開いて実行できる状態を目指す
+
+■ 必要な修正
+・Backend: ExportService（エンジン別のConverter）
+・Backend: 各エンジンのプロジェクトテンプレート
+・Backend: アセット変換（画像フォーマット、音声フォーマット）
+・Backend: コード変換（GDScript / C# / Blueprint）
+・Frontend: Export設定ダイアログ（対象エンジン、バージョン、出力先）
+・Frontend: Export進捗表示
+・Config: export_engines.yaml（対応エンジン、バージョン、テンプレートパス）
+
+■ 売り
+・プロトタイプ→製品版への移行をシームレスに
+・生成結果が「使い捨て」ではなく実用的
+・ゲーム開発者の既存ワークフローに統合可能
