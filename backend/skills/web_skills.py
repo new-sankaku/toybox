@@ -137,7 +137,9 @@ class WebFetchSkill(Skill):
        metadata={"url":url,"content_type":content_type,"truncated":truncated}
       )
      except json.JSONDecodeError:
-      pass
+      # TODO:Content-Type=application/jsonだがParse失敗時のhandling実装
+      get_logger().error(f"JSON parse failed despite Content-Type=application/json: url={url}")
+      raise
     content=raw_content.decode(encoding,errors="replace")
     if extract_text and"text/html" in content_type:
      content=self._extract_text_from_html(content)

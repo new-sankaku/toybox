@@ -3,6 +3,7 @@ import os
 from typing import List,Dict,Any,Optional,TYPE_CHECKING
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 from .file_skills import FileSkillMixin
+from middleware.logger import get_logger
 if TYPE_CHECKING:
     from cache.file_manager import FileManager
 class ProjectAnalyzeSkill(FileSkillMixin,Skill):
@@ -158,7 +159,9 @@ class ProjectAnalyzeSkill(FileSkillMixin,Skill):
                                 content=fp.read(5000)
                                 file_info["content"]=content
                         except Exception:
-                            pass
+                            # TODO:File読み取り失敗時のhandling実装
+                            get_logger().error(f"Failed to read file: {os.path.join(root,f)}",exc_info=True)
+                            raise
                     result["important_files"][f]=file_info
         result["languages"]=dict(sorted(lang_counts.items(),key=lambda x:-x[1]))
         result["file_counts"]=dict(sorted(ext_counts.items(),key=lambda x:-x[1])[:20])

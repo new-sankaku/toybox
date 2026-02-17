@@ -98,48 +98,30 @@ class AssetGenerator:
         approval_status="approved" if auto_approve else"pending"
         from models.tables import Asset
 
-        if real_file:
-            asset=Asset(
-                id=f"asset-{uuid.uuid4().hex[:8]}",
-                project_id=agent.project_id,
-                agent_id=agent.id,
-                name=real_file["name"],
-                type=real_file["type"],
-                agent=display_name,
-                size=real_file["size"],
-                url=real_file["url"],
-                thumbnail=real_file["thumbnail"],
-                duration=self._random_duration() if real_file["type"]=="audio" else None,
-                approval_status=approval_status,
-                created_at=datetime.now(),
-            )
-            log_msg=f"アセット生成: {real_file['name']}"+(
-                " (自動承認)" if auto_approve else""
-            )
-            self._add_system_log(
-                session,agent.project_id,"info",display_name,log_msg
-            )
-        else:
-            url=f"/assets/{name}" if asset_type in ("image","audio") else None
-            thumbnail=f"/thumbnails/{name}" if asset_type=="image" else None
-            asset=Asset(
-                id=f"asset-{uuid.uuid4().hex[:8]}",
-                project_id=agent.project_id,
-                agent_id=agent.id,
-                name=name,
-                type=asset_type,
-                agent=display_name,
-                size=size,
-                url=url,
-                thumbnail=thumbnail,
-                duration=self._random_duration() if asset_type=="audio" else None,
-                approval_status=approval_status,
-                created_at=datetime.now(),
-            )
-            log_msg=f"アセット生成: {name}"+(" (自動承認)" if auto_approve else"")
-            self._add_system_log(
-                session,agent.project_id,"info",display_name,log_msg
-            )
+        if not real_file:
+            # TODO:Testdata Fileが見つからない場合の正式な処理を実装する
+            self._logger.error(f"Testdata file not found: type={asset_type}, project={agent.project_id}")
+            raise FileNotFoundError(f"Testdata file not found for asset_type={asset_type}")
+        asset=Asset(
+            id=f"asset-{uuid.uuid4().hex[:8]}",
+            project_id=agent.project_id,
+            agent_id=agent.id,
+            name=real_file["name"],
+            type=real_file["type"],
+            agent=display_name,
+            size=real_file["size"],
+            url=real_file["url"],
+            thumbnail=real_file["thumbnail"],
+            duration=self._random_duration() if real_file["type"]=="audio" else None,
+            approval_status=approval_status,
+            created_at=datetime.now(),
+        )
+        log_msg=f"アセット生成: {real_file['name']}"+(
+            " (自動承認)" if auto_approve else""
+        )
+        self._add_system_log(
+            session,agent.project_id,"info",display_name,log_msg
+        )
         session.add(asset)
         session.flush()
         if not auto_approve:

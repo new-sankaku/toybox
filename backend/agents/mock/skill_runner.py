@@ -199,7 +199,10 @@ class MockSkillRunner(MockRunnerBase):
             if comment:
                 context.on_speech(comment)
         except Exception:
-            pass
+            # TODO:Speech Service Error時のhandling実装
+            from middleware.logger import get_logger
+            get_logger().error(f"Failed to emit start speech: agent_type={agent_type}",exc_info=True)
+            raise
 
     def _build_output(
         self,agent_type:str,content:str,skill_history:List[Dict[str,Any]]

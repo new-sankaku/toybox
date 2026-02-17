@@ -4,6 +4,7 @@ import base64
 from typing import Optional,Dict,Any,List
 from .base import Skill,SkillResult,SkillContext,SkillCategory,SkillParameter
 from .file_skills import FileSkillMixin
+from middleware.logger import get_logger
 
 
 class ImageGenerateSkill(Skill):
@@ -153,7 +154,9 @@ class BgmGenerateSkill(FileSkillMixin,Skill):
      "agent_modified":agent_id,
     })
   except Exception:
-   pass
+   # TODO:Asset Metadata保存のError handling実装
+   get_logger().error(f"Failed to save asset metadata: path={path}",exc_info=True)
+   raise
 
 
 class SfxGenerateSkill(FileSkillMixin,Skill):
@@ -220,7 +223,9 @@ class SfxGenerateSkill(FileSkillMixin,Skill):
      "agent_modified":agent_id,
     })
   except Exception:
-   pass
+   # TODO:Asset Metadata保存のError handling実装
+   get_logger().error(f"Failed to save asset metadata: path={path}",exc_info=True)
+   raise
 
 
 class VoiceGenerateSkill(FileSkillMixin,Skill):
@@ -291,4 +296,6 @@ class VoiceGenerateSkill(FileSkillMixin,Skill):
      "agent_modified":agent_id,
     })
   except Exception:
-   pass
+   # TODO:Asset Metadata保存のError handling実装
+   get_logger().error(f"Failed to save asset metadata: path={path}",exc_info=True)
+   raise
