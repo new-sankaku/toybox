@@ -31,6 +31,9 @@ from TikTokLive.events import (
 from config import (
     get_bucket_seconds,
     get_event_history_size,
+    get_reconnect_base_delay,
+    get_reconnect_max_attempts,
+    get_reconnect_max_delay,
     get_simulation,
     get_timeline_limit,
 )
@@ -42,9 +45,12 @@ Broadcast = Callable[[dict], Awaitable[None]]
 STATE_IDLE = "idle"
 STATE_CONNECTING = "connecting"
 STATE_CONNECTED = "connected"
+STATE_RECONNECTING = "reconnecting"
 STATE_DISCONNECTED = "disconnected"
 STATE_ENDED = "ended"
 STATE_ERROR = "error"
+
+ACTIVE_STATES = (STATE_CONNECTING, STATE_CONNECTED, STATE_RECONNECTING)
 
 STEP_IDS = ["request", "live_check", "websocket", "receiving"]
 
@@ -115,6 +121,11 @@ class TikTokCollector:
         self.markers: deque = deque(maxlen=500)
         self.gifters: dict = {}
         self.gift_types: dict = {}
+        self._stop_requested = False
+        self._reconnect_attempt = 0
+        self._reconnect_max = get_reconnect_max_attempts()
+        self._reconnect_base_delay = get_reconnect_base_delay()
+        self._reconnect_max_delay = get_reconnect_max_delay()
 
     def snapshot(self) -> dict:
         return {
@@ -175,8 +186,10 @@ class TikTokCollector:
 
     async def start(self, unique_id: str) -> None:
         async with self._lock:
-            if self.state in (STATE_CONNECTING, STATE_CONNECTED):
+            if self.state in ACTIVE_STATES:
                 raise RuntimeError("収集は既に実行中です。先に停止してください。")
+            self._stop_requested = False
+            self._reconnect_attempt = 0
             self.unique_id = unique_id
             self.room_id = None
             self.error_message = None
@@ -203,10 +216,11 @@ class TikTokCollector:
         async with self._lock:
             client = self._client
             task = self._task
-        if self.state not in (STATE_CONNECTING, STATE_CONNECTED):
+        if self.state not in ACTIVE_STATES:
             raise RuntimeError("収集は実行されていません。")
         logger.info("collection stop requested: unique_id=%s", self.unique_id)
-        if client is not None:
+        self._stop_requested = True
+        if client is not None and self.state == STATE_CONNECTED:
             try:
                 await client.disconnect()
             except Exception:
@@ -220,30 +234,83 @@ class TikTokCollector:
                 logger.warning("collector task cancelled after timeout")
 
     async def _run(self) -> None:
-        client = self._client
         try:
-            await client.connect(fetch_room_info=True)
-            if self.state == STATE_CONNECTED:
-                self.state = STATE_DISCONNECTED
-        except UserOfflineError:
-            self._fail("live_check", f"@{self.unique_id} は現在LIVE配信していません。")
-        except UserNotFoundError:
-            self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
-        except AgeRestrictedError:
-            self._fail("live_check", "年齢制限付きのLIVEのため接続できません。")
-        except TikTokLiveError as exc:
-            logger.exception("TikTokLive error")
-            self._fail("websocket", f"TikTok接続Error: {exc}")
+            while True:
+                interruption = await self._connect_once()
+                if interruption is None:
+                    break
+                if not await self._wait_for_reconnect(interruption):
+                    break
         except asyncio.CancelledError:
             self.state = STATE_DISCONNECTED
-        except Exception as exc:
-            logger.exception("unexpected collector error")
-            self._fail("websocket", f"予期しないError: {exc}")
         finally:
             if self.state in (STATE_DISCONNECTED, STATE_ENDED):
                 self.steps["receiving"] = "done"
             await self._notify_state()
             logger.info("collector finished: state=%s", self.state)
+
+    async def _connect_once(self) -> Optional[str]:
+        try:
+            await self._client.connect(fetch_room_info=True)
+            if self._stop_requested or self.state == STATE_ENDED:
+                if self.state == STATE_CONNECTED:
+                    self.state = STATE_DISCONNECTED
+                return None
+            return "LIVEとの接続が切断されました"
+        except UserOfflineError:
+            self._fail("live_check", f"@{self.unique_id} は現在LIVE配信していません。")
+            return None
+        except UserNotFoundError:
+            self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
+            return None
+        except AgeRestrictedError:
+            self._fail("live_check", "年齢制限付きのLIVEのため接続できません。")
+            return None
+        except TikTokLiveError as exc:
+            logger.warning("transient TikTokLive error: %s", exc, exc_info=True)
+            return f"TikTok接続Error: {exc}"
+        except Exception as exc:
+            logger.warning("transient collector error: %s", exc, exc_info=True)
+            return f"接続Error: {exc}"
+
+    async def _wait_for_reconnect(self, reason: str) -> bool:
+        if self._stop_requested:
+            self.state = STATE_DISCONNECTED
+            return False
+        self._reconnect_attempt += 1
+        if self._reconnect_attempt > self._reconnect_max:
+            self._fail(
+                "websocket",
+                f"再接続が{self._reconnect_max}回失敗したため停止しました。最後の原因: {reason}",
+            )
+            return False
+        delay = min(
+            self._reconnect_base_delay * (2 ** (self._reconnect_attempt - 1)),
+            self._reconnect_max_delay,
+        )
+        self.state = STATE_RECONNECTING
+        self.steps["websocket"] = "active"
+        self.steps["receiving"] = "pending"
+        logger.info(
+            "reconnecting (attempt %d/%d, delay %.1fs): %s",
+            self._reconnect_attempt,
+            self._reconnect_max,
+            delay,
+            reason,
+        )
+        await self._notify_state()
+        await self._record(
+            "system",
+            {
+                "text": f"再接続します ({self._reconnect_attempt}/{self._reconnect_max}回目、{delay:.0f}秒後)。原因: {reason}"
+            },
+        )
+        await asyncio.sleep(delay)
+        if self._stop_requested:
+            self.state = STATE_DISCONNECTED
+            return False
+        self._client = self._build_client(self.unique_id)
+        return True
 
     def _fail(self, step: str, message: str) -> None:
         self.steps[step] = "failed"
@@ -268,13 +335,16 @@ class TikTokCollector:
         return client
 
     async def _on_connect(self, event: ConnectEvent) -> None:
+        reconnected = self._reconnect_attempt > 0
+        self._reconnect_attempt = 0
         self.state = STATE_CONNECTED
         self.steps["live_check"] = "done"
         self.steps["websocket"] = "done"
         self.steps["receiving"] = "active"
         self.room_id = self._client.room_id if self._client else None
-        self.stats["connected_at"] = time.time()
-        self._add_marker("connect", "LIVE接続")
+        if self.stats["connected_at"] is None:
+            self.stats["connected_at"] = time.time()
+        self._add_marker("reconnect" if reconnected else "connect", "再接続" if reconnected else "LIVE接続")
         logger.info("connected: unique_id=%s room_id=%s", self.unique_id, self.room_id)
         await self._notify_state()
         await self._record(
@@ -283,10 +353,10 @@ class TikTokCollector:
         )
 
     async def _on_disconnect(self, event: DisconnectEvent) -> None:
-        if self.state == STATE_CONNECTED:
+        if self.state == STATE_CONNECTED and self._stop_requested:
             self.state = STATE_DISCONNECTED
             self._add_marker("disconnect", "切断")
-            await self._record("system", {"text": "LIVEから切断されました。"})
+            await self._record("system", {"text": "収集を停止しました。"})
             await self._notify_state()
 
     async def _on_live_end(self, event: LiveEndEvent) -> None:

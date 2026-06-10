@@ -266,6 +266,7 @@ body {
 
 .badge-idle { background: var(--sand-panel-muted); color: var(--ink-muted); }
 .badge-connecting { background: var(--accent); color: var(--invert-fg); border-color: var(--accent-deep); }
+.badge-reconnecting { background: var(--sand-panel-muted); color: var(--accent-deep); border-color: var(--accent-deep); }
 .badge-connected { background: var(--ok); color: var(--invert-fg); border-color: var(--ok); }
 .badge-error { background: var(--warn); color: var(--invert-fg); border-color: var(--warn); }
 .badge-ended { background: var(--invert-bg); color: var(--invert-fg); }

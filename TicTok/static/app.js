@@ -39,6 +39,7 @@ const STATUS_LABELS = {
   idle: { badge: "IDLE", cls: "badge-idle", message: "待機中 — TikTok IDを入力して収集を開始してください。" },
   connecting: { badge: "CONNECTING", cls: "badge-connecting", message: "接続処理を実行中です…" },
   connected: { badge: "RECEIVING", cls: "badge-connected", message: "LIVEに接続済み。Eventを受信しています。" },
+  reconnecting: { badge: "RECONNECTING", cls: "badge-reconnecting", message: "接続が不安定なため再接続しています…（収集Dataは保持されます）" },
   disconnected: { badge: "STOPPED", cls: "badge-idle", message: "収集を停止しました。" },
   ended: { badge: "LIVE ENDED", cls: "badge-ended", message: "LIVE配信が終了しました。" },
   error: { badge: "ERROR", cls: "badge-error", message: "Errorが発生しました。" },
@@ -71,12 +72,14 @@ function applyState(state) {
   els.statusBadge.textContent = info.badge;
   els.statusBadge.className = `badge ${info.cls}`;
   const simulationTag = state.simulation ? " [Simulation mode]" : "";
-  els.statusMessage.textContent = (state.error_message || info.message) + simulationTag;
+  const message = state.status === "error" ? state.error_message || info.message : info.message;
+  els.statusMessage.textContent = message + simulationTag;
 
-  const busy = state.status === "connecting";
+  const active = ["connecting", "connected", "reconnecting"].includes(state.status);
+  const busy = state.status === "connecting" || state.status === "reconnecting";
   els.spinner.classList.toggle("hidden", !busy);
-  els.startBtn.disabled = state.status === "connecting" || state.status === "connected";
-  els.stopBtn.disabled = !(state.status === "connecting" || state.status === "connected");
+  els.startBtn.disabled = active;
+  els.stopBtn.disabled = !active;
 
   if (state.unique_id && !els.uniqueId.value) {
     els.uniqueId.value = state.unique_id;
@@ -512,7 +515,7 @@ async function refreshAnalytics() {
 }
 
 setInterval(() => {
-  if (currentStatus === "connecting" || currentStatus === "connected") {
+  if (["connecting", "connected", "reconnecting"].includes(currentStatus)) {
     refreshAnalytics();
   }
 }, 5000);

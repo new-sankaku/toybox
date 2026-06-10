@@ -28,3 +28,15 @@ def get_timeline_limit() -> int:
 def get_simulation() -> bool:
     return os.environ.get("TICTOK_SIMULATION", "0").lower() in ("1", "true", "yes")
 
+
+def get_reconnect_max_attempts() -> int:
+    return int(os.environ.get("TICTOK_RECONNECT_MAX_ATTEMPTS", "10"))
+
+
+def get_reconnect_base_delay() -> float:
+    return float(os.environ.get("TICTOK_RECONNECT_BASE_DELAY", "2.0"))
+
+
+def get_reconnect_max_delay() -> float:
+    return float(os.environ.get("TICTOK_RECONNECT_MAX_DELAY", "60.0"))
+

@@ -47,6 +47,9 @@ bash TicTok/run.sh
 | `TICTOK_BUCKET_SECONDS` | `10` | Timeline 集計の bucket 幅（秒） |
 | `TICTOK_TIMELINE_LIMIT` | `2160` | 保持する bucket 数の上限（10秒幅で約6時間） |
 | `TICTOK_SIMULATION` | `0` | `1` で simulation mode（擬似 event を生成。LIVE 配信なしで画面確認可能） |
+| `TICTOK_RECONNECT_MAX_ATTEMPTS` | `10` | 自動再接続の最大試行回数 |
+| `TICTOK_RECONNECT_BASE_DELAY` | `2.0` | 再接続の初回待機秒数（exponential backoff） |
+| `TICTOK_RECONNECT_MAX_DELAY` | `60.0` | 再接続待機秒数の上限 |
 
 ## 使い方
 
@@ -56,6 +59,15 @@ bash TicTok/run.sh
 4. 「停止」で収集を終了します。
 
 対象の User が LIVE 配信中でない場合や ID が存在しない場合は、該当 step が失敗表示になり、Error 内容が画面に表示されます。
+
+## 自動再接続
+
+一時的な障害（Sign API の 502、network 断、予期しない切断など）は error にせず、exponential backoff（2秒 → 4秒 → … 最大60秒）で自動再接続します。
+
+- 再接続中は「RECONNECTING」の控えめな badge と spinner を表示し、収集済み Data・統計・Timeline は保持されます。
+- 回復不能な失敗（LIVE 未配信・User 不存在・年齢制限）は再接続せず error 表示します。
+- 再接続が `TICTOK_RECONNECT_MAX_ATTEMPTS` 回失敗した場合のみ error として停止します。
+- 再接続の成功は Timeline 上に「再接続」marker として記録されます。
 
 ## Timeline graph
 
