@@ -228,7 +228,7 @@ async def export_session_csv(session_id: int) -> Response:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(
-        ["time", "kind", "user_unique_id", "user_nickname", "comment", "text", "gift_name", "gift_count", "diamonds"]
+        ["time", "kind", "user_unique_id", "user_nickname", "comment", "text", "gift_name", "gift_count", "diamonds", "like_count"]
     )
     for event in storage.iter_events(session_id):
         writer.writerow(
@@ -242,6 +242,7 @@ async def export_session_csv(session_id: int) -> Response:
                 event["gift_name"] or "",
                 event["gift_count"] if event["gift_count"] is not None else "",
                 event["diamonds"] if event["diamonds"] is not None else "",
+                event["count"] if event["count"] is not None else "",
             ]
         )
     filename = f"tictok_session_{session_id}_{session['unique_id']}.csv"

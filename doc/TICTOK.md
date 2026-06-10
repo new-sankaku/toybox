@@ -15,6 +15,8 @@ TicTok/
 ├── requirements.txt   依存Package
 ├── run.bat            Windows用起動script
 ├── run.sh             Linux/macOS用起動script
+├── tests/
+│   └── test_collector.py  Collector/Storageのtest（venvのpythonで直接実行）
 └── static/
     ├── index.html     監視page（tab切替で配信者ごとの詳細dashboard）
     ├── overview.html  全体監視page（監視中の全配信者をcard一覧）
@@ -42,6 +44,12 @@ bash TicTok/run.sh
 ```
 
 初回実行時に `TicTok/venv` が作成され、依存Packageが install されます。起動後、Browser で `http://127.0.0.1:8520` を開きます。
+
+test の実行（Windows は `venv\Scripts\python`）:
+
+```bash
+cd TicTok && venv/bin/python tests/test_collector.py
+```
 
 ## 設定（環境変数）
 

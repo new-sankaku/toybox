@@ -298,7 +298,7 @@ class Storage:
     def iter_events(self, session_id: int) -> list:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds"
+                "SELECT time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds, count"
                 " FROM events WHERE session_id = ? ORDER BY time",
                 (session_id,),
             ).fetchall()
