@@ -199,10 +199,7 @@ async def session_detail(session_id: int) -> dict:
     return {
         "session": session,
         "timeline": timeline,
-        "summary": {
-            "totals": session["stats"],
-            **storage.session_summary(session_id),
-        },
+        "summary": storage.session_summary(session_id),
     }
 
 

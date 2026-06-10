@@ -609,10 +609,6 @@ body {
   overflow-wrap: anywhere;
 }
 
-.stat-small {
-  font-size: 0.85rem;
-}
-
 .chart-panel,
 .result-panel {
   grid-column: 1 / -1;

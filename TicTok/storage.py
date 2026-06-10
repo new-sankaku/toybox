@@ -107,17 +107,29 @@ class Storage:
                     " COALESCE(SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END), 0) AS comments,"
                     " COALESCE(SUM(CASE WHEN kind = 'join' THEN 1 ELSE 0 END), 0) AS joins,"
                     " COALESCE(SUM(CASE WHEN kind = 'follow' THEN 1 ELSE 0 END), 0) AS follows,"
-                    " COALESCE(SUM(CASE WHEN kind = 'share' THEN 1 ELSE 0 END), 0) AS shares"
+                    " COALESCE(SUM(CASE WHEN kind = 'share' THEN 1 ELSE 0 END), 0) AS shares,"
+                    " COALESCE(SUM(CASE WHEN kind = 'like' THEN count ELSE 0 END), 0) AS likes,"
+                    " COALESCE(SUM(CASE WHEN kind = 'subscribe' THEN 1 ELSE 0 END), 0) AS subscribes,"
+                    " COALESCE(SUM(CASE WHEN kind = 'battle' THEN 1 ELSE 0 END), 0) AS battles,"
+                    " COUNT(*) AS events_total"
                     " FROM events WHERE session_id = ?",
                     (session_id,),
                 ).fetchone()
                 stats = {
+                    "viewers": 0,
+                    "total_viewers": 0,
+                    "likes_total": agg["likes"],
+                    "comments": agg["comments"],
                     "gifts": agg["gifts"],
                     "diamonds": agg["diamonds"],
-                    "comments": agg["comments"],
-                    "joins": agg["joins"],
                     "follows": agg["follows"],
                     "shares": agg["shares"],
+                    "joins": agg["joins"],
+                    "subscribes": agg["subscribes"],
+                    "battles": agg["battles"],
+                    "battle_points": 0,
+                    "events_total": agg["events_total"],
+                    "connected_at": None,
                     "recovered": True,
                 }
                 self._conn.execute(

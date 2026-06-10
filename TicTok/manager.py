@@ -26,7 +26,7 @@ class CollectorManager:
         return {
             collector.session_id
             for collector in self._collectors.values()
-            if collector.session_id is not None and collector.state in ACTIVE_STATES
+            if collector.session_id is not None
         }
 
     async def start(self, unique_id: str) -> TikTokCollector:

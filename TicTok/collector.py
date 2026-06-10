@@ -128,6 +128,7 @@ class TikTokCollector:
         self._owner_warned = False
         self._stop_requested = False
         self._reconnect_attempt = 0
+        self._last_stats_sent = 0.0
 
     def snapshot(self) -> dict:
         return {
@@ -217,6 +218,10 @@ class TikTokCollector:
         async with self._lock:
             if self.state in ACTIVE_STATES:
                 raise RuntimeError("収集は既に実行中です。先に停止してください。")
+            if self._task is not None and not self._task.done():
+                done, pending = await asyncio.wait({self._task}, timeout=5)
+                if pending:
+                    raise RuntimeError("前回の収集処理が終了していません。少し待ってから再試行してください。")
             self._stop_requested = False
             self._reset_session_data()
             self.steps = {step: "pending" for step in STEP_IDS}
@@ -290,27 +295,37 @@ class TikTokCollector:
 
     async def _wait_for_live_start(self, skip_first_check: bool = False) -> bool:
         probe = TikTokLiveClient(unique_id=self.unique_id)
-        waiting_announced = False
-        if skip_first_check:
-            waiting_announced = True
-            await self._announce_waiting()
-            await asyncio.sleep(self._settings.get("live_check_interval"))
-        while True:
-            if self._stop_requested:
-                self.state = STATE_DISCONNECTED
-                return False
-            try:
-                if await probe.web.fetch_is_live(unique_id=self.unique_id):
-                    return True
-            except UserNotFoundError:
-                self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
-                return False
-            except Exception as exc:
-                logger.warning("live check failed for %s: %s", self.unique_id, exc, exc_info=True)
-            if not waiting_announced:
+        try:
+            waiting_announced = False
+            if skip_first_check:
                 waiting_announced = True
                 await self._announce_waiting()
-            await asyncio.sleep(self._settings.get("live_check_interval"))
+                await asyncio.sleep(self._settings.get("live_check_interval"))
+            while True:
+                if self._stop_requested:
+                    self.state = STATE_DISCONNECTED
+                    return False
+                try:
+                    if await probe.web.fetch_is_live(unique_id=self.unique_id):
+                        return True
+                except UserNotFoundError:
+                    self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
+                    return False
+                except Exception as exc:
+                    logger.warning("live check failed for %s: %s", self.unique_id, exc, exc_info=True)
+                if not waiting_announced:
+                    waiting_announced = True
+                    await self._announce_waiting()
+                await asyncio.sleep(self._settings.get("live_check_interval"))
+        finally:
+            await self._close_probe(probe)
+
+    @staticmethod
+    async def _close_probe(probe: TikTokLiveClient) -> None:
+        try:
+            await probe.web.close()
+        except Exception:
+            logger.debug("probe close skipped", exc_info=True)
 
     async def _session_loop(self) -> str:
         while True:
@@ -380,6 +395,8 @@ class TikTokCollector:
                 "offline confirmation check failed for %s: %s", self.unique_id, exc, exc_info=True
             )
             return False
+        finally:
+            await self._close_probe(probe)
         return not is_live
 
     async def _wait_for_reconnect(self, reason: str) -> str:
@@ -510,7 +527,7 @@ class TikTokCollector:
             return
         self._battles[event.battle_id] = own_score
         self.stats["battle_points"] = sum(self._battles.values())
-        await self._broadcast({"type": "stats", "data": self.stats})
+        await self._broadcast_stats()
 
     async def _on_gift(self, event: GiftEvent) -> None:
         user = _user_payload(event.user)
@@ -573,8 +590,7 @@ class TikTokCollector:
 
     async def _on_like(self, event: LikeEvent) -> None:
         user = _user_payload(event.user)
-        if event.total:
-            self.stats["likes_total"] = event.total
+        self.stats["likes_total"] = max(self.stats["likes_total"], event.total or 0)
         self._bucket()["likes"] += event.count
         await self._record(
             "like",
@@ -622,6 +638,13 @@ class TikTokCollector:
         self.stats["total_viewers"] = event.total_user
         self._bucket()["viewers"] = event.m_total
         self._update_rates()
+        await self._broadcast_stats()
+
+    async def _broadcast_stats(self) -> None:
+        now = time.time()
+        if now - self._last_stats_sent < 0.25:
+            return
+        self._last_stats_sent = now
         await self._broadcast({"type": "stats", "data": self.stats})
 
     def _update_rates(self) -> None:
@@ -759,7 +782,7 @@ class TikTokCollector:
                 logger.exception("failed to persist event for session %s", self.session_id)
         self._update_rates()
         await self._broadcast({"type": "event", "data": entry})
-        await self._broadcast({"type": "stats", "data": self.stats})
+        await self._broadcast_stats()
 
     async def _emit_only(self, kind: str, payload: dict) -> None:
         entry = {"kind": kind, "time": time.time(), **payload}

@@ -191,6 +191,10 @@ function createTimelineChart(canvas) {
     const labels = [];
     const series = { gifts: [], diamonds: [], viewers: [], comments: [], likes: [], joins: [], follows: [], shares: [] };
     let viewers = raw[0].viewers;
+    for (const b of raw) {
+      if (b.start >= first) break;
+      viewers = b.viewers;
+    }
     for (let s = first; s <= last; s += size) {
       const b = byStart.get(s);
       if (b) viewers = b.viewers;

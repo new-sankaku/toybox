@@ -211,6 +211,37 @@ async def test_event_persistence_columns():
     print("OK 保存column (comment/count/gift) とranking集計")
 
 
+async def test_likes_total_monotonic():
+    storage, settings = make_env()
+    c = TikTokCollector("likes", noop_broadcast, storage, settings)
+    user = SimpleNamespace(unique_id="u", nick_name="U")
+    await c._on_like(SimpleNamespace(user=user, count=3, total=100))
+    await c._on_like(SimpleNamespace(user=user, count=2, total=0))
+    await c._on_like(SimpleNamespace(user=user, count=1, total=50))
+    assert c.stats["likes_total"] == 100, c.stats["likes_total"]
+    print("OK 累計Likeの単調性 (一時的な0/減少値を無視)")
+
+
+async def test_recovered_session_stats_shape():
+    storage, _ = make_env()
+    sid = storage.create_session("crashed", 10)
+    user = {"unique_id": "u", "nickname": "U"}
+    storage.add_event(sid, {"time": 1.0, "kind": "like", "user": user, "count": 9, "text": "x"})
+    storage.add_event(sid, {"time": 2.0, "kind": "battle", "user": user, "text": "x"})
+    storage.add_event(sid, {"time": 3.0, "kind": "gift", "user": user, "gift_name": "Rose", "repeat_count": 2, "diamonds": 2, "text": "x"})
+    recovered = storage.cleanup_stale_sessions()
+    assert recovered == 1
+    session = storage.get_session(sid)
+    stats = session["stats"]
+    finalize_keys = {"viewers", "total_viewers", "likes_total", "comments", "gifts", "diamonds",
+                     "follows", "shares", "joins", "subscribes", "battles", "battle_points",
+                     "events_total", "connected_at"}
+    assert finalize_keys <= set(stats), finalize_keys - set(stats)
+    assert stats["likes_total"] == 9 and stats["battles"] == 1 and stats["gifts"] == 2
+    assert session["status"] == "disconnected" and session["ended_at"] is not None
+    print("OK 回復Sessionのstats (finalizeと同じkey構成 + events由来の値)")
+
+
 async def main():
     collector_mod.asyncio.sleep = fast_sleep
     collector_mod.TikTokLiveClient = FakeProbeFactory
@@ -222,6 +253,8 @@ async def main():
     await test_reconnect_exhausted()
     await test_user_not_found_terminal()
     await test_event_persistence_columns()
+    await test_likes_total_monotonic()
+    await test_recovered_session_stats_shape()
     print("ALL TESTS PASSED")
 
 
