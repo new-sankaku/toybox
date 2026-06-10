@@ -126,8 +126,8 @@ function applyState(state) {
   const message = state.status === "error" ? state.error_message || info.message : info.message;
   els.statusMessage.textContent = message + simulationTag;
 
-  const active = ["connecting", "connected", "reconnecting"].includes(state.status);
-  const busy = state.status === "connecting" || state.status === "reconnecting";
+  const active = ["waiting", "connecting", "connected", "reconnecting"].includes(state.status);
+  const busy = ["waiting", "connecting", "reconnecting"].includes(state.status);
   els.spinner.classList.toggle("hidden", !busy);
   els.stopBtn.disabled = !active;
   els.restartBtn.disabled = active;

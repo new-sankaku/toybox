@@ -146,6 +146,7 @@ body {
 }
 
 .dot-connected { color: var(--ok); }
+.dot-waiting { color: var(--ok); opacity: 0.6; }
 .dot-connecting,
 .dot-reconnecting { color: var(--accent-deep); }
 .dot-error { color: var(--warn); }
@@ -291,6 +292,41 @@ body {
   display: flex;
   align-items: center;
   gap: 0.8rem;
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: 0.8rem;
+  margin: 0.8rem 0 1rem;
+}
+
+.setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  padding: 0.6rem 0.8rem;
+}
+
+.setting-field input {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 230, 0.3);
+  color: var(--ink-strong);
+  padding: 0.4rem 0.6rem;
+}
+
+.setting-field input:focus {
+  outline: none;
+  background: rgba(255, 250, 230, 0.6);
+}
+
+.setting-note {
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  line-height: 1.4;
 }
 
 .layout {
@@ -482,6 +518,7 @@ body {
 .badge-idle { background: var(--sand-panel-muted); color: var(--ink-muted); }
 .badge-connecting { background: var(--accent); color: var(--invert-fg); border-color: var(--accent-deep); }
 .badge-reconnecting { background: var(--sand-panel-muted); color: var(--accent-deep); border-color: var(--accent-deep); }
+.badge-waiting { background: var(--sand-panel-muted); color: var(--ok); border-color: var(--ok); }
 .badge-connected { background: var(--ok); color: var(--invert-fg); border-color: var(--ok); }
 .badge-error { background: var(--warn); color: var(--invert-fg); border-color: var(--warn); }
 .badge-ended { background: var(--invert-bg); color: var(--invert-fg); }

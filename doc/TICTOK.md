@@ -10,6 +10,7 @@ TicTok/
 ├── manager.py         複数Collectorの管理（配信者ごとに1 instance）
 ├── collector.py       TikTokLive client wrapper（Event収集・統計集計・自動再接続）
 ├── storage.py         SQLite保存層（WAL mode、Session/Event/Timeline/Memo）
+├── settings.py        画面から変更できる設定（DB保存・env既定値）
 ├── config.py          環境変数によるServer設定
 ├── requirements.txt   依存Package
 ├── run.bat            Windows用起動script
@@ -18,8 +19,9 @@ TicTok/
     ├── index.html     監視page（tab切替で配信者ごとの詳細dashboard）
     ├── overview.html  全体監視page（監視中の全配信者をcard一覧）
     ├── history.html   履歴page（総合dashboard / Session履歴 / Memo / Session詳細）
+    ├── settings.html  設定page（確認間隔などの変更）
     ├── common.js      共通utility（chart factory・WebSocket・整形）
-    ├── app.js / overview.js / history.js
+    ├── app.js / overview.js / history.js / settings.js
     ├── style.css      NieR:Automata風 sand配色
     └── vendor/
         └── chart.umd.min.js   Chart.js v4（graph描画、offline動作のため同梱）
@@ -50,11 +52,12 @@ bash TicTok/run.sh
 | `TICTOK_LOG_LEVEL` | `INFO` | log level |
 | `TICTOK_DB_PATH` | `TicTok/tictok.db` | SQLite database の path |
 | `TICTOK_EVENT_HISTORY` | `200` | 新規接続時に再送する Event 履歴件数 |
-| `TICTOK_BUCKET_SECONDS` | `10` | Timeline 集計の bucket 幅（秒） |
+| `TICTOK_BUCKET_SECONDS` | `10` | Timeline 集計の bucket 幅（秒）※設定pageで上書き可 |
 | `TICTOK_TIMELINE_LIMIT` | `2160` | memory 上に保持する bucket 数の上限 |
 | `TICTOK_SESSION_LIST_LIMIT` | `100` | 履歴一覧の表示件数 |
 | `TICTOK_SIMULATION` | `0` | `1` で simulation mode（擬似 event を生成。LIVE 配信なしで画面確認可能） |
-| `TICTOK_RECONNECT_MAX_ATTEMPTS` | `10` | 自動再接続の最大試行回数 |
+| `TICTOK_LIVE_CHECK_INTERVAL` | `60` | 常駐監視での配信開始の確認間隔（秒）※設定pageで上書き可 |
+| `TICTOK_RECONNECT_MAX_ATTEMPTS` | `10` | 自動再接続の最大試行回数 ※設定pageで上書き可 |
 | `TICTOK_RECONNECT_BASE_DELAY` | `2.0` | 再接続の初回待機秒数（exponential backoff） |
 | `TICTOK_RECONNECT_MAX_DELAY` | `60.0` | 再接続待機秒数の上限 |
 
@@ -70,12 +73,25 @@ bash TicTok/run.sh
 
 監視中の全配信者を 1 画面の card 一覧で表示します。card には状態・視聴者数・Gift数・Diamonds・分間 rate・接続時間・直近の Gift / Comment が realtime 表示され、click で該当配信者の詳細 tab に移動します。
 
+### 設定 page（`/settings`）
+
+配信開始の確認間隔・bucket 幅・再接続 parameter・履歴表示件数などを画面から変更できます。設定は Database に保存され、Server を再起動しても維持されます（環境変数は初期値として機能）。bucket 幅と Event 履歴件数は次の Session 開始から適用されます。
+
 ### 履歴 page（`/history`）
 
 - **総合 Dashboard（全 Session）**: 総 Gift 数・総 Diamonds・総 Comment・総収集時間、直近 Session ごとの推移 graph、配信者別の累計、全 Session を通じた上位 Gift 送信 User。
 - **Session 履歴**: 過去の収集を一覧表示。各 Session に対して「表示」「CSV」「JSON」「削除」を操作できます（削除は確認 dialog あり、収集中の Session は削除不可）。
 - **Memo 機能**: Session ごとに自由記述の Memo を保存できます。
 - **Session 詳細**: 選択した Session の Timeline graph・Result 分析（User ごとの Gift / Gift 種類別）を表示します。
+
+## 常駐監視 mode（自動追跡・自動収集）
+
+監視対象は LIVE 配信の有無に関わらず常駐で追跡します。
+
+- 未配信の場合は error にせず **WAITING 状態**になり、設定した間隔（既定 60 秒）で配信開始を確認します。
+- 配信開始を検出すると**自動で接続して収集を開始**します。
+- LIVE が終了すると Session を確定保存し、再び WAITING に戻ります。**次の配信は新しい Session として自動収集**されます。
+- 存在しない User や年齢制限のみ error として停止します。「停止」を押すまで監視は続きます。
 
 ## 自動保存（SQLite）
 
@@ -92,13 +108,13 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 
 ## 自動再接続
 
-一時的な障害（Sign API の 502、network 断、予期しない切断など）は error にせず、exponential backoff で自動再接続します。再接続中は控えめな RECONNECTING badge を表示し、収集済み Data は保持されます。回復不能な失敗（LIVE 未配信・User 不存在・年齢制限）は再接続せず error 表示します。
+一時的な障害（Sign API の 502、network 断、予期しない切断など）は error にせず、exponential backoff で自動再接続します。再接続中は控えめな RECONNECTING badge を表示し、収集済み Data は保持されます。LIVE 未配信は常駐監視の WAITING に移行し、回復不能な失敗（User 不存在・年齢制限）のみ error 表示します。
 
 ## API
 
 | Method | Path | 説明 |
 | --- | --- | --- |
-| GET | `/` `/overview` `/history` | 各 page の HTML |
+| GET | `/` `/overview` `/history` `/settings` | 各 page の HTML |
 | GET | `/api/monitors` | 監視中の全 collector の snapshot |
 | POST | `/api/monitors` | `{"unique_id": "..."}` で監視開始（既存 ID は再開） |
 | POST | `/api/monitors/{unique_id}/stop` | 収集停止 |
@@ -112,6 +128,7 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | GET | `/api/sessions/{id}/export.csv` | Event の CSV export（BOM 付き UTF-8） |
 | GET | `/api/sessions/{id}/export.json` | Session 全体の JSON export |
 | GET | `/api/dashboard` | 総合 dashboard（全 Session 集計） |
+| GET / PUT | `/api/settings` | 設定の取得・更新（DB に永続化） |
 | WS | `/ws` | monitors / state / stats / event の push 配信（`monitor` field で配信者を識別） |
 
 ## 収集 Event
@@ -119,7 +136,7 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | 種別 | 内容 |
 | --- | --- |
 | gift | Gift 到着（Streak は確定時に集計、Streak 中は進行表示のみ） |
-| comment | Comment |
+| comment | Comment（発言内容は raw text として comment column にも保存され、CSV/JSON export に含まれます） |
 | like | Like（累計値は LikeEvent の total を反映） |
 | follow / share / join / subscribe | 各 user action |
 | battle | LinkMicBattle（Battle 検出、Timeline に marker 表示） |

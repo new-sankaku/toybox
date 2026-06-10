@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from config import get_db_path, get_host, get_log_level, get_port, get_session_list_limit
+from config import get_db_path, get_host, get_log_level, get_port
 from manager import CollectorManager
+from settings import Settings
 from storage import Storage
 
 logger = logging.getLogger("tictok.server")
@@ -58,7 +59,8 @@ class EventHub:
 hub = EventHub()
 storage = Storage(get_db_path())
 storage.cleanup_stale_sessions()
-manager = CollectorManager(broadcast=hub.broadcast, storage=storage)
+settings = Settings(storage)
+manager = CollectorManager(broadcast=hub.broadcast, storage=storage, settings=settings)
 
 
 @asynccontextmanager
@@ -119,6 +121,25 @@ async def history_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "history.html")
 
 
+@app.get("/settings")
+async def settings_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "settings.html")
+
+
+@app.get("/api/settings")
+async def get_settings_api() -> dict:
+    return {"settings": settings.describe()}
+
+
+@app.put("/api/settings")
+async def update_settings_api(values: dict) -> dict:
+    try:
+        updated = settings.update(values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return {"settings": settings.describe(), "values": updated}
+
+
 @app.get("/api/monitors")
 async def list_monitors() -> dict:
     return {"monitors": manager.snapshots()}
@@ -164,7 +185,7 @@ async def monitor_summary(unique_id: str) -> dict:
 @app.get("/api/sessions")
 async def list_sessions() -> dict:
     return {
-        "sessions": storage.list_sessions(get_session_list_limit()),
+        "sessions": storage.list_sessions(settings.get("session_list_limit")),
         "active_session_ids": sorted(manager.active_session_ids()),
     }
 
@@ -206,7 +227,7 @@ async def export_session_csv(session_id: int) -> Response:
     buffer = io.StringIO()
     writer = csv.writer(buffer)
     writer.writerow(
-        ["time", "kind", "user_unique_id", "user_nickname", "text", "gift_name", "gift_count", "diamonds"]
+        ["time", "kind", "user_unique_id", "user_nickname", "comment", "text", "gift_name", "gift_count", "diamonds"]
     )
     for event in storage.iter_events(session_id):
         writer.writerow(
@@ -215,6 +236,7 @@ async def export_session_csv(session_id: int) -> Response:
                 event["kind"],
                 event["user_unique_id"] or "",
                 event["user_nickname"] or "",
+                event["comment"] or "",
                 event["text"] or "",
                 event["gift_name"] or "",
                 event["gift_count"] if event["gift_count"] is not None else "",

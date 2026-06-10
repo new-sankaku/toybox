@@ -2,6 +2,7 @@
 
 const STATUS_LABELS = {
   idle: { badge: "IDLE", cls: "badge-idle", message: "待機中" },
+  waiting: { badge: "WAITING", cls: "badge-waiting", message: "LIVE配信の開始を待っています…（開始を検出すると自動で収集を始めます）" },
   connecting: { badge: "CONNECTING", cls: "badge-connecting", message: "接続処理を実行中です…" },
   connected: { badge: "RECEIVING", cls: "badge-connected", message: "LIVEに接続済み。Eventを受信しています。" },
   reconnecting: { badge: "RECONNECTING", cls: "badge-reconnecting", message: "接続が不安定なため再接続しています…（収集Dataは保持されます）" },

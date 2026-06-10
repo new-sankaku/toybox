@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TicTok LIVE Monitor — 全体監視</title>
+  <title>TicTok LIVE Monitor — 設定</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -12,21 +12,24 @@
   <header class="app-header">
     <div class="header-mark">■</div>
     <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
-    <div class="header-sub">All Monitors Board — YoRHa Interface</div>
+    <div class="header-sub">System Configuration — YoRHa Interface</div>
     <nav class="app-nav">
       <a class="nav-link" href="/">▌ 監視</a>
-      <a class="nav-link active" href="/overview">▌ 全体監視</a>
+      <a class="nav-link" href="/overview">▌ 全体監視</a>
       <a class="nav-link" href="/history">▌ 履歴</a>
-      <a class="nav-link" href="/settings">▌ 設定</a>
+      <a class="nav-link active" href="/settings">▌ 設定</a>
     </nav>
   </header>
 
   <main class="layout">
-    <section class="panel chart-panel">
-      <h2 class="panel-title">▌ 全体監視 Board</h2>
-      <div class="chart-note">監視中の全配信者を一覧表示します。Card clickで詳細tabに移動します。</div>
-      <div id="monitor-grid" class="monitor-grid"></div>
-      <div id="grid-empty" class="feed-empty">監視対象がありません。「監視」pageから追加してください。</div>
+    <section class="panel control-panel">
+      <h2 class="panel-title">▌ 設定</h2>
+      <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。</div>
+      <div id="settings-form" class="settings-form"></div>
+      <div class="note-actions">
+        <button id="settings-save" class="btn btn-primary">設定を保存</button>
+        <span id="settings-status" class="form-message"></span>
+      </div>
     </section>
   </main>
 
@@ -36,8 +39,7 @@
     <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
   </footer>
 
-  <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/common.js"></script>
-  <script src="/static/overview.js"></script>
+  <script src="/static/settings.js"></script>
 </body>
 </html>

@@ -10,9 +10,10 @@ Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class CollectorManager:
-    def __init__(self, broadcast: Broadcast, storage: Storage) -> None:
+    def __init__(self, broadcast: Broadcast, storage: Storage, settings) -> None:
         self._broadcast = broadcast
         self._storage = storage
+        self._settings = settings
         self._collectors: dict[str, TikTokCollector] = {}
 
     def get(self, unique_id: str) -> Optional[TikTokCollector]:
@@ -35,6 +36,7 @@ class CollectorManager:
                 unique_id=unique_id,
                 broadcast=self._make_broadcast(unique_id),
                 storage=self._storage,
+                settings=self._settings,
             )
             self._collectors[unique_id] = collector
         await collector.start()

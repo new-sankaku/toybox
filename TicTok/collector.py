@@ -28,21 +28,14 @@ from TikTokLive.events import (
     SubscribeEvent,
 )
 
-from config import (
-    get_bucket_seconds,
-    get_event_history_size,
-    get_reconnect_base_delay,
-    get_reconnect_max_attempts,
-    get_reconnect_max_delay,
-    get_simulation,
-    get_timeline_limit,
-)
+from config import get_simulation, get_timeline_limit
 
 logger = logging.getLogger("tictok.collector")
 
 Broadcast = Callable[[dict], Awaitable[None]]
 
 STATE_IDLE = "idle"
+STATE_WAITING = "waiting"
 STATE_CONNECTING = "connecting"
 STATE_CONNECTED = "connected"
 STATE_RECONNECTING = "reconnecting"
@@ -50,7 +43,7 @@ STATE_DISCONNECTED = "disconnected"
 STATE_ENDED = "ended"
 STATE_ERROR = "error"
 
-ACTIVE_STATES = (STATE_CONNECTING, STATE_CONNECTED, STATE_RECONNECTING)
+ACTIVE_STATES = (STATE_WAITING, STATE_CONNECTING, STATE_CONNECTED, STATE_RECONNECTING)
 
 STEP_IDS = ["request", "live_check", "websocket", "receiving"]
 
@@ -107,9 +100,10 @@ def _user_payload(user: Any) -> dict:
 
 
 class TikTokCollector:
-    def __init__(self, unique_id: str, broadcast: Broadcast, storage) -> None:
+    def __init__(self, unique_id: str, broadcast: Broadcast, storage, settings) -> None:
         self._broadcast = broadcast
         self._storage = storage
+        self._settings = settings
         self._client: Optional[TikTokLiveClient] = None
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
@@ -120,18 +114,15 @@ class TikTokCollector:
         self.room_id: Optional[int] = None
         self.stats = _empty_stats()
         self.steps = {step: "pending" for step in STEP_IDS}
-        self.recent_events: deque = deque(maxlen=get_event_history_size())
-        self._bucket_seconds = get_bucket_seconds()
         self._simulation = get_simulation()
+        self._bucket_seconds = settings.get("bucket_seconds")
+        self.recent_events: deque = deque(maxlen=settings.get("event_history"))
         self.timeline: deque = deque(maxlen=get_timeline_limit())
         self.markers: deque = deque(maxlen=500)
         self.gifters: dict = {}
         self.gift_types: dict = {}
         self._stop_requested = False
         self._reconnect_attempt = 0
-        self._reconnect_max = get_reconnect_max_attempts()
-        self._reconnect_base_delay = get_reconnect_base_delay()
-        self._reconnect_max_delay = get_reconnect_max_delay()
 
     def snapshot(self) -> dict:
         return {
@@ -191,32 +182,45 @@ class TikTokCollector:
     def _add_marker(self, kind: str, label: str) -> None:
         self.markers.append({"time": time.time(), "kind": kind, "label": label})
 
+    def _reset_session_data(self) -> None:
+        self._reconnect_attempt = 0
+        self.room_id = None
+        self.error_message = None
+        self.stats = _empty_stats()
+        self._bucket_seconds = self._settings.get("bucket_seconds")
+        self.recent_events = deque(maxlen=self._settings.get("event_history"))
+        self.timeline.clear()
+        self.markers.clear()
+        self.gifters = {}
+        self.gift_types = {}
+
+    def _prepare_session(self) -> None:
+        self._reset_session_data()
+        self.steps = {step: "pending" for step in STEP_IDS}
+        self.steps["request"] = "done"
+        self.steps["live_check"] = "done"
+        self.steps["websocket"] = "active"
+        self.state = STATE_CONNECTING
+        self.session_id = self._storage.create_session(self.unique_id, self._bucket_seconds)
+        self._client = self._build_client(self.unique_id)
+        logger.info("session prepared: unique_id=%s session_id=%s", self.unique_id, self.session_id)
+
     async def start(self) -> None:
         async with self._lock:
             if self.state in ACTIVE_STATES:
                 raise RuntimeError("収集は既に実行中です。先に停止してください。")
             self._stop_requested = False
-            self._reconnect_attempt = 0
-            self.room_id = None
-            self.error_message = None
-            self.stats = _empty_stats()
-            self.recent_events.clear()
-            self.timeline.clear()
-            self.markers.clear()
-            self.gifters = {}
-            self.gift_types = {}
+            self._reset_session_data()
             self.steps = {step: "pending" for step in STEP_IDS}
             self.steps["request"] = "done"
             self.steps["live_check"] = "active"
             self.state = STATE_CONNECTING
-            self.session_id = self._storage.create_session(self.unique_id, self._bucket_seconds)
             if self._simulation:
                 self._client = None
                 self._task = asyncio.create_task(self._run_simulation(), name=f"tictok-sim-{self.unique_id}")
             else:
-                self._client = self._build_client(self.unique_id)
                 self._task = asyncio.create_task(self._run(), name=f"tictok-collector-{self.unique_id}")
-        logger.info("collection start requested: unique_id=%s session_id=%s", self.unique_id, self.session_id)
+        logger.info("monitoring start requested: unique_id=%s", self.unique_id)
         await self._notify_state()
 
     async def stop(self) -> None:
@@ -241,21 +245,73 @@ class TikTokCollector:
                 logger.warning("collector task cancelled after timeout")
 
     async def _run(self) -> None:
+        first_cycle = True
         try:
             while True:
-                interruption = await self._connect_once()
-                if interruption is None:
+                if not await self._wait_for_live_start(skip_first_check=not first_cycle):
                     break
-                if not await self._wait_for_reconnect(interruption):
+                first_cycle = False
+                self._prepare_session()
+                await self._notify_state()
+                outcome = await self._session_loop()
+                self._persist_final()
+                await self._notify_state()
+                if outcome in ("stopped", "fatal"):
                     break
+                logger.info("session closed (%s), resuming watch: unique_id=%s", outcome, self.unique_id)
         except asyncio.CancelledError:
             self.state = STATE_DISCONNECTED
+            self._persist_final()
         finally:
             if self.state in (STATE_DISCONNECTED, STATE_ENDED):
                 self.steps["receiving"] = "done"
-            self._persist_final()
             await self._notify_state()
             logger.info("collector finished: state=%s", self.state)
+
+    async def _announce_waiting(self) -> None:
+        self.state = STATE_WAITING
+        self.steps = {step: "pending" for step in STEP_IDS}
+        self.steps["request"] = "done"
+        self.steps["live_check"] = "active"
+        await self._notify_state()
+        logger.info(
+            "waiting for live start: unique_id=%s interval=%ss",
+            self.unique_id,
+            self._settings.get("live_check_interval"),
+        )
+
+    async def _wait_for_live_start(self, skip_first_check: bool = False) -> bool:
+        probe = TikTokLiveClient(unique_id=self.unique_id)
+        waiting_announced = False
+        if skip_first_check:
+            waiting_announced = True
+            await self._announce_waiting()
+            await asyncio.sleep(self._settings.get("live_check_interval"))
+        while True:
+            if self._stop_requested:
+                self.state = STATE_DISCONNECTED
+                return False
+            try:
+                if await probe.web.fetch_is_live(unique_id=self.unique_id):
+                    return True
+            except UserNotFoundError:
+                self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
+                return False
+            except Exception as exc:
+                logger.warning("live check failed for %s: %s", self.unique_id, exc)
+            if not waiting_announced:
+                waiting_announced = True
+                await self._announce_waiting()
+            await asyncio.sleep(self._settings.get("live_check_interval"))
+
+    async def _session_loop(self) -> str:
+        while True:
+            outcome, reason = await self._connect_once()
+            if outcome != "transient":
+                return outcome
+            result = await self._wait_for_reconnect(reason)
+            if result != "retry":
+                return result
 
     def _persist_final(self) -> None:
         if self.session_id is None:
@@ -266,45 +322,49 @@ class TikTokCollector:
             )
         except Exception:
             logger.exception("failed to persist session %s", self.session_id)
+        self.session_id = None
 
-    async def _connect_once(self) -> Optional[str]:
+    async def _connect_once(self) -> tuple:
         try:
             await self._client.connect(fetch_room_info=True)
-            if self._stop_requested or self.state == STATE_ENDED:
+            if self._stop_requested:
                 if self.state == STATE_CONNECTED:
                     self.state = STATE_DISCONNECTED
-                return None
-            return "LIVEとの接続が切断されました"
+                return ("stopped", None)
+            if self.state == STATE_ENDED:
+                return ("ended", None)
+            return ("transient", "LIVEとの接続が切断されました")
         except UserOfflineError:
-            self._fail("live_check", f"@{self.unique_id} は現在LIVE配信していません。")
-            return None
+            self.state = STATE_ENDED
+            return ("ended", None)
         except UserNotFoundError:
             self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
-            return None
+            return ("fatal", None)
         except AgeRestrictedError:
             self._fail("live_check", "年齢制限付きのLIVEのため接続できません。")
-            return None
+            return ("fatal", None)
         except TikTokLiveError as exc:
             logger.warning("transient TikTokLive error: %s", exc, exc_info=True)
-            return f"TikTok接続Error: {exc}"
+            return ("transient", f"TikTok接続Error: {exc}")
         except Exception as exc:
             logger.warning("transient collector error: %s", exc, exc_info=True)
-            return f"接続Error: {exc}"
+            return ("transient", f"接続Error: {exc}")
 
-    async def _wait_for_reconnect(self, reason: str) -> bool:
+    async def _wait_for_reconnect(self, reason: str) -> str:
         if self._stop_requested:
             self.state = STATE_DISCONNECTED
-            return False
+            return "stopped"
+        max_attempts = self._settings.get("reconnect_max_attempts")
         self._reconnect_attempt += 1
-        if self._reconnect_attempt > self._reconnect_max:
+        if self._reconnect_attempt > max_attempts:
             self._fail(
                 "websocket",
-                f"再接続が{self._reconnect_max}回失敗したため停止しました。最後の原因: {reason}",
+                f"再接続が{max_attempts}回失敗したため停止しました。最後の原因: {reason}",
             )
-            return False
+            return "fatal"
         delay = min(
-            self._reconnect_base_delay * (2 ** (self._reconnect_attempt - 1)),
-            self._reconnect_max_delay,
+            self._settings.get("reconnect_base_delay") * (2 ** (self._reconnect_attempt - 1)),
+            self._settings.get("reconnect_max_delay"),
         )
         self.state = STATE_RECONNECTING
         self.steps["websocket"] = "active"
@@ -312,7 +372,7 @@ class TikTokCollector:
         logger.info(
             "reconnecting (attempt %d/%d, delay %.1fs): %s",
             self._reconnect_attempt,
-            self._reconnect_max,
+            max_attempts,
             delay,
             reason,
         )
@@ -320,15 +380,15 @@ class TikTokCollector:
         await self._record(
             "system",
             {
-                "text": f"再接続します ({self._reconnect_attempt}/{self._reconnect_max}回目、{delay:.0f}秒後)。原因: {reason}"
+                "text": f"再接続します ({self._reconnect_attempt}/{max_attempts}回目、{delay:.0f}秒後)。原因: {reason}"
             },
         )
         await asyncio.sleep(delay)
         if self._stop_requested:
             self.state = STATE_DISCONNECTED
-            return False
+            return "stopped"
         self._client = self._build_client(self.unique_id)
-        return True
+        return "retry"
 
     def _fail(self, step: str, message: str) -> None:
         self.steps[step] = "failed"
@@ -551,6 +611,7 @@ class TikTokCollector:
         ]
         try:
             await asyncio.sleep(1.5)
+            self.session_id = self._storage.create_session(self.unique_id, self._bucket_seconds)
             self.state = STATE_CONNECTED
             self.steps["live_check"] = "done"
             self.steps["websocket"] = "done"

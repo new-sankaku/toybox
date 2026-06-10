@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS markers (
     label TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_markers_session ON markers(session_id);
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -72,8 +76,15 @@ class Storage:
             self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             self._conn.commit()
         logger.info("storage initialized: %s", db_path)
+
+    def _migrate(self) -> None:
+        columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(events)")]
+        if "comment" not in columns:
+            self._conn.execute("ALTER TABLE events ADD COLUMN comment TEXT")
+            logger.info("migrated events table: added comment column")
 
     def close(self) -> None:
         with self._lock:
@@ -141,8 +152,8 @@ class Storage:
         user = entry.get("user") or {}
         with self._lock:
             self._conn.execute(
-                "INSERT INTO events (session_id, time, kind, user_unique_id, user_nickname, text, gift_name, gift_count, diamonds)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (session_id, time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     session_id,
                     entry["time"],
@@ -150,6 +161,7 @@ class Storage:
                     user.get("unique_id"),
                     user.get("nickname"),
                     entry.get("text"),
+                    entry.get("comment"),
                     entry.get("gift_name"),
                     entry.get("repeat_count"),
                     entry.get("diamonds"),
@@ -282,11 +294,25 @@ class Storage:
     def iter_events(self, session_id: int) -> list:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT time, kind, user_unique_id, user_nickname, text, gift_name, gift_count, diamonds"
+                "SELECT time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds"
                 " FROM events WHERE session_id = ? ORDER BY time",
                 (session_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_settings(self) -> dict:
+        with self._lock:
+            rows = self._conn.execute("SELECT key, value FROM settings").fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
+    def set_settings(self, values: dict) -> None:
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO settings (key, value) VALUES (?, ?)"
+                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [(key, str(value)) for key, value in values.items()],
+            )
+            self._conn.commit()
 
     def aggregate_dashboard(self) -> dict:
         with self._lock:

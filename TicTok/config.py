@@ -14,12 +14,10 @@ def get_log_level() -> str:
     return os.environ.get("TICTOK_LOG_LEVEL", "INFO")
 
 
-def get_event_history_size() -> int:
-    return int(os.environ.get("TICTOK_EVENT_HISTORY", "200"))
-
-
-def get_bucket_seconds() -> int:
-    return int(os.environ.get("TICTOK_BUCKET_SECONDS", "10"))
+def get_db_path() -> str:
+    return os.environ.get(
+        "TICTOK_DB_PATH", str(Path(__file__).resolve().parent / "tictok.db")
+    )
 
 
 def get_timeline_limit() -> int:
@@ -28,26 +26,3 @@ def get_timeline_limit() -> int:
 
 def get_simulation() -> bool:
     return os.environ.get("TICTOK_SIMULATION", "0").lower() in ("1", "true", "yes")
-
-
-def get_reconnect_max_attempts() -> int:
-    return int(os.environ.get("TICTOK_RECONNECT_MAX_ATTEMPTS", "10"))
-
-
-def get_reconnect_base_delay() -> float:
-    return float(os.environ.get("TICTOK_RECONNECT_BASE_DELAY", "2.0"))
-
-
-def get_reconnect_max_delay() -> float:
-    return float(os.environ.get("TICTOK_RECONNECT_MAX_DELAY", "60.0"))
-
-
-def get_db_path() -> str:
-    return os.environ.get(
-        "TICTOK_DB_PATH", str(Path(__file__).resolve().parent / "tictok.db")
-    )
-
-
-def get_session_list_limit() -> int:
-    return int(os.environ.get("TICTOK_SESSION_LIST_LIMIT", "100"))
-
