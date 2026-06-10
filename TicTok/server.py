@@ -49,6 +49,7 @@ class EventHub:
             try:
                 await connection.send_json(message)
             except Exception:
+                logger.debug("dropping dead websocket connection", exc_info=True)
                 dead.append(connection)
         if dead:
             async with self._lock:

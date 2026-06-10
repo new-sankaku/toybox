@@ -306,7 +306,7 @@ class TikTokCollector:
                 self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
                 return False
             except Exception as exc:
-                logger.warning("live check failed for %s: %s", self.unique_id, exc)
+                logger.warning("live check failed for %s: %s", self.unique_id, exc, exc_info=True)
             if not waiting_announced:
                 waiting_announced = True
                 await self._announce_waiting()
@@ -376,7 +376,9 @@ class TikTokCollector:
         except UserNotFoundError:
             raise
         except Exception as exc:
-            logger.warning("offline confirmation check failed for %s: %s", self.unique_id, exc)
+            logger.warning(
+                "offline confirmation check failed for %s: %s", self.unique_id, exc, exc_info=True
+            )
             return False
         return not is_live
 
