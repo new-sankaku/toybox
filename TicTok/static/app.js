@@ -32,6 +32,7 @@ const els = {
     shares: document.getElementById("stat-shares"),
     joins: document.getElementById("stat-joins"),
     battles: document.getElementById("stat-battles"),
+    battle_points: document.getElementById("stat-battle-points"),
     events_total: document.getElementById("stat-events"),
     rate_gifts: document.getElementById("stat-rate-gifts"),
     rate_diamonds: document.getElementById("stat-rate-diamonds"),

@@ -83,6 +83,7 @@ bash TicTok/run.sh
 - **Session 履歴**: 過去の収集を一覧表示。各 Session に対して「表示」「CSV」「JSON」「削除」を操作できます（削除は確認 dialog あり、収集中の Session は削除不可）。
 - **Memo 機能**: Session ごとに自由記述の Memo を保存できます。
 - **Session 詳細**: 選択した Session の Timeline graph・Result 分析（User ごとの Gift / Gift 種類別）を表示します。
+- **配信 Ranking**: 配信（Session）単位の Ranking を Like / Comment / Gift（Diamonds）/ Battle Score の指標で切替表示します。収集中の配信は現在値で反映されます。
 
 ## 常駐監視 mode（自動追跡・自動収集）
 
@@ -110,6 +111,10 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 
 一時的な障害（Sign API の 502、network 断、予期しない切断など）は error にせず、exponential backoff で自動再接続します。再接続中は控えめな RECONNECTING badge を表示し、収集済み Data は保持されます。LIVE 未配信は常駐監視の WAITING に移行し、回復不能な失敗（User 不存在・年齢制限）のみ error 表示します。
 
+### 配信終了の二重確認
+
+配信終了は明示 signal（LiveEndEvent / TikTok API の未配信応答）でのみ判定します。さらに、未配信応答を受けた場合は数秒後に軽量 API で再確認し、**実際は配信中だった場合は同一 Session のまま再接続**します。これにより一時的な誤応答による Session 分割と取り逃しを防ぎます。
+
 ## API
 
 | Method | Path | 説明 |
@@ -128,6 +133,7 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | GET | `/api/sessions/{id}/export.csv` | Event の CSV export（BOM 付き UTF-8） |
 | GET | `/api/sessions/{id}/export.json` | Session 全体の JSON export |
 | GET | `/api/dashboard` | 総合 dashboard（全 Session 集計） |
+| GET | `/api/rankings` | 配信 Ranking（Like / Comment / Gift / Battle Score） |
 | GET / PUT | `/api/settings` | 設定の取得・更新（DB に永続化） |
 | WS | `/ws` | monitors / state / stats / event の push 配信（`monitor` field で配信者を識別） |
 
@@ -139,7 +145,7 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | comment | Comment（発言内容は raw text として comment column にも保存され、CSV/JSON export に含まれます） |
 | like | Like（累計値は LikeEvent の total を反映） |
 | follow / share / join / subscribe | 各 user action |
-| battle | LinkMicBattle（Battle 検出、Timeline に marker 表示） |
+| battle | LinkMicBattle（Battle 検出、Timeline に marker 表示）。LinkMicArmies から自配信者の Battle Score を集計 |
 | RoomUserSeq | 視聴者数・累計視聴者数の更新 |
 | system | 接続・再接続・切断・LIVE 終了の通知 |
 
@@ -147,4 +153,5 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 
 - Gift の Streak（連打）は二重計上を防ぐため、Streak 確定時（`repeat_end`）にのみ Gift 数と Diamonds を加算します。
 - 分間 rate 指標は直近 60 秒の bucket 集計から算出します。
+- Battle Score は LinkMicArmies の host_score（自配信者分）を battle ごとに最新値で集計した合計です。Like 数の Ranking は TikTok の累計値を優先し、無い場合（異常終了からの回復 Session など）は保存済み Like event の合計を使用します。
 - TikTok 側の仕様変更により接続できない場合は、`TikTokLive` package の更新を確認してください。

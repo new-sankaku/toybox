@@ -58,6 +58,21 @@
     </section>
 
     <section class="panel result-panel">
+      <h2 class="panel-title">▌ 配信 Ranking</h2>
+      <div class="chart-note">配信（Session）単位のRankingです。指標を切替できます。収集中の配信は現在値で反映されます。</div>
+      <div id="ranking-tabs" class="tab-bar"></div>
+      <div class="table-wrap">
+        <table class="result-table">
+          <thead>
+            <tr><th>#</th><th>Session</th><th>配信者</th><th>開始</th><th>時間</th><th id="ranking-value-head">値</th></tr>
+          </thead>
+          <tbody id="ranking-table"></tbody>
+        </table>
+      </div>
+      <div id="ranking-empty" class="feed-empty">DATAなし</div>
+    </section>
+
+    <section class="panel result-panel">
       <h2 class="panel-title">▌ Session 履歴</h2>
       <div class="table-wrap">
         <table class="result-table">

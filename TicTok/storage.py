@@ -85,6 +85,9 @@ class Storage:
         if "comment" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN comment TEXT")
             logger.info("migrated events table: added comment column")
+        if "count" not in columns:
+            self._conn.execute("ALTER TABLE events ADD COLUMN count INTEGER")
+            logger.info("migrated events table: added count column")
 
     def close(self) -> None:
         with self._lock:
@@ -152,8 +155,8 @@ class Storage:
         user = entry.get("user") or {}
         with self._lock:
             self._conn.execute(
-                "INSERT INTO events (session_id, time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO events (session_id, time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds, count)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     session_id,
                     entry["time"],
@@ -165,6 +168,7 @@ class Storage:
                     entry.get("gift_name"),
                     entry.get("repeat_count"),
                     entry.get("diamonds"),
+                    entry.get("count"),
                 ),
             )
             self._conn.commit()
@@ -313,6 +317,39 @@ class Storage:
                 [(key, str(value)) for key, value in values.items()],
             )
             self._conn.commit()
+
+    def session_rankings(self, limit: int) -> dict:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT s.id, s.unique_id, s.started_at, s.ended_at,"
+                " COALESCE(json_extract(s.stats_json, '$.likes_total'),"
+                "   (SELECT SUM(e.count) FROM events e WHERE e.session_id = s.id AND e.kind = 'like'), 0) AS likes,"
+                " (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id AND e.kind = 'comment') AS comments,"
+                " (SELECT COALESCE(SUM(e.diamonds), 0) FROM events e WHERE e.session_id = s.id AND e.kind = 'gift') AS diamonds,"
+                " COALESCE(json_extract(s.stats_json, '$.battle_points'), 0) AS battle_points"
+                " FROM sessions s",
+            ).fetchall()
+        sessions = [dict(row) for row in rows]
+
+        def ranked(metric: str) -> list:
+            ordered = sorted(sessions, key=lambda s: s[metric] or 0, reverse=True)
+            return [
+                {
+                    "session_id": s["id"],
+                    "unique_id": s["unique_id"],
+                    "started_at": s["started_at"],
+                    "ended_at": s["ended_at"],
+                    "value": s[metric] or 0,
+                }
+                for s in ordered[:limit]
+            ]
+
+        return {
+            "likes": ranked("likes"),
+            "comments": ranked("comments"),
+            "gifts": ranked("diamonds"),
+            "battles": ranked("battle_points"),
+        }
 
     def aggregate_dashboard(self) -> dict:
         with self._lock:

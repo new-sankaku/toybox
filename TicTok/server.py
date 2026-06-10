@@ -273,6 +273,33 @@ async def aggregate_dashboard() -> dict:
     return storage.aggregate_dashboard()
 
 
+RANKING_STAT_KEYS = {
+    "likes": "likes_total",
+    "comments": "comments",
+    "gifts": "diamonds",
+    "battles": "battle_points",
+}
+
+
+@app.get("/api/rankings")
+async def session_rankings() -> dict:
+    rankings = storage.session_rankings(settings.get("session_list_limit"))
+    live_stats = {
+        snap["session_id"]: snap["stats"]
+        for snap in manager.snapshots()
+        if snap.get("session_id") is not None
+    }
+    if live_stats:
+        for metric, stat_key in RANKING_STAT_KEYS.items():
+            entries = rankings[metric]
+            for entry in entries:
+                stats = live_stats.get(entry["session_id"])
+                if stats is not None:
+                    entry["value"] = stats.get(stat_key, entry["value"])
+            entries.sort(key=lambda e: e["value"], reverse=True)
+    return rankings
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await hub.register(websocket)

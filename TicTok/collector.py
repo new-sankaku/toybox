@@ -21,6 +21,7 @@ from TikTokLive.events import (
     GiftEvent,
     JoinEvent,
     LikeEvent,
+    LinkMicArmiesEvent,
     LinkMicBattleEvent,
     LiveEndEvent,
     RoomUserSeqEvent,
@@ -68,6 +69,7 @@ def _empty_stats() -> dict:
         "joins": 0,
         "subscribes": 0,
         "battles": 0,
+        "battle_points": 0,
         "events_total": 0,
         "connected_at": None,
         "rate_gifts": 0,
@@ -121,6 +123,9 @@ class TikTokCollector:
         self.markers: deque = deque(maxlen=500)
         self.gifters: dict = {}
         self.gift_types: dict = {}
+        self._battles: dict = {}
+        self._owner_id: str = ""
+        self._owner_warned = False
         self._stop_requested = False
         self._reconnect_attempt = 0
 
@@ -193,6 +198,9 @@ class TikTokCollector:
         self.markers.clear()
         self.gifters = {}
         self.gift_types = {}
+        self._battles = {}
+        self._owner_id = ""
+        self._owner_warned = False
 
     def _prepare_session(self) -> None:
         self._reset_session_data()
@@ -335,8 +343,16 @@ class TikTokCollector:
                 return ("ended", None)
             return ("transient", "LIVEとの接続が切断されました")
         except UserOfflineError:
-            self.state = STATE_ENDED
-            return ("ended", None)
+            try:
+                offline_confirmed = await self._confirm_offline()
+            except UserNotFoundError:
+                self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
+                return ("fatal", None)
+            if offline_confirmed:
+                self.state = STATE_ENDED
+                return ("ended", None)
+            logger.info("offline report not confirmed, treating as transient: %s", self.unique_id)
+            return ("transient", "TikTokが一時的に未配信と応答しました（再確認では配信中）")
         except UserNotFoundError:
             self._fail("live_check", f"@{self.unique_id} というUserが見つかりません。")
             return ("fatal", None)
@@ -349,6 +365,20 @@ class TikTokCollector:
         except Exception as exc:
             logger.warning("transient collector error: %s", exc, exc_info=True)
             return ("transient", f"接続Error: {exc}")
+
+    async def _confirm_offline(self) -> bool:
+        await asyncio.sleep(5)
+        if self._stop_requested:
+            return True
+        probe = TikTokLiveClient(unique_id=self.unique_id)
+        try:
+            is_live = await probe.web.fetch_is_live(unique_id=self.unique_id)
+        except UserNotFoundError:
+            raise
+        except Exception as exc:
+            logger.warning("offline confirmation check failed for %s: %s", self.unique_id, exc)
+            return False
+        return not is_live
 
     async def _wait_for_reconnect(self, reason: str) -> str:
         if self._stop_requested:
@@ -410,6 +440,7 @@ class TikTokCollector:
         client.add_listener(SubscribeEvent, self._on_subscribe)
         client.add_listener(RoomUserSeqEvent, self._on_room_user)
         client.add_listener(LinkMicBattleEvent, self._on_battle)
+        client.add_listener(LinkMicArmiesEvent, self._on_armies)
         return client
 
     async def _on_connect(self, event: ConnectEvent) -> None:
@@ -420,6 +451,12 @@ class TikTokCollector:
         self.steps["websocket"] = "done"
         self.steps["receiving"] = "active"
         self.room_id = self._client.room_id if self._client else None
+        try:
+            room_info = (self._client.room_info if self._client else None) or {}
+            owner = room_info.get("owner") or {}
+            self._owner_id = str(owner.get("id") or "")
+        except Exception:
+            logger.exception("failed to read room owner for %s", self.unique_id)
         if self.stats["connected_at"] is None:
             self.stats["connected_at"] = time.time()
         self._add_marker("reconnect" if reconnected else "connect", "再接続" if reconnected else "LIVE接続")
@@ -453,6 +490,25 @@ class TikTokCollector:
             "battle",
             {"text": f"{label} のEventを受信しました (action={event.action})"},
         )
+
+    async def _on_armies(self, event: LinkMicArmiesEvent) -> None:
+        if not self._owner_id:
+            if not self._owner_warned:
+                self._owner_warned = True
+                logger.warning(
+                    "room owner id unknown; battle score tracking disabled for %s", self.unique_id
+                )
+            return
+        own_score = None
+        for host_id, army in (event.armies or {}).items():
+            if str(host_id) == self._owner_id or getattr(army, "anchor_id_str", "") == self._owner_id:
+                own_score = army.host_score
+                break
+        if own_score is None or self._battles.get(event.battle_id) == own_score:
+            return
+        self._battles[event.battle_id] = own_score
+        self.stats["battle_points"] = sum(self._battles.values())
+        await self._broadcast({"type": "stats", "data": self.stats})
 
     async def _on_gift(self, event: GiftEvent) -> None:
         user = _user_payload(event.user)
@@ -617,6 +673,7 @@ class TikTokCollector:
             self.steps["websocket"] = "done"
             self.steps["receiving"] = "active"
             self.room_id = rng.randrange(10**18, 10**19)
+            self._owner_id = "sim_owner"
             self.stats["connected_at"] = time.time()
             self._add_marker("connect", "LIVE接続")
             if self.session_id is not None:
@@ -666,10 +723,21 @@ class TikTokCollector:
                     await self._on_follow(SimpleNamespace(user=user))
                 else:
                     await self._on_share(SimpleNamespace(user=user))
-                if tick % 90 == 0:
-                    await self._on_battle(
-                        SimpleNamespace(battle_id=rng.randrange(10**6), action=1)
-                    )
+                if tick % 60 == 0:
+                    battle_id = rng.randrange(10**6)
+                    await self._on_battle(SimpleNamespace(battle_id=battle_id, action=1))
+                    own_score = 0
+                    for _ in range(rng.randint(2, 4)):
+                        own_score += rng.randint(50, 400)
+                        await self._on_armies(
+                            SimpleNamespace(
+                                battle_id=battle_id,
+                                armies={
+                                    1111: SimpleNamespace(host_score=own_score, anchor_id_str="sim_owner"),
+                                    2222: SimpleNamespace(host_score=rng.randint(0, 800), anchor_id_str="rival"),
+                                },
+                            )
+                        )
         except asyncio.CancelledError:
             self.state = STATE_DISCONNECTED
             self.steps["receiving"] = "done"

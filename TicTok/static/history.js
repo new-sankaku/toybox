@@ -92,6 +92,60 @@ async function loadDashboard() {
   );
 }
 
+const RANKING_METRICS = [
+  { key: "likes", label: "Like", head: "Like数" },
+  { key: "comments", label: "Comment", head: "Comment数" },
+  { key: "gifts", label: "Gift (Diamonds)", head: "Diamonds" },
+  { key: "battles", label: "Battle Score", head: "Battle Score" },
+];
+let rankingsData = null;
+let activeMetric = "gifts";
+
+function initRankingTabs() {
+  const bar = document.getElementById("ranking-tabs");
+  RANKING_METRICS.forEach((metric) => {
+    const tab = document.createElement("button");
+    tab.className = `tab${metric.key === activeMetric ? " tab-active" : ""}`;
+    tab.textContent = metric.label;
+    tab.dataset.metric = metric.key;
+    tab.addEventListener("click", () => {
+      activeMetric = metric.key;
+      bar.querySelectorAll(".tab").forEach((t) => {
+        t.classList.toggle("tab-active", t.dataset.metric === activeMetric);
+      });
+      renderRanking();
+    });
+    bar.appendChild(tab);
+  });
+}
+
+function renderRanking() {
+  const metric = RANKING_METRICS.find((m) => m.key === activeMetric);
+  document.getElementById("ranking-value-head").textContent = metric.head;
+  const rows = ((rankingsData && rankingsData[activeMetric]) || []).filter((r) => r.value > 0);
+  renderTableRows(
+    "ranking-table",
+    "ranking-empty",
+    rows,
+    (r, rank) => [
+      String(rank),
+      `#${r.session_id}`,
+      `@${r.unique_id}`,
+      fmtDateTime(r.started_at),
+      r.ended_at ? fmtDuration(r.ended_at - r.started_at) : "収集中",
+      fmtNum(r.value),
+    ],
+    [0, 5],
+  );
+}
+
+async function loadRankings() {
+  const res = await fetch("/api/rankings");
+  if (!res.ok) return;
+  rankingsData = await res.json();
+  renderRanking();
+}
+
 function sessionActions(session, isActive) {
   const wrap = document.createElement("span");
   wrap.className = "row-actions";
@@ -235,12 +289,18 @@ document.getElementById("note-save").addEventListener("click", async () => {
 function handleMessage(msg) {
   if (msg.type === "monitors" || msg.type === "state") {
     loadSessions();
+    loadRankings();
   }
 }
 
 buildAggChart();
 detailChart = createTimelineChart(document.getElementById("detail-chart"));
+initRankingTabs();
 loadDashboard();
 loadSessions();
+loadRankings();
 connectWS(handleMessage);
-setInterval(loadDashboard, 30000);
+setInterval(() => {
+  loadDashboard();
+  loadRankings();
+}, 30000);
