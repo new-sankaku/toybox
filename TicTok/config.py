@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 def get_host() -> str:
@@ -39,4 +40,14 @@ def get_reconnect_base_delay() -> float:
 
 def get_reconnect_max_delay() -> float:
     return float(os.environ.get("TICTOK_RECONNECT_MAX_DELAY", "60.0"))
+
+
+def get_db_path() -> str:
+    return os.environ.get(
+        "TICTOK_DB_PATH", str(Path(__file__).resolve().parent / "tictok.db")
+    )
+
+
+def get_session_list_limit() -> int:
+    return int(os.environ.get("TICTOK_SESSION_LIST_LIMIT", "100"))
 

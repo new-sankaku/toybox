@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TicTok LIVE Monitor</title>
+  <title>TicTok LIVE Monitor — 監視</title>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
@@ -13,11 +13,16 @@
     <div class="header-mark">■</div>
     <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
     <div class="header-sub">TikTok LIVE Event Collector — YoRHa Interface</div>
+    <nav class="app-nav">
+      <a class="nav-link active" href="/">▌ 監視</a>
+      <a class="nav-link" href="/overview">▌ 全体監視</a>
+      <a class="nav-link" href="/history">▌ 履歴</a>
+    </nav>
   </header>
 
   <main class="layout">
     <section class="panel control-panel">
-      <h2 class="panel-title">▌ 接続設定</h2>
+      <h2 class="panel-title">▌ 監視対象の追加</h2>
       <div class="control-row">
         <label class="field">
           <span class="field-label">TikTok ID</span>
@@ -27,97 +32,116 @@
                    autocomplete="off" spellcheck="false" />
           </div>
         </label>
-        <button id="start-btn" class="btn btn-primary">収集開始</button>
-        <button id="stop-btn" class="btn" disabled>停止</button>
+        <button id="add-btn" class="btn btn-primary">監視開始</button>
       </div>
+      <div id="add-message" class="form-message"></div>
 
-      <div class="status-row">
-        <div id="spinner" class="spinner hidden" aria-hidden="true"><div class="spinner-core"></div></div>
-        <div class="status-text">
-          <span id="status-badge" class="badge badge-idle">IDLE</span>
-          <span id="status-message">待機中 — TikTok IDを入力して収集を開始してください。</span>
-        </div>
-      </div>
-
-      <ol id="steps" class="steps"></ol>
+      <div id="tab-bar" class="tab-bar"></div>
     </section>
 
-    <section class="panel stats-panel">
-      <h2 class="panel-title">▌ 統計</h2>
-      <div class="stats-grid">
-        <div class="stat"><span class="stat-label">視聴者数</span><span class="stat-value" id="stat-viewers">0</span></div>
-        <div class="stat"><span class="stat-label">累計視聴者</span><span class="stat-value" id="stat-total-viewers">0</span></div>
-        <div class="stat"><span class="stat-label">累計Like</span><span class="stat-value" id="stat-likes">0</span></div>
-        <div class="stat stat-accent"><span class="stat-label">Gift数</span><span class="stat-value" id="stat-gifts">0</span></div>
-        <div class="stat stat-accent"><span class="stat-label">Diamonds</span><span class="stat-value" id="stat-diamonds">0</span></div>
-        <div class="stat"><span class="stat-label">Comment数</span><span class="stat-value" id="stat-comments">0</span></div>
-        <div class="stat"><span class="stat-label">Follow</span><span class="stat-value" id="stat-follows">0</span></div>
-        <div class="stat"><span class="stat-label">Share</span><span class="stat-value" id="stat-shares">0</span></div>
-        <div class="stat"><span class="stat-label">入室数</span><span class="stat-value" id="stat-joins">0</span></div>
-        <div class="stat"><span class="stat-label">Battle</span><span class="stat-value" id="stat-battles">0</span></div>
-        <div class="stat"><span class="stat-label">受信Event</span><span class="stat-value" id="stat-events">0</span></div>
-        <div class="stat"><span class="stat-label">接続時間</span><span class="stat-value" id="stat-uptime">--:--:--</span></div>
-        <div class="stat"><span class="stat-label">Room ID</span><span class="stat-value stat-small" id="stat-room">-</span></div>
-      </div>
-    </section>
-
-    <section class="panel chart-panel">
-      <h2 class="panel-title">▌ Timeline</h2>
-      <div class="chart-note">凡例clickで表示系列を切替できます。縦線はLIVE状況のMarker（接続 / Battle / 終了）です。</div>
-      <div class="chart-wrap">
-        <canvas id="timeline-chart"></canvas>
-      </div>
-    </section>
-
-    <section class="panel result-panel">
-      <h2 class="panel-title">▌ Result 分析</h2>
-      <div class="result-totals" id="result-totals"></div>
-      <div class="result-tables">
-        <div class="result-block">
-          <h3 class="result-subtitle">■ UserごとのGift</h3>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead>
-                <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
-              </thead>
-              <tbody id="user-ranking"></tbody>
-            </table>
+    <div id="detail-area" class="detail-area hidden">
+      <section class="panel control-panel">
+        <h2 class="panel-title">▌ <span id="detail-title">監視状況</span></h2>
+        <div class="status-row">
+          <div id="spinner" class="spinner hidden" aria-hidden="true"><div class="spinner-core"></div></div>
+          <div class="status-text">
+            <span id="status-badge" class="badge badge-idle">IDLE</span>
+            <span id="status-message">待機中</span>
           </div>
-          <div id="user-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
-        </div>
-        <div class="result-block">
-          <h3 class="result-subtitle">■ Gift種類別</h3>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead>
-                <tr><th>#</th><th>Gift</th><th>個数</th><th>単価</th><th>Diamonds</th></tr>
-              </thead>
-              <tbody id="gift-ranking"></tbody>
-            </table>
+          <div class="monitor-actions">
+            <button id="stop-btn" class="btn" disabled>停止</button>
+            <button id="restart-btn" class="btn" disabled>再開</button>
+            <button id="remove-btn" class="btn btn-danger">監視解除</button>
           </div>
-          <div id="gift-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
         </div>
-      </div>
-    </section>
+        <ol id="steps" class="steps"></ol>
+      </section>
 
-    <section class="panel feed-panel">
-      <h2 class="panel-title">▌ Gift</h2>
-      <div id="gift-streak" class="gift-streak hidden"></div>
-      <ul id="gift-feed" class="feed"></ul>
-      <div id="gift-empty" class="feed-empty">GIFT受信待機中…</div>
-    </section>
+      <section class="panel stats-panel">
+        <h2 class="panel-title">▌ 統計</h2>
+        <div class="stats-grid">
+          <div class="stat"><span class="stat-label">視聴者数</span><span class="stat-value" id="stat-viewers">0</span></div>
+          <div class="stat"><span class="stat-label">累計視聴者</span><span class="stat-value" id="stat-total-viewers">0</span></div>
+          <div class="stat"><span class="stat-label">累計Like</span><span class="stat-value" id="stat-likes">0</span></div>
+          <div class="stat stat-accent"><span class="stat-label">Gift数</span><span class="stat-value" id="stat-gifts">0</span></div>
+          <div class="stat stat-accent"><span class="stat-label">Diamonds</span><span class="stat-value" id="stat-diamonds">0</span></div>
+          <div class="stat"><span class="stat-label">Comment数</span><span class="stat-value" id="stat-comments">0</span></div>
+          <div class="stat"><span class="stat-label">Follow</span><span class="stat-value" id="stat-follows">0</span></div>
+          <div class="stat"><span class="stat-label">Share</span><span class="stat-value" id="stat-shares">0</span></div>
+          <div class="stat"><span class="stat-label">入室数</span><span class="stat-value" id="stat-joins">0</span></div>
+          <div class="stat"><span class="stat-label">Battle</span><span class="stat-value" id="stat-battles">0</span></div>
+          <div class="stat"><span class="stat-label">受信Event</span><span class="stat-value" id="stat-events">0</span></div>
+          <div class="stat"><span class="stat-label">接続時間</span><span class="stat-value" id="stat-uptime">--:--:--</span></div>
+          <div class="stat stat-rate"><span class="stat-label">Gift/分</span><span class="stat-value" id="stat-rate-gifts">0</span></div>
+          <div class="stat stat-rate"><span class="stat-label">Diamonds/分</span><span class="stat-value" id="stat-rate-diamonds">0</span></div>
+          <div class="stat stat-rate"><span class="stat-label">Comment/分</span><span class="stat-value" id="stat-rate-comments">0</span></div>
+          <div class="stat stat-rate"><span class="stat-label">Like/分</span><span class="stat-value" id="stat-rate-likes">0</span></div>
+        </div>
+      </section>
 
-    <section class="panel feed-panel">
-      <h2 class="panel-title">▌ Comment</h2>
-      <ul id="comment-feed" class="feed"></ul>
-      <div id="comment-empty" class="feed-empty">COMMENT受信待機中…</div>
-    </section>
+      <section class="panel chart-panel">
+        <h2 class="panel-title">▌ Timeline</h2>
+        <div class="chart-note">凡例clickで表示系列を切替できます。縦線はLIVE状況のMarker（接続 / Battle / 終了）です。</div>
+        <div class="chart-wrap">
+          <canvas id="timeline-chart"></canvas>
+        </div>
+      </section>
 
-    <section class="panel feed-panel feed-panel-wide">
-      <h2 class="panel-title">▌ Event Log</h2>
-      <div id="event-filters" class="event-filters"></div>
-      <ul id="event-feed" class="feed"></ul>
-      <div id="event-empty" class="feed-empty">EVENT受信待機中…</div>
+      <section class="panel result-panel">
+        <h2 class="panel-title">▌ Result 分析</h2>
+        <div class="result-totals" id="result-totals"></div>
+        <div class="result-tables">
+          <div class="result-block">
+            <h3 class="result-subtitle">■ UserごとのGift</h3>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
+                </thead>
+                <tbody id="user-ranking"></tbody>
+              </table>
+            </div>
+            <div id="user-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
+          </div>
+          <div class="result-block">
+            <h3 class="result-subtitle">■ Gift種類別</h3>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th>#</th><th>Gift</th><th>個数</th><th>単価</th><th>Diamonds</th></tr>
+                </thead>
+                <tbody id="gift-ranking"></tbody>
+              </table>
+            </div>
+            <div id="gift-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel feed-panel">
+        <h2 class="panel-title">▌ Gift</h2>
+        <div id="gift-streak" class="gift-streak hidden"></div>
+        <ul id="gift-feed" class="feed"></ul>
+        <div id="gift-empty" class="feed-empty">GIFT受信待機中…</div>
+      </section>
+
+      <section class="panel feed-panel">
+        <h2 class="panel-title">▌ Comment</h2>
+        <ul id="comment-feed" class="feed"></ul>
+        <div id="comment-empty" class="feed-empty">COMMENT受信待機中…</div>
+      </section>
+
+      <section class="panel feed-panel feed-panel-wide">
+        <h2 class="panel-title">▌ Event Log</h2>
+        <div id="event-filters" class="event-filters"></div>
+        <ul id="event-feed" class="feed"></ul>
+        <div id="event-empty" class="feed-empty">EVENT受信待機中…</div>
+      </section>
+    </div>
+
+    <section id="no-monitor" class="panel">
+      <h2 class="panel-title">▌ 監視対象なし</h2>
+      <div class="feed-empty">TikTok IDを入力して「監視開始」を押してください。複数の配信者を同時に監視できます。</div>
     </section>
   </main>
 
@@ -128,6 +152,7 @@
   </footer>
 
   <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

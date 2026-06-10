@@ -78,6 +78,221 @@ body {
   text-transform: uppercase;
 }
 
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  font-size: 0.78rem;
+  letter-spacing: 0.15em;
+  color: var(--ink-muted);
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  padding: 0.3rem 0.9rem;
+}
+
+.nav-link:hover {
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+.nav-link.active {
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+.form-message {
+  font-size: 0.75rem;
+  color: var(--accent-deep);
+  margin-top: 0.4rem;
+  min-height: 1em;
+}
+
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+}
+
+.tab {
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  letter-spacing: 0.1em;
+  padding: 0.4rem 1rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--ink-strong);
+}
+
+.tab-active {
+  background: var(--invert-bg);
+  color: var(--invert-fg);
+}
+
+.tab-dot {
+  font-size: 0.6rem;
+}
+
+.dot-connected { color: var(--ok); }
+.dot-connecting,
+.dot-reconnecting { color: var(--accent-deep); }
+.dot-error { color: var(--warn); }
+.dot-idle,
+.dot-disconnected,
+.dot-ended { color: var(--ink-muted); }
+
+.detail-area {
+  display: contents;
+}
+
+.monitor-actions {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--invert-fg);
+}
+
+.btn-small {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.7rem;
+  text-decoration: none;
+  display: inline-block;
+  color: var(--ink-strong);
+}
+
+.row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
+  gap: 0.8rem;
+}
+
+.monitor-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--ink-strong);
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  padding: 0.7rem 0.8rem;
+  transition: background 0.15s;
+}
+
+.monitor-card:hover {
+  background: rgba(255, 250, 230, 0.35);
+}
+
+.monitor-card.card-live {
+  border-left: 4px solid var(--ok);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.4rem;
+}
+
+.card-name {
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+}
+
+.card-rows {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));
+  gap: 0.25rem 0.8rem;
+}
+
+.card-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.74rem;
+}
+
+.card-label {
+  color: var(--ink-muted);
+  letter-spacing: 0.1em;
+}
+
+.card-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.card-last {
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  border-top: 1px dashed var(--line);
+  padding-top: 0.3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-last-gift {
+  color: var(--accent-deep);
+}
+
+.chart-wrap-short {
+  block-size: clamp(11rem, 28vh, 17rem);
+  margin-bottom: 0.8rem;
+}
+
+.note-block {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.note-input {
+  font: inherit;
+  inline-size: 100%;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  color: var(--ink-strong);
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+}
+
+.note-input:focus {
+  outline: none;
+  background: rgba(255, 250, 230, 0.35);
+}
+
+.note-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
 .layout {
   flex: 1;
   display: grid;
@@ -335,6 +550,11 @@ body {
 
 .stat-accent {
   background: var(--invert-bg);
+}
+
+.stat-rate {
+  border-style: dashed;
+  background: rgba(255, 250, 230, 0.25);
 }
 
 .stat-accent .stat-label { color: rgba(216, 210, 188, 0.7); }

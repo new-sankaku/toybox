@@ -1,16 +1,21 @@
 import asyncio
+import csv
+import io
+import json
 import logging
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from collector import TikTokCollector
-from config import get_host, get_log_level, get_port
+from config import get_db_path, get_host, get_log_level, get_port, get_session_list_limit
+from manager import CollectorManager
+from storage import Storage
 
 logger = logging.getLogger("tictok.server")
 
@@ -51,13 +56,28 @@ class EventHub:
 
 
 hub = EventHub()
-collector = TikTokCollector(broadcast=hub.broadcast)
-app = FastAPI(title="TicTok LIVE Monitor")
+storage = Storage(get_db_path())
+storage.cleanup_stale_sessions()
+manager = CollectorManager(broadcast=hub.broadcast, storage=storage)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await manager.stop_all()
+    storage.close()
+
+
+app = FastAPI(title="TicTok LIVE Monitor", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-class StartRequest(BaseModel):
+class MonitorRequest(BaseModel):
     unique_id: str = Field(min_length=1, max_length=80)
+
+
+class NoteRequest(BaseModel):
+    note: str = Field(max_length=10000)
 
 
 def _normalize_unique_id(raw: str) -> str:
@@ -70,50 +90,172 @@ def _normalize_unique_id(raw: str) -> str:
     return unique_id
 
 
+def _get_collector(unique_id: str):
+    collector = manager.get(unique_id)
+    if collector is None:
+        raise HTTPException(status_code=404, detail=f"@{unique_id} は監視対象に存在しません。")
+    return collector
+
+
+def _get_session_or_404(session_id: int) -> dict:
+    session = storage.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} が見つかりません。")
+    return session
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
-@app.get("/api/status")
-async def status() -> dict:
-    return collector.snapshot()
+@app.get("/overview")
+async def overview_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "overview.html")
 
 
-@app.get("/api/timeline")
-async def timeline() -> dict:
-    return collector.timeline_snapshot()
+@app.get("/history")
+async def history_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "history.html")
 
 
-@app.get("/api/summary")
-async def summary() -> dict:
-    return collector.summary_snapshot()
+@app.get("/api/monitors")
+async def list_monitors() -> dict:
+    return {"monitors": manager.snapshots()}
 
 
-@app.post("/api/start")
-async def start(request: StartRequest) -> dict:
+@app.post("/api/monitors")
+async def add_monitor(request: MonitorRequest) -> dict:
     unique_id = _normalize_unique_id(request.unique_id)
     try:
-        await collector.start(unique_id)
+        collector = await manager.start(unique_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return collector.snapshot()
 
 
-@app.post("/api/stop")
-async def stop() -> dict:
+@app.post("/api/monitors/{unique_id}/stop")
+async def stop_monitor(unique_id: str) -> dict:
+    collector = _get_collector(unique_id)
     try:
-        await collector.stop()
+        await manager.stop(unique_id)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     return collector.snapshot()
+
+
+@app.delete("/api/monitors/{unique_id}")
+async def remove_monitor(unique_id: str) -> dict:
+    _get_collector(unique_id)
+    await manager.remove(unique_id)
+    return {"removed": unique_id}
+
+
+@app.get("/api/monitors/{unique_id}/timeline")
+async def monitor_timeline(unique_id: str) -> dict:
+    return _get_collector(unique_id).timeline_snapshot()
+
+
+@app.get("/api/monitors/{unique_id}/summary")
+async def monitor_summary(unique_id: str) -> dict:
+    return _get_collector(unique_id).summary_snapshot()
+
+
+@app.get("/api/sessions")
+async def list_sessions() -> dict:
+    return {
+        "sessions": storage.list_sessions(get_session_list_limit()),
+        "active_session_ids": sorted(manager.active_session_ids()),
+    }
+
+
+@app.get("/api/sessions/{session_id}")
+async def session_detail(session_id: int) -> dict:
+    session = _get_session_or_404(session_id)
+    timeline = storage.session_timeline(session_id)
+    timeline["bucket_seconds"] = session["bucket_seconds"]
+    return {
+        "session": session,
+        "timeline": timeline,
+        "summary": {
+            "totals": session["stats"],
+            **storage.session_summary(session_id),
+        },
+    }
+
+
+@app.patch("/api/sessions/{session_id}")
+async def update_session_note(session_id: int, request: NoteRequest) -> dict:
+    _get_session_or_404(session_id)
+    storage.set_note(session_id, request.note)
+    return {"id": session_id, "note": request.note}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: int) -> dict:
+    _get_session_or_404(session_id)
+    if session_id in manager.active_session_ids():
+        raise HTTPException(status_code=409, detail="収集中のSessionは削除できません。先に停止してください。")
+    storage.delete_session(session_id)
+    return {"deleted": session_id}
+
+
+@app.get("/api/sessions/{session_id}/export.csv")
+async def export_session_csv(session_id: int) -> Response:
+    session = _get_session_or_404(session_id)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(
+        ["time", "kind", "user_unique_id", "user_nickname", "text", "gift_name", "gift_count", "diamonds"]
+    )
+    for event in storage.iter_events(session_id):
+        writer.writerow(
+            [
+                event["time"],
+                event["kind"],
+                event["user_unique_id"] or "",
+                event["user_nickname"] or "",
+                event["text"] or "",
+                event["gift_name"] or "",
+                event["gift_count"] if event["gift_count"] is not None else "",
+                event["diamonds"] if event["diamonds"] is not None else "",
+            ]
+        )
+    filename = f"tictok_session_{session_id}_{session['unique_id']}.csv"
+    return Response(
+        content="\ufeff" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/sessions/{session_id}/export.json")
+async def export_session_json(session_id: int) -> Response:
+    session = _get_session_or_404(session_id)
+    payload = {
+        "session": session,
+        "summary": storage.session_summary(session_id),
+        "timeline": storage.session_timeline(session_id),
+        "events": storage.iter_events(session_id),
+    }
+    filename = f"tictok_session_{session_id}_{session['unique_id']}.json"
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, indent=2),
+        media_type="application/json; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/dashboard")
+async def aggregate_dashboard() -> dict:
+    return storage.aggregate_dashboard()
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await hub.register(websocket)
     try:
-        await websocket.send_json({"type": "state", "data": collector.snapshot()})
+        await websocket.send_json({"type": "monitors", "data": manager.snapshots()})
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:

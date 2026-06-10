@@ -79,6 +79,7 @@ testdata/
 
 TicTok/venv/
 TicTok/__pycache__/
+TicTok/*.db
 
 .claude/tool-history.jsonl
 tool-history.csv

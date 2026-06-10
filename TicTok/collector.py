@@ -77,6 +77,10 @@ def _empty_stats() -> dict:
         "battles": 0,
         "events_total": 0,
         "connected_at": None,
+        "rate_gifts": 0,
+        "rate_diamonds": 0,
+        "rate_comments": 0,
+        "rate_likes": 0,
     }
 
 
@@ -103,14 +107,16 @@ def _user_payload(user: Any) -> dict:
 
 
 class TikTokCollector:
-    def __init__(self, broadcast: Broadcast) -> None:
+    def __init__(self, unique_id: str, broadcast: Broadcast, storage) -> None:
         self._broadcast = broadcast
+        self._storage = storage
         self._client: Optional[TikTokLiveClient] = None
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
         self.state = STATE_IDLE
         self.error_message: Optional[str] = None
-        self.unique_id: Optional[str] = None
+        self.unique_id = unique_id
+        self.session_id: Optional[int] = None
         self.room_id: Optional[int] = None
         self.stats = _empty_stats()
         self.steps = {step: "pending" for step in STEP_IDS}
@@ -133,6 +139,7 @@ class TikTokCollector:
             "simulation": self._simulation,
             "error_message": self.error_message,
             "unique_id": self.unique_id,
+            "session_id": self.session_id,
             "room_id": self.room_id,
             "stats": self.stats,
             "steps": [
@@ -184,13 +191,12 @@ class TikTokCollector:
     def _add_marker(self, kind: str, label: str) -> None:
         self.markers.append({"time": time.time(), "kind": kind, "label": label})
 
-    async def start(self, unique_id: str) -> None:
+    async def start(self) -> None:
         async with self._lock:
             if self.state in ACTIVE_STATES:
                 raise RuntimeError("収集は既に実行中です。先に停止してください。")
             self._stop_requested = False
             self._reconnect_attempt = 0
-            self.unique_id = unique_id
             self.room_id = None
             self.error_message = None
             self.stats = _empty_stats()
@@ -203,13 +209,14 @@ class TikTokCollector:
             self.steps["request"] = "done"
             self.steps["live_check"] = "active"
             self.state = STATE_CONNECTING
+            self.session_id = self._storage.create_session(self.unique_id, self._bucket_seconds)
             if self._simulation:
                 self._client = None
-                self._task = asyncio.create_task(self._run_simulation(), name="tictok-simulator")
+                self._task = asyncio.create_task(self._run_simulation(), name=f"tictok-sim-{self.unique_id}")
             else:
-                self._client = self._build_client(unique_id)
-                self._task = asyncio.create_task(self._run(), name="tictok-collector")
-        logger.info("collection start requested: unique_id=%s", unique_id)
+                self._client = self._build_client(self.unique_id)
+                self._task = asyncio.create_task(self._run(), name=f"tictok-collector-{self.unique_id}")
+        logger.info("collection start requested: unique_id=%s session_id=%s", self.unique_id, self.session_id)
         await self._notify_state()
 
     async def stop(self) -> None:
@@ -246,8 +253,19 @@ class TikTokCollector:
         finally:
             if self.state in (STATE_DISCONNECTED, STATE_ENDED):
                 self.steps["receiving"] = "done"
+            self._persist_final()
             await self._notify_state()
             logger.info("collector finished: state=%s", self.state)
+
+    def _persist_final(self) -> None:
+        if self.session_id is None:
+            return
+        try:
+            self._storage.finalize_session(
+                self.session_id, self.state, self.stats, list(self.timeline), list(self.markers)
+            )
+        except Exception:
+            logger.exception("failed to persist session %s", self.session_id)
 
     async def _connect_once(self) -> Optional[str]:
         try:
@@ -345,6 +363,8 @@ class TikTokCollector:
         if self.stats["connected_at"] is None:
             self.stats["connected_at"] = time.time()
         self._add_marker("reconnect" if reconnected else "connect", "再接続" if reconnected else "LIVE接続")
+        if self.session_id is not None:
+            self._storage.update_session(self.session_id, STATE_CONNECTED, self.room_id)
         logger.info("connected: unique_id=%s room_id=%s", self.unique_id, self.room_id)
         await self._notify_state()
         await self._record(
@@ -483,7 +503,23 @@ class TikTokCollector:
         self.stats["viewers"] = event.m_total
         self.stats["total_viewers"] = event.total_user
         self._bucket()["viewers"] = event.m_total
+        self._update_rates()
         await self._broadcast({"type": "stats", "data": self.stats})
+
+    def _update_rates(self) -> None:
+        cutoff = time.time() - 60.0
+        gifts = diamonds = comments = likes = 0
+        for bucket in reversed(self.timeline):
+            if bucket["start"] + self._bucket_seconds <= cutoff:
+                break
+            gifts += bucket["gifts"]
+            diamonds += bucket["diamonds"]
+            comments += bucket["comments"]
+            likes += bucket["likes"]
+        self.stats["rate_gifts"] = gifts
+        self.stats["rate_diamonds"] = diamonds
+        self.stats["rate_comments"] = comments
+        self.stats["rate_likes"] = likes
 
     async def _run_simulation(self) -> None:
         rng = random.Random()
@@ -522,6 +558,8 @@ class TikTokCollector:
             self.room_id = rng.randrange(10**18, 10**19)
             self.stats["connected_at"] = time.time()
             self._add_marker("connect", "LIVE接続")
+            if self.session_id is not None:
+                self._storage.update_session(self.session_id, STATE_CONNECTED, self.room_id)
             logger.info("simulation connected: unique_id=%s", self.unique_id)
             await self._notify_state()
             await self._record(
@@ -575,6 +613,7 @@ class TikTokCollector:
             self.state = STATE_DISCONNECTED
             self.steps["receiving"] = "done"
             self._add_marker("disconnect", "切断")
+            self._persist_final()
             await self._notify_state()
             logger.info("simulation stopped: unique_id=%s", self.unique_id)
 
@@ -582,6 +621,12 @@ class TikTokCollector:
         self.stats["events_total"] += 1
         entry = {"kind": kind, "time": time.time(), **payload}
         self.recent_events.append(entry)
+        if self.session_id is not None:
+            try:
+                self._storage.add_event(self.session_id, entry)
+            except Exception:
+                logger.exception("failed to persist event for session %s", self.session_id)
+        self._update_rates()
         await self._broadcast({"type": "event", "data": entry})
         await self._broadcast({"type": "stats", "data": self.stats})
 
