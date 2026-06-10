@@ -26,6 +26,7 @@ const els = {
     follows: document.getElementById("stat-follows"),
     shares: document.getElementById("stat-shares"),
     joins: document.getElementById("stat-joins"),
+    battles: document.getElementById("stat-battles"),
     events_total: document.getElementById("stat-events"),
   },
   uptime: document.getElementById("stat-uptime"),
@@ -69,7 +70,8 @@ function applyState(state) {
   const info = STATUS_LABELS[state.status] || STATUS_LABELS.idle;
   els.statusBadge.textContent = info.badge;
   els.statusBadge.className = `badge ${info.cls}`;
-  els.statusMessage.textContent = state.error_message || info.message;
+  const simulationTag = state.simulation ? " [Simulation mode]" : "";
+  els.statusMessage.textContent = (state.error_message || info.message) + simulationTag;
 
   const busy = state.status === "connecting";
   els.spinner.classList.toggle("hidden", !busy);
@@ -88,6 +90,7 @@ function applyState(state) {
     clearFeeds();
     state.recent_events.forEach((ev) => addEvent(ev, true));
   }
+  refreshAnalytics();
 }
 
 function renderSteps(steps) {
@@ -127,10 +130,14 @@ function clearFeeds() {
   });
 }
 
-function addFeedItem(feed, ev, contentText, silent) {
+function addFeedItem(feed, ev, contentText, silent, filterable = false) {
   feed.empty.classList.add("hidden");
   const li = document.createElement("li");
   li.className = `feed-item feed-item-${ev.kind}`;
+  if (filterable) {
+    li.dataset.kind = ev.kind;
+    if (!activeKinds.has(ev.kind)) li.classList.add("filtered-out");
+  }
   if (silent) li.style.animation = "none";
 
   const meta = document.createElement("div");
@@ -157,7 +164,7 @@ function addEvent(ev, silent = false) {
     showStreak(ev);
     return;
   }
-  addFeedItem(els.feeds.event, ev, ev.text, silent);
+  addFeedItem(els.feeds.event, ev, ev.text, silent, true);
   if (ev.kind === "gift") {
     addFeedItem(els.feeds.gift, ev, ev.text, silent);
   } else if (ev.kind === "comment") {
@@ -247,4 +254,270 @@ els.uniqueId.addEventListener("keydown", (e) => {
   }
 });
 
+const EVENT_KINDS = ["gift", "comment", "like", "follow", "share", "join", "subscribe", "battle", "system"];
+const activeKinds = new Set(EVENT_KINDS);
+
+function initEventFilters() {
+  const container = document.getElementById("event-filters");
+  EVENT_KINDS.forEach((kind) => {
+    const label = document.createElement("label");
+    label.className = "filter-chip on";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = true;
+    input.addEventListener("change", () => {
+      if (input.checked) activeKinds.add(kind);
+      else activeKinds.delete(kind);
+      label.classList.toggle("on", input.checked);
+      els.feeds.event.list.querySelectorAll(`[data-kind="${kind}"]`).forEach((li) => {
+        li.classList.toggle("filtered-out", !input.checked);
+      });
+    });
+    const text = document.createElement("span");
+    text.textContent = kind;
+    label.append(input, text);
+    container.appendChild(label);
+  });
+}
+
+const CHART_DISPLAY_LIMIT = 720;
+let chart = null;
+let chartFirstStart = null;
+let chartBucketSeconds = 10;
+let chartMarkers = [];
+
+const markerPlugin = {
+  id: "tictokMarkers",
+  afterDatasetsDraw(c) {
+    if (!chartMarkers.length || chartFirstStart === null) return;
+    const { ctx, chartArea, scales } = c;
+    chartMarkers.forEach((m) => {
+      const idx = Math.round((m.time - chartFirstStart) / chartBucketSeconds);
+      if (idx < 0 || idx >= c.data.labels.length) return;
+      const x = scales.x.getPixelForValue(idx);
+      ctx.save();
+      ctx.strokeStyle = "#a4502f";
+      ctx.setLineDash([4, 3]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#a4502f";
+      ctx.font = "10px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(m.label, x + 3, chartArea.top + 10);
+      ctx.restore();
+    });
+  },
+};
+
+function initChart() {
+  const axisColor = "#6f6a59";
+  const gridColor = "rgba(143, 136, 113, 0.3)";
+  chart = new Chart(document.getElementById("timeline-chart"), {
+    type: "bar",
+    data: {
+      labels: [],
+      datasets: [
+        { label: "Gift数", type: "bar", data: [], backgroundColor: "#8e4f2f", yAxisID: "y" },
+        { label: "Diamonds", type: "bar", data: [], backgroundColor: "rgba(169, 110, 73, 0.55)", yAxisID: "y2" },
+        { label: "同接数", type: "line", data: [], borderColor: "#4d4a3f", backgroundColor: "#4d4a3f", borderWidth: 2, pointRadius: 0, tension: 0.25, yAxisID: "y2" },
+        { label: "Comment数", type: "line", data: [], borderColor: "#5d6e4e", backgroundColor: "#5d6e4e", borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: "y" },
+        { label: "Like数", type: "line", data: [], borderColor: "#9b8c52", backgroundColor: "#9b8c52", borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: "y", hidden: true },
+        { label: "入室数", type: "line", data: [], borderColor: "#7a7263", backgroundColor: "#7a7263", borderWidth: 1.5, pointRadius: 0, tension: 0.25, yAxisID: "y", hidden: true },
+        { label: "Follow", type: "line", data: [], borderColor: "#5d6e4e", backgroundColor: "#5d6e4e", borderDash: [4, 3], borderWidth: 1.5, pointRadius: 0, yAxisID: "y", hidden: true },
+        { label: "Share", type: "line", data: [], borderColor: "#a96e49", backgroundColor: "#a96e49", borderDash: [4, 3], borderWidth: 1.5, pointRadius: 0, yAxisID: "y", hidden: true },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          ticks: { color: axisColor, maxRotation: 0, autoSkip: true, maxTicksLimit: 12, font: { family: "monospace", size: 10 } },
+          grid: { color: gridColor },
+        },
+        y: {
+          position: "left",
+          beginAtZero: true,
+          title: { display: true, text: "件数", color: axisColor, font: { family: "monospace", size: 10 } },
+          ticks: { color: axisColor, font: { family: "monospace", size: 10 }, precision: 0 },
+          grid: { color: gridColor },
+        },
+        y2: {
+          position: "right",
+          beginAtZero: true,
+          title: { display: true, text: "Diamonds / 同接数", color: axisColor, font: { family: "monospace", size: 10 } },
+          ticks: { color: axisColor, font: { family: "monospace", size: 10 }, precision: 0 },
+          grid: { drawOnChartArea: false },
+        },
+      },
+      plugins: {
+        legend: {
+          labels: { color: "#4d4a3f", font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 },
+        },
+        tooltip: {
+          backgroundColor: "#4d4a3f",
+          titleColor: "#d8d2bc",
+          bodyColor: "#d8d2bc",
+          titleFont: { family: "monospace" },
+          bodyFont: { family: "monospace" },
+        },
+      },
+    },
+    plugins: [markerPlugin],
+  });
+}
+
+function updateTimeline(data) {
+  if (!chart) return;
+  chartBucketSeconds = data.bucket_seconds;
+  chartMarkers = data.markers || [];
+  const raw = data.buckets || [];
+  if (!raw.length) {
+    chartFirstStart = null;
+    chart.data.labels = [];
+    chart.data.datasets.forEach((ds) => { ds.data = []; });
+    chart.update();
+    return;
+  }
+  const size = data.bucket_seconds;
+  const byStart = new Map(raw.map((b) => [b.start, b]));
+  const last = raw[raw.length - 1].start;
+  let first = raw[0].start;
+  if ((last - first) / size + 1 > CHART_DISPLAY_LIMIT) {
+    first = last - (CHART_DISPLAY_LIMIT - 1) * size;
+  }
+  chartFirstStart = first;
+  const labels = [];
+  const series = { gifts: [], diamonds: [], viewers: [], comments: [], likes: [], joins: [], follows: [], shares: [] };
+  let viewers = raw[0].viewers;
+  for (let s = first; s <= last; s += size) {
+    const b = byStart.get(s);
+    if (b) viewers = b.viewers;
+    labels.push(fmtTime(s));
+    series.gifts.push(b ? b.gifts : 0);
+    series.diamonds.push(b ? b.diamonds : 0);
+    series.viewers.push(viewers);
+    series.comments.push(b ? b.comments : 0);
+    series.likes.push(b ? b.likes : 0);
+    series.joins.push(b ? b.joins : 0);
+    series.follows.push(b ? b.follows : 0);
+    series.shares.push(b ? b.shares : 0);
+  }
+  chart.data.labels = labels;
+  const order = ["gifts", "diamonds", "viewers", "comments", "likes", "joins", "follows", "shares"];
+  order.forEach((key, i) => { chart.data.datasets[i].data = series[key]; });
+  chart.update();
+}
+
+function applySummary(summary) {
+  const totals = summary.totals || {};
+  const chips = [
+    ["Gift合計", totals.gifts],
+    ["Diamonds合計", totals.diamonds],
+    ["Gift送信者数", totals.unique_gifters],
+    ["Comment合計", totals.comments],
+    ["Like合計", totals.likes_total],
+    ["Battle回数", totals.battles],
+  ];
+  const totalsEl = document.getElementById("result-totals");
+  totalsEl.innerHTML = "";
+  chips.forEach(([label, value]) => {
+    const chip = document.createElement("div");
+    chip.className = "result-chip";
+    const l = document.createElement("span");
+    l.className = "label";
+    l.textContent = label;
+    const v = document.createElement("span");
+    v.className = "value";
+    v.textContent = Number(value || 0).toLocaleString("ja-JP");
+    chip.append(l, v);
+    totalsEl.appendChild(chip);
+  });
+
+  renderRanking(
+    "user-ranking",
+    "user-ranking-empty",
+    summary.users || [],
+    (user, rank) => [
+      String(rank),
+      user.unique_id ? `${user.nickname} (@${user.unique_id})` : user.nickname,
+      Number(user.gifts).toLocaleString("ja-JP"),
+      Number(user.diamonds).toLocaleString("ja-JP"),
+      topItemText(user.items),
+    ],
+  );
+  renderRanking(
+    "gift-ranking",
+    "gift-ranking-empty",
+    summary.gifts || [],
+    (gift, rank) => [
+      String(rank),
+      gift.name,
+      Number(gift.count).toLocaleString("ja-JP"),
+      Number(gift.diamonds_each).toLocaleString("ja-JP"),
+      Number(gift.diamonds).toLocaleString("ja-JP"),
+    ],
+  );
+}
+
+function topItemText(items) {
+  const entries = Object.entries(items || {});
+  if (!entries.length) return "-";
+  entries.sort((a, b) => b[1] - a[1]);
+  const [name, count] = entries[0];
+  return `${name} x${count}`;
+}
+
+function renderRanking(bodyId, emptyId, rows, toCells) {
+  const tbody = document.getElementById(bodyId);
+  const empty = document.getElementById(emptyId);
+  tbody.innerHTML = "";
+  empty.classList.toggle("hidden", rows.length > 0);
+  rows.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    if (i === 0) tr.className = "rank-top";
+    toCells(row, i + 1).forEach((cell, col) => {
+      const td = document.createElement("td");
+      if (col === 0 || col === 2 || col === 3 || col === 4) td.className = "num";
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+let analyticsBusy = false;
+
+async function refreshAnalytics() {
+  if (analyticsBusy || !chart) return;
+  analyticsBusy = true;
+  try {
+    const [timelineRes, summaryRes] = await Promise.all([
+      fetch("/api/timeline"),
+      fetch("/api/summary"),
+    ]);
+    updateTimeline(await timelineRes.json());
+    applySummary(await summaryRes.json());
+  } catch (err) {
+    console.warn("analytics refresh failed", err);
+  } finally {
+    analyticsBusy = false;
+  }
+}
+
+setInterval(() => {
+  if (currentStatus === "connecting" || currentStatus === "connected") {
+    refreshAnalytics();
+  }
+}, 5000);
+
+initEventFilters();
+initChart();
 connectWebSocket();
+refreshAnalytics();

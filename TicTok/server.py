@@ -80,6 +80,16 @@ async def status() -> dict:
     return collector.snapshot()
 
 
+@app.get("/api/timeline")
+async def timeline() -> dict:
+    return collector.timeline_snapshot()
+
+
+@app.get("/api/summary")
+async def summary() -> dict:
+    return collector.summary_snapshot()
+
+
 @app.post("/api/start")
 async def start(request: StartRequest) -> dict:
     unique_id = _normalize_unique_id(request.unique_id)

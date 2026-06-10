@@ -54,9 +54,49 @@
         <div class="stat"><span class="stat-label">Follow</span><span class="stat-value" id="stat-follows">0</span></div>
         <div class="stat"><span class="stat-label">Share</span><span class="stat-value" id="stat-shares">0</span></div>
         <div class="stat"><span class="stat-label">入室数</span><span class="stat-value" id="stat-joins">0</span></div>
+        <div class="stat"><span class="stat-label">Battle</span><span class="stat-value" id="stat-battles">0</span></div>
         <div class="stat"><span class="stat-label">受信Event</span><span class="stat-value" id="stat-events">0</span></div>
         <div class="stat"><span class="stat-label">接続時間</span><span class="stat-value" id="stat-uptime">--:--:--</span></div>
         <div class="stat"><span class="stat-label">Room ID</span><span class="stat-value stat-small" id="stat-room">-</span></div>
+      </div>
+    </section>
+
+    <section class="panel chart-panel">
+      <h2 class="panel-title">▌ Timeline</h2>
+      <div class="chart-note">凡例clickで表示系列を切替できます。縦線はLIVE状況のMarker（接続 / Battle / 終了）です。</div>
+      <div class="chart-wrap">
+        <canvas id="timeline-chart"></canvas>
+      </div>
+    </section>
+
+    <section class="panel result-panel">
+      <h2 class="panel-title">▌ Result 分析</h2>
+      <div class="result-totals" id="result-totals"></div>
+      <div class="result-tables">
+        <div class="result-block">
+          <h3 class="result-subtitle">■ UserごとのGift</h3>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
+              </thead>
+              <tbody id="user-ranking"></tbody>
+            </table>
+          </div>
+          <div id="user-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
+        </div>
+        <div class="result-block">
+          <h3 class="result-subtitle">■ Gift種類別</h3>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>#</th><th>Gift</th><th>個数</th><th>単価</th><th>Diamonds</th></tr>
+              </thead>
+              <tbody id="gift-ranking"></tbody>
+            </table>
+          </div>
+          <div id="gift-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
+        </div>
       </div>
     </section>
 
@@ -75,6 +115,7 @@
 
     <section class="panel feed-panel feed-panel-wide">
       <h2 class="panel-title">▌ Event Log</h2>
+      <div id="event-filters" class="event-filters"></div>
       <ul id="event-feed" class="feed"></ul>
       <div id="event-empty" class="feed-empty">EVENT受信待機中…</div>
     </section>
@@ -86,6 +127,7 @@
     <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
   </footer>
 
+  <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>
