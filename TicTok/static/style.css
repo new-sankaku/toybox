@@ -294,6 +294,39 @@ body {
   letter-spacing: 0.1em;
 }
 
+.card-name-link {
+  color: var(--ink-strong);
+  text-decoration: none;
+}
+
+.card-name-link:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+}
+
+.card-video-wrap {
+  margin: 0.1rem 0 0.4rem;
+  background: #000;
+  border: 1px solid var(--line);
+}
+
+.card-video {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.card-controls {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+
+.card-controls .btn-small {
+  flex: 0 0 auto;
+}
+
 .card-rows {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 7.5rem), 1fr));

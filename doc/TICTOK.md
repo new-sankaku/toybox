@@ -83,7 +83,9 @@ cd TicTok && venv/bin/python tests/test_collector.py
 
 ### 全体監視 page（`/overview`）
 
-監視中の全配信者を 1 画面の card 一覧で表示します。card には状態・視聴者数・Gift数・Diamonds・分間 rate・接続時間・直近の Gift / Comment が realtime 表示され、click で該当配信者の詳細 tab に移動します。
+監視中の全配信者を 1 画面の card 一覧で表示します。card には状態・視聴者数・Gift数・Diamonds・分間 rate・接続時間・直近の Gift / Comment が realtime 表示され、配信者名のリンクで詳細 tab に移動します。
+
+**複数 LIVE の同時再生**: 各 card に録画開始/停止 button があり、録画中の配信は card 内に映像 preview を表示します。複数の配信者を同時に録画すれば、この page が複数 LIVE の同時視聴（video wall）になります。音声は各 card の「🔊/🔇」で個別に切替えます（初期は全て音声 OFF）。
 
 ### 設定 page（`/settings`）
 
