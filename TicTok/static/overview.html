@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 全体監視</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="app-header">
+    <div class="header-mark">■</div>
+    <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
+    <div class="header-sub">All Monitors Board — YoRHa Interface</div>
+    <nav class="app-nav">
+      <a class="nav-link" href="/">▌ 監視</a>
+      <a class="nav-link active" href="/overview">▌ 全体監視</a>
+      <a class="nav-link" href="/history">▌ 履歴</a>
+      <a class="nav-link" href="/settings">▌ 設定</a>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="panel chart-panel">
+      <h2 class="panel-title">▌ 全体監視 Board</h2>
+      <div class="chart-note">監視中の全配信者を一覧表示します。録画中の配信は映像を同時にpreview再生できます（音声は各cardの🔊で切替）。名前のリンクで詳細tabへ移動します。</div>
+      <div id="monitor-grid" class="monitor-grid"></div>
+      <div id="grid-empty" class="feed-empty">監視対象がありません。「監視」pageから追加してください。</div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="ws-indicator" class="ws-indicator">●</span>
+    <span id="ws-status">Server接続中…</span>
+    <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
+  </footer>
+
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/hls.min.js"></script>
+  <script src="/static/common.js"></script>
+  <script src="/static/overview.js"></script>
+</body>
+</html>

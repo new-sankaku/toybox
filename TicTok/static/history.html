@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 履歴</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <header class="app-header">
+    <div class="header-mark">■</div>
+    <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
+    <div class="header-sub">Session History &amp; Analytics — YoRHa Interface</div>
+    <nav class="app-nav">
+      <a class="nav-link" href="/">▌ 監視</a>
+      <a class="nav-link" href="/overview">▌ 全体監視</a>
+      <a class="nav-link active" href="/history">▌ 履歴</a>
+      <a class="nav-link" href="/settings">▌ 設定</a>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="panel result-panel">
+      <h2 class="panel-title">▌ 総合 Dashboard（全Session）</h2>
+      <div class="result-totals" id="agg-totals"></div>
+      <div class="chart-note">直近SessionごとのGift数とDiamondsの推移です。</div>
+      <div class="chart-wrap chart-wrap-short">
+        <canvas id="agg-chart"></canvas>
+      </div>
+      <div class="result-tables">
+        <div class="result-block">
+          <h3 class="result-subtitle">■ 配信者別の累計</h3>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>#</th><th>配信者</th><th>Session数</th><th>Gift数</th><th>Diamonds</th><th>Comment数</th></tr>
+              </thead>
+              <tbody id="streamer-ranking"></tbody>
+            </table>
+          </div>
+          <div id="streamer-ranking-empty" class="feed-empty">DATAなし</div>
+        </div>
+        <div class="result-block">
+          <h3 class="result-subtitle">■ 全Sessionの上位Gift送信User</h3>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>Session数</th></tr>
+              </thead>
+              <tbody id="gifter-ranking"></tbody>
+            </table>
+          </div>
+          <div id="gifter-ranking-empty" class="feed-empty">DATAなし</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel result-panel">
+      <h2 class="panel-title">▌ 配信 Ranking</h2>
+      <div class="chart-note">配信（Session）単位のRankingです。指標を切替できます。収集中の配信は現在値で反映されます。</div>
+      <div id="ranking-tabs" class="tab-bar"></div>
+      <div class="table-wrap">
+        <table class="result-table">
+          <thead>
+            <tr><th>#</th><th>Session</th><th>配信者</th><th>開始</th><th>時間</th><th id="ranking-value-head">値</th></tr>
+          </thead>
+          <tbody id="ranking-table"></tbody>
+        </table>
+      </div>
+      <div id="ranking-empty" class="feed-empty">DATAなし</div>
+    </section>
+
+    <section class="panel result-panel">
+      <h2 class="panel-title">▌ Session 履歴</h2>
+      <div class="table-wrap">
+        <table class="result-table">
+          <thead>
+            <tr><th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th><th>Gift</th><th>Diamonds</th><th>Memo</th><th>操作</th></tr>
+          </thead>
+          <tbody id="session-list"></tbody>
+        </table>
+      </div>
+      <div id="session-list-empty" class="feed-empty">保存されたSessionがありません。</div>
+    </section>
+
+    <div id="session-detail" class="detail-area hidden">
+      <section class="panel result-panel">
+        <h2 class="panel-title">▌ <span id="detail-title">Session 詳細</span></h2>
+        <div class="result-totals" id="detail-totals"></div>
+
+        <div class="note-block">
+          <h3 class="result-subtitle">■ Memo</h3>
+          <textarea id="note-input" class="note-input" rows="3" placeholder="このSessionに関するMemoを記入…"></textarea>
+          <div class="note-actions">
+            <button id="note-save" class="btn btn-primary">Memoを保存</button>
+            <span id="note-status" class="form-message"></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel result-panel">
+        <h2 class="panel-title">▌ 録画</h2>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
+            </thead>
+            <tbody id="recording-list"></tbody>
+          </table>
+        </div>
+        <div id="recording-list-empty" class="feed-empty">このSessionの録画はありません。</div>
+      </section>
+
+      <section class="panel chart-panel">
+        <h2 class="panel-title">▌ Session Timeline</h2>
+        <div class="chart-wrap">
+          <canvas id="detail-chart"></canvas>
+        </div>
+      </section>
+
+      <section class="panel result-panel">
+        <h2 class="panel-title">▌ Session Result 分析</h2>
+        <div class="result-tables">
+          <div class="result-block">
+            <h3 class="result-subtitle">■ UserごとのGift</h3>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
+                </thead>
+                <tbody id="user-ranking"></tbody>
+              </table>
+            </div>
+            <div id="user-ranking-empty" class="feed-empty">GIFTなし</div>
+          </div>
+          <div class="result-block">
+            <h3 class="result-subtitle">■ Gift種類別</h3>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th>#</th><th>Gift</th><th>個数</th><th>Diamonds</th></tr>
+                </thead>
+                <tbody id="gift-ranking"></tbody>
+              </table>
+            </div>
+            <div id="gift-ranking-empty" class="feed-empty">GIFTなし</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="app-footer">
+    <span id="ws-indicator" class="ws-indicator">●</span>
+    <span id="ws-status">Server接続中…</span>
+    <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
+  </footer>
+
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/common.js"></script>
+  <script src="/static/history.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+# Python packages
+TikTokLive==6.6.5
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# System dependency (not pip-installable):
+#   ffmpeg — required only for the LIVE video recording feature.
+#   Linux:   apt-get install ffmpeg   /   Windows: https://ffmpeg.org/download.html
+#   録画機能を使わない場合は不要です（未installでも他の機能は動作します）。
