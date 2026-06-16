@@ -18,10 +18,10 @@ STATE_FAILED = "failed"
 
 # Preference order (high -> low). TikTok quality keys vary per stream.
 QUALITY_PREFERENCE = ["origin", "uhd", "hd", "sd", "ld"]
-# Minimum bytes that must appear quickly to consider the connection healthy.
-HEALTHY_BYTES = 50_000
-HEALTHY_WAIT_SECONDS = 12
+HEALTHY_WAIT_SECONDS = 14
+MIN_SEGMENTS = 2
 MAX_LAUNCH_ATTEMPTS = 4
+SEGMENT_SECONDS = 2
 
 
 def ffmpeg_available() -> bool:
@@ -53,7 +53,6 @@ def extract_stream_url(room_info: dict, quality_pref: str = "") -> tuple[Optiona
             except (KeyError, TypeError):
                 continue
 
-    # Fallback: legacy flat flv pull url map.
     flv_map = stream_url.get("flv_pull_url") or {}
     if isinstance(flv_map, dict) and flv_map:
         for label in ("FULL_HD1", "HD1", "SD2", "SD1"):
@@ -66,7 +65,8 @@ def extract_stream_url(room_info: dict, quality_pref: str = "") -> tuple[Optiona
 
 
 class Recorder:
-    """Records a TikTok LIVE stream to disk via ffmpeg (stream copy, no re-encode)."""
+    """Records a TikTok LIVE stream to disk via ffmpeg as HLS (live-previewable),
+    then concatenates the segments into a single mp4 on stop. Stream copy only."""
 
     def __init__(self, unique_id: str, record_dir: str) -> None:
         self.unique_id = unique_id
@@ -76,22 +76,30 @@ class Recorder:
         self.error: Optional[str] = None
         self.started_at: Optional[float] = None
         self.ended_at: Optional[float] = None
-        self.ts_path: Optional[Path] = None
+        self.base: Optional[str] = None
+        self.hls_dir: Optional[Path] = None
+        self.playlist: Optional[Path] = None
         self.output_path: Optional[Path] = None
         self.recording_id: Optional[int] = None
         self._proc: Optional[asyncio.subprocess.Process] = None
         self._task: Optional[asyncio.Task] = None
         self._stop_requested = False
+        self._on_finalize = None
 
     @property
     def is_active(self) -> bool:
         return self.state in (STATE_RECORDING, STATE_STOPPING)
 
+    def _live_bytes(self) -> int:
+        if self.hls_dir is None or not self.hls_dir.exists():
+            return 0
+        return sum(f.stat().st_size for f in self.hls_dir.glob("seg*.ts"))
+
     def snapshot(self) -> dict:
-        size = 0
-        path = self.output_path or self.ts_path
-        if path is not None and path.exists():
-            size = path.stat().st_size
+        if self.output_path is not None and self.output_path.exists():
+            size = self.output_path.stat().st_size
+        else:
+            size = self._live_bytes()
         return {
             "state": self.state,
             "quality": self.quality,
@@ -101,7 +109,22 @@ class Recorder:
             "bytes": size,
             "filename": self.output_path.name if self.output_path else None,
             "recording_id": self.recording_id,
+            "live": self.state == STATE_RECORDING and self.playlist is not None and self.playlist.exists(),
         }
+
+    def live_file(self, filename: str) -> Optional[Path]:
+        """Return a path inside the active HLS dir for serving to the browser player."""
+        if self.hls_dir is None:
+            return None
+        # Only allow plain HLS playlist/segment filenames (no traversal, no logs).
+        if "/" in filename or "\\" in filename or ".." in filename:
+            return None
+        if not (filename.endswith(".m3u8") or filename.endswith(".ts")):
+            return None
+        candidate = (self.hls_dir / filename).resolve()
+        if self.hls_dir.resolve() not in candidate.parents:
+            return None
+        return candidate if candidate.is_file() else None
 
     async def start(self, room_info: dict, on_finalize=None) -> None:
         if self.is_active:
@@ -111,23 +134,27 @@ class Recorder:
         url, quality = extract_stream_url(room_info)
         if not url:
             raise RuntimeError("配信のstream URLを取得できませんでした（録画不可）。")
-        self._record_dir.mkdir(parents=True, exist_ok=True)
         stamp = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-        base = f"{self.unique_id}_{stamp}"
-        self.ts_path = self._record_dir / f"{base}.ts"
-        self.output_path = self.ts_path
+        self.base = f"{self.unique_id}_{stamp}"
+        self.hls_dir = self._record_dir / self.base
+        self.hls_dir.mkdir(parents=True, exist_ok=True)
+        self.playlist = self.hls_dir / "index.m3u8"
+        self.output_path = self._record_dir / f"{self.base}.mp4"
         self.quality = quality
         self.error = None
         self.started_at = time.time()
         self.ended_at = None
         self._stop_requested = False
-        self.state = STATE_RECORDING
         self._on_finalize = on_finalize
+        self.state = STATE_RECORDING
+        # output_path doesn't exist until finalize; reset so snapshot reports live bytes.
+        self.output_path = None
+        self._mp4_path = self._record_dir / f"{self.base}.mp4"
         self._task = asyncio.create_task(self._run(url), name=f"tictok-rec-{self.unique_id}")
-        logger.info("recording started: %s quality=%s -> %s", self.unique_id, quality, self.ts_path)
+        logger.info("recording started: %s quality=%s -> %s", self.unique_id, quality, self.hls_dir)
 
     async def _run(self, url: str) -> None:
-        log_path = self.ts_path.with_suffix(".ts.log")
+        log_path = self.hls_dir / "ffmpeg.log"
         attempt = 0
         try:
             while not self._stop_requested:
@@ -138,10 +165,9 @@ class Recorder:
                 if healthy:
                     await proc.wait()
                     break
-                # Unhealthy: corrupt/failed connection. Kill and retry.
                 await self._terminate(proc)
                 if self._stop_requested or attempt >= MAX_LAUNCH_ATTEMPTS:
-                    if not self._has_data():
+                    if not self._has_segments():
                         raise RuntimeError(
                             f"録画を開始できませんでした（{attempt}回試行、stream接続不良）。"
                         )
@@ -167,7 +193,12 @@ class Recorder:
                 "ffmpeg", "-nostdin", "-y", "-loglevel", "warning",
                 "-fflags", "+discardcorrupt", "-analyzeduration", "10M", "-probesize", "10M",
                 "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-                "-i", url, "-c", "copy", "-f", "mpegts", str(self.ts_path),
+                "-i", url,
+                "-map", "0:v:0", "-map", "0:a:0?", "-c", "copy",
+                "-f", "hls", "-hls_time", str(SEGMENT_SECONDS), "-hls_list_size", "0",
+                "-hls_flags", "append_list+independent_segments",
+                "-hls_segment_filename", str(self.hls_dir / "seg%05d.ts"),
+                str(self.playlist),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=log_file,
@@ -179,13 +210,15 @@ class Recorder:
         for _ in range(HEALTHY_WAIT_SECONDS):
             await asyncio.sleep(1)
             if proc.returncode is not None:
-                return self._has_data()
-            if self._has_data():
+                return self._has_segments()
+            if self._has_segments():
                 return True
-        return self._has_data()
+        return self._has_segments()
 
-    def _has_data(self) -> bool:
-        return self.ts_path is not None and self.ts_path.exists() and self.ts_path.stat().st_size > HEALTHY_BYTES
+    def _has_segments(self) -> bool:
+        if self.hls_dir is None or not self.hls_dir.exists():
+            return False
+        return len(list(self.hls_dir.glob("seg*.ts"))) >= MIN_SEGMENTS
 
     async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
         if proc.returncode is not None:
@@ -208,40 +241,36 @@ class Recorder:
 
     async def _finalize(self) -> None:
         self.ended_at = time.time()
-        if self.ts_path and self.ts_path.exists() and self.ts_path.stat().st_size > HEALTHY_BYTES:
-            mp4_path = self.ts_path.with_suffix(".mp4")
-            if await self._remux_to_mp4(self.ts_path, mp4_path):
+        if self._has_segments() and self.playlist and self.playlist.exists():
+            mp4_path = self._mp4_path
+            if await self._concat_to_mp4(self.playlist, mp4_path):
                 self.output_path = mp4_path
-                try:
-                    self.ts_path.unlink()
-                except OSError:
-                    logger.debug("could not remove intermediate ts", exc_info=True)
+                shutil.rmtree(self.hls_dir, ignore_errors=True)
+                if self.state != STATE_FAILED:
+                    self.state = STATE_COMPLETED
             else:
-                self.output_path = self.ts_path
-            if self.state != STATE_FAILED:
-                self.state = STATE_COMPLETED
+                # Keep HLS dir as the fallback artifact (still playable).
+                self.output_path = self.playlist
+                if self.state != STATE_FAILED:
+                    self.state = STATE_FAILED
+                    self.error = self.error or "mp4への変換に失敗しました（HLSは残っています）。"
         else:
             if self.state != STATE_FAILED:
                 self.state = STATE_FAILED
                 self.error = self.error or "録画Dataが空でした（stream接続不良）。"
-            if self.ts_path and self.ts_path.exists() and self.ts_path.stat().st_size == 0:
-                try:
-                    self.ts_path.unlink()
-                except OSError:
-                    pass
-        callback = getattr(self, "_on_finalize", None)
-        if callback is not None:
+            shutil.rmtree(self.hls_dir, ignore_errors=True)
+        if self._on_finalize is not None:
             try:
-                await callback(self)
+                await self._on_finalize(self)
             except Exception:
                 logger.exception("recording finalize callback failed for %s", self.unique_id)
         logger.info("recording finalized: %s state=%s file=%s", self.unique_id, self.state, self.output_path)
 
-    async def _remux_to_mp4(self, src: Path, dst: Path) -> bool:
+    async def _concat_to_mp4(self, playlist: Path, dst: Path) -> bool:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-                "-i", str(src), "-c", "copy", "-movflags", "+faststart", str(dst),
+                "-i", str(playlist), "-c", "copy", "-movflags", "+faststart", str(dst),
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -249,7 +278,7 @@ class Recorder:
             await proc.wait()
             return proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0
         except Exception:
-            logger.exception("remux to mp4 failed for %s", self.unique_id)
+            logger.exception("concat to mp4 failed for %s", self.unique_id)
             return False
 
     async def stop(self) -> None:

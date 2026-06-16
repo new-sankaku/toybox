@@ -204,6 +204,15 @@ async def stop_recording(unique_id: str) -> dict:
     return collector.snapshot()
 
 
+@app.get("/api/monitors/{unique_id}/record/live/{filename}")
+async def live_recording(unique_id: str, filename: str) -> FileResponse:
+    path = manager.live_recording_file(unique_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="ライブ録画が見つかりません。")
+    media_type = "application/vnd.apple.mpegurl" if path.suffix == ".m3u8" else "video/mp2t"
+    return FileResponse(path, media_type=media_type, headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/api/monitors/{unique_id}/timeline")
 async def monitor_timeline(unique_id: str) -> dict:
     return _get_collector(unique_id).timeline_snapshot()

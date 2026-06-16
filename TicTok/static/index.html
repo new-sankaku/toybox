@@ -60,6 +60,16 @@
           <span class="rec-dot">●</span>
           <span id="record-text">録画中</span>
         </div>
+        <div id="player-panel" class="player-panel hidden">
+          <div class="player-head">
+            <span class="player-title">● LIVE Preview（録画中の映像）</span>
+            <div class="player-controls">
+              <button id="audio-btn" class="btn btn-small" title="音声のオン/オフ">🔇 音声OFF</button>
+            </div>
+          </div>
+          <video id="live-video" class="live-video" playsinline muted autoplay></video>
+          <div id="player-message" class="player-message"></div>
+        </div>
         <ol id="steps" class="steps"></ol>
       </section>
 
@@ -159,6 +169,7 @@
   </footer>
 
   <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/hls.min.js"></script>
   <script src="/static/common.js"></script>
   <script src="/static/app.js"></script>
 </body>

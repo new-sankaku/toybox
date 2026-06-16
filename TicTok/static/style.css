@@ -199,6 +199,47 @@ body {
   animation: pulse 1.1s ease-in-out infinite;
 }
 
+.player-panel {
+  margin-top: 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--invert-bg);
+  padding: 0.5rem;
+}
+
+.player-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.player-title {
+  color: var(--invert-fg);
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+}
+
+.player-controls {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.live-video {
+  display: block;
+  inline-size: 100%;
+  max-block-size: 60vh;
+  background: #000;
+  border: 1px solid var(--line);
+}
+
+.player-message {
+  color: rgba(216, 210, 188, 0.75);
+  font-size: 0.72rem;
+  margin-top: 0.3rem;
+  min-height: 1em;
+}
+
 .btn-small {
   padding: 0.2rem 0.6rem;
   font-size: 0.7rem;

@@ -17,6 +17,10 @@ const els = {
   recordBtn: document.getElementById("record-btn"),
   recordStatus: document.getElementById("record-status"),
   recordText: document.getElementById("record-text"),
+  playerPanel: document.getElementById("player-panel"),
+  liveVideo: document.getElementById("live-video"),
+  audioBtn: document.getElementById("audio-btn"),
+  playerMessage: document.getElementById("player-message"),
   steps: document.getElementById("steps"),
   giftStreak: document.getElementById("gift-streak"),
   feeds: {
@@ -141,10 +145,81 @@ function applyState(state) {
   applyStats(state.stats || {});
 }
 
+let hlsInstance = null;
+let playerUid = null;
+let audioEnabled = false;
+
+function stopPlayer() {
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+  if (els.liveVideo) {
+    els.liveVideo.removeAttribute("src");
+    els.liveVideo.load();
+  }
+  playerUid = null;
+  els.playerPanel.classList.add("hidden");
+}
+
+function startPlayer(uid) {
+  if (playerUid === uid && hlsInstance) return;
+  stopPlayer();
+  playerUid = uid;
+  els.playerPanel.classList.remove("hidden");
+  els.playerMessage.textContent = "映像を読み込み中…（数秒の遅延があります）";
+  const src = `/api/monitors/${encodeURIComponent(uid)}/record/live/index.m3u8`;
+  const video = els.liveVideo;
+  video.muted = !audioEnabled;
+  updateAudioButton();
+  if (window.Hls && window.Hls.isSupported()) {
+    hlsInstance = new window.Hls({ liveSyncDuration: 4, lowLatencyMode: false });
+    hlsInstance.loadSource(src);
+    hlsInstance.attachMedia(video);
+    hlsInstance.on(window.Hls.Events.MANIFEST_PARSED, () => {
+      els.playerMessage.textContent = "";
+      video.play().catch(() => {});
+    });
+    hlsInstance.on(window.Hls.Events.ERROR, (_e, data) => {
+      if (data.fatal) {
+        // Segments may not be ready yet; retry shortly.
+        els.playerMessage.textContent = "映像を待機中…";
+        setTimeout(() => {
+          if (playerUid === uid && hlsInstance) hlsInstance.startLoad();
+        }, 2000);
+      }
+    });
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    video.src = src;
+    video.addEventListener("loadedmetadata", () => video.play().catch(() => {}));
+    els.playerMessage.textContent = "";
+  } else {
+    els.playerMessage.textContent = "このBrowserはHLS再生に対応していません。";
+  }
+}
+
+function updateAudioButton() {
+  els.audioBtn.textContent = audioEnabled ? "🔊 音声ON" : "🔇 音声OFF";
+  els.audioBtn.classList.toggle("btn-recording", audioEnabled);
+}
+
+els.audioBtn.addEventListener("click", () => {
+  audioEnabled = !audioEnabled;
+  els.liveVideo.muted = !audioEnabled;
+  if (audioEnabled) els.liveVideo.play().catch(() => {});
+  updateAudioButton();
+});
+
 function applyRecording(state) {
   const rec = state.recording;
   const recording = !!rec && (rec.state === "recording" || rec.state === "stopping");
   const connected = state.status === "connected";
+
+  if (rec && rec.live && rec.state === "recording") {
+    startPlayer(state.unique_id);
+  } else {
+    stopPlayer();
+  }
 
   if (!state.ffmpeg_available) {
     els.recordBtn.disabled = true;

@@ -78,6 +78,12 @@ class CollectorManager:
         await self.notify_monitors()
         return collector
 
+    def live_recording_file(self, unique_id: str, filename: str):
+        collector = self._collectors.get(unique_id)
+        if collector is None or collector.recorder is None:
+            return None
+        return collector.recorder.live_file(filename)
+
     async def stop_all(self) -> None:
         for collector in self._collectors.values():
             if collector.state in ACTIVE_STATES:

@@ -299,11 +299,12 @@ class TikTokCollector:
             raise RuntimeError("この配信のstream URLを取得できませんでした（録画不可）。")
         recorder = Recorder(self.unique_id, self._record_dir)
         await recorder.start(self._room_info, on_finalize=self._on_recording_finalized)
+        planned_name = f"{recorder.base}.mp4"
         recorder.recording_id = self._storage.create_recording(
             self.session_id,
             self.unique_id,
-            str(recorder.output_path),
-            recorder.output_path.name,
+            str(self._record_dir),
+            planned_name,
             recorder.quality,
             recorder.started_at,
         )
