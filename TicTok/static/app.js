@@ -14,6 +14,9 @@ const els = {
   stopBtn: document.getElementById("stop-btn"),
   restartBtn: document.getElementById("restart-btn"),
   removeBtn: document.getElementById("remove-btn"),
+  recordBtn: document.getElementById("record-btn"),
+  recordStatus: document.getElementById("record-status"),
+  recordText: document.getElementById("record-text"),
   steps: document.getElementById("steps"),
   giftStreak: document.getElementById("gift-streak"),
   feeds: {
@@ -133,8 +136,49 @@ function applyState(state) {
   els.stopBtn.disabled = !active;
   els.restartBtn.disabled = active;
 
+  applyRecording(state);
   renderSteps(state.steps || []);
   applyStats(state.stats || {});
+}
+
+function applyRecording(state) {
+  const rec = state.recording;
+  const recording = !!rec && (rec.state === "recording" || rec.state === "stopping");
+  const connected = state.status === "connected";
+
+  if (!state.ffmpeg_available) {
+    els.recordBtn.disabled = true;
+    els.recordBtn.textContent = "● 録画 (ffmpeg未install)";
+    els.recordBtn.title = "録画にはサーバーにffmpegのinstallが必要です。";
+  } else if (recording) {
+    els.recordBtn.disabled = rec.state === "stopping";
+    els.recordBtn.textContent = "■ 録画停止";
+    els.recordBtn.classList.add("btn-recording");
+    els.recordBtn.title = "";
+  } else {
+    els.recordBtn.disabled = !connected;
+    els.recordBtn.textContent = "● 録画開始";
+    els.recordBtn.classList.remove("btn-recording");
+    els.recordBtn.title = connected ? "" : "配信に接続中のみ録画できます。";
+  }
+
+  if (rec && (recording || rec.state === "completed" || rec.state === "failed")) {
+    els.recordStatus.classList.remove("hidden");
+    const mb = (rec.bytes / 1048576).toFixed(1);
+    if (recording) {
+      const secs = rec.started_at ? Math.floor(Date.now() / 1000 - rec.started_at) : 0;
+      els.recordText.textContent = `録画中 [${rec.quality || "-"}] ${fmtDuration(secs)} / ${mb} MB`;
+      els.recordStatus.classList.add("rec-active");
+    } else if (rec.state === "completed") {
+      els.recordStatus.classList.remove("rec-active");
+      els.recordText.textContent = `録画完了: ${rec.filename || "-"} (${mb} MB)`;
+    } else {
+      els.recordStatus.classList.remove("rec-active");
+      els.recordText.textContent = `録画失敗: ${rec.error || "不明なError"}`;
+    }
+  } else {
+    els.recordStatus.classList.add("hidden");
+  }
 }
 
 function renderSteps(steps) {
@@ -420,6 +464,28 @@ els.removeBtn.addEventListener("click", async () => {
     els.statusMessage.textContent = err.message;
   }
 });
+
+els.recordBtn.addEventListener("click", async () => {
+  if (!activeTab) return;
+  const monitor = monitors.get(activeTab);
+  const rec = monitor && monitor.snapshot && monitor.snapshot.recording;
+  const recording = rec && (rec.state === "recording" || rec.state === "stopping");
+  els.recordBtn.disabled = true;
+  try {
+    const action = recording ? "stop" : "start";
+    await apiSend("POST", `/api/monitors/${encodeURIComponent(activeTab)}/record/${action}`);
+  } catch (err) {
+    els.statusMessage.textContent = err.message;
+    els.recordBtn.disabled = false;
+  }
+});
+
+setInterval(() => {
+  if (!activeTab) return;
+  const monitor = monitors.get(activeTab);
+  const rec = monitor && monitor.snapshot && monitor.snapshot.recording;
+  if (rec && rec.state === "recording") applyRecording(monitor.snapshot);
+}, 1000);
 
 initEventFilters();
 const params = new URLSearchParams(location.search);

@@ -26,3 +26,9 @@ def get_timeline_limit() -> int:
 
 def get_simulation() -> bool:
     return os.environ.get("TICTOK_SIMULATION", "0").lower() in ("1", "true", "yes")
+
+
+def get_record_dir() -> str:
+    return os.environ.get(
+        "TICTOK_RECORD_DIR", str(Path(__file__).resolve().parent / "recordings")
+    )

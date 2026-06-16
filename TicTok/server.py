@@ -13,8 +13,9 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from config import get_db_path, get_host, get_log_level, get_port
+from config import get_db_path, get_host, get_log_level, get_port, get_record_dir
 from manager import CollectorManager
+from recorder import ffmpeg_available
 from settings import Settings
 from storage import Storage
 
@@ -22,7 +23,16 @@ logger = logging.getLogger("tictok.server")
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
+RECORD_DIR = Path(get_record_dir()).resolve()
 UNIQUE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.]{1,64}$")
+
+
+def _safe_recording_path(raw_path: str) -> Path:
+    """Resolve a stored recording path and ensure it stays under the record dir."""
+    path = Path(raw_path).resolve()
+    if RECORD_DIR not in path.parents and path != RECORD_DIR:
+        raise HTTPException(status_code=400, detail="不正な録画pathです。")
+    return path
 
 
 class EventHub:
@@ -60,6 +70,7 @@ class EventHub:
 hub = EventHub()
 storage = Storage(get_db_path())
 storage.cleanup_stale_sessions()
+storage.mark_stale_recordings()
 settings = Settings(storage)
 manager = CollectorManager(broadcast=hub.broadcast, storage=storage, settings=settings)
 
@@ -173,6 +184,26 @@ async def remove_monitor(unique_id: str) -> dict:
     return {"removed": unique_id}
 
 
+@app.post("/api/monitors/{unique_id}/record/start")
+async def start_recording(unique_id: str) -> dict:
+    collector = _get_collector(unique_id)
+    try:
+        await manager.start_recording(unique_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return collector.snapshot()
+
+
+@app.post("/api/monitors/{unique_id}/record/stop")
+async def stop_recording(unique_id: str) -> dict:
+    collector = _get_collector(unique_id)
+    try:
+        await manager.stop_recording(unique_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return collector.snapshot()
+
+
 @app.get("/api/monitors/{unique_id}/timeline")
 async def monitor_timeline(unique_id: str) -> dict:
     return _get_collector(unique_id).timeline_snapshot()
@@ -200,6 +231,7 @@ async def session_detail(session_id: int) -> dict:
         "session": session,
         "timeline": timeline,
         "summary": storage.session_summary(session_id),
+        "recordings": storage.recordings_for_session(session_id),
     }
 
 
@@ -265,6 +297,43 @@ async def export_session_json(session_id: int) -> Response:
         media_type="application/json; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@app.get("/api/recordings")
+async def list_recordings() -> dict:
+    return {
+        "ffmpeg_available": ffmpeg_available(),
+        "recordings": storage.list_recordings(settings.get("session_list_limit")),
+    }
+
+
+@app.get("/api/recordings/{recording_id}/download")
+async def download_recording(recording_id: int) -> FileResponse:
+    recording = storage.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    path = _safe_recording_path(recording["path"])
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="録画fileが存在しません（削除済みか録画失敗）。")
+    media_type = "video/mp4" if path.suffix == ".mp4" else "video/mp2t"
+    return FileResponse(path, media_type=media_type, filename=recording["filename"])
+
+
+@app.delete("/api/recordings/{recording_id}")
+async def delete_recording(recording_id: int) -> dict:
+    recording = storage.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if recording["status"] == "recording":
+        raise HTTPException(status_code=409, detail="録画中のfileは削除できません。先に停止してください。")
+    path = _safe_recording_path(recording["path"])
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"file削除に失敗しました: {exc}")
+    storage.delete_recording(recording_id)
+    return {"deleted": recording_id}
 
 
 @app.get("/api/dashboard")

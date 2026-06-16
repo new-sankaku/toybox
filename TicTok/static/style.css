@@ -171,6 +171,34 @@ body {
   color: var(--invert-fg);
 }
 
+.btn-recording {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: var(--invert-fg);
+}
+
+.record-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  font-size: 0.8rem;
+  color: var(--ink-strong);
+}
+
+.record-status .rec-dot {
+  color: var(--ink-muted);
+  font-size: 0.7rem;
+}
+
+.record-status.rec-active .rec-dot {
+  color: var(--warn);
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
 .btn-small {
   padding: 0.2rem 0.6rem;
   font-size: 0.7rem;

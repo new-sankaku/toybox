@@ -29,7 +29,8 @@ from TikTokLive.events import (
     SubscribeEvent,
 )
 
-from config import get_simulation, get_timeline_limit
+from config import get_record_dir, get_simulation, get_timeline_limit
+from recorder import Recorder, extract_stream_url, ffmpeg_available
 
 logger = logging.getLogger("tictok.collector")
 
@@ -129,12 +130,17 @@ class TikTokCollector:
         self._stop_requested = False
         self._reconnect_attempt = 0
         self._last_stats_sent = 0.0
+        self._record_dir = get_record_dir()
+        self._room_info: dict = {}
+        self.recorder: Optional[Recorder] = None
 
     def snapshot(self) -> dict:
         return {
             "status": self.state,
             "simulation": self._simulation,
             "error_message": self.error_message,
+            "ffmpeg_available": ffmpeg_available(),
+            "recording": self.recorder.snapshot() if self.recorder else None,
             "unique_id": self.unique_id,
             "session_id": self.session_id,
             "room_id": self.room_id,
@@ -267,6 +273,7 @@ class TikTokCollector:
                 self._prepare_session()
                 await self._notify_state()
                 outcome = await self._session_loop()
+                await self._stop_recording()
                 self._persist_final()
                 await self._notify_state()
                 if outcome in ("stopped", "fatal"):
@@ -274,12 +281,67 @@ class TikTokCollector:
                 logger.info("session closed (%s), resuming watch: unique_id=%s", outcome, self.unique_id)
         except asyncio.CancelledError:
             self.state = STATE_DISCONNECTED
+            await self._stop_recording()
             self._persist_final()
         finally:
             if self.state in (STATE_DISCONNECTED, STATE_ENDED):
                 self.steps["receiving"] = "done"
             await self._notify_state()
             logger.info("collector finished: state=%s", self.state)
+
+    async def start_recording(self) -> None:
+        if self.state != STATE_CONNECTED:
+            raise RuntimeError("録画は配信に接続中のみ開始できます。")
+        if self.recorder is not None and self.recorder.is_active:
+            raise RuntimeError("既に録画中です。")
+        url, quality = extract_stream_url(self._room_info)
+        if not url:
+            raise RuntimeError("この配信のstream URLを取得できませんでした（録画不可）。")
+        recorder = Recorder(self.unique_id, self._record_dir)
+        await recorder.start(self._room_info, on_finalize=self._on_recording_finalized)
+        recorder.recording_id = self._storage.create_recording(
+            self.session_id,
+            self.unique_id,
+            str(recorder.output_path),
+            recorder.output_path.name,
+            recorder.quality,
+            recorder.started_at,
+        )
+        self.recorder = recorder
+        self._add_marker("record", "録画開始")
+        await self._record("system", {"text": f"録画を開始しました（quality: {recorder.quality}）。"})
+        await self._notify_state()
+
+    async def stop_recording(self) -> None:
+        if self.recorder is None or not self.recorder.is_active:
+            raise RuntimeError("録画は実行されていません。")
+        await self.recorder.stop()
+        await self._notify_state()
+
+    async def _stop_recording(self) -> None:
+        if self.recorder is not None and self.recorder.is_active:
+            try:
+                await self.recorder.stop()
+            except Exception:
+                logger.exception("failed to stop recording for %s", self.unique_id)
+
+    async def _on_recording_finalized(self, recorder: Recorder) -> None:
+        if recorder.recording_id is not None:
+            snap = recorder.snapshot()
+            self._storage.update_recording(
+                recorder.recording_id,
+                recorder.state,
+                str(recorder.output_path) if recorder.output_path else "",
+                recorder.output_path.name if recorder.output_path else "",
+                recorder.ended_at,
+                snap["bytes"],
+                recorder.error,
+            )
+        await self._record(
+            "system",
+            {"text": f"録画が終了しました（{recorder.state}）。"},
+        )
+        await self._notify_state()
 
     async def _announce_waiting(self) -> None:
         self.state = STATE_WAITING
@@ -471,8 +533,8 @@ class TikTokCollector:
         self.steps["receiving"] = "active"
         self.room_id = self._client.room_id if self._client else None
         try:
-            room_info = (self._client.room_info if self._client else None) or {}
-            owner = room_info.get("owner") or {}
+            self._room_info = (self._client.room_info if self._client else None) or {}
+            owner = self._room_info.get("owner") or {}
             self._owner_id = str(owner.get("id") or "")
         except Exception:
             logger.exception("failed to read room owner for %s", self.unique_id)
@@ -487,6 +549,11 @@ class TikTokCollector:
             "system",
             {"text": f"@{self.unique_id} のLIVE (Room {self.room_id}) に接続しました。"},
         )
+        if not reconnected and self._settings.get("auto_record") and ffmpeg_available():
+            try:
+                await self.start_recording()
+            except Exception as exc:
+                logger.warning("auto-record failed to start for %s: %s", self.unique_id, exc)
 
     async def _on_disconnect(self, event: DisconnectEvent) -> None:
         if self.state == STATE_CONNECTED and self._stop_requested:

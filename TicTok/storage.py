@@ -56,6 +56,20 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS recordings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER REFERENCES sessions(id) ON DELETE SET NULL,
+    unique_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    quality TEXT,
+    status TEXT NOT NULL,
+    error TEXT,
+    started_at REAL NOT NULL,
+    ended_at REAL,
+    bytes INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_recordings_session ON recordings(session_id);
 """
 
 
@@ -315,6 +329,66 @@ class Storage:
                 (session_id,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def create_recording(self, session_id, unique_id, path, filename, quality, started_at) -> int:
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO recordings (session_id, unique_id, path, filename, quality, status, started_at)"
+                " VALUES (?, ?, ?, ?, ?, 'recording', ?)",
+                (session_id, unique_id, path, filename, quality, started_at),
+            )
+            self._conn.commit()
+            return cursor.lastrowid
+
+    def update_recording(self, recording_id, status, path, filename, ended_at, size, error=None) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE recordings SET status = ?, path = ?, filename = ?, ended_at = ?, bytes = ?, error = ?"
+                " WHERE id = ?",
+                (status, path, filename, ended_at, size, error, recording_id),
+            )
+            self._conn.commit()
+
+    def list_recordings(self, limit: int) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM recordings ORDER BY started_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recordings_for_session(self, session_id: int) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM recordings WHERE session_id = ? ORDER BY started_at", (session_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_recording(self, recording_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM recordings WHERE id = ?", (recording_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_recording(self, recording_id: int) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM recordings WHERE id = ?", (recording_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
+            self._conn.commit()
+        return dict(row)
+
+    def mark_stale_recordings(self) -> int:
+        """On startup, recordings left 'recording' are orphaned (process died)."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET status = 'interrupted' WHERE status = 'recording'"
+            )
+            self._conn.commit()
+        return cursor.rowcount
 
     def get_settings(self) -> dict:
         with self._lock:

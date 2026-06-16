@@ -50,10 +50,15 @@
             <span id="status-message">待機中</span>
           </div>
           <div class="monitor-actions">
+            <button id="record-btn" class="btn" disabled>● 録画開始</button>
             <button id="stop-btn" class="btn" disabled>停止</button>
             <button id="restart-btn" class="btn" disabled>再開</button>
             <button id="remove-btn" class="btn btn-danger">監視解除</button>
           </div>
+        </div>
+        <div id="record-status" class="record-status hidden">
+          <span class="rec-dot">●</span>
+          <span id="record-text">録画中</span>
         </div>
         <ol id="steps" class="steps"></ol>
       </section>

@@ -60,6 +60,15 @@ SETTING_DEFS = {
         "label": "画面再接続時に再送するEvent履歴件数",
         "note": "次のSession開始から適用されます。",
     },
+    "auto_record": {
+        "env": "TICTOK_AUTO_RECORD",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "配信開始時に自動録画する（0=しない / 1=する）",
+        "note": "1にすると、配信開始を検出するたびにffmpegで自動録画します（ffmpegが必要）。",
+    },
     "session_list_limit": {
         "env": "TICTOK_SESSION_LIST_LIMIT",
         "default": 100,

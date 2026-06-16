@@ -14,6 +14,9 @@ from collector import (
     STATE_WAITING,
     TikTokCollector,
 )
+import json as _json
+
+from recorder import extract_stream_url
 from settings import Settings
 from storage import Storage
 from TikTokLive.client.errors import UserNotFoundError, UserOfflineError
@@ -242,6 +245,51 @@ async def test_recovered_session_stats_shape():
     print("OK 回復Sessionのstats (finalizeと同じkey構成 + events由来の値)")
 
 
+def _room_info(qualities):
+    data = {q: {"main": {"flv": f"https://cdn/{q}.flv"}} for q in qualities}
+    return {
+        "owner": {"id": 1, "display_id": "x"},
+        "stream_url": {
+            "live_core_sdk_data": {"pull_data": {"stream_data": _json.dumps({"data": data})}}
+        },
+    }
+
+
+async def test_stream_url_quality_selection():
+    # prefers high quality, excludes audio-only 'ao'
+    url, q = extract_stream_url(_room_info(["ld", "hd", "ao"]))
+    assert q == "hd" and url == "https://cdn/hd.flv", (url, q)
+    url, q = extract_stream_url(_room_info(["sd", "ld"]))
+    assert q == "sd", q
+    url, q = extract_stream_url(_room_info(["ao"]))
+    assert q == "ao", q  # only option
+    # legacy flat flv_pull_url fallback
+    legacy = {"stream_url": {"flv_pull_url": {"HD1": "https://cdn/hd1.flv", "SD1": "https://cdn/sd1.flv"}}}
+    url, q = extract_stream_url(legacy)
+    assert url == "https://cdn/hd1.flv" and q == "hd1", (url, q)
+    # no stream url
+    url, q = extract_stream_url({"owner": {}})
+    assert url is None and q is None
+    print("OK stream URL抽出 (quality優先順位 / ao除外 / legacy fallback / 無効)")
+
+
+async def test_recording_metadata_persistence():
+    storage, _ = make_env()
+    sid = storage.create_session("rec", 10)
+    rid = storage.create_recording(sid, "rec", "/tmp/rec/x.ts", "x.ts", "hd", 100.0)
+    storage.update_recording(rid, "completed", "/tmp/rec/x.mp4", "x.mp4", 160.0, 5_000_000)
+    recs = storage.recordings_for_session(sid)
+    assert len(recs) == 1 and recs[0]["status"] == "completed" and recs[0]["bytes"] == 5_000_000
+    assert recs[0]["filename"] == "x.mp4"
+    # mark_stale: a still-'recording' row becomes 'interrupted'
+    rid2 = storage.create_recording(sid, "rec", "/tmp/rec/y.ts", "y.ts", "hd", 200.0)
+    assert storage.mark_stale_recordings() == 1
+    assert storage.get_recording(rid2)["status"] == "interrupted"
+    deleted = storage.delete_recording(rid)
+    assert deleted is not None and storage.get_recording(rid) is None
+    print("OK 録画metadataの永続化 (作成/更新/stale回収/削除)")
+
+
 async def main():
     collector_mod.asyncio.sleep = fast_sleep
     collector_mod.TikTokLiveClient = FakeProbeFactory
@@ -255,6 +303,8 @@ async def main():
     await test_event_persistence_columns()
     await test_likes_total_monotonic()
     await test_recovered_session_stats_shape()
+    await test_stream_url_quality_selection()
+    await test_recording_metadata_persistence()
     print("ALL TESTS PASSED")
 
 

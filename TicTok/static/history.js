@@ -267,9 +267,69 @@ async function showDetail(sessionId) {
     [0, 2, 3],
   );
 
+  renderRecordings(data.recordings || []);
+
   const detail = document.getElementById("session-detail");
   detail.classList.remove("hidden");
   detail.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+const RECORDING_STATUS = {
+  recording: "録画中",
+  completed: "完了",
+  failed: "失敗",
+  interrupted: "中断",
+  stopping: "停止中",
+};
+
+function recordingActions(rec) {
+  const wrap = document.createElement("span");
+  wrap.className = "row-actions";
+  const playable = rec.status === "completed" || rec.status === "interrupted";
+  if (playable) {
+    const dl = document.createElement("a");
+    dl.className = "btn btn-small";
+    dl.textContent = "DL";
+    dl.href = `/api/recordings/${rec.id}/download`;
+    wrap.appendChild(dl);
+  }
+  const del = document.createElement("button");
+  del.className = "btn btn-small btn-danger";
+  del.textContent = "削除";
+  del.disabled = rec.status === "recording";
+  del.addEventListener("click", async () => {
+    if (!window.confirm(`録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`)) return;
+    try {
+      await apiSend("DELETE", `/api/recordings/${rec.id}`);
+      if (currentSessionId !== null) showDetail(currentSessionId);
+    } catch (err) {
+      window.alert(err.message);
+    }
+  });
+  wrap.appendChild(del);
+  return wrap;
+}
+
+function renderRecordings(recordings) {
+  renderTableRows(
+    "recording-list",
+    "recording-list-empty",
+    recordings,
+    (rec) => {
+      const dur = rec.ended_at ? fmtDuration(rec.ended_at - rec.started_at) : "-";
+      const mb = `${(rec.bytes / 1048576).toFixed(1)} MB`;
+      return [
+        `#${rec.id}`,
+        rec.filename,
+        rec.quality || "-",
+        RECORDING_STATUS[rec.status] || rec.status,
+        dur,
+        mb,
+        recordingActions(rec),
+      ];
+    },
+    [0, 4, 5],
+  );
 }
 
 document.getElementById("note-save").addEventListener("click", async () => {

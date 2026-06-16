@@ -11,6 +11,7 @@ TicTok/
 ├── collector.py       TikTokLive client wrapper（Event収集・統計集計・自動再接続）
 ├── storage.py         SQLite保存層（WAL mode、Session/Event/Timeline/Memo）
 ├── settings.py        画面から変更できる設定（DB保存・env既定値）
+├── recorder.py        LIVE動画録画（ffmpeg stream copy、mpegts→mp4）
 ├── config.py          環境変数によるServer設定
 ├── requirements.txt   依存Package
 ├── run.bat            Windows用起動script
@@ -64,6 +65,8 @@ cd TicTok && venv/bin/python tests/test_collector.py
 | `TICTOK_TIMELINE_LIMIT` | `2160` | memory 上に保持する bucket 数の上限 |
 | `TICTOK_SESSION_LIST_LIMIT` | `100` | 履歴一覧の表示件数 |
 | `TICTOK_SIMULATION` | `0` | `1` で simulation mode（擬似 event を生成。LIVE 配信なしで画面確認可能） |
+| `TICTOK_RECORD_DIR` | `TicTok/recordings` | 録画 file の保存先 directory |
+| `TICTOK_AUTO_RECORD` | `0` | `1` で配信開始時に自動録画（設定pageで上書き可） |
 | `TICTOK_LIVE_CHECK_INTERVAL` | `60` | 常駐監視での配信開始の確認間隔（秒）※設定pageで上書き可 |
 | `TICTOK_RECONNECT_MAX_ATTEMPTS` | `10` | 自動再接続の最大試行回数 ※設定pageで上書き可 |
 | `TICTOK_RECONNECT_BASE_DELAY` | `2.0` | 再接続の初回待機秒数（exponential backoff） |
@@ -92,6 +95,16 @@ cd TicTok && venv/bin/python tests/test_collector.py
 - **Memo 機能**: Session ごとに自由記述の Memo を保存できます。
 - **Session 詳細**: 選択した Session の Timeline graph・Result 分析（User ごとの Gift / Gift 種類別）を表示します。
 - **配信 Ranking**: 配信（Session）単位の Ranking を Like / Comment / Gift（Diamonds）/ Battle Score の指標で切替表示します。収集中の配信は現在値で反映されます。
+
+## LIVE 動画の録画
+
+配信の映像を ffmpeg で録画し、保存・download できます。**ffmpeg の install が必要**です（未 install の場合は録画 button が無効化され、その旨が表示されます。他の機能は ffmpeg なしでも動作します）。
+
+- **手動録画**: 監視 page の配信詳細で「● 録画開始」/「■ 録画停止」。録画中は赤い indicator に画質・経過時間・file size を表示します。
+- **自動録画**: 設定 page の「配信開始時に自動録画」を ON にすると、配信開始の検出ごとに自動で録画を開始し、配信終了・停止時に finalize します。
+- **方式**: TikTok の HLS/FLV pull stream を `ffmpeg -c copy`（再 encode なし）で取得します。CPU 負荷は最小で、画質は source のまま。録画中は中断耐性のある MPEG-TS で書き込み、停止時に mp4 へ remux します（faststart 付き）。画質は配信が提供する中から高画質優先（origin > uhd > hd > sd > ld、音声のみは除外）で自動選択します。
+- **堅牢性**: stream 接続が一時的に不良（corrupt packet）な場合は自動で再試行します。録画は WebSocket 接続とは独立した ffmpeg process のため、event 収集の再接続に影響されません。
+- **保存・管理**: 録画は session に紐づけて DB に記録され、履歴 page の Session 詳細に「録画」一覧として表示されます。各録画は download / 削除できます（録画中は削除不可、削除は確認 dialog 付き）。Server を異常終了した場合、録画中だった row は次回起動時に「中断」として記録されます。
 
 ## 常駐監視 mode（自動追跡・自動収集）
 
@@ -131,6 +144,8 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | GET | `/api/monitors` | 監視中の全 collector の snapshot |
 | POST | `/api/monitors` | `{"unique_id": "..."}` で監視開始（既存 ID は再開） |
 | POST | `/api/monitors/{unique_id}/stop` | 収集停止 |
+| POST | `/api/monitors/{unique_id}/record/start` | 録画開始 |
+| POST | `/api/monitors/{unique_id}/record/stop` | 録画停止 |
 | DELETE | `/api/monitors/{unique_id}` | 監視対象から削除（Session は履歴に残る） |
 | GET | `/api/monitors/{unique_id}/timeline` | 収集中の時系列 bucket と marker |
 | GET | `/api/monitors/{unique_id}/summary` | 収集中の Result 分析 |
@@ -142,6 +157,9 @@ Chart.js による時系列 graph を表示します（横軸 = 時間、bucket 
 | GET | `/api/sessions/{id}/export.json` | Session 全体の JSON export |
 | GET | `/api/dashboard` | 総合 dashboard（全 Session 集計） |
 | GET | `/api/rankings` | 配信 Ranking（Like / Comment / Gift / Battle Score） |
+| GET | `/api/recordings` | 録画一覧（ffmpeg 利用可否を含む） |
+| GET | `/api/recordings/{id}/download` | 録画 file の download |
+| DELETE | `/api/recordings/{id}` | 録画の削除（file ＋ DB row） |
 | GET / PUT | `/api/settings` | 設定の取得・更新（DB に永続化） |
 | WS | `/ws` | monitors / state / stats / event の push 配信（`monitor` field で配信者を識別） |
 

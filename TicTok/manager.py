@@ -62,6 +62,22 @@ class CollectorManager:
         logger.info("monitor removed: %s (total=%d)", unique_id, len(self._collectors))
         await self.notify_monitors()
 
+    async def start_recording(self, unique_id: str) -> TikTokCollector:
+        collector = self._collectors.get(unique_id)
+        if collector is None:
+            raise KeyError(unique_id)
+        await collector.start_recording()
+        await self.notify_monitors()
+        return collector
+
+    async def stop_recording(self, unique_id: str) -> TikTokCollector:
+        collector = self._collectors.get(unique_id)
+        if collector is None:
+            raise KeyError(unique_id)
+        await collector.stop_recording()
+        await self.notify_monitors()
+        return collector
+
     async def stop_all(self) -> None:
         for collector in self._collectors.values():
             if collector.state in ACTIVE_STATES:
