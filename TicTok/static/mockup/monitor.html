@@ -248,6 +248,11 @@
     .a-feed .it.gift { border-left-color: var(--accent-deep); background: rgba(169,110,73,0.14); }
     .a-feed .it.battle { border-left-color: var(--warn); background: rgba(164,80,47,0.12); }
     .a-feed .it.follow { border-left-color: var(--ok); }
+    /* アイコン + 表示名/ID（表示名は変更可・@idで同定） */
+    .av { width:1.15rem; height:1.15rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.6rem; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; border:1px solid var(--line); }
+    .u { display:inline-flex; align-items:center; gap:0.3rem; vertical-align:middle; }
+    .u b { font-weight:600; }
+    .uid { color:var(--ink-muted); font-size:0.62rem; }
     .a-rank { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
     .a-rank th { position: sticky; top: 0; background: var(--invert-bg); color: var(--invert-fg); text-align: left; padding: 0.25rem 0.4rem; font-size: 0.62rem; }
     .a-rank td { padding: 0.22rem 0.4rem; border-top: 1px solid rgba(143,136,113,0.45); }
@@ -400,9 +405,9 @@
 
       <!-- 行2: 監視対象タブ（概況内包） -->
       <div class="a-tabs">
-        <button class="a-tab on"><span class="dot live">●</span> @kawaii_live <span class="mini">👁1.2k · 💎18.6k · ●REC</span></button>
-        <button class="a-tab"><span class="dot live">●</span> @music_room <span class="mini">👁840 · 💎4.2k</span></button>
-        <button class="a-tab"><span class="dot" style="color:var(--ink-muted)">●</span> @game_ch <span class="mini">待機中</span></button>
+        <button class="a-tab on"><span class="dot live">●</span><span class="av" style="width:0.95rem;height:0.95rem;">か</span> かわいいLIVE <span class="uid" style="color:var(--invert-fg);opacity:0.7;">@kawaii_live</span> <span class="mini">👁1.2k · 💎18.6k · ●REC</span></button>
+        <button class="a-tab"><span class="dot live">●</span><span class="av" style="width:0.95rem;height:0.95rem;">M</span> Music Room <span class="uid">@music_room</span> <span class="mini">👁840 · 💎4.2k</span></button>
+        <button class="a-tab"><span class="dot" style="color:var(--ink-muted)">●</span><span class="av" style="width:0.95rem;height:0.95rem;">G</span> Game Ch <span class="uid">@game_ch</span> <span class="mini">待機中</span></button>
       </div>
 
       <!-- 行3: 3カラム ダッシュボード -->
@@ -410,7 +415,7 @@
         <!-- 左: LIVE + 状態 + 操作 -->
         <div class="a-col">
           <div class="a-card" style="flex:0 0 auto;">
-            <h3>@kawaii_live <span class="badge connected">CONNECTED</span></h3>
+            <h3><span class="u"><span class="av">か</span><b>かわいいLIVE</b><span class="uid" style="color:rgba(216,210,188,0.7);">@kawaii_live</span></span> <span class="badge connected">CONNECTED</span></h3>
             <div class="a-video">● LIVE Preview <span class="rec">● REC 24:31 / 312MB</span></div>
             <div class="a-statusline">
               <span style="font-size:0.72rem;">接続時間 01:42:09 · simulation</span>
@@ -493,21 +498,21 @@
             </h3>
             <div class="body">
               <div class="a-feed" data-pane="feed-all">
-                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div>@whale_kun → Galaxy ×1 (1,000💎)</div>
-                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:55</span></div>@fan_01 → Rose ×10 (100💎)</div>
-                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:31</span></div>@nico → Finger Heart ×5 (25💎)</div>
-                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:39:50</span></div>@sora → Sunglasses ×2 (2💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span> → Galaxy ×1 (1,000💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:55</span></div><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span> → Rose ×10 (100💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:31</span></div><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span> → Finger Heart ×5 (25💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:39:50</span></div><span class="u"><span class="av">そ</span><b>そら</b><span class="uid">@sora</span></span> → Sunglasses ×2 (2💎)</div>
               </div>
               <div class="a-feed" data-pane="feed-comment" style="display:none;">
-                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:10</span></div>@user_a: かわいい！</div>
-                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:02</span></div>@user_b: 今日も配信ありがとう</div>
-                <div class="it"><div class="meta"><span>COMMENT</span><span>22:40:48</span></div>@user_c: 🎉🎉🎉</div>
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:10</span></div><span class="u"><span class="av">A</span><b>あいり</b><span class="uid">@user_a</span></span>: かわいい！</div>
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:02</span></div><span class="u"><span class="av">B</span><b>Bob</b><span class="uid">@user_b</span></span>: 今日も配信ありがとう</div>
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:40:48</span></div><span class="u"><span class="av">C</span><b>ちゃん</b><span class="uid">@user_c</span></span>: 🎉🎉🎉</div>
               </div>
               <div class="a-feed" data-pane="feed-event" style="display:none;">
-                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div>@whale_kun Galaxy ×1</div>
-                <div class="it follow"><div class="meta"><span>FOLLOW</span><span>22:40:59</span></div>@new_fan がフォロー</div>
-                <div class="it battle"><div class="meta"><span>BATTLE</span><span>22:40:30</span></div>Battle開始 vs @rival</div>
-                <div class="it"><div class="meta"><span>JOIN</span><span>22:40:12</span></div>@user_d が入室</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span> Galaxy ×1</div>
+                <div class="it follow"><div class="meta"><span>FOLLOW</span><span>22:40:59</span></div><span class="u"><span class="av">N</span><b>新規さん</b><span class="uid">@new_fan</span></span> がフォロー</div>
+                <div class="it battle"><div class="meta"><span>BATTLE</span><span>22:40:30</span></div>Battle開始 vs <span class="u"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span></div>
+                <div class="it"><div class="meta"><span>JOIN</span><span>22:40:12</span></div><span class="u"><span class="av">D</span><b>でぃー</b><span class="uid">@user_d</span></span> が入室</div>
               </div>
               <div data-pane="feed-battle" style="display:none;">
                 <div class="a-feed">
@@ -520,7 +525,7 @@
                       </span>
                       <b style="color:var(--warn);">9,800 敵陣</b>
                     </div>
-                    <div style="font-size:0.64rem;color:var(--ink-muted);">vs @rival_star · 結果 <b style="color:var(--ok);">WIN</b> · 実弾Gift 18件 / 上位 @whale_kun 6,400💎</div>
+                    <div style="font-size:0.64rem;color:var(--ink-muted);">vs <b>Rival Star</b> @rival_star · 結果 <b style="color:var(--ok);">WIN</b> · 実弾Gift 18件 / 上位 <span class="av" style="width:0.9rem;height:0.9rem;">W</span> Whale King 6,400💎</div>
                   </div>
                   <div class="it battle" style="border-left-width:4px;">
                     <div class="meta"><span>BATTLE #1 · チーム戦(2v2)</span><span>20:48:10〜 5:00</span></div>
@@ -538,11 +543,11 @@
               </div>
               <div data-pane="feed-rank" style="display:none;">
                 <table class="a-rank">
-                  <thead><tr><th>#</th><th>User</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+                  <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
                   <tbody>
-                    <tr><td>1</td><td>@whale_kun</td><td class="n">12</td><td class="n">9,400</td></tr>
-                    <tr><td>2</td><td>@fan_01</td><td class="n">48</td><td class="n">3,200</td></tr>
-                    <tr><td>3</td><td>@nico</td><td class="n">31</td><td class="n">1,150</td></tr>
+                    <tr><td>1</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">12</td><td class="n">9,400</td></tr>
+                    <tr><td>2</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">48</td><td class="n">3,200</td></tr>
+                    <tr><td>3</td><td><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span></td><td class="n">31</td><td class="n">1,150</td></tr>
                   </tbody>
                 </table>
               </div>

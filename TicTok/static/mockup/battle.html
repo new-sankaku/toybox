@@ -58,6 +58,9 @@
     .ctab td.side-opp { border-left:3px solid var(--warn); }
     .team { display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.64rem; margin-bottom:0.4rem; }
     .team .t { border:1px solid var(--line); padding:0.15rem 0.45rem; background:var(--sand-panel-muted); }
+    .av { width:1.15rem; height:1.15rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.6rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); vertical-align:middle; flex:0 0 auto; }
+    .u { display:inline-flex; align-items:center; gap:0.3rem; vertical-align:middle; }
+    .u b { font-weight:600; } .uid { color:var(--ink-muted); font-size:0.62rem; }
   </style>
 </head>
 <body>
@@ -81,6 +84,8 @@
         ・対戦相手 … なし<br>
         ・いつのBattleか … Event Logに「Battle #id を受信」とだけ表示<br>
         ・実弾で飛んだGift（誰がいくら）… なし<br>
+        ・送信者/貢献者のアイコン … なし（avatarは受信するが破棄）<br>
+        ・表示名と@idの区別 … unique_idのみで表示名(nickname)を併記せず<br>
         ・勝敗 … なし<br>
         ・Battleごとの個別表示 … なし（合算のみ）
       </div>
@@ -109,16 +114,16 @@
             <span class="bar"><span class="o" style="width:56%"></span><span class="e" style="width:44%"></span></span>
             <span class="opp">9,800 敵陣</span>
           </div>
-          <div class="vs">@kawaii_live <b>vs</b> @rival_star · 差 +2,600</div>
+          <div class="vs"><span class="u"><span class="av">か</span><b>かわいいLIVE</b><span class="uid">@kawaii_live</span></span> <b>vs</b> <span class="u"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span> · 差 +2,600</div>
           <table class="ctab">
-            <caption>実弾Gift貢献（自陣 / 敵陣・diamond換算）</caption>
+            <caption>実弾Gift貢献（自陣 / 敵陣・diamond換算・表示名/@idで識別）</caption>
             <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
             <tbody>
-              <tr><td class="side-own">自陣</td><td>@whale_kun</td><td class="n">3</td><td class="n">6,400</td></tr>
-              <tr><td class="side-own">自陣</td><td>@fan_01</td><td class="n">8</td><td class="n">3,500</td></tr>
-              <tr><td class="side-own">自陣</td><td>@nico</td><td class="n">5</td><td class="n">2,500</td></tr>
-              <tr><td class="side-opp">敵陣</td><td>@big_spender</td><td class="n">2</td><td class="n">7,000</td></tr>
-              <tr><td class="side-opp">敵陣</td><td>@rival_fan</td><td class="n">9</td><td class="n">2,800</td></tr>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">3</td><td class="n">6,400</td></tr>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">8</td><td class="n">3,500</td></tr>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span></td><td class="n">5</td><td class="n">2,500</td></tr>
+              <tr><td class="side-opp">敵陣</td><td><span class="u"><span class="av">B</span><b>Big Spender</b><span class="uid">@big_spender</span></span></td><td class="n">2</td><td class="n">7,000</td></tr>
+              <tr><td class="side-opp">敵陣</td><td><span class="u"><span class="av">R</span><b>りばる</b><span class="uid">@rival_fan</span></span></td><td class="n">9</td><td class="n">2,800</td></tr>
             </tbody>
           </table>
         </div>
@@ -139,17 +144,17 @@
             <span class="opp">9,900 敵チーム</span>
           </div>
           <div class="team">
-            <span class="t" style="border-left:3px solid var(--ok);">自: @kawaii_live 4,100 / @duo_chan 3,100</span>
-            <span class="t" style="border-left:3px solid var(--warn);">敵: @rivalA 5,200 / @rivalB 4,700</span>
+            <span class="t" style="border-left:3px solid var(--ok);">自: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">か</span>かわいいLIVE</span> 4,100 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">D</span>duo</span> 3,100</span>
+            <span class="t" style="border-left:3px solid var(--warn);">敵: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">A</span>rivalA</span> 5,200 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">B</span>rivalB</span> 4,700</span>
           </div>
           <table class="ctab">
-            <caption>実弾Gift貢献（上位・diamond換算）</caption>
+            <caption>実弾Gift貢献（上位・diamond換算・表示名/@idで識別）</caption>
             <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
             <tbody>
-              <tr><td class="side-own">自</td><td>@whale_kun</td><td class="n">2</td><td class="n">3,000</td></tr>
-              <tr><td class="side-own">自</td><td>@fan_01</td><td class="n">6</td><td class="n">2,400</td></tr>
-              <tr><td class="side-opp">敵</td><td>@enemy_whale</td><td class="n">3</td><td class="n">6,000</td></tr>
-              <tr><td class="side-opp">敵</td><td>@enemy_fan</td><td class="n">7</td><td class="n">2,100</td></tr>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">2</td><td class="n">3,000</td></tr>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">6</td><td class="n">2,400</td></tr>
+              <tr><td class="side-opp">敵</td><td><span class="u"><span class="av">E</span><b>Enemy Whale</b><span class="uid">@enemy_whale</span></span></td><td class="n">3</td><td class="n">6,000</td></tr>
+              <tr><td class="side-opp">敵</td><td><span class="u"><span class="av">え</span><b>えねみー</b><span class="uid">@enemy_fan</span></span></td><td class="n">7</td><td class="n">2,100</td></tr>
             </tbody>
           </table>
         </div>

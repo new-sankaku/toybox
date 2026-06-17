@@ -73,7 +73,10 @@
     .a-tile { border:1px solid var(--line); background:var(--sand-panel); display:flex; flex-direction:column; }
     .a-tile.live { border-left:3px solid var(--ok); }
     .a-tile .th { display:flex; align-items:center; gap:0.4rem; justify-content:space-between; padding:0.3rem 0.5rem; background:var(--invert-bg); }
-    .a-tile .th a { color:var(--invert-fg); text-decoration:none; font-size:0.8rem; letter-spacing:0.06em; }
+    .a-tile .th a { color:var(--invert-fg); text-decoration:none; font-size:0.78rem; letter-spacing:0.04em; display:inline-flex; align-items:center; gap:0.3rem; min-width:0; }
+    .a-tile .th a .nm { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .a-tile .th a .uid { font-size:0.58rem; opacity:0.65; }
+    .av { width:1.05rem; height:1.05rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.58rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); flex:0 0 auto; }
     .a-tile .th .rec { color:var(--warn); font-size:0.62rem; }
     /* スマホLIVEは縦長(9:16)。高さ固定で中央寄せ */
     .a-tile .vid { background:#000; aspect-ratio:9/16; height:13rem; width:auto; max-width:100%; margin:0 auto; display:flex; align-items:center; justify-content:center; color:rgba(216,210,188,0.55); font-size:0.62rem; }
@@ -173,7 +176,7 @@
       <!-- 高密度タイル -->
       <div class="a-tiles">
         <div class="a-tile live">
-          <div class="th"><a href="#">@kawaii_live</a><span><span class="rec">● REC</span> <span class="badge connected">LIVE</span></span></div>
+          <div class="th"><a href="#"><span class="av">か</span><span class="nm">かわいいLIVE <span class="uid">@kawaii_live</span></span></a><span><span class="rec">● REC</span> <span class="badge connected">LIVE</span></span></div>
           <div class="vid">● Preview</div>
           <div class="a-kpi">
             <div><span class="l">👁</span><span class="v">1,284</span></div>
@@ -183,12 +186,12 @@
             <div><span class="l">Cmt/分</span><span class="v">31</span></div>
             <div><span class="l">接続</span><span class="v">1:42</span></div>
           </div>
-          <div class="last">GIFT: @whale_kun Galaxy ×1</div>
+          <div class="last">GIFT: Whale King (@whale_kun) Galaxy ×1</div>
           <div class="ctl"><button class="rec">■ 録画停止</button><button>🔇</button></div>
         </div>
 
         <div class="a-tile live">
-          <div class="th"><a href="#">@music_room</a><span class="badge connected">LIVE</span></div>
+          <div class="th"><a href="#"><span class="av">M</span><span class="nm">Music Room <span class="uid">@music_room</span></span></a><span class="badge connected">LIVE</span></div>
           <div class="vid">（録画停止中）</div>
           <div class="a-kpi">
             <div><span class="l">👁</span><span class="v">840</span></div>
@@ -203,7 +206,7 @@
         </div>
 
         <div class="a-tile">
-          <div class="th"><a href="#">@game_ch</a><span class="badge idle">IDLE</span></div>
+          <div class="th"><a href="#"><span class="av">G</span><span class="nm">Game Ch <span class="uid">@game_ch</span></span></a><span class="badge idle">IDLE</span></div>
           <div class="vid">未接続</div>
           <div class="a-kpi">
             <div><span class="l">👁</span><span class="v">-</span></div>

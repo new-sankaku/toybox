@@ -36,6 +36,16 @@
 
 **結論**: ご要望（自陣/敵陣、個人戦/チーム戦、相手、時刻、実弾Gift、勝敗、個別表示）はすべて **新規データ収集なしで実装可能**です。必要なのは collector の保持構造をbattle_idごとに変更し、破棄しているfieldを拾うことと、保存（storageにbattleテーブル追加）です。本回はモックのみ。
 
+## 1.6 ユーザーのアイコン（avatar）と「ID ≠ 表示名」
+
+- **アイコンは取得可能**: `User.avatar_thumb / avatar_medium / avatar_large`（`ImageModel.m_urls` = CDN URL配列）。Gift送信者・Comment・入室者・**Battle貢献者**(`BattleUserArmy.avatar_thumb`)など、全ユーザーで取得できます。現状 `collector._user_payload`（collector.py:97）は **unique_id と nickname だけを抽出しavatarを破棄**しています。
+- **ID と表示名は別物**:
+  - `unique_id` … @ハンドル（一意・安定。**同定に使うべきキー**）
+  - `nick_name` … 表示名（任意に変更可・他人と重複し得る）
+  - `id`（数値）/ `sec_uid` … 内部の安定ID
+  - → UIは **「表示名＋@id」を併記**し、集計・名寄せは unique_id（または数値id）で行う方針とします。モック各所（Gift/Comment/Ranking/Battle貢献者/配信者）に反映済み。
+- **実装上の注意**: avatarのCDN URLは**有効期限切れ/ホットリンク制限**の可能性があるため、本実装では取得時刻での表示（必要なら自前proxy/cache）を検討します。Fallbackは設けず（方針）、URL不在時はイニシャル表示などの確定仕様にします。
+
 ## 2. 方針と対応
 
 | user方針 | 現状の課題 | 案での対応 |
