@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok 履歴 — 画面デザイン案 (Before / After)</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#4d4a3f; --ink-strong:#3b382f; --ink-muted:#6f6a59; --line:#8f8871;
+      --accent:#a96e49; --accent-deep:#8e4f2f; --invert-bg:#4d4a3f; --invert-fg:#d8d2bc;
+      --ok:#5d6e4e; --warn:#a4502f; --shadow:rgba(59,56,47,0.35);
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { background: radial-gradient(ellipse at 50% -20%, rgba(255,250,230,0.25), transparent 60%), var(--sand-bg); color:var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.04em; }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.6rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.2em; font-size:0.8rem; }
+    .mock-switch .note { font-size:0.7rem; color:rgba(216,210,188,0.7); }
+    .mock-btn { font:inherit; cursor:pointer; padding:0.3rem 1rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); letter-spacing:0.15em; }
+    .mock-btn.on { background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep); }
+    .mock-view { display:none; } .mock-view.on { display:block; }
+
+    .panel { background:var(--sand-panel); border:1px solid var(--line); box-shadow:0.35rem 0.35rem 0 var(--shadow); padding:0.9rem 1rem 1rem; margin-bottom:1rem; }
+    .panel-title { margin:0 0 0.8rem; font-size:0.85rem; font-weight:600; color:var(--invert-fg); background:var(--invert-bg); padding:0.35rem 0.6rem; letter-spacing:0.15em; }
+    table.t { width:100%; border-collapse:collapse; font-size:0.74rem; }
+    table.t th { background:var(--invert-bg); color:var(--invert-fg); text-align:left; padding:0.35rem 0.6rem; font-size:0.66rem; position:sticky; top:0; }
+    table.t td { padding:0.3rem 0.6rem; border-top:1px solid rgba(143,136,113,0.45); }
+    table.t td.n, table.t th.n { text-align:right; font-variant-numeric:tabular-nums; }
+
+    /* ---- common topbar/footer (After) ---- */
+    .a-topbar { display:flex; align-items:center; gap:0.8rem; flex-wrap:wrap; padding:0.35rem 1rem; border-bottom:1px solid var(--line); background:linear-gradient(to bottom,var(--sand-bg-deep),transparent); }
+    .a-brand { display:flex; align-items:baseline; gap:0.4rem; }
+    .a-brand .m { color:var(--ink-strong); letter-spacing:0.3em; font-size:0.7rem; } .a-brand b { color:var(--ink-strong); font-size:0.9rem; letter-spacing:0.18em; }
+    .a-nav { display:flex; gap:0.3rem; }
+    .a-nav a { text-decoration:none; font-size:0.72rem; letter-spacing:0.12em; color:var(--ink-muted); border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.2rem 0.7rem; }
+    .a-nav a.active { background:var(--invert-bg); color:var(--invert-fg); }
+    .a-ws { margin-left:auto; display:flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:var(--ink-muted); } .a-ws .dot { color:var(--ok); }
+    .a-footer { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 1rem; border-top:1px solid var(--line); background:var(--sand-bg-deep); font-size:0.68rem; color:var(--ink-muted); } .a-footer .right { margin-left:auto; letter-spacing:0.3em; text-transform:uppercase; }
+
+    /* ============ BEFORE ============ */
+    .b-header { padding:1.2rem 5% 0.8rem; border-bottom:2px solid var(--line); background:linear-gradient(to bottom,var(--sand-bg-deep),transparent); }
+    .b-header h1 { margin:0.2rem 0 0; font-size:1.6rem; font-weight:600; color:var(--ink-strong); }
+    .b-sub { margin-top:0.2rem; font-size:0.72rem; color:var(--ink-muted); text-transform:uppercase; }
+    .b-nav { display:flex; gap:0.5rem; margin-top:0.7rem; flex-wrap:wrap; }
+    .b-nav a { text-decoration:none; font-size:0.78rem; color:var(--ink-muted); border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.3rem 0.9rem; }
+    .b-nav a.active { background:var(--invert-bg); color:var(--invert-fg); }
+    .b-wrap { padding:1rem 5%; }
+    .b-chips { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.8rem; }
+    .b-chip { border:1px solid var(--line); background:var(--invert-bg); color:var(--invert-fg); padding:0.45rem 0.7rem; display:flex; flex-direction:column; gap:0.2rem; flex:1 1 10rem; }
+    .b-chip .l { font-size:0.62rem; color:rgba(216,210,188,0.7); } .b-chip .v { font-size:1.1rem; }
+    .b-fake-chart { height:11rem; background:var(--sand-panel-muted); border:1px solid var(--line); display:flex; align-items:flex-end; gap:3px; padding:0.6rem; margin-bottom:0.8rem; }
+    .b-fake-chart i { flex:1; background:var(--accent); opacity:0.7; }
+
+    /* ============ AFTER: master-detail ============ */
+    .a-app { display:grid; grid-template-rows:auto auto 1fr auto; min-height:calc(100vh - 2.6rem); }
+    .a-kpibar { display:flex; gap:0.4rem; flex-wrap:wrap; padding:0.4rem 1rem; background:var(--sand-bg-deep); border-bottom:1px solid var(--line); }
+    .a-chip { display:flex; flex-direction:column; gap:0.1rem; border:1px solid var(--line); background:var(--invert-bg); color:var(--invert-fg); padding:0.25rem 0.6rem; min-width:6rem; }
+    .a-chip .l { font-size:0.58rem; letter-spacing:0.1em; color:rgba(216,210,188,0.7); } .a-chip .v { font-size:0.95rem; font-variant-numeric:tabular-nums; }
+    .a-main { display:grid; grid-template-columns:minmax(18rem,26rem) minmax(0,1fr); gap:0.6rem; padding:0.6rem 1rem; min-height:0; }
+    .a-col { display:flex; flex-direction:column; gap:0.6rem; min-height:0; }
+    .a-card { background:var(--sand-panel); border:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+    .a-card > h3 { margin:0; font-size:0.72rem; font-weight:600; letter-spacing:0.15em; color:var(--invert-fg); background:var(--invert-bg); padding:0.25rem 0.5rem; display:flex; justify-content:space-between; gap:0.5rem; }
+    .a-card > .body { padding:0.5rem; min-height:0; overflow:auto; }
+    .a-filter { display:flex; gap:0.3rem; flex-wrap:wrap; padding:0.35rem 0.5rem; }
+    .a-filter input, .a-filter select { font:inherit; font-size:0.68rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); padding:0.2rem 0.4rem; }
+    .a-slist { width:100%; border-collapse:collapse; font-size:0.7rem; }
+    .a-slist th { position:sticky; top:0; background:var(--invert-bg); color:var(--invert-fg); text-align:left; padding:0.25rem 0.4rem; font-size:0.6rem; }
+    .a-slist td { padding:0.25rem 0.4rem; border-top:1px solid rgba(143,136,113,0.45); cursor:pointer; }
+    .a-slist td.n { text-align:right; font-variant-numeric:tabular-nums; }
+    .a-slist tr.sel td { background:rgba(169,110,73,0.18); }
+    .a-seg { display:flex; }
+    .a-seg button { flex:1; font:inherit; cursor:pointer; border:1px solid var(--line); border-left:0; background:var(--sand-panel-muted); color:var(--ink-muted); padding:0.25rem 0; font-size:0.66rem; }
+    .a-seg button:first-child { border-left:1px solid var(--line); } .a-seg button.on { background:var(--invert-bg); color:var(--invert-fg); }
+    .d-chips { display:flex; gap:0.4rem; flex-wrap:wrap; margin-bottom:0.5rem; }
+    .d-chip { border:1px solid var(--line); background:var(--invert-bg); color:var(--invert-fg); padding:0.3rem 0.6rem; display:flex; flex-direction:column; }
+    .d-chip .l { font-size:0.56rem; color:rgba(216,210,188,0.7); } .d-chip .v { font-size:0.9rem; }
+    .a-fake-chart { height:9rem; background:var(--sand-panel-muted); border:1px solid var(--line); display:flex; align-items:flex-end; gap:2px; padding:0.4rem; margin-bottom:0.5rem; }
+    .a-fake-chart i { flex:1; background:var(--accent); opacity:0.75; }
+    @media (max-width:60rem){ .a-app{ height:auto; } .a-main{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok 履歴ページ — デザイン案</strong>
+    <button class="mock-btn" onclick="show('before')">◀ BEFORE（現状）</button>
+    <button class="mock-btn on" onclick="show('after')">AFTER（案） ▶</button>
+    <span class="note">※ サンプルデータの静的モックです。左の配信を選ぶと右に詳細（切替表示）。</span>
+  </div>
+
+  <!-- ===== BEFORE ===== -->
+  <div class="mock-view" id="view-before">
+    <header class="b-header">
+      <div style="color:var(--ink-strong);font-size:0.7rem;letter-spacing:0.5em;">■</div>
+      <h1>TicTok : LIVE MONITOR</h1>
+      <div class="b-sub">Session History &amp; Analytics — YoRHa Interface</div>
+      <nav class="b-nav"><a href="#">▌ 監視</a><a href="#">▌ 全体監視</a><a class="active" href="#">▌ 履歴</a><a href="#">▌ 設定</a></nav>
+    </header>
+    <div class="b-wrap">
+      <section class="panel">
+        <h2 class="panel-title">▌ 総合 Dashboard（全Session）</h2>
+        <div class="b-chips">
+          <div class="b-chip"><span class="l">総Session</span><span class="v">42</span></div>
+          <div class="b-chip"><span class="l">総Gift</span><span class="v">11,280</span></div>
+          <div class="b-chip"><span class="l">総Diamonds</span><span class="v">540,300</span></div>
+          <div class="b-chip"><span class="l">総Comment</span><span class="v">88,400</span></div>
+        </div>
+        <div class="b-fake-chart"><i style="height:40%"></i><i style="height:60%"></i><i style="height:50%"></i><i style="height:80%"></i><i style="height:70%"></i><i style="height:90%"></i><i style="height:65%"></i><i style="height:85%"></i></div>
+        <table class="t"><thead><tr><th>#</th><th>配信者</th><th class="n">Session数</th><th class="n">Gift数</th><th class="n">Diamonds</th><th class="n">Comment数</th></tr></thead>
+          <tbody><tr><td>1</td><td>@kawaii_live</td><td class="n">18</td><td class="n">6,200</td><td class="n">312,000</td><td class="n">48,000</td></tr>
+          <tr><td>2</td><td>@music_room</td><td class="n">14</td><td class="n">3,100</td><td class="n">150,300</td><td class="n">28,400</td></tr></tbody></table>
+      </section>
+      <section class="panel">
+        <h2 class="panel-title">▌ 配信 Ranking</h2>
+        <table class="t"><thead><tr><th>#</th><th>Session</th><th>配信者</th><th>開始</th><th>時間</th><th class="n">値</th></tr></thead>
+          <tbody><tr><td>1</td><td>#128</td><td>@kawaii_live</td><td>06/15 21:00</td><td>3:05</td><td class="n">24,300</td></tr></tbody></table>
+      </section>
+      <section class="panel">
+        <h2 class="panel-title">▌ Session 履歴</h2>
+        <table class="t"><thead><tr><th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th><th class="n">Gift</th><th class="n">Diamonds</th><th>Memo</th><th>操作</th></tr></thead>
+          <tbody>
+          <tr><td>128</td><td>@kawaii_live</td><td>06/15 21:00</td><td>3:05</td><td>ended</td><td class="n">512</td><td class="n">24,300</td><td>-</td><td>詳細</td></tr>
+          <tr><td>127</td><td>@music_room</td><td>06/14 20:30</td><td>1:20</td><td>ended</td><td class="n">96</td><td class="n">4,200</td><td>-</td><td>詳細</td></tr>
+          </tbody></table>
+      </section>
+      <p style="text-align:center;color:var(--ink-muted);font-size:0.75rem;">…選択するとさらに下に「Session詳細・Memo・録画・Timeline・Result分析」が展開（要スクロール）…</p>
+    </div>
+  </div>
+
+  <!-- ===== AFTER ===== -->
+  <div class="mock-view on" id="view-after">
+    <div class="a-app">
+      <div class="a-topbar">
+        <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+        <nav class="a-nav"><a href="#">監視</a><a href="#">全体監視</a><a class="active" href="#">履歴</a><a href="#">設定</a></nav>
+        <div class="a-ws"><span class="dot">●</span> Server接続中</div>
+      </div>
+
+      <!-- 全Session KPIバー -->
+      <div class="a-kpibar">
+        <div class="a-chip"><span class="l">総Session</span><span class="v">42</span></div>
+        <div class="a-chip"><span class="l">総Gift</span><span class="v">11,280</span></div>
+        <div class="a-chip"><span class="l">総💎</span><span class="v">540,300</span></div>
+        <div class="a-chip"><span class="l">総Comment</span><span class="v">88,400</span></div>
+        <div class="a-chip"><span class="l">配信者数</span><span class="v">6</span></div>
+        <div class="a-chip"><span class="l">録画数</span><span class="v">19</span></div>
+      </div>
+
+      <!-- master-detail -->
+      <div class="a-main">
+        <!-- 左: フィルタ + Session一覧（選択） -->
+        <div class="a-col">
+          <div class="a-card" style="flex:1;">
+            <h3>SESSION 一覧 <span style="font-size:0.6rem;opacity:0.7;">行clickで右に詳細</span></h3>
+            <div class="a-filter">
+              <input placeholder="配信者で絞込 @..." style="flex:1;">
+              <select><option>新しい順</option><option>Gift順</option><option>💎順</option></select>
+            </div>
+            <div class="body" style="padding:0;">
+              <table class="a-slist">
+                <thead><tr><th>配信者</th><th>開始</th><th>時間</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+                <tbody>
+                  <tr class="sel"><td>@kawaii_live</td><td>06/15 21:00</td><td>3:05</td><td class="n">512</td><td class="n">24,300</td></tr>
+                  <tr><td>@music_room</td><td>06/14 20:30</td><td>1:20</td><td class="n">96</td><td class="n">4,200</td></tr>
+                  <tr><td>@kawaii_live</td><td>06/13 21:10</td><td>2:40</td><td class="n">410</td><td class="n">18,900</td></tr>
+                  <tr><td>@game_ch</td><td>06/12 19:00</td><td>0:55</td><td class="n">61</td><td class="n">2,100</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右: 選択Sessionの詳細（タブ切替で1ペイン: 概要/Ranking/録画/全体集計） -->
+        <div class="a-col">
+          <div class="a-card" style="flex:1;">
+            <h3 style="padding:0;background:transparent;">
+              <div class="a-seg" style="width:100%;">
+                <button class="on" onclick="seg(this,'p-sum')">概要</button>
+                <button onclick="seg(this,'p-rank')">Ranking</button>
+                <button onclick="seg(this,'p-rec')">録画</button>
+                <button onclick="seg(this,'p-agg')">全体集計</button>
+              </div>
+            </h3>
+            <div class="body">
+              <div data-pane="p-sum">
+                <div style="font-size:0.72rem;color:var(--ink-muted);margin-bottom:0.4rem;">Session #128 · @kawaii_live · 06/15 21:00 〜 (3:05) · ended</div>
+                <div class="d-chips">
+                  <div class="d-chip"><span class="l">Gift</span><span class="v">512</span></div>
+                  <div class="d-chip"><span class="l">💎</span><span class="v">24,300</span></div>
+                  <div class="d-chip"><span class="l">Gift送信者</span><span class="v">88</span></div>
+                  <div class="d-chip"><span class="l">Comment</span><span class="v">3,400</span></div>
+                  <div class="d-chip"><span class="l">Like</span><span class="v">102,000</span></div>
+                  <div class="d-chip"><span class="l">Battle</span><span class="v">3</span></div>
+                </div>
+                <div class="a-fake-chart"><i style="height:35%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:72%"></i><i style="height:64%"></i><i style="height:88%"></i><i style="height:58%"></i><i style="height:78%"></i><i style="height:92%"></i><i style="height:66%"></i></div>
+                <div style="display:flex;gap:0.4rem;align-items:center;">
+                  <input placeholder="このSessionのMemo…" style="flex:1;font:inherit;font-size:0.7rem;border:1px solid var(--line);background:var(--sand-panel-muted);padding:0.35rem 0.5rem;">
+                  <button style="font:inherit;font-size:0.7rem;border:1px solid var(--line);background:var(--invert-bg);color:var(--invert-fg);padding:0.35rem 0.8rem;">保存</button>
+                </div>
+              </div>
+              <div data-pane="p-rank" style="display:none;">
+                <table class="t"><thead><tr><th>#</th><th>User</th><th class="n">Gift</th><th class="n">💎</th><th>主なGift</th></tr></thead>
+                  <tbody><tr><td>1</td><td>@whale_kun</td><td class="n">12</td><td class="n">9,400</td><td>Galaxy</td></tr>
+                  <tr><td>2</td><td>@fan_01</td><td class="n">48</td><td class="n">3,200</td><td>Rose</td></tr></tbody></table>
+              </div>
+              <div data-pane="p-rec" style="display:none;">
+                <table class="t"><thead><tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th class="n">Size</th><th>操作</th></tr></thead>
+                  <tbody><tr><td>1</td><td>kawaii_live_2106.mp4</td><td>720p</td><td>完了</td><td>3:05</td><td class="n">2.1GB</td><td>DL / 削除</td></tr></tbody></table>
+              </div>
+              <div data-pane="p-agg" style="display:none;">
+                <div style="font-size:0.7rem;color:var(--ink-muted);margin-bottom:0.4rem;">配信者別の累計（全Session）</div>
+                <table class="t"><thead><tr><th>#</th><th>配信者</th><th class="n">Session</th><th class="n">Gift</th><th class="n">💎</th><th class="n">Comment</th></tr></thead>
+                  <tbody><tr><td>1</td><td>@kawaii_live</td><td class="n">18</td><td class="n">6,200</td><td class="n">312,000</td><td class="n">48,000</td></tr>
+                  <tr><td>2</td><td>@music_room</td><td class="n">14</td><td class="n">3,100</td><td class="n">150,300</td><td class="n">28,400</td></tr></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-footer"><span class="dot" style="color:var(--ok);">●</span> Server接続中 <span class="right">Glory&nbsp;to&nbsp;Mankind</span></div>
+    </div>
+  </div>
+
+  <script>
+    function show(which){
+      document.getElementById('view-before').classList.toggle('on', which==='before');
+      document.getElementById('view-after').classList.toggle('on', which==='after');
+      document.querySelectorAll('.mock-btn').forEach((b,i)=>b.classList.toggle('on', (which==='before')? i===0 : i===1));
+      window.scrollTo(0,0);
+    }
+    function seg(btn,pane){
+      btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+      btn.classList.add('on');
+      document.querySelectorAll('[data-pane]').forEach(p=>{ p.style.display = (p.dataset.pane===pane)?'':'none'; });
+    }
+  </script>
+</body>
+</html>

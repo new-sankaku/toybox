@@ -213,16 +213,24 @@
     /* --- 中央カラム: 高密度スタット + チャート --- */
     .a-statgroup { margin-bottom: 0.4rem; }
     .a-statgroup .gl { font-size: 0.62rem; letter-spacing: 0.2em; color: var(--ink-muted); margin: 0 0 0.25rem; text-transform: uppercase; }
-    .a-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.2rem, 1fr)); gap: 0.3rem; }
-    .a-stat { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.3rem 0.45rem; display: flex; flex-direction: column; gap: 0.1rem; }
-    .a-stat .l { font-size: 0.6rem; letter-spacing: 0.1em; color: var(--ink-muted); white-space: nowrap; }
-    .a-stat .v { font-size: 1.05rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; }
+    /* コンパクト化: 1行に「ラベル左・値右」を収める（縦・横とも省スペース） */
+    .a-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.4rem, 1fr)); gap: 0.2rem 0.35rem; }
+    .a-stat { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.18rem 0.4rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.3rem; }
+    .a-stat .l { font-size: 0.6rem; letter-spacing: 0.04em; color: var(--ink-muted); white-space: nowrap; }
+    .a-stat .v { font-size: 0.82rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .a-stat.acc { background: var(--invert-bg); }
     .a-stat.acc .l { color: rgba(216,210,188,0.7); }
     .a-stat.acc .v { color: var(--invert-fg); }
     .a-stat.rate { border-style: dashed; background: rgba(255,250,230,0.25); }
-    .a-stat .d { font-size: 0.58rem; color: var(--accent-deep); }
-    .a-stat .d.down { color: var(--ink-muted); }
+    .a-stat .v .d { font-size: 0.56rem; color: var(--accent-deep); margin-left: 0.25rem; }
+    .a-stat .v .d.down { color: var(--ink-muted); }
+    /* 過去配信比較テーブル */
+    .a-cmp { width: 100%; border-collapse: collapse; font-size: 0.66rem; }
+    .a-cmp th, .a-cmp td { padding: 0.18rem 0.4rem; border-top: 1px solid rgba(143,136,113,0.4); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .a-cmp th { background: var(--invert-bg); color: var(--invert-fg); font-size: 0.6rem; letter-spacing: 0.06em; border-top: 0; position: sticky; top: 0; }
+    .a-cmp td.k, .a-cmp th.k { text-align: left; color: var(--ink-muted); }
+    .a-cmp td.now { color: var(--ink-strong); font-weight: 600; }
+    .a-cmp td.best { color: var(--accent-deep); }
     .a-chartcard { flex: 1; }
     .a-fake-chart { height: 100%; min-height: 8rem; background: var(--sand-panel-muted); border: 1px solid var(--line); display: flex; align-items: flex-end; gap: 2px; padding: 0.5rem; }
     .a-fake-chart i { flex: 1; background: var(--accent); opacity: 0.75; }
@@ -424,36 +432,39 @@
             <h3>STATS <span style="font-size:0.6rem;opacity:0.7;">現在 / 累計 / レート</span></h3>
             <div class="body">
               <div class="a-statgroup">
-                <p class="gl">現在</p>
+                <p class="gl">現在 / 累計</p>
                 <div class="a-statgrid">
-                  <div class="a-stat"><span class="l">視聴者</span><span class="v">1,284</span><span class="d">▲ +52</span></div>
-                  <div class="a-stat"><span class="l">入室数</span><span class="v">3,560</span></div>
-                  <div class="a-stat"><span class="l">接続時間</span><span class="v">1:42:09</span></div>
-                </div>
-              </div>
-              <div class="a-statgroup">
-                <p class="gl">累計</p>
-                <div class="a-statgrid">
-                  <div class="a-stat acc"><span class="l">Gift数</span><span class="v">342</span></div>
-                  <div class="a-stat acc"><span class="l">Diamonds</span><span class="v">18,650</span></div>
-                  <div class="a-stat"><span class="l">累計Like</span><span class="v">58,210</span></div>
-                  <div class="a-stat"><span class="l">Comment</span><span class="v">2,109</span></div>
+                  <div class="a-stat"><span class="l">視聴者</span><span class="v">1,284<span class="d">▲52</span></span></div>
+                  <div class="a-stat"><span class="l">入室</span><span class="v">3,560</span></div>
+                  <div class="a-stat"><span class="l">接続</span><span class="v">1:42:09</span></div>
+                  <div class="a-stat acc"><span class="l">Gift</span><span class="v">342</span></div>
+                  <div class="a-stat acc"><span class="l">💎</span><span class="v">18,650</span></div>
+                  <div class="a-stat"><span class="l">Like</span><span class="v">58,210</span></div>
+                  <div class="a-stat"><span class="l">Comm</span><span class="v">2,109</span></div>
                   <div class="a-stat"><span class="l">Follow</span><span class="v">87</span></div>
                   <div class="a-stat"><span class="l">Share</span><span class="v">41</span></div>
                   <div class="a-stat"><span class="l">累計視聴</span><span class="v">9,402</span></div>
                   <div class="a-stat"><span class="l">Battle</span><span class="v">2</span></div>
-                  <div class="a-stat"><span class="l">B.Score</span><span class="v">1,200</span></div>
+                  <div class="a-stat" title="PK対戦(LinkMic Battle)中の自分のスコア合計"><span class="l">PK Score</span><span class="v">1,200</span></div>
                   <div class="a-stat"><span class="l">Event</span><span class="v">12,884</span></div>
+                  <div class="a-stat rate"><span class="l">Gift/分</span><span class="v">8.2</span></div>
+                  <div class="a-stat rate"><span class="l">💎/分</span><span class="v">221</span></div>
+                  <div class="a-stat rate"><span class="l">Comm/分</span><span class="v">31</span></div>
+                  <div class="a-stat rate"><span class="l">Like/分</span><span class="v">640</span></div>
                 </div>
               </div>
               <div class="a-statgroup">
-                <p class="gl">レート（/分）</p>
-                <div class="a-statgrid">
-                  <div class="a-stat rate"><span class="l">Gift</span><span class="v">8.2</span></div>
-                  <div class="a-stat rate"><span class="l">Diamonds</span><span class="v">221</span></div>
-                  <div class="a-stat rate"><span class="l">Comment</span><span class="v">31</span></div>
-                  <div class="a-stat rate"><span class="l">Like</span><span class="v">640</span></div>
-                </div>
+                <p class="gl">過去配信との比較（@kawaii_live · 直近DB履歴）</p>
+                <table class="a-cmp">
+                  <thead><tr><th class="k">指標</th><th>今回</th><th>前回</th><th>平均(5)</th><th>自己Best</th></tr></thead>
+                  <tbody>
+                    <tr><td class="k">Gift</td><td class="now">342</td><td>280</td><td>261</td><td class="best">512</td></tr>
+                    <tr><td class="k">💎</td><td class="now">18,650</td><td>12,400</td><td>10,900</td><td class="best">24,300</td></tr>
+                    <tr><td class="k">視聴者Peak</td><td class="now">1,284</td><td>980</td><td>1,020</td><td class="best">2,110</td></tr>
+                    <tr><td class="k">Comment</td><td class="now">2,109</td><td>1,800</td><td>1,650</td><td class="best">3,400</td></tr>
+                    <tr><td class="k">配信時間</td><td class="now">1:42</td><td>1:20</td><td>1:31</td><td class="best">3:05</td></tr>
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
