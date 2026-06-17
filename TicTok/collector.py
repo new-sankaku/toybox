@@ -6,9 +6,11 @@ from collections import deque
 from types import SimpleNamespace
 from typing import Any, Awaitable, Callable, Optional
 
+import httpx
 from TikTokLive import TikTokLiveClient
 from TikTokLive.client.errors import (
     AgeRestrictedError,
+    SignatureRateLimitError,
     TikTokLiveError,
     UserNotFoundError,
     UserOfflineError,
@@ -29,7 +31,14 @@ from TikTokLive.events import (
     SubscribeEvent,
 )
 
-from config import get_record_dir, get_simulation, get_timeline_limit
+from config import (
+    get_record_dir,
+    get_sign_api_key,
+    get_sign_api_url,
+    get_simulation,
+    get_timeline_limit,
+    get_web_proxy,
+)
 from recorder import Recorder, extract_stream_url, ffmpeg_available
 
 logger = logging.getLogger("tictok.collector")
@@ -92,6 +101,27 @@ def _empty_bucket(start: int, viewers: int) -> dict:
         "shares": 0,
         "viewers": viewers,
     }
+
+
+def _client_kwargs() -> dict:
+    kwargs: dict = {}
+    proxy = get_web_proxy()
+    if proxy:
+        kwargs["web_proxy"] = httpx.Proxy(proxy)
+    signer_kwargs: dict = {}
+    sign_api_key = get_sign_api_key()
+    if sign_api_key:
+        signer_kwargs["sign_api_key"] = sign_api_key
+    sign_api_url = get_sign_api_url()
+    if sign_api_url:
+        signer_kwargs["sign_api_base"] = sign_api_url
+    if signer_kwargs:
+        kwargs["web_kwargs"] = {"signer_kwargs": signer_kwargs}
+    return kwargs
+
+
+def new_client(unique_id: str) -> TikTokLiveClient:
+    return TikTokLiveClient(unique_id=unique_id, **_client_kwargs())
 
 
 def _user_payload(user: Any) -> dict:
@@ -356,14 +386,27 @@ class TikTokCollector:
             self._settings.get("live_check_interval"),
         )
 
+    def _live_check_delay(self) -> float:
+        interval = self._settings.get("live_check_interval")
+        jitter = self._settings.get("live_check_jitter")
+        return interval + random.uniform(0.0, interval * jitter)
+
     async def _wait_for_live_start(self, skip_first_check: bool = False) -> bool:
-        probe = TikTokLiveClient(unique_id=self.unique_id)
+        probe = new_client(self.unique_id)
         try:
             waiting_announced = False
             if skip_first_check:
                 waiting_announced = True
                 await self._announce_waiting()
-                await asyncio.sleep(self._settings.get("live_check_interval"))
+                await asyncio.sleep(self._live_check_delay())
+            else:
+                stagger = random.uniform(
+                    0.0,
+                    self._settings.get("live_check_interval")
+                    * self._settings.get("live_check_jitter"),
+                )
+                if stagger > 0:
+                    await asyncio.sleep(stagger)
             while True:
                 if self._stop_requested:
                     self.state = STATE_DISCONNECTED
@@ -379,7 +422,7 @@ class TikTokCollector:
                 if not waiting_announced:
                     waiting_announced = True
                     await self._announce_waiting()
-                await asyncio.sleep(self._settings.get("live_check_interval"))
+                await asyncio.sleep(self._live_check_delay())
         finally:
             await self._close_probe(probe)
 
@@ -393,11 +436,49 @@ class TikTokCollector:
     async def _session_loop(self) -> str:
         while True:
             outcome, reason = await self._connect_once()
-            if outcome != "transient":
+            if outcome == "ratelimited":
+                result = await self._wait_for_ratelimit(reason)
+            elif outcome == "transient":
+                result = await self._wait_for_reconnect(reason)
+            else:
                 return outcome
-            result = await self._wait_for_reconnect(reason)
             if result != "retry":
                 return result
+
+    def _ratelimit_delay(self, exc: SignatureRateLimitError) -> float:
+        floor = float(self._settings.get("reconnect_max_delay"))
+        try:
+            retry = float(exc.retry_after)
+        except Exception:
+            retry = 0.0
+        return min(max(retry, floor), 3600.0)
+
+    async def _wait_for_ratelimit(self, delay: float) -> str:
+        if self._stop_requested:
+            self.state = STATE_DISCONNECTED
+            return "stopped"
+        self.state = STATE_RECONNECTING
+        self.steps["websocket"] = "active"
+        self.steps["receiving"] = "pending"
+        has_key = bool(get_sign_api_key())
+        hint = "" if has_key else " API key (TICTOK_SIGN_API_KEY) を設定すると上限が緩和されます。"
+        logger.warning(
+            "sign server rate limited for %s: waiting %.0fs (api_key=%s)",
+            self.unique_id,
+            delay,
+            has_key,
+        )
+        await self._notify_state()
+        await self._record(
+            "system",
+            {"text": f"署名Server(EulerStream)のrate limitに到達しました。{delay:.0f}秒後に再試行します。{hint}"},
+        )
+        await asyncio.sleep(delay)
+        if self._stop_requested:
+            self.state = STATE_DISCONNECTED
+            return "stopped"
+        self._client = self._build_client(self.unique_id)
+        return "retry"
 
     def _persist_final(self) -> None:
         if self.session_id is None:
@@ -437,6 +518,9 @@ class TikTokCollector:
         except AgeRestrictedError:
             self._fail("live_check", "年齢制限付きのLIVEのため接続できません。")
             return ("fatal", None)
+        except SignatureRateLimitError as exc:
+            logger.warning("sign server rate limit for %s: %s", self.unique_id, exc, exc_info=True)
+            return ("ratelimited", self._ratelimit_delay(exc))
         except TikTokLiveError as exc:
             logger.warning("transient TikTokLive error: %s", exc, exc_info=True)
             return ("transient", f"TikTok接続Error: {exc}")
@@ -448,7 +532,7 @@ class TikTokCollector:
         await asyncio.sleep(5)
         if self._stop_requested:
             return True
-        probe = TikTokLiveClient(unique_id=self.unique_id)
+        probe = new_client(self.unique_id)
         try:
             is_live = await probe.web.fetch_is_live(unique_id=self.unique_id)
         except UserNotFoundError:
@@ -509,7 +593,7 @@ class TikTokCollector:
         logger.error("collector failed at %s: %s", step, message)
 
     def _build_client(self, unique_id: str) -> TikTokLiveClient:
-        client = TikTokLiveClient(unique_id=unique_id)
+        client = new_client(unique_id)
         client.add_listener(ConnectEvent, self._on_connect)
         client.add_listener(DisconnectEvent, self._on_disconnect)
         client.add_listener(LiveEndEvent, self._on_live_end)

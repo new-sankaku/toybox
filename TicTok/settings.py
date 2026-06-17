@@ -24,6 +24,15 @@ SETTING_DEFS = {
         "label": "配信開始の確認間隔（秒）",
         "note": "常駐監視で未配信のとき、この間隔でLIVE開始を確認します。",
     },
+    "live_check_jitter": {
+        "env": "TICTOK_LIVE_CHECK_JITTER",
+        "default": 0.3,
+        "type": float,
+        "min": 0.0,
+        "max": 1.0,
+        "label": "配信確認間隔のjitter比率（0〜1）",
+        "note": "複数監視のpollingが同時刻に揃わないよう、確認間隔へ最大この比率の揺らぎを加えます。",
+    },
     "reconnect_max_attempts": {
         "env": "TICTOK_RECONNECT_MAX_ATTEMPTS",
         "default": 10,

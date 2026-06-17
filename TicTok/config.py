@@ -32,3 +32,15 @@ def get_record_dir() -> str:
     return os.environ.get(
         "TICTOK_RECORD_DIR", str(Path(__file__).resolve().parent / "recordings")
     )
+
+
+def get_sign_api_key() -> str:
+    return os.environ.get("TICTOK_SIGN_API_KEY", "").strip()
+
+
+def get_sign_api_url() -> str:
+    return os.environ.get("TICTOK_SIGN_API_URL", "").strip()
+
+
+def get_web_proxy() -> str:
+    return os.environ.get("TICTOK_WEB_PROXY", "").strip()

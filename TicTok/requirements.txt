@@ -1,5 +1,7 @@
 # Python packages
-TikTokLive==6.6.5
+# interactive extra pulls curl_cffi for browser TLS (JA3) impersonation,
+# reducing bot detection on direct TikTok requests.
+TikTokLive[interactive]==6.6.5
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 

@@ -34,6 +34,18 @@ async def noop_broadcast(message):
     pass
 
 
+def make_ratelimit_error():
+    import httpx
+    from TikTokLive.client.errors import SignatureRateLimitError
+
+    response = httpx.Response(
+        status_code=429,
+        headers={"RateLimit-Remaining": "1", "RateLimit-Reset": "60"},
+        request=httpx.Request("GET", "https://tiktok.eulerstream.com/webcast/fetch/"),
+    )
+    return SignatureRateLimitError(None, "retry in %s seconds", response=response)
+
+
 def make_env():
     storage = Storage(tempfile.mktemp(suffix=".db"))
     settings = Settings(storage)
@@ -70,6 +82,8 @@ class FakeClient:
             raise UserOfflineError("x", "offline")
         if action == "fail":
             raise RuntimeError("transient boom")
+        if action == "ratelimit":
+            raise make_ratelimit_error()
         await self.c._on_connect(None)
         if action == "live_end":
             await ORIG_SLEEP(0.1)
@@ -188,6 +202,23 @@ async def test_reconnect_exhausted():
     print("OK 再接続上限超過 -> error停止")
 
 
+async def test_signature_ratelimit_waits_and_recovers():
+    storage, settings = make_env()
+    settings._values["reconnect_max_attempts"] = 1
+    settings._values["reconnect_max_delay"] = 0.05
+    c = TikTokCollector("limited", noop_broadcast, storage, settings)
+    plan = ["ratelimit", "ratelimit", "ratelimit", "stay"]
+    c._build_client = lambda uid: FakeClient(c, plan)
+    FakeProbeFactory.results = [True]
+    await c.start()
+    assert await wait_for(lambda: c.state == STATE_CONNECTED), c.state
+    # Rate limits must NOT consume the connection-failure budget.
+    assert c._reconnect_attempt == 0, c._reconnect_attempt
+    assert c.state != STATE_ERROR
+    await c.stop()
+    print("OK 署名Server rate limit -> 待機後に復帰（再接続budgetを消費しない）")
+
+
 async def test_user_not_found_terminal():
     storage, settings = make_env()
     c = TikTokCollector("ghost", noop_broadcast, storage, settings)
@@ -299,6 +330,7 @@ async def main():
     await test_resident_new_session_per_live()
     await test_reconnect_then_recover()
     await test_reconnect_exhausted()
+    await test_signature_ratelimit_waits_and_recovers()
     await test_user_not_found_terminal()
     await test_event_persistence_columns()
     await test_likes_total_monotonic()
