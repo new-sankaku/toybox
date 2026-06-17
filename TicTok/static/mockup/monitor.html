@@ -180,7 +180,7 @@
     /* 行3: 3カラム ダッシュボード本体（各カラム内のみスクロール） */
     .a-main {
       display: grid;
-      grid-template-columns: minmax(16rem, 21rem) minmax(0, 1fr) minmax(18rem, 25rem);
+      grid-template-columns: minmax(0, 40fr) minmax(0, 35fr) minmax(0, 25fr);
       gap: 0.6rem; padding: 0.6rem 1rem; min-height: 0;
     }
     .a-col { display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; }
@@ -195,10 +195,12 @@
     }
     .a-card > .body { padding: 0.5rem; min-height: 0; overflow: auto; }
 
-    /* --- 左カラム: LIVE preview + 状態 + 操作 --- */
-    /* スマホLIVEは縦長(9:16)。高さを制限し中央寄せ（レターボックス） */
-    .a-video { aspect-ratio: 9/16; height: 40vh; width: auto; max-width: 100%; margin: 0 auto; background: #000; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: rgba(216,210,188,0.6); font-size: 0.72rem; position: relative; }
-    .a-video .rec { position: absolute; top: 0.4rem; left: 0.4rem; color: var(--warn); font-size: 0.7rem; }
+    /* --- 左カラム: LIVE preview を枠いっぱいに最大化（縦長9:16をレターボックスで中央表示） --- */
+    .a-livecard { flex: 1; min-height: 0; }
+    .a-videowrap { flex: 1; min-height: 0; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .a-video { block-size: 100%; inline-size: auto; max-inline-size: 100%; aspect-ratio: 9/16; background: #000; display: flex; align-items: center; justify-content: center; color: rgba(216,210,188,0.6); font-size: 0.72rem; }
+    .rec-badge { position: absolute; top: 0.4rem; left: 0.4rem; color: var(--warn); font-size: 0.7rem; background: rgba(0,0,0,0.45); padding: 0.1rem 0.45rem; }
+    .a-livefoot { flex: 0 0 auto; }
     .a-statusline { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; flex-wrap: wrap; }
     .badge { padding: 0.12rem 0.5rem; font-size: 0.66rem; letter-spacing: 0.18em; border: 1px solid var(--line); }
     .badge.connected { background: var(--ok); color: var(--invert-fg); border-color: var(--ok); }
@@ -412,22 +414,27 @@
 
       <!-- 行3: 3カラム ダッシュボード -->
       <div class="a-main">
-        <!-- 左: LIVE + 状態 + 操作 -->
+        <!-- 左(40%): LIVE Preview を枠いっぱいに最大化 -->
         <div class="a-col">
-          <div class="a-card" style="flex:0 0 auto;">
+          <div class="a-card a-livecard">
             <h3><span class="u"><span class="av">か</span><b>かわいいLIVE</b><span class="uid" style="color:rgba(216,210,188,0.7);">@kawaii_live</span></span> <span class="badge connected">CONNECTED</span></h3>
-            <div class="a-video">● LIVE Preview <span class="rec">● REC 24:31 / 312MB</span></div>
-            <div class="a-statusline">
-              <span style="font-size:0.72rem;">接続時間 01:42:09 · simulation</span>
+            <div class="a-videowrap">
+              <div class="a-video">● LIVE Preview（縦長 9:16）</div>
+              <span class="rec-badge">● REC 24:31 / 312MB</span>
             </div>
-            <div class="a-steps">
-              <i class="done">ID解決</i><i class="done">接続</i><i class="done">LIVE取得</i><i class="done">収集</i>
-            </div>
-            <div class="a-actions">
-              <button class="rec">■ 録画停止</button>
-              <button>停止</button>
-              <button>再開</button>
-              <button class="danger">監視解除</button>
+            <div class="a-livefoot">
+              <div class="a-statusline">
+                <span style="font-size:0.72rem;">接続時間 01:42:09 · simulation</span>
+              </div>
+              <div class="a-steps">
+                <i class="done">ID解決</i><i class="done">接続</i><i class="done">LIVE取得</i><i class="done">収集</i>
+              </div>
+              <div class="a-actions">
+                <button class="rec">■ 録画停止</button>
+                <button>停止</button>
+                <button>再開</button>
+                <button class="danger">監視解除</button>
+              </div>
             </div>
           </div>
         </div>
