@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok 全体監視 — 画面デザイン案 (Before / After)</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#4d4a3f; --ink-strong:#3b382f; --ink-muted:#6f6a59; --line:#8f8871;
+      --accent:#a96e49; --accent-deep:#8e4f2f; --invert-bg:#4d4a3f; --invert-fg:#d8d2bc;
+      --ok:#5d6e4e; --warn:#a4502f; --shadow:rgba(59,56,47,0.35);
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body {
+      background: radial-gradient(ellipse at 50% -20%, rgba(255,250,230,0.25), transparent 60%), var(--sand-bg);
+      color: var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.04em;
+    }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.6rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.2em; font-size:0.8rem; }
+    .mock-switch .note { font-size:0.7rem; color:rgba(216,210,188,0.7); }
+    .mock-btn { font:inherit; cursor:pointer; padding:0.3rem 1rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); letter-spacing:0.15em; }
+    .mock-btn.on { background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep); }
+    .mock-view { display:none; } .mock-view.on { display:block; }
+
+    .panel { background:var(--sand-panel); border:1px solid var(--line); box-shadow:0.35rem 0.35rem 0 var(--shadow); padding:0.9rem 1rem 1rem; }
+    .panel-title { margin:0 0 0.8rem; font-size:0.85rem; font-weight:600; color:var(--invert-fg); background:var(--invert-bg); padding:0.35rem 0.6rem; letter-spacing:0.15em; }
+
+    /* ---- 共通 header/footer (After) ---- */
+    .a-topbar { display:flex; align-items:center; gap:0.8rem; flex-wrap:wrap; padding:0.35rem 1rem; border-bottom:1px solid var(--line); background:linear-gradient(to bottom,var(--sand-bg-deep),transparent); }
+    .a-brand { display:flex; align-items:baseline; gap:0.4rem; }
+    .a-brand .m { color:var(--ink-strong); letter-spacing:0.3em; font-size:0.7rem; }
+    .a-brand b { color:var(--ink-strong); font-size:0.9rem; letter-spacing:0.18em; }
+    .a-nav { display:flex; gap:0.3rem; }
+    .a-nav a { text-decoration:none; font-size:0.72rem; letter-spacing:0.12em; color:var(--ink-muted); border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.2rem 0.7rem; }
+    .a-nav a.active { background:var(--invert-bg); color:var(--invert-fg); }
+    .a-ws { margin-left:auto; display:flex; align-items:center; gap:0.3rem; font-size:0.7rem; color:var(--ink-muted); }
+    .a-ws .dot { color:var(--ok); }
+    .a-footer { display:flex; align-items:center; gap:0.6rem; padding:0.3rem 1rem; border-top:1px solid var(--line); background:var(--sand-bg-deep); font-size:0.68rem; color:var(--ink-muted); }
+    .a-footer .right { margin-left:auto; letter-spacing:0.3em; text-transform:uppercase; }
+
+    /* ============ BEFORE: card grid ============ */
+    .b-header { padding:1.2rem 5% 0.8rem; border-bottom:2px solid var(--line); background:linear-gradient(to bottom,var(--sand-bg-deep),transparent); }
+    .b-header h1 { margin:0.2rem 0 0; font-size:1.6rem; font-weight:600; color:var(--ink-strong); }
+    .b-sub { margin-top:0.2rem; font-size:0.72rem; color:var(--ink-muted); text-transform:uppercase; }
+    .b-nav { display:flex; gap:0.5rem; margin-top:0.7rem; flex-wrap:wrap; }
+    .b-nav a { text-decoration:none; font-size:0.78rem; color:var(--ink-muted); border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.3rem 0.9rem; }
+    .b-nav a.active { background:var(--invert-bg); color:var(--invert-fg); }
+    .b-wrap { padding:1rem 5%; }
+    .b-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,19rem),1fr)); gap:0.8rem; }
+    .b-card { display:flex; flex-direction:column; gap:0.5rem; border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.7rem 0.8rem; }
+    .b-card.live { border-left:4px solid var(--ok); }
+    .b-card .head { display:flex; justify-content:space-between; border-bottom:1px solid var(--line); padding-bottom:0.4rem; }
+    .badge { padding:0.12rem 0.5rem; font-size:0.64rem; letter-spacing:0.16em; border:1px solid var(--line); }
+    .badge.connected { background:var(--ok); color:var(--invert-fg); border-color:var(--ok); }
+    .badge.idle { background:var(--sand-panel-muted); color:var(--ink-muted); }
+    .b-card .vid { background:#000; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; color:rgba(216,210,188,0.6); font-size:0.7rem; }
+    .b-rows { display:grid; grid-template-columns:repeat(auto-fit, minmax(7.5rem,1fr)); gap:0.25rem 0.8rem; }
+    .b-row { display:flex; justify-content:space-between; font-size:0.74rem; }
+    .b-row .l { color:var(--ink-muted); }
+    .b-last { font-size:0.7rem; color:var(--ink-muted); border-top:1px dashed var(--line); padding-top:0.3rem; }
+
+    /* ============ AFTER: 集計バー + 高密度タイル ============ */
+    .a-app { display:grid; grid-template-rows:auto auto 1fr auto; min-height:calc(100vh - 2.6rem); }
+    .a-summary { display:flex; gap:0.4rem; flex-wrap:wrap; padding:0.4rem 1rem; background:var(--sand-bg-deep); border-bottom:1px solid var(--line); }
+    .a-chip { display:flex; flex-direction:column; gap:0.1rem; border:1px solid var(--line); background:var(--invert-bg); color:var(--invert-fg); padding:0.25rem 0.6rem; min-width:6rem; }
+    .a-chip .l { font-size:0.58rem; letter-spacing:0.12em; color:rgba(216,210,188,0.7); }
+    .a-chip .v { font-size:0.95rem; font-variant-numeric:tabular-nums; }
+    .a-toolbar { margin-left:auto; display:flex; align-items:center; gap:0.4rem; font-size:0.68rem; color:var(--ink-muted); }
+    .a-toolbar select, .a-toolbar button { font:inherit; font-size:0.68rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); padding:0.2rem 0.5rem; }
+    /* auto-fit + 1fr で余白を残さず、tileを大きくLiveを表示 */
+    .a-tiles { padding:0.6rem 1rem; display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%,15rem),1fr)); gap:0.6rem; align-content:start; overflow:auto; }
+    .a-tile { border:1px solid var(--line); background:var(--sand-panel); display:flex; flex-direction:column; max-width:22rem; justify-self:center; inline-size:100%; }
+    .a-tile.live { border-left:3px solid var(--ok); }
+    /* ヘッダーを 3分割（avatar固定 / 名前=可変省略 / 状態固定）で揃える */
+    .a-tile .th { display:flex; align-items:center; gap:0.4rem; padding:0.3rem 0.5rem; background:var(--invert-bg); }
+    .a-tile .th a { flex:1 1 auto; min-width:0; color:var(--invert-fg); text-decoration:none; font-size:0.78rem; letter-spacing:0.04em; display:flex; align-items:center; gap:0.3rem; }
+    .a-tile .th a .nm { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .a-tile .th a .uid { font-size:0.58rem; opacity:0.65; }
+    .a-tile .th .status { flex:0 0 auto; display:flex; align-items:center; gap:0.3rem; white-space:nowrap; }
+    .av { width:1.05rem; height:1.05rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.58rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); flex:0 0 auto; }
+    .a-tile .th .rec { color:var(--warn); font-size:0.62rem; }
+    /* スマホLIVEは縦長(9:16)。高さ固定で中央寄せ */
+    /* Liveを大きく: tile幅いっぱいの縦長(9:16) */
+    .a-tile .vid { background:#000; aspect-ratio:9/16; width:100%; display:flex; align-items:center; justify-content:center; color:rgba(216,210,188,0.55); font-size:0.62rem; }
+    .a-kpi { display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--line); }
+    .a-kpi div { background:var(--sand-panel-muted); padding:0.18rem 0.4rem; display:flex; justify-content:space-between; font-size:0.64rem; }
+    .a-kpi div .l { color:var(--ink-muted); }
+    .a-kpi div .v { font-variant-numeric:tabular-nums; color:var(--ink-strong); }
+    .a-tile .last { font-size:0.62rem; color:var(--accent-deep); padding:0.25rem 0.5rem; border-top:1px dashed var(--line); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .a-tile .ctl { display:flex; gap:0.3rem; padding:0.25rem 0.5rem 0.35rem; }
+    .a-tile .ctl button { font:inherit; font-size:0.62rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); padding:0.15rem 0.5rem; cursor:pointer; }
+    .a-tile .ctl button.rec { background:var(--warn); color:var(--invert-fg); border-color:var(--warn); }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok 全体監視ページ — デザイン案</strong>
+    <button class="mock-btn" onclick="show('before')">◀ BEFORE（現状）</button>
+    <button class="mock-btn on" onclick="show('after')">AFTER（案） ▶</button>
+    <span class="note">※ サンプルデータの静的モックです。</span>
+  </div>
+
+  <!-- ===== BEFORE ===== -->
+  <div class="mock-view" id="view-before">
+    <header class="b-header">
+      <div style="color:var(--ink-strong);font-size:0.7rem;letter-spacing:0.5em;">■</div>
+      <h1>TicTok : LIVE MONITOR</h1>
+      <div class="b-sub">All Monitors Board — YoRHa Interface</div>
+      <nav class="b-nav"><a href="#">▌ 監視</a><a class="active" href="#">▌ 全体監視</a><a href="#">▌ 履歴</a><a href="#">▌ 設定</a></nav>
+    </header>
+    <div class="b-wrap">
+      <section class="panel">
+        <h2 class="panel-title">▌ 全体監視 Board</h2>
+        <div style="font-size:0.7rem;color:var(--ink-muted);margin-bottom:0.5rem;">監視中の全配信者を一覧表示します。録画中は映像をpreview再生できます。</div>
+        <div class="b-grid">
+          <div class="b-card live">
+            <div class="head"><a style="color:var(--ink-strong);text-decoration:none;">@kawaii_live</a><span class="badge connected">CONNECTED</span></div>
+            <div class="vid">● LIVE Preview</div>
+            <div class="b-rows">
+              <div class="b-row"><span class="l">視聴者数</span><span>1,284</span></div>
+              <div class="b-row"><span class="l">Gift数</span><span>342</span></div>
+              <div class="b-row"><span class="l">Diamonds</span><span>18,650</span></div>
+              <div class="b-row"><span class="l">累計Like</span><span>58,210</span></div>
+              <div class="b-row"><span class="l">Gift/分</span><span>8.2</span></div>
+              <div class="b-row"><span class="l">Diamonds/分</span><span>221</span></div>
+              <div class="b-row"><span class="l">Comment/分</span><span>31</span></div>
+              <div class="b-row"><span class="l">Like/分</span><span>640</span></div>
+              <div class="b-row"><span class="l">接続時間</span><span>1:42:09</span></div>
+            </div>
+            <div class="b-last" style="color:var(--accent-deep);">GIFT: @whale_kun Galaxy ×1</div>
+            <div class="b-last">COMMENT: @user_a かわいい！</div>
+          </div>
+          <div class="b-card live">
+            <div class="head"><a style="color:var(--ink-strong);text-decoration:none;">@music_room</a><span class="badge connected">CONNECTED</span></div>
+            <div class="vid">（録画停止中）</div>
+            <div class="b-rows">
+              <div class="b-row"><span class="l">視聴者数</span><span>840</span></div>
+              <div class="b-row"><span class="l">Gift数</span><span>96</span></div>
+              <div class="b-row"><span class="l">Diamonds</span><span>4,200</span></div>
+              <div class="b-row"><span class="l">累計Like</span><span>21,500</span></div>
+              <div class="b-row"><span class="l">Gift/分</span><span>3.1</span></div>
+              <div class="b-row"><span class="l">Diamonds/分</span><span>88</span></div>
+              <div class="b-row"><span class="l">Comment/分</span><span>18</span></div>
+              <div class="b-row"><span class="l">Like/分</span><span>240</span></div>
+              <div class="b-row"><span class="l">接続時間</span><span>0:51:30</span></div>
+            </div>
+            <div class="b-last" style="color:var(--accent-deep);">GIFT: @fan_x Rose ×3</div>
+            <div class="b-last">COMMENT: @user_z いい声！</div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ===== AFTER ===== -->
+  <div class="mock-view on" id="view-after">
+    <div class="a-app">
+      <div class="a-topbar">
+        <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+        <nav class="a-nav"><a href="#">監視</a><a class="active" href="#">全体監視</a><a href="#">履歴</a><a href="#">設定</a></nav>
+        <div class="a-ws"><span class="dot">●</span> Server接続中</div>
+      </div>
+
+      <!-- 集計バー: 全配信を1行で俯瞰 -->
+      <div class="a-summary">
+        <div class="a-chip"><span class="l">監視数</span><span class="v">3</span></div>
+        <div class="a-chip"><span class="l">LIVE中</span><span class="v" style="color:var(--ok);">2</span></div>
+        <div class="a-chip"><span class="l">録画中</span><span class="v" style="color:var(--invert-fg);">1</span></div>
+        <div class="a-chip"><span class="l">合計視聴者</span><span class="v">2,124</span></div>
+        <div class="a-chip"><span class="l">合計Gift</span><span class="v">438</span></div>
+        <div class="a-chip"><span class="l">合計💎</span><span class="v">22,850</span></div>
+        <div class="a-toolbar">
+          並替 <select><option>💎降順</option><option>視聴者降順</option><option>Gift/分</option><option>状態</option></select>
+          <button>映像 全ON</button><button>音声 全OFF</button>
+        </div>
+      </div>
+
+      <!-- 高密度タイル -->
+      <div class="a-tiles">
+        <div class="a-tile live">
+          <div class="th"><a href="#"><span class="av">か</span><span class="nm">かわいいLIVE <span class="uid">@kawaii_live</span></span></a><span class="status"><span class="rec">● REC</span> <span class="badge connected">LIVE</span></span></div>
+          <div class="vid">● Preview</div>
+          <div class="a-kpi">
+            <div><span class="l">👁</span><span class="v">1,284</span></div>
+            <div><span class="l">💎</span><span class="v">18,650</span></div>
+            <div><span class="l">Gift</span><span class="v">342</span></div>
+            <div><span class="l">💎/分</span><span class="v">221</span></div>
+            <div><span class="l">Cmt/分</span><span class="v">31</span></div>
+            <div><span class="l">接続</span><span class="v">1:42</span></div>
+          </div>
+          <div class="last">GIFT: Whale King (@whale_kun) Galaxy ×1</div>
+          <div class="ctl"><button class="rec">■ 録画停止</button><button>🔇</button></div>
+        </div>
+
+        <div class="a-tile live">
+          <div class="th"><a href="#"><span class="av">M</span><span class="nm">Music Room <span class="uid">@music_room</span></span></a><span class="status"><span class="badge connected">LIVE</span></span></div>
+          <div class="vid">（録画停止中）</div>
+          <div class="a-kpi">
+            <div><span class="l">👁</span><span class="v">840</span></div>
+            <div><span class="l">💎</span><span class="v">4,200</span></div>
+            <div><span class="l">Gift</span><span class="v">96</span></div>
+            <div><span class="l">💎/分</span><span class="v">88</span></div>
+            <div><span class="l">Cmt/分</span><span class="v">18</span></div>
+            <div><span class="l">接続</span><span class="v">0:51</span></div>
+          </div>
+          <div class="last">GIFT: @fan_x Rose ×3</div>
+          <div class="ctl"><button>● 録画開始</button><button>🔇</button></div>
+        </div>
+
+        <div class="a-tile">
+          <div class="th"><a href="#"><span class="av">G</span><span class="nm">Game Ch <span class="uid">@game_ch</span></span></a><span class="status"><span class="badge idle">IDLE</span></span></div>
+          <div class="vid">未接続</div>
+          <div class="a-kpi">
+            <div><span class="l">👁</span><span class="v">-</span></div>
+            <div><span class="l">💎</span><span class="v">-</span></div>
+            <div><span class="l">Gift</span><span class="v">-</span></div>
+            <div><span class="l">💎/分</span><span class="v">-</span></div>
+            <div><span class="l">Cmt/分</span><span class="v">-</span></div>
+            <div><span class="l">接続</span><span class="v">-</span></div>
+          </div>
+          <div class="last">待機中…</div>
+          <div class="ctl"><button>● 録画開始</button><button>🔇</button></div>
+        </div>
+      </div>
+
+      <div class="a-footer"><span class="dot" style="color:var(--ok);">●</span> Server接続中 <span class="right">Glory&nbsp;to&nbsp;Mankind</span></div>
+    </div>
+  </div>
+
+  <script>
+    function show(which){
+      document.getElementById('view-before').classList.toggle('on', which==='before');
+      document.getElementById('view-after').classList.toggle('on', which==='after');
+      document.querySelectorAll('.mock-btn').forEach((b,i)=>b.classList.toggle('on', (which==='before')? i===0 : i===1));
+      window.scrollTo(0,0);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok Battle 詳細 — 画面デザイン案 (Before / After)</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#4d4a3f; --ink-strong:#3b382f; --ink-muted:#6f6a59; --line:#8f8871;
+      --accent:#a96e49; --accent-deep:#8e4f2f; --invert-bg:#4d4a3f; --invert-fg:#d8d2bc;
+      --ok:#5d6e4e; --warn:#a4502f; --shadow:rgba(59,56,47,0.35);
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { background: radial-gradient(ellipse at 50% -20%, rgba(255,250,230,0.25), transparent 60%), var(--sand-bg); color:var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.04em; }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.6rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.2em; font-size:0.8rem; }
+    .mock-switch .note { font-size:0.7rem; color:rgba(216,210,188,0.7); }
+    .mock-btn { font:inherit; cursor:pointer; padding:0.3rem 1rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); letter-spacing:0.15em; }
+    .mock-btn.on { background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep); }
+    .mock-view { display:none; padding:1rem 1.2rem; } .mock-view.on { display:block; }
+
+    .panel-title { margin:0 0 0.8rem; font-size:0.85rem; font-weight:600; color:var(--invert-fg); background:var(--invert-bg); padding:0.35rem 0.6rem; letter-spacing:0.15em; }
+
+    /* ===== BEFORE ===== */
+    .b-box { background:var(--sand-panel); border:1px solid var(--line); box-shadow:0.35rem 0.35rem 0 var(--shadow); padding:0.9rem 1rem 1rem; max-width:40rem; }
+    .b-stat { border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.5rem 0.7rem; display:inline-flex; flex-direction:column; gap:0.25rem; margin:0.3rem 0.3rem 0 0; }
+    .b-stat .l { font-size:0.68rem; letter-spacing:0.18em; color:var(--ink-muted); } .b-stat .v { font-size:1.25rem; color:var(--ink-strong); }
+    .b-note { font-size:0.74rem; color:var(--ink-muted); margin-top:0.8rem; line-height:1.6; }
+
+    /* ===== AFTER: per-battle cards ===== */
+    .a-head { display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.6rem; }
+    .a-head h2 { margin:0; font-size:1rem; letter-spacing:0.1em; color:var(--ink-strong); }
+    .a-head .sum { font-size:0.7rem; color:var(--ink-muted); }
+    .bcards { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,26rem),1fr)); gap:0.8rem; }
+    .bcard { border:1px solid var(--line); background:var(--sand-panel); box-shadow:0.25rem 0.25rem 0 var(--shadow); display:flex; flex-direction:column; }
+    .bcard .bh { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; padding:0.4rem 0.6rem; background:var(--invert-bg); color:var(--invert-fg); flex-wrap:wrap; }
+    .bcard .bh .id { font-size:0.78rem; letter-spacing:0.1em; }
+    .bcard .bh .mode { font-size:0.62rem; border:1px solid var(--line); padding:0.05rem 0.45rem; }
+    .bcard .bh .when { font-size:0.62rem; color:rgba(216,210,188,0.75); }
+    .res { font-size:0.7rem; letter-spacing:0.15em; padding:0.05rem 0.5rem; border:1px solid; }
+    .res.win { color:var(--ok); border-color:var(--ok); } .res.lose { color:var(--warn); border-color:var(--warn); }
+    .bbody { padding:0.6rem; }
+    /* score bar */
+    .score { display:flex; align-items:center; gap:0.5rem; font-variant-numeric:tabular-nums; margin-bottom:0.2rem; }
+    .score .own { color:var(--ok); font-weight:600; } .score .opp { color:var(--warn); font-weight:600; }
+    .bar { flex:1; height:0.7rem; background:var(--line); display:flex; border:1px solid var(--line); }
+    .bar .o { background:var(--ok); } .bar .e { background:var(--warn); }
+    .vs { font-size:0.66rem; color:var(--ink-muted); text-align:center; margin-bottom:0.5rem; }
+    /* contributor table */
+    .ctab { width:100%; border-collapse:collapse; font-size:0.68rem; }
+    .ctab caption { text-align:left; font-size:0.62rem; color:var(--ink-muted); letter-spacing:0.1em; padding:0.3rem 0 0.15rem; }
+    .ctab th { background:var(--sand-panel-muted); text-align:left; padding:0.2rem 0.4rem; font-size:0.6rem; color:var(--ink-muted); border-bottom:1px solid var(--line); }
+    .ctab td { padding:0.18rem 0.4rem; border-top:1px solid rgba(143,136,113,0.4); }
+    .ctab td.n { text-align:right; font-variant-numeric:tabular-nums; }
+    .ctab td.side-own { border-left:3px solid var(--ok); }
+    .ctab td.side-opp { border-left:3px solid var(--warn); }
+    .team { display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.64rem; margin-bottom:0.4rem; }
+    .team .t { border:1px solid var(--line); padding:0.15rem 0.45rem; background:var(--sand-panel-muted); }
+    .av { width:1.15rem; height:1.15rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.6rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); vertical-align:middle; flex:0 0 auto; }
+    .u { display:inline-flex; align-items:center; gap:0.3rem; vertical-align:middle; }
+    .u b { font-weight:600; } .uid { color:var(--ink-muted); font-size:0.62rem; }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok Battle 詳細 — デザイン案</strong>
+    <button class="mock-btn" onclick="show('before')">◀ BEFORE（現状）</button>
+    <button class="mock-btn on" onclick="show('after')">AFTER（案） ▶</button>
+    <span class="note">※ サンプルデータ。監視ページ活動ログの「Battle」タブ／履歴Session詳細に配置する想定。</span>
+  </div>
+
+  <!-- ===== BEFORE ===== -->
+  <div class="mock-view" id="view-before">
+    <div class="b-box">
+      <h2 class="panel-title">▌ 統計（Battle関連・現状）</h2>
+      <div class="b-stat"><span class="l">Battle</span><span class="v">2</span></div>
+      <div class="b-stat"><span class="l">Battle Score</span><span class="v">1,200</span></div>
+      <div class="b-note">
+        現状で分かるのは <b>Battle回数</b> と <b>自陣スコアの合算値</b> のみです。<br>
+        ・敵陣 / 相手スコア … 取得していない（イベントには含まれるが破棄）<br>
+        ・個人戦 / チーム戦の区別 … なし<br>
+        ・対戦相手 … なし<br>
+        ・いつのBattleか … Event Logに「Battle #id を受信」とだけ表示<br>
+        ・実弾で飛んだGift（誰がいくら）… なし<br>
+        ・送信者/貢献者のアイコン … なし（avatarは受信するが破棄）<br>
+        ・表示名と@idの区別 … unique_idのみで表示名(nickname)を併記せず<br>
+        ・勝敗 … なし<br>
+        ・Battleごとの個別表示 … なし（合算のみ）
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== AFTER ===== -->
+  <div class="mock-view on" id="view-after">
+    <div class="a-head">
+      <h2>@kawaii_live · Battle 一覧</h2>
+      <span class="sum">このSession: 2 Battle · 1勝1敗 · 自陣計 19,600 / 敵陣計 19,700</span>
+    </div>
+    <div class="bcards">
+
+      <!-- 個人戦 1v1 WIN -->
+      <div class="bcard">
+        <div class="bh">
+          <span class="id">BATTLE #2</span>
+          <span class="mode">個人戦 1v1</span>
+          <span class="when">21:14:32〜21:19:32 (5:00)</span>
+          <span class="res win">WIN</span>
+        </div>
+        <div class="bbody">
+          <div class="score">
+            <span class="own">自陣 12,400</span>
+            <span class="bar"><span class="o" style="width:56%"></span><span class="e" style="width:44%"></span></span>
+            <span class="opp">9,800 敵陣</span>
+          </div>
+          <div class="vs"><span class="u"><span class="av">か</span><b>かわいいLIVE</b><span class="uid">@kawaii_live</span></span> <b>vs</b> <span class="u"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span> · 差 +2,600</div>
+          <table class="ctab">
+            <caption>実弾Gift貢献（自陣 / 敵陣・diamond換算・表示名/@idで識別）</caption>
+            <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+            <tbody>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">3</td><td class="n">6,400</td></tr>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">8</td><td class="n">3,500</td></tr>
+              <tr><td class="side-own">自陣</td><td><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span></td><td class="n">5</td><td class="n">2,500</td></tr>
+              <tr><td class="side-opp">敵陣</td><td><span class="u"><span class="av">B</span><b>Big Spender</b><span class="uid">@big_spender</span></span></td><td class="n">2</td><td class="n">7,000</td></tr>
+              <tr><td class="side-opp">敵陣</td><td><span class="u"><span class="av">R</span><b>りばる</b><span class="uid">@rival_fan</span></span></td><td class="n">9</td><td class="n">2,800</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- チーム戦 2v2 LOSE -->
+      <div class="bcard">
+        <div class="bh">
+          <span class="id">BATTLE #1</span>
+          <span class="mode">チーム戦 2v2</span>
+          <span class="when">20:48:10〜20:53:10 (5:00)</span>
+          <span class="res lose">LOSE</span>
+        </div>
+        <div class="bbody">
+          <div class="score">
+            <span class="own">自チーム 7,200</span>
+            <span class="bar"><span class="o" style="width:42%"></span><span class="e" style="width:58%"></span></span>
+            <span class="opp">9,900 敵チーム</span>
+          </div>
+          <div class="team">
+            <span class="t" style="border-left:3px solid var(--ok);">自: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">か</span>かわいいLIVE</span> 4,100 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">D</span>duo</span> 3,100</span>
+            <span class="t" style="border-left:3px solid var(--warn);">敵: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">A</span>rivalA</span> 5,200 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">B</span>rivalB</span> 4,700</span>
+          </div>
+          <table class="ctab">
+            <caption>実弾Gift貢献（上位・diamond換算・表示名/@idで識別）</caption>
+            <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+            <tbody>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">2</td><td class="n">3,000</td></tr>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">6</td><td class="n">2,400</td></tr>
+              <tr><td class="side-opp">敵</td><td><span class="u"><span class="av">E</span><b>Enemy Whale</b><span class="uid">@enemy_whale</span></span></td><td class="n">3</td><td class="n">6,000</td></tr>
+              <tr><td class="side-opp">敵</td><td><span class="u"><span class="av">え</span><b>えねみー</b><span class="uid">@enemy_fan</span></span></td><td class="n">7</td><td class="n">2,100</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function show(which){
+      document.getElementById('view-before').classList.toggle('on', which==='before');
+      document.getElementById('view-after').classList.toggle('on', which==='after');
+      document.querySelectorAll('.mock-btn').forEach((b,i)=>b.classList.toggle('on', (which==='before')? i===0 : i===1));
+      window.scrollTo(0,0);
+    }
+  </script>
+</body>
+</html>

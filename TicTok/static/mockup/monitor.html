@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok 監視 — 画面デザイン案 (Before / After)</title>
+  <style>
+    :root {
+      --sand-bg: #b3ac98;
+      --sand-bg-deep: #a89f88;
+      --sand-panel: #cdc6ae;
+      --sand-panel-muted: #c2bba4;
+      --ink: #4d4a3f;
+      --ink-strong: #3b382f;
+      --ink-muted: #6f6a59;
+      --line: #8f8871;
+      --accent: #a96e49;
+      --accent-deep: #8e4f2f;
+      --invert-bg: #4d4a3f;
+      --invert-fg: #d8d2bc;
+      --ok: #5d6e4e;
+      --warn: #a4502f;
+      --shadow: rgba(59, 56, 47, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; min-height: 100%; }
+
+    body {
+      background:
+        radial-gradient(ellipse at 50% -20%, rgba(255, 250, 230, 0.25), transparent 60%),
+        var(--sand-bg);
+      color: var(--ink);
+      font-family: "Roboto Mono", "Noto Sans Mono", "Courier New", monospace;
+      letter-spacing: 0.04em;
+    }
+
+    /* ===== Mockup switcher (案の比較用、本番には含めない) ===== */
+    .mock-switch {
+      position: sticky;
+      top: 0;
+      z-index: 200;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.5rem 1rem;
+      background: var(--invert-bg);
+      color: var(--invert-fg);
+      border-bottom: 2px solid var(--line);
+      flex-wrap: wrap;
+    }
+    .mock-switch strong { letter-spacing: 0.2em; font-size: 0.8rem; }
+    .mock-switch .note { font-size: 0.7rem; color: rgba(216,210,188,0.7); }
+    .mock-btn {
+      font: inherit;
+      cursor: pointer;
+      padding: 0.3rem 1rem;
+      border: 1px solid var(--line);
+      background: var(--sand-panel-muted);
+      color: var(--ink-strong);
+      letter-spacing: 0.15em;
+    }
+    .mock-btn.on { background: var(--accent-deep); color: var(--invert-fg); border-color: var(--accent-deep); }
+    .mock-view { display: none; }
+    .mock-view.on { display: block; }
+
+    /* ============================================================
+       BEFORE : 既存レイアウト（縦積み・要スクロール）
+       ============================================================ */
+    .b-header {
+      padding: 1.2rem 5% 0.8rem;
+      border-bottom: 2px solid var(--line);
+      background: linear-gradient(to bottom, var(--sand-bg-deep), transparent);
+    }
+    .b-mark { color: var(--ink-strong); font-size: 0.7rem; letter-spacing: 0.5em; }
+    .b-header h1 {
+      margin: 0.2rem 0 0; font-size: 1.6rem; font-weight: 600;
+      color: var(--ink-strong); text-shadow: 0.12em 0.12em 0 rgba(59,56,47,0.18);
+    }
+    .b-sub { margin-top: 0.2rem; font-size: 0.72rem; color: var(--ink-muted); text-transform: uppercase; }
+    .b-nav { display: flex; gap: 0.5rem; margin-top: 0.7rem; flex-wrap: wrap; }
+    .b-nav a {
+      text-decoration: none; font-size: 0.78rem; letter-spacing: 0.15em;
+      color: var(--ink-muted); border: 1px solid var(--line);
+      background: var(--sand-panel-muted); padding: 0.3rem 0.9rem;
+    }
+    .b-nav a.active { background: var(--invert-bg); color: var(--invert-fg); }
+
+    .b-layout {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+      gap: 1rem; padding: 1rem 5% 1.5rem; align-items: start;
+    }
+    .panel {
+      background: var(--sand-panel); border: 1px solid var(--line);
+      box-shadow: 0.35rem 0.35rem 0 var(--shadow); padding: 0.9rem 1rem 1rem;
+    }
+    .panel-title {
+      margin: 0 0 0.8rem; font-size: 0.85rem; font-weight: 600;
+      color: var(--invert-fg); background: var(--invert-bg);
+      padding: 0.35rem 0.6rem; letter-spacing: 0.15em;
+    }
+    .b-span { grid-column: 1 / -1; }
+    .b-stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.5rem;
+    }
+    .b-stat {
+      border: 1px solid var(--line); background: var(--sand-panel-muted);
+      padding: 0.5rem 0.7rem; display: flex; flex-direction: column; gap: 0.25rem;
+    }
+    .b-stat .l { font-size: 0.68rem; letter-spacing: 0.18em; color: var(--ink-muted); }
+    .b-stat .v { font-size: 1.25rem; color: var(--ink-strong); }
+    .b-stat.acc { background: var(--invert-bg); }
+    .b-stat.acc .l { color: rgba(216,210,188,0.7); }
+    .b-stat.acc .v { color: var(--invert-fg); }
+    .b-fake-chart {
+      height: 16rem; background: var(--sand-panel-muted); border: 1px solid var(--line);
+      display: flex; align-items: flex-end; gap: 3px; padding: 0.6rem;
+    }
+    .b-fake-chart i { flex: 1; background: var(--accent); opacity: 0.7; }
+    .b-feed { display: flex; flex-direction: column; gap: 0.35rem; min-height: 14rem; }
+    .b-feed .it {
+      border-left: 3px solid var(--line); background: var(--sand-panel-muted);
+      padding: 0.4rem 0.6rem; font-size: 0.8rem;
+    }
+    .b-feed .it.gift { border-left-color: var(--accent-deep); background: rgba(169,110,73,0.14); }
+    .b-scroll-hint {
+      position: fixed; right: 0.6rem; bottom: 0.6rem; z-index: 50;
+      background: var(--warn); color: var(--invert-fg); font-size: 0.7rem;
+      padding: 0.4rem 0.7rem; border: 1px solid var(--line); letter-spacing: 0.1em;
+    }
+
+    /* ============================================================
+       AFTER : 単一画面ダッシュボード（高密度・スクロール最小）
+       ============================================================ */
+    .a-app {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      height: calc(100vh - 2.6rem); /* mock-switch分を控除 */
+      min-height: 38rem;
+    }
+
+    /* 行1: スリムなトップバー（タイトル極小 + nav + 追加入力 + 接続状態） */
+    .a-topbar {
+      display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+      padding: 0.35rem 1rem; border-bottom: 1px solid var(--line);
+      background: linear-gradient(to bottom, var(--sand-bg-deep), transparent);
+    }
+    .a-brand { display: flex; align-items: baseline; gap: 0.4rem; }
+    .a-brand .m { color: var(--ink-strong); letter-spacing: 0.3em; font-size: 0.7rem; }
+    .a-brand b { color: var(--ink-strong); font-size: 0.9rem; letter-spacing: 0.18em; }
+    .a-nav { display: flex; gap: 0.3rem; }
+    .a-nav a {
+      text-decoration: none; font-size: 0.72rem; letter-spacing: 0.12em;
+      color: var(--ink-muted); border: 1px solid var(--line);
+      background: var(--sand-panel-muted); padding: 0.2rem 0.7rem;
+    }
+    .a-nav a.active { background: var(--invert-bg); color: var(--invert-fg); }
+    .a-add { display: flex; align-items: center; margin-left: auto; border: 1px solid var(--line); background: var(--sand-panel-muted); }
+    .a-add .at { padding: 0 0.4rem; color: var(--ink-muted); border-right: 1px solid var(--line); }
+    .a-add input { border: 0; background: transparent; font: inherit; padding: 0.3rem 0.5rem; color: var(--ink-strong); outline: none; width: 9rem; }
+    .a-add button { font: inherit; border: 0; border-left: 1px solid var(--line); background: var(--invert-bg); color: var(--invert-fg); padding: 0.3rem 0.8rem; cursor: pointer; letter-spacing: 0.1em; }
+    .a-ws { display: flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; color: var(--ink-muted); }
+    .a-ws .dot { color: var(--ok); }
+
+    /* 行2: 監視対象タブ（状態ドット + 主要数値を内包＝切替前に概況が分かる） */
+    .a-tabs { display: flex; gap: 0.4rem; padding: 0.35rem 1rem; flex-wrap: wrap; border-bottom: 1px solid var(--line); background: var(--sand-bg-deep); }
+    .a-tab {
+      font: inherit; cursor: pointer; display: flex; align-items: center; gap: 0.5rem;
+      border: 1px solid var(--line); background: var(--sand-panel-muted);
+      color: var(--ink-muted); padding: 0.25rem 0.7rem; letter-spacing: 0.08em;
+    }
+    .a-tab.on { background: var(--invert-bg); color: var(--invert-fg); }
+    .a-tab .dot { font-size: 0.6rem; }
+    .a-tab .dot.live { color: var(--ok); }
+    .a-tab .dot.rec { color: var(--warn); }
+    .a-tab .mini { font-size: 0.66rem; opacity: 0.8; }
+
+    /* 行3: 3カラム ダッシュボード本体（各カラム内のみスクロール） */
+    .a-main {
+      display: grid;
+      grid-template-columns: minmax(0, 40fr) minmax(0, 35fr) minmax(0, 25fr);
+      gap: 0.6rem; padding: 0.6rem 1rem; min-height: 0;
+    }
+    .a-col { display: flex; flex-direction: column; gap: 0.6rem; min-height: 0; }
+    .a-card {
+      background: var(--sand-panel); border: 1px solid var(--line);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .a-card > h3 {
+      margin: 0; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.15em;
+      color: var(--invert-fg); background: var(--invert-bg); padding: 0.25rem 0.5rem;
+      display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+    }
+    .a-card > .body { padding: 0.5rem; min-height: 0; overflow: auto; }
+
+    /* --- 左カラム: LIVE preview を枠いっぱいに最大化（縦長9:16をレターボックスで中央表示） --- */
+    .a-livecard { flex: 1; min-height: 0; }
+    .a-videowrap { flex: 1; min-height: 0; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .a-video { block-size: 100%; inline-size: auto; max-inline-size: 100%; aspect-ratio: 9/16; background: #000; display: flex; align-items: center; justify-content: center; color: rgba(216,210,188,0.6); font-size: 0.72rem; }
+    .rec-badge { position: absolute; top: 0.4rem; left: 0.4rem; color: var(--warn); font-size: 0.7rem; background: rgba(0,0,0,0.45); padding: 0.1rem 0.45rem; }
+    .a-livefoot { flex: 0 0 auto; }
+    .a-statusline { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; flex-wrap: wrap; }
+    .badge { padding: 0.12rem 0.5rem; font-size: 0.66rem; letter-spacing: 0.18em; border: 1px solid var(--line); }
+    .badge.connected { background: var(--ok); color: var(--invert-fg); border-color: var(--ok); }
+    .a-steps { display: flex; gap: 0.25rem; padding: 0 0.5rem 0.4rem; flex-wrap: wrap; }
+    .a-steps i { font-style: normal; font-size: 0.62rem; padding: 0.15rem 0.4rem; border: 1px solid var(--line); background: var(--sand-panel-muted); color: var(--ink-muted); }
+    .a-steps i.done { color: var(--ink-strong); }
+    .a-steps i.done::before { content: "■ "; color: var(--ok); }
+    .a-actions { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.3rem; padding: 0.4rem 0.5rem; }
+    .a-actions button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--sand-panel-muted); color: var(--ink-strong); padding: 0.35rem 0.4rem; font-size: 0.72rem; }
+    .a-actions button.rec { background: var(--warn); color: var(--invert-fg); border-color: var(--warn); }
+    .a-actions button.danger { color: var(--accent-deep); }
+
+    /* --- 中央カラム: 高密度スタット + チャート --- */
+    .a-statgroup { margin-bottom: 0.4rem; }
+    .a-statgroup .gl { font-size: 0.62rem; letter-spacing: 0.2em; color: var(--ink-muted); margin: 0 0 0.25rem; text-transform: uppercase; }
+    /* コンパクト化: 1行に「ラベル左・値右」を収める（縦・横とも省スペース） */
+    .a-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.8rem, 1fr)); gap: 0.2rem 0.35rem; }
+    .a-stat { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.18rem 0.45rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.4rem; overflow: hidden; }
+    .a-stat .l { font-size: 0.6rem; letter-spacing: 0.04em; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .a-stat .v { font-size: 0.82rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; }
+    .a-stat.acc { background: var(--invert-bg); }
+    .a-stat.acc .l { color: rgba(216,210,188,0.7); }
+    .a-stat.acc .v { color: var(--invert-fg); }
+    .a-stat.rate { border-style: dashed; background: rgba(255,250,230,0.25); }
+    .a-stat .v .d { font-size: 0.56rem; color: var(--accent-deep); margin-left: 0.25rem; }
+    .a-stat .v .d.down { color: var(--ink-muted); }
+    /* 過去配信比較テーブル */
+    .a-cmp { width: 100%; border-collapse: collapse; font-size: 0.66rem; }
+    .a-cmp th, .a-cmp td { padding: 0.18rem 0.4rem; border-top: 1px solid rgba(143,136,113,0.4); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .a-cmp th { background: var(--invert-bg); color: var(--invert-fg); font-size: 0.6rem; letter-spacing: 0.06em; border-top: 0; position: sticky; top: 0; }
+    .a-cmp td.k, .a-cmp th.k { text-align: left; color: var(--ink-muted); }
+    .a-cmp td.now { color: var(--ink-strong); font-weight: 600; }
+    .a-cmp td.best { color: var(--accent-deep); }
+    .a-chartcard { flex: 1 1 50%; }
+    .a-fake-chart { height: 100%; min-height: 8rem; background: var(--sand-panel-muted); border: 1px solid var(--line); display: flex; align-items: flex-end; gap: 2px; padding: 0.5rem; }
+    .a-fake-chart i { flex: 1; background: var(--accent); opacity: 0.75; }
+
+    /* --- 右カラム: アクティビティ（セグメント切替の1ペイン） --- */
+    .a-seg { display: flex; gap: 0; }
+    .a-seg button { flex: 1; font: inherit; cursor: pointer; border: 1px solid var(--line); border-left: 0; background: var(--sand-panel-muted); color: var(--ink-muted); padding: 0.25rem 0; font-size: 0.66rem; letter-spacing: 0.06em; }
+    .a-seg button:first-child { border-left: 1px solid var(--line); }
+    .a-seg button.on { background: var(--invert-bg); color: var(--invert-fg); }
+    .a-seg .cnt { font-size: 0.58rem; opacity: 0.7; }
+    .a-feed { display: flex; flex-direction: column; gap: 0.3rem; }
+    .a-feed .it { border-left: 3px solid var(--line); background: var(--sand-panel-muted); padding: 0.3rem 0.5rem; font-size: 0.74rem; line-height: 1.4; }
+    .a-feed .it .meta { display: flex; justify-content: space-between; font-size: 0.6rem; color: var(--ink-muted); }
+    .a-feed .it.gift { border-left-color: var(--accent-deep); background: rgba(169,110,73,0.14); }
+    .a-feed .it.battle { border-left-color: var(--warn); background: rgba(164,80,47,0.12); }
+    .a-feed .it.follow { border-left-color: var(--ok); }
+    /* アイコン + 表示名/ID（表示名は変更可・@idで同定） */
+    .av { width:1.15rem; height:1.15rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.6rem; display:inline-flex; align-items:center; justify-content:center; flex:0 0 auto; border:1px solid var(--line); }
+    .u { display:inline-flex; align-items:center; gap:0.3rem; vertical-align:middle; }
+    .u b { font-weight:600; }
+    .uid { color:var(--ink-muted); font-size:0.62rem; }
+    .a-rank { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+    .a-rank th { position: sticky; top: 0; background: var(--invert-bg); color: var(--invert-fg); text-align: left; padding: 0.25rem 0.4rem; font-size: 0.62rem; }
+    .a-rank td { padding: 0.22rem 0.4rem; border-top: 1px solid rgba(143,136,113,0.45); }
+    .a-rank td.n { text-align: right; font-variant-numeric: tabular-nums; }
+
+    /* 行4: フッター */
+    .a-footer { display: flex; align-items: center; gap: 0.6rem; padding: 0.3rem 1rem; border-top: 1px solid var(--line); background: var(--sand-bg-deep); font-size: 0.68rem; color: var(--ink-muted); }
+    .a-footer .right { margin-left: auto; letter-spacing: 0.3em; text-transform: uppercase; }
+
+    @media (max-width: 60rem) {
+      .a-app { height: auto; }
+      .a-main { grid-template-columns: 1fr; }
+      .a-card > .body { overflow: visible; }
+    }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok 監視ページ — デザイン案</strong>
+    <button class="mock-btn" id="btn-before" onclick="show('before')">◀ BEFORE（現状）</button>
+    <button class="mock-btn on" id="btn-after" onclick="show('after')">AFTER（案） ▶</button>
+    <span class="note">※ サンプルデータ・静的モックです。ボタンで切替できます。</span>
+  </div>
+
+  <!-- ============================ BEFORE ============================ -->
+  <div class="mock-view" id="view-before">
+    <header class="b-header">
+      <div class="b-mark">■</div>
+      <h1>TicTok : LIVE MONITOR</h1>
+      <div class="b-sub">TikTok LIVE Event Collector — YoRHa Interface</div>
+      <nav class="b-nav">
+        <a class="active" href="#">▌ 監視</a>
+        <a href="#">▌ 全体監視</a>
+        <a href="#">▌ 履歴</a>
+        <a href="#">▌ 設定</a>
+      </nav>
+    </header>
+
+    <main class="b-layout">
+      <section class="panel b-span">
+        <h2 class="panel-title">▌ 監視対象の追加</h2>
+        <div style="display:flex;gap:0.8rem;align-items:flex-end;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;border:1px solid var(--line);background:var(--sand-panel-muted);">
+            <span style="padding:0 0.5rem;color:var(--ink-muted);border-right:1px solid var(--line);">@</span>
+            <input placeholder="username" style="border:0;background:transparent;font:inherit;padding:0.55rem;outline:none;">
+          </div>
+          <button style="font:inherit;background:var(--invert-bg);color:var(--invert-fg);border:1px solid var(--line);padding:0.55rem 1.4rem;cursor:pointer;">監視開始</button>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-top:0.9rem;flex-wrap:wrap;">
+          <span class="b-stat" style="padding:0.4rem 1rem;background:var(--invert-bg);color:var(--invert-fg);">● @kawaii_live</span>
+          <span class="b-stat" style="padding:0.4rem 1rem;">● @music_room</span>
+        </div>
+      </section>
+
+      <section class="panel b-span">
+        <h2 class="panel-title">▌ @kawaii_live の監視状況</h2>
+        <div style="display:flex;gap:0.8rem;align-items:center;flex-wrap:wrap;">
+          <span class="badge connected" style="padding:0.15rem 0.6rem;">CONNECTED</span>
+          <span style="font-size:0.85rem;">LIVE接続中</span>
+          <span style="margin-left:auto;display:flex;gap:0.5rem;">
+            <button style="font:inherit;border:1px solid var(--line);background:var(--warn);color:var(--invert-fg);padding:0.5rem 1rem;">■ 録画停止</button>
+            <button style="font:inherit;border:1px solid var(--line);background:var(--sand-panel-muted);padding:0.5rem 1rem;">停止</button>
+            <button style="font:inherit;border:1px solid var(--line);background:var(--sand-panel-muted);padding:0.5rem 1rem;">監視解除</button>
+          </span>
+        </div>
+        <div style="margin-top:0.7rem;background:#000;border:1px solid var(--line);height:18rem;display:flex;align-items:center;justify-content:center;color:rgba(216,210,188,0.6);">● LIVE Preview（録画中の映像）</div>
+      </section>
+
+      <section class="panel b-span">
+        <h2 class="panel-title">▌ 統計</h2>
+        <div class="b-stats">
+          <div class="b-stat"><span class="l">視聴者数</span><span class="v">1,284</span></div>
+          <div class="b-stat"><span class="l">累計視聴者</span><span class="v">9,402</span></div>
+          <div class="b-stat"><span class="l">累計Like</span><span class="v">58,210</span></div>
+          <div class="b-stat acc"><span class="l">Gift数</span><span class="v">342</span></div>
+          <div class="b-stat acc"><span class="l">Diamonds</span><span class="v">18,650</span></div>
+          <div class="b-stat"><span class="l">Comment数</span><span class="v">2,109</span></div>
+          <div class="b-stat"><span class="l">Follow</span><span class="v">87</span></div>
+          <div class="b-stat"><span class="l">Share</span><span class="v">41</span></div>
+          <div class="b-stat"><span class="l">入室数</span><span class="v">3,560</span></div>
+          <div class="b-stat"><span class="l">Battle</span><span class="v">2</span></div>
+          <div class="b-stat"><span class="l">Battle Score</span><span class="v">1,200</span></div>
+          <div class="b-stat"><span class="l">受信Event</span><span class="v">12,884</span></div>
+          <div class="b-stat"><span class="l">接続時間</span><span class="v">01:42:09</span></div>
+          <div class="b-stat"><span class="l">Gift/分</span><span class="v">8.2</span></div>
+          <div class="b-stat"><span class="l">Diamonds/分</span><span class="v">221</span></div>
+          <div class="b-stat"><span class="l">Comment/分</span><span class="v">31</span></div>
+          <div class="b-stat"><span class="l">Like/分</span><span class="v">640</span></div>
+        </div>
+      </section>
+
+      <section class="panel b-span">
+        <h2 class="panel-title">▌ Timeline</h2>
+        <div class="b-fake-chart">
+          <i style="height:30%"></i><i style="height:50%"></i><i style="height:45%"></i><i style="height:70%"></i><i style="height:60%"></i><i style="height:85%"></i><i style="height:55%"></i><i style="height:75%"></i><i style="height:90%"></i><i style="height:65%"></i><i style="height:80%"></i><i style="height:50%"></i>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">▌ Gift</h2>
+        <div class="b-feed">
+          <div class="it gift">@fan_01 → Rose ×10 (100💎)</div>
+          <div class="it gift">@whale_kun → Galaxy ×1 (1000💎)</div>
+          <div class="it gift">@nico → Finger Heart ×5 (25💎)</div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">▌ Comment</h2>
+        <div class="b-feed">
+          <div class="it">@user_a: かわいい！</div>
+          <div class="it">@user_b: 今日も配信ありがとう</div>
+          <div class="it">@user_c: 🎉🎉🎉</div>
+        </div>
+      </section>
+
+      <section class="panel b-span">
+        <h2 class="panel-title">▌ Event Log</h2>
+        <div class="b-feed">
+          <div class="it gift">GIFT @fan_01 Rose ×10</div>
+          <div class="it">FOLLOW @new_fan がフォローしました</div>
+          <div class="it">JOIN @user_d が入室</div>
+        </div>
+      </section>
+
+      <p style="grid-column:1/-1;text-align:center;color:var(--ink-muted);font-size:0.75rem;">…さらに「Result 分析」テーブル（UserごとのGift / Gift種類別）が下に続く（要スクロール）…</p>
+    </main>
+    <div class="b-scroll-hint">⚠ 全体把握に縦スクロール多数</div>
+  </div>
+
+  <!-- ============================ AFTER ============================ -->
+  <div class="mock-view on" id="view-after">
+    <div class="a-app">
+      <!-- 行1: スリムトップバー -->
+      <div class="a-topbar">
+        <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+        <nav class="a-nav">
+          <a class="active" href="#">監視</a>
+          <a href="#">全体監視</a>
+          <a href="#">履歴</a>
+          <a href="#">設定</a>
+        </nav>
+        <div class="a-add">
+          <span class="at">@</span>
+          <input placeholder="username で監視追加" />
+          <button>監視開始</button>
+        </div>
+        <div class="a-ws"><span class="dot">●</span> Server接続中</div>
+      </div>
+
+      <!-- 行2: 監視対象タブ（概況内包） -->
+      <div class="a-tabs">
+        <button class="a-tab on"><span class="dot live">●</span><span class="av" style="width:0.95rem;height:0.95rem;">か</span> かわいいLIVE <span class="uid" style="color:var(--invert-fg);opacity:0.7;">@kawaii_live</span> <span class="mini">👁1.2k · 💎18.6k · ●REC</span></button>
+        <button class="a-tab"><span class="dot live">●</span><span class="av" style="width:0.95rem;height:0.95rem;">M</span> Music Room <span class="uid">@music_room</span> <span class="mini">👁840 · 💎4.2k</span></button>
+        <button class="a-tab"><span class="dot" style="color:var(--ink-muted)">●</span><span class="av" style="width:0.95rem;height:0.95rem;">G</span> Game Ch <span class="uid">@game_ch</span> <span class="mini">待機中</span></button>
+      </div>
+
+      <!-- 行3: 3カラム ダッシュボード -->
+      <div class="a-main">
+        <!-- 左(40%): LIVE Preview を枠いっぱいに最大化 -->
+        <div class="a-col">
+          <div class="a-card a-livecard">
+            <h3><span class="u"><span class="av">か</span><b>かわいいLIVE</b><span class="uid" style="color:rgba(216,210,188,0.7);">@kawaii_live</span></span> <span class="badge connected">CONNECTED</span></h3>
+            <div class="a-videowrap">
+              <div class="a-video">● LIVE Preview（縦長 9:16）</div>
+              <span class="rec-badge">● REC 24:31 / 312MB</span>
+            </div>
+            <div class="a-livefoot">
+              <div class="a-statusline">
+                <span style="font-size:0.72rem;">接続時間 01:42:09 · simulation</span>
+              </div>
+              <div class="a-steps">
+                <i class="done">ID解決</i><i class="done">接続</i><i class="done">LIVE取得</i><i class="done">収集</i>
+              </div>
+              <div class="a-actions">
+                <button class="rec">■ 録画停止</button>
+                <button>停止</button>
+                <button>再開</button>
+                <button class="danger">監視解除</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 中央: STATS と TIMELINE を上下 50% / 50% -->
+        <div class="a-col">
+          <div class="a-card" style="flex:1 1 50%;">
+            <h3>STATS <span style="font-size:0.6rem;opacity:0.7;">現在 / 累計 / レート</span></h3>
+            <div class="body">
+              <div class="a-statgroup">
+                <p class="gl">現在 / 累計</p>
+                <div class="a-statgrid">
+                  <div class="a-stat"><span class="l">視聴者</span><span class="v">1,284<span class="d">▲52</span></span></div>
+                  <div class="a-stat"><span class="l">入室</span><span class="v">3,560</span></div>
+                  <div class="a-stat"><span class="l">接続</span><span class="v">1:42:09</span></div>
+                  <div class="a-stat acc"><span class="l">Gift</span><span class="v">342</span></div>
+                  <div class="a-stat acc"><span class="l">💎</span><span class="v">18,650</span></div>
+                  <div class="a-stat"><span class="l">Like</span><span class="v">58,210</span></div>
+                  <div class="a-stat"><span class="l">Comm</span><span class="v">2,109</span></div>
+                  <div class="a-stat"><span class="l">Follow</span><span class="v">87</span></div>
+                  <div class="a-stat"><span class="l">Share</span><span class="v">41</span></div>
+                  <div class="a-stat"><span class="l">累計視聴</span><span class="v">9,402</span></div>
+                  <div class="a-stat"><span class="l">Battle</span><span class="v">2</span></div>
+                  <div class="a-stat" title="Battle(LinkMic対戦)中の自陣スコア合計。詳細は活動ログのBattleタブ"><span class="l">Battle Score</span><span class="v">1,200</span></div>
+                  <div class="a-stat"><span class="l">Event</span><span class="v">12,884</span></div>
+                  <div class="a-stat rate"><span class="l">Gift/分</span><span class="v">8.2</span></div>
+                  <div class="a-stat rate"><span class="l">💎/分</span><span class="v">221</span></div>
+                  <div class="a-stat rate"><span class="l">Comm/分</span><span class="v">31</span></div>
+                  <div class="a-stat rate"><span class="l">Like/分</span><span class="v">640</span></div>
+                </div>
+              </div>
+              <div class="a-statgroup">
+                <p class="gl">過去配信との比較（@kawaii_live · 直近DB履歴）</p>
+                <table class="a-cmp">
+                  <thead><tr><th class="k">指標</th><th>今回</th><th>前回</th><th>平均(5)</th><th>自己Best</th></tr></thead>
+                  <tbody>
+                    <tr><td class="k">Gift</td><td class="now">342</td><td>280</td><td>261</td><td class="best">512</td></tr>
+                    <tr><td class="k">💎</td><td class="now">18,650</td><td>12,400</td><td>10,900</td><td class="best">24,300</td></tr>
+                    <tr><td class="k">視聴者Peak</td><td class="now">1,284</td><td>980</td><td>1,020</td><td class="best">2,110</td></tr>
+                    <tr><td class="k">Comment</td><td class="now">2,109</td><td>1,800</td><td>1,650</td><td class="best">3,400</td></tr>
+                    <tr><td class="k">配信時間</td><td class="now">1:42</td><td>1:20</td><td>1:31</td><td class="best">3:05</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div class="a-card a-chartcard">
+            <h3>TIMELINE <span style="font-size:0.6rem;opacity:0.7;">凡例clickで系列切替</span></h3>
+            <div class="body" style="padding:0.4rem;">
+              <div class="a-fake-chart">
+                <i style="height:30%"></i><i style="height:50%"></i><i style="height:45%"></i><i style="height:70%"></i><i style="height:60%"></i><i style="height:85%"></i><i style="height:55%"></i><i style="height:75%"></i><i style="height:90%"></i><i style="height:65%"></i><i style="height:80%"></i><i style="height:50%"></i><i style="height:72%"></i><i style="height:88%"></i><i style="height:60%"></i><i style="height:95%"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右: アクティビティ（セグメント切替の1ペイン） -->
+        <div class="a-col">
+          <div class="a-card" style="flex:1;">
+            <h3 style="padding:0;background:transparent;">
+              <div class="a-seg" style="width:100%;">
+                <button class="on" onclick="seg(this,'feed-all')">Gift <span class="cnt">342</span></button>
+                <button onclick="seg(this,'feed-comment')">Comment <span class="cnt">2.1k</span></button>
+                <button onclick="seg(this,'feed-event')">Event <span class="cnt">12.8k</span></button>
+                <button onclick="seg(this,'feed-battle')">Battle <span class="cnt">2</span></button>
+                <button onclick="seg(this,'feed-rank')">Ranking</button>
+              </div>
+            </h3>
+            <div class="body">
+              <div class="a-feed" data-pane="feed-all">
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span> → Galaxy ×1 (1,000💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:55</span></div><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span> → Rose ×10 (100💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:40:31</span></div><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span> → Finger Heart ×5 (25💎)</div>
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:39:50</span></div><span class="u"><span class="av">そ</span><b>そら</b><span class="uid">@sora</span></span> → Sunglasses ×2 (2💎)</div>
+              </div>
+              <div class="a-feed" data-pane="feed-comment" style="display:none;">
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:10</span></div><span class="u"><span class="av">A</span><b>あいり</b><span class="uid">@user_a</span></span>: かわいい！</div>
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:41:02</span></div><span class="u"><span class="av">B</span><b>Bob</b><span class="uid">@user_b</span></span>: 今日も配信ありがとう</div>
+                <div class="it"><div class="meta"><span>COMMENT</span><span>22:40:48</span></div><span class="u"><span class="av">C</span><b>ちゃん</b><span class="uid">@user_c</span></span>: 🎉🎉🎉</div>
+              </div>
+              <div class="a-feed" data-pane="feed-event" style="display:none;">
+                <div class="it gift"><div class="meta"><span>GIFT</span><span>22:41:08</span></div><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span> Galaxy ×1</div>
+                <div class="it follow"><div class="meta"><span>FOLLOW</span><span>22:40:59</span></div><span class="u"><span class="av">N</span><b>新規さん</b><span class="uid">@new_fan</span></span> がフォロー</div>
+                <div class="it battle"><div class="meta"><span>BATTLE</span><span>22:40:30</span></div>Battle開始 vs <span class="u"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span></div>
+                <div class="it"><div class="meta"><span>JOIN</span><span>22:40:12</span></div><span class="u"><span class="av">D</span><b>でぃー</b><span class="uid">@user_d</span></span> が入室</div>
+              </div>
+              <div data-pane="feed-battle" style="display:none;">
+                <div class="a-feed">
+                  <div class="it battle" style="border-left-width:4px;">
+                    <div class="meta"><span>BATTLE #2 · 個人戦(1v1)</span><span>21:14:32〜 5:00</span></div>
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin:0.2rem 0;font-variant-numeric:tabular-nums;">
+                      <b style="color:var(--ok);">自陣 12,400</b>
+                      <span style="flex:1;height:0.5rem;background:var(--line);display:flex;">
+                        <span style="width:56%;background:var(--ok);"></span><span style="width:44%;background:var(--warn);"></span>
+                      </span>
+                      <b style="color:var(--warn);">9,800 敵陣</b>
+                    </div>
+                    <div style="font-size:0.64rem;color:var(--ink-muted);">vs <b>Rival Star</b> @rival_star · 結果 <b style="color:var(--ok);">WIN</b> · 実弾Gift 18件 / 上位 <span class="av" style="width:0.9rem;height:0.9rem;">W</span> Whale King 6,400💎</div>
+                  </div>
+                  <div class="it battle" style="border-left-width:4px;">
+                    <div class="meta"><span>BATTLE #1 · チーム戦(2v2)</span><span>20:48:10〜 5:00</span></div>
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin:0.2rem 0;font-variant-numeric:tabular-nums;">
+                      <b style="color:var(--ok);">自陣 7,200</b>
+                      <span style="flex:1;height:0.5rem;background:var(--line);display:flex;">
+                        <span style="width:42%;background:var(--ok);"></span><span style="width:58%;background:var(--warn);"></span>
+                      </span>
+                      <b style="color:var(--warn);">9,900 敵陣</b>
+                    </div>
+                    <div style="font-size:0.64rem;color:var(--ink-muted);">味方 @kawaii_live+@duo_chan / 相手 @rivalA+@rivalB · 結果 <b style="color:var(--warn);">LOSE</b> · 実弾Gift 25件</div>
+                  </div>
+                </div>
+                <p style="font-size:0.62rem;color:var(--ink-muted);margin:0.3rem 0 0;">※ 行clickで各Battleの実弾Gift内訳（誰がいくら）まで展開 → battle.html 参照</p>
+              </div>
+              <div data-pane="feed-rank" style="display:none;">
+                <table class="a-rank">
+                  <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+                  <tbody>
+                    <tr><td>1</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">12</td><td class="n">9,400</td></tr>
+                    <tr><td>2</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">48</td><td class="n">3,200</td></tr>
+                    <tr><td>3</td><td><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span></td><td class="n">31</td><td class="n">1,150</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 行4: フッター -->
+      <div class="a-footer">
+        <span class="dot" style="color:var(--ok);">●</span> Server接続中
+        <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function show(which) {
+      document.getElementById('view-before').classList.toggle('on', which === 'before');
+      document.getElementById('view-after').classList.toggle('on', which === 'after');
+      document.getElementById('btn-before').classList.toggle('on', which === 'before');
+      document.getElementById('btn-after').classList.toggle('on', which === 'after');
+      window.scrollTo(0, 0);
+    }
+    function seg(btn, pane) {
+      btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      document.querySelectorAll('[data-pane]').forEach(p => {
+        p.style.display = (p.dataset.pane === pane) ? '' : 'none';
+      });
+    }
+  </script>
+</body>
+</html>
