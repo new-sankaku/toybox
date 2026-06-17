@@ -53,7 +53,7 @@
     .b-fake-chart i { flex:1; background:var(--accent); opacity:0.7; }
 
     /* ============ AFTER: master-detail ============ */
-    .a-app { display:grid; grid-template-rows:auto auto 1fr auto; min-height:calc(100vh - 2.6rem); }
+    .a-app { display:grid; grid-template-rows:auto auto auto 1fr auto; height:calc(100vh - 2.6rem); }
     .a-kpibar { display:flex; gap:0.4rem; flex-wrap:wrap; padding:0.4rem 1rem; background:var(--sand-bg-deep); border-bottom:1px solid var(--line); }
     .a-chip { display:flex; flex-direction:column; gap:0.1rem; border:1px solid var(--line); background:var(--invert-bg); color:var(--invert-fg); padding:0.25rem 0.6rem; min-width:6rem; }
     .a-chip .l { font-size:0.58rem; letter-spacing:0.1em; color:rgba(216,210,188,0.7); } .a-chip .v { font-size:0.95rem; font-variant-numeric:tabular-nums; }
@@ -78,6 +78,36 @@
     .a-fake-chart { height:9rem; background:var(--sand-panel-muted); border:1px solid var(--line); display:flex; align-items:flex-end; gap:2px; padding:0.4rem; margin-bottom:0.5rem; }
     .a-fake-chart i { flex:1; background:var(--accent); opacity:0.75; }
     @media (max-width:60rem){ .a-app{ height:auto; } .a-main{ grid-template-columns:1fr; } }
+
+    /* Excel的一覧 + 選択でグラフ */
+    .x-toolbar { display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; padding:0.35rem 1rem; background:var(--sand-bg-deep); border-bottom:1px solid var(--line); font-size:0.68rem; color:var(--ink-muted); }
+    .x-toolbar input, .x-toolbar select, .x-toolbar button { font:inherit; font-size:0.68rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); padding:0.2rem 0.45rem; }
+    .x-toolbar .sp { margin-left:auto; }
+    .x-split { display:grid; grid-template-rows:1fr auto; min-height:0; }
+    .x-tablewrap { overflow:auto; border-bottom:2px solid var(--line); }
+    .xtab { width:100%; border-collapse:collapse; font-size:0.7rem; white-space:nowrap; }
+    .xtab th { position:sticky; top:0; z-index:1; background:var(--invert-bg); color:var(--invert-fg); text-align:left; padding:0.3rem 0.55rem; font-size:0.62rem; letter-spacing:0.04em; cursor:pointer; border-right:1px solid rgba(216,210,188,0.15); }
+    .xtab th.n, .xtab td.n { text-align:right; font-variant-numeric:tabular-nums; }
+    .xtab td { padding:0.25rem 0.55rem; border-top:1px solid rgba(143,136,113,0.4); border-right:1px solid rgba(143,136,113,0.25); }
+    .xtab tbody tr:nth-child(even) { background:rgba(255,250,230,0.16); }
+    .xtab tbody tr { cursor:pointer; }
+    .xtab tbody tr.sel { background:rgba(169,110,73,0.2); }
+    .xtab tbody tr:hover { background:rgba(255,250,230,0.32); }
+    .st { font-size:0.58rem; padding:0.02rem 0.4rem; border:1px solid var(--line); }
+    .st.ended { background:var(--invert-bg); color:var(--invert-fg); }
+    .st.live { background:var(--ok); color:var(--invert-fg); border-color:var(--ok); }
+    .x-graph { background:var(--sand-panel); padding:0.4rem 1rem 0.5rem; }
+    .x-graph .gh { display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap; margin-bottom:0.3rem; }
+    .x-graph .gh b { font-size:0.74rem; color:var(--ink-strong); letter-spacing:0.08em; }
+    .x-graph .gh .leg { font-size:0.62rem; color:var(--ink-muted); }
+    .x-graph .gh .leg .sw { display:inline-block; width:0.7rem; height:0.45rem; vertical-align:middle; margin-right:0.2rem; }
+    .x-bars { height:8rem; display:flex; align-items:flex-end; gap:0.5rem; border:1px solid var(--line); background:var(--sand-panel-muted); padding:0.4rem 0.5rem; }
+    .x-bars .col { flex:1; display:flex; flex-direction:column; align-items:center; gap:0.15rem; height:100%; justify-content:flex-end; }
+    .x-bars .col .pair { display:flex; align-items:flex-end; gap:2px; flex:1; width:100%; justify-content:center; }
+    .x-bars .col .pair i { width:38%; display:block; }
+    .x-bars .col .pair i.g { background:var(--accent-deep); }
+    .x-bars .col .pair i.d { background:var(--accent); opacity:0.7; }
+    .x-bars .col span { font-size:0.56rem; color:var(--ink-muted); }
   </style>
 </head>
 <body>
@@ -146,74 +176,57 @@
         <div class="a-chip"><span class="l">録画数</span><span class="v">19</span></div>
       </div>
 
-      <!-- master-detail -->
-      <div class="a-main">
-        <!-- 左: フィルタ + Session一覧（選択） -->
-        <div class="a-col">
-          <div class="a-card" style="flex:1;">
-            <h3>SESSION 一覧 <span style="font-size:0.6rem;opacity:0.7;">行clickで右に詳細</span></h3>
-            <div class="a-filter">
-              <input placeholder="配信者で絞込 @..." style="flex:1;">
-              <select><option>新しい順</option><option>Gift順</option><option>💎順</option></select>
-            </div>
-            <div class="body" style="padding:0;">
-              <table class="a-slist">
-                <thead><tr><th>配信者</th><th>開始</th><th>時間</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
-                <tbody>
-                  <tr class="sel"><td>@kawaii_live</td><td>06/15 21:00</td><td>3:05</td><td class="n">512</td><td class="n">24,300</td></tr>
-                  <tr><td>@music_room</td><td>06/14 20:30</td><td>1:20</td><td class="n">96</td><td class="n">4,200</td></tr>
-                  <tr><td>@kawaii_live</td><td>06/13 21:10</td><td>2:40</td><td class="n">410</td><td class="n">18,900</td></tr>
-                  <tr><td>@game_ch</td><td>06/12 19:00</td><td>0:55</td><td class="n">61</td><td class="n">2,100</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+      <!-- ツールバー: 絞込・並替・列表示・出力 -->
+      <div class="x-toolbar">
+        <input placeholder="🔎 配信者 / Memo で絞込">
+        <select><option>全期間</option><option>今日</option><option>今週</option><option>今月</option></select>
+        <select><option>状態: 全て</option><option>ended</option><option>収集中</option></select>
+        <select><option>並替: 開始(新しい順)</option><option>Gift 多い順</option><option>💎 多い順</option><option>配信者</option></select>
+        <span class="sp"></span>
+        <button>列の表示…</button><button>CSV出力</button>
+      </div>
+
+      <!-- Excel的一覧（上） + 選択でグラフ（下） -->
+      <div class="x-split">
+        <div class="x-tablewrap">
+          <table class="xtab">
+            <thead>
+              <tr>
+                <th>#</th><th>配信者</th><th>開始</th><th>終了</th><th>時間</th><th>状態</th>
+                <th class="n">Gift</th><th class="n">💎</th><th class="n">Gift送信者</th><th class="n">Comment</th>
+                <th class="n">Like</th><th class="n">Follow</th><th class="n">Share</th><th class="n">入室</th>
+                <th class="n">Battle</th><th class="n">B.Score</th><th class="n">視聴Peak</th><th>録画</th><th>Memo</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="sel"><td>128</td><td>@kawaii_live</td><td>06/15 21:00</td><td>00:05</td><td>3:05</td><td><span class="st ended">ended</span></td>
+                <td class="n">512</td><td class="n">24,300</td><td class="n">88</td><td class="n">3,400</td><td class="n">102,000</td><td class="n">210</td><td class="n">96</td><td class="n">5,800</td><td class="n">3</td><td class="n">1,200</td><td class="n">2,110</td><td>2本</td><td>神回</td><td>詳細 / DL</td></tr>
+              <tr><td>127</td><td>@music_room</td><td>06/14 20:30</td><td>21:50</td><td>1:20</td><td><span class="st ended">ended</span></td>
+                <td class="n">96</td><td class="n">4,200</td><td class="n">31</td><td class="n">1,800</td><td class="n">21,500</td><td class="n">54</td><td class="n">22</td><td class="n">1,900</td><td class="n">0</td><td class="n">0</td><td class="n">980</td><td>-</td><td>-</td><td>詳細 / DL</td></tr>
+              <tr><td>126</td><td>@kawaii_live</td><td>06/13 21:10</td><td>23:50</td><td>2:40</td><td><span class="st ended">ended</span></td>
+                <td class="n">410</td><td class="n">18,900</td><td class="n">72</td><td class="n">2,900</td><td class="n">88,000</td><td class="n">180</td><td class="n">80</td><td class="n">5,100</td><td class="n">2</td><td class="n">900</td><td class="n">1,760</td><td>1本</td><td>-</td><td>詳細 / DL</td></tr>
+              <tr><td>125</td><td>@game_ch</td><td>06/12 19:00</td><td>19:55</td><td>0:55</td><td><span class="st ended">ended</span></td>
+                <td class="n">61</td><td class="n">2,100</td><td class="n">18</td><td class="n">1,100</td><td class="n">12,400</td><td class="n">33</td><td class="n">12</td><td class="n">1,200</td><td class="n">1</td><td class="n">300</td><td class="n">640</td><td>-</td><td>-</td><td>詳細 / DL</td></tr>
+              <tr><td>124</td><td>@kawaii_live</td><td>06/11 21:05</td><td>23:10</td><td>2:05</td><td><span class="st ended">ended</span></td>
+                <td class="n">280</td><td class="n">12,400</td><td class="n">60</td><td class="n">2,300</td><td class="n">61,000</td><td class="n">140</td><td class="n">55</td><td class="n">4,200</td><td class="n">1</td><td class="n">500</td><td class="n">1,020</td><td>1本</td><td>-</td><td>詳細 / DL</td></tr>
+              <tr><td>123</td><td>@music_room</td><td>06/10 20:40</td><td>22:00</td><td>1:20</td><td><span class="st ended">ended</span></td>
+                <td class="n">120</td><td class="n">5,600</td><td class="n">38</td><td class="n">2,000</td><td class="n">25,000</td><td class="n">62</td><td class="n">28</td><td class="n">2,100</td><td class="n">0</td><td class="n">0</td><td class="n">1,100</td><td>-</td><td>-</td><td>詳細 / DL</td></tr>
+            </tbody>
+          </table>
         </div>
 
-        <!-- 右: 選択Sessionの詳細（タブ切替で1ペイン: 概要/Ranking/録画/全体集計） -->
-        <div class="a-col">
-          <div class="a-card" style="flex:1;">
-            <h3 style="padding:0;background:transparent;">
-              <div class="a-seg" style="width:100%;">
-                <button class="on" onclick="seg(this,'p-sum')">概要</button>
-                <button onclick="seg(this,'p-rank')">Ranking</button>
-                <button onclick="seg(this,'p-rec')">録画</button>
-                <button onclick="seg(this,'p-agg')">全体集計</button>
-              </div>
-            </h3>
-            <div class="body">
-              <div data-pane="p-sum">
-                <div style="font-size:0.72rem;color:var(--ink-muted);margin-bottom:0.4rem;">Session #128 · @kawaii_live · 06/15 21:00 〜 (3:05) · ended</div>
-                <div class="d-chips">
-                  <div class="d-chip"><span class="l">Gift</span><span class="v">512</span></div>
-                  <div class="d-chip"><span class="l">💎</span><span class="v">24,300</span></div>
-                  <div class="d-chip"><span class="l">Gift送信者</span><span class="v">88</span></div>
-                  <div class="d-chip"><span class="l">Comment</span><span class="v">3,400</span></div>
-                  <div class="d-chip"><span class="l">Like</span><span class="v">102,000</span></div>
-                  <div class="d-chip"><span class="l">Battle</span><span class="v">3</span></div>
-                </div>
-                <div class="a-fake-chart"><i style="height:35%"></i><i style="height:55%"></i><i style="height:48%"></i><i style="height:72%"></i><i style="height:64%"></i><i style="height:88%"></i><i style="height:58%"></i><i style="height:78%"></i><i style="height:92%"></i><i style="height:66%"></i></div>
-                <div style="display:flex;gap:0.4rem;align-items:center;">
-                  <input placeholder="このSessionのMemo…" style="flex:1;font:inherit;font-size:0.7rem;border:1px solid var(--line);background:var(--sand-panel-muted);padding:0.35rem 0.5rem;">
-                  <button style="font:inherit;font-size:0.7rem;border:1px solid var(--line);background:var(--invert-bg);color:var(--invert-fg);padding:0.35rem 0.8rem;">保存</button>
-                </div>
-              </div>
-              <div data-pane="p-rank" style="display:none;">
-                <table class="t"><thead><tr><th>#</th><th>User</th><th class="n">Gift</th><th class="n">💎</th><th>主なGift</th></tr></thead>
-                  <tbody><tr><td>1</td><td>@whale_kun</td><td class="n">12</td><td class="n">9,400</td><td>Galaxy</td></tr>
-                  <tr><td>2</td><td>@fan_01</td><td class="n">48</td><td class="n">3,200</td><td>Rose</td></tr></tbody></table>
-              </div>
-              <div data-pane="p-rec" style="display:none;">
-                <table class="t"><thead><tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th class="n">Size</th><th>操作</th></tr></thead>
-                  <tbody><tr><td>1</td><td>kawaii_live_2106.mp4</td><td>720p</td><td>完了</td><td>3:05</td><td class="n">2.1GB</td><td>DL / 削除</td></tr></tbody></table>
-              </div>
-              <div data-pane="p-agg" style="display:none;">
-                <div style="font-size:0.7rem;color:var(--ink-muted);margin-bottom:0.4rem;">配信者別の累計（全Session）</div>
-                <table class="t"><thead><tr><th>#</th><th>配信者</th><th class="n">Session</th><th class="n">Gift</th><th class="n">💎</th><th class="n">Comment</th></tr></thead>
-                  <tbody><tr><td>1</td><td>@kawaii_live</td><td class="n">18</td><td class="n">6,200</td><td class="n">312,000</td><td class="n">48,000</td></tr>
-                  <tr><td>2</td><td>@music_room</td><td class="n">14</td><td class="n">3,100</td><td class="n">150,300</td><td class="n">28,400</td></tr></tbody></table>
-              </div>
-            </div>
+        <!-- 選択行/配信者の Gift 増減グラフ -->
+        <div class="x-graph">
+          <div class="gh">
+            <b>@kawaii_live · Session別 推移</b>
+            <span class="leg"><span class="sw" style="background:var(--accent-deep);"></span>Gift数</span>
+            <span class="leg"><span class="sw" style="background:var(--accent);opacity:0.7;"></span>Diamonds</span>
+            <span class="leg" style="margin-left:auto;">行を選ぶとその配信者の増減を表示</span>
+          </div>
+          <div class="x-bars">
+            <div class="col"><div class="pair"><i class="g" style="height:55%"></i><i class="d" style="height:51%"></i></div><span>#124 280</span></div>
+            <div class="col"><div class="pair"><i class="g" style="height:80%"></i><i class="d" style="height:78%"></i></div><span>#126 410</span></div>
+            <div class="col"><div class="pair"><i class="g" style="height:100%"></i><i class="d" style="height:100%"></i></div><span>#128 512</span></div>
           </div>
         </div>
       </div>

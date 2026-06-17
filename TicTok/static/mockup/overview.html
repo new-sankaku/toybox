@@ -69,13 +69,14 @@
     .a-chip .v { font-size:0.95rem; font-variant-numeric:tabular-nums; }
     .a-toolbar { margin-left:auto; display:flex; align-items:center; gap:0.4rem; font-size:0.68rem; color:var(--ink-muted); }
     .a-toolbar select, .a-toolbar button { font:inherit; font-size:0.68rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); padding:0.2rem 0.5rem; }
-    .a-tiles { padding:0.6rem 1rem; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,15rem),1fr)); gap:0.5rem; align-content:start; overflow:auto; }
+    .a-tiles { padding:0.6rem 1rem; display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,11rem),1fr)); gap:0.5rem; align-content:start; overflow:auto; }
     .a-tile { border:1px solid var(--line); background:var(--sand-panel); display:flex; flex-direction:column; }
     .a-tile.live { border-left:3px solid var(--ok); }
     .a-tile .th { display:flex; align-items:center; gap:0.4rem; justify-content:space-between; padding:0.3rem 0.5rem; background:var(--invert-bg); }
     .a-tile .th a { color:var(--invert-fg); text-decoration:none; font-size:0.8rem; letter-spacing:0.06em; }
     .a-tile .th .rec { color:var(--warn); font-size:0.62rem; }
-    .a-tile .vid { background:#000; aspect-ratio:16/9; display:flex; align-items:center; justify-content:center; color:rgba(216,210,188,0.55); font-size:0.62rem; }
+    /* スマホLIVEは縦長(9:16)。高さ固定で中央寄せ */
+    .a-tile .vid { background:#000; aspect-ratio:9/16; height:13rem; width:auto; max-width:100%; margin:0 auto; display:flex; align-items:center; justify-content:center; color:rgba(216,210,188,0.55); font-size:0.62rem; }
     .a-kpi { display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--line); }
     .a-kpi div { background:var(--sand-panel-muted); padding:0.18rem 0.4rem; display:flex; justify-content:space-between; font-size:0.64rem; }
     .a-kpi div .l { color:var(--ink-muted); }

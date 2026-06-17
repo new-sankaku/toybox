@@ -9,14 +9,32 @@
 
 | ページ | モック | 状態 |
 |--------|--------|------|
-| 監視 | `TicTok/static/mockup/monitor.html` | STATSコンパクト化・PK Score改名・過去配信比較を反映 |
-| 全体監視 | `TicTok/static/mockup/overview.html` | 集計バー＋高密度タイル |
-| 履歴 | `TicTok/static/mockup/history.html` | KPIバー＋master-detail |
+| 監視 | `TicTok/static/mockup/monitor.html` | STATSコンパクト化(見切れ修正)・Battle Score改名・過去配信比較・Battleタブ・Preview縦長・STATS/グラフ50:50 |
+| 全体監視 | `TicTok/static/mockup/overview.html` | 集計バー＋高密度タイル・Preview縦長 |
+| 履歴 | `TicTok/static/mockup/history.html` | Excel的一覧＋選択でGift増減グラフ |
+| Battle詳細 | `TicTok/static/mockup/battle.html` | Battleごとの個別詳細（自陣/敵陣・形式・相手・時刻・実弾Gift・勝敗） |
 | 設定 | （現状維持） | フォーム中心のため変更最小 |
 
-## 1.5 用語: PK Score（旧 B.Score / Battle Score）
+## 1.5 用語と Battle（対戦）機能の拡張
 
-`collector.py` の `battle_points` は **PK対戦（LinkMic Battle）中の配信者(host)スコアの合算**です（`armies` eventの `host_score` を battle_id ごとに合計）。「B.Score」は意味が伝わりにくいため、UI表記を **「PK Score」** に統一し、ツールチップで説明を添える案とします。
+`collector.py` の `battle_points` は **Battle（LinkMic対戦）中の配信者(host)スコアの合算**です（`armies` eventの `host_score` を battle_id ごとに合計）。「B.Score / PK」は分かりにくいため、UI表記を **「Battle Score」** に統一します（カタカナ「バトルスコア」と同義。本Projectのカタカナ→英語方針に合わせ英語表記を採用）。
+
+### 現状で取得しているもの / いないもの
+
+現状は **自陣スコアの合算のみ**で、しかも **Battleごとではなく合計値**です。ただしTikTokLive 6.6.5 の `WebcastLinkMicBattle` / `BattleUserArmies` には、ご要望のデータがほぼ全て含まれており、collectorが**受信しているが破棄している**だけです。
+
+| 欲しい情報 | 現状 | ライブラリでの取得可否（追加実装で対応） |
+|-----------|------|------------------------------|
+| Battle Score（自陣） | ✅ 収集中（合算） | Battleごとに分離して保持に変更 |
+| 敵陣 / 相手のスコア | ❌ 破棄中 | ✅ `armies` の他host_idの `host_score` |
+| 個人戦 / チーム戦の区別 | ❌ なし | ✅ `BattleSetting.battle_type` / `team_users`・`team_armies` の有無 |
+| 対戦相手（名前） | ❌ なし | ✅ `anchor_info`(BattleUserInfo) / `anchor_id_str`＋room情報 |
+| いつのBattleか | ⚠️ markerに時刻のみ | ✅ `BattleSetting.start_time_ms`・`end_time_ms`・`duration` |
+| 実弾で飛んだGift（誰がいくら） | ❌ なし | ✅ `BattleUserArmies.user_armies`（`BattleUserArmy`: nickname・`diamond_score`） |
+| 勝敗 | ❌ なし | ✅ `battle_result`(BattleResult.result) / `team_battle_result` |
+| Battleごとの個別表示 | ❌ 合算のみ | ✅ battle_idごとの個別レコードに変更（`battle.html` の表示） |
+
+**結論**: ご要望（自陣/敵陣、個人戦/チーム戦、相手、時刻、実弾Gift、勝敗、個別表示）はすべて **新規データ収集なしで実装可能**です。必要なのは collector の保持構造をbattle_idごとに変更し、破棄しているfieldを拾うことと、保存（storageにbattleテーブル追加）です。本回はモックのみ。
 
 ## 2. 方針と対応
 
@@ -85,8 +103,16 @@
 - 並替（💎/視聴者/レート/状態）と一括映像・音声トグルを集計バー右に配置。
 
 ### 履歴（`history.html`）
-- 縦積み3パネル → **master-detail（左=Session一覧、右=詳細）** に再構成。
-- 全Session KPIを上部バーに固定。詳細は **概要 / Ranking / 録画 / 全体集計** のタブ切替（1ペイン）でスクロールを最小化。
+- 縦積み3パネル → **Excel的な1枚の一覧表** に再構成（全Sessionを多列で俯瞰。配信者/期間/状態の絞込、列の表示切替、並替、CSV出力）。
+- 「特定の日を開いて詳細展開」ではなく、まず**一覧で見比べる**ことを主体に。
+- 行（配信者）を選ぶと下部に **Gift / Diamonds の増減グラフ**（Session別の推移）を表示。
+- 個別Sessionの深掘り（Ranking・録画・実弾Gift内訳など）は「詳細」リンクから。
+
+### 監視ページの調整（今回反映）
+- STATS の**見切れを修正**（セル幅を確保しラベルは省略表示、はみ出しを抑制）。
+- 中央カラムを **STATS 50% / TIMELINE 50%** に分割（STATS側は内部スクロール）。
+- LIVE Preview を **スマホ縦長(9:16)** に変更（監視・全体監視とも）。
+- 活動ログに **Battle タブ** を追加（Battleごとの自陣/敵陣・形式・相手・勝敗・実弾Gift上位）。
 
 ## 7. 今後の展開（承認後）
 

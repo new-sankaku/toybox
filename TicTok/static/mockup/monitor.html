@@ -196,7 +196,8 @@
     .a-card > .body { padding: 0.5rem; min-height: 0; overflow: auto; }
 
     /* --- 左カラム: LIVE preview + 状態 + 操作 --- */
-    .a-video { aspect-ratio: 16/9; background: #000; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: rgba(216,210,188,0.6); font-size: 0.72rem; position: relative; }
+    /* スマホLIVEは縦長(9:16)。高さを制限し中央寄せ（レターボックス） */
+    .a-video { aspect-ratio: 9/16; height: 40vh; width: auto; max-width: 100%; margin: 0 auto; background: #000; border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; color: rgba(216,210,188,0.6); font-size: 0.72rem; position: relative; }
     .a-video .rec { position: absolute; top: 0.4rem; left: 0.4rem; color: var(--warn); font-size: 0.7rem; }
     .a-statusline { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.5rem; flex-wrap: wrap; }
     .badge { padding: 0.12rem 0.5rem; font-size: 0.66rem; letter-spacing: 0.18em; border: 1px solid var(--line); }
@@ -214,10 +215,10 @@
     .a-statgroup { margin-bottom: 0.4rem; }
     .a-statgroup .gl { font-size: 0.62rem; letter-spacing: 0.2em; color: var(--ink-muted); margin: 0 0 0.25rem; text-transform: uppercase; }
     /* コンパクト化: 1行に「ラベル左・値右」を収める（縦・横とも省スペース） */
-    .a-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(5.4rem, 1fr)); gap: 0.2rem 0.35rem; }
-    .a-stat { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.18rem 0.4rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.3rem; }
-    .a-stat .l { font-size: 0.6rem; letter-spacing: 0.04em; color: var(--ink-muted); white-space: nowrap; }
-    .a-stat .v { font-size: 0.82rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .a-statgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(6.8rem, 1fr)); gap: 0.2rem 0.35rem; }
+    .a-stat { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.18rem 0.45rem; display: flex; align-items: baseline; justify-content: space-between; gap: 0.4rem; overflow: hidden; }
+    .a-stat .l { font-size: 0.6rem; letter-spacing: 0.04em; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .a-stat .v { font-size: 0.82rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; white-space: nowrap; flex: 0 0 auto; }
     .a-stat.acc { background: var(--invert-bg); }
     .a-stat.acc .l { color: rgba(216,210,188,0.7); }
     .a-stat.acc .v { color: var(--invert-fg); }
@@ -231,7 +232,7 @@
     .a-cmp td.k, .a-cmp th.k { text-align: left; color: var(--ink-muted); }
     .a-cmp td.now { color: var(--ink-strong); font-weight: 600; }
     .a-cmp td.best { color: var(--accent-deep); }
-    .a-chartcard { flex: 1; }
+    .a-chartcard { flex: 1 1 50%; }
     .a-fake-chart { height: 100%; min-height: 8rem; background: var(--sand-panel-muted); border: 1px solid var(--line); display: flex; align-items: flex-end; gap: 2px; padding: 0.5rem; }
     .a-fake-chart i { flex: 1; background: var(--accent); opacity: 0.75; }
 
@@ -426,9 +427,9 @@
           </div>
         </div>
 
-        <!-- 中央: 高密度スタット + チャート -->
+        <!-- 中央: STATS と TIMELINE を上下 50% / 50% -->
         <div class="a-col">
-          <div class="a-card" style="flex:0 0 auto;">
+          <div class="a-card" style="flex:1 1 50%;">
             <h3>STATS <span style="font-size:0.6rem;opacity:0.7;">現在 / 累計 / レート</span></h3>
             <div class="body">
               <div class="a-statgroup">
@@ -445,7 +446,7 @@
                   <div class="a-stat"><span class="l">Share</span><span class="v">41</span></div>
                   <div class="a-stat"><span class="l">累計視聴</span><span class="v">9,402</span></div>
                   <div class="a-stat"><span class="l">Battle</span><span class="v">2</span></div>
-                  <div class="a-stat" title="PK対戦(LinkMic Battle)中の自分のスコア合計"><span class="l">PK Score</span><span class="v">1,200</span></div>
+                  <div class="a-stat" title="Battle(LinkMic対戦)中の自陣スコア合計。詳細は活動ログのBattleタブ"><span class="l">Battle Score</span><span class="v">1,200</span></div>
                   <div class="a-stat"><span class="l">Event</span><span class="v">12,884</span></div>
                   <div class="a-stat rate"><span class="l">Gift/分</span><span class="v">8.2</span></div>
                   <div class="a-stat rate"><span class="l">💎/分</span><span class="v">221</span></div>
@@ -486,6 +487,7 @@
                 <button class="on" onclick="seg(this,'feed-all')">Gift <span class="cnt">342</span></button>
                 <button onclick="seg(this,'feed-comment')">Comment <span class="cnt">2.1k</span></button>
                 <button onclick="seg(this,'feed-event')">Event <span class="cnt">12.8k</span></button>
+                <button onclick="seg(this,'feed-battle')">Battle <span class="cnt">2</span></button>
                 <button onclick="seg(this,'feed-rank')">Ranking</button>
               </div>
             </h3>
@@ -506,6 +508,33 @@
                 <div class="it follow"><div class="meta"><span>FOLLOW</span><span>22:40:59</span></div>@new_fan がフォロー</div>
                 <div class="it battle"><div class="meta"><span>BATTLE</span><span>22:40:30</span></div>Battle開始 vs @rival</div>
                 <div class="it"><div class="meta"><span>JOIN</span><span>22:40:12</span></div>@user_d が入室</div>
+              </div>
+              <div data-pane="feed-battle" style="display:none;">
+                <div class="a-feed">
+                  <div class="it battle" style="border-left-width:4px;">
+                    <div class="meta"><span>BATTLE #2 · 個人戦(1v1)</span><span>21:14:32〜 5:00</span></div>
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin:0.2rem 0;font-variant-numeric:tabular-nums;">
+                      <b style="color:var(--ok);">自陣 12,400</b>
+                      <span style="flex:1;height:0.5rem;background:var(--line);display:flex;">
+                        <span style="width:56%;background:var(--ok);"></span><span style="width:44%;background:var(--warn);"></span>
+                      </span>
+                      <b style="color:var(--warn);">9,800 敵陣</b>
+                    </div>
+                    <div style="font-size:0.64rem;color:var(--ink-muted);">vs @rival_star · 結果 <b style="color:var(--ok);">WIN</b> · 実弾Gift 18件 / 上位 @whale_kun 6,400💎</div>
+                  </div>
+                  <div class="it battle" style="border-left-width:4px;">
+                    <div class="meta"><span>BATTLE #1 · チーム戦(2v2)</span><span>20:48:10〜 5:00</span></div>
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin:0.2rem 0;font-variant-numeric:tabular-nums;">
+                      <b style="color:var(--ok);">自陣 7,200</b>
+                      <span style="flex:1;height:0.5rem;background:var(--line);display:flex;">
+                        <span style="width:42%;background:var(--ok);"></span><span style="width:58%;background:var(--warn);"></span>
+                      </span>
+                      <b style="color:var(--warn);">9,900 敵陣</b>
+                    </div>
+                    <div style="font-size:0.64rem;color:var(--ink-muted);">味方 @kawaii_live+@duo_chan / 相手 @rivalA+@rivalB · 結果 <b style="color:var(--warn);">LOSE</b> · 実弾Gift 25件</div>
+                  </div>
+                </div>
+                <p style="font-size:0.62rem;color:var(--ink-muted);margin:0.3rem 0 0;">※ 行clickで各Battleの実弾Gift内訳（誰がいくら）まで展開 → battle.html 参照</p>
               </div>
               <div data-pane="feed-rank" style="display:none;">
                 <table class="a-rank">
