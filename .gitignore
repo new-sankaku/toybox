@@ -79,6 +79,7 @@ testdata/
 
 TicTok/venv/
 TicTok/__pycache__/
+TicTok/**/__pycache__/
 TicTok/*.db
 TicTok/recordings/
 
