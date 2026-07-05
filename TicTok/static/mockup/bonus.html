@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok Bonus Mission（倍率タイム）— 焼き込み/詳細 デザイン案</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#4d4a3f; --ink-strong:#3b382f; --ink-muted:#6f6a59; --line:#8f8871;
+      --accent-deep:#8e4f2f; --invert-bg:#4d4a3f; --invert-fg:#d8d2bc; --shadow:rgba(59,56,47,0.35);
+      --ok:#5d6e4e; --warn:#a4502f;
+      --bar-track:rgba(8,10,16,0.55); --bar-edge:rgba(255,255,255,0.22);
+      --bonus:#fbbf24; --bonus-deep:#f59e0b; --bonus-hot:#fb7185;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { background:var(--sand-bg); color:var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.03em; }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.6rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.18em; font-size:0.82rem; }
+    .mock-switch .note { font-size:0.7rem; color:rgba(216,210,188,0.75); }
+    .mock-btn { font:inherit; cursor:pointer; padding:0.3rem 1rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); letter-spacing:0.12em; }
+    .mock-btn.on { background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep); }
+    .mock-view { display:none; padding:1rem 1.2rem 3rem; } .mock-view.on { display:block; }
+
+    .a-head { display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap; margin:0.4rem 0 0.2rem; }
+    .a-head h2 { margin:0; font-size:1rem; letter-spacing:0.08em; color:var(--ink-strong); }
+    .a-head .sum { font-size:0.7rem; color:var(--ink-muted); }
+    .lead { font-size:0.76rem; color:var(--ink-muted); line-height:1.7; max-width:64rem; margin:0.4rem 0 0.8rem; }
+    .lead b { color:var(--ink-strong); }
+    .seclabel { margin:1.6rem 0 0.6rem; font-size:0.8rem; font-weight:700; color:var(--invert-fg); background:var(--invert-bg); padding:0.3rem 0.6rem; letter-spacing:0.12em; }
+
+    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,18rem),1fr)); gap:1rem; align-items:start; }
+    .card { display:flex; flex-direction:column; gap:0.4rem; }
+    .card > .cap { font-size:0.72rem; color:var(--ink-strong); letter-spacing:0.06em; }
+    .card > .cap b { color:var(--accent-deep); }
+    .card > .sub { font-size:0.64rem; color:var(--ink-muted); }
+
+    /* ===== 縦動画フレーム(9:16) ===== */
+    .frame { position:relative; aspect-ratio:9/16; width:100%; border:1px solid var(--line); box-shadow:0.25rem 0.25rem 0 var(--shadow); overflow:hidden; border-radius:0.4rem;
+      background:linear-gradient(160deg,#2b3550,#171a26 60%,#0b0d14); color:#fff; }
+    .frame .scene-host { position:absolute; left:3%; top:1.6%; display:flex; align-items:center; gap:0.35rem; font-size:0.6rem; }
+    .frame .scene-host .dot { width:1.4em; height:1.4em; border-radius:50%; background:linear-gradient(135deg,#f0abfc,#6366f1); display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+    .frame .scene-live { position:absolute; right:3%; top:1.8%; font-size:0.52rem; background:#e11d48; padding:0.05em 0.5em; border-radius:0.6em; letter-spacing:0.12em; }
+    .frame .scene-body { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.7rem; color:rgba(255,255,255,0.16); letter-spacing:0.3em; }
+
+    /* 既存PKスコアバー(文脈用・簡略) : 上端 */
+    .pk { position:absolute; left:3%; right:3%; top:6.5%; display:flex; flex-direction:column; gap:0.28em; font-size:clamp(0.5rem,2.6vw,0.78rem); }
+    .pk-meta { display:flex; align-items:center; justify-content:center; gap:0.5em; font-size:0.62em; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.8); }
+    .pk-meta .mode { background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.25); border-radius:0.6em; padding:0.05em 0.55em; letter-spacing:0.08em; }
+    .pk-meta .clock { font-weight:800; font-variant-numeric:tabular-nums; }
+    .pk-track { position:relative; display:flex; height:1.4em; border-radius:1em; background:var(--bar-track); overflow:hidden; box-shadow:inset 0 0 0 1px var(--bar-edge); }
+    .pk-track .o { background:linear-gradient(90deg,#2563eb,#22d3ee); display:flex; align-items:center; }
+    .pk-track .e { background:linear-gradient(90deg,#fb7185,#e11d48); display:flex; align-items:center; justify-content:flex-end; }
+    .pk-track .pt { padding:0 0.5em; font-weight:800; font-size:0.6em; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.7); white-space:nowrap; }
+
+    /* ===================================================================
+       BONUS MISSION 焼き込み本体 — PKバーのすぐ下に時系列で出現
+       =================================================================== */
+    .bonus { position:absolute; left:3%; right:3%; top:13.5%; font-size:clamp(0.5rem,2.6vw,0.78rem);
+      background:rgba(8,10,16,0.62); border:1px solid rgba(255,255,255,0.18); border-radius:0.7em;
+      box-shadow:0 0.15em 0.5em rgba(0,0,0,0.45); padding:0.45em 0.6em; display:flex; flex-direction:column; gap:0.35em; }
+    .bonus.glow { border-color:rgba(251,191,36,0.9); box-shadow:0 0 0.7em rgba(251,191,36,0.55), 0 0.15em 0.5em rgba(0,0,0,0.5); }
+    .bn-head { display:flex; align-items:center; gap:0.4em; font-size:0.66em; }
+    .bn-head .tag { font-weight:800; letter-spacing:0.06em; display:inline-flex; align-items:center; gap:0.3em;
+      color:#fff; background:linear-gradient(90deg,var(--bonus-deep),var(--bonus)); border-radius:0.6em; padding:0.08em 0.55em; text-shadow:0 1px 1px rgba(0,0,0,0.35); }
+    .bn-head .tag.hot { background:linear-gradient(90deg,var(--bonus-hot),#e11d48); }
+    .bn-head .multi { font-weight:900; font-size:1.15em; color:var(--bonus); text-shadow:0 1px 2px rgba(0,0,0,0.8); }
+    .bn-head .clk { margin-left:auto; font-weight:800; font-variant-numeric:tabular-nums; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.8); }
+    .bn-desc { font-size:0.6em; color:rgba(255,255,255,0.86); text-shadow:0 1px 2px rgba(0,0,0,0.7); }
+
+    /* 進捗/カウントダウン バー */
+    .bn-bar { position:relative; height:0.95em; border-radius:1em; background:rgba(255,255,255,0.16); overflow:hidden; box-shadow:inset 0 0 0 1px rgba(255,255,255,0.2); }
+    .bn-fill { position:absolute; inset:0 auto 0 0; border-radius:1em; background:linear-gradient(90deg,var(--bonus),var(--bonus-deep)); box-shadow:0 0 0.4em rgba(251,191,36,0.7); }
+    .bn-fill.hot { background:linear-gradient(90deg,#fb7185,#e11d48); box-shadow:0 0 0.4em rgba(251,113,133,0.7); }
+    .bn-bar .lab { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.58em; font-weight:800; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.85); }
+    /* 貢献者アバター列 */
+    .bn-contrib { display:flex; align-items:center; gap:0.25em; font-size:0.56em; color:rgba(255,255,255,0.82); }
+    .bn-contrib .av { width:1.5em; height:1.5em; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:700; color:#fff; font-size:0.8em; box-shadow:0 0 0 1px rgba(255,255,255,0.7); }
+    .bn-settle { display:flex; align-items:center; justify-content:center; gap:0.4em; font-weight:900; color:var(--bonus); text-shadow:0 1px 3px rgba(0,0,0,0.85); font-size:0.9em; }
+
+    /* anatomy */
+    .anat { background:#11131c; border-radius:0.5rem; padding:1.4rem 1rem; border:1px solid var(--line); }
+    .anat .bonus { position:static; left:auto; right:auto; top:auto; font-size:1rem; max-width:30rem; margin:0 auto; }
+    .callouts { max-width:34rem; margin:1rem auto 0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr)); gap:0.4rem 1rem; font-size:0.7rem; color:#cdd3e0; }
+    .callouts div b { color:#fbbf24; }
+
+    /* timeline 図 */
+    .tl { max-width:50rem; display:flex; flex-direction:column; gap:0.3rem; margin:0.4rem 0 0.6rem; font-size:0.66rem; }
+    .tl-row { display:flex; align-items:center; gap:0.4rem; }
+    .tl-row .ph { flex:0 0 7rem; color:var(--ink-strong); font-weight:700; }
+    .tl-row .seg { height:1.1rem; border-radius:0.3rem; display:flex; align-items:center; padding:0 0.5rem; font-size:0.6rem; color:#1c1a14; white-space:nowrap; }
+    .tl-prev { background:repeating-linear-gradient(45deg,#e7d8a6,#e7d8a6 6px,#dcc98c 6px,#dcc98c 12px); }
+    .tl-task { background:linear-gradient(90deg,#fbbf24,#f59e0b); }
+    .tl-rew { background:linear-gradient(90deg,#fb7185,#e11d48); color:#fff; }
+
+    /* ===== Battle 詳細パネル版 ===== */
+    .bcard { border:1px solid var(--line); background:var(--sand-panel); box-shadow:0.25rem 0.25rem 0 var(--shadow); max-width:30rem; }
+    .bcard .bh { display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.6rem; background:var(--invert-bg); color:var(--invert-fg); flex-wrap:wrap; }
+    .bcard .bh .id { font-size:0.78rem; } .bcard .bh .mode { font-size:0.62rem; border:1px solid var(--line); padding:0.05rem 0.45rem; }
+    .bcard .bh .res.lose { font-size:0.7rem; color:var(--warn); border:1px solid var(--warn); padding:0.05rem 0.5rem; margin-left:auto; }
+    .bbody { padding:0.6rem; }
+    /* 詳細の倍率ブロック */
+    .dbonus { border:1px solid var(--bonus-deep); border-left:3px solid var(--bonus-deep); background:var(--sand-panel-muted); padding:0.45rem 0.6rem; margin-top:0.5rem; }
+    .dbonus .t { display:flex; align-items:center; gap:0.4rem; font-size:0.72rem; color:var(--ink-strong); font-weight:700; }
+    .dbonus .t .x { background:linear-gradient(90deg,var(--bonus-deep),var(--bonus)); color:#fff; border-radius:0.5em; padding:0.05em 0.45em; font-weight:900; }
+    .dbonus .row { display:flex; flex-wrap:wrap; gap:0.3rem 1rem; font-size:0.66rem; color:var(--ink-muted); margin-top:0.35rem; }
+    .dbonus .row b { color:var(--ink-strong); font-variant-numeric:tabular-nums; }
+    .dbonus .ph-mini { display:flex; gap:0.25rem; margin-top:0.4rem; font-size:0.58rem; }
+    .dbonus .ph-mini span { flex:1; text-align:center; border-radius:0.3em; padding:0.15rem 0; color:#1c1a14; }
+    .dbonus .contribs { display:flex; align-items:center; gap:0.3rem; margin-top:0.4rem; font-size:0.62rem; color:var(--ink-muted); flex-wrap:wrap; }
+    .dbonus .contribs .av { width:1.3rem; height:1.3rem; border-radius:50%; background:var(--accent-deep); color:var(--invert-fg); display:inline-flex; align-items:center; justify-content:center; font-size:0.62rem; }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok — Bonus Mission（倍率タイム）デザイン案</strong>
+    <button class="mock-btn on" onclick="show('video')">動画 焼き込み ▶</button>
+    <button class="mock-btn" onclick="show('detail')">Battle詳細パネル ▶</button>
+    <span class="note">※ 実データ(Session72)由来: ミッション40秒で進捗100到達 → 60秒間 ギフト×2 → 確定ボーナス +8,016💎</span>
+  </div>
+
+  <!-- ============================ 動画 焼き込み ============================ -->
+  <div class="mock-view on" id="view-video">
+    <div class="a-head"><h2>動画 焼き込み — PKスコアバーの直下に時系列で出現</h2><span class="sum">予告 → ミッション(40s) → 倍率タイム(60s) → 確定</span></div>
+    <p class="lead">
+      TikTokの <b>Match Bonus Mission</b>（LinkmicBattleTask）を、録画mp4へ時刻同期で焼き込みます。常時は出さず、
+      <b>該当する時間帯だけ</b>PKスコアバーのすぐ下に帯を出します。データは収集済みの
+      <b>preview/task/reward の各 start・duration</b>、<b>rewardMultiple(=倍率)</b>、<b>taskProgress(進捗)</b>、貢献者(fromUserUid)、
+      確定 <b>sum(ボーナス💎)</b> を使用。倍率値・秒数はhard-codeせずeventの実値で描画します。
+    </p>
+
+    <!-- timeline -->
+    <div class="seclabel">▌ 時間帯の構造（このBattleの実値）</div>
+    <div class="tl">
+      <div class="tl-row"><span class="ph">① 予告 preview</span><div class="seg tl-prev" style="flex:25">もうすぐ ボーナスミッション ×2</div></div>
+      <div class="tl-row"><span class="ph">② ミッション task</span><div class="seg tl-task" style="flex:40">40秒で 進捗100 を達成 → 倍率解放</div></div>
+      <div class="tl-row"><span class="ph">③ 倍率 reward</span><div class="seg tl-rew" style="flex:60">60秒間 ギフト ×2</div></div>
+      <div class="tl-row"><span class="ph">④ 確定 settle</span><div class="seg" style="flex:14;background:#cdc6ae">+8,016💎</div></div>
+    </div>
+
+    <!-- anatomy -->
+    <div class="seclabel">▌ 部位(anatomy) — 倍率タイム中の帯</div>
+    <div class="anat">
+      <div class="bonus glow">
+        <div class="bn-head"><span class="tag hot">🔥 ギフト</span><span class="multi">×2</span><span class="bn-desc" style="font-size:0.6em">タイム</span><span class="clk">0:48</span></div>
+        <div class="bn-bar"><div class="bn-fill hot" style="right:auto;width:80%"></div><span class="lab">倍率タイム 残り0:48 / 60s</span></div>
+      </div>
+      <div class="callouts">
+        <div><b>① tag</b> フェーズ名(予告/ミッション/倍率)。色で状態</div>
+        <div><b>② ×倍率</b> rewardMultiple の実値(×2 等)</div>
+        <div><b>③ clock</b> そのフェーズの残り秒(start+durationから算出)</div>
+        <div><b>④ bar</b> ミッション=進捗%、倍率=残り時間%</div>
+        <div><b>⑤ 出現条件</b> 該当時間帯のみ表示、外は非表示</div>
+        <div><b>⑥ 配置</b> PKバー直下。スコアバーと干渉しない</div>
+      </div>
+    </div>
+
+    <!-- phases over video -->
+    <div class="seclabel">▌ フェーズ別（映像9:16上での見え方）</div>
+    <div class="grid">
+
+      <!-- ① preview -->
+      <div class="card">
+        <div class="cap"><b>① 予告</b> preview</div>
+        <div class="sub">開始前。これから倍率が来る予告。点滅で注意喚起。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">N</span>naru_golf</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">3コラ</span><span class="clock">02:40</span></div>
+            <div class="pk-track"><div class="o" style="flex:42"><span class="pt">💎42</span></div><div class="e" style="flex:58"><span class="pt">3,569💎</span></div></div>
+          </div>
+          <div class="bonus">
+            <div class="bn-head"><span class="tag">🎁 ボーナス予告</span><span class="bn-desc">まもなく ミッション開始</span><span class="clk">0:05</span></div>
+            <div class="bn-desc">達成すると <b style="color:var(--bonus)">60秒間 ギフト×2</b> タイムに突入します</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ② task -->
+      <div class="card">
+        <div class="cap"><b>② ミッション</b> task (40s)</div>
+        <div class="sub">進捗バーが0→100へ。押し上げた貢献者を表示。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">N</span>naru_golf</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">3コラ</span><span class="clock">02:10</span></div>
+            <div class="pk-track"><div class="o" style="flex:55"><span class="pt">💎120</span></div><div class="e" style="flex:45"><span class="pt">98💎</span></div></div>
+          </div>
+          <div class="bonus glow">
+            <div class="bn-head"><span class="tag">🎯 ミッション</span><span class="bn-desc">達成で ×2 解放</span><span class="clk">0:18</span></div>
+            <div class="bn-bar"><div class="bn-fill" style="width:63%"></div><span class="lab">進捗 63 / 100</span></div>
+            <div class="bn-contrib"><span>後押し:</span>
+              <span class="av" style="background:linear-gradient(135deg,#f0abfc,#7c3aed)">ザ</span>
+              <span class="av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">団</span>
+              <span class="av" style="background:linear-gradient(135deg,#fbbf24,#f59e0b)">＋3</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ③ reward -->
+      <div class="card">
+        <div class="cap"><b>③ 倍率タイム</b> reward (60s)</div>
+        <div class="sub">×2発動中。残り時間バー。最も目立たせる(glow+暖色)。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">N</span>naru_golf</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">3コラ</span><span class="clock">01:30</span></div>
+            <div class="pk-track"><div class="o" style="flex:48"><span class="pt">💎210</span></div><div class="e" style="flex:52"><span class="pt">240💎</span></div></div>
+          </div>
+          <div class="bonus glow">
+            <div class="bn-head"><span class="tag hot">🔥 ギフト</span><span class="multi">×2</span><span class="bn-desc">タイム発動中</span><span class="clk">0:48</span></div>
+            <div class="bn-bar"><div class="bn-fill hot" style="width:80%"></div><span class="lab">倍率タイム 残り 0:48 / 60s</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ④ settle -->
+      <div class="card">
+        <div class="cap"><b>④ 確定</b> settle</div>
+        <div class="sub">終了時に獲得ボーナス総額を数秒フラッシュ表示。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">N</span>naru_golf</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">3コラ</span><span class="clock">00:30</span></div>
+            <div class="pk-track"><div class="o" style="flex:46"><span class="pt">💎314</span></div><div class="e" style="flex:54"><span class="pt">3,569💎</span></div></div>
+          </div>
+          <div class="bonus glow">
+            <div class="bn-head"><span class="tag">✅ 倍率タイム終了</span><span class="clk">+8,016</span></div>
+            <div class="bn-settle">🎁 ボーナス +8,016 💎 獲得</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================ Battle詳細パネル ============================ -->
+  <div class="mock-view" id="view-detail">
+    <div class="a-head"><h2>Battle詳細パネル — カード内に倍率ブロックを追加</h2><span class="sum">既存のBattleカードに「倍率タイム」セクションを差し込む</span></div>
+    <p class="lead">
+      Battle詳細(一覧/履歴)カードのスコア下に <b>倍率タイム ブロック</b> を追加します。Battle中に
+      Bonus Missionが発生した場合のみ表示。<b>倍率・各フェーズの時刻と長さ・達成可否・獲得ボーナス💎・後押しした貢献者</b>を1ブロックに集約します。
+    </p>
+    <div class="bcard">
+      <div class="bh"><span class="id">BATTLE #72-1</span><span class="mode">3コラ</span><span class="res lose">最下位</span></div>
+      <div class="bbody">
+        <div style="font-size:0.7rem;color:var(--ink-muted)">21:11:28〜21:16:29 (5:01) · 自陣 314 / 首位 10,365</div>
+
+        <div class="dbonus">
+          <div class="t"><span>🎁 倍率タイム</span><span class="x">×2</span><span style="font-weight:400;color:var(--ink-muted);font-size:0.64rem">Match Bonus Mission</span></div>
+          <div class="ph-mini">
+            <span class="tl-prev">予告 5s</span>
+            <span class="tl-task">ミッション 40s・達成✅</span>
+            <span class="tl-rew">倍率 60s ×2</span>
+          </div>
+          <div class="row">
+            <span>発動時間帯: <b>21:12:40〜21:14:04</b></span>
+            <span>進捗: <b>100 / 100</b> 達成</span>
+            <span>獲得ボーナス: <b>+8,016 💎</b></span>
+          </div>
+          <div class="contribs"><span>後押し:</span>
+            <span class="av">ザ</span><span>🎰🐎ザク団</span>
+            <span class="av">団</span><span>＋2名</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="lead" style="margin-top:1rem">
+      ※ 未発動のBattleではこのブロックを出しません。倍率が複数回来るBattleは、ブロックを発生回数ぶん縦に並べます。
+    </p>
+  </div>
+
+  <script>
+    function show(which){
+      document.getElementById('view-video').classList.toggle('on', which==='video');
+      document.getElementById('view-detail').classList.toggle('on', which==='detail');
+      document.querySelectorAll('.mock-btn').forEach((b,i)=>b.classList.toggle('on', (which==='video')? i===0 : i===1));
+      window.scrollTo(0,0);
+    }
+  </script>
+</body>
+</html>

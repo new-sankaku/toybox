@@ -38,6 +38,9 @@ Desktop.ini
 # Logs
 logs/
 *.log
+
+# TicTok captured raw-event samples (runtime diagnostic data)
+samples/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -77,10 +80,24 @@ testdata/
 *.db-wal
 *.db-shm
 
+# Single-instance lock file
+*.db.lock
+
+# Python bytecode (all packages)
+__pycache__/
+*.pyc
+
 TicTok/venv/
 TicTok/__pycache__/
+TicTok/tests/__pycache__/
 TicTok/*.db
+*.db.bak*
 TicTok/recordings/
+TicTok/models/
+TicTok/.playwright-mcp/
+# Comment-overlay fonts are fetched on demand (tictok/record/fonts.py), not committed
+TicTok/assets/fonts/*.ttf
+TicTok/assets/fonts/*.otf
 
 .claude/tool-history.jsonl
 tool-history.csv

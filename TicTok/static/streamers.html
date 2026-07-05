@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 配信者分析</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a class="active" href="/streamers">配信者</a>
+        <a href="/analytics">全体解析</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
+
+    <div class="sm-split">
+      <!-- 左: 配信者リスト -->
+      <aside class="sm-list-pane">
+        <input id="sm-search" type="text" placeholder="🔎 配信者で絞込" autocomplete="off" />
+        <div class="sm-list" id="sm-list"></div>
+        <div id="sm-list-empty" class="a-empty">配信者がいません。</div>
+      </aside>
+
+      <!-- 右: 選択配信者の集約プロファイル -->
+      <main class="sm-detail" id="sm-detail">
+        <div class="sm-placeholder" id="sm-placeholder">左の一覧から配信者を選ぶと、全Sessionを集約した分析を表示します。</div>
+
+        <div class="sm-body hidden" id="sm-body">
+          <!-- 見出し -->
+          <div class="sm-head" id="sm-head"></div>
+
+          <!-- 通算KPI -->
+          <div class="a-kpibar" id="sm-kpi"></div>
+
+          <!-- エンゲージメント正規化指標(規模が違う配信者を公平比較) -->
+          <div class="a-kpibar sm-eng-bar" id="sm-eng"></div>
+
+          <!-- Session別 推移 + 成長トレンド -->
+          <section class="result-block">
+            <h3 class="result-subtitle">■ Session別 推移 <span class="result-sub-note">（点線=コイン移動平均）</span> <span id="sm-trend-note" class="result-sub-note"></span></h3>
+            <div class="x-chartwrap"><canvas id="sm-trend"></canvas></div>
+            <div class="a-kpibar sm-eng-bar" id="sm-growth"></div>
+          </section>
+
+          <!-- AI 講評（集約profile→強み/課題/改善提案） -->
+          <section class="result-block sm-aireview">
+            <h3 class="result-subtitle">■ AI 講評 <span id="sm-ai-note" class="result-sub-note"></span>
+              <button id="sm-ai-btn" class="btn btn-small" disabled>講評する</button>
+            </h3>
+            <div id="sm-ai-status" class="form-message"></div>
+            <div id="sm-ai-result" class="ai-result hidden"></div>
+          </section>
+
+          <!-- 時間帯ヒートマップ(bucket時系列ベース) -->
+          <section class="result-block">
+            <h3 class="result-subtitle">
+              ■ 時間帯分布
+              <span class="result-sub-note">（曜日×時刻15分刻み・実際に発生した時間に集計）</span>
+              <select id="sm-hm-metric" class="sm-hm-metric">
+                <option value="diamonds">色: コイン</option>
+                <option value="active_seconds">色: 配信時間</option>
+                <option value="comments">色: Comment</option>
+              </select>
+            </h3>
+            <div class="hm" id="sm-heatmap"></div>
+            <div class="hm-legend" id="sm-hm-legend"></div>
+          </section>
+
+          <!-- ファン継続率 / 日次コホート -->
+          <section class="result-block">
+            <h3 class="result-subtitle">■ ファン継続率（日次コホート） <span id="sm-cohort-note" class="result-sub-note"></span></h3>
+            <div class="x-chartwrap"><canvas id="sm-cohort-chart"></canvas></div>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead><tr><th>日</th><th>Active</th><th>新規</th><th>復帰/継続</th><th>前日継続率</th><th>コイン</th></tr></thead>
+                <tbody id="sm-cohort-rows"></tbody>
+              </table>
+            </div>
+            <div id="sm-cohort-empty" class="feed-empty">視聴データがまだありません。</div>
+          </section>
+
+          <!-- ハイライト自動抽出(コイン急増点) -->
+          <section class="result-block">
+            <h3 class="result-subtitle">■ ハイライト <span class="result-sub-note">（配信中のコイン急増点を自動抽出・平常比）</span></h3>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead><tr><th>#</th><th>日時</th><th>Session</th><th>コイン(瞬間)</th><th>平常比</th><th>Comment</th><th>録画</th></tr></thead>
+                <tbody id="sm-highlight-rows"></tbody>
+              </table>
+            </div>
+            <div id="sm-highlight-empty" class="feed-empty">急増点は検出されませんでした（データ不足、または平坦な配信）。</div>
+          </section>
+
+          <div class="sm-grid">
+            <!-- Gifter / 収益分析 -->
+            <section class="result-block">
+              <h3 class="result-subtitle">■ Gifter / 収益分析</h3>
+              <div class="a-kpibar sm-conc" id="sm-conc"></div>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Session</th></tr></thead>
+                  <tbody id="sm-gifters"></tbody>
+                </table>
+              </div>
+              <div id="sm-gifters-empty" class="feed-empty">Giftの記録がありません。</div>
+            </section>
+          </div>
+
+          <!-- Battle 分析（過去の全Battleを集約） -->
+          <section class="result-block">
+            <h3 class="result-subtitle">■ Battle 分析 <span class="result-sub-note">（過去の全Battleを集約）</span></h3>
+            <div class="a-kpibar sm-conc" id="sm-battle"></div>
+
+            <!-- スコア推移: 過去バトル順（古い→新しい）に自陣/敵陣Scoreを並べる -->
+            <h4 class="result-subtitle sm-subtitle">スコア推移 <span class="result-sub-note">（古い→新しい・自陣/敵陣Score、点=Batt中コイン）</span> <span id="sm-battle-trend-note" class="result-sub-note"></span></h4>
+            <div class="x-chartwrap"><canvas id="sm-battle-trend"></canvas></div>
+            <div id="sm-battle-trend-empty" class="feed-empty">Battleの記録がありません。</div>
+
+            <div class="sm-grid">
+              <!-- Battle Gifter: Battle中に投げたファン（どんなギフターで出てきたか） -->
+              <section class="result-block">
+                <h4 class="result-subtitle sm-subtitle">Battle Gifter <span class="result-sub-note">（Battle中に投げたファン）</span></h4>
+                <div class="table-wrap">
+                  <table class="result-table">
+                    <thead><tr><th>#</th><th>Gifter</th><th>コイン</th><th>Gift数</th><th>出現Battle</th></tr></thead>
+                    <tbody id="sm-battle-gifters"></tbody>
+                  </table>
+                </div>
+                <div id="sm-battle-gifters-empty" class="feed-empty">Battle中のGift記録がありません。</div>
+              </section>
+
+              <!-- 対戦相手別 W/L -->
+              <section class="result-block">
+                <h4 class="result-subtitle sm-subtitle">対戦相手別</h4>
+                <div class="table-wrap">
+                  <table class="result-table">
+                    <thead><tr><th>#</th><th>対戦相手</th><th>対戦数</th><th>勝</th><th>負</th><th>勝率</th></tr></thead>
+                    <tbody id="sm-opponents"></tbody>
+                  </table>
+                </div>
+                <div id="sm-opponents-empty" class="feed-empty">Battleの記録がありません。</div>
+              </section>
+            </div>
+
+            <!-- Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順） -->
+            <h4 class="result-subtitle sm-subtitle">Battle 履歴 <span class="result-sub-note">（新しい順・最大80戦）</span></h4>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead><tr><th>日時</th><th>形式</th><th>対戦相手</th><th>自陣</th><th>敵陣</th><th>結果</th><th>Batt中コイン</th><th id="sm-battle-history-keycontrib">貢献者</th></tr></thead>
+                <tbody id="sm-battle-history"></tbody>
+              </table>
+            </div>
+            <div id="sm-battle-history-empty" class="feed-empty">Battleの記録がありません。</div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <!-- ハイライト録画 再生モーダル -->
+  <div id="sm-video-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="sm-video-title">録画</h2>
+        <button id="sm-video-close" class="modal-close">閉じる ✕</button>
+      </div>
+      <div class="modal-body">
+        <video id="sm-video" class="sm-video" controls playsinline preload="metadata"></video>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/common.js"></script>
+  <script src="/static/streamers.js"></script>
+</body>
+</html>

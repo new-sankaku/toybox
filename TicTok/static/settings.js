@@ -3,14 +3,30 @@
 const form = document.getElementById("settings-form");
 const statusEl = document.getElementById("settings-status");
 
-function buildField(item) {
-  const wrap = document.createElement("label");
-  wrap.className = "setting-field";
+function buildOptions(item) {
+  const group = document.createElement("div");
+  group.className = "radio-group";
+  item.options.forEach((opt) => {
+    const option = document.createElement("label");
+    option.className = "radio-option";
 
-  const label = document.createElement("span");
-  label.className = "field-label";
-  label.textContent = item.label;
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = item.key;
+    radio.value = opt.value;
+    radio.dataset.key = item.key;
+    radio.checked = String(opt.value) === String(item.value);
 
+    const text = document.createElement("span");
+    text.textContent = opt.label;
+
+    option.append(radio, text);
+    group.appendChild(option);
+  });
+  return group;
+}
+
+function buildNumber(item) {
   const input = document.createElement("input");
   input.type = "number";
   input.min = item.min;
@@ -18,13 +34,34 @@ function buildField(item) {
   input.step = item.step;
   input.value = item.value;
   input.dataset.key = item.key;
+  return input;
+}
 
-  const note = document.createElement("span");
-  note.className = "setting-note";
-  note.textContent = `${item.note}（${item.min}〜${item.max}）`;
+function buildHeader() {
+  ["項目", "設定値", "説明"].forEach((text) => {
+    const head = document.createElement("div");
+    head.className = "s-cell s-head";
+    head.textContent = text;
+    form.appendChild(head);
+  });
+}
 
-  wrap.append(label, input, note);
-  return wrap;
+function buildField(item) {
+  const hasOptions = Array.isArray(item.options) && item.options.length > 0;
+
+  const label = document.createElement("div");
+  label.className = "s-cell s-label";
+  label.textContent = item.label;
+
+  const control = document.createElement("div");
+  control.className = "s-cell s-control";
+  control.appendChild(hasOptions ? buildOptions(item) : buildNumber(item));
+
+  const note = document.createElement("div");
+  note.className = "s-cell s-note";
+  note.textContent = hasOptions ? item.note : `${item.note}（${item.min}〜${item.max}）`;
+
+  form.append(label, control, note);
 }
 
 async function loadSettings() {
@@ -35,12 +72,16 @@ async function loadSettings() {
   }
   const data = await res.json();
   form.innerHTML = "";
-  data.settings.forEach((item) => form.appendChild(buildField(item)));
+  buildHeader();
+  data.settings.forEach((item) => buildField(item));
 }
 
 document.getElementById("settings-save").addEventListener("click", async () => {
   const values = {};
-  form.querySelectorAll("input[data-key]").forEach((input) => {
+  form.querySelectorAll("input[type=number][data-key]").forEach((input) => {
+    values[input.dataset.key] = input.value;
+  });
+  form.querySelectorAll("input[type=radio][data-key]:checked").forEach((input) => {
     values[input.dataset.key] = input.value;
   });
   statusEl.textContent = "保存中…";

@@ -2,8 +2,47 @@
 TikTokLive==6.6.5
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
+# Server-side avatar proxy fetches TikTok CDN images (also a TikTokLive transitive dep).
+httpx>=0.27.0
+
+# 録画Downloadの動画化(burn-in)で、コメントを色付き絵文字つきでoverlay層に描画する
+# (libassは絵文字を白黒でしか描けないためPILで描画してffmpegに合成する)。実avatarの
+# 円形maskも同層で行う。同梱fontは assets/fonts/ (Noto Sans CJK JP + Noto Color Emoji
+# + Noto Sans / Georgian / Math のfallback)。PILはfont fallbackを持たないため、
+# fontToolsで各fontのcmapを読み、字形を持つfontへ文字単位でroutingする。
+Pillow>=10.0.0
+numpy>=1.24.0
+fonttools>=4.40.0
+
+# LIVE detection runs through a headless Chromium to pass TikTok's SlardarWAF
+# JS challenge (plain HTTP clients receive a WAF stub page with no SIGI_STATE).
+# After pip install, run: playwright install chromium
+playwright>=1.40.0
 
 # System dependency (not pip-installable):
 #   ffmpeg — required only for the LIVE video recording feature.
 #   Linux:   apt-get install ffmpeg   /   Windows: https://ffmpeg.org/download.html
 #   録画機能を使わない場合は不要です（未installでも他の機能は動作します）。
+
+# Optional local-AI features (opt-in; lazy-imported so the base app runs without them):
+#   - コメント感情/トピック分析: 追加pip不要。OpenAI互換のローカルserver(Ollama等)を
+#     立て、TICTOK_AI_ENABLED=1 と TICTOK_AI_MODEL を設定する。
+#   - 文字起こし(STT): faster-whisper を使う。modelはHugging Faceから初回実行時に自動DL。
+#     TICTOK_STT_ENABLED=1 を設定する。
+#       pip install faster-whisper
+#     GPU(CUDA 12)で動かす場合はCUDA 12ランタイムwheelも入れる（systemのCUDAとは独立）:
+#       pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+#     Windowsでは transcription.py が起動時にこれらwheelのbinをDLL loaderへ登録する。
+# faster-whisper>=1.0.0
+# nvidia-cublas-cu12 ; platform_system != "Darwin"
+# nvidia-cudnn-cu12  ; platform_system != "Darwin"
+#   - AI高画質化(Up出力): torch + spandrel で超解像modelをGPU実行する(CPUは実用速度に
+#     ならない)。modelはhard-codeせず、spandrelが読める超解像weights file
+#     (例: Real-ESRGAN)を任意の場所に置き .env で指定する:
+#       TICTOK_UPSCALE_ENABLED=1
+#       TICTOK_UPSCALE_MODEL_PATH=<weights fileのpath (.pth/.safetensors)>
+#     install (CUDA 12版torch):
+#       pip install torch --index-url https://download.pytorch.org/whl/cu124
+#       pip install spandrel
+# torch
+# spandrel

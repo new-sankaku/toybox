@@ -4,132 +4,107 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TicTok LIVE Monitor — 履歴</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body class="app-dashboard">
   <div class="scanlines" aria-hidden="true"></div>
 
-  <header class="app-header">
-    <div class="header-mark">■</div>
-    <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
-    <div class="header-sub">Session History &amp; Analytics — YoRHa Interface</div>
-    <nav class="app-nav">
-      <a class="nav-link" href="/">▌ 監視</a>
-      <a class="nav-link" href="/overview">▌ 全体監視</a>
-      <a class="nav-link active" href="/history">▌ 履歴</a>
-      <a class="nav-link" href="/settings">▌ 設定</a>
-    </nav>
-  </header>
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a class="active" href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a href="/analytics">全体解析</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
 
-  <main class="layout">
-    <section class="panel result-panel">
-      <h2 class="panel-title">▌ 総合 Dashboard（全Session）</h2>
-      <div class="result-totals" id="agg-totals"></div>
-      <div class="chart-note">直近SessionごとのGift数とDiamondsの推移です。</div>
-      <div class="chart-wrap chart-wrap-short">
-        <canvas id="agg-chart"></canvas>
-      </div>
-      <div class="result-tables">
-        <div class="result-block">
-          <h3 class="result-subtitle">■ 配信者別の累計</h3>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead>
-                <tr><th>#</th><th>配信者</th><th>Session数</th><th>Gift数</th><th>Diamonds</th><th>Comment数</th></tr>
-              </thead>
-              <tbody id="streamer-ranking"></tbody>
-            </table>
-          </div>
-          <div id="streamer-ranking-empty" class="feed-empty">DATAなし</div>
+    <!-- 全Session KPIバー -->
+    <div class="a-kpibar" id="kpi-bar"></div>
+
+    <!-- ツールバー: 絞込・並替・出力 -->
+    <div class="x-toolbar">
+      <input id="flt-search" type="text" placeholder="🔎 配信者 / Memo で絞込" autocomplete="off" />
+      <select id="flt-period">
+        <option value="all">全期間</option>
+        <option value="today">今日</option>
+        <option value="week">今週</option>
+        <option value="month">今月</option>
+      </select>
+      <select id="flt-status">
+        <option value="all">状態: 全て</option>
+        <option value="live">収集中</option>
+        <option value="ended">終了</option>
+      </select>
+      <select id="flt-sort">
+        <option value="started_desc">並替: 開始(新しい順)</option>
+        <option value="started_asc">開始(古い順)</option>
+        <option value="gifts">Gift 多い順</option>
+        <option value="diamonds">コイン 多い順</option>
+        <option value="unique_id">配信者</option>
+      </select>
+      <span class="sp"></span>
+      <button id="bulk-del-users" class="btn-danger">ユーザー削除</button>
+      <button id="export-csv">表示中をCSV出力</button>
+    </div>
+
+    <!-- Excel的一覧 -->
+    <div class="x-tablewrap">
+      <table class="xtab">
+        <thead>
+          <tr>
+            <th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th>
+            <th class="n">コイン</th><th class="n">Comment</th>
+            <th class="n">Like</th><th class="n">Follow</th><th class="n">Share</th><th class="n">入室</th>
+            <th class="n">Battle</th><th class="n">B.Score</th><th class="n">最大同接</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="session-rows"></tbody>
+      </table>
+      <div id="session-empty" class="a-empty">保存されたSessionがありません。</div>
+    </div>
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <!-- Session 詳細モーダル -->
+  <div id="detail-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="detail-title">Session 詳細</h2>
+        <div class="modal-head-actions">
+          <a id="detail-csv" class="btn btn-small" href="#" download>CSV出力</a>
+          <a id="detail-json" class="btn btn-small" href="#" download>JSON出力</a>
+          <button id="detail-close" class="modal-close">閉じる ✕</button>
         </div>
-        <div class="result-block">
-          <h3 class="result-subtitle">■ 全Sessionの上位Gift送信User</h3>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead>
-                <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>Session数</th></tr>
-              </thead>
-              <tbody id="gifter-ranking"></tbody>
-            </table>
-          </div>
-          <div id="gifter-ranking-empty" class="feed-empty">DATAなし</div>
-        </div>
       </div>
-    </section>
+      <div class="modal-body">
+      <div class="result-totals" id="detail-totals"></div>
 
-    <section class="panel result-panel">
-      <h2 class="panel-title">▌ 配信 Ranking</h2>
-      <div class="chart-note">配信（Session）単位のRankingです。指標を切替できます。収集中の配信は現在値で反映されます。</div>
-      <div id="ranking-tabs" class="tab-bar"></div>
-      <div class="table-wrap">
-        <table class="result-table">
-          <thead>
-            <tr><th>#</th><th>Session</th><th>配信者</th><th>開始</th><th>時間</th><th id="ranking-value-head">値</th></tr>
-          </thead>
-          <tbody id="ranking-table"></tbody>
-        </table>
-      </div>
-      <div id="ranking-empty" class="feed-empty">DATAなし</div>
-    </section>
-
-    <section class="panel result-panel">
-      <h2 class="panel-title">▌ Session 履歴</h2>
-      <div class="table-wrap">
-        <table class="result-table">
-          <thead>
-            <tr><th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th><th>Gift</th><th>Diamonds</th><th>Memo</th><th>操作</th></tr>
-          </thead>
-          <tbody id="session-list"></tbody>
-        </table>
-      </div>
-      <div id="session-list-empty" class="feed-empty">保存されたSessionがありません。</div>
-    </section>
-
-    <div id="session-detail" class="detail-area hidden">
-      <section class="panel result-panel">
-        <h2 class="panel-title">▌ <span id="detail-title">Session 詳細</span></h2>
-        <div class="result-totals" id="detail-totals"></div>
-
-        <div class="note-block">
-          <h3 class="result-subtitle">■ Memo</h3>
-          <textarea id="note-input" class="note-input" rows="3" placeholder="このSessionに関するMemoを記入…"></textarea>
-          <div class="note-actions">
-            <button id="note-save" class="btn btn-primary">Memoを保存</button>
-            <span id="note-status" class="form-message"></span>
-          </div>
-        </div>
+      <!-- 主役: Session 内の時系列推移 -->
+      <section class="detail-hero">
+        <h3 class="result-subtitle">■ Session Timeline</h3>
+        <div class="chart-wrap" id="detail-chart"></div>
       </section>
 
-      <section class="panel result-panel">
-        <h2 class="panel-title">▌ 録画</h2>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
-            </thead>
-            <tbody id="recording-list"></tbody>
-          </table>
-        </div>
-        <div id="recording-list-empty" class="feed-empty">このSessionの録画はありません。</div>
-      </section>
-
-      <section class="panel chart-panel">
-        <h2 class="panel-title">▌ Session Timeline</h2>
-        <div class="chart-wrap">
-          <canvas id="detail-chart"></canvas>
-        </div>
-      </section>
-
-      <section class="panel result-panel">
-        <h2 class="panel-title">▌ Session Result 分析</h2>
-        <div class="result-tables">
+      <!-- 分析: 貢献ランキング ｜ Battle -->
+      <div class="detail-grid">
+        <section class="detail-rankings">
           <div class="result-block">
             <h3 class="result-subtitle">■ UserごとのGift</h3>
             <div class="table-wrap">
               <table class="result-table">
-                <thead>
-                  <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>User</th><th>Gift数</th><th>コイン</th><th>Gift内訳</th></tr></thead>
                 <tbody id="user-ranking"></tbody>
               </table>
             </div>
@@ -139,24 +114,103 @@
             <h3 class="result-subtitle">■ Gift種類別</h3>
             <div class="table-wrap">
               <table class="result-table">
-                <thead>
-                  <tr><th>#</th><th>Gift</th><th>個数</th><th>Diamonds</th></tr>
-                </thead>
+                <thead><tr><th>#</th><th>Gift</th><th>個数</th><th>コイン</th></tr></thead>
                 <tbody id="gift-ranking"></tbody>
               </table>
             </div>
             <div id="gift-ranking-empty" class="feed-empty">GIFTなし</div>
           </div>
-        </div>
-      </section>
-    </div>
-  </main>
+        </section>
 
-  <footer class="app-footer">
-    <span id="ws-indicator" class="ws-indicator">●</span>
-    <span id="ws-status">Server接続中…</span>
-    <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
-  </footer>
+        <section class="detail-battle">
+          <h3 class="result-subtitle">■ Battle <span id="battle-summary" class="result-sub-note"></span></h3>
+          <div class="bcards" id="battle-cards"></div>
+          <div id="battle-empty" class="feed-empty">このSessionにBattleはありません。</div>
+        </section>
+      </div>
+
+      <!-- AI: コメント分析 -->
+      <section class="detail-ai">
+        <h3 class="result-subtitle">■ AI コメント分析 <span id="ai-status-note" class="result-sub-note"></span></h3>
+        <div class="ai-actions">
+          <button id="ai-analyze-btn" class="btn btn-primary" disabled>分析する</button>
+          <span id="ai-analyze-status" class="form-message"></span>
+        </div>
+        <div id="ai-result" class="ai-result hidden"></div>
+      </section>
+
+      <!-- 管理: 録画 ｜ Memo -->
+      <div class="detail-grid">
+        <section>
+          <h3 class="result-subtitle">■ 録画</h3>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
+              </thead>
+              <tbody id="recording-list"></tbody>
+            </table>
+          </div>
+          <div id="recording-list-empty" class="feed-empty">このSessionの録画はありません。</div>
+        </section>
+
+        <section class="note-block">
+          <h3 class="result-subtitle">■ Memo</h3>
+          <textarea id="note-input" class="note-input" rows="3" placeholder="このSessionに関するMemoを記入…"></textarea>
+          <div class="note-actions">
+            <button id="note-save" class="btn btn-primary">Memoを保存</button>
+            <span id="note-status" class="form-message"></span>
+          </div>
+        </section>
+      </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文字起こし 表示モーダル（動画 + 時刻同期segment） -->
+  <div id="transcript-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="transcript-title">文字起こし</h2>
+        <button id="transcript-close" class="modal-close">閉じる ✕</button>
+      </div>
+      <div class="modal-body tr-body">
+        <video id="transcript-video" class="tr-video" controls playsinline preload="metadata"></video>
+        <div id="transcript-hint" class="tr-hint">行をクリックするとその時刻から再生します。</div>
+        <div id="transcript-segments" class="tr-segments"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ユーザー単位の履歴一括削除モーダル（複数選択） -->
+  <div id="userdel-modal" class="modal-overlay hidden">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <h2>ユーザー削除</h2>
+        <button id="userdel-close" class="modal-close">閉じる ✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="userdel-note">選択した配信者の履歴（Session・録画・分析）をすべて削除します。この操作は取り消せません。</p>
+        <div class="x-toolbar userdel-tools">
+          <input id="userdel-search" type="text" placeholder="🔎 配信者で絞込" autocomplete="off" />
+          <label class="userdel-all"><input id="userdel-selall" type="checkbox" /> 全選択</label>
+        </div>
+        <div class="table-wrap userdel-listwrap">
+          <table class="result-table">
+            <thead>
+              <tr><th></th><th>配信者</th><th class="n">Session</th><th class="n">コイン</th><th class="n">Comment</th></tr>
+            </thead>
+            <tbody id="userdel-rows"></tbody>
+          </table>
+          <div id="userdel-empty" class="feed-empty">配信者がいません。</div>
+        </div>
+        <div class="userdel-footer">
+          <span id="userdel-status" class="form-message"></span>
+          <button id="userdel-run" class="btn btn-danger" disabled>選択した配信者を削除</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/common.js"></script>
