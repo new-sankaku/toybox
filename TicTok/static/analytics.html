@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 全体解析</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a class="active" href="/analytics">全体解析</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
+
+    <main class="an-page">
+      <!-- 期間フィルタ + 母集団サマリ -->
+      <div class="an-controls">
+        <label class="an-ctl">集計期間
+          <select id="an-period">
+            <option value="0">全期間</option>
+            <option value="90">直近90日</option>
+            <option value="30">直近30日</option>
+            <option value="7">直近7日</option>
+          </select>
+        </label>
+        <span class="an-auto" id="an-auto">選ぶと自動で更新されます</span>
+        <div class="a-kpibar an-summary" id="an-summary"></div>
+      </div>
+      <p class="an-note">
+        監視中の配信者を<b>まとめて</b>集計します。1回だけの上振れ・下振れに振り回されないよう、各指標は<b>中央値・順位相関・レート正規化</b>で計算し、サンプル数 n を併記しています。
+      </p>
+
+      <!-- A. 時間帯インデックス -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">
+          ■ ① 時間帯×曜日別の入室の多さ（平均=1.0の倍率）
+          <select id="an-ti-metric" class="sm-hm-metric">
+            <option value="joins">指標: 入室</option>
+            <option value="comments">指標: Comment</option>
+            <option value="diamonds">指標: コイン</option>
+            <option value="likes">指標: いいね</option>
+            <option value="follows">指標: フォロー</option>
+          </select>
+        </h3>
+        <p class="an-help"><b>縦＝時刻・横＝曜日</b>のマスです。各配信の平均入室を <b>1.0</b> としたとき、その時間帯の入室が<b>何倍か</b>を表します（例: 1.40なら平均の1.4倍）。暖色が濃いほど平均より多い時間帯。右端<b>全部</b>は全曜日の合計。マスにカーソルを合わせると件数(n)も出ます。指標は右上で入室・Comment・コインなどに切替できます。</p>
+        <div class="an-legendline" id="an-ti-note"></div>
+        <div class="an-hm-wrap"><div class="an-heatmap" id="an-ti-heatmap"></div></div>
+      </section>
+
+      <!-- A2. organic入室(ノイズ除去した時間帯の関心) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ①' ノイズ除去後の時間帯別入室数</h3>
+        <p class="an-help">生の入室数には、配信内容に関心のない一時的な流入（<b>宝箱狙いの外国勢・運営boost・シェア直後の瞬間流入・配信開始直後の初速</b>）が混ざります。そこで各入室に、その後の<b>再訪・入室後の反応・レベル</b>から「質の重み」を付け、質の低い入室を割り引いて足し直したのがこのグラフです。<b>灰線＝生の入室数、暖色線＝割り引き後（本来の関心による入室）</b>。暖色が灰より下がる時間帯ほど、一時的な流入で水増しされていた帯です（gift・Commentの実勢と一致することを確認済み。提案書§15）。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-organic-chart"></canvas></div>
+        <div class="an-legendline" id="an-organic-note"></div>
+      </section>
+
+      <!-- B. 指標間の関連(配信単位)（①の右に並べる） -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ④ 指標どうしの連動（相関・配信単位）</h3>
+        <p class="an-help">1配信=1点として、2つの指標が<b>一緒に増えるか</b>を見ます。<b>1.0に近い(濃い橙)＝一緒に増える</b>、0＝無関係、<b>マイナス(青)＝逆</b>。例: 入室×ギフトが0.7なら「入室の多い配信はギフトも多い」。上段が素の相関、<b>下段(かっこ内)は配信の規模(同接)の差を取り除いた値</b>＝「大きい配信は何でも多い」分を差し引いた関連です。相関はどちらが原因かは示しません。</p>
+        <div class="table-wrap"><table class="result-table an-matrix" id="an-matrix"></table></div>
+        <div class="an-legendline" id="an-matrix-note"></div>
+      </section>
+
+      <!-- H. 入室のコンテキスト別 -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ② 状況別の入室速度（Battle / コラボ / 平時）</h3>
+        <p class="an-help">Battle中・コラボ中・平時それぞれの、<b>1分あたりの入室数</b>です。棒が長いほど、その状況で入室が集中しています。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-context-chart"></canvas></div>
+        <div class="an-legendline" id="an-context-note"></div>
+      </section>
+
+      <!-- C0. シェア→入室(event-study) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ③ シェア後の入室数の変化</h3>
+        <p class="an-help"><b>シェアされた瞬間を0秒</b>として、その前後で入室数が<b>平常よりどれだけ増減したか</b>を重ね合わせた平均です。<b>暖色の線＝増えた分</b>、濃い帯＝95%信頼区間。<b>破線で囲んだ灰の帯＝無関係な時点で同じ計算をした比較用の目安</b>で、暖色が灰をはっきり超えた所が本物の反応です。0秒より<b>手前から</b>線が上がっている場合は「入室が先・シェアが後」の可能性があり、シェアが原因とは断定しません。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-share-chart"></canvas></div>
+        <div class="an-legendline" id="an-share-note"></div>
+      </section>
+
+      <!-- C. Battle影響(event-study, placebo補正) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ③' バトル開始後の入室数の変化</h3>
+        <p class="an-help"><b>バトル開始を0秒</b>として、入室数が<b>平常よりどれだけ増減したか</b>を重ね合わせた平均です。読み方は③シェアと同じで、<b>破線で囲んだ灰の比較帯</b>を超えて初めて効果と言えます。「バトル中÷バトル外」の単純な倍率は<b>盛り上がっている時間帯そのものの影響</b>を効果と取り違えるため、注記の参考値のみに留めます。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-battle-chart"></canvas></div>
+        <div class="an-legendline" id="an-battle-note"></div>
+      </section>
+
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑨ グローブ(5倍)のコイン帯別 発動率</h3>
+        <p class="an-help">バトル中、<b>グローブ</b>(Critical Strike)は効果時間内に飛んだギフトを<b>ランダムで5倍</b>にします。<b>監視配信者（自陣）に届いたギフト</b>の<b>単価(coin)帯</b>ごとに、グローブ効果中のギフトのうち<b>何%が5倍になったか(発動率)</b>を表示します。カード仕様の抽選率は20〜30%。件数nが少ない帯は参考値です（自陣のcrit信号は収集時にしか取れないため、<b>今後のバトル収集から蓄積</b>されます）。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-glove-chart"></canvas></div>
+        <div class="an-legendline" id="an-glove-note"></div>
+      </section>
+
+      <!-- E. 規模 vs 効率（⑤と横並び） -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑧ 配信者マップ（規模 × 効率）</h3>
+        <p class="an-help">配信者を<b>横=規模(平均同接)</b>×<b>縦=効率(同接あたりコイン)</b>で配置します。<b>右上ほど規模も効率も高い</b>配信者。バブルが大きいほど配信回数が多い。点にカーソルを合わせると配信者名が出ます。</p>
+        <div class="x-chartwrap an-chart-tall"><canvas id="an-scatter-chart"></canvas></div>
+        <div class="an-legendline" id="an-scatter-note"></div>
+      </section>
+
+      <!-- F. 入室 → 定着（⑧と横並び） -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑤ 入室数と同接（定着の度合い）</h3>
+        <p class="an-help">時刻別に<b>入室数(棒)と平均同接(線)を並べました</b>。入室の棒が高いのに同接の線が伸びない時間帯は「入っても抜けている」状態です。全体の定着効率は上の1数値(1入室あたり何人残るか)で確認できます。</p>
+        <div class="an-legendline" id="an-retention-note"></div>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-retention-hour"></canvas></div>
+      </section>
+
+      <!-- G. ギフト / コメント集中度（⑦と横並び） -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑥ コイン・Commentの偏り（集中度 / Lorenz曲線・Gini）</h3>
+        <p class="an-help">コイン・Commentが少数の<b>重課金者・常連</b>にどれだけ偏っているかを見ます。曲線が対角線(＝全員均等)から<b>下に膨らむほど偏りが大きい</b>。下のタグ＝上位N%が全体の何%を占めるか。Giniは1に近いほど偏りが大きい指標です。</p>
+        <div class="an-grid2">
+          <div>
+            <div class="an-legendline" id="an-conc-gift-note"></div>
+            <div class="x-chartwrap an-chart-short"><canvas id="an-lorenz-gift"></canvas></div>
+            <div class="a-kpibar an-conc-top" id="an-conc-gift-top"></div>
+          </div>
+          <div>
+            <div class="an-legendline" id="an-conc-comment-note"></div>
+            <div class="x-chartwrap an-chart-short"><canvas id="an-lorenz-comment"></canvas></div>
+            <div class="a-kpibar an-conc-top" id="an-conc-comment-top"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- D. 入室の質(新規/常連)（⑥と横並び） -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑦ 入室者の内訳（新規 / 常連）</h3>
+        <p class="an-help">入室者のうち<b>初めて来た人(新規)</b>の割合を時間帯別に表します。棒＝新規/常連の<b>人数</b>、線＝<b>新規率(%)</b>。新規率が高い時間帯ほど、新しい人の流入が多い時間です。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-quality-chart"></canvas></div>
+        <div class="an-legendline" id="an-quality-note"></div>
+      </section>
+
+    </main>
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/common.js"></script>
+  <script src="/static/analytics.js"></script>
+</body>
+</html>

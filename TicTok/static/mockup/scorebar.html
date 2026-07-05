@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok Battle Score Bar — 焼き込みデザイン案</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#4d4a3f; --ink-strong:#3b382f; --ink-muted:#6f6a59; --line:#8f8871;
+      --accent-deep:#8e4f2f; --invert-bg:#4d4a3f; --invert-fg:#d8d2bc; --shadow:rgba(59,56,47,0.35);
+      --bar-track:rgba(8,10,16,0.55); --bar-edge:rgba(255,255,255,0.22);
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body { background:var(--sand-bg); color:var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.03em; }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.6rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.18em; font-size:0.82rem; }
+    .mock-switch .note { font-size:0.7rem; color:rgba(216,210,188,0.75); }
+    .wrap { padding:1rem 1.2rem 3rem; }
+    .a-head { display:flex; align-items:baseline; gap:0.6rem; flex-wrap:wrap; margin:0.4rem 0 0.2rem; }
+    .a-head h2 { margin:0; font-size:1rem; letter-spacing:0.08em; color:var(--ink-strong); }
+    .a-head .sum { font-size:0.7rem; color:var(--ink-muted); }
+    .lead { font-size:0.76rem; color:var(--ink-muted); line-height:1.7; max-width:62rem; margin:0.4rem 0 0.6rem; }
+    .lead b { color:var(--ink-strong); }
+
+    /* 色 = 形式 の凡例 */
+    .legend { display:flex; flex-wrap:wrap; gap:0.4rem 1.2rem; font-size:0.7rem; color:var(--ink-strong); margin:0.2rem 0 1rem; }
+    .legend .sw { display:inline-flex; align-items:center; gap:0.4rem; }
+    .legend .chip { width:1.6rem; height:0.8rem; border-radius:0.4rem; display:inline-block; }
+    .c-own { background:linear-gradient(90deg,#22d3ee,#2563eb); }
+    .c-opp { background:linear-gradient(90deg,#fb7185,#e11d48); }
+    .c-fam { background:linear-gradient(90deg,#22d3ee,#0891b2 49%,#60a5fa 51%,#2563eb); }
+    .c-multi { background:linear-gradient(90deg,#22d3ee,#2563eb 33%,#c084fc 34%,#7c3aed 66%,#fbbf24 67%,#f59e0b); }
+
+    .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%,17rem),1fr)); gap:1rem; align-items:start; }
+    .card { display:flex; flex-direction:column; gap:0.4rem; }
+    .card > .cap { font-size:0.72rem; color:var(--ink-strong); letter-spacing:0.06em; }
+    .card > .cap b { color:var(--accent-deep); }
+    .card > .sub { font-size:0.64rem; color:var(--ink-muted); }
+
+    /* ===== 縦動画フレーム(9:16) : 内側がそのまま焼き込まれる ===== */
+    .frame { position:relative; aspect-ratio:9/16; width:100%; border:1px solid var(--line); box-shadow:0.25rem 0.25rem 0 var(--shadow); overflow:hidden; border-radius:0.4rem;
+      background:linear-gradient(160deg,#2b3550,#171a26 60%,#0b0d14); color:#fff; }
+    .frame .scene-host { position:absolute; left:3%; top:1.6%; display:flex; align-items:center; gap:0.35rem; font-size:0.6rem; }
+    .frame .scene-host .dot { width:1.4em; height:1.4em; border-radius:50%; background:linear-gradient(135deg,#f0abfc,#6366f1); display:inline-flex; align-items:center; justify-content:center; font-weight:700; }
+    .frame .scene-live { position:absolute; right:3%; top:1.8%; font-size:0.52rem; background:#e11d48; padding:0.05em 0.5em; border-radius:0.6em; letter-spacing:0.12em; }
+    .frame .scene-body { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:0.7rem; color:rgba(255,255,255,0.18); letter-spacing:0.3em; }
+
+    /* ===================================================================
+       PK SCORE BAR — 焼き込み本体 / 上端中央
+       =================================================================== */
+    .pk { position:absolute; left:3%; right:3%; top:6.5%; display:flex; flex-direction:column; gap:0.28em;
+      font-size:clamp(0.5rem,2.6vw,0.78rem); }
+    .pk-meta { display:flex; align-items:center; justify-content:center; gap:0.5em; font-size:0.62em; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.8); }
+    .pk-meta .mode { background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.25); border-radius:0.6em; padding:0.05em 0.55em; letter-spacing:0.08em; }
+    .pk-meta .clock { font-weight:800; font-variant-numeric:tabular-nums; }
+    .pk-row { display:flex; align-items:center; gap:0.3em; }
+
+    .pk-av { flex:0 0 auto; width:1.7em; height:1.7em; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-weight:700; font-size:0.7em; color:#fff; box-shadow:0 0 0 0.12em rgba(255,255,255,0.85), 0 0.1em 0.4em rgba(0,0,0,0.5); }
+
+    .pk-track { position:relative; flex:1 1 auto; display:flex; align-items:stretch; height:1.55em; border-radius:1em;
+      background:var(--bar-track); overflow:hidden; box-shadow:inset 0 0 0 1px var(--bar-edge), 0 0.15em 0.5em rgba(0,0,0,0.45); }
+
+    /* 陣営(side): 2極レイアウト(1v1 / team)。内側に member segment(濃淡) */
+    .side { position:relative; min-width:8%; display:flex; align-items:stretch; overflow:hidden; }
+    .side.own { justify-content:flex-start; } .side.opp { justify-content:flex-end; }
+
+    /* segment(個人 or member) : 背景色はinlineで指定 */
+    .seg { position:relative; min-width:0; display:flex; align-items:center; overflow:hidden; }
+    .side.own .seg { justify-content:flex-start; } .side.opp .seg { justify-content:flex-end; }
+    .seg .pt { padding:0 0.55em; font-weight:800; color:#fff; text-shadow:0 0.06em 0.25em rgba(0,0,0,0.75); font-variant-numeric:tabular-nums; white-space:nowrap; display:inline-flex; align-items:center; gap:0.25em; }
+    .seg .pt .ic { font-size:0.82em; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+    /* 自陣強調: 白outline + 王冠/自バッジ */
+    .seg.me { box-shadow:inset 0 0 0 2px rgba(255,255,255,0.92); z-index:2; }
+    .seg .me-tag { font-size:0.62em; background:rgba(255,255,255,0.92); color:#0b1020; border-radius:0.5em; padding:0 0.35em; font-weight:800; margin:0 0.25em; }
+    /* member同士の細い仕切り */
+    .seg + .seg::before { content:""; position:absolute; left:0; top:16%; bottom:16%; width:1px; background:rgba(255,255,255,0.5); z-index:3; }
+
+    /* VSノブ : 2極(team / 1v1)のときだけ表示 */
+    .pk-knob { position:absolute; top:50%; left:var(--split,50%); transform:translate(-50%,-50%); z-index:4;
+      width:1.9em; height:1.9em; border-radius:50%; background:radial-gradient(circle at 50% 35%,#fff,#e7eaf2 60%,#aab2c5);
+      display:flex; align-items:center; justify-content:center; font-size:0.62em; font-weight:800; color:#1e2433;
+      box-shadow:0 0 0.5em rgba(255,255,255,0.8), 0 0.1em 0.4em rgba(0,0,0,0.5); }
+    .crown { position:absolute; top:-0.55em; left:0.4em; font-size:0.7em; z-index:5; filter:drop-shadow(0 1px 1px rgba(0,0,0,0.6)); }
+
+    .anat { background:#11131c; border-radius:0.5rem; padding:1.4rem 1rem 1.2rem; border:1px solid var(--line); }
+    .anat .pk { position:static; left:auto; right:auto; top:auto; font-size:1rem; max-width:34rem; margin:0 auto; }
+    .callouts { max-width:34rem; margin:1rem auto 0; display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,14rem),1fr)); gap:0.4rem 1rem; font-size:0.7rem; color:#cdd3e0; }
+    .callouts div b { color:#7dd3fc; }
+    .seclabel { margin:1.6rem 0 0.6rem; font-size:0.8rem; font-weight:700; color:var(--invert-fg); background:var(--invert-bg); padding:0.3rem 0.6rem; letter-spacing:0.12em; }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>TicTok — Battle Score Bar 焼き込みデザイン案 v2</strong>
+    <span class="note">※ 録画mp4へ焼き込むスコアバー。上端中央。寒色=自陣/暖色=敵陣、同系色=同チーム、別色=別人。</span>
+  </div>
+
+  <div class="wrap">
+    <div class="a-head"><h2>スコアバー焼き込み — 色で形式が分かる設計</h2><span class="sum">1v1 / 個人Nコラ(ランキング) / チーム戦 NvM</span></div>
+    <p class="lead">
+      バー内に <b>───💎1,200───｜───740💎───</b> の形で点数を表示。<b>flex-grow=score</b> で境界が比率移動します。
+      <b>色そのものが形式を表す</b>のがv2の要点です — 寒色(cyan系)=自陣・暖色(rose系)=敵陣、<b>同系色の濃淡=同チームのmember</b>(段数で 2:2 / 1:3 が読める)、
+      <b>全員別色=個人戦</b>(色数で 1:1 / 1:1:1 / 1:1:1:1 が読める)。データは収集済みの own_score / opp_score / participants(score・team_id・rank) と score_series を使用。
+    </p>
+    <div class="legend">
+      <span class="sw"><span class="chip c-own"></span>自陣(寒色)</span>
+      <span class="sw"><span class="chip c-opp"></span>敵陣(暖色)</span>
+      <span class="sw"><span class="chip c-fam"></span>同系濃淡 = 同チームのmember</span>
+      <span class="sw"><span class="chip c-multi"></span>全員別色 = 個人戦(色数=人数)</span>
+    </div>
+
+    <!-- ===================== ANATOMY ===================== -->
+    <div class="seclabel">▌ 部位(anatomy) — 1v1</div>
+    <div class="anat">
+      <div class="pk">
+        <div class="pk-meta"><span class="mode">個人戦 1v1</span><span class="clock">02:13</span></div>
+        <div class="pk-row">
+          <span class="pk-av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">か</span>
+          <div class="pk-track" style="--split:56%">
+            <div class="side own" style="flex:1240"><div class="seg me" style="background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="ic">💎</span>1,240</span></div></div>
+            <div class="pk-knob">VS</div>
+            <div class="side opp" style="flex:980"><div class="seg" style="background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">980<span class="ic">💎</span></span></div></div>
+          </div>
+          <span class="pk-av" style="background:linear-gradient(135deg,#fb7185,#e11d48)">R</span>
+        </div>
+      </div>
+      <div class="callouts">
+        <div><b>① VSノブ</b> 2極(1v1/team)の境界。score比でleft%</div>
+        <div><b>② 自陣(寒色)</b> 白outline+「自」で配信者を強調</div>
+        <div><b>③ 敵陣(暖色)</b> 右から伸びる</div>
+        <div><b>④ pt+💎</b> 自陣=左寄せ / 敵陣=右寄せ</div>
+        <div><b>⑤ 端アバター</b> host顔(任意)</div>
+        <div><b>⑥ meta</b> 形式 + 残り時間(任意)</div>
+      </div>
+    </div>
+
+    <!-- ===================== FORMATS ===================== -->
+    <div class="seclabel">▌ 形式別(映像9:16上での見え方)</div>
+    <div class="grid">
+
+      <!-- 1v1 -->
+      <div class="card">
+        <div class="cap"><b>個人戦 1v1</b> — 2色2分割</div>
+        <div class="sub">自陣(寒) vs 相手(暖)。色2つ=2人。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">1v1</span><span class="clock">03:01</span></div>
+            <div class="pk-row">
+              <span class="pk-av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">か</span>
+              <div class="pk-track" style="--split:62%">
+                <div class="side own" style="flex:1200"><div class="seg me" style="background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="ic">💎</span>1,200</span></div></div>
+                <div class="pk-knob">VS</div>
+                <div class="side opp" style="flex:740"><div class="seg" style="background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">740<span class="ic">💎</span></span></div></div>
+              </div>
+              <span class="pk-av" style="background:linear-gradient(135deg,#fb7185,#e11d48)">R</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 個人 1:1:1 ranking -->
+      <div class="card">
+        <div class="cap"><b>個人戦 1:1:1</b> — ランキング型・3色</div>
+        <div class="sub">rank順segment・全員別色。自陣=outline+「自」。👑=1位。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">3コラ</span><span class="clock">01:48</span></div>
+            <div class="pk-row">
+              <div class="pk-track">
+                <div class="seg me" style="flex:1100;background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="crown">👑</span><span class="pt"><span class="me-tag">自</span>1,100</span></div>
+                <div class="seg" style="flex:680;background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">680</span></div>
+                <div class="seg" style="flex:500;background:linear-gradient(90deg,#c084fc,#7c3aed)"><span class="pt">500</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 個人 1:1:1:1 ranking -->
+      <div class="card">
+        <div class="cap"><b>個人戦 1:1:1:1</b> — ランキング型・4色</div>
+        <div class="sub">色数=人数。一目で4コラと分かる。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">4コラ</span><span class="clock">02:55</span></div>
+            <div class="pk-row">
+              <div class="pk-track">
+                <div class="seg" style="flex:1430;background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="crown">👑</span><span class="pt">1,430</span></div>
+                <div class="seg me" style="flex:1020;background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="me-tag">自</span>1,020</span></div>
+                <div class="seg" style="flex:690;background:linear-gradient(90deg,#c084fc,#7c3aed)"><span class="pt">690</span></div>
+                <div class="seg" style="flex:320;background:linear-gradient(90deg,#fbbf24,#f59e0b)"><span class="pt">320</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- team 2v2 -->
+      <div class="card">
+        <div class="cap"><b>チーム戦 2v2</b> — 同系濃淡2:2</div>
+        <div class="sub">自(寒2段) vs 敵(暖2段)。段数で人数が読める。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">2v2</span><span class="clock">02:30</span></div>
+            <div class="pk-row">
+              <span class="pk-av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">自</span>
+              <div class="pk-track" style="--split:42%">
+                <div class="side own" style="flex:7200">
+                  <div class="seg me" style="flex:4100;background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="me-tag">自</span>4,100</span></div>
+                  <div class="seg" style="flex:3100;background:linear-gradient(90deg,#0891b2,#38bdf8)"><span class="pt">3,100</span></div>
+                </div>
+                <div class="pk-knob">VS</div>
+                <div class="side opp" style="flex:9900">
+                  <div class="seg" style="flex:5200;background:linear-gradient(90deg,#fb923c,#ea580c)"><span class="pt">5,200</span></div>
+                  <div class="seg" style="flex:4700;background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">4,700</span></div>
+                </div>
+              </div>
+              <span class="pk-av" style="background:linear-gradient(135deg,#fb7185,#e11d48)">敵</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- team 1v3 -->
+      <div class="card">
+        <div class="cap"><b>チーム戦 1v3</b> — 1段 vs 3段</div>
+        <div class="sub">自(寒1) vs 敵(暖3段)。段数で 1:3 が読める。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">1v3</span><span class="clock">04:12</span></div>
+            <div class="pk-row">
+              <span class="pk-av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">か</span>
+              <div class="pk-track" style="--split:38%">
+                <div class="side own" style="flex:5200"><div class="seg me" style="background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="me-tag">自</span>5,200</span></div></div>
+                <div class="pk-knob">VS</div>
+                <div class="side opp" style="flex:8400">
+                  <div class="seg" style="flex:3600;background:linear-gradient(90deg,#fb923c,#ea580c)"><span class="pt">3,600</span></div>
+                  <div class="seg" style="flex:2900;background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">2,900</span></div>
+                  <div class="seg" style="flex:1900;background:linear-gradient(90deg,#f43f5e,#9f1239)"><span class="pt">1,900</span></div>
+                </div>
+              </div>
+              <span class="pk-av" style="background:linear-gradient(135deg,#fb7185,#e11d48)">敵</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- team 1v2 lead -->
+      <div class="card">
+        <div class="cap"><b>チーム戦 1:2</b> — 自陣リード中</div>
+        <div class="sub">境界が右へ。自(寒1) vs 敵(暖2段)。</div>
+        <div class="frame">
+          <div class="scene-host"><span class="dot">か</span>かわいいLIVE</div><div class="scene-live">LIVE</div><div class="scene-body">配信映像</div>
+          <div class="pk">
+            <div class="pk-meta"><span class="mode">1v2</span><span class="clock">00:42</span></div>
+            <div class="pk-row">
+              <span class="pk-av" style="background:linear-gradient(135deg,#22d3ee,#2563eb)">か</span>
+              <div class="pk-track" style="--split:70%">
+                <div class="side own" style="flex:9300"><div class="seg me" style="background:linear-gradient(90deg,#2563eb,#22d3ee)"><span class="pt"><span class="me-tag">自</span>9,300</span></div></div>
+                <div class="pk-knob">VS</div>
+                <div class="side opp" style="flex:4000">
+                  <div class="seg" style="flex:2400;background:linear-gradient(90deg,#fb923c,#ea580c)"><span class="pt">2,400</span></div>
+                  <div class="seg" style="flex:1600;background:linear-gradient(90deg,#fb7185,#e11d48)"><span class="pt">1,600</span></div>
+                </div>
+              </div>
+              <span class="pk-av" style="background:linear-gradient(135deg,#fb7185,#e11d48)">敵</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

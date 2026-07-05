@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>全体解析 ②③④ 表現案の比較</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    body.app-dashboard { padding: 1.4rem clamp(1rem, 3vw, 2.4rem) 3rem; }
+    .mk-head { margin: 0 0 0.4rem; color: var(--ink-strong); font-size: 1.1rem; }
+    .mk-lead { margin: 0 0 1.6rem; color: var(--ink-muted); font-size: 0.8rem; line-height: 1.6; max-inline-size: 60rem; }
+    .mk-q { margin: 2rem 0 0.6rem; color: var(--ink-strong); font-size: 0.95rem; border-block-end: 2px solid var(--line); padding-block-end: 0.35rem; }
+    .mk-qsub { margin: 0 0 1rem; color: var(--ink-muted); font-size: 0.72rem; }
+    .mk-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; }
+    .mk-opt { border: 1px solid var(--line); background: var(--sand-panel); padding: 0.9rem 1rem 1.1rem; display: flex; flex-direction: column; }
+    .mk-tag { align-self: flex-start; font-size: 0.66rem; letter-spacing: 0.08em; color: var(--invert-fg); background: var(--invert-bg); padding: 0.15rem 0.5rem; margin-block-end: 0.5rem; }
+    .mk-tag.mk-cur { background: var(--sand-panel-muted); color: var(--ink-muted); border: 1px solid var(--line); }
+    .mk-optname { font-size: 0.82rem; color: var(--ink-strong); font-weight: 700; margin-block-end: 0.2rem; }
+    .mk-optdesc { font-size: 0.68rem; color: var(--ink-muted); line-height: 1.5; margin-block-end: 0.9rem; }
+    .mk-demo { margin-block-start: auto; }
+
+    /* ②-A stat cards */
+    .ctx-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+    .ctx-card { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.5rem 0.6rem 0.6rem; display: flex; flex-direction: column; gap: 0.25rem; }
+    .ctx-card.is-peak { border-color: var(--accent-deep); border-inline-start-width: 3px; }
+    .ctx-name { font-size: 0.64rem; color: var(--ink-muted); letter-spacing: 0.04em; }
+    .ctx-val { font-size: 1.2rem; color: var(--ink-strong); font-variant-numeric: tabular-nums; line-height: 1; }
+    .ctx-val small { font-size: 0.6rem; color: var(--ink-muted); }
+    .ctx-mult { font-size: 0.68rem; font-weight: 700; }
+    .ctx-mult.up { color: var(--accent-deep); }
+    .ctx-mult.base { color: var(--ink-muted); font-weight: 400; }
+    .ctx-track { block-size: 4px; background: var(--sand-bg-deep); margin-block-start: 0.2rem; }
+    .ctx-fill { block-size: 100%; background: var(--accent); }
+
+    /* ②-B single relative bar */
+    .ctx-stack { display: flex; block-size: 2.2rem; border: 1px solid var(--line); overflow: hidden; font-size: 0.64rem; }
+    .ctx-seg { display: flex; align-items: center; justify-content: center; color: var(--invert-fg); white-space: nowrap; overflow: hidden; }
+    .ctx-legend { display: flex; gap: 0.8rem; margin-block-start: 0.5rem; font-size: 0.64rem; color: var(--ink-muted); flex-wrap: wrap; }
+    .ctx-legend span::before { content: "■ "; }
+
+    /* ③-A metric list + range bar */
+    .up-list { display: flex; flex-direction: column; gap: 0.55rem; }
+    .up-row { display: grid; grid-template-columns: 4.2rem 3rem 1fr; align-items: center; gap: 0.5rem; }
+    .up-name { font-size: 0.7rem; color: var(--ink-muted); }
+    .up-mult { font-size: 0.95rem; font-weight: 700; font-variant-numeric: tabular-nums; text-align: right; }
+    .up-mult.up { color: var(--accent-deep); }
+    .up-mult.down { color: #4d6e6e; }
+    .up-bar { position: relative; block-size: 1.1rem; background: var(--sand-panel-muted); border: 1px solid var(--line); }
+    .up-base { position: absolute; inset-block: 0; inline-size: 1px; background: #8a4b4b; }
+    .up-range { position: absolute; inset-block: 25% ; block-size: 50%; background: rgba(164,80,47,0.35); }
+    .up-range.down { background: rgba(77,110,110,0.4); }
+    .up-dot { position: absolute; inset-block-start: 50%; inline-size: 8px; block-size: 8px; border-radius: 50%; background: var(--accent-deep); transform: translate(-50%,-50%); }
+    .up-dot.down { background: #4d6e6e; }
+    .up-scale { display: flex; justify-content: space-between; font-size: 0.58rem; color: var(--ink-muted); margin-block-start: 0.4rem; padding-inline-start: 7.7rem; }
+
+    /* ③-B dumbbell (same primitives, no big number) */
+    .db-row { display: grid; grid-template-columns: 4.2rem 1fr; align-items: center; gap: 0.5rem; margin-block-end: 0.5rem; }
+
+    /* ④-A lower triangle */
+    table.mk-matrix { border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    table.mk-matrix th { font-size: 0.6rem; padding: 0.2rem 0.35rem; color: var(--ink-muted); font-weight: 400; }
+    table.mk-matrix td { inline-size: 2.1rem; block-size: 1.7rem; text-align: center; font-size: 0.64rem; border: 1px solid var(--line); color: var(--ink-strong); }
+    table.mk-matrix td.blank { border: 0; background: transparent; }
+    .mk-strongline { margin-block-start: 0.7rem; font-size: 0.66rem; color: var(--ink-muted); line-height: 1.6; }
+    .mk-strongline b { color: var(--accent-deep); }
+
+    /* ④-B ranked relations only */
+    .rel-list { display: flex; flex-direction: column; gap: 0.4rem; }
+    .rel-row { display: grid; grid-template-columns: 8.5rem 1fr 2.2rem; align-items: center; gap: 0.5rem; font-size: 0.68rem; color: var(--ink-muted); }
+    .rel-bar { block-size: 0.85rem; background: var(--sand-panel-muted); border: 1px solid var(--line); position: relative; }
+    .rel-fill { position: absolute; inset-block: 0; inset-inline-start: 0; background: rgba(169,110,73,0.65); }
+    .rel-fill.neg { background: rgba(77,110,110,0.6); }
+    .rel-v { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink-strong); font-weight: 700; }
+  </style>
+</head>
+<body class="app-dashboard">
+  <h1 class="mk-head">全体解析 — ②③④ の表現案 比較モック</h1>
+  <p class="mk-lead">
+    数字が少ない②③を棒グラフから数値主体に、④の対称行列を整理した案です。
+    各案は <b>②-A / ③-A</b> のように呼びます。見て良い組み合わせを選んでください（数値はダミー）。
+  </p>
+
+  <!-- ================= ② ================= -->
+  <h2 class="mk-q">② コンテキスト別（Battle / コラボ / 平時 の入室/分 ＝ 3値）</h2>
+  <p class="mk-qsub">元データは3つの数値＋「平時の何倍か」。棒3本は間延びしがち。</p>
+  <div class="mk-opts">
+
+    <div class="mk-opt">
+      <span class="mk-tag">②-A</span>
+      <div class="mk-optname">倍率つき Stat カード</div>
+      <div class="mk-optdesc">大きな数字＋平時基準の倍率バッジ。下に相対バー。一目で「どの状況が熱いか」。</div>
+      <div class="mk-demo">
+        <div class="ctx-cards">
+          <div class="ctx-card is-peak">
+            <span class="ctx-name">Battle中</span>
+            <span class="ctx-val">12.3<small> /分</small></span>
+            <span class="ctx-mult up">×2.1 平時比</span>
+            <div class="ctx-track"><div class="ctx-fill" style="inline-size:100%"></div></div>
+          </div>
+          <div class="ctx-card">
+            <span class="ctx-name">コラボ中</span>
+            <span class="ctx-val">8.1<small> /分</small></span>
+            <span class="ctx-mult up">×1.4</span>
+            <div class="ctx-track"><div class="ctx-fill" style="inline-size:66%"></div></div>
+          </div>
+          <div class="ctx-card">
+            <span class="ctx-name">平時</span>
+            <span class="ctx-val">5.8<small> /分</small></span>
+            <span class="ctx-mult base">基準</span>
+            <div class="ctx-track"><div class="ctx-fill" style="inline-size:47%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag">②-B</span>
+      <div class="mk-optname">相対1本バー（構成比）</div>
+      <div class="mk-optdesc">3状況の入室速度を1本に。相対的な大小が直感的。数値精度はカードに劣る。</div>
+      <div class="mk-demo">
+        <div class="ctx-stack">
+          <div class="ctx-seg" style="inline-size:47%;background:var(--accent-deep)">Battle 12.3</div>
+          <div class="ctx-seg" style="inline-size:31%;background:#7a6a8e">コラボ 8.1</div>
+          <div class="ctx-seg" style="inline-size:22%;background:#4d4a3f">平時 5.8</div>
+        </div>
+        <div class="ctx-legend">
+          <span style="color:var(--accent-deep)">Battle中 ×2.1</span>
+          <span style="color:#7a6a8e">コラボ中 ×1.4</span>
+          <span style="color:#4d4a3f">平時 基準</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag mk-cur">②-現状</span>
+      <div class="mk-optname">横棒グラフ（現行）</div>
+      <div class="mk-optdesc">棒3本。全幅だと横に間延びして見える。</div>
+      <div class="mk-demo">
+        <div class="rel-list">
+          <div class="rel-row"><span>Battle中</span><div class="rel-bar"><div class="rel-fill" style="inline-size:100%"></div></div><span class="rel-v">12.3</span></div>
+          <div class="rel-row"><span>コラボ中</span><div class="rel-bar"><div class="rel-fill" style="inline-size:66%"></div></div><span class="rel-v">8.1</span></div>
+          <div class="rel-row"><span>平時</span><div class="rel-bar"><div class="rel-fill" style="inline-size:47%"></div></div><span class="rel-v">5.8</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= ③ ================= -->
+  <h2 class="mk-q">③ Battle影響（4指標が平常の何倍か。中央値＋P25〜P75）</h2>
+  <p class="mk-qsub">現行は棒だけで、ばらつき(P25〜P75)はtooltip頼み。倍率とばらつきを同時に見せたい。</p>
+  <div class="mk-opts">
+
+    <div class="mk-opt">
+      <span class="mk-tag">③-A</span>
+      <div class="mk-optname">指標リスト＋レンジバー</div>
+      <div class="mk-optdesc">「×中央値」を大きく、1.0基準線つきのP25〜P75レンジ＋中央値ドット＋n。倍率が主役でばらつきも常時見える。</div>
+      <div class="mk-demo">
+        <div class="up-list">
+          <!-- scale 0..3.5 : baseline 1.0 -> 28.6% -->
+          <div class="up-row">
+            <span class="up-name">入室</span><span class="up-mult up">×1.60</span>
+            <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:34%;inline-size:26%"></div><div class="up-dot" style="inset-inline-start:46%"></div></div>
+          </div>
+          <div class="up-row">
+            <span class="up-name">コイン</span><span class="up-mult up">×2.10</span>
+            <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:40%;inline-size:51%"></div><div class="up-dot" style="inset-inline-start:60%"></div></div>
+          </div>
+          <div class="up-row">
+            <span class="up-name">Comment</span><span class="up-mult up">×1.25</span>
+            <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:26%;inline-size:20%"></div><div class="up-dot" style="inset-inline-start:36%"></div></div>
+          </div>
+          <div class="up-row">
+            <span class="up-name">フォロー</span><span class="up-mult down">×0.90</span>
+            <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range down" style="inset-inline-start:17%;inline-size:20%"></div><div class="up-dot down" style="inset-inline-start:26%"></div></div>
+          </div>
+        </div>
+        <div class="up-scale"><span>0</span><span>1.0(変化なし)</span><span>3.0×</span></div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag">③-B</span>
+      <div class="mk-optname">Dumbbell 図</div>
+      <div class="mk-optdesc">help文どおり「◆＝中央値、線＝ばらつき」。数値は控えめ、分布の広さが視覚的。グラフは残す。</div>
+      <div class="mk-demo">
+        <div class="db-row"><span class="up-name">入室</span>
+          <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:34%;inline-size:26%"></div><div class="up-dot" style="inset-inline-start:46%;inline-size:11px;block-size:11px;border-radius:2px;transform:translate(-50%,-50%) rotate(45deg)"></div></div>
+        </div>
+        <div class="db-row"><span class="up-name">コイン</span>
+          <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:40%;inline-size:51%"></div><div class="up-dot" style="inset-inline-start:60%;inline-size:11px;block-size:11px;border-radius:2px;transform:translate(-50%,-50%) rotate(45deg)"></div></div>
+        </div>
+        <div class="db-row"><span class="up-name">Comment</span>
+          <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range" style="inset-inline-start:26%;inline-size:20%"></div><div class="up-dot" style="inset-inline-start:36%;inline-size:11px;block-size:11px;border-radius:2px;transform:translate(-50%,-50%) rotate(45deg)"></div></div>
+        </div>
+        <div class="db-row"><span class="up-name">フォロー</span>
+          <div class="up-bar"><div class="up-base" style="inset-inline-start:28.6%"></div><div class="up-range down" style="inset-inline-start:17%;inline-size:20%"></div><div class="up-dot down" style="inset-inline-start:26%;inline-size:11px;block-size:11px;border-radius:2px;transform:translate(-50%,-50%) rotate(45deg)"></div></div>
+        </div>
+        <div class="up-scale"><span>0</span><span>1.0</span><span>3.0×</span></div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag mk-cur">③-現状</span>
+      <div class="mk-optname">横棒グラフ（現行）</div>
+      <div class="mk-optdesc">倍率のみ棒表示。ばらつきは見えない。</div>
+      <div class="mk-demo">
+        <div class="rel-list">
+          <div class="rel-row"><span>入室</span><div class="rel-bar"><div class="rel-fill" style="inline-size:53%"></div></div><span class="rel-v">×1.6</span></div>
+          <div class="rel-row"><span>コイン</span><div class="rel-bar"><div class="rel-fill" style="inline-size:70%"></div></div><span class="rel-v">×2.1</span></div>
+          <div class="rel-row"><span>Comment</span><div class="rel-bar"><div class="rel-fill" style="inline-size:42%"></div></div><span class="rel-v">×1.25</span></div>
+          <div class="rel-row"><span>フォロー</span><div class="rel-bar"><div class="rel-fill neg" style="inline-size:30%"></div></div><span class="rel-v">×0.9</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= ④ ================= -->
+  <h2 class="mk-q">④ 指標間の関連（6×6 相関ヒートマップ）</h2>
+  <p class="mk-qsub">相関行列は対称なので上半分と対角は冗長。読み手が本当に欲しいのは「強く一緒に動く組」。</p>
+  <div class="mk-opts">
+
+    <div class="mk-opt">
+      <span class="mk-tag">④-A</span>
+      <div class="mk-optname">下三角ヒートマップ＋強い関連の抜粋</div>
+      <div class="mk-optdesc">冗長な上半分/対角を省き半分のサイズに。下に強い組をテキストで箇条書き。表の網羅性は保つ。</div>
+      <div class="mk-demo">
+        <table class="mk-matrix">
+          <thead><tr><th></th><th>入室</th><th>Com</th><th>コイン</th><th>いいね</th><th>フォロー</th></tr></thead>
+          <tbody>
+            <tr><th>Comment</th><td style="background:rgba(169,110,73,0.32)">0.40</td><td class="blank"></td><td class="blank"></td><td class="blank"></td><td class="blank"></td></tr>
+            <tr><th>コイン</th><td style="background:rgba(169,110,73,0.58)">0.72</td><td style="background:rgba(169,110,73,0.26)">0.33</td><td class="blank"></td><td class="blank"></td><td class="blank"></td></tr>
+            <tr><th>いいね</th><td style="background:rgba(169,110,73,0.24)">0.30</td><td style="background:rgba(169,110,73,0.5)">0.62</td><td style="background:rgba(169,110,73,0.18)">0.22</td><td class="blank"></td><td class="blank"></td></tr>
+            <tr><th>フォロー</th><td style="background:rgba(169,110,73,0.16)">0.20</td><td style="background:rgba(169,110,73,0.22)">0.28</td><td style="background:rgba(77,110,110,0.2)">-0.15</td><td style="background:rgba(169,110,73,0.28)">0.35</td><td class="blank"></td></tr>
+            <tr><th>同接</th><td style="background:rgba(169,110,73,0.62)">0.78</td><td style="background:rgba(169,110,73,0.3)">0.38</td><td style="background:rgba(169,110,73,0.52)">0.65</td><td style="background:rgba(169,110,73,0.2)">0.25</td><td style="background:rgba(169,110,73,0.14)">0.18</td></tr>
+          </tbody>
+        </table>
+        <div class="mk-strongline">
+          強い関連: <b>同接 × 入室 0.78</b> ／ <b>入室 × コイン 0.72</b> ／ <b>コイン × 同接 0.65</b>
+        </div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag">④-B</span>
+      <div class="mk-optname">ランキング（表を廃止）</div>
+      <div class="mk-optdesc">行列をやめ、関連の強い組だけを強さ順のバーで。「何と何が一緒に動くか」に絞って最短で読める。</div>
+      <div class="mk-demo">
+        <div class="rel-list">
+          <div class="rel-row"><span>同接 × 入室</span><div class="rel-bar"><div class="rel-fill" style="inline-size:78%"></div></div><span class="rel-v">0.78</span></div>
+          <div class="rel-row"><span>入室 × コイン</span><div class="rel-bar"><div class="rel-fill" style="inline-size:72%"></div></div><span class="rel-v">0.72</span></div>
+          <div class="rel-row"><span>コイン × 同接</span><div class="rel-bar"><div class="rel-fill" style="inline-size:65%"></div></div><span class="rel-v">0.65</span></div>
+          <div class="rel-row"><span>Comment × いいね</span><div class="rel-bar"><div class="rel-fill" style="inline-size:62%"></div></div><span class="rel-v">0.62</span></div>
+          <div class="rel-row"><span>コイン × フォロー</span><div class="rel-bar"><div class="rel-fill neg" style="inline-size:15%"></div></div><span class="rel-v">-0.15</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mk-opt">
+      <span class="mk-tag mk-cur">④-現状</span>
+      <div class="mk-optname">全6×6ヒートマップ（現行）</div>
+      <div class="mk-optdesc">対称に全マスを表示。上半分と対角が冗長。</div>
+      <div class="mk-demo">
+        <table class="mk-matrix">
+          <thead><tr><th></th><th>入室</th><th>Com</th><th>コイン</th><th>好</th><th>フォ</th><th>同接</th></tr></thead>
+          <tbody>
+            <tr><th>入室</th><td style="background:var(--sand-panel-muted)">–</td><td style="background:rgba(169,110,73,0.32)">.40</td><td style="background:rgba(169,110,73,0.58)">.72</td><td style="background:rgba(169,110,73,0.24)">.30</td><td style="background:rgba(169,110,73,0.16)">.20</td><td style="background:rgba(169,110,73,0.62)">.78</td></tr>
+            <tr><th>Com</th><td style="background:rgba(169,110,73,0.32)">.40</td><td style="background:var(--sand-panel-muted)">–</td><td style="background:rgba(169,110,73,0.26)">.33</td><td style="background:rgba(169,110,73,0.5)">.62</td><td style="background:rgba(169,110,73,0.22)">.28</td><td style="background:rgba(169,110,73,0.3)">.38</td></tr>
+            <tr><th>コイン</th><td style="background:rgba(169,110,73,0.58)">.72</td><td style="background:rgba(169,110,73,0.26)">.33</td><td style="background:var(--sand-panel-muted)">–</td><td style="background:rgba(169,110,73,0.18)">.22</td><td style="background:rgba(77,110,110,0.2)">-.15</td><td style="background:rgba(169,110,73,0.52)">.65</td></tr>
+            <tr><th>好</th><td style="background:rgba(169,110,73,0.24)">.30</td><td style="background:rgba(169,110,73,0.5)">.62</td><td style="background:rgba(169,110,73,0.18)">.22</td><td style="background:var(--sand-panel-muted)">–</td><td style="background:rgba(169,110,73,0.28)">.35</td><td style="background:rgba(169,110,73,0.2)">.25</td></tr>
+            <tr><th>フォ</th><td style="background:rgba(169,110,73,0.16)">.20</td><td style="background:rgba(169,110,73,0.22)">.28</td><td style="background:rgba(77,110,110,0.2)">-.15</td><td style="background:rgba(169,110,73,0.28)">.35</td><td style="background:var(--sand-panel-muted)">–</td><td style="background:rgba(169,110,73,0.14)">.18</td></tr>
+            <tr><th>同接</th><td style="background:rgba(169,110,73,0.62)">.78</td><td style="background:rgba(169,110,73,0.3)">.38</td><td style="background:rgba(169,110,73,0.52)">.65</td><td style="background:rgba(169,110,73,0.2)">.25</td><td style="background:rgba(169,110,73,0.14)">.18</td><td style="background:var(--sand-panel-muted)">–</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <p class="mk-lead" style="margin-block-start:2.4rem">
+    選び方の例: 「②-A、③-A、④-A で」。決まれば実データに繋いで analytics.html / analytics.js / style.css に実装します。
+  </p>
+</body>
+</html>

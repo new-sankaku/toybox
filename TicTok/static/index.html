@@ -4,169 +4,173 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TicTok LIVE Monitor — 監視</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body class="app-dashboard">
   <div class="scanlines" aria-hidden="true"></div>
 
-  <header class="app-header">
-    <div class="header-mark">■</div>
-    <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
-    <div class="header-sub">TikTok LIVE Event Collector — YoRHa Interface</div>
-    <nav class="app-nav">
-      <a class="nav-link active" href="/">▌ 監視</a>
-      <a class="nav-link" href="/overview">▌ 全体監視</a>
-      <a class="nav-link" href="/history">▌ 履歴</a>
-      <a class="nav-link" href="/settings">▌ 設定</a>
-    </nav>
-  </header>
-
-  <main class="layout">
-    <section class="panel control-panel">
-      <h2 class="panel-title">▌ 監視対象の追加</h2>
-      <div class="control-row">
-        <label class="field">
-          <span class="field-label">TikTok ID</span>
-          <div class="field-input-wrap">
-            <span class="at-mark">@</span>
-            <input id="unique-id" type="text" placeholder="username"
-                   autocomplete="off" spellcheck="false" />
-          </div>
+  <div class="app-shell">
+    <!-- 行1: スリムトップバー -->
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a class="active" href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a href="/analytics">全体解析</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-add">
+        <span class="at">@</span>
+        <input id="unique-id" type="text" placeholder="username で監視追加"
+               autocomplete="off" spellcheck="false" />
+        <label class="a-rec-opt" title="OFFにすると動画は保存せず、統計・Comment等のデータのみ収集します。">
+          <input type="checkbox" id="add-record-video" checked /> 動画保存
         </label>
-        <button id="add-btn" class="btn btn-primary">監視開始</button>
+        <button id="add-btn">監視開始</button>
       </div>
-      <div id="add-message" class="form-message"></div>
-
-      <div id="tab-bar" class="tab-bar"></div>
-    </section>
-
-    <div id="detail-area" class="detail-area hidden">
-      <section class="panel control-panel">
-        <h2 class="panel-title">▌ <span id="detail-title">監視状況</span></h2>
-        <div class="status-row">
-          <div id="spinner" class="spinner hidden" aria-hidden="true"><div class="spinner-core"></div></div>
-          <div class="status-text">
-            <span id="status-badge" class="badge badge-idle">IDLE</span>
-            <span id="status-message">待機中</span>
-          </div>
-          <div class="monitor-actions">
-            <button id="record-btn" class="btn" disabled>● 録画開始</button>
-            <button id="stop-btn" class="btn" disabled>停止</button>
-            <button id="restart-btn" class="btn" disabled>再開</button>
-            <button id="remove-btn" class="btn btn-danger">監視解除</button>
-          </div>
-        </div>
-        <div id="record-status" class="record-status hidden">
-          <span class="rec-dot">●</span>
-          <span id="record-text">録画中</span>
-        </div>
-        <div id="player-panel" class="player-panel hidden">
-          <div class="player-head">
-            <span class="player-title">● LIVE Preview（録画中の映像）</span>
-            <div class="player-controls">
-              <button id="audio-btn" class="btn btn-small" title="音声のオン/オフ">🔇 音声OFF</button>
-            </div>
-          </div>
-          <video id="live-video" class="live-video" playsinline muted autoplay></video>
-          <div id="player-message" class="player-message"></div>
-        </div>
-        <ol id="steps" class="steps"></ol>
-      </section>
-
-      <section class="panel stats-panel">
-        <h2 class="panel-title">▌ 統計</h2>
-        <div class="stats-grid">
-          <div class="stat"><span class="stat-label">視聴者数</span><span class="stat-value" id="stat-viewers">0</span></div>
-          <div class="stat"><span class="stat-label">累計視聴者</span><span class="stat-value" id="stat-total-viewers">0</span></div>
-          <div class="stat"><span class="stat-label">累計Like</span><span class="stat-value" id="stat-likes">0</span></div>
-          <div class="stat stat-accent"><span class="stat-label">Gift数</span><span class="stat-value" id="stat-gifts">0</span></div>
-          <div class="stat stat-accent"><span class="stat-label">Diamonds</span><span class="stat-value" id="stat-diamonds">0</span></div>
-          <div class="stat"><span class="stat-label">Comment数</span><span class="stat-value" id="stat-comments">0</span></div>
-          <div class="stat"><span class="stat-label">Follow</span><span class="stat-value" id="stat-follows">0</span></div>
-          <div class="stat"><span class="stat-label">Share</span><span class="stat-value" id="stat-shares">0</span></div>
-          <div class="stat"><span class="stat-label">入室数</span><span class="stat-value" id="stat-joins">0</span></div>
-          <div class="stat"><span class="stat-label">Battle</span><span class="stat-value" id="stat-battles">0</span></div>
-          <div class="stat"><span class="stat-label">Battle Score</span><span class="stat-value" id="stat-battle-points">0</span></div>
-          <div class="stat"><span class="stat-label">受信Event</span><span class="stat-value" id="stat-events">0</span></div>
-          <div class="stat"><span class="stat-label">接続時間</span><span class="stat-value" id="stat-uptime">--:--:--</span></div>
-          <div class="stat stat-rate"><span class="stat-label">Gift/分</span><span class="stat-value" id="stat-rate-gifts">0</span></div>
-          <div class="stat stat-rate"><span class="stat-label">Diamonds/分</span><span class="stat-value" id="stat-rate-diamonds">0</span></div>
-          <div class="stat stat-rate"><span class="stat-label">Comment/分</span><span class="stat-value" id="stat-rate-comments">0</span></div>
-          <div class="stat stat-rate"><span class="stat-label">Like/分</span><span class="stat-value" id="stat-rate-likes">0</span></div>
-        </div>
-      </section>
-
-      <section class="panel chart-panel">
-        <h2 class="panel-title">▌ Timeline</h2>
-        <div class="chart-note">凡例clickで表示系列を切替できます。縦線はLIVE状況のMarker（LIVE接続 / 再接続 / Battle / LIVE終了 / 切断）です。</div>
-        <div class="chart-wrap">
-          <canvas id="timeline-chart"></canvas>
-        </div>
-      </section>
-
-      <section class="panel result-panel">
-        <h2 class="panel-title">▌ Result 分析</h2>
-        <div class="result-totals" id="result-totals"></div>
-        <div class="result-tables">
-          <div class="result-block">
-            <h3 class="result-subtitle">■ UserごとのGift</h3>
-            <div class="table-wrap">
-              <table class="result-table">
-                <thead>
-                  <tr><th>#</th><th>User</th><th>Gift数</th><th>Diamonds</th><th>主なGift</th></tr>
-                </thead>
-                <tbody id="user-ranking"></tbody>
-              </table>
-            </div>
-            <div id="user-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
-          </div>
-          <div class="result-block">
-            <h3 class="result-subtitle">■ Gift種類別</h3>
-            <div class="table-wrap">
-              <table class="result-table">
-                <thead>
-                  <tr><th>#</th><th>Gift</th><th>個数</th><th>単価</th><th>Diamonds</th></tr>
-                </thead>
-                <tbody id="gift-ranking"></tbody>
-              </table>
-            </div>
-            <div id="gift-ranking-empty" class="feed-empty">GIFT受信待機中…</div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel feed-panel">
-        <h2 class="panel-title">▌ Gift</h2>
-        <div id="gift-streak" class="gift-streak hidden"></div>
-        <ul id="gift-feed" class="feed"></ul>
-        <div id="gift-empty" class="feed-empty">GIFT受信待機中…</div>
-      </section>
-
-      <section class="panel feed-panel">
-        <h2 class="panel-title">▌ Comment</h2>
-        <ul id="comment-feed" class="feed"></ul>
-        <div id="comment-empty" class="feed-empty">COMMENT受信待機中…</div>
-      </section>
-
-      <section class="panel feed-panel feed-panel-wide">
-        <h2 class="panel-title">▌ Event Log</h2>
-        <div id="event-filters" class="event-filters"></div>
-        <ul id="event-feed" class="feed"></ul>
-        <div id="event-empty" class="feed-empty">EVENT受信待機中…</div>
-      </section>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div id="add-message" class="a-form-msg"></div>
     </div>
 
-    <section id="no-monitor" class="panel">
-      <h2 class="panel-title">▌ 監視対象なし</h2>
-      <div class="feed-empty">TikTok IDを入力して「監視開始」を押してください。複数の配信者を同時に監視できます。</div>
-    </section>
-  </main>
+    <!-- 行2: 監視対象タブ（概況内包） -->
+    <div id="tab-bar" class="a-tabs"></div>
 
-  <footer class="app-footer">
-    <span id="ws-indicator" class="ws-indicator">●</span>
-    <span id="ws-status">Server接続中…</span>
-    <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
-  </footer>
+    <!-- 行3: 3カラム ダッシュボード -->
+    <div id="main-area" class="a-main hidden">
+      <!-- 左(40%): LIVE Preview を最大化 -->
+      <div class="a-col">
+        <div class="a-card a-livecard">
+          <h3>
+            <span id="live-owner" class="u"><b>監視状況</b></span>
+            <span id="status-badge" class="badge badge-idle">IDLE</span>
+          </h3>
+          <div class="a-videowrap">
+            <video id="live-video" class="a-video hidden" playsinline muted autoplay></video>
+            <div id="video-msg" class="a-video-msg">● LIVE Preview（録画中に表示）</div>
+            <span id="rec-badge" class="rec-badge hidden"><span class="rec-dot">●</span> <span id="rec-badge-text">REC</span></span>
+          </div>
+          <div class="a-livefoot">
+            <div class="a-statusline">
+              <span id="status-message">待機中</span>
+              <span id="audio-wrap">· <button id="audio-btn" class="link-btn">🔇 音声OFF</button></span>
+            </div>
+            <ol id="steps" class="a-steps"></ol>
+            <div class="a-actions">
+              <button id="record-btn" disabled>● 録画開始</button>
+              <button id="record-video-btn" title="この監視対象の動画保存ON/OFF。OFFでデータのみ収集します。">🎥 動画保存: ON</button>
+              <button id="stop-btn" disabled>配信切断</button>
+              <button id="restart-btn" disabled>配信再接続</button>
+              <button id="remove-btn" class="danger">監視解除</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 中央(35%): STATS と TIMELINE を上下 50/50 -->
+      <div class="a-col">
+        <div class="a-card a-statcard">
+          <h3>STATS <span class="sub">現在 / 累計 / レート</span></h3>
+          <div class="body">
+            <div class="a-statgroup">
+              <p class="gl">現在 / 累計</p>
+              <div class="a-statgrid">
+                <div class="a-stat"><span class="l">視聴者</span><span class="v" id="stat-viewers">0</span></div>
+                <div class="a-stat" title="現在の視聴者のうち匿名(非ログイン/非公開)で枠内にいる人数"><span class="l">匿名視聴</span><span class="v" id="stat-anonymous">0</span></div>
+                <div class="a-stat"><span class="l">入室</span><span class="v" id="stat-joins">0</span></div>
+                <div class="a-stat"><span class="l">接続</span><span class="v" id="stat-uptime">--:--:--</span></div>
+                <div class="a-stat acc"><span class="l">Gift</span><span class="v" id="stat-gifts">0</span></div>
+                <div class="a-stat acc"><span class="l">コイン</span><span class="v" id="stat-diamonds">0</span></div>
+                <div class="a-stat"><span class="l">Like</span><span class="v" id="stat-likes">0</span></div>
+                <div class="a-stat"><span class="l">Comment</span><span class="v" id="stat-comments">0</span></div>
+                <div class="a-stat"><span class="l">Follow</span><span class="v" id="stat-follows">0</span></div>
+                <div class="a-stat"><span class="l">Share</span><span class="v" id="stat-shares">0</span></div>
+                <div class="a-stat"><span class="l">累計視聴</span><span class="v" id="stat-total-viewers">0</span></div>
+                <div class="a-stat"><span class="l">Battle</span><span class="v" id="stat-battles">0</span></div>
+                <div class="a-stat" title="Battle(LinkMic対戦)中の自陣スコア合計。詳細は活動ログのBattleタブ"><span class="l">Battle Score</span><span class="v" id="stat-battle-points">0</span></div>
+                <div class="a-stat"><span class="l">Event</span><span class="v" id="stat-events">0</span></div>
+                <div class="a-stat rate"><span class="l">Gift/分</span><span class="v" id="stat-rate-gifts">0</span></div>
+                <div class="a-stat rate"><span class="l">コイン/分</span><span class="v" id="stat-rate-diamonds">0</span></div>
+                <div class="a-stat rate"><span class="l">Comm/分</span><span class="v" id="stat-rate-comments">0</span></div>
+                <div class="a-stat rate"><span class="l">Like/分</span><span class="v" id="stat-rate-likes">0</span></div>
+              </div>
+            </div>
+            <div class="a-statgroup">
+              <p class="gl" id="cmp-label">過去配信との比較</p>
+              <table class="a-cmp">
+                <thead><tr><th class="k">指標</th><th>今回</th><th>前回</th><th>平均</th><th>自己Best</th></tr></thead>
+                <tbody id="cmp-body"></tbody>
+              </table>
+              <div id="cmp-empty" class="a-empty">過去の配信履歴がありません。</div>
+            </div>
+          </div>
+        </div>
+        <div class="a-card a-chartcard">
+          <h3>TIMELINE <span class="sub">縦線はLIVE Marker・hoverで実数</span></h3>
+          <div class="body">
+            <div class="a-chartwrap" id="timeline-chart"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 右(25%): アクティビティ（セグメント切替の1ペイン） -->
+      <div class="a-col">
+        <div class="a-card a-actcard">
+          <h3>
+            <div id="seg-bar" class="a-seg">
+              <button class="on" data-pane="gift">Gift <span class="cnt" id="cnt-gift">0</span></button>
+              <button data-pane="comment">Comment <span class="cnt" id="cnt-comment">0</span></button>
+              <button data-pane="event">Event <span class="cnt" id="cnt-event">0</span></button>
+              <button data-pane="battle">Battle <span class="cnt" id="cnt-battle">0</span></button>
+              <button data-pane="ranking">Ranking</button>
+            </div>
+          </h3>
+          <div class="body">
+            <div class="seg-pane" data-pane="gift">
+              <div id="gift-streak" class="gift-streak hidden"></div>
+              <ul id="gift-feed" class="a-feed"></ul>
+              <div id="gift-empty" class="a-empty">GIFT受信待機中…</div>
+            </div>
+            <div class="seg-pane hidden" data-pane="comment">
+              <ul id="comment-feed" class="a-feed"></ul>
+              <div id="comment-empty" class="a-empty">COMMENT受信待機中…</div>
+            </div>
+            <div class="seg-pane hidden" data-pane="event">
+              <div id="event-filters" class="event-filters"></div>
+              <ul id="event-feed" class="a-feed"></ul>
+              <div id="event-empty" class="a-empty">EVENT受信待機中…</div>
+            </div>
+            <div class="seg-pane hidden" data-pane="battle">
+              <div id="pk-support" class="pk hidden"></div>
+              <div id="battle-list" class="bcards"></div>
+              <div id="battle-empty" class="a-empty">Battle未発生。LinkMic対戦が始まると表示します。</div>
+            </div>
+            <div class="seg-pane hidden" data-pane="ranking">
+              <table class="a-rank">
+                <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">コイン</th></tr></thead>
+                <tbody id="user-ranking"></tbody>
+              </table>
+              <div id="user-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section id="no-monitor" class="a-empty">
+      TikTok IDを入力して「監視開始」を押してください。複数の配信者を同時に監視できます。
+    </section>
+
+    <!-- 行4: フッター -->
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
 
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/vendor/hls.min.js"></script>

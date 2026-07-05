@@ -58,6 +58,25 @@
     .ctab td.side-opp { border-left:3px solid var(--warn); }
     .team { display:flex; gap:0.4rem; flex-wrap:wrap; font-size:0.64rem; margin-bottom:0.4rem; }
     .team .t { border:1px solid var(--line); padding:0.15rem 0.45rem; background:var(--sand-panel-muted); }
+    /* personal multi (3コラ/4コラ): 順位リスト */
+    .branks { display:flex; flex-direction:column; gap:0.3rem; margin-bottom:0.5rem; }
+    .brank { display:flex; align-items:center; gap:0.5rem; font-variant-numeric:tabular-nums; }
+    .brank .rk { font-size:0.66rem; color:var(--ink-muted); min-width:2.2em; }
+    .brank .ru { flex:0 1 auto; overflow:hidden; }
+    .brank .rbar { flex:1 1 4rem; height:0.6rem; background:var(--line); display:flex; border:1px solid var(--line); }
+    .brank .rbar .o { background:var(--ok); } .brank .rbar .e { background:var(--warn); }
+    .brank .rsc { font-size:0.7rem; min-width:4em; text-align:right; }
+    .brank.self { background:var(--sand-panel-muted); } .brank.self .rsc { color:var(--ok); font-weight:600; }
+    /* team NvM: チームbox + メンバー内訳 */
+    .bteams { display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%,11rem),1fr)); gap:0.5rem; margin-bottom:0.5rem; }
+    .bteam { border:1px solid var(--line); display:flex; flex-direction:column; min-width:0; }
+    .bteam.own { border-left:3px solid var(--ok); } .bteam.opp { border-left:3px solid var(--warn); }
+    .bt-head { display:flex; align-items:baseline; justify-content:space-between; gap:0.4rem; padding:0.25rem 0.45rem; font-size:0.68rem; border-bottom:1px solid var(--line); background:var(--sand-panel-muted); }
+    .bteam.own .bt-head b { color:var(--ok); } .bteam.opp .bt-head b { color:var(--warn); }
+    .bt-total { font-size:0.66rem; font-variant-numeric:tabular-nums; }
+    .bt-mem { display:flex; align-items:center; justify-content:space-between; gap:0.4rem; padding:0.18rem 0.45rem; font-size:0.66rem; }
+    .bt-mem .bt-sc { font-variant-numeric:tabular-nums; }
+    .bt-mem.self { background:var(--sand-panel-muted); } .bt-mem.self .bt-sc { color:var(--ok); font-weight:600; }
     .av { width:1.15rem; height:1.15rem; border-radius:50%; background:var(--accent); color:var(--invert-fg); font-size:0.6rem; display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--line); vertical-align:middle; flex:0 0 auto; }
     .u { display:inline-flex; align-items:center; gap:0.3rem; vertical-align:middle; }
     .u b { font-weight:600; } .uid { color:var(--ink-muted); font-size:0.62rem; }
@@ -81,6 +100,7 @@
         現状で分かるのは <b>Battle回数</b> と <b>自陣スコアの合算値</b> のみです。<br>
         ・敵陣 / 相手スコア … 取得していない（イベントには含まれるが破棄）<br>
         ・個人戦 / チーム戦の区別 … なし<br>
+        ・<b>1対1以外の形式</b>（3コラ・4コラの個人マルチ、チーム NvM）… 表現できず、相手を1人に畳んでしまう<br>
         ・対戦相手 … なし<br>
         ・いつのBattleか … Event Logに「Battle #id を受信」とだけ表示<br>
         ・実弾で飛んだGift（誰がいくら）… なし<br>
@@ -96,7 +116,7 @@
   <div class="mock-view on" id="view-after">
     <div class="a-head">
       <h2>@kawaii_live · Battle 一覧</h2>
-      <span class="sum">このSession: 2 Battle · 1勝1敗 · 自陣計 19,600 / 敵陣計 19,700</span>
+      <span class="sum">このSession: 4 Battle · 1v1 / 3コラ / 4コラ / チーム戦 を形式ごとに表示</span>
     </div>
     <div class="bcards">
 
@@ -129,6 +149,58 @@
         </div>
       </div>
 
+      <!-- 個人マルチ 3コラ（順位制）LOSE（自分2位） -->
+      <div class="bcard">
+        <div class="bh">
+          <span class="id">BATTLE #3</span>
+          <span class="mode">個人戦 3コラ</span>
+          <span class="when">21:32:00〜21:37:00 (5:00)</span>
+          <span class="res lose">2位</span>
+        </div>
+        <div class="bbody">
+          <div class="branks">
+            <div class="brank"><span class="rk">1位</span><span class="u ru"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span><span class="rbar"><span class="e" style="width:100%"></span></span><span class="rsc">11,200</span></div>
+            <div class="brank self"><span class="rk">2位</span><span class="u ru"><span class="av">か</span><b>かわいいLIVE</b><span class="uid">@kawaii_live</span></span><span class="rbar"><span class="o" style="width:78%"></span></span><span class="rsc">8,700</span></div>
+            <div class="brank"><span class="rk">3位</span><span class="u ru"><span class="av">M</span><b>Muse</b><span class="uid">@muse_live</span></span><span class="rbar"><span class="e" style="width:41%"></span></span><span class="rsc">4,600</span></div>
+          </div>
+          <table class="ctab">
+            <caption>実弾Gift貢献（自分の陣営 / 他ホスト・diamond換算）</caption>
+            <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+            <tbody>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">3</td><td class="n">5,200</td></tr>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">ふ</span><b>ふぁん</b><span class="uid">@fan_01</span></span></td><td class="n">7</td><td class="n">3,500</td></tr>
+              <tr><td class="side-opp">他</td><td><span class="u"><span class="av">B</span><b>Big Spender</b><span class="uid">@big_spender</span></span></td><td class="n">2</td><td class="n">7,800</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 個人マルチ 4コラ（順位制）WIN（自分1位） -->
+      <div class="bcard">
+        <div class="bh">
+          <span class="id">BATTLE #4</span>
+          <span class="mode">個人戦 4コラ</span>
+          <span class="when">21:40:00〜21:45:00 (5:00)</span>
+          <span class="res win">1位</span>
+        </div>
+        <div class="bbody">
+          <div class="branks">
+            <div class="brank self"><span class="rk">1位</span><span class="u ru"><span class="av">か</span><b>かわいいLIVE</b><span class="uid">@kawaii_live</span></span><span class="rbar"><span class="o" style="width:100%"></span></span><span class="rsc">14,300</span></div>
+            <div class="brank"><span class="rk">2位</span><span class="u ru"><span class="av">R</span><b>Rival Star</b><span class="uid">@rival_star</span></span><span class="rbar"><span class="e" style="width:71%"></span></span><span class="rsc">10,200</span></div>
+            <div class="brank"><span class="rk">3位</span><span class="u ru"><span class="av">M</span><b>Muse</b><span class="uid">@muse_live</span></span><span class="rbar"><span class="e" style="width:48%"></span></span><span class="rsc">6,900</span></div>
+            <div class="brank"><span class="rk">4位</span><span class="u ru"><span class="av">N</span><b>Neon</b><span class="uid">@neon_jp</span></span><span class="rbar"><span class="e" style="width:22%"></span></span><span class="rsc">3,200</span></div>
+          </div>
+          <table class="ctab">
+            <caption>実弾Gift貢献（自分の陣営 / 他ホスト・diamond換算）</caption>
+            <thead><tr><th>陣営</th><th>送信者</th><th class="n">Gift</th><th class="n">💎</th></tr></thead>
+            <tbody>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">W</span><b>Whale King</b><span class="uid">@whale_kun</span></span></td><td class="n">5</td><td class="n">9,000</td></tr>
+              <tr><td class="side-own">自</td><td><span class="u"><span class="av">N</span><b>nico</b><span class="uid">@nico</span></span></td><td class="n">6</td><td class="n">5,300</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- チーム戦 2v2 LOSE -->
       <div class="bcard">
         <div class="bh">
@@ -143,9 +215,17 @@
             <span class="bar"><span class="o" style="width:42%"></span><span class="e" style="width:58%"></span></span>
             <span class="opp">9,900 敵チーム</span>
           </div>
-          <div class="team">
-            <span class="t" style="border-left:3px solid var(--ok);">自: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">か</span>かわいいLIVE</span> 4,100 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">D</span>duo</span> 3,100</span>
-            <span class="t" style="border-left:3px solid var(--warn);">敵: <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">A</span>rivalA</span> 5,200 / <span class="u"><span class="av" style="width:0.9rem;height:0.9rem;">B</span>rivalB</span> 4,700</span>
+          <div class="bteams">
+            <div class="bteam own">
+              <div class="bt-head"><b>自チーム</b><span class="bt-total">7,200</span></div>
+              <div class="bt-mem self"><span class="u"><span class="av">か</span><b>かわいいLIVE</b></span><span class="bt-sc">4,100</span></div>
+              <div class="bt-mem"><span class="u"><span class="av">D</span><b>duo</b></span><span class="bt-sc">3,100</span></div>
+            </div>
+            <div class="bteam opp">
+              <div class="bt-head"><b>敵チーム</b><span class="bt-total">9,900</span></div>
+              <div class="bt-mem"><span class="u"><span class="av">A</span><b>rivalA</b></span><span class="bt-sc">5,200</span></div>
+              <div class="bt-mem"><span class="u"><span class="av">B</span><b>rivalB</b></span><span class="bt-sc">4,700</span></div>
+            </div>
           </div>
           <table class="ctab">
             <caption>実弾Gift貢献（上位・diamond換算・表示名/@idで識別）</caption>

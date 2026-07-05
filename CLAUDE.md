@@ -2,6 +2,7 @@
 ・敬語の使用
 ・SubAgentはClaude Opusを使用
 ・カタカナはToken圧縮のため、英単語にします。
+・venv使ってください
 
 ## 禁止事項
 ・SubAgentにHaikuは禁止

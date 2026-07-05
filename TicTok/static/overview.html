@@ -4,39 +4,62 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TicTok LIVE Monitor — 全体監視</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body class="app-dashboard">
   <div class="scanlines" aria-hidden="true"></div>
 
-  <header class="app-header">
-    <div class="header-mark">■</div>
-    <h1>TicTok&nbsp;:&nbsp;LIVE&nbsp;MONITOR</h1>
-    <div class="header-sub">All Monitors Board — YoRHa Interface</div>
-    <nav class="app-nav">
-      <a class="nav-link" href="/">▌ 監視</a>
-      <a class="nav-link active" href="/overview">▌ 全体監視</a>
-      <a class="nav-link" href="/history">▌ 履歴</a>
-      <a class="nav-link" href="/settings">▌ 設定</a>
-    </nav>
-  </header>
+  <div class="app-shell">
+    <!-- 行1: スリムトップバー -->
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a class="active" href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a href="/analytics">全体解析</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
 
-  <main class="layout">
-    <section class="panel chart-panel">
-      <h2 class="panel-title">▌ 全体監視 Board</h2>
-      <div class="chart-note">監視中の全配信者を一覧表示します。録画中の配信は映像を同時にpreview再生できます（音声は各cardの🔊で切替）。名前のリンクで詳細tabへ移動します。</div>
-      <div id="monitor-grid" class="monitor-grid"></div>
-      <div id="grid-empty" class="feed-empty">監視対象がありません。「監視」pageから追加してください。</div>
-    </section>
-  </main>
+    <!-- 行2: 集計バー + ツールバー -->
+    <div class="a-summary">
+      <div class="a-chip"><span class="l">監視数</span><span class="v" id="sum-monitors">0</span></div>
+      <div class="a-chip"><span class="l">LIVE中</span><span class="v ok" id="sum-live">0</span></div>
+      <div class="a-chip"><span class="l">録画中</span><span class="v" id="sum-recording">0</span></div>
+      <div class="a-chip"><span class="l">合計視聴者</span><span class="v" id="sum-viewers">0</span></div>
+      <div class="a-chip"><span class="l">合計Gift</span><span class="v" id="sum-gifts">0</span></div>
+      <div class="a-chip"><span class="l">合計コイン</span><span class="v" id="sum-diamonds">0</span></div>
+      <div class="a-toolbar">
+        並替
+        <select id="sort-select">
+          <option value="diamonds">コイン降順</option>
+          <option value="viewers">視聴者降順</option>
+          <option value="rate_gifts">Gift/分</option>
+          <option value="rate_diamonds">コイン/分</option>
+          <option value="status">状態</option>
+        </select>
+        <button id="video-all-on">映像 全ON</button>
+        <button id="audio-all-off">音声 全OFF</button>
+      </div>
+    </div>
 
-  <footer class="app-footer">
-    <span id="ws-indicator" class="ws-indicator">●</span>
-    <span id="ws-status">Server接続中…</span>
-    <span class="footer-right">Glory&nbsp;to&nbsp;Mankind</span>
-  </footer>
+    <!-- 行3: 高密度タイル -->
+    <div id="monitor-grid" class="a-tiles"></div>
+    <div id="grid-empty" class="a-empty">監視対象がありません。「監視」pageから追加してください。</div>
 
-  <script src="/static/vendor/chart.umd.min.js"></script>
+    <!-- 行4: フッター -->
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
   <script src="/static/vendor/hls.min.js"></script>
   <script src="/static/common.js"></script>
   <script src="/static/overview.js"></script>

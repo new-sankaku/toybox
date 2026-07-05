@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TicTok LIVE Monitor — 設定</title>
+  <title>TicTok — Battle 詳細</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
@@ -13,7 +13,6 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
-    <!-- 行1: スリムトップバー（他tabと統一） -->
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
       <nav class="a-nav">
@@ -22,34 +21,28 @@
         <a href="/history">履歴</a>
         <a href="/streamers">配信者</a>
         <a href="/analytics">全体解析</a>
-        <a class="active" href="/settings">設定</a>
+        <a href="/settings">設定</a>
       </nav>
       <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
     </div>
 
-    <!-- 行2: スクロール可能な設定本体 -->
-    <div class="a-content">
-      <div class="a-card a-settingscard">
-        <h3>設定</h3>
-        <div class="body">
-          <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。</div>
-          <div id="settings-form" class="settings-form"></div>
-          <div class="note-actions">
-            <button id="settings-save" class="btn btn-primary">設定を保存</button>
-            <span id="settings-status" class="form-message"></span>
-          </div>
-        </div>
+    <main class="bwrap">
+      <div class="b-head">
+        <h2 id="battle-title">Battle 一覧</h2>
+        <span class="sum" id="battle-sum"></span>
       </div>
-    </div>
+      <div class="bcards" id="battle-cards"></div>
+      <div class="a-empty" id="battle-empty"></div>
+    </main>
 
-    <!-- 行3: フッター -->
     <div class="a-footer">
       <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>
 
+  <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/common.js"></script>
-  <script src="/static/settings.js"></script>
+  <script src="/static/battle.js"></script>
 </body>
 </html>
