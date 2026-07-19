@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — job</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
+        <a href="/analytics">全体解析</a>
+        <a class="active" href="/jobs">job</a>
+        <a href="/ops">運用log</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
+
+    <div class="x-toolbar">
+      <label class="x-field"><span>状態</span>
+        <select id="flt-state">
+          <option value="active">実行中・待機中</option>
+          <option value="all">全て</option>
+          <option value="failed">失敗・中断のみ</option>
+        </select>
+      </label>
+      <label class="x-field"><span>種別</span>
+        <select id="flt-kind">
+          <option value="all">全て</option>
+          <option value="overlay">焼き込み</option>
+          <option value="upscale">Up出力</option>
+          <option value="reprocess">再mp4化</option>
+          <option value="overlay_preview">焼き込みプレビュー</option>
+          <option value="clip_batch">clip一括書き出し</option>
+        </select>
+      </label>
+      <span class="sp"></span>
+      <span id="gpu-summary" class="chart-note"></span>
+      <span id="stt-summary" class="chart-note"></span>
+    </div>
+
+    <div class="a-card">
+      <h3>job <span class="sub">焼き込み・Up出力・再mp4化はserver側の永続queueで1本ずつ実行します。Serverを再起動しても待機中のjobは残ります。</span></h3>
+      <div class="body">
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>状態</th><th>種別</th><th>対象</th><th>進捗</th>
+                <th>投入</th><th>所要</th><th>結果</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="job-rows"></tbody>
+          </table>
+          <div id="job-empty" class="feed-empty" data-label="job一覧">jobはありません。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/jobs.js"></script>
+</body>
+</html>

@@ -21,9 +21,13 @@
         <a href="/overview">全体監視</a>
         <a href="/history">履歴</a>
         <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
         <a href="/analytics">全体解析</a>
+        <a href="/jobs">job</a>
+        <a href="/ops">運用log</a>
         <a class="active" href="/settings">設定</a>
       </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
       <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
     </div>
 
@@ -32,12 +36,70 @@
       <div class="a-card a-settingscard">
         <h3>設定</h3>
         <div class="body">
-          <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。</div>
+          <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。変更履歴は<a href="/ops">運用log</a>の「設定変更履歴」で確認できます。</div>
+          <div class="settings-filter">
+            <input id="settings-filter" type="search" placeholder="項目名・説明・keyで絞り込む（browserのCtrl+Fも使えます）" />
+            <span id="settings-filter-count" class="chart-note"></span>
+          </div>
           <div id="settings-form" class="settings-form"></div>
           <div class="note-actions">
             <button id="settings-save" class="btn btn-primary">設定を保存</button>
             <span id="settings-status" class="form-message"></span>
           </div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>焼き込みプレビュー <span class="sub">設定の効き目を1配信ぶん出力せずに確かめる</span></h3>
+        <div class="body">
+          <div class="chart-note">録画を1本選んで、上の焼き込み設定をそのまま適用した結果を確認します。静止画は1 frameだけを合成するので数秒で返ります。動画は本出力と同じ解像度・codec・qualityで焼き込み、尺だけを切ります(長さは上の設定「焼き込み: 時刻合わせとプレビュー」にある「動画化: プレビュー動画の尺(秒)」で決まります)。切り出す位置はComment/Gift/Battleが最も多い区間を自動で選びます。設定を変えたら「設定を保存」してからプレビューしてください。</div>
+          <div class="note-actions">
+            <select id="preview-recording"></select>
+            <button id="preview-still-btn" class="btn btn-primary">静止画で確認</button>
+            <button id="preview-clip-btn" class="btn">動画で確認（queueに入ります）</button>
+            <span id="preview-status" class="form-message"></span>
+          </div>
+          <div id="preview-meta" class="chart-note"></div>
+          <div id="preview-output" class="preview-output"></div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>容量の内訳 <span class="sub">録画・出力が使っているdiskの内訳</span></h3>
+        <div class="body">
+          <div class="chart-note">録画folderを実際に走査して、配信者別・種別別の容量を集計します。数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は下のbuttonを押したときだけ実行します。</div>
+          <div class="note-actions">
+            <button id="usage-scan" class="btn btn-primary">容量を再scanする</button>
+            <span id="usage-status" class="form-message"></span>
+          </div>
+          <div id="usage-summary" class="chart-note"></div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>種別</th><th class="num">容量</th><th class="num">file数</th><th>作り直せるか</th></tr></thead>
+              <tbody id="usage-category-list"></tbody>
+            </table>
+          </div>
+          <div id="usage-category-empty" class="chart-note hidden">まだ走査していません。</div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>配信者</th><th class="num">容量</th><th class="num">生録画</th><th class="num">焼き込み</th><th class="num">高画質化</th><th class="num">HLS(.ts)</th><th class="num">中間file</th></tr></thead>
+              <tbody id="usage-streamer-list"></tbody>
+            </table>
+          </div>
+          <div id="usage-streamer-empty" class="chart-note hidden">まだ走査していません。</div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>保持policy <span class="sub">古いdataの削除</span></h3>
+        <div class="body">
+          <div class="chart-note">上の設定「容量と保持policy」にある「保持policy:」で始まる各項目に沿って、①中断したrenderが残した中間file → ②作り直せる派生物(焼き込み・AI高画質化) → ③生録画 の順で削除します。生録画のmp4は唯一の再取得不能なdataなので、既定では③を実行しません。まず「削除内容を確認（削除しません）」で対象を確かめ、そのうえで「確認した内容を削除する」を押してください。</div>
+          <div class="note-actions">
+            <button id="retention-preview" class="btn">削除内容を確認（削除しません）</button>
+            <button id="retention-apply" class="btn btn-danger" disabled>確認した内容を削除する</button>
+            <span id="retention-status" class="form-message"></span>
+          </div>
+          <div id="retention-plan"></div>
         </div>
       </div>
     </div>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 運用log</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a href="/">監視</a>
+        <a href="/overview">全体監視</a>
+        <a href="/history">履歴</a>
+        <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
+        <a href="/analytics">全体解析</a>
+        <a href="/jobs">job</a>
+        <a class="active" href="/ops">運用log</a>
+        <a href="/settings">設定</a>
+      </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+    </div>
+
+    <div class="x-toolbar">
+      <label class="x-field"><span>重要度</span>
+        <select id="flt-severity">
+          <option value="">全て</option>
+          <option value="error">error のみ</option>
+          <option value="warning">warning のみ</option>
+          <option value="info">info のみ</option>
+        </select>
+      </label>
+      <label class="x-field"><span>種別</span>
+        <select id="flt-kind">
+          <option value="">全て</option>
+        </select>
+      </label>
+      <input id="flt-unique" type="text" placeholder="配信者(@id)" />
+      <input id="flt-job" type="text" placeholder="job_id" />
+      <input id="flt-since" type="date" title="この日から" />
+      <input id="flt-until" type="date" title="この日まで" />
+      <button id="flt-apply" class="btn btn-primary">絞り込む</button>
+      <button id="flt-settings" class="btn" title="設定の変更履歴（いつどの値からどの値へ変えたか）だけを表示します。">設定変更履歴</button>
+      <button id="flt-reset" class="btn">条件をclear</button>
+      <span class="sp"></span>
+      <span id="ops-summary" class="chart-note"></span>
+    </div>
+
+    <div class="a-card a-card-fill">
+      <h3>運用log <span class="sub">録画の失敗・接続断・設定変更・jobの開始完了などの状態遷移です。全文logはlogs folderのtext logにあります。</span></h3>
+      <div class="body">
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>時刻</th><th>重要度</th><th>種別</th><th>対象</th><th>内容</th><th>所要</th><th>詳細</th>
+              </tr>
+            </thead>
+            <tbody id="ops-rows"></tbody>
+          </table>
+          <div id="ops-empty" class="feed-empty" data-label="運用log">該当する記録はありません。</div>
+        </div>
+        <div class="note-actions">
+          <button id="ops-more" class="btn hidden">さらに読み込む</button>
+          <span id="ops-status" class="form-message"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/ops.js"></script>
+</body>
+</html>

@@ -3,6 +3,7 @@ from typing import Awaitable, Callable, Optional
 
 from tictok.collect.collector import ACTIVE_STATES, ProbeGate, TikTokCollector
 from tictok.collect.live_resolver import BrowserLiveResolver
+from tictok.core.logctx import log_context
 from tictok.storage import Storage
 
 logger = logging.getLogger("tictok.manager")
@@ -69,7 +70,13 @@ class CollectorManager:
         if record_video is not None:
             self._storage.set_target_record_video(unique_id, collector.record_video)
         await collector.start()
-        logger.info("monitor started: %s (total=%d)", unique_id, len(self._collectors))
+        with log_context(unique_id=unique_id):
+            logger.info(
+                "monitor started (%d monitor(s) now active)", len(self._collectors),
+                extra={"event": "collector.monitor_started",
+                       "ctx": {"total_monitors": len(self._collectors),
+                               "record_video": collector.record_video}},
+            )
         await self.notify_monitors()
         return collector
 
@@ -89,7 +96,12 @@ class CollectorManager:
             await collector.stop()
         del self._collectors[unique_id]
         self._storage.remove_monitored_target(unique_id)
-        logger.info("monitor removed: %s (total=%d)", unique_id, len(self._collectors))
+        with log_context(unique_id=unique_id):
+            logger.info(
+                "monitor removed (%d monitor(s) remain)", len(self._collectors),
+                extra={"event": "collector.monitor_removed",
+                       "ctx": {"total_monitors": len(self._collectors)}},
+            )
         await self.notify_monitors()
 
     async def start_recording(self, unique_id: str) -> TikTokCollector:
@@ -129,16 +141,24 @@ class CollectorManager:
         if not targets:
             return
         logger.info(
-            "restoring %d monitored target(s): %s",
-            len(targets),
-            [t["unique_id"] for t in targets],
+            "restoring %d monitored target(s) from the previous run", len(targets),
+            extra={"event": "collector.monitors_restore_started",
+                   "ctx": {"count": len(targets),
+                           "targets": [t["unique_id"] for t in targets]}},
         )
         for target in targets:
             unique_id = target["unique_id"]
             try:
                 await self.start(unique_id, record_video=target["record_video"])
             except Exception:
-                logger.exception("failed to restore monitor %s", unique_id)
+                # 落ちた監視は誰も拾い直さない。userが手で再追加するまで、この配信者の
+                # 収集と録画は丸ごと止まったままになる。
+                with log_context(unique_id=unique_id):
+                    logger.error(
+                        "failed to restore this monitor; it stays stopped until it is "
+                        "started again by hand", exc_info=True,
+                        extra={"event": "collector.monitor_restore_failed", "ctx": {}},
+                    )
 
     async def stop_all(self) -> None:
         for collector in self._collectors.values():
@@ -146,7 +166,15 @@ class CollectorManager:
                 try:
                     await collector.stop()
                 except Exception:
-                    logger.exception("failed to stop monitor %s", collector.unique_id)
+                    # shutdown中。残りの監視の停止は続行するが、この監視のsessionは
+                    # finalizeされないまま終わる可能性がある。
+                    with log_context(unique_id=collector.unique_id):
+                        logger.error(
+                            "failed to stop this monitor during shutdown; its session may "
+                            "be left unfinalized", exc_info=True,
+                            extra={"event": "collector.monitor_stop_failed",
+                                   "ctx": {"state": collector.state}},
+                        )
 
     async def notify_monitors(self) -> None:
         await self._broadcast({"type": "monitors", "data": self.snapshots()})

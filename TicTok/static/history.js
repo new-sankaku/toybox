@@ -7,15 +7,25 @@ let currentSessionId = null;
 let currentSessionUid = null;
 let allSessions = [];
 let activeIds = new Set();
+// Session一覧が空に見えるときの理由。取得前(loading)・0件(loaded)・取得失敗(failed)。
+// 取得前を「保存されたSessionがありません。」と描くと、上のKPI(総Session)と矛盾した
+// 確定的な事実を1秒以上出すことになる。
+let sessionsState = "loading";
+let sessionsError = null;
+// 制限(メンバー限定/年齢制限)で録画できなかった試行のsession status。配信実績では
+// ないので「終了」filterからは外し、専用の選択肢で絞り込めるようにする。
+const STATUS_RESTRICTED = "restricted";
 // 出力中Sessionのprogress要素。WS更新でtableが再描画されても、行のbuttonを
-// 作り直す代わりにこの要素を再装着し、spinner/進捗を保持する。
+// 作り直す代わりにこの要素を再装着し、spinner/進捗を保持する。Session単位の出力は
+// server側のjobが実体なので、この要素はreload後もjob snapshotから復元される。
 const activeOutputs = new Map();
-// 焼き込み(server側ffmpeg)中はHTTP応答待ちでbyteが来ないため、進捗%はWSの
-// output_progressで受け取る。recording.id → 進捗を反映する関数。
-const encodeProgress = new Map();
-// Up出力(AI高画質化)中のSession行のprogress要素と、WS upscale_progressの反映関数。
+// Up出力(AI高画質化)中のSession行のprogress要素。
 const activeUpOutputs = new Map();
-const upscaleProgress = new Map();
+// 再mp4化(元.tsからのfinalize再実行)中の進捗%はWS reprocess_progressで届く。
+const reprocessProgress = new Map();
+// 単体録画のjob(出力/Up出力/再mp4化)の待受。POSTはjob_idを返すだけで、実処理はserver側の
+// 永続queueが行うため、完了/失敗はWSのjob_updateでしか届かない。job_id → {prog,resolve,reject}。
+const jobWatchers = new Map();
 
 const flt = {
   search: document.getElementById("flt-search"),
@@ -36,6 +46,7 @@ function renderKpi(totals, streamerCount, recordingCount) {
     ["録画数", fmtNum(recordingCount)],
   ];
   bar.innerHTML = "";
+  bar.removeAttribute("title");
   chips.forEach(([label, value]) => {
     const chip = document.createElement("div");
     chip.className = "a-chip";
@@ -51,21 +62,41 @@ function renderKpi(totals, streamerCount, recordingCount) {
 }
 
 async function loadKpi() {
-  const [dashRes, recRes] = await Promise.all([
-    fetch("/api/dashboard"),
-    fetch("/api/recordings"),
-  ]);
-  if (!dashRes.ok) return;
-  const dash = await dashRes.json();
-  const recordingCount = recRes.ok ? (await recRes.json()).recordings.length : 0;
+  let dash;
+  try {
+    dash = await apiSend("GET", "/api/dashboard");
+  } catch (err) {
+    // 取得できなかった集計を0で埋めない。まだ一度も描けていないときだけ失敗を明示し、
+    // 前回の値が出ているならそれを残す(定期reloadの1回が落ちただけで消さない)。
+    const bar = document.getElementById("kpi-bar");
+    bar.title = errorDetailText(err);
+    if (!bar.childElementCount) {
+      bar.textContent = "集計値を取得できませんでした（0件という意味ではありません）。";
+    }
+    return;
+  }
+  // 録画数はdashboard totals(非cap COUNT)を使う。旧実装は/api/recordingsの返却件数を
+  // 数えていたためsession_list_limit(既定100)で頭打ちになっていた。
+  const recordingCount = (dash.totals && dash.totals.recordings) || 0;
   renderKpi(dash.totals || {}, (dash.streamers || []).length, recordingCount);
 }
 
 // ---- session table ----
 async function loadSessions() {
-  const res = await fetch("/api/sessions");
-  if (!res.ok) return;
-  const data = await res.json();
+  // limit=0で全件取得。filter/検索/sortはclient側で全Sessionに対して行うため、最新N件で
+  // 頭打ちにするとperiod/検索で古いSessionが不可視になる(session行は軽量なので全件でよい)。
+  let data;
+  try {
+    data = await apiSend("GET", "/api/sessions?limit=0");
+  } catch (err) {
+    // 既に描けている行はそのまま残す(定期reloadの1回が落ちただけで一覧を空にしない)。
+    sessionsState = "failed";
+    sessionsError = err;
+    renderTable();
+    return;
+  }
+  sessionsState = "loaded";
+  sessionsError = null;
   allSessions = data.sessions || [];
   activeIds = new Set(data.active_session_ids || []);
   renderTable();
@@ -94,8 +125,10 @@ function filteredSessions() {
   let rows = allSessions.filter((s) => {
     if (after && s.started_at < after) return false;
     const isActive = activeIds.has(s.id);
+    const restricted = s.status === STATUS_RESTRICTED;
     if (statusFilter === "live" && !isActive) return false;
-    if (statusFilter === "ended" && isActive) return false;
+    if (statusFilter === "ended" && (isActive || restricted)) return false;
+    if (statusFilter === "restricted" && !restricted) return false;
     if (q) {
       const hay = `${s.unique_id} ${s.note || ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
@@ -123,18 +156,35 @@ function statusCell(session) {
     span.textContent = "収集中";
   } else {
     const info = STATUS_LABELS[session.status] || STATUS_LABELS.ended;
-    span.className = "st ended";
+    // 制限sessionは配信実績ではなく「録画できなかった試行」なので、通常の終了sessionと
+    // 見分けが付く別Classにする。集計からも除外されているため数値は全て0で並ぶ。
+    const restricted = session.status === STATUS_RESTRICTED;
+    span.className = restricted ? "st restricted" : "st ended";
     span.textContent = info.badge;
+    if (restricted) span.title = info.message;
   }
   return span;
 }
 
-function actionsCell(session) {
-  const wrap = document.createElement("span");
-  wrap.className = "row-actions";
+// 操作Buttonは1つずつ独立したtable列(td.act)に入れる。全行が同じ列構成のため、
+// tableの列機構が幅を自動で合わせ、複数行に渡って縦に揃う（幅をnumberで指定しない）。
+// 列数は表headerの操作thのcolspan(actionColumnCount)と一致させる。
+function actionColumnCount() {
+  return 3 + Number(upscaleConfigured) + Number(sttConfigured);
+}
+
+function actionCells(session) {
   const isActive = activeIds.has(session.id);
   const outputting = activeOutputs.has(session.id);
   const upOutputting = activeUpOutputs.has(session.id);
+  const hasVideo = (session.recording_count || 0) > 0;
+  const cells = [];
+  const cell = (node) => {
+    const td = document.createElement("td");
+    td.className = "act";
+    td.appendChild(node);
+    return td;
+  };
 
   const showBtn = document.createElement("button");
   showBtn.className = "btn btn-small";
@@ -143,6 +193,7 @@ function actionsCell(session) {
     e.stopPropagation();
     showDetail(session.id);
   });
+  cells.push(cell(showBtn));
 
   // 出力中の行は再描画されても、進行中のprogress要素をそのまま再装着する。
   let outNode;
@@ -151,9 +202,8 @@ function actionsCell(session) {
   } else {
     const out = document.createElement("button");
     out.className = "btn btn-small";
-    // 出力済みでも再出力したいのでButtonは活性のまま、ラベルだけ「(済)」にする。
-    out.textContent = session.output_done ? "出力(済)" : "出力";
-    const hasVideo = (session.recording_count || 0) > 0;
+    // 出力済みでも再出力したいのでButtonは活性のまま、ラベルだけ「済」にする。
+    out.textContent = session.output_done ? "出力済" : "出力";
     out.disabled = isActive || !hasVideo;
     out.title = isActive
       ? "収集中のSessionは出力できません"
@@ -166,31 +216,9 @@ function actionsCell(session) {
     });
     outNode = out;
   }
+  cells.push(cell(outNode));
 
-  const del = document.createElement("button");
-  del.className = "btn btn-small btn-danger";
-  del.textContent = "削除";
-  del.disabled = isActive || outputting || upOutputting;
-  del.title = isActive
-    ? "収集中のSessionは削除できません"
-    : outputting || upOutputting
-      ? "出力中のSessionは削除できません"
-      : "";
-  del.addEventListener("click", async (e) => {
-    e.stopPropagation();
-    if (!window.confirm(`Session #${session.id} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`)) return;
-    try {
-      await apiSend("DELETE", `/api/sessions/${session.id}`);
-      if (currentSessionId === session.id) closeDetail();
-      await Promise.all([loadSessions(), loadKpi()]);
-    } catch (err) {
-      window.alert(err.message);
-    }
-  });
-
-  wrap.append(showBtn, outNode);
-
-  // Up出力(AI高画質化)。ローカルAIのUpscale設定が有効な場合のみ表示する。
+  // Up出力(AI高画質化)。ローカルAIのUpscale設定が有効な場合のみ列を出す。
   if (upscaleConfigured) {
     let upNode;
     if (upOutputting) {
@@ -198,9 +226,8 @@ function actionsCell(session) {
     } else {
       const up = document.createElement("button");
       up.className = "btn btn-small";
-      // 出力済みでも再出力可能（活性のまま）。ラベルだけ「(済)」にする。
-      up.textContent = session.up_output_done ? "Up出力(済)" : "Up出力";
-      const hasVideo = (session.recording_count || 0) > 0;
+      // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
+      up.textContent = session.up_output_done ? "Up出力済" : "Up出力";
       up.disabled = isActive || !hasVideo;
       up.title = isActive
         ? "収集中のSessionは出力できません"
@@ -213,17 +240,16 @@ function actionsCell(session) {
       });
       upNode = up;
     }
-    wrap.appendChild(upNode);
+    cells.push(cell(upNode));
   }
 
-  // 文字起こし(STT有効時のみ)。録画があるSessionで実行できる。複数録画がある場合は
-  // 結果がRecording単位のため詳細へ誘導し、単一録画はその場でModalに表示する。
+  // 文字起こし(STT有効時のみ列を出す)。複数録画がある場合は結果がRecording単位のため
+  // 詳細へ誘導し、単一録画はその場でModalに表示する。
   if (sttConfigured) {
     const tr = document.createElement("button");
     tr.className = "btn btn-small";
-    // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「(済)」にする。
-    tr.textContent = session.transcript_done ? "文字起こし(済)" : "文字起こし";
-    const hasVideo = (session.recording_count || 0) > 0;
+    // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
+    tr.textContent = session.transcript_done ? "文字起済" : "文字起";
     tr.disabled = isActive || !hasVideo;
     tr.title = isActive
       ? "収集中のSessionは文字起こしできません"
@@ -234,11 +260,32 @@ function actionsCell(session) {
       e.stopPropagation();
       transcribeSession(session, tr);
     });
-    wrap.appendChild(tr);
+    cells.push(cell(tr));
   }
 
-  wrap.appendChild(del);
-  return wrap;
+  const del = document.createElement("button");
+  del.className = "btn btn-small btn-danger";
+  del.textContent = "削除";
+  del.disabled = isActive || outputting || upOutputting;
+  del.title = isActive
+    ? "収集中のSessionは削除できません"
+    : outputting || upOutputting
+      ? "出力中のSessionは削除できません"
+      : "このSessionの記録(Comment/Gift/分析)と録画をまとめて削除します。取り消せません。";
+  del.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (!window.confirm(`Session #${session.id} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`)) return;
+    try {
+      await apiSend("DELETE", `/api/sessions/${session.id}`);
+      if (currentSessionId === session.id) closeDetail();
+      await Promise.all([loadSessions(), loadKpi()]);
+    } catch (err) {
+      window.alert(err.message);
+    }
+  });
+  cells.push(cell(del));
+
+  return cells;
 }
 
 // 履歴一覧の操作からの文字起こし。SessionのRecordingを取得し、単一なら即表示、
@@ -276,7 +323,18 @@ function renderTable() {
   const tbody = document.getElementById("session-rows");
   const rows = filteredSessions();
   tbody.innerHTML = "";
-  document.getElementById("session-empty").classList.toggle("hidden", rows.length > 0);
+  // 操作Buttonは1列ずつ独立tdなので、header操作thをその列数だけ横結合して整合させる。
+  const opTh = document.getElementById("op-th");
+  if (opTh) opTh.colSpan = actionColumnCount();
+  const emptyEl = document.getElementById("session-empty");
+  if (rows.length > 0) setListState(emptyEl, "ok");
+  else if (sessionsState === "failed") setListState(emptyEl, "failed", sessionsError);
+  else if (sessionsState === "loading") setListState(emptyEl, "loading");
+  // 保存が0件なのか、filterに一致しないだけなのかは別の状態。後者を「保存が無い」と
+  // 描くと、保存済みSessionを取り違えたことになる。
+  else if (allSessions.length > 0)
+    setListMessage(emptyEl, "条件に一致するSessionがありません。filterを変更してください。");
+  else setListState(emptyEl, "empty");
   rows.forEach((s) => {
     const stats = s.stats || {};
     const tr = document.createElement("tr");
@@ -311,9 +369,7 @@ function renderTable() {
     cells.push(numTd(stats.battles));
     cells.push(numTd(stats.battle_points));
     cells.push(numTd(stats.viewers_peak));
-    const actTd = document.createElement("td");
-    actTd.appendChild(actionsCell(s));
-    cells.push(actTd);
+    actionCells(s).forEach((td) => cells.push(td));
 
     cells.forEach((td) => tr.appendChild(td));
     tbody.appendChild(tr);
@@ -335,9 +391,13 @@ function numTd(value) {
 
 // ---- detail modal ----
 async function showDetail(sessionId) {
-  const res = await fetch(`/api/sessions/${sessionId}`);
-  if (!res.ok) return;
-  const data = await res.json();
+  let data;
+  try {
+    data = await apiSend("GET", `/api/sessions/${sessionId}`);
+  } catch (err) {
+    window.alert(`Session詳細を取得できませんでした。\n${errorDetailText(err)}`);
+    return;
+  }
   const session = data.session;
   currentSessionId = sessionId;
   currentSessionUid = session.unique_id;
@@ -482,24 +542,45 @@ function makeOutputProgress() {
   return prog;
 }
 
-// 1録画の焼き込みをserverに依頼し、recordings folderへ出力する。出力先のfile名を
-// 返す。焼き込み(再Encode)段階の%はserverからWSで届くoutput_progressをprogに反映する。
-// labelは複数録画時の「(1/2) 」等の接頭辞。
-async function outputRecording(rec, prog, label) {
-  encodeProgress.set(rec.id, (pct) =>
-    renderOutputProgress(prog, `${label}焼き込み `, pct, 100));
-  try {
-    const res = await fetch(`/api/recordings/${rec.id}/output`, { method: "POST" });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : "出力に失敗しました。");
-    }
-    const name = payload.filename || rec.filename;
-    // 同期方式の比較出力(サーバ時刻版)が同時に作られた場合は両file名を知らせる。
-    return payload.filename_b ? `${name}（比較: ${payload.filename_b}）` : name;
-  } finally {
-    encodeProgress.delete(rec.id);
+// jobをqueueへ投入し、完了(または失敗)まで待つ。応答はjob_idだけで、進捗も結果も
+// WSのjob_updateで届くため、待受をjob_idで登録してからPromiseを返す。
+async function startRecordingJob(rec, prog, path, failMessage) {
+  const res = await fetch(`/api/recordings/${rec.id}/${path}`, { method: "POST" });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
   }
+  renderOutputProgress(prog, "待機中 ", 0, 100);
+  return new Promise((resolve, reject) => {
+    jobWatchers.set(payload.job_id, { prog, resolve, reject, failMessage });
+  });
+}
+
+// server側jobの状態を、待受中のprogress要素へ反映する。
+function applyRecordingJob(job) {
+  const watcher = jobWatchers.get(job.job_id);
+  if (!watcher) return false;
+  if (job.state === "pending") {
+    renderOutputProgress(watcher.prog, "待機中 ", 0, 100);
+    return true;
+  }
+  if (job.state === "running") {
+    renderOutputProgress(watcher.prog, `${job.stage || "準備中"} `, job.pct, 100);
+    return true;
+  }
+  jobWatchers.delete(job.job_id);
+  if (job.state === "completed") watcher.resolve(job);
+  else watcher.reject(new Error(job.message || watcher.failMessage));
+  return true;
+}
+
+// 1録画の焼き込みをserverに依頼し、recordings folderへ出力する。出力先のfile名を返す。
+async function outputRecording(rec, prog) {
+  const job = await startRecordingJob(rec, prog, "output", "出力に失敗しました。");
+  const result = job.result || {};
+  const name = result.filename || rec.filename;
+  // 同期方式の比較出力(サーバ時刻版)が同時に作られた場合は両file名を知らせる。
+  return result.filename_b ? `${name}（比較: ${result.filename_b}）` : name;
 }
 
 function renderOutputProgress(prog, label, received, total) {
@@ -523,11 +604,13 @@ function finishOutputProgress(prog) {
 
 // 録画単体の出力(録画一覧の操作)。
 async function downloadRecording(rec, btn) {
-  await ensureNotifyPermission();
+  // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
+  // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
+  ensureNotifyPermission();
   const prog = makeOutputProgress();
   btn.replaceWith(prog);
   try {
-    const name = await outputRecording(rec, prog, "");
+    const name = await outputRecording(rec, prog);
     finishOutputProgress(prog);
     notifyOutputDone(name);
     // done badge(出力済)を反映するため詳細を再描画する。
@@ -538,64 +621,106 @@ async function downloadRecording(rec, btn) {
   }
 }
 
-// Session単位の出力(履歴一覧の操作)。そのSessionの完了録画をすべて出力する。
-async function outputSession(session, btn) {
-  await ensureNotifyPermission();
+// 録画単体の再mp4化(詳細modalの録画一覧の操作)。元の.tsから録画時と同一のfinalize
+// (concat→timing→単一解像度normalize)を再実行する。単一解像度normalizeの再Encode%は
+// serverからWSで届く reprocess_progress をprogに反映する。
+async function reprocessRecording(rec, btn) {
+  ensureNotifyPermission();
   const prog = makeOutputProgress();
   btn.replaceWith(prog);
-  // 再描画でprogが行から切り離されても進捗を保持できるよう登録する。
-  activeOutputs.set(session.id, prog);
+  reprocessProgress.set(rec.id, (pct) =>
+    renderOutputProgress(prog, "再mp4化 ", pct, 100));
   try {
-    const res = await fetch(`/api/sessions/${session.id}`);
-    if (!res.ok) throw new Error("Session情報の取得に失敗しました。");
-    const data = await res.json();
-    const recs = (data.recordings || []).filter(
-      (r) => r.status === "completed" || r.status === "interrupted");
-    if (!recs.length) throw new Error("出力できる録画がありません。");
-    let lastName = "";
-    for (let i = 0; i < recs.length; i++) {
-      const label = recs.length > 1 ? `(${i + 1}/${recs.length}) ` : "";
-      lastName = await outputRecording(recs[i], prog, label);
-    }
+    const job = await startRecordingJob(rec, prog, "reprocess", "再mp4化に失敗しました。");
     finishOutputProgress(prog);
-    notifyOutputDone(recs.length > 1 ? `${recs.length}件の録画を出力しました` : lastName);
+    notifyOutputDone((job.result || {}).filename || rec.filename);
+    if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
     window.alert(err.message);
   } finally {
-    activeOutputs.delete(session.id);
-    // done badge(出力済)をbackendの最新状態で反映する。
-    loadSessions();
+    reprocessProgress.delete(rec.id);
   }
 }
 
-// 1録画のAI高画質化(Up出力)をserverに依頼する。焼き込みが有効な場合はserver側で
-// 先に焼き込みが走り(output_progress)、続いて高画質化(upscale_progress)が届く。
-async function upOutputRecording(rec, prog, label) {
-  encodeProgress.set(rec.id, (pct) =>
-    renderOutputProgress(prog, `${label}焼き込み `, pct, 100));
-  upscaleProgress.set(rec.id, (pct) =>
-    renderOutputProgress(prog, `${label}高画質化 `, pct, 100));
+// Session単位の出力(履歴一覧の操作)。録画を1本ずつ回すloopはserver側のjobで、ここは
+// 起動と進捗表示だけを持つ。以前はこのloopがbrowser側にあったため、tabを閉じると残りの
+// 録画は起動すらされず、reloadすると完了も失敗も届かなくなっていた。
+async function startSessionOutput(session, btn, path, activeMap, failMessage) {
+  // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
+  // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
+  ensureNotifyPermission();
+  const prog = makeOutputProgress();
+  btn.replaceWith(prog);
+  // 再描画でprogが行から切り離されても進捗を保持できるよう登録する。
+  activeMap.set(session.id, prog);
   try {
-    const res = await fetch(`/api/recordings/${rec.id}/upscale-output`, { method: "POST" });
+    const res = await fetch(`/api/sessions/${session.id}/${path}`, { method: "POST" });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : "Up出力に失敗しました。");
+      throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
     }
-    return payload.filename || rec.filename;
-  } finally {
-    encodeProgress.delete(rec.id);
-    upscaleProgress.delete(rec.id);
+    // 以降の進捗・完了・失敗はserverのjob(WS job_update)で届く。
+  } catch (err) {
+    activeMap.delete(session.id);
+    prog.replaceWith(btn);
+    window.alert(err.message);
   }
+}
+
+async function outputSession(session, btn) {
+  await startSessionOutput(session, btn, "output", activeOutputs, "出力に失敗しました。");
+}
+
+// server側job(session_overlay / session_upscale)の状態を行のprogress要素へ反映する。
+// WS接続時のsnapshotからも同じ経路で復元されるため、reload後も進捗へ復帰する。
+function applyJob(job) {
+  // 単体録画のjobを待っている要素があればそちらが優先(詳細modalのbutton位置に出る)。
+  if (applyRecordingJob(job)) return;
+  const activeMap = job.domain === "session_upscale" ? activeUpOutputs
+    : job.domain === "session_overlay" ? activeOutputs
+      : null;
+  if (!activeMap || job.session_id === null || job.session_id === undefined) return;
+  if (job.state === "running" || job.state === "pending") {
+    let prog = activeMap.get(job.session_id);
+    if (!prog) {
+      // このpageがjobを開始していない場合(reload後・別tabからの開始)はここで作る。
+      prog = makeOutputProgress();
+      activeMap.set(job.session_id, prog);
+      renderTable();
+    }
+    renderOutputProgress(prog, `${job.stage || "準備中"} `, job.pct, 100);
+    return;
+  }
+  const prog = activeMap.get(job.session_id);
+  if (!prog) return;
+  activeMap.delete(job.session_id);
+  if (job.state === "completed") {
+    finishOutputProgress(prog);
+    notifyOutputDone(job.message || job.title);
+  } else {
+    window.alert(job.message || "出力に失敗しました。");
+  }
+  // done badge(出力済)をbackendの最新状態で反映する。
+  loadSessions();
+}
+
+// 1録画のAI高画質化(Up出力)をserverに依頼する。焼き込みが有効な場合はserver側で
+// 先に焼き込みが走り、続いて高画質化が走る(どちらの段階かはjobのstageで届く)。
+async function upOutputRecording(rec, prog) {
+  const job = await startRecordingJob(rec, prog, "upscale-output", "Up出力に失敗しました。");
+  return (job.result || {}).filename || rec.filename;
 }
 
 // 録画単体のUp出力(詳細modalの録画一覧の操作)。
 async function upDownloadRecording(rec, btn) {
-  await ensureNotifyPermission();
+  // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
+  // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
+  ensureNotifyPermission();
   const prog = makeOutputProgress();
   btn.replaceWith(prog);
   try {
-    const name = await upOutputRecording(rec, prog, "");
+    const name = await upOutputRecording(rec, prog);
     finishOutputProgress(prog);
     notifyOutputDone(name);
     // done badge(Up出力済)を反映するため詳細を再描画する。
@@ -607,44 +732,23 @@ async function upDownloadRecording(rec, btn) {
 }
 
 // Session単位のUp出力(履歴一覧の操作)。そのSessionの完了録画をすべて高画質化する。
+// 出力と同じくloopの実体はserver側のjob。
 async function upOutputSession(session, btn) {
-  await ensureNotifyPermission();
-  const prog = makeOutputProgress();
-  btn.replaceWith(prog);
-  // 再描画でprogが行から切り離されても進捗を保持できるよう登録する。
-  activeUpOutputs.set(session.id, prog);
-  try {
-    const res = await fetch(`/api/sessions/${session.id}`);
-    if (!res.ok) throw new Error("Session情報の取得に失敗しました。");
-    const data = await res.json();
-    const recs = (data.recordings || []).filter(
-      (r) => r.status === "completed" || r.status === "interrupted");
-    if (!recs.length) throw new Error("出力できる録画がありません。");
-    let lastName = "";
-    for (let i = 0; i < recs.length; i++) {
-      const label = recs.length > 1 ? `(${i + 1}/${recs.length}) ` : "";
-      lastName = await upOutputRecording(recs[i], prog, label);
-    }
-    finishOutputProgress(prog);
-    notifyOutputDone(recs.length > 1 ? `${recs.length}件の録画をUp出力しました` : lastName);
-  } catch (err) {
-    prog.replaceWith(btn);
-    window.alert(err.message);
-  } finally {
-    activeUpOutputs.delete(session.id);
-    // done badge(Up出力済)をbackendの最新状態で反映する。
-    loadSessions();
-  }
+  await startSessionOutput(session, btn, "upscale-output", activeUpOutputs,
+    "Up出力に失敗しました。");
 }
 
 function recordingActions(rec) {
   const wrap = document.createElement("span");
   wrap.className = "row-actions";
+  // 常用する出力系だけ操作列に出し、稀にしか使わない保守・破壊的操作はmenuへ畳む。
+  // Buttonを7個並べると操作列が列幅を食い、#やFile名まで折り返して読めなくなる。
+  const menuItems = [];
   if (rec.status === "completed" || rec.status === "interrupted") {
     const dl = document.createElement("button");
     dl.className = "btn btn-small";
-    // 出力済みでも再出力可能（活性のまま）。ラベルだけ「(済)」にする。
-    dl.textContent = rec.has_output ? "出力(済)" : "出力";
+    // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
+    dl.textContent = rec.has_output ? "出力済" : "出力";
     dl.title = "設定でComment/Gift演出が有効な場合、焼き込み済み動画をrecordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
     dl.addEventListener("click", () => downloadRecording(rec, dl));
     wrap.appendChild(dl);
@@ -652,8 +756,8 @@ function recordingActions(rec) {
     if (upscaleConfigured) {
       const up = document.createElement("button");
       up.className = "btn btn-small";
-      // Up出力済みでも再出力可能（活性のまま）。ラベルだけ「(済)」にする。
-      up.textContent = rec.has_up_output ? "Up出力(済)" : "Up出力";
+      // Up出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
+      up.textContent = rec.has_up_output ? "Up出力済" : "Up出力";
       up.title = "この録画をローカルAI(超解像model)で高画質化し、.up.mp4としてrecordings folderへ出力します。焼き込みが有効な場合は焼き込み後の動画を高画質化します。GPUでも録画時間の数倍かかります。";
       up.addEventListener("click", () => upDownloadRecording(rec, up));
       wrap.appendChild(up);
@@ -662,8 +766,8 @@ function recordingActions(rec) {
     if (sttConfigured) {
       const tr = document.createElement("button");
       tr.className = "btn btn-small";
-      // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「(済)」にする。
-      tr.textContent = rec.has_transcript ? "文字起こし(済)" : "文字起こし";
+      // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
+      tr.textContent = rec.has_transcript ? "文字起済" : "文字起";
       tr.title = "この録画の音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
       tr.addEventListener("click", async () => {
         await transcribeOrShow(rec, tr);
@@ -672,21 +776,61 @@ function recordingActions(rec) {
       });
       wrap.appendChild(tr);
     }
+
+    // 再mp4化は進捗をbutton位置に描くためmenuではなく操作列に残す必要があるが、
+    // 常用ではないのでmenuへ入れ、押下時はmenuのtoggle Buttonを進捗表示に使う。
+    menuItems.push({
+      label: "再mp4化",
+      title: "保持している元の.tsセグメントから、録画時と同じ処理でmp4を作り直します。配信中に解像度が変わってPlayerがカクつく録画を1解像度へ正しく直せます。元mp4は_backupへ退避します（.tsが残っていない録画は不可）。再Encodeのため時間がかかります。",
+      onSelect: () => reprocessRecording(rec, wrap.querySelector(".row-menu-toggle")),
+    });
+
+    // 派生物(焼き込み・Up出力・renderの中間file)だけを消す。元録画は残るので、
+    // 再出力すれば作り直せる。容量を空ける目的の操作はこちらを使う。
+    menuItems.push({
+      label: "派生物削除",
+      title: "この録画の焼き込み(.overlay.mp4)・AI高画質化(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。",
+      onSelect: async () => {
+        if (!window.confirm(`録画 #${rec.id} の派生物（焼き込み・Up出力）を削除しますか？元の録画は残ります。`)) return;
+        try {
+          const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
+          window.alert(`${(res.freed_bytes / 1073741824).toFixed(1)} GB を削除しました。`);
+          if (currentSessionId !== null) showDetail(currentSessionId);
+        } catch (err) {
+          window.alert(err.message);
+        }
+      },
+    });
+
+    menuItems.push({
+      label: rec.protected ? "保護を解除" : "保護",
+      title: "保持policyの自動削除からこの録画を除外します。もう一度押すと解除します。手動の削除は保護中でも実行できます。",
+      onSelect: async () => {
+        try {
+          await apiSend("POST", `/api/recordings/${rec.id}/protect`, { protected: !rec.protected });
+          if (currentSessionId !== null) showDetail(currentSessionId);
+        } catch (err) {
+          window.alert(err.message);
+        }
+      },
+    });
   }
-  const del = document.createElement("button");
-  del.className = "btn btn-small btn-danger";
-  del.textContent = "削除";
-  del.disabled = rec.status === "recording";
-  del.addEventListener("click", async () => {
-    if (!window.confirm(`録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`)) return;
-    try {
-      await apiSend("DELETE", `/api/recordings/${rec.id}`);
-      if (currentSessionId !== null) showDetail(currentSessionId);
-    } catch (err) {
-      window.alert(err.message);
-    }
+  menuItems.push({
+    label: "削除",
+    title: "この録画のfileとDBの記録を削除します。派生物(焼き込み・Up出力)も一緒に消え、取り消せません。録画中は削除できません。",
+    danger: true,
+    disabled: rec.status === "recording",
+    onSelect: async () => {
+      if (!window.confirm(`録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`)) return;
+      try {
+        await apiSend("DELETE", `/api/recordings/${rec.id}`);
+        if (currentSessionId !== null) showDetail(currentSessionId);
+      } catch (err) {
+        window.alert(err.message);
+      }
+    },
   });
-  wrap.appendChild(del);
+  wrap.appendChild(rowMenu(menuItems));
   return wrap;
 }
 
@@ -698,11 +842,22 @@ function renderRecordings(recordings) {
     (rec) => {
       const dur = rec.ended_at ? fmtDuration(rec.ended_at - rec.started_at) : "-";
       const mb = `${(rec.bytes / 1048576).toFixed(1)} MB`;
+      // 保護はmenuへ畳んだためlabelでは分からない。状態列にbadgeで出して一目で分かるようにする。
+      const state = document.createElement("span");
+      state.className = "rec-state";
+      state.append(RECORDING_STATUS[rec.status] || rec.status);
+      if (rec.protected) {
+        const p = document.createElement("span");
+        p.className = "st protected";
+        p.textContent = "保護中";
+        p.title = "保持policyの自動削除から除外されています。";
+        state.appendChild(p);
+      }
       return [
         `#${rec.id}`,
         rec.filename,
         rec.quality || "-",
-        RECORDING_STATUS[rec.status] || rec.status,
+        state,
         dur,
         mb,
         recordingActions(rec),
@@ -730,38 +885,84 @@ async function loadAiStatus() {
   }
 }
 
+// 分析結果はserverのai_analysis表へ保存される。詳細を開いたときはGETで保存済みだけを
+// 読み(LLMは走らない)、実行はbutton(POST)でのみ行う。「再分析」は入力が同じでも
+// 作り直す(refresh=1)。
+function renderAiMeta(payload) {
+  const meta = document.getElementById("ai-meta");
+  if (!payload || !payload.computed_at) {
+    meta.textContent = "";
+    return;
+  }
+  meta.textContent = `分析日時: ${fmtDateTime(payload.computed_at)}`
+    + ` / model: ${payload.model || "-"}`
+    + ` / prompt版: ${payload.prompt_version}`
+    + (payload.comment_count ? ` / ${fmtNum(payload.comment_count)}件のCommentを分析` : "");
+}
+
 function resetAiResult() {
   const btn = document.getElementById("ai-analyze-btn");
   btn.disabled = !aiConfigured;
   btn.textContent = "分析する";
+  btn.classList.remove("hidden");
+  document.getElementById("ai-rerun-btn").classList.add("hidden");
   document.getElementById("ai-analyze-status").textContent = aiConfigured
     ? ""
     : "ローカルAIが未設定のため利用できません。";
+  document.getElementById("ai-meta").textContent = "";
   const result = document.getElementById("ai-result");
   result.classList.add("hidden");
   result.innerHTML = "";
+  loadStoredAiAnalysis();
 }
 
-async function runAiAnalysis() {
+async function loadStoredAiAnalysis() {
+  if (currentSessionId === null) return;
+  const sessionId = currentSessionId;
+  let payload;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/comment-analysis`);
+    if (!res.ok) return;
+    payload = await res.json();
+  } catch (err) {
+    return;
+  }
+  if (currentSessionId !== sessionId || !payload.analysis) return;
+  renderAiAnalysis(payload);
+  renderAiMeta(payload);
+  document.getElementById("ai-analyze-btn").classList.add("hidden");
+  const rerun = document.getElementById("ai-rerun-btn");
+  rerun.classList.remove("hidden");
+  rerun.disabled = !aiConfigured;
+  if (payload.error) document.getElementById("ai-analyze-status").textContent = payload.error;
+}
+
+async function runAiAnalysis(refresh) {
   if (currentSessionId === null || !aiConfigured) return;
+  const sessionId = currentSessionId;
   const btn = document.getElementById("ai-analyze-btn");
+  const rerun = document.getElementById("ai-rerun-btn");
   const status = document.getElementById("ai-analyze-status");
   btn.disabled = true;
-  btn.textContent = "分析中…";
+  rerun.disabled = true;
   status.textContent = "ローカルAIで分析しています（modelにより数十秒かかることがあります）…";
   try {
-    const res = await fetch(`/api/sessions/${currentSessionId}/comment-analysis`);
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : "分析に失敗しました。");
-    }
+    const payload = await apiSend(
+      "POST", `/api/sessions/${sessionId}/comment-analysis${refresh ? "?refresh=1" : ""}`);
+    if (currentSessionId !== sessionId) return;
     renderAiAnalysis(payload);
-    status.textContent = `${payload.comment_count}件のCommentを分析しました。`;
+    renderAiMeta(payload);
+    status.textContent = payload.cached
+      ? "前回と同じ入力・同じmodelのため、保存済みの結果を表示しました。"
+      : `${fmtNum(payload.comment_count)}件のCommentを分析しました。`;
+    btn.classList.add("hidden");
+    rerun.classList.remove("hidden");
   } catch (err) {
     status.textContent = err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = "再分析";
+    btn.textContent = "分析する";
+    rerun.disabled = false;
   }
 }
 
@@ -859,6 +1060,8 @@ async function loadUpscaleStatus() {
 
 // ---- 文字起こし(STT) ----
 let sttConfigured = false;
+// 現行の時刻map版。transcript側の版がこれと違うと字幕のtimecodeがズレるため警告する。
+let sttTimemapVersion = null;
 // recording.id → 進捗を反映する関数（WS transcribe_progress で更新）。
 const transcribeProgress = new Map();
 
@@ -869,6 +1072,7 @@ async function loadSttStatus() {
     const st = await res.json();
     const prev = sttConfigured;
     sttConfigured = Boolean(st.configured);
+    sttTimemapVersion = st.timemap_version === undefined ? null : st.timemap_version;
     // status取得はSession一覧loadと並行のため、有効化が後から確定した場合は
     // 操作列の文字起こしButtonを出すため再描画する。
     if (sttConfigured !== prev) renderTable();
@@ -915,6 +1119,23 @@ function openTranscript(rec, data) {
   const video = document.getElementById("transcript-video");
   // 同録画をRange対応endpointで配信。segmentクリックでその時刻へseekできる。
   video.src = `/api/recordings/${rec.id}/play`;
+  // 字幕fileの書き出し。timecodeは元録画mp4のmedia軸基準（hintに明記済み）。
+  [["transcript-srt", "srt"], ["transcript-vtt", "vtt"], ["transcript-txt", "txt"]]
+    .forEach(([id, fmt]) => {
+      const a = document.getElementById(id);
+      a.href = `/api/recordings/${rec.id}/transcript/export?format=${fmt}`;
+    });
+  // 時刻mapの版が現行と違うtranscriptは、書き出した字幕が動画とズレる可能性がある。
+  // 版が取れていない場合は判定できないので警告を出さない（推測で出さない）。
+  const warn = document.getElementById("transcript-warn");
+  const stale = sttTimemapVersion !== null && data.timemap_version !== sttTimemapVersion;
+  warn.classList.toggle("hidden", !stale);
+  if (stale) {
+    warn.textContent =
+      `この文字起こしは古い時刻map（版 ${data.timemap_version === null || data.timemap_version === undefined ? "なし" : data.timemap_version}` +
+      ` / 現行 ${sttTimemapVersion}）で作られています。書き出した字幕の時刻が動画とズレる場合があります。` +
+      "正確な時刻が必要な場合は文字起こしをやり直してください。";
+  }
   const wrap = document.getElementById("transcript-segments");
   wrap.innerHTML = "";
   transcriptSegEls = [];
@@ -1140,7 +1361,8 @@ document.getElementById("note-save").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("ai-analyze-btn").addEventListener("click", runAiAnalysis);
+document.getElementById("ai-analyze-btn").addEventListener("click", () => runAiAnalysis(false));
+document.getElementById("ai-rerun-btn").addEventListener("click", () => runAiAnalysis(true));
 document.getElementById("transcript-close").addEventListener("click", closeTranscript);
 document.getElementById("transcript-modal").addEventListener("click", (e) => {
   if (e.target.id === "transcript-modal") closeTranscript();
@@ -1163,19 +1385,26 @@ flt.search.addEventListener("input", () => {
 );
 
 function handleMessage(msg) {
-  if (msg.type === "output_progress") {
-    const update = encodeProgress.get(msg.recording_id);
-    if (update) update(msg.pct);
-    return;
-  }
-  if (msg.type === "upscale_progress") {
-    const update = upscaleProgress.get(msg.recording_id);
-    if (update) update(msg.pct);
-    return;
-  }
+  // output_progress / upscale_progress はjob_updateのstageと同じ内容をrecording単位で
+  // 流す既存message。この画面の進捗はjob_updateへ一本化したので、ここでは扱わない。
   if (msg.type === "transcribe_progress") {
     const update = transcribeProgress.get(msg.recording_id);
     if (update) update(msg.pct);
+    return;
+  }
+  if (msg.type === "reprocess_progress") {
+    const update = reprocessProgress.get(msg.recording_id);
+    if (update) update(msg.pct);
+    return;
+  }
+  // WS接続直後に届くserver側job台帳のsnapshot。reload前から動いているSession出力へ
+  // この経路で復帰する。
+  if (msg.type === "jobs") {
+    (msg.data || []).forEach(applyJob);
+    return;
+  }
+  if (msg.type === "job_update") {
+    if (msg.job) applyJob(msg.job);
     return;
   }
   if (msg.type === "battles" || msg.type === "stats") {
@@ -1201,6 +1430,7 @@ function scheduleReload() {
 }
 
 detailChart = createTimelineChart(document.getElementById("detail-chart"));
+setListState(document.getElementById("session-empty"), "loading");
 loadAiStatus();
 loadSttStatus();
 loadUpscaleStatus();

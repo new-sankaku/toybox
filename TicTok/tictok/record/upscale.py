@@ -20,10 +20,13 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
 from tictok.core.config import (
+    get_db_path,
+    get_log_dir,
     get_upscale_compute_type,
     get_upscale_device,
     get_upscale_enabled,
@@ -32,8 +35,19 @@ from tictok.core.config import (
     get_upscale_tile,
     get_upscale_tile_overlap,
 )
+from tictok.core import cancel
+from tictok.record import audio_norm
+from tictok.core.gpu import gpu_slot
 from tictok.paths import PROJECT_ROOT
-from tictok.record.recorder import ffmpeg_available, ffprobe_available, sidecar_dir, sidecar_path
+from tictok.record.recorder import (
+    ProgressGate,
+    ffmpeg_available,
+    ffmpeg_ctx,
+    ffprobe_available,
+    log_disk_preflight,
+    sidecar_dir,
+    sidecar_path,
+)
 from tictok.record.video_overlay import (
     _encoder_args,
     _mapped_quality,
@@ -123,21 +137,36 @@ def upscale_done(src: Path) -> bool:
         return False
 
 
+def upscale_artifact_paths(src: Path) -> list:
+    """Every upscale artifact of a recording, over both possible inputs (raw source and
+    the overlay variants). Regenerable from the input, so the retention sweep may drop
+    them; enumerated here so the reported reclaimable bytes and what cleanup removes
+    stay the same set."""
+    src = Path(src)
+    paths = []
+    for input_path in (src, overlay_paths(src)[0], overlay_paths_b(src)[0]):
+        paths.extend((
+            upscale_output_path(input_path),
+            sidecar_path(input_path, UPSCALE_META_SUFFIX),
+            sidecar_path(input_path, UPSCALE_LOG_SUFFIX),
+        ))
+    return paths
+
+
 def cleanup_upscale_files(src: Path) -> None:
     """Remove upscaled outputs and their cache metas for a recording (called on
     delete). Covers both possible inputs (raw source and overlay variants)."""
     src = Path(src)
-    inputs = [src, overlay_paths(src)[0], overlay_paths_b(src)[0]]
-    for input_path in inputs:
-        for path in (
-            upscale_output_path(input_path),
-            sidecar_path(input_path, UPSCALE_META_SUFFIX),
-            sidecar_path(input_path, UPSCALE_LOG_SUFFIX),
-        ):
-            try:
-                path.unlink(missing_ok=True)
-            except OSError:
-                logger.warning("failed to remove upscale artifact %s", path, exc_info=True)
+    for path in upscale_artifact_paths(src):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning(
+                "failed to remove upscale artifact %s", path.name,
+                extra={"event": "upscale.artifact_removal_failed",
+                       "ctx": {"stem": src.stem, "path": str(path)}},
+                exc_info=True,
+            )
 
 
 def _resolve_device() -> str:
@@ -150,10 +179,20 @@ def _resolve_device() -> str:
 
 
 def _get_model():
-    """Load (and cache) the configured super-resolution model. Returns
-    (descriptor, device, half). Raises UpscaleError with an actionable message."""
+    """Load (and cache) the configured super-resolution model for the video Up出力
+    feature. Gated on TICTOK_UPSCALE_ENABLED. Returns (descriptor, device, half).
+    Raises UpscaleError with an actionable message."""
     if not get_upscale_enabled():
         raise UpscaleError("Upscaleが無効です（TICTOK_UPSCALE_ENABLED=1 を設定してください）。")
+    return load_image_model()
+
+
+def load_image_model():
+    """Load (and cache) the configured super-resolution model regardless of the
+    video Up出力 enable flag. Returns (descriptor, device, half). Shared by the
+    video Up出力 (gated on get_upscale_enabled via _get_model) and avatar upscaling
+    (gated on its own overlay setting); both need only TICTOK_UPSCALE_MODEL_PATH and
+    torch/spandrel. Raises UpscaleError with an actionable message."""
     try:
         import torch
         from spandrel import ImageModelDescriptor, ModelLoader
@@ -173,17 +212,45 @@ def _get_model():
     global _model, _model_key
     with _model_lock:
         if _model is None or _model_key != key:
-            logger.info("loading upscale model: %s device=%s compute=%s", model_path, device, compute)
+            started = time.monotonic()
+            logger.info(
+                "loading upscale model: %s device=%s compute=%s", model_path, device, compute,
+                extra={"event": "upscale.model_load_started",
+                       "ctx": {"path": model_path, "device": device, "compute": compute,
+                               "size_bytes": model_file.stat().st_size}},
+            )
             try:
                 descriptor = ModelLoader().load_from_file(model_path)
             except Exception as exc:
+                logger.error(
+                    "could not load the upscale model %s", model_file.name,
+                    extra={"event": "upscale.model_load_failed",
+                           "ctx": {"path": model_path, "device": device, "compute": compute,
+                                   "reason": "unreadable",
+                                   "duration_ms": int((time.monotonic() - started) * 1000)}},
+                    exc_info=True,
+                )
                 raise UpscaleError(f"Upscale modelの読み込みに失敗しました: {exc}") from exc
             if not isinstance(descriptor, ImageModelDescriptor):
+                logger.error(
+                    "the configured upscale model %s is not an image-to-image model",
+                    model_file.name,
+                    extra={"event": "upscale.model_load_failed",
+                           "ctx": {"path": model_path, "reason": "wrong_model_kind",
+                                   "descriptor": type(descriptor).__name__}},
+                )
                 raise UpscaleError("このmodelは画像→画像の超解像modelではありません。")
             if compute == "auto":
                 half = device == "cuda" and descriptor.supports_half
             elif compute == "float16":
                 if not descriptor.supports_half:
+                    logger.error(
+                        "the configured upscale model %s does not support float16",
+                        model_file.name,
+                        extra={"event": "upscale.model_load_failed",
+                               "ctx": {"path": model_path, "reason": "half_unsupported",
+                                       "compute": compute}},
+                    )
                     raise UpscaleError("このmodelはfloat16に対応していません（TICTOK_UPSCALE_COMPUTE_TYPE=float32 にしてください）。")
                 half = True
             else:
@@ -194,9 +261,26 @@ def _get_model():
                     descriptor.model.half()
                 descriptor.model.eval()
             except Exception as exc:
+                logger.error(
+                    "could not initialise the upscale model %s on %s",
+                    model_file.name, device,
+                    extra={"event": "upscale.model_load_failed",
+                           "ctx": {"path": model_path, "device": device, "half": half,
+                                   "reason": "device_init",
+                                   "duration_ms": int((time.monotonic() - started) * 1000)}},
+                    exc_info=True,
+                )
                 raise UpscaleError(f"Upscale modelの初期化に失敗しました（device={device}）: {exc}") from exc
             _model = (descriptor, device, half)
             _model_key = key
+            logger.info(
+                "upscale model ready: %s x%s on %s (half=%s)",
+                model_file.name, descriptor.scale, device, half,
+                extra={"event": "upscale.model_loaded",
+                       "ctx": {"path": model_path, "device": device, "half": half,
+                               "compute": compute, "scale": int(descriptor.scale),
+                               "duration_ms": int((time.monotonic() - started) * 1000)}},
+            )
     return _model
 
 
@@ -205,21 +289,42 @@ def _probe_video(src: Path) -> tuple[int, int, float, float]:
     the probe fails — frame geometry must be exact for raw-pipe decode."""
     if not ffprobe_available():
         raise UpscaleError("ffprobeが見つかりません。高画質化にはffmpeg一式のinstallが必要です。")
+    args = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,r_frame_rate",
+        "-show_entries", "format=duration", "-of", "json", str(src),
+    ]
     try:
-        out = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
-             "-show_entries", "stream=width,height,r_frame_rate",
-             "-show_entries", "format=duration", "-of", "json", str(src)],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60, check=True,
-        ).stdout
-        info = json.loads(out.decode("utf-8", "replace"))
+        completed = subprocess.run(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=True,
+        )
+        info = json.loads(completed.stdout.decode("utf-8", "replace"))
         stream = info["streams"][0]
         width, height = int(stream["width"]), int(stream["height"])
         fps = _parse_fps(stream.get("r_frame_rate", ""))
         duration = float(info.get("format", {}).get("duration") or 0)
     except (OSError, subprocess.SubprocessError, KeyError, IndexError, ValueError) as exc:
+        stderr = getattr(exc, "stderr", None)
+        logger.error(
+            "could not probe %s for upscaling", src.name,
+            extra={"event": "process.ffprobe_failed",
+                   "ctx": {"stage": "upscale_probe", "stem": src.stem, "path": str(src),
+                           **ffmpeg_ctx(
+                               args,
+                               getattr(exc, "returncode", None),
+                               stderr_text=stderr.decode("utf-8", "replace") if stderr else None,
+                           )}},
+            exc_info=True,
+        )
         raise UpscaleError(f"動画情報の取得に失敗しました: {exc}") from exc
     if width <= 0 or height <= 0 or not (0 < fps <= 240):
+        logger.error(
+            "probe of %s returned unusable geometry: %dx%d @ %s fps",
+            src.name, width, height, fps,
+            extra={"event": "upscale.probe_rejected",
+                   "ctx": {"stem": src.stem, "path": str(src), "input_width": width,
+                           "input_height": height, "fps": fps}},
+        )
         raise UpscaleError(f"動画の解像度/フレームレートが不正です: {width}x{height} @ {fps}")
     return width, height, fps, duration
 
@@ -262,7 +367,8 @@ def _upscale_frame(descriptor, frame, tile: int, overlap: int, scale: int):
     return out
 
 
-def _signature(input_path: Path, model_path: str, encoder: str, quality: int) -> str:
+def _signature(input_path: Path, model_path: str, encoder: str, quality: int,
+               audio_normalize: Optional[dict] = None) -> str:
     stat = input_path.stat()
     mstat = Path(model_path).stat()
     payload = {
@@ -274,12 +380,15 @@ def _signature(input_path: Path, model_path: str, encoder: str, quality: int) ->
         "max_height": get_upscale_max_height(),
         "tile": [get_upscale_tile(), get_upscale_tile_overlap()],
         "compute": get_upscale_compute_type(),
+        # 音量正規化は出力の音声を変えるので、設定を変えたら作り直す。
+        "audio_normalize": audio_normalize,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progress=None) -> Path:
+def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progress=None,
+                    audio_normalize: Optional[dict] = None) -> Path:
     """Upscale ``input_path`` to its ``.up.mp4`` sibling and return that path.
     Blocking (GPU bound) — call via a thread. Cached: an existing output whose meta
     signature matches the input/model/settings is returned as-is.
@@ -296,22 +405,53 @@ def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progres
     dst = upscale_output_path(src)
     meta = sidecar_path(src, UPSCALE_META_SUFFIX)
     quality = _mapped_quality(encoder, int(base_quality))
-    signature = _signature(src, str(_model_file()), encoder, quality)
+    signature = _signature(src, str(_model_file()), encoder, quality, audio_normalize)
     if dst.is_file() and meta.is_file():
         try:
             if meta.read_text(encoding="utf-8").strip() == signature:
+                logger.debug(
+                    "reusing the cached upscale of %s", src.name,
+                    extra={"event": "upscale.reused",
+                           "ctx": {"stem": src.stem, "path": str(dst),
+                                   "size_bytes": dst.stat().st_size}},
+                )
                 return dst
         except OSError:
-            pass
-    with _upscale_lock:
-        _render(src, dst, descriptor, device, half, encoder, quality, on_progress)
+            logger.warning(
+                "could not read the upscale cache signature for %s; re-rendering",
+                src.name,
+                extra={"event": "upscale.cache_read_failed",
+                       "ctx": {"stem": src.stem, "path": str(meta)}},
+                exc_info=True,
+            )
+    # An upscale writes an output several times the size of its input, on the same
+    # volume. Preflight before the GPU work rather than after: a run that dies on a
+    # full volume hours in has already thrown away the whole render.
+    log_disk_preflight(
+        "upscale.disk_checked", [src.parent, get_db_path(), get_log_dir()],
+        stage="upscale", stem=src.stem,
+    )
+    started = time.monotonic()
+    with gpu_slot("upscale"), _upscale_lock:
+        _render(src, dst, descriptor, device, half, encoder, quality, on_progress,
+                audio_normalize)
     sidecar_dir(src).mkdir(parents=True, exist_ok=True)
     meta.write_text(signature, encoding="utf-8")
+    logger.info(
+        "upscaled %s -> %s", src.name, dst.name,
+        extra={"event": "upscale.completed",
+               "ctx": {"stem": src.stem, "path": str(dst),
+                       "size_bytes": dst.stat().st_size,
+                       "input_bytes": src.stat().st_size,
+                       "encoder": encoder, "quality": quality, "device": device,
+                       "duration_ms": int((time.monotonic() - started) * 1000)}},
+    )
     return dst
 
 
 def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
-            encoder: str, quality: int, on_progress) -> None:
+            encoder: str, quality: int, on_progress,
+            audio_normalize: Optional[dict] = None) -> None:
     import queue
     import numpy as np
     import torch
@@ -322,6 +462,9 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
 
     scale = int(descriptor.scale)
     width, height, fps, duration = _probe_video(src)
+    # 音声は入力1からそのまま拾う。正規化する場合だけ、loudnormが上げたrateを戻すため
+    # sourceの実値を測る。
+    audio_rate = audio_norm.probe_sample_rate(src) if audio_normalize else None
     out_w, out_h = _output_dimensions(width, height, scale)
     total_frames = max(1, int(round(duration * fps)))
     tile = get_upscale_tile()
@@ -339,32 +482,70 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
     logger.info(
         "upscale start: %s %dx%d -> %dx%d (model x%d, device=%s, half=%s, tile=%d, encoder=%s, ~%d frames)",
         src.name, width, height, out_w, out_h, scale, device, half, tile, encoder, total_frames,
+        extra={"event": "upscale.started",
+               "ctx": {"stem": src.stem, "path": str(src),
+                       "input_width": width, "input_height": height,
+                       "width": out_w, "height": out_h, "scale": scale,
+                       "device": device, "half": half, "tile": tile,
+                       "tile_overlap": overlap, "encoder": encoder, "quality": quality,
+                       "fps": round(fps, 3), "frames": total_frames,
+                       "source_seconds": round(duration, 3),
+                       "stderr_path": str(log_path)}},
     )
+    render_started = time.monotonic()
+    gate = ProgressGate()
     decode = encode = None
+    # Bound before the try so a failure raised between the two Popen calls can still be
+    # logged with whatever command line was reached.
+    decode_args: list = []
+    encode_args: list = []
+    done = 0
     try:
         with open(log_path, "w", encoding="utf-8") as log_file:
             # Decode to CFR raw RGB. TikTok recordings are VFR (stream-copied HLS);
             # raw frames on a pipe carry no timestamps, so the fps filter must
             # normalise timing here or the muxed audio would drift on long videos.
             # (Burned-in overlay inputs are already CFR — the filter is a no-op.)
+            decode_args = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src),
+                "-map", "0:v:0", "-vf", f"fps={fps_str}",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
+            ]
+            logger.debug(
+                "starting the upscale decoder for %s", src.name,
+                extra={"event": "process.ffmpeg_started",
+                       "ctx": {"stage": "upscale_decode", "stem": src.stem,
+                               "stderr_path": str(log_path), **ffmpeg_ctx(decode_args)}},
+            )
             decode = subprocess.Popen(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src),
-                 "-map", "0:v:0", "-vf", f"fps={fps_str}",
-                 "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                decode_args,
                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log_file,
             )
             # Frames are piped at the final output size: when the model overshoots the
             # height cap the downscale happens on the GPU (below), not in ffmpeg — a
             # 4x model on a 720p source would otherwise push ~44MB per raw frame
             # through the pipe only for ffmpeg to throw most of it away.
+            encode_args = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{out_w}x{out_h}",
+                "-framerate", fps_str, "-i", "pipe:0",
+                "-i", str(src),
+                "-map", "0:v:0", "-map", "1:a?",
+                # 音量正規化のときだけ音声を再encodeする。入力(焼き込み済み or 録画)は
+                # VFR由来のtimestampを持つため、audio_norm側でaresample=async=1を前置する。
+                *(audio_norm.encode_args(**audio_normalize, sample_rate=audio_rate)
+                  if audio_normalize else ["-c:a", "copy"]),
+                *_encoder_args(encoder, quality), "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart", "-f", "mp4", str(tmp_dst),
+            ]
+            logger.debug(
+                "starting the upscale encoder for %s", src.name,
+                extra={"event": "process.ffmpeg_started",
+                       "ctx": {"stage": "upscale_encode", "stem": src.stem,
+                               "stderr_path": str(log_path), **ffmpeg_ctx(encode_args)}},
+            )
             encode = subprocess.Popen(
-                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{out_w}x{out_h}",
-                 "-framerate", fps_str, "-i", "pipe:0",
-                 "-i", str(src),
-                 "-map", "0:v:0", "-map", "1:a?", "-c:a", "copy",
-                 *_encoder_args(encoder, quality), "-pix_fmt", "yuv420p",
-                 "-movflags", "+faststart", "-f", "mp4", str(tmp_dst)],
+                encode_args,
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log_file,
             )
             # Overlap the three stages: a reader thread pulls raw frames off the
@@ -416,7 +597,6 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             writer_t = threading.Thread(target=_writer, name="upscale-writer", daemon=True)
             reader_t.start()
             writer_t.start()
-            done = 0
             try:
                 while True:
                     arr = frame_q.get()
@@ -430,6 +610,17 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                         try:
                             out = _upscale_frame(descriptor, frame, tile, overlap, scale)
                         except torch.cuda.OutOfMemoryError as exc:
+                            logger.error(
+                                "the GPU ran out of memory upscaling %s at frame %d",
+                                src.name, done + 1,
+                                extra={"event": "upscale.memory_exhausted",
+                                       "ctx": {"stem": src.stem, "frames_done": done,
+                                               "frames": total_frames, "tile": tile,
+                                               "tile_overlap": overlap, "half": half,
+                                               "width": out_w, "height": out_h,
+                                               "duration_ms": int((time.monotonic() - render_started) * 1000)}},
+                                exc_info=True,
+                            )
                             raise UpscaleError(
                                 "GPUメモリが不足しました（TICTOK_UPSCALE_TILE をより小さく設定してください）。"
                             ) from exc
@@ -456,8 +647,27 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                                 raise (writer_err[0] if writer_err else
                                        UpscaleError("encodeへの書き込みが中断されました。")) from None
                     done += 1
+                    # cancelはframe単位でしか効かない(1 frameの推論は中断できない)。ここを
+                    # 抜けるとfinallyがdecode/encodeをkillし、tmp_dstも消える。
+                    cancel.check_cancelled()
                     if on_progress and (done % _PROGRESS_EVERY_FRAMES == 0 or done >= total_frames):
                         on_progress(done, max(total_frames, done))
+                    percent = 100.0 * done / max(total_frames, done)
+                    if gate.due(percent):
+                        elapsed = time.monotonic() - render_started
+                        rate = done / elapsed if elapsed > 0 else 0.0
+                        remaining = max(0, max(total_frames, done) - done)
+                        logger.info(
+                            "upscaling %s: %d/%d frames (%.1f%%) at %.2f fps",
+                            src.name, done, max(total_frames, done), percent, rate,
+                            extra={"event": "upscale.progress_reported",
+                                   "ctx": {"stem": src.stem, "frames_done": done,
+                                           "frames": max(total_frames, done),
+                                           "percent": round(percent, 2),
+                                           "frames_per_second": round(rate, 3),
+                                           "eta_seconds": round(remaining / rate, 1) if rate > 0 else None,
+                                           "duration_ms": int(elapsed * 1000)}},
+                        )
             finally:
                 # Stop and unblock the helper threads whatever happens: signal stop,
                 # drain the input queue so a blocked reader.put() returns, then send the
@@ -484,16 +694,56 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             decode_rc = decode.wait()
             encode_rc = encode.wait()
         if decode_rc != 0:
+            logger.error(
+                "the upscale decoder for %s exited %s after %d frame(s)",
+                src.name, decode_rc, done,
+                extra={"event": "process.ffmpeg_failed",
+                       "ctx": {"stage": "upscale_decode", "stem": src.stem,
+                               "frames_done": done, "frames": total_frames,
+                               **ffmpeg_ctx(decode_args, decode_rc, log_path)}},
+            )
             raise UpscaleError(f"動画のdecodeに失敗しました（詳細: {log_path.name}）。")
         if encode_rc != 0 or not tmp_dst.is_file():
+            logger.error(
+                "the upscale encoder for %s exited %s after %d frame(s)",
+                src.name, encode_rc, done,
+                extra={"event": "process.ffmpeg_failed",
+                       "ctx": {"stage": "upscale_encode", "stem": src.stem,
+                               "frames_done": done, "frames": total_frames,
+                               "size_bytes": tmp_dst.stat().st_size if tmp_dst.is_file() else 0,
+                               **ffmpeg_ctx(encode_args, encode_rc, log_path)}},
+            )
             raise UpscaleError(f"動画のencodeに失敗しました（詳細: {log_path.name}）。")
         if done == 0:
+            logger.error(
+                "the upscale decoder for %s produced no frames", src.name,
+                extra={"event": "upscale.no_frames_decoded",
+                       "ctx": {"stem": src.stem, "frames": total_frames,
+                               **ffmpeg_ctx(decode_args, decode_rc, log_path)}},
+            )
             raise UpscaleError("動画からframeを取得できませんでした。")
         tmp_dst.replace(dst)
         if on_progress:
             on_progress(total_frames, total_frames)
-        logger.info("upscale rendered: %s (%d frames)", dst.name, done)
+        elapsed = time.monotonic() - render_started
+        logger.info(
+            "upscale rendered: %s (%d frames)", dst.name, done,
+            extra={"event": "upscale.rendered",
+                   "ctx": {"stem": src.stem, "path": str(dst), "frames_done": done,
+                           "frames": total_frames, "size_bytes": dst.stat().st_size,
+                           "frames_per_second": round(done / elapsed, 3) if elapsed > 0 else None,
+                           "duration_ms": int(elapsed * 1000)}},
+        )
     except BrokenPipeError as exc:
+        logger.error(
+            "the upscale encoder pipe for %s broke after %d frame(s)", src.name, done,
+            extra={"event": "process.ffmpeg_failed",
+                   "ctx": {"stage": "upscale_encode", "stem": src.stem,
+                           "frames_done": done, "frames": total_frames,
+                           **ffmpeg_ctx(encode_args, encode.returncode if encode else None,
+                                        log_path)}},
+            exc_info=True,
+        )
         raise UpscaleError(f"encodeが中断されました（詳細: {log_path.name}）。") from exc
     finally:
         for proc in (decode, encode):

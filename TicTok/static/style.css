@@ -255,9 +255,53 @@ body {
 
 .row-actions {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.3rem;
 }
+
+/* 操作Buttonの左右隙間は.btnの広いpadding(1.4rem)が原因。.btnより高いspecificityの
+   本selectorでpadding/letter-spacingを詰めてcompactにする。nowrap(.row-actions)で
+   Buttonが2段に折り返して不揃いに見えるのを防ぐ。列の縦揃えはnowrap＋全行同一Button構成で
+   自然に揃うため、隙間の出る固定min-widthは設けない。 */
+.row-actions .btn-small {
+  padding: 0.2rem 0.45rem;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+
+/* 操作列に入りきらないButtonのoverflow menu。.table-wrap(overflow:auto)にclipされない
+   よう、JSがviewport座標を入れるfixed配置にする。z-indexはmodal-overlay(150)と
+   走査線overlay(100)より上でなければ詳細modal内で見えない。 */
+.row-menu {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: max-content;
+  background: var(--sand-panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 0.4rem 1rem rgba(0, 0, 0, 0.25);
+}
+
+.row-menu-item {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-top: 1px solid rgba(143, 136, 113, 0.35);
+  color: var(--ink-strong);
+  font: inherit;
+  font-size: 0.72rem;
+  text-align: left;
+  white-space: nowrap;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+}
+
+.row-menu-item:first-child { border-top: 0; }
+.row-menu-item:hover:not(:disabled) { background: rgba(255, 250, 230, 0.32); }
+.row-menu-item:disabled { opacity: 0.45; cursor: default; }
+.row-menu-item-danger { color: var(--warn); }
+.row-menu-item-danger:hover:not(:disabled) { background: var(--warn); color: var(--invert-fg); }
 
 .monitor-grid {
   display: grid;
@@ -442,6 +486,57 @@ body {
   color: var(--ink-muted);
   font-size: 0.68rem;
   line-height: 1.4;
+}
+
+/* section見出し。3カラムを跨いで1行を占め、列見出し(.s-head, top:0)の直下へ吸着する。
+   畳まない(collapseしない)ので、browserのCtrl+Fは全項目に効いたままになる。 */
+.s-section {
+  grid-column: 1 / -1;
+  position: sticky;
+  top: 1.9rem;
+  z-index: 1;
+  padding: 0.35rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  color: var(--ink-strong);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+/* 「既定値へ戻す」と環境変数の注記。設定値の入力欄の下へ回り込ませる。 */
+.s-control {
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.s-default {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+}
+
+.s-envnote { color: var(--warn); }
+
+.settings-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.6rem;
+}
+
+.settings-filter input {
+  font: inherit;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 230, 0.3);
+  color: var(--ink-strong);
+  padding: 0.35rem 0.6rem;
+  flex: 1 1 14rem;
+  min-inline-size: 0;
 }
 
 /* 最終行の下線は枠線と二重になるため省く */
@@ -830,6 +925,8 @@ body {
   background: var(--sand-panel-muted);
 }
 
+/* headerは短い語しか置かないので、列が狭まっても「画/質」のように割らない。
+   headerの最小幅が列幅の下限になり、data側の潰れ(#6/76 等)も抑えられる。 */
 .result-table th {
   position: sticky;
   top: 0;
@@ -840,6 +937,7 @@ body {
   letter-spacing: 0.1em;
   padding: 0.4rem 0.6rem;
   font-size: 0.7rem;
+  white-space: nowrap;
 }
 
 .result-table td {
@@ -853,13 +951,38 @@ body {
   background: rgba(255, 250, 230, 0.18);
 }
 
+/* 数値(ID・時間・Size・コイン)は途中で折り返すと桁が別の数に読める(342,99+2 等)ため
+   常に1行。折り返しの余地は本文列(File名・User名)側だけに残す。 */
 .result-table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 識別子(重要度・種別key)は語中で割ると別の語に読める(warni/ng・collector.disconne/cted)。
+   .num と違い長さが読めないので折り返し自体は許すが、区切りの無い語は割らない。 */
+.result-table .ident {
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.rec-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  white-space: nowrap;
 }
 
 .result-table .rank-top td {
   background: rgba(169, 110, 73, 0.18);
+}
+
+/* ダブルクリックで詳細を開ける行(Battle履歴など) */
+.result-table tbody tr.row-clickable {
+  cursor: pointer;
+}
+.result-table tbody tr.row-clickable:hover td {
+  background: rgba(169, 110, 73, 0.28);
 }
 
 /* User単位のGift内訳: Gift種ごとに1行、個数とコイン数を併記 */
@@ -948,6 +1071,19 @@ body {
   padding: 0.8rem 0.2rem;
   text-align: center;
   letter-spacing: 0.2em;
+}
+
+/* 一覧placeholderの3状態。0件と見分けが付くよう、取得失敗は警告色・読み込み中は
+   確定した事実ではないことが判るよう淡くする。 */
+.list-failed {
+  color: var(--warn);
+  letter-spacing: 0.08em;
+  cursor: help;
+}
+
+.list-loading {
+  opacity: 0.65;
+  font-style: italic;
 }
 
 .feed-item {
@@ -1080,6 +1216,45 @@ body {
   color: var(--invert-fg);
 }
 
+/* nav内のerror件数badge。件数0のときは中身が空になり、::before等で描かないので消える。
+   取得できなかったときは "?" を出す(0件と区別する)。 */
+.nav-badge:not(:empty) {
+  display: inline-block;
+  margin-inline-start: 0.35em;
+  padding: 0 0.35em;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+}
+
+.nav-badge.alert:not(:empty) {
+  background: var(--warn);
+  color: var(--invert-fg);
+  border-color: var(--warn);
+}
+
+/* 運用logの詳細(JSON全文と設定変更のdiff)。表の下へ差し込む行なので幅は表に従わせる。 */
+.ops-detail pre {
+  margin: 0.3rem 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--sand-panel-muted);
+  border: 1px solid var(--line);
+  font-size: 0.66rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-block-size: 40vh;
+  overflow: auto;
+}
+
+.ops-diff {
+  margin: 0.2rem 0 0.4rem;
+  padding-inline-start: 1.2em;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--ink-strong);
+}
+
 .a-add {
   display: flex;
   align-items: center;
@@ -1137,6 +1312,52 @@ body {
 
 .a-add button:hover:not(:disabled) { background: var(--accent-deep); }
 .a-add button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 空き容量バー(全画面のトップバー右側)。下限割れは警告色にする。 */
+.a-disk {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-inline-size: 0;
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+}
+
+/* 監視画面は先行する.a-addが既に右寄せしているため、autoを重ねない。 */
+.a-add ~ .a-disk { margin-left: 0; }
+
+.a-disk:empty { display: none; }
+.a-disk .d-empty { letter-spacing: 0.08em; }
+
+.a-disk .d-vol {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-inline-size: 0;
+}
+
+.a-disk .d-vol .l { letter-spacing: 0.08em; }
+.a-disk .d-vol .v { color: var(--ink-strong); }
+
+.a-disk .d-vol .track {
+  display: block;
+  inline-size: clamp(2.5rem, 6vw, 6rem);
+  block-size: 0.45rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+}
+
+.a-disk .d-vol .fill {
+  display: block;
+  block-size: 100%;
+  background: var(--ink-muted);
+}
+
+.a-disk .d-vol.low .v,
+.a-disk .d-vol.low .l { color: var(--warn); }
+.a-disk .d-vol.low .fill { background: var(--warn); }
 
 .a-ws { display: flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; color: var(--ink-muted); }
 .a-ws .dot { color: var(--warn); }
@@ -1280,6 +1501,13 @@ body {
 
 .a-card > h3 .sub { font-size: 0.6rem; opacity: 0.7; font-weight: 400; }
 .a-card > .body { padding: 0.5rem; min-height: 0; overflow: auto; flex: 1 1 auto; }
+
+/* 表が主役の1枚card(運用log)。既定の.a-cardは中身なりの高さで止まるため、共通
+   .table-wrapのmax-height(40vh)が実質の高さになり画面下に数百pxの死に領域が残る。
+   card→body→table-wrapを縦に伸ばし、scrollは表の中だけに閉じる。 */
+.a-card-fill { flex: 1 1 auto; }
+.a-card-fill > .body { display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden; }
+.a-card-fill .table-wrap { flex: 1 1 auto; max-height: none; min-height: 0; }
 
 /* 設定tab: 監視tabと同じ app-shell 内に置くスクロール本体（高さを他tabと統一） */
 .a-content {
@@ -1772,18 +2000,32 @@ body {
   cursor: pointer;
 }
 .x-toolbar .sp { margin-left: auto; }
+/* 絞り込みselectは項目名を常に見せる。先頭optionのlabelにprefixを入れる書き方では、
+   値を選んだ瞬間に何の条件か分からなくなる。 */
+.x-field { display: inline-flex; align-items: baseline; gap: 0.25rem; min-inline-size: 0; }
+.x-field > span { color: var(--ink-muted); white-space: nowrap; }
+.x-field > select { min-inline-size: 0; }
 
 .x-tablewrap { flex: 1 1 auto; overflow: auto; min-height: 0; }
 .xtab { inline-size: 100%; border-collapse: collapse; font-size: 0.7rem; white-space: nowrap; }
 .xtab th { position: sticky; top: 0; z-index: 1; background: var(--invert-bg); color: var(--invert-fg); text-align: left; padding: 0.3rem 0.55rem; font-size: 0.62rem; cursor: pointer; border-right: 1px solid rgba(216, 210, 188, 0.15); }
 .xtab th.n, .xtab td.n { text-align: right; font-variant-numeric: tabular-nums; }
 .xtab td { padding: 0.25rem 0.55rem; border-top: 1px solid rgba(143, 136, 113, 0.4); border-right: 1px solid rgba(143, 136, 113, 0.25); }
+/* 操作列: 1Button=1td。列幅はtableが全行揃えるので、tdは中央寄せ＋詰めpaddingのみ。 */
+.xtab td.act { padding: 0.15rem 0.08rem; text-align: center; }
+/* .btnの広いpadding(1.4rem)を上書きしcompactに（.btnより高specificity）。列は最長ラベル
+   (出力済等)幅にtableが揃えるので、Buttonをwidth:100%で列いっぱいに広げ、cell内の余白
+   (スカスカ)を無くして情報密度を上げる。 */
+.xtab td.act .btn-small { padding: 0.15rem 0.25rem; letter-spacing: normal; width: 100%; }
 .xtab tbody tr:nth-child(even) { background: rgba(255, 250, 230, 0.16); }
 .xtab tbody tr:hover { background: rgba(255, 250, 230, 0.32); }
 .xtab .row-actions a { color: var(--accent-deep); }
 .st { font-size: 0.58rem; padding: 0.02rem 0.4rem; border: 1px solid var(--line); }
 .st.ended { background: var(--invert-bg); color: var(--invert-fg); }
 .st.live { background: var(--ok); color: var(--invert-fg); border-color: var(--ok); }
+/* 制限で録画できなかった試行。実績sessionと取り違えないよう塗りを外し、warn色の枠だけにする。 */
+.st.restricted { background: transparent; color: var(--warn); border-color: var(--warn); }
+.st.protected { background: transparent; color: var(--accent-deep); border-color: var(--accent-deep); }
 
 .x-chartwrap { position: relative; block-size: clamp(16rem, 32vh, 22rem); border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.4rem 0.5rem; }
 .x-chartwrap.hidden { display: none; }
@@ -1979,6 +2221,20 @@ body {
 .detail-grid > section { margin-top: 0; min-inline-size: 0; }
 .detail-rankings { display: flex; flex-direction: column; gap: 0.8rem; }
 .detail-rankings .table-wrap { max-height: 28vh; }
+/* 録画｜Memo の段。Memoはrows=3のtextareaで縦に伸びないため、等分割だと右が
+   数百px空いたまま左の録画tableだけが潰れる。余りは録画側へ寄せる。
+   fr比だと窓を狭めた分だけMemoも一定割合を持ち続け、録画側の唯一の可変列(File名)が
+   先に潰れて2行になる。Memoは上限付きで頭打ちにし、残りは全て録画側へ渡す。
+   狭い窓では素の.detail-grid(auto-fit)に任せて1列へ畳む。 */
+@media (min-width: 60rem) {
+  .detail-grid-manage { grid-template-columns: minmax(0, 1fr) minmax(0, clamp(12rem, 20%, 20rem)); }
+}
+/* 列幅の配り方: 中身の幅が決まっている列(#・画質・状態・時間・Size・操作)は
+   shrink-to-fit(1%)で詰め、余りは唯一の可変列であるFile名(100%)へ全部渡す。
+   固定幅ではないので窓幅に追従する。左右paddingは共通値(0.6rem)のままだと7列分で
+   100px超をFile名から奪い、窓を狭めた時にFile名だけが折り返す。ここは詰める。 */
+.rec-table th, .rec-table td { inline-size: 1%; white-space: nowrap; padding-inline: 0.35rem; }
+.rec-table th:nth-child(2), .rec-table td:nth-child(2) { inline-size: 100%; white-space: normal; }
 .detail-battle .bcards { grid-template-columns: 1fr; gap: 0.6rem; max-height: 60vh; overflow-y: auto; }
 .detail-battle .bcard { box-shadow: none; }
 .result-sub-note { font-size: 0.66rem; font-weight: 400; letter-spacing: 0.04em; color: var(--ink-muted); margin-left: 0.4rem; }
@@ -1991,6 +2247,9 @@ body {
   .a-livecard, .a-statcard, .a-chartcard, .a-actcard { flex: 1 1 auto; }
   .a-videowrap { min-height: 60vh; }
   .x-tablewrap { max-height: 60vh; }
+  /* 縦は画面高でなくpage scrollに任せる幅なので、表の伸びも他一覧と同じ上限に戻す。 */
+  .a-card-fill > .body { overflow: visible; }
+  .a-card-fill .table-wrap { max-height: 60vh; }
 }
 
 /* ===== 配信者分析ページ (master-detail) ===== */
@@ -2082,6 +2341,7 @@ body {
 .tr-body { display: flex; flex-direction: column; gap: 0.5rem; min-height: 0; }
 .tr-video { inline-size: 100%; max-block-size: 42vh; background: #000; flex: 0 0 auto; }
 .tr-hint { font-size: 0.66rem; color: var(--ink-muted); letter-spacing: 0.04em; }
+.tr-warn { font-size: 0.7rem; color: var(--warn); border: 1px solid var(--warn); padding: 0.3rem 0.5rem; line-height: 1.5; }
 .tr-segments { display: flex; flex-direction: column; gap: 0.1rem; max-block-size: 38vh; overflow: auto; min-height: 0; }
 .tr-seg { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.8rem; line-height: 1.5; padding: 0.1rem 0.3rem; cursor: pointer; border-inline-start: 2px solid transparent; }
 .tr-seg:nth-child(even) { background: rgba(255, 250, 230, 0.16); }
@@ -2233,33 +2493,36 @@ body {
 
 .an-chart-tall { block-size: clamp(22rem, 52vh, 40rem); }
 
-/* ① 数値付きheatmap: 縦=24時刻 × 横=曜日(+全)。狭幅では横scroll。 */
+/* ① 数値付きheatmap: 縦=15分slot × 横=曜日(+全)。狭幅では横scroll。 */
 .an-hm-wrap { inline-size: 100%; overflow-x: auto; }
 .an-heatmap {
   display: grid;
-  grid-template-columns: auto repeat(7, minmax(2.6em, 1fr)) minmax(2.6em, 1fr);
-  gap: 2px;
-  min-inline-size: 22rem;
+  grid-template-columns: auto repeat(7, minmax(2.1em, 1fr)) minmax(2.1em, 1fr);
+  gap: 1px;
+  min-inline-size: 20rem;
   font-family: monospace;
-  font-size: clamp(0.62rem, 1.4vw, 0.78rem);
+  font-size: clamp(0.5rem, 1.1vw, 0.64rem);
 }
 .an-hm-h {
   text-align: center;
   font-weight: 700;
-  padding: 0.3em 0.2em;
+  padding: 0.2em 0.15em;
   color: var(--ink-muted);
 }
 .an-hm-all { border-inline-start: 2px solid var(--line); }
 .an-hm-rowh {
   text-align: end;
-  padding: 0.35em 0.5em;
+  padding: 0.1em 0.4em;
   white-space: nowrap;
   color: var(--ink-muted);
 }
 .an-hm-corner { font-weight: 700; }
+/* 15分刻み: 毎時(00分)は罫線+濃色で強調、:15/:30/:45は控えめに。 */
+.an-hm-hour { border-block-start: 1px solid var(--line); font-weight: 700; }
+.an-hm-quarter { opacity: 0.5; font-size: 0.92em; }
 .an-hm-cell {
   text-align: center;
-  padding: 0.4em 0.15em;
+  padding: 0.15em 0.1em;
   border-radius: 2px;
   font-variant-numeric: tabular-nums;
   background: rgba(143, 136, 113, 0.08);
@@ -2313,5 +2576,240 @@ body {
 .an-help b { color: var(--ink-strong); }
 .an-auto { font-size: 0.64rem; color: var(--ink-muted); letter-spacing: 0.05em; }
 .an-chart-short { block-size: clamp(13rem, 26vh, 19rem); }
+/* ①' 平日/休日の2グラフ: 常に縦並び。 */
+.an-organic-pair {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+.an-organic-col { min-inline-size: 0; }
+.an-subhead {
+  font-size: 0.72rem;
+  margin-block-end: 0.25rem;
+  color: var(--ink-muted);
+}
 .an-sw-pos { color: var(--accent-deep); }
 .an-sw-neg { color: #4d6e6e; }
+
+/* ===== 配信者動画（横断シーン検索・ラフ切り出し） ===== */
+.vd-tabs { display: flex; gap: 0.35rem; padding: 0.4rem 0.6rem 0; border-bottom: 2px solid var(--line); }
+.vd-tab {
+  padding: 0.35rem 0.9rem;
+  background: var(--sand-panel-muted);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  color: var(--ink-muted);
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.vd-tab.active { background: var(--sand-panel); color: var(--ink-strong); font-weight: 600; }
+.vd-view { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+.vd-view.hidden { display: none; }
+
+.vd-chk { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; color: var(--ink-muted); white-space: nowrap; }
+.vd-summary { font-size: 0.68rem; color: var(--ink-muted); }
+
+/* 2列の下に全幅1行を敷くため、flexではなくgridで組む(全幅rowは grid-column: 1 / -1)。
+   行・列とも minmax(0, …) にしないとgrid itemの既定min-sizeがautoのため中身に押し広げられ、
+   下端のtimelineが画面外へ出る。 */
+.vd-split {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.vd-hits { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; min-height: 0; min-block-size: 0; min-inline-size: 0; border-right: 2px solid var(--line); }
+/* 共通.table-wrapはmax-height:40vhで頭打ちになる。ここは結果一覧が主役なので、
+   pane高さいっぱいまで伸ばして中身だけをscrollさせる。 */
+.vd-hits .table-wrap { flex: 1 1 auto; max-height: none; min-height: 0; border: none; }
+/* 種別・配信者・配信日・位置は中身の幅が決まっている列。tableのauto layoutは余りを全列へ
+   配るため、そのままだと短い列の右に死んだ余白が並ぶ。shrink-to-fit(1%)で中身ぴったりへ
+   詰め、余りは内容列(100%)へ全部寄せる。固定幅ではないので窓幅に追従する。 */
+.vd-hits .xtab th, .vd-hits .xtab td { padding-inline: 0.35rem; }
+.vd-hits .xtab th:not(:last-child), .vd-hits .xtab td:not(:last-child) { inline-size: 1%; }
+.vd-hits .xtab th:last-child, .vd-hits .xtab td:last-child { inline-size: 100%; }
+/* 内容だけは折り返す。nowrapのままだと長いコメントで横scrollが出て他列が押し出される。 */
+.vd-hits .xtab td:last-child { white-space: normal; overflow-wrap: anywhere; }
+.vd-more { flex: 0 0 auto; padding: 0.5rem; text-align: center; }
+.vd-player {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-height: 0;
+  min-block-size: 0;
+  min-inline-size: 0;
+  padding: 0.6rem;
+  overflow: hidden;
+  background: var(--sand-panel-muted);
+}
+/* 時間軸rowは2列にまたがって全幅を取る。 */
+.vd-timeline {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.35rem 0.6rem;
+  border-block-start: 2px solid var(--line);
+  background: var(--sand-panel-muted);
+}
+.vd-player-head { font-size: 0.7rem; color: var(--ink-muted); }
+/* 動画と操作系を横に並べ、動画は実比率のまま左へ。inline-sizeをautoにしないと
+   縦動画が枠幅まで引き伸ばされ、左右が黒帯で埋まって右側が死ぬ。stageに高さを持たせ、
+   右列(.vd-side)は文字起こしで残り高さを埋めることで動画右下の空白を無くす。 */
+/* 固定高さにするとseek barの下に死んだ余白が残る。stageがpaneの残り高さを吸うことで
+   動画と文字起こしが縦いっぱいに広がり、下端はseek barとkey説明で閉じる。 */
+.vd-stage { display: flex; align-items: stretch; gap: 0.6rem; min-inline-size: 0; flex: 1 1 auto; min-block-size: clamp(16rem, 42vh, 34rem); }
+.vd-video { flex: 0 1 auto; inline-size: auto; block-size: 100%; max-inline-size: 62%; background: #000; }
+.vd-side { flex: 1 1 auto; display: flex; flex-direction: column; gap: 0.4rem; min-inline-size: 0; min-block-size: 0; }
+.vd-controls { flex: 0 0 auto; display: flex; flex-direction: column; gap: 0.3rem; }
+.vd-row { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.vd-status { min-block-size: 1rem; }
+
+/* .btnは.btn-smallより後に定義されており、同specificityでは.btnのpadding(1.4rem)と
+   letter-spacing(0.15em)が勝つ。この密なpanelでは要素名を足して確実に上書きする。 */
+.vd-player button.btn,
+.vd-timeline button.btn,
+.vd-cuts-tools button.btn {
+  padding: 0.25rem 0.65rem;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.vd-heat-block { display: flex; flex-direction: column; gap: 0.2rem; }
+.vd-heat-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+.vd-heat-label { font-size: 0.62rem; color: var(--ink-muted); }
+.vd-heat { inline-size: 100%; block-size: clamp(3.5rem, 9vh, 6rem); border: 1px solid var(--line); background: var(--sand-panel); cursor: pointer; touch-action: none; display: block; }
+
+.vd-cutbar, .vd-paths { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.vd-time { font-size: 0.7rem; color: var(--ink-strong); }
+.vd-len { color: var(--ink-muted); }
+.vd-variant {
+  /* 横並びの行内で余りを取る。flex-growを列方向に効かせると空白の大きな箱になるので、
+     必ず行(.vd-row)の中に置くこと。 */
+  flex: 1 1 6rem;
+  min-inline-size: 0;
+  padding: 0.25rem 0.4rem;
+  background: var(--sand-panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.68rem;
+}
+
+.vd-hit { cursor: pointer; }
+.vd-hit:hover, .vd-hit:focus-visible { background: var(--sand-panel-muted); outline: none; }
+.vd-src { display: inline-block; padding: 0 0.3rem; border: 1px solid var(--line); font-size: 0.62rem; white-space: nowrap; }
+.vd-src-stt { color: var(--accent-deep); }
+.vd-src-comment { color: var(--ok); }
+.vd-who { color: var(--ink-muted); }
+.vd-mark { background: var(--accent-deep); color: var(--invert-fg); padding: 0 0.1rem; }
+
+@media (max-width: 60rem) {
+  /* .app-shellがheight:autoになりdocument scrollへ切り替わるため、1frは確定高さを持たない。
+     .vd-stageに明示のmin-block-sizeを与えないとvideoが潰れる。 */
+  .vd-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: visible;
+  }
+  .vd-hits { grid-column: 1; grid-row: 1; max-height: 45vh; border-right: none; border-bottom: 2px solid var(--line); }
+  .vd-player { grid-column: 1; grid-row: 2; }
+  .vd-timeline { grid-column: 1; grid-row: 3; }
+  .vd-stage { min-block-size: 60vh; }
+}
+
+/* 配信者動画: 文字起こしpanel・keyboard hint・hit選択 */
+/* 右列の残り高さを文字起こしとコメントで折半する。flex-basisをautoにすると件数の多い方が
+   中身の高さで押し広げ、もう片方が潰れるので0基準にする。max-block-sizeで頭打ちにすると
+   動画右下に空白が戻るので使わない。 */
+.vd-transcript-block,
+.vd-comment-block { flex: 1 1 0; display: flex; flex-direction: column; gap: 0.2rem; min-block-size: 0; }
+.vd-segments {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+  user-select: none;
+}
+.vd-seg { display: flex; gap: 0.5rem; padding: 0.15rem 0.4rem; font-size: 0.7rem; cursor: pointer; border-block-end: 1px solid rgba(143, 136, 113, 0.25); }
+.vd-seg:hover { background: var(--sand-panel-muted); }
+.vd-seg-t { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.vd-seg-active { color: var(--ink-strong); font-weight: 600; }
+.vd-seg-sel { background: color-mix(in srgb, var(--ok) 30%, var(--sand-panel)); }
+.vd-comments {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--sand-panel);
+}
+.vd-cmt { display: flex; gap: 0.4rem; padding: 0.12rem 0.4rem; font-size: 0.68rem; cursor: pointer; border-block-end: 1px solid rgba(143, 136, 113, 0.25); }
+.vd-cmt:hover { background: var(--sand-panel-muted); }
+/* 名前は行の一部を上限に丸め、本文が読める幅を必ず残す。 */
+.vd-cmt-who { flex: 0 1 auto; max-inline-size: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-cmt-body { flex: 1 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
+.vd-cmt-active { background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel)); color: var(--ink-strong); }
+/* 見どころ登録は行末に置き、hoverするまで淡くして本文の読みを邪魔しない。 */
+.vd-cmt-mark {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: var(--ink-muted);
+  opacity: 0.35;
+  cursor: pointer;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+}
+.vd-cmt:hover .vd-cmt-mark { opacity: 1; }
+.vd-cmt-mark:hover, .vd-cmt-mark:focus-visible { color: var(--accent-deep); opacity: 1; }
+/* メモ入力。行内で余りを取り、窓幅に追従させる(固定幅にしない)。 */
+.vd-memo {
+  flex: 1 1 8rem;
+  min-inline-size: 0;
+  inline-size: 100%;
+  padding: 0.2rem 0.35rem;
+  background: var(--sand-panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.68rem;
+}
+.vd-rate {
+  padding: 0.15rem 0.3rem;
+  background: var(--sand-panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.68rem;
+}
+.vd-keys { font-size: 0.62rem; color: var(--ink-muted); padding-block-start: 0.1rem; }
+.vd-hit-current { outline: 1px solid var(--accent-deep); outline-offset: -1px; }
+
+/* seek bar hoverのサムネイル。spriteの1 tileだけをbackground-positionで見せる。 */
+.vd-heat-wrap { position: relative; }
+.vd-thumb {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 2px;
+  border: 1px solid var(--line);
+  background: var(--invert-bg);
+}
+.vd-thumb.hidden { display: none; }
+.vd-thumb-img { background-repeat: no-repeat; }
+.vd-thumb-time { text-align: center; font-size: 0.6rem; color: var(--invert-fg); }
+.vd-score { margin-inline-start: 0.3rem; color: var(--ink-muted); font-size: 0.6rem; }
+
+/* 焼き込みプレビュー: 縦長の成果物を親幅に収める(固定幅は持たせない) */
+.preview-output { display: flex; justify-content: center; }
+.preview-output img,
+.preview-output video { max-inline-size: 100%; block-size: auto; max-block-size: 70vh; }

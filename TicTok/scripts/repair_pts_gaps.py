@@ -37,7 +37,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tictok.core.config import get_record_dir
+from tictok.core import layout
+from tictok.core.config import get_db_path, record_dir_from_db
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
     ffprobe_available,
@@ -180,20 +181,18 @@ def main() -> int:
         logger.error("ffprobe/ffmpeg not found on PATH; cannot validate or re-mux.")
         return 2
 
-    record_dir = Path(args.record_dir) if args.record_dir else Path(get_record_dir())
+    record_dir = Path(args.record_dir) if args.record_dir else Path(record_dir_from_db(get_db_path()))
     if not record_dir.is_dir():
         logger.error("recordings directory not found: %s", record_dir)
         return 2
 
     repaired = 0
     scanned = 0
-    for hls_dir in sorted(record_dir.iterdir()):
-        if not hls_dir.is_dir():
-            continue
+    for hls_dir in layout.iter_sessions(record_dir):
         segments = _read_playlist(hls_dir)
         if not segments:
             continue
-        mp4_path = record_dir / f"{hls_dir.name}.mp4"
+        mp4_path = layout.mp4_path(record_dir, hls_dir.name)
         if not mp4_path.is_file():
             continue
         scanned += 1
