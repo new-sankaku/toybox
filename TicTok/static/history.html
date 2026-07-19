@@ -20,9 +20,13 @@
         <a href="/overview">全体監視</a>
         <a class="active" href="/history">履歴</a>
         <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
         <a href="/analytics">全体解析</a>
+        <a href="/jobs">job</a>
+        <a href="/ops">運用log</a>
         <a href="/settings">設定</a>
       </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
       <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
     </div>
 
@@ -32,24 +36,31 @@
     <!-- ツールバー: 絞込・並替・出力 -->
     <div class="x-toolbar">
       <input id="flt-search" type="text" placeholder="🔎 配信者 / Memo で絞込" autocomplete="off" />
-      <select id="flt-period">
-        <option value="all">全期間</option>
-        <option value="today">今日</option>
-        <option value="week">今週</option>
-        <option value="month">今月</option>
-      </select>
-      <select id="flt-status">
-        <option value="all">状態: 全て</option>
-        <option value="live">収集中</option>
-        <option value="ended">終了</option>
-      </select>
-      <select id="flt-sort">
-        <option value="started_desc">並替: 開始(新しい順)</option>
-        <option value="started_asc">開始(古い順)</option>
-        <option value="gifts">Gift 多い順</option>
-        <option value="diamonds">コイン 多い順</option>
-        <option value="unique_id">配信者</option>
-      </select>
+      <label class="x-field"><span>期間</span>
+        <select id="flt-period">
+          <option value="all">全期間</option>
+          <option value="today">今日</option>
+          <option value="week">今週</option>
+          <option value="month">今月</option>
+        </select>
+      </label>
+      <label class="x-field"><span>状態</span>
+        <select id="flt-status">
+          <option value="all">全て</option>
+          <option value="live">収集中</option>
+          <option value="ended">終了</option>
+          <option value="restricted">録画不可</option>
+        </select>
+      </label>
+      <label class="x-field"><span>並替</span>
+        <select id="flt-sort">
+          <option value="started_desc">開始(新しい順)</option>
+          <option value="started_asc">開始(古い順)</option>
+          <option value="gifts">Gift 多い順</option>
+          <option value="diamonds">コイン 多い順</option>
+          <option value="unique_id">配信者</option>
+        </select>
+      </label>
       <span class="sp"></span>
       <button id="bulk-del-users" class="btn-danger">ユーザー削除</button>
       <button id="export-csv">表示中をCSV出力</button>
@@ -63,12 +74,12 @@
             <th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th>
             <th class="n">コイン</th><th class="n">Comment</th>
             <th class="n">Like</th><th class="n">Follow</th><th class="n">Share</th><th class="n">入室</th>
-            <th class="n">Battle</th><th class="n">B.Score</th><th class="n">最大同接</th><th>操作</th>
+            <th class="n">Battle</th><th class="n">B.Score</th><th class="n">最大同接</th><th id="op-th">操作</th>
           </tr>
         </thead>
         <tbody id="session-rows"></tbody>
       </table>
-      <div id="session-empty" class="a-empty">保存されたSessionがありません。</div>
+      <div id="session-empty" class="a-empty" data-label="Session一覧">保存されたSessionがありません。</div>
     </div>
 
     <div class="a-footer">
@@ -134,17 +145,19 @@
         <h3 class="result-subtitle">■ AI コメント分析 <span id="ai-status-note" class="result-sub-note"></span></h3>
         <div class="ai-actions">
           <button id="ai-analyze-btn" class="btn btn-primary" disabled>分析する</button>
+          <button id="ai-rerun-btn" class="btn hidden" title="保存済みの結果を捨てて、同じ入力でもう一度ローカルAIに分析させます。">再分析</button>
           <span id="ai-analyze-status" class="form-message"></span>
         </div>
+        <div id="ai-meta" class="chart-note"></div>
         <div id="ai-result" class="ai-result hidden"></div>
       </section>
 
       <!-- 管理: 録画 ｜ Memo -->
-      <div class="detail-grid">
+      <div class="detail-grid detail-grid-manage">
         <section>
           <h3 class="result-subtitle">■ 録画</h3>
           <div class="table-wrap">
-            <table class="result-table">
+            <table class="result-table rec-table">
               <thead>
                 <tr><th>#</th><th>File</th><th>画質</th><th>状態</th><th>時間</th><th>Size</th><th>操作</th></tr>
               </thead>
@@ -172,11 +185,17 @@
     <div class="modal">
       <div class="modal-head">
         <h2 id="transcript-title">文字起こし</h2>
-        <button id="transcript-close" class="modal-close">閉じる ✕</button>
+        <div class="modal-head-actions">
+          <a id="transcript-srt" class="btn btn-small" href="#" download>SRT出力</a>
+          <a id="transcript-vtt" class="btn btn-small" href="#" download>VTT出力</a>
+          <a id="transcript-txt" class="btn btn-small" href="#" download>TXT出力</a>
+          <button id="transcript-close" class="modal-close">閉じる ✕</button>
+        </div>
       </div>
       <div class="modal-body tr-body">
         <video id="transcript-video" class="tr-video" controls playsinline preload="metadata"></video>
-        <div id="transcript-hint" class="tr-hint">行をクリックするとその時刻から再生します。</div>
+        <div id="transcript-hint" class="tr-hint">行をクリックするとその時刻から再生します。字幕fileの時刻は元録画mp4基準です（焼き込み出力・Up出力とは一致しません）。</div>
+        <div id="transcript-warn" class="tr-warn hidden"></div>
         <div id="transcript-segments" class="tr-segments"></div>
       </div>
     </div>

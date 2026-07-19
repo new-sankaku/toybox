@@ -634,8 +634,8 @@ function pkNearestRival(b) {
 // score_series([{t,own,opp}])の直近〜25秒前との符号反転(逆転)だけを見る。優勢/劣勢に
 // 転じた瞬間のみ通知し、差の拡大/縮小は出さない。点が足りない序盤はstable(表示なし)。
 function pkMomentum(b, curGap) {
-  // 個人マルチはscore_seriesがopp=敵陣合算のみで、直近rivalとの逆転を判定できない。
-  // 誤認を避けるため勢い(逆転)は出さない。
+  // 個人マルチはscore_seriesのoppが首位の敵1人ぶんで、直近rival(rank-1)との逆転は
+  // 判定できない。誤認を避けるため勢い(逆転)は出さない。
   if (pkNearestRival(b)) return "stable";
   const series = b.score_series || [];
   if (series.length < 2) return "stable";
@@ -653,12 +653,16 @@ function pkMomentum(b, curGap) {
   return "stable";
 }
 
-// side側の貢献者数。minScore指定時は実効BS(effectiveBs=score、無ければ実弾)がN以上の人だけ
-// 数える。score不明(gift再構成のみ)の貢献者もカードは「BS ○○(推測)」と実弾で表示するため、
-// 100↑判定も実効BSに揃える(表示と数え方の不一致=「BSが見えるのに100↑=0」を防ぐ)。
+// side側の貢献者数。minScore指定時は「N コイン(実弾)以上」を投げた人を数える。100↑=100コイン
+// 以上、というuserの読み(実弾列)と数え方を揃える。自陣は実弾を実測できるので実弾で判定し、
+// 相手陣は別Roomで実弾が取れないため、その場合のみBS(score)を代用する。
+function contribCoins(c) {
+  const dia = c.diamonds || 0;
+  return dia > 0 ? dia : c.score || 0;
+}
 function pkContribCount(b, side, minScore) {
   const min = minScore || 0;
-  return (b.contributions || []).filter((c) => c.side === side && effectiveBs(c) >= min).length;
+  return (b.contributions || []).filter((c) => c.side === side && contribCoins(c) >= min).length;
 }
 
 // スコアの簡易表記: xxx / xx.xK / xxxM(千=K, 百万=M, 小数1桁・末尾.0は省く)。
@@ -761,7 +765,7 @@ function pkComments(b, s, vs) {
 
   // 貢献者数(自/敵)。敵はOpponentRoomListenerが拾えた分のみ(0人あり)。
   out.push(`貢献 自 ${pkContribCount(b, "own")}人 / 敵 ${pkContribCount(b, "opp")}人`);
-  // 100ポイント(バトルスコア)以上の貢献者数。
+  // 100コイン(実弾)以上を投げた貢献者数。
   out.push(`100↑貢献 自 ${pkContribCount(b, "own", 100)}人 / 敵 ${pkContribCount(b, "opp", 100)}人`);
 
   return out.slice(0, 7);

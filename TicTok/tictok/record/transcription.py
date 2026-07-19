@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 from tictok.core.config import (
     get_stt_beam_size,
@@ -16,12 +17,22 @@ from tictok.core.config import (
     get_stt_condition_on_previous_text,
     get_stt_device,
     get_stt_enabled,
+    get_stt_feature_block_frames,
     get_stt_language,
     get_stt_model,
     get_stt_no_repeat_ngram_size,
 )
+from tictok.core.gpu import gpu_slot
+from tictok.record.recorder import ProgressGate
 
 logger = logging.getLogger("tictok.stt")
+
+# Schema version of the gapless->media time map applied to segment times. Stored on
+# every transcript so the population produced by a given mapping is identifiable:
+# transcripts written before the mapping existed carry no version, and a future
+# change to the anchor rules bumps this, which is what makes "which transcripts need
+# re-running" an answerable query instead of a guess.
+TIMEMAP_VERSION = 1
 
 
 class STTError(RuntimeError):
@@ -71,7 +82,13 @@ def _register_cuda_dll_dirs() -> None:
                 try:
                     os.add_dll_directory(bin_dir)
                 except OSError:
-                    logger.warning("could not register CUDA DLL dir: %s", bin_dir, exc_info=True)
+                    logger.warning(
+                        "could not register CUDA DLL dir %s; GPU transcription may fall "
+                        "back to CPU", bin_dir,
+                        extra={"event": "stt.cuda_dll_dir_rejected",
+                               "ctx": {"path": bin_dir}},
+                        exc_info=True,
+                    )
     if bin_dirs:
         existing = os.environ.get("PATH", "")
         new = [d for d in bin_dirs if d not in existing]
@@ -98,6 +115,9 @@ def stt_status() -> dict:
         "model": get_stt_model(),
         "device": get_stt_device(),
         "compute_type": get_stt_compute_type(),
+        # 画面がtranscriptの時刻mapの版を「現行かどうか」で判定できるようにする。
+        # 版が古いtranscriptは字幕のtimecodeがズレるため、書き出し前に警告が要る。
+        "timemap_version": TIMEMAP_VERSION,
     }
 
 
@@ -116,6 +136,93 @@ def _resolve_device_compute() -> tuple:
     return device, compute
 
 
+# faster-whisper's numpy FeatureExtractor computes the STFT of the entire waveform in one
+# array: np.fft.rfft returns complex128, so a 3-hour capture needs a single (1, ~1.1M, 201)
+# complex128 buffer (~3.3 GiB) and raises MemoryError before decoding even starts — the
+# feature step runs on the CPU/numpy path regardless of device, so a GPU model does not help.
+# The log-mel that model.transcribe actually consumes is small (feature_size x n_frames
+# float32); only the transient STFT is huge. We compute that log-mel in frame blocks so the
+# transient buffer is bounded, mirroring FeatureExtractor.__call__ exactly (same reflect
+# padding, hanning window, complex64 magnitudes, mel matmul, global normalization). STFT
+# frames are independent, so the produced features are bit-identical and the transcript is
+# unchanged. No fallback: if the vendored extractor's shape differs from what we mirror, we
+# raise STTError rather than silently degrade.
+_blocked_fe_installed = False
+
+
+def _install_blocked_feature_extractor(model) -> None:
+    global _blocked_fe_installed
+    import numpy as np
+
+    fe = model.feature_extractor
+    required = ("n_fft", "hop_length", "mel_filters", "sampling_rate", "chunk_length")
+    missing = [a for a in required if not hasattr(fe, a)]
+    if missing:
+        raise STTError(
+            "faster-whisper の FeatureExtractor 実装が想定と異なります"
+            f"（不足属性: {missing}）。block化した特徴抽出を安全に適用できません。"
+        )
+
+    base_cls = type(fe)
+    block_frames = get_stt_feature_block_frames()
+    if block_frames < 1:
+        raise STTError(f"TICTOK_STT_FEATURE_BLOCK_FRAMES は1以上にしてください（現在 {block_frames}）。")
+
+    class _BlockedFeatureExtractor(base_cls):
+        # Overrides only __call__; every other attribute/method is inherited unchanged so
+        # transcribe()'s use of sampling_rate/hop_length/nb_max_frames/time_per_frame holds.
+        def __call__(self, waveform, padding=160, chunk_length=None):
+            if chunk_length is not None:
+                # Preserve the side effect the original relies on for the batched path.
+                self.n_samples = chunk_length * self.sampling_rate
+                self.nb_max_frames = self.n_samples // self.hop_length
+            if waveform.dtype is not np.float32:
+                waveform = waveform.astype(np.float32)
+            if padding:
+                waveform = np.pad(waveform, (0, padding))
+            n_fft = self.n_fft
+            hop = self.hop_length
+            window = np.hanning(n_fft + 1)[:-1].astype("float32")
+            # Mirror FeatureExtractor.stft framing: center=True reflect-pad then strided frames.
+            x = np.expand_dims(waveform, 0)
+            pad_amount = n_fft // 2
+            x = np.pad(x, ((0, 0), (pad_amount, pad_amount)), mode="reflect")
+            length = x.shape[1]
+            n_frames = 1 + (length - n_fft) // hop
+            # The original drops the final STFT frame (magnitudes = abs(stft[..., :-1]) ** 2).
+            use_frames = n_frames - 1
+            if use_frames < 1:
+                raise STTError("音声が短すぎて文字起こしできません。")
+            frames = np.lib.stride_tricks.as_strided(
+                x, (1, n_frames, n_fft), (x.strides[0], hop * x.strides[1], x.strides[1])
+            )
+            # Fill the full magnitudes array (small float32, unlike the complex128 STFT) in
+            # blocks, then run the mel matmul once over the whole array exactly as the
+            # original does. Blocking only the transient rfft — not the matmul — keeps the
+            # BLAS reduction order identical, so the log-mel is bit-identical to the original.
+            magnitudes = np.empty((n_fft // 2 + 1, use_frames), dtype=np.float32)
+            for i in range(0, use_frames, block_frames):
+                j = min(i + block_frames, use_frames)
+                spec = np.fft.rfft(frames[0, i:j, :] * window, n=n_fft, axis=-1).astype("complex64")
+                magnitudes[:, i:j] = (np.abs(spec) ** 2).T
+            mel_spec = self.mel_filters @ magnitudes
+            log_spec = np.log10(np.clip(mel_spec, a_min=1e-10, a_max=None))
+            log_spec = np.maximum(log_spec, log_spec.max() - 8.0)
+            log_spec = (log_spec + 4.0) / 4.0
+            return log_spec
+
+    # Retype the existing instance so all loaded state (mel_filters, etc.) is preserved.
+    fe.__class__ = _BlockedFeatureExtractor
+    if not _blocked_fe_installed:
+        logger.info(
+            "blocked feature extractor installed (block_frames=%d)", block_frames,
+            extra={"event": "stt.feature_extractor_installed",
+                   "ctx": {"block_frames": block_frames,
+                           "extractor": base_cls.__name__}},
+        )
+        _blocked_fe_installed = True
+
+
 def _get_model():
     if not get_stt_enabled():
         raise STTError("STTが無効です（TICTOK_STT_ENABLED=1 を設定してください）。")
@@ -132,12 +239,32 @@ def _get_model():
     global _model, _model_key
     with _model_lock:
         if _model is None or _model_key != key:
-            logger.info("loading whisper model: %s device=%s compute=%s", model_name, device, compute)
+            started = time.monotonic()
+            logger.info(
+                "loading whisper model: %s device=%s compute=%s", model_name, device, compute,
+                extra={"event": "stt.model_load_started",
+                       "ctx": {"model": model_name, "device": device, "compute": compute}},
+            )
             try:
                 _model = WhisperModel(model_name, device=device, compute_type=compute)
             except Exception as exc:
+                logger.error(
+                    "could not load the whisper model %s on %s", model_name, device,
+                    extra={"event": "stt.model_load_failed",
+                           "ctx": {"model": model_name, "device": device,
+                                   "compute": compute,
+                                   "duration_ms": int((time.monotonic() - started) * 1000)}},
+                    exc_info=True,
+                )
                 raise STTError(f"STT modelの読み込みに失敗しました: {exc}") from exc
+            _install_blocked_feature_extractor(_model)
             _model_key = key
+            logger.info(
+                "whisper model ready: %s on %s (%s)", model_name, device, compute,
+                extra={"event": "stt.model_loaded",
+                       "ctx": {"model": model_name, "device": device, "compute": compute,
+                               "duration_ms": int((time.monotonic() - started) * 1000)}},
+            )
     return _model
 
 
@@ -164,6 +291,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
     import av
     import numpy as np
 
+    started = time.monotonic()
     resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=sampling_rate)
     raw_buffer = io.BytesIO()
     dtype = None
@@ -171,9 +299,19 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
     anchor_gapless: list = []
     anchor_media: list = []
     last_delta = None
+    # Corrupt frames are skipped (as faster-whisper's own decoder does) but counted:
+    # each one is audio that exists in the container and not in the waveform, i.e. a
+    # direct contributor to the gapless/media divergence this map corrects. Without a
+    # count, a transcript that drifted badly is indistinguishable from one that did not.
+    invalid_frames_skipped = 0
     try:
         container = av.open(path, mode="r", metadata_errors="ignore")
     except Exception as exc:
+        logger.error(
+            "could not open %s for transcription", os.path.basename(path),
+            extra={"event": "stt.audio_open_failed", "ctx": {"path": path}},
+            exc_info=True,
+        )
         raise STTError(f"音声の読み込みに失敗しました: {exc}") from exc
     with container:
         stream = container.streams.audio[0]
@@ -188,6 +326,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
             except av.error.InvalidDataError:
                 # Skip a corrupt frame exactly as faster-whisper's decoder does, so the
                 # sample total (and thus the gapless axis) stays identical to its output.
+                invalid_frames_skipped += 1
                 continue
             if frame.pts is not None:
                 media = frame.pts * time_base
@@ -213,7 +352,33 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
         # Close the map at the true end so interpolation covers the final run.
         anchor_gapless.append(gapless)
         anchor_media.append(gapless + last_delta)
-    return audio, anchor_gapless, anchor_media
+    # drift_seconds is the whole point of this pass: how far the end of the gapless
+    # waveform sits behind the container timeline the player seeks by. It is also the
+    # field that identifies which stored transcripts were produced from a drifting
+    # source and therefore need re-running when the mapping changes.
+    drift_seconds = round(anchor_media[-1] - anchor_gapless[-1], 3) if anchor_gapless else 0.0
+    logger.info(
+        "decoded %.1fs of audio from %s (%d timemap anchors, %.3fs drift)",
+        gapless, os.path.basename(path), len(anchor_gapless), drift_seconds,
+        extra={"event": "stt.audio_decoded",
+               "ctx": {"path": path, "anchors": len(anchor_gapless),
+                       "drift_seconds": drift_seconds,
+                       "timemap_version": TIMEMAP_VERSION,
+                       "invalid_frames_skipped": invalid_frames_skipped,
+                       "gapless_seconds": round(gapless, 3),
+                       "duration_ms": int((time.monotonic() - started) * 1000)}},
+    )
+    if invalid_frames_skipped:
+        logger.warning(
+            "skipped %d corrupt audio frame(s) while decoding %s; the transcript covers "
+            "less audio than the container holds",
+            invalid_frames_skipped, os.path.basename(path),
+            extra={"event": "stt.invalid_frames_skipped",
+                   "ctx": {"path": path,
+                           "invalid_frames_skipped": invalid_frames_skipped,
+                           "drift_seconds": drift_seconds}},
+        )
+    return audio, anchor_gapless, anchor_media, drift_seconds
 
 
 def _media_time(anchor_gapless: list, anchor_media: list, t: float) -> float:
@@ -242,15 +407,24 @@ def transcribe(path: str, on_progress=None) -> dict:
     language = get_stt_language() or None
     out_segments = []
     texts = []
-    with _transcribe_lock:
+    started = time.monotonic()
+    gate = ProgressGate()
+    # The private lock keeps concurrent decodes off the shared CTranslate2 model; the
+    # process-wide slot keeps this decode off the GPU while a burn-in or Up出力 owns it.
+    with gpu_slot("stt"), _transcribe_lock:
         # Decode ourselves so segment times can be restored onto the media/container
         # timeline; the waveform is bit-identical to faster-whisper's own decode, so the
         # transcript text is unaffected. See _decode_audio_with_media_map.
         try:
-            audio, anchor_gapless, anchor_media = _decode_audio_with_media_map(path)
+            audio, anchor_gapless, anchor_media, drift_seconds = _decode_audio_with_media_map(path)
         except STTError:
             raise
         except Exception as exc:
+            logger.error(
+                "audio decode failed for %s", os.path.basename(path),
+                extra={"event": "stt.audio_decode_failed", "ctx": {"path": path}},
+                exc_info=True,
+            )
             raise STTError(f"文字起こしに失敗しました: {exc}") from exc
         try:
             segments, info = model.transcribe(
@@ -262,6 +436,14 @@ def transcribe(path: str, on_progress=None) -> dict:
                 no_repeat_ngram_size=get_stt_no_repeat_ngram_size(),
             )
         except Exception as exc:
+            logger.error(
+                "whisper decoding failed for %s", os.path.basename(path),
+                extra={"event": "stt.transcribe_failed",
+                       "ctx": {"path": path, "model": get_stt_model(),
+                               "language": language,
+                               "duration_ms": int((time.monotonic() - started) * 1000)}},
+                exc_info=True,
+            )
             raise STTError(f"文字起こしに失敗しました: {exc}") from exc
         # info.duration is the gapless decoded length; progress ratios stay in that
         # domain (both numerator and denominator gapless), while emitted segment times
@@ -283,10 +465,50 @@ def transcribe(path: str, on_progress=None) -> dict:
                 texts.append(raw)
             if on_progress and gapless_total > 0:
                 on_progress(segment.end, gapless_total)
+            if gapless_total > 0:
+                percent = 100.0 * min(segment.end, gapless_total) / gapless_total
+                if gate.due(percent):
+                    elapsed = time.monotonic() - started
+                    logger.info(
+                        "transcribing %s: %.0f/%.0fs of audio (%.1f%%), %d segment(s)",
+                        os.path.basename(path), segment.end, gapless_total,
+                        percent, len(out_segments),
+                        extra={"event": "stt.progress_reported",
+                               "ctx": {"path": path, "percent": round(percent, 2),
+                                       "audio_seconds": round(segment.end, 1),
+                                       "gapless_seconds": round(gapless_total, 1),
+                                       "segments": len(out_segments),
+                                       "realtime_factor": round(segment.end / elapsed, 3) if elapsed > 0 else None,
+                                       "duration_ms": int(elapsed * 1000)}},
+                    )
+    elapsed = time.monotonic() - started
+    logger.info(
+        "transcribed %s: %d segment(s) over %.0fs of audio",
+        os.path.basename(path), len(out_segments), media_total or gapless_total,
+        extra={"event": "stt.transcribed",
+               "ctx": {"path": path, "model": get_stt_model(),
+                       "language": getattr(info, "language", language) or "",
+                       "segments": len(out_segments),
+                       "characters": len("".join(texts)),
+                       "anchors": len(anchor_gapless),
+                       "drift_seconds": drift_seconds,
+                       "timemap_version": TIMEMAP_VERSION,
+                       "gapless_seconds": round(gapless_total, 3),
+                       "media_seconds": round(media_total, 3) if media_total else None,
+                       "realtime_factor": round(gapless_total / elapsed, 3) if elapsed > 0 else None,
+                       "duration_ms": int(elapsed * 1000)}},
+    )
     return {
         "text": "".join(texts).strip(),
         "segments": out_segments,
         "language": getattr(info, "language", language) or "",
         "duration": round(media_total, 2) if media_total else gapless_total,
         "model": get_stt_model(),
+        # Carried into the transcripts row (see Storage.save_transcript): these three
+        # identify the time mapping a stored transcript was produced under, which is
+        # what makes "select the transcripts that must be re-run" a query rather than a
+        # re-transcription of everything.
+        "timemap_version": TIMEMAP_VERSION,
+        "timemap_anchors": len(anchor_gapless),
+        "timemap_drift_seconds": drift_seconds,
     }

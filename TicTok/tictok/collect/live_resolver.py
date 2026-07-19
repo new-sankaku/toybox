@@ -125,7 +125,14 @@ class BrowserLiveResolver:
             locale=get_locale_lang_country(),
             timezone_id=get_locale_tz(),
         )
-        logger.info("browser live resolver started (headless=%s)", get_resolver_headless())
+        logger.info(
+            "browser live resolver started (headless=%s)", get_resolver_headless(),
+            extra={"event": "collector.resolver_started",
+                   "ctx": {"headless": get_resolver_headless(),
+                           "locale": get_locale_lang_country(),
+                           "timezone": get_locale_tz(),
+                           "timeout_ms": get_resolver_timeout_ms()}},
+        )
 
     async def close(self) -> None:
         for closer, label in (
@@ -138,9 +145,19 @@ class BrowserLiveResolver:
                 if result is not None:
                     await result
             except Exception:
-                logger.warning("failed to close %s", label, exc_info=True)
+                # 閉じ残しはprocess終了で回収されるが、shutdownが遅い/chromiumが残る
+                # 原因になるので無音にはしない。
+                logger.warning(
+                    "failed to close the resolver's %s; a chromium process may be left "
+                    "behind", label, exc_info=True,
+                    extra={"event": "collector.resolver_close_failed",
+                           "ctx": {"component": label}},
+                )
         self._context = self._browser = self._playwright = None
-        logger.info("browser live resolver stopped")
+        logger.info(
+            "browser live resolver stopped",
+            extra={"event": "collector.resolver_stopped", "ctx": {}},
+        )
 
     async def resolve(self, unique_id: str) -> LiveResolution:
         """Resolve live state for a user. See :func:`interpret_live_state`.
@@ -165,7 +182,12 @@ class BrowserLiveResolver:
                     # No SIGI_STATE within the window: most often the WAF
                     # challenge has not resolved. Fall through to read whatever
                     # state the page exposes so interpret_live_state can classify.
-                    logger.debug("SIGI_STATE wait timed out for %s", unique_id, exc_info=True)
+                    logger.debug(
+                        "SIGI_STATE did not attach within %dms for @%s; reading whatever "
+                        "the page exposes", timeout, unique_id, exc_info=True,
+                        extra={"event": "collector.resolver_sigi_timed_out",
+                               "ctx": {"target_unique_id": unique_id, "timeout_ms": timeout}},
+                    )
                 data = await page.evaluate(_EXTRACT_JS)
             except UserNotFoundError:
                 raise
@@ -177,8 +199,23 @@ class BrowserLiveResolver:
                 try:
                     await page.close()
                 except Exception:
-                    logger.debug("page close skipped", exc_info=True)
+                    logger.debug(
+                        "resolver page close failed for @%s", unique_id, exc_info=True,
+                        extra={"event": "collector.resolver_page_close_failed",
+                               "ctx": {"target_unique_id": unique_id}},
+                    )
         room_id = interpret_live_state(data, unique_id)
+        # probeごとの結果。全監視×poll間隔の最高頻度pathなので level guard で抑える。
+        # DEBUG時は「いつ・どのroomが・どう見えたか」を1件ずつ辿れる。
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "live state resolved for @%s: room_id=%s", unique_id, room_id,
+                extra={"event": "collector.live_state_resolved",
+                       "ctx": {"target_unique_id": unique_id, "room_id": room_id,
+                               "status": data.get("status"),
+                               "waf": bool(data.get("waf")),
+                               "has_avatar": bool(data.get("avatar"))}},
+            )
         return LiveResolution(
             room_id=room_id,
             avatar=str(data.get("avatar") or ""),

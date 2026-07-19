@@ -4,6 +4,7 @@ driven (see config.py) so no provider/model is hard-coded. AI is opt-in and ther
 no fallback: when disabled, unconfigured or unreachable this raises AIError and the
 caller surfaces it as "unavailable" rather than fabricating a result."""
 
+import hashlib
 import json
 import logging
 
@@ -23,6 +24,33 @@ logger = logging.getLogger("tictok.ai")
 
 class AIError(RuntimeError):
     """AI機能が無効・未設定・到達不能、または応答が不正なときに送出する。"""
+
+
+# 保存済み結果を再利用してよいかの判定に使うprompt版。system prompt・schema・組み立てを
+# 変えたら必ず+1すること。+1しない限り、新しいpromptで得られるはずの結果が古いcacheで
+# 隠れ続ける(model名とprompt版と入力指紋の3つが一致したときだけcacheを返す)。
+COMMENT_PROMPT_VERSION = 1
+REVIEW_PROMPT_VERSION = 1
+
+# ai_analysis表のkind/target_type。DBのkeyなので画面・APIの文言とは分けて固定する。
+KIND_COMMENT = "comment_analysis"
+KIND_STREAMER_REVIEW = "streamer_review"
+TARGET_SESSION = "session"
+TARGET_STREAMER = "streamer"
+
+
+def input_signature(payload) -> str:
+    """LLMへ渡す入力の指紋。これが変わらない限り再実行しても同じ入力なのでcacheを返す。
+    sort_keysで辞書順を固定し、dict構築順の違いで指紋が変わらないようにする。"""
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def comment_sample(comments: list) -> list:
+    """analyze_commentsが実際にmodelへ渡す整形済みsample。指紋はこの結果から取る
+    (整形前のlistで指紋を取ると、空白だけの差でcacheが外れる)。"""
+    cleaned = [c.strip().replace("\n", " ") for c in comments if c and c.strip()]
+    return cleaned[-get_ai_comment_sample():]
 
 
 def ai_status() -> dict:
@@ -157,10 +185,9 @@ async def analyze_comments(comments: list) -> dict:
         raise AIError("AI機能が無効です（TICTOK_AI_ENABLED=1 を設定してください）。")
     if not get_ai_model():
         raise AIError("AI modelが未設定です（TICTOK_AI_MODEL を設定してください）。")
-    cleaned = [c.strip().replace("\n", " ") for c in comments if c and c.strip()]
+    cleaned = comment_sample(comments)
     if not cleaned:
         raise AIError("分析できるコメントがありません。")
-    cleaned = cleaned[-get_ai_comment_sample() :]
     content = await _chat(_build_messages(cleaned))
     data = _extract_json(content)
     logger.info("comment analysis done: %d comments, model=%s", len(cleaned), get_ai_model())

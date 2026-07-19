@@ -41,16 +41,69 @@ function fmtNum(value) {
   return Number(value || 0).toLocaleString("ja-JP");
 }
 
+// Serverのerror detailは2種類が混ざる。app自身が利用者向けに書いた日本語の説明と、
+// FastAPIの既定error(routeが無いときの "Not Found" 等)やPython例外のstr()で出る英語。
+// 後者をそのまま画面へ出すと日本語UIの中に意味の取れない生文言が並ぶため、statusから
+// 引いた日本語に置き換え、生文言はerrorのdetailに残してtooltip/consoleから辿れるようにする。
+const HTTP_ERROR_TEXT = {
+  400: "Requestの内容が不正です。",
+  401: "この操作には認証が必要です。",
+  403: "この操作は許可されていません。",
+  404: "対象が見つかりませんでした（Serverのcodeが古い可能性があります）。",
+  405: "この操作をServerが受け付けていません。",
+  409: "他の処理と競合したため実行できませんでした。",
+  422: "入力値をServerが受け付けませんでした。",
+  500: "Server内部でErrorが発生しました。",
+  502: "外部からの取得に失敗しました。",
+  503: "Serverが一時的に応答できません。",
+  504: "Serverの応答が時間内に返りませんでした。",
+};
+
+function hasJapanese(text) {
+  return /[぀-ヿ㐀-鿿！-ﾟ]/.test(text);
+}
+
+function httpError(status, detail) {
+  const raw = typeof detail === "string" ? detail.trim() : "";
+  const passthrough = raw && hasJapanese(raw);
+  const message = passthrough
+    ? raw
+    : (HTTP_ERROR_TEXT[status] || `Serverが処理できませんでした（HTTP ${status}）。`);
+  // 画面へ出さなかった生文言はconsoleに残す。alertのように後から辿れない出し方をする
+  // 呼び出し元でも、原因の特定に必要な情報が消えないようにする。
+  if (!passthrough) console.warn(`API error: HTTP ${status}${raw ? ` / ${raw}` : ""}`);
+  const err = new Error(message);
+  err.status = status;
+  err.detail = raw;
+  return err;
+}
+
+function errorDetailText(err) {
+  if (!err) return "";
+  const parts = [];
+  if (err.status) parts.push(`HTTP ${err.status}`);
+  const raw = err.detail || err.message || "";
+  if (raw) parts.push(raw);
+  return parts.join(" / ");
+}
+
 async function apiSend(method, path, body) {
-  const res = await fetch(path, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    const err = new Error("Serverへ接続できませんでした。");
+    err.status = 0;
+    err.detail = String((e && e.message) || e);
+    throw err;
+  }
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}));
-    const detail = payload.detail;
-    throw new Error(typeof detail === "string" ? detail : "Requestに失敗しました。");
+    throw httpError(res.status, payload.detail);
   }
   return res.json();
 }
@@ -122,6 +175,7 @@ const MARKER_STYLES = {
   connect: { color: "#4d4a3f", short: "接続" },
   reconnect: { color: "#9b8c52", short: "再接続" },
   disconnect: { color: "#8a4b4b", short: "切断" },
+  disconnect_unplanned: { color: "#7a2f2f", short: "異常切断" },
   live_end: { color: "#8a4b4b", short: "終了" },
 };
 const MARKER_DEFAULT = { color: "#a4502f", short: "•" };
@@ -531,6 +585,9 @@ function participantUser(p, owner) {
 
 // Group participants into teams (own team(s) first). team_id from the proto is the
 // authoritative grouping key; side is the fallback for legacy data.
+// battle.typeはbackend(tictok/core/battle.py)がparticipantsのteam_idから導出する。
+// TikTokは個人マルチ(1:1:1)も「1人陣営×N」のteam構造で送るため、team構造の有無では
+// チーム戦と区別できず、typeが"team"なのは実チーム戦(陣営に2人以上)の時だけになる。
 function battleTeams(parts) {
   const groups = new Map();
   parts.forEach((p) => {
@@ -609,6 +666,16 @@ function buildBattleHead(battle, ordinal) {
   const res = document.createElement("span");
   res.className = "res " + meta.cls;
   res.textContent = meta.text;
+  // 勝敗はbackend(tictok/core/battle.py)がPK確定時点で判定した値。TikTokから最後に届いた
+  // スコアはPK後に相手が枠から抜けた後のもので、勝敗が反転している場合があるため、
+  // 食い違うときだけ元の値を注記する(全体解析の勝敗と必ず一致する)。
+  if (battle.result_basis === "settled" && battle.result_reported !== battle.result) {
+    res.title =
+      `PK確定時点（${fmtNum(battle.own_score || 0)} 対 ${fmtNum(battle.opp_score || 0)}）の判定です。`
+      + ` TikTokから最後に届いたスコアは ${fmtNum(battle.own_score_reported || 0)} 対 `
+      + `${fmtNum(battle.opp_score_reported || 0)}（${battleResultMeta(battle.result_reported).text}）ですが、`
+      + `これはPK終了後に相手が枠から抜けた後の値です。`;
+  }
   head.append(id, mode, when, res);
   return head;
 }
@@ -759,32 +826,29 @@ function groupContribsByHost(battle, topo) {
 function fmtBs(value) {
   return (value || 0) > 0 ? fmtNum(value) : "—";
 }
-// カード表示「BS」に相当する実効値: 本物のBS(score)があればそれ、無ければ実弾(推測BS)。
-// fmtBsCoins の表示と、pkContribCount の100↑判定を同じ基準に揃え、表示と数え方を一致させる。
+// カード表示「BS」に相当する実効値。BS(バトルスコア=PKポイント)は倍率で膨らむため実弾(コイン)を
+// 必ず上回る。実弾を下回るBSはarmies snapshotの取りこぼし等のデータ欠損なので、実弾をBSとみなす
+// (=max)。本物のscoreが無い/実弾未満の代用値は確定BSではないため bsEstimated で(推測)を付す。
 function effectiveBs(c) {
-  const score = c.score || 0;
-  return score > 0 ? score : c.diamonds || 0;
+  return Math.max(c.score || 0, c.diamonds || 0);
+}
+// 実弾から代用したBS(=score欠落 or score<実弾)はtrue。表示で(推測)を明示する。
+function bsEstimated(c) {
+  return (c.score || 0) < (c.diamonds || 0);
 }
 function fmtBsCoins(c) {
-  const score = c.score || 0;
   const dia = c.diamonds || 0;
-  // BS未取得(score 0)だが実弾ありの貢献者は、TikTokがPK内訳(armies)を送らなかった人。
-  // 実弾を推測BSとして併記し「推測」を明示する。BSと実弾は単位/係数が異なり正確な
-  // 換算は不能なため、これは確定値ではなく推測である旨を表示で必ず示す。
-  if (score <= 0 && dia > 0) {
-    return `BS ${fmtNum(dia)}(推測) / 実弾 ${fmtNum(dia)}`;
-  }
-  return `BS ${fmtBs(score)} / 実弾 ${fmtBs(dia)}`;
+  const bs = effectiveBs(c);
+  const bsText = bs > 0 ? (bsEstimated(c) ? `${fmtNum(bs)}(推測)` : fmtNum(bs)) : "—";
+  return `BS ${bsText} / 実弾 ${fmtBs(dia)}`;
 }
 
-// 貢献者テーブルのBS列。本物のBS(score)があればそれ、無ければ実弾からの推測を明示、
+// 貢献者テーブルのBS列。実弾以上に補正した実効BSを出し、代用値は(推測)を明示、
 // どちらも無ければ—。実弾列は fmtBs(diamonds) で別列に分ける。
 function bsCellText(c) {
-  const score = c.score || 0;
-  const dia = c.diamonds || 0;
-  if (score > 0) return fmtNum(score);
-  if (dia > 0) return `${fmtNum(dia)}(推測)`;
-  return "—";
+  const bs = effectiveBs(c);
+  if (bs <= 0) return "—";
+  return bsEstimated(c) ? `${fmtNum(bs)}(推測)` : fmtNum(bs);
 }
 
 // 1配信者(host)ぶんの貢献: ヘッダ(配信者 + BS/実弾合計 + 貢献者N人) + 送信者一覧。
@@ -957,6 +1021,28 @@ function isMeaningfulMission(m) {
   );
 }
 
+// ミッション種別の文言。TikTokはStarling key(pm_mt_*)しか配信せず文言自体はeventに載らないため、
+// key -> 表示文言をここで持つ(差し込み値は event 実値の progress_target)。焼き込み側の
+// video_overlay._BONUS_TASK_TEXT と同一の文言に揃える。
+const BONUS_TASK_TEXT = {
+  pm_mt_live_match_instructions_2: (n) => `ギフト${n}個`,
+  pm_mt_live_match_instructions_gifter_1: (n) => `指定ギフト${n}個`,
+  pm_mt_match_sp_team_gifter: (n) => `チーム 指定ギフト${n}個`,
+  pm_mt_match_sp_team_point: (n) => `チーム ${n}ポイント`,
+};
+
+// 達成条件の文言。種別を運ぶのは prompt key だけなので、key を持たない旧recordや
+// 未知keyでは種別を名乗らず空を返す(呼び出し側は条件を伏せた汎用表示へ落とす)。
+function bonusTaskLabel(m) {
+  for (const p of m.prompts || []) {
+    const make = BONUS_TASK_TEXT[p.key];
+    if (!make) continue;
+    const n = (p.fields || {}).multi;
+    return n ? make(n) : "";
+  }
+  return "";
+}
+
 function buildBonusMission(m) {
   const box = document.createElement("div");
   box.className = "dbonus";
@@ -973,9 +1059,10 @@ function buildBonusMission(m) {
   // フェーズ(予告→ミッション→倍率)を帯で
   const phases = document.createElement("div");
   phases.className = "dbonus-ph";
+  const task = bonusTaskLabel(m) || "ミッション";
   const taskLabel = m.progress_target
-    ? `ミッション ${m.task_duration || "?"}s・${m.achieved ? "達成✅" : `${m.progress}/${m.progress_target}`}`
-    : `ミッション ${m.task_duration || "?"}s`;
+    ? `${task} ${m.task_duration || "?"}s・${m.achieved ? "達成✅" : `${m.progress}/${m.progress_target}`}`
+    : `${task} ${m.task_duration || "?"}s`;
   phases.append(
     phaseSpan(`予告`, "ph-prev"),
     phaseSpan(taskLabel, "ph-task"),
@@ -1273,7 +1360,71 @@ function userCell(user, opts = {}) {
   return wrap;
 }
 
-function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols) {
+// 表の操作列に入りきらないButtonをまとめるoverflow menu。
+// 表は.table-wrap(overflow:auto)の中にあるため、absoluteのmenuはscroll枠でclipされる。
+// position:fixedでviewport基準に出し、開いた時のButton位置から座標を決める。
+let openRowMenu = null;
+
+function closeRowMenu() {
+  if (!openRowMenu) return;
+  openRowMenu.remove();
+  openRowMenu = null;
+}
+
+document.addEventListener("click", (ev) => {
+  if (openRowMenu && !openRowMenu.contains(ev.target) && !ev.target.closest(".row-menu-toggle")) {
+    closeRowMenu();
+  }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") closeRowMenu();
+});
+window.addEventListener("resize", closeRowMenu);
+document.addEventListener("scroll", closeRowMenu, true);
+
+// items: [{ label, title, danger, disabled, onSelect }]。返り値は操作列へ入れるtoggle Button。
+function rowMenu(items, opts) {
+  const options = opts || {};
+  const toggle = document.createElement("button");
+  toggle.className = "btn btn-small row-menu-toggle";
+  toggle.textContent = options.label || "その他 ⋯";
+  toggle.title = options.title || "その他の操作";
+  toggle.addEventListener("click", () => {
+    const wasOpenFor = openRowMenu && openRowMenu.dataset.owner === String(toggle.dataset.menuId);
+    closeRowMenu();
+    if (wasOpenFor) return;
+    toggle.dataset.menuId = String(Date.now()) + String(Math.random());
+    const menu = document.createElement("div");
+    menu.className = "row-menu";
+    menu.dataset.owner = toggle.dataset.menuId;
+    items.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.className = "row-menu-item" + (item.danger ? " row-menu-item-danger" : "");
+      btn.textContent = item.label;
+      if (item.title) btn.title = item.title;
+      btn.disabled = Boolean(item.disabled);
+      btn.addEventListener("click", () => {
+        closeRowMenu();
+        item.onSelect();
+      });
+      menu.appendChild(btn);
+    });
+    document.body.appendChild(menu);
+    const rect = toggle.getBoundingClientRect();
+    const size = menu.getBoundingClientRect();
+    const left = Math.max(4, Math.min(rect.right - size.width, window.innerWidth - size.width - 4));
+    const below = rect.bottom + 2;
+    const top = below + size.height > window.innerHeight ? Math.max(4, rect.top - size.height - 2) : below;
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    openRowMenu = menu;
+  });
+  return toggle;
+}
+
+// onRow(tr, row, index) は任意。行に属性やevent(行dblclick等)を付ける用途で呼ぶ。
+function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
+  closeRowMenu();
   const tbody = document.getElementById(tbodyId);
   const empty = document.getElementById(emptyId);
   tbody.innerHTML = "";
@@ -1288,6 +1439,176 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols) {
       else td.textContent = cell;
       tr.appendChild(td);
     });
+    if (onRow) onRow(tr, row, i);
     tbody.appendChild(tr);
   });
+}
+
+// ---- 一覧placeholderの3状態 ----
+// 「読み込み中」「0件」「取得失敗」は必ず描き分ける。取得できなかったものを0件として
+// 描くのは、存在しない事実(記録が無かった)の提示にあたる。
+// 失敗時の文言は要素の data-label(例: 運用log)から組み立て、生のServer文言はtooltipと
+// consoleにだけ残す。
+const LIST_LOADING_TEXT = "読み込み中…";
+
+function listStateReset(el) {
+  if (el.dataset.emptyText === undefined) el.dataset.emptyText = el.textContent;
+  el.classList.remove("list-loading", "list-failed");
+  el.removeAttribute("title");
+}
+
+function setListState(el, state, err) {
+  if (!el) return;
+  listStateReset(el);
+  if (state === "ok") {
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  if (state === "loading") {
+    el.classList.add("list-loading");
+    el.textContent = LIST_LOADING_TEXT;
+    return;
+  }
+  if (state === "failed") {
+    el.classList.add("list-failed");
+    el.textContent =
+      `${el.dataset.label || "Data"}を取得できませんでした（0件という意味ではありません）。`;
+    el.title = errorDetailText(err);
+    console.warn(`${el.id || "list"}: ${errorDetailText(err)}`, err);
+    return;
+  }
+  el.textContent = el.dataset.emptyText;
+}
+
+// 0件の理由が状況で変わる一覧(検索前・対象未選択など)向け。取得失敗ではないので
+// 失敗の見た目とtooltipは落とす。
+function setListMessage(el, text) {
+  if (!el) return;
+  listStateReset(el);
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+// ---- 空き容量バー(全画面共通のトップバー) ----
+// 出力を拒否する下限を下回ったvolumeは警告表示にする。閾値はserverの設定
+// (disk_min_free_gb)が唯一の出所で、画面側は判定を持たない。
+const DISK_POLL_MS = 60000;
+
+function fmtGb(bytes) {
+  return (Number(bytes || 0) / (1024 * 1024 * 1024)).toFixed(1);
+}
+
+function renderDiskBar(container, data) {
+  container.innerHTML = "";
+  const volumes = (data && data.volumes) || {};
+  const low = new Set((data && data.low_volumes) || []);
+  const names = Object.keys(volumes).sort();
+  if (!names.length) {
+    const empty = document.createElement("span");
+    empty.className = "d-empty";
+    empty.textContent = "空き容量: 不明";
+    container.appendChild(empty);
+    return;
+  }
+  const floorGb = fmtGb((data && data.min_free_bytes) || 0);
+  names.forEach((name) => {
+    const info = volumes[name];
+    const used = info.total_bytes ? (info.total_bytes - info.free_bytes) / info.total_bytes : 0;
+    const item = document.createElement("div");
+    item.className = low.has(name) ? "d-vol low" : "d-vol";
+    item.title = `${info.path}\n空き ${fmtGb(info.free_bytes)}GB / 全体 ${fmtGb(info.total_bytes)}GB`
+      + (Number(data.min_free_bytes) > 0 ? `\n出力を拒否する下限 ${floorGb}GB` : "");
+    const label = document.createElement("span");
+    label.className = "l";
+    label.textContent = name;
+    const track = document.createElement("span");
+    track.className = "track";
+    const fill = document.createElement("span");
+    fill.className = "fill";
+    fill.style.width = `${Math.min(100, Math.max(0, used * 100)).toFixed(1)}%`;
+    track.appendChild(fill);
+    const value = document.createElement("span");
+    value.className = "v";
+    value.textContent = `${fmtGb(info.free_bytes)}GB`;
+    item.append(label, track, value);
+    container.appendChild(item);
+  });
+}
+
+function showDiskUnavailable(container) {
+  container.innerHTML = "";
+  const err = document.createElement("span");
+  err.className = "d-empty";
+  err.textContent = "空き容量: 取得失敗";
+  container.appendChild(err);
+}
+
+async function loadDiskBar() {
+  const container = document.getElementById("disk-bar");
+  if (!container) return;
+  let data = null;
+  try {
+    const res = await fetch("/api/disk");
+    if (!res.ok) throw new Error(String(res.status));
+    data = await res.json();
+  } catch (e) {
+    showDiskUnavailable(container);
+    return;
+  }
+  renderDiskBar(container, data);
+}
+
+if (document.getElementById("disk-bar")) {
+  loadDiskBar();
+  setInterval(loadDiskBar, DISK_POLL_MS);
+}
+
+// ---- 運用logのerror badge(全画面共通のnav) ----
+// 直近の窓(serverの設定が唯一の出所)にerrorが何件あるかをnavの「運用log」へ添える。
+// 照会に失敗したときは0件ではなく「?」を出す。取得できていないことを0件として描くと、
+// 「何も壊れていない」という嘘の表示になる。
+const OPS_BADGE_POLL_MS = 60000;
+
+function opsBadgeElement() {
+  const link = document.querySelector('.a-nav a[href="/ops"]');
+  if (!link) return null;
+  let badge = link.querySelector(".nav-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-badge";
+    link.appendChild(badge);
+  }
+  return badge;
+}
+
+async function loadOpsBadge() {
+  const badge = opsBadgeElement();
+  if (!badge) return;
+  let data;
+  try {
+    const res = await fetch("/api/ops/summary");
+    if (!res.ok) throw new Error(String(res.status));
+    data = await res.json();
+  } catch (e) {
+    badge.textContent = "?";
+    badge.className = "nav-badge unknown";
+    badge.title = "運用logの件数を取得できませんでした（0件という意味ではありません）。";
+    return;
+  }
+  const errors = Number((data.counts || {}).error || 0);
+  const warnings = Number((data.counts || {}).warning || 0);
+  badge.title = `直近${Math.round(data.window_hours)}時間: error ${errors} / warning ${warnings}`;
+  if (errors > 0) {
+    badge.textContent = String(errors);
+    badge.className = "nav-badge alert";
+    return;
+  }
+  badge.textContent = "";
+  badge.className = "nav-badge";
+}
+
+if (document.querySelector('.a-nav a[href="/ops"]')) {
+  loadOpsBadge();
+  setInterval(loadOpsBadge, OPS_BADGE_POLL_MS);
 }

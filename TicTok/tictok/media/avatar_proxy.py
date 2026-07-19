@@ -161,11 +161,21 @@ class AvatarProxy:
             resp.raise_for_status()
             content = resp.content
             if len(content) > _MAX_BYTES:
-                logger.warning("avatar too large (%d bytes): %s", len(content), url)
+                logger.warning(
+                    "avatar too large (%d bytes): %s", len(content), url,
+                    extra={"event": "http.avatar_fetch_rejected",
+                           "ctx": {"reason": "too_large", "size_bytes": len(content),
+                                   "max_bytes": _MAX_BYTES}},
+                )
                 return None
             content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
             if not content_type.startswith("image/"):
-                logger.warning("avatar non-image content-type %r: %s", content_type, url)
+                logger.warning(
+                    "avatar non-image content-type %r: %s", content_type, url,
+                    extra={"event": "http.avatar_fetch_rejected",
+                           "ctx": {"reason": "not_an_image", "content_type": content_type,
+                                   "size_bytes": len(content)}},
+                )
                 return None
             return content, content_type
         except httpx.HTTPStatusError as exc:
@@ -173,10 +183,18 @@ class AvatarProxy:
             # first). A signed URL can still 403 if it expired before we ever cached
             # it; log concisely without a stack trace — it is an expected CDN state,
             # not a server fault. The UI keeps its initial-letter avatar.
-            logger.info("avatar fetch HTTP %d (no local copy): %s", exc.response.status_code, url)
+            logger.info(
+                "avatar fetch HTTP %d (no local copy): %s", exc.response.status_code, url,
+                extra={"event": "http.avatar_fetch_missed",
+                       "ctx": {"status": exc.response.status_code}},
+            )
             return None
         except Exception:
-            logger.warning("avatar fetch failed: %s", url, exc_info=True)
+            logger.warning(
+                "avatar fetch failed: %s", url,
+                extra={"event": "http.avatar_fetch_failed", "ctx": {"reason": "unexpected"}},
+                exc_info=True,
+            )
             return None
 
     def _remember(self, url: str, content: bytes, content_type: str) -> None:
@@ -204,7 +222,12 @@ class AvatarProxy:
             )
             return content, content_type
         except OSError:
-            logger.warning("failed to read persisted avatar: %s", url, exc_info=True)
+            logger.warning(
+                "failed to read persisted avatar: %s", url,
+                extra={"event": "http.avatar_read_failed",
+                       "ctx": {"source": "url_cache", "path": str(bin_path)}},
+                exc_info=True,
+            )
             return None
 
     def _owner_disk_paths(self, owner_key: str) -> tuple[Path, Path]:
@@ -227,5 +250,10 @@ class AvatarProxy:
             )
             return content, content_type
         except OSError:
-            logger.warning("failed to read owner avatar by id: %s", owner_key, exc_info=True)
+            logger.warning(
+                "failed to read owner avatar by id: %s", owner_key,
+                extra={"event": "http.avatar_read_failed",
+                       "ctx": {"source": "owner_cache", "path": str(bin_path)}},
+                exc_info=True,
+            )
             return None

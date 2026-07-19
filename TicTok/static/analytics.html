@@ -20,9 +20,13 @@
         <a href="/overview">全体監視</a>
         <a href="/history">履歴</a>
         <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
         <a class="active" href="/analytics">全体解析</a>
+        <a href="/jobs">job</a>
+        <a href="/ops">運用log</a>
         <a href="/settings">設定</a>
       </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
       <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
     </div>
 
@@ -41,13 +45,13 @@
         <div class="a-kpibar an-summary" id="an-summary"></div>
       </div>
       <p class="an-note">
-        監視中の配信者を<b>まとめて</b>集計します。1回だけの上振れ・下振れに振り回されないよう、各指標は<b>中央値・順位相関・レート正規化</b>で計算し、サンプル数 n を併記しています。
+        監視中の配信者を<b>まとめて</b>集計します。1回だけの上振れ・下振れに振り回されないよう、各指標は<b>中央値・順位相関・レート正規化</b>で計算し、サンプル数 n を併記しています。期間は<b>配信の開始時刻</b>で区切ります（期間より前に始まった配信は、続いていても含まれません）。
       </p>
 
       <!-- A. 時間帯インデックス -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">
-          ■ ① 時間帯×曜日別の入室の多さ（平均=1.0の倍率）
+          ■ ① 20分×曜日別の入室の多さ（平均=1.0の倍率）
           <select id="an-ti-metric" class="sm-hm-metric">
             <option value="joins">指標: 入室</option>
             <option value="comments">指標: Comment</option>
@@ -56,7 +60,7 @@
             <option value="follows">指標: フォロー</option>
           </select>
         </h3>
-        <p class="an-help"><b>縦＝時刻・横＝曜日</b>のマスです。各配信の平均入室を <b>1.0</b> としたとき、その時間帯の入室が<b>何倍か</b>を表します（例: 1.40なら平均の1.4倍）。暖色が濃いほど平均より多い時間帯。右端<b>全部</b>は全曜日の合計。マスにカーソルを合わせると件数(n)も出ます。指標は右上で入室・Comment・コインなどに切替できます。</p>
+        <p class="an-help"><b>縦＝20分刻みの時刻・横＝曜日</b>のマスです。各配信の平均入室を <b>1.0</b> としたとき、その20分の入室が<b>何倍か</b>を表します（例: 1.40なら平均の1.4倍）。暖色が濃いほど平均より多い時間帯。右端<b>全部</b>は全曜日をまとめた値（中央値・合計ではありません）。マスにカーソルを合わせると観測数(配信×日)も出ます。指標は右上で入室・Comment・コインなどに切替できます。<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。</p>
         <div class="an-legendline" id="an-ti-note"></div>
         <div class="an-hm-wrap"><div class="an-heatmap" id="an-ti-heatmap"></div></div>
       </section>
@@ -64,15 +68,24 @@
       <!-- A2. organic入室(ノイズ除去した時間帯の関心) -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ①' ノイズ除去後の時間帯別入室数</h3>
-        <p class="an-help">生の入室数には、配信内容に関心のない一時的な流入（<b>宝箱狙いの外国勢・運営boost・シェア直後の瞬間流入・配信開始直後の初速</b>）が混ざります。そこで各入室に、その後の<b>再訪・入室後の反応・レベル</b>から「質の重み」を付け、質の低い入室を割り引いて足し直したのがこのグラフです。<b>灰線＝生の入室数、暖色線＝割り引き後（本来の関心による入室）</b>。暖色が灰より下がる時間帯ほど、一時的な流入で水増しされていた帯です（gift・Commentの実勢と一致することを確認済み。提案書§15）。</p>
-        <div class="x-chartwrap an-chart-short"><canvas id="an-organic-chart"></canvas></div>
+        <p class="an-help">生の入室数には、配信内容に関心のない一時的な流入（<b>宝箱狙いの外国勢・運営boost・シェア直後の瞬間流入・配信開始直後の初速</b>）が混ざります。そこで各入室に、その後の<b>再訪・入室後の反応・レベル</b>から「質の重み」を付け、質の低い入室を割り引いて足し直したのがこのグラフです。<b>灰線＝生の入室数、暖色線＝割り引き後（本来の関心による入室）</b>。重みは常に1以下のため<b>暖色はどの時間帯も灰より低く</b>なります。見るのは上下ではなく<b>灰との差（ギャップ）</b>で、差が大きい帯ほど一時的な流入で水増しされていた帯です（gift・Commentの実勢との一致はデータ量の多い配信者で確認済み。データが薄い場合は参考程度に。提案書§15）。<b>平日（月〜金）と休日（土日）</b>で分けています（祝日は曜日で判別できないため休日に含みません）。時間帯は<b>15分刻み</b>のまま、①と同様に<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。</p>
+        <div class="an-organic-pair">
+          <div class="an-organic-col">
+            <div class="result-subtitle an-subhead" id="an-organic-wd-head">平日（月〜金）</div>
+            <div class="x-chartwrap an-chart-short"><canvas id="an-organic-chart-wd"></canvas></div>
+          </div>
+          <div class="an-organic-col">
+            <div class="result-subtitle an-subhead" id="an-organic-he-head">休日（土日）</div>
+            <div class="x-chartwrap an-chart-short"><canvas id="an-organic-chart-he"></canvas></div>
+          </div>
+        </div>
         <div class="an-legendline" id="an-organic-note"></div>
       </section>
 
       <!-- B. 指標間の関連(配信単位)（①の右に並べる） -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ④ 指標どうしの連動（相関・配信単位）</h3>
-        <p class="an-help">1配信=1点として、2つの指標が<b>一緒に増えるか</b>を見ます。<b>1.0に近い(濃い橙)＝一緒に増える</b>、0＝無関係、<b>マイナス(青)＝逆</b>。例: 入室×ギフトが0.7なら「入室の多い配信はギフトも多い」。上段が素の相関、<b>下段(かっこ内)は配信の規模(同接)の差を取り除いた値</b>＝「大きい配信は何でも多い」分を差し引いた関連です。相関はどちらが原因かは示しません。</p>
+        <p class="an-help">1配信=1点として、2つの指標が<b>一緒に増えるか</b>を見ます。<b>1.0に近い(濃い橙)＝一緒に増える</b>、0＝無関係、<b>マイナス(青)＝逆</b>。例: 入室×ギフトが0.7なら「入室の多い配信はギフトも多い」。上段が素の相関、<b>下段(かっこ内)は配信の規模(同接)と長さの差を取り除いた値</b>＝「大きい・長い配信は何でも多い」分を差し引いた関連です。配信本数に対して有意でないセルは色なしの参考値です。相関はどちらが原因かは示しません。</p>
         <div class="table-wrap"><table class="result-table an-matrix" id="an-matrix"></table></div>
         <div class="an-legendline" id="an-matrix-note"></div>
       </section>
@@ -80,15 +93,32 @@
       <!-- H. 入室のコンテキスト別 -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ② 状況別の入室速度（Battle / コラボ / 平時）</h3>
-        <p class="an-help">Battle中・コラボ中・平時それぞれの、<b>1分あたりの入室数</b>です。棒が長いほど、その状況で入室が集中しています。</p>
+        <p class="an-help">Battle中・コラボ中・平時それぞれの、<b>1分あたりの入室数</b>です。棒が長いほど、その状況で入室が集中しています。ただしこの差には<b>「盛り上がる時間帯にバトルをする」影響が含まれる</b>ため、バトル自体の効果は時間帯を補正した③'で確認してください。</p>
         <div class="x-chartwrap an-chart-short"><canvas id="an-context-chart"></canvas></div>
         <div class="an-legendline" id="an-context-note"></div>
+      </section>
+
+      <!-- H2. 入室の流入元とフォロー関係(F6: 既に届いているfieldの追加読み) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ②' 入室の流入元とフォロー関係</h3>
+        <p class="an-help">TikTokが入室eventに添えてくる<b>流入元（どの画面から来たか）</b>と、<b>その視聴者が配信者をフォローしているか</b>の内訳です。推定ではなく配信側が送ってきた値をそのまま数えています。<b>この機能を入れる前に収集した入室には値が付いていない</b>ため、集計の分母は「値が届いた分」だけにし、どれだけ届いているか（<b>取得率</b>）を併記します。取得率が低いうちは構成比を実勢と読まないでください。届いた上で空だったものは<b>unknown</b>として独立に数えます（フォローしていない、へは丸めません）。<b>ug_task_page</b>は報酬タスクからの誘導で、配信内容への関心とは別物です。</p>
+        <div class="an-organic-pair">
+          <div class="an-organic-col">
+            <div class="result-subtitle an-subhead">流入元（入室）</div>
+            <div class="table-wrap"><table class="result-table" id="an-entry-src"></table></div>
+          </div>
+          <div class="an-organic-col">
+            <div class="result-subtitle an-subhead">フォロー関係</div>
+            <div class="table-wrap"><table class="result-table" id="an-entry-follow"></table></div>
+          </div>
+        </div>
+        <div class="an-legendline" id="an-entry-note"></div>
       </section>
 
       <!-- C0. シェア→入室(event-study) -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ③ シェア後の入室数の変化</h3>
-        <p class="an-help"><b>シェアされた瞬間を0秒</b>として、その前後で入室数が<b>平常よりどれだけ増減したか</b>を重ね合わせた平均です。<b>暖色の線＝増えた分</b>、濃い帯＝95%信頼区間。<b>破線で囲んだ灰の帯＝無関係な時点で同じ計算をした比較用の目安</b>で、暖色が灰をはっきり超えた所が本物の反応です。0秒より<b>手前から</b>線が上がっている場合は「入室が先・シェアが後」の可能性があり、シェアが原因とは断定しません。</p>
+        <p class="an-help"><b>シェアされた瞬間を0秒</b>として、その前後で入室数が<b>平常よりどれだけ増減したか</b>を重ね合わせた平均です。<b>暖色の線＝増えた分</b>、濃い帯＝95%信頼区間（同じ配信内のシェアは独立でないため、配信単位のばらつきで補正）。<b>破線で囲んだ灰の帯＝無関係な時点で同じ計算をした比較用の目安</b>で、暖色が灰をはっきり超えた所が本物の反応です。0秒より<b>手前から</b>線が上がっている場合は「入室が先・シェアが後」の可能性があり、シェアが原因とは断定しません。線の基準（平常）は各シェアの直前1分、注記のピーク%は全期間の平均入室レート比です。</p>
         <div class="x-chartwrap an-chart-short"><canvas id="an-share-chart"></canvas></div>
         <div class="an-legendline" id="an-share-note"></div>
       </section>
@@ -111,7 +141,7 @@
       <!-- E. 規模 vs 効率（⑤と横並び） -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ⑧ 配信者マップ（規模 × 効率）</h3>
-        <p class="an-help">配信者を<b>横=規模(平均同接)</b>×<b>縦=効率(同接あたりコイン)</b>で配置します。<b>右上ほど規模も効率も高い</b>配信者。バブルが大きいほど配信回数が多い。点にカーソルを合わせると配信者名が出ます。</p>
+        <p class="an-help">配信者を<b>横=規模(配信ごとの平均同接の中央値・対数軸)</b>×<b>縦=効率(コイン/同接・時間=視聴1人が1時間見るあたりのコイン)</b>で配置します。効率は視聴時間で割ってあるため、配信が長いだけでは高くなりません。<b>右上ほど規模も効率も高い</b>配信者。バブルが大きいほど配信回数が多い。点にカーソルを合わせると配信者名が出ます。</p>
         <div class="x-chartwrap an-chart-tall"><canvas id="an-scatter-chart"></canvas></div>
         <div class="an-legendline" id="an-scatter-note"></div>
       </section>
@@ -119,7 +149,7 @@
       <!-- F. 入室 → 定着（⑧と横並び） -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ⑤ 入室数と同接（定着の度合い）</h3>
-        <p class="an-help">時刻別に<b>入室数(棒)と平均同接(線)を並べました</b>。入室の棒が高いのに同接の線が伸びない時間帯は「入っても抜けている」状態です。全体の定着効率は上の1数値(1入室あたり何人残るか)で確認できます。</p>
+        <p class="an-help">時刻別に<b>入室の速さ(棒・件/分)と平均同接(線)を並べました</b>。棒は観測1分あたりに直してあり、配信本数の多い時刻ほど高く見える偏りはありません。上の1数値は、入室があった時間の同接の動きから入室のない時間の自然な増減を差し引いた<b>「1入室あたりの同接押し上げ」の推定値</b>です。入室は再入室・間引きを含む概算のため、厳密な定着率ではなく目安として見てください。</p>
         <div class="an-legendline" id="an-retention-note"></div>
         <div class="x-chartwrap an-chart-short"><canvas id="an-retention-hour"></canvas></div>
       </section>
@@ -127,7 +157,7 @@
       <!-- G. ギフト / コメント集中度（⑦と横並び） -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ⑥ コイン・Commentの偏り（集中度 / Lorenz曲線・Gini）</h3>
-        <p class="an-help">コイン・Commentが少数の<b>重課金者・常連</b>にどれだけ偏っているかを見ます。曲線が対角線(＝全員均等)から<b>下に膨らむほど偏りが大きい</b>。下のタグ＝上位N%が全体の何%を占めるか。Giniは1に近いほど偏りが大きい指標です。</p>
+        <p class="an-help">コイン・Commentが少数の<b>重課金者・常連</b>にどれだけ偏っているかを見ます。曲線が対角線(＝全員均等)から<b>下に膨らむほど偏りが大きい</b>。下のタグ＝上位N%が全体の何%を占めるか。Giniは0が均等で、大きいほど少数への偏りが強い指標です。対象は<b>コインを送った人・Commentした人のみ</b>（無言の視聴者は含みません）。人数nが少ないとGiniの上限は約(n-1)/nまでしか届かない点に注意してください。</p>
         <div class="an-grid2">
           <div>
             <div class="an-legendline" id="an-conc-gift-note"></div>
@@ -142,10 +172,27 @@
         </div>
       </section>
 
+      <!-- I. Battle展開の統計(F9) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑩ バトルの展開（残り時間で見る）</h3>
+        <p class="an-help">バトルを<b>終了時刻を0秒とした「残り時間」</b>で揃えて重ね合わせ、<b>自陣の得点がいつ入ったか・リードが何回入れ替わったか・残り1分でリードしていた試合がどうなったか</b>を集計します。相手が1人（または1チーム）に定まる試合だけが対象で、<b>3人以上の個人マルチは相手が入れ替わる合成値になる</b>ため、参加者ごとの記録から<b>直近のライバル1人</b>の推移を復元できた試合だけを含めます。グラフの<b>合計比</b>は全試合の得点を合算した比率で少数の高額ギフトに引っ張られるため、<b>試合ごとの比率の中央値</b>を併記しています。<b>「残り1分リード時の勝率」は結果の記述</b>であって「終盤に温存すると勝てる」という意味ではありません（リードしている側はそもそも有利な試合が多い、という選び方の偏りを含みます）。</p>
+        <div class="x-chartwrap an-chart-short"><canvas id="an-bf-chart"></canvas></div>
+        <div class="an-legendline" id="an-bf-note"></div>
+        <div class="table-wrap"><table class="result-table" id="an-bf-lead"></table></div>
+      </section>
+
+      <!-- J. 収集の取得率(F10 Phase2) -->
+      <section class="result-block an-col1">
+        <h3 class="result-subtitle">■ ⑪ 収集の取得率（このデータの穴）</h3>
+        <p class="an-help">ここまでの集計が<b>どれだけ穴のあるデータに基づいているか</b>を示します。切断中に起きた入室・ギフトは丸ごと記録に残らず、他のグラフを静かに歪めます。<b>指標ごとに測れる配信の本数が違う</b>ため、対象本数を各行に出しています。<b>切断の記録を始める前に収集した配信は「計測不能」</b>として分母から外します（0秒の欠測として混ぜると、実際には無い健全さを示すことになるため）。録画の取得率・文字起こし率・同接の取得間隔は、古い配信でも正しく出ます。</p>
+        <div class="table-wrap"><table class="result-table" id="an-coverage"></table></div>
+        <div class="an-legendline" id="an-coverage-note"></div>
+      </section>
+
       <!-- D. 入室の質(新規/常連)（⑥と横並び） -->
       <section class="result-block an-col1">
         <h3 class="result-subtitle">■ ⑦ 入室者の内訳（新規 / 常連）</h3>
-        <p class="an-help">入室者のうち<b>初めて来た人(新規)</b>の割合を時間帯別に表します。棒＝新規/常連の<b>人数</b>、線＝<b>新規率(%)</b>。新規率が高い時間帯ほど、新しい人の流入が多い時間です。</p>
+        <p class="an-help">入室者のうち<b>初めて来た人(新規)</b>の割合を時間帯別に表します。棒＝新規/常連の<b>人数（時間帯ごとのユニーク人数・再入室は1人と数える）</b>、線＝<b>新規率(%)</b>。「新規」は<b>この監視ツールが初めて観測した人</b>のことで、監視を始めた直後は以前からの常連も新規に数えられ高めに出ます。他の監視配信者で観測済みの人は常連扱いです。</p>
         <div class="x-chartwrap an-chart-short"><canvas id="an-quality-chart"></canvas></div>
         <div class="an-legendline" id="an-quality-note"></div>
       </section>

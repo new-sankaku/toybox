@@ -91,12 +91,32 @@ class GiftIconCache:
                 resp.raise_for_status()
                 content = resp.content
                 if not content or len(content) > _MAX_BYTES:
-                    logger.warning("gift icon size invalid (id=%s, %d bytes)", gift_id, len(content))
+                    logger.error(
+                        "gift icon response for %s is unusable (%d bytes); the icon is "
+                        "lost for the burn-in", gift_id, len(content),
+                        extra={"event": "collector.gift_icon_persist_failed",
+                               "ctx": {"gift_id": int(gift_id), "reason": "invalid_size",
+                                       "size_bytes": len(content), "max_bytes": _MAX_BYTES}},
+                    )
                     return False
                 self.path_for(gift_id).write_bytes(content)
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "persisted gift icon %s (%d bytes)", gift_id, len(content),
+                        extra={"event": "collector.gift_icon_persisted",
+                               "ctx": {"gift_id": int(gift_id), "size_bytes": len(content)}},
+                    )
                 return True
             except Exception:
-                logger.warning("gift icon persist failed (id=%s): %s", gift_id, url, exc_info=True)
+                # There is no second chance: the icon URL is region/signature bound and
+                # is only fetchable while the event is live, so a failure here means the
+                # burn-in renders this gift without its icon forever.
+                logger.error(
+                    "gift icon persist failed (id=%s): %s", gift_id, url,
+                    extra={"event": "collector.gift_icon_persist_failed",
+                           "ctx": {"gift_id": int(gift_id), "reason": "unexpected"}},
+                    exc_info=True,
+                )
                 return False
 
     async def persist_gift_list(self, gift_list: dict) -> int:
@@ -117,6 +137,13 @@ class GiftIconCache:
                     count += 1
         if names:
             self._merge_name_index(names)
+        logger.info(
+            "gift icon cache refreshed: %d newly persisted, %d name(s) indexed",
+            count, len(names),
+            extra={"event": "collector.gift_icons_cached",
+                   "ctx": {"persisted": count, "names": len(names),
+                           "gifts": len(gift_list.get("gifts") or [])}},
+        )
         return count
 
     def _merge_name_index(self, mapping: dict) -> None:
@@ -129,4 +156,10 @@ class GiftIconCache:
             existing.update(mapping)
             path.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
         except (OSError, ValueError):
-            logger.warning("gift name index write failed: %s", path, exc_info=True)
+            logger.warning(
+                "gift name index write failed; legacy events without a gift id keep "
+                "rendering without an icon",
+                extra={"event": "collector.gift_name_index_write_failed",
+                       "ctx": {"path": str(path), "names": len(mapping)}},
+                exc_info=True,
+            )

@@ -348,7 +348,7 @@ function updateTile(tile, monitor) {
   const recording = isRecording(snap);
   tile.querySelector('[data-field="rec"]').classList.toggle("hidden", !recording);
 
-  updateTileStats(tile, snap.stats || {});
+  updateTileStats(tile, snap.stats || {}, snap.status === "connected");
 
   updateTileLast(tile, monitor);
 
@@ -405,10 +405,18 @@ function updateTileLast(tile, monitor) {
   if (lastEl) lastEl.textContent = monitor.lastGift ? `GIFT: ${monitor.lastGift.text}` : "待機中…";
 }
 
-function updateTileStats(tile, stats) {
+// 視聴者は「今この瞬間の同時視聴者数」で、切断すると値が来なくなる(statsは切断で
+// 0に戻らずSession開始時までの最後の観測値を保持する)。切断中もその値を出すと、
+// LIVE中だけを合計する上部のLIVE視聴者と食い違い、「合計0なのにcardには3」に見える。
+// 接続中以外は uptime と同じく "-" にして、値が無いことを値の代わりに出さない。
+const LIVE_ONLY_STATS = ["viewers"];
+
+function updateTileStats(tile, stats, connected) {
   ["viewers", "diamonds", "gifts", "rate_diamonds", "rate_comments"].forEach((key) => {
     const el = tile.querySelector(`[data-field="${key}"]`);
-    if (el) el.textContent = key in stats ? fmtNum(stats[key]) : "-";
+    if (!el) return;
+    const live = connected || !LIVE_ONLY_STATS.includes(key);
+    el.textContent = live && key in stats ? fmtNum(stats[key]) : "-";
   });
 }
 
@@ -578,7 +586,10 @@ function handleMessage(msg) {
     updateSummary();
   } else if (msg.type === "stats") {
     if (monitor.snapshot) monitor.snapshot.stats = msg.data;
-    if (tile) updateTileStats(tile, msg.data);
+    if (tile) {
+      updateTileStats(tile, msg.data,
+        !!monitor.snapshot && monitor.snapshot.status === "connected");
+    }
     updateSummary();
   } else if (msg.type === "event") {
     rememberEvent(monitor, msg.data);

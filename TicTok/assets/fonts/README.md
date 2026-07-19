@@ -20,6 +20,8 @@ and logged, not an error.
 | `NotoSans-VF.ttf` | Fallback: phonetic-extension letters, combining marks | [google/fonts · notosans](https://github.com/google/fonts/tree/main/ofl/notosans) | SIL OFL 1.1 |
 | `NotoSansGeorgian-VF.ttf` | Fallback: Georgian letters (used as kaomoji brows) | [google/fonts · notosansgeorgian](https://github.com/google/fonts/tree/main/ofl/notosansgeorgian) | SIL OFL 1.1 |
 | `NotoSansMath-Regular.ttf` | Fallback: maths operators (used as kaomoji mouths) | [google/fonts · notosansmath](https://github.com/google/fonts/tree/main/ofl/notosansmath) | SIL OFL 1.1 |
+| `NotoSansSymbols2-Regular.ttf` | Fallback: dingbats / ornaments (e.g. U+275B) and misc symbols the emoji font has no colour glyph for | [google/fonts · notosanssymbols2](https://github.com/google/fonts/tree/main/ofl/notosanssymbols2) | SIL OFL 1.1 |
+| `unifont.otf` | Universal last resort: any assigned BMP codepoint (exotic scripts kaomoji borrow — Canadian syllabics, Thai, Yi, Armenian, Ethiopic, …) so nothing is silently dropped | [GNU Unifont](https://unifoundry.com/unifont/) | GPLv2+FE / SIL OFL 1.1 |
 
 The SIL Open Font License (Version 1.1) text is in `OFL.txt`.
 

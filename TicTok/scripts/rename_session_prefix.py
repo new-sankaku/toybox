@@ -22,7 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tictok.core.config import get_db_path, get_record_dir
+from tictok.core import layout
+from tictok.core.config import get_db_path, record_dir_from_db
 from tictok.record.recorder import SIDECAR_DIRNAME, session_prefix
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -52,18 +53,20 @@ def _plan_row(row: sqlite3.Row, record_dir: Path) -> dict | None:
         return None  # 既に付与済み
     new_base = prefix + old_base
 
+    # old_base and new_base share the same streamer, so every move stays within the
+    # same <streamer>/{ts,mp4} folders — only the stem's session prefix changes.
     moves: list[tuple[Path, Path]] = []
-    mp4 = record_dir / f"{old_base}.mp4"
+    mp4 = layout.mp4_path(record_dir, old_base)
     if mp4.is_file():
-        moves.append((mp4, record_dir / f"{new_base}.mp4"))
-    # The burned-in overlay mp4 lives in the root next to its source, so it renames
+        moves.append((mp4, layout.mp4_path(record_dir, new_base)))
+    # The burned-in overlay mp4 lives in the mp4 folder next to its source, so it renames
     # alongside the recording rather than with the .sidecars artifacts below.
-    overlay = record_dir / f"{old_base}.overlay.mp4"
+    overlay = layout.mp4_dir(record_dir, old_base) / f"{old_base}.overlay.mp4"
     if overlay.is_file():
-        moves.append((overlay, record_dir / f"{new_base}.overlay.mp4"))
-    hls = record_dir / old_base
+        moves.append((overlay, layout.mp4_dir(record_dir, new_base) / f"{new_base}.overlay.mp4"))
+    hls = layout.session_dir(record_dir, old_base)
     if hls.is_dir():
-        moves.append((hls, record_dir / new_base))
+        moves.append((hls, layout.session_dir(record_dir, new_base)))
     sidecar_dir = record_dir / SIDECAR_DIRNAME
     if sidecar_dir.is_dir():
         for art in sorted(sidecar_dir.iterdir()):
@@ -93,8 +96,8 @@ def main() -> int:
     parser.add_argument("--record-dir", default=None, help="recordings dir (default: project setting)")
     args = parser.parse_args()
 
-    record_dir = Path(args.record_dir) if args.record_dir else Path(get_record_dir())
     db_path = args.db or get_db_path()
+    record_dir = Path(args.record_dir) if args.record_dir else Path(record_dir_from_db(db_path))
     if not record_dir.is_dir():
         logger.error("recordings directory not found: %s", record_dir)
         return 1

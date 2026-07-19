@@ -14,8 +14,10 @@ import hashlib
 import json
 import logging
 import math
+import shutil
 import subprocess
 import tempfile
+import time
 import unicodedata
 import urllib.request
 from pathlib import Path
@@ -25,7 +27,15 @@ from typing import Awaitable, Callable, Optional
 ProgressCb = Callable[[int], Awaitable[None]]
 
 from tictok.paths import PROJECT_ROOT
+from tictok.core import cancel
+from tictok.core import config
+from tictok.core import layout
+from tictok.core.cancel import JobCancelled
+from tictok.core.gpu import gpu_slot_async
+from tictok.core.logging_setup import progress_interval_seconds
+from tictok.core.battle import battle_sides, battle_type
 from tictok.media.avatar_pool import avatar_key
+from tictok.record import audio_norm, subtitles
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
     ffmpeg_available,
@@ -38,12 +48,145 @@ from tictok.record.recorder import (
 
 logger = logging.getLogger("tictok.video_overlay")
 
+
+# ===== 診断用ctx builder =====
+# 焼き込みは別process(ffmpeg)と別thread(PIL layer)に跨がって失敗するため、失敗地点の
+# logがその場で原因を確定できるだけのfieldを持っていないと、後から再現できない。以下は
+# その「失敗地点に必ず載せるfield」を組み立てる小道具で、描画結果には一切影響しない。
+
+
+def _oserror_ctx(exc: BaseException) -> dict:
+    """OSErrorの識別子をctxへ。errnoが無いとdisk満杯(ENOSPC)と権限とpath不正が
+    区別できず、過去の障害では全て「render failed」の一行に潰れていた。"""
+    ctx: dict = {"exc_type": type(exc).__name__, "error": str(exc)}
+    for attr in ("errno", "strerror", "winerror"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            ctx[attr] = value
+    return ctx
+
+
+def _disk_ctx(path: Path) -> dict:
+    """``path``が載るvolumeの空き容量。書き込み失敗のlogに必ず添える。空き容量の取得自体が
+    失敗しても診断を止めないよう、取れなかったことをfieldとして残す。"""
+    try:
+        usage = shutil.disk_usage(str(path if path.is_dir() else path.parent))
+    except OSError as exc:
+        return {"disk_free_bytes": None, "disk_probe_error": str(exc)}
+    return {
+        "disk_free_bytes": usage.free,
+        "disk_total_bytes": usage.total,
+        "disk_low": usage.free < config.get_log_disk_low_bytes(),
+    }
+
+
+def _dir_bytes(path: Path) -> Optional[int]:
+    """展開済みframeが実際に何byte書けたか。ENOSPCの直前まで書けていたのか、最初の1枚で
+    落ちたのかを分ける。走査に失敗したらNone(不明)を返し、推測値は作らない。"""
+    try:
+        return sum(p.stat().st_size for p in path.iterdir() if p.is_file())
+    except OSError:
+        return None
+
+
+class NothingToDrawError(RuntimeError):
+    """描く対象が1件も無いという入力側の前提不成立。
+
+    ffmpegの失敗と同じRuntimeErrorで運ぶと、HTTP側が5xxへ落とすしか無くなり、監視とlogでは
+    server errorとして数えられる(userへ出す文言は正常なのに、状態だけが異常になる)。
+    呼び出し側が4xxへ落とせるよう型で分ける。"""
+
+
+class _IntervalGate:
+    """時間間隔で進捗logを間引くgate。DEBUG時は progress_interval_seconds が0を返すため
+    毎回通り、DEBUG指定が実際に情報量を増やす。"""
+
+    def __init__(self, interval_seconds: float) -> None:
+        self._interval = interval_seconds
+        self._last = 0.0
+
+    def ready(self) -> bool:
+        now = time.monotonic()
+        if self._interval > 0 and now - self._last < self._interval:
+            return False
+        self._last = now
+        return True
+
+
+def _timing_map_ctx(src: Path) -> dict:
+    """録画のtiming map(wall->media anchors / media_pts)の在否。recorderはCFR転落時に
+    このfileをunlinkするが、焼き込みは別時刻・別操作で走るため、焼き込み側のlogだけを見る
+    調査者にはmapが無い理由が見えない。開始logに在否とversionとmtimeを必ず残す。"""
+    path = timing_path(src)
+    ctx: dict = {"timing_map_present": False, "timing_map_version": None,
+                 "timing_map_mtime": None}
+    try:
+        stat = path.stat()
+    except OSError:
+        return ctx
+    ctx["timing_map_present"] = True
+    ctx["timing_map_mtime"] = round(stat.st_mtime, 3)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ctx
+    if isinstance(data, dict):
+        ctx["timing_map_version"] = data.get("version")
+        ctx["timing_map_anchors"] = len(data.get("anchors") or [])
+        ctx["timing_map_media_pts"] = len(data.get("media_pts") or [])
+    return ctx
+
+
+def _bridge_ctx(source: Optional[dict]) -> dict:
+    """Mode A/B共通のtime bridge診断。原点Cが破綻すると全eventが動画長の外へ落ちるので、
+    Cとその根拠件数はどちらのModeでも構造化して残す(Bだけに出すと、Aで起きた同種の
+    ズレを後から突き合わせられない)。"""
+    if source is None:
+        return {"bridge_available": False, "c_value": None, "n_anchor": None,
+                "n_samples": None, "n_backlog": None}
+    return {
+        "bridge_available": True,
+        "c_value": round(source["c_value"], 3),
+        "n_anchor": source["n_anchor"],
+        "n_samples": source["n_samples"],
+        "n_backlog": source["n_backlog"],
+    }
+
+
+def _placement_ctx(stats: dict) -> dict:
+    """"何も描かない"判断と描画完了の双方に載せる、event配置の全体像。件数だけでは
+    multi-recordingの2本目で窓がズレた場合を検出できないため、渡されたevent窓・
+    event時刻の範囲・映像timeへ写像したoffsetの範囲を必ず併記する。"""
+    keys = (
+        "events_total", "placed", "dropped_no_create_time", "dropped_before_start",
+        "dropped_after_end", "dropped_ratio", "offset_min", "offset_max",
+        "events_time_min", "events_time_max", "video_duration_seconds",
+        "window_started_at", "window_ended_at", "time_source",
+    )
+    ctx = {k: stats.get(k) for k in keys}
+    ctx.update(stats.get("bridge") or {})
+    return ctx
+
+
 # Font size in settings is authored against this reference height (a typical
 # vertical video); the actual script size is scaled to the real video so burned
 # text looks consistent regardless of the source resolution.
 BASE_HEIGHT = 1280
 DEFAULT_WIDTH = 720
 DEFAULT_HEIGHT = 1280
+
+# Comment avatar radius as a fraction of the line height. The drawn diameter is the
+# dominant factor in how much of the avatar survives encoding: at 4:2:0 the chroma
+# plane is half this again, so a disc small enough to matter loses fine detail no
+# matter how good the source or the bitrate (a larger source or a higher bitrate
+# does not recover it — both were measured and neither helps).
+#
+# 1.0 is the free point: it makes the disc exactly one comment block tall (a block is
+# at least the nickname line plus one body line, i.e. 2 * line_h), so the avatar fills
+# the space the layout already reserves and the feed keeps the same number of comments
+# on screen. Above 1.0 the avatar drives the block height instead of the text, and
+# every extra pixel costs feed density.
+AVATAR_RADIUS_FRAC = 1.00
 
 # Burned-in overlays (comment text, colour emoji, gift icons, score bar) are
 # rasterised at the output resolution, so a low-resolution source would burn
@@ -73,10 +216,19 @@ COMMENT_END_HOLD_SECONDS = 4
 OVERLAY_SUFFIX = ".overlay.mp4"
 ASS_SUFFIX = ".overlay.ass"
 META_SUFFIX = ".overlay.meta"
-# Legacy transient CFR-normalised copy of a VFR source. CFR normalisation is now
-# folded into the burn-in filter graph (no intermediate file), but the suffix is kept
-# so cleanup removes any such file orphaned by an older build's crashed render.
+# Legacy transient CFR-normalised copy of a VFR source (older builds). Kept so
+# cleanup removes any such file orphaned by an older build's crashed render.
 CFR_SUFFIX = ".cfr.mp4"
+# Transient CFR-normalised base written by the pre-pass when a comment layer is
+# composited on a VFR source (see _run_ffmpeg); removed when the render finishes.
+CFR_BASE_SUFFIX = ".cfrbase.mp4"
+# Upper bound for the CFR normalisation target. TikTok recordings are stream-copied
+# HLS: the container's nominal rate (r_frame_rate, often 50/60) is padding — the real
+# average rate is far lower (mobile live content is ~30fps). Normalising to the nominal
+# would encode phantom duplicate frames, doubling the pre-pass, comment-layer and
+# burn-in frame counts for no visible gain, so the target is capped here. 30 preserves
+# all real motion and matches COMMENT_LAYER_FPS_CAP so base and layer share a grid.
+CFR_FPS_CAP = 30.0
 # Mode B (source-clock timing) burn-in, produced alongside Mode A for comparison
 # when video_overlay_timing_compare is on. Same source mp4, comments/battle timed
 # by TikTok create_time instead of consumer arrival.
@@ -85,7 +237,21 @@ ASS_SUFFIX_B = ".overlay.b.ass"
 META_SUFFIX_B = ".overlay.b.meta"
 # Per-comment timing detail for offline investigation (arrival vs source offset).
 TIMING_DEBUG_SUFFIX = ".timing.debug.json"
+# 焼き込み設定の確認用プレビュー。本出力とはfile名・meta・lock keyを完全に分けており、
+# ここのfileが在っても本出力のcache判定には一切影響しない(逆も同じ)。成果物はuserへ
+# 見せる中間確認物なので、本出力のmp4と同じ場所(recordings root)には置かず、sidecar
+# dirへ隔離する。
+PREVIEW_STILL_SUFFIX = ".preview.png"
+PREVIEW_CLIP_SUFFIX = ".preview.mp4"
+PREVIEW_CLIP_META_SUFFIX = ".preview.meta"
+PREVIEW_CLIP_BASE_SUFFIX = ".preview.cfrbase.mp4"
+PREVIEW_LAYER_SUFFIX = ".preview.comments.mov"
 ICON_CACHE_DIR = "gift_icons"
+# Downloaded custom-emote images, cached by stable emote_id so a repeated emote
+# ([laugh] etc.) is fetched once and reused across comments and recordings.
+EMOTE_CACHE_DIR = "emotes"
+# Private-Use base for per-render emote sentinel codepoints (see _CommentShaper).
+_EMOTE_SENTINEL_BASE = 0xE000
 
 # Settings that change the rendered output; the cache is invalidated when any
 # of these (or the source file) change.
@@ -95,6 +261,7 @@ OVERLAY_KEYS = (
     "video_overlay_score_bar",
     "video_overlay_score_bar_hold_seconds",
     "video_overlay_real_avatars",
+    "video_overlay_avatar_upscale",
     "video_overlay_font_size",
     "video_overlay_comment_delay_seconds",
     "video_overlay_gift_seconds",
@@ -102,10 +269,33 @@ OVERLAY_KEYS = (
     "video_overlay_icon_percent",
     "video_overlay_quality",
     "video_overlay_codec",
+    "video_overlay_subtitles",
+    "video_overlay_subtitle_font_size",
+    "video_overlay_subtitle_position_percent",
+    # 音量正規化は出力の中身を変えるので、cache signatureへ入る必要がある(値を変えたのに
+    # 前回の音声のままcache hitする、を避ける)。
+    "video_output_normalize_audio",
+    *audio_norm.NORMALIZE_SETTING_KEYS,
 )
 
 _locks_guard = asyncio.Lock()
 _locks: dict[str, asyncio.Lock] = {}
+
+
+# Avatar AI super-resolution lives in tictok.media.avatar_upscale, which imports the
+# upscale stack that in turn imports this module — so it is imported lazily (inside the
+# call) to avoid an import cycle at module load. Both entry points are only reached at
+# render time.
+def _avatars_upscalable() -> bool:
+    from tictok.media.avatar_upscale import avatars_upscalable
+
+    return avatars_upscalable()
+
+
+def _upscale_avatar(src_img: Path) -> Optional[Path]:
+    from tictok.media.avatar_upscale import ensure_avatar_upscaled
+
+    return ensure_avatar_upscaled(src_img)
 
 
 def overlay_settings(settings) -> dict:
@@ -118,7 +308,14 @@ def overlay_enabled(settings) -> bool:
         bool(cfg["video_overlay_comments"])
         or bool(cfg["video_overlay_gifts"])
         or bool(cfg["video_overlay_score_bar"])
+        or bool(cfg["video_overlay_subtitles"])
     )
+
+
+def subtitles_enabled(settings) -> bool:
+    """字幕焼き込みが要求されているか。呼び出し側はこれが真のとき、転写の有無と時刻mapの
+    版を確かめてから焼き込みへ入る(無いまま字幕なしで焼くのは禁止)。"""
+    return bool(settings.get("video_overlay_subtitles"))
 
 
 def overlay_paths(src: Path) -> tuple[Path, Path, Path]:
@@ -143,13 +340,44 @@ def overlay_paths_b(src: Path) -> tuple[Path, Path, Path]:
     )
 
 
+def preview_paths(src: Path) -> tuple[Path, Path, Path]:
+    """(静止画png, 動画mp4, 動画のmeta)。いずれもsidecar dirに置き、本出力のpath空間とは
+    重ならない。"""
+    src = Path(src)
+    return (
+        sidecar_path(src, PREVIEW_STILL_SUFFIX),
+        sidecar_path(src, PREVIEW_CLIP_SUFFIX),
+        sidecar_path(src, PREVIEW_CLIP_META_SUFFIX),
+    )
+
+
+def overlay_artifact_paths(src: Path) -> list:
+    """Every burn-in artifact that survives a finished render (the output mp4s and
+    their ass/meta/debug sidecars). Regenerable from the source plus the stored events,
+    so the retention sweep may drop them; enumerated here rather than at the call site
+    so what is reported as reclaimable and what cleanup actually removes cannot drift."""
+    src = Path(src)
+    return list(overlay_paths(src)) + list(overlay_paths_b(src)) + [
+        sidecar_path(src, TIMING_DEBUG_SUFFIX),
+    ] + list(preview_paths(src))
+
+
+def overlay_transient_paths(src: Path) -> list:
+    """Intermediates a render writes and deletes again (CFR base, comment layer). A
+    crashed render orphans them, and an orphan is pure waste — no output depends on it."""
+    src = Path(src)
+    paths = [sidecar_path(src, CFR_SUFFIX)]
+    for out_mp4 in (overlay_paths(src)[0], overlay_paths_b(src)[0]):
+        paths.append(sidecar_dir(src) / (out_mp4.stem + CFR_BASE_SUFFIX))
+        paths.append(sidecar_dir(src) / (out_mp4.stem + COMMENT_LAYER_SUFFIX))
+    paths.append(sidecar_path(src, PREVIEW_CLIP_BASE_SUFFIX))
+    paths.append(sidecar_path(src, PREVIEW_LAYER_SUFFIX))
+    return paths
+
+
 def cleanup_overlay_files(src: Path) -> None:
     """Remove cached burn-in artifacts for a recording (called on delete)."""
-    paths = list(overlay_paths(Path(src))) + list(overlay_paths_b(Path(src)))
-    paths.append(sidecar_path(Path(src), TIMING_DEBUG_SUFFIX))
-    # Transient CFR-normalised base (removed at the end of a render, but a crashed
-    # render can orphan one).
-    paths.append(sidecar_path(Path(src), CFR_SUFFIX))
+    paths = overlay_artifact_paths(src) + overlay_transient_paths(src)
     for path in paths:
         try:
             path.unlink(missing_ok=True)
@@ -166,14 +394,56 @@ async def _get_lock(key: str) -> asyncio.Lock:
         return lock
 
 
-def _signature(src: Path, cfg: dict, timing: Optional[Path] = None, variant: str = "a") -> str:
+def _events_fingerprint(events: list) -> str:
+    """Digest of the burned-in event set. The mp4's size/mtime does not change when
+    the DB's events for the session change (journal recovery re-inserts, or the session
+    keeps collecting after this recording finalised), so without this a re-output would
+    return a stale burn-in on a cache hit."""
+    h = hashlib.sha256()
+    for e in events:
+        h.update(json.dumps(e, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8"))
+        h.update(b"\x00")
+    return h.hexdigest()
+
+
+# 描く物が1つも無く、音量正規化だけを掛けて出した成果物の印。meta の2行目に置く。
+# cache hitで再renderを飛ばした場合でも「A側は何も描かなかった」ことが要る(Mode Bの
+# 起動判定)ため、signatureとは別にこの事実を残す。
+AUDIO_ONLY_MARK = "audio-only"
+
+
+def _read_meta(meta_path: Path, signature: str) -> Optional[bool]:
+    """cacheが有効なら「音声のみ正規化した出力か」を返す。無効・読めない場合はNone。"""
+    try:
+        lines = meta_path.read_text(encoding="utf-8").strip().splitlines()
+    except OSError:
+        return None
+    if not lines or lines[0].strip() != signature:
+        return None
+    return len(lines) > 1 and lines[1].strip() == AUDIO_ONLY_MARK
+
+
+def _signature(
+    src: Path,
+    cfg: dict,
+    timing: Optional[Path] = None,
+    variant: str = "a",
+    events_sig: Optional[str] = None,
+    subtitles_sig: Optional[str] = None,
+) -> str:
     stat = src.stat()
     payload = {
-        "version": 18,
+        # 27: TikTok custom emoteを文字高の2倍で描画し、該当行の行高も拡張。
+        # commentの行送り・block高が変わるためcacheを無効化する。
+        "version": 27,
         "variant": variant,
         "cfg": cfg,
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
+        "events": events_sig,
+        # 転写のやり直しでsegmentが変われば描く字幕も変わるが、mp4も設定値も変わらない。
+        # これが無いと転写後の焼き直しがcache hitで無視される。
+        "subtitles": subtitles_sig,
     }
     # The wall->media timing map changes comment placement, so a new/refreshed
     # sidecar must invalidate a cached burn-in built without (or before) it.
@@ -219,6 +489,14 @@ GIFT_BAND_TOP = 0.05
 COMMENT_BAND_TOP = 0.64
 BAND_BOTTOM = 0.97
 COMMENT_WIDTH_FRAC = 0.80
+
+# STT字幕は画面中央に横いっぱいで置く帯。縦位置は設定
+# (video_overlay_subtitle_position_percent)で動かすので、ここは幅と行間だけを持つ。
+# 幅はComment帯(左80%)と違い中央揃えなので、左右に均等な余白を残す。
+SUBTITLE_WIDTH_FRAC = 0.90
+# 1つのsegmentが極端に長い場合の行数上限。これを超える行は描かず、字幕が画面全体を
+# 覆って映像が見えなくなるのを防ぐ(捨てた行数はstatsとlogに残す)。
+SUBTITLE_MAX_LINES = 4
 
 # Initial-letter avatar colours (ASS \1c = &HBBGGRR&). Real commenter avatars are
 # signed CDN URLs that expire (403 after a while), so a username-initial disc —
@@ -420,6 +698,8 @@ TEXT_FALLBACK_FONT_FILES = (
     "NotoSans-VF.ttf",            # phonetic extensions, combining marks, sub/superset
     "NotoSansGeorgian-VF.ttf",    # Georgian letters used as kaomoji brows
     "NotoSansMath-Regular.ttf",   # supplemental maths operators used as kaomoji mouths
+    "NotoSansSymbols2-Regular.ttf",  # dingbats/ornaments (e.g. U+275B) and misc symbols
+    "unifont.otf",                   # universal last resort: any assigned BMP codepoint
 )
 # Noto Color Emoji is a bitmap-strike font: its glyphs live at this single pixel
 # size, so emoji are rendered at the native strike and scaled down (crisp result).
@@ -428,6 +708,10 @@ EMOJI_STRIKE_PX = 109
 # font size; used by both wrap measurement and rendering so they stay consistent.
 # Kept at 1.0 so emoji match the text height instead of overpowering it.
 EMOJI_TILE_EM = 1.0
+# TikTok custom emotes (sub/fansclub) are detailed illustrations, not glyphs: at the
+# text height they read as unrecognisable specks, so they are drawn at this multiple
+# of the comment font size. Lines carrying one grow taller to fit (see line_height).
+EMOTE_TILE_EM = 2.0
 
 # Codepoint ranges drawn with the colour-emoji font (predominantly emoji blocks).
 # Text-presentation arrows/letters are intentionally excluded so ordinary text is
@@ -475,17 +759,24 @@ def _strip_bidi_controls(text: Optional[str]) -> str:
     return "".join(out)
 
 
-def _tokenize_emoji(text: str) -> list:
+def _tokenize_emoji(text: str, is_base=_is_emoji_base) -> list:
     """Split ``text`` into ordered ('text', run) / ('emoji', cluster) tokens. An
     emoji cluster absorbs trailing modifiers (variation selector, skin tone) and
     ZWJ-joined emoji so a joined sequence draws as a single token; adjacent emoji
-    without a ZWJ stay separate tokens."""
+    without a ZWJ stay separate tokens.
+
+    ``is_base`` decides which codepoints start an emoji cluster. It defaults to the
+    codepoint-range test, but the colour-emoji shaper passes a coverage-aware
+    predicate (range AND present in the colour-emoji font) so range codepoints the
+    font has no colour glyph for — decorative music notes/ornaments/enclosed letters
+    that live inside the emoji blocks — stay in text runs and render through the text
+    fallback chain instead of vanishing as a blank tile."""
     tokens: list = []
     buf: list = []
     i, n = 0, len(text)
     while i < n:
         cp = ord(text[i])
-        if _is_emoji_base(cp):
+        if is_base(cp):
             if buf:
                 tokens.append(("text", "".join(buf)))
                 buf = []
@@ -496,7 +787,7 @@ def _tokenize_emoji(text: str) -> list:
                 if _is_emoji_mod(c2):
                     cluster.append(text[i])
                     i += 1
-                elif c2 == 0x200D and i + 1 < n and _is_emoji_base(ord(text[i + 1])):
+                elif c2 == 0x200D and i + 1 < n and is_base(ord(text[i + 1])):
                     cluster.append(text[i])
                     cluster.append(text[i + 1])
                     i += 2
@@ -511,10 +802,10 @@ def _tokenize_emoji(text: str) -> list:
     return tokens
 
 
-def _emoji_units(text: str) -> list:
+def _emoji_units(text: str, is_base=_is_emoji_base) -> list:
     """Wrap units: one entry per character for text, one per cluster for emoji."""
     out: list = []
-    for kind, s in _tokenize_emoji(text):
+    for kind, s in _tokenize_emoji(text, is_base):
         if kind == "emoji":
             out.append(("emoji", s))
         else:
@@ -559,6 +850,11 @@ class _CommentShaper:
             raise FileNotFoundError(f"comment fonts missing under {ASSETS_FONT_DIR}")
         self._text_path = str(text_path)
         self._emoji_font = ImageFont.truetype(str(emoji_path), EMOJI_STRIKE_PX)
+        # Codepoints the colour-emoji font actually has a glyph for. A codepoint can
+        # be an emoji by Unicode range yet have no colour glyph here (music notes,
+        # ornaments, enclosed letters that share the emoji blocks); routing those to
+        # the emoji font produces a blank tile, so ``is_color_emoji`` gates on this.
+        self._emoji_cov = frozenset(TTFont(str(emoji_path)).getBestCmap())
         self._font_cache: dict = {}   # (path, size) -> PIL font
         self._emoji_cache: dict = {}
         # Glyph-coverage chain: the primary CJK font first, then each fallback in
@@ -571,6 +867,15 @@ class _CommentShaper:
                 raise FileNotFoundError(f"bundled fallback font missing: {fpath}")
             self._chain.append((str(fpath), frozenset(TTFont(str(fpath)).getBestCmap())))
         self._cp_cache: dict = {}     # codepoint -> covering font path (or None)
+        # TikTok custom emotes (sub/fansclub) are inline images, not glyphs. Each is
+        # assigned a Private-Use sentinel codepoint inserted into the comment text at
+        # its position; the sentinel then flows through wrap/measure/draw as an
+        # emoji-like unit, and ``emote_tile`` supplies the resolved image. Registered
+        # before layout (with a square placeholder size) and the image is attached
+        # once downloaded — see _apply_comment_emotes / _resolve_emotes.
+        self._emotes: dict = {}       # sentinel char -> {"id", "url", "image"}
+        self._emote_cps: set = set()  # sentinel codepoints (fast membership test)
+        self._emote_tile_cache: dict = {}  # (sentinel, px) -> resized RGBA tile
 
     def _pil_font(self, path: str, fs: int):
         key = (path, fs)
@@ -592,17 +897,60 @@ class _CommentShaper:
         self._cp_cache[cp] = path
         return path
 
+    def is_color_emoji(self, cp: int) -> bool:
+        """True when ``cp`` renders as a colour emoji here: an emoji by Unicode range
+        AND present in the colour-emoji font, or a registered custom-emote sentinel.
+        Range codepoints the font lacks a colour glyph for (music notes/ornaments/
+        enclosed letters sharing the emoji blocks) return False so they fall back to
+        the monochrome text chain instead of drawing a blank tile."""
+        return cp in self._emote_cps or (_is_emoji_base(cp) and cp in self._emoji_cov)
+
+    def register_emote(self, sentinel: str, emote_id: str, url: str) -> None:
+        """Bind a Private-Use sentinel char to a custom emote (image resolved later)."""
+        self._emotes[sentinel] = {"id": emote_id, "url": url, "image": None}
+        self._emote_cps.add(ord(sentinel))
+
+    def set_emote_image(self, sentinel: str, image) -> None:
+        """Attach the downloaded RGBA image for a sentinel; clears any placeholder tile."""
+        rec = self._emotes.get(sentinel)
+        if rec is not None:
+            rec["image"] = image
+            for key in [k for k in self._emote_tile_cache if k[0] == sentinel]:
+                self._emote_tile_cache.pop(key, None)
+
+    def _emote_tile(self, sentinel: str, px: int):
+        """Square emote image scaled to height ``px`` (cached). A transparent square is
+        returned until the image is downloaded, so wrap/measure stay stable."""
+        key = (sentinel, px)
+        tile = self._emote_tile_cache.get(key)
+        if tile is not None:
+            return tile
+        from PIL import Image
+        img = self._emotes[sentinel].get("image")
+        if img is None:
+            return Image.new("RGBA", (px, px), (0, 0, 0, 0))  # placeholder; not cached
+        scale = px / img.height
+        w = max(1, int(round(img.width * scale)))
+        tile = img.resize((w, px), Image.LANCZOS)
+        self._emote_tile_cache[key] = tile
+        return tile
+
+    def tokenize(self, text: str) -> list:
+        """Coverage-aware emoji tokenisation (see ``_tokenize_emoji``)."""
+        return _tokenize_emoji(text, self.is_color_emoji)
+
     def sanitize(self, text: Optional[str]) -> str:
         """Clean a comment string for the colour-emoji path: drop invisible bidi/
         control characters (tofu, kept-emoji-mods excepted) and any glyph no bundled
-        text font covers, so the burn-in never shows replacement boxes. Emoji are
-        left untouched (they render through the colour-emoji font)."""
+        font covers, so the burn-in never shows replacement boxes. Colour emoji are
+        kept for the emoji font; range codepoints without a colour glyph are kept only
+        when the text chain covers them (else dropped like any other tofu)."""
         if not text:
             return ""
         out = []
         for ch in text:
             cp = ord(ch)
-            if _is_emoji_base(cp) or _is_emoji_mod(cp):
+            if self.is_color_emoji(cp) or _is_emoji_mod(cp):
                 out.append(ch)
                 continue
             if unicodedata.category(ch) in ("Cc", "Cf"):
@@ -634,9 +982,28 @@ class _CommentShaper:
     def emoji_px(self, fs: int) -> int:
         return max(8, int(round(fs * EMOJI_TILE_EM)))
 
+    def emote_px(self, fs: int) -> int:
+        return max(8, int(round(fs * EMOTE_TILE_EM)))
+
+    def has_emote(self, text: str) -> bool:
+        return bool(self._emote_cps) and any(ord(ch) in self._emote_cps for ch in text)
+
+    def line_height(self, text: str, fs: int, base_line_h: int) -> int:
+        """Height of the line box holding ``text``. A line carrying a custom emote is
+        taller than the text line so the enlarged emote tile fits inside its own box
+        instead of bleeding over the neighbouring lines."""
+        if not self.has_emote(text):
+            return base_line_h
+        return max(base_line_h, int(round(self.emote_px(fs) * 1.15)))
+
     def emoji_tile(self, cluster: str, px: int):
         """RGBA image of ``cluster`` scaled to height ``px`` (cached). Multi-emoji
-        (ZWJ) clusters keep their natural width so components never overlap."""
+        (ZWJ) clusters keep their natural width so components never overlap. A
+        single-char custom-emote sentinel returns its inline emote image instead."""
+        if len(cluster) == 1 and cluster in self._emotes:
+            # Emotes are drawn larger than the surrounding emoji/text (EMOTE_TILE_EM);
+            # ``px`` arrives as the emoji cell height, so rescale it to the emote cell.
+            return self._emote_tile(cluster, max(8, int(round(px * EMOTE_TILE_EM / EMOJI_TILE_EM))))
         key = (cluster, px)
         tile = self._emoji_cache.get(key)
         if tile is not None:
@@ -674,7 +1041,7 @@ class _CommentShaper:
         return self._pil_font(path or self._text_path, fs).getlength(s)
 
     def measure(self, text: str, fs: int) -> float:
-        return sum(self._unit_width(k, s, fs) for k, s in _emoji_units(text))
+        return sum(self._unit_width(k, s, fs) for k, s in _emoji_units(text, self.is_color_emoji))
 
     def wrap(self, text: str, fs: int, max_w: float) -> list:
         """Break ``text`` into lines fitting ``max_w`` px. ASCII breaks at spaces,
@@ -685,7 +1052,7 @@ class _CommentShaper:
         cur = ""
         cur_w = 0.0
         last_space = -1
-        for kind, s in _emoji_units(text):
+        for kind, s in _emoji_units(text, self.is_color_emoji):
             uw = self._unit_width(kind, s, fs)
             if cur and cur_w + uw > max_w:
                 if last_space > 0:
@@ -710,7 +1077,7 @@ class _CommentShaper:
         ell = "…"
         ell_w = self.text_font(fs).getlength(ell)
         out, w = "", 0.0
-        for kind, s in _emoji_units(text):
+        for kind, s in _emoji_units(text, self.is_color_emoji):
             uw = self._unit_width(kind, s, fs)
             if w + uw + ell_w > max_w:
                 break
@@ -757,7 +1124,7 @@ def _comment_metrics(width: int, height: int, font_size: int,
     Comment blocks have a variable height (a long comment wraps onto as many lines
     as it needs), so the per-comment height is computed by the layout, not here."""
     line_h = max(1, int(round(font_size * 1.3)))
-    avatar_r = max(4, int(round(line_h * 0.78)))
+    avatar_r = max(4, int(round(line_h * AVATAR_RADIUS_FRAC)))
     avatar_d = 2 * avatar_r
     gap = max(4, int(round(font_size * 0.4)))
     x_left = max(8, int(round(width * 0.025)))
@@ -842,7 +1209,7 @@ def _layout_comment_feed(comments: list, m: dict, font_size: int, end_time: floa
     such stack state until its top edge rises above the band (it has fully faded);
     the final comments (nothing after to push them up) hold until ``end_time``.
 
-    Placement: {nick_disp, body_lines, color, initial, has_avatar, uid, empty,
+    Placement: {nick_disp, body_lines, line_hs, color, initial, has_avatar, uid, empty,
     block_h, segments:[{start, end, top, prev_top, grad, fad_in, tail}]}. Both the
     ASS generator and the real-avatar renderer consume this so they stay aligned."""
     line_h, avatar_d, gap_v = m["line_h"], m["avatar_d"], m["gap_v"]
@@ -866,15 +1233,21 @@ def _layout_comment_feed(comments: list, m: dict, font_size: int, end_time: floa
             body = _ass_escape(shaper.sanitize(c.get("text")))
             body_lines = shaper.wrap(body, font_size, text_max_w)[:max_body_lines]
             nick_disp = shaper.truncate(nick, font_size, text_max_w)
+            # Lines carrying a custom emote get a taller box (the emote tile is drawn
+            # above text size), so the block height is the sum of the per-line boxes.
+            line_hs = [shaper.line_height(ln, font_size, line_h)
+                       for ln in [nick_disp] + body_lines]
         else:
             nick = _ass_escape(_strip_bidi_controls(c.get("nick")))
             body = _ass_escape(_strip_bidi_controls(c.get("text")))
             body_lines = _wrap_text(body, font_size, text_max_w, wide_em, narrow_em)[:max_body_lines]
             nick_disp = _truncate(nick, font_size, text_max_w, wide_em, narrow_em)
-        block_h = max(avatar_d + 2 * avatar_off, (1 + len(body_lines)) * line_h)
+            line_hs = [line_h] * (1 + len(body_lines))
+        block_h = max(avatar_d + 2 * avatar_off, sum(line_hs))
         items.append({
             "nick_disp": nick_disp,
             "body_lines": body_lines,
+            "line_hs": line_hs,
             "color": _avatar_color(nick),
             "initial": (nick.strip()[:1] or "?").upper(),
             "has_avatar": c.get("user_id") in avatar_ids,
@@ -980,6 +1353,11 @@ def _build_gift_layout(gifts: list, width: int, height: int, coin_fs: int, icon_
     slide_ms = int(SLIDE_SECONDS * 1000)
     text_dialogues: list[str] = []
     overlays: list[dict] = []
+    # slot割り当てを先に確定させる。空きが無いときは最も早く空くslotを再利用するが、その際は
+    # 先客の表示終了を新しいgiftの開始時刻まで詰める。詰めないと同じslotに2枚が同時に描かれ、
+    # labelが重なって双方読めなくなる(Battle中はgiftが集中するので常態化する)。
+    placed: list[dict] = []
+    slot_owner: list[Optional[int]] = [None] * slot_count
     for item in gifts:
         t = item["offset"]
         slot = min(range(slot_count), key=lambda i: slot_free[i])
@@ -987,7 +1365,18 @@ def _build_gift_layout(gifts: list, width: int, height: int, coin_fs: int, icon_
             if slot_free[idx] <= t:
                 slot = idx
                 break
+        prev = slot_owner[slot]
+        if prev is not None and placed[prev]["end"] > t:
+            placed[prev]["end"] = t
         slot_free[slot] = t + hold
+        slot_owner[slot] = len(placed)
+        placed.append({"item": item, "slot": slot, "start": t, "end": t + hold})
+
+    for entry in placed:
+        item, slot = entry["item"], entry["slot"]
+        start, end = entry["start"], entry["end"]
+        if end <= start:
+            continue
         icon_y = gift_top + slot * slot_h
         coins = item.get("diamonds") or 0
         # Gift labels render through libass; strip invisible bidi/control chars so a
@@ -997,13 +1386,15 @@ def _build_gift_layout(gifts: list, width: int, height: int, coin_fs: int, icon_
         # "<coins> (<user>)", e.g. "1 (user a)"; truncated to stay within frame.
         label = f"{coins:,} ({nick})" if nick else f"{coins:,}"
         label = _truncate(label, coin_fs, width - x_left * 2, wide_em, narrow_em)
-        start, end = t, t + hold
         # coin+user line sits left-aligned just under the icon
         cy = icon_y + icon_px + 2
         identifiable = bool(item.get("gift_id") or item.get("gift_name") or item.get("image"))
         if identifiable:
-            # slide horizontally in sync with the icon
-            x_off = x_left - (icon_px + 20)
+            # slide horizontally in sync with the icon。開始xは0でclampする: 素の
+            # x_left-(icon_px+20) は負になり、slide中のlabelが画面外へはみ出したまま
+            # 描かれる(Battle中はbandが押し下がって同時表示が増えるため特に目立つ)。
+            # 出現の演出は\fadが担うので、水平移動は枠内だけで完結させる。
+            x_off = max(0, x_left - (icon_px + 20))
             move = f"\\move({x_off},{cy},{x_left},{cy},0,{slide_ms})"
             tag = f"{{\\an7{move}\\fad(150,300)}}"
             overlays.append({
@@ -1329,6 +1720,18 @@ SCORE_BAR_GIFT_BAND_TOP = 0.135
 _SCORE_OWN_RGB = "22A8E6"
 _SCORE_OPP_RGB = "E6486B"
 _SCORE_TRACK_RGB = "0A0E14"
+# TikTok本家のPK bar寄りの質感付け。陣営色(上の2色)は変えず、奥行きと締まりだけを足す:
+# barの落ち影 / fill上端のgloss帯 / splitのVSノッチ(白・glow付き) / mode・clockを収める丸pill。
+_SCORE_NOTCH_RGB = "FFFFFF"
+_SCORE_PILL_RGB = "0A0E14"
+# avatarを囲む陣営色のring厚(av_rに対する比)。実写真はringの内側に合成するので、
+# 写真が取れた端でもringだけは残り、両端の陣営色が途切れない。
+_SCORE_RING_FRAC = 0.18
+_SCORE_GLOSS_FRAC = 0.34
+_SCORE_GLOSS_ALPHA = "\\1a&HC8&"
+_SCORE_SHADOW_ALPHA = "\\1a&H96&"
+_SCORE_GLOW_ALPHA = "\\1a&HB4&"
+_SCORE_PILL_ALPHA = "\\1a&H55&"
 # 個人マルチ(3コラ+)で陣営(参加者)ごとに塗り分ける敵陣色。1人目は_SCORE_OPP_RGB(rose)のままで
 # 1v1/2分割の見た目を保ち、2人目以降に別色を割り当てる。陣営数が色数を超えたら循環で再利用する。
 _SCORE_OPP_PALETTE = (
@@ -1346,6 +1749,44 @@ BONUS_BAND_TOP = 0.116
 BONUS_BAND_H_FRAC = 0.022
 BONUS_BAND_MARGIN = 0.20
 BONUS_SETTLE_HOLD = 3.0
+# Match Bonus Mission の種別文言。TikTokはStarling key(pm_mt_*)しか配信せず、文言そのものは
+# event に載らないため、key -> 表示文言をここで持つ。差し込み値(progress_target)は event 実値。
+# 対応するkeyは、その差し込み値が実配信468件で progress_target と完全一致することを確認済み
+# (倍率キー instructions_1/3・gifter_2・*_target_host は reward_multiple と一致)。
+# ミッション種別は target_type だけでは文言を復元できず、この key でしか判別できない。
+_BONUS_TASK_TEXT = {
+    "pm_mt_live_match_instructions_2": "ギフト{n}個",
+    "pm_mt_live_match_instructions_gifter_1": "指定ギフト{n}個",
+    "pm_mt_match_sp_team_gifter": "チーム 指定ギフト{n}個",
+    "pm_mt_match_sp_team_point": "チーム {n}ポイント",
+}
+_bonus_unknown_task_keys: set = set()
+
+
+def _bonus_task_label(mission: dict) -> str:
+    """ミッションの達成条件文言。種別(指定ギフト/チーム/ポイント)を運ぶのは prompt key
+    だけなので、それを持たない mission(key未収集の旧record、または未知key)では種別を
+    名乗らず空を返す。呼び出し側は条件を伏せた汎用文言へ落とす。"""
+    prompts = mission.get("prompts") or []
+    for p in prompts:
+        key = p.get("key") or ""
+        text = _BONUS_TASK_TEXT.get(key)
+        if text is None:
+            continue
+        n = (p.get("fields") or {}).get("multi") or ""
+        return text.format(n=n) if n else ""
+    known = {p.get("key") for p in prompts} - set(_BONUS_TASK_TEXT)
+    for key in sorted(k for k in known if k):
+        if key.startswith("pm_mt_") and key not in _bonus_unknown_task_keys:
+            _bonus_unknown_task_keys.add(key)
+            logger.info(
+                "bonus mission prompt key %s has no display text; the burn-in band "
+                "shows the mission without naming its condition", key,
+                extra={"event": "overlay.bonus_prompt_key_unknown",
+                       "ctx": {"prompt_key": key,
+                               "target_type": mission.get("target_type") or 0}},
+            )
+    return ""
 _BONUS_GOLD_RGB = "F5A60A"
 _BONUS_HOT_RGB = "E6486B"
 _BONUS_TRACK_RGB = "0A0E14"
@@ -1383,12 +1824,13 @@ def _round_rect_path(x: float, y: float, w: float, h: float, r: float,
 
 
 def _battle_mode_label(battle: dict) -> str:
-    """形式ラベル: 個人戦 1v1 / 個人戦 Nコラ / チーム戦 NvM。"""
+    """形式ラベル(Web common.jsのbattleModeLabelと一致): チーム戦 NvM / 個人戦 Nコラ /
+    個人戦 1v1。形式はbattle["type"]ではなくcore.battleのruleで参加者から判定するため、
+    typeが未migrationの古いdataでも正しく出る。"""
     parts = battle.get("participants") or []
-    own_n = sum(1 for p in parts if p.get("is_own") or p.get("side") == "own")
-    opp_n = sum(1 for p in parts if p.get("side") == "opp" and not p.get("is_own"))
-    if battle.get("type") == "team":
-        return f"チーム戦 {own_n}v{opp_n}" if (own_n and opp_n) else "チーム戦"
+    if battle_type(parts) == "team":
+        sides = battle_sides(parts)
+        return ("チーム戦 " + "v".join(str(len(ids)) for ids, _ in sides)) if sides else "チーム戦"
     n = len(parts)
     return "個人戦 1v1" if n <= 2 else f"個人戦 {n}コラ"
 
@@ -1403,44 +1845,53 @@ def _fmt_clock(seconds: float) -> str:
 _SCORE_CLOCK_MAX_STEPS = 3600
 
 
-def _personal_lane_order(series: list) -> list:
-    """個人マルチ(3コラ+)用に、score_seriesのpartsから左→右の固定lane順を決める。
-    自分(side=="own")を先頭、相手は到達した最高scoreの降順で安定配置する(scoreが
-    時系列で前後しても並びは固定)。partsを持たない/2人以下なら空listを返し、呼び出し
-    側は従来の自陣/敵陣2分割へfallbackする。戻り値は[(participant_id, is_own), ...]。"""
-    side: dict = {}
-    best: dict = {}
-    for sm in series:
-        for pt in (sm.get("parts") or []):
-            pid = pt.get("id")
-            if pid is None:
-                continue
-            side[pid] = pt.get("side")
-            best[pid] = max(best.get(pid, 0), pt.get("score") or 0)
-    if len(side) <= 2:
-        return []
-    own_ids = [pid for pid, sd in side.items() if sd == "own"]
-    opp_ids = sorted((pid for pid, sd in side.items() if sd != "own"),
-                     key=lambda pid: -best.get(pid, 0))
-    return [(pid, True) for pid in own_ids] + [(pid, False) for pid in opp_ids]
-
-
 def _sample_lanes(sample: dict, lane_order: list) -> list:
-    """1サンプルのpartsをlane_order(固定順)へ写像した[(score, is_own)]を返す。
-    そのサンプルに居ないlaneはscore=0(セグメント幅0)で詰める。"""
-    by_id = {pt.get("id"): (pt.get("score") or 0) for pt in (sample.get("parts") or [])}
-    return [(by_id.get(pid, 0), is_own) for pid, is_own in lane_order]
+    """1サンプルのpartsをlane_order(固定順)へ写像した[(score, is_own)]を返す。segmentの
+    scoreは属する参加者scoreの合計(1人segmentなら本人のscore)。そのサンプルに居ない
+    参加者はscore=0(セグメント幅0)で詰める。"""
+    by_id = {str(pt.get("id")): (pt.get("score") or 0) for pt in (sample.get("parts") or [])}
+    return [(sum(by_id.get(pid, 0) for pid in ids), is_own) for ids, is_own in lane_order]
+
+
+def _step_xexpr(entries: list) -> str:
+    """[(end_time, x), ...](時刻昇順)を ffmpeg overlay の ``x`` 用step式へ畳む。個人マルチの
+    lane avatarはsegment幅と一緒に毎sample動くが、sampleごとにoverlay instanceを積むと1本の
+    動画で数百inputになりfilter graphが破綻する。1 laneにつきoverlayを1つだけ置き、xを時間の
+    階段関数で動かすことで instance数を lane数 に固定する(gift iconの``xexpr``と同じ仕組み)。
+    連続する同一xは1段に潰す。filtergraph parserはcommaで分割するので ``\\,`` で退避する。"""
+    merged: list = []
+    for end_t, x in entries:
+        if merged and merged[-1][1] == x:
+            merged[-1][0] = end_t
+        else:
+            merged.append([end_t, x])
+    expr = str(merged[-1][1])
+    for end_t, x in reversed(merged[:-1]):
+        expr = f"if(lt(t\\,{end_t:.3f})\\,{x}\\,{expr})"
+    return expr
 
 
 def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional[float],
-                               width: int, height: int, hold_seconds: float = 0.0) -> list:
-    """TikTok風のBattleスコアバーをASS dialogueで描く。Battle中だけ画面上部に
-    自陣(左)/敵陣(右)の2分割バーを表示し、score_seriesの各点を映像timeへ写像して
-    時系列で更新する(数値・境界が動く)。member別の時系列dataは無いため2分割で描画する。
+                               width: int, height: int, hold_seconds: float = 0.0,
+                               avatar_dir: Optional[Path] = None,
+                               use_real_avatars: bool = False,
+                               wide_em: float = NOMINAL_WIDE_EM,
+                               narrow_em: float = NOMINAL_NARROW_EM) -> tuple[list, list]:
+    """TikTok風のBattleスコアバーをASS dialogueで描く。Battle中だけ画面上部にバーを表示し、
+    score_seriesの各点を映像timeへ写像して時系列で更新する(数値・境界が動く)。形式に応じて
+    Web(common.jsのbattleBarUnits)と同じ分割で描く:
+      1v1        : 自陣(左)/敵陣(右)の2分割。
+      チーム戦NvM: 自陣/敵陣のチーム合計(own/opp)で2分割。Web同様memberには割らず、境界(VS)は
+                   陣営合計で時系列移動する。
+      個人Nコラ  : 参加者ごとにN分割(全員別色)。
+    全形式で陣営ごとに配信者アバターを合成する: 2極は両端、個人マルチは各segmentの先頭。
+    ``_build_ass``がavatar_specを解決してoverlay合成し、解決できなかった陣営はここで描く
+    イニシャル円盤がそのまま残る(アバターはASSより上に合成されるので、円盤は常に下敷きとして
+    描いておけばよい)。陣営色のringは写真の外側に残すので、両端の陣営色は途切れない。
 
     残り時間のcountdownはscore sampleと切り離し1秒刻みで描く(sample間隔に依らない)。
     Battle終了後も``hold_seconds``だけ最終スコアと勝敗を残す(勝利タイム表示)。保持は
-    次Battleの開始・動画終端で打ち切る。"""
+    次Battleの開始・動画終端で打ち切る。戻り値 (dialogue_lines, avatar_specs)。"""
     upper = video_duration if video_duration is not None else float("inf")
     mx = int(round(width * SCORE_BAR_MARGIN))
     left, right = mx, width - mx
@@ -1456,14 +1907,22 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
     meta_fs = max(9, int(round(bar_h * 0.46)))
     ini_fs = max(7, int(round(av_r * 1.05)))
     bord = max(1, int(round(bar_h * 0.06)))
+    shad = max(1, int(round(bar_h * 0.05)))
     meta_y = int(round(top - bar_h * 0.5))
 
     own_c, opp_c, track_c = _ass_bgr(_SCORE_OWN_RGB), _ass_bgr(_SCORE_OPP_RGB), _ass_bgr(_SCORE_TRACK_RGB)
     opp_palette_c = [_ass_bgr(c) for c in _SCORE_OPP_PALETTE]
+    notch_c, pill_c, shadow_c = _ass_bgr(_SCORE_NOTCH_RGB), _ass_bgr(_SCORE_PILL_RGB), _ass_bgr("000000")
     own_cx = left + pad + av_r
     opp_cx = right - pad - av_r
     own_num_x = own_cx + av_r + gap
     opp_num_x = opp_cx - av_r - gap
+    # 実写真はringの内側に収める。ring厚ぶん小さい画像を円盤の中心へ重ねると、下敷きの
+    # 陣営色円盤が縁として残り、写真の有無に関わらず端の見た目が揃う。
+    ring = max(1, int(round(av_r * _SCORE_RING_FRAC)))
+    av_size = max(4, 2 * (av_r - ring))
+    gloss_h = max(2, int(round(bar_h * _SCORE_GLOSS_FRAC)))
+    shadow_off = max(2, int(round(bar_h * 0.12)))
 
     def shape(layer, start, end, color, path, alpha=""):
         return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
@@ -1471,12 +1930,57 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
 
     def text(layer, start, end, x, y, an, fs, body):
         return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
-                f"{{\\an{an}\\pos({x},{y})\\fs{fs}\\b1\\1c&H00FFFFFF&\\3c&H00000000&\\bord{bord}\\shad1}}{body}")
+                f"{{\\an{an}\\pos({x},{y})\\fs{fs}\\b1\\1c&H00FFFFFF&\\3c&H00000000&"
+                f"\\bord{bord}\\shad{shad}\\4c&H00000000&}}{body}")
 
     def disc(layer, start, end, cx, color):
+        """陣営色の塗り円盤。実写真が解決すればring厚ぶん内側を覆われ、縁だけが残る。"""
         return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
-                f"{{\\an7\\pos({cx - av_r},{int(round(cy - av_r))})\\1c{color}\\3c&H00FFFFFF&"
-                f"\\bord{bord}\\shad0\\p1}}{_circle_path(av_r)}")
+                f"{{\\an7\\pos({int(round(cx - av_r))},{int(round(cy - av_r))})\\1c{color}"
+                f"\\bord0\\shad0\\p1}}{_circle_path(av_r)}")
+
+    def gloss(layer, start, end, x, w, rl, rr):
+        """fill上端に薄い白帯を重ねて、平坦な塗りに軽い立体感(艶)を出す。"""
+        if w < 2:
+            return
+        out.append(shape(layer, start, end, notch_c,
+                         _round_rect_path(x, top, w, gloss_h, gloss_h / 2, rl, rr),
+                         alpha=_SCORE_GLOSS_ALPHA))
+
+    notch_w = max(2, int(round(bar_h * 0.09)))
+    # ノッチを立てられる範囲。端のavatar zoneまで寄せるとdiamondがbarの丸端からはみ出し、
+    # avatarにも重なるので、両端のavatar+余白ぶんを除いた内側にclampする。片側が0点の
+    # 試合ではsplitが端に張り付くが、その場合も境界はここで止めて枠内に収める。
+    notch_min = left + pad + av_r * 2
+    notch_max = right - pad - av_r * 2
+
+    def notch(layer, start, end, x):
+        """splitに立てるVSノッチ。太い半透明の白帯でglowを近似し、その上に芯の細帯と
+        中央のdiamondを重ねる。境界がどこかを一目で分かるようにする。"""
+        if notch_max <= notch_min:
+            return
+        nw = notch_w
+        xi = int(round(min(max(x, notch_min), notch_max)))
+        out.append(shape(layer, start, end, notch_c,
+                         _round_rect_path(xi - nw * 1.5, top, nw * 3, bar_h, 0),
+                         alpha=_SCORE_GLOW_ALPHA))
+        out.append(shape(layer + 1, start, end, notch_c,
+                         _round_rect_path(xi - nw / 2, top, nw, bar_h, 0)))
+        d = max(3, int(round(bar_h * 0.26)))
+        out.append(shape(layer + 1, start, end, notch_c,
+                         f"m {xi} {cyi - d} l {xi + d} {cyi} l {xi} {cyi + d} l {xi - d} {cyi}"))
+
+    def pill(layer, start, end, x, w):
+        """mode/clockを収める丸pill。裸の文字が映像に直接乗ると読みにくく安っぽいので、
+        暗い半透明の下地を敷いて情報の塊として見せる。"""
+        ph = meta_fs + max(4, int(round(meta_fs * 0.55)))
+        out.append(shape(layer, start, end, pill_c,
+                         _round_rect_path(x, meta_y - ph / 2, w, ph, ph / 2),
+                         alpha=_SCORE_PILL_ALPHA))
+
+    def pill_w(body: str) -> int:
+        pad_x = max(4, int(round(meta_fs * 0.55)))
+        return int(round(_estimate_width(body, meta_fs, wide_em, narrow_em))) + pad_x * 2
 
     cyi = int(round(cy))
     out: list = []
@@ -1490,19 +1994,30 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
         if split - left >= 2:
             out.append(shape(8, start, end, own_c,
                              _round_rect_path(left, top, split - left, bar_h, radius, True, False)))
+            gloss(8, start, end, left, split - left, True, False)
         if right - split >= 2:
             out.append(shape(8, start, end, opp_c,
                              _round_rect_path(split, top, right - split, bar_h, radius, False, True)))
-        out.append(text(8, start, end, own_num_x, cyi, 4, num_fs, f"{own:,}"))
-        out.append(text(8, start, end, opp_num_x, cyi, 6, num_fs, f"{opp:,}"))
+            gloss(8, start, end, split, right - split, False, True)
+        notch(8, start, end, split)
+        out.append(text(9, start, end, own_num_x, cyi, 4, num_fs, f"{own:,}"))
+        out.append(text(9, start, end, opp_num_x, cyi, 6, num_fs, f"{opp:,}"))
 
     seg_sep = max(2, int(round(bar_h * 0.05)))
 
-    def emit_lanes(start, end, lanes):
+    # 個人マルチのlane avatarは、laneごとに1つのoverlayを置いてxを時間で動かす(_step_xexpr)。
+    # ここではlaneごとに [(segment終了time, そのsampleでのx), ...] を貯める。segmentがavatarを
+    # 置けない幅のsampleでは画面外のxを積み、そのlaneだけ一時的に隠す。
+    lane_tracks: dict = {}
+    lane_reps: dict = {}
+
+    def emit_lanes(start, end, lanes, reps=None):
         """個人マルチ(3コラ+): 1本のバーを各参加者のscore比でN分割し、各segment内に
         scoreを描く。色は陣営(segment)ごとに変える: 自分=own色、相手は出現順(score降順)に
         opp_palette_cの別色で塗り分け、自分を強調する。``lanes`` は左→右の固定順
-        [(score, is_own), ...]。全score=0なら均等割り。"""
+        [(score, is_own), ...]。全score=0なら均等割り。
+        各segmentの先頭には陣営色ringのアバターを置き、誰のlaneかを色だけに頼らず示す。
+        segmentが狭いときはavatarを優先して数値を省き、avatarも入らない幅なら両方省く。"""
         n = len(lanes)
         if n == 0:
             return
@@ -1523,12 +2038,65 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
             if seg_w >= 2:
                 out.append(shape(8, start, end, seg_c,
                                  _round_rect_path(x, top, seg_w, bar_h, radius, i == 0, i == n - 1)))
-            if seg_w >= 8:
+                gloss(8, start, end, x, seg_w, i == 0, i == n - 1)
+            if i > 0 and seg_w >= 2:
+                notch(8, start, end, x)
+            # segment先頭のavatar。ringぶんの余白を見て、置ける幅があるsampleだけ表示する。
+            # 2本目以降のsegmentは直前にノッチが立つので、その芯幅ぶん右へ逃がして重なりを避ける。
+            lead = pad + (notch_w * 2 if i > 0 else 0)
+            av_cx = x + lead + av_r
+            fits_avatar = seg_w >= av_r * 2 + lead + pad
+            if fits_avatar:
+                out.append(disc(9, start, end, av_cx, seg_c))
+                rep = (reps or {}).get(i)
+                if rep:
+                    ini = _ass_escape((_strip_bidi_controls(rep.get("nickname")).strip()[:1] or "＊")).upper()
+                    out.append(text(9, start, end, int(round(av_cx)), cyi, 5, ini_fs, ini))
+                    lane_reps.setdefault(i, rep)
+            lane_tracks.setdefault(i, []).append(
+                (end, int(round(av_cx - av_size / 2)) if fits_avatar else -av_size - 8)
+            )
+            # 数値はavatarを置いた残り幅に収まるときだけ描く(avatarを潰してまで出さない)。
+            used = av_cx + av_r - x if fits_avatar else 0
+            text_w = seg_w - used - pad
+            if text_w >= 8:
                 label = f"{max(0, score):,}"
-                # 狭いsegmentでも収まるよう数字fontをsegment幅に合わせて縮める。
-                fs = min(num_fs, max(8, int(seg_w / (len(label) * 0.62))))
-                out.append(text(8, start, end, int(round(x + seg_w / 2)), cyi, 5, fs, label))
+                fs = min(num_fs, max(8, int(text_w / (len(label) * 0.62))))
+                out.append(text(9, start, end, int(round(x + used + text_w / 2)), cyi, 5, fs, label))
             x += seg_w + seg_sep
+
+    # 陣営ごとに合成する配信者アバター(overlay)。呼び出し側(_build_ass)が解決して焼き込む。
+    # 解決できなかった陣営は、下に常に描いてあるイニシャル円盤がそのまま残る。
+    avatar_specs: list = []
+
+    def add_avatar_spec(rep, cx, start, end, xexpr=None):
+        """陣営 representative host のアバターoverlay specを積む。user_id候補と保存URLを持たせ、
+        解決側でcache/URLからcircle画像を作る。sizeは陣営色ringの内側に収まる直径。
+        cacheの有無で積むかどうかを決めない: 解決側がcache→URL downloadの順で解決し、
+        どちらも駄目なspecだけを落とすので、ここで先回りに諦めるとURL経路が死ぬ。"""
+        if not rep:
+            return
+        uids = [rep.get("user_id"), rep.get("unique_id"), rep.get("nickname")]
+        uids = [u for u in uids if u]
+        url = rep.get("avatar") or ""
+        if not uids and not url:
+            return
+        key = (avatar_key(str(uids[0])) if uids else hashlib.sha1(url.encode("utf-8")).hexdigest()[:16])
+        spec = {
+            "kind": "avatar",
+            "key": key,
+            "uids": [str(u) for u in uids],
+            "url": url,
+            "size": av_size,
+            "x": int(round(cx - av_size / 2)),
+            "y": int(round(cy - av_size / 2)),
+            "start": start,
+            "end": end,
+            "static": True,
+        }
+        if xexpr is not None:
+            spec["xexpr"] = xexpr
+        avatar_specs.append(spec)
 
     # Resolve each battle's media window first, so the post-battle hold can be
     # clamped to the next battle's start (two bars never overlap).
@@ -1560,16 +2128,33 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
 
         parts = battle.get("participants") or []
         mode = _ass_escape(_battle_mode_label(battle))
-        # 個人マルチ(3コラ+)は参加者ごとのlaneにN分割。1v1・チーム戦、及びparts時系列を
-        # 持たない旧dataは従来どおり自陣/敵陣の2分割へfallbackする。
-        lane_order = _personal_lane_order(series) if battle.get("type") != "team" else []
-        multi = bool(lane_order)
+        # 形式ごとの分割はWeb(common.jsのbattleBarUnits)と一致させる。segment単位(陣営)は
+        # core.battleのbattle_sidesが決めるので、2陣営なら2極、3陣営以上ならN分割:
+        #   1v1 / チーム戦2v2 : 自陣/敵陣の合計(own/opp)で2分割。memberには割らない。
+        #   個人マルチ(1:1:1等) : 陣営(=1人)ごとのN分割(lane)。
+        # 2極は1v1もチーム戦も同じ emit_bar で描く(sm["own"]/["opp"]が陣営合計)。
+        lane_order = battle_sides(parts)
+        # score_seriesがparts(host別score)を持たない古いrecordでは陣営別の内訳を時系列で
+        # 復元できず、N分割は描けない(全lane=0は emit_lanes の均等割りに落ちて捏造になる)。
+        # その場合はrecordが実際に持つown/oppの2極だけを描く。
+        has_lane_scores = any(sm.get("parts") for sm in series)
+        multi = len(lane_order) > 2 and has_lane_scores
+        # 陣営別内訳を欠く個人マルチ。旧collectorのown/oppは首位の敵という現行semanticsと
+        # 別物なので、勝利タイムでheadline(opp_score)と混ぜない目印にする。
+        lanes_unavailable = len(lane_order) > 2 and not has_lane_scores
 
         # Static elements over the whole visible span (battle + hold).
+        # 落ち影 → track の順に敷く。影はbarと同じ形を下へずらした黒で、映像の明暗に関わらず
+        # barが板として浮いて見えるようにする(平坦な塗りだけだと映像に沈んで安っぽく見える)。
+        out.append(shape(6, win_start, disp_end, shadow_c,
+                         _round_rect_path(left, top + shadow_off, track_w, bar_h, radius),
+                         alpha=_SCORE_SHADOW_ALPHA))
         out.append(shape(7, win_start, disp_end, track_c,
                          _round_rect_path(left, top, track_w, bar_h, radius), alpha="\\1a&H45&"))
         if not multi:
-            # 端のavatar disc/イニシャルは2分割表示のみ。N分割は各segmentに数値を描く。
+            # 2極表示(1v1/チーム戦)は両端に representative host を出す。イニシャル円盤は常に
+            # 下敷きとして描き、その上にavatar specを必ず積む。avatarはASSより後に合成される
+            # ので、解決できれば写真がイニシャルを覆い、駄目なら円盤がそのまま残る。
             own_p = next((p for p in parts if p.get("is_own")), None)
             opp_p = max((p for p in parts if p.get("side") == "opp" and not p.get("is_own")),
                         key=lambda p: p.get("score", 0) or 0, default=None)
@@ -1578,12 +2163,31 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
             own_ini = _ass_escape((_strip_bidi_controls((own_p or {}).get("nickname")).strip()[:1] or "自")).upper()
             opp_ini = _ass_escape((_strip_bidi_controls((opp_p or {}).get("nickname")).strip()[:1] or "敵")).upper()
             out.append(disc(9, win_start, disp_end, own_cx, own_c))
-            out.append(disc(9, win_start, disp_end, opp_cx, opp_c))
             out.append(text(9, win_start, disp_end, own_cx, cyi, 5, ini_fs, own_ini))
+            out.append(disc(9, win_start, disp_end, opp_cx, opp_c))
             out.append(text(9, win_start, disp_end, opp_cx, cyi, 5, ini_fs, opp_ini))
+            if use_real_avatars:
+                add_avatar_spec(own_p, own_cx, win_start, disp_end)
+                add_avatar_spec(opp_p, opp_cx, win_start, disp_end)
+        # mode / clock は丸pillの中に収める。clockは毎秒張り替えるが、pillは最大幅("59:59")
+        # で1枚だけ敷いて使い回す(毎秒pillを積むとdialogueが倍になるだけで見た目は同じ)。
+        mode_plain = _battle_mode_label(battle)
+        mode_pw = pill_w(mode_plain)
+        clock_pw = pill_w("59:59")
+        pill(8, win_start, disp_end, left - max(4, int(round(meta_fs * 0.55))), mode_pw)
+        pill(8, win_start, disp_end, right + max(4, int(round(meta_fs * 0.55))) - clock_pw, clock_pw)
         out.append(text(9, win_start, disp_end, left, meta_y, 4, meta_fs, mode))
 
         # Fills + numbers per score sample (battle phase: scores change discretely).
+        lane_tracks.clear()
+        lane_reps.clear()
+        parts_by_id = {str(p.get("user_id")): p for p in parts if p.get("user_id")}
+        # laneの representative host = その陣営で最高scoreのmember(2極の敵陣選出と同じ基準)。
+        lane_rep_by_index = {
+            i: max((parts_by_id[pid] for pid in ids if pid in parts_by_id),
+                   key=lambda p: p.get("score", 0) or 0, default=None)
+            for i, (ids, _own) in enumerate(lane_order)
+        }
         n = len(series)
         for i, sm in enumerate(series):
             s_pts = max(win_start, to_media(sm.get("t") or 0))
@@ -1591,7 +2195,7 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
             if e_pts <= s_pts:
                 continue
             if multi:
-                emit_lanes(s_pts, e_pts, _sample_lanes(sm, lane_order))
+                emit_lanes(s_pts, e_pts, _sample_lanes(sm, lane_order), lane_rep_by_index)
             else:
                 emit_bar(s_pts, e_pts, sm.get("own") or 0, sm.get("opp") or 0)
 
@@ -1606,21 +2210,34 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
 
         # Victory-time hold: freeze the final score and show the result.
         if disp_end > win_end + 1e-6:
+            last = series[-1]
             if multi:
-                emit_lanes(win_end, disp_end, _sample_lanes(series[-1], lane_order))
+                emit_lanes(win_end, disp_end, _sample_lanes(last, lane_order), lane_rep_by_index)
+            elif lanes_unavailable:
+                # headline(opp_score=首位の敵)はこのrecordのseries oppと別semanticsのため、
+                # 混ぜると勝利タイムでバーが飛ぶ。seriesの最終値をそのまま保持する。
+                emit_bar(win_end, disp_end, last.get("own") or 0, last.get("opp") or 0)
             else:
-                fown = max(0, battle.get("own_score") or (series[-1].get("own") or 0))
-                fopp = max(0, battle.get("opp_score") or (series[-1].get("opp") or 0))
+                fown = max(0, battle.get("own_score") or (last.get("own") or 0))
+                fopp = max(0, battle.get("opp_score") or (last.get("opp") or 0))
                 emit_bar(win_end, disp_end, fown, fopp)
             result = {"win": "WIN", "lose": "LOSE", "draw": "DRAW"}.get(battle.get("result"), "0:00")
             out.append(text(9, win_end, disp_end, right, meta_y, 6, meta_fs, result))
-    return out
+
+        # 個人マルチのlane avatar: このBattleぶんの位置履歴を1 laneあたり1つのoverlayへ畳む
+        # (勝利タイムぶんも溜め終わってからなので、hold中も正しい位置に残る)。
+        if use_real_avatars:
+            for i, entries in lane_tracks.items():
+                rep = lane_reps.get(i)
+                if rep and entries:
+                    add_avatar_spec(rep, 0, win_start, disp_end, xexpr=_step_xexpr(entries))
+    return out, avatar_specs
 
 
 def _build_bonus_dialogues(battles: list, to_media, video_duration: Optional[float],
                            width: int, height: int) -> list:
     """Match Bonus Mission（倍率タイム）をスコアバー直下に焼き込む。該当時間帯のみ表示:
-    予告(まもなく×N) → ミッション期間(達成で×N) → 達成(×N解放) → 倍率期間(×Nのcountdown帯)
+    予告(まもなく条件で×N) → ミッション期間(条件で×N) → 達成(×N解放) → 倍率期間(×Nのcountdown帯)
     → 確定(獲得ボーナス💎を数秒)。時刻はevent実値の絶対timestamp(preview/task/reward_start_ts)を
     映像timeへ写像する。ミッション帯の終端はtask_durationで確定したミッション実終了(mission_end)で、
     倍率開始ではない。達成〜倍率開始のsettle gapは達成beatで埋め、各帯の境界がズレないようにする。
@@ -1661,13 +2278,19 @@ def _build_bonus_dialogues(battles: list, to_media, video_duration: Optional[flo
             continue
         for m in battle.get("bonus_missions") or []:
             mult = m.get("multiplier") or 0
-            tag = f"x{mult}" if mult else "BONUS"
+            # 倍率タイム中のギフト倍率(reward_multiple)。達成条件("チーム 200ポイント"等)の
+            # 直後に置くため、単なる"x2"だと条件値との掛け算に読める。何が2倍になるかを
+            # 文言で明示する。倍率不明(START取り逃し)のときは値を騙らない。
+            tag = f"ギフト{mult}倍" if mult else "ギフト倍率"
             preview_s = m.get("preview_start_ts")
             task_s = m.get("task_start_ts")
             task_dur = m.get("task_duration") or 0
             reward_s = m.get("reward_start_ts")
             reward_dur = m.get("reward_duration") or 0
             achieved = bool(m.get("achieved"))
+            # 達成条件はミッション種別ごとに違う(指定ギフト/チーム/ポイント)。判別できる
+            # prompt keyが無いmissionでは条件を伏せ、種別を誤って名乗らない。
+            task_label = _bonus_task_label(m)
 
             # ミッションの実終了時刻: task_durationで確定。無ければ倍率開始へfallbackする。
             # reward_sがあれば必ずそれ以前へ丸める(倍率帯と重ねない)。
@@ -1675,20 +2298,23 @@ def _build_bonus_dialogues(battles: list, to_media, video_duration: Optional[flo
             if mission_end and reward_s:
                 mission_end = min(mission_end, reward_s)
 
-            # ① 予告: ミッション開始前。これから来る倍率を告知する(該当区間のみ)。
+            # ① 予告: ミッション開始前。これから来る倍率と達成条件を告知する(該当区間のみ)。
             if preview_s and task_s and task_s > preview_s:
-                band(preview_s, task_s, f"BONUS MISSION  まもなく {tag}", gold, "\\1a&H50&")
+                head = f"まもなく {task_label}で{tag}" if task_label else f"まもなく {tag}"
+                band(preview_s, task_s, f"BONUS MISSION  {head}", gold, "\\1a&H50&")
 
             # ② ミッション期間: 進捗の逐次値は持たないため目標(達成で×N)を提示する。終端は
             #    倍率開始ではなくミッション実終了(mission_end)。以前はreward開始まで延ばしており
             #    達成〜倍率開始のsettle gap分だけ「達成で」表示が後ろへズレていた。
             if task_s and mission_end and mission_end > task_s:
-                band(task_s, mission_end, f"BONUS MISSION  達成で {tag}", gold, "\\1a&H40&")
+                goal = f"{task_label}で{tag}" if task_label else f"達成で{tag}"
+                band(task_s, mission_end, f"BONUS MISSION  {goal}", gold, "\\1a&H40&")
 
             # ③ 達成: ミッション終了〜倍率開始(settle)を、達成済みなら達成beatで埋める。
             #    この区間を②の「達成で(=未達成)」で跨がせないことがズレ解消の要点。
             if achieved and reward_s and mission_end and reward_s > mission_end:
                 band(mission_end, reward_s, f"達成  {tag} 解放", gold, "\\1a&H28&")
+
 
             # ④ 倍率期間: ×N のcountdown帯(残り時間で減るfill)。最も目立たせる。
             if reward_s and reward_dur:
@@ -1707,7 +2333,7 @@ def _build_bonus_dialogues(battles: list, to_media, video_duration: Optional[flo
                             out.append(shape(7, t, seg_end, hot,
                                              _round_rect_path(left, top, fill_w, band_h, radius)))
                         out.append(text(8, t, seg_end, (left + right) // 2, 5,
-                                        f"GIFT {tag}  {_fmt_clock(re_ - t)}"))
+                                        f"{tag}  {_fmt_clock(re_ - t)}"))
                         t += 1.0
                         steps += 1
 
@@ -1723,6 +2349,63 @@ def _build_bonus_dialogues(battles: list, to_media, video_duration: Optional[flo
     return out
 
 
+def _subtitle_font(cfg: dict, height: int) -> int:
+    """字幕のfont size(px)。Commentと同じく基準高さから実解像度へ比例させる。"""
+    return max(8, int(round(cfg["video_overlay_subtitle_font_size"] * height / BASE_HEIGHT)))
+
+
+def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
+                              width: int, height: int, cfg: dict,
+                              wide_em: float, narrow_em: float) -> tuple[list, dict]:
+    """転写segmentをASSのDialogue行へ。時刻変換は一切しない。
+
+    segments_jsonのstart/endは転写時にmedia軸(このmp4のPTS秒)へ再map済みで、焼き込みが
+    使う軸と同一なので、壁時計mapper(to_media)へ通してはならない。通すと二重変換になる。
+    """
+    fs = _subtitle_font(cfg, height)
+    pct = cfg.get("video_overlay_subtitle_position_percent") or 0
+    cx = width // 2
+    cy = int(round(height * pct / 100.0))
+    max_w = int(width * SUBTITLE_WIDTH_FRAC)
+    upper = video_duration if video_duration is not None else float("inf")
+    lines: list = []
+    dropped_after = 0
+    truncated = 0
+    for seg in segments:
+        start = float(seg["start"])
+        end = float(seg["end"])
+        if start >= upper:
+            dropped_after += 1
+            continue
+        end = min(end, upper)
+        if end <= start:
+            dropped_after += 1
+            continue
+        text = _ass_escape(_strip_bidi_controls(seg["text"]))
+        if not text:
+            continue
+        wrapped = _wrap_text(text, fs, max_w, wide_em, narrow_em)
+        if len(wrapped) > SUBTITLE_MAX_LINES:
+            truncated += 1
+            wrapped = wrapped[:SUBTITLE_MAX_LINES]
+        body = "\\N".join(wrapped)
+        lines.append(
+            f"Dialogue: 7,{_ass_timestamp(start)},{_ass_timestamp(end)},Subtitle,,0,0,0,,"
+            f"{{\\an5\\pos({cx},{cy})}}{body}"
+        )
+    if dropped_after or truncated:
+        logger.info(
+            "subtitle layout: %d line(s) placed, %d outside the video, %d truncated to %d lines",
+            len(lines), dropped_after, truncated, SUBTITLE_MAX_LINES,
+            extra={"event": "overlay.subtitles_laid_out",
+                   "ctx": {"placed": len(lines), "dropped_after_end": dropped_after,
+                           "truncated": truncated, "max_lines": SUBTITLE_MAX_LINES,
+                           "font_size": fs, "position_percent": pct}},
+        )
+    return lines, {"placed": len(lines), "dropped_after_end": dropped_after,
+                   "truncated": truncated, "font_size": fs}
+
+
 def _build_ass(events: list, started_at: float, ended_at: Optional[float], video_duration: Optional[float],
                width: int, height: int, cfg: dict, anchors: Optional[list] = None,
                avatar_dir: Optional[Path] = None,
@@ -1732,11 +2415,14 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
                use_comment_layer: bool = True,
                time_source: str = "arrival",
                debug_sink: Optional[list] = None,
-               media_pts: Optional[list] = None) -> tuple[str, list, dict, Optional[dict]]:
+               media_pts: Optional[list] = None,
+               subtitle_segments: Optional[list] = None) -> tuple[str, list, dict, Optional[dict]]:
     comment_fs = _comment_font(cfg, height)
     icon_px = _icon_px(cfg, height)
     coin_fs = max(10, int(round(height * COIN_REF_PX / BASE_HEIGHT)))
     outline = max(1, int(round(comment_fs * 0.08)))
+    subtitle_fs = _subtitle_font(cfg, height)
+    subtitle_outline = max(2, int(round(subtitle_fs * 0.10)))
     upper = video_duration if video_duration is not None else float("inf")
     # Mode A (arrival): place every timestamp through the consumer-arrival wall->pts
     # map. Mode B (server): place events by their TikTok create_time and the battle
@@ -1750,12 +2436,18 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         if source is None:
             logger.warning(
                 "overlay Mode B requested but no live create_time to anchor on; "
-                "Mode B output is unavailable for this recording"
+                "Mode B output is unavailable for this recording",
+                extra={"event": "overlay.time_bridge_unavailable",
+                       "ctx": {"time_source": time_source, "mode": "B",
+                               **_bridge_ctx(None)}},
             )
         else:
             logger.info(
                 "overlay Mode B anchored: C=%.3f on %d/%d live events (%d backlog excluded)",
                 source["c_value"], source["n_anchor"], source["n_samples"], source["n_backlog"],
+                extra={"event": "overlay.time_bridge_resolved",
+                       "ctx": {"time_source": time_source, "mode": "B",
+                               **_bridge_ctx(source)}},
             )
     # event placement on the mp4 timeline. Mode B uses create_time (source clock);
     # an event without create_time cannot be source-placed and is dropped (counted),
@@ -1771,10 +2463,34 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         )
         if bonus_source is None:
             logger.warning(
-                "no live create_time to anchor bonus windows; placing them on the arrival axis"
+                "no live create_time to anchor bonus windows; placing them on the arrival axis",
+                extra={"event": "overlay.time_bridge_unavailable",
+                       "ctx": {"time_source": time_source, "mode": "A",
+                               **_bridge_ctx(None)}},
+            )
+        else:
+            # Mode Aでも同じ橋を建てているので、その原点Cと根拠件数をAでも構造化して残す。
+            # 原点破綻はModeに依らず「全eventが動画長の外」という同じ症状で出る。
+            logger.info(
+                "overlay Mode A source bridge: C=%.3f on %d/%d live events (%d backlog excluded)",
+                bonus_source["c_value"], bonus_source["n_anchor"],
+                bonus_source["n_samples"], bonus_source["n_backlog"],
+                extra={"event": "overlay.time_bridge_resolved",
+                       "ctx": {"time_source": time_source, "mode": "A",
+                               **_bridge_ctx(bonus_source)}},
             )
     to_bonus = to_media if bonus_source is None else bonus_source["source_to_pts"]
     dropped_no_ct = 0
+    # 範囲外dropの内訳。過去のMode B原点破綻では全eventが範囲外へ落ちたにもかかわらず
+    # 「描くものが無い」としか残らず、調査を正反対へ誘導した。境界のどちら側へ落ちたかと
+    # offsetの実際の範囲を必ず数える。
+    dropped_before = 0
+    dropped_after = 0
+    offset_min: Optional[float] = None
+    offset_max: Optional[float] = None
+    time_min: Optional[float] = None
+    time_max: Optional[float] = None
+    placed = 0
 
     def event_offset(ev) -> Optional[float]:
         if time_source != "server":
@@ -1793,10 +2509,16 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     for event in events:
         # Place the event on the video timeline (not wall-clock) so comments/gifts
         # stay locked to the footage; ``delay`` then nudges by a user offset.
+        raw_time = event.get("time")
+        if raw_time is not None:
+            time_min = raw_time if time_min is None else min(time_min, raw_time)
+            time_max = raw_time if time_max is None else max(time_max, raw_time)
         offset = event_offset(event)
         if offset is None:
             dropped_no_ct += 1
             continue
+        offset_min = offset if offset_min is None else min(offset_min, offset)
+        offset_max = offset if offset_max is None else max(offset_max, offset)
         if debug_sink is not None and event.get("kind") in ("comment", "gift"):
             debug_sink.append({
                 "kind": event.get("kind"),
@@ -1804,11 +2526,18 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
                 "create_time": event.get("create_time"),
                 "offset_arrival": round(to_media(event["time"] or 0) + delay, 3),
                 "offset": round(offset, 3),
+                # プレビュー窓の自動選定がgiftの重みとmin diamondsを効かせるために読む。
+                "diamonds": event.get("diamonds"),
                 "nick": event.get("user_nickname") or "",
                 "text": (event.get("comment") or event.get("text") or "")[:80],
             })
-        if offset < 0 or offset > upper:
+        if offset < 0:
+            dropped_before += 1
             continue
+        if offset > upper:
+            dropped_after += 1
+            continue
+        placed += 1
         kind = event["kind"]
         if kind == "comment" and cfg["video_overlay_comments"]:
             body = event.get("comment") or event.get("text") or ""
@@ -1818,6 +2547,7 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
                     "nick": event.get("user_nickname") or "",
                     "user_id": event.get("user_unique_id") or event.get("user_nickname") or "",
                     "text": body,
+                    "emotes": event.get("emotes"),
                 })
         elif kind == "gift" and cfg["video_overlay_gifts"]:
             diamonds = event.get("diamonds") or 0
@@ -1845,12 +2575,21 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     last_offset = comments[-1]["offset"] if comments else 0.0
     comment_end = video_duration if video_duration is not None else last_offset + COMMENT_END_HOLD_SECONDS
 
+    metrics = _comment_metrics(width, height, comment_fs, wide_em, narrow_em)
+    # Comments are drawn by the PIL colour-emoji layer when its shaper is available;
+    # only then are the ASS comment dialogues suppressed. Without it (Pillow/fonts
+    # missing, or an explicit fallback after a layer-render failure) comments fall
+    # back to the monochrome ASS feed so they still show.
+    shaper = _make_comment_shaper() if (use_comment_layer and cfg["video_overlay_comments"] and comments) else None
     # Real-avatar resolution: a comment whose commenter avatar was cached at
     # capture time gets a composited circular photo (ASS disc omitted for it); the
-    # rest keep the initial-letter disc. avatar_files feeds the overlay renderer.
-    metrics = _comment_metrics(width, height, comment_fs, wide_em, narrow_em)
+    # rest keep the initial-letter disc. The circular photo can only be composited by
+    # the PIL comment layer, so it is resolved only when the shaper exists. On the ASS
+    # fallback path (shaper is None — Pillow/fonts missing or a colour-layer failure)
+    # nothing can draw the photo; leaving avatars unresolved keeps has_avatar False so
+    # every comment gets its initial-letter disc instead of a blank avatar hole.
     avatar_files: dict = {}
-    if avatar_dir is not None and cfg.get("video_overlay_real_avatars"):
+    if shaper is not None and avatar_dir is not None and cfg.get("video_overlay_real_avatars"):
         for c in comments:
             uid = c.get("user_id")
             if not uid or uid in avatar_files:
@@ -1862,11 +2601,12 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
             except OSError:
                 continue
     avatar_ids = set(avatar_files)
-    # Comments are drawn by the PIL colour-emoji layer when its shaper is available;
-    # only then are the ASS comment dialogues suppressed. Without it (Pillow/fonts
-    # missing, or an explicit fallback after a layer-render failure) comments fall
-    # back to the monochrome ASS feed so they still show.
-    shaper = _make_comment_shaper() if (use_comment_layer and cfg["video_overlay_comments"] and comments) else None
+    # Splice TikTok custom emotes into the comment text as inline-image sentinels
+    # before layout so wrapping accounts for them (images downloaded by _resolve_emotes
+    # before the layer render). Only on the colour-layer path; the ASS fallback has no
+    # shaper and keeps the raw [shortcode]/placeholder text.
+    if shaper is not None:
+        _apply_comment_emotes(comments, shaper)
     placements = _layout_comment_feed(comments, metrics, comment_fs, comment_end, avatar_ids, shaper)
     comment_lines = [] if shaper is not None else _build_comment_dialogues(placements, metrics)
     drawable_comments = sum(1 for p in placements if not p["empty"])
@@ -1875,13 +2615,24 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     # can drop below the bar when it is present (avoids overlapping the top strip).
     score_lines: list = []
     bonus_lines: list = []
+    score_avatars: list = []
     if cfg.get("video_overlay_score_bar") and battles:
-        score_lines = _build_score_bar_dialogues(
+        score_lines, score_avatars = _build_score_bar_dialogues(
             battles, to_score, video_duration, width, height,
             cfg.get("video_overlay_score_bar_hold_seconds") or 0,
+            avatar_dir=avatar_dir,
+            use_real_avatars=bool(cfg.get("video_overlay_real_avatars")),
+            wide_em=wide_em, narrow_em=narrow_em,
         )
         bonus_lines = _build_bonus_dialogues(battles, to_bonus, video_duration, width, height)
     gift_band_top = SCORE_BAR_GIFT_BAND_TOP if score_lines else GIFT_BAND_TOP
+
+    # STT字幕。時刻は既にmedia軸なのでmapperを通さない(_build_subtitle_dialogues参照)。
+    subtitle_lines: list = []
+    subtitle_stats = {"placed": 0, "dropped_after_end": 0, "truncated": 0, "font_size": 0}
+    if cfg.get("video_overlay_subtitles") and subtitle_segments:
+        subtitle_lines, subtitle_stats = _build_subtitle_dialogues(
+            subtitle_segments, video_duration, width, height, cfg, wide_em, narrow_em)
 
     gift_lines, overlays = _build_gift_layout(
         gifts, width, height, coin_fs, icon_px, cfg["video_overlay_gift_seconds"], wide_em, narrow_em,
@@ -1895,6 +2646,10 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         overlays.sort(key=lambda o: o["diamonds"], reverse=True)
         dropped_icons = len(overlays) - MAX_GIFT_OVERLAYS
         overlays = overlays[:MAX_GIFT_OVERLAYS]
+    # Score-bar avatars are composited by the same overlay graph but are not gift
+    # icons (no diamond count), so they are appended after the gift-count cap rather
+    # than competing with gifts for the MAX_GIFT_OVERLAYS budget.
+    overlays.extend(score_avatars)
 
     header = (
         "[Script Info]\n"
@@ -1916,11 +2671,15 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         # Score bar: outline style, top-left aligned; per-line overrides set the real
         # font size, colour and position for each shape/number/avatar.
         f"Style: Score,{COMMENT_FONT},20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,"
-        f"100,100,0,0,1,2,0,7,0,0,0,1\n\n"
+        f"100,100,0,0,1,2,0,7,0,0,0,1\n"
+        # STT字幕: 中央揃え・太めの縁取り。映像の明暗に関わらず読めるよう、Commentより
+        # 強い輪郭と影を付ける(位置は行ごとの\posで与える)。
+        f"Style: Subtitle,{COMMENT_FONT},{subtitle_fs},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,"
+        f"100,100,0,0,1,{subtitle_outline},1,5,0,0,0,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
-    body = "\n".join(comment_lines + gift_lines + score_lines + bonus_lines)
+    body = "\n".join(comment_lines + gift_lines + score_lines + bonus_lines + subtitle_lines)
     stats = {
         # Count drawable comments (not ASS lines) so the "nothing to draw" check holds
         # whether comments render via the PIL layer or the ASS fallback.
@@ -1928,6 +2687,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         "gifts": len(gift_lines),
         "score": len(score_lines),
         "bonus": len(bonus_lines),
+        "subtitles": len(subtitle_lines),
+        "subtitle_diag": subtitle_stats,
         "icons": len(overlays),
         "dropped_icons": dropped_icons,
         "avatars": len(avatar_ids),
@@ -1935,6 +2696,27 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         "source_unavailable": time_source == "server" and source is None,
         "source_diag": {k: source[k] for k in ("c_value", "n_anchor", "n_backlog", "n_samples")} if source else None,
         "dropped_no_create_time": dropped_no_ct,
+        # 以下は「描くものが無い」判断を後から検証するための配置診断。件数だけでは
+        # multi-recordingの2本目で窓がズレた場合と、そもそもeventが無い場合を区別できない。
+        "events_total": len(events),
+        "placed": placed,
+        "dropped_before_start": dropped_before,
+        "dropped_after_end": dropped_after,
+        "dropped_ratio": (
+            round((dropped_before + dropped_after + dropped_no_ct) / len(events), 4)
+            if events else 0.0
+        ),
+        "offset_min": round(offset_min, 3) if offset_min is not None else None,
+        "offset_max": round(offset_max, 3) if offset_max is not None else None,
+        "events_time_min": round(time_min, 3) if time_min is not None else None,
+        "events_time_max": round(time_max, 3) if time_max is not None else None,
+        "video_duration_seconds": video_duration,
+        # 呼び出し元が渡したevent窓そのもの。窓が録画と一致しているかは、この値なしには
+        # 焼き込みのlogだけからは判定できない。
+        "window_started_at": started_at,
+        "window_ended_at": ended_at,
+        "bridge": {"mode": "B" if time_source == "server" else "A",
+                   **_bridge_ctx(source if time_source == "server" else bonus_source)},
     }
     comment_plan = None
     if shaper is not None and drawable_comments:
@@ -1944,6 +2726,14 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
             "avatar_files": avatar_files,
             "comment_fs": comment_fs,
             "shaper": shaper,
+            # AI super-resolution of the composited avatars: only when the setting is on,
+            # real avatars are in use, and a model is actually available. Resolved inside
+            # the comment-layer render thread (never the event loop) — see
+            # _render_comment_layer_sync. Imported lazily: the upscale stack imports this
+            # module, so a top-level import here would be circular.
+            "avatar_upscale": bool(
+                avatar_files and cfg.get("video_overlay_avatar_upscale") and _avatars_upscalable()
+            ),
         }
     return header + body + ("\n" if body else ""), overlays, stats, comment_plan
 
@@ -2022,6 +2812,91 @@ def _download(url: str, dest: Path) -> None:
     dest.write_bytes(data)
 
 
+def _apply_comment_emotes(comments: list, shaper: "_CommentShaper") -> None:
+    """Splice TikTok custom emotes into each comment's text as inline-image sentinels.
+
+    TikTok delivers chat sub/fansclub emotes out of band (the comment text holds only
+    a ``[shortcode]`` or a space); the ``emotes`` field carries, per emote, the stable
+    ``id``, an image ``url`` and the ``index`` where it belongs. Each distinct emote_id
+    gets one Private-Use sentinel char (registered with the shaper so it tokenises and
+    measures as an emoji-sized unit); the sentinels are placed at their indices and the
+    original content characters fill the remaining slots. Images are downloaded later by
+    _resolve_emotes. Comments without emote data are left untouched."""
+    nxt = _EMOTE_SENTINEL_BASE
+    sentinel_of: dict = {}
+    for c in comments:
+        raw = c.get("emotes")
+        if not raw:
+            continue
+        try:
+            emotes = raw if isinstance(raw, list) else json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if not emotes:
+            continue
+        text = c.get("text") or ""
+        max_idx = max((int(e.get("index", 0) or 0) for e in emotes), default=-1)
+        n = max(len(text), max_idx + 1)
+        slots: list = [None] * n
+        for e in emotes:
+            eid = str(e.get("id") or "")
+            url = e.get("url") or ""
+            if not eid or not url:
+                continue
+            sent = sentinel_of.get(eid)
+            if sent is None:
+                if nxt > 0xF8FF:  # exhausted the PUA block (thousands of distinct emotes)
+                    continue
+                sent = chr(nxt)
+                nxt += 1
+                sentinel_of[eid] = sent
+                shaper.register_emote(sent, eid, url)
+            idx = int(e.get("index", 0) or 0)
+            if 0 <= idx < n and slots[idx] is None:
+                slots[idx] = sent
+        it = iter(text)
+        out = [s if s is not None else next(it, "") for s in slots]
+        out.append("".join(it))  # any content chars past the last slot
+        c["text"] = "".join(out)
+
+
+def _load_emote_image(path: Path):
+    """Decode a downloaded emote image (webp/png) to RGBA, or None if undecodable."""
+    from PIL import Image
+    with Image.open(path) as im:
+        return im.convert("RGBA")
+
+
+async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path) -> int:
+    """Download every registered custom-emote image (cached by emote_id) and attach it
+    to the shaper so the comment layer draws it inline. Returns the count resolved; a
+    failed emote is skipped (its sentinel then draws as a transparent gap)."""
+    if shaper is None or not shaper._emotes:
+        return 0
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_running_loop()
+    by_id: dict = {}
+    for sent, rec in shaper._emotes.items():
+        by_id.setdefault(rec["id"], []).append(sent)
+    resolved = 0
+    for eid, sents in by_id.items():
+        url = shaper._emotes[sents[0]]["url"]
+        dest = cache_dir / f"{eid}.img"
+        img = None
+        try:
+            if not (dest.is_file() and dest.stat().st_size > 0):
+                await loop.run_in_executor(None, _download, url, dest)
+            img = await loop.run_in_executor(None, _load_emote_image, dest)
+        except (OSError, ValueError):
+            logger.warning("emote download/decode failed (id=%s): %s", eid, url, exc_info=True)
+            dest.unlink(missing_ok=True)
+        if img is not None:
+            for s in sents:
+                shaper.set_emote_image(s, img)
+            resolved += 1
+    return resolved
+
+
 async def _resolve_icons(overlays: list, cache_dir: Path) -> list:
     """Resolve each gift overlay to a local icon file. Cache first — icons are
     persisted at capture time (while URLs are fresh), so an expired URL still
@@ -2073,6 +2948,78 @@ async def _resolve_icons(overlays: list, cache_dir: Path) -> list:
             logger.warning("gift icon download failed (id=%s): %s", gid, url, exc_info=True)
             dest.unlink(missing_ok=True)
     return [s for s in overlays if s.get("file")]
+
+
+def _save_png(im, dest: Path) -> None:
+    im.save(str(dest), format="PNG")
+
+
+async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_dir: Path) -> list:
+    """Score-bar端の配信者アバターを、円形PNG(alpha付き)へ解決する。取得順は
+    (1)avatar_dirのcache(capture時に保存された鮮度の高い画像。user_id/@id/nicknameのkey候補で探す)
+    (2)無ければDBに保存された avatar URL をon-demand download。どちらも不可ならそのspecは落とし、
+    バーの端は下に常に描かれるイニシャル円盤が残る(空にならない)。解決したspecには``file``を付ける。"""
+    if not specs:
+        return []
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    loop = asyncio.get_running_loop()
+    resolved: list = []
+    # 同じ配信者のspecは1試合ぶん・全試合ぶん何本も出る(2極の両端、個人マルチのlane、Battle毎)。
+    # 解決結果は(key,size)単位でmemo化し、失敗も覚える: 失効したCDN URLはdownloadが15s timeout
+    # まで待つので、memoが無いとspec本数ぶん直列に再試行して出力が数分stallする。
+    done: dict = {}
+    for spec in specs:
+        size = int(spec.get("size") or 0)
+        if size <= 0:
+            continue
+        memo_key = (spec["key"], size)
+        if memo_key in done:
+            png = done[memo_key]
+            if png is not None:
+                spec["file"] = png
+                resolved.append(spec)
+            continue
+        src_img: Optional[Path] = None
+        if avatar_dir is not None:
+            for uid in spec.get("uids") or []:
+                cand = avatar_dir / f"{avatar_key(str(uid))}.img"
+                try:
+                    if cand.is_file() and cand.stat().st_size > 0:
+                        src_img = cand
+                        break
+                except OSError:
+                    continue
+        if src_img is None and spec.get("url"):
+            dl = cache_dir / f"savatar_src_{spec['key']}.img"
+            if dl.is_file() and dl.stat().st_size > 0:
+                src_img = dl
+            else:
+                try:
+                    await loop.run_in_executor(None, _download, spec["url"], dl)
+                    if dl.stat().st_size > 0:
+                        src_img = dl
+                except (OSError, ValueError):
+                    logger.warning("score avatar download failed: %s", spec.get("url"), exc_info=True)
+                    dl.unlink(missing_ok=True)
+        if src_img is None:
+            done[memo_key] = None
+            continue
+        png = cache_dir / f"savatar_{spec['key']}_{size}.png"
+        if not (png.is_file() and png.stat().st_size > 0):
+            im = await loop.run_in_executor(None, _circle_avatar, src_img, size)
+            if im is None:
+                done[memo_key] = None
+                continue
+            try:
+                await loop.run_in_executor(None, _save_png, im, png)
+            except OSError:
+                logger.warning("score avatar render failed: %s", png, exc_info=True)
+                done[memo_key] = None
+                continue
+        done[memo_key] = png
+        spec["file"] = png
+        resolved.append(spec)
+    return resolved
 
 
 # Frames-per-second of the rendered comment overlay layer. The feed is a slow
@@ -2143,7 +3090,7 @@ def _draw_comment_line(draw, layer, shaper: "_CommentShaper", line: str,
     baseline = ty + asc
     sw = max(1, int(round(fs * 0.07)))
     cx = float(x)
-    for kind, s in _tokenize_emoji(line):
+    for kind, s in shaper.tokenize(line):
         if kind == "emoji":
             tile = shaper.emoji_tile(s, emoji_px)
             ey = y + max(0, (line_h - tile.height) // 2)
@@ -2191,11 +3138,14 @@ def _render_comment_tile(p: dict, m: dict, shaper: "_CommentShaper", fs: int, ti
                   stroke_width=max(1, initial_fs // 12), stroke_fill=(0, 0, 0, 160))
 
     # Username (line 1, warm accent) then the wrapped body (white) to the avatar's right.
-    _draw_comment_line(draw, tile, shaper, p["nick_disp"], x_text, 0, line_h, fs, (255, 224, 124, 255))
-    y = line_h
-    for ln in p["body_lines"]:
-        _draw_comment_line(draw, tile, shaper, ln, x_text, y, line_h, fs, (255, 255, 255, 255))
-        y += line_h
+    # Line boxes are per-line (a line holding a custom emote is taller than the text
+    # line height), so each row advances by its own box height, not by a fixed line_h.
+    line_hs = p.get("line_hs") or [line_h] * (1 + len(p["body_lines"]))
+    _draw_comment_line(draw, tile, shaper, p["nick_disp"], x_text, 0, line_hs[0], fs, (255, 224, 124, 255))
+    y = line_hs[0]
+    for ln, lh in zip(p["body_lines"], line_hs[1:]):
+        _draw_comment_line(draw, tile, shaper, ln, x_text, y, lh, fs, (255, 255, 255, 255))
+        y += lh
     return tile
 
 
@@ -2207,6 +3157,17 @@ def _render_comment_tile(p: dict, m: dict, shaper: "_CommentShaper", fs: int, ti
 _ALPHA_LUTS: dict[int, bytes] = {}
 
 
+def _rm_frames_dir(d: Path) -> None:
+    """Best-effort removal of the transient sparse-layer frame directory."""
+    try:
+        if d.exists():
+            for p in d.iterdir():
+                p.unlink(missing_ok=True)
+            d.rmdir()
+    except OSError:
+        logger.warning("could not remove transient frames dir %s", d, exc_info=True)
+
+
 def _alpha_lut(aq: int) -> bytes:
     """256-entry byte LUT scaling an alpha channel by ``aq``/255 (aq in 0..255)."""
     lut = _ALPHA_LUTS.get(aq)
@@ -2216,17 +3177,22 @@ def _alpha_lut(aq: int) -> bytes:
     return lut
 
 
-def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs: int,
-                               shaper: "_CommentShaper", width: int, height: int, fps: float,
-                               out_path: Path) -> Optional[tuple]:
-    """Render the whole comment feed as an alpha overlay video (qtrle .mov) using
-    Pillow so emoji show in colour. Each comment is rasterised once to a tile and
-    scrolled/faded using the same placements/timing the ASS layer would have used, so
-    comments stay locked to the footage. Only the bottom-left comment band is rendered
-    and composited as a single ffmpeg overlay regardless of comment count. Returns
-    (out_path, overlay_x, overlay_y) or None when there is nothing to draw."""
+def _comment_layer_tiles(placements: list, avatar_files: dict, m: dict, fs: int,
+                         shaper: "_CommentShaper", width: int, height: int,
+                         avatar_upscale: bool = False,
+                         time_window: Optional[tuple] = None) -> Optional[dict]:
+    """Rasterise the comment feed into per-comment tiles plus the scroll segments that
+    reference them, and resolve the band geometry. Built from the whole-recording
+    placements, so the burn-in and the preview share one and the same tile set and
+    timing — a preview may only narrow which frames get composited, never how a frame
+    is composed. Returns None when there is nothing to draw.
+
+    ``time_window`` (preview only) skips rasterising comments that are never on screen
+    inside it. This is a cost cut, not a layout change: the band geometry is still
+    derived from every drawable comment in the recording, so a comment outside the
+    window cannot move the ones inside it."""
     try:
-        from PIL import Image
+        from PIL import Image  # noqa: F401  (availability check; used by the compositor)
     except ImportError:
         logger.warning("Pillow not installed; cannot render comment layer")
         return None
@@ -2234,9 +3200,18 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     avatar_d, line_h = m["avatar_d"], m["line_h"]
     x_text, text_max_w, gap = m["x_text"], m["text_max_w"], m["gap"]
 
+    # This runs in a worker thread (see _render_comment_layer), so the AI super-
+    # resolution GPU inference here never blocks the event loop. Each avatar is
+    # upscaled once and cached on disk; a failed/unavailable upscale returns None and
+    # the raw 72px avatar is used (quality degraded, never a render failure).
     circ: dict = {}
     for uid, path in avatar_files.items():
-        im = _circle_avatar(Path(path), avatar_d)
+        src = Path(path)
+        if avatar_upscale:
+            up = _upscale_avatar(src)
+            if up is not None:
+                src = up
+        im = _circle_avatar(src, avatar_d)
         if im is not None:
             circ[uid] = im
 
@@ -2257,6 +3232,14 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     # segment: (tile, start, end, prev_top, top, fad_in_ms, grad).
     segments: list = []
     layer_end = 0.0
+    if time_window is not None:
+        win_start, win_end = time_window
+        drawable = [
+            p for p in drawable
+            if any(seg["start"] <= win_end and seg["end"] > win_start for seg in p["segments"])
+        ]
+        if not drawable:
+            return None
     for p in drawable:
         if p["has_avatar"]:
             p["_avatar_img"] = circ.get(p["uid"])
@@ -2270,100 +3253,262 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     if not segments:
         return None
     segments.sort(key=lambda seg: seg[1])
+    return {"region_x": region_x, "region_y0": region_y0, "region_w": region_w,
+            "region_h": region_h, "segments": segments, "layer_end": layer_end}
 
+
+def _comment_frame_state(t: float, live: list, region_y0: int):
+    """Draw ops + a content signature for time ``t``. The signature captures every
+    visible tile's quantised position and alpha, so an unchanged signature means a
+    pixel-identical frame — letting the layer loop skip recompositing through the long
+    static stretches between comments (only slides/fade-ins actually change)."""
     slide = SLIDE_SECONDS / 2.0  # seconds; matches slide_cs (ms) in the ASS \move
-    n_frames = int(math.ceil(layer_end * fps)) + 1
+    ops: list = []
+    sig: list = []
+    for tile, s, e, prev_top, top, fad_in, grad in live:
+        if t < s:
+            continue
+        cur_top = top if (slide <= 0 or t >= s + slide) else prev_top + (top - prev_top) * ((t - s) / slide)
+        alpha = grad
+        if fad_in and t < s + fad_in / 1000.0:
+            alpha = min(alpha, (t - s) / (fad_in / 1000.0))
+        y = int(round(cur_top - region_y0))
+        ops.append((tile, y, alpha))
+        sig.append((id(tile), y, int(alpha * 255)))
+    return tuple(sig), ops
 
-    def frame_state(t: float, live: list):
-        """Draw ops + a content signature for time ``t``. The signature captures every
-        visible tile's quantised position and alpha, so an unchanged signature means a
-        pixel-identical frame — letting the loop skip recompositing through the long
-        static stretches between comments (only slides/fade-ins actually change)."""
-        ops: list = []
-        sig: list = []
-        for tile, s, e, prev_top, top, fad_in, grad in live:
-            if t < s:
-                continue
-            cur_top = top if (slide <= 0 or t >= s + slide) else prev_top + (top - prev_top) * ((t - s) / slide)
-            alpha = grad
-            if fad_in and t < s + fad_in / 1000.0:
-                alpha = min(alpha, (t - s) / (fad_in / 1000.0))
-            y = int(round(cur_top - region_y0))
-            ops.append((tile, y, alpha))
-            sig.append((id(tile), y, int(alpha * 255)))
-        return tuple(sig), ops
 
-    # Frames are streamed as raw RGBA to a qtrle encoder (constant memory — nothing
-    # accumulates on disk, which matters for multi-hour recordings). The feed is
-    # static except during each comment's brief slide/fade-in, so a frame whose
-    # content signature matches the previous one re-sends the cached bytes instead of
-    # recompositing — removing the per-frame pixel work across the static stretches.
-    proc = subprocess.Popen(
-        ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-         "-f", "rawvideo", "-pix_fmt", "rgba", "-video_size", f"{region_w}x{region_h}",
-         "-framerate", f"{fps:.6f}", "-i", "-",
-         "-c:v", "qtrle", "-pix_fmt", "argb", str(out_path)],
-        stdin=subprocess.PIPE,
-    )
+def _composite_comment_frame(ops: list, region_x: int, region_w: int, region_h: int):
+    """Compose one RGBA band image from the draw ops of a single instant."""
+    from PIL import Image
+
+    layer = Image.new("RGBA", (region_w, region_h), (0, 0, 0, 0))
+    for tile, y, alpha in ops:
+        draw_tile = tile
+        if alpha < 0.999:
+            draw_tile = tile.copy()
+            draw_tile.putalpha(tile.getchannel("A").point(_alpha_lut(int(alpha * 255))))
+        layer.alpha_composite(draw_tile, (region_x, y))
+    return layer
+
+
+def _comment_still_frame(tiles: dict, t: float):
+    """The comment band exactly as it looks at media time ``t``, as an RGBA image.
+    Uses the same tiles and the same slide/fade maths as the video layer, so the still
+    preview cannot show a different feed from the one the burn-in would produce."""
+    segments = tiles["segments"]
+    live = [seg for seg in segments if seg[1] <= t < seg[2]]
+    _sig, ops = _comment_frame_state(t, live, tiles["region_y0"])
+    if not ops:
+        return None
+    return _composite_comment_frame(ops, tiles["region_x"], tiles["region_w"], tiles["region_h"])
+
+
+def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs: int,
+                               shaper: "_CommentShaper", width: int, height: int, fps: float,
+                               out_path: Path, avatar_upscale: bool = False,
+                               window: Optional[tuple] = None) -> Optional[tuple]:
+    """Render the comment feed as an alpha overlay video (qtrle .mov) using Pillow so
+    emoji show in colour. Each comment is rasterised once to a tile and scrolled/faded
+    using the same placements/timing the ASS layer would have used, so comments stay
+    locked to the footage. Only the bottom-left comment band is rendered and composited
+    as a single ffmpeg overlay regardless of comment count. Returns
+    (out_path, overlay_x, overlay_y, stats) or None when there is nothing to draw.
+    ``stats`` carries the frame count / fps / rendered length so the caller can verify
+    the layer covers the whole base (a layer shorter than the base makes comments
+    vanish mid-video without any error — see _log_duration_check).
+
+    ``window`` is a (start, end) media-PTS window for the burn-in preview: only frames
+    inside it are composited, and the produced file starts at its first frame (time 0),
+    so the caller must offset the layer input by ``window[0]`` when compositing. The
+    tiles and their timings are unchanged — the window narrows what is rendered, never
+    how it is placed."""
+    tiles = _comment_layer_tiles(placements, avatar_files, m, fs, shaper, width, height,
+                                 avatar_upscale, time_window=window)
+    if tiles is None:
+        return None
+    region_x, region_y0 = tiles["region_x"], tiles["region_y0"]
+    region_w, region_h = tiles["region_w"], tiles["region_h"]
+    segments, layer_end = tiles["segments"], tiles["layer_end"]
+
+    if window is None:
+        first_frame = 0
+        n_frames = int(math.ceil(layer_end * fps)) + 1
+    else:
+        win_start, win_end = window
+        first_frame = max(0, int(math.floor(win_start * fps)))
+        # 窓の終端までは必ず覆う(layer_endで打ち切らない)。commentが尽きた後は同一signature
+        # のframeがsparse圧縮で1枚に畳まれるだけなので、costは増えない。
+        last_frame = int(math.ceil(win_end * fps)) + 1
+        n_frames = max(1, last_frame - first_frame)
+
+    # The feed is static except during each comment's brief slide/fade-in, so instead
+    # of streaming every CFR frame to the encoder (hundreds of thousands of full RGBA
+    # writes on a multi-hour recording), only frames whose content signature changes
+    # are materialised; each is then held for its run length via the concat demuxer's
+    # per-frame duration. The output is still CFR at ``fps`` (``-r``/``-vsync cfr``
+    # resample the held frames onto the exact 1/fps grid, and every duration is an
+    # integer number of frames, so no boundary drifts), which keeps the overlay
+    # frame-locked exactly as the dense stream was — only the redundant static frames
+    # are elided. Distinct frames live transiently on disk (bounded by comment
+    # activity, not by duration) under a per-render frames dir, removed when done.
+    frames_dir = out_path.with_name(out_path.stem + ".frames")
+    _rm_frames_dir(frames_dir)
+    try:
+        frames_dir.mkdir(parents=True)
+    except OSError as exc:
+        # ここはdisk満杯が最初に当たる2箇所のうちの1つ。pathとerrnoと空き容量が無いと、
+        # 権限・path不正・ENOSPCが「layer render failed」の一行に潰れて区別できない。
+        logger.error(
+            "comment layer: cannot create frames dir %s", frames_dir, exc_info=True,
+            extra={"event": "overlay.frames_dir_create_failed",
+                   "ctx": {"path": str(frames_dir), "frames_written": 0,
+                           **_oserror_ctx(exc), **_disk_ctx(frames_dir.parent)}},
+        )
+        return None
+
+    entries: list[tuple[str, int]] = []  # (png filename, start frame index)
     ptr = 0
     live: list = []
     prev_sig = None
-    prev_bytes: Optional[bytes] = None
-    composited = 0
+    # 進捗はdistinct frameの生成に律速される(大半のframeは直後のcontinueで即skipされる)ので、
+    # gateはcontinueの後、実際に1枚描く分岐の中に置く。
+    gate = _IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
+    render_started = time.monotonic()
     try:
-        for f in range(n_frames):
+        for f in range(first_frame, first_frame + n_frames):
+            # JobCancelledはBaseException(下のexcept Exceptionでは捕まらない)。ここで捕まると
+            # cancelがASS転落という「品質を落とした成功」に化けるため、意図的に素通りさせる。
+            cancel.check_cancelled()
             t = f / fps
             while ptr < len(segments) and segments[ptr][1] <= t:
                 live.append(segments[ptr])
                 ptr += 1
             if live:
                 live = [seg for seg in live if seg[2] > t]
-            sig, ops = frame_state(t, live)
-            if sig == prev_sig and prev_bytes is not None:
-                proc.stdin.write(prev_bytes)
-                continue
-            layer = Image.new("RGBA", (region_w, region_h), (0, 0, 0, 0))
-            for tile, y, alpha in ops:
-                draw_tile = tile
-                if alpha < 0.999:
-                    draw_tile = tile.copy()
-                    draw_tile.putalpha(tile.getchannel("A").point(_alpha_lut(int(alpha * 255))))
-                layer.alpha_composite(draw_tile, (region_x, y))
-            prev_bytes = layer.tobytes()
+            sig, ops = _comment_frame_state(t, live, region_y0)
+            if sig == prev_sig and entries:
+                continue  # unchanged: extends the current distinct frame's run
+            layer = _composite_comment_frame(ops, region_x, region_w, region_h)
+            name = f"f{len(entries):07d}.png"
+            layer.save(frames_dir / name)
+            # frame indexはfileの先頭を0とする相対値。窓ありでもconcatのdurationが
+            # そのまま使えるようにするため、絶対frame番号は持ち込まない。
+            entries.append((name, f - first_frame))
             prev_sig = sig
-            composited += 1
-            proc.stdin.write(prev_bytes)
-        proc.stdin.close()
-        proc.wait()
-    except Exception:
-        logger.warning("comment layer render failed", exc_info=True)
-        try:
-            if proc.stdin and not proc.stdin.closed:
-                proc.stdin.close()
-        except OSError:
-            pass
-        proc.wait()
-        out_path.unlink(missing_ok=True)
+            if gate.ready():
+                logger.debug(
+                    "comment layer progress: %d distinct frames at %.1fs of %.1fs",
+                    len(entries), t, layer_end,
+                    extra={"event": "overlay.comment_layer_progress_reported",
+                           "ctx": {"frames_written": len(entries), "frame_index": f,
+                                   "n_frames": n_frames, "position_seconds": round(t, 3),
+                                   "layer_duration_seconds": round(layer_end, 3),
+                                   "fps": round(fps, 3),
+                                   "duration_ms": int((time.monotonic() - render_started) * 1000)}},
+                )
+    except JobCancelled:
+        # 展開済みpngは1配信ぶんで数GBになる。cancelでもここを掃除しないと、誰も参照しない
+        # frames dirがdiskに残り続ける。
+        _rm_frames_dir(frames_dir)
+        raise
+    except Exception as exc:
+        # disk満杯(ENOSPC)が実際に最初に当たる地点。ここでreturn Noneすると下のqtrle encode
+        # には到達しないため、encode側にsignatureを置いても実経路では一度も発火しない。
+        # 書けたframe数・展開済みbyte・空き容量をこの行に必ず載せる。
+        logger.error(
+            "comment layer frame render failed at frame %d of %d", f, n_frames, exc_info=True,
+            extra={"event": "overlay.comment_layer_frame_failed",
+                   "ctx": {"path": str(frames_dir), "frames_written": len(entries),
+                           "frame_index": f, "n_frames": n_frames,
+                           "frames_dir_bytes": _dir_bytes(frames_dir),
+                           "fps": round(fps, 3),
+                           **_oserror_ctx(exc), **_disk_ctx(frames_dir)}},
+        )
+        _rm_frames_dir(frames_dir)
         return None
+
+    if not entries:
+        _rm_frames_dir(frames_dir)
+        return None
+
+    # concat playlist: hold each distinct frame until the next begins (the last until
+    # the stream ends). The final entry is repeated because the concat demuxer ignores
+    # the last listed duration. Durations are integer-frame multiples of 1/fps.
+    lines = ["ffconcat version 1.0"]
+    for i, (name, start) in enumerate(entries):
+        end = entries[i + 1][1] if i + 1 < len(entries) else n_frames
+        lines.append(f"file '{name}'")
+        lines.append(f"duration {(end - start) / fps:.9f}")
+    lines.append(f"file '{entries[-1][0]}'")
+    (frames_dir / "list.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    cancel.check_cancelled()
+    # Popen + register: qtrle encoding a full recording's layer runs for minutes, and an
+    # unregistered process is one the cancel cannot reach — the operator would keep
+    # waiting on "取り消し中…" until this finished on its own.
+    proc = subprocess.Popen(
+        ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+         "-f", "concat", "-safe", "0", "-i", "list.txt",
+         "-vsync", "cfr", "-r", f"{fps:.6f}",
+         "-c:v", "qtrle", "-pix_fmt", "argb", str(out_path.resolve())],
+        cwd=str(frames_dir), stdin=subprocess.DEVNULL,
+    )
+    cancel.register_process(proc)
+    try:
+        proc.wait()
+    finally:
+        cancel.forget_process(proc)
+    frames_bytes = _dir_bytes(frames_dir)
+    _rm_frames_dir(frames_dir)
+    if cancel.is_cancelled():
+        out_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
     if proc.returncode != 0 or not out_path.exists() or out_path.stat().st_size == 0:
-        logger.warning(
+        logger.error(
             "comment layer encoder failed (rc=%s, output_exists=%s)",
             proc.returncode, out_path.exists(),
+            extra={"event": "overlay.comment_layer_encode_failed",
+                   "ctx": {"path": str(out_path.resolve()), "returncode": proc.returncode,
+                           "frames_written": len(entries), "n_frames": n_frames,
+                           "frames_dir_bytes": frames_bytes, "fps": round(fps, 3),
+                           **_disk_ctx(out_path.parent)}},
         )
         out_path.unlink(missing_ok=True)
         return None
-    logger.info("comment layer: %d/%d frames composited (rest cached)", composited, n_frames)
-    return out_path, region_x, region_y0
+    layer_stats = {
+        "frames_written": len(entries),
+        "n_frames": n_frames,
+        "fps": round(fps, 3),
+        # 全尺のfeedが何秒まで続くか(窓の有無に依らない)と、この file が実際に覆う長さ。
+        # 窓ありのときに両者が一致すると思い込むと、尾切れの検知が効かなくなる。
+        "layer_duration_seconds": round(layer_end, 3),
+        "rendered_seconds": round(n_frames / fps, 3),
+        "window_start_seconds": round(first_frame / fps, 3) if window is not None else None,
+        "size_bytes": out_path.stat().st_size,
+        "duration_ms": int((time.monotonic() - render_started) * 1000),
+    }
+    logger.info(
+        "comment layer: %d distinct frames held over %d total (sparse)", len(entries), n_frames,
+        extra={"event": "overlay.comment_layer_rendered",
+               "ctx": {"path": str(out_path.resolve()), **layer_stats}},
+    )
+    return out_path, region_x, region_y0, layer_stats
 
 
 async def _render_comment_layer(placements: list, avatar_files: dict, m: dict, fs: int,
                                 shaper: "_CommentShaper", width: int, height: int, fps: float,
-                                out_path: Path) -> Optional[tuple]:
-    """Async wrapper: the PIL/ffmpeg render is blocking, so run it off the loop."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _render_comment_layer_sync,
-        placements, avatar_files, m, fs, shaper, width, height, fps, out_path,
+                                out_path: Path, avatar_upscale: bool = False,
+                                window: Optional[tuple] = None) -> Optional[tuple]:
+    """Async wrapper: the PIL/ffmpeg render is blocking, so run it off the loop.
+
+    ``to_thread`` rather than ``run_in_executor``: it copies the caller's context into the
+    worker, which is what lets the avatar super-resolution inside recognise that this job
+    already holds the GPU slot instead of deadlocking behind itself."""
+    return await asyncio.to_thread(
+        _render_comment_layer_sync,
+        placements, avatar_files, m, fs, shaper, width, height, fps, out_path, avatar_upscale,
+        window,
     )
 
 
@@ -2374,11 +3519,20 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
     one stream per instance, then slide each instance in/out over its window. When
     ``scale_to`` is given, the source frame is first upscaled to that (w, h) so the
     overlays — authored at the same render resolution — composite crisply onto it.
-    When ``cfr_fps`` is given (VFR source), the base is normalised to that constant
-    frame rate in this same graph so the comment layer stays time-locked, avoiding a
-    separate full re-encode pass. The ``fps`` filter preserves each frame's time
-    position (it only regularises spacing), so the overlay/ASS timeline — computed in
-    the source mp4's PTS seconds — still aligns with the normalised base."""
+    When ``cfr_fps`` is given (VFR source with no comment layer), the base is
+    normalised to that constant frame rate in this same graph. The ``fps`` filter
+    preserves each frame's time position (it only regularises spacing), so the
+    overlay/ASS timeline — computed in the source mp4's PTS seconds — still aligns
+    with the normalised base.
+
+    Note: when a comment layer is composited on a VFR source, ``fps`` folded into this
+    graph is NOT enough — overlay's framesync couples to the fps filter's bursty
+    in-graph frame delivery and the separately-rendered layer drifts tens of seconds
+    out mid-stream (comments vanish where the source's real rate dips). That case runs
+    the CFR normalisation as a separate first pass (see ``_run_ffmpeg``) so this graph
+    receives an already-CFR base and ``cfr_fps`` is None here — the layer then stays
+    locked. Gifts and the ass score bar are timestamp-driven (``enable=between(t,...)``
+    / ``ass``), not framesync, so they never needed the separate pass."""
     by_file: dict[str, list] = {}
     for spec in overlays:
         by_file.setdefault(str(spec["file"]), []).append(spec)
@@ -2404,7 +3558,10 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
         specs = by_file[file]
         count = len(specs)
         base = f"ic{input_index}"
-        chain = f"[{input_index}:v]scale={icon_px}:{icon_px},format=rgba"
+        # Each file is scaled once to its own size: gift icons to icon_px, score-bar
+        # avatars to the disc diameter they carry. Specs sharing a file share a size.
+        sz = int(specs[0].get("size") or icon_px)
+        chain = f"[{input_index}:v]scale={sz}:{sz},format=rgba"
         if count == 1:
             parts.append(f"{chain}[{base}_0]")
         else:
@@ -2413,15 +3570,28 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
         label_queue[file] = [f"{base}_{k}" for k in range(count)]
         input_index += 1
 
+    # Gift icons (and the comment layer) composite BELOW the ASS text, so gift coin
+    # numbers/labels draw over their icon. Score-bar avatars must sit ABOVE ASS: the
+    # ASS score bar draws a translucent track over the whole bar, so an avatar left
+    # beneath it would be dimmed by that track. Static specs are therefore held back
+    # and composited after the ass filter.
+    slide_specs = [s for s in overlays if not s.get("static")]
+    static_specs = [s for s in overlays if s.get("static")]
+
     cur = base_label
     step = 0
-    for spec in overlays:
+    for spec in slide_specs:
         label = label_queue[str(spec["file"])].pop(0)
-        s, e, x = spec["start"], spec["end"], spec["x_rest"]
+        s, e = spec["start"], spec["end"]
+        out = f"[v{step}]"
+        # Gift icon: slide in/out horizontally to its rest x.
+        sz = int(spec.get("size") or icon_px)
+        x = spec["x_rest"]
         fi = f"clip((t-{s})/{SLIDE_SECONDS}\\,0\\,1)"
         fo = f"clip(({e}-t)/{SLIDE_SECONDS}\\,0\\,1)"
-        xexpr = f"{-icon_px - 20}+({x + icon_px + 20})*min({fi}\\,{fo})"
-        out = f"[v{step}]"
+        # slideは枠内(x=0)から開始する。画面外(-sz-20)から入れるとslide中のiconが左端で
+        # 切れたまま表示され、labelの開始x clampと合わせて枠外描画を無くす。
+        xexpr = f"0+({x})*min({fi}\\,{fo})"
         parts.append(
             f"{cur}[{label}]overlay=x='{xexpr}':y={spec['y']}:"
             f"eof_action=repeat:enable='between(t,{s},{e})'{out}"
@@ -2433,7 +3603,24 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
         # pass lets the main video continue once the (shorter) layer ends.
         parts.append(f"{cur}[{layer_input}:v]overlay=x=0:y={layer_y}:eof_action=pass[cl]")
         cur = "[cl]"
-    parts.append(f"{cur}ass={ass_name}[vout]")
+    # ass output is the final [vout] unless score-bar avatars still composite on top.
+    ass_out = "[assed]" if static_specs else "[vout]"
+    parts.append(f"{cur}ass={ass_name}{ass_out}")
+    cur = ass_out
+    for i, spec in enumerate(static_specs):
+        label = label_queue[str(spec["file"])].pop(0)
+        s, e = spec["start"], spec["end"]
+        out = "[vout]" if i == len(static_specs) - 1 else f"[a{i}]"
+        # Score-bar avatar: fixed position over the disc, on top of the ass bar. 個人マルチの
+        # lane avatarはsegmentと一緒に動くので、instanceを増やさずxを時間の階段式で与える
+        # (``xexpr``。segmentが狭くavatarを置けない区間は画面外のxへ退避している)。
+        xexpr = spec.get("xexpr")
+        xarg = f"'{xexpr}'" if xexpr else str(int(spec.get("x", spec.get("x_rest", 0))))
+        parts.append(
+            f"{cur}[{label}]overlay=x={xarg}:y={spec['y']}:"
+            f"eof_action=repeat:enable='between(t,{s},{e})'{out}"
+        )
+        cur = out
     return ";".join(parts)
 
 
@@ -2522,11 +3709,22 @@ async def video_encoder_name(codec: str = "auto") -> str:
         order = _AUTO_ENCODER_ORDER if codec == "auto" else _ENCODER_CANDIDATES.get(codec, ())
         for name in order:
             if await _probe_encoder(name):
-                logger.info("video overlay encoder: %s (codec=%s)", name, codec)
+                logger.info("video overlay encoder: %s (codec=%s)", name, codec,
+                            extra={"event": "overlay.encoder_resolved",
+                                   "ctx": {"encoder": name, "codec": codec,
+                                           "probed": list(order)[:list(order).index(name) + 1]}})
                 _resolved_encoders[codec] = name
                 return name
         # Requested codec unavailable: never fail the render — fall back to H.264.
-        logger.warning("no working encoder for codec=%s; falling back to libx264", codec)
+        # 利用者が選んだcodecでは出力されず、file sizeと画質が確定的に変わる(自動回復ではない)。
+        # TODO: 規約上のfallback禁止に該当する。廃止は別taskで判断する。
+        logger.warning(
+            "no working encoder for codec=%s; falling back to libx264", codec,
+            extra={"event": "overlay.encoder_fallback_used",
+                   "ctx": {"codec": codec, "encoder": "libx264",
+                           "probed": list(order),
+                           "degraded": "requested codec unavailable; CPU H.264 used"}},
+        )
         _resolved_encoders[codec] = "libx264"
         return "libx264"
 
@@ -2575,6 +3773,62 @@ async def _probe_duration_us(src: Path) -> Optional[int]:
     return int(secs * 1_000_000) if secs > 0 else None
 
 
+async def _duration_seconds(src: Path) -> Optional[float]:
+    """Duration in seconds, or None when it could not be probed."""
+    us = await _probe_duration_us(src)
+    return us / 1_000_000 if us else None
+
+
+def _log_duration_check(event: str, message: str, *, fps: float,
+                        layer_seconds: Optional[float], base_seconds: Optional[float],
+                        src_seconds: Optional[float], compare: tuple,
+                        n_frames: Optional[int] = None, ctx: Optional[dict] = None) -> None:
+    """生成物のdurationが基準stream(base)と一致しているかを1行で残す。
+
+    過去障害「焼き込みcommentが中盤で数分消える」の本質は、CFRのcomment layerがVFRの
+    baseより早く終わることだった。合成filterのeof_action=passはlayerが尽きた瞬間に
+    無警告で消える設計なので、生成物のdurationを測っていない限り症状しか残らない。
+    1 jobあたりprobe 2回。
+
+    警告は**不足側のみ**。この障害は片側にしか起きない: layerがbaseより短ければcommentが
+    その時点で消えるが、長ければ余剰は合成時に捨てられるだけで無害である。実測でもconcat
+    demuxerが最終frameを1つ余分に並べる仕様上、layerは常時2 frameほどbaseより長い。両側を
+    等しく警告すると毎回warningが出て、本物の不足がその中に埋もれる。超過側もdeltaとして
+    必ず記録されるので、JSONL側からは同じ精度で追える。
+
+    ``compare`` は差を取る2つのfield名(例 ("layer", "base"))。どちらか一方でも測れなければ
+    差はNoneのまま残し、既定値で埋めた「一致した」という誤った記録は作らない。
+    """
+    measured = {
+        "layer_duration_seconds": round(layer_seconds, 3) if layer_seconds is not None else None,
+        "base_duration_seconds": round(base_seconds, 3) if base_seconds is not None else None,
+        "src_duration_seconds": round(src_seconds, 3) if src_seconds is not None else None,
+    }
+    left = measured[f"{compare[0]}_duration_seconds"]
+    right = measured[f"{compare[1]}_duration_seconds"]
+    delta = None if (left is None or right is None) else round(left - right, 3)
+    tolerance = (
+        config.get_log_overlay_duration_tolerance_frames() / fps if fps > 0 else None
+    )
+    short = delta is not None and tolerance is not None and delta < -tolerance
+    payload = dict(measured)
+    payload.update({
+        "duration_delta_seconds": delta,
+        "duration_compared": list(compare),
+        "duration_shortfall": short,
+        "duration_tolerance_seconds": round(tolerance, 4) if tolerance is not None else None,
+        "n_frames": n_frames,
+        "fps": round(fps, 3),
+        "duration_measured": delta is not None,
+    })
+    payload.update(ctx or {})
+    logger.log(
+        logging.WARNING if short else logging.INFO,
+        message, left, right, delta,
+        extra={"event": event, "ctx": payload},
+    )
+
+
 async def _probe_pts_gaps(src: Path) -> list:
     """Forward jumps in the mp4's video PTS, as [(pts_before, pts_after)] ascending.
 
@@ -2616,10 +3870,16 @@ async def _probe_pts_gaps(src: Path) -> list:
     return gaps
 
 
-async def _pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb) -> None:
+async def _pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb,
+                                base_us: int = 0) -> None:
     """Parse ffmpeg ``-progress pipe:1`` output and report 0-99% by elapsed
     ``out_time_us`` over the source duration. 100% is reserved for the download
-    phase, so encode tops out at 99%."""
+    phase, so encode tops out at 99%.
+
+    ``base_us`` is the output timestamp the encode starts from. It is 0 for a whole
+    recording, but the burn-in preview keeps the source's absolute timestamps (-copyts)
+    so its window starts at the window's own offset; without subtracting it the preview
+    would report itself as already finished."""
     last = -1
     while True:
         line = await stream.readline()
@@ -2631,7 +3891,7 @@ async def _pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb) 
         value = text.split("=", 1)[1]
         if not value.isdigit():
             continue
-        pct = min(99, int(int(value) * 100 / total_us))
+        pct = min(99, max(0, int((int(value) - base_us) * 100 / total_us)))
         if pct != last:
             last = pct
             try:
@@ -2640,14 +3900,152 @@ async def _pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb) 
                 logger.exception("overlay progress callback failed")
 
 
+def _prepass_encoder_args(name: str) -> list:
+    """Near-lossless, fast encode args for the transient CFR base. It is re-encoded by
+    the main pass, so it only needs to be visually transparent (a low CQ/CRF), and
+    fast (a light preset) — the GPU encoders keep this pass off the CPU and quick."""
+    if name in ("h264_nvenc", "hevc_nvenc", "av1_nvenc"):
+        return ["-c:v", name, "-preset", "p4", "-rc", "vbr", "-cq", "16", "-b:v", "0"]
+    if name in ("h264_qsv", "hevc_qsv", "av1_qsv"):
+        return ["-c:v", name, "-global_quality", "16", "-preset", "veryfast"]
+    if name in ("h264_amf", "hevc_amf", "av1_amf"):
+        return ["-c:v", name, "-rc", "cqp", "-qp_i", "16", "-qp_p", "16", "-quality", "speed"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "14"]
+
+
+async def _prepass_cfr(src: Path, out: Path, scale_to: Optional[tuple], cfr_fps: float, cwd: Path,
+                       window: Optional[tuple] = None) -> None:
+    """Render the scaled/CFR-normalised base to a transient near-lossless file so the
+    comment-layer overlay composites onto a real CFR stream (clean container PTS),
+    not the fps filter's in-graph output. Overlay's framesync locks to a real file but
+    drifts against the folded fps output on VFR sources — see _build_filter_complex.
+    Uses the GPU encoder when available (this base can be several GB for a long
+    recording; a CPU pass would be slow). Audio is copied through so the main pass can
+    still map it from this base.
+
+    ``window`` limits the base to a (start, end) media-PTS window for the burn-in
+    preview — this is where the preview's cost actually drops, since a whole-recording
+    base is the single largest intermediate. ``-ss``/``-t`` are input options (a plain
+    duration measured from the seek point, unambiguous under ``-copyts``) and
+    ``-copyts`` keeps the source's own timestamps, so the ASS/gift timeline — built for
+    the whole recording and never re-derived — still lines up with the windowed base.
+    The windowed base carries no audio: the preview is a visual check, and stream-copied
+    audio cannot be cut at an arbitrary point without shifting its start."""
+    seek: list[str] = []
+    tail: list[str] = ["-c:a", "copy"]
+    if window is not None:
+        win_start, win_end = window
+        seek = ["-ss", f"{win_start:.6f}", "-t", f"{max(0.0, win_end - win_start):.6f}"]
+        tail = ["-an", "-copyts"]
+    vf: list[str] = []
+    if scale_to is not None:
+        sw, sh = scale_to
+        vf.append(f"scale={sw}:{sh}:flags=lanczos")
+    vf.append(f"fps={cfr_fps:.6f}")
+    # Prefer the H.264 GPU encoder for the transient (fastest, universally decodable);
+    # falls back to CPU libx264 only when no hardware encoder works here.
+    encoder = await video_encoder_name("h264")
+    log_path = out.with_name(out.stem + ".prepass.log")
+    log_file = open(log_path, "wb")
+    proc = None
+    try:
+        cancel.check_cancelled()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            *seek, "-i", str(src), "-vf", ",".join(vf),
+            *_prepass_encoder_args(encoder),
+            *tail, "-movflags", "+faststart", str(out),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=log_file, cwd=str(cwd),
+        )
+        cancel.register_process(proc)
+        await proc.wait()
+    finally:
+        if proc is not None:
+            cancel.forget_process(proc)
+        log_file.close()
+    if cancel.is_cancelled():
+        out.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
+    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        tail = ""
+        try:
+            tail = log_path.read_text(
+                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
+        except OSError:
+            logger.warning(
+                "pre-pass ffmpeg log unreadable: %s", log_path, exc_info=True,
+                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+            )
+        out.unlink(missing_ok=True)
+        logger.error(
+            "CFR base pre-pass failed for %s via %s", src.name, encoder,
+            extra={"event": "overlay.prepass_failed",
+                   "ctx": {"path": str(out.resolve()), "stem": src.stem,
+                           "encoder": encoder, "fps": round(cfr_fps, 3),
+                           "returncode": proc.returncode,
+                           "stderr_tail": tail, **_disk_ctx(out.parent)}},
+        )
+        raise RuntimeError(f"CFR正規化(pre-pass)に失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+    # baseがsourceより短ければ、この時点で映像そのものが尾切れしている。合成後に気付いても
+    # 原因がbaseかlayerか切り分けられないので、pre-pass直後に測る。
+    # 窓ありのbaseはsourceより短くて当然なので、比較対象は窓の長さにする(全尺と比べると
+    # 毎回shortfall warningになり、本物の尾切れがその中に埋もれる)。
+    expected = await _duration_seconds(src)
+    if window is not None:
+        expected = max(0.0, window[1] - window[0])
+    _log_duration_check(
+        "overlay.prepass_completed",
+        "CFR base pre-pass done: base=%ss src=%ss (delta=%ss)",
+        fps=cfr_fps,
+        layer_seconds=None,
+        base_seconds=await _duration_seconds(out),
+        src_seconds=expected,
+        compare=("base", "src"),
+        ctx={"path": str(out.resolve()), "stem": src.stem, "encoder": encoder,
+             "window_start_seconds": round(window[0], 3) if window is not None else None,
+             "window_end_seconds": round(window[1], 3) if window is not None else None,
+             "size_bytes": out.stat().st_size},
+    )
+
+
 async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, out: Path, cwd: Path, quality: int,
                       codec: str = "auto", comment_layer: Optional[tuple] = None,
                       on_progress: Optional[ProgressCb] = None,
                       scale_to: Optional[tuple] = None,
-                      cfr_fps: Optional[float] = None) -> None:
+                      cfr_fps: Optional[float] = None,
+                      window: Optional[tuple] = None,
+                      seek_source: bool = False,
+                      layer_offset: float = 0.0,
+                      audio_normalize: Optional[dict] = None) -> None:
+    """``window`` (burn-in preview only) keeps the source's absolute timestamps via
+    ``-copyts`` and trims the output to that media-PTS window, so the filter graph — the
+    very same graph the whole-recording burn-in builds, with the same ASS and the same
+    gift ``enable=between(t,...)`` expressions — needs no rewriting. ``seek_source``
+    applies the seek to input 0; it is False when input 0 is a CFR base the pre-pass has
+    already windowed. ``layer_offset`` shifts the comment layer input (that file always
+    starts at 0) onto the window's absolute position."""
     log_path = out.with_name(out.stem + ".ffmpeg.log")
     log_file = open(log_path, "wb")
-    inputs: list[str] = ["-i", str(src)]
+    # Compositing a comment layer on a VFR source needs a real CFR base (framesync
+    # desyncs against fps folded into the overlay graph). That base is produced by a
+    # separate pre-pass the caller runs concurrently with the comment-layer render
+    # (see _render_variant); by the time it reaches here ``src`` is already the CFR
+    # base and ``scale_to``/``cfr_fps`` are None. Gifts/ass are timestamp-driven, so
+    # without a layer the CFR normalisation stays folded into this graph via cfr_fps.
+    win_start, win_end = window if window is not None else (0.0, 0.0)
+    win_seconds = max(0.0, win_end - win_start)
+    inputs: list[str] = []
+    if window is not None:
+        # -copyts はinputのtimestampを触らせないためのoptionなので、必ず入力より前に置く。
+        # これが無いとffmpegは各入力のstart_timeを引いて0基準へ寄せてしまい、窓の内側で
+        # ASS/giftのenable式が全て外れる。
+        inputs += ["-copyts"]
+        if seek_source:
+            inputs += ["-ss", f"{win_start:.6f}", "-t", f"{win_seconds:.6f}"]
+    inputs += ["-i", str(src)]
     seen: list[str] = []
     for spec in overlays:
         f = str(spec["file"])
@@ -2658,25 +4056,52 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
     layer_input = None
     layer_y = 0
     if comment_layer is not None:
-        layer_path, _layer_x, layer_y = comment_layer
+        layer_path, _layer_x, layer_y, _layer_stats = comment_layer
         layer_input = 1 + len(seen)  # source is [0], gift icons follow
+        if layer_offset:
+            inputs += ["-itsoffset", f"{layer_offset:.6f}"]
         inputs += ["-i", str(layer_path)]
     filter_complex = _build_filter_complex(overlays, icon_px, ass_name, layer_input, layer_y, scale_to, cfr_fps)
+    # graphはfileで渡す。gift icon 100枚超・lane avatar付きのBattle録画では graph が数十KBに
+    # なり、Windowsのcommand line上限(32767字)を実測27KBまで使い切って超える。-filter_complex
+    # だと超えた時点でprocess生成そのものが失敗するので、常にscript渡しにして上限から外す。
+    filter_path = out.with_name(out.stem + ".filter.txt")
+    filter_path.write_text(filter_complex, encoding="utf-8")
     vmap = "[vout]"
     encoder = await video_encoder_name(codec)
     encoder_args = _encoder_args(encoder, _mapped_quality(encoder, quality))
     # 進捗を出すにはsource長(分母)が要る。取得できた時だけ-progressを有効化する。
-    total_us = await _probe_duration_us(src) if on_progress else None
+    if window is not None:
+        total_us = int(win_seconds * 1_000_000) if win_seconds > 0 else None
+        base_us = int(win_start * 1_000_000)
+        # 窓ありは音声を持たない(prepassの説明を参照)。尺の切り出しはinput側の-ss/-t
+        # (seek_source)かpre-passが済ませているので、output側では切らない: -copyts下の
+        # -tは出力timestampを基準に測るため、窓の開始offsetぶん早く打ち切ってしまう。
+        audio_args = ["-an"]
+    else:
+        total_us = await _probe_duration_us(src) if on_progress else None
+        base_us = 0
+        # 正規化するときだけ音声を再encodeする。録画はVFRなのでfilterの前段に
+        # aresample=async=1が要る(audio_norm側で必ず付けている)。出力rateはinput 0の
+        # 実値へ戻す(loudnormは192kHzを出すため)。
+        if audio_normalize:
+            rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src)
+            audio_args = ["-map", "0:a?"] + audio_norm.encode_args(
+                **audio_normalize, sample_rate=rate)
+        else:
+            audio_args = ["-map", "0:a?", "-c:a", "copy"]
     report = on_progress if (on_progress and total_us) else None
+    proc = None
     try:
+        cancel.check_cancelled()
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
             *inputs,
-            "-filter_complex", filter_complex,
-            "-map", vmap, "-map", "0:a?",
+            "-filter_complex_script", str(filter_path),
+            "-map", vmap,
+            *audio_args,
             *encoder_args,
             "-pix_fmt", "yuv420p",
-            "-c:a", "copy",
             "-movflags", "+faststart",
             *(["-progress", "pipe:1", "-nostats"] if report else []),
             str(out),
@@ -2685,19 +4110,111 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
             stderr=log_file,
             cwd=str(cwd),
         )
+        cancel.register_process(proc)
+        if report and proc.stdout is not None:
+            await _pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
+        await proc.wait()
+    finally:
+        if proc is not None:
+            cancel.forget_process(proc)
+        log_file.close()
+    if cancel.is_cancelled():
+        out.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+        filter_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
+    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        tail = ""
+        try:
+            tail = log_path.read_text(
+                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
+        except OSError:
+            logger.warning(
+                "burn-in ffmpeg log unreadable: %s", log_path, exc_info=True,
+                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+            )
+        out.unlink(missing_ok=True)
+        # 成果物は残らず、この呼び出しに自動回復経路も無いのでerror。ENOSPCはffmpegの
+        # stderrにしか出ないため、空き容量を同じ行に併記して切り分け可能にする。
+        logger.error(
+            "burn-in ffmpeg failed for %s (rc=%s)", out.name, proc.returncode,
+            extra={"event": "overlay.burn_in_failed",
+                   "ctx": {"path": str(out.resolve()), "stem": src.stem,
+                           "returncode": proc.returncode, "encoder": encoder,
+                           "quality": quality, "codec": codec,
+                           "overlays": len(overlays),
+                           "comment_layer_used": comment_layer is not None,
+                           "filter_chars": len(filter_complex),
+                           "stderr_tail": tail, **_disk_ctx(out.parent)}},
+        )
+        raise RuntimeError(f"動画へのComment/Gift焼き込みに失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+    filter_path.unlink(missing_ok=True)
+
+
+async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict,
+                          on_progress: Optional[ProgressCb] = None) -> None:
+    """描く物が1つも無い録画へ音量正規化だけを掛ける。映像はstream copyなので再encodeは
+    音声だけで、GPUも尺なりのencode時間も要らない。
+
+    録画はHLS由来のVFRで、-c:v copy のまま音声filterを足すと同期が崩れる。前段の
+    aresample=async=1 はaudio_norm.encode_args()が必ず付けているので、ここでは音声引数を
+    組み替えないこと。"""
+    log_path = out.with_name(out.stem + ".ffmpeg.log")
+    log_file = open(log_path, "wb")
+    total_us = await _probe_duration_us(src) if on_progress else None
+    report = on_progress if (on_progress and total_us) else None
+    rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src)
+    proc = None
+    try:
+        cancel.check_cancelled()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            "-i", str(src),
+            "-map", "0:v:0", "-map", "0:a?",
+            "-c:v", "copy",
+            *audio_norm.encode_args(**audio_normalize, sample_rate=rate),
+            "-movflags", "+faststart",
+            *(["-progress", "pipe:1", "-nostats"] if report else []),
+            str(out),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE if report else asyncio.subprocess.DEVNULL,
+            stderr=log_file,
+            cwd=str(cwd),
+        )
+        cancel.register_process(proc)
         if report and proc.stdout is not None:
             await _pump_ffmpeg_progress(proc.stdout, total_us, report)
         await proc.wait()
     finally:
+        if proc is not None:
+            cancel.forget_process(proc)
         log_file.close()
+    if cancel.is_cancelled():
+        out.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
     if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
         tail = ""
         try:
-            tail = log_path.read_text(encoding="utf-8", errors="replace")[-800:]
+            tail = log_path.read_text(
+                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
         except OSError:
-            pass
+            logger.warning(
+                "audio-normalise ffmpeg log unreadable: %s", log_path, exc_info=True,
+                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+            )
         out.unlink(missing_ok=True)
-        raise RuntimeError(f"動画へのComment/Gift焼き込みに失敗しました（ffmpeg）。{tail}".strip())
+        logger.error(
+            "audio-normalise ffmpeg failed for %s (rc=%s)", out.name, proc.returncode,
+            extra={"event": "overlay.audio_normalise_failed",
+                   "ctx": {"path": str(out.resolve()), "stem": src.stem,
+                           "returncode": proc.returncode,
+                           "stderr_tail": tail,
+                           **audio_norm.describe(audio_normalize),
+                           **_disk_ctx(out.parent)}},
+        )
+        raise RuntimeError(f"音量正規化に失敗しました（ffmpeg）。{tail}".strip())
     log_path.unlink(missing_ok=True)
 
 
@@ -2777,37 +4294,14 @@ async def _probe_is_vfr(src: Path, nominal_fps: float) -> bool:
     return 0 < avg < nominal_fps * 0.95
 
 
-async def ensure_overlay(
-    src_path: str,
-    started_at: float,
-    ended_at: Optional[float],
-    events: list,
-    settings,
-    battles: Optional[list] = None,
-    on_progress: Optional[ProgressCb] = None,
-) -> dict:
-    """Burn comments/gifts/battle into the recording per settings and return
-    ``{"a": Path, "b": Optional[Path]}``: ``a`` is the user-facing Mode A
-    (consumer-arrival timing) output — or the source path when nothing is drawn —
-    and ``b`` is the Mode B (source-clock / create_time timing) comparison output,
-    produced only when ``video_overlay_timing_compare`` is on and the recording has
-    live create_time to anchor on, else ``None``. Built and cached on first use;
-    raises RuntimeError on failure.
+async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> dict:
+    """Probe everything a render needs from the source: duration, the wall->media timing
+    map inputs, geometry, CFR target, font metrics and the usable subtitle segments.
 
-    The caller must only invoke this when overlay_enabled(settings) is True."""
-    if not ffmpeg_available():
-        raise RuntimeError("ffmpegが見つかりません。焼き込みにはffmpegのinstallが必要です。")
-    src = Path(src_path)
-    if not src.is_file():
-        raise RuntimeError("録画fileが存在しません。")
-    # The burned-in mp4 lands in the recordings root; the transient/cache artifacts
-    # (ass, meta, comment layer, ffmpeg log) live under the per-recording .sidecars
-    # dir, so create it before any write.
-    sidecar_dir(src).mkdir(parents=True, exist_ok=True)
-    cfg = overlay_settings(settings)
-
-    # Probe the source once; both variants share geometry, duration, anchors and
-    # font metrics, differing only in how event timestamps map onto the timeline.
+    The burn-in and the burn-in preview both go through here, unconditionally and with
+    the same arguments, so the preview cannot end up on a different timeline from the
+    output it is previewing. Nothing in here is allowed to branch on "this is a preview"
+    — a preview that builds its own time map would be worse than no preview at all."""
     dur_us = await _probe_duration_us(src)
     video_dur = dur_us / 1_000_000 if dur_us else None
     anchors = _load_timing_anchors(src)
@@ -2823,86 +4317,309 @@ async def ensure_overlay(
     # overlay text/emoji are crisp; scale_to tells ffmpeg to bring the source frame up
     # to the same canvas before compositing. None when no upscale is needed.
     width, height = _render_dimensions(src_w, src_h)
-    scale_to = (width, height) if (width, height) != (src_w, src_h) else None
-    icon_px = _icon_px(cfg, height)
+    wide_em, narrow_em = await _font_metrics()
+    return {
+        "video_dur": video_dur,
+        "anchors": anchors,
+        "media_pts": media_pts,
+        "pts_gaps": pts_gaps,
+        "src_w": src_w,
+        "src_h": src_h,
+        "fps": fps,
+        "width": width,
+        "height": height,
+        "scale_to": (width, height) if (width, height) != (src_w, src_h) else None,
+        "icon_px": _icon_px(cfg, height),
+        "avatar_dir": layout.record_root_of(src) / "avatars" / "by-id",
+        "wide_em": wide_em,
+        "narrow_em": narrow_em,
+        "quality": int(cfg.get("video_overlay_quality") or 21),
+        "codec": codec_family(cfg.get("video_overlay_codec")),
+        "subtitle_segments": (
+            subtitles.usable_segments(transcript.get("segments"))
+            if (cfg.get("video_overlay_subtitles") and transcript) else []
+        ),
+    }
+
+
+async def ensure_overlay(
+    src_path: str,
+    started_at: float,
+    ended_at: Optional[float],
+    events: list,
+    settings,
+    battles: Optional[list] = None,
+    on_progress: Optional[ProgressCb] = None,
+    transcript: Optional[dict] = None,
+) -> dict:
+    """Burn comments/gifts/battle into the recording per settings and return
+    ``{"a": Path, "b": Optional[Path]}``: ``a`` is the user-facing Mode A
+    (consumer-arrival timing) output, and ``b`` is the Mode B (source-clock /
+    create_time timing) comparison output, produced only when
+    ``video_overlay_timing_compare`` is on and the recording has live create_time to
+    anchor on, else ``None``. Built and cached on first use; raises RuntimeError on
+    failure.
+
+    描く物が1つも無い録画では、``a`` は音量正規化がOFFならsource pathそのもの、ONなら
+    映像をstream copyしたまま音声だけを正規化した出力になる(userが求めた「履歴の出力にも
+    音量正規化」は、描く物の有無に依らず掛かる必要がある)。
+
+    ``transcript`` is this recording's stored transcript (storage.get_transcript). It is
+    only read when ``video_overlay_subtitles`` is on, and the caller is responsible for
+    refusing the job when the setting is on but no usable transcript exists — burning a
+    recording without the subtitles that were asked for would be a silent downgrade.
+
+    The caller must only invoke this when overlay_enabled(settings) is True."""
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpegが見つかりません。焼き込みにはffmpegのinstallが必要です。")
+    src = Path(src_path)
+    if not src.is_file():
+        raise RuntimeError("録画fileが存在しません。")
+    # The burned-in mp4 lands in the recordings root; the transient/cache artifacts
+    # (ass, meta, comment layer, ffmpeg log) live under the per-recording .sidecars
+    # dir, so create it before any write.
+    sidecar_dir(src).mkdir(parents=True, exist_ok=True)
+    cfg = overlay_settings(settings)
+
+    # Probe the source once; both variants share geometry, duration, anchors and
+    # font metrics, differing only in how event timestamps map onto the timeline.
+    ctx = await _render_context(src, cfg, transcript)
+    video_dur = ctx["video_dur"]
+    anchors, media_pts, pts_gaps = ctx["anchors"], ctx["media_pts"], ctx["pts_gaps"]
+    src_w, src_h, fps = ctx["src_w"], ctx["src_h"], ctx["fps"]
+    # 焼き込みはrecorderとは別時刻・別操作で走るので、焼き込みのlogだけを見る調査者に
+    # 前提条件が見えている必要がある。特にtiming mapはrecorderがCFR転落時にunlinkする
+    # ため、「無い」ことと「その理由の時刻」が開始行に残っていないと辿れない。
+    logger.info(
+        "overlay job started for %s (events=%d window=%s..%s duration=%ss %dx%d @%.3ffps)",
+        src.name, len(events), started_at, ended_at, video_dur, src_w, src_h, fps,
+        extra={"event": "overlay.job_started",
+               "ctx": {"path": str(src.resolve()), "stem": src.stem,
+                       "events_total": len(events),
+                       "window_started_at": started_at, "window_ended_at": ended_at,
+                       "video_duration_seconds": video_dur,
+                       "src_width": src_w, "src_height": src_h, "src_fps": fps,
+                       "anchors": len(anchors) if anchors else 0,
+                       "media_pts": len(media_pts) if media_pts else 0,
+                       "pts_gaps": len(pts_gaps) if pts_gaps else 0,
+                       **_timing_map_ctx(src), **_disk_ctx(src)}},
+    )
+    width, height, scale_to = ctx["width"], ctx["height"], ctx["scale_to"]
+    icon_px = ctx["icon_px"]
     # TikTok recordings are stream-copied HLS and thus variable-frame-rate. ffmpeg's
     # overlay filter cannot keep the constant-rate comment layer time-locked to a VFR
     # base — comments end up many seconds behind the footage — so the base is normalised
     # to CFR. This is folded into the burn-in filter graph (see _build_filter_complex)
     # rather than run as a separate full re-encode pass, so the video body is encoded
     # once instead of twice. cfr_fps is None for an already-CFR source (no resample).
-    cfr_fps = fps if await _probe_is_vfr(src, fps) else None
+    # Cap the CFR target: the nominal rate is HLS padding (see CFR_FPS_CAP), so a
+    # 50/60fps VFR source normalises to 30 — halving the frames every downstream pass
+    # touches — while a source already at or below the cap keeps its own rate.
+    cfr_fps = min(fps, CFR_FPS_CAP) if await _probe_is_vfr(src, fps) else None
     if cfr_fps is not None:
-        logger.info("overlay: normalising VFR source to CFR %.3ffps in-graph for %s", fps, src.name)
-    avatar_dir = src.parent / "avatars" / "by-id"
-    wide_em, narrow_em = await _font_metrics()
-    quality = int(cfg.get("video_overlay_quality") or 21)
-    codec = codec_family(cfg.get("video_overlay_codec"))
+        logger.info("overlay: normalising VFR source (nominal %.3ffps) to CFR %.3ffps for %s",
+                    fps, cfr_fps, src.name,
+                    extra={"event": "overlay.cfr_normalisation_planned",
+                           "ctx": {"stem": src.stem, "src_fps": fps, "fps": cfr_fps}})
+    avatar_dir = ctx["avatar_dir"]
+    wide_em, narrow_em = ctx["wide_em"], ctx["narrow_em"]
+    quality, codec = ctx["quality"], ctx["codec"]
+    subtitle_segments = ctx["subtitle_segments"]
 
-    async def _render_variant(time_source, out, ass_path, meta_path, signature, debug_path=None):
+    # 「A側が何も描かなかった」ことをMode Bの起動判定へ渡す。素通しでも音量正規化だけを
+    # 掛けた出力を返すため、A の戻り値がsrcかどうかでは区別できない。
+    a_drew_nothing = False
+
+    async def _render_variant_locked(time_source, out, ass_path, meta_path, signature, debug_path=None):
+        nonlocal a_drew_nothing
+        render_started = time.monotonic()
         if out.is_file() and meta_path.is_file():
-            try:
-                if meta_path.read_text(encoding="utf-8").strip() == signature:
-                    return out
-            except OSError:
-                pass
+            cached_audio_only = _read_meta(meta_path, signature)
+            if cached_audio_only is not None:
+                if cached_audio_only and time_source == "arrival":
+                    a_drew_nothing = True
+                return out
         debug_sink = [] if debug_path is not None else None
         ass_text, overlays, stats, comment_plan = _build_ass(
             events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
             wide_em, narrow_em, pts_gaps, battles, time_source=time_source, debug_sink=debug_sink,
-            media_pts=media_pts,
+            media_pts=media_pts, subtitle_segments=subtitle_segments,
         )
         if stats.get("source_unavailable"):
             # Mode B could not be anchored (no live create_time); leave no B output.
             out.unlink(missing_ok=True)
             meta_path.unlink(missing_ok=True)
             return None
-        if stats["comments"] == 0 and stats["gifts"] == 0 and stats["score"] == 0:
-            logger.info("overlay[%s]: nothing to draw for %s; serving source", time_source, src.name)
-            out.unlink(missing_ok=True)
-            meta_path.unlink(missing_ok=True)
-            return src if time_source == "arrival" else None
+        if (stats["comments"] == 0 and stats["gifts"] == 0 and stats["score"] == 0
+                and stats["subtitles"] == 0):
+            # 「eventが無かった」と「原点破綻で全eventが動画長の外へ落ちた」は、この行だけ
+            # 見ると区別がつかない。drop内訳とoffsetの範囲を必ず併記し、drop率が高い場合は
+            # 正常なtrimではなく欠陥として扱う。
+            placement = _placement_ctx(stats)
+            broken = stats["dropped_ratio"] >= config.get_log_overlay_drop_warn_ratio()
+            normalize = audio_norm.targets_from_cfg(cfg) if time_source == "arrival" else None
+            logger.log(
+                logging.WARNING if broken else logging.INFO,
+                "overlay[%s]: nothing to draw for %s; %s "
+                "(events=%d placed=%d dropped_before=%d dropped_after=%d offsets=%s..%s of %ss)",
+                time_source, src.name,
+                "normalising audio only" if normalize else "serving source",
+                stats["events_total"], stats["placed"],
+                stats["dropped_before_start"], stats["dropped_after_end"],
+                stats["offset_min"], stats["offset_max"], stats["video_duration_seconds"],
+                extra={"event": "overlay.nothing_to_draw",
+                       "ctx": {"stem": src.stem, **placement,
+                               **audio_norm.describe(normalize)}},
+            )
+            if time_source == "arrival":
+                a_drew_nothing = True
+            if normalize is None:
+                out.unlink(missing_ok=True)
+                meta_path.unlink(missing_ok=True)
+                return src if time_source == "arrival" else None
+            # 描く物は無いが音量正規化は要求されている。映像はstream copyのままで音声だけを
+            # 再encodeし、履歴の出力にも正規化が掛かった状態で残す。
+            await _run_audio_only(src, out, sidecar_dir(src), normalize, on_progress)
+            meta_path.write_text(f"{signature}\n{AUDIO_ONLY_MARK}", encoding="utf-8")
+            logger.info(
+                "overlay[%s]: audio-only normalise done for %s (%d bytes)",
+                time_source, out.name, out.stat().st_size,
+                extra={"event": "overlay.audio_normalised",
+                       "ctx": {"path": str(out.resolve()), "stem": src.stem,
+                               "duration_ms": int((time.monotonic() - render_started) * 1000),
+                               "size_bytes": out.stat().st_size,
+                               **audio_norm.describe(normalize)}},
+            )
+            return out
 
-        comment_layer = None
-        comment_fallback = False
-        comment_layer_path = sidecar_dir(src) / (out.stem + COMMENT_LAYER_SUFFIX)
-        if comment_plan is not None:
-            layer_fps = min(fps, COMMENT_LAYER_FPS_CAP)
-            # The comment layer streams every frame through a long-lived pipe to a
-            # qtrle encoder; under load that pipe can break transiently and yield
-            # None. Retry once before giving up, since a mono fallback must never be
-            # cached as the final result (see the meta write below).
-            for attempt in range(1, 3):
-                comment_layer = await _render_comment_layer(
-                    comment_plan["placements"], comment_plan["avatar_files"], comment_plan["metrics"],
-                    comment_plan["comment_fs"], comment_plan["shaper"],
-                    width, height, layer_fps, comment_layer_path,
-                )
-                if comment_layer is not None:
-                    break
-                logger.warning("comment layer render produced nothing for %s (attempt %d/2)", src.name, attempt)
-            if comment_layer is None:
-                # The colour-emoji layer could not be produced; rebuild the ASS with
-                # the monochrome comment feed so comments still show. This output is
-                # degraded (colour emoji were requested but failed to render), so it is
-                # NOT cached as complete — the next output retries the colour layer.
-                comment_fallback = True
-                logger.warning("comment layer unavailable for %s after retry; falling back to ASS comments", src.name)
-                ass_text, overlays, stats, _ = _build_ass(
-                    events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
-                    wide_em, narrow_em, pts_gaps, battles, use_comment_layer=False, time_source=time_source,
-                    media_pts=media_pts,
-                )
-
-        renderable = await _resolve_icons(overlays, src.parent / ICON_CACHE_DIR)
-        ass_path.write_text(ass_text, encoding="utf-8")
+        # comment layer(数GB)とCFR base(数十GB)は、合成まで到達しなかった経路でも必ず
+        # 消す。pre-passのre-raiseやcancelはlayer renderの後・_run_ffmpegの前で抜けるため、
+        # _run_ffmpegのfinallyに置いたままでは回収する所有者が誰も居なくなる。
+        comment_layer_path: Optional[Path] = None
+        prepass_file: Optional[Path] = None
         try:
-            await _run_ffmpeg(src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
+            comment_layer = None
+            comment_fallback = False
+            comment_layer_path = sidecar_dir(src) / (out.stem + COMMENT_LAYER_SUFFIX)
+            # ``render_src``/``main_cfr``/``main_scale`` are what the burn-in graph sees.
+            # They stay as the source unless a CFR base pre-pass runs, which swaps in the
+            # normalised base and drops the in-graph resample.
+            render_src, main_cfr, main_scale = src, cfr_fps, scale_to
+            if comment_plan is not None:
+                # Download the custom-emote images and attach them to the shaper before the
+                # layer render draws them inline (cached by emote_id under the recording's
+                # sidecar dir, reused across comments and re-outputs).
+                await _resolve_emotes(comment_plan["shaper"], layout.record_root_of(src) / EMOTE_CACHE_DIR)
+                layer_fps = min(fps, COMMENT_LAYER_FPS_CAP)
+                # Run the CFR base pre-pass (GPU) concurrently with the comment-layer
+                # render (CPU/qtrle): they are independent (both only read the source) and
+                # bound different hardware, so overlapping them roughly halves the pre-burn
+                # "preparing" wait. Started optimistically since the layer almost always
+                # renders; if it ends up unavailable the base is discarded below and the
+                # in-graph CFR path is used for the ASS fallback instead.
+                prepass_task = None
+                if cfr_fps is not None:
+                    prepass_file = sidecar_dir(src) / (out.stem + CFR_BASE_SUFFIX)
+                    prepass_task = asyncio.create_task(
+                        _prepass_cfr(src, prepass_file, scale_to, cfr_fps, sidecar_dir(src)))
+                # The comment layer streams every frame through a long-lived pipe to a
+                # qtrle encoder; under load that pipe can break transiently and yield
+                # None. Retry once before giving up, since a mono fallback must never be
+                # cached as the final result (see the meta write below).
+                for attempt in range(1, 3):
+                    comment_layer = await _render_comment_layer(
+                        comment_plan["placements"], comment_plan["avatar_files"], comment_plan["metrics"],
+                        comment_plan["comment_fs"], comment_plan["shaper"],
+                        width, height, layer_fps, comment_layer_path,
+                        comment_plan.get("avatar_upscale", False),
+                    )
+                    if comment_layer is not None:
+                        break
+                    logger.warning(
+                        "comment layer render produced nothing for %s (attempt %d/2)", src.name, attempt,
+                        extra={"event": "overlay.comment_layer_retried",
+                               "ctx": {"stem": src.stem, "attempt": attempt,
+                                       "time_source": time_source, "fps": layer_fps}},
+                    )
+                if prepass_task is not None:
+                    try:
+                        await prepass_task
+                    except Exception:
+                        # The base pre-pass failed. If the layer rendered, it cannot be
+                        # composited on a VFR base without drift, so re-raise (fatal); if
+                        # the layer also failed the base is not needed anyway.
+                        prepass_file.unlink(missing_ok=True)
+                        prepass_file = None
+                        if comment_layer is not None:
+                            raise
+                if comment_layer is not None and prepass_file is not None:
+                    # Composite onto the real CFR base; the main graph no longer resamples.
+                    render_src, main_cfr, main_scale = prepass_file, None, None
+                if comment_layer is not None:
+                    # layerがbaseより短ければ、合成後にcommentが途中で無警告に消える
+                    # (eof_action=passの設計上、ffmpegは何も言わない)。合成前に測る。
+                    layer_stats = comment_layer[3]
+                    _log_duration_check(
+                        "overlay.comment_layer_checked",
+                        "comment layer duration check: layer=%ss base=%ss (delta=%ss)",
+                        fps=layer_fps,
+                        layer_seconds=await _duration_seconds(comment_layer[0]),
+                        base_seconds=await _duration_seconds(render_src),
+                        src_seconds=video_dur,
+                        compare=("layer", "base"),
+                        n_frames=layer_stats["n_frames"],
+                        ctx={"path": str(comment_layer[0].resolve()), "stem": src.stem,
+                             "time_source": time_source,
+                             "frames_written": layer_stats["frames_written"],
+                             "size_bytes": layer_stats["size_bytes"],
+                             "base_is_prepass": prepass_file is not None},
+                    )
+                elif prepass_file is not None:
+                    # Layer unavailable → base unused; drop it and let the ASS path
+                    # normalise CFR in-graph via cfr_fps.
+                    prepass_file.unlink(missing_ok=True)
+                    prepass_file = None
+                if comment_layer is None:
+                    # The colour-emoji layer could not be produced; rebuild the ASS with
+                    # the monochrome comment feed so comments still show. This output is
+                    # degraded (colour emoji were requested but failed to render), so it is
+                    # NOT cached as complete — the next output retries the colour layer.
+                    comment_fallback = True
+                    # 転落先のASS feedはカラー絵文字も実写アイコンも描けないため、成果物の品質は
+                    # 確定的に劣化する(自動回復ではない)。転落した事実と理由を必ずerrorで残す。
+                    # TODO: 規約上のfallback禁止に該当する。廃止は別taskで判断する。
+                    logger.warning(
+                        "comment layer unavailable for %s after retry; falling back to monochrome ASS comments",
+                        src.name,
+                        extra={"event": "overlay.comment_layer_fallback_used",
+                               "ctx": {"stem": src.stem, "time_source": time_source,
+                                       "reason": "comment layer render returned nothing twice",
+                                       "degraded": "no colour emoji, no real avatars",
+                                       "fps": layer_fps,
+                                       **_disk_ctx(sidecar_dir(src))}},
+                    )
+                    ass_text, overlays, stats, _ = _build_ass(
+                        events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
+                        wide_em, narrow_em, pts_gaps, battles, use_comment_layer=False, time_source=time_source,
+                        media_pts=media_pts, subtitle_segments=subtitle_segments,
+                    )
+
+            icon_cache = layout.record_root_of(src) / ICON_CACHE_DIR
+            gift_specs = [o for o in overlays if o.get("kind") != "avatar"]
+            avatar_specs = [o for o in overlays if o.get("kind") == "avatar"]
+            renderable = await _resolve_icons(gift_specs, icon_cache)
+            renderable += await _resolve_score_avatars(avatar_specs, avatar_dir, icon_cache)
+            ass_path.write_text(ass_text, encoding="utf-8")
+            await _run_ffmpeg(render_src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
                               codec=codec, comment_layer=comment_layer, on_progress=on_progress,
-                              scale_to=scale_to, cfr_fps=cfr_fps)
+                              scale_to=main_scale, cfr_fps=main_cfr,
+                              audio_normalize=audio_norm.targets_from_cfg(cfg))
         finally:
             ass_path.unlink(missing_ok=True)
-            comment_layer_path.unlink(missing_ok=True)
+            if comment_layer_path is not None:
+                comment_layer_path.unlink(missing_ok=True)
+            if prepass_file is not None:
+                prepass_file.unlink(missing_ok=True)
         if comment_fallback:
             meta_path.unlink(missing_ok=True)
         else:
@@ -2919,15 +4636,53 @@ async def ensure_overlay(
                 )
             except OSError:
                 logger.warning("failed to write timing debug sidecar %s", debug_path, exc_info=True)
-        logger.info(
-            "overlay rendered[%s]: %s (comments=%d gifts=%d score=%d icons=%d dropped_icons=%d avatars=%d)",
+        placement = _placement_ctx(stats)
+        drop_ratio = stats["dropped_ratio"]
+        broken = drop_ratio >= config.get_log_overlay_drop_warn_ratio()
+        logger.log(
+            logging.WARNING if broken else logging.INFO,
+            "overlay rendered[%s]: %s (comments=%d gifts=%d score=%d icons=%d dropped_icons=%d "
+            "avatars=%d placed=%d/%d dropped_before=%d dropped_after=%d)",
             time_source, out.name, stats["comments"], stats["gifts"], stats["score"], len(renderable),
-            stats["dropped_icons"], stats["avatars"],
+            stats["dropped_icons"], stats["avatars"], stats["placed"], stats["events_total"],
+            stats["dropped_before_start"], stats["dropped_after_end"],
+            extra={"event": "overlay.rendered",
+                   "ctx": {"stem": out.stem,
+                           "comments": stats["comments"], "gifts": stats["gifts"],
+                           "score": stats["score"], "bonus": stats["bonus"],
+                           "subtitles": stats["subtitles"],
+                           "subtitle_diag": stats["subtitle_diag"],
+                           "icons": len(renderable), "dropped_icons": stats["dropped_icons"],
+                           "avatars": stats["avatars"],
+                           "comment_layer_used": comment_layer is not None,
+                           "comment_fallback": comment_fallback,
+                           "duration_ms": int((time.monotonic() - render_started) * 1000),
+                           "size_bytes": out.stat().st_size if out.is_file() else None,
+                           **placement}},
         )
         return out
 
+    async def _render_variant(time_source, out, ass_path, meta_path, signature, debug_path=None):
+        """Render one variant while holding a process-wide GPU slot. The cache hit is
+        answered before queueing: a re-output that is already up to date must not wait
+        behind another recording's encode just to return the file it already has."""
+        nonlocal a_drew_nothing
+        if out.is_file() and meta_path.is_file():
+            cached_audio_only = _read_meta(meta_path, signature)
+            if cached_audio_only is not None:
+                if cached_audio_only and time_source == "arrival":
+                    a_drew_nothing = True
+                return out
+        async with gpu_slot_async(f"overlay:{out.stem}"):
+            return await _render_variant_locked(
+                time_source, out, ass_path, meta_path, signature, debug_path
+            )
+
+    events_sig = _events_fingerprint(events)
+    subtitles_sig = subtitles.fingerprint(transcript) if cfg.get("video_overlay_subtitles") else ""
     out_a, ass_a, meta_a = overlay_paths(src)
-    sig_a = _signature(src, cfg, timing_path(src), variant="a")
+    sig_a = _signature(src, cfg, timing_path(src), variant="a", events_sig=events_sig,
+                       subtitles_sig=subtitles_sig)
     lock = await _get_lock(str(out_a))
     async with lock:
         result_a = await _render_variant("arrival", out_a, ass_a, meta_a, sig_a)
@@ -2936,13 +4691,14 @@ async def ensure_overlay(
         # create_time to anchor on. Skipped entirely when A drew nothing (same events
         # => B would draw nothing too).
         b_enabled = (
-            result_a is not src
+            not a_drew_nothing
             and bool(settings.get("video_overlay_timing_compare"))
             and len(_live_create_samples(events)) >= SOURCE_MIN_ANCHOR_SAMPLES
         )
         if b_enabled:
             out_b, ass_b, meta_b = overlay_paths_b(src)
-            sig_b = _signature(src, cfg, timing_path(src), variant="b")
+            sig_b = _signature(src, cfg, timing_path(src), variant="b", events_sig=events_sig,
+                               subtitles_sig=subtitles_sig)
             result_b = await _render_variant(
                 "server", out_b, ass_b, meta_b, sig_b, sidecar_path(src, TIMING_DEBUG_SUFFIX)
             )
@@ -2951,3 +4707,472 @@ async def ensure_overlay(
             for p in overlay_paths_b(src):
                 p.unlink(missing_ok=True)
     return {"a": result_a, "b": result_b}
+
+
+# ===== 焼き込み設定のプレビュー =====
+# 13項目ある焼き込み設定の効き目を、1配信ぶんの本出力(数十分〜数時間)を待たずに確かめる
+# ための経路。静止画は1 frameだけをPIL層と合成して秒で返し、動画は実解像度・実codecのまま
+# 尺だけをmedia PTS窓で切る。
+#
+# 守るべき不変条件が1つある: **時刻mapを分岐させないこと**。プレビューは全尺のまま組んだ
+# 描画plan(_render_context / _build_ass)をそのまま使い、窓はffmpegのseekと-copytsでしか
+# 効かせない。プレビュー専用にoffsetを組み直すと「プレビューでは合っているのに本出力は
+# ズレる」という、無いより有害な確認手段になる。成果物(png/mp4/meta/中間物)はsidecar dirへ
+# 隔離し、本出力のcache判定とは無関係にしてある。
+
+PREVIEW_ASS_SUFFIX = ".preview.ass"
+PREVIEW_RAW_SUFFIX = ".preview.raw.png"
+# 窓の自動選定で使う重み。giftとBattleはcommentより低頻度なので、同じ件数ならそれらを
+# 含む窓を優先する(gift秒数・min diamonds・score bar holdが空振りする窓を選ばないため)。
+# 選定にしか効かず、描画結果には一切影響しない。
+PREVIEW_GIFT_WEIGHT = 6.0
+PREVIEW_BATTLE_WEIGHT = 2.0
+# Battle区間へ置く評価点の間隔(秒)。Battleは数分続くので、開始点だけに重みを置くと窓が
+# 常にBattle冒頭へ吸い寄せられる。
+PREVIEW_BATTLE_SAMPLE_SECONDS = 15.0
+
+
+def preview_seconds(settings) -> float:
+    """動画プレビューの尺(秒)。costは解像度ではなく尺で決まるので、ここが唯一の削減軸。"""
+    return float(settings.get("video_overlay_preview_seconds"))
+
+
+def _battle_media_windows(battles, to_media, video_duration) -> list:
+    """Battleが映像上のどの区間かを (start, end) で返す。窓の自動選定にしか使わない
+    (描画は_build_score_bar_dialoguesが自前で解決する)ので、ここでの誤差はプレビュー窓の
+    選び方が少し悪くなるだけで、描かれる内容は動かない。"""
+    upper = video_duration if video_duration is not None else float("inf")
+    wins: list = []
+    for battle in battles or []:
+        if battle.get("aborted"):
+            continue
+        series = battle.get("score_series") or []
+        if not series:
+            continue
+        end_wall = battle.get("end_time") or series[-1].get("t")
+        start = max(0.0, to_media(series[0].get("t") or 0))
+        end = to_media(end_wall) if end_wall else start
+        if end <= start or start >= upper:
+            continue
+        wins.append((start, min(end, upper)))
+    return wins
+
+
+def _preview_points(debug_rows: list, cfg: dict, battle_windows: list,
+                    video_duration) -> list:
+    """窓の評価に使う (映像time, 重み) の列。commentとgiftの位置は本番の描画planが出した
+    offsetそのもの(_build_assのdebug_sink)なので、選定と描画で時刻がズレようがない。"""
+    upper = video_duration if video_duration is not None else float("inf")
+    min_diamonds = cfg.get("video_overlay_gift_min_diamonds") or 0
+    points: list = []
+    for row in debug_rows:
+        offset = row.get("offset")
+        if offset is None or offset < 0 or offset > upper:
+            continue
+        if row.get("kind") == "comment":
+            if cfg.get("video_overlay_comments"):
+                points.append((offset, 1.0))
+        elif row.get("kind") == "gift":
+            if cfg.get("video_overlay_gifts") and (row.get("diamonds") or 0) >= min_diamonds:
+                points.append((offset, PREVIEW_GIFT_WEIGHT))
+    if cfg.get("video_overlay_score_bar"):
+        for start, end in battle_windows:
+            t = start
+            while t < end:
+                points.append((t, PREVIEW_BATTLE_WEIGHT))
+                t += PREVIEW_BATTLE_SAMPLE_SECONDS
+    points.sort(key=lambda p: p[0])
+    return points
+
+
+def _pick_preview_window(points: list, video_duration, seconds: float) -> tuple:
+    """描くものが最も濃い ``seconds`` 秒の窓を返す。userに開始時刻を入れさせると、大半の
+    録画では何も起きていない区間を引いてしまい、gift秒数もmin diamondsもscore barも
+    確認できない空振りのプレビューになる。"""
+    total = video_duration if video_duration is not None else 0.0
+    if total and total <= seconds:
+        return 0.0, total
+    max_start = max(0.0, total - seconds) if total else 0.0
+    if not points:
+        return 0.0, (min(seconds, total) if total else seconds)
+    times = [p[0] for p in points]
+    cumulative = [0.0]
+    for _t, weight in points:
+        cumulative.append(cumulative[-1] + weight)
+
+    def score(start: float) -> float:
+        lo = bisect.bisect_left(times, start)
+        hi = bisect.bisect_right(times, start + seconds)
+        return cumulative[hi] - cumulative[lo]
+
+    # 候補は「ある点で窓が始まる」「ある点が窓の中央に来る」の2種類で足りる。窓の重みは
+    # 開始位置に対して区分定数なので、最大値は必ずいずれかの点の近傍で取れる。
+    candidates = {0.0, max_start}
+    for t in times:
+        candidates.add(min(max(0.0, t), max_start))
+        candidates.add(min(max(0.0, t - seconds / 2.0), max_start))
+    ordered = sorted(candidates)
+    best = ordered[0]
+    best_score = score(best)
+    for start in ordered:
+        value = score(start)
+        if value > best_score:
+            best, best_score = start, value
+    end = best + seconds
+    if total:
+        end = min(end, total)
+    return best, end
+
+
+async def _preview_plan(src: Path, settings, started_at: float, ended_at,
+                        events: list, battles, transcript,
+                        seconds: float, at_seconds) -> dict:
+    """プレビュー1回ぶんの描画plan。本出力と同じ_render_context・同じ_build_assを、同じ
+    引数で通す(ここが分岐したらプレビューは嘘になる)。窓だけをこの後で決める。"""
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpegが見つかりません。プレビューにはffmpegのinstallが必要です。")
+    if not src.is_file():
+        raise RuntimeError("録画fileが存在しません。")
+    sidecar_dir(src).mkdir(parents=True, exist_ok=True)
+    cfg = overlay_settings(settings)
+    ctx = await _render_context(src, cfg, transcript)
+    debug_sink: list = []
+    ass_text, overlays, stats, comment_plan = _build_ass(
+        events, started_at, ended_at, ctx["video_dur"], ctx["width"], ctx["height"], cfg,
+        ctx["anchors"], ctx["avatar_dir"], ctx["wide_em"], ctx["narrow_em"], ctx["pts_gaps"],
+        battles, time_source="arrival", debug_sink=debug_sink,
+        media_pts=ctx["media_pts"], subtitle_segments=ctx["subtitle_segments"],
+    )
+    if (stats["comments"] == 0 and stats["gifts"] == 0 and stats["score"] == 0
+            and stats["subtitles"] == 0):
+        raise NothingToDrawError(
+            "この録画には焼き込むComment/Gift/Battle/字幕がありません。"
+            "設定を変えるか、別の録画でプレビューしてください。"
+        )
+    to_media = _make_time_mapper(ctx["anchors"], started_at, ended_at, ctx["video_dur"],
+                                ctx["pts_gaps"], ctx["media_pts"])
+    battle_windows = _battle_media_windows(battles, to_media, ctx["video_dur"])
+    points = _preview_points(debug_sink, cfg, battle_windows, ctx["video_dur"])
+    if at_seconds is None:
+        win_start, win_end = _pick_preview_window(points, ctx["video_dur"], seconds)
+        auto = True
+    else:
+        total = ctx["video_dur"] or (at_seconds + seconds)
+        win_start = min(max(0.0, at_seconds), max(0.0, total - seconds))
+        win_end = min(win_start + seconds, total)
+        auto = False
+    return {"cfg": cfg, "ctx": ctx, "ass_text": ass_text, "overlays": overlays,
+            "stats": stats, "comment_plan": comment_plan, "points": points,
+            "window": (win_start, win_end), "window_auto": auto,
+            "battle_windows": battle_windows}
+
+
+def _comments_in_window(comment_plan, window: tuple) -> bool:
+    """窓の中でcommentが1件でも画面に出るか。出ないなら層を描かない。本出力の「層を作れ
+    なかったのでASSの白黒feedへ転落」とは別事象で、混同するとプレビューだけ見た目が
+    変わってしまう。"""
+    if comment_plan is None:
+        return False
+    win_start, win_end = window
+    for p in comment_plan["placements"]:
+        if p["empty"] or not p.get("segments"):
+            continue
+        for seg in p["segments"]:
+            if seg["start"] <= win_end and seg["end"] > win_start:
+                return True
+    return False
+
+
+async def _preview_render_inputs(src: Path, plan: dict) -> list:
+    """gift icon / score barのavatarを解決して、overlay filterへ渡せるspecにする。"""
+    icon_cache = layout.record_root_of(src) / ICON_CACHE_DIR
+    overlays = plan["overlays"]
+    gift_specs = [o for o in overlays if o.get("kind") != "avatar"]
+    avatar_specs = [o for o in overlays if o.get("kind") == "avatar"]
+    renderable = await _resolve_icons(gift_specs, icon_cache)
+    renderable += await _resolve_score_avatars(avatar_specs, plan["ctx"]["avatar_dir"], icon_cache)
+    return renderable
+
+
+async def _run_preview_frame(src: Path, overlays: list, ctx: dict, ass_path: Path,
+                             out_png: Path, at: float) -> None:
+    """``at`` の1 frameを、本出力と同一のfilter graphを通してpngへ書く。``-copyts``で
+    sourceのtimestampを保つので、ASSのDialogueもgiftの``enable=between(t,...)``も全尺の
+    ままの時刻で正しく効く(時刻を組み直さないための要)。"""
+    cwd = sidecar_dir(src)
+    filter_complex = _build_filter_complex(
+        overlays, ctx["icon_px"], ass_path.name, None, 0, ctx["scale_to"], None)
+    # graphは常にscript渡し(command line長の上限に触れないため。_run_ffmpegと同じ理由)。
+    filter_path = out_png.with_name(out_png.stem + ".filter.txt")
+    filter_path.write_text(filter_complex, encoding="utf-8")
+    log_path = out_png.with_name(out_png.stem + ".ffmpeg.log")
+    log_file = open(log_path, "wb")
+    inputs: list = ["-copyts", "-ss", f"{at:.6f}", "-i", str(src)]
+    seen: list = []
+    for spec in overlays:
+        f = str(spec["file"])
+        if f not in seen:
+            seen.append(f)
+    for f in seen:
+        inputs += ["-i", f]
+    proc = None
+    try:
+        cancel.check_cancelled()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            *inputs,
+            "-filter_complex_script", str(filter_path),
+            "-map", "[vout]", "-an", "-frames:v", "1", "-update", "1",
+            str(out_png),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL, stderr=log_file, cwd=str(cwd),
+        )
+        cancel.register_process(proc)
+        await proc.wait()
+    finally:
+        if proc is not None:
+            cancel.forget_process(proc)
+        log_file.close()
+    if cancel.is_cancelled():
+        out_png.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+        filter_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
+    if proc.returncode != 0 or not out_png.exists() or out_png.stat().st_size == 0:
+        tail = ""
+        try:
+            tail = log_path.read_text(
+                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
+        except OSError:
+            logger.warning(
+                "preview ffmpeg log unreadable: %s", log_path, exc_info=True,
+                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+            )
+        out_png.unlink(missing_ok=True)
+        filter_path.unlink(missing_ok=True)
+        logger.error(
+            "preview frame extraction failed for %s at %.3fs (rc=%s)", src.name, at,
+            proc.returncode,
+            extra={"event": "overlay.preview_frame_failed",
+                   "ctx": {"path": str(out_png.resolve()), "stem": src.stem,
+                           "at_seconds": round(at, 3), "returncode": proc.returncode,
+                           "overlays": len(overlays), "filter_chars": len(filter_complex),
+                           "stderr_tail": tail, **_disk_ctx(out_png.parent)}},
+        )
+        raise RuntimeError(f"プレビュー用frameの抽出に失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+    filter_path.unlink(missing_ok=True)
+
+
+def _preview_still_sync(comment_plan: dict, ctx: dict, raw_png: Path, out_png: Path,
+                        at: float) -> bool:
+    """抜いた1 frameへcomment層を重ねてpngにする。tile化も配置式も本出力と同じ関数を通す。"""
+    from PIL import Image
+
+    tiles = _comment_layer_tiles(
+        comment_plan["placements"], comment_plan["avatar_files"], comment_plan["metrics"],
+        comment_plan["comment_fs"], comment_plan["shaper"], ctx["width"], ctx["height"],
+        comment_plan.get("avatar_upscale", False), time_window=(at, at),
+    )
+    if tiles is None:
+        return False
+    band = _comment_still_frame(tiles, at)
+    if band is None:
+        return False
+    with Image.open(raw_png) as frame:
+        base = frame.convert("RGBA")
+    base.alpha_composite(band, (tiles["region_x"], tiles["region_y0"]))
+    base.convert("RGB").save(out_png)
+    return True
+
+
+async def _preview_still_compose(comment_plan: dict, ctx: dict, raw_png: Path,
+                                 out_png: Path, at: float) -> bool:
+    """comment層の合成。avatarのAI超解像を伴うときだけGPU slotを取る(取らない場合は本出力の
+    encode中でも待たずに返せる。設定確認を待たせないことが静止画プレビューの存在理由)。"""
+    if comment_plan.get("avatar_upscale"):
+        async with gpu_slot_async(f"overlay-preview:{out_png.stem}"):
+            return await asyncio.to_thread(_preview_still_sync, comment_plan, ctx,
+                                           raw_png, out_png, at)
+    return await asyncio.to_thread(_preview_still_sync, comment_plan, ctx,
+                                   raw_png, out_png, at)
+
+
+async def preview_still(src_path: str, started_at: float, ended_at,
+                        events: list, settings, battles=None, transcript=None,
+                        at_seconds=None) -> dict:
+    """焼き込み設定の静止画プレビュー。指定(既定はevent密度で自動選定した)media PTSの
+    1 frameだけを抜き、本出力と同じASS・同じgift overlay・同じPIL comment層を重ねてpngへ
+    書く。動画encodeもcomment layerのpipeもCFR pre-passも通らないので秒で返る。"""
+    src = Path(src_path)
+    # 窓の長さはGift演出の表示秒数に合わせる。giftは自分のoffsetから表示秒数のあいだ画面に
+    # 残るので、その幅で最も濃い窓の「終わり」が、Gift/Commentが最も多く同時に出ている瞬間
+    # になる。
+    span = float(settings.get("video_overlay_gift_seconds") or 0) or SLIDE_SECONDS
+    plan = await _preview_plan(src, settings, started_at, ended_at, events, battles,
+                               transcript, span, at_seconds)
+    ctx = plan["ctx"]
+    at = plan["window"][1] if at_seconds is None else plan["window"][0]
+    if ctx["video_dur"]:
+        at = min(at, max(0.0, ctx["video_dur"] - 1.0 / max(ctx["fps"], 1.0)))
+    still_path, _clip_path, _meta_path = preview_paths(src)
+    ass_path = sidecar_path(src, PREVIEW_ASS_SUFFIX)
+    raw_path = sidecar_path(src, PREVIEW_RAW_SUFFIX)
+    comment_plan = plan["comment_plan"]
+    draw_comments = _comments_in_window(comment_plan, (at, at))
+    started = time.monotonic()
+    lock = await _get_lock(f"preview-still:{still_path}")
+    async with lock:
+        if draw_comments:
+            await _resolve_emotes(comment_plan["shaper"],
+                                  layout.record_root_of(src) / EMOTE_CACHE_DIR)
+        renderable = await _preview_render_inputs(src, plan)
+        ass_path.write_text(plan["ass_text"], encoding="utf-8")
+        try:
+            await _run_preview_frame(src, renderable, ctx, ass_path, raw_path, at)
+            if draw_comments:
+                drawn = await _preview_still_compose(comment_plan, ctx, raw_path,
+                                                     still_path, at)
+            else:
+                drawn = False
+                shutil.copyfile(raw_path, still_path)
+        finally:
+            ass_path.unlink(missing_ok=True)
+            raw_path.unlink(missing_ok=True)
+    logger.info(
+        "overlay preview still rendered at %.3fs for %s (comments=%s icons=%d)",
+        at, src.name, drawn, len(renderable),
+        extra={"event": "overlay.preview_still_rendered",
+               "ctx": {"path": str(still_path.resolve()), "stem": src.stem,
+                       "at_seconds": round(at, 3), "window_auto": plan["window_auto"],
+                       "comments_drawn": drawn, "icons": len(renderable),
+                       "video_duration_seconds": ctx["video_dur"],
+                       "duration_ms": int((time.monotonic() - started) * 1000)}},
+    )
+    return {"path": still_path, "at_seconds": at, "window_auto": plan["window_auto"],
+            "comments_drawn": drawn, "stats": plan["stats"],
+            "video_duration_seconds": ctx["video_dur"]}
+
+
+async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path,
+                               signature: str, on_progress) -> None:
+    ctx = plan["ctx"]
+    window = plan["window"]
+    win_start, win_end = window
+    comment_plan = plan["comment_plan"]
+    render_started = time.monotonic()
+    cfr_fps = min(ctx["fps"], CFR_FPS_CAP) if await _probe_is_vfr(src, ctx["fps"]) else None
+    ass_path = sidecar_path(src, PREVIEW_ASS_SUFFIX)
+    layer_path = sidecar_path(src, PREVIEW_LAYER_SUFFIX)
+    prepass_file = None
+    comment_layer = None
+    render_src, main_cfr, main_scale = src, cfr_fps, ctx["scale_to"]
+    seek_source = True
+    draw_comments = _comments_in_window(comment_plan, window)
+    try:
+        if draw_comments:
+            await _resolve_emotes(comment_plan["shaper"],
+                                  layout.record_root_of(src) / EMOTE_CACHE_DIR)
+            layer_fps = min(ctx["fps"], COMMENT_LAYER_FPS_CAP)
+            prepass_task = None
+            if cfr_fps is not None:
+                prepass_file = sidecar_path(src, PREVIEW_CLIP_BASE_SUFFIX)
+                prepass_task = asyncio.create_task(
+                    _prepass_cfr(src, prepass_file, ctx["scale_to"], cfr_fps,
+                                 sidecar_dir(src), window=window))
+            comment_layer = await _render_comment_layer(
+                comment_plan["placements"], comment_plan["avatar_files"],
+                comment_plan["metrics"], comment_plan["comment_fs"], comment_plan["shaper"],
+                ctx["width"], ctx["height"], layer_fps, layer_path,
+                comment_plan.get("avatar_upscale", False), window=window,
+            )
+            if prepass_task is not None:
+                try:
+                    await prepass_task
+                except Exception:
+                    prepass_file.unlink(missing_ok=True)
+                    prepass_file = None
+                    raise
+            if comment_layer is None:
+                # 本出力はここでASSの白黒feedへ転落するが、プレビューでは転落させない。
+                # 本出力と違う見た目を「プレビュー」として見せる方が有害なので、失敗を
+                # そのまま失敗として返す。
+                raise RuntimeError(
+                    "プレビューのComment層を描画できませんでした。"
+                    "空き容量とPillow/fontのinstallを確認してください。"
+                )
+            if prepass_file is not None:
+                render_src, main_cfr, main_scale = prepass_file, None, None
+                seek_source = False  # pre-passが既に窓で切っている
+        renderable = await _preview_render_inputs(src, plan)
+        ass_path.write_text(plan["ass_text"], encoding="utf-8")
+        await _run_ffmpeg(
+            render_src, renderable, ctx["icon_px"], ass_path.name, out, sidecar_dir(src),
+            ctx["quality"], codec=ctx["codec"], comment_layer=comment_layer,
+            on_progress=on_progress, scale_to=main_scale, cfr_fps=main_cfr,
+            window=window, seek_source=seek_source,
+            # layer fileは常に0始まり。窓の絶対位置へずらして初めてbaseと噛み合う。
+            layer_offset=(win_start if comment_layer is not None else 0.0),
+        )
+    finally:
+        ass_path.unlink(missing_ok=True)
+        layer_path.unlink(missing_ok=True)
+        if prepass_file is not None:
+            prepass_file.unlink(missing_ok=True)
+    meta_path.write_text(signature, encoding="utf-8")
+    logger.info(
+        "overlay preview clip rendered: %s (%.3f..%.3fs, comments=%s)",
+        out.name, win_start, win_end, comment_layer is not None,
+        extra={"event": "overlay.preview_clip_rendered",
+               "ctx": {"path": str(out.resolve()), "stem": src.stem,
+                       "window_start_seconds": round(win_start, 3),
+                       "window_end_seconds": round(win_end, 3),
+                       "window_auto": plan["window_auto"],
+                       "comment_layer_used": comment_layer is not None,
+                       "prepass_used": prepass_file is not None,
+                       "codec": ctx["codec"], "quality": ctx["quality"],
+                       "size_bytes": out.stat().st_size if out.is_file() else None,
+                       "duration_ms": int((time.monotonic() - render_started) * 1000)}},
+    )
+
+
+async def preview_clip(src_path: str, started_at: float, ended_at,
+                       events: list, settings, battles=None, transcript=None,
+                       on_progress=None, at_seconds=None) -> dict:
+    """焼き込み設定の動画プレビュー。実解像度・実codec・実qualityのまま、media PTS窓の
+    ぶんだけを焼き込む。窓は comment layerのrender・CFR pre-pass・本encode の3箇所すべてに
+    効かせる(1つでも全尺のままなら本出力とcostが変わらず、プレビューの意味が消える)。
+
+    描画planは全尺のまま組み、窓はffmpegのseekと``-copyts``でしか効かせない。時刻mapを
+    組み直さないので、ここで見えたズレは本出力でも同じだけ起きる。"""
+    src = Path(src_path)
+    seconds = preview_seconds(settings)
+    plan = await _preview_plan(src, settings, started_at, ended_at, events, battles,
+                               transcript, seconds, at_seconds)
+    ctx, cfg = plan["ctx"], plan["cfg"]
+    window = plan["window"]
+    win_start, win_end = window
+    _still, clip_path, meta_path = preview_paths(src)
+    signature = _signature(
+        src, cfg, timing_path(src),
+        # 本出力のsignature空間と絶対に交差させないため、variantに窓まで畳み込む。
+        variant=f"preview:{win_start:.3f}:{win_end:.3f}",
+        events_sig=_events_fingerprint(events),
+        subtitles_sig=(subtitles.fingerprint(transcript)
+                       if cfg.get("video_overlay_subtitles") else ""),
+    )
+    lock = await _get_lock(f"preview-clip:{clip_path}")
+    async with lock:
+        if clip_path.is_file() and meta_path.is_file():
+            try:
+                if meta_path.read_text(encoding="utf-8").strip() == signature:
+                    return {"path": clip_path, "window": window,
+                            "window_auto": plan["window_auto"], "cached": True,
+                            "video_duration_seconds": ctx["video_dur"]}
+            except OSError:
+                pass
+        async with gpu_slot_async(f"overlay-preview:{clip_path.stem}"):
+            await _render_preview_clip(src, plan, clip_path, meta_path, signature,
+                                       on_progress)
+    return {"path": clip_path, "window": window, "window_auto": plan["window_auto"],
+            "cached": False, "video_duration_seconds": ctx["video_dur"]}

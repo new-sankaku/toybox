@@ -6,15 +6,24 @@ let trendChart = null;
 let cohortChart = null;
 let currentHeatmap = [];
 let aiConfigured = false;
+// Battle詳細modalが使うowner(自陣host)。renderProfileのidentityを保持する。
+let currentIdentity = null;
 
 const elSearch = document.getElementById("sm-search");
 const elHmMetric = document.getElementById("sm-hm-metric");
 
 // ---- 左: 配信者リスト ----
 async function loadStreamers() {
-  const res = await fetch("/api/streamers");
-  if (!res.ok) return;
-  streamers = (await res.json()).streamers || [];
+  let payload;
+  try {
+    payload = await apiSend("GET", "/api/streamers");
+  } catch (err) {
+    // 握りつぶすと一覧が空のままになり、placeholderの「配信者がいません。」が
+    // 取得失敗を0件として提示してしまう。
+    setListState(document.getElementById("sm-list-empty"), "failed", err);
+    return;
+  }
+  streamers = payload.streamers || [];
   renderList();
   // 初期選択: URLの ?uid= があればそれ、無ければ先頭。
   const wanted = new URLSearchParams(location.search).get("uid");
@@ -30,7 +39,7 @@ function renderList() {
     return `${s.unique_id} ${s.nickname}`.toLowerCase().includes(q);
   });
   list.innerHTML = "";
-  document.getElementById("sm-list-empty").classList.toggle("hidden", rows.length > 0);
+  setListState(document.getElementById("sm-list-empty"), rows.length > 0 ? "ok" : "empty");
   rows.forEach((s) => {
     const item = document.createElement("button");
     item.className = "sm-item" + (s.unique_id === selectedUid ? " sel" : "");
@@ -53,9 +62,21 @@ async function selectStreamer(uid, light = false) {
   if (!uid) return;
   selectedUid = uid;
   renderList();
-  const res = await fetch(`/api/streamers/${encodeURIComponent(uid)}/profile`);
-  if (!res.ok || selectedUid !== uid) return;
-  renderProfile(await res.json());
+  let profile;
+  try {
+    profile = await apiSend("GET", `/api/streamers/${encodeURIComponent(uid)}/profile`);
+  } catch (err) {
+    // 一覧の選択は既にuidへ移っているため、握りつぶすと直前の配信者の数値が
+    // 新しい選択のものとして残る。表示を畳んで取得失敗だと明示する。
+    if (selectedUid !== uid) return;
+    document.getElementById("sm-body").classList.add("hidden");
+    const ph = document.getElementById("sm-placeholder");
+    ph.classList.remove("hidden");
+    ph.textContent = `@${uid} のプロファイルを取得できませんでした。${errorDetailText(err)}`;
+    return;
+  }
+  if (selectedUid !== uid) return;
+  renderProfile(profile);
   if (!light) {
     resetAiReview();
     loadCohortAndHighlights(uid);
@@ -82,40 +103,83 @@ async function loadAiStatus() {
   }
 }
 
+// 講評はserverのai_analysis表へ保存される。配信者を選んだときはGETで保存済みだけを読み
+// (LLMは走らない)、生成はbutton(POST)でのみ行う。「再講評」は集約dataが同じでも作り直す。
+function renderAiMeta(payload) {
+  const meta = document.getElementById("sm-ai-meta");
+  if (!payload || !payload.computed_at) {
+    meta.textContent = "";
+    return;
+  }
+  meta.textContent = `分析日時: ${fmtDateTime(payload.computed_at)}`
+    + ` / model: ${payload.model || "-"} / prompt版: ${payload.prompt_version}`;
+}
+
 function resetAiReview() {
   const btn = document.getElementById("sm-ai-btn");
   btn.disabled = !aiConfigured;
   btn.textContent = "講評する";
+  btn.classList.remove("hidden");
+  document.getElementById("sm-ai-rerun").classList.add("hidden");
   document.getElementById("sm-ai-status").textContent = aiConfigured
     ? ""
     : "ローカルAIが未設定のため利用できません。";
+  document.getElementById("sm-ai-meta").textContent = "";
   const res = document.getElementById("sm-ai-result");
   res.classList.add("hidden");
   res.innerHTML = "";
+  loadStoredAiReview();
 }
 
-async function runAiReview() {
+async function loadStoredAiReview() {
+  if (!selectedUid) return;
+  const uid = selectedUid;
+  let payload;
+  try {
+    const res = await fetch(`/api/streamers/${encodeURIComponent(uid)}/ai-review`);
+    if (!res.ok) return;
+    payload = await res.json();
+  } catch (err) {
+    return;
+  }
+  if (selectedUid !== uid || !payload.review) return;
+  renderAiReview(payload.review);
+  renderAiMeta(payload);
+  document.getElementById("sm-ai-btn").classList.add("hidden");
+  const rerun = document.getElementById("sm-ai-rerun");
+  rerun.classList.remove("hidden");
+  rerun.disabled = !aiConfigured;
+  if (payload.error) document.getElementById("sm-ai-status").textContent = payload.error;
+}
+
+async function runAiReview(refresh) {
   if (!selectedUid || !aiConfigured) return;
   const uid = selectedUid;
   const btn = document.getElementById("sm-ai-btn");
+  const rerun = document.getElementById("sm-ai-rerun");
   const status = document.getElementById("sm-ai-status");
   btn.disabled = true;
-  btn.textContent = "講評中…";
+  rerun.disabled = true;
   status.textContent = "ローカルAIで講評を生成しています（modelにより数十秒かかることがあります）…";
   try {
-    const res = await fetch(`/api/streamers/${encodeURIComponent(uid)}/ai-review`);
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : "講評に失敗しました。");
-    }
+    const payload = await apiSend(
+      "POST",
+      `/api/streamers/${encodeURIComponent(uid)}/ai-review${refresh ? "?refresh=1" : ""}`,
+    );
     if (selectedUid !== uid) return;
     renderAiReview(payload.review || {});
-    status.textContent = "";
+    renderAiMeta(payload);
+    status.textContent = payload.cached
+      ? "前回と同じ集約data・同じmodelのため、保存済みの講評を表示しました。"
+      : "";
+    btn.classList.add("hidden");
+    rerun.classList.remove("hidden");
   } catch (err) {
     status.textContent = err.message;
   } finally {
     btn.disabled = false;
-    btn.textContent = "再講評";
+    btn.textContent = "講評する";
+    rerun.disabled = false;
   }
 }
 
@@ -159,6 +223,7 @@ async function loadCohortAndHighlights(uid) {
 function renderProfile(p) {
   document.getElementById("sm-placeholder").classList.add("hidden");
   document.getElementById("sm-body").classList.remove("hidden");
+  currentIdentity = p.identity;
   renderHead(p.identity, p.count);
   renderKpi(p);
   renderEngagement(p.totals);
@@ -561,7 +626,53 @@ function renderBattleHistory(history) {
       ];
     },
     [3, 4, 6, 7],
+    // 行ダブルクリックでそのBattleの詳細(参加者/貢献者カード)をmodal表示。
+    (tr, h) => {
+      tr.classList.add("row-clickable");
+      tr.title = "ダブルクリックでBattle結果を表示";
+      tr.addEventListener("dblclick", () => showBattleDetail(h));
+    },
   );
+}
+
+// Battle履歴の1行 → そのSessionのBattleを取得し、該当Battle(battle_id一致、無ければ
+// start_time最近)のカードを詳細modalに描画する。カードは/battleページ・履歴詳細と共有の
+// renderBattleCardsを使う。
+async function showBattleDetail(h) {
+  const title = document.getElementById("sm-battle-title");
+  const cards = document.getElementById("sm-battle-cards");
+  const empty = document.getElementById("sm-battle-empty");
+  title.textContent = `Battle結果 — ${fmtDateTime(h.started_at)}`;
+  empty.classList.add("hidden");
+  renderBattleCards(cards, [], currentIdentity || {});
+  document.getElementById("sm-battle-modal").classList.remove("hidden");
+
+  const res = await fetch(`/api/sessions/${h.session_id}`);
+  if (!res.ok) {
+    empty.textContent = "Battle結果の取得に失敗しました。";
+    empty.classList.remove("hidden");
+    return;
+  }
+  const data = await res.json();
+  const battles = data.battles || [];
+  const owner = data.owner || currentIdentity || { unique_id: h.session_id };
+  const battle =
+    (h.battle_id && battles.find((b) => String(b.battle_id) === String(h.battle_id)))
+    || battles.find((b) => b.start_time === h.started_at)
+    || null;
+  if (!battle) {
+    renderBattleCards(cards, [], owner);
+    empty.textContent = "このBattleの詳細が見つかりませんでした。";
+    empty.classList.remove("hidden");
+    return;
+  }
+  renderBattleCards(cards, [battle], owner);
+}
+
+function closeBattleDetail() {
+  // renderBattleCardsで保持中のChart instanceを破棄してから閉じる。
+  renderBattleCards(document.getElementById("sm-battle-cards"), [], currentIdentity || {});
+  document.getElementById("sm-battle-modal").classList.add("hidden");
 }
 
 // スコア推移: 過去Battleを古い→新しい順に、自陣/敵陣Scoreの折れ線 + Batt中コインの棒で表示。
@@ -681,10 +792,20 @@ function handleMessage(msg) {
 
 elSearch.addEventListener("input", renderList);
 elHmMetric.addEventListener("change", renderHeatmap);
-document.getElementById("sm-ai-btn").addEventListener("click", runAiReview);
+document.getElementById("sm-ai-btn").addEventListener("click", () => runAiReview(false));
+document.getElementById("sm-ai-rerun").addEventListener("click", () => runAiReview(true));
 document.getElementById("sm-video-close").addEventListener("click", closeVideo);
 document.getElementById("sm-video-modal").addEventListener("click", (e) => {
   if (e.target.id === "sm-video-modal") closeVideo();
+});
+document.getElementById("sm-battle-close").addEventListener("click", closeBattleDetail);
+document.getElementById("sm-battle-modal").addEventListener("click", (e) => {
+  if (e.target.id === "sm-battle-modal") closeBattleDetail();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!document.getElementById("sm-battle-modal").classList.contains("hidden")) closeBattleDetail();
+  else if (!document.getElementById("sm-video-modal").classList.contains("hidden")) closeVideo();
 });
 trendChart = createSessionTrendChart(document.getElementById("sm-trend"), { movingAvg: true });
 cohortChart = createCohortChart(document.getElementById("sm-cohort-chart"));

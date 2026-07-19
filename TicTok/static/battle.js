@@ -10,13 +10,11 @@ const cardsEl = document.getElementById("battle-cards");
 const emptyEl = document.getElementById("battle-empty");
 
 function showEmpty(text) {
-  emptyEl.textContent = text;
-  emptyEl.classList.remove("hidden");
+  setListMessage(emptyEl, text);
 }
 
 function hideEmpty() {
-  emptyEl.textContent = "";
-  emptyEl.classList.add("hidden");
+  setListState(emptyEl, "ok");
 }
 
 function render(data) {
@@ -44,13 +42,13 @@ async function load() {
     showEmpty("対象が指定されていません（?monitor=ID または ?session=ID）");
     return;
   }
+  setListState(emptyEl, "loading");
   try {
-    const res = await fetch(path);
-    if (!res.ok) throw new Error("Battleの取得に失敗しました。");
-    const data = await res.json();
-    render(data);
+    render(await apiSend("GET", path));
   } catch (err) {
-    showEmpty(err.message || "Battleの取得に失敗しました。");
+    cardsEl.innerHTML = "";
+    sumEl.textContent = "";
+    setListState(emptyEl, "failed", err);
   }
 }
 

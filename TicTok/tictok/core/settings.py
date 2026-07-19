@@ -1,12 +1,52 @@
 import logging
 import os
+from pathlib import Path
 
+from tictok.paths import PROJECT_ROOT
 from tictok.storage import Storage
 
 logger = logging.getLogger("tictok.settings")
 
+_DEFAULT_RECORD_DIR = str(PROJECT_ROOT / "recordings")
+
+# 設定画面のsection。SETTING_DEFSのkey順は既に論理clusterに並んでいるので、順序は変えず
+# 各項目にcategoryを持たせ、画面側はcategoryが切り替わる位置にheaderを差し込むだけにする。
+# 新しい設定を足すときは、同じcategoryの項目の隣へ置くこと(離れた位置へ置くと同じheaderが
+# 二度出る)。焼き込みが2つに分かれているのは既存のkey順がそうなっているためで、順序を
+# 変えないという方針を優先した結果である。
+CATEGORY_LABELS = {
+    "paths": "保存先",
+    "collect": "収集と接続",
+    "record": "録画とBattle収集",
+    "diagnostic": "診断・sample採取",
+    "ui": "画面表示",
+    "overlay": "焼き込み: 表示要素と画質",
+    "audio": "音量正規化",
+    "clip": "切り出し(clip)",
+    "overlay_timing": "焼き込み: 時刻合わせとプレビュー",
+    "storage": "容量と保持policy",
+}
+
 SETTING_DEFS = {
+    "record_dir": {
+        "category": "paths",
+        "env": "TICTOK_RECORD_DIR",
+        "default": _DEFAULT_RECORD_DIR,
+        "type": str,
+        "label": "録画の一時保存先(SSD想定)",
+        "note": "録画中の書き込み先の絶対パスです(例: D:\\rec_ssd)。HLSセグメント・変換中のmp4・ライブ再生・avatar/gift iconキャッシュはここに置かれます。SSDなど高速なドライブを推奨します。変更はサーバー再起動後の録画から有効です。空欄で環境変数TICTOK_RECORD_DIR、無ければ既定のrecordingsを使います。",
+    },
+    "record_dir_final": {
+        "category": "paths",
+        "env": "TICTOK_RECORD_DIR_FINAL",
+        "default": "",
+        "type": str,
+        "allow_empty": True,
+        "label": "録画の最終保存先(HDD想定)",
+        "note": "録画完了後にmp4を退避する絶対パスです(例: K:\\80_Tiktok)。一時保存先で録画→変換し、完了したmp4とtimingをここへ移動します。出力(焼き込み・AI高画質化)もここに生成されます。大容量のHDDを推奨します。空欄なら一時保存先と同じ(退避せず)になります。変更はサーバー再起動後の録画から有効です。",
+    },
     "bucket_seconds": {
+        "category": "collect",
         "env": "TICTOK_BUCKET_SECONDS",
         "default": 10,
         "type": int,
@@ -16,6 +56,7 @@ SETTING_DEFS = {
         "note": "次のSession開始から適用されます。",
     },
     "live_check_interval": {
+        "category": "collect",
         "env": "TICTOK_LIVE_CHECK_INTERVAL",
         "default": 60,
         "type": int,
@@ -25,6 +66,7 @@ SETTING_DEFS = {
         "note": "未配信のとき、この間隔でLIVE開始を確認します。短すぎるとTikTokのWAFにIP単位でブロックされます（実効レート=監視数×60÷間隔）。監視数が多いほど長めに設定してください。",
     },
     "live_check_max_per_min": {
+        "category": "collect",
         "env": "TICTOK_LIVE_CHECK_MAX_PER_MIN",
         "default": 2.0,
         "type": float,
@@ -33,7 +75,28 @@ SETTING_DEFS = {
         "label": "LIVE確認の総アクセス上限（回/分）",
         "note": "全監視を合計したTikTokへのアクセス回数の上限です。監視数が増えても合計がこの値を超えないよう確認間隔を自動で広げ、IP単位のブロックを防ぎます。小さいほど安全ですが、個々の配信開始の検出は遅くなります。",
     },
+    "restricted_recheck_interval": {
+        "category": "collect",
+        "env": "TICTOK_RESTRICTED_RECHECK_INTERVAL",
+        "default": 60,
+        "type": int,
+        "min": 60,
+        "max": 7200,
+        "label": "録画不可判定の再確認間隔（秒）",
+        "note": "メンバー限定/年齢制限と判定した配信を再確認する最初の間隔です。制限応答が一時的なものなら数分で解けることが多いため、この間隔で数回続けてから、以降は上限まで倍々に広げます。確認は署名サーバーを消費しない軽量な問い合わせ1回だけです。短いほど復帰は速くなりますが、TikTokへのアクセス回数が増え、制限が解けたと判定した回数だけ接続(=署名)が発生します。",
+    },
+    "restricted_recheck_max_interval": {
+        "category": "collect",
+        "env": "TICTOK_RESTRICTED_RECHECK_MAX_INTERVAL",
+        "default": 900,
+        "type": int,
+        "min": 60,
+        "max": 7200,
+        "label": "録画不可判定の再確認間隔の上限（秒）",
+        "note": "再確認の間隔を倍々に広げていく際の上限です。本当にメンバー限定/年齢制限の配信は放送が終わるまで解けないため、粘るほど無駄なアクセスになります。上限に達した後はその間隔を保ち続けます(60秒には戻しません)。",
+    },
     "reconnect_max_attempts": {
+        "category": "collect",
         "env": "TICTOK_RECONNECT_MAX_ATTEMPTS",
         "default": 10,
         "type": int,
@@ -43,6 +106,7 @@ SETTING_DEFS = {
         "note": "一時的な接続障害が続いた場合に諦めるまでの回数です。",
     },
     "reconnect_base_delay": {
+        "category": "collect",
         "env": "TICTOK_RECONNECT_BASE_DELAY",
         "default": 2.0,
         "type": float,
@@ -52,6 +116,7 @@ SETTING_DEFS = {
         "note": "exponential backoffの起点です（2→4→8…秒）。",
     },
     "reconnect_max_delay": {
+        "category": "collect",
         "env": "TICTOK_RECONNECT_MAX_DELAY",
         "default": 60.0,
         "type": float,
@@ -61,6 +126,7 @@ SETTING_DEFS = {
         "note": "backoffがこの秒数を超えないように制限します。",
     },
     "connection_idle_timeout": {
+        "category": "collect",
         "env": "TICTOK_CONNECTION_IDLE_TIMEOUT",
         "default": 45,
         "type": int,
@@ -69,7 +135,18 @@ SETTING_DEFS = {
         "label": "受信途絶とみなす秒数（自動再接続）",
         "note": "接続中にこの秒数Dataの受信が途絶えた場合、配信側の電波切れ等で接続が応答不能（half-open）になったと判断し、自動で再接続します。短すぎると配信が静かなだけで不要な再接続が発生します。",
     },
+    "recording_stall_timeout": {
+        "category": "collect",
+        "env": "TICTOK_RECORDING_STALL_TIMEOUT",
+        "default": 40,
+        "type": int,
+        "min": 15,
+        "max": 600,
+        "label": "録画停止とみなす秒数（自動再接続）",
+        "note": "Event受信は続いているのに録画segmentがこの秒数増えない場合、動画のstream URLが無音停止(ffmpegが死んだURLをretry継続)したと判断し、再接続してroom_infoを取り直し録画を再開します。ffmpeg内蔵reconnect(30s)より長くしないと自力回復と競合します。正常な配信はsegment間隔が数秒を超えません。",
+    },
     "event_history": {
+        "category": "collect",
         "env": "TICTOK_EVENT_HISTORY",
         "default": 200,
         "type": int,
@@ -79,6 +156,7 @@ SETTING_DEFS = {
         "note": "次のSession開始から適用されます。",
     },
     "auto_record": {
+        "category": "record",
         "env": "TICTOK_AUTO_RECORD",
         "default": 1,
         "type": int,
@@ -92,6 +170,7 @@ SETTING_DEFS = {
         ],
     },
     "battle_score_sample_seconds": {
+        "category": "record",
         "env": "TICTOK_BATTLE_SCORE_SAMPLE_SECONDS",
         "default": 3,
         "type": int,
@@ -101,6 +180,7 @@ SETTING_DEFS = {
         "note": "Battle中の自陣/敵陣スコアの時系列をこの間隔で記録し、各画面のBattleカードにスコア推移として表示します。短いほど細かく記録しますがDataが増えます。",
     },
     "monitor_opponent_rooms": {
+        "category": "record",
         "env": "TICTOK_MONITOR_OPPONENT_ROOMS",
         "default": 1,
         "type": int,
@@ -114,6 +194,7 @@ SETTING_DEFS = {
         ],
     },
     "battle_debug_capture": {
+        "category": "diagnostic",
         "env": "TICTOK_BATTLE_DEBUG_CAPTURE",
         "default": 0,
         "type": int,
@@ -127,6 +208,7 @@ SETTING_DEFS = {
         ],
     },
     "league_probe": {
+        "category": "diagnostic",
         "env": "TICTOK_LEAGUE_PROBE",
         "default": 0,
         "type": int,
@@ -140,6 +222,7 @@ SETTING_DEFS = {
         ],
     },
     "sample_capture": {
+        "category": "diagnostic",
         "env": "TICTOK_SAMPLE_CAPTURE",
         "default": 1,
         "type": int,
@@ -153,6 +236,7 @@ SETTING_DEFS = {
         ],
     },
     "sample_capture_max_per_kind": {
+        "category": "diagnostic",
         "env": "TICTOK_SAMPLE_CAPTURE_MAX_PER_KIND",
         "default": 40,
         "type": int,
@@ -162,6 +246,7 @@ SETTING_DEFS = {
         "note": "event種別(kind)ごとに保存する異なる構造サンプルの最大件数です。上限に達するとその種別は以降保存しません。大きいほど網羅性が上がりますが容量が増えます。",
     },
     "session_list_limit": {
+        "category": "ui",
         "env": "TICTOK_SESSION_LIST_LIMIT",
         "default": 100,
         "type": int,
@@ -171,6 +256,7 @@ SETTING_DEFS = {
         "note": "履歴pageに表示するSessionの最大数です。",
     },
     "video_overlay_comments": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_COMMENTS",
         "default": 1,
         "type": int,
@@ -184,6 +270,7 @@ SETTING_DEFS = {
         ],
     },
     "video_overlay_gifts": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_GIFTS",
         "default": 1,
         "type": int,
@@ -197,19 +284,21 @@ SETTING_DEFS = {
         ],
     },
     "video_overlay_score_bar": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_SCORE_BAR",
         "default": 1,
         "type": int,
         "min": 0,
         "max": 1,
         "label": "動画化: Battleスコアバーを焼き込む",
-        "note": "録画Download時、Battle(PK)中だけ画面上部に自陣(左)/敵陣(右)のスコアバーをTikTok風に焼き込みます。スコアはBattleのスコア推移(score_series)から映像のtimeに合わせて時系列で描画します。1v1とチーム戦は陣営合計、個人マルチ(Nコラ)は自陣と首位相手の対比です。Battleが無い録画では何も表示しません。",
+        "note": "録画Download時、Battle(PK)中だけ画面上部にスコアバーをTikTok風に焼き込みます。スコアはBattleのスコア推移(score_series)から映像のtimeに合わせて時系列で描画します。分割はWeb表示と同じで、1v1は自陣(左)/敵陣(右)の2分割、チーム戦NvMは自陣/敵陣の2極を各memberのsub-segment(同系色の濃淡)へ分割、個人マルチ(Nコラ)は参加者ごとにN分割します。2極表示(1v1/チーム戦)の両端には配信者アバターを合成します(取得不可時はイニシャル表示)。Battleが無い録画では何も表示しません。",
         "options": [
             {"value": 0, "label": "しない"},
             {"value": 1, "label": "する"},
         ],
     },
     "video_overlay_score_bar_hold_seconds": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_SCORE_BAR_HOLD_SECONDS",
         "default": 60,
         "type": int,
@@ -219,6 +308,7 @@ SETTING_DEFS = {
         "note": "Battle(PK)終了後も、最終スコアと勝敗を表示したままスコアバーをこの秒数だけ画面に残します(勝利タイム/結果表示用)。終了と同時に消さず、既定では60秒残します。次のBattleが始まる場合・動画が終わる場合はそこで打ち切ります。0で終了と同時に消します。",
     },
     "video_overlay_real_avatars": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_REAL_AVATARS",
         "default": 1,
         "type": int,
@@ -231,7 +321,22 @@ SETTING_DEFS = {
             {"value": 1, "label": "する"},
         ],
     },
+    "video_overlay_avatar_upscale": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_AVATAR_UPSCALE",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "動画化: 実アイコンをAI超解像で高精細化",
+        "note": "焼き込む実ユーザーアイコンを合成前にAI超解像modelで高精細化します。TikTokが返すComment/GiftのアイコンはCDN上限が72x72の強圧縮画像で、拡大するとぼやけるため、これを補います(配信者アイコンはより高解像度を取得済み)。上記「Commentに実ユーザーアイコンを使う」が有効な場合のみ作用します。AI超解像model(TICTOK_UPSCALE_MODEL_PATH)とtorch/spandrelの導入が必要で、未導入時は元の低解像アイコンで焼き込みます(logに記録)。超解像結果はUser単位でcacheします。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
     "video_overlay_font_size": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_FONT_SIZE",
         "default": 14,
         "type": int,
@@ -241,6 +346,7 @@ SETTING_DEFS = {
         "note": "焼き込むCommentの基準文字サイズ(動画の縦1280pxを基準)です。Commentは画面左下の高さ約33%・幅80%の領域に表示し、長いCommentは折り返して全文を表示します(省略記号なし)。文字を小さくすると同時表示行数が増えます。古いCommentは上端でグラデーション的にfade outします。",
     },
     "video_overlay_icon_percent": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_ICON_PERCENT",
         "default": 7,
         "type": int,
@@ -250,6 +356,7 @@ SETTING_DEFS = {
         "note": "焼き込むGift Iconの大きさを、動画の縦pxに対する割合(%)で指定します。動画解像度に応じて動的に算出されます。",
     },
     "video_overlay_quality": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_QUALITY",
         "default": 21,
         "type": int,
@@ -259,6 +366,7 @@ SETTING_DEFS = {
         "note": "焼き込み出力のEncode品質(CRF/CQ相当, おおよそ0〜51)。小さいほど高画質ですがfileは大きくなります。元配信が既に圧縮済みのため、14程度より下げても見た目はほぼ変わらずfileだけ肥大化します。GPU(NVENC)利用時もこの値を使います。",
     },
     "video_overlay_codec": {
+        "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_CODEC",
         "default": 0,
         "type": int,
@@ -273,7 +381,160 @@ SETTING_DEFS = {
             {"value": 3, "label": "AV1 (最小file)"},
         ],
     },
+    "video_overlay_subtitles": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLES",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "動画化: 文字起こし字幕を焼き込む",
+        "note": "文字起こし済みの録画に対して、そのsegmentを字幕として動画へ焼き込みます。字幕の時刻は元録画mp4のmedia軸(PTS)基準で、Comment/Gift/Battleとは別の座標帯に描きます。文字起こしが無い録画・古い時刻mapで作られた文字起こしの録画は、ズレた字幕を恒久的に焼き込まないため出力を拒否します(先に文字起こしをやり直してください)。誤認識をそのまま焼き込む点に注意し、修正したい場合は焼き込みではなく字幕fileの書き出し(履歴の文字起こし画面)を使ってください。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "video_overlay_subtitle_font_size": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLE_FONT_SIZE",
+        "default": 26,
+        "type": int,
+        "min": 8,
+        "max": 96,
+        "label": "動画化: 字幕の文字サイズ(px)",
+        "note": "焼き込む字幕の基準文字サイズ(動画の縦1280pxを基準)です。実際のサイズは動画の解像度に応じて自動で拡大縮小します。長い字幕は画面幅に合わせて折り返します。",
+    },
+    "video_overlay_subtitle_position_percent": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLE_POSITION_PERCENT",
+        "default": 58,
+        "type": int,
+        "min": 5,
+        "max": 95,
+        "label": "動画化: 字幕の縦位置(画面上端からの%)",
+        "note": "字幕の中心を、動画の縦方向のどの位置に置くかを%で指定します。既定の58%はCommentの表示帯(下から約33%)の直上で、CommentともBattleスコアバーとも重なりません。値を大きくするとCommentの表示帯へ、小さくするとGift演出の帯へ近づくので、重ねたくない要素に応じて調整してください。",
+    },
+    "video_output_normalize_audio": {
+        "category": "audio",
+        "env": "TICTOK_VIDEO_OUTPUT_NORMALIZE_AUDIO",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "動画化: 出力の音量を正規化する(焼き込み出力・Up出力)",
+        "note": "焼き込み出力とUp出力の音声を、下の目標値へ揃えて出力します。配信ごとの音量差を投稿前に手作業で直す必要がなくなります。音声だけを再encodeし、映像の扱いは変わりません。設定を変えると焼き込みの出力cacheは無効になり、次に出力を押したときに作り直します。描くもの(Comment/Gift/スコアバー/字幕)が1つも無い録画でも、映像はそのままcopyして音声だけを再encodeした出力を作ります。上の焼き込み設定を全てOFFにした場合は出力自体を行わないため、正規化もかかりません。切り出し(clip)側の正規化は切り出し時に個別に選べます。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "audio_normalize_lufs": {
+        "category": "audio",
+        "env": "TICTOK_AUDIO_NORMALIZE_LUFS",
+        "default": -14.0,
+        "type": float,
+        "min": -40.0,
+        "max": -5.0,
+        "label": "音量正規化: 目標音量(LUFS)",
+        "note": "音量正規化(loudnorm)の目標となる統合ラウドネスです。切り出し・焼き込み出力・Up出力で共通に使います。-14 LUFSは各SNSの配信でおおむね標準的な値で、小さくするほど静かになります。",
+    },
+    "audio_normalize_true_peak": {
+        "category": "audio",
+        "env": "TICTOK_AUDIO_NORMALIZE_TRUE_PEAK",
+        "default": -1.5,
+        "type": float,
+        "min": -9.0,
+        "max": 0.0,
+        "label": "音量正規化: 上限ピーク(dBTP)",
+        "note": "音量正規化の際に許す最大の真のピークです。0に近いほど音圧を保てますが、再encode時に歪みやすくなります。",
+    },
+    "audio_normalize_bitrate_kbps": {
+        "category": "audio",
+        "env": "TICTOK_AUDIO_NORMALIZE_BITRATE_KBPS",
+        "default": 192,
+        "type": int,
+        "min": 64,
+        "max": 512,
+        "label": "音量正規化: 音声のbitrate(kbps)",
+        "note": "音量正規化は音声の再encode(AAC)を伴うため、その品質を指定します。録画時の変換と同じ192kbpsが既定です。正規化しない場合、音声はそのまま複製されるのでこの値は使いません。",
+    },
+    "clip_normalize_audio": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_NORMALIZE_AUDIO",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し: 音量正規化の既定",
+        "note": "動画画面の切り出しで「音量を正規化」を最初からONにしておくかどうかです。切り出しのたびに画面側で変更できます。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "clip_pad_before_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_PAD_BEFORE_SECONDS",
+        "default": 8,
+        "type": int,
+        "min": 0,
+        "max": 60,
+        "label": "切り出し候補: 前paddingの秒数",
+        "note": "切り出し候補の開始を、検出した区間の何秒前から始めるかです。stream copyでの切り出しはkeyframe単位(録画のsegmentは2秒)でしか切れないため、paddingが無いと出だしが欠けます。",
+    },
+    "clip_pad_after_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_PAD_AFTER_SECONDS",
+        "default": 5,
+        "type": int,
+        "min": 0,
+        "max": 60,
+        "label": "切り出し候補: 後paddingの秒数",
+        "note": "切り出し候補の終了を、検出した区間の何秒後まで伸ばすかです。",
+    },
+    "clip_candidate_window_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_WINDOW_SECONDS",
+        "default": 30,
+        "type": int,
+        "min": 5,
+        "max": 600,
+        "label": "切り出し候補: 検出窓の長さ(秒)",
+        "note": "盛り上がりを測る移動窓の長さです。各配信のTimeline集計bucket幅から窓に入るbucket数を導くため、bucket幅の異なる配信の間でも同じ長さで比較できます。bucket幅より短い値を指定してもbucket 1個ぶんが下限です。",
+    },
+    "clip_candidate_zscore": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_ZSCORE",
+        "default": 2.0,
+        "type": float,
+        "min": 0.5,
+        "max": 10.0,
+        "label": "切り出し候補: 検出のしきい値(z)",
+        "note": "配信内の平均からの外れ具合(標準偏差の何倍か)がこの値以上の窓を候補にします。配信者pageの「ハイライト」と同じ判定で、既定の2.0もそこと同じです。小さくすると候補は増えますが、平凡な場面も混ざります。",
+    },
+    "clip_candidate_lead_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LEAD_SECONDS",
+        "default": 10,
+        "type": int,
+        "min": 0,
+        "max": 120,
+        "label": "切り出し候補: 先行秒数(lead)",
+        "note": "候補の開始をこの秒数だけ前へずらします。ギフトもコメントも「出来事への反応」なので、反応が始まった時刻から切ると原因の場面が入りません。Commentと映像の時刻ズレの補正ではありません(そちらは変換側で解決済みです)。",
+    },
+    "clip_candidate_limit": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LIMIT",
+        "default": 20,
+        "type": int,
+        "min": 1,
+        "max": 200,
+        "label": "切り出し候補: 表示する上限件数",
+        "note": "1つの録画について、盛り上がりの大きい順に何件まで候補を出すかです。",
+    },
     "video_overlay_timing_compare": {
+        "category": "overlay_timing",
         "env": "TICTOK_VIDEO_OVERLAY_TIMING_COMPARE",
         "default": 0,
         "type": int,
@@ -287,6 +548,7 @@ SETTING_DEFS = {
         ],
     },
     "video_overlay_comment_delay_seconds": {
+        "category": "overlay_timing",
         "env": "TICTOK_VIDEO_OVERLAY_COMMENT_DELAY_SECONDS",
         "default": 0,
         "type": int,
@@ -296,6 +558,7 @@ SETTING_DEFS = {
         "note": "焼き込むComment/Giftの表示time刻を一律でずらします。配信映像はCDNで数秒遅れて録画されるため、Commentが映像より先行して見える場合に+方向(例:+5)で後ろへずらして合わせます。逆に遅れて見える場合は-方向にします。0で補正なし。",
     },
     "video_overlay_gift_seconds": {
+        "category": "overlay_timing",
         "env": "TICTOK_VIDEO_OVERLAY_GIFT_SECONDS",
         "default": 4,
         "type": int,
@@ -305,6 +568,7 @@ SETTING_DEFS = {
         "note": "Gift通知Cardを表示し続ける秒数です。",
     },
     "video_overlay_gift_min_diamonds": {
+        "category": "overlay_timing",
         "env": "TICTOK_VIDEO_OVERLAY_GIFT_MIN_DIAMONDS",
         "default": 0,
         "type": int,
@@ -313,7 +577,18 @@ SETTING_DEFS = {
         "label": "動画化: Gift演出の最小diamonds",
         "note": "この値以上のdiamondsのGiftだけを演出表示します。0で全Giftを表示します。安価なGiftが多い配信で画面が埋まるのを防げます。",
     },
+    "video_overlay_preview_seconds": {
+        "category": "overlay_timing",
+        "env": "TICTOK_VIDEO_OVERLAY_PREVIEW_SECONDS",
+        "default": 30,
+        "type": int,
+        "min": 5,
+        "max": 300,
+        "label": "動画化: プレビュー動画の尺(秒)",
+        "note": "焼き込み設定を確認するためのプレビュー動画の長さです。プレビューは本出力と同じ解像度・codec・qualityで焼き込み、尺だけをここで切ります(costを決めるのは解像度ではなく尺なので、短いほど速く確認できます)。切り出す区間はComment/Gift/Battleが最も多い場所を自動で選びます。この設定は本出力には一切影響せず、変更しても既存の焼き込みは作り直しになりません。",
+    },
     "recording_keep_hls": {
+        "category": "storage",
         "env": "TICTOK_RECORDING_KEEP_HLS",
         "default": 0,
         "type": int,
@@ -325,6 +600,70 @@ SETTING_DEFS = {
             {"value": 0, "label": "しない(削除)"},
             {"value": 1, "label": "する(保持)"},
         ],
+    },
+    "disk_min_free_gb": {
+        "category": "storage",
+        "env": "TICTOK_DISK_MIN_FREE_GB",
+        "default": 20,
+        "type": int,
+        "min": 0,
+        "max": 4096,
+        "label": "出力を拒否する空き容量の下限（GB）",
+        "note": "焼き込み・AI高画質化(Up出力)を開始する前に出力先ドライブの空き容量を確認し、この値を下回っていれば開始を拒否します。中間fileが多層に積み上がるため、元動画の数倍の空きが必要です。0で拒否しません(確認だけ行います)。診断log用のしきい値(TICTOK_LOG_DISK_LOW_BYTES)とは別で、こちらは実際に処理を止めます。",
+    },
+    "retention_transient_hours": {
+        "category": "storage",
+        "env": "TICTOK_RETENTION_TRANSIENT_HOURS",
+        "default": 24,
+        "type": int,
+        "min": 0,
+        "max": 8760,
+        "label": "保持policy: 中間fileを削除するまでの経過時間（時間）",
+        "note": "焼き込みの途中file(CFR base・comment layer)は正常終了すると自動で消えますが、途中で落ちるとdiskに残り続けます。最終更新からこの時間が過ぎた残骸を削除対象にします。実行中のrenderのfileを巻き込まないための猶予なので、短くしすぎないでください。0でこの段階を実行しません。削除は設定だけでは起きず、設定画面「保持policy」の「削除内容を確認（削除しません）」→「確認した内容を削除する」を押したときのみ実行します。",
+    },
+    "retention_derived_days": {
+        "category": "storage",
+        "env": "TICTOK_RETENTION_DERIVED_DAYS",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 3650,
+        "label": "保持policy: 派生物を削除するまでの日数",
+        "note": "焼き込み(.overlay.mp4)とAI高画質化(.up.mp4)は元録画と収集eventから作り直せる派生物です。最終更新からこの日数が過ぎたものを削除対象にします(元録画は残ります)。保護flagを立てた録画は対象外です。0でこの段階を実行しません。削除は設定画面「保持policy」の「削除内容を確認（削除しません）」→「確認した内容を削除する」を押したときのみ実行します。",
+    },
+    "retention_source_enabled": {
+        "category": "storage",
+        "env": "TICTOK_RETENTION_SOURCE_ENABLED",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "保持policy: 生録画の自動削除",
+        "note": "生録画のmp4は唯一の再取得不能なdataで、消すと再mp4化・再出力・文字起こし・切り出し・盛り上がり解析がまとめて復旧不能になります(文字起こし結果も録画と一緒に消えます)。既定は無効です。有効にしても、実行前に必ず削除内容の一覧(dry-run)が表示され、確認するまで削除しません。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "retention_source_days": {
+        "category": "storage",
+        "env": "TICTOK_RETENTION_SOURCE_DAYS",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 3650,
+        "label": "保持policy: 生録画を削除するまでの日数",
+        "note": "上の「生録画の自動削除」が有効な場合に限り、配信終了からこの日数が過ぎた録画を削除対象にします。保護flagを立てた録画は対象外です。0でこの段階を実行しません。",
+    },
+    "retention_free_target_gb": {
+        "category": "storage",
+        "env": "TICTOK_RETENTION_FREE_TARGET_GB",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 4096,
+        "label": "保持policy: 削除を打ち切る空き容量（GB）",
+        "note": "保持policyの実行中、対象driveの空き容量がこの値に達した時点で以降の削除を打ち切ります。古いものから順に消すため、必要な分だけ空けて残りは保持できます。0で打ち切らず、条件に合うものをすべて削除します。",
     },
 }
 
@@ -343,12 +682,32 @@ class Settings:
         return definition["type"](raw)
 
     def _load(self) -> None:
+        """Resolve every setting from DB > env > built-in default.
+
+        Only the per-source counts are logged, never the values: the full set is
+        available from the settings API and dumping ~30 lines of it at every start
+        would crowd out the startup sequence it sits in. The counts still answer the
+        question this log exists for — whether the running values come from the UI, the
+        environment, or nothing at all.
+        """
         stored = self._storage.get_settings()
+        sources = {"from_db": 0, "from_env": 0, "from_default": 0}
         for key, definition in SETTING_DEFS.items():
             if key in stored:
                 self._values[key] = definition["type"](stored[key])
+                sources["from_db"] += 1
             else:
                 self._values[key] = self._env_default(key)
+                if os.environ.get(definition["env"]) is None:
+                    sources["from_default"] += 1
+                else:
+                    sources["from_env"] += 1
+        logger.info(
+            "settings loaded (db=%d env=%d default=%d)",
+            sources["from_db"], sources["from_env"], sources["from_default"],
+            extra={"event": "process.settings_loaded",
+                   "ctx": {"total": len(SETTING_DEFS), **sources}},
+        )
 
     def get(self, key: str):
         return self._values[key]
@@ -357,28 +716,80 @@ class Settings:
         return dict(self._values)
 
     def describe(self) -> list:
+        """画面へ渡す設定の定義一覧。
+
+        defaultは「今この環境で『既定値へ戻す』を押したときに入る値」なので、環境変数で
+        上書きされていればその値になる。built-in定数だけを返すと、env運用中に嘘の既定値を
+        提示することになるため、default_sourceとbuiltin_defaultも併せて返して画面が
+        「環境変数で上書き中」を表示できるようにする。
+        """
         described = []
         for key, definition in SETTING_DEFS.items():
+            from_env = os.environ.get(definition["env"]) is not None
             entry = {
                 "key": key,
                 "value": self._values[key],
                 "label": definition["label"],
                 "note": definition["note"],
-                "min": definition["min"],
-                "max": definition["max"],
-                "step": 1 if definition["type"] is int else 0.5,
+                "category": definition["category"],
+                "category_label": CATEGORY_LABELS[definition["category"]],
+                "default": self._env_default(key),
+                "default_source": "env" if from_env else "builtin",
+                "builtin_default": definition["default"],
+                "env": definition["env"],
             }
+            if definition["type"] is str:
+                entry["kind"] = "text"
+            else:
+                entry["min"] = definition["min"]
+                entry["max"] = definition["max"]
+                entry["step"] = 1 if definition["type"] is int else 0.5
             if "options" in definition:
                 entry["options"] = definition["options"]
             described.append(entry)
         return described
 
+    def _validate_path(self, definition: dict, value) -> str:
+        """Validate a directory-path setting: it must be a non-empty absolute path that
+        can be created and written to. Rejects invalid input (no silent fallback) so the
+        operator gets immediate feedback rather than a broken record dir at next start."""
+        text = str(value).strip().strip('"')
+        if not text:
+            if definition.get("allow_empty"):
+                return ""
+            raise ValueError(f"{definition['label']} を指定してください。")
+        path = Path(text)
+        if not path.is_absolute():
+            raise ValueError(
+                f"{definition['label']} は絶対パスで指定してください（例: K:\\80_Tiktok）。"
+            )
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ValueError(f"{definition['label']} のフォルダを作成できません: {exc}")
+        if not os.access(path, os.W_OK):
+            raise ValueError(f"{definition['label']} に書き込みできません: {path}")
+        return str(path)
+
     def update(self, values: dict) -> dict:
+        """Validate and persist a settings change.
+
+        A settings change is a state transition worth reconstructing months later
+        ("did the recording stall start when the stall timeout was lowered?"), so the
+        accepted diff goes to ops_events as well as the log, and it carries the old
+        value alongside the new one — knowing a key changed is useless without knowing
+        what it changed from. Rejected input stays at info: the operator already gets a
+        422 with the reason, and the request itself is recorded by the access log
+        (see the ValueError handler in the settings endpoint).
+        """
         validated = {}
         for key, value in values.items():
             if key not in SETTING_DEFS:
                 raise ValueError(f"不明な設定key: {key}")
             definition = SETTING_DEFS[key]
+            if definition["type"] is str:
+                validated[key] = self._validate_path(definition, value)
+                continue
             try:
                 if (
                     definition["type"] is int
@@ -396,7 +807,21 @@ class Settings:
                 )
             validated[key] = typed
         if validated:
+            changes = {
+                key: [self._values.get(key), value]
+                for key, value in validated.items()
+                if self._values.get(key) != value
+            }
             self._storage.set_settings(validated)
             self._values.update(validated)
-            logger.info("settings updated: %s", validated)
+            self._storage.record_ops_event(
+                logger,
+                "process.settings_updated",
+                "settings updated: " + (
+                    ", ".join(f"{k}: {old} -> {new}" for k, (old, new) in changes.items())
+                    or "no effective change"
+                ),
+                detail={"changes": changes, "changed": len(changes),
+                        "submitted": len(validated)},
+            )
         return self.all_values()

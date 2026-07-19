@@ -21,9 +21,13 @@
         <a class="active" href="/overview">全体監視</a>
         <a href="/history">履歴</a>
         <a href="/streamers">配信者</a>
+        <a href="/videos">配信者動画</a>
         <a href="/analytics">全体解析</a>
+        <a href="/jobs">job</a>
+        <a href="/ops">運用log</a>
         <a href="/settings">設定</a>
       </nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
       <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
     </div>
 
@@ -32,7 +36,7 @@
       <div class="a-chip"><span class="l">監視数</span><span class="v" id="sum-monitors">0</span></div>
       <div class="a-chip"><span class="l">LIVE中</span><span class="v ok" id="sum-live">0</span></div>
       <div class="a-chip"><span class="l">録画中</span><span class="v" id="sum-recording">0</span></div>
-      <div class="a-chip"><span class="l">合計視聴者</span><span class="v" id="sum-viewers">0</span></div>
+      <div class="a-chip" title="LIVE中の配信の現在の視聴者を合計した数です。切断中の配信は含みません。"><span class="l">LIVE視聴者</span><span class="v" id="sum-viewers">0</span></div>
       <div class="a-chip"><span class="l">合計Gift</span><span class="v" id="sum-gifts">0</span></div>
       <div class="a-chip"><span class="l">合計コイン</span><span class="v" id="sum-diamonds">0</span></div>
       <div class="a-toolbar">
