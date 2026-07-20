@@ -164,8 +164,12 @@ def derived_candidates(recordings, resolve_path, min_age_seconds: float, now: fl
     for recording in recordings:
         if recording.get("protected"):
             continue
+        if recording.get("status") == "recording":
+            continue
         src = resolve_path(recording)
         if src is None or not src.is_file():
+            # 元mp4が無い派生物は「作り直せる」派生物ではなく最後の1本なので、この段階では
+            # 消さない(回収したい場合は録画行ごと削除するUIが同じfileを消す)。
             continue
         found = _existing(overlay_artifact_paths(src) + upscale_artifact_paths(src))
         if not found:

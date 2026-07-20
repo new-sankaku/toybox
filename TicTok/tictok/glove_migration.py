@@ -15,12 +15,15 @@ import json
 import logging
 from pathlib import Path
 
+from tictok.core.battle import GLOVE_EVENT_VERSION
+
 logger = logging.getLogger("tictok.glove_migration")
 
-GLOVE_EVENT_VERSION = 3
 _MATCH_BEFORE_SEC = 2.0
 _MATCH_AFTER_SEC = 8.0
 _ATTR_MATCH_SEC = 3.0
+_EPOCH_SECONDS_MIN = 1_000_000_000
+_EPOCH_SECONDS_MAX = 100_000_000_000
 _DEFAULT_MULTIPLE = 5
 _METHOD_FLAG = "flag"
 _METHOD_ATTR = "attr"
@@ -30,7 +33,10 @@ _METHOD_DELTA = "delta"
 def _own_host_id(battle: dict, unique_id: str):
     for p in battle.get("participants") or []:
         if p.get("side") == "own" and p.get("unique_id") == unique_id:
-            return str(p.get("user_id"))
+            user_id = p.get("user_id")
+            if user_id is None:
+                continue
+            return str(user_id)
     return None
 
 
@@ -83,6 +89,27 @@ def _iter_armies(log_dir: Path, unique_id: str, session_id: int, battle_id: int)
             logger.warning("failed to read the battle raw capture %s", path, exc_info=True)
 
 
+def _armies_create_time(payload: dict):
+    """armies recordのserver時刻(CommonMessageData.create_time)を秒で返す。無ければNone。
+
+    再判定の突合相手(glove_eventのt・events.create_time・glove窓のeffect_time_sec)は全て
+    TikTok server時計なので、series側も同じ軸に載せる。生dumpの rec['ts'] は受信側の
+    time.time()で、数秒のskewだけで正しいjumpが突合窓から外れるため使わない。"""
+    base = _field(payload, "baseMessage", "base_message") or {}
+    raw = _field(base, "createTime", "create_time")
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    if value > _EPOCH_SECONDS_MAX:
+        value = value / 1000.0
+    if value < _EPOCH_SECONDS_MIN:
+        return None
+    return float(value)
+
+
 def _own_score(payload: dict, own_hid: str):
     own = None
     for hid, army in (payload.get("armies") or {}).items():
@@ -102,9 +129,13 @@ def _own_score(payload: dict, own_hid: str):
 def _load_battle_signals(log_dir: Path, unique_id: str, session_id: int,
                          battle_id: int, own_hid: str):
     """生dumpから再判定の材料を1passで取り出す。
-    series: 自host個人scoreの(観測ts, score)系列。額の厳密一致に使う。
+    series: 自host個人scoreの(server時刻, score)系列。額の厳密一致に使う。
     attrs : armiesが名指ししたgift(gift_id + gift_sent_time)へ同定できたscore delta。
-            collector側の _glove_record_attr と同じ証拠を後から再構成したもの。"""
+            collector側の _glove_record_attr と同じ証拠を後から再構成したもの。
+
+    server時刻(create_time)を持たないrecordは軸に載せられないので丸ごと飛ばす。受信側時計
+    へ落とすFallbackはしない。全recordが欠落しているdumpでは signals が空になり、その
+    battleの全eventは既存判定を維持したまま(kept)になる。"""
     series: list = []
     attrs: list = []
     if not own_hid:
@@ -114,7 +145,10 @@ def _load_battle_signals(log_dir: Path, unique_id: str, session_id: int,
         own = _own_score(payload, own_hid)
         if own is None:
             continue
-        series.append((rec.get("ts") or 0, own))
+        ts = _armies_create_time(payload)
+        if ts is None:
+            continue
+        series.append((ts, own))
         if prev is not None and own > prev:
             gift_id = _field(payload, "giftId", "gift_id")
             sent_ms = _field(payload, "giftSentTime", "gift_sent_time")
@@ -173,11 +207,26 @@ def _multiplier_at(missions, t):
     return 1
 
 
+def _running_max_jumps(series: list) -> list:
+    """scoreの増分[t, delta]列。基準prevはrunning-maxで進める(scoreが一時的に下がっても
+    下げない)。_load_battle_signalsのattr delta、およびcollectorの _glove_deltas と同じ
+    定義にするための単一の導出。隣接差分にすると、score下落を挟んだときにattrのdeltaと
+    jump本体が食い違い、attr判定のconsumeが無関係なjumpを部分減算して偽critを生む。"""
+    jumps: list = []
+    prev = None
+    for t, score in series:
+        if prev is not None and score > prev:
+            jumps.append([t, score - prev])
+        if prev is None or score > prev:
+            prev = score
+    return jumps
+
+
 def _migrate_battle(conn, battle: dict, session_id: int, series: list,
                     attrs: list) -> dict:
     windows = [w for w in (battle.get("glove_windows") or []) if w.get("own")]
     events = sorted(battle.get("glove_events") or [], key=lambda e: e.get("t") or 0)
-    jumps = [[t1, s1 - s0] for (t0, s0), (t1, s1) in zip(series, series[1:]) if s1 > s0]
+    jumps = _running_max_jumps(series)
     missions = battle.get("bonus_missions")
     stats = {"crit": 0, "normal": 0, "undecided": 0, "kept": 0}
 
@@ -221,6 +270,8 @@ def _migrate_battle(conn, battle: dict, session_id: int, series: list,
         verdict = None
         if total > 0:
             verdict = _resolve_by_attr(attrs, ev, total, multiple, m)
+            if verdict is not None:
+                consume(t, verdict[2])
         if verdict is None and total > 0 and m is not None:
             want_normal, want_crit = total * m, total * multiple
             if want_normal != want_crit:

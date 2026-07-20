@@ -916,6 +916,16 @@ function applySummary(summary) {
     (user, rank) => [String(rank), userCell(user), fmtNum(user.gifts), fmtNum(user.diamonds)],
     [0, 2, 3],
   );
+  renderTableRows(
+    "gift-ranking",
+    "gift-ranking-empty",
+    summary.gifts || [],
+    (gift, rank) => [String(rank), gift.name, fmtNum(gift.count), fmtNum(gift.diamonds)],
+    [0, 2, 3],
+  );
+  const gifters = (summary.totals || {}).unique_gifters;
+  document.getElementById("rank-gifters").textContent =
+    gifters ? `Gifter ${fmtNum(gifters)}人` : "";
 }
 
 let analyticsBusy = false;
@@ -1116,7 +1126,11 @@ els.restartBtn.addEventListener("click", async () => {
 
 els.removeBtn.addEventListener("click", async () => {
   if (!activeTab) return;
-  if (!window.confirm(`@${activeTab} を監視対象から外しますか？（収集済みSessionは履歴に残ります）`)) return;
+  const ok = await confirmDialog(
+    `@${activeTab} を監視対象から外しますか？（収集済みSessionは履歴に残ります）`,
+    { title: "監視対象から外す", confirmLabel: "外す" },
+  );
+  if (!ok) return;
   try {
     await apiSend("DELETE", `/api/monitors/${encodeURIComponent(activeTab)}`);
   } catch (err) {
@@ -1147,9 +1161,12 @@ els.recordVideoBtn.addEventListener("click", async () => {
   const next = snap.record_video === false;
   const rec = snap.recording;
   const recording = rec && (rec.state === "recording" || rec.state === "stopping");
-  if (!next && recording &&
-      !window.confirm(`@${activeTab} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`)) {
-    return;
+  if (!next && recording) {
+    const ok = await confirmDialog(
+      `@${activeTab} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`,
+      { title: "動画保存をOFFにする", confirmLabel: "OFFにする" },
+    );
+    if (!ok) return;
   }
   els.recordVideoBtn.disabled = true;
   try {

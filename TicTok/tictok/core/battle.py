@@ -4,11 +4,25 @@ collector(収集時)・video_overlay(焼き込み)・battle_migration(既存data
 analytics(全体解析)・履歴画面が同じruleを使うための単一の定義。Web(static/common.jsの
 battleTopology/battleTeams/battleBarUnits)と同じ分割になるよう対応させてある。
 """
+import statistics
 from typing import Optional
+
+# end_time_msもdurationも次Battle開始も無い「終了済み・最終」Battleでgift窓を閉じるための
+# 既定Battle長(秒)。同一sessionの実観測duration中央値が取れればそれを優先し、無い場合のみ
+# この値を使う。窓を無制限(配信終了まで)にするとBattle後の通常Giftを誤帰属するため。
+# TikTok PKの標準尺(約5分)に基づく。
+BATTLE_FALLBACK_DURATION_SECONDS = 300.0
 
 # 保存済みbattleがどのruleで判定されたかのversion。ruleを変えたら+1すると、起動時の
 # battle_migrationが既存recordを再判定する。collectorは新規保存時にこの値を打つ。
 BATTLE_TOPOLOGY_VERSION = 2
+
+# 保存済みglove_eventがどの判定方式で決まったかのversion。方式を変えたら+1すると、起動時の
+# glove_migrationが既存eventを再判定する。collectorは新規保存時にこの値を打つ。collectorと
+# glove_migrationが同じ値を見るよう、定数はここ1箇所にだけ置く(両側に直書きすると片側だけ
+# 上がって再判定が黙って空振りする)。
+# 4: 時間軸を受信側時計からserver時計(create_time)へ統一。
+GLOVE_EVENT_VERSION = 4
 
 # PK確定scoreを拾う猶予(秒)。end_timeちょうどで切ってはいけない。
 #
@@ -170,3 +184,35 @@ def annotate_result(battle: dict) -> dict:
         battle["own_score"] = resolved["own"]
         battle["opp_score"] = resolved["opp"]
     return battle
+
+
+def gift_window_fallback_duration(battles: list) -> float:
+    """同一sessionのBattle群から、窓を閉じるためのfallback長を実観測で決める。
+    明示durationとstart/end差の中央値を使い、1件も観測できない場合のみ既定値。"""
+    observed = [b["duration"] for b in battles if b.get("duration")]
+    observed += [
+        b["end_time"] - b["start_time"]
+        for b in battles
+        if b.get("end_time") is not None
+        and b.get("start_time") is not None
+        and b["end_time"] > b["start_time"]
+    ]
+    return statistics.median(observed) if observed else BATTLE_FALLBACK_DURATION_SECONDS
+
+
+def gift_window_end(battle: dict, starts: list, fallback_duration: float) -> Optional[float]:
+    """Battleの貢献集計に使うgift窓の終端。startsは同一sessionの全Battle開始時刻(昇順)。
+
+    end_time_msを欠くBattleを無制限の窓にしない: Battle後〜配信終了までの通常Giftが
+    貢献に合算され、連続PKでは同じGiftが複数Battleへ二重帰属するため。所定durationで
+    閉じ、それも無い終了済みBattleは次Battleの開始で、さらに無ければfallback長で打ち切る。
+    進行中Battleは意図的に開いたまま(live giftを集計)Noneを返す。"""
+    start = battle.get("start_time")
+    end = battle.get("end_time")
+    if end is not None or start is None:
+        return end
+    if battle.get("duration"):
+        return start + battle["duration"]
+    if battle.get("ongoing"):
+        return None
+    return next((s for s in starts if s > start), None) or start + fallback_duration

@@ -62,19 +62,23 @@
         </select>
       </label>
       <span class="sp"></span>
+      <button id="open-rankings">Sessionランキング</button>
       <button id="bulk-del-users" class="btn-danger">ユーザー削除</button>
       <button id="export-csv">表示中をCSV出力</button>
     </div>
 
     <!-- Excel的一覧 -->
     <div class="x-tablewrap">
-      <table class="xtab">
+      <table class="xtab" id="session-table">
         <thead>
           <tr>
-            <th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th>
-            <th class="n">コイン</th><th class="n">Comment</th>
-            <th class="n">Like</th><th class="n">Follow</th><th class="n">Share</th><th class="n">入室</th>
-            <th class="n">Battle</th><th class="n">B.Score</th><th class="n">最大同接</th><th id="op-th">操作</th>
+            <th data-sort="id">#</th><th data-sort="unique_id">配信者</th>
+            <th data-sort="started_at">開始</th><th data-sort="duration">時間</th><th>状態</th>
+            <th class="n" data-sort="diamonds">コイン</th><th class="n" data-sort="comments">Comment</th>
+            <th class="n" data-sort="likes_total">Like</th><th class="n" data-sort="follows">Follow</th>
+            <th class="n" data-sort="shares">Share</th><th class="n" data-sort="joins">入室</th>
+            <th class="n" data-sort="battles">Battle</th><th class="n" data-sort="battle_points">B.Score</th>
+            <th class="n" data-sort="viewers_peak">最大同接</th><th id="op-th">操作</th>
           </tr>
         </thead>
         <tbody id="session-rows"></tbody>
@@ -197,6 +201,38 @@
         <div id="transcript-hint" class="tr-hint">行をクリックするとその時刻から再生します。字幕fileの時刻は元録画mp4基準です（焼き込み出力・Up出力とは一致しません）。</div>
         <div id="transcript-warn" class="tr-warn hidden"></div>
         <div id="transcript-segments" class="tr-segments"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session横断ランキング（指標ごとのSession上位） -->
+  <div id="rank-modal" class="modal-overlay hidden">
+    <div class="modal modal-narrow">
+      <div class="modal-head">
+        <h2>Sessionランキング</h2>
+        <button id="rank-close" class="modal-close">閉じる ✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="rank-note">指標ごとに、保存済みSessionを上位から並べます。収集中のSessionは現在値で並びます。行をクリックするとそのSessionの詳細を開きます。</p>
+        <div class="x-toolbar rank-tools">
+          <label class="x-field"><span>指標</span>
+            <select id="rank-metric">
+              <option value="gifts">コイン</option>
+              <option value="comments">Comment</option>
+              <option value="likes">Like</option>
+              <option value="battles">B.Score</option>
+            </select>
+          </label>
+        </div>
+        <div class="table-wrap rank-listwrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>#</th><th>配信者</th><th>開始</th><th>時間</th><th class="n" id="rank-value-th">コイン</th></tr>
+            </thead>
+            <tbody id="rank-rows"></tbody>
+          </table>
+          <div id="rank-empty" class="feed-empty" data-label="Sessionランキング">Sessionがありません。</div>
+        </div>
       </div>
     </div>
   </div>

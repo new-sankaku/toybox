@@ -246,7 +246,7 @@ class MediaJobQueue:
 
         try:
             with token_scope(token):
-                result = await self._runner(job, report)
+                result = await self._run_with_retry(job, report, token)
         except JobCancelled:
             logger.info(
                 "media job cancelled: %s (%s)", job_id, job["kind"],
@@ -281,6 +281,42 @@ class MediaJobQueue:
             self._tokens.pop(job_id, None)
             self._last_progress.pop(job_id, None)
         await self._emit(self._storage.get_media_job(job_id))
+
+    async def _run_with_retry(self, job: dict, report: Callable, token: CancelToken):
+        """runnerを実行し、失敗が残り試行回数の範囲なら待ってから実行し直す。
+
+        1発失敗=永久failedにすると、出力先fileがantivirusに掴まれていた・disk busyで
+        ffmpegの起動が弾かれた、といった数秒で消える事象が「人が投げ直すまで直らない
+        失敗」として残る。取り消し(JobCancelled)と入力側の前提不成立(JobSkipped)は
+        再試行しても結果が変わらないので、ここでは捕まえずそのまま外へ通す。
+        """
+        attempts = max(1, config.get_media_job_attempts())
+        backoff = config.get_media_job_retry_backoff_seconds()
+        job_id = job["job_id"]
+        for attempt in range(1, attempts + 1):
+            try:
+                return await self._runner(job, report)
+            except (JobCancelled, JobSkipped):
+                raise
+            except Exception:
+                if attempt >= attempts:
+                    raise
+                wait = backoff * attempt
+                logger.warning(
+                    "media job attempt %d/%d failed, retrying in %.1fs: %s (%s)",
+                    attempt, attempts, wait, job_id, job["kind"], exc_info=True,
+                    extra={"event": "media_queue.job_retry",
+                           "ctx": {"job_id": job_id, "kind": job["kind"],
+                                   "recording_id": job.get("recording_id"),
+                                   "attempt": attempt, "attempts": attempts,
+                                   "wait_seconds": round(wait, 1)}},
+                )
+                await self._update_progress(
+                    job_id, job.get("pct") or 0,
+                    f"失敗したため再試行します（{attempt + 1}/{attempts}）…")
+                await asyncio.sleep(wait)
+                # 待っている間に取り消されたなら、再試行せず取り消しとして畳む。
+                token.check()
 
     async def _update_progress(self, job_id: str, pct: int, stage: str) -> None:
         # 同じ(段階, %)の再通知はDB書き込みも配信も省く。frame単位のcallbackはpctが変わらない

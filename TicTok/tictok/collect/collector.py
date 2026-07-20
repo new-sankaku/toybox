@@ -76,7 +76,12 @@ from tictok.core.config import (
     get_simulation,
     get_timeline_limit,
 )
-from tictok.core.battle import BATTLE_TOPOLOGY_VERSION, annotate_result, battle_type
+from tictok.core.battle import (
+    BATTLE_TOPOLOGY_VERSION,
+    GLOVE_EVENT_VERSION,
+    annotate_result,
+    battle_type,
+)
 from tictok.core.logctx import (
     ctx_recording_id,
     ctx_session_id,
@@ -126,6 +131,17 @@ def _enum_value(value: Any) -> Optional[int]:
     """betterproto enum fields are IntEnum members; return the underlying int so
     actions can be compared against the protocol constants regardless of whether
     the field arrived as an enum member, a plain int, or None."""
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_int(value: Any) -> Optional[int]:
+    """protoのint fieldを素直にintへ。Noneや数値化できない値はNoneを返し、0で埋めない
+    (proto3のscalarはpresenceを持たないため、0で届いたものはそのまま0として残す)。"""
     if value is None:
         return None
     try:
@@ -294,6 +310,11 @@ STATE_ERROR = "error"
 STATE_RESTRICTED = "restricted"
 
 ACTIVE_STATES = (STATE_WAITING, STATE_CONNECTING, STATE_CONNECTED, STATE_RECONNECTING, STATE_RESTRICTED)
+
+# live checkを撃ち続けている状態。ProbeGateの間隔はこの母数で割る: 接続中のcollectorは
+# probeを消費しないので、全collector数で割ると「まだ配信していない人の検出」だけが監視数に
+# 比例して遅くなる(20監視中15人が接続中でも残り5人が20人分に薄めた間隔で待たされる)。
+PROBING_STATES = (STATE_WAITING, STATE_RESTRICTED)
 
 # 制限holdの再確認を基準間隔のまま繰り返す回数。一時的な制限応答は数分で解けることが
 # 多く序盤は密に見たいが、本当のメンバー限定/年齢制限はその放送が終わるまで解けないので、
@@ -712,7 +733,11 @@ def _user_payload(user: Any) -> dict:
             "identity_key": "",
         }
     unique_id = getattr(user, "unique_id", "") or ""
-    nickname = getattr(user, "nick_name", "") or unique_id or "(unknown)"
+    # 表示名とidentity keyを分ける。"(unknown)" は表示用のリテラルであって身元ではないので、
+    # 名寄せ(identity_key)には素のnicknameだけを渡す。混ぜると身元不明の視聴者が全員
+    # "(unknown)" という1 identityへ畳まれ、users表・貢献者集計で1人に潰れる。
+    raw_nickname = getattr(user, "nick_name", "") or ""
+    nickname = raw_nickname or unique_id or "(unknown)"
     avatar = _image_url(getattr(user, "avatar_thumb", None))
     # 数値のアカウントID(不変)。Gift eventとarmiesで同じ体系なので、Battle貢献の
     # 「実弾(コイン)」と「バトルスコア(PKポイント)」を貢献者単位で突合する鍵になる。
@@ -735,7 +760,7 @@ def _user_payload(user: Any) -> dict:
         "user_id": user_id, "unique_id": unique_id, "nickname": nickname, "avatar": avatar,
         "fans_level": fans_level, "gifter_level": gifter_level,
         "gifter_badge": gifter_badge, "member_badge": member_badge,
-        "identity_key": _identity_key(user_id, unique_id, nickname),
+        "identity_key": _identity_key(user_id, unique_id, raw_nickname),
     }
 
 
@@ -745,6 +770,9 @@ def _user_payload(user: Any) -> dict:
 # (この計装より前に収集した行=未計測)なので、両者を混同しないこと。
 ENTRY_UNKNOWN = "unknown"
 FOLLOW_UNKNOWN = "unknown"
+SHARE_UNKNOWN = "unknown"
+COMMENT_UNKNOWN = "unknown"
+SOURCE_UNKNOWN = "unknown"
 # FollowInfo.follow_status の実値。protobufはdefaultを省くため、0(非follower)と未送出は
 # 値だけでは区別できない。FollowInfo自体がwireに載っていた場合に限り0を非followerとして
 # 読み、message ごと不在なら FOLLOW_UNKNOWN にする(非followerへ丸めない)。
@@ -780,6 +808,36 @@ def _follow_signals(user: Any) -> dict:
     status = _FOLLOW_STATUS_LABELS.get(int(getattr(info, "follow_status", 0) or 0), FOLLOW_UNKNOWN)
     count = int(getattr(info, "follower_count", 0) or 0)
     return {"follow_status": status, "follower_count": count}
+
+
+def _share_signals(event: Any) -> dict:
+    """ShareEventの行き先。share_type / share_target を生値のまま残す。実配信では
+    share_target が '-1' と '112' に割れ、share_type の有無とも相関するが、112が何を
+    指すかは未確定なので解釈したlabelは付けない(分解は解析側の仕事)。protobufはscalarの
+    presenceを区別できないため、0/空は SHARE_UNKNOWN として「届いたが空」を明示する。"""
+    share_type = int(getattr(event, "share_type", 0) or 0)
+    target = str(getattr(event, "share_target", "") or "").strip()
+    return {
+        "share_type": str(share_type) if share_type else SHARE_UNKNOWN,
+        "share_target": target or SHARE_UNKNOWN,
+    }
+
+
+def _comment_signals(event: Any) -> dict:
+    """CommentEventの content_language / comment_tag。視聴者層の言語構成をTikTok側の判定で
+    取れる唯一の源。どちらもTikTokが後から追加したfieldで、古い収集分には存在しない。
+    DBのNULLは「この計装より前=未計測」を意味するので、届かなかった場合は
+    COMMENT_UNKNOWN を明示的に入れて両者を混同しないこと。comment_tagはenum名のJSON
+    listで残す(数値はproto版で意味が動きうる)。"""
+    language = str(getattr(event, "content_language", "") or "").strip()
+    tags = [
+        str(getattr(tag, "name", None) or tag)
+        for tag in (getattr(event, "comment_tag", None) or [])
+    ]
+    return {
+        "content_language": language or COMMENT_UNKNOWN,
+        "comment_tag": json.dumps(tags, ensure_ascii=False) if tags else COMMENT_UNKNOWN,
+    }
 
 
 def _identity_signals(event: Any) -> dict:
@@ -889,6 +947,7 @@ class TikTokCollector:
         self._glove_deltas: dict = {}
         self._glove_recent_gifts: list = []
         self._glove_attr: dict = {}
+        self._glove_clock_warned = False
         # コラボ(非BattleのLinkMic)接続窓。channel_id -> {start, guests_max}(接続中)、
         # finish/session終了で _collab_windows へ確定。入室コンテキスト3分類(doc §14)に使う。
         self._collab_open: dict = {}
@@ -920,6 +979,14 @@ class TikTokCollector:
         # instead. Reset per session in _reset_session_data.
         self._ever_connected = False
         self._last_stats_sent = 0.0
+        # RoomUserSeqの貢献者Ranking保存の間引き用。最後に書いた時刻と、その時の内容の
+        # 指紋(rank/user/scoreのtuple)。同じRankingが続くあいだは書かない。
+        self._contrib_saved_at = 0.0
+        self._contrib_saved_sig: Optional[tuple] = None
+        self._score_anchor: dict = {}
+        # 最後に保存した配信者follower総数。TikTok側の値は結果整合で前後するため、
+        # 「変化したら書く」だけを条件にする(単調化はしない)。
+        self._follower_saved: Optional[int] = None
         # Timestamp of the last datum received from TikTok over the live websocket.
         # The idle watchdog uses it to detect a silent half-open connection (host
         # network drop) where connect() never returns and no disconnect fires.
@@ -997,10 +1064,15 @@ class TikTokCollector:
 
     def _touch_user(self, user: dict) -> str:
         """User正規化プロフィールをSession registryに反映し、identity_keyを返す。変更され
-        うる属性は最新の非空値で上書きする(storage.users表と同じ最新値上書きロジック)。"""
-        key = user.get("identity_key") or _identity_key(
-            user.get("user_id"), user.get("unique_id"), user.get("nickname")
-        )
+        うる属性は最新の非空値で上書きする(storage.users表と同じ最新値上書きロジック)。
+        identity_keyを持つdictはその値をそのまま使う(空文字=身元不明として畳まない)。
+        recomputeすると表示用の "(unknown)" が名寄せkeyになり別人が1人へ潰れる。"""
+        if "identity_key" in user:
+            key = user["identity_key"]
+        else:
+            key = _identity_key(
+                user.get("user_id"), user.get("unique_id"), user.get("nickname")
+            )
         if not key:
             return ""
         prof = self.users.get(key)
@@ -1245,6 +1317,8 @@ class TikTokCollector:
         self.users = {}
         self.gift_types = {}
         self._battles = {}
+        # battle_id -> スコア推移の記録窓を開いた時刻。_append_score_sampleの間引き起点。
+        self._score_anchor = {}
         # グローブcrit判定(delta厳密一致方式)。armies eventごとの自hostスコア増分(delta)を
         # poolに貯め、窓中giftの「倍率タイムm×単価(通常)」「窓倍率M×単価(crit)」との厳密一致で
         # 排他的に突合する。一意に決まらないものはcrit=None(判定不能)のまま確定する。
@@ -1261,6 +1335,8 @@ class TikTokCollector:
         # battle_id -> [{gid, t, delta, flag, used}]。armiesが名指ししたgiftへdeltaを同定した
         # 記録。額一致より強い証拠なので先に消費する。
         self._glove_attr = {}
+        # server時計(create_time)欠落の警告をSessionごとに1回だけ出すためのflag。
+        self._glove_clock_warned = False
         self._collab_open = {}
         self._collab_windows = []
         self._last_checkpoint_at = 0.0
@@ -1273,6 +1349,9 @@ class TikTokCollector:
         self._league = ""
         self._owner_warned = False
         self._create_time_logged = False
+        self._contrib_saved_at = 0.0
+        self._contrib_saved_sig = None
+        self._follower_saved = None
         self._recording_desired = False
         # We only reset a session for a recordable live; a restriction hold no longer applies.
         self._clear_restricted_hold()
@@ -3114,13 +3193,35 @@ class TikTokCollector:
         await self._notify_state()
 
     async def _on_live_end(self, event: LiveEndEvent) -> None:
+        # 終了の申告元。実配信では extra_info.source に 'finish_by_server' が入る例を
+        # 観測している。配信者自身の終了とサーバ側都合の終了は運用上まったく別物なので、
+        # 生値を残して後から区別できるようにする。ただし各値が何を意味するかは未確定
+        # なので、labelもseverityの出し分けも行わない(推測で意味を与えない)。
+        extra = getattr(event, "extra_info", None)
+        source = (
+            str(getattr(extra, "source", "") or "").strip()
+            if _on_wire(extra) else ""
+        ) or SOURCE_UNKNOWN
         logger.info(
             "TikTok signalled that the broadcast has ended",
             extra={"event": "collector.live_ended",
                    "ctx": {"reason": "live_end_event", "room_id": self.room_id,
+                           "end_source": source,
                            "recording_active": bool(
                                self.recorder is not None and self.recorder.is_active
                            )}},
+        )
+        self._storage.record_ops_event(
+            logger, "collector.live_ended",
+            f"broadcast ended in room {self.room_id} (source: {source})",
+            severity=OPS_INFO,
+            detail={"room_id": self.room_id,
+                    "end_source": source,
+                    "state": self.state,
+                    "recording_desired": self._recording_desired,
+                    "recording_active": bool(
+                        self.recorder is not None and self.recorder.is_active
+                    )},
         )
         self.state = STATE_ENDED
         self._add_conn_marker("live_end", "LIVE終了")
@@ -3163,7 +3264,13 @@ class TikTokCollector:
         """Record a {t, own, opp, parts} point for the battle's score-over-time
         chart. The latest point within the sample window is collapsed in place so the
         series stays bounded yet always reflects the current score; a new point is
-        appended only once the window elapses or the score changes.
+        appended only once the window elapses.
+
+        窓の起点(anchor)はseries[-1]["t"]ではなく別に持つ。scoreが動き続けるあいだは
+        series[-1]を差し替えるが、そのtも一緒に進むためseries[-1]["t"]を起点にすると窓が
+        永久に閉じず、系列が1点のまま伸びない。スコアが動き続ける場面=決着の瞬間が丸ごと
+        1点に潰れるので、起点は「その窓を開いた時刻」に固定する。anchorはrec外に持つ
+        (recはそのままDBへJSON保存されるため、実行時のみの状態を混ぜない)。
 
         ``parts`` snapshots each host's live score (id/side/team_id) so a per-member /
         per-team breakdown is available over time, not just the 2-sided own/opp totals
@@ -3180,9 +3287,11 @@ class TikTokCollector:
         ]
         sample = {"t": now, "own": rec["own_score"], "opp": rec["opp_score"], "parts": parts}
         series = rec["score_series"]
+        battle_id = rec.get("battle_id")
         if series:
             last = series[-1]
-            within_window = now - last["t"] < self._settings.get("battle_score_sample_seconds")
+            anchor = self._score_anchor.get(battle_id, last["t"])
+            within_window = now - anchor < self._score_sample_window(rec, now)
             unchanged = (
                 last["own"] == sample["own"]
                 and last["opp"] == sample["opp"]
@@ -3193,6 +3302,27 @@ class TikTokCollector:
                     series[-1] = sample
                 return
         series.append(sample)
+        self._score_anchor[battle_id] = now
+
+    def _score_sample_window(self, rec: dict, now: float) -> float:
+        """スコア推移の記録間隔。終盤だけ短い窓を返す。
+
+        PKの決着は終了間際に集中する(core.battleの実測: 最後にscoreが動いたsampleの大半が
+        end_timeの±3秒)ため、通常の間隔のままでは逆転の瞬間が1点に潰れる。end_timeは
+        Battle開始時のbattle settingで既知なので、残り時間で窓を切り替える。
+
+        end_timeはTikTok server時計、nowは受信側のlocal時計で厳密には同一ではない。境界が
+        数秒ずれても「終盤を細かく録る」という目的は達せられるので補正はしない(ずれの補正は
+        推定値の捏造になる)。end_timeが届かなかったBattleは通常の間隔のままにする。"""
+        normal = self._settings.get("battle_score_sample_seconds")
+        endgame = self._settings.get("battle_score_endgame_seconds")
+        end_time = rec.get("end_time")
+        if not endgame or not end_time:
+            return normal
+        # 終了時刻を過ぎた後も同じ幅を続ける: 確定scoreはend_timeの後に届くことがある。
+        if now < end_time - endgame:
+            return normal
+        return min(normal, self._settings.get("battle_score_endgame_sample_seconds"))
 
     def _is_own_host(self, host_id: Any, army: Any) -> bool:
         return str(host_id) == self._owner_id or getattr(army, "anchor_id_str", "") == self._owner_id
@@ -3655,7 +3785,9 @@ class TikTokCollector:
         rec = self._battles.get(battle_id)
         if rec is None:
             return
-        key = user.get("user_id") or user.get("unique_id") or user.get("nickname")
+        # _user_payloadが決めたidentity_keyをそのまま使う。ここで再計算すると表示用の
+        # "(unknown)" がkeyになり、身元不明の相手陣gifterが1人へ畳まれる。
+        key = user.get("identity_key")
         if not key:
             return
         entry = rec["contributions"].get(key)
@@ -3800,10 +3932,14 @@ class TikTokCollector:
         """自陣グローブ窓中に自陣へ届いた1ギフトを、crit判定待ち(pending)として記録する。
         単価はGift event(自室)からのみ確実に取れるためここで確定し、critは後続armiesの
         自hostスコアdelta厳密一致で解決する。gift時刻は窓・armiesと同じserver epoch秒
-        (create_time)で突合する。窓中giftとして記録したらTrue。"""
+        (create_time)で突合する。server時刻が無いgiftは窓の内外すら判定できないので、
+        受信側時計へ落とさず判定対象から外す。窓中giftとして記録したらTrue。"""
         if not diamonds_each or count <= 0:
             return False
-        ts = int(t if t is not None else time.time())
+        if t is None:
+            self._warn_glove_clock("gift")
+            return False
+        ts = int(t)
         for rec in self._battles.values():
             if rec.get("aborted"):
                 continue
@@ -3824,7 +3960,7 @@ class TikTokCollector:
                 "crit": None,
                 # 判定根拠(GLOVE_METHOD_*)。判定不能のまま確定した場合はNoneのまま残す。
                 "method": None,
-                "v": 3,
+                "v": GLOVE_EVENT_VERSION,
             }
             rec["glove_events"].append(ev)
             self._glove_pending.setdefault(rec["battle_id"], []).append({
@@ -3838,11 +3974,47 @@ class TikTokCollector:
         return False
 
     def _record_glove_offwindow_gift(self, diamonds_each: int, count: int, t: Optional[float]) -> None:
-        """窓外に自室へ届いたgiftを記録する。deltaのpool掃除(通常寄与の先取り消費)に使う。"""
+        """窓外に自室へ届いたgiftを記録する。deltaのpool掃除(通常寄与の先取り消費)に使う。
+        server時刻が無いgiftはpool上の位置が決まらないため記録しない。"""
         if not diamonds_each or count <= 0:
             return
-        ts = int(t if t is not None else time.time())
-        self._glove_recent_gifts.append([ts, diamonds_each * count])
+        if t is None:
+            self._warn_glove_clock("gift")
+            return
+        self._glove_recent_gifts.append([int(t), diamonds_each * count])
+
+    def _glove_pool_latest(self, battle_id: int) -> Optional[float]:
+        """glove poolが持つ最新のserver時刻。全entryが同じserver時計の値なので、armies側の
+        create_timeが読めないときの刈り込み基準に使える。空ならNone(刈るものが無い)。"""
+        stamps = [d[0] for d in self._glove_deltas.get(battle_id) or []]
+        stamps += [e["t"] for e in self._glove_attr.get(battle_id) or []]
+        stamps += [g[0] for g in self._glove_recent_gifts]
+        return max(stamps) if stamps else None
+
+    def _glove_prune(self, battle_id: int, ref: Optional[float]) -> None:
+        """突合窓を過ぎたdelta/attr/窓外giftを捨ててpoolを有界に保つ。refはserver時計。"""
+        if ref is None:
+            return
+        horizon = ref - GLOVE_MATCH_AFTER_SEC - 30
+        deltas = self._glove_deltas.get(battle_id)
+        if deltas:
+            deltas[:] = [d for d in deltas if d[0] >= horizon and d[1] > 0]
+        entries = self._glove_attr.get(battle_id)
+        if entries:
+            entries[:] = [e for e in entries if not e["used"] and e["t"] >= horizon]
+        self._glove_recent_gifts[:] = [g for g in self._glove_recent_gifts if g[0] >= horizon]
+
+    def _warn_glove_clock(self, source: str) -> None:
+        """server時計(create_time)が読めずglove判定から外したことをSessionに1回だけ残す。"""
+        if self._glove_clock_warned:
+            return
+        self._glove_clock_warned = True
+        logger.warning(
+            "glove crit resolution dropped a %s event without a server create_time; "
+            "those gifts stay undecided (crit=None) for this session", source,
+            extra={"event": "collector.glove_clock_missing",
+                   "ctx": {"source": source, "room_id": self.room_id}},
+        )
 
     def _glove_multiplier_at(self, rec: dict, t: float) -> Optional[int]:
         """時刻tに有効なMatch Bonus倍率。倍率タイム外=1。reward期間中だが倍率不明
@@ -3893,31 +4065,36 @@ class TikTokCollector:
         (2)額の厳密一致、の順で pending中のグローブ・ギフトへ割り当てて解決する。
         通常=m×total / crit=窓倍率M×total(m=倍率タイム、critは倍率タイムと重畳しない=
         実dump実測: m=3の窓でx15は0件・x5が3件)。どの根拠でも一意に決まらないものは
-        crit=None(判定不能)のまま確定し、推測で埋めない。"""
+        crit=None(判定不能)のまま確定し、推測で埋めない。
+
+        時間軸はギフト・グローブ窓と同じserver時計(create_time)に揃える。受信側の
+        time.time()を混ぜると数秒のskewだけで正しいdeltaが突合窓(BEFORE/AFTER)から
+        外れ、critが全件Noneに落ちる。create_timeが無いarmiesはこの軸に載せられない
+        ため、基準scoreだけ進めてdeltaは捨てる(受信側時計へのFallbackはしない)。"""
         battle_id = int(getattr(event, "battle_id", 0) or 0)
-        now = time.time()
+        now = self._create_time_sec(event)
         score = self._glove_own_host_score(event)
         if score is not None:
             prev = self._glove_prev_score.get(battle_id)
             if prev is not None and score > prev:
                 delta = score - prev
-                self._glove_deltas.setdefault(battle_id, []).append([now, delta])
+                if now is not None:
+                    self._glove_deltas.setdefault(battle_id, []).append([now, delta])
+                # 名指し同定(gift_sent_time基準)はarmies自身のcreate_timeに依存しない。
                 self._glove_record_attr(battle_id, event, delta)
             if prev is None or score > prev:
                 self._glove_prev_score[battle_id] = score
-        horizon = now - GLOVE_MATCH_AFTER_SEC - 30
-        deltas = self._glove_deltas.get(battle_id)
-        if deltas:
-            deltas[:] = [d for d in deltas if d[0] >= horizon and d[1] > 0]
-        entries = self._glove_attr.get(battle_id)
-        if entries:
-            entries[:] = [e for e in entries if not e["used"] and e["t"] >= horizon]
+        if now is None:
+            self._warn_glove_clock("armies")
+            # 判定はできないが刈り込みは続ける。ここでreturnするだけだと、gift側は
+            # server時計を持てて armies だけ持てない配信でpoolが際限なく伸びる。
+            self._glove_prune(battle_id, self._glove_pool_latest(battle_id))
+            return
+        self._glove_prune(battle_id, now)
         # 窓外giftの通常寄与(m×total)を先に消費し、窓中giftとの偶然一致(偽crit)を防ぐ。
         remaining_gifts = []
         for g in self._glove_recent_gifts:
             gt, gtotal = g
-            if gt < now - GLOVE_MATCH_AFTER_SEC - 30:
-                continue
             m = self._glove_multiplier_at(rec, gt)
             if m is not None and self._glove_consume_delta(battle_id, gt, gtotal * m):
                 continue
@@ -4352,14 +4529,17 @@ class TikTokCollector:
         bucket["diamonds"] += diamonds
         # 不変ID優先(user_id -> unique_id -> nickname)で名寄せ。プロフィールはself.users
         # に集約し、gifterエントリはidentity_keyと集計値のみ持つ(重複保持を避ける)。
-        gifter_key = self._touch_user(user) or user["nickname"] or "(unknown)"
-        gifter = self.gifters.setdefault(
-            gifter_key,
-            {"gifts": 0, "diamonds": 0, "items": {}},
-        )
-        gifter["gifts"] += count
-        gifter["diamonds"] += diamonds
-        gifter["items"][gift_name] = gifter["items"].get(gift_name, 0) + count
+        # 身元不明(key='')はrankingに載せない。表示名 "(unknown)" をkeyにすると別人の
+        # giftが1人分として合算されるため(self.usersも同じ理由で登録しない)。
+        gifter_key = self._touch_user(user)
+        if gifter_key:
+            gifter = self.gifters.setdefault(
+                gifter_key,
+                {"gifts": 0, "diamonds": 0, "items": {}},
+            )
+            gifter["gifts"] += count
+            gifter["diamonds"] += diamonds
+            gifter["items"][gift_name] = gifter["items"].get(gift_name, 0) + count
         gift_type = self.gift_types.setdefault(
             gift_name,
             {"name": gift_name, "count": 0, "diamonds": 0, "diamonds_each": diamonds_each},
@@ -4401,6 +4581,7 @@ class TikTokCollector:
             "comment": event.comment,
             "text": f"{user['nickname']}: {event.comment}",
             **_identity_signals(event),
+            **_comment_signals(event),
         }
         emotes = _emote_payload(event)
         if emotes:
@@ -4427,17 +4608,44 @@ class TikTokCollector:
         user = _user_payload(event.user)
         self.stats["follows"] += 1
         self._bucket()["follows"] += 1
+        self._save_follower_count(event)
         await self._record(
             "follow", {"user": user, "text": f"{user['nickname']} がFollowしました"},
             create_time=self._create_time_sec(event),
         )
+
+    def _save_follower_count(self, event: FollowEvent) -> None:
+        """FollowEventが同梱する配信者のfollower総数(絶対値)を残す。
+
+        stats["follows"]はevent本数なので、unfollowも収集が切れていた間の増減も表せない。
+        こちらはTikTok側が持つ総数そのものなので、配信中の純増を差で出せる。ただし値は
+        結果整合で前後する(実観測: 81507の次に81465)ため、単調化や補間はせず届いた値を
+        そのまま残し、解釈は解析側に委ねる。値が動いた時だけ1点書く。"""
+        count = _as_int(getattr(event, "follow_count", None))
+        if not count or self.session_id is None or count == self._follower_saved:
+            return
+        try:
+            self._storage.add_follower_sample(
+                self.session_id, time.time(), self._create_time_sec(event), count
+            )
+            self._follower_saved = count
+        except Exception:
+            logger.error(
+                "failed to persist the streamer's follower total; this datapoint is "
+                "lost from the session's follower curve",
+                exc_info=True,
+                extra={"event": "collector.follower_sample_persist_failed",
+                       "ctx": {"follower_count": count}},
+            )
 
     async def _on_share(self, event: ShareEvent) -> None:
         user = _user_payload(event.user)
         self.stats["shares"] += 1
         self._bucket()["shares"] += 1
         await self._record(
-            "share", {"user": user, "text": f"{user['nickname']} がLIVEをShareしました"},
+            "share",
+            {"user": user, "text": f"{user['nickname']} がLIVEをShareしました",
+             **_share_signals(event)},
             create_time=self._create_time_sec(event),
         )
 
@@ -4502,8 +4710,59 @@ class TikTokCollector:
                     extra={"event": "collector.viewer_sample_persist_failed",
                            "ctx": {"viewers": event.m_total}},
                 )
+            self._save_contributors(event)
         self._update_rates()
         await self._broadcast_stats()
+
+    def _save_contributors(self, event: RoomUserSeqEvent) -> None:
+        """RoomUserSeqが運ぶTikTok公式の上位貢献者Ranking(累積score)を時系列で残す。
+
+        こちらのgift eventの積み上げとは独立な系列なので、突き合わせれば収集の取りこぼし量が
+        実測できる。毎message書くと冗長なので、設定間隔を空けた上で内容が変わった時だけ書く。
+        scoreは文字列で届くことがあるため数値化するが、数値化できない値は捨てる(捏造しない)。"""
+        contributors = getattr(event, "m_contributors", None) or []
+        if not contributors:
+            return
+        now = time.time()
+        if now - self._contrib_saved_at < self._settings.get("contributor_sample_seconds"):
+            return
+        rows = []
+        for item in contributors:
+            m_user = getattr(item, "m_user", None)
+            user = _user_payload(m_user)
+            if not user["unique_id"]:
+                # @handleはUser protoのusernameに入る(unique_idという名のfieldは実wireに
+                # 存在しない)。identity_keyは不変user_idで決まるので順位は変わらないが、
+                # 突合結果を人が読むときの手掛かりとして持たせる。
+                user["unique_id"] = getattr(m_user, "username", "") or ""
+            rows.append(
+                {
+                    "rank": _as_int(getattr(item, "m_rank", None)),
+                    "score": _as_int(getattr(item, "m_score", None)),
+                    "user": user,
+                }
+            )
+        sig = tuple(
+            (r["rank"], r["score"], r["user"]["user_id"], r["user"]["nickname"]) for r in rows
+        )
+        if sig == self._contrib_saved_sig:
+            return
+        # 間隔gateは書き込みの成否によらず進める(失敗が続いても毎message叩きに行かない)。
+        # 内容の指紋は書けた時だけ更新し、失敗した内容は次の機会に書き直す。
+        self._contrib_saved_at = now
+        try:
+            self._storage.add_contributor_samples(
+                self.session_id, now, self._create_time_sec(event), rows
+            )
+            self._contrib_saved_sig = sig
+        except Exception:
+            logger.error(
+                "failed to persist a contributor ranking sample; this snapshot of "
+                "TikTok's cumulative contribution ranking is lost",
+                exc_info=True,
+                extra={"event": "collector.contributor_sample_persist_failed",
+                       "ctx": {"contributors": len(rows)}},
+            )
 
     async def _broadcast_stats(self) -> None:
         now = time.time()
@@ -4637,6 +4896,14 @@ class TikTokCollector:
             likes_total = 0
             tick = 0
             sim_collab_channel = None
+            # TikTok側が算出する累積貢献score(RoomUserSeqのm_contributors)の擬似値。
+            # 自前のgift集計より必ず多め(取りこぼしがある前提)に積み、突合で差が出る形にする。
+            # keyはuser.id(SimpleNamespaceは__eq__を持つためunhashableでkeyにできない)。
+            sim_contrib: dict = {}
+            sim_users_by_id = {u.id: u for u in users}
+            # 配信者のfollower総数(FollowEventのfollow_count)。実配信では結果整合で
+            # 前後するので、その揺れも再現する(単調増加だと後段の前提を誤らせる)。
+            sim_followers = rng.randint(3000, 90000)
             while True:
                 await asyncio.sleep(rng.uniform(0.4, 1.4))
                 tick += 1
@@ -4644,9 +4911,16 @@ class TikTokCollector:
                 if tick % 3 == 0:
                     viewers = max(1, viewers + rng.randint(-6, 8))
                     anonymous = max(0, int(viewers * rng.uniform(0.2, 0.4)))
+                    top = sorted(sim_contrib.items(), key=lambda kv: -kv[1])[:5]
                     await self._on_room_user(
                         SimpleNamespace(
-                            m_total=viewers, total_user=viewers + tick * 2, anonymous=anonymous
+                            m_total=viewers, total_user=viewers + tick * 2, anonymous=anonymous,
+                            m_contributors=[
+                                SimpleNamespace(
+                                    m_rank=i, m_score=score, m_user=sim_users_by_id[uid]
+                                )
+                                for i, (uid, score) in enumerate(top, start=1)
+                            ],
                         )
                     )
                 roll = rng.random()
@@ -4664,16 +4938,24 @@ class TikTokCollector:
                     await self._on_join(SimpleNamespace(user=user))
                 elif roll < 0.95:
                     gid, name, diamonds = rng.choice(gifts)
+                    repeat = rng.randint(1, 5)
                     await self._on_gift(
                         SimpleNamespace(
                             user=user,
                             gift=SimpleNamespace(id=gid, name=name, diamond_count=diamonds, image=sim_icon),
                             streaking=False,
-                            repeat_count=rng.randint(1, 5),
+                            repeat_count=repeat,
                         )
                     )
+                    # 収集の取りこぼしぶんを上乗せしてTikTok側の累積scoreを作る。
+                    sim_contrib[user.id] = sim_contrib.get(user.id, 0) + int(
+                        diamonds * repeat * rng.uniform(1.0, 1.15)
+                    )
                 elif roll < 0.98:
-                    await self._on_follow(SimpleNamespace(user=user))
+                    sim_followers = max(0, sim_followers + rng.choice([1, 1, 1, 2, -1, -3]))
+                    await self._on_follow(
+                        SimpleNamespace(user=user, follow_count=sim_followers)
+                    )
                 else:
                     await self._on_share(SimpleNamespace(user=user))
                 if tick % 60 == 0:
@@ -4814,6 +5096,10 @@ class TikTokCollector:
         for round_no in range(rng.randint(5, 8)):
             if round_no:
                 await asyncio.sleep(sample_gap)
+            # 実modeと同じくgift/armiesの時刻はserver時計(create_time)で揃える。
+            # simでは実配信のserver時計に相当するものがこのtickになる。
+            tick = int(time.time())
+            base_message = SimpleNamespace(create_time=tick)
             glove_gift = None
             if sim_glove and round_no:
                 # 窓中の自室Gift eventを1件pending化し、自hostスコアをその寄与分
@@ -4823,7 +5109,7 @@ class TikTokCollector:
                 unit = rng.choice(sim_tiers)
                 gid = 900000 + sim_tiers.index(unit)
                 self._gift_coins[gid] = unit
-                if self._record_glove_candidate(gid, unit, 1, time.time()):
+                if self._record_glove_candidate(gid, unit, 1, tick):
                     glove_gift = unit * (GLOVE_MULTIPLE if rng.random() < 0.25 else 1)
             for hid in scores:
                 if hid == "sim_owner" and glove_gift is not None:
@@ -4850,6 +5136,7 @@ class TikTokCollector:
                             for hid in members
                         ]))
                 await self._on_armies(SimpleNamespace(
+                    base_message=base_message,
                     battle_id=battle_id, armies=None, team_armies=team_armies))
             else:
                 own_ua = contribs(True, "own")
@@ -4863,6 +5150,7 @@ class TikTokCollector:
                         host_score=scores[hid], anchor_id_str=hid,
                         user_armies=contribs(False, hid))
                 await self._on_armies(SimpleNamespace(
+                    base_message=base_message,
                     battle_id=battle_id, team_armies=None, armies=armies))
         # Simulate the opponent-room gift capture (Part 2): give 敵陣 contributors a
         # 実弾(コイン) value distinct from their BS(score) so the BS/実弾 併記 is visible

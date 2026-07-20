@@ -11,20 +11,25 @@
 窓は**秒**で受けて各sessionのbucket_secondsからbucket個数を導く。bucket_secondsは
 session単位で可変(既定10秒)なので、bucket個数で持つとsession間で窓の実長が変わる。
 
-入力はdiamondsとcommentsのみ。joinsは純増ではなく交絡し、viewersはbuckets列に既に
-別系列として存在する。
+必須の入力はdiamondsとcommentsのみ。joinsは純増ではなく交絡し、viewersはbuckets列に既に
+別系列として存在する。録画のある区間では、呼び出し側が各bucketへ音声の区間peakを
+``audio_peak``として載せられる(OPTIONAL_METRICS)。歓声や笑い声はギフトにもコメントにも
+現れないことがあり、その盛り上がりを拾える一方、録画の無いsessionには存在しない値なので
+必須にはしない。
 """
 
 from typing import Optional
 
-# 既定のしきい値。storage.streamer_highlightsが従来から使っている値で、変更すると
-# 配信者pageの見どころが変わる。録画単位の候補検出は設定値(clip_candidate_zscore)を
-# 明示的に渡す。
-HIGHLIGHT_ZSCORE = 2.0
+from tictok.core.config import get_highlight_zscore
+
 # これ未満のbucket数では平均も標準偏差も意味を持たない(従来の見どころ判定と同値)。
 MIN_BUCKETS = 5
-# 対応する指標。値は全指標ぶん常に返し、しきい値判定だけをmetricsで絞る。
+# 全bucketが必ず持つ指標。値は常に全指標ぶん返し、しきい値判定だけをmetricsで絞る。
 METRICS = ("diamonds", "comments")
+# bucketに載っていることもある指標。音声由来の値(audio_peak)は録画がある区間でしか
+# 作れないので、必須にすると録画の無いsession(配信者pageの見どころ)が判定できなくなる。
+# bucket全件がkeyを持つときだけ系列を作り、欠けているものは黙って0で埋めない。
+OPTIONAL_METRICS = ("audio_peak",)
 
 
 def window_bucket_count(bucket_seconds: float, window_seconds: float) -> int:
@@ -62,7 +67,7 @@ def _zscores(series: list) -> Optional[tuple]:
 
 def detect_spikes(buckets: list, window_buckets: int = 1,
                   metrics: tuple = ("diamonds",),
-                  zscore_min: float = HIGHLIGHT_ZSCORE) -> list:
+                  zscore_min: Optional[float] = None) -> list:
     """spike候補を時刻順で返す。
 
     ``buckets`` は storage の bucket 行(start / diamonds / comments を持つ dict 相当)で、
@@ -74,11 +79,20 @@ def detect_spikes(buckets: list, window_buckets: int = 1,
     """
     if window_buckets < 1:
         raise ValueError("window_bucketsは1以上である必要があります。")
-    unknown = [m for m in metrics if m not in METRICS]
+    if zscore_min is None:
+        zscore_min = get_highlight_zscore()
+    known = METRICS + OPTIONAL_METRICS
+    unknown = [m for m in metrics if m not in known]
     if unknown:
         raise ValueError(f"未知の指標です: {unknown}")
+    available = METRICS + tuple(
+        m for m in OPTIONAL_METRICS if all(m in b for b in buckets)
+    )
+    missing = [m for m in metrics if m not in available]
+    if missing:
+        raise ValueError(f"bucketに載っていない指標を要求されました: {missing}")
     series = {}
-    for metric in METRICS:
+    for metric in available:
         values = [float(b[metric] or 0) for b in buckets]
         series[metric] = _rolling_sums(values, window_buckets)
     starts = [b["start"] for b in buckets][: len(series[METRICS[0]])]
@@ -99,7 +113,7 @@ def detect_spikes(buckets: list, window_buckets: int = 1,
         best_z = scored[best_metric][0]
         if best_z < zscore_min:
             continue
-        values = {m: series[m][i] for m in METRICS}
+        values = {m: series[m][i] for m in available}
         baseline = scored[best_metric][1]
         candidates.append({
             "start": start,

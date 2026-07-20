@@ -993,6 +993,12 @@ body {
 .dl-pct { flex: 0 0 auto; font-variant-numeric: tabular-nums; font-size: 0.7rem; color: var(--ink-muted); white-space: nowrap; }
 .dl-progress.done .dl-pct { color: var(--accent-deep); }
 
+/* job一覧: session一括のgroup行と、その明細行(既定では畳む)。 */
+.job-target { display: inline-flex; align-items: baseline; gap: 0.4rem; flex-wrap: wrap; min-inline-size: 0; }
+.job-target .job-toggle { padding: 0.1rem 0.4rem; letter-spacing: normal; white-space: nowrap; }
+.job-subrow > td { background: var(--sand-panel-muted); }
+.job-subrow > td:first-child { padding-inline-start: 1.4rem; }
+
 .gift-items { display: grid; grid-template-columns: 1fr auto auto; gap: 0.15rem 0.7rem; align-items: baseline; }
 .gift-items .gi-line { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; }
 .gift-items .gi-name { overflow-wrap: anywhere; }
@@ -1358,6 +1364,33 @@ body {
 .a-disk .d-vol.low .v,
 .a-disk .d-vol.low .l { color: var(--warn); }
 .a-disk .d-vol.low .fill { background: var(--warn); }
+
+/* job状況(全画面共通)。WSが届く前は中身が無く、その間は場所も取らない。 */
+.a-jobs {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-left: auto;
+  min-inline-size: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-muted);
+  text-decoration: none;
+}
+
+.a-jobs:empty { display: none; }
+/* 右寄せの起点は先頭の1つだけにする(後続へautoを重ねると間延びする)。 */
+.a-jobs ~ .a-disk { margin-left: 0; }
+.a-add ~ .a-jobs { margin-left: 0; }
+
+.a-jobs .j-active { color: var(--ink-strong); font-variant-numeric: tabular-nums; }
+.a-jobs .j-failed {
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  padding: 0 0.35em;
+  font-variant-numeric: tabular-nums;
+}
 
 .a-ws { display: flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; color: var(--ink-muted); }
 .a-ws .dot { color: var(--warn); }
@@ -1784,6 +1817,21 @@ body {
 .a-feed .it.feed-item-join,
 .a-feed .it.feed-item-like { opacity: 0.85; }
 
+/* Rankingペインは「UserごとのGift」と「Gift種類別」の2表を縦に並べる。 */
+.rank-sec + .rank-sec { margin-top: 0.7rem; }
+.rank-sec-h {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.15rem 0.1rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-strong);
+}
+.rank-sec-n { font-size: 0.62rem; letter-spacing: 0.06em; color: var(--ink-muted); }
+.rank-sec-n:empty { display: none; }
+
 .a-rank { inline-size: 100%; border-collapse: collapse; font-size: 0.7rem; }
 .a-rank th { position: sticky; top: 0; background: var(--invert-bg); color: var(--invert-fg); text-align: left; padding: 0.25rem 0.4rem; font-size: 0.62rem; }
 .a-rank td { padding: 0.22rem 0.4rem; border-top: 1px solid rgba(143, 136, 113, 0.45); }
@@ -2017,6 +2065,13 @@ body {
    (出力済等)幅にtableが揃えるので、Buttonをwidth:100%で列いっぱいに広げ、cell内の余白
    (スカスカ)を無くして情報密度を上げる。 */
 .xtab td.act .btn-small { padding: 0.15rem 0.25rem; letter-spacing: normal; width: 100%; }
+/* click並替に対応した列headerだけを押せる見た目にし、今どの列で並んでいるかを矢印で示す。 */
+.xtab th[data-sort] { user-select: none; }
+.xtab th:not([data-sort]) { cursor: default; }
+.xtab th[data-sort]:hover { background: var(--accent-deep); }
+.xtab th[data-sort].sorted { background: var(--accent-deep); }
+.xtab th[data-sort].sorted::after { content: " ▼"; font-size: 0.85em; }
+.xtab th[data-sort].sorted.sorted-asc::after { content: " ▲"; }
 .xtab tbody tr:nth-child(even) { background: rgba(255, 250, 230, 0.16); }
 .xtab tbody tr:hover { background: rgba(255, 250, 230, 0.32); }
 .xtab .row-actions a { color: var(--accent-deep); }
@@ -2206,6 +2261,82 @@ body {
 .modal-close:hover { background: var(--invert-bg); color: var(--invert-fg); }
 .modal section { margin-top: 0.9rem; }
 .modal-narrow { max-inline-size: 42rem; }
+
+/* 共通の確認dialog(common.jsのconfirmDialog)。既存のmodalより上に重ね、詳細modalの
+   中から出した確認が背後に隠れないようにする。 */
+.confirm-overlay { align-items: center; z-index: 160; }
+.confirm-modal { max-inline-size: 34rem; }
+.confirm-text {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.confirm-actions {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+/* 共通のtoast(common.jsのshowToast)。走査線・row menu・modalのどれよりも上に出す。 */
+.toast-layer {
+  position: fixed;
+  inset-block-end: 1rem;
+  inset-inline-end: 1rem;
+  z-index: 220;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+  max-inline-size: min(30rem, 92vw);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  background: var(--sand-panel);
+  border: 1px solid var(--line);
+  border-inline-start: 0.25rem solid var(--accent-deep);
+  box-shadow: 0.3rem 0.3rem 0 var(--shadow);
+  color: var(--ink-strong);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  padding: 0.5rem 0.7rem;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.toast-error { border-inline-start-color: var(--warn); }
+.toast-count {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--warn);
+  font-size: 0.7rem;
+}
+.toast-count:empty { display: none; }
+.toast-close {
+  flex: 0 0 auto;
+  appearance: none;
+  background: none;
+  border: 0;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0 0.1rem;
+}
+.toast-close:hover { color: var(--ink-strong); }
+
+/* Sessionランキングモーダル */
+.rank-note { margin: 0 0 0.7rem; color: var(--ink); font-size: 0.85rem; }
+.rank-tools { margin-bottom: 0.6rem; }
+.rank-listwrap { max-block-size: 55vh; overflow-y: auto; }
+.rank-listwrap .rank-row { cursor: pointer; }
+.rank-listwrap .rank-row:hover { background: rgba(255, 250, 230, 0.32); }
 
 /* ユーザー削除モーダル */
 .userdel-note { margin: 0 0 0.7rem; color: var(--ink); font-size: 0.85rem; }

@@ -12,7 +12,7 @@ import secrets
 import shutil
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -35,10 +35,9 @@ from tictok.core.http_cache import REVALIDATE_CACHE_CONTROL, static_cache_contro
 from tictok.media.avatar_pool import AvatarPool
 from tictok.media.avatar_proxy import AvatarProxy
 from tictok.media.gift_icons import GiftIconCache
-from tictok.ai import ai_analysis
+from tictok.ai import ai_analysis, review_digest
 from tictok.ai.ai_analysis import AIError, ai_status, analyze_comments, analyze_streamer
 from tictok.core.config import (
-    get_ai_comment_sample,
     get_ai_enabled,
     get_avatar_fetch_attempts,
     get_avatar_fetch_backoff_seconds,
@@ -77,7 +76,12 @@ from tictok.record.transcription import transcribe as stt_transcribe
 from tictok.record.transcribe_queue import TranscribeQueue, backfill_search_index
 from tictok.media.clipper import make_clip
 from tictok.media.thumbnails import ensure_sprite, sprite_path
-from tictok.media.waveform import ensure_waveform
+from tictok.media.waveform import (
+    ensure_audio_profile,
+    ensure_waveform,
+    level_peak,
+    silent_ratio,
+)
 from tictok.search import cutlist_export, indexer, semantic
 from tictok.record import audio_norm, disk_scan, retention, subtitles
 from tictok.record.media_queue import JobSkipped, MediaJobQueue
@@ -91,6 +95,7 @@ from tictok.record.upscale import (
     upscale_output_path,
     upscale_status,
 )
+from tictok import analytics
 from tictok.core import cancel, spike
 from tictok.core.settings import Settings
 from tictok.storage import OPS_ERROR, OPS_INFO, OPS_WARNING, Storage
@@ -996,7 +1001,8 @@ async def list_ops_events_api(
     if severity and severity not in OPS_SEVERITIES:
         raise HTTPException(status_code=422,
                             detail=f"不明なseverity: {severity}")
-    page_size = int(limit) if limit else get_ops_events_query_limit()
+    max_page_size = max(1, get_ops_events_query_limit())
+    page_size = max(1, min(int(limit), max_page_size)) if limit else max_page_size
     events = await asyncio.to_thread(
         storage.list_ops_events,
         limit=page_size,
@@ -1960,6 +1966,20 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
             "normalized": bool(normalize), "precise": precise}
 
 
+@contextmanager
+def _input_precondition():
+    """job runner内で、入力側の前提不成立(404)を失敗ではなくskipへ落とす。
+
+    録画行やfileが無いのは待っても変わらないので、media_queueのretryでbackoffを消費してから
+    赤いfailedとして残すのは誤り。取り消しと同じ「正常な終わり方」へ畳む。"""
+    try:
+        yield
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise JobSkipped(str(exc.detail)) from exc
+        raise
+
+
 async def _run_media_job(job: dict, report) -> dict:
     """queueが1件を実行する本体。stage進捗は report(stage, pct) でqueueへ返す。"""
     kind = job["kind"]
@@ -1968,7 +1988,7 @@ async def _run_media_job(job: dict, report) -> dict:
     if kind == "reprocess":
         recording = storage.get_recording(recording_id)
         if recording is None:
-            raise HTTPException(status_code=404, detail="録画が見つかりません。")
+            raise JobSkipped("録画が見つかりません（削除済み）。")
         return await _reprocess_recording(recording_id, recording, job_id, report)
     if kind == "overlay_preview":
         return await _run_preview_clip_job(recording_id, report)
@@ -1976,7 +1996,8 @@ async def _run_media_job(job: dict, report) -> dict:
         return await _run_clip_batch_job(job, report)
     if kind not in ("overlay", "upscale"):
         raise HTTPException(status_code=400, detail=f"未知のjob種別です: {kind}")
-    recording, path = _recording_for_output(recording_id)
+    with _input_precondition():
+        recording, path = _recording_for_output(recording_id)
     result = await _burn_in_recording(recording, path, job_id, report)
     rendered, payload = _overlay_payload(result, path)
     payload.update({
@@ -2175,14 +2196,32 @@ async def upscale_output_recording(recording_id: int) -> dict:
                                     stem=path.stem)
 
 
+def _existing_recording_file(recording: dict) -> Optional[Path]:
+    """録画行が指す実在のmp4。path不正・削除済み・finalize未完(録画dirのまま)ならNone。"""
+    try:
+        path = _safe_recording_path(recording.get("path") or "")
+    except HTTPException:
+        return None
+    return path if path.is_file() else None
+
+
 def _session_output_targets(session_id: int) -> list:
-    """Recordings of a session that can be output, in the order they were made."""
+    """Recordings of a session that can be output, in the order they were made.
+
+    statusだけで選ぶと、fileが消えた/finalizeが完走しなかった行までqueueへ載り、workerが
+    1件ずつ404で落ちる。単体の出力APIは投入時にfileの実在を見て弾いているので、session
+    一括でも同じ条件で絞る。"""
     if storage.get_session(session_id) is None:
         raise HTTPException(status_code=404, detail="Sessionが見つかりません。")
-    targets = [r for r in storage.recordings_for_session(session_id)
-               if r.get("status") in ("completed", "interrupted")]
+    finished = [r for r in storage.recordings_for_session(session_id)
+                if r.get("status") in ("completed", "interrupted")]
+    targets = [r for r in finished if _existing_recording_file(r) is not None]
     if not targets:
-        raise HTTPException(status_code=409, detail="出力できる録画がありません。")
+        raise HTTPException(
+            status_code=409,
+            detail=("この Session の録画は録画fileが残っていません（削除済みか録画失敗）。"
+                    if finished else "出力できる録画がありません。"),
+        )
     return targets
 
 
@@ -2308,6 +2347,7 @@ async def retry_job(job_id: str) -> dict:
         job["kind"], job["recording_id"], group_id=job.get("group_id") or "",
         recording=recording,
         stem=Path(recording.get("filename") or "").stem or f"#{job['recording_id']}",
+        params=job.get("params") or None,
     )
 
 
@@ -2607,6 +2647,17 @@ async def recording_heat_api(recording_id: int) -> dict:
     return {"recording_id": recording_id, "points": points}
 
 
+# 候補badgeの文言。指標を足したらここも足すこと(素通りするとKeyErrorで気付ける)。
+_CANDIDATE_LABELS = {
+    "diamonds": lambda item: f"ダイヤ{item['diamonds']}",
+    "comments": lambda item: f"コメント{item['comments']}",
+    "audio_peak": lambda item: "音量",
+}
+# 窓が重なった候補を畳むときに、代表となった窓から引き継ぐkey。
+_CANDIDATE_REPRESENTATIVE_KEYS = ("zscore", "metric", "diamonds", "comments", "ratio",
+                                  "silent_ratio")
+
+
 def _merge_candidates(items: list) -> list:
     """時刻順に並んだ候補のうち、範囲が重なるものを1つへ畳む。移動窓は1 bucketずつずれた
     窓を連続で拾うため、畳まないと同じ盛り上がりが何本ものclipになる。"""
@@ -2617,8 +2668,8 @@ def _merge_candidates(items: list) -> list:
             prev["end"] = max(prev["end"], item["end"])
             if item["zscore"] > prev["zscore"]:
                 # 代表値は最も外れている窓のものを残す(合算すると窓の重なりを二重に数える)。
-                prev.update({k: item[k] for k in
-                             ("zscore", "metric", "diamonds", "comments", "ratio")})
+                prev.update({k: item[k] for k in _CANDIDATE_REPRESENTATIVE_KEYS
+                             if k in item})
             continue
         merged.append(dict(item))
     return merged
@@ -2655,14 +2706,42 @@ async def recording_clip_candidates_api(recording_id: int) -> dict:
     ended_at = recording.get("ended_at")
     buckets = storage.session_buckets(session_id, started_at, ended_at)
     window_buckets = spike.window_bucket_count(bucket_seconds, window_seconds)
-    found = spike.detect_spikes(
-        buckets, window_buckets=window_buckets, metrics=spike.METRICS,
-        zscore_min=float(settings.get("clip_candidate_zscore")))
-    if not found:
-        return empty
     path = _resolved_recording_path(recording)
     to_pts = await asyncio.to_thread(
         indexer.build_time_mapper_sync, path, started_at, ended_at)
+    metrics = spike.METRICS
+    profile = None
+    if int(settings.get("clip_candidate_audio")):
+        try:
+            profile = await ensure_audio_profile(path)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
+        # 音声は動画時間軸なので、各bucketの窓を動画時間へ写してからpeakを引く。
+        # 録画の外へ落ちるbucketがあるとlevelの取れない窓ができるため、その録画では
+        # 音声を判定から外す(0で埋めると「無音だった」という観測を作ってしまう)。
+        outside = next((b for b in buckets
+                        if level_peak(profile, to_pts(b["start"]),
+                                      to_pts(b["start"] + bucket_seconds)) is None), None)
+        if outside is None:
+            for bucket in buckets:
+                bucket["audio_peak"] = level_peak(
+                    profile, to_pts(bucket["start"]),
+                    to_pts(bucket["start"] + bucket_seconds))
+            metrics = metrics + ("audio_peak",)
+        else:
+            logger.info(
+                "clip candidates: audio metric skipped for recording %s"
+                " (bucket outside the recorded audio)", recording_id,
+                extra={"event": "clip.audio_metric_skipped",
+                       "ctx": {"recording_id": recording_id,
+                               "bucket_start": outside["start"],
+                               "audio_duration_seconds": profile["duration_seconds"]}},
+            )
+    found = spike.detect_spikes(
+        buckets, window_buckets=window_buckets, metrics=metrics,
+        zscore_min=float(settings.get("clip_candidate_zscore")))
+    if not found:
+        return empty
     video_seconds = await _duration_seconds(path)
     span = bucket_seconds * window_buckets
     items = []
@@ -2674,7 +2753,7 @@ async def recording_clip_candidates_api(recording_id: int) -> dict:
             end = min(end, video_seconds)
         if end <= start:
             continue
-        items.append({
+        item = {
             "start": round(start, 2),
             "end": round(end, 2),
             "zscore": round(candidate["zscore"], 2),
@@ -2682,13 +2761,17 @@ async def recording_clip_candidates_api(recording_id: int) -> dict:
             "ratio": round(candidate["ratio"], 2),
             "diamonds": int(candidate["values"]["diamonds"]),
             "comments": int(candidate["values"]["comments"]),
-        })
+        }
+        items.append(item)
     merged = _merge_candidates(items)
     merged.sort(key=lambda c: c["zscore"], reverse=True)
     limit = int(settings.get("clip_candidate_limit"))
     for item in merged:
-        item["label"] = (f"ダイヤ{item['diamonds']}" if item["metric"] == "diamonds"
-                         else f"コメント{item['comments']}")
+        item["label"] = _CANDIDATE_LABELS[item["metric"]](item)
+        if profile is not None:
+            # 無音割合は畳んだ後の区間で測る。代表窓の値を引き継ぐと、窓が伸びた分の
+            # 無音が数に入らず実態とずれる。判定できなければNoneのまま。
+            item["silent_ratio"] = silent_ratio(profile, item["start"], item["end"])
     return {**empty, "candidates": merged[:limit]}
 
 
@@ -2862,17 +2945,41 @@ async def clear_cutlist_api() -> dict:
 
 
 @app.get("/api/cutlist/export")
-async def export_cutlist_api(format: str = "csv") -> Response:
-    """cut listをCSV/EDLで書き出す。mp4を出さずに範囲だけ渡せば再encodeが要らない。"""
-    if format not in ("csv", "edl"):
-        raise HTTPException(status_code=400, detail="formatはcsvかedlを指定してください。")
+async def export_cutlist_api(format: str = "csv", unique_ids: str = "") -> Response:
+    """cut listをCSV/EDL/FCPXMLで書き出す。mp4を出さずに範囲だけ渡せば再encodeが要らない。
+
+    EDL/FCPXMLはframeが最小単位なので、素材のfpsをffprobeで実測してから組み立てる
+    (既定値で埋めるとNLE上の位置が素材ごとにずれる)。実測できない素材が混ざる場合は
+    frame基準の形式を出さずにerrorへ倒す。
+
+    実測では配信者ごとにfpsが違う(25/60fpsの実例)。EDLはlist全体で1 frame rateしか
+    持てないため、配信者を跨いで出すとほぼ確実に混在で止まる。unique_idsで配信者を
+    絞って出すか、素材ごとにframe rateを持てるFCPXMLを使うこと。"""
+    if format not in ("csv", "edl", "fcpxml"):
+        raise HTTPException(status_code=400,
+                            detail="formatはcsv/edl/fcpxmlのいずれかを指定してください。")
+    wanted = {u for u in unique_ids.split(",") if u}
     cuts = (await list_cutlist_api())["items"]
-    if format == "csv":
-        body = cutlist_export.to_csv(cuts)
-        media_type, filename = "text/csv; charset=utf-8", "tictok_cutlist.csv"
-    else:
-        body = cutlist_export.to_edl(cuts)
-        media_type, filename = "text/plain; charset=utf-8", "tictok_cutlist.edl"
+    if wanted:
+        cuts = [c for c in cuts if c["unique_id"] in wanted]
+    cuts = await cutlist_export.resolve_timebases(cuts)
+    try:
+        if format == "csv":
+            body = cutlist_export.to_csv(cuts)
+            media_type, filename = "text/csv; charset=utf-8", "tictok_cutlist.csv"
+        elif format == "edl":
+            body = cutlist_export.to_edl(cuts)
+            media_type, filename = "text/plain; charset=utf-8", "tictok_cutlist.edl"
+        else:
+            body = cutlist_export.to_fcpxml(cuts)
+            media_type, filename = "application/xml; charset=utf-8", "tictok_cutlist.fcpxml"
+    except cutlist_export.CutlistExportError as exc:
+        logger.warning(
+            "cutlist export refused (%s): %s", format, exc, exc_info=True,
+            extra={"event": "cutlist.export_refused",
+                   "ctx": {"format": format, "cuts": len(cuts)}},
+        )
+        raise HTTPException(status_code=400, detail=str(exc))
     return Response(
         content=body.encode("utf-8-sig" if format == "csv" else "utf-8"),
         media_type=media_type,
@@ -2936,14 +3043,23 @@ def _semantic_min_score() -> float:
 
 
 @app.get("/api/search/semantic")
-async def semantic_search_api(q: str, unique_ids: str = "", limit: int = 50) -> dict:
+async def semantic_search_api(q: str, sources: str = "stt,comment", unique_ids: str = "",
+                              since: Optional[float] = None, until: Optional[float] = None,
+                              limit: int = 50) -> dict:
     """意味検索。語の一致ではなく意味の近さで探すので、言い回しを覚えていなくても引ける。
 
     結果はkeyword検索と同じ行形式へ揃えて返す(画面が両者を同じ表で描けるようにする)。
-    passageは複数のsearch_hits行を束ねたものなので、代表行の位置へseekする。"""
+    passageは複数のsearch_hits行を束ねたものなので、代表行の位置へseekする。
+    sources/since/untilの意味は /api/search と同じで、絞り込むほど走査行が減って速くなる。"""
+    wanted = [s for s in sources.split(",") if s in (indexer.SOURCE_STT, indexer.SOURCE_COMMENT)]
     ids = [u for u in unique_ids.split(",") if u]
+    if not wanted:
+        # 0件は0件として返す。ここで全件を検索すると、種類を全部外したのに結果が出る。
+        return {"total": 0, "mode": "semantic", "items": [],
+                "hint": "検索する種類（発話／コメント）を選んでください。"}
     try:
-        matches = await semantic.search(q, max(1, min(limit, 200)), ids or None)
+        matches = await semantic.search(q, max(1, min(limit, 200)), ids or None,
+                                        wanted, since, until)
     except semantic.SemanticError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2982,18 +3098,45 @@ async def semantic_search_api(q: str, unique_ids: str = "", limit: int = 50) -> 
 
 @app.get("/api/search/semantic/status")
 async def semantic_status_api() -> dict:
-    return semantic.index_status()
+    return await asyncio.to_thread(semantic.index_status)
+
+
+async def _broadcast_semantic_status() -> None:
+    """意味検索indexの現況を配る。開始時はcreate_taskで投げっぱなしにするので、
+    ここで例外を出すと「Task exception was never retrieved」だけが残る。通知の失敗で
+    buildを巻き添えにする理由も無いので、logへ落として飲む。"""
+    try:
+        status = await asyncio.to_thread(semantic.index_status)
+        await hub.broadcast({"type": "semantic_index", "status": status})
+    except Exception:
+        logger.exception(
+            "failed to broadcast the semantic index status",
+            extra={"event": "search.semantic_status_broadcast_failed", "ctx": {}},
+        )
 
 
 @app.post("/api/search/semantic/build")
 async def semantic_build_api() -> dict:
     """意味検索indexを構築する(差分)。keyword indexが増えた後に呼ぶ。"""
+    loop = asyncio.get_running_loop()
+
+    def on_progress(info: dict) -> None:
+        # 開始をここで知らせる。lockを実際に握った後なので、配る status の building は真。
+        # これが無いと、別tabやこのbuildを始めていない画面はbuttonを塞げない。
+        if info.get("stage") == "start":
+            loop.create_task(_broadcast_semantic_status())
+
     try:
         async with _job_ops("semantic", None):
-            result = await semantic.build_index(storage)
+            result = await semantic.build_index(storage, on_progress=on_progress)
+    except semantic.SemanticBusy as exc:
+        # 待たせずに「実行中」と返す。SemanticErrorより先に捕まえること(subclassのため)。
+        raise HTTPException(status_code=409, detail=str(exc))
     except semantic.SemanticError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    await hub.broadcast({"type": "semantic_index", "status": semantic.index_status()})
+    finally:
+        # 失敗して抜けた場合もbuildingを下ろす。ここを通さないと画面が塞がったまま残る。
+        await _broadcast_semantic_status()
     return result
 
 
@@ -3131,10 +3274,22 @@ def _ai_model_or_503() -> str:
     return model
 
 
+def _session_comment_entries(session_id: int) -> list:
+    """sessionのcommentを(時刻, 本文)で返す。時刻が要るのは時間層化抽出のため。
+
+    storage.session_commentsは新しい順にN件を切って本文だけを返すので、そこから採ると
+    標本が配信終盤に偏る(=出力されるsentiment比率が配信全体の推定量にならない)。件数を
+    絞るのは抽出側の仕事なので、ここでは全commentを時刻付きで渡す。"""
+    return [
+        (row["time"], row["comment"] or row["text"] or "")
+        for row in storage.iter_events(session_id)
+        if row["kind"] == "comment" and (row["comment"] or row["text"])
+    ]
+
+
 async def _session_comment_input(session_id: int) -> list:
-    comments = await asyncio.to_thread(
-        storage.session_comments, session_id, get_ai_comment_sample())
-    sample = ai_analysis.comment_sample(comments)
+    entries = await asyncio.to_thread(_session_comment_entries, session_id)
+    sample = ai_analysis.comment_sample(entries)
     if not sample:
         raise HTTPException(status_code=404, detail="このSessionに分析できるCommentがありません。")
     return sample
@@ -3191,39 +3346,21 @@ async def run_session_comment_analysis(session_id: int, refresh: int = 0) -> dic
 
 
 def _streamer_review_input(profile: dict) -> dict:
-    """配信者profileからLLMへ渡す集約dictを組む。指紋もこの戻り値から取るので、
-    実行経路と指紋計算で別のdictを作らないこと(作ると毎回cacheが外れる)。"""
-    battles = profile["battles"]
-    heatmap_top = sorted(profile["heatmap"], key=lambda c: c["diamonds"], reverse=True)[:5]
-    review_input = {
-        "配信者": profile["identity"]["nickname"],
-        "配信回数": profile["count"],
-        "通算": profile["totals"],
-        "平均": {k: round(v) for k, v in profile["average"].items()},
-        "自己ベスト": profile["best"],
-        "収益集中度": profile["concentration"],
-        "Battle": {
-            k: battles[k]
-            for k in ("count", "wins", "losses", "win_rate", "avg_own_score", "avg_opp_score", "battle_diamond_share")
-        },
-        "上位gifter": [
-            {"name": g["nickname"], "diamonds": g["diamonds"], "出現session": g["sessions"]}
-            for g in profile["gifters"][:10]
-        ],
-        "Battle上位gifter": [
-            {"name": g["nickname"], "diamonds": g["diamonds"], "出現battle": g["battles"]}
-            for g in battles.get("gifters", [])[:8]
-        ],
-        "稼ぐ時間帯top": [
-            {
-                "曜日": ["日", "月", "火", "水", "木", "金", "土"][c["dow"]],
-                "時刻": f"{c['hour']:02d}:{c['quarter'] * 15:02d}",
-                "コイン": c["diamonds"],
-            }
-            for c in heatmap_top
-        ],
-    }
-    return review_input
+    """配信者profileと全体解析からLLMへ渡す集約dictを組む。指紋もこの戻り値から取るので、
+    実行経路と指紋計算で別のdictを作らないこと(作ると毎回cacheが外れる)。
+
+    全体解析(信頼区間・標本数・被覆率つき)を併せて渡すのは、profileだけでは時間帯の話が
+    「最も稼いだ15分枠top5」という粗い入力からしか語れないため。解析側の母集団は監視対象
+    全体なので、review_digestが入れ物を分けて区別できる形にする。DB読みなので同期で組み、
+    呼び出し側がto_threadへ逃がす。"""
+    return review_digest.review_input(
+        profile,
+        time_index=storage.analytics_time_index(),
+        retention=storage.analytics_retention(),
+        entry_source=storage.analytics_entry_source(),
+        battle_flow=storage.analytics_battle_flow(),
+        coverage=storage.analytics_coverage(),
+    )
 
 
 @app.get("/api/streamers/{unique_id}/ai-review")
@@ -3245,7 +3382,7 @@ async def run_streamer_ai_review(unique_id: str, refresh: int = 0) -> dict:
     profile = await asyncio.to_thread(storage.streamer_profile, unique_id)
     if profile["count"] == 0:
         raise HTTPException(status_code=404, detail="この配信者の集計データがありません。")
-    review_input = _streamer_review_input(profile)
+    review_input = await asyncio.to_thread(_streamer_review_input, profile)
     signature = ai_analysis.input_signature(review_input)
     record = await asyncio.to_thread(
         storage.get_ai_analysis, ai_analysis.KIND_STREAMER_REVIEW,
@@ -3400,6 +3537,18 @@ async def analytics_coverage(days: int = 0) -> dict:
 @app.get("/api/analytics/entry-source")
 async def analytics_entry_source(days: int = 0) -> dict:
     return await asyncio.to_thread(storage.analytics_entry_source, _analytics_since(days))
+
+
+def _analytics_gift_sku(since: float) -> dict:
+    """ギフトSKU構成。reduceに要るのはsession単位payloadだけで、storage側から追加で
+    引くものが無いため(gloveの単価表のような横断queryが不要)、ここで組み立てる。"""
+    return analytics.reduce_gift_sku(storage._analytics_rows("gift_sku", since))
+
+
+@app.get("/api/analytics/gift-sku")
+async def analytics_gift_sku(days: int = 0) -> dict:
+    """コインがどの価格帯のギフトから来ているか、帯ごとの反復購入率、battle内外の構成差。"""
+    return await asyncio.to_thread(_analytics_gift_sku, _analytics_since(days))
 
 
 @app.get("/api/analytics/organic-entries")

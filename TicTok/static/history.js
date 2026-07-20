@@ -118,6 +118,58 @@ function periodStart(kind) {
   return 0;
 }
 
+// ---- 並び替え ----
+// 並替selectと列headerのclickは同じsortStateを書き換える。どちらかを別に持つと、
+// 片方が実際の並びと違う指定を出したまま残る。
+// order は昇降の呼び名(文言を他の選択肢と揃えるため)。
+const SESSION_SORT_COLUMNS = {
+  id: { label: "#", order: "time", dir: "desc", get: (s) => s.id },
+  unique_id: { label: "配信者", order: "text", dir: "asc", get: (s) => s.unique_id },
+  started_at: { label: "開始", order: "time", dir: "desc", get: (s) => s.started_at },
+  // 収集中Sessionは終了時刻が無いので、表示(「収集中」)と同じく現時点までの経過で並べる。
+  duration: {
+    label: "時間",
+    order: "length",
+    dir: "desc",
+    get: (s) => (s.ended_at || Date.now() / 1000) - s.started_at,
+  },
+  gifts: { label: "Gift", dir: "desc", get: (s) => sessionStat(s, "gifts") },
+  diamonds: { label: "コイン", dir: "desc", get: (s) => sessionStat(s, "diamonds") },
+  comments: { label: "Comment", dir: "desc", get: (s) => sessionStat(s, "comments") },
+  likes_total: { label: "Like", dir: "desc", get: (s) => sessionStat(s, "likes_total") },
+  follows: { label: "Follow", dir: "desc", get: (s) => sessionStat(s, "follows") },
+  shares: { label: "Share", dir: "desc", get: (s) => sessionStat(s, "shares") },
+  joins: { label: "入室", dir: "desc", get: (s) => sessionStat(s, "joins") },
+  battles: { label: "Battle", dir: "desc", get: (s) => sessionStat(s, "battles") },
+  battle_points: { label: "B.Score", dir: "desc", get: (s) => sessionStat(s, "battle_points") },
+  viewers_peak: { label: "最大同接", dir: "desc", get: (s) => sessionStat(s, "viewers_peak") },
+};
+
+// 並替selectの選択肢が指すsortState。selectのvalueはこのtableの見出しと1対1。
+const SESSION_SORT_PRESETS = {
+  started_desc: { key: "started_at", dir: "desc" },
+  started_asc: { key: "started_at", dir: "asc" },
+  gifts: { key: "gifts", dir: "desc" },
+  diamonds: { key: "diamonds", dir: "desc" },
+  unique_id: { key: "unique_id", dir: "asc" },
+};
+// 列headerからの並びがselectのどの選択肢にも当たらないとき、その並びを表示する行き先。
+const SORT_COLUMN_OPTION = "column";
+
+let sortState = { ...SESSION_SORT_PRESETS.started_desc };
+
+function sessionStat(session, key) {
+  return (session.stats && session.stats[key]) || 0;
+}
+
+function sortOptionLabel(key, dir) {
+  const column = SESSION_SORT_COLUMNS[key];
+  if (column.order === "time") return `${column.label}(${dir === "desc" ? "新しい順" : "古い順"})`;
+  if (column.order === "text") return `${column.label}(${dir === "asc" ? "昇順" : "降順"})`;
+  if (column.order === "length") return `${column.label} ${dir === "desc" ? "長い順" : "短い順"}`;
+  return `${column.label} ${dir === "desc" ? "多い順" : "少ない順"}`;
+}
+
 function filteredSessions() {
   const q = flt.search.value.trim().toLowerCase();
   const after = periodStart(flt.period.value);
@@ -130,22 +182,76 @@ function filteredSessions() {
     if (statusFilter === "ended" && (isActive || restricted)) return false;
     if (statusFilter === "restricted" && !restricted) return false;
     if (q) {
-      const hay = `${s.unique_id} ${s.note || ""}`.toLowerCase();
+      // 一覧に出ているのは表示名(owner_nickname)なので、それで引けなければ
+      // 「見えているのに絞り込めない」ことになる。@idとMemoに加えて検索対象にする。
+      const hay = `${s.unique_id} ${s.owner_nickname || ""} ${s.note || ""}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
   });
-  const sortKey = flt.sort.value;
-  const stat = (s, k) => (s.stats && s.stats[k]) || 0;
-  const sorters = {
-    started_desc: (a, b) => b.started_at - a.started_at,
-    started_asc: (a, b) => a.started_at - b.started_at,
-    gifts: (a, b) => stat(b, "gifts") - stat(a, "gifts"),
-    diamonds: (a, b) => stat(b, "diamonds") - stat(a, "diamonds"),
-    unique_id: (a, b) => a.unique_id.localeCompare(b.unique_id) || b.started_at - a.started_at,
-  };
-  rows.sort(sorters[sortKey] || sorters.started_desc);
+  const column = SESSION_SORT_COLUMNS[sortState.key] || SESSION_SORT_COLUMNS.started_at;
+  const sign = sortState.dir === "asc" ? 1 : -1;
+  const compare = column.order === "text"
+    ? (a, b) => sign * String(column.get(a)).localeCompare(String(column.get(b)))
+    : (a, b) => sign * (column.get(a) - column.get(b));
+  // 同値の並びが描画ごとに揺れないよう、最後は必ず開始時刻とidで決める。
+  rows.sort((a, b) => compare(a, b) || b.started_at - a.started_at || b.id - a.id);
   return rows;
+}
+
+function syncSortSelect() {
+  const preset = Object.keys(SESSION_SORT_PRESETS).find(
+    (name) => SESSION_SORT_PRESETS[name].key === sortState.key
+      && SESSION_SORT_PRESETS[name].dir === sortState.dir,
+  );
+  let extra = flt.sort.querySelector(`option[value="${SORT_COLUMN_OPTION}"]`);
+  if (preset) {
+    if (extra) extra.remove();
+    flt.sort.value = preset;
+    return;
+  }
+  if (!extra) {
+    extra = document.createElement("option");
+    extra.value = SORT_COLUMN_OPTION;
+    flt.sort.appendChild(extra);
+  }
+  extra.textContent = sortOptionLabel(sortState.key, sortState.dir);
+  flt.sort.value = SORT_COLUMN_OPTION;
+}
+
+function syncSortHeaders() {
+  document.querySelectorAll("#session-table th[data-sort]").forEach((th) => {
+    const active = th.dataset.sort === sortState.key;
+    th.classList.toggle("sorted", active);
+    th.classList.toggle("sorted-asc", active && sortState.dir === "asc");
+    th.setAttribute(
+      "aria-sort",
+      active ? (sortState.dir === "asc" ? "ascending" : "descending") : "none",
+    );
+  });
+}
+
+function applySort(key) {
+  const column = SESSION_SORT_COLUMNS[key];
+  if (!column) return;
+  sortState = sortState.key === key
+    ? { key, dir: sortState.dir === "desc" ? "asc" : "desc" }
+    : { key, dir: column.dir };
+  syncSortSelect();
+  renderTable();
+}
+
+function bindSortHeaders() {
+  document.querySelectorAll("#session-table th[data-sort]").forEach((th) => {
+    th.tabIndex = 0;
+    th.title = "この列で並べ替えます（もう一度押すと順序が入れ替わります）。";
+    th.addEventListener("click", () => applySort(th.dataset.sort));
+    th.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      applySort(th.dataset.sort);
+    });
+  });
 }
 
 function statusCell(session) {
@@ -274,13 +380,17 @@ function actionCells(session) {
       : "このSessionの記録(Comment/Gift/分析)と録画をまとめて削除します。取り消せません。";
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
-    if (!window.confirm(`Session #${session.id} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`)) return;
+    const ok = await confirmDialog(
+      `Session #${session.id} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`,
+      { title: "Sessionの削除", confirmLabel: "削除する" },
+    );
+    if (!ok) return;
     try {
       await apiSend("DELETE", `/api/sessions/${session.id}`);
       if (currentSessionId === session.id) closeDetail();
       await Promise.all([loadSessions(), loadKpi()]);
     } catch (err) {
-      window.alert(err.message);
+      showError(err);
     }
   });
   cells.push(cell(del));
@@ -300,17 +410,17 @@ async function transcribeSession(session, btn) {
     const recs = (data.recordings || []).filter(
       (r) => r.status === "completed" || r.status === "interrupted");
     if (!recs.length) {
-      window.alert("文字起こしできる録画がありません。");
+      showToast("文字起こしできる録画がありません。");
       return;
     }
     if (recs.length === 1) {
       await transcribeOrShow(recs[0], btn);
       return;
     }
-    window.alert("このSessionには複数の録画があります。詳細から録画ごとに文字起こししてください。");
+    showToast("このSessionには複数の録画があります。詳細から録画ごとに文字起こししてください。");
     showDetail(session.id);
   } catch (err) {
-    window.alert(err.message);
+    showError(err);
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -322,6 +432,7 @@ async function transcribeSession(session, btn) {
 function renderTable() {
   const tbody = document.getElementById("session-rows");
   const rows = filteredSessions();
+  syncSortHeaders();
   tbody.innerHTML = "";
   // 操作Buttonは1列ずつ独立tdなので、header操作thをその列数だけ横結合して整合させる。
   const opTh = document.getElementById("op-th");
@@ -395,7 +506,7 @@ async function showDetail(sessionId) {
   try {
     data = await apiSend("GET", `/api/sessions/${sessionId}`);
   } catch (err) {
-    window.alert(`Session詳細を取得できませんでした。\n${errorDetailText(err)}`);
+    showToast(`Session詳細を取得できませんでした。\n${errorDetailText(err)}`, "error");
     return;
   }
   const session = data.session;
@@ -533,15 +644,6 @@ function notifyOutputDone(name) {
   }
 }
 
-function makeOutputProgress() {
-  const prog = document.createElement("span");
-  prog.className = "dl-progress";
-  prog.innerHTML = '<span class="spinner dl-spinner"><span class="spinner-core"></span></span>'
-    + '<span class="dl-bar"><span class="dl-bar-fill"></span></span>'
-    + '<span class="dl-pct">準備中…</span>';
-  return prog;
-}
-
 // jobをqueueへ投入し、完了(または失敗)まで待つ。応答はjob_idだけで、進捗も結果も
 // WSのjob_updateで届くため、待受をjob_idで登録してからPromiseを返す。
 async function startRecordingJob(rec, prog, path, failMessage) {
@@ -550,7 +652,7 @@ async function startRecordingJob(rec, prog, path, failMessage) {
   if (!res.ok) {
     throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
   }
-  renderOutputProgress(prog, "待機中 ", 0, 100);
+  setJobProgress(prog, { state: "pending" });
   return new Promise((resolve, reject) => {
     jobWatchers.set(payload.job_id, { prog, resolve, reject, failMessage });
   });
@@ -560,12 +662,8 @@ async function startRecordingJob(rec, prog, path, failMessage) {
 function applyRecordingJob(job) {
   const watcher = jobWatchers.get(job.job_id);
   if (!watcher) return false;
-  if (job.state === "pending") {
-    renderOutputProgress(watcher.prog, "待機中 ", 0, 100);
-    return true;
-  }
-  if (job.state === "running") {
-    renderOutputProgress(watcher.prog, `${job.stage || "準備中"} `, job.pct, 100);
+  if (job.state === "pending" || job.state === "running") {
+    setJobProgress(watcher.prog, job);
     return true;
   }
   jobWatchers.delete(job.job_id);
@@ -583,41 +681,22 @@ async function outputRecording(rec, prog) {
   return result.filename_b ? `${name}（比較: ${result.filename_b}）` : name;
 }
 
-function renderOutputProgress(prog, label, received, total) {
-  const fill = prog.querySelector(".dl-bar-fill");
-  const pct = prog.querySelector(".dl-pct");
-  if (total > 0) {
-    const p = Math.min(100, Math.round((received / total) * 100));
-    fill.style.inlineSize = `${p}%`;
-    pct.textContent = `${label}${p}%`;
-  } else {
-    pct.textContent = `${label}${(received / 1048576).toFixed(1)} MB`;
-  }
-}
-
-function finishOutputProgress(prog) {
-  prog.querySelector(".dl-spinner").remove();
-  prog.querySelector(".dl-bar-fill").style.inlineSize = "100%";
-  prog.querySelector(".dl-pct").textContent = "完了 ✓";
-  prog.classList.add("done");
-}
-
 // 録画単体の出力(録画一覧の操作)。
 async function downloadRecording(rec, btn) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeOutputProgress();
+  const prog = makeProgress();
   btn.replaceWith(prog);
   try {
     const name = await outputRecording(rec, prog);
-    finishOutputProgress(prog);
+    finishProgress(prog);
     notifyOutputDone(name);
     // done badge(出力済)を反映するため詳細を再描画する。
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    window.alert(err.message);
+    showError(err);
   }
 }
 
@@ -626,18 +705,18 @@ async function downloadRecording(rec, btn) {
 // serverからWSで届く reprocess_progress をprogに反映する。
 async function reprocessRecording(rec, btn) {
   ensureNotifyPermission();
-  const prog = makeOutputProgress();
+  const prog = makeProgress();
   btn.replaceWith(prog);
   reprocessProgress.set(rec.id, (pct) =>
-    renderOutputProgress(prog, "再mp4化 ", pct, 100));
+    setProgress(prog, "再mp4化 ", pct));
   try {
     const job = await startRecordingJob(rec, prog, "reprocess", "再mp4化に失敗しました。");
-    finishOutputProgress(prog);
+    finishProgress(prog);
     notifyOutputDone((job.result || {}).filename || rec.filename);
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    window.alert(err.message);
+    showError(err);
   } finally {
     reprocessProgress.delete(rec.id);
   }
@@ -650,7 +729,7 @@ async function startSessionOutput(session, btn, path, activeMap, failMessage) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeOutputProgress();
+  const prog = makeProgress();
   btn.replaceWith(prog);
   // 再描画でprogが行から切り離されても進捗を保持できるよう登録する。
   activeMap.set(session.id, prog);
@@ -664,7 +743,7 @@ async function startSessionOutput(session, btn, path, activeMap, failMessage) {
   } catch (err) {
     activeMap.delete(session.id);
     prog.replaceWith(btn);
-    window.alert(err.message);
+    showError(err);
   }
 }
 
@@ -685,21 +764,21 @@ function applyJob(job) {
     let prog = activeMap.get(job.session_id);
     if (!prog) {
       // このpageがjobを開始していない場合(reload後・別tabからの開始)はここで作る。
-      prog = makeOutputProgress();
+      prog = makeProgress();
       activeMap.set(job.session_id, prog);
       renderTable();
     }
-    renderOutputProgress(prog, `${job.stage || "準備中"} `, job.pct, 100);
+    setJobProgress(prog, job);
     return;
   }
   const prog = activeMap.get(job.session_id);
   if (!prog) return;
   activeMap.delete(job.session_id);
   if (job.state === "completed") {
-    finishOutputProgress(prog);
+    finishProgress(prog);
     notifyOutputDone(job.message || job.title);
   } else {
-    window.alert(job.message || "出力に失敗しました。");
+    showToast(job.message || "出力に失敗しました。", "error");
   }
   // done badge(出力済)をbackendの最新状態で反映する。
   loadSessions();
@@ -717,17 +796,17 @@ async function upDownloadRecording(rec, btn) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeOutputProgress();
+  const prog = makeProgress();
   btn.replaceWith(prog);
   try {
     const name = await upOutputRecording(rec, prog);
-    finishOutputProgress(prog);
+    finishProgress(prog);
     notifyOutputDone(name);
     // done badge(Up出力済)を反映するため詳細を再描画する。
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    window.alert(err.message);
+    showError(err);
   }
 }
 
@@ -791,13 +870,17 @@ function recordingActions(rec) {
       label: "派生物削除",
       title: "この録画の焼き込み(.overlay.mp4)・AI高画質化(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。",
       onSelect: async () => {
-        if (!window.confirm(`録画 #${rec.id} の派生物（焼き込み・Up出力）を削除しますか？元の録画は残ります。`)) return;
+        const ok = await confirmDialog(
+          `録画 #${rec.id} の派生物（焼き込み・Up出力）を削除しますか？元の録画は残ります。`,
+          { title: "派生物の削除", confirmLabel: "削除する" },
+        );
+        if (!ok) return;
         try {
           const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
-          window.alert(`${(res.freed_bytes / 1073741824).toFixed(1)} GB を削除しました。`);
+          showToast(`${(res.freed_bytes / 1073741824).toFixed(1)} GB を削除しました。`);
           if (currentSessionId !== null) showDetail(currentSessionId);
         } catch (err) {
-          window.alert(err.message);
+          showError(err);
         }
       },
     });
@@ -810,7 +893,7 @@ function recordingActions(rec) {
           await apiSend("POST", `/api/recordings/${rec.id}/protect`, { protected: !rec.protected });
           if (currentSessionId !== null) showDetail(currentSessionId);
         } catch (err) {
-          window.alert(err.message);
+          showError(err);
         }
       },
     });
@@ -821,12 +904,16 @@ function recordingActions(rec) {
     danger: true,
     disabled: rec.status === "recording",
     onSelect: async () => {
-      if (!window.confirm(`録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`)) return;
+      const ok = await confirmDialog(
+        `録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`,
+        { title: "録画の削除", confirmLabel: "削除する" },
+      );
+      if (!ok) return;
       try {
         await apiSend("DELETE", `/api/recordings/${rec.id}`);
         if (currentSessionId !== null) showDetail(currentSessionId);
       } catch (err) {
-        window.alert(err.message);
+        showError(err);
       }
     },
   });
@@ -1100,7 +1187,7 @@ async function transcribeOrShow(rec, btn) {
     }
     openTranscript(rec, payload);
   } catch (err) {
-    window.alert(err.message);
+    showError(err);
   } finally {
     transcribeProgress.delete(rec.id);
     btn.disabled = false;
@@ -1314,7 +1401,11 @@ async function runUserDelete() {
     .filter((s) => userdelSelected.has(s.unique_id))
     .map((s) => `@${s.unique_id}`)
     .join("\n");
-  if (!window.confirm(`次の${ids.length}名の履歴をすべて削除しますか？この操作は取り消せません。\n\n${names}`)) return;
+  const ok = await confirmDialog(
+    `次の${ids.length}名の履歴をすべて削除しますか？この操作は取り消せません。\n\n${names}`,
+    { title: "ユーザー削除", confirmLabel: "削除する" },
+  );
+  if (!ok) return;
   const run = document.getElementById("userdel-run");
   const status = document.getElementById("userdel-status");
   run.disabled = true;
@@ -1331,6 +1422,91 @@ async function runUserDelete() {
     run.disabled = false;
   }
 }
+
+// ---- Session横断ランキング ----
+// /api/rankings は4指標分をまとめて返すので、開いたときに1回だけ取得し、指標の切替は
+// 手元のpayloadで描き分ける。収集中Sessionの値はserver側でlive statsに差し替え済み。
+const RANK_METRICS = {
+  gifts: "コイン",
+  comments: "Comment",
+  likes: "Like",
+  battles: "B.Score",
+};
+let rankings = null;
+let rankState = "loading";
+let rankError = null;
+
+function rankMetric() {
+  return document.getElementById("rank-metric").value;
+}
+
+function renderRankings() {
+  const metric = rankMetric();
+  document.getElementById("rank-value-th").textContent = RANK_METRICS[metric];
+  const rows = (rankings && rankings[metric]) || [];
+  const emptyEl = document.getElementById("rank-empty");
+  renderTableRows(
+    "rank-rows",
+    "rank-empty",
+    rows,
+    (entry, rank) => {
+      // 表示名とavatarはranking APIに無い。既に読み込んだSession一覧に同じSessionが
+      // あればそこから補い、無ければ@idだけで出す(名前は作らない)。
+      const known = allSessions.find((s) => s.id === entry.session_id);
+      return [
+        String(rank),
+        userCell({
+          unique_id: entry.unique_id,
+          nickname: (known && known.owner_nickname) || entry.unique_id,
+          avatar: (known && known.owner_avatar) || "",
+        }),
+        fmtDateTime(entry.started_at),
+        entry.ended_at ? fmtDuration(entry.ended_at - entry.started_at) : "収集中",
+        fmtNum(entry.value),
+      ];
+    },
+    [0, 4],
+    (tr, entry) => {
+      tr.classList.add("rank-row");
+      tr.title = `Session #${entry.session_id} の詳細を開きます。`;
+      tr.addEventListener("click", () => {
+        closeRankings();
+        showDetail(entry.session_id);
+      });
+    },
+  );
+  if (rows.length > 0) setListState(emptyEl, "ok");
+  else if (rankState === "failed") setListState(emptyEl, "failed", rankError);
+  else if (rankState === "loading") setListState(emptyEl, "loading");
+  else setListState(emptyEl, "empty");
+}
+
+async function openRankings() {
+  document.getElementById("rank-modal").classList.remove("hidden");
+  rankState = "loading";
+  rankError = null;
+  rankings = null;
+  renderRankings();
+  try {
+    rankings = await apiSend("GET", "/api/rankings");
+    rankState = "loaded";
+  } catch (err) {
+    rankState = "failed";
+    rankError = err;
+  }
+  renderRankings();
+}
+
+function closeRankings() {
+  document.getElementById("rank-modal").classList.add("hidden");
+}
+
+document.getElementById("open-rankings").addEventListener("click", openRankings);
+document.getElementById("rank-close").addEventListener("click", closeRankings);
+document.getElementById("rank-modal").addEventListener("click", (e) => {
+  if (e.target.id === "rank-modal") closeRankings();
+});
+document.getElementById("rank-metric").addEventListener("input", renderRankings);
 
 document.getElementById("bulk-del-users").addEventListener("click", openUserDelete);
 document.getElementById("userdel-close").addEventListener("click", closeUserDelete);
@@ -1380,9 +1556,16 @@ flt.search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(renderTable, 200);
 });
-[flt.period, flt.status, flt.sort].forEach((el) =>
+[flt.period, flt.status].forEach((el) =>
   el.addEventListener("input", renderTable),
 );
+flt.sort.addEventListener("input", () => {
+  const preset = SESSION_SORT_PRESETS[flt.sort.value];
+  // 列headerが足した選択肢を選び直しただけなら、今の並びがそのまま正。
+  if (preset) sortState = { ...preset };
+  renderTable();
+});
+bindSortHeaders();
 
 function handleMessage(msg) {
   // output_progress / upscale_progress はjob_updateのstageと同じ内容をrecording単位で

@@ -229,11 +229,11 @@
 
       <div class="result-block">
         <h3 class="result-subtitle">■ 切り出しリスト</h3>
-        <span class="result-sub-note">mp4を書き出さずEDL/CSVでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDLのtimecodeは30fps固定換算のため概位置です（録画はVFR）。秒の正確さが要る場合はCSVを使ってください。</span>
+        <span class="result-sub-note">行をクリックするとその録画をIN/OUTが入った状態で開きます。mp4を書き出さずEDL/CSVでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDLのtimecodeは30fps固定換算のため概位置です（録画はVFR）。秒の正確さが要る場合はCSVを使ってください。</span>
         <div class="table-wrap">
           <table class="result-table">
             <thead>
-              <tr><th>配信者</th><th>file</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>ラベル</th><th></th></tr>
+              <tr><th>配信者</th><th>配信日</th><th>file</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>ラベル</th><th></th></tr>
             </thead>
             <tbody id="cut-rows"></tbody>
           </table>
@@ -276,6 +276,7 @@
         <button id="job-enqueue" class="btn btn-primary btn-small" type="button">この配信者をまとめて文字起こし</button>
         <button id="job-cancel" class="btn btn-danger btn-small" type="button">待機中をすべて取消</button>
         <button id="semantic-build" class="btn btn-small" type="button">意味検索indexを更新</button>
+        <span id="semantic-note" class="vd-summary"></span>
         <span class="sp"></span>
         <span id="job-summary" class="vd-summary"></span>
       </div>

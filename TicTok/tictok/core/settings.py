@@ -155,6 +155,16 @@ SETTING_DEFS = {
         "label": "画面再接続時に再送するEvent履歴件数",
         "note": "次のSession開始から適用されます。",
     },
+    "contributor_sample_seconds": {
+        "category": "collect",
+        "env": "TICTOK_CONTRIBUTOR_SAMPLE_SECONDS",
+        "default": 30,
+        "type": int,
+        "min": 5,
+        "max": 600,
+        "label": "貢献者Rankingの記録間隔（秒）",
+        "note": "TikTokが配信中に配信するRoom上位貢献者のRanking（TikTok側が算出した累積スコア）を、この間隔で記録します。内容が前回と同じ場合は記録しません。自前のGift集計と突き合わせて取りこぼし量を測るためのDataです。短いほど細かく記録しますがDataが増えます。",
+    },
     "auto_record": {
         "category": "record",
         "env": "TICTOK_AUTO_RECORD",
@@ -178,6 +188,26 @@ SETTING_DEFS = {
         "max": 60,
         "label": "Battleスコア推移の記録間隔（秒）",
         "note": "Battle中の自陣/敵陣スコアの時系列をこの間隔で記録し、各画面のBattleカードにスコア推移として表示します。短いほど細かく記録しますがDataが増えます。",
+    },
+    "battle_score_endgame_seconds": {
+        "category": "record",
+        "env": "TICTOK_BATTLE_SCORE_ENDGAME_SECONDS",
+        "default": 20,
+        "type": int,
+        "min": 0,
+        "max": 300,
+        "label": "Battle終盤とみなす残り時間（秒）",
+        "note": "Battle終了時刻までの残りがこの秒数を切ったあいだ、スコア推移を「Battle終盤のスコア記録間隔」で細かく記録します。決着はこの区間で付くため、通常の間隔のままだと逆転の瞬間が1点に潰れます。0にすると終盤の細分化を行いません（Battleの終了時刻が届かない場合も細分化しません）。",
+    },
+    "battle_score_endgame_sample_seconds": {
+        "category": "record",
+        "env": "TICTOK_BATTLE_SCORE_ENDGAME_SAMPLE_SECONDS",
+        "default": 0.5,
+        "type": float,
+        "min": 0.1,
+        "max": 10.0,
+        "label": "Battle終盤のスコア記録間隔（秒）",
+        "note": "「Battle終盤とみなす残り時間」の区間で使う記録間隔です。通常の記録間隔より短い値にしてください。",
     },
     "monitor_opponent_rooms": {
         "category": "record",
@@ -333,6 +363,21 @@ SETTING_DEFS = {
         "options": [
             {"value": 0, "label": "しない"},
             {"value": 1, "label": "する"},
+        ],
+    },
+    "video_overlay_min_height": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_MIN_HEIGHT",
+        "default": 2560,
+        "type": int,
+        "min": 720,
+        "max": 2560,
+        "label": "動画化: 焼き込みの最低出力高さ(px)",
+        "note": "焼き込む文字・絵文字・アイコンは出力解像度で描画されるため、sourceがこの高さより低い場合は先に拡大(lanczos)してから焼き込みます。TikTokのsourceは720x1280が上限なので、既定の2560では約2倍の大きさで描画され、アイコンの円は46px→94pxになります(実ユーザーアイコンはAI超解像で288px以上まで高精細化済みのため、拡大しても実detailが増えます)。映像本体はlanczos拡大なので鮮明にはならず、file sizeは1280比で約2.2倍・焼き込み時間は約1.7倍になります。保存容量を優先する場合は1280(拡大なし)にしてください。",
+        "options": [
+            {"value": 1280, "label": "1280 (拡大しない)"},
+            {"value": 1920, "label": "1920 (1.5倍)"},
+            {"value": 2560, "label": "2560 (2倍)"},
         ],
     },
     "video_overlay_font_size": {
@@ -523,6 +568,20 @@ SETTING_DEFS = {
         "label": "切り出し候補: 先行秒数(lead)",
         "note": "候補の開始をこの秒数だけ前へずらします。ギフトもコメントも「出来事への反応」なので、反応が始まった時刻から切ると原因の場面が入りません。Commentと映像の時刻ズレの補正ではありません(そちらは変換側で解決済みです)。",
     },
+    "clip_candidate_audio": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_AUDIO",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し候補: 音声の盛り上がりも見る",
+        "note": "ギフトとコメントに加えて、音量の急上昇も候補の判定に使います。歓声や笑い声はギフトにもコメントにも現れないことがあるため、それらを拾えます。各候補には無音の割合も付きます。初回は録画の音声を最後まで読むため長尺で90秒級かかります(波形表示と同じ処理で、一度作れば以後は再利用します)。",
+        "options": [
+            {"value": 0, "label": "しない (ギフトとコメントのみ)"},
+            {"value": 1, "label": "する (音量の急上昇も候補にする)"},
+        ],
+    },
     "clip_candidate_limit": {
         "category": "clip",
         "env": "TICTOK_CLIP_CANDIDATE_LIMIT",
@@ -675,11 +734,30 @@ class Settings:
         self._load()
 
     def _env_default(self, key: str):
+        """Resolve the default for one key, honouring an environment override.
+
+        An env value becomes both the running value and the value the UI offers as
+        「既定値へ戻す」, so it has to clear the same bar as anything typed into the form.
+        Without that, an out-of-range env value is accepted at start and then rejected
+        with a 422 the moment the operator saves it back. No fallback: an invalid value
+        is reported and raised, not quietly replaced by the built-in default.
+        """
         definition = SETTING_DEFS[key]
         raw = os.environ.get(definition["env"])
         if raw is None:
             return definition["default"]
-        return definition["type"](raw)
+        try:
+            if definition["type"] is str:
+                return self._check_path_shape(definition, raw)
+            return self._validate_number(definition, raw)
+        except ValueError as exc:
+            logger.error(
+                "invalid setting from environment: %s=%s (%s)",
+                definition["env"], raw, exc,
+                extra={"event": "process.settings_env_invalid",
+                       "ctx": {"key": key, "env": definition["env"], "reason": str(exc)}},
+            )
+            raise
 
     def _load(self) -> None:
         """Resolve every setting from DB > env > built-in default.
@@ -693,11 +771,14 @@ class Settings:
         stored = self._storage.get_settings()
         sources = {"from_db": 0, "from_env": 0, "from_default": 0}
         for key, definition in SETTING_DEFS.items():
+            # DBが勝つ場合もenv既定値は解決しておく。describe()が後から同じ解決を行うため、
+            # 不正なenvはここで起動を止め、設定画面が開けなくなる形で露見させない。
+            env_default = self._env_default(key)
             if key in stored:
                 self._values[key] = definition["type"](stored[key])
                 sources["from_db"] += 1
             else:
-                self._values[key] = self._env_default(key)
+                self._values[key] = env_default
                 if os.environ.get(definition["env"]) is None:
                     sources["from_default"] += 1
                 else:
@@ -749,20 +830,30 @@ class Settings:
             described.append(entry)
         return described
 
-    def _validate_path(self, definition: dict, value) -> str:
-        """Validate a directory-path setting: it must be a non-empty absolute path that
-        can be created and written to. Rejects invalid input (no silent fallback) so the
-        operator gets immediate feedback rather than a broken record dir at next start."""
+    def _check_path_shape(self, definition: dict, value) -> str:
+        """Shape-only check for a directory-path setting: non-empty (unless allow_empty)
+        and absolute. Kept free of side effects so it can also gate env defaults, which
+        are resolved on every describe() — mkdir/W_OK there would touch the filesystem
+        on every settings read."""
         text = str(value).strip().strip('"')
         if not text:
             if definition.get("allow_empty"):
                 return ""
             raise ValueError(f"{definition['label']} を指定してください。")
-        path = Path(text)
-        if not path.is_absolute():
+        if not Path(text).is_absolute():
             raise ValueError(
                 f"{definition['label']} は絶対パスで指定してください（例: K:\\80_Tiktok）。"
             )
+        return text
+
+    def _validate_path(self, definition: dict, value) -> str:
+        """Validate a directory-path setting: it must be a non-empty absolute path that
+        can be created and written to. Rejects invalid input (no silent fallback) so the
+        operator gets immediate feedback rather than a broken record dir at next start."""
+        text = self._check_path_shape(definition, value)
+        if not text:
+            return ""
+        path = Path(text)
         try:
             path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -770,6 +861,26 @@ class Settings:
         if not os.access(path, os.W_OK):
             raise ValueError(f"{definition['label']} に書き込みできません: {path}")
         return str(path)
+
+    def _validate_number(self, definition: dict, value):
+        """Coerce and range-check one numeric setting. Shared by update() and the env
+        default resolution so both gates accept exactly the same set of values."""
+        try:
+            if (
+                definition["type"] is int
+                and isinstance(value, float)
+                and not value.is_integer()
+            ):
+                # int(10.9)=10 と黙って切り捨てず、不正入力として拒否する。
+                raise ValueError(value)
+            typed = definition["type"](value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{definition['label']} の値が不正です: {value}")
+        if not (definition["min"] <= typed <= definition["max"]):
+            raise ValueError(
+                f"{definition['label']} は {definition['min']}〜{definition['max']} の範囲で指定してください。"
+            )
+        return typed
 
     def update(self, values: dict) -> dict:
         """Validate and persist a settings change.
@@ -790,22 +901,7 @@ class Settings:
             if definition["type"] is str:
                 validated[key] = self._validate_path(definition, value)
                 continue
-            try:
-                if (
-                    definition["type"] is int
-                    and isinstance(value, float)
-                    and not value.is_integer()
-                ):
-                    # int(10.9)=10 と黙って切り捨てず、不正入力として拒否する。
-                    raise ValueError(value)
-                typed = definition["type"](value)
-            except (TypeError, ValueError):
-                raise ValueError(f"{definition['label']} の値が不正です: {value}")
-            if not (definition["min"] <= typed <= definition["max"]):
-                raise ValueError(
-                    f"{definition['label']} は {definition['min']}〜{definition['max']} の範囲で指定してください。"
-                )
-            validated[key] = typed
+            validated[key] = self._validate_number(definition, value)
         if validated:
             changes = {
                 key: [self._values.get(key), value]

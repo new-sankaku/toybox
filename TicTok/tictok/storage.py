@@ -5,7 +5,6 @@ import logging
 import os
 import shutil
 import sqlite3
-import statistics
 import threading
 import time
 from pathlib import Path
@@ -24,7 +23,7 @@ from tictok.core.config import (
     get_storage_backlog_warn_rows,
 )
 from tictok.core import spike
-from tictok.core.battle import annotate_result
+from tictok.core.battle import annotate_result, gift_window_end, gift_window_fallback_duration
 from tictok.core.logctx import current_context
 from tictok.core.logging_setup import progress_interval_seconds
 
@@ -42,6 +41,9 @@ _EVENTS_COLUMNS = (
     # 両者を同じNULLへ潰すと被覆率が出せなくなる。
     "enter_source", "enter_type", "enter_reason", "follow_status", "follower_count",
     "is_subscriber", "is_moderator", "is_gift_giver",
+    # Share の行き先 / Comment の言語判定。上と同じ規約で、NULL=計装前の未計測、
+    # 'unknown'=届いたが空。share_targetは意味が未確定なので生値をそのまま入れる。
+    "share_type", "share_target", "content_language", "comment_tag",
 )
 _EVENTS_INSERT_SQL = (
     f"INSERT INTO events ({', '.join(_EVENTS_COLUMNS)})"
@@ -61,11 +63,6 @@ _USER_UPSERT_TTL_SECONDS = 60.0
 # 1戦のBattle貢献者を「主力貢献者」とみなすcoin(diamond)下限。この閾値以上を投げた
 # 貢献者を1戦ごとに数え、過去全Battleの平均人数を出す。
 _BATTLE_KEY_CONTRIB_DIAMONDS = 100
-# end_time_msもdurationも次Battle開始も無い「終了済み・最終」Battleでgift窓を閉じるための
-# 既定Battle長(秒)。同一sessionの実観測duration中央値が取れればそれを優先し、無い場合のみ
-# この値を使う。窓を無制限(配信終了まで)にするとBattle後の通常Giftを誤帰属するため。
-# TikTok PKの標準尺(約5分)に基づく。
-_BATTLE_FALLBACK_DURATION_SECONDS = 300.0
 
 # ops_events.severity の値域。DB側のCHECK制約は付けない: ops_eventsは障害時に記録を残す
 # ための表で、制約違反で書き込みが失敗して本流を巻き込むのが最悪の失敗様式だからである。
@@ -107,6 +104,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_unique_id ON sessions(unique_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+-- 配信者1人の履歴は「unique_idで絞って新しい順」で引く。単独indexが2本あっても
+-- SQLiteは片方しか使えず、絞り込み後に必ずsortが入る。複合にしてsortごと消す。
+CREATE INDEX IF NOT EXISTS idx_sessions_unique_started ON sessions(unique_id, started_at);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -201,6 +201,11 @@ CREATE TABLE IF NOT EXISTS recordings (
     protected INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_session ON recordings(session_id);
+-- 録画一覧は常に新しい順の全件走査、配信者動画画面はunique_id絞り+新しい順、
+-- 起動時の中断録画回収はstatus絞り。session_id単独indexはどれにも効かない。
+CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_uid_started ON recordings(unique_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_status ON recordings(status);
 CREATE TABLE IF NOT EXISTS monitored_targets (
     unique_id TEXT PRIMARY KEY,
     added_at REAL NOT NULL,
@@ -318,6 +323,36 @@ CREATE TABLE IF NOT EXISTS viewer_samples (
     anonymous INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_viewer_samples_session ON viewer_samples(session_id);
+-- RoomUserSeqが毎回運んでくるTikTok公式の累積貢献ranking(上位N人)の時系列。
+-- scoreはTikTok側が算出した累積値で、こちらのgift eventの積み上げとは独立の系列である。
+-- 両者を突き合わせると「こちらが取りこぼしたgiftの量」が実測できる(自前集計の検算)ため、
+-- 集計後の値ではなく届いたsnapshotのまま残す。scoreの単位はTikTokが公開していないので
+-- coin/diamond等の意味づけをした列名は付けない(意味が確定するまではscoreのまま)。
+-- 1 messageぶんの上位listは同一timeの複数行で表す(rankが1行1人)。
+CREATE TABLE IF NOT EXISTS contributor_samples (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    time REAL NOT NULL,
+    create_time REAL,
+    rank INTEGER,
+    score INTEGER,
+    identity_key TEXT,
+    user_id TEXT,
+    user_unique_id TEXT,
+    user_nickname TEXT,
+    user_avatar TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contributor_samples_session ON contributor_samples(session_id, time);
+CREATE INDEX IF NOT EXISTS idx_contributor_samples_identity ON contributor_samples(session_id, identity_key);
+-- FollowEventが運ぶ配信者のfollower総数の時系列。events.follows(event本数)とは別物で、
+-- unfollowも切断中の増減もこちらには載る。TikTok側の値は結果整合で前後するため
+-- (実観測: 81507の次に81465が届く)、単調化や補間はせず届いた値をそのまま残す。
+CREATE TABLE IF NOT EXISTS follower_samples (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    time REAL NOT NULL,
+    create_time REAL,
+    follower_count INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_follower_samples_session ON follower_samples(session_id, time);
 -- 状態遷移の記録(Layer2)。session_id/recording_idは意図的にFKを張らない: この表は障害と
 -- その後始末を後から再構成するためのもので、参照先sessionが消えていることこそ調べたい状況
 -- である。FKにすると孤児行がFK違反で書けなくなり、記録すべき瞬間に限って記録が残らない。
@@ -672,7 +707,15 @@ class Storage:
 
         ページングはkeyset(before_ts + before_id)を既定にする。この表は末尾に行が増え続けるので、
         OFFSETだと読み込み中に新しい行が入るたび境界の行が重複・欠落する。offsetも受けるが、
-        keysetを指定したときはそちらを優先する。"""
+        keysetを指定したときはそちらを優先する。
+
+        limitはNoneのときだけ設定値の既定を使う。0以下は拒否する: SQLiteはLIMIT -1を
+        「無制限」と解釈するため、素通しすると1requestでops_events全件を読み込んでしまう。
+        全件取得はこの一覧の契約に無い。"""
+        if limit is not None:
+            limit = int(limit)
+            if limit <= 0:
+                raise ValueError(f"limitは1以上を指定してください: {limit}")
         clauses, params = self._ops_events_filters(
             severity=severity, kind=kind, kind_prefix=kind_prefix, unique_id=unique_id,
             session_id=session_id, job_id=job_id, since=since, until=until,
@@ -683,7 +726,7 @@ class Storage:
             clauses.append("(o.ts < ? OR (o.ts = ? AND o.id < ?))")
             params.extend([before_ts, before_ts, before_id])
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(int(limit) if limit else get_ops_events_query_limit())
+        params.append(limit if limit is not None else get_ops_events_query_limit())
         tail = " LIMIT ?"
         if not keyset and offset:
             tail += " OFFSET ?"
@@ -1419,6 +1462,14 @@ class Storage:
             ("is_subscriber", "INTEGER"),
             ("is_moderator", "INTEGER"),
             ("is_gift_giver", "INTEGER"),
+            # ShareEvent.share_type / share_target。生値のTEXT。share_targetは実配信で
+            # '-1' と '112' の2値を観測しているが、何を指すかは未確定なので解釈を付けない。
+            ("share_type", "TEXT"),
+            ("share_target", "TEXT"),
+            # CommentEvent.content_language(TikTok側の言語判定) / comment_tag(enum名のJSON list)。
+            # どちらも後から追加されたfieldで、古い収集分では届かない。
+            ("content_language", "TEXT"),
+            ("comment_tag", "TEXT"),
         ):
             if name not in columns:
                 # backfillはしない。既存行は「計装前で未計測」であって「不明と観測した」
@@ -1561,9 +1612,12 @@ class Storage:
         keyが指定された場合はそれを使う(逆引き補完済みeventのidentity_keyを尊重するため)。
         use_cache時は属性が変わらない限り一定時間(TTL)はupsertを間引く(liveの高頻度取り込み用。
         last_seenの更新がTTL分遅れる副作用は許容。backfill等の正確性重視の呼び出しは間引かない)。"""
-        key = key or _identity_key(
-            user.get("user_id"), user.get("unique_id"), user.get("nickname")
-        )
+        # keyが明示されたらそのまま使う。空文字(身元不明)を偽値として拾ってnicknameから
+        # 再計算すると、表示用の "(unknown)" で別人が1行へ畳まれる。
+        if key is None:
+            key = _identity_key(
+                user.get("user_id"), user.get("unique_id"), user.get("nickname")
+            )
         if not key:
             return ""
         nickname = (user.get("nickname") or "").strip()
@@ -1884,9 +1938,15 @@ class Storage:
 
     def add_event(self, session_id: int, entry: dict) -> None:
         user = entry.get("user") or {}
-        identity_key = _identity_key(
-            user.get("user_id"), user.get("unique_id"), user.get("nickname")
-        )
+        # collectorが決めたidentity_keyをそのまま使う(空文字=身元不明も尊重する)。ここで
+        # nicknameから再計算すると、表示用の "(unknown)" がkeyになり別人のeventが1
+        # identityへ畳まれる。keyを持たないdict(逆引き補完前のentry等)だけ計算する。
+        if "identity_key" in user:
+            identity_key = user["identity_key"]
+        else:
+            identity_key = _identity_key(
+                user.get("user_id"), user.get("unique_id"), user.get("nickname")
+            )
         params = (
             session_id,
             entry["time"],
@@ -1918,6 +1978,10 @@ class Storage:
             entry.get("is_subscriber"),
             entry.get("is_moderator"),
             entry.get("is_gift_giver"),
+            entry.get("share_type"),
+            entry.get("share_target"),
+            entry.get("content_language"),
+            entry.get("comment_tag"),
         )
         # DB bufferへ積む前に耐久journalへ追記する。プロセスがこの直後に死んでも、eventは
         # diskに残り起動時recoverで復元できる(paramsはeventsの行tupleそのもの)。
@@ -1947,6 +2011,60 @@ class Storage:
             self._viewer_buffer.append(row)
             if len(self._event_buffer) + len(self._viewer_buffer) >= _WRITE_BATCH_SIZE:
                 self._flush_cond.notify()
+
+    def add_contributor_samples(
+        self, session_id: int, ts: float, create_time: Optional[float], rows: list
+    ) -> None:
+        """RoomUserSeqの上位貢献者snapshotを1 messageぶんまとめて保存する。rowsは
+        {rank, score, user{user_id, unique_id, nickname, avatar}} のlist。
+        呼び出し側が間引き済みである前提の低頻度書き込みなので、event/viewerのbatch writerは
+        通さず同期で書く(writerのbuffer/journal形式を増やさない)。
+
+        identity_keyは_identity_key(不変user_id -> unique_id -> nickname)で採るが、users表への
+        upsertは行わない。この経路のuserにはLv/badgeが載っておらず、upsertすると空の属性で
+        既存profileを触りにいく余地を作るだけだからである。"""
+        if not rows:
+            return
+        params = []
+        for row in rows:
+            user = row.get("user") or {}
+            params.append(
+                (
+                    session_id,
+                    ts,
+                    create_time,
+                    row.get("rank"),
+                    row.get("score"),
+                    _identity_key(
+                        user.get("user_id"), user.get("unique_id"), user.get("nickname")
+                    )
+                    or None,
+                    user.get("user_id") or None,
+                    user.get("unique_id") or None,
+                    user.get("nickname") or None,
+                    user.get("avatar") or None,
+                )
+            )
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO contributor_samples (session_id, time, create_time, rank, score,"
+                " identity_key, user_id, user_unique_id, user_nickname, user_avatar)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            )
+            self._conn.commit()
+
+    def add_follower_sample(
+        self, session_id: int, ts: float, create_time: Optional[float], follower_count: int
+    ) -> None:
+        """FollowEventが運ぶ配信者のfollower総数を1点記録する。値が動いた時だけ呼ぶ想定。"""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO follower_samples (session_id, time, create_time, follower_count)"
+                " VALUES (?, ?, ?, ?)",
+                (session_id, ts, create_time, follower_count),
+            )
+            self._conn.commit()
 
     def finalize_session(
         self, session_id: int, status: str, stats: dict, timeline: list, markers: list
@@ -2235,16 +2353,21 @@ class Storage:
 
     def session_comments(self, session_id: int, limit: int) -> list:
         """Most recent comment texts for a session, for AI analysis. The text lives in
-        the `comment` column (add_event stores entry['comment']); fall back to `text`."""
+        the `comment` column (add_event stores entry['comment']); fall back to `text`.
+
+        本文が空の行はSQL側で落とす。Python側で落とすとLIMITが空行込みで先に効き、
+        直近が空commentばかりのsessionで要求件数より少なく(最悪0件)返ってしまう。
+        「空」の定義はNULLと空文字だけ(空白のみの本文は落とさない)。"""
         self.flush()
         with self._lock:
             rows = self._conn.execute(
                 "SELECT comment, text FROM events"
                 " WHERE session_id = ? AND kind = 'comment'"
+                " AND COALESCE(NULLIF(comment, ''), NULLIF(text, '')) IS NOT NULL"
                 " ORDER BY time DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
-        return [(row["comment"] or row["text"] or "") for row in rows if (row["comment"] or row["text"])]
+        return [(row["comment"] or row["text"] or "") for row in rows]
 
     def iter_events(self, session_id: int, start: float | None = None, end: float | None = None) -> list:
         """Events for a session, ordered by arrival time. When start/end (wall-clock
@@ -2368,6 +2491,7 @@ class Storage:
                 " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
                 " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
                 " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar, SUM(e.diamonds) AS diamonds,"
+                " SUM(e.gift_count) AS gifts,"
                 # Lv/badgeはその時点で変動する属性。users表(最新)へfallbackすると過去の値を
                 # 捏造するため、このSessionのevent(point-in-time)のみ。無ければ非表示。
                 " NULLIF(MAX(e.user_fans_level), 0) AS fans_level,"
@@ -2382,12 +2506,16 @@ class Storage:
             ).fetchall()
         return [
             {
+                # identity_key/giftsは配信者profileのBattle gifter集計が使う。Battle card側は
+                # 参照しない(この関数を貢献集計の単一の入口にするために持たせている)。
+                "key": row["key"],
                 "user_id": row["user_id"] or "",
                 "unique_id": row["unique_id"] or "",
                 "nickname": row["nickname"] or "(unknown)",
                 "avatar": row["avatar"] or "",
                 "side": "own",
                 "diamonds": row["diamonds"] or 0,
+                "gifts": row["gifts"] or 0,
                 "fans_level": row["fans_level"] or 0,
                 "gifter_level": row["gifter_level"] or 0,
                 "gifter_badge": row["gifter_badge"] or "",
@@ -2404,37 +2532,14 @@ class Storage:
         starts = sorted(
             b["start_time"] for b in battles if b.get("start_time") is not None
         )
-        # 終了済み・最終・duration不明Battleの窓を閉じるためのfallback長。まず同一sessionの
-        # 実観測duration(明示durationまたはstart/end差)の中央値を使い、無ければ既定値。
-        observed = [b["duration"] for b in battles if b.get("duration")]
-        observed += [
-            b["end_time"] - b["start_time"]
-            for b in battles
-            if b.get("end_time") is not None
-            and b.get("start_time") is not None
-            and b["end_time"] > b["start_time"]
-        ]
-        fallback_duration = (
-            statistics.median(observed) if observed else _BATTLE_FALLBACK_DURATION_SECONDS
-        )
+        fallback_duration = gift_window_fallback_duration(battles)
         for battle in battles:
             own_host = next(
                 (p.get("user_id") for p in battle.get("participants", []) if p.get("is_own")),
                 None,
             )
             start = battle.get("start_time")
-            end = battle.get("end_time")
-            # end_time_msを欠くBattleを無制限の窓にしない: Battle後〜配信終了までの通常
-            # Giftが貢献に合算され、連続PKでは同じGiftが複数Battleへ二重帰属するため。
-            # 所定durationで閉じ、それも無い終了済みBattleは次Battleの開始で打ち切る。
-            if end is None and start is not None and battle.get("duration"):
-                end = start + battle["duration"]
-            if end is None and start is not None and not battle.get("ongoing"):
-                end = next((s for s in starts if s > start), None)
-            # 次Battleも無い(=最終)終了済みBattleは、無制限窓(配信終了まで)を避けるため
-            # fallback長で打ち切る。進行中Battleは意図的に開いたまま(live giftを集計)。
-            if end is None and start is not None and not battle.get("ongoing"):
-                end = start + fallback_duration
+            end = gift_window_end(battle, starts, fallback_duration)
             # 終了済みBattleは窓が確定しているので貢献集計をキャッシュし、再集計は進行中のみ。
             bid = battle.get("battle_id")
             cache_key = (
@@ -2651,23 +2756,38 @@ class Storage:
             ).fetchall()
             owners = self._latest_owners()
             owner = owners.get(unique_id)
-            # Reconstruct each battle's own-side gifters (who fueled the battle, and
-            # by how much) from gift events inside the battle window, the same way
-            # battle_gift_contributions does. The opponent's gifters live in a
-            # different room and are not in this session's events, so this is the
-            # monitored streamer's own battle gifters only. Aggregated across every
-            # past battle it answers "which gifters keep showing up in battles".
-            battle_diamonds = 0
-            battle_gifters: dict = {}
-            parsed_battles = []
-            # battle_id is TikTok's globally-unique PK id, so the same physical battle
-            # carries the same id across sessions. Dedup on it to keep concurrent-
-            # collection duplicates from inflating every battle metric. id 0/missing is
-            # treated as un-dedupable (old/synthetic records) and kept as-is.
-            seen_battle_ids = set()
-            dropped_duplicates = 0
-            for brow in battle_rows:
-                battle = annotate_result(json.loads(brow["data_json"]))
+
+        # 各Battleの自陣貢献を、Battle cardと同じ窓・同じ入口(battle_gift_contributions)で
+        # 復元する。窓解決は同一sessionの他Battle(次Battle開始・duration中央値)に依存する
+        # ためsession単位でまとめて解く。窓を自前で持つと、end_timeを欠くBattleが無制限窓に
+        # なりBattle後の通常Giftまで貢献へ混入する(実測: 貢献者0人→12人, coin 26→19397)。
+        # battle_gift_contributionsは自身でlockを取るのでlockの外で回す。
+        battles_by_session: dict = {}
+        for brow in battle_rows:
+            battles_by_session.setdefault(brow["session_id"], []).append(
+                annotate_result(json.loads(brow["data_json"]))
+            )
+
+        battle_diamonds = 0
+        battle_team_diamonds = 0
+        # 相手陣のgifterは別Roomのためこのsessionのeventには無い。ここに集まるのは監視配信者
+        # 自身のBattle gifterだけで、全Battleを通して「Battleに必ず現れるgifter」を表す。
+        battle_gifters: dict = {}
+        parsed_battles = []
+        # battle_id is TikTok's globally-unique PK id, so the same physical battle
+        # carries the same id across sessions. Dedup on it to keep concurrent-
+        # collection duplicates from inflating every battle metric. id 0/missing is
+        # treated as un-dedupable (old/synthetic records) and kept as-is.
+        seen_battle_ids = set()
+        dropped_duplicates = 0
+        for session_id, session_battles in battles_by_session.items():
+            # 窓解決には(重複除外前の)そのsessionの全Battleを使う。除外されるのは別session
+            # が同じBattleを重複収集した分で、このsessionの「次Battle開始」は変わらないため。
+            starts = sorted(
+                b["start_time"] for b in session_battles if b.get("start_time") is not None
+            )
+            fallback_duration = gift_window_fallback_duration(session_battles)
+            for battle in session_battles:
                 start_time = battle.get("start_time")
                 if start_time is None:
                     continue
@@ -2677,53 +2797,75 @@ class Storage:
                         dropped_duplicates += 1
                         continue
                     seen_battle_ids.add(battle_id)
-                upper = battle.get("end_time")
-                upper = upper if upper is not None else 9_999_999_999
-                contrib_rows = self._conn.execute(
-                    "SELECT e.identity_key AS key,"
-                    " COALESCE(NULLIF(MAX(e.user_id), ''), u.user_id) AS user_id,"
-                    " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
-                    " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
-                    " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar, SUM(e.gift_count) AS gifts, SUM(e.diamonds) AS diamonds"
-                    " FROM events e LEFT JOIN users u ON u.identity_key = e.identity_key"
-                    " WHERE e.session_id = ? AND e.kind = 'gift' AND e.time >= ? AND e.time <= ?"
-                    " GROUP BY e.identity_key HAVING SUM(e.diamonds) > 0",
-                    (brow["session_id"], start_time, upper),
-                ).fetchall()
+                end_time = gift_window_end(battle, starts, fallback_duration)
+                gift = self.battle_gift_contributions(session_id, start_time, end_time)
+
+                # 自室のGift eventで実測できる分。これが監視配信者自身の貢献者である。
                 window_diamonds = 0
                 key_contributors = 0
-                for crow in contrib_rows:
-                    diamonds = crow["diamonds"] or 0
+                for g in gift:
+                    diamonds = g["diamonds"]
                     window_diamonds += diamonds
                     if diamonds >= _BATTLE_KEY_CONTRIB_DIAMONDS:
                         key_contributors += 1
-                    key = crow["key"]
+                    key = g["key"]
                     if not key:
                         continue
-                    g = battle_gifters.setdefault(
+                    agg = battle_gifters.setdefault(
                         key,
                         {
-                            "user_id": crow["user_id"] or "",
-                            "unique_id": crow["unique_id"] or "",
-                            "nickname": crow["nickname"] or "(unknown)",
-                            "avatar": crow["avatar"] or "",
+                            "user_id": g["user_id"],
+                            "unique_id": g["unique_id"],
+                            "nickname": g["nickname"],
+                            "avatar": g["avatar"],
                             "diamonds": 0,
                             "gifts": 0,
                             "battles": 0,
                         },
                     )
-                    g["diamonds"] += diamonds
-                    g["gifts"] += crow["gifts"] or 0
-                    g["battles"] += 1
-                    if crow["avatar"] and not g["avatar"]:
-                        g["avatar"] = crow["avatar"]
+                    agg["diamonds"] += diamonds
+                    agg["gifts"] += g["gifts"]
+                    agg["battles"] += 1
+                    if g["avatar"] and not agg["avatar"]:
+                        agg["avatar"] = g["avatar"]
+
+                # チーム戦のteam集約armiesは味方hostの貢献者も自陣hostへ寄って届く
+                # (team集約のanchorが実hostに解決できないため、host別に分けられない)。
+                # 実測できる自室分とは別に、armies由来のチーム全体分も併記する。集計方法は
+                # Battle card(apply_battle_gift_contributions)と揃える。
+                gift_by_id = {g["user_id"]: g for g in gift if g["user_id"]}
+                team_diamonds = 0
+                team_key_contributors = 0
+                matched = set()
+                for c in battle.get("contributions", []) or []:
+                    if c.get("side") != "own":
+                        continue
+                    cid = c.get("user_id")
+                    if cid and cid in gift_by_id:
+                        matched.add(cid)
+                        coins = gift_by_id[cid]["diamonds"]
+                    else:
+                        coins = c.get("diamonds") or 0
+                    team_diamonds += coins
+                    if coins >= _BATTLE_KEY_CONTRIB_DIAMONDS:
+                        team_key_contributors += 1
+                for g in gift:
+                    if g["user_id"] and g["user_id"] in matched:
+                        continue
+                    team_diamonds += g["diamonds"]
+                    if g["diamonds"] >= _BATTLE_KEY_CONTRIB_DIAMONDS:
+                        team_key_contributors += 1
+
                 battle_diamonds += window_diamonds
+                battle_team_diamonds += team_diamonds
                 parsed_battles.append(
                     {
                         "battle": battle,
-                        "session_id": brow["session_id"],
+                        "session_id": session_id,
                         "window_diamonds": window_diamonds,
                         "key_contributors": key_contributors,
+                        "team_diamonds": team_diamonds,
+                        "team_key_contributors": team_key_contributors,
                     }
                 )
 
@@ -2839,18 +2981,33 @@ class Storage:
             b = pb["battle"]
             opps = b.get("opponents", []) or []
             opp = max(opps, key=lambda o: o.get("score", 0) or 0, default=None) if opps else None
+            # own_scoreはチーム戦ではチーム合計。監視配信者1人ぶんのscoreは participants の
+            # 自hostが持つ。個人戦(個人マルチ含む)は自陣host=1人なのでown_scoreと同値。
+            # チーム戦で自hostを特定できない古いrecordはNone(不明)にする。0を入れると
+            # 「そのBattleは無得点だった」と読める偽の実測値になるため。
+            btype = b.get("type") or "personal"
+            own_host = next(
+                (p for p in (b.get("participants") or []) if p.get("is_own")), None
+            )
+            if own_host is not None:
+                own_host_score = own_host.get("score", 0) or 0
+            else:
+                own_host_score = (b.get("own_score", 0) or 0) if btype != "team" else None
             history.append(
                 {
                     "session_id": pb["session_id"],
                     "battle_id": b.get("battle_id"),
                     "started_at": b.get("start_time"),
                     "ended_at": b.get("end_time"),
-                    "type": b.get("type") or "personal",
+                    "type": btype,
                     "own_score": b.get("own_score", 0) or 0,
+                    "own_host_score": own_host_score,
                     "opp_score": b.get("opp_score", 0) or 0,
                     "result": b.get("result"),
                     "diamonds": pb["window_diamonds"],
+                    "team_diamonds": pb["team_diamonds"],
                     "key_contributors": pb["key_contributors"],
+                    "team_key_contributors": pb["team_key_contributors"],
                     "opponent_count": len(opps),
                     "opponent": {
                         "unique_id": opp.get("unique_id", ""),
@@ -2864,7 +3021,12 @@ class Storage:
         history.sort(key=lambda h: h["started_at"] or 0, reverse=True)
 
         # 1戦あたり「主力貢献者(coin >= 閾値)」の平均人数。過去全Battleを集約した指標。
+        # 自室のGift eventで実測した分と、armies由来のチーム全体分の両方を出す(チーム戦は
+        # 味方hostの貢献者を自陣hostと分離できないため、片方だけでは実態を表さない)。
         key_contrib_sum = sum(pb["key_contributors"] for pb in parsed_battles)
+        team_key_contrib_sum = sum(pb["team_key_contributors"] for pb in parsed_battles)
+        # 自hostのscoreが不明なBattleは平均の母数からも外す(0として均すと平均が下振れする)。
+        own_host_scores = [h["own_host_score"] for h in history if h["own_host_score"] is not None]
         battle_summary = {
             "count": battle_count,
             "wins": wins,
@@ -2872,11 +3034,16 @@ class Storage:
             "draws": draws,
             "win_rate": (wins / decided * 100) if decided else 0,
             "avg_own_score": (own_score_sum / battle_count) if battle_count else 0,
+            "avg_own_host_score": (sum(own_host_scores) / len(own_host_scores)) if own_host_scores else 0,
+            "own_host_score_count": len(own_host_scores),
             "avg_opp_score": (opp_score_sum / battle_count) if battle_count else 0,
             "key_contrib_threshold": _BATTLE_KEY_CONTRIB_DIAMONDS,
             "key_contrib_total": key_contrib_sum,
             "avg_key_contributors": (key_contrib_sum / battle_count) if battle_count else 0,
+            "team_key_contrib_total": team_key_contrib_sum,
+            "avg_team_key_contributors": (team_key_contrib_sum / battle_count) if battle_count else 0,
             "battle_diamonds": battle_diamonds,
+            "battle_team_diamonds": battle_team_diamonds,
             "battle_diamond_share": (battle_diamonds / totals["diamonds"] * 100) if totals["diamonds"] else 0,
             "opponents": opponent_list[:30],
             "gifters": battle_gifter_list[:30],
@@ -3395,7 +3562,8 @@ class Storage:
         segmentがディスクに残っていればmp4へ再finalizeできるため、起動時の復元対象を列挙する。"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, session_id, unique_id, path, filename, status FROM recordings"
+                "SELECT id, session_id, unique_id, path, filename, status, ended_at"
+                " FROM recordings"
                 " WHERE status IN ('recording', 'interrupted') ORDER BY started_at"
             ).fetchall()
         return [dict(row) for row in rows]

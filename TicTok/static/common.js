@@ -124,7 +124,11 @@ function connectWS(onMessage) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${protocol}://${location.host}/ws`);
   ws.onopen = () => setStatus(true, "Server接続: ONLINE");
-  ws.onmessage = (msg) => onMessage(JSON.parse(msg.data));
+  ws.onmessage = (msg) => {
+    const data = JSON.parse(msg.data);
+    applyJobBar(data);
+    onMessage(data);
+  };
   ws.onclose = () => {
     setStatus(false, "Server接続: OFFLINE — 再接続中…");
     setTimeout(() => connectWS(onMessage), 2000);
@@ -1611,4 +1615,243 @@ async function loadOpsBadge() {
 if (document.querySelector('.a-nav a[href="/ops"]')) {
   loadOpsBadge();
   setInterval(loadOpsBadge, OPS_BADGE_POLL_MS);
+}
+
+// ---- 共通UI: 通知toast ----
+// window.alertはpageのscript実行ごと止めるため、WSで届く録画状態やjob進捗が、
+// 誰かが「OK」を押すまで反映されない。監視画面を開いたまま席を外す使い方をするので、
+// 通知は画面内へ出して処理は止めない。
+// 情報表示は自動で消すが、errorは消さない。監視画面を開いたまま席を外す使い方なので、
+// 録画・出力の失敗が自動消滅すると、戻ってきたときに失敗した事実そのものが残らない。
+// 閉じる操作を挟むことで「見た」がユーザーの明示になる(alertの確認強制の代わり)。
+const TOAST_MS = 6000;
+
+function toastLayer() {
+  let layer = document.getElementById("toast-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "toast-layer";
+    layer.className = "toast-layer";
+    layer.setAttribute("role", "status");
+    layer.setAttribute("aria-live", "polite");
+    document.body.appendChild(layer);
+  }
+  return layer;
+}
+
+// kindは "error"(失敗の報告) と既定の情報表示。errorは自動で消さず、閉じるまで残す。
+function showToast(message, kind) {
+  const text = String(message === undefined || message === null ? "" : message).trim();
+  if (!text) return null;
+  // errorは閉じるまで残るので、同じ失敗が繰り返されると画面が埋まる(録画の再試行や
+  // job失敗は同一文面で連続する)。同じ文面は増やさず回数だけ更新する。
+  if (kind === "error") {
+    const existing = [...toastLayer().querySelectorAll(".toast-error")].find(
+      (el) => el.dataset.toastText === text,
+    );
+    if (existing) {
+      const count = Number(existing.dataset.toastCount || "1") + 1;
+      existing.dataset.toastCount = String(count);
+      existing.querySelector(".toast-count").textContent = `×${count}`;
+      return existing;
+    }
+  }
+  const toast = document.createElement("div");
+  toast.className = kind === "error" ? "toast toast-error" : "toast";
+  toast.dataset.toastText = text;
+  const body = document.createElement("span");
+  body.className = "toast-body";
+  body.textContent = text;
+  const count = document.createElement("span");
+  count.className = "toast-count";
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.textContent = "✕";
+  close.title = "この通知を閉じる";
+  const dismiss = () => {
+    if (toast.isConnected) toast.remove();
+  };
+  close.addEventListener("click", dismiss);
+  toast.append(body, count, close);
+  toastLayer().appendChild(toast);
+  if (kind !== "error") setTimeout(dismiss, TOAST_MS);
+  return toast;
+}
+
+function showError(err) {
+  showToast(err && err.message ? err.message : String(err), "error");
+}
+
+// ---- 共通UI: 確認dialog ----
+// 取り消せない操作の前に確認を取る。window.confirmと違い、何を消すのかを複数行で読ませ、
+// 破壊的な操作は実行Buttonを危険色にできる。
+// 返り値はPromise<boolean>で、Escape・背景click・取消はいずれもfalse。
+function confirmDialog(message, opts) {
+  const options = opts || {};
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay confirm-overlay";
+    const modal = document.createElement("div");
+    modal.className = "modal modal-narrow confirm-modal";
+    const head = document.createElement("div");
+    head.className = "modal-head";
+    const title = document.createElement("h2");
+    title.textContent = options.title || "確認";
+    head.appendChild(title);
+    const body = document.createElement("div");
+    body.className = "modal-body confirm-text";
+    body.textContent = message;
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "btn";
+    cancel.textContent = options.cancelLabel || "取消";
+    const ok = document.createElement("button");
+    ok.className = options.danger === false ? "btn btn-primary" : "btn btn-danger";
+    ok.textContent = options.confirmLabel || "実行";
+    actions.append(cancel, ok);
+    modal.append(head, body, actions);
+    overlay.appendChild(modal);
+
+    const finish = (answer) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(answer);
+    };
+    const onKey = (ev) => {
+      if (ev.key !== "Escape") return;
+      // 他のmodalのEscape handlerまで届くと、確認を閉じたつもりで背後の画面まで閉じる。
+      ev.stopPropagation();
+      finish(false);
+    };
+    cancel.addEventListener("click", () => finish(false));
+    ok.addEventListener("click", () => finish(true));
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) finish(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    ok.focus();
+  });
+}
+
+// ---- 共通UI: 進捗bar ----
+// spinner付きは「今この画面から起動して待っている」操作向け、spinner無しは一覧に並ぶ
+// 他所で動いているjobの状態表示向け。
+function makeProgress(opts) {
+  const options = opts || {};
+  const prog = document.createElement("span");
+  prog.className = "dl-progress";
+  if (options.spinner !== false) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner dl-spinner";
+    const core = document.createElement("span");
+    core.className = "spinner-core";
+    spinner.appendChild(core);
+    prog.appendChild(spinner);
+  }
+  const bar = document.createElement("span");
+  bar.className = "dl-bar";
+  const fill = document.createElement("span");
+  fill.className = "dl-bar-fill";
+  bar.appendChild(fill);
+  const text = document.createElement("span");
+  text.className = "dl-pct";
+  text.textContent = options.label || "準備中…";
+  prog.append(bar, text);
+  return prog;
+}
+
+function setProgress(prog, label, pct) {
+  const value = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  prog.querySelector(".dl-bar-fill").style.inlineSize = `${value}%`;
+  prog.querySelector(".dl-pct").textContent = `${label}${value}%`;
+}
+
+// job台帳の1行を進捗表示へ写す。待機中はまだ何も進んでいないので%を出さない
+// (0%と描くと、動き出したのに止まっているように読める)。
+function setJobProgress(prog, job) {
+  if (job.state === "pending") {
+    prog.querySelector(".dl-bar-fill").style.inlineSize = "0%";
+    prog.querySelector(".dl-pct").textContent = "待機中";
+    return;
+  }
+  setProgress(prog, `${job.stage || "準備中"} `, job.pct);
+}
+
+function finishProgress(prog, text) {
+  const spinner = prog.querySelector(".dl-spinner");
+  if (spinner) spinner.remove();
+  prog.querySelector(".dl-bar-fill").style.inlineSize = "100%";
+  prog.querySelector(".dl-pct").textContent = text || "完了 ✓";
+  prog.classList.add("done");
+}
+
+// ---- job状況(全画面共通のトップバー) ----
+// job台帳のsnapshot(jobs)と更新(job_update)は全pageのWSへ届いているのに、job画面以外は
+// 捨てていた。出力が動いているか・失敗が残っているかはどの画面からでも見えるべきなので、
+// トップバーへ集約する。数はWSが唯一の出所で、届く前は何も出さない(0件と描かない)。
+const JOB_BAR_FAILED_STATES = ["failed", "interrupted"];
+let jobBarState = null;
+
+// session一括投入はgroupの合成行と録画ごとの明細行の両方が流れてくる。合成行はjob_idに
+// group_idがそのまま入るので、それ以外のgroup付き行(=明細)を数えると二重に数える。
+function jobBarCountable(job) {
+  const groupId = job.group_id || "";
+  return !groupId || groupId === job.job_id;
+}
+
+function jobBarElement() {
+  const topbar = document.querySelector(".a-topbar");
+  if (!topbar) return null;
+  let el = document.getElementById("job-bar");
+  if (!el) {
+    el = document.createElement("a");
+    el.id = "job-bar";
+    el.className = "a-jobs";
+    el.href = "/jobs";
+    const disk = document.getElementById("disk-bar");
+    topbar.insertBefore(el, disk || null);
+  }
+  return el;
+}
+
+function renderJobBar() {
+  const el = jobBarElement();
+  if (!el || !jobBarState) return;
+  const rows = [...jobBarState.values()].filter(jobBarCountable);
+  const running = rows.filter((job) => job.state === "running").length;
+  const pending = rows.filter((job) => job.state === "pending").length;
+  const failed = rows.filter((job) => JOB_BAR_FAILED_STATES.includes(job.state)).length;
+  el.replaceChildren();
+  if (!running && !pending && !failed) {
+    el.removeAttribute("title");
+    return;
+  }
+  const active = document.createElement("span");
+  active.className = "j-active";
+  active.textContent = `job: 実行中 ${running} / 待機中 ${pending}`;
+  el.appendChild(active);
+  if (failed) {
+    const bad = document.createElement("span");
+    bad.className = "j-failed";
+    bad.textContent = `失敗 ${failed}`;
+    el.appendChild(bad);
+  }
+  el.title = failed
+    ? `直近のjob履歴に失敗・中断が${failed}件あります。job画面の「失敗・中断のみ」で確認できます。`
+    : "焼き込み・Up出力などのjobの実行状況です。押すとjob画面へ移動します。";
+}
+
+function applyJobBar(message) {
+  if (message.type === "jobs") {
+    jobBarState = new Map((message.data || []).map((job) => [job.job_id, job]));
+    renderJobBar();
+    return;
+  }
+  if (message.type === "job_update" && message.job) {
+    if (!jobBarState) jobBarState = new Map();
+    jobBarState.set(message.job.job_id, message.job);
+    renderJobBar();
+  }
 }

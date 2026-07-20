@@ -230,9 +230,19 @@ function renderHits() {
 
 // ===== player =====
 
+// 検索hitは当たった発話/コメントの終わり(end_time)も持っている。開いた時点でIN/OUTへ
+// 入れておけば、打ち直さずそのまま切り出し・切り出しリストへ回せる。意味検索のhitは
+// passage単位(既定25秒)なので、範囲がそのまま素材の候補になる。
+function hitCutRange(hit) {
+  const end = Number(hit.end_time);
+  if (!isFinite(end) || end <= hit.video_time) return null;
+  return [hit.video_time, end];
+}
+
 async function openHit(hit, index) {
   const video = $("video");
   const sameRecording = state.current && state.current.recording_id === hit.recording_id;
+  const range = hitCutRange(hit);
   state.current = hit;
   if (index !== undefined) {
     state.hitIndex = index;
@@ -244,7 +254,7 @@ async function openHit(hit, index) {
 
   if (!sameRecording) {
     // 別録画に移ったらIN/OUTは持ち越さない(別fileの秒数として無意味になるため)。
-    setCut(null, null);
+    setCut(...(range || [null, null]));
     state.heat = null;
     // 別録画の候補は秒数として無意味なので持ち越さない。
     state.candidates = [];
@@ -270,6 +280,7 @@ async function openHit(hit, index) {
     loadWaveform(hit.recording_id);
   } else {
     video.currentTime = hit.video_time;
+    if (range) setCut(range[0], range[1]);
     highlightActiveSegment();
     highlightActiveComment();
   }
@@ -1046,13 +1057,20 @@ function renderCuts() {
       const remove = document.createElement("button");
       remove.className = "btn btn-small btn-danger";
       remove.textContent = "削除";
-      remove.addEventListener("click", async () => {
+      remove.addEventListener("click", async (e) => {
+        // 行click(再生へ戻る)と重ならないよう、削除は行へ伝播させない。
+        e.stopPropagation();
         await apiSend("DELETE", `/api/cutlist/${cut.id}`);
         loadCuts();
       });
+      const file = document.createElement("span");
+      file.textContent = cut.filename || "-";
+      // 解決済みのpathはNLEへ渡す実体そのもの。録画を移動していても今の場所が出る。
+      if (cut.path) file.title = cut.path;
       return [
         cut.unique_id,
-        cut.filename || "-",
+        fmtYmd(cut.recording_started_at),
+        file,
         fmtDuration(cut.start),
         fmtDuration(cut.end),
         fmtDuration(cut.end - cut.start),
@@ -1060,8 +1078,32 @@ function renderCuts() {
         remove,
       ];
     },
-    [2, 3, 4],
+    [3, 4, 5],
+    (tr, cut) => {
+      tr.classList.add("row-clickable");
+      tr.tabIndex = 0;
+      tr.title = "この範囲を再生画面で開きます（IN/OUTが入った状態になります）。";
+      tr.addEventListener("click", () => openCut(cut));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        openCut(cut);
+      });
+    },
   );
+}
+
+// 切り出しリストから再生画面へ戻る。IN/OUTを復元するので、位置を詰めてから
+// 出力し直したり、そのまま切り出したりできる。
+async function openCut(cut) {
+  showView("search");
+  await openHit({
+    recording_id: cut.recording_id,
+    unique_id: cut.unique_id,
+    started_at: cut.recording_started_at,
+    video_time: cut.start,
+  });
+  setCut(cut.start, cut.end);
 }
 
 async function addCut() {
@@ -1416,6 +1458,38 @@ function renderQueue(queue) {
   );
 }
 
+// 押せない理由は、押してから初めて分かるのでは遅い。buttonの状態と理由を同じ場所で決める。
+function renderSemantic(status) {
+  const button = $("semantic-build");
+  const note = $("semantic-note");
+  if (!status) {
+    button.disabled = false;
+    note.textContent = "";
+    button.title = "";
+    return;
+  }
+  let reason = "";
+  if (!status.enabled) {
+    reason = "意味検索が無効です（TICTOK_SEMANTIC_ENABLED を確認してください）。";
+  } else if (!status.available) {
+    reason = `埋め込みmodelに接続できません（${status.base_url || "接続先未設定"}）。`;
+  } else if (status.building) {
+    reason = "意味検索indexを更新中です。完了までお待ちください。";
+  }
+  button.disabled = Boolean(reason);
+  note.textContent = reason;
+  button.title = reason;
+}
+
+async function loadSemantic() {
+  try {
+    renderSemantic(await apiSend("GET", "/api/search/semantic/status"));
+  } catch (err) {
+    // statusが取れないこと自体は操作を止める理由にならない。buildを叩けばserverが弾く。
+    $("semantic-note").textContent = err.message;
+  }
+}
+
 async function enqueue(uniqueId) {
   try {
     const result = await apiSend("POST", "/api/transcribe/queue", { unique_id: uniqueId || null });
@@ -1616,8 +1690,12 @@ function bind() {
         `意味検索index: ${fmtNum(result.passages ?? 0)} passage / ${fmtNum(result.hits ?? 0)}件から構築しました。`;
     } catch (err) {
       $("job-summary").textContent = err.message;
+    } finally {
+      // finallyでないと、通信断や画面遷移でbuttonが押せないまま残る。
+      // 再有効化の可否はserverのstatusに従う(別のbuildが走っている場合は塞いだまま)。
+      button.disabled = false;
+      loadSemantic();
     }
-    button.disabled = false;
   });
 
   $("job-enqueue").addEventListener("click", () => enqueue($("job-streamer").value));
@@ -1655,6 +1733,9 @@ function onMessage(message) {
         loadTranscript(message.indexed_recording_id);
       }
     }
+  } else if (message.type === "semantic_index") {
+    // 別tab/別clientが始めたbuildでも塞がるよう、開始と完了の両方で飛んでくる。
+    renderSemantic(message.status);
   } else if (message.type === "job_update" && message.job.domain === "clip_batch") {
     const job = message.job;
     if (job.state === "running") {
@@ -1677,5 +1758,6 @@ function onMessage(message) {
 
 bind();
 loadStatus();
+loadSemantic();
 loadClipDefaults();
 connectWS(onMessage);

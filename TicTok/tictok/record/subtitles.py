@@ -39,6 +39,10 @@ def usable_segments(segments, media_duration=None) -> list:
 
     start/endがNULL、end<=start、textが空のものは落とす(捏造して埋めない)。
 
+    負の時刻は0へ寄せてからend<=startを判定する。segments_jsonの時刻はmedia軸へ再map済み
+    なので負値が来ること自体が異常で、全区間が負のsegmentは実在しない区間を指す。0へ寄せた
+    結果0-->0になるものを残すと、playerに長さ0のcueが出るだけで内容は救えない。
+
     ``media_duration`` を渡すと、cueの終端を実尺で打ち切る。whisperのsegment終端は
     VADの窓境界なので実尺をわずかに超えることがあり(実測1.77秒)、そのまま出すとplayerが
     存在しない位置のcueを持つ。実尺が測れない場合はNoneを渡す(推測して詰めない)。"""
@@ -49,12 +53,10 @@ def usable_segments(segments, media_duration=None) -> list:
         text = (seg.get("text") or "").strip()
         if start is None or end is None or not text:
             continue
-        start = float(start)
-        end = float(end)
+        start = max(0.0, float(start))
+        end = max(0.0, float(end))
         if end <= start:
             continue
-        start = max(0.0, start)
-        end = max(0.0, end)
         if media_duration is not None:
             if start >= media_duration:
                 continue

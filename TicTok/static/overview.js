@@ -191,7 +191,7 @@ async function toggleRecord(uid) {
   try {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/record/${recording ? "stop" : "start"}`);
   } catch (err) {
-    window.alert(err.message);
+    showError(err);
     if (btn) btn.disabled = false;
   }
 }
@@ -202,16 +202,19 @@ async function toggleRecordVideo(uid) {
   if (!snap) return;
   const next = snap.record_video === false;
   const recording = isRecording(snap);
-  if (!next && recording &&
-      !window.confirm(`@${uid} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`)) {
-    return;
+  if (!next && recording) {
+    const ok = await confirmDialog(
+      `@${uid} の動画保存をOFFにすると進行中の録画を停止します。よろしいですか？`,
+      { title: "動画保存をOFFにする", confirmLabel: "OFFにする" },
+    );
+    if (!ok) return;
   }
   const btn = grid.querySelector(`[data-uid="${CSS.escape(uid)}"] [data-field="record-video-btn"]`);
   if (btn) btn.disabled = true;
   try {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/record-video`, { record_video: next });
   } catch (err) {
-    window.alert(err.message);
+    showError(err);
     if (btn) btn.disabled = false;
   }
 }

@@ -1918,13 +1918,68 @@ class Recorder:
                 )
 
 
+def _row_points_at_file(row: dict) -> bool:
+    """DB行のpathが実在するmp4を指しているか。
+
+    finalizeがmp4を作った後・DB更新前に落ちると、行のpathは録画開始時に入れた録画dirの
+    ままで残る。この行は status を interrupted に直しても出力・再生の入口(path.is_file())
+    を全て素通りできないため、mp4があるかどうかとは別に必ず判定する。"""
+    raw = row.get("path") or ""
+    return bool(raw) and Path(raw).is_file()
+
+
+def _finalized_mp4(base: str, dirs) -> Optional[Path]:
+    """完成mp4が working dir(finalize済み) か final dir(移送済み) にあれば返す。"""
+    for d in dirs:
+        path = layout.mp4_path(d, base)
+        if path.is_file() and path.stat().st_size > 0:
+            return path
+    return None
+
+
+async def _reattach_orphan_mp4(storage, row: dict, base: str, mp4_path: Path) -> bool:
+    """finalize済みなのにDB行が指していないmp4へ、行を張り直す。
+
+    HLS segmentが残っていない以上この録画を作り直す手段は無く、放置すると2GBの完成品が
+    「録画fileが存在しません」として出力も再生もできないまま残る。ffprobeが動画streamを
+    確認できない場合だけは張り直さない(壊れたfileをcompletedとして提示しない)。"""
+    recorder = Recorder("", str(mp4_path.parent), row.get("session_id"), storage=storage)
+    recorder.recording_id = row.get("id")
+    recorder.base = base
+    if ffprobe_available() and not await recorder._validate_mp4(mp4_path):
+        logger.error(
+            "orphan mp4 for recording id=%s has no decodable video stream; leaving the "
+            "row interrupted", row.get("id"),
+            extra={"event": "recording.reattach_failed",
+                   "ctx": {"stem": base, "path": str(mp4_path),
+                           "size_bytes": mp4_path.stat().st_size}},
+        )
+        return False
+    stat = mp4_path.stat()
+    # mp4の書き上がり時刻が、この録画が実際に終わった時刻。ended_atが既にあればそれを残す。
+    ended_at = row.get("ended_at") or stat.st_mtime
+    storage.update_recording(row["id"], STATE_COMPLETED, str(mp4_path), mp4_path.name,
+                             ended_at, stat.st_size, None)
+    logger.warning(
+        "reattached recording id=%s to its finalized mp4 %s (DB row pointed at %s)",
+        row.get("id"), mp4_path, row.get("path"),
+        extra={"event": "recording.reattached",
+               "ctx": {"stem": base, "path": str(mp4_path), "stale_path": row.get("path"),
+                       "size_bytes": stat.st_size}},
+    )
+    return True
+
+
 async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = False,
                                          final_dir=None) -> int:
     """起動時、クラッシュで中断した録画の捕捉済みHLS segmentをmp4へ再finalizeしてDB行を復旧する。
     プロセスが録画中に落ちると_finalizeが走らずDB行はseg*.tsを指さないまま(pathは録画dir、
     filenameは未生成mp4)残り、seg*.tsは孤立して再生不能になる。ここでconcat→mp4化し、成功した
-    録画をcompletedとして実mp4パス/サイズで更新する。segmentが無い/既にmp4がある録画はskipし、
-    復元できなかったものは既存のinterruptedのまま残す(mark_stale_recordingsの後始末に委ねる)。"""
+    録画をcompletedとして実mp4パス/サイズで更新する。
+
+    mp4は出来たがDB更新の前に落ちた場合(例: 混在解像度のnormalize中)も同じ壊れ方をする。
+    segmentが残っていれば作り直し、残っていなければ出来ているmp4へ行を張り直す。segmentも
+    mp4も無いものは既存のinterruptedのまま残す(mark_stale_recordingsの後始末に委ねる)。"""
     if not ffmpeg_available():
         logger.error(
             "ffmpeg unavailable; interrupted recordings cannot be recovered and their "
@@ -1941,18 +1996,27 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
     )
     recovered = 0
     candidates = 0
+    reattached = 0
     for row in storage.recordings_for_recovery():
         filename = row.get("filename") or ""
         base = Path(filename).stem if filename else ""
         if not base:
             continue
-        # A valid mp4 may already sit in the working dir (finalized but DB not updated)
-        # or the final dir (relocated); either means recovery is unnecessary.
-        if any(layout.mp4_path(d, base).is_file() and layout.mp4_path(d, base).stat().st_size > 0
-               for d in {record_dir, final_dir}):
+        # 復旧対象は「行が実fileを指していない」ものだけ。mp4の有無で判定すると、mp4は
+        # 出来ているのに行が録画dirを指したままの録画(finalizeの途中でprocessが落ちた場合)
+        # を「復旧不要」と読み違え、行が直らないまま残り続ける。
+        if _row_points_at_file(row):
             continue
+        existing = _finalized_mp4(base, {record_dir, final_dir})
         hls_dir = layout.session_dir(record_dir, base)
-        if not hls_dir.is_dir() or not any(hls_dir.glob("seg*.ts")):
+        has_segments = hls_dir.is_dir() and any(hls_dir.glob("seg*.ts"))
+        if existing is not None and not has_segments:
+            # 作り直す材料(seg*.ts)が無いので、出来ているmp4へ行を張り直す。作り直しでは
+            # なく突き合わせなので、再生可能かをffprobeで確かめてからcompletedにする。
+            if await _reattach_orphan_mp4(storage, row, base, existing):
+                reattached += 1
+            continue
+        if not has_segments:
             continue  # 再finalizeできるsegmentが残っていない
         # Counted here, not per DB row: rows that already have an mp4 or have no
         # segments left were not recovery attempts and must not make the summary read
@@ -1999,11 +2063,13 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
                                "path": str(hls_dir), "size_bytes": snap.get("bytes", 0),
                                "error": recorder.error}},
             )
-    if candidates:
+    if candidates or reattached:
         logger.warning(
-            "recovered %d of %d interrupted recordings from the previous run",
-            recovered, candidates,
+            "recovered %d of %d interrupted recordings from the previous run "
+            "(+%d reattached to an existing mp4)",
+            recovered, candidates, reattached,
             extra={"event": "recording.recovery_completed",
-                   "ctx": {"recovered": recovered, "candidates": candidates}},
+                   "ctx": {"recovered": recovered, "candidates": candidates,
+                           "reattached": reattached}},
         )
-    return recovered
+    return recovered + reattached

@@ -346,7 +346,11 @@ retentionPreviewBtn.addEventListener("click", async () => {
 });
 
 retentionApplyBtn.addEventListener("click", async () => {
-  if (!window.confirm("確認した内容を削除します。生録画を含む場合、この操作は取り消せません。実行しますか？")) return;
+  const ok = await confirmDialog(
+    "確認した内容を削除します。生録画を含む場合、この操作は取り消せません。実行しますか？",
+    { title: "保持policyの適用", confirmLabel: "削除する" },
+  );
+  if (!ok) return;
   retentionApplyBtn.disabled = true;
   retentionPreviewBtn.disabled = true;
   retentionStatusEl.textContent = "削除中…";

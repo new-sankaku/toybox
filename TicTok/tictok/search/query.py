@@ -48,7 +48,7 @@ def parse(raw: str) -> dict:
     if not raw:
         raise QueryError("検索語を入力してください。")
 
-    use_or = " OR " in f" {raw} "
+    use_or = False
     positives: list = []
     negatives: list = []
     for match in _TOKEN_RE.finditer(raw):
@@ -58,6 +58,7 @@ def parse(raw: str) -> dict:
         else:
             token = bare
             if token == "OR":
+                use_or = True
                 continue
             negated = token.startswith("-") and len(token) > 1
             text = token[1:] if negated else token

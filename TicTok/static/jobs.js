@@ -33,6 +33,9 @@ const ACTIVE_STATES = ["pending", "running"];
 const FAILED_STATES = ["failed", "interrupted"];
 
 let jobs = [];
+// 明細を開いているgroup_id。groupの合成行はjob_idにgroup_idがそのまま入るため、
+// 「group_idを持ち、かつjob_idと一致しない」行がsession一括の明細にあたる。
+const expandedGroups = new Set();
 let gpu = null;
 // 台帳外(transcribe_queue)の実状。GPU現況と台帳の食い違いを説明するためだけに読む。
 let stt = null;
@@ -61,6 +64,41 @@ function matchesFilter(job) {
   return true;
 }
 
+function isGroupRow(job) {
+  return !!job.group_id && job.group_id === job.job_id;
+}
+
+function isGroupMember(job) {
+  return !!job.group_id && job.group_id !== job.job_id;
+}
+
+// 表示順: group行の直後に、開いているgroupの明細だけを差し込む。
+// filterでgroup行が落ちたときは明細を畳む相手がいないので、その明細は単独行として出す
+// (畳んだまま隠すと、filterに一致したjobが一覧から消える)。
+function visibleRows() {
+  const matched = sortJobs(jobs.filter(matchesFilter));
+  const groupIds = new Set(matched.filter(isGroupRow).map((job) => job.job_id));
+  const members = new Map();
+  const tops = [];
+  matched.forEach((job) => {
+    if (isGroupMember(job) && groupIds.has(job.group_id)) {
+      if (!members.has(job.group_id)) members.set(job.group_id, []);
+      members.get(job.group_id).push(job);
+      return;
+    }
+    tops.push(job);
+  });
+  const rows = [];
+  tops.forEach((job) => {
+    const list = (isGroupRow(job) && members.get(job.job_id)) || [];
+    rows.push({ job, members: list.length });
+    if (expandedGroups.has(job.job_id)) {
+      list.forEach((member) => rows.push({ job: member, members: 0, sub: true }));
+    }
+  });
+  return rows;
+}
+
 function sortJobs(list) {
   const rank = (job) => (job.state === "running" ? 0 : job.state === "pending" ? 1 : 2);
   return list.slice().sort((a, b) => {
@@ -80,24 +118,44 @@ function stateCell(job) {
 }
 
 function progressCell(job) {
-  const wrap = document.createElement("span");
-  wrap.className = "dl-progress";
   if (job.state !== "running" && job.state !== "pending") {
+    const wrap = document.createElement("span");
+    wrap.className = "dl-progress";
     wrap.textContent = job.state === "completed" ? "完了 ✓" : "-";
     return wrap;
   }
-  wrap.innerHTML = '<span class="dl-bar"><span class="dl-bar-fill"></span></span>'
-    + '<span class="dl-pct"></span>';
-  const pct = job.state === "pending" ? 0 : Math.max(0, Math.min(100, job.pct || 0));
-  wrap.querySelector(".dl-bar-fill").style.inlineSize = `${pct}%`;
-  wrap.querySelector(".dl-pct").textContent = job.state === "pending"
-    ? "待機中" : `${job.stage || "準備中"} ${pct}%`;
-  return wrap;
+  // 一覧は他所で動いているjobの状態表示なのでspinnerは付けない。
+  const prog = makeProgress({ spinner: false });
+  setJobProgress(prog, job);
+  return prog;
 }
 
 function targetText(job) {
   if (job.total > 1) return `${job.title || "-"}（${job.total}本）`;
   return job.filename || job.title || (job.recording_id ? `#${job.recording_id}` : "-");
+}
+
+function targetCell(row) {
+  const wrap = document.createElement("span");
+  wrap.className = "job-target";
+  if (row.members > 0) {
+    const open = expandedGroups.has(row.job.job_id);
+    const toggle = document.createElement("button");
+    toggle.className = "btn btn-small job-toggle";
+    toggle.textContent = `${open ? "▼" : "▶"} 明細 ${row.members}件`;
+    toggle.title = "この一括出力に含まれる録画ごとのjobを開閉します。";
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    toggle.addEventListener("click", () => {
+      if (open) expandedGroups.delete(row.job.job_id);
+      else expandedGroups.add(row.job.job_id);
+      render();
+    });
+    wrap.appendChild(toggle);
+  }
+  const label = document.createElement("span");
+  label.textContent = targetText(row.job);
+  wrap.appendChild(label);
+  return wrap;
 }
 
 function elapsedText(job) {
@@ -115,12 +173,12 @@ function resultText(job) {
 }
 
 async function sendJobAction(path, job, confirmText) {
-  if (confirmText && !window.confirm(confirmText)) return;
+  if (confirmText && !await confirmDialog(confirmText, { title: "jobの取り消し", confirmLabel: "取り消す" })) return;
   try {
     await apiSend("POST", `/api/jobs/${job.job_id}/${path}`);
     await load();
   } catch (err) {
-    window.alert(err.message);
+    showError(err);
   }
 }
 
@@ -156,7 +214,7 @@ function actionsCell(job) {
 }
 
 function render() {
-  const rows = sortJobs(jobs.filter(matchesFilter));
+  const rows = visibleRows();
   const tbody = document.getElementById("job-rows");
   tbody.replaceChildren();
   const emptyEl = document.getElementById("job-empty");
@@ -167,12 +225,14 @@ function render() {
   else if (jobs.length > 0)
     setListMessage(emptyEl, "条件に一致するjobがありません。filterを変更してください。");
   else setListState(emptyEl, "empty");
-  rows.forEach((job) => {
+  rows.forEach((row) => {
+    const job = row.job;
     const tr = document.createElement("tr");
+    if (row.sub) tr.className = "job-subrow";
     const cells = [
       stateCell(job),
       JOB_KIND_LABELS[job.domain] || job.domain,
-      targetText(job),
+      targetCell(row),
       progressCell(job),
       fmtDateTime(job.queued_at || job.started_at),
       elapsedText(job),

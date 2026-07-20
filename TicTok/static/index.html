@@ -154,11 +154,22 @@
               <div id="battle-empty" class="a-empty">Battle未発生。LinkMic対戦が始まると表示します。</div>
             </div>
             <div class="seg-pane hidden" data-pane="ranking">
-              <table class="a-rank">
-                <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">コイン</th></tr></thead>
-                <tbody id="user-ranking"></tbody>
-              </table>
-              <div id="user-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+              <div class="rank-sec">
+                <div class="rank-sec-h">UserごとのGift <span id="rank-gifters" class="rank-sec-n"></span></div>
+                <table class="a-rank">
+                  <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">コイン</th></tr></thead>
+                  <tbody id="user-ranking"></tbody>
+                </table>
+                <div id="user-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+              </div>
+              <div class="rank-sec">
+                <div class="rank-sec-h">Gift種類別</div>
+                <table class="a-rank">
+                  <thead><tr><th>#</th><th>Gift</th><th class="n">個数</th><th class="n">コイン</th></tr></thead>
+                  <tbody id="gift-ranking"></tbody>
+                </table>
+                <div id="gift-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+              </div>
             </div>
           </div>
         </div>

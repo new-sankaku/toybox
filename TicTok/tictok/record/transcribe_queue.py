@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
+from tictok.core import config
 from tictok.record.transcription import STTError, stt_available
 from tictok.record.transcription import transcribe as stt_transcribe
 from tictok.search import indexer
@@ -155,7 +156,7 @@ class TranscribeQueue:
                                  "recording_id": recording_id, "pct": pct}), loop)
 
         try:
-            result = await asyncio.to_thread(stt_transcribe, str(path), on_progress)
+            result = await self._transcribe_with_retry(recording_id, path, on_progress)
         except STTError as exc:
             self._current = None
             self._storage.set_transcription_state(recording_id, "failed", error=str(exc))
@@ -183,6 +184,32 @@ class TranscribeQueue:
         await self._broadcast({"type": "transcribe_progress",
                                "recording_id": recording_id, "pct": 100})
         await self._emit(indexed=recording_id)
+
+    async def _transcribe_with_retry(self, recording_id: int, path: Path,
+                                     on_progress: Callable) -> dict:
+        """転写を実行し、失敗が残り試行回数の範囲なら待ってから実行し直す。
+
+        STTはGPUと録画fileの両方を掴むため、他jobがVRAMを解放する途中のCUDA確保失敗や、
+        退避直後のfileが一時的に開けない、といった数秒で消える失敗で落ちる。1発failedに
+        すると人が投げ直すまで転写されないままになるので、設定回数まで試す。
+        """
+        attempts = max(1, config.get_transcribe_job_attempts())
+        backoff = config.get_transcribe_job_retry_backoff_seconds()
+        for attempt in range(1, attempts + 1):
+            try:
+                return await asyncio.to_thread(stt_transcribe, str(path), on_progress)
+            except Exception:
+                if attempt >= attempts:
+                    raise
+                wait = backoff * attempt
+                logger.warning(
+                    "transcribe attempt %d/%d failed, retrying in %.1fs: recording_id=%d",
+                    attempt, attempts, wait, recording_id, exc_info=True,
+                    extra={"event": "stt.queue_job_retry",
+                           "ctx": {"recording_id": recording_id, "attempt": attempt,
+                                   "attempts": attempts, "wait_seconds": round(wait, 1)}},
+                )
+                await asyncio.sleep(wait)
 
     async def _emit(self, indexed: Optional[int] = None) -> None:
         message = {"type": "transcribe_queue", "status": self.status()}

@@ -188,14 +188,6 @@ DEFAULT_HEIGHT = 1280
 # every extra pixel costs feed density.
 AVATAR_RADIUS_FRAC = 1.00
 
-# Burned-in overlays (comment text, colour emoji, gift icons, score bar) are
-# rasterised at the output resolution, so a low-resolution source would burn
-# low-resolution text. To keep text crisp regardless of source quality, the output
-# is upscaled (aspect preserved, lanczos) to at least this height when the source is
-# shorter; the source video content is upscaled along with it (softer, larger file —
-# an accepted trade-off for legible text). Taller sources are left untouched.
-OVERLAY_MIN_HEIGHT = 1280
-
 # Coin count size is derived from the video height (not the comment font) so it
 # stays legible even though comments use a small font: COIN_REF_PX pixels at the
 # reference height, scaled to the real video. The gift icon size is a user
@@ -263,6 +255,8 @@ OVERLAY_KEYS = (
     "video_overlay_real_avatars",
     "video_overlay_avatar_upscale",
     "video_overlay_font_size",
+    # 出力解像度そのものを決めるので、変更したら焼き直しになる(cacheを跨がせない)。
+    "video_overlay_min_height",
     "video_overlay_comment_delay_seconds",
     "video_overlay_gift_seconds",
     "video_overlay_gift_min_diamonds",
@@ -784,13 +778,13 @@ def _tokenize_emoji(text: str, is_base=_is_emoji_base) -> list:
             i += 1
             while i < n:
                 c2 = ord(text[i])
-                if _is_emoji_mod(c2):
-                    cluster.append(text[i])
-                    i += 1
-                elif c2 == 0x200D and i + 1 < n and is_base(ord(text[i + 1])):
+                if c2 == 0x200D and i + 1 < n and is_base(ord(text[i + 1])):
                     cluster.append(text[i])
                     cluster.append(text[i + 1])
                     i += 2
+                elif _is_emoji_mod(c2):
+                    cluster.append(text[i])
+                    i += 1
                 else:
                     break
             tokens.append(("emoji", "".join(cluster)))
@@ -4254,14 +4248,23 @@ async def _probe_dimensions(src: Path) -> tuple[int, int, float]:
         return DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_FPS
 
 
-def _render_dimensions(src_w: int, src_h: int) -> tuple[int, int]:
-    """Output (width, height) for the burn-in. A source shorter than
-    OVERLAY_MIN_HEIGHT is upscaled to it (aspect preserved) so burned text/emoji
-    rasterise crisply instead of inheriting a low source resolution; taller sources
-    are returned unchanged. Both dimensions are forced even (yuv420p requires it)."""
-    if src_w <= 0 or src_h <= 0 or src_h >= OVERLAY_MIN_HEIGHT:
+def _render_dimensions(src_w: int, src_h: int, min_height: int) -> tuple[int, int]:
+    """Output (width, height) for the burn-in. A source shorter than ``min_height``
+    is upscaled to it (aspect preserved) so burned text/emoji/avatars rasterise
+    crisply instead of inheriting a low source resolution; taller sources are
+    returned unchanged. Both dimensions are forced even (yuv420p requires it).
+
+    ``min_height`` is the user's ``video_overlay_min_height`` and normally exceeds the
+    720x1280 source, because the avatar disc — diameter 2 * line_h, which scales with
+    the output height — is only 46px at 1280 and collapses into mush. The AI super-
+    resolution pass (media/avatar_upscale.py) lifts the 72px avatar to 288-400px, so a
+    taller canvas draws real detail rather than an interpolated enlargement. Measured
+    on a 3h50m recording: 1280 -> 11.7min/1.24GB, 1920 -> ~12.6min/1.99GB, 2560 ->
+    ~19.4min/2.75GB (NVENC; the comment layer is rasterised once per comment and
+    scrolled, not redrawn per frame, so 4x the pixels costs well under 2x the time)."""
+    if src_w <= 0 or src_h <= 0 or src_h >= min_height:
         return src_w, src_h
-    out_h = OVERLAY_MIN_HEIGHT
+    out_h = min_height
     out_w = int(round(src_w * out_h / src_h))
     return out_w - (out_w % 2), out_h - (out_h % 2)
 
@@ -4316,7 +4319,7 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> d
     # Render (and burn) at the upscaled resolution when the source is low-res, so the
     # overlay text/emoji are crisp; scale_to tells ffmpeg to bring the source frame up
     # to the same canvas before compositing. None when no upscale is needed.
-    width, height = _render_dimensions(src_w, src_h)
+    width, height = _render_dimensions(src_w, src_h, int(cfg["video_overlay_min_height"]))
     wide_em, narrow_em = await _font_metrics()
     return {
         "video_dur": video_dur,

@@ -12,6 +12,7 @@ per-session計算(compute_payload)はsqlite接続を受け取る純関数。redu
 
 import bisect
 import functools
+import hashlib
 import json
 import logging
 import threading
@@ -29,6 +30,21 @@ GLOVE_COIN_BUCKETS = [
     (1, 15), (16, 50), (51, 100), (101, 500), (501, 1000),
     (1001, 3000), (3001, 6000), (6001, 12000), (12001, 25000), (25001, 45000),
 ]
+
+# ギフトSKU構成(何の価格帯で課金されているか)の単価帯。TikTokの実際の価格点(1/5/20/
+# 99/199/299/500/1000/1500/10000/29999 coin 等)が帯の境界を跨がないよう、桁の変わり目と
+# 「500 coin級」「1000 coin級」の実務上の区切りで刻む。最上帯は上限を持たない
+# (Universe級の高額SKUを範囲外で落とすと、コインのシェアが合計100%にならなくなる)。
+GIFT_SKU_COIN_BUCKETS = [
+    (1, 9), (10, 99), (100, 499), (500, 999),
+    (1000, 4999), (5000, 19999), (20000, None),
+]
+# 反復購入とみなす最低送信回数。2回目が発生したかどうかを見る。
+_SKU_REPEAT_MIN = 2
+# SKU一覧に載せる上限(コイン降順)。全SKUを返すと画面が読めないため。
+_SKU_TOP_LIMIT = 25
+# identity_keyを畳むdigestのbit数。48bitなら10万identityでも衝突期待値は1e-5未満。
+_SKU_IDENTITY_DIGEST_BYTES = 6
 
 # 横断集計で扱う指標。indexは加算できるcount系のみ(viewersは水準値なので除外)。
 INDEX_METRICS = ("joins", "comments", "diamonds", "likes", "follows")
@@ -94,6 +110,7 @@ CACHE_VERSIONS = {
     "entry_source": 1,
     "battle_flow": 2,
     "coverage": 1,
+    "gift_sku": 1,
 }
 KINDS = tuple(CACHE_VERSIONS)
 
@@ -339,11 +356,15 @@ def concentration(values: list, lorenz_points: int = 40) -> dict:
     gini = (2 * cum_index) / (n * total) - (n + 1) / n
     # Lorenz曲線(下位から累積): 人口累積比 vs 価値累積比。点は最大lorenz_pointsへ間引く。
     lorenz = [{"p": 0.0, "share": 0.0}]
-    step = max(1, n // lorenz_points)
+    keep = max(1, lorenz_points - 1)  # 原点を含めてlorenz_points点に収める
+    if n <= keep:
+        picks = set(range(1, n + 1))
+    else:
+        picks = {max(1, round(j * n / keep)) for j in range(1, keep + 1)}
     running = 0
     for i, v in enumerate(vals):
         running += v
-        if (i + 1) % step == 0 or i == n - 1:
+        if (i + 1) in picks:
             lorenz.append({"p": round((i + 1) / n, 4), "share": round(running / total, 4)})
     # 上位N%(降順)のシェア。
     desc = vals[::-1]
@@ -398,6 +419,14 @@ def _peri_aggregate(clusters: list):
             var = sum((w[i] - mean[i]) ** 2 for w in windows) / (n - 1)
             ci.append(t * (var ** 0.5) / (n ** 0.5))
     return mean, ci
+
+
+def _identity_digest(identity_key: str) -> str:
+    """identity_keyをcache payload用の短いdigestへ。session跨ぎで同一人物を突き合わせる
+    ためだけに使うので、決定論的でありさえすればよい(暗号用途ではない)。"""
+    return hashlib.blake2b(
+        identity_key.encode("utf-8"), digest_size=_SKU_IDENTITY_DIGEST_BYTES
+    ).hexdigest()
 
 
 def _chunked(seq: list, size: int = 500):
@@ -1291,6 +1320,92 @@ def _payload_coverage(conn, sess: dict) -> dict:
     }
 
 
+def _gift_battle_windows(conn, sess: dict) -> list:
+    """session内のbattle窓(非重複・sessionの範囲へclamp済み)。start/endの揃わない
+    battle行は窓として使えないので落とす。"""
+    s_start = sess["started_at"]
+    s_end = sess["ended_at"]
+    spans = []
+    for row in conn.execute(
+        "SELECT data_json AS d FROM battles WHERE session_id = ? ORDER BY rowid",
+        (sess["id"],),
+    ).fetchall():
+        try:
+            battle = json.loads(row["d"])
+        except (ValueError, TypeError):
+            continue
+        start_time = battle.get("start_time")
+        end_time = battle.get("end_time")
+        if start_time is None or end_time is None or end_time <= start_time:
+            continue
+        lo = max(start_time, s_start)
+        hi = min(end_time, s_end) if s_end is not None else end_time
+        if hi > lo:
+            spans.append((lo, hi))
+    return _merge_intervals(spans)
+
+
+def _payload_gift_sku(conn, sess: dict) -> dict:
+    """ギフトSKU構成の素材。gift eventをgift_id単位へ畳み、battle窓内/外に分けて持つ。
+
+    単価帯への割り当てはreduce側で行う。単価(1個あたりcoin)はgift_id単位でしか安定せず、
+    gift_countが記録されていないeventが混ざるsessionでは自session内だけでは解けないため
+    (glove(§⑨)と同じ考え方で、観測が増えるほど後から解ける)。
+
+    反復購入率のために送り手ごとの送信回数も持つ。identity_keyは生で持つとcache payloadが
+    session数×送り手数まで膨らむので、48bitのdigestへ畳んで持つ(この規模の識別子数では
+    衝突確率が無視できる。用途はsession跨ぎの同一人物判定のみで、復号は不要)。
+    identityの取れない匿名giftは反復の分母に入れられないため、件数だけ別掲する。"""
+    windows = _gift_battle_windows(conn, sess)
+    # [events, coins, events_in_battle, coins_in_battle, price_coins, price_units]
+    # price_*はgift_count>0のeventのみ(単価=price_coins/price_units)。
+    gifts: dict = {}
+    senders: dict = {}
+    names: dict = {}
+    no_gift_id = [0, 0]
+    anon = 0
+    for row in conn.execute(
+        "SELECT time, gift_id, gift_name, gift_count, diamonds, identity_key"
+        " FROM events WHERE session_id = ? AND kind = 'gift' ORDER BY time",
+        (sess["id"],),
+    ).fetchall():
+        coins = row["diamonds"] or 0
+        gid = row["gift_id"]
+        if gid is None:
+            no_gift_id[0] += 1
+            no_gift_id[1] += coins
+            continue
+        key = str(gid)
+        rec = gifts.setdefault(key, [0, 0, 0, 0, 0, 0])
+        rec[0] += 1
+        rec[1] += coins
+        if _in_intervals(row["time"], windows):
+            rec[2] += 1
+            rec[3] += coins
+        count = row["gift_count"] or 0
+        if count > 0:
+            rec[4] += coins
+            rec[5] += count
+        name = (row["gift_name"] or "").strip()
+        if name:
+            names[key] = name
+        identity = row["identity_key"] or ""
+        if identity:
+            by_sender = senders.setdefault(key, {})
+            digest = _identity_digest(identity)
+            by_sender[digest] = by_sender.get(digest, 0) + 1
+        else:
+            anon += 1
+    return {
+        "g": gifts,
+        "names": names,
+        "s": senders,
+        "no_id": no_gift_id,
+        "anon": anon,
+        "battle_sec": round(_total_span(windows), 1),
+    }
+
+
 _PAYLOAD_FUNCS = {
     "summary": _payload_summary,
     "time_index": _payload_time_index,
@@ -1307,6 +1422,7 @@ _PAYLOAD_FUNCS = {
     "entry_source": _payload_entry_source,
     "battle_flow": _payload_battle_flow,
     "coverage": _payload_coverage,
+    "gift_sku": _payload_gift_sku,
 }
 
 
@@ -1761,6 +1877,147 @@ def reduce_glove(rows: list, unit_coins: dict) -> dict:
         "n_battles": n_battles,
         "unresolved": unresolved,
         "range_out": range_out,
+    }
+
+
+def _sku_unit_coins(rows: list) -> dict:
+    """gift_id→単価(1個あたりcoin)。集計対象期間のgift event全体から解く。
+
+    単価はgift_idごとに一定なので、gift_countが記録されたeventのcoinと個数を全て足して
+    割る(1 eventだけを代表に採るより、記録漏れや端数の影響を受けにくい)。gift_countが
+    1件も記録されていないgift_idは解けないため表に載せず、reduce側で除外扱いにする
+    (推測で埋めると単価帯の構成そのものが作り物になる)。"""
+    coins: dict = {}
+    units: dict = {}
+    for _, payload in rows:
+        for gid, rec in payload["g"].items():
+            coins[gid] = coins.get(gid, 0) + rec[4]
+            units[gid] = units.get(gid, 0) + rec[5]
+    return {gid: coins[gid] / units[gid] for gid, n in units.items() if n > 0 and coins[gid] > 0}
+
+
+def _sku_bucket_index(unit: float) -> Optional[int]:
+    for i, (lo, hi) in enumerate(GIFT_SKU_COIN_BUCKETS):
+        if unit >= lo and (hi is None or unit <= hi):
+            return i
+    return None
+
+
+@_stage("gift_sku")
+def reduce_gift_sku(rows: list) -> dict:
+    """ギフトSKU構成の記述統計。「誰が」(concentration)に対する「何で」の側。
+
+    出すのは3つ。(1)コイン/件数が単価帯ごとにどう分かれているか、(2)単価帯ごとの反復
+    購入率(同一配信者へその帯のギフトを2回以上送った人の割合)、(3)battle窓内と窓外での
+    構成差。いずれも記述統計であり、帯ごとの差が「その価格帯を置いたから売れた」ことを
+    意味しない(何を出すかは配信者と視聴者の状態に依存しており、統制していない)。
+
+    反復購入率のdedupは配信者(owner_key)単位。同じ人が別の配信者へ送った分を1人として
+    畳むと「1人が複数回」と「別配信で1回ずつ」が混ざり、配信者から見た反復の意味が
+    失われるため、(owner_key, identity)を1単位として数える。gift event自体はsessionが
+    配信者1人に属するので横断で重複しない(battleのように双方向へ現れる素材ではない)。"""
+    unit_coins = _sku_unit_coins(rows)
+    buckets = [
+        {"lo": lo, "hi": hi, "coins": 0, "events": 0,
+         "coins_battle": 0, "events_battle": 0}
+        for lo, hi in GIFT_SKU_COIN_BUCKETS
+    ]
+    # 帯ごと (owner_key, identity digest) -> その帯での送信回数。
+    senders: list = [dict() for _ in GIFT_SKU_COIN_BUCKETS]
+    skus: dict = {}
+    unresolved_events = unresolved_coins = 0
+    no_id_events = no_id_coins = anon_events = 0
+    battle_seconds = 0.0
+
+    for sess, payload in rows:
+        owner = sess["owner_key"]
+        battle_seconds += payload.get("battle_sec") or 0.0
+        no_id_events += payload["no_id"][0]
+        no_id_coins += payload["no_id"][1]
+        anon_events += payload.get("anon") or 0
+        for gid, rec in payload["g"].items():
+            unit = unit_coins.get(gid)
+            index = _sku_bucket_index(unit) if unit else None
+            if index is None:
+                # 単価が解けないSKUは帯へ入れない(glove(§⑨)のunresolvedと同じ扱い)。
+                unresolved_events += rec[0]
+                unresolved_coins += rec[1]
+                continue
+            b = buckets[index]
+            b["events"] += rec[0]
+            b["coins"] += rec[1]
+            b["events_battle"] += rec[2]
+            b["coins_battle"] += rec[3]
+            sku = skus.setdefault(gid, {"coins": 0, "events": 0, "unit": unit,
+                                        "name": "", "bucket": index})
+            sku["coins"] += rec[1]
+            sku["events"] += rec[0]
+            name = payload["names"].get(gid)
+            if name:
+                sku["name"] = name
+        for gid, by_sender in payload["s"].items():
+            unit = unit_coins.get(gid)
+            index = _sku_bucket_index(unit) if unit else None
+            if index is None:
+                continue
+            target = senders[index]
+            for digest, count in by_sender.items():
+                key = (owner, digest)
+                target[key] = target.get(key, 0) + count
+
+    total_coins = sum(b["coins"] for b in buckets)
+    total_events = sum(b["events"] for b in buckets)
+    battle_coins = sum(b["coins_battle"] for b in buckets)
+    outside_coins = total_coins - battle_coins
+
+    out_buckets = []
+    for b, by_sender in zip(buckets, senders):
+        n_senders = len(by_sender)
+        repeaters = sum(1 for n in by_sender.values() if n >= _SKU_REPEAT_MIN)
+        coins_outside = b["coins"] - b["coins_battle"]
+        out_buckets.append({
+            "label": f"{b['lo']}-{b['hi']}" if b["hi"] is not None else f"{b['lo']}+",
+            "lo": b["lo"], "hi": b["hi"],
+            "coins": b["coins"],
+            "events": b["events"],
+            "coin_share": (b["coins"] / total_coins) if total_coins else None,
+            "event_share": (b["events"] / total_events) if total_events else None,
+            "senders": n_senders,
+            "repeat_senders": repeaters,
+            "repeat_rate": (repeaters / n_senders * 100) if n_senders else None,
+            "repeat_ci": _wilson_ci(repeaters, n_senders),
+            "coins_battle": b["coins_battle"],
+            "coins_outside": coins_outside,
+            # battle内外それぞれのコインを100%としたときの、この帯の構成比。
+            # 「battle中は高額へ寄るか」を帯の間で比較できる形にする。
+            "coin_share_battle": (b["coins_battle"] / battle_coins) if battle_coins else None,
+            "coin_share_outside": (coins_outside / outside_coins) if outside_coins else None,
+        })
+
+    top = sorted(skus.items(), key=lambda kv: -kv[1]["coins"])[:_SKU_TOP_LIMIT]
+    return {
+        "buckets": out_buckets,
+        "top_skus": [
+            {"gift_id": int(gid), "name": sku["name"],
+             "unit_coins": round(sku["unit"], 2),
+             "bucket": out_buckets[sku["bucket"]]["label"],
+             "coins": sku["coins"], "events": sku["events"],
+             "coin_share": (sku["coins"] / total_coins) if total_coins else None}
+            for gid, sku in top
+        ],
+        "total_coins": total_coins,
+        "total_events": total_events,
+        "battle_coins": battle_coins,
+        "outside_coins": outside_coins,
+        "battle_seconds": round(battle_seconds, 1),
+        "n_skus": len(skus),
+        # 帯へ入れられなかった分。捏造せずに件数として残す(母数から外れている量が
+        # 見えないと、シェアが何に対する割合なのか判断できない)。
+        "unresolved_events": unresolved_events,
+        "unresolved_coins": unresolved_coins,
+        "no_gift_id_events": no_id_events,
+        "no_gift_id_coins": no_id_coins,
+        "anonymous_events": anon_events,
     }
 
 

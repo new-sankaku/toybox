@@ -373,7 +373,10 @@ function renderKpi(p) {
     ["総配信時間", fmtDuration(t.duration)],
     ["平均同接", fmtNum(Math.round(a.viewers))],
     ["最高同接", fmtNum(b.viewers)],
+    ["総Gift", fmtNum(t.gifts)],
     ["総Comment", fmtNum(t.comments)],
+    ["総Like", fmtNum(t.likes)],
+    ["総B.Score", fmtNum(t.battle_points)],
   ]);
 }
 
@@ -544,17 +547,26 @@ function renderGifters(gifters) {
 }
 
 // ---- Battle 分析 ----
+// チーム戦は自陣=チーム全体なので、Scoreも貢献者も「監視配信者ぶん」と「チーム計」で値が
+// 変わる。片方だけ出すと個人戦と桁が揃わず読み違えるため、両方を 自分 / チーム計 で併記する。
 function renderBattle(b) {
   chipBar("sm-battle", [
     ["対戦数", fmtNum(b.count)],
     ["勝率", b.count ? `${b.win_rate.toFixed(1)}%` : "—", b.win_rate >= 50 ? "ok" : ""],
     ["戦績", `${b.wins}勝 ${b.losses}敗 ${b.draws}分`],
-    ["平均自陣Score", fmtNum(Math.round(b.avg_own_score))],
+    [
+      "平均自陣Score 自分/陣営",
+      `${fmtNum(Math.round(b.avg_own_host_score))} / ${fmtNum(Math.round(b.avg_own_score))}`,
+    ],
     ["平均敵陣Score", fmtNum(Math.round(b.avg_opp_score))],
-    [`貢献者${b.key_contrib_threshold}+/戦`, `${b.avg_key_contributors.toFixed(1)} 人`],
+    [
+      `貢献者${b.key_contrib_threshold}+/戦 自室/陣営`,
+      `${b.avg_key_contributors.toFixed(1)} / ${b.avg_team_key_contributors.toFixed(1)} 人`,
+    ],
     ["Battle中コイン比率", `${b.battle_diamond_share.toFixed(1)}%`],
   ]);
-  document.getElementById("sm-battle-history-keycontrib").textContent = `貢献者${b.key_contrib_threshold}+`;
+  document.getElementById("sm-battle-history-keycontrib").textContent =
+    `貢献者${b.key_contrib_threshold}+ 自室/陣営`;
 }
 
 function renderOpponents(opponents) {
@@ -596,6 +608,14 @@ function renderBattleGifters(gifters) {
 }
 
 const BATTLE_TYPE_LABEL = { team: "チーム戦", personal: "個人戦" };
+
+// 「監視配信者ぶん / 陣営計」の併記。個人戦は自陣host=1人で両者一致するため1つだけ出し、
+// 差が出るチーム戦だけ併記する。自host分が不明(古いrecordでhostを特定できない)なら —。
+function pairValue(own, team) {
+  if (own === null || own === undefined) return `— / ${fmtNum(team)}`;
+  if (own === team) return fmtNum(own);
+  return `${fmtNum(own)} / ${fmtNum(team)}`;
+}
 const BATTLE_RESULT = { win: ["WIN", "ok"], lose: ["LOSE", "warn"], draw: ["分", ""] };
 
 // Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順）。
@@ -618,11 +638,11 @@ function renderBattleHistory(history) {
         fmtDateTime(h.started_at),
         mode,
         opp,
-        fmtNum(h.own_score),
+        pairValue(h.own_host_score, h.own_score),
         fmtNum(h.opp_score),
         res,
-        fmtNum(h.diamonds),
-        `${fmtNum(h.key_contributors)} 人`,
+        pairValue(h.diamonds, h.team_diamonds),
+        `${pairValue(h.key_contributors, h.team_key_contributors)} 人`,
       ];
     },
     [3, 4, 6, 7],

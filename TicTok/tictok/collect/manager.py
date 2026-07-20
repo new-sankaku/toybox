@@ -1,7 +1,7 @@
 import logging
 from typing import Awaitable, Callable, Optional
 
-from tictok.collect.collector import ACTIVE_STATES, ProbeGate, TikTokCollector
+from tictok.collect.collector import ACTIVE_STATES, PROBING_STATES, ProbeGate, TikTokCollector
 from tictok.collect.live_resolver import BrowserLiveResolver
 from tictok.core.logctx import log_context
 from tictok.storage import Storage
@@ -20,7 +20,7 @@ class CollectorManager:
         self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
         self._collectors: dict[str, TikTokCollector] = {}
-        self._probe_gate = ProbeGate(settings, lambda: len(self._collectors))
+        self._probe_gate = ProbeGate(settings, self._probing_count)
         self._resolver = BrowserLiveResolver(settings)
 
     async def startup(self) -> None:
@@ -28,6 +28,12 @@ class CollectorManager:
 
     async def shutdown(self) -> None:
         await self._resolver.close()
+
+    def _probing_count(self) -> int:
+        """ProbeGateの間隔計算の母数。probeを実際に消費しているcollector(=live checkを
+        撃ち続けている待機中/制限中)だけを数える。接続中のcollectorを含めると、実アクセス
+        量は変わらないのに待機中の検出間隔だけが引き伸ばされる。"""
+        return sum(1 for c in self._collectors.values() if c.state in PROBING_STATES)
 
     def get(self, unique_id: str) -> Optional[TikTokCollector]:
         return self._collectors.get(unique_id)

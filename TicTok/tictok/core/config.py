@@ -523,6 +523,37 @@ def get_ai_comment_sample() -> int:
     return int(os.environ.get("TICTOK_AI_COMMENT_SAMPLE", "300"))
 
 
+def get_ai_comment_sample_windows() -> int:
+    """Number of equal-time windows the session is split into before sampling comments.
+    The sample is drawn proportionally from every window, so the reported sentiment is an
+    estimate of the whole stream rather than of its final minutes. 1 disables the
+    stratification (a single window = the plain tail sample)."""
+    return int(os.environ.get("TICTOK_AI_COMMENT_SAMPLE_WINDOWS", "12"))
+
+
+def get_ai_max_tokens() -> int:
+    """Upper bound on the model's reply length. Local quantized models will happily run
+    to their context limit on a long comment batch, and a reply cut off mid-object is
+    unparseable JSON. 0 omits the field (server default)."""
+    return int(os.environ.get("TICTOK_AI_MAX_TOKENS", "2048"))
+
+
+def get_ai_json_schema_enabled() -> bool:
+    """Send the expected shape as an OpenAI-compatible ``response_format`` json_schema so
+    the endpoint constrains decoding instead of the reply being scraped for braces.
+    llama.cpp server and Ollama both support it; disable for an endpoint that rejects
+    the field (it answers HTTP 400 rather than degrading, which is the intended
+    behaviour — there is no silent fallback)."""
+    return os.environ.get("TICTOK_AI_JSON_SCHEMA", "1").lower() in ("1", "true", "yes")
+
+
+def get_ai_review_min_observations() -> int:
+    """Minimum n for a cross-session statistic to be offered to the review model as
+    established rather than as provisional. Below this the figure is still passed, but
+    flagged so the model is told not to draw a conclusion from it."""
+    return int(os.environ.get("TICTOK_AI_REVIEW_MIN_OBSERVATIONS", "20"))
+
+
 # ---- Local speech-to-text (faster-whisper / CTranslate2, GPU-accelerated) ----
 # Opt-in; the faster-whisper package is an optional dependency loaded lazily, so the
 # base app runs without it. No fallback: if disabled or the package/model is missing
@@ -716,11 +747,75 @@ def get_media_queue_poll_seconds() -> float:
     return float(os.environ.get("TICTOK_MEDIA_QUEUE_POLL_SECONDS", "5"))
 
 
+def get_media_job_attempts() -> int:
+    """Total runs of a media job before it is recorded as failed (1 = no retry).
+    A burn-in dies on transient conditions that are gone seconds later — the output
+    directory locked by an antivirus scan, an ffmpeg spawn refused while the disk is
+    busy — and without a retry those land as a permanent failure that only a human
+    re-queue undoes. The default keeps this to a single retry because the other class of
+    failure (a genuine defect in the input) costs hours of GPU time per attempt."""
+    return int(os.environ.get("TICTOK_MEDIA_JOB_ATTEMPTS", "2"))
+
+
+def get_media_job_retry_backoff_seconds() -> float:
+    """Base wait before re-running a failed media job; the Nth retry waits base * N.
+    Long enough for a file lock or a disk-busy spike to clear."""
+    return float(os.environ.get("TICTOK_MEDIA_JOB_RETRY_BACKOFF_SECONDS", "10"))
+
+
+def get_transcribe_job_attempts() -> int:
+    """Total runs of a transcription job before it is recorded as failed (1 = no retry).
+    Higher than the media default: STT reads the file and holds the GPU for minutes
+    rather than hours, so a retry is cheap, and a CUDA allocation refused while another
+    job releases VRAM is exactly the transient this covers."""
+    return int(os.environ.get("TICTOK_TRANSCRIBE_JOB_ATTEMPTS", "3"))
+
+
+def get_transcribe_job_retry_backoff_seconds() -> float:
+    """Base wait before re-running a failed transcription; the Nth retry waits base * N."""
+    return float(os.environ.get("TICTOK_TRANSCRIBE_JOB_RETRY_BACKOFF_SECONDS", "10"))
+
+
 def get_media_job_history_days() -> float:
     """How long finished media job rows stay in the DB for the job centre's history
     (0 = never prune). These rows are small and are the only record of what was asked
     for, so the default keeps a fortnight rather than minutes."""
     return float(os.environ.get("TICTOK_MEDIA_JOB_HISTORY_DAYS", "14"))
+
+
+# ---- Spike detection (streamer highlights / clip candidates, see core/spike.py) ----
+
+
+def get_highlight_zscore() -> float:
+    """Threshold (in standard deviations above the session's own mean) at which a window
+    counts as a highlight on the streamer page. The clip-candidate screen passes its own
+    設定値 explicitly; this is the default the highlight list uses, and the two share one
+    detector so the same moment is named on both screens."""
+    return float(os.environ.get("TICTOK_HIGHLIGHT_ZSCORE", "2.0"))
+
+
+# ---- Audio profile (silence / loudness, derived from the waveform decode) ----
+
+
+def get_audio_profile_interval_seconds() -> float:
+    """Resolution of the absolute-level series kept alongside the display waveform.
+    The waveform decode already produces a 20ms peak series and throws it away; keeping
+    it at this resolution costs a few kB per recording and means silence and loudness
+    spikes are answerable without decoding the container again."""
+    return float(os.environ.get("TICTOK_AUDIO_PROFILE_INTERVAL_SECONDS", "1.0"))
+
+
+def get_audio_silence_dbfs() -> float:
+    """Level (dBFS, full scale = 0) below which an interval counts as silent. Measured
+    against full scale rather than against the recording's own peak, because a stream
+    that is quiet throughout must not have its noise floor promoted to 'audible'."""
+    return float(os.environ.get("TICTOK_AUDIO_SILENCE_DBFS", "-50"))
+
+
+def get_audio_silence_min_seconds() -> float:
+    """Shortest run of silent intervals reported as a silent span. Below this the gap is
+    a pause between words, not a place a clip can be cut."""
+    return float(os.environ.get("TICTOK_AUDIO_SILENCE_MIN_SECONDS", "2.0"))
 
 
 # ---- Clip export ----
