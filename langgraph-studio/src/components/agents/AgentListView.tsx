@@ -109,8 +109,7 @@ export default function AgentListView({
    completed:list.filter(a=>a.status==='completed').length,
    failed:list.filter(a=>a.status==='failed').length,
    interrupted:list.filter(a=>a.status==='interrupted').length,
-   waiting_provider:list.filter(a=>a.status==='waiting_provider').length,
-   frozen:list.filter(a=>a.status==='frozen').length
+   waiting_provider:list.filter(a=>a.status==='waiting_provider').length
   }
  },[allAgentsForCount])
 

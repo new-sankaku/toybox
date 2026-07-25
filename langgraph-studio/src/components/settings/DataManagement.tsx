@@ -98,10 +98,10 @@ export function DataManagement():JSX.Element{
   try{
    const r=await archiveApi.cleanup()
    const total=(r.deleted?.traces||0)+(r.deleted?.agent_logs||0)+(r.deleted?.system_logs||0)
-   showMsg(`${total}件のログを削除しました`,'success')
+   showMsg(`${total}件のデータをクリーンアップしました`,'success')
    await fetchAll()
   }catch{
-   showMsg('ログの削除に失敗しました','error')
+   showMsg('クリーンアップに失敗しました','error')
   }finally{
    setOperating(null)
   }
@@ -183,7 +183,7 @@ export function DataManagement():JSX.Element{
    <Card>
     <CardHeader>
      <Clock size={14}/>
-     <span className="text-nier-small font-medium">ログの削除</span>
+     <span className="text-nier-small font-medium">クリーンアップ</span>
      <span className="text-nier-caption opacity-60 ml-2">保持期間より古いデータを削除</span>
     </CardHeader>
     <CardContent className="border-t border-nier-border-light space-y-4">
@@ -196,7 +196,7 @@ export function DataManagement():JSX.Element{
        onChange={e=>setRetentionDays(Number(e.target.value))}
       />
       <span className="text-nier-small text-nier-text-light">日</span>
-      <Button variant="default" size="sm" onClick={handleSetRetention} disabled={operating==='retention'}>
+      <Button variant="ghost" size="sm" onClick={handleSetRetention} disabled={operating==='retention'}>
        {operating==='retention'?'設定中...':'設定'}
       </Button>
      </div>
@@ -232,7 +232,7 @@ export function DataManagement():JSX.Element{
       onClick={()=>setConfirmDialog({type:'cleanup'})}
       disabled={operating==='cleanup'}
      >
-      {operating==='cleanup'?'実行中...':'ログを削除'}
+      {operating==='cleanup'?'実行中...':'クリーンアップ実行'}
      </Button>
     </CardContent>
    </Card>
@@ -241,7 +241,6 @@ export function DataManagement():JSX.Element{
     <CardHeader>
      <Archive size={16}/>
      <span className="text-nier-small font-medium">アーカイブ一覧</span>
-     <span className="text-nier-caption opacity-60 ml-2">バックアップ作成時に自動保存されたデータ</span>
     </CardHeader>
     <CardContent className="border-t border-nier-border-light">
      {archives.length===0?(
@@ -275,7 +274,7 @@ export function DataManagement():JSX.Element{
     <Card>
      <CardHeader>
       <Database size={14} className="text-nier-text-light"/>
-      <span className="text-nier-small font-medium">ログ件数</span>
+      <span className="text-nier-small font-medium">データ統計</span>
      </CardHeader>
      <CardContent className="border-t border-nier-border-light">
       <div className="grid grid-cols-3 gap-4 text-nier-small">
@@ -305,7 +304,7 @@ export function DataManagement():JSX.Element{
         {confirmDialog.type==='restore'&&'復元の確認'}
         {confirmDialog.type==='delete-backup'&&'バックアップ削除の確認'}
         {confirmDialog.type==='delete-archive'&&'アーカイブ削除の確認'}
-        {confirmDialog.type==='cleanup'&&'ログ削除の確認'}
+        {confirmDialog.type==='cleanup'&&'クリーンアップの確認'}
        </span>
       </CardHeader>
       <CardContent className="border-t border-nier-border-light">

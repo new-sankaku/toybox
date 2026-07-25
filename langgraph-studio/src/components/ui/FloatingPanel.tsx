@@ -147,7 +147,7 @@ export function FloatingPanel({
       variant="ghost"
       size="icon"
       onClick={onClose}
-      className="text-nier-text-header hover:bg-white/20 h-6 w-6 border border-nier-text-header/30"
+      className="text-nier-text-header hover:bg-white/10 h-6 w-6"
      >
       <X size={14}/>
      </Button>

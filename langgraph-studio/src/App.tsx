@@ -191,7 +191,7 @@ function App():JSX.Element{
     <div key={`dashboard-${dataKey}`} className={activeTab==='system'?'block':'hidden'}>
      <DashboardView/>
     </div>
-    {activeTab!=='system'&&<div key={`content-${dataKey}`} className="h-full min-h-0 overflow-hidden">{renderOtherContent()}</div>}
+    {activeTab!=='system'&&<div key={`content-${dataKey}`} className="h-full">{renderOtherContent()}</div>}
    </AppLayout>
   </QueryClientProvider>
 )

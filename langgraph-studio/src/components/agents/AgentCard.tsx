@@ -1,7 +1,7 @@
 import{Progress}from'@/components/ui/Progress'
 import{cn}from'@/lib/utils'
 import type{Agent,QualityCheckConfig}from'@/types/agent'
-import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Zap,Lock}from'lucide-react'
+import{Cpu,Play,CheckCircle,XCircle,Pause,Clock,Shield,ShieldOff,Sparkles,AlertCircle,RotateCcw,Zap}from'lucide-react'
 
 interface AgentCardProps{
  agent:Agent
@@ -57,13 +57,6 @@ const statusConfig={
   textColor:'text-nier-text-light',
   icon:Zap,
   text:'中断',
-  pulse:false
- },
- frozen:{
-  color:'bg-[#5A6A80]',
-  textColor:'text-nier-text-light',
-  icon:Lock,
-  text:'凍結',
   pulse:false
  },
  paused:{

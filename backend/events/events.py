@@ -138,20 +138,6 @@ class AgentPaused:
 
 
 @dataclass
-class AgentFrozen:
-    project_id:str
-    agent_id:str
-    agent:Dict[str,Any]=field(default_factory=dict)
-
-
-@dataclass
-class AgentUnfrozen:
-    project_id:str
-    agent_id:str
-    agent:Dict[str,Any]=field(default_factory=dict)
-
-
-@dataclass
 class AgentActivated:
     project_id:str
     agent_id:str

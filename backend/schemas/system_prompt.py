@@ -17,6 +17,3 @@ class AgentSystemPromptSchema(BaseSchema):
  principles:List[str]
  base_prompt_file:Optional[str]=None
  has_quality_feedback:bool=False
-
-class PromptSaveSchema(BaseSchema):
- content:str

@@ -60,8 +60,6 @@ interface ServerToClientEvents{
  'agent:resumed':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:retry':(data:{agent:Agent;agentId:string;projectId:string;previousStatus:string})=>void
  'agent:activated':(data:{agent:Agent;agentId:string;projectId:string})=>void
- 'agent:frozen':(data:{agent:Agent;agentId:string;projectId:string})=>void
- 'agent:unfrozen':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'agent:waiting_response':(data:{agent:Agent;agentId:string;projectId:string})=>void
  'checkpoint:created':(data:{checkpoint:Checkpoint;checkpointId:string;projectId:string;agentId:string;agentStatus?:string})=>void
  'checkpoint:resolved':(data:{checkpoint:Checkpoint;checkpointId?:string;agentId?:string;agentStatus?:string})=>void
@@ -320,28 +318,6 @@ class WebSocketService{
     agentStore.updateAgent(data.agent.id,data.agent)
    }
    agentStore.updateAgentStatus(data.agentId,'running')
-  })
-
-  this.socket.on('agent:frozen',(data)=>{
-   console.log('[WS] Agent frozen:',data.agentId)
-   const agentStore=useAgentStore.getState()
-   if(data.agent){
-    agentStore.updateAgent(data.agent.id,data.agent)
-   }
-   agentStore.updateAgentStatus(data.agentId,'frozen')
-   const name=getAgentDisplayName(data.agent)
-   useActivityFeedStore.getState().addEvent('agent_frozen',name,`${name} が凍結されました`,data.agentId)
-  })
-
-  this.socket.on('agent:unfrozen',(data)=>{
-   console.log('[WS] Agent unfrozen:',data.agentId)
-   const agentStore=useAgentStore.getState()
-   if(data.agent){
-    agentStore.updateAgent(data.agent.id,data.agent)
-   }
-   agentStore.updateAgentStatus(data.agentId,'pending')
-   const name=getAgentDisplayName(data.agent)
-   useActivityFeedStore.getState().addEvent('agent_unfrozen',name,`${name} の凍結が解除されました`,data.agentId)
   })
 
   this.socket.on('agent:waiting_response',(data)=>{
