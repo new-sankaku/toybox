@@ -81,6 +81,38 @@ class AgentLifecycleManager(BaseService):
             )
             return agent_repo.to_dict(agent)
 
+    def freeze_agent(self,agent_id:str)->Optional[Dict]:
+        with session_scope() as session:
+            agent_repo=AgentRepository(session)
+            syslog_repo=SystemLogRepository(session)
+            agent=agent_repo.get(agent_id)
+            if not agent or agent.status!="pending":
+                return None
+            agent.status="frozen"
+            agent.updated_at=datetime.now()
+            session.flush()
+            syslog_repo.add_log(
+                agent.project_id,"info","System",
+                f"エージェント {_get_display_name(agent)} を凍結",
+            )
+            return agent_repo.to_dict(agent)
+
+    def unfreeze_agent(self,agent_id:str)->Optional[Dict]:
+        with session_scope() as session:
+            agent_repo=AgentRepository(session)
+            syslog_repo=SystemLogRepository(session)
+            agent=agent_repo.get(agent_id)
+            if not agent or agent.status!="frozen":
+                return None
+            agent.status="pending"
+            agent.updated_at=datetime.now()
+            session.flush()
+            syslog_repo.add_log(
+                agent.project_id,"info","System",
+                f"エージェント {_get_display_name(agent)} の凍結を解除",
+            )
+            return agent_repo.to_dict(agent)
+
     def get_retryable_agents(self,project_id:str)->List[Dict]:
         with session_scope() as session:
             agents=AgentRepository(session).get_by_project(project_id)

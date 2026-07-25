@@ -662,6 +662,45 @@ def test_next_pending_media_job_orders_by_priority_then_queue_time(tmp_db, recor
     assert tmp_db.next_pending_media_job()["job_id"] == "low"
 
 
+def test_claim_takes_one_job_at_a_time_and_marks_it_running(tmp_db, recording_id,
+                                                            make_session):
+    """workerが複数居ても同じ行を2人が拾わないこと。選ぶのと掴むのが別呼び出しだと、
+    その隙間に同じ録画へ2本のffmpegが走り、同じ出力fileを奪い合う。"""
+    other = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
+    tmp_db.enqueue_media_job("low", "burn", other, priority=0)
+    tmp_db.enqueue_media_job("high", "burn", recording_id, priority=5)
+
+    first = tmp_db.claim_next_pending_media_job()
+    assert first["job_id"] == "high"
+    assert first["state"] == "running"
+    assert first["started_at"]
+
+    second = tmp_db.claim_next_pending_media_job()
+    assert second["job_id"] == "low"
+
+    assert tmp_db.claim_next_pending_media_job() is None
+
+
+def test_claim_never_runs_two_jobs_for_the_same_recording(tmp_db, recording_id,
+                                                          make_session):
+    """同じ録画へ2本同時に出さない。再mp4化はmp4を作り直して差し替えるので、その裏で
+    同じmp4を読んでいる焼き込みは途中で足元を抜かれる。"""
+    other = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
+    # 同じ録画への2本は priority で順番を確定させる(queued_at はWindowsの時計分解能で
+    # 同着になり得るため、順序の主張には使わない)。
+    tmp_db.enqueue_media_job("burn", "overlay", recording_id, priority=9)
+    tmp_db.enqueue_media_job("again", "reprocess", recording_id, priority=8)
+    tmp_db.enqueue_media_job("other", "overlay", other, priority=1)
+
+    assert tmp_db.claim_next_pending_media_job()["job_id"] == "burn"
+    # 2本目は同じ録画のjobを飛ばして、別の録画へ進む。
+    assert tmp_db.claim_next_pending_media_job()["job_id"] == "other"
+    assert tmp_db.claim_next_pending_media_job() is None
+
+    tmp_db.finish_media_job("burn", "completed")
+    assert tmp_db.claim_next_pending_media_job()["job_id"] == "again"
+
+
 def test_cancel_pending_media_job_refuses_running(tmp_db, recording_id):
     tmp_db.enqueue_media_job("j1", "burn", recording_id)
     tmp_db.start_media_job("j1")
@@ -778,6 +817,64 @@ def test_untranscribed_recordings_excludes_queued_and_unfinished(tmp_db, make_se
 
 
 # ===== 録画 / 転写 =====
+
+def test_update_rebuilt_recording_never_moves_ended_at(tmp_db, make_session):
+    """作り直しは捕捉が終わった時刻を動かさない。
+
+    復旧と再mp4化がupdate_recordingを流用し、Recorder._finalizeが打つ「今」をended_atへ
+    書き戻していたため、DBの尺が「録画開始〜再処理時刻」に化けていた。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+    tmp_db.update_recording(rec, "completed", "/a.mp4", "a.mp4", 1300.0, 100)
+
+    tmp_db.update_rebuilt_recording(rec, "completed", "/b.mp4", "b.mp4", 200,
+                                    duration_seconds=280.0,
+                                    ended_at_if_missing=9_999_999.0)
+
+    row = tmp_db.get_recording(rec)
+    assert row["ended_at"] == 1300.0
+    assert row["path"] == "/b.mp4"
+    assert row["bytes"] == 200
+    assert row["duration_seconds"] == 280.0
+
+
+def test_update_rebuilt_recording_fills_only_a_missing_ended_at(tmp_db, make_session):
+    """中断のまま終わってended_atを持たない行だけは埋める。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+
+    tmp_db.update_rebuilt_recording(rec, "completed", "/a.mp4", "a.mp4", 10,
+                                    ended_at_if_missing=1250.0)
+
+    assert tmp_db.get_recording(rec)["ended_at"] == 1250.0
+
+
+def test_measured_duration_survives_an_update_that_could_not_measure(tmp_db, make_session):
+    """尺を測れなかった書き戻しが、測れていた値を消してはいけない。
+
+    Noneは「据え置き」であって「不明で上書き」ではない(ffprobeが一時的に無い環境で
+    再mp4化を通すと、それまでの実測が消える)。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+    tmp_db.update_recording(rec, "completed", "/a.mp4", "a.mp4", 1300.0, 100,
+                            duration_seconds=280.0)
+
+    tmp_db.update_recording(rec, "completed", "/a.mp4", "a.mp4", 1300.0, 100)
+    assert tmp_db.get_recording(rec)["duration_seconds"] == 280.0
+
+    tmp_db.update_rebuilt_recording(rec, "completed", "/a.mp4", "a.mp4", 100)
+    assert tmp_db.get_recording(rec)["duration_seconds"] == 280.0
+
+
+def test_set_recording_duration_refuses_a_zero_measurement(tmp_db, make_session):
+    """尺0の録画は存在しない。0は測定失敗なので、実測値を潰させない。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+
+    assert tmp_db.set_recording_duration(rec, 42.0) is True
+    assert tmp_db.set_recording_duration(rec, 0.0) is False
+    assert tmp_db.get_recording(rec)["duration_seconds"] == 42.0
+
 
 def test_mark_stale_recordings_marks_only_in_flight(tmp_db, make_session):
     session_id = make_session("alice", status="connected")
@@ -945,3 +1042,427 @@ def test_close_flushes_buffered_events(tmp_db, tmp_db_path, make_session, event_
     finally:
         side.close()
     assert n == 3
+
+
+# ===== 未監視配信者の発見(discovery) =====
+
+def _battle(battle_id, start_time, opponents):
+    return {
+        "battle_id": battle_id,
+        "start_time": start_time,
+        "opponents": [
+            {"unique_id": handle, "nickname": handle.upper(), "avatar": "", "user_id": ""}
+            for handle in opponents
+        ],
+    }
+
+
+def test_discovery_ranks_by_time_decayed_contact_count(tmp_db, make_session):
+    """順位は生の対戦数ではなく時間減衰つきの和。回数で劣る直近の相手が、
+    古いだけの多数回の相手を上回ること(この逆転こそが減衰を入れる理由)。"""
+    now = time.time()
+    session_id = make_session("owner")
+    battles = []
+    # stale: 4戦だが全て半減期4つぶん(112日)前 → 重みは 4 * 0.0625 = 0.25
+    battles += [_battle(100 + i, now - 112 * 86400, ["stale"]) for i in range(4)]
+    # fresh: 2戦だが直近 → 重みはほぼ 2.0
+    battles += [_battle(200 + i, now - 3600, ["fresh"]) for i in range(2)]
+    tmp_db.save_battles(session_id, battles)
+
+    result = tmp_db.discovery_candidates(min_contacts=2, half_life_days=28.0, limit=10)
+    handles = [c["unique_id"] for c in result["candidates"]]
+    assert handles == ["fresh", "stale"]
+    by_handle = {c["unique_id"]: c for c in result["candidates"]}
+    assert by_handle["stale"]["contacts"] == 4
+    assert by_handle["fresh"]["contacts"] == 2
+    assert by_handle["fresh"]["score"] > by_handle["stale"]["score"]
+
+
+def test_discovery_excludes_monitored_and_dismissed(tmp_db, make_session):
+    now = time.time()
+    session_id = make_session("owner")
+    tmp_db.save_battles(
+        session_id,
+        [_battle(i, now - 3600, ["rival", "friend", "other"]) for i in range(1, 4)],
+    )
+    assert {c["unique_id"] for c in
+            tmp_db.discovery_candidates(3, 14.0, 10)["candidates"]} == {"rival", "friend", "other"}
+
+    # 監視へ昇格した相手は候補から外れる(既存のmonitored_targetsが唯一の判定元)。
+    tmp_db.add_monitored_target("rival", record_video=True)
+    # 却下した相手も外れる。候補は毎回導出するので、記録しないと出続ける。
+    tmp_db.dismiss_discovery_candidate("friend")
+    result = tmp_db.discovery_candidates(3, 14.0, 10)
+    assert [c["unique_id"] for c in result["candidates"]] == ["other"]
+    assert result["dismissed"] == 1
+
+    # 却下は取り消せる。
+    tmp_db.restore_discovery_candidate("friend")
+    assert {c["unique_id"] for c in
+            tmp_db.discovery_candidates(3, 14.0, 10)["candidates"]} == {"friend", "other"}
+    assert tmp_db.list_dismissed_candidates() == []
+
+
+def test_discovery_counts_a_battle_once_per_opponent_across_observers(tmp_db, make_session):
+    """同じBattleを複数の監視配信者が別sessionで観測しても接触は1回。
+    素直に数えると同陣営に2人監視しているだけで対戦数が倍に化ける。"""
+    now = time.time()
+    for owner in ("owner_a", "owner_b"):
+        session_id = make_session(owner)
+        tmp_db.save_battles(session_id, [_battle(9001, now - 3600, ["rival"])])
+
+    result = tmp_db.discovery_candidates(min_contacts=1, half_life_days=14.0, limit=10)
+    assert [c["unique_id"] for c in result["candidates"]] == ["rival"]
+    assert result["candidates"][0]["contacts"] == 1
+    # どの監視配信者の相手だったかは両方残す(候補を見て判断する材料になる)。
+    assert result["candidates"][0]["via"] == ["owner_a", "owner_b"]
+
+
+def test_discovery_skips_opponents_without_handle(tmp_db, make_session):
+    """unique_idが無い相手は監視を開始する手段が無いので候補にしない。
+    nicknameで代用すると昇格できない候補が並ぶ。"""
+    now = time.time()
+    session_id = make_session("owner")
+    tmp_db.save_battles(
+        session_id,
+        [{"battle_id": 1, "start_time": now - 3600,
+          "opponents": [{"unique_id": "", "nickname": "名無し"},
+                        {"unique_id": "named", "nickname": "Named"}]}],
+    )
+    result = tmp_db.discovery_candidates(min_contacts=1, half_life_days=14.0, limit=10)
+    assert [c["unique_id"] for c in result["candidates"]] == ["named"]
+    assert result["skipped_unidentified"] == 1
+
+
+def test_discovery_skips_battles_missing_time_or_id(tmp_db, make_session):
+    """start_time/battle_idはどちらも減衰と重複除外に必須。欠けた記録に代わりの値を
+    当てると、実際には無かった接触を作ることになるので数えない。"""
+    now = time.time()
+    session_id = make_session("owner")
+    tmp_db.save_battles(
+        session_id,
+        [
+            {"battle_id": 0, "start_time": now, "opponents": [{"unique_id": "a"}]},
+            {"battle_id": 5, "start_time": None, "opponents": [{"unique_id": "b"}]},
+            _battle(6, now - 3600, ["c"]),
+        ],
+    )
+    result = tmp_db.discovery_candidates(min_contacts=1, half_life_days=14.0, limit=10)
+    assert [c["unique_id"] for c in result["candidates"]] == ["c"]
+    assert result["skipped_incomplete"] == 2
+
+
+def test_discovery_limit_caps_rows_but_reports_full_eligible_count(tmp_db, make_session):
+    """件数制限は表示だけを絞る。総数を返さないと「これで全部」と読めてしまう。"""
+    now = time.time()
+    session_id = make_session("owner")
+    tmp_db.save_battles(
+        session_id,
+        [_battle(i, now - 3600, [f"rival{i:02d}"]) for i in range(1, 21)],
+    )
+    result = tmp_db.discovery_candidates(min_contacts=1, half_life_days=14.0, limit=5)
+    assert len(result["candidates"]) == 5
+    assert result["eligible"] == 20
+    assert result["seen"] == 20
+
+
+def test_discovery_rejects_non_positive_half_life(tmp_db):
+    with pytest.raises(ValueError):
+        tmp_db.discovery_candidates(min_contacts=1, half_life_days=0.0, limit=5)
+
+
+# ===== Fan台帳 =====
+
+def _gift(gift_builder, key, diamonds, at, repeat=1):
+    """identity_keyがuser_idから決まることを利用して、視聴者を数値IDで作り分ける。"""
+    return gift_builder(
+        diamonds=diamonds, repeat_count=repeat, at=at,
+        user={"user_id": key, "unique_id": f"handle{key}", "nickname": f"Fan {key}",
+              "avatar": "", "fans_level": 0, "gifter_level": 0,
+              "gifter_badge": "", "member_badge": ""},
+    )
+
+
+def test_fan_ledger_aggregates_across_streamers_with_per_streamer_split(
+    tmp_db, make_session, gift_builder
+):
+    """台帳は配信者を跨いで合算し、内訳を額つきで返す。額を伏せて「2人へ投げた」とだけ
+    出すと、3コインの相手も本命と同格に見えてしまう。"""
+    a = make_session("ownerA")
+    b = make_session("ownerB")
+    tmp_db.add_event(a, _gift(gift_builder, "7001", 1000, at=100.0))
+    tmp_db.add_event(a, _gift(gift_builder, "7001", 500, at=200.0))
+    tmp_db.add_event(b, _gift(gift_builder, "7001", 3, at=300.0))
+    tmp_db.add_event(b, _gift(gift_builder, "7002", 50, at=400.0))
+    tmp_db.flush()
+
+    result = tmp_db.fan_ledger(min_diamonds=0, limit=10)
+    assert [f["identity_key"] for f in result["fans"]] == ["7001", "7002"]
+    top = result["fans"][0]
+    assert top["diamonds"] == 1503
+    assert top["sessions"] == 2
+    assert top["streamer_count"] == 2
+    # 内訳は額の降順。偏りが読み取れること。
+    assert [(s["unique_id"], s["diamonds"]) for s in top["streamers"]] == [
+        ("ownerA", 1500), ("ownerB", 3),
+    ]
+    assert result["total_gifters"] == 2
+    assert result["multi_streamer"] == 1
+
+
+def test_fan_ledger_excludes_non_identity_keys(tmp_db, make_session, gift_builder, event_builder):
+    """'(unknown)' と空keyは1人の視聴者ではない。台帳に並べると巨大な偽fanになる。
+    除外した分は黙って消さず、件数と額を返す。"""
+    session_id = make_session("owner")
+    tmp_db.add_event(session_id, _gift(gift_builder, "7001", 100, at=100.0))
+    for key in ("", "(unknown)"):
+        # identity_keyはuser dict側で指定する(collectorが決めた値をstorageが尊重する経路)。
+        tmp_db.add_event(session_id, gift_builder(
+            diamonds=9999, at=200.0,
+            user={"user_id": "", "unique_id": "", "nickname": key, "avatar": "",
+                  "fans_level": 0, "gifter_level": 0, "gifter_badge": "",
+                  "member_badge": "", "identity_key": key},
+        ))
+    tmp_db.flush()
+
+    result = tmp_db.fan_ledger(min_diamonds=0, limit=10)
+    assert [f["identity_key"] for f in result["fans"]] == ["7001"]
+    assert all(f["identity_key"] not in ("", "(unknown)") for f in result["fans"])
+    # 除外分が見えること(合計が合わない理由を画面から辿れるようにするため)。
+    assert result["unidentified"]["gift_events"] == 2
+    assert result["unidentified"]["diamonds"] == 19998
+
+
+def test_fan_ledger_totals_reconcile_with_gift_events(tmp_db, make_session, gift_builder):
+    """台帳の合計 + 除外分 = gift eventの総額。(identity, 配信者)で割って畳む集計が
+    coinを取りこぼしても二重計上してもいないことの検算。"""
+    a = make_session("ownerA")
+    b = make_session("ownerB")
+    for i, (session_id, key, coins) in enumerate([
+        (a, "7001", 100), (a, "7002", 250), (b, "7001", 70), (b, "7003", 5),
+        (a, "7001", 30), (b, "7002", 8),
+    ]):
+        tmp_db.add_event(session_id, _gift(gift_builder, key, coins, at=100.0 + i))
+    tmp_db.flush()
+
+    result = tmp_db.fan_ledger(min_diamonds=0, limit=100)
+    ledger_total = sum(f["diamonds"] for f in result["fans"])
+    assert ledger_total + result["unidentified"]["diamonds"] == 463
+
+
+def test_fan_ledger_threshold_and_limit_report_full_counts(tmp_db, make_session, gift_builder):
+    """閾値と件数制限は表示を絞るだけ。総数を返さないと「これで全部」と読める。"""
+    session_id = make_session("owner")
+    for i in range(10):
+        tmp_db.add_event(session_id, _gift(gift_builder, f"70{i:02d}", (i + 1) * 100, at=100.0 + i))
+    tmp_db.flush()
+
+    result = tmp_db.fan_ledger(min_diamonds=500, limit=3)
+    assert len(result["fans"]) == 3
+    assert result["eligible"] == 6
+    assert result["total_gifters"] == 10
+    # 上位から順に出ること。
+    assert [f["diamonds"] for f in result["fans"]] == [1000, 900, 800]
+
+
+def test_fan_ledger_prefers_users_table_handle_over_stale_event_handle(
+    tmp_db, make_session, gift_builder
+):
+    """表示handleはusers表(最新へupsertされる)を優先する。eventのMAX()は辞書順の最大を
+    拾うだけで、実測では改名前の自動生成handleが現handleを押しのけた。"""
+    session_id = make_session("owner")
+    tmp_db.add_event(session_id, gift_builder(
+        diamonds=10, at=100.0,
+        user={"user_id": "7001", "unique_id": "zzz_old_handle", "nickname": "Old",
+              "avatar": "", "fans_level": 0, "gifter_level": 0,
+              "gifter_badge": "", "member_badge": ""},
+    ))
+    tmp_db.add_event(session_id, gift_builder(
+        diamonds=10, at=200.0,
+        user={"user_id": "7001", "unique_id": "current_handle", "nickname": "Now",
+              "avatar": "", "fans_level": 0, "gifter_level": 0,
+              "gifter_badge": "", "member_badge": ""},
+    ))
+    tmp_db.flush()
+
+    fan = tmp_db.fan_ledger(min_diamonds=0, limit=10)["fans"][0]
+    assert fan["unique_id"] == "current_handle"
+
+
+def test_fan_profile_returns_session_ledger_not_raw_events(tmp_db, make_session, gift_builder):
+    """明細はSession粒度まで畳んだもの。実測で最上位のfanは47,000行(大半like)を持ち、
+    生eventを返すのは一覧としても転送量としても成立しない。"""
+    a = make_session("ownerA")
+    b = make_session("ownerB")
+    tmp_db.add_event(a, _gift(gift_builder, "7001", 100, at=100.0))
+    tmp_db.add_event(a, _gift(gift_builder, "7001", 200, at=150.0))
+    tmp_db.add_event(b, _gift(gift_builder, "7001", 40, at=300.0))
+    tmp_db.flush()
+
+    profile = tmp_db.fan_profile("7001")
+    assert profile["diamonds"] == 340
+    assert [s["unique_id"] for s in profile["streamers"]] == ["ownerA", "ownerB"]
+    assert profile["streamers"][0]["diamonds"] == 300
+    assert len(profile["sessions"]) == 2
+    assert "events" not in profile
+    # 窓の両端が畳まれていること。
+    own_a = next(s for s in profile["streamers"] if s["unique_id"] == "ownerA")
+    assert own_a["first_gift"] == 100.0 and own_a["last_gift"] == 150.0
+
+
+def test_fan_profile_rejects_non_identity_and_reports_missing(tmp_db):
+    for key in ("", "(unknown)"):
+        with pytest.raises(ValueError):
+            tmp_db.fan_profile(key)
+    assert tmp_db.fan_profile("no-such-identity") == {}
+
+
+# ===== live見どころ(wall-clock -> PTS再map) =====
+
+def _recording(tmp_db, session_id, unique_id="alice", started_at=1000.0):
+    return tmp_db.create_recording(session_id, unique_id, "/a.mp4", "a.mp4", "hd", started_at)
+
+
+def test_live_bookmark_is_stored_unmapped_with_its_wall_clock(tmp_db, make_session):
+    """押下時に確定できるのはwall-clockだけ。startは暫定値で、pts_mapped=0が
+    「まだmp4のPTS軸ではない」ことを示す。"""
+    session_id = make_session("alice")
+    rec = _recording(tmp_db, session_id, started_at=1000.0)
+    bm = tmp_db.add_live_bookmark(rec, "alice", wall_time=1300.0,
+                                  provisional_start=300.0, memo="いい場面")
+    assert bm["live_wall"] == 1300.0
+    assert bm["start"] == 300.0
+    assert bm["pts_mapped"] == 0
+    assert bm["memo"] == "いい場面"
+    assert bm["end"] is None
+    assert [b["id"] for b in tmp_db.list_unmapped_bookmarks(rec)] == [bm["id"]]
+
+
+def test_apply_bookmark_pts_confirms_only_what_was_remapped(tmp_db, make_session):
+    """再mapできた行だけが確定する。渡さなかった行は暫定のまま残り、
+    画面が「これは暫定値」と言い続けられる。"""
+    session_id = make_session("alice")
+    rec = _recording(tmp_db, session_id)
+    a = tmp_db.add_live_bookmark(rec, "alice", 1300.0, 300.0)
+    b = tmp_db.add_live_bookmark(rec, "alice", 1400.0, 400.0)
+
+    assert tmp_db.apply_bookmark_pts([(a["id"], 315.5)]) == 1
+    remaining = tmp_db.list_unmapped_bookmarks(rec)
+    assert [r["id"] for r in remaining] == [b["id"]]
+    rows = {r["id"]: r for r in tmp_db.list_bookmarks(rec)}
+    assert rows[a["id"]]["start"] == pytest.approx(315.5)
+    assert rows[a["id"]]["pts_mapped"] == 1
+    assert rows[b["id"]]["start"] == 400.0
+    assert rows[b["id"]]["pts_mapped"] == 0
+    assert tmp_db.apply_bookmark_pts([]) == 0
+
+
+def test_bookmarks_made_from_video_time_are_already_mapped(tmp_db, make_session):
+    """/videosから作る既存経路はstartが最初からPTS軸。live_wall無し・pts_mapped=1で、
+    finalizeの再map対象に混ざらないこと。"""
+    session_id = make_session("alice")
+    rec = _recording(tmp_db, session_id)
+    bm = tmp_db.add_bookmark(rec, "alice", 12.5, end=20.0, memo="後から")
+    assert bm["live_wall"] is None
+    assert bm["pts_mapped"] == 1
+    assert tmp_db.list_unmapped_bookmarks(rec) == []
+
+
+# ===== 表示handleの解決: 通算集計はusers表、session単位はpoint-in-time =====
+
+
+def _renamed_gifter(tmp_db, gift_builder, session_id, *, old="zzz_old_handle",
+                    new="aaa_new_handle", user_id="7300000000000000009"):
+    """同じuser_idで改名した視聴者。MAX()は辞書順最大(=old)を拾うため、
+    users表(最新=new)と食い違う。実DBで踏んだのと同じ形。"""
+    def _user(handle, nickname):
+        return {"user_id": user_id, "unique_id": handle, "nickname": nickname,
+                "avatar": "", "fans_level": 0, "gifter_level": 0,
+                "gifter_badge": "", "member_badge": ""}
+
+    tmp_db.add_event(session_id, gift_builder(
+        diamonds=10, at=100.0, user=_user(old, "Old Name")))
+    tmp_db.add_event(session_id, gift_builder(
+        diamonds=10, at=200.0, user=_user(new, "New Name")))
+    tmp_db.flush()
+
+
+def test_streamer_profile_shows_the_current_handle_not_the_lexicographic_max(
+    tmp_db, make_session, gift_builder
+):
+    """配信者profileのgifterはsessionを跨ぐ通算集計なので、最新の身元で出すこと。
+
+    MAX(e.user_unique_id)は辞書順の最大を返すだけで「最新のhandle」ではない。実DBでは
+    改名前の自動生成handle(user5037930325926)が現handle(harehare12345)を押しのけていた。
+    """
+    session_id = make_session("streamer")
+    tmp_db.update_session(session_id, "ended")
+    _renamed_gifter(tmp_db, gift_builder, session_id)
+
+    gifters = tmp_db.streamer_profile("streamer")["gifters"]
+    top = next(g for g in gifters if g["user_id"] == "7300000000000000009")
+    assert top["unique_id"] == "aaa_new_handle"
+    assert top["nickname"] == "New Name"
+    # 辞書順最大(old)を拾っていないこと。
+    assert top["unique_id"] != "zzz_old_handle"
+
+
+def test_aggregate_dashboard_shows_the_current_handle(tmp_db, make_session, gift_builder):
+    """全体dashboardも通算集計なので同じ規則。"""
+    session_id = make_session("streamer")
+    tmp_db.update_session(session_id, "ended")
+    _renamed_gifter(tmp_db, gift_builder, session_id)
+
+    gifters = tmp_db.aggregate_dashboard()["top_gifters"]
+    top = next(g for g in gifters if g["user_id"] == "7300000000000000009")
+    assert top["unique_id"] == "aaa_new_handle"
+
+
+def test_session_summary_keeps_the_point_in_time_view(tmp_db, make_session, gift_builder):
+    """session単位の表示は「そのSessionでの見え方」を保つ(通算集計とは逆の規則)。
+
+    users表(最新)を優先すると、過去のSessionを開いたときに当時と違うhandleが出る。
+    ここはsessionのsnapshotなので、eventが持つ値を優先する既存の設計意図を維持する。
+    """
+    session_id = make_session("streamer")
+    _renamed_gifter(tmp_db, gift_builder, session_id)
+
+    users = tmp_db.session_summary(session_id)["users"]
+    top = next(u for u in users if u["user_id"] == "7300000000000000009")
+    # users表(最新)ではなくevent側の値であること。
+    assert top["unique_id"] == "zzz_old_handle"
+
+
+def test_gifter_user_id_is_unchanged_by_the_handle_rule(tmp_db, make_session, gift_builder):
+    """user_idはbattle貢献の突合keyなので、解決規則を変えても値が動かないこと。
+
+    identity_keyがuser_idそのものなので両方式は一致する(実DB1171人で差0を確認)。
+    ここが動くとbattle_gift_contributionsの突合が変わる。
+    """
+    session_id = make_session("streamer")
+    tmp_db.update_session(session_id, "ended")
+    _renamed_gifter(tmp_db, gift_builder, session_id)
+
+    profile_ids = {g["user_id"] for g in tmp_db.streamer_profile("streamer")["gifters"]}
+    summary_ids = {u["user_id"] for u in tmp_db.session_summary(session_id)["users"]}
+    assert "7300000000000000009" in profile_ids
+    assert profile_ids == summary_ids
+
+
+def test_levels_stay_point_in_time_in_cross_session_aggregates(
+    tmp_db, make_session, gift_builder
+):
+    """Lv/badgeはusers表へ寄せない(観測していない過去の値を捏造しないため)。
+    handleの規則を変えたときに巻き込んでいないことの確認。"""
+    session_id = make_session("streamer")
+    tmp_db.update_session(session_id, "ended")
+    tmp_db.add_event(session_id, gift_builder(
+        diamonds=10, at=100.0,
+        user={"user_id": "7300000000000000010", "unique_id": "lvuser",
+              "nickname": "Lv User", "avatar": "", "fans_level": 0,
+              "gifter_level": 5, "gifter_badge": "", "member_badge": ""}))
+    tmp_db.flush()
+
+    users = tmp_db.session_summary(session_id)["users"]
+    top = next(u for u in users if u["user_id"] == "7300000000000000010")
+    assert top["gifter_level"] == 5

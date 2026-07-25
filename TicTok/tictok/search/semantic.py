@@ -474,6 +474,14 @@ async def _embed_all(embedder: Embedder, texts: list, dim: Optional[int],
     return np.vstack(out), dim
 
 
+def build_running() -> bool:
+    """構築が走っているか。「受け付けました」を返す前の重複判定に使う。
+
+    build_index自身も入口で同じ判定をしてSemanticBusyを投げるが、そちらはbackground
+    taskの中で上がるためHTTPの応答には間に合わない。requestを弾くのはここ。"""
+    return _build_lock.locked()
+
+
 async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
     """search_hitsをpassageへ束ねて埋め込み、sidecar indexへ追記する。
 

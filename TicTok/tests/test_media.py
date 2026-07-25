@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import types
 
 import numpy as np
@@ -238,7 +239,7 @@ def test_clip_path_truncates_a_long_label(make_recording):
     assert out.name.endswith("_" + "x" * 40 + ".mp4")
 
 
-def _patch_clip_ffmpeg(monkeypatch, captured):
+def _patch_clip_ffmpeg(monkeypatch, captured, duration=None):
     monkeypatch.setattr(clipper, "ffmpeg_available", lambda: True)
 
     async def fake_exec(*cmd, **kwargs):
@@ -255,27 +256,105 @@ def _patch_clip_ffmpeg(monkeypatch, captured):
     monkeypatch.setattr(clipper.asyncio, "create_subprocess_exec", fake_exec)
 
     async def fake_duration(path):
-        return None
+        return duration
 
     monkeypatch.setattr(clipper, "_duration_seconds", fake_duration)
 
 
-async def test_make_clip_puts_output_seek_after_the_input(monkeypatch, make_recording):
+async def test_make_clip_puts_the_copy_seek_before_the_input(monkeypatch, make_recording):
+    """出力側-ssはkeyframeが来るまでvideo packetを捨て、GOPより短い範囲では映像が1 frameも
+    残らない(keyframe間隔17.67秒の実録画で音声のみのmp4になることを確認済み)。"""
     _, mp4 = make_recording()
     captured = {}
     _patch_clip_ffmpeg(monkeypatch, captured)
 
     info = await clipper.make_clip(mp4, 12.0, 23.6)
     cmd = captured["cmd"]
-    assert cmd.index("-i") < cmd.index("-ss")
+    assert cmd.index("-ss") < cmd.index("-i")
     assert cmd[cmd.index("-ss") + 1] == "12.000"
-    assert cmd[cmd.index("-t") + 1] == "11.600"
+    assert cmd[cmd.index("-to") + 1] == "23.600"
+    assert "-copyts" in cmd
+    assert "-t" not in cmd
     assert "-c" in cmd and cmd[cmd.index("-c") + 1] == "copy"
     assert cmd[cmd.index("-avoid_negative_ts") + 1] == "make_zero"
     assert info["encoder"] == "copy"
     assert info["precise"] is False
     assert info["normalized"] is False
     assert info["bytes"] == 8
+
+
+async def test_make_clip_copy_disables_accurate_seek(monkeypatch, make_recording):
+    """accurate seekは復号するstreamだけを-ssまで捨てる。音声を再encodeする経路で有効だと、
+    映像はkeyframeから・音声は要求位置から始まりGOPぶんずれる(実測3.5秒)。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_clip_ffmpeg(monkeypatch, captured)
+
+    await clipper.make_clip(mp4, 12.0, 23.6)
+    cmd = captured["cmd"]
+    assert "-noaccurate_seek" in cmd
+    assert cmd.index("-noaccurate_seek") < cmd.index("-i")
+
+
+async def test_make_clip_normalize_also_disables_accurate_seek(monkeypatch, make_recording):
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_clip_ffmpeg(monkeypatch, captured)
+    monkeypatch.setattr(clipper.audio_norm, "probe_sample_rate", lambda src: 48000)
+
+    await clipper.make_clip(
+        mp4, 0.0, 4.0,
+        normalize={"target_lufs": -14.0, "true_peak": -1.5, "bitrate_kbps": 192},
+    )
+    cmd = captured["cmd"]
+    assert "-noaccurate_seek" in cmd
+    assert cmd.index("-noaccurate_seek") < cmd.index("-i")
+
+
+async def test_make_clip_reports_the_keyframe_lead(monkeypatch, make_recording):
+    """stream copyは直前のkeyframeから始まるので、実尺は要求より長く実開始は手前になる。"""
+    _, mp4 = make_recording()
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=16.4)
+
+    info = await clipper.make_clip(mp4, 200.0, 210.0)
+    assert info["keyframe_lead_seconds"] == 6.4
+    assert info["actual_start_seconds"] == 193.6
+    assert info["start"] == 200.0
+
+
+async def test_make_clip_precise_has_no_keyframe_lead(monkeypatch, make_recording):
+    _, mp4 = make_recording()
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=10.0)
+
+    async def fake_encoder(codec):
+        return "libx264"
+
+    monkeypatch.setattr(clipper, "video_encoder_name", fake_encoder)
+    info = await clipper.make_clip(mp4, 200.0, 210.0, precise=True)
+    assert info["keyframe_lead_seconds"] is None
+    assert info["actual_start_seconds"] == 200.0
+
+
+async def test_make_clip_does_not_warn_about_the_keyframe_lead(monkeypatch, make_recording,
+                                                               caplog):
+    """前へ伸びるのはstream copyの正常な結果。これを警告にすると、本来拾いたい
+    「音声filterが尺を変えた」異常が毎回の警告に埋もれる。"""
+    _, mp4 = make_recording()
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=40.0)
+
+    with caplog.at_level("WARNING", logger="tictok.media.clipper"):
+        await clipper.make_clip(mp4, 200.0, 210.0)
+    assert "duration_mismatch" not in caplog.text
+
+
+async def test_make_clip_still_warns_when_the_output_is_short(monkeypatch, make_recording,
+                                                              caplog):
+    _, mp4 = make_recording()
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=3.0)
+
+    with caplog.at_level("WARNING", logger="tictok.media.clipper"):
+        await clipper.make_clip(mp4, 200.0, 210.0)
+    assert "duration differs from the request" in caplog.text
 
 
 async def test_make_clip_precise_reencodes_video(monkeypatch, make_recording):
@@ -311,6 +390,31 @@ async def test_make_clip_normalize_copies_video_and_reencodes_audio(monkeypatch,
     assert cmd[cmd.index("-c:a") + 1] == "aac"
     assert cmd[cmd.index("-ar") + 1] == "48000"
     assert info["normalized"] is True
+
+
+@pytest.mark.requires_ffmpeg
+async def test_make_clip_keeps_video_when_the_range_is_shorter_than_a_gop(make_recording):
+    """このbugの本体。GOPより短い範囲を出力側-ssで切ると映像が1 frameも残らないため、
+    実frameを数える形でしか守れない(commandの形からは見えない)。"""
+    # GOP 300 frame = 10秒。要求4秒はGOPより短いので、旧実装では映像が0 frameになる。
+    _, mp4 = make_recording()
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30:duration=40",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=40",
+         "-c:v", "libx264", "-g", "300", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-shortest", str(mp4)],
+        check=True, stdin=subprocess.DEVNULL)
+
+    info = await clipper.make_clip(mp4, 12.0, 16.0)
+    counted = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+         "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", info["path"]],
+        capture_output=True, text=True, check=True).stdout.strip().splitlines()[0]
+    assert int(counted) > 0
+    # 直前のkeyframeは10秒地点なので、要求4秒に対し2秒ぶん手前から始まる。
+    assert info["keyframe_lead_seconds"] == pytest.approx(2.0, abs=0.3)
+    assert info["actual_start_seconds"] == pytest.approx(10.0, abs=0.3)
 
 
 async def test_make_clip_rejects_a_non_positive_range(monkeypatch, make_recording):
@@ -385,6 +489,143 @@ def test_sprite_cache_survives_a_corrupt_meta_file(make_recording):
 async def test_ensure_sprite_requires_an_existing_file(tmp_root):
     with pytest.raises(RuntimeError):
         await th.ensure_sprite(tmp_root / "nope.mp4")
+
+
+def test_sprite_signature_covers_the_keyframe_decision(make_recording):
+    """判定条件がsignatureに入っていないと、条件を直しても壊れたspriteが残り続ける。"""
+    _, mp4 = make_recording()
+    signature = th._signature(mp4)
+    assert signature["keyframe_safety"] == th.KEYFRAME_SAFETY
+    assert signature["keyframe_min_interval"] == th.KEYFRAME_ONLY_MIN_INTERVAL
+
+    th.sprite_path(mp4).parent.mkdir(parents=True, exist_ok=True)
+    th.sprite_path(mp4).write_bytes(b"\xff\xd8")
+    th._meta_path(mp4).write_text(
+        json.dumps({"signature": signature, "sprite": {"count": 7}}), encoding="utf-8")
+    assert th._cached(mp4, signature) == {"count": 7}
+    # 判定条件を変えたら作り直させる。
+    assert th._cached(mp4, dict(signature, keyframe_safety=99.0)) is None
+
+
+def _patch_keyframe_probe(monkeypatch, stdout=b"", returncode=0, captured=None):
+    async def fake_exec(*cmd, **kwargs):
+        if captured is not None:
+            captured["cmd"] = list(cmd)
+
+        async def communicate():
+            return stdout, b""
+
+        return types.SimpleNamespace(returncode=returncode, communicate=communicate,
+                                     kill=lambda: None)
+
+    monkeypatch.setattr(th.asyncio, "create_subprocess_exec", fake_exec)
+
+
+async def test_max_keyframe_gap_ignores_the_window_boundaries(monkeypatch,
+                                                              make_recording):
+    """窓と窓の間の隙間を数えると、どの録画も「間隔が数百秒」になり常に通常decodeへ倒れる。"""
+    _, mp4 = make_recording()
+    # 窓1: 100,104,110 (最大6秒) / 窓2: 900,903 (最大3秒)。100→900の800秒は窓の切れ目。
+    _patch_keyframe_probe(monkeypatch, b"100\n104\n110\n900\n903\n")
+    assert await th._max_keyframe_gap(mp4, 1000.0) == pytest.approx(6.0)
+
+
+async def test_max_keyframe_gap_samples_instead_of_scanning_the_whole_file(
+        monkeypatch, make_recording):
+    """全走査は利点とほぼ同額のcostになる(実測4.2秒 対 利点4.6秒)。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_keyframe_probe(monkeypatch, b"10\n12\n", captured=captured)
+    await th._max_keyframe_gap(mp4, 1000.0)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-skip_frame") + 1] == "nokey"
+    intervals = cmd[cmd.index("-read_intervals") + 1]
+    assert len(intervals.split(",")) == th.KEYFRAME_PROBE_WINDOWS
+
+
+async def test_max_keyframe_gap_returns_none_when_it_cannot_measure(monkeypatch,
+                                                                    make_recording):
+    _, mp4 = make_recording()
+    _patch_keyframe_probe(monkeypatch, b"", returncode=1)
+    assert await th._max_keyframe_gap(mp4, 1000.0) is None
+
+    _patch_keyframe_probe(monkeypatch, b"100\n")
+    assert await th._max_keyframe_gap(mp4, 1000.0) is None
+
+
+def _patch_sprite_build(monkeypatch, duration, gap, captured):
+    """gridの決定からffmpeg起動までを差し替え、decode modeの選択だけを見る。"""
+    async def fake_probe(src):
+        return duration, 720, 1280
+
+    async def fake_gap(src, dur):
+        captured["probed"] = True
+        return gap
+
+    monkeypatch.setattr(th, "_probe", fake_probe)
+    monkeypatch.setattr(th, "_max_keyframe_gap", fake_gap)
+    monkeypatch.setattr(th, "ffmpeg_available", lambda: True)
+
+    async def fake_exec(*cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        out = th.Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\xff\xd8")
+
+        async def communicate():
+            return b"", b""
+
+        return types.SimpleNamespace(returncode=0, communicate=communicate,
+                                     kill=lambda: None)
+
+    monkeypatch.setattr(th.asyncio, "create_subprocess_exec", fake_exec)
+
+
+async def test_sprite_uses_a_full_decode_when_keyframes_are_too_sparse(monkeypatch,
+                                                                       make_recording):
+    """この不具合の本体。実録画(尺3022秒→interval 11秒、実keyframe間隔 最大18.16秒)では
+    keyframeがtile数ぶん無く、280 tile中67枚が誤った時刻の絵になっていた。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_sprite_build(monkeypatch, duration=3022.0, gap=17.7, captured=captured)
+
+    await th.ensure_sprite(mp4)
+    assert captured["probed"] is True
+    assert "-skip_frame" not in captured["cmd"]
+
+
+async def test_sprite_keeps_keyframe_only_when_the_interval_is_wide_enough(monkeypatch,
+                                                                           make_recording):
+    """3時間級(interval 47〜95秒)は従来どおり速い経路のままであること。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_sprite_build(monkeypatch, duration=13841.0, gap=17.7, captured=captured)
+
+    await th.ensure_sprite(mp4)
+    cmd = captured["cmd"]
+    assert cmd[cmd.index("-skip_frame") + 1] == "nokey"
+
+
+async def test_sprite_does_not_guess_when_the_keyframe_probe_fails(monkeypatch,
+                                                                   make_recording):
+    """測れないときに速い方を選ぶと、誤ったspriteが静かにcacheへ残る。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_sprite_build(monkeypatch, duration=13841.0, gap=None, captured=captured)
+
+    await th.ensure_sprite(mp4)
+    assert "-skip_frame" not in captured["cmd"]
+
+
+async def test_sprite_skips_the_probe_for_short_recordings(monkeypatch, make_recording):
+    """intervalが小さい録画はどう測ってもkeyframeのみdecodeを選べないので、測定costを払わない。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_sprite_build(monkeypatch, duration=600.0, gap=2.0, captured=captured)
+
+    await th.ensure_sprite(mp4)
+    assert "probed" not in captured
+    assert "-skip_frame" not in captured["cmd"]
 
 
 # ------------------------------------------------------------------------ gift_icons

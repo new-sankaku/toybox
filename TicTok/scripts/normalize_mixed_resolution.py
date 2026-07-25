@@ -40,8 +40,10 @@ from tictok.record.recorder import (
     ffmpeg_available,
     ffprobe_available,
     probe_mp4_resolutions,
+    commit_normalized,
+    normalize_marker_path,
+    normalize_tmp_path,
     reencode_single_resolution,
-    replace_with_retry,
     timing_path,
 )
 
@@ -68,7 +70,7 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
     )
     if not apply:
         return True
-    tmp = mp4_path.with_suffix(mp4_path.suffix + ".norm.tmp")
+    tmp = normalize_tmp_path(mp4_path)
     ok = await reencode_single_resolution(
         mp4_path, tmp, target_w, target_h, mode,
         config.get_normalize_codec(), config.get_normalize_quality(),
@@ -93,6 +95,7 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
             logger.error("  could not back up original %s; keeping it and discarding re-encode",
                          mp4_path.name)
             tmp.unlink(missing_ok=True)
+            normalize_marker_path(tmp).unlink(missing_ok=True)
             return False
         try:
             shutil.move(str(tmp), str(mp4_path))
@@ -100,22 +103,28 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
             # Roll back so the recording is never left without its file.
             shutil.move(str(backup_path), str(mp4_path))
             tmp.unlink(missing_ok=True)
+            normalize_marker_path(tmp).unlink(missing_ok=True)
             logger.error("  could not place re-encode for %s; restored original", mp4_path.name)
             return False
+        normalize_marker_path(tmp).unlink(missing_ok=True)
         _drop_timing_if_cfr(mp4_path, ok)
         logger.info("  done: %s -> %dx%d (original backed up to %s)",
                     mp4_path.name, target_w, target_h, backup_path)
         return True
-    if not await replace_with_retry(tmp, mp4_path):
+    if not await commit_normalized(tmp, mp4_path, ok):
         # Keep the completed re-encode rather than discard it to a transient lock (a
-        # media player or AV scanner holding the mp4 open). Close it and rename the
-        # kept ".norm.tmp" over the original, or re-run once the file is free.
+        # media player or AV scanner holding the mp4 open). It carries a completion
+        # marker, so the server's startup sweep swaps it in on its own; closing the file
+        # and re-running this script also works.
         logger.error(
-            "  could not replace %s (file locked — is it open in a player?); "
-            "normalized output kept at %s", mp4_path.name, tmp.name,
+            "  could not replace %s (file locked — is it open in a player?); normalized "
+            "output kept at %s and will be reclaimed at the next server startup",
+            mp4_path.name, tmp.name,
         )
         return False
-    _drop_timing_if_cfr(mp4_path, ok)
+    if ok == "cfr":
+        logger.warning("  used CFR fallback for %s; dropped timing map (comment sync approximate)",
+                       mp4_path.name)
     logger.info("  done: %s -> %dx%d", mp4_path.name, target_w, target_h)
     return True
 

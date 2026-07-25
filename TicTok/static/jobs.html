@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TicTok LIVE Monitor — job</title>
+  <title>TicTok LIVE Monitor — Job</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
@@ -13,39 +13,35 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">Job</h1>
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a class="active" href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <div class="x-toolbar">
       <label class="x-field"><span>状態</span>
-        <select id="flt-state">
+        <select id="job-flt-state">
           <option value="active">実行中・待機中</option>
           <option value="all">全て</option>
           <option value="failed">失敗・中断のみ</option>
         </select>
       </label>
       <label class="x-field"><span>種別</span>
-        <select id="flt-kind">
+        <select id="job-flt-kind">
           <option value="all">全て</option>
           <option value="overlay">焼き込み</option>
           <option value="upscale">Up出力</option>
-          <option value="session_overlay">Session出力</option>
+          <option value="session_overlay">Session 焼き込み</option>
           <option value="session_upscale">Session Up出力</option>
+          <option value="bulk_overlay">一括 焼き込み出力</option>
+          <option value="bulk_upscale">一括 Up出力</option>
+          <option value="bulk_reprocess">一括 再mp4化</option>
+          <option value="bulk_audionorm">一括 音量正規化</option>
           <option value="reprocess">再mp4化</option>
+          <option value="audionorm">音量正規化</option>
           <option value="overlay_preview">焼き込みプレビュー</option>
           <option value="clip_batch">clip一括書き出し</option>
         </select>
@@ -55,8 +51,8 @@
       <span id="stt-summary" class="chart-note"></span>
     </div>
 
-    <div class="a-card">
-      <h3>job <span class="sub">焼き込み・Up出力・再mp4化はserver側の永続queueで1本ずつ実行します。Serverを再起動しても待機中のjobは残ります。</span></h3>
+    <div class="a-card a-card-fill" id="jobs">
+      <h3>Job <span class="sub">焼き込み・Up出力・再mp4化はserver側の永続queueで1本ずつ実行します。Serverを再起動しても待機中のjobは残ります。終わったjobの記録は<a href="/ops">運用log</a>に残ります。</span></h3>
       <div class="body">
         <div class="table-wrap">
           <table class="result-table">

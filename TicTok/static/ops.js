@@ -7,30 +7,35 @@
 // 読み込み中に新しい行が入るたび境界の行が重複・欠落する。
 
 const SEVERITY_LABELS = {
-  error: { text: "error", cls: "badge-error" },
-  warning: { text: "warning", cls: "badge-idle" },
-  info: { text: "info", cls: "badge-idle" },
+  error: { text: "error", cls: "ops-sev-error" },
+  warning: { text: "warning", cls: "ops-sev-warning" },
+  info: { text: "info", cls: "ops-sev-info" },
 };
 
-const OPS_KIND_WINDOW_HOURS = 24 * 30;
-
 let nextPage = null;
-let settingsOnly = false;
 let detailMaxChars = 0;
-let settingsKind = "";
+// kind(collector.disconnected)→日本語ラベルの対応表。Server側(core/ops_labels.py)が唯一の
+// 出所で、画面は受け取って引くだけにする。同じ訳語をFrontendにも置くと必ずずれる。
+let kindLabels = {};
+
+// 表に無いkindは生値をそのまま出す。それらしいラベルを組み立てると、記録に無い名前が画面に
+// 出て、text logと突き合わせられなくなる。
+function kindText(kind) {
+  return kindLabels[kind] || kind;
+}
 
 function opsFilters() {
   const params = new URLSearchParams();
   const severity = document.getElementById("flt-severity").value;
   const kind = document.getElementById("flt-kind").value;
-  const unique = document.getElementById("flt-unique").value.trim();
+  const unique = document.getElementById("flt-unique").value;
   const job = document.getElementById("flt-job").value.trim();
   const since = document.getElementById("flt-since").value;
   const until = document.getElementById("flt-until").value;
-  if (severity) params.set("severity", severity);
-  if (settingsOnly) params.set("kind_prefix", settingsKind);
-  else if (kind) params.set("kind_prefix", kind);
-  if (unique) params.set("unique_id", unique.replace(/^@/, ""));
+  // 閾値での絞り込み。1段だけを見るseverityとは別のparameterで、Server側が順序を持つ。
+  if (severity) params.set("min_severity", severity);
+  if (kind) params.set("kind_prefix", kind);
+  if (unique) params.set("unique_id", unique);
   if (job) params.set("job_id", job);
   if (since) params.set("since", String(new Date(`${since}T00:00:00`).getTime() / 1000));
   if (until) params.set("until", String(new Date(`${until}T23:59:59`).getTime() / 1000));
@@ -38,11 +43,20 @@ function opsFilters() {
 }
 
 function severityCell(event) {
-  const meta = SEVERITY_LABELS[event.severity] || { text: event.severity, cls: "badge-idle" };
+  const meta = SEVERITY_LABELS[event.severity] || { text: event.severity, cls: "ops-sev-info" };
   const span = document.createElement("span");
-  span.className = `badge ${meta.cls}`;
+  span.className = `ops-sev ${meta.cls}`;
   span.textContent = meta.text;
   return span;
+}
+
+// 時刻は月日から出す。この画面は1行=1件のlogを縦に追う表で、全行に同じ年が並ぶと
+// 桁が増えるだけで読む助けにならない。年を含む完全な日時はcellのtooltipで読める。
+function opsTimeText(ts) {
+  if (!ts) return "-";
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 function targetText(event) {
@@ -109,30 +123,52 @@ function detailNode(event) {
 
 function appendRow(tbody, event) {
   const tr = document.createElement("tr");
+  // 重要度は色でも読めるようにする。error/warningを本文の中から目で拾うのは、
+  // 数十行が並ぶ表では現実的でない。
+  tr.className = `sev-${event.severity}`;
+  // 1件=2行(本体+詳細)で組むため、縞はCSSのnth-childでは付けられない(本体行が常に奇数
+  // 番目になり全行が同じ色になる)。件数から数えてclassで付ける。
+  if (Math.floor(tbody.childElementCount / 2) % 2 === 1) tr.classList.add("ops-row-alt");
+
   const detailTr = document.createElement("tr");
-  detailTr.className = "hidden";
+  detailTr.className = "ops-detail-row hidden";
   const detailTd = document.createElement("td");
   detailTd.colSpan = 7;
   detailTd.appendChild(detailNode(event));
   detailTr.appendChild(detailTd);
 
+  // 行あたりの高さがそのまま1画面に入る件数になるので、開閉は1文字ぶんに収める。
+  // 何のButtonかは列header(詳細)が示し、開いている行はaria-expandedのstyleで判る。
   const toggle = document.createElement("button");
-  toggle.className = "btn btn-small";
-  toggle.textContent = "詳細";
-  toggle.addEventListener("click", () => detailTr.classList.toggle("hidden"));
+  toggle.type = "button";
+  toggle.className = "btn btn-compact ops-toggle";
+  toggle.textContent = "▸";
+  toggle.title = "詳細を開く";
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.addEventListener("click", () => {
+    const open = !detailTr.classList.toggle("hidden");
+    toggle.textContent = open ? "▾" : "▸";
+    toggle.title = open ? "詳細を閉じる" : "詳細を開く";
+    toggle.setAttribute("aria-expanded", String(open));
+  });
 
   const cells = [
-    { value: fmtDateTime(event.ts) },
+    // 開閉は左端。行の先頭に置くと、開いている行と閉じている行が縦一列で見分けられる。
+    { value: toggle, cls: "act" },
+    { value: opsTimeText(event.ts), cls: "ops-ts", title: fmtDateTime(event.ts) },
     { value: severityCell(event), cls: "ident" },
-    { value: event.kind, cls: "ident" },
-    { value: targetText(event) },
-    { value: event.message || "" },
-    { value: durationText(event) },
-    { value: toggle },
+    // 種別は日本語で出し、記録上のkey(collector.disconnected)はtooltipに残す。
+    { value: kindText(event.kind), cls: "ident ops-kind", title: event.kind },
+    // 対象は識別子(＠id・session・File名)の列。語中で割ると別のFile名に読めるうえ、
+    // 内容列が余りを取る組み方では1文字ずつの縦棒まで潰れる。
+    { value: targetText(event), cls: "ident ops-target" },
+    { value: event.message || "", cls: "ops-msg" },
+    { value: durationText(event), cls: "num ops-dur" },
   ];
-  cells.forEach(({ value, cls }) => {
+  cells.forEach(({ value, cls, title }) => {
     const td = document.createElement("td");
     if (cls) td.className = cls;
+    if (title) td.title = title;
     if (value instanceof Node) td.appendChild(value);
     else td.textContent = value;
     tr.appendChild(td);
@@ -172,7 +208,8 @@ async function loadEvents(append) {
     return;
   }
   detailMaxChars = data.detail_max_chars || 0;
-  settingsKind = data.settings_kind || settingsKind;
+  // 一覧のkindは保持期間ぶん(候補より広い)あり得るので、こちらの表も取り込んでおく。
+  if (data.kind_labels) kindLabels = data.kind_labels;
   nextPage = data.next;
   const tbody = document.getElementById("ops-rows");
   if (!append) tbody.replaceChildren();
@@ -182,20 +219,33 @@ async function loadEvents(append) {
   statusEl.textContent = `保持期間: ${data.retention_days}日`;
 }
 
-async function loadKinds() {
-  const select = document.getElementById("flt-kind");
+// 種別・配信者の候補。観測窓は指定しない(全期間)。窓を切ると、保持期間内に記録がある
+// のに候補に出ないkind/配信者が生まれ、「表に居るのに絞り込めない」状態になる。
+// ops_eventsは状態遷移だけの表なので、全期間のGROUP BYでも軽い。
+async function loadFilterOptions() {
+  const kindSelect = document.getElementById("flt-kind");
+  const uniqueSelect = document.getElementById("flt-unique");
   let data;
   try {
-    data = await apiSend("GET", `/api/ops/kinds?hours=${OPS_KIND_WINDOW_HOURS}`);
+    data = await apiSend("GET", "/api/ops/kinds");
   } catch (err) {
-    // 候補が引けないだけで一覧は読める。選択肢を捏造せず「全て」のままにする。
+    // 候補が引けないだけで一覧は読める。選択肢を捏造せず「すべて」のままにする。
     return;
   }
+  kindLabels = data.kind_labels || {};
   (data.kinds || []).forEach((entry) => {
     const option = document.createElement("option");
     option.value = entry.kind;
-    option.textContent = `${entry.kind}（${fmtNum(entry.count)}）`;
-    select.appendChild(option);
+    option.textContent = `${kindText(entry.kind)}（${fmtNum(entry.count)}）`;
+    // 種別を日本語にすると記録上のkeyが画面から消える。text logと突き合わせられるよう残す。
+    option.title = entry.kind;
+    kindSelect.appendChild(option);
+  });
+  (data.unique_ids || []).forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.unique_id;
+    option.textContent = `@${entry.unique_id}（${fmtNum(entry.count)}）`;
+    uniqueSelect.appendChild(option);
   });
 }
 
@@ -213,20 +263,14 @@ async function loadSummary() {
   }
 }
 
-document.getElementById("flt-apply").addEventListener("click", () => {
-  settingsOnly = false;
-  loadEvents(false);
-});
-
-document.getElementById("flt-settings").addEventListener("click", () => {
-  settingsOnly = true;
-  document.getElementById("flt-kind").value = "";
-  document.getElementById("flt-severity").value = "";
-  loadEvents(false);
+document.getElementById("flt-apply").addEventListener("click", () => loadEvents(false));
+// 選択式の条件は選んだ時点で意図が確定する。「絞り込む」を押し忘れて古い結果を今の条件の
+// ものとして読む事故を防ぐ(自由入力のjob IDと期間は打ち終わりが判らないのでButton側)。
+["flt-severity", "flt-kind", "flt-unique"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", () => loadEvents(false));
 });
 
 document.getElementById("flt-reset").addEventListener("click", () => {
-  settingsOnly = false;
   ["flt-severity", "flt-kind", "flt-unique", "flt-job", "flt-since", "flt-until"]
     .forEach((id) => { document.getElementById(id).value = ""; });
   loadEvents(false);
@@ -234,7 +278,8 @@ document.getElementById("flt-reset").addEventListener("click", () => {
 
 document.getElementById("ops-more").addEventListener("click", () => loadEvents(true));
 
-loadKinds();
+loadFilterOptions();
 loadSummary();
 loadEvents(false);
+// jobの進捗はJob画面が持つ。この画面はWSを接続表示とtopbarのjob badgeのためだけに使う。
 connectWS(() => {});

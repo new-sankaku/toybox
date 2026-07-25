@@ -13,23 +13,14 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">監視</h1>
     <!-- 行1: スリムトップバー -->
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a class="active" href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-add">
         <span class="at">@</span>
-        <input id="unique-id" type="text" placeholder="username で監視追加"
+        <input id="unique-id" aria-label="username で監視追加" type="text" placeholder="TikTok ID で監視開始"
                autocomplete="off" spellcheck="false" />
         <label class="a-rec-opt" title="OFFにすると動画は保存せず、統計・Comment等のデータのみ収集します。">
           <input type="checkbox" id="add-record-video" checked /> 動画保存
@@ -37,8 +28,8 @@
         <button id="add-btn">監視開始</button>
       </div>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
-      <div id="add-message" class="a-form-msg"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
+      <div id="add-message" class="a-form-msg" aria-live="polite"></div>
     </div>
 
     <!-- 行2: 監視対象タブ（概況内包） -->
@@ -66,10 +57,11 @@
             <ol id="steps" class="a-steps"></ol>
             <div class="a-actions">
               <button id="record-btn" disabled>● 録画開始</button>
+              <button id="bookmark-btn" disabled title="いま見ている場面を見どころとして記録します（キー: B）。録画中のみ押せます。">🔖 見どころ</button>
               <button id="record-video-btn" title="この監視対象の動画保存ON/OFF。OFFでデータのみ収集します。">🎥 動画保存: ON</button>
-              <button id="stop-btn" disabled>配信切断</button>
-              <button id="restart-btn" disabled>配信再接続</button>
-              <button id="remove-btn" class="danger">監視解除</button>
+              <button id="stop-btn" disabled>収集を停止</button>
+              <button id="restart-btn" disabled>収集を再開</button>
+              <button id="remove-btn" class="danger">監視対象から外す</button>
             </div>
           </div>
         </div>
@@ -137,16 +129,16 @@
             <div class="seg-pane" data-pane="gift">
               <div id="gift-streak" class="gift-streak hidden"></div>
               <ul id="gift-feed" class="a-feed"></ul>
-              <div id="gift-empty" class="a-empty">GIFT受信待機中…</div>
+              <div id="gift-empty" class="a-empty">Gift受信待機中…</div>
             </div>
             <div class="seg-pane hidden" data-pane="comment">
               <ul id="comment-feed" class="a-feed"></ul>
-              <div id="comment-empty" class="a-empty">COMMENT受信待機中…</div>
+              <div id="comment-empty" class="a-empty">Comment受信待機中…</div>
             </div>
             <div class="seg-pane hidden" data-pane="event">
               <div id="event-filters" class="event-filters"></div>
               <ul id="event-feed" class="a-feed"></ul>
-              <div id="event-empty" class="a-empty">EVENT受信待機中…</div>
+              <div id="event-empty" class="a-empty">Event受信待機中…</div>
             </div>
             <div class="seg-pane hidden" data-pane="battle">
               <div id="pk-support" class="pk hidden"></div>
@@ -154,13 +146,20 @@
               <div id="battle-empty" class="a-empty">Battle未発生。LinkMic対戦が始まると表示します。</div>
             </div>
             <div class="seg-pane hidden" data-pane="ranking">
+              <!-- GiftとRankingは同じgift dataの別表示なのに排他で、見比べるのに切替が要った。
+                   直近の数件だけここにも出して、集計を見ながら「今なにが来たか」を追える。 -->
+              <div class="rank-sec">
+                <div class="rank-sec-h">直近のGift</div>
+                <ul id="rank-recent-gift" class="a-feed a-feed-compact"></ul>
+                <div id="rank-recent-gift-empty" class="a-empty">Gift受信待機中…</div>
+              </div>
               <div class="rank-sec">
                 <div class="rank-sec-h">UserごとのGift <span id="rank-gifters" class="rank-sec-n"></span></div>
                 <table class="a-rank">
                   <thead><tr><th>#</th><th>User（表示名 / @id）</th><th class="n">Gift</th><th class="n">コイン</th></tr></thead>
                   <tbody id="user-ranking"></tbody>
                 </table>
-                <div id="user-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+                <div id="user-ranking-empty" class="a-empty">Gift受信待機中…</div>
               </div>
               <div class="rank-sec">
                 <div class="rank-sec-h">Gift種類別</div>
@@ -168,7 +167,7 @@
                   <thead><tr><th>#</th><th>Gift</th><th class="n">個数</th><th class="n">コイン</th></tr></thead>
                   <tbody id="gift-ranking"></tbody>
                 </table>
-                <div id="gift-ranking-empty" class="a-empty">GIFT受信待機中…</div>
+                <div id="gift-ranking-empty" class="a-empty">Gift受信待機中…</div>
               </div>
             </div>
           </div>
@@ -182,7 +181,7 @@
 
     <!-- 行4: フッター -->
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>

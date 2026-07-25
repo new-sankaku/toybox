@@ -16,6 +16,7 @@ from pathlib import Path
 
 from tictok.core import layout
 from tictok.record.recorder import (
+    NORMALIZE_DONE_SUFFIX,
     NORMALIZE_TMP_SUFFIX,
     SIDECAR_DIRNAME,
     TIMING_SUFFIX,
@@ -96,6 +97,7 @@ _SUFFIX_CATEGORIES = (
     (ASS_SUFFIX, CATEGORY_OVERLAY),
     (META_SUFFIX_B, CATEGORY_OVERLAY),
     (META_SUFFIX, CATEGORY_OVERLAY),
+    (NORMALIZE_TMP_SUFFIX + NORMALIZE_DONE_SUFFIX, CATEGORY_TRANSIENT),
     (NORMALIZE_TMP_SUFFIX + ".ffmpeg.log", CATEGORY_TRANSIENT),
     (NORMALIZE_TMP_SUFFIX, CATEGORY_TRANSIENT),
     # プレビューは焼き込みの派生物。中間物(base/layer/raw/ass)はrenderが消すが、

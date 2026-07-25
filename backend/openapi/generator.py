@@ -15,6 +15,8 @@ from schemas import (
  DagExecutionSettingsSchema,TemperatureDefaultsSchema,
  TokenBudgetSettingsSchema,ContextPolicySettingsSchema,
  AdvancedSettingsSchema,UsageCategorySettingSchema,UsageCategoryUpdateSchema,
+ DailyCostItemSchema,DailyCostByServiceItemSchema,DailyCostResponseSchema,
+ CostPredictionSchema,
 )
 
 def pydantic_to_openapi_schema(model:Type[BaseModel])->Dict[str,Any]:
@@ -98,6 +100,10 @@ def generate_openapi_spec()->Dict[str,Any]:
   ("AdvancedSettingsSchema",AdvancedSettingsSchema),
   ("UsageCategorySettingSchema",UsageCategorySettingSchema),
   ("UsageCategoryUpdateSchema",UsageCategoryUpdateSchema),
+  ("DailyCostItemSchema",DailyCostItemSchema),
+  ("DailyCostByServiceItemSchema",DailyCostByServiceItemSchema),
+  ("DailyCostResponseSchema",DailyCostResponseSchema),
+  ("CostPredictionSchema",CostPredictionSchema),
  ]
  schemas={name:pydantic_to_openapi_schema(model) for name,model in schemas_list}
  spec={
@@ -266,6 +272,24 @@ def _add_cost_paths(spec:Dict):
     {"name":"month","in":"query","schema":{"type":"integer"}},
    ],
    "responses":{"200":{"description":"Cost summary","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CostSummarySchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/daily"]={
+  "get":{
+   "summary":"Get daily cost breakdown",
+   "tags":["Cost"],
+   "parameters":[
+    {"name":"year","in":"query","schema":{"type":"integer"}},
+    {"name":"month","in":"query","schema":{"type":"integer"}},
+   ],
+   "responses":{"200":{"description":"Daily cost data","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DailyCostResponseSchema"}}}}},
+  },
+ }
+ spec["paths"]["/api/cost/prediction"]={
+  "get":{
+   "summary":"Get cost prediction",
+   "tags":["Cost"],
+   "responses":{"200":{"description":"Cost prediction","content":{"application/json":{"schema":{"$ref":"#/components/schemas/CostPredictionSchema"}}}}},
   },
  }
  spec["paths"]["/api/cost/export/csv"]={

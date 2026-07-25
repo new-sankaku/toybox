@@ -886,3 +886,214 @@ async def test_manager_restore_keeps_going_after_one_target_fails(manager, monke
     monkeypatch.setattr(mgr, "start", fake_start)
     await mgr.restore()
     assert started == [("good", 1)]
+
+
+# ===== 宝箱(Envelope) / Portal の取り込み =====
+# 実sample(samples/EnvelopeEvent.jsonl, PortalEvent.jsonl)で確認した shape を固定する。
+
+
+class _Obj:
+    """protoのようにattribute accessできる薄いobject。実eventはproto messageで、
+    dictではなくgetattrで読むため、testも同じ読み方にする。"""
+
+    def __init__(self, **fields):
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+
+def _envelope_event(**info):
+    return _Obj(envelope_info=_Obj(**info), display="ENVELOPE_DISPLAY_NEW",
+                base_message=None)
+
+
+def _portal_event(**info):
+    return _Obj(portal_info=_Obj(**info), portal_display=2, base_message=None)
+
+
+@pytest.fixture
+def envelope_collector(collector):
+    collector.session_id = 1
+    return collector
+
+
+def test_treasure_box_payload_is_captured(envelope_collector):
+    """実測(business_type=1): diamond_count=20 / people_count=16 / 送信者。
+    markerだけでは投下coinが残らないので、payloadを実測値のまま保存する。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="7661188576227855124", business_type=1, diamond_count=20,
+        people_count=16, create_time="1783764415705", unpack_at=1783764595,
+        send_user_id="7310859361970226178", send_user_name="wicha_3111",
+    )))
+
+    rows = envelope_collector._envelopes
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["kind"] == "envelope"
+    assert (row["diamond_count"], row["people_count"]) == (20, 16)
+    assert row["business_type"] == 1
+    assert row["sender_unique_id"] == "wicha_3111"
+    assert row["envelope_id"] == "7661188576227855124"
+    # msの文字列で届くcreate_timeが秒へ正規化されること。
+    assert 1783764415 <= row["create_time"] <= 1783764416
+    assert row["unpack_at"] == pytest.approx(1783764595)
+
+
+def test_super_fan_box_has_no_diamond_count_and_is_not_zero_filled(envelope_collector):
+    """実測(business_type=19): diamond_countが存在しない。0で埋めると
+    「無料で配った」という観測していない事実になる。Noneのまま残すこと。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="1195152805380", business_type=19, people_count=1,
+        create_time="1784220745989", unpack_at=1784220925,
+        send_user_id="7577028547187065877", send_user_name="sinbakwk35k", skin_id=56,
+    )))
+
+    row = envelope_collector._envelopes[0]
+    assert row["diamond_count"] is None
+    assert row["people_count"] == 1
+    # 送信者は配信者とは限らない(実測でこれは視聴者)。そのまま残す。
+    assert row["sender_unique_id"] == "sinbakwk35k"
+    assert row["data"]["skin_id"] == 56
+
+
+def test_portal_send_arrives_as_an_envelope_with_business_type_4(envelope_collector):
+    """実測: Portalの「送信」はEnvelopeEventで届く(business_type=4, 120 coin, 定員80)。
+    PortalEventはPortalが閉じたときの別messageである。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="7661161260446092052", business_type=4, diamond_count=120,
+        people_count=80, create_time="1783764873225", unpack_at=1783765172,
+        send_user_id="7310859361970226178", send_user_name="wicha_3111",
+    )))
+
+    row = envelope_collector._envelopes[0]
+    assert row["kind"] == "envelope"
+    assert (row["business_type"], row["diamond_count"], row["people_count"]) == (4, 120, 80)
+
+
+def test_portal_close_records_the_moved_count_and_no_source_room(envelope_collector):
+    """実測: portal_infoはtrans_count(実移動人数)を運ぶ。移動「元」のroomを示すfieldは
+    payloadのどこにも無いので、ここでも作らない。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_portal(_portal_event(
+        id="7661135713622936341", sender_id="7310859361970226178", trans_count=24,
+    )))
+
+    row = envelope_collector._envelopes[0]
+    assert row["kind"] == "portal_closed"
+    assert row["trans_count"] == 24
+    assert row["sender_user_id"] == "7310859361970226178"
+    # 流入元を示すfieldを勝手に作っていないこと。
+    assert "source_room_id" not in row
+    assert "from_unique_id" not in row
+    assert row["diamond_count"] is None
+
+
+def test_the_same_envelope_id_is_folded_and_hide_does_not_erase_the_measurement(
+    envelope_collector
+):
+    """実測で同じenvelope_idがNEW(実測値あり)とHIDE(idと種別だけ)の2回届く。
+    2件に数えず、かつHIDEが後から来ても実測値を消さないこと。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="7661188576227855124", business_type=1, diamond_count=20,
+        people_count=16, send_user_id="7310859361970226178",
+        send_user_name="wicha_3111",
+    )))
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="7661188576227855124", business_type=1,
+    )))
+
+    assert len(envelope_collector._envelopes) == 1
+    row = envelope_collector._envelopes[0]
+    assert (row["diamond_count"], row["people_count"]) == (20, 16)
+
+
+def test_hide_arriving_first_is_filled_in_by_the_later_measurement(envelope_collector):
+    """順序が逆でも同じ結果になること(HIDEが先に届く回がある)。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="E1", business_type=1,
+    )))
+    asyncio.run(envelope_collector._on_envelope(_envelope_event(
+        envelope_id="E1", business_type=1, diamond_count=20, people_count=16,
+    )))
+
+    assert len(envelope_collector._envelopes) == 1
+    assert envelope_collector._envelopes[0]["diamond_count"] == 20
+
+
+def test_marker_refractory_does_not_drop_the_payload(envelope_collector):
+    """markerの不応期は残しつつ、payloadは1件ずつ残すこと。
+
+    不応期は「1演出=1 mask onset」へ畳むためのもので窓としては正しいが、測定では
+    1件ずつが別の支出であり、時間で畳むと投下coinの合計が失われる。
+    """
+    import asyncio
+
+    for i in range(3):
+        asyncio.run(envelope_collector._on_envelope(_envelope_event(
+            envelope_id=f"E{i}", business_type=1, diamond_count=20, people_count=16,
+        )))
+
+    # markerは不応期で1本に畳まれる(既存の挙動を変えない)。
+    envelope_markers = [m for m in envelope_collector._all_markers()
+                        if m["kind"] == "envelope"]
+    assert len(envelope_markers) == 1
+    # 実測は3件とも残る。
+    assert len(envelope_collector._envelopes) == 3
+    assert sum(r["diamond_count"] for r in envelope_collector._envelopes) == 60
+
+
+def test_envelope_without_info_is_not_recorded(envelope_collector):
+    """envelope_infoを持たないeventで空行を作らない。"""
+    import asyncio
+
+    asyncio.run(envelope_collector._on_envelope(_Obj(envelope_info=None, display=None,
+                                                     base_message=None)))
+    assert envelope_collector._envelopes == []
+
+
+def test_envelopes_round_trip_through_storage(tmp_db, make_session):
+    """保存と読み出し。diamond_count=NULLがNULLのまま戻ること。"""
+    session_id = make_session("alice")
+    tmp_db.save_envelopes(session_id, [
+        {"kind": "envelope", "envelope_id": "E1", "time": 100.0, "create_time": 99.0,
+         "business_type": 1, "diamond_count": 20, "people_count": 16,
+         "trans_count": None, "unpack_at": 200.0, "sender_user_id": "u1",
+         "sender_unique_id": "wicha_3111", "data": {"display": "NEW"}},
+        {"kind": "envelope", "envelope_id": "E2", "time": 110.0, "create_time": None,
+         "business_type": 19, "diamond_count": None, "people_count": 1,
+         "trans_count": None, "unpack_at": None, "sender_user_id": "u2",
+         "sender_unique_id": "sinbakwk35k", "data": {}},
+        {"kind": "portal_closed", "envelope_id": "P1", "time": 120.0,
+         "create_time": None, "business_type": None, "diamond_count": None,
+         "people_count": None, "trans_count": 24, "unpack_at": None,
+         "sender_user_id": "u1", "sender_unique_id": None, "data": {}},
+    ])
+
+    rows = tmp_db.session_envelopes(session_id)
+    assert [r["kind"] for r in rows] == ["envelope", "envelope", "portal_closed"]
+    assert rows[0]["diamond_count"] == 20
+    assert rows[0]["data"]["display"] == "NEW"
+    assert rows[1]["diamond_count"] is None, "Super Fan Boxの欠落はNULLのまま"
+    assert rows[2]["trans_count"] == 24
+
+
+def test_save_envelopes_replaces_per_session(tmp_db, make_session):
+    """battles/collab_windowsと同じ全置換。checkpointを繰り返しても増殖しないこと。"""
+    session_id = make_session("alice")
+    row = {"kind": "envelope", "envelope_id": "E1", "time": 100.0, "create_time": None,
+           "business_type": 1, "diamond_count": 20, "people_count": 16,
+           "trans_count": None, "unpack_at": None, "sender_user_id": None,
+           "sender_unique_id": None, "data": {}}
+    tmp_db.save_envelopes(session_id, [row])
+    tmp_db.save_envelopes(session_id, [row])
+    assert len(tmp_db.session_envelopes(session_id)) == 1

@@ -54,7 +54,7 @@ function removeSpacesAndComments(code){
 
  // 復元
  for(let i=0;i<preserved.length;i++){
-  result=result.replace(`__PRESERVED_${i}__`,preserved[i]);
+  result=result.replace(`__PRESERVED_${i}__`,()=>preserved[i]);
  }
  return result;
 }

@@ -775,6 +775,493 @@ class TestReduceScaleEfficiency:
         assert out["streamers"][1]["avatar"] == ""
 
 
+def _dwell_samples(seconds=600.0, step=5.0, viewers=60, rate=0.5, start=0.0, total0=0):
+    """定常な観測列。rate=1秒あたりの到着数で累積counterを伸ばす。"""
+    out = []
+    n = int(seconds / step) + 1
+    for i in range(n):
+        t = start + i * step
+        level = viewers(i) if callable(viewers) else viewers
+        out.append((t, level, total0 + int(round(rate * i * step))))
+    return out
+
+
+class TestDwellWindows:
+    def test_stationary_window_recovers_little_law(self):
+        # L=60人・λ=0.5人/秒 なら W = 60/0.5 = 120秒。
+        windows, rejects = an._dwell_windows(_dwell_samples(), [])
+        assert windows, rejects
+        for _hour, level, arrivals, span, _cmts in windows:
+            assert _approx(level * span / arrivals, 120.0, tol=1.0)
+
+    def test_arrival_burst_is_rejected_as_unstable(self):
+        # 1つの窓の中で、到着が1つの小binへ固まっている=λが定常ではない。
+        samples = []
+        for i in range(60):
+            t = i * 5.0
+            total = 0 if t < 120.0 else (60 if t >= 180.0 else int((t - 120.0)))
+            samples.append((t, 60, total))
+        windows, rejects = an._dwell_windows(samples, [])
+        assert rejects["unstable"] >= 1
+        assert not windows
+
+    def test_level_drift_is_rejected(self):
+        # 同接が窓内で倍以上動く=Lが代表値にならない。
+        samples = _dwell_samples(viewers=lambda i: 20 + i)
+        _windows, rejects = an._dwell_windows(samples, [])
+        assert rejects["drift"] >= 1
+
+    def test_counter_rollback_is_rejected_not_treated_as_arrivals(self):
+        samples = [(i * 5.0, 60, 500 if i < 30 else 10) for i in range(70)]
+        _windows, rejects = an._dwell_windows(samples, [])
+        assert rejects["reset"] >= 1
+
+    def test_too_few_arrivals_is_rejected(self):
+        samples = [(i * 5.0, 60, i // 60) for i in range(121)]
+        windows, rejects = an._dwell_windows(samples, [])
+        assert not windows
+        assert rejects["noarr"] >= 1
+
+    def test_large_sampling_gap_is_rejected(self):
+        # 観測が150秒途切れた窓。窓の長さ自体は足りているので「短い」ではなく穴で落ちる。
+        samples = [(i * 5.0, 60, i) for i in range(21)]
+        samples += [(250.0, 60, 60), (260.0, 60, 62), (270.0, 60, 64)]
+        _windows, rejects = an._dwell_windows(samples, [])
+        assert rejects["gap"] >= 1
+        assert rejects["short"] == 0
+
+    def test_level_is_time_weighted_not_sample_weighted(self):
+        # 同接20の帯は密に、同接80の帯は疎にsamplingした列。どちらの帯も実時間は
+        # 等しいので時間加重平均は50付近になる。sample数で平均すると密な20側へ
+        # 大きく寄る(約29)ため、両者は明確に区別できる。
+        samples = []
+        for block in range(10):
+            level = 20 if block % 2 == 0 else 80
+            base = block * 30.0
+            times = [base + k * 5.0 for k in range(6)] if level == 20 else [base]
+            for t in times:
+                samples.append((t, level, int(t * 0.2)))
+        samples.append((299.0, 20, int(299.0 * 0.2)))
+        windows, rejects = an._dwell_windows(samples, [])
+        assert windows, rejects
+        assert 45.0 < windows[0][1] < 55.0
+
+    def test_comments_are_counted_inside_the_window(self):
+        samples = _dwell_samples(seconds=300.0)
+        comments = [10.0, 20.0, 30.0, 9000.0]
+        windows, _rejects = an._dwell_windows(samples, comments)
+        assert windows
+        assert windows[0][4] == 3
+
+
+class TestReduceDwell:
+    def _payload(self, dwell=120.0, n=6, comments=0, arr=1000, vmin=2000.0, avgv=60.0):
+        # arrivals=span*level/dwell となるよう窓を作る。
+        span, level = 300.0, 60.0
+        arrivals = int(round(span * level / dwell))
+        return {
+            "w": [[12, level, arrivals, span, comments] for _ in range(n)],
+            "rej": [0] * len(an._DW_REJECT_KEYS),
+            "vmin": vmin, "arr": arr, "jn": int(arr * 0.8), "avgv": avgv,
+        }
+
+    def test_dwell_and_turnover_are_reciprocal(self):
+        rows = [(_sess(i, "a"), self._payload()) for i in range(1, 5)]
+        out = an.reduce_dwell(rows)
+        assert _approx(out["overall"]["dwell_seconds"], 120.0, tol=0.5)
+        assert _approx(out["overall"]["turnover_per_hour"], 30.0, tol=0.5)
+
+    def test_sessions_with_too_few_windows_are_not_estimated(self):
+        rows = [(_sess(1, "a"), self._payload(n=an._DW_MIN_SESSION_WINDOWS - 1))]
+        out = an.reduce_dwell(rows)
+        assert out["n_estimated"] == 0
+        assert out["overall"] is None
+
+    def test_rejected_windows_are_reported_not_filled(self):
+        payload = self._payload()
+        payload["rej"] = [1] * len(an._DW_REJECT_KEYS)
+        out = an.reduce_dwell([(_sess(1, "a"), payload)])
+        assert sum(out["rejects"].values()) == len(an._DW_REJECT_KEYS)
+        assert out["candidates"] == out["windows"] + len(an._DW_REJECT_KEYS)
+
+    def test_streamer_needs_multiple_sessions(self):
+        rows = [(_sess(1, "solo"), self._payload())]
+        assert an.reduce_dwell(rows)["streamers"] == []
+
+    def test_cross_check_ratio_is_a_per_session_median(self):
+        # 合計比は大きい配信1本に支配されるため、配信ごとに取った比の中央値であること。
+        rows = [
+            (_sess(1, "a"), self._payload(arr=10) | {"jn": 8}),
+            (_sess(2, "a"), self._payload(arr=10) | {"jn": 8}),
+            (_sess(3, "a"), self._payload(arr=10000) | {"jn": 2000}),
+        ]
+        out = an.reduce_dwell(rows)
+        assert _approx(out["cross_check"]["ratio"], 0.8, tol=1e-6)
+        assert out["cross_check"]["n"] == 3
+
+    def test_mix_splits_windows_against_the_streamer_own_median(self):
+        # 短い滞在の窓と長い滞在の窓を半々で持たせると、churn/stickyの両方が立つ。
+        fast = [[12, 60.0, 300, 300.0, 0]] * 4    # W=60秒
+        slow = [[12, 60.0, 60, 300.0, 0]] * 4     # W=300秒
+        payload = self._payload()
+        payload["w"] = fast + slow
+        rows = [(_sess(i, "a"), payload) for i in (1, 2)]
+        mix = an.reduce_dwell(rows)["streamers"][0]["mix"]
+        assert mix["churn"] > 0.4 and mix["sticky"] > 0.4
+        assert _approx(mix["churn"] + mix["sticky"] + mix["steady"], 1.0, tol=1e-6)
+
+    def test_empty_rows_report_nothing_rather_than_zero(self):
+        out = an.reduce_dwell([])
+        assert out["overall"] is None
+        assert out["crude_dwell_seconds"] is None
+        assert out["cross_check"]["ratio"] is None
+        assert out["streamers"] == [] and out["hours"] == []
+
+
+class TestRobustStats:
+    def test_mad_ignores_a_single_extreme(self):
+        # 1本だけ桁違いでも尺度が壊れないこと(標準偏差ならここで跳ね上がる)。
+        assert an._mad([1, 2, 3, 4, 5]) == 1.0
+        assert an._mad([1, 2, 3, 4, 100000]) == 1.0
+
+    def test_robust_z_scales_like_a_standard_deviation(self):
+        # 正規標本ではMAD*1.4826 ≈ σ。1σぶん離れた点のzは概ね1になる。
+        baseline = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        z = an._robust_z(_median_plus(baseline, 1.4826 * an._mad(baseline)), baseline)
+        assert 0.9 < z < 1.1
+
+    def test_robust_z_is_none_when_scale_is_undefined(self):
+        # MAD=0で微小な差を無限大のzにしない。
+        assert an._robust_z(5.0, [3, 3, 3, 3, 3]) is None
+        assert an._robust_z(5.0, [3]) is None
+
+    def test_empirical_p_floor_is_bounded_by_baseline_size(self):
+        baseline = list(range(20))
+        p = an._empirical_p(9999.0, baseline)
+        assert _approx(p, 1 / (len(baseline) + 1))
+
+    def test_empirical_p_is_two_sided(self):
+        baseline = [10] * 5 + [0, 20]
+        assert _approx(an._empirical_p(0.0, baseline), an._empirical_p(20.0, baseline))
+
+    def test_empirical_p_of_a_typical_value_is_large(self):
+        assert an._empirical_p(10.0, list(range(0, 21))) > 0.9
+
+
+class TestBenjaminiHochberg:
+    def test_preserves_input_order(self):
+        q = an.benjamini_hochberg([0.5, 0.01, 0.2])
+        assert len(q) == 3
+        assert q[1] < q[0] and q[1] < q[2]
+
+    def test_is_monotone_in_rank(self):
+        ps = [0.001, 0.008, 0.02, 0.3, 0.9]
+        q = an.benjamini_hochberg(ps)
+        assert q == sorted(q)
+
+    def test_never_exceeds_one(self):
+        assert all(v <= 1.0 for v in an.benjamini_hochberg([0.9, 0.95, 0.99]))
+
+    def test_single_test_leaves_p_unchanged(self):
+        assert _approx(an.benjamini_hochberg([0.03])[0], 0.03)
+
+    def test_empty(self):
+        assert an.benjamini_hochberg([]) == []
+
+
+class TestChangepointStatistic:
+    def test_finds_the_split_of_a_clear_step(self):
+        values = [1] * 20 + [9] * 20
+        _stat, at = an._rank_cusum(an._rank_average(values), 4)
+        assert at == 20
+
+    def test_refuses_splits_inside_the_minimum_segment(self):
+        # 端に段があっても最小segment長を割る位置は返さない。
+        values = [1] + [9] * 19
+        _stat, at = an._rank_cusum(an._rank_average(values), 5)
+        assert at is None or 5 <= at <= 15
+
+    def test_too_short_series_has_no_split(self):
+        assert an._rank_cusum([1.0, 2.0, 3.0], 4) == (0.0, None)
+
+    def test_flat_series_yields_no_signal(self):
+        stat, _at = an._rank_cusum(an._rank_average([5] * 30), 4)
+        assert _approx(stat, 0.0, tol=1e-9)
+
+    def test_block_shuffle_preserves_length_and_multiset(self):
+        import random as _random
+        seq = list(range(20))
+        out = an._block_shuffled(seq, 4, _random.Random(1))
+        assert len(out) == len(seq)
+        assert set(out) <= set(seq)
+
+
+def _median_plus(values, delta):
+    return an._median(values) + delta
+
+
+class TestReduceAnomaly:
+    def _payload(self, metrics=None, cp=None, span=3600.0, ev=500):
+        return {"m": metrics if metrics is not None else {}, "span": span,
+                "ev": ev, "cp": cp}
+
+    def _rows(self, n=15, uid="a", value=10.0, spike_value=None):
+        rows = []
+        for i in range(n):
+            v = value if (spike_value is None or i < n - 1) else spike_value
+            # baselineに幅を持たせる(MAD=0だと尺度が定義できず判定不能になる)。
+            v = v + (i % 3) - 1
+            rows.append((_sess(i + 1, uid, started=1000.0 + i),
+                         self._payload({"coins_per_min": v})))
+        return rows
+
+    def test_streamer_without_enough_history_is_not_judged(self):
+        rows = self._rows(n=an._AN_MIN_BASELINE)
+        out = an.reduce_anomaly(rows)
+        assert out["findings"] == []
+        short = [c for c in out["coverage"] if c["status"] == "insufficient"]
+        assert short and short[0]["unique_id"] == "a"
+
+    def test_baseline_excludes_the_session_under_test(self):
+        rows = self._rows(n=16, value=10.0, spike_value=1000.0)
+        out = an.reduce_anomaly(rows)
+        top = out["findings"][0]
+        # 自分をbaselineへ混ぜていれば中央値が跳ね上がり、この逸脱は出ない。
+        assert top["session_id"] == 16
+        assert top["typical"] < 20
+        assert top["z"] > 10
+        assert top["baseline"] == 15
+
+    def test_reports_the_normal_range_alongside_the_deviation(self):
+        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
+        top = out["findings"][0]
+        assert top["p25"] <= top["typical"] <= top["p75"]
+        assert top["label"]
+
+    def test_significance_uses_bh_not_raw_p(self):
+        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
+        top = out["findings"][0]
+        assert top["q"] >= top["p"]
+        assert top["significant"] == (top["q"] < out["fdr_q"])
+
+    def test_power_reports_the_detection_floor(self):
+        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
+        power = out["power"]
+        assert power["tests"] == len(out["findings"])
+        assert _approx(power["best_p"], 1 / 16, tol=1e-3)
+        assert power["reachable"] is (power["best_p"] <= power["needed_p"])
+
+    def test_sessions_without_measurable_metrics_are_counted_separately(self):
+        rows = self._rows(n=16) + [(_sess(99, "a"), self._payload({}))]
+        out = an.reduce_anomaly(rows)
+        assert out["n_sessions"] == 17
+        assert out["n_measured"] == 16
+
+    def test_changepoint_shift_needs_both_significance_and_magnitude(self):
+        big = {"at": 500.0, "before": 40.0, "after": 8.0, "p": 0.005, "bins": 30}
+        tiny = {"at": 500.0, "before": 10.0, "after": 9.8, "p": 0.005, "bins": 30}
+        noisy = {"at": 500.0, "before": 40.0, "after": 8.0, "p": 0.9, "bins": 30}
+        rows = [
+            (_sess(1, "a"), self._payload(cp=big)),
+            (_sess(2, "a"), self._payload(cp=tiny)),
+            (_sess(3, "a"), self._payload(cp=noisy)),
+        ]
+        shifts = an.reduce_anomaly(rows)["changepoints"]["shifts"]
+        assert [s["session_id"] for s in shifts] == [1]
+
+    def test_empty_rows_do_not_fabricate_results(self):
+        out = an.reduce_anomaly([])
+        assert out["findings"] == [] and out["n_significant"] == 0
+        assert out["power"] is None
+        assert out["changepoints"]["shifts"] == []
+
+
+class TestObservedSpan:
+    """稼働秒をbucketsから切り離した移行の回帰test。bucketsが無くても測れること。"""
+
+    def _conn(self, tmp_db_path, events=(), viewers=()):
+        import sqlite3
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            "CREATE TABLE events (session_id INT, time REAL, kind TEXT, diamonds INT);"
+            "CREATE TABLE viewer_samples (session_id INT, time REAL, viewers INT);"
+        )
+        conn.executemany("INSERT INTO events VALUES (?,?,?,?)", events)
+        conn.executemany("INSERT INTO viewer_samples VALUES (?,?,?)", viewers)
+        return conn
+
+    def test_ended_session_uses_ended_at(self):
+        conn = self._conn(None, events=[(1, 1500.0, "join", 0)])
+        assert an._observed_span(conn, _sess(1, ended=5000.0)) == 4000.0
+
+    def test_live_session_falls_back_to_the_last_observation(self):
+        # 収集中はended_atが無い。bucketsに頼らず、最後に届いたeventで終端を決める。
+        conn = self._conn(None, events=[(1, 1500.0, "join", 0), (1, 3400.0, "comment", 0)])
+        sess = _sess(1)
+        sess["ended_at"] = None
+        assert an._observed_span(conn, sess) == 2400.0
+
+    def test_live_session_considers_viewer_samples_too(self):
+        conn = self._conn(None, events=[(1, 1500.0, "join", 0)],
+                          viewers=[(1, 4000.0, 10)])
+        sess = _sess(1)
+        sess["ended_at"] = None
+        assert an._observed_span(conn, sess) == 3000.0
+
+    def test_session_without_any_observation_is_zero_not_negative(self):
+        conn = self._conn(None)
+        sess = _sess(1)
+        sess["ended_at"] = None
+        assert an._observed_span(conn, sess) == 0.0
+
+    def test_summary_counts_events_not_buckets(self):
+        # bucketsを1行も持たない配信でも集計できること(切断で終わった配信が該当)。
+        conn = self._conn(None, events=[
+            (1, 1100.0, "join", 0), (1, 1200.0, "join", 0),
+            (1, 1300.0, "comment", 0), (1, 1400.0, "gift", 50),
+        ])
+        out = an._payload_summary(conn, _sess(1, ended=4000.0))
+        assert out["j"] == 2
+        assert out["c"] == 1
+        assert out["d"] == 50
+        assert out["act"] == 3000.0
+        assert out["nb"] == 50  # 3000秒 / bucket 60秒
+
+
+class TestLifeTable:
+    def _table(self, pairs):
+        """(events, censored) の並びを bin 数へ合わせて詰める。"""
+        n = len(an._AC_BIN_EDGES) + 1
+        out = [[0, 0] for _ in range(n)]
+        for i, (ev, cs) in enumerate(pairs):
+            out[i] = [ev, cs]
+        return out
+
+    def test_no_censoring_matches_the_plain_ratio(self):
+        # 母数はtable自身の合計(反応+打ち切り)。100人中、最初のbinで25人・次で25人が
+        # 反応し、残り50人は最後まで観測できた場合。
+        curve = an._life_table_curve(self._table([(25, 0), (25, 0), (0, 50)]))
+        assert _approx(curve[0], 0.25, tol=1e-9)
+        assert _approx(curve[1], 0.5, tol=1e-9)
+
+    def test_censored_people_are_not_counted_as_non_responders(self):
+        # どちらも100人・2番目のbinで25人が反応。違いは最初のbinで50人が配信終了で
+        # 抜けたかどうか。抜けた人を「反応しなかった」と数えないぶん、率は高く出る。
+        censored = an._life_table_curve(self._table([(0, 50), (25, 0), (0, 25)]))
+        plain = an._life_table_curve(self._table([(0, 0), (25, 0), (0, 75)]))
+        assert _approx(censored[1], 0.5, tol=1e-9)
+        assert _approx(plain[1], 0.25, tol=1e-9)
+        assert censored[1] > plain[1]
+
+    def test_curve_is_monotone_non_decreasing(self):
+        curve = an._life_table_curve(self._table([(5, 3), (4, 10), (2, 40), (1, 5)]))
+        assert all(b >= a - 1e-12 for a, b in zip(curve, curve[1:]))
+
+    def test_empty_table_is_none_not_zero(self):
+        assert an._life_table_curve(self._table([])) is None
+
+    def test_everyone_responding_reaches_one(self):
+        curve = an._life_table_curve(self._table([(10, 0)]))
+        assert _approx(curve[0], 1.0, tol=1e-9)
+
+    def test_median_latency_is_over_responders_only(self):
+        # 9割が反応しない状況でも、反応した人の中央値は求まる。
+        table = self._table([(10, 0), (10, 900)])
+        median = an._ac_median_latency(table)
+        assert median is not None
+        assert an._AC_BIN_EDGES[0] <= median <= an._AC_BIN_EDGES[1]
+
+    def test_median_latency_none_without_responders(self):
+        assert an._ac_median_latency(self._table([(0, 50)])) is None
+
+    def test_bin_index_places_values_in_order(self):
+        assert an._ac_bin_index(0) == 0
+        assert an._ac_bin_index(an._AC_BIN_EDGES[0] - 0.001) == 0
+        assert an._ac_bin_index(an._AC_BIN_EDGES[0]) == 1
+        assert an._ac_bin_index(10 ** 9) == len(an._AC_BIN_EDGES)
+
+
+class TestReduceActivation:
+    def _payload(self, n=100, responded=10, at_bin=0, censored_bin=None, **extra):
+        size = len(an._AC_BIN_EDGES) + 1
+        wl = [[0, 0] for _ in range(size)]
+        nl = [[0, 0] for _ in range(size)]
+        wl[at_bin][0] = responded
+        nl[at_bin][0] = responded // 2
+        rest_wl = n - responded
+        rest_nl = n - responded // 2
+        idx = size - 1 if censored_bin is None else censored_bin
+        wl[idx][1] = rest_wl
+        nl[idx][1] = rest_nl
+        base = {"n": n, "wl": wl, "nl": nl,
+                "act": responded, "act_j": responded, "gift": 0, "gift_j": 0}
+        base.update(extra)
+        return base
+
+    def _rows(self, count=5, **kw):
+        return [(_sess(i + 1, "a", started=1000.0 + i), self._payload(**kw))
+                for i in range(count)]
+
+    def test_both_series_are_returned(self):
+        out = an.reduce_activation(self._rows())
+        assert set(out["series"]) == {"wl", "nl"}
+        assert out["series"]["wl"]["activated"] > out["series"]["nl"]["activated"]
+
+    def test_person_counts_accumulate_across_sessions(self):
+        out = an.reduce_activation(self._rows(count=4, n=50))
+        assert out["n_persons"] == 200
+        assert out["n_sessions"] == 4
+
+    def test_horizons_are_non_decreasing(self):
+        out = an.reduce_activation(self._rows())
+        values = [h["activated"] for h in out["series"]["wl"]["horizons"]]
+        assert all(b >= a for a, b in zip(values, values[1:]))
+
+    def test_ci_needs_enough_session_clusters(self):
+        few = an.reduce_activation(self._rows(count=an._AC_MIN_SESSIONS - 1))
+        assert all(h["ci"] is None for h in few["series"]["wl"]["horizons"])
+        many = an.reduce_activation(self._rows(count=6))
+        assert any(h["ci"] is not None for h in many["series"]["wl"]["horizons"])
+
+    def test_ci_brackets_the_point_estimate(self):
+        out = an.reduce_activation(self._rows(count=8))
+        for h in out["series"]["wl"]["horizons"]:
+            if h["ci"] is not None and h["activated"] is not None:
+                assert h["ci"][0] <= h["activated"] + 1e-6
+                assert h["activated"] <= h["ci"][1] + 1e-6
+
+    def test_ci_is_deterministic_across_calls(self):
+        # 同じdataで画面の値が呼ぶたび揺れないこと。
+        a = an.reduce_activation(self._rows(count=6))
+        b = an.reduce_activation(self._rows(count=6))
+        assert a["series"]["wl"]["horizons"] == b["series"]["wl"]["horizons"]
+
+    def test_coverage_reports_the_missing_join_population(self):
+        rows = self._rows(count=3)
+        rows = [(s, dict(p, act=100, act_j=60, gift=40, gift_j=10)) for s, p in rows]
+        cov = an.reduce_activation(rows)["coverage"]
+        assert cov["actors"] == 300 and cov["actors_with_join"] == 180
+        assert _approx(cov["ratio"], 0.6, tol=1e-9)
+        assert cov["missing"] == 120
+        # ギフト送信者のほうが取りこぼしが多いことが数値で出ること。
+        assert cov["gifter_ratio"] < cov["ratio"]
+
+    def test_sessions_without_joins_are_skipped(self):
+        rows = self._rows(count=2) + [(_sess(9, "a"), {"n": 0, "wl": [], "nl": [],
+                                                       "act": 0, "act_j": 0,
+                                                       "gift": 0, "gift_j": 0})]
+        out = an.reduce_activation(rows)
+        assert out["n_sessions"] == 2
+
+    def test_empty_rows_do_not_fabricate(self):
+        out = an.reduce_activation([])
+        assert out["n_persons"] == 0
+        assert out["coverage"] is None
+        assert out["series"]["wl"]["curve"] is None
+        assert out["series"]["wl"]["median_latency"] is None
+
+
 class TestReduceEntrySource:
     def _payload(self, src=None, jfs=None, efs=None, roles=None,
                  jt=10, jm=8, jfm=6, et=4, em=3):

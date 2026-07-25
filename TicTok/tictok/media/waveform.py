@@ -83,6 +83,13 @@ def audio_profile_path(src) -> Path:
     return sidecar_path(src, AUDIO_PROFILE_SUFFIX)
 
 
+def waveform_artifact_paths(src) -> tuple:
+    """``src``の波形cache一式のpath。表示用と絶対levelで別fileなので、srcを消す側が
+    片方だけ残さないよう列挙で返す。実在確認はしない。"""
+    src = Path(src)
+    return (waveform_path(src), audio_profile_path(src))
+
+
 def _source_key(src: Path) -> dict:
     """cacheの有効性を判定するsrcの指紋。hashは3時間/12GBのfileを毎回全読みすることに
     なるので使わず、mtime+sizeで判定する(録画は追記でなく差し替えで更新される)。"""

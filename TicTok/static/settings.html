@@ -13,22 +13,13 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">設定</h1>
     <!-- 行1: スリムトップバー（他tabと統一） -->
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a class="active" href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <!-- 行2: スクロール可能な設定本体 -->
@@ -38,14 +29,35 @@
         <div class="body">
           <div class="chart-note">設定はDatabaseに保存され、Server再起動後も維持されます。一部の設定は次のSession開始から適用されます。変更履歴は<a href="/ops">運用log</a>の「設定変更履歴」で確認できます。</div>
           <div class="settings-filter">
-            <input id="settings-filter" type="search" placeholder="項目名・説明・keyで絞り込む（browserのCtrl+Fも使えます）" />
+            <input id="settings-filter" type="search" aria-label="設定項目を絞り込む" placeholder="項目名・説明・keyで絞り込む（browserのCtrl+Fも使えます）" />
             <span id="settings-filter-count" class="chart-note"></span>
           </div>
           <div id="settings-form" class="settings-form"></div>
-          <div class="note-actions">
+          <!-- 焼き込み設定の調整は「変更→保存→プレビュー→変更」の反復で、保存が表の
+               直下にあると1周ごとに上下scrollが要る。card下端に貼り付けて往復を消す。 -->
+          <div class="note-actions settings-save-bar">
             <button id="settings-save" class="btn btn-primary">設定を保存</button>
-            <span id="settings-status" class="form-message"></span>
+            <span id="settings-status" class="form-message" aria-live="polite"></span>
           </div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>通知の宛先 <span class="sub">webhookが実際に届くかを確かめる</span></h3>
+        <div class="body">
+          <div class="chart-note">通知の宛先(Discord/Slack/汎用receiverのwebhook URL)は、投稿権限を持つ資格情報のため設定画面ではなく <code>TicTok/.env</code> の <code>TICTOK_NOTIFY_WEBHOOK_URL</code> で指定します（カンマ区切りで複数指定できます）。変更後はServerの再起動が必要です。何を通知するか・閾値・不応期は上の設定「通知(webhook)」で変更できます。下のbuttonは実際にwebhookへ1件送信します。</div>
+          <div class="note-actions">
+            <button id="notify-test" class="btn btn-primary">テスト通知を送る</button>
+            <span id="notify-status" class="form-message"></span>
+          </div>
+          <div id="notify-summary" class="chart-note"></div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>宛先</th><th>形式</th><th>結果</th></tr></thead>
+              <tbody id="notify-target-list"></tbody>
+            </table>
+          </div>
+          <div id="notify-target-empty" class="chart-note hidden">宛先が設定されていません。</div>
         </div>
       </div>
 
@@ -65,35 +77,9 @@
       </div>
 
       <div class="a-card a-settingscard">
-        <h3>容量の内訳 <span class="sub">録画・出力が使っているdiskの内訳</span></h3>
-        <div class="body">
-          <div class="chart-note">録画folderを実際に走査して、配信者別・種別別の容量を集計します。数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は下のbuttonを押したときだけ実行します。</div>
-          <div class="note-actions">
-            <button id="usage-scan" class="btn btn-primary">容量を再scanする</button>
-            <span id="usage-status" class="form-message"></span>
-          </div>
-          <div id="usage-summary" class="chart-note"></div>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead><tr><th>種別</th><th class="num">容量</th><th class="num">file数</th><th>作り直せるか</th></tr></thead>
-              <tbody id="usage-category-list"></tbody>
-            </table>
-          </div>
-          <div id="usage-category-empty" class="chart-note hidden">まだ走査していません。</div>
-          <div class="table-wrap">
-            <table class="result-table">
-              <thead><tr><th>配信者</th><th class="num">容量</th><th class="num">生録画</th><th class="num">焼き込み</th><th class="num">高画質化</th><th class="num">HLS(.ts)</th><th class="num">中間file</th></tr></thead>
-              <tbody id="usage-streamer-list"></tbody>
-            </table>
-          </div>
-          <div id="usage-streamer-empty" class="chart-note hidden">まだ走査していません。</div>
-        </div>
-      </div>
-
-      <div class="a-card a-settingscard">
         <h3>保持policy <span class="sub">古いdataの削除</span></h3>
         <div class="body">
-          <div class="chart-note">上の設定「容量と保持policy」にある「保持policy:」で始まる各項目に沿って、①中断したrenderが残した中間file → ②作り直せる派生物(焼き込み・AI高画質化) → ③生録画 の順で削除します。生録画のmp4は唯一の再取得不能なdataなので、既定では③を実行しません。まず「削除内容を確認（削除しません）」で対象を確かめ、そのうえで「確認した内容を削除する」を押してください。</div>
+          <div class="chart-note">上の設定「容量と保持policy」にある「保持policy:」で始まる各項目に沿って、①中断したrenderが残した中間file → ②作り直せる派生物(焼き込み・Up出力) → ③生録画 の順で削除します。生録画のmp4は唯一の再取得不能なdataなので、既定では③を実行しません。まず「削除内容を確認（削除しません）」で対象を確かめ、そのうえで「確認した内容を削除する」を押してください。何がdiskを使っているか（配信者別・種別別の内訳）は<a href="/capacity">動画容量</a>画面で見られます。</div>
           <div class="note-actions">
             <button id="retention-preview" class="btn">削除内容を確認（削除しません）</button>
             <button id="retention-apply" class="btn btn-danger" disabled>確認した内容を削除する</button>
@@ -102,11 +88,35 @@
           <div id="retention-plan"></div>
         </div>
       </div>
+
+      <div class="a-card a-settingscard">
+        <h3>Databaseの保守 <span class="sub">event・解析結果・設定はtictok.dbにしかありません。退避はSQLiteのbackup APIで取るため、収集を止めずに実行できます。</span></h3>
+        <div class="body">
+          <div class="note-actions">
+            <button id="mnt-backup" class="btn btn-primary" title="稼働したまま、その時点のDBの複製を1世代作ります。作成後にintegrity_checkで読めることを確認してから確定します。">今すぐ退避</button>
+            <button id="mnt-integrity" class="btn" title="PRAGMA integrity_check を実行します。読み取りのみで、収集は止まりません。">健全性check</button>
+            <button id="mnt-checkpoint" class="btn" title="WALの内容をDB本体へ書き戻し、WAL fileを切り詰めます。">WAL checkpoint</button>
+            <button id="mnt-vacuum" class="btn btn-danger" title="DB fileを作り直して空き領域を回収します。実行中は全ての書き込みが待たされます。">VACUUM</button>
+            <span id="mnt-status" class="form-message"></span>
+          </div>
+          <div id="mnt-summary" class="chart-note"></div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>退避file</th><th>種別</th><th>作成日時</th><th>size</th></tr>
+              </thead>
+              <tbody id="mnt-rows"></tbody>
+            </table>
+            <div id="mnt-empty" class="feed-empty" data-label="退避">退避fileはまだありません。</div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- 行3: フッター -->
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>

@@ -778,3 +778,394 @@ async def test_recovery_skips_rows_with_neither_segments_nor_mp4(
 
     assert await recover_interrupted_recordings(tmp_db, tmp_root) == 0
     assert tmp_db.get_recording(recording_id)["status"] == "interrupted"
+
+
+async def test_recovery_does_not_stamp_ended_at_with_the_recovery_time(
+        recovery_env, tmp_db, tmp_root, monkeypatch):
+    """復旧は捕捉が終わった時刻を動かさない。既にended_atがある行は据え置く。
+
+    Recorder._finalizeは``ended_at = time.time()``を打つ。それをDBへ書き戻していたため、
+    起動時の復旧と再mp4化がDBの尺を「録画開始〜再処理時刻」に化けさせていた(実測: 3時間
+    13分の録画が34時間)。同じbatchの行は同じended_atになるので、一覧では古い行ほど尺が
+    伸びて積算に見える。ended_atはevent窓としても使われるため被害は表示に留まらない。"""
+    from tictok.record import recorder
+
+    async def fake_finalize(self, base, on_progress=None):
+        self.output_path = layout.mp4_path(tmp_root, base, "tester")
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.output_path.write_bytes(b"\x00" * 512)
+        self.state = recorder.STATE_COMPLETED
+        # 復旧を走らせた「今」。DBへ持ち込んではいけない値。
+        self.ended_at = 9_999_999.0
+        self.duration_seconds = 120.0
+
+    monkeypatch.setattr(recorder.Recorder, "finalize_recovered_hls", fake_finalize)
+    recording_id, stem, _ = recovery_env(segments=3)
+    tmp_db.update_recording(
+        recording_id, "interrupted", str(tmp_root), f"{stem}.mp4", 1300.0, 0)
+
+    assert await recorder.recover_interrupted_recordings(tmp_db, tmp_root) == 1
+
+    row = tmp_db.get_recording(recording_id)
+    assert row["ended_at"] == 1300.0
+    assert row["duration_seconds"] == pytest.approx(120.0)
+
+
+async def test_recovery_fills_a_missing_ended_at_from_the_measured_duration(
+        recovery_env, tmp_db, tmp_root, monkeypatch):
+    """ended_atを持たない行(中断のまま終わった録画)だけは埋める。
+
+    捕捉は実時間で進むので、録画開始+実尺が捕捉の終わりに当たる。復旧を走らせた時刻では
+    ない — そちらは何日も後になりうる。"""
+    from tictok.record import recorder
+
+    async def fake_finalize(self, base, on_progress=None):
+        self.output_path = layout.mp4_path(tmp_root, base, "tester")
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.output_path.write_bytes(b"\x00" * 512)
+        self.state = recorder.STATE_COMPLETED
+        self.ended_at = 9_999_999.0
+        self.duration_seconds = 300.0
+
+    monkeypatch.setattr(recorder.Recorder, "finalize_recovered_hls", fake_finalize)
+    recording_id, _, _ = recovery_env(segments=3)
+
+    assert await recorder.recover_interrupted_recordings(tmp_db, tmp_root) == 1
+
+    row = tmp_db.get_recording(recording_id)
+    # recovery_envのstarted_atは1000.0。
+    assert row["ended_at"] == pytest.approx(1300.0)
+    assert row["duration_seconds"] == pytest.approx(300.0)
+
+
+# --------------------------------------------------------------------------
+# recorder: live見どころのPTS再map
+# --------------------------------------------------------------------------
+
+
+def _timing_recorder(tmp_path, tmp_db, session_id, *, media_pts, anchors,
+                     started_at=1000.0, ended_at=1300.0):
+    """timing map sidecarを持つ録画1本ぶんのRecorderを組む。mp4の中身は使わない
+    (長さはprobeを差し替えて与える)。"""
+    from tictok.record import recorder as rec_mod
+
+    mp4 = tmp_path / "rec" / "alice" / "mp4" / "00001_alice_20260101_000000.mp4"
+    mp4.parent.mkdir(parents=True, exist_ok=True)
+    mp4.write_bytes(b"")
+    tp = rec_mod.timing_path(mp4)
+    tp.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"version": 2, "media_duration": anchors[-1][1],
+               "anchors": [[w, m] for w, m in anchors]}
+    if media_pts:
+        payload["media_pts"] = [[m, p] for m, p in media_pts]
+    tp.write_text(json.dumps(payload), encoding="utf-8")
+
+    r = rec_mod.Recorder("alice", str(tmp_path / "rec"), session_id, storage=tmp_db)
+    r.base = mp4.stem
+    r.started_at = started_at
+    r.ended_at = ended_at
+    r.recording_id = tmp_db.create_recording(
+        session_id, "alice", str(mp4), mp4.name, "hd", started_at)
+    return r, mp4
+
+
+def test_live_bookmark_is_remapped_onto_the_mp4_timeline(tmp_path, tmp_db, make_session):
+    """押下位置(wall-clock)がmp4のPTS軸へ載ること。
+
+    素朴な wall - started_at のままだと、mux inflationのぶんだけ手前を指す。実測では
+    112分の録画で340秒ずれた。ここでは 300s の押下が 330s(1.1倍のinflation)へ動く。
+    """
+    import asyncio
+
+    session_id = make_session("alice")
+    r, mp4 = _timing_recorder(
+        tmp_path, tmp_db, session_id,
+        anchors=[(1000.0, 0.0), (1300.0, 300.0)],
+        media_pts=[(0.0, 0.0), (300.0, 330.0)],
+    )
+    bm = tmp_db.add_live_bookmark(r.recording_id, "alice", wall_time=1300.0,
+                                  provisional_start=300.0)
+    assert bm["start"] == 300.0 and bm["pts_mapped"] == 0
+
+    async def fake_probe(path):
+        return 330.0
+
+    r._probe_duration = fake_probe
+    asyncio.run(r._remap_live_bookmarks(mp4))
+
+    row = {b["id"]: b for b in tmp_db.list_bookmarks(r.recording_id)}[bm["id"]]
+    assert row["pts_mapped"] == 1
+    # 素朴実装なら300.0のまま。再mapされていれば330.0。
+    assert row["start"] == pytest.approx(330.0)
+    assert row["start"] != pytest.approx(300.0)
+    assert tmp_db.list_unmapped_bookmarks(r.recording_id) == []
+
+
+def test_live_bookmark_stays_provisional_without_a_timing_map(tmp_path, tmp_db, make_session):
+    """timing mapが無い(解像度正規化がCFRへ落ちて破棄された等)ときは確定させない。
+    暫定値をpts_mapped=1で固めると、ズレたdataが確定値として残る。"""
+    import asyncio
+
+    from tictok.record import recorder as rec_mod
+
+    session_id = make_session("alice")
+    r, mp4 = _timing_recorder(
+        tmp_path, tmp_db, session_id,
+        anchors=[(1000.0, 0.0), (1300.0, 300.0)], media_pts=None,
+    )
+    rec_mod.timing_path(mp4).unlink()
+    bm = tmp_db.add_live_bookmark(r.recording_id, "alice", 1300.0, 300.0)
+
+    asyncio.run(r._remap_live_bookmarks(mp4))
+
+    row = {b["id"]: b for b in tmp_db.list_bookmarks(r.recording_id)}[bm["id"]]
+    assert row["pts_mapped"] == 0
+    assert row["start"] == 300.0
+    assert [b["id"] for b in tmp_db.list_unmapped_bookmarks(r.recording_id)] == [bm["id"]]
+
+
+def test_remap_uses_the_same_mapper_as_the_burn_in(tmp_path, tmp_db, make_session):
+    """再mapの結果が焼き込みの時刻mapと一致すること。別実装を持つと、同じ録画で
+    コメントの焼き込み位置と見どころの位置が食い違う。"""
+    import asyncio
+
+    from tictok.record import video_overlay as vo
+
+    session_id = make_session("alice")
+    anchors = [(1000.0, 0.0), (1300.0, 300.0)]
+    media_pts = [(0.0, 0.0), (150.0, 160.0), (300.0, 330.0)]
+    r, mp4 = _timing_recorder(tmp_path, tmp_db, session_id,
+                              anchors=anchors, media_pts=media_pts)
+    wall = 1150.0
+    bm = tmp_db.add_live_bookmark(r.recording_id, "alice", wall, wall - 1000.0)
+
+    async def fake_probe(path):
+        return 330.0
+
+    r._probe_duration = fake_probe
+    asyncio.run(r._remap_live_bookmarks(mp4))
+
+    expected = vo._make_time_mapper(anchors, 1000.0, 1300.0, 330.0, None, media_pts)(wall)
+    row = {b["id"]: b for b in tmp_db.list_bookmarks(r.recording_id)}[bm["id"]]
+    assert row["start"] == pytest.approx(expected)
+
+# --------------------------------------------------------------------------
+# recorder: playlist -> VOD playlist (the input the finalize mux reads)
+# --------------------------------------------------------------------------
+
+
+def _recorder_with_hls(tmp_path, playlist_body, segments):
+    """A Recorder stub holding just the HLS state the playlist helpers touch.
+    ``segments`` maps segment filename -> mtime; a name absent from it is a
+    playlist entry with no file on disk."""
+    import os
+
+    from tictok.record import recorder as rec
+
+    hls = tmp_path / "hls"
+    hls.mkdir()
+    for name, mtime in segments.items():
+        seg = hls / name
+        seg.write_bytes(b"\x00")
+        os.utime(seg, (mtime, mtime))
+    playlist = hls / "index.m3u8"
+    playlist.write_text(playlist_body, encoding="utf-8")
+
+    r = rec.Recorder.__new__(rec.Recorder)
+    r.hls_dir = hls
+    r.playlist = playlist
+    r.base = "stem"
+    r.unique_id = "uid"
+    r._volume_paths = lambda: []
+    return r
+
+
+def _playlist(entries):
+    lines = ["#EXTM3U", "#EXT-X-VERSION:6"]
+    for name, extinf in entries:
+        lines.append("#EXTINF:%.6f," % extinf)
+        lines.append(name)
+    return "\n".join(lines) + "\n"
+
+
+def test_playlist_segments_uses_playlist_order_and_extinf(tmp_path):
+    r = _recorder_with_hls(
+        tmp_path,
+        _playlist([("seg00000.ts", 1.96), ("seg00001.ts", 2.04)]),
+        {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0},
+    )
+
+    kept = r._playlist_segments()
+
+    assert [(p.name, e, d) for p, e, _, d in kept] == [
+        ("seg00000.ts", 1.96, False),
+        ("seg00001.ts", 2.04, False),
+    ]
+
+
+def test_playlist_segments_excludes_ts_absent_from_the_playlist(tmp_path):
+    # A .ts written after the last playlist flush is an unindexed partial write:
+    # it has no #EXTINF, so muxing it would advance pts past the media axis.
+    r = _recorder_with_hls(
+        tmp_path,
+        _playlist([("seg00000.ts", 1.96)]),
+        {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0},
+    )
+
+    assert [p.name for p, _, _, _ in r._playlist_segments()] == ["seg00000.ts"]
+
+
+def test_playlist_segments_drops_pts_discontinuity_and_marks_the_next(tmp_path):
+    # seg1 claims 100s of media for 2s of wall time -> glitched source timestamp.
+    r = _recorder_with_hls(
+        tmp_path,
+        _playlist([("seg00000.ts", 2.0), ("seg00001.ts", 100.0), ("seg00002.ts", 2.0)]),
+        {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0, "seg00002.ts": 1004.0},
+    )
+
+    kept = r._playlist_segments()
+
+    assert [(p.name, d) for p, _, _, d in kept] == [
+        ("seg00000.ts", False),
+        ("seg00002.ts", True),
+    ]
+
+
+def test_playlist_segments_carries_a_source_flagged_discontinuity(tmp_path):
+    body = _playlist([("seg00000.ts", 2.0)])
+    body += "#EXT-X-DISCONTINUITY\n#EXTINF:2.000000,\nseg00001.ts\n"
+    r = _recorder_with_hls(
+        tmp_path, body, {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0})
+
+    assert [d for _, _, _, d in r._playlist_segments()] == [False, True]
+
+
+def test_playlist_segments_empty_without_a_playlist(tmp_path):
+    r = _recorder_with_hls(tmp_path, _playlist([]), {})
+    r.playlist.unlink()
+
+    assert r._playlist_segments() == []
+
+
+def test_write_vod_playlist_is_terminated_and_typed(tmp_path):
+    # Without PLAYLIST-TYPE:VOD + ENDLIST the HLS demuxer treats the list as live
+    # and seeks to the live edge, dropping all but the last few segments.
+    r = _recorder_with_hls(
+        tmp_path,
+        _playlist([("seg00000.ts", 1.96), ("seg00001.ts", 2.04)]),
+        {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0},
+    )
+    out = tmp_path / "vod.m3u8"
+
+    assert r._write_vod_playlist(r._playlist_segments(), out) is True
+
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert "#EXT-X-PLAYLIST-TYPE:VOD" in lines
+    assert lines[-1] == "#EXT-X-ENDLIST"
+    assert "#EXT-X-TARGETDURATION:3" in lines
+    # Bare names so the demuxer resolves them beside the playlist.
+    assert [l for l in lines if l.endswith(".ts")] == ["seg00000.ts", "seg00001.ts"]
+    assert [l for l in lines if l.startswith("#EXTINF")] == [
+        "#EXTINF:1.960000,", "#EXTINF:2.040000,"]
+
+
+def test_write_vod_playlist_emits_a_discontinuity_marker(tmp_path):
+    r = _recorder_with_hls(
+        tmp_path,
+        _playlist([("seg00000.ts", 2.0), ("seg00001.ts", 100.0), ("seg00002.ts", 2.0)]),
+        {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0, "seg00002.ts": 1004.0},
+    )
+    out = tmp_path / "vod.m3u8"
+    r._write_vod_playlist(r._playlist_segments(), out)
+
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert lines[lines.index("seg00002.ts") - 2] == "#EXT-X-DISCONTINUITY"
+
+
+def test_media_pts_is_identity_when_pts_contribution_is_the_extinf():
+    # What the HLS demuxer produces: each segment contributes exactly its #EXTINF,
+    # so the media axis and the container axis coincide.
+    from tictok.record.recorder import media_pts_from_segments
+
+    extinfs = [2.0, 1.5, 2.5]
+    points = media_pts_from_segments(extinfs, extinfs, 6.0)
+
+    assert points == [[0.0, 0.0], [2.0, 2.0], [3.5, 3.5], [6.0, 6.0]]
+
+
+def test_media_pts_pins_the_endpoint_to_the_finalized_duration():
+    from tictok.record.recorder import media_pts_from_segments
+
+    extinfs = [2.0, 2.0]
+    points = media_pts_from_segments(extinfs, extinfs, 4.4)
+
+    assert points[-1] == [4.0, 4.4]
+    assert points[1] == [2.0, 2.2]
+
+
+# --------------------------------------------------------------------------
+# layout: 録画横断poolのroot
+# --------------------------------------------------------------------------
+
+
+def test_pool_dirs_do_not_follow_the_mp4_to_the_final_dir(tmp_path, monkeypatch):
+    """avatars/emotes/gift_iconsはmp4の位置ではなくwork rootで解決すること。
+
+    poolを書くのは収集時のcollectorでwork root固定。読む側がmp4の現在地で解くと、
+    final dirへ移送された録画だけが存在しないpoolを見に行き、avatarもemoteも1件も
+    解決できずイニシャル円盤へ黙って縮退する(署名付きCDN URLは失効しており再取得も
+    効かない)。移送の有無で結果が変わってはいけない。"""
+    from tictok.core import layout
+
+    work = (tmp_path / "work").resolve()
+    final = (tmp_path / "final").resolve()
+    monkeypatch.setattr(layout, "_pool_root", None)
+    layout.set_pool_root(work)
+    try:
+        assert layout.avatar_pool_dir() == work / "avatars" / "by-id"
+        assert layout.emote_pool_dir() == work / "emotes"
+        assert layout.gift_icon_pool_dir() == work / "gift_icons"
+        # 移送後のmp4から解いたrootはfinal dirだが、poolはwork rootのまま。
+        relocated = layout.mp4_path(final, "00001_tester_20260101_120000")
+        assert layout.record_root_of(relocated) == final
+        assert layout.pool_root() == work
+    finally:
+        layout.reset_pool_root()
+
+
+def test_record_root_of_still_follows_the_mp4_for_per_recording_artifacts(tmp_path):
+    """録画ごとのartifact(.sidecars)は逆にmp4へ付いていくこと。poolと混同しない。"""
+    from tictok.core import layout
+    from tictok.record.recorder import sidecar_dir
+
+    final = (tmp_path / "final").resolve()
+    relocated = layout.mp4_path(final, "00001_tester_20260101_120000")
+    assert sidecar_dir(relocated) == final / ".sidecars"
+
+
+# ---- 再mp4化のついでの音量正規化 --------------------------------------------------
+
+async def test_concat_audio_args_default_to_the_recording_time_encode(tmp_path):
+    """normalize_audioを渡さない経路(通常録画のfinalize)は、録画したままの音量で残すこと。"""
+    from tictok.record import recorder as rec_mod
+
+    r = rec_mod.Recorder("alice", str(tmp_path / "rec"), 1)
+    args = await r._concat_audio_args(tmp_path / "seg00000.ts")
+    assert args == ["-c:a", "aac", "-b:a", "192k", "-af", "aresample=async=1:first_pts=0"]
+
+
+async def test_concat_audio_args_add_loudnorm_when_asked(tmp_path, monkeypatch):
+    """再mp4化はもともと音声を再encodeするので、正規化は同じpassの中で済む。"""
+    from tictok.record import audio_norm
+    from tictok.record import recorder as rec_mod
+
+    monkeypatch.setattr(audio_norm, "probe_sample_rate", lambda src: 44100)
+    r = rec_mod.Recorder(
+        "alice", str(tmp_path / "rec"), 1,
+        normalize_audio={"target_lufs": -14.0, "true_peak": -1.5, "bitrate_kbps": 192},
+    )
+    args = await r._concat_audio_args(tmp_path / "seg00000.ts")
+    filters = args[args.index("-af") + 1]
+    # first_pts=0を落とすと、live .tsの任意の開始PTSがそのまま残り音声だけ原点がずれる。
+    assert filters == "aresample=async=1:first_pts=0,loudnorm=I=-14:TP=-1.5"
+    assert args[args.index("-ar") + 1] == "44100"

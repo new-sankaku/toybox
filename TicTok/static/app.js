@@ -14,6 +14,7 @@ const els = {
   restartBtn: document.getElementById("restart-btn"),
   removeBtn: document.getElementById("remove-btn"),
   recordBtn: document.getElementById("record-btn"),
+  bookmarkBtn: document.getElementById("bookmark-btn"),
   recordVideoBtn: document.getElementById("record-video-btn"),
   addRecordVideo: document.getElementById("add-record-video"),
   recBadge: document.getElementById("rec-badge"),
@@ -39,6 +40,13 @@ const els = {
     gift: { list: document.getElementById("gift-feed"), empty: document.getElementById("gift-empty") },
     comment: { list: document.getElementById("comment-feed"), empty: document.getElementById("comment-empty") },
     event: { list: document.getElementById("event-feed"), empty: document.getElementById("event-empty") },
+    // Ranking paneに出す直近gift。Gift feedとはDOM nodeを共有できない(prependは移動に
+    // なる)ので、同じeventからnodeを2つ作る。
+    giftRecent: {
+      list: document.getElementById("rank-recent-gift"),
+      empty: document.getElementById("rank-recent-gift-empty"),
+      limit: 6,
+    },
   },
   stats: {
     viewers: document.getElementById("stat-viewers"),
@@ -371,6 +379,16 @@ function applyRecording(state) {
     els.recordBtn.title = connected ? "" : "配信に接続中のみ録画できます。";
   }
 
+  // 見どころは動画の中の位置を指すので、録画中だけ押せる。録画していない配信に印を
+  // 置いても、後から戻る先が無い。
+  const canBookmark = !!rec && rec.state === "recording" && !!rec.recording_id;
+  els.bookmarkBtn.disabled = !canBookmark;
+  if (!canBookmark) {
+    els.bookmarkBtn.title = "録画中のみ記録できます。";
+  } else {
+    els.bookmarkBtn.title = "いま見ている場面を見どころとして記録します（キー: B）。";
+  }
+
   if (rec && (recording || finalizing || rec.state === "completed" || rec.state === "failed")) {
     els.recBadge.classList.remove("hidden");
     const mb = (rec.bytes / 1048576).toFixed(1);
@@ -471,7 +489,7 @@ function addToFeed(feed, node, silent) {
   feed.empty.classList.add("hidden");
   if (silent) node.style.animation = "none";
   feed.list.prepend(node);
-  while (feed.list.children.length > FEED_LIMIT) {
+  while (feed.list.children.length > (feed.limit || FEED_LIMIT)) {
     feed.list.removeChild(feed.list.lastChild);
   }
 }
@@ -500,6 +518,7 @@ function addEventToDOM(ev, silent = false) {
 
   if (ev.kind === "gift") {
     addToFeed(els.feeds.gift, feedItemNode(ev, giftContent(ev), false), silent);
+    addToFeed(els.feeds.giftRecent, feedItemNode(ev, giftContent(ev), false), silent);
   } else if (ev.kind === "comment") {
     const nodes = [userCell(ev.user)];
     const tail = document.createElement("span");
@@ -1151,6 +1170,42 @@ els.recordBtn.addEventListener("click", async () => {
     els.statusMessage.textContent = err.message;
     els.recordBtn.disabled = false;
   }
+});
+
+// 見どころの登録。押した時刻はServerが打つ(browserの時計ずれを持ち込まない)。
+// 登録直後の位置はwall-clock由来の暫定値で、録画のfinalizeでmp4のPTS軸へ載せ直される。
+async function markBookmark() {
+  if (!activeTab || els.bookmarkBtn.disabled) return;
+  els.bookmarkBtn.disabled = true;
+  try {
+    await apiSend("POST", `/api/monitors/${encodeURIComponent(activeTab)}/bookmark`, { memo: "" });
+    flashBookmarkSaved();
+  } catch (err) {
+    els.statusMessage.textContent = err.message;
+  } finally {
+    // 状態はWSのsnapshotで戻るが、失敗時に押せないままにしないよう即座に戻す。
+    els.bookmarkBtn.disabled = false;
+  }
+}
+
+function flashBookmarkSaved() {
+  const btn = els.bookmarkBtn;
+  const original = "🔖 見どころ";
+  btn.textContent = "🔖 記録しました";
+  clearTimeout(btn._flashTimer);
+  btn._flashTimer = setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
+els.bookmarkBtn.addEventListener("click", markBookmark);
+
+// 「見ている最中に1押し」が目的なので、入力欄にいるとき以外はBキーでも打てるようにする。
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "b" && ev.key !== "B") return;
+  if (ev.ctrlKey || ev.altKey || ev.metaKey) return;
+  const el = document.activeElement;
+  if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+  ev.preventDefault();
+  markBookmark();
 });
 
 els.recordVideoBtn.addEventListener("click", async () => {

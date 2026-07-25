@@ -1,6 +1,8 @@
 "use strict";
 
-// job画面: 実行中・待機中・過去のjobを1画面に並べ、取り消しと再実行の導線を持つ。
+// Job画面: 実行中・待機中・過去のjobを1画面に並べ、取り消しと再実行の導線を持つ。
+// 運用log(ops_events)は「もう起きたこと」を遡る画面で、こちらは「これから終わること」を
+// 待つ画面。更新のされ方(行の書き換え vs 追記)も見る目的も違うので、pageを分けている。
 // 一覧はWSのjob_update/jobsで更新するが、pageを開いた直後だけはHTTPで取り直す
 // (WSのsnapshotが届く前の空表示を避けるため)。
 
@@ -19,13 +21,20 @@ const JOB_KIND_LABELS = {
   overlay: "焼き込み",
   upscale: "Up出力",
   reprocess: "再mp4化",
+  audionorm: "音量正規化",
   overlay_preview: "焼き込みプレビュー",
   clip_batch: "clip一括書き出し",
-  session_overlay: "Session出力",
+  session_overlay: "Session 焼き込み",
   session_upscale: "Session Up出力",
+  bulk_overlay: "一括 焼き込み出力",
+  bulk_upscale: "一括 Up出力",
+  bulk_reprocess: "一括 再mp4化",
+  bulk_audionorm: "一括 音量正規化",
   stt: "文字起こし",
   storage: "容量scan",
   retention: "保持policy",
+  semantic: "意味検索index",
+  cutlist: "cut list書き出し",
 };
 
 // group(session一括)は個々のjobを畳んだ表示行なので、既定では明細を出さない。
@@ -56,8 +65,8 @@ function upsertJob(job) {
 }
 
 function matchesFilter(job) {
-  const state = document.getElementById("flt-state").value;
-  const kind = document.getElementById("flt-kind").value;
+  const state = document.getElementById("job-flt-state").value;
+  const kind = document.getElementById("job-flt-kind").value;
   if (state === "active" && !ACTIVE_STATES.includes(job.state)) return false;
   if (state === "failed" && !FAILED_STATES.includes(job.state)) return false;
   if (kind !== "all" && job.domain !== kind) return false;
@@ -113,7 +122,11 @@ function stateCell(job) {
   const meta = JOB_STATE_LABELS[job.state] || { text: job.state, cls: "badge-idle" };
   const span = document.createElement("span");
   span.className = `badge ${meta.cls}`;
-  span.textContent = meta.text;
+  // 順番待ちと、前提(保存先volume)の復帰待ちは進まない理由が違う。同じ「待機中」で並べると
+  // queueが詰まっているようにしか見えない。
+  const waiting = job.state === "pending" && job.not_before && job.not_before * 1000 > Date.now();
+  span.textContent = waiting ? "復帰待ち" : meta.text;
+  if (waiting) span.title = job.stage || "前提が整うまで待っています。";
   return span;
 }
 
@@ -130,7 +143,7 @@ function progressCell(job) {
   return prog;
 }
 
-function targetText(job) {
+function jobTargetText(job) {
   if (job.total > 1) return `${job.title || "-"}（${job.total}本）`;
   return job.filename || job.title || (job.recording_id ? `#${job.recording_id}` : "-");
 }
@@ -153,7 +166,7 @@ function targetCell(row) {
     wrap.appendChild(toggle);
   }
   const label = document.createElement("span");
-  label.textContent = targetText(row.job);
+  label.textContent = jobTargetText(row.job);
   wrap.appendChild(label);
   return wrap;
 }
@@ -187,8 +200,9 @@ function actionsCell(job) {
   wrap.className = "row-actions";
   // 取り消し・再実行が効くのはDBのqueueに載る映像jobだけ。容量scan等のin-process jobは
   // 台帳に行が無いので、押せるように見せない。
-  const queued = ["overlay", "upscale", "reprocess", "overlay_preview", "clip_batch",
-    "session_overlay", "session_upscale"]
+  const queued = ["overlay", "upscale", "reprocess", "audionorm", "overlay_preview", "clip_batch",
+    "session_overlay", "session_upscale",
+    "bulk_overlay", "bulk_upscale", "bulk_reprocess", "bulk_audionorm"]
     .includes(job.domain);
   if (!queued) return wrap;
   if (ACTIVE_STATES.includes(job.state)) {
@@ -196,18 +210,35 @@ function actionsCell(job) {
     cancel.className = "btn btn-small";
     cancel.textContent = "取り消し";
     cancel.title = "待機中のjobはqueueから外します。実行中のjobはffmpegを止めて途中のfileを片付けるため、状態が変わるまで少し時間がかかります。";
-    cancel.addEventListener("click", () => sendJobAction(
-      "cancel", job,
-      job.state === "running" ? `実行中の「${job.title}」を取り消しますか？途中までの出力は破棄されます。` : "",
-    ));
+    // group行の取り消しは1本ではなくgroupの未終了ぶん全部に効く。配信者まるごとの一括は
+    // 数百本になるので、待機中でも件数を言わずに消してはいけない。
+    const confirmText = job.total > 1
+      ? `「${job.title}」の未終了のjobをまとめて取り消しますか？（全${fmtNum(job.total)}本）`
+        + (job.state === "running" ? " 実行中の1本は途中までの出力を破棄します。" : "")
+      : (job.state === "running"
+        ? `実行中の「${job.title}」を取り消しますか？途中までの出力は破棄されます。` : "");
+    cancel.addEventListener("click", () => sendJobAction("cancel", job, confirmText));
     wrap.appendChild(cancel);
     return wrap;
   }
-  if (job.total > 1) return wrap;
+  // group行は「失敗したぶんだけ」を戻せる。ここを1本ずつ探して押させていたため、一括の
+  // 途中で落ちた録画は気付かれないまま残っていた。
+  if (job.total > 1) {
+    if (job.state !== "failed") return wrap;
+    const resume = document.createElement("button");
+    resume.className = "btn btn-small";
+    resume.textContent = "失敗ぶんを再投入";
+    resume.title = "この一括投入のうち、失敗・中断した録画だけをqueueへ戻して続きから処理します。"
+      + "完了済みの録画はやり直しません。";
+    resume.addEventListener("click", () => sendJobAction("retry", job, ""));
+    wrap.appendChild(resume);
+    return wrap;
+  }
   const retry = document.createElement("button");
   retry.className = "btn btn-small";
   retry.textContent = "再実行";
-  retry.title = "同じ内容を新しいjobとしてqueueへ投入し直します。この行は履歴として残ります。";
+  retry.title = "この録画をもう一度処理します。失敗・中断・取り消しならこの行がそのまま待機へ戻り、"
+    + "完了済みなら新しいjobとして投入し直します。";
   retry.addEventListener("click", () => sendJobAction("retry", job, ""));
   wrap.appendChild(retry);
   return wrap;
@@ -289,8 +320,14 @@ function renderGpu() {
   const running = counts.running || 0;
   const pending = counts.pending || 0;
   if (running || pending) {
-    sttEl.textContent = `文字起こしqueue: 実行中 ${running} / 待機中 ${pending}（この一覧には出ません）`;
-    sttEl.title = "文字起こしは別queueで動くため、この一覧には行が出ません。配信者動画の画面から投入・取り消しができます。";
+    // 状況を見る場所と操作する場所が分かれていた。待機が詰まっているのを見つけても
+    // その場で取り消せないので、操作できる画面へ直接繋ぐ。
+    sttEl.innerHTML = "";
+    const link = document.createElement("a");
+    link.href = "/videos#transcribe";
+    link.textContent = `文字起こしqueue: 実行中 ${running} / 待機中 ${pending}`;
+    link.title = "文字起こしは別queueで動くため、この一覧には行が出ません。clickで投入・取り消しができる画面へ移動します。";
+    sttEl.appendChild(link);
   }
 }
 
@@ -325,7 +362,7 @@ function onMessage(message) {
   }
 }
 
-["flt-state", "flt-kind"].forEach((id) =>
+["job-flt-state", "job-flt-kind"].forEach((id) =>
   document.getElementById(id).addEventListener("input", render),
 );
 

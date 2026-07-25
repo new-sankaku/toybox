@@ -15,6 +15,8 @@ import functools
 import hashlib
 import json
 import logging
+import math
+import random
 import threading
 import time
 from typing import Optional
@@ -92,10 +94,108 @@ _CV_GAP_PERCENTILE = 95.0
 # sampling間隔を測るには最低限これだけのsampleが要る(1点では間隔が定義できない)。
 _CV_MIN_SAMPLES = 3
 
+# 滞在時間(Little則 W = L / λ)。L=同時接続、λ=到着率=viewer_samples.total_viewers
+# (累積来場counter)の時間微分。Little則は定常状態でしか成り立たないため、窓を細かく
+# 切り、窓内が定常とみなせるものだけを採用する(不採用は推定不能として別掲する)。
+_DW_WINDOW_SECONDS = 300.0        # 推定1点あたりの窓幅
+_DW_SUBBIN_SECONDS = 60.0         # 窓内の定常性を測る小bin
+_DW_MIN_SUBBINS = 4               # 分散を測るのに要る最低小bin数
+_DW_MIN_WINDOW_FILL = 0.6         # 窓の端が欠けた分を許す下限(実観測span / 窓幅)
+# 到着が少なすぎる窓はλの相対誤差が大きく、W=L/λが発散する。Poisson変動係数
+# 1/√k がこの件数で約35%に収まる水準。
+_DW_MIN_ARRIVALS = 8
+# 定常性の判定は素の変動係数ではなく分散対平均比(index of dispersion / Fano因子)で行う。
+# 定常Poisson到着でも小binの件数はばらつき、素のCVは件数が少ないだけで閾値を超えて
+# しまう(λ一定でもCV≈1/√k)。Fano因子は定常Poissonなら件数によらず1へ寄るため、
+# 「λが窓内で動いた」ぶんだけを検出できる。
+_DW_MAX_DISPERSION = 3.0
+# 同接の水準そのものが窓内で動いている場合もLは代表値にならない。窓の前半後半で
+# 時間加重平均を比べ、相対差がこれを超える窓は採らない。
+_DW_MAX_LEVEL_DRIFT = 0.35
+# sampling欠測の許容。Lは階段保持の時間積分で求めるため多少の間隔ゆらぎには強いが、
+# 大穴が空いた窓は同接の水準も到着も追えていない。
+_DW_MAX_SAMPLE_GAP_SECONDS = 120.0
+_DW_MAX_GAP_SHARE = 0.20
+# 配信/配信者を1点として出すのに要る最低数。
+_DW_MIN_SESSION_WINDOWS = 3
+_DW_MIN_STREAMER_SESSIONS = 2
+# 窓を「入れ替わりが速い / 常連が居座る」に分ける、その配信者自身の中央値に対する比。
+# 絶対秒ではなく配信者内の相対で切る(total_viewersの定義が非公開で、絶対値を配信者間で
+# 比べられないため)。
+_DW_CHURN_RATIO = 0.80
+_DW_STICKY_RATIO = 1.25
+# 時刻別の棒を実勢として読ませてよい最低窓数。これ未満の時刻は値を出しつつ、
+# 参考値であることが見て分かるよう画面側で区別する(消すと「その時刻は配信が無い」に
+# 見えてしまうため、消さずに弱める)。
+_DW_MIN_HOUR_WINDOWS = 20
+# 窓を不採用にした理由。payloadは件数の配列で持つのでキー順を固定する。
+_DW_REJECT_KEYS = ("short", "gap", "cover", "reset", "noarr", "unstable", "drift")
+
+# 配信の異常検知(session間の水準比較)。core/spike.pyがsession内の瞬間peakを見るのに対し、
+# こちらは「その配信者のいつも」と1配信まるごとの水準を比べる。spike.pyの設計判断
+# (生の単位では配信ごとに規模が桁で違い横断しきい値が無意味)とは矛盾しない。ここでは
+# 配信者自身の履歴を基準に正規化してから比べるため、規模の違いは基準側に吸収される。
+_AN_METRICS = ("viewers_med", "coins_per_min", "comments_per_min", "joins_per_min",
+               "follow_per_join")
+# 露出量の下限。短い配信・分母の小さい比率を「異常」と呼ばないための門。実測で、
+# これを入れる前は「31入室中3フォロー=通常の16倍」のような小分母のノイズが上位を
+# 占めていた。
+_AN_MIN_SPAN_SECONDS = 1800.0   # 観測できたevent範囲がこの秒数未満の配信は対象外
+_AN_MIN_EVENTS = 100            # 相互作用eventの最低数
+_AN_MIN_JOINS_FOR_RATIO = 200   # follow率の分母。これ未満は比率が桁で暴れる
+_AN_MIN_VIEWER_SAMPLES = 30     # 同接の代表値を出すのに要るsample数
+# 収集の失敗を「異常な配信」と読まないため、event数は相互作用のみで数える。system は
+# collector自身の記録で配信の活動ではない(実測で、全100件がsystemだけの収集失敗
+# sessionが「Comment 0件の異常」として上位に出ていた)。
+_AN_NON_ACTIVITY_KINDS = ("system",)
+# 判定に要る同一配信者の他配信の本数。これ未満は「判定不能」にする。経験p値が到達
+# できる最小値は 1/(本数+1) なので、10本を切ると最も外れた配信でもp>0.09にしかならず、
+# 有意水準に触れることすらできない。MADも数点では尺度として安定しない。
+_AN_MIN_BASELINE = 10
+# Benjamini-Hochberg の false discovery rate。
+_AN_FDR_Q = 0.10
+
+# session内の水準shift(変化点)検出。順位CUSUM(Pettitt)+ block permutation。
+_AN_CP_BIN_SECONDS = 120.0
+_AN_CP_MIN_BINS = 12
+_AN_CP_MIN_SEGMENT = 4
+_AN_CP_PERMUTATIONS = 199
+# permutationのblock長。同接系列は自己相関が強く(実測でlag1のACF中央値+0.71)、
+# 1点ずつ入れ替える帰無分布では「時間構造があること」自体を検出してしまう
+# (実測で57本中48本=84%が有意になった)。ACFが概ね0へ落ちるlag8(16分)を
+# blockとして丸ごと入れ替え、短期の自己相関を保った帰無分布にする(同30%)。
+_AN_CP_BLOCK_BINS = 8
+_AN_CP_ALPHA = 0.05
+# 統計的に有意でも、水準が数%動いただけの変化点は運用上の意味が無い。比でこれだけ
+# 離れたものを「明確なshift」として扱う。上下の閾値は比の対数で概ね対称にしてある
+# (log0.75=-0.29 / log1.35=+0.30)。0.75と1.25のような算術的な対称にすると、
+# 下がる側だけが厳しくなる。
+_AN_CP_MIN_RATIO_DROP = 0.75
+_AN_CP_MIN_RATIO_RISE = 1.35
+
+# 入室後の初回反応までの時間(activation funnel)。1観測 = (session, 人)。
+_AC_ACTION_KINDS = ("comment", "like", "gift", "follow", "share")
+# likeは平均13.9個/eventのbatch送信(実測: count最大15で頭打ち)で、timestampはbatchが
+# flushされた時刻である。したがって初回like時刻は実際の行動より遅く出る(上方bias)。
+# 一方でlikeは初回反応の61.8%を占めるため、除くと「反応」の大半が消える。どちらか一方
+# では誤読するので、含む系列と除く系列の両方を必ず出す。
+_AC_BATCHED_KINDS = ("like",)
+# 生存時間の life-table 区間(秒)。初回反応は数十秒〜数時間に広く散るため、短時間側を
+# 細かく、長時間側を粗く刻む。最後は上限なしのbin。
+_AC_BIN_EDGES = (10, 20, 30, 45, 60, 90, 120, 180, 300, 450,
+                 600, 900, 1200, 1800, 2700, 3600, 5400, 7200)
+# 画面で「入室からN分後までに反応した割合」を出す時点(秒)。
+_AC_HORIZONS = (60, 300, 900, 1800, 3600)
+# cluster bootstrapの反復数。sessionを単位に復元抽出してCIを作る(同一配信内の視聴者は
+# 独立でないため、人単位のGreenwood分散ではCIが過小に出る)。
+_AC_BOOTSTRAP = 200
+# CIを出すのに要る最低session数。これ未満はCIを出さない(1 clusterでは分散が測れない)。
+_AC_MIN_SESSIONS = 3
+
 # per-session payloadのschema version。計算ロジックを変えたら該当kindを+1すると
 # 既存cache行がlazyに再計算される。
 CACHE_VERSIONS = {
-    "summary": 1,
+    "summary": 2,
     "time_index": 3,
     "relations": 1,
     "peri_share": 3,
@@ -105,12 +205,15 @@ CACHE_VERSIONS = {
     "join_quality": 2,
     "scale_efficiency": 2,
     "retention": 2,
-    "join_context": 2,
+    "join_context": 3,
     "organic": 3,
     "entry_source": 1,
     "battle_flow": 2,
     "coverage": 1,
     "gift_sku": 1,
+    "dwell": 1,
+    "anomaly": 1,
+    "activation": 1,
 }
 KINDS = tuple(CACHE_VERSIONS)
 
@@ -421,6 +524,93 @@ def _peri_aggregate(clusters: list):
     return mean, ci
 
 
+def _mad(values: list, center: Optional[float] = None) -> float:
+    """中央絶対偏差。外れ値そのものを探すので、baselineは平均・標準偏差では作れない
+    (検出したい1本が自分でbaselineを膨らませ、自分を平凡に見せてしまう)。"""
+    if not values:
+        return 0.0
+    med = _median(values) if center is None else center
+    return _median([abs(v - med) for v in values])
+
+
+def _robust_z(value: float, baseline: list) -> Optional[float]:
+    """baseline(自分を除いた同一配信者の他配信)に対する頑健z。
+
+    1.4826はMADを正規分布の標準偏差と同じ尺度へ揃える定数。MAD=0(他配信が同じ値ばかり)
+    では尺度が定義できないのでNone(0除算を避けるために小さい数を入れると、わずかな差が
+    無限大のzに化ける)。"""
+    if len(baseline) < 2:
+        return None
+    med = _median(baseline)
+    mad = _mad(baseline, med)
+    if mad <= 0:
+        return None
+    return (value - med) / (1.4826 * mad)
+
+
+def _empirical_p(value: float, baseline: list) -> Optional[float]:
+    """baselineの中で「中央値からこれ以上離れている」割合(両側)。
+
+    分布を仮定しない。正規近似のp値を使わないのは、実測でこのdataの裾が正規より
+    桁違いに重いため(|z|>3で約13倍、|z|>4で約375倍)。正規のp値を当てると、
+    ただの重い裾を「極めて有意な異常」として大量に出してしまう。
+    到達できる最小値は 1/(n+1) で、baselineの本数が検出力の上限を決める。"""
+    if not baseline:
+        return None
+    med = _median(baseline)
+    dev = abs(value - med)
+    at_least = sum(1 for v in baseline if abs(v - med) >= dev)
+    return (at_least + 1) / (len(baseline) + 1)
+
+
+def benjamini_hochberg(pvalues: list) -> list:
+    """BH法のq値(FDR調整済みp)。入力と同じ並びで返す。
+
+    指標×配信の数だけ検定するため、素のp値をそのまま閾値に当てると偽陽性が積み上がる。
+    q値は単調になるよう後ろから累積minを取る(BHの標準手順)。"""
+    n = len(pvalues)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda i: pvalues[i])
+    out = [1.0] * n
+    running = 1.0
+    for rank in range(n - 1, -1, -1):
+        i = order[rank]
+        running = min(running, pvalues[i] * n / (rank + 1))
+        out[i] = min(1.0, running)
+    return out
+
+
+def _rank_cusum(rank_values: list, min_segment: int):
+    """順位CUSUMの最大絶対値と分割位置(Pettittの変化点統計量)。
+
+    水準そのものではなく順位で見るのは、1本の高額ギフトや瞬間的なspikeで変化点が
+    決まらないようにするため。分割位置の前後には最低segment長を要求する
+    (端で切ると片側が数点になり、統計量が不安定になる)。"""
+    n = len(rank_values)
+    if n < 2 * min_segment:
+        return 0.0, None
+    mean = sum(rank_values) / n
+    best, at, running = 0.0, None, 0.0
+    for k in range(n - 1):
+        running += rank_values[k] - mean
+        if k + 1 < min_segment or n - (k + 1) < min_segment:
+            continue
+        if abs(running) > best:
+            best, at = abs(running), k + 1
+    return best, at
+
+
+def _block_shuffled(seq: list, block: int, rng) -> list:
+    """circular block permutation。連続blockを丸ごと並べ替え、短期の自己相関を保つ。"""
+    n = len(seq)
+    out = []
+    for _ in range((n + block - 1) // block):
+        start = rng.randrange(n)
+        out.extend(seq[(start + k) % n] for k in range(block))
+    return out[:n]
+
+
 def _identity_digest(identity_key: str) -> str:
     """identity_keyをcache payload用の短いdigestへ。session跨ぎで同一人物を突き合わせる
     ためだけに使うので、決定論的でありさえすればよい(暗号用途ではない)。"""
@@ -438,16 +628,40 @@ def _chunked(seq: list, size: int = 500):
 # 各関数は1 sessionの中間集計(JSON化可能なdict)を返す。終了済みsessionでは結果が
 # 不変になるよう、session内で閉じた情報+その時点で確定済みの外部情報のみを使う。
 
+def _observed_span(conn, sess: dict) -> float:
+    """この配信を実際に観測できた秒数。
+
+    bucketsの本数×bucket幅を稼働秒に使わない。bucketsはfinalize_sessionでしか書かれず、
+    切断で終わった配信(実測で110本中43本)には1行も残らないため、稼働秒がまるごと0に
+    なってしまう。eventsとviewer_samplesは収集中に永続化されるので、そちらの実観測範囲を
+    使えば全配信で測れる。終端はended_at、収集中は最後に何かが届いた時刻。"""
+    row = conn.execute(
+        "SELECT MAX(t) AS last FROM ("
+        "  SELECT MAX(time) AS t FROM events WHERE session_id = ?"
+        "  UNION ALL SELECT MAX(time) FROM viewer_samples WHERE session_id = ?)",
+        (sess["id"], sess["id"]),
+    ).fetchone()
+    end = sess["ended_at"]
+    if end is None:
+        end = row["last"] if row and row["last"] is not None else sess["started_at"]
+    return max(0.0, end - sess["started_at"])
+
+
 def _payload_summary(conn, sess: dict) -> dict:
     row = conn.execute(
-        "SELECT COUNT(*) AS nb, COALESCE(SUM(joins), 0) AS j,"
-        " COALESCE(SUM(diamonds), 0) AS d, COALESCE(SUM(comments), 0) AS c"
-        " FROM buckets WHERE session_id = ?",
+        "SELECT COALESCE(SUM(kind = 'join'), 0) AS j,"
+        " COALESCE(SUM(CASE WHEN kind = 'gift' THEN diamonds ELSE 0 END), 0) AS d,"
+        " COALESCE(SUM(kind = 'comment'), 0) AS c"
+        " FROM events WHERE session_id = ?",
         (sess["id"],),
     ).fetchone()
+    seconds = _observed_span(conn, sess)
+    bucket_seconds = sess["bucket_seconds"] or 0
     return {
-        "nb": row["nb"],
-        "act": row["nb"] * (sess["bucket_seconds"] or 0),
+        # nbは「bucket表の行数」ではなく、観測できた秒数をbucket幅で割った相当数。
+        # 意味を揃えたまま、bucketsの無い配信でも測れるようにする。
+        "nb": int(seconds // bucket_seconds) if bucket_seconds > 0 else 0,
+        "act": round(seconds, 1),
         "j": row["j"],
         "d": row["d"],
         "c": row["c"],
@@ -779,6 +993,305 @@ def _payload_scale_efficiency(conn, sess: dict) -> dict:
     }
 
 
+def _dwell_windows(samples: list, comment_times: list):
+    """viewer_samplesの並びを固定幅の窓へ切り、Little則が使える窓だけを返す。
+
+    samplesは (time, viewers, total_viewers) の時刻昇順。返り値は
+    (採用窓のlist, 不採用理由のcounter dict)。採用窓は
+    [時刻(hour), L(時間加重平均同接), 到着数, 実観測秒, 窓内Comment数]。
+
+    Lは単純平均ではなく階段保持の時間積分にする。sampling間隔は一定ではなく
+    (中央値2.6秒に対しp99は33秒)、単純平均では間隔の詰まった区間が過大に効く。
+    時間積分ならviewer-minutesと同じ定義になり、間隔のゆらぎに影響されない。"""
+    rejects = {k: 0 for k in _DW_REJECT_KEYS}
+    windows = []
+    n = len(samples)
+    i = 0
+    while i < n:
+        head = samples[i][0]
+        j = i
+        while j < n and samples[j][0] < head + _DW_WINDOW_SECONDS:
+            j += 1
+        seg = samples[i:j]
+        i = j
+        if len(seg) < 2:
+            rejects["short"] += 1
+            continue
+        span = seg[-1][0] - seg[0][0]
+        if (span < _DW_WINDOW_SECONDS * _DW_MIN_WINDOW_FILL
+                or span < _DW_MIN_SUBBINS * _DW_SUBBIN_SECONDS):
+            rejects["short"] += 1
+            continue
+        gaps = [b[0] - a[0] for a, b in zip(seg, seg[1:])]
+        if max(gaps) > _DW_MAX_SAMPLE_GAP_SECONDS:
+            rejects["gap"] += 1
+            continue
+        stale = sum(g for g in gaps if g > _DW_SUBBIN_SECONDS)
+        if stale / span > _DW_MAX_GAP_SHARE:
+            rejects["cover"] += 1
+            continue
+        totals = [s[2] for s in seg]
+        # 累積counterが減る窓はsession境界かcounterの作り直し。差分を到着数と読めない。
+        if any(b < a for a, b in zip(totals, totals[1:])):
+            rejects["reset"] += 1
+            continue
+        arrivals = totals[-1] - totals[0]
+        if arrivals < _DW_MIN_ARRIVALS:
+            rejects["noarr"] += 1
+            continue
+        area = sum(a[1] * (b[0] - a[0]) for a, b in zip(seg, seg[1:]))
+        level = area / span
+        if level <= 0:
+            rejects["noarr"] += 1
+            continue
+        # 小binごとの到着数を累積counterのbin端の値から差分で取る。
+        base = seg[0][0]
+        n_bins = int(span // _DW_SUBBIN_SECONDS)
+        edges = []
+        k = 0
+        for b in range(n_bins + 1):
+            edge = base + b * _DW_SUBBIN_SECONDS
+            while k + 1 < len(seg) and seg[k + 1][0] <= edge:
+                k += 1
+            edges.append(seg[k][2])
+        counts = [b - a for a, b in zip(edges, edges[1:])]
+        if len(counts) < _DW_MIN_SUBBINS:
+            rejects["short"] += 1
+            continue
+        mean_count = sum(counts) / len(counts)
+        if mean_count <= 0:
+            rejects["noarr"] += 1
+            continue
+        variance = sum((c - mean_count) ** 2 for c in counts) / (len(counts) - 1)
+        if variance / mean_count > _DW_MAX_DISPERSION:
+            rejects["unstable"] += 1
+            continue
+        mid = base + span / 2
+        first_area = sum(
+            a[1] * (b[0] - a[0]) for a, b in zip(seg, seg[1:]) if a[0] < mid
+        )
+        first_span = sum((b[0] - a[0]) for a, b in zip(seg, seg[1:]) if a[0] < mid)
+        second_span = span - first_span
+        if first_span <= 0 or second_span <= 0:
+            rejects["short"] += 1
+            continue
+        drift = abs((area - first_area) / second_span - first_area / first_span) / level
+        if drift > _DW_MAX_LEVEL_DRIFT:
+            rejects["drift"] += 1
+            continue
+        comments = bisect.bisect_left(comment_times, seg[-1][0]) - bisect.bisect_left(
+            comment_times, seg[0][0]
+        )
+        hour = int(time.localtime(base).tm_hour)
+        windows.append([hour, round(level, 3), arrivals, round(span, 1), comments])
+    return windows, rejects
+
+
+def _payload_dwell(conn, sess: dict) -> dict:
+    """滞在時間(Little則)の素材。定常とみなせる窓ごとの同接水準・到着数・Comment数。
+
+    配信まるごとの粗い推定値(視聴量÷総来場者)も併せて持つ。分子の視聴量は⑧規模vs効率と
+    同じ定義でなければならないため、_payload_scale_efficiencyをそのまま呼んで揃える
+    (viewer-minutesの定義を二重に持つと、同じ画面の2箇所で違う視聴量が出る)。"""
+    sid = sess["id"]
+    samples = [
+        (r["time"], r["viewers"], r["total_viewers"])
+        for r in conn.execute(
+            "SELECT time, viewers, total_viewers FROM viewer_samples"
+            " WHERE session_id = ? ORDER BY time",
+            (sid,),
+        )
+        if r["total_viewers"] is not None
+    ]
+    comment_times = [
+        r["time"] for r in conn.execute(
+            "SELECT time FROM events WHERE session_id = ? AND kind = 'comment'"
+            " ORDER BY time",
+            (sid,),
+        )
+    ]
+    windows, rejects = _dwell_windows(samples, comment_times)
+    scale = _payload_scale_efficiency(conn, sess)
+    # 全体の到着数は「窓に切らない」session全体の累積counterの伸び。窓の合計とは
+    # 一致しない(不採用窓ぶんが入るため)ので別に持つ。
+    arrivals = 0
+    if len(samples) >= 2:
+        arrivals = max(0, samples[-1][2] - samples[0][2])
+    joins = conn.execute(
+        "SELECT COUNT(*) AS c FROM events WHERE session_id = ? AND kind = 'join'",
+        (sid,),
+    ).fetchone()["c"]
+    return {
+        "w": windows,
+        "rej": [rejects[k] for k in _DW_REJECT_KEYS],
+        "vmin": scale["vmin"],
+        "arr": arrivals,
+        "jn": joins or 0,
+        "avgv": scale["avgv"],
+    }
+
+
+def _payload_anomaly(conn, sess: dict) -> dict:
+    """異常検知の素材: 1配信ぶんの水準指標と、session内の水準shift(変化点)。
+
+    水準指標はbucketsではなくevents/viewer_samplesから作る。bucketsはfinalize_session
+    でしか書かれず、切断で終わった配信(status=disconnected)には残らない。実測でbuckets
+    を持つのは109本中67本で、欠けるのは長時間・不安定な配信に偏るため、bucketsを基準に
+    すると母集団が系統的に歪む(events基準なら同じ配信者で16本→49本になる)。"""
+    sid = sess["id"]
+    placeholders = ", ".join("?" * len(_AN_NON_ACTIVITY_KINDS))
+    agg = conn.execute(
+        "SELECT COUNT(*) AS n, MIN(time) AS t0, MAX(time) AS t1,"
+        " COALESCE(SUM(CASE WHEN kind = 'gift' THEN diamonds ELSE 0 END), 0) AS coins,"
+        " COALESCE(SUM(kind = 'comment'), 0) AS comments,"
+        " COALESCE(SUM(kind = 'join'), 0) AS joins,"
+        " COALESCE(SUM(kind = 'follow'), 0) AS follows"
+        f" FROM events WHERE session_id = ? AND kind NOT IN ({placeholders})",
+        (sid, *_AN_NON_ACTIVITY_KINDS),
+    ).fetchone()
+    samples = [
+        (r["time"], r["viewers"]) for r in conn.execute(
+            "SELECT time, viewers FROM viewer_samples WHERE session_id = ? ORDER BY time",
+            (sid,),
+        )
+    ]
+    span = (agg["t1"] - agg["t0"]) if agg["t0"] is not None else 0.0
+    metrics = {}
+    if (agg["n"] or 0) >= _AN_MIN_EVENTS and span >= _AN_MIN_SPAN_SECONDS:
+        minutes = span / 60.0
+        metrics["coins_per_min"] = round((agg["coins"] or 0) / minutes, 4)
+        metrics["comments_per_min"] = round((agg["comments"] or 0) / minutes, 4)
+        metrics["joins_per_min"] = round((agg["joins"] or 0) / minutes, 4)
+        if (agg["joins"] or 0) >= _AN_MIN_JOINS_FOR_RATIO:
+            metrics["follow_per_join"] = round((agg["follows"] or 0) / agg["joins"], 6)
+        if len(samples) >= _AN_MIN_VIEWER_SAMPLES:
+            metrics["viewers_med"] = _median([v for _t, v in samples])
+    return {
+        "m": metrics,
+        "span": round(span, 1),
+        "ev": agg["n"] or 0,
+        "cp": _changepoint(sid, samples),
+    }
+
+
+def _changepoint(session_id: int, samples: list) -> Optional[dict]:
+    """session内の水準shift。順位CUSUMで最も割れる時点を採り、block permutationで
+    「配信のいつもの起伏でもこの程度は出る」かを確かめる。
+
+    乱数はsession_idで固定する。payloadはcacheへ載るので、同じ配信を再計算したときに
+    違うp値が出てはならない。"""
+    if len(samples) < 2:
+        return None
+    base = samples[0][0]
+    bins: dict = {}
+    for t, viewers in samples:
+        bins.setdefault(int((t - base) // _AN_CP_BIN_SECONDS), []).append(viewers)
+    # 観測の穴はbinごと落とす(0で埋めると、切断を「同接0への急落」として検出する)。
+    index = sorted(bins)
+    values = [_median(bins[i]) for i in index]
+    if len(values) < _AN_CP_MIN_BINS:
+        return None
+    rank_values = _rank_average(values)
+    stat, at = _rank_cusum(rank_values, _AN_CP_MIN_SEGMENT)
+    if at is None:
+        return None
+    rng = random.Random(session_id)
+    exceed = sum(
+        1 for _ in range(_AN_CP_PERMUTATIONS)
+        if _rank_cusum(_block_shuffled(rank_values, _AN_CP_BLOCK_BINS, rng),
+                       _AN_CP_MIN_SEGMENT)[0] >= stat
+    )
+    before = _median(values[:at])
+    after = _median(values[at:])
+    return {
+        "at": round(base + index[at] * _AN_CP_BIN_SECONDS, 1),
+        "before": round(before, 2),
+        "after": round(after, 2),
+        "p": round((exceed + 1) / (_AN_CP_PERMUTATIONS + 1), 4),
+        "bins": len(values),
+    }
+
+
+def _ac_bin_index(seconds: float) -> int:
+    """秒をlife-tableのbin indexへ。上限を超えたものは最後のbinへ入れる。"""
+    return bisect.bisect_right(_AC_BIN_EDGES, seconds)
+
+
+def _payload_activation(conn, sess: dict) -> dict:
+    """入室後の初回反応までの時間(life-table形式)と、入室の取りこぼしを測る材料。
+
+    1観測 = (この配信, 1人)。入室時刻が分からないと潜時の原点が無いので、母集団は
+    「join eventが記録された人」に限る。ただし実測では、行動した人の35%はjoinが
+    記録されておらず、しかもその層はgift率が高い(81% vs 55%)。母集団が engaged 側へ
+    欠けているぶんは reduce 側で被覆として返し、画面で但し書きにする。
+
+    既存の_payload_organicは同じ材料を読みながらengagedをboolのsetにしてしまい潜時を
+    捨てている。あちらはorganic weightの入力で用途が違うため、payloadは分ける。"""
+    # NON_IDENTITY_KEYSはstorage側の単一定義。storageがanalyticsをimportしているため
+    # module levelでimportすると循環するので、呼び出し時に解決する。
+    from tictok.storage import NON_IDENTITY_KEYS
+
+    sid = sess["id"]
+    kinds = ("join",) + _AC_ACTION_KINDS
+    rows = conn.execute(
+        "SELECT time AS t, kind, identity_key AS k FROM events"
+        f" WHERE session_id = ? AND kind IN ({','.join('?' * len(kinds))})"
+        f" AND identity_key NOT IN ({','.join('?' * len(NON_IDENTITY_KEYS))})"
+        " ORDER BY time",
+        (sid, *kinds, *NON_IDENTITY_KEYS),
+    ).fetchall()
+
+    first_join: dict = {}
+    first_any: dict = {}
+    first_slow: dict = {}   # batch送信のkindを除いた初回反応
+    gifted: set = set()
+    actors: set = set()
+    last_seen = sess["started_at"]
+    for r in rows:
+        key, kind, t = r["k"], r["kind"], r["t"]
+        if t > last_seen:
+            last_seen = t
+        if kind == "join":
+            first_join.setdefault(key, t)
+            continue
+        actors.add(key)
+        if kind == "gift":
+            gifted.add(key)
+        first_any.setdefault(key, t)
+        if kind not in _AC_BATCHED_KINDS:
+            first_slow.setdefault(key, t)
+
+    end = sess["ended_at"] if sess["ended_at"] is not None else last_seen
+    n_bins = len(_AC_BIN_EDGES) + 1
+    with_batched = [[0, 0] for _ in range(n_bins)]
+    without_batched = [[0, 0] for _ in range(n_bins)]
+
+    for key, joined in first_join.items():
+        horizon = end - joined
+        if horizon <= 0:
+            continue
+        for table, firsts in ((with_batched, first_any), (without_batched, first_slow)):
+            acted = firsts.get(key)
+            # 入室より前の反応は、その入室に対する反応ではない(再入室した常連など)。
+            # 潜時が負になるので観測から外し、打ち切りとして扱う。
+            if acted is not None and acted >= joined:
+                table[_ac_bin_index(acted - joined)][0] += 1
+            else:
+                table[_ac_bin_index(horizon)][1] += 1
+
+    joined_keys = set(first_join)
+    return {
+        "n": len(first_join),
+        "wl": with_batched,
+        "nl": without_batched,
+        # 被覆: 行動した人のうち何人にjoinが残っているか。gift率は欠落の偏りの証拠。
+        "act": len(actors),
+        "act_j": len(actors & joined_keys),
+        "gift": len(gifted),
+        "gift_j": len(gifted & joined_keys),
+    }
+
+
 def _payload_retention(conn, sess: dict) -> dict:
     """時刻別の入室/同接と、入室押し上げ推定の分子分母。同接の変化を「入室があった
     bucket(jb)」と「入室のないbucket(nb)」に分けて持ち、reduce側で平常の増減(drift=
@@ -819,12 +1332,11 @@ def _payload_join_context(conn, sess: dict) -> dict:
     """Battle中 / コラボ(非BattleのLinkMic)中 / 平時 の秒数と入室数(session内)。"""
     sid = sess["id"]
     s_start = sess["started_at"]
-    nb = conn.execute(
-        "SELECT COUNT(*) AS n FROM buckets WHERE session_id = ?", (sid,)
-    ).fetchone()["n"]
-    sec = (nb or 0) * (sess["bucket_seconds"] or 0)
-    # 収集中(ended_atなし)は稼働秒で終端を近似。
-    span_end = sess["ended_at"] if sess["ended_at"] is not None else (s_start + sec)
+    # 収集中(ended_atなし)は実観測範囲で終端を近似する。bucketsは切断で終わった配信に
+    # 残らないため、本数から稼働秒を出すと終端がs_startへ潰れ、窓が全部空になる。
+    span_end = sess["ended_at"]
+    if span_end is None:
+        span_end = s_start + _observed_span(conn, sess)
 
     def clip(a, b):
         lo = max(a, s_start)
@@ -1423,6 +1935,9 @@ _PAYLOAD_FUNCS = {
     "battle_flow": _payload_battle_flow,
     "coverage": _payload_coverage,
     "gift_sku": _payload_gift_sku,
+    "dwell": _payload_dwell,
+    "anomaly": _payload_anomaly,
+    "activation": _payload_activation,
 }
 
 
@@ -2092,6 +2607,500 @@ def reduce_scale_efficiency(rows: list, owners: dict) -> dict:
         )
     result.sort(key=lambda x: x["coins"], reverse=True)
     return {"streamers": result}
+
+
+def _dwell_mean_ci(values: list):
+    """配信ごとに1点へ畳んだ滞在時間の平均と95%CI半幅。
+
+    1配信=1クラスタ、1クラスタ=1観測なので、素のt区間がそのままcluster-robustになる
+    (同一配信内の窓は隣接窓が同じ視聴者集団を共有していて独立ではないため、窓を直接
+    数え上げてSEを作るとCIが過小に出る)。2点未満はCIを出さない。"""
+    n = len(values)
+    if n == 0:
+        return None, None
+    mean = sum(values) / n
+    if n < 2:
+        return mean, None
+    var = sum((v - mean) ** 2 for v in values) / (n - 1)
+    return mean, _t_975(n - 1) * (var ** 0.5) / (n ** 0.5)
+
+
+def _dwell_session_stats(payload: dict):
+    """1配信ぶんの採用窓から、その配信の代表滞在時間などを求める。窓が足りなければNone。"""
+    windows = payload.get("w") or []
+    if len(windows) < _DW_MIN_SESSION_WINDOWS:
+        return None
+    dwells = []
+    watch_minutes = 0.0
+    comments = 0
+    seconds = 0.0
+    levels = []
+    for hour, level, arrivals, span, cmts in windows:
+        if arrivals <= 0 or span <= 0:
+            continue
+        dwells.append(level * span / arrivals)
+        watch_minutes += level * span / 60.0
+        comments += cmts
+        seconds += span
+        levels.append(level)
+    if not dwells:
+        return None
+    return {
+        "dwell": _median(dwells),
+        "level": _median(levels),
+        "seconds": seconds,
+        "comments_per_watch_minute": (comments / watch_minutes) if watch_minutes > 0 else None,
+        "windows": windows,
+        "n_windows": len(dwells),
+    }
+
+
+def _dwell_share(windows: list):
+    """窓を「その配信者自身の窓の中央値」との比で3分し、観測時間ベースのシェアを返す。
+
+    基準は配信単位の代表値ではなく窓の中央値を使う。窓ごとの滞在時間は右に裾を引くため、
+    配信ごとに中央値へ畳んだ値を基準にすると分布の中心がずれ、半分より多くの窓が
+    「居座り」側へ倒れてしまう。"""
+    measured = [
+        (level * span / arrivals, span)
+        for _hour, level, arrivals, span, _cmts in windows
+        if arrivals > 0 and span > 0
+    ]
+    if not measured:
+        return None
+    reference = _median([d for d, _ in measured])
+    if reference <= 0:
+        return None
+    total = sum(span for _, span in measured)
+    churn = sum(span for d, span in measured if d / reference < _DW_CHURN_RATIO)
+    sticky = sum(span for d, span in measured if d / reference > _DW_STICKY_RATIO)
+    return {"churn": round(churn / total, 4), "sticky": round(sticky / total, 4),
+            "steady": round((total - churn - sticky) / total, 4),
+            "window_median": round(reference, 1)}
+
+
+@_stage("dwell")
+def reduce_dwell(rows: list) -> dict:
+    """視聴者1人あたりの平均滞在時間(Little則 W = L / λ)と、入れ替わりの速さ。
+
+    λは総来場counter(total_viewers)の伸びで、TikTokはこのcounterの定義を公開していない
+    (ユニークか延べか、匿名を含むかが不明)。よってWの絶対秒は他の配信者や外部の数字と
+    比べられない。同一配信者の中での相対比較にのみ使える。この但し書きは画面側にも出す。
+
+    推定できなかった窓は理由別に数えて返す。埋めないのは、定常でない区間へ無理に
+    Little則を当てた値は「それらしい秒数」に見えてしまい、実測と区別が付かないため。"""
+    rejects = {k: 0 for k in _DW_REJECT_KEYS}
+    per_session = []
+    crude = []
+    join_ratios = []
+    n_windows = 0
+    for sess, payload in rows:
+        for key, count in zip(_DW_REJECT_KEYS, payload.get("rej") or []):
+            rejects[key] += count
+        arrivals = payload.get("arr") or 0
+        # counterの伸びと入室eventの比。配信ごとに取ってから中央値にする(合計比は
+        # 大きい配信1本に支配され、比が揃っているかどうかが見えなくなる)。
+        if arrivals > 0:
+            join_ratios.append((payload.get("jn") or 0) / arrivals)
+        vmin = payload.get("vmin") or 0.0
+        if arrivals > 0 and vmin > 0:
+            crude.append(vmin * 60.0 / arrivals)
+        stats = _dwell_session_stats(payload)
+        if stats is None:
+            continue
+        n_windows += stats["n_windows"]
+        stats["unique_id"] = sess["unique_id"]
+        stats["avgv"] = payload.get("avgv") or 0.0
+        per_session.append(stats)
+
+    candidates = n_windows + sum(rejects.values())
+    dwells = [s["dwell"] for s in per_session]
+    mean, ci = _dwell_mean_ci(dwells)
+    overall = None
+    if mean is not None and mean > 0:
+        # 代表値は中央値。配信ごとの滞在時間は右に裾を引き、平均は長い数本に引かれる。
+        # CIは平均に対してしか厳密に出せないため、平均±CIは精度の目安として併記する。
+        center = _median(dwells)
+        overall = {
+            "dwell_seconds": round(center, 1),
+            "mean": round(mean, 1),
+            "ci": round(ci, 1) if ci is not None else None,
+            "p25": round(_percentile(dwells, 25), 1),
+            "p75": round(_percentile(dwells, 75), 1),
+            "turnover_per_hour": round(3600.0 / center, 1) if center > 0 else None,
+            "n_sessions": len(dwells),
+        }
+
+    by_uid: dict = {}
+    for stats in per_session:
+        by_uid.setdefault(stats["unique_id"], []).append(stats)
+    streamers = []
+    for uid, group in by_uid.items():
+        if len(group) < _DW_MIN_STREAMER_SESSIONS:
+            continue
+        values = [s["dwell"] for s in group]
+        s_mean, s_ci = _dwell_mean_ci(values)
+        reference = _median(values)
+        windows = [w for s in group for w in s["windows"]]
+        streamers.append({
+            "unique_id": uid,
+            "sessions": len(group),
+            "windows": sum(s["n_windows"] for s in group),
+            "dwell_seconds": round(reference, 1),
+            "mean": round(s_mean, 1),
+            "ci": round(s_ci, 1) if s_ci is not None else None,
+            "p25": round(_percentile(values, 25), 1),
+            "p75": round(_percentile(values, 75), 1),
+            "turnover_per_hour": round(3600.0 / reference, 1) if reference > 0 else None,
+            "avg_viewers": round(_median([s["level"] for s in group]), 1),
+            "mix": _dwell_share(windows),
+        })
+    streamers.sort(key=lambda s: s["windows"], reverse=True)
+
+    hours = []
+    by_hour: dict = {}
+    for stats in per_session:
+        for hour, level, arrivals, span, _cmts in stats["windows"]:
+            if arrivals > 0 and span > 0:
+                by_hour.setdefault(hour, []).append(level * span / arrivals)
+    for hour in sorted(by_hour):
+        values = by_hour[hour]
+        hours.append([hour, round(_median(values), 1), len(values)])
+
+    # 妥当性check: 滞在が長いと推定された配信では、視聴時間あたりのCommentも多いはず。
+    # 同接(部屋の大きさでchatの速さが変わる)を統制した偏順位相関で見る。Wの分子である
+    # 同接そのものとの相関は定義上必ず正になるため、独立なComment側で確かめる。
+    paired = [s for s in per_session if s["comments_per_watch_minute"] is not None]
+    engagement = None
+    if len(paired) >= 3:
+        rho = _partial_spearman(
+            [s["dwell"] for s in paired],
+            [s["comments_per_watch_minute"] for s in paired],
+            [[s["avgv"] for s in paired]],
+        )
+        engagement = {
+            "rho": None if rho is None else round(rho, 3),
+            "significant": _spearman_significant(rho, len(paired), 1),
+            "n": len(paired),
+        }
+
+    return {
+        "n_sessions": len(rows),
+        "n_estimated": len(per_session),
+        "windows": n_windows,
+        "candidates": candidates,
+        "window_seconds": _DW_WINDOW_SECONDS,
+        "hour_min_windows": _DW_MIN_HOUR_WINDOWS,
+        "rejects": rejects,
+        "overall": overall,
+        "crude_dwell_seconds": round(_median(crude), 1) if crude else None,
+        "crude_n": len(crude),
+        "cross_check": {
+            "ratio": round(_median(join_ratios), 3) if join_ratios else None,
+            "p10": round(_percentile(join_ratios, 10), 3) if join_ratios else None,
+            "p90": round(_percentile(join_ratios, 90), 3) if join_ratios else None,
+            "n": len(join_ratios),
+        },
+        "streamers": streamers,
+        "hours": hours,
+        "engagement": engagement,
+    }
+
+
+_AN_METRIC_LABELS = {
+    "viewers_med": "同接(中央値)",
+    "coins_per_min": "コイン/分",
+    "comments_per_min": "Comment/分",
+    "joins_per_min": "入室/分",
+    "follow_per_join": "フォロー率(入室あたり)",
+}
+
+
+@_stage("anomaly")
+def reduce_anomaly(rows: list) -> dict:
+    """配信の異常検知: その配信者自身の過去分布に対する1配信まるごとの水準の逸脱。
+
+    baselineは必ず「自分を除いた」同一配信者の他配信(leave-one-out)。判定したい配信を
+    baselineに混ぜると、外れているほど基準が自分に引き寄せられ、逸脱が過小に出る。
+
+    有意性はBH法でFDRを制御する。p値は分布を仮定しない経験p値で、到達できる最小値が
+    1/(baseline本数+1)であるため、現在のdata量では多重検定を通過しない。これは手法の
+    不備ではなくdata量の上限なので、埋めずに「検出力不足」として本数とともに返す。"""
+    per_streamer: dict = {}
+    changepoints = []
+    n_measured = 0
+    for sess, payload in rows:
+        metrics = payload.get("m") or {}
+        if metrics:
+            n_measured += 1
+        per_streamer.setdefault(sess["unique_id"], []).append((sess, metrics))
+        cp = payload.get("cp")
+        if cp:
+            before, after = cp.get("before") or 0.0, cp.get("after") or 0.0
+            ratio = (after / before) if before > 0 else None
+            changepoints.append({
+                "session_id": sess["id"],
+                "unique_id": sess["unique_id"],
+                "started_at": sess["started_at"],
+                "at": cp.get("at"),
+                "before": before,
+                "after": after,
+                "ratio": None if ratio is None else round(ratio, 3),
+                "p": cp.get("p"),
+                "bins": cp.get("bins"),
+            })
+
+    findings = []
+    coverage = []
+    for uid, entries in sorted(per_streamer.items()):
+        for metric in _AN_METRICS:
+            values = [(s, m[metric]) for s, m in entries if metric in m]
+            n = len(values)
+            baseline_n = max(0, n - 1)
+            if baseline_n < _AN_MIN_BASELINE:
+                coverage.append({"unique_id": uid, "metric": metric, "sessions": n,
+                                 "status": "insufficient", "baseline": baseline_n})
+                continue
+            # 到達できる最小p値。これがBHを通れないなら、この配信者・指標では
+            # どれだけ外れた配信があっても有意判定は出せない。
+            coverage.append({"unique_id": uid, "metric": metric, "sessions": n,
+                             "status": "ok", "baseline": baseline_n,
+                             "min_p": round(1.0 / (baseline_n + 1), 4)})
+            for sess, value in values:
+                others = [v for s2, v in values if s2["id"] != sess["id"]]
+                z = _robust_z(value, others)
+                p = _empirical_p(value, others)
+                if z is None or p is None:
+                    continue
+                findings.append({
+                    "session_id": sess["id"],
+                    "unique_id": uid,
+                    "started_at": sess["started_at"],
+                    "metric": metric,
+                    "label": _AN_METRIC_LABELS[metric],
+                    "value": round(value, 4),
+                    "typical": round(_median(others), 4),
+                    "p25": round(_percentile(others, 25), 4),
+                    "p75": round(_percentile(others, 75), 4),
+                    "z": round(z, 2),
+                    "p": round(p, 4),
+                    "baseline": len(others),
+                })
+
+    qvalues = benjamini_hochberg([f["p"] for f in findings])
+    for finding, q in zip(findings, qvalues):
+        finding["q"] = round(q, 4)
+        finding["significant"] = q < _AN_FDR_Q
+    findings.sort(key=lambda f: -abs(f["z"]))
+
+    # 検出力の上限。経験p値が到達できる最小値は 1/(baseline+1) で、BHで最小順位の
+    # 検定が通るには p <= q/検定数 が要る。両者から「有意判定が出せる最小のbaseline
+    # 本数」が決まる。届いていないなら、どれだけ外れた配信があっても有意にはならない。
+    n_tests = len(findings)
+    power = None
+    if n_tests:
+        needed_p = _AN_FDR_Q / n_tests
+        best_p = min(f["p"] for f in findings)
+        power = {
+            "tests": n_tests,
+            "needed_p": round(needed_p, 6),
+            "best_p": round(best_p, 4),
+            "needed_baseline": int(math.ceil(1.0 / needed_p)) - 1,
+            "reachable": best_p <= needed_p,
+        }
+
+    shifts = [
+        c for c in changepoints
+        if c["p"] is not None and c["p"] <= _AN_CP_ALPHA and c["ratio"] is not None
+        and (c["ratio"] <= _AN_CP_MIN_RATIO_DROP or c["ratio"] >= _AN_CP_MIN_RATIO_RISE)
+    ]
+    shifts.sort(key=lambda c: c["ratio"])
+
+    return {
+        "n_sessions": len(rows),
+        "n_measured": n_measured,
+        "metrics": list(_AN_METRICS),
+        "labels": _AN_METRIC_LABELS,
+        "fdr_q": _AN_FDR_Q,
+        "min_baseline": _AN_MIN_BASELINE,
+        "findings": findings,
+        "n_significant": sum(1 for f in findings if f["significant"]),
+        "power": power,
+        "coverage": coverage,
+        "changepoints": {
+            "tested": len(changepoints),
+            "alpha": _AN_CP_ALPHA,
+            "bin_seconds": _AN_CP_BIN_SECONDS,
+            "block_bins": _AN_CP_BLOCK_BINS,
+            "significant": sum(
+                1 for c in changepoints if c["p"] is not None and c["p"] <= _AN_CP_ALPHA
+            ),
+            "shifts": shifts,
+        },
+    }
+
+
+def _life_table_curve(table: list) -> Optional[list]:
+    """life-tableから累積反応率 1-S(t) をbin境界ごとに返す。
+
+    打ち切り(配信終了で観測が切れた人)を「反応しなかった」と数えると反応率が下に歪む。
+    区間ごとに、その区間で打ち切られた人を半分だけリスク集合から引くactuarial補正
+    (n - c/2)を入れたKaplan-Meier系の推定量を使う。リスク集合が尽きたらそこで打ち切る。"""
+    survival = 1.0
+    out = []
+    at_risk = sum(ev + cens for ev, cens in table)
+    if at_risk <= 0:
+        return None
+    for events, censored in table:
+        effective = at_risk - censored / 2.0
+        if effective > 0:
+            survival *= 1.0 - events / effective
+        out.append(1.0 - survival)
+        at_risk -= events + censored
+    return out
+
+
+def _ac_median_latency(table: list) -> Optional[float]:
+    """反応した人だけを母集団にした初回反応までの中央値(秒)。
+
+    全体の中央値は定義できない(9割が最後まで反応しないため生存曲線が0.5を下回らない)。
+    「反応した人はどれくらいで反応するか」に限れば意味があるので、そちらを返す。
+    binの中で線形補間する。"""
+    total = sum(ev for ev, _c in table)
+    if total <= 0:
+        return None
+    half = total / 2.0
+    cumulative = 0
+    low = 0.0
+    for i, (events, _censored) in enumerate(table):
+        high = _AC_BIN_EDGES[i] if i < len(_AC_BIN_EDGES) else None
+        if cumulative + events >= half:
+            if high is None or events <= 0:
+                return low
+            return low + (high - low) * (half - cumulative) / events
+        cumulative += events
+        if high is None:
+            return low
+        low = high
+    return low
+
+
+def _ac_horizon_values(curve: Optional[list]) -> dict:
+    """bin境界の累積反応率から、画面に出す時点(_AC_HORIZONS)の値を引く。"""
+    if curve is None:
+        return {h: None for h in _AC_HORIZONS}
+    out = {}
+    for horizon in _AC_HORIZONS:
+        idx = bisect.bisect_left(_AC_BIN_EDGES, horizon)
+        out[horizon] = curve[min(idx, len(curve) - 1)]
+    return out
+
+
+def _ac_bootstrap_ci(tables: list, rng) -> dict:
+    """sessionを単位にした復元抽出で、各時点の95%CIをpercentileで作る。
+
+    同一配信の視聴者は独立でない(同じ配信者・同じ時間帯・同じ盛り上がりを共有する)ため、
+    人を独立標本として扱うGreenwood分散ではCIが過小に出る。clusterごと入れ替える。"""
+    if len(tables) < _AC_MIN_SESSIONS:
+        return {h: None for h in _AC_HORIZONS}
+    n_bins = len(_AC_BIN_EDGES) + 1
+    samples: dict = {h: [] for h in _AC_HORIZONS}
+    for _ in range(_AC_BOOTSTRAP):
+        picked = [tables[rng.randrange(len(tables))] for _ in range(len(tables))]
+        pooled = [[0, 0] for _ in range(n_bins)]
+        for table in picked:
+            for i, (ev, cens) in enumerate(table):
+                pooled[i][0] += ev
+                pooled[i][1] += cens
+        values = _ac_horizon_values(_life_table_curve(pooled))
+        for h, v in values.items():
+            if v is not None:
+                samples[h].append(v)
+    out = {}
+    for h, vals in samples.items():
+        out[h] = (
+            [round(_percentile(vals, 2.5), 4), round(_percentile(vals, 97.5), 4)]
+            if len(vals) >= _AC_BOOTSTRAP // 2 else None
+        )
+    return out
+
+
+@_stage("activation")
+def reduce_activation(rows: list) -> dict:
+    """入室後どれくらいで最初の反応が出るか、そして何割が無反応のまま去るか。
+
+    likeを含む系列と除く系列を必ず並べて返す。likeはbatch送信で時刻が遅れて付くため
+    含む系列は「遅く見える」方向へ、除く系列は初回反応の61.8%を落とすため「反応が
+    少なく見える」方向へ、それぞれ別方向に歪む。片方だけでは誤読する。"""
+    n_bins = len(_AC_BIN_EDGES) + 1
+    pooled = {"wl": [[0, 0] for _ in range(n_bins)], "nl": [[0, 0] for _ in range(n_bins)]}
+    per_session = {"wl": [], "nl": []}
+    n_persons = 0
+    cov = {"act": 0, "act_j": 0, "gift": 0, "gift_j": 0}
+    n_sessions = 0
+    for _sess, payload in rows:
+        if not payload.get("n"):
+            continue
+        n_sessions += 1
+        n_persons += payload["n"]
+        for key in ("wl", "nl"):
+            table = payload.get(key) or []
+            if not table:
+                continue
+            per_session[key].append(table)
+            for i, (ev, cens) in enumerate(table):
+                pooled[key][i][0] += ev
+                pooled[key][i][1] += cens
+        for key in cov:
+            cov[key] += payload.get(key) or 0
+
+    rng = random.Random(0)  # 同じdataなら同じCIを返す(画面の値が呼ぶたび揺れないように)
+    series = {}
+    for key, label in (("wl", "likeを含む"), ("nl", "likeを除く")):
+        curve = _life_table_curve(pooled[key])
+        point = _ac_horizon_values(curve)
+        ci = _ac_bootstrap_ci(per_session[key], rng)
+        events = sum(ev for ev, _c in pooled[key])
+        series[key] = {
+            "label": label,
+            "curve": None if curve is None else [round(v, 4) for v in curve],
+            "horizons": [
+                {"seconds": h,
+                 "activated": None if point[h] is None else round(point[h], 4),
+                 "ci": ci[h]}
+                for h in _AC_HORIZONS
+            ],
+            "activated": events,
+            "activated_ratio": round(events / n_persons, 4) if n_persons else None,
+            # 反応した人に限った中央値。全体の中央値は9割が反応しないため存在しない。
+            "median_latency": _ac_median_latency(pooled[key]),
+        }
+
+    # 被覆: 行動が観測された人のうち、入室が記録されていた割合。ここが低いほど
+    # 「入室した人の何%が反応するか」の母集団が欠ける。
+    coverage = None
+    if cov["act"]:
+        missing = cov["act"] - cov["act_j"]
+        coverage = {
+            "actors": cov["act"],
+            "actors_with_join": cov["act_j"],
+            "ratio": round(cov["act_j"] / cov["act"], 4),
+            "missing": missing,
+            # 欠落が engaged 側へ偏っている証拠。gift送信者に限った入室記録率を並べる。
+            "gifters": cov["gift"],
+            "gifters_with_join": cov["gift_j"],
+            "gifter_ratio": round(cov["gift_j"] / cov["gift"], 4) if cov["gift"] else None,
+        }
+
+    return {
+        "n_sessions": n_sessions,
+        "n_persons": n_persons,
+        "bin_edges": list(_AC_BIN_EDGES),
+        "horizons": list(_AC_HORIZONS),
+        "series": series,
+        "coverage": coverage,
+        "bootstrap": _AC_BOOTSTRAP,
+    }
 
 
 @_stage("retention")

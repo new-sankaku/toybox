@@ -23,6 +23,8 @@ const activeOutputs = new Map();
 const activeUpOutputs = new Map();
 // 再mp4化(元.tsからのfinalize再実行)中の進捗%はWS reprocess_progressで届く。
 const reprocessProgress = new Map();
+// 音量正規化(mp4の音声だけ作り直し)中の進捗%はWS audionorm_progressで届く。
+const audionormProgress = new Map();
 // 単体録画のjob(出力/Up出力/再mp4化)の待受。POSTはjob_idを返すだけで、実処理はserver側の
 // 永続queueが行うため、完了/失敗はWSのjob_updateでしか届かない。job_id → {prog,resolve,reject}。
 const jobWatchers = new Map();
@@ -151,6 +153,9 @@ const SESSION_SORT_PRESETS = {
   started_asc: { key: "started_at", dir: "asc" },
   gifts: { key: "gifts", dir: "desc" },
   diamonds: { key: "diamonds", dir: "desc" },
+  comments: { key: "comments", dir: "desc" },
+  likes_total: { key: "likes_total", dir: "desc" },
+  battle_points: { key: "battle_points", dir: "desc" },
   unique_id: { key: "unique_id", dir: "asc" },
 };
 // 列headerからの並びがselectのどの選択肢にも当たらないとき、その並びを表示する行き先。
@@ -309,7 +314,7 @@ function actionCells(session) {
     const out = document.createElement("button");
     out.className = "btn btn-small";
     // 出力済みでも再出力したいのでButtonは活性のまま、ラベルだけ「済」にする。
-    out.textContent = session.output_done ? "出力済" : "出力";
+    out.textContent = session.output_done ? "焼き込み出力済" : "焼き込み出力";
     out.disabled = isActive || !hasVideo;
     out.title = isActive
       ? "収集中のSessionは出力できません"
@@ -333,7 +338,7 @@ function actionCells(session) {
       const up = document.createElement("button");
       up.className = "btn btn-small";
       // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-      up.textContent = session.up_output_done ? "Up出力済" : "Up出力";
+      up.textContent = session.up_output_done ? "AI高画質済" : "AI高画質";
       up.disabled = isActive || !hasVideo;
       up.title = isActive
         ? "収集中のSessionは出力できません"
@@ -355,7 +360,9 @@ function actionCells(session) {
     const tr = document.createElement("button");
     tr.className = "btn btn-small";
     // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
-    tr.textContent = session.transcript_done ? "文字起済" : "文字起";
+    // 録画が複数ある場合は押すと選択menuが出る。▾でそれを予告する。
+    const multi = (session.recording_count || 0) > 1;
+    tr.textContent = (session.transcript_done ? "字幕化済" : "字幕化") + (multi ? " ▾" : "");
     tr.disabled = isActive || !hasVideo;
     tr.title = isActive
       ? "収集中のSessionは文字起こしできません"
@@ -417,8 +424,15 @@ async function transcribeSession(session, btn) {
       await transcribeOrShow(recs[0], btn);
       return;
     }
-    showToast("このSessionには複数の録画があります。詳細から録画ごとに文字起こししてください。");
-    showDetail(session.id);
+    // 複数録画は「どれを」が決まらない。詳細を開かせてscrollさせ直すのではなく、
+    // その場で選ばせる(押した結果が「押せませんでした」になるのを避ける)。
+    openMenuAt(btn, recs.map((rec) => ({
+      label: `#${rec.id} ${rec.filename || ""}${rec.has_transcript ? "（字幕化済）" : ""}`,
+      title: rec.has_transcript
+        ? "保存済みの文字起こしを表示します。"
+        : "この録画の音声をローカルAIで文字起こしします。",
+      onSelect: () => transcribeOrShow(rec, btn),
+    })));
   } catch (err) {
     showError(err);
   } finally {
@@ -480,6 +494,7 @@ function renderTable() {
     cells.push(numTd(stats.battles));
     cells.push(numTd(stats.battle_points));
     cells.push(numTd(stats.viewers_peak));
+    cells.push(noteTd(s));
     actionCells(s).forEach((td) => cells.push(td));
 
     cells.forEach((td) => tr.appendChild(td));
@@ -500,8 +515,39 @@ function numTd(value) {
   return td;
 }
 
+// Memoは検索対象(filteredSessionsがs.noteを見る)なのに、絞り込んだ結果の一覧では
+// 中身が見えず、確認に詳細modal+scrollが要った。その場で読めて、その場で直せるようにする。
+function noteTd(session) {
+  const td = document.createElement("td");
+  td.className = "note-cell";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "note-inline";
+  input.value = session.note || "";
+  input.placeholder = "—";
+  input.title = "Memo。ここで直接編集でき、離れると保存されます（検索boxの絞込対象です）。";
+  input.addEventListener("click", (e) => e.stopPropagation());
+  input.addEventListener("change", async () => {
+    const value = input.value;
+    if (value === (session.note || "")) return;
+    try {
+      await apiSend("PATCH", `/api/sessions/${session.id}`, { note: value });
+      session.note = value;
+      // 詳細modalを開いたままなら、そちらの入力欄とも食い違わせない。
+      if (currentSessionId === session.id) {
+        document.getElementById("note-input").value = value;
+      }
+    } catch (err) {
+      input.value = session.note || "";
+      showError(err);
+    }
+  });
+  td.appendChild(input);
+  return td;
+}
+
 // ---- detail modal ----
-async function showDetail(sessionId) {
+async function showDetail(sessionId, fromHistory) {
   let data;
   try {
     data = await apiSend("GET", `/api/sessions/${sessionId}`);
@@ -510,8 +556,13 @@ async function showDetail(sessionId) {
     return;
   }
   const session = data.session;
+  const wasClosed = currentSessionId === null;
   currentSessionId = sessionId;
   currentSessionUid = session.unique_id;
+  // 開いている詳細をURLに出す。?session= のdeep linkは元々あるのに、画面内で
+  // 開いたときだけURLが動かず、戻るButtonも共有もbookmarkも効かなかった。
+  // 履歴操作/起動時の復元はURLが既に正しいので、積まずに置き換えるだけにする。
+  syncDetailUrl(sessionId, wasClosed && !fromHistory);
 
   document.getElementById("detail-title").textContent =
     `Session #${session.id} — @${session.unique_id} (${fmtDateTime(session.started_at)})`;
@@ -554,7 +605,54 @@ async function showDetail(sessionId) {
   );
 
   renderRecordings(data.recordings || []);
-  document.getElementById("detail-modal").classList.remove("hidden");
+  const detailModal = document.getElementById("detail-modal");
+  detailModal.classList.remove("hidden");
+  focusModalOpen(detailModal, document.getElementById("detail-close"));
+  loadCollabs(sessionId);
+}
+
+// ---- コラボ(非BattleのLinkMic)区間 ----
+// 区間は別endpointなので、詳細本体を出したあとに追いかけて描く。
+// この一覧が持つのは接続の時間窓だけで、共演者が誰かはDBに無い。
+async function loadCollabs(sessionId) {
+  const empty = document.getElementById("collab-empty");
+  const summary = document.getElementById("collab-summary");
+  summary.textContent = "";
+  renderTableRows("collab-rows", "collab-empty", [], () => [], []);
+  setListState(empty, "loading");
+  let data;
+  try {
+    data = await apiSend("GET", `/api/sessions/${sessionId}/collabs`);
+  } catch (err) {
+    // 別のSessionへ切り替わっていたら、そちらの表示を古い応答で上書きしない。
+    if (currentSessionId !== sessionId) return;
+    setListState(empty, "failed", err);
+    return;
+  }
+  if (currentSessionId !== sessionId) return;
+  const collabs = data.collabs || [];
+  renderTableRows(
+    "collab-rows",
+    "collab-empty",
+    collabs,
+    (win, rank) => [
+      String(rank),
+      fmtClock(win.start),
+      // 終端が無い窓は収集中に開いたまま。空欄にすると記録漏れと区別できない。
+      win.end ? fmtClock(win.end) : "接続中",
+      win.end ? fmtDuration(win.end - win.start) : "-",
+      // guests_maxは記録されていないSessionが多く、0を「0人」として出すと
+      // 人数を数えた結果に見えてしまう。値がある場合だけ人数として扱う。
+      win.guests_max > 0 ? fmtNum(win.guests_max) : "記録なし",
+    ],
+    [0, 4],
+  );
+  if (!collabs.length) {
+    setListState(empty, "empty");
+    return;
+  }
+  setListState(empty, "ok");
+  summary.textContent = `${fmtNum(collabs.length)} 区間`;
 }
 
 function renderBattles(battles, owner) {
@@ -573,10 +671,24 @@ function renderBattles(battles, owner) {
   renderBattleCards(cards, battles, owner);
 }
 
-function closeDetail() {
-  document.getElementById("detail-modal").classList.add("hidden");
+function closeDetail(fromPopState) {
+  const detailModal = document.getElementById("detail-modal");
+  detailModal.classList.add("hidden");
+  focusModalClose(detailModal);
   currentSessionId = null;
   currentSessionUid = null;
+  // 戻るButton由来の閉じるでpushBackすると履歴が二重に積まれる。
+  if (!fromPopState && new URLSearchParams(location.search).get("session")) {
+    history.pushState({}, "", location.pathname);
+  }
+}
+
+// 詳細を開いた/切り替えたときのURL反映。開く操作は履歴を1段積んで戻るButtonで
+// 閉じられるようにし、別Sessionへの切り替えは積まずに置き換える。
+function syncDetailUrl(sessionId, pushNew) {
+  const url = `${location.pathname}?session=${sessionId}`;
+  if (pushNew) history.pushState({ session: sessionId }, "", url);
+  else history.replaceState({ session: sessionId }, "", url);
 }
 
 // 収集中Sessionの詳細を開いている間、Battleカードだけをliveで貼り替える。
@@ -700,6 +812,27 @@ async function downloadRecording(rec, btn) {
   }
 }
 
+// 録画単体の音量正規化(詳細modalの録画一覧の操作)。映像はstream copyで音声だけを作り直し、
+// 元のmp4と差し替える(元は_backup/へ退避)。進捗はWS audionorm_progressで届く。
+async function audionormRecording(rec, btn) {
+  ensureNotifyPermission();
+  const prog = makeProgress();
+  btn.replaceWith(prog);
+  audionormProgress.set(rec.id, (pct, stage) =>
+    setProgress(prog, stage || "音量正規化", pct));
+  try {
+    const job = await startRecordingJob(rec, prog, "audionorm", "音量正規化に失敗しました。");
+    finishProgress(prog);
+    notifyOutputDone((job.result || {}).filename || rec.filename);
+    if (currentSessionId !== null) showDetail(currentSessionId);
+  } catch (err) {
+    prog.replaceWith(btn);
+    showError(err);
+  } finally {
+    audionormProgress.delete(rec.id);
+  }
+}
+
 // 録画単体の再mp4化(詳細modalの録画一覧の操作)。元の.tsから録画時と同一のfinalize
 // (concat→timing→単一解像度normalize)を再実行する。単一解像度normalizeの再Encode%は
 // serverからWSで届く reprocess_progress をprogに反映する。
@@ -707,8 +840,10 @@ async function reprocessRecording(rec, btn) {
   ensureNotifyPermission();
   const prog = makeProgress();
   btn.replaceWith(prog);
-  reprocessProgress.set(rec.id, (pct) =>
-    setProgress(prog, "再mp4化 ", pct));
+  // stageはserverが段階名(セグメントを結合中／単一解像度へ変換中…)を載せてくる。
+  // 固定文字列で上書きすると、どの段階で待っているのかが分からなくなる。
+  reprocessProgress.set(rec.id, (pct, stage) =>
+    setProgress(prog, stage || "再mp4化", pct));
   try {
     const job = await startRecordingJob(rec, prog, "reprocess", "再mp4化に失敗しました。");
     finishProgress(prog);
@@ -823,11 +958,16 @@ function recordingActions(rec) {
   // 常用する出力系だけ操作列に出し、稀にしか使わない保守・破壊的操作はmenuへ畳む。
   // Buttonを7個並べると操作列が列幅を食い、#やFile名まで折り返して読めなくなる。
   const menuItems = [];
-  if (rec.status === "completed" || rec.status === "interrupted") {
+  // 容量整理でmp4だけ消した録画は行が残る。srcを読む操作(出力・Up出力・再mp4化・
+  // 新規の文字起こし)は押しても404になるだけなので出さない。ただし保存済みの転写を
+  // 「見る」のはsrc不要で、行を残す意味そのものなので消してはならない。
+  const hasSource = rec.file_exists !== false;
+  const finished = rec.status === "completed" || rec.status === "interrupted";
+  if (hasSource && finished) {
     const dl = document.createElement("button");
     dl.className = "btn btn-small";
     // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-    dl.textContent = rec.has_output ? "出力済" : "出力";
+    dl.textContent = rec.has_output ? "焼き込み出力済" : "焼き込み出力";
     dl.title = "設定でComment/Gift演出が有効な場合、焼き込み済み動画をrecordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
     dl.addEventListener("click", () => downloadRecording(rec, dl));
     wrap.appendChild(dl);
@@ -836,67 +976,59 @@ function recordingActions(rec) {
       const up = document.createElement("button");
       up.className = "btn btn-small";
       // Up出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
-      up.textContent = rec.has_up_output ? "Up出力済" : "Up出力";
+      up.textContent = rec.has_up_output ? "AI高画質済" : "AI高画質";
       up.title = "この録画をローカルAI(超解像model)で高画質化し、.up.mp4としてrecordings folderへ出力します。焼き込みが有効な場合は焼き込み後の動画を高画質化します。GPUでも録画時間の数倍かかります。";
       up.addEventListener("click", () => upDownloadRecording(rec, up));
       wrap.appendChild(up);
     }
+  }
 
-    if (sttConfigured) {
-      const tr = document.createElement("button");
-      tr.className = "btn btn-small";
-      // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
-      tr.textContent = rec.has_transcript ? "文字起済" : "文字起";
-      tr.title = "この録画の音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
-      tr.addEventListener("click", async () => {
-        await transcribeOrShow(rec, tr);
-        // done badge(文字起こし済)を反映するため詳細を再描画する。
-        if (currentSessionId !== null) showDetail(currentSessionId);
-      });
-      wrap.appendChild(tr);
-    }
+  // 保存済みの転写を開くのはDBだけで完結する。動画fileを消した録画でも、転写を読む
+  // 手段は残す(それが行を残す理由そのもの)。新規の文字起こしは音声が要るのでsrc必須。
+  if (finished && sttConfigured && (hasSource || rec.has_transcript)) {
+    const tr = document.createElement("button");
+    tr.className = "btn btn-small";
+    // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
+    tr.textContent = rec.has_transcript ? "字幕化済" : "字幕化";
+    tr.title = rec.has_transcript && !hasSource
+      ? "保存済みの文字起こしを表示します（動画fileは削除済みのため再実行はできません）。"
+      : "この録画の音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
+    tr.addEventListener("click", async () => {
+      await transcribeOrShow(rec, tr);
+      // done badge(文字起こし済)を反映するため詳細を再描画する。
+      if (currentSessionId !== null) showDetail(currentSessionId);
+    });
+    wrap.appendChild(tr);
+  }
 
+  if (hasSource && finished) {
     // 再mp4化は進捗をbutton位置に描くためmenuではなく操作列に残す必要があるが、
     // 常用ではないのでmenuへ入れ、押下時はmenuのtoggle Buttonを進捗表示に使う。
+    menuItems.push({
+      label: "音量正規化",
+      title: "この録画の音量を設定の目標値(既定 -14 LUFS)へ揃えます。映像はそのまま複製し、音声だけを作り直して元のmp4と差し替えます(元は_backupへ退避)。配信ごと・場面ごとの音量差を1本ずつ直す手間が要らなくなります。",
+      onSelect: () => audionormRecording(rec, wrap.querySelector(".row-menu-toggle")),
+    });
+
     menuItems.push({
       label: "再mp4化",
       title: "保持している元の.tsセグメントから、録画時と同じ処理でmp4を作り直します。配信中に解像度が変わってPlayerがカクつく録画を1解像度へ正しく直せます。元mp4は_backupへ退避します（.tsが残っていない録画は不可）。再Encodeのため時間がかかります。",
       onSelect: () => reprocessRecording(rec, wrap.querySelector(".row-menu-toggle")),
     });
 
-    // 派生物(焼き込み・Up出力・renderの中間file)だけを消す。元録画は残るので、
-    // 再出力すれば作り直せる。容量を空ける目的の操作はこちらを使う。
-    menuItems.push({
-      label: "派生物削除",
-      title: "この録画の焼き込み(.overlay.mp4)・AI高画質化(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。",
-      onSelect: async () => {
-        const ok = await confirmDialog(
-          `録画 #${rec.id} の派生物（焼き込み・Up出力）を削除しますか？元の録画は残ります。`,
-          { title: "派生物の削除", confirmLabel: "削除する" },
-        );
-        if (!ok) return;
-        try {
-          const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
-          showToast(`${(res.freed_bytes / 1073741824).toFixed(1)} GB を削除しました。`);
-          if (currentSessionId !== null) showDetail(currentSessionId);
-        } catch (err) {
-          showError(err);
-        }
-      },
-    });
-
-    menuItems.push({
-      label: rec.protected ? "保護を解除" : "保護",
-      title: "保持policyの自動削除からこの録画を除外します。もう一度押すと解除します。手動の削除は保護中でも実行できます。",
-      onSelect: async () => {
-        try {
-          await apiSend("POST", `/api/recordings/${rec.id}/protect`, { protected: !rec.protected });
-          if (currentSessionId !== null) showDetail(currentSessionId);
-        } catch (err) {
-          showError(err);
-        }
-      },
-    });
+    // 派生物削除は容量を空ける常用操作。menuの奥に畳むと、同じ目的の操作が
+    // 配信者画面(一覧から1 click)と履歴(menu経由)で深さが揃わない。派生物が
+    // 実在する行にだけ操作列へ直接出す。
+    if (rec.has_output || rec.has_up_output) {
+      const der = document.createElement("button");
+      der.className = "btn btn-small";
+      der.textContent = "派生物削除";
+      der.title = "この録画の焼き込み(.overlay.mp4)・Up出力(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。";
+      der.addEventListener("click", () => deleteDerived(rec, () => {
+        if (currentSessionId !== null) showDetail(currentSessionId);
+      }));
+      wrap.appendChild(der);
+    }
   }
   menuItems.push({
     label: "削除",
@@ -917,7 +1049,9 @@ function recordingActions(rec) {
       }
     },
   });
-  wrap.appendChild(rowMenu(menuItems));
+  // 残るのは音量正規化・再mp4化と削除だけ。「その他」では中身が読めないので用途を名乗らせる。
+  wrap.appendChild(rowMenu(menuItems,
+    { label: "作り直す/消す ⋯", title: "音量正規化・再mp4化・録画の削除" }));
   return wrap;
 }
 
@@ -927,18 +1061,30 @@ function renderRecordings(recordings) {
     "recording-list-empty",
     recordings,
     (rec) => {
-      const dur = rec.ended_at ? fmtDuration(rec.ended_at - rec.started_at) : "-";
-      const mb = `${(rec.bytes / 1048576).toFixed(1)} MB`;
+      // 尺はserverが実測したduration_secondsだけを出す。ended_at - started_atは壁時計で、
+      // 捕捉の停滞ぶんが載る上、再処理でended_atが潰れた録画では数百時間に化ける。
+      const dur = rec.duration_seconds > 0 ? fmtDuration(rec.duration_seconds) : "-";
+      const gone = rec.file_exists === false;
+      // recordings.bytesは録画完了時の値で、fileを消しても残る。そのまま出すと
+      // 消えた容量をまだ持っているように読める。
+      const mb = gone ? "—" : `${(rec.bytes / 1048576).toFixed(1)} MB`;
       // 保護はmenuへ畳んだためlabelでは分からない。状態列にbadgeで出して一目で分かるようにする。
       const state = document.createElement("span");
       state.className = "rec-state";
       state.append(RECORDING_STATUS[rec.status] || rec.status);
-      if (rec.protected) {
-        const p = document.createElement("span");
-        p.className = "st protected";
-        p.textContent = "保護中";
-        p.title = "保持policyの自動削除から除外されています。";
-        state.appendChild(p);
+      if (gone) {
+        const g = document.createElement("span");
+        g.className = "st file-gone";
+        g.textContent = "file削除済";
+        g.title = "動画fileは削除されています。文字起こし・検索index・bookmark・解析は残っています。";
+        state.appendChild(g);
+      }
+      // 保護はbadge自体をtoggleにする。状態が見えている場所でそのまま切り替えられる。
+      // 収集中の録画は保持policyの対象外なので出さない(menu時代と同じ条件)。
+      if (rec.status === "completed" || rec.status === "interrupted") {
+        state.appendChild(protectBadge(rec, () => {
+          if (currentSessionId !== null) showDetail(currentSessionId);
+        }));
       }
       return [
         `#${rec.id}`,
@@ -1198,13 +1344,18 @@ async function transcribeOrShow(rec, btn) {
 // 表示中transcriptのsegment要素と開始秒（動画の再生位置と同期させる）。
 let transcriptSegEls = [];
 let transcriptActiveIdx = -1;
+// 表示中transcriptの録画。再生errorの理由を問い合わせる間の取り違えを防ぐ。
+let transcriptRecordingId = null;
 
 function openTranscript(rec, data) {
   const segs = data.segments || [];
   document.getElementById("transcript-title").textContent =
     `録画 #${rec.id} 文字起こし（${data.language || "?"} · ${data.model || ""} · ${segs.length}行）`;
   const video = document.getElementById("transcript-video");
+  document.getElementById("transcript-video-message").textContent = "";
+  transcriptRecordingId = rec.id;
   // 同録画をRange対応endpointで配信。segmentクリックでその時刻へseekできる。
+  // 動画fileを消した録画でも転写は開ける。再生できないことはerror時に文言で伝える。
   video.src = `/api/recordings/${rec.id}/play`;
   // 字幕fileの書き出し。timecodeは元録画mp4のmedia軸基準（hintに明記済み）。
   [["transcript-srt", "srt"], ["transcript-vtt", "vtt"], ["transcript-txt", "txt"]]
@@ -1253,7 +1404,9 @@ function openTranscript(rec, data) {
       transcriptSegEls.push({ start: s.start, el: row });
     });
   }
-  document.getElementById("transcript-modal").classList.remove("hidden");
+  const transcriptModal = document.getElementById("transcript-modal");
+  transcriptModal.classList.remove("hidden");
+  focusModalOpen(transcriptModal, document.getElementById("transcript-close"));
 }
 
 // 再生位置に対応するsegment（start<=現在時刻 の最後）を強調し、追従scrollする。
@@ -1280,9 +1433,13 @@ function highlightActiveSegment() {
 function closeTranscript() {
   const video = document.getElementById("transcript-video");
   video.pause();
+  // src除去自体がerrorを飛ばす。先にidを落とし、閉じただけで理由を出しにいかせない。
+  transcriptRecordingId = null;
   video.removeAttribute("src");
   video.load();
-  document.getElementById("transcript-modal").classList.add("hidden");
+  const transcriptModal = document.getElementById("transcript-modal");
+  transcriptModal.classList.add("hidden");
+  focusModalClose(transcriptModal);
 }
 
 // ---- CSV of visible table ----
@@ -1329,7 +1486,9 @@ async function openUserDelete() {
   userdelSelected.clear();
   document.getElementById("userdel-search").value = "";
   document.getElementById("userdel-status").textContent = "";
-  document.getElementById("userdel-modal").classList.remove("hidden");
+  const userdelModal = document.getElementById("userdel-modal");
+  userdelModal.classList.remove("hidden");
+  focusModalOpen(userdelModal, document.getElementById("userdel-close"));
   try {
     const res = await fetch("/api/streamers");
     if (!res.ok) throw new Error("配信者一覧の取得に失敗しました。");
@@ -1342,7 +1501,9 @@ async function openUserDelete() {
 }
 
 function closeUserDelete() {
-  document.getElementById("userdel-modal").classList.add("hidden");
+  const userdelModal = document.getElementById("userdel-modal");
+  userdelModal.classList.add("hidden");
+  focusModalClose(userdelModal);
 }
 
 function filteredStreamers() {
@@ -1403,7 +1564,7 @@ async function runUserDelete() {
     .join("\n");
   const ok = await confirmDialog(
     `次の${ids.length}名の履歴をすべて削除しますか？この操作は取り消せません。\n\n${names}`,
-    { title: "ユーザー削除", confirmLabel: "削除する" },
+    { title: "配信者を削除", confirmLabel: "削除する" },
   );
   if (!ok) return;
   const run = document.getElementById("userdel-run");
@@ -1422,91 +1583,6 @@ async function runUserDelete() {
     run.disabled = false;
   }
 }
-
-// ---- Session横断ランキング ----
-// /api/rankings は4指標分をまとめて返すので、開いたときに1回だけ取得し、指標の切替は
-// 手元のpayloadで描き分ける。収集中Sessionの値はserver側でlive statsに差し替え済み。
-const RANK_METRICS = {
-  gifts: "コイン",
-  comments: "Comment",
-  likes: "Like",
-  battles: "B.Score",
-};
-let rankings = null;
-let rankState = "loading";
-let rankError = null;
-
-function rankMetric() {
-  return document.getElementById("rank-metric").value;
-}
-
-function renderRankings() {
-  const metric = rankMetric();
-  document.getElementById("rank-value-th").textContent = RANK_METRICS[metric];
-  const rows = (rankings && rankings[metric]) || [];
-  const emptyEl = document.getElementById("rank-empty");
-  renderTableRows(
-    "rank-rows",
-    "rank-empty",
-    rows,
-    (entry, rank) => {
-      // 表示名とavatarはranking APIに無い。既に読み込んだSession一覧に同じSessionが
-      // あればそこから補い、無ければ@idだけで出す(名前は作らない)。
-      const known = allSessions.find((s) => s.id === entry.session_id);
-      return [
-        String(rank),
-        userCell({
-          unique_id: entry.unique_id,
-          nickname: (known && known.owner_nickname) || entry.unique_id,
-          avatar: (known && known.owner_avatar) || "",
-        }),
-        fmtDateTime(entry.started_at),
-        entry.ended_at ? fmtDuration(entry.ended_at - entry.started_at) : "収集中",
-        fmtNum(entry.value),
-      ];
-    },
-    [0, 4],
-    (tr, entry) => {
-      tr.classList.add("rank-row");
-      tr.title = `Session #${entry.session_id} の詳細を開きます。`;
-      tr.addEventListener("click", () => {
-        closeRankings();
-        showDetail(entry.session_id);
-      });
-    },
-  );
-  if (rows.length > 0) setListState(emptyEl, "ok");
-  else if (rankState === "failed") setListState(emptyEl, "failed", rankError);
-  else if (rankState === "loading") setListState(emptyEl, "loading");
-  else setListState(emptyEl, "empty");
-}
-
-async function openRankings() {
-  document.getElementById("rank-modal").classList.remove("hidden");
-  rankState = "loading";
-  rankError = null;
-  rankings = null;
-  renderRankings();
-  try {
-    rankings = await apiSend("GET", "/api/rankings");
-    rankState = "loaded";
-  } catch (err) {
-    rankState = "failed";
-    rankError = err;
-  }
-  renderRankings();
-}
-
-function closeRankings() {
-  document.getElementById("rank-modal").classList.add("hidden");
-}
-
-document.getElementById("open-rankings").addEventListener("click", openRankings);
-document.getElementById("rank-close").addEventListener("click", closeRankings);
-document.getElementById("rank-modal").addEventListener("click", (e) => {
-  if (e.target.id === "rank-modal") closeRankings();
-});
-document.getElementById("rank-metric").addEventListener("input", renderRankings);
 
 document.getElementById("bulk-del-users").addEventListener("click", openUserDelete);
 document.getElementById("userdel-close").addEventListener("click", closeUserDelete);
@@ -1577,7 +1653,12 @@ function handleMessage(msg) {
   }
   if (msg.type === "reprocess_progress") {
     const update = reprocessProgress.get(msg.recording_id);
-    if (update) update(msg.pct);
+    if (update) update(msg.pct, msg.stage);
+    return;
+  }
+  if (msg.type === "audionorm_progress") {
+    const update = audionormProgress.get(msg.recording_id);
+    if (update) update(msg.pct, msg.stage);
     return;
   }
   // WS接続直後に届くserver側job台帳のsnapshot。reload前から動いているSession出力へ
@@ -1614,10 +1695,27 @@ function scheduleReload() {
 
 detailChart = createTimelineChart(document.getElementById("detail-chart"));
 setListState(document.getElementById("session-empty"), "loading");
+bindVideoError(
+  document.getElementById("transcript-video"),
+  () => transcriptRecordingId,
+  (text) => { document.getElementById("transcript-video-message").textContent = text; },
+);
 loadAiStatus();
 loadSttStatus();
 loadUpscaleStatus();
 loadKpi();
-loadSessions();
+// Session一覧を先に読む。詳細modalは表示名を一覧から補うため、一覧が入ってから開く。
+loadSessions().then(() => {
+  // 横断jump(Ctrl+K)や他画面からの ?session= 指定でその詳細を開く。
+  const wanted = Number(new URLSearchParams(location.search).get("session"));
+  if (wanted) showDetail(wanted, true);
+});
+// 戻る/進むでmodalの開閉を追従させる。URLが状態を持つ以上、browserの履歴操作が
+// 効かないと「戻ったのに閉じない」ことになる。
+window.addEventListener("popstate", () => {
+  const wanted = Number(new URLSearchParams(location.search).get("session"));
+  if (wanted && wanted !== currentSessionId) showDetail(wanted, true);
+  else if (!wanted && currentSessionId !== null) closeDetail(true);
+});
 connectWS(handleMessage);
 setInterval(loadKpi, 30000);

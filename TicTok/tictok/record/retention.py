@@ -17,6 +17,7 @@ from tictok.record.recorder import (
     FFMPEG_LOG_SUFFIX,
     NORMALIZE_TMP_SUFFIX,
     SIDECAR_DIRNAME,
+    read_normalize_marker,
 )
 from tictok.record.upscale import upscale_artifact_paths
 from tictok.record.video_overlay import (
@@ -100,6 +101,11 @@ def transient_candidates(roots, recordings, resolve_path,
         for root in roots:
             mp4 = layout.mp4_path(root, stem)
             tmp = mp4.with_suffix(mp4.suffix + NORMALIZE_TMP_SUFFIX)
+            if read_normalize_marker(tmp) is not None and tmp.is_file():
+                # 完了印付き = 正常に直ったが差し替えだけが失敗した成果物。隣の元mp4より
+                # 価値が高く、reclaimが当て直すまでの預かり物なので掃除対象から外す。
+                # ここを外さないと「壊れた混在mp4が残り、直った方が消える」ことになる。
+                continue
             for path in (tmp, tmp.with_name(tmp.name + FFMPEG_LOG_SUFFIX)):
                 info = _stat(path)
                 if info is None or path in seen:

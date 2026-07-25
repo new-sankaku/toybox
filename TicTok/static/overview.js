@@ -159,12 +159,20 @@ function buildTile(uid) {
   audioBtn.textContent = on ? "🔊" : "🔇";
   audioBtn.classList.toggle("on", on);
   audioBtn.title = "音声のON/OFF";
+  audioBtn.setAttribute("aria-label", "音声のON/OFF");
   audioBtn.addEventListener("click", () => toggleAudio(uid));
   const recVideoBtn = document.createElement("button");
   recVideoBtn.dataset.field = "record-video-btn";
-  recVideoBtn.textContent = "🎥";
+  recVideoBtn.textContent = "🎥保存";
   recVideoBtn.addEventListener("click", () => toggleRecordVideo(uid));
-  ctl.append(recBtn, recVideoBtn, audioBtn);
+  const bookmarkBtn = document.createElement("button");
+  bookmarkBtn.dataset.field = "bookmark-btn";
+  bookmarkBtn.textContent = "🔖";
+  bookmarkBtn.title = "いま見ている場面を見どころとして記録します。録画中のみ押せます。";
+  bookmarkBtn.setAttribute("aria-label", "見どころに記録");
+  bookmarkBtn.disabled = true;
+  bookmarkBtn.addEventListener("click", () => markBookmark(uid));
+  ctl.append(recBtn, recVideoBtn, bookmarkBtn, audioBtn);
   tile.appendChild(ctl);
 
   // Battle block (live; shown only while a battle is in progress)
@@ -192,6 +200,26 @@ async function toggleRecord(uid) {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/record/${recording ? "stop" : "start"}`);
   } catch (err) {
     showError(err);
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 見どころの登録。押した時刻はServerが打つ。登録位置は録画のfinalizeでmp4のPTS軸へ
+// 載せ直されるので、ここでは時刻を送らない。
+async function markBookmark(uid) {
+  const btn = grid.querySelector(`[data-uid="${CSS.escape(uid)}"] [data-field="bookmark-btn"]`);
+  if (btn && btn.disabled) return;
+  if (btn) btn.disabled = true;
+  try {
+    await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/bookmark`, { memo: "" });
+    if (btn) {
+      btn.textContent = "✓";
+      clearTimeout(btn._flashTimer);
+      btn._flashTimer = setTimeout(() => { btn.textContent = "🔖"; }, 1500);
+    }
+  } catch (err) {
+    showError(err);
+  } finally {
     if (btn) btn.disabled = false;
   }
 }
@@ -361,7 +389,7 @@ function updateTile(tile, monitor) {
   const recVideoBtn = tile.querySelector('[data-field="record-video-btn"]');
   const videoOn = snap.record_video !== false;
   recVideoBtn.disabled = false;
-  recVideoBtn.textContent = videoOn ? "🎥" : "📊";
+  recVideoBtn.textContent = videoOn ? "🎥保存" : "📊dataのみ";
   recVideoBtn.classList.toggle("on", videoOn);
   recVideoBtn.title = videoOn
     ? "動画保存: ON（クリックでデータのみ収集に切替）"
@@ -389,6 +417,16 @@ function updateTile(tile, monitor) {
     recBtn.classList.remove("on");
   }
 
+  // 見どころは動画の中の位置を指すので、録画中だけ押せる。
+  const bookmarkBtn = tile.querySelector('[data-field="bookmark-btn"]');
+  if (bookmarkBtn) {
+    const canBookmark = !!rec && rec.state === "recording" && !!rec.recording_id;
+    bookmarkBtn.disabled = !canBookmark;
+    bookmarkBtn.title = canBookmark
+      ? "いま見ている場面を見どころとして記録します。"
+      : "録画中のみ記録できます。";
+  }
+
   // Video / placeholder
   const ph = tile.querySelector('[data-field="ph"]');
   // live becomes true once the HLS playlist exists (backend re-notifies then),
@@ -397,7 +435,7 @@ function updateTile(tile, monitor) {
     ensurePlayer(uid, tile);
   } else {
     destroyPlayer(uid);
-    ph.textContent = recording ? "録画停止中" : snap.status === "connected" ? "録画停止中" : "未接続";
+    ph.textContent = recording ? "プレビュー準備中…" : snap.status === "connected" ? "録画停止中" : "未接続";
   }
 }
 

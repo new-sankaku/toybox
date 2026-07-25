@@ -23,8 +23,6 @@ import urllib.request
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-# 焼き込み進捗を0-100%で受け取るcallback。serverはこれをWSへ中継する。
-ProgressCb = Callable[[int], Awaitable[None]]
 
 from tictok.paths import PROJECT_ROOT
 from tictok.core import cancel
@@ -33,11 +31,16 @@ from tictok.core import layout
 from tictok.core.cancel import JobCancelled
 from tictok.core.gpu import gpu_slot_async
 from tictok.core.logging_setup import progress_interval_seconds
+from tictok.core.progress import (  # 進捗reporterは全長時間jobで共通
+    OVERLAY_PHASES, PREVIEW_PHASES, IntervalGate, JobProgress, ProgressCb, StageCb,
+    fmt_hms, pump_ffmpeg_progress, pump_progress_sync,
+)
 from tictok.core.battle import battle_sides, battle_type
 from tictok.media.avatar_pool import avatar_key
 from tictok.record import audio_norm, subtitles
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
+    SIDECAR_DIRNAME,
     ffmpeg_available,
     ffprobe_available,
     is_pts_discontinuity,
@@ -95,22 +98,6 @@ class NothingToDrawError(RuntimeError):
     ffmpegの失敗と同じRuntimeErrorで運ぶと、HTTP側が5xxへ落とすしか無くなり、監視とlogでは
     server errorとして数えられる(userへ出す文言は正常なのに、状態だけが異常になる)。
     呼び出し側が4xxへ落とせるよう型で分ける。"""
-
-
-class _IntervalGate:
-    """時間間隔で進捗logを間引くgate。DEBUG時は progress_interval_seconds が0を返すため
-    毎回通り、DEBUG指定が実際に情報量を増やす。"""
-
-    def __init__(self, interval_seconds: float) -> None:
-        self._interval = interval_seconds
-        self._last = 0.0
-
-    def ready(self) -> bool:
-        now = time.monotonic()
-        if self._interval > 0 and now - self._last < self._interval:
-            return False
-        self._last = now
-        return True
 
 
 def _timing_map_ctx(src: Path) -> dict:
@@ -219,7 +206,7 @@ CFR_BASE_SUFFIX = ".cfrbase.mp4"
 # average rate is far lower (mobile live content is ~30fps). Normalising to the nominal
 # would encode phantom duplicate frames, doubling the pre-pass, comment-layer and
 # burn-in frame counts for no visible gain, so the target is capped here. 30 preserves
-# all real motion and matches COMMENT_LAYER_FPS_CAP so base and layer share a grid.
+# all real motion and matches the comment layer's fps cap so base and layer share a grid.
 CFR_FPS_CAP = 30.0
 # Mode B (source-clock timing) burn-in, produced alongside Mode A for comparison
 # when video_overlay_timing_compare is on. Same source mp4, comments/battle timed
@@ -238,10 +225,10 @@ PREVIEW_CLIP_SUFFIX = ".preview.mp4"
 PREVIEW_CLIP_META_SUFFIX = ".preview.meta"
 PREVIEW_CLIP_BASE_SUFFIX = ".preview.cfrbase.mp4"
 PREVIEW_LAYER_SUFFIX = ".preview.comments.mov"
-ICON_CACHE_DIR = "gift_icons"
+ICON_CACHE_DIR = layout.GIFT_ICON_POOL_DIRNAME
 # Downloaded custom-emote images, cached by stable emote_id so a repeated emote
 # ([laugh] etc.) is fetched once and reused across comments and recordings.
-EMOTE_CACHE_DIR = "emotes"
+EMOTE_CACHE_DIR = layout.EMOTE_POOL_DIRNAME
 # Private-Use base for per-render emote sentinel codepoints (see _CommentShaper).
 _EMOTE_SENTINEL_BASE = 0xE000
 
@@ -369,6 +356,77 @@ def overlay_transient_paths(src: Path) -> list:
     return paths
 
 
+_TRANSIENT_SWEEP_DIR_SUFFIX = ".frames"
+
+
+def _transient_sweep_suffixes() -> tuple:
+    """起動sweepが孤児と見なすsuffix。renderが自分で消す物とちょうど同じ集合。
+
+    module levelのtupleにしないのは、COMMENT_LAYER_SUFFIX等がこの関数より後ろで定義されて
+    おり、import時評価ではNameErrorになるため(定義順に依存しない形にしておく)。"""
+    return (
+        CFR_BASE_SUFFIX, CFR_SUFFIX, COMMENT_LAYER_SUFFIX,
+        PREVIEW_CLIP_BASE_SUFFIX, PREVIEW_LAYER_SUFFIX,
+        PREVIEW_RAW_SUFFIX, PREVIEW_ASS_SUFFIX,
+        CFR_BASE_SUFFIX.replace(".mp4", "") + ".prepass.log",
+    )
+
+
+def sweep_orphaned_transients(roots) -> tuple:
+    """起動時に、落ちたrenderが残した焼き込み中間物をすべて消す。(件数, bytes)を返す。
+
+    renderは成功でも例外でも ``finally`` で中間物を消すが、**processが即死すると finally は
+    走らない**。実際にserver再起動で53%だったjobが31GB(cfrbase 17.3GB + comments.mov 13.7GB)
+    を残し、空き容量を直接圧迫した。起動時点では実行中jobは存在しない(_recover_media_jobsが
+    interruptedへ倒した後に呼ぶこと)ので、ここに在る中間物は定義上すべて孤児で、
+    どの成果物もこれらに依存しない。次のrenderは必ず作り直すため、消して失うものは無い。
+
+    保持policy(retention)にも同じfileを拾う経路はあるが、あちらは人が画面から起こす掃除で、
+    誰も見ていない夜間に貯まる孤児には届かない。"""
+    removed, freed = 0, 0
+    suffixes = _transient_sweep_suffixes()
+    for root in roots:
+        sidecars = Path(root) / SIDECAR_DIRNAME
+        if not sidecars.is_dir():
+            continue
+        for path in sidecars.iterdir():
+            if path.is_dir():
+                # PIL側の展開先(<layer>.frames/)。中身はdistinct frameのpngで、layerを
+                # 作り直せば再生成される。
+                if not path.name.endswith(_TRANSIENT_SWEEP_DIR_SUFFIX):
+                    continue
+                size = _dir_bytes(path)
+                _rm_frames_dir(path)
+                if path.exists():
+                    continue
+                removed += 1
+                freed += size
+                continue
+            if not any(path.name.endswith(suffix) for suffix in suffixes):
+                continue
+            try:
+                size = path.stat().st_size
+                path.unlink()
+            except OSError:
+                logger.warning(
+                    "could not remove the orphaned burn-in intermediate %s", path.name,
+                    extra={"event": "overlay.transient_sweep_failed",
+                           "ctx": {"path": str(path)}},
+                    exc_info=True,
+                )
+                continue
+            removed += 1
+            freed += size
+    if removed:
+        logger.info(
+            "removed %d orphaned burn-in intermediate(s), freeing %.1f GB",
+            removed, freed / 1e9,
+            extra={"event": "overlay.transient_swept",
+                   "ctx": {"removed": removed, "freed_bytes": freed}},
+        )
+    return removed, freed
+
+
 def cleanup_overlay_files(src: Path) -> None:
     """Remove cached burn-in artifacts for a recording (called on delete)."""
     paths = overlay_artifact_paths(src) + overlay_transient_paths(src)
@@ -427,9 +485,13 @@ def _signature(
 ) -> str:
     stat = src.stat()
     payload = {
+        # 28: avatar/emote/gift iconのpoolをmp4の現在地ではなくwork rootで解決するよう修正。
+        # final dirへ移送済みの録画は今までpoolを1件も引けず、全コメントがイニシャル円盤へ
+        # 縮退した出力になっていた。描画が変わるのでcacheを無効化する — これが無いと、
+        # 直った後に焼き直しても既存のmeta+出力にcache hitして壊れた出力が返り続ける。
         # 27: TikTok custom emoteを文字高の2倍で描画し、該当行の行高も拡張。
         # commentの行送り・block高が変わるためcacheを無効化する。
-        "version": 27,
+        "version": 28,
         "variant": variant,
         "cfg": cfg,
         "size": stat.st_size,
@@ -2861,7 +2923,8 @@ def _load_emote_image(path: Path):
         return im.convert("RGBA")
 
 
-async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path) -> int:
+async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path,
+                          on_step: Optional[Callable] = None) -> int:
     """Download every registered custom-emote image (cached by emote_id) and attach it
     to the shaper so the comment layer draws it inline. Returns the count resolved; a
     failed emote is skipped (its sentinel then draws as a transparent gap)."""
@@ -2873,7 +2936,9 @@ async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path) -
     for sent, rec in shaper._emotes.items():
         by_id.setdefault(rec["id"], []).append(sent)
     resolved = 0
-    for eid, sents in by_id.items():
+    for index, (eid, sents) in enumerate(by_id.items()):
+        if on_step is not None:
+            await on_step("絵文字", index, len(by_id))
         url = shaper._emotes[sents[0]]["url"]
         dest = cache_dir / f"{eid}.img"
         img = None
@@ -2891,7 +2956,8 @@ async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path) -
     return resolved
 
 
-async def _resolve_icons(overlays: list, cache_dir: Path) -> list:
+async def _resolve_icons(overlays: list, cache_dir: Path,
+                         on_step: Optional[Callable] = None) -> list:
     """Resolve each gift overlay to a local icon file. Cache first — icons are
     persisted at capture time (while URLs are fresh), so an expired URL still
     renders. On a cache miss, auto-resolve the URL from the current gift list by
@@ -2901,7 +2967,9 @@ async def _resolve_icons(overlays: list, cache_dir: Path) -> list:
     loop = asyncio.get_running_loop()
     name_index = _load_name_index(cache_dir)
     gift_map: Optional[dict] = None
-    for spec in overlays:
+    for index, spec in enumerate(overlays):
+        if on_step is not None:
+            await on_step("ギフトアイコン", index, len(overlays))
         gid = int(spec.get("gift_id") or 0)
         name = spec.get("gift_name") or ""
         # 1. persisted cache by gift_id
@@ -2948,7 +3016,8 @@ def _save_png(im, dest: Path) -> None:
     im.save(str(dest), format="PNG")
 
 
-async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_dir: Path) -> list:
+async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_dir: Path,
+                                 on_step: Optional[Callable] = None) -> list:
     """Score-bar端の配信者アバターを、円形PNG(alpha付き)へ解決する。取得順は
     (1)avatar_dirのcache(capture時に保存された鮮度の高い画像。user_id/@id/nicknameのkey候補で探す)
     (2)無ければDBに保存された avatar URL をon-demand download。どちらも不可ならそのspecは落とし、
@@ -2962,7 +3031,9 @@ async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_
     # 解決結果は(key,size)単位でmemo化し、失敗も覚える: 失効したCDN URLはdownloadが15s timeout
     # まで待つので、memoが無いとspec本数ぶん直列に再試行して出力が数分stallする。
     done: dict = {}
-    for spec in specs:
+    for index, spec in enumerate(specs):
+        if on_step is not None:
+            await on_step("配信者アイコン", index, len(specs))
         size = int(spec.get("size") or 0)
         if size <= 0:
             continue
@@ -3019,8 +3090,12 @@ async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_
 # Frames-per-second of the rendered comment overlay layer. The feed is a slow
 # scroll, so the layer is sampled at the source fps (capped here to bound the
 # per-frame render cost on long recordings); ffmpeg composites it by PTS so a lower
-# layer fps than the video still aligns at each sampled instant.
-COMMENT_LAYER_FPS_CAP = 30
+# layer fps than the video still aligns at each sampled instant. 中間fileの容量は
+# frame数にほぼ比例するので、ここは容量の主要な調整点でもある(config側の説明を参照)。
+
+
+def comment_layer_fps_cap() -> float:
+    return config.get_overlay_layer_fps_cap()
 COMMENT_LAYER_SUFFIX = ".comments.mov"
 # Supersample factor for the circular avatar mask: the mask is drawn this many
 # times larger than the final avatar and downscaled, antialiasing the edge.
@@ -3301,7 +3376,8 @@ def _comment_still_frame(tiles: dict, t: float):
 def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs: int,
                                shaper: "_CommentShaper", width: int, height: int, fps: float,
                                out_path: Path, avatar_upscale: bool = False,
-                               window: Optional[tuple] = None) -> Optional[tuple]:
+                               window: Optional[tuple] = None,
+                               progress: Optional[Callable] = None) -> Optional[tuple]:
     """Render the comment feed as an alpha overlay video (qtrle .mov) using Pillow so
     emoji show in colour. Each comment is rasterised once to a tile and scrolled/faded
     using the same placements/timing the ASS layer would have used, so comments stay
@@ -3367,10 +3443,16 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     prev_sig = None
     # 進捗はdistinct frameの生成に律速される(大半のframeは直後のcontinueで即skipされる)ので、
     # gateはcontinueの後、実際に1枚描く分岐の中に置く。
-    gate = _IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
+    gate = IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
+    # UIへ返す進捗はlog gateとは別。logは間引いて良いが、画面の%は数十分無言にできない。
+    ui_gate = IntervalGate(config.get_job_progress_min_interval_seconds())
     render_started = time.monotonic()
     try:
         for f in range(first_frame, first_frame + n_frames):
+            if progress is not None and ui_gate.ready():
+                done = f - first_frame
+                progress("layer", done / n_frames if n_frames else 1.0,
+                         f"{done:,}/{n_frames:,}フレーム")
             # JobCancelledはBaseException(下のexcept Exceptionでは捕まらない)。ここで捕まると
             # cancelがASS転落という「品質を落とした成功」に化けるため、意図的に素通りさせる。
             cancel.check_cancelled()
@@ -3438,18 +3520,27 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     (frames_dir / "list.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     cancel.check_cancelled()
+    if progress is not None:
+        progress("layer", 1.0, f"{n_frames:,}/{n_frames:,}フレーム")
     # Popen + register: qtrle encoding a full recording's layer runs for minutes, and an
     # unregistered process is one the cancel cannot reach — the operator would keep
     # waiting on "取り消し中…" until this finished on its own.
+    layer_seconds = n_frames / fps if fps > 0 else 0.0
     proc = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+         *(["-progress", "pipe:1", "-nostats"] if progress is not None else []),
          "-f", "concat", "-safe", "0", "-i", "list.txt",
          "-vsync", "cfr", "-r", f"{fps:.6f}",
          "-c:v", "qtrle", "-pix_fmt", "argb", str(out_path.resolve())],
         cwd=str(frames_dir), stdin=subprocess.DEVNULL,
+        stdout=(subprocess.PIPE if progress is not None else None),
     )
     cancel.register_process(proc)
     try:
+        # 数十GBのqtrleを吐くこの pass も数分〜数十分かかる。worker thread内なので
+        # -progress を同thread内でそのまま読み進める(loopは塞がない)。
+        if progress is not None and proc.stdout is not None:
+            pump_progress_sync(proc.stdout, layer_seconds, progress, "layer_encode")
         proc.wait()
     finally:
         cancel.forget_process(proc)
@@ -3493,16 +3584,20 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
 async def _render_comment_layer(placements: list, avatar_files: dict, m: dict, fs: int,
                                 shaper: "_CommentShaper", width: int, height: int, fps: float,
                                 out_path: Path, avatar_upscale: bool = False,
-                                window: Optional[tuple] = None) -> Optional[tuple]:
+                                window: Optional[tuple] = None,
+                                progress: Optional[Callable] = None) -> Optional[tuple]:
     """Async wrapper: the PIL/ffmpeg render is blocking, so run it off the loop.
 
     ``to_thread`` rather than ``run_in_executor``: it copies the caller's context into the
     worker, which is what lets the avatar super-resolution inside recognise that this job
-    already holds the GPU slot instead of deadlocking behind itself."""
+    already holds the GPU slot instead of deadlocking behind itself.
+
+    ``progress`` は ``progress(段階key, 達成率, 詳細)`` の**同期**callback。worker thread
+    から呼ばれるので、loopへ戻す橋渡し(JobProgress.thread_cb)を通す必要がある。"""
     return await asyncio.to_thread(
         _render_comment_layer_sync,
         placements, avatar_files, m, fs, shaper, width, height, fps, out_path, avatar_upscale,
-        window,
+        window, progress,
     )
 
 
@@ -3864,51 +3959,28 @@ async def _probe_pts_gaps(src: Path) -> list:
     return gaps
 
 
-async def _pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb,
-                                base_us: int = 0) -> None:
-    """Parse ffmpeg ``-progress pipe:1`` output and report 0-99% by elapsed
-    ``out_time_us`` over the source duration. 100% is reserved for the download
-    phase, so encode tops out at 99%.
-
-    ``base_us`` is the output timestamp the encode starts from. It is 0 for a whole
-    recording, but the burn-in preview keeps the source's absolute timestamps (-copyts)
-    so its window starts at the window's own offset; without subtracting it the preview
-    would report itself as already finished."""
-    last = -1
-    while True:
-        line = await stream.readline()
-        if not line:
-            break
-        text = line.decode("ascii", "replace").strip()
-        if not text.startswith("out_time_us="):
-            continue
-        value = text.split("=", 1)[1]
-        if not value.isdigit():
-            continue
-        pct = min(99, max(0, int((int(value) - base_us) * 100 / total_us)))
-        if pct != last:
-            last = pct
-            try:
-                await on_progress(pct)
-            except Exception:
-                logger.exception("overlay progress callback failed")
-
-
 def _prepass_encoder_args(name: str) -> list:
-    """Near-lossless, fast encode args for the transient CFR base. It is re-encoded by
-    the main pass, so it only needs to be visually transparent (a low CQ/CRF), and
-    fast (a light preset) — the GPU encoders keep this pass off the CPU and quick."""
+    """Visually-transparent, fast encode args for the transient CFR base. It is re-encoded
+    by the main pass, so it only needs to be good enough to feed that pass (a low CQ/CRF),
+    and fast (a light preset) — the GPU encoders keep this pass off the CPU and quick.
+
+    品質は設定(get_overlay_prepass_quality)。以前はCQ16固定で、2h43mの録画で17GBに達し
+    comment layerと合わせて同時38GBを占めていた。捨て物に無劣化を求めるのは割に合わない。
+    CPU側libx264はCQと同じ数字ではCRFの方が重くなるので、2段ぶん緩めて釣り合わせる。"""
+    quality = config.get_overlay_prepass_quality()
     if name in ("h264_nvenc", "hevc_nvenc", "av1_nvenc"):
-        return ["-c:v", name, "-preset", "p4", "-rc", "vbr", "-cq", "16", "-b:v", "0"]
+        return ["-c:v", name, "-preset", "p4", "-rc", "vbr", "-cq", str(quality), "-b:v", "0"]
     if name in ("h264_qsv", "hevc_qsv", "av1_qsv"):
-        return ["-c:v", name, "-global_quality", "16", "-preset", "veryfast"]
+        return ["-c:v", name, "-global_quality", str(quality), "-preset", "veryfast"]
     if name in ("h264_amf", "hevc_amf", "av1_amf"):
-        return ["-c:v", name, "-rc", "cqp", "-qp_i", "16", "-qp_p", "16", "-quality", "speed"]
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", "14"]
+        return ["-c:v", name, "-rc", "cqp", "-qp_i", str(quality), "-qp_p", str(quality),
+                "-quality", "speed"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(max(0, quality - 2))]
 
 
 async def _prepass_cfr(src: Path, out: Path, scale_to: Optional[tuple], cfr_fps: float, cwd: Path,
-                       window: Optional[tuple] = None) -> None:
+                       window: Optional[tuple] = None,
+                       on_progress: Optional[ProgressCb] = None) -> None:
     """Render the scaled/CFR-normalised base to a transient near-lossless file so the
     comment-layer overlay composites onto a real CFR stream (clean container PTS),
     not the fps filter's in-graph output. Overlay's framesync locks to a real file but
@@ -3942,17 +4014,35 @@ async def _prepass_cfr(src: Path, out: Path, scale_to: Optional[tuple], cfr_fps:
     log_path = out.with_name(out.stem + ".prepass.log")
     log_file = open(log_path, "wb")
     proc = None
+    # この pre-pass は4.65時間の録画で20分以上かかる。進捗を出さないと、jobは動いている
+    # のに%が据え置きになり「止まった」ようにしか見えない(実際にそう報告された)。
+    total_us = None
+    if on_progress is not None:
+        if window is not None:
+            total_us = int(max(0.0, window[1] - window[0]) * 1_000_000) or None
+        else:
+            total_us = await _probe_duration_us(src)
+    report = on_progress if total_us else None
     try:
         cancel.check_cancelled()
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            *(["-progress", "pipe:1", "-nostats"] if report else []),
             *seek, "-i", str(src), "-vf", ",".join(vf),
             *_prepass_encoder_args(encoder),
-            *tail, "-movflags", "+faststart", str(out),
+            # faststartは付けない。moovを先頭へ移す処理はfile全体を書き直すpassで、
+            # 数十GBになるこの中間fileでは無視できない時間を食う。読むのは次のffmpegが
+            # localのfileを順に流すだけなので、先頭にmoovが在る必要が無い。
+            *tail, str(out),
             stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL, stderr=log_file, cwd=str(cwd),
+            stdout=(asyncio.subprocess.PIPE if report else asyncio.subprocess.DEVNULL),
+            stderr=log_file, cwd=str(cwd),
         )
         cancel.register_process(proc)
+        if report:
+            # 窓ありは-copytsでsourceの絶対PTSが出るので、窓開始を引いて0起点へ戻す。
+            base_us = int(window[0] * 1_000_000) if window is not None else 0
+            await pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
         await proc.wait()
     finally:
         if proc is not None:
@@ -4106,7 +4196,7 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
         )
         cancel.register_process(proc)
         if report and proc.stdout is not None:
-            await _pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
+            await pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
         await proc.wait()
     finally:
         if proc is not None:
@@ -4178,7 +4268,7 @@ async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict
         )
         cancel.register_process(proc)
         if report and proc.stdout is not None:
-            await _pump_ffmpeg_progress(proc.stdout, total_us, report)
+            await pump_ffmpeg_progress(proc.stdout, total_us, report)
         await proc.wait()
     finally:
         if proc is not None:
@@ -4297,7 +4387,8 @@ async def _probe_is_vfr(src: Path, nominal_fps: float) -> bool:
     return 0 < avg < nominal_fps * 0.95
 
 
-async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> dict:
+async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
+                          progress: Optional["JobProgress"] = None) -> dict:
     """Probe everything a render needs from the source: duration, the wall->media timing
     map inputs, geometry, CFR target, font metrics and the usable subtitle segments.
 
@@ -4305,8 +4396,14 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> d
     the same arguments, so the preview cannot end up on a different timeline from the
     output it is previewing. Nothing in here is allowed to branch on "this is a preview"
     — a preview that builds its own time map would be worse than no preview at all."""
+    async def _step(frac: float, detail: str) -> None:
+        if progress is not None:
+            await progress.set("probe", frac, detail)
+
+    await _step(0.05, "長さを取得中")
     dur_us = await _probe_duration_us(src)
     video_dur = dur_us / 1_000_000 if dur_us else None
+    await _step(0.25, "時刻mapを読み込み中")
     anchors = _load_timing_anchors(src)
     media_pts = _load_media_pts(src)
     # media_pts(version-2 mapで2点以上)があればmapperはpts_gapsを参照しない。全packetの
@@ -4314,12 +4411,16 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> d
     if media_pts and len(media_pts) >= 2:
         pts_gaps = None
     else:
+        # 全packet走査。長時間録画では数分かかるので、入る前に必ず知らせる。
+        await _step(0.35, "PTSの欠落を走査中")
         pts_gaps = await _probe_pts_gaps(src)
+    await _step(0.75, "解像度・フレームレートを取得中")
     src_w, src_h, fps = await _probe_dimensions(src)
     # Render (and burn) at the upscaled resolution when the source is low-res, so the
     # overlay text/emoji are crisp; scale_to tells ffmpeg to bring the source frame up
     # to the same canvas before compositing. None when no upscale is needed.
     width, height = _render_dimensions(src_w, src_h, int(cfg["video_overlay_min_height"]))
+    await _step(0.9, "フォントを測定中")
     wide_em, narrow_em = await _font_metrics()
     return {
         "video_dur": video_dur,
@@ -4333,7 +4434,7 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict]) -> d
         "height": height,
         "scale_to": (width, height) if (width, height) != (src_w, src_h) else None,
         "icon_px": _icon_px(cfg, height),
-        "avatar_dir": layout.record_root_of(src) / "avatars" / "by-id",
+        "avatar_dir": layout.avatar_pool_dir(),
         "wide_em": wide_em,
         "narrow_em": narrow_em,
         "quality": int(cfg.get("video_overlay_quality") or 21),
@@ -4352,7 +4453,7 @@ async def ensure_overlay(
     events: list,
     settings,
     battles: Optional[list] = None,
-    on_progress: Optional[ProgressCb] = None,
+    on_progress: Optional[StageCb] = None,
     transcript: Optional[dict] = None,
 ) -> dict:
     """Burn comments/gifts/battle into the recording per settings and return
@@ -4386,7 +4487,15 @@ async def ensure_overlay(
 
     # Probe the source once; both variants share geometry, duration, anchors and
     # font metrics, differing only in how event timestamps map onto the timeline.
-    ctx = await _render_context(src, cfg, transcript)
+    progress = JobProgress(on_progress)
+    # 比較出力(Mode B)は同じ段階列をもう一度最初から流す。持ち分を先に切っておかないと
+    # %が 0→99→0→99 と往復する。実際にBを作るかはA終了後にしか決まらないが、作らなかった
+    # 場合は前進方向へ飛ぶだけなので、可能性がある時点で2分割しておく方が安全である。
+    b_possible = (bool(settings.get("video_overlay_timing_compare"))
+                  and len(_live_create_samples(events)) >= SOURCE_MIN_ANCHOR_SAMPLES)
+    progress.span(0, 2 if b_possible else 1)
+    ctx = await _render_context(src, cfg, transcript, progress)
+    await progress.done("probe")
     video_dur = ctx["video_dur"]
     anchors, media_pts, pts_gaps = ctx["anchors"], ctx["media_pts"], ctx["pts_gaps"]
     src_w, src_h, fps = ctx["src_w"], ctx["src_h"], ctx["fps"]
@@ -4419,6 +4528,9 @@ async def ensure_overlay(
     # 50/60fps VFR source normalises to 30 — halving the frames every downstream pass
     # touches — while a source already at or below the cap keeps its own rate.
     cfr_fps = min(fps, CFR_FPS_CAP) if await _probe_is_vfr(src, fps) else None
+    if cfr_fps is None:
+        # 既にCFRならbase pre-passは走らない。重みに残すと全体%がその分だけ頭打ちになる。
+        progress.disable("base")
     if cfr_fps is not None:
         logger.info("overlay: normalising VFR source (nominal %.3ffps) to CFR %.3ffps for %s",
                     fps, cfr_fps, src.name,
@@ -4433,6 +4545,16 @@ async def ensure_overlay(
     # 掛けた出力を返すため、A の戻り値がsrcかどうかでは区別できない。
     a_drew_nothing = False
 
+    # assets段階は3つのresolver(絵文字→ギフトicon→配信者icon)を順に通る。段階内の
+    # 達成率が巻き戻らないよう、resolverごとに持ち分を割り当てる。
+    _ASSET_SPANS = {"絵文字": (0.0, 1 / 3), "ギフトアイコン": (1 / 3, 2 / 3),
+                    "配信者アイコン": (2 / 3, 1.0)}
+
+    async def _asset_step(label: str, index: int, total: int) -> None:
+        lo, hi = _ASSET_SPANS[label]
+        inner = (index / total) if total else 1.0
+        await progress.set("assets", lo + (hi - lo) * inner, f"{label} {index:,}/{total:,}")
+
     async def _render_variant_locked(time_source, out, ass_path, meta_path, signature, debug_path=None):
         nonlocal a_drew_nothing
         render_started = time.monotonic()
@@ -4443,10 +4565,15 @@ async def ensure_overlay(
                     a_drew_nothing = True
                 return out
         debug_sink = [] if debug_path is not None else None
+        await progress.set("plan", 0.1, f"{len(events):,}件のeventを配置中")
         ass_text, overlays, stats, comment_plan = _build_ass(
             events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
             wide_em, narrow_em, pts_gaps, battles, time_source=time_source, debug_sink=debug_sink,
             media_pts=media_pts, subtitle_segments=subtitle_segments,
+        )
+        await progress.done(
+            "plan",
+            f"コメント{stats['comments']:,} ギフト{stats['gifts']:,} 字幕{stats['subtitles']:,}",
         )
         if stats.get("source_unavailable"):
             # Mode B could not be anchored (no live create_time); leave no B output.
@@ -4482,7 +4609,11 @@ async def ensure_overlay(
                 return src if time_source == "arrival" else None
             # 描く物は無いが音量正規化は要求されている。映像はstream copyのままで音声だけを
             # 再encodeし、履歴の出力にも正規化が掛かった状態で残す。
-            await _run_audio_only(src, out, sidecar_dir(src), normalize, on_progress)
+            # 描く物が無い経路: 残るのは音声の再encodeだけなので、層生成の段階を重みから
+            # 外して、この1本で100%へ届くようにする。
+            progress.disable("assets", "layer", "layer_encode", "base")
+            await _run_audio_only(src, out, sidecar_dir(src), normalize,
+                                  progress.cb("encode", video_dur))
             meta_path.write_text(f"{signature}\n{AUDIO_ONLY_MARK}", encoding="utf-8")
             logger.info(
                 "overlay[%s]: audio-only normalise done for %s (%d bytes)",
@@ -4508,12 +4639,18 @@ async def ensure_overlay(
             # They stay as the source unless a CFR base pre-pass runs, which swaps in the
             # normalised base and drops the in-graph resample.
             render_src, main_cfr, main_scale = src, cfr_fps, scale_to
+            if comment_plan is None:
+                # commentが1件も無い(ギフトだけ等)。層は作られず、CFR正規化も本graphに
+                # 畳まれてbase pre-passは走らない。3段階まとめて重みから外す。
+                progress.disable("layer", "layer_encode", "base")
             if comment_plan is not None:
                 # Download the custom-emote images and attach them to the shaper before the
                 # layer render draws them inline (cached by emote_id under the recording's
                 # sidecar dir, reused across comments and re-outputs).
-                await _resolve_emotes(comment_plan["shaper"], layout.record_root_of(src) / EMOTE_CACHE_DIR)
-                layer_fps = min(fps, COMMENT_LAYER_FPS_CAP)
+                await _resolve_emotes(comment_plan["shaper"],
+                                      layout.emote_pool_dir(),
+                                      _asset_step)
+                layer_fps = min(fps, comment_layer_fps_cap())
                 # Run the CFR base pre-pass (GPU) concurrently with the comment-layer
                 # render (CPU/qtrle): they are independent (both only read the source) and
                 # bound different hardware, so overlapping them roughly halves the pre-burn
@@ -4523,20 +4660,29 @@ async def ensure_overlay(
                 prepass_task = None
                 if cfr_fps is not None:
                     prepass_file = sidecar_dir(src) / (out.stem + CFR_BASE_SUFFIX)
+                    # baseは**元の解像度のまま**作る。この pre-pass が担うのはCFR化だけで、
+                    # 拡大は本passのgraphでやれば足りる(framesyncが噛むのはfpsだけ)。以前は
+                    # ここで min_height(既定2560)へ引き伸ばしてから中間fileに焼いていたため、
+                    # 捨てる中間物にNVENCの時間と容量を最終尺ぶん払っていた。実測(31分の
+                    # 512x1024): 178秒/2844MB -> 33秒/666MB。
                     prepass_task = asyncio.create_task(
-                        _prepass_cfr(src, prepass_file, scale_to, cfr_fps, sidecar_dir(src)))
+                        _prepass_cfr(src, prepass_file, None, cfr_fps, sidecar_dir(src),
+                                     on_progress=progress.cb("base", video_dur)))
                 # The comment layer streams every frame through a long-lived pipe to a
                 # qtrle encoder; under load that pipe can break transiently and yield
                 # None. Retry once before giving up, since a mono fallback must never be
                 # cached as the final result (see the meta write below).
+                layer_progress = progress.thread_cb_multi(asyncio.get_running_loop())
                 for attempt in range(1, 3):
                     comment_layer = await _render_comment_layer(
                         comment_plan["placements"], comment_plan["avatar_files"], comment_plan["metrics"],
                         comment_plan["comment_fs"], comment_plan["shaper"],
                         width, height, layer_fps, comment_layer_path,
                         comment_plan.get("avatar_upscale", False),
+                        progress=layer_progress,
                     )
                     if comment_layer is not None:
+                        await progress.done("layer_encode")
                         break
                     logger.warning(
                         "comment layer render produced nothing for %s (attempt %d/2)", src.name, attempt,
@@ -4547,17 +4693,24 @@ async def ensure_overlay(
                 if prepass_task is not None:
                     try:
                         await prepass_task
+                        # pumpは99%上限(100はjob完了専用)なので、そのままではこの段階が
+                        # 永久に「進行中」で残り、重みぶんの%も届かない。完了を明示する。
+                        await progress.done("base")
                     except Exception:
                         # The base pre-pass failed. If the layer rendered, it cannot be
                         # composited on a VFR base without drift, so re-raise (fatal); if
                         # the layer also failed the base is not needed anyway.
                         prepass_file.unlink(missing_ok=True)
                         prepass_file = None
+                        progress.disable("base")
                         if comment_layer is not None:
                             raise
                 if comment_layer is not None and prepass_file is not None:
-                    # Composite onto the real CFR base; the main graph no longer resamples.
-                    render_src, main_cfr, main_scale = prepass_file, None, None
+                    # Composite onto the real CFR base; the main graph no longer resamples
+                    # the frame rate. 拡大(scale_to)は本graphに残す — baseは元解像度で作って
+                    # あり、overlay/ASSは出力canvasの座標で組まれているため、合成の前に
+                    # 引き伸ばす必要がある。
+                    render_src, main_cfr, main_scale = prepass_file, None, scale_to
                 if comment_layer is not None:
                     # layerがbaseより短ければ、合成後にcommentが途中で無警告に消える
                     # (eof_action=passの設計上、ffmpegは何も言わない)。合成前に測る。
@@ -4582,12 +4735,15 @@ async def ensure_overlay(
                     # normalise CFR in-graph via cfr_fps.
                     prepass_file.unlink(missing_ok=True)
                     prepass_file = None
+                    progress.disable("base")
                 if comment_layer is None:
                     # The colour-emoji layer could not be produced; rebuild the ASS with
                     # the monochrome comment feed so comments still show. This output is
                     # degraded (colour emoji were requested but failed to render), so it is
                     # NOT cached as complete — the next output retries the colour layer.
                     comment_fallback = True
+                    # 層は結局作られていない。重みに残すと、その分だけ%が届かなくなる。
+                    progress.disable("layer", "layer_encode")
                     # 転落先のASS feedはカラー絵文字も実写アイコンも描けないため、成果物の品質は
                     # 確定的に劣化する(自動回復ではない)。転落した事実と理由を必ずerrorで残す。
                     # TODO: 規約上のfallback禁止に該当する。廃止は別taskで判断する。
@@ -4607,16 +4763,20 @@ async def ensure_overlay(
                         media_pts=media_pts, subtitle_segments=subtitle_segments,
                     )
 
-            icon_cache = layout.record_root_of(src) / ICON_CACHE_DIR
+            icon_cache = layout.gift_icon_pool_dir()
             gift_specs = [o for o in overlays if o.get("kind") != "avatar"]
             avatar_specs = [o for o in overlays if o.get("kind") == "avatar"]
-            renderable = await _resolve_icons(gift_specs, icon_cache)
-            renderable += await _resolve_score_avatars(avatar_specs, avatar_dir, icon_cache)
+            renderable = await _resolve_icons(gift_specs, icon_cache, _asset_step)
+            renderable += await _resolve_score_avatars(avatar_specs, avatar_dir, icon_cache,
+                                                       _asset_step)
+            await progress.done("assets", f"アイコン{len(renderable):,}件")
             ass_path.write_text(ass_text, encoding="utf-8")
             await _run_ffmpeg(render_src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
-                              codec=codec, comment_layer=comment_layer, on_progress=on_progress,
+                              codec=codec, comment_layer=comment_layer,
+                              on_progress=progress.cb("encode", video_dur),
                               scale_to=main_scale, cfr_fps=main_cfr,
                               audio_normalize=audio_norm.targets_from_cfg(cfg))
+            await progress.done("encode")
         finally:
             ass_path.unlink(missing_ok=True)
             if comment_layer_path is not None:
@@ -4699,6 +4859,7 @@ async def ensure_overlay(
             and len(_live_create_samples(events)) >= SOURCE_MIN_ANCHOR_SAMPLES
         )
         if b_enabled:
+            progress.span(1, 2)
             out_b, ass_b, meta_b = overlay_paths_b(src)
             sig_b = _signature(src, cfg, timing_path(src), variant="b", events_sig=events_sig,
                                subtitles_sig=subtitles_sig)
@@ -4709,6 +4870,7 @@ async def ensure_overlay(
             # Compare off / not anchorable / B drew nothing: drop any stale B output.
             for p in overlay_paths_b(src):
                 p.unlink(missing_ok=True)
+    await progress.finish("出力を確認中")
     return {"a": result_a, "b": result_b}
 
 
@@ -4888,7 +5050,7 @@ def _comments_in_window(comment_plan, window: tuple) -> bool:
 
 async def _preview_render_inputs(src: Path, plan: dict) -> list:
     """gift icon / score barのavatarを解決して、overlay filterへ渡せるspecにする。"""
-    icon_cache = layout.record_root_of(src) / ICON_CACHE_DIR
+    icon_cache = layout.gift_icon_pool_dir()
     overlays = plan["overlays"]
     gift_specs = [o for o in overlays if o.get("kind") != "avatar"]
     avatar_specs = [o for o in overlays if o.get("kind") == "avatar"]
@@ -5028,7 +5190,7 @@ async def preview_still(src_path: str, started_at: float, ended_at,
     async with lock:
         if draw_comments:
             await _resolve_emotes(comment_plan["shaper"],
-                                  layout.record_root_of(src) / EMOTE_CACHE_DIR)
+                                  layout.emote_pool_dir())
         renderable = await _preview_render_inputs(src, plan)
         ass_path.write_text(plan["ass_text"], encoding="utf-8")
         try:
@@ -5062,6 +5224,10 @@ async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path
     ctx = plan["ctx"]
     window = plan["window"]
     win_start, win_end = window
+    # プレビューも本出力と同じ3 pass構成(層描画→CFRベース→合成)を通る。窓ぶんとはいえ
+    # 数十秒かかるので、本出力と同じ段階表示にする。
+    progress = JobProgress(on_progress, PREVIEW_PHASES)
+    win_seconds = max(0.0, win_end - win_start)
     comment_plan = plan["comment_plan"]
     render_started = time.monotonic()
     cfr_fps = min(ctx["fps"], CFR_FPS_CAP) if await _probe_is_vfr(src, ctx["fps"]) else None
@@ -5073,25 +5239,38 @@ async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path
     seek_source = True
     draw_comments = _comments_in_window(comment_plan, window)
     try:
+        await progress.done("plan", f"{fmt_hms(win_seconds)}ぶん")
+        # base pre-passはcomment層を合成する時にしか作らない(下のbranchの中)。commentが
+        # 窓に無ければ層もbaseも走らないので、両方まとめて重みから外す。
+        if not draw_comments or cfr_fps is None:
+            progress.disable("base")
+        if not draw_comments:
+            progress.disable("layer", "layer_encode")
         if draw_comments:
             await _resolve_emotes(comment_plan["shaper"],
-                                  layout.record_root_of(src) / EMOTE_CACHE_DIR)
-            layer_fps = min(ctx["fps"], COMMENT_LAYER_FPS_CAP)
+                                  layout.emote_pool_dir())
+            layer_fps = min(ctx["fps"], comment_layer_fps_cap())
             prepass_task = None
             if cfr_fps is not None:
                 prepass_file = sidecar_path(src, PREVIEW_CLIP_BASE_SUFFIX)
+                # 本出力と同じ組み方: baseは元解像度でCFR化だけ、拡大は本graphに残す。
+                # ここが本出力と違うと、プレビューが本出力と別の絵を見せることになる。
                 prepass_task = asyncio.create_task(
-                    _prepass_cfr(src, prepass_file, ctx["scale_to"], cfr_fps,
-                                 sidecar_dir(src), window=window))
+                    _prepass_cfr(src, prepass_file, None, cfr_fps,
+                                 sidecar_dir(src), window=window,
+                                 on_progress=progress.cb("base", win_seconds)))
             comment_layer = await _render_comment_layer(
                 comment_plan["placements"], comment_plan["avatar_files"],
                 comment_plan["metrics"], comment_plan["comment_fs"], comment_plan["shaper"],
                 ctx["width"], ctx["height"], layer_fps, layer_path,
                 comment_plan.get("avatar_upscale", False), window=window,
+                progress=progress.thread_cb_multi(asyncio.get_running_loop()),
             )
+            await progress.done("layer_encode")
             if prepass_task is not None:
                 try:
                     await prepass_task
+                    await progress.done("base")
                 except Exception:
                     prepass_file.unlink(missing_ok=True)
                     prepass_file = None
@@ -5105,18 +5284,19 @@ async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path
                     "空き容量とPillow/fontのinstallを確認してください。"
                 )
             if prepass_file is not None:
-                render_src, main_cfr, main_scale = prepass_file, None, None
+                render_src, main_cfr, main_scale = prepass_file, None, ctx["scale_to"]
                 seek_source = False  # pre-passが既に窓で切っている
         renderable = await _preview_render_inputs(src, plan)
         ass_path.write_text(plan["ass_text"], encoding="utf-8")
         await _run_ffmpeg(
             render_src, renderable, ctx["icon_px"], ass_path.name, out, sidecar_dir(src),
             ctx["quality"], codec=ctx["codec"], comment_layer=comment_layer,
-            on_progress=on_progress, scale_to=main_scale, cfr_fps=main_cfr,
+            on_progress=progress.cb("encode", win_seconds), scale_to=main_scale, cfr_fps=main_cfr,
             window=window, seek_source=seek_source,
             # layer fileは常に0始まり。窓の絶対位置へずらして初めてbaseと噛み合う。
             layer_offset=(win_start if comment_layer is not None else 0.0),
         )
+        await progress.done("encode")
     finally:
         ass_path.unlink(missing_ok=True)
         layer_path.unlink(missing_ok=True)

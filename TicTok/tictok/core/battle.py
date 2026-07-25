@@ -7,11 +7,7 @@ battleTopology/battleTeams/battleBarUnits)と同じ分割になるよう対応�
 import statistics
 from typing import Optional
 
-# end_time_msもdurationも次Battle開始も無い「終了済み・最終」Battleでgift窓を閉じるための
-# 既定Battle長(秒)。同一sessionの実観測duration中央値が取れればそれを優先し、無い場合のみ
-# この値を使う。窓を無制限(配信終了まで)にするとBattle後の通常Giftを誤帰属するため。
-# TikTok PKの標準尺(約5分)に基づく。
-BATTLE_FALLBACK_DURATION_SECONDS = 300.0
+from tictok.core.config import get_battle_gift_window_fallback_seconds
 
 # 保存済みbattleがどのruleで判定されたかのversion。ruleを変えたら+1すると、起動時の
 # battle_migrationが既存recordを再判定する。collectorは新規保存時にこの値を打つ。
@@ -197,7 +193,9 @@ def gift_window_fallback_duration(battles: list) -> float:
         and b.get("start_time") is not None
         and b["end_time"] > b["start_time"]
     ]
-    return statistics.median(observed) if observed else BATTLE_FALLBACK_DURATION_SECONDS
+    if observed:
+        return statistics.median(observed)
+    return float(get_battle_gift_window_fallback_seconds())
 
 
 def gift_window_end(battle: dict, starts: list, fallback_duration: float) -> Optional[float]:

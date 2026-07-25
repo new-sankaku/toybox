@@ -150,6 +150,18 @@ def _as_int(value: Any) -> Optional[int]:
         return None
 
 
+def _text(value: Any) -> Optional[str]:
+    """protoのid系fieldを文字列へ。空文字とNoneはNoneに寄せる。
+
+    idはint64で届くこともstrで届くこともあり(実測: envelope_idはstr、portal_info.idもstr、
+    一方でuser idはint)、桁の大きいintをそのままJSONへ載せるとJS側で精度が落ちる。
+    文字列に寄せておけば比較も保存も一意に決まる。"""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _apply_locale() -> None:
     lang = get_locale_lang()
     country = get_locale_country()
@@ -879,11 +891,15 @@ def _epoch_seconds(raw: Any) -> Optional[float]:
 
 class TikTokCollector:
     def __init__(
-        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_pool=None, avatar_proxy=None, record_video: bool = True
+        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_pool=None, avatar_proxy=None, record_video: bool = True, notifier=None, schedule_profiler=None
     ) -> None:
         self._broadcast = broadcast
+        self._schedule_profiler = schedule_profiler
         self._storage = storage
         self._settings = settings
+        # 通知機構。障害系とsession開始はops_events経由で拾えるが、coin rateとBattle開始は
+        # ops_eventsに乗らない(運用logではない)ため、ここから直接渡す。未設定でも収集は動く。
+        self._notifier = notifier
         self._probe_gate = probe_gate or ProbeGate(settings, lambda: 1)
         self._resolver = resolver
         self._gift_icons = gift_icons
@@ -952,6 +968,10 @@ class TikTokCollector:
         # finish/session終了で _collab_windows へ確定。入室コンテキスト3分類(doc §14)に使う。
         self._collab_open: dict = {}
         self._collab_windows: list = []
+        # 宝箱/Portalの実測。markerの不応期とは別に、1件ずつ残す(支出の合計が要るため)。
+        # _envelope_index は envelope_id -> 行 で、同一宝箱のNEW/HIDE通知を1行へ畳む。
+        self._envelopes: list = []
+        self._envelope_index: dict = {}
         # 進行中sessionのbattles/collab_windowsを最後に中間永続化した時刻(定期checkpoint用)。
         self._last_checkpoint_at: float = 0.0
         self._owner_id: str = ""
@@ -1339,6 +1359,8 @@ class TikTokCollector:
         self._glove_clock_warned = False
         self._collab_open = {}
         self._collab_windows = []
+        self._envelopes = []
+        self._envelope_index = {}
         self._last_checkpoint_at = 0.0
         self._team_shape_logged = set()
         # 前Sessionのlistenerは_runの終了処理でstop済み。dictだけ空に戻す。
@@ -1393,7 +1415,7 @@ class TikTokCollector:
         with log_context(session_id=self.session_id):
             self._storage.record_ops_event(
                 logger, "session.started",
-                f"session started for a live broadcast (room {self._resolved_room_id})",
+                f"配信のsessionを開始しました（room {self._resolved_room_id}）",
                 severity=OPS_INFO,
                 detail={"room_id": self._resolved_room_id,
                         "bucket_seconds": self._bucket_seconds,
@@ -1536,8 +1558,8 @@ class TikTokCollector:
             await self._notify_state()
             self._storage.record_ops_event(
                 logger, "session.restricted",
-                f"broadcast is restricted (members-only / age); recording is not "
-                f"possible for room {self._resolved_room_id}, holding the watch",
+                f"限定配信のため録画できません（会員限定・年齢制限、"
+                f"room {self._resolved_room_id}）。監視は続けます",
                 severity=OPS_WARNING,
                 detail={"room_id": self._resolved_room_id,
                         "recheck_seconds": recheck_seconds},
@@ -1704,6 +1726,7 @@ class TikTokCollector:
                     recorder.ended_at,
                     snap["bytes"],
                     recorder.error,
+                    recorder.duration_seconds,
                 )
         text = (
             "録画を終了しました（Data未受信のため履歴から削除）。"
@@ -1835,8 +1858,16 @@ class TikTokCollector:
                 self._log_still_waiting(failures)
             await self._live_check_sleep(failures)
 
+    def _schedule_factor(self) -> float:
+        """この配信者の、いまの時間帯のlive-check間隔倍率。過去のsession開始時刻から
+        推定した配信されやすさで、確認間隔を詰める/広げる。総probe量は一様配分と等しく
+        保たれ、上限は従来どおりProbeGate側のlive_check_max_per_minが持つ。"""
+        if self._schedule_profiler is None:
+            return 1.0
+        return self._schedule_profiler.profile_for(self.unique_id).factor_at(time.time())
+
     async def _live_check_sleep(self, failures: int) -> None:
-        base = self._settings.get("live_check_interval")
+        base = self._settings.get("live_check_interval") * self._schedule_factor()
         multiplier = min(2 ** failures, LIVE_CHECK_BACKOFF_MAX_MULTIPLIER)
         jitter = 1.0 + random.uniform(-LIVE_CHECK_JITTER_RATIO, LIVE_CHECK_JITTER_RATIO)
         await asyncio.sleep(base * multiplier * jitter)
@@ -2026,6 +2057,7 @@ class TikTokCollector:
                 [self._battle_public(b) for b in self._battles.values() if not b.get("aborted")],
             )
             self._storage.save_collab_windows(self.session_id, self._collab_windows_public())
+            self._storage.save_envelopes(self.session_id, self._envelopes)
             self._storage.append_markers(self.session_id, self._all_markers())
             self._last_checkpoint_at = time.time()
         except Exception:
@@ -2067,7 +2099,7 @@ class TikTokCollector:
         else:
             self._storage.record_ops_event(
                 logger, "session.ended",
-                f"session ended in state {self.state}",
+                f"配信のsessionを終了しました（状態 {self.state}）",
                 severity=OPS_INFO,
                 duration_ms=duration_ms,
                 detail={"state": self.state,
@@ -2263,8 +2295,8 @@ class TikTokCollector:
             if idle >= timeout:
                 self._storage.record_ops_event(
                     logger, "collector.stream_lost",
-                    f"no data from TikTok for {idle:.0f}s while {self.state}; forcing a "
-                    f"reconnect (likely a host network drop)",
+                    f"TikTokから{idle:.0f}秒 dataが届きません（状態 {self.state}）。"
+                    f"再接続します（host側の回線断の可能性）",
                     severity=OPS_WARNING,
                     detail={"idle_seconds": round(idle, 1),
                             "timeout_seconds": timeout,
@@ -2286,8 +2318,8 @@ class TikTokCollector:
             if self._recording_stalled(stall_timeout):
                 self._storage.record_ops_event(
                     logger, "collector.recording_stalled",
-                    f"recording produced no new video for {stall_timeout}s while events "
-                    f"kept flowing; forcing a reconnect to re-resolve the stream URL",
+                    f"eventは届いているのに{stall_timeout}秒 映像が増えていません。"
+                    f"stream URLを取り直すため再接続します",
                     severity=OPS_WARNING,
                     detail={"stall_timeout_seconds": stall_timeout,
                             "idle_seconds": round(idle, 1),
@@ -2450,8 +2482,8 @@ class TikTokCollector:
             # monitor reconnects on its own when the broadcast/connection recovers.
             self._storage.record_ops_event(
                 logger, "collector.reconnect_exhausted",
-                f"reconnect exhausted after {max_attempts} attempts; returning to the "
-                f"watch loop instead of terminating (last reason: {reason})",
+                f"再接続を{max_attempts}回試みましたが繋がりませんでした。終了せず"
+                f"監視loopへ戻ります（最後の理由: {reason}）",
                 severity=OPS_WARNING,
                 detail={"max_attempts": max_attempts, "reason": reason,
                         "room_id": self.room_id},
@@ -2539,9 +2571,9 @@ class TikTokCollector:
         restarted = self._resolved_room_id is not None
         self._storage.record_ops_event(
             logger, "collector.reconnect_broadcast_ended",
-            f"broadcast {'restarted on a new room' if restarted else 'ended'} while "
-            f"reconnecting (attempt {attempt}); returning to the watch loop instead "
-            f"of spending further sign requests",
+            f"再接続中（{attempt}回目）に配信が"
+            f"{'新しいroomで再開' if restarted else '終了'}しました。"
+            f"sign requestを浪費しないよう監視loopへ戻ります",
             severity=OPS_INFO,
             detail={"attempt": attempt, "room_id": session_room,
                     "restarted": restarted,
@@ -2793,8 +2825,8 @@ class TikTokCollector:
             self._storage.update_session(self.session_id, STATE_CONNECTED, self.room_id)
         self._storage.record_ops_event(
             logger, "collector.connected",
-            f"{'reconnected' if reconnected else 'connected'} to the live websocket "
-            f"(room {self.room_id})",
+            f"eventの受信に{'再接続' if reconnected else '接続'}しました"
+            f"（live websocket、room {self.room_id}）",
             severity=OPS_INFO,
             detail={"room_id": self.room_id,
                     "reconnected": reconnected,
@@ -3176,8 +3208,8 @@ class TikTokCollector:
         )
         self._storage.record_ops_event(
             logger, "collector.disconnected",
-            f"live websocket disconnected ({'on request' if planned else 'unexpectedly'})"
-            f" from room {self.room_id}",
+            f"eventの受信が切れました"
+            f"（{'停止要求による切断' if planned else '予期しない切断'}、room {self.room_id}）",
             severity=OPS_INFO if planned else OPS_WARNING,
             detail={"room_id": self.room_id,
                     "planned": planned,
@@ -3213,7 +3245,7 @@ class TikTokCollector:
         )
         self._storage.record_ops_event(
             logger, "collector.live_ended",
-            f"broadcast ended in room {self.room_id} (source: {source})",
+            f"配信が終了しました（room {self.room_id}、検知元: {source}）",
             severity=OPS_INFO,
             detail={"room_id": self.room_id,
                     "end_source": source,
@@ -3584,6 +3616,11 @@ class TikTokCollector:
                                "opponents": len(rec.get("opponents") or []),
                                "duration_seconds": rec.get("duration")}},
             )
+            if self._notifier is not None:
+                # 「窓が開いた」分岐なので、同一Battleのaction更新でも毎回ここへ来る。1戦1件に
+                # 畳むのは通知側(battle_id単位のdedup key)の仕事。
+                self._notifier.on_battle_started(
+                    self.unique_id, battle_id, len(rec.get("opponents") or []))
             await self._start_opponent_listeners(rec)
         await self._broadcast_battles(force=True)
 
@@ -4668,20 +4705,91 @@ class TikTokCollector:
             create_time=self._create_time_sec(event),
         )
 
+    def _record_envelope(self, row: dict) -> None:
+        """宝箱/Portalの実測を1件溜める。
+
+        markerの不応期(_add_driver_marker)とは**別のgate**にする。不応期は「1演出=1 mask onset」
+        へ畳むためのもので、mask窓としては正しい。だが測定では1件ずつが別の支出であり、
+        時間で畳むと投下coinの合計が失われる。重複除外はenvelope_id(同一性)で行う —
+        実測で同じenvelope_idがNEW/HIDEの2回届いており、時間窓より厳密に畳める。
+
+        同じenvelope_idが再訪したときは、後から来た非NULL値で埋める(HIDE通知はbusiness_type
+        とidしか持たないので、先にHIDEが来てもNEWの実測値で上書きされる)。
+        """
+        key = row.get("envelope_id")
+        if key:
+            existing = self._envelope_index.get(key)
+            if existing is not None:
+                for field, value in row.items():
+                    if value is not None and existing.get(field) is None:
+                        existing[field] = value
+                return
+            self._envelope_index[key] = row
+        self._envelopes.append(row)
+
     async def _on_portal(self, event: Any) -> None:
         """ポータル(他配信からの誘導流入)。入室が構造的に押し上がる交絡窓なので、解析の
         placeboから除外するためのmask源としてmarkerに残す(入室scoreへは算入しない)。
         PortalEvent/EnvelopePortalEventの両系統を同一markerへ寄せる。1ポータルで複数message
-        (invite/ping/finish)が飛んでも、後段のmaskは窓のunionを取るため無害。診断capも並行。"""
+        (invite/ping/finish)が飛んでも、後段のmaskは窓のunionを取るため無害。診断capも並行。
+
+        payloadのportal_infoは**Portalが閉じた時点の実移動人数**(trans_count)を運ぶ。
+        移動「元」のroomを示すfieldは無い(実payloadを全key走査して確認済み: room_idは受信側
+        =自室のみ)。したがって「どの配信者から流入したか」は取得不能で、ここでも推測しない。
+        """
         self._mark_data()
         self._add_driver_marker("portal", "ポータル")
         self._capture_sample("PortalEvent", event)
+        info = getattr(event, "portal_info", None)
+        if info is not None:
+            self._record_envelope({
+                "kind": "portal_closed",
+                "envelope_id": _text(getattr(info, "id", None)),
+                "time": time.time(),
+                "create_time": self._create_time_sec(event),
+                "business_type": None,
+                "diamond_count": None,
+                "people_count": None,
+                "trans_count": _as_int(getattr(info, "trans_count", None)),
+                "unpack_at": None,
+                "sender_user_id": _text(getattr(info, "sender_id", None)),
+                "sender_unique_id": None,
+                "data": {"portal_display": _as_int(
+                    getattr(event, "portal_display", None))},
+            })
 
     async def _on_envelope(self, event: EnvelopeEvent) -> None:
-        """宝箱(红包)。開封待ちで入室が誘引される交絡窓。mask源としてmarkerに残す。"""
+        """宝箱(红包)。開封待ちで入室が誘引される交絡窓。mask源としてmarkerに残す。
+
+        payloadのenvelope_infoは投下coin(diamond_count)・定員(people_count)・開封時刻
+        (unpack_at)・送信者を運ぶ。実測で確認した注意点:
+        - business_type=4 は**Portalの送信**である("sent a Portal"表示)。閉鎖側のPortalEvent
+          とは別messageで、idも別値なので結合しない
+        - business_type=19(Super Fan Box)は**diamond_countを持たない**。0で埋めない
+        - 送信者は配信者とは限らない(実測でbt=19は視聴者@sinbakwk35kが送信)。
+          「配信者の支出」と決めつけられないので、送信者をそのまま残す
+        """
         self._mark_data()
         self._add_driver_marker("envelope", "宝箱")
         self._capture_sample("EnvelopeEvent", event)
+        info = getattr(event, "envelope_info", None)
+        if info is not None:
+            self._record_envelope({
+                "kind": "envelope",
+                "envelope_id": _text(getattr(info, "envelope_id", None)),
+                "time": time.time(),
+                "create_time": _epoch_seconds(getattr(info, "create_time", None))
+                or self._create_time_sec(event),
+                "business_type": _as_int(getattr(info, "business_type", None)),
+                "diamond_count": _as_int(getattr(info, "diamond_count", None)),
+                "people_count": _as_int(getattr(info, "people_count", None)),
+                "trans_count": None,
+                "unpack_at": _epoch_seconds(getattr(info, "unpack_at", None)),
+                "sender_user_id": _text(getattr(info, "send_user_id", None)),
+                "sender_unique_id": _text(getattr(info, "send_user_name", None)),
+                "data": {"display": _text(getattr(event, "display", None)),
+                         "skin_id": _as_int(getattr(info, "skin_id", None))},
+            })
 
     async def _on_room_user(self, event: RoomUserSeqEvent) -> None:
         self._mark_data()
@@ -4792,6 +4900,10 @@ class TikTokCollector:
         self.stats["rate_diamonds"] = diamonds
         self.stats["rate_comments"] = comments
         self.stats["rate_likes"] = likes
+        if self._notifier is not None:
+            # 既に毎回算出している直近1分のcoin量をそのまま閾値判定へ渡す。通知のために
+            # 別系列を持たない。submitはnon-blockingで例外を返さない。
+            self._notifier.on_coin_rate(self.unique_id, float(diamonds))
 
     async def _run_simulation(self) -> None:
         # 実modeの _run と同じく、このtaskの全logに監視対象を載せる。simulationのlogが
@@ -4876,7 +4988,7 @@ class TikTokCollector:
             # ops_events が「終わりだけある」不揃いな表になり、突合scriptが書けない。
             self._storage.record_ops_event(
                 logger, "session.started",
-                f"simulated session started (room {self.room_id})",
+                f"simulationのsessionを開始しました（room {self.room_id}）",
                 severity=OPS_INFO,
                 detail={"room_id": self.room_id,
                         "bucket_seconds": self._bucket_seconds,

@@ -103,12 +103,8 @@ def get_record_dir() -> str:
     )
 
 
-def record_dir_from_db(db_path: str) -> str:
-    """Effective record dir for out-of-band tools (maintenance scripts): the UI-set
-    'record_dir' setting when present in the DB, else the TICTOK_RECORD_DIR env var,
-    else the default. Mirrors how the server resolves it via Settings so a script
-    targets the same folder the server records into. A missing DB/table resolves to
-    the env/default (this is the unset case, not a masked failure)."""
+def _setting_from_db(db_path: str, key: str) -> str:
+    """UI(DB)で設定された値。未設定・DB/表が無ければ空文字。"""
     import sqlite3
 
     row = None
@@ -116,15 +112,32 @@ def record_dir_from_db(db_path: str) -> str:
         conn = sqlite3.connect(db_path, timeout=5)
         try:
             row = conn.execute(
-                "SELECT value FROM settings WHERE key = 'record_dir'"
+                "SELECT value FROM settings WHERE key = ?", (key,)
             ).fetchone()
         finally:
             conn.close()
     except sqlite3.Error:
         row = None
-    if row and row[0] and str(row[0]).strip():
-        return str(row[0]).strip()
-    return get_record_dir()
+    return str(row[0]).strip() if row and row[0] and str(row[0]).strip() else ""
+
+
+def record_dir_from_db(db_path: str) -> str:
+    """Effective record dir for out-of-band tools (maintenance scripts): the UI-set
+    'record_dir' setting when present in the DB, else the TICTOK_RECORD_DIR env var,
+    else the default. Mirrors how the server resolves it via Settings so a script
+    targets the same folder the server records into. A missing DB/table resolves to
+    the env/default (this is the unset case, not a masked failure)."""
+    return _setting_from_db(db_path, "record_dir") or get_record_dir()
+
+
+def final_record_dir_from_db(db_path: str) -> str:
+    """完成mp4の移送先(final dir)。``record_dir_from_db`` と同じ順序(DB設定 > 環境変数)で
+    解き、未設定なら record dir そのもの(=移送しない)を返す。serverの
+    ``FINAL_DIR = record_dir_final or record_dir`` と同じ結論になるよう、script側に
+    2つ目の解決規則を持たせないための関数。"""
+    value = _setting_from_db(db_path, "record_dir_final") \
+        or os.environ.get("TICTOK_RECORD_DIR_FINAL", "").strip()
+    return value or record_dir_from_db(db_path)
 
 
 def get_locale_lang() -> str:
@@ -375,6 +388,15 @@ def get_sample_dir() -> str:
     )
 
 
+def get_battle_gift_window_fallback_seconds() -> float:
+    """Battle貢献のGift集計窓を閉じる長さ(秒)。終了時刻もdurationも次Battleの開始も
+    分からない「終了済み・最終」Battle専用の最終手段で、同一sessionで実際に観測できた
+    Battle長(中央値)が1件でも取れればそちらが優先される。窓を閉じないとBattle後の通常Gift
+    が貢献へ合算され、連続PKでは同じGiftが複数Battleへ二重計上される。TikTok PKの標準尺
+    (約5分)を既定値にしている。"""
+    return float(os.environ.get("TICTOK_BATTLE_GIFT_WINDOW_FALLBACK_SECONDS", "300"))
+
+
 def get_journal_enabled() -> bool:
     """Durable append-only event journal on disk. Every event/viewer sample is
     appended here at ingest time, independent of the batched SQLite writer, so a
@@ -395,6 +417,51 @@ def get_journal_retention_days() -> int:
     """Days to keep journal files. Recovery runs every startup, so loss is caught
     within hours; this window only bounds disk use. 0 disables pruning."""
     return int(os.environ.get("TICTOK_JOURNAL_RETENTION_DAYS", "14"))
+
+
+# ---- Database maintenance (snapshots / integrity, see tictok/core/dbmaint.py) ----
+# The journal above protects the *event stream* against a writer stall; it does not
+# protect the database file itself against corruption, a bad migration, or an operator
+# mistake. A snapshot taken through SQLite's own backup API is the only thing that does,
+# and it is the only correct way to copy a live WAL database — a file copy of tictok.db
+# without its -wal is a torn, older image of the data.
+
+
+def get_db_backup_dir() -> str:
+    """Directory holding database snapshots. Next to the DB by default so a snapshot is
+    found without configuration; point it at another volume to survive that disk."""
+    return os.environ.get(
+        "TICTOK_DB_BACKUP_DIR", str(PROJECT_ROOT / "backups")
+    )
+
+
+def get_db_backup_keep() -> int:
+    """Snapshot generations kept per reason (manual / pre-migration), oldest pruned
+    after a new one lands. A snapshot is a full copy of the database, so generations are
+    counted in hundreds of MB each; three is enough to step back past a bad run without
+    the folder outgrowing the data it protects. 0 disables pruning."""
+    return int(os.environ.get("TICTOK_DB_BACKUP_KEEP", "3"))
+
+
+def get_db_backup_min_free_ratio() -> float:
+    """Free space required before a snapshot starts, as a multiple of the database plus
+    its WAL. A snapshot that fills the volume takes the live database down with it, so
+    the check refuses up front rather than failing halfway with a partial file."""
+    return float(os.environ.get("TICTOK_DB_BACKUP_MIN_FREE_RATIO", "1.2"))
+
+
+def get_db_backup_before_migration() -> bool:
+    """Take a snapshot at startup when a destructive migration is about to rewrite
+    existing rows (glove re-judgement / battle topology). Those rewrite battles in place
+    and there is no undo; the snapshot is taken once per migration version, not on every
+    restart."""
+    return os.environ.get("TICTOK_DB_BACKUP_BEFORE_MIGRATION", "1").lower() in ("1", "true", "yes")
+
+
+def get_db_integrity_check_max_errors() -> int:
+    """Rows PRAGMA integrity_check is allowed to report before it stops. A corrupt file
+    can produce an unbounded list, and the first handful already identify the damage."""
+    return int(os.environ.get("TICTOK_DB_INTEGRITY_CHECK_MAX_ERRORS", "20"))
 
 
 # ---- ops_events (Layer2 state-transition table, see tictok/storage.py) ----
@@ -523,6 +590,29 @@ def get_ai_comment_sample() -> int:
     return int(os.environ.get("TICTOK_AI_COMMENT_SAMPLE", "300"))
 
 
+def get_ai_chapter_chunk_chars() -> int:
+    """Transcript characters per map-stage chat completion. Larger means fewer calls (and
+    less wall time), but overflowing the local model's context truncates the reply and
+    raises AIError."""
+    return int(os.environ.get("TICTOK_AI_CHAPTER_CHUNK_CHARS", "12000"))
+
+
+def get_ai_chapter_per_chunk() -> int:
+    """Max chapter candidates taken from one map-stage chunk."""
+    return int(os.environ.get("TICTOK_AI_CHAPTER_PER_CHUNK", "6"))
+
+
+def get_ai_chapter_max() -> int:
+    """Max chapters in the final table of contents."""
+    return int(os.environ.get("TICTOK_AI_CHAPTER_MAX", "30"))
+
+
+def get_ai_chapter_min_seconds() -> float:
+    """Minimum gap between adjacent chapters. Closer ones are dropped: they stop reading
+    as a table of contents, and platforms ignore chapter marks that short."""
+    return float(os.environ.get("TICTOK_AI_CHAPTER_MIN_SECONDS", "60"))
+
+
 def get_ai_comment_sample_windows() -> int:
     """Number of equal-time windows the session is split into before sampling comments.
     The sample is drawn proportionally from every window, so the reported sentiment is an
@@ -534,8 +624,14 @@ def get_ai_comment_sample_windows() -> int:
 def get_ai_max_tokens() -> int:
     """Upper bound on the model's reply length. Local quantized models will happily run
     to their context limit on a long comment batch, and a reply cut off mid-object is
-    unparseable JSON. 0 omits the field (server default)."""
-    return int(os.environ.get("TICTOK_AI_MAX_TOKENS", "2048"))
+    unparseable JSON. 0 omits the field (server default).
+
+    16384 rather than a few thousand because reasoning models spend this same budget on
+    their thinking tokens before emitting any JSON: chapter generation measured a hard
+    failure at 2048 and 4096, and only completed at 16384. The cut-off is not silent
+    (_chat rejects finish_reason=length), so an over-generous ceiling costs nothing but
+    a too-small one fails every call."""
+    return int(os.environ.get("TICTOK_AI_MAX_TOKENS", "16384"))
 
 
 def get_ai_json_schema_enabled() -> bool:
@@ -696,6 +792,34 @@ def get_normalize_quality() -> int:
     return int(os.environ.get("TICTOK_NORMALIZE_QUALITY", "17"))
 
 
+def get_overlay_prepass_quality() -> int:
+    """焼き込みのCFR base pre-passのencode品質(H.264 CRF/CQ、低いほど高品質・大きい)。
+
+    この中間fileは主passがもう一度encodeし直す**捨て物**で、必要なのは主passの入力として
+    視覚的に透過であることだけ。2h43mの録画でCQ16は約17GB(実測14.1Mbps=source 5.9Mbpsの
+    2.4倍)に達し、comment layerと合わせて同時38GBを占めていた。世代損失は1回だけなので、
+    その1回を「見えない範囲で一番安く」置くのが正しい。TICTOK_OVERLAY_PREPASS_QUALITYで上書き。
+
+    既定が20から14へ下がっているのは、pre-passが**元解像度のまま**焼くようになったため
+    (拡大は主passのgraphへ移した)。同じCQでも画素数が数分の1になれば絶対的な誤差は増え、
+    その中間fileを後から拡大するぶん誤差も一緒に拡大される。非圧縮の拡大を基準にした実測
+    (31分の512x1024 → 1280x2560)では、旧経路(拡大→CQ20)のSSIM 0.9957に対し、新経路の
+    CQ20は0.9935へ落ち、CQ14で0.9958と旧経路へ戻る。CQ14でもfileは旧経路の2844MBに対し
+    1178MB、時間は178秒に対し35秒。"""
+    return int(os.environ.get("TICTOK_OVERLAY_PREPASS_QUALITY", "14"))
+
+
+def get_overlay_layer_fps_cap() -> float:
+    """コメントlayer(alpha中間file)のfps上限。実効fpsは min(映像fps, この値)。
+
+    layerは「内容が変わるframeだけPILで描き、CFRへ引き伸ばしてqtrleへ流す」構造で、実測では
+    24万frame中3923(1.6%)しか内容が変わらないのにファイル全体を支配していた(13.7GB)。容量は
+    frame数にほぼ比例するので、ここを下げれば直接効く。ただし**下げるとコメントのscrollが
+    粗くなる**(出力の見た目が変わる)ため、既定は据え置き、確認した上で下げるための入口として
+    設定にしてある。TICTOK_OVERLAY_LAYER_FPS_CAPで上書き。"""
+    return float(os.environ.get("TICTOK_OVERLAY_LAYER_FPS_CAP", "30"))
+
+
 def get_normalize_scale_mode() -> str:
     """How differing frames are fitted onto the single output canvas: 'pad' (preserve
     each rendition's aspect ratio, letterbox the difference — no geometric distortion,
@@ -747,6 +871,38 @@ def get_media_queue_poll_seconds() -> float:
     return float(os.environ.get("TICTOK_MEDIA_QUEUE_POLL_SECONDS", "5"))
 
 
+def get_media_queue_workers() -> int:
+    """同時に走らせる映像jobの本数(最小1)。
+
+    1本のjobは常にGPUを使い切っているわけではない。再mp4化は前半のconcat(音声encodeと
+    disk I/O)でGPUを一切使わず、後半の解像度normalizeでNVENCに張り付く。焼き込みも
+    コメント層の描画はCPUで、その間NVENCは空く。直列のままだと、この空き時間ぶんだけ
+    bulk全体が延びる。
+
+    実測(RTX 4070 Ti / 46分の録画): NVENC単独76秒に対し、2本同時は1本あたり39秒・3本同時
+    は38秒。2本でほぼ2倍の処理量が出て、そこから先は頭打ちになる。
+
+    既定を2にしているのは、この本数までは**焼き込み同士が重ならない**ため。焼き込みはrender
+    全体でGPU枠(TICTOK_GPU_CONCURRENCY、既定1)を握るので、2本目は枠待ちで止まり中間fileも
+    作らない。つまり既定のままで増えるのは「GPU枠を取らない再mp4化」と「焼き込みの裏で走る
+    別種のjob」の重なりだけで、diskの山は再mp4化2本ぶん(元mp4+変換中の一時file)に収まる。
+
+    3以上や、焼き込み同士を重ねる(TICTOK_GPU_CONCURRENCYも上げる)場合は、中間fileの同時
+    使用量が本数ぶん増える(焼き込みは1本あたりCFR base+コメント層で数GB〜数十GB)ので、
+    空き容量と相談すること。"""
+    return max(1, int(os.environ.get("TICTOK_MEDIA_QUEUE_WORKERS", "2")))
+
+
+def get_job_progress_min_interval_seconds() -> float:
+    """Minimum gap between two progress notifications that carry the same overall
+    percent. The percent alone changes at most 100 times per job, but the stage detail
+    (frame counters, encode position) changes continuously, and every notification is a
+    DB write plus a websocket broadcast to every open page. This gate is what keeps a
+    multi-hour job's detail text live without turning it into tens of thousands of
+    writes. A change in percent is always sent immediately, regardless of this gap."""
+    return float(os.environ.get("TICTOK_JOB_PROGRESS_MIN_INTERVAL_SECONDS", "2"))
+
+
 def get_media_job_attempts() -> int:
     """Total runs of a media job before it is recorded as failed (1 = no retry).
     A burn-in dies on transient conditions that are gone seconds later — the output
@@ -761,6 +917,31 @@ def get_media_job_retry_backoff_seconds() -> float:
     """Base wait before re-running a failed media job; the Nth retry waits base * N.
     Long enough for a file lock or a disk-busy spike to clear."""
     return float(os.environ.get("TICTOK_MEDIA_JOB_RETRY_BACKOFF_SECONDS", "10"))
+
+
+def get_media_job_defer_seconds() -> float:
+    """Wait before a deferred media job becomes runnable again.
+
+    A retry (get_media_job_attempts) answers a failure that is gone in seconds. It cannot
+    answer a storage volume that went away: the final dir dropping off the bus takes it
+    out for minutes, both attempts burn inside 10 seconds, and the job lands as failed
+    with the recording left half-rebuilt. Deferring returns the job to the queue instead
+    of consuming an attempt, so the run continues on its own once the volume is back."""
+    return float(os.environ.get("TICTOK_MEDIA_JOB_DEFER_SECONDS", "60"))
+
+
+def get_media_job_defer_timeout_seconds() -> float:
+    """How long a job may stay deferred before it is recorded as failed. Waiting without
+    a bound would leave a queue that looks alive while nothing can ever run."""
+    return float(os.environ.get("TICTOK_MEDIA_JOB_DEFER_TIMEOUT_SECONDS", "7200"))
+
+
+def get_media_job_auto_requeue_limit() -> int:
+    """How many times a job interrupted by a server restart is put back on the queue by
+    itself (0 disables). A bulk run spans hours, so a restart in the middle used to leave
+    its remaining members as permanent holes that only a human noticed. The cap is what
+    keeps a job that takes the process down with it from re-running on every boot."""
+    return int(os.environ.get("TICTOK_MEDIA_JOB_AUTO_REQUEUE_LIMIT", "3"))
 
 
 def get_transcribe_job_attempts() -> int:
@@ -823,7 +1004,44 @@ def get_audio_silence_min_seconds() -> float:
 
 def get_clip_duration_tolerance_seconds() -> float:
     """How far a written clip may differ from the requested length before it is logged
-    as a mismatch. Stream copy can only cut on keyframes (HLS segments are 2s), so a
-    sub-second difference is expected and is not an error; the check exists to catch an
-    audio filter silently changing the length."""
+    as a mismatch. Stream copy can only start on a keyframe, and keyframe spacing is set
+    by the broadcaster, not by the 2s HLS segmenting: measured 2.1s-37.6s across real
+    recordings. A copy clip therefore runs *long* by up to one GOP, which is normal and
+    is not checked; only a clip shorter than requested trips this, which is what catches
+    an audio filter silently changing the length."""
     return float(os.environ.get("TICTOK_CLIP_DURATION_TOLERANCE_SECONDS", "1.0"))
+
+
+# ---- 通知(webhook) ----
+# 宛先URLだけは設定画面(DB)ではなく.env/環境変数に置く。Discord/Slackのwebhook URLは
+# それ自体が投稿権限を持つ資格情報であり、設定画面の値は(a)画面に平文で表示され、
+# (b)変更時にsettings.updateがold->newをops_eventsへ書き込み保持期間ぶん残る。
+# 資格情報の置き場は既にEulerStream API keyで .env と決まっているので、そこへ揃える。
+# 閾値・有効無効・retry上限といった資格情報でない項目はSettings(設定画面)側にある。
+
+
+def get_notify_webhook_urls() -> list:
+    """通知の宛先webhook URL。カンマ区切りで複数指定でき、全宛先へ同じ通知を送る。
+    空(未設定)なら通知は組み立てず送信もしない。"""
+    raw = os.environ.get("TICTOK_NOTIFY_WEBHOOK_URL", "")
+    return [url.strip() for url in raw.split(",") if url.strip()]
+
+
+def get_notify_webhook_format() -> str:
+    """webhookのpayload形式。Discord/Slack/汎用receiverでbodyのschemaが違うため、
+    送信側が合わせる必要がある。既定の"auto"は宛先hostから判定する(判定できなければ
+    汎用JSON)。host判定を使わず固定したい場合に discord / slack / generic を明示する。"""
+    return os.environ.get("TICTOK_NOTIFY_WEBHOOK_FORMAT", "auto").strip().lower()
+
+
+def get_notify_queue_max() -> int:
+    """送信待ちalertの上限。通知は本体(収集・録画)から切り離したqueue越しに送るため、
+    宛先が落ちている間もqueueは伸び続ける。上限に達したら新しいalertを捨て、捨てたことを
+    ops_eventsへ残す(無音で溜め続けてmemoryを食う方が悪い)。"""
+    return int(os.environ.get("TICTOK_NOTIFY_QUEUE_MAX", "500"))
+
+
+def get_notify_shutdown_drain_seconds() -> float:
+    """shutdown時に送信待ちを吐き切るのを待つ秒数。ここを無制限にすると宛先が落ちている
+    ときにserverが終了できなくなる。"""
+    return float(os.environ.get("TICTOK_NOTIFY_SHUTDOWN_DRAIN_SECONDS", "5.0"))

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — Fan台帳</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <h1 class="visually-hidden">Fan台帳</h1>
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav"></nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
+    </div>
+
+    <!-- 台帳全体のKPI -->
+    <div class="a-kpibar" id="fan-kpi"></div>
+
+    <div class="x-toolbar">
+      <input id="fan-search" type="text" aria-label="表示名 / @ID で絞込" placeholder="🔎 表示名 / @ID で絞込" autocomplete="off" />
+      <label class="x-field"><span>並替</span>
+        <select id="fan-sort">
+          <option value="diamonds">コイン 多い順</option>
+          <option value="gifts">Gift数 多い順</option>
+          <option value="sessions">出現Session 多い順</option>
+          <option value="comments">Comment 多い順</option>
+          <option value="last_seen">最終観測が新しい順</option>
+          <option value="last_seen_asc">最終観測が古い順</option>
+          <option value="first_seen">初観測が古い順</option>
+        </select>
+      </label>
+      <label class="x-field"><span>絞込</span>
+        <select id="fan-filter">
+          <option value="all">全て</option>
+          <option value="multi">複数の配信者へ投げた人</option>
+        </select>
+      </label>
+    </div>
+
+    <div id="fan-note" class="chart-note"></div>
+
+    <section class="result-block">
+      <h3 class="result-subtitle">■ Fan台帳 <span class="result-sub-note">（giftを送った視聴者。行をクリックで明細）</span></h3>
+      <div class="table-wrap">
+        <table class="result-table">
+          <thead><tr>
+            <th>#</th><th>視聴者</th><th>コイン</th><th>Gift数</th><th>出現Session</th>
+            <th>Comment</th><th>投げた配信者</th><th>初観測</th><th>最終観測</th><th>経過</th>
+          </tr></thead>
+          <tbody id="fan-rows"></tbody>
+        </table>
+      </div>
+      <div id="fan-empty" class="a-empty" data-label="Fan台帳">該当する視聴者がいません。</div>
+    </section>
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <!-- 1人ぶんの明細 -->
+  <div id="fan-modal" class="modal-overlay hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="fan-modal-title">
+      <div class="modal-head">
+        <h2 id="fan-modal-title">視聴者の明細</h2>
+        <button id="fan-modal-close" class="modal-close">閉じる ✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="fan-modal-ident"></div>
+        <div class="a-kpibar" id="fan-modal-kpi"></div>
+        <div id="fan-modal-message" class="form-message"></div>
+
+        <section class="result-block">
+          <h4 class="result-subtitle sm-subtitle">配信者別</h4>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>配信者</th><th>コイン</th><th>Gift数</th><th>Session</th><th>初回</th><th>最終</th></tr></thead>
+              <tbody id="fan-modal-streamers"></tbody>
+            </table>
+          </div>
+          <div id="fan-modal-streamers-empty" class="feed-empty">記録がありません。</div>
+        </section>
+
+        <section class="result-block">
+          <h4 class="result-subtitle sm-subtitle">Session別 明細 <span class="result-sub-note">（新しい順）</span></h4>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>日時</th><th>配信者</th><th>コイン</th><th>Gift数</th><th>最初のGift</th><th>最後のGift</th></tr></thead>
+              <tbody id="fan-modal-sessions"></tbody>
+            </table>
+          </div>
+          <div id="fan-modal-sessions-empty" class="feed-empty">記録がありません。</div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/fans.js"></script>
+</body>
+</html>

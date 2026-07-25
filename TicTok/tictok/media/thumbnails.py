@@ -7,10 +7,29 @@ hover中はrequestが連射されるため、file数分のHTTP round tripより1
 生成は`fps=1/N,scale,tile=CxR`の1passで行う。seek+個別抽出をN回回す案も測ったが
 (3.9h録画/296点で約77秒)、1passの方が実測で速く、processも1つで済む。
 ただし全frame decodeは3.9h録画で192秒かかり、hover起点のrequestには重すぎた。
-intervalがkeyframe間隔(recorderのsegment_seconds=2秒相当)より十分大きい場合に限り
-`-skip_frame nokey`でkeyframeだけをdecodeし、同じ絵を23秒で得ている。
-短い録画はintervalが小さくkeyframeを取りこぼしうるので通常decodeのままで、
-そもそも尺が短く時間もかからない。
+intervalが実keyframe間隔より十分大きい場合に限り`-skip_frame nokey`でkeyframeだけを
+decodeし、同じ絵を桁違いに速く得る(3022秒の録画で実測4.6秒 対 19.4秒)。
+
+== keyframe間隔は測る。仮定してはいけない ==
+
+以前はここを「recorderのsegment_seconds=2秒だからkeyframe間隔も約2秒」と仮定し、
+intervalが10秒以上なら安全としていた。これは誤りだった。
+
+recorderは`-hls_time 2`を**stream copy**で流している(recorder.py)。実playlistのEXTINFは
+確かに中央値1.961秒で、segmentは2秒である。しかし**segmentはkeyframeから始まっていない**
+(同じ録画のmp4のkeyframe間隔は17.67秒)。segmentが2秒であることと、keyframeが2秒間隔で
+あることは別で、後者は配信側のencoder設定で決まりこちらからは決められない。実測した
+keyframe間隔は録画ごとに2.1〜37.6秒とばらついた。
+
+その結果、intervalが10〜37秒の帯ではtile数ぶんのkeyframeが存在せず、`fps=1/N`が直前の
+frameで埋めてtileが複製される。実録画(3022秒/interval 11秒/実keyframe間隔 最大18.16秒)
+では280 tile中67枚が誤った時刻の絵になっていた。
+
+よって固定の閾値では決められない。その録画のkeyframe間隔を実際に測り、intervalが上回る
+ときだけkeyframeのみdecodeへ切り替える。測定は全走査(この録画で4.2秒=利点とほぼ同額)を
+避け、尺を等分した数箇所だけを読む(実測0.39秒)。測れなかったときは推測せず通常decodeへ
+倒す。誤って通常decodeを選んでも遅いだけだが、誤ってkeyframeのみを選ぶと静かに誤った
+spriteがcacheへ残る。
 
 尺は数分〜3時間超まで幅があるため、intervalとgridはdurationから決め、
 総tile数はMAX_TILESで頭打ちにしてsprintが無制限に肥大するのを防ぐ。
@@ -41,9 +60,18 @@ MAX_TILES = 300
 SPRITE_COLUMNS = 10
 # 最小interval。これより細かくしても隣のtileがほぼ同じ絵になる。
 MIN_INTERVAL_SECONDS = 2.0
-# keyframeのみdecodeに切り替える閾値。segment境界のkeyframe間隔(約2秒)に対して
-# 十分な余裕がある場合だけ、取りこぼしなくkeyframeを拾える。
+# keyframe間隔を測りに行く下限のinterval。これ未満ならどの録画でもkeyframeのみdecodeは
+# 選べない(実測のkeyframe間隔の下限が約2秒)ので、測定costを払わず通常decodeにする。
 KEYFRAME_ONLY_MIN_INTERVAL = 10.0
+# keyframe間隔の測定に使う窓の数と、1窓あたりの秒数。尺を等分した位置を読む。
+# 8x30秒で3022秒の録画から0.39秒、推定値は全走査の18.16秒に対し17.68秒だった。
+KEYFRAME_PROBE_WINDOWS = 8
+KEYFRAME_PROBE_SPAN_SECONDS = 30.0
+# intervalが「測ったkeyframe間隔 x この係数」以上のときだけkeyframeのみdecodeを選ぶ。
+# 標本は尺の一部(既定で8%程度)しか見ないので、測った最大値は真の最大値の下限でしかない。
+# 実録画での取りこぼしは約3%だったが、外した場合の損得が対称でないため広く取る:
+# 安全側に倒れても1度だけ生成が数倍遅くなるだけで、逆に倒れると誤ったspriteがcacheに残る。
+KEYFRAME_SAFETY = 1.5
 # mjpegの-q:v(2=最良〜31=最低)。5でtile当たり約4KB。
 JPEG_QSCALE = 5
 
@@ -55,6 +83,13 @@ def sprite_path(src: Path) -> Path:
 
 def _meta_path(src: Path) -> Path:
     return sidecar_path(Path(src), META_SUFFIX)
+
+
+def thumbnail_artifact_paths(src) -> tuple:
+    """``src``のspriteとそのmetaのpath。srcを消す側がcacheを取り残さないための列挙で、
+    実在確認はしない(呼び出し側がunlink時にmissing_okで吸収する)。"""
+    src = Path(src)
+    return (sprite_path(src), _meta_path(src))
 
 
 # 同一fileへの同時生成を防ぐ。hoverは連射されるので、素通しだと同じ3.9h録画に
@@ -102,6 +137,43 @@ async def _probe(src: Path) -> tuple[float, int, int]:
     return duration, width, height
 
 
+async def _max_keyframe_gap(src: Path, duration: float) -> float | None:
+    """標本抽出で測ったkeyframe間隔の最大値(秒)。測れなければNone。
+
+    全走査は利点とほぼ同額のcostになるので、尺を等分した位置の短い窓だけを読む。窓と窓の
+    間には当然大きな隙間が空くため、窓幅を超えるgapは窓の切れ目として捨てる(これを数えると
+    どの録画も「keyframe間隔が数百秒」になり、常に通常decodeへ倒れる)。
+    """
+    span = KEYFRAME_PROBE_SPAN_SECONDS
+    starts = [duration * (i + 0.5) / KEYFRAME_PROBE_WINDOWS
+              for i in range(KEYFRAME_PROBE_WINDOWS)]
+    intervals = ",".join(f"{at:.2f}%+{span:.0f}" for at in starts)
+    proc = await asyncio.create_subprocess_exec(
+        "ffprobe", "-v", "error", "-read_intervals", intervals,
+        "-select_streams", "v:0", "-skip_frame", "nokey",
+        "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(src),
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        logger.warning(
+            "keyframe probe failed for %s; falling back to a full decode", src.name,
+            extra={"event": "thumbnails.keyframe_probe_failed",
+                   "ctx": {"src": str(src), "returncode": proc.returncode,
+                           "stderr": (stderr or b"").decode("utf-8", "replace")[:2000]}},
+        )
+        return None
+    times = sorted(
+        float(line) for line in out.decode("utf-8", "replace").split() if line.strip()
+    )
+    gaps = [b - a for a, b in zip(times, times[1:]) if b - a <= span]
+    if not gaps:
+        return None
+    return max(gaps)
+
+
 def _grid(duration: float, width: int, height: int) -> dict:
     """尺と解像度からinterval・grid・tile寸法を決める。"""
     interval = max(MIN_INTERVAL_SECONDS, math.ceil(duration / MAX_TILES))
@@ -121,10 +193,22 @@ def _grid(duration: float, width: int, height: int) -> dict:
 
 
 def _signature(src: Path) -> dict:
+    """cacheの有効性を決める鍵。srcの実体だけでなく、**spriteの中身を変えうる判定条件**も
+    含める。keyframeのみdecodeの可否はまさにそれで、誤った条件で作られたspriteは絵が
+    複製されているのに寸法もtile数も正常なため、条件を直しても鍵が同じままだと壊れた
+    cacheが永久に残る(この不具合が実際にあった)。
+
+    含めるのは測定結果(keyframe間隔)ではなく判定条件の方である。測定結果を入れると
+    cacheの照合前に毎回ffprobeを走らせることになり、hoverの連射で測定costを払い続ける。
+    同じfileに対する測定は決定的なので、条件が変わらない限り結論も変わらない。"""
     stat = src.stat()
     return {"mtime": stat.st_mtime, "size": stat.st_size,
             "tile_width": TILE_WIDTH, "max_tiles": MAX_TILES,
-            "columns": SPRITE_COLUMNS}
+            "columns": SPRITE_COLUMNS,
+            "keyframe_min_interval": KEYFRAME_ONLY_MIN_INTERVAL,
+            "keyframe_probe_windows": KEYFRAME_PROBE_WINDOWS,
+            "keyframe_probe_span": KEYFRAME_PROBE_SPAN_SECONDS,
+            "keyframe_safety": KEYFRAME_SAFETY}
 
 
 def _cached(src: Path, signature: dict) -> dict | None:
@@ -161,7 +245,23 @@ async def ensure_sprite(src: Path) -> dict:
         out = sprite_path(src)
         sidecar_dir(src).mkdir(parents=True, exist_ok=True)
 
-        keyframe_only = grid["interval_seconds"] >= KEYFRAME_ONLY_MIN_INTERVAL
+        interval = grid["interval_seconds"]
+        keyframe_gap = None
+        if interval >= KEYFRAME_ONLY_MIN_INTERVAL:
+            keyframe_gap = await _max_keyframe_gap(src, duration)
+        # 測れなかった(None)ときは推測せず通常decode。誤ってkeyframeのみを選ぶと、
+        # tileが複製された誤ったspriteがそのままcacheへ残る。
+        keyframe_only = (keyframe_gap is not None
+                         and interval >= keyframe_gap * KEYFRAME_SAFETY)
+        logger.info(
+            "sprite decode mode for %s: %s", src.name,
+            "keyframe-only" if keyframe_only else "full",
+            extra={"event": "thumbnails.decode_mode",
+                   "ctx": {"src": str(src), "interval_seconds": interval,
+                           "keyframe_gap_seconds": (None if keyframe_gap is None
+                                                    else round(keyframe_gap, 3)),
+                           "safety": KEYFRAME_SAFETY, "keyframe_only": keyframe_only}},
+        )
         pre_input = ["-skip_frame", "nokey"] if keyframe_only else []
         vf = (f"fps=1/{grid['interval_seconds']:.6f},"
               f"scale={grid['tile_width']}:{grid['tile_height']},"

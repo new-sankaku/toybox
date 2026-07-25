@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok LIVE Monitor — 動画容量</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="app-dashboard cap-page">
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="app-shell">
+    <h1 class="visually-hidden">動画容量</h1>
+    <div class="a-topbar">
+      <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+      <nav class="a-nav"></nav>
+      <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
+    </div>
+
+    <div class="a-content">
+      <!-- 1枚目: 操作。この画面へ来る動機の大半が「一時保存先が埋まったので動画を移す」
+           なので、見通しや内訳より先に置く。 -->
+      <div class="a-card a-settingscard" id="places">
+        <h3>動画の保存先 <span class="sub">録画は一時保存先(SSD)で作り、完了したものを最終保存先(HDD)へ移します</span></h3>
+        <div class="body">
+          <div id="cap-flow" class="cap-flow">
+            <div class="cap-place" id="cap-place-work">
+              <span class="l">一時保存先</span>
+              <code class="p" id="cap-work-path">-</code>
+              <span class="v" id="cap-work-total">-</span>
+            </div>
+
+            <div class="cap-move" id="cap-move">
+              <span class="cap-arrow" aria-hidden="true">▼</span>
+              <span class="cap-move-text" id="cap-move-text">-</span>
+              <div class="note-actions">
+                <button id="reloc-plan" class="btn" title="移動の対象になる録画を一覧します。この操作ではfileを動かしません。">対象を確認</button>
+                <button id="reloc-apply" class="btn btn-primary hidden" title="一覧した録画を最終保存先へ移します。">最終保存先へ移動</button>
+                <span id="reloc-status" class="form-message"></span>
+              </div>
+            </div>
+
+            <div class="cap-place" id="cap-place-final">
+              <span class="l">最終保存先</span>
+              <code class="p" id="cap-final-path">-</code>
+              <span class="v" id="cap-final-total">-</span>
+            </div>
+          </div>
+
+          <div id="cap-place-note" class="chart-note"></div>
+
+          <!-- 対象一覧は「対象を確認」を押すまで出さない。押した順序(確認→実行)を保つ。 -->
+          <div id="reloc-detail" class="hidden">
+            <div id="reloc-summary" class="chart-note"></div>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead><tr><th>配信者</th><th class="num">本数</th><th class="num">容量</th></tr></thead>
+                <tbody id="reloc-rows"></tbody>
+              </table>
+              <div id="reloc-empty" class="feed-empty" data-label="移動対象">一時保存先に残っている完了録画はありません。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>driveの空きと満杯まで <span class="sub">日次の記録から1日あたりの増減を出し、満杯までを幅で見積もります</span></h3>
+        <div class="body">
+          <div class="note-actions">
+            <button id="cap-sample" class="btn" title="いまの容量を1件記録します。日次の自動記録と同じ内容です。">容量を今すぐ記録</button>
+            <span id="cap-status" class="form-message"></span>
+          </div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>Drive</th><th class="num">空き</th><th class="num">全体</th><th class="num">1日あたり</th><th class="num">満杯まで</th></tr>
+              </thead>
+              <tbody id="cap-rows"></tbody>
+            </table>
+            <div id="cap-empty" class="feed-empty" data-label="容量">まだ記録がありません。</div>
+          </div>
+          <div id="cap-summary" class="chart-note"></div>
+          <div class="chart-note">満杯までは幅で出します。観測期間が短いうちは数値を出しません（観測から出た値ではなく、作った値になるため）。各行にカーソルを合わせると、その予測が何日ぶん・何件の記録に基づくか、直線にどれだけ沿っているかが出ます。</div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>使用量の推移 <span class="sub">何がどれだけ増えているか</span></h3>
+        <div class="body">
+          <div class="cap-grid">
+            <section class="cap-cell">
+              <h4 class="result-subtitle sm-subtitle">録画の増加実績 <span class="result-sub-note">（録画の記録から遡って算出。driveの空きとは別の系列です）</span></h4>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead><tr><th>日</th><th class="num">録画</th><th class="num">増加</th></tr></thead>
+                  <tbody id="cap-daily"></tbody>
+                </table>
+                <div id="cap-daily-empty" class="feed-empty" data-label="録画の増加実績">録画の記録がありません。</div>
+              </div>
+            </section>
+
+            <section class="cap-cell">
+              <h4 class="result-subtitle sm-subtitle">後処理の完了率 <span class="result-sub-note">（完了した録画に対する進み。未処理が多いほど今後の出力で増えます）</span></h4>
+              <div class="a-kpibar cap-kpibar" id="cap-completion"></div>
+            </section>
+
+            <section class="cap-cell">
+              <h4 class="result-subtitle sm-subtitle">Databaseの使用量 <span class="result-sub-note">（動画とは別枠。DB backupは設定画面のDatabaseの保守で作られたものです）</span></h4>
+              <div class="a-kpibar cap-kpibar" id="cap-dbusage"></div>
+              <div id="cap-dbrows" class="chart-note"></div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <!-- 設定画面から移設。drive全体の空き(上)に対して、こちらは録画folderの中身の内訳。 -->
+      <div class="a-card a-settingscard">
+        <h3>録画folderの内訳 <span class="sub">配信者別・種別別に、実際にfolderを走査して集計します</span></h3>
+        <div class="body">
+          <div class="chart-note">数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は下のbuttonを押したときだけ実行します。「作り直せる」種別は消しても録画から再生成できます。</div>
+          <div class="note-actions">
+            <button id="usage-scan" class="btn btn-primary">容量を再scanする</button>
+            <span id="usage-status" class="form-message"></span>
+          </div>
+          <div id="usage-summary" class="chart-note"></div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>種別</th><th class="num">容量</th><th class="num">file数</th><th>作り直せるか</th></tr></thead>
+              <tbody id="usage-category-list"></tbody>
+            </table>
+          </div>
+          <div id="usage-category-empty" class="chart-note hidden">まだ走査していません。</div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>配信者</th><th class="num">容量</th><th class="num">生録画</th><th class="num">焼き込み</th><th class="num">Up出力</th><th class="num">HLS(.ts)</th><th class="num">中間file</th></tr></thead>
+              <tbody id="usage-streamer-list"></tbody>
+            </table>
+          </div>
+          <div id="usage-streamer-empty" class="chart-note hidden">まだ走査していません。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="a-footer">
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
+    </div>
+  </div>
+
+  <script src="/static/common.js"></script>
+  <script src="/static/capacity.js"></script>
+</body>
+</html>

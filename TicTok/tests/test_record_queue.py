@@ -1,4 +1,6 @@
+import json
 import os
+import time
 from pathlib import Path
 
 import pytest
@@ -6,7 +8,14 @@ import pytest
 from tictok.core import layout
 from tictok.core.cancel import JobCancelled
 from tictok.record import disk_scan, retention
-from tictok.record.media_queue import JobSkipped, MediaJobQueue, group_payload, job_payload
+from tictok.record.media_queue import (
+    JobDeferred,
+    JobSkipped,
+    MediaJobQueue,
+    group_payload,
+    job_payload,
+)
+from tictok.record.recorder import timing_path as recorder_timing_path
 from tictok.record.transcribe_queue import TranscribeQueue
 
 HOUR = 3600.0
@@ -335,6 +344,120 @@ async def test_skipped_and_cancelled_are_never_retried(
     assert len(calls) == 1
 
 
+async def test_deferred_job_returns_to_the_queue_without_failing(
+        queue_factory, recording_factory, tmp_db, monkeypatch):
+    """保存先volumeの不在は失敗ではない。attemptを食わず、待機へ戻して自分で再開する。"""
+    monkeypatch.setenv("TICTOK_MEDIA_JOB_ATTEMPTS", "5")
+    recording = recording_factory()
+    calls = []
+
+    async def runner(job, report):
+        calls.append(1)
+        raise JobDeferred("保存先が見つかりません（K:）。")
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "reprocess", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    stored = tmp_db.get_media_job("job-1")
+    assert len(calls) == 1                      # retryで潰さない
+    assert stored["state"] == "pending"
+    assert stored["finished_at"] is None
+    assert stored["not_before"] > time.time()
+    assert "保存先が見つかりません" in stored["stage"]
+
+
+async def test_deferred_job_is_not_claimed_until_its_wait_elapses(
+        queue_factory, recording_factory, tmp_db):
+    """待機へ戻した直後に同じworkerが拾い直すと、待つ意味が無くなる。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        raise JobDeferred("保存先が見つかりません（K:）。")
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "reprocess", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    assert tmp_db.claim_next_pending_media_job() is None
+    tmp_db.defer_media_job("job-1", time.time() - 1, "復帰待ち")
+    assert tmp_db.claim_next_pending_media_job()["job_id"] == "job-1"
+
+
+async def test_deferred_job_fails_once_it_has_waited_too_long(
+        queue_factory, recording_factory, tmp_db, monkeypatch):
+    """待ち続けるqueueは、動いているように見えて何も進まない。上限で失敗へ倒す。"""
+    monkeypatch.setenv("TICTOK_MEDIA_JOB_DEFER_TIMEOUT_SECONDS", "60")
+    recording = recording_factory()
+
+    async def runner(job, report):
+        raise JobDeferred("保存先が見つかりません（K:）。")
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "reprocess", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+    # 61分前から待っていたことにする
+    tmp_db.defer_media_job("job-1", time.time(), "復帰待ち")
+    with tmp_db._lock:
+        tmp_db._conn.execute(
+            "UPDATE media_job_queue SET deferred_since = ? WHERE job_id = ?",
+            (time.time() - 3600, "job-1"))
+        tmp_db._conn.commit()
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    stored = tmp_db.get_media_job("job-1")
+    assert stored["state"] == "failed"
+    assert "解消しませんでした" in stored["error"]
+
+
+async def test_requeue_returns_failed_members_to_the_same_group(
+        queue_factory, recording_factory, tmp_db):
+    """一括の失敗ぶんは同じ行を戻す。新規行を足すとgroupの母数が増え、完了に到達しない。"""
+    a, b = recording_factory(), recording_factory()
+
+    async def runner(job, report):
+        if job["recording_id"] == b["id"]:
+            raise OSError("boom")
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-a", "reprocess", a["id"], group_id="grp")
+    await queue.enqueue("job-b", "reprocess", b["id"], group_id="grp")
+    await queue._process(tmp_db.get_media_job("job-a"))
+    await queue._process(tmp_db.get_media_job("job-b"))
+    assert tmp_db.get_media_job("job-b")["state"] == "failed"
+
+    assert await queue.requeue(["job-a", "job-b"]) == 1      # 完了ぶんは戻さない
+    assert tmp_db.get_media_job("job-b")["state"] == "pending"
+    assert tmp_db.get_media_job("job-b")["error"] is None
+    assert tmp_db.get_media_job("job-a")["state"] == "completed"
+    assert len(tmp_db.media_jobs_in_group("grp")) == 2
+
+
+async def test_finished_group_with_failures_leaves_one_ops_event(
+        queue_factory, recording_factory, tmp_db):
+    """一括は投げて寝る使い方なので、Job画面を開いていなくても欠落が残る場所が要る。"""
+    a, b = recording_factory(), recording_factory()
+
+    async def runner(job, report):
+        if job["recording_id"] == b["id"]:
+            raise OSError("boom")
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-a", "reprocess", a["id"], group_id="grp")
+    await queue.enqueue("job-b", "reprocess", b["id"], group_id="grp")
+    await queue._process(tmp_db.get_media_job("job-a"))
+    await queue._process(tmp_db.get_media_job("job-b"))
+
+    events = [e for e in tmp_db.list_ops_events(limit=50)
+              if e["kind"] == "media_queue.group_finished"]
+    assert len(events) == 1
+    assert events[0]["severity"] == "warning"
+    assert events[0]["detail"]["failed"] == 1
+    assert events[0]["detail"]["failed_job_ids"] == ["job-b"]
+
+
 async def test_repeated_identical_progress_is_collapsed(
         queue_factory, recording_factory, tmp_db):
     recording = recording_factory()
@@ -526,6 +649,22 @@ def test_transient_phase_finds_the_normalize_tmp_next_to_the_mp4(
     assert items[0]["recording_id"] == recording["id"]
 
 
+def test_transient_phase_spares_a_normalize_tmp_that_completed(recording_factory, tmp_root):
+    """完了印付きの .norm.tmp は『中断した残骸』ではなく『直ったが当てられなかった成果物』。
+
+    これを消すと、混在解像度の壊れたmp4が残って直った方が消える。実際に一度その形で
+    再生カクつきが再発している(差し替えがlockで失敗し、掃除が完成品を消す側に回った)。"""
+    from tictok.record.recorder import normalize_marker_path, normalize_tmp_path
+
+    now = 100 * DAY
+    recording = recording_factory(ended_at=DAY)
+    src = Path(recording["path"])
+    tmp = _touch(normalize_tmp_path(src), now - 10 * HOUR)
+    normalize_marker_path(tmp).write_text('{"timing_mode": "passthrough"}', encoding="utf-8")
+    assert retention.transient_candidates([tmp_root], [recording], _resolve, HOUR, now) == []
+    assert tmp.is_file()
+
+
 def test_transient_phase_ignores_recordings_still_running(recording_factory, tmp_root):
     from tictok.record.recorder import NORMALIZE_TMP_SUFFIX
 
@@ -534,6 +673,491 @@ def test_transient_phase_ignores_recordings_still_running(recording_factory, tmp
     src = Path(recording["path"])
     _touch(src.with_suffix(src.suffix + NORMALIZE_TMP_SUFFIX), now - 10 * HOUR)
     assert retention.transient_candidates([tmp_root], [recording], _resolve, HOUR, now) == []
+
+
+# --------------------------------------------------------------------------
+# 混在解像度normalizeの再回収(差し替えがlockで失敗した成果物の救済)
+# --------------------------------------------------------------------------
+
+
+async def test_reclaim_swaps_a_completed_normalization_into_place(recording_factory, monkeypatch):
+    """再encodeは終わったのにos.replaceだけがlockで落ちた録画を、後から当て直せること。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    mp4.write_bytes(b"mixed")
+    tmp = recorder.normalize_tmp_path(mp4)
+    tmp.write_bytes(b"normalized")
+    recorder.normalize_marker_path(tmp).write_text(
+        '{"timing_mode": "passthrough", "width": 720, "height": 1280}', encoding="utf-8")
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions", _fake_probe({(720, 1280)}))
+
+    assert await recorder.reclaim_normalized_mp4(mp4) == "reclaimed"
+    assert mp4.read_bytes() == b"normalized"
+    assert not tmp.exists()
+    assert not recorder.normalize_marker_path(tmp).exists()
+
+
+async def test_reclaim_refuses_a_leftover_that_is_still_mixed_resolution(
+        recording_factory, monkeypatch):
+    """印が付いていても実fileが単一解像度でなければ当てない。壊れた物を壊れた物で
+    置き換えるくらいなら、両方残して人間に判断させる。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    mp4.write_bytes(b"mixed")
+    tmp = recorder.normalize_tmp_path(mp4)
+    tmp.write_bytes(b"truncated")
+    recorder.normalize_marker_path(tmp).write_text('{"timing_mode": "passthrough"}', encoding="utf-8")
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions",
+                        _fake_probe({(640, 1280), (720, 1280)}))
+
+    assert await recorder.reclaim_normalized_mp4(mp4) == "invalid"
+    assert mp4.read_bytes() == b"mixed"
+    assert tmp.is_file()
+
+
+async def test_reclaim_drops_the_timing_map_only_for_a_cfr_reencode(
+        recording_factory, monkeypatch):
+    """CFRへ落ちた再encodeはframe timelineを作り直すので、media->pts mapは捨てる。
+    passthroughでは残す(消すと焼き込みのコメント同期が近似へ劣化する)。"""
+    from tictok.record import recorder
+
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions", _fake_probe({(720, 1280)}))
+    for timing_mode, map_survives in (("passthrough", True), ("cfr", False)):
+        recording = recording_factory(ended_at=DAY)
+        mp4 = Path(recording["path"])
+        mp4.write_bytes(b"mixed")
+        tmp = recorder.normalize_tmp_path(mp4)
+        tmp.write_bytes(b"normalized")
+        recorder.normalize_marker_path(tmp).write_text(
+            json.dumps({"timing_mode": timing_mode}), encoding="utf-8")
+        timing = recorder.timing_path(mp4)
+        timing.parent.mkdir(parents=True, exist_ok=True)
+        timing.write_text("{}", encoding="utf-8")
+
+        assert await recorder.reclaim_normalized_mp4(mp4) == "reclaimed"
+        assert timing.is_file() is map_survives
+
+
+async def test_reclaim_is_a_noop_without_a_completion_marker(recording_factory):
+    """印の無い .norm.tmp は中断した中間file。当ててはいけない(掃除側の担当)。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    mp4.write_bytes(b"mixed")
+    tmp = recorder.normalize_tmp_path(mp4)
+    tmp.write_bytes(b"half-written")
+
+    assert await recorder.reclaim_normalized_mp4(mp4) == "none"
+    assert mp4.read_bytes() == b"mixed"
+    assert tmp.is_file()
+
+
+async def test_reclaim_clears_a_marker_whose_tmp_is_gone(recording_factory):
+    """手動で当て済み(tmpだけ消えた)なら印も片付ける。残すと毎回probeし直すことになる。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    mp4.write_bytes(b"normalized")
+    tmp = recorder.normalize_tmp_path(mp4)
+    recorder.normalize_marker_path(tmp).write_text('{"timing_mode": "passthrough"}', encoding="utf-8")
+
+    assert await recorder.reclaim_normalized_mp4(mp4) == "none"
+    assert not recorder.normalize_marker_path(tmp).exists()
+
+
+async def test_startup_sweep_reclaims_and_refreshes_the_recorded_size(
+        recording_factory, tmp_db, tmp_root, monkeypatch):
+    """起動sweepが差し替え待ちを拾い、DBのbytesも取り直すこと。
+
+    bytesを直さないと容量画面と保持policyが元mp4のサイズで計算し続ける(再encodeで
+    数倍変わる)。印の無い録画はsweepの対象外で、ffprobeも走らない。"""
+    from tictok.record import recorder
+
+    pending = recording_factory(ended_at=DAY)
+    untouched = recording_factory(ended_at=DAY)
+    mp4 = Path(pending["path"])
+    mp4.write_bytes(b"mixed")
+    tmp = recorder.normalize_tmp_path(mp4)
+    tmp.write_bytes(b"normalized-and-larger")
+    recorder.normalize_marker_path(tmp).write_text(
+        '{"timing_mode": "passthrough", "width": 720, "height": 1280}', encoding="utf-8")
+    probed = []
+
+    async def probe(path):
+        probed.append(path)
+        return {(720, 1280)}
+
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions", probe)
+
+    assert await recorder.reclaim_pending_normalizations(tmp_db, [tmp_root]) == 1
+    assert mp4.read_bytes() == b"normalized-and-larger"
+    assert tmp_db.get_recording(pending["id"])["bytes"] == len(b"normalized-and-larger")
+    assert tmp_db.get_recording(untouched["id"])["bytes"] == untouched["bytes"]
+    assert probed == [tmp]
+
+
+async def test_replace_with_retry_survives_a_lock_that_outlasts_the_first_attempts(tmp_path):
+    """差し替えは一度の失敗で諦めない。30秒固定だった頃に、再生中のfileを掴んだまま
+    抜けられて正規化が丸ごと失われている。"""
+    from tictok.record import recorder
+
+    tmp = tmp_path / "a.mp4.norm.tmp"
+    dst = tmp_path / "a.mp4"
+    tmp.write_bytes(b"normalized")
+    dst.write_bytes(b"mixed")
+    real_replace, attempts = os.replace, []
+
+    def locked_for_the_first_few(src, target):
+        attempts.append(target)
+        if len(attempts) < 4:
+            raise PermissionError("locked by another process")
+        real_replace(src, target)
+
+    monkeypatch_sleep = getattr(recorder.asyncio, "sleep")
+    try:
+        recorder.os.replace = locked_for_the_first_few
+        recorder.asyncio.sleep = _no_wait
+        assert await recorder.replace_with_retry(tmp, dst) is True
+    finally:
+        recorder.os.replace = real_replace
+        recorder.asyncio.sleep = monkeypatch_sleep
+    assert len(attempts) == 4
+    assert dst.read_bytes() == b"normalized"
+
+
+async def _no_wait(_seconds):
+    return None
+
+
+def _fake_probe(resolutions):
+    async def probe(_path, *_args):
+        return set(resolutions)
+    return probe
+
+
+# --------------------------------------------------------------------------
+# 再mp4化の無駄削り(concatと並行したkeyframe走査 / 音声の二重encode回避)
+# --------------------------------------------------------------------------
+
+
+async def test_normalize_uses_the_resolutions_probed_during_concat(recording_factory,
+                                                                   monkeypatch):
+    """concatと並行して取った解像度が在れば、連結後mp4を頭から読み直さないこと。
+
+    この再走査は実測で349MBあたり14秒・1.2GBで50秒かかる。同じ内容を2度読むのを
+    やめるのがこの経路の狙いなので、握り潰されていないことを固定する。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    calls = []
+
+    async def probe(path, *args):
+        calls.append(path)
+        return {(640, 1280), (720, 1280)}
+
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions", probe)
+    rec = recorder.Recorder("streamerA", str(mp4.parent), 1)
+    rec.base = mp4.stem
+    rec._concat_resolutions = {(720, 1280)}
+    monkeypatch.setattr(recorder.config, "get_normalize_mixed_resolution", lambda: True)
+
+    await rec._normalize_mixed_resolution(mp4)
+
+    # 単一解像度として畳まれ、再走査もre-encodeも走らない。
+    assert calls == []
+
+
+async def test_normalize_reprobes_when_concat_left_no_resolutions(recording_factory,
+                                                                  monkeypatch):
+    """並行走査が何も返せなかった時は、必ず連結後mp4を読み直すこと。空のまま進めると
+    混在録画を「単一解像度」と誤判定して黙ってnormalizeを飛ばす(過去の実バグ)。"""
+    from tictok.record import recorder
+
+    recording = recording_factory(ended_at=DAY)
+    mp4 = Path(recording["path"])
+    calls = []
+
+    async def probe(path, *args):
+        calls.append(path)
+        return {(720, 1280)}
+
+    monkeypatch.setattr(recorder, "probe_mp4_resolutions", probe)
+    rec = recorder.Recorder("streamerA", str(mp4.parent), 1)
+    rec.base = mp4.stem
+    rec._concat_resolutions = None
+
+    await rec._normalize_mixed_resolution(mp4)
+
+    assert calls == [mp4]
+
+
+async def test_reencode_copies_audio_only_when_asked(tmp_path, monkeypatch):
+    """finalize経路は直前のconcatが書いたAACをそのまま運ぶ(copy)。素性を保証できない
+    維持scriptは既定のままre-encodeする。"""
+    from tictok.record import recorder
+
+    captured = []
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _EmptyStream()
+
+        async def wait(self):
+            return 0
+
+    class _EmptyStream:
+        async def readline(self):
+            return b""
+
+    async def fake_exec(*args, **kwargs):
+        captured.append(args)
+        (tmp_path / "out.tmp").write_bytes(b"x")
+        return _Proc()
+
+    async def same_length(_path):
+        return 3600.0
+
+    monkeypatch.setattr(recorder.asyncio, "create_subprocess_exec", fake_exec)
+    # 尺の突き合わせ(完走の検証)は別testの主題。ここはffmpegの引数だけを見る。
+    monkeypatch.setattr(recorder, "_probe_duration_seconds", same_length)
+    monkeypatch.setattr(recorder, "_write_normalize_marker", lambda *a, **k: None)
+
+    src, dst = tmp_path / "in.mp4", tmp_path / "out.tmp"
+    src.write_bytes(b"x")
+    assert await recorder.reencode_single_resolution(
+        src, dst, 720, 1280, "pad", "h264", 17, audio_copy=True) == "passthrough"
+    assert "copy" in captured[-1] and "aac" not in captured[-1]
+
+    assert await recorder.reencode_single_resolution(
+        src, dst, 720, 1280, "pad", "h264", 17) == "passthrough"
+    assert "aac" in captured[-1]
+
+
+async def test_reencode_that_stops_early_is_not_accepted_as_success(tmp_path, monkeypatch):
+    """exit 0 は「最後まで読めた」を意味しない。実測では178分の入力に対しdecodeが14.5分で
+    止まり、ffmpegは正常終了して91%を捨てた出力を残した。尺で突き合わせないと通ってしまう。"""
+    from tictok.record import recorder
+
+    modes = []
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _EmptyStream()
+
+        async def wait(self):
+            return 0
+
+    class _EmptyStream:
+        async def readline(self):
+            return b""
+
+    async def fake_exec(*args, **kwargs):
+        modes.append("cfr" if "cfr" in args else "passthrough")
+        (tmp_path / "out.tmp").write_bytes(b"x")
+        return _Proc()
+
+    async def short_output(path):
+        return 10675.0 if path.name == "in.mp4" else 872.0
+
+    monkeypatch.setattr(recorder.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(recorder, "_probe_duration_seconds", short_output)
+    monkeypatch.setattr(recorder, "_write_normalize_marker", lambda *a, **k: None)
+
+    src, dst = tmp_path / "in.mp4", tmp_path / "out.tmp"
+    src.write_bytes(b"x")
+    result = await recorder.reencode_single_resolution(
+        src, dst, 720, 1280, "pad", "h264", 17, audio_copy=True)
+
+    assert result is None                       # 採用しない
+    assert modes == ["passthrough", "cfr"]      # CFRまで試してから諦める
+    assert not dst.exists()                     # 切れた出力を残さない(sweepが拾ってしまう)
+
+
+async def test_reencode_keeps_its_output_when_the_duration_matches(tmp_path, monkeypatch):
+    from tictok.record import recorder
+
+    class _Proc:
+        returncode = 0
+
+        def __init__(self):
+            self.stdout = _EmptyStream()
+
+        async def wait(self):
+            return 0
+
+    class _EmptyStream:
+        async def readline(self):
+            return b""
+
+    async def fake_exec(*args, **kwargs):
+        (tmp_path / "out.tmp").write_bytes(b"x")
+        return _Proc()
+
+    async def same_length(_path):
+        return 10675.0
+
+    monkeypatch.setattr(recorder.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(recorder, "_probe_duration_seconds", same_length)
+    monkeypatch.setattr(recorder, "_write_normalize_marker", lambda *a, **k: None)
+
+    src, dst = tmp_path / "in.mp4", tmp_path / "out.tmp"
+    src.write_bytes(b"x")
+    assert await recorder.reencode_single_resolution(
+        src, dst, 720, 1280, "pad", "h264", 17, audio_copy=True) == "passthrough"
+
+
+# ===== 退避(_backup)の後始末 =====
+
+
+@pytest.fixture
+def backup_env(tmp_root, monkeypatch):
+    """退避と現行mp4を作り、ffprobeの代わりに (frame数, 尺) を返す仕掛けを置く。"""
+    from tictok.record import backups
+
+    measured: dict = {}
+
+    async def fake_probe(path):
+        # keyはpathそのもの。現行mp4と1世代目の退避はfile名が同じ(<stem>.mp4)なので、
+        # 名前でひくと両者の測定値が混ざる。
+        return measured.get(str(path), (None, None))
+
+    monkeypatch.setattr(backups, "probe_frames_seconds", fake_probe)
+
+    def _make(stem="00001_streamerA_20260101_120000", generations=1):
+        current = layout.mp4_path(tmp_root, stem, "streamerA")
+        current.parent.mkdir(parents=True, exist_ok=True)
+        current.write_bytes(b"\x00" * 64)
+        backup_dir = backups.backup_dir(tmp_root)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        made = []
+        for n in range(generations):
+            path = backup_dir / (f"{stem}.mp4" if n == 0 else f"{stem}.{n}.mp4")
+            path.write_bytes(b"\x00" * 128)
+            made.append(path)
+        return current, made, measured
+
+    return _make
+
+
+async def test_backup_is_deleted_once_the_replacement_is_verified(backup_env, tmp_root):
+    """退避は失敗を巻き戻すためのもので、成功が確かめられた時点で役目を終える。消す経路が
+    無かったため、成功1回につき元mp4が1本ずつ永久に残っていた(実測84本 304GB)。"""
+    from tictok.record import backups
+
+    stem = "00001_streamerA_20260101_120000"
+    current, made, measured = backup_env(stem=stem, generations=2)
+    measured[str(current)] = (81870, 3640.0)
+    measured[str(made[0])] = (81870, 3769.0)   # 尺は旧経路のぶん長いがframeは同じ
+    measured[str(made[1])] = (81870, 3769.0)
+
+    result = await backups.sweep_recording_backups(
+        stem, current, [tmp_root], keep_seconds=0.0, now=time.time())
+
+    assert result["deleted"] == 2
+    assert not any(path.exists() for path in made)
+
+
+async def test_backup_survives_when_the_replacement_lost_content(backup_env, tmp_root):
+    """現行が退避より欠けていれば、その退避はその録画の唯一の原本。消してはいけない。"""
+    from tictok.record import backups
+
+    stem = "00001_streamerA_20260101_120000"
+    current, made, measured = backup_env(stem=stem)
+    measured[str(current)] = (18252, 730.0)     # 途中で切れた作り直し
+    measured[str(made[0])] = (81870, 3769.0)
+
+    result = await backups.sweep_recording_backups(
+        stem, current, [tmp_root], keep_seconds=0.0, now=time.time())
+
+    assert result["deleted"] == 0
+    assert made[0].exists()
+    assert "欠けている" in "".join(result["kept"])
+
+
+async def test_backup_survives_when_only_frames_dropped_but_length_held(backup_env, tmp_root):
+    """旧mp4がCFR化でframeを水増ししていると、正しい作り直しでもframeが減る。内容欠落とは
+    別物だが、尺だけでは中身が薄くなっていないと言い切れないので自動では消さない。"""
+    from tictok.record import backups
+
+    stem = "00001_streamerA_20260101_120000"
+    current, made, measured = backup_env(stem=stem)
+    measured[str(current)] = (160047, 7647.0)
+    measured[str(made[0])] = (238531, 7951.0)
+
+    result = await backups.sweep_recording_backups(
+        stem, current, [tmp_root], keep_seconds=0.0, now=time.time())
+
+    assert result["deleted"] == 0
+    assert made[0].exists()
+
+
+async def test_backup_is_kept_inside_the_configured_window(backup_env, tmp_root):
+    """猶予を設定していれば、判定に関わらずその期間は残す(尺やframeでは見えない不具合に
+    人が気付くための窓)。"""
+    from tictok.record import backups
+
+    stem = "00001_streamerA_20260101_120000"
+    current, made, measured = backup_env(stem=stem)
+    measured[str(current)] = (81870, 3640.0)
+    measured[str(made[0])] = (81870, 3769.0)
+
+    result = await backups.sweep_recording_backups(
+        stem, current, [tmp_root], keep_seconds=DAY, now=time.time())
+
+    assert result["deleted"] == 0
+    assert made[0].exists()
+
+
+def test_startup_sweep_removes_orphaned_burn_in_intermediates(recording_factory, tmp_root):
+    """processが即死するとrenderの finally が走らず中間物が残る。実際にserver再起動で
+    31GB(cfrbase 17.3GB + comments.mov 13.7GB)が居座り、97%埋まったdiskを直接圧迫した。"""
+    from tictok.record.video_overlay import (
+        overlay_paths, overlay_transient_paths, sweep_orphaned_transients,
+    )
+
+    recording = recording_factory(ended_at=DAY)
+    src = Path(recording["path"])
+    orphans = [p for p in overlay_transient_paths(src)]
+    for path in orphans:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x" * 16)
+    frames_dir = orphans[1].with_name(orphans[1].stem + ".frames")
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    (frames_dir / "f0000000.png").write_bytes(b"x" * 32)
+    # 成果物(焼き込み済みmp4)と永続sidecarは巻き込まない。
+    output = overlay_paths(src)[0]
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(b"kept")
+    timing = recorder_timing_path(src)
+    timing.parent.mkdir(parents=True, exist_ok=True)
+    timing.write_text("{}", encoding="utf-8")
+
+    removed, freed = sweep_orphaned_transients([tmp_root])
+
+    assert removed == len(orphans) + 1
+    assert freed == 16 * len(orphans) + 32
+    assert not any(p.exists() for p in orphans)
+    assert not frames_dir.exists()
+    assert output.read_bytes() == b"kept"
+    assert timing.is_file()
+
+
+def test_startup_sweep_is_a_noop_without_a_sidecar_dir(tmp_path):
+    """sidecar dirがまだ無いserverでも落ちないこと(初回起動)。"""
+    from tictok.record.video_overlay import sweep_orphaned_transients
+
+    assert sweep_orphaned_transients([tmp_path / "nope"]) == (0, 0)
 
 
 def test_build_plan_keeps_phase_order_and_explains_disabled_phases(recording_factory, tmp_root):

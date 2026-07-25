@@ -15,7 +15,10 @@ import json
 import logging
 from pathlib import Path
 
+from tictok.core import config
 from tictok.core.battle import GLOVE_EVENT_VERSION
+from tictok.core.logging_setup import progress_interval_seconds
+from tictok.core.progress import IntervalGate
 
 logger = logging.getLogger("tictok.glove_migration")
 
@@ -312,7 +315,26 @@ def migrate_glove_events(conn, log_dir) -> dict:
     ).fetchall()
     totals = {"battles": 0, "crit": 0, "normal": 0, "undecided": 0, "kept": 0}
     touched_sessions = set()
-    for row in rows:
+    # この再判定は Storage.__init__ の中、つまりserverが待ち受けを始める**前**に走る。
+    # battle毎に生dump(.jsonl.gz)を全行解凍してparseするため、対象が多いと数分かかる。
+    # 進捗を出さないと、userには「serverが起動しない」としか見えない(HTTPも上がって
+    # いないので画面から確かめる手段が無く、logだけが唯一の手がかりになる)。
+    if rows:
+        logger.info(
+            "glove migration: re-judging %d battle(s) from the raw captures; "
+            "the server starts once this finishes", len(rows),
+            extra={"event": "glove_migration.started", "ctx": {"candidates": len(rows)}},
+        )
+    gate = IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
+    for index, row in enumerate(rows):
+        if gate.ready():
+            logger.info(
+                "glove migration: %d/%d battle(s) scanned (%d rewritten)",
+                index, len(rows), totals["battles"],
+                extra={"event": "glove_migration.progress",
+                       "ctx": {"scanned": index, "candidates": len(rows),
+                               "rewritten": totals["battles"]}},
+            )
         try:
             battle = json.loads(row["d"])
         except (ValueError, TypeError):

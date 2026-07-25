@@ -46,6 +46,14 @@ FCPXML_VERSION = "1.10"
 _NTSC_DENOMINATOR = 1001
 
 
+def _reason_suffix(reason: str) -> str:
+    """error文へ差し込む「: 理由」。理由が分からなければ従来どおりの案内へ落とす。
+
+    理由はcut itemが持つ(module levelのdictに溜めない)。溜めると書き出す度に増え続ける
+    うえ、一度失敗したpathが後で読めるようになっても古い理由が残り、実態と食い違う。"""
+    return f": {reason}" if reason else "。fileの実体を確認してください"
+
+
 class CutlistExportError(RuntimeError):
     """frame基準の形式へ書き出せないとき(fps未解決・fps混在など)に送出する。"""
 
@@ -54,18 +62,21 @@ def _ffprobe_available() -> bool:
     return shutil.which("ffprobe") is not None
 
 
-async def _probe_media(path: Path) -> Optional[dict]:
+async def _probe_media(path: Path) -> tuple:
     """素材のfps(有理数)・解像度・尺・音声構成をffprobeで実測する。
 
     fpsはr_frame_rateの分数表記をそのまま有理数で保持する。floatへ落とすと29.97が
     30000/1001へ戻らず、FCPXMLのframeDurationが表現できない。測れない場合は捏造せず
-    Noneを返し、呼び出し側が形式ごとに扱いを決める。"""
+    Noneを返し、呼び出し側が形式ごとに扱いを決める。
+
+    戻り値は ``(情報 or None, 失敗理由)``。理由を返さずNoneだけにすると、6つある失敗原因
+    すべてが1つの汎用errorへ潰れ、userはffprobeが無いのか映像streamが無いのか分からない。"""
     if not _ffprobe_available():
         logger.warning(
             "ffprobe not found; cutlist timecode cannot be resolved",
             extra={"event": "cutlist.probe_unavailable", "ctx": {"path": str(path)}},
         )
-        return None
+        return None, "ffprobeが見つかりません"
     try:
         proc = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-print_format", "json",
@@ -80,7 +91,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
             "ffprobe failed to start for %s", path, exc_info=True,
             extra={"event": "cutlist.probe_failed", "ctx": {"path": str(path)}},
         )
-        return None
+        return None, "ffprobeを起動できません"
     if proc.returncode != 0:
         logger.warning(
             "ffprobe returned %d for %s", proc.returncode, path,
@@ -88,7 +99,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
                    "ctx": {"path": str(path), "returncode": proc.returncode,
                            "stderr": (err or b"").decode("utf-8", "replace")[:500]}},
         )
-        return None
+        return None, f"ffprobeがexit {proc.returncode}で失敗"
     try:
         info = json.loads(out.decode("utf-8", "replace"))
     except ValueError:
@@ -96,7 +107,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
             "ffprobe output was not JSON for %s", path, exc_info=True,
             extra={"event": "cutlist.probe_failed", "ctx": {"path": str(path)}},
         )
-        return None
+        return None, "ffprobeの出力を解釈できません"
 
     video = next((s for s in info.get("streams") or []
                   if s.get("codec_type") == "video"), None)
@@ -105,7 +116,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
             "no video stream in %s", path,
             extra={"event": "cutlist.probe_no_video", "ctx": {"path": str(path)}},
         )
-        return None
+        return None, "映像streamがありません"
     fps = _parse_rate(video.get("r_frame_rate"))
     if fps is None:
         logger.warning(
@@ -113,7 +124,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
             extra={"event": "cutlist.probe_no_fps",
                    "ctx": {"path": str(path), "r_frame_rate": video.get("r_frame_rate")}},
         )
-        return None
+        return None, f"frame rateが不正です（{video.get('r_frame_rate')!r}）"
 
     audio = next((s for s in info.get("streams") or []
                   if s.get("codec_type") == "audio"), None)
@@ -131,7 +142,7 @@ async def _probe_media(path: Path) -> Optional[dict]:
         "duration": duration,
         "audio_channels": _as_int((audio or {}).get("channels")),
         "audio_rate": _as_int((audio or {}).get("sample_rate")),
-    }
+    }, ""
 
 
 def _as_int(value) -> Optional[int]:
@@ -152,23 +163,35 @@ def _parse_rate(token) -> Optional[Fraction]:
     return rate if rate > 0 else None
 
 
-async def resolve_timebases(cuts: list) -> list:
+async def resolve_timebases(cuts: list, on_progress=None) -> list:
     """各cutへ素材の実測情報(``media``)を付けたlistを返す。同一fileは1回だけ測る。
 
     測れなかったcutの ``media`` はNone。ここでは落とさず、frame基準の形式側で
-    「解決できない素材がある」として止める。"""
+    「解決できない素材がある」として止める。
+
+    ``on_progress(done, total)`` は素材1本を測るたびに await される。ffprobeを素材ごとに
+    **逐次**回すため、cutが多いと書き出しbuttonが無反応に見える(実際に測っている件数を
+    出す以外に、進んでいることを伝える手段が無い)。"""
     probed: dict = {}
     out = []
+    # 分母は「これから測るfile数」。cut件数ではない(同じ素材の複数cutは1回しか測らない)。
+    unique_paths = {c.get("path") for c in cuts if c.get("path")}
+    total = len(unique_paths)
     for cut in cuts:
         item = dict(cut)
         path = cut.get("path")
         if path:
             if path not in probed:
+                if on_progress is not None:
+                    await on_progress(len(probed), total)
                 probed[path] = await _probe_media(Path(path))
-            item["media"] = probed[path]
+            item["media"], item["media_error"] = probed[path]
         else:
             item["media"] = None
+            item["media_error"] = "cutにfileのpathがありません"
         out.append(item)
+    if on_progress is not None:
+        await on_progress(total, total)
     return out
 
 
@@ -257,10 +280,12 @@ def _timeline_rate(cuts: list) -> Fraction:
     """list全体のtimebase。EDLは1つしか持てないので、混在は書き出さずに止める。"""
     rates = {}
     missing = []
+    missing_reasons = []
     for cut in cuts:
         media = cut.get("media")
         if not media:
             missing.append(cut.get("filename") or cut.get("path") or cut["unique_id"])
+            missing_reasons.append(cut.get("media_error") or "")
             continue
         rates.setdefault(media["fps"], []).append(
             cut.get("filename") or cut.get("path") or cut["unique_id"]
@@ -268,7 +293,7 @@ def _timeline_rate(cuts: list) -> Fraction:
     if missing:
         raise CutlistExportError(
             "frame rateを実測できない素材があるためtimecodeを出せません"
-            f"（{len(missing)}件、例: {missing[0]}）。fileの実体を確認してください。"
+            f"（{len(missing)}件、例: {missing[0]}{_reason_suffix(missing_reasons[0])}）。"
         )
     if not rates:
         raise CutlistExportError("書き出す対象がありません。")
@@ -331,8 +356,8 @@ def to_fcpxml(cuts: list, name: str = "tictok_cutlist") -> str:
         first = missing[0]
         raise CutlistExportError(
             "frame rateを実測できない素材があるためFCPXMLを出せません"
-            f"（{len(missing)}件、例: {first.get('filename') or first.get('path')}）。"
-            "fileの実体を確認してください。"
+            f"（{len(missing)}件、例: {first.get('filename') or first.get('path')}"
+            f"{_reason_suffix(first.get('media_error') or '')}）。"
         )
     if not cuts:
         raise CutlistExportError("書き出す対象がありません。")

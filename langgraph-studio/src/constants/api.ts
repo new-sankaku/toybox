@@ -55,12 +55,16 @@ export const API_ENDPOINTS={
   retry:(id:string)=>`/api/agents/${id}/retry`,
   pause:(id:string)=>`/api/agents/${id}/pause`,
   resume:(id:string)=>`/api/agents/${id}/resume`,
+  freeze:(id:string)=>`/api/agents/${id}/freeze`,
+  unfreeze:(id:string)=>`/api/agents/${id}/unfreeze`,
   cancel:(id:string)=>`/api/agents/${id}/cancel`,
   sequence:(id:string)=>`/api/agents/${id}/sequence`,
   execute:(id:string)=>`/api/agents/${id}/execute`,
   executeWithWorkers:(id:string)=>`/api/agents/${id}/execute-with-workers`,
   traces:(id:string)=>`/api/agents/${id}/traces`,
   systemPrompt:(id:string)=>`/api/agents/${id}/system-prompt`,
+  savePromptToProject:(id:string)=>`/api/agents/${id}/system-prompt/project`,
+  savePromptToGlobal:(id:string)=>`/api/agents/${id}/system-prompt/global`,
   snapshots:(id:string)=>`/api/agents/${id}/snapshots`,
   restoreSnapshot:(agentId:string,snapshotId:string)=>`/api/agents/${agentId}/snapshots/${snapshotId}/restore`
  },
@@ -114,7 +118,9 @@ export const API_ENDPOINTS={
   advancedSettingsDefaults:'/api/config/advanced-settings/defaults',
   concurrentLimitsDefaults:'/api/config/concurrent-limits/defaults',
   concurrentLimits:'/api/config/concurrent-limits',
-  principles:'/api/config/principles'
+  principles:'/api/config/principles',
+  notificationSettings:'/api/config/notification-settings',
+  displaySettings:'/api/config/display-settings'
  },
  brushup:{
   options:'/api/brushup/options'
