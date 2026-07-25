@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from tictok.core import layout
-from tictok.core.cancel import JobCancelled
+from tictok.core.cancel import CancelToken, JobCancelled
 from tictok.record import disk_scan, retention
 from tictok.record.media_queue import (
     JobDeferred,
@@ -217,8 +217,10 @@ async def test_cancel_pending_marks_cancelled_and_second_cancel_reports_finished
     assert await queue.cancel("nope") == "missing"
 
 
-async def test_cancel_running_reprocess_is_refused_not_silently_accepted(
+async def test_cancel_running_job_requests_interruption(
         queue_factory, recording_factory, tmp_db):
+    """workerが掴んでいる実行中jobのcancelはtokenを倒す中断要求として通る。
+    stateはrunningのまま — 実際に止まったのはrunner側が畳んでから書く。"""
     recording = recording_factory()
 
     async def runner(job, report):
@@ -227,7 +229,10 @@ async def test_cancel_running_reprocess_is_refused_not_silently_accepted(
     queue, _ = queue_factory(runner)
     await queue.enqueue("job-1", "reprocess", recording["id"])
     tmp_db.start_media_job("job-1")
-    assert await queue.cancel("job-1") == "unsupported"
+    token = CancelToken("job-1")
+    queue._tokens["job-1"] = token
+    assert await queue.cancel("job-1") == "cancelling"
+    assert token.cancelled
     assert tmp_db.get_media_job("job-1")["state"] == "running"
 
 
@@ -1378,7 +1383,8 @@ async def test_transcribe_retries_a_transient_failure_then_succeeds(
         return {"text": "ok", "segments": []}
 
     monkeypatch.setattr("tictok.record.transcribe_queue.stt_transcribe", flaky)
-    result = await queue._transcribe_with_retry(1, Path("x.mp4"), lambda d, t: None)
+    result = await queue._transcribe_with_retry(
+        1, Path("x.mp4"), lambda d, t: None, lambda: 0)
     assert len(calls) == 3
     assert result["text"] == "ok"
 
@@ -1396,5 +1402,6 @@ async def test_transcribe_gives_up_after_the_configured_attempts(
 
     monkeypatch.setattr("tictok.record.transcribe_queue.stt_transcribe", always_fails)
     with pytest.raises(RuntimeError):
-        await queue._transcribe_with_retry(1, Path("x.mp4"), lambda d, t: None)
+        await queue._transcribe_with_retry(
+            1, Path("x.mp4"), lambda d, t: None, lambda: 0)
     assert len(calls) == 2

@@ -390,7 +390,7 @@ async def test_resolve_timebases_probes_each_file_once(monkeypatch, tmp_path):
 
     async def fake_probe(path):
         calls.append(Path(path))
-        return _media(Fraction(25, 1))
+        return _media(Fraction(25, 1)), None
 
     monkeypatch.setattr(cutlist_export, "_probe_media", fake_probe)
     first, second = tmp_path / "a.mp4", tmp_path / "b.mp4"
@@ -408,15 +408,18 @@ async def test_resolve_timebases_leaves_unprobeable_cuts_unmeasured(monkeypatch,
     """ffprobeが失敗した素材へ既定fpsを与えない。frame基準の形式側で止めるため、
     未解決はNoneのまま残す。"""
     async def fail_probe(path):
-        return None
+        return None, "映像streamがありません"
 
     monkeypatch.setattr(cutlist_export, "_probe_media", fail_probe)
     resolved = await cutlist_export.resolve_timebases(
         [_cut(path=str(tmp_path / "a.mp4"), fps=None)])
     assert resolved[0]["media"] is None
+    # 失敗理由は潰さずcutへ載せる。汎用errorに畳むとuserが原因を切り分けられない。
+    assert resolved[0]["media_error"] == "映像streamがありません"
     # pathが無いcutはffprobeを起こしようがないので、そもそも測りに行かない。
     pathless = await cutlist_export.resolve_timebases([_cut(fps=None)])
     assert pathless[0]["media"] is None
+    assert pathless[0]["media_error"] == "cutにfileのpathがありません"
 
 
 # ===== indexer =====

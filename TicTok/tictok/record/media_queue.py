@@ -249,7 +249,7 @@ class MediaJobQueue:
 
     async def cancel(self, job_id: str) -> str:
         """取り消し結果を返す: 'cancelled'(待機中を取消) / 'cancelling'(実行中へ中断要求) /
-        'missing'(該当なし) / 'finished'(既に終了) / 'unsupported'(中断点が無い種別)。"""
+        'missing'(該当なし、または前回processの残骸running行) / 'finished'(既に終了)。"""
         job = self._storage.get_media_job(job_id)
         if job is None:
             return "missing"
