@@ -24,16 +24,30 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 
+from tictok.core.config import (
+    get_audio_profile_interval_seconds,
+    get_audio_silence_dbfs,
+    get_audio_silence_min_seconds,
+)
 from tictok.record.recorder import ffmpeg_available, ffmpeg_ctx, sidecar_path
 
 logger = logging.getLogger(__name__)
 
 WAVEFORM_SUFFIX = ".waveform.json"
+# 絶対levelの時系列(無音判定・音量spike用)。表示用波形とは正規化が違うので別sidecarにする。
+# 表示側は「最大値で割った包絡」、こちらは「full scale基準の実level」でなければ、
+# 静かな配信のnoise floorが可聴扱いになる。
+AUDIO_PROFILE_SUFFIX = ".audio.json"
 # cache schemaのversion。縮約方法や正規化を変えたら上げる(旧cacheを無効化するため)。
 _CACHE_VERSION = 1
+_PROFILE_VERSION = 1
+# 表示用波形を伴わずprofileだけを要求されたときのbucket数。decodeは1回で両方作れるので、
+# ついでに作る表示用波形の解像度を決めるためだけの値(APIの既定値と揃えてある)。
+_PROFILE_DISPLAY_BUCKETS = 2000
 
 # 波形表示に必要なのは振幅の包絡だけで音質は不要。8kHzでも数千bucketの包絡は変わらず、
 # decode量(=所要時間)は元の48kHzの1/6で済む。
@@ -62,6 +76,18 @@ _STDERR_KEEP_BYTES = 16384
 def waveform_path(src) -> Path:
     """``src``の波形cacheのsidecar path。"""
     return sidecar_path(src, WAVEFORM_SUFFIX)
+
+
+def audio_profile_path(src) -> Path:
+    """``src``の絶対level時系列のsidecar path。"""
+    return sidecar_path(src, AUDIO_PROFILE_SUFFIX)
+
+
+def waveform_artifact_paths(src) -> tuple:
+    """``src``の波形cache一式のpath。表示用と絶対levelで別fileなので、srcを消す側が
+    片方だけ残さないよう列挙で返す。実在確認はしない。"""
+    src = Path(src)
+    return (waveform_path(src), audio_profile_path(src))
 
 
 def _source_key(src: Path) -> dict:
@@ -112,6 +138,34 @@ def _lock_for(key: str) -> asyncio.Lock:
         return lock
 
 
+def _load_profile_cache(src: Path, interval: float) -> dict:
+    """有効なlevel profile cacheがあれば返す。刻み幅が違うcacheは畳み直さない(境界が
+    整数倍でない限り近似になり、無音区間の端が実際とずれる)。"""
+    path = audio_profile_path(src)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if data.get("version") != _PROFILE_VERSION:
+        return {}
+    if data.get("interval_seconds") != round(interval, 3):
+        return {}
+    try:
+        key = _source_key(src)
+    except OSError:
+        return {}
+    if data.get("mtime") != key["mtime"] or data.get("size") != key["size"]:
+        return {}
+    levels = data.get("levels")
+    if not isinstance(levels, list):
+        return {}
+    return {
+        "interval_seconds": data["interval_seconds"],
+        "duration_seconds": float(data.get("duration_seconds", 0.0)),
+        "levels": levels,
+    }
+
+
 def _store_cache(src: Path, result: dict) -> None:
     """cacheを書く。書けなくても波形自体は返せるので、失敗は警告に留めて送出しない
     (次回ffmpegが再度走るだけで、結果は正しい)。"""
@@ -129,6 +183,24 @@ def _store_cache(src: Path, result: dict) -> None:
         logger.warning(
             "waveform cache write failed for %s", src.name,
             extra={"event": "waveform.cache_write_failed",
+                   "ctx": {"src": str(src), "path": str(path), "error": str(exc)}},
+        )
+
+
+def _store_profile_cache(src: Path, profile: dict) -> None:
+    """level profileを書く。失敗しても値自体は返せるので警告に留める(_store_cacheと同じ)。"""
+    path = audio_profile_path(src)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"version": _PROFILE_VERSION, "sample_rate": SAMPLE_RATE,
+                   **_source_key(src), **profile}
+        tmp = path.with_suffix(f"{path.suffix}.{os.getpid()}-{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        logger.warning(
+            "audio profile cache write failed for %s", src.name,
+            extra={"event": "waveform.profile_write_failed",
                    "ctx": {"src": str(src), "path": str(path), "error": str(exc)}},
         )
 
@@ -215,6 +287,23 @@ def _reduce(fine: np.ndarray, buckets: int) -> np.ndarray:
     return fine[idx]
 
 
+def _levels(fine: np.ndarray, interval: float) -> dict:
+    """fine peak列を固定秒刻みへ畳み、full scale基準(0.0〜1.0)の絶対levelにする。
+
+    表示用の``_reduce``と違い、bucket数ではなく**時間**で刻む。無音判定も音量spikeも
+    「何秒目のlevelか」で答える必要があり、録画の尺で刻み幅が変わってはならないため。
+    """
+    frames = max(1, int(round(interval * 1000.0 / FINE_FRAME_MS)))
+    n = fine.size
+    starts = np.arange(0, n, frames, dtype=np.int64)
+    reduced = np.maximum.reduceat(fine, starts) / _FULL_SCALE
+    return {
+        "interval_seconds": round(frames * FINE_FRAME_MS / 1000.0, 3),
+        "duration_seconds": round(n * FINE_FRAME_MS / 1000.0, 3),
+        "levels": [round(float(v), _PEAK_DECIMALS) for v in reduced],
+    }
+
+
 def _decode_fine_peaks(src: Path) -> np.ndarray:
     """ffmpegで音声のみをmono/``SAMPLE_RATE``へdecodeし、fine peak列を返す。"""
     args = [
@@ -268,10 +357,17 @@ def _decode_fine_peaks(src: Path) -> np.ndarray:
     return fine
 
 
-def _build(src: Path, buckets: int) -> dict:
+def _build(src: Path, buckets: int, interval: float) -> tuple:
+    """1回のdecodeから、表示用波形と絶対level profileの両方を作る。
+
+    profileを別々に作らないのは、decodeがcontainerを丸ごと読む(長尺で90秒級)処理で、
+    2回読めば所要も倍になるため。fine peak列は畳んだ後に捨てられていたので、
+    ここで刻み直すだけならffmpegの再実行は要らない。
+    """
     started = time.monotonic()
     fine = _decode_fine_peaks(src)
     duration = fine.size * FINE_FRAME_MS / 1000.0
+    profile = _levels(fine, interval)
     peaks = _reduce(fine, buckets)
     # 全尺のpeakで割る「表示用」正規化。full scale固定で割ると入力levelの低い配信が
     # 一様に潰れて包絡が読めなくなるため、seek bar下の表示にはこちらが要る。
@@ -293,7 +389,7 @@ def _build(src: Path, buckets: int) -> dict:
                        "sample_rate": SAMPLE_RATE,
                        "elapsed_seconds": round(time.monotonic() - started, 2)}},
     )
-    return result
+    return result, profile
 
 
 async def ensure_waveform(src: Path, buckets: int = 2000) -> dict:
@@ -326,6 +422,104 @@ async def ensure_waveform(src: Path, buckets: int = 2000) -> dict:
         cached = await asyncio.to_thread(_load_cache, src, buckets)
         if cached:
             return cached
-        result = await asyncio.to_thread(_build, src, buckets)
+        result, profile = await asyncio.to_thread(
+            _build, src, buckets, get_audio_profile_interval_seconds())
         await asyncio.to_thread(_store_cache, src, result)
+        await asyncio.to_thread(_store_profile_cache, src, profile)
     return result
+
+
+async def ensure_audio_profile(src: Path) -> dict:
+    """``src``の絶対level時系列を返す(cacheがあればそれを、無ければ生成してcacheする)。
+
+    戻り値: ``{"interval_seconds": float, "duration_seconds": float, "levels": list[float]}``。
+    levelsはfull scale基準(0.0〜1.0)の区間peakで、表示用波形と違い録画間で比較できる。
+
+    生成は表示用波形と同じdecodeで賄うため、波形cacheも同時に埋まる。
+    """
+    src = Path(src)
+    interval = get_audio_profile_interval_seconds()
+    if interval <= 0:
+        raise RuntimeError("音声profileの刻み幅は正の値にしてください。")
+    if not src.is_file():
+        raise RuntimeError("録画fileが存在しません。")
+
+    cached = await asyncio.to_thread(_load_profile_cache, src, interval)
+    if cached:
+        return cached
+
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpegが見つかりません。音声解析にはffmpegのinstallが必要です。")
+
+    async with _lock_for(str(src.resolve())):
+        cached = await asyncio.to_thread(_load_profile_cache, src, interval)
+        if cached:
+            return cached
+        result, profile = await asyncio.to_thread(
+            _build, src, _PROFILE_DISPLAY_BUCKETS, interval)
+        await asyncio.to_thread(_store_cache, src, result)
+        await asyncio.to_thread(_store_profile_cache, src, profile)
+    return profile
+
+
+def silence_spans(profile: dict, threshold_dbfs: Optional[float] = None,
+                  min_seconds: Optional[float] = None) -> list:
+    """profileから無音区間 ``[{"start": 秒, "end": 秒}]`` を返す。
+
+    閾値はfull scale基準の絶対level。録画自身のpeakで正規化した値と比べると、全体に
+    音量の小さい配信では通常の発話まで無音に落ちる。
+    """
+    threshold_dbfs = (get_audio_silence_dbfs() if threshold_dbfs is None
+                      else threshold_dbfs)
+    min_seconds = (get_audio_silence_min_seconds() if min_seconds is None
+                   else min_seconds)
+    amplitude = 10.0 ** (threshold_dbfs / 20.0)
+    interval = profile["interval_seconds"]
+    spans: list = []
+    run_start = None
+    levels = profile["levels"]
+    for i, level in enumerate(levels + [None]):
+        silent = level is not None and level < amplitude
+        if silent and run_start is None:
+            run_start = i
+        elif not silent and run_start is not None:
+            start, end = run_start * interval, i * interval
+            if end - start >= min_seconds:
+                spans.append({"start": round(start, 2), "end": round(end, 2)})
+            run_start = None
+    return spans
+
+
+def silent_ratio(profile: dict, start: float, end: float,
+                 threshold_dbfs: Optional[float] = None) -> Optional[float]:
+    """``[start, end)``秒のうち無音だった割合。区間がprofileの外なら判定不能でNone。"""
+    interval = profile["interval_seconds"]
+    levels = profile["levels"]
+    if interval <= 0 or end <= start or start < 0:
+        return None
+    first = int(start / interval)
+    last = min(len(levels), int(round(end / interval)))
+    if first >= last or first >= len(levels):
+        return None
+    threshold_dbfs = (get_audio_silence_dbfs() if threshold_dbfs is None
+                      else threshold_dbfs)
+    amplitude = 10.0 ** (threshold_dbfs / 20.0)
+    window = levels[first:last]
+    return round(sum(1 for v in window if v < amplitude) / len(window), 3)
+
+
+def level_peak(profile: dict, start: float, end: float) -> Optional[float]:
+    """``[start, end)``秒の絶対levelのpeak。区間がprofileの外なら判定不能でNone。
+
+    Noneを0で埋めないのは、録画の無い区間(=音声が存在しない)と本当の無音を混ぜると、
+    前者が「静まり返っていた」として盛り上がり判定の母集団に入ってしまうため。
+    """
+    interval = profile["interval_seconds"]
+    levels = profile["levels"]
+    if interval <= 0 or end <= start or start < 0:
+        return None
+    first = int(start / interval)
+    last = min(len(levels), max(first + 1, int(round(end / interval))))
+    if first >= len(levels):
+        return None
+    return max(levels[first:last])

@@ -13,52 +13,49 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">配信者動画</h1>
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a class="active" href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <div class="vd-tabs">
       <button id="tab-search" class="vd-tab active" type="button">シーン検索</button>
       <button id="tab-marks" class="vd-tab" type="button">見どころ</button>
-      <button id="tab-candidates" class="vd-tab" type="button">切り出し候補</button>
       <button id="tab-cuts" class="vd-tab" type="button">切り出しリスト</button>
       <button id="tab-jobs" class="vd-tab" type="button">一括文字起こし</button>
+      <button id="tab-bulk" class="vd-tab" type="button">一括処理</button>
     </div>
 
     <!-- ===== シーン検索 ===== -->
     <div id="view-search" class="vd-view">
       <div class="x-toolbar">
-        <input id="q" type="text" placeholder="🔎 空白=AND　&quot;…&quot;=フレーズ　-語=除外　OR=いずれか" autocomplete="off" />
+        <input id="q" type="text" aria-label="シーンをコメント・音声から検索" placeholder="🔎 空白=AND　&quot;…&quot;=フレーズ　-語=除外　OR=いずれか" autocomplete="off" />
         <label class="vd-chk"><input id="src-stt" type="checkbox" checked /> 音声</label>
-        <label class="vd-chk"><input id="src-comment" type="checkbox" checked /> コメント</label>
+        <label class="vd-chk"><input id="src-comment" type="checkbox" checked /> Comment</label>
         <label class="x-field"><span>配信者</span>
           <select id="flt-streamer"><option value="">全て</option></select>
         </label>
-        <label class="x-field"><span>検索</span>
-          <select id="flt-mode">
-            <option value="keyword">語で一致</option>
-            <option value="semantic">意味で近い（AI）</option>
-          </select>
-        </label>
-        <label class="x-field"><span>並替</span>
-          <select id="flt-order">
-            <option value="time">配信が新しい順</option>
-            <option value="rank">関連度順</option>
-          </select>
-        </label>
+        <span class="x-field seg-field"><span class="seg-label">検索</span>
+          <span id="flt-mode" class="seg" role="radiogroup" aria-label="検索の方式" data-value="keyword">
+            <button class="seg-item" type="button" data-value="keyword">語で一致</button>
+            <button class="seg-item" type="button" data-value="semantic">意味で近い（AI）</button>
+          </span>
+        </span>
+        <span class="x-field seg-field"><span class="seg-label">並替</span>
+          <span id="flt-order" class="seg" role="radiogroup" aria-label="並び順" data-value="time">
+            <button class="seg-item" type="button" data-value="time">配信が新しい順</button>
+            <button class="seg-item" type="button" data-value="rank">関連度順</button>
+          </span>
+        </span>
+        <!-- 意味検索が空振りしたとき、原因(index未構築)と対処が別tabにあって辿り着けなかった。
+             意味検索を選んでいるときだけ、理由と更新buttonをこの場に出す。 -->
+        <span id="semantic-inline" class="vd-summary hidden">
+          <span id="semantic-note" class="vd-summary"></span>
+          <button id="semantic-build" class="btn btn-small" type="button">意味検索indexを更新</button>
+        </span>
         <span class="sp"></span>
         <span id="search-summary" class="vd-summary"></span>
       </div>
@@ -68,7 +65,7 @@
           <div class="table-wrap">
             <table class="result-table xtab">
               <thead>
-                <tr><th>種別</th><th>配信者</th><th>配信日</th><th>位置</th><th>内容</th></tr>
+                <tr><th>種別</th><th>配信者</th><th>配信日</th><th id="hit-pos-th">位置</th><th>内容</th></tr>
               </thead>
               <tbody id="hit-rows"></tbody>
             </table>
@@ -94,66 +91,104 @@
                   <label class="vd-chk"><input id="snap-seg" type="checkbox" checked /> 発話境界にスナップ</label>
                   <label class="vd-chk"><input id="clip-precise" type="checkbox" /> 精密（再encode）</label>
                 </div>
-                <!-- 切り出しの素材版と音量正規化。焼き込み出力・Up出力は「出力済みの録画」に
-                     しか無いので、無い版を選ぶとserverが理由を返す。 -->
+                <!-- 素材版は再生と切り出しの両方に効く。出来を確かめずに切り出す事態を避けるため、
+                     選んだ版がそのままplayerに載る。焼き込み出力・Up出力は「出力済みの録画」に
+                     しか無いので、その録画に無い版は下のbuttonで作るまでgrey outする。 -->
                 <div class="vd-row">
-                  <label class="vd-chk">素材
-                    <select id="clip-variant" class="vd-variant">
-                      <option value="source">元録画</option>
-                      <option value="overlay">焼き込み出力</option>
-                      <option value="upscaled">Up出力</option>
-                    </select>
-                  </label>
+                  <span class="vd-chk seg-field"><span class="seg-label">素材</span>
+                    <span id="clip-variant" class="seg" role="radiogroup" aria-label="再生と切り出しに使う素材版" data-value="source">
+                      <button class="seg-item" type="button" data-value="source">元録画</button>
+                      <button class="seg-item" type="button" data-value="overlay">焼き込み</button>
+                      <button class="seg-item" type="button" data-value="upscaled">Up出力</button>
+                    </span>
+                  </span>
                   <label class="vd-chk"><input id="clip-normalize" type="checkbox" /> 音量を正規化</label>
                 </div>
                 <!-- 再生系。倍速は編集中の見返しで最も使うので、shuttle(J/K/L)とは別に
                      固定倍率を選べるようにする。ループはIN/OUTの当たりを何度も確認する用。 -->
                 <div class="vd-row">
-                  <label class="vd-chk">速度
-                    <select id="play-rate" class="vd-rate">
-                      <option value="0.25">0.25x</option>
-                      <option value="0.5">0.5x</option>
-                      <option value="0.75">0.75x</option>
-                      <option value="1" selected>1x</option>
-                      <option value="1.25">1.25x</option>
-                      <option value="1.5">1.5x</option>
-                      <option value="2">2x</option>
-                      <option value="3">3x</option>
-                      <option value="4">4x</option>
-                    </select>
-                  </label>
+                  <span class="vd-chk seg-field"><span class="seg-label">速度(x)</span>
+                    <span id="play-rate" class="seg seg-rate" role="radiogroup"
+                          aria-label="再生速度" data-value="1" data-revert="1" data-wheel="1"
+                          title="click=その速度へ / 選択中を再click=1xへ戻る / wheel=1段ずつ / , . key でも動きます">
+                      <button class="seg-item" type="button" data-value="0.25">0.25</button>
+                      <button class="seg-item" type="button" data-value="0.5">0.5</button>
+                      <button class="seg-item" type="button" data-value="0.75">0.75</button>
+                      <button class="seg-item" type="button" data-value="1">1</button>
+                      <button class="seg-item" type="button" data-value="1.25">1.25</button>
+                      <button class="seg-item" type="button" data-value="1.5">1.5</button>
+                      <button class="seg-item" type="button" data-value="2">2</button>
+                      <button class="seg-item" type="button" data-value="3">3</button>
+                      <button class="seg-item" type="button" data-value="4">4</button>
+                    </span>
+                  </span>
                   <label class="vd-chk"><input id="loop-range" type="checkbox" /> IN/OUTをループ</label>
+                </div>
+                <!-- 音量。native controlsのslider はhoverでしか出ず短いので、常時見える長い
+                     bar を外出しする。値は録画を跨いで記憶する。 -->
+                <div class="vd-row vd-volume-row">
+                  <button id="mute" class="btn btn-small vd-mute" type="button" title="ミュート切替">音量</button>
+                  <input id="volume" class="vd-volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" />
+                  <span id="volume-label" class="vd-volume-label">100%</span>
                 </div>
                 <div class="vd-row">
                   <button id="add-mark" class="btn btn-primary" type="button" disabled>見どころに記録</button>
-                  <input id="mark-memo" class="vd-memo" type="text" placeholder="メモ（後から編集可）" autocomplete="off" />
+                  <input id="mark-memo" class="vd-memo" type="text" aria-label="見どころのメモ" placeholder="メモ（後から編集可）" autocomplete="off" />
                   <button id="add-cut" class="btn" type="button" disabled>切り出しリストに追加</button>
                   <button id="do-clip" class="btn" type="button" disabled>mp4切り出し</button>
                 </div>
                 <div class="vd-row">
-                  <button id="copy-path" class="btn" type="button" disabled>path</button>
-                  <button id="copy-time" class="btn" type="button" disabled>時刻</button>
-                  <button id="copy-both" class="btn" type="button" disabled>path+IN/OUT</button>
-                  <select id="path-variant" class="vd-variant hidden" title="左のcopy対象にするfile（録画本体・焼き込み済・高画質化済）"></select>
+                  <button id="copy-path" class="btn" type="button" disabled>pathをcopy</button>
+                  <button id="copy-time" class="btn" type="button" disabled>時刻をcopy</button>
+                  <button id="copy-both" class="btn" type="button" disabled>path+IN/OUTをcopy</button>
+                  <select id="path-variant" class="vd-variant hidden" title="左のcopy対象にするfile（録画本体・焼き込み済・Up出力済）"></select>
                 </div>
-                <div id="player-status" class="form-message vd-status"></div>
+                <!-- この録画に対する生成job。実処理はserverの永続queueなので、押した後は
+                     browserを閉じてよく、進み具合はJob画面に出る。ここに置かないと、
+                     無い素材版に気付いてから配信履歴画面へ往復することになる。 -->
+                <div class="vd-row">
+                  <span class="seg-label">生成</span>
+                  <button id="do-overlay" class="btn" type="button" disabled
+                          title="収集したcomment/giftを焼き込んだ動画を出力します（設定で字幕が有効なときは先に文字起こしが要ります）">焼き込み出力</button>
+                  <button id="do-reprocess" class="btn" type="button" disabled
+                          title="保持している.tsから元録画のmp4を作り直します（混在解像度でカクつく録画の修復用。.tsが残っていない録画では実行できません）">再mp4化</button>
+                  <button id="do-audionorm" class="btn" type="button" disabled
+                          title="録画そのものの音量を設定の目標値へ揃えます（映像はそのまま複製し、音声だけ作り直します。元のmp4は_backup/へ退避します）">音量正規化</button>
+                  <button id="do-transcribe" class="btn" type="button" disabled>文字起こし</button>
+                </div>
+                <div id="job-note" class="vd-summary"></div>
+                <div id="player-status" class="form-message vd-status" aria-live="polite"></div>
               </div>
 
               <div class="vd-transcript-block">
                 <div class="vd-heat-head">
                   <span class="vd-heat-label">文字起こし — click移動 / drag範囲選択 / dblclick 1文</span>
-                  <button id="do-transcribe" class="btn btn-small" type="button" disabled>この録画を文字起こし</button>
                   <span class="sp"></span>
                   <span id="transcript-note" class="vd-summary"></span>
                 </div>
                 <div id="segments" class="vd-segments"></div>
               </div>
 
+              <!-- 章立て: 3時間級の録画を目次から辿る。表題はAIが書くので誤りがあり得る。
+                   必ずその時刻へ飛べる形にし、根拠としてその位置の実際の発話を併記する
+                   (表題だけを事実として読ませない)。 -->
+              <div class="vd-transcript-block">
+                <div class="vd-heat-head">
+                  <span class="vd-heat-label">章立て（AI）— clickでその位置へ移動 / 下段はその位置の実際の発話</span>
+                  <button id="do-chapters" class="btn btn-small" type="button" disabled>章立てを作る</button>
+                  <button id="copy-chapters" class="btn btn-small" type="button" disabled>説明欄用をcopy</button>
+                  <button id="save-chapters" class="btn btn-small" type="button" disabled>VTTを保存</button>
+                  <span class="sp"></span>
+                  <span id="chapter-note" class="vd-summary"></span>
+                </div>
+                <div id="chapters" class="vd-segments"></div>
+              </div>
+
               <!-- コメントは焼き込みと同じPTS軸を持つので、文字起こしと同じ操作感で
                    その位置へ飛べる。盛り上がりの中身を読んでから切り所を決められる。 -->
               <div class="vd-comment-block">
                 <div class="vd-heat-head">
-                  <span class="vd-heat-label">コメント — clickでその位置へ移動</span>
+                  <span class="vd-heat-label">Comment — clickでその位置へ移動</span>
                   <label class="vd-chk"><input id="comment-follow" type="checkbox" checked /> 再生に追従</label>
                   <span class="sp"></span>
                   <span id="comment-note" class="vd-summary"></span>
@@ -191,6 +226,42 @@
             space 再生/停止　J/K/L 逆送り・停止・早送り　I/O IN・OUT　M 見どころ記録　, . 再生速度　←→ frame送り(shift 1秒 / alt 10秒)　↑↓ 前後のシーン　Esc 範囲解除　alt+drag スナップ無効
           </div>
         </div>
+
+        <!-- 今開いている録画の見どころ・切り出し。tab側は録画横断の一覧なので残すが、
+             「今見ている録画のぶんを順に確認する」だけならここで完結する
+             (tab経由だと1件開くたび検索viewへ戻され、n件でn往復になる)。 -->
+        <details class="result-block vd-cand" id="own-block">
+          <summary class="result-subtitle">■ この録画の見どころ・切り出し <span id="own-summary" class="result-sub-note"></span></summary>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th>種別</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>メモ</th></tr>
+              </thead>
+              <tbody id="own-rows"></tbody>
+            </table>
+            <div id="own-empty" class="feed-empty">この録画にはまだ見どころ・切り出しがありません。</div>
+          </div>
+        </details>
+
+        <!-- 切り出し候補は「今開いている録画」の中身なので、tabへ出さずplayerの直下に置く。
+             別tabにすると1件開くたびここへ戻され、候補n件の確認が2n clickになる。 -->
+        <details class="result-block vd-cand" id="cand-block">
+          <summary class="result-subtitle">■ 切り出し候補 <span id="cand-summary" class="result-sub-note"></span></summary>
+          <div class="vd-cand-tools">
+            <span class="result-sub-note">配信内の平均から外れた区間です。判定は配信者画面の「ハイライト」と同じで、窓の長さ・しきい値・先行秒数・前後paddingは設定画面で変えられます。</span>
+            <span class="sp"></span>
+            <button id="cand-add-all" class="btn btn-small" type="button">全て切り出しリストへ</button>
+          </div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>根拠</th><th class="n">z</th><th class="n">コイン</th><th class="n">Comment</th><th></th></tr>
+              </thead>
+              <tbody id="cand-rows"></tbody>
+            </table>
+            <div id="cand-empty" class="feed-empty">録画を開くと候補を出します。</div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -219,8 +290,29 @@
     <div id="view-cuts" class="vd-view hidden">
       <div class="x-toolbar vd-cuts-tools">
         <button id="cuts-export" class="btn btn-primary btn-small" type="button">mp4を一括書き出し</button>
-        <button id="cuts-csv" class="btn btn-small" type="button">CSVを書き出し</button>
-        <button id="cuts-edl" class="btn btn-small" type="button">EDLを書き出し</button>
+        <!-- 一括書き出しの中身を決める設定。シーン検索側と同じ値を指すので、どちらで
+             変えても両方に反映される。ここに出さないと、現在値が見えないまま
+             数十本を書き出すことになる。 -->
+        <span class="x-field seg-field" title="一括書き出しで使う素材版。シーン検索側の「素材」と同じ設定です。"><span class="seg-label">素材</span>
+          <span id="cuts-variant" class="seg" role="radiogroup" aria-label="一括書き出しに使う素材版" data-value="source">
+            <button class="seg-item" type="button" data-value="source">元録画</button>
+            <button class="seg-item" type="button" data-value="overlay">焼き込み</button>
+            <button class="seg-item" type="button" data-value="upscaled">Up出力</button>
+          </span>
+        </span>
+        <label class="vd-chk"><input id="cuts-normalize" type="checkbox" /> 音量を正規化</label>
+        <label class="vd-chk"><input id="cuts-precise" type="checkbox" /> 精密（再encode）</label>
+        <label class="x-field"><span>形式</span>
+          <select id="cuts-fmt">
+            <option value="csv">CSV（秒）</option>
+            <option value="edl">EDL（CMX3600）</option>
+            <option value="fcpxml">FCPXML</option>
+          </select>
+        </label>
+        <label class="x-field"><span>配信者</span>
+          <select id="cuts-streamer" title="書き出す対象をこの配信者のcutだけに絞ります。同じ配信者でも録画ごとにfpsが違うことがあるため、絞ってもEDLのframe rate混在が残る場合があります。"><option value="">全て</option></select>
+        </label>
+        <button id="cuts-download" class="btn btn-small" type="button">listを書き出し</button>
         <button id="cuts-clear" class="btn btn-danger btn-small" type="button">すべて削除</button>
         <span class="sp"></span>
         <span id="cuts-status" class="vd-summary"></span>
@@ -229,53 +321,29 @@
 
       <div class="result-block">
         <h3 class="result-subtitle">■ 切り出しリスト</h3>
-        <span class="result-sub-note">mp4を書き出さずEDL/CSVでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDLのtimecodeは30fps固定換算のため概位置です（録画はVFR）。秒の正確さが要る場合はCSVを使ってください。</span>
+        <span class="result-sub-note">行をクリックするとその録画をIN/OUTが入った状態で開きます。mp4を書き出さずCSV/EDL/FCPXMLでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDL/FCPXMLのtimecodeは素材のfpsを実測してframe単位で組み立てます。EDLはlist全体で1つのframe rateしか持てないため、fpsの異なる録画が混ざると書き出せません（配信者で絞るか、素材ごとにframe rateを持てるFCPXMLを使ってください）。秒をそのまま扱いたい場合はCSVです。</span>
         <div class="table-wrap">
           <table class="result-table">
             <thead>
-              <tr><th>配信者</th><th>file</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>ラベル</th><th></th></tr>
+              <tr><th>配信者</th><th>配信日</th><th>file</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>ラベル</th><th></th></tr>
             </thead>
             <tbody id="cut-rows"></tbody>
           </table>
           <div id="cut-empty" class="feed-empty">まだありません。シーン検索でIN/OUTを決めて「リストに追加」してください。</div>
         </div>
-        <span class="result-sub-note">一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密の指定はシーン検索側の切り出し設定をそのまま使います。進み具合はjob画面で確認でき、途中で取り消せます。</span>
+        <span class="result-sub-note">一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密は上の指定を使います（シーン検索側の切り出し設定と同じもので、どちらで変えても両方に反映されます）。進み具合はJob画面で確認でき、途中で取り消せます。</span>
       </div>
     </div>
 
     <!-- ===== 切り出し候補 ===== -->
-    <div id="view-candidates" class="vd-view hidden">
-      <div class="x-toolbar">
-        <button id="cand-reload" class="btn btn-small" type="button">候補を出し直す</button>
-        <button id="cand-add-all" class="btn btn-small" type="button">全て切り出しリストへ</button>
-        <span class="sp"></span>
-        <span id="cand-summary" class="vd-summary"></span>
-      </div>
-
-      <div class="result-block">
-        <h3 class="result-subtitle">■ 盛り上がりの候補</h3>
-        <span class="result-sub-note">シーン検索で開いている録画について、配信内の平均から外れた区間を出します。判定は配信者画面の「ハイライト」と同じで、窓の長さ・しきい値・先行秒数・前後paddingは設定画面で変えられます。ギフトもコメントも出来事への反応なので、開始は設定の先行秒数だけ手前へ寄せています。</span>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>根拠</th><th class="n">z</th><th class="n">ダイヤ</th><th class="n">コメント</th><th></th></tr>
-            </thead>
-            <tbody id="cand-rows"></tbody>
-          </table>
-          <div id="cand-empty" class="feed-empty">シーン検索で録画を開いてください。</div>
-        </div>
-      </div>
-    </div>
-
     <!-- ===== 一括文字起こし ===== -->
     <div id="view-jobs" class="vd-view hidden">
       <div class="x-toolbar">
-        <label class="x-field"><span>配信者</span>
-          <select id="job-streamer"><option value="">全て</option></select>
-        </label>
-        <button id="job-enqueue" class="btn btn-primary btn-small" type="button">この配信者をまとめて文字起こし</button>
+        <!-- 配信者単位の投入は下の表の行buttonで行う(そちらは「もう全部済み」の行を
+             disableできる)。toolbar側にselect+buttonを重ねると、済んだ配信者も
+             投入できてしまう劣った経路が並ぶだけだった。 -->
+        <button id="job-enqueue-all" class="btn btn-primary btn-small" type="button" title="未転写の録画を全配信者ぶんまとめてqueueへ入れます。">全配信者をまとめて文字起こし</button>
         <button id="job-cancel" class="btn btn-danger btn-small" type="button">待機中をすべて取消</button>
-        <button id="semantic-build" class="btn btn-small" type="button">意味検索indexを更新</button>
         <span class="sp"></span>
         <span id="job-summary" class="vd-summary"></span>
       </div>
@@ -304,6 +372,55 @@
             <tbody id="queue-rows"></tbody>
           </table>
           <div id="queue-empty" class="feed-empty">処理待ちはありません。</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 一括処理 ===== -->
+    <!-- 焼き込み/Up出力/再mp4化/音量正規化/元mp4の削除を配信者単位、または録画を選んで
+         実行する。「生成」ではなく「処理」なのは、作らずに消す種別を含むため。進捗表を
+         持たないのは、映像jobの台帳はJob画面が唯一の置き場だからで、ここに縮小版を並べると
+         どちらが最新か分からなくなる(取消も向こうにしかない)。 -->
+    <div id="view-bulk" class="vd-view hidden">
+      <div class="x-toolbar">
+        <label class="x-field"><span>種別</span>
+          <!-- 既定は焼き込み。再mp4化は対象判定に録画ごとの.ts走査を伴うので、選ばれるまで
+               集計しない(既定を再mp4化にするとtabを開くだけで走査が走る)。 -->
+          <select id="bulk-kind">
+            <option value="overlay" selected>焼き込み出力</option>
+            <option value="upscale">Up出力</option>
+            <option value="reprocess">再mp4化</option>
+            <option value="audionorm">音量正規化</option>
+            <!-- 作らずに消す唯一の種別。.tsが残っている録画だけを対象にする(材料が
+                 無ければ復元手段が無い)ので、判定は再mp4化と同じく.ts走査を伴う。 -->
+            <option value="delete_mp4">元mp4の削除</option>
+          </select>
+        </label>
+        <label class="vd-chk"><input id="bulk-redo" type="checkbox" /> 出力済みも作り直す</label>
+        <button id="bulk-all" class="btn btn-primary btn-small" type="button" title="全配信者の未出力をまとめてqueueへ入れます。押す前に規模を確認できます。">全配信者をまとめて</button>
+        <a id="bulk-jobs-link" class="btn btn-small" href="/jobs">Job画面で進捗を見る</a>
+        <span id="bulk-filter" class="vd-summary hidden">
+          <span id="bulk-filter-label"></span>
+          <button id="bulk-filter-clear" class="btn btn-small" type="button">全配信者を表示</button>
+        </span>
+        <span class="sp"></span>
+        <span id="bulk-summary" class="vd-summary"></span>
+      </div>
+
+      <div class="result-block">
+        <h3 class="result-subtitle">■ 配信者別の対象</h3>
+        <span class="result-sub-note" id="bulk-note">録画1本ごとに1つのjobとしてqueueへ入り、順に処理します。配信者名の左の ▶ で録画一覧を開くと、選んだ録画だけを投入できます。所要時間はこのserverで実際に完了した同種jobの実測から出しています（実績が無い種別は不明と表示します）。投入後の進捗確認と取り消しはJob画面で行います。</span>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>配信者</th><th class="num">録画</th><th class="num">未処理</th><th class="num">処理済</th><th class="num">総時間</th><th></th></tr>
+            </thead>
+            <!-- 投入前の確認は、押した行の直下へこのtbody内の行として開く(表そのものは
+                 動かさない)。押した瞬間に数百本積ませないための確認は必ず挟む: 配信者
+                 まるごとの焼き込みは日単位で走り、中間fileでdiskを食う。 -->
+            <tbody id="bulk-rows"></tbody>
+          </table>
+          <div id="bulk-empty" class="feed-empty">録画がありません。</div>
         </div>
       </div>
     </div>

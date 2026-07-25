@@ -13,21 +13,12 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">履歴</h1>
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a class="active" href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <!-- 全Session KPIバー -->
@@ -35,7 +26,7 @@
 
     <!-- ツールバー: 絞込・並替・出力 -->
     <div class="x-toolbar">
-      <input id="flt-search" type="text" placeholder="🔎 配信者 / Memo で絞込" autocomplete="off" />
+      <input id="flt-search" type="text" aria-label="配信者 / Memo で絞込" placeholder="🔎 配信者 / Memo で絞込" autocomplete="off" />
       <label class="x-field"><span>期間</span>
         <select id="flt-period">
           <option value="all">全期間</option>
@@ -58,23 +49,29 @@
           <option value="started_asc">開始(古い順)</option>
           <option value="gifts">Gift 多い順</option>
           <option value="diamonds">コイン 多い順</option>
+          <option value="comments">Comment 多い順</option>
+          <option value="likes_total">Like 多い順</option>
+          <option value="battle_points">B.Score 多い順</option>
           <option value="unique_id">配信者</option>
         </select>
       </label>
       <span class="sp"></span>
-      <button id="bulk-del-users" class="btn-danger">ユーザー削除</button>
+      <button id="bulk-del-users" class="btn-danger">配信者を削除</button>
       <button id="export-csv">表示中をCSV出力</button>
     </div>
 
     <!-- Excel的一覧 -->
     <div class="x-tablewrap">
-      <table class="xtab">
+      <table class="xtab" id="session-table">
         <thead>
           <tr>
-            <th>#</th><th>配信者</th><th>開始</th><th>時間</th><th>状態</th>
-            <th class="n">コイン</th><th class="n">Comment</th>
-            <th class="n">Like</th><th class="n">Follow</th><th class="n">Share</th><th class="n">入室</th>
-            <th class="n">Battle</th><th class="n">B.Score</th><th class="n">最大同接</th><th id="op-th">操作</th>
+            <th data-sort="id">#</th><th data-sort="unique_id">配信者</th>
+            <th data-sort="started_at">開始</th><th data-sort="duration">時間</th><th>状態</th>
+            <th class="n" data-sort="diamonds">コイン</th><th class="n" data-sort="comments">Comment</th>
+            <th class="n" data-sort="likes_total">Like</th><th class="n" data-sort="follows">Follow</th>
+            <th class="n" data-sort="shares">Share</th><th class="n" data-sort="joins">入室</th>
+            <th class="n" data-sort="battles">Battle</th><th class="n" data-sort="battle_points">B.Score</th>
+            <th class="n" data-sort="viewers_peak">最大同接</th><th>Memo</th><th id="op-th">操作</th>
           </tr>
         </thead>
         <tbody id="session-rows"></tbody>
@@ -83,14 +80,14 @@
     </div>
 
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>
 
   <!-- Session 詳細モーダル -->
   <div id="detail-modal" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="detail-title">
       <div class="modal-head">
         <h2 id="detail-title">Session 詳細</h2>
         <div class="modal-head-actions">
@@ -140,6 +137,21 @@
         </section>
       </div>
 
+      <!-- コラボ(非BattleのLinkMic)の接続区間 -->
+      <section class="detail-collab">
+        <h3 class="result-subtitle">■ コラボ <span id="collab-summary" class="result-sub-note"></span></h3>
+        <p class="chart-note">共演者のidentityは記録していないため、接続していた区間のみを表示します。</p>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>#</th><th>開始</th><th>終了</th><th>時間</th><th class="n">最大人数</th></tr>
+            </thead>
+            <tbody id="collab-rows"></tbody>
+          </table>
+        </div>
+        <div id="collab-empty" class="feed-empty" data-label="コラボ">このSessionにコラボはありません。</div>
+      </section>
+
       <!-- AI: コメント分析 -->
       <section class="detail-ai">
         <h3 class="result-subtitle">■ AI コメント分析 <span id="ai-status-note" class="result-sub-note"></span></h3>
@@ -182,7 +194,7 @@
 
   <!-- 文字起こし 表示モーダル（動画 + 時刻同期segment） -->
   <div id="transcript-modal" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="transcript-title">
       <div class="modal-head">
         <h2 id="transcript-title">文字起こし</h2>
         <div class="modal-head-actions">
@@ -196,6 +208,7 @@
         <video id="transcript-video" class="tr-video" controls playsinline preload="metadata"></video>
         <div id="transcript-hint" class="tr-hint">行をクリックするとその時刻から再生します。字幕fileの時刻は元録画mp4基準です（焼き込み出力・Up出力とは一致しません）。</div>
         <div id="transcript-warn" class="tr-warn hidden"></div>
+        <div id="transcript-video-message" class="form-message"></div>
         <div id="transcript-segments" class="tr-segments"></div>
       </div>
     </div>
@@ -203,15 +216,15 @@
 
   <!-- ユーザー単位の履歴一括削除モーダル（複数選択） -->
   <div id="userdel-modal" class="modal-overlay hidden">
-    <div class="modal modal-narrow">
+    <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="userdel-title">
       <div class="modal-head">
-        <h2>ユーザー削除</h2>
+        <h2 id="userdel-title">配信者を削除</h2>
         <button id="userdel-close" class="modal-close">閉じる ✕</button>
       </div>
       <div class="modal-body">
         <p class="userdel-note">選択した配信者の履歴（Session・録画・分析）をすべて削除します。この操作は取り消せません。</p>
         <div class="x-toolbar userdel-tools">
-          <input id="userdel-search" type="text" placeholder="🔎 配信者で絞込" autocomplete="off" />
+          <input id="userdel-search" type="text" aria-label="配信者で絞込" placeholder="🔎 配信者で絞込" autocomplete="off" />
           <label class="userdel-all"><input id="userdel-selall" type="checkbox" /> 全選択</label>
         </div>
         <div class="table-wrap userdel-listwrap">

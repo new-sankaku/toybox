@@ -80,6 +80,16 @@ async function selectStreamer(uid, light = false) {
   if (!light) {
     resetAiReview();
     loadCohortAndHighlights(uid);
+    // 配信者が変わった時点で前の一覧は無効。表示中なら即引き直し、そうでなければ
+    // sectionが画面へ入った時点で読む。
+    filesLoadedUid = null;
+    fileItems = [];
+    renderTableRows("sm-files-rows", null, [], () => [], []);
+    chipBar("sm-files-summary", []);
+    refreshFileSelection();
+    // 画面外なら読みにいかないので「読み込み中」とは言わない。
+    setListMessage(document.getElementById("sm-files-empty"), "この位置まで表示すると容量を集計します。");
+    maybeLoadFiles();
   }
 }
 
@@ -309,10 +319,16 @@ function highlightRecCell(h) {
 }
 
 // ---- ハイライト録画の再生(deep-link) ----
+// 再生中の録画。errorの理由をserverへ問い合わせる間に別の録画へ移ることがあるため、
+// 到達時の対象と突き合わせる。
+let playingRecordingId = null;
+
 function openVideo(recordingId, offset, label) {
-  const modal = document.getElementById("sm-video-modal");
+  const box = document.getElementById("sm-video-box");
   const video = document.getElementById("sm-video");
   document.getElementById("sm-video-title").textContent = label;
+  document.getElementById("sm-video-message").textContent = "";
+  playingRecordingId = recordingId;
   video.src = `/api/recordings/${recordingId}/play`;
   // メタデータ確定後に急増点へseekして再生。Range対応のため部分読み込みでseekできる。
   const seek = () => {
@@ -321,16 +337,201 @@ function openVideo(recordingId, offset, label) {
     video.removeEventListener("loadedmetadata", seek);
   };
   video.addEventListener("loadedmetadata", seek);
-  modal.classList.remove("hidden");
+  box.classList.remove("hidden");
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function closeVideo() {
-  const modal = document.getElementById("sm-video-modal");
+  const box = document.getElementById("sm-video-box");
   const video = document.getElementById("sm-video");
   video.pause();
+  // src除去より先にidを落とす。除去自体がerrorを飛ばすので、残したままだと
+  // 閉じただけで「再生できませんでした」を出しにいく。
+  playingRecordingId = null;
   video.removeAttribute("src");
   video.load();
-  modal.classList.add("hidden");
+  box.classList.add("hidden");
+}
+
+// ---- 録画容量の整理 ----
+// 直近に読み込んだ一覧。checkbox選択の集計と確認文の件数/容量に使う。
+let fileItems = [];
+// この一覧は録画ごとに実fileをstatし、HLSはdirectoryを走査する(server側
+// _recording_file_summary)。配信者を選ぶたびに走らせると選択そのものが重くなるので、
+// sectionが実際に画面へ入ったときだけ読む。表示は常時そこにあり、click操作は増えない。
+let filesLoadedUid = null;
+let filesVisible = false;
+
+function maybeLoadFiles() {
+  if (!filesVisible || !selectedUid || filesLoadedUid === selectedUid) return;
+  loadFiles();
+}
+
+function fileSelection() {
+  const rows = document.getElementById("sm-files-rows");
+  const picked = (kind) =>
+    Array.from(rows.querySelectorAll(`input[data-kind="${kind}"]:checked`))
+      .map((el) => Number(el.dataset.id));
+  return { mp4_ids: picked("mp4"), ts_ids: picked("ts") };
+}
+
+function refreshFileSelection() {
+  const sel = fileSelection();
+  const byId = new Map(fileItems.map((i) => [i.id, i]));
+  const bytes =
+    sel.mp4_ids.reduce((a, id) => a + byId.get(id).mp4_bytes + byId.get(id).derived_bytes, 0)
+    + sel.ts_ids.reduce((a, id) => a + byId.get(id).ts_bytes, 0);
+  const count = sel.mp4_ids.length + sel.ts_ids.length;
+  document.getElementById("sm-files-selected").textContent =
+    count ? `${count}件 / ${fmtBytes(bytes)} を解放` : "";
+  document.getElementById("sm-files-run").disabled = count === 0;
+  return { ...sel, bytes, count };
+}
+
+function fileCheckbox(item, kind) {
+  const exists = kind === "mp4" ? item.mp4_exists : item.ts_exists;
+  if (!exists) return "—";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.dataset.kind = kind;
+  box.dataset.id = String(item.id);
+  // busyの判断はserverが返す。理由(録画中/焼き込み中/転写中)をUI側で組み直すと、
+  // server側の条件が増えたときに黙って選べてしまう。
+  box.disabled = item.busy;
+  if (item.busy) box.title = "録画中または処理中のため削除できません。";
+  box.addEventListener("change", refreshFileSelection);
+  return box;
+}
+
+// 状態＋保護toggle。履歴の録画表と同じ見た目・同じ操作にする。
+function fileState(item) {
+  const wrap = document.createElement("span");
+  wrap.className = "rec-state";
+  wrap.append(item.status);
+  // 収集中の録画は保持policyの対象外なので保護toggleを出さない(履歴側と同条件)。
+  if (item.status === "completed" || item.status === "interrupted") {
+    wrap.appendChild(protectBadge(item, loadFiles));
+  }
+  return wrap;
+}
+
+// 動画容量の内訳。派生物(焼き込み・Up出力)は元録画を残したまま消せるので、
+// 実在するときだけその場に削除buttonを出す。容量整理の主戦場はこの列。
+function fileSizeCell(item) {
+  const wrap = document.createElement("span");
+  wrap.className = "sm-size-cell";
+  wrap.append(fmtBytes(item.mp4_bytes + item.derived_bytes));
+  if (item.derived_bytes > 0) {
+    const note = document.createElement("span");
+    note.className = "result-sub-note";
+    note.textContent = `内 派生物 ${fmtBytes(item.derived_bytes)}`;
+    wrap.appendChild(note);
+    const btn = document.createElement("button");
+    btn.className = "btn btn-small";
+    btn.textContent = "派生物削除";
+    btn.title = "焼き込み(.overlay.mp4)・Up出力(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。";
+    btn.disabled = item.busy;
+    if (item.busy) btn.title = "録画中または処理中のため削除できません。";
+    btn.addEventListener("click", () => deleteDerived(item, loadFiles));
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+function renderFileRows() {
+  renderTableRows(
+    "sm-files-rows",
+    "sm-files-empty",
+    fileItems,
+    (item) => [
+      fileCheckbox(item, "mp4"),
+      fileCheckbox(item, "ts"),
+      `#${item.id}`,
+      item.filename || "—",
+      fileState(item),
+      fmtDateTime(item.started_at),
+      fileSizeCell(item),
+      fmtBytes(item.ts_bytes),
+    ],
+    [2, 6, 7],
+  );
+  // renderTableRowsはplaceholderのhiddenを切り替えるだけで文言を戻さない。読み込み中の
+  // 表示が0件の結果に残らないよう、状態はここで明示する。
+  setListState(document.getElementById("sm-files-empty"), fileItems.length ? "ok" : "empty");
+  document.getElementById("sm-files-all-mp4").checked = false;
+  document.getElementById("sm-files-all-ts").checked = false;
+  refreshFileSelection();
+}
+
+async function loadFiles() {
+  if (!selectedUid) return;
+  const uid = selectedUid;
+  filesLoadedUid = uid;
+  // 一括処理tabへは配信者を渡す。渡さないと向こうで一覧から選び直すことになる。
+  document.getElementById("sm-files-bulk").href =
+    `/videos?streamer=${encodeURIComponent(uid)}#bulk`;
+  document.getElementById("sm-files-message").textContent = "";
+  fileItems = [];
+  renderTableRows("sm-files-rows", null, [], () => [], []);
+  refreshFileSelection();
+  setListState(document.getElementById("sm-files-empty"), "loading");
+  let payload;
+  try {
+    payload = await apiSend("GET", `/api/streamers/${encodeURIComponent(uid)}/recordings`);
+  } catch (err) {
+    // 取得済み扱いのままだと再scrollしても引き直さない。失敗は未取得へ戻す。
+    if (filesLoadedUid === uid) filesLoadedUid = null;
+    setListState(document.getElementById("sm-files-empty"), "failed", err);
+    return;
+  }
+  // 読んでいる間に別の配信者へ切り替わっていたら、その一覧を上書きしない。
+  if (payload.unique_id !== selectedUid) return;
+  fileItems = payload.recordings || [];
+  chipBar("sm-files-summary", [
+    ["録画数", fmtNum(fileItems.length)],
+    ["動画+派生物", fmtBytes(payload.total_mp4_bytes)],
+    ["TS(HLS)", fmtBytes(payload.total_ts_bytes)],
+    ["合計", fmtBytes(payload.total_mp4_bytes + payload.total_ts_bytes)],
+  ]);
+  renderFileRows();
+}
+
+function toggleAllFiles(kind, checked) {
+  const rows = document.getElementById("sm-files-rows");
+  rows.querySelectorAll(`input[data-kind="${kind}"]:not(:disabled)`)
+    .forEach((el) => { el.checked = checked; });
+  refreshFileSelection();
+}
+
+async function runFileDelete() {
+  const sel = refreshFileSelection();
+  if (!sel.count) return;
+  const parts = [];
+  if (sel.mp4_ids.length) parts.push(`動画 ${sel.mp4_ids.length}件（焼き込み・Up出力・cacheを含む）`);
+  if (sel.ts_ids.length) parts.push(`TS ${sel.ts_ids.length}件`);
+  const ok = await confirmDialog(
+    `@${selectedUid} の ${parts.join(" と ")} をdiskから削除します（${fmtBytes(sel.bytes)}）。\n`
+    + "転写・検索index・bookmark・切り出しlist・解析は残りますが、削除したfileは元に戻せません。",
+    { title: "録画fileの削除", confirmLabel: "削除する", danger: true },
+  );
+  if (!ok) return;
+  const run = document.getElementById("sm-files-run");
+  run.disabled = true;
+  try {
+    const res = await apiSend(
+      "POST", `/api/streamers/${encodeURIComponent(selectedUid)}/recordings/delete-files`,
+      { mp4_ids: sel.mp4_ids, ts_ids: sel.ts_ids },
+    );
+    showToast(`${fmtBytes(res.freed_bytes)} を解放しました。`);
+  } catch (err) {
+    document.getElementById("sm-files-message").textContent = err.message;
+    run.disabled = false;
+    return;
+  }
+  // 実測を取り直す。解放bytesの予測値で表を書き換えると、消せなかったfileが
+  // 消えたことになる。
+  await loadFiles();
+  loadDiskBar();
 }
 
 function renderHead(identity, count) {
@@ -342,23 +543,6 @@ function renderHead(identity, count) {
   sub.className = "sm-head-sub";
   sub.textContent = `${fmtNum(count)} Session`;
   head.append(cell, sub);
-}
-
-function chipBar(containerId, chips) {
-  const bar = document.getElementById(containerId);
-  bar.innerHTML = "";
-  chips.forEach(([label, value, cls]) => {
-    const chip = document.createElement("div");
-    chip.className = "a-chip";
-    const l = document.createElement("span");
-    l.className = "l";
-    l.textContent = label;
-    const v = document.createElement("span");
-    v.className = "v" + (cls ? " " + cls : "");
-    v.textContent = value;
-    chip.append(l, v);
-    bar.appendChild(chip);
-  });
 }
 
 function renderKpi(p) {
@@ -373,7 +557,10 @@ function renderKpi(p) {
     ["総配信時間", fmtDuration(t.duration)],
     ["平均同接", fmtNum(Math.round(a.viewers))],
     ["最高同接", fmtNum(b.viewers)],
+    ["総Gift", fmtNum(t.gifts)],
     ["総Comment", fmtNum(t.comments)],
+    ["総Like", fmtNum(t.likes)],
+    ["総B.Score", fmtNum(t.battle_points)],
   ]);
 }
 
@@ -534,7 +721,12 @@ function renderGifters(gifters) {
     gifters,
     (g, rank) => [
       String(rank),
-      userCell(g, { stackId: true }),
+      // 名前からその人のFan台帳(全配信者横断の実績)へ直接飛べるようにする。
+      userCell(g, {
+        stackId: true,
+        href: g.identity_key ? `/fans?fan=${encodeURIComponent(g.identity_key)}` : "",
+        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
+      }),
       fmtNum(g.diamonds),
       fmtNum(g.gifts),
       `${fmtNum(g.sessions)} 回`,
@@ -544,17 +736,26 @@ function renderGifters(gifters) {
 }
 
 // ---- Battle 分析 ----
+// チーム戦は自陣=チーム全体なので、Scoreも貢献者も「監視配信者ぶん」と「チーム計」で値が
+// 変わる。片方だけ出すと個人戦と桁が揃わず読み違えるため、両方を 自分 / チーム計 で併記する。
 function renderBattle(b) {
   chipBar("sm-battle", [
     ["対戦数", fmtNum(b.count)],
     ["勝率", b.count ? `${b.win_rate.toFixed(1)}%` : "—", b.win_rate >= 50 ? "ok" : ""],
     ["戦績", `${b.wins}勝 ${b.losses}敗 ${b.draws}分`],
-    ["平均自陣Score", fmtNum(Math.round(b.avg_own_score))],
+    [
+      "平均自陣Score 自分/陣営",
+      `${fmtNum(Math.round(b.avg_own_host_score))} / ${fmtNum(Math.round(b.avg_own_score))}`,
+    ],
     ["平均敵陣Score", fmtNum(Math.round(b.avg_opp_score))],
-    [`貢献者${b.key_contrib_threshold}+/戦`, `${b.avg_key_contributors.toFixed(1)} 人`],
+    [
+      `貢献者${b.key_contrib_threshold}+/戦 自室/陣営`,
+      `${b.avg_key_contributors.toFixed(1)} / ${b.avg_team_key_contributors.toFixed(1)} 人`,
+    ],
     ["Battle中コイン比率", `${b.battle_diamond_share.toFixed(1)}%`],
   ]);
-  document.getElementById("sm-battle-history-keycontrib").textContent = `貢献者${b.key_contrib_threshold}+`;
+  document.getElementById("sm-battle-history-keycontrib").textContent =
+    `貢献者${b.key_contrib_threshold}+ 自室/陣営`;
 }
 
 function renderOpponents(opponents) {
@@ -596,6 +797,14 @@ function renderBattleGifters(gifters) {
 }
 
 const BATTLE_TYPE_LABEL = { team: "チーム戦", personal: "個人戦" };
+
+// 「監視配信者ぶん / 陣営計」の併記。個人戦は自陣host=1人で両者一致するため1つだけ出し、
+// 差が出るチーム戦だけ併記する。自host分が不明(古いrecordでhostを特定できない)なら —。
+function pairValue(own, team) {
+  if (own === null || own === undefined) return `— / ${fmtNum(team)}`;
+  if (own === team) return fmtNum(own);
+  return `${fmtNum(own)} / ${fmtNum(team)}`;
+}
 const BATTLE_RESULT = { win: ["WIN", "ok"], lose: ["LOSE", "warn"], draw: ["分", ""] };
 
 // Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順）。
@@ -618,19 +827,26 @@ function renderBattleHistory(history) {
         fmtDateTime(h.started_at),
         mode,
         opp,
-        fmtNum(h.own_score),
+        pairValue(h.own_host_score, h.own_score),
         fmtNum(h.opp_score),
         res,
-        fmtNum(h.diamonds),
-        `${fmtNum(h.key_contributors)} 人`,
+        pairValue(h.diamonds, h.team_diamonds),
+        `${pairValue(h.key_contributors, h.team_key_contributors)} 人`,
       ];
     },
     [3, 4, 6, 7],
-    // 行ダブルクリックでそのBattleの詳細(参加者/貢献者カード)をmodal表示。
+    // 行clickでそのBattleの詳細(参加者/貢献者カード)をmodal表示。dblclickは
+    // hoverしないと存在に気付けず、row-clickableなのに単clickが無反応で期待を裏切った。
     (tr, h) => {
       tr.classList.add("row-clickable");
-      tr.title = "ダブルクリックでBattle結果を表示";
-      tr.addEventListener("dblclick", () => showBattleDetail(h));
+      tr.tabIndex = 0;
+      tr.title = "clickでBattle結果を表示";
+      tr.addEventListener("click", () => showBattleDetail(h));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        showBattleDetail(h);
+      });
     },
   );
 }
@@ -645,7 +861,9 @@ async function showBattleDetail(h) {
   title.textContent = `Battle結果 — ${fmtDateTime(h.started_at)}`;
   empty.classList.add("hidden");
   renderBattleCards(cards, [], currentIdentity || {});
-  document.getElementById("sm-battle-modal").classList.remove("hidden");
+  const battleModal = document.getElementById("sm-battle-modal");
+  battleModal.classList.remove("hidden");
+  focusModalOpen(battleModal, document.getElementById("sm-battle-close"));
 
   const res = await fetch(`/api/sessions/${h.session_id}`);
   if (!res.ok) {
@@ -672,7 +890,9 @@ async function showBattleDetail(h) {
 function closeBattleDetail() {
   // renderBattleCardsで保持中のChart instanceを破棄してから閉じる。
   renderBattleCards(document.getElementById("sm-battle-cards"), [], currentIdentity || {});
-  document.getElementById("sm-battle-modal").classList.add("hidden");
+  const battleModal = document.getElementById("sm-battle-modal");
+  battleModal.classList.add("hidden");
+  focusModalClose(battleModal);
 }
 
 // スコア推移: 過去Battleを古い→新しい順に、自陣/敵陣Scoreの折れ線 + Batt中コインの棒で表示。
@@ -780,6 +1000,161 @@ function createCohortChart(canvas) {
   return { update };
 }
 
+// ---- 未監視の配信者の発見 ----
+// 候補は過去の全Battleの対戦相手から毎回導出する(保存しない)。順位は「時間減衰つき対戦数」で、
+// 閾値・半減期・件数は設定画面の「配信者の発見」で変えられる。
+// 昇格は監視画面と同じ POST /api/monitors を呼ぶ。ここ専用の追加経路は作らない。
+let discoverMode = "candidates";
+
+function discoverBusy(busy) {
+  document.getElementById("sm-discover-tab-candidates").disabled = busy;
+  document.getElementById("sm-discover-tab-dismissed").disabled = busy;
+}
+
+function openDiscover(mode) {
+  discoverMode = mode;
+  const discoverModal = document.getElementById("sm-discover-modal");
+  discoverModal.classList.remove("hidden");
+  focusModalOpen(discoverModal, document.getElementById("sm-discover-close"));
+  loadDiscover();
+}
+
+function closeDiscover() {
+  const discoverModal = document.getElementById("sm-discover-modal");
+  discoverModal.classList.add("hidden");
+  focusModalClose(discoverModal);
+  document.getElementById("sm-discover-message").textContent = "";
+}
+
+function discoverHead(labels) {
+  const head = document.getElementById("sm-discover-head");
+  head.innerHTML = "";
+  labels.forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    head.appendChild(th);
+  });
+}
+
+function actionButton(label, title, onClick, danger) {
+  const btn = document.createElement("button");
+  btn.className = "btn btn-small" + (danger ? " btn-danger" : "");
+  btn.textContent = label;
+  btn.title = title;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      await onClick();
+    } catch (err) {
+      document.getElementById("sm-discover-message").textContent = err.message;
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+
+async function loadDiscover() {
+  const isCandidates = discoverMode === "candidates";
+  const title = document.getElementById("sm-discover-title");
+  const note = document.getElementById("sm-discover-note");
+  const empty = document.getElementById("sm-discover-empty");
+  document.getElementById("sm-discover-message").textContent = "";
+  document.getElementById("sm-discover-tab-candidates").classList.toggle("btn-primary", isCandidates);
+  document.getElementById("sm-discover-tab-dismissed").classList.toggle("btn-primary", !isCandidates);
+  title.textContent = isCandidates ? "未監視の配信者（発見候補）" : "却下した候補";
+  empty.dataset.label = isCandidates ? "発見候補" : "却下した候補";
+  setListState(empty, "loading");
+  document.getElementById("sm-discover-rows").innerHTML = "";
+  discoverBusy(true);
+  let payload;
+  try {
+    payload = await apiSend("GET", isCandidates ? "/api/discovery" : "/api/discovery/dismissed");
+  } catch (err) {
+    // 取得失敗を0件として描くと「候補はいない」という誤った事実の提示になる。
+    discoverHead([]);
+    note.textContent = "";
+    setListState(empty, "failed", err);
+    discoverBusy(false);
+    return;
+  } finally {
+    discoverBusy(false);
+  }
+  if (isCandidates) renderCandidates(payload);
+  else renderDismissed(payload.dismissed || []);
+}
+
+function renderCandidates(payload) {
+  const rows = payload.candidates || [];
+  document.getElementById("sm-discover-note").textContent =
+    `対戦${payload.min_contacts}回以上の未監視の配信者 ${payload.eligible} 名のうち上位 ${rows.length} 名`
+    + `（対戦相手 ${payload.seen} 名を集計・半減期 ${payload.half_life_days} 日`
+    + `・却下 ${payload.dismissed} 名を除外）`;
+  discoverHead(["#", "配信者", "対戦数", "直近の対戦", "スコア", "当たった監視配信者", "操作"]);
+  setListMessage(
+    document.getElementById("sm-discover-empty"),
+    "条件に合う候補がありません。設定の「候補に出す最小のBattle対戦数」を下げると増えます。",
+  );
+  renderTableRows(
+    "sm-discover-rows",
+    "sm-discover-empty",
+    rows,
+    (c, rank) => {
+      const actions = document.createElement("span");
+      actions.className = "modal-head-actions";
+      actions.appendChild(
+        // 監視追加は非破壊で、いつでも外せる。同じ画面の「却下」に確認が無いのに
+        // こちらだけ挟むのは重さが逆で、確認dialogそのものが読み飛ばされる。
+        actionButton("監視へ追加", `@${c.unique_id} の監視を開始します。（LIVE中なら接続し、設定に従って録画します。あとで監視対象から外せます）`, async () => {
+          await apiSend("POST", "/api/monitors", { unique_id: c.unique_id, record_video: true });
+          showToast(`@${c.unique_id} の監視を開始しました。`);
+          loadDiscover();
+          loadStreamers();
+        }),
+      );
+      actions.appendChild(
+        actionButton("却下", "この配信者を候補に出さないようにします（後から戻せます）。", async () => {
+          await apiSend("POST", `/api/discovery/${encodeURIComponent(c.unique_id)}/dismiss`);
+          loadDiscover();
+        }, true),
+      );
+      return [
+        String(rank),
+        userCell(c, { stackId: true }),
+        `${fmtNum(c.contacts)} 戦`,
+        fmtDateTime(c.last_contact),
+        c.score.toFixed(2),
+        c.via.map((v) => `@${v}`).join(" / "),
+        actions,
+      ];
+    },
+    [0, 2, 4],
+  );
+}
+
+function renderDismissed(rows) {
+  document.getElementById("sm-discover-note").textContent =
+    `候補に出さないようにした配信者 ${rows.length} 名`;
+  discoverHead(["配信者", "却下した日時", "操作"]);
+  setListMessage(
+    document.getElementById("sm-discover-empty"),
+    "却下した候補はありません。",
+  );
+  renderTableRows(
+    "sm-discover-rows",
+    "sm-discover-empty",
+    rows,
+    (d) => [
+      `@${d.unique_id}`,
+      fmtDateTime(d.dismissed_at),
+      actionButton("候補へ戻す", "この配信者を再び候補に出します。", async () => {
+        await apiSend("DELETE", `/api/discovery/${encodeURIComponent(d.unique_id)}/dismiss`);
+        loadDiscover();
+      }),
+    ],
+    [],
+  );
+}
+
 // ---- WS: 収集中の更新で選択中の配信者を貼り替える ----
 function handleMessage(msg) {
   if (msg.type === "monitors" || msg.type === "state") {
@@ -794,18 +1169,35 @@ elSearch.addEventListener("input", renderList);
 elHmMetric.addEventListener("change", renderHeatmap);
 document.getElementById("sm-ai-btn").addEventListener("click", () => runAiReview(false));
 document.getElementById("sm-ai-rerun").addEventListener("click", () => runAiReview(true));
-document.getElementById("sm-video-close").addEventListener("click", closeVideo);
-document.getElementById("sm-video-modal").addEventListener("click", (e) => {
-  if (e.target.id === "sm-video-modal") closeVideo();
+document.getElementById("sm-video-stop").addEventListener("click", closeVideo);
+document.getElementById("sm-discover-btn").addEventListener("click", () => openDiscover("candidates"));
+document.getElementById("sm-discover-tab-candidates").addEventListener("click", () => openDiscover("candidates"));
+document.getElementById("sm-discover-tab-dismissed").addEventListener("click", () => openDiscover("dismissed"));
+document.getElementById("sm-discover-close").addEventListener("click", closeDiscover);
+document.getElementById("sm-discover-modal").addEventListener("click", (e) => {
+  if (e.target.id === "sm-discover-modal") closeDiscover();
 });
+bindVideoError(
+  document.getElementById("sm-video"),
+  () => playingRecordingId,
+  (text) => { document.getElementById("sm-video-message").textContent = text; },
+);
+// section手前200pxで先読みし、scrollし切る前に表が埋まっているようにする。
+new IntersectionObserver((entries) => {
+  filesVisible = entries.some((e) => e.isIntersecting);
+  maybeLoadFiles();
+}, { rootMargin: "200px" }).observe(document.getElementById("sm-files-section"));
+document.getElementById("sm-files-run").addEventListener("click", runFileDelete);
+document.getElementById("sm-files-all-mp4").addEventListener("change", (e) => toggleAllFiles("mp4", e.target.checked));
+document.getElementById("sm-files-all-ts").addEventListener("change", (e) => toggleAllFiles("ts", e.target.checked));
 document.getElementById("sm-battle-close").addEventListener("click", closeBattleDetail);
 document.getElementById("sm-battle-modal").addEventListener("click", (e) => {
   if (e.target.id === "sm-battle-modal") closeBattleDetail();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
-  if (!document.getElementById("sm-battle-modal").classList.contains("hidden")) closeBattleDetail();
-  else if (!document.getElementById("sm-video-modal").classList.contains("hidden")) closeVideo();
+  if (!document.getElementById("sm-discover-modal").classList.contains("hidden")) closeDiscover();
+  else if (!document.getElementById("sm-battle-modal").classList.contains("hidden")) closeBattleDetail();
 });
 trendChart = createSessionTrendChart(document.getElementById("sm-trend"), { movingAvg: true });
 cohortChart = createCohortChart(document.getElementById("sm-cohort-chart"));

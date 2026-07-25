@@ -34,6 +34,7 @@ release/
 .DS_Store
 Thumbs.db
 Desktop.ini
+*.lnk
 
 # Logs
 logs/
@@ -92,6 +93,7 @@ TicTok/__pycache__/
 TicTok/tests/__pycache__/
 TicTok/*.db
 *.db.bak*
+TicTok/backups/
 TicTok/recordings/
 TicTok/journal/
 TicTok/models/
@@ -103,6 +105,12 @@ TicTok/assets/fonts/*.otf
 TicTok/semantic_vectors.bin
 TicTok/sample_overlay.png
 TicTok/claude --dangerously-skip-permissions.bat
+TicTok/cmp-*.png
+TicTok/compare-*.png
+
+# playwright-mcp session artifacts (any project dir)
+.playwright-mcp/
+**/claude --dangerously-skip-permissions.bat
 
 .claude/tool-history.jsonl
 tool-history.csv

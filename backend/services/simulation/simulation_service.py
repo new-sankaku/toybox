@@ -136,7 +136,8 @@ class SimulationService:
                 for agent in ready_agents:
                     self._agent_simulator.start_agent(session,agent)
             else:
-                completed=all(a["status"]=="completed" for a in agents)
+                non_frozen=[a for a in agents if a["status"]!="frozen"]
+                completed=len(non_frozen)>0 and all(a["status"]=="completed" for a in non_frozen)
                 if completed:
                     project.status="completed"
                     project.updated_at=datetime.now()

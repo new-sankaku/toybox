@@ -1,9 +1,10 @@
 import logging
 from typing import Awaitable, Callable, Optional
 
-from tictok.collect.collector import ACTIVE_STATES, ProbeGate, TikTokCollector
+from tictok.collect.collector import ACTIVE_STATES, PROBING_STATES, ProbeGate, TikTokCollector
 from tictok.collect.live_resolver import BrowserLiveResolver
 from tictok.core.logctx import log_context
+from tictok.core.schedule import ScheduleProfiler
 from tictok.storage import Storage
 
 logger = logging.getLogger("tictok.manager")
@@ -12,22 +13,38 @@ Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class CollectorManager:
-    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_pool=None, avatar_proxy=None) -> None:
+    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_pool=None, avatar_proxy=None, notifier=None) -> None:
         self._broadcast = broadcast
         self._storage = storage
         self._settings = settings
         self._gift_icons = gift_icons
         self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
+        self._notifier = notifier
         self._collectors: dict[str, TikTokCollector] = {}
-        self._probe_gate = ProbeGate(settings, lambda: len(self._collectors))
+        self._probe_gate = ProbeGate(settings, self._probing_count)
+        self._schedule_profiler = ScheduleProfiler(self._session_start_history, settings)
         self._resolver = BrowserLiveResolver(settings)
+
+    def _session_start_history(self) -> list:
+        """全配信者のsession開始時刻。ScheduleProfilerのTTLごとに1回だけ呼ばれ、結果は
+        配信者別に切り分けられて全collectorで共有される。"""
+        return [
+            (session["unique_id"], session.get("started_at"))
+            for session in self._storage.list_sessions(0)
+        ]
 
     async def startup(self) -> None:
         await self._resolver.start()
 
     async def shutdown(self) -> None:
         await self._resolver.close()
+
+    def _probing_count(self) -> int:
+        """ProbeGateの間隔計算の母数。probeを実際に消費しているcollector(=live checkを
+        撃ち続けている待機中/制限中)だけを数える。接続中のcollectorを含めると、実アクセス
+        量は変わらないのに待機中の検出間隔だけが引き伸ばされる。"""
+        return sum(1 for c in self._collectors.values() if c.state in PROBING_STATES)
 
     def get(self, unique_id: str) -> Optional[TikTokCollector]:
         return self._collectors.get(unique_id)
@@ -60,6 +77,8 @@ class CollectorManager:
                 avatar_pool=self._avatar_pool,
                 avatar_proxy=self._avatar_proxy,
                 record_video=record_video,
+                notifier=self._notifier,
+                schedule_profiler=self._schedule_profiler,
             )
             self._collectors[unique_id] = collector
         elif record_video is not None and record_video != collector.record_video:

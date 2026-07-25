@@ -383,6 +383,52 @@ def register_project_settings_routes(app:Flask,project_service:ProjectService):
   project_service.update_project(project_id,{"advancedSettings":advanced})
   return jsonify({"id":principle_id,"saved":"project"})
 
+ @app.route('/api/config/notification-settings',methods=['GET'])
+ def get_notification_settings():
+  try:
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    return jsonify(repo.get_notification_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to get notification settings: {e}",exc_info=True)
+   return jsonify({"enabled":False,"categories":{"checkpoint":True,"completion":True,"error":True,"budget":True},"sound":False})
+
+ @app.route('/api/config/notification-settings',methods=['PUT'])
+ def update_notification_settings():
+  try:
+   data=request.json or {}
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    repo.update_notification_settings(data)
+    session.commit()
+    return jsonify(repo.get_notification_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to update notification settings: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
+ @app.route('/api/config/display-settings',methods=['GET'])
+ def get_display_settings():
+  try:
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    return jsonify(repo.get_display_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to get display settings: {e}",exc_info=True)
+   return jsonify({"sequenceFormat":"detailed","dashboardAnimation":True})
+
+ @app.route('/api/config/display-settings',methods=['PUT'])
+ def update_display_settings():
+  try:
+   data=request.json or {}
+   with session_scope() as session:
+    repo=GlobalExecutionSettingsRepository(session)
+    repo.update_display_settings(data)
+    session.commit()
+    return jsonify(repo.get_display_settings())
+  except Exception as e:
+   get_logger().error(f"Failed to update display settings: {e}",exc_info=True)
+   return jsonify({"error":str(e)}),500
+
  @app.route('/api/projects/<project_id>/settings/principles/<principle_id>/content',methods=['DELETE'])
  def reset_project_principle_content(project_id:str,principle_id:str):
   project=project_service.get_project(project_id)

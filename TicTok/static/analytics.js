@@ -7,8 +7,8 @@ const METRIC_LABELS = {
   joins: "入室",
   comments: "Comment",
   diamonds: "コイン",
-  likes: "いいね",
-  follows: "フォロー",
+  likes: "Like",
+  follows: "Follow",
   viewers: "同接",
 };
 
@@ -22,6 +22,8 @@ let scatterChart = null;
 let retentionHourChart = null;
 let contextChart = null;
 let battleFlowChart = null;
+let dwellHourChart = null;
+let activationChart = null;
 const lorenzCharts = {};
 
 const elPeriod = document.getElementById("an-period");
@@ -532,6 +534,354 @@ function renderRetention(data) {
   }
 }
 
+// ---- ⑫ 滞在時間と入れ替わり(Little則) ----
+// 推定できなかった窓は0や近似値で埋めず、理由別の件数として出す。埋めた値は実測と
+// 見分けが付かず、定常でない区間へLittle則を当てた結果が実測のように読まれてしまう。
+const DWELL_REJECT_LABELS = {
+  unstable: "来場の速さが窓内で動いていた",
+  drift: "同接の水準が窓内で動いていた",
+  cover: "観測に穴が多い",
+  noarr: "来場が少なく速さを出せない",
+  short: "窓の長さが足りない",
+  gap: "観測が大きく途切れた",
+  reset: "累積カウンタが巻き戻った",
+};
+
+function dwellSeconds(v) {
+  if (v == null) return "-";
+  return v < 90 ? `${v.toFixed(0)}秒` : `${(v / 60).toFixed(1)}分`;
+}
+
+function dwellPct(v) {
+  return v == null ? "-" : `${(v * 100).toFixed(0)}%`;
+}
+
+function renderDwell(data) {
+  const o = data.overall;
+  const kpi = document.getElementById("an-dwell-kpi");
+  const cells = o
+    ? [
+      ["平均滞在(中央値)", dwellSeconds(o.dwell_seconds)],
+      ["1時間あたりの入れ替わり", `${o.turnover_per_hour}回`],
+      ["配信ごとのばらつき", `${dwellSeconds(o.p25)}〜${dwellSeconds(o.p75)}`],
+      ["推定できた配信", `${fmtNum(o.n_sessions)}本`],
+      ["推定に使えた窓", `${fmtNum(data.windows || 0)} / ${fmtNum(data.candidates || 0)}`],
+    ]
+    : [["平均滞在(中央値)", "推定不能"]];
+  kpi.innerHTML = cells
+    .map(([k, v]) => `<div class="a-chip"><span class="l">${anEscape(k)}</span><span class="v">${anEscape(v)}</span></div>`)
+    .join("");
+
+  const hours = data.hours || [];
+  const labels = hours.map((h) => String(h[0]));
+  const values = hours.map((h) => h[1]);
+  const counts = hours.map((h) => h[2]);
+  // 窓の少ない時刻は棒を薄くする。消すと「その時刻は配信が無い」に読めてしまうため、
+  // 残したうえで参考値だと見て分かるようにする。
+  const minWindows = data.hour_min_windows || 0;
+  const colors = counts.map((n) => (n >= minWindows ? "rgba(93, 110, 78, 0.6)" : "rgba(93, 110, 78, 0.18)"));
+  if (dwellHourChart) {
+    dwellHourChart.data.labels = labels;
+    dwellHourChart.data.datasets[0].data = values;
+    dwellHourChart.data.datasets[0].backgroundColor = colors;
+    dwellHourChart.$counts = counts;
+    dwellHourChart.update();
+  } else {
+    dwellHourChart = new Chart(document.getElementById("an-dwell-hour"), {
+      type: "bar",
+      data: {
+        labels,
+        datasets: [{ label: "滞在時間の中央値(秒)", data: values, backgroundColor: colors, borderWidth: 0 }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: { ticks: { ...nierTicks(), autoSkip: false, maxTicksLimit: 24 }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "時刻", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
+          y: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("滞在時間(秒)") },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...nierTooltip(),
+            callbacks: {
+              // nは推定に使えた窓の数。少ない時刻の棒を実勢と読ませないため必ず併記する。
+              afterLabel: (ctx) => `n=${(dwellHourChart.$counts || [])[ctx.dataIndex] || 0} 窓`,
+            },
+          },
+        },
+      },
+    });
+    dwellHourChart.$counts = counts;
+  }
+
+  const table = document.getElementById("an-dwell-streamers");
+  const streamers = data.streamers || [];
+  let html = "<thead><tr><th>配信者</th><th class=\"num\">配信数</th><th class=\"num\">滞在時間(中央値)</th>"
+    + "<th class=\"num\">平均±95%CI</th><th class=\"num\">入れ替わり/時</th><th class=\"num\">同接(中央値)</th>"
+    + "<th class=\"num\">入れ替わりが速い時間</th><th class=\"num\">居座りの時間</th></tr></thead><tbody>";
+  if (!streamers.length) {
+    html += `<tr><td colspan="8" class="an-muted">推定に足りる配信がまだありません。</td></tr>`;
+  }
+  streamers.forEach((s) => {
+    const mix = s.mix || {};
+    html += `<tr><th class="ident">${anEscape(s.unique_id)}</th>`
+      + `<td class="num">${fmtNum(s.sessions)}</td>`
+      + `<td class="num">${dwellSeconds(s.dwell_seconds)}</td>`
+      + `<td class="num">${dwellSeconds(s.mean)}${s.ci == null ? "" : ` ±${s.ci.toFixed(0)}秒`}</td>`
+      + `<td class="num">${s.turnover_per_hour == null ? "-" : `${s.turnover_per_hour}回`}</td>`
+      + `<td class="num">${s.avg_viewers}</td>`
+      + `<td class="num">${dwellPct(mix.churn)}</td>`
+      + `<td class="num">${dwellPct(mix.sticky)}</td></tr>`;
+  });
+  table.innerHTML = `${html}</tbody>`;
+
+  const rejects = data.rejects || {};
+  const rejectText = Object.keys(DWELL_REJECT_LABELS)
+    .filter((k) => rejects[k])
+    .map((k) => `${DWELL_REJECT_LABELS[k]} ${fmtNum(rejects[k])}`)
+    .join(" / ") || "なし";
+  const cross = data.cross_check || {};
+  const eng = data.engagement || {};
+  let note = `対象 ${fmtNum(data.n_sessions || 0)}本のうち<b>推定できたのは ${fmtNum(data.n_estimated || 0)}本</b>。`
+    + ` 5分窓 ${fmtNum(data.candidates || 0)}個中 ${fmtNum(data.windows || 0)}個を採用し、`
+    + `<b>残りは推定不能</b>として除外しました（内訳: ${anEscape(rejectText)}）。`
+    + ` <span class="an-muted">時刻別のグラフで<b>薄い棒は窓が${fmtNum(minWindows)}個未満</b>の参考値です（深夜帯は観測そのものが少なく、数本の配信で決まります）。</span>`;
+  if (data.crude_dwell_seconds != null) {
+    note += ` <span class="an-muted">窓を切らずに配信まるごとで計算した粗い値は ${dwellSeconds(data.crude_dwell_seconds)}（${fmtNum(data.crude_n || 0)}本）で、上の推定と同程度です。</span>`;
+  }
+  if (cross.ratio != null) {
+    // 来場カウンタの正体は非公開のため、独立に届く入室eventとの比を必ず添える。
+    note += ` <span class="an-muted">来場カウンタの伸びに対する入室eventの比は中央値 ${cross.ratio.toFixed(2)}（配信間で ${cross.p10.toFixed(2)}〜${cross.p90.toFixed(2)}・${fmtNum(cross.n || 0)}本）。`
+      + `比が配信をまたいで揃っているため到着の代理として扱えますが、入室eventを基準に取り直せば滞在時間は約${((1 / cross.ratio - 1) * 100).toFixed(0)}%長く出ます。絶対秒に幅があるのはこのためです。</span>`;
+  }
+  if (eng.rho != null) {
+    note += eng.significant
+      ? ` <span class="an-muted">妥当性check: 滞在が長いと推定された配信ほど視聴時間あたりのCommentも多い傾向（同接を統制した偏順位相関 ρ=${eng.rho.toFixed(2)}・n=${fmtNum(eng.n)}・有意）。</span>`
+      : ` <span class="an-warn">妥当性check: 視聴時間あたりのCommentとの関連は ρ=${eng.rho.toFixed(2)}（n=${fmtNum(eng.n)}）で有意ではありません。滞在時間の推定が別の指標から裏付けられてはいない点に留意してください。</span>`;
+  }
+  document.getElementById("an-dwell-note").innerHTML = note;
+}
+
+// ---- ⑬ いつもと違う配信(session間の水準比較) ----
+// 逸脱の大きさ(z)と有意性は別物として扱う。経験p値の下限はbaseline本数で決まるため、
+// 多重検定を通せないことが構造的に確定する。そこを曖昧にすると、ただの重い裾を
+// 「統計的に検出された異常」として読ませてしまう。
+function anomValue(metric, v) {
+  if (v == null) return "-";
+  if (metric === "follow_per_join") return `${(v * 100).toFixed(2)}%`;
+  if (metric === "viewers_med") return `${v.toFixed(1)}人`;
+  return v >= 100 ? v.toFixed(0) : v.toFixed(2);
+}
+
+function anomDirection(z) {
+  return z >= 0
+    ? `<span class="an-warn">▲ 多い</span>`
+    : `<span class="an-muted">▼ 少ない</span>`;
+}
+
+function renderAnomaly(data) {
+  const power = data.power || {};
+  const cp = data.changepoints || {};
+  const cells = [
+    ["対象配信", `${fmtNum(data.n_measured || 0)} / ${fmtNum(data.n_sessions || 0)}本`],
+    ["検定数", fmtNum(power.tests || 0)],
+    ["統計的に有意", `${fmtNum(data.n_significant || 0)}件`],
+    ["水準が変わった配信", `${fmtNum((cp.shifts || []).length)} / ${fmtNum(cp.tested || 0)}本`],
+  ];
+  document.getElementById("an-anom-kpi").innerHTML = cells
+    .map(([k, v]) => `<div class="a-chip"><span class="l">${anEscape(k)}</span><span class="v">${v}</span></div>`)
+    .join("");
+
+  const findings = (data.findings || []).slice(0, 20);
+  let html = "<thead><tr><th>配信</th><th>配信者</th><th>指標</th><th>向き</th>"
+    + "<th class=\"num\">この配信</th><th class=\"num\">いつも(中央値)</th><th class=\"num\">いつもの範囲(P25-P75)</th>"
+    + "<th class=\"num\">逸脱(z)</th><th class=\"num\">比較対象</th></tr></thead><tbody>";
+  if (!findings.length) {
+    html += `<tr><td colspan="9" class="an-muted">比較できる配信がまだありません。</td></tr>`;
+  }
+  findings.forEach((f) => {
+    // session idはdeep link(?session=)が既にあるのに素のtextだった。「いつもと違う」と
+    // 分かってもその配信を見に行く手段が画面上に無かったので、実物へ繋ぐ。
+    html += `<tr><th>${fmtYmd(f.started_at)} `
+      + `<a class="an-muted" href="/history?session=${f.session_id}"`
+      + ` title="このSessionの詳細を開きます。">#${f.session_id}</a></th>`
+      + `<td class="ident">${anEscape(f.unique_id)}</td>`
+      + `<td>${anEscape(f.label || f.metric)}</td>`
+      + `<td>${anomDirection(f.z)}</td>`
+      + `<td class="num">${anomValue(f.metric, f.value)}</td>`
+      + `<td class="num">${anomValue(f.metric, f.typical)}</td>`
+      + `<td class="num an-muted">${anomValue(f.metric, f.p25)} 〜 ${anomValue(f.metric, f.p75)}</td>`
+      + `<td class="num">${f.z > 0 ? "+" : ""}${f.z}</td>`
+      + `<td class="num an-muted">${fmtNum(f.baseline)}本</td></tr>`;
+  });
+  document.getElementById("an-anom-findings").innerHTML = `${html}</tbody>`;
+
+  // 判定不能の配信者・指標は、件数を0にせず理由付きで出す。
+  const short = (data.coverage || []).filter((c) => c.status === "insufficient");
+  let note = `<b>逸脱の大きい順</b>に上位${fmtNum(findings.length)}件を出しています。`
+    + ` 対象は ${fmtNum(data.n_measured || 0)}本（30分未満の配信、相互作用eventが${fmtNum(100)}件未満の配信は、水準を比べる材料が足りないため除外）。`;
+  if (short.length) {
+    const names = [...new Set(short.map((c) => c.unique_id))];
+    note += ` <span class="an-warn">判定不能: ${anEscape(names.join(" / "))}</span>`
+      + ` <span class="an-muted">（比較に必要な過去配信が${fmtNum(data.min_baseline || 0)}本に届かないため、この配信者は一切判定していません）</span>`;
+  }
+  if (power.tests) {
+    note += `<br /><b class="an-warn">なぜ「統計的に有意」が${fmtNum(data.n_significant || 0)}件なのか</b>: `
+      + `比較は分布の形を仮定せず、過去の配信のうち何本が同じくらい離れているかで測ります。`
+      + `この方法で出せる最小のp値は<b>1÷(比較対象の本数+1)</b>までで、実際の最小値は <b>${power.best_p}</b> でした。`
+      + `一方 ${fmtNum(power.tests)}件を同時に検定するため、偽陽性を${((data.fdr_q || 0) * 100).toFixed(0)}%に抑える（Benjamini-Hochberg法）には <b>${power.needed_p}</b> 以下が必要です。`
+      + ` つまり有意判定を出すには1配信者あたり<b>${fmtNum(power.needed_baseline)}本</b>の過去配信が要る計算で、<b>現実には到達しません</b>。`
+      + ` <span class="an-muted">正規分布を仮定したp値ならいくらでも小さい値を出せますが、この指標の実測の裾は正規より|z|>3で約13倍・|z|>4で約375倍も厚く、当てはめると「ただの重い裾」を有意な異常として大量に報告することになるため採用していません。上の表は探索用の並べ替えとしてお使いください。</span>`;
+  }
+  document.getElementById("an-anom-note").innerHTML = note;
+
+  const shifts = cp.shifts || [];
+  let sh = "<thead><tr><th>配信</th><th>配信者</th><th>変わった時刻</th>"
+    + "<th class=\"num\">前</th><th class=\"num\">後</th><th class=\"num\">変化</th><th class=\"num\">p</th><th class=\"num\">観測</th></tr></thead><tbody>";
+  if (!shifts.length) {
+    sh += `<tr><td colspan="8" class="an-muted">明確な水準shiftのある配信はありません。</td></tr>`;
+  }
+  shifts.forEach((s) => {
+    const pct = s.ratio == null ? "-" : `${(s.ratio * 100).toFixed(0)}%`;
+    const dir = s.ratio != null && s.ratio < 1
+      ? `<span class="an-warn">▼ ${pct}</span>`
+      : `<span class="an-muted">▲ ${pct}</span>`;
+    sh += `<tr><th>${fmtYmd(s.started_at)} <span class="an-muted">#${s.session_id}</span></th>`
+      + `<td class="ident">${anEscape(s.unique_id)}</td>`
+      + `<td>${fmtTime(s.at)}</td>`
+      + `<td class="num">${s.before.toFixed(1)}人</td>`
+      + `<td class="num">${s.after.toFixed(1)}人</td>`
+      + `<td class="num">${dir}</td>`
+      + `<td class="num an-muted">${s.p}</td>`
+      + `<td class="num an-muted">${fmtNum(s.bins)}区間</td></tr>`;
+  });
+  document.getElementById("an-anom-shifts").innerHTML = `${sh}</tbody>`;
+  document.getElementById("an-anom-shift-note").innerHTML =
+    `同接の記録がある ${fmtNum(cp.tested || 0)}本を調べ、統計的に変化点が認められたのは ${fmtNum(cp.significant || 0)}本、`
+    + `そのうち<b>水準の変化が実用上はっきりしているものだけ</b>（4分の3以下に下がった、または1.35倍以上に上がった）を ${fmtNum(shifts.length)}本表示しています。`
+    + ` <span class="an-muted">${fmtNum(cp.bin_seconds ? cp.bin_seconds / 60 : 0)}分ごとに区切って判定し、比較用の並べ替えは${fmtNum(cp.block_bins || 0)}区間（自己相関がほぼ消える長さ）のかたまり単位で行っています。切断などで観測が途切れた区間は0人で埋めず、その区間ごと判定から外しています（0で埋めると、切断を「同接0への急落」として検出してしまいます）。</span>`;
+}
+
+// ---- ⑭ 入室後の初回反応(activation funnel) ----
+// 反応率と素通り率は同じ値の裏返しなので、両方を出しつつ「母集団が入室eventの
+// 記録された人に限られる」ことを必ず添える。入室の取りこぼしはengaged側へ偏っており、
+// 素通り率は上限、反応率は下限として読む必要がある。
+function actSeconds(v) {
+  if (v == null) return "-";
+  if (v < 60) return `${v.toFixed(0)}秒`;
+  if (v < 3600) return `${(v / 60).toFixed(0)}分`;
+  return `${(v / 3600).toFixed(1)}時間`;
+}
+
+function actPct(v, digits = 1) {
+  return v == null ? "-" : `${(v * 100).toFixed(digits)}%`;
+}
+
+function renderActivation(data) {
+  const wl = (data.series || {}).wl || {};
+  const nl = (data.series || {}).nl || {};
+  const cov = data.coverage;
+
+  const cells = [
+    ["対象(入室が記録された人)", `${fmtNum(data.n_persons || 0)}人`],
+    ["反応した割合(いいね含む)", actPct(wl.activated_ratio)],
+    ["反応した割合(いいね除く)", actPct(nl.activated_ratio)],
+    ["素通り(いいね含む)", actPct(wl.activated_ratio == null ? null : 1 - wl.activated_ratio)],
+    ["反応した人の中央値", actSeconds(wl.median_latency)],
+  ];
+  document.getElementById("an-act-kpi").innerHTML = cells
+    .map(([k, v]) => `<div class="a-chip"><span class="l">${anEscape(k)}</span><span class="v">${v}</span></div>`)
+    .join("");
+
+  const edges = data.bin_edges || [];
+  const mk = (s, color) => ({
+    label: s.label || "",
+    data: (s.curve || []).slice(0, edges.length).map((v, i) => ({ x: edges[i], y: v * 100 })),
+    borderColor: color,
+    backgroundColor: color,
+    borderWidth: 2,
+    pointRadius: 0,
+    tension: 0.1,
+    fill: false,
+  });
+  const datasets = [mk(wl, "#a4502f"), mk(nl, "#5d6e4e")];
+  if (activationChart) {
+    activationChart.data.datasets = datasets;
+    activationChart.update();
+  } else {
+    activationChart = new Chart(document.getElementById("an-act-chart"), {
+      type: "line",
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        parsing: false,
+        scales: {
+          x: {
+            type: "logarithmic",
+            ticks: { ...nierTicks(), callback: (v) => actSeconds(v) },
+            grid: { color: NIER_GRID_COLOR },
+            title: { display: true, text: "入室してからの経過時間(対数軸)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
+          },
+          y: {
+            beginAtZero: true,
+            ticks: { ...nierTicks(), callback: (v) => `${v}%` },
+            grid: { color: NIER_GRID_COLOR },
+            title: vAxisTitle("反応した割合(累積)"),
+          },
+        },
+        plugins: {
+          legend: { display: true, labels: { ...nierTicks(), boxWidth: 12 } },
+          tooltip: { ...nierTooltip() },
+        },
+      },
+    });
+  }
+
+  let html = "<thead><tr><th>入室からの経過</th><th class=\"num\">反応した割合(いいね含む)</th>"
+    + "<th class=\"num\">95%信頼区間</th><th class=\"num\">反応した割合(いいね除く)</th><th class=\"num\">95%信頼区間</th></tr></thead><tbody>";
+  const nlByH = {};
+  (nl.horizons || []).forEach((h) => { nlByH[h.seconds] = h; });
+  (wl.horizons || []).forEach((h) => {
+    const n = nlByH[h.seconds] || {};
+    const ci = (x) => (x && x.ci ? `${actPct(x.ci[0], 2)} 〜 ${actPct(x.ci[1], 2)}` : "-");
+    html += `<tr><th>${actSeconds(h.seconds)}後まで</th>`
+      + `<td class="num">${actPct(h.activated, 2)}</td>`
+      + `<td class="num an-muted">${ci(h)}</td>`
+      + `<td class="num">${actPct(n.activated, 2)}</td>`
+      + `<td class="num an-muted">${ci(n)}</td></tr>`;
+  });
+  document.getElementById("an-act-table").innerHTML = `${html}</tbody>`;
+
+  let note = `対象 ${fmtNum(data.n_sessions || 0)}配信・${fmtNum(data.n_persons || 0)}人`
+    + `（1人が同じ配信に入り直した場合は1人として数えます）。`
+    + `信頼区間は配信を単位にした再抽出 ${fmtNum(data.bootstrap || 0)}回から求めています。`;
+  if (wl.median_latency != null) {
+    note += ` <span class="an-muted">反応する人は<b>早い段階で反応します</b>。反応した人に限った中央値は`
+      + `${actSeconds(wl.median_latency)}（いいねを除くと${actSeconds(nl.median_latency)}）で、`
+      + `最終的な反応の大半は入室から1分以内に起きています。なお<b>全体の中央値は存在しません</b>`
+      + `（9割が最後まで反応しないため、曲線が50%に届きません）。</span>`;
+  }
+  if (cov) {
+    // 母集団の欠けは、この指標の最大の弱点なので必ず数値で出す。
+    note += `<br /><b class="an-warn">この割合は「入室が記録された人」だけの値です。</b>`
+      + ` 実際に反応があった ${fmtNum(cov.actors)}人のうち、入室eventが残っているのは`
+      + ` <b>${fmtNum(cov.actors_with_join)}人（${actPct(cov.ratio)}）</b>で、残り ${fmtNum(cov.missing)}人は`
+      + `反応しているのに入室が記録されていません。`;
+    if (cov.gifter_ratio != null) {
+      note += ` しかも<b>ギフトを送った人に限ると入室が残っているのは ${actPct(cov.gifter_ratio)}</b>`
+        + `（${fmtNum(cov.gifters_with_join)}/${fmtNum(cov.gifters)}人）にとどまり、`
+        + `<b>取りこぼしは熱心な視聴者ほど多い</b>ことが分かります。`;
+    }
+    note += ` <span class="an-muted">つまり母集団から熱心な層が抜けているため、上の反応率は<b>下限</b>、`
+      + `素通り率は<b>上限</b>として読んでください。視聴者全体の反応率はこれより高いはずです。</span>`;
+  }
+  document.getElementById("an-act-note").innerHTML = note;
+}
+
 // ---- ⑥ 集中度(Lorenz曲線) ----
 function renderConcentration(data) {
   renderLorenz("gift", "an-lorenz-gift", "an-conc-gift-note", "an-conc-gift-top", "コイン", data.gifts, "#a96e49");
@@ -1022,6 +1372,9 @@ async function loadAll() {
     fetchJSON(`/api/analytics/entry-source?${q}`),
     fetchJSON(`/api/analytics/battle-flow?${q}`),
     fetchJSON(`/api/analytics/coverage?${q}`),
+    fetchJSON(`/api/analytics/dwell?${q}`),
+    fetchJSON(`/api/analytics/anomaly?${q}`),
+    fetchJSON(`/api/analytics/activation?${q}`),
   ]);
   const val = (i) => (results[i].status === "fulfilled" ? results[i].value : null);
   safeRender("summary", renderSummary, val(0));
@@ -1039,12 +1392,15 @@ async function loadAll() {
   safeRender("entry-source", renderEntrySource, val(12));
   safeRender("battle-flow", renderBattleFlow, val(13));
   safeRender("coverage", renderCoverage, val(14));
+  safeRender("dwell", renderDwell, val(15));
+  safeRender("anomaly", renderAnomaly, val(16));
+  safeRender("activation", renderActivation, val(17));
   // 取得に失敗したパネルは前回描画が残る(stale)ため、note側で明示する。期間切替後に
   // 前の期間のグラフを今の期間の結果と誤認させない。
   const NOTE_IDS = [null, "an-ti-note", "an-organic-note", "an-context-note",
     "an-battle-note", "an-matrix-note", "an-retention-note", "an-conc-gift-note",
     "an-quality-note", "an-scatter-note", "an-glove-note", "an-share-note",
-    "an-entry-note", "an-bf-note", "an-coverage-note"];
+    "an-entry-note", "an-bf-note", "an-coverage-note", "an-dwell-note", "an-anom-note", "an-act-note"];
   results.forEach((r, i) => {
     if (r.status !== "rejected" || !NOTE_IDS[i]) return;
     const el = document.getElementById(NOTE_IDS[i]);
@@ -1071,6 +1427,27 @@ async function loadTimeIndex() {
   }
   safeRender("time-index", renderTimeIndex, ti);
 }
+
+// section目次。番号はDOM順と一致しないので、実在するsectionから組み立てる
+// (手書きの目次は追加・削除で必ずずれる)。
+function buildSectionIndex() {
+  const nav = document.getElementById("an-index");
+  if (!nav) return;
+  nav.innerHTML = "";
+  document.querySelectorAll("section[id^='an-s']").forEach((section) => {
+    const heading = section.querySelector(".result-subtitle");
+    if (!heading) return;
+    const mark = (heading.textContent.match(/■\s*(\S+)/) || [])[1];
+    if (!mark) return;
+    const link = document.createElement("a");
+    link.href = `#${section.id}`;
+    link.textContent = mark;
+    link.title = heading.textContent.replace(/^\s*■\s*/, "").trim();
+    nav.appendChild(link);
+  });
+}
+
+buildSectionIndex();
 
 elPeriod.addEventListener("change", loadAll);
 elTiMetric.addEventListener("change", loadTimeIndex);

@@ -58,7 +58,7 @@ class InterventionService(BaseService):
                 project_id,
                 "info",
                 "Human",
-                f"[{priority_desc}] {target_desc}への介入: {message[:50]}...",
+                f"[{priority_desc}] {target_desc}への連絡: {message[:50]}...",
             )
             return intervention
 
@@ -79,7 +79,7 @@ class InterventionService(BaseService):
                     intervention["projectId"],
                     "info",
                     "System",
-                    f"介入処理完了: {intervention['message'][:30]}...",
+                    f"連絡処理完了: {intervention['message'][:30]}...",
                 )
             return intervention
 
@@ -102,7 +102,7 @@ class InterventionService(BaseService):
                     project_id,
                     "info",
                     "System",
-                    f"介入削除: {intervention.message[:30]}...",
+                    f"連絡削除: {intervention.message[:30]}...",
                 )
             return result
 

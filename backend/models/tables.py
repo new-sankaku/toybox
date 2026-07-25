@@ -273,6 +273,8 @@ class GlobalExecutionSettings(Base):
  id=Column(Integer,primary_key=True,autoincrement=True)
  concurrent_limits=Column(JSON)
  websocket_settings=Column(JSON)
+ notification_settings=Column(JSON)
+ display_settings=Column(JSON)
  updated_at=Column(DateTime,default=datetime.now,onupdate=datetime.now)
 
 class FileMetadata(Base):

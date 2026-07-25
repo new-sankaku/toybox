@@ -6,6 +6,8 @@ const statusEl = document.getElementById("settings-status");
 function buildOptions(item) {
   const group = document.createElement("div");
   group.className = "radio-group";
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-labelledby", `setlbl-${item.key}`);
   item.options.forEach((opt) => {
     const option = document.createElement("label");
     option.className = "radio-option";
@@ -34,6 +36,7 @@ function buildNumber(item) {
   input.step = item.step;
   input.value = item.value;
   input.dataset.key = item.key;
+  input.setAttribute("aria-labelledby", `setlbl-${item.key}`);
   return input;
 }
 
@@ -42,6 +45,7 @@ function buildText(item) {
   input.type = "text";
   input.value = item.value;
   input.dataset.key = item.key;
+  input.setAttribute("aria-labelledby", `setlbl-${item.key}`);
   return input;
 }
 
@@ -102,6 +106,7 @@ function buildField(item) {
 
   const label = document.createElement("div");
   label.className = "s-cell s-label";
+  label.id = `setlbl-${item.key}`;
   label.textContent = item.label;
 
   const control = document.createElement("div");
@@ -183,185 +188,6 @@ document.getElementById("settings-save").addEventListener("click", async () => {
     statusEl.textContent = "保存しました。";
   } catch (err) {
     statusEl.textContent = err.message;
-  }
-});
-
-// ---- 容量の内訳 ----
-// 判定と文言はserverが持つ(種別labelも再生成可否もAPI応答のまま描画する)。
-const usageStatusEl = document.getElementById("usage-status");
-const usageSummaryEl = document.getElementById("usage-summary");
-const usageScanBtn = document.getElementById("usage-scan");
-
-function fmtBytesGb(bytes) {
-  return `${fmtGb(bytes)} GB`;
-}
-
-function renderUsage(payload) {
-  const scan = payload && payload.scan;
-  const hasScan = Boolean(scan && scan.usage);
-  document.getElementById("usage-category-empty").classList.toggle("hidden", hasScan);
-  document.getElementById("usage-streamer-empty").classList.toggle("hidden", hasScan);
-  if (!hasScan) {
-    document.getElementById("usage-category-list").innerHTML = "";
-    document.getElementById("usage-streamer-list").innerHTML = "";
-    usageSummaryEl.textContent = `対象folder: ${(payload.roots || []).join(" / ") || "-"}`;
-    return;
-  }
-  const usage = scan.usage;
-  const regenerable = new Set(usage.regenerable_categories || []);
-  const errors = (usage.errors || []).length;
-  usageSummaryEl.textContent =
-    `最終scan: ${fmtDateTime(scan.scanned_at)}（${Math.round(scan.duration_ms / 1000)}秒）`
-    + ` / 合計 ${fmtBytesGb(usage.total_bytes)}・${fmtNum(usage.total_files)} file`
-    + ` / 対象folder: ${(usage.roots || []).join(" / ")}`
-    + (errors ? ` / 読めなかった場所 ${fmtNum(errors)} 件（合計に含みません）` : "");
-
-  const rows = (usage.category_labels || [])
-    .map((entry) => ({ ...entry, ...(usage.categories[entry.key] || { bytes: 0, files: 0 }) }))
-    .filter((row) => row.files > 0);
-  renderTableRows(
-    "usage-category-list",
-    null,
-    rows,
-    (row) => [
-      row.label,
-      fmtBytesGb(row.bytes),
-      fmtNum(row.files),
-      regenerable.has(row.key) ? "作り直せる" : "作り直せない",
-    ],
-    [1, 2],
-  );
-
-  renderTableRows(
-    "usage-streamer-list",
-    null,
-    usage.streamers || [],
-    (row) => {
-      const cat = (key) => fmtBytesGb((row.categories[key] || {}).bytes || 0);
-      return [
-        row.label,
-        fmtBytesGb(row.bytes),
-        cat("source"),
-        cat("overlay"),
-        cat("up"),
-        cat("ts"),
-        cat("transient"),
-      ];
-    },
-    [1, 2, 3, 4, 5, 6],
-  );
-}
-
-async function loadUsage() {
-  try {
-    const res = await fetch("/api/storage/usage");
-    if (!res.ok) throw new Error(String(res.status));
-    renderUsage(await res.json());
-  } catch (err) {
-    usageStatusEl.textContent = "容量の内訳を取得できませんでした。";
-  }
-}
-
-usageScanBtn.addEventListener("click", async () => {
-  usageScanBtn.disabled = true;
-  usageStatusEl.textContent = "走査中…（数TB規模では数分かかります）";
-  try {
-    renderUsage(await apiSend("POST", "/api/storage/scan"));
-    usageStatusEl.textContent = "走査しました。";
-  } catch (err) {
-    usageStatusEl.textContent = err.message;
-  } finally {
-    usageScanBtn.disabled = false;
-  }
-});
-
-// ---- 保持policy ----
-// dry-runの結果を持っていない限りapplyできない。planはserverが組み直すため、画面が持つのは
-// 「確認済みかどうか」だけにする。
-const retentionStatusEl = document.getElementById("retention-status");
-const retentionPlanEl = document.getElementById("retention-plan");
-const retentionPreviewBtn = document.getElementById("retention-preview");
-const retentionApplyBtn = document.getElementById("retention-apply");
-const RETENTION_SAMPLE = 20;
-
-function retentionItemLabel(item) {
-  if (item.filename) {
-    return `${item.filename}（${item.age_days}日前 / ${fmtBytesGb(item.bytes)}）`;
-  }
-  return `${item.name}（${item.age_hours}時間前 / ${fmtBytesGb(item.bytes)}）`;
-}
-
-function renderRetentionPlan(plan) {
-  retentionPlanEl.innerHTML = "";
-  (plan.phases || []).forEach((phase) => {
-    const block = document.createElement("div");
-    block.className = "chart-note";
-    const head = document.createElement("div");
-    head.textContent = phase.enabled
-      ? `${phase.label}: ${fmtNum(phase.items.length)} 件 / ${fmtBytesGb(phase.bytes)}`
-      : `${phase.label}: ${phase.reason}`;
-    block.appendChild(head);
-    if (phase.enabled && phase.items.length) {
-      const list = document.createElement("ul");
-      phase.items.slice(0, RETENTION_SAMPLE).forEach((item) => {
-        const li = document.createElement("li");
-        li.textContent = retentionItemLabel(item);
-        list.appendChild(li);
-      });
-      if (phase.items.length > RETENTION_SAMPLE) {
-        const li = document.createElement("li");
-        li.textContent = `ほか ${fmtNum(phase.items.length - RETENTION_SAMPLE)} 件`;
-        list.appendChild(li);
-      }
-      block.appendChild(list);
-    }
-    retentionPlanEl.appendChild(block);
-  });
-  const total = document.createElement("div");
-  total.className = "chart-note";
-  total.textContent = `合計 ${fmtNum(plan.total_items)} 件 / ${fmtBytesGb(plan.total_bytes)} を削除できます。`
-    + (plan.protected_count ? ` 保護中の録画 ${fmtNum(plan.protected_count)} 件は対象外です。` : "")
-    + (plan.free_target_bytes
-      ? ` 空き容量が ${fmtGb(plan.free_target_bytes)} GB に達した時点で打ち切ります。`
-      : "");
-  retentionPlanEl.appendChild(total);
-}
-
-retentionPreviewBtn.addEventListener("click", async () => {
-  retentionPreviewBtn.disabled = true;
-  retentionApplyBtn.disabled = true;
-  retentionStatusEl.textContent = "確認中…";
-  try {
-    const res = await apiSend("POST", "/api/storage/retention", { apply: false });
-    renderRetentionPlan(res.plan);
-    retentionApplyBtn.disabled = res.plan.total_items === 0;
-    retentionStatusEl.textContent = res.plan.total_items
-      ? "削除内容を確認してください。まだ何も削除していません。"
-      : "削除対象はありません。";
-  } catch (err) {
-    retentionStatusEl.textContent = err.message;
-  } finally {
-    retentionPreviewBtn.disabled = false;
-  }
-});
-
-retentionApplyBtn.addEventListener("click", async () => {
-  if (!window.confirm("確認した内容を削除します。生録画を含む場合、この操作は取り消せません。実行しますか？")) return;
-  retentionApplyBtn.disabled = true;
-  retentionPreviewBtn.disabled = true;
-  retentionStatusEl.textContent = "削除中…";
-  try {
-    const res = await apiSend("POST", "/api/storage/retention", { apply: true, confirm: true });
-    renderRetentionPlan(res.plan);
-    retentionStatusEl.textContent =
-      `${fmtNum(res.result.removed_items)} 件・${fmtBytesGb(res.result.freed_bytes)} を削除しました。`
-      + (res.result.stopped_at ? "（空き容量が目標に達したため途中で打ち切りました）" : "");
-    loadDiskBar();
-    loadUsage();
-  } catch (err) {
-    retentionStatusEl.textContent = err.message;
-  } finally {
-    retentionPreviewBtn.disabled = false;
   }
 });
 
@@ -484,9 +310,275 @@ function applyPreviewJob(job) {
 
 loadPreviewRecordings();
 
+// ---- 通知の宛先 ----
+// URLはserverがredactした状態で返る(画面に投稿tokenを出さない)。テスト送信は実際にwebhookへ
+// 投げた結果をそのまま出す: 「積めた」ではなく「届いた」を確かめるための画面である。
+const notifyStatusEl = document.getElementById("notify-status");
+const notifySummaryEl = document.getElementById("notify-summary");
+const notifyListEl = document.getElementById("notify-target-list");
+const notifyTestBtn = document.getElementById("notify-test");
+
+function renderNotifyTargets(targets, results) {
+  const byTarget = new Map((results || []).map((r) => [r.target, r]));
+  notifyListEl.innerHTML = "";
+  document.getElementById("notify-target-empty").classList.toggle("hidden", targets.length > 0);
+  targets.forEach((target) => {
+    const row = document.createElement("tr");
+    const result = byTarget.get(target.url);
+    let outcome = "-";
+    if (result) {
+      outcome = result.ok ? `送信成功 (HTTP ${result.status})` : `失敗: ${result.error || result.status}`;
+    }
+    [target.url, target.format, outcome].forEach((text) => {
+      const cell = document.createElement("td");
+      cell.textContent = text;
+      row.appendChild(cell);
+    });
+    notifyListEl.appendChild(row);
+  });
+}
+
+async function loadNotifyStatus(results) {
+  try {
+    const res = await fetch("/api/notify/status");
+    if (!res.ok) throw new Error("通知状態の取得に失敗しました。");
+    const data = await res.json();
+    notifySummaryEl.textContent =
+      `通知: ${data.enabled ? "有効" : "無効"} / 宛先 ${data.targets.length} 件`
+      + ` / 送信 ${fmtNum(data.sent)} 件・失敗 ${fmtNum(data.failed)} 件`
+      + ` / 送信待ち ${fmtNum(data.queued)} 件`
+      + (data.dropped ? ` / queue溢れで破棄 ${fmtNum(data.dropped)} 件` : "");
+    renderNotifyTargets(data.targets, results);
+  } catch (err) {
+    notifySummaryEl.textContent = err.message;
+  }
+}
+
+notifyTestBtn.addEventListener("click", async () => {
+  notifyTestBtn.disabled = true;
+  notifyStatusEl.textContent = "送信中…";
+  try {
+    const res = await apiSend("POST", "/api/notify/test");
+    const failed = (res.results || []).filter((r) => !r.ok).length;
+    notifyStatusEl.textContent = failed
+      ? `${failed} 件の宛先へ送信できませんでした。`
+      : "送信しました。宛先側で受信を確認してください。";
+    await loadNotifyStatus(res.results);
+  } catch (err) {
+    notifyStatusEl.textContent = err.message;
+    await loadNotifyStatus();
+  } finally {
+    notifyTestBtn.disabled = false;
+  }
+});
+
 loadSettings();
-loadUsage();
+loadNotifyStatus();
 connectWS((msg) => {
   if (msg.type === "jobs") (msg.data || []).forEach(applyPreviewJob);
   else if (msg.type === "job_update" && msg.job) applyPreviewJob(msg.job);
 });
+
+// ---- 保持policy ----
+// dry-runの結果を持っていない限りapplyできない。planはserverが組み直すため、画面が持つのは
+// 「確認済みかどうか」だけにする。
+const retentionStatusEl = document.getElementById("retention-status");
+const retentionPlanEl = document.getElementById("retention-plan");
+const retentionPreviewBtn = document.getElementById("retention-preview");
+const retentionApplyBtn = document.getElementById("retention-apply");
+const RETENTION_SAMPLE = 20;
+
+function retentionItemLabel(item) {
+  if (item.filename) {
+    return `${item.filename}（${item.age_days}日前 / ${fmtBytesGb(item.bytes)}）`;
+  }
+  return `${item.name}（${item.age_hours}時間前 / ${fmtBytesGb(item.bytes)}）`;
+}
+
+function renderRetentionPlan(plan) {
+  retentionPlanEl.innerHTML = "";
+  (plan.phases || []).forEach((phase) => {
+    const block = document.createElement("div");
+    block.className = "chart-note";
+    const head = document.createElement("div");
+    head.textContent = phase.enabled
+      ? `${phase.label}: ${fmtNum(phase.items.length)} 件 / ${fmtBytesGb(phase.bytes)}`
+      : `${phase.label}: ${phase.reason}`;
+    block.appendChild(head);
+    if (phase.enabled && phase.items.length) {
+      const list = document.createElement("ul");
+      phase.items.slice(0, RETENTION_SAMPLE).forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = retentionItemLabel(item);
+        list.appendChild(li);
+      });
+      if (phase.items.length > RETENTION_SAMPLE) {
+        const li = document.createElement("li");
+        li.textContent = `ほか ${fmtNum(phase.items.length - RETENTION_SAMPLE)} 件`;
+        list.appendChild(li);
+      }
+      block.appendChild(list);
+    }
+    retentionPlanEl.appendChild(block);
+  });
+  const total = document.createElement("div");
+  total.className = "chart-note";
+  total.textContent = `合計 ${fmtNum(plan.total_items)} 件 / ${fmtBytesGb(plan.total_bytes)} を削除できます。`
+    + (plan.protected_count ? ` 保護中の録画 ${fmtNum(plan.protected_count)} 件は対象外です。` : "")
+    + (plan.free_target_bytes
+      ? ` 空き容量が ${fmtGb(plan.free_target_bytes)} GB に達した時点で打ち切ります。`
+      : "");
+  retentionPlanEl.appendChild(total);
+}
+
+retentionPreviewBtn.addEventListener("click", async () => {
+  retentionPreviewBtn.disabled = true;
+  retentionApplyBtn.disabled = true;
+  retentionStatusEl.textContent = "確認中…";
+  try {
+    const res = await apiSend("POST", "/api/storage/retention", { apply: false });
+    renderRetentionPlan(res.plan);
+    retentionApplyBtn.disabled = res.plan.total_items === 0;
+    retentionStatusEl.textContent = res.plan.total_items
+      ? "削除内容を確認してください。まだ何も削除していません。"
+      : "削除対象はありません。";
+  } catch (err) {
+    retentionStatusEl.textContent = err.message;
+  } finally {
+    retentionPreviewBtn.disabled = false;
+  }
+});
+
+retentionApplyBtn.addEventListener("click", async () => {
+  const ok = await confirmDialog(
+    "確認した内容を削除します。生録画を含む場合、この操作は取り消せません。実行しますか？",
+    { title: "保持policyの適用", confirmLabel: "削除する" },
+  );
+  if (!ok) return;
+  retentionApplyBtn.disabled = true;
+  retentionPreviewBtn.disabled = true;
+  retentionStatusEl.textContent = "削除中…";
+  try {
+    const res = await apiSend("POST", "/api/storage/retention", { apply: true, confirm: true });
+    renderRetentionPlan(res.plan);
+    retentionStatusEl.textContent =
+      `${fmtNum(res.result.removed_items)} 件・${fmtBytesGb(res.result.freed_bytes)} を削除しました。`
+      + (res.result.stopped_at ? "（空き容量が目標に達したため途中で打ち切りました）" : "");
+    loadDiskBar();
+  } catch (err) {
+    retentionStatusEl.textContent = err.message;
+  } finally {
+    retentionPreviewBtn.disabled = false;
+  }
+});
+
+// ---- DBの保守 ----
+// 退避・健全性check・WAL checkpoint・VACUUMの手動導線。実行結果はops_eventsにも残るので、
+// 経緯は運用log画面で追える。
+const MAINTENANCE_REASONS = { manual: "手動", premigration: "migration前" };
+
+function maintenanceButtons() {
+  return ["mnt-backup", "mnt-integrity", "mnt-checkpoint", "mnt-vacuum"]
+    .map((id) => document.getElementById(id));
+}
+
+function setMaintenanceBusy(busy, text) {
+  maintenanceButtons().forEach((btn) => { btn.disabled = busy; });
+  const el = document.getElementById("mnt-status");
+  el.removeAttribute("title");
+  el.textContent = text || "";
+}
+
+function renderMaintenance(data) {
+  const db = data.db || {};
+  const parts = [
+    `DB ${fmtGb(db.bytes)}GB / WAL ${fmtGb(db.wal_bytes)}GB`,
+    `空き ${fmtGb(db.free_bytes)}GB`,
+    `退避先 ${data.backup_dir}`,
+    `保持世代 ${data.keep === 0 ? "無制限" : `${fmtNum(data.keep)}世代`}（種別ごと）`,
+  ];
+  if (!data.before_migration) {
+    // 既定はONなので、OFFであることは表示しないと気付けない。
+    parts.push("migration前の自動退避: 無効");
+  }
+  document.getElementById("mnt-summary").textContent = parts.join(" / ");
+
+  const tbody = document.getElementById("mnt-rows");
+  tbody.replaceChildren();
+  (data.backups || []).forEach((item) => {
+    const tr = document.createElement("tr");
+    [
+      { value: item.name, cls: "ident" },
+      { value: MAINTENANCE_REASONS[item.reason] || item.reason },
+      { value: fmtDateTime(item.created_at) },
+      { value: `${fmtGb(item.bytes)}GB` },
+    ].forEach(({ value, cls }) => {
+      const td = document.createElement("td");
+      if (cls) td.className = cls;
+      td.textContent = value;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  setListState(document.getElementById("mnt-empty"),
+    tbody.childElementCount === 0 ? "empty" : "ok");
+}
+
+async function loadMaintenance() {
+  try {
+    renderMaintenance(await apiSend("GET", "/api/maintenance/status"));
+  } catch (err) {
+    // 一覧を空で描くと「退避が1つも無い」と読めてしまう。取得できなかったことを出す。
+    setListState(document.getElementById("mnt-empty"), "failed", err);
+    document.getElementById("mnt-summary").textContent = "";
+  }
+}
+
+async function runMaintenance(path, body, running, done) {
+  setMaintenanceBusy(true, running);
+  try {
+    const result = await apiSend("POST", path, body);
+    showToast(done(result));
+  } catch (err) {
+    showError(err);
+    setMaintenanceBusy(false, "");
+    await loadMaintenance();
+    return;
+  }
+  setMaintenanceBusy(false, "");
+  await loadMaintenance();
+}
+
+document.getElementById("mnt-backup").addEventListener("click", () => runMaintenance(
+  "/api/maintenance/backup", undefined, "退避中…（DBの大きさに応じて時間がかかります）",
+  (data) => `退避しました: ${data.backup.name}（${fmtGb(data.backup.bytes)}GB）`,
+));
+
+document.getElementById("mnt-integrity").addEventListener("click", () => runMaintenance(
+  "/api/maintenance/integrity-check", undefined, "健全性checkを実行中…",
+  (data) => data.ok
+    ? "健全性check: 問題は見つかりませんでした。"
+    : `健全性check: ${fmtNum(data.problems.length)}件の問題を検出しました。詳細は運用log画面で確認してください。`,
+));
+
+document.getElementById("mnt-checkpoint").addEventListener("click", () => runMaintenance(
+  "/api/maintenance/checkpoint", undefined, "WAL checkpointを実行中…",
+  (data) => data.busy === 0
+    ? `WALを書き戻しました（WAL ${fmtGb(data.wal_bytes)}GB）`
+    : `WALの一部は書き戻せませんでした（読み取り中の処理があります。WAL ${fmtGb(data.wal_bytes)}GB）`,
+));
+
+document.getElementById("mnt-vacuum").addEventListener("click", async () => {
+  const ok = await confirmDialog(
+    "VACUUMはDB fileを作り直します。実行中は収集を含む全ての書き込みが待たされ、"
+    + "DBとほぼ同じ大きさの一時領域も必要です。配信の収集中は避けてください。",
+    { title: "VACUUMを実行しますか？", confirmLabel: "VACUUMを実行" },
+  );
+  if (!ok) return;
+  await runMaintenance(
+    "/api/maintenance/vacuum", { confirm: true }, "VACUUMを実行中…（書き込みは待たされます）",
+    (data) => `VACUUMが完了しました（${fmtGb(data.freed_bytes)}GB回収 / ${fmtGb(data.bytes_after)}GB）`,
+  );
+});
+
+loadMaintenance();

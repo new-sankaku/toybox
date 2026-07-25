@@ -1,10 +1,10 @@
-from flask import Flask,jsonify
+from flask import Flask,jsonify,request
 from services.project_service import ProjectService
 from services.agent_service import AgentService
 from services.trace_service import TraceService
 from middleware.error_handler import NotFoundError
 from config_loaders import get_config_dir
-from config_loaders.prompt_config import load_prompt
+from config_loaders.prompt_config import load_prompt,_prompt_cache
 from config_loaders.principle_config import (
  load_principles_for_agent,
  get_agent_principles,
@@ -144,3 +144,57 @@ def register_system_prompt_routes(app:Flask,project_service:ProjectService,agent
   }
 
   return jsonify(response)
+
+ @app.route('/api/agents/<agent_id>/system-prompt/project',methods=['PUT'])
+ def save_agent_prompt_to_project(agent_id:str):
+  agent=agent_service.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+
+  data=request.get_json() or {}
+  content=data.get("content","")
+  if not content:
+   return jsonify({"error":"content is required"}),400
+
+  project_id=agent.get("projectId")
+  if not project_id:
+   return jsonify({"error":"Agent has no project"}),400
+
+  project=project_service.get_project(project_id)
+  if not project:
+   return jsonify({"error":"Project not found"}),404
+
+  agent_type=agent.get("type","")
+  project_settings=project.get("settings",{}) or {}
+  prompt_overrides=project_settings.get("promptOverrides",{}) or {}
+  prompt_overrides[agent_type]=content
+  project_settings["promptOverrides"]=prompt_overrides
+  project_service.update_project(project_id,{"settings":project_settings})
+
+  get_logger().info(f"Prompt saved to project {project_id} for agent type {agent_type}")
+  return jsonify({"status":"saved","scope":"project","agentType":agent_type})
+
+ @app.route('/api/agents/<agent_id>/system-prompt/global',methods=['PUT'])
+ def save_agent_prompt_to_global(agent_id:str):
+  agent=agent_service.get_agent(agent_id)
+  if not agent:
+   raise NotFoundError("Agent",agent_id)
+
+  data=request.get_json() or {}
+  content=data.get("content","")
+  if not content:
+   return jsonify({"error":"content is required"}),400
+
+  agent_type=agent.get("type","")
+  prompts_dir=get_config_dir()/"prompts"
+  prompts_dir.mkdir(parents=True,exist_ok=True)
+  prompt_file=prompts_dir/f"{agent_type}.md"
+
+  with open(prompt_file,"w",encoding="utf-8") as f:
+   f.write(content)
+
+  if agent_type in _prompt_cache:
+   _prompt_cache[agent_type]=content
+
+  get_logger().info(f"Prompt saved globally for agent type {agent_type} to {prompt_file}")
+  return jsonify({"status":"saved","scope":"global","agentType":agent_type,"file":str(prompt_file)})

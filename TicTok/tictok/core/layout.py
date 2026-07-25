@@ -6,11 +6,20 @@
     <root>/<streamer>/mp4/<stem>.mp4      ... 完成mp4と焼き込み(<stem>.overlay.mp4)・高画質化(<stem>.up.mp4)
 
 stem は ``NNNNN_<streamer>_YYYYMMDD_HHMMSS`` で、<streamer> は録画時の unique_id と一致する。
-avatars/emotes/gift_icons/.sidecars は従来どおり root 直下に置き、mp4 の位置ではなく
-``record_root_of`` が返す root を基準に解決する。
+
+root 直下のfileは2種類あり、解決の基準が違う:
+
+  録画ごとのartifact (.sidecars/, _clips/) は ``record_root_of`` — mp4と同じrootに置き、
+  mp4がfinal dirへ移送されれば一緒に移る。
+
+  録画横断のpool (avatars/, emotes/, gift_icons/) は ``pool_root`` — mp4の位置とは無関係に
+  work root ただ1つに置く。書き込むのは収集時のcollector(AvatarPool/GiftIconCache)で、
+  そこはwork root固定であり、mp4の現在地では解決できない。
 """
 import re
 from pathlib import Path
+
+from tictok.core import config
 
 TS_DIRNAME = "ts"
 MP4_DIRNAME = "mp4"
@@ -97,12 +106,66 @@ def iter_sessions(root):
 
 
 def record_root_of(path) -> Path:
-    """root 直下の共有リソース(avatars/emotes/gift_icons/.sidecars)を解決するための record root。
+    """その録画のartifact(.sidecars/_clips)を解決するための record root。
 
     入れ子レイアウト(<root>/<streamer>/{ts,mp4}/...)なら root を、
-    そうでなければ(規約外・フラット)親ディレクトリを返す。"""
+    そうでなければ(規約外・フラット)親ディレクトリを返す。
+
+    録画横断のpool(avatars/emotes/gift_icons)には使わない。移送後のmp4に対しては
+    final dir が返るが、poolはwork rootにしか存在しない(``pool_root``)。"""
     p = Path(path)
     parent = p.parent
     if parent.name in (TS_DIRNAME, MP4_DIRNAME):
         return parent.parent.parent
     return parent
+
+
+AVATAR_POOL_DIRNAME = "avatars"
+EMOTE_POOL_DIRNAME = "emotes"
+GIFT_ICON_POOL_DIRNAME = "gift_icons"
+
+_pool_root: Path | None = None
+
+
+def pool_root() -> Path:
+    """録画横断のpool(avatars/emotes/gift_icons)を置く単一のroot = work record dir。
+
+    poolを書くのは収集時のcollectorで、書き込み先はwork record dir固定。読む側が
+    ``record_root_of(src)`` で解くと、final dirへ移送された録画だけが存在しないpoolを
+    見に行き、avatarもemoteも1件も解決できない(署名付きCDN URLは期限切れで再取得もできず、
+    黙ってイニシャル円盤へ縮退する)。読み書きの基準をここへ一本化する。
+
+    server processでは起動時に ``set_pool_root(RECORD_DIR)`` が入る(serverが解決した値と
+    ずれないよう、推測ではなく実物を受け取る)。単体で走るmaintenance scriptにはそれが無いので、
+    その場合だけ ``config.record_dir_from_db`` で同じ順序(DB設定 > 環境変数 > 既定)を辿る。"""
+    global _pool_root
+    if _pool_root is None:
+        _pool_root = Path(config.record_dir_from_db(config.get_db_path())).resolve()
+    return _pool_root
+
+
+def set_pool_root(root) -> None:
+    """poolのrootを明示指定する。serverが自分の RECORD_DIR を渡すために使う。"""
+    global _pool_root
+    _pool_root = Path(root).resolve()
+
+
+def reset_pool_root() -> None:
+    """``pool_root`` のcacheを捨てる。設定を差し替えるtestが使う。"""
+    global _pool_root
+    _pool_root = None
+
+
+def avatar_pool_dir() -> Path:
+    """capture時に保存したuser avatarのpool(``<work root>/avatars/by-id``)。"""
+    return pool_root() / AVATAR_POOL_DIRNAME / "by-id"
+
+
+def emote_pool_dir() -> Path:
+    """downloadしたcustom emote画像のpool。"""
+    return pool_root() / EMOTE_POOL_DIRNAME
+
+
+def gift_icon_pool_dir() -> Path:
+    """capture時に保存したgift iconのpool。"""
+    return pool_root() / GIFT_ICON_POOL_DIRNAME

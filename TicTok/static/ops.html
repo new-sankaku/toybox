@@ -13,43 +13,45 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">運用log</h1>
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a class="active" href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <div class="x-toolbar">
+      <!-- 重要度は「1段だけ」ではなく閾値で選ぶ。障害を追うときに見たいのは「warning以上」で、
+           warningだけを出してerrorを隠す選び方は運用上まず使わない。 -->
       <label class="x-field"><span>重要度</span>
-        <select id="flt-severity">
-          <option value="">全て</option>
+        <select id="flt-severity" title="選んだ重要度以上の記録だけを表示します。">
+          <option value="">すべて（info以上）</option>
+          <option value="warning">warning 以上</option>
           <option value="error">error のみ</option>
-          <option value="warning">warning のみ</option>
-          <option value="info">info のみ</option>
         </select>
       </label>
       <label class="x-field"><span>種別</span>
-        <select id="flt-kind">
-          <option value="">全て</option>
+        <select id="flt-kind" title="できごとの種類。括弧内は記録されている件数です。">
+          <option value="">すべて</option>
         </select>
       </label>
-      <input id="flt-unique" type="text" placeholder="配信者(@id)" />
-      <input id="flt-job" type="text" placeholder="job_id" />
-      <input id="flt-since" type="date" title="この日から" />
-      <input id="flt-until" type="date" title="この日まで" />
+      <label class="x-field"><span>配信者</span>
+        <select id="flt-unique" title="記録に出てくる配信者だけを候補にしています。">
+          <option value="">すべて</option>
+        </select>
+      </label>
+      <label class="x-field"><span>期間</span>
+        <input id="flt-since" type="date" aria-label="この日から" title="この日から" />
+      </label>
+      <label class="x-field"><span>〜</span>
+        <input id="flt-until" type="date" aria-label="この日まで" title="この日まで" />
+      </label>
+      <label class="x-field"><span>job ID</span>
+        <input id="flt-job" type="text" aria-label="job IDで絞込"
+               title="詳細を開くと出るjob ID。1回の処理に紐づく記録だけを辿るときに使います。" />
+      </label>
       <button id="flt-apply" class="btn btn-primary">絞り込む</button>
-      <button id="flt-settings" class="btn" title="設定の変更履歴（いつどの値からどの値へ変えたか）だけを表示します。">設定変更履歴</button>
       <button id="flt-reset" class="btn">条件をclear</button>
       <span class="sp"></span>
       <span id="ops-summary" class="chart-note"></span>
@@ -59,10 +61,12 @@
       <h3>運用log <span class="sub">録画の失敗・接続断・設定変更・jobの開始完了などの状態遷移です。全文logはlogs folderのtext logにあります。</span></h3>
       <div class="body">
         <div class="table-wrap">
-          <table class="result-table">
+          <table class="result-table ops-table">
             <thead>
               <tr>
-                <th>時刻</th><th>重要度</th><th>種別</th><th>対象</th><th>内容</th><th>所要</th><th>詳細</th>
+                <th class="act" title="その記録の生data（JSON）を開きます。">詳細</th>
+                <th>時刻</th><th>重要度</th><th>種別</th><th>対象</th><th class="ops-msg">内容</th>
+                <th class="num" title="その処理にかかった時間。一瞬で終わるできごとは「-」です。">処理時間</th>
               </tr>
             </thead>
             <tbody id="ops-rows"></tbody>
@@ -70,11 +74,12 @@
           <div id="ops-empty" class="feed-empty" data-label="運用log">該当する記録はありません。</div>
         </div>
         <div class="note-actions">
-          <button id="ops-more" class="btn hidden">さらに読み込む</button>
+          <button id="ops-more" class="btn btn-compact hidden">さらに読み込む</button>
           <span id="ops-status" class="form-message"></span>
         </div>
       </div>
     </div>
+
   </div>
 
   <script src="/static/common.js"></script>

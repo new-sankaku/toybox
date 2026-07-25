@@ -5,14 +5,15 @@ import logging
 import os
 import shutil
 import sqlite3
-import statistics
 import threading
 import time
 from pathlib import Path
 from typing import Optional
 
 from tictok import analytics, battle_migration, glove_migration
+from tictok.core import dbmaint
 from tictok.core.config import (
+    get_db_backup_before_migration,
     get_journal_dir,
     get_journal_enabled,
     get_journal_retention_days,
@@ -24,9 +25,16 @@ from tictok.core.config import (
     get_storage_backlog_warn_rows,
 )
 from tictok.core import spike
-from tictok.core.battle import annotate_result
+from tictok.core.battle import (
+    BATTLE_TOPOLOGY_VERSION,
+    GLOVE_EVENT_VERSION,
+    annotate_result,
+    gift_window_end,
+    gift_window_fallback_duration,
+)
 from tictok.core.logctx import current_context
 from tictok.core.logging_setup import progress_interval_seconds
+from tictok.core.progress import IntervalGate
 
 logger = logging.getLogger("tictok.storage")
 
@@ -42,6 +50,9 @@ _EVENTS_COLUMNS = (
     # 両者を同じNULLへ潰すと被覆率が出せなくなる。
     "enter_source", "enter_type", "enter_reason", "follow_status", "follower_count",
     "is_subscriber", "is_moderator", "is_gift_giver",
+    # Share の行き先 / Comment の言語判定。上と同じ規約で、NULL=計装前の未計測、
+    # 'unknown'=届いたが空。share_targetは意味が未確定なので生値をそのまま入れる。
+    "share_type", "share_target", "content_language", "comment_tag",
 )
 _EVENTS_INSERT_SQL = (
     f"INSERT INTO events ({', '.join(_EVENTS_COLUMNS)})"
@@ -61,15 +72,21 @@ _USER_UPSERT_TTL_SECONDS = 60.0
 # 1戦のBattle貢献者を「主力貢献者」とみなすcoin(diamond)下限。この閾値以上を投げた
 # 貢献者を1戦ごとに数え、過去全Battleの平均人数を出す。
 _BATTLE_KEY_CONTRIB_DIAMONDS = 100
-# end_time_msもdurationも次Battle開始も無い「終了済み・最終」Battleでgift窓を閉じるための
-# 既定Battle長(秒)。同一sessionの実観測duration中央値が取れればそれを優先し、無い場合のみ
-# この値を使う。窓を無制限(配信終了まで)にするとBattle後の通常Giftを誤帰属するため。
-# TikTok PKの標準尺(約5分)に基づく。
-_BATTLE_FALLBACK_DURATION_SECONDS = 300.0
 
 # ops_events.severity の値域。DB側のCHECK制約は付けない: ops_eventsは障害時に記録を残す
 # ための表で、制約違反で書き込みが失敗して本流を巻き込むのが最悪の失敗様式だからである。
 # 値域はここで担保し、record_ops_eventが呼び出し時点で検証する。
+# 「このmigration版のmigrationは完走済み」を示すmarker(db_maintenance表)。値はmigration版の
+# 組で、片方でも上がれば不一致になり、次の起動が退避してからmigrationを走らせる。
+# 「退避済み」ではなく「完走済み」であることに意味がある: 書き換える行が1つも無かった起動でも
+# markerは進み、退避fileは作られない(守る対象が無いため)。
+_MIGRATION_BACKUP_KEY = "premigration_backup_versions"
+
+
+def _migration_versions() -> str:
+    return f"glove={GLOVE_EVENT_VERSION},topo={BATTLE_TOPOLOGY_VERSION}"
+
+
 OPS_INFO = "info"
 OPS_WARNING = "warning"
 OPS_ERROR = "error"
@@ -78,6 +95,9 @@ _OPS_LOG_LEVELS = {
     OPS_WARNING: logging.WARNING,
     OPS_ERROR: logging.ERROR,
 }
+# 重大度の低い順。「warning以上」のような閾値の絞り込みはこの順序だけを根拠にする
+# (severity列は文字列で、辞書順ではerror < info < warningになり大小比較ができない)。
+OPS_SEVERITY_ORDER = (OPS_INFO, OPS_WARNING, OPS_ERROR)
 
 # sqlite3.OperationalErrorは DB lock/busy と disk full/I-O障害/破損を同一例外型で運ぶ。
 # 前者は再試行で回復する一時障害(warning)、後者は放置すると書き込みが恒久的に失われる
@@ -107,6 +127,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_unique_id ON sessions(unique_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);
+-- 配信者1人の履歴は「unique_idで絞って新しい順」で引く。単独indexが2本あっても
+-- SQLiteは片方しか使えず、絞り込み後に必ずsortが入る。複合にしてsortごと消す。
+CREATE INDEX IF NOT EXISTS idx_sessions_unique_started ON sessions(unique_id, started_at);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -182,7 +205,43 @@ CREATE TABLE IF NOT EXISTS collab_windows (
     data_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_collab_session ON collab_windows(session_id);
+-- 宝箱(Treasure Box / Super Fan Box)とPortal。coinを投じて視聴者を集める施策なので、
+-- markersだけでは効果測定ができない(markersはsession_id/time/kind/labelの4列で、投下額も
+-- 定員も入らない)。
+--
+-- kindは 'envelope'(送信) と 'portal_closed'(Portal閉鎖時の実移動人数)の2種。
+-- **この2つはidで結合できない**: 実測でPortal送信のenvelope_id(7661161260446092052)と
+-- PortalEventのportal_info.id(7661135713622936341)は別値だった。結合するなら送信者と
+-- 時刻で寄せるしかなく、それは解析側の判断なのでここでは行わない。
+--
+-- diamond_countはNULLになり得る。実測でbusiness_type=19(Super Fan Box)はdiamond_countを
+-- 持たない。0を入れると「無料で配った」という実測していない事実になるのでNULLのままにする。
+--
+-- envelope_idは同一宝箱のNEW/HIDE通知で共通なので、重複除外のkeyに使う(実測で同じ
+-- envelope_idがdisplay違いで2回届いた)。NULLの回は重複除外できない(既存のbattle_idと同じ扱い)。
+CREATE TABLE IF NOT EXISTS envelopes (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    envelope_id TEXT,
+    time REAL NOT NULL,
+    create_time REAL,
+    business_type INTEGER,
+    diamond_count INTEGER,
+    people_count INTEGER,
+    trans_count INTEGER,
+    unpack_at REAL,
+    sender_user_id TEXT,
+    sender_unique_id TEXT,
+    data_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_envelopes_session ON envelopes(session_id, time);
 CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+-- 保守の内部状態。settings表とは分ける: あちらは設定画面が編集する項目の入れ物で、
+-- operatorが触れない内部markerを混ぜると「見えないのに消せる設定」になる。
+CREATE TABLE IF NOT EXISTS db_maintenance (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
@@ -198,13 +257,38 @@ CREATE TABLE IF NOT EXISTS recordings (
     started_at REAL NOT NULL,
     ended_at REAL,
     bytes INTEGER NOT NULL DEFAULT 0,
-    protected INTEGER NOT NULL DEFAULT 0
+    protected INTEGER NOT NULL DEFAULT 0,
+    -- 録画本体の音量正規化を適用した時刻と、そのときの目標LUFS。NULLは未適用。
+    -- 一括画面の「処理済」判定はこの列だけを見る(全録画ぶんffprobeを回すのは非現実的)。
+    -- mp4を作り直す操作(再mp4化)は、正規化せずに作り直したなら必ずNULLへ戻すこと。
+    audio_normalized_at REAL,
+    audio_normalized_lufs REAL,
+    -- 保持している.tsから作り直した時刻。NULLは未実施。一括の「処理済」判定はこの列だけを
+    -- 見る(作り直したmp4は元と同じ名前・場所の別内容で、fileからは見分けが付かない)。
+    reprocessed_at REAL,
+    -- 録画の実尺(秒)。ffprobeで測った値だけを入れ、測れなければNULL(未測定)のまま残す。
+    -- ended_at - started_at は壁時計であって尺ではない: 捕捉が停滞した秒も、再接続の
+    -- 待ちも、そのまま尺に化ける(実測で1.6倍)。画面と見積りが要るのは動画そのものの
+    -- 長さなので、推測で埋めず測った値を持つ。
+    duration_seconds REAL
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_session ON recordings(session_id);
+-- 録画一覧は常に新しい順の全件走査、配信者動画画面はunique_id絞り+新しい順、
+-- 起動時の中断録画回収はstatus絞り。session_id単独indexはどれにも効かない。
+CREATE INDEX IF NOT EXISTS idx_recordings_started_at ON recordings(started_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_uid_started ON recordings(unique_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_recordings_status ON recordings(status);
 CREATE TABLE IF NOT EXISTS monitored_targets (
     unique_id TEXT PRIMARY KEY,
     added_at REAL NOT NULL,
     record_video INTEGER NOT NULL DEFAULT 1
+);
+-- 発見候補のうちoperatorが「監視しない」と判断した相手。候補listはbattle履歴から毎回
+-- 導出するので、除外を記録しておかないと同じ相手が永久に上位へ出続ける。監視へ昇格した
+-- 相手はmonitored_targetsに載るため、ここへ入れるのは明示的な却下だけである。
+CREATE TABLE IF NOT EXISTS discovery_dismissed (
+    unique_id TEXT PRIMARY KEY,
+    dismissed_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS transcripts (
     recording_id INTEGER PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE,
@@ -255,6 +339,11 @@ CREATE INDEX IF NOT EXISTS idx_cut_list_rec ON cut_list(recording_id);
 -- 見どころ(bookmark)。cut_listが「書き出す素材の候補」なのに対し、こちらは「後でまた
 -- 見たい場所」の記憶で、書き出しの意思とは独立に溜まる。end IS NULLが点(コメント1件や
 -- 現在位置)、endを持てば範囲。source_hit_idはメモ元のsearch_hits行(コメント由来のとき)。
+-- live_wall/pts_mappedは配信を見ながら押した見どころのため。押した瞬間に判るのは
+-- wall-clockだけで、mp4のPTS軸とはmux inflationぶんずれる(実測: 112分の録画で340秒)。
+-- 押下時はwall-clockから出した暫定値をstartへ入れてpts_mapped=0とし、finalizeで
+-- timing mapを使ってPTS軸へ再mapしてから1にする。再mapできなかった行は0のまま残し、
+-- 「これは暫定値だ」と画面が言えるようにする(黙って確定値のふりをさせない)。
 CREATE TABLE IF NOT EXISTS bookmarks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     recording_id INTEGER NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
@@ -263,6 +352,8 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     end REAL,
     memo TEXT NOT NULL DEFAULT '',
     source_hit_id INTEGER,
+    live_wall REAL,
+    pts_mapped INTEGER NOT NULL DEFAULT 1,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_rec ON bookmarks(recording_id, start);
@@ -305,7 +396,11 @@ CREATE TABLE IF NOT EXISTS media_job_queue (
     result_json TEXT NOT NULL DEFAULT '{}',
     -- 投入時の指定(clip一括書き出しの範囲list・素材版・正規化の有無など)。録画idだけでは
     -- 再現できない指定を持つ種別のためにある。
-    params_json TEXT NOT NULL DEFAULT '{}'
+    params_json TEXT NOT NULL DEFAULT '{}',
+    -- 待機へ戻したjobを、この時刻まで拾わない(保存先volumeの復帰待ちなど)。
+    not_before REAL,
+    -- 最初に待機へ戻した時刻。総待ち時間の打ち切り判定に使う。
+    deferred_since REAL
 );
 CREATE INDEX IF NOT EXISTS idx_media_job_queue_state ON media_job_queue(state, priority, queued_at);
 CREATE INDEX IF NOT EXISTS idx_media_job_queue_rec ON media_job_queue(recording_id, state);
@@ -318,6 +413,36 @@ CREATE TABLE IF NOT EXISTS viewer_samples (
     anonymous INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_viewer_samples_session ON viewer_samples(session_id);
+-- RoomUserSeqが毎回運んでくるTikTok公式の累積貢献ranking(上位N人)の時系列。
+-- scoreはTikTok側が算出した累積値で、こちらのgift eventの積み上げとは独立の系列である。
+-- 両者を突き合わせると「こちらが取りこぼしたgiftの量」が実測できる(自前集計の検算)ため、
+-- 集計後の値ではなく届いたsnapshotのまま残す。scoreの単位はTikTokが公開していないので
+-- coin/diamond等の意味づけをした列名は付けない(意味が確定するまではscoreのまま)。
+-- 1 messageぶんの上位listは同一timeの複数行で表す(rankが1行1人)。
+CREATE TABLE IF NOT EXISTS contributor_samples (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    time REAL NOT NULL,
+    create_time REAL,
+    rank INTEGER,
+    score INTEGER,
+    identity_key TEXT,
+    user_id TEXT,
+    user_unique_id TEXT,
+    user_nickname TEXT,
+    user_avatar TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_contributor_samples_session ON contributor_samples(session_id, time);
+CREATE INDEX IF NOT EXISTS idx_contributor_samples_identity ON contributor_samples(session_id, identity_key);
+-- FollowEventが運ぶ配信者のfollower総数の時系列。events.follows(event本数)とは別物で、
+-- unfollowも切断中の増減もこちらには載る。TikTok側の値は結果整合で前後するため
+-- (実観測: 81507の次に81465が届く)、単調化や補間はせず届いた値をそのまま残す。
+CREATE TABLE IF NOT EXISTS follower_samples (
+    session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    time REAL NOT NULL,
+    create_time REAL,
+    follower_count INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_follower_samples_session ON follower_samples(session_id, time);
 -- 状態遷移の記録(Layer2)。session_id/recording_idは意図的にFKを張らない: この表は障害と
 -- その後始末を後から再構成するためのもので、参照先sessionが消えていることこそ調べたい状況
 -- である。FKにすると孤児行がFK違反で書けなくなり、記録すべき瞬間に限って記録が残らない。
@@ -349,6 +474,16 @@ CREATE TABLE IF NOT EXISTS storage_scan (
     duration_ms REAL NOT NULL DEFAULT 0,
     payload_json TEXT NOT NULL DEFAULT '{}'
 );
+-- 容量の時系列。storage_scanとは役割が違うので別表にする: あちらは「最新の内訳」1行を
+-- 全置換で持つcacheで、増減の履歴が原理的に残らない(予測が出せない)。こちらは追記のみで、
+-- 1行が1時点のsnapshotである。1日1回程度なので行数は年365行規模にしかならない。
+-- filesystem走査は伴わない: drive空きはO(1)、録画量とDB行数はDBから引ける(実測48ms)。
+CREATE TABLE IF NOT EXISTS capacity_samples (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sampled_at REAL NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_capacity_samples_at ON capacity_samples(sampled_at);
 CREATE TABLE IF NOT EXISTS analytics_session_cache (
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     kind TEXT NOT NULL,
@@ -419,6 +554,13 @@ def _identity_key(user_id, unique_id, nickname) -> str:
             or (nickname or "").strip())
 
 
+# 1人の視聴者を指さないidentity_key。'' は身元を採れなかったeventの現行表現。
+# '(unknown)' は表示用リテラルを名寄せkeyに使っていた時期の畳み込み跡で(commit 022b2e0で
+# 収集側は修正済み)、既存DBに残る行は別人が1 identityへ潰れたものである。分離に要る情報は
+# 失われているため復元できない。Fan台帳はこれらを1人として並べてはならない。
+NON_IDENTITY_KEYS = ("", "(unknown)")
+
+
 def _valid_owner_id(user_id) -> bool:
     """配信者の数値アカウントIDとして妥当か。TikTokの実IDは長い数値で、team_id等の
     小さな値(例: '1','2')が誤ってown-host user_idに混入したゴミを弾く。"""
@@ -480,6 +622,9 @@ class Storage:
         self._ops_fail_lock = threading.Lock()
         self._ops_write_failures = 0
         self._ops_first_failure_logged = False
+        # ops_eventsの観測者(通知機構)。ops_eventsは障害系・session lifecycleの単一の口なので、
+        # 通知のために別の計装を各所へ足す代わりに、ここへ1本ぶら下げる。
+        self._ops_observer = None
         # backlog警告の間隔gate(writerスレッド専用に触るのでlock不要)。
         self._backlog_logged_at = 0.0
         with self._lock:
@@ -489,6 +634,12 @@ class Storage:
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
             self._migrate()
+            self._conn.commit()
+        # 破壊的migrationの直前に退避する。glove/battleのmigrationはbattles.data_jsonを
+        # in-placeで書き換え、元の値はどこにも残らない。lockの外なのは、退避が自分のread接続を
+        # 開くためで、ここはまだwriter threadも起動していない起動直後の単独実行区間である。
+        premigration_backup = self._backup_before_migrations()
+        with self._lock:
             # 旧方式judgeのグローブcrit event(vマーカー無し)を新方式へ再判定する。
             # 冪等で、対象が無ければno-op。collectorはまだ動いていない起動時のみ安全。
             glove_stats = glove_migration.migrate_glove_events(self._conn, get_log_dir())
@@ -500,7 +651,9 @@ class Storage:
             if topo_stats["battles"]:
                 logger.info("migrated battle topology to v2: %s", topo_stats)
             pruned_ops = self._prune_ops_events_locked()
+            self._set_maintenance_locked(_MIGRATION_BACKUP_KEY, _migration_versions())
             self._conn.commit()
+        self.premigration_backup = premigration_backup
         self._writer = threading.Thread(
             target=self._writer_loop, name="storage-writer", daemon=True
         )
@@ -513,6 +666,139 @@ class Storage:
                            "journal_enabled": self._journal_enabled,
                            **self._db_space_ctx()}},
         )
+
+    # ----- DB保守(退避・健全性check・VACUUM) --------------------------------------------
+    # 退避fileの作成そのものは core.dbmaint が持つ(自前のread接続で行うのでingestを止めない)。
+    # ここに置くのは、live接続でしか正しく実行できない操作(WAL checkpoint・VACUUM)と、
+    # 起動時の退避hookである。
+
+    def _get_maintenance_locked(self, key: str):
+        row = self._conn.execute(
+            "SELECT value FROM db_maintenance WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row is not None else None
+
+    def _set_maintenance_locked(self, key: str, value: str) -> None:
+        self._conn.execute(
+            "INSERT INTO db_maintenance (key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+    def _backup_before_migrations(self) -> dict:
+        """破壊的migrationの直前の自動退避。__init__からのみ呼ぶ。
+
+        起動の度に511MBを複製するのは無意味なので、退避はmigration版が上がった時だけ行う。
+        判定はmigration側の選択条件を写さず、「今のmigration版のmigrationが完走済みか」という
+        marker(db_maintenance表)で行う。migrationの選択SQLをここへ複製すると、片方だけ直った
+        時に黙って退避されなくなる。markerはmigrationが完走した後に書くので、途中で落ちた起動は
+        次回もう一度退避してからやり直す。
+
+        退避に失敗したらmigrationは走らせず起動を止める。書き換えたrowの元の値はどこにも
+        残らないため、「退避できなかったが先に進む」は取り返しのつかない選択肢になる。
+        """
+        if not get_db_backup_before_migration():
+            return {"taken": False, "skipped": "disabled"}
+        versions = _migration_versions()
+        with self._lock:
+            done = self._get_maintenance_locked(_MIGRATION_BACKUP_KEY)
+            has_rows = self._conn.execute("SELECT 1 FROM battles LIMIT 1").fetchone() is not None
+        if done == versions:
+            return {"taken": False, "skipped": "already_migrated", "versions": versions}
+        if not has_rows:
+            # 両migrationが書き換えるのはbattles表だけ。空なら守る対象が無い(新規DBの初回起動)。
+            return {"taken": False, "skipped": "no_rows", "versions": versions}
+        try:
+            result = dbmaint.create_backup(
+                self._db_path, reason=dbmaint.REASON_PRE_MIGRATION
+            )
+        except Exception as exc:
+            logger.error(
+                "pre-migration database snapshot failed; startup is aborted so the "
+                "destructive migration does not run without one (%s)", exc, exc_info=True,
+                extra={"event": "storage.premigration_backup_failed",
+                       "ctx": {"versions": versions,
+                               "backup_dir": str(dbmaint.backup_dir()),
+                               **self._db_space_ctx()}},
+            )
+            raise
+        logger.info(
+            "pre-migration database snapshot written to %s", result["path"],
+            extra={"event": "storage.premigration_backup_completed",
+                   "ctx": {"versions": versions, **result}},
+        )
+        return {"taken": True, "versions": versions, **result}
+
+    def db_file_status(self) -> dict:
+        """DB fileとWALのsize、載っているvolumeの空き。画面が「今どれだけの物を退避するのか」
+        を退避前に示すための材料。"""
+        db = Path(self._db_path).resolve()
+        status = {
+            "path": str(db),
+            "bytes": db.stat().st_size if db.is_file() else 0,
+            "wal_bytes": 0,
+        }
+        wal = dbmaint.wal_path(db)
+        if wal.is_file():
+            status["wal_bytes"] = wal.stat().st_size
+        status.update(self._db_space_ctx())
+        return status
+
+    def integrity_check(self) -> dict:
+        """live DBのPRAGMA integrity_check。自前のread接続で走らせるので、数十秒かかっても
+        収集側の書き込みは止まらない(WALのreaderはwriterを塞がない)。"""
+        self.flush()
+        started = time.monotonic()
+        verdict = dbmaint.integrity_check_file(self._db_path)
+        verdict["duration_ms"] = round((time.monotonic() - started) * 1000.0, 1)
+        return verdict
+
+    def wal_checkpoint(self) -> dict:
+        """WALをDB本体へ書き戻してWAL fileを切り詰める。
+
+        戻り値のbusyはSQLiteがそのまま返す値で、1は「readerが居て全部は書き戻せなかった」
+        を意味する。成功に丸めない: WALが縮まなかったのに『完了』と表示されると、次に容量を
+        疑う人が誤った前提から調べ始める。"""
+        self.flush()
+        started = time.monotonic()
+        with self._lock:
+            self._conn.commit()
+            row = self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        busy, log_pages, checkpointed = (row[0], row[1], row[2]) if row else (None, None, None)
+        return {
+            "busy": busy,
+            "log_pages": log_pages,
+            "checkpointed_pages": checkpointed,
+            "wal_bytes": self.db_file_status()["wal_bytes"],
+            "duration_ms": round((time.monotonic() - started) * 1000.0, 1),
+        }
+
+    def vacuum(self) -> dict:
+        """DB fileを作り直して断片化と削除跡の空き領域を回収する。手動実行専用。
+
+        VACUUMはfile全体をexclusive lockで再構築するため、実行中は全ての書き込みが待たされ、
+        一時的にDBとほぼ同じ大きさの作業fileも要る。自動では決して走らせない。
+
+        WAL modeでは再構築の結果は一旦WALへ書かれ、DB file自体はcheckpointするまで1 byteも
+        縮まない。checkpointまで含めて初めて「回収した」と言えるので、ここで続けて実行する
+        (これを省くと必ず freed_bytes=0 と報告され、VACUUMが効いていないように見える)。"""
+        self.flush()
+        before = self.db_file_status()["bytes"]
+        started = time.monotonic()
+        with self._lock:
+            # VACUUMはtransactionの中では実行できない。直前に必ずcommitして開いた暗黙の
+            # transactionを閉じる。
+            self._conn.commit()
+            self._conn.execute("VACUUM")
+            self._conn.commit()
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        after = self.db_file_status()["bytes"]
+        return {
+            "bytes_before": before,
+            "bytes_after": after,
+            "freed_bytes": before - after,
+            "duration_ms": round((time.monotonic() - started) * 1000.0, 1),
+        }
 
     # ----- ops_events(Layer2: 状態遷移のDB記録) ----------------------------------------
     def record_ops_event(
@@ -568,7 +854,30 @@ class Storage:
             ops_id, kind, severity, message, unique_id, session_id,
             recording_id, job_id, duration_ms, detail,
         )
+        self._notify_ops_observer(kind, severity, message, unique_id, detail)
         return ops_id
+
+    def set_ops_observer(self, observer) -> None:
+        """ops_eventが記録されるたびに呼ばれるcallbackを1つ登録する(通知機構用)。
+
+        DB書き込みの後に呼ぶ。順序を逆にすると、通知は届いたのに運用logにその行が無いという
+        状態が起こり得る。
+        """
+        self._ops_observer = observer
+
+    def _notify_ops_observer(self, kind, severity, message, unique_id, detail) -> None:
+        """観測者へ配る。record_ops_eventはあらゆるthreadから、しばしば障害処理の最中に
+        呼ばれるので、観測者側の失敗を呼び出し元へ返さない。通知が落ちても記録は残る。"""
+        observer = self._ops_observer
+        if observer is None:
+            return
+        try:
+            observer(kind, severity, message, unique_id, detail)
+        except Exception:
+            logger.exception(
+                "ops event observer failed; the event itself is recorded (kind=%s)", kind,
+                extra={"event": "storage.ops_observer_failed", "ctx": {"kind": kind}},
+            )
 
     def _write_ops_event(self, ops_id, kind, severity, message, unique_id,
                          session_id, recording_id, job_id, duration_ms, detail) -> None:
@@ -638,11 +947,20 @@ class Storage:
     def _ops_events_filters(self, *, severity: Optional[str], kind: Optional[str],
                             kind_prefix: Optional[str], unique_id: Optional[str],
                             session_id: Optional[int], job_id: Optional[str],
-                            since: Optional[float], until: Optional[float]) -> tuple:
+                            since: Optional[float], until: Optional[float],
+                            min_severity: Optional[str] = None) -> tuple:
         """list/countで同一の絞り込みを組む。両者で条件がずれるとbadgeの件数と一覧の
         件数が食い違うため、SQLの組み立ては1箇所に置く。"""
         clauses = []
         params: list = []
+        if min_severity is not None:
+            # 「warning以上」の閾値指定。severity列は文字列で大小比較ができないため、
+            # 重大度の順序(OPS_SEVERITY_ORDER)から該当する値を並べてINで引く。
+            if min_severity not in OPS_SEVERITY_ORDER:
+                raise ValueError(f"unknown ops severity: {min_severity!r}")
+            levels = OPS_SEVERITY_ORDER[OPS_SEVERITY_ORDER.index(min_severity):]
+            clauses.append(f"o.severity IN ({','.join('?' * len(levels))})")
+            params.extend(levels)
         for column, value in (("o.severity", severity), ("o.kind", kind),
                               ("o.unique_id", unique_id), ("o.session_id", session_id),
                               ("o.job_id", job_id)):
@@ -666,16 +984,26 @@ class Storage:
                         job_id: Optional[str] = None, since: Optional[float] = None,
                         until: Optional[float] = None, offset: int = 0,
                         before_ts: Optional[float] = None,
-                        before_id: Optional[int] = None) -> list:
+                        before_id: Optional[int] = None,
+                        min_severity: Optional[str] = None) -> list:
         """画面表示用の一覧。sessions/recordingsはLEFT JOINで引く: ops_eventsはFKを張らず
         session削除後も残るため、INNER JOINだと障害当時の行が消えて見える。
 
         ページングはkeyset(before_ts + before_id)を既定にする。この表は末尾に行が増え続けるので、
         OFFSETだと読み込み中に新しい行が入るたび境界の行が重複・欠落する。offsetも受けるが、
-        keysetを指定したときはそちらを優先する。"""
+        keysetを指定したときはそちらを優先する。
+
+        limitはNoneのときだけ設定値の既定を使う。0以下は拒否する: SQLiteはLIMIT -1を
+        「無制限」と解釈するため、素通しすると1requestでops_events全件を読み込んでしまう。
+        全件取得はこの一覧の契約に無い。"""
+        if limit is not None:
+            limit = int(limit)
+            if limit <= 0:
+                raise ValueError(f"limitは1以上を指定してください: {limit}")
         clauses, params = self._ops_events_filters(
             severity=severity, kind=kind, kind_prefix=kind_prefix, unique_id=unique_id,
             session_id=session_id, job_id=job_id, since=since, until=until,
+            min_severity=min_severity,
         )
         keyset = before_ts is not None and before_id is not None
         if keyset:
@@ -683,7 +1011,7 @@ class Storage:
             clauses.append("(o.ts < ? OR (o.ts = ? AND o.id < ?))")
             params.extend([before_ts, before_ts, before_id])
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-        params.append(int(limit) if limit else get_ops_events_query_limit())
+        params.append(limit if limit is not None else get_ops_events_query_limit())
         tail = " LIMIT ?"
         if not keyset and offset:
             tail += " OFFSET ?"
@@ -742,6 +1070,25 @@ class Storage:
                 tuple(params),
             ).fetchall()
         return [{"kind": row["kind"], "count": row["n"]} for row in rows]
+
+    def ops_event_unique_ids(self, *, since: Optional[float] = None) -> list:
+        """記録に出てくる配信者の一覧(件数付き)。配信者filterの候補に使う。
+
+        配信者一覧(streamer_index)ではなくops_events自身から引く。監視を外した配信者の
+        障害記録は残り続けるので、一覧側から候補を作ると「表には居るのに選べない」行が出る。"""
+        clauses, params = self._ops_events_filters(
+            severity=None, kind=None, kind_prefix=None, unique_id=None,
+            session_id=None, job_id=None, since=since, until=None,
+        )
+        clauses.append("o.unique_id IS NOT NULL AND o.unique_id <> ''")
+        where = " WHERE " + " AND ".join(clauses)
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT o.unique_id AS unique_id, COUNT(*) AS n FROM ops_events o{where}"
+                " GROUP BY o.unique_id ORDER BY o.unique_id",
+                tuple(params),
+            ).fetchall()
+        return [{"unique_id": row["unique_id"], "count": row["n"]} for row in rows]
 
     # ----- AI分析結果のcache -----------------------------------------------------------
     # LLM推論はここへ保存し、model・prompt版・入力指紋が一致する限り再実行しない。
@@ -1419,6 +1766,14 @@ class Storage:
             ("is_subscriber", "INTEGER"),
             ("is_moderator", "INTEGER"),
             ("is_gift_giver", "INTEGER"),
+            # ShareEvent.share_type / share_target。生値のTEXT。share_targetは実配信で
+            # '-1' と '112' の2値を観測しているが、何を指すかは未確定なので解釈を付けない。
+            ("share_type", "TEXT"),
+            ("share_target", "TEXT"),
+            # CommentEvent.content_language(TikTok側の言語判定) / comment_tag(enum名のJSON list)。
+            # どちらも後から追加されたfieldで、古い収集分では届かない。
+            ("content_language", "TEXT"),
+            ("comment_tag", "TEXT"),
         ):
             if name not in columns:
                 # backfillはしない。既存行は「計装前で未計測」であって「不明と観測した」
@@ -1513,6 +1868,62 @@ class Storage:
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "recordings", "column": "protected"}},
             )
+        if "audio_normalized_at" not in recording_columns:
+            # 既存録画はNULL(未適用)から始める。過去のmp4が正規化済みかどうかは、file
+            # からは判別できない(loudnormは痕跡を残さない)ので推測で埋めてはいけない。
+            self._conn.execute("ALTER TABLE recordings ADD COLUMN audio_normalized_at REAL")
+            self._conn.execute("ALTER TABLE recordings ADD COLUMN audio_normalized_lufs REAL")
+            logger.info(
+                "migrated recordings table: added audio normalization columns",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "recordings",
+                               "column": "audio_normalized_at,audio_normalized_lufs"}},
+            )
+        if "reprocessed_at" not in recording_columns:
+            # 再mp4化に「済み」の印が無かったため、一括投入は.tsが残っている録画を毎回
+            # 全部作り直していた。同じ内容を作り直すたびに元mp4が_backupへ積まれ(実測で
+            # 同一録画に3世代)、退避だけで307GBに達していた。作り直しは元動画を差し替える
+            # 不可逆な操作なので、既定では一度で足りる。
+            self._conn.execute("ALTER TABLE recordings ADD COLUMN reprocessed_at REAL")
+            # 既存ぶんはjob台帳から埋める。完了した再mp4化の記録がそのまま「作り直した」
+            # 事実で、fileからの推測ではない。台帳が消えている古い録画はNULLのまま残る。
+            self._conn.execute(
+                "UPDATE recordings SET reprocessed_at = ("
+                "  SELECT MAX(q.finished_at) FROM media_job_queue q"
+                "  WHERE q.recording_id = recordings.id AND q.kind = 'reprocess'"
+                "    AND q.state = 'completed')"
+            )
+            backfilled = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM recordings WHERE reprocessed_at IS NOT NULL"
+            ).fetchone()["n"]
+            logger.info(
+                "migrated recordings table: added reprocessed_at column (%d backfilled)",
+                backfilled,
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "recordings", "column": "reprocessed_at",
+                               "backfilled": backfilled}},
+            )
+        if "duration_seconds" not in recording_columns:
+            # 尺の出所を壁時計(ended_at - started_at)から実測へ移す。既存行はNULL(未測定)
+            # から始め、転写を持つ録画だけ転写側の実尺で埋める(転写はmp4そのものを読んで
+            # 作られており、fileからの推測ではない)。残りは scripts/repair_recording_
+            # durations.py がmp4/HLSを測って埋める。
+            self._conn.execute("ALTER TABLE recordings ADD COLUMN duration_seconds REAL")
+            self._conn.execute(
+                "UPDATE recordings SET duration_seconds = ("
+                "  SELECT t.duration FROM transcripts t"
+                "  WHERE t.recording_id = recordings.id AND t.duration > 0)"
+            )
+            backfilled = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM recordings WHERE duration_seconds IS NOT NULL"
+            ).fetchone()["n"]
+            logger.info(
+                "migrated recordings table: added duration_seconds column (%d backfilled)",
+                backfilled,
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "recordings", "column": "duration_seconds",
+                               "backfilled": backfilled}},
+            )
         target_columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(monitored_targets)")]
         if "record_video" not in target_columns:
             self._conn.execute(
@@ -1525,6 +1936,21 @@ class Storage:
             self._backfill_owner_user_ids()
             self._mark_migration("owner_user_id_v1")
         self._migrate_ops_events()
+        bookmark_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(bookmarks)")
+        ]
+        if "live_wall" not in bookmark_columns:
+            # 既存行は/videosで動画時間から作られたもの。startは既にPTS軸なので
+            # pts_mapped=1(既定)のままで正しく、live_wallはNULL(live押下ではない)。
+            self._conn.execute("ALTER TABLE bookmarks ADD COLUMN live_wall REAL")
+            self._conn.execute(
+                "ALTER TABLE bookmarks ADD COLUMN pts_mapped INTEGER NOT NULL DEFAULT 1"
+            )
+            logger.info(
+                "migrated bookmarks table: added live_wall/pts_mapped columns",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "bookmarks", "column": "live_wall,pts_mapped"}},
+            )
         media_job_columns = [
             row["name"] for row in self._conn.execute("PRAGMA table_info(media_job_queue)")
         ]
@@ -1538,6 +1964,18 @@ class Storage:
                 "migrated media_job_queue table: added params_json column",
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "media_job_queue", "column": "params_json"}},
+            )
+        if "not_before" not in media_job_columns:
+            # 保存先volumeの不在のような「待てば直る」前提不成立を、失敗ではなく待機で
+            # 表すための列。not_before までworkerは拾わず、deferred_since で総待ち時間を
+            # 打ち切る(待ち続けるqueueは、動いているように見えて何も進まない)。
+            self._conn.execute("ALTER TABLE media_job_queue ADD COLUMN not_before REAL")
+            self._conn.execute("ALTER TABLE media_job_queue ADD COLUMN deferred_since REAL")
+            logger.info(
+                "migrated media_job_queue table: added not_before/deferred_since columns",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "media_job_queue",
+                               "column": "not_before,deferred_since"}},
             )
 
     def _migrate_ops_events(self) -> None:
@@ -1561,9 +1999,12 @@ class Storage:
         keyが指定された場合はそれを使う(逆引き補完済みeventのidentity_keyを尊重するため)。
         use_cache時は属性が変わらない限り一定時間(TTL)はupsertを間引く(liveの高頻度取り込み用。
         last_seenの更新がTTL分遅れる副作用は許容。backfill等の正確性重視の呼び出しは間引かない)。"""
-        key = key or _identity_key(
-            user.get("user_id"), user.get("unique_id"), user.get("nickname")
-        )
+        # keyが明示されたらそのまま使う。空文字(身元不明)を偽値として拾ってnicknameから
+        # 再計算すると、表示用の "(unknown)" で別人が1行へ畳まれる。
+        if key is None:
+            key = _identity_key(
+                user.get("user_id"), user.get("unique_id"), user.get("nickname")
+            )
         if not key:
             return ""
         nickname = (user.get("nickname") or "").strip()
@@ -1884,9 +2325,15 @@ class Storage:
 
     def add_event(self, session_id: int, entry: dict) -> None:
         user = entry.get("user") or {}
-        identity_key = _identity_key(
-            user.get("user_id"), user.get("unique_id"), user.get("nickname")
-        )
+        # collectorが決めたidentity_keyをそのまま使う(空文字=身元不明も尊重する)。ここで
+        # nicknameから再計算すると、表示用の "(unknown)" がkeyになり別人のeventが1
+        # identityへ畳まれる。keyを持たないdict(逆引き補完前のentry等)だけ計算する。
+        if "identity_key" in user:
+            identity_key = user["identity_key"]
+        else:
+            identity_key = _identity_key(
+                user.get("user_id"), user.get("unique_id"), user.get("nickname")
+            )
         params = (
             session_id,
             entry["time"],
@@ -1918,6 +2365,10 @@ class Storage:
             entry.get("is_subscriber"),
             entry.get("is_moderator"),
             entry.get("is_gift_giver"),
+            entry.get("share_type"),
+            entry.get("share_target"),
+            entry.get("content_language"),
+            entry.get("comment_tag"),
         )
         # DB bufferへ積む前に耐久journalへ追記する。プロセスがこの直後に死んでも、eventは
         # diskに残り起動時recoverで復元できる(paramsはeventsの行tupleそのもの)。
@@ -1947,6 +2398,60 @@ class Storage:
             self._viewer_buffer.append(row)
             if len(self._event_buffer) + len(self._viewer_buffer) >= _WRITE_BATCH_SIZE:
                 self._flush_cond.notify()
+
+    def add_contributor_samples(
+        self, session_id: int, ts: float, create_time: Optional[float], rows: list
+    ) -> None:
+        """RoomUserSeqの上位貢献者snapshotを1 messageぶんまとめて保存する。rowsは
+        {rank, score, user{user_id, unique_id, nickname, avatar}} のlist。
+        呼び出し側が間引き済みである前提の低頻度書き込みなので、event/viewerのbatch writerは
+        通さず同期で書く(writerのbuffer/journal形式を増やさない)。
+
+        identity_keyは_identity_key(不変user_id -> unique_id -> nickname)で採るが、users表への
+        upsertは行わない。この経路のuserにはLv/badgeが載っておらず、upsertすると空の属性で
+        既存profileを触りにいく余地を作るだけだからである。"""
+        if not rows:
+            return
+        params = []
+        for row in rows:
+            user = row.get("user") or {}
+            params.append(
+                (
+                    session_id,
+                    ts,
+                    create_time,
+                    row.get("rank"),
+                    row.get("score"),
+                    _identity_key(
+                        user.get("user_id"), user.get("unique_id"), user.get("nickname")
+                    )
+                    or None,
+                    user.get("user_id") or None,
+                    user.get("unique_id") or None,
+                    user.get("nickname") or None,
+                    user.get("avatar") or None,
+                )
+            )
+        with self._lock:
+            self._conn.executemany(
+                "INSERT INTO contributor_samples (session_id, time, create_time, rank, score,"
+                " identity_key, user_id, user_unique_id, user_nickname, user_avatar)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                params,
+            )
+            self._conn.commit()
+
+    def add_follower_sample(
+        self, session_id: int, ts: float, create_time: Optional[float], follower_count: int
+    ) -> None:
+        """FollowEventが運ぶ配信者のfollower総数を1点記録する。値が動いた時だけ呼ぶ想定。"""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO follower_samples (session_id, time, create_time, follower_count)"
+                " VALUES (?, ?, ?, ?)",
+                (session_id, ts, create_time, follower_count),
+            )
+            self._conn.commit()
 
     def finalize_session(
         self, session_id: int, status: str, stats: dict, timeline: list, markers: list
@@ -2235,16 +2740,21 @@ class Storage:
 
     def session_comments(self, session_id: int, limit: int) -> list:
         """Most recent comment texts for a session, for AI analysis. The text lives in
-        the `comment` column (add_event stores entry['comment']); fall back to `text`."""
+        the `comment` column (add_event stores entry['comment']); fall back to `text`.
+
+        本文が空の行はSQL側で落とす。Python側で落とすとLIMITが空行込みで先に効き、
+        直近が空commentばかりのsessionで要求件数より少なく(最悪0件)返ってしまう。
+        「空」の定義はNULLと空文字だけ(空白のみの本文は落とさない)。"""
         self.flush()
         with self._lock:
             rows = self._conn.execute(
                 "SELECT comment, text FROM events"
                 " WHERE session_id = ? AND kind = 'comment'"
+                " AND COALESCE(NULLIF(comment, ''), NULLIF(text, '')) IS NOT NULL"
                 " ORDER BY time DESC LIMIT ?",
                 (session_id, limit),
             ).fetchall()
-        return [(row["comment"] or row["text"] or "") for row in rows if (row["comment"] or row["text"])]
+        return [(row["comment"] or row["text"] or "") for row in rows]
 
     def iter_events(self, session_id: int, start: float | None = None, end: float | None = None) -> list:
         """Events for a session, ordered by arrival time. When start/end (wall-clock
@@ -2321,6 +2831,50 @@ class Storage:
             )
             self._conn.commit()
 
+    def save_envelopes(self, session_id: int, rows: list) -> None:
+        """宝箱/Portalをsession単位で全置換する。battles/collab_windowsと同じ冪等な作法。
+
+        collector側が envelope_id で重複を畳んだ結果を渡す前提。ここでUNIQUE制約を張らない
+        のは、envelope_idがNULLで届く回(HIDE通知など)があり、NULL同士は制約で畳めないため
+        (畳めない回を弾くと実測が欠ける)。
+        """
+        with self._lock:
+            self._conn.execute("DELETE FROM envelopes WHERE session_id = ?", (session_id,))
+            self._conn.executemany(
+                "INSERT INTO envelopes (session_id, kind, envelope_id, time, create_time,"
+                " business_type, diamond_count, people_count, trans_count, unpack_at,"
+                " sender_user_id, sender_unique_id, data_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        session_id, r.get("kind") or "envelope", r.get("envelope_id"),
+                        r.get("time"), r.get("create_time"), r.get("business_type"),
+                        r.get("diamond_count"), r.get("people_count"), r.get("trans_count"),
+                        r.get("unpack_at"), r.get("sender_user_id"),
+                        r.get("sender_unique_id"),
+                        json.dumps(r.get("data") or {}, ensure_ascii=False),
+                    )
+                    for r in rows
+                ],
+            )
+            self._conn.commit()
+
+    def session_envelopes(self, session_id: int) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT kind, envelope_id, time, create_time, business_type,"
+                " diamond_count, people_count, trans_count, unpack_at,"
+                " sender_user_id, sender_unique_id, data_json"
+                " FROM envelopes WHERE session_id = ? ORDER BY time",
+                (session_id,),
+            ).fetchall()
+        out = []
+        for row in rows:
+            item = dict(row)
+            item["data"] = json.loads(item.pop("data_json") or "{}")
+            out.append(item)
+        return out
+
     def save_collab_windows(self, session_id: int, windows: list) -> None:
         """コラボ(非BattleのLinkMic)接続窓を保存。Battle窓の差し引きは分析側で行う。"""
         with self._lock:
@@ -2368,6 +2922,7 @@ class Storage:
                 " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
                 " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
                 " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar, SUM(e.diamonds) AS diamonds,"
+                " SUM(e.gift_count) AS gifts,"
                 # Lv/badgeはその時点で変動する属性。users表(最新)へfallbackすると過去の値を
                 # 捏造するため、このSessionのevent(point-in-time)のみ。無ければ非表示。
                 " NULLIF(MAX(e.user_fans_level), 0) AS fans_level,"
@@ -2382,12 +2937,16 @@ class Storage:
             ).fetchall()
         return [
             {
+                # identity_key/giftsは配信者profileのBattle gifter集計が使う。Battle card側は
+                # 参照しない(この関数を貢献集計の単一の入口にするために持たせている)。
+                "key": row["key"],
                 "user_id": row["user_id"] or "",
                 "unique_id": row["unique_id"] or "",
                 "nickname": row["nickname"] or "(unknown)",
                 "avatar": row["avatar"] or "",
                 "side": "own",
                 "diamonds": row["diamonds"] or 0,
+                "gifts": row["gifts"] or 0,
                 "fans_level": row["fans_level"] or 0,
                 "gifter_level": row["gifter_level"] or 0,
                 "gifter_badge": row["gifter_badge"] or "",
@@ -2404,37 +2963,14 @@ class Storage:
         starts = sorted(
             b["start_time"] for b in battles if b.get("start_time") is not None
         )
-        # 終了済み・最終・duration不明Battleの窓を閉じるためのfallback長。まず同一sessionの
-        # 実観測duration(明示durationまたはstart/end差)の中央値を使い、無ければ既定値。
-        observed = [b["duration"] for b in battles if b.get("duration")]
-        observed += [
-            b["end_time"] - b["start_time"]
-            for b in battles
-            if b.get("end_time") is not None
-            and b.get("start_time") is not None
-            and b["end_time"] > b["start_time"]
-        ]
-        fallback_duration = (
-            statistics.median(observed) if observed else _BATTLE_FALLBACK_DURATION_SECONDS
-        )
+        fallback_duration = gift_window_fallback_duration(battles)
         for battle in battles:
             own_host = next(
                 (p.get("user_id") for p in battle.get("participants", []) if p.get("is_own")),
                 None,
             )
             start = battle.get("start_time")
-            end = battle.get("end_time")
-            # end_time_msを欠くBattleを無制限の窓にしない: Battle後〜配信終了までの通常
-            # Giftが貢献に合算され、連続PKでは同じGiftが複数Battleへ二重帰属するため。
-            # 所定durationで閉じ、それも無い終了済みBattleは次Battleの開始で打ち切る。
-            if end is None and start is not None and battle.get("duration"):
-                end = start + battle["duration"]
-            if end is None and start is not None and not battle.get("ongoing"):
-                end = next((s for s in starts if s > start), None)
-            # 次Battleも無い(=最終)終了済みBattleは、無制限窓(配信終了まで)を避けるため
-            # fallback長で打ち切る。進行中Battleは意図的に開いたまま(live giftを集計)。
-            if end is None and start is not None and not battle.get("ongoing"):
-                end = start + fallback_duration
+            end = gift_window_end(battle, starts, fallback_duration)
             # 終了済みBattleは窓が確定しているので貢献集計をキャッシュし、再集計は進行中のみ。
             bid = battle.get("battle_id")
             cache_key = (
@@ -2610,12 +3146,20 @@ class Storage:
                 + " ORDER BY s.started_at DESC LIMIT ?",
                 (*handles, limit),
             ).fetchall()
+            # 表示属性はusers表(最新)を優先する。ここはsessionを跨いだ通算集計で、
+            # 「そのSessionでの見え方」という基準が存在しないため、最新の身元で1人を1行に
+            # 示すのが正しい。session単位のsession_summary/battle_gift_contributionsは逆に
+            # point-in-timeを優先する(そちらは過去の見え方を保つのが目的)。
+            #
+            # event側をMAX()で優先してはいけない: MAX()は辞書順の最大を返すだけで「最新の
+            # handle」ではない。実測では改名前の自動生成handle user5037930325926 が現handle
+            # harehare12345 を、user9487377432719 が chikudenchi0807 を押しのけていた。
             gifter_rows = self._conn.execute(
                 "SELECT e.identity_key AS key,"
-                " COALESCE(NULLIF(MAX(e.user_id), ''), u.user_id) AS user_id,"
-                " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
-                " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
-                " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar, SUM(e.gift_count) AS gifts,"
+                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar, SUM(e.gift_count) AS gifts,"
                 " SUM(e.diamonds) AS diamonds, COUNT(DISTINCT e.session_id) AS sessions"
                 " FROM events e JOIN sessions s ON s.id = e.session_id"
                 " LEFT JOIN users u ON u.identity_key = e.identity_key"
@@ -2651,23 +3195,38 @@ class Storage:
             ).fetchall()
             owners = self._latest_owners()
             owner = owners.get(unique_id)
-            # Reconstruct each battle's own-side gifters (who fueled the battle, and
-            # by how much) from gift events inside the battle window, the same way
-            # battle_gift_contributions does. The opponent's gifters live in a
-            # different room and are not in this session's events, so this is the
-            # monitored streamer's own battle gifters only. Aggregated across every
-            # past battle it answers "which gifters keep showing up in battles".
-            battle_diamonds = 0
-            battle_gifters: dict = {}
-            parsed_battles = []
-            # battle_id is TikTok's globally-unique PK id, so the same physical battle
-            # carries the same id across sessions. Dedup on it to keep concurrent-
-            # collection duplicates from inflating every battle metric. id 0/missing is
-            # treated as un-dedupable (old/synthetic records) and kept as-is.
-            seen_battle_ids = set()
-            dropped_duplicates = 0
-            for brow in battle_rows:
-                battle = annotate_result(json.loads(brow["data_json"]))
+
+        # 各Battleの自陣貢献を、Battle cardと同じ窓・同じ入口(battle_gift_contributions)で
+        # 復元する。窓解決は同一sessionの他Battle(次Battle開始・duration中央値)に依存する
+        # ためsession単位でまとめて解く。窓を自前で持つと、end_timeを欠くBattleが無制限窓に
+        # なりBattle後の通常Giftまで貢献へ混入する(実測: 貢献者0人→12人, coin 26→19397)。
+        # battle_gift_contributionsは自身でlockを取るのでlockの外で回す。
+        battles_by_session: dict = {}
+        for brow in battle_rows:
+            battles_by_session.setdefault(brow["session_id"], []).append(
+                annotate_result(json.loads(brow["data_json"]))
+            )
+
+        battle_diamonds = 0
+        battle_team_diamonds = 0
+        # 相手陣のgifterは別Roomのためこのsessionのeventには無い。ここに集まるのは監視配信者
+        # 自身のBattle gifterだけで、全Battleを通して「Battleに必ず現れるgifter」を表す。
+        battle_gifters: dict = {}
+        parsed_battles = []
+        # battle_id is TikTok's globally-unique PK id, so the same physical battle
+        # carries the same id across sessions. Dedup on it to keep concurrent-
+        # collection duplicates from inflating every battle metric. id 0/missing is
+        # treated as un-dedupable (old/synthetic records) and kept as-is.
+        seen_battle_ids = set()
+        dropped_duplicates = 0
+        for session_id, session_battles in battles_by_session.items():
+            # 窓解決には(重複除外前の)そのsessionの全Battleを使う。除外されるのは別session
+            # が同じBattleを重複収集した分で、このsessionの「次Battle開始」は変わらないため。
+            starts = sorted(
+                b["start_time"] for b in session_battles if b.get("start_time") is not None
+            )
+            fallback_duration = gift_window_fallback_duration(session_battles)
+            for battle in session_battles:
                 start_time = battle.get("start_time")
                 if start_time is None:
                     continue
@@ -2677,53 +3236,75 @@ class Storage:
                         dropped_duplicates += 1
                         continue
                     seen_battle_ids.add(battle_id)
-                upper = battle.get("end_time")
-                upper = upper if upper is not None else 9_999_999_999
-                contrib_rows = self._conn.execute(
-                    "SELECT e.identity_key AS key,"
-                    " COALESCE(NULLIF(MAX(e.user_id), ''), u.user_id) AS user_id,"
-                    " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
-                    " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
-                    " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar, SUM(e.gift_count) AS gifts, SUM(e.diamonds) AS diamonds"
-                    " FROM events e LEFT JOIN users u ON u.identity_key = e.identity_key"
-                    " WHERE e.session_id = ? AND e.kind = 'gift' AND e.time >= ? AND e.time <= ?"
-                    " GROUP BY e.identity_key HAVING SUM(e.diamonds) > 0",
-                    (brow["session_id"], start_time, upper),
-                ).fetchall()
+                end_time = gift_window_end(battle, starts, fallback_duration)
+                gift = self.battle_gift_contributions(session_id, start_time, end_time)
+
+                # 自室のGift eventで実測できる分。これが監視配信者自身の貢献者である。
                 window_diamonds = 0
                 key_contributors = 0
-                for crow in contrib_rows:
-                    diamonds = crow["diamonds"] or 0
+                for g in gift:
+                    diamonds = g["diamonds"]
                     window_diamonds += diamonds
                     if diamonds >= _BATTLE_KEY_CONTRIB_DIAMONDS:
                         key_contributors += 1
-                    key = crow["key"]
+                    key = g["key"]
                     if not key:
                         continue
-                    g = battle_gifters.setdefault(
+                    agg = battle_gifters.setdefault(
                         key,
                         {
-                            "user_id": crow["user_id"] or "",
-                            "unique_id": crow["unique_id"] or "",
-                            "nickname": crow["nickname"] or "(unknown)",
-                            "avatar": crow["avatar"] or "",
+                            "user_id": g["user_id"],
+                            "unique_id": g["unique_id"],
+                            "nickname": g["nickname"],
+                            "avatar": g["avatar"],
                             "diamonds": 0,
                             "gifts": 0,
                             "battles": 0,
                         },
                     )
-                    g["diamonds"] += diamonds
-                    g["gifts"] += crow["gifts"] or 0
-                    g["battles"] += 1
-                    if crow["avatar"] and not g["avatar"]:
-                        g["avatar"] = crow["avatar"]
+                    agg["diamonds"] += diamonds
+                    agg["gifts"] += g["gifts"]
+                    agg["battles"] += 1
+                    if g["avatar"] and not agg["avatar"]:
+                        agg["avatar"] = g["avatar"]
+
+                # チーム戦のteam集約armiesは味方hostの貢献者も自陣hostへ寄って届く
+                # (team集約のanchorが実hostに解決できないため、host別に分けられない)。
+                # 実測できる自室分とは別に、armies由来のチーム全体分も併記する。集計方法は
+                # Battle card(apply_battle_gift_contributions)と揃える。
+                gift_by_id = {g["user_id"]: g for g in gift if g["user_id"]}
+                team_diamonds = 0
+                team_key_contributors = 0
+                matched = set()
+                for c in battle.get("contributions", []) or []:
+                    if c.get("side") != "own":
+                        continue
+                    cid = c.get("user_id")
+                    if cid and cid in gift_by_id:
+                        matched.add(cid)
+                        coins = gift_by_id[cid]["diamonds"]
+                    else:
+                        coins = c.get("diamonds") or 0
+                    team_diamonds += coins
+                    if coins >= _BATTLE_KEY_CONTRIB_DIAMONDS:
+                        team_key_contributors += 1
+                for g in gift:
+                    if g["user_id"] and g["user_id"] in matched:
+                        continue
+                    team_diamonds += g["diamonds"]
+                    if g["diamonds"] >= _BATTLE_KEY_CONTRIB_DIAMONDS:
+                        team_key_contributors += 1
+
                 battle_diamonds += window_diamonds
+                battle_team_diamonds += team_diamonds
                 parsed_battles.append(
                     {
                         "battle": battle,
-                        "session_id": brow["session_id"],
+                        "session_id": session_id,
                         "window_diamonds": window_diamonds,
                         "key_contributors": key_contributors,
+                        "team_diamonds": team_diamonds,
+                        "team_key_contributors": team_key_contributors,
                     }
                 )
 
@@ -2770,6 +3351,8 @@ class Storage:
 
         gifters = [
             {
+                # identity_keyはFan台帳の主キー。名前からその人の横断実績へ飛ぶ導線に使う。
+                "identity_key": row["key"] or "",
                 "user_id": row["user_id"] or "",
                 "unique_id": row["unique_id"] or "",
                 "nickname": row["nickname"] or "(unknown)",
@@ -2839,18 +3422,33 @@ class Storage:
             b = pb["battle"]
             opps = b.get("opponents", []) or []
             opp = max(opps, key=lambda o: o.get("score", 0) or 0, default=None) if opps else None
+            # own_scoreはチーム戦ではチーム合計。監視配信者1人ぶんのscoreは participants の
+            # 自hostが持つ。個人戦(個人マルチ含む)は自陣host=1人なのでown_scoreと同値。
+            # チーム戦で自hostを特定できない古いrecordはNone(不明)にする。0を入れると
+            # 「そのBattleは無得点だった」と読める偽の実測値になるため。
+            btype = b.get("type") or "personal"
+            own_host = next(
+                (p for p in (b.get("participants") or []) if p.get("is_own")), None
+            )
+            if own_host is not None:
+                own_host_score = own_host.get("score", 0) or 0
+            else:
+                own_host_score = (b.get("own_score", 0) or 0) if btype != "team" else None
             history.append(
                 {
                     "session_id": pb["session_id"],
                     "battle_id": b.get("battle_id"),
                     "started_at": b.get("start_time"),
                     "ended_at": b.get("end_time"),
-                    "type": b.get("type") or "personal",
+                    "type": btype,
                     "own_score": b.get("own_score", 0) or 0,
+                    "own_host_score": own_host_score,
                     "opp_score": b.get("opp_score", 0) or 0,
                     "result": b.get("result"),
                     "diamonds": pb["window_diamonds"],
+                    "team_diamonds": pb["team_diamonds"],
                     "key_contributors": pb["key_contributors"],
+                    "team_key_contributors": pb["team_key_contributors"],
                     "opponent_count": len(opps),
                     "opponent": {
                         "unique_id": opp.get("unique_id", ""),
@@ -2864,7 +3462,12 @@ class Storage:
         history.sort(key=lambda h: h["started_at"] or 0, reverse=True)
 
         # 1戦あたり「主力貢献者(coin >= 閾値)」の平均人数。過去全Battleを集約した指標。
+        # 自室のGift eventで実測した分と、armies由来のチーム全体分の両方を出す(チーム戦は
+        # 味方hostの貢献者を自陣hostと分離できないため、片方だけでは実態を表さない)。
         key_contrib_sum = sum(pb["key_contributors"] for pb in parsed_battles)
+        team_key_contrib_sum = sum(pb["team_key_contributors"] for pb in parsed_battles)
+        # 自hostのscoreが不明なBattleは平均の母数からも外す(0として均すと平均が下振れする)。
+        own_host_scores = [h["own_host_score"] for h in history if h["own_host_score"] is not None]
         battle_summary = {
             "count": battle_count,
             "wins": wins,
@@ -2872,11 +3475,16 @@ class Storage:
             "draws": draws,
             "win_rate": (wins / decided * 100) if decided else 0,
             "avg_own_score": (own_score_sum / battle_count) if battle_count else 0,
+            "avg_own_host_score": (sum(own_host_scores) / len(own_host_scores)) if own_host_scores else 0,
+            "own_host_score_count": len(own_host_scores),
             "avg_opp_score": (opp_score_sum / battle_count) if battle_count else 0,
             "key_contrib_threshold": _BATTLE_KEY_CONTRIB_DIAMONDS,
             "key_contrib_total": key_contrib_sum,
             "avg_key_contributors": (key_contrib_sum / battle_count) if battle_count else 0,
+            "team_key_contrib_total": team_key_contrib_sum,
+            "avg_team_key_contributors": (team_key_contrib_sum / battle_count) if battle_count else 0,
             "battle_diamonds": battle_diamonds,
+            "battle_team_diamonds": battle_team_diamonds,
             "battle_diamond_share": (battle_diamonds / totals["diamonds"] * 100) if totals["diamonds"] else 0,
             "opponents": opponent_list[:30],
             "gifters": battle_gifter_list[:30],
@@ -3054,30 +3662,55 @@ class Storage:
             "owner_key": row["owner_key"],
         }
 
-    def _ensure_analytics_cache_locked(self, kind: str) -> int:
+    def _ensure_analytics_cache(self, kind: str) -> int:
         """終了済みで未計算(またはlogic version不一致)のsessionのpayloadを計算・保存する。
-        finalizeを通らず終了したsession(異常終了の復旧等)もここで拾う。lock保持前提。"""
+        finalizeを通らず終了したsession(異常終了の復旧等)もここで拾う。
+
+        **lockはsession 1件ごとに取り直す(lock保持のまま全件回さない)**。CACHE_VERSIONSを
+        1つ上げると全履歴が再計算対象になり、以前はその全走査をDB lockを握ったまま行って
+        いた。待たされるのは解析画面だけではない: 同じlockを使う全ての読み書き — 別tabの
+        録画一覧も、収集中sessionのevent書き込みも — が止まるため、userには「アプリ全体が
+        固まった」ように見える。1件ごとに手放せば、他のrequestがその隙間へ入れる。
+
+        件数が変わるのは「他のrequestが割り込める」点だけで、結果は変わらない。埋めている
+        最中に追加されたsessionはcacheに載らないまま読み出しへ抜けるが、その場合は
+        _analytics_rows がその場で計算する経路(収集中sessionと同じ)へ落ちる。
+        """
         version = analytics.CACHE_VERSIONS[kind]
-        rows = self._conn.execute(
-            self._ANALYTICS_SESSION_SELECT
-            + " FROM sessions s"
-            " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
-            " WHERE s.ended_at IS NOT NULL AND (c.session_id IS NULL OR c.version != ?)"
-            + _EXCLUDE_RESTRICTED,
-            (kind, version),
-        ).fetchall()
-        for row in rows:
-            payload = analytics.compute_payload(
-                self._conn, self._analytics_sess_dict(row), kind
-            )
-            self._conn.execute(
-                "INSERT OR REPLACE INTO analytics_session_cache"
-                " (session_id, kind, version, payload_json, computed_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (row["id"], kind, version, json.dumps(payload), time.time()),
-            )
+        with self._lock:
+            rows = self._conn.execute(
+                self._ANALYTICS_SESSION_SELECT
+                + " FROM sessions s"
+                " LEFT JOIN analytics_session_cache c ON c.session_id = s.id AND c.kind = ?"
+                " WHERE s.ended_at IS NOT NULL AND (c.session_id IS NULL OR c.version != ?)"
+                + _EXCLUDE_RESTRICTED,
+                (kind, version),
+            ).fetchall()
+        gate = IntervalGate(progress_interval_seconds(get_log_progress_interval_seconds()))
+        for index, row in enumerate(rows):
+            # 1件ぶんの計算と書き込みだけをlockの中で行う。connectionはthread safeでは
+            # ないので、計算をlockの外へ出すことはできない(隙間を作るのが目的で、
+            # 排他を弱めるのが目的ではない)。
+            with self._lock:
+                payload = analytics.compute_payload(
+                    self._conn, self._analytics_sess_dict(row), kind
+                )
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO analytics_session_cache"
+                    " (session_id, kind, version, payload_json, computed_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (row["id"], kind, version, json.dumps(payload), time.time()),
+                )
+            if gate.ready():
+                logger.info(
+                    "analytics cache: %d/%d sessions computed for kind=%s",
+                    index + 1, len(rows), kind,
+                    extra={"event": "analytics.cache_progress",
+                           "ctx": {"kind": kind, "done": index + 1, "total": len(rows)}},
+                )
         if rows:
-            self._conn.commit()
+            with self._lock:
+                self._conn.commit()
             logger.info(
                 "analytics cache: computed %d sessions for kind=%s", len(rows), kind
             )
@@ -3085,9 +3718,15 @@ class Storage:
 
     def _analytics_rows(self, kind: str, since: float) -> list:
         """(sessionメタ, per-session payload)の列をstarted_at昇順で返す。終了済みは
-        cacheから読み、収集中sessionはその場で計算する(session単位indexで軽い)。"""
+        cacheから読み、収集中sessionはその場で計算する(session単位indexで軽い)。
+
+        収集中sessionのその場計算はbufferではなくDBを読むため、先に確定させる。終了済み
+        分はfinalize_sessionがflush後にcacheを作るので既に整合している。"""
+        self.flush()
+        # cache埋めはlockの外で行う(中で1件ごとに取り直す)。ここをlockの中へ戻すと、
+        # 全session再計算のあいだDBに触る全ての処理が止まる。
+        self._ensure_analytics_cache(kind)
         with self._lock:
-            self._ensure_analytics_cache_locked(kind)
             rows = self._conn.execute(
                 self._ANALYTICS_SESSION_SELECT
                 + ", c.payload_json AS payload_json FROM sessions s"
@@ -3274,14 +3913,56 @@ class Storage:
             self._conn.commit()
             return cursor.lastrowid
 
-    def update_recording(self, recording_id, status, path, filename, ended_at, size, error=None) -> None:
+    def update_recording(self, recording_id, status, path, filename, ended_at, size,
+                         error=None, duration_seconds=None) -> None:
+        """live captureが終わった録画を確定させる。ended_atは捕捉が終わった時刻そのもの。
+
+        duration_secondsは測れたときだけ渡す。測れなかった(ffprobeが無い等)場合に既存の
+        実測値を消さないよう、Noneは「据え置き」であって「不明で上書き」ではない。"""
         with self._lock:
             self._conn.execute(
-                "UPDATE recordings SET status = ?, path = ?, filename = ?, ended_at = ?, bytes = ?, error = ?"
+                "UPDATE recordings SET status = ?, path = ?, filename = ?, ended_at = ?, bytes = ?,"
+                " error = ?, duration_seconds = COALESCE(?, duration_seconds)"
                 " WHERE id = ?",
-                (status, path, filename, ended_at, size, error, recording_id),
+                (status, path, filename, ended_at, size, error, duration_seconds, recording_id),
             )
             self._conn.commit()
+
+    def update_rebuilt_recording(self, recording_id, status, path, filename, size,
+                                 error=None, duration_seconds=None,
+                                 ended_at_if_missing=None) -> None:
+        """既存録画を素材(.ts)から作り直した/拾い直した結果を書き戻す。
+
+        **ended_atを現在時刻で上書きしてはならない**。作り直しは中身を作り直すだけで、
+        捕捉が終わった時刻を変えない。update_recordingを流用していたため、起動時の復旧と
+        再mp4化が実行時刻をended_atへ書き込み、DBの尺が「録画開始〜再処理時刻」に化けて
+        いた(実測: 3時間の録画が177時間、同じbatchで処理した行は同一のended_atになるため
+        古い行ほど尺が伸び、一覧では下へ行くほど増える見え方になる)。ended_atはrecording
+        窓としてeventの絞り込みと焼き込みの時刻mapにも使われるので、被害は表示に留まらない。
+
+        ended_at_if_missingは、そもそもended_atを持たない行(中断のまま終わった録画)を
+        埋めるためだけの値。既にended_atがある行には触れない。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE recordings SET status = ?, path = ?, filename = ?, bytes = ?, error = ?,"
+                " ended_at = COALESCE(ended_at, ?),"
+                " duration_seconds = COALESCE(?, duration_seconds)"
+                " WHERE id = ?",
+                (status, path, filename, size, error, ended_at_if_missing,
+                 duration_seconds, recording_id),
+            )
+            self._conn.commit()
+
+    def set_recording_duration(self, recording_id: int, seconds: float) -> bool:
+        """実測した尺だけを書き戻す。是正scriptと、中身を作り直さずに尺だけ確定させる
+        経路が使う。0以下は測定失敗なので受け付けない(尺0の録画は存在しない)。"""
+        if not seconds or seconds <= 0:
+            return False
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET duration_seconds = ? WHERE id = ?", (seconds, recording_id))
+            self._conn.commit()
+        return cursor.rowcount > 0
 
     def list_recordings(self, limit: int) -> list:
         with self._lock:
@@ -3294,6 +3975,16 @@ class Storage:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM recordings WHERE session_id = ? ORDER BY started_at", (session_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def recordings_for_user(self, unique_id: str) -> list:
+        """配信者1人ぶんの全録画。容量整理の画面が対象を並べるための入力で、statusは
+        絞らない(中断・失敗した録画こそHLSが残って容量を食っているため)。新しい順。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM recordings WHERE unique_id = ? ORDER BY started_at DESC",
+                (unique_id,),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -3333,6 +4024,70 @@ class Storage:
             self._conn.execute("DELETE FROM recordings WHERE id = ?", (recording_id,))
             self._conn.commit()
         return dict(row)
+
+    def completed_recordings_with_paths(self) -> list:
+        """完了録画のid/所在/容量。最終保存先への退避対象を選ぶための入力。
+
+        pathの所属judgeとfileの実在確認は呼び出し側(server)が行う。record_dir /
+        record_dir_final を知っているのはserver側で、ここへ持ち込むとstorageが設定に
+        依存することになる。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, unique_id, path, filename, bytes, started_at"
+                " FROM recordings WHERE status = 'completed' AND path IS NOT NULL"
+                " ORDER BY started_at"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_recording_bytes(self, recording_id: int, size: int) -> bool:
+        """録画のbytesだけを書き換える。中身を差し替えたが所在も状態も変わらない場合
+        (混在解像度normalizeの再回収)に使う。update_recordingは status/path/ended_at まで
+        書き戻すので、ここで使うと呼び出し側が持っていない値で既存行を潰しかねない。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET bytes = ? WHERE id = ?", (size, recording_id))
+            self._conn.commit()
+        return cursor.rowcount > 0
+
+    def set_recording_reprocessed(self, recording_id: int, at: Optional[float]) -> bool:
+        """録画を.tsから作り直した時刻を書く。``at=None``で未実施へ戻す。
+
+        一括の「済み」判定はこの列だけを見る。作り直したmp4はfileから見分けが付かない
+        (元と同じ名前・同じ場所の別内容)ので、file側から推測してはいけない。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET reprocessed_at = ? WHERE id = ?", (at, recording_id))
+            self._conn.commit()
+        return cursor.rowcount > 0
+
+    def set_recording_audio_normalized(self, recording_id: int, at: Optional[float],
+                                       lufs: Optional[float]) -> bool:
+        """録画本体の音量正規化の適用状態を書く。``at=None``で未適用へ戻す。
+
+        mp4を作り直す操作は、正規化を伴わなかったなら必ずNoneで呼んで消すこと。残したまま
+        にすると一括画面が「処理済」と数え、実際には素の音量のmp4が対象から外れる。
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET audio_normalized_at = ?, audio_normalized_lufs = ?"
+                " WHERE id = ?",
+                (at, lufs if at is not None else None, recording_id))
+            self._conn.commit()
+        return cursor.rowcount > 0
+
+    def update_recording_path(self, recording_id: int, path: str) -> bool:
+        """録画の所在を書き換える。移送が**成功した後にだけ**呼ぶこと。
+
+        serverは再生・出力でrecordings.pathの絶対pathをそのまま使う(_safe_recording_path)。
+        file を動かしてDBを更新しないと再生が壊れ、逆にDBだけ更新するともっと悪い
+        (存在しないpathを指す)。filenameは移送で変わらないので触らない。
+        """
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET path = ? WHERE id = ?", (path, recording_id))
+            self._conn.commit()
+        return cursor.rowcount > 0
 
     def set_recording_protected(self, recording_id: int, protected: bool) -> bool:
         """保持policyの自動削除から除外するflagを立てる/下ろす。存在しない録画はFalse。"""
@@ -3381,6 +4136,113 @@ class Storage:
             "usage": json.loads(row["payload_json"]),
         }
 
+    def db_file_bytes(self) -> dict:
+        """開いているDB本体とWAL/SHMのbyte数。
+
+        env(TICTOK_DB_PATH)を読み直さず、実際に開いているpathを見る。envは後から変わり得る
+        ので、読み直すと「いま計測しているDB」と別のfileを測ることになる。
+        WALをdbと分けて出すのはcheckpointの判断材料になるため(実測19MB規模まで育つ)。
+        """
+        base = Path(self._db_path)
+        out = {"db": 0, "wal": 0, "shm": 0}
+        for key, suffix in (("db", ""), ("wal", "-wal"), ("shm", "-shm")):
+            try:
+                out[key] = (base.parent / (base.name + suffix)).stat().st_size
+            except OSError:
+                out[key] = 0
+        return out
+
+    def add_capacity_sample(self, payload: dict, sampled_at: Optional[float] = None) -> dict:
+        """容量snapshotを1件追記する。storage_scan(1行cache)とは別で、こちらは履歴。"""
+        now = time.time() if sampled_at is None else sampled_at
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO capacity_samples (sampled_at, payload_json) VALUES (?, ?)",
+                (now, json.dumps(payload, ensure_ascii=False)),
+            )
+            self._conn.commit()
+        return {"id": cursor.lastrowid, "sampled_at": now, "payload": payload}
+
+    def latest_capacity_sample(self) -> Optional[dict]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT sampled_at, payload_json FROM capacity_samples"
+                " ORDER BY sampled_at DESC LIMIT 1"
+            ).fetchone()
+        if row is None:
+            return None
+        return {"sampled_at": row["sampled_at"], "payload": json.loads(row["payload_json"])}
+
+    def list_capacity_samples(self, since: Optional[float] = None, limit: int = 400) -> list:
+        sql = "SELECT sampled_at, payload_json FROM capacity_samples"
+        params: tuple = ()
+        if since is not None:
+            sql += " WHERE sampled_at >= ?"
+            params = (since,)
+        sql += " ORDER BY sampled_at DESC LIMIT ?"
+        with self._lock:
+            rows = self._conn.execute(sql, (*params, limit)).fetchall()
+        samples = [
+            {"sampled_at": r["sampled_at"], "payload": json.loads(r["payload_json"])}
+            for r in rows
+        ]
+        samples.reverse()
+        return samples
+
+    def capacity_db_counts(self) -> dict:
+        """健全性reportの母数。全てindexかtable走査で数十ms(実測)。"""
+        with self._lock:
+            rows = {}
+            for name in ("events", "sessions", "users", "recordings", "transcripts",
+                         "search_hits", "ops_events", "bookmarks"):
+                rows[name] = self._conn.execute(
+                    f"SELECT COUNT(*) AS c FROM {name}").fetchone()["c"]
+            recordings = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT status, COUNT(*) AS n, COALESCE(SUM(bytes), 0) AS bytes"
+                    " FROM recordings GROUP BY status")
+            ]
+            transcribed = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM recordings r"
+                " JOIN transcripts t ON t.recording_id = r.id"
+                " WHERE r.status = 'completed'").fetchone()["c"]
+            media_jobs = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT kind, state, COUNT(*) AS n FROM media_job_queue"
+                    " GROUP BY kind, state")
+            ]
+            transcribe_queue = [
+                dict(r) for r in self._conn.execute(
+                    "SELECT state, COUNT(*) AS n FROM transcribe_queue GROUP BY state")
+            ]
+        return {
+            "rows": rows,
+            "recordings_by_status": recordings,
+            "transcribed_completed": transcribed,
+            "media_jobs": media_jobs,
+            "transcribe_queue": transcribe_queue,
+        }
+
+    def recording_bytes_by_day(self, limit_days: int = 120) -> list:
+        """録画の日次増加(bytes)の実績。
+
+        drive空きと違い、こちらは**遡って算出できる**: recordingsがstarted_atとbytesを
+        最初から持っているためで、sampleを貯め始めるのを待つ必要がない(実測34日ぶん)。
+        画面ではsample由来の系列と混ぜず、由来を分けて示すこと。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DATE(started_at, 'unixepoch', 'localtime') AS day,"
+                " COUNT(*) AS recordings, COALESCE(SUM(bytes), 0) AS bytes"
+                " FROM recordings WHERE started_at IS NOT NULL"
+                " GROUP BY day ORDER BY day DESC LIMIT ?",
+                (limit_days,),
+            ).fetchall()
+        return [
+            {"day": r["day"], "recordings": r["recordings"], "bytes": r["bytes"]}
+            for r in reversed(rows)
+        ]
+
     def mark_stale_recordings(self) -> int:
         """On startup, recordings left 'recording' are orphaned (process died)."""
         with self._lock:
@@ -3395,7 +4257,8 @@ class Storage:
         segmentがディスクに残っていればmp4へ再finalizeできるため、起動時の復元対象を列挙する。"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, session_id, unique_id, path, filename, status FROM recordings"
+                "SELECT id, session_id, unique_id, path, filename, status, started_at, ended_at"
+                " FROM recordings"
                 " WHERE status IN ('recording', 'interrupted') ORDER BY started_at"
             ).fetchall()
         return [dict(row) for row in rows]
@@ -3673,6 +4536,57 @@ class Storage:
             ).fetchone()
         return dict(row)
 
+    def add_live_bookmark(self, recording_id: int, unique_id: str, wall_time: float,
+                          provisional_start: float, memo: str = "") -> dict:
+        """配信を見ている最中に押された見どころ。
+
+        押した瞬間に確定できるのはwall-clockだけで、mp4のPTS軸へはまだ載せられない
+        (finalizeでtiming mapが書かれるまで対応が存在しない)。そこでwall-clockから出した
+        暫定値をstartに入れ、pts_mapped=0で「まだPTS軸ではない」と明示する。確定は
+        remap_live_bookmarks()が行う。
+
+        provisional_startは録画開始からの経過秒。実測では最終的なPTSと数十〜数百秒ずれる
+        (112分の録画で340秒)ので、確定値として扱ってはならない。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "INSERT INTO bookmarks"
+                " (recording_id, unique_id, start, end, memo, source_hit_id,"
+                "  live_wall, pts_mapped, created_at)"
+                " VALUES (?, ?, ?, NULL, ?, NULL, ?, 0, ?)",
+                (recording_id, unique_id, provisional_start, memo, wall_time, time.time()),
+            )
+            self._conn.commit()
+            row = self._conn.execute(
+                "SELECT * FROM bookmarks WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+        return dict(row)
+
+    def list_unmapped_bookmarks(self, recording_id: int) -> list:
+        """まだPTS軸へ載せていないlive見どころ(finalizeの再map対象)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, start, live_wall FROM bookmarks"
+                " WHERE recording_id = ? AND pts_mapped = 0 AND live_wall IS NOT NULL"
+                " ORDER BY live_wall",
+                (recording_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def apply_bookmark_pts(self, mapped: list) -> int:
+        """再map結果を確定させる。mappedは [(bookmark_id, pts_start), ...]。
+
+        再mapできなかった行はここへ渡さないこと。pts_mapped=0のまま残せば画面が暫定値だと
+        言えるが、ここを通すと暫定値が確定値として固定されてしまう。"""
+        if not mapped:
+            return 0
+        with self._lock:
+            cursor = self._conn.executemany(
+                "UPDATE bookmarks SET start = ?, pts_mapped = 1 WHERE id = ?",
+                [(float(pts), int(bookmark_id)) for bookmark_id, pts in mapped],
+            )
+            self._conn.commit()
+        return cursor.rowcount
+
     def list_bookmarks(self, recording_id: Optional[int] = None) -> list:
         """見どころ一覧。recording_id指定で1録画分(seek bar描画用)、無指定で全件(一覧tab用)。
         録画のfilename/開始時刻はどの配信のどこかを示すために結合する。"""
@@ -3849,6 +4763,22 @@ class Storage:
             ).fetchone()
         return self._media_job_row(row)
 
+    def busy_recording_ids(self) -> set:
+        """焼き込み/Up出力/転写が待機・実行中の録画id。
+
+        これらのjobはsrc mp4を実行中に読むため、消すと道半ばで壊れたjobだけが残る。
+        容量整理の一括削除が対象から外すために使う。"""
+        with self._lock:
+            media = self._conn.execute(
+                "SELECT DISTINCT recording_id FROM media_job_queue"
+                " WHERE state IN ('pending', 'running') AND recording_id IS NOT NULL"
+            ).fetchall()
+            stt = self._conn.execute(
+                "SELECT recording_id FROM transcribe_queue"
+                " WHERE state IN ('pending', 'running')"
+            ).fetchall()
+        return {row["recording_id"] for row in media} | {row["recording_id"] for row in stt}
+
     def pending_media_job_for(self, kind: str, recording_id: int) -> Optional[dict]:
         """同じ録画・同じ種別で既に待機/実行中のjob。二重投入を弾くために使う。"""
         with self._lock:
@@ -3860,6 +4790,16 @@ class Storage:
             ).fetchone()
         return self._media_job_row(row) if row else None
 
+    def pending_media_job_keys(self) -> set:
+        """待機/実行中の全jobの (kind, recording_id) 集合。一括画面は録画ごとに二重投入を
+        弾く判定を行うが、録画数ぶんの個別queryを回すと重い。1回で引いて集合の照合にする。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT kind, recording_id FROM media_job_queue"
+                " WHERE state IN ('pending', 'running')"
+            ).fetchall()
+        return {(row["kind"], row["recording_id"]) for row in rows}
+
     def next_pending_media_job(self) -> Optional[dict]:
         with self._lock:
             row = self._conn.execute(
@@ -3867,6 +4807,40 @@ class Storage:
                 " ORDER BY priority DESC, queued_at LIMIT 1"
             ).fetchone()
         return self._media_job_row(row) if row else None
+
+    def claim_next_pending_media_job(self) -> Optional[dict]:
+        """次の待機jobをrunningへ落として返す(無ければNone)。
+
+        選ぶのと掴むのを1つのlockの中で済ませるのは、workerが複数居るときに同じ行を
+        2人が拾わないため。取得と開始が別呼び出しだと、その隙間で同じ録画へ2本の
+        ffmpegが走り、同じ出力fileを奪い合う。
+
+        同じ録画に対する別種のjobも同時には出さない。再mp4化は録画のmp4を作り直して
+        差し替えるので、その裏で同じmp4を読んでいる焼き込みは途中で足元を抜かれる。
+        直列workerの時代はこれが起こり得なかったため、並列化と一緒に明示する。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT job_id FROM media_job_queue WHERE state = 'pending'"
+                " AND (not_before IS NULL OR not_before <= ?)"
+                " AND recording_id NOT IN ("
+                "   SELECT recording_id FROM media_job_queue"
+                "   WHERE state = 'running' AND recording_id IS NOT NULL)"
+                " ORDER BY priority DESC, queued_at LIMIT 1",
+                (time.time(),),
+            ).fetchone()
+            if row is None:
+                return None
+            job_id = row["job_id"]
+            self._conn.execute(
+                "UPDATE media_job_queue SET state = 'running', started_at = ?, pct = 0,"
+                " stage = '', error = NULL WHERE job_id = ?",
+                (time.time(), job_id),
+            )
+            self._conn.commit()
+            claimed = self._conn.execute(
+                "SELECT * FROM media_job_queue WHERE job_id = ?", (job_id,)
+            ).fetchone()
+        return self._media_job_row(claimed) if claimed else None
 
     def get_media_job(self, job_id: str) -> Optional[dict]:
         with self._lock:
@@ -3908,6 +4882,60 @@ class Storage:
             )
             self._conn.commit()
 
+    def defer_media_job(self, job_id: str, not_before: float, stage: str) -> None:
+        """実行中のjobを待機へ戻し、``not_before`` まで拾わせない。
+
+        失敗ではないのでattemptも消費しないし、finished_atも書かない。前提(保存先volume)が
+        戻れば同じ行がそのまま走り出す。``deferred_since`` は最初の1回だけ立て、以後の
+        延長でも上書きしない — ここを毎回更新すると、待ち続けるjobが打ち切りに掛からない。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE media_job_queue SET state = 'pending', started_at = NULL,"
+                " pct = 0, stage = ?, error = NULL, not_before = ?,"
+                " deferred_since = COALESCE(deferred_since, ?) WHERE job_id = ?",
+                (stage, not_before, time.time(), job_id),
+            )
+            self._conn.commit()
+
+    REQUEUEABLE_STATES = ("failed", "interrupted", "cancelled")
+
+    def requeue_media_jobs(self, job_ids, *, auto: bool = False) -> int:
+        """終わってしまったjobを待機へ戻す。戻した件数を返す。
+
+        対象は failed / interrupted / cancelled だけ。completed を戻せると「もう一度出力」と
+        区別が付かなくなる(あれは新しい投入であって、同じ行の再開ではない)。``result_json``は
+        捨てる: 失敗時の退避先が残ったままだと、起動時のrecoveryが次の実行で作った成果物を
+        古い退避で上書きしかねない。
+
+        ``auto`` は起動時の自動再開ぶん。回数を params へ数え、呼び出し側が上限で打ち切れる
+        ようにする — processごと落とすjobを無条件に戻すと、起動のたびに同じ落ち方を繰り返す。
+        """
+        ids = [str(j) for j in job_ids]
+        if not ids:
+            return 0
+        requeued = 0
+        with self._lock:
+            for job_id in ids:
+                row = self._conn.execute(
+                    "SELECT state, params_json FROM media_job_queue WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()
+                if row is None or row["state"] not in self.REQUEUEABLE_STATES:
+                    continue
+                params = json.loads(row["params_json"] or "{}")
+                if auto:
+                    params["auto_requeues"] = int(params.get("auto_requeues") or 0) + 1
+                self._conn.execute(
+                    "UPDATE media_job_queue SET state = 'pending', queued_at = ?,"
+                    " started_at = NULL, finished_at = NULL, pct = 0, stage = '',"
+                    " error = NULL, not_before = NULL, deferred_since = NULL,"
+                    " result_json = '{}', params_json = ? WHERE job_id = ?",
+                    (time.time(), json.dumps(params, ensure_ascii=False), job_id),
+                )
+                requeued += 1
+            self._conn.commit()
+        return requeued
+
     def set_media_job_result(self, job_id: str, result: dict) -> None:
         """実行の途中で判明した後始末情報を、終了を待たずに残す。再mp4化が元mp4を_backupへ
         退避した直後の退避先がこれで、processがここで落ちると起動時のrecoveryが唯一の
@@ -3930,6 +4958,33 @@ class Storage:
                 (limit,),
             ).fetchall()
         return [self._media_job_row(row) for row in rows]
+
+    def media_job_durations(self, kind: str, limit: int = 50) -> list:
+        """完了したjobの実測 (所要秒, 元録画の尺秒) を新しい順に返す。
+
+        配信者まるごとの一括投入は所要時間を先に見せないと押せないが、その倍率を設定値や
+        定数で持つとGPU・model・解像度が違う環境で必ず外れる。実績が1件も無ければ空listを
+        返し、呼び出し側は「不明」と出す(推測値を出すと、根拠のある数字と区別できない)。
+
+        尺の出所は実測(duration_seconds)だけ。壁時計で割ると、捕捉が停滞した録画や
+        ended_atが再処理時刻に潰れた録画で分母が数十倍になり、倍率が桁ごと狂う。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT q.started_at, q.finished_at, r.duration_seconds AS source"
+                " FROM media_job_queue q JOIN recordings r ON r.id = q.recording_id"
+                " WHERE q.kind = ? AND q.state = 'completed'"
+                " AND q.started_at IS NOT NULL AND q.finished_at IS NOT NULL"
+                " AND r.duration_seconds IS NOT NULL"
+                " ORDER BY q.finished_at DESC LIMIT ?",
+                (kind, limit),
+            ).fetchall()
+        pairs = []
+        for row in rows:
+            elapsed = row["finished_at"] - row["started_at"]
+            if elapsed > 0 and row["source"] > 0:
+                pairs.append((elapsed, row["source"]))
+        return pairs
 
     def media_jobs_in_group(self, group_id: str) -> list:
         """session一括投入の1回分。group進捗はこの集合から毎回組み直す(集計値を別に持つと、
@@ -3956,9 +5011,10 @@ class Storage:
     def interrupt_running_media_jobs(self) -> list:
         """起動時: 前回processが落ちて'running'のまま残った行を返し、'interrupted'にする。
 
-        転写queueのようにpendingへ戻さないのは、映像jobが中途の成果物(退避したmp4・部分
-        出力)を残したまま死んでいる可能性があるためで、後始末を済ませるまで自動で走らせては
-        いけない。返した行はserver側のrecoveryが個別に処理する。"""
+        転写queueのようにここでpendingへ戻さないのは、映像jobが中途の成果物(退避したmp4・
+        部分出力)を残したまま死んでいる可能性があるためで、後始末を済ませるまで自動で走らせては
+        いけない。返した行はserver側のrecoveryが個別に処理し、原状へ戻した上で待機列へ戻す
+        (``requeue_media_jobs(auto=True)``)。順序が逆だと、断片の上から作り直しが始まる。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM media_job_queue WHERE state = 'running'"
@@ -4043,6 +5099,358 @@ class Storage:
             for row in rows
         ]
 
+    def _unidentified_gift_summary(self) -> dict:
+        """台帳から外した身元不明eventの規模。黙って除外すると「Fan台帳の合計がSessionの
+        coin合計と合わない」理由が画面から辿れなくなるため、件数と額を返して明示する。"""
+        placeholders = ",".join("?" for _ in NON_IDENTITY_KEYS)
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS events, COALESCE(SUM(diamonds), 0) AS diamonds"
+            " FROM events WHERE kind = 'gift'"
+            f" AND (identity_key IS NULL OR identity_key IN ({placeholders}))",
+            NON_IDENTITY_KEYS,
+        ).fetchone()
+        return {"gift_events": row["events"] or 0, "diamonds": row["diamonds"] or 0}
+
+    def fan_ledger(self, min_diamonds: int, limit: int) -> dict:
+        """視聴者を主語にしたgift台帳。誰がどの配信者へ幾ら投げたかを横断で集計する。
+
+        既存の配信者別gifter集計(streamer_profile)と同じqueryの形を使い、配信者での絞りを
+        外して「identity_key × 配信者」で割る。こうすると1度の走査で通算と配信者別内訳の
+        両方が出るので、内訳のために引き直さなくて済む。
+
+        gift eventを持つ視聴者だけを台帳に載せる。events全kindを横断すると視聴者は35,000人
+        規模になり(実測)、一覧として使えないうえ走査も一桁遅くなる。commentしかしない視聴者は
+        別の指標であり、台帳の主題(誰が幾ら投じたか)とは分けて扱う。
+        """
+        placeholders = ",".join("?" for _ in NON_IDENTITY_KEYS)
+        exclude = (
+            f" AND e.identity_key IS NOT NULL AND e.identity_key NOT IN ({placeholders})"
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                # 表示名はusers表を優先する。MAX(e.user_unique_id)は辞書順の最大を拾うだけで
+                # 「最新のhandle」ではなく、実測では改名前の自動生成handle(user5037930325926)が
+                # 現handle(harehare12345)を押しのけた。users表は毎eventで最新へupsertされる
+                # 唯一の真実なので、eventの値はusers側が空のときだけ使う。
+                "SELECT e.identity_key AS key, s.unique_id AS owner,"
+                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
+                " u.gifter_level AS gifter_level, u.first_seen AS first_seen,"
+                " u.last_seen AS last_seen, SUM(e.diamonds) AS diamonds,"
+                " SUM(e.gift_count) AS gifts, COUNT(DISTINCT e.session_id) AS sessions,"
+                " MIN(e.time) AS first_gift, MAX(e.time) AS last_gift"
+                " FROM events e JOIN sessions s ON s.id = e.session_id"
+                " LEFT JOIN users u ON u.identity_key = e.identity_key"
+                " WHERE e.kind = 'gift'" + exclude +
+                " GROUP BY e.identity_key, s.unique_id",
+                NON_IDENTITY_KEYS,
+            ).fetchall()
+            # commentは別kindなのでgiftの集計には相乗りできない。identity単位の件数だけを
+            # 軽く引いて畳む(実測14ms)。全kindの横断走査は一覧には重すぎる。
+            comment_rows = self._conn.execute(
+                "SELECT e.identity_key AS key, COUNT(*) AS comments FROM events e"
+                " WHERE e.kind = 'comment'" + exclude + " GROUP BY e.identity_key",
+                NON_IDENTITY_KEYS,
+            ).fetchall()
+            unidentified = self._unidentified_gift_summary()
+
+        comments = {r["key"]: r["comments"] or 0 for r in comment_rows}
+        fans: dict = {}
+        for row in rows:
+            fan = fans.setdefault(
+                row["key"],
+                {
+                    "identity_key": row["key"],
+                    "user_id": row["user_id"] or "",
+                    "unique_id": row["unique_id"] or "",
+                    "nickname": row["nickname"] or row["unique_id"] or "(unknown)",
+                    "avatar": row["avatar"] or "",
+                    "gifter_level": row["gifter_level"] or 0,
+                    "first_seen": row["first_seen"],
+                    "last_seen": row["last_seen"],
+                    "diamonds": 0,
+                    "gifts": 0,
+                    "sessions": 0,
+                    "comments": comments.get(row["key"], 0),
+                    "first_gift": None,
+                    "last_gift": None,
+                    "streamers": [],
+                },
+            )
+            fan["diamonds"] += row["diamonds"] or 0
+            fan["gifts"] += row["gifts"] or 0
+            fan["sessions"] += row["sessions"] or 0
+            for field, source, pick in (
+                ("first_gift", "first_gift", min), ("last_gift", "last_gift", max),
+            ):
+                value = row[source]
+                if value is not None:
+                    current = fan[field]
+                    fan[field] = value if current is None else pick(current, value)
+            fan["streamers"].append(
+                {
+                    "unique_id": row["owner"],
+                    "diamonds": row["diamonds"] or 0,
+                    "gifts": row["gifts"] or 0,
+                    "sessions": row["sessions"] or 0,
+                }
+            )
+
+        for fan in fans.values():
+            # 配信者別は必ず額の降順。「2人へ投げている」だけでは実態が分からず、実測では
+            # 286,946 対 3 coin のような極端な偏りが普通にある。額を並べて出す。
+            fan["streamers"].sort(key=lambda s: -s["diamonds"])
+            fan["streamer_count"] = len(fan["streamers"])
+
+        eligible = [f for f in fans.values() if f["diamonds"] >= min_diamonds]
+        eligible.sort(key=lambda f: (-f["diamonds"], -f["gifts"]))
+        multi = sum(1 for f in fans.values() if f["streamer_count"] > 1)
+        logger.info(
+            "fan ledger: %d shown of %d eligible (%d gifters, %d multi-streamer,"
+            " min_diamonds=%d)",
+            min(len(eligible), limit), len(eligible), len(fans), multi, min_diamonds,
+            extra={"event": "storage.fan_ledger_scanned",
+                   "ctx": {"gifters": len(fans), "eligible": len(eligible),
+                           "multi_streamer": multi,
+                           "unidentified_gift_events": unidentified["gift_events"]}},
+        )
+        return {
+            "fans": eligible[:limit],
+            "eligible": len(eligible),
+            "total_gifters": len(fans),
+            "multi_streamer": multi,
+            "unidentified": unidentified,
+            "min_diamonds": min_diamonds,
+            "limit": limit,
+            "generated_at": time.time(),
+        }
+
+    def fan_profile(self, identity_key: str) -> dict:
+        """1人ぶんの台帳。配信者別の内訳とSession単位の明細を返す。
+
+        eventの生行は返さない。実測で最上位のfanは47,000行(大半がlike)を持ち、明細として
+        読めないうえ転送も走査も無駄になる。Session粒度まで畳んだものが台帳の単位である。
+        """
+        if identity_key in NON_IDENTITY_KEYS:
+            raise ValueError("identity_key は1人の視聴者を指しません")
+        with self._lock:
+            identity = self._conn.execute(
+                "SELECT identity_key, user_id, unique_id, nickname, avatar,"
+                " fans_level, gifter_level, gifter_badge, first_seen, last_seen"
+                " FROM users WHERE identity_key = ?",
+                (identity_key,),
+            ).fetchone()
+            if identity is None:
+                return {}
+            session_rows = self._conn.execute(
+                "SELECT e.session_id AS session_id, s.unique_id AS owner,"
+                " s.started_at AS started_at, SUM(e.diamonds) AS diamonds,"
+                " SUM(e.gift_count) AS gifts, MIN(e.time) AS first_gift,"
+                " MAX(e.time) AS last_gift"
+                " FROM events e JOIN sessions s ON s.id = e.session_id"
+                " WHERE e.identity_key = ? AND e.kind = 'gift'"
+                " GROUP BY e.session_id ORDER BY s.started_at DESC",
+                (identity_key,),
+            ).fetchall()
+            kind_rows = self._conn.execute(
+                "SELECT kind, COUNT(*) AS n FROM events WHERE identity_key = ?"
+                " GROUP BY kind",
+                (identity_key,),
+            ).fetchall()
+
+        sessions = [
+            {
+                "session_id": r["session_id"],
+                "unique_id": r["owner"],
+                "started_at": r["started_at"],
+                "diamonds": r["diamonds"] or 0,
+                "gifts": r["gifts"] or 0,
+                "first_gift": r["first_gift"],
+                "last_gift": r["last_gift"],
+            }
+            for r in session_rows
+        ]
+        by_streamer: dict = {}
+        for s in sessions:
+            entry = by_streamer.setdefault(
+                s["unique_id"],
+                {"unique_id": s["unique_id"], "diamonds": 0, "gifts": 0, "sessions": 0,
+                 "first_gift": None, "last_gift": None},
+            )
+            entry["diamonds"] += s["diamonds"]
+            entry["gifts"] += s["gifts"]
+            entry["sessions"] += 1
+            for field, pick in (("first_gift", min), ("last_gift", max)):
+                value = s[field]
+                if value is not None:
+                    current = entry[field]
+                    entry[field] = value if current is None else pick(current, value)
+        streamers = sorted(by_streamer.values(), key=lambda e: -e["diamonds"])
+        return {
+            "identity_key": identity["identity_key"],
+            "user_id": identity["user_id"] or "",
+            "unique_id": identity["unique_id"] or "",
+            "nickname": identity["nickname"] or identity["unique_id"] or "(unknown)",
+            "avatar": identity["avatar"] or "",
+            "fans_level": identity["fans_level"] or 0,
+            "gifter_level": identity["gifter_level"] or 0,
+            "gifter_badge": identity["gifter_badge"] or "",
+            "first_seen": identity["first_seen"],
+            "last_seen": identity["last_seen"],
+            "diamonds": sum(s["diamonds"] for s in sessions),
+            "gifts": sum(s["gifts"] for s in sessions),
+            "activity": {r["kind"]: r["n"] for r in kind_rows},
+            "streamers": streamers,
+            "sessions": sessions,
+        }
+
+    def dismiss_discovery_candidate(self, unique_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO discovery_dismissed (unique_id, dismissed_at) VALUES (?, ?)"
+                " ON CONFLICT(unique_id) DO UPDATE SET dismissed_at = excluded.dismissed_at",
+                (unique_id, time.time()),
+            )
+            self._conn.commit()
+
+    def restore_discovery_candidate(self, unique_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM discovery_dismissed WHERE unique_id = ?", (unique_id,)
+            )
+            self._conn.commit()
+
+    def list_dismissed_candidates(self) -> list:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT unique_id, dismissed_at FROM discovery_dismissed"
+                " ORDER BY dismissed_at DESC"
+            ).fetchall()
+        return [
+            {"unique_id": row["unique_id"], "dismissed_at": row["dismissed_at"]}
+            for row in rows
+        ]
+
+    def discovery_candidates(
+        self, min_contacts: int, half_life_days: float, limit: int
+    ) -> dict:
+        """未監視だがBattleで繰り返し当たっている配信者を、接触の多い順に返す。
+
+        順位は「時間減衰つき接触回数」= Σ 0.5^(経過日数 / 半減期) で決める。生の回数だけ
+        で並べると、もう当たらなくなった相手がいつまでも上位に居座り、逆に直近だけを見ると
+        たまたま1回当たった相手が常連を押しのける。半減期つきの減衰和は両方を1つの値に
+        まとめる標準的なやり方で、半減期は設定で変えられる。
+
+        同じBattleは(battle_id, 相手)単位で1回だけ数える。1つのBattleを複数の監視配信者が
+        別々のsessionで観測する(同陣営に2人監視している/両陣営とも監視対象)ため、素直に
+        数えると同じ対戦が接触2回に化ける。
+
+        start_time / battle_id を欠くBattleは数えない。どちらも減衰にも重複除外にも必須で、
+        代わりの値を当てると「実際には無かった接触」を作ることになる。
+        """
+        if half_life_days <= 0:
+            raise ValueError("half_life_days must be positive")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT b.data_json AS data_json, s.unique_id AS own_id"
+                " FROM battles b JOIN sessions s ON s.id = b.session_id"
+            ).fetchall()
+            monitored = {
+                r["unique_id"]
+                for r in self._conn.execute("SELECT unique_id FROM monitored_targets")
+            }
+            dismissed = {
+                r["unique_id"]
+                for r in self._conn.execute("SELECT unique_id FROM discovery_dismissed")
+            }
+
+        now = time.time()
+        aggregated: dict = {}
+        seen_contacts = set()
+        skipped_unidentified = 0
+        skipped_incomplete = 0
+        for row in rows:
+            battle = json.loads(row["data_json"])
+            start_time = battle.get("start_time")
+            battle_id = battle.get("battle_id")
+            if start_time is None or not battle_id:
+                skipped_incomplete += 1
+                continue
+            age_days = max(0.0, (now - start_time) / 86400.0)
+            weight = 0.5 ** (age_days / half_life_days)
+            for opponent in battle.get("opponents", []) or []:
+                # unique_id(=@handle)が無い相手は監視を開始する手段が無い。nicknameは
+                # 変わるうえ重複するので、代わりのkeyにはできない。
+                handle = (opponent.get("unique_id") or "").strip()
+                if not handle:
+                    skipped_unidentified += 1
+                    continue
+                if handle in monitored or handle in dismissed:
+                    continue
+                entry = aggregated.setdefault(
+                    handle,
+                    {
+                        "unique_id": handle,
+                        "nickname": opponent.get("nickname") or handle,
+                        "avatar": opponent.get("avatar") or "",
+                        "user_id": opponent.get("user_id") or "",
+                        "contacts": 0,
+                        "score": 0.0,
+                        "first_contact": start_time,
+                        "last_contact": start_time,
+                        "via": set(),
+                    },
+                )
+                # viaは重複観測でも積む。「同じBattleを2人が見た」ことは接触2回では
+                # ないが、その相手が2人の監視配信者と当たっている事実は候補の判断材料
+                # であり、1件目の観測者だけ残すとその情報が落ちる。
+                entry["via"].add(row["own_id"])
+                if not entry["avatar"] and opponent.get("avatar"):
+                    entry["avatar"] = opponent["avatar"]
+                contact = (battle_id, handle)
+                if contact in seen_contacts:
+                    continue
+                seen_contacts.add(contact)
+                entry["contacts"] += 1
+                entry["score"] += weight
+                entry["first_contact"] = min(entry["first_contact"], start_time)
+                entry["last_contact"] = max(entry["last_contact"], start_time)
+
+        eligible = [e for e in aggregated.values() if e["contacts"] >= min_contacts]
+        eligible.sort(key=lambda e: (-e["score"], -e["last_contact"]))
+        candidates = []
+        for entry in eligible[:limit]:
+            candidate = dict(entry)
+            candidate["via"] = sorted(entry["via"])
+            candidate["score"] = round(entry["score"], 3)
+            candidates.append(candidate)
+
+        logger.info(
+            "discovery candidates: %d shown of %d eligible (%d seen, min_contacts=%d,"
+            " half_life=%.1fd)",
+            len(candidates), len(eligible), len(aggregated), min_contacts, half_life_days,
+            extra={"event": "storage.discovery_scanned",
+                   "ctx": {"shown": len(candidates), "eligible": len(eligible),
+                           "seen": len(aggregated), "monitored": len(monitored),
+                           "dismissed": len(dismissed),
+                           "skipped_unidentified": skipped_unidentified,
+                           "skipped_incomplete": skipped_incomplete}},
+        )
+        return {
+            "candidates": candidates,
+            "eligible": len(eligible),
+            "seen": len(aggregated),
+            "dismissed": len(dismissed),
+            "skipped_unidentified": skipped_unidentified,
+            "skipped_incomplete": skipped_incomplete,
+            "min_contacts": min_contacts,
+            "half_life_days": half_life_days,
+            "limit": limit,
+            "generated_at": now,
+        }
+
     def session_rankings(self, limit: int) -> dict:
         with self._lock:
             base_rows = self._conn.execute(
@@ -4120,12 +5528,14 @@ class Storage:
                 " GROUP BY COALESCE(NULLIF(s.owner_user_id, ''), s.unique_id) ORDER BY diamonds DESC",
             ).fetchall()
             streamer_handles = self._latest_owner_handles_locked()
+            # 全sessionを跨ぐ通算集計なので表示属性はusers表(最新)を優先する
+            # (理由はstreamer_profileのgifter集計と同じ)。
             gifter_rows = self._conn.execute(
                 "SELECT e.identity_key AS key,"
-                " COALESCE(NULLIF(MAX(e.user_id), ''), u.user_id) AS user_id,"
-                " COALESCE(NULLIF(MAX(e.user_unique_id), ''), u.unique_id) AS unique_id,"
-                " COALESCE(NULLIF(MAX(e.user_nickname), ''), u.nickname) AS nickname,"
-                " COALESCE(NULLIF(MAX(e.user_avatar), ''), u.avatar) AS avatar,"
+                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
                 " SUM(e.gift_count) AS gifts, SUM(e.diamonds) AS diamonds,"
                 " COUNT(DISTINCT e.session_id) AS sessions"
                 " FROM events e LEFT JOIN users u ON u.identity_key = e.identity_key"

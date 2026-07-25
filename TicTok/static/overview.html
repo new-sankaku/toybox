@@ -13,22 +13,13 @@
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
+    <h1 class="visually-hidden">全体監視</h1>
     <!-- 行1: スリムトップバー -->
     <div class="a-topbar">
       <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
-      <nav class="a-nav">
-        <a href="/">監視</a>
-        <a class="active" href="/overview">全体監視</a>
-        <a href="/history">履歴</a>
-        <a href="/streamers">配信者</a>
-        <a href="/videos">配信者動画</a>
-        <a href="/analytics">全体解析</a>
-        <a href="/jobs">job</a>
-        <a href="/ops">運用log</a>
-        <a href="/settings">設定</a>
-      </nav>
+      <nav class="a-nav"></nav>
       <div class="a-disk" id="disk-bar" title="録画・出力先の空き容量"></div>
-      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status">Server接続中…</span></div>
+      <div class="a-ws"><span id="ws-indicator" class="dot">●</span> <span id="ws-status" aria-live="polite">Server接続中…</span></div>
     </div>
 
     <!-- 行2: 集計バー + ツールバー -->
@@ -59,7 +50,7 @@
 
     <!-- 行4: フッター -->
     <div class="a-footer">
-      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot">Server接続中…</span>
+      <span id="ws-indicator-foot" class="dot">●</span> <span id="ws-status-foot" aria-live="polite">Server接続中…</span>
       <span class="right">Glory&nbsp;to&nbsp;Mankind</span>
     </div>
   </div>

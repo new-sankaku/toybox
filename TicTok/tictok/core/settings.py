@@ -25,6 +25,10 @@ CATEGORY_LABELS = {
     "clip": "切り出し(clip)",
     "overlay_timing": "焼き込み: 時刻合わせとプレビュー",
     "storage": "容量と保持policy",
+    "notify": "通知(webhook)",
+    "discovery": "配信者の発見",
+    "fans": "Fan台帳",
+    "capacity": "容量予測",
 }
 
 SETTING_DEFS = {
@@ -74,6 +78,77 @@ SETTING_DEFS = {
         "max": 30.0,
         "label": "LIVE確認の総アクセス上限（回/分）",
         "note": "全監視を合計したTikTokへのアクセス回数の上限です。監視数が増えても合計がこの値を超えないよう確認間隔を自動で広げ、IP単位のブロックを防ぎます。小さいほど安全ですが、個々の配信開始の検出は遅くなります。",
+    },
+    "live_check_schedule_enabled": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_ENABLED",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "options": [{"value": 0, "label": "しない"}, {"value": 1, "label": "する"}],
+        "label": "配信しやすい時間帯へLIVE確認を寄せる",
+        "note": "過去の配信開始時刻から配信者ごとの時間帯の偏りを推定し、確率の高い時間帯の確認間隔を詰め、低い時間帯を広げます。総アクセス数は変わりません。既定でoffなのは、確認の総量が上限に達している状態では時間帯間に融通できる余剰が無く、実測で検出の速さがほとんど変わらないためです。上限に余裕がある場合のみ効果があります。",
+    },
+    "live_check_schedule_floor": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_FLOOR",
+        "default": 0.35,
+        "type": float,
+        "min": 0.0,
+        "max": 1.0,
+        "label": "時間帯推定の平滑化(一様分布との混合比)",
+        "note": "推定した時間帯分布を、どれだけ一様分布へ寄せるかです。大きいほど過去の偏りを信用せず全時間帯を平等に扱います。履歴が少ないうちに特定の時間帯へ寄せすぎるのを防ぎます。",
+    },
+    "live_check_schedule_min_factor": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_MIN_FACTOR",
+        "default": 0.5,
+        "type": float,
+        "min": 0.1,
+        "max": 1.0,
+        "label": "確認間隔を詰められる下限の倍率",
+        "note": "配信しやすい時間帯で、確認間隔をどこまで短くしてよいかの下限です。0.5なら通常の半分までです。",
+    },
+    "live_check_schedule_max_factor": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_MAX_FACTOR",
+        "default": 2.0,
+        "type": float,
+        "min": 1.0,
+        "max": 8.0,
+        "label": "確認間隔を広げられる上限の倍率",
+        "note": "配信しにくい時間帯でも、確認間隔をこの倍率までしか広げません。予測が外れたときに配信を取り逃さないための保証です。",
+    },
+    "live_check_schedule_min_sessions": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_MIN_SESSIONS",
+        "default": 8,
+        "type": int,
+        "min": 1,
+        "max": 200,
+        "label": "時間帯推定に必要な過去の配信本数",
+        "note": "この本数に満たない配信者は推定せず、全時間帯を平等に確認します。少ない履歴から偏りを決めつけないためです。",
+    },
+    "live_check_schedule_window_days": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_WINDOW_DAYS",
+        "default": 90,
+        "type": int,
+        "min": 7,
+        "max": 365,
+        "label": "時間帯推定に使う過去の日数",
+        "note": "何日前までの配信履歴を推定に使うかです。長いほど安定しますが、配信時間帯が変わった場合の追従は遅くなります。",
+    },
+    "live_check_schedule_refresh_seconds": {
+        "category": "collect",
+        "env": "TICTOK_LIVE_CHECK_SCHEDULE_REFRESH_SECONDS",
+        "default": 3600,
+        "type": int,
+        "min": 60,
+        "max": 86400,
+        "label": "時間帯推定の再計算間隔（秒）",
+        "note": "推定を何秒ごとに作り直すかです。短くすると新しい配信がすぐ反映されますが、その都度DBを読みます。",
     },
     "restricted_recheck_interval": {
         "category": "collect",
@@ -155,6 +230,16 @@ SETTING_DEFS = {
         "label": "画面再接続時に再送するEvent履歴件数",
         "note": "次のSession開始から適用されます。",
     },
+    "contributor_sample_seconds": {
+        "category": "collect",
+        "env": "TICTOK_CONTRIBUTOR_SAMPLE_SECONDS",
+        "default": 30,
+        "type": int,
+        "min": 5,
+        "max": 600,
+        "label": "貢献者Rankingの記録間隔（秒）",
+        "note": "TikTokが配信中に配信するRoom上位貢献者のRanking（TikTok側が算出した累積スコア）を、この間隔で記録します。内容が前回と同じ場合は記録しません。自前のGift集計と突き合わせて取りこぼし量を測るためのDataです。短いほど細かく記録しますがDataが増えます。",
+    },
     "auto_record": {
         "category": "record",
         "env": "TICTOK_AUTO_RECORD",
@@ -178,6 +263,26 @@ SETTING_DEFS = {
         "max": 60,
         "label": "Battleスコア推移の記録間隔（秒）",
         "note": "Battle中の自陣/敵陣スコアの時系列をこの間隔で記録し、各画面のBattleカードにスコア推移として表示します。短いほど細かく記録しますがDataが増えます。",
+    },
+    "battle_score_endgame_seconds": {
+        "category": "record",
+        "env": "TICTOK_BATTLE_SCORE_ENDGAME_SECONDS",
+        "default": 20,
+        "type": int,
+        "min": 0,
+        "max": 300,
+        "label": "Battle終盤とみなす残り時間（秒）",
+        "note": "Battle終了時刻までの残りがこの秒数を切ったあいだ、スコア推移を「Battle終盤のスコア記録間隔」で細かく記録します。決着はこの区間で付くため、通常の間隔のままだと逆転の瞬間が1点に潰れます。0にすると終盤の細分化を行いません（Battleの終了時刻が届かない場合も細分化しません）。",
+    },
+    "battle_score_endgame_sample_seconds": {
+        "category": "record",
+        "env": "TICTOK_BATTLE_SCORE_ENDGAME_SAMPLE_SECONDS",
+        "default": 0.5,
+        "type": float,
+        "min": 0.1,
+        "max": 10.0,
+        "label": "Battle終盤のスコア記録間隔（秒）",
+        "note": "「Battle終盤とみなす残り時間」の区間で使う記録間隔です。通常の記録間隔より短い値にしてください。",
     },
     "monitor_opponent_rooms": {
         "category": "record",
@@ -335,6 +440,21 @@ SETTING_DEFS = {
             {"value": 1, "label": "する"},
         ],
     },
+    "video_overlay_min_height": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_MIN_HEIGHT",
+        "default": 2560,
+        "type": int,
+        "min": 720,
+        "max": 2560,
+        "label": "動画化: 焼き込みの最低出力高さ(px)",
+        "note": "焼き込む文字・絵文字・アイコンは出力解像度で描画されるため、sourceがこの高さより低い場合は先に拡大(lanczos)してから焼き込みます。TikTokのsourceは720x1280が上限なので、既定の2560では約2倍の大きさで描画され、アイコンの円は46px→94pxになります(実ユーザーアイコンはAI超解像で288px以上まで高精細化済みのため、拡大しても実detailが増えます)。映像本体はlanczos拡大なので鮮明にはならず、file sizeは1280比で約2.2倍・焼き込み時間は約1.7倍になります。保存容量を優先する場合は1280(拡大なし)にしてください。",
+        "options": [
+            {"value": 1280, "label": "1280 (拡大しない)"},
+            {"value": 1920, "label": "1920 (1.5倍)"},
+            {"value": 2560, "label": "2560 (2倍)"},
+        ],
+    },
     "video_overlay_font_size": {
         "category": "overlay",
         "env": "TICTOK_VIDEO_OVERLAY_FONT_SIZE",
@@ -429,6 +549,20 @@ SETTING_DEFS = {
             {"value": 1, "label": "する"},
         ],
     },
+    "reprocess_normalize_audio": {
+        "category": "audio",
+        "env": "TICTOK_REPROCESS_NORMALIZE_AUDIO",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "再mp4化: 元録画の音量も正規化する",
+        "note": "再mp4化(.tsからのmp4作り直し)のついでに、録画そのものの音量を下の目標値へ揃えます。再mp4化はもともと音声をAACへ再encodeしているため、正規化を足しても所要時間はほとんど変わりません。元のmp4は_backup/へ退避され、.tsも残っているので作り直せます。単体で音量だけを揃えたい録画には、動画画面の「音量正規化」を使ってください。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
     "audio_normalize_lufs": {
         "category": "audio",
         "env": "TICTOK_AUDIO_NORMALIZE_LUFS",
@@ -437,7 +571,7 @@ SETTING_DEFS = {
         "min": -40.0,
         "max": -5.0,
         "label": "音量正規化: 目標音量(LUFS)",
-        "note": "音量正規化(loudnorm)の目標となる統合ラウドネスです。切り出し・焼き込み出力・Up出力で共通に使います。-14 LUFSは各SNSの配信でおおむね標準的な値で、小さくするほど静かになります。",
+        "note": "音量正規化(loudnorm)の目標となる統合ラウドネスです。切り出し・焼き込み出力・Up出力・音量正規化・再mp4化で共通に使います。-14 LUFSは各SNSの配信でおおむね標準的な値で、小さくするほど静かになります。",
     },
     "audio_normalize_true_peak": {
         "category": "audio",
@@ -481,7 +615,7 @@ SETTING_DEFS = {
         "min": 0,
         "max": 60,
         "label": "切り出し候補: 前paddingの秒数",
-        "note": "切り出し候補の開始を、検出した区間の何秒前から始めるかです。stream copyでの切り出しはkeyframe単位(録画のsegmentは2秒)でしか切れないため、paddingが無いと出だしが欠けます。",
+        "note": "切り出し候補の開始を、検出した区間の何秒前から始めるかです。盛り上がりに至るまでの流れを含めるためのもので、これが無いと文脈の無いところから始まります。なお出だしの欠けを防ぐためのものではありません(stream copyは直前のkeyframeまで手前へ伸びるため、paddingが0でも指定範囲は欠けません)。",
     },
     "clip_pad_after_seconds": {
         "category": "clip",
@@ -522,6 +656,20 @@ SETTING_DEFS = {
         "max": 120,
         "label": "切り出し候補: 先行秒数(lead)",
         "note": "候補の開始をこの秒数だけ前へずらします。ギフトもコメントも「出来事への反応」なので、反応が始まった時刻から切ると原因の場面が入りません。Commentと映像の時刻ズレの補正ではありません(そちらは変換側で解決済みです)。",
+    },
+    "clip_candidate_audio": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_AUDIO",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し候補: 音声の盛り上がりも見る",
+        "note": "ギフトとコメントに加えて、音量の急上昇も候補の判定に使います。歓声や笑い声はギフトにもコメントにも現れないことがあるため、それらを拾えます。各候補には無音の割合も付きます。初回は録画の音声を最後まで読むため長尺で90秒級かかります(波形表示と同じ処理で、一度作れば以後は再利用します)。",
+        "options": [
+            {"value": 0, "label": "しない (ギフトとコメントのみ)"},
+            {"value": 1, "label": "する (音量の急上昇も候補にする)"},
+        ],
     },
     "clip_candidate_limit": {
         "category": "clip",
@@ -611,6 +759,16 @@ SETTING_DEFS = {
         "label": "出力を拒否する空き容量の下限（GB）",
         "note": "焼き込み・AI高画質化(Up出力)を開始する前に出力先ドライブの空き容量を確認し、この値を下回っていれば開始を拒否します。中間fileが多層に積み上がるため、元動画の数倍の空きが必要です。0で拒否しません(確認だけ行います)。診断log用のしきい値(TICTOK_LOG_DISK_LOW_BYTES)とは別で、こちらは実際に処理を止めます。",
     },
+    "backup_keep_days": {
+        "category": "storage",
+        "env": "TICTOK_BACKUP_KEEP_DAYS",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 365,
+        "label": "差し替え前の元動画(_backup)を残す日数",
+        "note": "再mp4化・音量正規化は元のmp4を_backupフォルダへ退避してから差し替えます。退避は失敗を巻き戻すためのもので、成功して中身を確認できた時点で役目を終えます。0なら、その録画の処理が完走し、出来たmp4が退避と同じだけのフレーム数を持つことを確認した直後に消します(退避フォルダは膨らみません)。1以上にすると、その日数のあいだ残します。フレーム数では見えない不具合(コメントのズレ・音の異常)に後から気付いて戻したい場合の猶予です。過去に積み上がったぶんは scripts/prune_backup_mp4.py で確認しながら消せます。",
+    },
     "retention_transient_hours": {
         "category": "storage",
         "env": "TICTOK_RETENTION_TRANSIENT_HOURS",
@@ -665,6 +823,234 @@ SETTING_DEFS = {
         "label": "保持policy: 削除を打ち切る空き容量（GB）",
         "note": "保持policyの実行中、対象driveの空き容量がこの値に達した時点で以降の削除を打ち切ります。古いものから順に消すため、必要な分だけ空けて残りは保持できます。0で打ち切らず、条件に合うものをすべて削除します。",
     },
+    # 通知の宛先webhook URLはここに置かない。URL自体が投稿権限を持つ資格情報であり、この表の
+    # 値は設定画面に平文で表示され、変更時にupdate()がold->newをops_eventsへ書き残す。宛先は
+    # .env(TICTOK_NOTIFY_WEBHOOK_URL)側にあり、ここには資格情報でない項目だけを置く。
+    "notify_enabled": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_ENABLED",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "通知を送る",
+        "note": "配信開始・障害・盛り上がりをwebhook(Discord/Slack/汎用receiver)へ送ります。宛先はTicTok/.envのTICTOK_NOTIFY_WEBHOOK_URLで指定します(資格情報のため設定画面には置いていません)。宛先が未設定の場合、有効にしても送信は行われません。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "notify_rule_live_started": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RULE_LIVE_STARTED",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "通知: 監視中の配信者のLIVE開始",
+        "note": "待機中の監視対象が配信を開始し、Sessionが始まった時点で通知します。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "notify_rule_ops": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RULE_OPS",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "通知: 障害・状態遷移(運用log連動)",
+        "note": "運用logに記録される状態遷移(接続断・録画停止・再接続の打ち切り・録画不可判定・job中断など)を通知します。どこまで拾うかは下の「通知する最低severity」で決めます。この機構は運用logを唯一の口として使うので、通知のために別の判定を持ちません。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "notify_ops_min_severity": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_OPS_MIN_SEVERITY",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 2,
+        "label": "通知する最低severity",
+        "note": "上の「障害・状態遷移」で通知する範囲です。infoまで含めると正常時のjob開始完了まで届くため、既定はwarning以上です。",
+        "options": [
+            {"value": 0, "label": "errorのみ"},
+            {"value": 1, "label": "warning以上"},
+            {"value": 2, "label": "info以上（多い）"},
+        ],
+    },
+    "notify_rule_battle_started": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RULE_BATTLE_STARTED",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "通知: Battle開始",
+        "note": "Battleが始まった時点で通知します。1戦ごとに1回だけで、同じBattleの途中経過では通知しません。Battleの多い配信者を監視していると件数が多くなるため既定は無効です。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "notify_rule_coin_rate": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RULE_COIN_RATE",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "通知: coin急増",
+        "note": "直近1分のcoin(diamond)量が下の閾値を超えた瞬間に通知します。閾値を超えている間は鳴り続けず、下回ってから再度超えたときに次の通知を出します。",
+        "options": [
+            {"value": 0, "label": "しない"},
+            {"value": 1, "label": "する"},
+        ],
+    },
+    "notify_coin_rate_threshold": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_COIN_RATE_THRESHOLD",
+        "default": 10000,
+        "type": int,
+        "min": 0,
+        "max": 100000000,
+        "label": "coin急増と判定する量（coin/分）",
+        "note": "直近1分の合計coinがこの値以上になったら急増と判定します。配信者ごとに規模が桁で違うため、監視している配信者の平常時の値を見て決めてください(全体解析・履歴で確認できます)。0でこの判定を行いません。",
+    },
+    "notify_refractory_seconds": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_REFRACTORY_SECONDS",
+        "default": 300,
+        "type": int,
+        "min": 0,
+        "max": 86400,
+        "label": "同一事象を再通知しない秒数（不応期）",
+        "note": "同じ配信者の同じ事象について、この秒数のあいだは2件目以降を送りません。再接続を短時間に繰り返すような状況で通知が洪水になるのを防ぎます。0で抑止しません(非推奨)。",
+    },
+    "notify_retry_max": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RETRY_MAX",
+        "default": 3,
+        "type": int,
+        "min": 0,
+        "max": 10,
+        "label": "送信失敗時の再試行回数",
+        "note": "webhookの送信に失敗したときに再試行する回数です(初回送信は回数に含みません)。待ち時間は倍々に広がります。宛先URLが誤っている等の再試行しても変わらない失敗は、回数を待たずに打ち切ります。回数を使い切った送信失敗は運用logにerrorとして必ず残ります。",
+    },
+    "notify_retry_base_delay": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_RETRY_BASE_DELAY",
+        "default": 2.0,
+        "type": float,
+        "min": 0.5,
+        "max": 60.0,
+        "label": "再試行の初回待機秒数",
+        "note": "exponential backoffの起点です（2→4→8…秒）。",
+    },
+    "notify_timeout_seconds": {
+        "category": "notify",
+        "env": "TICTOK_NOTIFY_TIMEOUT_SECONDS",
+        "default": 10.0,
+        "type": float,
+        "min": 1.0,
+        "max": 120.0,
+        "label": "webhook送信のtimeout（秒）",
+        "note": "1回の送信を待つ上限です。送信は収集・録画とは別に動くため、ここで待っても本体の処理は止まりません。変更はServer再起動後に有効です。",
+    },
+    "discovery_min_contacts": {
+        "category": "discovery",
+        "env": "TICTOK_DISCOVERY_MIN_CONTACTS",
+        "default": 3,
+        "type": int,
+        "min": 1,
+        "max": 100,
+        "label": "候補に出す最小のBattle対戦数",
+        "note": "過去のBattleでこの回数以上当たった未監視の配信者だけを候補にします。1にすると一度きりの対戦相手まで並び、候補が数百件になります。",
+    },
+    "discovery_half_life_days": {
+        "category": "discovery",
+        "env": "TICTOK_DISCOVERY_HALF_LIFE_DAYS",
+        "default": 14.0,
+        "type": float,
+        "min": 1.0,
+        "max": 365.0,
+        "label": "接触の重みが半分になる日数（半減期）",
+        "note": "候補の順位は「時間減衰つき対戦数」で決めます。この日数だけ前の対戦は1回を0.5回として数え、その倍の日数前なら0.25回になります。短くすると直近によく当たる相手が上位に、長くすると通算で多く当たった相手が上位に来ます。",
+    },
+    "discovery_limit": {
+        "category": "discovery",
+        "env": "TICTOK_DISCOVERY_LIMIT",
+        "default": 30,
+        "type": int,
+        "min": 1,
+        "max": 500,
+        "label": "候補を表示する最大件数",
+        "note": "上位から何件まで出すかです。条件を満たす候補の総数は一覧の見出しに表示されます。",
+    },
+    "fan_min_diamonds": {
+        "category": "fans",
+        "env": "TICTOK_FAN_MIN_DIAMONDS",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 10000000,
+        "label": "台帳に載せる最小のcoin額",
+        "note": "通算でこの額以上を投じた視聴者だけを台帳に載せます。0でgiftを1回でも送った視聴者を全員載せます。台帳はgiftを送った視聴者だけが対象で、commentのみの視聴者は含みません(全視聴者は数万人規模になり一覧として使えないためです)。",
+    },
+    "fan_limit": {
+        "category": "fans",
+        "env": "TICTOK_FAN_LIMIT",
+        "default": 100,
+        "type": int,
+        "min": 1,
+        "max": 2000,
+        "label": "台帳に表示する最大件数",
+        "note": "上位から何件まで出すかです。条件を満たす視聴者の総数は一覧の見出しに表示されます。",
+    },
+    "capacity_sample_interval_hours": {
+        "category": "capacity",
+        "env": "TICTOK_CAPACITY_SAMPLE_INTERVAL_HOURS",
+        "default": 24,
+        "type": int,
+        "min": 1,
+        "max": 168,
+        "label": "容量snapshotを記録する間隔（時間）",
+        "note": "drive空き・DB size・録画量を記録する間隔です。filesystemの走査は行わず1回あたり0.05秒程度なので、収集の妨げにはなりません。短くすると予測が早く立ち上がりますが、記録が増えるだけで精度が上がるわけではありません（増加速度は日単位の現象のため）。",
+    },
+    "capacity_forecast_min_samples": {
+        "category": "capacity",
+        "env": "TICTOK_CAPACITY_FORECAST_MIN_SAMPLES",
+        "default": 3,
+        "type": int,
+        "min": 3,
+        "max": 100,
+        "label": "満杯予測に必要な最小の記録数",
+        "note": "これより記録が少ない間は「あと何日」を表示しません。2点では傾きのばらつきが評価できず、幅のない予測になってしまうため下限は3です。",
+    },
+    "capacity_forecast_max_extrapolation": {
+        "category": "capacity",
+        "env": "TICTOK_CAPACITY_FORECAST_MAX_EXTRAPOLATION",
+        "default": 3.0,
+        "type": float,
+        "min": 1.0,
+        "max": 20.0,
+        "label": "観測期間の何倍先まで予測を出すか",
+        "note": "観測が7日しかない状態で「あと1000日」と出すのは、算術としては正しくても観測が保証していない値です。予測がこの倍率を超えたら数値を伏せ、「少なくとも○日先までは持つ」とだけ表示します。大きくすると遠い先まで数値が出ますが、その数値の裏付けは観測期間ぶんしかありません。",
+    },
+    "capacity_alert_days": {
+        "category": "capacity",
+        "env": "TICTOK_CAPACITY_ALERT_DAYS",
+        "default": 14,
+        "type": int,
+        "min": 0,
+        "max": 365,
+        "label": "満杯まで何日を切ったら通知するか",
+        "note": "満杯までの見積り幅の下限（最も早く尽きる側）がこの日数を割ったら運用logへ記録し、通知設定に従って送信します。0で通知しません。点推定ではなく下限で判定するのは、幅の下限が既に閾値を割っている状況で黙らないためです。",
+    },
 }
 
 
@@ -675,11 +1061,30 @@ class Settings:
         self._load()
 
     def _env_default(self, key: str):
+        """Resolve the default for one key, honouring an environment override.
+
+        An env value becomes both the running value and the value the UI offers as
+        「既定値へ戻す」, so it has to clear the same bar as anything typed into the form.
+        Without that, an out-of-range env value is accepted at start and then rejected
+        with a 422 the moment the operator saves it back. No fallback: an invalid value
+        is reported and raised, not quietly replaced by the built-in default.
+        """
         definition = SETTING_DEFS[key]
         raw = os.environ.get(definition["env"])
         if raw is None:
             return definition["default"]
-        return definition["type"](raw)
+        try:
+            if definition["type"] is str:
+                return self._check_path_shape(definition, raw)
+            return self._validate_number(definition, raw)
+        except ValueError as exc:
+            logger.error(
+                "invalid setting from environment: %s=%s (%s)",
+                definition["env"], raw, exc,
+                extra={"event": "process.settings_env_invalid",
+                       "ctx": {"key": key, "env": definition["env"], "reason": str(exc)}},
+            )
+            raise
 
     def _load(self) -> None:
         """Resolve every setting from DB > env > built-in default.
@@ -693,11 +1098,14 @@ class Settings:
         stored = self._storage.get_settings()
         sources = {"from_db": 0, "from_env": 0, "from_default": 0}
         for key, definition in SETTING_DEFS.items():
+            # DBが勝つ場合もenv既定値は解決しておく。describe()が後から同じ解決を行うため、
+            # 不正なenvはここで起動を止め、設定画面が開けなくなる形で露見させない。
+            env_default = self._env_default(key)
             if key in stored:
                 self._values[key] = definition["type"](stored[key])
                 sources["from_db"] += 1
             else:
-                self._values[key] = self._env_default(key)
+                self._values[key] = env_default
                 if os.environ.get(definition["env"]) is None:
                     sources["from_default"] += 1
                 else:
@@ -749,20 +1157,30 @@ class Settings:
             described.append(entry)
         return described
 
-    def _validate_path(self, definition: dict, value) -> str:
-        """Validate a directory-path setting: it must be a non-empty absolute path that
-        can be created and written to. Rejects invalid input (no silent fallback) so the
-        operator gets immediate feedback rather than a broken record dir at next start."""
+    def _check_path_shape(self, definition: dict, value) -> str:
+        """Shape-only check for a directory-path setting: non-empty (unless allow_empty)
+        and absolute. Kept free of side effects so it can also gate env defaults, which
+        are resolved on every describe() — mkdir/W_OK there would touch the filesystem
+        on every settings read."""
         text = str(value).strip().strip('"')
         if not text:
             if definition.get("allow_empty"):
                 return ""
             raise ValueError(f"{definition['label']} を指定してください。")
-        path = Path(text)
-        if not path.is_absolute():
+        if not Path(text).is_absolute():
             raise ValueError(
                 f"{definition['label']} は絶対パスで指定してください（例: K:\\80_Tiktok）。"
             )
+        return text
+
+    def _validate_path(self, definition: dict, value) -> str:
+        """Validate a directory-path setting: it must be a non-empty absolute path that
+        can be created and written to. Rejects invalid input (no silent fallback) so the
+        operator gets immediate feedback rather than a broken record dir at next start."""
+        text = self._check_path_shape(definition, value)
+        if not text:
+            return ""
+        path = Path(text)
         try:
             path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -770,6 +1188,26 @@ class Settings:
         if not os.access(path, os.W_OK):
             raise ValueError(f"{definition['label']} に書き込みできません: {path}")
         return str(path)
+
+    def _validate_number(self, definition: dict, value):
+        """Coerce and range-check one numeric setting. Shared by update() and the env
+        default resolution so both gates accept exactly the same set of values."""
+        try:
+            if (
+                definition["type"] is int
+                and isinstance(value, float)
+                and not value.is_integer()
+            ):
+                # int(10.9)=10 と黙って切り捨てず、不正入力として拒否する。
+                raise ValueError(value)
+            typed = definition["type"](value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{definition['label']} の値が不正です: {value}")
+        if not (definition["min"] <= typed <= definition["max"]):
+            raise ValueError(
+                f"{definition['label']} は {definition['min']}〜{definition['max']} の範囲で指定してください。"
+            )
+        return typed
 
     def update(self, values: dict) -> dict:
         """Validate and persist a settings change.
@@ -790,22 +1228,7 @@ class Settings:
             if definition["type"] is str:
                 validated[key] = self._validate_path(definition, value)
                 continue
-            try:
-                if (
-                    definition["type"] is int
-                    and isinstance(value, float)
-                    and not value.is_integer()
-                ):
-                    # int(10.9)=10 と黙って切り捨てず、不正入力として拒否する。
-                    raise ValueError(value)
-                typed = definition["type"](value)
-            except (TypeError, ValueError):
-                raise ValueError(f"{definition['label']} の値が不正です: {value}")
-            if not (definition["min"] <= typed <= definition["max"]):
-                raise ValueError(
-                    f"{definition['label']} は {definition['min']}〜{definition['max']} の範囲で指定してください。"
-                )
-            validated[key] = typed
+            validated[key] = self._validate_number(definition, value)
         if validated:
             changes = {
                 key: [self._values.get(key), value]
@@ -817,9 +1240,9 @@ class Settings:
             self._storage.record_ops_event(
                 logger,
                 "process.settings_updated",
-                "settings updated: " + (
-                    ", ".join(f"{k}: {old} -> {new}" for k, (old, new) in changes.items())
-                    or "no effective change"
+                "設定を変更しました: " + (
+                    ", ".join(f"{k}: {old} → {new}" for k, (old, new) in changes.items())
+                    or "実質的な変更はありません"
                 ),
                 detail={"changes": changes, "changed": len(changes),
                         "submitted": len(validated)},

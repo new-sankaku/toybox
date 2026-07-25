@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Callable, Optional
 
+from tictok.core import config
 from tictok.record.transcription import STTError, stt_available
 from tictok.record.transcription import transcribe as stt_transcribe
 from tictok.search import indexer
@@ -143,6 +144,9 @@ class TranscribeQueue:
         loop = asyncio.get_running_loop()
         last_pct = -1
 
+        def current_pct() -> int:
+            return max(0, last_pct)
+
         def on_progress(done: float, total: float) -> None:
             nonlocal last_pct
             pct = min(100, int(done / total * 100)) if total > 0 else 0
@@ -155,7 +159,8 @@ class TranscribeQueue:
                                  "recording_id": recording_id, "pct": pct}), loop)
 
         try:
-            result = await asyncio.to_thread(stt_transcribe, str(path), on_progress)
+            result = await self._transcribe_with_retry(
+                recording_id, path, on_progress, current_pct)
         except STTError as exc:
             self._current = None
             self._storage.set_transcription_state(recording_id, "failed", error=str(exc))
@@ -184,6 +189,41 @@ class TranscribeQueue:
                                "recording_id": recording_id, "pct": 100})
         await self._emit(indexed=recording_id)
 
+    async def _transcribe_with_retry(self, recording_id: int, path: Path,
+                                     on_progress: Callable,
+                                     current_pct: Callable) -> dict:
+        """転写を実行し、失敗が残り試行回数の範囲なら待ってから実行し直す。
+
+        STTはGPUと録画fileの両方を掴むため、他jobがVRAMを解放する途中のCUDA確保失敗や、
+        退避直後のfileが一時的に開けない、といった数秒で消える失敗で落ちる。1発failedに
+        すると人が投げ直すまで転写されないままになるので、設定回数まで試す。
+        """
+        attempts = max(1, config.get_transcribe_job_attempts())
+        backoff = config.get_transcribe_job_retry_backoff_seconds()
+        for attempt in range(1, attempts + 1):
+            try:
+                return await asyncio.to_thread(stt_transcribe, str(path), on_progress)
+            except Exception:
+                if attempt >= attempts:
+                    raise
+                wait = backoff * attempt
+                logger.warning(
+                    "transcribe attempt %d/%d failed, retrying in %.1fs: recording_id=%d",
+                    attempt, attempts, wait, recording_id, exc_info=True,
+                    extra={"event": "stt.queue_job_retry",
+                           "ctx": {"recording_id": recording_id, "attempt": attempt,
+                                   "attempts": attempts, "wait_seconds": round(wait, 1)}},
+                )
+                # 再試行を待っている間、行は最後の%のまま「実行中」で止まって見える。
+                # media queue側は同じ状況を文言で出しているので、こちらも揃える
+                # (待たされている理由が画面から分からないのは、進捗が無いのと同じ)。
+                await self._broadcast({
+                    "type": "transcribe_progress", "recording_id": recording_id,
+                    "pct": current_pct(),
+                    "note": f"失敗したため再試行します（{attempt + 1}/{attempts}）…",
+                })
+                await asyncio.sleep(wait)
+
     async def _emit(self, indexed: Optional[int] = None) -> None:
         message = {"type": "transcribe_queue", "status": self.status()}
         if indexed is not None:
@@ -202,6 +242,9 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
     indexed = storage.search_indexed_counts()
     transcribed = storage.transcribed_recording_ids()
     done = {"comments": 0, "transcripts": 0}
+    # 失敗した録画のid。件数だけ数えて中身を捨てると、「検索に出ない録画が
+    # ある」ことに誰も気付けない(backfillは起動時に黙って走るため)。
+    failed: list = []
     for recording in storage.recordings_brief():
         recording_id = recording["id"]
         sources = indexed.get(recording_id, {})
@@ -215,6 +258,15 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         try:
             path = resolve_path(full["path"])
         except Exception:
+            # pathを解決できない録画。以前は数えも記録もせず素通りしていたため、
+            # 「検索に出てこない録画がある」という症状の原因がどこにも残らなかった。
+            failed.append(recording_id)
+            logger.warning(
+                "search index backfill: cannot resolve the path of recording %d",
+                recording_id, exc_info=True,
+                extra={"event": "search.backfill_path_unresolved",
+                       "ctx": {"recording_id": recording_id, "path": full.get("path")}},
+            )
             continue
         try:
             if needs_transcript:
@@ -224,6 +276,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
                 await indexer.index_comments(storage, full, path)
                 done["comments"] += 1
         except Exception:
+            failed.append(recording_id)
             logger.exception(
                 "search index backfill failed: recording_id=%d", recording_id,
                 extra={"event": "search.backfill_failed",
@@ -232,10 +285,21 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
             continue
         # 起動直後のI/Oを独占しないよう1件ごとに譲る。
         await asyncio.sleep(0)
-    if done["comments"] or done["transcripts"]:
+    if failed:
+        # 1件でも落ちていれば、完了logではなく警告として残す。infoの中に埋めると
+        # 「完了した」という記録だけが目に入る。
+        logger.warning(
+            "search index backfill finished with %d failure(s) "
+            "(comments=%d transcripts=%d); those recordings stay out of search",
+            len(failed), done["comments"], done["transcripts"],
+            extra={"event": "search.backfill_incomplete",
+                   "ctx": {**done, "failed": len(failed),
+                           "failed_recording_ids": failed[:50]}},
+        )
+    elif done["comments"] or done["transcripts"]:
         logger.info(
             "search index backfill completed (comments=%d transcripts=%d)",
             done["comments"], done["transcripts"],
             extra={"event": "search.backfill_completed", "ctx": done},
         )
-    return done
+    return {**done, "failed": len(failed)}

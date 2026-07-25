@@ -1,5 +1,60 @@
 "use strict";
 
+// ---- 画面共通nav ----
+// 各HTMLに手書きすると、page追加のたび全fileの編集が要り、抜けても誰も気付かない。
+// 実際 /compare はnavへの追加漏れとroute未登録で到達不能なまま残っていた。
+// 定義をここ1箇所に集約し、現在地はpathnameから決める。
+const NAV_ITEMS = [
+  ["/", "監視"],
+  ["/overview", "全体監視"],
+  ["/history", "履歴"],
+  ["/streamers", "配信者"],
+  ["/videos", "配信者動画"],
+  ["/capacity", "動画容量"],
+  ["/fans", "Fan台帳"],
+  ["/analytics", "全体解析"],
+  ["/jobs", "Job"],
+  ["/ops", "運用log"],
+  ["/settings", "設定"],
+];
+
+function renderNav() {
+  const nav = document.querySelector("nav.a-nav");
+  if (!nav) return;
+  // 末尾の / は落とす("/history/" でも履歴を現在地と見なす)。
+  const here = location.pathname.replace(/\/+$/, "") || "/";
+  nav.innerHTML = "";
+  NAV_ITEMS.forEach(([href, label]) => {
+    const a = document.createElement("a");
+    a.href = href;
+    a.textContent = label;
+    if (href === here) a.className = "active";
+    nav.appendChild(a);
+  });
+}
+
+renderNav();
+
+// ---- modal a11y ----
+// dialogを開いた時にfocusをmodal内へ移し、閉じた時に呼び出し元へ戻す。
+// focus trap(Tab循環の閉じ込め)は張らない。各modalはEsc/backdrop clickでの
+// closeを個別に実装しているため、ここはfocusの移動と復帰だけを担う。
+const _modalReturnFocus = new WeakMap();
+function focusModalOpen(overlay, initialTarget) {
+  if (!overlay) return;
+  if (!_modalReturnFocus.has(overlay)) {
+    const prev = document.activeElement;
+    _modalReturnFocus.set(overlay, prev instanceof HTMLElement ? prev : null);
+  }
+  if (initialTarget && typeof initialTarget.focus === "function") initialTarget.focus();
+}
+function focusModalClose(overlay) {
+  if (!overlay) return;
+  const prev = _modalReturnFocus.get(overlay);
+  _modalReturnFocus.delete(overlay);
+  if (prev && document.contains(prev) && typeof prev.focus === "function") prev.focus();
+}
+
 const STATUS_LABELS = {
   idle: { badge: "IDLE", cls: "badge-idle", message: "待機中" },
   waiting: { badge: "WAITING", cls: "badge-waiting", message: "LIVE配信の開始を待っています…（開始を検出すると自動で収集を始めます）" },
@@ -124,7 +179,11 @@ function connectWS(onMessage) {
   const protocol = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${protocol}://${location.host}/ws`);
   ws.onopen = () => setStatus(true, "Server接続: ONLINE");
-  ws.onmessage = (msg) => onMessage(JSON.parse(msg.data));
+  ws.onmessage = (msg) => {
+    const data = JSON.parse(msg.data);
+    applyJobBar(data);
+    onMessage(data);
+  };
   ws.onclose = () => {
     setStatus(false, "Server接続: OFFLINE — 再接続中…");
     setTimeout(() => connectWS(onMessage), 2000);
@@ -547,7 +606,7 @@ function createSessionTrendChart(canvas, opts = {}) {
   return { chart, update, clear };
 }
 
-// ---- Battle cards (shared by /battle page and history detail modal) ----
+// ---- Battle cards (shared by history detail modal, monitor, overview, streamers) ----
 // A battle is not always 1v1: personal multi (3コラ/4コラ) is an N-host free-for-all
 // ranked by score, and team battles are NvM. participants[] holds every host with
 // its score/side/team/rank; topology drives which layout the card uses.
@@ -1329,8 +1388,14 @@ function userBadges(user) {
 }
 
 function userCell(user, opts = {}) {
-  const wrap = document.createElement("span");
-  wrap.className = "u" + (opts.stackId ? " u-stack" : "");
+  // href付きならlinkにする。名前が出ている場所からその人の画面へ直接飛べないと、
+  // nav→検索box→入力→行clickの遠回りになる(Fan台帳と配信者画面が実際そうだった)。
+  const wrap = document.createElement(opts.href ? "a" : "span");
+  if (opts.href) {
+    wrap.href = opts.href;
+    if (opts.linkTitle) wrap.title = opts.linkTitle;
+  }
+  wrap.className = "u" + (opts.stackId ? " u-stack" : "") + (opts.href ? " u-link" : "");
   // leagueFirst: リーグchipをアイコンの前に出す(履歴一覧など)。
   if (opts.leagueFirst && user && user.league) wrap.appendChild(leagueChip(user.league));
   wrap.appendChild(avatarNode(user, opts.avatarClass));
@@ -1383,6 +1448,37 @@ window.addEventListener("resize", closeRowMenu);
 document.addEventListener("scroll", closeRowMenu, true);
 
 // items: [{ label, title, danger, disabled, onSelect }]。返り値は操作列へ入れるtoggle Button。
+// 任意の要素を起点にmenuを出す。toggle Buttonを介さず「押した場所でそのまま選ばせる」
+// 用途(録画が複数あるSessionの字幕化など)にも使う。
+function openMenuAt(anchor, items) {
+  closeRowMenu();
+  const menu = document.createElement("div");
+  menu.className = "row-menu";
+  menu.dataset.owner = anchor.dataset.menuId || "";
+  items.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.className = "row-menu-item" + (item.danger ? " row-menu-item-danger" : "");
+    btn.textContent = item.label;
+    if (item.title) btn.title = item.title;
+    btn.disabled = Boolean(item.disabled);
+    btn.addEventListener("click", () => {
+      closeRowMenu();
+      item.onSelect();
+    });
+    menu.appendChild(btn);
+  });
+  document.body.appendChild(menu);
+  const rect = anchor.getBoundingClientRect();
+  const size = menu.getBoundingClientRect();
+  const left = Math.max(4, Math.min(rect.right - size.width, window.innerWidth - size.width - 4));
+  const below = rect.bottom + 2;
+  const top = below + size.height > window.innerHeight ? Math.max(4, rect.top - size.height - 2) : below;
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  openRowMenu = menu;
+  return menu;
+}
+
 function rowMenu(items, opts) {
   const options = opts || {};
   const toggle = document.createElement("button");
@@ -1394,30 +1490,7 @@ function rowMenu(items, opts) {
     closeRowMenu();
     if (wasOpenFor) return;
     toggle.dataset.menuId = String(Date.now()) + String(Math.random());
-    const menu = document.createElement("div");
-    menu.className = "row-menu";
-    menu.dataset.owner = toggle.dataset.menuId;
-    items.forEach((item) => {
-      const btn = document.createElement("button");
-      btn.className = "row-menu-item" + (item.danger ? " row-menu-item-danger" : "");
-      btn.textContent = item.label;
-      if (item.title) btn.title = item.title;
-      btn.disabled = Boolean(item.disabled);
-      btn.addEventListener("click", () => {
-        closeRowMenu();
-        item.onSelect();
-      });
-      menu.appendChild(btn);
-    });
-    document.body.appendChild(menu);
-    const rect = toggle.getBoundingClientRect();
-    const size = menu.getBoundingClientRect();
-    const left = Math.max(4, Math.min(rect.right - size.width, window.innerWidth - size.width - 4));
-    const below = rect.bottom + 2;
-    const top = below + size.height > window.innerHeight ? Math.max(4, rect.top - size.height - 2) : below;
-    menu.style.left = `${left}px`;
-    menu.style.top = `${top}px`;
-    openRowMenu = menu;
+    openMenuAt(toggle, items);
   });
   return toggle;
 }
@@ -1427,6 +1500,18 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
   closeRowMenu();
   const tbody = document.getElementById(tbodyId);
   const empty = document.getElementById(emptyId);
+  // dataセルは数値列を右寄せ(num)にするが、headerが左寄せのままだと項目と値が縦に
+  // 揃わずズレて見える。numericColsを唯一の根拠に、同じ列のheaderも右寄せへ合わせる。
+  const headRow = (() => {
+    const table = tbody.closest("table");
+    return table && table.tHead ? table.tHead.rows[0] : null;
+  })();
+  if (headRow) {
+    numericCols.forEach((col) => {
+      const th = headRow.cells[col];
+      if (th) th.classList.add("num");
+    });
+  }
   tbody.innerHTML = "";
   if (empty) empty.classList.toggle("hidden", rows.length > 0);
   rows.forEach((row, i) => {
@@ -1442,6 +1527,127 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
     if (onRow) onRow(tr, row, i);
     tbody.appendChild(tr);
   });
+}
+
+// KPIの帯(a-kpibar)へlabel/値のchipを並べる。fans/streamers/videosが同じ物を持って
+// いたのでここへ集約した。
+function chipBar(containerId, chips) {
+  const bar = document.getElementById(containerId);
+  bar.innerHTML = "";
+  chips.forEach(([label, value, cls]) => {
+    const chip = document.createElement("div");
+    chip.className = "a-chip";
+    const l = document.createElement("span");
+    l.className = "l";
+    l.textContent = label;
+    const v = document.createElement("span");
+    v.className = "v" + (cls ? " " + cls : "");
+    v.textContent = value;
+    chip.append(l, v);
+    bar.appendChild(chip);
+  });
+}
+
+// ---- segmented control ----
+// 排他選択のうち何度も往復するもの(再生速度など)は<select>だとmenuを開いて狙う手数が
+// 要る。全選択肢を並べたbutton群にして1clickで移れるようにする。呼び出し側は既に
+// $(id).valueとchange eventで書かれているため、同じI/Fを要素へ生やして置き換えを
+// markupだけに留める。
+//
+// markup:
+//   <div id="x" class="seg" role="radiogroup" data-value="1" data-wheel="1" data-revert="1">
+//     <button class="seg-item" type="button" data-value="1">1</button>
+//   </div>
+// data-wheel  … 群の上のwheelで1段ずつ動かす
+// data-revert … 選択中をもう一度clickしたときに戻す値
+function initSegmented(id) {
+  const root = document.getElementById(id);
+  const items = Array.from(root.querySelectorAll(".seg-item"));
+  const valueAt = (i) => items[i].dataset.value;
+  const indexOf = (value) => items.findIndex((b) => b.dataset.value === String(value));
+  let index = Math.max(0, indexOf(root.dataset.value ?? valueAt(0)));
+
+  function paint() {
+    items.forEach((b, i) => {
+      const on = i === index;
+      b.classList.toggle("seg-on", on);
+      b.setAttribute("aria-checked", on ? "true" : "false");
+      // roving tabindex。群全体でtab stopは1つにし、中は矢印keyで移る。
+      b.tabIndex = on ? 0 : -1;
+    });
+  }
+
+  function select(next, emit) {
+    if (next < 0 || next >= items.length || items[next].disabled || next === index) return;
+    index = next;
+    paint();
+    if (emit) root.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  // disableされた選択肢は飛ばす。素材版は録画によって存在しないことがある。
+  function moveTo(start, direction) {
+    for (let i = start; i >= 0 && i < items.length; i += direction) {
+      if (!items[i].disabled) {
+        select(i, true);
+        items[i].focus();
+        return;
+      }
+    }
+  }
+
+  function step(direction) {
+    moveTo(index + direction, direction);
+  }
+
+  items.forEach((b, i) => {
+    b.setAttribute("role", "radio");
+    b.addEventListener("click", (ev) => {
+      // ev.detail>0 がmouse click。keyboard(space/enter)由来のclickは0で来る。
+      const pointer = ev.detail > 0;
+      // 選択中をもう一度押したら既定へ戻す。1x↔倍速の往復をpillの往復移動なしに行う。
+      // keyboardのspaceは「選択中の選択肢を選ぶ」が標準の意味なので戻さない。
+      if (pointer && i === index && root.dataset.revert !== undefined) {
+        select(indexOf(root.dataset.revert), true);
+      } else {
+        select(i, true);
+      }
+      // 押したpillにfocusを残すと、直後のspace(再生)や矢印(frame送り)をこの群が
+      // 食う。mouseで押したときは画面側のshortcutへ返す。
+      if (pointer) b.blur();
+    });
+  });
+
+  root.addEventListener("keydown", (ev) => {
+    const dir = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[ev.key];
+    if (dir === undefined && ev.key !== "Home" && ev.key !== "End") return;
+    ev.preventDefault();
+    if (ev.key === "Home") moveTo(0, 1);
+    else if (ev.key === "End") moveTo(items.length - 1, -1);
+    else step(dir);
+  });
+
+  if (root.dataset.wheel === "1") {
+    root.addEventListener("wheel", (ev) => {
+      ev.preventDefault();
+      step(ev.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
+  }
+
+  // <select>と同じ読み書きI/F。setterはuser操作でないのでchangeを出さない。
+  Object.defineProperty(root, "value", {
+    get: () => valueAt(index),
+    set: (v) => { const i = indexOf(v); if (i >= 0) select(i, false); },
+  });
+  Object.defineProperty(root, "selectedIndex", {
+    get: () => index,
+    set: (i) => select(i, false),
+  });
+  Object.defineProperty(root, "options", {
+    get: () => items.map((b) => ({ value: b.dataset.value, disabled: b.disabled })),
+  });
+
+  paint();
+  return root;
 }
 
 // ---- 一覧placeholderの3状態 ----
@@ -1499,6 +1705,55 @@ function fmtGb(bytes) {
   return (Number(bytes || 0) / (1024 * 1024 * 1024)).toFixed(1);
 }
 
+// 単位付きのGB。容量の内訳(動画容量)と保持policy(設定)が同じ書式で出すために共通化する。
+function fmtBytesGb(bytes) {
+  return `${fmtGb(bytes)} GB`;
+}
+
+// 単位を跨ぐ一覧(録画本体のGB〜取り残しsidecarのKB)で使う。GB固定だと小さいfileが
+// 全部0.0GBに潰れ、消しても減らないように見える。
+function fmtBytes(bytes) {
+  const n = Number(bytes || 0);
+  if (n <= 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// ---- 再生できなかったときの理由 ----
+// 容量整理で動画fileだけを消した録画は行が残るため、再生の入口(検索hit・ハイライト)も
+// 残る。srcが404でも<video>はerror eventを出すだけで画面は無言で止まるので、理由を出す。
+const VIDEO_MISSING_TEXT =
+  "この録画の動画fileは削除されています。文字起こし・検索・bookmarkは引き続き使えます。";
+const VIDEO_ERROR_TEXT = "この録画を再生できませんでした。";
+
+// error eventはfile削除以外(codec・網)でも飛ぶ。消えたと決め打ちすると、実際は別の
+// 原因のときに嘘の説明を出すことになるので、実在をserverに確かめてから文言を選ぶ。
+async function videoErrorText(recordingId) {
+  try {
+    const info = await apiSend("GET", `/api/recordings/${recordingId}/path`);
+    return info.exists ? VIDEO_ERROR_TEXT : VIDEO_MISSING_TEXT;
+  } catch (err) {
+    return VIDEO_ERROR_TEXT;
+  }
+}
+
+// video要素のerrorを拾い、理由をshow(text)へ渡す。currentRecordingId()で今の対象を
+// 引くのは、error到達が非同期で、その間に別の録画へ移っていることがあるため。
+function bindVideoError(video, currentRecordingId, show) {
+  video.addEventListener("error", async () => {
+    // src除去(modalを閉じる/切り替える)でもerrorは飛ぶ。空srcは異常ではない。
+    if (!video.getAttribute("src")) return;
+    const recordingId = currentRecordingId();
+    if (recordingId === null || recordingId === undefined) return;
+    const text = await videoErrorText(recordingId);
+    if (currentRecordingId() !== recordingId) return;
+    show(text);
+  });
+}
+
 function renderDiskBar(container, data) {
   container.innerHTML = "";
   const volumes = (data && data.volumes) || {};
@@ -1515,10 +1770,14 @@ function renderDiskBar(container, data) {
   names.forEach((name) => {
     const info = volumes[name];
     const used = info.total_bytes ? (info.total_bytes - info.free_bytes) / info.total_bytes : 0;
-    const item = document.createElement("div");
+    // 空きが減ったと気付く場所と、内訳を見て消す場所を繋ぐ。隣のjob barは既にlinkで、
+    // ここだけ押せないのは不揃いだった。
+    const item = document.createElement("a");
+    item.href = "/capacity";
     item.className = low.has(name) ? "d-vol low" : "d-vol";
     item.title = `${info.path}\n空き ${fmtGb(info.free_bytes)}GB / 全体 ${fmtGb(info.total_bytes)}GB`
-      + (Number(data.min_free_bytes) > 0 ? `\n出力を拒否する下限 ${floorGb}GB` : "");
+      + (Number(data.min_free_bytes) > 0 ? `\n出力を拒否する下限 ${floorGb}GB` : "")
+      + "\nclickで容量の内訳と整理へ";
     const label = document.createElement("span");
     label.className = "l";
     label.textContent = name;
@@ -1612,3 +1871,571 @@ if (document.querySelector('.a-nav a[href="/ops"]')) {
   loadOpsBadge();
   setInterval(loadOpsBadge, OPS_BADGE_POLL_MS);
 }
+
+// ---- 共通UI: 通知toast ----
+// window.alertはpageのscript実行ごと止めるため、WSで届く録画状態やjob進捗が、
+// 誰かが「OK」を押すまで反映されない。監視画面を開いたまま席を外す使い方をするので、
+// 通知は画面内へ出して処理は止めない。
+// 情報表示は自動で消すが、errorは消さない。監視画面を開いたまま席を外す使い方なので、
+// 録画・出力の失敗が自動消滅すると、戻ってきたときに失敗した事実そのものが残らない。
+// 閉じる操作を挟むことで「見た」がユーザーの明示になる(alertの確認強制の代わり)。
+const TOAST_MS = 6000;
+
+function toastLayer() {
+  let layer = document.getElementById("toast-layer");
+  if (!layer) {
+    layer = document.createElement("div");
+    layer.id = "toast-layer";
+    layer.className = "toast-layer";
+    layer.setAttribute("role", "status");
+    layer.setAttribute("aria-live", "polite");
+    document.body.appendChild(layer);
+  }
+  return layer;
+}
+
+// kindは "error"(失敗の報告) と既定の情報表示。errorは自動で消さず、閉じるまで残す。
+function showToast(message, kind) {
+  const text = String(message === undefined || message === null ? "" : message).trim();
+  if (!text) return null;
+  // errorは閉じるまで残るので、同じ失敗が繰り返されると画面が埋まる(録画の再試行や
+  // job失敗は同一文面で連続する)。同じ文面は増やさず回数だけ更新する。
+  if (kind === "error") {
+    const existing = [...toastLayer().querySelectorAll(".toast-error")].find(
+      (el) => el.dataset.toastText === text,
+    );
+    if (existing) {
+      const count = Number(existing.dataset.toastCount || "1") + 1;
+      existing.dataset.toastCount = String(count);
+      existing.querySelector(".toast-count").textContent = `×${count}`;
+      return existing;
+    }
+  }
+  const toast = document.createElement("div");
+  toast.className = kind === "error" ? "toast toast-error" : "toast";
+  toast.dataset.toastText = text;
+  const body = document.createElement("span");
+  body.className = "toast-body";
+  body.textContent = text;
+  const count = document.createElement("span");
+  count.className = "toast-count";
+  const close = document.createElement("button");
+  close.className = "toast-close";
+  close.textContent = "✕";
+  close.title = "この通知を閉じる";
+  const dismiss = () => {
+    if (toast.isConnected) toast.remove();
+  };
+  close.addEventListener("click", dismiss);
+  toast.append(body, count, close);
+  toastLayer().appendChild(toast);
+  if (kind !== "error") setTimeout(dismiss, TOAST_MS);
+  return toast;
+}
+
+function showError(err) {
+  showToast(err && err.message ? err.message : String(err), "error");
+}
+
+// ---- 共通UI: 録画の保守操作 ----
+// 履歴の詳細と配信者の録画file一覧の両方から使う。片方だけmenuの奥に畳むと、
+// 同じ操作が画面ごとに違う深さになる(実際そうなっていた)。
+
+// 保護badge。状態が見えている場所でそのまま切り替える。menuへ畳むと
+// 「見えているのに切り替えは2階層下」というちぐはぐが起きる。
+function protectBadge(rec, onDone) {
+  const badge = document.createElement("button");
+  badge.className = "st protect-toggle" + (rec.protected ? " protected" : "");
+  badge.type = "button";
+  badge.textContent = rec.protected ? "保護中" : "保護";
+  badge.setAttribute("aria-pressed", rec.protected ? "true" : "false");
+  badge.title = rec.protected
+    ? "保持policyの自動削除から除外されています。押すと解除します。"
+    : "押すと保持policyの自動削除から除外します。手動の削除は保護中でも実行できます。";
+  badge.addEventListener("click", async () => {
+    badge.disabled = true;
+    try {
+      await apiSend("POST", `/api/recordings/${rec.id}/protect`, { protected: !rec.protected });
+      if (onDone) onDone();
+    } catch (err) {
+      badge.disabled = false;
+      showError(err);
+    }
+  });
+  return badge;
+}
+
+// 派生物(焼き込み・Up出力・renderの中間file)だけ消す。元録画は残り再出力できる
+// 可逆操作なので確認dialogは挟まない(取り消せない削除と同じ重さで出すと、
+// 確認dialogそのものが読み飛ばされる)。
+async function deleteDerived(rec, onDone) {
+  try {
+    const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
+    showToast(`録画 #${rec.id} の派生物 ${fmtBytes(res.freed_bytes)} を削除しました。`);
+    if (onDone) onDone();
+  } catch (err) {
+    showError(err);
+  }
+}
+
+// ---- 共通UI: 確認dialog ----
+// 取り消せない操作の前に確認を取る。window.confirmと違い、何を消すのかを複数行で読ませ、
+// 破壊的な操作は実行Buttonを危険色にできる。
+// 返り値はPromise<boolean>で、Escape・背景click・取消はいずれもfalse。
+function confirmDialog(message, opts) {
+  const options = opts || {};
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay confirm-overlay";
+    const modal = document.createElement("div");
+    modal.className = "modal modal-narrow confirm-modal";
+    const head = document.createElement("div");
+    head.className = "modal-head";
+    const title = document.createElement("h2");
+    title.textContent = options.title || "確認";
+    head.appendChild(title);
+    const body = document.createElement("div");
+    body.className = "modal-body confirm-text";
+    body.textContent = message;
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "btn";
+    cancel.textContent = options.cancelLabel || "取消";
+    const ok = document.createElement("button");
+    ok.className = options.danger === false ? "btn btn-primary" : "btn btn-danger";
+    ok.textContent = options.confirmLabel || "実行";
+    actions.append(cancel, ok);
+    modal.append(head, body, actions);
+    overlay.appendChild(modal);
+
+    const finish = (answer) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(answer);
+    };
+    const onKey = (ev) => {
+      if (ev.key !== "Escape") return;
+      // 他のmodalのEscape handlerまで届くと、確認を閉じたつもりで背後の画面まで閉じる。
+      ev.stopPropagation();
+      finish(false);
+    };
+    cancel.addEventListener("click", () => finish(false));
+    ok.addEventListener("click", () => finish(true));
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) finish(false);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    ok.focus();
+  });
+}
+
+// ---- 共通UI: 進捗bar ----
+// spinner付きは「今この画面から起動して待っている」操作向け、spinner無しは一覧に並ぶ
+// 他所で動いているjobの状態表示向け。
+function makeProgress(opts) {
+  const options = opts || {};
+  const prog = document.createElement("span");
+  prog.className = "dl-progress";
+  if (options.spinner !== false) {
+    const spinner = document.createElement("span");
+    spinner.className = "spinner dl-spinner";
+    const core = document.createElement("span");
+    core.className = "spinner-core";
+    spinner.appendChild(core);
+    prog.appendChild(spinner);
+  }
+  // 段階名(詳細つきで長い)と%は別の要素にする。1要素に混ぜると、段階名の長さで%まで
+  // 押し出されるか、cellが横に伸びてtable全体が崩れる。段階名だけを縮める。
+  const stage = document.createElement("span");
+  stage.className = "dl-stage";
+  stage.textContent = options.label || "準備中…";
+  const bar = document.createElement("span");
+  bar.className = "dl-bar";
+  const fill = document.createElement("span");
+  fill.className = "dl-bar-fill";
+  bar.appendChild(fill);
+  const text = document.createElement("span");
+  text.className = "dl-pct";
+  prog.append(stage, bar, text);
+  return prog;
+}
+
+function setProgress(prog, label, pct) {
+  const value = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  prog.querySelector(".dl-bar-fill").style.inlineSize = `${value}%`;
+  prog.querySelector(".dl-stage").textContent = label;
+  prog.querySelector(".dl-pct").textContent = `${value}%`;
+}
+
+// 実行中jobの残り時間。開始からの経過と達成率だけで見積もる(段階ごとの重みはserver側で
+// 既に%へ畳まれているため、%は概ね時間に比例する)。序盤の%は分母が小さく見積もりが
+// 何倍にも振れるので、一定%に達するまでは出さない — 外れた残り時間は無いより悪い。
+const JOB_ETA_MIN_PCT = 5;
+
+function jobEtaText(job) {
+  const pct = Number(job.pct) || 0;
+  if (!job.started_at || pct < JOB_ETA_MIN_PCT || pct >= 100) return "";
+  const elapsed = Date.now() / 1000 - job.started_at;
+  if (elapsed <= 0) return "";
+  return `残り約 ${fmtDuration((elapsed / pct) * (100 - pct))}`;
+}
+
+// job台帳の1行を進捗表示へ写す。待機中はまだ何も進んでいないので%を出さない
+// (0%と描くと、動き出したのに止まっているように読める)。
+function setJobProgress(prog, job) {
+  if (job.state === "pending") {
+    prog.querySelector(".dl-bar-fill").style.inlineSize = "0%";
+    // 順番が分かる時は必ず出す。「待機中」だけでは、次に始まるのか3時間jobの後ろに
+    // 並んだのかが区別できない。
+    const position = Number(job.queue_position) || 0;
+    prog.querySelector(".dl-stage").textContent =
+      position > 0 ? `待機中（${position}番目）` : "待機中";
+    prog.querySelector(".dl-pct").textContent = "";
+    prog.title = position > 1
+      ? `順番待ちです。前に${position - 1}件あります。終わり次第、自動で始まります。`
+      : "順番待ちです。前のjobが終わり次第、自動で始まります。";
+    return;
+  }
+  setProgress(prog, job.stage || "準備中", job.pct);
+  const eta = jobEtaText(job);
+  if (eta) prog.querySelector(".dl-pct").textContent += `・${eta}`;
+  // 段階名は詳細(frame数・encode位置)まで含めると長い。省略表示になっても全文が
+  // 読めるよう、tooltipには必ず全文を入れる。
+  prog.title = `${job.stage || "準備中"} ${prog.querySelector(".dl-pct").textContent}`;
+}
+
+function finishProgress(prog, text) {
+  const spinner = prog.querySelector(".dl-spinner");
+  if (spinner) spinner.remove();
+  prog.querySelector(".dl-bar-fill").style.inlineSize = "100%";
+  prog.querySelector(".dl-stage").textContent = "";
+  prog.querySelector(".dl-pct").textContent = text || "完了 ✓";
+  prog.title = "";
+  prog.classList.add("done");
+}
+
+// ---- job状況(全画面共通のトップバー) ----
+// job台帳のsnapshot(jobs)と更新(job_update)は全pageのWSへ届いているのに、Job画面以外は
+// 捨てていた。出力が動いているか・失敗が残っているかはどの画面からでも見えるべきなので、
+// トップバーへ集約する。数はWSが唯一の出所で、届く前は何も出さない(0件と描かない)。
+const JOB_BAR_FAILED_STATES = ["failed", "interrupted"];
+let jobBarState = null;
+
+// session一括投入はgroupの合成行と録画ごとの明細行の両方が流れてくる。合成行はjob_idに
+// group_idがそのまま入るので、それ以外のgroup付き行(=明細)を数えると二重に数える。
+function jobBarCountable(job) {
+  const groupId = job.group_id || "";
+  return !groupId || groupId === job.job_id;
+}
+
+function jobBarElement() {
+  const topbar = document.querySelector(".a-topbar");
+  if (!topbar) return null;
+  let el = document.getElementById("job-bar");
+  if (!el) {
+    el = document.createElement("a");
+    el.id = "job-bar";
+    el.className = "a-jobs";
+    el.href = "/jobs";
+    const disk = document.getElementById("disk-bar");
+    topbar.insertBefore(el, disk || null);
+  }
+  return el;
+}
+
+function renderJobBar() {
+  const el = jobBarElement();
+  if (!el || !jobBarState) return;
+  const rows = [...jobBarState.values()].filter(jobBarCountable);
+  const running = rows.filter((job) => job.state === "running").length;
+  const pending = rows.filter((job) => job.state === "pending").length;
+  const failed = rows.filter((job) => JOB_BAR_FAILED_STATES.includes(job.state)).length;
+  el.replaceChildren();
+  if (!running && !pending && !failed) {
+    el.removeAttribute("title");
+    return;
+  }
+  const active = document.createElement("span");
+  active.className = "j-active";
+  active.textContent = `job: 実行中 ${running} / 待機中 ${pending}`;
+  el.appendChild(active);
+  if (failed) {
+    const bad = document.createElement("span");
+    bad.className = "j-failed";
+    bad.textContent = `失敗 ${failed}`;
+    el.appendChild(bad);
+  }
+  el.title = failed
+    ? `直近のjob履歴に失敗・中断が${failed}件あります。Job画面の「失敗・中断のみ」で確認できます。`
+    : "焼き込み・Up出力などのjobの実行状況です。押すとJob画面へ移動します。";
+}
+
+function applyJobBar(message) {
+  if (message.type === "jobs") {
+    jobBarState = new Map((message.data || []).map((job) => [job.job_id, job]));
+    renderJobBar();
+    return;
+  }
+  if (message.type === "job_update" && message.job) {
+    if (!jobBarState) jobBarState = new Map();
+    jobBarState.set(message.job.job_id, message.job);
+    renderJobBar();
+  }
+}
+
+// ---- 全画面共通: 横断jump (Ctrl+K) ----
+// 配信者・Session・録画を1つの入力で横断で絞り込み、選んだ対象の画面へ直接飛ぶ。
+// 候補の取得は最初にCtrl+Kを押したときだけ行う。全画面のload毎にAPIを3本叩くと、
+// 一度も使わない利用者にまで常時cost を払わせることになるため遅延取得にしている。
+// 飛び先はいずれも既存の受け口を使う(新しい画面側の対応は不要)。
+//   配信者 → /streamers?uid=   (streamers.js が起動時に読む)
+//   Session → /history?session= (history.js が起動時に読んで詳細を開く)
+//   録画   → /history?session=  (録画は詳細modalの「録画」一覧に並ぶ)
+const JUMP_PER_KIND = 8;
+
+let jumpUI = null;
+let jumpItems = null;
+let jumpState = "idle";
+let jumpError = null;
+let jumpRows = [];
+let jumpActive = 0;
+
+function jumpKindLabel(kind) {
+  if (kind === "streamer") return "配信者";
+  if (kind === "session") return "Session";
+  if (kind === "fan") return "視聴者";
+  return "録画";
+}
+
+// 検索対象の文字列は候補を作るときに1度だけ組む(打鍵ごとに組み直さない)。
+function buildJumpItems(streamers, sessions, recordings, fans) {
+  const items = [];
+  streamers.forEach((s) => {
+    items.push({
+      kind: "streamer",
+      title: s.nickname || s.unique_id,
+      sub: `@${s.unique_id} ・ Session ${fmtNum(s.sessions)} ・ コイン ${fmtNum(s.diamonds)}`,
+      search: `${s.unique_id} ${s.nickname || ""}`.toLowerCase(),
+      href: `/streamers?uid=${encodeURIComponent(s.unique_id)}`,
+    });
+  });
+  sessions.forEach((s) => {
+    const name = s.owner_nickname || s.unique_id;
+    items.push({
+      kind: "session",
+      title: `#${s.id} ${name}`,
+      sub: `@${s.unique_id} ・ ${fmtDateTime(s.started_at)}`,
+      search: `${s.id} ${s.unique_id} ${name} ${fmtYmd(s.started_at)}`.toLowerCase(),
+      href: `/history?session=${s.id}`,
+    });
+  });
+  // 視聴者。名前が分かっている人を引くのに /fans へ移動して検索boxへ打ち直す必要が
+  // あった。名寄せ済みのidentity_keyで直接その明細を開く。
+  (fans || []).forEach((f) => {
+    items.push({
+      kind: "fan",
+      title: f.nickname || f.unique_id,
+      sub: `@${f.unique_id} ・ コイン ${fmtNum(f.diamonds)} ・ 配信者 ${fmtNum(f.streamer_count)}人`,
+      search: `${f.unique_id} ${f.nickname || ""}`.toLowerCase(),
+      href: `/fans?fan=${encodeURIComponent(f.identity_key)}`,
+    });
+  });
+  recordings.forEach((r) => {
+    items.push({
+      kind: "recording",
+      title: r.filename,
+      sub: `Session #${r.session_id} ・ @${r.unique_id} ・ ${r.quality || "-"}`,
+      search: `${r.filename} ${r.unique_id} ${r.session_id}`.toLowerCase(),
+      href: `/history?session=${r.session_id}`,
+    });
+  });
+  return items;
+}
+
+// 空白区切りの語をすべて含むものだけを残す(語順に依存しない)。
+function filterJumpItems(query) {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const kinds = ["streamer", "fan", "session", "recording"];
+  const rows = [];
+  kinds.forEach((kind) => {
+    const hit = (jumpItems || []).filter(
+      (item) => item.kind === kind && terms.every((t) => item.search.includes(t)),
+    );
+    // 種類ごとに上限を設ける。件数の多い録画・Sessionだけで埋まると、配信者が
+    // 一覧から押し出されて「無い」ように見えてしまう。
+    rows.push(...hit.slice(0, JUMP_PER_KIND));
+  });
+  return rows;
+}
+
+function renderJumpList() {
+  const { list, note } = jumpUI;
+  list.innerHTML = "";
+  if (jumpState === "loading") {
+    note.textContent = "候補を読み込み中…";
+    return;
+  }
+  if (jumpState === "failed") {
+    note.textContent = "候補を取得できませんでした（0件という意味ではありません）。";
+    note.title = errorDetailText(jumpError);
+    return;
+  }
+  note.removeAttribute("title");
+  jumpRows = filterJumpItems(jumpUI.input.value);
+  if (!jumpRows.length) {
+    note.textContent = jumpUI.input.value.trim()
+      ? "一致する配信者・Session・録画がありません。"
+      : "配信者名・Session番号・録画file名で絞り込めます。";
+    return;
+  }
+  if (jumpActive >= jumpRows.length) jumpActive = jumpRows.length - 1;
+  jumpRows.forEach((item, i) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "jump-row" + (i === jumpActive ? " active" : "");
+    const kind = document.createElement("span");
+    kind.className = `jump-kind k-${item.kind}`;
+    kind.textContent = jumpKindLabel(item.kind);
+    const text = document.createElement("span");
+    text.className = "jump-text";
+    const title = document.createElement("b");
+    title.className = "jump-title";
+    title.textContent = item.title;
+    const sub = document.createElement("span");
+    sub.className = "jump-sub";
+    sub.textContent = item.sub;
+    text.append(title, sub);
+    row.append(kind, text);
+    row.addEventListener("click", () => {
+      location.href = item.href;
+    });
+    // mouseで指した行をEnterの対象と一致させる(keyboardとmouseで選択がずれない)。
+    row.addEventListener("mousemove", () => {
+      if (jumpActive === i) return;
+      jumpActive = i;
+      renderJumpList();
+    });
+    list.appendChild(row);
+  });
+  // 何件の中から探しているのかを出す。/api/recordings はserverの
+  // session_list_limit で頭打ちになるため、録画の対象数は実件数とは限らない。
+  const counts = ["streamer", "session", "recording"].map(
+    (k) => `${jumpKindLabel(k)} ${fmtNum((jumpItems || []).filter((i) => i.kind === k).length)}`,
+  );
+  note.textContent = `検索対象: ${counts.join(" / ")}`;
+}
+
+function buildJumpUI() {
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay jump-overlay hidden";
+  const modal = document.createElement("div");
+  modal.className = "modal jump-modal";
+  const head = document.createElement("div");
+  head.className = "modal-head";
+  const title = document.createElement("h2");
+  title.textContent = "横断jump";
+  const close = document.createElement("button");
+  close.className = "modal-close";
+  close.textContent = "閉じる ✕";
+  head.append(title, close);
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "jump-input";
+  input.placeholder = "🔎 配信者 / Session / 録画 を横断で絞込";
+  input.autocomplete = "off";
+  const list = document.createElement("div");
+  list.className = "jump-list";
+  const note = document.createElement("div");
+  note.className = "jump-note";
+  modal.append(head, input, list, note);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  close.addEventListener("click", closeJump);
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) closeJump();
+  });
+  input.addEventListener("input", () => {
+    jumpActive = 0;
+    renderJumpList();
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+      if (!jumpRows.length) return;
+      ev.preventDefault();
+      const step = ev.key === "ArrowDown" ? 1 : -1;
+      jumpActive = (jumpActive + step + jumpRows.length) % jumpRows.length;
+      renderJumpList();
+      const active = jumpUI.list.querySelector(".jump-row.active");
+      if (active) active.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (ev.key === "Enter") {
+      const item = jumpRows[jumpActive];
+      if (!item) return;
+      ev.preventDefault();
+      location.href = item.href;
+      return;
+    }
+    if (ev.key === "Escape") {
+      // 背後の画面のEscape handler(modalを閉じる等)まで届かせない。
+      ev.stopPropagation();
+      closeJump();
+    }
+  });
+  jumpUI = { overlay, input, list, note };
+}
+
+async function loadJumpItems() {
+  jumpState = "loading";
+  renderJumpList();
+  try {
+    const [streamers, sessions, recordings, fans] = await Promise.all([
+      apiSend("GET", "/api/streamers"),
+      apiSend("GET", "/api/sessions?limit=0"),
+      apiSend("GET", "/api/recordings"),
+      // 視聴者は台帳が無い環境もあり得るので、ここだけ失敗を候補なしへ落とす
+      // (他の3種のjumpまで巻き添えで死なせない)。
+      apiSend("GET", "/api/fans").catch(() => ({ fans: [] })),
+    ]);
+    jumpItems = buildJumpItems(
+      streamers.streamers || [],
+      sessions.sessions || [],
+      recordings.recordings || [],
+      fans.fans || [],
+    );
+    jumpState = "loaded";
+  } catch (err) {
+    jumpState = "failed";
+    jumpError = err;
+  }
+  renderJumpList();
+}
+
+function openJump() {
+  if (!jumpUI) buildJumpUI();
+  jumpUI.overlay.classList.remove("hidden");
+  jumpUI.input.select();
+  jumpUI.input.focus();
+  jumpActive = 0;
+  if (jumpState === "idle" || jumpState === "failed") loadJumpItems();
+  else renderJumpList();
+}
+
+function closeJump() {
+  if (jumpUI) jumpUI.overlay.classList.add("hidden");
+}
+
+// Ctrl+K は入力欄にfocusがあるときも効かせる。修飾key付きの組合せなので通常の打鍵とは
+// 衝突せず、絞込欄を触っている最中こそ別の対象へ移りたいことが多い。videos.jsの再生
+// shortcutは修飾key付きを自ら除外しているため、こちらと二重に発火することはない。
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "k" && ev.key !== "K") return;
+  if (!ev.ctrlKey && !ev.metaKey) return;
+  if (ev.altKey || ev.shiftKey) return;
+  ev.preventDefault();
+  if (jumpUI && !jumpUI.overlay.classList.contains("hidden")) closeJump();
+  else openJump();
+});

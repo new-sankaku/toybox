@@ -19,7 +19,7 @@ const tabs:Tab[]=[
  {id:'intervention',label:'連絡',icon:'✉',hasBadge:true},
  {id:'checkpoints',label:'進捗承認',icon:'✓',hasBadge:true},
  {id:'data',label:'生成素材',icon:'≡',hasBadge:true},
- {id:'cost',label:'コスト',icon:'¥'},
+ {id:'cost',label:'コスト',icon:'$'},
  {id:'logs',label:'ログ',icon:'≫'},
  {id:'global-config',label:'設定',icon:'⚙',alwaysEnabled:true}
 ]

@@ -54,7 +54,6 @@ import json
 import logging
 import os
 import sqlite3
-import threading
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -314,7 +313,22 @@ CREATE TABLE IF NOT EXISTS indexed (
 );
 """
 
-_lock = threading.Lock()
+# buildだけが書き手なので、排他が要るのもbuild同士だけ。asyncio.Lockなのは build_index が
+# 埋め込みの応答をawaitするため — ここでthreading.Lockを握るとevent loopのthreadごと止まり、
+# build中のserver全体(検索・status・他のAPI)が応答不能になる。
+#
+# 読み手(search / index_status)はlockを取らない。vector fileは追記のみで、readerは先に
+# rows_total(= file size)を確定させてから、それ未満のrownoだけを走査する。buildが並行して
+# 追記しても、増えた行はrows_totalの外なので走査に入らない。これが読み取りの一貫性を保つ
+# 不変条件で、lockはこれに何も足していなかった。
+_build_lock = asyncio.Lock()
+
+
+class SemanticBusy(SemanticError):
+    """build実行中に再度buildを要求されたとき。
+
+    待たせるのではなく即座に返す。10分待たされるより「走っている」と伝わる方が扱いやすく、
+    userは待つか諦めるかを自分で選べる。"""
 
 
 def _open_meta() -> sqlite3.Connection:
@@ -460,6 +474,14 @@ async def _embed_all(embedder: Embedder, texts: list, dim: Optional[int],
     return np.vstack(out), dim
 
 
+def build_running() -> bool:
+    """構築が走っているか。「受け付けました」を返す前の重複判定に使う。
+
+    build_index自身も入口で同じ判定をしてSemanticBusyを投げるが、そちらはbackground
+    taskの中で上がるためHTTPの応答には間に合わない。requestを弾くのはここ。"""
+    return _build_lock.locked()
+
+
 async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
     """search_hitsをpassageへ束ねて埋め込み、sidecar indexへ追記する。
 
@@ -473,8 +495,11 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
         if on_progress is not None:
             on_progress(kwargs)
 
-    with _lock:
-        conn = _open_meta()
+    if _build_lock.locked():
+        raise SemanticBusy("意味検索indexの構築が既に実行中です。完了までお待ちください。")
+
+    async with _build_lock:
+        conn = await asyncio.to_thread(_open_meta)
         try:
             _set_meta(conn, "schema_version", SCHEMA_VERSION)
             dim = _dim(conn)
@@ -494,18 +519,23 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
                     "異なります。indexを削除してから作り直してください。"
                 )
 
-            groups = _hit_groups(storage)
-            done_rows = {
-                (row["recording_id"], row["source"]): row
-                for row in conn.execute("SELECT * FROM indexed").fetchall()
-            }
-            pending = []
-            for group in groups:
-                key = (group["recording_id"], group["source"])
-                prev = done_rows.get(key)
-                if prev and prev["hit_count"] == group["n"] and prev["hit_max_id"] == group["max_id"]:
-                    continue
-                pending.append(group)
+            def _pending_groups() -> list:
+                groups = _hit_groups(storage)
+                done_rows = {
+                    (row["recording_id"], row["source"]): row
+                    for row in conn.execute("SELECT * FROM indexed").fetchall()
+                }
+                out = []
+                for group in groups:
+                    prev = done_rows.get((group["recording_id"], group["source"]))
+                    if (prev and prev["hit_count"] == group["n"]
+                            and prev["hit_max_id"] == group["max_id"]):
+                        continue
+                    out.append(group)
+                return out
+
+            # search_hitsの全groupを数える走査。件数に比例して伸びるのでloopから外す。
+            pending = await asyncio.to_thread(_pending_groups)
 
             total_hits = sum(g["n"] for g in pending)
             progress(stage="start", groups=len(pending), hits=total_hits, done=0, total=total_hits)
@@ -523,22 +553,62 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
             vector_file = vector_path()
             vector_file.parent.mkdir(parents=True, exist_ok=True)
 
+            def _record_empty(recording_id: int, source: str, group: dict) -> None:
+                conn.execute("DELETE FROM passages WHERE recording_id = ? AND source = ?",
+                             (recording_id, source))
+                conn.execute(
+                    "INSERT INTO indexed (recording_id, source, hit_count, hit_max_id,"
+                    " passage_count, built_at) VALUES (?, ?, ?, ?, 0, ?)"
+                    " ON CONFLICT(recording_id, source) DO UPDATE SET"
+                    " hit_count=excluded.hit_count, hit_max_id=excluded.hit_max_id,"
+                    " passage_count=0, built_at=excluded.built_at",
+                    (recording_id, source, group["n"], group["max_id"], time.time()),
+                )
+                conn.commit()
+
+            def _write_group(recording_id: int, source: str, group: dict, passages: list,
+                             vectors: np.ndarray, rowno: int, dim: int) -> None:
+                """vectorの追記とmetadataの記録。file追記→INSERT→commitはこの順で不可分。
+
+                追記が先なのは、readerがrows_total(file size)未満のrownoしか見ないため。
+                逆順にすると、まだfileに無い行をmetadataが指す瞬間ができる。"""
+                conn.execute("DELETE FROM passages WHERE recording_id = ? AND source = ?",
+                             (recording_id, source))
+                with open(vector_file, "ab") as handle:
+                    handle.write(vectors.astype(dtype, copy=False).tobytes())
+                conn.executemany(
+                    "INSERT INTO passages (rowno, recording_id, source, session_id, unique_id,"
+                    " started_at, video_time, end_time, hit_id, hit_ids, body)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (rowno + offset, p["recording_id"], p["source"], p["session_id"],
+                         p["unique_id"], p["started_at"], p["video_time"], p["end_time"],
+                         p["hit_id"], json.dumps(p["hit_ids"]), p["body"])
+                        for offset, p in enumerate(passages)
+                    ],
+                )
+                conn.execute(
+                    "INSERT INTO indexed (recording_id, source, hit_count, hit_max_id,"
+                    " passage_count, built_at) VALUES (?, ?, ?, ?, ?, ?)"
+                    " ON CONFLICT(recording_id, source) DO UPDATE SET"
+                    " hit_count=excluded.hit_count, hit_max_id=excluded.hit_max_id,"
+                    " passage_count=excluded.passage_count, built_at=excluded.built_at",
+                    (recording_id, source, group["n"], group["max_id"], len(passages),
+                     time.time()),
+                )
+                _set_meta(conn, "dim", dim)
+                _set_meta(conn, "dtype", dtype)
+                _set_meta(conn, "model", embedder.name)
+                conn.commit()
+
             for group in pending:
                 recording_id, source = group["recording_id"], group["source"]
-                rows = _load_hits(storage, recording_id, source)
-                passages = build_passages(rows)
+                # sqliteもpassageの束ねもblocking。event loopで回すと、build中は検索も
+                # 画面も止まる(まさにlockで起きていた問題を別経路で再現することになる)。
+                rows = await asyncio.to_thread(_load_hits, storage, recording_id, source)
+                passages = await asyncio.to_thread(build_passages, rows)
                 if not passages:
-                    conn.execute("DELETE FROM passages WHERE recording_id = ? AND source = ?",
-                                 (recording_id, source))
-                    conn.execute(
-                        "INSERT INTO indexed (recording_id, source, hit_count, hit_max_id,"
-                        " passage_count, built_at) VALUES (?, ?, ?, ?, 0, ?)"
-                        " ON CONFLICT(recording_id, source) DO UPDATE SET"
-                        " hit_count=excluded.hit_count, hit_max_id=excluded.hit_max_id,"
-                        " passage_count=0, built_at=excluded.built_at",
-                        (recording_id, source, group["n"], group["max_id"], time.time()),
-                    )
-                    conn.commit()
+                    await asyncio.to_thread(_record_empty, recording_id, source, group)
                     continue
 
                 texts = [get_semantic_doc_prefix() + p["body"] for p in passages]
@@ -556,35 +626,9 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
 
                 # 旧passageは捨てて追記し直す。vector file側の旧行は参照されなくなるだけ
                 # (穴が残る)。穴はrebuildで回収する方針で、追記の単純さを優先した。
-                conn.execute("DELETE FROM passages WHERE recording_id = ? AND source = ?",
-                             (recording_id, source))
-                with open(vector_file, "ab") as handle:
-                    handle.write(vectors.astype(dtype, copy=False).tobytes())
-                conn.executemany(
-                    "INSERT INTO passages (rowno, recording_id, source, session_id, unique_id,"
-                    " started_at, video_time, end_time, hit_id, hit_ids, body)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    [
-                        (next_rowno + offset, p["recording_id"], p["source"], p["session_id"],
-                         p["unique_id"], p["started_at"], p["video_time"], p["end_time"],
-                         p["hit_id"], json.dumps(p["hit_ids"]), p["body"])
-                        for offset, p in enumerate(passages)
-                    ],
-                )
+                await asyncio.to_thread(_write_group, recording_id, source, group,
+                                        passages, vectors, next_rowno, dim)
                 next_rowno += len(passages)
-                conn.execute(
-                    "INSERT INTO indexed (recording_id, source, hit_count, hit_max_id,"
-                    " passage_count, built_at) VALUES (?, ?, ?, ?, ?, ?)"
-                    " ON CONFLICT(recording_id, source) DO UPDATE SET"
-                    " hit_count=excluded.hit_count, hit_max_id=excluded.hit_max_id,"
-                    " passage_count=excluded.passage_count, built_at=excluded.built_at",
-                    (recording_id, source, group["n"], group["max_id"], len(passages),
-                     time.time()),
-                )
-                _set_meta(conn, "dim", dim)
-                _set_meta(conn, "dtype", dtype)
-                _set_meta(conn, "model", embedder.name)
-                conn.commit()
 
                 embedded_passages += len(passages)
                 embedded_hits += group["n"]
@@ -653,19 +697,32 @@ def _scan_scores(vectors: np.memmap, query: np.ndarray, rownos: Optional[np.ndar
     return all_rownos[top], all_scores[top]
 
 
-async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None) -> list:
+async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
+                 sources: Optional[list] = None, since: Optional[float] = None,
+                 until: Optional[float] = None) -> list:
     """意味的に近いsceneを返す。
 
     戻り値の各要素は search_hits の ``id`` と ``score`` を必ず持つ。passageは複数の
     search_hits行を束ねたものなので、``id`` はpassage先頭行のid、束ねた全idは
-    ``hit_ids`` に入れてある(呼び出し側はどちらでもsearch_hitsと突き合わせられる)。"""
+    ``hit_ids`` に入れてある(呼び出し側はどちらでもsearch_hitsと突き合わせられる)。
+
+    ``sources``(stt/comment)・``since``/``until``(録画のstarted_at基準、keyword検索の
+    search_scenesと同じ意味)はmetadata側で先に効かせる。総当たり走査の対象行がそのまま
+    減るため、絞り込むほど検索は速くなる。``sources`` に空listを渡した場合は「どの種類も
+    選ばれていない」であって全件ではないので、0件を返す。"""
     query = (query or "").strip()
     if not query:
         raise SemanticError("検索語を入力してください。")
+    # 「1種類も選ばれていない」と「絞り込み無し」は別物。前者で全件を返すと、画面で
+    # 種類checkを全部外したのに結果が出るという逆の挙動になる。
+    if sources is not None and not sources:
+        return []
     embedder = get_embedder()
     limit = max(1, int(limit))
 
-    with _lock:
+    # buildと並行しても止めない。rows_totalを先に確定させ、それ未満のrownoしか触らないので、
+    # 並行する追記は走査の外に出る(module冒頭の_build_lockの注記を参照)。
+    def _prepare() -> tuple:
         conn = _open_meta()
         try:
             dim = _dim(conn)
@@ -687,36 +744,57 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None)
                 raise SemanticError("意味検索のindexが空です。先にindexを作成してください。")
 
             # 絞り込みはmetadata側で先に効かせる。走査対象が減るほど検索は速くなる。
-            rownos = None
+            clauses: list = []
+            params: list = []
             if unique_ids:
-                placeholders = ",".join("?" * len(unique_ids))
+                clauses.append("unique_id IN (%s)" % ",".join("?" * len(unique_ids)))
+                params.extend(unique_ids)
+            if sources:
+                clauses.append("source IN (%s)" % ",".join("?" * len(sources)))
+                params.extend(sources)
+            if since is not None:
+                clauses.append("started_at >= ?")
+                params.append(since)
+            if until is not None:
+                clauses.append("started_at <= ?")
+                params.append(until)
+            rownos = None
+            if clauses:
                 picked = conn.execute(
-                    f"SELECT rowno FROM passages WHERE unique_id IN ({placeholders})"
-                    " ORDER BY rowno",
-                    list(unique_ids),
+                    "SELECT rowno FROM passages WHERE " + " AND ".join(clauses)
+                    + " ORDER BY rowno",
+                    params,
                 ).fetchall()
                 rownos = np.fromiter((r["rowno"] for r in picked), dtype=np.int64,
                                      count=len(picked))
-                if len(rownos) == 0:
-                    return []
                 rownos = rownos[rownos < rows_total]
-                if len(rownos) == 0:
-                    return []
+            return dim, dtype, path, rows_total, rownos
+        finally:
+            conn.close()
 
-            query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
-            vector = query_vec[0][0].astype(np.float32)
+    dim, dtype, path, rows_total, rownos = await asyncio.to_thread(_prepare)
+    if rownos is not None and len(rownos) == 0:
+        return []
 
-            started = time.time()
-            vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
-            # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
-            # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
-            fetch = min(limit * 4, rows_total) if rownos is None else min(limit * 4, len(rownos))
-            top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
-            elapsed = time.time() - started
+    query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
+    vector = query_vec[0][0].astype(np.float32)
 
-            score_by_rowno = {int(r): float(s) for r, s in zip(top_rownos, top_scores)}
-            if not score_by_rowno:
-                return []
+    def _scan() -> tuple:
+        """memmapの走査もmetadataの引き当てもblocking。48k×768のdot積は今は一瞬でも、
+        passage数に比例して伸びる — event loopに載せるとその分だけserverが固まる。"""
+        started = time.time()
+        vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
+        # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
+        # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
+        fetch = min(limit * 4, rows_total) if rownos is None else min(limit * 4, len(rownos))
+        top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
+        elapsed = time.time() - started
+
+        score_by_rowno = {int(r): float(s) for r, s in zip(top_rownos, top_scores)}
+        if not score_by_rowno:
+            return {}, [], elapsed
+        conn = _open_meta()
+        try:
             placeholders = ",".join("?" * len(score_by_rowno))
             meta_rows = conn.execute(
                 f"SELECT * FROM passages WHERE rowno IN ({placeholders})",
@@ -724,6 +802,11 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None)
             ).fetchall()
         finally:
             conn.close()
+        return score_by_rowno, meta_rows, elapsed
+
+    score_by_rowno, meta_rows, elapsed = await asyncio.to_thread(_scan)
+    if not score_by_rowno:
+        return []
 
     items = []
     for row in meta_rows:
@@ -769,26 +852,29 @@ def index_status() -> dict:
         "vector_bytes": 0,
         "meta_bytes": 0,
         "last_built_at": None,
+        # 画面がbuild中にbuttonを塞ぐための状態。これが無いと、userは押してみるまで
+        # 実行中だと分からない。
+        "building": _build_lock.locked(),
         "passage_seconds": get_semantic_passage_seconds(),
     }
     path = meta_path()
     if not path.is_file():
         return status
-    with _lock:
-        conn = _open_meta()
-        try:
-            status["dim"] = _dim(conn)
-            status["dtype"] = _get_meta(conn, "dtype")
-            status["index_model"] = _get_meta(conn, "model")
-            row = conn.execute(
-                "SELECT COUNT(*) AS n, COUNT(DISTINCT recording_id) AS recs FROM passages"
-            ).fetchone()
-            status["passages"] = row["n"]
-            status["recordings"] = row["recs"]
-            last = conn.execute("SELECT MAX(built_at) AS t FROM indexed").fetchone()
-            status["last_built_at"] = last["t"]
-        finally:
-            conn.close()
+    # 読み取りのみ。buildと並行しても、見えるのはcommit済みの断面になる。
+    conn = _open_meta()
+    try:
+        status["dim"] = _dim(conn)
+        status["dtype"] = _get_meta(conn, "dtype")
+        status["index_model"] = _get_meta(conn, "model")
+        row = conn.execute(
+            "SELECT COUNT(*) AS n, COUNT(DISTINCT recording_id) AS recs FROM passages"
+        ).fetchone()
+        status["passages"] = row["n"]
+        status["recordings"] = row["recs"]
+        last = conn.execute("SELECT MAX(built_at) AS t FROM indexed").fetchone()
+        status["last_built_at"] = last["t"]
+    finally:
+        conn.close()
     vectors = vector_path()
     status["vector_bytes"] = vectors.stat().st_size if vectors.is_file() else 0
     status["meta_bytes"] = path.stat().st_size

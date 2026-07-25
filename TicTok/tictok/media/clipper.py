@@ -3,10 +3,38 @@
 用途は「探したシーンを素材として抜く」ところまでで、仕上げは既存の焼き込み
 (video_overlay)・高画質化(upscale)とNLEに任せる。
 
-既定はstream copy: 録画のHLS segmentは2秒刻み(recorderのsegment_seconds)なので
-keyframe間隔も約2秒で、切り出し開始は最大でその1区間だけ手前へ寄る。再encodeが無い分
-巨大fileでも即座に終わるため、素材出しにはこちらが適する。frame単位の精度が要る場合だけ
-precise=Trueで再encodeする(encoderは焼き込みと同じ能力解決を通す)。
+既定はstream copy。再encodeが無い分、巨大fileでも即座に終わるため素材出しに適する。
+frame単位の精度が要る場合だけ precise=True で再encodeする(encoderは焼き込みと同じ能力解決を
+通す)。
+
+== 切り出しの引数順(過去の誤りと訂正) ==
+
+stream copyの-ssは**入力側**(-iの前)に置く。出力側(-iの後ろ)に置くと、ffmpegはkeyframeが
+来るまでvideo packetを捨てるため、**先頭が最大1 GOPぶん映像なしになる**。実録画で確認した
+実害:
+
+- keyframe間隔17.67秒の録画から10秒を切ると、video streamが存在しない(音声のみの)mp4になる
+- 同じ録画から11.6秒を切ると、11.67秒に対してvideo frameが5枚しか入らない
+- 60秒を切っても先頭11.3秒、30秒を切っても先頭16.2秒が映像なしになる
+
+このmoduleは以前「HLS segmentが2秒刻みだからkeyframe間隔も約2秒」と仮定していたが、実測の
+keyframe間隔は録画ごとに2.1秒〜37.6秒とばらつく(配信側のencoder設定次第で、こちらでは
+決められない)。仮定が崩れた分だけ映像が失われていた。
+
+出力側-ssへ寄せた当時の根拠として「入力側-ssだと-tの尺計算が崩れ、11.6秒の指定が25.5秒
+出力になる」と記録されていたが、これは**誤診**である。実測すると25.5秒の内訳は
+「要求11.6秒 + 直前keyframeまでの13.9秒」で、尺計算は壊れていない。stream copyは
+keyframeからしか始められないという原理どおりの結果を、計算誤りと読み違えていた。
+
+よって現在は ``-ss <start> -i <src> -to <end> -copyts`` を使う。-toで終端を絶対時刻として
+渡すので、-tのように尺の引き算を挟まずに済む。内容は[startの直前のkeyframe, end]になり、
+要求より手前へ伸びた分は lead_seconds として返す(捨てるにはframe精度の再encodeが要る上、
+素材用途では前後の余白はむしろ扱いやすいので残す)。
+
+``-noaccurate_seek`` は音声を再encodeする経路(normalize)のために要る。既定のaccurate seekは
+「decodeするstreamだけ」-ssの正確な位置まで捨てるため、videoはkeyframeから、audioは要求位置
+から始まり、**両者がGOPぶん(実測3.5秒、長い録画では最大37秒)ずれる**。stream copyだけの
+経路では復号が無いので影響しない。
 """
 
 import asyncio
@@ -90,11 +118,12 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
         args = ["-i", str(src)] + codec_args
     else:
         encoder = "copy"
-        # -ssは必ず-iの後ろ(出力側)に置く。録画はHLS stream-copy由来のVFRで、入力側-ssだと
-        # -tの尺計算が崩れ、11.6秒の指定が25.5秒出力になる実例を確認している。出力側seekでも
-        # ffmpegは内部でseekするため6579秒のfileで約1.1秒と実用速度に収まる。
-        # avoid_negative_tsは先頭PTSを0へ寄せ、playerが黒画で待つのを防ぐ。
-        args = ["-i", str(src), "-ss", f"{start:.3f}", "-t", f"{duration:.3f}",
+        # -ssは必ず-iの前(入力側)に置く。出力側だとkeyframeが来るまでvideo packetが捨てられ、
+        # 先頭が最大1 GOPぶん映像なしになる(module docstringの実測を参照)。
+        # -noaccurate_seekは、音声だけ再encodeするnormalize経路でaudioがvideoより後ろから
+        # 始まるのを防ぐ。avoid_negative_tsは先頭PTSを0へ寄せ、playerが黒画で待つのを防ぐ。
+        args = ["-noaccurate_seek", "-ss", f"{start:.3f}", "-i", str(src),
+                "-to", f"{end:.3f}", "-copyts",
                 *copy_args, "-avoid_negative_ts", "make_zero"]
 
     cmd = ["ffmpeg", "-v", "error", "-y", *args, "-movflags", "+faststart", str(out)]
@@ -129,11 +158,21 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
     # 音声だけを再encodeする経路は、filterがsampleを詰めたり落としたりすると尺が動く。
     # 指定と実測が離れていないかを毎回測って記録する(判定不能なときは捏造せずNone)。
     actual = await _duration_seconds(out)
+    # stream copyはkeyframeからしか始められないので、実際の内容は要求より手前から始まる。
+    # 何秒手前かを返して、呼び出し側が実物の時刻を示せるようにする。
+    lead = None if (actual is None or precise) else max(0.0, actual - duration)
+    tolerance = config.get_clip_duration_tolerance_seconds()
     ctx = {"src": str(src), "output": str(out), "start": start, "end": end,
            "duration_seconds": duration, "output_duration_seconds": actual,
+           "keyframe_lead_seconds": None if lead is None else round(lead, 3),
            "precise": precise, "encoder": encoder, "size_bytes": size,
            **audio_norm.describe(normalize)}
-    if actual is not None and abs(actual - duration) > config.get_clip_duration_tolerance_seconds():
+    # 判定は経路で分ける。再encodeはframe精度なので両側で見るが、stream copyは前へ伸びるのが
+    # 正常なので短い側だけを見る。伸びた分まで警告にすると、正常な切り出しが毎回警告になり
+    # 「音声filterが尺を変えた」という本来拾いたい異常が埋もれる。
+    if actual is not None and (
+        abs(actual - duration) > tolerance if precise else actual < duration - tolerance
+    ):
         logger.warning(
             "clip duration differs from the request: %s (%.2fs requested, %.2fs written)",
             out.name, duration, actual,
@@ -153,4 +192,7 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
         "encoder": encoder,
         "normalized": bool(normalize),
         "output_duration_seconds": actual,
+        # 実際の内容開始。stream copyでは要求より手前のkeyframeになる(preciseでは要求どおり)。
+        "keyframe_lead_seconds": None if lead is None else round(lead, 3),
+        "actual_start_seconds": start if lead is None else round(start - lead, 3),
     }
