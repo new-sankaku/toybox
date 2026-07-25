@@ -23,8 +23,6 @@ import{agentApi}from'@/services/apiService'
 import{convertApiAgents}from'@/services/converters/agentConverter'
 import{COLORS}from'@/constants/colors'
 import{TIMING}from'@/constants/timing'
-import{WorkflowContextMenu}from'@/components/dashboard/WorkflowContextMenu'
-import{useNavigationStore}from'@/stores/navigationStore'
 import type{Agent,AgentType,AgentStatus}from'@/types/agent'
 import type{AssetGenerationOptions}from'@/config/projectOptions'
 
@@ -213,8 +211,6 @@ function getStatusStyle(status:AgentStatus|undefined):{
    return{background:COLORS.status.waitingApproval.bg,border:COLORS.status.waitingApproval.border,color:COLORS.status.waitingApproval.text}
   case'failed':
    return{background:COLORS.status.failed.bg,border:COLORS.status.failed.border,color:COLORS.status.failed.text}
-  case'frozen':
-   return{background:COLORS.status.frozen.bg,border:COLORS.status.frozen.border,color:COLORS.status.frozen.text}
   case'pending':
   default:
    return{background:COLORS.status.pending.bg,border:COLORS.status.pending.border,color:COLORS.status.pending.text}
@@ -223,7 +219,6 @@ function getStatusStyle(status:AgentStatus|undefined):{
 
 interface AgentNodeData{
  label:string
- agentId?:string
  status?:AgentStatus
  progress?:number
  hasLW?:boolean
@@ -237,20 +232,19 @@ function AgentNode({data }:{data:AgentNodeData}){
  const isRunning=data.status==='running'
  const isCompleted=data.status==='completed'
  const isWaitingApproval=data.status==='waiting_approval'
- const isFrozen=data.status==='frozen'
  const progress=data.progress ?? 0
  const{nodeWidth,nodeHeight,fontSize}=data
- const spinnerSize=Math.max(Math.round(fontSize*0.9),8)
 
  return(
   <div
-   className="relative rounded text-center flex flex-col justify-center"
+   className={`relative rounded text-center flex flex-col justify-center ${isRunning||isWaitingApproval?'animate-pulse' : ''}`}
    style={{
     background:style.background,
     border:`1.5px solid ${style.border}`,
     color:style.color,
     width:nodeWidth,
     height:nodeHeight,
+    boxShadow:isRunning?`0 0 8px ${style.border}` : isWaitingApproval?`0 0 6px ${style.border}` : 'none',
    }}
   >
 
@@ -283,11 +277,6 @@ function AgentNode({data }:{data:AgentNodeData}){
      承認待ち
     </div>
 )}
-   {isFrozen&&(
-    <div className="mt-0.5" style={{fontSize:fontSize*0.8,color:COLORS.status.frozen.border,fontWeight:'bold'}}>
-     凍結
-    </div>
-)}
 
    {data.hasLW&&(
     <div
@@ -301,17 +290,6 @@ function AgentNode({data }:{data:AgentNodeData}){
      }}
     >
      L/W
-    </div>
-)}
-   {isRunning&&!isWaitingApproval&&(
-    <div
-     className="absolute -top-1 -right-1 flex items-center justify-center"
-     style={{width:spinnerSize+4,height:spinnerSize+4}}
-    >
-     <div
-      className="api-spinner"
-      style={{width:spinnerSize,height:spinnerSize}}
-     />
     </div>
 )}
    {isCompleted&&(
@@ -328,14 +306,6 @@ function AgentNode({data }:{data:AgentNodeData}){
      style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.badge.waitingApproval}}
     >
      !
-    </div>
-)}
-   {isFrozen&&(
-    <div
-     className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-     style={{fontSize:fontSize*0.8,color:'white',fontWeight:'bold',background:COLORS.status.frozen.border}}
-    >
-     *
     </div>
 )}
   </div>
@@ -379,10 +349,9 @@ interface FlowCanvasProps{
  nodes:Node[]
  edges:Edge[]
  onContainerResize:(width:number,height:number)=>void
- onNodeContextMenu?:(event:React.MouseEvent,node:Node)=>void
 }
 
-function FlowCanvas({nodes,edges,onContainerResize,onNodeContextMenu}:FlowCanvasProps){
+function FlowCanvas({nodes,edges,onContainerResize}:FlowCanvasProps){
  const containerRef=useRef<HTMLDivElement>(null)
  const{fitView}=useReactFlow()
  const[containerSize,setContainerSize]=useState({width:0,height:0})
@@ -434,7 +403,6 @@ function FlowCanvas({nodes,edges,onContainerResize,onNodeContextMenu}:FlowCanvas
     preventScrolling={false}
     proOptions={{hideAttribution:true}}
     defaultEdgeOptions={{type:'straight'}}
-    onNodeContextMenu={onNodeContextMenu}
    >
     <Background
      variant={BackgroundVariant.Dots}
@@ -449,12 +417,10 @@ function FlowCanvas({nodes,edges,onContainerResize,onNodeContextMenu}:FlowCanvas
 
 export default function WorkflowDiagram():JSX.Element{
  const{currentProject}=useProjectStore()
- const{agents,setAgents,updateAgentStatus}=useAgentStore()
+ const{agents,setAgents}=useAgentStore()
  const{getLabel,getFilteredUIPhases,getWorkflowDependencies,fetchDefinitions,loaded:definitionsLoaded}=useAgentDefinitionStore()
  const{agentRoles}=useUIConfigStore()
- const{navigateToIntervention}=useNavigationStore()
  const[containerSize,setContainerSize]=useState({width:0,height:0})
- const[contextMenu,setContextMenu]=useState<{x:number;y:number;agentId:string;status:AgentStatus}|null>(null)
 
  const handleContainerResize=useCallback((width:number,height:number)=>{
   setContainerSize({width,height})
@@ -577,7 +543,6 @@ export default function WorkflowDiagram():JSX.Element{
     position:pos||{x:0,y:0},
     data:{
      label:getLabel(nodeDef.type),
-     agentId:agent?.id,
      status:agent?.status,
      progress:agent?.progress ?? 0,
      hasLW:nodeDef.hasLW,
@@ -632,50 +597,10 @@ export default function WorkflowDiagram():JSX.Element{
   })
  },[getAgentByType,agentNodes,edgeDefs])
 
- const handleNodeContextMenu=useCallback((event:React.MouseEvent,node:Node)=>{
-  event.preventDefault()
-  const data=node.data as unknown as AgentNodeData
-  if(!data.agentId||!data.status)return
-  setContextMenu({x:event.clientX,y:event.clientY,agentId:data.agentId,status:data.status})
- },[])
-
- const handlePause=useCallback(async(agentId:string)=>{
-  try{
-   const result=await agentApi.pause(agentId)
-   if(result.success)updateAgentStatus(agentId,'paused')
-  }catch(e){console.error('Failed to pause agent:',e)}
- },[updateAgentStatus])
-
- const handleResume=useCallback(async(agentId:string)=>{
-  try{
-   const result=await agentApi.resume(agentId)
-   if(result.success)updateAgentStatus(agentId,'running')
-  }catch(e){console.error('Failed to resume agent:',e)}
- },[updateAgentStatus])
-
- const handleFreeze=useCallback(async(agentId:string)=>{
-  try{
-   const result=await agentApi.freeze(agentId)
-   if(result.success)updateAgentStatus(agentId,'frozen')
-  }catch(e){console.error('Failed to freeze agent:',e)}
- },[updateAgentStatus])
-
- const handleUnfreeze=useCallback(async(agentId:string)=>{
-  try{
-   const result=await agentApi.unfreeze(agentId)
-   if(result.success)updateAgentStatus(agentId,'pending')
-  }catch(e){console.error('Failed to unfreeze agent:',e)}
- },[updateAgentStatus])
-
- const handleContact=useCallback((agentId:string)=>{
-  navigateToIntervention(agentId)
- },[navigateToIntervention])
-
  const projectAgents=agents.filter(a=>a.projectId===currentProject?.id)
  const completedCount=projectAgents.filter(a=>a.status==='completed').length
  const runningCount=projectAgents.filter(a=>a.status==='running').length
  const waitingApprovalCount=projectAgents.filter(a=>a.status==='waiting_approval').length
- const frozenCount=projectAgents.filter(a=>a.status==='frozen').length
  const totalCount=agentNodes.length
  const overallProgress=totalCount>0
   ?Math.round((completedCount/totalCount)*100+
@@ -698,7 +623,6 @@ export default function WorkflowDiagram():JSX.Element{
  }
 
  return(
-  <>
   <Card>
    <CardHeader>
     <DiamondMarker>ワークフロー全体図</DiamondMarker>
@@ -706,19 +630,16 @@ export default function WorkflowDiagram():JSX.Element{
      <span>全体: {overallProgress}%</span>
      <span>完了: {completedCount}/{totalCount}</span>
      {runningCount>0&&(
-      <span className="text-nier-accent-orange">実行中: {runningCount}</span>
+      <span className="text-nier-accent-orange animate-pulse">実行中: {runningCount}</span>
 )}
      {waitingApprovalCount>0&&(
-      <span className="text-[#8B7914]">承認待ち: {waitingApprovalCount}</span>
-)}
-     {frozenCount>0&&(
-      <span style={{color:COLORS.status.frozen.border}}>凍結: {frozenCount}</span>
+      <span className="text-[#8B7914] animate-pulse">承認待ち: {waitingApprovalCount}</span>
 )}
     </div>
    </CardHeader>
    <CardContent className="p-0 relative">
     <ReactFlowProvider>
-     <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize} onNodeContextMenu={handleNodeContextMenu}/>
+     <FlowCanvas nodes={nodes} edges={edges} onContainerResize={handleContainerResize}/>
     </ReactFlowProvider>
 
 
@@ -741,12 +662,6 @@ export default function WorkflowDiagram():JSX.Element{
       <div className="w-3 h-2.5 bg-nier-bg-main border border-nier-border-light rounded-sm"/>
       <span>待機</span>
      </div>
-     {frozenCount>0&&(
-      <div className="flex items-center gap-1">
-       <div className="w-3 h-2.5 rounded-sm" style={{background:COLORS.status.frozen.bg,border:`1px solid ${COLORS.status.frozen.border}`}}/>
-       <span>凍結</span>
-      </div>
-)}
      <div className="flex items-center gap-1 mt-1 pt-1 border-t border-nier-border-light">
       <span className="text-[9px] px-1 py-0.5 border border-nier-border-light rounded text-nier-text-light">L/W</span>
       <span>継続ループ</span>
@@ -754,20 +669,5 @@ export default function WorkflowDiagram():JSX.Element{
     </div>
    </CardContent>
   </Card>
-  {contextMenu&&(
-   <WorkflowContextMenu
-    x={contextMenu.x}
-    y={contextMenu.y}
-    agentId={contextMenu.agentId}
-    status={contextMenu.status}
-    onClose={()=>setContextMenu(null)}
-    onPause={handlePause}
-    onResume={handleResume}
-    onFreeze={handleFreeze}
-    onUnfreeze={handleUnfreeze}
-    onContact={handleContact}
-   />
-)}
-  </>
 )
 }

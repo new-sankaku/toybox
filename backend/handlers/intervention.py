@@ -84,14 +84,14 @@ def register_intervention_routes(app:Flask,project_service,agent_service,interve
     def get_intervention(intervention_id:str):
         intervention=intervention_service.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
         return jsonify(intervention)
 
     @app.route('/api/interventions/<intervention_id>/acknowledge',methods=['POST'])
     def acknowledge_intervention(intervention_id:str):
         intervention=intervention_service.acknowledge_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         event_bus.publish(InterventionAcknowledged(project_id=intervention["projectId"],intervention_id=intervention_id,intervention=intervention))
 
@@ -101,7 +101,7 @@ def register_intervention_routes(app:Flask,project_service,agent_service,interve
     def process_intervention(intervention_id:str):
         intervention=intervention_service.process_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         event_bus.publish(InterventionProcessed(project_id=intervention["projectId"],intervention_id=intervention_id,intervention=intervention))
 
@@ -111,12 +111,12 @@ def register_intervention_routes(app:Flask,project_service,agent_service,interve
     def delete_intervention(intervention_id:str):
         intervention=intervention_service.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         project_id=intervention["projectId"]
         success=intervention_service.delete_intervention(intervention_id)
         if not success:
-            return jsonify({"error":"連絡の削除に失敗しました"}),500
+            return jsonify({"error":"介入の削除に失敗しました"}),500
 
         event_bus.publish(InterventionDeleted(project_id=project_id,intervention_id=intervention_id))
 
@@ -126,7 +126,7 @@ def register_intervention_routes(app:Flask,project_service,agent_service,interve
     def respond_to_intervention(intervention_id:str):
         intervention=intervention_service.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         data=request.get_json() or {}
         message=data.get("message","").strip()
@@ -151,7 +151,7 @@ def register_intervention_routes(app:Flask,project_service,agent_service,interve
     def agent_question(intervention_id:str):
         intervention=intervention_service.get_intervention(intervention_id)
         if not intervention:
-            return jsonify({"error":"連絡が見つかりません"}),404
+            return jsonify({"error":"介入が見つかりません"}),404
 
         data=request.get_json() or {}
         message=data.get("message","").strip()

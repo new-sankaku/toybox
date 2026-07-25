@@ -9,8 +9,6 @@ from events.events import (
     AgentResumed,
     AgentRetried,
     AgentPaused,
-    AgentFrozen,
-    AgentUnfrozen,
     AgentActivated,
     AgentCreated,
     AgentWaitingResponse,
@@ -72,8 +70,6 @@ class WebSocketEmitter:
         self._event_bus.subscribe(ProjectInitialized,self._on_project_initialized)
         self._event_bus.subscribe(ProjectPaused,self._on_project_paused)
         self._event_bus.subscribe(AgentPaused,self._on_agent_paused)
-        self._event_bus.subscribe(AgentFrozen,self._on_agent_frozen)
-        self._event_bus.subscribe(AgentUnfrozen,self._on_agent_unfrozen)
         self._event_bus.subscribe(AgentActivated,self._on_agent_activated)
         self._event_bus.subscribe(AgentCreated,self._on_agent_created)
         self._event_bus.subscribe(AgentWaitingResponse,self._on_agent_waiting_response)
@@ -269,28 +265,6 @@ class WebSocketEmitter:
                 "projectId":event.project_id,
                 "agent":event.agent,
                 "reason":event.reason,
-            },
-            event.project_id,
-        )
-
-    def _on_agent_frozen(self,event:AgentFrozen)->None:
-        self._emit(
-            "agent:frozen",
-            {
-                "agentId":event.agent_id,
-                "projectId":event.project_id,
-                "agent":event.agent,
-            },
-            event.project_id,
-        )
-
-    def _on_agent_unfrozen(self,event:AgentUnfrozen)->None:
-        self._emit(
-            "agent:unfrozen",
-            {
-                "agentId":event.agent_id,
-                "projectId":event.project_id,
-                "agent":event.agent,
             },
             event.project_id,
         )

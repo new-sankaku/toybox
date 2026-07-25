@@ -69,12 +69,6 @@ class AgentService(BaseService):
     def resume_agent(self,agent_id:str)->Optional[Dict]:
         return self._lifecycle.resume_agent(agent_id)
 
-    def freeze_agent(self,agent_id:str)->Optional[Dict]:
-        return self._lifecycle.freeze_agent(agent_id)
-
-    def unfreeze_agent(self,agent_id:str)->Optional[Dict]:
-        return self._lifecycle.unfreeze_agent(agent_id)
-
     def get_retryable_agents(self,project_id:str)->List[Dict]:
         return self._lifecycle.get_retryable_agents(project_id)
 

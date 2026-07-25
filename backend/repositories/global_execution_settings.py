@@ -52,37 +52,3 @@ class GlobalExecutionSettingsRepository:
   if settings and settings.websocket_settings:
    return settings.websocket_settings
   return get_websocket_config()
-
- def get_notification_settings(self)->Dict[str,Any]:
-  defaults={"enabled":False,"categories":{"checkpoint":True,"completion":True,"error":True,"budget":True},"sound":False}
-  settings=self.get()
-  if settings and settings.notification_settings:
-   return settings.notification_settings
-  return defaults
-
- def update_notification_settings(self,data:Dict[str,Any])->GlobalExecutionSettings:
-  settings=self.get_or_create_default()
-  defaults={"enabled":False,"categories":{"checkpoint":True,"completion":True,"error":True,"budget":True},"sound":False}
-  current=settings.notification_settings or defaults
-  current.update(data)
-  settings.notification_settings=current
-  settings.updated_at=datetime.now()
-  self.session.flush()
-  return settings
-
- def get_display_settings(self)->Dict[str,Any]:
-  defaults={"sequenceFormat":"detailed","dashboardAnimation":True}
-  settings=self.get()
-  if settings and settings.display_settings:
-   return settings.display_settings
-  return defaults
-
- def update_display_settings(self,data:Dict[str,Any])->GlobalExecutionSettings:
-  settings=self.get_or_create_default()
-  defaults={"sequenceFormat":"detailed","dashboardAnimation":True}
-  current=settings.display_settings or defaults
-  current.update(data)
-  settings.display_settings=current
-  settings.updated_at=datetime.now()
-  self.session.flush()
-  return settings

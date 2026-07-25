@@ -10,7 +10,6 @@ import{useGlobalCostSettingsStore}from'@/stores/globalCostSettingsStore'
 import{agentApi,type ApiAgent,type DailyCostItem}from'@/services/apiService'
 import{TIMING}from'@/constants/timing'
 import{FolderOpen,TrendingUp,TrendingDown,AlertTriangle}from'lucide-react'
-import{Sankey,Tooltip,ResponsiveContainer}from'recharts'
 
 function formatTokens(num:number):string{
  if(num>=1000000)return`${(num/1000000).toFixed(1)}m`
@@ -98,6 +97,7 @@ function CostLineChart({data,budgetLimit,height=120}:{data:DailyCostItem[];budge
   const y=padding.top+chartH-(d.cumulative/maxVal)*chartH
   return{x,y,d}
  })
+ const linePath=points.map((p,i)=>`${i===0?'M':'L'}${p.x}%,${p.y}`).join(' ')
  const budgetY=budgetLimit>0?padding.top+chartH-(budgetLimit/maxVal)*chartH:-1
  return(
   <svg width="100%" height={height} className="overflow-visible">
@@ -253,81 +253,6 @@ export default function CostView():JSX.Element{
 
  const budgetLimit=settings?.globalMonthlyLimit??0
 
- const sankeyData=useMemo(()=>{
-  const serviceNodes:string[]=[]
-  const phaseNodes:string[]=[]
-  const linkMap=new Map<string,number>()
-  agents.forEach(agent=>{
-   const key=getAgentKey(agent.type)
-   const service=agentServiceMap[key]
-   if(!service)return
-   let phaseIdx=-1
-   uiPhases.forEach((phase,idx)=>{
-    if(phase.agents.includes(key))phaseIdx=idx
-   })
-   if(phaseIdx<0)return
-   const cost=calculateCost(agent.inputTokens||0,agent.outputTokens||0)
-   if(cost<=0)return
-   if(!serviceNodes.includes(service))serviceNodes.push(service)
-   const phaseKey=`phase${phaseIdx}`
-   if(!phaseNodes.includes(phaseKey))phaseNodes.push(phaseKey)
-   const lk=`${service}|${phaseKey}`
-   linkMap.set(lk,(linkMap.get(lk)||0)+cost)
-  })
-  if(serviceNodes.length===0||phaseNodes.length===0)return null
-  const nodes=[
-   ...serviceNodes.map(s=>({name:serviceLabels[s]||s})),
-   ...phaseNodes.map(p=>{
-    const idx=parseInt(p.replace('phase',''))
-    return{name:uiPhases[idx]?.label||p}
-   })
-]
-  const links:Array<{source:number;target:number;value:number}>=[]
-  linkMap.forEach((value,key)=>{
-   const[svc,ph]=key.split('|')
-   const si=serviceNodes.indexOf(svc)
-   const ti=serviceNodes.length+phaseNodes.indexOf(ph)
-   if(si>=0&&ti>=serviceNodes.length)links.push({source:si,target:ti,value:Math.round(value*10000)/10000})
-  })
-  if(links.length===0)return null
-  return{nodes,links,serviceCount:serviceNodes.length}
- },[agents,agentServiceMap,uiPhases,serviceLabels,calculateCost])
-
- const renderSankeyNode=useCallback(({x,y,width,height,payload}:any)=>{
-  const isSource=payload?.depth===0
-  const cost=payload?.value??0
-  return(
-   <g>
-    <rect x={x} y={y} width={width} height={height}
-     fill={isSource?'var(--nier-accent,#8b7355)':'#a89070'}
-     fillOpacity={0.85}
-     stroke="var(--nier-border,#8b8070)"
-     strokeWidth={0.5}
-    />
-    <text
-     x={isSource?x-6:x+width+6}
-     y={y+height/2-7}
-     textAnchor={isSource?'end':'start'}
-     dominantBaseline="middle"
-     fill="var(--nier-text-main,#4a4538)"
-     fontSize={11}
-    >
-     {payload?.name}
-    </text>
-    <text
-     x={isSource?x-6:x+width+6}
-     y={y+height/2+7}
-     textAnchor={isSource?'end':'start'}
-     dominantBaseline="middle"
-     fill="var(--nier-text-light,#8b8070)"
-     fontSize={10}
-    >
-     ${cost.toFixed(2)}
-    </text>
-   </g>
-)
- },[])
-
  if(!currentProject){
   return(
    <div className="p-4 animate-nier-fade-in">
@@ -348,11 +273,11 @@ export default function CostView():JSX.Element{
   const totalOutput=data.reduce((s,g)=>s+g.output,0)
   const totalCost=calculateCost(totalInput,totalOutput)
   return(
-   <Card className="flex-1">
+   <Card className="flex-1 flex flex-col overflow-hidden">
     <CardHeader>
      <DiamondMarker>{title}</DiamondMarker>
     </CardHeader>
-    <CardContent className="p-2">
+    <CardContent className="p-2 flex-1 overflow-y-auto flex flex-col">
      {loading&&data.length===0?(
       <div className="text-nier-text-light text-nier-small">読み込み中...</div>
 ):data.length===0?(
@@ -373,7 +298,7 @@ export default function CostView():JSX.Element{
          <span className="text-right font-medium">${totalCost.toFixed(2)}</span>
         </div>
        </div>
-       <div>
+       <div className="flex-1 overflow-y-auto">
         {data.map(group=>(
          <div key={group.key}>
           <div className="grid grid-cols-[1fr_50px_50px_60px] gap-x-2 text-nier-small py-0.5 bg-nier-bg-panel">
@@ -425,30 +350,9 @@ export default function CostView():JSX.Element{
  }
 
  return(
-  <div className="p-4 animate-nier-fade-in h-full overflow-y-auto space-y-3">
+  <div className="p-4 animate-nier-fade-in h-full flex flex-col overflow-hidden gap-3">
    {renderBudgetAlert()}
-   {sankeyData&&(
-    <Card className="flex flex-col overflow-hidden" style={{height:'35vh',minHeight:'280px'}}>
-     <CardHeader className="flex-shrink-0 py-1">
-      <DiamondMarker>コストフロー</DiamondMarker>
-     </CardHeader>
-     <CardContent className="p-2 flex-1 overflow-hidden">
-      <ResponsiveContainer width="100%" height="100%">
-       <Sankey
-        data={{nodes:sankeyData.nodes,links:sankeyData.links}}
-        nodePadding={24}
-        nodeWidth={10}
-        margin={{top:4,right:100,bottom:4,left:100}}
-        node={renderSankeyNode}
-        link={{stroke:'var(--nier-accent,#8b7355)',strokeOpacity:0.25}}
-       >
-        <Tooltip formatter={(value:number|undefined)=>'$'+(value??0).toFixed(4)}/>
-       </Sankey>
-      </ResponsiveContainer>
-     </CardContent>
-    </Card>
-)}
-   <div className="flex gap-3" style={{height:'200px'}}>
+   <div className="flex gap-3 flex-shrink-0" style={{minHeight:'160px',maxHeight:'220px'}}>
     <Card className="flex-1 flex flex-col overflow-hidden">
      <CardHeader className="flex-shrink-0 py-1">
       <DiamondMarker>日別コスト</DiamondMarker>
@@ -515,44 +419,44 @@ export default function CostView():JSX.Element{
      </CardContent>
     </Card>
    </div>
-   <div className="flex gap-3">
+   <div className="flex-1 flex gap-3 overflow-hidden">
     {renderGroupTable(serviceGroupedData,'AIサービス別')}
     {renderGroupTable(phaseGroupedData,'Phase別')}
-     <Card className="flex-1">
-      <CardHeader>
-       <DiamondMarker>サマリー</DiamondMarker>
-      </CardHeader>
-      <CardContent className="p-2 space-y-3">
-       <div className="border-b border-nier-border-light pb-2">
-        <div className="flex justify-between text-nier-small py-0.5">
-         <span className="text-nier-text-light">入力</span>
-         <span className="font-medium">{formatTokens(totals.input)}</span>
-        </div>
-        <div className="flex justify-between text-nier-small py-0.5">
-         <span className="text-nier-text-light">出力</span>
-         <span className="font-medium">{formatTokens(totals.output)}</span>
-        </div>
-        <div className="flex justify-between text-nier-small py-0.5">
-         <span className="text-nier-text-light">合計コスト</span>
-         <span className="font-medium">${totals.cost.toFixed(2)}</span>
-        </div>
+    <Card className="flex-1 flex flex-col overflow-hidden">
+     <CardHeader className="flex-shrink-0">
+      <DiamondMarker>サマリー</DiamondMarker>
+     </CardHeader>
+     <CardContent className="p-2 space-y-3 flex-1 overflow-y-auto">
+      <div className="border-b border-nier-border-light pb-2">
+       <div className="flex justify-between text-nier-small py-0.5">
+        <span className="text-nier-text-light">入力</span>
+        <span className="font-medium">{formatTokens(totals.input)}</span>
        </div>
-       <div>
-        <div className="flex justify-between text-nier-small py-0.5">
-         <span className="text-nier-text-light">予算</span>
-         <span>${budgetLimit.toFixed(2)}</span>
-        </div>
-        <div className="flex justify-between text-nier-small py-0.5">
-         <span className="text-nier-text-light">残り</span>
-         <span>${(budgetLimit-totals.cost).toFixed(2)}</span>
-        </div>
-        <Progress value={budgetLimit>0?(totals.cost/budgetLimit)*100:0} className="h-1.5 mt-1"/>
-        <div className="text-nier-caption text-nier-text-light text-center mt-0.5">
-         {budgetLimit>0?`${((totals.cost/budgetLimit)*100).toFixed(1)}%使用`:'予算未設定'}
-        </div>
+       <div className="flex justify-between text-nier-small py-0.5">
+        <span className="text-nier-text-light">出力</span>
+        <span className="font-medium">{formatTokens(totals.output)}</span>
        </div>
-      </CardContent>
-     </Card>
+       <div className="flex justify-between text-nier-small py-0.5">
+        <span className="text-nier-text-light">合計コスト</span>
+        <span className="font-medium">${totals.cost.toFixed(2)}</span>
+       </div>
+      </div>
+      <div>
+       <div className="flex justify-between text-nier-small py-0.5">
+        <span className="text-nier-text-light">予算</span>
+        <span>${budgetLimit.toFixed(2)}</span>
+       </div>
+       <div className="flex justify-between text-nier-small py-0.5">
+        <span className="text-nier-text-light">残り</span>
+        <span>${(budgetLimit-totals.cost).toFixed(2)}</span>
+       </div>
+       <Progress value={budgetLimit>0?(totals.cost/budgetLimit)*100:0} className="h-1.5 mt-1"/>
+       <div className="text-nier-caption text-nier-text-light text-center mt-0.5">
+        {budgetLimit>0?`${((totals.cost/budgetLimit)*100).toFixed(1)}%使用`:'予算未設定'}
+       </div>
+      </div>
+     </CardContent>
+    </Card>
    </div>
   </div>
 )

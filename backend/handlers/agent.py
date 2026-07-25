@@ -1,6 +1,6 @@
 import asyncio
 from flask import Flask,jsonify,request
-from events.events import AgentPaused,AgentResumed,AgentFrozen,AgentUnfrozen,AgentSnapshotRestored
+from events.events import AgentPaused,AgentResumed,AgentSnapshotRestored
 from middleware.error_handler import NotFoundError,ValidationError,ApiError
 from middleware.rate_limiter import rate_limit
 
@@ -163,34 +163,6 @@ def register_agent_routes(app:Flask,project_service,agent_service,trace_service,
    return jsonify({"success":True,"agent":result})
   else:
    raise ApiError("Failed to resume agent",code="RESUME_ERROR",status_code=500)
-
- @app.route('/api/agents/<agent_id>/freeze',methods=['POST'])
- def freeze_agent(agent_id:str):
-  agent=agent_service.get_agent(agent_id)
-  if not agent:
-   raise NotFoundError("Agent",agent_id)
-  if agent.get("status")!="pending":
-   raise ValidationError("Agent status must be pending to freeze","status")
-  result=agent_service.freeze_agent(agent_id)
-  if result:
-   event_bus.publish(AgentFrozen(project_id=result["projectId"],agent_id=agent_id,agent=result))
-   return jsonify({"success":True,"agent":result})
-  else:
-   raise ApiError("Failed to freeze agent",code="FREEZE_ERROR",status_code=500)
-
- @app.route('/api/agents/<agent_id>/unfreeze',methods=['POST'])
- def unfreeze_agent(agent_id:str):
-  agent=agent_service.get_agent(agent_id)
-  if not agent:
-   raise NotFoundError("Agent",agent_id)
-  if agent.get("status")!="frozen":
-   raise ValidationError("Agent status must be frozen to unfreeze","status")
-  result=agent_service.unfreeze_agent(agent_id)
-  if result:
-   event_bus.publish(AgentUnfrozen(project_id=result["projectId"],agent_id=agent_id,agent=result))
-   return jsonify({"success":True,"agent":result})
-  else:
-   raise ApiError("Failed to unfreeze agent",code="UNFREEZE_ERROR",status_code=500)
 
  @app.route('/api/projects/<project_id>/agents/retryable',methods=['GET'])
  def get_retryable_agents(project_id:str):

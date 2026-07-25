@@ -158,7 +158,7 @@ export interface ApiAgent{
  projectId:string
  type:string
  phase?:number
- status:'pending'|'running'|'completed'|'failed'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'frozen'|'interrupted'
+ status:'pending'|'running'|'completed'|'failed'|'waiting_approval'|'waiting_response'|'waiting_provider'|'paused'|'interrupted'
  progress:number
  currentTask:string|null
  tokensUsed:number
@@ -227,16 +227,6 @@ export const agentApi={
   return response.data
  },
 
- freeze:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(API_ENDPOINTS.agents.freeze(agentId))
-  return response.data
- },
-
- unfreeze:async(agentId:string):Promise<{success:boolean;agent:ApiAgent}>=>{
-  const response=await api.post(API_ENDPOINTS.agents.unfreeze(agentId))
-  return response.data
- },
-
  cancel:async(agentId:string):Promise<{success:boolean;message:string}>=>{
   const response=await api.post(API_ENDPOINTS.agents.cancel(agentId))
   return response.data
@@ -264,16 +254,6 @@ export const agentApi={
 
  getSystemPrompt:async(agentId:string):Promise<AgentSystemPrompt>=>{
   const response=await api.get(API_ENDPOINTS.agents.systemPrompt(agentId))
-  return response.data
- },
-
- savePromptToProject:async(agentId:string,content:string):Promise<{status:string;scope:string;agentType:string}>=>{
-  const response=await api.put(API_ENDPOINTS.agents.savePromptToProject(agentId),{content})
-  return response.data
- },
-
- savePromptToGlobal:async(agentId:string,content:string):Promise<{status:string;scope:string;agentType:string;file:string}>=>{
-  const response=await api.put(API_ENDPOINTS.agents.savePromptToGlobal(agentId),{content})
   return response.data
  },
 

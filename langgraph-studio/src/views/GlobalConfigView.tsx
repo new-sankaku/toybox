@@ -14,9 +14,7 @@ import{
  ApiKeyManagement,
  DataManagement,
  ExecutionSettings,
- OutputSettings,
- NotificationSettings,
- DisplaySettings
+ OutputSettings
 }from'@/components/settings'
 import{useProjectStore}from'@/stores/projectStore'
 import{useAutoApprovalStore}from'@/stores/autoApprovalStore'
@@ -36,9 +34,7 @@ const configSections:ConfigSection[]=[
  {id:'advanced',label:'AI 詳細設定',projectOnly:true},
  {id:'principles',label:'AI Agentプロンプト',projectOnly:true},
  {id:'output',label:'生成結果保存先',projectOnly:true},
- {id:'data-management',label:'データ管理'},
- {id:'notification-settings',label:'通知設定'},
- {id:'display-settings',label:'表示設定'}
+ {id:'data-management',label:'データ管理'}
 ]
 
 export default function GlobalConfigView():JSX.Element{
@@ -147,8 +143,6 @@ export default function GlobalConfigView():JSX.Element{
       currentProject?<OutputSettings projectId={currentProject.id}/>:renderNoProjectMessage()
 )}
      {activeSection==='data-management'&&<DataManagement/>}
-     {activeSection==='notification-settings'&&<NotificationSettings/>}
-     {activeSection==='display-settings'&&<DisplaySettings/>}
     </div>
    </div>
   </div>

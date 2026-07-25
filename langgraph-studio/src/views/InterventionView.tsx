@@ -10,12 +10,10 @@ import{interventionApi,agentApi,type ApiIntervention,type ApiAgent}from'@/servic
 import{FolderOpen,AlertTriangle,Send,Users,User,MessageSquare,Bot,UserCircle,Plus,Trash2}from'lucide-react'
 import type{InterventionPriority,InterventionTarget,Intervention}from'@/types/intervention'
 import{useAgentDefinitionStore}from'@/stores/agentDefinitionStore'
-import{useNavigationStore}from'@/stores/navigationStore'
 
 export default function InterventionView():JSX.Element{
  const{currentProject}=useProjectStore()
  const{getLabel}=useAgentDefinitionStore()
- const{pendingInterventionAgentId,clearPendingIntervention}=useNavigationStore()
  const{interventions:storeInterventions,setInterventions:setStoreInterventions,addIntervention,updateIntervention,removeIntervention}=useInterventionStore()
  const[agents,setAgents]=useState<ApiAgent[]>([])
  const[loading,setLoading]=useState(true)
@@ -59,16 +57,6 @@ export default function InterventionView():JSX.Element{
  useEffect(()=>{
   chatEndRef.current?.scrollIntoView({behavior:'smooth'})
  },[selectedId,interventions])
-
- useEffect(()=>{
-  if(pendingInterventionAgentId&&agents.length>0){
-   setShowNewForm(true)
-   setSelectedId(null)
-   setTargetType('specific')
-   setTargetAgentId(pendingInterventionAgentId)
-   clearPendingIntervention()
-  }
- },[pendingInterventionAgentId,agents,clearPendingIntervention])
 
  const handleSubmit=async(e:React.FormEvent)=>{
   e.preventDefault()
@@ -153,7 +141,7 @@ export default function InterventionView():JSX.Element{
    case'delivered':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected-muted">配信済み</span>
    case'acknowledged':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected-muted">確認済み</span>
    case'processed':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-selected">処理完了</span>
-   case'waiting_response':return<span className="text-nier-caption px-2 py-0.5 rounded nier-surface-header">返答待ち</span>
+   case'waiting_response':return<span className="text-nier-caption px-2 py-0.5 rounded bg-nier-accent-orange/20 text-nier-accent-orange">返答待ち</span>
    default:return null
   }
  }
@@ -263,8 +251,8 @@ export default function InterventionView():JSX.Element{
      <Card className="h-full flex flex-col">
       <CardHeader className="flex-shrink-0">
        <DiamondMarker>
-        {showNewForm&&!selectedId?'新規連絡':(
-         selectedIntervention?`${getTargetLabel(selectedIntervention)} への連絡`:'チャット'
+        {showNewForm&&!selectedId?'新規介入':(
+         selectedIntervention?`${getTargetLabel(selectedIntervention)} への介入`:'チャット'
 )}
        </DiamondMarker>
       </CardHeader>
@@ -373,7 +361,7 @@ export default function InterventionView():JSX.Element{
            {sending?'送信中...':(
             <>
              <Send size={14}/>
-             連絡を送信
+             介入を送信
             </>
 )}
           </Button>

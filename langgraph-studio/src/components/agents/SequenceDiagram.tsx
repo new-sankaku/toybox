@@ -21,8 +21,8 @@ function formatDuration(ms:number|null):string{
 
 function formatCost(cost:number|null):string{
  if(cost===null||cost===undefined)return''
- if(cost<0.01)return`$${cost.toFixed(4)}`
- return`$${cost.toFixed(2)}`
+ if(cost<0.01)return`${cost.toFixed(4)}`
+ return`${cost.toFixed(2)}`
 }
 
 function formatTimeOnly(timestamp:string|null):string{
@@ -133,20 +133,22 @@ function CallEntryRow({
    onClick={clickable?handleClick:undefined}
   >
    {label&&(
-    <div className={cn('text-[11px] font-mono truncate mb-0.5',isError?'text-nier-accent-red':'text-nier-text-main')}>
+    <div className={cn('text-[11px] font-mono truncate',isError?'text-nier-accent-red':'text-nier-text-main')}>
      {label}
     </div>
 )}
-   <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] gap-x-2 items-center text-[10px] font-mono text-nier-text-light">
-    <span className="text-nier-text-light">{timeStr}</span>
-    <span className="truncate">
-     <span>{model}</span>
-     {agentRole&&<span className={cn('ml-1',isError&&'text-nier-accent-red')}>({agentRole})</span>}
-    </span>
-    {durationStr?<span>{durationStr}</span>:<span/>}
-    <span>#{callIndex}</span>
-    <span className="whitespace-nowrap">In {formatTokens(tokensIn)}/Out {formatTokens(tokensOut)}</span>
-    {cost!==null?<span className="text-nier-text-main">{formatCost(cost)}</span>:<span/>}
+   <div className="flex items-center gap-1.5 text-[10px] font-mono text-nier-text-light">
+    <span>{timeStr}</span>
+    <span>|</span>
+    <span>{model}</span>
+    <span>|</span>
+    <span className={cn(isError&&'text-nier-accent-red')}>{agentRole}</span>
+    <span>|</span>
+    {durationStr&&<><span>{durationStr}</span><span>|</span></>}
+    <span>Call {callIndex}回</span>
+    <span>|</span>
+    <span>In {formatTokens(tokensIn)}/Out {formatTokens(tokensOut)}</span>
+    {cost!==null&&<><span>/</span><span>{formatCost(cost)}</span></>}
    </div>
   </div>
 )
@@ -191,16 +193,15 @@ export function SequenceDiagram({data,onMessageClick}:SequenceDiagramProps):JSX.
  return(
   <div className="w-full bg-nier-bg-panel border border-nier-border-light font-mono">
    {(totalIn>0||totalOut>0||totalDur)&&(
-    <div className="border-b-2 border-nier-border-dark px-3 py-1.5 text-[10px] nier-surface-selected-muted flex items-center gap-3">
-     <span className="font-medium">Total</span>
-     <span>In {formatTokens(totalIn)}/Out {formatTokens(totalOut)}</span>
-     {totalDur&&<span>{totalDur}</span>}
+    <div className="border-b border-nier-border-light px-3 py-1.5 text-[10px] nier-surface-selected-muted">
+     Total: Token In {formatTokens(totalIn)}/Out {formatTokens(totalOut)}
+     {totalDur?` / ${totalDur}`:''}
     </div>
 )}
    <div className="max-h-sequence-panel overflow-y-auto">
     {dateGroups.map((group)=>(
      <div key={group.dateKey}>
-      <div className="px-3 py-1 text-[11px] nier-surface-selected border-b-2 border-nier-border-dark">
+      <div className="px-3 py-1 text-[11px] nier-surface-selected border-b border-nier-border-light">
        {group.dateKey} {group.workerCount>0&&`Worker ${group.workerCount}体`}
       </div>
       <div className="px-3">
