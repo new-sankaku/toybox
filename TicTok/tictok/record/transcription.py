@@ -22,7 +22,6 @@ from tictok.core.config import (
     get_stt_model,
     get_stt_no_repeat_ngram_size,
 )
-from tictok.core.gpu import gpu_slot
 from tictok.record.recorder import ProgressGate
 
 logger = logging.getLogger("tictok.stt")
@@ -83,8 +82,8 @@ def _register_cuda_dll_dirs() -> None:
                     os.add_dll_directory(bin_dir)
                 except OSError:
                     logger.warning(
-                        "could not register CUDA DLL dir %s; GPU transcription may fall "
-                        "back to CPU", bin_dir,
+                        "CUDAのDLL dir %s を登録できません（GPUでの転写がCPUへ"
+                        "落ちる可能性があります）", bin_dir,
                         extra={"event": "stt.cuda_dll_dir_rejected",
                                "ctx": {"path": bin_dir}},
                         exc_info=True,
@@ -215,7 +214,7 @@ def _install_blocked_feature_extractor(model) -> None:
     fe.__class__ = _BlockedFeatureExtractor
     if not _blocked_fe_installed:
         logger.info(
-            "blocked feature extractor installed (block_frames=%d)", block_frames,
+            "分割版のfeature extractorを組み込みました（block_frames=%d）", block_frames,
             extra={"event": "stt.feature_extractor_installed",
                    "ctx": {"block_frames": block_frames,
                            "extractor": base_cls.__name__}},
@@ -241,7 +240,7 @@ def _get_model():
         if _model is None or _model_key != key:
             started = time.monotonic()
             logger.info(
-                "loading whisper model: %s device=%s compute=%s", model_name, device, compute,
+                "whisper modelを読み込みます: %s device=%s compute=%s", model_name, device, compute,
                 extra={"event": "stt.model_load_started",
                        "ctx": {"model": model_name, "device": device, "compute": compute}},
             )
@@ -249,7 +248,7 @@ def _get_model():
                 _model = WhisperModel(model_name, device=device, compute_type=compute)
             except Exception as exc:
                 logger.error(
-                    "could not load the whisper model %s on %s", model_name, device,
+                    "whisper model %s を %s で読み込めません", model_name, device,
                     extra={"event": "stt.model_load_failed",
                            "ctx": {"model": model_name, "device": device,
                                    "compute": compute,
@@ -260,7 +259,7 @@ def _get_model():
             _install_blocked_feature_extractor(_model)
             _model_key = key
             logger.info(
-                "whisper model ready: %s on %s (%s)", model_name, device, compute,
+                "whisper modelの準備ができました: %s / %s（%s）", model_name, device, compute,
                 extra={"event": "stt.model_loaded",
                        "ctx": {"model": model_name, "device": device, "compute": compute,
                                "duration_ms": int((time.monotonic() - started) * 1000)}},
@@ -279,6 +278,75 @@ def _get_model():
 # map the gapless decoded-audio axis back onto the container PTS axis. Segment times are
 # then restored onto the media timeline so a transcript click seeks accurately throughout.
 _TIMEMAP_ANCHOR_STEP_SECONDS = 0.02
+# A jump smaller than this is never treated as a source-timestamp glitch: real gaps of a
+# few seconds (a reconnect, a run of dropped audio packets) are elapsed media time and
+# must stay on the map.
+_PHANTOM_JUMP_MIN_SECONDS = 5.0
+# Slack between the playlist's span and the decoded end before a rebase is considered.
+# Covers the tail after the last keyframe and EXTINF rounding across thousands of entries.
+_PLAYLIST_SPAN_TOLERANCE_SECONDS = 5.0
+
+
+def _playlist_media_total(path: str):
+    """HLS playlistの ``#EXTINF`` 合計(=playerが進む秒)。playlist以外・読めなければNone。
+
+    採用集合のplaylistは録画の media span の唯一の権威である(recorder._playlist_segments)。
+    復号側の時刻がこれを超えたなら、超えたぶんは経過時間ではない。"""
+    if not str(path).lower().endswith(".m3u8"):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    total = 0.0
+    for line in text.splitlines():
+        if line.startswith("#EXTINF:"):
+            try:
+                total += float(line[8:].split(",", 1)[0])
+            except ValueError:
+                continue
+    return total if total > 0 else None
+
+
+def _rebase_phantom_jumps(anchor_gapless: list, anchor_media: list, playlist_total):
+    """源のtimestampが壊れたsegmentが残した「幻のjump」をmedia軸から取り除く。
+
+    採用集合のplaylistは壊れたsegment自体を落とすが、**その隣のsegmentが持つPTSは壊れた
+    ままである**。ffmpegは ``#EXT-X-DISCONTINUITY`` で時刻を貼り直すのに対し、PyAVは貼り
+    直さないため、復号側の時刻だけが飛ぶ。実測(00126): playlistは10297.4sなのにPyAVの終端
+    は38586.1sで、630.7s地点に+28288.4sのjumpが1つあった。そのまま地図にすると、字幕は
+    録画の外側を指す。
+
+    判定はplaylistの尺で行う — 「大きいjumpは疑わしい」ではなく「**playlistの尺を超えた
+    ぶんだけが幻**」である。音声が実在しない本物の穴(録画00268-682で実測34.2s)は尺の内側に
+    収まるので、こちらは触らない。大きいjumpから順に、終端が尺へ収まるまで畳む。
+
+    ``(畳んだ後のmedia, 畳んだ秒数, 畳んだ箇所数)`` を返す。"""
+    if playlist_total is None or len(anchor_media) < 2:
+        return anchor_media, 0.0, 0
+    if anchor_media[-1] <= playlist_total + _PLAYLIST_SPAN_TOLERANCE_SECONDS:
+        return anchor_media, 0.0, 0
+    # 各anchorが持ち込んだ「音声の進みに対する超過」= そこで開いた穴。
+    gaps = [
+        (anchor_media[i] - anchor_media[i - 1]) - (anchor_gapless[i] - anchor_gapless[i - 1])
+        for i in range(1, len(anchor_media))
+    ]
+    order = sorted(range(len(gaps)), key=lambda i: gaps[i], reverse=True)
+    media = list(anchor_media)
+    absorbed = 0.0
+    count = 0
+    for index in order:
+        if media[-1] <= playlist_total + _PLAYLIST_SPAN_TOLERANCE_SECONDS:
+            break
+        jump = gaps[index]
+        if jump < _PHANTOM_JUMP_MIN_SECONDS:
+            break
+        for k in range(index + 1, len(media)):
+            media[k] -= jump
+        absorbed += jump
+        count += 1
+    return media, absorbed, count
 
 
 def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
@@ -308,7 +376,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
         container = av.open(path, mode="r", metadata_errors="ignore")
     except Exception as exc:
         logger.error(
-            "could not open %s for transcription", os.path.basename(path),
+            "転写のために %s を開けません", os.path.basename(path),
             extra={"event": "stt.audio_open_failed", "ctx": {"path": path}},
             exc_info=True,
         )
@@ -317,6 +385,13 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
         stream = container.streams.audio[0]
         time_base = float(stream.time_base)
         rate = stream.rate
+        # 出す時刻は**playerがseekする軸**でなければならない。その軸は0始まりだが、
+        # containerの内部timestampは0始まりとは限らない。HLSのsegmentは実測1.438s から
+        # 始まり、**PyAVはffmpegと違って先頭を0へ寄せない**(ffmpegは-copytsを付けない
+        # 限り寄せる)。引かないまま出すと、文字起こしの全segmentがそのぶん後ろへずれ、
+        # 字幕clickのseekが丸ごと1.4秒ずれる。mp4では0.016s(=最初の音声frame)で、
+        # 引いても1 frame未満の補正にしかならない。
+        origin = (container.start_time / av.time_base) if container.start_time is not None else 0.0
         frames = container.decode(stream)
         while True:
             try:
@@ -329,7 +404,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
                 invalid_frames_skipped += 1
                 continue
             if frame.pts is not None:
-                media = frame.pts * time_base
+                media = frame.pts * time_base - origin
                 delta = media - gapless
                 if last_delta is None or abs(delta - last_delta) > _TIMEMAP_ANCHOR_STEP_SECONDS:
                     anchor_gapless.append(gapless)
@@ -352,13 +427,26 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
         # Close the map at the true end so interpolation covers the final run.
         anchor_gapless.append(gapless)
         anchor_media.append(gapless + last_delta)
+    # 壊れた源timestampが残した幻のjumpを、playlistの尺を権威にして畳む(_rebase_phantom_jumps)。
+    playlist_total = _playlist_media_total(path)
+    anchor_media, absorbed, absorbed_count = _rebase_phantom_jumps(
+        anchor_gapless, anchor_media, playlist_total)
+    if absorbed_count:
+        logger.warning(
+            "幻のtimestamp jump %d 件（%.1fs）を %s で畳みました（playlistの尺は %.1fs）",
+            absorbed_count, absorbed, os.path.basename(path), playlist_total or 0.0,
+            extra={"event": "stt.phantom_jump_rebased",
+                   "ctx": {"path": path, "jumps": absorbed_count,
+                           "absorbed_seconds": round(absorbed, 3),
+                           "playlist_seconds": round(playlist_total or 0.0, 3)}},
+        )
     # drift_seconds is the whole point of this pass: how far the end of the gapless
     # waveform sits behind the container timeline the player seeks by. It is also the
     # field that identifies which stored transcripts were produced from a drifting
     # source and therefore need re-running when the mapping changes.
     drift_seconds = round(anchor_media[-1] - anchor_gapless[-1], 3) if anchor_gapless else 0.0
     logger.info(
-        "decoded %.1fs of audio from %s (%d timemap anchors, %.3fs drift)",
+        "%.1fs 分の音声を %s から復号しました（timemapのanchor %d 件, ズレ %.3fs）",
         gapless, os.path.basename(path), len(anchor_gapless), drift_seconds,
         extra={"event": "stt.audio_decoded",
                "ctx": {"path": path, "anchors": len(anchor_gapless),
@@ -370,8 +458,8 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
     )
     if invalid_frames_skipped:
         logger.warning(
-            "skipped %d corrupt audio frame(s) while decoding %s; the transcript covers "
-            "less audio than the container holds",
+            "壊れた音声frame %d 件を %s の復号中にskipしました（転写はcontainerより"
+            "短い音声しか覆いません）",
             invalid_frames_skipped, os.path.basename(path),
             extra={"event": "stt.invalid_frames_skipped",
                    "ctx": {"path": path,
@@ -401,7 +489,15 @@ def _media_time(anchor_gapless: list, anchor_media: list, t: float) -> float:
 
 
 def transcribe(path: str, on_progress=None) -> dict:
-    """Transcribe an audio/video file. Blocking (CPU/GPU bound) — call via a thread.
+    """Transcribe an audio/video file. Blocking (CPU/GPU bound).
+
+    **Runs in the STT worker process, never in the server** — importing CTranslate2 into
+    a process that also loads torch puts two cuDNN versions behind one DLL name and kills
+    it outright (see tictok.record.stt_worker). Callers go through
+    ``stt_worker.run_transcribe``, which owns the GPU slot for the child's lifetime; that
+    is why no slot is taken here (``gpu_slot`` is per-process and would not line up with
+    the burn-in's).
+
     on_progress(done_seconds, total_seconds) is invoked per decoded segment."""
     model = _get_model()
     language = get_stt_language() or None
@@ -409,9 +505,10 @@ def transcribe(path: str, on_progress=None) -> dict:
     texts = []
     started = time.monotonic()
     gate = ProgressGate()
-    # The private lock keeps concurrent decodes off the shared CTranslate2 model; the
-    # process-wide slot keeps this decode off the GPU while a burn-in or Up出力 owns it.
-    with gpu_slot("stt"), _transcribe_lock:
+    # The private lock keeps concurrent decodes off the shared CTranslate2 model. The GPU
+    # slot is held by the parent (stt_worker.run_transcribe) around this whole process —
+    # taking it here would acquire the *worker's* semaphore, which no other job shares.
+    with _transcribe_lock:
         # Decode ourselves so segment times can be restored onto the media/container
         # timeline; the waveform is bit-identical to faster-whisper's own decode, so the
         # transcript text is unaffected. See _decode_audio_with_media_map.
@@ -421,7 +518,7 @@ def transcribe(path: str, on_progress=None) -> dict:
             raise
         except Exception as exc:
             logger.error(
-                "audio decode failed for %s", os.path.basename(path),
+                "%s の音声の復号に失敗しました", os.path.basename(path),
                 extra={"event": "stt.audio_decode_failed", "ctx": {"path": path}},
                 exc_info=True,
             )
@@ -437,7 +534,7 @@ def transcribe(path: str, on_progress=None) -> dict:
             )
         except Exception as exc:
             logger.error(
-                "whisper decoding failed for %s", os.path.basename(path),
+                "%s のwhisperの復号に失敗しました", os.path.basename(path),
                 extra={"event": "stt.transcribe_failed",
                        "ctx": {"path": path, "model": get_stt_model(),
                                "language": language,
@@ -470,7 +567,7 @@ def transcribe(path: str, on_progress=None) -> dict:
                 if gate.due(percent):
                     elapsed = time.monotonic() - started
                     logger.info(
-                        "transcribing %s: %.0f/%.0fs of audio (%.1f%%), %d segment(s)",
+                        "%s を転写中: 音声 %.0f/%.0fs（%.1f%%）, segment %d 件",
                         os.path.basename(path), segment.end, gapless_total,
                         percent, len(out_segments),
                         extra={"event": "stt.progress_reported",
@@ -483,7 +580,7 @@ def transcribe(path: str, on_progress=None) -> dict:
                     )
     elapsed = time.monotonic() - started
     logger.info(
-        "transcribed %s: %d segment(s) over %.0fs of audio",
+        "%s の転写が完了しました: segment %d 件 / 音声 %.0fs 分",
         os.path.basename(path), len(out_segments), media_total or gapless_total,
         extra={"event": "stt.transcribed",
                "ctx": {"path": path, "model": get_stt_model(),

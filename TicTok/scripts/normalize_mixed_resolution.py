@@ -64,7 +64,7 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
     mode = config.get_normalize_scale_mode()
     summary = ", ".join(f"{w}x{h}" for w, h in sorted(resolutions))
     logger.info(
-        "%s: %d resolutions (%s) -> %dx%d%s",
+        "%s: 解像度が %d種混在(%s) -> %dx%d%s",
         mp4_path.name, len(resolutions), summary, target_w, target_h,
         "" if apply else "  [dry-run]",
     )
@@ -76,7 +76,7 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
         config.get_normalize_codec(), config.get_normalize_quality(),
     )
     if not ok:
-        logger.error("  re-encode failed; keeping original %s", mp4_path.name)
+        logger.error("  re-encodeに失敗したため元のfileを維持します: %s", mp4_path.name)
         tmp.unlink(missing_ok=True)
         return False
     if backup_dir is not None:
@@ -92,7 +92,7 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
         try:
             shutil.move(str(mp4_path), str(backup_path))
         except OSError:
-            logger.error("  could not back up original %s; keeping it and discarding re-encode",
+            logger.error("  %s を退避できないため元のfileを維持しre-encode結果を破棄します",
                          mp4_path.name)
             tmp.unlink(missing_ok=True)
             normalize_marker_path(tmp).unlink(missing_ok=True)
@@ -104,11 +104,11 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
             shutil.move(str(backup_path), str(mp4_path))
             tmp.unlink(missing_ok=True)
             normalize_marker_path(tmp).unlink(missing_ok=True)
-            logger.error("  could not place re-encode for %s; restored original", mp4_path.name)
+            logger.error("  %s のre-encode結果を配置できないため元のfileへ戻しました", mp4_path.name)
             return False
         normalize_marker_path(tmp).unlink(missing_ok=True)
         _drop_timing_if_cfr(mp4_path, ok)
-        logger.info("  done: %s -> %dx%d (original backed up to %s)",
+        logger.info("  完了: %s -> %dx%d（元のfileの退避先 %s）",
                     mp4_path.name, target_w, target_h, backup_path)
         return True
     if not await commit_normalized(tmp, mp4_path, ok):
@@ -117,15 +117,15 @@ async def normalize_one(mp4_path: Path, apply: bool, backup_dir: Path = None) ->
         # marker, so the server's startup sweep swaps it in on its own; closing the file
         # and re-running this script also works.
         logger.error(
-            "  could not replace %s (file locked — is it open in a player?); normalized "
-            "output kept at %s and will be reclaimed at the next server startup",
+            "  %s を差し替えられません(fileがlockされています。playerで開いていませんか)。"
+            "正規化した出力は %s に残し、次のserver起動時に取り込みます",
             mp4_path.name, tmp.name,
         )
         return False
     if ok == "cfr":
-        logger.warning("  used CFR fallback for %s; dropped timing map (comment sync approximate)",
+        logger.warning("  %s はCFRへ落ちたためtiming mapを捨てました(commentの同期は近似になります)",
                        mp4_path.name)
-    logger.info("  done: %s -> %dx%d", mp4_path.name, target_w, target_h)
+    logger.info("  完了: %s -> %dx%d", mp4_path.name, target_w, target_h)
     return True
 
 
@@ -134,7 +134,7 @@ def _drop_timing_if_cfr(mp4_path: Path, mode) -> None:
     remove the sidecar; the comment burn-in then approximates rather than using a wrong map."""
     if mode == "cfr":
         timing_path(mp4_path).unlink(missing_ok=True)
-        logger.warning("  used CFR fallback for %s; dropped timing map (comment sync approximate)",
+        logger.warning("  %s はCFRへ落ちたためtiming mapを捨てました(commentの同期は近似になります)",
                        mp4_path.name)
 
 
@@ -149,7 +149,7 @@ async def main() -> int:
     backup_dir = Path(args.backup_dir) if args.backup_dir else None
 
     if not (ffmpeg_available() and ffprobe_available()):
-        logger.error("ffmpeg/ffprobe not found on PATH")
+        logger.error("ffmpeg/ffprobeがPATHにありません")
         return 2
 
     if args.file:
@@ -161,7 +161,7 @@ async def main() -> int:
         # They are already single-resolution, so this only avoids wasting a scan on them.
         targets = sorted(p for p in record_dir.glob("*.mp4") if ".overlay" not in p.name)
     if not targets:
-        logger.info("no recordings found")
+        logger.info("対象の録画がありません")
         return 0
 
     changed = 0
@@ -169,7 +169,7 @@ async def main() -> int:
     start = time.monotonic()
     for i, mp4_path in enumerate(targets, 1):
         if not mp4_path.is_file():
-            logger.warning("skip (missing): %s", mp4_path)
+            logger.warning("skip(fileがありません): %s", mp4_path)
             continue
         # Progress before each scan: each probe reads the whole file (keyframes span it),
         # so a multi-hour recording takes tens of seconds on spinning disk. Report count,
@@ -177,15 +177,15 @@ async def main() -> int:
         elapsed = time.monotonic() - start
         eta = elapsed / (i - 1) * (total - i + 1) if i > 1 else 0.0
         logger.info(
-            "[%d/%d] scanning %s (elapsed %dm%02ds, eta %dm%02ds)",
+            "[%d/%d] 走査中 %s（経過 %dm%02ds, 残り %dm%02ds）",
             i, total, mp4_path.name,
             int(elapsed) // 60, int(elapsed) % 60, int(eta) // 60, int(eta) % 60,
         )
         if await normalize_one(mp4_path, args.apply, backup_dir):
             changed += 1
     logger.info(
-        "%s %d of %d recording(s) with mixed resolution",
-        "normalized" if args.apply else "would normalize", changed, len(targets),
+        "解像度が混在する録画を%s: %d本 / 走査 %d本",
+        "正規化しました" if args.apply else "正規化できます", changed, len(targets),
     )
     return 0
 

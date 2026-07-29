@@ -1,0 +1,168 @@
+# 静的解析の設定。運用方針と段階導入の理由は doc/LINT_TYPECHECK.md を参照。
+# packaging用の [project] は持たない（このrepositoryはinstallせず、repository rootから直接起動する）。
+
+# ---------------------------------------------------------------------------
+# ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+    "venv",
+    "models",
+    "recordings",
+    "backups",
+    "logs",
+    "samples",
+    "journal",
+    "assets",
+]
+
+[tool.ruff.lint]
+# 方針: 「実bugを示すrule」を選ぶ。整形のみのruleは、formatterを導入していない現状では
+# diffを増やすだけで得るものが無いため採用しない。
+select = [
+    "E4", "E7", "E9",  # pycodestyle error (E722 bare except / E741 紛らわしい変数名 を含む)
+    "F",               # pyflakes (未定義名・未使用import・未使用局所変数)
+    "B",               # flake8-bugbear (実bugになりやすいpattern)
+    "ASYNC",           # async固有の落とし穴
+    "LOG",             # logging APIの誤用
+    "T20",             # print() 禁止 (CLAUDE.md: Backendでprint()は禁止)
+    "SIM115",          # context manager無しのopen() = file handle leak
+    "RUF006",          # create_taskの戻り値を保持しない (task がGCで消える)
+    "RUF013",          # 暗黙のOptional
+]
+
+ignore = [
+    # E501(行長)は非選択。既存codeに120超が1500行以上あり、formatter未導入で一括整形もできない。
+    # line-lengthの値はformatter導入時のためだけに置いてある。
+    "B007",  # 未使用のloop変数。命名の趣味の範囲で、bugを示さない。
+    "B008",  # 引数defaultでの関数呼び出し。FastAPIの Depends()/Query() がこの形。
+    "B904",  # raise ... from err。except節からのHTTPException送出が定型で、fromは冗長。
+    "B905",  # zip(strict=)。実bug検出力はあるが既存37箇所。doc記載の後追い対象。
+    # ASYNC2xx: async関数内のblocking呼び出し。この codebase は重いI/Oを to_thread へ
+    # 逃がす方針が既にあり、残りは意図的な同期呼び出し。一律警告は雑音になる。
+    "ASYNC221", "ASYNC230", "ASYNC240",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# --- 恒久的な例外(仕様上正しいもの) ---
+# scripts/ は運用CLI。標準出力が成果物そのものなのでprintが正しい。
+"scripts/*" = ["T20"]
+# stt_workerは `python -m` で起動する子process。stdoutは親との制御channel専用のため
+# usageはstderrへprintする(logger未初期化の時点で出る必要がある)。
+"tictok/record/stt_worker.py" = ["T20"]
+
+# --- 暫定baseline(他Agentが同時編集中のfile。修正でき次第この項目を削る) ---
+# 内容と対処方針は doc/LINT_TYPECHECK.md の「後追いで直すべき指摘」を参照。
+"scripts/normalize_mixed_resolution.py" = ["RUF013"]
+"tests/test_migration.py" = ["F541"]
+"tests/test_perf.py" = ["ASYNC251"]
+"tests/test_record_misc.py" = ["E741"]
+"tests/test_record_queue.py" = ["B009"]
+"tests/test_server.py" = ["E402"]
+"tictok/core/config.py" = ["F401"]
+"tictok/media/avatar_proxy.py" = ["E741"]
+"tictok/record/backups.py" = ["F401"]
+"tictok/record/hls_pack.py" = ["F401"]
+"tictok/record/recorder.py" = ["SIM115"]
+"tictok/record/upscale.py" = ["F401"]
+"tictok/record/video_overlay.py" = ["F401", "F841", "SIM115"]
+"tictok/search/semantic.py" = ["B023"]
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+# 段階導入。詳細な理由と昇格手順は doc/LINT_TYPECHECK.md。
+#   Stage 1 (現在): tictok/ 全体に check_untyped_defs を掛ける。annotationの追記を
+#                   強制せず、既に書かれている型だけで矛盾を検出する。まだ通らない
+#                   27 module は下の overrides で明示的にignoreし、この一覧は増やさない。
+#   Stage 2 以降  : ignore一覧を減らす → 中核moduleから disallow_untyped_defs を有効化。
+[tool.mypy]
+python_version = "3.10"
+files = ["tictok"]
+exclude = '(^|[\\/])(venv|models|recordings|backups|logs|samples|journal)([\\/]|$)'
+
+# annotationの追記は強制しないが、書かれている型の矛盾は見る。
+check_untyped_defs = true
+no_implicit_optional = true
+strict_equality = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = false
+
+show_error_codes = true
+pretty = false
+# override先のmoduleが未installでも落とさない(optional依存があるため)。
+warn_unused_configs = false
+
+# optional依存 / 型を持たない第三者library。
+# follow_imports="skip" は「installされていても中身を追わずAnyにする」指定。
+# これが無いと、torch等がある開発機と無いCIでmypyの結果が変わってしまう。
+[[tool.mypy.overrides]]
+module = [
+    "TikTokLive.*",
+    "fontTools.*",
+    "torch.*",
+    "torchvision.*",
+    "spandrel.*",
+    "onnxruntime.*",
+    "faster_whisper.*",
+    "ctranslate2.*",
+    "nvidia.*",
+    "playwright.*",
+]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+# Pillowは常にinstallされる実行時依存だが、py.typed の同梱がversionで変わる
+# (10.2は無し / 12.2は有り)。同梱されていれば実型で検査し、無ければAnyに落ちるだけで
+# CIが赤くならないようにする。follow_imports="skip" は付けない(付けると新しいPillowでも
+# 型検査が効かなくなる)。
+[[tool.mypy.overrides]]
+module = ["PIL.*"]
+ignore_missing_imports = true
+
+# Stage 1 の時点で未達のmodule。1件ずつ潰して、この一覧から削っていく。
+# 新規moduleは既定で検査対象になる(この一覧に足さないこと)。
+[[tool.mypy.overrides]]
+module = [
+    "tictok.analytics",
+    "tictok.glove_migration",
+    "tictok.server",
+    "tictok.storage",
+    "tictok.ai.ai_analysis",
+    "tictok.collect.collector",
+    "tictok.collect.live_resolver",
+    "tictok.collect.proto_dict",
+    "tictok.core.ffprobe",
+    "tictok.core.intervals",
+    "tictok.core.logging_setup",
+    "tictok.core.notify",
+    "tictok.core.process_lock",
+    "tictok.core.settings",
+    "tictok.core.spike",
+    "tictok.media.clipper",
+    "tictok.media.concat",
+    "tictok.media.laugh_audio",
+    "tictok.media.reel",
+    "tictok.media.smile",
+    "tictok.record.recorder",
+    "tictok.record.stt_worker",
+    "tictok.record.transcription",
+    "tictok.record.upscale",
+    "tictok.record.video_overlay",
+    "tictok.search.cutlist_export",
+    "tictok.search.query",
+]
+ignore_errors = true
+
+# tictok.store.* だけはmodule単位ではなくpackage単位で除外する。
+# 全moduleがmixinとして書かれており、`self._conn` / `self.flush` / `self._lock` は
+# 合成先のclassが持つ。mypyはmixin単体では解決できず attr-defined が大量に出る
+# (現状559件)。個別のcode不備ではないので1件ずつ潰す性質のものではない。
+# 昇格方法: 共有属性を宣言したProtocolを各mixinのbaseに置く。1度直せばpackage全体が
+# 通るので、その時点でこのentryごと削除する。
+[[tool.mypy.overrides]]
+module = ["tictok.store.*"]
+ignore_errors = true

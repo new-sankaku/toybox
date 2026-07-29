@@ -706,7 +706,7 @@ function renderAnomaly(data) {
     // 分かってもその配信を見に行く手段が画面上に無かったので、実物へ繋ぐ。
     html += `<tr><th>${fmtYmd(f.started_at)} `
       + `<a class="an-muted" href="/history?session=${f.session_id}"`
-      + ` title="このSessionの詳細を開きます。">#${f.session_id}</a></th>`
+      + ` title="このSessionの詳細を開きます。">#${sessionNo(f.session_id)}</a></th>`
       + `<td class="ident">${anEscape(f.unique_id)}</td>`
       + `<td>${anEscape(f.label || f.metric)}</td>`
       + `<td>${anomDirection(f.z)}</td>`
@@ -748,7 +748,7 @@ function renderAnomaly(data) {
     const dir = s.ratio != null && s.ratio < 1
       ? `<span class="an-warn">▼ ${pct}</span>`
       : `<span class="an-muted">▲ ${pct}</span>`;
-    sh += `<tr><th>${fmtYmd(s.started_at)} <span class="an-muted">#${s.session_id}</span></th>`
+    sh += `<tr><th>${fmtYmd(s.started_at)} <span class="an-muted">#${sessionNo(s.session_id)}</span></th>`
       + `<td class="ident">${anEscape(s.unique_id)}</td>`
       + `<td>${fmtTime(s.at)}</td>`
       + `<td class="num">${s.before.toFixed(1)}人</td>`

@@ -92,8 +92,8 @@ class GiftIconCache:
                 content = resp.content
                 if not content or len(content) > _MAX_BYTES:
                     logger.error(
-                        "gift icon response for %s is unusable (%d bytes); the icon is "
-                        "lost for the burn-in", gift_id, len(content),
+                        "%s のgift icon responseが使用できないため（%d bytes）"
+                        "焼き込みでiconが失われます", gift_id, len(content),
                         extra={"event": "collector.gift_icon_persist_failed",
                                "ctx": {"gift_id": int(gift_id), "reason": "invalid_size",
                                        "size_bytes": len(content), "max_bytes": _MAX_BYTES}},
@@ -102,7 +102,7 @@ class GiftIconCache:
                 self.path_for(gift_id).write_bytes(content)
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "persisted gift icon %s (%d bytes)", gift_id, len(content),
+                        "gift icon %s を保存しました（%d bytes）", gift_id, len(content),
                         extra={"event": "collector.gift_icon_persisted",
                                "ctx": {"gift_id": int(gift_id), "size_bytes": len(content)}},
                     )
@@ -112,7 +112,7 @@ class GiftIconCache:
                 # is only fetchable while the event is live, so a failure here means the
                 # burn-in renders this gift without its icon forever.
                 logger.error(
-                    "gift icon persist failed (id=%s): %s", gift_id, url,
+                    "gift iconの保存に失敗しました（id=%s）: %s", gift_id, url,
                     extra={"event": "collector.gift_icon_persist_failed",
                            "ctx": {"gift_id": int(gift_id), "reason": "unexpected"}},
                     exc_info=True,
@@ -138,7 +138,7 @@ class GiftIconCache:
         if names:
             self._merge_name_index(names)
         logger.info(
-            "gift icon cache refreshed: %d newly persisted, %d name(s) indexed",
+            "gift icon cacheを更新しました: 新規保存 %d 件, name index %d 件",
             count, len(names),
             extra={"event": "collector.gift_icons_cached",
                    "ctx": {"persisted": count, "names": len(names),
@@ -157,8 +157,8 @@ class GiftIconCache:
             path.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
         except (OSError, ValueError):
             logger.warning(
-                "gift name index write failed; legacy events without a gift id keep "
-                "rendering without an icon",
+                "gift nameのindexを書き込めないためgift idの無い旧eventは"
+                "icon無しで描画されます",
                 extra={"event": "collector.gift_name_index_write_failed",
                        "ctx": {"path": str(path), "names": len(mapping)}},
                 exc_info=True,

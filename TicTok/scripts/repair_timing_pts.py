@@ -130,12 +130,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if not ffprobe_available():
-        logger.error("ffprobe/ffmpeg not found on PATH; cannot probe segment durations.")
+        logger.error("ffprobe/ffmpegがPATH上に見つからないためsegmentの尺を測れません")
         return 2
 
     record_dir = Path(args.record_dir) if args.record_dir else Path(record_dir_from_db(get_db_path()))
     if not record_dir.is_dir():
-        logger.error("recordings directory not found: %s", record_dir)
+        logger.error("recordingのdirectoryが見つかりません: %s", record_dir)
         return 2
 
     repaired = scanned = 0
@@ -173,12 +173,12 @@ def main() -> int:
         durations = _probe_durations([seg for seg, _, _ in kept])
         media_pts = media_pts_from_segments([e for _, e, _ in kept], durations, mp4_dur)
         if media_pts is None:
-            logger.info("%s: segment durations incomplete or mp4 unprobed; skipped", hls_dir.name)
+            logger.info("%s: segmentの尺が揃わないかmp4を測れなかったためskipしました", hls_dir.name)
             continue
 
         drift = mp4_dur - anchors[-1][1] if mp4_dur else 0.0
         logger.info(
-            "%s: %d kept segments, media=%.0fs mp4=%.0fs (mux inflation %.0fs) -> media_pts[%d]",
+            "%s: 採用したsegment %d件, media=%.0fs mp4=%.0fs（muxでの膨らみ %.0fs）-> media_pts[%d]",
             hls_dir.name, len(kept), anchors[-1][1], mp4_dur or 0.0, drift, len(media_pts),
         )
         if not args.apply:
@@ -194,15 +194,15 @@ def main() -> int:
             tpath.parent.mkdir(parents=True, exist_ok=True)
             tpath.write_text(json.dumps(payload), encoding="utf-8")
         except OSError:
-            logger.warning("  failed to write timing map; left untouched", exc_info=True)
+            logger.warning("  timing mapの書き込みに失敗したため手を付けずに残します", exc_info=True)
             continue
         for art in _overlay_artifacts(mp4_path):
             art.unlink(missing_ok=True)
-        logger.info("  timing map rebuilt with media_pts; stale burn-in cache dropped")
+        logger.info("  media_pts付きでtiming mapを作り直し、古い焼き込みcacheを削除しました")
         repaired += 1
 
     logger.info(
-        "%s: scanned %d recording(s) with retained HLS, %s %d.",
+        "%s: HLSが残っている recording %d件を確認し、%s %d件",
         "applied" if args.apply else "dry-run", scanned,
         "repaired" if args.apply else "would repair", repaired,
     )

@@ -57,7 +57,7 @@ def _ensure_semaphore() -> threading.Semaphore:
             _limit = max(1, config.get_gpu_concurrency())
             _semaphore = threading.Semaphore(_limit)
             logger.info(
-                "gpu admission control: %d concurrent job(s)", _limit,
+                "GPUの同時実行数を決定しました: job %d 件まで", _limit,
                 extra={"event": "gpu.limit_resolved", "ctx": {"limit": _limit}},
             )
     return _semaphore
@@ -93,7 +93,7 @@ def _acquire(label: str) -> int:
     _held.set(1)
     if waited >= 1.0:
         logger.info(
-            "gpu slot acquired by %s after waiting %.1fs", label, waited,
+            "%s が %.1fs 待ってGPUの枠を取得しました", label, waited,
             extra={"event": "gpu.slot_waited",
                    "ctx": {"label": label, "waited_seconds": round(waited, 1),
                            "limit": _limit}},

@@ -80,6 +80,36 @@
       </div>
     </div>
 
+    <div class="a-card">
+      <h3>API所要時間 <span class="sub">起動してからのAPIごとの累計です。並びは合計時間の順（＝serverの時間を食っている順）で、1回の遅さではありません。内訳はその時間がどこへ消えたかです。</span></h3>
+      <div class="body">
+        <div class="note-actions">
+          <button id="perf-reload" class="btn btn-compact">最新にする</button>
+          <button id="perf-reset" class="btn btn-compact" title="ここまでの計測を捨てて測り直します。修正の前後を比べるときに使います。">計測をreset</button>
+          <span id="perf-note" class="chart-note"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>API</th>
+                <th class="num" title="計測してからの呼び出し回数。">回数</th>
+                <th class="num" title="そのAPIに費やした時間の合計。">合計</th>
+                <th class="num" title="全APIの合計に占める割合。">割合</th>
+                <th class="num" title="1回あたりの平均。">平均</th>
+                <th class="num" title="半数がこの時間以内。">p50</th>
+                <th class="num" title="20回に1回はこれ以上かかります。">p95</th>
+                <th class="num" title="計測中に一番かかった回。">最大</th>
+                <th title="1回の中で時間がどこへ消えたか。db=DB照会 / fs=file走査 / proc=子process / net=外部API / other=それ以外（応答の組み立て等）。">内訳</th>
+              </tr>
+            </thead>
+            <tbody id="perf-rows"></tbody>
+          </table>
+          <div id="perf-empty" class="feed-empty" data-label="API所要時間">まだ記録がありません。</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script src="/static/common.js"></script>

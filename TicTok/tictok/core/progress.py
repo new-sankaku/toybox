@@ -63,7 +63,7 @@ REPROCESS_PHASES: tuple = (
 RETENTION_PHASES: tuple = (
     ("transient", "中断renderの残骸を削除中", 0.2),
     ("derived", "派生fileを削除中", 0.4),
-    ("source", "録画本体を削除中", 0.4),
+    ("source", "原本を削除中", 0.4),
 )
 
 # プレビューは窓ぶんだけを同じ3 passで通す。probe/planは全尺でも軽いので1段階に畳む。
@@ -219,7 +219,7 @@ class JobProgress:
         try:
             await self._sink(self._ceiling, stage)
         except Exception:
-            logger.exception("job progress sink failed")
+            logger.exception("jobの進捗sinkが失敗しました")
 
     async def _emit(self, force: bool = False) -> None:
         if self._sink is None:
@@ -238,7 +238,7 @@ class JobProgress:
         try:
             await self._sink(pct, text)
         except Exception:
-            logger.exception("job progress sink failed")
+            logger.exception("jobの進捗sinkが失敗しました")
 
     # ---- callback adapter ----
 
@@ -301,4 +301,4 @@ async def pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb,
             try:
                 await on_progress(pct, max(0, out_us))
             except Exception:
-                logger.exception("overlay progress callback failed")
+                logger.exception("コメント焼き込みの進捗callbackが失敗しました")

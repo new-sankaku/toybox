@@ -118,8 +118,8 @@ def ensure_avatar_upscaled(src_img: Path) -> Optional[Path]:
         except UpscaleError:
             _model_unavailable = True
             logger.warning(
-                "avatar upscale requested but the super-resolution model is unavailable; "
-                "burning in raw 72px avatars instead",
+                "avatarの高画質化が要求されましたが超解像modelが利用できないため"
+                "72pxのavatarをそのまま焼き込みます",
                 extra={"event": "upscale.avatar_model_load_failed",
                        "ctx": {"path": str(model_file), "suppressed_for_process": True}},
                 exc_info=True,
@@ -130,7 +130,7 @@ def ensure_avatar_upscaled(src_img: Path) -> Optional[Path]:
             _render_avatar(descriptor, device, half, src_img, dst)
         except Exception:
             logger.warning(
-                "avatar upscale failed for %s; using the raw avatar", src_img.name,
+                "%s のavatarの高画質化に失敗したため元のavatarを使用します", src_img.name,
                 extra={"event": "upscale.avatar_failed",
                        "ctx": {"path": str(src_img), "device": device, "half": half}},
                 exc_info=True,
@@ -139,7 +139,7 @@ def ensure_avatar_upscaled(src_img: Path) -> Optional[Path]:
             return None
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "upscaled avatar %s", src_img.name,
+                "avatar %s を高画質化しました", src_img.name,
                 extra={"event": "upscale.avatar_rendered",
                        "ctx": {"path": str(dst),
                                "size_bytes": dst.stat().st_size if dst.is_file() else 0,
@@ -186,7 +186,7 @@ def _prune_stale(src_img: Path, keep: Path) -> None:
                 old.unlink(missing_ok=True)
     except OSError:
         logger.warning(
-            "failed to prune stale upscaled avatars for %s", src_img.name,
+            "%s の古い高画質化avatarの削除に失敗しました", src_img.name,
             extra={"event": "upscale.avatar_prune_failed", "ctx": {"path": str(src_img)}},
             exc_info=True,
         )

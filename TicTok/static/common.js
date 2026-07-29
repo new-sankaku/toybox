@@ -96,6 +96,47 @@ function fmtNum(value) {
   return Number(value || 0).toLocaleString("ja-JP");
 }
 
+// 画面に出す番号はSession番号(0埋め5桁)へ一本化する。録画table のPKを混ぜると、同じ録画が
+// disk上の 00339_… と画面の #705 という別々の名前で呼ばれ、file名から画面を、画面からfileを
+// 引けなくなる。幅は recorder.SESSION_PREFIX_WIDTH と同じ。
+const SESSION_NO_WIDTH = 5;
+
+function sessionNo(id) {
+  if (id === null || id === undefined || id === "") return "";
+  const n = Number(id);
+  if (!Number.isFinite(n)) return String(id);
+  return String(Math.trunc(n)).padStart(SESSION_NO_WIDTH, "0");
+}
+
+// 録画のfile名から拡張子を落としたstem(``00339_user_20260721_144949``)。
+function recStem(rec) {
+  return String((rec && rec.filename) || "").replace(/\.[^./\\]+$/, "");
+}
+
+// 録画の番号。file名の先頭を正とし、session_idはその次に見る — session削除後も行が残る
+// 録画(実測136件)はsession_idがNULLだがfile名の番号は生きている。中断録画のようにfile名が
+// 規約から外れているものだけがsession_id側へ落ちる。
+function recNo(rec) {
+  const head = /^(\d{5,})_/.exec(recStem(rec));
+  if (head) return head[1];
+  return sessionNo(rec && rec.session_id);
+}
+
+function recTag(rec) {
+  const no = recNo(rec);
+  return no ? `#${no}` : "—";
+}
+
+// 一覧・通知に出す録画の名前。file名が規約どおり(先頭に番号)ならそれ自体が番号を名乗って
+// いるのでそのまま出し、外れている録画(中断時のindex.m3u8など)だけ番号を前に補う。
+function recName(rec) {
+  const stem = recStem(rec);
+  if (/^\d{5,}_/.test(stem)) return stem;
+  const tag = recTag(rec);
+  if (!stem) return tag;
+  return tag === "—" ? stem : `${tag} ${stem}`;
+}
+
 // Serverのerror detailは2種類が混ざる。app自身が利用者向けに書いた日本語の説明と、
 // FastAPIの既定error(routeが無いときの "Not Found" 等)やPython例外のstr()で出る英語。
 // 後者をそのまま画面へ出すと日本語UIの中に意味の取れない生文言が並ぶため、statusから
@@ -563,7 +604,7 @@ function createSessionTrendChart(canvas, opts = {}) {
           callbacks: {
             title: (items) => {
               const r = rows[items[0].dataIndex];
-              return r ? `#${r.id}  ${fmtDateTime(r.started_at)}` : "";
+              return r ? `#${sessionNo(r.id)}  ${fmtDateTime(r.started_at)}` : "";
             },
             label: (item) => {
               if (item.dataset.label === "配信時間") {
@@ -753,8 +794,14 @@ function battleBarUnits(topo) {
   return [...own, ...opp].map((p) => ({ score: p.score || 0, own: p.is_own, self: p.is_own }));
 }
 
-// 敵陣segmentの別色数(c1..cN)。これを超える陣営は循環で色を再利用する。
-const SEG_OPP_COLORS = 6;
+// 敵陣segmentの別色数(c1..cN)。これを超える陣営は循環で色を再利用する。動画焼き込みの
+// _SCORE_LANE_PALETTE(先頭が自陣roseで、残りが敵陣色)と同じ本数にして割り当てを一致させる。
+const SEG_OPP_COLORS = 5;
+
+// Battle chartの自陣/敵陣線。バーの陣営色(rose/cyan)と同系だが、明地の上で線として
+// 読める暗さのink側を使う(style.cssの--battle-own-ink/--battle-opp-inkと同値)。
+const BATTLE_OWN_LINE = "#b3123f";
+const BATTLE_OPP_LINE = "#0b6478";
 
 // 動画overlayの焼き込みと同じ「1本のバーをN分割」スコアバー。各segmentの幅は
 // flex-grow=scoreで境界が比率移動し、内側にscoreを描く。色は陣営(segment)ごとに変える:
@@ -1035,8 +1082,8 @@ function syncBattleScoreChart(entry, battle) {
     data: {
       labels,
       datasets: [
-        { label: "自陣", data: ownData, borderColor: "#5d6e4e", backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
-        { label: "敵陣", data: oppData, borderColor: "#a4502f", backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
+        { label: "自陣", data: ownData, borderColor: BATTLE_OWN_LINE, backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
+        { label: "敵陣", data: oppData, borderColor: BATTLE_OPP_LINE, backgroundColor: "transparent", borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
       ],
     },
     options: {
@@ -1514,19 +1561,24 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
   }
   tbody.innerHTML = "";
   if (empty) empty.classList.toggle("hidden", rows.length > 0);
+  // 行は画面から切り離されたfragmentの上で組む。live tbodyへ1行ずつappendすると、
+  // 行数ぶんlayoutが走る(この共通描画は数百行の表でも使われる)。
+  const fragment = document.createDocumentFragment();
+  const numeric = new Set(numericCols);
   rows.forEach((row, i) => {
     const tr = document.createElement("tr");
     if (i === 0) tr.className = "rank-top";
     toCells(row, i + 1).forEach((cell, col) => {
       const td = document.createElement("td");
-      if (numericCols.includes(col)) td.className = "num";
+      if (numeric.has(col)) td.className = "num";
       if (cell instanceof Node) td.appendChild(cell);
       else td.textContent = cell;
       tr.appendChild(td);
     });
     if (onRow) onRow(tr, row, i);
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
 }
 
 // KPIの帯(a-kpibar)へlabel/値のchipを並べる。fans/streamers/videosが同じ物を持って
@@ -1725,8 +1777,10 @@ function fmtBytes(bytes) {
 // ---- 再生できなかったときの理由 ----
 // 容量整理で動画fileだけを消した録画は行が残るため、再生の入口(検索hit・ハイライト)も
 // 残る。srcが404でも<video>はerror eventを出すだけで画面は無言で止まるので、理由を出す。
+// 「動画file」ではなく素材とmp4の両方を名乗る。判定(/path の exists)はmp4だけを見ていた
+// 頃があり、素材が丸ごと残っている録画にまで「削除されています」と出していた。
 const VIDEO_MISSING_TEXT =
-  "この録画の動画fileは削除されています。文字起こし・検索・bookmarkは引き続き使えます。";
+  "この録画は素材(.ts)もmp4も残っていません。文字起こし・検索・bookmarkは引き続き使えます。";
 const VIDEO_ERROR_TEXT = "この録画を再生できませんでした。";
 
 // error eventはfile削除以外(codec・網)でも飛ぶ。消えたと決め打ちすると、実際は別の
@@ -1971,7 +2025,7 @@ function protectBadge(rec, onDone) {
 async function deleteDerived(rec, onDone) {
   try {
     const res = await apiSend("DELETE", `/api/recordings/${rec.id}/derived`);
-    showToast(`録画 #${rec.id} の派生物 ${fmtBytes(res.freed_bytes)} を削除しました。`);
+    showToast(`録画 ${recName(rec)} の派生物 ${fmtBytes(res.freed_bytes)} を削除しました。`);
     if (onDone) onDone();
   } catch (err) {
     showError(err);
@@ -2181,8 +2235,20 @@ function applyJobBar(message) {
   if (message.type === "job_update" && message.job) {
     if (!jobBarState) jobBarState = new Map();
     jobBarState.set(message.job.job_id, message.job);
-    renderJobBar();
+    scheduleJobBar();
   }
+}
+
+// queueは1件が動き出すたび待機列の順番を全件配り直すので、job_updateは数十通が一息に来る。
+// 帯の数え直しは全件走査なので、1通ごとにやらず次の描画frameまで畳む。
+let jobBarScheduled = false;
+function scheduleJobBar() {
+  if (jobBarScheduled) return;
+  jobBarScheduled = true;
+  requestAnimationFrame(() => {
+    jobBarScheduled = false;
+    renderJobBar();
+  });
 }
 
 // ---- 全画面共通: 横断jump (Ctrl+K) ----
@@ -2225,9 +2291,10 @@ function buildJumpItems(streamers, sessions, recordings, fans) {
     const name = s.owner_nickname || s.unique_id;
     items.push({
       kind: "session",
-      title: `#${s.id} ${name}`,
+      title: `#${sessionNo(s.id)} ${name}`,
       sub: `@${s.unique_id} ・ ${fmtDateTime(s.started_at)}`,
-      search: `${s.id} ${s.unique_id} ${name} ${fmtYmd(s.started_at)}`.toLowerCase(),
+      // 0埋めの有無どちらで打っても当たるよう、素の番号も検索語に残す。
+      search: `${sessionNo(s.id)} ${s.id} ${s.unique_id} ${name} ${fmtYmd(s.started_at)}`.toLowerCase(),
       href: `/history?session=${s.id}`,
     });
   });
@@ -2246,8 +2313,8 @@ function buildJumpItems(streamers, sessions, recordings, fans) {
     items.push({
       kind: "recording",
       title: r.filename,
-      sub: `Session #${r.session_id} ・ @${r.unique_id} ・ ${r.quality || "-"}`,
-      search: `${r.filename} ${r.unique_id} ${r.session_id}`.toLowerCase(),
+      sub: `Session ${recTag(r)} ・ @${r.unique_id} ・ ${r.quality || "-"}`,
+      search: `${r.filename} ${r.unique_id} ${recNo(r)} ${r.session_id}`.toLowerCase(),
       href: `/history?session=${r.session_id}`,
     });
   });

@@ -177,13 +177,13 @@ def main() -> int:
             if row and row[0] and Path(row[0]).resolve() != roots[0].resolve():
                 roots.append(Path(row[0]))
         except sqlite3.Error:
-            logger.warning("could not read record_dir_final; scanning the working root only")
+            logger.warning("record_dir_finalを読めないためwork rootのみ走査します")
     roots = [r for r in roots if r.is_dir()]
     if not roots:
-        logger.error("no recordings directory found")
+        logger.error("録画dirが見つかりません")
         return 1
     for root in roots:
-        logger.info("scanning %s", root)
+        logger.info("走査します: %s", root)
 
     recordings = iter_recordings(roots)
     if args.streamer:
@@ -191,8 +191,8 @@ def main() -> int:
         # parent. Lets one streamer be finished off without waiting on the rest.
         wanted = {s.lower() for s in args.streamer}
         recordings = [p for p in recordings if p.parent.parent.name.lower() in wanted]
-        logger.info("streamer filter: %s", ", ".join(sorted(wanted)))
-    logger.info("%d mp4 file(s) found\n", len(recordings))
+        logger.info("配信者で絞り込みます: %s", ", ".join(sorted(wanted)))
+    logger.info("mp4 file %d件が見つかりました\n", len(recordings))
 
     skipped = 0
     worklist = []
@@ -200,7 +200,7 @@ def main() -> int:
         try:
             gap = audio_gap_seconds(path)
         except (RuntimeError, KeyError, ValueError) as exc:
-            logger.warning("SKIP  %s (%s)", path.name, exc)
+            logger.warning("skip  %s（音声の穴を測れません: %s）", path.name, exc)
             skipped += 1
             continue
         if gap < AUDIO_GAP_MIN_SECONDS:
@@ -212,13 +212,13 @@ def main() -> int:
 
     if not args.apply:
         for path, gap in worklist:
-            logger.info("REPAIR(dry-run) %-52s gap=%8.1fs", path.name[:52], gap)
-        logger.info("\ndry-run: repaired=%d failed=0 skipped(clean)=%d",
+            logger.info("修復(dry-run) %-52s 音声の穴=%8.1fs", path.name[:52], gap)
+        logger.info("\ndry-run: 修復=%d 失敗=0 skip(穴なし)=%d",
                     len(worklist), skipped)
         return 0
 
     total_bytes = sum(p.stat().st_size for p, _ in worklist)
-    logger.info("repairing %d file(s), %.1f GB, %d job(s)\n",
+    logger.info("%d件 %.1f GB を修復します（job %d並列）\n",
                 len(worklist), total_bytes / 1024 ** 3, args.jobs)
 
     def repair_one(item) -> bool:
@@ -234,9 +234,9 @@ def main() -> int:
                 # had every remaining file fail to read after the drive was hammered,
                 # yet each of those files repaired fine on its own afterwards. Back off
                 # and let the drive settle rather than burning the whole pass.
-                logger.warning("RETRY %-52s %s", path.name[:52], detail)
+                logger.warning("再試行 %-52s %s", path.name[:52], detail)
                 time.sleep(RETRY_DELAY_SECONDS * attempt)
-        logger.error("FAIL  %-52s %s", path.name[:52], detail)
+        logger.error("失敗  %-52s %s", path.name[:52], detail)
         return False
 
     def _attempt(path: Path, tmp: Path, gap: float, started: float) -> tuple:
@@ -263,9 +263,9 @@ def main() -> int:
             try:
                 tmp.unlink(missing_ok=True)
             except OSError:
-                logger.warning("could not remove %s; delete it by hand", tmp.name)
+                logger.warning("%s を削除できません。手で削除してください", tmp.name)
             return False, str(exc)
-        logger.info("OK    %-52s gap %8.1fs -> %.2fs  (%.0fs)",
+        logger.info("完了  %-52s 音声の穴 %8.1fs -> %.2fs（%.0fs）",
                     path.name[:52], gap, new_gap, time.monotonic() - started)
         return True, ""
 
@@ -278,10 +278,10 @@ def main() -> int:
     repaired = sum(results)
     failed = len(results) - repaired
 
-    logger.info("\napplied: repaired=%d failed=%d skipped(clean)=%d",
+    logger.info("\n実行しました: 修復=%d 失敗=%d skip(穴なし)=%d",
                 repaired, failed, skipped)
     if not args.no_backup and repaired:
-        logger.info("originals kept under %s/ — delete them once the result is confirmed",
+        logger.info("元のfileは %s/ に残しています。結果を確認したら削除してください",
                     BACKUP_DIRNAME)
     return 1 if failed else 0
 

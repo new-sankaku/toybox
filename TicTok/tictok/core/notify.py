@@ -150,7 +150,7 @@ class Notifier:
         self._task = asyncio.create_task(self._worker(), name="tictok-notifier")
         targets = get_notify_webhook_urls()
         logger.info(
-            "notifier started with %d webhook target(s)", len(targets),
+            "notifierを開始しました（webhookの宛先 %d 件）", len(targets),
             extra={"event": "notify.started",
                    "ctx": {"targets": [redact_url(u) for u in targets],
                            "enabled": bool(self._settings.get("notify_enabled"))}},
@@ -166,7 +166,7 @@ class Notifier:
                                    timeout=get_notify_shutdown_drain_seconds())
         except asyncio.TimeoutError:
             logger.warning(
-                "notifier stopped with %d alert(s) still queued", self._queue.qsize(),
+                "alertが %d 件queueに残ったままnotifierを停止しました", self._queue.qsize(),
                 extra={"event": "notify.drain_timeout",
                        "ctx": {"pending": self._queue.qsize()}},
             )
@@ -184,7 +184,7 @@ class Notifier:
             await self._client.aclose()
             self._client = None
         logger.info(
-            "notifier stopped (sent=%d failed=%d dropped=%d)",
+            "notifierを停止しました（送信=%d 失敗=%d 破棄=%d）",
             self.sent, self.failed, self._dropped,
             extra={"event": "notify.stopped",
                    "ctx": {"sent": self.sent, "failed": self.failed,
@@ -215,7 +215,7 @@ class Notifier:
             return False
         except Exception:
             logger.exception(
-                "failed to queue an alert; it is dropped",
+                "alertをqueueへ積めなかったため破棄します",
                 extra={"event": "notify.enqueue_failed", "ctx": {"rule": alert.rule}},
             )
             return False
@@ -258,7 +258,7 @@ class Notifier:
                 # workerが例外で死ぬと以後の通知が全て無音になる。ここは必ず握って続行する
                 # (握った事実はlogに残る)。
                 logger.exception(
-                    "unexpected failure while delivering an alert",
+                    "alertの送信中に想定外の失敗が発生しました",
                     extra={"event": "notify.deliver_crashed",
                            "ctx": {"rule": alert.rule}},
                 )
@@ -282,7 +282,7 @@ class Notifier:
                 if response.status_code < 400:
                     self.sent += 1
                     logger.info(
-                        "alert delivered (%s) to %s in %d attempt(s)",
+                        "alertを送信しました（%s）: 宛先 %s, 試行 %d 回",
                         alert.rule, redact_url(url), attempt,
                         extra={"event": "notify.delivered",
                                "ctx": {"rule": alert.rule, "format": fmt,
@@ -324,7 +324,7 @@ class Notifier:
                                                   unique_id, detail))
         except Exception:
             logger.exception(
-                "alert rule evaluation failed for ops event %s", kind,
+                "ops event %s に対するalert ruleの評価に失敗しました", kind,
                 extra={"event": "notify.rule_failed", "ctx": {"kind": kind}},
             )
 
@@ -333,7 +333,7 @@ class Notifier:
             self.submit(self.rules.from_coin_rate(unique_id, coins_per_minute))
         except Exception:
             logger.exception(
-                "alert rule evaluation failed for coin rate",
+                "coin rateに対するalert ruleの評価に失敗しました",
                 extra={"event": "notify.rule_failed", "ctx": {"unique_id": unique_id}},
             )
 
@@ -342,7 +342,7 @@ class Notifier:
             self.submit(self.rules.from_battle_started(unique_id, battle_id, opponents))
         except Exception:
             logger.exception(
-                "alert rule evaluation failed for battle start",
+                "battleの開始に対するalert ruleの評価に失敗しました",
                 extra={"event": "notify.rule_failed", "ctx": {"unique_id": unique_id}},
             )
 

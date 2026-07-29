@@ -34,6 +34,34 @@ def timemap_current(timemap_version) -> bool:
     return timemap_version == TIMEMAP_VERSION
 
 
+# 文字起こしの尺と素材の実尺の差がこれを超えたら、別の軸で作られたと判断する。同じ素材から
+# 作られていれば両者は秒未満で一致する(実測: やり直した62件が0.15秒以内)。VADの丸めと最終
+# segmentの端数を吸収するぶんだけ余裕を持たせる。
+AXIS_TOLERANCE_SECONDS = 2.0
+
+
+def axis_matches_media(transcript, media_duration) -> bool:
+    """このtranscriptの時刻が、いま焼き込む素材と同じ時間軸に載っているか。
+
+    ``timemap_current`` は「どの版のmapで作られたか」しか見ない。版が同じでも、作られた
+    ときの入力が別物なら時刻は尺に比例してずれる。実測でいずれも版1のまま:
+
+      * 幻の音声穴で伸びた旧mp4から作った文字起こし … 実尺+191秒
+      * 源のtimestampが壊れたsegmentのjumpを含むもの … 実尺+28287秒
+
+    こうなると字幕は録画の外側を指す。焼き込みは元に戻せないので、尺が合わないものは
+    焼かずに拒否する。
+
+    実尺が測れないときはTrueを返す。根拠が無いまま拒否すると、正しい文字起こしまで焼けなく
+    なる — 拒否するのは「ズレている証拠がある」ときだけにする。"""
+    if media_duration is None or media_duration <= 0:
+        return True
+    duration = (transcript or {}).get("duration")
+    if not duration:
+        return True
+    return abs(float(duration) - float(media_duration)) <= AXIS_TOLERANCE_SECONDS
+
+
 def usable_segments(segments, media_duration=None) -> list:
     """字幕として出せるsegmentだけを時刻順で返す。
 
@@ -68,7 +96,7 @@ def usable_segments(segments, media_duration=None) -> list:
     dropped = len(segments or []) - len(items)
     if dropped:
         logger.info(
-            "subtitle export dropped %d unusable segment(s) of %d",
+            "字幕の書き出しで使えないsegment %d 件を除外しました（全 %d 件）",
             dropped, len(segments or []),
             extra={"event": "subtitle.segments_dropped",
                    "ctx": {"dropped": dropped, "total": len(segments or [])}},

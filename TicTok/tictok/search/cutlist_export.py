@@ -26,16 +26,16 @@ EDL/FCPXMLの位置はframe単位の厳密さまでは保証しない。秒を�
 無いので、用途に応じて選べるよう3形式を並べている。
 """
 
-import asyncio
 import csv
 import io
 import json
 import logging
-import shutil
 from fractions import Fraction
 from pathlib import Path
 from typing import Optional
 from xml.sax.saxutils import escape, quoteattr
+
+from tictok.core import ffprobe
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class CutlistExportError(RuntimeError):
 
 
 def _ffprobe_available() -> bool:
-    return shutil.which("ffprobe") is not None
+    return ffprobe.available()
 
 
 async def _probe_media(path: Path) -> tuple:
@@ -73,38 +73,37 @@ async def _probe_media(path: Path) -> tuple:
     すべてが1つの汎用errorへ潰れ、userはffprobeが無いのか映像streamが無いのか分からない。"""
     if not _ffprobe_available():
         logger.warning(
-            "ffprobe not found; cutlist timecode cannot be resolved",
+            "ffprobeが見つからないためcutlistのtimecodeを解決できません",
             extra={"event": "cutlist.probe_unavailable", "ctx": {"path": str(path)}},
         )
         return None, "ffprobeが見つかりません"
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-print_format", "json",
-            "-show_format", "-show_streams", str(path),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        result = await ffprobe.run(
+            ["ffprobe", "-v", "error", "-print_format", "json",
+             "-show_format", "-show_streams", str(path)],
+            timeout=ffprobe.SHORT_TIMEOUT_SECONDS,
         )
-        out, err = await proc.communicate()
     except OSError:
         logger.warning(
-            "ffprobe failed to start for %s", path, exc_info=True,
+            "%s に対するffprobeを起動できません", path, exc_info=True,
             extra={"event": "cutlist.probe_failed", "ctx": {"path": str(path)}},
         )
         return None, "ffprobeを起動できません"
-    if proc.returncode != 0:
+    if not result.ok:
         logger.warning(
-            "ffprobe returned %d for %s", proc.returncode, path,
+            "ffprobeがexit %s を返しました: %s", result.returncode, path,
             extra={"event": "cutlist.probe_failed",
-                   "ctx": {"path": str(path), "returncode": proc.returncode,
-                           "stderr": (err or b"").decode("utf-8", "replace")[:500]}},
+                   "ctx": {"path": str(path), "returncode": result.returncode,
+                           "stderr": result.stderr[:500]}},
         )
-        return None, f"ffprobeがexit {proc.returncode}で失敗"
+        if result.timed_out:
+            return None, "ffprobeが時間内に応答しません"
+        return None, f"ffprobeがexit {result.returncode}で失敗"
     try:
-        info = json.loads(out.decode("utf-8", "replace"))
+        info = json.loads(result.stdout)
     except ValueError:
         logger.warning(
-            "ffprobe output was not JSON for %s", path, exc_info=True,
+            "ffprobeの出力がJSONではありません: %s", path, exc_info=True,
             extra={"event": "cutlist.probe_failed", "ctx": {"path": str(path)}},
         )
         return None, "ffprobeの出力を解釈できません"
@@ -113,14 +112,14 @@ async def _probe_media(path: Path) -> tuple:
                   if s.get("codec_type") == "video"), None)
     if video is None:
         logger.warning(
-            "no video stream in %s", path,
+            "%s に映像streamがありません", path,
             extra={"event": "cutlist.probe_no_video", "ctx": {"path": str(path)}},
         )
         return None, "映像streamがありません"
     fps = _parse_rate(video.get("r_frame_rate"))
     if fps is None:
         logger.warning(
-            "unusable r_frame_rate %r in %s", video.get("r_frame_rate"), path,
+            "r_frame_rate %r が使用できません: %s", video.get("r_frame_rate"), path,
             extra={"event": "cutlist.probe_no_fps",
                    "ctx": {"path": str(path), "r_frame_rate": video.get("r_frame_rate")}},
         )

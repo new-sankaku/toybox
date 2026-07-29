@@ -183,7 +183,8 @@ def streamer_digest(profile: dict) -> dict:
     """配信者profileだけから作れる部分(この配信者の実績)。"""
     battles = profile["battles"]
     heatmap_top = sorted(profile["heatmap"], key=lambda c: c["diamonds"], reverse=True)[:5]
-    return {
+    coop = profile.get("coop")
+    digest = {
         "配信者": profile["identity"]["nickname"],
         "配信回数": profile["count"],
         "通算": profile["totals"],
@@ -216,6 +217,22 @@ def streamer_digest(profile: dict) -> dict:
             "ため、時間帯の傾向としては読めない。時間帯の傾向は"
             "cross_streamer_reference.時間帯index を見ること。"),
     }
+    # 共演構成は配信の組み立て方そのもの(ソロで回すのか、コラボ・Battleに寄せるのか)を
+    # 表すので、講評の材料に載せる。取れない配信者では入れ物ごと出さない。
+    if coop and coop.get("active_seconds"):
+        digest["共演構成"] = {
+            "配信時間に占めるコラボ比率(%)": round(coop["collab_share"], 1),
+            "配信時間に占めるBattle比率(%)": round(coop["battle_share"], 1),
+            "ソロ比率(%)": round(coop["solo_share"], 1),
+            "Battle回数/時": round(coop["battles_per_hour"], 2),
+            "コラボ回数/時": round(coop["collabs_per_hour"], 2),
+            "平均コラボ長(分)": round(coop["avg_collab_seconds"] / 60, 1),
+            "コラボした配信数": coop["sessions_with_collab"],
+            "集計対象の配信数": coop["sessions"],
+            "note": ("コラボはBattle以外のLinkMic。BattleもLinkMic上で起きるため、"
+                     "重なった時間はBattle側にだけ数えている。"),
+        }
+    return digest
 
 
 def review_input(profile: dict, *, time_index: Optional[dict] = None,

@@ -56,7 +56,7 @@ class CancelToken:
             self._cancelled = True
             processes = list(self._processes)
         logger.info(
-            "cancel requested for job %s (%d process(es) to stop)",
+            "job %s の取り消しを受け付けました（停止するprocess %d 件）",
             self.job_id, len(processes),
             extra={"event": "job.cancel_requested",
                    "ctx": {"job_id": self.job_id, "processes": len(processes)}},
@@ -97,7 +97,7 @@ def _kill(process, job_id: str) -> None:
             process.kill()
     except (OSError, ValueError, ProcessLookupError):
         logger.debug(
-            "could not kill a sub-process for job %s", job_id, exc_info=True,
+            "job %s の子processを終了できませんでした", job_id, exc_info=True,
             extra={"event": "job.cancel_kill_failed", "ctx": {"job_id": job_id}},
         )
 

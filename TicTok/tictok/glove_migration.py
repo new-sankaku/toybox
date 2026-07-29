@@ -89,7 +89,7 @@ def _iter_armies(log_dir: Path, unique_id: str, session_id: int, battle_id: int)
                     yield rec, payload
         except OSError:
             # 読めないdumpがあっても再判定自体は続ける(既存判定は降格させないので安全)。
-            logger.warning("failed to read the battle raw capture %s", path, exc_info=True)
+            logger.warning("battleの生dump %s を読めませんでした", path, exc_info=True)
 
 
 def _armies_create_time(payload: dict):
@@ -321,15 +321,15 @@ def migrate_glove_events(conn, log_dir) -> dict:
     # いないので画面から確かめる手段が無く、logだけが唯一の手がかりになる)。
     if rows:
         logger.info(
-            "glove migration: re-judging %d battle(s) from the raw captures; "
-            "the server starts once this finishes", len(rows),
+            "glove migration: 生dumpから battle %d 件を再判定します"
+            "（完了後にserverが起動します）", len(rows),
             extra={"event": "glove_migration.started", "ctx": {"candidates": len(rows)}},
         )
     gate = IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
     for index, row in enumerate(rows):
         if gate.ready():
             logger.info(
-                "glove migration: %d/%d battle(s) scanned (%d rewritten)",
+                "glove migration: battle %d/%d 件を走査しました（%d 件を書き換え）",
                 index, len(rows), totals["battles"],
                 extra={"event": "glove_migration.progress",
                        "ctx": {"scanned": index, "candidates": len(rows),

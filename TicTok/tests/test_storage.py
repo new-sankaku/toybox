@@ -10,11 +10,13 @@ from tictok.storage import (
     OPS_WARNING,
     SESSION_STATUS_RESTRICTED,
     Storage,
+    _coop_summary,
     _identity_key,
     _session_ids_of,
     _to_int,
     _valid_owner_id,
 )
+from tictok.store._common import _USER_CACHE_MAX
 
 log = logging.getLogger("tests.storage")
 
@@ -227,6 +229,66 @@ def test_add_event_without_identifiable_user_creates_no_users_row(
     assert db_read.execute("SELECT COUNT(*) n FROM events").fetchone()["n"] == 1
 
 
+# ===== upsert間引きcache(_user_cache)の上限 =====
+
+def test_user_cache_skips_the_upsert_within_the_ttl(
+    tmp_db, db_read, make_session, event_builder
+):
+    """cacheのhit経路。属性が変わらないままTTL内に再登場したuserはusers表を触らない
+    (last_seenが据え置かれることで分かる)。上限を入れてもここが壊れてはならない。"""
+    session_id = make_session(status="connected")
+    user = event_builder.user(user_id="7300000000000000001")
+    tmp_db.add_event(session_id, event_builder("comment", at=1000.0, user=user))
+    tmp_db.add_event(session_id, event_builder("comment", at=1030.0, user=user))
+    tmp_db.flush()
+    row = db_read.execute(
+        "SELECT last_seen FROM users WHERE identity_key = ?", ("7300000000000000001",)
+    ).fetchone()
+    assert row["last_seen"] == 1000.0
+
+
+def test_user_cache_evicts_the_oldest_quarter_at_the_limit(
+    tmp_db, db_read, make_session, event_builder, monkeypatch
+):
+    """上限に達したら挿入順の古い方から1/4を捨てる(_battle_contrib_cacheと同じ扱い)。
+    捨てるのはcacheの行だけで、users表の行は1つも落とさない。"""
+    monkeypatch.setattr("tictok.store.users._USER_CACHE_MAX", 8)
+    session_id = make_session(status="connected")
+    for i in range(9):
+        user = event_builder.user(user_id=f"730000000000000{i:04d}")
+        tmp_db.add_event(session_id, event_builder("comment", at=1000.0 + i, user=user))
+    tmp_db.flush()
+    # 9人目を載せる時点で8件(=上限)。8//4=2件を古い順に捨ててから載せるので7件残る。
+    assert list(tmp_db._user_cache) == [f"730000000000000{i:04d}" for i in range(2, 9)]
+    assert db_read.execute("SELECT COUNT(*) n FROM users").fetchone()["n"] == 9
+
+
+def test_user_cache_does_not_evict_when_an_existing_key_is_refreshed(
+    tmp_db, make_session, event_builder, monkeypatch
+):
+    """既存keyの入れ替え(TTL切れ/属性変更)ではdictが伸びないので捨てない。ここで捨てると
+    TTL内のuserを巻き添えにし、上限を入れた副作用としてDB書き込みだけが増える。"""
+    monkeypatch.setattr("tictok.store.users._USER_CACHE_MAX", 8)
+    session_id = make_session(status="connected")
+    for i in range(8):
+        user = event_builder.user(user_id=f"730000000000000{i:04d}")
+        tmp_db.add_event(session_id, event_builder("comment", at=1000.0 + i, user=user))
+    tmp_db.flush()
+    assert len(tmp_db._user_cache) == 8
+    oldest = event_builder.user(user_id="7300000000000000000")
+    tmp_db.add_event(session_id, event_builder("comment", at=2000.0, user=oldest))
+    tmp_db.flush()
+    assert len(tmp_db._user_cache) == 8
+    assert "7300000000000000000" in tmp_db._user_cache
+
+
+def test_user_cache_limit_holds_the_busiest_observed_sessions():
+    """上限値の根拠は実測。1 sessionあたりのdistinct identity_keyは最大8,642件、同時進行
+    sessionは最大4本(いずれも実DBの実測値)。合計34,568件を収容できない値へ下げると、
+    TTL内の再upsertがDB書き込みへ戻り、この cache の存在意義が消える。"""
+    assert _USER_CACHE_MAX >= 8642 * 4
+
+
 # ===== session lifecycle =====
 
 def test_create_session_starts_as_connecting(tmp_db, make_session):
@@ -258,6 +320,69 @@ def test_cleanup_stale_sessions_recovers_stats_from_events(
     assert stats["comments"] == 1
     assert stats["events_total"] == 3
     assert stats["recovered"] is True
+
+
+def test_cleanup_stale_sessions_rebuilds_buckets(tmp_db, make_session, event_builder):
+    """回収したsessionにもbucketを作る。
+
+    作らずに済ませていたため、見どころ・切り抜き候補・heat bar・peak_viewersが黙って空に
+    なるsessionが実DBで144本中60本あった。落ちるのは長時間で不安定な配信に偏るので、
+    欠けたことに気付く手段が無い。"""
+    session_id = make_session(status="connected")
+    tmp_db.add_event(session_id, event_builder("comment", at=5.0, comment="a"))
+    tmp_db.add_event(session_id, event_builder("comment", at=105.0, comment="b"))
+    tmp_db.flush()
+
+    assert tmp_db.cleanup_stale_sessions() == 1
+    # bucket_seconds=60 なので 5.0 -> 0、105.0 -> 60。
+    assert [b["start"] for b in tmp_db.session_timeline(session_id)["buckets"]] == [0, 60]
+
+
+def test_backfill_missing_buckets_fills_only_sessions_that_have_none(
+    tmp_db, make_session, event_builder
+):
+    """過去に回収されたsessionを埋める。既にbucketを持つsessionには触らない。
+
+    既存bucketのviewersは収集中の観測値で、eventから作り直すとviewer_samplesの
+    sample間隔ぶん粗くなる。上書きしてはいけない。"""
+    empty = make_session("empty", status="disconnected")
+    tmp_db.add_event(empty, event_builder("comment", at=5.0, comment="a"))
+    kept = make_session("kept", status="disconnected")
+    tmp_db.add_event(kept, event_builder("comment", at=5.0, comment="b"))
+    tmp_db.flush()
+    tmp_db.finalize_session(
+        kept, "disconnected", {},
+        [{"start": 0, "gifts": 0, "diamonds": 0, "comments": 0, "likes": 0,
+          "joins": 0, "follows": 0, "shares": 0, "viewers": 99}], [])
+
+    assert tmp_db.backfill_missing_buckets() == 1
+    assert [b["start"] for b in tmp_db.session_timeline(empty)["buckets"]] == [0]
+    assert tmp_db.session_timeline(kept)["buckets"][0]["viewers"] == 99
+    # 2度目は対象が無い(冪等)。
+    assert tmp_db.backfill_missing_buckets() == 0
+
+
+def test_finalize_session_fills_buckets_dropped_by_the_timeline_deque(
+    tmp_db, make_session, event_builder
+):
+    """collector側のtimelineはdequeで、上限を超えると先頭から落ちる。
+
+    確定時にそのdequeでbucketを全置換するため、6時間を超える配信は冒頭が丸ごと消えて
+    いた(実測3 sessionで計1.89時間)。eventに在って欠けた時間帯だけを補う。"""
+    session_id = make_session(status="connected")
+    tmp_db.add_event(session_id, event_builder("comment", at=5.0, comment="dropped"))
+    tmp_db.add_event(session_id, event_builder("comment", at=105.0, comment="kept"))
+    tmp_db.flush()
+    # dequeが先頭(start=0)を落とした状態を再現する(bucket_seconds=60)。
+    tmp_db.finalize_session(
+        session_id, "disconnected", {},
+        [{"start": 60, "gifts": 0, "diamonds": 0, "comments": 1, "likes": 0,
+          "joins": 0, "follows": 0, "shares": 0, "viewers": 42}], [])
+
+    buckets = tmp_db.session_timeline(session_id)["buckets"]
+    assert [b["start"] for b in buckets] == [0, 60]
+    # 生きているbucketのviewersは観測値のまま。補った側を作るために上書きしない。
+    assert {b["start"]: b["viewers"] for b in buckets}[60] == 42
 
 
 def test_cleanup_stale_sessions_leaves_finished_and_restricted_alone(tmp_db, make_session):
@@ -549,14 +674,14 @@ def test_list_ops_events_rejects_non_positive_limit(tmp_db, bad):
 
 
 def test_list_ops_events_none_limit_uses_configured_default(tmp_db, monkeypatch):
-    monkeypatch.setattr("tictok.storage.get_ops_events_query_limit", lambda: 2)
+    monkeypatch.setattr("tictok.store.ops_events.get_ops_events_query_limit", lambda: 2)
     for i in range(5):
         tmp_db.record_ops_event(log, "k", f"m{i}")
     assert len(tmp_db.list_ops_events()) == 2
 
 
 def test_ops_event_detail_is_truncated_but_says_so(tmp_db, monkeypatch):
-    monkeypatch.setattr("tictok.storage.get_ops_events_detail_max_chars", lambda: 40)
+    monkeypatch.setattr("tictok.store.ops_events.get_ops_events_detail_max_chars", lambda: 40)
     tmp_db.record_ops_event(log, "k", "big", detail={"stderr": "x" * 500})
     item = tmp_db.list_ops_events(kind="k")[0]
     assert item["detail"]["truncated_chars"] > 0
@@ -681,6 +806,57 @@ def test_claim_takes_one_job_at_a_time_and_marks_it_running(tmp_db, recording_id
     assert tmp_db.claim_next_pending_media_job() is None
 
 
+def test_claim_caps_how_many_sweep_jobs_run_at_once(tmp_db, recording_id, make_session):
+    """起動時sweepが積んだ行でworkerを埋め尽くさないこと。
+
+    sweepは人が待っていない自動投入で、起動のたびに数十本積まれる。全枠を取られると、
+    その直後に人が投げたjobはsweepが1本終わるまで始まらない。"""
+    second = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
+    third = tmp_db.create_recording(make_session("c"), "c", "c.mp4", "c.mp4", "hd", 1.0)
+    # 順序の主張はpriorityで確定させる(queued_atはWindowsの時計分解能で同着になり得る)。
+    # 人の投入を**わざと最下位**にして、順番ではなく上限が効いていることを見る。
+    tmp_db.enqueue_media_job("sweep-1", "waveform", recording_id, priority=2, sweep=True)
+    tmp_db.enqueue_media_job("sweep-2", "waveform", second, priority=1, sweep=True)
+    tmp_db.enqueue_media_job("mine", "overlay", third, priority=0)
+
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=1)["job_id"] == "sweep-1"
+    # 2本目のsweepは枠が空くまで拾わず、人の投入を先に出す。
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=1)["job_id"] == "mine"
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=1) is None
+
+    tmp_db.finish_media_job("sweep-1", "completed")
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=1)["job_id"] == "sweep-2"
+
+
+def test_claim_without_a_sweep_cap_treats_sweep_jobs_like_any_other(tmp_db, recording_id,
+                                                                    make_session):
+    """上限0は「絞らない」。sweepの印そのものが順番を変えてはいけない(順番はpriorityの仕事)。"""
+    second = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
+    tmp_db.enqueue_media_job("sweep-1", "waveform", recording_id, priority=2, sweep=True)
+    tmp_db.enqueue_media_job("sweep-2", "waveform", second, priority=1, sweep=True)
+
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=0)["job_id"] == "sweep-1"
+    assert tmp_db.claim_next_pending_media_job(sweep_limit=0)["job_id"] == "sweep-2"
+
+
+def test_media_job_recording_ids_in_states_groups_by_kind(tmp_db, recording_id,
+                                                          make_session):
+    """自動で積み直さない録画を種別ごとに答えること。種別をまたいで混ぜると、波形が失敗した
+    録画のサムネまで永久に積まれなくなる。"""
+    second = tmp_db.create_recording(make_session("b"), "b", "b.mp4", "b.mp4", "hd", 1.0)
+    tmp_db.enqueue_media_job("w1", "waveform", recording_id, sweep=True)
+    tmp_db.enqueue_media_job("s1", "sprite", second, sweep=True)
+    tmp_db.enqueue_media_job("w2", "waveform", second, sweep=True)
+    tmp_db.finish_media_job("w1", "failed", error="音声がありません")
+    tmp_db.finish_media_job("s1", "cancelled")
+    tmp_db.finish_media_job("w2", "completed")
+
+    got = tmp_db.media_job_recording_ids_in_states(
+        ("waveform", "sprite"), ("failed", "skipped", "cancelled"))
+
+    assert got == {"waveform": {recording_id}, "sprite": {second}}
+
+
 def test_claim_never_runs_two_jobs_for_the_same_recording(tmp_db, recording_id,
                                                           make_session):
     """同じ録画へ2本同時に出さない。再mp4化はmp4を作り直して差し替えるので、その裏で
@@ -752,71 +928,26 @@ def test_media_jobs_cascade_when_recording_is_deleted(tmp_db, recording_id):
     assert tmp_db.get_media_job("j1") is None
 
 
-# ===== 一括転写queue =====
-
-def test_enqueue_transcriptions_skips_active_and_revives_failed(tmp_db, recording_id):
-    assert tmp_db.enqueue_transcriptions([(recording_id, "alice")]) == 1
-    # pending中の再投入は待ち行列を膨らませない。
-    assert tmp_db.enqueue_transcriptions([(recording_id, "alice")]) == 0
-    tmp_db.set_transcription_state(recording_id, "running")
-    assert tmp_db.enqueue_transcriptions([(recording_id, "alice")]) == 0
-
-    tmp_db.set_transcription_state(recording_id, "failed", error="boom")
-    assert tmp_db.enqueue_transcriptions([(recording_id, "alice")], priority=3) == 1
-    row = tmp_db.next_pending_transcription()
-    assert row["state"] == "pending"
-    assert row["priority"] == 3
-    assert row["error"] is None
-    assert row["pct"] == 0
 
 
-def test_set_transcription_state_done_forces_full_pct(tmp_db, recording_id):
-    tmp_db.enqueue_transcriptions([(recording_id, "alice")])
-    tmp_db.set_transcription_state(recording_id, "running")
-    tmp_db.update_transcription_pct(recording_id, 40)
-    tmp_db.set_transcription_state(recording_id, "done")
-    item = tmp_db.list_transcribe_queue()[0]
-    assert item["state"] == "done"
-    assert item["pct"] == 100
-    assert item["finished_at"] is not None
-    assert tmp_db.next_pending_transcription() is None
-
-
-def test_cancel_transcriptions_only_touches_pending(tmp_db, make_session):
-    session_id = make_session("alice", status="connected")
-    rec_a = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
-    rec_b = tmp_db.create_recording(session_id, "alice", "/b.mp4", "b.mp4", "hd", 2.0)
-    tmp_db.enqueue_transcriptions([(rec_a, "alice"), (rec_b, "alice")])
-    tmp_db.set_transcription_state(rec_a, "running")
-
-    assert tmp_db.cancel_transcriptions() == 1
-    assert tmp_db.count_transcribe_queue_by_state() == {"running": 1, "cancelled": 1}
-    # runningはSTT実行中で止める手段が無いので、再起動時にpendingへ戻す。
-    assert tmp_db.reset_running_transcriptions() == 1
-    assert tmp_db.count_transcribe_queue_by_state() == {"pending": 1, "cancelled": 1}
-
-
-def test_untranscribed_recordings_excludes_queued_and_unfinished(tmp_db, make_session):
+def test_untranscribed_recordings_excludes_transcribed_and_queued(tmp_db, make_session):
+    """候補から外すのは「文字起こし済み(transcriptsが在る)」と「同じ台帳で待機/実行中」だけ。
+    終わったjob行(failed等)は外さない — 失敗した録画は積み直せなければならない。"""
     session_id = make_session("alice", status="connected")
     done = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
     queued = tmp_db.create_recording(session_id, "alice", "/b.mp4", "b.mp4", "hd", 2.0)
-    fresh = tmp_db.create_recording(session_id, "alice", "/c.mp4", "c.mp4", "hd", 3.0)
-    other = tmp_db.create_recording(session_id, "bob", "/d.mp4", "d.mp4", "hd", 4.0)
-    for rid in (done, queued, fresh, other):
-        tmp_db.update_recording(rid, "completed", "/x", "x.mp4", 10.0, 1)
-    # 未完了の録画は候補にしない。
-    still_recording = tmp_db.create_recording(session_id, "alice", "/e.mp4", "e.mp4",
-                                              "hd", 5.0)
-    tmp_db.save_transcript(done, {"text": "t", "segments": []})
-    tmp_db.enqueue_transcriptions([(queued, "alice")])
+    failed = tmp_db.create_recording(session_id, "alice", "/c.mp4", "c.mp4", "hd", 3.0)
+    fresh = tmp_db.create_recording(session_id, "alice", "/d.mp4", "d.mp4", "hd", 4.0)
+    for rid in (done, queued, failed, fresh):
+        tmp_db.update_recording(rid, "completed", f"/{rid}.mp4", f"{rid}.mp4", 9.0, 10)
+    tmp_db.save_transcript(done, {"segments": [], "text": ""})
+    tmp_db.enqueue_media_job("j-queued", "stt", queued)
+    tmp_db.enqueue_media_job("j-failed", "stt", failed)
+    tmp_db.finish_media_job("j-failed", "failed", error="x")
 
-    assert {r["id"] for r in tmp_db.untranscribed_recordings("alice")} == {fresh}
-    all_ids = {r["id"] for r in tmp_db.untranscribed_recordings()}
-    assert other in all_ids
-    assert still_recording not in all_ids
+    ids = {row["id"] for row in tmp_db.untranscribed_recordings("alice")}
+    assert ids == {failed, fresh}
 
-
-# ===== 録画 / 転写 =====
 
 def test_update_rebuilt_recording_never_moves_ended_at(tmp_db, make_session):
     """作り直しは捕捉が終わった時刻を動かさない。
@@ -874,6 +1005,35 @@ def test_set_recording_duration_refuses_a_zero_measurement(tmp_db, make_session)
     assert tmp_db.set_recording_duration(rec, 42.0) is True
     assert tmp_db.set_recording_duration(rec, 0.0) is False
     assert tmp_db.get_recording(rec)["duration_seconds"] == 42.0
+
+
+def test_recording_review_defaults_to_unchecked_and_round_trips(tmp_db, make_session):
+    """観たかどうかはDBのどの列からも導けないので、既定は必ず未確認から始まる。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+    assert tmp_db.get_recording(rec)["review_state"] == "unchecked"
+    assert tmp_db.get_recording(rec)["review_updated_at"] is None
+
+    updated = tmp_db.set_recording_review(rec, "checking")
+    assert updated["review_state"] == "checking"
+    assert updated["review_updated_at"] > 0
+    assert tmp_db.get_recording(rec)["review_state"] == "checking"
+    assert tmp_db.set_recording_review(rec, "checked")["review_state"] == "checked"
+
+
+def test_set_recording_review_rejects_an_unknown_state(tmp_db, make_session):
+    """画面が読めない印を残すと、その録画はどの状態にも属さず絞り込みから消える。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1000.0)
+    tmp_db.set_recording_review(rec, "checked")
+
+    with pytest.raises(ValueError):
+        tmp_db.set_recording_review(rec, "done")
+    assert tmp_db.get_recording(rec)["review_state"] == "checked"
+
+
+def test_set_recording_review_reports_a_missing_recording(tmp_db):
+    assert tmp_db.set_recording_review(99999999, "checked") is None
 
 
 def test_mark_stale_recordings_marks_only_in_flight(tmp_db, make_session):
@@ -1042,6 +1202,229 @@ def test_close_flushes_buffered_events(tmp_db, tmp_db_path, make_session, event_
     finally:
         side.close()
     assert n == 3
+
+
+def test_streamer_profile_returns_every_opponent_not_just_the_top_ranked(tmp_db, make_session):
+    """対戦相手別は件数を切らない。上位N件で切ると裾の相手が画面から消え、
+    「対戦していない」と読めてしまう(app.jsの過去対戦成績の突合も外れる)。"""
+    now = time.time()
+    session_id = make_session("owner")
+    # 対戦数は1戦ずつ差をつける。多い順に並ぶことと、末尾(1戦)まで残ることを同時に見る。
+    battles = []
+    bid = 1
+    for rank in range(40):
+        for _ in range(40 - rank):
+            battles.append(_battle(bid, now - 3600, [f"rival{rank:02d}"]))
+            bid += 1
+    tmp_db.save_battles(session_id, battles)
+
+    opponents = tmp_db.streamer_profile("owner")["battles"]["opponents"]
+    assert len(opponents) == 40
+    assert [o["unique_id"] for o in opponents] == [f"rival{i:02d}" for i in range(40)]
+    assert opponents[-1]["battles"] == 1
+
+
+def test_streamer_profile_history_keeps_every_battle_for_opponent_lookup(tmp_db, make_session):
+    """Battle履歴も件数を切らない。直近80戦で切ると、対戦相手別で選んだ相手の対戦が
+    履歴に1件も無い(=その対戦の動画へ辿れない)ことが普通に起きる。"""
+    now = time.time()
+    session_id = make_session("owner")
+    battles = [_battle(i, now - 86400 + i, [f"rival{i:03d}"]) for i in range(120)]
+    tmp_db.save_battles(session_id, battles)
+
+    history = tmp_db.streamer_profile("owner")["battles"]["history"]
+    assert len(history) == 120
+    # 最古の相手(=旧cap 80戦の外)からその対戦へ辿れること。
+    assert any("rival000" in h["opponent_keys"] for h in history)
+
+
+def test_streamer_profile_history_keys_every_opponent_not_only_the_top_scorer(
+    tmp_db, make_session
+):
+    """絞込のkeyは代表相手ではなく参加した全員。格下だった相手を選んだ時にその対戦が
+    履歴から消えると、対戦相手別の戦数と履歴の件数が食い違う。"""
+    now = time.time()
+    session_id = make_session("owner")
+    battle = _battle(1, now - 3600, ["strong", "weak"])
+    battle["opponents"][0]["score"] = 9000
+    battle["opponents"][1]["score"] = 10
+    tmp_db.save_battles(session_id, [battle])
+
+    entry = tmp_db.streamer_profile("owner")["battles"]["history"][0]
+    assert entry["opponent"]["unique_id"] == "strong"  # 表に出す代表は最高score
+    assert sorted(entry["opponent_keys"]) == ["strong", "weak"]
+
+
+def test_streamer_profile_history_points_at_the_recording_that_covers_the_battle(
+    tmp_db, make_session
+):
+    """「その対戦の動画へ」の当たり先。同じsessionに複数の録画がある(実測46 session)
+    ので、時刻を含む方に当たること。含む録画が無ければNone(押せるbuttonを出さない)。"""
+    now = time.time()
+    session_id = make_session("owner")
+    first = tmp_db.create_recording(session_id, "owner", "/a.mp4", "a.mp4", "hd", now - 3600)
+    tmp_db.update_recording(first, "completed", "/a.mp4", "a.mp4", now - 2400, 64)
+    second = tmp_db.create_recording(session_id, "owner", "/b.mp4", "b.mp4", "hd", now - 1200)
+    tmp_db.update_recording(second, "completed", "/b.mp4", "b.mp4", now - 600, 64)
+    tmp_db.save_battles(session_id, [
+        _battle(1, now - 3000, ["rivalA"]),   # 1本目の中
+        _battle(2, now - 900, ["rivalB"]),    # 2本目の中
+        _battle(3, now - 1800, ["rivalC"]),   # 録画の切れ目(どちらの窓にも入らない)
+    ])
+
+    by_id = {h["battle_id"]: h for h in tmp_db.streamer_profile("owner")["battles"]["history"]}
+    assert by_id[1]["recording_id"] == first
+    assert by_id[2]["recording_id"] == second
+    assert by_id[3]["recording_id"] is None
+
+
+def test_streamer_profile_history_bounds_an_interrupted_recording_by_the_next_one(
+    tmp_db, make_session
+):
+    """中断録画はended_atを持たない。無制限に伸ばすと、後続の録画の時間帯まで先頭の
+    中断録画が名乗ってしまう(飛んだ先に対戦が映っていない)。"""
+    now = time.time()
+    session_id = make_session("owner")
+    stopped = tmp_db.create_recording(session_id, "owner", "/a.mp4", "a.mp4", "hd", now - 3600)
+    tmp_db.update_recording(stopped, "interrupted", "/a.mp4", "a.mp4", None, 64)
+    later = tmp_db.create_recording(session_id, "owner", "/b.mp4", "b.mp4", "hd", now - 1200)
+    tmp_db.update_recording(later, "completed", "/b.mp4", "b.mp4", now - 600, 64)
+    tmp_db.save_battles(session_id, [
+        _battle(1, now - 3000, ["rivalA"]),
+        _battle(2, now - 900, ["rivalB"]),
+    ])
+
+    by_id = {h["battle_id"]: h for h in tmp_db.streamer_profile("owner")["battles"]["history"]}
+    assert by_id[1]["recording_id"] == stopped
+    assert by_id[2]["recording_id"] == later
+
+
+# ===== 共演構成(コラボ / Battle / ソロ) =====
+
+class TestCoopSummary:
+    """_coop_summary は配信時間をコラボ/Battle/ソロへ分ける純関数。DBを触らない。"""
+
+    def test_overlapping_collab_and_battle_is_counted_once_on_the_battle_side(self):
+        """BattleもコラボもLinkMic上で起きるため窓は重なり得る。両方に足すと
+        合計が配信時間を超え、比率が100%を割らなくなる。"""
+        coop = _coop_summary(
+            [(1, 0.0, 1000.0)],
+            [(1, 100.0, 600.0)],   # コラボ 500秒
+            [(1, 300.0, 500.0)],   # うち200秒はBattle
+        )
+        assert coop["battle_seconds"] == 200.0
+        assert coop["collab_seconds"] == 300.0
+        assert coop["solo_seconds"] == 500.0
+        assert coop["battle_share"] + coop["collab_share"] + coop["solo_share"] == 100.0
+
+    def test_simultaneous_windows_do_not_double_count_seconds(self):
+        """同じ時間に複数の窓が開いていても、秒は1回しか数えない(merge)。"""
+        coop = _coop_summary(
+            [(1, 0.0, 1000.0)],
+            [(1, 0.0, 400.0), (1, 200.0, 600.0)],
+            [],
+        )
+        assert coop["collab_seconds"] == 600.0
+        assert coop["collab_count"] == 2  # 秒はmergeするが「何回繋いだか」は窓の数
+
+    def test_windows_are_clipped_to_their_session(self):
+        """収集断でsessionが先に終わった窓を全長で足すと比率が100%を超える。"""
+        coop = _coop_summary(
+            [(1, 0.0, 100.0)],
+            [(1, 50.0, 9999.0)],
+            [],
+        )
+        assert coop["collab_seconds"] == 50.0
+        assert coop["collab_share"] == 50.0
+
+    def test_zero_length_window_is_not_an_occurrence(self):
+        """長さ0で閉じた窓(実測506件中14件)を1回に数えると、時間あたりの頻度だけが
+        持ち上がる。秒も回数も数えないこと。"""
+        coop = _coop_summary(
+            [(1, 0.0, 3600.0)],
+            [(1, 500.0, 500.0)],
+            [],
+        )
+        assert coop["collab_count"] == 0
+        assert coop["collabs_per_hour"] == 0.0
+
+    def test_windows_of_an_uncounted_session_are_dropped(self):
+        """分母(配信時間)に入らないsessionの窓を足すと、比率の分子と分母が別集合になる。"""
+        coop = _coop_summary(
+            [(1, 0.0, 3600.0)],
+            [(2, 0.0, 1800.0)],
+            [(2, 0.0, 600.0)],
+        )
+        assert coop["collab_seconds"] == 0.0
+        assert coop["battle_seconds"] == 0.0
+        assert coop["solo_share"] == 100.0
+
+    def test_rates_are_per_streaming_hour(self):
+        coop = _coop_summary(
+            [(1, 0.0, 7200.0)],
+            [(1, 0.0, 600.0)],
+            [(1, 1000.0, 1300.0), (1, 2000.0, 2300.0), (1, 3000.0, 3300.0)],
+        )
+        assert coop["battles_per_hour"] == 1.5
+        assert coop["collabs_per_hour"] == 0.5
+        assert coop["avg_battle_seconds"] == 300.0
+
+    def test_no_streaming_time_yields_zero_rates_not_a_division_error(self):
+        coop = _coop_summary([], [], [])
+        assert coop["active_seconds"] == 0
+        assert coop["battles_per_hour"] == 0.0
+        assert coop["solo_share"] == 0.0
+
+
+def test_streamer_profile_reports_coop_composition(tmp_db, tmp_db_path, make_session):
+    """profileの coop は、配信時間に占めるコラボ/Battleの割合と時間あたりの回数を返す。"""
+    session_id = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute(
+            "UPDATE sessions SET started_at = 0, ended_at = 7200 WHERE id = ?", (session_id,)
+        )
+        side.commit()
+    finally:
+        side.close()
+    tmp_db.save_collab_windows(
+        session_id, [{"channel_id": "c1", "start": 100.0, "end": 1900.0}]
+    )
+    tmp_db.save_battles(
+        session_id,
+        [
+            dict(_battle(1, 3000.0, ["rival"]), end_time=3300.0),
+            dict(_battle(2, 4000.0, ["rival"]), end_time=4300.0),
+        ],
+    )
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["active_seconds"] == 7200
+    assert coop["collab_seconds"] == 1800
+    assert coop["battle_seconds"] == 600
+    assert coop["collab_share"] == 25.0
+    assert coop["battles_per_hour"] == 1.0
+    assert coop["sessions_with_collab"] == 1
+
+
+def test_streamer_profile_coop_uses_deduped_battles(tmp_db, tmp_db_path, make_session):
+    """同じBattleを2 instanceが収集した重複は、Battle集計と同じく秒でも1回だけ数える。"""
+    a = make_session("owner")
+    b = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute("UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (a,))
+        side.execute("UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (b,))
+        side.commit()
+    finally:
+        side.close()
+    same = dict(_battle(77, 100.0, ["rival"]), end_time=400.0)
+    tmp_db.save_battles(a, [same])
+    tmp_db.save_battles(b, [dict(same)])
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["battle_count"] == 1
+    assert coop["battle_seconds"] == 300
 
 
 # ===== 未監視配信者の発見(discovery) =====
@@ -1466,3 +1849,16 @@ def test_levels_stay_point_in_time_in_cross_session_aggregates(
     users = tmp_db.session_summary(session_id)["users"]
     top = next(u for u in users if u["user_id"] == "7300000000000000010")
     assert top["gifter_level"] == 5
+
+
+def test_media_job_queue_forbids_a_null_recording_id(tmp_db, make_session):
+    """``recording_id`` は NOT NULL。これが飢餓に対する実際の防御になっている。
+
+    claim の SQL は ``recording_id NOT IN (SELECT recording_id FROM media_job_queue
+    WHERE state='running' AND recording_id IS NOT NULL)`` で、SQLの三値論理により
+    ``NULL NOT IN (非空集合)`` は真にならない。もし NULL を許していれば、複数録画に
+    またがるjob(reel等)を recording_id 無しで積んだ瞬間に「実行中のjobが在る間だけ
+    拾われない」という再現性の低い飢餓に落ちていた。schemaが先に止めるので到達しない。
+    """
+    with pytest.raises(sqlite3.IntegrityError):
+        tmp_db.enqueue_media_job("null_rec", "reel", None)

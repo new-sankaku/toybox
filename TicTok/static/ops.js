@@ -66,11 +66,14 @@ function targetText(event) {
     // ops_eventsはFKを張らずsession削除後も残る。sessionが消えた行はunique_idが引けない
     // ので、そのことを明示する(空欄にすると記録漏れと見分けが付かない)。
     parts.push(event.session_unique_id
-      ? `session #${event.session_id}`
-      : `session #${event.session_id}（削除済み）`);
+      ? `session #${sessionNo(event.session_id)}`
+      : `session #${sessionNo(event.session_id)}（削除済み）`);
   }
   if (event.recording_id) {
-    parts.push(event.recording_filename || `録画 #${event.recording_id}`);
+    // 録画行が消えていればfile名は引けない。sessionと同じく「削除済み」と名乗る(番号が
+    // 出せないからと空欄にすると、録画の記録が無かったのと見分けが付かない)。
+    const name = recName({ filename: event.recording_filename, session_id: event.session_id });
+    parts.push(name === "—" ? "録画（削除済み）" : `録画 ${name}`);
   }
   return parts.join(" / ") || "-";
 }
@@ -263,6 +266,92 @@ async function loadSummary() {
   }
 }
 
+// ---- API所要時間 ------------------------------------------------------------------
+// 「どの画面が重いか」はbrowserのdev toolでも見えるが、その時間がserverの中でDB照会・
+// file走査・子processのどこへ消えたかはserver側にしか無い。ここはその内訳を読む口。
+
+// msは桁が3つに跨る(0.4ms〜30,000ms)。同じ書式で並べると読めないので桁ごとに変える。
+function fmtMs(ms) {
+  const value = Number(ms || 0);
+  if (value >= 10000) return `${(value / 1000).toFixed(1)}s`;
+  if (value >= 100) return `${Math.round(value)}ms`;
+  if (value >= 10) return `${value.toFixed(1)}ms`;
+  return `${value.toFixed(2)}ms`;
+}
+
+// 内訳は合計時間の大きい順に上位だけ出す。全部並べるとcellが折り返して表が読めなくなる
+// (計装の名前は増える一方で、割合の小さいものは判断に効かない)。
+const PERF_BREAKDOWN_TOP = 4;
+
+function perfBreakdownText(row) {
+  const entries = Object.entries(row.phases || {})
+    .map(([name, slot]) => [name, slot.ms])
+    .filter(([, ms]) => ms > 0);
+  const other = Math.max(0, row.total_ms - entries.reduce((sum, [, ms]) => sum + ms, 0));
+  if (other > 0) entries.push(["other", other]);
+  if (!entries.length) return "-";
+  entries.sort((a, b) => b[1] - a[1]);
+  return entries.slice(0, PERF_BREAKDOWN_TOP)
+    .map(([name, ms]) => `${name} ${fmtMs(ms)}`).join(" / ");
+}
+
+async function loadPerf() {
+  const note = document.getElementById("perf-note");
+  const empty = document.getElementById("perf-empty");
+  setListState(empty, "loading");
+  let data;
+  try {
+    data = await apiSend("GET", "/api/perf");
+  } catch (err) {
+    document.getElementById("perf-rows").replaceChildren();
+    setListState(empty, "failed", err);
+    note.textContent = "";
+    return;
+  }
+  const lag = data.loop_lag || {};
+  const parts = [
+    `計測開始から ${fmtDuration(data.window_seconds)}`,
+    `${fmtNum(data.request_count)} request / 合計 ${fmtMs(data.total_ms)}`,
+    // loopの遅れはrouteに紐付かない。1本のcoroutineがloopを握ると全画面が同時に遅く
+    // なるので、route表とは別に出す。
+    `event loopの最大停止 ${fmtMs(lag.max_ms)}（警告 ${fmtNum(lag.warned)}回）`,
+  ];
+  if (!data.enabled) parts.unshift("計測は無効です（TICTOK_PERF_ENABLED）");
+  if ((data.inflight || []).length) parts.push(`処理中 ${fmtNum(data.inflight.length)}件`);
+  note.textContent = parts.join(" / ");
+  // renderTableRowsは表示/非表示しか触らないので、loading文言のまま0件になるのを戻す。
+  setListState(empty, (data.routes || []).length ? "ok" : "empty");
+  renderTableRows(
+    "perf-rows", "perf-empty", data.routes || [],
+    (row) => [
+      row.route,
+      fmtNum(row.count) + (row.failed ? `（失敗 ${fmtNum(row.failed)}）` : ""),
+      fmtMs(row.total_ms),
+      `${(row.share * 100).toFixed(1)}%`,
+      fmtMs(row.avg_ms),
+      fmtMs(row.p50_ms),
+      fmtMs(row.p95_ms),
+      fmtMs(row.max_ms),
+      perfBreakdownText(row),
+    ],
+    [1, 2, 3, 4, 5, 6, 7],
+  );
+}
+
+document.getElementById("perf-reload").addEventListener("click", () => loadPerf());
+document.getElementById("perf-reset").addEventListener("click", async () => {
+  const note = document.getElementById("perf-note");
+  try {
+    await apiSend("DELETE", "/api/perf");
+  } catch (err) {
+    note.textContent = "計測をresetできませんでした。";
+    note.title = errorDetailText(err);
+    return;
+  }
+  note.removeAttribute("title");
+  loadPerf();
+});
+
 document.getElementById("flt-apply").addEventListener("click", () => loadEvents(false));
 // 選択式の条件は選んだ時点で意図が確定する。「絞り込む」を押し忘れて古い結果を今の条件の
 // ものとして読む事故を防ぐ(自由入力のjob IDと期間は打ち終わりが判らないのでButton側)。
@@ -281,5 +370,6 @@ document.getElementById("ops-more").addEventListener("click", () => loadEvents(t
 loadFilterOptions();
 loadSummary();
 loadEvents(false);
+loadPerf();
 // jobの進捗はJob画面が持つ。この画面はWSを接続表示とtopbarのjob badgeのためだけに使う。
 connectWS(() => {});

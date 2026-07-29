@@ -1,8 +1,9 @@
 # 配信者まるごとの一括処理
 
-焼き込み(`overlay`) / Up出力(`upscale`) / 再mp4化(`reprocess`) / 音量正規化(`audionorm`) /
-元mp4の削除(`delete_mp4`)を、Sessionではなく**配信者単位**(または全配信者、あるいは選んだ
-録画だけ)で実行する。画面は配信者動画(`/videos`)の「一括処理」tab、API は
+文字起こし(`transcribe`) / 焼き込み(`overlay`) / Up出力(`upscale`) / 再mp4化(`reprocess`) /
+音量正規化(`audionorm`) / ts結合(`pack`) / 元mp4の削除(`delete_mp4`)を、Sessionではなく
+**配信者単位**(または全配信者、あるいは選んだ録画だけ)で実行する。画面は配信者動画
+(`/videos`)の「一括処理」tab、API は
 `GET /api/bulk/status`, `GET /api/bulk/estimate`, `GET /api/bulk/recordings`,
 `POST /api/bulk/queue`, `POST /api/bulk/delete-mp4`。
 
@@ -79,7 +80,12 @@
 「処理済み」の判定元は種別で違う。焼き込み・Up出力はfilesystem(出力fileの実在)、音量正規化は
 **DBの `recordings.audio_normalized_at` だけ**を見る。loudnormはmp4に痕跡を残さないので、
 fileからは正規化済みか判別できない(推測で埋めてはいけない)。再mp4化は元mp4を作り直すので、
-正規化せずに作り直したら必ずこの列をNULLへ戻す。
+正規化せずに作り直したら必ずこの列をNULLへ戻す。文字起こしは `transcripts` 表の有無だけ。
+
+「既にqueueにある」の照合先も種別で違う。映像jobは `pending_media_job_keys()`、文字起こしは
+`pending_transcription_ids()`(台帳が別)。**素材やmp4を置き換える種別(`pack`・`delete_mp4`)の
+「処理中の録画」は両方の和**を見る — 転写もGPUの裏で元mp4/.tsを読み続けるので、その足元で
+消す/束ね直すと読み手が壊れる(削除の実行直前に見る `busy_recording_ids()` と同じ集合)。
 
 除外した件数は理由ごとに数えて返す。「対象0本」とだけ出ると、原因を探して回ることになる。
 
@@ -100,7 +106,9 @@ session数から推測しない。1 sessionしか持たない配信者への一�
 ## 進捗
 
 この画面は進捗表を持たない。映像jobの台帳はJob画面(`/jobs`)が唯一の置き場で、縮小版を並べると
-どちらが最新か分からなくなる(取消も向こうにしかない)。tabからはlinkだけを出す。
+どちらが最新か分からなくなる(取消も向こうにしかない)。tabからはlinkだけを出す。文字起こしは
+台帳がそもそも別なので、linkの行き先も同画面の「一括文字起こし」tabへ変える(種別を選んだ
+時点でtoolbarのlinkの文言とhrefが切り替わる)。
 
 jobが1本終わると出力fileの有無が変わるため、`_media_job_runner` の `finally` で
 `_fs_state_cache` / `_fs_bulk_cache` / `_bulk_status_cache` を捨てる。完了通知の直後に画面が
@@ -135,7 +143,7 @@ cacheはpathを持つ録画に限り、それ以外は都度算出する(件数�
 
 ### .ts走査(`has_hls`)は再mp4化を見るときだけ
 
-`has_hls`(=`_find_hls_root` の `glob("seg*.ts")`)は **reprocess の判定にしか要らない**のに、全録画
+`has_hls`(=`_find_hls_root` の `_has_usable_media`)は **reprocess の判定にしか要らない**のに、全録画
 ぶんを他種別の集計でも回すと無駄が大きい。そこで `_recording_fs_facts()` は has_hls を **含めず**、
 reprocess判定に入ったときだけ `_recording_has_hls()` が遅延で引いて facts dict へ書き戻す(同TTL窓は
 1回)。`glob` は `any(...)` で最初のセグメントで打ち切るので、走査する場合も全.tsの列挙にはならない。
@@ -147,8 +155,9 @@ reprocess判定に入ったときだけ `_recording_has_hls()` が遅延で引�
 statusのcacheは要求種別の組をkeyにし、file変化(job完了)・投入時に `_bulk_status_cache.clear()`。
 
 reprocessを集計するときも、has_hlsを録画ごとの `is_dir` で見るのではなく `_bulk_hls_batch()` が
-**配信者ごとの `ts/` を1回scandir**して stem dir の有無で足切りし、実在する dir だけ既存の
-`glob("seg*.ts")` で中身を確認する(`_find_hls_root` と厳密に等価)。retentionで.tsが消えた録画は
+**配信者ごとの `ts/` を1回scandir**して stem dir の有無で足切りし、実在する dir だけ
+`_has_usable_media()`(素材と再生listの両方)で中身を確認する(`_find_hls_root` と厳密に等価)。
+retentionで.tsが消えた録画は
 親一覧だけで即決し、録画ごとのstatを起こさない。母集合単位の呼び出し(status/recordings/plan)が
 kindにreprocessを含むときだけ呼ぶ。単発の `_recording_has_hls()` は据え置き(facts未充填のとき遅延)。
 
@@ -156,6 +165,65 @@ kindにreprocessを含むときだけ呼ぶ。単発の `_recording_has_hls()` �
 変えて録画一覧を引き直す間は明細行に「録画を読み込み中…」を出す。古い/空の表を無反応で
 残さない。`recordings` / `estimate` の reprocess判定は元々そのtabを見るとき限定なので、そのまま
 on-demand で走査する。
+
+## 文字起こし(`transcribe`)
+
+走る先だけが他と違う種別。対象の選び方は同じ `_bulk_plan` を通すが、投入先は
+media_job_queue ではなく **transcribe_queue**(GPUを直列に1本ずつ使う別台帳)で、
+`POST /api/bulk/queue` が kind で振り分ける(`BULK_QUEUE_KINDS` には入らない)。
+
+導線を種別ごとに割らないのは、「見せた本数と積んだ本数が同じ」を保つのが一括画面の
+軸だからである。同tabの「一括文字起こし」は配信者まるごと・全配信者の投入と進捗表を
+持つが、**録画を選んでの投入**と**投入前の見積り**を持たない。一括処理側から入れば
+`▶` で録画一覧を開いて選べ、押す前に本数・総尺・所要が出る。進捗と取り消しは
+台帳が1つであるべきなので「一括文字起こし」tabに置いたまま、一括処理側は
+toolbarのlinkをそちらへ向ける(Job画面へ送ると、転写の行が無い台帳を見せることになる)。
+
+| 項目 | 他の種別との違い |
+| --- | --- |
+| 済み判定 | `transcripts` 表の有無だけ。転写はfileを作らないのでfilesystemからは判別できない |
+| 入力 | mp4でも素材(.ts)でもよい(`hls_source` 経由)。両方無いときだけ `no_source` |
+| 二重投入 | 照合先は `pending_transcription_ids()`。映像jobのpendingだけを見ると待機中を積み直す |
+| 所要の実測比 | `transcribe_job_durations()`(transcribe_queueの実測)。media_job_queueには行が出ない |
+| 同時実行数 | 常に1。STTは `transcription._transcribe_lock` で完全に直列化されている |
+| 空き容量 | 見ない。書くのはtranscript行だけで、中間fileも出力fileも作らない |
+
+「出力済みも作り直す」は伏せない。model を替えたときや時刻mapの版が上がったとき
+(既存transcriptのseekがずれる)は転写し直すしかないため。ただし転写済みの行は
+`done` で残るので、`enqueue_transcriptions(redo=True)` が **done を待機へ戻す**
+ところまでやらないと、redoを選んでも1本も走らない。`running` は戻さない — 実行中の
+1本を待機へ書き戻すと、終わったworkerがdoneへ上書きして再投入が消える。
+
+## ts結合(`pack`)
+
+素材の`.ts`を解像度の切れ目ごとに1 fileへ束ね直す(実体は `tictok/record/hls_pack.py`、設計は
+そのmodule docstring)。**再encodeしないbyte連結**なので、映像も再生も再mp4化の結果も変わらず、
+file数だけが減る。2秒ごとに刻まれたsegmentが1録画で数千本あり、走査・backup・移送のすべてが
+file数に比例して重くなるのを畳むための処理である(2026-07-25実測: 対象128本で seg 286,211 file)。
+
+対象は **素材があって、まだ束ねていない録画**。素材の有無は他の種別と同じ `_has_usable_media`
+(素材と再生listの両方)で、束ね済みかは `hls_pack.is_packed()` — 束ねたfileの実在だけが根拠で、
+DBには印を持たない(外で消えたり戻ったりする)。**mp4の有無は問わない**: 束ねるのは素材そのもの
+なので、mp4を消した録画も対象であり続ける(`_bulk_classify` は `has_file` の手前で答える)。
+
+束ね済みは `skipped.packed`(「結合済み」)として返し、画面の「済」件数にも数える
+(`_BULK_DONE_REASONS`)。作り直す余地が無いので「出力済みも作り直す」は伏せる — 束ね済みへ
+投げても `already_packed` で何もしない冪等な操作で、押せる状態で残すと投入本数の見え方だけが
+狂う。
+
+| 前提 | 扱い |
+| --- | --- |
+| 素材の在るvolumeの空きが素材と同じだけ無い | 507で止める。元segmentは3段の検証を全て通るまで消さないので、束ねる間は2本分が同時に存在する |
+| 同じ録画を他のjobが掴んでいる | `JobDeferred` で待つ。再mp4化は素材をplaylist順に読んでいる最中で、その足元でsegmentを消すと読み手が壊れる |
+| 既に束ね済み | 何もせず `already_packed` を返す(冪等) |
+| `pack_session` が失敗 | `reason` をそのままjobのerrorに出す。失敗しても元は一切触られない(束ねたfileを捨てて元を残す)ので復旧手順は無い |
+
+取り消しは**進捗callbackの位置でしか効かない**。`pack_session` はcancel tokenを持たないので、
+server側は `on_progress` で `cancel.check_cancelled()` を呼ぶ。実測した刻みは
+`(5%, 束ねたfile 0本) → (60%, 0本) → (100%, 1本)` で、5%と60%は**まだ何も書いていない**時点、
+100%は元segmentの削除まで終わった後。よって100%では中断しない(済んだ作業を取り消し扱いに
+してしまう)。時間の大半を占めるsegmentごとのffprobe(`_resolutions_for`)の最中には
+callbackが無いため、その間の取り消しは60%の地点まで待つことになる。
 
 ## 元mp4の削除(`delete_mp4`)
 

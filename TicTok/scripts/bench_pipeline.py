@@ -36,7 +36,7 @@ ROOTS = [Path(r"C:\01_work\00_Git\toybox\TicTok\recordings"), Path(r"K:\80_Tikto
 def find_hls_root(stem: str):
     for root in ROOTS:
         d = layout.session_dir(root, stem)
-        if d.is_dir() and any(d.glob("seg*.ts")):
+        if d.is_dir() and layout.has_media(d):
             return root
     return None
 
@@ -79,7 +79,7 @@ async def bench_reprocess(stem: str, work: Path) -> dict:
     out = work / f"{stem}.bench.mp4"
     out.unlink(missing_ok=True)
 
-    rec = Recorder(stem, str(root), 0, keep_hls=True, final_dir=str(root))
+    rec = Recorder(stem, str(root), 0, final_dir=str(root))
     rec.base = stem
     rec.hls_dir = hls_dir
     rec.playlist = hls_dir / "index.m3u8"
@@ -137,8 +137,6 @@ async def bench_overlay(stem: str, work: Path) -> dict:
         shutil.copy2(src, local)
         print(f"  (copied source {src.stat().st_size/1e6:.0f}MB in "
               f"{time.monotonic()-started:.0f}s)", flush=True)
-    for sidecar in (".timing.json",):
-        s = src.with_suffix(sidecar) if src.suffix else None
     timing = src.parent / f"{src.stem}.mp4.timing.json"
     if timing.is_file():
         shutil.copy2(timing, work / timing.name)

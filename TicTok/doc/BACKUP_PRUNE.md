@@ -22,8 +22,8 @@ mp4は完了時に2次(final)へ移送されている。**基準はmp4の現在�
 root(fileは消えている) → `FINAL_DIR`(完成mp4の既定の置き場)。
 
 `Recorder.finalize_recovered_hls(base, mp4_root=...)` が読む先と書く先の分離を受ける。
-live captureが無い経路なので一旦1次へ書いてから移送する理由も無く、数十GBを二度書きしない。
-`keep_hls=True` のため `_relocate_to_final()` は走らない(segmentを消さない)。
+live captureが無い経路なので一旦1次へ書いてから移す理由も無く、数十GBを二度書きしない。
+確定は移送しないので、segmentは読んだ場所(1次)にそのまま残る。
 
 2次へ在るべき録画が既に1次へ落ちている場合は、`/capacity`(動画容量)の「最終保存先へ移動」で戻す
 ([RELOCATE_TO_FINAL.md](RELOCATE_TO_FINAL.md))。
