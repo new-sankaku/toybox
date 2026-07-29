@@ -28,6 +28,24 @@
   --bonus: #fbbf24;
   --bonus-deep: #f59e0b;
   --shadow: rgba(59, 56, 47, 0.35);
+  /* Battleスコアバー専用の陣営色。動画焼き込み(tictok/record/video_overlay.pyの
+     _SCORE_OWN_RGB_* / _SCORE_OPP_RGB_* / _SCORE_LANE_PALETTE)と同じ値・同じ割り当て順で、
+     Webと動画で同じBattleが同じ色に見えるようにする。塗りはgradient、文字はink側を使う
+     (明地の--sand-panel上でrose/cyanそのままでは文字contrastが足りない)。 */
+  --battle-own-a: #ff3a6d;
+  --battle-own-b: #ff3fd0;
+  --battle-opp-a: #00eedc;
+  --battle-opp-b: #21aaf5;
+  --battle-own-ink: #b3123f;
+  --battle-opp-ink: #0b6478;
+  --battle-lane2-a: #ffb02e;
+  --battle-lane2-b: #ff771f;
+  --battle-lane3-a: #8a63ff;
+  --battle-lane3-b: #c14bf0;
+  --battle-lane4-a: #3de08a;
+  --battle-lane4-b: #18b89b;
+  --battle-lane5-a: #ff7ba8;
+  --battle-lane5-b: #e64fa6;
 }
 
 * {
@@ -2321,25 +2339,24 @@ body {
 .res.draw { color: var(--ink-muted); border-color: var(--line); }
 .bbody { padding: 0.6rem; }
 .score { display: flex; align-items: center; gap: 0.5rem; font-variant-numeric: tabular-nums; margin-bottom: 0.2rem; }
-.score .own { color: var(--ok-ink); font-weight: 600; }
-.score .opp { color: var(--warn-ink); font-weight: 600; }
+.score .own { color: var(--battle-own-ink); font-weight: 600; }
+.score .opp { color: var(--battle-opp-ink); font-weight: 600; }
 .score .bar { flex: 1; block-size: 0.7rem; background: var(--line); display: flex; border: 1px solid var(--line); }
-.score .bar .o { background: var(--ok); }
-.score .bar .e { background: var(--warn); }
+.score .bar .o { background: linear-gradient(90deg, var(--battle-own-a), var(--battle-own-b)); }
+.score .bar .e { background: linear-gradient(90deg, var(--battle-opp-a), var(--battle-opp-b)); }
 /* 動画overlay焼き込みと同じN分割スコアバー。1segment=参加者(個人戦)/チーム(チーム戦)。
    幅はflex-grow=scoreで比率移動し、各segment内にscoreを描く。自陣=寒色/敵陣=暖色。 */
 .score .bar-multi { block-size: 1.5em; background: var(--line); border: 1px solid var(--line); border-radius: 0.2rem; overflow: hidden; }
 .score .bar-multi .seg { display: flex; align-items: center; justify-content: center; min-inline-size: 2.6em; padding-inline: 0.3em; overflow: hidden; }
 .score .bar-multi .seg b { font-size: 0.7rem; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); white-space: nowrap; font-variant-numeric: tabular-nums; }
-/* segment(陣営)ごとの配色。自陣=c-own(--ok)、敵陣1人目=c1(--warn)で1v1/チーム戦は従来の見た目を維持し、
-   個人マルチの3陣営目以降(c2..c6)に別色を割り当てる。陣営数が色数を超えたら循環で再利用する。 */
-.score .bar-multi .seg.c-own { background: var(--ok); }
-.score .bar-multi .seg.c1 { background: var(--warn); }
-.score .bar-multi .seg.c2 { background: #6a4c93; }
-.score .bar-multi .seg.c3 { background: #9c7a16; }
-.score .bar-multi .seg.c4 { background: #2f6b5e; }
-.score .bar-multi .seg.c5 { background: #985277; }
-.score .bar-multi .seg.c6 { background: #4f6d8e; }
+/* segment(陣営)ごとの配色。自陣=c-own(rose)、敵陣は出現順(score降順)にc1..c5。動画焼き込みの
+   _SCORE_LANE_PALETTEと同じ順序で、陣営数が色数を超えたら循環で再利用する。 */
+.score .bar-multi .seg.c-own { background: linear-gradient(90deg, var(--battle-own-a), var(--battle-own-b)); }
+.score .bar-multi .seg.c1 { background: linear-gradient(90deg, var(--battle-opp-a), var(--battle-opp-b)); }
+.score .bar-multi .seg.c2 { background: linear-gradient(90deg, var(--battle-lane2-a), var(--battle-lane2-b)); }
+.score .bar-multi .seg.c3 { background: linear-gradient(90deg, var(--battle-lane3-a), var(--battle-lane3-b)); }
+.score .bar-multi .seg.c4 { background: linear-gradient(90deg, var(--battle-lane4-a), var(--battle-lane4-b)); }
+.score .bar-multi .seg.c5 { background: linear-gradient(90deg, var(--battle-lane5-a), var(--battle-lane5-b)); }
 .score .bar-multi .seg.self { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85); }
 .score .bar-multi .seg + .seg { border-inline-start: 1px solid rgba(255, 255, 255, 0.55); }
 .vs { font-size: 0.66rem; color: var(--ink-muted); text-align: center; margin-bottom: 0.5rem; }
@@ -2367,8 +2384,8 @@ body {
 .brank .rk { font-size: 0.66rem; color: var(--ink-muted); min-inline-size: 2.2em; }
 .brank .ru { min-inline-size: 0; flex: 0 1 auto; overflow: hidden; }
 .brank .rbar { flex: 1 1 4rem; block-size: 0.6rem; background: var(--line); display: flex; border: 1px solid var(--line); min-inline-size: 2rem; }
-.brank .rbar .o { background: var(--ok); }
-.brank .rbar .e { background: var(--warn); }
+.brank .rbar .o { background: linear-gradient(90deg, var(--battle-own-a), var(--battle-own-b)); }
+.brank .rbar .e { background: linear-gradient(90deg, var(--battle-opp-a), var(--battle-opp-b)); }
 .brank .rsc { font-size: 0.7rem; min-inline-size: 4em; text-align: right; }
 .brank.self { background: var(--sand-panel-muted); }
 .brank.self .rsc { color: var(--ok-ink); font-weight: 600; }
@@ -2686,9 +2703,63 @@ body {
 .sm-grid { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: flex-start; }
 .sm-conc { background: transparent; border-bottom: none; padding: 0.2rem 0 0.4rem; }
 
+/* 共演構成の内訳bar（ソロ / コラボ / Battle）。幅は割合そのものなので固定値を持たず、
+   flex-growへ比率を渡す。狭い区間で文字が溢れないようoverflowで畳み、数値はlegendが持つ。 */
+.sm-mix {
+  display: flex;
+  inline-size: 100%;
+  block-size: 1.5em;
+  border: 1px solid var(--line);
+  border-radius: 0.2rem;
+  overflow: hidden;
+  background: var(--line);
+}
+.sm-mix-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-inline-size: 0;
+  overflow: hidden;
+}
+.sm-mix-seg b {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.sm-mix-seg + .sm-mix-seg { border-inline-start: 1px solid rgba(255, 255, 255, 0.55); }
+.sm-mix-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.9rem;
+  margin-block-start: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.sm-mix-item { display: inline-flex; align-items: center; gap: 0.3rem; }
+.sm-mix-item i {
+  inline-size: 0.7em;
+  block-size: 0.7em;
+  border: 1px solid var(--line);
+  flex: none;
+}
+
 /* Battle分析 内の小見出し（スコア推移 / Battle Gifter / 対戦相手別 / Battle履歴） */
 .sm-subtitle { margin-block: 0.9rem 0.4rem; font-size: 0.72rem; color: var(--ink); }
 .sm-grid .sm-subtitle { margin-top: 0.2rem; }
+/* 対戦相手別の絞込帯。x-toolbarは画面上端の帯を想定した装飾(下線・地色・左右padding)を
+   持つので、card内へ置く分はそれを外して表のすぐ上に付ける。検索boxは残り幅を取る。 */
+.sm-opp-tools { padding: 0 0 0.35rem; background: transparent; border-bottom: none; }
+.sm-opp-tools > input { flex: 1 1 8rem; min-inline-size: 0; }
+/* 対戦相手別で選んだ相手。Battle履歴がその相手だけになっているので、どの行を選んだのかが
+   表の側でも分かるようにする(絞込帯の文言だけだと、表と帯の対応が読めない)。 */
+.result-table tbody tr.sm-opp-picked td { background: rgba(93, 110, 78, 0.24); }
+/* Battle履歴の絞込帯。何で絞られているかと解除手段を表の直前に置く。 */
+.sm-bh-filter { gap: 0.5rem; align-items: center; font-size: 0.72rem; color: var(--ink); }
+
 /* Battle履歴の勝敗バッジ */
 .sm-bres { display: inline-block; font-size: 0.66rem; letter-spacing: 0.12em; padding: 0.02rem 0.4rem; border: 1px solid var(--line); color: var(--ink-muted); }
 .sm-bres.ok { color: var(--ok-ink); border-color: var(--ok); }
@@ -3118,6 +3189,29 @@ body {
 .vd-src { display: inline-block; padding: 0 0.3rem; border: 1px solid var(--line); font-size: 0.62rem; white-space: nowrap; }
 .vd-src-stt { color: var(--accent-ink); }
 .vd-src-comment { color: var(--ok-ink); }
+/* 録画行の種別欄。「録画」+実体badge(TS/MP4)+状態を並べる。幅は中身なり(固定幅は持たせない)。
+   折り返さないのは、この列がshrink-to-fit(.vd-hits .xtab td:not(:last-child)のinline-size:1%)
+   だから。wrapを許すと列幅がbadge1個ぶんのmin-contentまで詰まり、窓幅に関係なくbadgeが
+   縦に積まれて行が2段になる。入りきらない窓では.table-wrapの横scrollへ落とす。 */
+.vd-kinds { display: inline-flex; flex-wrap: nowrap; gap: 0.2rem; align-items: center; }
+.vd-src-ts { color: var(--ok-ink); }
+.vd-src-mp4 { color: var(--accent-ink); }
+.vd-src-interrupted { color: var(--warn-ink); }
+.vd-src-none { color: var(--ink-muted); }
+/* 確認状態(観たかどうかの印)。塗りではなく文字色で状態を分ける: 行は選択とhoverで背景が
+   変わるため、塗りで状態を出すと選択中の行だけ印が読めなくなる。未確認をいちばん強い色に
+   するのは、この一覧を開く動機が「まだ観ていないものを探す」ことだから。 */
+.vd-review {
+  font: inherit;
+  font-size: 0.62rem;
+  padding: 0 0.15rem;
+  border: 1px solid var(--line);
+  background: var(--sand-panel-muted);
+  cursor: pointer;
+}
+.vd-review[data-state="unchecked"] { color: var(--warn-ink); }
+.vd-review[data-state="checking"] { color: var(--accent-ink); }
+.vd-review[data-state="checked"] { color: var(--ink-muted); }
 .vd-who { color: var(--ink-muted); }
 .vd-mark { background: var(--accent-deep); color: var(--invert-fg); padding: 0 0.1rem; }
 
@@ -3153,7 +3247,12 @@ body {
 .vd-seg { display: flex; gap: 0.5rem; padding: 0.15rem 0.4rem; font-size: 0.7rem; cursor: pointer; border-block-end: 1px solid rgba(143, 136, 113, 0.25); }
 .vd-seg:hover { background: var(--sand-panel-muted); }
 .vd-seg-t { flex: 0 0 auto; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
-.vd-seg-active { color: var(--ink-strong); font-weight: 600; }
+/* 今の行。文字起こし・章立て・コメントで同じ見え方(背景+太字)に揃える。 */
+.vd-seg-active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel));
+  color: var(--ink-strong);
+  font-weight: 700;
+}
 .vd-seg-sel { background: color-mix(in srgb, var(--ok) 30%, var(--sand-panel)); }
 .vd-comments {
   flex: 1 1 auto;
@@ -3167,7 +3266,11 @@ body {
 /* 名前は行の一部を上限に丸め、本文が読める幅を必ず残す。 */
 .vd-cmt-who { flex: 0 1 auto; max-inline-size: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vd-cmt-body { flex: 1 1 auto; min-inline-size: 0; overflow-wrap: anywhere; }
-.vd-cmt-active { background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel)); color: var(--ink-strong); }
+.vd-cmt-active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--sand-panel));
+  color: var(--ink-strong);
+  font-weight: 700;
+}
 /* 見どころ登録は行頭(checkboxの位置)に置く。未登録はhoverするまで淡くして本文の読みを
    邪魔せず、登録済みはhoverに関係なく色で判るようにする。本文が折り返しても1行目の高さ
    に留めるためalign-selfで上端へ寄せる。 */

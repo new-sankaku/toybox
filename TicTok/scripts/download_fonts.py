@@ -31,7 +31,7 @@ def main() -> int:
     try:
         ensure_fonts(force=args.force)
     except Exception:
-        logging.getLogger("tictok.fonts").error("font download failed", exc_info=True)
+        logging.getLogger("tictok.fonts").error("fontのdownloadに失敗しました", exc_info=True)
         return 1
     print(f"All {len(FONT_MANIFEST)} comment-overlay fonts present in {FONT_DIR}")
     return 0

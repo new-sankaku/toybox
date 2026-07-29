@@ -30,7 +30,7 @@ from pathlib import Path
 # Collectorを取り込むと import時に locale と sign API key が WebDefaults へ適用される。
 # 本番と同じ認証/locale設定を流用するため、設定処理を再実装せずこれに依存する。
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from tictok.collect import collector  # noqa: E402  (import side effects: _apply_locale / _apply_sign_api_key)
+from tictok.collect import collector  # noqa: E402,F401  (import side effects: _apply_locale / _apply_sign_api_key)
 from tictok.core.config import get_log_dir  # noqa: E402
 
 from TikTokLive import TikTokLiveClient  # noqa: E402

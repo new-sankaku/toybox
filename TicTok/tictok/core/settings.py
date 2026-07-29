@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 from tictok.paths import PROJECT_ROOT
-from tictok.storage import Storage
+from tictok.storage import OPS_ERROR, Storage
 
 logger = logging.getLogger("tictok.settings")
 
@@ -509,7 +509,7 @@ SETTING_DEFS = {
         "min": 0,
         "max": 1,
         "label": "動画化: 文字起こし字幕を焼き込む",
-        "note": "文字起こし済みの録画に対して、そのsegmentを字幕として動画へ焼き込みます。字幕の時刻は元録画mp4のmedia軸(PTS)基準で、Comment/Gift/Battleとは別の座標帯に描きます。文字起こしが無い録画・古い時刻mapで作られた文字起こしの録画は、ズレた字幕を恒久的に焼き込まないため出力を拒否します(先に文字起こしをやり直してください)。誤認識をそのまま焼き込む点に注意し、修正したい場合は焼き込みではなく字幕fileの書き出し(履歴の文字起こし画面)を使ってください。",
+        "note": "文字起こし済みの録画に対して、そのsegmentを字幕として動画へ焼き込みます。字幕の時刻は素材の再生軸(media軸)基準で、Comment/Gift/Battleとは別の座標帯に描きます。文字起こしが無い録画・古い時刻mapで作られた文字起こしの録画・文字起こしの尺が素材の実尺と合わない録画は、ズレた字幕を恒久的に焼き込まないため出力を拒否します(先に文字起こしをやり直してください)。誤認識をそのまま焼き込む点に注意し、修正したい場合は焼き込みではなく字幕fileの書き出し(履歴の文字起こし画面)を使ってください。",
         "options": [
             {"value": 0, "label": "しない"},
             {"value": 1, "label": "する"},
@@ -538,7 +538,10 @@ SETTING_DEFS = {
     "video_output_normalize_audio": {
         "category": "audio",
         "env": "TICTOK_VIDEO_OUTPUT_NORMALIZE_AUDIO",
-        "default": 0,
+        # 既定でON。録画の原本(.ts)は無加工で、再生もその原本をそのまま流すため、音量が
+        # 揃うのは出力を作ったときだけになる。出力は投稿・視聴に回すものなので、既定を
+        # OFFにしておくと配信ごとの音量差がそのまま成果物に残る。
+        "default": 1,
         "type": int,
         "min": 0,
         "max": 1,
@@ -615,7 +618,17 @@ SETTING_DEFS = {
         "min": 0,
         "max": 60,
         "label": "切り出し候補: 前paddingの秒数",
-        "note": "切り出し候補の開始を、検出した区間の何秒前から始めるかです。盛り上がりに至るまでの流れを含めるためのもので、これが無いと文脈の無いところから始まります。なお出だしの欠けを防ぐためのものではありません(stream copyは直前のkeyframeまで手前へ伸びるため、paddingが0でも指定範囲は欠けません)。",
+        "note": "切り出し候補の開始を、検出した区間の何秒前から始めるかです。盛り上がりに至るまでの流れを含めるためのもので、これが無いと文脈の無いところから始まります。なお出だしの欠けを防ぐためのものではありません(切り出しは指定時刻以前のkeyframeから始め、着地を毎回実測で確かめるため、paddingが0でも指定範囲は欠けません)。",
+    },
+    "clip_keyframe_scan_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_KEYFRAME_SCAN_SECONDS",
+        "default": 45,
+        "type": int,
+        "min": 2,
+        "max": 300,
+        "label": "切り出し: keyframe走査窓の秒数",
+        "note": "切り出しの開始位置を決めるとき、指定時刻の何秒前までkeyframeを探すかです。指定時刻をそのままffmpegへ渡すと映像は**その直後**のkeyframeから始まり、指定した範囲の頭を最大1 GOP失います(実録画で実測)。そのため指定時刻以前のkeyframeを探してそこから切ります。現行の録画で実測したkeyframe間隔は最大6.1秒、過去には37.6秒の例があるため既定45秒はどちらも収まります。短すぎる値は黙って劣化せず、切り出しが失敗して理由を表示します。",
     },
     "clip_pad_after_seconds": {
         "category": "clip",
@@ -656,6 +669,121 @@ SETTING_DEFS = {
         "max": 120,
         "label": "切り出し候補: 先行秒数(lead)",
         "note": "候補の開始をこの秒数だけ前へずらします。ギフトもコメントも「出来事への反応」なので、反応が始まった時刻から切ると原因の場面が入りません。Commentと映像の時刻ズレの補正ではありません(そちらは変換側で解決済みです)。",
+    },
+    "clip_default_mode": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_DEFAULT_MODE",
+        "default": "copy",
+        "type": str,
+        "label": "切り出しの既定の方式",
+        "note": "高速: stream copyで数秒。切れ目はkeyframeまで手前へ伸びるため、指定より最大数十秒長くなります（素材として渡すなら前後の余白は扱いやすい面もあります）。smart: 先頭のGOPだけ再encodeして指定どおりのIN点で切ります。copyより数秒重いだけで、劣化するのは先頭の1 GOPに限られます。精密: 全編を再encodeします。範囲が1 GOPに収まる短い切り出しではsmartより速いことがあります。",
+        "options": [
+            {"value": "copy", "label": "高速 (前置きあり)"},
+            {"value": "smart", "label": "smart (要求どおりのIN点)"},
+            {"value": "precise", "label": "精密 (全編再encode)"},
+        ],
+    },
+    "clip_candidate_laugh_comment": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_COMMENT",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し候補: Commentの笑いも見る",
+        "note": "「草」「w」「笑」「😂」などの笑いCommentの多さを候補の判定に使います。Comment全体の数とは別の指標で、実測ではCommentの多い窓と8割が別の時刻を指しました(相関 0.29)。ギフトが跳ねた窓では逆に笑いが減るため、ギフト連打と笑いを区別できます。追加のinstallも解析時間も不要です。",
+        "options": [
+            {"value": 0, "label": "見ない"},
+            {"value": 1, "label": "見る"},
+        ],
+    },
+    "clip_candidate_laugh_weight": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_WEIGHT",
+        "default": 1.0,
+        "type": float,
+        "min": 0.0,
+        "max": 3.0,
+        "label": "切り出し候補: 笑いの重視度",
+        "note": "笑い指標のz-scoreに掛ける倍率です。1.0で上位20件のうち笑い由来が中央値25%になります(実測)。2.0にすると6割が笑い由来になり、0.5では ほぼ従来どおりです。",
+    },
+    "clip_candidate_laugh_min_comments": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_MIN_COMMENTS",
+        "default": 2,
+        "type": int,
+        "min": 0,
+        "max": 100,
+        "label": "切り出し候補: 笑いCommentの最小件数",
+        "note": "窓内の笑いCommentがこの件数に満たない場合は候補にしません。笑いはほとんどの窓で0件のため、下限を置かないと「ほとんど笑いの無い配信のたった1件」が統計的に大きく見えて候補を占領します。3以上にすると実測で候補が89%消えます。",
+    },
+    "clip_candidate_laugh_audio": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_AUDIO",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し候補: 笑い声(音声)も見る",
+        "note": "録画の音声から笑い声そのものを検出し、笑っていた秒数を候補の判定に使います。配信者と参加者の笑いはCommentにもギフトにも現れないことがあり、これはその瞬間を直接拾える唯一の指標です。ONNXのaudio tagging modelとlabel fileを別途配置し、TICTOK_LAUGH_AUDIO_ENABLED / _MODEL_PATH / _LABELS_PATH の設定が必要です(入手手順は doc/LAUGH_AUDIO_MODEL.md)。modelが無い状態でこれをONにすると候補の算出は失敗します(笑い0件として黙って算出しません)。初回は録画の音声を最後まで読むためCPUで数十秒〜数分かかり、結果は録画ごとに再利用します。",
+        "options": [
+            {"value": 0, "label": "見ない"},
+            {"value": 1, "label": "見る (音声から笑い声を検出)"},
+        ],
+    },
+    "clip_candidate_laugh_audio_weight": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_AUDIO_WEIGHT",
+        "default": 1.0,
+        "type": float,
+        "min": 0.0,
+        "max": 3.0,
+        "label": "切り出し候補: 笑い声の重視度",
+        "note": "笑い声指標のz-scoreに掛ける倍率です。Commentの笑いの重視度と同じ意味で、大きくすると候補の上位が笑い声由来で占められ、0.0にすると判定には効かなくなります(値は候補の根拠として表示されます)。",
+    },
+    "clip_candidate_laugh_audio_min_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_LAUGH_AUDIO_MIN_SECONDS",
+        "default": 3.0,
+        "type": float,
+        "min": 0.0,
+        "max": 60.0,
+        "label": "切り出し候補: 笑い声の最小秒数",
+        "note": "窓内で笑い声が出ていた秒数がこの値に満たない場合は候補にしません。笑い声もほとんどの窓で0秒のため、下限を置かないと「ほとんど笑いの無い配信の1刻みぶん」が統計的に大きく見えて候補を占領します。刻みの幅は TICTOK_LAUGH_AUDIO_HOP_SECONDS(既定1秒)です。",
+    },
+    "clip_candidate_smile": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_SMILE",
+        "default": 0,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "切り出し候補: 笑顔(映像)も見る",
+        "note": "録画の映像から顔を探し、笑顔と判定できた秒数を候補の判定に使います。**顔がちょうど1つ映っている場面しか判定できません** — 画面のどれが配信者かを決める手段が無いため、battle・collabで画面が分割されている間は判定を捨てます(その区間の値は実際より小さく出ます)。顔検出と笑顔判定のONNX modelを別途配置し、TICTOK_SMILE_ENABLED / _FACE_MODEL_PATH / _MODEL_PATH の設定が必要です(入手手順は doc/SMILE_MODEL.md)。modelが無い状態でこれをONにすると候補の算出は失敗します(笑顔0件として黙って算出しません)。初回は録画をsamplingしながら復号するためCPUで数分かかり、結果は録画ごとに再利用します。",
+        "options": [
+            {"value": 0, "label": "見ない"},
+            {"value": 1, "label": "見る (映像から笑顔を検出)"},
+        ],
+    },
+    "clip_candidate_smile_weight": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_SMILE_WEIGHT",
+        "default": 1.0,
+        "type": float,
+        "min": 0.0,
+        "max": 3.0,
+        "label": "切り出し候補: 笑顔の重視度",
+        "note": "笑顔指標のz-scoreに掛ける倍率です。笑い声・Commentの笑いの重視度と同じ意味で、大きくすると候補の上位が笑顔由来で占められ、0.0にすると判定には効かなくなります(値は候補の根拠として表示されます)。",
+    },
+    "clip_candidate_smile_min_seconds": {
+        "category": "clip",
+        "env": "TICTOK_CLIP_CANDIDATE_SMILE_MIN_SECONDS",
+        "default": 5.0,
+        "type": float,
+        "min": 0.0,
+        "max": 60.0,
+        "label": "切り出し候補: 笑顔の最小秒数",
+        "note": "窓内で笑顔と判定できた秒数がこの値に満たない場合は候補にしません。下限を置かないと、笑顔のほとんど無い配信で1標本ぶんの検出が統計的に大きく見えて候補を占領します。標本の刻みは TICTOK_SMILE_SAMPLE_SECONDS です。",
     },
     "clip_candidate_audio": {
         "category": "clip",
@@ -735,20 +863,6 @@ SETTING_DEFS = {
         "label": "動画化: プレビュー動画の尺(秒)",
         "note": "焼き込み設定を確認するためのプレビュー動画の長さです。プレビューは本出力と同じ解像度・codec・qualityで焼き込み、尺だけをここで切ります(costを決めるのは解像度ではなく尺なので、短いほど速く確認できます)。切り出す区間はComment/Gift/Battleが最も多い場所を自動で選びます。この設定は本出力には一切影響せず、変更しても既存の焼き込みは作り直しになりません。",
     },
-    "recording_keep_hls": {
-        "category": "storage",
-        "env": "TICTOK_RECORDING_KEEP_HLS",
-        "default": 0,
-        "type": int,
-        "min": 0,
-        "max": 1,
-        "label": "録画: HLS中間data(.ts)を保持する",
-        "note": "通常はmp4化が完了するとHLSの中間data(セグメント.ts/playlist)を削除します。「する」にすると削除せず保持します。Comment焼き込みの時刻ズレ調査など、mp4のPTSと元セグメントの対応を後から検証するための診断用です。録画ごとにmp4とほぼ同容量を追加で消費するため、調査時のみ有効化してください。",
-        "options": [
-            {"value": 0, "label": "しない(削除)"},
-            {"value": 1, "label": "する(保持)"},
-        ],
-    },
     "disk_min_free_gb": {
         "category": "storage",
         "env": "TICTOK_DISK_MIN_FREE_GB",
@@ -768,6 +882,56 @@ SETTING_DEFS = {
         "max": 365,
         "label": "差し替え前の元動画(_backup)を残す日数",
         "note": "再mp4化・音量正規化は元のmp4を_backupフォルダへ退避してから差し替えます。退避は失敗を巻き戻すためのもので、成功して中身を確認できた時点で役目を終えます。0なら、その録画の処理が完走し、出来たmp4が退避と同じだけのフレーム数を持つことを確認した直後に消します(退避フォルダは膨らみません)。1以上にすると、その日数のあいだ残します。フレーム数では見えない不具合(コメントのズレ・音の異常)に後から気付いて戻したい場合の猶予です。過去に積み上がったぶんは scripts/prune_backup_mp4.py で確認しながら消せます。",
+    },
+    "pack_sweep_per_start": {
+        "category": "storage",
+        "env": "TICTOK_PACK_SWEEP_PER_START",
+        "default": 10,
+        "type": int,
+        "min": 0,
+        "max": 500,
+        "label": "ts結合: 起動時に自動で結合する録画の本数",
+        "note": "録画1本は数千個の.tsで出来ています(実測で3.1時間の配信が5,628個)。これを解像度の切れ目ごとに1本へ束ね直すと、走査・backup・移送のfile数が二桁減ります(実測293,437個→数百個)。中身は再encodeせずbyteをそのまま連結するので、画質も尺も1 bitも変わりません。起動のたびにこの本数だけqueueへ積みます。1本あたり30〜220秒かかりdiskを占有するため、大きくすると起動直後のdiskが長時間塞がります。録画中の録画と、直近に書き込みのあった録画は対象外です。0でこの自動処理を行いません(画面の「ts結合」から手動で実行できます)。",
+    },
+    "pack_sweep_quiet_minutes": {
+        "category": "storage",
+        "env": "TICTOK_PACK_SWEEP_QUIET_MINUTES",
+        "default": 15,
+        "type": int,
+        "min": 1,
+        "max": 1440,
+        "label": "起動時sweep: 直近に書き込みのあった録画を避ける時間（分）",
+        "note": "捕捉中のffmpegはindex.m3u8を書き続けるため、その最中に束ねるとplaylistを差し替えた直後に上書きされ、消したsegmentを指すplaylistが残ります。録画中かどうかはDBの状態で判断しますが、DBに載る前の録画や捕捉processだけが生きている状態も避けるため、最後の書き込みからこの時間が経っていない録画は対象外にします。ts結合は素材そのものを書き換えるためfileの更新時刻で判定し、音声波形・サムネ・文字起こしは素材を読むだけなので録画の終了時刻で判定します(読むだけの処理が早すぎても、出来るのは作り直せるcacheであって壊れた素材ではありません)。",
+    },
+    "waveform_sweep_per_start": {
+        "category": "storage",
+        "env": "TICTOK_WAVEFORM_SWEEP_PER_START",
+        "default": 10,
+        "type": int,
+        "min": 0,
+        "max": 5000,
+        "label": "音声波形: 起動時に自動で生成する録画の本数",
+        "note": "seek barの下に敷く音声波形と、無音判定・盛り上がり判定に使う音量の時系列です。作られていない録画では再生画面で波形を開いた人が生成の完了を待つことになり、3.9時間の録画で90秒級かかります。起動のたびにこの本数だけqueueへ積んで、待たずに出る状態へ寄せます。音声だけをdecodeする処理でGPUは使いませんが、録画fileを丸ごと読むためdiskを占有します。0でこの自動処理を行いません。",
+    },
+    "sprite_sweep_per_start": {
+        "category": "storage",
+        "env": "TICTOK_SPRITE_SWEEP_PER_START",
+        "default": 10,
+        "type": int,
+        "min": 0,
+        "max": 5000,
+        "label": "サムネ: 起動時に自動で生成する録画の本数",
+        "note": "seek barにカーソルを合わせたとき出る縮小画像の一覧(sprite)です。音声波形と同じく、無ければ最初に見た人が生成を待ちます。起動のたびにこの本数だけqueueへ積みます。映像をdecodeするので音声波形より重く、diskも長く占有します。0でこの自動処理を行いません。",
+    },
+    "transcribe_sweep_enabled": {
+        "category": "storage",
+        "env": "TICTOK_TRANSCRIBE_SWEEP_ENABLED",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "文字起こし: 起動時に未転写の録画をすべてqueueへ積む",
+        "note": "本数で区切らないのは、文字起こしのqueueが映像jobとは別台帳で、GPUを1本ずつ直列に使い、再起動をまたいで残るためです。全部積んでも同時に走るのは常に1本で、終わらなかったぶんは次の起動でそのまま続きます。転写済みの録画と、既に待機・実行中の録画は積み直しません(積むのは未転写のものだけです)。1本あたり数十分かかるので、貯まっている録画が多いと数日ぶんのGPU作業がqueueに並びます。0でこの自動処理を行いません。",
     },
     "retention_transient_hours": {
         "category": "storage",
@@ -796,8 +960,8 @@ SETTING_DEFS = {
         "type": int,
         "min": 0,
         "max": 1,
-        "label": "保持policy: 生録画の自動削除",
-        "note": "生録画のmp4は唯一の再取得不能なdataで、消すと再mp4化・再出力・文字起こし・切り出し・盛り上がり解析がまとめて復旧不能になります(文字起こし結果も録画と一緒に消えます)。既定は無効です。有効にしても、実行前に必ず削除内容の一覧(dry-run)が表示され、確認するまで削除しません。",
+        "label": "保持policy: 原本の自動削除",
+        "note": "録画の原本は唯一の再取得不能なdataで、消すと再mp4化・再出力・文字起こし・切り出し・盛り上がり解析がまとめて復旧不能になります(文字起こし結果も録画と一緒に消えます)。原本とは、素材(.ts)が残っている録画ではその素材、素材が残っていない録画ではmp4本体です(mp4は素材から作り直せるため、素材がある録画では派生物として扱われます)。既定は無効です。有効にしても、実行前に必ず削除内容の一覧(dry-run)が表示され、確認するまで削除しません。",
         "options": [
             {"value": 0, "label": "しない"},
             {"value": 1, "label": "する"},
@@ -1058,6 +1222,7 @@ class Settings:
     def __init__(self, storage: Storage) -> None:
         self._storage = storage
         self._values: dict = {}
+        self._invalid: dict = {}
         self._load()
 
     def _env_default(self, key: str):
@@ -1074,17 +1239,80 @@ class Settings:
         if raw is None:
             return definition["default"]
         try:
+            if self._is_choice(definition):
+                return self._validate_choice(definition, raw)
             if definition["type"] is str:
                 return self._check_path_shape(definition, raw)
             return self._validate_number(definition, raw)
         except ValueError as exc:
             logger.error(
-                "invalid setting from environment: %s=%s (%s)",
+                "環境変数の設定値が不正です: %s=%s（%s）",
                 definition["env"], raw, exc,
                 extra={"event": "process.settings_env_invalid",
                        "ctx": {"key": key, "env": definition["env"], "reason": str(exc)}},
             )
             raise
+
+    @staticmethod
+    def _coerce(definition: dict, value):
+        """宣言された型へ変換するだけ。範囲・選択肢・pathのshapeは見ない。
+
+        「制約に反しているが値はある」と「そもそも値として読めない」を分けるために要る。
+        前者はoperatorが保存した値そのもので走らせられるが、後者は走らせる値が存在しない。"""
+        if definition["type"] is str:
+            return str(value).strip().strip('"')
+        return definition["type"](value)
+
+    def _stored_value(self, key: str, definition: dict, raw):
+        """DBに保存済みの1件を、update()と同じgateへ通して解決する。戻り値は (値, 不正の理由)。
+
+        DBへはupdate()経由でしか入らない建前だが、SETTING_DEFSのtype/min/max/optionsを後から
+        変更すると、その時点で正しかった既存行が建前を破る。素のcastのままでは範囲外・選択肢外・
+        相対pathが黙って実行値になり(update()なら422で拒否される値)、型として読めない値は
+        keyを名指ししない ValueError で起動を殺していた。
+
+        不正だった場合も**保存された値を既定値へ差し替えない**。差し替えは黙って別の値で走る
+        ということで、画面には既定値が現在値として並び、operatorは自分の設定が捨てられたことを
+        知る術がない(No fallback)。値はそのまま走らせ、logとops_eventsと画面へ「どのkeyのどの値が
+        なぜ不正か」を出す。
+
+        起動を止めるのは型として読めないときだけ。env側(``_env_default``)が不正で即座に止めるのは、
+        .envの修正にserverが要らないからで、DB値の修正tool は設定画面そのものである。範囲が動いた
+        だけで起動を拒むと、その値を直す唯一の画面ごと止まり、sqlite を直接叩く以外に復旧手段が
+        無くなる。「設定画面が開けなくなる形で露見させない」という_load側の方針を、DB値では
+        「設定画面が開ける形で露見させる」として引き継ぐ(不正なDB値はdescribe()を壊さないので、
+        画面は開いたまま該当keyを直せる)。"""
+        try:
+            if self._is_choice(definition):
+                return self._validate_choice(definition, raw), None
+            if definition["type"] is str:
+                return self._check_path_shape(definition, raw), None
+            return self._validate_number(definition, raw), None
+        except ValueError as exc:
+            reason = str(exc)
+        try:
+            typed = self._coerce(definition, raw)
+        except (TypeError, ValueError) as exc:
+            logger.error(
+                "保存済みの設定値が読めません: %s=%r（%s / %s）。設定画面で保存し直すか、"
+                "settings表の該当行を削除すると組み込みの既定値(%r)に戻ります。",
+                key, raw, definition["label"], exc, definition["default"],
+                extra={"event": "process.settings_db_unreadable",
+                       "ctx": {"key": key, "stored": str(raw), "reason": str(exc),
+                               "builtin_default": definition["default"]}},
+            )
+            raise ValueError(
+                f"保存済みの設定値が読めません: {key}={raw!r}（{definition['label']}）"
+            ) from exc
+        logger.error(
+            "保存済みの設定値が現在の定義に適合しません: %s=%r（%s）。この値のまま実行しますが、"
+            "設定画面から保存し直してください。",
+            key, raw, reason,
+            extra={"event": "process.settings_db_invalid",
+                   "ctx": {"key": key, "stored": str(raw), "reason": reason,
+                           "builtin_default": definition["default"]}},
+        )
+        return typed, reason
 
     def _load(self) -> None:
         """Resolve every setting from DB > env > built-in default.
@@ -1102,7 +1330,10 @@ class Settings:
             # 不正なenvはここで起動を止め、設定画面が開けなくなる形で露見させない。
             env_default = self._env_default(key)
             if key in stored:
-                self._values[key] = definition["type"](stored[key])
+                value, reason = self._stored_value(key, definition, stored[key])
+                self._values[key] = value
+                if reason:
+                    self._invalid[key] = reason
                 sources["from_db"] += 1
             else:
                 self._values[key] = env_default
@@ -1110,18 +1341,42 @@ class Settings:
                     sources["from_default"] += 1
                 else:
                     sources["from_env"] += 1
+        # settings表にはSETTING_DEFS以外の行も入る(store/maintenance.pyが移行済みmarkerを
+        # ``_migration:<name>`` で置く)。定義に無いkeyは読まないだけで、残骸として報告はしない
+        # — markerと「消えた設定の残り」をkey名から見分ける手段が無く、prefixの決め打ちは
+        # 命名が変わった時に黙って壊れる。
         logger.info(
-            "settings loaded (db=%d env=%d default=%d)",
+            "設定値を読み込みました（db=%d env=%d 既定=%d）",
             sources["from_db"], sources["from_env"], sources["from_default"],
             extra={"event": "process.settings_loaded",
-                   "ctx": {"total": len(SETTING_DEFS), **sources}},
+                   "ctx": {"total": len(SETTING_DEFS), **sources,
+                           "invalid": len(self._invalid)}},
         )
+        if self._invalid:
+            self._storage.record_ops_event(
+                logger,
+                "process.settings_db_invalid",
+                "保存済みの設定値が現在の定義に適合しません（%d件）: %s" % (
+                    len(self._invalid),
+                    ", ".join(f"{key}={self._values[key]!r}" for key in self._invalid),
+                ),
+                severity=OPS_ERROR,
+                detail={"invalid": {key: {"value": self._values[key], "reason": reason}
+                                    for key, reason in self._invalid.items()}},
+            )
 
     def get(self, key: str):
         return self._values[key]
 
     def all_values(self) -> dict:
         return dict(self._values)
+
+    def invalid_values(self) -> dict:
+        """起動時に現在の定義へ適合しなかった保存済み設定の {key: 理由}。
+
+        値そのものは ``get`` / ``all_values`` が返すものが実行値(既定値へは差し替えない)。
+        ここにkeyが載っている間、そのkeyは設定画面から保存し直すまで不正なまま走り続ける。"""
+        return dict(self._invalid)
 
     def describe(self) -> list:
         """画面へ渡す設定の定義一覧。
@@ -1154,8 +1409,33 @@ class Settings:
                 entry["step"] = 1 if definition["type"] is int else 0.5
             if "options" in definition:
                 entry["options"] = definition["options"]
+            if key in self._invalid:
+                # 保存済みの値が現在の定義に反しているkey。画面がその場で直せるよう、値を
+                # 黙って差し替える代わりに理由を添えて出す。適合している間はfield自体を出さない
+                # (「不正でない」を毎回名乗る必要は無い)。
+                entry["invalid"] = self._invalid[key]
             described.append(entry)
         return described
+
+    @staticmethod
+    def _is_choice(definition: dict) -> bool:
+        """optionsを持つstrは**列挙**であって path ではない。
+
+        strをpath決め打ちで検証していたのは、当初strの設定がrecord_dirしか無かったため。
+        列挙を足すたびに「絶対パスで指定してください」と拒否されるので、ここで型を分ける。
+        """
+        return definition["type"] is str and bool(definition.get("options"))
+
+    def _validate_choice(self, definition: dict, value) -> str:
+        """optionsに無い値は拒否する。近い値へ寄せない — 綴り違いを黙って別の設定として
+        受けると、画面の表示と実際の挙動が食い違う。"""
+        text = str(value).strip()
+        allowed = [option["value"] for option in definition["options"]]
+        if text not in allowed:
+            raise ValueError(
+                f"{definition['label']} は次のいずれかを指定してください: {', '.join(allowed)}"
+            )
+        return text
 
     def _check_path_shape(self, definition: dict, value) -> str:
         """Shape-only check for a directory-path setting: non-empty (unless allow_empty)
@@ -1225,6 +1505,9 @@ class Settings:
             if key not in SETTING_DEFS:
                 raise ValueError(f"不明な設定key: {key}")
             definition = SETTING_DEFS[key]
+            if self._is_choice(definition):
+                validated[key] = self._validate_choice(definition, value)
+                continue
             if definition["type"] is str:
                 validated[key] = self._validate_path(definition, value)
                 continue
@@ -1237,6 +1520,9 @@ class Settings:
             }
             self._storage.set_settings(validated)
             self._values.update(validated)
+            # 保存できた=同じgateを通ったので、そのkeyの「定義に適合しない」印は解ける。
+            for key in validated:
+                self._invalid.pop(key, None)
             self._storage.record_ops_event(
                 logger,
                 "process.settings_updated",

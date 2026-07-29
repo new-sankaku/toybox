@@ -63,6 +63,42 @@ def session_dir(root, stem, streamer=None) -> Path:
     return root / s / TS_DIRNAME / stem if s else root / stem
 
 
+# session dir に置かれる録画実体のfile名。``seg*.ts`` は配信から刻まれたそのままの
+# segment、``pack*.ts`` は解像度の切れ目ごとに束ね直したもの(tictok.record.hls_pack)。
+# 「この録画に素材があるか」の判定は必ずここを通す: 束ね済みの録画をseg*.tsだけで見ると
+# 素材が無いと誤判定し、再mp4化が拒否され、retentionはmp4を最後の1本と誤認する。
+MEDIA_GLOBS = ("seg*.ts", "pack*.ts")
+
+
+def media_files(session_dir) -> list:
+    """その session dir に在る録画実体(.ts)。順序はglobごとに名前順。"""
+    session_dir = Path(session_dir)
+    found: list = []
+    for pattern in MEDIA_GLOBS:
+        found.extend(sorted(session_dir.glob(pattern)))
+    return found
+
+
+def has_media(session_dir) -> bool:
+    """その session dir に録画実体が1本でも在るか。"""
+    session_dir = Path(session_dir)
+    return any(next(session_dir.glob(pattern), None) is not None for pattern in MEDIA_GLOBS)
+
+
+# captureが書くHLS再生list。segmentの山だけではEXTINF順が分からず、再生も再構成もできない。
+PLAYLIST_NAME = "index.m3u8"
+
+
+def has_playable_media(session_dir) -> bool:
+    """その session dir から再生・再構成ができるか(素材と再生listの両方が在る)。
+
+    「素材が在るか」(``has_media``)と分けて持つ。再生経路がHLSになるかはこちらで決まり、
+    再生経路は**時間軸**を決める(HLSはplaylistのEXTINF累積=media軸、mp4はPTS軸)。軸を
+    決める側と再生を決める側が違う条件を見ると、検索hitの秒だけが別の軸に載る。"""
+    session_dir = Path(session_dir)
+    return has_media(session_dir) and (session_dir / PLAYLIST_NAME).is_file()
+
+
 def mp4_dir(root, stem, streamer=None) -> Path:
     """この録画の mp4・overlay・up.mp4 を置くディレクトリ。"""
     root = Path(root)
@@ -118,6 +154,46 @@ def record_root_of(path) -> Path:
     if parent.name in (TS_DIRNAME, MP4_DIRNAME):
         return parent.parent.parent
     return parent
+
+
+_record_roots: list | None = None
+
+
+def record_roots() -> list:
+    """録画の実体を探す root の一覧(work root と final root)。先頭が work。
+
+    録画は work root で生まれ、完成すると final root へ移送される。移送は素材とmp4を
+    まとめて動かすが、途中で失敗すると**片方だけが移る**。実測でDBの331件中28件が
+    その状態にあり、mp4のrootから素材を探す限りその28件は素材が無いことになっていた
+    (mp4が原本だった頃は成果物が残るので露見しにくかったが、素材が原本になった今は
+    録画が丸ごと見えないことを意味する)。
+
+    ``pool_root`` と同じで、serverは起動時に自分が解決した値を渡す。単体で走る
+    maintenance scriptにはそれが無いので、その場合だけDB設定から同じ順序で辿る。"""
+    global _record_roots
+    if _record_roots is None:
+        db = config.get_db_path()
+        work = Path(config.record_dir_from_db(db)).resolve()
+        final = Path(config.final_record_dir_from_db(db)).resolve()
+        _record_roots = [work] if work == final else [work, final]
+    return _record_roots
+
+
+def set_record_roots(roots) -> None:
+    """探索するrootを明示指定する。serverが自分の RECORD_DIR / FINAL_DIR を渡す。"""
+    global _record_roots
+    seen: list = []
+    for root in roots:
+        resolved = Path(root).resolve()
+        if resolved not in seen:
+            seen.append(resolved)
+    _record_roots = seen
+
+
+def reset_record_roots() -> None:
+    """``record_roots`` のcacheを捨てる。設定を差し替えるtestが使う。"""
+    global _record_roots
+    _record_roots = None
 
 
 AVATAR_POOL_DIRNAME = "avatars"

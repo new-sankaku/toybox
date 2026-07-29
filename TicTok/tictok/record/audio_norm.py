@@ -27,11 +27,13 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from tictok.core import ffprobe
 from tictok.record.recorder import ffmpeg_ctx, ffprobe_available
 
 logger = logging.getLogger(__name__)
 
-_PROBE_TIMEOUT_SECONDS = 60
+# 単一streamのheaderを読むだけなので短い方の上限。実体は core.ffprobe。
+_PROBE_TIMEOUT_SECONDS = ffprobe.SHORT_TIMEOUT_SECONDS
 
 # 設定key(clip・焼き込み・Up出力で共有する)。焼き込みのcache signatureへも渡すので、
 # 値を増やしたらvideo_overlay.OVERLAY_KEYSにも足すこと。
@@ -62,7 +64,7 @@ def targets_from_cfg(cfg: dict) -> Optional[dict]:
     }
 
 
-def probe_sample_rate(src: Path) -> Optional[int]:
+def probe_sample_rate(src: Path, input_args: tuple = ()) -> Optional[int]:
     """入力の音声sample rateをffprobeで測る。音声streamを持たない入力ではNone。
 
     blockingなので、async側からはasyncio.to_thread()経由で呼ぶこと。取得できない
@@ -72,7 +74,7 @@ def probe_sample_rate(src: Path) -> Optional[int]:
     if not ffprobe_available():
         raise RuntimeError("ffprobeが見つかりません。音量正規化にはffmpeg一式のinstallが必要です。")
     args = [
-        "ffprobe", "-v", "error", "-select_streams", "a:0",
+        "ffprobe", "-v", "error", *input_args, "-select_streams", "a:0",
         "-show_entries", "stream=sample_rate", "-of", "json", str(src),
     ]
     try:
@@ -84,7 +86,7 @@ def probe_sample_rate(src: Path) -> Optional[int]:
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         stderr = getattr(exc, "stderr", None)
         logger.error(
-            "could not probe the audio sample rate of %s", Path(src).name,
+            "%s の音声のsample rateを取得できません", Path(src).name,
             extra={"event": "process.ffprobe_failed",
                    "ctx": {"stage": "audio_sample_rate", "path": str(src),
                            **ffmpeg_ctx(

@@ -162,7 +162,7 @@ class AvatarProxy:
             content = resp.content
             if len(content) > _MAX_BYTES:
                 logger.warning(
-                    "avatar too large (%d bytes): %s", len(content), url,
+                    "avatarのsizeが大きすぎます（%d bytes）: %s", len(content), url,
                     extra={"event": "http.avatar_fetch_rejected",
                            "ctx": {"reason": "too_large", "size_bytes": len(content),
                                    "max_bytes": _MAX_BYTES}},
@@ -171,7 +171,7 @@ class AvatarProxy:
             content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
             if not content_type.startswith("image/"):
                 logger.warning(
-                    "avatar non-image content-type %r: %s", content_type, url,
+                    "avatarのcontent-typeがimageではありません %r: %s", content_type, url,
                     extra={"event": "http.avatar_fetch_rejected",
                            "ctx": {"reason": "not_an_image", "content_type": content_type,
                                    "size_bytes": len(content)}},
@@ -184,14 +184,15 @@ class AvatarProxy:
             # it; log concisely without a stack trace — it is an expected CDN state,
             # not a server fault. The UI keeps its initial-letter avatar.
             logger.info(
-                "avatar fetch HTTP %d (no local copy): %s", exc.response.status_code, url,
+                "avatarの取得がHTTP %d で終わりました（localに複製がありません）: %s",
+                exc.response.status_code, url,
                 extra={"event": "http.avatar_fetch_missed",
                        "ctx": {"status": exc.response.status_code}},
             )
             return None
         except Exception:
             logger.warning(
-                "avatar fetch failed: %s", url,
+                "avatarの取得に失敗しました: %s", url,
                 extra={"event": "http.avatar_fetch_failed", "ctx": {"reason": "unexpected"}},
                 exc_info=True,
             )
@@ -223,7 +224,7 @@ class AvatarProxy:
             return content, content_type
         except OSError:
             logger.warning(
-                "failed to read persisted avatar: %s", url,
+                "保存済みavatarの読み取りに失敗しました: %s", url,
                 extra={"event": "http.avatar_read_failed",
                        "ctx": {"source": "url_cache", "path": str(bin_path)}},
                 exc_info=True,
@@ -251,7 +252,7 @@ class AvatarProxy:
             return content, content_type
         except OSError:
             logger.warning(
-                "failed to read owner avatar by id: %s", owner_key,
+                "owner avatarをidから読み取れませんでした: %s", owner_key,
                 extra={"event": "http.avatar_read_failed",
                        "ctx": {"source": "owner_cache", "path": str(bin_path)}},
                 exc_info=True,

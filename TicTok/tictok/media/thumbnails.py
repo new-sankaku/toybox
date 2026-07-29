@@ -31,6 +31,19 @@ frameで埋めてtileが複製される。実録画(3022秒/interval 11秒/実ke
 倒す。誤って通常decodeを選んでも遅いだけだが、誤ってkeyframeのみを選ぶと静かに誤った
 spriteがcacheへ残る。
 
+== 解像度が変わる録画では filter graph を作り直させない ==
+
+配信側の解像度は配信中に変わる(実測: 640x1280 → 720x1280 → 640x1280)。ffmpegは入力の
+frame寸法が変わると **filter graph全体を作り直す**(入力option ``reinit_filter`` の既定は1)。
+``tile`` は指定枚数を貯めてから1枚出す蓄積型なので、作り直しのたびに貯めた分が捨てられ、
+``-frames:v 1`` は**最後の作り直し以降**だけが入ったsheetを掴む。頭の「変更時刻÷interval」枚が
+丸ごと抜けて全体がその枚数ぶん前へ詰まり、足りない末尾は ``tile`` のEOF flushで黒く埋まる。
+
+実測(3.68時間・interval 45秒・最後の変更が2481秒): tile *i* に (i+55)*45秒 の絵が入り、
+末尾55枚(10755秒以降)が黒。**前段に ``scale`` を置いても効かない** — 作り直しは入力側で
+起きるので、scaleへ届く前にgraphごとresetされる。``-reinit_filter 0`` で作り直しを止めれば
+``scale`` が寸法差を吸収し、``tile`` の蓄積も ``fps`` の起点も生き残る。
+
 尺は数分〜3時間超まで幅があるため、intervalとgridはdurationから決め、
 総tile数はMAX_TILESで頭打ちにしてsprintが無制限に肥大するのを防ぐ。
 """
@@ -41,6 +54,8 @@ import logging
 import math
 from pathlib import Path
 
+from tictok.core import cancel, ffprobe
+from tictok.media import hls_source
 from tictok.record.recorder import sidecar_dir, sidecar_path
 from tictok.record.video_overlay import ffmpeg_available, ffprobe_available
 
@@ -74,6 +89,9 @@ KEYFRAME_PROBE_SPAN_SECONDS = 30.0
 KEYFRAME_SAFETY = 1.5
 # mjpegの-q:v(2=最良〜31=最低)。5でtile当たり約4KB。
 JPEG_QSCALE = 5
+# 解像度が変わっても filter graph を作り直させない入力option(module docstring参照)。
+# 作り直すと `tile` の蓄積が捨てられ、spriteが丸ごとずれて末尾が黒くなる。
+NO_GRAPH_REINIT = ("-reinit_filter", "0")
 
 
 def sprite_path(src: Path) -> Path:
@@ -105,39 +123,49 @@ def _lock_for(key: str) -> asyncio.Lock:
     return lock
 
 
-async def _probe(src: Path) -> tuple[float, int, int]:
-    """(duration秒, width, height)。取得できなければRuntimeError。"""
+async def _probe_duration(source) -> float:
+    """尺(秒)。取得できなければRuntimeError。
+
+    寸法はここでは取らない。``stream=width,height`` は1組しか返さず、混在解像度の録画では
+    その1組が全編を代表しないため、tileのaspectを開いた所の値だけで決めてしまう
+    (``_widest`` を参照)。"""
     if not ffprobe_available():
         raise RuntimeError("ffprobeが見つかりません。sprite生成にはffmpeg一式のinstallが必要です。")
-    proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height", "-show_entries", "format=duration",
-        "-of", "json", str(src),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, stderr = await proc.communicate()
-    try:
-        data = json.loads(out.decode("utf-8", "replace"))
-        stream = data["streams"][0]
-        width, height = int(stream["width"]), int(stream["height"])
-        duration = float(data["format"]["duration"])
-    except (ValueError, KeyError, IndexError) as exc:
-        message = (stderr or b"").decode("utf-8", "replace").strip()
+    result = await ffprobe.run(
+        ffprobe.duration_args(source.path, source.input_args))
+    duration = ffprobe.parse_duration(result.stdout)
+    if duration is None:
+        message = result.stderr.strip()
         logger.error(
-            "thumbnail probe failed for %s", src.name,
+            "thumbnail生成のため %s の情報を取得できませんでした", source.path.name,
             extra={"event": "thumbnails.probe_failed",
-                   "ctx": {"src": str(src), "returncode": proc.returncode,
+                   "ctx": {"src": str(source.path), "returncode": result.returncode,
                            "stderr": message[:2000]}},
         )
-        raise RuntimeError(f"録画の情報を取得できませんでした: {message[:300]}") from exc
-    if duration <= 0 or width <= 0 or height <= 0:
+        raise RuntimeError(f"録画の情報を取得できませんでした: {message[:300]}")
+    if duration <= 0:
         raise RuntimeError("録画の尺または解像度が不正です。")
-    return duration, width, height
+    return duration
 
 
-async def _max_keyframe_gap(src: Path, duration: float) -> float | None:
+async def _widest(source) -> tuple[int, int]:
+    """tileのaspectを決める寸法。録画に現れる解像度の幅と高さそれぞれの最大。
+
+    vfの ``scale`` は全frameを同じtile寸法へ揃えるので、寸法を1組のprobeで決めると、
+    切替後のframeがそのaspectへ引き伸ばされる。両方を包む枠から比を採れば、混在した
+    どのframeも同じ歪み方をしない。"""
+    found = await hls_source.widest_resolution(source)
+    if found is None or found[0] <= 0 or found[1] <= 0:
+        raise RuntimeError("録画の尺または解像度が不正です。")
+    return found
+
+
+async def _no_keyframe_gap() -> float | None:
+    """測らなかったことを「測れなかった」と同じNoneで表す。どちらも通常decodeへ倒れる。"""
+    return None
+
+
+async def _max_keyframe_gap(source, duration: float) -> float | None:
     """標本抽出で測ったkeyframe間隔の最大値(秒)。測れなければNone。
 
     全走査は利点とほぼ同額のcostになるので、尺を等分した位置の短い窓だけを読む。窓と窓の
@@ -148,25 +176,22 @@ async def _max_keyframe_gap(src: Path, duration: float) -> float | None:
     starts = [duration * (i + 0.5) / KEYFRAME_PROBE_WINDOWS
               for i in range(KEYFRAME_PROBE_WINDOWS)]
     intervals = ",".join(f"{at:.2f}%+{span:.0f}" for at in starts)
-    proc = await asyncio.create_subprocess_exec(
-        "ffprobe", "-v", "error", "-read_intervals", intervals,
+    result = await ffprobe.run([
+        "ffprobe", "-v", "error", *source.input_args, "-read_intervals", intervals,
         "-select_streams", "v:0", "-skip_frame", "nokey",
-        "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(src),
-        stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, stderr = await proc.communicate()
-    if proc.returncode != 0:
+        "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(source.path),
+    ])
+    if not result.ok:
         logger.warning(
-            "keyframe probe failed for %s; falling back to a full decode", src.name,
+            "%s のkeyframeを走査できないため全体のdecodeに切り替えます",
+            source.path.name,
             extra={"event": "thumbnails.keyframe_probe_failed",
-                   "ctx": {"src": str(src), "returncode": proc.returncode,
-                           "stderr": (stderr or b"").decode("utf-8", "replace")[:2000]}},
+                   "ctx": {"src": str(source.path), "returncode": result.returncode,
+                           "stderr": result.stderr[:2000]}},
         )
         return None
     times = sorted(
-        float(line) for line in out.decode("utf-8", "replace").split() if line.strip()
+        float(line) for line in result.stdout.split() if line.strip()
     )
     gaps = [b - a for a, b in zip(times, times[1:]) if b - a <= span]
     if not gaps:
@@ -174,9 +199,14 @@ async def _max_keyframe_gap(src: Path, duration: float) -> float | None:
     return max(gaps)
 
 
+def _interval_seconds(duration: float) -> float:
+    """tileの間隔。尺だけで決まる — 解像度を待たずにkeyframe走査の要否を判断できる。"""
+    return max(MIN_INTERVAL_SECONDS, math.ceil(duration / MAX_TILES))
+
+
 def _grid(duration: float, width: int, height: int) -> dict:
     """尺と解像度からinterval・grid・tile寸法を決める。"""
-    interval = max(MIN_INTERVAL_SECONDS, math.ceil(duration / MAX_TILES))
+    interval = _interval_seconds(duration)
     # fpsフィルタは0, interval, 2*interval... を出すので、末尾の端数区間は数えない。
     count = max(1, min(MAX_TILES, int(duration // interval)))
     columns = min(SPRITE_COLUMNS, count)
@@ -200,15 +230,19 @@ def _signature(src: Path) -> dict:
 
     含めるのは測定結果(keyframe間隔)ではなく判定条件の方である。測定結果を入れると
     cacheの照合前に毎回ffprobeを走らせることになり、hoverの連射で測定costを払い続ける。
-    同じfileに対する測定は決定的なので、条件が変わらない限り結論も変わらない。"""
-    stat = src.stat()
-    return {"mtime": stat.st_mtime, "size": stat.st_size,
+    同じfileに対する測定は決定的なので、条件が変わらない限り結論も変わらない。
+
+    srcの指紋はhls_sourceが出す。mp4が在る録画では今までの ``src.stat()`` と同じ値なので、
+    既存のspriteのcacheはそのまま生き続ける。mp4が無い録画では素材(.ts)そのものを数える —
+    playlistのstatはsegmentの入れ替わりを映さないので、鍵にすると当たり続けてしまう。"""
+    return {**hls_source.fingerprint(src),
             "tile_width": TILE_WIDTH, "max_tiles": MAX_TILES,
             "columns": SPRITE_COLUMNS,
             "keyframe_min_interval": KEYFRAME_ONLY_MIN_INTERVAL,
             "keyframe_probe_windows": KEYFRAME_PROBE_WINDOWS,
             "keyframe_probe_span": KEYFRAME_PROBE_SPAN_SECONDS,
-            "keyframe_safety": KEYFRAME_SAFETY}
+            "keyframe_safety": KEYFRAME_SAFETY,
+            "graph_reinit": False}
 
 
 def _cached(src: Path, signature: dict) -> dict | None:
@@ -228,8 +262,6 @@ def _cached(src: Path, signature: dict) -> dict | None:
 async def ensure_sprite(src: Path) -> dict:
     """srcのsprite sheetを用意し、gridのmetaを返す。2回目以降はcacheを返す。"""
     src = Path(src)
-    if not src.is_file():
-        raise RuntimeError("録画fileが存在しません。")
 
     async with _lock_for(str(src)):
         signature = _signature(src)
@@ -240,71 +272,86 @@ async def ensure_sprite(src: Path) -> dict:
         if not ffmpeg_available():
             raise RuntimeError("ffmpegが見つかりません。sprite生成にはffmpegのinstallが必要です。")
 
-        duration, width, height = await _probe(src)
-        grid = _grid(duration, width, height)
-        out = sprite_path(src)
-        sidecar_dir(src).mkdir(parents=True, exist_ok=True)
-
-        interval = grid["interval_seconds"]
-        keyframe_gap = None
-        if interval >= KEYFRAME_ONLY_MIN_INTERVAL:
-            keyframe_gap = await _max_keyframe_gap(src, duration)
-        # 測れなかった(None)ときは推測せず通常decode。誤ってkeyframeのみを選ぶと、
-        # tileが複製された誤ったspriteがそのままcacheへ残る。
-        keyframe_only = (keyframe_gap is not None
-                         and interval >= keyframe_gap * KEYFRAME_SAFETY)
-        logger.info(
-            "sprite decode mode for %s: %s", src.name,
-            "keyframe-only" if keyframe_only else "full",
-            extra={"event": "thumbnails.decode_mode",
-                   "ctx": {"src": str(src), "interval_seconds": interval,
-                           "keyframe_gap_seconds": (None if keyframe_gap is None
-                                                    else round(keyframe_gap, 3)),
-                           "safety": KEYFRAME_SAFETY, "keyframe_only": keyframe_only}},
-        )
-        pre_input = ["-skip_frame", "nokey"] if keyframe_only else []
-        vf = (f"fps=1/{grid['interval_seconds']:.6f},"
-              f"scale={grid['tile_width']}:{grid['tile_height']},"
-              f"tile={grid['columns']}x{grid['rows']}")
-        cmd = ["ffmpeg", "-v", "error", "-y", *pre_input, "-i", str(src),
-               "-an", "-sn", "-vf", vf, "-frames:v", "1",
-               "-q:v", str(JPEG_QSCALE), str(out)]
-
-        loop = asyncio.get_running_loop()
-        started = loop.time()
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        elapsed = loop.time() - started
-        if proc.returncode != 0 or not out.is_file():
-            message = (stderr or b"").decode("utf-8", "replace").strip()
-            logger.error(
-                "thumbnail sprite failed for %s", src.name,
-                extra={"event": "thumbnails.failed",
-                       "ctx": {"src": str(src), "returncode": proc.returncode,
-                               "keyframe_only": keyframe_only, "vf": vf,
-                               "stderr": message[:2000]}},
+        with hls_source.ffmpeg_source(src) as source:
+            duration = await _probe_duration(source)
+            interval = _interval_seconds(duration)
+            # 寸法の走査とkeyframe間隔の測定はどちらもkeyframeを読むだけで、互いに依存しない。
+            # 直列にすると長時間録画で両方の待ち時間を足すことになるので並べて走らせる。
+            widest, keyframe_gap = await asyncio.gather(
+                _widest(source),
+                (_max_keyframe_gap(source, duration)
+                 if interval >= KEYFRAME_ONLY_MIN_INTERVAL else _no_keyframe_gap()),
             )
-            raise RuntimeError(f"サムネイルの生成に失敗しました: {message[:300]}")
+            width, height = widest
+            grid = _grid(duration, width, height)
+            out = sprite_path(src)
+            sidecar_dir(src).mkdir(parents=True, exist_ok=True)
 
-        sprite = {"path": str(out), **grid}
-        _meta_path(src).write_text(
-            json.dumps({"signature": signature, "sprite": sprite}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        logger.info(
-            "thumbnail sprite built: %s (%d tiles, %.1fs)", out.name, grid["count"], elapsed,
-            extra={"event": "thumbnails.built",
-                   "ctx": {"src": str(src), "output": str(out),
-                           "count": grid["count"], "columns": grid["columns"],
-                           "rows": grid["rows"], "interval_seconds": grid["interval_seconds"],
-                           "tile_width": grid["tile_width"], "tile_height": grid["tile_height"],
-                           "duration_seconds": duration, "keyframe_only": keyframe_only,
-                           "elapsed_seconds": round(elapsed, 2),
-                           "size_bytes": out.stat().st_size}},
-        )
-        return sprite
+            # 測れなかった(None)ときは推測せず通常decode。誤ってkeyframeのみを選ぶと、
+            # tileが複製された誤ったspriteがそのままcacheへ残る。
+            keyframe_only = (keyframe_gap is not None
+                             and interval >= keyframe_gap * KEYFRAME_SAFETY)
+            logger.info(
+                "%s のsprite decode mode: %s", src.name,
+                "keyframe-only" if keyframe_only else "full",
+                extra={"event": "thumbnails.decode_mode",
+                       "ctx": {"src": str(src), "interval_seconds": interval,
+                               "keyframe_gap_seconds": (None if keyframe_gap is None
+                                                        else round(keyframe_gap, 3)),
+                               "safety": KEYFRAME_SAFETY, "keyframe_only": keyframe_only,
+                               "hls": source.is_hls, "width": width, "height": height}},
+            )
+            pre_input = ["-skip_frame", "nokey"] if keyframe_only else []
+            vf = (f"fps=1/{grid['interval_seconds']:.6f},"
+                  f"scale={grid['tile_width']}:{grid['tile_height']},"
+                  f"tile={grid['columns']}x{grid['rows']}")
+            cmd = ["ffmpeg", "-v", "error", "-y", *pre_input, *NO_GRAPH_REINIT,
+                   *source.input_args, "-i", str(source.path),
+                   "-an", "-sn", "-vf", vf, "-frames:v", "1",
+                   "-q:v", str(JPEG_QSCALE), str(out)]
+
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # 全frame decodeは3.9h録画で192秒かかる。timeoutは付けない(正常な長時間走査を
+            # 落とす)が、取り消しは効かなければならないのでprocessだけ登録する。
+            cancel.register_process(proc)
+            try:
+                _, stderr = await proc.communicate()
+            finally:
+                cancel.forget_process(proc)
+            elapsed = loop.time() - started
+            if proc.returncode != 0 or not out.is_file():
+                message = (stderr or b"").decode("utf-8", "replace").strip()
+                logger.error(
+                    "%s のthumbnail spriteの生成に失敗しました", src.name,
+                    extra={"event": "thumbnails.failed",
+                           "ctx": {"src": str(src), "returncode": proc.returncode,
+                                   "keyframe_only": keyframe_only, "vf": vf,
+                                   "stderr": message[:2000]}},
+                )
+                raise RuntimeError(f"サムネイルの生成に失敗しました: {message[:300]}")
+
+            sprite = {"path": str(out), **grid}
+            _meta_path(src).write_text(
+                json.dumps({"signature": signature, "sprite": sprite}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info(
+                "thumbnail spriteを生成しました: %s（%d tiles, %.1fs）",
+                out.name, grid["count"], elapsed,
+                extra={"event": "thumbnails.built",
+                       "ctx": {"src": str(src), "output": str(out),
+                               "count": grid["count"], "columns": grid["columns"],
+                               "rows": grid["rows"], "interval_seconds": grid["interval_seconds"],
+                               "tile_width": grid["tile_width"], "tile_height": grid["tile_height"],
+                               "duration_seconds": duration, "keyframe_only": keyframe_only,
+                               "elapsed_seconds": round(elapsed, 2),
+                               "size_bytes": out.stat().st_size}},
+            )
+            return sprite

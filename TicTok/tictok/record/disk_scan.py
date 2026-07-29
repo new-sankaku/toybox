@@ -168,7 +168,7 @@ def _walk(root: Path, totals: dict, errors: list) -> None:
         except OSError as exc:
             errors.append({"path": str(current), "error": str(exc)})
             logger.warning(
-                "could not read %s while measuring disk usage", current,
+                "disk使用量の集計中に %s を読み取れません", current,
                 extra={"event": "storage.scan_dir_failed",
                        "ctx": {"path": str(current)}},
                 exc_info=True,

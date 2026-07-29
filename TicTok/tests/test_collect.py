@@ -506,6 +506,74 @@ def test_extract_league_reads_the_only_known_source_and_never_invents():
     assert C._extract_league("not a dict") == ""
 
 
+# ---------------- sign server outage ----------------
+
+
+def _sign_error(reason, status=None):
+    from TikTokLive.client.errors import SignAPIError
+
+    response = None if status is None else SimpleNamespace(status_code=status, headers={})
+    return SignAPIError(reason, "boom", response=response)
+
+
+@pytest.mark.parametrize("reason", ["RATE_LIMIT", "CONNECT_ERROR", "EMPTY_PAYLOAD", "EMPTY_COOKIES"])
+def test_sign_server_outage_classifies_server_side_reasons_as_external(reason):
+    from TikTokLive.client.errors import SignAPIError
+
+    outage = C.sign_server_outage(_sign_error(SignAPIError.ErrorReason[reason]))
+    assert outage is not None
+    assert "sign server" in outage["reason"]
+    assert outage["ctx"]["sign_reason"] == reason
+
+
+def test_sign_server_outage_treats_non_200_by_status_class():
+    from TikTokLive.client.errors import SignAPIError
+
+    # 5xxはsign server自身の不調 -> 外部要因として1行に落とす。
+    outage = C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500))
+    assert outage is not None and outage["ctx"]["sign_status"] == 500
+    assert "500" in outage["reason"]
+    # 4xxはこちらのrequest/keyの問題なので隠さない(Stack Trace経路のまま)。
+    assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 403)) is None
+    # statusが読めないSIGN_NOT_200も外部と断定できないので隠さない。
+    assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200)) is None
+
+
+def test_sign_server_outage_does_not_hide_entitlement_or_unrelated_failures():
+    from TikTokLive.client.errors import SignAPIError
+
+    # API keyの権限不足は設定で直せる自陣の問題。一時障害へ吸わせない。
+    for reason in ("PREMIUM_ENDPOINT", "AUTHENTICATED_WS"):
+        assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason[reason])) is None
+    assert C.sign_server_outage(RuntimeError("unrelated")) is None
+
+
+@pytest.mark.asyncio
+async def test_opponent_listener_logs_sign_outage_without_a_traceback(caplog, monkeypatch):
+    from TikTokLive.client.errors import SignAPIError
+
+    class _Resolver:
+        async def resolve(self, _handle):
+            raise _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500)
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", "battle-1", _Resolver(), _Gate(), None
+    )
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        await listener._run()
+
+    records = [r for r in caplog.records if r.event == "collector.opponent_listener_sign_unavailable"]
+    assert len(records) == 1
+    assert records[0].exc_info is None
+    assert "対処不要" in records[0].getMessage()
+    assert records[0].ctx["battle_id"] == "battle-1"
+    assert records[0].ctx["sign_status"] == 500
+
+
 # ---------------- ProbeGate ----------------
 
 
@@ -1097,3 +1165,90 @@ def test_save_envelopes_replaces_per_session(tmp_db, make_session):
     tmp_db.save_envelopes(session_id, [row])
     tmp_db.save_envelopes(session_id, [row])
     assert len(tmp_db.session_envelopes(session_id)) == 1
+
+
+# ---------------- 録画確定時のcomment index ----------------
+
+
+def _finalized_recorder(tmp_db, tmp_root, session_id, state="completed", started=1000.0,
+                        ended=1600.0):
+    """確定直後のRecorderを模したstub。collectorが読むfieldだけを持たせる。
+
+    DB行もupdate_recording済み(=確定を書き戻した後)にしておく。indexはended_atでevent窓を
+    切るので、書き戻す前に張ると次の録画のcommentまで巻き込む。"""
+    path = tmp_root / "streamer" / "mp4" / "00001_streamer_20260101_120000.mp4"
+    recording_id = tmp_db.create_recording(
+        session_id, "streamer", str(path), path.name, "hd", started)
+    tmp_db.update_recording(recording_id, state, str(path), path.name, ended, 1024,
+                            None, ended - started)
+    return SimpleNamespace(
+        recording_id=recording_id, state=state, output_path=path, ended_at=ended,
+        error=None, duration_seconds=ended - started, base=path.stem,
+        snapshot=lambda: {"bytes": 1024},
+    )
+
+
+async def test_finalized_recording_indexes_its_comments(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """確定した録画のcommentがその場でindexへ入ること。
+
+    起動時のbackfillしか張る経路が無かった頃は、server稼働中に始まって終わった録画は
+    次の再起動までcomment panelにも横断検索にも1件も出なかった。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+    tmp_db.add_event(session_id, event_builder("comment", at=1030.0, comment="こんばんは"))
+    tmp_db.add_event(session_id, event_builder("comment", at=1700.0, comment="録画の外"))
+
+    await collector._index_recording_comments(recorder)
+
+    rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
+    assert [(r["video_time"], r["body"]) for r in rows] == [(30.0, "こんばんは")]
+
+
+async def test_finalized_recording_skips_the_index_when_the_material_failed(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """failedの録画は張らない。起動時backfill(recordings_briefがcompleted/interruptedのみ)と
+    同じ規則にしないと、commentが出る録画の条件が2つに分かれる。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id, state="failed")
+    tmp_db.add_event(session_id, event_builder("comment", at=1030.0, comment="こんばんは"))
+
+    await collector._index_recording_comments(recorder)
+
+    assert tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT) == []
+
+
+async def test_index_failure_does_not_break_the_finalize_callback(
+        collector, tmp_db, tmp_root, make_session, monkeypatch):
+    """indexが落ちても確定処理は続ける。ここで送出すると通知も次の録画への再開も落ちる。"""
+    async def boom(*args, **kwargs):
+        raise OSError("timing.jsonが読めません")
+
+    monkeypatch.setattr(C.indexer, "index_comments", boom)
+    session_id = make_session("streamer", status="connected")
+    collector.session_id = session_id
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+
+    await collector._on_recording_finalized(recorder)
+
+    assert tmp_db.get_recording(recorder.recording_id)["status"] == "completed"
+
+
+async def test_finalize_callback_wires_the_comment_index(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """確定callbackそのものがindexを張ること(呼び出しの結線が外れていないこと)。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    collector.session_id = session_id
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+    tmp_db.add_event(session_id, event_builder("comment", at=1100.0, comment="おつぽみ"))
+
+    await collector._on_recording_finalized(recorder)
+
+    rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
+    assert [r["body"] for r in rows] == ["おつぽみ"]

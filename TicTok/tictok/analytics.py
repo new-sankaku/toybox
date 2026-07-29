@@ -22,7 +22,14 @@ import time
 from typing import Optional
 
 from tictok.core import config
+from tictok.core import perf
 from tictok.core.battle import BATTLE_SETTLE_GRACE_SECONDS, resolve_result
+from tictok.core.intervals import (
+    in_intervals,
+    merge_intervals,
+    subtract_intervals,
+    total_span,
+)
 from tictok.core.logctx import log_context
 
 logger = logging.getLogger("tictok.analytics")
@@ -395,55 +402,12 @@ def _partial_spearman(a: list, b: list, controls: list) -> Optional[float]:
     return _pearson(era, erb)
 
 
-def _merge_intervals(intervals: list) -> list:
-    """[(start,end),...] を重なり/隣接を統合してソート済み非重複区間へ。"""
-    clean = [(a, b) for a, b in intervals if b > a]
-    if not clean:
-        return []
-    clean.sort()
-    merged = [list(clean[0])]
-    for a, b in clean[1:]:
-        if a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return [(a, b) for a, b in merged]
-
-
-def _subtract_intervals(base: list, cut: list) -> list:
-    """base区間群から cut区間群を差し引く(base, cut は非重複ソート済み前提でなくてよい)。"""
-    base = _merge_intervals(base)
-    cut = _merge_intervals(cut)
-    result = []
-    for a, b in base:
-        segments = [(a, b)]
-        for ca, cb in cut:
-            next_segments = []
-            for sa, sb in segments:
-                if cb <= sa or ca >= sb:
-                    next_segments.append((sa, sb))
-                    continue
-                if ca > sa:
-                    next_segments.append((sa, min(ca, sb)))
-                if cb < sb:
-                    next_segments.append((max(cb, sa), sb))
-            segments = next_segments
-        result.extend(s for s in segments if s[1] > s[0])
-    return result
-
-
-def _in_intervals(t: float, intervals: list) -> bool:
-    """t が非重複ソート済み区間群のいずれかに入るか(端は[start,end))。"""
-    for a, b in intervals:
-        if a <= t < b:
-            return True
-        if a > t:
-            break
-    return False
-
-
-def _total_span(intervals: list) -> float:
-    return sum(b - a for a, b in intervals)
+# 区間演算は tictok.core.intervals が正。配信者profile(storage)も同じ実装を使う。
+# 既存の呼び出し・testが参照している私有名はそのまま別名で残す。
+_merge_intervals = merge_intervals
+_subtract_intervals = subtract_intervals
+_in_intervals = in_intervals
+_total_span = total_span
 
 
 def concentration(values: list, lorenz_points: int = 40) -> dict:
@@ -1972,7 +1936,7 @@ def _record_compute(kind: str, sess: dict, duration_ms: float) -> None:
     slot[2] += duration_ms
     if duration_ms >= config.get_log_slow_analytics_payload_ms():
         logger.warning(
-            "slow analytics payload: kind=%s took %.0fms for one session",
+            "analytics payloadの計算が低速です: kind=%s が1 sessionで %.0fms かかりました",
             kind, duration_ms,
             extra={"event": "analytics.payload_slow",
                    "ctx": {"kind": kind, "duration_ms": round(duration_ms, 1),
@@ -1980,7 +1944,7 @@ def _record_compute(kind: str, sess: dict, duration_ms: float) -> None:
         )
     elif logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "analytics payload computed: kind=%s in %.1fms", kind, duration_ms,
+            "analytics payloadを計算しました: kind=%s, %.1fms", kind, duration_ms,
             extra={"event": "analytics.payload_computed",
                    "ctx": {"kind": kind, "duration_ms": round(duration_ms, 1),
                            "version": CACHE_VERSIONS[kind], "live": live}},
@@ -1995,7 +1959,10 @@ def compute_payload(conn, sess: dict, kind: str) -> dict:
     bindされていない)。"""
     with log_context(session_id=sess.get("id"), unique_id=sess.get("unique_id")):
         started = time.perf_counter()
-        payload = _PAYLOAD_FUNCS[kind](conn, sess)
+        # 内訳では中のDB読み(db.read)と計算を分ける。cache missが何件出たかは上のlogが
+        # 持つが、requestから見て「集計計算そのもの」がどれだけかはここでしか取れない。
+        with perf.phase("analytics.payload"):
+            payload = _PAYLOAD_FUNCS[kind](conn, sess)
         _record_compute(kind, sess, (time.perf_counter() - started) * 1000.0)
     return payload
 
@@ -2010,17 +1977,18 @@ def _stage(kind):
             resolved = kind(*args, **kwargs) if callable(kind) else kind
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "analytics stage started: %s (%d sessions)", resolved, len(rows),
+                    "analytics stageを開始しました: %s（%d session）", resolved, len(rows),
                     extra={"event": "analytics.stage_started",
                            "ctx": {"kind": resolved, "rows": len(rows)}},
                 )
             started = time.perf_counter()
             try:
-                result = func(rows, *args, **kwargs)
+                with perf.phase("analytics.reduce"):
+                    result = func(rows, *args, **kwargs)
             except Exception:
                 _compute_counters().pop(resolved, None)
                 logger.error(
-                    "analytics stage failed: %s (%d sessions)", resolved, len(rows),
+                    "analytics stageが失敗しました: %s（%d session）", resolved, len(rows),
                     exc_info=True,
                     extra={"event": "analytics.stage_failed",
                            "ctx": {"kind": resolved, "rows": len(rows),
@@ -2053,13 +2021,13 @@ def _log_stage_completed(kind: str, rows: int, duration_ms: float) -> None:
         "computed_live": live,
     }
     message = (
-        f"analytics stage {kind}: {rows} sessions in {total_ms:.0f}ms"
-        f" (reduce {duration_ms:.0f}ms, payload {compute_ms:.0f}ms for"
-        f" {missed + live} sessions)"
+        f"analytics stage {kind}: {rows} session を {total_ms:.0f}ms で処理しました"
+        f"（reduce {duration_ms:.0f}ms, payload {compute_ms:.0f}ms /"
+        f" {missed + live} session）"
     )
     if total_ms >= config.get_log_slow_analytics_ms():
         logger.warning(
-            "slow " + message,
+            "低速: " + message,
             extra={"event": "analytics.stage_slow", "ctx": ctx},
         )
     else:

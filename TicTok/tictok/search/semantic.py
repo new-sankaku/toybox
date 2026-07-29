@@ -61,6 +61,8 @@ from typing import Callable, Optional
 import httpx
 import numpy as np
 
+from tictok.core import perf
+
 logger = logging.getLogger(__name__)
 
 
@@ -216,7 +218,7 @@ class HttpEmbedder(Embedder):
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
-            logger.warning("embedding endpoint unreachable: %s", exc, exc_info=True)
+            logger.warning("埋め込みendpointへ接続できません: %s", exc, exc_info=True)
             raise SemanticError(
                 f"埋め込みエンドポイントへ接続できません（{self._base_url}）: {exc}"
             ) from exc
@@ -540,7 +542,7 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
             total_hits = sum(g["n"] for g in pending)
             progress(stage="start", groups=len(pending), hits=total_hits, done=0, total=total_hits)
             logger.info(
-                "semantic index build start: groups=%d hits=%d model=%s",
+                "意味検索のindex作成を開始しました: groups=%d hits=%d model=%s",
                 len(pending), total_hits, embedder.name,
                 extra={"event": "search.semantic_build_start",
                        "ctx": {"groups": len(pending), "hits": total_hits,
@@ -647,7 +649,7 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
                 "vector_bytes": vector_file.stat().st_size if vector_file.is_file() else 0,
             }
             logger.info(
-                "semantic index build done: passages=%d hits=%d elapsed=%.1fs model=%s",
+                "意味検索のindex作成が完了しました: passages=%d hits=%d 所要 %.1fs model=%s",
                 embedded_passages, total_hits, elapsed, embedder.name,
                 extra={"event": "search.semantic_build_done", "ctx": result},
             )
@@ -776,18 +778,23 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
     if rownos is not None and len(rownos) == 0:
         return []
 
-    query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
+    # 埋め込みは外部のAI serverへのHTTP。走査(CPU)と足して1つにすると、遅い回の原因が
+    # model側なのかindex走査なのか分けられない。
+    with perf.timer("net.embed"):
+        query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
     vector = query_vec[0][0].astype(np.float32)
 
     def _scan() -> tuple:
         """memmapの走査もmetadataの引き当てもblocking。48k×768のdot積は今は一瞬でも、
         passage数に比例して伸びる — event loopに載せるとその分だけserverが固まる。"""
         started = time.time()
-        vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
-        # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
-        # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
-        fetch = min(limit * 4, rows_total) if rownos is None else min(limit * 4, len(rownos))
-        top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
+        with perf.phase("search.semantic_scan"):
+            vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
+            # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
+            # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
+            fetch = (min(limit * 4, rows_total) if rownos is None
+                     else min(limit * 4, len(rownos)))
+            top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
         elapsed = time.time() - started
 
         score_by_rowno = {int(r): float(s) for r, s in zip(top_rownos, top_scores)}
@@ -826,7 +833,7 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
     items.sort(key=lambda item: -item["score"])
     items = items[:limit]
     logger.info(
-        "semantic search: q_len=%d hits=%d scan=%s elapsed=%.3fs",
+        "意味検索を実行しました: q_len=%d hits=%d scan=%s 所要 %.3fs",
         len(query), len(items), rows_total if rownos is None else len(rownos), elapsed,
         extra={"event": "search.semantic_query",
                "ctx": {"results": len(items), "scanned": rows_total if rownos is None

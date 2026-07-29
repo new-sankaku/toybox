@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import xml.etree.ElementTree as ET
 from fractions import Fraction
@@ -5,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tictok.core import layout
+from tictok.record.recorder import timing_path
 from tictok.search import cutlist_export, indexer
 from tictok.search.query import MIN_FTS_CHARS, QueryError, parse
 
@@ -497,6 +500,103 @@ async def test_index_comments_ignores_events_outside_the_recording_window(
     assert await indexer.index_comments(tmp_db, recording) == 1
     rows = tmp_db.search_hits_for(recording["id"], indexer.SOURCE_COMMENT)
     assert [r["body"] for r in rows] == ["inside"]
+
+
+async def test_index_comments_closes_an_open_window_at_the_next_recording(
+        tmp_db, recording, event_builder, tmp_root):
+    """ended_atが無い録画(crash中断)の窓を、同じsessionの次の録画の開始で閉じること。
+
+    開いたままにすると後続録画のcommentをこの録画のものとして取り込む。"""
+    sid = recording["session_id"]
+    crashed = dict(recording, ended_at=None)
+    nxt = tmp_root / "streamer" / "mp4" / "00002_streamer_20260101_130000.mp4"
+    tmp_db.create_recording(sid, "streamer", str(nxt), nxt.name, "hd", 1600.0)
+    tmp_db.add_event(sid, event_builder("comment", at=1500.0, comment="この録画"))
+    tmp_db.add_event(sid, event_builder("comment", at=1900.0, comment="次の録画"))
+    tmp_db.flush()
+
+    assert await indexer.index_comments(tmp_db, crashed) == 1
+    rows = tmp_db.search_hits_for(recording["id"], indexer.SOURCE_COMMENT)
+    assert [r["body"] for r in rows] == ["この録画"]
+
+
+async def test_index_comments_keeps_the_window_open_when_nothing_follows(
+        tmp_db, recording, event_builder):
+    """次の録画が無ければ閉じる根拠が無いので開いたままにする。ここで勝手に切ると、
+    session最後の録画(ended_atが無いまま残った行)のcommentを落とすことになる。"""
+    sid = recording["session_id"]
+    crashed = dict(recording, ended_at=None)
+    tmp_db.add_event(sid, event_builder("comment", at=1500.0, comment="窓の中"))
+    tmp_db.add_event(sid, event_builder("comment", at=9000.0, comment="ずっと後"))
+    tmp_db.flush()
+
+    assert await indexer.index_comments(tmp_db, crashed) == 2
+
+
+def test_next_recording_start_ignores_itself_and_other_sessions(
+        tmp_db, make_session, tmp_root):
+    """境界は厳密に ``>``。自分自身を拾うと窓が即座に潰れて0件になる。"""
+    session_id = make_session("streamer", status="connected")
+    other = make_session("streamer", status="connected")
+    path = tmp_root / "streamer" / "mp4" / "00001_streamer_20260101_120000.mp4"
+    tmp_db.create_recording(session_id, "streamer", str(path), path.name, "hd", 1000.0)
+    tmp_db.create_recording(session_id, "streamer", str(path), path.name, "hd", 1600.0)
+    tmp_db.create_recording(other, "streamer", str(path), path.name, "hd", 1200.0)
+
+    assert tmp_db.next_recording_start(session_id, 1000.0) == 1600.0
+    assert tmp_db.next_recording_start(session_id, 1600.0) is None
+
+
+# ===== 時間軸 — 焼き付ける秒は「その録画が再生される軸」でなければならない =====
+
+
+def _write_axis_material(tmp_root, recording, *, with_index: bool):
+    """録画の素材(.ts)とtiming.jsonを置く。``media_pts`` はmedia軸とPTS軸が別物になる値
+    (mp4のmux inflation相当)にして、どちらの軸で焼いたかを見分けられるようにする。"""
+    path = Path(recording["path"])
+    session = layout.session_dir(tmp_root, path.stem, "streamer")
+    session.mkdir(parents=True, exist_ok=True)
+    (session / "seg00000.ts").write_bytes(b"\x47" * 188)
+    if with_index:
+        (session / layout.PLAYLIST_NAME).write_text(
+            "#EXTM3U\n#EXTINF:600.000000,\nseg00000.ts\n", encoding="utf-8")
+    timing_path(path).parent.mkdir(parents=True, exist_ok=True)
+    timing_path(path).write_text(json.dumps({
+        "version": 2,
+        "media_duration": 600.0,
+        # wall 1000..1600 -> media 0..600(起動latencyなし)。
+        "anchors": [[1000.0, 0.0], [1600.0, 600.0]],
+        # media 600 が mp4では 660 になる録画(=10%のinflation)。
+        "media_pts": [[0.0, 0.0], [600.0, 660.0]],
+    }), encoding="utf-8")
+
+
+async def test_index_comments_uses_the_media_axis_when_the_recording_plays_from_hls(
+        tmp_db, recording, event_builder, tmp_root):
+    """.tsが残る録画はHLSで再生され、playerの秒はmedia軸。mp4のPTSを掛けてはいけない。"""
+    _write_axis_material(tmp_root, recording, with_index=True)
+    tmp_db.add_event(recording["session_id"],
+                     event_builder("comment", at=1300.0, comment="半分の位置"))
+    tmp_db.flush()
+
+    assert await indexer.index_comments(tmp_db, recording) == 1
+    row = tmp_db.search_hits_for(recording["id"], indexer.SOURCE_COMMENT)[0]
+    assert row["video_time"] == 300.0
+    assert tmp_db.get_recording(recording["id"])["time_axis"] == indexer.AXIS_MEDIA
+
+
+async def test_index_comments_uses_the_pts_axis_when_only_the_mp4_can_be_played(
+        tmp_db, recording, event_builder, tmp_root):
+    """再生listが無ければ再生はmp4。その録画の秒はmp4のPTS軸で、media_ptsを掛けるのが正しい。"""
+    _write_axis_material(tmp_root, recording, with_index=False)
+    tmp_db.add_event(recording["session_id"],
+                     event_builder("comment", at=1300.0, comment="半分の位置"))
+    tmp_db.flush()
+
+    assert await indexer.index_comments(tmp_db, recording) == 1
+    row = tmp_db.search_hits_for(recording["id"], indexer.SOURCE_COMMENT)[0]
+    assert row["video_time"] == 330.0
+    assert tmp_db.get_recording(recording["id"])["time_axis"] == indexer.AXIS_PTS
 
 
 async def test_index_comments_falls_back_to_text_and_records_nickname(

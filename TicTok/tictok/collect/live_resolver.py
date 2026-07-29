@@ -126,7 +126,7 @@ class BrowserLiveResolver:
             timezone_id=get_locale_tz(),
         )
         logger.info(
-            "browser live resolver started (headless=%s)", get_resolver_headless(),
+            "browserのlive resolverを開始しました（headless=%s）", get_resolver_headless(),
             extra={"event": "collector.resolver_started",
                    "ctx": {"headless": get_resolver_headless(),
                            "locale": get_locale_lang_country(),
@@ -148,14 +148,14 @@ class BrowserLiveResolver:
                 # 閉じ残しはprocess終了で回収されるが、shutdownが遅い/chromiumが残る
                 # 原因になるので無音にはしない。
                 logger.warning(
-                    "failed to close the resolver's %s; a chromium process may be left "
-                    "behind", label, exc_info=True,
+                    "resolverの%sを閉じられませんでした。chromiumのprocessが残る可能性が"
+                    "あります", label, exc_info=True,
                     extra={"event": "collector.resolver_close_failed",
                            "ctx": {"component": label}},
                 )
         self._context = self._browser = self._playwright = None
         logger.info(
-            "browser live resolver stopped",
+            "browserのlive resolverを停止しました",
             extra={"event": "collector.resolver_stopped", "ctx": {}},
         )
 
@@ -183,8 +183,8 @@ class BrowserLiveResolver:
                     # challenge has not resolved. Fall through to read whatever
                     # state the page exposes so interpret_live_state can classify.
                     logger.debug(
-                        "SIGI_STATE did not attach within %dms for @%s; reading whatever "
-                        "the page exposes", timeout, unique_id, exc_info=True,
+                        "SIGI_STATEが%dms以内に付きませんでした（@%s）。pageが出している"
+                        "内容だけを読みます", timeout, unique_id, exc_info=True,
                         extra={"event": "collector.resolver_sigi_timed_out",
                                "ctx": {"target_unique_id": unique_id, "timeout_ms": timeout}},
                     )
@@ -200,7 +200,7 @@ class BrowserLiveResolver:
                     await page.close()
                 except Exception:
                     logger.debug(
-                        "resolver page close failed for @%s", unique_id, exc_info=True,
+                        "@%s のresolver pageを閉じられませんでした", unique_id, exc_info=True,
                         extra={"event": "collector.resolver_page_close_failed",
                                "ctx": {"target_unique_id": unique_id}},
                     )
@@ -209,7 +209,7 @@ class BrowserLiveResolver:
         # DEBUG時は「いつ・どのroomが・どう見えたか」を1件ずつ辿れる。
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "live state resolved for @%s: room_id=%s", unique_id, room_id,
+                "@%s の配信状態を解決しました: room_id=%s", unique_id, room_id,
                 extra={"event": "collector.live_state_resolved",
                        "ctx": {"target_unique_id": unique_id, "room_id": room_id,
                                "status": data.get("status"),

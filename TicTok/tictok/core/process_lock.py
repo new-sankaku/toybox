@@ -80,12 +80,12 @@ class ProcessLock:
                     if attempts <= 20:
                         time.sleep(0.02)
                         continue
-                    logger.warning("reclaiming unreadable lock file: %s", self.path)
+                    logger.warning("読めないlock fileを回収します: %s", self.path)
                     self._unlink()
                     continue
                 pid = holder.get("pid")
                 if not _pid_alive(pid):
-                    logger.warning("reclaiming stale lock from dead pid=%s: %s", pid, self.path)
+                    logger.warning("停止済みのpid=%s が残したlockを回収します: %s", pid, self.path)
                     self._unlink()
                     attempts = 0
                     continue
@@ -100,7 +100,7 @@ class ProcessLock:
                 except OSError:
                     pass
                 self._fd = fd
-                logger.info("acquired instance lock: %s (pid=%d)", self.path, os.getpid())
+                logger.info("instanceのlockを取得しました: %s（pid=%d）", self.path, os.getpid())
                 return self
 
     def release(self) -> None:
@@ -123,7 +123,7 @@ class ProcessLock:
         except FileNotFoundError:
             pass
         except OSError:
-            logger.exception("failed to remove lock file: %s", self.path)
+            logger.exception("lock fileを削除できませんでした: %s", self.path)
 
     def _read_holder(self):
         try:

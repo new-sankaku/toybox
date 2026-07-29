@@ -18,10 +18,14 @@ const JOB_STATE_LABELS = {
 };
 
 const JOB_KIND_LABELS = {
+  stt: "文字起こし",
   overlay: "焼き込み",
   upscale: "Up出力",
   reprocess: "再mp4化",
   audionorm: "音量正規化",
+  pack: "ts結合",
+  waveform: "音声波形",
+  sprite: "サムネ",
   overlay_preview: "焼き込みプレビュー",
   clip_batch: "clip一括書き出し",
   session_overlay: "Session 焼き込み",
@@ -30,11 +34,13 @@ const JOB_KIND_LABELS = {
   bulk_upscale: "一括 Up出力",
   bulk_reprocess: "一括 再mp4化",
   bulk_audionorm: "一括 音量正規化",
-  stt: "文字起こし",
+  bulk_pack: "一括 ts結合",
   storage: "容量scan",
   retention: "保持policy",
   semantic: "意味検索index",
   cutlist: "cut list書き出し",
+  reel: "切り出しの連結",
+  clip_overlay: "範囲焼き込み",
 };
 
 // group(session一括)は個々のjobを畳んだ表示行なので、既定では明細を出さない。
@@ -61,15 +67,34 @@ function upsertJob(job) {
   const index = jobs.findIndex((item) => jobKey(item) === jobKey(job));
   if (index >= 0) jobs[index] = job;
   else jobs.push(job);
-  render();
+  scheduleRender();
 }
 
-function matchesFilter(job) {
-  const state = document.getElementById("job-flt-state").value;
-  const kind = document.getElementById("job-flt-kind").value;
-  if (state === "active" && !ACTIVE_STATES.includes(job.state)) return false;
-  if (state === "failed" && !FAILED_STATES.includes(job.state)) return false;
-  if (kind !== "all" && job.domain !== kind) return false;
+// job_updateは1件ずつ届くが、queueは1つのjobが動き出すたび待機列の順番を全件配り直すため、
+// 数十通が一息に来る。1通ごとにrender()すると同じ表を数十回組み直すことになるので、
+// 次の描画frameまで畳んで1回にする。
+let renderScheduled = false;
+function scheduleRender() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  requestAnimationFrame(() => {
+    renderScheduled = false;
+    render();
+  });
+}
+
+// 現在のfilter条件。行ごとにDOMを引き直さないよう、判定の前に1度だけ読む。
+function currentFilter() {
+  return {
+    state: document.getElementById("job-flt-state").value,
+    kind: document.getElementById("job-flt-kind").value,
+  };
+}
+
+function matchesFilter(job, filter) {
+  if (filter.state === "active" && !ACTIVE_STATES.includes(job.state)) return false;
+  if (filter.state === "failed" && !FAILED_STATES.includes(job.state)) return false;
+  if (filter.kind !== "all" && job.domain !== filter.kind) return false;
   return true;
 }
 
@@ -85,7 +110,8 @@ function isGroupMember(job) {
 // filterでgroup行が落ちたときは明細を畳む相手がいないので、その明細は単独行として出す
 // (畳んだまま隠すと、filterに一致したjobが一覧から消える)。
 function visibleRows() {
-  const matched = sortJobs(jobs.filter(matchesFilter));
+  const filter = currentFilter();
+  const matched = sortJobs(jobs.filter((job) => matchesFilter(job, filter)));
   const groupIds = new Set(matched.filter(isGroupRow).map((job) => job.job_id));
   const members = new Map();
   const tops = [];
@@ -145,7 +171,7 @@ function progressCell(job) {
 
 function jobTargetText(job) {
   if (job.total > 1) return `${job.title || "-"}（${job.total}本）`;
-  return job.filename || job.title || (job.recording_id ? `#${job.recording_id}` : "-");
+  return recStem(job) || job.title || (job.session_id ? recTag(job) : "-");
 }
 
 function targetCell(row) {
@@ -195,14 +221,22 @@ async function sendJobAction(path, job, confirmText) {
   }
 }
 
+// 起動時sweepが自動で積んだjobは、人が投げた覚えが無いまま並ぶ。種別だけを出すと「頼んで
+// いない処理が動いている」としか読めないので、出所を名乗らせる。
+function kindText(job) {
+  const label = JOB_KIND_LABELS[job.domain] || job.domain;
+  return job.sweep ? `${label}（自動）` : label;
+}
+
 function actionsCell(job) {
   const wrap = document.createElement("span");
   wrap.className = "row-actions";
   // 取り消し・再実行が効くのはDBのqueueに載る映像jobだけ。容量scan等のin-process jobは
   // 台帳に行が無いので、押せるように見せない。
-  const queued = ["overlay", "upscale", "reprocess", "audionorm", "overlay_preview", "clip_batch",
+  const queued = ["overlay", "upscale", "reprocess", "audionorm", "pack",
+    "waveform", "sprite", "overlay_preview", "clip_batch", "reel", "clip_overlay",
     "session_overlay", "session_upscale",
-    "bulk_overlay", "bulk_upscale", "bulk_reprocess", "bulk_audionorm"]
+    "bulk_overlay", "bulk_upscale", "bulk_reprocess", "bulk_audionorm", "bulk_pack"]
     .includes(job.domain);
   if (!queued) return wrap;
   if (ACTIVE_STATES.includes(job.state)) {
@@ -256,13 +290,16 @@ function render() {
   else if (jobs.length > 0)
     setListMessage(emptyEl, "条件に一致するjobがありません。filterを変更してください。");
   else setListState(emptyEl, "empty");
+  // 組み立て中の行は画面に繋がっていないfragmentへ積む。live tbodyへ1行ずつ足すと、
+  // 行ごとにlayoutが走る。
+  const fragment = document.createDocumentFragment();
   rows.forEach((row) => {
     const job = row.job;
     const tr = document.createElement("tr");
     if (row.sub) tr.className = "job-subrow";
     const cells = [
       stateCell(job),
-      JOB_KIND_LABELS[job.domain] || job.domain,
+      kindText(job),
       targetCell(row),
       progressCell(job),
       fmtDateTime(job.queued_at || job.started_at),
@@ -276,15 +313,15 @@ function render() {
       else td.textContent = cell;
       tr.appendChild(td);
     });
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
   renderGpu();
 }
 
-// 文字起こしは media_job_queue ではなく transcribe_queue で動くので、この一覧には行が
-// 出ない。一方でGPUの枠は同じなのでgpu.activeには出る。台帳0行で「実行中 stt」とだけ
-// 出すと『GPUは動いているのにjobは無い』と読めるため、台帳に無いGPU実行はその旨を明記し、
-// 実際の待ち行列を別queueの数字としてそのまま併記する(この一覧に偽の行は足さない)。
+// 台帳に無いGPU実行(例: 単発の文字起こしAPI)は、gpu.activeにだけ現れる。台帳0行で
+// 「実行中 stt」とだけ出すと『GPUは動いているのにjobは無い』と読めるため、その旨を明記する。
+// 文字起こしのqueue自体は同じ台帳(kind=stt)に載るので、この一覧に行として出る。
 function outsideLedger() {
   const running = new Set(
     jobs.filter((job) => job.state === "running").map((job) => job.domain),

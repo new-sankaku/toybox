@@ -89,12 +89,21 @@ def test_dotenv_summary_returns_a_copy():
 
 @pytest.mark.parametrize(
     "raw, expected",
-    [("1", True), ("true", True), ("TRUE", True), ("Yes", True),
-     ("0", False), ("no", False), ("", False), ("on", False), ("2", False)],
+    [("1", True), ("true", True), ("TRUE", True), ("Yes", True), ("on", True), ("  1  ", True),
+     ("0", False), ("no", False), ("off", False), ("False", False)],
 )
-def test_bool_getters_accept_only_the_documented_truthy_set(monkeypatch, raw, expected):
+def test_bool_getters_accept_the_documented_token_sets(monkeypatch, raw, expected):
     monkeypatch.setenv("TICTOK_SIMULATION", raw)
     assert config.get_simulation() is expected
+
+
+@pytest.mark.parametrize("raw", ["2", "", "   ", "ture", "no!"])
+def test_bool_getter_rejects_unknown_token_instead_of_reading_it_as_false(monkeypatch, raw):
+    """真token以外を黙って偽と読むと、``ture`` の1文字違いが機能を丸ごと無効にしながら
+    何も言わない。真偽値も数値と同じく、解釈できない値は例外にする。"""
+    monkeypatch.setenv("TICTOK_SIMULATION", raw)
+    with pytest.raises(config.ConfigError):
+        config.get_simulation()
 
 
 def test_bool_getter_defaults(monkeypatch):
@@ -138,6 +147,117 @@ def test_numeric_getter_rejects_garbage_instead_of_falling_back(monkeypatch):
     monkeypatch.setenv("TICTOK_PORT", "not-a-port")
     with pytest.raises(ValueError):
         config.get_port()
+
+
+# ---------------- config: env varの型検証 ----------------
+
+
+def test_config_error_is_a_value_error():
+    """helper化前は int()/float() の素のValueErrorが出ていた。既にValueErrorを
+    捕まえている呼び出し側の挙動を変えないこと。"""
+    assert issubclass(config.ConfigError, ValueError)
+
+
+@pytest.mark.parametrize("raw", ["not-a-port", "", "   ", "80.5", "8_000円"])
+def test_int_getter_rejects_unparsable_values(monkeypatch, raw):
+    monkeypatch.setenv("TICTOK_PORT", raw)
+    with pytest.raises(config.ConfigError):
+        config.get_port()
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "1,5"])
+def test_float_getter_rejects_unparsable_values(monkeypatch, raw):
+    monkeypatch.setenv("TICTOK_HIGHLIGHT_ZSCORE", raw)
+    with pytest.raises(config.ConfigError):
+        config.get_highlight_zscore()
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
+def test_float_getter_rejects_non_finite_values(monkeypatch, raw):
+    """nan/infはfloat()を通ってしまう。閾値にすると比較が常に偽になり、
+    「閾値が効いていない」ことは出力を見ても分からない。"""
+    monkeypatch.setenv("TICTOK_SMILE_THRESHOLD", raw)
+    with pytest.raises(config.ConfigError):
+        config.get_smile_threshold()
+
+
+def test_numeric_getters_tolerate_surrounding_whitespace(monkeypatch):
+    monkeypatch.setenv("TICTOK_PORT", "  9001 ")
+    monkeypatch.setenv("TICTOK_HIGHLIGHT_ZSCORE", " 2.5 ")
+    assert config.get_port() == 9001
+    assert config.get_highlight_zscore() == 2.5
+
+
+def test_invalid_env_names_the_key_the_value_and_the_default(monkeypatch, caplog):
+    """例外はjobの深い場所で握り潰されうるので、原因は必ずlogにも残す。"""
+    monkeypatch.setenv("TICTOK_PORT", "not-a-port")
+    with caplog.at_level("ERROR", logger="tictok.config"):
+        with pytest.raises(config.ConfigError):
+            config.get_port()
+
+    record = caplog.records[-1]
+    assert record.event == "process.config_env_invalid"
+    assert record.ctx == {
+        "key": "TICTOK_PORT", "raw": "not-a-port", "expected": "整数", "default": 8520,
+    }
+    assert "TICTOK_PORT" in record.getMessage() and "not-a-port" in record.getMessage()
+
+
+def test_int_and_float_getters_return_their_declared_types(monkeypatch):
+    monkeypatch.setenv("TICTOK_LOG_SHUTDOWN_DRAIN_SECONDS", "10")
+    monkeypatch.delenv("TICTOK_MEDIA_JOB_HISTORY_DAYS", raising=False)
+    assert isinstance(config.get_log_shutdown_drain_seconds(), float)
+    # 既定値も実型で持つ("14"のような文字列既定はもう無い)
+    assert isinstance(config.get_media_job_history_days(), float)
+    assert isinstance(config.get_media_queue_workers(), int)
+
+
+def test_clamped_getters_keep_their_floor(monkeypatch):
+    monkeypatch.setenv("TICTOK_MEDIA_QUEUE_WORKERS", "0")
+    monkeypatch.setenv("TICTOK_MEDIA_QUEUE_SWEEP_CONCURRENCY", "-3")
+    assert config.get_media_queue_workers() == 1
+    assert config.get_media_queue_sweep_concurrency() == 0
+
+
+# ---------------- config.validate_env ----------------
+
+
+def test_validate_env_passes_on_a_clean_environment():
+    assert config.validate_env() == []
+
+
+def test_validate_env_reports_every_bad_key_at_once(monkeypatch, caplog):
+    """1件直しては再起動、を繰り返させない。最初の1件で止めず全getterを回すこと。"""
+    monkeypatch.setenv("TICTOK_PORT", "not-a-port")
+    monkeypatch.setenv("TICTOK_AI_ENABLED", "ture")
+    monkeypatch.setenv("TICTOK_SMILE_THRESHOLD", "high")
+
+    with caplog.at_level("ERROR", logger="tictok.config"):
+        with pytest.raises(config.ConfigError) as raised:
+            config.validate_env()
+
+    for key in ("TICTOK_PORT", "TICTOK_AI_ENABLED", "TICTOK_SMILE_THRESHOLD"):
+        assert key in str(raised.value)
+
+    summary = [r for r in caplog.records
+               if getattr(r, "event", "") == "process.config_env_invalid_summary"]
+    assert len(summary) == 1
+    assert summary[0].ctx["count"] == 3
+
+
+def test_validate_env_skips_getters_that_need_an_argument(monkeypatch):
+    """record_dir_from_db 等はDB pathを要求するので環境変数だけでは解決できない。
+    引数付きgetterを呼びに行かないこと(呼ぶとTypeErrorで検証自体が落ちる)。"""
+    calls = []
+    monkeypatch.setattr(
+        config, "get_media_queue_workers", lambda: calls.append("no-arg") or 1
+    )
+    monkeypatch.setattr(
+        config, "get_broken_for_test", lambda required: calls.append("with-arg"), raising=False
+    )
+
+    assert config.validate_env() == []
+    assert calls == ["no-arg"]
 
 
 def test_ai_base_url_default_and_trailing_slashes_removed(monkeypatch):
@@ -350,7 +470,9 @@ def test_setting_options_stay_inside_the_declared_range():
     for key, definition in SETTING_DEFS.items():
         for option in definition.get("options", []):
             assert isinstance(option["value"], definition["type"]), key
-            assert definition["min"] <= option["value"] <= definition["max"], key
+            # 範囲は数値の設定にしか意味が無い。optionsを持つstrは列挙で、min/maxを持たない。
+            if definition["type"] is not str:
+                assert definition["min"] <= option["value"] <= definition["max"], key
             assert option["label"], key
 
 
@@ -405,6 +527,124 @@ def test_all_values_is_a_snapshot_copy(tmp_db):
     snapshot = resolved.all_values()
     snapshot["bucket_seconds"] = -1
     assert resolved.get("bucket_seconds") != -1
+
+
+# ---------------- settings: DB値の検証 ----------------
+# DBへはupdate()経由でしか入らない建前だが、SETTING_DEFSのtype/min/max/optionsを後から
+# 変更すると、保存された時点では正しかった既存行がその建前を破る。
+
+
+@pytest.mark.parametrize("stored", ["abc", "10.9", ""])
+def test_unreadable_db_value_stops_startup_naming_the_key(tmp_db, stored, caplog):
+    """型として読めない値は走らせる値が無いので起動を止める。ただし素の
+    「invalid literal for int()」で死なせず、keyと値と直し方を名指しすること。"""
+    tmp_db.set_settings({"bucket_seconds": stored})
+
+    with caplog.at_level("ERROR", logger="tictok.settings"):
+        with pytest.raises(ValueError, match="bucket_seconds"):
+            Settings(tmp_db)
+
+    record = [r for r in caplog.records
+              if getattr(r, "event", "") == "process.settings_db_unreadable"][-1]
+    assert record.ctx["key"] == "bucket_seconds"
+    assert record.ctx["stored"] == stored
+    assert record.ctx["builtin_default"] == SETTING_DEFS["bucket_seconds"]["default"]
+
+
+@pytest.mark.parametrize(
+    "key, stored",
+    [
+        ("bucket_seconds", 99999),          # 範囲外(上)
+        ("bucket_seconds", -5),             # 範囲外(下)
+        ("clip_default_mode", "no-such-mode"),  # optionsに無い
+        ("record_dir", "relative/dir"),     # 絶対パスでない
+    ],
+)
+def test_out_of_definition_db_value_keeps_running_and_is_reported(tmp_db, key, stored, caplog):
+    """定義に反する保存値を既定値へ差し替えない(No fallback)。差し替えると画面には既定値が
+    現在値として並び、operatorは自分の設定が捨てられたことを知る術がない。"""
+    tmp_db.set_settings({key: stored})
+
+    with caplog.at_level("ERROR", logger="tictok.settings"):
+        resolved = Settings(tmp_db)
+
+    assert resolved.get(key) == SETTING_DEFS[key]["type"](stored)
+    assert resolved.get(key) != SETTING_DEFS[key]["default"]
+    assert key in resolved.invalid_values()
+
+    record = [r for r in caplog.records
+              if getattr(r, "event", "") == "process.settings_db_invalid"][0]
+    assert record.ctx["key"] == key
+    assert record.ctx["stored"] == str(stored)
+    assert record.ctx["reason"]
+
+
+def test_invalid_db_value_keeps_the_settings_screen_openable(tmp_db):
+    """DB値の修正tool は設定画面そのもの。envと違い、範囲が動っただけで起動を拒むと
+    直す画面ごと止まる。画面は開いたまま、該当keyに理由を添えて提示すること。"""
+    tmp_db.set_settings({"bucket_seconds": 99999})
+
+    resolved = Settings(tmp_db)
+    described = {entry["key"]: entry for entry in resolved.describe()}
+
+    assert described["bucket_seconds"]["value"] == 99999
+    assert "範囲" in described["bucket_seconds"]["invalid"]
+    # 適合しているkeyはfield自体を持たない
+    assert "invalid" not in described["session_list_limit"]
+
+
+def test_invalid_db_value_is_recorded_as_an_ops_event(tmp_db):
+    tmp_db.set_settings({"bucket_seconds": 99999})
+
+    Settings(tmp_db)
+
+    kinds = [row["kind"] for row in tmp_db.list_ops_events(limit=20)]
+    assert "process.settings_db_invalid" in kinds
+
+
+def test_saving_a_valid_value_clears_the_invalid_mark(tmp_db):
+    tmp_db.set_settings({"bucket_seconds": 99999})
+    resolved = Settings(tmp_db)
+    assert "bucket_seconds" in resolved.invalid_values()
+
+    resolved.update({"bucket_seconds": 30})
+
+    assert resolved.invalid_values() == {}
+    described = {entry["key"]: entry for entry in resolved.describe()}
+    assert "invalid" not in described["bucket_seconds"]
+
+
+def test_invalid_values_is_a_snapshot_copy(tmp_db):
+    tmp_db.set_settings({"bucket_seconds": 99999})
+    resolved = Settings(tmp_db)
+    snapshot = resolved.invalid_values()
+    snapshot.clear()
+    assert "bucket_seconds" in resolved.invalid_values()
+
+
+def test_valid_db_values_are_not_marked_invalid(tmp_db, caplog):
+    tmp_db.set_settings({"bucket_seconds": 15, "session_list_limit": 77})
+
+    with caplog.at_level("ERROR", logger="tictok.settings"):
+        resolved = Settings(tmp_db)
+
+    assert resolved.invalid_values() == {}
+    assert resolved.get("bucket_seconds") == 15
+    assert not [r for r in caplog.records
+                if getattr(r, "event", "").startswith("process.settings_db_")]
+
+
+def test_rows_outside_the_definition_are_ignored_without_noise(tmp_db, caplog):
+    """settings表は移行済みmarker(``_migration:<name>``)も持つ共有の表。定義に無いkeyは
+    読まないだけで、残骸として騒がないこと(markerと見分ける手段が無い)。"""
+    tmp_db.set_settings({"bucket_seconds": 15, "removed_setting": "1"})
+
+    with caplog.at_level("WARNING", logger="tictok.settings"):
+        resolved = Settings(tmp_db)
+
+    assert "removed_setting" not in resolved.all_values()
+    assert resolved.get("bucket_seconds") == 15
+    assert [r for r in caplog.records if r.levelname in ("WARNING", "ERROR")] == []
 
 
 # ---------------- settings: update validation ----------------
@@ -567,3 +807,101 @@ def test_path_env_default_allowing_empty_still_accepts_empty(tmp_db, monkeypatch
 def test_default_record_dir_matches_config_default(monkeypatch):
     monkeypatch.delenv("TICTOK_RECORD_DIR", raising=False)
     assert settings_mod._DEFAULT_RECORD_DIR == config.get_record_dir()
+
+
+# ---------------- api.fsfacts: cacheの上限 ----------------
+# fsfactsのcacheはTTLで「まだ正しいか」しか見ておらず、期限切れを消す者がいなかったため、
+# processが見たpathの数だけ単調に伸びていた。上限の根拠を実測値で固定する。
+#
+# 実測(tictok.db, 2026-07-29): 録画374本。43.1日で374本 = 8.68本/日。
+_MEASURED_RECORDINGS = 374
+_MEASURED_RECORDINGS_PER_DAY = 8.68
+
+
+@pytest.fixture
+def fsfacts(env_guard):
+    """env_guardを効かせてからimportする(tictok.api.runtimeはimport時にStorage/instance
+    lock/record dirを掴むため、順序が逆だと本番を掴む)。cacheはprocess共有なので必ず戻す。"""
+    from tictok.api import fsfacts as module
+
+    for cache in (module._fs_state_cache, module._fs_bulk_cache, module._bulk_status_cache):
+        cache.clear()
+    yield module
+    for cache in (module._fs_state_cache, module._fs_bulk_cache, module._bulk_status_cache):
+        cache.clear()
+
+
+def test_fs_caches_hold_the_whole_recording_population_without_evicting(fsfacts):
+    """1回のpollは**全録画**をstatしに来る。上限が録画数を下回ると同じpoll中に自分で自分を
+    追い出し、cacheが防ぐはずだったstatの嵐へ戻る。実測の録画数に、実測の増加ペースで1年
+    ぶんを足しても捨てないこと。"""
+    working_set = _MEASURED_RECORDINGS + int(_MEASURED_RECORDINGS_PER_DAY * 365)
+
+    for index in range(working_set):
+        fsfacts._fs_state_cache[f"K:\rec\s\mp4\{index:05d}_user_20250101_120000.mp4"] = (
+            0.0, False, False)
+
+    assert working_set < fsfacts._FS_FACTS_CACHE_MAX
+    assert len(fsfacts._fs_state_cache) == working_set
+
+
+@pytest.mark.parametrize("name", ["_fs_state_cache", "_fs_bulk_cache", "_bulk_status_cache"])
+def test_caches_stop_growing_at_their_cap(fsfacts, name):
+    cache = getattr(fsfacts, name)
+    cap = cache._max_entries
+
+    for index in range(cap * 2):
+        cache[f"key-{index}"] = (0.0, index)
+
+    assert len(cache) <= cap
+    # 捨てるのは上限に達したときに古い方から1/4。丸ごと空にはしない(直後のpollが全件
+    # 引き直しになる)。
+    assert len(cache) > cap // 2
+
+
+def test_cache_evicts_the_oldest_entries_first(fsfacts):
+    cache = fsfacts._fs_state_cache
+    cap = cache._max_entries
+    for index in range(cap):
+        cache[f"key-{index}"] = (0.0, index)
+
+    cache["key-new"] = (0.0, -1)
+
+    assert "key-0" not in cache
+    assert f"key-{cap - 1}" in cache
+    assert "key-new" in cache
+    assert len(cache) == cap - cap // 4 + 1
+
+
+def test_updating_an_existing_key_never_evicts(fsfacts):
+    """既存keyの入れ替えではdictは伸びない。そこで捨てるとTTL内の生きたentryを巻き添えに
+    hit率だけが落ちる(store/_common.pyの_USER_CACHE_MAXと同じ扱い)。"""
+    cache = fsfacts._fs_state_cache
+    cap = cache._max_entries
+    for index in range(cap):
+        cache[f"key-{index}"] = (0.0, index)
+
+    for _ in range(100):
+        cache["key-0"] = (1.0, "更新")
+
+    assert len(cache) == cap
+    assert cache["key-0"] == (1.0, "更新")
+
+
+def test_bulk_status_cache_cap_clears_the_legitimate_key_space(fsfacts):
+    """正当なkeyは BULK_KINDS の空でない部分集合ぶんしか無い。上限がそれを下回ると、
+    重複入りの要求が来なくても通常利用で捨て合うことになる。"""
+    from tictok.api.routes.bulk import BULK_KINDS
+
+    legitimate_keys = 2 ** len(BULK_KINDS) - 1
+    assert fsfacts._BULK_STATUS_CACHE_MAX > legitimate_keys
+
+
+def test_caches_stay_bounded_after_clear(fsfacts):
+    """無効化(_media_job_runner等)はclear()で行う。clearでただのdictに戻らないこと。"""
+    fsfacts._fs_bulk_cache.clear()
+    cap = fsfacts._fs_bulk_cache._max_entries
+    for index in range(cap + 10):
+        fsfacts._fs_bulk_cache[f"key-{index}"] = (0.0, {})
+
+    assert len(fsfacts._fs_bulk_cache) <= cap

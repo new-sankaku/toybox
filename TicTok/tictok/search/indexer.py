@@ -1,17 +1,24 @@
 """転写segmentとcommentを横断検索indexへ正規化して投入する。
 
 検索結果からの動画seekを焼き込み動画と一致させるため、commentのwall-clockから
-mp4 PTSへの変換はvideo_overlayと同一のmapperを使う。単純な``time - started_at``は
+再生の時間軸への変換はvideo_overlayと同一のmapperを使う。単純な``time - started_at``は
 mp4のmux overheadで最大20秒以上ずれるため使わない(_make_time_mapperのdocstring参照)。
 
+**軸は再生経路で決まる**(_playback_media_pts)。.tsが残る録画はHLSで再生され、player の
+currentTime は playlist の EXTINF 累積 = media軸である。mp4でしか再生できない録画だけが
+PTS軸になる。
+
 変換はindex時に一度だけ行い、結果をsearch_hits.video_timeへ焼き付ける。検索queryごとに
-mapperを組み直すと録画1本あたりffprobeが走るので、検索が実用速度に乗らない。
+mapperを組み直すと録画1本あたりffprobeが走るので、検索が実用速度に乗らない。焼き付けた
+以上、素材の在り方(=再生経路)が変われば軸も変わる。作り直しは
+scripts/repair_search_time_axis.py が行う。
 """
 
 import logging
 from pathlib import Path
 from typing import Optional
 
+from tictok.media import hls_source
 from tictok.record.video_overlay import (
     _load_media_pts,
     _load_timing_anchors,
@@ -24,16 +31,39 @@ logger = logging.getLogger(__name__)
 SOURCE_STT = "stt"
 SOURCE_COMMENT = "comment"
 
+AXIS_MEDIA = "media"
+AXIS_PTS = "pts"
+
+
+def playback_axis(src: Path) -> str:
+    """この録画の秒がどの軸で読まれるか。HLS再生なら``media``、mp4再生なら``pts``。"""
+    return AXIS_MEDIA if hls_source.plays_from_hls(src) else AXIS_PTS
+
+
+def _playback_media_pts(src: Path, anchors: Optional[list]) -> Optional[list]:
+    """playerの軸へ載せるための media->pts 対応を返す。
+
+    録画時に作った ``media_pts`` は media -> **mp4のPTS** の対応で、mp4を再生する録画に
+    しか正しくない。HLSで再生する録画にこれを掛けると、mp4のmux inflationぶんだけ
+    commentが後ろへずれる(実測で最大21.5秒)。恒等の2点mapを返して既存の経路をそのまま
+    恒等で通す — video_overlay._render_context の is_hls 分岐と同じ扱いである。"""
+    if not hls_source.plays_from_hls(src):
+        return _load_media_pts(src)
+    if not anchors or len(anchors) < 2:
+        return None
+    media_end = float(anchors[-1][1])
+    return [(0.0, 0.0), (media_end, media_end)] if media_end > 0 else None
+
 
 def build_time_mapper_sync(src: Path, started_at: float, ended_at: Optional[float]):
-    """wall-clock -> mp4 PTS秒のmapperを同期で作る。
+    """wall-clock -> 再生の時間軸(秒)のmapperを同期で作る。
 
     ffprobeを避けるためvideo_durationは渡さない。media_ptsを持つ録画(現行recorderの
     出力)ではmapperがそもそも参照しないので精度は変わらず、持たない旧録画では素の
     wall offsetへ縮退する。heat barのように概位置で足りる用途のみに使うこと。"""
     anchors = _load_timing_anchors(src)
-    media_pts = _load_media_pts(src)
-    return _make_time_mapper(anchors, started_at, ended_at, None, None, media_pts)
+    return _make_time_mapper(anchors, started_at, ended_at, None, None,
+                             _playback_media_pts(src, anchors))
 
 
 def index_transcript(storage, recording: dict) -> int:
@@ -58,7 +88,7 @@ def index_transcript(storage, recording: dict) -> int:
         })
     count = storage.replace_search_hits(recording["id"], SOURCE_STT, rows)
     logger.info(
-        "transcript indexed: recording_id=%d segments=%d", recording["id"], count,
+        "転写をindexへ登録しました: recording_id=%d segments=%d", recording["id"], count,
         extra={"event": "search.transcript_indexed",
                "ctx": {"recording_id": recording["id"], "segments": count}},
     )
@@ -77,7 +107,7 @@ async def index_comments(storage, recording: dict, src: Optional[Path] = None) -
         src = Path(recording["path"])
 
     anchors = _load_timing_anchors(src)
-    media_pts = _load_media_pts(src)
+    media_pts = _playback_media_pts(src, anchors)
     # media_ptsがあればmapperはvideo_duration/pts_gapsを参照しない。無い旧録画のときだけ
     # 尺をprobeして、wall窓をmp4の実尺へ線形に載せるfallbackを効かせる。
     video_dur = None
@@ -89,7 +119,19 @@ async def index_comments(storage, recording: dict, src: Optional[Path] = None) -
     ended_at = recording.get("ended_at")
     to_pts = _make_time_mapper(anchors, started_at, ended_at, video_dur, None, media_pts)
 
-    events = storage.iter_events(session_id, started_at, ended_at)
+    # ended_atが無い録画(crashで中断した行・確定の途中で落ちた行)は窓の終わりが決まらない。
+    # そのままiter_eventsへ渡すとsession末尾まで開きっぱなしになり、同じsessionの後続録画の
+    # commentを丸ごとこの録画のものとして取り込む(焼き込みで同じ形の事故があり、
+    # doc/BUG_CHECKLIST.mdに記録がある)。次の録画が始まった時刻で閉じる。
+    #
+    # 閉じるのはeventの窓だけで、mapperには渡さない。mapperのended_atは「捕捉が終わった
+    # 時刻」として壁時計の窓を実尺へ線形に載せるのに使われるので、別の意味の値を入れると
+    # 秒そのものが歪む。
+    window_end = ended_at
+    if window_end is None:
+        window_end = storage.next_recording_start(session_id, started_at)
+
+    events = storage.iter_events(session_id, started_at, window_end)
     rows = []
     for event in events:
         if event.get("kind") != "comment":
@@ -110,12 +152,19 @@ async def index_comments(storage, recording: dict, src: Optional[Path] = None) -
             "body": body,
         })
     count = storage.replace_search_hits(recording["id"], SOURCE_COMMENT, rows)
+    # 実際に書いた軸を録画へ記録する。migrate_time_axis_to_media.py はこの列で変換済みを
+    # 判定するので、書いた側が名乗らないと同じ値へ二重に変換が掛かる。
+    axis = playback_axis(src)
+    storage.set_recording_time_axis(recording["id"], axis)
     logger.info(
-        "comments indexed: recording_id=%d comments=%d", recording["id"], count,
+        "commentをindexへ登録しました: recording_id=%d comments=%d axis=%s",
+        recording["id"], count, axis,
         extra={"event": "search.comments_indexed",
-               "ctx": {"recording_id": recording["id"], "comments": count,
+               "ctx": {"recording_id": recording["id"], "comments": count, "time_axis": axis,
                        "anchors": len(anchors) if anchors else 0,
                        "media_pts": len(media_pts) if media_pts else 0,
-                       "video_duration_seconds": video_dur}},
+                       "video_duration_seconds": video_dur,
+                       "window_end": "ended_at" if ended_at is not None else (
+                           "next_recording" if window_end is not None else "open")}},
     )
     return count

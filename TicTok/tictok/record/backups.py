@@ -12,12 +12,11 @@
 (実測 4151.0秒 -> 4000.3秒 / frame数は87652で同一)。
 """
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import Optional
 
-from tictok.core import layout
+from tictok.core import ffprobe, layout
 
 logger = logging.getLogger("tictok.backups")
 
@@ -62,16 +61,11 @@ async def probe_frames_seconds(path: Path) -> tuple:
         "-of", "default=noprint_wrappers=1", str(path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
+        result = await ffprobe.run(args, timeout=ffprobe.SHORT_TIMEOUT_SECONDS)
     except OSError:
         return None, None
     frames = seconds = None
-    for line in out.decode("ascii", "replace").splitlines():
+    for line in result.stdout.splitlines():
         key, _, value = line.partition("=")
         try:
             if key == "nb_frames":
@@ -143,7 +137,7 @@ async def sweep_recording_backups(stem: str, current: Path, roots, keep_seconds:
             path.unlink()
         except OSError as exc:
             logger.warning(
-                "could not delete the superseded backup %s: %s", path, exc,
+                "不要になった退避file %s を削除できません: %s", path, exc,
                 extra={"event": "backup.delete_failed",
                        "ctx": {"stem": stem, "path": str(path)}},
             )
@@ -153,7 +147,7 @@ async def sweep_recording_backups(stem: str, current: Path, roots, keep_seconds:
         freed += info.st_size
     if deleted or kept:
         logger.info(
-            "swept backups for %s: deleted %d (%.2fGB), kept %d", stem, deleted,
+            "%s の退避fileを整理しました: 削除 %d 件（%.2fGB）, 保持 %d 件", stem, deleted,
             freed / 1024 ** 3, sum(kept.values()),
             extra={"event": "backup.swept",
                    "ctx": {"stem": stem, "deleted": deleted, "freed_bytes": freed,

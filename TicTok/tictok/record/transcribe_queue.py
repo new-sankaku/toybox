@@ -1,234 +1,19 @@
-"""配信者単位で投入する一括転写queue。
+"""検索indexの後追い構築。
 
-STTはtranscription._transcribe_lockで完全に直列化されており、並列に走らせても速くならない
-(むしろVRAMを奪い合う)。よってworkerは常に1本で、queueはDBに置いて中断・再起動をまたぐ。
-
-1本終わるごとにtranscriptを保存し、その場で検索indexへ反映してからbroadcastする。
-全件終了を待たずに検索結果へ現れるので、長時間のqueueでも先に終わった分から使える。
+文字起こしそのものは映像jobと同じ台帳(media_job_queue の kind=stt)で走る。専用queueを
+分けていた頃の ``TranscribeQueue`` は、その台帳が「済み判定」を兼ねていたことだけを根拠に
+存在していたが、済みの根拠は transcripts テーブルの有無であり、GPU枠も元から共通だったため、
+分ける理由が残っていない。投入は server._enqueue_stt_jobs、実行は server._run_stt_job。
 """
 
 import asyncio
 import logging
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
-from tictok.core import config
-from tictok.record.transcription import STTError, stt_available
-from tictok.record.transcription import transcribe as stt_transcribe
 from tictok.search import indexer
 
 logger = logging.getLogger(__name__)
-
-IDLE_POLL_SECONDS = 5.0
-
-
-class TranscribeQueue:
-    def __init__(self, storage, broadcast: Callable, resolve_path: Callable[[str], Path]):
-        self._storage = storage
-        self._broadcast = broadcast
-        self._resolve_path = resolve_path
-        self._task: Optional[asyncio.Task] = None
-        self._wake = asyncio.Event()
-        self._stopping = False
-        self._current: Optional[int] = None
-
-    # ===== lifecycle =====
-
-    def start(self) -> None:
-        # 前回processが'running'のまま落ちた行は誰も進めない。pendingへ戻して拾い直す。
-        revived = self._storage.reset_running_transcriptions()
-        if revived:
-            logger.info(
-                "transcribe queue: revived %d interrupted job(s)", revived,
-                extra={"event": "stt.queue_revived", "ctx": {"revived": revived}},
-            )
-        self._task = asyncio.create_task(self._run())
-
-    async def stop(self) -> None:
-        self._stopping = True
-        self._wake.set()
-        if self._task is not None:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-
-    # ===== 投入 =====
-
-    def enqueue_streamer(self, unique_id: Optional[str], priority: int = 0) -> dict:
-        """配信者の未転写録画をまとめて投入する。unique_idがNoneなら全配信者。"""
-        pending = self._storage.untranscribed_recordings(unique_id)
-        added = self._storage.enqueue_transcriptions(
-            [(row["id"], row["unique_id"]) for row in pending], priority)
-        if added:
-            self._wake.set()
-        logger.info(
-            "transcribe queue: enqueued %d recording(s) for %s", added, unique_id or "all",
-            extra={"event": "stt.queue_enqueued",
-                   "ctx": {"unique_id": unique_id, "added": added, "candidates": len(pending)}},
-        )
-        return {"added": added, "candidates": len(pending)}
-
-    def enqueue_recordings(self, recording_ids: list, priority: int = 0) -> dict:
-        """録画を1本単位で投入する。再生中の1本だけを転写したい導線から使う。"""
-        entries = []
-        for recording_id in recording_ids:
-            recording = self._storage.get_recording(recording_id)
-            if recording is None:
-                raise ValueError(f"recording {recording_id} が存在しません")
-            entries.append((recording["id"], recording["unique_id"]))
-        added = self._storage.enqueue_transcriptions(entries, priority)
-        if added:
-            self._wake.set()
-        logger.info(
-            "transcribe queue: enqueued %d recording(s) by id", added,
-            extra={"event": "stt.queue_enqueued",
-                   "ctx": {"recording_ids": recording_ids, "added": added,
-                           "candidates": len(entries)}},
-        )
-        return {"added": added, "candidates": len(entries)}
-
-    def cancel(self, recording_ids: Optional[list] = None) -> int:
-        return self._storage.cancel_transcriptions(recording_ids)
-
-    def status(self) -> dict:
-        items = self._storage.list_transcribe_queue()
-        counts: dict = {}
-        for item in items:
-            counts[item["state"]] = counts.get(item["state"], 0) + 1
-        return {
-            "available": stt_available(),
-            "running": self._current,
-            "counts": counts,
-            "items": items,
-        }
-
-    # ===== worker =====
-
-    async def _run(self) -> None:
-        while not self._stopping:
-            job = self._storage.next_pending_transcription()
-            if job is None:
-                self._wake.clear()
-                try:
-                    await asyncio.wait_for(self._wake.wait(), timeout=IDLE_POLL_SECONDS)
-                except asyncio.TimeoutError:
-                    pass
-                continue
-            await self._process(job)
-
-    async def _process(self, job: dict) -> None:
-        recording_id = job["recording_id"]
-        recording = self._storage.get_recording(recording_id)
-        if recording is None:
-            self._storage.set_transcription_state(
-                recording_id, "failed", error="録画が見つかりません。")
-            await self._emit()
-            return
-        try:
-            path = self._resolve_path(recording["path"])
-        except Exception as exc:
-            self._storage.set_transcription_state(recording_id, "failed", error=str(exc))
-            await self._emit()
-            return
-        if not path.is_file():
-            self._storage.set_transcription_state(
-                recording_id, "failed", error="録画fileが存在しません。")
-            await self._emit()
-            return
-
-        self._current = recording_id
-        self._storage.set_transcription_state(recording_id, "running")
-        await self._emit()
-        loop = asyncio.get_running_loop()
-        last_pct = -1
-
-        def current_pct() -> int:
-            return max(0, last_pct)
-
-        def on_progress(done: float, total: float) -> None:
-            nonlocal last_pct
-            pct = min(100, int(done / total * 100)) if total > 0 else 0
-            if pct == last_pct:
-                return
-            last_pct = pct
-            self._storage.update_transcription_pct(recording_id, pct)
-            asyncio.run_coroutine_threadsafe(
-                self._broadcast({"type": "transcribe_progress",
-                                 "recording_id": recording_id, "pct": pct}), loop)
-
-        try:
-            result = await self._transcribe_with_retry(
-                recording_id, path, on_progress, current_pct)
-        except STTError as exc:
-            self._current = None
-            self._storage.set_transcription_state(recording_id, "failed", error=str(exc))
-            logger.warning(
-                "transcribe queue job failed: recording_id=%d", recording_id, exc_info=True,
-                extra={"event": "stt.queue_job_failed", "ctx": {"recording_id": recording_id}},
-            )
-            await self._emit()
-            return
-        except Exception as exc:
-            self._current = None
-            self._storage.set_transcription_state(recording_id, "failed", error=str(exc))
-            logger.exception(
-                "transcribe queue job crashed: recording_id=%d", recording_id,
-                extra={"event": "stt.queue_job_crashed", "ctx": {"recording_id": recording_id}},
-            )
-            await self._emit()
-            return
-
-        self._storage.save_transcript(recording_id, result)
-        # 保存直後にindexへ反映する。ここを後回しにすると、queue完走まで検索に出てこない。
-        await asyncio.to_thread(indexer.index_transcript, self._storage, recording)
-        self._current = None
-        self._storage.set_transcription_state(recording_id, "done")
-        await self._broadcast({"type": "transcribe_progress",
-                               "recording_id": recording_id, "pct": 100})
-        await self._emit(indexed=recording_id)
-
-    async def _transcribe_with_retry(self, recording_id: int, path: Path,
-                                     on_progress: Callable,
-                                     current_pct: Callable) -> dict:
-        """転写を実行し、失敗が残り試行回数の範囲なら待ってから実行し直す。
-
-        STTはGPUと録画fileの両方を掴むため、他jobがVRAMを解放する途中のCUDA確保失敗や、
-        退避直後のfileが一時的に開けない、といった数秒で消える失敗で落ちる。1発failedに
-        すると人が投げ直すまで転写されないままになるので、設定回数まで試す。
-        """
-        attempts = max(1, config.get_transcribe_job_attempts())
-        backoff = config.get_transcribe_job_retry_backoff_seconds()
-        for attempt in range(1, attempts + 1):
-            try:
-                return await asyncio.to_thread(stt_transcribe, str(path), on_progress)
-            except Exception:
-                if attempt >= attempts:
-                    raise
-                wait = backoff * attempt
-                logger.warning(
-                    "transcribe attempt %d/%d failed, retrying in %.1fs: recording_id=%d",
-                    attempt, attempts, wait, recording_id, exc_info=True,
-                    extra={"event": "stt.queue_job_retry",
-                           "ctx": {"recording_id": recording_id, "attempt": attempt,
-                                   "attempts": attempts, "wait_seconds": round(wait, 1)}},
-                )
-                # 再試行を待っている間、行は最後の%のまま「実行中」で止まって見える。
-                # media queue側は同じ状況を文言で出しているので、こちらも揃える
-                # (待たされている理由が画面から分からないのは、進捗が無いのと同じ)。
-                await self._broadcast({
-                    "type": "transcribe_progress", "recording_id": recording_id,
-                    "pct": current_pct(),
-                    "note": f"失敗したため再試行します（{attempt + 1}/{attempts}）…",
-                })
-                await asyncio.sleep(wait)
-
-    async def _emit(self, indexed: Optional[int] = None) -> None:
-        message = {"type": "transcribe_queue", "status": self.status()}
-        if indexed is not None:
-            message["indexed_recording_id"] = indexed
-        await self._broadcast(message)
 
 
 async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) -> dict:
@@ -262,7 +47,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
             # 「検索に出てこない録画がある」という症状の原因がどこにも残らなかった。
             failed.append(recording_id)
             logger.warning(
-                "search index backfill: cannot resolve the path of recording %d",
+                "検索indexのbackfill: 録画 %d のpathを解決できません",
                 recording_id, exc_info=True,
                 extra={"event": "search.backfill_path_unresolved",
                        "ctx": {"recording_id": recording_id, "path": full.get("path")}},
@@ -278,7 +63,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         except Exception:
             failed.append(recording_id)
             logger.exception(
-                "search index backfill failed: recording_id=%d", recording_id,
+                "検索indexのbackfillに失敗しました: recording_id=%d", recording_id,
                 extra={"event": "search.backfill_failed",
                        "ctx": {"recording_id": recording_id}},
             )
@@ -289,8 +74,8 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         # 1件でも落ちていれば、完了logではなく警告として残す。infoの中に埋めると
         # 「完了した」という記録だけが目に入る。
         logger.warning(
-            "search index backfill finished with %d failure(s) "
-            "(comments=%d transcripts=%d); those recordings stay out of search",
+            "検索indexのbackfillが %d 件の失敗を残して終了しました"
+            "（comment=%d 転写=%d）該当の録画は検索に出ません",
             len(failed), done["comments"], done["transcripts"],
             extra={"event": "search.backfill_incomplete",
                    "ctx": {**done, "failed": len(failed),
@@ -298,7 +83,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         )
     elif done["comments"] or done["transcripts"]:
         logger.info(
-            "search index backfill completed (comments=%d transcripts=%d)",
+            "検索indexのbackfillが完了しました（comment=%d 転写=%d）",
             done["comments"], done["transcripts"],
             extra={"event": "search.backfill_completed", "ctx": done},
         )

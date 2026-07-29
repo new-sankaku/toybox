@@ -32,6 +32,9 @@ const state = {
   total: 0,
   // 検索語なしで録画一覧を出している状態。hitsの中身がhitではなく録画になる。
   browsing: false,
+  // serverから受け取った録画一覧の全件。hitsは確認状態の絞り込みを掛けた後の表示ぶんで、
+  // 絞り込みを変えるたびに引き直さないための元data。
+  browseAll: [],
   hits: [],
   hitIndex: -1,
   current: null,
@@ -62,6 +65,7 @@ const state = {
   // 投入結果や失敗の文言。空なら対象数の集計文を出す。
   bulkNote: "",
   segments: [],
+  segmentIndex: -1,
   chapters: [],
   chapterIndex: -1,
   comments: [],
@@ -143,6 +147,13 @@ async function runSearch(reset) {
     state.hits = [];
   }
   state.query = query;
+  // 確認の印は録画1本の属性。語で探している間の行は録画ではなくシーンなので、この
+  // 絞り込みは対象を持たない。押せるまま残すと、効いていない指定が効いているように見える。
+  const reviewFilter = $("flt-review");
+  reviewFilter.disabled = Boolean(query);
+  reviewFilter.title = query
+    ? "確認状態の絞り込みは、検索語なしの録画一覧でだけ使えます。"
+    : "確認状態で録画一覧を絞り込みます。";
   if (!sources.length) {
     state.hits = [];
     state.total = 0;
@@ -245,6 +256,7 @@ async function loadBrowse() {
     data = await apiSend(
       "GET", `/api/recordings/browse${streamer ? `?unique_id=${encodeURIComponent(streamer)}` : ""}`);
   } catch (err) {
+    state.browseAll = [];
     state.hits = [];
     renderHits();
     setListState($("hit-empty"), "failed", err);
@@ -252,20 +264,182 @@ async function loadBrowse() {
   }
   // 待っている間に検索語が入っていたら、その結果を録画一覧で上書きしない。
   if (!state.browsing) return;
-  state.hits = (data.recordings || []).map((rec) => ({ ...rec, video_time: 0 }));
+  state.browseAll = (data.recordings || []).map((rec) => ({ ...rec, video_time: 0 }));
+  applyBrowseFilter();
+}
+
+// 確認状態の絞り込みは受け取り済みの一覧の上で行う。serverへ引き直さないのは、絞り込みを
+// 変えるたびに全録画の実体走査(mediaの判定)が走るのを避けるため。件数は「絞り込みの結果」と
+// 「一覧に載っている総数」の両方を出す(絞った先の件数だけだと、録画そのものが減ったのか
+// 印で外れたのかが読めない)。
+function applyBrowseFilter() {
+  const want = $("flt-review").value;
+  state.hits = want
+    ? state.browseAll.filter((rec) => reviewStateOf(rec) === want)
+    : state.browseAll.slice();
+  // 絞り込みで行が入れ替わるとhitIndexは別の録画を指す。開いている録画を追い直し、
+  // 一覧から外れたなら選択なしへ戻す(別録画に選択枠が付いたままにしない)。
+  const open = state.current ? state.current.recording_id : null;
+  state.hitIndex = open === null
+    ? -1
+    : state.hits.findIndex((rec) => rec.recording_id === open);
   renderHits();
+  highlightHitRow();
   setListState($("hit-empty"), state.hits.length ? "ok" : "empty");
-  $("search-summary").textContent = state.hits.length
-    ? `録画 ${fmtNum(state.hits.length)}本（検索語を入れるとシーンを探せます）`
+  if (!state.hits.length && want && state.browseAll.length) {
+    setListMessage($("hit-empty"), `「${REVIEW_LABELS[want]}」の録画はありません。`);
+  }
+  const total = state.browseAll.length;
+  $("search-summary").textContent = total
+    ? (want
+      ? `${REVIEW_LABELS[want]} ${fmtNum(state.hits.length)}本 / 録画 ${fmtNum(total)}本`
+      : `録画 ${fmtNum(total)}本（検索語を入れるとシーンを探せます）`)
     : "";
+}
+
+// 実体の種別を名乗るbadge。行に出ている名前(``<stem>.mp4``)は録画の身元でしかなく、
+// finalizeはmp4を作らない。名前だけを見せると「mp4というfileが在る」と読めてしまうので、
+// 実物が.tsなのかmp4なのかをここで出す。
+const MEDIA_BADGE_LABELS = { ts: "TS", mp4: "MP4" };
+const MEDIA_BADGE_TITLES = {
+  ts: "原本の素材(.ts)が残っています。再生・焼き込み・切り出しはこれを読みます。",
+  mp4: "mp4が在ります（再mp4化で作ったもの、または元mp4を持つ旧録画）。",
+};
+
+function mediaBadges(media) {
+  // 実体が1つも無い録画は行だけが残っている。開けないことをその場で言う(転写・検索・
+  // bookmarkは残るので行自体は消さない)。
+  if (!media || !media.length) {
+    const gone = document.createElement("span");
+    gone.className = "vd-src vd-src-none";
+    gone.textContent = "実体なし";
+    gone.title = "素材(.ts)もmp4も残っていないため再生できません。文字起こし・検索・bookmarkは使えます。";
+    return [gone];
+  }
+  return media.map((kind) => {
+    const badge = document.createElement("span");
+    badge.className = `vd-src vd-src-${kind}`;
+    badge.textContent = MEDIA_BADGE_LABELS[kind] || kind;
+    badge.title = MEDIA_BADGE_TITLES[kind] || "";
+    return badge;
+  });
+}
+
+// ===== 確認状態(観たかどうかの印) =====
+
+// 値はserverのRECORDING_REVIEW_STATESと一致させる。既定は未確認で、印は手で付けたときだけ
+// 動く(再生や出力では動かさない)。
+const REVIEW_LABELS = { unchecked: "未確認", checking: "確認中", checked: "確認済" };
+const REVIEW_ORDER = ["unchecked", "checking", "checked"];
+
+function reviewStateOf(rec) {
+  const value = rec && rec.review_state;
+  return REVIEW_LABELS[value] ? value : "unchecked";
+}
+
+// 一覧の行に置く印。行clickは録画を開く操作なので、この操作だけは行へ伝えない
+// (印を付け替えるたびに再生が始まると、一覧を眺めながら印を整える作業ができない)。
+function reviewSelect(rec) {
+  const select = document.createElement("select");
+  select.className = "vd-review";
+  select.setAttribute("aria-label", "この録画の確認状態");
+  select.title = "この録画を観たかどうかの印です。手で付け替えたときだけ変わります。";
+  REVIEW_ORDER.forEach((value) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = REVIEW_LABELS[value];
+    select.appendChild(option);
+  });
+  const current = reviewStateOf(rec);
+  select.value = current;
+  select.dataset.state = current;
+  ["click", "mousedown", "keydown"].forEach((type) =>
+    select.addEventListener(type, (event) => event.stopPropagation()),
+  );
+  select.addEventListener("change", () => setReview(rec.recording_id, select.value));
+  return select;
+}
+
+// 印を1件書き換える。反映先は一覧・再生画面の両方で、どちらから変えても同じ値になる。
+// 失敗したら画面上の値も元へ戻す: 保存できていない印を「付いている」ように見せると、
+// 次に開いたときに黙って消える。
+async function setReview(recordingId, next) {
+  const before = state.browseAll.find((rec) => rec.recording_id === recordingId);
+  const previous = before ? reviewStateOf(before) : null;
+  applyReviewLocally(recordingId, next);
+  try {
+    await apiSend("PATCH", `/api/recordings/${recordingId}/review`, { state: next });
+    if (state.current && state.current.recording_id === recordingId) {
+      $("review-note").textContent = `「${REVIEW_LABELS[next]}」にしました。`;
+    }
+  } catch (err) {
+    if (previous) applyReviewLocally(recordingId, previous);
+    if (state.current && state.current.recording_id === recordingId) {
+      $("review-note").textContent = err.message;
+    } else {
+      // 一覧だけを触っているときは再生画面の欄が見えていないことがある。行の値を
+      // 戻したうえで、失敗そのものはstatus行にも残す。
+      $("player-status").textContent = err.message;
+    }
+  }
+}
+
+// 画面上の値を揃える。一覧の元data・表示中の行・再生画面のsegmented controlは同じ録画の
+// 同じ印なので、1箇所で書き換えて3つへ配る。
+function applyReviewLocally(recordingId, next) {
+  [state.browseAll, state.hits].forEach((list) => {
+    const rec = list.find((row) => row.recording_id === recordingId);
+    if (rec) rec.review_state = next;
+  });
+  if (state.current && state.current.recording_id === recordingId) {
+    state.current.review_state = next;
+    syncReviewControl(next);
+  }
+  const row = $("hit-rows").querySelector(
+    `tr[data-recording-id="${recordingId}"] .vd-review`);
+  if (row) {
+    row.value = next;
+    row.dataset.state = next;
+  }
+  // 絞り込み中は、印を変えた行が対象から外れることがある。表示から外すのは
+  // 絞り込みの指定どおりだが、外れた行が残っていると一覧が指定と食い違う。
+  if (state.browsing && $("flt-review").value) applyBrowseFilter();
+}
+
+function syncReviewControl(value) {
+  const control = $("review-state");
+  control.value = value;
+  control.dataset.state = value;
+}
+
+// 録画を開くまでは押せない。開いていない状態で印だけ選べると、どの録画に付くのかを
+// 名乗れないまま操作を受け付けることになる。
+function setReviewControlEnabled(enabled) {
+  $("review-state").querySelectorAll(".seg-item").forEach((item) => {
+    item.disabled = !enabled;
+  });
 }
 
 function browseRowCells(rec) {
   const kind = document.createElement("span");
-  kind.className = "vd-src";
-  kind.textContent = "録画";
+  kind.className = "vd-kinds";
+  const label = document.createElement("span");
+  label.className = "vd-src";
+  label.textContent = "録画";
+  kind.appendChild(label);
+  mediaBadges(rec.media).forEach((badge) => kind.appendChild(badge));
+  // 中断録画も一覧に出す(素材は揃っていることがある)。ただし確定を跨げていないので、
+  // 尺が未測定なことがある事実は行から読めるようにしておく。
+  if (rec.status === "interrupted") {
+    const note = document.createElement("span");
+    note.className = "vd-src vd-src-interrupted";
+    note.textContent = "中断";
+    note.title = "確定処理を跨げなかった録画です（serverの再起動・crashなど）。素材は残っており再生できます。";
+    kind.appendChild(note);
+  }
   const body = document.createElement("span");
-  body.textContent = rec.filename || `#${rec.recording_id}`;
+  // 表示は身元から拡張子を落としたstem。`.mp4`を出すと、実体がmp4だと読めてしまう。
+  body.textContent = recName(rec);
   // 転写が無い録画は語で検索しても当たらない。一覧で見分けられるようにしておく。
   if (!rec.has_transcript) {
     const note = document.createElement("span");
@@ -278,12 +452,15 @@ function browseRowCells(rec) {
   // 載る上、再処理でended_atが「今」に潰れた録画では数百時間に化ける。測っていなければ
   // それらしい数字を置かず「—」と出す。
   const length = rec.duration_seconds > 0 ? fmtDuration(rec.duration_seconds) : "—";
-  return [kind, rec.unique_id, fmtYmd(rec.started_at), length, body];
+  return [reviewSelect(rec), kind, rec.unique_id, fmtYmd(rec.started_at), length, body];
 }
 
 function renderHits() {
   // 録画一覧では同じ列が「hitの位置」ではなく「録画の尺」になる。
   $("hit-pos-th").textContent = state.browsing ? "尺" : "位置";
+  // 確認の印は1行=1録画のときだけ意味を持つ。検索hitは同じ録画の別のシーンが何行も
+  // 並ぶので、行ごとに印を出すと同じ印が重複して並ぶだけになる。
+  $("hit-review-th").classList.toggle("hidden", !state.browsing);
   // 一覧はfile名だけで横幅を使わないので、左列を中身幅へ詰める(CSS側)。
   document.querySelector(".vd-split").classList.toggle("vd-browse", state.browsing);
   renderTableRows(
@@ -316,6 +493,8 @@ function renderHits() {
     (tr, hit, index) => {
       tr.classList.add("vd-hit");
       tr.tabIndex = 0;
+      // 印を書き換えたとき、一覧を作り直さずにその行だけを追えるようにする。
+      if (hit.recording_id !== undefined) tr.dataset.recordingId = hit.recording_id;
       const open = () => openHit(hit, index);
       tr.addEventListener("click", open);
       tr.addEventListener("keydown", (e) => {
@@ -353,6 +532,11 @@ async function openHit(hit, index) {
   $("player-status").textContent = "";
 
   if (!sameRecording) {
+    // 印は録画ごとの値。前の録画のものを残すと、開いた直後の一瞬だけ別録画の印が
+    // 出てしまう。確定値はloadPathsがserverから持ってくる(一覧経由なら行の値が既にある)。
+    $("review-note").textContent = "";
+    setReviewControlEnabled(true);
+    syncReviewControl(reviewStateOf(hit));
     // 別録画に移ったらIN/OUTは持ち越さない(別fileの秒数として無意味になるため)。
     setCut(...(range || [null, null]));
     state.heat = null;
@@ -381,7 +565,9 @@ async function openHit(hit, index) {
     await loadPaths(hit.recording_id);
     // 待っている間に別の録画へ移っていたら、こちらは古い。上書きしない。
     if (!state.current || state.current.recording_id !== hit.recording_id) return;
-    reloadPlayback(false);
+    // 再生経路の確定はserverへ問い合わせる。待たずに下のplay()へ進むと、まだ何も
+    // 読み込んでいない<video>を再生しようとして無音のまま止まる。
+    await reloadPlayback(false);
   } else {
     video.currentTime = hit.video_time;
     if (range) setCut(range[0], range[1]);
@@ -422,10 +608,14 @@ function applyVariantAvailability() {
     const kind = item.dataset.value;
     const has = kinds.includes(kind);
     item.disabled = !has;
+    // 「下の処理から作れます」とだけ案内していたが、全尺の焼き込みは可逆中間がC:を
+    // 192GB/時食うため長尺では実行できない。切り出しなら範囲だけを焼けるので、そちらを示す。
     item.title = has
       ? ""
       : `この録画には${VARIANT_LABELS[kind]}がありません。${
-          kind === "source" ? "" : "下の「生成」から作れます。"}`;
+          kind === "source"
+            ? ""
+            : "この版での再生はできませんが、切り出しは範囲だけを焼いて出せます（下の「処理」で全尺を作ることもできます）。"}`;
   });
 }
 
@@ -437,25 +627,38 @@ function playbackVariant() {
   return state.variantKinds.includes(want) ? want : "source";
 }
 
-function playUrl(recordingId, variant) {
-  const query = variant && variant !== "source" ? `?variant=${encodeURIComponent(variant)}` : "";
-  return `/api/recordings/${recordingId}/play${query}`;
+// 再生経路は録画ごとに違う。素材(.ts)が残っている録画はHLSで直接観て、mp4しか残っていない
+// 録画はmp4を観る。どちらになるかはserverが実物を見て決める(画面側は推測しない)。
+let hlsPlayer = null;
+// 読み込み要求の世代。録画・素材版を速く切り替えると前の要求の応答が後から届くので、
+// 最新の要求だけを採用する。
+let playbackToken = 0;
+
+function detachHls() {
+  if (!hlsPlayer) return;
+  hlsPlayer.destroy();
+  hlsPlayer = null;
 }
 
-// 素材版を切り替えても尺と時間軸は同じ(焼き込み・Up出力は元録画と同じmedia軸で作る)ので、
-// 見ていた位置とIN/OUTはそのまま持ち越せる。
-function reloadPlayback(keepTime) {
-  if (!state.current) return;
+// hls.jsのcurrentTimeはplaylistのEXTINF累積(media軸)と一致するため、mp4と同じくvideo_timeを
+// そのまま入れられる。位置・音量・倍率の扱いも経路で変えない。
+function loadPlayback(playback, at, playing) {
   const video = $("video");
-  const at = keepTime ? video.currentTime : state.current.video_time;
-  const playing = !video.paused;
-  const variant = playbackVariant();
-  const want = $("clip-variant").value;
-  $("player-status").textContent =
-    want === variant
-      ? ""
-      : `切り出し素材は「${VARIANT_LABELS[want]}」ですが、この録画にはその出力が無いため元録画を再生しています。`;
-  video.src = playUrl(state.current.recording_id, variant);
+  detachHls();
+  if (playback.mode === "hls" && window.Hls && window.Hls.isSupported()) {
+    hlsPlayer = new window.Hls();
+    hlsPlayer.loadSource(playback.url);
+    hlsPlayer.attachMedia(video);
+    hlsPlayer.on(window.Hls.Events.ERROR, (_e, data) => {
+      // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
+      if (data.fatal) $("player-status").textContent = "この録画を再生できませんでした。";
+    });
+  } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
+    $("player-status").textContent = "このBrowserはHLS再生に対応していません。";
+    return;
+  } else {
+    video.src = playback.url;
+  }
   video.addEventListener(
     "loadedmetadata",
     () => {
@@ -465,6 +668,40 @@ function reloadPlayback(keepTime) {
     { once: true },
   );
   if (playing) video.play().catch(() => {});
+}
+
+// 素材版を切り替えても尺と時間軸は同じ(焼き込み・Up出力は元録画と同じmedia軸で作る)ので、
+// 見ていた位置とIN/OUTはそのまま持ち越せる。
+async function reloadPlayback(keepTime) {
+  if (!state.current) return;
+  const video = $("video");
+  const at = keepTime ? video.currentTime : state.current.video_time;
+  const playing = !video.paused;
+  const variant = playbackVariant();
+  const want = $("clip-variant").value;
+  const recordingId = state.current.recording_id;
+  const token = (playbackToken += 1);
+  let playback;
+  try {
+    playback = await apiSend(
+      "GET",
+      `/api/recordings/${recordingId}/playback?variant=${encodeURIComponent(variant)}`,
+    );
+  } catch (err) {
+    $("player-status").textContent = err.message;
+    return;
+  }
+  if (token !== playbackToken) return;
+  if (want !== variant) {
+    $("player-status").textContent =
+      `切り出し素材は「${VARIANT_LABELS[want]}」ですが、この録画にはその出力が無いため元録画を再生しています。`;
+  } else if (variant === "source" && playback.mode !== "hls") {
+    // 素材から直接観られない録画であることは、出来を見るうえで知っておく必要がある。
+    $("player-status").textContent = "この録画は.tsが残っていないため、mp4を再生しています。";
+  } else {
+    $("player-status").textContent = "";
+  }
+  loadPlayback(playback, at, playing);
 }
 
 async function loadPaths(recordingId) {
@@ -478,19 +715,29 @@ async function loadPaths(recordingId) {
   // 選択肢が無い間は空箱を出さない。録画を開く前や派生fileが1つも無いときは、
   // copy対象を選ぶ余地が無いので選択肢欄そのものを出す意味が無い。
   select.classList.add("hidden");
+  let data;
   try {
-    const data = await apiSend("GET", `/api/recordings/${recordingId}/path`);
+    data = await apiSend("GET", `/api/recordings/${recordingId}/path`);
     state.variants = data.variants || [];
   } catch (err) {
     $("player-status").textContent = err.message;
     return;
+  }
+  // 印の確定値。検索hit経由で開いた録画は一覧の値を持たないので、ここが唯一の出所になる。
+  if (state.current && state.current.recording_id === recordingId) {
+    state.current.review_state = reviewStateOf(data);
+    syncReviewControl(reviewStateOf(data));
   }
   state.variantKinds = state.variants.filter((v) => v.exists).map((v) => v.kind);
   applyVariantAvailability();
   state.variants.forEach((variant) => {
     const option = document.createElement("option");
     option.value = variant.path;
-    option.textContent = VARIANT_FILE_LABELS[variant.kind] || variant.kind;
+    // 実体の種別を併記する。素材しか無い録画のsourceはmp4ではなくsession dir(seg*.ts)を
+    // 指すので、「録画本体」とだけ出すと何を渡されたのか読めない。
+    const media = MEDIA_BADGE_LABELS[variant.media_kind];
+    option.textContent = (VARIANT_FILE_LABELS[variant.kind] || variant.kind)
+      + (media ? `（${media}）` : "");
     select.appendChild(option);
   });
   select.classList.toggle("hidden", state.variants.length < 2);
@@ -515,6 +762,7 @@ async function loadHeat(recordingId) {
 
 async function loadTranscript(recordingId) {
   state.segments = [];
+  state.segmentIndex = -1;
   state.selFrom = null;
   state.selTo = null;
   $("segments").innerHTML = "";
@@ -579,6 +827,7 @@ const RECORDING_JOBS = {
   overlay: { button: "do-overlay", path: "output", label: "焼き込み出力" },
   reprocess: { button: "do-reprocess", path: "reprocess", label: "再mp4化" },
   audionorm: { button: "do-audionorm", path: "audionorm", label: "音量正規化" },
+  pack: { button: "do-pack", path: "pack", label: "ts結合" },
 };
 // Up出力はplayerからは投げない(単発でも実時間の数倍かかるため、対象を選んでから投げる
 // 一括処理tabが投入口)。ここでは出来上がりを再生・切り出しに使えれば足りる。
@@ -673,8 +922,19 @@ function selectSegmentRange(from, to) {
   setCut(state.segments[a].start, state.segments[b].end);
 }
 
+// 追従scrollは今の行をpanelの中央へ置く。末尾に貼り付けると前後の文脈のうち「後」が
+// 見えず、今どこを読んでいるのかが掴めない。scrollIntoViewは祖先のscroll容器まで動かして
+// 画面全体が飛ぶので、この容器のscrollTopだけを直接動かす。
+function centerRowIn(container, row) {
+  const offset = row.getBoundingClientRect().top - container.getBoundingClientRect().top;
+  const target = container.scrollTop + offset - (container.clientHeight - row.offsetHeight) / 2;
+  const max = container.scrollHeight - container.clientHeight;
+  container.scrollTop = Math.max(0, Math.min(target, max));
+}
+
 function highlightActiveSegment() {
-  const rows = $("segments").children;
+  const container = $("segments");
+  const rows = container.children;
   if (!rows.length) return;
   const now = $("video").currentTime;
   let active = -1;
@@ -685,10 +945,13 @@ function highlightActiveSegment() {
       break;
     }
   }
+  if (active === state.segmentIndex) return;
   for (let i = 0; i < rows.length; i += 1) {
     rows[i].classList.toggle("vd-seg-active", i === active);
   }
-  if (active >= 0) rows[active].scrollIntoView({ block: "nearest" });
+  state.segmentIndex = active;
+  // 追従は既定ON。読み返している最中に勝手に飛ぶのが邪魔な場面もあるので切れるようにする。
+  if (active >= 0 && $("transcript-follow").checked) centerRowIn(container, rows[active]);
 }
 
 // 発話の途中で切れたclipは素材にならないので、手打ちのIN/OUTを最寄りの発話境界へ寄せる。
@@ -950,7 +1213,8 @@ function activeCommentIndex(now) {
 }
 
 function highlightActiveComment() {
-  const rows = $("comments").children;
+  const container = $("comments");
+  const rows = container.children;
   if (!rows.length) return;
   const index = activeCommentIndex($("video").currentTime);
   if (index === state.commentIndex) return;
@@ -961,7 +1225,7 @@ function highlightActiveComment() {
   if (!row) return;
   row.classList.add("vd-cmt-active");
   // 追従は既定ON。読み返している最中に勝手に飛ぶのが邪魔な場面もあるので切れるようにする。
-  if ($("comment-follow").checked) row.scrollIntoView({ block: "nearest" });
+  if ($("comment-follow").checked) centerRowIn(container, row);
 }
 
 // ===== 見どころ(bookmark) =====
@@ -1435,7 +1699,7 @@ function setCut(inSec, outSec) {
 const CLIP_CONTROLS = [
   ["variant", "clip-variant", "cuts-variant", "value"],
   ["normalize_audio", "clip-normalize", "cuts-normalize", "checked"],
-  ["precise", "clip-precise", "cuts-precise", "checked"],
+  ["mode", "clip-mode", "cuts-mode", "value"],
 ];
 
 function clipOptions() {
@@ -1472,7 +1736,14 @@ async function runClip() {
       label: state.query,
       ...clipOptions(),
     });
-    $("player-status").textContent = `出力: ${result.path}`;
+    // 実開始を必ず出す。stream copyはkeyframeからしか始まれないので、要求より手前へ
+    // 伸びる。serverはずっとこの値を返していたのに画面が使っておらず、「30秒頼んで67秒」の
+    // 理由が利用者から見えなかった。
+    const lead = result.keyframe_lead_seconds;
+    const note = lead
+      ? `（実開始 ${fmtDuration(result.actual_start_seconds)} / 要求より ${lead.toFixed(1)}秒手前）`
+      : "";
+    $("player-status").textContent = `出力: ${result.path}${note}`;
     await copyText(result.path, "切り出しpathをcopyしました。");
   } catch (err) {
     $("player-status").textContent = err.message;
@@ -1752,6 +2023,25 @@ async function loadCandidates() {
   renderCandidates();
 }
 
+// 候補の根拠。serverのmetric名をそのまま画面語へ写す。三項演算子で2択にしていたころは
+// 音量由来の候補が「Comment」と表示されていた。
+const CANDIDATE_METRIC_LABELS = {
+  diamonds: "コイン",
+  comments: "Comment",
+  audio_peak: "音量",
+  laugh_comment: "笑い",
+  laugh_audio: "笑い声",
+  smile: "笑顔",
+};
+
+// 素材(録画)の解析から出る指標の列。serverが載せなかった指標はkeyが無く、その録画では
+// 判定していないことを意味する — 0と表示すると「検出したが0だった」と読めてしまうので
+// 「—」を出す。指標を足すときはここへ1 entryとvideos.htmlへ<th>を1つ足す。
+const CANDIDATE_MATERIAL_COLUMNS = [
+  { key: "laugh_audio", format: (value) => `${fmtNum(Math.round(value))}秒` },
+  { key: "smile", format: (value) => `${fmtNum(Math.round(value))}秒` },
+];
+
 function renderCandidates() {
   const empty = $("cand-empty");
   empty.textContent = state.current
@@ -1781,14 +2071,18 @@ function renderCandidates() {
         fmtDuration(candidate.start),
         fmtDuration(candidate.end),
         fmtDuration(candidate.end - candidate.start),
-        candidate.metric === "diamonds" ? "コイン" : "Comment",
+        CANDIDATE_METRIC_LABELS[candidate.metric] || candidate.metric,
         candidate.zscore.toFixed(1),
         fmtNum(candidate.diamonds),
         fmtNum(candidate.comments),
+        fmtNum(candidate.laugh_comment || 0),
+        ...CANDIDATE_MATERIAL_COLUMNS.map(({ key, format }) =>
+          candidate[key] == null ? "—" : format(candidate[key]),
+        ),
         actions,
       ];
     },
-    [0, 1, 2, 4, 5, 6],
+    [0, 1, 2, 4, 5, 6, 7, ...CANDIDATE_MATERIAL_COLUMNS.map((_, i) => 8 + i)],
   );
 }
 
@@ -1840,6 +2134,33 @@ async function exportCuts() {
     });
     $("cuts-status").textContent =
       `${fmtNum(result.total)}件を${fmtNum(result.jobs.length)}個のjobで書き出します（Job画面で進み具合を確認できます）。`;
+  } catch (err) {
+    $("cuts-status").textContent = err.message;
+  }
+  button.disabled = false;
+}
+
+async function makeReel() {
+  if (!state.cuts.length) {
+    $("cuts-status").textContent = "切り出しリストが空です。";
+    return;
+  }
+  const button = $("cuts-reel");
+  button.disabled = true;
+  $("cuts-status").textContent = "queueへ投入中…";
+  try {
+    // 並べ替えない。表示した順と違う順で繋がれる方が、順序を指定できないより悪い誤認を生む。
+    const result = await apiSend("POST", "/api/reels", {
+      items: state.cuts.map((cut) => ({
+        recording_id: cut.recording_id,
+        start: cut.start,
+        end: cut.end,
+        label: cut.label || null,
+      })),
+      variant: $("cuts-variant").dataset.value || "source",
+    });
+    $("cuts-status").textContent =
+      `${fmtNum(result.parts)}件を1本に連結します（Job画面で進み具合を確認できます）。`;
   } catch (err) {
     $("cuts-status").textContent = err.message;
   }
@@ -2066,12 +2387,16 @@ function renderStreamers() {
   );
 }
 
+// 文字起こしは映像jobと同じ台帳(kind=stt)で走るので、stateの語彙もそちらに揃える。
+// completed/skipped/interrupted はJob画面と同じ言葉で出す(同じ行を2つの名前で呼ばない)。
 const QUEUE_LABELS = {
   running: "実行中",
   pending: "待機",
-  done: "完了",
+  completed: "完了",
   failed: "失敗",
   cancelled: "取消",
+  skipped: "対象外",
+  interrupted: "中断",
 };
 
 function renderQueue(queue) {
@@ -2093,7 +2418,7 @@ function renderQueue(queue) {
       QUEUE_LABELS[item.state] || item.state,
       item.unique_id,
       item.filename || "-",
-      item.state === "running" ? `${item.pct}%` : (item.state === "done" ? "100%" : "-"),
+      item.state === "running" ? `${item.pct}%` : (item.state === "completed" ? "100%" : "-"),
       item.error || "",
     ],
     [3],
@@ -2149,13 +2474,19 @@ async function enqueue(uniqueId) {
 // 種別のラベルはserver側のMEDIA_JOB_TITLESと同じ語を使う。画面ごとに言い換えると、
 // Job画面に並ぶjob titleと突き合わせられなくなる。
 const BULK_LABELS = {
+  transcribe: "文字起こし",
   overlay: "焼き込み出力", upscale: "Up出力", reprocess: "再mp4化", audionorm: "音量正規化",
-  delete_mp4: "元mp4の削除",
+  pack: "ts結合", delete_mp4: "元mp4の削除",
 };
 const BULK_SKIP_LABELS = {
   recording: "録画中",
-  no_file: "録画fileが無い",
+  // 実体が何も無い(素材もmp4も)場合と、mp4だけが無い場合は別物。焼き込み・Up出力は素材
+  // から出せるので前者でしか外れず、後者は元mp4を要る操作(音量正規化・元mp4の削除)だけの
+  // 不足を指す。server側のBULK_SKIP_LABELSと同じ語であること。
+  no_source: "素材もmp4も無い",
+  no_file: "元mp4が無い",
   no_hls: ".tsが残っていない",
+  packed: "結合済み",
   done: "処理済み",
   queued: "既にqueueにある",
   protected: "保護されている",
@@ -2165,6 +2496,15 @@ const BULK_SKIP_LABELS = {
 };
 // 作らずに消す種別。queueへは載せず専用APIで即時に実行するので、文言もbuttonも分ける。
 const BULK_DELETE_KIND = "delete_mp4";
+// 出力を作らない種別。元mp4の容量も所要の実測比も意味を持たないので、見積りの出し方を分ける。
+const BULK_PACK_KIND = "pack";
+// 走る先がmedia_job_queueではない種別。台帳がJob画面に出ないので、進捗の行き先を分ける。
+const BULK_TRANSCRIBE_KIND = "transcribe";
+// mp4を作らない種別。元mp4の合計を並べても確かめるべき数字にならないので、chipを分ける。
+const BULK_NO_MP4_KINDS = [BULK_PACK_KIND, BULK_TRANSCRIBE_KIND];
+// 「作り直す」余地が無い種別。ts結合は冪等(束ね済みは何もしない)で、削除は一方通行。
+// 文字起こしは含めない — modelを替えたときや時刻mapの版が上がったときは転写し直す。
+const BULK_NO_REDO_KINDS = [BULK_PACK_KIND, BULK_DELETE_KIND];
 
 async function loadBulk() {
   // 集計は録画数ぶんのfile確認を伴うので数秒かかることがある。待っている間に古い/空の表を
@@ -2312,7 +2652,7 @@ function bulkDetailRow(streamer) {
       : (BULK_SKIP_LABELS[row.reason] || row.reason || "対象外");
     // seconds=0は「尺が0の録画」ではなく未測定。0:00と出すと見積りの母数から抜けている
     // ことが読めなくなるので、測っていないことをそのまま出す。
-    [box, `#${row.id}`, fmtDateTime(row.started_at),
+    [box, recTag(row), fmtDateTime(row.started_at),
      row.seconds > 0 ? fmtDuration(row.seconds) : "—",
      fmtBytes(row.bytes), statusText].forEach((value, col) => {
       const td = document.createElement("td");
@@ -2410,11 +2750,22 @@ function appendBulkConfirm(tbody) {
   const volumes = Object.entries(disk.volumes || {});
   const free = volumes.length ? Math.min(...volumes.map(([, v]) => v.free_bytes)) : null;
   const notes = [];
-  if (free !== null) {
-    notes.push(`書き込み先の最小空き容量は ${fmtBytes(free)}、`
-      + `同時に走るぶんの元動画は ${fmtBytes(estimate.largest_source_bytes)} です。`);
+  // 文字起こしはfileを作らない(書くのはDBのtranscript行だけ)。空き容量を並べると、
+  // 確かめる必要の無い数字を確かめさせることになる。
+  if (free !== null && estimate.kind !== BULK_TRANSCRIBE_KIND) {
+    // ts結合が要るのは素材と同じだけの空きで、元mp4の容量とは関係が無い。ここへ元動画の
+    // 合計を並べると、確かめるべき数字を取り違える。
+    notes.push(estimate.kind === BULK_PACK_KIND
+      ? `書き込み先の最小空き容量は ${fmtBytes(free)} です。`
+      : `書き込み先の最小空き容量は ${fmtBytes(free)}、`
+        + `同時に走るぶんの元動画は ${fmtBytes(estimate.largest_source_bytes)} です。`);
   }
-  if ((disk.low_volumes || []).length) {
+  if (estimate.kind === BULK_TRANSCRIBE_KIND) {
+    notes.push("文字起こしはfileを作らず、結果をDBへ保存して検索indexへ反映します。"
+      + "GPUを1本ずつ直列に使うため、所要は本数ぶん積み上がります。"
+      + "投入後の進捗と取り消しは「一括文字起こし」tabで行います（Job画面には出ません）。");
+  }
+  if ((disk.low_volumes || []).length && estimate.kind !== BULK_TRANSCRIBE_KIND) {
     notes.push(`空き容量が下限を下回っているvolumeがあります（${disk.low_volumes.join(", ")}）。`
       + "この状態では投入できません。");
   }
@@ -2429,6 +2780,12 @@ function appendBulkConfirm(tbody) {
   if (estimate.kind === "reprocess") {
     notes.push("再mp4化は保持している.tsから録画を作り直します。"
       + "設定「再mp4化: 元録画の音量も正規化する」がONなら、同時に音量も揃います。");
+  }
+  if (estimate.kind === BULK_PACK_KIND) {
+    notes.push("ts結合は素材の.tsを解像度の切れ目ごとに1 fileへ束ね直します。再encodeしない"
+      + "byte連結なので、映像も再生も再mp4化の結果も変わらず、file数だけが減ります。"
+      + "束ねる間は元segmentを残したまま検証するため、その録画の素材と同じだけの空きが"
+      + "一時的に要ります（足りない録画はjobが空き容量不足として止まります）。");
   }
   if (estimate.kind === BULK_DELETE_KIND) {
     notes.push("録画本体のmp4だけを削除します。焼き込み(.overlay.mp4)・Up出力(.up.mp4)・"
@@ -2455,7 +2812,10 @@ function appendBulkConfirm(tbody) {
     ? `この内容で${fmtNum(estimate.recordings)}本のmp4を削除`
     : `この内容で${fmtNum(estimate.recordings)}本を投入`;
   if (estimate.kind === BULK_DELETE_KIND) run.className = "btn btn-danger btn-small";
-  run.disabled = estimate.recordings === 0 || (disk.low_volumes || []).length > 0;
+  // 空き容量の下限割れで止めるのは、fileを書く種別だけ。文字起こしはfileを作らないので、
+  // 空きが細っている状況でこそ先に回せる(serverの投入APIも同じ理由でdiskを見ない)。
+  run.disabled = estimate.recordings === 0
+    || (estimate.kind !== BULK_TRANSCRIBE_KIND && (disk.low_volumes || []).length > 0);
   run.addEventListener("click", () => runBulk(run));
   const cancel = document.createElement("button");
   cancel.className = "btn btn-small";
@@ -2471,6 +2831,14 @@ function appendBulkConfirm(tbody) {
     ["対象", `${fmtNum(estimate.recordings)}本`],
     ["総録画時間", fmtDuration(estimate.seconds)],
     ["空く容量", fmtBytes(estimate.source_bytes)],
+  ] : BULK_NO_MP4_KINDS.includes(estimate.kind) ? [
+    // 束ねるのは素材、文字起こしが書くのはDBで、どちらもmp4は触らない。元mp4の容量を
+    // 並べると何を処理するのか読み違える。
+    ["対象", `${fmtNum(estimate.recordings)}本`],
+    ["総録画時間", fmtDuration(estimate.seconds)],
+    ["所要(実測比)", estimate.eta_seconds === null
+      ? "実績が無いため不明"
+      : `約${fmtDuration(estimate.eta_seconds)}（過去${fmtNum(estimate.eta_samples)}件から）`],
   ] : [
     ["対象", `${fmtNum(estimate.recordings)}本`],
     ["総録画時間", fmtDuration(estimate.seconds)],
@@ -2491,13 +2859,34 @@ function renderBulk() {
     : state.bulk;
   // 種別によって「何が起きるか」が違う。作る種別の説明を消す種別にも出すと、
   // queueへ積まれるものと即時に消えるものの区別が付かない。
+  // 「作り直す」余地の無い種別では再出力の指定を伏せる。押せる状態で残すと、投入本数の
+  // 見え方(済みぶんを足すか)と実際に投入される本数が食い違う。
+  const redoBox = $("bulk-redo");
+  redoBox.disabled = BULK_NO_REDO_KINDS.includes(kind);
+  if (redoBox.disabled) redoBox.checked = false;
   $("bulk-note").textContent = kind === BULK_DELETE_KIND
     ? "録画本体のmp4だけを即座に削除します（queueには載りません）。対象は.tsが残っている録画だけで、"
       + "作り直せない録画は自動で対象から外します。焼き込み・Up出力・名前を変えたfileは残ります。"
       + "削除後は種別を「再mp4化」にして投入すると、同じ.tsから作り直せます。"
+    : kind === BULK_TRANSCRIBE_KIND
+    ? "録画の音声を文字起こしして、シーン検索の対象にします（字幕の焼き込みにも要ります）。"
+      + "配信者名の左の ▶ で録画一覧を開くと、選んだ録画だけを投入できます。"
+      + "GPUを1本ずつ直列に使うため、投入後の進捗確認と取り消しは「一括文字起こし」tabで行います"
+      + "（Job画面の台帳には出ません）。"
+    : kind === BULK_PACK_KIND
+    ? "素材の.tsを解像度の切れ目ごとに1 fileへ束ね直します（再encodeしないbyte連結で、映像も"
+      + "再生も変わりません）。2秒ごとに刻まれたsegmentが数千本あると、走査・backup・移送の"
+      + "すべてがfile数に比例して重くなるのを畳むための処理です。録画1本ごとに1つのjobとして"
+      + "queueへ入り、束ね済みの録画は自動で対象から外れます。"
     : "録画1本ごとに1つのjobとしてqueueへ入り、順に処理します。配信者名の左の ▶ で録画一覧を開くと、"
       + "選んだ録画だけを投入できます。所要時間はこのserverで実際に完了した同種jobの実測から出しています"
       + "（実績が無い種別は不明と表示します）。投入後の進捗確認と取り消しはJob画面で行います。";
+  // 進捗の行き先は種別で違う。文字起こしはJob画面の台帳に行が出ないので、そこへ誘導すると
+  // 「投入したのに何も無い」画面へ送ることになる。
+  const jobsLink = $("bulk-jobs-link");
+  const toStt = kind === BULK_TRANSCRIBE_KIND;
+  jobsLink.textContent = toStt ? "一括文字起こしで進捗を見る" : "Job画面で進捗を見る";
+  jobsLink.href = toStt ? "#jobs" : "/jobs";
   $("bulk-filter").classList.toggle("hidden", !state.bulkOnly);
   $("bulk-filter-label").textContent = state.bulkOnly ? `@${state.bulkOnly} だけを表示中` : "";
   const total = rows.reduce((sum, s) => sum + bulkTargetCount(s, kind, redo), 0);
@@ -2587,7 +2976,12 @@ async function runBulk(button) {
       ? `元mp4を${fmtNum(result.deleted)}本削除しました（${fmtBytes(result.freed_bytes)}）。`
         + "作り直すときは種別を「再mp4化」にして投入してください。"
       : `${BULK_LABELS[pending.kind]} ${fmtNum(result.total)}本をqueueへ入れました。`
-        + "進捗の確認と取り消しはJob画面で行います。";
+        + (pending.kind === BULK_TRANSCRIBE_KIND
+          ? "進捗の確認と取り消しは「一括文字起こし」tabで行います。"
+          : "進捗の確認と取り消しはJob画面で行います。");
+    // 転写queueの現況はtabを跨いで同じ台帳を見ている。投入した直後に「一括文字起こし」を
+    // 開いたとき、古い表のままにしない。
+    if (result.queue) renderQueue(result.queue);
     // 投入した録画は「既にqueueにある」へ変わる。開いている一覧もその状態へ揃える。
     if (state.bulkOpen) {
       try {
@@ -2608,10 +3002,23 @@ async function runBulk(button) {
 
 // 排他選択のうち往復の多いものはsegmented controlで出す。listenerを付ける前に生やす
 // (initSegmentedが.valueとchange eventを要素へ足すため、以降は<select>と同じに扱える)。
-const SEGMENTED = ["flt-mode", "flt-order", "clip-variant", "cuts-variant", "play-rate"];
+const SEGMENTED = [
+  "flt-mode", "flt-order", "clip-variant", "cuts-variant", "clip-mode", "cuts-mode",
+  "play-rate", "review-state"];
 
 function bind() {
   SEGMENTED.forEach(initSegmented);
+  // 録画を開くまで印は付けられない。
+  setReviewControlEnabled(false);
+  $("review-state").addEventListener("change", () => {
+    if (!state.current) return;
+    setReview(state.current.recording_id, $("review-state").value);
+  });
+  // 絞り込みは受け取り済みの一覧の上で効く。検索語があるときの行は録画ではなくシーンなので
+  // 対象にならない — 効かない設定を押せる状態で並べず、その場でdisableして理由を出す。
+  $("flt-review").addEventListener("change", () => {
+    if (state.browsing) applyBrowseFilter();
+  });
 
   VIEWS.forEach((view) => $(`tab-${view}`).addEventListener("click", () => showView(view)));
 
@@ -2804,6 +3211,7 @@ function bind() {
 
   $("cuts-download").addEventListener("click", runCutlistExport);
   $("cuts-export").addEventListener("click", exportCuts);
+  $("cuts-reel").addEventListener("click", makeReel);
   bindClipControls();
   $("cand-block").addEventListener("toggle", maybeLoadCandidates);
   $("cand-add-all").addEventListener("click", async () => {
@@ -2881,6 +3289,13 @@ function bind() {
     }),
   );
   $("bulk-all").addEventListener("click", () => askBulk(null, null));
+  // 文字起こしの進捗は同じ画面の別tabにある。/jobsへ飛ばすとJob画面の台帳(転写の行は
+  // 出ない)へ送ることになるので、遷移せずtabだけを切り替える。
+  $("bulk-jobs-link").addEventListener("click", (event) => {
+    if ($("bulk-kind").value !== BULK_TRANSCRIBE_KIND) return;
+    event.preventDefault();
+    showView("jobs");
+  });
   $("bulk-filter-clear").addEventListener("click", () => {
     state.bulkOnly = null;
     hideBulkConfirm();
@@ -2900,12 +3315,18 @@ function bind() {
   });
 }
 
-// 音量正規化の既定は設定画面が持つ。画面側にhard-codeしない。
+// 切り出しの既定(音量正規化・方式)は設定画面が持つ。画面側にhard-codeしない。
 async function loadClipDefaults() {
   try {
     const data = await apiSend("GET", "/api/settings");
-    const item = (data.settings || []).find((entry) => entry.key === "clip_normalize_audio");
-    if (item) $("clip-normalize").checked = Boolean(Number(item.value));
+    const byKey = new Map((data.settings || []).map((entry) => [entry.key, entry.value]));
+    if (byKey.has("clip_normalize_audio")) {
+      $("clip-normalize").checked = Boolean(Number(byKey.get("clip_normalize_audio")));
+    }
+    const mode = byKey.get("clip_default_mode");
+    if (mode) {
+      ["clip-mode", "cuts-mode"].forEach((id) => { $(id).value = String(mode); });
+    }
   } catch (err) {
     $("player-status").textContent = err.message;
   }
@@ -2943,6 +3364,24 @@ function onMessage(message) {
       $("cuts-status").textContent = `一括書き出しが終わりました（${fmtNum(job.result.count ?? 0)}件）。`;
     } else if (job.state !== "pending") {
       $("cuts-status").textContent = `一括書き出し: ${job.message || job.state}`;
+    }
+  } else if (message.type === "job_update" && message.job.domain === "reel") {
+    const job = message.job;
+    if (job.state === "running") {
+      $("cuts-status").textContent = `連結 ${job.stage || ""} ${job.pct}%`.trim();
+    } else if (job.state === "completed") {
+      const r = job.result || {};
+      // 指定尺と前置きを両方出す。実録画では30秒の範囲に37秒の前置きが付いた例があるので、
+      // 実尺だけを見せると「90秒のつもりが134秒」の理由が分からない。
+      const parts = [`連結しました（${fmtNum(r.parts ?? 0)}件）`];
+      if (r.requested_seconds != null && r.lead_seconds != null) {
+        parts.push(`指定尺 ${fmtDuration(r.requested_seconds)}`
+          + ` ＋ 前置き ${fmtDuration(r.lead_seconds)}`
+          + ` ＝ 実尺 ${fmtDuration(r.output_duration_seconds ?? 0)}`);
+      }
+      $("cuts-status").textContent = `${parts.join(" / ")}: ${r.filename || ""}`;
+    } else if (job.state !== "pending") {
+      $("cuts-status").textContent = `連結: ${job.message || job.state}`;
     }
   } else if (message.type === "job_update" && BULK_LABELS[message.job.domain]) {
     const job = message.job;
@@ -2986,6 +3425,10 @@ if (location.hash === "#bulk") {
 loadStatus();
 loadSemantic();
 loadClipDefaults();
+// 開いた時点で録画一覧を出す。語なしの一覧はrunSearchが担うが、起動時は誰も呼ばないため
+// 「検索語を入力してください」のまま止まり、当たる語を先に発明しないと1本も開けなかった
+// (確認状態の印も、一覧が出ていなければ目に入らない)。
+runSearch(true);
 // player直下の「この録画の見どころ・切り出し」はcut listを使う。tabを開くまで
 // 読まないと、録画を開いた直後だけ切り出しが抜けた一覧になる。
 loadCuts();

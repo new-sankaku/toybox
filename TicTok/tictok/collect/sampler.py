@@ -75,8 +75,8 @@ class EventSampler:
                 # 既存sampleのseen署名を復元できないと、その kind は同じshapeを
                 # 上限まで取り直す(重複が増えるだけで収集は継続する)。
                 logger.warning(
-                    "failed to load existing samples for kind %s; already-seen shapes "
-                    "may be captured again", kind, exc_info=True,
+                    "kind %s の既存sampleを読み込めませんでした。既に観測済みのshapeを"
+                    "再度captureする可能性があります", kind, exc_info=True,
                     extra={"event": "collector.sample_load_failed",
                            "ctx": {"kind": kind, "path": str(path)}},
                 )
@@ -100,7 +100,7 @@ class EventSampler:
             seen.add(sig)
             self._counts[kind] = self._counts.get(kind, 0) + 1
             logger.info(
-                "captured a new %s sample shape (%d/%d)",
+                "%s の新しいsample shapeをcaptureしました（%d/%d）",
                 kind, self._counts[kind], self._max_per_kind,
                 extra={"event": "collector.sample_captured",
                        "ctx": {"kind": kind, "count": self._counts[kind],
@@ -111,7 +111,7 @@ class EventSampler:
             # 診断用の任意機能。収集本流には影響しないが、sampleが貯まらない理由が
             # 分からなくなるので無音にはしない。
             logger.warning(
-                "event sample capture failed for kind %s; this shape is not recorded",
+                "kind %s のevent sample captureに失敗しました。このshapeは記録されません",
                 kind, exc_info=True,
                 extra={"event": "collector.sample_capture_failed",
                        "ctx": {"kind": kind}},

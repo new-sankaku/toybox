@@ -47,7 +47,7 @@ def to_plain(value: Any, depth: int = 0) -> Any:
                 # per-field per-eventの最高頻度path なので level guard は必須。
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "proto field default comparison failed; keeping field %s", field_name,
+                        "proto fieldの既定値比較に失敗しました。field %s を残します", field_name,
                         exc_info=True,
                         extra={"event": "collector.proto_field_default_check_failed",
                                "ctx": {"field": field_name,
@@ -75,5 +75,5 @@ def safe_event_to_dict(event: Any) -> dict:
         result = to_plain(event)
         return result if isinstance(result, dict) else {"_value": result}
     except Exception:
-        logger.exception("safe_event_to_dict failed")
+        logger.exception("safe_event_to_dictが失敗しました")
         return {"_repr": repr(event)}

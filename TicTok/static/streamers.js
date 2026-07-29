@@ -243,9 +243,12 @@ function renderProfile(p) {
   renderHeatmap();
   renderConcentration(p.concentration);
   renderGifters(p.gifters);
+  renderCoop(p.coop);
   renderBattle(p.battles);
   renderBattleTrend(p.battles.history || []);
   renderBattleGifters(p.battles.gifters || []);
+  // 配信者を選び直したら相手の絞込は持ち越さない(別人の相手で絞られたままになる)。
+  pickedOpponent = null;
   renderOpponents(p.battles.opponents);
   renderBattleHistory(p.battles.history || []);
 }
@@ -295,7 +298,7 @@ function renderHighlights(list) {
     (h, rank) => [
       String(rank),
       fmtDateTime(h.time),
-      `#${h.session_id}`,
+      `#${sessionNo(h.session_id)}`,
       fmtNum(h.diamonds),
       `×${h.ratio.toFixed(1)}`,
       fmtNum(h.comments),
@@ -311,9 +314,10 @@ function highlightRecCell(h) {
   const btn = document.createElement("button");
   btn.className = "btn btn-small";
   btn.textContent = "▶ 再生";
-  btn.title = `録画 #${h.recording_id} の ${fmtDuration(h.offset || 0)} 付近から再生`;
+  const no = `#${sessionNo(h.session_id)}`;
+  btn.title = `録画 ${no} の ${fmtDuration(h.offset || 0)} 付近から再生`;
   btn.addEventListener("click", () =>
-    openVideo(h.recording_id, h.offset || 0, `急増点 ${fmtDateTime(h.time)}（録画 #${h.recording_id}）`),
+    openVideo(h.recording_id, h.offset || 0, `急増点 ${fmtDateTime(h.time)}（録画 ${no}）`),
   );
   return btn;
 }
@@ -323,22 +327,69 @@ function highlightRecCell(h) {
 // 到達時の対象と突き合わせる。
 let playingRecordingId = null;
 
-function openVideo(recordingId, offset, label) {
+// 素材(.ts)が残っている録画はHLSで直接観る。mp4しか残っていない録画はmp4を観る。どちらに
+// なるかはserverが録画ごとの実物を見て決めるので、こちらは受け取った経路で読み込む。
+let hlsPlayer = null;
+
+function detachHls() {
+  if (!hlsPlayer) return;
+  hlsPlayer.destroy();
+  hlsPlayer = null;
+}
+
+// 再生できなかった理由を、再生boxの同じ場所に出す。再生できた/できなかったを利用者が
+// 1か所で読めるようにするため、失敗も動画と同じ枠へ出す。
+function showVideoMessage(label, text) {
+  const box = document.getElementById("sm-video-box");
+  document.getElementById("sm-video-title").textContent = label;
+  document.getElementById("sm-video-message").textContent = text;
+  box.classList.remove("hidden");
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+async function openVideo(recordingId, offset, label) {
   const box = document.getElementById("sm-video-box");
   const video = document.getElementById("sm-video");
+  const message = document.getElementById("sm-video-message");
   document.getElementById("sm-video-title").textContent = label;
-  document.getElementById("sm-video-message").textContent = "";
+  message.textContent = "";
   playingRecordingId = recordingId;
-  video.src = `/api/recordings/${recordingId}/play`;
-  // メタデータ確定後に急増点へseekして再生。Range対応のため部分読み込みでseekできる。
+  detachHls();
+  box.classList.remove("hidden");
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  let playback;
+  try {
+    playback = await apiSend("GET", `/api/recordings/${recordingId}/playback`);
+  } catch (err) {
+    message.textContent = err.message;
+    return;
+  }
+  // 待っている間に別の録画へ移っていたら、こちらは古い。上書きしない。
+  if (playingRecordingId !== recordingId) return;
+  if (playback.mode === "hls" && window.Hls && window.Hls.isSupported()) {
+    hlsPlayer = new window.Hls();
+    hlsPlayer.loadSource(playback.url);
+    hlsPlayer.attachMedia(video);
+    hlsPlayer.on(window.Hls.Events.ERROR, (_e, data) => {
+      // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
+      if (data.fatal && playingRecordingId === recordingId) {
+        message.textContent = "この録画を再生できませんでした。";
+      }
+    });
+  } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
+    message.textContent = "このBrowserはHLS再生に対応していません。";
+    return;
+  } else {
+    video.src = playback.url;
+  }
+  // メタデータ確定後に急増点へseekして再生。HLSのcurrentTimeはplaylistのEXTINF累積で、
+  // mp4のmedia軸と同じ秒数なので、offsetはどちらの経路でもそのまま使える。
   const seek = () => {
     try { video.currentTime = offset; } catch (e) { /* seek不可でも先頭から再生 */ }
     video.play().catch(() => {});
     video.removeEventListener("loadedmetadata", seek);
   };
   video.addEventListener("loadedmetadata", seek);
-  box.classList.remove("hidden");
-  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function closeVideo() {
@@ -348,6 +399,7 @@ function closeVideo() {
   // src除去より先にidを落とす。除去自体がerrorを飛ばすので、残したままだと
   // 閉じただけで「再生できませんでした」を出しにいく。
   playingRecordingId = null;
+  detachHls();
   video.removeAttribute("src");
   video.load();
   box.classList.add("hidden");
@@ -446,7 +498,7 @@ function renderFileRows() {
     (item) => [
       fileCheckbox(item, "mp4"),
       fileCheckbox(item, "ts"),
-      `#${item.id}`,
+      recTag(item),
       item.filename || "—",
       fileState(item),
       fmtDateTime(item.started_at),
@@ -735,6 +787,73 @@ function renderGifters(gifters) {
   );
 }
 
+// ---- 共演構成(コラボ / Battle / ソロ) ----
+// 「1時間あたり何回」は総配信時間が短いほど跳ねる指標なので、実数(回数)と集計対象の
+// 配信時間を同じbarに並べて、頻度を単独で読ませない。
+const COOP_SEGMENTS = [
+  { key: "solo", label: "ソロ", color: "#4d4a3f" },
+  { key: "collab", label: "コラボ", color: "#7a6a8e" },
+  { key: "battle", label: "Battle", color: "#a4502f" },
+];
+
+function fmtMinutes(seconds) {
+  if (!seconds) return "—";
+  const m = seconds / 60;
+  return m >= 10 ? `${Math.round(m)} 分` : `${m.toFixed(1)} 分`;
+}
+
+function renderCoop(c) {
+  const empty = document.getElementById("sm-coop-empty");
+  const mix = document.getElementById("sm-coop-mix");
+  const legend = document.getElementById("sm-coop-legend");
+  mix.innerHTML = "";
+  legend.innerHTML = "";
+  if (!c || !c.active_seconds) {
+    chipBar("sm-coop", []);
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  chipBar("sm-coop", [
+    ["コラボ比率", `${c.collab_share.toFixed(1)}%`],
+    ["Battle比率", `${c.battle_share.toFixed(1)}%`],
+    ["ソロ比率", `${c.solo_share.toFixed(1)}%`],
+    ["共演計", `${c.coop_share.toFixed(1)}%`, c.coop_share >= 50 ? "ok" : ""],
+    ["Battle 回/時", `${c.battles_per_hour.toFixed(2)}`],
+    ["コラボ 回/時", `${c.collabs_per_hour.toFixed(2)}`],
+    ["Battle回数", `${fmtNum(c.battle_count)} 回`],
+    ["コラボ回数", `${fmtNum(c.collab_count)} 回`],
+    ["平均Battle長", fmtMinutes(c.avg_battle_seconds)],
+    ["平均コラボ長", fmtMinutes(c.avg_collab_seconds)],
+    ["コラボした配信", `${fmtNum(c.sessions_with_collab)} / ${fmtNum(c.sessions)}`],
+    ["集計対象", `${fmtDuration(c.active_seconds)}`],
+  ]);
+
+  COOP_SEGMENTS.forEach((seg) => {
+    const share = c[`${seg.key}_share`] || 0;
+    if (share > 0) {
+      const el = document.createElement("span");
+      el.className = "sm-mix-seg";
+      el.style.flexGrow = String(share);
+      el.style.background = seg.color;
+      el.title = `${seg.label} ${share.toFixed(1)}% / ${fmtDuration(c[`${seg.key}_seconds`])}`;
+      // 幅が狭い区間に文字を押し込むと読めなくなるので、数字はlegend側で必ず出す。
+      const b = document.createElement("b");
+      b.textContent = `${share.toFixed(0)}%`;
+      el.appendChild(b);
+      mix.appendChild(el);
+    }
+    const item = document.createElement("span");
+    item.className = "sm-mix-item";
+    const dot = document.createElement("i");
+    dot.style.background = seg.color;
+    const text = document.createElement("span");
+    text.textContent = `${seg.label} ${share.toFixed(1)}%（${fmtDuration(c[`${seg.key}_seconds`])}）`;
+    item.append(dot, text);
+    legend.appendChild(item);
+  });
+}
+
 // ---- Battle 分析 ----
 // チーム戦は自陣=チーム全体なので、Scoreも貢献者も「監視配信者ぶん」と「チーム計」で値が
 // 変わる。片方だけ出すと個人戦と桁が揃わず読み違えるため、両方を 自分 / チーム計 で併記する。
@@ -758,14 +877,57 @@ function renderBattle(b) {
     `貢献者${b.key_contrib_threshold}+ 自室/陣営`;
 }
 
+// 対戦相手別: serverは全件(配信者あたり数百)返す。ここで絞込・並べ替えして出す。
+// 上位N件で切ると、裾の相手が「対戦していない」ように見えるため件数の上限は設けない。
+let opponentsAll = [];
+
 function renderOpponents(opponents) {
+  opponentsAll = opponents || [];
+  renderOpponentRows();
+}
+
+// 勝率は勝敗のついたBattleだけが母数。引分/未確定しかない相手は率を持たないため、
+// 率での並べ替えでは末尾へ置く(0%として混ぜると「全敗」と読めてしまう)。
+function opponentRate(o) {
+  const decided = o.wins + o.losses;
+  return decided ? o.wins / decided : null;
+}
+
+const OPPONENT_SORTS = {
+  battles: (o) => o.battles,
+  wins: (o) => o.wins,
+  losses: (o) => o.losses,
+  rate: (o) => (opponentRate(o) == null ? -1 : opponentRate(o)),
+};
+
+function renderOpponentRows() {
+  const q = document.getElementById("sm-opp-search").value.trim().toLowerCase();
+  const min = Number(document.getElementById("sm-opp-min").value) || 1;
+  const sortKey = document.getElementById("sm-opp-sort").value;
+  const keyOf = OPPONENT_SORTS[sortKey] || OPPONENT_SORTS.battles;
+  const rows = opponentsAll
+    .filter((o) => o.battles >= min)
+    .filter((o) => !q || `${o.nickname} @${o.unique_id}`.toLowerCase().includes(q))
+    // 同値は対戦数の多い順を第2キーにする(率で並べた時に1戦だけの相手が上に来ないように)。
+    .sort((a, b) => keyOf(b) - keyOf(a) || b.battles - a.battles);
+  document.getElementById("sm-opp-note").textContent = opponentsAll.length
+    ? `（${fmtNum(opponentsAll.length)} 名中 ${fmtNum(rows.length)} 名）`
+    : "";
+  if (opponentsAll.length && !rows.length) {
+    setListMessage(
+      document.getElementById("sm-opponents-empty"),
+      "条件に合う対戦相手がいません。絞込を緩めてください。",
+    );
+  } else {
+    setListMessage(document.getElementById("sm-opponents-empty"), "Battleの記録がありません。");
+  }
   renderTableRows(
     "sm-opponents",
     "sm-opponents-empty",
-    opponents || [],
+    rows,
     (o, rank) => {
-      const decided = o.wins + o.losses;
-      const rate = decided ? `${((o.wins / decided) * 100).toFixed(0)}%` : "—";
+      const r = opponentRate(o);
+      const rate = r == null ? "—" : `${(r * 100).toFixed(0)}%`;
       return [
         String(rank),
         userCell(o, { stackId: true }),
@@ -776,7 +938,45 @@ function renderOpponents(opponents) {
       ];
     },
     [0, 2, 3, 4, 5],
+    // 行clickでBattle履歴をその相手だけに絞る。相手を見つけてから「その対戦がどれか」
+    // を探すのに、履歴を日時で目視照合させない(1配信者で数百戦ある)。
+    (tr, o) => {
+      tr.classList.add("row-clickable");
+      tr.classList.toggle("sm-opp-picked", !!pickedOpponent && pickedOpponent.key === o.key);
+      tr.tabIndex = 0;
+      tr.title = "clickでこの相手とのBattle履歴に絞込";
+      tr.addEventListener("click", () => pickOpponent(o));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        pickOpponent(o);
+      });
+    },
   );
+}
+
+// 対戦相手別で選んでいる相手(null=絞込なし)。Battle履歴の絞込と、相手一覧の選択表示の
+// 両方がこれ1つを見る。
+let pickedOpponent = null;
+
+function pickOpponent(o) {
+  // 同じ相手をもう一度clickしたら解除。絞込を外す手段が帯のbuttonだけだと、選び直しの
+  // たびに一覧と帯を往復することになる。
+  pickedOpponent = pickedOpponent && pickedOpponent.key === o.key ? null : o;
+  renderOpponentRows();
+  renderBattleHistoryRows();
+  if (pickedOpponent) {
+    document
+      .getElementById("sm-battle-history")
+      .closest(".table-wrap")
+      .scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function clearOpponentPick() {
+  pickedOpponent = null;
+  renderOpponentRows();
+  renderBattleHistoryRows();
 }
 
 // Battle Gifter: Battle時間窓内に自陣へ投げたファンの集計（どんなギフターで出てきたか）。
@@ -807,13 +1007,80 @@ function pairValue(own, team) {
 }
 const BATTLE_RESULT = { win: ["WIN", "ok"], lose: ["LOSE", "warn"], draw: ["分", ""] };
 
+// Battle開始の何秒前から再生するか。開始時刻ちょうどに飛ぶと、既にBattleが始まった絵から
+// 見ることになり、直前の呼びかけ(誰が入ってきたか)が見えない。
+const BATTLE_VIDEO_LEAD_SECONDS = 5;
+
+// その対戦を含む録画があれば、対戦の場面から再生するbutton。録画が無い対戦(未録画・
+// retentionで削除済み)は「—」— 押しても何も無いbuttonは出さない。
+function battleVideoCell(h) {
+  if (!h.recording_id) return "—";
+  const btn = document.createElement("button");
+  btn.className = "btn btn-small";
+  btn.textContent = "▶ 再生";
+  const label = `Battle ${fmtDateTime(h.started_at)}（録画 #${sessionNo(h.session_id)}）`;
+  btn.title = `${label} の場面から再生します。`;
+  btn.addEventListener("click", async (e) => {
+    // 行clickはBattle結果modalを開く。buttonを押した時に両方走らせない。
+    e.stopPropagation();
+    btn.disabled = true;
+    try {
+      // 動画の何秒地点かはserverに解かせる。壁時計との差(起動latency・再接続の穴・mux)は
+      // 録画fileの時刻anchorが無いと解けず、画面で引き算すると分単位でずれる。
+      const at = encodeURIComponent(h.started_at);
+      const found = await apiSend("GET", `/api/recordings/${h.recording_id}/locate?at=${at}`);
+      openVideo(
+        h.recording_id,
+        Math.max(0, found.video_time - BATTLE_VIDEO_LEAD_SECONDS),
+        label,
+      );
+    } catch (err) {
+      // 理由を出せる場所は再生boxしかない。前の再生は止めてから出す(音が続いたまま
+      // 別の対戦のerrorが出ると、どちらの話か読めない)。
+      closeVideo();
+      showVideoMessage(label, err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+
 // Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順）。
 // 「どんなスコアになったか」を過去のBattle全体で一覧できる。
+let battleHistoryAll = [];
+
 function renderBattleHistory(history) {
+  battleHistoryAll = history || [];
+  renderBattleHistoryRows();
+}
+
+function renderBattleHistoryRows() {
+  // 絞込は代表相手ではなく参加した全員(opponent_keys)に当てる。チーム戦・個人マルチで
+  // 格下だった相手を選んだ時に、その対戦が履歴から消えてしまうため。
+  const rows = pickedOpponent
+    ? battleHistoryAll.filter((h) => (h.opponent_keys || []).includes(pickedOpponent.key))
+    : battleHistoryAll;
+  const filterBar = document.getElementById("sm-battle-history-filter");
+  filterBar.classList.toggle("hidden", !pickedOpponent);
+  if (pickedOpponent) {
+    const name = pickedOpponent.nickname || pickedOpponent.unique_id || "(unknown)";
+    document.getElementById("sm-battle-history-filter-label").textContent =
+      `${name} との対戦 ${fmtNum(rows.length)} 戦`;
+  }
+  document.getElementById("sm-battle-history-note").textContent = battleHistoryAll.length
+    ? `（新しい順・${fmtNum(rows.length)} / ${fmtNum(battleHistoryAll.length)} 戦）`
+    : "（新しい順）";
+  setListMessage(
+    document.getElementById("sm-battle-history-empty"),
+    pickedOpponent
+      ? "この相手との対戦は履歴にありません。"
+      : "Battleの記録がありません。",
+  );
   renderTableRows(
     "sm-battle-history",
     "sm-battle-history-empty",
-    history,
+    rows,
     (h) => {
       const [label, cls] = BATTLE_RESULT[h.result] || ["—", ""];
       const res = document.createElement("span");
@@ -832,6 +1099,7 @@ function renderBattleHistory(history) {
         res,
         pairValue(h.diamonds, h.team_diamonds),
         `${pairValue(h.key_contributors, h.team_key_contributors)} 人`,
+        battleVideoCell(h),
       ];
     },
     [3, 4, 6, 7],
@@ -913,8 +1181,8 @@ function createBattleTrendChart(canvas) {
       labels: [],
       datasets: [
         { type: "bar", label: "Batt中コイン", data: [], backgroundColor: "rgba(169, 110, 73, 0.35)", yAxisID: "y2" },
-        { type: "line", label: "自陣Score", data: [], borderColor: "#5d6e4e", backgroundColor: "#5d6e4e", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
-        { type: "line", label: "敵陣Score", data: [], borderColor: "#a4502f", backgroundColor: "#a4502f", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
+        { type: "line", label: "自陣Score", data: [], borderColor: BATTLE_OWN_LINE, backgroundColor: BATTLE_OWN_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
+        { type: "line", label: "敵陣Score", data: [], borderColor: BATTLE_OPP_LINE, backgroundColor: BATTLE_OPP_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
       ],
     },
     options: {
@@ -1167,6 +1435,10 @@ function handleMessage(msg) {
 
 elSearch.addEventListener("input", renderList);
 elHmMetric.addEventListener("change", renderHeatmap);
+document.getElementById("sm-opp-search").addEventListener("input", renderOpponentRows);
+document.getElementById("sm-opp-min").addEventListener("change", renderOpponentRows);
+document.getElementById("sm-opp-sort").addEventListener("change", renderOpponentRows);
+document.getElementById("sm-battle-history-clear").addEventListener("click", clearOpponentPick);
 document.getElementById("sm-ai-btn").addEventListener("click", () => runAiReview(false));
 document.getElementById("sm-ai-rerun").addEventListener("click", () => runAiReview(true));
 document.getElementById("sm-video-stop").addEventListener("click", closeVideo);

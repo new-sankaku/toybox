@@ -108,7 +108,7 @@ def _fetch(name: str, spec: _Font) -> None:
         # self-correcting: the pin has to be reviewed and updated by hand, and until
         # then every burn-in loses colour emoji.
         logger.error(
-            "font %s failed verification; upstream content has changed", name,
+            "font %s の検証に失敗しました（配布元の内容が変わっています）", name,
             extra={"event": "overlay.font_digest_mismatch",
                    "ctx": {"stem": name, "url": spec.url, "digest": digest,
                            "expected_digest": spec.sha256, "size_bytes": len(data)}},
@@ -120,7 +120,7 @@ def _fetch(name: str, spec: _Font) -> None:
     tmp.write_bytes(data)
     tmp.replace(FONT_DIR / name)
     logger.info(
-        "fetched font %s (%d bytes)", name, len(data),
+        "font %s を取得しました（%d bytes）", name, len(data),
         extra={"event": "overlay.font_fetched",
                "ctx": {"stem": name, "url": spec.url, "size_bytes": len(data),
                        "path": str(FONT_DIR / name),
@@ -147,7 +147,7 @@ def ensure_fonts(force: bool = False) -> None:
         if missing:
             started = time.monotonic()
             logger.info(
-                "fetching %d comment-overlay font(s) to %s", len(missing), FONT_DIR,
+                "コメント焼き込み用のfont %d 件を %s へ取得します", len(missing), FONT_DIR,
                 extra={"event": "overlay.font_fetch_started",
                        "ctx": {"fonts": sorted(missing), "missing": len(missing),
                                "total": len(FONT_MANIFEST), "forced": force,
@@ -161,8 +161,8 @@ def ensure_fonts(force: bool = False) -> None:
                     # instead, so this degrades output rather than losing it — but the
                     # degradation is silent in the finished video, so it is named here.
                     logger.warning(
-                        "could not fetch font %s; the burn-in falls back to monochrome "
-                        "comment rendering", name,
+                        "font %s を取得できないため、焼き込みのcommentは"
+                        "白黒の描画へ転落します", name,
                         extra={"event": "overlay.font_fetch_failed",
                                "ctx": {"stem": name, "url": spec.url,
                                        "timeout_seconds": _DOWNLOAD_TIMEOUT}},
@@ -170,7 +170,7 @@ def ensure_fonts(force: bool = False) -> None:
                     )
                     raise
             logger.info(
-                "comment-overlay fonts ready (%d fetched)", len(missing),
+                "コメント焼き込み用のfontが揃いました（%d 件取得）", len(missing),
                 extra={"event": "overlay.fonts_ready",
                        "ctx": {"fetched": len(missing), "total": len(FONT_MANIFEST),
                                "path": str(FONT_DIR),

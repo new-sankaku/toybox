@@ -46,3 +46,11 @@ playwright>=1.40.0
 #       pip install spandrel
 # torch
 # spandrel
+#   - 笑い声検出(切り出し候補): onnxruntime でAudioSetのaudio tagging modelをCPU実行する
+#     (GPUは転写・超解像が使うので取らない)。modelとlabel fileは利用者が置き .env で指定する。
+#     入手・再exportの手順は doc/LAUGH_AUDIO_MODEL.md:
+#       pip install onnxruntime
+#       TICTOK_LAUGH_AUDIO_ENABLED=1
+#       TICTOK_LAUGH_AUDIO_MODEL_PATH=<波形入力でexportしたONNX>
+#       TICTOK_LAUGH_AUDIO_LABELS_PATH=<class_labels_indices.csv>
+# onnxruntime

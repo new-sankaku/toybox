@@ -388,7 +388,7 @@ function actionCells(session) {
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
     const ok = await confirmDialog(
-      `Session #${session.id} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`,
+      `Session #${sessionNo(session.id)} (@${session.unique_id}) を削除しますか？この操作は取り消せません。`,
       { title: "Sessionの削除", confirmLabel: "削除する" },
     );
     if (!ok) return;
@@ -427,7 +427,7 @@ async function transcribeSession(session, btn) {
     // 複数録画は「どれを」が決まらない。詳細を開かせてscrollさせ直すのではなく、
     // その場で選ばせる(押した結果が「押せませんでした」になるのを避ける)。
     openMenuAt(btn, recs.map((rec) => ({
-      label: `#${rec.id} ${rec.filename || ""}${rec.has_transcript ? "（字幕化済）" : ""}`,
+      label: `${recName(rec)}${rec.has_transcript ? "（字幕化済）" : ""}`,
       title: rec.has_transcript
         ? "保存済みの文字起こしを表示します。"
         : "この録画の音声をローカルAIで文字起こしします。",
@@ -460,13 +460,17 @@ function renderTable() {
   else if (allSessions.length > 0)
     setListMessage(emptyEl, "条件に一致するSessionがありません。filterを変更してください。");
   else setListState(emptyEl, "empty");
+  // 1行あたりavatar・Memo入力・操作button群で30要素前後になる表を、収集中は毎秒
+  // 組み直す。live tbodyへ1行ずつappendすると行数ぶんlayoutが走るので、画面から
+  // 切り離されたfragmentの上で組んでから1回で挿す。
+  const fragment = document.createDocumentFragment();
   rows.forEach((s) => {
     const stats = s.stats || {};
     const tr = document.createElement("tr");
     const duration = s.ended_at ? fmtDuration(s.ended_at - s.started_at) : "収集中";
 
     const cells = [];
-    cells.push(textTd(`#${s.id}`));
+    cells.push(textTd(`#${sessionNo(s.id)}`));
     const nameTd = document.createElement("td");
     nameTd.appendChild(
       userCell(
@@ -498,8 +502,9 @@ function renderTable() {
     actionCells(s).forEach((td) => cells.push(td));
 
     cells.forEach((td) => tr.appendChild(td));
-    tbody.appendChild(tr);
+    fragment.appendChild(tr);
   });
+  tbody.appendChild(fragment);
 }
 
 function textTd(text) {
@@ -565,7 +570,7 @@ async function showDetail(sessionId, fromHistory) {
   syncDetailUrl(sessionId, wasClosed && !fromHistory);
 
   document.getElementById("detail-title").textContent =
-    `Session #${session.id} — @${session.unique_id} (${fmtDateTime(session.started_at)})`;
+    `Session #${sessionNo(session.id)} — @${session.unique_id} (${fmtDateTime(session.started_at)})`;
   document.getElementById("detail-csv").href = `/api/sessions/${session.id}/export.csv`;
   document.getElementById("detail-json").href = `/api/sessions/${session.id}/export.json`;
   const stats = session.stats || {};
@@ -991,7 +996,7 @@ function recordingActions(rec) {
     // 文字起こし済みでも再実行可能（活性のまま）。ラベルだけ「済」にする。
     tr.textContent = rec.has_transcript ? "字幕化済" : "字幕化";
     tr.title = rec.has_transcript && !hasSource
-      ? "保存済みの文字起こしを表示します（動画fileは削除済みのため再実行はできません）。"
+      ? "保存済みの文字起こしを表示します（素材もmp4も残っていないため再実行はできません）。"
       : "この録画の音声をローカルAIで文字起こしします（初回はmodel読み込みで時間がかかります）。結果はキャッシュされます。";
     tr.addEventListener("click", async () => {
       await transcribeOrShow(rec, tr);
@@ -1037,7 +1042,7 @@ function recordingActions(rec) {
     disabled: rec.status === "recording",
     onSelect: async () => {
       const ok = await confirmDialog(
-        `録画 #${rec.id} (${rec.filename}) を削除しますか？この操作は取り消せません。`,
+        `録画 ${recName(rec)} を削除しますか？この操作は取り消せません。`,
         { title: "録画の削除", confirmLabel: "削除する" },
       );
       if (!ok) return;
@@ -1075,8 +1080,8 @@ function renderRecordings(recordings) {
       if (gone) {
         const g = document.createElement("span");
         g.className = "st file-gone";
-        g.textContent = "file削除済";
-        g.title = "動画fileは削除されています。文字起こし・検索index・bookmark・解析は残っています。";
+        g.textContent = "実体なし";
+        g.title = "素材(.ts)もmp4も残っていません。文字起こし・検索index・bookmark・解析は残っています。";
         state.appendChild(g);
       }
       // 保護はbadge自体をtoggleにする。状態が見えている場所でそのまま切り替えられる。
@@ -1087,7 +1092,7 @@ function renderRecordings(recordings) {
         }));
       }
       return [
-        `#${rec.id}`,
+        recTag(rec),
         rec.filename,
         rec.quality || "-",
         state,
@@ -1350,7 +1355,7 @@ let transcriptRecordingId = null;
 function openTranscript(rec, data) {
   const segs = data.segments || [];
   document.getElementById("transcript-title").textContent =
-    `録画 #${rec.id} 文字起こし（${data.language || "?"} · ${data.model || ""} · ${segs.length}行）`;
+    `録画 ${recName(rec)} 文字起こし（${data.language || "?"} · ${data.model || ""} · ${segs.length}行）`;
   const video = document.getElementById("transcript-video");
   document.getElementById("transcript-video-message").textContent = "";
   transcriptRecordingId = rec.id;
@@ -1681,15 +1686,18 @@ function handleMessage(msg) {
   }
 }
 
-// monitors/stateは収集中に高頻度で届く。1件ごとにSession一覧+KPIをフル再取得すると
-// 重いため、~1sで合体し最大1回/秒程度に抑える(末尾実行でburstを1回にまとめる)。
+// monitors/stateは収集中に高頻度で届く。1件ごとにSession一覧をフル再取得すると重いため、
+// ~1sで合体し最大1回/秒程度に抑える(末尾実行でburstを1回にまとめる)。
+//
+// KPI帯(/api/dashboard)はここから外してある。あれは全sessionの通算集計で、収集中の
+// 1秒で動く量は帯の桁に現れない。1秒ごとに引くと、収集の裏で最も重いqueryを最も高い
+// 頻度で回すことになる(下の30秒intervalが引き続き更新する)。
 let reloadTimer = null;
 function scheduleReload() {
   if (reloadTimer) return;
   reloadTimer = setTimeout(() => {
     reloadTimer = null;
     loadSessions();
-    loadKpi();
   }, 1000);
 }
 

@@ -155,7 +155,7 @@ def _remux(kept: list, dst: Path) -> bool:
         )
         return proc.returncode == 0 and dst.is_file() and dst.stat().st_size > 0
     except OSError:
-        logger.warning("re-mux failed for %s", dst, exc_info=True)
+        logger.warning("%s の再muxに失敗しました", dst, exc_info=True)
         return False
     finally:
         list_path.unlink(missing_ok=True)
@@ -178,12 +178,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if not ffprobe_available():
-        logger.error("ffprobe/ffmpeg not found on PATH; cannot validate or re-mux.")
+        logger.error("ffprobe/ffmpegがPATH上に見つからないため検証も再muxもできません")
         return 2
 
     record_dir = Path(args.record_dir) if args.record_dir else Path(record_dir_from_db(get_db_path()))
     if not record_dir.is_dir():
-        logger.error("recordings directory not found: %s", record_dir)
+        logger.error("recordingのdirectoryが見つかりません: %s", record_dir)
         return 2
 
     repaired = 0
@@ -201,7 +201,7 @@ def main() -> int:
             continue
         phantom = sum(e for _, e, _ in dropped)
         logger.info(
-            "%s: %d discontinuity segment(s), ~%.0fs phantom -> %s",
+            "%s: 不連続なsegment %d件, 幻の尺 約%.0fs -> %s",
             hls_dir.name, len(dropped), phantom,
             ", ".join("%s(EXTINF=%.0fs wall=%.1fs)" % (n, e, w) for n, e, w in dropped),
         )
@@ -210,7 +210,7 @@ def main() -> int:
 
         tmp = mp4_path.with_name(mp4_path.stem + ".repair.tmp.mp4")
         if not _remux(kept, tmp):
-            logger.error("  re-mux failed; left untouched")
+            logger.error("  再muxに失敗したため手を付けずに残します")
             tmp.unlink(missing_ok=True)
             continue
         old_dur = _probe_duration(mp4_path) or 0.0
@@ -218,7 +218,7 @@ def main() -> int:
         gap = _max_pts_gap(tmp)
         if new_dur <= 0 or gap >= PTS_DISCONTINUITY_MIN_SECONDS or new_dur >= old_dur:
             logger.error(
-                "  validation failed (old=%.0fs new=%.0fs max_gap=%.0fs); left untouched",
+                "  検証に失敗したため手を付けずに残します（old=%.0fs new=%.0fs max_gap=%.0fs）",
                 old_dur, new_dur, gap,
             )
             tmp.unlink(missing_ok=True)
@@ -229,11 +229,11 @@ def main() -> int:
         _rewrite_timing(segments, dropped, mp4_path)
         for art in _overlay_artifacts(mp4_path):
             art.unlink(missing_ok=True)
-        logger.info("  repaired: %.0fs -> %.0fs (max gap now %.1fs)", old_dur, new_dur, gap)
+        logger.info("  修復しました: %.0fs -> %.0fs（最大gapは %.1fs になりました）", old_dur, new_dur, gap)
         repaired += 1
 
     logger.info(
-        "%s: scanned %d recording(s) with retained HLS, %s %d.",
+        "%s: HLSが残っている recording %d件を確認し、%s %d件",
         "applied" if args.apply else "dry-run", scanned,
         "repaired" if args.apply else "would repair", repaired,
     )

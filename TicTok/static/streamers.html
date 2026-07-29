@@ -165,6 +165,20 @@
             </section>
           </div>
 
+          <!-- 共演構成: 配信時間をコラボ / Battle / ソロへ分解する。割合と、1時間あたりの回数。 -->
+          <section class="result-block">
+            <h3 class="result-subtitle">■ 共演構成 <span class="result-sub-note">（配信時間に占めるコラボ・Battleの割合と、配信1時間あたりの回数）</span></h3>
+            <div class="a-kpibar sm-conc" id="sm-coop"></div>
+            <div class="sm-mix" id="sm-coop-mix"></div>
+            <div class="sm-mix-legend" id="sm-coop-legend"></div>
+            <p class="chart-note">
+              コラボはBattle以外のLinkMic（共演）です。BattleもLinkMic上で起きるため、
+              重なった時間はBattle側にだけ数えます（二重計上を避けるため）。
+              長さ0で閉じた窓は回数に数えません。
+            </p>
+            <div id="sm-coop-empty" class="feed-empty">配信時間の記録がありません。</div>
+          </section>
+
           <!-- Battle 分析（過去の全Battleを集約） -->
           <section class="result-block">
             <h3 class="result-subtitle">■ Battle 分析 <span class="result-sub-note">（過去の全Battleを集約）</span></h3>
@@ -190,22 +204,47 @@
 
               <!-- 対戦相手別 W/L -->
               <section class="result-block">
-                <h4 class="result-subtitle sm-subtitle">対戦相手別</h4>
+                <h4 class="result-subtitle sm-subtitle">対戦相手別 <span id="sm-opp-note" class="result-sub-note"></span></h4>
+                <div class="x-toolbar sm-opp-tools">
+                  <input id="sm-opp-search" type="text" aria-label="対戦相手で絞込" placeholder="🔎 表示名 / @ID で絞込" autocomplete="off" />
+                  <label class="x-field"><span>対戦数</span>
+                    <select id="sm-opp-min">
+                      <option value="1">全て</option>
+                      <option value="2">2回以上</option>
+                      <option value="3">3回以上</option>
+                      <option value="5">5回以上</option>
+                      <option value="10">10回以上</option>
+                    </select>
+                  </label>
+                  <label class="x-field"><span>並び</span>
+                    <select id="sm-opp-sort">
+                      <option value="battles">対戦数</option>
+                      <option value="wins">勝ち</option>
+                      <option value="losses">負け</option>
+                      <option value="rate">勝率</option>
+                    </select>
+                  </label>
+                </div>
                 <div class="table-wrap">
                   <table class="result-table">
                     <thead><tr><th>#</th><th>対戦相手</th><th>対戦数</th><th>勝</th><th>負</th><th>勝率</th></tr></thead>
                     <tbody id="sm-opponents"></tbody>
                   </table>
                 </div>
+                <div class="result-sub-note">行をclickすると、その相手とのBattle履歴だけに絞り込みます。</div>
                 <div id="sm-opponents-empty" class="feed-empty">Battleの記録がありません。</div>
               </section>
             </div>
 
             <!-- Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順） -->
-            <h4 class="result-subtitle sm-subtitle">Battle 履歴 <span class="result-sub-note">（新しい順・最大80戦）</span></h4>
+            <h4 class="result-subtitle sm-subtitle">Battle 履歴 <span id="sm-battle-history-note" class="result-sub-note">（新しい順）</span></h4>
+            <div class="x-toolbar sm-opp-tools sm-bh-filter hidden" id="sm-battle-history-filter">
+              <span id="sm-battle-history-filter-label"></span>
+              <button id="sm-battle-history-clear" class="btn btn-small">絞込を解除</button>
+            </div>
             <div class="table-wrap">
               <table class="result-table">
-                <thead><tr><th>日時</th><th>形式</th><th>対戦相手</th><th>自陣 自分/陣営</th><th>敵陣</th><th>結果</th><th>Batt中コイン 自室/陣営</th><th id="sm-battle-history-keycontrib">貢献者</th></tr></thead>
+                <thead><tr><th>日時</th><th>形式</th><th>対戦相手</th><th>自陣 自分/陣営</th><th>敵陣</th><th>結果</th><th>Batt中コイン 自室/陣営</th><th id="sm-battle-history-keycontrib">貢献者</th><th>動画</th></tr></thead>
                 <tbody id="sm-battle-history"></tbody>
               </table>
             </div>
@@ -261,6 +300,7 @@
   </div>
 
   <script src="/static/vendor/chart.umd.min.js"></script>
+  <script src="/static/vendor/hls.min.js"></script>
   <script src="/static/common.js"></script>
   <script src="/static/streamers.js"></script>
 </body>

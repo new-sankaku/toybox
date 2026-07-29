@@ -582,7 +582,7 @@ def shutdown_logging() -> None:
     if _dedup_filter is not None:
         for key, count in _dedup_filter.pending_summaries():
             logger.warning(
-                "suppressed %d repeats of %s at exit (logger=%s line=%s)",
+                "終了時点で重複 %d 件を抑制していました: %s（logger=%s line=%s）",
                 count, key[2], key[0], key[3],
                 extra={"event": "logging.suppressed_flushed",
                        "ctx": {"count": count, "logger": key[0], "line": key[3]}},
