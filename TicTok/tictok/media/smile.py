@@ -1047,6 +1047,38 @@ def smile_coverage(profile: dict, start: float, end: float) -> Optional[float]:
     return round(sum(1 for value in window if value is not None) / len(window), 3)
 
 
+def multi_face_spans(profile: dict, min_faces: int = 2) -> list:
+    """顔が ``min_faces`` 個以上映っていた区間 ``[(start, end), ...]`` (秒)を返す。
+
+    「画面に何人映っているか」は素材そのものから読める唯一の事実で、コラボ・battleの
+    区間を**DBの窓に頼らずに**外すために使う。実測でDB側の ``collab_windows`` は
+    ``guests_max`` が811窓中805窓で0のまま(名簿が届かない窓ではそのまま確定する)なので、
+    「何人いたか」では絞れない。こちらは1標本ごとに実際の検出数を持っている。
+
+    隣り合う標本は連結して1つの区間にする。区間は標本の刻み幅ぶんの幅を持ち、
+    ``[標本の時刻, 次の標本の時刻)`` を覆う — 標本と標本の間は観測していないが、
+    2人映っている標本に挟まれた区間を単独として扱う方が誤りが大きい。
+
+    **顔が0個の標本は含めない。** 「顔が見えない」は「複数人いる」ではなく、配信者が
+    画面に映らない場面(ゲーム画面・カメラ外し)は単独配信でも普通に起きる。ここで0個を
+    多人数側へ入れると、そういう配信の素材がまるごと消える。
+    """
+    interval = profile["interval_seconds"]
+    if interval <= 0:
+        raise SmileError("profileの刻み幅が不正です。")
+    faces = profile.get("faces") or []
+    spans: list = []
+    for i, count in enumerate(faces):
+        if count is None or count < min_faces:
+            continue
+        start, end = i * interval, (i + 1) * interval
+        if spans and abs(spans[-1][1] - start) < 1e-9:
+            spans[-1] = (spans[-1][0], end)
+        else:
+            spans.append((start, end))
+    return spans
+
+
 def without_spans(profile: dict, spans: list) -> dict:
     """``spans``(``[(start, end), ...]``秒)に入る標本を判定不能へ落としたprofileを返す。
 

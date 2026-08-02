@@ -308,10 +308,26 @@ def migrate_glove_events(conn, log_dir) -> dict:
     """旧方式のglove_eventsを新方式で再判定してbattles表へ書き戻す。commitは呼び出し側。
     書き換えたsessionのglove analytics cacheは無効化する。"""
     log_dir = Path(log_dir)
+    # 版の判定はSQLへ置く(battle_migrationのtopo_vと同じ設計)。LIKEだけで絞ると「glove_events
+    # を持つbattle全部」が候補になり、全件が現行版でも毎起動でdata_jsonをPythonへ運んで
+    # json.loadsすることになる。battles.data_jsonは1件が最大697KB・合計36MBあり、そこを
+    # 素通りさせるだけのために起動が伸びる。
+    #
+    # ただしglove_eventsは1 battleに複数入り、版はevent単位に付く。battle単位のmarkerで
+    # 代用するとmixed(一部だけ旧版)を取りこぼすので、json_eachでevent 1件ずつ見て
+    # 「現行版未満が1件でもあるか」を問う — 下のPython側gateと同じ条件である。
+    # json_validで囲むのは、data_jsonが壊れているbattleでjson_eachがqueryごとerrorに
+    # なるのを避けるため。壊れた行は下のjson.loadsでも弾かれるので結果は変わらない
+    # (CASEは条件を順に評価するので、無効なJSONへjson_eachが走ることはない)。
     rows = conn.execute(
         "SELECT b.rowid rid, b.battle_id bid, b.session_id sid, b.data_json d,"
         " s.unique_id uid FROM battles b JOIN sessions s ON s.id = b.session_id"
         " WHERE b.data_json LIKE '%\"glove_events\": [{%'"
+        "   AND CASE WHEN json_valid(b.data_json)"
+        "            THEN EXISTS (SELECT 1 FROM json_each(b.data_json, '$.glove_events') je"
+        "                         WHERE COALESCE(json_extract(je.value, '$.v'), 0) < ?)"
+        "            ELSE 0 END",
+        (GLOVE_EVENT_VERSION,),
     ).fetchall()
     totals = {"battles": 0, "crit": 0, "normal": 0, "undecided": 0, "kept": 0}
     touched_sessions = set()

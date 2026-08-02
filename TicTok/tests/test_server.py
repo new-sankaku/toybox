@@ -301,6 +301,24 @@ def test_browse_recordings_reports_a_deleted_file_as_missing(client, make_srv_re
     assert rec["file_exists"] is False
 
 
+def test_browse_recordings_media_matches_the_per_recording_judgement(
+        client, server, make_srv_recording):
+    """一覧の実体判定はdir単位に畳んだ一括版で引く(録画ごとのglob+statは全件ぶん走る)。
+    畳んだ側が個別版と食い違うと、開ける録画が「素材なし」に見える。"""
+    from tictok.api import files
+
+    _, present, _ = make_srv_recording(unique_id="haves")
+    _, missing, gone = make_srv_recording(unique_id="gones")
+    gone.unlink()
+
+    rows = {r["recording_id"]: r
+            for r in client.get("/api/recordings/browse").json()["recordings"]}
+    for recording_id in (present, missing):
+        recording = server.runtime.storage.get_recording(recording_id)
+        assert rows[recording_id]["media"] == files._recording_media_kinds(recording)
+        assert rows[recording_id]["file_exists"] is bool(rows[recording_id]["media"])
+
+
 def test_browse_recordings_reports_the_measured_duration_not_the_wall_clock(
         client, server, make_srv_recording):
     """一覧の尺は実測値だけを出す。壁時計(ended_at - started_at)は捕捉の停滞ぶんが載る上、
@@ -321,6 +339,47 @@ def test_browse_recordings_leaves_an_unmeasured_duration_null(client, make_srv_r
     body = client.get("/api/recordings/browse").json()
     rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
     assert rec["duration_seconds"] is None
+
+
+# 配信者別の集計は「DB行がN本ある」ではなく「手を出せる録画がN本ある」を返す。画面の
+# 配信者選択がこの一覧から作られるため、実体を見ないと素材の消えた配信者が選択肢に残る。
+def _status_entry(client, unique_id):
+    body = client.get("/api/search/status").json()
+    return next(s for s in body["streamers"] if s["unique_id"] == unique_id)
+
+
+def test_search_status_counts_a_recording_with_material_as_playable(client, make_srv_recording):
+    make_srv_recording(unique_id="haspulse", file_exists=False, ts_segments=2)
+    entry = _status_entry(client, "haspulse")
+    assert entry["recordings"] == 1
+    assert entry["playable"] == 1
+    assert entry["transcribable"] == 1
+
+
+def test_search_status_reports_a_streamer_without_material_as_unplayable(
+        client, make_srv_recording):
+    """素材もmp4も無い配信者。行は残すが、実体0本であることを名乗る — 画面はこれを見て
+    配信者選択から外し、文字起こしのbuttonを押させない(投入側も実体の無い録画を弾く)。"""
+    make_srv_recording(unique_id="ghosted", file_exists=False)
+    entry = _status_entry(client, "ghosted")
+    assert entry["recordings"] == 1
+    assert entry["playable"] == 0
+    assert entry["transcribable"] == 0
+
+
+def test_search_status_excludes_transcribed_recordings_from_transcribable(
+        client, server, make_srv_recording):
+    """転写済の録画は積み直す対象ではない。実体があっても transcribable には数えない。"""
+    _, recording_id, _ = make_srv_recording(unique_id="alldone", file_exists=False,
+                                            ts_segments=2)
+    server.runtime.storage.save_transcript(
+        recording_id, {"language": "ja", "model": "test", "text": "あ",
+                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}],
+                       "duration": 1.0})
+    entry = _status_entry(client, "alldone")
+    assert entry["playable"] == 1
+    assert entry["transcribed"] == 1
+    assert entry["transcribable"] == 0
 
 
 # 「この録画を観たか」は一覧からしか分からない。印が既定値を名乗らないと、画面はどの
@@ -843,6 +902,25 @@ def test_cut_lifecycle_add_list_delete(client, make_srv_recording):
     assert client.delete(f"/api/cutlist/{created['id']}").status_code == 404
 
 
+def test_cut_label_can_be_edited(client, make_srv_recording):
+    """labelは書き出しfile名とEDL/FCPXMLのclip名になる。見どころのメモを引き継いだまま
+    直せないと、綴りの誤りが最終成果物にそのまま残る。"""
+    _, recording_id, _ = make_srv_recording()
+    created = client.post(
+        "/api/cutlist",
+        json={"recording_id": recording_id, "start": 1.5, "end": 9.0, "label": "山場"},
+    ).json()
+    response = client.patch(f"/api/cutlist/{created['id']}", json={"label": "  決着  "})
+    assert response.status_code == 200
+    assert response.json()["label"] == "決着"
+    listed = client.get("/api/cutlist").json()["items"]
+    assert any(c["id"] == created["id"] and c["label"] == "決着" for c in listed)
+
+
+def test_cut_label_patch_404_for_unknown_cut(client):
+    assert client.patch("/api/cutlist/99999999", json={"label": "x"}).status_code == 404
+
+
 def test_cutlist_export_rejects_unknown_format(client):
     response = client.get("/api/cutlist/export", params={"format": "xml"})
     assert response.status_code == 400
@@ -874,7 +952,261 @@ def test_patch_unknown_bookmark_is_404(client):
     assert client.patch("/api/bookmarks/99999999", json={"memo": "x"}).status_code == 404
 
 
+# ---- 切り抜きグループ(group) ------------------------------------------------------------
+
+def test_group_crud_and_idempotent_name(client):
+    created = client.post("/api/groups", json={"name": " XXX発言 "}).json()
+    assert created["name"] == "XXX発言"
+    # 同名は既存を返す(検索語からの1-click作成を冪等にする)。
+    assert client.post("/api/groups", json={"name": "XXX発言"}).json()["id"] == created["id"]
+    assert client.post("/api/groups", json={"name": "  "}).status_code == 400
+    assert client.patch(f"/api/groups/{created['id']}",
+                        json={"name": "YYY発言"}).json()["name"] == "YYY発言"
+    assert client.patch("/api/groups/99999999", json={"name": "z"}).status_code == 404
+    listed = client.get("/api/groups").json()["items"]
+    assert [g["name"] for g in listed] == ["YYY発言"]
+    assert client.delete(f"/api/groups/{created['id']}").json() == {"deleted": created["id"]}
+    assert client.delete(f"/api/groups/{created['id']}").status_code == 404
+
+
+def test_group_delete_returns_items_to_ungrouped(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "帰る先"}).json()
+    cut = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0,
+        "group_id": group["id"]}).json()
+    assert (cut["group_id"], cut["position"]) == (group["id"], 0)
+    mark = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0, "group_id": group["id"]}).json()
+    assert mark["group_id"] == group["id"]
+    client.delete(f"/api/groups/{group['id']}")
+    cuts = client.get("/api/cutlist").json()["items"]
+    assert next(c for c in cuts if c["id"] == cut["id"])["group_id"] is None
+    marks = client.get("/api/bookmarks").json()["items"]
+    assert next(m for m in marks if m["id"] == mark["id"])["group_id"] is None
+
+
+def test_add_cut_with_unknown_group_is_404(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    response = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": 99999999})
+    assert response.status_code == 404
+
+
+def test_cutlist_bulk_move_copy_delete(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    g1 = client.post("/api/groups", json={"name": "g1"}).json()
+    g2 = client.post("/api/groups", json={"name": "g2"}).json()
+    first = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": g1["id"]}).json()
+    second = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 3.0, "end": 4.0, "group_id": g1["id"]}).json()
+    # copy: 元(g1)は残り、複製がg2へ末尾追記される。
+    body = client.post("/api/cutlist/bulk", json={
+        "op": "copy", "ids": [first["id"], second["id"]], "group_id": g2["id"]}).json()
+    assert body["affected"] == 2
+    items = client.get("/api/cutlist").json()["items"]
+    assert len([c for c in items if c["group_id"] == g1["id"]]) == 2
+    copies = sorted((c for c in items if c["group_id"] == g2["id"]),
+                    key=lambda c: c["position"])
+    assert [c["start"] for c in copies] == [1.0, 3.0]
+    # move: group_id=Noneで未分類へ戻る(positionも外れる)。
+    body = client.post("/api/cutlist/bulk", json={
+        "op": "move", "ids": [first["id"]], "group_id": None}).json()
+    assert body["affected"] == 1
+    moved = next(c for c in client.get("/api/cutlist").json()["items"]
+                 if c["id"] == first["id"])
+    assert (moved["group_id"], moved["position"]) == (None, None)
+    assert client.post("/api/cutlist/bulk", json={
+        "op": "delete", "ids": [second["id"]]}).json()["affected"] == 1
+    assert client.post("/api/cutlist/bulk",
+                       json={"op": "explode", "ids": [1]}).status_code == 400
+    assert client.post("/api/cutlist/bulk",
+                       json={"op": "move", "ids": []}).status_code == 400
+    assert client.post("/api/cutlist/bulk", json={
+        "op": "move", "ids": [second["id"]], "group_id": 99999999}).status_code == 404
+
+
+def test_bookmarks_bulk_move_and_delete(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "見どころ束"}).json()
+    first = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0}).json()
+    second = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 2.0}).json()
+    assert (first["group_id"], second["group_id"]) == (None, None)
+    body = client.post("/api/bookmarks/bulk", json={
+        "op": "move", "ids": [first["id"], second["id"]], "group_id": group["id"]}).json()
+    assert body["affected"] == 2
+    # 他testの行を数えないよう、自分のidの有無だけで見る(server fixtureはDBを共有する)。
+    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
+    assert marks[first["id"]]["group_id"] == group["id"]
+    assert marks[second["id"]]["group_id"] == group["id"]
+    # 未分類へ戻す。
+    assert client.post("/api/bookmarks/bulk", json={
+        "op": "move", "ids": [first["id"]], "group_id": None}).json()["affected"] == 1
+    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
+    assert marks[first["id"]]["group_id"] is None
+    assert client.post("/api/bookmarks/bulk", json={
+        "op": "delete", "ids": [first["id"], second["id"]]}).json()["affected"] == 2
+    remaining = {m["id"] for m in client.get("/api/bookmarks").json()["items"]}
+    assert first["id"] not in remaining and second["id"] not in remaining
+    # 見どころは並びもIN/OUTも持たないのでcopyは受け付けない。
+    assert client.post("/api/bookmarks/bulk", json={
+        "op": "copy", "ids": [1], "group_id": group["id"]}).status_code == 400
+    assert client.post("/api/bookmarks/bulk", json={"op": "move", "ids": []}).status_code == 400
+    assert client.post("/api/bookmarks/bulk", json={
+        "op": "move", "ids": [1], "group_id": 99999999}).status_code == 404
+
+
+def test_group_reorder_defines_export_order_and_filename(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "グループA"}).json()
+    first = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": group["id"]}).json()
+    second = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 3.0, "end": 4.0, "group_id": group["id"]}).json()
+    assert client.post(f"/api/groups/{group['id']}/order", json={
+        "cut_ids": [second["id"], first["id"]]}).json()["ordered"] == 2
+    response = client.get("/api/cutlist/export",
+                          params={"format": "csv", "group": str(group["id"])})
+    assert response.status_code == 200
+    # file名はグループ名(RFC 5987)で、行は並び順(second→first)=NLEのtimeline順で出る。
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+    import csv as csv_mod
+    import io as io_mod
+    rows = list(csv_mod.reader(io_mod.StringIO(response.content.decode("utf-8-sig"))))
+    assert [row[3] for row in rows[1:]] == ["3.000", "1.000"]
+    assert client.get("/api/cutlist/export",
+                      params={"format": "csv", "group": "99999999"}).status_code == 404
+    assert client.get("/api/cutlist/export",
+                      params={"format": "csv", "group": "abc"}).status_code == 400
+
+
+def test_clear_cutlist_scoped_by_group(client, make_srv_recording):
+    # serverのDBはtest間で共有されるため、全体件数ではなく自分の行のid有無で確かめる。
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "scoped"}).json()
+    grouped = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0,
+        "group_id": group["id"]}).json()
+    loose = client.post("/api/cutlist", json={
+        "recording_id": recording_id, "start": 3.0, "end": 4.0}).json()
+    assert client.delete("/api/cutlist",
+                         params={"group": str(group["id"])}).json()["deleted"] == 1
+    ids = {c["id"] for c in client.get("/api/cutlist").json()["items"]}
+    assert grouped["id"] not in ids and loose["id"] in ids
+    assert client.delete("/api/cutlist", params={"group": "none"}).json()["deleted"] >= 1
+    ids = {c["id"] for c in client.get("/api/cutlist").json()["items"]}
+    assert loose["id"] not in ids
+    assert client.delete("/api/cutlist", params={"group": "abc"}).status_code == 400
+
+
+def test_bookmark_group_patch_keeps_memo_and_group_independent(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "mark先"}).json()
+    mark = client.post("/api/bookmarks",
+                       json={"recording_id": recording_id, "start": 7.0}).json()
+    patched = client.patch(f"/api/bookmarks/{mark['id']}",
+                           json={"group_id": group["id"]}).json()
+    assert patched["group_id"] == group["id"]
+    # memoだけのPATCHで所属は動かない。
+    patched = client.patch(f"/api/bookmarks/{mark['id']}", json={"memo": "m"}).json()
+    assert (patched["memo"], patched["group_id"]) == ("m", group["id"])
+    # group_id=Noneの明示は「未分類へ戻す」。
+    patched = client.patch(f"/api/bookmarks/{mark['id']}", json={"group_id": None}).json()
+    assert patched["group_id"] is None
+    assert client.patch(f"/api/bookmarks/{mark['id']}", json={}).status_code == 400
+    assert client.patch(f"/api/bookmarks/{mark['id']}",
+                        json={"group_id": 99999999}).status_code == 404
+
+
 # ---- jobs -------------------------------------------------------------------------
+
+def test_job_list_finds_a_failure_pushed_out_of_the_page_by_new_jobs(
+        client, server, make_srv_recording):
+    # 画面側でfilterしていた頃の穴。一括投入が台帳の新しい行を埋めると、その前に失敗した
+    # jobが応答に入らず、画面は「失敗・中断のみ」を0件と断定していた。
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    # runtime.storage は process singletonで、台帳は同じsession内の他testの行も持つ。
+    # 件数は必ず自分が積む前との差で見る。
+    before = client.get("/api/jobs", params={"state": "failed"}).json()["total"]
+    storage.enqueue_media_job("old-failed", "overlay", recording_id)
+    storage.finish_media_job("old-failed", "failed", error="boom")
+    for index in range(5):
+        storage.enqueue_media_job(f"new-{index}", "upscale", recording_id)
+    body = client.get("/api/jobs", params={"state": "failed", "limit": 2}).json()
+    assert "old-failed" in [job["job_id"] for job in body["jobs"]]
+    assert body["total"] == before + 1
+
+
+def test_job_list_reports_how_much_of_the_ledger_it_read(client, server, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    params = {"state": "all", "kind": "overlay", "limit": 2}
+    before = client.get("/api/jobs", params=params).json()["total"]
+    for index in range(4):
+        storage.enqueue_media_job(f"j-{index}", "overlay", recording_id)
+    body = client.get("/api/jobs", params=params).json()
+    # 件数を添えないと、limitで切った一覧を『これが全部』と読ませてしまう。
+    assert (body["total"], body["limit"]) == (before + 4, 2)
+
+
+def test_job_list_kind_filter_maps_a_folded_domain_to_the_ledger_kind(
+        client, server, make_srv_recording):
+    session_id, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.enqueue_media_job("kind-filter-1", "overlay", recording_id,
+                              group_id="grp-kind-filter", session_id=session_id)
+    body = client.get("/api/jobs", params={"state": "all", "kind": "session_overlay"}).json()
+    # session_overlay という文字列を持つ行は台帳に無い。畳む前のkindで引けないと、この
+    # 種別で絞った瞬間に必ず0件になる。
+    assert "grp-kind-filter" in [job["job_id"] for job in body["jobs"]]
+
+
+def test_job_list_pins_a_named_job_even_when_it_is_older_than_the_page(
+        client, server, make_srv_recording):
+    # 運用logの「このjobを見る」からの着地。新しい投入で押し出されていても必ず出す。
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.enqueue_media_job("pinned-one", "overlay", recording_id)
+    storage.finish_media_job("pinned-one", "completed")
+    for index in range(5):
+        storage.enqueue_media_job(f"after-{index}", "upscale", recording_id)
+    body = client.get("/api/jobs", params={"job": "pinned-one", "limit": 1}).json()
+    assert [job["job_id"] for job in body["jobs"]] == ["pinned-one"]
+    assert body["total"] == 1
+
+
+def test_job_list_rejects_an_unknown_state_filter(client):
+    # 知らない値を「全て」に倒すと、絞ったつもりの一覧に全件が出る。
+    assert client.get("/api/jobs", params={"state": "こわれた"}).status_code == 400
+    assert client.get("/api/jobs", params={"limit": 0}).status_code == 400
+
+
+def test_job_list_carries_the_kind_labels_from_the_server(client):
+    from tictok.record import media_queue
+
+    labels = client.get("/api/jobs").json()["kind_labels"]
+    # 一覧に出るdomainは畳んだgroup行も含めて全部labelを持つ(画面はこれを引くだけ)。
+    for domain in (*media_queue.GROUP_DOMAINS.values(), *media_queue.BULK_DOMAINS.values()):
+        assert domain in labels
+    # 種別labelと運用logのmessage文は同じ語であること(2箇所に訳語を置かない理由そのもの)。
+    assert labels["upscale"] == "Up出力"
+    assert labels["overlay"] == "焼き込み"
+    assert labels["stt"] == "文字起こし"
+
+
+def test_ops_kind_labels_use_the_same_words_as_the_job_screen(client):
+    from tictok.core import ops_labels
+
+    assert ops_labels.KIND_LABELS["upscale.job_started"] == "Up出力・開始"
+    assert ops_labels.KIND_LABELS["overlay.job_failed"] == "焼き込み・失敗"
+    # 起動時のsweepや保守が積むjobも、運用logで生のcode名を名乗らない。
+    assert ops_labels.KIND_LABELS["maintenance.job_completed"] == "DB保守・完了"
+    assert ops_labels.job_domain_label("reprocess") == "再mp4化"
+
 
 def test_cancel_unknown_job_is_404(client):
     response = client.post("/api/jobs/deadbeef/cancel")
@@ -1494,6 +1826,30 @@ def test_relocation_is_disabled_when_there_is_no_separate_final_dir(server, monk
     assert plan["items"] == []
 
 
+def test_relocate_refuses_a_second_run_while_one_is_in_flight(
+        server, client, relocation_dirs, monkeypatch):
+    """移送中の2度目は断る。同じplanを作って走るため、同じfileを2つのthreadが動かし、
+    片方が「移動元が無い」で必ず失敗する(容量scan・保持policyと同じ作法)。
+
+    退避先を設定した状態で確かめる。未設定のままだと「最終保存先がありません」の409が
+    返り、lockを外しても同じ結果になるのでこのtestが何も検証しなくなる。"""
+    from tictok.api.routes import storage as storage_routes
+
+    work, _final = relocation_dirs
+    _make_relocatable(server, work)
+
+    class _Held:
+        def locked(self):
+            return True
+
+    monkeypatch.setattr(storage_routes, "_relocate_lock", _Held())
+    conflict = client.post("/api/storage/relocate", json={"confirm": True})
+    assert conflict.status_code == 409
+    assert "実行中" in conflict.json()["detail"]
+    # dry-runは読むだけなので通す。実行中でも「何が移るか」は確かめられる。
+    assert client.post("/api/storage/relocate", json={"confirm": False}).status_code == 200
+
+
 def test_relocation_plan_lists_only_completed_files_that_exist(server, relocation_dirs):
     """対象は「完了 かつ 作業先 かつ 実体がある」もの。DBにpathがあるだけの行を件数に
     混ぜると「移せる」という嘘になる(実測で132本中82本が実体なし)。"""
@@ -1864,118 +2220,6 @@ def make_recording_with_ts(server):
         return session_id, recording_id, path, seg_dir
 
     return _make
-
-
-def test_streamer_recordings_reports_mp4_and_ts_separately(client, make_recording_with_ts):
-    _s, recording_id, _path, _seg = make_recording_with_ts()
-    body = client.get("/api/streamers/tester/recordings").json()
-    item = next(i for i in body["recordings"] if i["id"] == recording_id)
-    assert item["mp4_exists"] is True
-    assert item["mp4_bytes"] == 64
-    assert item["ts_exists"] is True
-    assert item["ts_bytes"] == 256
-    # 合計はこの録画ぶんを必ず含む。storageはtest間で共有なので固定値では比べない。
-    assert body["total_ts_bytes"] >= 256
-
-
-def test_streamer_recordings_sizes_come_from_disk_not_the_db(client, make_srv_recording):
-    """DBのbytesは録画完了時の値のまま残る。消えたfileを容量ありと報告してはならない。"""
-    _s, recording_id, path = make_srv_recording()
-    path.unlink()
-    body = client.get("/api/streamers/tester/recordings").json()
-    item = next(i for i in body["recordings"] if i["id"] == recording_id)
-    assert item["mp4_exists"] is False
-    assert item["mp4_bytes"] == 0
-
-
-def test_deleting_ts_only_keeps_the_mp4(client, make_recording_with_ts):
-    _s, recording_id, path, seg_dir = make_recording_with_ts()
-    body = client.post("/api/streamers/tester/recordings/delete-files",
-                       json={"mp4_ids": [], "ts_ids": [recording_id]}).json()
-    assert body["freed_bytes"] == 256
-    assert not seg_dir.exists()
-    assert path.is_file()
-
-
-def test_deleting_mp4_keeps_the_row_and_its_transcript(client, server, make_recording_with_ts):
-    """行を消さないことがこの機能の要点。転写・検索indexはCASCADEで道連れになる。"""
-    _s, recording_id, path, seg_dir = make_recording_with_ts()
-    server.runtime.storage.save_transcript(
-        recording_id, {"language": "ja", "text": "あ",
-                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}]})
-    client.post("/api/streamers/tester/recordings/delete-files",
-                json={"mp4_ids": [recording_id], "ts_ids": []})
-    assert not path.exists()
-    # mp4だけの指定なのでHLSは残る。
-    assert seg_dir.is_dir()
-    assert server.runtime.storage.get_recording(recording_id) is not None
-    assert recording_id in server.runtime.storage.transcribed_recording_ids()
-
-
-def test_deleting_mp4_also_removes_its_sprite_and_waveform_caches(client, server,
-                                                                  make_srv_recording):
-    """cacheはsrcのmtime+sizeで有効判定するため、srcを消しただけでは無効化されない。"""
-    from tictok.media.thumbnails import thumbnail_artifact_paths
-    from tictok.media.waveform import waveform_artifact_paths
-
-    _s, recording_id, path = make_srv_recording()
-    caches = [*thumbnail_artifact_paths(path), *waveform_artifact_paths(path)]
-    caches[0].parent.mkdir(parents=True, exist_ok=True)
-    for cache in caches:
-        cache.write_bytes(b"\x02" * 32)
-    client.post("/api/streamers/tester/recordings/delete-files",
-                json={"mp4_ids": [recording_id], "ts_ids": []})
-    assert [c for c in caches if c.exists()] == []
-
-
-def test_deleting_mp4_also_removes_render_intermediates(client, server, make_srv_recording):
-    """焼き込みの中間(.cfrbase.mp4等)は元動画級に大きい。srcを消して残すと容量が空かない。"""
-    from tictok.record.video_overlay import overlay_transient_paths
-
-    _s, recording_id, path = make_srv_recording()
-    transients = list(overlay_transient_paths(path))
-    assert transients
-    transients[0].parent.mkdir(parents=True, exist_ok=True)
-    for tmp in transients:
-        tmp.write_bytes(b"\x03" * 1024)
-    client.post("/api/streamers/tester/recordings/delete-files",
-                json={"mp4_ids": [recording_id], "ts_ids": []})
-    assert [t for t in transients if t.exists()] == []
-
-
-def test_delete_files_refuses_a_recording_still_being_written(client, make_recording_with_ts):
-    _s, recording_id, path, seg_dir = make_recording_with_ts(status="recording")
-    response = client.post("/api/streamers/tester/recordings/delete-files",
-                           json={"mp4_ids": [recording_id], "ts_ids": [recording_id]})
-    assert response.status_code == 409
-    assert path.is_file()
-    assert seg_dir.is_dir()
-
-
-def test_delete_files_refuses_a_recording_with_a_queued_job(client, server,
-                                                            make_srv_recording):
-    """焼き込み/転写はsrcを実行中に読む。消すと壊れたjobだけが残る。"""
-    _s, recording_id, path = make_srv_recording()
-    server.runtime.storage.enqueue_media_job("job-1", "overlay", recording_id)
-    response = client.post("/api/streamers/tester/recordings/delete-files",
-                           json={"mp4_ids": [recording_id], "ts_ids": []})
-    assert response.status_code == 409
-    assert path.is_file()
-
-
-def test_delete_files_refuses_ids_belonging_to_another_streamer(client, make_srv_recording):
-    """他人の録画idを混ぜて投げても、pathのstreamer側だけを見て触らない。"""
-    _s, other_id, other_path = make_srv_recording(unique_id="someone")
-    response = client.post("/api/streamers/tester/recordings/delete-files",
-                           json={"mp4_ids": [other_id], "ts_ids": []})
-    assert response.status_code == 404
-    assert other_path.is_file()
-
-
-def test_delete_files_rejects_an_empty_selection(client):
-    response = client.post("/api/streamers/tester/recordings/delete-files",
-                           json={"mp4_ids": [], "ts_ids": []})
-    assert response.status_code == 400
 
 
 def test_session_detail_marks_a_recording_whose_file_was_deleted(client, make_srv_recording):

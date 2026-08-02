@@ -370,19 +370,33 @@ class IngestMixin:
           - DBがjournalと同数以上なら何もしない。
           - journalがDBを『全項目で上回る』時のみ、当該sessionのevent/viewerをidempotentに
             全置換して復元する(count混在=不整合はskipしてwarn、誤clobber回避)。
-        置換後はstats_json/buckets/analytics cacheをeventから再構成する。"""
+        置換後はstats_json/buckets/analytics cacheをeventから再構成する。
+
+        journalは2 passで読む。1 pass目(_count_journal_rows)はsession別の件数だけを数え、
+        2 pass目(_collect_journal_rows)は復元が要るsessionの行だけを組み立てる。復元の
+        要否はDBの行数との比較だけで決まるので、通常の起動 — 復元が1件も要らない起動 —
+        で保持期間ぶんの記録を行に開く理由が無い(実測でjournalは568MB/15日ぶん)。
+        pruneは最後のまま動かさない: 先に回すと、保持期間を過ぎたfileが、この起動で
+        復元に寄与しないまま消える(本来復元できたeventを失う経路になる)。"""
         summary = {"sessions": 0, "events": 0, "viewers": 0}
         if not self._journal_enabled:
             return summary
-        events_by_sid: dict = {}
-        viewers_by_sid: dict = {}
-        for path in self._journal_files():
-            self._read_journal_file(path, events_by_sid, viewers_by_sid)
-        session_ids = sorted(set(events_by_sid) | set(viewers_by_sid))
+        # 2つのpassは同じfile集合を読む(間にpruneを挟まない)。
+        paths = self._journal_files()
+        event_counts, viewer_counts = self._count_journal_rows(paths)
+        candidates = self._journal_restore_candidates(event_counts, viewer_counts)
+        if not candidates:
+            self._prune_journal()
+            return summary
+        events_by_sid, viewers_by_sid = self._collect_journal_rows(
+            paths, wanted=candidates, limits=(event_counts, viewer_counts)
+        )
         with self._lock:
-            for sid in session_ids:
+            for sid in sorted(candidates):
                 j_events = events_by_sid.get(sid, [])
                 j_viewers = viewers_by_sid.get(sid, [])
+                # 判断はDELETEと同じlock区間で取り直す。候補選びは「行を組み立てる価値が
+                # あるか」を件数で見ただけで、その後にDBが動いていない保証は無い。
                 exists = self._conn.execute(
                     "SELECT bucket_seconds FROM sessions WHERE id = ?", (sid,)
                 ).fetchone()
@@ -449,6 +463,32 @@ class IngestMixin:
         self._prune_journal()
         return summary
 
+    def _journal_restore_candidates(self, event_counts: dict, viewer_counts: dict) -> set:
+        """行を組み立てる価値があるsessionのidを、件数だけで絞り込む。
+
+        ここは「2 pass目を走らせるか」を決める門であって、復元の可否ではない。実際に
+        DELETE→全置換してよいかは、置換と同じlock区間でDBを見直して決める
+        (lockを跨いだ判断は、その間にDBが動けば古くなる)。門は緩い側へ倒してある —
+        件数が不整合なsessionもここは通り、警告と見送りは置換側が行う。
+        """
+        candidates: set = set()
+        with self._lock:
+            for sid in sorted(set(event_counts) | set(viewer_counts)):
+                if self._conn.execute(
+                    "SELECT 1 FROM sessions WHERE id = ?", (sid,)
+                ).fetchone() is None:
+                    continue  # 削除済み/未作成: resurrectしない
+                db_ev = self._conn.execute(
+                    "SELECT COUNT(*) c FROM events WHERE session_id = ?", (sid,)
+                ).fetchone()["c"]
+                db_vw = self._conn.execute(
+                    "SELECT COUNT(*) c FROM viewer_samples WHERE session_id = ?", (sid,)
+                ).fetchone()["c"]
+                if (db_ev < event_counts.get(sid, 0)
+                        or db_vw < viewer_counts.get(sid, 0)):
+                    candidates.add(sid)
+        return candidates
+
     def _journal_files(self) -> list:
         journal_dir = Path(get_journal_dir())
         if not journal_dir.is_dir():
@@ -456,7 +496,17 @@ class IngestMixin:
         files = list(journal_dir.glob("events-*.jsonl")) + list(journal_dir.glob("events-*.jsonl.gz"))
         return sorted(files)
 
-    def _read_journal_file(self, path: Path, events_by_sid: dict, viewers_by_sid: dict) -> None:
+    def _iter_journal_rows(self, path: Path, log_anomalies: bool = True):
+        """journal file 1本を ``(kind, session_id, row)`` で流す。kindは 'e' / 'v'。
+
+        **行の読み方をここ1箇所にしか置かないことがこのmethodの目的である。** 復元するか
+        否かは件数を数えるpass(_count_journal_rows)が決め、実際にDELETE→全置換するのは
+        行を組み立てるpass(_collect_journal_rows)なので、両者の解釈 — 壊れた行のskip、
+        events行の幅の正規化 — が少しでも食い違うと、件数で下した判断と書き戻す中身が
+        ずれる。別々に書けば、片方だけ直った瞬間に静かにeventが失われる。
+
+        log_anomalies=False は2 pass目のため。同じfileの同じ異常を二度は報告しない。
+        """
         overlong = 0
         try:
             opener = gzip.open if path.suffix == ".gz" else open
@@ -480,15 +530,15 @@ class IngestMixin:
                         elif len(row) > len(_EVENTS_COLUMNS):
                             overlong += 1
                             continue
-                        events_by_sid.setdefault(sid, []).append(row)
+                        yield "e", sid, row
                     elif rec.get("t") == "v":
-                        viewers_by_sid.setdefault(sid, []).append(row)
+                        yield "v", sid, row
         except Exception:
             logger.exception(
                 "journal file %s を読めませんでした", path,
                 extra={"event": "storage.journal_read_failed", "ctx": {"path": str(path)}},
             )
-        if overlong:
+        if overlong and log_anomalies:
             # 列数がSCHEMAより多いjournal = 新しいTicTokが書いた記録を古い版が読んでいる。
             # 列の対応が決められないので復元しない(位置ずれのまま入れる方が有害)。
             logger.warning(
@@ -499,6 +549,47 @@ class IngestMixin:
                        "ctx": {"path": str(path), "rows": overlong,
                                "columns": len(_EVENTS_COLUMNS)}},
             )
+
+    def _count_journal_rows(self, paths: list) -> tuple:
+        """session別の件数だけを数える(``(events, viewers)`` の2 dict)。
+
+        行そのものは持たない。復元が要るかどうかはDBの行数との比較だけで決まるので、
+        通常の起動 — 復元が1件も要らない起動 — で保持期間ぶんの記録をmemoryへ載せる
+        必要はない(実測で journal は 568MB / 15日ぶんあり、行に開くとその数倍になる)。
+        """
+        events: dict = {}
+        viewers: dict = {}
+        for path in paths:
+            for kind, sid, _row in self._iter_journal_rows(path):
+                target = events if kind == "e" else viewers
+                target[sid] = target.get(sid, 0) + 1
+        return events, viewers
+
+    def _collect_journal_rows(self, paths: list, wanted=None, limits=None) -> tuple:
+        """復元に使う行を組み立てる(``(events_by_sid, viewers_by_sid)``)。
+
+        wantedを渡すとそのsessionぶんだけを持つ。limitsは ``(events, viewers)`` の件数
+        dictで、session毎の取り込み上限になる。上限を置くのは、数えたあとにjournalが
+        伸びる可能性があるため: journalは追記のみなので数えた行は先頭から同じ順で
+        現れるが、後から増えた行まで拾うと「件数で下した判断」より多くを書き戻す
+        ことになる。
+        """
+        events_by_sid: dict = {}
+        viewers_by_sid: dict = {}
+        event_limits, viewer_limits = limits if limits is not None else (None, None)
+        for path in paths:
+            for kind, sid, row in self._iter_journal_rows(path, log_anomalies=False):
+                if wanted is not None and sid not in wanted:
+                    continue
+                if kind == "e":
+                    bucket, cap = events_by_sid, event_limits
+                else:
+                    bucket, cap = viewers_by_sid, viewer_limits
+                rows = bucket.setdefault(sid, [])
+                if cap is not None and len(rows) >= cap.get(sid, 0):
+                    continue
+                rows.append(row)
+        return events_by_sid, viewers_by_sid
 
     def _prune_journal(self) -> None:
         days = get_journal_retention_days()

@@ -74,6 +74,9 @@
           <div id="ops-empty" class="feed-empty" data-label="運用log">該当する記録はありません。</div>
         </div>
         <div class="note-actions">
+          <!-- 表は自動で入れ替えない。読んでいる途中の行が勝手に流れると追っている記録を
+               見失うので、新着があることだけを出して、押した時に入れ替える。 -->
+          <button id="ops-reload" class="btn btn-compact" title="今の条件で一覧を取り直します。">最新にする</button>
           <button id="ops-more" class="btn btn-compact hidden">さらに読み込む</button>
           <span id="ops-status" class="form-message"></span>
         </div>

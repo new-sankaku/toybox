@@ -779,6 +779,28 @@ def test_pending_media_job_for_matches_kind_and_ignores_finished(tmp_db, recordi
     assert tmp_db.pending_media_job_for("burn", recording_id) is None
 
 
+def test_list_media_jobs_filters_before_the_limit_cuts_the_page(tmp_db, recording_id):
+    # 一括投入が新しい行を埋めた状況。画面側で絞ると、古い失敗はlimitの外で消える。
+    tmp_db.enqueue_media_job("old-failed", "burn", recording_id)
+    tmp_db.finish_media_job("old-failed", "failed", error="boom")
+    for index in range(5):
+        tmp_db.enqueue_media_job(f"new-{index}", "upscale", recording_id)
+    rows = tmp_db.list_media_jobs(2, states=("failed", "interrupted"))
+    assert [row["job_id"] for row in rows] == ["old-failed"]
+
+
+def test_list_media_jobs_kind_filter_and_count_share_the_condition(tmp_db, recording_id):
+    tmp_db.enqueue_media_job("b1", "burn", recording_id)
+    tmp_db.enqueue_media_job("u1", "upscale", recording_id)
+    tmp_db.enqueue_media_job("u2", "upscale", recording_id)
+    assert [r["job_id"] for r in tmp_db.list_media_jobs(10, kinds=("burn",))] == ["b1"]
+    # countはlimitで切る前の件数。画面が「直近N件だけを見ている」と名乗る根拠になる。
+    assert tmp_db.count_media_jobs(kinds=("upscale",)) == 2
+    assert len(tmp_db.list_media_jobs(1, kinds=("upscale",))) == 1
+    assert tmp_db.count_media_jobs() == 3
+    assert tmp_db.count_media_jobs(states=("pending",), kinds=("burn",)) == 1
+
+
 def test_next_pending_media_job_orders_by_priority_then_queue_time(tmp_db, recording_id):
     tmp_db.enqueue_media_job("low", "burn", recording_id, priority=0)
     tmp_db.enqueue_media_job("high", "burn", recording_id, priority=5)
@@ -1096,6 +1118,36 @@ def test_replace_search_hits_drops_stale_fts_entries(tmp_db, make_session):
     assert tmp_db.search_indexed_counts()[rec] == {"comment": 1}
 
 
+def test_get_recording_for_read_matches_the_writer_view(tmp_db, make_session):
+    """read接続版はwriter版と同じ行を返す。recordingsの書き込みは全て即commitなので、
+    直前の更新もread接続から見える(bufferを経由するeventとはここが違う)。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    assert tmp_db.get_recording_for_read(rec) == tmp_db.get_recording(rec)
+
+    tmp_db.update_recording_path(rec, "/moved.mp4")
+    assert tmp_db.get_recording_for_read(rec)["path"] == "/moved.mp4"
+    assert tmp_db.get_recording_for_read(rec + 1000) is None
+
+
+def test_get_recording_for_read_does_not_wait_on_the_writer_lock(tmp_db, make_session):
+    """再生中のsegment配信はここを毎秒叩く。writer接続だとcollectorのevent書き出しと
+    lockを取り合い、実測でsegment 1本が9.4秒待たされた。"""
+    import threading
+
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    got: list = []
+    thread = threading.Thread(target=lambda: got.append(tmp_db.get_recording_for_read(rec)))
+    with tmp_db._lock:
+        thread.start()
+        thread.join(timeout=10.0)
+        finished = not thread.is_alive()
+    thread.join(timeout=10.0)
+    assert finished, "writer lockの保持中に読み取りが返らなかった"
+    assert got[0]["id"] == rec
+
+
 def test_search_scenes_falls_back_to_like_for_short_terms(tmp_db, make_session):
     session_id = make_session("alice", status="connected")
     rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
@@ -1167,6 +1219,77 @@ def test_cut_list_add_delete_and_clear(tmp_db, make_session):
     assert tmp_db.delete_cut(cut["id"]) is False
     assert tmp_db.clear_cuts() == 1
     assert tmp_db.list_cuts() == []
+
+
+def test_clip_group_crud_counts_and_delete_returns_items_to_ungrouped(tmp_db, make_session):
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    group = tmp_db.add_group("XXX発言")
+    # 同名は冪等(既存を返す)。同名が2つ並ぶと追加先がどちらか読めなくなる。
+    assert tmp_db.add_group("XXX発言")["id"] == group["id"]
+    first = tmp_db.add_cut(rec, "alice", 10.0, 20.0, "a", group_id=group["id"])
+    second = tmp_db.add_cut(rec, "alice", 30.0, 40.0, "b", group_id=group["id"])
+    # グループへ入れた順にpositionが振られる(グループ内の並び=書き出し順)。
+    assert (first["position"], second["position"]) == (0, 1)
+    mark = tmp_db.add_bookmark(rec, "alice", 5.0, group_id=group["id"])
+    listed = tmp_db.list_groups()
+    assert [g["id"] for g in listed] == [group["id"]]
+    assert listed[0]["cut_count"] == 2
+    assert listed[0]["cut_seconds"] == pytest.approx(20.0)
+    assert listed[0]["bookmark_count"] == 1
+    assert tmp_db.update_group(group["id"], name="YYY発言")["name"] == "YYY発言"
+    assert tmp_db.update_group(999999, name="zzz") is None
+    # グループの削除は項目を消さず未分類へ戻す。
+    assert tmp_db.delete_group(group["id"]) is True
+    assert tmp_db.delete_group(group["id"]) is False
+    assert all(c["group_id"] is None and c["position"] is None for c in tmp_db.list_cuts())
+    assert tmp_db.get_bookmark(mark["id"])["group_id"] is None
+
+
+def test_cut_group_move_copy_reorder_and_scoped_clear(tmp_db, make_session):
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    g1 = tmp_db.add_group("g1")
+    g2 = tmp_db.add_group("g2")
+    first = tmp_db.add_cut(rec, "alice", 10.0, 20.0, group_id=g1["id"])
+    second = tmp_db.add_cut(rec, "alice", 30.0, 40.0, group_id=g1["id"])
+    loose = tmp_db.add_cut(rec, "alice", 50.0, 60.0)
+    # move: 移動先の末尾へ。未分類の行はpositionを持たない。
+    assert tmp_db.move_cuts_to_group([loose["id"]], g2["id"]) == 1
+    moved = next(c for c in tmp_db.list_cuts() if c["id"] == loose["id"])
+    assert (moved["group_id"], moved["position"]) == (g2["id"], 0)
+    # copy: 行の複製。元(g1)は残り、複製は相対順(first→second)を保ってg2の末尾へ。
+    assert tmp_db.copy_cuts_to_group([second["id"], first["id"]], g2["id"]) == 2
+    g1_rows = [c for c in tmp_db.list_cuts() if c["group_id"] == g1["id"]]
+    assert {c["id"] for c in g1_rows} == {first["id"], second["id"]}
+    g2_rows = sorted((c for c in tmp_db.list_cuts() if c["group_id"] == g2["id"]),
+                     key=lambda c: c["position"])
+    assert [c["start"] for c in g2_rows] == [50.0, 10.0, 30.0]
+    # reorder: 指定順へ振り直し、指定に無い行は現状の相対順のまま後ろへ。
+    ids = [c["id"] for c in g2_rows]
+    assert tmp_db.reorder_group_cuts(g2["id"], [ids[2], ids[0]]) == 3
+    reordered = sorted((c for c in tmp_db.list_cuts() if c["group_id"] == g2["id"]),
+                       key=lambda c: c["position"])
+    assert [c["id"] for c in reordered] == [ids[2], ids[0], ids[1]]
+    # 一括削除はグループ/未分類のscopeを持つ。
+    assert tmp_db.clear_cuts(group_id=g1["id"]) == 2
+    assert tmp_db.clear_cuts(only_ungrouped=True) == 0
+    assert tmp_db.move_cuts_to_group([ids[0]], None) == 1
+    assert tmp_db.clear_cuts(only_ungrouped=True) == 1
+    assert tmp_db.delete_cuts([ids[1], ids[2]]) == 2
+    assert tmp_db.list_cuts() == []
+
+
+def test_bookmark_group_assignment(tmp_db, make_session):
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    group = tmp_db.add_group("mark先")
+    mark = tmp_db.add_bookmark(rec, "alice", 5.0)
+    assert mark["group_id"] is None
+    assert tmp_db.set_bookmark_group([mark["id"]], group["id"]) == 1
+    assert tmp_db.get_bookmark(mark["id"])["group_id"] == group["id"]
+    assert tmp_db.set_bookmark_group([mark["id"]], None) == 1
+    assert tmp_db.get_bookmark(mark["id"])["group_id"] is None
 
 
 def test_bookmark_point_keeps_null_end_and_memo_is_editable(tmp_db, make_session):

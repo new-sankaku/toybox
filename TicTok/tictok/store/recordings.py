@@ -114,6 +114,21 @@ class RecordingsMixin:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_recording_for_read(self, recording_id: int) -> Optional[dict]:
+        """読むだけの経路のための1件取得。集計read専用の接続を使う。
+
+        HLS segmentの配信は再生中ずっと毎秒叩かれる(実測で4.2時間に886 request)。writer接続で
+        引くとcollectorのevent書き出しと同じlockを取り合い、そのlock待ちがrouteの所要時間の
+        40%(最悪1本で9.4秒)を占めていた。recordingsの書き込みはどれも即commitなので、
+        read接続からも最新の行が見える。
+
+        read接続は重い集計と直列化される点だけ引き換えになるが、収集中は常時書き込みが続く
+        writer側と違い、集計は人が操作したときにしか走らない。"""
+        row = self._read_connection().execute(
+            "SELECT * FROM recordings WHERE id = ?", (recording_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def next_recording_start(self, session_id: int, after: float) -> Optional[float]:
         """同じsessionで``after``より後に始まった録画のうち、最も早い開始時刻。無ければNone。
 

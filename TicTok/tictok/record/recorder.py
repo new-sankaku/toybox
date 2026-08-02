@@ -1,14 +1,17 @@
 import asyncio
 import errno
+import fnmatch
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import sys
 import time
 import uuid
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -16,6 +19,7 @@ from tictok.core import cancel
 from tictok.core import config
 from tictok.core import ffprobe
 from tictok.core import layout
+from tictok.core import orphan_capture
 from tictok.core.logctx import ctx_recording_id, ctx_session_id, ctx_unique_id
 from tictok.core.logging_setup import is_debug_enabled, progress_interval_seconds
 from tictok.core.progress import pump_ffmpeg_progress
@@ -78,6 +82,9 @@ HEALTHY_WAIT_SECONDS = 14
 MIN_SEGMENTS = 2
 MAX_LAUNCH_ATTEMPTS = 4
 SEGMENT_SECONDS = 2
+# ``Path.glob("seg*.ts")`` と同じ判定を1回のscandirで下すためのmatcher。normcaseを噛ませて
+# あるので、Windowsの大小無視までglobと一致する(patternは normcase 済みの綴りへ変換する)。
+_SEGMENT_NAME_MATCH = re.compile(fnmatch.translate(os.path.normcase("seg*.ts"))).match
 # How long ffmpeg keeps retrying a dropped input before giving up. Absorbs brief
 # host-side blips that reuse the same stream URL. A full host re-broadcast
 # reissues the URL, which ffmpeg cannot follow; that case is handled upstream by
@@ -335,10 +342,15 @@ def is_pts_discontinuity(extinf: float, wall_seconds: float) -> bool:
     )
 
 
+# PATH上の実行fileの有無はprocessの寿命で変わらない。Windowsの ``shutil.which`` は
+# PATH x PATHEXT ぶんの存在確認を毎回叩くため、収集のsnapshotのように高頻度で通る経路で
+# 効いてくる。
+@lru_cache(maxsize=1)
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+@lru_cache(maxsize=1)
 def ffprobe_available() -> bool:
     return shutil.which("ffprobe") is not None
 
@@ -495,6 +507,29 @@ def write_curated_playlist(hls_dir, dst, unique_id: str = "") -> Optional[Path]:
     dst.write_text(render_vod_playlist(kept, absolute=dst.parent.resolve() != hls_dir.resolve()),
                    encoding="utf-8")
     return dst
+
+
+def curated_span_seconds(hls_dir, unique_id: str = "") -> Optional[float]:
+    """その録画の採用集合が名乗る尺(秒)。採用できるsegmentが無ければNone。
+
+    ``write_curated_playlist`` が書くのと**同じ集合**を測る。下流(転写・切り出し・焼き込み)
+    がffmpegへ渡すのはその集合なので、「素材が何秒あるか」を問う側もここを見なければ、
+    読む対象と測る対象が別物になる。
+
+    ``recordings.duration_seconds`` も finalize が書いた ``timing.json`` も使えない。
+    どちらも確定した瞬間のsnapshotで、その後にdirが太れば置き去りになる(実測: 録画行
+    12.0秒に対し採用集合 16,861.8秒)。"""
+    hls_dir = Path(hls_dir)
+    recorder = Recorder(unique_id or hls_dir.name,
+                        str(layout.record_root_of(hls_dir.parent)), None)
+    recorder.hls_dir = hls_dir
+    recorder.playlist = hls_dir / "index.m3u8"
+    recorder.base = hls_dir.name
+    kept = recorder._playlist_segments()
+    if not kept:
+        return None
+    total = sum(entry[1] for entry in kept)
+    return total if total > 0 else None
 
 
 def normalize_tmp_path(mp4_path) -> Path:
@@ -1252,20 +1287,42 @@ class Recorder:
         count, newest segment size). It advances whenever ffmpeg writes video —
         either a new seg*.ts appears or the open segment grows — and freezes
         entirely when the source silently stalls (the CDN stops serving new
-        segments) even though ffmpeg stays alive retrying the now-dead URL. Only
-        the newest segment is stat()ed, so polling stays O(1) over a long
-        recording. Segment names are zero-padded, so the lexical max is the
-        highest index (newest)."""
+        segments) even though ffmpeg stays alive retrying the now-dead URL.
+        Segment names are zero-padded, so the lexical max is the highest index
+        (newest).
+
+        costはdirectoryの列挙1回 + 最新1本への ``stat`` 1回。**O(1)ではない** — 以前ここは
+        「最新の1本しかstatしないのでpollingはO(1)」と書いていたが、それはstatの回数の話
+        でしかなく、列挙は録画が伸びるほど重くなる(実測5,400 segment: ``Path.glob`` 版
+        10.2ms / 現行のscandir版 7.5ms)。この監査でその一文が「ここは軽い」という誤った
+        判断を招いたので、正確に書き直してある。
+
+        **sizeを ``os.scandir`` の ``DirEntry.stat()`` から取ってはいけない。** Windowsでは
+        開いたままのfileのsizeがdirectory entryの古い値のまま返る(実測: 4,096 byte書き込み
+        済み・flush済みのfileを0 byteと報告した)。それはffmpegがいま書いているsegment
+        そのものの状態なので、使うと「開いているsegmentが伸びている」ことを検出できず、
+        録画中に誤ってstallと判定して不要な再接続を起こす。列挙は名前だけを見て、sizeは
+        最新1本を ``stat`` で取り直すこと。"""
         if self.hls_dir is None or not self.hls_dir.exists():
             return (0, 0)
-        segs = list(self.hls_dir.glob("seg*.ts"))
-        if not segs:
+        count = 0
+        newest = ""
+        try:
+            with os.scandir(self.hls_dir) as entries:
+                for entry in entries:
+                    if not _SEGMENT_NAME_MATCH(os.path.normcase(entry.name)):
+                        continue
+                    count += 1
+                    if entry.name > newest:
+                        newest = entry.name
+        except PermissionError:
+            return (0, 0)
+        if not count:
             return (0, 0)
         try:
-            newest = max(segs, key=lambda p: p.name)
-            return (len(segs), newest.stat().st_size)
+            return (count, (self.hls_dir / newest).stat().st_size)
         except OSError:
-            return (len(segs), 0)
+            return (count, 0)
 
     def snapshot(self) -> dict:
         if self.output_path is not None and self.output_path.exists():
@@ -1433,6 +1490,10 @@ class Recorder:
             self.state = STATE_FAILED
         finally:
             self._proc = None
+            # 捕捉が終わったdirの目印は必ず消す。残すと次の起動が、既に別の用途へ回された
+            # かもしれないpidを探しに行くことになる。
+            if self.hls_dir is not None:
+                orphan_capture.clear(self.hls_dir)
             await self._finalize()
 
     def _segment_count(self) -> int:
@@ -1465,12 +1526,17 @@ class Recorder:
         )
         log_file = open(log_path, "ab")
         try:
-            return await asyncio.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=log_file,
             )
+            # 捕捉processの身元をdirへ残す。serverが後始末を通らずに死ぬと(hard kill・
+            # コンソールのCLOSE・native crash)、Windowsは子を道連れにしないためこのffmpegが
+            # 生き残り、主の居ないdirへ書き続ける。次の起動がこの目印で回収する。
+            orphan_capture.mark(self.hls_dir, proc.pid)
+            return proc
         except Exception:
             logger.error(
                 "%s の録画processを起動できません", self.unique_id,

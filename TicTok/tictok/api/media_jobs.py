@@ -24,17 +24,19 @@ from tictok.record.recorder import (disk_free_by_volume, ffmpeg_available, ffmpe
 from tictok.record.transcription import STTError, stt_available
 from tictok.record.stt_worker import run_transcribe as stt_transcribe
 from tictok.media import hls_source
+from tictok.media import laugh_audio
 from tictok.media.clipper import clip_path, make_clip
 from tictok.media.reel import make_reel
 from tictok.media.thumbnails import ensure_sprite
 from tictok.media.waveform import ensure_audio_profile, ensure_waveform
 from tictok.search import indexer
 from tictok.record import audio_norm, backups, hls_pack, subtitles
-from tictok.record.media_queue import JobDeferred, JobSkipped, MediaJobQueue
+from tictok.record.media_queue import (db_kind_for_domain, JobDeferred, JobSkipped,
+    MediaJobQueue)
 from tictok.record.upscale import UpscaleError, ensure_upscaled
 from tictok.core import cancel
 from tictok.core.progress import JobProgress, pump_ffmpeg_progress, REPROCESS_PHASES
-from tictok.record.video_overlay import (_duration_seconds, _material_media_seconds,
+from tictok.record.video_overlay import (_duration_seconds, material_media_seconds,
     codec_family, ensure_overlay, NothingToDrawError, overlay_enabled, preview_clip,
     render_clip_overlay, subtitles_enabled, video_encoder_name)
 from tictok.api import files as api_files
@@ -75,6 +77,7 @@ async def _media_job_runner(job: dict, report) -> dict:
         fsfacts._fs_state_cache.clear()
         fsfacts._fs_bulk_cache.clear()
         fsfacts._bulk_status_cache.clear()
+        fsfacts._hls_dir_cache.clear()
 
 
 # 焼き込み/Up出力/再mp4化の永続queue。workerは1本で、投入内容はDBに残るためserverを再起動
@@ -82,10 +85,35 @@ async def _media_job_runner(job: dict, report) -> dict:
 media_job_queue = MediaJobQueue(runtime.storage, runtime.hub.broadcast, _media_job_runner)
 
 
-def _job_snapshot() -> list:
+def _job_snapshot(*, states=None, domains=None, job_id=None, limit: int = 200) -> list:
     """画面が見るjobの全体像: process内registry(容量scan・保持policy・文字起こし)と、DBの
-    映像job queue(単体job + session一括のgroup)を1つのlistに畳む。"""
-    return runtime.jobs.snapshot() + media_job_queue.list_jobs()
+    映像job queue(単体job + session一括のgroup)を1つのlistに畳む。
+
+    ``states`` / ``domains`` / ``job_id`` はJob画面のfilter。台帳側はDBのWHEREで、registry側は
+    processが持つ数十件なのでここで絞る。filterを画面へ任せると、条件に一致する古い行が
+    limitの外に落ちたまま「該当なし」と断定されるため、絞る場所をserverへ寄せている。"""
+    registry = runtime.jobs.snapshot()
+    if states is not None:
+        registry = [job for job in registry if job["state"] in states]
+    if domains is not None:
+        registry = [job for job in registry if job["domain"] in domains]
+    if job_id:
+        registry = [job for job in registry if job["job_id"] == job_id]
+    kinds = None if domains is None else [db_kind_for_domain(d) for d in domains]
+    return registry + media_job_queue.list_jobs(limit, states=states, kinds=kinds,
+                                                job_id=job_id)
+
+
+def _job_page(*, states=None, domains=None, job_id=None, limit: int = 200) -> tuple:
+    """(表示するjob, filterに一致する台帳の全行数)。
+
+    2つを1回のthread呼び出しで返すのは、この画面がWSの接続ごとに叩かれるため。件数を添える
+    のは、limitで切った一覧を『これが全部』と読ませないため(0件の断定と、見えていないだけを
+    画面が区別できる)。"""
+    kinds = None if domains is None else [db_kind_for_domain(d) for d in domains]
+    jobs = _job_snapshot(states=states, domains=domains, job_id=job_id, limit=limit)
+    total = runtime.storage.count_media_jobs(states=states, kinds=kinds, job_id=job_id)
+    return jobs, total
 
 
 def _media_job_running() -> bool:
@@ -130,7 +158,7 @@ def _recording_media_seconds(recording: dict) -> Optional[float]:
     """この録画の素材の実尺。判定の実体はvideo_overlay側に1つだけ置く(焼き込みの最終関門と
     同じ物差しで測るため)。pathを解決できなければNone。"""
     try:
-        return _material_media_seconds(api_files._resolved_recording_path(recording))
+        return material_media_seconds(api_files._resolved_recording_path(recording))
     except HTTPException:
         return None
 
@@ -184,11 +212,17 @@ async def _burn_in_recording(recording: dict, path: Path, job_id: str,
     recording_id = recording["id"]
     if not (overlay_enabled(runtime.settings) and recording.get("session_id") is not None):
         return {}
-    transcript = _subtitle_transcript(recording_id)
-    events = runtime.storage.iter_events(
+    # 焼き込みの入力を揃えるところは全てthreadへ出す。event loop上で引くとその間serverが
+    # 止まる: iter_eventsはbufferのflushを待ってからsessionの全eventを読み(実測37,214件で
+    # 372ms)、writer lockも同じだけ握るのでcollectorの書き出しまで巻き添えにする。
+    # 転写側はsegments_json(実測800KB級)の復号が載る。
+    transcript = await asyncio.to_thread(_subtitle_transcript, recording_id)
+    events = await asyncio.to_thread(
+        runtime.storage.iter_events,
         recording["session_id"], recording["started_at"], recording.get("ended_at")
     )
-    battles = runtime.storage.battles_for_session(recording["session_id"])
+    battles = await asyncio.to_thread(
+        runtime.storage.battles_for_session, recording["session_id"])
 
     async def _emit_progress(pct: int, stage: str) -> None:
         await runtime.hub.broadcast(
@@ -254,7 +288,9 @@ MEDIA_JOB_TITLES = {"overlay": "焼き込み", "upscale": "Up出力", "reprocess
                     "reel": "切り出しの連結", "clip_overlay": "範囲焼き込み",
                     # 文字起こしも同じ台帳で走る。別台帳だった頃はJob一覧に出ず、GPUを同じ
                     # 枠で取り合っているのに「動いているのにjobが無い」と読める状態だった。
-                    "stt": "文字起こし"}
+                    "stt": "文字起こし",
+                    # 笑い声分析も同じ台帳。cudaで走らせると文字起こしと同じGPU枠を取る。
+                    "laugh": "笑い声分析"}
 
 # 録画単位の二重投入judgeを通さないkind。reelは複数録画にまたがり、同じ先頭録画でも範囲listが
 # 違えば別の成果物なので、(kind, recording_id)で弾くと2本目が永久に投げられない。
@@ -305,9 +341,12 @@ async def _transcribe_into_storage(recording: dict, path: Path, on_progress) -> 
 
     復号は必ず ``stt_worker`` の子processで走る(serverでCTranslate2を読むと、torchと別version
     のcuDNNが同じDLL名で同居してprocessごと即死する)。GPU枠も子の生存期間ぶんそこで押さえる。"""
-    with hls_source.ffmpeg_source(path, prefer_hls=hls_source.plays_from_hls(path)) as source:
+    async with hls_source.ffmpeg_source_async(
+            path, prefer_hls=hls_source.plays_from_hls(path)) as source:
         result = await asyncio.to_thread(stt_transcribe, str(source.path), on_progress)
-    runtime.storage.save_transcript(recording["id"], result)
+    # 転写1本ぶんのsegments_jsonは実測800KB級。event loop上で書くとその間serverが止まる
+    # (単発API側の同じ保存は既にthreadへ出ている)。
+    await asyncio.to_thread(runtime.storage.save_transcript, recording["id"], result)
     # 保存と同時に検索indexへ反映する。ここを省くと文字起こし済みなのに検索へ出ない録画が残る。
     await asyncio.to_thread(indexer.index_transcript, runtime.storage, recording)
     return result
@@ -355,27 +394,42 @@ async def _run_stt_job(recording_id: int, report) -> dict:
 async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = False) -> dict:
     """文字起こしを録画ごとに1件ずつqueueへ載せる。投入できた数と内訳を返す。
 
-    既にqueueに居る録画は ``_enqueue_media_job`` が409で弾くので、ここでは数えて先へ進む
-    (二重投入の判断は1箇所に置く)。実体の無い録画は投入しない — 何度積んでも結果は変わらず、
-    起動のたびに同じ失敗が積み上がるだけになる(実測89件)。"""
-    added = 0
-    skipped_no_media = 0
-    already = 0
-    for recording in recordings:
-        if not api_files._recording_source_exists(recording):
-            skipped_no_media += 1
-            continue
-        try:
-            await _enqueue_media_job(
-                "stt", recording["id"], recording=recording,
-                stem=Path(recording.get("filename") or "").stem,
-                priority=priority, sweep=sweep)
-        except HTTPException as exc:
-            if exc.status_code != 409:
-                raise
-            already += 1
-            continue
-        added += 1
+    既にqueueに居る録画は数えて先へ進む(二重投入の判断は ``_enqueue_media_job`` と同じ
+    ``pending_for``)。実体の無い録画は投入しない — 何度積んでも結果は変わらず、
+    起動のたびに同じ失敗が積み上がるだけになる(実測89件)。
+
+    選別と投入を分けているのは、どちらもevent loopを塞ぐためである。選別は録画ごとに
+    素材のdir走査とDB照会を行い、投入は1本ごとに待機列全件を引き直していた(N本でN²)。
+    選別はthreadでまとめ、投入は ``enqueue_many`` の1回に畳む。"""
+    def _classify() -> tuple:
+        specs: list = []
+        skipped_no_media = 0
+        already = 0
+        seen: set = set()
+        for recording in recordings:
+            if not api_files._recording_source_exists(recording):
+                skipped_no_media += 1
+                continue
+            recording_id = recording["id"]
+            # 同じ録画が母集合に2度現れた場合も「既にqueueにある」で数える。1件ずつ投入して
+            # いた頃は2本目のpending_forが1本目を見つけて弾いていた。
+            if (recording_id in seen
+                    or media_job_queue.pending_for("stt", recording_id) is not None):
+                already += 1
+                continue
+            seen.add(recording_id)
+            stem = Path(recording.get("filename") or "").stem
+            specs.append({
+                "job_id": secrets.token_hex(4), "kind": "stt",
+                "recording_id": recording_id,
+                "session_id": recording.get("session_id"), "group_id": "",
+                "title": f"{MEDIA_JOB_TITLES['stt']} {stem}".strip(),
+                "params": None, "priority": priority, "sweep": sweep,
+            })
+        return specs, already, skipped_no_media
+
+    specs, already, skipped_no_media = await asyncio.to_thread(_classify)
+    added = len(await media_job_queue.enqueue_many(specs))
     runtime.logger.info(
         "音声の転写jobをqueueへ入れました: 追加=%d 既存=%d 素材なしでskip=%d", added, already,
         skipped_no_media,
@@ -388,10 +442,86 @@ async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = F
             "skipped_no_media": skipped_no_media}
 
 
+async def _run_laugh_job(recording_id: int, report) -> dict:
+    """笑い声分析をqueueのworkerとして実行し、結果を検索indexへ反映する。
+
+    解析そのものは ``ensure_laugh_profile`` が持つ(sidecarが在れば読むだけ)。**indexへの
+    投入は毎回行う**: sidecarだけ在ってindexが無い録画(解析だけ先に回した録画・閾値を
+    変えた後)を、同じjobで拾い直せるようにするためである。cacheに当たる場合の解析は
+    実測で数十msなので、毎回通しても損はしない。
+
+    deviceがcudaのときは ``laugh_audio`` 側が別processへ出す(この関数はどちらでも同じ)。
+    """
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise JobSkipped("録画が見つかりません（削除済み）。")
+    if not api_files._recording_source_exists(recording):
+        raise JobSkipped("録画fileが存在しません（削除済みか録画失敗）。")
+    path = api_files._resolved_recording_path(recording)
+    await report("笑い声分析", 0)
+    try:
+        async with runtime._job_ops("laugh", recording_id, stem=path.stem):
+            profile = await laugh_audio.ensure_laugh_profile(path)
+    except hls_source.SourceMissing as exc:
+        raise JobSkipped(str(exc) or "素材が見つかりません。")
+    except laugh_audio.LaughAudioError as exc:
+        # model未配置・engine無効は録画の問題ではない。積み直しても直らないので、
+        # 失敗として理由ごと残す(JobSkippedにすると設定の不備が静かに流れる)。
+        raise HTTPException(status_code=503, detail=str(exc))
+    await report("検索indexへ登録", 90)
+    windows = await asyncio.to_thread(
+        indexer.index_laughter, runtime.storage, recording, profile)
+    await report("笑い声分析", 100)
+    return {"recording_id": recording_id, "windows": windows,
+            "duration_seconds": profile.get("duration_seconds")}
+
+
+async def _enqueue_laugh_jobs(recordings: list, priority: int = 0,
+                              sweep: bool = False) -> dict:
+    """笑い声分析を録画ごとに1件ずつqueueへ載せる。``_enqueue_stt_jobs`` と同じ形。"""
+    def _classify() -> tuple:
+        specs: list = []
+        skipped_no_media = 0
+        already = 0
+        seen: set = set()
+        for recording in recordings:
+            if not api_files._recording_source_exists(recording):
+                skipped_no_media += 1
+                continue
+            recording_id = recording["id"]
+            if (recording_id in seen
+                    or media_job_queue.pending_for("laugh", recording_id) is not None):
+                already += 1
+                continue
+            seen.add(recording_id)
+            stem = Path(recording.get("filename") or "").stem
+            specs.append({
+                "job_id": secrets.token_hex(4), "kind": "laugh",
+                "recording_id": recording_id,
+                "session_id": recording.get("session_id"), "group_id": "",
+                "title": f"{MEDIA_JOB_TITLES['laugh']} {stem}".strip(),
+                "params": None, "priority": priority, "sweep": sweep,
+            })
+        return specs, already, skipped_no_media
+
+    specs, already, skipped_no_media = await asyncio.to_thread(_classify)
+    added = len(await media_job_queue.enqueue_many(specs))
+    runtime.logger.info(
+        "笑い声分析のjobをqueueへ入れました: 追加=%d 既存=%d 素材なしでskip=%d",
+        added, already, skipped_no_media,
+        extra={"event": "laugh.jobs_enqueued",
+               "ctx": {"added": added, "already": already,
+                       "skipped_no_media": skipped_no_media,
+                       "candidates": len(recordings), "sweep": sweep}},
+    )
+    return {"added": added, "candidates": len(recordings), "already": already,
+            "skipped_no_media": skipped_no_media}
+
+
 async def _run_preview_clip_job(recording_id: int, report) -> dict:
     """動画プレビューをqueueのworkerとして実行する。焼き込み本体と違い成果物はsidecarの
     <name>.preview.mp4 だけで、本出力のmp4にもそのcache判定にも触れない。"""
-    recording, path, events, battles, transcript = _preview_sources(recording_id)
+    recording, path, events, battles, transcript = await asyncio.to_thread(_preview_sources, recording_id)
 
     async def _emit_progress(pct: int, stage: str) -> None:
         await report(stage, pct)
@@ -447,7 +577,7 @@ async def _run_clip_overlay_job(job: dict, report) -> dict:
     """
     recording_id = job["recording_id"]
     params = job.get("params") or {}
-    recording, path, events, battles, transcript = _preview_sources(recording_id)
+    recording, path, events, battles, transcript = await asyncio.to_thread(_preview_sources, recording_id)
     start, end = float(params["start"]), float(params["end"])
     out = clip_path(path, start, end, params.get("label"), suffix="overlay")
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -550,12 +680,6 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
             "normalized": bool(normalize), "mode": mode}
 
 
-# 波形の既定bucket数。cacheはbucket数までkeyに含む(別解像度は畳み直さない — waveform.py)
-# ので、先回りで作る解像度は再生画面が要求する解像度と同じでなければならない。違えば作った
-# 先から全録画ぶん作り直しになる(static/videos.js の WAVE_BUCKETS と対)。
-WAVEFORM_DEFAULT_BUCKETS = 2000
-
-
 async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
     """再生画面が使うsidecar cache(音声波形 / サムネsprite)を先に作っておくjob。
 
@@ -577,7 +701,7 @@ async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
     await report(f"{MEDIA_JOB_TITLES[kind]}を生成中…", 0)
     try:
         if kind == "waveform":
-            result = await ensure_waveform(path, WAVEFORM_DEFAULT_BUCKETS)
+            result = await ensure_waveform(path)
             # 表示用波形と絶対levelは1回のdecodeから両方作られ、両方cacheされる
             # (waveform._build)。この呼び出しは通常そのcacheの確認で終わる。
             await ensure_audio_profile(path)
@@ -643,6 +767,8 @@ async def _run_media_job(job: dict, report) -> dict:
         return await _run_sidecar_cache_job(kind, recording_id, report)
     if kind == "stt":
         return await _run_stt_job(recording_id, report)
+    if kind == "laugh":
+        return await _run_laugh_job(recording_id, report)
     if kind == "overlay_preview":
         return await _run_preview_clip_job(recording_id, report)
     if kind == "clip_batch":

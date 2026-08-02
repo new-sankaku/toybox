@@ -272,11 +272,47 @@ async def test_jump_overlay_opens_and_closes(ui_server, page):
 async def test_videos_tabs_switch(ui_server, page):
     """配信者動画のtabが切り替わる(view の出し分けが効いている)。"""
     await page.goto(ui_server + "/videos", wait_until="networkidle")
-    for view in ["marks", "cuts", "jobs", "bulk", "search"]:
+    # 文字起こしは一括処理の1種別になり、専用tabは無くなった(選ぶ場所と進捗を見る場所が
+    # 別tabに固定され、1回の作業で必ず往復していたため)。
+    for view in ["marks", "cuts", "bulk", "search"]:
         await page.click(f"#tab-{view}")
         await page.wait_for_selector(f"#view-{view}:not(.hidden)", timeout=5000)
         classes = (await page.get_attribute(f"#tab-{view}", "class")).split()
         assert classes.count("active") == 1
+    assert page.js_errors == []
+
+
+async def test_job_kind_filter_is_built_from_the_server(ui_server, page):
+    """Job画面の種別選択肢がserverの応答から生える。
+
+    labelの出所は core/ops_labels.py だけで、画面は受け取って引く。応答が届かない・key名が
+    変わったといった食い違いは、jsdomのstubでは stub を直せば通ってしまうため、実serverを
+    叩くここで見る(壊れると『全て』しか選べない種別filterになる)。"""
+    await page.goto(ui_server + "/jobs", wait_until="networkidle")
+    await page.wait_for_function(
+        "() => document.querySelectorAll('#job-flt-kind option').length > 1", timeout=15000,
+    )
+    values = await page.eval_on_selector_all(
+        "#job-flt-kind option", "els => els.map(e => e.value)")
+    assert values[0] == "all"
+    for domain in ["overlay", "upscale", "stt", "session_overlay", "bulk_overlay"]:
+        assert domain in values
+    labels = await page.eval_on_selector_all(
+        "#job-flt-kind option", "els => els.map(e => e.textContent)")
+    assert "Up出力" in labels
+    assert page.js_errors == []
+
+
+async def test_job_column_sort_reorders_and_returns_to_default(ui_server, page):
+    """列headerのclickで並べ替えが効き、3回目で既定へ戻る。"""
+    await page.goto(ui_server + "/jobs", wait_until="networkidle")
+    head = "#job-table th[data-sort='queued']"
+    await page.click(head)
+    assert (await page.get_attribute(head, "aria-sort")) == "descending"
+    await page.click(head)
+    assert (await page.get_attribute(head, "aria-sort")) == "ascending"
+    await page.click(head)
+    assert (await page.get_attribute(head, "aria-sort")) == "none"
     assert page.js_errors == []
 
 

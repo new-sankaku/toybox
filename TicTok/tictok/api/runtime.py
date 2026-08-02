@@ -28,12 +28,17 @@ from tictok.paths import PROJECT_ROOT
 from tictok.core.logging_setup import setup_logging
 from tictok.core.logctx import log_context
 from tictok.core.jsonio import js_safe
+from tictok.media.asset_prefetch import AssetPrefetcher
 from tictok.media.avatar_pool import AvatarPool
 from tictok.media.avatar_proxy import AvatarProxy
+from tictok.media.emote_pool import EmotePool
 from tictok.media.gift_icons import GiftIconCache
-from tictok.core.config import (ConfigError, get_avatar_fetch_attempts,
+from tictok.core.config import (ConfigError, get_asset_prefetch_concurrency,
+    get_asset_prefetch_enabled, get_asset_prefetch_queue_size,
+    get_asset_prefetch_rate_per_second, get_avatar_fetch_attempts,
     get_avatar_fetch_backoff_seconds, get_avatar_fetch_concurrency, dotenv_summary,
-    get_db_path, get_job_retention_seconds, validate_env)
+    get_db_path, get_job_retention_seconds, get_websocket_send_timeout_seconds,
+    validate_env)
 from tictok.collect.manager import CollectorManager
 from tictok.core import ops_labels
 from tictok.core.process_lock import ProcessLock, ProcessLockError
@@ -166,6 +171,47 @@ class EventHub:
             extra={"event": "http.websocket_disconnected", "ctx": {"connections": total}},
         )
 
+    async def _send_one(self, connection: WebSocket, payload: dict,
+                        timeout: float, message_type) -> Optional[str]:
+        """1接続へ送る。届いたらNone、駄目だった理由("timeout"/"error")を返す。
+
+        上限を設けるのは、埋まった送信bufferへのsendが相手の受信を待って返らないため。
+        待つ側はbroadcast本体で、そこにはcollectorのevent処理が乗っている。"""
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(connection.send_json(payload), timeout)
+            else:
+                await connection.send_json(payload)
+        except asyncio.TimeoutError:
+            logger.debug(
+                "websocket接続への送信が%.1f秒で終わらないため切り離します", timeout,
+                extra={"event": "http.websocket_send_timeout",
+                       "ctx": {"message_type": message_type, "timeout_seconds": timeout}},
+            )
+            return "timeout"
+        except Exception:
+            logger.debug(
+                "応答しないwebsocket接続を切り離します", exc_info=True,
+                extra={"event": "http.websocket_send_failed",
+                       "ctx": {"message_type": message_type}},
+            )
+            return "error"
+        return None
+
+    async def _close_quietly(self, connection: WebSocket, timeout: float) -> None:
+        """時間切れで切り離した接続を実際に閉じる。
+
+        集合から外すだけでは、生きているtabが更新を受け取らないまま「接続中」を表示し続ける。
+        閉じればbrowserのoncloseが張り直す(static/common.js)。閉じる操作自体も詰まった
+        transportの上を通るので、同じ上限で縛って結果は問わない。"""
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(connection.close(), timeout)
+            else:
+                await connection.close()
+        except Exception:
+            pass
+
     async def broadcast(self, message: dict) -> None:
         """Push one update to every connected page.
 
@@ -174,35 +220,47 @@ class EventHub:
         rather than loss. The per-connection reason stays at debug (a closing tab
         produces one routinely) while the fact that a live update was lost is reported
         once per broadcast at warning.
+
+        送信は接続ごとに並行で行う。直列に await していた頃は、応答しないclient 1枚が
+        後続の全clientと**呼び出し元**(収集中のcollector、job台帳)を自分の詰まりに巻き込んで
+        いた。1接続あたりの上限も同じ理由で要る — 並行にしただけでは、broadcast全体が
+        最も遅い1接続の速度に張り付く。
         """
         async with self._lock:
             connections = list(self._connections)
+        if not connections:
+            return
         # WSはHTTPのresponse classを通らないので、int64の桁落ち対策はここで掛ける。
         # 送信前に1回だけ変換し、接続ごとに繰り返さない。
         payload = js_safe(message)
-        dead: list[WebSocket] = []
-        for connection in connections:
-            try:
-                await connection.send_json(payload)
-            except Exception:
-                logger.debug(
-                    "応答しないwebsocket接続を切り離します", exc_info=True,
-                    extra={"event": "http.websocket_send_failed",
-                           "ctx": {"message_type": message.get("type")}},
-                )
-                dead.append(connection)
-        if dead:
-            async with self._lock:
-                for connection in dead:
-                    self._connections.discard(connection)
-                total = len(self._connections)
-            logger.warning(
-                "broadcast中に到達できないwebsocket clientを %d件 切り離しました（合計 %d）",
-                len(dead), total,
-                extra={"event": "http.websocket_clients_dropped",
-                       "ctx": {"dropped": len(dead), "connections": total,
-                               "message_type": message.get("type")}},
-            )
+        message_type = message.get("type")
+        timeout = get_websocket_send_timeout_seconds()
+        results = await asyncio.gather(*(
+            self._send_one(connection, payload, timeout, message_type)
+            for connection in connections
+        ))
+        dead = [connection for connection, reason in zip(connections, results) if reason]
+        if not dead:
+            return
+        timed_out = [connection for connection, reason in zip(connections, results)
+                     if reason == "timeout"]
+        # 時間切れのtransportは生きたまま詰まっていることがある。集合から外すだけでは
+        # そのtabが黙って更新を失い続けるので、閉じて張り直させる。
+        if timed_out:
+            await asyncio.gather(*(
+                self._close_quietly(connection, timeout) for connection in timed_out
+            ))
+        async with self._lock:
+            for connection in dead:
+                self._connections.discard(connection)
+            total = len(self._connections)
+        logger.warning(
+            "broadcast中に到達できないwebsocket clientを %d件 切り離しました（うち時間切れ %d件、合計 %d）",
+            len(dead), len(timed_out), total,
+            extra={"event": "http.websocket_clients_dropped",
+                   "ctx": {"dropped": len(dead), "timed_out": len(timed_out),
+                           "connections": total, "message_type": message_type}},
+        )
 
 
 class JobRegistry:
@@ -415,6 +473,22 @@ avatar_pool = AvatarPool(
 )
 avatar_proxy = AvatarProxy(cache_dir=layout.pool_root() / layout.AVATAR_POOL_DIRNAME, pool=avatar_pool)
 gift_icons = GiftIconCache(cache_dir=layout.gift_icon_pool_dir())
+emote_pool = EmotePool(cache_dir=layout.emote_pool_dir())
+# 焼き込みassetの先行取得。event着信時にpoolへ落としておき、焼き込みをcache hitで済ませる。
+# 無効時はNoneのまま渡す(collector側は未接続として扱い、capture時のpool保存は行われない)。
+# workerはevent loopが要るのでlifespanで起こす(``startup.py``)。
+asset_prefetch = (
+    AssetPrefetcher(
+        gift_icons=gift_icons,
+        avatar_pool=avatar_pool,
+        emote_pool=emote_pool,
+        concurrency=get_asset_prefetch_concurrency(),
+        queue_size=get_asset_prefetch_queue_size(),
+        rate_per_second=get_asset_prefetch_rate_per_second(),
+    )
+    if get_asset_prefetch_enabled()
+    else None
+)
 # 通知(webhook)。ops_eventsは障害系とsession lifecycleの単一の口なので、そこへ観測者として
 # 1本ぶら下げるだけで切断・録画停止・再接続打ち切り・LIVE開始が揃う。coin rateとBattle開始は
 # ops_eventsに乗らないためcollectorから直接渡す。送信はここでは行わず、lifespanで起こす
@@ -423,8 +497,8 @@ notifier = Notifier(storage, settings)
 storage.set_ops_observer(notifier.on_ops_event)
 manager = CollectorManager(
     broadcast=hub.broadcast, storage=storage, settings=settings,
-    gift_icons=gift_icons, avatar_pool=avatar_pool, avatar_proxy=avatar_proxy,
-    notifier=notifier,
+    gift_icons=gift_icons, avatar_proxy=avatar_proxy,
+    asset_prefetch=asset_prefetch, notifier=notifier,
 )
 
 

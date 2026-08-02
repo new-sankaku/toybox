@@ -125,12 +125,17 @@ class AnalyticsMixin:
                 " WHERE s.started_at >= ? ORDER BY s.started_at",
                 (kind, since),
             ).fetchall()
-            out = []
-            for row in rows:
-                sess = self._analytics_sess_dict(row)
-                if sess["ended_at"] is not None and row["payload_json"] is not None:
-                    out.append((sess, json.loads(row["payload_json"])))
-                else:
+        # cache済みのpayloadはlockの外でほどく。lockを取り直すのは、その場で計算する
+        # session(収集中)の1件ぶんだけにする。_ensure_analytics_cacheと同じ理由で、
+        # 収集中sessionの重いkind(実測でorganic 283ms / battle_ratio 210ms)を握ったままに
+        # すると、その間collectorのevent書き込みまで止まる。
+        out = []
+        for row in rows:
+            sess = self._analytics_sess_dict(row)
+            if sess["ended_at"] is not None and row["payload_json"] is not None:
+                out.append((sess, json.loads(row["payload_json"])))
+            else:
+                with self._lock:
                     out.append((sess, analytics.compute_payload(self._conn, sess, kind)))
         return out
 
@@ -175,10 +180,6 @@ class AnalyticsMixin:
             self._analytics_rows("time_index", since), metric
         )
 
-    def analytics_relations(self, since: float = 0.0) -> dict:
-        """指標間の関連(配信単位)のSpearman順位相関+同接(規模)制御の偏相関。"""
-        return analytics.reduce_relations(self._analytics_rows("relations", since))
-
     def analytics_share_uplift(self, since: float = 0.0) -> dict:
         """Share→入室のevent-study(placebo帯・95%CI付き)。"""
         return analytics.reduce_peri(self._analytics_rows("peri_share", since), "share")
@@ -198,30 +199,28 @@ class AnalyticsMixin:
         """Battleのグローブ(5倍化)のcoin帯別発動率。単価不明分は全期間のGift event由来の
         gift_id→単価表で解決する(観測が増えるほど後から解ける)。"""
         rows = self._analytics_rows("glove", since)
-        with self._lock:
-            coin_rows = self._conn.execute(
-                "SELECT gift_id, diamonds, gift_count FROM events"
-                " WHERE kind = 'gift' AND gift_id IS NOT NULL AND gift_count > 0"
-            ).fetchall()
-        # gift_id→単価(diamonds_each)。同一gift_idは価格一定なので代表値でよい。
-        unit_coins: dict = {}
-        for r in coin_rows:
-            gid, cnt = r["gift_id"], r["gift_count"] or 0
-            if gid is None or cnt <= 0:
-                continue
-            unit_coins[gid] = (r["diamonds"] or 0) / cnt
+        # gift_id→単価(diamonds_each)。同一gift_idは基本的に価格一定なので代表値でよい。
+        # 実data 435 SKU中の例外は18107(Outfit Base Gift)だけで、着せ替えの価格がそのまま
+        # 乗るため80/149/199の3値を取る(全4件)。従来はscan順の最終行が勝つ実装で、
+        # どの値になるかはindexの並び次第だった。MAXで決定的にしても、この4件は
+        # グローブ窓の未解決単価に使われないためreduce_gloveの出力は変わらない(実測で一致)。
+        # 畳み込みはSQL側で行う。1行ずつPythonへ渡して上書きしていた頃は、gift eventの
+        # 総数(実測45,107行)がそのまま転送量になり、しかも書き込み接続のlockを握ったまま
+        # 走っていた。GROUP BYなら戻りはSKU数(実測435行)で頭打ちになる。
+        # 期間ではなく全期間で引くのは意図どおり(観測が増えるほど後から単価が解ける)。
+        # 直前の_analytics_rowsがflush()済みなので、集計read専用の接続から全て見える。
+        coin_rows = self._read_connection().execute(
+            "SELECT gift_id AS gift_id,"
+            " MAX(COALESCE(diamonds, 0) * 1.0 / gift_count) AS unit FROM events"
+            " WHERE kind = 'gift' AND gift_id IS NOT NULL AND gift_count > 0"
+            " GROUP BY gift_id"
+        ).fetchall()
+        unit_coins = {r["gift_id"]: r["unit"] for r in coin_rows}
         return analytics.reduce_glove(rows, unit_coins)
 
     def analytics_join_quality(self, since: float = 0.0) -> dict:
         """入室の質: 入室者のうち初見(初観測)の比率を時間帯別に。"""
         return analytics.reduce_join_quality(self._analytics_rows("join_quality", since))
-
-    def analytics_scale_efficiency(self, since: float = 0.0) -> dict:
-        """規模 vs 効率: 配信者ごとの平均同接(規模)と同接あたりコイン(効率)。"""
-        rows = self._analytics_rows("scale_efficiency", since)
-        with self._lock:
-            owners = self._latest_owners()
-        return analytics.reduce_scale_efficiency(rows, owners)
 
     def analytics_retention(self, since: float = 0.0) -> dict:
         """入室→定着: 時刻別の入室と平均同接、全体stick rate(=Σ純増/Σ入室)。"""
@@ -265,7 +264,9 @@ class AnalyticsMixin:
         return analytics.reduce_entry_source(self._analytics_rows("entry_source", since))
 
     def analytics_battle_flow(self, since: float = 0.0) -> dict:
-        """Battle展開(残り時間軸): リード交代・残り1分時点のリード別勝率・終盤集中度。"""
+        """Battle展開(残り時間軸): リード交代・残り1分時点のリード別勝率・終盤集中度。
+
+        画面の節としては廃止したが、AI講評(routes/ai.py)が入力に使うため残す。"""
         return analytics.reduce_battle_flow(self._analytics_rows("battle_flow", since))
 
     def analytics_coverage(self, since: float = 0.0) -> dict:

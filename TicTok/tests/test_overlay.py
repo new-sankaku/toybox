@@ -1094,7 +1094,8 @@ def test_clip_sidecars_are_per_output_and_live_with_the_recording(make_recording
     _stem, mp4 = make_recording()
     first = vo.clip_overlay_sidecars(mp4, tmp_path / "clips" / "a.mp4")
     second = vo.clip_overlay_sidecars(mp4, tmp_path / "clips" / "b.mp4")
-    assert len(set(first) | set(second)) == 8
+    # CFR baseは中間fileでなくstream供給になったので、sidecarは(ass, layer, meta)の3つ。
+    assert len(set(first) | set(second)) == 6
     for path in first + second:
         assert path.parent == vo.sidecar_dir(mp4)
         assert path.parent.name == ".sidecars"
@@ -1107,12 +1108,14 @@ def test_clip_intermediates_are_reachable_by_the_startup_sweep(make_recording,
     from tictok.core import layout
 
     _stem, mp4 = make_recording()
-    ass, layer, base, meta = vo.clip_overlay_sidecars(mp4, tmp_path / "clips" / "a.mp4")
+    ass, layer, meta = vo.clip_overlay_sidecars(mp4, tmp_path / "clips" / "a.mp4")
     suffixes = vo._transient_sweep_suffixes()
-    for path in (ass, layer, base):
+    for path in (ass, layer):
         assert any(path.name.endswith(s) for s in suffixes), path.name
     assert not any(meta.name.endswith(s) for s in suffixes)
 
+    # 旧build(中間のCFR base file)の残骸もsweepが拾えること。
+    base = ass.with_name(ass.name.replace(vo.CLIP_ASS_SUFFIX, vo.CLIP_BASE_SUFFIX))
     for path in (ass, layer, base, meta):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x" * 4)

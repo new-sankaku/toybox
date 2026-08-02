@@ -13,7 +13,7 @@ lock契約:
   _upsert_user_locked は self._lock 保持前提。呼び出し元は _upsert_users_locked(ingest)と
   _backfill_users(maintenance)で、いずれも lock 区間の内側から辿り着く。
   _latest_owner_handles_locked / _owner_handles_locked も self._lock 保持前提で、
-  呼び出し元(streamer_index / streamer_profile / streamer_cohort / streamer_highlights /
+  呼び出し元(streamer_index / streamer_profile / streamer_cohort /
   streamer_history_stats / session_ids_for_users / aggregate_dashboard)は
   すべて with self._lock: の内側で呼ぶ。
 """
@@ -21,6 +21,7 @@ import json
 import time
 from typing import Optional
 
+from tictok.core.league import display_league, display_league_sql
 from tictok.store._common import (
     NON_IDENTITY_KEYS,
     _USER_CACHE_MAX,
@@ -191,11 +192,12 @@ class UsersMixin:
             item["owner_avatar"] = ""
         return item
 
-    def _unidentified_gift_summary(self) -> dict:
+    def _unidentified_gift_summary(self, conn) -> dict:
         """台帳から外した身元不明eventの規模。黙って除外すると「Fan台帳の合計がSessionの
-        coin合計と合わない」理由が画面から辿れなくなるため、件数と額を返して明示する。"""
+        coin合計と合わない」理由が画面から辿れなくなるため、件数と額を返して明示する。
+        接続は呼び出し元から受け取る(台帳本体と同じ接続・同じ時点で数えるため)。"""
         placeholders = ",".join("?" for _ in NON_IDENTITY_KEYS)
-        row = self._conn.execute(
+        row = conn.execute(
             "SELECT COUNT(*) AS events, COALESCE(SUM(diamonds), 0) AS diamonds"
             " FROM events WHERE kind = 'gift'"
             f" AND (identity_key IS NULL OR identity_key IN ({placeholders}))",
@@ -218,35 +220,41 @@ class UsersMixin:
         exclude = (
             f" AND e.identity_key IS NOT NULL AND e.identity_key NOT IN ({placeholders})"
         )
-        with self._lock:
-            rows = self._conn.execute(
-                # 表示名はusers表を優先する。MAX(e.user_unique_id)は辞書順の最大を拾うだけで
-                # 「最新のhandle」ではなく、実測では改名前の自動生成handle(user5037930325926)が
-                # 現handle(harehare12345)を押しのけた。users表は毎eventで最新へupsertされる
-                # 唯一の真実なので、eventの値はusers側が空のときだけ使う。
-                "SELECT e.identity_key AS key, s.unique_id AS owner,"
-                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
-                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
-                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
-                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
-                " u.gifter_level AS gifter_level, u.first_seen AS first_seen,"
-                " u.last_seen AS last_seen, SUM(e.diamonds) AS diamonds,"
-                " SUM(e.gift_count) AS gifts, COUNT(DISTINCT e.session_id) AS sessions,"
-                " MIN(e.time) AS first_gift, MAX(e.time) AS last_gift"
-                " FROM events e JOIN sessions s ON s.id = e.session_id"
-                " LEFT JOIN users u ON u.identity_key = e.identity_key"
-                " WHERE e.kind = 'gift'" + exclude +
-                " GROUP BY e.identity_key, s.unique_id",
-                NON_IDENTITY_KEYS,
-            ).fetchall()
-            # commentは別kindなのでgiftの集計には相乗りできない。identity単位の件数だけを
-            # 軽く引いて畳む(実測14ms)。全kindの横断走査は一覧には重すぎる。
-            comment_rows = self._conn.execute(
-                "SELECT e.identity_key AS key, COUNT(*) AS comments FROM events e"
-                " WHERE e.kind = 'comment'" + exclude + " GROUP BY e.identity_key",
-                NON_IDENTITY_KEYS,
-            ).fetchall()
-            unidentified = self._unidentified_gift_summary()
+        # gift eventとcomment eventを全期間ぶん走査する(実測で合わせて421ms)。書き込み接続で
+        # 流すとその間collectorのevent書き出しが同じlockで待たされるので、同じ形のgifter集計を
+        # 持つstreamer_profileと同様に集計read専用の接続を使う。
+        conn = self._read_connection()
+        rows = conn.execute(
+            # 表示名はusers表を優先する。MAX(e.user_unique_id)は辞書順の最大を拾うだけで
+            # 「最新のhandle」ではなく、実測では改名前の自動生成handle(user5037930325926)が
+            # 現handle(harehare12345)を押しのけた。users表は毎eventで最新へupsertされる
+            # 唯一の真実なので、eventの値はusers側が空のときだけ使う。
+            "SELECT e.identity_key AS key, s.unique_id AS owner,"
+            " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+            " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+            " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+            " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
+            " u.gifter_level AS gifter_level, u.fans_level AS fans_level,"
+            # この視聴者自身が配信者である場合のリーグ帯(取れていなければ空=非表示)。
+            f" {display_league_sql('u')} AS league,"
+            " u.first_seen AS first_seen,"
+            " u.last_seen AS last_seen, SUM(e.diamonds) AS diamonds,"
+            " SUM(e.gift_count) AS gifts, COUNT(DISTINCT e.session_id) AS sessions,"
+            " MIN(e.time) AS first_gift, MAX(e.time) AS last_gift"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            " LEFT JOIN users u ON u.identity_key = e.identity_key"
+            " WHERE e.kind = 'gift'" + exclude +
+            " GROUP BY e.identity_key, s.unique_id",
+            NON_IDENTITY_KEYS,
+        ).fetchall()
+        # commentは別kindなのでgiftの集計には相乗りできない。identity単位の件数だけを
+        # 軽く引いて畳む(実測14ms)。全kindの横断走査は一覧には重すぎる。
+        comment_rows = conn.execute(
+            "SELECT e.identity_key AS key, COUNT(*) AS comments FROM events e"
+            " WHERE e.kind = 'comment'" + exclude + " GROUP BY e.identity_key",
+            NON_IDENTITY_KEYS,
+        ).fetchall()
+        unidentified = self._unidentified_gift_summary(conn)
 
         comments = {r["key"]: r["comments"] or 0 for r in comment_rows}
         fans: dict = {}
@@ -260,6 +268,8 @@ class UsersMixin:
                     "nickname": row["nickname"] or row["unique_id"] or "(unknown)",
                     "avatar": row["avatar"] or "",
                     "gifter_level": row["gifter_level"] or 0,
+                    "fans_level": row["fans_level"] or 0,
+                    "league": row["league"] or "",
                     "first_seen": row["first_seen"],
                     "last_seen": row["last_seen"],
                     "diamonds": 0,
@@ -330,7 +340,8 @@ class UsersMixin:
         with self._lock:
             identity = self._conn.execute(
                 "SELECT identity_key, user_id, unique_id, nickname, avatar,"
-                " fans_level, gifter_level, gifter_badge, first_seen, last_seen"
+                " fans_level, gifter_level, gifter_badge, member_badge, league,"
+                " broadcaster, league_checked_at, first_seen, last_seen"
                 " FROM users WHERE identity_key = ?",
                 (identity_key,),
             ).fetchone()
@@ -389,6 +400,14 @@ class UsersMixin:
             "fans_level": identity["fans_level"] or 0,
             "gifter_level": identity["gifter_level"] or 0,
             "gifter_badge": identity["gifter_badge"] or "",
+            "member_badge": identity["member_badge"] or "",
+            # この視聴者自身が配信者かどうか。leagueはD帯を落とした表示用の値で、
+            # broadcasterはNULL(未確認)と0(確認して配信者ではない)を区別する。
+            "league": display_league(identity["league"]),
+            "broadcaster": (
+                None if identity["broadcaster"] is None else bool(identity["broadcaster"])
+            ),
+            "league_checked_at": identity["league_checked_at"],
             "first_seen": identity["first_seen"],
             "last_seen": identity["last_seen"],
             "diamonds": sum(s["diamonds"] for s in sessions),

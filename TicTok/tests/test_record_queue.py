@@ -1281,12 +1281,16 @@ def test_scan_roots_labels_the_shared_bucket_and_sorts_streamers_by_size(tmp_roo
 
 
 class _FakeChild:
-    """subprocess.Popenの代役。stdoutに流す行と終了codeだけを持つ。"""
+    """subprocess.Popenの代役。stdoutに流す行と終了codeだけを持つ。
+
+    ``returncode`` も持たせる。取り消しの ``cancel._kill`` はこの属性で「まだ生きているか」
+    を見るので、無いと取り消し経路がAttributeErrorで落ちる(Popenは必ず持っている)。"""
 
     def __init__(self, stdout_lines, stderr_lines=(), code=0):
         self.stdout = iter(stdout_lines)
         self.stderr = iter(stderr_lines)
         self._code = code
+        self.returncode = None
         self.killed = False
 
     def wait(self):
@@ -1336,6 +1340,60 @@ def test_stt_worker_reports_the_exit_code_and_log_tail_when_the_child_dies(monke
         _run_with_child(monkeypatch, child)
     assert "3221226505" in str(excinfo.value)
     assert "cuda init" in str(excinfo.value)
+
+
+def test_stt_worker_registers_the_child_so_cancel_can_kill_it(monkeypatch):
+    """取り消しは子processのkillでしか効かない。復号はCTranslate2の中で回っており、python側に
+    取り消しを見に行く余地が無いため、登録し忘れると取り消しが黙って無視される。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
+
+    child = _FakeChild([
+        '{"t": "progress", "done": 5.0, "total": 10.0}\n',
+        '{"t": "result", "result": {"text": "ok"}}\n',
+    ], code=3221225786)
+    token = cancel.CancelToken("job1")
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", lambda *a, **k: child)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts", lambda d, t: token.cancel())
+    assert child.killed
+
+
+def test_stt_worker_reports_a_cancel_as_cancelled_not_as_a_crash(monkeypatch):
+    """killされた子は本物のcrashと同じ非0で返る。取り消しを先に名乗らないと、operator自身の
+    取り消しが「processが異常終了しました」というerrorとして記録される。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
+
+    child = _FakeChild([], stderr_lines=["loading whisper model\n"], code=3221225786)
+    token = cancel.CancelToken("job1")
+    token.cancel()
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", lambda *a, **k: child)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts")
+
+
+def test_stt_worker_does_not_start_a_child_for_an_already_cancelled_job(monkeypatch):
+    """枠待ちは数時間になり得る。待っている間に受けた取り消しが無視されると、止めたはずの
+    jobが枠を取った瞬間に改めて走り出す。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
+
+    spawned = []
+
+    def _spawn(*args, **kwargs):
+        spawned.append(1)
+        return _FakeChild([])
+
+    token = cancel.CancelToken("job1")
+    token.cancel()
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", _spawn)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts")
+    assert spawned == []
 
 
 def test_stt_worker_ignores_a_stray_stdout_line_without_losing_the_result(monkeypatch):

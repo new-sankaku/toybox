@@ -35,7 +35,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from tictok import battle_migration, glove_migration
+from tictok import battle_migration, glove_migration, timemap_migration
 from tictok.core import perf
 from tictok.core.config import get_journal_enabled, get_log_dir
 
@@ -62,6 +62,7 @@ from tictok.store._common import (
     _MIGRATION_BACKUP_KEY,
     _OPS_LOG_LEVELS,
     _ReadResult,
+    _TIMEMAP_SELECTION_KEY,
     _SESSION_TOTALS_CTE,
     _SQLITE_FATAL_ERRORNAMES,
     _SQLITE_FATAL_MESSAGES,
@@ -87,6 +88,7 @@ from tictok.store.ai_cache import AiCacheMixin
 from tictok.store.ingest import IngestMixin
 from tictok.store.sessions import SessionsMixin
 from tictok.store.users import UsersMixin
+from tictok.store.gifter_league import GifterLeagueMixin
 from tictok.store.battles import BattlesMixin
 from tictok.store.streamers import StreamersMixin
 from tictok.store.analytics_store import AnalyticsMixin
@@ -121,6 +123,7 @@ __all__ = [
     "_MIGRATION_BACKUP_KEY",
     "_OPS_LOG_LEVELS",
     "_ReadResult",
+    "_TIMEMAP_SELECTION_KEY",
     "_SESSION_TOTALS_CTE",
     "_SQLITE_FATAL_ERRORNAMES",
     "_SQLITE_FATAL_MESSAGES",
@@ -149,6 +152,7 @@ class Storage(
     IngestMixin,
     SessionsMixin,
     UsersMixin,
+    GifterLeagueMixin,
     BattlesMixin,
     StreamersMixin,
     AnalyticsMixin,
@@ -219,6 +223,10 @@ class Storage(
         # 開くためで、ここはまだwriter threadも起動していない起動直後の単独実行区間である。
         premigration_backup = self._backup_before_migrations()
         with self._lock:
+            # 「この選別ruleでの選別は完走済み」。timemapの選別だけがこれを見る(下記)。
+            timemap_selection = str(timemap_migration.SELECTION_VERSION)
+            timemap_done = (
+                self._get_maintenance_locked(_TIMEMAP_SELECTION_KEY) == timemap_selection)
             # 旧方式judgeのグローブcrit event(vマーカー無し)を新方式へ再判定する。
             # 冪等で、対象が無ければno-op。collectorはまだ動いていない起動時のみ安全。
             glove_stats = glove_migration.migrate_glove_events(self._conn, get_log_dir())
@@ -229,6 +237,22 @@ class Storage(
             topo_stats = battle_migration.migrate_battle_topology(self._conn)
             if topo_stats["battles"]:
                 logger.info("battleの構造判定をv2へ移行しました: %s", topo_stats)
+            # 旧版の時刻mapで作られた文字起こしを素材の実尺で選別する。畳む対象が無かった
+            # ものは現行版と同じ時刻なので昇格させ、食い違うものだけ据え置く。冪等。
+            #
+            # glove/battleと違い、同じ選別ruleでは二度走らせない。据え置いた行は版1のまま
+            # 残り続けるので、毎起動で同じ母集合を測り直すことになる。しかも物差し
+            # (material_media_seconds)は採用集合のplaylist解析かffprobeで、1件あたり数百ms
+            # かかる — writer threadを起こす前のこの区間でそれを繰り返すと、据え置きが増える
+            # ほど起動が延びる。据え置いた行は再転写でしか動かず、再転写は現行版で保存する。
+            if timemap_done:
+                timemap_stats = {"checked": 0, "promoted": 0, "kept": 0, "skipped": "done"}
+            else:
+                timemap_stats = timemap_migration.migrate_timemap_version(
+                    self._conn, timemap_migration.material_span)
+                self._set_maintenance_locked(_TIMEMAP_SELECTION_KEY, timemap_selection)
+            if timemap_stats["checked"]:
+                logger.info("文字起こしの時刻map版を選別しました: %s", timemap_stats)
             pruned_ops = self._prune_ops_events_locked()
             self._set_maintenance_locked(_MIGRATION_BACKUP_KEY, _migration_versions())
             self._conn.commit()

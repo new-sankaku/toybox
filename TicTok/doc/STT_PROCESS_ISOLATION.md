@@ -78,7 +78,14 @@ logへ流す)。stdoutへlogを混ぜると結果を読めなくなる。
 
 - **子の死を必ず観測できる**。native crashは例外にならないが、終了codeとstderrは残るので、
   jobのerrorとして記録される(今までは無言で消えた)
-- **復号中の取り消しが効く**(processをkillすれば止まる)
+- **復号中の取り消しが効く**(processをkillすれば止まる)。ただし**killできるのは
+  `cancel.register_process` へ預けた場合だけ**である。別processにした当初これを忘れており、
+  取り消しAPIは `cancelling` を返すのに子は最後まで走り切っていた(実測: 6時間16分の入力を
+  96%まで回し切り、画面には「取消中」が残ったまま)。復号はCTranslate2の中で回っていて
+  python側に取り消しを見に行く余地が無いので、**登録以外に止める手段は無い**。
+  killされた子は本物のcrashと同じ非0で返るため、`run_transcribe` は結果を判定する前に
+  `cancel.check_cancelled()` を通す — 通さないとoperator自身の取り消しが
+  「processが異常終了しました」というerrorとして記録される
 - **job毎にVRAMが解放される**。以前はwhisper modelがserverに常駐し、焼き込みと食い合った
 
 ## costは無視できる

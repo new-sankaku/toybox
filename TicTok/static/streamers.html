@@ -92,64 +92,6 @@
             <div id="sm-cohort-empty" class="feed-empty">視聴データがまだありません。</div>
           </section>
 
-          <!-- ハイライト自動抽出(コイン急増点) -->
-          <section class="result-block">
-            <h3 class="result-subtitle">■ ハイライト <span class="result-sub-note">（配信中のコイン急増点を自動抽出・平常比）</span></h3>
-            <div class="table-wrap">
-              <table class="result-table">
-                <thead><tr><th>#</th><th>日時</th><th>Session</th><th>コイン(瞬間)</th><th>平常比</th><th>Comment</th><th>録画</th></tr></thead>
-                <tbody id="sm-highlight-rows"></tbody>
-              </table>
-            </div>
-            <div id="sm-highlight-empty" class="feed-empty">急増点は検出されませんでした（データ不足、または平坦な配信）。</div>
-            <!-- 再生は表の直下でそのまま行う。急増点と映像を同時に見られる。 -->
-            <div id="sm-video-box" class="sm-video-box hidden">
-              <div class="sm-video-head">
-                <span id="sm-video-title" class="result-sub-note"></span>
-                <button id="sm-video-stop" class="btn btn-small">再生を止める</button>
-              </div>
-              <video id="sm-video" class="sm-video" controls playsinline preload="metadata"></video>
-              <div id="sm-video-message" class="form-message"></div>
-            </div>
-          </section>
-
-          <!-- 録画file容量(選んでdiskから削除。記録・転写・解析は残る) -->
-          <section class="result-block" id="sm-files-section">
-            <h3 class="result-subtitle sm-files-head">
-              <span>■ 録画file <span class="result-sub-note">（選んでdiskから削除できます）</span></span>
-              <span id="sm-files-selected" class="result-sub-note"></span>
-              <!-- 投入buttonはここに置かない。この画面は1人ぶんの分析と容量整理が役割で、
-                   対象数の判定も進捗も持っていない。実体は配信者動画の一括処理tabにあるので、
-                   同じ配信者を選んだ状態でそこへ渡すlinkだけを出す。 -->
-              <a id="sm-files-bulk" class="btn btn-small" href="/videos#bulk">この配信者を一括処理…</a>
-              <button id="sm-files-run" class="btn btn-small btn-danger" disabled>選択したfileを削除</button>
-            </h3>
-            <p class="chart-note">
-              選んだfileをdiskから削除します。録画の記録そのもの（転写・検索index・bookmark・切り出しlist・解析）は残るため、
-              文字起こしからの検索は削除後も使えます。<strong>削除したfileは元に戻せません。</strong>
-            </p>
-            <div id="sm-files-summary" class="a-kpibar"></div>
-            <div class="table-wrap">
-              <table class="result-table sm-files-table">
-                <thead>
-                  <tr>
-                    <th><label class="sm-files-all"><input type="checkbox" id="sm-files-all-mp4" /> 動画</label></th>
-                    <th><label class="sm-files-all"><input type="checkbox" id="sm-files-all-ts" /> TS</label></th>
-                    <th>#</th>
-                    <th>file名</th>
-                    <th>状態</th>
-                    <th>開始</th>
-                    <th>動画容量</th>
-                    <th>TS容量</th>
-                  </tr>
-                </thead>
-                <tbody id="sm-files-rows"></tbody>
-              </table>
-            </div>
-            <div id="sm-files-empty" class="a-empty" data-label="録画">録画がありません。</div>
-            <div id="sm-files-message" class="form-message"></div>
-          </section>
-
           <div class="sm-grid">
             <!-- Gifter / 収益分析 -->
             <section class="result-block">
@@ -162,6 +104,20 @@
                 </table>
               </div>
               <div id="sm-gifters-empty" class="feed-empty">Giftの記録がありません。</div>
+            </section>
+
+            <!-- ライバーからのギフト: 比率だけでは「誰が投げたのか」が読めないため、
+                 リーグ帯の内訳と本人の一覧を並べる。 -->
+            <section class="result-block">
+              <h3 class="result-subtitle">■ ライバーからのギフト <span class="result-sub-note">（自分でも配信している人）</span></h3>
+              <div class="a-kpibar sm-conc" id="sm-liver-tiers"></div>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead><tr><th>#</th><th>ライバー</th><th class="num">コイン</th><th class="num">Gift数</th><th class="num">出現Session</th></tr></thead>
+                  <tbody id="sm-livers"></tbody>
+                </table>
+              </div>
+              <div id="sm-livers-empty" class="feed-empty">ライバーからのGiftはまだ確認できていません。</div>
             </section>
           </div>
 
@@ -249,6 +205,15 @@
               </table>
             </div>
             <div id="sm-battle-history-empty" class="feed-empty">Battleの記録がありません。</div>
+            <!-- 再生は表の直下でそのまま行う。対戦の記録と映像を同時に見られる。 -->
+            <div id="sm-video-box" class="sm-video-box hidden">
+              <div class="sm-video-head">
+                <span id="sm-video-title" class="result-sub-note"></span>
+                <button id="sm-video-stop" class="btn btn-small">再生を止める</button>
+              </div>
+              <video id="sm-video" class="sm-video" controls playsinline preload="metadata"></video>
+              <div id="sm-video-message" class="form-message"></div>
+            </div>
           </section>
         </div>
       </main>

@@ -46,6 +46,7 @@ import csv
 import io
 import json
 import logging
+import math as _math
 import os
 import subprocess
 import threading
@@ -60,6 +61,7 @@ from tictok.core.config import (
     get_laugh_audio_activation,
     get_laugh_audio_batch,
     get_laugh_audio_classes,
+    get_laugh_audio_device,
     get_laugh_audio_enabled,
     get_laugh_audio_hop_seconds,
     get_laugh_audio_labels_path,
@@ -91,6 +93,11 @@ _LOGIT_CLAMP = 60.0
 # sidecarにしか無いcache管理用の項。読み出した確率列へは混ぜない。
 _CACHE_ONLY_KEYS = ("version", "mtime", "size", "segments",
                     "model", "model_size", "model_mtime")
+
+
+# deviceの設定値 -> onnxruntimeのexecution provider。ここに無い値は例外にする(綴り違いを
+# 黙ってCPUとして扱うと、GPUのつもりで遅いまま気付けない)。
+_PROVIDERS = {"cpu": "CPUExecutionProvider", "cuda": "CUDAExecutionProvider"}
 
 
 class LaughAudioError(RuntimeError):
@@ -184,7 +191,7 @@ def laugh_status() -> dict:
         "window_seconds": get_laugh_audio_window_seconds(),
         "hop_seconds": get_laugh_audio_hop_seconds(),
         "threshold": get_laugh_audio_threshold(),
-        "device": "cpu",
+        "device": get_laugh_audio_device(),
     }
 
 
@@ -301,8 +308,15 @@ def _get_model() -> _Model:
     if not model_file.is_file():
         raise LaughAudioError(f"笑い声検出のmodel fileが見つかりません: {model_file}")
     threads = get_laugh_audio_threads()
+    device = get_laugh_audio_device()
+    provider = _PROVIDERS.get(device)
+    if provider is None:
+        raise LaughAudioError(
+            f"TICTOK_LAUGH_AUDIO_DEVICE には {'/'.join(_PROVIDERS)} のいずれかを"
+            f"設定してください（今の値: {device!r}）。"
+        )
     model_path = str(model_file)
-    key = (model_path, threads)
+    key = (model_path, threads, device)
     global _model, _model_key
     with _model_lock:
         if _model is None or _model_key != key:
@@ -312,31 +326,44 @@ def _get_model() -> _Model:
                 options.intra_op_num_threads = threads
                 options.inter_op_num_threads = 1
             logger.info(
-                "笑い声検出のmodelを読み込みます: %s（threads=%d）", model_path, threads,
+                "笑い声検出のmodelを読み込みます: %s（device=%s threads=%d）",
+                model_path, device, threads,
                 extra={"event": "laugh.model_load_started",
-                       "ctx": {"path": model_path, "threads": threads,
+                       "ctx": {"path": model_path, "device": device, "threads": threads,
                                "size_bytes": model_file.stat().st_size}},
             )
             try:
                 session = ort.InferenceSession(
-                    model_path, sess_options=options,
-                    providers=["CPUExecutionProvider"],
+                    model_path, sess_options=options, providers=[provider],
                 )
             except Exception as exc:
                 logger.error(
                     "笑い声検出のmodel %s を読み込めませんでした", model_file.name,
                     extra={"event": "laugh.model_load_failed",
-                           "ctx": {"path": model_path, "threads": threads,
+                           "ctx": {"path": model_path, "device": device,
+                                   "threads": threads,
                                    "duration_ms": int((time.monotonic() - started) * 1000)}},
                     exc_info=True,
                 )
                 raise LaughAudioError(f"笑い声検出modelの読み込みに失敗しました: {exc}") from exc
+            # **onnxruntimeは要求したproviderを作れないと黙ってCPUへ落ちる。** 実測でも
+            # CUDAを指定したsessionが CPUExecutionProvider だけを名乗り、そのまま
+            # 「GPUで走っている」つもりの計測値が出た(CUDA EPのDLL依存が1つ欠けていた)。
+            # 落ちたことは結果を見ても分からないので、ここで名乗らせて突き合わせる。
+            active = session.get_providers()
+            if provider not in active:
+                raise LaughAudioError(
+                    f"{provider} を作れませんでした（実際に載ったのは {active}）。"
+                    "onnxruntime-gpuの導入とCUDA runtimeのDLLを確認してください。"
+                    "CPUで走らせる場合は TICTOK_LAUGH_AUDIO_DEVICE=cpu にしてください。"
+                )
             _model = _describe(session, model_file)
             _model_key = key
             logger.info(
-                "笑い声検出のmodelを準備しました: %s（cpu）", model_file.name,
+                "笑い声検出のmodelを準備しました: %s（%s）", model_file.name, device,
                 extra={"event": "laugh.model_loaded",
-                       "ctx": {"path": model_path, "threads": threads,
+                       "ctx": {"path": model_path, "device": device, "threads": threads,
+                               "providers": active,
                                "fixed_batch": _model.fixed_batch,
                                "fixed_samples": _model.fixed_samples,
                                "duration_ms": int((time.monotonic() - started) * 1000)}},
@@ -688,18 +715,33 @@ async def ensure_laugh_profile(src: Path) -> dict:
         cached = await asyncio.to_thread(_load_cache, src, window, hop)
         if cached:
             return cached
-        profile = await asyncio.to_thread(_build, src, window, hop)
+        if get_laugh_audio_device() == "cpu":
+            profile = await asyncio.to_thread(_build, src, window, hop)
+        else:
+            # GPUはこのprocessへ載せない(cuDNNの同居でserverごと落ちる)。境界の説明は
+            # laugh_worker の module docstring。
+            from tictok.media import laugh_worker
+            profile = await asyncio.to_thread(laugh_worker.run_build, src, window, hop)
         await asyncio.to_thread(_store_cache, src, profile)
     return profile
 
 
 def laugh_seconds(profile: dict, start: float, end: float,
-                  threshold: Optional[float] = None) -> Optional[float]:
+                  threshold: Optional[float] = None,
+                  exclude_spans: Optional[list] = None) -> Optional[float]:
     """``[start, end)``秒のうち笑いが出ていた秒数。区間がprofileの外なら判定不能でNone。
 
     確率列は ``interval_seconds`` 刻みなので、閾値を超えた刻みの数 × 刻み幅を返す。
     Noneを0で埋めないのは ``waveform.level_peak`` と同じ理由で、解析していない区間と
     「笑いが無かった区間」を混ぜると、前者が静かな区間として集計に入ってしまうため。
+
+    ``exclude_spans`` (``[(start, end), ...]``秒)に入る刻みは数えない。コラボ中を外す
+    ための口で、窓の作り方はここでは決めない — 画面の顔の数から作るなら
+    ``smile.multi_face_spans``、DBの事実から作るなら呼び出し側で組む。engineが窓の
+    出所を知らないのは ``smile.without_spans`` と同じ方針で、素材だけで再現できる状態を
+    保つためである。
+
+    除外はsidecarを書き換えない。窓の定義を変えても再解析は要らない(閾値と同じ扱い)。
     """
     interval = profile["interval_seconds"]
     probs = profile["probs"]
@@ -710,5 +752,25 @@ def laugh_seconds(profile: dict, start: float, end: float,
     if first >= last or first >= len(probs):
         return None
     threshold = get_laugh_audio_threshold() if threshold is None else threshold
-    hits = sum(1 for v in probs[first:last] if v >= threshold)
+    excluded = _excluded_ticks(exclude_spans, interval, first, last)
+    hits = sum(1 for i in range(first, last)
+               if probs[i] >= threshold and i not in excluded)
     return round(hits * interval, 3)
+
+
+def _excluded_ticks(spans: Optional[list], interval: float,
+                    first: int, last: int) -> set:
+    """``spans`` が覆う刻みindexの集合(``[first, last)`` の範囲だけ)。
+
+    刻みは ``[i*interval, (i+1)*interval)`` を表すので、窓と少しでも重なる刻みを外す。
+    中心が入るかで判定すると、刻みより短い窓が1つも外れない。"""
+    if not spans:
+        return set()
+    ticks: set = set()
+    for span_start, span_end in spans:
+        if span_end <= span_start:
+            continue
+        lo = max(first, int(float(span_start) / interval))
+        hi = min(last, int(_math.ceil(float(span_end) / interval)))
+        ticks.update(range(lo, hi))
+    return ticks

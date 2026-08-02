@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body class="app-dashboard cap-page">
+<body class="app-dashboard">
   <div class="scanlines" aria-hidden="true"></div>
 
   <div class="app-shell">
@@ -71,6 +71,7 @@
         <h3>driveの空きと満杯まで <span class="sub">日次の記録から1日あたりの増減を出し、満杯までを幅で見積もります</span></h3>
         <div class="body">
           <div class="note-actions">
+            <button id="cap-reload" class="btn" title="この画面の集計を取り直します。folderの走査は行いません。">最新にする</button>
             <button id="cap-sample" class="btn" title="いまの容量を1件記録します。日次の自動記録と同じ内容です。">容量を今すぐ記録</button>
             <span id="cap-status" class="form-message"></span>
           </div>
@@ -121,7 +122,7 @@
       <div class="a-card a-settingscard">
         <h3>録画folderの内訳 <span class="sub">配信者別・種別別に、実際にfolderを走査して集計します</span></h3>
         <div class="body">
-          <div class="chart-note">数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は下のbuttonを押したときだけ実行します。「作り直せる」種別は消しても録画から再生成できます。</div>
+          <div class="chart-note">数TB規模では走査に数十秒〜数分かかるため、結果は保存され、再走査は下のbuttonを押したときだけ実行します。「作り直せる」種別は消しても録画から再生成できます。<strong>この画面はfileを消しません。</strong>削除は<a href="/settings#retention-preview">設定画面の保持policy</a>で対象を確認してから実行します。</div>
           <div class="note-actions">
             <button id="usage-scan" class="btn btn-primary">容量を再scanする</button>
             <span id="usage-status" class="form-message"></span>
@@ -133,14 +134,16 @@
               <tbody id="usage-category-list"></tbody>
             </table>
           </div>
-          <div id="usage-category-empty" class="chart-note hidden">まだ走査していません。</div>
+          <div id="usage-category-empty" class="chart-note hidden" data-label="種別別の内訳">まだ走査していません。</div>
           <div class="table-wrap">
             <table class="result-table">
-              <thead><tr><th>配信者</th><th class="num">容量</th><th class="num">生録画</th><th class="num">焼き込み</th><th class="num">Up出力</th><th class="num">HLS(.ts)</th><th class="num">中間file</th></tr></thead>
+              <!-- 列はserverの種別定義(category_labels)から組む。画面が列を持つと、種別が
+                   増えたときに「容量」列と内訳の和が黙って合わなくなる。 -->
+              <thead><tr id="usage-streamer-head"></tr></thead>
               <tbody id="usage-streamer-list"></tbody>
             </table>
           </div>
-          <div id="usage-streamer-empty" class="chart-note hidden">まだ走査していません。</div>
+          <div id="usage-streamer-empty" class="chart-note hidden" data-label="配信者別の内訳">まだ走査していません。</div>
         </div>
       </div>
     </div>

@@ -18,11 +18,15 @@ from tictok.core.config import (get_media_job_auto_requeue_limit, get_media_job_
     get_media_queue_sweep_concurrency, get_no_restore)
 from tictok.core import perf
 from tictok.core import layout
+from tictok.core import orphan_capture
 from tictok.record.recorder import (ffmpeg_available, ffprobe_available,
     reclaim_pending_normalizations, recover_interrupted_recordings)
 # 文字起こしは必ず別processで走らせる。serverでCTranslate2を読むと、torch(焼き込み・Up出力)
 # と別versionのcuDNNが同じDLL名で同居し、processごと即死する(tictok.record.stt_worker参照)。
 from tictok.record import stt_worker
+# 笑い声検出をGPUで走らせるときも同じ理由で別processになる(cpu実行なら子は起きない)。
+from tictok.media import laugh_worker
+from tictok.collect.gifter_league import GifterLeagueWorker
 from tictok.record.transcribe_queue import backfill_search_index
 from tictok.record import hls_pack
 from tictok.record.video_overlay import _duration_seconds, sweep_orphaned_transients
@@ -377,6 +381,15 @@ async def lifespan(app: FastAPI):
     # 監視の復元より先に起こす。復元は数秒後に実配信へ接続してsessionを開始するので、後に
     # すると起動直後のLIVE開始通知だけが落ちる。
     runtime.notifier.start()
+    # 監視の復元より先に起こす。復元した配信のeventが届き始めた時点でworkerが居ないと、
+    # 署名URLが新鮮な最初の数秒ぶんのassetをqueueに積んだまま取り逃す。
+    if runtime.asset_prefetch is not None:
+        runtime.asset_prefetch.start()
+    # 前回の実行が残した捕捉ffmpegを、**録画に触れる何よりも先に**止める。この後に来る
+    # manager.restore()は実配信へ繋いで録画を始め、_recover_interrupted_recordings_bgは
+    # 素材を見て中断録画を確定させる。孤児が書き続けたままそれをやると、確定した尺が直後
+    # から嘘になり、同じdirを2つのffmpegが書く(実測: 録画行12.0秒に対しdirは16,861.8秒)。
+    await asyncio.to_thread(orphan_capture.sweep, runtime._RECORD_ROOTS)
     await runtime.manager.startup()
     no_restore = get_no_restore()
     if no_restore:
@@ -401,6 +414,10 @@ async def lifespan(app: FastAPI):
     backfill_task = asyncio.create_task(_backfill_search_index_bg())
     reclaim_task = asyncio.create_task(_reclaim_normalizations_bg())
     capacity_task = asyncio.create_task(_capacity_sampler_bg())
+    # ギフターのリーグ取得。待ち行列はDBに在るので、ここは流すだけ。収集本体とは別枠の
+    # 外部アクセスなので、間隔は自前の設定(既定15秒/件)で持つ。
+    gifter_league_worker = GifterLeagueWorker(runtime.storage, runtime.settings)
+    gifter_league_task = asyncio.create_task(gifter_league_worker.run())
     # event loopの遅れを測る常駐probe。1本のcoroutineがloopを握ると全画面が同時に遅く
     # なるが、それはrequestごとの所要時間には「全員が少しずつ遅い」としか出ない。
     loop_lag_task = asyncio.create_task(perf.loop_lag_monitor())
@@ -444,6 +461,12 @@ async def lifespan(app: FastAPI):
         await capacity_task
     except asyncio.CancelledError:
         pass
+    gifter_league_task.cancel()
+    try:
+        await gifter_league_task
+    except asyncio.CancelledError:
+        pass
+    await gifter_league_worker.aclose()
     startup_sweep_task.cancel()
     try:
         await startup_sweep_task
@@ -457,14 +480,21 @@ async def lifespan(app: FastAPI):
     # 文字起こしはmedia_job_queueのkind=sttとして走る。子processだけは別に落とす必要が
     # ある(Windowsは親の終了で子を殺さない)。
     stt_worker.terminate_all()
+    # 笑い声検出をGPUで走らせている場合も同じ形の子processが居る(cpu実行なら0件)。
+    laugh_worker.terminate_all()
     await media_jobs.media_job_queue.stop()
     await runtime.manager.stop_all()
     await runtime.manager.shutdown()
     # 監視を止めた後に止める。先に止めると停止処理そのものが出す状態遷移が通知されない。
     # storage.close()より前であることも必須で、送信失敗はops_eventsへ書く。
     await runtime.notifier.stop()
+    # 先行取得のworkerは、それが叩くstore(httpx client)を閉じる前に止める。逆順にすると
+    # 実行中のdownloadが閉じたclientへ落ちて、終了処理が例外で埋まる。
+    if runtime.asset_prefetch is not None:
+        await runtime.asset_prefetch.aclose()
     await runtime.avatar_proxy.aclose()
     await runtime.gift_icons.aclose()
     await runtime.avatar_pool.aclose()
+    await runtime.emote_pool.aclose()
     runtime.storage.close()
     runtime.instance_lock.release()

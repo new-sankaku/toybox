@@ -215,4 +215,113 @@ describe("videos.js", () => {
       expect(doc.getElementById("search-summary").textContent).toBe("未確認 2本 / 録画 4本");
     });
   });
+
+  // 配信者選択は「選ぶと何かが出てくる」配信者だけを並べる。実体も転写も索引も無い配信者を
+  // 混ぜると、選んでも空の一覧しか出ない選択肢が並ぶ(素材がretentionで消えた配信者)。
+  describe("配信者の絞り込み候補", () => {
+    const entry = (over) => ({
+      unique_id: "x", recordings: 1, playable: 0, transcribable: 0,
+      transcribed: 0, comment_indexed: 0, seconds: 0, ...over,
+    });
+    const options = () =>
+      [...doc.getElementById("flt-streamer").options].map((o) => o.value);
+
+    it("実体のある配信者は候補に出す", () => {
+      state().streamers = [entry({ unique_id: "alive", playable: 2 })];
+      win.fillStreamerSelects();
+      expect(options()).toEqual(["", "alive"]);
+    });
+
+    it("実体も転写も索引も無い配信者は候補から外す", () => {
+      state().streamers = [entry({ unique_id: "ghost", recordings: 5 })];
+      win.fillStreamerSelects();
+      expect(options()).toEqual([""]);
+    });
+
+    it("実体が無くても転写・索引が在れば残す(そこへ辿る道がここしかない)", () => {
+      state().streamers = [
+        entry({ unique_id: "stt-only", transcribed: 1 }),
+        entry({ unique_id: "cmt-only", comment_indexed: 1 }),
+      ];
+      win.fillStreamerSelects();
+      expect(options()).toEqual(["", "stt-only", "cmt-only"]);
+    });
+
+    it("選択中の配信者が候補から消えたら「全て」へ戻す", () => {
+      state().streamers = [entry({ unique_id: "alive", playable: 1 })];
+      win.fillStreamerSelects();
+      doc.getElementById("flt-streamer").value = "alive";
+      state().streamers = [entry({ unique_id: "alive" })];
+      win.fillStreamerSelects();
+      expect(doc.getElementById("flt-streamer").value).toBe("");
+    });
+
+    it("表からは消さず、実体0本であることを名乗る", () => {
+      state().streamers = [
+        entry({ unique_id: "alive", playable: 1, transcribable: 1 }),
+        entry({ unique_id: "ghost", recordings: 5 }),
+      ];
+      win.renderStreamers();
+      const rows = [...doc.getElementById("streamer-rows").rows];
+      expect(rows).toHaveLength(2);
+      expect(rows[1].cells[0].textContent).toContain("実体なし");
+      expect(rows[0].cells[0].textContent).toBe("alive");
+      // 投入できる録画が無い配信者の文字起こしは押させない(投入側も実体で弾く)。
+      expect(rows[1].querySelector("button").disabled).toBe(true);
+      expect(rows[0].querySelector("button").disabled).toBe(false);
+    });
+  });
+
+  // M keyは動画を見ている最中に押されるので、視線はstatusの1行から遠い。記録できた事実と
+  // 行き先が画面に出ないと、押せていないのか記録先が違うのかを区別できない。
+  describe("見どころ記録の合図", () => {
+    beforeEach(() => {
+      state().current = { recording_id: 7, unique_id: "u1" };
+      state().groups = [{ id: 3, name: "切り抜きA" }];
+      win.fetch = async () =>
+        new Response(JSON.stringify({ id: 99, items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+    });
+
+    const toastText = () => {
+      const body = doc.querySelector("#toast-layer .toast-body");
+      return body ? body.textContent : null;
+    };
+
+    it("記録した時刻と行き先を画面内notificationに出す", async () => {
+      await win.saveBookmark(65, null, "", null);
+      expect(toastText()).toBe("見どころに記録しました（00:01:05 → 未分類）");
+      expect(doc.getElementById("player-status").textContent).toBe(toastText());
+    });
+
+    it("記録先グループを選んでいればその名前を出す", async () => {
+      state().addGroup = "3";
+      await win.saveBookmark(65, null, "", null);
+      expect(toastText()).toBe("見どころに記録しました（00:01:05 → 切り抜きA）");
+    });
+
+    it("範囲で記録したときはIN/OUTの両方を出す", async () => {
+      await win.saveBookmark(65, 90, "", null);
+      expect(toastText()).toBe("見どころに記録しました（00:01:05 - 00:01:30 → 未分類）");
+    });
+
+    it("記録した位置をtimeline上で光らせる(点はendを持たない)", async () => {
+      await win.saveBookmark(65, null, "", null);
+      expect(page.get("markFlash")).toMatchObject({ start: 65, end: null });
+      expect(win.markFlashAlpha()).toBeGreaterThan(0);
+    });
+
+    it("失敗したら成功の合図を出さない", async () => {
+      win.fetch = async () =>
+        new Response(JSON.stringify({ detail: "録画が見つかりません。" }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        });
+      await win.saveBookmark(65, null, "", null);
+      expect(toastText()).toBe("録画が見つかりません。");
+      expect(page.get("markFlash")).toBeNull();
+    });
+  });
 });

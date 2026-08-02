@@ -3,8 +3,9 @@
 // Job画面: 実行中・待機中・過去のjobを1画面に並べ、取り消しと再実行の導線を持つ。
 // 運用log(ops_events)は「もう起きたこと」を遡る画面で、こちらは「これから終わること」を
 // 待つ画面。更新のされ方(行の書き換え vs 追記)も見る目的も違うので、pageを分けている。
-// 一覧はWSのjob_update/jobsで更新するが、pageを開いた直後だけはHTTPで取り直す
-// (WSのsnapshotが届く前の空表示を避けるため)。
+// 一覧の出所はHTTPの /api/jobs で、filter(状態・種別)はserverが台帳全体へ当てる。実行中の
+// 行はWSのjob_updateがその場で書き換えるが、WSのsnapshot(type=jobs)はfilterを通っていない
+// ので、届いたら置き換えではなく同じfilterで取り直す。
 
 const JOB_STATE_LABELS = {
   pending: { text: "待機中", cls: "badge-idle" },
@@ -17,37 +18,32 @@ const JOB_STATE_LABELS = {
   interrupted: { text: "中断", cls: "badge-error" },
 };
 
-const JOB_KIND_LABELS = {
-  stt: "文字起こし",
-  overlay: "焼き込み",
-  upscale: "Up出力",
-  reprocess: "再mp4化",
-  audionorm: "音量正規化",
-  pack: "ts結合",
-  waveform: "音声波形",
-  sprite: "サムネ",
-  overlay_preview: "焼き込みプレビュー",
-  clip_batch: "clip一括書き出し",
-  session_overlay: "Session 焼き込み",
-  session_upscale: "Session Up出力",
-  bulk_overlay: "一括 焼き込み出力",
-  bulk_upscale: "一括 Up出力",
-  bulk_reprocess: "一括 再mp4化",
-  bulk_audionorm: "一括 音量正規化",
-  bulk_pack: "一括 ts結合",
-  storage: "容量scan",
-  retention: "保持policy",
-  semantic: "意味検索index",
-  cutlist: "cut list書き出し",
-  reel: "切り出しの連結",
-  clip_overlay: "範囲焼き込み",
-};
+// 種別(domain)→日本語label。Server側(core/ops_labels.py)が唯一の出所で、画面は受け取って
+// 引くだけにする。同じ訳語をここにも置くと、運用logのmessage文と種別labelが必ずずれる
+// (実際「Up出力」と「AI高画質化」、「焼き込み」と「コメント焼き込み」がずれていた)。
+let kindLabels = {};
 
-// group(session一括)は個々のjobを畳んだ表示行なので、既定では明細を出さない。
+// 状態filterの値 → 対象のstate。server側の同じ表(record/media_queue.STATE_FILTERS)が台帳を
+// 絞り、ここはWSで届いた行に同じ判定を当てるために持つ(訳語ではなくstate keyなので二重に
+// 持っても語がずれることはない)。
 const ACTIVE_STATES = ["pending", "running"];
 const FAILED_STATES = ["failed", "interrupted"];
 
+// 1回に読み込む台帳の行数。これを超える分はserverが切るので、切れたことを画面が名乗る。
+const JOB_PAGE_LIMIT = 200;
+
 let jobs = [];
+// filterに一致する台帳の全行数と、実際に読み込んだ上限。total > limit のとき、この一覧は
+// 「全部」ではない。
+let jobTotal = 0;
+let jobLimit = JOB_PAGE_LIMIT;
+// 列clickでの並べ替え。nullの間は既定の並び(実行中→待機中→その他、以降時刻降順)。
+let sortState = null;
+// ?kind= で来た種別。種別の選択肢はserverの応答から作るため、選択肢が揃うまで預かる。
+let pendingKind = "";
+// ?job= で名指しされたjob。台帳から直接引かせるためserverへ渡す — 指されたjobが古くて
+// 直近200件の外に居ても着地できるようにする。絞込入力を人が触った時点で外す。
+let pinnedJob = "";
 // 明細を開いているgroup_id。groupの合成行はjob_idにgroup_idがそのまま入るため、
 // 「group_idを持ち、かつjob_idと一致しない」行がsession一括の明細にあたる。
 const expandedGroups = new Set();
@@ -87,14 +83,25 @@ function scheduleRender() {
 function currentFilter() {
   return {
     state: document.getElementById("job-flt-state").value,
-    kind: document.getElementById("job-flt-kind").value,
+    // 種別の選択肢はserverの応答から作るので、初回は ?kind= がまだselectに入っていない。
+    // requestには先に載せる(選択肢が揃うのを待って読み直すと2往復になる)。
+    kind: pendingKind || document.getElementById("job-flt-kind").value,
+    text: document.getElementById("job-flt-text").value.trim().toLowerCase(),
   };
+}
+
+// 絞込入力が当たる文字列。画面に出ている「対象」に加えてjob idも見るのは、運用logの
+// 「このjobを見る」が ?job=<job_id> でここへ飛ばしてくるため。
+function jobSearchText(job) {
+  return [jobTargetText(job), job.title, job.job_id, job.group_id]
+    .filter(Boolean).join(" ").toLowerCase();
 }
 
 function matchesFilter(job, filter) {
   if (filter.state === "active" && !ACTIVE_STATES.includes(job.state)) return false;
   if (filter.state === "failed" && !FAILED_STATES.includes(job.state)) return false;
   if (filter.kind !== "all" && job.domain !== filter.kind) return false;
+  if (filter.text && !jobSearchText(job).includes(filter.text)) return false;
   return true;
 }
 
@@ -134,25 +141,95 @@ function visibleRows() {
   return rows;
 }
 
+// 列clickでの並べ替え。値は画面に出ている物と同じ物を使う(表示は「復帰待ち」なのに
+// 並びは"pending"、のように見えている語と順序の根拠が食い違わないようにする)。
+const JOB_SORT_COLUMNS = {
+  state: { dir: "asc", value: (job) => stateText(job) },
+  kind: { dir: "asc", value: (job) => kindText(job) },
+  target: { dir: "asc", value: (job) => jobTargetText(job) },
+  pct: { dir: "desc", value: (job) => job.pct || 0 },
+  queued: { dir: "desc", value: (job) => job.queued_at || job.started_at || 0 },
+  // 未実行(開始も投入も無い)は所要が「無い」ので、0秒のjobより後ろへ置く。
+  elapsed: { dir: "desc", value: (job) => (elapsedSeconds(job) === null ? -1 : elapsedSeconds(job)) },
+  result: { dir: "asc", value: (job) => resultText(job) },
+};
+
+function jobRecency(job) {
+  return job.finished_at || job.started_at || job.queued_at || 0;
+}
+
 function sortJobs(list) {
   const rank = (job) => (job.state === "running" ? 0 : job.state === "pending" ? 1 : 2);
+  const column = sortState && JOB_SORT_COLUMNS[sortState.key];
   return list.slice().sort((a, b) => {
+    if (column) {
+      const av = column.value(a);
+      const bv = column.value(b);
+      let diff = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv), "ja");
+      if (sortState.dir === "desc") diff = -diff;
+      // 同値どうしは既定と同じく新しい順。行が毎回入れ替わると読み直せない。
+      return diff || jobRecency(b) - jobRecency(a);
+    }
     if (rank(a) !== rank(b)) return rank(a) - rank(b);
-    const at = a.finished_at || a.started_at || a.queued_at || 0;
-    const bt = b.finished_at || b.started_at || b.queued_at || 0;
-    return bt - at;
+    return jobRecency(b) - jobRecency(a);
   });
+}
+
+// 押すたび 降順 → 昇順 → 既定 と回す。既定(実行中→待機中→その他)はこの画面の主目的
+// なので、列で並べ替えた後に戻す手段をreload以外に残す。
+function applySort(key) {
+  const column = JOB_SORT_COLUMNS[key];
+  if (!column) return;
+  if (!sortState || sortState.key !== key) sortState = { key, dir: column.dir };
+  else if (sortState.dir === column.dir) sortState = { key, dir: column.dir === "desc" ? "asc" : "desc" };
+  else sortState = null;
+  render();
+}
+
+function syncSortHeaders() {
+  document.querySelectorAll("#job-table th[data-sort]").forEach((th) => {
+    const active = Boolean(sortState) && th.dataset.sort === sortState.key;
+    th.classList.toggle("sorted", active);
+    th.classList.toggle("sorted-asc", active && sortState.dir === "asc");
+    th.setAttribute(
+      "aria-sort",
+      active ? (sortState.dir === "asc" ? "ascending" : "descending") : "none",
+    );
+  });
+}
+
+function bindSortHeaders() {
+  document.querySelectorAll("#job-table th[data-sort]").forEach((th) => {
+    th.tabIndex = 0;
+    th.title = "この列で並べ替えます（押すたび 降順→昇順→既定 と切り替わります）。";
+    th.addEventListener("click", () => applySort(th.dataset.sort));
+    th.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      applySort(th.dataset.sort);
+    });
+  });
+}
+
+// 順番待ちと、前提(保存先volume)の復帰待ちは進まない理由が違う。同じ「待機中」で並べると
+// queueが詰まっているようにしか見えない。
+function stateWaiting(job) {
+  return job.state === "pending" && job.not_before && job.not_before * 1000 > Date.now();
+}
+
+function stateText(job) {
+  const meta = JOB_STATE_LABELS[job.state] || { text: job.state };
+  return stateWaiting(job) ? "復帰待ち" : meta.text;
 }
 
 function stateCell(job) {
   const meta = JOB_STATE_LABELS[job.state] || { text: job.state, cls: "badge-idle" };
   const span = document.createElement("span");
   span.className = `badge ${meta.cls}`;
-  // 順番待ちと、前提(保存先volume)の復帰待ちは進まない理由が違う。同じ「待機中」で並べると
-  // queueが詰まっているようにしか見えない。
-  const waiting = job.state === "pending" && job.not_before && job.not_before * 1000 > Date.now();
-  span.textContent = waiting ? "復帰待ち" : meta.text;
-  if (waiting) span.title = job.stage || "前提が整うまで待っています。";
+  span.textContent = stateText(job);
+  if (stateWaiting(job)) span.title = job.stage || "前提が整うまで待っています。";
   return span;
 }
 
@@ -197,11 +274,16 @@ function targetCell(row) {
   return wrap;
 }
 
-function elapsedText(job) {
+function elapsedSeconds(job) {
   const start = job.started_at || job.queued_at;
-  if (!start) return "-";
+  if (!start) return null;
   const end = job.finished_at || Date.now() / 1000;
-  return fmtDuration(Math.max(0, end - start));
+  return Math.max(0, end - start);
+}
+
+function elapsedText(job) {
+  const seconds = elapsedSeconds(job);
+  return seconds === null ? "-" : fmtDuration(seconds);
 }
 
 function resultText(job) {
@@ -211,8 +293,20 @@ function resultText(job) {
   return result.filename || "";
 }
 
-async function sendJobAction(path, job, confirmText) {
-  if (confirmText && !await confirmDialog(confirmText, { title: "jobの取り消し", confirmLabel: "取り消す" })) return;
+// 失敗jobのmessageはffmpeg由来の長文が入る。そのまま流すと行が数行に折り返し、隣の
+// 進捗barが幅を失って潰れる。行内は1行で切り(.job-result)、全文はtooltipで読ませる。
+function resultCell(job) {
+  const text = resultText(job);
+  const span = document.createElement("span");
+  span.className = "job-result";
+  span.textContent = text;
+  if (text) span.title = text;
+  return span;
+}
+
+async function sendJobAction(path, job, confirmText, confirmOpts) {
+  const opts = confirmOpts || { title: "jobの取り消し", confirmLabel: "取り消す" };
+  if (confirmText && !await confirmDialog(confirmText, opts)) return;
   try {
     await apiSend("POST", `/api/jobs/${job.job_id}/${path}`);
     await load();
@@ -221,11 +315,35 @@ async function sendJobAction(path, job, confirmText) {
   }
 }
 
+// 表に無いdomainは生値をそのまま出す。それらしいラベルを組み立てると、記録に無い名前が
+// 画面に出て運用logと突き合わせられなくなる(ops_labels.pyのdocstringと同じ約束)。
+function kindLabel(domain) {
+  return kindLabels[domain] || domain;
+}
+
 // 起動時sweepが自動で積んだjobは、人が投げた覚えが無いまま並ぶ。種別だけを出すと「頼んで
 // いない処理が動いている」としか読めないので、出所を名乗らせる。
 function kindText(job) {
-  const label = JOB_KIND_LABELS[job.domain] || job.domain;
+  const label = kindLabel(job.domain);
   return job.sweep ? `${label}（自動）` : label;
+}
+
+// 種別filterの選択肢。labelと同じくserverの応答から作り、画面に一覧を持たない
+// (画面側の一覧は、serverへ種別が増えたときに黙って古いままになる)。
+function renderKindOptions() {
+  const select = document.getElementById("job-flt-kind");
+  const wanted = pendingKind || select.value;
+  // 先頭の「全て」は残し、それ以降を作り直す。
+  [...select.options].slice(1).forEach((option) => option.remove());
+  Object.entries(kindLabels).forEach(([domain, label]) => {
+    const option = document.createElement("option");
+    option.value = domain;
+    option.textContent = label;
+    select.appendChild(option);
+  });
+  // 知らない値でselectを空にしない(既定のfilterが外れて全件が出る方が読み違えを生む)。
+  if ([...select.options].some((option) => option.value === wanted)) select.value = wanted;
+  pendingKind = "";
 }
 
 function actionsCell(job) {
@@ -273,56 +391,97 @@ function actionsCell(job) {
   retry.textContent = "再実行";
   retry.title = "この録画をもう一度処理します。失敗・中断・取り消しならこの行がそのまま待機へ戻り、"
     + "完了済みなら新しいjobとして投入し直します。";
-  retry.addEventListener("click", () => sendJobAction("retry", job, ""));
+  // 完了済みからのretryは同じ行の再開ではなく新規投入で、GPUを長時間占有する。隣の
+  // 「取り消し」には確認があるのに、始める側が無警告なのは誤爆のcostが釣り合わない。
+  // 失敗・中断・取り消しからの再開は同じ行が待機へ戻るだけなので、従来どおり無確認。
+  const retryConfirm = job.state === "completed"
+    ? `完了済みの「${job.title}」をもう一度処理しますか？新しいjobとして投入され、`
+      + "既存の出力は上書きされます。GPUを長時間占有します。"
+    : "";
+  retry.addEventListener("click", () => sendJobAction("retry", job, retryConfirm,
+    { title: "完了済みの再実行", confirmLabel: "再実行する", danger: false }));
   wrap.appendChild(retry);
   return wrap;
 }
 
+// 右寄せ(tabular)にする列: 投入・所要。headerのclassもここを根拠に揃うので、
+// 数字だけが右へ寄って項目名と縦がずれる状態にはならない(renderTableRows)。
+const JOB_NUMERIC_COLS = [4, 5];
+
+// 一覧が空に見える理由を言い分ける。取得前・取得失敗・0件・filterで落ちただけ、は別物。
+function renderEmptyState(visible) {
+  const emptyEl = document.getElementById("job-empty");
+  if (visible > 0) {
+    setListState(emptyEl, "ok");
+    return;
+  }
+  if (loadState === "failed") {
+    setListState(emptyEl, "failed", loadError);
+    return;
+  }
+  if (loadState === "loading") {
+    setListState(emptyEl, "loading");
+    return;
+  }
+  const filter = currentFilter();
+  const filtering = filter.state !== "all" || filter.kind !== "all" || Boolean(filter.text);
+  if (!filtering) {
+    setListState(emptyEl, "empty");
+    return;
+  }
+  // 状態・種別はserverが台帳全体から絞っているので「該当なし」と言い切ってよい。ただし
+  // limitで切れている場合だけは、見えていない行の存在を先に名乗る。
+  setListMessage(emptyEl, jobTotal > jobLimit
+    ? `直近${fmtNum(jobLimit)}件の中に条件に一致するjobはありません（台帳の該当は${fmtNum(jobTotal)}件）。`
+    : "条件に一致するjobがありません。filterを変更してください。");
+}
+
+// limitで切れているとき、一覧を「これが全部」と読ませない。
+function renderLimitNote() {
+  const el = document.getElementById("job-limit-note");
+  el.removeAttribute("title");
+  if (loadState !== "loaded" || jobTotal <= jobLimit) {
+    el.textContent = "";
+    return;
+  }
+  el.textContent = `※ 直近${fmtNum(jobLimit)}件のみ表示（該当 ${fmtNum(jobTotal)}件）`;
+  el.title = `この条件に一致するjobは台帳に${fmtNum(jobTotal)}件ありますが、新しい${fmtNum(jobLimit)}件だけを読み込んでいます。`
+    + "これより古いjobはこの一覧に出ません。状態・種別で絞ると、古いjobもserver側から拾い直します。";
+}
+
 function render() {
   const rows = visibleRows();
-  const tbody = document.getElementById("job-rows");
-  tbody.replaceChildren();
-  const emptyEl = document.getElementById("job-empty");
-  if (rows.length > 0) setListState(emptyEl, "ok");
-  else if (loadState === "failed") setListState(emptyEl, "failed", loadError);
-  else if (loadState === "loading") setListState(emptyEl, "loading");
-  // jobが1件も無いのか、filterに一致しないだけなのかは別の状態。
-  else if (jobs.length > 0)
-    setListMessage(emptyEl, "条件に一致するjobがありません。filterを変更してください。");
-  else setListState(emptyEl, "empty");
-  // 組み立て中の行は画面に繋がっていないfragmentへ積む。live tbodyへ1行ずつ足すと、
-  // 行ごとにlayoutが走る。
-  const fragment = document.createDocumentFragment();
-  rows.forEach((row) => {
-    const job = row.job;
-    const tr = document.createElement("tr");
-    if (row.sub) tr.className = "job-subrow";
-    const cells = [
-      stateCell(job),
-      kindText(job),
-      targetCell(row),
-      progressCell(job),
-      fmtDateTime(job.queued_at || job.started_at),
-      elapsedText(job),
-      resultText(job),
-      actionsCell(job),
-    ];
-    cells.forEach((cell) => {
-      const td = document.createElement("td");
-      if (cell instanceof Node) td.appendChild(cell);
-      else td.textContent = cell;
-      tr.appendChild(td);
-    });
-    fragment.appendChild(tr);
+  renderTableRows("job-rows", null, rows, (row) => [
+    stateCell(row.job),
+    kindText(row.job),
+    targetCell(row),
+    progressCell(row.job),
+    fmtDateTimeShort(row.job.queued_at || row.job.started_at),
+    elapsedText(row.job),
+    resultCell(row.job),
+    actionsCell(row.job),
+  ], JOB_NUMERIC_COLS, (tr, row) => {
+    // rank-topは順位表の1位を塗るclass。この一覧の先頭は「いま動いているjob」であって
+    // 順位ではないので落とす。
+    tr.classList.remove("rank-top");
+    if (row.sub) tr.classList.add("job-subrow");
   });
-  tbody.appendChild(fragment);
+  renderEmptyState(rows.length);
+  syncSortHeaders();
+  renderLimitNote();
   renderGpu();
 }
 
 // 台帳に無いGPU実行(例: 単発の文字起こしAPI)は、gpu.activeにだけ現れる。台帳0行で
 // 「実行中 stt」とだけ出すと『GPUは動いているのにjobは無い』と読めるため、その旨を明記する。
 // 文字起こしのqueue自体は同じ台帳(kind=stt)に載るので、この一覧に行として出る。
+//
+// ただしこの指摘ができるのは、一覧が実行中の行を1つも隠していないときだけ。失敗のみ・
+// 特定の種別で絞った状態で「一覧に出ない」と言うと、filterで隠しただけのjobを別queueの
+// 実行として名指しすることになる。
 function outsideLedger() {
+  const filter = currentFilter();
+  if (filter.state === "failed" || filter.kind !== "all" || filter.text || pinnedJob) return [];
   const running = new Set(
     jobs.filter((job) => job.state === "running").map((job) => job.domain),
   );
@@ -348,7 +507,7 @@ function renderGpu() {
   const parts = [`GPU: 実行中 ${active}（同時実行上限 ${gpu.limit} / 順番待ち ${gpu.waiting}）`];
   const outside = outsideLedger();
   if (outside.length) {
-    const names = outside.map((label) => JOB_KIND_LABELS[label] || label).join(" / ");
+    const names = outside.map(kindLabel).join(" / ");
     parts.push(`※ ${names}は下の一覧に出ない別queueで実行中です。`);
   }
   el.textContent = parts.join(" ");
@@ -363,23 +522,36 @@ function renderGpu() {
     const link = document.createElement("a");
     link.href = "/videos#transcribe";
     link.textContent = `文字起こしqueue: 実行中 ${running} / 待機中 ${pending}`;
-    link.title = "文字起こしは別queueで動くため、この一覧には行が出ません。clickで投入・取り消しができる画面へ移動します。";
+    link.title = "文字起こしはこの一覧にも種別「文字起こし」として出ます。clickで一括投入・一括取り消しができる画面へ移動します。";
     sttEl.appendChild(link);
   }
 }
 
+// 状態・種別はserverが台帳全体から絞る。画面側だけで絞っていた頃は、一括投入が台帳の
+// 新しい200行を埋めた日に、その前に失敗したjobが応答へ入らないまま「該当なし」と断定して
+// いた。対象の絞込(text)は手元の行に当てるだけなのでrequestには載せない。
 async function load() {
+  const filter = currentFilter();
+  const params = new URLSearchParams({
+    state: filter.state, kind: filter.kind, limit: String(JOB_PAGE_LIMIT),
+  });
+  if (pinnedJob) params.set("job", pinnedJob);
   try {
-    const data = await apiSend("GET", "/api/jobs");
+    const data = await apiSend("GET", `/api/jobs?${params}`);
     jobs = data.jobs || [];
     gpu = data.gpu || null;
     stt = data.stt || null;
+    kindLabels = data.kind_labels || {};
+    jobTotal = data.total || 0;
+    jobLimit = data.limit || JOB_PAGE_LIMIT;
     loadState = "loaded";
     loadError = null;
+    renderKindOptions();
   } catch (err) {
     jobs = [];
     gpu = null;
     stt = null;
+    jobTotal = 0;
     loadState = "failed";
     loadError = err;
   }
@@ -388,10 +560,10 @@ async function load() {
 
 function onMessage(message) {
   if (message.type === "jobs") {
-    jobs = message.data || [];
-    loadState = "loaded";
-    loadError = null;
-    render();
+    // WSのsnapshotはfilterを通っていない直近ぶん。これで置き換えると、serverへ渡した
+    // filterで拾い直した古い行が接続のたびに消える。行の出所を1つに保つため取り直す
+    // (取り直しが終わるまでは今の一覧をそのまま出しておく)。
+    load();
     return;
   }
   if (message.type === "job_update" && message.job) {
@@ -399,10 +571,47 @@ function onMessage(message) {
   }
 }
 
+// 状態・種別はserver側の絞り込みが変わるので取り直す。対象の絞込は手元の行に効くだけ
+// なので描き直しで足りる(1文字ごとにserverを叩かない)。
 ["job-flt-state", "job-flt-kind"].forEach((id) =>
-  document.getElementById(id).addEventListener("input", render),
+  document.getElementById(id).addEventListener("change", load),
 );
+document.getElementById("job-flt-text").addEventListener("input", () => {
+  // ?job= で1件に固定したまま別の語で探させると、いくら打っても0件になる。人が入力へ
+  // 触った時点で名指しを解き、台帳から取り直す。
+  if (pinnedJob) {
+    pinnedJob = "";
+    load();
+    return;
+  }
+  render();
+});
 
+// 他画面からの誘導(topbarの「失敗 N」・一括処理の「Job画面で進捗を見る」・運用logの
+// 「このjobを見る」)は、目的の行が見えるfilterで着地しないと「押したのに空の表」になる。
+// queryで初期値を受ける。
+(function applyQueryFilters() {
+  const params = new URLSearchParams(location.search);
+  const state = params.get("state");
+  const kind = params.get("kind");
+  const job = (params.get("job") || "").trim();
+  if (state) {
+    const select = document.getElementById("job-flt-state");
+    // 知らない値でselectを空にしない(既定のfilterが外れて全件が出る方が読み違えを生む)。
+    if ([...select.options].some((opt) => opt.value === state)) select.value = state;
+  }
+  // 種別の選択肢はserverの応答から作るため、値はここでは当てられない。預けて後で入れる。
+  if (kind) pendingKind = kind;
+  if (job) {
+    document.getElementById("job-flt-text").value = job;
+    pinnedJob = job;
+    // 運用logから指されたjobは大抵もう終わっている。既定の「実行中・待機中」で着地すると
+    // 空の表になるので、状態の指定が無いときは全件から探す。
+    if (!state) document.getElementById("job-flt-state").value = "all";
+  }
+})();
+
+bindSortHeaders();
 setListState(document.getElementById("job-empty"), "loading");
 load();
 connectWS(onMessage);

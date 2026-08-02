@@ -171,11 +171,16 @@ async def _max_keyframe_gap(source, duration: float) -> float | None:
     全走査は利点とほぼ同額のcostになるので、尺を等分した位置の短い窓だけを読む。窓と窓の
     間には当然大きな隙間が空くため、窓幅を超えるgapは窓の切れ目として捨てる(これを数えると
     どの録画も「keyframe間隔が数百秒」になり、常に通常decodeへ倒れる)。
+
+    窓は ``開始%終了`` の**絶対時刻**で渡す。尺で指定する ``開始%+尺`` は、実HLSに混ざる
+    pts=N/Aのpacketで1 packet読んだ時点で打ち切られ、0 frameしか返らない(実測: 3.1時間の
+    録画で 0 frame 対 128 frame)。0 frameはNone(=測れなかった)として全frame decodeへ倒れる
+    ため、故障は「遅いだけ」の形でしか現れない。``media/keyframes.py`` も同じ理由で絶対時刻。
     """
     span = KEYFRAME_PROBE_SPAN_SECONDS
     starts = [duration * (i + 0.5) / KEYFRAME_PROBE_WINDOWS
               for i in range(KEYFRAME_PROBE_WINDOWS)]
-    intervals = ",".join(f"{at:.2f}%+{span:.0f}" for at in starts)
+    intervals = ",".join(f"{at:.2f}%{at + span:.2f}" for at in starts)
     result = await ffprobe.run([
         "ffprobe", "-v", "error", *source.input_args, "-read_intervals", intervals,
         "-select_streams", "v:0", "-skip_frame", "nokey",
@@ -272,7 +277,7 @@ async def ensure_sprite(src: Path) -> dict:
         if not ffmpeg_available():
             raise RuntimeError("ffmpegが見つかりません。sprite生成にはffmpegのinstallが必要です。")
 
-        with hls_source.ffmpeg_source(src) as source:
+        async with hls_source.ffmpeg_source_async(src) as source:
             duration = await _probe_duration(source)
             interval = _interval_seconds(duration)
             # 寸法の走査とkeyframe間隔の測定はどちらもkeyframeを読むだけで、互いに依存しない。

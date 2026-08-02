@@ -12,6 +12,8 @@ from fastapi import HTTPException, Query
 from pydantic import BaseModel
 from tictok.core.config import get_media_queue_workers
 from tictok.record.transcription import stt_available
+from tictok.media import laugh_audio
+from tictok.search import indexer
 from tictok.storage import OPS_INFO, OPS_WARNING
 from tictok.record.video_overlay import subtitles_enabled
 from fastapi import APIRouter
@@ -28,8 +30,8 @@ router = APIRouter()
 
 # 一括投入を許すkind。任意のkindを通すと、preview等の一括に向かないjobまで配信者単位で
 # 大量に積めてしまうので、ここに挙げたものだけを受け付ける。
-BULK_KINDS = ("transcribe", "overlay", "upscale", "reprocess", "audionorm", "pack",
-              "delete_mp4")
+BULK_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "audionorm",
+              "pack", "delete_mp4")
 
 # queueへ載る種別。delete_mp4はfileを1本消すだけでffmpegを起こさないため、jobにすると
 # 実行時間0の行が録画数ぶん台帳へ並ぶだけになる。専用APIで即時に実行する。
@@ -40,8 +42,8 @@ BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack")
 # 対象判定に .ts の走査が要る種別。母集合単位の呼び出しは _bulk_hls_batch で先に埋める。
 # 焼き込み・Up出力・文字起こしが入っているのは、mp4が無い録画でも素材から処理できるため —
 # 素材の有無を見ずに判定すると、単体では処理できる録画が一括だけ弾かれる。
-BULK_HLS_KINDS = ("transcribe", "overlay", "upscale", "reprocess", "delete_mp4", "pack",
-                  "waveform", "sprite")
+BULK_HLS_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "delete_mp4",
+                  "pack", "waveform", "sprite")
 
 # 対象判定に .sidecars の走査が要る種別。母集合単位の呼び出しは _bulk_sidecar_batch で
 # 先に埋める(録画ごとのstatにすると数千本で効く)。
@@ -52,6 +54,10 @@ BULK_SIDECAR_KINDS = ("waveform", "sprite")
 # 別に持つ。MEDIA_JOB_TITLESへ足すと、media_job_queueに存在しないkindが混ざる。
 BULK_KIND_TITLES = {**media_jobs.MEDIA_JOB_TITLES, "transcribe": "文字起こし",
                     "delete_mp4": "元mp4の削除"}
+# 済み判定に検索indexを見る種別。sidecarの有無ではなくindexの有無で見るのは、解析だけ
+# 済んでindexへ入っていない録画(先に解析を回した / 閾値を変えた)を拾い直せるようにする
+# ため。解析済みならjobはcacheに当たって数十msで終わり、indexだけが埋まる。
+BULK_SEARCH_INDEX_KINDS = ("laugh",)
 
 # 対象外にした理由の表示名。画面と409本文で同じ語を使う。
 BULK_SKIP_LABELS = {
@@ -96,7 +102,8 @@ def _parse_bulk_status_kinds(kinds: Optional[str]) -> tuple:
 
 def _bulk_classify(kind: str, recording: dict,
                    facts: Optional[dict] = None,
-                   transcribed: Optional[set] = None) -> tuple[bool, str]:
+                   transcribed: Optional[set] = None,
+                   indexed: Optional[dict] = None) -> tuple[bool, str]:
     """この録画がkindの投入対象か。(対象か, 対象外の理由) を返す。
 
     理由を数えて画面へ返すのは、「対象0本」とだけ出ると原因(fileが無いのか、既に出力済みか、
@@ -108,11 +115,28 @@ def _bulk_classify(kind: str, recording: dict,
     ``transcribed`` は転写済みのrecording_id集合(transcribeの済み判定)。facts と同じく
     母集合単位で1回だけ引いて渡す — 録画ごとにget_transcriptを叩くと、本文まで読んで
     捨てることになる。
+
+    ``indexed`` は ``storage.search_indexed_counts()``(recording_id -> source -> 件数)。
+    笑い声分析の済み判定に使う。
     """
     if recording.get("status") not in ("completed", "interrupted"):
         return False, "recording"
     if facts is None:
         facts = fsfacts._recording_fs_facts(recording)
+    if kind == "laugh":
+        # 入力は素材(.ts)でもmp4でもよい(laugh_audioはhls_source経由で開く)。
+        has_hls = facts.get("has_hls")
+        if has_hls is None:
+            has_hls = fsfacts._recording_has_hls(recording)
+        if not facts["has_file"] and not has_hls:
+            return False, "no_source"
+        # 済み判定は**検索indexの有無**で見る。sidecar(確率列)だけ在ってindexが無い録画は
+        # 「解析は済んだが検索に出ない」状態で、sidecarで済みにすると誰も拾い直せない。
+        # jobは解析cacheに当たって数十msで終わり、indexだけを埋める。
+        if indexed is None:
+            indexed = runtime.storage.search_indexed_counts()
+        done = indexer.SOURCE_LAUGH in (indexed.get(recording["id"]) or {})
+        return (False, "done") if done else (True, "")
     if kind == "transcribe":
         # 入力は素材(.ts)でもmp4でもよい(transcribe_queueはhls_source経由で開く)。
         has_hls = facts.get("has_hls")
@@ -220,6 +244,9 @@ def _bulk_plan(kind: str, unique_id: Optional[str], redo: bool,
     busy_ids = {rid for _kind, rid in pending} | stt_pending
     recordings = _bulk_recordings(unique_id)
     transcribed = runtime.storage.transcribed_recording_ids() if kind == "transcribe" else None
+    # 済み判定に検索indexを見る種別は、母集合単位で1回だけ引く(録画ごとに引くと
+    # search_hitsの集計が録画数ぶん走る)。
+    indexed = runtime.storage.search_indexed_counts() if kind in BULK_SEARCH_INDEX_KINDS else None
     facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
     if kind in BULK_HLS_KINDS:
         fsfacts._bulk_hls_batch(recordings, facts_by_id)
@@ -231,7 +258,7 @@ def _bulk_plan(kind: str, unique_id: Optional[str], redo: bool,
         if selected is not None and recording["id"] not in selected:
             continue
         ok, reason = _bulk_classify(kind, recording, facts_by_id[recording["id"]],
-                                    transcribed)
+                                    transcribed, indexed)
         # 素材やmp4を置き換える種別は、他の何かがその録画を掴んでいる間は外す。焼き込みは
         # 実行中ずっと元mp4を読み、再mp4化は素材を読んでいるので、その足元で消す/束ね直すと
         # 道半ばで壊れたjobが残る。
@@ -272,7 +299,8 @@ def _bulk_estimate(kind: str, targets: list) -> dict:
     # 同時実行数ぶんのjobが並ぶので、中間fileの山も本数ぶん重なる。1本ぶんで見せると、
     # workerを増やした環境で「入るはず」と示した直後に空き容量を割る。
     # 転写はSTT側のlockで完全に直列化されており、workerを増やしても1本ずつしか進まない。
-    workers = 1 if kind == "transcribe" \
+    # 笑い声分析も同じ: cudaならgpu_slot、cpuなら_infer_lockで、どちらも1本ずつになる。
+    workers = 1 if kind in ("transcribe", "laugh") \
         else min(get_media_queue_workers(), len(sizes) or 1)
     return {
         "recordings": len(targets),
@@ -303,6 +331,8 @@ async def bulk_status(kinds: Optional[str] = None) -> dict:
     def _collect() -> list:
         recordings = runtime.storage.list_recordings(100000)
         transcribed = runtime.storage.transcribed_recording_ids() if "transcribe" in requested else None
+        indexed = (runtime.storage.search_indexed_counts()
+                   if any(k in BULK_SEARCH_INDEX_KINDS for k in requested) else None)
         facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
         if any(k in BULK_HLS_KINDS for k in requested):
             fsfacts._bulk_hls_batch(recordings, facts_by_id)
@@ -319,7 +349,7 @@ async def bulk_status(kinds: Optional[str] = None) -> dict:
             entry["seconds"] += files._recording_seconds(recording)
             facts = facts_by_id[recording["id"]]
             for kind in requested:
-                ok, reason = _bulk_classify(kind, recording, facts, transcribed)
+                ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed)
                 if ok:
                     entry["targets"][kind] += 1
                 elif reason in _BULK_DONE_REASONS:
@@ -361,13 +391,15 @@ async def bulk_recordings(kind: str, unique_id: str, redo: int = 0) -> dict:
         pending |= {("transcribe", rid) for kind_, rid in pending if kind_ == "stt"}
         recordings = runtime.storage.recordings_for_user(unique_id)
         transcribed = runtime.storage.transcribed_recording_ids() if kind == "transcribe" else None
+        indexed = (runtime.storage.search_indexed_counts()
+                   if kind in BULK_SEARCH_INDEX_KINDS else None)
         facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
         if kind in BULK_HLS_KINDS:
             fsfacts._bulk_hls_batch(recordings, facts_by_id)
         rows = []
         for recording in recordings:
             facts = facts_by_id[recording["id"]]
-            ok, reason = _bulk_classify(kind, recording, facts, transcribed)
+            ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed)
             if not ok and redo and reason == "done":
                 ok, reason = True, ""
             if ok and (kind, recording["id"]) in pending:
@@ -444,6 +476,7 @@ async def bulk_delete_mp4(payload: BulkQueueRequest) -> dict:
     fsfacts._fs_state_cache.clear()
     fsfacts._fs_bulk_cache.clear()
     fsfacts._bulk_status_cache.clear()
+    fsfacts._hls_dir_cache.clear()
     scope = f"@{payload.unique_id}" if payload.unique_id else "全配信者"
     await asyncio.to_thread(
         runtime.storage.record_ops_event, runtime.logger, "recording.sources_deleted",
@@ -484,8 +517,9 @@ async def _bulk_queue_transcribe(payload: BulkQueueRequest) -> dict:
             detail="文字起こしの対象になる録画がありません（内訳: "
                    + _bulk_skipped_detail(plan["skipped"]) + "）。",
         )
-    added = await media_jobs._enqueue_stt_jobs(
-        [runtime.storage.get_recording(t["id"]) for t in targets])
+    # planの行をそのまま渡す。idから引き直していた頃は、対象1本につき1回の同期queryが
+    # event loop上で走っていた(_bulk_planは既に同じ行を持っている)。
+    added = await media_jobs._enqueue_stt_jobs(targets)
     # 投入で対象が消えるので、次のstatusは作り直す。
     fsfacts._bulk_status_cache.clear()
     scope = f"@{payload.unique_id}" if payload.unique_id else "全配信者"
@@ -498,6 +532,44 @@ async def _bulk_queue_transcribe(payload: BulkQueueRequest) -> dict:
     # totalは実際にqueueへ入った本数。planの本数をそのまま返すと、既にpending/runningで
     # 弾かれたぶんまで「入れました」と名乗ることになる。
     return {"kind": "transcribe", "unique_id": payload.unique_id, "total": added["added"],
+            "skipped": plan["skipped"], "recording_ids": [t["id"] for t in targets]}
+
+
+async def _bulk_queue_laugh(payload: BulkQueueRequest) -> dict:
+    """一括処理の笑い声分析。対象の選び方は他の種別と同じ ``_bulk_plan``。
+
+    disk下限は見ない。書くのは録画ごとの確率列sidecar(3時間で約100KB)と検索indexの行だけ
+    で、映像jobのような中間fileも出力fileも作らない。
+
+    engineが無効・model未配置ならここで断る。全件をqueueへ積んでから1本ずつ同じ理由で
+    失敗させると、台帳が同じerrorで埋まるだけになる。
+    """
+    status = laugh_audio.laugh_status()
+    if not status["configured"]:
+        raise HTTPException(
+            status_code=503,
+            detail="笑い声検出が利用できません。TICTOK_LAUGH_AUDIO_ENABLED と "
+                   "model/label fileの設定を確認してください（doc/LAUGH_AUDIO_MODEL.md）。")
+    ids = [int(value) for value in payload.recording_ids] if payload.recording_ids else None
+    plan = await asyncio.to_thread(_bulk_plan, "laugh", payload.unique_id,
+                                   payload.redo, ids)
+    targets = plan["targets"]
+    if not targets:
+        raise HTTPException(
+            status_code=409,
+            detail="笑い声分析の対象になる録画がありません（内訳: "
+                   + _bulk_skipped_detail(plan["skipped"]) + "）。",
+        )
+    added = await media_jobs._enqueue_laugh_jobs(targets)
+    fsfacts._bulk_status_cache.clear()
+    scope = f"@{payload.unique_id}" if payload.unique_id else "全配信者"
+    runtime.logger.info("一括投入: 笑い声分析 %d件（%s）", added["added"], scope,
+                extra={"event": "bulk.enqueued",
+                       "ctx": {"kind": "laugh", "unique_id": payload.unique_id,
+                               "total": added["added"], "candidates": len(targets),
+                               "selected": len(ids) if ids is not None else None,
+                               "redo": payload.redo, "skipped": plan["skipped"]}})
+    return {"kind": "laugh", "unique_id": payload.unique_id, "total": added["added"],
             "skipped": plan["skipped"], "recording_ids": [t["id"] for t in targets]}
 
 
@@ -516,6 +588,8 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
     _require_bulk_kind(kind)
     if kind == "transcribe":
         return await _bulk_queue_transcribe(payload)
+    if kind == "laugh":
+        return await _bulk_queue_laugh(payload)
     if kind not in BULK_QUEUE_KINDS:
         raise HTTPException(status_code=400,
                             detail=f"queueへ載せない種別です: {kind}（専用APIで実行します）")
@@ -546,22 +620,31 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
                         + ("…" if len(missing) > 5 else "")
                         + "）。先に一括文字起こしを実行してください。"),
             )
-        for target in targets:
-            media_jobs._subtitle_transcript(target["id"])
+        # 1本ごとに転写の読み出しとtiming.jsonのparseを行う検証。直上の_missingと同じく
+        # threadで回す(loop上では対象数ぶんのDB読みとJSON parseがserverを止める)。
+        def _verify() -> None:
+            for target in targets:
+                media_jobs._subtitle_transcript(target["id"])
+
+        await asyncio.to_thread(_verify)
     group_id = secrets.token_hex(4)
     scope = f"@{payload.unique_id}" if payload.unique_id else "全配信者"
     # 選んで投入したときは、その旨をjob titleに残す。同じ配信者へ「まるごと」と「選択」を
     # 別々に積んだとき、Job画面でどちらのgroupか区別が付かなくなる。
     title = (f"{media_jobs.MEDIA_JOB_TITLES[kind]} 一括 {scope}"
              + (f" 選択{len(targets)}本" if ids is not None else ""))
-    for target in targets:
-        await media_jobs.media_job_queue.enqueue(
-            secrets.token_hex(4), kind, target["id"],
-            session_id=target.get("session_id"), group_id=group_id, title=title,
+    # まとめて積む。1本ずつenqueueすると、投入のたびに待機列全件とgroup全件を引き直すため
+    # N本の投入がN²のqueryになり、その間event loopが空かない。
+    await media_jobs.media_job_queue.enqueue_many([
+        {
+            "job_id": secrets.token_hex(4), "kind": kind, "recording_id": target["id"],
+            "session_id": target.get("session_id"), "group_id": group_id, "title": title,
             # このgroupがsession一括ではないことの目印。queue側はこれを見てgroupの
             # domainを bulk_* にし、履歴画面のsession行へ誤って貼らないようにする。
-            params={"bulk": True},
-        )
+            "params": {"bulk": True},
+        }
+        for target in targets
+    ])
     # 投入で対象が消えるので、次のstatusは作り直す。
     fsfacts._bulk_status_cache.clear()
     runtime.logger.info("一括投入: %s %d件（%s）", kind, len(targets), scope,

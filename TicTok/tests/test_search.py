@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
@@ -713,6 +714,55 @@ def test_search_scenes_limit_and_offset_page_without_changing_total(tmp_db, seed
     assert first["total"] == second["total"] == 5
     assert len(first["items"]) == len(second["items"]) == 2
     assert not set(_bodies(first)) & set(_bodies(second))
+
+
+def test_search_scenes_filters_by_unique_id(tmp_db, recording):
+    rows = [{"session_id": recording["session_id"], "unique_id": uid,
+             "started_at": 1000.0, "video_time": 0.0, "end_time": None,
+             "nickname": None, "body": body}
+            for uid, body in (("alice", "アリスのラーメン"), ("bob", "ボブのラーメン"))]
+    tmp_db.replace_search_hits(recording["id"], indexer.SOURCE_STT, rows)
+    result = tmp_db.search_scenes("ラーメン", [indexer.SOURCE_STT], ["alice"])
+    assert result["total"] == 1
+    assert _bodies(result) == ["アリスのラーメン"]
+
+
+@pytest.mark.parametrize("unique_ids", [None, ["alice"]])
+def test_search_scenes_always_drives_the_join_from_the_fts_table(tmp_db, unique_ids):
+    """配信者で絞ってもFTS側が外側であること。
+
+    素のJOINだと、plannerがidx_search_hits_uidの等値条件に釣られてsearch_hits側を
+    外側に回し、当たった行ごとにFTS照合する経路へ倒れる(実測: 件数のqueryが33ms→50秒)。
+    行数の少ないtest DBでも同じ反転が起きるので、planを直接見て縛る。
+    """
+    from tictok.store.transcripts import _build_scene_query
+
+    built = _build_scene_query(parse("ラーメン"),
+                               [indexer.SOURCE_STT, indexer.SOURCE_COMMENT],
+                               unique_ids, None, None, "time")
+    reader = tmp_db._read_connection()
+    for sql, params in ((built.count_sql, built.params),
+                        (built.page_sql, built.params + [50, 0])):
+        plan = [row["detail"] for row in
+                reader.execute("EXPLAIN QUERY PLAN " + sql, params)]
+        assert "VIRTUAL TABLE" in plan[0], (sql, plan)
+        assert not any("idx_search_hits_uid" in step for step in plan), (sql, plan)
+
+
+def test_search_scenes_does_not_hold_the_writer_lock(tmp_db, seeded):
+    """検索はwriter接続を使わない。使うとcollectorのevent書き出しが検索の間止まる。"""
+    seeded(["ラーメン"])
+    done: list = []
+    thread = threading.Thread(
+        target=lambda: done.append(
+            tmp_db.search_scenes("ラーメン", [indexer.SOURCE_STT])))
+    with tmp_db._lock:
+        thread.start()
+        thread.join(timeout=10.0)
+        finished = not thread.is_alive()
+    thread.join(timeout=10.0)
+    assert finished, "writer lockの保持中に検索が返らなかった"
+    assert done[0]["total"] == 1
 
 
 def test_replace_search_hits_drops_the_stale_fts_index(tmp_db, seeded):

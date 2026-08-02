@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from tictok import battle_migration, glove_migration
+from tictok import battle_migration, glove_migration, timemap_migration
 from tictok.core.battle import BATTLE_TOPOLOGY_VERSION
 
 GV = glove_migration.GLOVE_EVENT_VERSION
@@ -738,3 +738,115 @@ def test_migrate_battle_topology_leaves_unparsable_row_alone(conn):
     rows = [r["d"] for r in conn.execute("SELECT data_json d FROM battles ORDER BY rowid")]
     assert rows[0] == "oops"
     assert json.loads(rows[1])["opp_score"] == 200
+
+
+# --- 時刻map版の選別(timemap_migration) ------------------------------------------------
+
+TMV = timemap_migration.TIMEMAP_VERSION
+
+
+def _put_transcript(conn, recording_id, duration, version, path="K:/rec.mp4"):
+    conn.execute(
+        "INSERT INTO recordings (id, session_id, unique_id, path, filename, status, started_at)"
+        " VALUES (?, 1, 'tester', ?, 'rec.mp4', 'completed', 0)",
+        (recording_id, path),
+    )
+    conn.execute(
+        "INSERT INTO transcripts (recording_id, language, model, text, segments_json,"
+        " duration, created_at, timemap_version) VALUES (?, 'ja', 'm', 't', '[]', ?, 0, ?)",
+        (recording_id, duration, version),
+    )
+    conn.commit()
+
+
+def _versions(conn):
+    return {r["recording_id"]: r["timemap_version"] for r in conn.execute(
+        "SELECT recording_id, timemap_version FROM transcripts")}
+
+
+def test_timemap_promotes_transcript_that_fits_the_material(conn):
+    _put_transcript(conn, 1, duration=600.0, version=TMV - 1)
+    totals = timemap_migration.migrate_timemap_version(conn, lambda path: 600.5)
+    conn.commit()
+    assert totals == {"checked": 1, "promoted": 1, "kept": 0}
+    assert _versions(conn) == {1: TMV}
+
+
+def test_timemap_keeps_transcript_that_overruns_the_material(conn):
+    # 実測(録画00126)の形: 素材2時間51分に対し転写の終端が10時間43分。
+    _put_transcript(conn, 1, duration=38584.7, version=TMV - 1)
+    totals = timemap_migration.migrate_timemap_version(conn, lambda path: 10297.4)
+    conn.commit()
+    assert totals == {"checked": 1, "promoted": 0, "kept": 1}
+    assert _versions(conn) == {1: TMV - 1}
+
+
+def test_timemap_promotes_when_the_material_cannot_be_measured(conn):
+    # 実尺が測れない旧録画。証拠が無いまま据え置くと、正しい転写まで焼き込めなくなる。
+    _put_transcript(conn, 1, duration=600.0, version=TMV - 1)
+    totals = timemap_migration.migrate_timemap_version(conn, lambda path: None)
+    conn.commit()
+    assert totals == {"checked": 1, "promoted": 1, "kept": 0}
+    assert _versions(conn) == {1: TMV}
+
+
+def test_timemap_leaves_versionless_transcripts_alone(conn):
+    # map以前の転写。media軸に載っている保証がそもそも無く、昇格の根拠が無い。
+    _put_transcript(conn, 1, duration=600.0, version=None)
+    totals = timemap_migration.migrate_timemap_version(conn, lambda path: 600.0)
+    conn.commit()
+    assert totals == {"checked": 0, "promoted": 0, "kept": 0}
+    assert _versions(conn) == {1: None}
+
+
+def test_timemap_migration_is_idempotent(conn):
+    _put_transcript(conn, 1, duration=600.0, version=TMV - 1)
+    _put_transcript(conn, 2, duration=38584.7, version=TMV - 1)
+    first = timemap_migration.migrate_timemap_version(conn, lambda path: 600.5 if path else None)
+    conn.commit()
+    assert first == {"checked": 2, "promoted": 1, "kept": 1}
+    again = timemap_migration.migrate_timemap_version(conn, lambda path: 600.5)
+    conn.commit()
+    assert again == {"checked": 1, "promoted": 0, "kept": 1}
+    assert _versions(conn) == {1: TMV, 2: TMV - 1}
+
+
+def test_timemap_measures_each_recording_by_its_own_path(conn):
+    _put_transcript(conn, 1, duration=600.0, version=TMV - 1, path="K:/a.mp4")
+    _put_transcript(conn, 2, duration=600.0, version=TMV - 1, path="K:/b.mp4")
+    spans = {"K:/a.mp4": 600.5, "K:/b.mp4": 120.0}
+    totals = timemap_migration.migrate_timemap_version(conn, spans.get)
+    conn.commit()
+    assert totals == {"checked": 2, "promoted": 1, "kept": 1}
+    assert _versions(conn) == {1: TMV, 2: TMV - 1}
+def test_timemap_selection_runs_once_per_selection_rule(tmp_db_path, monkeypatch):
+    """選別は物差しが変わった時だけ走らせる。据え置いた行は版1のまま残るので、素直に毎起動で
+    走らせると同じ母集合を測り直し続ける — 物差しは1件あたりplaylist解析かffprobeを要する。"""
+    from tictok import timemap_migration as tm
+    from tictok.storage import Storage, _TIMEMAP_SELECTION_KEY
+
+    calls = []
+
+    def _spy(conn, span_of):
+        calls.append(1)
+        return {"checked": 0, "promoted": 0, "kept": 0}
+
+    monkeypatch.setattr(tm, "migrate_timemap_version", _spy)
+    first = Storage(str(tmp_db_path))
+    try:
+        assert calls == [1]
+        assert first._get_maintenance_locked(_TIMEMAP_SELECTION_KEY) == str(tm.SELECTION_VERSION)
+    finally:
+        first.close()
+    second = Storage(str(tmp_db_path))
+    try:
+        assert calls == [1], "同じ選別ruleで二度走らせてはいけない"
+    finally:
+        second.close()
+    # 物差しを変えたら選り直す。上げ忘れると、新しい物差しなら合格する転写が据え置かれ続ける。
+    monkeypatch.setattr(tm, "SELECTION_VERSION", tm.SELECTION_VERSION + 1)
+    third = Storage(str(tmp_db_path))
+    try:
+        assert calls == [1, 1]
+    finally:
+        third.close()

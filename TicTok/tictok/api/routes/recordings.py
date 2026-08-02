@@ -21,7 +21,7 @@ from tictok.media import laugh_audio
 from tictok.media import smile
 from tictok.media.thumbnails import ensure_sprite, sprite_path
 from tictok.media.waveform import (ensure_audio_profile, ensure_waveform, level_peak,
-    silent_ratio)
+    silence_spans, silent_ratio)
 from tictok.search import indexer
 from tictok.record import subtitles
 from tictok.record.upscale import cleanup_upscale_files
@@ -30,6 +30,7 @@ from tictok.storage import RECORDING_REVIEW_STATES, REVIEW_UNCHECKED
 from tictok.record.video_overlay import _duration_seconds, cleanup_overlay_files
 from fastapi import APIRouter
 from tictok.api import files
+from tictok.api import fsfacts
 from tictok.api import media_jobs
 from tictok.api import runtime
 
@@ -61,6 +62,10 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
         transcribed = runtime.storage.transcribed_recording_ids()
         rows = (runtime.storage.recordings_for_user(handle) if handle
                 else runtime.storage.list_recordings(max(1, min(limit, 2000))))
+        # 実体の種別はdir単位に畳んだ一括版で引く。録画ごとにglob(.ts)+statを起こすと、
+        # この一覧(実測198件)を開くたびに数百回のfs走査が走る。
+        listed = [rec for rec in rows if rec["status"] in ("completed", "interrupted")]
+        kinds_by_id = fsfacts.bulk_media_kinds(listed)
         items = []
         for rec in rows:
             # 中断録画(interrupted)も観られる。serverの再起動やcrashで確定を跨げなかった
@@ -73,7 +78,7 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
             # 実体が無い録画も行は残す。転写・検索・bookmarkはそのまま使えるので、
             # 一覧から消すとその録画へ辿る道が無くなる。開けないことは``media``が空である
             # ことで画面が示す(消すのではなく、何が在るかを名乗らせる)。
-            media = files._recording_media_kinds(rec)
+            media = kinds_by_id.get(rec["id"], [])
             items.append({
                 "recording_id": rec["id"],
                 "session_id": rec.get("session_id"),
@@ -134,8 +139,12 @@ async def play_recording(recording_id: int, variant: str = "source") -> FileResp
 
     variantで素材版(元録画/焼き込み出力/Up出力)を選ぶ。切り出しと同じ版をそのまま観られない限り、
     利用者は出力結果を確認する手段が無い(pathをcopyして外部playerで開くしかない)。無い版は
-    黙ってsourceへ落とさず404を返す(頼んだ版と違うものを再生すると出来を誤認する)。"""
-    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    黙ってsourceへ落とさず404を返す(頼んだ版と違うものを再生すると出来を誤認する)。
+
+    HLSと同じくread接続から引く。Range要求はseekのたびに飛ぶので、writer接続では
+    再生操作がcollectorの書き込み待ちに乗る。"""
+    recording = await asyncio.to_thread(
+        runtime.storage.get_recording_for_read, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     if variant not in files.CLIP_VARIANTS:
@@ -167,13 +176,25 @@ async def recording_playback(recording_id: int, variant: str = "source") -> dict
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     if variant not in files.CLIP_VARIANTS:
         raise HTTPException(status_code=400, detail=f"未知の素材版です: {variant}")
-    hls_dir = files._recording_hls_dir(recording) if variant == "source" else None
+    hls_dir = (await asyncio.to_thread(fsfacts.recording_hls_dir, recording)
+               if variant == "source" else None)
     if hls_dir is not None:
         return {"recording_id": recording_id, "variant": variant, "mode": "hls",
                 "url": f"/api/recordings/{recording_id}/hls/{files._HLS_PLAYLIST_NAME}"}
     query = "" if variant == "source" else f"?variant={variant}"
     return {"recording_id": recording_id, "variant": variant, "mode": "mp4",
             "url": f"/api/recordings/{recording_id}/play{query}"}
+
+
+def _hls_target(recording: dict, filename: str) -> tuple:
+    """(HLS再生dir, 返してよいfile)。どちらも見つからなければNone。
+
+    dirの解決はTTL cacheを通す(再生の間ずっと同じ答えを返すため)。file側は毎回statする —
+    束ね直しでsegmentは実際に入れ替わるので、そこを覚えると消えたfileを指し続ける。"""
+    hls_dir = fsfacts.recording_hls_dir(recording)
+    if hls_dir is None:
+        return None, None
+    return hls_dir, files._hls_member(hls_dir, filename)
 
 
 @router.get("/api/recordings/{recording_id}/hls/{filename}")
@@ -183,14 +204,20 @@ async def recording_hls(recording_id: int, filename: str) -> Response:
     playlistは読み込んだ本文を返す(FileResponseはstat時のsizeでContent-Lengthを決めるため、
     録画中のように追記され得るfileでは実体長と食い違う)。segmentはFileResponseで返して
     Range要求に応える — 束ね済み録画のplaylistは ``#EXT-X-BYTERANGE`` で1本のpack*.tsの中を
-    指すので、範囲取得が効かないと再生できない。"""
-    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    指すので、範囲取得が効かないと再生できない。
+
+    行の取得はread接続から引く。ここは再生中ずっと毎秒叩かれる唯一のrouteで、writer接続で
+    引いていた頃はlock待ちがこのrouteの所要時間の40%(最悪1本で9.4秒)を占めていた。
+
+    dirの解決とfileの実在確認もthreadで行う。segment 1本ごとにrecord rootの数だけ
+    is_dir・素材のglob・statを起こしており、それがloop上に残っていた。"""
+    recording = await asyncio.to_thread(
+        runtime.storage.get_recording_for_read, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
-    hls_dir = files._recording_hls_dir(recording)
+    hls_dir, path = await asyncio.to_thread(_hls_target, recording, filename)
     if hls_dir is None:
         raise HTTPException(status_code=404, detail="この録画は.tsが残っていません。")
-    path = files._hls_member(hls_dir, filename)
     if path is None:
         raise HTTPException(status_code=404, detail="HLS fileが見つかりません。")
     if path.suffix == ".m3u8":
@@ -332,7 +359,7 @@ async def transcribe_recording(recording_id: int) -> dict:
             async with runtime._job_ops("stt", recording_id, stem=path.stem,
                                 job_registry_id=job_id):
                 # mp4が無い録画は.tsのHLSから転写する(transcribe_queueと同じ貸し出し方)。
-                with hls_source.ffmpeg_source(path) as source:
+                async with hls_source.ffmpeg_source_async(path) as source:
                     result = await asyncio.to_thread(
                         stt_transcribe, str(source.path), on_progress)
         except STTError as exc:
@@ -471,11 +498,24 @@ async def _attach_laugh_audio(path: Path, buckets: list, bucket_seconds: int,
 
     modelが未配置・未導入のときは ``LaughAudioError`` がそのまま上がる。ここで捕まえて
     笑い抜きの候補を返すと、利用者は「笑いの無い配信」と読む — 呼び出し側で503にする。
+
+    ``clip_candidate_laugh_audio_solo_only`` が立っていれば、画面に顔が2つ以上映って
+    いる間の笑い声を数えない。コラボ中の笑いは共演者のものかもしれず、どの顔が配信者かを
+    画面から決める手段が無いため(smile module docstringと同じ制約)。窓は映像から作る —
+    DBの ``collab_windows`` はLinkMic channelの有無であって人数ではなく、実測で
+    ``guests_max`` が811窓中805窓で0のままだった。
     """
     profile = await laugh_audio.ensure_laugh_profile(path)
+    exclude_spans = None
+    if int(runtime.settings.get("clip_candidate_laugh_audio_solo_only")):
+        # 顔検出のmodelが無ければ SmileError がそのまま上がる。ここで黙って除外なしに
+        # 落とすと、「コラボを外した候補」として外れていない候補を渡すことになる。
+        faces_profile = await smile.ensure_smile_profile(path)
+        exclude_spans = smile.multi_face_spans(faces_profile)
     seconds = [
         laugh_audio.laugh_seconds(profile, to_pts(bucket["start"]),
-                                  to_pts(bucket["start"] + bucket_seconds))
+                                  to_pts(bucket["start"] + bucket_seconds),
+                                  exclude_spans=exclude_spans)
         for bucket in buckets
     ]
     outside = next((i for i, value in enumerate(seconds) if value is None), None)
@@ -562,9 +602,7 @@ def _attach_laugh_comments(session_id: int, buckets: list, bucket_seconds: int) 
     counts: dict = {}
     bodies = []
     rows = []
-    for event in runtime.storage.iter_events(session_id):
-        if event.get("kind") != "comment":
-            continue
+    for event in runtime.storage.iter_events(session_id, kinds=("comment",)):
         # 旧録画は text 列に入っている(storage側もCOALESCEで両方見ている)。
         body = (event.get("comment") or event.get("text") or "").strip()
         if not body:
@@ -638,8 +676,7 @@ def _merge_candidates(items: list) -> list:
 async def recording_clip_candidates_api(recording_id: int) -> dict:
     """録画窓の盛り上がりから切り出し候補を出す。時刻は動画時間軸(秒)。
 
-    判定は配信者pageのハイライト(storage.streamer_highlights)と同じ core.spike で、窓だけを
-    設定の秒数へ広げる。窓に入るbucket数はsessionのbucket幅から導くので、bucket幅の違う
+    判定は core.spike で、窓だけを設定の秒数へ広げる。窓に入るbucket数はsessionのbucket幅から導くので、bucket幅の違う
     session間でも窓の実長は揃う。"""
     recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
     if recording is None:
@@ -764,12 +801,16 @@ async def recording_clip_candidates_api(recording_id: int) -> dict:
 
 
 @router.get("/api/recordings/{recording_id}/waveform")
-async def recording_waveform_api(recording_id: int,
-                                 buckets: int = media_jobs.WAVEFORM_DEFAULT_BUCKETS) -> dict:
+async def recording_waveform_api(recording_id: int) -> dict:
     """seek bar用の音声波形。無音・BGM・発話の区別が付くので切り所の判断に使う。
 
-    初回はcontainerを丸ごと読むため長尺(3.9時間)で90秒級かかる。画面側は利用者が明示的に
-    要求したときだけ呼ぶこと(録画を開く度に走らせるとdiskを占有する)。"""
+    解像度はserver側の時間刻み(waveform.WAVE_BUCKET_SECONDS)で固定。拡大表示は同じ列を
+    画面側で畳んで使う(別解像度を要求させると録画全体のdecodeがやり直しになる)。
+    無音区間(silences)も同梱する — snapとシーン選択の吸着先で、profileは波形と同じ
+    decodeから既にcacheされているため追加costは無い。
+
+    初回はcontainerを丸ごと読むため長尺(3.9時間)で90秒級かかる。画面側は波形checkboxが
+    ONのときだけ呼ぶこと(OFFの利用者の録画openで走らせるとdiskを占有する)。"""
     recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
@@ -779,9 +820,11 @@ async def recording_waveform_api(recording_id: int,
     if not files._recording_source_exists(recording):
         raise HTTPException(status_code=404, detail="録画fileが存在しません。")
     try:
-        result = await ensure_waveform(path, max(200, min(buckets, 8000)))
+        result = await ensure_waveform(path)
+        profile = await ensure_audio_profile(path)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    result["silences"] = silence_spans(profile)
     result["recording_id"] = recording_id
     return result
 
@@ -831,14 +874,20 @@ async def delete_recording(recording_id: int) -> dict:
     if recording["status"] == "recording":
         raise HTTPException(status_code=409, detail="録画中のfileは削除できません。先に停止してください。")
     path = files._safe_recording_path(recording["path"])
-    try:
-        if path.is_file():
-            path.unlink()
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"file削除に失敗しました: {exc}")
-    cleanup_overlay_files(path)
-    cleanup_upscale_files(path)
-    files._unlink_quietly(files._recording_cache_paths(path))
-    files._remove_recording_ts(recording)
+
+    # 素材のsession dirは束ね前で数千fileある(実測で最大11,285)。走査もrmtreeもloop上で
+    # 回すと、1本消す間serverが丸ごと止まる。
+    def _remove() -> None:
+        try:
+            if path.is_file():
+                path.unlink()
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"file削除に失敗しました: {exc}")
+        cleanup_overlay_files(path)
+        cleanup_upscale_files(path)
+        files._unlink_quietly(files._recording_cache_paths(path))
+        files._remove_recording_ts(recording)
+
+    await asyncio.to_thread(_remove)
     await asyncio.to_thread(runtime.storage.delete_recording, recording_id)
     return {"deleted": recording_id}

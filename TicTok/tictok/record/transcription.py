@@ -31,7 +31,13 @@ logger = logging.getLogger("tictok.stt")
 # transcripts written before the mapping existed carry no version, and a future
 # change to the anchor rules bumps this, which is what makes "which transcripts need
 # re-running" an answerable query instead of a guess.
-TIMEMAP_VERSION = 1
+#
+# 2: 幻のtimestamp jumpをplaylistの尺で畳む(_rebase_phantom_jumps)。これを入れた時に版を
+#    据え置いたため、壊れた地図で作られた転写(実測: 2時間51分の録画に対し終端10時間43分)が
+#    現行版を名乗ったまま残り、画面もDBもそれを見分けられなかった。既存の版1の転写は起動時の
+#    timemap_migrationが選別する — 畳む対象が無かったものは版2の出力と一致するので昇格させ、
+#    素材と尺が食い違うものだけ版1のまま残して「要再転写」として名乗らせる。
+TIMEMAP_VERSION = 2
 
 
 class STTError(RuntimeError):

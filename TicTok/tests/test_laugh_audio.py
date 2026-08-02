@@ -407,7 +407,9 @@ def test_loading_the_model_reports_every_missing_prerequisite(monkeypatch, tmp_p
 
 
 def test_the_model_runs_on_the_cpu_provider_only(monkeypatch, configured):
-    """GPUは転写と超解像が12GBを奪い合っている。ここが取ると焼き込みが待たされる。"""
+    """既定ではGPUを取らない。12GBは転写と超解像が奪い合っており、ここが割り込むと
+    焼き込みが待たされる。GPUで走らせたい場合だけ TICTOK_LAUGH_AUDIO_DEVICE=cuda に
+    して、**別process**(laugh_worker)へ出す。"""
     ort = pytest.importorskip("onnxruntime")
     captured = {}
 
@@ -419,6 +421,7 @@ def test_the_model_runs_on_the_cpu_provider_only(monkeypatch, configured):
         captured["providers"] = providers
         captured["intra"] = sess_options.intra_op_num_threads
         return types.SimpleNamespace(
+            get_providers=lambda: list(providers or []),
             get_inputs=lambda: [types.SimpleNamespace(name="waveform",
                                                       shape=["b", "n"])],
             get_outputs=lambda: [types.SimpleNamespace(name="logits")])
@@ -568,6 +571,162 @@ def test_a_scaled_hop_changes_the_seconds_each_bin_is_worth():
     assert la.laugh_seconds(profile, 0.0, 2.0, threshold=0.35) == 1.5
 
 
+# --------------------------------------------------------------------------- 窓の除外
+
+
+def test_excluded_spans_are_not_counted():
+    """コラボ中(顔が2つ以上)の笑いを候補から外すための口。"""
+    profile = _profile(probs=[0.9] * 10)
+    assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5) == 10.0
+    assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5,
+                            exclude_spans=[(2.0, 5.0)]) == 7.0
+    assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5,
+                            exclude_spans=[(0.0, 10.0)]) == 0.0
+
+
+def test_a_span_shorter_than_one_bin_still_removes_that_bin():
+    """中心が入るかで判定すると、刻みより短い窓が1つも外れない。"""
+    profile = _profile(probs=[0.9] * 10)
+    assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5,
+                            exclude_spans=[(3.2, 3.4)]) == 9.0
+
+
+def test_overlapping_spans_do_not_subtract_twice():
+    profile = _profile(probs=[0.9] * 10)
+    assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5,
+                            exclude_spans=[(1.0, 4.0), (3.0, 6.0)]) == 5.0
+
+
+def test_spans_outside_the_window_and_empty_spans_change_nothing():
+    profile = _profile(probs=[0.9] * 10)
+    for spans in ([], None, [(20.0, 30.0)], [(5.0, 5.0)], [(6.0, 3.0)]):
+        assert la.laugh_seconds(profile, 0.0, 10.0, threshold=0.5,
+                                exclude_spans=spans) == 10.0
+
+
+def test_excluding_everything_is_zero_seconds_not_unanalysed():
+    """全部外れた区間は「笑いが0秒」であって「解析していない」ではない。Noneを返すと
+    呼び出し側(_MaterialMetric)が指標ごと録画から外してしまう。"""
+    profile = _profile(probs=[0.9, 0.9])
+    assert la.laugh_seconds(profile, 0.0, 2.0, threshold=0.5,
+                            exclude_spans=[(0.0, 2.0)]) == 0.0
+
+
+# --------------------------------------------------------------------------- 検索index
+
+
+def _laugh_profile(probs, interval=1.0) -> dict:
+    return {"interval_seconds": interval, "probs": probs, "duration_seconds": len(probs)}
+
+
+def test_laugh_windows_folds_consecutive_bins_into_one_scene():
+    """1回の笑いを刻みのまま行にすると、検索結果が同じ場面で埋まる。"""
+    from tictok.search.indexer import laugh_windows
+    profile = _laugh_profile([0.0, 0.9, 0.9, 0.9, 0.0])
+    assert laugh_windows(profile, 0.5, 0.0, 0.0) == [(1.0, 4.0, 0.9)]
+
+
+def test_a_short_dip_inside_one_laugh_does_not_split_the_scene():
+    """笑い声は息継ぎで確率が1〜2刻み落ちる。同じ笑いの中の出来事なのでつなぐ。"""
+    from tictok.search.indexer import laugh_windows
+    profile = _laugh_profile([0.9, 0.1, 0.9])
+    assert laugh_windows(profile, 0.5, 2.0, 0.0) == [(0.0, 3.0, 0.9)]
+    # 隙間を許さない設定では2つに割れる(畳んでいるのは設定であってlogicではない)。
+    assert laugh_windows(profile, 0.5, 0.0, 0.0) == [(0.0, 1.0, 0.9), (2.0, 3.0, 0.9)]
+
+
+def test_windows_shorter_than_the_minimum_are_dropped():
+    """1刻みだけ閾値を超える点は録画1本で数百個出る。全部出すと本物が埋もれる。"""
+    from tictok.search.indexer import laugh_windows
+    profile = _laugh_profile([0.9, 0.0, 0.0, 0.9, 0.9, 0.9])
+    assert laugh_windows(profile, 0.5, 0.0, 2.0) == [(3.0, 6.0, 0.9)]
+
+
+def test_the_window_carries_the_strongest_probability_inside_it():
+    """閾値を超えたかだけだと、はっきり笑った場面と辛うじて超えた場面が同じ顔で並ぶ。"""
+    from tictok.search.indexer import laugh_windows
+    assert laugh_windows(_laugh_profile([0.6, 0.95, 0.7]), 0.5, 2.0, 0.0) \
+        == [(0.0, 3.0, 0.95)]
+
+
+def test_nothing_over_the_threshold_is_no_windows_not_one_empty_window():
+    from tictok.search.indexer import laugh_windows
+    assert laugh_windows(_laugh_profile([0.1, 0.2]), 0.5, 2.0, 0.0) == []
+    assert laugh_windows(_laugh_profile([]), 0.5, 2.0, 0.0) == []
+
+
+def test_index_laughter_writes_rows_a_person_can_choose_from(monkeypatch):
+    """行の本文だけで「どれを開くか」を選べること。語(笑い声)でも引けること。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", "0")
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MIN_SECONDS", "0")
+    written = {}
+
+    class _Store:
+        def replace_search_hits(self, recording_id, source, rows):
+            written[source] = rows
+            return len(rows)
+
+    recording = {"id": 7, "session_id": 3, "unique_id": "@who", "started_at": 100.0}
+    count = indexer.index_laughter(_Store(), recording,
+                                   _laugh_profile([0.0, 0.8, 0.8]), threshold=0.5)
+    assert count == 1
+    row = written[indexer.SOURCE_LAUGH][0]
+    assert (row["video_time"], row["end_time"]) == (1.0, 3.0)
+    assert row["body"] == "笑い声 2秒（強さ 0.80）"
+    assert row["unique_id"] == "@who" and row["session_id"] == 3
+    # 語で引く側はtrigram FTS。3文字あるので走査へ落ちない。
+    assert "笑い声" in row["body"]
+
+
+def test_index_laughter_replaces_the_previous_rows_for_the_recording():
+    """閾値を変えて入れ直したとき、古い窓が残ると同じ場面が二重に並ぶ。"""
+    from tictok.search import indexer
+    calls = []
+
+    class _Store:
+        def replace_search_hits(self, recording_id, source, rows):
+            calls.append((recording_id, source, len(rows)))
+            return len(rows)
+
+    recording = {"id": 7, "session_id": None, "unique_id": "@who", "started_at": 0.0}
+    indexer.index_laughter(_Store(), recording, _laugh_profile([0.1, 0.1]), threshold=0.5)
+    # 1件も無くてもreplaceは呼ぶ(呼ばないと前回の窓が残る)。
+    assert calls == [(7, indexer.SOURCE_LAUGH, 0)]
+
+
+# --------------------------------------------------------------------------- device
+
+
+def test_the_device_is_cpu_unless_asked_otherwise(monkeypatch):
+    monkeypatch.delenv("TICTOK_LAUGH_AUDIO_DEVICE", raising=False)
+    assert config.get_laugh_audio_device() == "cpu"
+
+
+def test_an_unknown_device_is_rejected_instead_of_falling_back(monkeypatch, configured):
+    monkeypatch.setenv("TICTOK_LAUGH_AUDIO_DEVICE", "gpu")
+    with pytest.raises(la.LaughAudioError, match="TICTOK_LAUGH_AUDIO_DEVICE"):
+        la._get_model()
+
+
+def test_a_provider_that_silently_became_cpu_is_an_error(monkeypatch, configured):
+    """onnxruntimeは要求したproviderを作れないと**黙ってCPUへ落ちる**(実測)。落ちたことは
+    確率を見ても分からないので、名乗らせて突き合わせる。"""
+    monkeypatch.setenv("TICTOK_LAUGH_AUDIO_DEVICE", "cuda")
+
+    class _Session:
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+    fake = types.SimpleNamespace(
+        SessionOptions=lambda: types.SimpleNamespace(),
+        InferenceSession=lambda *a, **k: _Session(),
+    )
+    monkeypatch.setitem(__import__("sys").modules, "onnxruntime", fake)
+    with pytest.raises(la.LaughAudioError, match="CUDAExecutionProvider"):
+        la._get_model()
+
+
 # --------------------------------------------------------------------------- 入口
 
 
@@ -635,13 +794,30 @@ async def test_the_end_to_end_build_writes_the_sidecar(make_recording, configure
 # --------------------------------------------------------------------------- 実model
 
 
+# 実modelの設定は**import時に控えておく**。conftestの env_guard が TICTOK_* を一掃するため、
+# 収集時のskip判定(os.environを直接見る)と実行時の設定が食い違い、「modelが未設定」で落ちる。
+_REAL_MODEL = os.environ.get("TICTOK_LAUGH_AUDIO_MODEL_PATH", "")
+_REAL_LABELS = os.environ.get("TICTOK_LAUGH_AUDIO_LABELS_PATH", "")
+_REAL_ACTIVATION = os.environ.get("TICTOK_LAUGH_AUDIO_ACTIVATION", "")
+_REAL_WINDOW = os.environ.get("TICTOK_LAUGH_AUDIO_WINDOW_SECONDS", "")
+
+
 @pytest.mark.skipif(
-    not os.environ.get("TICTOK_LAUGH_AUDIO_MODEL_PATH")
-    or not Path(os.environ["TICTOK_LAUGH_AUDIO_MODEL_PATH"]).is_file(),
+    not _REAL_MODEL or not Path(_REAL_MODEL).is_file()
+    or not _REAL_LABELS or not Path(_REAL_LABELS).is_file(),
     reason="needs a real laugh-detection ONNX model (TICTOK_LAUGH_AUDIO_MODEL_PATH)",
 )
 def test_the_real_model_accepts_a_window_of_silence(monkeypatch):
     monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ENABLED", "1")
+    monkeypatch.setenv("TICTOK_LAUGH_AUDIO_MODEL_PATH", _REAL_MODEL)
+    monkeypatch.setenv("TICTOK_LAUGH_AUDIO_LABELS_PATH", _REAL_LABELS)
+    if _REAL_ACTIVATION:
+        monkeypatch.setenv("TICTOK_LAUGH_AUDIO_ACTIVATION", _REAL_ACTIVATION)
+    if _REAL_WINDOW:
+        monkeypatch.setenv("TICTOK_LAUGH_AUDIO_WINDOW_SECONDS", _REAL_WINDOW)
+    # deviceは既定(cpu)のままにする。testが12GBのGPUを掴むとjobと衝突する。
+    monkeypatch.setattr(la, "_model", None, raising=False)
+    monkeypatch.setattr(la, "_model_key", None, raising=False)
     model = la._get_model()
     labels = la._load_labels()
     indices = la._class_indices(labels, config.get_laugh_audio_classes())

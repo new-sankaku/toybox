@@ -534,17 +534,31 @@ class SessionsMixin:
             ).fetchall()
         return [(row["comment"] or row["text"] or "") for row in rows]
 
-    def iter_events(self, session_id: int, start: float | None = None, end: float | None = None) -> list:
+    def iter_events(self, session_id: int, start: float | None = None, end: float | None = None,
+                    kinds=None) -> list:
         """Events for a session, ordered by arrival time. When start/end (wall-clock
         seconds, the same axis as recorder.started_at) are given, only events inside
         [start, end] are returned so a single recording of a multi-recording session
-        is fed only its own events, not the whole session's."""
+        is fed only its own events, not the whole session's.
+
+        kindsを渡すとその種別だけをSQL側で絞る(Noneは全kind)。呼び出し側が全kindを読んで
+        からPythonで捨てるのは、必要量の何倍もの行を運ぶことになる — likeとjoinだけで
+        event全体の81%を占めるため、commentだけが要る用途では実測7倍の行を読んでいた。
+        idx_events_session_kind_time(session_id, kind, time)がそのまま効く形にしてある。
+        空のkindsは「どの種別も許さない」であって全kindではないので、0件を返す。"""
+        if kinds is not None:
+            kinds = list(kinds)
+            if not kinds:
+                return []
         self.flush()
         sql = (
             "SELECT time, create_time, kind, user_unique_id, user_nickname, text, comment, gift_name, gift_count, diamonds, count, gift_image, gift_id, emotes"
             " FROM events WHERE session_id = ?"
         )
         params: list = [session_id]
+        if kinds is not None:
+            sql += " AND kind IN (%s)" % ",".join("?" * len(kinds))
+            params.extend(kinds)
         if start is not None:
             sql += " AND time >= ?"
             params.append(start)

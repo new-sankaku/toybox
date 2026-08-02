@@ -23,6 +23,11 @@ from tictok.api import runtime
 
 router = APIRouter()
 
+# 移送は数十GB〜TBのfile移動で分単位かかる。2度目のrequestは同じplanを作って走るため、
+# 同じfileを2つのthreadが同時に動かし、片方が「移動元が無い」で失敗する。実行中は断る
+# (_storage_scan_lock / _retention_lock と同じ作法)。dry-runは読むだけなので通す。
+_relocate_lock = asyncio.Lock()
+
 
 @router.get("/api/storage/relocate")
 async def relocation_plan_api() -> dict:
@@ -41,12 +46,16 @@ async def relocate_api(request: RelocateRequest) -> dict:
         raise HTTPException(
             status_code=409,
             detail="最終保存先が設定されていません（作業先と同じため退避先がありません）。")
+    if request.confirm and _relocate_lock.locked():
+        raise HTTPException(status_code=409, detail="最終保存先への移動が既に実行中です。")
     plan = await asyncio.to_thread(disk._relocation_plan)
     if not request.confirm:
         return {"applied": False, "plan": plan}
     if not plan["items"]:
         return {"applied": False, "plan": plan}
-    async with runtime._tracked_job("storage", "最終保存先へ退避") as job_id:
+    # domainは"storage"(容量scan)と分ける。同じ名前で並ぶと、Job画面の種別列がfile移動を
+    # 「容量scan」と名乗り、種別を根拠に読むoperatorを取り違えさせる。
+    async with _relocate_lock, runtime._tracked_job("relocate", "最終保存先へ退避") as job_id:
         loop = asyncio.get_running_loop()
 
         def _on_item(done: int, total: int, item: Optional[dict]) -> None:
@@ -209,6 +218,7 @@ async def storage_retention_api(request: RetentionRequest) -> dict:
             fsfacts._fs_state_cache.clear()
             fsfacts._fs_bulk_cache.clear()
             fsfacts._bulk_status_cache.clear()
+            fsfacts._hls_dir_cache.clear()
             await progress.finish("削除結果を集計中")
             await asyncio.to_thread(
                 runtime.storage.record_ops_event,

@@ -231,16 +231,11 @@ def _recording_source_exists(recording: dict) -> bool:
 
 
 def _dir_bytes(path: Path) -> int:
-    """directory配下の実bytes合計。読めないentryは0として飛ばす(存在しない容量を数えない)。"""
-    total = 0
-    with perf.phase("fs.walk"):
-        for entry in path.rglob("*"):
-            try:
-                if entry.is_file():
-                    total += entry.stat().st_size
-            except OSError:
-                continue
-    return total
+    """directory配下の実bytes合計。読めないentryは0として飛ばす(存在しない容量を数えない)。
+
+    走査は ``_dir_usage`` に任せる。rglobはentry 1件につきis_fileとstatを別々に呼ぶため、
+    束ね前のsession dir(実測で最大11,285 entries)では同じ答えに3倍の呼び出しを払う。"""
+    return _dir_usage(path)[0]
 
 
 def _dir_usage(path: Path) -> tuple:

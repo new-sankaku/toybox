@@ -14,9 +14,11 @@ from TikTokLive.proto import (
     ImageBadge,
     ImageModel,
     PrivilegeLogExtra,
+    User,
     UserFansClubInfo,
     UserIdentity,
 )
+from TikTokLive.events import CommentEvent
 
 from tictok.collect import collector as C
 from tictok.collect.live_resolver import LiveResolveBlocked, interpret_live_state
@@ -297,6 +299,20 @@ def test_user_payload_identity_key_prefers_the_immutable_numeric_id():
     assert payload["user_id"] == "7012345678"
     assert payload["unique_id"] == "handle"
     assert payload["nickname"] == "Nick"
+    assert payload["identity_key"] == "7012345678"
+
+
+def test_event_user_survives_multi_word_proto_fields():
+    """event.userはExtendedUser.from_user経由。TikTokLive 6.6.5はここでto_pydictを
+    casing無しで呼ぶためnick_nameがnickNameになりTypeErrorで落ちる(ttlive_compatで補正)。
+    既存testはExtendedUserを直に組むのでisinstanceで素通りし、この経路を通らない。"""
+    event = CommentEvent(
+        user_info=User(id=7_012_345_678, nick_name="Nick", username="handle", sec_uid="sec"),
+        content="やあ",
+    )
+    payload = C._user_payload(event.user)
+    assert payload["nickname"] == "Nick"
+    assert payload["unique_id"] == "handle"
     assert payload["identity_key"] == "7012345678"
 
 
@@ -1252,3 +1268,89 @@ async def test_finalize_callback_wires_the_comment_index(
 
     rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
     assert [r["body"] for r in rows] == ["おつぽみ"]
+
+
+# ---------------- 焼き込みassetの先行取得への結線 ----------------
+
+
+class _RecordingPrefetch:
+    """AssetPrefetcherのうち、collectorが呼ぶ面だけを持つstub。"""
+
+    def __init__(self):
+        self.gift_icons = []
+        self.avatars = []
+        self.emotes = []
+
+    def submit_gift_icon(self, gift_id, url):
+        self.gift_icons.append((gift_id, url))
+
+    def submit_avatar(self, user_key, url):
+        self.avatars.append((user_key, url))
+
+    def submit_emotes(self, raw):
+        self.emotes.append(raw)
+
+
+@pytest.mark.asyncio
+async def test_recorded_event_queues_the_user_avatar_and_comment_emotes(collector):
+    """_record は履歴に載る全event種が通る唯一の口で、そこがasset先行取得のhook。
+    avatarとemoteのCDN URLは配信終了後403になるため、ここで積み損ねると焼き込みは
+    頭文字円盤と透明な余白へ縮退し、後から取り直す手段が無い。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+    emotes = json.dumps([{"index": 0, "id": "700111", "url": "https://cdn.example/e.png"}])
+
+    await collector._record("comment", {
+        "user": {"unique_id": "viewer", "avatar": "https://cdn.example/a.png"},
+        "comment": "こんばんは",
+        "emotes": emotes,
+    })
+
+    assert prefetch.avatars == [("viewer", "https://cdn.example/a.png")]
+    assert prefetch.emotes == [emotes]
+
+
+@pytest.mark.asyncio
+async def test_event_without_emotes_queues_nothing_for_emotes(collector):
+    """emoteを持たないeventで空の要求を積まないこと(queueは有界で、席は有限)。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+
+    await collector._record("like", {"user": {"unique_id": "viewer", "avatar": ""}, "count": 1})
+
+    assert prefetch.emotes == []
+    assert prefetch.avatars == [("viewer", "")]
+
+
+@pytest.mark.asyncio
+async def test_gift_event_queues_the_icon_while_its_url_is_fresh(collector, monkeypatch):
+    """gift iconはgift eventの側で積む(gift_idはそこにしか無い)。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(collector, "_record", _noop)
+
+    await collector._on_gift(SimpleNamespace(
+        user=ExtendedUser(username="handle"),
+        gift=SimpleNamespace(name="rose", diamond_count=10,
+                             image=ImageModel(m_urls=["https://cdn.example/rose.png"]), id=5827),
+        repeat_count=1,
+        streaking=False,
+        base_message=SimpleNamespace(create_time=0),
+    ))
+
+    assert prefetch.gift_icons == [(5827, "https://cdn.example/rose.png")]
+
+
+@pytest.mark.asyncio
+async def test_collector_without_a_prefetcher_still_records_events(collector):
+    """先行取得を無効にしたserverでも収集そのものは動く(assetが貯まらないだけ)。"""
+    collector._asset_prefetch = None
+
+    await collector._record("comment", {"user": {"unique_id": "viewer", "avatar": "u"},
+                                        "comment": "やあ"})
+
+    assert collector.stats["events_total"] == 1

@@ -691,6 +691,37 @@ def test_without_spans_drops_the_battle_and_collab_windows():
         == profile["scores"]
 
 
+def test_multi_face_spans_marks_where_more_than_one_person_is_on_screen():
+    """コラボ区間をDBの窓ではなく素材から決めるための窓。``collab_windows`` は
+    LinkMic channelの有無であって人数ではない(実測で811窓中805窓が guests_max=0)。"""
+    profile = _profile()  # faces = [1, 1, 2, 1, 1, 0, 3, 1, 1, 1] / 刻み2.0秒
+    assert sm.multi_face_spans(profile) == [(4.0, 6.0), (12.0, 14.0)]
+
+
+def test_multi_face_spans_joins_neighbouring_samples_into_one_span():
+    profile = _profile(faces=[1, 2, 2, 2, 1, 3, 3])
+    assert sm.multi_face_spans(profile) == [(2.0, 8.0), (10.0, 14.0)]
+
+
+def test_a_sample_with_no_face_is_not_a_collab():
+    """顔が見えないのは「複数人いる」ではない。ゲーム画面・カメラ外しは単独配信でも
+    普通に起きるので、ここで0個を多人数側へ入れるとその素材がまるごと消える。"""
+    profile = _profile(faces=[0, 0, 0, 0])
+    assert sm.multi_face_spans(profile) == []
+    profile = _profile(faces=[2, 0, 2])
+    assert sm.multi_face_spans(profile) == [(0.0, 2.0), (4.0, 6.0)]
+
+
+def test_multi_face_spans_takes_the_minimum_from_the_caller():
+    profile = _profile(faces=[1, 2, 3, 4])
+    assert sm.multi_face_spans(profile, min_faces=3) == [(4.0, 8.0)]
+
+
+def test_multi_face_spans_ignores_unknown_sample_counts():
+    profile = _profile(faces=[None, 2, None])
+    assert sm.multi_face_spans(profile) == [(2.0, 4.0)]
+
+
 # --------------------------------------------------------------------------- sidecar
 
 
@@ -857,11 +888,16 @@ async def test_the_end_to_end_build_writes_the_sidecar(make_recording, cacheable
 # --------------------------------------------------------------------------- 実model
 
 
+# 実modelの設定は**import時に控えておく**。conftestの env_guard が TICTOK_* を一掃するため、
+# 収集時のskip判定(os.environを直接見る)と実行時の設定が食い違い、「model未設定」で落ちる。
+_REAL_FACE_MODEL = os.environ.get("TICTOK_SMILE_FACE_MODEL_PATH", "")
+_REAL_SMILE_MODEL = os.environ.get("TICTOK_SMILE_MODEL_PATH", "")
+
+
 @pytest.mark.skipif(
-    not os.environ.get("TICTOK_SMILE_FACE_MODEL_PATH")
-    or not os.environ.get("TICTOK_SMILE_MODEL_PATH")
-    or not Path(os.environ["TICTOK_SMILE_FACE_MODEL_PATH"]).is_file()
-    or not Path(os.environ["TICTOK_SMILE_MODEL_PATH"]).is_file(),
+    not _REAL_FACE_MODEL or not _REAL_SMILE_MODEL
+    or not Path(_REAL_FACE_MODEL).is_file()
+    or not Path(_REAL_SMILE_MODEL).is_file(),
     reason="needs the real ONNX models (TICTOK_SMILE_FACE_MODEL_PATH / TICTOK_SMILE_MODEL_PATH)",
 )
 def test_the_real_models_accept_a_blank_frame(monkeypatch):
@@ -869,5 +905,9 @@ def test_the_real_models_accept_a_blank_frame(monkeypatch):
     無地のframeに顔は無いので、検出0件が正しい。"""
     pytest.importorskip("onnxruntime")
     monkeypatch.setenv("TICTOK_SMILE_ENABLED", "1")
+    monkeypatch.setenv("TICTOK_SMILE_FACE_MODEL_PATH", _REAL_FACE_MODEL)
+    monkeypatch.setenv("TICTOK_SMILE_MODEL_PATH", _REAL_SMILE_MODEL)
+    monkeypatch.setattr(sm, "_models", None, raising=False)
+    monkeypatch.setattr(sm, "_models_key", None, raising=False)
     models = sm._get_models()
     assert sm._faces(models.detector, _frame(360, 640)) == []

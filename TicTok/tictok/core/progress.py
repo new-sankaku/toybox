@@ -43,10 +43,11 @@ OVERLAY_PHASES: tuple = (
     ("probe", "動画を解析中", 0.02),
     ("plan", "描画レイアウトを計算中", 0.03),
     ("assets", "アイコン・絵文字を取得中", 0.03),
-    ("layer", "コメント層を描画中", 0.22),
+    # CFR baseは中間fileを作らず合成へstream供給されるようになった(video_overlay
+    # _base_pipe_cmd)ので、独立した段階としては存在しない。重みはencodeが吸収する。
+    ("layer", "コメント層を描画中", 0.27),
     ("layer_encode", "コメント層を書き出し中", 0.08),
-    ("base", "CFRベースを生成中", 0.20),
-    ("encode", "焼き込み合成中", 0.42),
+    ("encode", "焼き込み合成中", 0.57),
 )
 
 # 再mp4化(元の.tsからのfinalize再実行)。concatは全segmentを1本のffmpegで通すので、
@@ -69,10 +70,9 @@ RETENTION_PHASES: tuple = (
 # プレビューは窓ぶんだけを同じ3 passで通す。probe/planは全尺でも軽いので1段階に畳む。
 PREVIEW_PHASES: tuple = (
     ("plan", "プレビュー範囲を準備中", 0.05),
-    ("layer", "コメント層を描画中", 0.25),
+    ("layer", "コメント層を描画中", 0.30),
     ("layer_encode", "コメント層を書き出し中", 0.10),
-    ("base", "CFRベースを生成中", 0.25),
-    ("encode", "プレビューを焼き込み中", 0.35),
+    ("encode", "プレビューを焼き込み中", 0.55),
 )
 
 

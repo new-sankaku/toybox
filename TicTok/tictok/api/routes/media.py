@@ -12,10 +12,12 @@ from typing import Optional
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from tictok.core import ops_labels
 from tictok.core.gpu import gpu_status
 from tictok.media.clipper import make_clip
 from tictok.media.reel import reel_path
 from tictok.record import audio_norm
+from tictok.record import media_queue
 from tictok.record.upscale import upscale_status
 from tictok.record.video_overlay import (NothingToDrawError, overlay_enabled, preview_paths,
     preview_still)
@@ -32,7 +34,7 @@ router = APIRouter()
 async def preview_still_api(recording_id: int, at: Optional[float] = None) -> dict:
     """焼き込み設定の静止画プレビュー。動画encode・comment layerのpipe・CFR pre-passを
     通らないので数秒で返る。``at`` 未指定ならComment/Gift/Battleが最も濃い時刻を自動で選ぶ。"""
-    recording, path, events, battles, transcript = media_jobs._preview_sources(recording_id)
+    recording, path, events, battles, transcript = await asyncio.to_thread(media_jobs._preview_sources, recording_id)
     try:
         result = await preview_still(
             str(path), recording["started_at"], recording.get("ended_at"),
@@ -71,7 +73,7 @@ async def preview_still_image(recording_id: int) -> FileResponse:
 async def preview_clip_api(recording_id: int) -> dict:
     """焼き込み設定の動画プレビューをqueueへ載せる。本出力と同じ解像度・codec・qualityで、
     尺だけをmedia PTS窓で切る。応答はjob_idのみ(完了はWSのjob_updateで届く)。"""
-    recording, path, _events, _battles, _transcript = media_jobs._preview_sources(recording_id)
+    recording, path, _events, _battles, _transcript = await asyncio.to_thread(media_jobs._preview_sources, recording_id)
     return await media_jobs._enqueue_media_job("overlay_preview", recording_id, recording=recording,
                                     stem=path.stem)
 
@@ -184,19 +186,43 @@ async def upscale_output_session(session_id: int) -> dict:
 
 
 @router.get("/api/jobs")
-async def list_jobs() -> dict:
+async def list_jobs(state: str = "all", kind: str = "all", job: str = "",
+                    limit: int = 200) -> dict:
     """待機中/実行中/過去のjobと、GPU排他の現況。画面のreload後もこれで進捗へ復帰する。
+
+    ``state`` / ``kind`` はJob画面のfilterで、台帳をここで絞る。画面側だけで絞っていた頃は、
+    一括投入が台帳の新しい``limit``行を埋めた日に、その前に失敗したjobが応答へ入らず
+    「失敗・中断のみ」が0件と断定していた。``total`` は絞り込みに一致する台帳の全行数で、
+    ``limit``で切れた分があることを画面が名乗るために返す。
 
     文字起こしも同じ台帳(kind=stt)に載るので一覧へ行として出る。件数を別に添えるのは、
     単発の文字起こしAPIのように台帳を通らないGPU実行があり、その時 gpu.active にだけ
-    sttが出るためである(台帳0行で「実行中 stt」だけが出ると読み解けない)。"""
+    sttが出るためである(台帳0行で「実行中 stt」だけが出ると読み解けない)。
+
+    ``job`` は1件の名指し(運用logの「このjobを見る」からの着地)。指されたjobが古くて
+    ``limit``の外に居ても必ず応答へ入るよう、台帳をjob_idで直接引く。
+
+    種別labelを同梱するのは、同じ訳語を画面にも置くと必ずずれるため
+    (``core/ops_labels.py`` のdocstring)。種別filterの選択肢もこれから作る。"""
+    if state != "all" and state not in media_queue.STATE_FILTERS:
+        raise HTTPException(status_code=400, detail=f"知らない状態filterです: {state}")
+    if limit < 1:
+        raise HTTPException(status_code=400, detail="limitは1以上で指定してください。")
+    states = media_queue.STATE_FILTERS.get(state)
+    domains = None if kind == "all" else (kind,)
+    jobs, total = await asyncio.to_thread(
+        media_jobs._job_page, states=states, domains=domains,
+        job_id=job.strip() or None, limit=limit)
     return {
-        "jobs": await asyncio.to_thread(media_jobs._job_snapshot),
+        "jobs": jobs,
+        "total": total,
+        "limit": limit,
         "gpu": gpu_status(),
         "stt": {"counts": await asyncio.to_thread(
             runtime.storage.count_media_jobs_by_state,
             "stt",
         )},
+        "kind_labels": ops_labels.JOB_KIND_LABELS,
     }
 
 

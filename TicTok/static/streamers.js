@@ -48,7 +48,12 @@ function renderList() {
     meta.className = "sm-item-meta";
     meta.innerHTML =
       `<span class="v">${fmtCompact(s.diamonds)}</span><span class="l">コイン</span>`
-      + `<span class="v">${fmtNum(s.sessions)}</span><span class="l">配信</span>`;
+      + `<span class="v">${fmtNum(s.sessions)}</span><span class="l">配信</span>`
+      + `<span class="v">${fmtPercent(s.liver_coin_share)}</span>`
+      + `<span class="l">ライバー/コイン</span>`
+      + `<span class="v">${fmtPercent(s.liver_gifter_share)}</span>`
+      + `<span class="l">ライバー/人数</span>`;
+    meta.title = liverTitle(s);
     item.appendChild(meta);
     item.addEventListener("click", () => selectStreamer(s.unique_id));
     list.appendChild(item);
@@ -79,17 +84,7 @@ async function selectStreamer(uid, light = false) {
   renderProfile(profile);
   if (!light) {
     resetAiReview();
-    loadCohortAndHighlights(uid);
-    // 配信者が変わった時点で前の一覧は無効。表示中なら即引き直し、そうでなければ
-    // sectionが画面へ入った時点で読む。
-    filesLoadedUid = null;
-    fileItems = [];
-    renderTableRows("sm-files-rows", null, [], () => [], []);
-    chipBar("sm-files-summary", []);
-    refreshFileSelection();
-    // 画面外なら読みにいかないので「読み込み中」とは言わない。
-    setListMessage(document.getElementById("sm-files-empty"), "この位置まで表示すると容量を集計します。");
-    maybeLoadFiles();
+    loadCohort(uid);
   }
 }
 
@@ -220,14 +215,10 @@ function renderAiReview(r) {
   res.classList.remove("hidden");
 }
 
-async function loadCohortAndHighlights(uid) {
-  const [cRes, hRes] = await Promise.all([
-    fetch(`/api/streamers/${encodeURIComponent(uid)}/cohort`),
-    fetch(`/api/streamers/${encodeURIComponent(uid)}/highlights`),
-  ]);
+async function loadCohort(uid) {
+  const res = await fetch(`/api/streamers/${encodeURIComponent(uid)}/cohort`);
   if (selectedUid !== uid) return;
-  if (cRes.ok) renderCohort(await cRes.json());
-  if (hRes.ok) renderHighlights((await hRes.json()).highlights || []);
+  if (res.ok) renderCohort(await res.json());
 }
 
 function renderProfile(p) {
@@ -243,6 +234,7 @@ function renderProfile(p) {
   renderHeatmap();
   renderConcentration(p.concentration);
   renderGifters(p.gifters);
+  renderLivers(p.livers || []);
   renderCoop(p.coop);
   renderBattle(p.battles);
   renderBattleTrend(p.battles.history || []);
@@ -289,40 +281,7 @@ function renderCohort(data) {
   );
 }
 
-// ---- ハイライト(コイン急増点) ----
-function renderHighlights(list) {
-  renderTableRows(
-    "sm-highlight-rows",
-    "sm-highlight-empty",
-    list,
-    (h, rank) => [
-      String(rank),
-      fmtDateTime(h.time),
-      `#${sessionNo(h.session_id)}`,
-      fmtNum(h.diamonds),
-      `×${h.ratio.toFixed(1)}`,
-      fmtNum(h.comments),
-      highlightRecCell(h),
-    ],
-    [0, 3, 4, 5],
-  );
-}
-
-// 録画がこの急増点をカバーしていれば、その時刻へ飛ぶ再生buttonを出す。
-function highlightRecCell(h) {
-  if (!h.recording_id) return "—";
-  const btn = document.createElement("button");
-  btn.className = "btn btn-small";
-  btn.textContent = "▶ 再生";
-  const no = `#${sessionNo(h.session_id)}`;
-  btn.title = `録画 ${no} の ${fmtDuration(h.offset || 0)} 付近から再生`;
-  btn.addEventListener("click", () =>
-    openVideo(h.recording_id, h.offset || 0, `急増点 ${fmtDateTime(h.time)}（録画 ${no}）`),
-  );
-  return btn;
-}
-
-// ---- ハイライト録画の再生(deep-link) ----
+// ---- 録画の再生(Battle履歴から該当場面へ) ----
 // 再生中の録画。errorの理由をserverへ問い合わせる間に別の録画へ移ることがあるため、
 // 到達時の対象と突き合わせる。
 let playingRecordingId = null;
@@ -403,187 +362,6 @@ function closeVideo() {
   video.removeAttribute("src");
   video.load();
   box.classList.add("hidden");
-}
-
-// ---- 録画容量の整理 ----
-// 直近に読み込んだ一覧。checkbox選択の集計と確認文の件数/容量に使う。
-let fileItems = [];
-// この一覧は録画ごとに実fileをstatし、HLSはdirectoryを走査する(server側
-// _recording_file_summary)。配信者を選ぶたびに走らせると選択そのものが重くなるので、
-// sectionが実際に画面へ入ったときだけ読む。表示は常時そこにあり、click操作は増えない。
-let filesLoadedUid = null;
-let filesVisible = false;
-
-function maybeLoadFiles() {
-  if (!filesVisible || !selectedUid || filesLoadedUid === selectedUid) return;
-  loadFiles();
-}
-
-function fileSelection() {
-  const rows = document.getElementById("sm-files-rows");
-  const picked = (kind) =>
-    Array.from(rows.querySelectorAll(`input[data-kind="${kind}"]:checked`))
-      .map((el) => Number(el.dataset.id));
-  return { mp4_ids: picked("mp4"), ts_ids: picked("ts") };
-}
-
-function refreshFileSelection() {
-  const sel = fileSelection();
-  const byId = new Map(fileItems.map((i) => [i.id, i]));
-  const bytes =
-    sel.mp4_ids.reduce((a, id) => a + byId.get(id).mp4_bytes + byId.get(id).derived_bytes, 0)
-    + sel.ts_ids.reduce((a, id) => a + byId.get(id).ts_bytes, 0);
-  const count = sel.mp4_ids.length + sel.ts_ids.length;
-  document.getElementById("sm-files-selected").textContent =
-    count ? `${count}件 / ${fmtBytes(bytes)} を解放` : "";
-  document.getElementById("sm-files-run").disabled = count === 0;
-  return { ...sel, bytes, count };
-}
-
-function fileCheckbox(item, kind) {
-  const exists = kind === "mp4" ? item.mp4_exists : item.ts_exists;
-  if (!exists) return "—";
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.dataset.kind = kind;
-  box.dataset.id = String(item.id);
-  // busyの判断はserverが返す。理由(録画中/焼き込み中/転写中)をUI側で組み直すと、
-  // server側の条件が増えたときに黙って選べてしまう。
-  box.disabled = item.busy;
-  if (item.busy) box.title = "録画中または処理中のため削除できません。";
-  box.addEventListener("change", refreshFileSelection);
-  return box;
-}
-
-// 状態＋保護toggle。履歴の録画表と同じ見た目・同じ操作にする。
-function fileState(item) {
-  const wrap = document.createElement("span");
-  wrap.className = "rec-state";
-  wrap.append(item.status);
-  // 収集中の録画は保持policyの対象外なので保護toggleを出さない(履歴側と同条件)。
-  if (item.status === "completed" || item.status === "interrupted") {
-    wrap.appendChild(protectBadge(item, loadFiles));
-  }
-  return wrap;
-}
-
-// 動画容量の内訳。派生物(焼き込み・Up出力)は元録画を残したまま消せるので、
-// 実在するときだけその場に削除buttonを出す。容量整理の主戦場はこの列。
-function fileSizeCell(item) {
-  const wrap = document.createElement("span");
-  wrap.className = "sm-size-cell";
-  wrap.append(fmtBytes(item.mp4_bytes + item.derived_bytes));
-  if (item.derived_bytes > 0) {
-    const note = document.createElement("span");
-    note.className = "result-sub-note";
-    note.textContent = `内 派生物 ${fmtBytes(item.derived_bytes)}`;
-    wrap.appendChild(note);
-    const btn = document.createElement("button");
-    btn.className = "btn btn-small";
-    btn.textContent = "派生物削除";
-    btn.title = "焼き込み(.overlay.mp4)・Up出力(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。";
-    btn.disabled = item.busy;
-    if (item.busy) btn.title = "録画中または処理中のため削除できません。";
-    btn.addEventListener("click", () => deleteDerived(item, loadFiles));
-    wrap.appendChild(btn);
-  }
-  return wrap;
-}
-
-function renderFileRows() {
-  renderTableRows(
-    "sm-files-rows",
-    "sm-files-empty",
-    fileItems,
-    (item) => [
-      fileCheckbox(item, "mp4"),
-      fileCheckbox(item, "ts"),
-      recTag(item),
-      item.filename || "—",
-      fileState(item),
-      fmtDateTime(item.started_at),
-      fileSizeCell(item),
-      fmtBytes(item.ts_bytes),
-    ],
-    [2, 6, 7],
-  );
-  // renderTableRowsはplaceholderのhiddenを切り替えるだけで文言を戻さない。読み込み中の
-  // 表示が0件の結果に残らないよう、状態はここで明示する。
-  setListState(document.getElementById("sm-files-empty"), fileItems.length ? "ok" : "empty");
-  document.getElementById("sm-files-all-mp4").checked = false;
-  document.getElementById("sm-files-all-ts").checked = false;
-  refreshFileSelection();
-}
-
-async function loadFiles() {
-  if (!selectedUid) return;
-  const uid = selectedUid;
-  filesLoadedUid = uid;
-  // 一括処理tabへは配信者を渡す。渡さないと向こうで一覧から選び直すことになる。
-  document.getElementById("sm-files-bulk").href =
-    `/videos?streamer=${encodeURIComponent(uid)}#bulk`;
-  document.getElementById("sm-files-message").textContent = "";
-  fileItems = [];
-  renderTableRows("sm-files-rows", null, [], () => [], []);
-  refreshFileSelection();
-  setListState(document.getElementById("sm-files-empty"), "loading");
-  let payload;
-  try {
-    payload = await apiSend("GET", `/api/streamers/${encodeURIComponent(uid)}/recordings`);
-  } catch (err) {
-    // 取得済み扱いのままだと再scrollしても引き直さない。失敗は未取得へ戻す。
-    if (filesLoadedUid === uid) filesLoadedUid = null;
-    setListState(document.getElementById("sm-files-empty"), "failed", err);
-    return;
-  }
-  // 読んでいる間に別の配信者へ切り替わっていたら、その一覧を上書きしない。
-  if (payload.unique_id !== selectedUid) return;
-  fileItems = payload.recordings || [];
-  chipBar("sm-files-summary", [
-    ["録画数", fmtNum(fileItems.length)],
-    ["動画+派生物", fmtBytes(payload.total_mp4_bytes)],
-    ["TS(HLS)", fmtBytes(payload.total_ts_bytes)],
-    ["合計", fmtBytes(payload.total_mp4_bytes + payload.total_ts_bytes)],
-  ]);
-  renderFileRows();
-}
-
-function toggleAllFiles(kind, checked) {
-  const rows = document.getElementById("sm-files-rows");
-  rows.querySelectorAll(`input[data-kind="${kind}"]:not(:disabled)`)
-    .forEach((el) => { el.checked = checked; });
-  refreshFileSelection();
-}
-
-async function runFileDelete() {
-  const sel = refreshFileSelection();
-  if (!sel.count) return;
-  const parts = [];
-  if (sel.mp4_ids.length) parts.push(`動画 ${sel.mp4_ids.length}件（焼き込み・Up出力・cacheを含む）`);
-  if (sel.ts_ids.length) parts.push(`TS ${sel.ts_ids.length}件`);
-  const ok = await confirmDialog(
-    `@${selectedUid} の ${parts.join(" と ")} をdiskから削除します（${fmtBytes(sel.bytes)}）。\n`
-    + "転写・検索index・bookmark・切り出しlist・解析は残りますが、削除したfileは元に戻せません。",
-    { title: "録画fileの削除", confirmLabel: "削除する", danger: true },
-  );
-  if (!ok) return;
-  const run = document.getElementById("sm-files-run");
-  run.disabled = true;
-  try {
-    const res = await apiSend(
-      "POST", `/api/streamers/${encodeURIComponent(selectedUid)}/recordings/delete-files`,
-      { mp4_ids: sel.mp4_ids, ts_ids: sel.ts_ids },
-    );
-    showToast(`${fmtBytes(res.freed_bytes)} を解放しました。`);
-  } catch (err) {
-    document.getElementById("sm-files-message").textContent = err.message;
-    run.disabled = false;
-    return;
-  }
-  // 実測を取り直す。解放bytesの予測値で表を書き換えると、消せなかったfileが
-  // 消えたことになる。
-  await loadFiles();
-  loadDiskBar();
 }
 
 function renderHead(identity, count) {
@@ -755,6 +533,34 @@ function hmCell(text, cls) {
 }
 
 // ---- Gifter / 収益分析 ----
+// ライバー比率は判定済みのコインを分母にした値。判定は待ち行列で順に進むので、
+// 未判定を「ライバーではない」と数えると実際より低く出る。判定がまだ1件も無い間は
+// 0%ではなく — を出す(「居ないと確認できた」と「まだ判っていない」を混同させない)。
+// ライバー(自分でも配信している人)の割合は、コイン基準と人数基準で意味が違う。1人の大口
+// ライバーが居ればコイン比率だけが跳ね、少額のライバーが大勢居れば人数比率だけが上がる。
+// どちらの分母かが名前から読めるよう、独立した項目として出す。
+//
+// 値が無い場合(判定が1件も済んでいない / serverが旧processでfieldを返さない)は — にする。
+// 0%は「ライバーが居ないと確認できた」という別の意味なので、そこへ丸めない。
+function fmtPercent(value) {
+  return typeof value === "number" ? `${value.toFixed(1)}%` : "—";
+}
+
+// 分母はどちらも全体。未判定の人はライバーに数えられないため、この比率は下限である。
+// 「判定済み」を必ず併記して、どこまで確認できた上での値かを読めるようにする。
+function liverTitle(c) {
+  const coin =
+    `コイン: ${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)}`;
+  const head =
+    `人数: ${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人`;
+  return (
+    `ギフトに占めるライバー（自分でも配信している人）の割合です。\n${coin}\n${head}\n`
+    + `分母は全体です。リーグ未判定の人はライバーに数えないため、この値は下限です`
+    + `（判定済み コイン ${fmtPercent(c.liver_coin_coverage)} / `
+    + `人数 ${fmtPercent(c.liver_gifter_coverage)}）。`
+  );
+}
+
 function renderConcentration(c) {
   chipBar("sm-conc", [
     ["Gifter数", fmtNum(c.total_gifters)],
@@ -763,6 +569,19 @@ function renderConcentration(c) {
     ["Top1 比率", `${c.top1.toFixed(1)}%`],
     ["Top5 比率", `${c.top5.toFixed(1)}%`],
     ["Top10 比率", `${c.top10.toFixed(1)}%`],
+    // 分母を名前に持たせて独立させる。「ライバー比率」だけでは、コインに対してなのか
+    // 人数に対してなのかが読めない。
+    ["ライバー / コイン全体", fmtPercent(c.liver_coin_share), "",
+      `${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)} コイン。`
+      + `${liverTitle(c)}`],
+    ["ライバー / ギフト人数", fmtPercent(c.liver_gifter_share), "",
+      `${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人。`
+      + `${liverTitle(c)}`],
+    ["リーグ判定済み(コイン)", fmtPercent(c.liver_coin_coverage), "",
+      "リーグを確認できたギフターのコインが、コイン全体に占める割合です。"
+      + "上の2つはこの範囲で確定した分だけを数えた下限値です。"],
+    ["リーグ判定済み(人数)", fmtPercent(c.liver_gifter_coverage), "",
+      "リーグを確認できたギフターが、ギフト人数全体に占める割合です。"],
   ]);
 }
 
@@ -782,6 +601,51 @@ function renderGifters(gifters) {
       fmtNum(g.diamonds),
       fmtNum(g.gifts),
       `${fmtNum(g.sessions)} 回`,
+    ],
+    [0, 2, 3, 4],
+  );
+}
+
+// ライバーからのギフト。比率だけでは「誰が投げたのか」が読めないので、リーグ帯の内訳と
+// 本人の一覧を並べる。帯はA/B/Cのグループ単位で畳む(A1とA2を別の帯として並べると、
+// 帯が10種類以上になって「どんなライバーか」が却って読めなくなる)。
+function liverTiers(livers) {
+  const groups = new Map();
+  livers.forEach((l) => {
+    const group = (l.league || "?").charAt(0);
+    if (!groups.has(group)) groups.set(group, { count: 0, diamonds: 0, tiers: new Set() });
+    const g = groups.get(group);
+    g.count += 1;
+    g.diamonds += l.diamonds || 0;
+    g.tiers.add(l.league);
+  });
+  return Array.from(groups.entries()).sort((a, b) => b[1].diamonds - a[1].diamonds);
+}
+
+function renderLivers(livers) {
+  chipBar(
+    "sm-liver-tiers",
+    liverTiers(livers).map(([group, g]) => [
+      `${group} 帯`,
+      `${fmtNum(g.count)} 人 / ${fmtNum(g.diamonds)} コイン`,
+      "",
+      `内訳: ${Array.from(g.tiers).sort().join(", ")}`,
+    ]),
+  );
+  renderTableRows(
+    "sm-livers",
+    "sm-livers-empty",
+    livers,
+    (l, rank) => [
+      String(rank),
+      userCell(l, {
+        stackId: true,
+        href: l.identity_key ? `/fans?fan=${encodeURIComponent(l.identity_key)}` : "",
+        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
+      }),
+      fmtNum(l.diamonds),
+      fmtNum(l.gifts),
+      `${fmtNum(l.sessions)} 回`,
     ],
     [0, 2, 3, 4],
   );
@@ -1454,14 +1318,6 @@ bindVideoError(
   () => playingRecordingId,
   (text) => { document.getElementById("sm-video-message").textContent = text; },
 );
-// section手前200pxで先読みし、scrollし切る前に表が埋まっているようにする。
-new IntersectionObserver((entries) => {
-  filesVisible = entries.some((e) => e.isIntersecting);
-  maybeLoadFiles();
-}, { rootMargin: "200px" }).observe(document.getElementById("sm-files-section"));
-document.getElementById("sm-files-run").addEventListener("click", runFileDelete);
-document.getElementById("sm-files-all-mp4").addEventListener("change", (e) => toggleAllFiles("mp4", e.target.checked));
-document.getElementById("sm-files-all-ts").addEventListener("change", (e) => toggleAllFiles("ts", e.target.checked));
 document.getElementById("sm-battle-close").addEventListener("click", closeBattleDetail);
 document.getElementById("sm-battle-modal").addEventListener("click", (e) => {
   if (e.target.id === "sm-battle-modal") closeBattleDetail();

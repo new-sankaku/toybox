@@ -1,5 +1,6 @@
 import hashlib
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -1428,3 +1429,72 @@ async def test_recovery_sees_a_packed_recording_as_having_material(
 
     assert await recorder.recover_interrupted_recordings(tmp_db, tmp_root) == 1
     assert tmp_db.get_recording(recording_id)["status"] == "completed"
+
+
+# --------------------------------------------------------------------------
+# 焼き込み/プレビューの入力取得は event loop 上でやらない
+# --------------------------------------------------------------------------
+
+
+def _loop_side_storage_calls(module_path, function_names):
+    """``function_names`` のasync関数から、threadを経由せず storage を触っている箇所。
+
+    ``asyncio.to_thread(storage.x, ...)`` は関数objectを渡しているだけなので数えない。"""
+    import ast
+
+    tree = ast.parse(pathlib.Path(module_path).read_text(encoding="utf-8"))
+    found = []
+
+    class Walk(ast.NodeVisitor):
+        def __init__(self, name):
+            self.name = name
+
+        def visit_Call(self, node):
+            if getattr(node.func, "attr", None) == "to_thread":
+                for arg in node.args[1:]:
+                    self.visit(arg)
+                return
+            target = node.func
+            label = None
+            if isinstance(target, ast.Attribute):
+                owner = target.value
+                chain = []
+                while isinstance(owner, ast.Attribute):
+                    chain.append(owner.attr)
+                    owner = owner.value
+                if isinstance(owner, ast.Name):
+                    chain.append(owner.id)
+                if ".".join(reversed(chain)).endswith("storage"):
+                    label = "storage.%s" % target.attr
+                elif target.attr in _BLOCKING_HELPERS:
+                    # ``media_jobs._preview_sources(...)`` のようにmodule越しの呼び方も拾う。
+                    label = target.attr
+            elif isinstance(target, ast.Name) and target.id in _BLOCKING_HELPERS:
+                label = target.id
+            if label:
+                found.append("%s:%d %s -> %s" % (module_path, node.lineno, self.name, label))
+            self.generic_visit(node)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in function_names:
+            Walk(node.name).visit(node)
+    return found
+
+
+# 中でstorageを触る同期helper。async側から素で呼ぶと同じことになる。
+_BLOCKING_HELPERS = {"_preview_sources", "_subtitle_transcript"}
+
+
+@pytest.mark.parametrize("module_path,functions", [
+    ("tictok/api/media_jobs.py",
+     {"_burn_in_recording", "_run_preview_clip_job", "_run_clip_overlay_job"}),
+    ("tictok/api/routes/media.py", {"preview_still_api", "preview_clip_api"}),
+])
+def test_burn_in_inputs_are_never_loaded_on_the_event_loop(module_path, functions):
+    """焼き込みとプレビューの入力取得は必ずthreadへ出す。
+
+    ``iter_events`` はbufferのflushを待ってからsessionの全eventを読む(実測37,214件で372ms)。
+    event loop上で呼ぶとその間serverが丸ごと止まり、writer lockも握るのでcollectorの
+    書き出しまで巻き添えになる。実測ではloop上の呼び出しがlock保持者を待つと、待った時間が
+    そのままevent loopの停止時間になった(4,706ms 対 to_thread経由17ms)。"""
+    assert _loop_side_storage_calls(module_path, functions) == []

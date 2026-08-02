@@ -14,6 +14,11 @@ const SEVERITY_LABELS = {
 
 let nextPage = null;
 let detailMaxChars = 0;
+// 表に出ている一番新しい行と、それを描いたときの条件。新着の数え合わせに使う。
+// 0件の一覧でもidはnullのまま条件だけ控える(「まだ読んでいない」と「読んだが0件だった」は
+// 別物で、後者では次に入った記録がすべて新着になる)。
+let topEventId = null;
+let topEventFilter = null;
 // kind(collector.disconnected)→日本語ラベルの対応表。Server側(core/ops_labels.py)が唯一の
 // 出所で、画面は受け取って引くだけにする。同じ訳語をFrontendにも置くと必ずずれる。
 let kindLabels = {};
@@ -52,30 +57,42 @@ function severityCell(event) {
 
 // 時刻は月日から出す。この画面は1行=1件のlogを縦に追う表で、全行に同じ年が並ぶと
 // 桁が増えるだけで読む助けにならない。年を含む完全な日時はcellのtooltipで読める。
-function opsTimeText(ts) {
-  if (!ts) return "-";
-  const d = new Date(ts * 1000);
-  const p = (n) => String(n).padStart(2, "0");
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
+// 実装はcommon.jsのfmtDateTimeShortが持つ(Job画面と同じ書式であることが要件なので、
+// 同じ物を2箇所に置かない)。
 
-function targetText(event) {
+// 対象は「何が起きたか」の次に辿る先でもある。文字列だけだと、番号を控えて履歴画面で
+// 探し直すことになるので、飛べるものはlinkにする。
+function targetNode(event) {
   const parts = [];
-  if (event.unique_id) parts.push(`@${event.unique_id}`);
+  if (event.unique_id) parts.push(document.createTextNode(`@${event.unique_id}`));
   if (event.session_id) {
     // ops_eventsはFKを張らずsession削除後も残る。sessionが消えた行はunique_idが引けない
-    // ので、そのことを明示する(空欄にすると記録漏れと見分けが付かない)。
-    parts.push(event.session_unique_id
-      ? `session #${sessionNo(event.session_id)}`
-      : `session #${sessionNo(event.session_id)}（削除済み）`);
+    // ので、そのことを明示する(空欄にすると記録漏れと見分けが付かない)。飛び先が無い
+    // 削除済みsessionはlinkにしない(押して空の画面へ着くのは「消えた」より読みにくい)。
+    const label = `session #${sessionNo(event.session_id)}`;
+    if (event.session_unique_id) {
+      const link = document.createElement("a");
+      link.href = `/history?session=${event.session_id}`;
+      link.textContent = label;
+      link.title = "履歴画面でこのsessionの詳細を開きます。";
+      parts.push(link);
+    } else {
+      parts.push(document.createTextNode(`${label}（削除済み）`));
+    }
   }
   if (event.recording_id) {
     // 録画行が消えていればfile名は引けない。sessionと同じく「削除済み」と名乗る(番号が
     // 出せないからと空欄にすると、録画の記録が無かったのと見分けが付かない)。
     const name = recName({ filename: event.recording_filename, session_id: event.session_id });
-    parts.push(name === "—" ? "録画（削除済み）" : `録画 ${name}`);
+    parts.push(document.createTextNode(name === "—" ? "録画（削除済み）" : `録画 ${name}`));
   }
-  return parts.join(" / ") || "-";
+  if (!parts.length) return document.createTextNode("-");
+  const wrap = document.createElement("span");
+  parts.forEach((node, i) => {
+    if (i) wrap.append(document.createTextNode(" / "));
+    wrap.append(node);
+  });
+  return wrap;
 }
 
 function durationText(event) {
@@ -119,7 +136,28 @@ function detailNode(event) {
   }
   const ids = document.createElement("div");
   ids.className = "chart-note";
-  ids.textContent = `ops_id: ${event.ops_id}` + (event.job_id ? ` / job_id: ${event.job_id}` : "");
+  ids.append(document.createTextNode(`ops_id: ${event.ops_id}`));
+  if (event.job_id) {
+    // job_idは1回の処理に紐づく記録を束ねる唯一のkey。表示するだけだと、手で写して
+    // job IDの条件へ貼ることになる。同じ画面で完結する絞り込みと、jobそのものの
+    // 状態を見るJob画面の両方へ出す。
+    ids.append(document.createTextNode(` / job_id: ${event.job_id} `));
+    const only = document.createElement("button");
+    only.type = "button";
+    only.className = "btn btn-compact";
+    only.textContent = "このjobの記録だけ表示";
+    only.title = "job IDの条件にこのIDを入れて、この画面で絞り込みます。";
+    only.addEventListener("click", () => {
+      document.getElementById("flt-job").value = event.job_id;
+      loadEvents(false);
+    });
+    ids.append(only, document.createTextNode(" "));
+    const link = document.createElement("a");
+    link.href = `/jobs?job=${encodeURIComponent(event.job_id)}`;
+    link.textContent = "Job画面で開く";
+    link.title = "このjobの進捗・結果をJob画面で見ます。";
+    ids.append(link);
+  }
   wrap.appendChild(ids);
   return wrap;
 }
@@ -158,13 +196,13 @@ function appendRow(tbody, event) {
   const cells = [
     // 開閉は左端。行の先頭に置くと、開いている行と閉じている行が縦一列で見分けられる。
     { value: toggle, cls: "act" },
-    { value: opsTimeText(event.ts), cls: "ops-ts", title: fmtDateTime(event.ts) },
+    { value: fmtDateTimeShort(event.ts), cls: "ops-ts", title: fmtDateTime(event.ts) },
     { value: severityCell(event), cls: "ident" },
     // 種別は日本語で出し、記録上のkey(collector.disconnected)はtooltipに残す。
     { value: kindText(event.kind), cls: "ident ops-kind", title: event.kind },
     // 対象は識別子(＠id・session・File名)の列。語中で割ると別のFile名に読めるうえ、
     // 内容列が余りを取る組み方では1文字ずつの縦棒まで潰れる。
-    { value: targetText(event), cls: "ident ops-target" },
+    { value: targetNode(event), cls: "ident ops-target" },
     { value: event.message || "", cls: "ops-msg" },
     { value: durationText(event), cls: "num ops-dur" },
   ];
@@ -215,7 +253,15 @@ async function loadEvents(append) {
   if (data.kind_labels) kindLabels = data.kind_labels;
   nextPage = data.next;
   const tbody = document.getElementById("ops-rows");
-  if (!append) tbody.replaceChildren();
+  if (!append) {
+    tbody.replaceChildren();
+    // 新着の基準は「今この条件で描いた最新の行」。条件も一緒に控えておかないと、
+    // 条件を変えた直後の数え合わせが別の一覧との比較になる。
+    const events = data.events || [];
+    topEventId = events.length ? events[0].id : null;
+    topEventFilter = params.toString();
+    setNewEventCount(0, false);
+  }
   (data.events || []).forEach((event) => appendRow(tbody, event));
   setListState(emptyEl, tbody.childElementCount === 0 ? "empty" : "ok");
   document.getElementById("ops-more").classList.toggle("hidden", !nextPage);
@@ -236,13 +282,36 @@ async function loadFilterOptions() {
     return;
   }
   kindLabels = data.kind_labels || {};
+  // 種別は数十件ある。1枚のflatな一覧から目で拾うのは現実的でないので、kindの前半
+  // (collector / overlay …)でまとめ、groupごとに「すべて」を置く。groupの見出しは
+  // kindのそのままの前半にする: 日本語のgroup名をここで作ると、Server(core/ops_labels)が
+  // 持たない訳語を画面が名乗ることになり、text logとの突き合わせもできなくなる。
+  // APIの受け口は kind_prefix(前方一致)なので、値は "overlay." をそのまま渡せばよい。
+  const groups = new Map();
   (data.kinds || []).forEach((entry) => {
-    const option = document.createElement("option");
-    option.value = entry.kind;
-    option.textContent = `${kindText(entry.kind)}（${fmtNum(entry.count)}）`;
-    // 種別を日本語にすると記録上のkeyが画面から消える。text logと突き合わせられるよう残す。
-    option.title = entry.kind;
-    kindSelect.appendChild(option);
+    const domain = String(entry.kind).split(".")[0];
+    const group = groups.get(domain) || { count: 0, kinds: [] };
+    group.count += entry.count || 0;
+    group.kinds.push(entry);
+    groups.set(domain, group);
+  });
+  groups.forEach((group, domain) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = domain;
+    const all = document.createElement("option");
+    all.value = `${domain}.`;
+    all.textContent = `${domain} すべて（${fmtNum(group.count)}）`;
+    all.title = `${domain}. で始まる種別すべて`;
+    optgroup.appendChild(all);
+    group.kinds.forEach((entry) => {
+      const option = document.createElement("option");
+      option.value = entry.kind;
+      option.textContent = `${kindText(entry.kind)}（${fmtNum(entry.count)}）`;
+      // 種別を日本語にすると記録上のkeyが画面から消える。text logと突き合わせられるよう残す。
+      option.title = entry.kind;
+      optgroup.appendChild(option);
+    });
+    kindSelect.appendChild(optgroup);
   });
   (data.unique_ids || []).forEach((entry) => {
     const option = document.createElement("option");
@@ -264,6 +333,46 @@ async function loadSummary() {
     el.textContent = "件数を取得できませんでした（0件という意味ではありません）。";
     el.title = errorDetailText(err);
   }
+}
+
+// ---- 自動での数え直し --------------------------------------------------------------
+// 件数(navのbadgeと同じAPI)は60秒ごとに増えるのに、一覧と画面上の件数は起動時のまま
+// だった。同じ画面の中で「badgeは増えているのに表は増えない」状態を残さないよう、
+// 件数はbadgeと同じ周期で取り直し、表は新着の数だけを出して押した時に入れ替える。
+
+function setNewEventCount(count, atLeast) {
+  const btn = document.getElementById("ops-reload");
+  btn.textContent = count
+    ? `最新にする（新着 ${fmtNum(count)}件${atLeast ? "以上" : ""}）`
+    : "最新にする";
+  btn.classList.toggle("btn-primary", count > 0);
+}
+
+async function pollOpsUpdates() {
+  await loadSummary();
+  const params = opsFilters();
+  // 条件を変えた直後(まだ絞り込んでいない)は数え合わせの相手が居ない。前の条件の一覧と
+  // 今の条件の件数を突き合わせると、出てもいない行を新着として数えることになる。
+  if (topEventFilter === null || params.toString() !== topEventFilter) return;
+  let data;
+  try {
+    data = await apiSend("GET", `/api/ops/events?${params.toString()}`);
+  } catch (err) {
+    // 取れなかっただけで「新着なし」ではない。数を作らず、前の表示のままにする。
+    console.warn(`ops-reload: ${errorDetailText(err)}`, err);
+    return;
+  }
+  const events = data.events || [];
+  const index = topEventId === null
+    ? -1
+    : events.findIndex((event) => event.id === topEventId);
+  if (index >= 0) {
+    setNewEventCount(index, false);
+    return;
+  }
+  // 基準の行が1ページに入っていない。ページを埋め切っているならこの先にも在り得るので
+  // 「以上」と断る(ちょうどの数は1ページでは分からない)。
+  setNewEventCount(events.length, events.length >= (data.limit || 0));
 }
 
 // ---- API所要時間 ------------------------------------------------------------------
@@ -358,6 +467,15 @@ document.getElementById("flt-apply").addEventListener("click", () => loadEvents(
 ["flt-severity", "flt-kind", "flt-unique"].forEach((id) => {
   document.getElementById(id).addEventListener("change", () => loadEvents(false));
 });
+// 自由入力もEnterで確定できるようにする。打ち終わりが判らないのでchangeでは走らせないが、
+// 打ったあとmouseへ持ち替えさせる理由も無い(「絞り込む」は残す)。
+["flt-job", "flt-since", "flt-until"].forEach((id) => {
+  document.getElementById(id).addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    loadEvents(false);
+  });
+});
 
 document.getElementById("flt-reset").addEventListener("click", () => {
   ["flt-severity", "flt-kind", "flt-unique", "flt-job", "flt-since", "flt-until"]
@@ -366,10 +484,12 @@ document.getElementById("flt-reset").addEventListener("click", () => {
 });
 
 document.getElementById("ops-more").addEventListener("click", () => loadEvents(true));
+document.getElementById("ops-reload").addEventListener("click", () => loadEvents(false));
 
 loadFilterOptions();
 loadSummary();
 loadEvents(false);
 loadPerf();
+setInterval(pollOpsUpdates, OPS_BADGE_POLL_MS);
 // jobの進捗はJob画面が持つ。この画面はWSを接続表示とtopbarのjob badgeのためだけに使う。
 connectWS(() => {});

@@ -774,6 +774,38 @@ def get_avatar_fetch_backoff_seconds() -> float:
     return _env_float("TICTOK_AVATAR_FETCH_BACKOFF_SECONDS", 1.5)
 
 
+# ---- capture時のasset先行取得 (tictok.media.asset_prefetch) ----
+
+
+def get_asset_prefetch_enabled() -> bool:
+    """配信中にgift icon / user avatar / custom emoteをpoolへ先行取得するか。
+
+    既定ON。切ると、これらのassetはCDN URLが新鮮な間に保存されなくなる。URLは配信終了後
+    403になるため後から取り直せず、焼き込みのavatarは頭文字円盤へ、emoteは透明な余白へ
+    縮退し、履歴とbrowser proxyのavatarも同時に失われる。帯域を絞る目的で切る場合は
+    その代償を承知した上で切ること。"""
+    return _env_bool("TICTOK_ASSET_PREFETCH_ENABLED", True)
+
+
+def get_asset_prefetch_concurrency() -> int:
+    """先行取得のworker本数 = 同時download数の上限。コメントが殺到しても実際にCDNを叩く
+    本数はここで頭打ちになる。1件あたりの取得は数百msなので、既定でも毎秒数十件を捌ける。"""
+    return _env_int("TICTOK_ASSET_PREFETCH_CONCURRENCY", 8)
+
+
+def get_asset_prefetch_queue_size() -> int:
+    """先行取得queueの上限件数。溢れたぶんは捨てて(logへ残して)収集を止めない。取得待ちが
+    この件数を超えるのは、CDNが応答しないか配信が桁違いに荒れている場合だけで、そこで
+    queueを伸ばしても取得は追いつかず、event処理の側がmemoryを食うだけになる。"""
+    return _env_int("TICTOK_ASSET_PREFETCH_QUEUE_SIZE", 4000)
+
+
+def get_asset_prefetch_rate_per_second() -> float:
+    """先行取得が要求を開始してよい毎秒件数の上限。worker本数とは別の軸で、短時間に
+    集中した取得がCDNのrate limitに当たるのを防ぐ。0以下で無制限。"""
+    return _env_float("TICTOK_ASSET_PREFETCH_RATE_PER_SECOND", 16.0)
+
+
 # ---- Local AI (OpenAI-compatible endpoint: Ollama / llama.cpp server / LM Studio) ----
 # Provider/model/endpoint are NOT hard-coded into logic; they are deployment config so
 # the same code runs against any local quantized model. AI is opt-in (disabled by default)
@@ -1030,21 +1062,22 @@ def get_normalize_quality() -> int:
     return _env_int("TICTOK_NORMALIZE_QUALITY", 17)
 
 
-def get_overlay_prepass_quality() -> int:
-    """焼き込みのCFR base pre-passのencode品質(H.264 CRF/CQ、低いほど高品質・大きい)。
+def get_overlay_encode_chunks() -> int:
+    """焼き込み本encodeの時間分割並列数。既定1(分割なし)。
 
-    この中間fileは主passがもう一度encodeし直す**捨て物**で、必要なのは主passの入力として
-    視覚的に透過であることだけ。2h43mの録画でCQ16は約17GB(実測14.1Mbps=source 5.9Mbpsの
-    2.4倍)に達し、comment layerと合わせて同時38GBを占めていた。世代損失は1回だけなので、
-    その1回を「見えない範囲で一番安く」置くのが正しい。TICTOK_OVERLAY_PREPASS_QUALITYで上書き。
+    実測(00302, AV1 NVENC): 2分割の並列sessionはNVENCの合計処理量を分け合うだけで
+    wallは縮まない(各chunkがちょうど半速になった)。engine 2基の活用は分割ではなく
+    単一sessionのsplit-frame encode(video_overlay._split_encode_args)が担い、そちらは
+    1.81倍の実測。分割機構そのものは配信中の追いかけ焼き込みが将来使うために残している。
+    TICTOK_OVERLAY_ENCODE_CHUNKSで上書き。"""
+    return max(1, _env_int("TICTOK_OVERLAY_ENCODE_CHUNKS", 1))
 
-    既定が20から14へ下がっているのは、pre-passが**元解像度のまま**焼くようになったため
-    (拡大は主passのgraphへ移した)。同じCQでも画素数が数分の1になれば絶対的な誤差は増え、
-    その中間fileを後から拡大するぶん誤差も一緒に拡大される。非圧縮の拡大を基準にした実測
-    (31分の512x1024 → 1280x2560)では、旧経路(拡大→CQ20)のSSIM 0.9957に対し、新経路の
-    CQ20は0.9935へ落ち、CQ14で0.9958と旧経路へ戻る。CQ14でもfileは旧経路の2844MBに対し
-    1178MB、時間は178秒に対し35秒。"""
-    return _env_int("TICTOK_OVERLAY_PREPASS_QUALITY", 14)
+
+def get_overlay_layer_save_workers() -> int:
+    """comment層のdistinct frame書き出し(composite+PNG encode)のworker thread数。
+    0(既定)はCPU数から自動(video_overlay._layer_save_workers)。PILのcompositeとzlibは
+    GILを解放するので、threadで実並列になる。TICTOK_OVERLAY_LAYER_SAVE_WORKERSで上書き。"""
+    return _env_int("TICTOK_OVERLAY_LAYER_SAVE_WORKERS", 0)
 
 
 def get_overlay_layer_fps_cap() -> float:
@@ -1087,6 +1120,19 @@ def get_gpu_wait_timeout_seconds() -> float:
     an error — so the default never times out. Set a bound only when a stuck stage should
     surface as a failure rather than as an indefinite wait."""
     return _env_float("TICTOK_GPU_WAIT_TIMEOUT_SECONDS", 0.0)
+
+
+# ---- Live update channel (websocket broadcast) ----
+
+
+def get_websocket_send_timeout_seconds() -> float:
+    """1接続へのbroadcast送信を諦めるまでの秒数(0で無制限に待つ)。
+
+    broadcastは接続数ぶんの送信をまとめて行うが、TCPの送信bufferが埋まったclientへの
+    送信は相手が読むまで返らない。上限が無いと、1枚の応答しないtabが**他の全clientと
+    呼び出し元(収集中のcollector)**を道連れにする。超えた接続は応答しないものとして
+    切り離す — browserは自分で張り直すので、失うのはその1接続の1 messageだけである。"""
+    return _env_float("TICTOK_WEBSOCKET_SEND_TIMEOUT_SECONDS", 5.0)
 
 
 # ---- Long-running job registry (server-side progress, reload-tolerant) ----
@@ -1154,6 +1200,19 @@ def get_job_progress_min_interval_seconds() -> float:
     return _env_float("TICTOK_JOB_PROGRESS_MIN_INTERVAL_SECONDS", 2.0)
 
 
+def get_media_job_group_emit_min_interval_seconds() -> float:
+    """同じgroupの進捗まとめを続けて配るときの最小間隔。
+
+    group行の進捗はDBからgroup全件を引き直して作る。一括投入はgroup 1つに数百本入るので、
+    投入中も実行中も、1件動くたびに数百行のqueryがevent loop上で走る(N本の投入でN²)。
+    ここで間引く対象はgroupのまとめ行だけで、個々のjob行は従来どおり即座に配る。
+
+    間隔中に落ちた更新は捨てず、間隔明けの次の配信が最新のgroup状態を運ぶ。groupの
+    終了(全件完了/失敗)は間隔に関わらず即座に配る — そこを遅らせると「終わったのに
+    終わらない」表示になる。"""
+    return _env_float("TICTOK_MEDIA_JOB_GROUP_EMIT_MIN_INTERVAL_SECONDS", 2.0)
+
+
 def get_media_job_attempts() -> int:
     """Total runs of a media job before it is recorded as failed (1 = no retry).
     A burn-in dies on transient conditions that are gone seconds later — the output
@@ -1215,7 +1274,7 @@ def get_media_job_history_days() -> float:
     return _env_float("TICTOK_MEDIA_JOB_HISTORY_DAYS", 14.0)
 
 
-# ---- Spike detection (streamer highlights / clip candidates, see core/spike.py) ----
+# ---- Spike detection (clip candidates, see core/spike.py) ----
 
 
 def get_highlight_zscore() -> float:
@@ -1317,8 +1376,8 @@ def get_notify_shutdown_drain_seconds() -> float:
 # deployment が置く file を path で受け、model 名も class 名も logic に焼かない。
 # Fallback は持たない: 無効・未導入・model/label 不備・推論失敗はいずれも
 # LaughAudioError で返し、「笑いが無かった」ように見える結果を黙って返さない。
-# 実行は常に CPU。GPU(12GB) は faster-whisper と超解像が奪い合っており、ここが
-# gpu_slot を取ると焼き込みが待たされる — tagging model は tiny 級で CPU で足りる。
+# 実行するdeviceは TICTOK_LAUGH_AUDIO_DEVICE で選ぶ(既定 cpu)。cuda は別processで
+# 走らせる — 同居させない理由は laugh_worker.py の docstring を参照。
 
 
 def get_laugh_audio_enabled() -> bool:
@@ -1369,6 +1428,37 @@ def get_laugh_audio_batch() -> int:
     """1回のsession.runへ渡す窓の数。modelがbatchを固定してexportされている場合は
     そちらが優先される。"""
     return _env_int("TICTOK_LAUGH_AUDIO_BATCH", 32)
+
+
+def get_laugh_index_merge_gap_seconds() -> float:
+    """検索indexへ入れるとき、笑いの刻みをひと続きとみなす隙間の上限(秒)。
+
+    笑い声は一定ではなく、息継ぎで確率が1〜2刻みだけ閾値を割る。0にすると1回の笑いが
+    数行に割れ、検索結果が同じ場面で埋まる。"""
+    return _env_float("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", 2.0)
+
+
+def get_laugh_index_min_seconds() -> float:
+    """検索indexへ入れる窓の最短の長さ(秒)。これ未満の窓は行にしない。
+
+    1刻みだけ閾値を超える点は録画1本で数百個出る。全部を検索結果へ出すと、本当に笑って
+    いる場面がその中に埋もれる(切り出し候補側の下限と同じ理由)。"""
+    return _env_float("TICTOK_LAUGH_INDEX_MIN_SECONDS", 2.0)
+
+
+def get_laugh_audio_device() -> str:
+    """推論を走らせるdevice: ``cpu``(既定) か ``cuda``。
+
+    既定をcpuにしているのは、cudaがonnxruntime-gpuとCUDA runtimeの配置に依存し、
+    どちらも欠けている環境が普通にあるため。ここでcudaを既定にすると、未導入の環境で
+    「動いているのに遅い」でも「明示的に失敗」でもなく、**onnxruntimeが黙ってCPUへ
+    落ちた状態**になる(実測: 要求したproviderが作れないとget_providersがCPUだけを
+    返す)。laugh_audio側はその落下を検出して例外にするので、cudaと書いた環境では
+    必ずcudaで走るか失敗するかのどちらかになる。
+
+    実測(RTX 4070 Ti / ced-tiny 2秒窓): CPU 393 window/s に対し CUDA 12,733 window/s
+    (32倍)。cudaのときは音声decodeの方が律速になる(実測 833倍速)。"""
+    return os.environ.get("TICTOK_LAUGH_AUDIO_DEVICE", "cpu").strip().lower()
 
 
 def get_laugh_audio_threads() -> int:

@@ -8,20 +8,47 @@ kindとops_eventsのmessage文の両方に出るためで、2箇所に同じ訳�
 呼び出し側はNoneのときkindの生値を出すこと(operatorが記録と突き合わせられる形を残す)。
 """
 
-# 後処理jobの種類。kind(overlay.job_started)とmessage(「コメント焼き込みの処理を開始」)の
-# 両方がこの表を引く。
+# 後処理jobの種類。kind(overlay.job_started)とmessage(「焼き込みを開始しました」)の両方が
+# この表を引き、Job画面の種別labelと種別filterの選択肢もここから作る。訳語を置く場所は
+# ここ1箇所だけで、画面側は受け取って引くだけにする(module docstringの理由)。
 JOB_DOMAIN_LABELS = {
-    "overlay": "コメント焼き込み",
-    "overlay_preview": "焼き込みのpreview",
-    "clip": "切り抜きの書き出し",
-    "reel": "切り出しの連結",
-    "clip_overlay": "範囲の焼き込み",
-    "audionorm": "音量の正規化",
+    "overlay": "焼き込み",
+    "upscale": "Up出力",
+    "reprocess": "再mp4化",
+    "audionorm": "音量正規化",
     "pack": "ts結合",
-    "upscale": "AI高画質化",
-    "stt": "音声の転写",
-    "semantic": "意味検索のindex",
+    "waveform": "音声波形",
+    "sprite": "サムネ",
+    "overlay_preview": "焼き込みプレビュー",
+    "clip": "切り抜きの書き出し",
+    "clip_batch": "clip一括書き出し",
+    "clip_overlay": "範囲焼き込み",
+    "reel": "切り出しの連結",
+    "cutlist": "cut list書き出し",
+    "stt": "文字起こし",
+    "semantic": "意味検索index",
+    "storage": "容量scan",
+    # file移動を「容量scan」として並べていたため、種別を根拠に読むと実体を取り違えた。
+    "relocate": "最終保存先へ移動",
+    "retention": "保持policy",
+    "maintenance": "DB保守",
 }
+
+# session一括・配信者一括を1行へ畳んだときのdomain。実行の単位ではない(=ops_eventsのkindに
+# はならない)が、Job画面には行として出るのでlabelが要る。畳む前後で語を変えないよう、元の
+# 種別名をそのまま含める。
+GROUP_DOMAIN_LABELS = {
+    "session_overlay": "Session 焼き込み",
+    "session_upscale": "Session Up出力",
+    "bulk_overlay": "一括 焼き込み出力",
+    "bulk_upscale": "一括 Up出力",
+    "bulk_reprocess": "一括 再mp4化",
+    "bulk_audionorm": "一括 音量正規化",
+    "bulk_pack": "一括 ts結合",
+}
+
+# Job画面が引く全domain。並び順がそのまま種別filterの選択肢の順になる。
+JOB_KIND_LABELS = {**JOB_DOMAIN_LABELS, **GROUP_DOMAIN_LABELS}
 
 # jobの終わり方。取り消しと対象なしは正常な終わり方で、失敗と区別して読めるようにする。
 _JOB_ACTION_LABELS = {

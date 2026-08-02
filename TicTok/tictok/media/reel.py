@@ -105,8 +105,8 @@ async def make_reel(items: list, *, label: Optional[str] = None,
 
     # mp4が無い録画は.tsのHLSから切る。素材は同じ物を何度も切るので、貸し出しは全部の
     # 切り出しが終わるまで開いたままにする(hls_source参照)。
-    with contextlib.ExitStack() as stack:
-        sources = {src: stack.enter_context(hls_source.ffmpeg_source(src))
+    async with contextlib.AsyncExitStack() as stack:
+        sources = {src: await stack.enter_async_context(hls_source.ffmpeg_source_async(src))
                    for src in dict.fromkeys(part["src"] for part in parts)}
         first = await concat.check_compatible(sources, event="reel.incompatible")
         codec = first["video"]["codec_name"]

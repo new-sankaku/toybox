@@ -44,6 +44,7 @@ from collections import deque
 from pathlib import Path
 from typing import Callable, Optional
 
+from tictok.core import cancel
 from tictok.core.gpu import gpu_slot
 from tictok.record.transcription import STTError
 
@@ -92,14 +93,25 @@ def run_transcribe(path: str, on_progress: Optional[Callable] = None) -> dict:
     """``path`` を子processで文字起こしし、結果dictを返す。同期(呼び出し側はthreadへ)。
 
     GPU枠はここで押さえる。``gpu_slot`` はprocess内のsemaphoreなので、子で取っても他の
-    jobとは噛み合わない — 枠を持つのは常に親側である。"""
+    jobとは噛み合わない — 枠を持つのは常に親側である。
+
+    取り消しは子processのkillで効かせる。他のmedia jobと同じく ``cancel.register_process``
+    へ預けるだけでよい — 復号はCTranslate2の中で回っており、python側に取り消しを見に行く
+    余地は無いので、殺す以外に止める手段が無い。**登録し忘れると取り消しが黙って効かない**:
+    APIは受け付けて `cancelling` を返すのに子は最後まで走り切り、画面には「取消中」が
+    残り続ける(実測: 6時間16分の入力を96%まで回し切った)。枠待ちの前後でも取り消しを見る
+    — GPUが埋まっている間の待機は数時間になり得るので、そこで受けた取り消しが枠を取った
+    後の復号開始まで無視されると、止めたはずのjobが改めて走り出す。"""
     args = [sys.executable, "-u", "-m", "tictok.record.stt_worker", str(path)]
     tail: deque = deque(maxlen=STDERR_TAIL_LINES)
+    cancel.check_cancelled()
     with gpu_slot("stt"):
+        cancel.check_cancelled()
         proc = subprocess.Popen(
             args, cwd=str(PROJECT_ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", errors="replace", env=dict(os.environ),
         )
+        cancel.register_process(proc)
         with _children_lock:
             _children.add(proc)
         reader = threading.Thread(target=_drain_stderr, args=(proc.stderr, tail),
@@ -136,10 +148,15 @@ def run_transcribe(path: str, on_progress: Optional[Callable] = None) -> dict:
             if proc.poll() is None:
                 proc.kill()
                 proc.wait()
+            cancel.forget_process(proc)
             with _children_lock:
                 _children.discard(proc)
             reader.join(timeout=5)
 
+    # 取り消しで殺した子は、本物のcrashと同じ非0で返ってくる。先に取り消しを名乗らないと、
+    # operator自身の取り消しが「文字起こしのprocessが異常終了しました」というerrorになり、
+    # jobの状態も重大度も嘘になる(core.cancelの is_cancelled が置かれている理由と同じ)。
+    cancel.check_cancelled()
     if failure is not None:
         raise STTError(failure.get("message") or "文字起こしに失敗しました。")
     if code != 0 or result is None:

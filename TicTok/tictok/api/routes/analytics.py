@@ -30,11 +30,6 @@ async def analytics_time_index(metric: str = "joins", days: int = 0) -> dict:
     return await asyncio.to_thread(runtime.storage.analytics_time_index, metric, _analytics_since(days))
 
 
-@router.get("/api/analytics/relations")
-async def analytics_relations(days: int = 0) -> dict:
-    return await asyncio.to_thread(runtime.storage.analytics_relations, _analytics_since(days))
-
-
 @router.get("/api/analytics/battle-uplift")
 async def analytics_battle_uplift(days: int = 0) -> dict:
     return await asyncio.to_thread(runtime.storage.analytics_battle_uplift, _analytics_since(days))
@@ -55,11 +50,6 @@ async def analytics_join_quality(days: int = 0) -> dict:
     return await asyncio.to_thread(runtime.storage.analytics_join_quality, _analytics_since(days))
 
 
-@router.get("/api/analytics/scale-efficiency")
-async def analytics_scale_efficiency(days: int = 0) -> dict:
-    return await asyncio.to_thread(runtime.storage.analytics_scale_efficiency, _analytics_since(days))
-
-
 @router.get("/api/analytics/retention")
 async def analytics_retention(days: int = 0) -> dict:
     return await asyncio.to_thread(runtime.storage.analytics_retention, _analytics_since(days))
@@ -73,11 +63,6 @@ async def analytics_concentration(days: int = 0) -> dict:
 @router.get("/api/analytics/join-context")
 async def analytics_join_context(days: int = 0) -> dict:
     return await asyncio.to_thread(runtime.storage.analytics_join_context, _analytics_since(days))
-
-
-@router.get("/api/analytics/battle-flow")
-async def analytics_battle_flow(days: int = 0) -> dict:
-    return await asyncio.to_thread(runtime.storage.analytics_battle_flow, _analytics_since(days))
 
 
 @router.get("/api/analytics/coverage")
@@ -111,17 +96,6 @@ def _analytics_dwell(since: float) -> dict:
 async def analytics_dwell(days: int = 0) -> dict:
     """視聴者1人あたりの平均滞在時間と入れ替わり率。同一配信者内の相対比較にのみ使える。"""
     return await asyncio.to_thread(_analytics_dwell, _analytics_since(days))
-
-
-def _analytics_anomaly(since: float) -> dict:
-    """配信の異常検知(session間の水準比較 + session内の水準shift)。"""
-    return analytics.reduce_anomaly(runtime.storage._analytics_rows("anomaly", since))
-
-
-@router.get("/api/analytics/anomaly")
-async def analytics_anomaly(days: int = 0) -> dict:
-    """その配信者自身の過去分布に対する逸脱。同一配信者内の相対比較のみ。"""
-    return await asyncio.to_thread(_analytics_anomaly, _analytics_since(days))
 
 
 def _analytics_activation(since: float) -> dict:

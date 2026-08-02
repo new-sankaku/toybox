@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import math
+import pathlib
 import shutil
 import subprocess
 import types
@@ -60,21 +61,23 @@ def test_fine_peaks_empty_stream_returns_empty():
     assert wf._fine_peaks(_fake_proc(b"")).size == 0
 
 
-def test_reduce_folds_to_exactly_the_requested_buckets():
-    fine = np.arange(10, dtype=np.float32)
-    out = wf._reduce(fine, 5)
-    assert out.tolist() == [1.0, 3.0, 5.0, 7.0, 9.0]
+def test_display_peaks_fold_by_fixed_time_buckets():
+    frames_per_bucket = int(round(wf.WAVE_BUCKET_SECONDS * 1000.0 / wf.FINE_FRAME_MS))
+    fine = np.arange(frames_per_bucket * 3, dtype=np.float32)
+    out = wf._display_peaks(fine)
+    assert out.tolist() == [
+        float(frames_per_bucket - 1),
+        float(frames_per_bucket * 2 - 1),
+        float(frames_per_bucket * 3 - 1),
+    ]
 
 
-def test_reduce_single_bucket_is_the_global_max():
-    fine = np.array([3.0, 41.0, 7.0], dtype=np.float32)
-    assert wf._reduce(fine, 1).tolist() == [41.0]
-
-
-def test_reduce_stretches_when_shorter_than_buckets():
-    fine = np.array([5.0, 7.0], dtype=np.float32)
-    out = wf._reduce(fine, 4)
-    assert out.tolist() == [5.0, 5.0, 7.0, 7.0]
+def test_display_peaks_keep_a_trailing_partial_bucket():
+    frames_per_bucket = int(round(wf.WAVE_BUCKET_SECONDS * 1000.0 / wf.FINE_FRAME_MS))
+    fine = np.zeros(frames_per_bucket + 1, dtype=np.float32)
+    fine[-1] = 7.0
+    out = wf._display_peaks(fine)
+    assert out.tolist() == [0.0, 7.0]
 
 
 def test_levels_are_time_binned_and_full_scale_normalised():
@@ -97,24 +100,34 @@ def test_levels_interval_snaps_to_fine_frame_grid():
 
 def test_waveform_cache_roundtrip_and_invalidation(make_recording):
     _, mp4 = make_recording()
-    result = {"buckets": 4, "duration_seconds": 12.5, "peaks": [0.1, 0.2, 0.3, 1.0]}
+    result = {"buckets": 4, "bucket_seconds": wf.WAVE_BUCKET_SECONDS,
+              "duration_seconds": 12.5, "peaks": [0.1, 0.2, 0.3, 1.0]}
     wf._store_cache(mp4, result)
 
-    assert wf._load_cache(mp4, 4) == result
-    assert wf._load_cache(mp4, 8) == {}
+    assert wf._load_cache(mp4) == result
 
     mp4.write_bytes(b"\x00" * 999)
-    assert wf._load_cache(mp4, 4) == {}
+    assert wf._load_cache(mp4) == {}
 
 
 def test_waveform_cache_rejects_a_stale_schema_version(make_recording):
     _, mp4 = make_recording()
-    wf._store_cache(mp4, {"buckets": 2, "duration_seconds": 1.0, "peaks": [0.0, 1.0]})
+    wf._store_cache(mp4, {"buckets": 2, "bucket_seconds": wf.WAVE_BUCKET_SECONDS,
+                          "duration_seconds": 1.0, "peaks": [0.0, 1.0]})
     path = wf.waveform_path(mp4)
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["version"] = wf._CACHE_VERSION + 1
     path.write_text(json.dumps(payload), encoding="utf-8")
-    assert wf._load_cache(mp4, 2) == {}
+    assert wf._load_cache(mp4) == {}
+
+
+def test_waveform_cache_rejects_a_different_bucket_width(make_recording):
+    # 旧schema(bucket個数固定)のcacheはbucket_secondsを持たない。読める形に畳み直さず
+    # 作り直させる(境界がbucketの整数倍でない限り近似になり表示位置がずれるため)。
+    _, mp4 = make_recording()
+    wf._store_cache(mp4, {"buckets": 2, "bucket_seconds": wf.WAVE_BUCKET_SECONDS * 2,
+                          "duration_seconds": 1.0, "peaks": [0.0, 1.0]})
+    assert wf._load_cache(mp4) == {}
 
 
 def test_audio_profile_cache_ignores_a_different_interval(make_recording):
@@ -172,12 +185,6 @@ def test_level_peak_returns_none_for_unusable_windows():
     assert wf.level_peak(profile, 5.0, 6.0) is None
     assert wf.level_peak(profile, -1.0, 1.0) is None
     assert wf.level_peak(profile, 1.0, 0.5) is None
-
-
-async def test_ensure_waveform_rejects_non_positive_buckets(make_recording):
-    _, mp4 = make_recording()
-    with pytest.raises(RuntimeError):
-        await wf.ensure_waveform(mp4, buckets=0)
 
 
 async def test_ensure_waveform_requires_an_existing_file(tmp_root):
@@ -1016,6 +1023,45 @@ def test_grid_tile_dimensions_are_even_and_follow_the_aspect():
 def test_grid_falls_back_to_the_default_aspect_without_a_height():
     grid = th._grid(600.0, 1080, 0)
     assert grid["tile_height"] == th._grid(600.0, 9, 16)["tile_height"]
+
+
+async def test_keyframe_probe_uses_absolute_window_bounds(monkeypatch):
+    """窓は ``開始%終了`` で渡す。
+
+    尺で書く ``開始%+尺`` は実HLSに混ざるpts=N/Aのpacketで打ち切られ、0 frameしか返らない
+    (実測: 3.1時間の録画で 0 frame 対 128 frame)。0 frameは「測れなかった」と同じNoneに
+    化けて全frame decodeへ倒れるため、形式を誤っても壊れて見えず、遅くなるだけになる。"""
+    captured = {}
+
+    async def fake_run(args, **kwargs):
+        captured["args"] = [str(a) for a in args]
+        return types.SimpleNamespace(ok=True, returncode=0, stderr="",
+                                     stdout="1.0\n3.0\n5.0\n")
+
+    monkeypatch.setattr(th.ffprobe, "run", fake_run)
+    source = types.SimpleNamespace(path=pathlib.Path("curated.m3u8"), input_args=())
+
+    assert await th._max_keyframe_gap(source, 3600.0) == 2.0
+
+    args = captured["args"]
+    intervals = args[args.index("-read_intervals") + 1]
+    assert "%+" not in intervals
+    windows = intervals.split(",")
+    assert len(windows) == th.KEYFRAME_PROBE_WINDOWS
+    for window in windows:
+        start, end = window.split("%")
+        assert float(end) - float(start) == pytest.approx(th.KEYFRAME_PROBE_SPAN_SECONDS)
+
+
+async def test_keyframe_probe_reports_none_when_nothing_was_read(monkeypatch):
+    """1 frameも読めなければ推測せずNone。全decodeは遅いだけで、誤ったkeyframe-onlyは
+    絵が複製されたspriteをcacheへ焼き付ける。"""
+    async def fake_run(args, **kwargs):
+        return types.SimpleNamespace(ok=True, returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(th.ffprobe, "run", fake_run)
+    source = types.SimpleNamespace(path=pathlib.Path("curated.m3u8"), input_args=())
+    assert await th._max_keyframe_gap(source, 3600.0) is None
 
 
 def test_sprite_cache_requires_both_files_and_a_matching_signature(make_recording):

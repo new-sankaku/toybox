@@ -271,17 +271,58 @@ class MediaJobsMixin:
             )
             self._conn.commit()
 
-    def list_media_jobs(self, limit: int = 200) -> list:
+    @staticmethod
+    def _media_job_filter(states, kinds, job_id=None) -> tuple:
+        """(WHERE句, 束縛値)。条件が無ければ空文字を返す。listとcountで同じ条件を使うため、
+        組み立てを1箇所に置く(片方だけ条件が違うと『N件あるのに0件』の逆が起きる)。
+
+        ``job_id`` は1件名指し。group_idも見るのは、一括投入のgroupを指されたときにその
+        明細から畳み直せるようにするため。"""
+        where = []
+        params: list = []
+        if states:
+            where.append("q.state IN (%s)" % ",".join("?" * len(states)))
+            params.extend(states)
+        if kinds:
+            where.append("q.kind IN (%s)" % ",".join("?" * len(kinds)))
+            params.extend(kinds)
+        if job_id:
+            where.append("(q.job_id = ? OR q.group_id = ?)")
+            params.extend([job_id, job_id])
+        return (" WHERE " + " AND ".join(where)) if where else "", params
+
+    def list_media_jobs(self, limit: int = 200, *, states=None, kinds=None,
+                        job_id=None) -> list:
+        """台帳の行を、実行中→待機中→その他の順に ``limit`` 件まで。
+
+        ``states`` / ``kinds`` での絞り込みをDB側に置くのは、画面側で絞ると条件に一致する
+        古い行がlimitの外に落ちたまま「0件」と表示されるため。一括投入が新しい200行を埋めた
+        日は、その前に失敗したjobが誰の目にも入らなくなる。``job_id`` の名指しも同じ理由で、
+        他画面から指されたjobがlimitの外に居ても必ず引けるようにする。"""
+        clause, params = self._media_job_filter(states, kinds, job_id)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT q.*, r.filename, r.unique_id, r.path AS recording_path"
                 " FROM media_job_queue q LEFT JOIN recordings r ON r.id = q.recording_id"
+                + clause +
                 " ORDER BY CASE q.state WHEN 'running' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,"
                 " q.priority DESC, COALESCE(q.finished_at, q.started_at, q.queued_at) DESC"
                 " LIMIT ?",
-                (limit,),
+                (*params, limit),
             ).fetchall()
         return [self._media_job_row(row) for row in rows]
+
+    def count_media_jobs(self, *, states=None, kinds=None, job_id=None) -> int:
+        """同じ条件に一致する台帳の全行数(limitで切る前)。
+
+        画面が「直近N件だけを見ている」と名乗るために使う。件数を持たないと、limitに達した
+        一覧を『これが全部』と読ませてしまう。"""
+        clause, params = self._media_job_filter(states, kinds, job_id)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS n FROM media_job_queue q" + clause, params,
+            ).fetchone()
+        return int(row["n"])
 
     def media_job_durations(self, kind: str, limit: int = 50) -> list:
         """完了したjobの実測 (所要秒, 元録画の尺秒) を新しい順に返す。

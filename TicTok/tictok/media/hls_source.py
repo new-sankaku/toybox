@@ -22,6 +22,7 @@ streamと見なされて待ち続ける。採用集合だけを指す終端済�
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import logging
@@ -173,6 +174,25 @@ def ffmpeg_source(src, prefer_hls: bool = False):
                            "ctx": {"path": str(playlist)}},
                     exc_info=True,
                 )
+
+
+@contextlib.asynccontextmanager
+async def ffmpeg_source_async(src, prefer_hls: bool = False):
+    """``ffmpeg_source`` のasync版。素材の貸し出しと後片付けをthreadへ出す。
+
+    **async関数から素材を借りるときは必ずこちらを使う。** 中でやっているのは同期のsegment
+    走査(VOD playlistの生成)と同期ffprobeで、実測1.7秒 + 0.1秒かかる。素の ``with`` で入ると
+    その間event loopが止まり、全画面も収集WSも同時に固まる。同期ffprobeのtimeoutは600秒
+    なので、返らない入力に当たれば最悪10分止まる(実測でevent loopが117秒止まった回がある)。
+
+    本体は try/finally だけなので、例外は生成器へ投げ返さず素通しでよい — 後片付けの
+    finallyはどちらの抜け方でも走る。"""
+    manager = ffmpeg_source(src, prefer_hls)
+    source = await asyncio.to_thread(manager.__enter__)
+    try:
+        yield source
+    finally:
+        await asyncio.to_thread(manager.__exit__, None, None, None)
 
 
 def _container_start_time(playlist: Path) -> float:

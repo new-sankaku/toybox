@@ -44,6 +44,39 @@ segment時刻は**gapless軸**(音声が実在するぶんだけの軸)になる
 「復号したcontainerの軸」なので、**mp4から文字起こしすればPTS軸、.tsから文字起こしすればmedia軸**になる。
 `transcribe_queue` が `prefer_hls=hls_source.plays_from_hls(path)` を渡すのはこのためである。
 
+### 時刻map版(`timemap_version`)
+
+| 版 | 中身 |
+|---|---|
+| NULL | mapが無かった頃の転写。gapless軸のままで、尺が伸びるほど後ろへズレる |
+| 1 | gapless→media軸のanchor map |
+| 2 | 1 に加え、源のtimestampが壊れたsegmentが残した**幻のjump**をplaylistの尺で畳む(`_rebase_phantom_jumps`) |
+
+版2を入れた当初は版を据え置いたため、壊れた地図で作られた転写が現行版を名乗ったまま残った
+(実測 録画00126: 素材2時間51分に対し転写の終端10時間43分。630.7秒地点の +28,288秒のjumpが
+線形補間で残り全体へ引き伸ばされ、字幕clickが録画の外側へ飛ぶ)。
+
+既存の版1は起動時の `timemap_migration` が選別する。物差しは焼き込みの関門と同じ
+`video_overlay.material_media_seconds` と `subtitles.axis_matches_media` で、**転写の尺が素材に
+収まっていれば畳む対象が無かった**のだから版2へ昇格させ、食い違うものだけ版1のまま据え置いて
+「要再転写」を名乗らせる。実尺が測れない録画は昇格させる — 降格は「ズレている証拠がある」ときに
+だけ行う。据え置かれた録画は再転写でしか直らない(既存segmentの張り直しは不可能)。
+
+選別を走らせるかどうかは `timemap_migration.SELECTION_VERSION`(db_maintenanceへ刻む)で決める。
+据え置いた行は版1のまま残るため、素直に毎起動で走らせると同じ母集合を測り直し続ける。
+**選別の根拠(物差し)を変えたらこの値を上げること。**
+
+### 「素材の実尺」は何を測るか
+
+`material_media_seconds` が測るのは、**下流が実際にffmpegへ渡す素材**である
+(`hls_source.ffmpeg_source` と同じ順: .ts が在れば採用集合、無ければmp4)。
+
+`timing.json` の `media_duration` も `recordings.duration_seconds` も使わない。どちらも
+finalize時のsnapshotで、その後にsession dirが太れば置き去りになる(実測: 捕捉processが
+孤児化して書き続けた録画で、録画行 12.0秒 に対し採用集合 16,861.8秒)。逆に素材が消えてmp4
+だけが残った録画では、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい転写を
+「軸が違う」と弾いていた(実測9件)。
+
 ## comment indexをいつ張るか
 
 `search_hits`(comment)を作る経路は3つで、これ以外に自動で張るものは無い。検索hitもplayer下段の

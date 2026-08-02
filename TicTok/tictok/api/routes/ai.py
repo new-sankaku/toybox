@@ -71,8 +71,8 @@ def _session_comment_entries(session_id: int) -> list:
     絞るのは抽出側の仕事なので、ここでは全commentを時刻付きで渡す。"""
     return [
         (row["time"], row["comment"] or row["text"] or "")
-        for row in runtime.storage.iter_events(session_id)
-        if row["kind"] == "comment" and (row["comment"] or row["text"])
+        for row in runtime.storage.iter_events(session_id, kinds=("comment",))
+        if row["comment"] or row["text"]
     ]
 
 

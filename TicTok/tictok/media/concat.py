@@ -134,6 +134,32 @@ async def _probe(cmd: list, src) -> str:
     return result.stdout
 
 
+async def probe_codec_params(source) -> dict:
+    """srcの先頭video/audio streamのparameterを、ffprobe 1回ぶんだけで返す。取れない項目は
+    捏造せずNoneのまま残す。
+
+    ``probe_stream_params`` と違い解像度の全種類を採らない(=録画全編のkeyframe走査をしない)。
+    そのぶん ``width``/``height`` はstream headerの1組、``resolutions`` は未測定のNoneなので、
+    **連結の可否を決める照合には使えない**。原本と同じ設定でencodeし直すために要る値
+    (pix_fmt / profile / level / sample_rate / channels)はここで揃うので、照合をしない
+    呼び出し(smart cutのhead再encode)はこちらを使う。"""
+    src = source.path
+    text = await _probe(
+        ["ffprobe", "-v", "error", *source.input_args,
+         "-show_streams", "-of", "json", str(src)], src)
+    streams = json.loads(text).get("streams") or []
+    video = next((s for s in streams if s.get("codec_type") == "video"), None)
+    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
+    if video is None:
+        raise RuntimeError(f"映像streamがありません: {src.name}")
+    if audio is None:
+        raise RuntimeError(f"音声streamがありません: {src.name}")
+    return {
+        "video": {k: video.get(k) for k in VIDEO_KEYS},
+        "audio": {k: audio.get(k) for k in AUDIO_KEYS},
+    }
+
+
 async def probe_stream_params(source) -> dict:
     """srcの先頭video/audio streamのparameterを返す。取れない項目は捏造せずNoneのまま残す
     (Noneは他fileのNone以外と一致しないので、照合は自然に失敗する)。
@@ -146,26 +172,17 @@ async def probe_stream_params(source) -> dict:
     # media package内の依存の向きを一方向に保つ)。
     from tictok.media import hls_source
 
-    src = source.path
-    text = await _probe(
-        ["ffprobe", "-v", "error", *source.input_args,
-         "-show_streams", "-of", "json", str(src)], src)
-    streams = json.loads(text).get("streams") or []
-    video = next((s for s in streams if s.get("codec_type") == "video"), None)
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
-    if video is None:
-        raise RuntimeError(f"映像streamがありません: {src.name}")
-    if audio is None:
-        raise RuntimeError(f"音声streamがありません: {src.name}")
+    params = await probe_codec_params(source)
+    video = params["video"]
     found = await hls_source.resolutions(source)
     return {
         "video": {
-            **{k: video.get(k) for k in VIDEO_KEYS},
-            "width": max((w for w, _ in found), default=video.get("width")),
-            "height": max((h for _, h in found), default=video.get("height")),
+            **video,
+            "width": max((w for w, _ in found), default=video["width"]),
+            "height": max((h for _, h in found), default=video["height"]),
             "resolutions": len(found) or None,
         },
-        "audio": {k: audio.get(k) for k in AUDIO_KEYS},
+        "audio": params["audio"],
     }
 
 

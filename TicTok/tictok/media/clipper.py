@@ -324,8 +324,8 @@ async def _copy_clip(source, start: float, end: float, out: Path, output_args) -
 async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
     """先頭GOPだけを再encodeし、残りを原本のまま複製して1本へ繋ぐ。"""
     duration = end - start
-    with hls_source.ffmpeg_source(src) as source:
-        params = await concat.probe_stream_params(source)
+    async with hls_source.ffmpeg_source_async(src) as source:
+        params = await concat.probe_codec_params(source)
         codec = params["video"]["codec_name"]
         if codec not in concat.ANNEXB_FILTERS:
             raise RuntimeError(f"smart cutに対応していない映像codecです: {codec}")
@@ -459,7 +459,7 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
 
     # mp4が無い録画は.tsのHLSから切る。切り出しはstream copyなので、どちらを読んでも
     # 出てくるpacketは同じ(hls_source参照)。
-    with hls_source.ffmpeg_source(src) as source:
+    async with hls_source.ffmpeg_source_async(src) as source:
         if normalize:
             # loudnormは192kHzを出すので、sourceの実rateを測って出力をそこへ戻す。
             rate = await asyncio.to_thread(audio_norm.probe_sample_rate, source.path)

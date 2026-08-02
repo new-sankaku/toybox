@@ -13,13 +13,13 @@ Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class CollectorManager:
-    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_pool=None, avatar_proxy=None, notifier=None) -> None:
+    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_proxy=None, asset_prefetch=None, notifier=None) -> None:
         self._broadcast = broadcast
         self._storage = storage
         self._settings = settings
         self._gift_icons = gift_icons
-        self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
+        self._asset_prefetch = asset_prefetch
         self._notifier = notifier
         self._collectors: dict[str, TikTokCollector] = {}
         self._probe_gate = ProbeGate(settings, self._probing_count)
@@ -74,8 +74,8 @@ class CollectorManager:
                 probe_gate=self._probe_gate,
                 resolver=self._resolver,
                 gift_icons=self._gift_icons,
-                avatar_pool=self._avatar_pool,
                 avatar_proxy=self._avatar_proxy,
+                asset_prefetch=self._asset_prefetch,
                 record_video=record_video,
                 notifier=self._notifier,
                 schedule_profiler=self._schedule_profiler,

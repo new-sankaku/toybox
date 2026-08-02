@@ -4,13 +4,15 @@
 読み取り専用の集計。個々のtableのCRUDは持たず、他mixinが書いたものを読むだけである。
 重い集計が集中するため、_read_connection() を使う箇所もここに偏る。
 
-lock契約: lock保持前提のmethodは無い。各methodが自分で self._lock を取り、
-  その区間内で _owner_handles_locked / _latest_owner_handles_locked(users)を呼ぶ。
+lock契約: lock保持前提のmethodは無い。身元解決(_owner_handles_locked /
+  _latest_owner_handles_locked(users))を使うmethodは、その呼び出しだけを自分で取った
+  self._lock の内側に置く。集計本体を _read_connection() で流すmethodはそれ以外に
+  self._lock を取らない(session_rankings は身元解決を使わないため一度も取らない)。
 """
 import json
 
-from tictok.core import spike
 from tictok.core.battle import annotate_result, gift_window_end, gift_window_fallback_duration
+from tictok.core.league import display_league_sql
 
 from tictok.store._common import (
     _BATTLE_KEY_CONTRIB_DIAMONDS,
@@ -23,6 +25,56 @@ from tictok.store._common import (
     _opponent_key,
     logger,
 )
+
+
+def _liver_share(
+    row=None,
+    gift_diamonds=0,
+    checked_diamonds=0,
+    liver_diamonds=0,
+    gifters=0,
+    checked_gifters=0,
+    liver_gifters=0,
+) -> dict:
+    """ギフトに占めるライバー(自分でも配信している人)の割合を、2つの物差しで返す。
+
+    コイン基準と人数基準は別物で、片方だけでは読み違える。1人の大口ライバーが居れば
+    コイン比率は跳ね上がるが人数比率は動かない。逆に少額のライバーが大勢居れば人数比率
+    だけが上がる。どちらの分母かを名前に持たせて、独立した項目として返す。
+
+    **分母はどちらも全体**(そのギフト全額 / gift実績のある全員)。「コイン全体に占める
+    ライバーの割合」という問いにそのまま答える形にする。リーグの確認は待ち行列で順に
+    進むため、未確認の人はライバーに数えられない — つまりこの比率は**下限**で、確認が
+    進むほど実態へ上がっていく。どこまで確認できているかは coverage で別に返す。
+
+    確認が1件も済んでいなければ比率は None。そこを0%にすると「ライバーが居ないと確認
+    できた」と読めてしまうが、実際には何も判っていない。
+    """
+    if row is not None:
+        gift_diamonds = row["gift_diamonds"] or 0
+        checked_diamonds = row["checked_diamonds"] or 0
+        liver_diamonds = row["liver_diamonds"] or 0
+        gifters = row["gifters"] or 0
+        checked_gifters = row["checked_gifters"] or 0
+        liver_gifters = row["liver_gifters"] or 0
+    return {
+        # コイン基準
+        "liver_diamonds": liver_diamonds,
+        "liver_gift_diamonds": gift_diamonds,
+        "liver_coin_share": (
+            (liver_diamonds / gift_diamonds * 100) if gift_diamonds and checked_diamonds else None
+        ),
+        "liver_checked_diamonds": checked_diamonds,
+        "liver_coin_coverage": (checked_diamonds / gift_diamonds * 100) if gift_diamonds else 0.0,
+        # 人数基準
+        "liver_gifters": liver_gifters,
+        "liver_total_gifters": gifters,
+        "liver_gifter_share": (
+            (liver_gifters / gifters * 100) if gifters and checked_gifters else None
+        ),
+        "liver_checked_gifters": checked_gifters,
+        "liver_gifter_coverage": (checked_gifters / gifters * 100) if gifters else 0.0,
+    }
 
 
 class StreamersMixin:
@@ -88,11 +140,35 @@ class StreamersMixin:
         # GROUP BYは配信者identity(owner_user_id優先)。bare columnのs.unique_idは
         # SQLiteでは任意の行から取られ@handle改名者でラベルが不定になるため、表示用
         # handleは最新sessionのものを相関subqueryで決定的に選ぶ。
-        rows = self._read_connection().execute(
+        conn = self._read_connection()
+        rows = conn.execute(
             _SESSION_TOTALS_CTE + _STREAMER_TOTALS_SELECT +
             f" WHERE 1=1{_EXCLUDE_RESTRICTED}"
             " GROUP BY okey ORDER BY diamonds DESC, sessions DESC",
         ).fetchall()
+        # 配信者ごとの「ギフトに占めるライバー(自分でも配信している人)の割合」。
+        # 分子・分母をどちらもgift eventから採るのは、比率の両側を同じ物差しで測るため
+        # (sessionのstats_jsonとgift eventは確定タイミングが違い、混ぜると比率が歪む)。
+        # 未確認の人を「ライバーではない」に丸めると過小評価になるので、判定済みぶんを
+        # 分母にした比率と、その判定済みが全体のどれだけかを別々に返す(実測65ms)。
+        liver_rows = conn.execute(
+            "SELECT COALESCE(NULLIF(s.owner_user_id, ''), s.unique_id) AS okey,"
+            " COALESCE(SUM(e.diamonds), 0) AS gift_diamonds,"
+            " COALESCE(SUM(CASE WHEN u.league_checked_at IS NOT NULL THEN e.diamonds"
+            "  ELSE 0 END), 0) AS checked_diamonds,"
+            f" COALESCE(SUM(CASE WHEN {display_league_sql('u')} <> '' THEN e.diamonds"
+            "  ELSE 0 END), 0) AS liver_diamonds,"
+            " COUNT(DISTINCT e.identity_key) AS gifters,"
+            " COUNT(DISTINCT CASE WHEN u.league_checked_at IS NOT NULL"
+            "  THEN e.identity_key END) AS checked_gifters,"
+            f" COUNT(DISTINCT CASE WHEN {display_league_sql('u')} <> ''"
+            "  THEN e.identity_key END) AS liver_gifters"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            " LEFT JOIN users u ON u.identity_key = e.identity_key"
+            f" WHERE e.kind = 'gift'{_EXCLUDE_RESTRICTED}"
+            " GROUP BY okey",
+        ).fetchall()
+        livers = {r["okey"]: r for r in liver_rows}
         with self._lock:
             handles = self._latest_owner_handles_locked()
             owners = self._latest_owners()
@@ -110,6 +186,7 @@ class StreamersMixin:
                     "gifts": row["gifts"] or 0,
                     "comments": row["comments"] or 0,
                     "last_started_at": row["last_started_at"],
+                    **_liver_share(livers.get(row["okey"])),
                 }
             )
         return result
@@ -151,6 +228,13 @@ class StreamersMixin:
             " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
             " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
             " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar, SUM(e.gift_count) AS gifts,"
+            # Lv/badgeとリーグはusers表(最新)を使う。ここはsessionを跨いだ通算集計で、
+            # 「そのSessionでの見え方」という基準が存在しないため、identity列と同じく最新の
+            # 値で1人を1行に示すのが正しい(point-in-time厳守はsession単位の
+            # battle_gift_contributions側の話である)。
+            f" u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
+            " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
+            f" {display_league_sql('u')} AS league, u.league_checked_at AS league_checked_at,"
             " SUM(e.diamonds) AS diamonds, COUNT(DISTINCT e.session_id) AS sessions"
             " FROM events e JOIN sessions s ON s.id = e.session_id"
             " LEFT JOIN users u ON u.identity_key = e.identity_key"
@@ -184,9 +268,8 @@ class StreamersMixin:
             " ORDER BY s.started_at ASC, b.session_id ASC",
             tuple(handles),
         ).fetchall()
-        # Battle履歴から「その対戦の動画」へ辿るための、時刻の当たり先。急増点
-        # (streamer_highlights)と同じ集合を見る — 中断録画も素材は揃っていることが
-        # あり、statusで捨てるとその録画へ辿る道が無くなる。
+        # Battle履歴から「その対戦の動画」へ辿るための、時刻の当たり先。中断録画も
+        # 素材は揃っていることがあり、statusで捨てるとその録画へ辿る道が無くなる。
         recording_rows = [
             dict(r)
             for r in conn.execute(
@@ -412,6 +495,12 @@ class StreamersMixin:
                 "unique_id": row["unique_id"] or "",
                 "nickname": row["nickname"] or "(unknown)",
                 "avatar": row["avatar"] or "",
+                "fans_level": row["fans_level"] or 0,
+                "gifter_level": row["gifter_level"] or 0,
+                "gifter_badge": row["gifter_badge"] or "",
+                "member_badge": row["member_badge"] or "",
+                # この視聴者自身が配信者である場合のリーグ帯。取れていなければ空=非表示。
+                "league": row["league"] or "",
                 "gifts": row["gifts"] or 0,
                 "diamonds": row["diamonds"] or 0,
                 "sessions": row["sessions"] or 0,
@@ -425,6 +514,8 @@ class StreamersMixin:
                 return 0.0
             return sum(g["diamonds"] for g in gifters[:top_n]) / gifter_total_diamonds * 100
 
+        # ギフトに占めるライバーの割合。gifters は全件で、表示用に切り詰めるのは後段の
+        # gifters[:100] だけなので、ここは母集合の全員から数える。
         concentration = {
             "total_gifters": len(gifters),
             "total_diamonds": gifter_total_diamonds,
@@ -433,6 +524,22 @@ class StreamersMixin:
             "top10": _share(10),
             "repeat_gifters": sum(1 for g in gifters if g["sessions"] >= 2),
             "once_gifters": sum(1 for g in gifters if g["sessions"] == 1),
+            **_liver_share(
+                gift_diamonds=gifter_total_diamonds,
+                checked_diamonds=sum(
+                    row["diamonds"] or 0
+                    for row in gifter_rows
+                    if row["league_checked_at"] is not None
+                ),
+                liver_diamonds=sum(
+                    row["diamonds"] or 0 for row in gifter_rows if row["league"]
+                ),
+                gifters=len(gifters),
+                checked_gifters=sum(
+                    1 for row in gifter_rows if row["league_checked_at"] is not None
+                ),
+                liver_gifters=sum(1 for row in gifter_rows if row["league"]),
+            ),
         }
 
         battles = [pb["battle"] for pb in parsed_battles]
@@ -585,6 +692,10 @@ class StreamersMixin:
             "average": average,
             "best": best,
             "gifters": gifters[:100],
+            # ライバーだけを抜いた一覧。gifters[:100] から絞ると、コイン順で100位より下の
+            # ライバーが消えて「誰が投げたか」が欠ける(比率の分子には入っているのに一覧に
+            # 居ない、という食い違いになる)ため、母集合から直接採る。
+            "livers": [g for g in gifters if g["league"]][:50],
             "concentration": concentration,
             "battles": battle_summary,
             "coop": coop,
@@ -644,88 +755,22 @@ class StreamersMixin:
             prev_keys = keys
         return {"days": days}
 
-    def streamer_highlights(self, unique_id: str, session_limit: int = 50, top: int = 15) -> list:
-        """Auto-detected spike moments across a streamer's recent sessions. A bucket
-        is a highlight when its coin value is a statistical outlier within its session
-        (z-score >= 2 over that session's coin buckets); the biggest spike per session
-        is kept and the top ones returned, tagged if a recording covers the moment."""
-        highlights = []
-        with self._lock:
-            handles = self._owner_handles_locked(unique_id)
-            ph = ",".join("?" * len(handles))
-            session_rows = self._conn.execute(
-                f"SELECT id, started_at FROM sessions WHERE unique_id IN ({ph})"
-                + _EXCLUDE_RESTRICTED_NO_ALIAS
-                + " ORDER BY started_at DESC LIMIT ?",
-                (*handles, session_limit),
-            ).fetchall()
-            session_ids = [s["id"] for s in session_rows]
-            buckets_by_session: dict = {}
-            if session_ids:
-                bph = ",".join("?" * len(session_ids))
-                for brow in self._conn.execute(
-                    f"SELECT session_id, start, diamonds, comments FROM buckets"
-                    f" WHERE session_id IN ({bph}) ORDER BY session_id, start",
-                    tuple(session_ids),
-                ).fetchall():
-                    buckets_by_session.setdefault(brow["session_id"], []).append(brow)
-            for session in session_rows:
-                buckets = buckets_by_session.get(session["id"], [])
-                # 窓は1 bucket。録画単位の候補検出(server側)は同じ関数を秒指定の窓で呼ぶ。
-                found = spike.detect_spikes(buckets, window_buckets=1, metrics=("diamonds",))
-                best = None
-                for candidate in found:
-                    value = candidate["values"]["diamonds"]
-                    if best is None or value > best["diamonds"]:
-                        best = {
-                            "session_id": session["id"],
-                            "time": candidate["start"],
-                            "diamonds": int(value),
-                            "comments": int(candidate["values"]["comments"]),
-                            "baseline": candidate["baseline"],
-                            "ratio": candidate["ratio"],
-                            "zscore": candidate["zscore"],
-                        }
-                if best:
-                    highlights.append(best)
-            recordings = self._conn.execute(
-                f"SELECT id, session_id, started_at, ended_at FROM recordings"
-                f" WHERE unique_id IN ({ph}) AND status IN ('completed', 'interrupted')",
-                tuple(handles),
-            ).fetchall()
-        recs = [dict(r) for r in recordings]
-        for highlight in highlights:
-            cover = next(
-                (
-                    r
-                    for r in recs
-                    if r["session_id"] == highlight["session_id"]
-                    and r["started_at"] <= highlight["time"]
-                    and (r["ended_at"] is None or highlight["time"] <= r["ended_at"])
-                ),
-                None,
-            )
-            highlight["has_recording"] = cover is not None
-            highlight["recording_id"] = cover["id"] if cover else None
-            # Seconds into the recording to jump to, for deep-linked playback.
-            highlight["offset"] = (
-                max(0, highlight["time"] - cover["started_at"]) if cover else None
-            )
-        highlights.sort(key=lambda h: h["diamonds"], reverse=True)
-        return highlights[:top]
-
     def session_rankings(self, limit: int) -> dict:
-        with self._lock:
-            base_rows = self._conn.execute(
-                "SELECT id, unique_id, started_at, ended_at, stats_json FROM sessions",
-            ).fetchall()
-            agg_rows = self._conn.execute(
-                "SELECT session_id,"
-                " SUM(CASE WHEN kind = 'like' THEN count ELSE 0 END) AS like_count,"
-                " SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END) AS comments,"
-                " SUM(CASE WHEN kind = 'gift' THEN diamonds ELSE 0 END) AS diamonds"
-                " FROM events GROUP BY session_id",
-            ).fetchall()
+        # session全件とevent全件のGROUP BY。書き込み接続で流すと、その間ずっとcollectorの
+        # event書き出しが同じlockで待たされる(実測: eventのGROUP BYだけでwarm 1.06秒、
+        # page cacheが冷えていれば7.4秒)。streamer_index / aggregate_dashboardと同じく
+        # 集計read専用の接続へ逃がす。
+        conn = self._read_connection()
+        base_rows = conn.execute(
+            "SELECT id, unique_id, started_at, ended_at, stats_json FROM sessions",
+        ).fetchall()
+        agg_rows = conn.execute(
+            "SELECT session_id,"
+            " SUM(CASE WHEN kind = 'like' THEN count ELSE 0 END) AS like_count,"
+            " SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END) AS comments,"
+            " SUM(CASE WHEN kind = 'gift' THEN diamonds ELSE 0 END) AS diamonds"
+            " FROM events GROUP BY session_id",
+        ).fetchall()
         agg = {r["session_id"]: r for r in agg_rows}
         sessions = []
         for row in base_rows:
@@ -810,6 +855,9 @@ class StreamersMixin:
             "   WHERE kind = 'gift' AND identity_key = t.key)) AS nickname,"
             " COALESCE(NULLIF(u.avatar, ''), (SELECT MAX(user_avatar) FROM events"
             "   WHERE kind = 'gift' AND identity_key = t.key)) AS avatar,"
+            " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
+            " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
+            f" {display_league_sql('u')} AS league,"
             " t.gifts AS gifts, t.diamonds AS diamonds, t.sessions AS sessions"
             " FROM top t LEFT JOIN users u ON u.identity_key = t.key"
             " ORDER BY t.diamonds DESC, t.gifts DESC",
@@ -845,6 +893,11 @@ class StreamersMixin:
                     "unique_id": row["unique_id"] or "",
                     "nickname": row["nickname"] or "(unknown)",
                     "avatar": row["avatar"] or "",
+                    "fans_level": row["fans_level"] or 0,
+                    "gifter_level": row["gifter_level"] or 0,
+                    "gifter_badge": row["gifter_badge"] or "",
+                    "member_badge": row["member_badge"] or "",
+                    "league": row["league"] or "",
                     "gifts": row["gifts"] or 0,
                     "diamonds": row["diamonds"] or 0,
                     "sessions": row["sessions"],

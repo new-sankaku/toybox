@@ -38,6 +38,15 @@ describe("videos.js の時間軸と対応付け", () => {
     });
   }
 
+  /** jsdom の <video> は currentTime を実装しないので、値を持つだけの property に置き換える。 */
+  function setCurrentTime(seconds) {
+    Object.defineProperty(doc.getElementById("video"), "currentTime", {
+      configurable: true,
+      writable: true,
+      value: seconds,
+    });
+  }
+
   describe("secondsFromClientX", () => {
     beforeEach(() => layoutHeat({ left: 100, width: 200 }));
 
@@ -128,8 +137,9 @@ describe("videos.js の時間軸と対応付け", () => {
 
     it("IN/OUTと尺を同じ書式で出し、出力buttonを開ける", () => {
       win.setCut(10, 25);
-      expect(doc.getElementById("cut-in").textContent).toBe("00:00:10");
-      expect(doc.getElementById("cut-out").textContent).toBe("00:00:25");
+      // IN/OUT欄は手打ちできるinputなので、値はvalueへ入る(0.1秒桁つき)。
+      expect(doc.getElementById("cut-in").value).toBe("00:00:10.0");
+      expect(doc.getElementById("cut-out").value).toBe("00:00:25.0");
       expect(doc.getElementById("cut-len").textContent).toBe("尺 00:00:15");
       expect(doc.getElementById("do-clip").disabled).toBe(false);
       expect(doc.getElementById("add-cut").disabled).toBe(false);
@@ -149,8 +159,11 @@ describe("videos.js の時間軸と対応付け", () => {
 
     it("未設定は --:--:-- のままで、尺は - ", () => {
       win.setCut(null, null);
-      expect(doc.getElementById("cut-in").textContent).toBe("--:--:--");
-      expect(doc.getElementById("cut-out").textContent).toBe("--:--:--");
+      // 未設定のinputは空で、--:--:-- はplaceholderが出す。
+      expect(doc.getElementById("cut-in").value).toBe("");
+      expect(doc.getElementById("cut-in").placeholder).toBe("--:--:--");
+      expect(doc.getElementById("cut-out").value).toBe("");
+      expect(doc.getElementById("cut-out").placeholder).toBe("--:--:--");
       expect(doc.getElementById("cut-len").textContent).toBe("-");
       expect(doc.getElementById("do-clip").disabled).toBe(true);
     });
@@ -165,6 +178,52 @@ describe("videos.js の時間軸と対応付け", () => {
       win.setCut(10, 25);
       expect(state().cutIn).toBe(10);
       expect(state().cutOut).toBe(25);
+    });
+  });
+
+  // IN/OUT線は帯の全高に描かれる。掴める範囲が上端laneだけだと、線の上を掴んだ操作が
+  // 黙ってseekになり、掴んだつもりの再生位置が飛ぶ。
+  describe("全尺barの当たり判定", () => {
+    beforeEach(() => {
+      layoutHeat({ left: 0, width: 200, top: 0, height: 60 });
+      setDuration(100);
+    });
+
+    it("波形の高さでもIN/OUT線の上ならhandleを掴む(seekへ落ちない)", () => {
+      win.setCut(20, 60);
+      // 20秒=x:40 / 60秒=x:120。laneより下(y:40)で線の上を押す。
+      expect(win.hitTestHeat(40, 40, "mouse")).toBe("in");
+      expect(win.hitTestHeat(120, 40, "mouse")).toBe("out");
+    });
+
+    it("lane外の許容幅は半分に絞り、線から離れればseekに戻す", () => {
+      win.setCut(20, 60);
+      // mouseの許容幅は lane内8px / lane外4px。
+      expect(win.hitTestHeat(126, 5, "mouse")).toBe("out");
+      expect(win.hitTestHeat(126, 40, "mouse")).toBe("seek");
+      expect(win.hitTestHeat(123, 40, "mouse")).toBe("out");
+    });
+
+    it("範囲の新規作成と平行移動は上端laneのまま(下でdragしてもseek)", () => {
+      win.setCut(20, 60);
+      expect(win.hitTestHeat(80, 5, "mouse")).toBe("band");
+      expect(win.hitTestHeat(80, 40, "mouse")).toBe("seek");
+      win.setCut(null, null);
+      expect(win.hitTestHeat(80, 5, "mouse")).toBe("new");
+      expect(win.hitTestHeat(80, 40, "mouse")).toBe("seek");
+    });
+
+    it("IN/OUTが近接していても近いほうを返す(OUTがINに飲まれない)", () => {
+      // 20秒=x:40 / 23秒=x:46。lane内の許容幅8pxでは両方が当たる。
+      win.setCut(20, 23);
+      expect(win.hitTestHeat(41, 5, "mouse")).toBe("in");
+      expect(win.hitTestHeat(45, 5, "mouse")).toBe("out");
+    });
+
+    it("尺が分かる前は何も掴ませない", () => {
+      win.setCut(20, 60);
+      setDuration(NaN);
+      expect(win.hitTestHeat(40, 5, "mouse")).toBe("seek");
     });
   });
 
@@ -295,6 +354,95 @@ describe("videos.js の時間軸と対応付け", () => {
       state().bookmarks = [];
       win.renderComments();
       expect(doc.querySelector("#comments .vd-seg-t").textContent).toBe("01:01:01");
+    });
+  });
+
+  // 拡大窓は「今どこを見ているか」を持つ唯一の状態。追従が窓の位置を毎回作り直していた頃は、
+  // 追従checkboxを外しても窓が再生位置へ引き戻され続け、外したこと自体が効かなかった。
+  describe("拡大窓の位置", () => {
+    beforeEach(() => {
+      setDuration(600);
+      state().zoomStart = null;
+      state().zoomSpan = 100;
+      doc.getElementById("zoom-follow").checked = true;
+    });
+
+    const windowNow = () => win.zoomWindow(600);
+
+    it("追従を外したら、再生が進んでも窓はその場に留まる", () => {
+      setCurrentTime(200);
+      win.followZoom();
+      const start = windowNow().start;
+      doc.getElementById("zoom-follow").checked = false;
+      setCurrentTime(500);
+      win.followZoom();
+      expect(windowNow().start).toBe(start);
+    });
+
+    it("追従中でも、再生位置が窓の中に居る間は窓を動かさない", () => {
+      setCurrentTime(200);
+      win.followZoom();
+      const start = windowNow().start;
+      setCurrentTime(start + 90);
+      win.followZoom();
+      expect(windowNow().start).toBe(start);
+    });
+
+    it("追従は窓の外へ出たときだけ置き直す(左端から2割の位置へ)", () => {
+      setCurrentTime(200);
+      win.followZoom();
+      setCurrentTime(400);
+      win.followZoom();
+      expect(windowNow().start).toBeCloseTo(400 - 100 * 0.2, 6);
+    });
+
+    it("窓が尺の外へはみ出さない", () => {
+      setCurrentTime(600);
+      win.followZoom();
+      expect(windowNow().start).toBe(500);
+      setCurrentTime(0);
+      win.followZoom();
+      expect(windowNow().start).toBe(0);
+    });
+
+    it("左右移動は追従を外して窓幅の割合ぶん動かす", () => {
+      setCurrentTime(300);
+      win.followZoom();
+      const start = windowNow().start;
+      win.panZoom(1);
+      expect(doc.getElementById("zoom-follow").checked).toBe(false);
+      expect(windowNow().start).toBeCloseTo(start + 20, 6);
+      win.panZoom(-1);
+      expect(windowNow().start).toBeCloseTo(start, 6);
+    });
+
+    it("拡縮しても追従中は再生位置が窓の同じ場所に残る(直後に窓が跳ばない)", () => {
+      setCurrentTime(300);
+      win.followZoom();
+      const before = windowNow();
+      const ratio = (300 - before.start) / before.span;
+      win.zoomBy(0.5, 0.9);
+      const after = windowNow();
+      expect(after.span).toBe(50);
+      expect((300 - after.start) / after.span).toBeCloseTo(ratio, 6);
+    });
+
+    it("追従していなければ、拡縮はcursorの下の時刻を動かさない", () => {
+      setCurrentTime(300);
+      win.followZoom();
+      doc.getElementById("zoom-follow").checked = false;
+      const before = windowNow();
+      const pinned = before.start + 0.75 * before.span;
+      win.zoomBy(0.5, 0.75);
+      const after = windowNow();
+      expect(after.start + 0.75 * after.span).toBeCloseTo(pinned, 6);
+    });
+
+    it("窓幅は下限より狭くならない(波形が箱になるだけの拡大を止める)", () => {
+      setCurrentTime(300);
+      win.followZoom();
+      for (let i = 0; i < 20; i += 1) win.zoomBy(0.5, 0.5);
+      expect(windowNow().span).toBe(8);
     });
   });
 

@@ -5,6 +5,8 @@ mp4は原本ではなく派生物になったので、mp4が無い録画でも .
 「素材はあるのに無いと言われる」か「派生物の代わりに原本が黙って出てくる」の
 どちらかになるので、その2つの境目を直接固定する。
 """
+import threading
+
 import pytest
 
 from tictok.core import layout
@@ -144,6 +146,53 @@ def test_the_curated_playlist_is_removed_even_when_the_body_fails(tmp_root):
             raise RuntimeError("boom")
 
     assert list(session.glob(hls_source.CURATED_PREFIX + "*")) == []
+
+
+async def test_async_source_lends_the_same_playlist_and_cleans_up(tmp_root):
+    """async版も同じ素材を貸し、同じように後片付けする。"""
+    mp4, session = build_recording(tmp_root, with_mp4=False)
+
+    async with hls_source.ffmpeg_source_async(mp4) as source:
+        written = source.path
+        assert source.is_hls is True
+        assert source.input_args == rec.HLS_INPUT_ARGS
+        assert written.is_file()
+
+    assert not written.exists()
+    assert list(session.glob(hls_source.CURATED_PREFIX + "*")) == []
+
+
+async def test_async_source_cleans_up_even_when_the_body_fails(tmp_root):
+    mp4, session = build_recording(tmp_root, with_mp4=False)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        async with hls_source.ffmpeg_source_async(mp4):
+            raise RuntimeError("boom")
+
+    assert list(session.glob(hls_source.CURATED_PREFIX + "*")) == []
+
+
+async def test_async_source_does_not_do_its_work_on_the_event_loop(tmp_root):
+    """貸し出しの中身は同期のsegment走査と同期ffprobeで、実測1.8秒かかる。event loop上で
+    走らせると全画面と収集WSが同時に固まる(実測で117秒止まった回がある)。"""
+    mp4, _ = build_recording(tmp_root, with_mp4=False)
+    loop_thread = threading.get_ident()
+    seen: list = []
+
+    original = hls_source.rec.write_curated_playlist
+
+    def spy(*args, **kwargs):
+        seen.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    hls_source.rec.write_curated_playlist = spy
+    try:
+        async with hls_source.ffmpeg_source_async(mp4):
+            pass
+    finally:
+        hls_source.rec.write_curated_playlist = original
+
+    assert seen and all(ident != loop_thread for ident in seen), seen
 
 
 def test_two_readers_of_the_same_recording_do_not_share_a_playlist(tmp_root):

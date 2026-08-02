@@ -223,7 +223,7 @@ def test_waveform_for_a_recording_without_an_mp4_reads_its_segments(tmp_root,
     monkeypatch.setattr(wf.subprocess, "Popen", fake_popen)
 
     with pytest.raises(RuntimeError):
-        wf._build(mp4, 32, 1.0)
+        wf._build(mp4, 1.0)
 
     assert_reads_the_curated_playlist(captured["args"], session)
 
@@ -244,7 +244,7 @@ async def test_waveform_reports_a_recording_with_no_material_as_missing(tmp_root
         seg.unlink()
 
     with pytest.raises(RuntimeError):
-        await wf.ensure_waveform(mp4, buckets=32)
+        await wf.ensure_waveform(mp4)
 
 
 # --------------------------------------------------------------------------
@@ -459,9 +459,12 @@ async def test_a_waveform_built_from_segments_covers_the_whole_recording(tmp_roo
     にしたせいで尺が縮む(=末尾へ向かって波形がずれる)ことがないかを、尺で直接見る。"""
     mp4, _ = build_real_recording(tmp_root)
 
-    result = await wf.ensure_waveform(mp4, buckets=64)
+    result = await wf.ensure_waveform(mp4)
 
-    assert len(result["peaks"]) == 64
+    # bucketは時間刻みなので、本数も尺から決まる。
+    assert len(result["peaks"]) == pytest.approx(
+        4 * SEGMENT_SECONDS / wf.WAVE_BUCKET_SECONDS, abs=0.3 / wf.WAVE_BUCKET_SECONDS)
+    assert result["bucket_seconds"] == wf.WAVE_BUCKET_SECONDS
     assert result["duration_seconds"] == pytest.approx(4 * SEGMENT_SECONDS, abs=0.3)
     assert max(result["peaks"]) > 0.5, "無音になっている(音声を読めていない)"
 

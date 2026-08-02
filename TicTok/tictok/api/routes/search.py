@@ -8,6 +8,7 @@ import asyncio
 import os
 import secrets
 import time
+import urllib.parse
 from typing import Optional
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -18,6 +19,7 @@ from tictok.search import cutlist_export, indexer, semantic
 from tictok.core.progress import IntervalGate
 from fastapi import APIRouter
 from tictok.api import files
+from tictok.api import fsfacts
 from tictok.api import media_jobs
 from tictok.api import runtime
 
@@ -43,8 +45,10 @@ class CancelRequest(BaseModel):
 async def search_api(q: str, sources: str = "stt,comment", unique_ids: str = "",
                      since: Optional[float] = None, until: Optional[float] = None,
                      order: str = "time", limit: int = 200, offset: int = 0) -> dict:
-    """転写とcommentを横断して検索する。1件=1シーンで、video_timeへそのままseekできる。"""
-    wanted = [s for s in sources.split(",") if s in (indexer.SOURCE_STT, indexer.SOURCE_COMMENT)]
+    """転写・comment・笑い声を横断して検索する。1件=1シーンで、video_timeへそのまま
+    seekできる。"""
+    wanted = [s for s in sources.split(",")
+              if s in (indexer.SOURCE_STT, indexer.SOURCE_COMMENT, indexer.SOURCE_LAUGH)]
     ids = [u for u in unique_ids.split(",") if u]
     result = await asyncio.to_thread(
         runtime.storage.search_scenes, q, wanted, ids, since, until, order,
@@ -57,19 +61,150 @@ class CutRequest(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     label: str = ""
+    group_id: Optional[int] = None
+
+
+class GroupRequest(BaseModel):
+    name: str
+    memo: str = ""
+
+
+class GroupPatchRequest(BaseModel):
+    name: Optional[str] = None
+    memo: Optional[str] = None
+
+
+class GroupOrderRequest(BaseModel):
+    cut_ids: list[int]
+
+
+class CutBulkRequest(BaseModel):
+    op: str
+    ids: list[int]
+    group_id: Optional[int] = None
+
+
+async def _require_group(group_id: int) -> dict:
+    group = await asyncio.to_thread(runtime.storage.get_group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="グループが見つかりません。")
+    return group
+
+
+# ===== 切り抜きグループ(group) =====
+# cut_list/bookmarksの項目を「切り抜き動画1本のグループ」単位で束ねる。所属は排他で、
+# グループ間の共用は行の複製(op=copy)で表す。
+
+
+@router.get("/api/groups")
+async def list_groups_api() -> dict:
+    return {"items": await asyncio.to_thread(runtime.storage.list_groups)}
+
+
+@router.post("/api/groups")
+async def add_group_api(payload: GroupRequest) -> dict:
+    """グループを作る。同名が既にあればそのグループを返す(検索語からの1-click作成を冪等にする)。"""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="グループ名を入力してください。")
+    return await asyncio.to_thread(runtime.storage.add_group, name, payload.memo)
+
+
+@router.patch("/api/groups/{group_id}")
+async def update_group_api(group_id: int, payload: GroupPatchRequest) -> dict:
+    name = payload.name.strip() if payload.name is not None else None
+    if payload.name is not None and not name:
+        raise HTTPException(status_code=400, detail="グループ名を入力してください。")
+    group = await asyncio.to_thread(
+        runtime.storage.update_group, group_id, name, payload.memo)
+    if group is None:
+        raise HTTPException(status_code=404, detail="グループが見つかりません。")
+    return group
+
+
+@router.delete("/api/groups/{group_id}")
+async def delete_group_api(group_id: int) -> dict:
+    """グループを消す。中の項目は消えず未分類へ戻る(項目まで消したければ先にbulk deleteする)。"""
+    if not await asyncio.to_thread(runtime.storage.delete_group, group_id):
+        raise HTTPException(status_code=404, detail="グループが見つかりません。")
+    return {"deleted": group_id}
+
+
+@router.post("/api/groups/{group_id}/order")
+async def reorder_group_api(group_id: int, payload: GroupOrderRequest) -> dict:
+    """グループ内の並びをcut_idsの順へ振り直す。この並びがEDL/FCPXMLの書き出し順になる。"""
+    await _require_group(group_id)
+    ordered = await asyncio.to_thread(
+        runtime.storage.reorder_group_cuts, group_id, payload.cut_ids)
+    return {"ordered": ordered}
+
+
+@router.post("/api/cutlist/bulk")
+async def cutlist_bulk_api(payload: CutBulkRequest) -> dict:
+    """cut listの一括操作。move=所属変更、copy=行を複製して別グループへ、delete=削除。
+    group_id=Noneは未分類を指す。"""
+    if payload.op not in ("move", "copy", "delete"):
+        raise HTTPException(status_code=400,
+                            detail="opはmove/copy/deleteのいずれかを指定してください。")
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="対象を選んでください。")
+    if payload.op in ("move", "copy") and payload.group_id is not None:
+        await _require_group(payload.group_id)
+    if payload.op == "move":
+        affected = await asyncio.to_thread(
+            runtime.storage.move_cuts_to_group, payload.ids, payload.group_id)
+    elif payload.op == "copy":
+        affected = await asyncio.to_thread(
+            runtime.storage.copy_cuts_to_group, payload.ids, payload.group_id)
+    else:
+        affected = await asyncio.to_thread(runtime.storage.delete_cuts, payload.ids)
+    return {"affected": affected}
+
+
+@router.post("/api/bookmarks/bulk")
+async def bookmarks_bulk_api(payload: CutBulkRequest) -> dict:
+    """見どころの一括操作。move=所属変更、delete=削除。見どころは並びもIN/OUTも
+    持たないので、cut listと違いcopy(行の複製)は無い — 同じ位置の見どころを2つ持っても
+    区別が付かず、片方が消し忘れとして残るだけになる。"""
+    if payload.op not in ("move", "delete"):
+        raise HTTPException(status_code=400,
+                            detail="opはmove/deleteのいずれかを指定してください。")
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="対象を選んでください。")
+    if payload.op == "move":
+        if payload.group_id is not None:
+            await _require_group(payload.group_id)
+        affected = await asyncio.to_thread(
+            runtime.storage.set_bookmark_group, payload.ids, payload.group_id)
+    else:
+        affected = await asyncio.to_thread(runtime.storage.delete_bookmarks, payload.ids)
+    return {"affected": affected}
 
 
 @router.get("/api/cutlist")
 async def list_cutlist_api() -> dict:
-    """cut listを返す。pathは移動後の実体を指すよう解決し直す。"""
-    cuts = await asyncio.to_thread(runtime.storage.list_cuts)
-    for cut in cuts:
-        if not cut.get("path"):
-            continue
-        recording = await asyncio.to_thread(runtime.storage.get_recording, cut["recording_id"])
-        if recording is not None:
-            cut["path"] = str(files._resolved_recording_path(recording))
-    return {"items": cuts}
+    """cut listを返す。pathは移動後の実体を指すよう解決し直す。
+
+    読みも解決も1回のthread呼び出しにまとめる。以前はcut 1件ごとにto_threadを跨いで
+    get_recordingを引き、**path解決(実fileのstat)はloop側**に残っていたので、cutが増える
+    ほどserverが止まる時間が伸びていた。同じ録画を指すcutは1回だけ解決する。"""
+    def _collect() -> list:
+        cuts = runtime.storage.list_cuts()
+        resolved: dict = {}
+        for cut in cuts:
+            if not cut.get("path"):
+                continue
+            recording_id = cut["recording_id"]
+            if recording_id not in resolved:
+                recording = runtime.storage.get_recording(recording_id)
+                resolved[recording_id] = (
+                    str(files._resolved_recording_path(recording))
+                    if recording is not None else None)
+            if resolved[recording_id] is not None:
+                cut["path"] = resolved[recording_id]
+        return cuts
+
+    return {"items": await asyncio.to_thread(_collect)}
 
 
 @router.post("/api/cutlist")
@@ -79,9 +214,25 @@ async def add_cut_api(payload: CutRequest) -> dict:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     if payload.end <= payload.start:
         raise HTTPException(status_code=400, detail="終了位置は開始位置より後にしてください。")
+    if payload.group_id is not None:
+        await _require_group(payload.group_id)
     return await asyncio.to_thread(
         runtime.storage.add_cut, payload.recording_id, recording["unique_id"],
-        payload.start, payload.end, payload.label)
+        payload.start, payload.end, payload.label, payload.group_id)
+
+
+class CutPatchRequest(BaseModel):
+    label: str = ""
+
+
+@router.patch("/api/cutlist/{cut_id}")
+async def update_cut_api(cut_id: int, payload: CutPatchRequest) -> dict:
+    """cutのlabelだけを直す。labelは書き出しfile名・EDL/FCPXMLのclip名になるので、
+    見どころのメモから引き継いだままでは直せないと最終成果物にそのまま残る。"""
+    label = payload.label.strip()
+    if not await asyncio.to_thread(runtime.storage.update_cut_label, cut_id, label):
+        raise HTTPException(status_code=404, detail="対象が見つかりません。")
+    return {"id": cut_id, "label": label}
 
 
 @router.delete("/api/cutlist/{cut_id}")
@@ -91,13 +242,33 @@ async def delete_cut_api(cut_id: int) -> dict:
     return {"deleted": cut_id}
 
 
+def _parse_group_param(group: str) -> tuple:
+    """query paramのgroup指定を(group_id, only_ungrouped)へ。'':全て / 'none':未分類 /
+    数字:そのグループ。export・一括削除が同じ書式を使う。"""
+    if not group:
+        return None, False
+    if group == "none":
+        return None, True
+    try:
+        return int(group), False
+    except ValueError:
+        raise HTTPException(status_code=400,
+                            detail="groupはグループのid、none、または空を指定してください。")
+
+
 @router.delete("/api/cutlist")
-async def clear_cutlist_api() -> dict:
-    return {"deleted": await asyncio.to_thread(runtime.storage.clear_cuts)}
+async def clear_cutlist_api(group: str = "") -> dict:
+    """一括削除。group=idでそのグループの分だけ、group=noneで未分類だけを消す。"""
+    group_id, only_ungrouped = _parse_group_param(group)
+    if group_id is not None:
+        await _require_group(group_id)
+    return {"deleted": await asyncio.to_thread(
+        runtime.storage.clear_cuts, group_id, only_ungrouped)}
 
 
 @router.get("/api/cutlist/export")
-async def export_cutlist_api(format: str = "csv", unique_ids: str = "") -> Response:
+async def export_cutlist_api(format: str = "csv", unique_ids: str = "",
+                             group: str = "") -> Response:
     """cut listをCSV/EDL/FCPXMLで書き出す。mp4を出さずに範囲だけ渡せば再encodeが要らない。
 
     EDL/FCPXMLはframeが最小単位なので、素材のfpsをffprobeで実測してから組み立てる
@@ -111,9 +282,18 @@ async def export_cutlist_api(format: str = "csv", unique_ids: str = "") -> Respo
         raise HTTPException(status_code=400,
                             detail="formatはcsv/edl/fcpxmlのいずれかを指定してください。")
     wanted = {u for u in unique_ids.split(",") if u}
+    group_id, only_ungrouped = _parse_group_param(group)
+    group_row = await _require_group(group_id) if group_id is not None else None
     cuts = (await list_cutlist_api())["items"]
     if wanted:
         cuts = [c for c in cuts if c["unique_id"] in wanted]
+    if group_id is not None:
+        # グループ単位はposition順で出す。この並びがそのままNLEのtimeline順になる。
+        cuts = [c for c in cuts if c.get("group_id") == group_id]
+        cuts.sort(key=lambda c: (c.get("position") is None, c.get("position") or 0,
+                                 c["start"], c["id"]))
+    elif only_ungrouped:
+        cuts = [c for c in cuts if c.get("group_id") is None]
     # 素材ごとに逐次ffprobeを回すので、cutが多いと待たされる。job台帳へ出しておけば
     # 「押したのに無反応」ではなく「いま何本目を測っているか」が見える。
     async with runtime._tracked_job("cutlist", f"cut listの書き出し（{format}）") as job_id:
@@ -122,15 +302,18 @@ async def export_cutlist_api(format: str = "csv", unique_ids: str = "") -> Respo
                                 stage=f"素材のframe rateを実測中（{done}/{total}本）")
 
         cuts = await cutlist_export.resolve_timebases(cuts, _probe_progress)
+    # グループ単位の書き出しはtitle/file名もグループ名にする。NLE上でどのグループのtimelineかを
+    # fileの名前が名乗れないと、複数グループを出し分けた瞬間に取り違える。
+    title = group_row["name"] if group_row else "tictok_cutlist"
     try:
         if format == "csv":
             body = cutlist_export.to_csv(cuts)
             media_type, filename = "text/csv; charset=utf-8", "tictok_cutlist.csv"
         elif format == "edl":
-            body = cutlist_export.to_edl(cuts)
+            body = cutlist_export.to_edl(cuts, title=title)
             media_type, filename = "text/plain; charset=utf-8", "tictok_cutlist.edl"
         else:
-            body = cutlist_export.to_fcpxml(cuts)
+            body = cutlist_export.to_fcpxml(cuts, name=title)
             media_type, filename = "application/xml; charset=utf-8", "tictok_cutlist.fcpxml"
     except cutlist_export.CutlistExportError as exc:
         runtime.logger.warning(
@@ -139,10 +322,19 @@ async def export_cutlist_api(format: str = "csv", unique_ids: str = "") -> Respo
                    "ctx": {"format": format, "cuts": len(cuts)}},
         )
         raise HTTPException(status_code=400, detail=str(exc))
+    disposition = f'attachment; filename="{filename}"'
+    if group_row:
+        # HTTP headerはlatin-1しか運べないため、グループ名(日本語)のfile名はRFC 5987の
+        # filename*で併記する。filename=はそれを読めないclient向けのASCII fallback。
+        extension = filename.rsplit(".", 1)[-1]
+        disposition += (
+            "; filename*=UTF-8''"
+            + urllib.parse.quote(f"{group_row['name']}.{extension}")
+        )
     return Response(
         content=body.encode("utf-8-sig" if format == "csv" else "utf-8"),
         media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={"Content-Disposition": disposition},
     )
 
 
@@ -152,10 +344,14 @@ class BookmarkRequest(BaseModel):
     end: Optional[float] = None
     memo: str = ""
     source_hit_id: Optional[int] = None
+    group_id: Optional[int] = None
 
 
-class BookmarkMemoRequest(BaseModel):
-    memo: str
+class BookmarkPatchRequest(BaseModel):
+    """部分更新。group_id=Noneは「未分類へ戻す」を意味するので、更新の有無は
+    model_fields_setで判定する(Noneを既定値と読み違えると所属が黙って外れる)。"""
+    memo: Optional[str] = None
+    group_id: Optional[int] = None
 
 
 @router.get("/api/bookmarks")
@@ -172,9 +368,12 @@ async def add_bookmark_api(payload: BookmarkRequest) -> dict:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     if payload.end is not None and payload.end <= payload.start:
         raise HTTPException(status_code=400, detail="終了位置は開始位置より後にしてください。")
+    if payload.group_id is not None:
+        await _require_group(payload.group_id)
     return await asyncio.to_thread(
         runtime.storage.add_bookmark, payload.recording_id, recording["unique_id"],
-        payload.start, payload.end, payload.memo, payload.source_hit_id)
+        payload.start, payload.end, payload.memo, payload.source_hit_id,
+        payload.group_id)
 
 
 class LiveBookmarkRequest(BaseModel):
@@ -212,12 +411,23 @@ async def add_live_bookmark_api(unique_id: str, payload: LiveBookmarkRequest) ->
 
 
 @router.patch("/api/bookmarks/{bookmark_id}")
-async def update_bookmark_api(bookmark_id: int, payload: BookmarkMemoRequest) -> dict:
-    updated = await asyncio.to_thread(
-        runtime.storage.update_bookmark_memo,
-        bookmark_id,
-        payload.memo,
-    )
+async def update_bookmark_api(bookmark_id: int, payload: BookmarkPatchRequest) -> dict:
+    provided = payload.model_fields_set
+    if not provided:
+        raise HTTPException(status_code=400, detail="更新する内容がありません。")
+    if "group_id" in provided:
+        if payload.group_id is not None:
+            await _require_group(payload.group_id)
+        if not await asyncio.to_thread(
+                runtime.storage.set_bookmark_group, [bookmark_id], payload.group_id):
+            raise HTTPException(status_code=404, detail="対象が見つかりません。")
+    if "memo" in provided:
+        updated = await asyncio.to_thread(
+            runtime.storage.update_bookmark_memo, bookmark_id, payload.memo or "")
+        if updated is None:
+            raise HTTPException(status_code=404, detail="対象が見つかりません。")
+        return updated
+    updated = await asyncio.to_thread(runtime.storage.get_bookmark, bookmark_id)
     if updated is None:
         raise HTTPException(status_code=404, detail="対象が見つかりません。")
     return updated
@@ -422,18 +632,35 @@ async def search_status_api() -> dict:
     def _collect() -> list:
         counts = runtime.storage.search_indexed_counts()
         transcribed = runtime.storage.transcribed_recording_ids()
+        rows = [rec for rec in runtime.storage.list_recordings(100000)
+                if rec["status"] == "completed"]
+        # 実体の有無まで返す。DB行だけを数えると、素材もmp4も残っていない配信者
+        # (retentionで消えた・外で消された)が「録画N本」を名乗り続け、画面の配信者選択に
+        # 出てくる。投入側(``_enqueue_stt_jobs``)は既に実体の無い録画を弾いているので、
+        # 数える側がDB行だけを見ていると、押しても何も起きないだけの行になる。
+        # 判定は_recording_media_kindsと同値(has_hls or has_file)だが、録画ごとのstat/globを
+        # 数百回起こさないよう、dir単位に畳んだ一括版で引く。
+        facts_by_id = fsfacts._bulk_fs_facts_batch(rows)
+        fsfacts._bulk_hls_batch(rows, facts_by_id)
         per_streamer: dict = {}
-        for recording in runtime.storage.list_recordings(100000):
-            if recording["status"] != "completed":
-                continue
+        for recording in rows:
             entry = per_streamer.setdefault(
                 recording["unique_id"],
-                {"unique_id": recording["unique_id"], "recordings": 0, "transcribed": 0,
-                 "comment_indexed": 0, "seconds": 0.0},
+                {"unique_id": recording["unique_id"], "recordings": 0, "playable": 0,
+                 "transcribable": 0, "transcribed": 0, "comment_indexed": 0,
+                 "seconds": 0.0},
             )
+            facts = facts_by_id.get(recording["id"]) or {}
+            playable = bool(facts.get("has_hls") or facts.get("has_file"))
             entry["recordings"] += 1
+            if playable:
+                entry["playable"] += 1
             if recording["id"] in transcribed:
                 entry["transcribed"] += 1
+            elif playable:
+                # 転写を積める録画。「録画数 - 転写済」だと実体の無い録画が永久に残り、
+                # 文字起こしのbuttonが押せるのに1件も投入されない状態になる。
+                entry["transcribable"] += 1
             if indexer.SOURCE_COMMENT in counts.get(recording["id"], {}):
                 entry["comment_indexed"] += 1
             entry["seconds"] += files._recording_seconds(recording)
@@ -484,9 +711,14 @@ async def transcribe_queue_api() -> dict:
                 if job.get("domain") == "stt"]
         counts: dict = {}
         items = []
+        # 同じ録画に複数の行(再試行・取り消し後の積み直し)が並ぶので、録画は1回だけ引く。
+        seen_recordings: dict = {}
         for job in rows:
             counts[job["state"]] = counts.get(job["state"], 0) + 1
-            recording = runtime.storage.get_recording(job["recording_id"]) if job.get("recording_id") else None
+            recording_id = job.get("recording_id")
+            if recording_id and recording_id not in seen_recordings:
+                seen_recordings[recording_id] = runtime.storage.get_recording(recording_id)
+            recording = seen_recordings.get(recording_id) if recording_id else None
             items.append({
                 "job_id": job["job_id"],
                 "recording_id": job.get("recording_id"),

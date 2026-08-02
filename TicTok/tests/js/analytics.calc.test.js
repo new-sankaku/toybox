@@ -78,11 +78,9 @@ describe("analytics.js の表示計算", () => {
     it.each([
       ["dwellSeconds", (v) => win.dwellSeconds(v)],
       ["dwellPct", (v) => win.dwellPct(v)],
-      ["anomValue", (v) => win.anomValue("x", v)],
       ["actSeconds", (v) => win.actSeconds(v)],
       ["actPct", (v) => win.actPct(v)],
       ["entryRatio", (v) => win.entryRatio(v)],
-      ["bfPct", (v) => win.bfPct(v)],
       ["cvSeconds", (v) => win.cvSeconds(v)],
     ])("%s(null) は - を出す", (_name, fn) => {
       expect(fn(null)).toBe("-");
@@ -120,69 +118,20 @@ describe("analytics.js の表示計算", () => {
   });
 
   describe("率の書式", () => {
-    it("dwellPct は整数%、actPct は既定1桁", () => {
-      expect(win.dwellPct(0.256)).toBe("26%");
+    it("% は画面ぜんぶで小数1桁に揃える", () => {
+      expect(win.dwellPct(0.256)).toBe("25.6%");
       expect(win.actPct(0.1234)).toBe("12.3%");
       expect(win.actPct(0.1234, 0)).toBe("12%");
     });
 
-    it("entryRatio / bfPct は1桁%", () => {
+    it("entryRatio は1桁%", () => {
       expect(win.entryRatio(0.5)).toBe("50.0%");
-      expect(win.bfPct(0.1234)).toBe("12.3%");
     });
 
     it("peakPct は符号を明示する", () => {
-      expect(win.peakPct({ peak: { pct: 12.4 } })).toBe("+12%");
-      expect(win.peakPct({ peak: { pct: -7.6 } })).toBe("-8%");
-      expect(win.peakPct({ peak: { pct: 0 } })).toBe("+0%");
-    });
-  });
-
-  describe("anomValue", () => {
-    it("指標ごとに単位を変える", () => {
-      expect(win.anomValue("follow_per_join", 0.0123)).toBe("1.23%");
-      expect(win.anomValue("viewers_med", 12.34)).toBe("12.3人");
-    });
-
-    it("それ以外は桁数で丸めを変える(大きい値に小数を出さない)", () => {
-      expect(win.anomValue("diamonds", 150.7)).toBe("151");
-      expect(win.anomValue("diamonds", 1.234)).toBe("1.23");
-    });
-
-    it("方向は多い/少ないを言葉で名乗る", () => {
-      expect(win.anomDirection(1.5)).toContain("多い");
-      expect(win.anomDirection(-1.5)).toContain("少ない");
-      expect(win.anomDirection(0)).toContain("多い");
-    });
-  });
-
-  describe("bfCi", () => {
-    it("観測がある時だけ率と信頼区間を出す", () => {
-      expect(win.bfCi({ n: 10, rate: 0.2, ci: [15, 25] })).toBe("20.0%（95%区間 15〜25%）");
-    });
-
-    it("区間が無ければ率だけ出す", () => {
-      expect(win.bfCi({ n: 10, rate: 0.2 })).toBe("20.0%");
-    });
-
-    it("観測0本は率を名乗らない", () => {
-      expect(win.bfCi({ n: 0, rate: 0.2 })).toBe("-");
-      expect(win.bfCi(null)).toBe("-");
-    });
-  });
-
-  describe("corrColor", () => {
-    it("正の相関と負の相関で色相を変え、強さを不透明度へ写す", () => {
-      expect(win.corrColor(0.5)).toBe("rgba(169, 110, 73, 0.4)");
-      expect(win.corrColor(-0.5)).toBe("rgba(77, 110, 110, 0.4)");
-    });
-
-    it("|相関| が1を超えても不透明度は上限で止める", () => {
-      expect(win.corrColor(2)).toBe("rgba(169, 110, 73, 0.8)");
-    });
-
-    it("相関が無い(null)マスは塗らない", () => {
-      expect(win.corrColor(null)).toBe("transparent");
+      expect(win.peakPct({ peak: { pct: 12.4 } })).toBe("+12.4%");
+      expect(win.peakPct({ peak: { pct: -7.6 } })).toBe("-7.6%");
+      expect(win.peakPct({ peak: { pct: 0 } })).toBe("+0.0%");
     });
   });
 
@@ -229,5 +178,138 @@ describe("analytics.js の表示計算", () => {
       ).not.toThrow();
       expect(errorSpy).toHaveBeenCalled();
     });
+  });
+
+  describe("setNote", () => {
+    // 注記は「1行の結論」と「統計の作法」に分ける。作法は消さず折りたたみへ移す。
+    it("結論は legendline、但し書きは同じsectionの折りたたみへ入れる", () => {
+      win.setNote("an-dwell-note", "結論だけ", "長い作法の説明");
+      const more = page.document.getElementById("an-dwell-note-more");
+      expect(page.document.getElementById("an-dwell-note").innerHTML).toBe("結論だけ");
+      expect(more.querySelector(".an-help-body").innerHTML).toBe("長い作法の説明");
+      expect(more.hidden).toBe(false);
+    });
+
+    it("但し書きが無い節では折りたたみ自体を出さない", () => {
+      win.setNote("an-dwell-note", "結論だけ");
+      const more = page.document.getElementById("an-dwell-note-more");
+      expect(more.hidden).toBe(true);
+      expect(more.open).toBe(false);
+    });
+  });
+
+  describe("anTable", () => {
+    it("数値列は header と値の両方へ num を付ける(項目と値が縦に揃う)", () => {
+      win.anTable("an-coverage", ["指標", "件数"], [["行", "12"]], [1], "なし");
+      const table = page.document.getElementById("an-coverage");
+      const ths = Array.from(table.querySelectorAll("thead th"));
+      expect(ths.map((th) => th.className)).toEqual(["", "num"]);
+      const tds = Array.from(table.querySelectorAll("tbody td"));
+      expect(tds[1].className).toBe("num");
+    });
+
+    it("tbody には th を置かない(.result-table th の sticky反転色が黒帯になる)", () => {
+      win.anTable("an-coverage", ["指標", "件数"], [["行", "12"]], [1], "なし");
+      expect(page.document.querySelectorAll("#an-coverage tbody th").length).toBe(0);
+    });
+
+    it("行が無いときは空欄ではなく理由を出す", () => {
+      win.anTable("an-coverage", ["指標", "件数"], [], [1], "まだありません。");
+      expect(page.document.getElementById("an-coverage").textContent).toContain("まだありません。");
+    });
+  });
+
+  describe("時間帯index の見せ方", () => {
+    it("既定はマスに数値を書かず、色とtooltipへ寄せる", () => {
+      const html = win.tiCellHTML({ index: 1.25, n: 12 }, "月", "12:00", false);
+      expect(html).toContain("></div>");
+      expect(html).not.toContain(">1.25<");
+      // 値そのものはtooltipに残す(色だけでは何倍か読めない)。
+      expect(html).toContain("×1.25");
+    });
+
+    it("checkboxを入れたときだけ倍率を書き込む", () => {
+      expect(win.tiCellHTML({ index: 1.25, n: 12 }, "月", "12:00", true)).toContain(">1.25<");
+    });
+
+    it("観測が1マスも無い行を見分ける(既定で畳む対象)", () => {
+      expect(win.tiSlotHasData({ minute: 0, dow: {}, all: { index: null, n: 0 } })).toBe(false);
+      expect(win.tiSlotHasData({ minute: 0, dow: { 1: { index: 1.2, n: 3 } }, all: null })).toBe(true);
+    });
+  });
+
+  describe("headingText", () => {
+    // 目次chipのtitleは見出しから作る。<select>を含む①だけ、option文字列まで
+    // 連結されて「指標: 入室指標: Comment…」になっていた。
+    it("見出しのspanは残し、form controlの文字列だけ落とす", () => {
+      const h = page.document.createElement("h3");
+      h.innerHTML = '■ ① <span>入室</span>が多いのはいつか'
+        + '<select><option>指標: 入室</option><option>指標: Comment</option></select>';
+      expect(win.headingText(h)).toBe("■ ① 入室が多いのはいつか");
+    });
+  });
+
+  describe("目次と section の並び", () => {
+    it("DOM順が番号順になっている(本文が番号で名指しするため)", () => {
+      const ids = Array.from(page.document.querySelectorAll("main section[id^='an-s']"))
+        .map((s) => s.id);
+      expect(ids).toEqual([
+        "an-s1", "an-s1d", "an-s2", "an-s2d", "an-s3", "an-s3d", "an-s5",
+        "an-s6", "an-s7", "an-s9", "an-s11", "an-s12", "an-s14",
+      ]);
+    });
+
+    it("目次chipは番号だけを出し、titleに選択肢の文字列を含めない", () => {
+      const links = Array.from(page.document.querySelectorAll("#an-index a"));
+      expect(links.map((a) => a.textContent)).toEqual([
+        "①", "①'", "②", "②'", "③", "③'", "⑤", "⑥", "⑦", "⑨", "⑪", "⑫", "⑭",
+      ]);
+      expect(links[0].title).toBe("① 入室が多いのはいつか");
+    });
+  });
+
+  describe("表を持つ節は全幅へ戻す", () => {
+    it("⑪⑫⑭②' は an-col1 を持たない", () => {
+      ["an-s2d", "an-s11", "an-s12", "an-s14"].forEach((id) => {
+        expect(page.document.getElementById(id).classList.contains("an-col1")).toBe(false);
+      });
+    });
+  });
+
+  describe("但し書きへのlink", () => {
+    it("畳んだ #an-caveats はlinkをclickした時点で開く", () => {
+      const caveats = page.document.getElementById("an-caveats");
+      caveats.open = false;
+      const link = page.document.querySelector('a[href="#an-caveats"]');
+      link.dispatchEvent(new win.MouseEvent("click", { bubbles: true }));
+      expect(caveats.open).toBe(true);
+    });
+  });
+});
+
+// 期間はURLとlocalStorageの両方に乗せる。他画面(overview/videos)と同じ作法。
+describe("analytics.js の期間の記憶", () => {
+  it("?days= を初期値に採り、URLへ書き戻す", async () => {
+    const page = loadPage({ page: "analytics", url: "http://localhost:8520/analytics?days=30#an-s12" });
+    const spy = vi.spyOn(page.win.console, "warn").mockImplementation(() => {});
+    await page.settle();
+    expect(page.document.getElementById("an-period").value).toBe("30");
+    expect(page.win.location.search).toBe("?days=30");
+    expect(page.win.location.hash).toBe("#an-s12");
+    spy.mockRestore();
+    await page.close();
+  });
+
+  it("URLに無ければ localStorage の選択を使う", async () => {
+    const page = loadPage({
+      page: "analytics",
+      url: "http://localhost:8520/analytics",
+      before: (win) => win.localStorage.setItem("tictok.analytics.days", "7"),
+    });
+    const spy = vi.spyOn(page.win.console, "warn").mockImplementation(() => {});
+    await page.settle();
+    expect(page.document.getElementById("an-period").value).toBe("7");
+    spy.mockRestore();
+    await page.close();
   });
 });

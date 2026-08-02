@@ -93,6 +93,7 @@ from tictok.core.logging_setup import compress_async, progress_interval_seconds
 from tictok.collect.live_resolver import LiveResolveBlocked
 from tictok.collect.proto_dict import safe_event_to_dict
 from tictok.collect.sampler import EventSampler
+from tictok.collect.ttlive_compat import apply_ttlive_patches
 from tictok.record.recorder import (
     STATE_COMPLETED,
     Recorder,
@@ -103,6 +104,8 @@ from tictok.search import indexer
 from tictok.storage import OPS_INFO, OPS_WARNING, _identity_key
 
 logger = logging.getLogger("tictok.collector")
+
+apply_ttlive_patches()
 
 # WebcastLinkMicBattleBattleAction (tiktok_proto). A PK that ends via CANCEL /
 # REJECT / CUT_SHORT never produced a real contest (matchmaking aborted or the
@@ -946,7 +949,7 @@ def _epoch_seconds(raw: Any) -> Optional[float]:
 
 class TikTokCollector:
     def __init__(
-        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_pool=None, avatar_proxy=None, record_video: bool = True, notifier=None, schedule_profiler=None
+        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_proxy=None, asset_prefetch=None, record_video: bool = True, notifier=None, schedule_profiler=None
     ) -> None:
         self._broadcast = broadcast
         self._schedule_profiler = schedule_profiler
@@ -957,12 +960,15 @@ class TikTokCollector:
         self._notifier = notifier
         self._probe_gate = probe_gate or ProbeGate(settings, lambda: 1)
         self._resolver = resolver
+        # gift catalogueの一括事前cacheだけがここを直接使う(gift/avatar/emoteの1件ずつの
+        # 取得は _asset_prefetch のqueue越し)。
         self._gift_icons = gift_icons
-        self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
-        self._avatar_tasks: set = set()
+        # 焼き込みassetの先行取得(有界queue＋worker)。avatar/gift icon/emoteの取得要求は
+        # すべてここへ積む。以前はasset 1件ごとにtaskを起こしていたが、コメントが殺到した
+        # ときの同時DL数に上限が無かった。
+        self._asset_prefetch = asset_prefetch
         self._gift_icon_tasks: set = set()
-        self._avatar_pool_tasks: set = set()
         self._badge_tasks: set = set()
         # 取得済みバッジURLのset(同一URLの再取得spam防止)。proxyのpath単位ディスク
         # キャッシュが最終的な重複排除を担うので、ここはbest-effortの軽い前段で十分。
@@ -2979,60 +2985,20 @@ class TikTokCollector:
             self.owner["nickname"] = cached["nickname"]
 
     def _persist_owner_avatar(self, url: str) -> None:
-        """Download the streamer avatar into the shared by-id pool in the background
-        so 履歴 / browser proxy / video burn-in can all render it after the signed
-        CDN URL expires. Keyed by the monitored unique_id — the id the browser /
-        history pass to the proxy (sessions.unique_id) and the same per-user pool
-        the commenter avatars use. Non-blocking: connect must not wait on a CDN
-        round-trip."""
-        if not url or self._avatar_pool is None:
-            return
-        owner_id = self.unique_id
-        # Skip scheduling when the pool already holds this (or a better) avatar for the
-        # owner; a re-signed same-rendition URL on every reconnect must not re-fetch.
-        if not self._avatar_pool.needs_update(owner_id, url):
-            return
-
-        async def _run() -> None:
-            try:
-                await self._avatar_pool.persist(owner_id, url)
-            except Exception:
-                logger.warning(
-                    "owner avatarの保存に失敗しました。この配信者の履歴と焼き込みは頭文字の"
-                    "avatarに縮退します", exc_info=True,
-                    extra={"event": "collector.avatar_persist_failed",
-                           "ctx": {"user_key": owner_id, "scope": "owner"}},
-                )
-
-        # 単一属性だと連続呼び出し(resolver→connect)で先行taskへの強参照が消え、
-        # 完了前にGCで破棄され得る。他のpersist系と同じくset+done_callbackで保持する。
-        task = asyncio.create_task(_run())
-        self._avatar_tasks.add(task)
-        task.add_done_callback(self._avatar_tasks.discard)
+        """Queue the streamer avatar for the shared by-id pool so 履歴 / browser proxy /
+        video burn-in can all render it after the signed CDN URL expires. Keyed by the
+        monitored unique_id — the id the browser / history pass to the proxy
+        (sessions.unique_id) and the same per-user pool the commenter avatars use.
+        Non-blocking: connect must not wait on a CDN round-trip."""
+        self._persist_avatar(self.unique_id, url)
 
     def _persist_gift_icon(self, gift_id: int, url: str) -> None:
-        """Cache a gift icon to disk in the background while its URL is fresh, so
-        the burn-in pipeline can composite it after the CDN URL would expire.
-        Non-blocking: event handling must not wait on a CDN round-trip."""
-        if not gift_id or not url or self._gift_icons is None:
+        """Queue a gift icon for the disk pool while its URL is fresh, so the burn-in
+        pipeline can composite it after the CDN URL would expire. Non-blocking: event
+        handling must not wait on a CDN round-trip."""
+        if self._asset_prefetch is None:
             return
-        if self._gift_icons.has(gift_id):
-            return
-
-        async def _run() -> None:
-            try:
-                await self._gift_icons.persist(gift_id, url)
-            except Exception:
-                logger.warning(
-                    "gift %s のicon保存に失敗しました。焼き込みではこのgiftをiconなしで"
-                    "描画します", gift_id, exc_info=True,
-                    extra={"event": "collector.gift_icon_persist_failed",
-                           "ctx": {"gift_id": gift_id}},
-                )
-
-        task = asyncio.create_task(_run())
-        self._gift_icon_tasks.add(task)
-        task.add_done_callback(self._gift_icon_tasks.discard)
+        self._asset_prefetch.submit_gift_icon(gift_id, url)
 
     def _persist_badge(self, url: str) -> None:
         """Pre-fetch a Lv/grade badge image through the avatar proxy while its signed
@@ -3068,34 +3034,23 @@ class TikTokCollector:
         self._persist_avatar(user.get("unique_id") or user.get("nickname"), user.get("avatar"))
 
     def _persist_avatar(self, user_key: Optional[str], url: Optional[str]) -> None:
-        """Cache a user's avatar into the shared by-id pool in the background while
-        its URL is fresh, so the burn-in pipeline can composite the real avatar after
-        the CDN URL would 403, and the browser proxy / history can fall back to it by
-        id. Keyed by user_key (unique_id, else nickname) — the same key the burn-in
-        side and the proxy derive for that user. Non-blocking."""
-        if self._avatar_pool is None or not user_key or not url:
+        """Queue a user's avatar for the shared by-id pool while its URL is fresh, so
+        the burn-in pipeline can composite the real avatar after the CDN URL would 403,
+        and the browser proxy / history can fall back to it by id. Keyed by user_key
+        (unique_id, else nickname) — the same key the burn-in side and the proxy derive
+        for that user. Non-blocking."""
+        if self._asset_prefetch is None:
             return
-        # Consult the pool's identity/resolution check instead of a plain "already have
-        # one": this re-fetches only when the avatar is a higher resolution or the user
-        # changed it, and skips the common re-signed same-image URL — so a task is not
-        # spawned per comment for a known, unchanged user.
-        if not self._avatar_pool.needs_update(user_key, url):
+        self._asset_prefetch.submit_avatar(user_key, url)
+
+    def _persist_emotes(self, raw) -> None:
+        """Queue the custom emote images a comment carries. The burn-in reads them by
+        emote_id from the same pool; their CDN URLs expire with the stream, so a comment
+        whose emote is not pooled now renders as a transparent gap forever."""
+        # emoteを持つのはcommentの一部だけで、大半のeventはここで戻る。
+        if not raw or self._asset_prefetch is None:
             return
-
-        async def _run() -> None:
-            try:
-                await self._avatar_pool.persist(user_key, url)
-            except Exception:
-                logger.warning(
-                    "%s のuser avatar保存に失敗しました。履歴と焼き込みは頭文字のavatarに"
-                    "縮退します", user_key, exc_info=True,
-                    extra={"event": "collector.avatar_persist_failed",
-                           "ctx": {"user_key": user_key, "scope": "user"}},
-                )
-
-        task = asyncio.create_task(_run())
-        self._avatar_pool_tasks.add(task)
-        task.add_done_callback(self._avatar_pool_tasks.discard)
+        self._asset_prefetch.submit_emotes(raw)
 
     def _precache_gift_icons(self) -> None:
         """At connect, pre-cache the room's full gift catalogue so every icon is
@@ -5423,7 +5378,10 @@ class TikTokCollector:
         # Single capture point: any user that lands in history (comment / gift /
         # follow / share / join / subscribe) gets their avatar pooled by id, so it
         # is reusable across sessions for the browser, 履歴 and the video burn-in.
+        # commentが持つcustom emoteも同じ理由でここから積む(gift iconはgift eventの
+        # 単価・IDを見る _on_gift 側で積む)。どちらも投入はqueueへ置くだけで戻る。
         self._persist_user_avatar(entry.get("user"))
+        self._persist_emotes(entry.get("emotes"))
         owner_changed = self._follow_owner_identity(entry.get("user"))
         if self.session_id is not None:
             try:

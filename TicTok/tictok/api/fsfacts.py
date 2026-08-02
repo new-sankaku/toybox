@@ -88,6 +88,31 @@ _fs_state_cache: dict = _BoundedCache(_FS_FACTS_CACHE_MAX)
 _FS_BULK_TTL_SECONDS = 30.0
 _fs_bulk_cache: dict = _BoundedCache(_FS_FACTS_CACHE_MAX)
 
+# 確定録画のHLS再生dir。segment 1本ごとに叩かれるrouteが、そのたびrecord rootの数だけ
+# is_dir・素材のglob・playlistのstatを起こしていた(再生中ずっと毎秒)。答えは再生の間
+# 変わらないので短いTTLで持つ。
+#
+# 消えた素材をcacheが在ると言い続けても実害は無い: 実際に返すfileは``_hls_member``が
+# その場でstatするので、返せなければ404になる。逆(素材が現れたのにNoneを覚えている)は
+# TTLぶんだけ遅れて解ける。
+_HLS_DIR_TTL_SECONDS = 3.0
+_hls_dir_cache: dict = _BoundedCache(_FS_FACTS_CACHE_MAX)
+
+
+def recording_hls_dir(recording: dict) -> Optional[Path]:
+    """``files._recording_hls_dir`` をTTL cache越しに引く。判定そのものは同じ。"""
+    key = recording.get("path") or recording.get("filename") or ""
+    now = time.time()
+    if key:
+        cached = _hls_dir_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return cached[1]
+    with perf.phase("fs.stat"):
+        hls_dir = files._recording_hls_dir(recording)
+    if key:
+        _hls_dir_cache[key] = (now + _HLS_DIR_TTL_SECONDS, hls_dir)
+    return hls_dir
+
 
 def _recording_output_state(path: Optional[str]) -> tuple[bool, bool]:
     """(output_done, up_output_done) for a recording path, cached briefly to avoid
@@ -307,6 +332,27 @@ def _bulk_fs_facts_batch(recordings: list) -> dict:
             _fs_bulk_cache[path] = (now + _FS_BULK_TTL_SECONDS, facts)
         facts_by_id[recording["id"]] = facts
     return facts_by_id
+
+
+def bulk_media_kinds(recordings: list) -> dict:
+    """recordings全部の実体の種別を `{recording_id: ["ts", "mp4"]}` の形でまとめて返す。
+
+    ``files._recording_media_kinds`` を録画ごとに呼ぶのと同じ判定だが、あちらは1本ごとに
+    glob(.ts)とstat(mp4)を起こす。録画一覧は画面を開くたび・配信者を変えるたびに全件ぶん
+    回るので、dir単位に畳んだ一括版で引く。種別の綴りと順序は個別版と揃える(画面が
+    2つの経路で違う名前を受け取らないようにする)。"""
+    facts_by_id = _bulk_fs_facts_batch(recordings)
+    _bulk_hls_batch(recordings, facts_by_id)
+    kinds_by_id: dict = {}
+    for recording in recordings:
+        facts = facts_by_id.get(recording["id"]) or {}
+        kinds = []
+        if facts.get("has_hls"):
+            kinds.append("ts")
+        if facts.get("has_file"):
+            kinds.append("mp4")
+        kinds_by_id[recording["id"]] = kinds
+    return kinds_by_id
 
 
 def _bulk_hls_batch(recordings: list, facts_by_id: dict) -> None:

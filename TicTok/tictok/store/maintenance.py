@@ -75,11 +75,15 @@ class MaintenanceMixin:
         versions = _migration_versions()
         with self._lock:
             done = self._get_maintenance_locked(_MIGRATION_BACKUP_KEY)
-            has_rows = self._conn.execute("SELECT 1 FROM battles LIMIT 1").fetchone() is not None
+            has_rows = self._conn.execute(
+                "SELECT 1 WHERE EXISTS(SELECT 1 FROM battles)"
+                " OR EXISTS(SELECT 1 FROM transcripts)").fetchone() is not None
         if done == versions:
             return {"taken": False, "skipped": "already_migrated", "versions": versions}
         if not has_rows:
-            # 両migrationが書き換えるのはbattles表だけ。空なら守る対象が無い(新規DBの初回起動)。
+            # migrationが書き換えるのはbattles表(glove/topo)とtranscripts表(timemap)だけ。
+            # どちらも空なら守る対象が無い(新規DBの初回起動)。片方だけを見ていると、そちらが
+            # 空のDBで退避されないまま、もう片方の書き換えが走る。
             return {"taken": False, "skipped": "no_rows", "versions": versions}
         try:
             result = dbmaint.create_backup(
@@ -307,6 +311,21 @@ class MaintenanceMixin:
         if "gifter_level" not in user_columns:
             self._conn.execute("ALTER TABLE users ADD COLUMN gifter_level INTEGER NOT NULL DEFAULT 0")
             logger.info("users表にgifter_level columnを追加しました")
+        for name, decl in (
+            # 視聴者が配信者でもあるかと、その配信者リーグ帯。既存行はNULL/空=未確認で、
+            # backfillはしない(未確認と「確認して配信者ではなかった」は別物である)。
+            ("broadcaster", "INTEGER"),
+            ("broadcaster_room_id", "TEXT NOT NULL DEFAULT ''"),
+            ("league", "TEXT NOT NULL DEFAULT ''"),
+            ("league_checked_at", "REAL"),
+        ):
+            if name not in user_columns:
+                self._conn.execute(f"ALTER TABLE users ADD COLUMN {name} {decl}")
+                logger.info(
+                    "users表に %s columnを追加しました", name,
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "users", "column": name}},
+                )
         if "create_time" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN create_time REAL")
             logger.info("events表にcreate_time columnを追加しました")
@@ -477,6 +496,30 @@ class MaintenanceMixin:
                 "bookmarks表にlive_wall/pts_mapped columnを追加しました",
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "bookmarks", "column": "live_wall,pts_mapped"}},
+            )
+        if "group_id" not in bookmark_columns:
+            # 切り抜きグループ(clip_groups)への所属。既存行は未分類(NULL)から始める。
+            self._conn.execute(
+                "ALTER TABLE bookmarks ADD COLUMN group_id INTEGER REFERENCES clip_groups(id)"
+            )
+            logger.info(
+                "bookmarks表にgroup_id columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "bookmarks", "column": "group_id"}},
+            )
+        cut_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(cut_list)")
+        ]
+        if "group_id" not in cut_columns:
+            # グループへの所属とグループ内の並び順(EDL/FCPXMLの書き出し順)。既存行は未分類(NULL)。
+            self._conn.execute(
+                "ALTER TABLE cut_list ADD COLUMN group_id INTEGER REFERENCES clip_groups(id)"
+            )
+            self._conn.execute("ALTER TABLE cut_list ADD COLUMN position INTEGER")
+            logger.info(
+                "cut_list表にgroup_id/position columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "cut_list", "column": "group_id,position"}},
             )
         media_job_columns = [
             row["name"] for row in self._conn.execute("PRAGMA table_info(media_job_queue)")

@@ -52,6 +52,8 @@ ignore = [
 # stt_workerは `python -m` で起動する子process。stdoutは親との制御channel専用のため
 # usageはstderrへprintする(logger未初期化の時点で出る必要がある)。
 "tictok/record/stt_worker.py" = ["T20"]
+# laugh_workerも同じ形の子process(GPUで笑い声検出を走らせるときの別process境界)。
+"tictok/media/laugh_worker.py" = ["T20"]
 
 # --- 暫定baseline(他Agentが同時編集中のfile。修正でき次第この項目を削る) ---
 # 内容と対処方針は doc/LINT_TYPECHECK.md の「後追いで直すべき指摘」を参照。

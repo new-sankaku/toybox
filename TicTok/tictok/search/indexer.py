@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 SOURCE_STT = "stt"
 SOURCE_COMMENT = "comment"
+SOURCE_LAUGH = "laugh"
 
 AXIS_MEDIA = "media"
 AXIS_PTS = "pts"
@@ -91,6 +92,88 @@ def index_transcript(storage, recording: dict) -> int:
         "転写をindexへ登録しました: recording_id=%d segments=%d", recording["id"], count,
         extra={"event": "search.transcript_indexed",
                "ctx": {"recording_id": recording["id"], "segments": count}},
+    )
+    return count
+
+
+def laugh_windows(profile: dict, threshold: float, merge_gap: float,
+                  min_seconds: float) -> list:
+    """笑い確率の刻み列を「笑っていた窓」へ畳む。``[(start, end, peak), ...]``。
+
+    畳むのは、確率列がhop刻み(既定1秒)の点列で、そのまま行にすると1回の笑いが数行へ
+    割れるため。息継ぎで確率が1〜2刻み落ちるのは同じ笑いの中の出来事なので、
+    ``merge_gap`` 以内の谷はつないでしまう。
+
+    ``peak`` は窓の中の最大確率。強さの目安として行の本文へ出す — 閾値を超えたかどうか
+    だけだと、はっきり笑った場面と辛うじて超えた場面が同じ顔で並ぶ。
+    """
+    interval = profile["interval_seconds"]
+    probs = profile["probs"]
+    if interval <= 0:
+        return []
+    gap_ticks = max(0, int(round(merge_gap / interval)))
+    windows: list = []
+    run_start = None
+    run_peak = 0.0
+    last_hit = None
+    for i, value in enumerate(probs):
+        if value < threshold:
+            continue
+        if run_start is None or (last_hit is not None and i - last_hit > gap_ticks + 1):
+            if run_start is not None:
+                windows.append((run_start, last_hit, run_peak))
+            run_start, run_peak = i, value
+        else:
+            run_peak = max(run_peak, value)
+        last_hit = i
+    if run_start is not None:
+        windows.append((run_start, last_hit, run_peak))
+    out = []
+    for first, last, peak in windows:
+        start, end = first * interval, (last + 1) * interval
+        if end - start + 1e-9 < min_seconds:
+            continue
+        out.append((round(start, 2), round(end, 2), round(peak, 3)))
+    return out
+
+
+def index_laughter(storage, recording: dict, profile: dict,
+                   threshold: Optional[float] = None) -> int:
+    """録画の笑い声をindexへ投入する。
+
+    確率列の秒は**そのままvideo_timeにできる**。laugh_audioは再生と同じ素材を
+    ``hls_source.ffmpeg_source`` 経由で読み、波形と同じ ``aresample=async=1:first_pts=0``
+    で穴を埋めているので、sample数がそのまま再生位置になる(転写と同じ扱いで、commentの
+    ように壁時計から写す必要が無い)。
+
+    本文に秒数と強さを書くのは、検索結果の行がそれだけで選べるようにするため。語で
+    引けることも兼ねる — ``笑い声`` は3文字なのでtrigram FTSに乗る。
+    """
+    from tictok.core.config import (get_laugh_audio_threshold,
+                                    get_laugh_index_merge_gap_seconds,
+                                    get_laugh_index_min_seconds)
+
+    threshold = get_laugh_audio_threshold() if threshold is None else threshold
+    windows = laugh_windows(profile, threshold,
+                            get_laugh_index_merge_gap_seconds(),
+                            get_laugh_index_min_seconds())
+    rows = [{
+        "session_id": recording.get("session_id"),
+        "unique_id": recording["unique_id"],
+        "started_at": recording["started_at"],
+        "video_time": start,
+        "end_time": end,
+        "nickname": None,
+        "body": f"笑い声 {end - start:.0f}秒（強さ {peak:.2f}）",
+    } for start, end, peak in windows]
+    count = storage.replace_search_hits(recording["id"], SOURCE_LAUGH, rows)
+    logger.info(
+        "笑い声をindexへ登録しました: recording_id=%d windows=%d threshold=%.2f",
+        recording["id"], count, threshold,
+        extra={"event": "search.laughter_indexed",
+               "ctx": {"recording_id": recording["id"], "windows": count,
+                       "threshold": threshold,
+                       "duration_seconds": profile.get("duration_seconds")}},
     )
     return count
 

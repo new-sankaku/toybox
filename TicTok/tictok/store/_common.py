@@ -18,6 +18,7 @@ import sqlite3
 from typing import Optional
 
 from tictok.core.battle import BATTLE_TOPOLOGY_VERSION, GLOVE_EVENT_VERSION
+from tictok.record.transcription import TIMEMAP_VERSION
 from tictok.core.intervals import merge_intervals, subtract_intervals, total_span
 
 logger = logging.getLogger("tictok.storage")
@@ -82,10 +83,15 @@ _BATTLE_CONTRIB_CACHE_MAX = 2000
 # 「退避済み」ではなく「完走済み」であることに意味がある: 書き換える行が1つも無かった起動でも
 # markerは進み、退避fileは作られない(守る対象が無いため)。
 _MIGRATION_BACKUP_KEY = "premigration_backup_versions"
+# 「文字起こしの時刻map版を、どの選別ruleで選り分け済みか」。migration版の組とは別に持つ:
+# 選別ruleだけが変わった場合(物差しの変更)にも選り直しが要り、逆に時刻map版が同じまま
+# rule版だけ据え置けば選り直しは不要、という組み合わせがあるため。
+_TIMEMAP_SELECTION_KEY = "timemap_selection_version"
 
 
 def _migration_versions() -> str:
-    return f"glove={GLOVE_EVENT_VERSION},topo={BATTLE_TOPOLOGY_VERSION}"
+    return (f"glove={GLOVE_EVENT_VERSION},topo={BATTLE_TOPOLOGY_VERSION}"
+            f",timemap={TIMEMAP_VERSION}")
 
 
 OPS_INFO = "info"
@@ -175,8 +181,25 @@ CREATE TABLE IF NOT EXISTS users (
     gifter_badge TEXT NOT NULL DEFAULT '',
     member_badge TEXT NOT NULL DEFAULT '',
     first_seen REAL,
-    last_seen REAL
+    last_seen REAL,
+    -- 視聴者が配信者でもあるか。NULL=未確認、0=LIVE不可/未経験、1=配信者。
+    -- broadcaster_room_id は過去の室でも league を引けるため使い回す(取得は1回で足りる)。
+    broadcaster INTEGER,
+    broadcaster_room_id TEXT NOT NULL DEFAULT '',
+    league TEXT NOT NULL DEFAULT '',
+    league_checked_at REAL
 );
+-- リーグ取得の待ち行列。processを跨いで残す必要がある(1件15秒で流すため、再起動で
+-- 消えると当日ぶんが丸ごと落ちる)。1人1行で、取得できた時点で消える。
+CREATE TABLE IF NOT EXISTS league_queue (
+    identity_key TEXT PRIMARY KEY,
+    unique_id TEXT NOT NULL,
+    enqueued_at REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at REAL NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_league_queue_due ON league_queue(next_attempt_at, enqueued_at);
 CREATE TABLE IF NOT EXISTS buckets (
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     start INTEGER NOT NULL,
@@ -194,6 +217,13 @@ CREATE INDEX IF NOT EXISTS idx_buckets_session ON buckets(session_id);
 -- session_idだけのindexだと本体行を全部読みに行くため、実測で162 sessionのlist_sessionsが
 -- 25msかかっていた。viewersを載せてcovering indexにすると0.9msで済む。
 CREATE INDEX IF NOT EXISTS idx_buckets_session_viewers ON buckets(session_id, viewers);
+-- bucketは「そのsessionの、この開始秒の1本」で引かれるが、上の2本はどちらもstartを
+-- 持たない。_fill_missing_buckets_lockedのHAVING NOT EXISTS(b.start = ...)がsessionの
+-- bucket全件を毎回舐めることになり、bucket数の2乗で伸びる — 配信長が2倍になると
+-- bucket数も評価回数も2倍で4倍である。実測: 2,839 bucketのsessionで、補うbucketが
+-- 0本でも644ms。これはfinalize_sessionが必ず通る経路で、その間はDB lockを握っている。
+-- session_buckets(start範囲)とsession_timeline(ORDER BY start)も同じindexに乗る。
+CREATE INDEX IF NOT EXISTS idx_buckets_session_start ON buckets(session_id, start);
 CREATE TABLE IF NOT EXISTS markers (
     session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     time REAL NOT NULL,
@@ -349,6 +379,15 @@ CREATE INDEX IF NOT EXISTS idx_search_hits_uid ON search_hits(unique_id, started
 CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
     body, content='search_hits', content_rowid='id', tokenize='trigram'
 );
+-- 切り抜きグループ(group)。cut_list/bookmarksの項目を「切り抜き動画1本のグループ」単位で束ねる。
+-- 項目側は排他所属(group_idを1つ持つ)で、グループ間の共用は行の複製で表す: NLEへ渡す前提では
+-- グループごとにIN/OUTの詰め方が変わるため、所属を共有すると片方の調整が他方のグループを壊す。
+CREATE TABLE IF NOT EXISTS clip_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    memo TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL
+);
 -- 切り出し候補の蓄積。複数配信を横断して探す性質上、見つけた端から溜めて最後にまとめて
 -- NLEへ渡すため、mp4出力とは独立に範囲だけを保持する。
 CREATE TABLE IF NOT EXISTS cut_list (
@@ -358,6 +397,12 @@ CREATE TABLE IF NOT EXISTS cut_list (
     start REAL NOT NULL,
     end REAL NOT NULL,
     label TEXT NOT NULL DEFAULT '',
+    -- 所属するグループ。NULLは未分類。positionはグループ内の並び順で、EDL/FCPXMLの書き出し順
+    -- (=NLEのtimeline順)そのものになる。NULLは末尾扱い(グループに入れた時に採番する)。
+    -- FK pragmaは有効化していないためON DELETE系は書かず、グループ削除時の解除は
+    -- delete_group()が自前で行う。
+    group_id INTEGER REFERENCES clip_groups(id),
+    position INTEGER,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cut_list_rec ON cut_list(recording_id);
@@ -379,6 +424,9 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     source_hit_id INTEGER,
     live_wall REAL,
     pts_mapped INTEGER NOT NULL DEFAULT 1,
+    -- 所属するグループ(cut_listと共通のclip_groups)。NULLは未分類。見どころは点の記憶で
+    -- 書き出し順を持たないため、positionは持たない(並びは常にstart順)。
+    group_id INTEGER REFERENCES clip_groups(id),
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_rec ON bookmarks(recording_id, start);
@@ -444,6 +492,14 @@ CREATE TABLE IF NOT EXISTS viewer_samples (
     anonymous INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_viewer_samples_session ON viewer_samples(session_id);
+-- bucketのviewersは「そのbucketの窓に入るsampleのMAX」で埋める(_rebuild_buckets_locked /
+-- _fill_missing_buckets_locked)。session_idだけのindexではtimeの範囲条件が乗らないため、
+-- bucket 1本ごとにそのsessionのsampleを端から端まで舐めることになり、bucket数 x sample数で
+-- 伸びる — 配信長が2倍になると両方が2倍で4倍である。実測: 9,438 sample / 2,112 bucketの
+-- sessionで2,693ms。timeを載せると同じ結果が2.4msで出る(検証DBで1,612ms -> 2.4ms)。
+-- 走るのは起動時の中断session回収・bucket backfill・journal復元・session確定で、いずれも
+-- DB lockを握ったままなので、その間collectorのevent書き出しが止まる。
+CREATE INDEX IF NOT EXISTS idx_viewer_samples_session_time ON viewer_samples(session_id, time);
 -- RoomUserSeqが毎回運んでくるTikTok公式の累積貢献ranking(上位N人)の時系列。
 -- scoreはTikTok側が算出した累積値で、こちらのgift eventの積み上げとは独立の系列である。
 -- 両者を突き合わせると「こちらが取りこぼしたgiftの量」が実測できる(自前集計の検算)ため、

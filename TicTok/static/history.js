@@ -443,14 +443,119 @@ async function transcribeSession(session, btn) {
   }
 }
 
+// 数値列の並び。全再構築と差分更新が同じ順で同じ値を出すよう、順序をここ1箇所で持つ。
+const SESSION_NUM_FIELDS = [
+  "diamonds", "comments", "likes_total", "follows", "shares",
+  "joins", "battles", "battle_points", "viewers_peak",
+];
+
+function sessionDurationText(s) {
+  return s.ended_at ? fmtDuration(s.ended_at - s.started_at) : "収集中";
+}
+
+function sessionNameCell(s) {
+  return userCell(
+    {
+      unique_id: s.unique_id,
+      nickname: s.owner_nickname || s.unique_id,
+      avatar: s.owner_avatar || "",
+      league: s.league || "",
+    },
+    { leagueFirst: true },
+  );
+}
+
+// 配信者cell・操作buttonを作り直すかどうかの判定材料。cellの中身を決める値を漏れなく
+// 並べ、1つでも変われば作り直す。差分更新が「変わったのに古いまま」を出さないための、
+// この2つのcellにおける唯一の根拠。
+function sessionNameSig(s) {
+  return [s.unique_id, s.owner_nickname || "", s.owner_avatar || "", s.league || ""].join(" ");
+}
+
+function sessionActionSig(s) {
+  return [
+    s.id, s.unique_id, s.recording_count || 0,
+    s.output_done ? 1 : 0, s.up_output_done ? 1 : 0, s.transcript_done ? 1 : 0,
+    activeIds.has(s.id) ? 1 : 0,
+    activeOutputs.has(s.id) ? 1 : 0,
+    activeUpOutputs.has(s.id) ? 1 : 0,
+    upscaleConfigured ? 1 : 0, sttConfigured ? 1 : 0,
+  ].join(" ");
+}
+
+// 描画済みの行。id → 差分更新で触るcellへの参照。並びが変わらない更新(収集中の数値だけが
+// 動く1秒ごとのreload)で、行を作り直さずに済ませるために持つ。
+let sessionRows = new Map();
+// 前回描いた行のidを並び順のまま。これが一致する間は差分更新でよい。
+let sessionRowOrder = [];
+// 前回描いたときの操作列の数。Up出力・文字起こしの設定が届くと列そのものが増減するので、
+// 並びが同じでも作り直す。
+let sessionRowColumns = -1;
+
+function buildSessionRow(s) {
+  const tr = document.createElement("tr");
+  tr.dataset.sessionId = String(s.id);
+  const nameTd = document.createElement("td");
+  nameTd.appendChild(sessionNameCell(s));
+  const durationTd = textTd(sessionDurationText(s));
+  const statusTd = document.createElement("td");
+  statusTd.appendChild(statusCell(s));
+  const numTds = SESSION_NUM_FIELDS.map((key) => numTd(sessionStat(s, key)));
+  const note = noteTd(s);
+  const actionTds = actionCells(s);
+  [
+    textTd(`#${sessionNo(s.id)}`), nameTd, textTd(fmtDateTime(s.started_at)),
+    durationTd, statusTd, ...numTds, note, ...actionTds,
+  ].forEach((td) => tr.appendChild(td));
+  return {
+    tr, nameTd, durationTd, statusTd, numTds, actionTds,
+    noteInput: note.querySelector(".note-inline"),
+    nameSig: sessionNameSig(s), actionSig: sessionActionSig(s),
+  };
+}
+
+// 行はそのままに、変わった値だけを書き戻す。収集中に動くのは数値・経過時間・状態だけで、
+// 行ごと作り直すとMemoの入力途中の値まで巻き添えで消える(1秒ごとに書きかけが飛んでいた)。
+function patchSessionRow(record, s) {
+  const duration = sessionDurationText(s);
+  if (record.durationTd.textContent !== duration) record.durationTd.textContent = duration;
+  SESSION_NUM_FIELDS.forEach((key, i) => {
+    const text = fmtNum(sessionStat(s, key));
+    if (record.numTds[i].textContent !== text) record.numTds[i].textContent = text;
+  });
+  const nameSig = sessionNameSig(s);
+  if (record.nameSig !== nameSig) {
+    record.nameTd.replaceChildren(sessionNameCell(s));
+    record.nameSig = nameSig;
+  }
+  // 状態badgeはclassと文言の組み。個別に比べるより作り直す方が食い違わない(1要素)。
+  const status = statusCell(s);
+  const shown = record.statusTd.firstElementChild;
+  if (!shown || shown.className !== status.className || shown.textContent !== status.textContent) {
+    record.statusTd.replaceChildren(status);
+  }
+  // 入力中の欄は上書きしない。打っている最中に値が戻ると、書きかけが消える。
+  if (record.noteInput && document.activeElement !== record.noteInput) {
+    const note = s.note || "";
+    if (record.noteInput.value !== note) record.noteInput.value = note;
+  }
+  const actionSig = sessionActionSig(s);
+  if (record.actionSig !== actionSig) {
+    const next = actionCells(s);
+    record.actionTds.forEach((td, i) => record.tr.replaceChild(next[i], td));
+    record.actionTds = next;
+    record.actionSig = actionSig;
+  }
+}
+
 function renderTable() {
   const tbody = document.getElementById("session-rows");
   const rows = filteredSessions();
   syncSortHeaders();
-  tbody.innerHTML = "";
   // 操作Buttonは1列ずつ独立tdなので、header操作thをその列数だけ横結合して整合させる。
   const opTh = document.getElementById("op-th");
-  if (opTh) opTh.colSpan = actionColumnCount();
+  const columns = actionColumnCount();
+  if (opTh) opTh.colSpan = columns;
   const emptyEl = document.getElementById("session-empty");
   if (rows.length > 0) setListState(emptyEl, "ok");
   else if (sessionsState === "failed") setListState(emptyEl, "failed", sessionsError);
@@ -460,49 +565,33 @@ function renderTable() {
   else if (allSessions.length > 0)
     setListMessage(emptyEl, "条件に一致するSessionがありません。filterを変更してください。");
   else setListState(emptyEl, "empty");
-  // 1行あたりavatar・Memo入力・操作button群で30要素前後になる表を、収集中は毎秒
-  // 組み直す。live tbodyへ1行ずつappendすると行数ぶんlayoutが走るので、画面から
-  // 切り離されたfragmentの上で組んでから1回で挿す。
+
+  // 並びも列数も変わっていないなら、行はそのまま使って中身だけ入れ替える。収集中は
+  // WS更新で1秒ごとにここへ来るので、1行30要素前後の表を作り直し続けると、その間ずっと
+  // 生成と破棄に時間を取られる(行が増えるほど比例して重くなる)。
+  const order = rows.map((s) => s.id);
+  const sameOrder = columns === sessionRowColumns
+    && order.length === sessionRowOrder.length
+    && order.every((id, i) => id === sessionRowOrder[i]);
+  if (sameOrder) {
+    rows.forEach((s) => {
+      const record = sessionRows.get(s.id);
+      if (record) patchSessionRow(record, s);
+    });
+    return;
+  }
+
+  tbody.innerHTML = "";
+  sessionRows = new Map();
+  sessionRowOrder = order;
+  sessionRowColumns = columns;
+  // live tbodyへ1行ずつappendすると行数ぶんlayoutが走るので、画面から切り離された
+  // fragmentの上で組んでから1回で挿す。
   const fragment = document.createDocumentFragment();
   rows.forEach((s) => {
-    const stats = s.stats || {};
-    const tr = document.createElement("tr");
-    const duration = s.ended_at ? fmtDuration(s.ended_at - s.started_at) : "収集中";
-
-    const cells = [];
-    cells.push(textTd(`#${sessionNo(s.id)}`));
-    const nameTd = document.createElement("td");
-    nameTd.appendChild(
-      userCell(
-        {
-          unique_id: s.unique_id,
-          nickname: s.owner_nickname || s.unique_id,
-          avatar: s.owner_avatar || "",
-          league: s.league || "",
-        },
-        { leagueFirst: true },
-      ),
-    );
-    cells.push(nameTd);
-    cells.push(textTd(fmtDateTime(s.started_at)));
-    cells.push(textTd(duration));
-    const stTd = document.createElement("td");
-    stTd.appendChild(statusCell(s));
-    cells.push(stTd);
-    cells.push(numTd(stats.diamonds));
-    cells.push(numTd(stats.comments));
-    cells.push(numTd(stats.likes_total));
-    cells.push(numTd(stats.follows));
-    cells.push(numTd(stats.shares));
-    cells.push(numTd(stats.joins));
-    cells.push(numTd(stats.battles));
-    cells.push(numTd(stats.battle_points));
-    cells.push(numTd(stats.viewers_peak));
-    cells.push(noteTd(s));
-    actionCells(s).forEach((td) => cells.push(td));
-
-    cells.forEach((td) => tr.appendChild(td));
-    fragment.appendChild(tr);
+    const record = buildSessionRow(s);
+    sessionRows.set(s.id, record);
+    fragment.appendChild(record.tr);
   });
   tbody.appendChild(fragment);
 }
@@ -523,6 +612,7 @@ function numTd(value) {
 // Memoは検索対象(filteredSessionsがs.noteを見る)なのに、絞り込んだ結果の一覧では
 // 中身が見えず、確認に詳細modal+scrollが要った。その場で読めて、その場で直せるようにする。
 function noteTd(session) {
+  const sessionId = session.id;
   const td = document.createElement("td");
   td.className = "note-cell";
   const input = document.createElement("input");
@@ -533,17 +623,21 @@ function noteTd(session) {
   input.title = "Memo。ここで直接編集でき、離れると保存されます（検索boxの絞込対象です）。";
   input.addEventListener("click", (e) => e.stopPropagation());
   input.addEventListener("change", async () => {
+    // 行は再取得を跨いで生き残るので、掴んだ時点のsessionではなく今の一覧から引く。
+    // 古い方へ書き戻すと、検索(noteを見る)の対象と画面の値が食い違う。
+    const current = allSessions.find((s) => s.id === sessionId);
+    if (!current) return;
     const value = input.value;
-    if (value === (session.note || "")) return;
+    if (value === (current.note || "")) return;
     try {
-      await apiSend("PATCH", `/api/sessions/${session.id}`, { note: value });
-      session.note = value;
+      await apiSend("PATCH", `/api/sessions/${sessionId}`, { note: value });
+      current.note = value;
       // 詳細modalを開いたままなら、そちらの入力欄とも食い違わせない。
-      if (currentSessionId === session.id) {
+      if (currentSessionId === sessionId) {
         document.getElementById("note-input").value = value;
       }
     } catch (err) {
-      input.value = session.note || "";
+      input.value = current.note || "";
       showError(err);
     }
   });

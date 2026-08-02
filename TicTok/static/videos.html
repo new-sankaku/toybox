@@ -25,16 +25,26 @@
       <button id="tab-search" class="vd-tab active" type="button">シーン検索</button>
       <button id="tab-marks" class="vd-tab" type="button">見どころ</button>
       <button id="tab-cuts" class="vd-tab" type="button">切り出しリスト</button>
-      <button id="tab-jobs" class="vd-tab" type="button">一括文字起こし</button>
+      <!-- 文字起こしは一括処理の1種別。tabを分けていた頃は「選ぶ場所(一括処理)」と
+           「進捗を見る場所(一括文字起こし)」が別tabに固定され、1回の作業で必ず往復した。
+           しかも投入経路が2つに割れ、見積り確認の無い側が目立つ位置にあった。 -->
       <button id="tab-bulk" class="vd-tab" type="button">一括処理</button>
     </div>
 
     <!-- ===== シーン検索 ===== -->
     <div id="view-search" class="vd-view">
       <div class="x-toolbar">
-        <input id="q" type="text" aria-label="シーンをコメント・音声から検索" placeholder="🔎 空白=AND　&quot;…&quot;=フレーズ　-語=除外　OR=いずれか" autocomplete="off" />
+        <!-- 構文をplaceholderに詰めていたが、既定幅では末尾が切れ、1文字打つと消えて
+             二度と読めなかった。placeholderは用途だけにして、構文はhoverで常に引ける。 -->
+        <input id="q" type="text" aria-label="シーンをコメント・音声から検索"
+               placeholder="🔎 コメント・音声を検索" autocomplete="off"
+               title="空白=AND（1つの発話・Commentの中で判定）／&quot;…&quot;=フレーズ／-語=除外／OR=いずれか" />
         <label class="vd-chk"><input id="src-stt" type="checkbox" checked /> 音声</label>
         <label class="vd-chk"><input id="src-comment" type="checkbox" checked /> Comment</label>
+        <!-- 笑い声は音声から検出した窓。語ではなく音そのものが根拠なので、転写に「笑」と
+             書かれていなくても当たる(Whisperは笑い声を文字にしない)。既定OFFは、語で
+             探しているときに笑いの行が混ざると結果が読みにくくなるため。 -->
+        <label class="vd-chk" title="音声から検出した笑い声の区間を探します（一括処理の「笑い声分析」が必要）。"><input id="src-laugh" type="checkbox" /> 笑い声</label>
         <label class="x-field"><span>配信者</span>
           <select id="flt-streamer"><option value="">全て</option></select>
         </label>
@@ -66,6 +76,9 @@
         <span id="semantic-inline" class="vd-summary hidden">
           <span id="semantic-note" class="vd-summary"></span>
           <button id="semantic-build" class="btn btn-small" type="button">意味検索indexを更新</button>
+          <!-- 更新の開始・完了・失敗の行き先。#semantic-note はstatus由来の「押せない理由」で
+               毎回上書きされるので、操作の結果は別の欄に置く。 -->
+          <span id="semantic-result" class="vd-summary"></span>
         </span>
         <span class="sp"></span>
         <span id="search-summary" class="vd-summary"></span>
@@ -99,7 +112,12 @@
                  文字起こしは残り高さを全部使い、動画と高さを揃える。 -->
             <div class="vd-side">
               <div id="player-head" class="vd-player-head">シーンを選ぶとここで再生します。</div>
+              <!-- 9行が見出しも罫線も無く積まれていたため、目的のbuttonを探すのに毎回時間が
+                   かかり、「今なにができるか」も読めなかった(disabledの理由は各buttonの
+                   hoverにしかない)。作業の段階で3群に分け、押せない理由は群の見出しに出す。 -->
               <div class="vd-controls">
+                <div class="vd-group">
+                  <span class="vd-group-head">見る</span>
                 <!-- 観たかどうかの印。一覧の行にも同じ物を出すが、観終わるのはここなので
                      再生画面から手を離さずに付け替えられる場所を持たせる。自動では動かさない
                      (開いただけ・流しただけの録画に印が付くと、印が何を指すのか読めなくなる)。 -->
@@ -114,29 +132,6 @@
                     </span>
                   </span>
                   <span id="review-note" class="vd-summary"></span>
-                </div>
-                <div class="vd-row">
-                  <label class="vd-chk"><input id="snap-seg" type="checkbox" checked /> 発話境界にスナップ</label>
-                  <span class="vd-chk seg-field" title="切り出しの方式。高速=stream copy（切れ目がkeyframeまで手前へ伸びます）／smart=先頭のGOPだけ再encodeして指定どおりのIN点で切ります／精密=全編再encode"><span class="seg-label">方式</span>
-                    <span id="clip-mode" class="seg" role="radiogroup" aria-label="切り出しの方式" data-value="copy">
-                      <button class="seg-item" type="button" data-value="copy">高速</button>
-                      <button class="seg-item" type="button" data-value="smart">smart</button>
-                      <button class="seg-item" type="button" data-value="precise">精密</button>
-                    </span>
-                  </span>
-                </div>
-                <!-- 素材版は再生と切り出しの両方に効く。出来を確かめずに切り出す事態を避けるため、
-                     選んだ版がそのままplayerに載る。焼き込み出力・Up出力は「出力済みの録画」に
-                     しか無いので、その録画に無い版は下のbuttonで作るまでgrey outする。 -->
-                <div class="vd-row">
-                  <span class="vd-chk seg-field"><span class="seg-label">素材</span>
-                    <span id="clip-variant" class="seg" role="radiogroup" aria-label="再生と切り出しに使う素材版" data-value="source">
-                      <button class="seg-item" type="button" data-value="source">元録画</button>
-                      <button class="seg-item" type="button" data-value="overlay">焼き込み</button>
-                      <button class="seg-item" type="button" data-value="upscaled">Up出力</button>
-                    </span>
-                  </span>
-                  <label class="vd-chk"><input id="clip-normalize" type="checkbox" /> 音量を正規化</label>
                 </div>
                 <!-- 再生系。倍速は編集中の見返しで最も使うので、shuttle(J/K/L)とは別に
                      固定倍率を選べるようにする。ループはIN/OUTの当たりを何度も確認する用。 -->
@@ -165,11 +160,51 @@
                   <input id="volume" class="vd-volume" type="range" min="0" max="100" step="1" value="100" aria-label="音量" />
                   <span id="volume-label" class="vd-volume-label">100%</span>
                 </div>
+                </div>
+
+                <div class="vd-group">
+                  <span class="vd-group-head">切り出す</span>
+                  <span id="clip-group-note" class="vd-group-note"></span>
+                <div class="vd-row">
+                  <label class="vd-chk"><input id="snap-seg" type="checkbox" checked /> 発話境界にスナップ</label>
+                  <span class="vd-chk seg-field" title="切り出しの方式。高速=stream copy（切れ目がkeyframeまで手前へ伸びます）／smart=先頭のGOPだけ再encodeして指定どおりのIN点で切ります／精密=全編再encode"><span class="seg-label">方式</span>
+                    <span id="clip-mode" class="seg" role="radiogroup" aria-label="切り出しの方式" data-value="copy">
+                      <button class="seg-item" type="button" data-value="copy">高速</button>
+                      <button class="seg-item" type="button" data-value="smart">smart</button>
+                      <button class="seg-item" type="button" data-value="precise">精密</button>
+                    </span>
+                  </span>
+                </div>
+                <!-- 素材版は再生と切り出しの両方に効く。出来を確かめずに切り出す事態を避けるため、
+                     選んだ版がそのままplayerに載る。焼き込み出力・Up出力は「出力済みの録画」に
+                     しか無いので、その録画に無い版は下のbuttonで作るまでgrey outする。 -->
+                <div class="vd-row">
+                  <span class="vd-chk seg-field"><span class="seg-label">素材</span>
+                    <span id="clip-variant" class="seg" role="radiogroup" aria-label="再生と切り出しに使う素材版" data-value="source">
+                      <button class="seg-item" type="button" data-value="source">元録画</button>
+                      <button class="seg-item" type="button" data-value="overlay">焼き込み</button>
+                      <button class="seg-item" type="button" data-value="upscaled">Up出力</button>
+                    </span>
+                  </span>
+                  <label class="vd-chk"><input id="clip-normalize" type="checkbox" /> 音量を正規化</label>
+                </div>
+                </div>
+
+                <div class="vd-group">
+                  <span class="vd-group-head">出す</span>
+                  <span id="output-group-note" class="vd-group-note"></span>
                 <div class="vd-row">
                   <button id="add-mark" class="btn btn-primary" type="button" disabled>見どころに記録</button>
                   <input id="mark-memo" class="vd-memo" type="text" aria-label="見どころのメモ" placeholder="メモ（後から編集可）" autocomplete="off" />
                   <button id="add-cut" class="btn" type="button" disabled>切り出しリストに追加</button>
                   <button id="do-clip" class="btn" type="button" disabled>mp4切り出し</button>
+                </div>
+                <!-- 記録先。selectに畳むと「今どこへ入るのか」が開くまで見えず、決め忘れが
+                     そのまま未分類への取りこぼしになる。グループは高々数個なので、
+                     選択肢そのものを常時並べて1 clickで切り替えられる形にする。 -->
+                <div class="vd-row vd-destrow">
+                  <span class="seg-label" title="「見どころに記録」「切り出しリストに追加」が入る先。グループは切り抜き動画1本の単位です。">記録先</span>
+                  <div id="dest-groups" class="vd-dest" role="radiogroup" aria-label="見どころ・切り出しの記録先グループ"></div>
                 </div>
                 <div class="vd-row">
                   <button id="copy-path" class="btn" type="button" disabled>pathをcopy</button>
@@ -194,6 +229,7 @@
                           title="保持している.tsを解像度の切れ目ごとに1 fileへ束ね直します（再encodeせずbyte連結するので映像も再生も変わりません。file数だけが減ります）">ts結合</button>
                   <button id="do-transcribe" class="btn" type="button" disabled>文字起こし</button>
                 </div>
+                </div>
                 <div id="job-note" class="vd-summary"></div>
                 <div id="player-status" class="form-message vd-status" aria-live="polite"></div>
               </div>
@@ -211,7 +247,7 @@
               <!-- 章立て: 3時間級の録画を目次から辿る。表題はAIが書くので誤りがあり得る。
                    必ずその時刻へ飛べる形にし、根拠としてその位置の実際の発話を併記する
                    (表題だけを事実として読ませない)。 -->
-              <div class="vd-transcript-block">
+              <div id="chapter-block" class="vd-transcript-block vd-block-collapsed">
                 <div class="vd-heat-head">
                   <span class="vd-heat-label">章立て（AI）— clickでその位置へ移動 / 下段はその位置の実際の発話</span>
                   <button id="do-chapters" class="btn btn-small" type="button" disabled>章立てを作る</button>
@@ -239,18 +275,21 @@
         </div>
 
         <!-- 時間軸は左右いっぱいに使う。同じ縦幅でも横pixelが倍になり、長時間録画でも
-             細かく狙える。上端のrange laneでIN/OUTをdrag、それより下はclickで移動。 -->
+             細かく狙える。上端のrange laneで範囲を作り、IN/OUT線は全高のどこでも掴める。
+             それ以外はclickで移動。 -->
         <div class="vd-timeline">
           <div class="vd-heat-head">
-            <span class="vd-heat-label">盛り上がり（コメント／コイン）— 上端barをdragで範囲選択 / 下はclickで移動</span>
+            <span class="vd-heat-label">盛り上がり（コメント／コイン）— 上端barをdragで範囲選択 / IN・OUT線はdragで移動 / 下はclickで移動</span>
             <label class="vd-chk"><input id="show-wave" type="checkbox" /> 音声波形</label>
             <span id="wave-note" class="vd-summary"></span>
             <span class="sp"></span>
             <button id="mark-in" class="btn" type="button">IN</button>
-            <span id="cut-in" class="vd-time">--:--:--</span>
+            <input id="cut-in" class="vd-time vd-time-input" type="text" placeholder="--:--:--" autocomplete="off" spellcheck="false" aria-label="IN時刻（直接入力できます）" title="時刻を直接入力できます（例 1:23:45.6）" />
             <button id="mark-out" class="btn" type="button">OUT</button>
-            <span id="cut-out" class="vd-time">--:--:--</span>
+            <input id="cut-out" class="vd-time vd-time-input" type="text" placeholder="--:--:--" autocomplete="off" spellcheck="false" aria-label="OUT時刻（直接入力できます）" title="時刻を直接入力できます（例 1:23:45.6）" />
             <span id="cut-len" class="vd-time vd-len">-</span>
+            <button id="preview-in" class="btn" type="button" disabled title="INの前後を再生して切れ目を確かめます">IN確認</button>
+            <button id="preview-out" class="btn" type="button" disabled title="OUTの前後を再生して切れ目を確かめます">OUT確認</button>
             <span class="sp"></span>
             <span id="time-now" class="vd-time">--:--:-- / --:--:--</span>
           </div>
@@ -261,8 +300,25 @@
               <div id="thumb-time" class="vd-thumb-time"></div>
             </div>
           </div>
+          <!-- 拡大窓。全尺barは3時間で1px≈7秒になり、drag精度が原理的に出ない。細かい操作は
+               すべてこちらで行い、全尺barは「どこを見ているか」の把握と粗い移動に使う。 -->
+          <div class="vd-heat-head">
+            <span class="vd-heat-label">拡大 — 下端の目盛りかshift+dragで左右移動 / wheelで拡縮 / IN・OUT線はdragで微調整 / dblclickで無音間を選択</span>
+            <label class="vd-chk"><input id="zoom-follow" type="checkbox" checked /> 再生に追従</label>
+            <span class="vd-zoom-ops">
+              <button id="zoom-left" class="btn" type="button" title="左へ移動（目盛りをdrag / shift+wheel）">◀</button>
+              <button id="zoom-right" class="btn" type="button" title="右へ移動（目盛りをdrag / shift+wheel）">▶</button>
+              <button id="zoom-out" class="btn" type="button" title="窓を広げる（wheel下）">－</button>
+              <button id="zoom-in" class="btn" type="button" title="窓を狭める（wheel上）">＋</button>
+            </span>
+            <span class="sp"></span>
+            <span id="zoom-note" class="vd-summary"></span>
+          </div>
+          <div class="vd-heat-wrap">
+            <canvas id="zoom" class="vd-heat vd-zoom"></canvas>
+          </div>
           <div class="vd-keys">
-            space 再生/停止　J/K/L 逆送り・停止・早送り　I/O IN・OUT　M 見どころ記録　, . 再生速度　←→ frame送り(shift 1秒 / alt 10秒)　↑↓ 前後のシーン　Esc 範囲解除　alt+drag スナップ無効
+            space 再生/停止　J/K/L 逆送り・停止・早送り　I/O IN・OUT　[ ] INを1frame調整　shift+[ ] OUTを1frame調整　M 見どころ記録　, . 再生速度　←→ frame送り(shift 1秒 / alt 10秒)　↑↓ 前後のシーン　Esc 範囲解除　alt+drag スナップ無効
           </div>
         </div>
 
@@ -274,7 +330,7 @@
           <div class="table-wrap">
             <table class="result-table">
               <thead>
-                <tr><th>種別</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>メモ</th></tr>
+                <tr><th>種別</th><th class="num">IN</th><th class="num">OUT</th><th class="num">尺</th><th>メモ</th><th>グループ</th></tr>
               </thead>
               <tbody id="own-rows"></tbody>
             </table>
@@ -294,7 +350,7 @@
           <div class="table-wrap">
             <table class="result-table">
               <thead>
-                <tr><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>根拠</th><th class="n">z</th><th class="n">コイン</th><th class="n">Comment</th><th class="n">笑い</th><th class="n">笑い声</th><th class="n">笑顔</th><th></th></tr>
+                <tr><th class="num">IN</th><th class="num">OUT</th><th class="num">尺</th><th>根拠</th><th class="num">z</th><th class="num">コイン</th><th class="num">Comment</th><th class="num">笑い</th><th class="num">笑い声</th><th class="num">笑顔</th><th></th></tr>
               </thead>
               <tbody id="cand-rows"></tbody>
             </table>
@@ -305,29 +361,87 @@
     </div>
 
     <!-- ===== 見どころ ===== -->
+    <!-- グループ一覧は切り出しリストtabと同じ物・同じ選択を指す(片方で選んだグループが
+         もう片方でも選ばれている)。棚を左に置くとその幅ぶん表と動画が痩せるので、
+         上段へ一列で寄せる。tabは「今どこを見ているか」を選ぶ場所であり、同時に行の
+         ドロップ先でもある。付け替えの手段は3つ(行のグループ欄・選択+移動先・tabへ
+         ドラッグ)で、1件だけ直すのに選択と往復を強いない。 -->
     <div id="view-marks" class="vd-view hidden">
-      <div class="x-toolbar">
-        <span id="marks-summary" class="vd-summary"></span>
-      </div>
+      <div class="vd-gbar" id="marks-groups" role="toolbar" aria-label="グループ"></div>
+      <div class="vd-gmain">
+        <!-- 選択した行の行き先はここで指す。表のすぐ上に置くので、行を選んだ手の位置から
+             動かずに入れられる(上段tabまでマウスを往復させない)。 -->
+        <div class="x-toolbar">
+          <label class="vd-chk"><input id="marks-select-all" type="checkbox" /> 全選択</label>
+          <span id="marks-selected" class="vd-summary"></span>
+          <label class="x-field"><span>移動先</span>
+            <select id="marks-move-target" title="選択した見どころを入れるグループ。"></select>
+          </label>
+          <button id="marks-move" class="btn btn-small" type="button" disabled>入れる</button>
+          <button id="marks-bulk-delete" class="btn btn-danger btn-small" type="button" disabled>選択を削除</button>
+          <span class="sp"></span>
+          <span id="marks-status" class="vd-summary"></span>
+          <span id="marks-summary" class="vd-summary"></span>
+        </div>
 
-      <div class="result-block">
-        <h3 class="result-subtitle">■ 見どころ</h3>
-        <span class="result-sub-note">「開く」でその録画のその位置から再生します。メモは直接書き換えられます（入力欄から離れた時点で保存）。範囲付きの見どころは開いた先でIN/OUTが入った状態になるので、そのまま切り出しへ回せます。</span>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>配信者</th><th>配信日</th><th class="n">位置</th><th class="n">尺</th><th>メモ</th><th></th></tr>
-            </thead>
-            <tbody id="mark-rows"></tbody>
-          </table>
-          <div id="mark-empty" class="feed-empty">まだありません。再生画面の「見どころに記録」か、コメント行の★から追加してください。</div>
+        <!-- 左=一覧・右=視聴。観る対象を選ぶ場所と観る場所が同時に見えるので、1件ずつ
+             確かめる間に一覧の位置が失われない。右列は再生していない間も畳まない
+             (畳むと観るたび左の表幅が動き、行を追えなくなる)。 -->
+        <div class="vd-msplit">
+          <div class="vd-mlist">
+            <div class="result-block">
+              <h3 class="result-subtitle">■ 見どころ</h3>
+              <span class="result-sub-note">「視聴」でこのtabのまま、右で再生します（範囲付きは終端で一度止まります）。「シーン検索視聴」はシーン検索の再生画面へ移って開きます — 範囲付きならIN/OUTが入った状態になるので、そのまま切り出しへ回せます。メモは直接書き換えられます（入力欄から離れた時点で保存）。所属は行の「グループ」欄で直接変えられます。まとめて動かす場合は行を選んで（shift+クリックで範囲選択）上の「移動先」で入れるか、行を上のグループtabへドラッグしてください。</span>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead>
+                    <tr><th></th><th>配信者</th><th>配信日</th><th class="num">位置</th><th class="num">尺</th><th>メモ</th><th>グループ</th><th></th></tr>
+                  </thead>
+                  <tbody id="mark-rows"></tbody>
+                </table>
+                <div id="mark-empty" class="feed-empty">まだありません。再生画面の「見どころに記録」か、コメント行の★から追加してください。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- この場で中身を確かめるためのplayer。シーン検索へ移らないと観られないと、
+               1件確かめるたびtabを往復し、そのたび見どころ一覧の位置が失われる。
+               時間軸のUI(波形・IN/OUT・転写)はここには置かない — それらを使う作業は
+               シーン検索側の仕事なので、「シーン検索視聴」で移る。 -->
+          <div class="vd-mstage">
+            <div id="mark-play" class="result-block vd-mplay hidden">
+              <div class="vd-mplay-head">
+                <h3 class="result-subtitle">■ 視聴</h3>
+                <span id="mark-play-head" class="vd-summary"></span>
+                <span class="sp"></span>
+                <button id="mark-play-search" class="btn btn-small" type="button" title="この見どころをシーン検索の再生画面で開きます（波形・IN/OUT・転写つき）。">シーン検索視聴</button>
+                <button id="mark-play-close" class="btn btn-small" type="button">閉じる</button>
+              </div>
+              <video id="mark-video" class="vd-mvideo" controls playsinline preload="metadata"></video>
+              <span id="mark-play-status" class="result-sub-note"></span>
+            </div>
+            <div id="mark-play-empty" class="feed-empty vd-mstage-empty">左の表の「視聴」を押すと、ここで再生します。</div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- ===== 切り出しリスト ===== -->
     <div id="view-cuts" class="vd-view hidden">
+      <div class="vd-gbar" id="cuts-groups" role="toolbar" aria-label="グループ"></div>
+      <div class="vd-gmain">
+      <!-- グループを選んでいる間は、その1本の切り抜きの見出しをlistの上に出す。
+           書き出し・連結・削除が効く範囲がこの見出しと一致していることを、
+           操作buttonを押す前に読み取れるようにする。 -->
+      <div id="cuts-group-head" class="vd-ghead hidden">
+        <h3 class="result-subtitle" id="cuts-group-title">■</h3>
+        <span id="cuts-group-stats" class="vd-summary"></span>
+        <span class="sp"></span>
+        <input id="cuts-group-memo" class="vd-memo vd-ghead-memo" type="text" autocomplete="off"
+               placeholder="このグループのメモ（狙い・投稿先など）" aria-label="グループのメモ" />
+      </div>
       <div class="x-toolbar vd-cuts-tools">
+        <span id="cuts-scope" class="vd-scope" title="書き出し・連結・全削除が効く範囲。上のグループtabで選んだ範囲そのものです。"></span>
         <button id="cuts-export" class="btn btn-primary btn-small" type="button">mp4を一括書き出し</button>
         <button id="cuts-reel" class="btn btn-small" type="button" title="リストの範囲を上から順に1本のmp4へ繋ぎます。再encodeしないので原本画質のまま数秒で終わります。">1本に連結</button>
         <!-- 一括書き出しの中身を決める設定。シーン検索側と同じ値を指すので、どちらで
@@ -358,71 +472,75 @@
         <label class="x-field"><span>配信者</span>
           <select id="cuts-streamer" title="書き出す対象をこの配信者のcutだけに絞ります。同じ配信者でも録画ごとにfpsが違うことがあるため、絞ってもEDLのframe rate混在が残る場合があります。"><option value="">全て</option></select>
         </label>
-        <button id="cuts-download" class="btn btn-small" type="button">listを書き出し</button>
+        <!-- 「書き出し」がmp4の生成(数十分のserver job)とfileのdownload(即時)の両方を
+             指していた。file側は「download」と名乗り、queueに載る操作と混ぜない。 -->
+        <button id="cuts-download" class="btn btn-small" type="button" title="CSV / EDL / FCPXML をこの場でdownloadします（mp4は作りません）。">cut listをdownload</button>
         <button id="cuts-clear" class="btn btn-danger btn-small" type="button">すべて削除</button>
         <span class="sp"></span>
         <span id="cuts-status" class="vd-summary"></span>
         <span id="cuts-summary" class="vd-summary"></span>
       </div>
 
-      <div class="result-block">
-        <h3 class="result-subtitle">■ 切り出しリスト</h3>
-        <span class="result-sub-note">行をクリックするとその録画をIN/OUTが入った状態で開きます。mp4を書き出さずCSV/EDL/FCPXMLでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDL/FCPXMLのtimecodeは素材のfpsを実測してframe単位で組み立てます。EDLはlist全体で1つのframe rateしか持てないため、fpsの異なる録画が混ざると書き出せません（配信者で絞るか、素材ごとにframe rateを持てるFCPXMLを使ってください）。秒をそのまま扱いたい場合はCSVです。</span>
+      <!-- 選択した行の行き先はここで指す。表のすぐ上に置くので、行を選んだ手の位置から
+           動かずに入れられる(上段tabまでマウスを往復させない)。1件だけなら行の
+           グループ欄で直接変えられるので、ここは複数件をまとめて動かす時の道具。 -->
+      <div class="x-toolbar vd-cuts-tools">
+        <label class="vd-chk"><input id="cuts-select-all" type="checkbox" /> 全選択</label>
+        <span id="cuts-selected" class="vd-summary"></span>
+        <label class="x-field"><span>移動先</span>
+          <select id="cuts-move-target" title="選択した切り出しを入れるグループ。"></select>
+        </label>
+        <button id="cuts-move" class="btn btn-small" type="button" disabled>入れる</button>
+        <button id="cuts-copy" class="btn btn-small" type="button" disabled title="選択した切り出しを移動先へ複製します。複製後はグループごとに独立してIN/OUTを詰められます。">複製</button>
+        <button id="cuts-bulk-delete" class="btn btn-danger btn-small" type="button" disabled>選択を削除</button>
+      </div>
+
+      <div class="result-block vd-cutlist">
+        <h3 class="result-subtitle" id="cuts-list-title">■ 切り出しリスト</h3>
+        <!-- 約400字を1段落で置いていたため読まれず、shift+click範囲選択やdragといった
+             主要な時短経路が発見されなかった。初回に要る操作だけ残し、まれにしか要らない
+             書き出し形式の話は畳む。 -->
+        <span class="result-sub-note">行clickでIN/OUTが入った状態で開きます／shift+クリックで範囲選択／行を上のグループtabへドラッグで所属を変えられます。</span>
+        <details class="result-sub-note">
+          <summary>書き出し形式について（CSV / EDL / FCPXML）</summary>
+          mp4を書き出さずCSV/EDL/FCPXMLでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDL/FCPXMLのtimecodeは素材のfpsを実測してframe単位で組み立てます。EDLはlist全体で1つのframe rateしか持てないため、fpsの異なる録画が混ざると書き出せません（配信者で絞るか、素材ごとにframe rateを持てるFCPXMLを使ってください）。秒をそのまま扱いたい場合はCSVです。
+        </details>
         <div class="table-wrap">
           <table class="result-table">
             <thead>
-              <tr><th>配信者</th><th>配信日</th><th>file</th><th class="n">IN</th><th class="n">OUT</th><th class="n">尺</th><th>ラベル</th><th></th></tr>
+              <tr><th></th><th class="num">順</th><th>配信者</th><th>配信日</th><th>file</th><th class="num">IN</th><th class="num">OUT</th><th class="num">尺</th><th class="num">頭出し</th><th>ラベル</th><th>グループ</th><th>並び</th><th></th></tr>
             </thead>
             <tbody id="cut-rows"></tbody>
           </table>
-          <div id="cut-empty" class="feed-empty">まだありません。シーン検索でIN/OUTを決めて「リストに追加」してください。</div>
+          <div id="cut-empty" class="feed-empty">まだありません。シーン検索でIN/OUTを決めて「切り出しリストに追加」してください。</div>
         </div>
-        <span class="result-sub-note">「1本に連結」はリストの<b>表示順</b>のまま繋ぎます（時刻順に並べ替えません）。stream copyなので原本画質のままですが、切れ目はkeyframeまで手前へ伸びるため実際の尺は指定より長くなります。音量正規化と精密は連結では使いません。素材の形式（解像度・profile等）が揃わない録画が混ざっていると、連結せず理由を出して失敗します。<b>現在、接合点ごとに音がわずかにずれます</b>（切り出し段の音声・映像の長さ不一致が原因で、別途対処中です）。</span>
-        <span class="result-sub-note">一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密は上の指定を使います（シーン検索側の切り出し設定と同じもので、どちらで変えても両方に反映されます）。進み具合はJob画面で確認でき、途中で取り消せます。</span>
+        <details class="result-sub-note">
+          <summary>「1本に連結」「mp4を一括書き出し」の注意</summary>
+          「1本に連結」はリストの<b>表示順</b>のまま繋ぎます（時刻順に並べ替えません）。stream copyなので原本画質のままですが、切れ目はkeyframeまで手前へ伸びるため実際の尺は指定より長くなります。音量正規化と精密は連結では使いません。素材の形式（解像度・profile等）が揃わない録画が混ざっていると、連結せず理由を出して失敗します。<b>現在、接合点ごとに音がわずかにずれます</b>（切り出し段の音声・映像の長さ不一致が原因で、別途対処中です）。<br />
+          一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密は上の指定を使います（シーン検索側の切り出し設定と同じもので、どちらで変えても両方に反映されます）。進み具合はJob画面で確認でき、途中で取り消せます。
+        </details>
+      </div>
+
+      <!-- 同じグループに属する見どころ。IN/OUTが未確定の素材候補なので切り出しリストとは
+           分けて置くが、同じ1本の材料なので同じ画面に置く(別tabへ追い出すと、素材を
+           拾ってから範囲を詰めるまでに画面を跨ぐことになる)。 -->
+      <div class="result-block hidden" id="cuts-marks-block">
+        <h3 class="result-subtitle">■ このグループの見どころ（素材候補）</h3>
+        <span class="result-sub-note">まだIN/OUTを詰めていない素材です。範囲付きの見どころは「切り出しへ」でそのまま同じグループの切り出しリストへ入ります（範囲のない点の見どころは、開いてIN/OUTを決めてから追加してください）。</span>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>配信者</th><th>配信日</th><th class="num">位置</th><th class="num">尺</th><th>メモ</th><th></th></tr>
+            </thead>
+            <tbody id="cuts-mark-rows"></tbody>
+          </table>
+          <div id="cuts-mark-empty" class="feed-empty">このグループの見どころはありません。</div>
+        </div>
+      </div>
       </div>
     </div>
 
     <!-- ===== 切り出し候補 ===== -->
-    <!-- ===== 一括文字起こし ===== -->
-    <div id="view-jobs" class="vd-view hidden">
-      <div class="x-toolbar">
-        <!-- 配信者単位の投入は下の表の行buttonで行う(そちらは「もう全部済み」の行を
-             disableできる)。toolbar側にselect+buttonを重ねると、済んだ配信者も
-             投入できてしまう劣った経路が並ぶだけだった。 -->
-        <button id="job-enqueue-all" class="btn btn-primary btn-small" type="button" title="未転写の録画を全配信者ぶんまとめてqueueへ入れます。">全配信者をまとめて文字起こし</button>
-        <button id="job-cancel" class="btn btn-danger btn-small" type="button">待機中をすべて取消</button>
-        <span class="sp"></span>
-        <span id="job-summary" class="vd-summary"></span>
-      </div>
-
-      <div class="result-block">
-        <h3 class="result-subtitle">■ 配信者別の検索対象</h3>
-        <span class="result-sub-note">文字起こしは1本ずつ順に処理され、終わった録画から検索に反映されます。音声を検索したい配信者だけ実行してください。</span>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>配信者</th><th class="n">録画</th><th class="n">音声を検索できる録画</th><th class="n">コメントを検索できる録画</th><th class="n">総時間</th><th></th></tr>
-            </thead>
-            <tbody id="streamer-rows"></tbody>
-          </table>
-          <div id="streamer-empty" class="feed-empty">録画がありません。</div>
-        </div>
-      </div>
-
-      <div class="result-block">
-        <h3 class="result-subtitle">■ 文字起こしの処理待ち</h3>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>状態</th><th>配信者</th><th>file</th><th class="n">進捗</th><th>備考</th></tr>
-            </thead>
-            <tbody id="queue-rows"></tbody>
-          </table>
-          <div id="queue-empty" class="feed-empty">処理待ちはありません。</div>
-        </div>
-      </div>
-    </div>
-
     <!-- ===== 一括処理 ===== -->
     <!-- 焼き込み/Up出力/再mp4化/音量正規化/元mp4の削除を配信者単位、または録画を選んで
          実行する。「生成」ではなく「処理」なのは、作らずに消す種別を含むため。進捗表を
@@ -434,9 +552,12 @@
           <!-- 既定は焼き込み。再mp4化は対象判定に録画ごとの.ts走査を伴うので、選ばれるまで
                集計しない(既定を再mp4化にするとtabを開くだけで走査が走る)。 -->
           <select id="bulk-kind">
-            <!-- 走る先はtranscribe_queue(GPUを1本ずつ直列)で、他の種別のようにJob画面の
-                 台帳には出ない。進捗は「一括文字起こし」tabで見る。 -->
+            <!-- GPUを1本ずつ直列に使う。台帳は他の種別と同じ(kind=stt)なので、進捗は
+                 Job画面でも、この画面の下に出る処理待ちの表でも追える。 -->
             <option value="transcribe">文字起こし</option>
+            <!-- 音声から笑い声を検出し、シーン検索の「笑い声」で引けるようにする。済み判定は
+                 検索indexの有無なので、解析だけ済んでいる録画もここから拾い直せる。 -->
+            <option value="laugh">笑い声分析</option>
             <option value="overlay" selected>焼き込み出力</option>
             <option value="upscale">Up出力</option>
             <option value="reprocess">再mp4化</option>
@@ -449,13 +570,16 @@
             <option value="delete_mp4">元mp4の削除</option>
           </select>
         </label>
+        <!-- 他画面から絞り込みを渡されたあと解除すると、同じ画面で元へ戻せなかった。
+             配信者の指定はこのselectを唯一の入力にし、他tabの選択とも共有する。 -->
+        <label class="x-field"><span>配信者</span>
+          <select id="bulk-streamer"><option value="">全て</option></select>
+        </label>
         <label class="vd-chk"><input id="bulk-redo" type="checkbox" /> 出力済みも作り直す</label>
-        <button id="bulk-all" class="btn btn-primary btn-small" type="button" title="全配信者の未出力をまとめてqueueへ入れます。押す前に規模を確認できます。">全配信者をまとめて</button>
+        <!-- labelと色は種別で変える。最も広い範囲に効くbuttonだけが種別も本数も名乗らず、
+             消す種別でも作る種別と同じ色をしていた。 -->
+        <button id="bulk-all" class="btn btn-primary btn-small" type="button">全配信者をまとめて</button>
         <a id="bulk-jobs-link" class="btn btn-small" href="/jobs">Job画面で進捗を見る</a>
-        <span id="bulk-filter" class="vd-summary hidden">
-          <span id="bulk-filter-label"></span>
-          <button id="bulk-filter-clear" class="btn btn-small" type="button">全配信者を表示</button>
-        </span>
         <span class="sp"></span>
         <span id="bulk-summary" class="vd-summary"></span>
       </div>
@@ -474,6 +598,43 @@
             <tbody id="bulk-rows"></tbody>
           </table>
           <div id="bulk-empty" class="feed-empty">録画がありません。</div>
+        </div>
+      </div>
+
+      <!-- 文字起こしを選んでいるときだけ出す。他の種別には無い情報(転写率・GPU待ちの列)で、
+           常に出すと種別を変えるたび無関係の表を読み飛ばすことになる。 -->
+      <div class="result-block" id="bulk-stt-queue" hidden>
+        <h3 class="result-subtitle">■ 文字起こしのqueue</h3>
+        <div class="x-toolbar">
+          <label class="vd-chk"><input id="queue-active-only" type="checkbox" checked /> 実行中・待機中だけ</label>
+          <button id="job-cancel" class="btn btn-danger btn-small" type="button" title="実行中の1本も止めます。そこまでの処理は破棄されます。">実行中と待機中をすべて取消</button>
+          <span class="sp"></span>
+          <span id="job-summary" class="vd-summary"></span>
+        </div>
+        <!-- 見出しは「処理待ち」ではなく「queue」。終わった行(完了・失敗・取消)も並ぶため、
+             待っているものだけの表と読ませない。 -->
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>状態</th><th>配信者</th><th>file</th><th class="num">進捗</th><th>備考</th></tr>
+            </thead>
+            <tbody id="queue-rows"></tbody>
+          </table>
+          <div id="queue-empty" class="feed-empty">queueに行がありません。</div>
+        </div>
+      </div>
+
+      <div class="result-block" id="bulk-stt-coverage" hidden>
+        <h3 class="result-subtitle">■ 配信者別の検索対象</h3>
+        <span class="result-sub-note">文字起こしは1本ずつ順に処理され、終わった録画から検索に反映されます。音声を検索したい配信者だけ実行してください。</span>
+        <div class="table-wrap">
+          <table class="result-table">
+            <thead>
+              <tr><th>配信者</th><th class="num">録画</th><th class="num">音声を検索できる録画</th><th class="num">コメントを検索できる録画</th><th class="num">総時間</th><th></th></tr>
+            </thead>
+            <tbody id="streamer-rows"></tbody>
+          </table>
+          <div id="streamer-empty" class="feed-empty">録画がありません。</div>
         </div>
       </div>
     </div>

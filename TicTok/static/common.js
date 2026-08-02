@@ -76,6 +76,16 @@ function fmtDateTime(epochSeconds) {
   return new Date(epochSeconds * 1000).toLocaleString("ja-JP", { hour12: false });
 }
 
+// 1行=1件を縦に追う表(運用log・Job)の時刻。toLocaleStringは0埋めをしないため
+// 「2026/8/2 9:03:21」と「2026/12/12 14:03:21」で桁が揃わず、行を跨いで時刻を比べられない。
+// 年は全行で同じなので落とし、月日以下を0埋めで出す(完全な日時はcellのtooltipで読める)。
+function fmtDateTimeShort(epochSeconds) {
+  if (!epochSeconds) return "-";
+  const d = new Date(epochSeconds * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function fmtYmd(epochSeconds) {
   if (!epochSeconds) return "-";
   const d = new Date(epochSeconds * 1000);
@@ -1586,9 +1596,11 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
 function chipBar(containerId, chips) {
   const bar = document.getElementById(containerId);
   bar.innerHTML = "";
-  chips.forEach(([label, value, cls]) => {
+  chips.forEach(([label, value, cls, title]) => {
     const chip = document.createElement("div");
     chip.className = "a-chip";
+    // 4つ目は任意のtooltip。比率のように「分母が何か」を添えないと読めない項目のため。
+    if (title) chip.title = title;
     const l = document.createElement("span");
     l.className = "l";
     l.textContent = label;
@@ -2085,6 +2097,76 @@ function confirmDialog(message, opts) {
   });
 }
 
+// confirmDialogの文字入力版。取消はnull、確定はtrimした文字列を返す(空文字は確定させず
+// 入力を促す — 空の名前を受けると、呼び出し側全員が同じ空チェックを持つことになる)。
+function promptDialog(message, opts) {
+  const options = opts || {};
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "modal-overlay confirm-overlay";
+    const modal = document.createElement("div");
+    modal.className = "modal modal-narrow confirm-modal";
+    const head = document.createElement("div");
+    head.className = "modal-head";
+    const title = document.createElement("h2");
+    title.textContent = options.title || "入力";
+    head.appendChild(title);
+    const body = document.createElement("div");
+    body.className = "modal-body confirm-text";
+    const label = document.createElement("div");
+    label.textContent = message;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "prompt-input";
+    input.value = options.value || "";
+    body.append(label, input);
+    const actions = document.createElement("div");
+    actions.className = "confirm-actions";
+    const cancel = document.createElement("button");
+    cancel.className = "btn";
+    cancel.textContent = options.cancelLabel || "取消";
+    const ok = document.createElement("button");
+    ok.className = "btn btn-primary";
+    ok.textContent = options.confirmLabel || "決定";
+    actions.append(cancel, ok);
+    modal.append(head, body, actions);
+    overlay.appendChild(modal);
+
+    const finish = (answer) => {
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      resolve(answer);
+    };
+    const submit = () => {
+      const value = input.value.trim();
+      if (!value) {
+        input.focus();
+        return;
+      }
+      finish(value);
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Enter" && document.activeElement === input) {
+        ev.stopPropagation();
+        submit();
+        return;
+      }
+      if (ev.key !== "Escape") return;
+      ev.stopPropagation();
+      finish(null);
+    };
+    cancel.addEventListener("click", () => finish(null));
+    ok.addEventListener("click", submit);
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) finish(null);
+    });
+    document.addEventListener("keydown", onKey, true);
+    document.body.appendChild(overlay);
+    input.focus();
+    input.select();
+  });
+}
+
 // ---- 共通UI: 進捗bar ----
 // spinner付きは「今この画面から起動して待っている」操作向け、spinner無しは一覧に並ぶ
 // 他所で動いているjobの状態表示向け。
@@ -2209,6 +2291,7 @@ function renderJobBar() {
   el.replaceChildren();
   if (!running && !pending && !failed) {
     el.removeAttribute("title");
+    el.href = "/jobs";
     return;
   }
   const active = document.createElement("span");
@@ -2221,8 +2304,11 @@ function renderJobBar() {
     bad.textContent = `失敗 ${failed}`;
     el.appendChild(bad);
   }
+  // 失敗が在るのに既定filter(実行中・待機中)へ着地すると、押した先が空の表になり
+  // 「直った」と読まれる。失敗を数えているときは、それが見えるfilterへ直接送る。
+  el.href = failed ? "/jobs?state=failed" : "/jobs";
   el.title = failed
-    ? `直近のjob履歴に失敗・中断が${failed}件あります。Job画面の「失敗・中断のみ」で確認できます。`
+    ? `直近のjob履歴に失敗・中断が${failed}件あります。押すとJob画面の「失敗・中断のみ」で開きます。`
     : "焼き込み・Up出力などのjobの実行状況です。押すとJob画面へ移動します。";
 }
 
