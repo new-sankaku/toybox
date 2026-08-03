@@ -18,8 +18,36 @@
 | 遅延p50/p95 | 1発話あたりの推論所要時間 | Game応答性の実測値 |
 | RTF | 推論時間 / 音声長 | 1.0を超えるEngineはReal timeで追従できない |
 
-Accuracyは `1 - 編集距離 / 正解Mora数` で算出する。二値ではなく連続値で保持し、
+Accuracyは `1 - 編集距離 / 正解単位数` で算出する。二値ではなく連続値で保持し、
 閾値はBenchmark結果から後決めする。
+
+## 比較単位
+
+Engineごとに `output_unit` を `mora` または `phoneme` で指定する。
+Phoneme Modelを使う場合、正解KanaもPhoneme列へ変換して同じ体系で比較する
+（`hayakuchi/phoneme.py`）。Phoneme単位はMora単位より粒度が細かく、
+子音だけが崩れた失敗を捉えられる。
+
+誤り位置はOverlay表示のためMora indexで扱う必要があるため、
+変換時にPhoneme→Moraの対応を保持し、検出後にMora indexへ戻す。
+
+無声化母音 `I` `U` は話者と発話速度で揺れるため、比較前に `i` `u` へ正規化する。
+ここを区別すると、正しく言えている発話を誤ってFAILにする原因になる。
+
+## Language Model補正の検出（正解Text不要）
+
+判定Engineの合否を最初に分ける検査であり、**収録データが無くても実施できる**。
+
+```bash
+python scripts/run_lm_bias_check.py --audio-dir data/probe --engine ctc_phoneme
+```
+
+任意の日本語音声に対し、音声側を改変（欠落・重複・入れ替え）したうえで
+Engine出力が改変前と変化するかだけを見る。正解Textを一切使わない。
+
+出力が変化しないEngineは、鳴っている音ではなく言語的な尤もらしさを返している。
+改変定義は `config/edits.yaml` に置く。**改変量は150ms以上**にすること。
+それ未満では長母音の途中を削っても発音列が変わらず、補正と区別できない。
 
 ## Dataset
 
@@ -33,6 +61,20 @@ Accuracyは `1 - 編集距離 / 正解Mora数` で算出する。二値ではな
 | NG Sample | 話者×Phrase×2 take | 噛んだもの |
 
 OKとNGは概ね同数にする。極端に偏るとFAR/FRRの推定が不安定になる。
+
+### 公開Corpusで代替できる範囲
+
+早口言葉に特化した公開音声Datasetは存在しない。ただし収録が必要な範囲は限定できる。
+
+| 段階 | 収録 | 用途 | 手段 |
+|---|---|---|---|
+| 段階0 | 不要 | Language Model補正の検出、応答性の実測、Engineの足切り | 公開Corpus + 音声改変 |
+| 段階1 | 必要 | 実際の噛み、特に判定が割れる境界例 | 自前収録 |
+
+段階0で候補を絞ってから段階1に入ることで、収録のやり直しを避けられる。
+Corpusの選択肢とLicenseは `doc/MODEL_CANDIDATES.md` を参照。
+ITAコーパスは424文すべてにKatakana読みが付属しPublic Domainのため、
+較正用の正解文として利用できる。
 
 ### NG Sampleの集め方
 

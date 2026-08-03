@@ -6,7 +6,7 @@ Engine × Condition × Sampleの総当たりで判定を行い、指標を集計
 import time
 from dataclasses import asdict
 from datetime import datetime,timezone
-from typing import Dict,List,Optional,Sequence
+from typing import Dict,List,Optional,Sequence,Tuple
 
 from middleware.logger import get_logger
 
@@ -15,8 +15,10 @@ from .conditions import Condition,apply_condition
 from .config import BenchmarkConfig
 from .dataset import Phrase,Sample,load_manifest,load_phrases,missing_audio
 from .engines import create_engine
+from .engines.base import UNIT_PHONEME
 from .metrics import SampleOutcome,summarize
 from .mora import mora_text
+from .phoneme import mora_to_phonemes
 from .scoring import judge
 
 
@@ -29,6 +31,14 @@ def _select(items:Sequence,identifiers:Optional[Sequence[str]],key)->List:
  if missing:
   raise ValueError(f"unknown identifier: {sorted(missing)}")
  return selected
+
+
+def reference_units(phrase:Phrase,unit:str)->Tuple[List[str],List[int]]:
+ """Engineの出力単位に合わせた正解列と、単位ごとの由来Mora indexを返す"""
+ if unit==UNIT_PHONEME:
+  return mora_to_phonemes(phrase.mora)
+ mora=phrase.mora
+ return mora,list(range(len(mora)))
 
 
 def _sample_payload(
@@ -114,7 +124,11 @@ def _run_engine(
  started=time.perf_counter()
  engine.prepare()
  load_ms=(time.perf_counter()-started)*1000.0
- logger.info(f"engine ready: {engine_id} adapter={definition['adapter']} load_ms={load_ms:.1f}")
+ unit=engine.output_unit
+ logger.info(
+  f"engine ready: {engine_id} adapter={definition['adapter']} unit={unit} load_ms={load_ms:.1f}"
+ )
+ units={phrase_id:reference_units(phrase,unit) for phrase_id,phrase in phrases.items()}
  condition_reports=[]
  all_outcomes:List[SampleOutcome]=[]
  for condition in conditions:
@@ -126,14 +140,19 @@ def _run_engine(
     raw_samples,sample_rate,condition,sample.id,config.asset_root
    )
    phrase=phrases[sample.phrase_id]
-   result=engine.run(processed,sample_rate,phrase.mora,sample.id)
-   judgement=judge(phrase.mora,result.hypothesis,config.scoring)
+   reference,origins=units[sample.phrase_id]
+   result=engine.run(processed,sample_rate,reference,sample.id)
+   judgement=judge(reference,result.hypothesis,config.scoring)
+   predicted_index=(
+    origins[judgement.first_error_index]
+    if judgement.first_error_index is not None else None
+   )
    outcome=SampleOutcome(
     sample_id=sample.id,
     label=sample.label,
     accuracy=judgement.accuracy,
     exact_match=judgement.exact_match,
-    predicted_error_index=judgement.first_error_index,
+    predicted_error_index=predicted_index,
     truth_error_index=sample.error_mora_index,
     elapsed_ms=result.elapsed_ms,
     audio_seconds=duration_seconds(processed,sample_rate),

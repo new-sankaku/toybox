@@ -12,6 +12,10 @@ import numpy as np
 
 from ..mora import to_mora
 
+UNIT_MORA="mora"
+UNIT_PHONEME="phoneme"
+_UNITS=frozenset((UNIT_MORA,UNIT_PHONEME))
+
 
 @dataclass
 class EngineResult:
@@ -33,6 +37,14 @@ class Engine(ABC):
  @property
  def target_sample_rate(self)->int:
   return int(self.params.get("target_sample_rate",16000))
+
+ @property
+ def output_unit(self)->str:
+  """Engineが返す比較単位。moraまたはphoneme"""
+  unit=str(self.params.get("output_unit",UNIT_MORA))
+  if unit not in _UNITS:
+   raise ValueError(f"unknown output_unit: {unit}. available={sorted(_UNITS)}")
+  return unit
 
  def prepare(self)->None:
   """Model読み込みなどの初期化を行う"""

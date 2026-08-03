@@ -60,11 +60,30 @@ engines:
     params:
       transcripts: data/transcripts_human.json
 
-  - id: ctc_ja
+  - id: ctc_phoneme
+    adapter: hf_ctc
+    enabled: true
+    params:
+      model_id: prj-beatrice/japanese-hubert-base-phoneme-ctc-v4
+      output_unit: phoneme
+      device: cpu
+      target_sample_rate: 16000
+
+  - id: ctc_kana
+    adapter: hf_ctc
+    enabled: true
+    params:
+      model_id: vumichien/wav2vec2-large-xlsr-japanese-hiragana
+      output_unit: mora
+      device: cpu
+      target_sample_rate: 16000
+
+  - id: ctc_kanji_mixed
     adapter: hf_ctc
     enabled: false
     params:
-      model_id: ""
+      model_id: jonatasgrosman/wav2vec2-large-xlsr-53-japanese
+      output_unit: mora
       device: cpu
       target_sample_rate: 16000
 
@@ -72,7 +91,7 @@ engines:
     adapter: seq2seq_asr
     enabled: false
     params:
-      model_id: ""
+      model_id: kotoba-tech/kotoba-whisper-v2.0
       device: cpu
       target_sample_rate: 16000
       generate_kwargs:

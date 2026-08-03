@@ -12,12 +12,14 @@ Platformの配信遅延は判定経路に入らない。
 ```
 Hayakuchi/
   doc/BENCHMARK.md            評価指標・収録Protocol・採用Gate
+  doc/MODEL_CANDIDATES.md     Model候補の調査と実測結果
   backend/
     config/benchmark.yaml     Model ID・閾値・収録条件のSimulation定義
+    config/edits.yaml         Language Model補正検出用の音声改変定義
     data/phrases.json         早口言葉Database
-    hayakuchi/                Mora分解・Alignment・Scoring・指標・Runner
+    hayakuchi/                Mora分解・Phoneme変換・Alignment・Scoring・指標
     hayakuchi/engines/        判定Engine Adapter
-    scripts/                  Manifest生成・Benchmark実行
+    scripts/                  Manifest生成・Benchmark実行・LM補正検出
     tests/                    Unit test / End-to-end test
 ```
 
@@ -48,3 +50,14 @@ python scripts/run_benchmark.py
 判定に一般的な音声認識Modelを使うと、Language Modelが噛んだ発話を正解文へ補正するため、
 **最も判定したい失敗が検出できない**。本Benchmarkは `lm_correction_rate` として
 この現象を明示的に測り、該当Engineを失格させる。
+
+## 実測済みの結果
+
+CPU 4 thread、公開Corpus（Common Voice ja）での測定。詳細は `doc/MODEL_CANDIDATES.md`。
+
+| Model | 音声改変への追従 | 遅延p50 | RTF p95 |
+|---|---|---|---|
+| `prj-beatrice/japanese-hubert-base-phoneme-ctc-v4` | 10/10 | 249ms（3秒前後の発話） | 0.081 |
+| `kotoba-tech/kotoba-whisper-v2.0` | 5/10 | 約26,000ms | 約4〜9 |
+
+Phoneme CTCをBase lineとして確定。**GPU不要**で応答性の要件を満たす。
