@@ -1,0 +1,49 @@
+:root {
+  --surface-main-bg: #0d1013;
+  --surface-main-fg: #e8edf2;
+  --surface-panel-bg: rgba(16, 20, 25, 0.86);
+  --surface-panel-fg: #e8edf2;
+  --surface-selected-bg: #1d2a35;
+  --surface-selected-fg: #ffffff;
+  --surface-muted-fg: #8b97a4;
+  --accent-ok: #5ce1a6;
+  --accent-error: #ff5d6c;
+  --accent-pending: #4a5561;
+  --accent-focus: #ffd166;
+  --radius: 0.6rem;
+  --gap: clamp(0.4rem, 1vw, 0.9rem);
+}
+
+.nier-surface-main {
+  background: var(--surface-main-bg);
+  color: var(--surface-main-fg);
+}
+
+.nier-surface-panel {
+  background: var(--surface-panel-bg);
+  color: var(--surface-panel-fg);
+}
+
+.nier-surface-selected {
+  background: var(--surface-selected-bg);
+  color: var(--surface-selected-fg);
+}
+
+.nier-surface-main-muted {
+  background: var(--surface-main-bg);
+  color: var(--surface-muted-fg);
+}
+
+.nier-surface-panel-muted {
+  background: var(--surface-panel-bg);
+  color: var(--surface-muted-fg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Noto Sans JP", "Yu Gothic", "Hiragino Sans", system-ui, sans-serif;
+}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hayakuchi 操作画面</title>
+<link rel="stylesheet" href="surface.css">
+<link rel="stylesheet" href="control.css">
+</head>
+<body class="nier-surface-main">
+<svg class="sprite" aria-hidden="true"><defs>
+  <symbol id="ico-mic" viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21h2v-3.1A7 7 0 0 0 19 11z"/></symbol>
+  <symbol id="ico-shuffle" viewBox="0 0 24 24"><path d="M17 4l4 3-4 3V8h-2.6l-2 3-1.2-1.8L13.3 6H17V4zM3 8h4.6l1.6 2.4-1.2 1.8L6.4 10H3V8zm0 8h3.4l2-3 1.2 1.8L7.6 18H3v-2zm14 0v-2l4 3-4 3v-2h-3.7l-2.1-3.2 1.2-1.8 1.6 2.4H17z"/></symbol>
+  <symbol id="ico-retry" viewBox="0 0 24 24"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></symbol>
+  <symbol id="ico-flag" viewBox="0 0 24 24"><path d="M5 3h2v18H5zm3 1h11l-2.2 3.5L19 11H8z"/></symbol>
+  <symbol id="ico-circle" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 3a6 6 0 1 1 0 12 6 6 0 0 1 0-12z"/></symbol>
+  <symbol id="ico-cross" viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-2.1 2.1L9.9 14.1 5.7 18.3l-2.1-2.1L7.8 12 3.6 7.8l2.1-2.1L9.9 9.9l6.3-6.3z"/></symbol>
+  <symbol id="ico-star" viewBox="0 0 24 24"><path d="m12 3 2.6 5.7 6.2.7-4.6 4.2 1.3 6.1L12 16.7 6.5 19.7l1.3-6.1L3.2 9.4l6.2-.7z"/></symbol>
+</defs></svg>
+
+<header class="bar nier-surface-panel">
+  <h1>Hayakuchi</h1>
+  <span class="now" id="now">よーい</span>
+  <span class="lv" id="lv">Lv.1</span>
+  <span class="obs">OBSに登録するURL <code id="overlay-url"></code></span>
+</header>
+
+<main class="layout">
+
+  <section class="panel nier-surface-panel">
+    <h2>マイク</h2>
+    <div class="mic">
+      <span class="mic-icon" id="mic-icon"><svg><use href="#ico-mic"/></svg></span>
+      <div class="mic-meter"><div class="mic-fill" id="mic-fill"></div></div>
+    </div>
+    <p class="help" id="mic-help">声を出すとバーが伸びます</p>
+  </section>
+
+  <section class="panel nier-surface-panel">
+    <h2>今のお題</h2>
+    <p class="current" id="current">-</p>
+    <div class="big-actions">
+      <button class="huge" id="next"><svg class="ico"><use href="#ico-shuffle"/></svg>次のお題</button>
+      <button class="huge" id="again"><svg class="ico"><use href="#ico-retry"/></svg>やり直す</button>
+      <button class="huge" id="giveup"><svg class="ico"><use href="#ico-flag"/></svg>ギブアップ</button>
+    </div>
+  </section>
+
+  <section class="panel nier-surface-panel">
+    <h2>結果</h2>
+    <p class="verdict" id="verdict">-</p>
+    <p class="score" id="score"></p>
+    <p class="help">判定が違うと感じたらここで直せます</p>
+    <div class="big-actions">
+      <button class="huge ok" id="pass"><svg class="ico"><use href="#ico-circle"/></svg>正解にする</button>
+      <button class="huge ng" id="fail"><svg class="ico"><use href="#ico-cross"/></svg>残念にする</button>
+    </div>
+    <details class="detail">
+      <summary>詳しく見る</summary>
+      <p class="mono wrap" id="detail">-</p>
+      <p class="mono wrap" id="hypothesis">-</p>
+    </details>
+  </section>
+
+  <section class="panel nier-surface-panel wide">
+    <h2>お題を選ぶ</h2>
+    <ul class="phrase-list" id="phrase-list"></ul>
+  </section>
+
+</main>
+<script src="control.js"></script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+paths:
+  phrases: data/phrases.json
+  web_root: web
+  profile: data/profile.json
+  log_dir: logs
+
+server:
+  host: 127.0.0.1
+  port: 8790
+
+audio:
+  sample_rate: 16000
+  source:
+    type: microphone
+    device: null
+
+game:
+  inference_interval_ms: 300.0
+  level_interval_ms: 60.0
+  max_utterance_ms: 12000.0
+  error_margin_mora: 2
+  hesitation_ms: 3000.0
+  completion_ratio: 0.85
+  restart_cost: 3.0
+  restart_skip_threshold: 3
+  waveform_buckets: 4
+  time_limit_enabled: true
+  limit_ms_per_mora: 260.0
+  limit_minimum_ms: 2500.0
+  result_hold_ms: 5000.0
+  auto_next: true
+  pass_accuracy: 0.9
+  grades:
+    S: 1.0
+    A: 0.95
+    B: 0.85
+    C: 0.7
+    D: 0.0
+
+vad:
+  frame_ms: 30.0
+  start_offset_db: 12.0
+  end_offset_db: 6.0
+  start_frames: 3
+  hangover_ms: 250.0
+  min_speech_ms: 300.0
+  floor_adaptation: 0.05
+  initial_floor_db: -60.0
+
+scoring:
+  substitution_cost: 1.0
+  deletion_cost: 1.0
+  insertion_cost: 1.0
+
+engine:
+  id: ctc_phoneme
+  adapter: hf_ctc
+  params:
+    model_id: prj-beatrice/japanese-hubert-base-phoneme-ctc-v4
+    output_unit: phoneme
+    device: cpu
+    target_sample_rate: 16000
+    num_threads: 2
+
+score:
+  base_per_difficulty: 100
+  accuracy_weight: 500
+  accuracy_exponent: 2.0
+  speed_weight: 0.1
+  target_ms_per_mora: 200.0
+  combo_weight: 10
+  streak_step: 0.1
+  streak_cap: 10
+  restart_rate: 0.8
+
+levels:
+  base_exp: 400
+  exponent: 1.35
+  unlock_every: 3
+  max_difficulty: 5

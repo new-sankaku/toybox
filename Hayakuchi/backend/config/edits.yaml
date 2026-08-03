@@ -1,0 +1,21 @@
+edits:
+  - id: cut_40
+    label: 40%地点を180ms欠落
+    kind: cut
+    position: 0.40
+    duration_ms: 180.0
+  - id: cut_65
+    label: 65%地点を120ms欠落
+    kind: cut
+    position: 0.65
+    duration_ms: 120.0
+  - id: repeat_55
+    label: 55%地点を180ms重複
+    kind: repeat
+    position: 0.55
+    duration_ms: 180.0
+  - id: swap_45
+    label: 45%地点で150msを入れ替え
+    kind: swap
+    position: 0.45
+    duration_ms: 150.0
