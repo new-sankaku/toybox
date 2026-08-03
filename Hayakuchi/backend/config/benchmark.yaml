@@ -1,0 +1,80 @@
+paths:
+  phrases: data/phrases.json
+  manifest: data/manifest.jsonl
+  audio_root: data
+  asset_root: data
+  output_dir: results
+  log_dir: logs
+
+scoring:
+  substitution_cost: 1.0
+  deletion_cost: 1.0
+  insertion_cost: 1.0
+
+metrics:
+  target_far: 0.05
+  localization_tolerance: 1
+  latency_percentiles:
+    - 50
+    - 95
+
+report:
+  include_samples: true
+
+conditions:
+  - id: clean
+    label: 清音源
+    ops: []
+  - id: noise_snr20
+    label: 環境Noise SNR20dB
+    ops:
+      - type: noise
+        snr_db: 20.0
+  - id: noise_snr10
+    label: 環境Noise SNR10dB
+    ops:
+      - type: noise
+        snr_db: 10.0
+  - id: vc_pitch_up
+    label: Voice Changer相当 +6半音
+    ops:
+      - type: pitch_shift
+        semitones: 6.0
+  - id: vc_pitch_down
+    label: Voice Changer相当 -4半音
+    ops:
+      - type: pitch_shift
+        semitones: -4.0
+  - id: overdrive
+    label: 過大入力Clip
+    ops:
+      - type: gain
+        db: 14.0
+      - type: clip
+        ceiling: 0.99
+
+engines:
+  - id: human_replay
+    adapter: replay
+    enabled: true
+    params:
+      transcripts: data/transcripts_human.json
+
+  - id: ctc_ja
+    adapter: hf_ctc
+    enabled: false
+    params:
+      model_id: ""
+      device: cpu
+      target_sample_rate: 16000
+
+  - id: seq2seq_control
+    adapter: seq2seq_asr
+    enabled: false
+    params:
+      model_id: ""
+      device: cpu
+      target_sample_rate: 16000
+      generate_kwargs:
+        language: ja
+        task: transcribe

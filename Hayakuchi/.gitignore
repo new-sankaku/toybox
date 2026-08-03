@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/logs/
+backend/results/
+backend/data/selftest/
+backend/data/wav/
+backend/data/manifest.jsonl
+backend/data/transcripts_human.json
