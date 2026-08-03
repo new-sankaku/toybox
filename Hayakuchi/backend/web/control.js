@@ -49,7 +49,14 @@ async function loadPhrases() {
     title.textContent = phrase.display;
     const meta = document.createElement("span");
     meta.className = "phrase-meta";
-    meta.textContent = `${"★".repeat(phrase.difficulty)} ${phrase.mora_count}拍`;
+    for (let index = 0; index < phrase.difficulty; index += 1) {
+      const star = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", "#ico-star");
+      star.appendChild(use);
+      meta.appendChild(star);
+    }
+    meta.append(` ${phrase.mora_count}拍`);
     item.append(title, meta);
     item.addEventListener("click", () => send({ type: "select", phrase_id: phrase.phrase_id }));
     el.phraseList.appendChild(item);

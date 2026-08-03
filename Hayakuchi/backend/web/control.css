@@ -90,9 +90,18 @@ h2 {
 }
 
 .mic-icon {
-  font-size: clamp(1.4rem, 3.4vw, 2.2rem);
+  display: inline-flex;
   transition: transform 0.1s;
 }
+
+.mic-icon svg {
+  width: clamp(1.4rem, 3.4vw, 2.2rem);
+  height: clamp(1.4rem, 3.4vw, 2.2rem);
+  fill: var(--surface-muted-fg);
+  transition: fill 0.1s;
+}
+
+.mic-icon[data-speaking="true"] svg { fill: var(--accent-ok); }
 
 .mic-icon[data-speaking="true"] { transform: scale(1.25); }
 
@@ -144,7 +153,10 @@ h2 {
   transition: transform 0.08s, border-color 0.12s;
 }
 
-.huge span { font-size: 1.4em; }
+.sprite { position: absolute; width: 0; height: 0; }
+.ico { width: 1.5em; height: 1.5em; fill: currentColor; flex: 0 0 auto; }
+.huge.ok .ico { fill: var(--accent-ok); }
+.huge.ng .ico { fill: var(--accent-error); }
 .huge:hover { border-color: var(--accent-focus); }
 .huge:active { transform: scale(0.96); }
 .huge.ok { border-color: rgba(92, 225, 138, 0.5); }
@@ -200,10 +212,15 @@ h2 {
 }
 
 .phrase-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.1em;
   font-size: clamp(0.7rem, 1.4vw, 0.85rem);
   font-weight: 400;
   color: var(--accent-focus);
 }
+
+.phrase-meta svg { width: 1.1em; height: 1.1em; fill: var(--accent-focus); }
 
 .mono {
   margin: 0.3rem 0 0;

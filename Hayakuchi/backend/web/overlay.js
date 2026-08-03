@@ -200,7 +200,7 @@ function renderResult(event) {
   el.stamp.dataset.show = "true";
   replay(el.stamp, true);
   countUp(event.score);
-  el.streak.textContent = event.streak > 1 ? "🔥".repeat(Math.min(event.streak, 5)) : "";
+  renderStreak(event.streak);
   if (event.passed) {
     burst(CONFETTI_BASE + Math.min(event.streak, 5) * 6);
   }
@@ -208,6 +208,18 @@ function renderResult(event) {
     el.banner.textContent = "レベルアップ！";
     replay(el.banner, true);
     burst(CONFETTI_BASE);
+  }
+}
+
+function renderStreak(streak) {
+  el.streak.replaceChildren();
+  const count = streak > 1 ? Math.min(streak, 5) : 0;
+  for (let index = 0; index < count; index += 1) {
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#ico-flame");
+    icon.appendChild(use);
+    el.streak.appendChild(icon);
   }
 }
 

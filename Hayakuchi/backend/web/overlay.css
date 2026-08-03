@@ -13,7 +13,7 @@ body {
 .stage {
   --pop: cubic-bezier(0.34, 1.7, 0.42, 1);
   --ink: #26201a;
-  --face: min(30vh, 20vw);
+  --face: min(34vh, 22vw);
   --sentence: min(7vh, 4.6vw);
   --reading: min(4.2vh, 2.8vw);
   --wave: min(14vh, 9vw);
@@ -34,7 +34,7 @@ body {
 
 @media (orientation: portrait) {
   .stage {
-    --face: min(26vh, 44vw);
+    --face: min(28vh, 46vw);
     --sentence: min(5vh, 7.6vw);
     --reading: min(3.2vh, 4.8vw);
     --wave: min(12vh, 20vw);
@@ -83,10 +83,13 @@ body {
 }
 
 .streak {
+  display: flex;
+  align-items: center;
+  gap: 0.1em;
   flex: 0 0 auto;
-  font-size: 1.4em;
-  white-space: nowrap;
 }
+
+.streak svg { width: 1.5em; height: 1.5em; fill: #ff8a3d; filter: drop-shadow(0 0.06em 0 var(--ink)); }
 
 .streak:empty { display: none; }
 
@@ -115,56 +118,56 @@ body {
   min-width: 0;
 }
 
+.sprite { position: absolute; width: 0; height: 0; }
+
 .face {
   width: var(--face);
   height: auto;
   overflow: visible;
-  animation: bob 1.8s ease-in-out infinite;
+  animation: sway 2.4s ease-in-out infinite;
 }
 
-.head { fill: #ffd76b; stroke: var(--ink); stroke-width: 7; }
-.cheek { fill: #ff9d9d; opacity: 0.85; }
+.tongue-body { fill: #ff7f93; stroke: var(--ink); stroke-width: 8; stroke-linejoin: round; }
+.tongue-groove { fill: none; stroke: #d2455f; stroke-width: 7; stroke-linecap: round; }
+.tongue-gloss { fill: #ffb3c1; opacity: 0.75; }
+.knot-outline { fill: none; stroke: var(--ink); stroke-width: 38; stroke-linecap: round; stroke-linejoin: round; }
+.knot-body { fill: none; stroke: #ff7f93; stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }
 .eyes { fill: var(--ink); stroke: var(--ink); stroke-width: 7; stroke-linecap: round; }
 .eyes path { fill: none; }
-.eyes-happy, .eyes-dizzy, .eyes-blank { display: none; }
-.mouth { fill: #7a2230; stroke: var(--ink); stroke-width: 6; transform-origin: 110px 132px; }
-.tongue { fill: #ff7c8f; }
+.eyes-happy, .eyes-blank { display: none; }
+.dizzy { fill: none; stroke: var(--ink); stroke-width: 7; stroke-linecap: round; }
 .lines { fill: #fff; opacity: 0; }
 .sweat { fill: #7fd4ff; stroke: var(--ink); stroke-width: 4; opacity: 0; }
+.tongue-knot { display: none; }
 
 .face[data-mood="speaking"] { animation: none; }
-.face[data-mood="speaking"] .mouth { animation: chatter 0.14s steps(2, end) infinite; }
+.face[data-mood="speaking"] .tongue-normal { animation: flap 0.16s ease-in-out infinite; transform-origin: 110px 196px; }
 .face[data-mood="speaking"] .lines { opacity: 1; animation: zoom 0.24s linear infinite; }
 .face[data-mood="speaking"] .sweat { opacity: 1; animation: drip 0.9s ease-in infinite; }
-.face[data-mood="speaking"] .body { animation: rattle 0.1s linear infinite; }
 
-.face[data-mood="hesitating"] .mouth { transform: scaleY(0.35); }
+.face[data-mood="hesitating"] { animation: fidget 0.6s ease-in-out infinite; }
 .face[data-mood="hesitating"] .sweat { opacity: 1; animation: drip 0.7s ease-in infinite; }
-.face[data-mood="hesitating"] { animation: fidget 0.5s ease-in-out infinite; }
 
 .face[data-mood="clear"] .eyes-normal { display: none; }
 .face[data-mood="clear"] .eyes-happy { display: block; }
-.face[data-mood="clear"] { animation: hop 0.45s var(--pop) 2; }
+.face[data-mood="clear"] { animation: stretch 0.45s var(--pop) 2; transform-origin: 110px 196px; }
 
-.face[data-mood="miss"] .eyes-normal { display: none; }
-.face[data-mood="miss"] .eyes-dizzy { display: block; }
+.face[data-mood="miss"] .tongue-normal { display: none; }
+.face[data-mood="miss"] .tongue-knot { display: block; }
 .face[data-mood="miss"] { animation: wobble 0.45s ease-in-out 2; }
-.face[data-mood="miss"] .mouth { transform: scaleY(0.45); }
 
 .face[data-mood="giveup"] .eyes-normal { display: none; }
 .face[data-mood="giveup"] .eyes-blank { display: block; }
-.face[data-mood="giveup"] { animation: droop 0.6s ease forwards; }
-.face[data-mood="giveup"] .mouth { transform: scaleY(0.3); }
+.face[data-mood="giveup"] { animation: droop 0.6s ease forwards; transform-origin: 110px 196px; }
 
-@keyframes bob { 0%, 100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-6%) rotate(2deg); } }
-@keyframes chatter { 0% { transform: scaleY(0.25); } 100% { transform: scaleY(1.1); } }
-@keyframes rattle { 0%, 100% { transform: translateX(-1.5px); } 50% { transform: translateX(1.5px); } }
+@keyframes sway { 0%, 100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes flap { 0%, 100% { transform: scaleY(0.9) scaleX(1.05); } 50% { transform: scaleY(1.08) scaleX(0.95); } }
+@keyframes stretch { 0%, 100% { transform: scaleY(1); } 45% { transform: scaleY(1.18) scaleX(0.92); } }
 @keyframes zoom { from { transform: translateX(6px); opacity: 0.25; } to { transform: translateX(-6px); opacity: 1; } }
 @keyframes drip { 0% { transform: translateY(-4px); opacity: 0; } 40% { opacity: 1; } 100% { transform: translateY(16px); opacity: 0; } }
-@keyframes hop { 0%, 100% { transform: translateY(0) scale(1); } 40% { transform: translateY(-20%) scale(1.1); } }
-@keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-11deg); } 75% { transform: rotate(11deg); } }
-@keyframes droop { to { transform: translateY(9%) rotate(6deg); } }
-@keyframes fidget { 0%, 100% { transform: rotate(-5deg); } 50% { transform: rotate(5deg); } }
+@keyframes wobble { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-12deg); } 75% { transform: rotate(12deg); } }
+@keyframes droop { to { transform: rotate(16deg) scaleY(0.82); } }
+@keyframes fidget { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
 
 .bubble {
   flex: 0 0 auto;
