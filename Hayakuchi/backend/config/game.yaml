@@ -16,7 +16,7 @@ audio:
 
 game:
   inference_interval_ms: 300.0
-  level_interval_ms: 150.0
+  level_interval_ms: 60.0
   max_utterance_ms: 12000.0
   error_margin_mora: 2
   hesitation_ms: 3000.0

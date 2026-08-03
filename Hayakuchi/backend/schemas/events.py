@@ -38,6 +38,7 @@ class PhraseEvent(BaseModel):
  phrase_id:str
  display:str
  mora:List[str]
+ mora_display:List[str]
  difficulty:int
 
 
@@ -90,6 +91,7 @@ class LevelEvent(BaseModel):
  level_db:float
  floor_db:float
  speaking:bool
+ envelope:List[float]=Field(default_factory=list)
 
 
 class SelectCommand(BaseModel):

@@ -51,6 +51,21 @@ def to_mora(text:str)->List[str]:
  return mora
 
 
+def to_hiragana(text:str)->str:
+ """Katakanaをひらがなへ変換する
+
+ 内部の比較はKatakanaで統一するが、画面表示は読み上げやすいひらがなにする。
+ """
+ out=[]
+ for ch in text:
+  code=ord(ch)
+  if _KATAKANA_START<=code<=_KATAKANA_END:
+   out.append(chr(code-_KANA_OFFSET))
+  else:
+   out.append(ch)
+ return "".join(out)
+
+
 def mora_text(mora:List[str])->str:
  """Mora列を表示用文字列へ戻す"""
  return "".join(mora)

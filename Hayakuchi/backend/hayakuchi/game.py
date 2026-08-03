@@ -23,7 +23,7 @@ from middleware.logger import get_logger
 from .audio_source import AudioSource
 from .dataset import Phrase
 from .engines.base import UNIT_PHONEME,Engine
-from .mora import mora_text
+from .mora import mora_text,to_hiragana
 from .phoneme import mora_to_phonemes
 from .profile import (
  LevelRules,
@@ -106,6 +106,7 @@ class GameSession:
   self._restarts=0
   self._best_combo=0
   self._silence_started_samples:Optional[int]=None
+  self._envelope:List[float]=[]
 
  @property
  def phase(self)->Phase:
@@ -137,6 +138,7 @@ class GameSession:
    phrase_id=phrase.id,
    display=phrase.display,
    mora=phrase.mora,
+   mora_display=[to_hiragana(item) for item in phrase.mora],
    difficulty=phrase.difficulty,
   )
 
@@ -381,13 +383,16 @@ class GameSession:
   async for frame in source.frames():
    event=vad.push(frame)
    now=time.perf_counter()
+   self._envelope.append(float(np.max(np.abs(frame))))
    if now-self._last_level>=level_interval:
     self._last_level=now
     await self._publish(LevelEvent(
      level_db=float(20.0*np.log10(np.sqrt(np.mean(np.square(frame)))+1e-10)),
      floor_db=vad.floor_db,
      speaking=vad.speaking,
+     envelope=self._envelope,
     ))
+    self._envelope=[]
    if event==VadEvent.SPEECH_START and self._phase==Phase.READY:
     self._reset_attempt()
     self._buffer=[frame]

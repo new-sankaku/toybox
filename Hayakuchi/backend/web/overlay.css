@@ -162,52 +162,64 @@ body {
   100% { opacity: 0; transform: translateX(14%) scaleY(0.2); }
 }
 
-/* ---------- phrase ---------- */
+/* ---------- board ---------- */
 
-.title {
+.board {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.3rem, 1.2vh, 0.8rem);
+  width: min(100%, 72rem);
+  padding: clamp(0.6rem, 2vh, 1.2rem) clamp(0.8rem, 2.5vw, 1.8rem);
+  border-radius: 0.7rem;
+  border: 0.16rem solid #26201a;
+  background: rgba(14, 17, 22, 0.9);
+  box-shadow: 0 0.35rem 0 #26201a, 0 0.9rem 2.4rem rgba(0, 0, 0, 0.6);
+}
+
+.sentence {
   margin: 0;
-  font-size: clamp(0.7rem, 2vh, 1.15rem);
   color: #fff;
-  opacity: 0.75;
-  text-shadow: 0 0.12em 0.3em rgba(0, 0, 0, 0.9);
+  font-size: clamp(1.2rem, 4.6vh, 2.9rem);
+  line-height: 1.25;
+  letter-spacing: 0.01em;
+  overflow-wrap: anywhere;
 }
 
 .mora-row {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: clamp(0.12rem, 0.5vw, 0.4rem);
-  width: min(100%, 68rem);
+  gap: clamp(0.05rem, 0.2vw, 0.18rem);
+  width: 100%;
 }
 
 .mora {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: clamp(1.7rem, 4vw, 3.4rem);
-  padding: 0.06em 0.18em;
   position: relative;
-  border-radius: 0.28em;
-  border: 0.11em solid #26201a;
-  background: #f4f1ea;
-  color: #9aa3ad;
-  font-size: clamp(1.25rem, 4.8vh, 2.8rem);
-  box-shadow: 0 0.14em 0 #26201a;
+  min-width: clamp(1rem, 2.2vw, 1.85rem);
+  padding: 0.02em 0.08em;
+  border-radius: 0.24em;
+  background: transparent;
+  color: #6b7580;
+  font-size: clamp(0.95rem, 3vh, 1.8rem);
   transition: color 0.1s, background 0.1s;
 }
 
 .mora[data-state="ok"] {
   background: #5ce18a;
-  color: #14351f;
+  color: #10301c;
   animation: bounce 0.32s var(--pop);
 }
 
 .mora[data-state="ok"]::after {
   content: "";
   position: absolute;
-  inset: -0.35em;
+  inset: -0.28em;
   border-radius: 50%;
-  border: 0.14em solid #ffe066;
+  border: 0.1em solid #ffe066;
   opacity: 0;
   animation: spark 0.45s ease-out;
   pointer-events: none;
@@ -220,13 +232,23 @@ body {
 
 .mora[data-state="error"] {
   background: #ff5d6c;
-  color: #fff;
+  color: #ffffff;
   animation: shake 0.34s ease;
 }
 
 @keyframes bounce { 0% { transform: scale(0.7) translateY(0.2em); } 60% { transform: scale(1.22) translateY(-0.14em); } 100% { transform: scale(1); } }
 @keyframes shake { 0%, 100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-0.16em) rotate(-7deg); } 75% { transform: translateX(0.16em) rotate(7deg); } }
 @keyframes pop { from { transform: translateX(-50%) scale(0.4); } to { transform: translateX(-50%) scale(1); } }
+
+/* ---------- waveform ---------- */
+
+.wave {
+  display: block;
+  width: 100%;
+  height: clamp(1.6rem, 5vh, 3rem);
+  border-radius: 0.35rem;
+  background: rgba(0, 0, 0, 0.45);
+}
 
 /* ---------- result stamp ---------- */
 

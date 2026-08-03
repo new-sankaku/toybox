@@ -16,7 +16,8 @@ const el = {
   combo: document.getElementById("combo"),
   streak: document.getElementById("streak"),
   banner: document.getElementById("banner"),
-  title: document.getElementById("title"),
+  sentence: document.getElementById("sentence"),
+  wave: document.getElementById("wave"),
   moraRow: document.getElementById("mora-row"),
   stamp: document.getElementById("stamp"),
   stampText: document.getElementById("stamp-text"),
@@ -28,9 +29,40 @@ const el = {
   confetti: document.getElementById("confetti"),
 };
 
+const WAVE_SLOTS = 150;
+const WAVE_IDLE = "#4a5561";
+const WAVE_LIVE = "#5ce18a";
+
 let moraNodes = [];
 let lastCombo = 0;
 let countUpTimer = null;
+const envelope = new Array(WAVE_SLOTS).fill(0);
+let waveColor = WAVE_IDLE;
+
+function drawWave() {
+  const canvas = el.wave;
+  const context = canvas.getContext("2d");
+  const { width, height } = canvas;
+  const middle = height / 2;
+  const slot = width / WAVE_SLOTS;
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = waveColor;
+  for (let index = 0; index < WAVE_SLOTS; index += 1) {
+    const amplitude = Math.min(1, envelope[index] * 1.8) * (middle - 2);
+    const bar = Math.max(1.5, amplitude);
+    context.fillRect(index * slot + slot * 0.2, middle - bar, slot * 0.6, bar * 2);
+  }
+  context.fillStyle = "rgba(255,255,255,0.25)";
+  context.fillRect(0, middle - 0.5, width, 1);
+  requestAnimationFrame(drawWave);
+}
+
+function pushEnvelope(values) {
+  values.forEach((value) => {
+    envelope.push(value);
+    envelope.shift();
+  });
+}
 
 function replay(node, name) {
   node.style.animation = "none";
@@ -50,9 +82,10 @@ function setBubble(text) {
 }
 
 function renderPhrase(event) {
-  el.title.textContent = event.display;
+  el.sentence.textContent = event.display;
   el.moraRow.replaceChildren();
-  moraNodes = event.mora.map((mora) => {
+  const labels = event.mora_display || event.mora;
+  moraNodes = labels.map((mora) => {
     const node = document.createElement("span");
     node.className = "mora";
     node.dataset.state = "pending";
@@ -184,8 +217,14 @@ function renderState(event) {
   }
 }
 
+function renderLevelMeter(event) {
+  pushEnvelope(event.envelope || []);
+  waveColor = event.speaking ? WAVE_LIVE : WAVE_IDLE;
+}
+
 const HANDLERS = {
   phrase: renderPhrase,
+  level: renderLevelMeter,
   progress: renderProgress,
   result: renderResult,
   profile: renderProfile,
@@ -205,3 +244,4 @@ function connect() {
 }
 
 connect();
+requestAnimationFrame(drawWave);
