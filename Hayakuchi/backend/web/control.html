@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hayakuchi Control</title>
+<link rel="stylesheet" href="surface.css">
+<link rel="stylesheet" href="control.css">
+</head>
+<body class="nier-surface-main">
+<header class="bar nier-surface-panel">
+  <h1>Hayakuchi</h1>
+  <span class="badge" id="phase">READY</span>
+  <span class="hint">Overlay URL: <code id="overlay-url"></code></span>
+</header>
+
+<main class="layout">
+  <section class="panel nier-surface-panel">
+    <h2>出題</h2>
+    <div class="mic">
+      <div class="mic-meter"><div class="mic-fill" id="mic-fill"></div></div>
+      <span class="mono" id="mic-label">-</span>
+    </div>
+    <div class="actions">
+      <button id="random">ランダム出題</button>
+    </div>
+    <ul class="phrase-list" id="phrase-list"></ul>
+  </section>
+
+  <section class="panel nier-surface-panel">
+    <h2>判定</h2>
+    <div class="verdict-row">
+      <span class="verdict" id="verdict">-</span>
+      <span class="mono" id="detail"></span>
+    </div>
+    <p class="hint">誤判定と感じた場合はここで覆せます。Overlayへ即時反映されます。</p>
+    <div class="actions">
+      <button id="pass" class="ok">CLEARにする</button>
+      <button id="fail" class="ng">MISSにする</button>
+    </div>
+    <h3>認識結果</h3>
+    <pre class="mono wrap" id="hypothesis">-</pre>
+  </section>
+</main>
+<script src="control.js"></script>
+</body>
+</html>

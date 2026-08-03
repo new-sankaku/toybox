@@ -10,7 +10,22 @@ from typing import Dict,List
 import yaml
 
 from .conditions import Condition,load_conditions
+from .game import GameConfig
 from .scoring import ScoringConfig
+from .vad import VadConfig
+
+
+@dataclass
+class GameServerConfig:
+ base_dir:Path
+ phrases_path:Path
+ web_root:Path
+ log_dir:Path
+ host:str
+ port:int
+ engine:Dict
+ source:Dict
+ game:"GameConfig"
 
 
 @dataclass
@@ -74,4 +89,46 @@ def load_config(path:Path)->BenchmarkConfig:
   conditions=load_conditions(payload["conditions"]),
   engines=engines,
   include_samples=bool(payload.get("report",{}).get("include_samples",True)),
+ )
+
+
+def load_game_config(path:Path)->GameServerConfig:
+ """Game Server Config YAMLを読み込む"""
+ path=path.resolve()
+ base_dir=path.parent.parent
+ with path.open("r",encoding="utf-8") as handle:
+  payload=yaml.safe_load(handle)
+
+ def _resolve(value:str)->Path:
+  candidate=Path(value)
+  return candidate if candidate.is_absolute() else base_dir/candidate
+
+ paths=payload["paths"]
+ server=payload["server"]
+ game=payload["game"]
+ audio=payload["audio"]
+ grades=game["grades"]
+ if not grades:
+  raise ValueError("no grade is defined in config")
+ return GameServerConfig(
+  base_dir=base_dir,
+  phrases_path=_resolve(paths["phrases"]),
+  web_root=_resolve(paths["web_root"]),
+  log_dir=_resolve(paths["log_dir"]),
+  host=str(server["host"]),
+  port=int(server["port"]),
+  engine=payload["engine"],
+  source=audio["source"],
+  game=GameConfig(
+   sample_rate=int(audio["sample_rate"]),
+   inference_interval_ms=float(game["inference_interval_ms"]),
+   level_interval_ms=float(game["level_interval_ms"]),
+   pass_accuracy=float(game["pass_accuracy"]),
+   grades={str(key):float(value) for key,value in grades.items()},
+   max_utterance_ms=float(game["max_utterance_ms"]),
+   error_margin_mora=int(game["error_margin_mora"]),
+   result_hold_ms=float(game["result_hold_ms"]),
+   scoring=ScoringConfig.from_dict(payload.get("scoring")),
+   vad=VadConfig.from_dict(payload.get("vad")),
+  ),
  )

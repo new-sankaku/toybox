@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Hayakuchi Overlay</title>
+<link rel="stylesheet" href="surface.css">
+<link rel="stylesheet" href="overlay.css">
+</head>
+<body>
+<div class="stage">
+  <section class="card nier-surface-panel" id="play-card">
+    <div class="headline">
+      <span class="display" id="display">-</span>
+      <span class="difficulty" id="difficulty"></span>
+      <span class="badge nier-surface-panel-muted" id="phase">READY</span>
+    </div>
+    <div class="mora-row" id="mora-row"></div>
+    <div class="meter"><div class="meter-fill" id="meter"></div></div>
+  </section>
+
+  <section class="card nier-surface-panel" id="result-card" data-hidden="true">
+    <div class="result">
+      <span class="verdict" id="verdict">-</span>
+      <div class="stat">
+        <span class="stat-value" id="accuracy">-</span>
+        <span class="stat-label">ACCURACY</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="duration">-</span>
+        <span class="stat-label">TIME</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="grade">-</span>
+        <span class="stat-label">GRADE</span>
+      </div>
+    </div>
+    <p class="note" id="result-note"></p>
+  </section>
+</div>
+<script src="overlay.js"></script>
+</body>
+</html>

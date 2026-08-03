@@ -3,25 +3,43 @@
 配信者向けの早口言葉Mini game。発話が正しく言えているかを判定し、
 崩れたMora位置をOverlayへ表示する。
 
-現状はGame本体の前段として、**判定Engineの選定Benchmark**のみを実装している。
-配信PlatformのAPI連携は対象外。音声は配信者PCのMic入力から直接取得する前提で、
+Game Runtime（Mic取得→逐次判定→Overlay）とEngine選定Benchmarkを実装している。
+配信PlatformのAPI連携は対象外。音声は配信者PCのMic入力から直接取得するため、
 Platformの配信遅延は判定経路に入らない。
+
+Overlayは**HTML**で、OBSのBrowser Sourceに透過で載る。Chroma keyもWindow captureも不要。
 
 ## 構成
 
 ```
 Hayakuchi/
+  doc/GAME.md                 Runtime構成と実装上の要点
   doc/BENCHMARK.md            評価指標・収録Protocol・採用Gate
   doc/MODEL_CANDIDATES.md     Model候補の調査と実測結果
   backend/
-    config/benchmark.yaml     Model ID・閾値・収録条件のSimulation定義
-    config/edits.yaml         Language Model補正検出用の音声改変定義
+    config/game.yaml          Model ID・Thread数・閾値・VAD設定
+    config/benchmark.yaml     収録条件のSimulation定義
     data/phrases.json         早口言葉Database
-    hayakuchi/                Mora分解・Phoneme変換・Alignment・Scoring・指標
+    hayakuchi/                Mora分解・Phoneme変換・逐次判定・VAD・音声取得
     hayakuchi/engines/        判定Engine Adapter
-    scripts/                  Manifest生成・Benchmark実行・LM補正検出
+    schemas/events.py         WebSocket Event定義
+    server/app.py             FastAPI + WebSocket
+    web/                      Overlay と 操作画面（HTML/CSS/JS）
+    scripts/                  Game起動・Benchmark実行・LM補正検出
     tests/                    Unit test / End-to-end test
 ```
+
+## 起動
+
+```bash
+cd backend
+.venv/bin/python scripts/run_game.py
+```
+
+OBS Browser Source: `http://127.0.0.1:8790/overlay.html`
+配信者用操作画面: `http://127.0.0.1:8790/`
+
+詳細は `doc/GAME.md` を参照。
 
 ## Setup
 

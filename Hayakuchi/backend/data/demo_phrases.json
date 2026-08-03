@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "phrases": [
+    {
+      "id": "demo_tanaka",
+      "display": "田中さんの奥さんは大学の先生です",
+      "kana": "たなかさんのおくさんわだいがくのせんせーです",
+      "difficulty": 1,
+      "tags": ["demo"]
+    },
+    {
+      "id": "demo_kimura",
+      "display": "木村さんに電話を貸してもらいました",
+      "kana": "きむらさんにでんわをかしてもらいました",
+      "difficulty": 1,
+      "tags": ["demo"]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+paths:
+  phrases: data/phrases.json
+  web_root: web
+  log_dir: logs
+
+server:
+  host: 127.0.0.1
+  port: 8790
+
+audio:
+  sample_rate: 16000
+  source:
+    type: microphone
+    device: null
+
+game:
+  inference_interval_ms: 300.0
+  level_interval_ms: 150.0
+  max_utterance_ms: 12000.0
+  error_margin_mora: 2
+  result_hold_ms: 6000.0
+  pass_accuracy: 0.9
+  grades:
+    S: 1.0
+    A: 0.95
+    B: 0.85
+    C: 0.7
+    D: 0.0
+
+vad:
+  frame_ms: 30.0
+  start_offset_db: 12.0
+  end_offset_db: 6.0
+  start_frames: 3
+  hangover_ms: 250.0
+  min_speech_ms: 300.0
+  floor_adaptation: 0.05
+  initial_floor_db: -60.0
+
+scoring:
+  substitution_cost: 1.0
+  deletion_cost: 1.0
+  insertion_cost: 1.0
+
+engine:
+  id: ctc_phoneme
+  adapter: hf_ctc
+  params:
+    model_id: prj-beatrice/japanese-hubert-base-phoneme-ctc-v4
+    output_unit: phoneme
+    device: cpu
+    target_sample_rate: 16000
+    num_threads: 2
