@@ -52,11 +52,12 @@ def create_app(
  source_definition:Dict,
  web_root:Path,
  base_dir:Path,
+ profile_path:Path,
 )->FastAPI:
  """Game Sessionを内包したApplicationを組み立てる"""
  logger=get_logger()
  broadcaster=Broadcaster()
- session=GameSession(engine,phrases,game_config,broadcaster.publish)
+ session=GameSession(engine,phrases,game_config,broadcaster.publish,profile_path)
  app=FastAPI(title="Hayakuchi")
  app.state.session=session
 
@@ -116,6 +117,10 @@ def create_app(
    await session.select(command.get("phrase_id"))
   elif kind=="override":
    await session.override(bool(command["passed"]))
+  elif kind=="retry":
+   await session.retry()
+  elif kind=="giveup":
+   await session.give_up()
   else:
    raise ValueError(f"unknown command: {kind}")
 

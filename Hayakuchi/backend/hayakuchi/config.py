@@ -11,6 +11,8 @@ import yaml
 
 from .conditions import Condition,load_conditions
 from .game import GameConfig
+from .profile import LevelRules
+from .score import ScoreRules
 from .scoring import ScoringConfig
 from .vad import VadConfig
 
@@ -25,6 +27,7 @@ class GameServerConfig:
  port:int
  engine:Dict
  source:Dict
+ profile_path:Path
  game:"GameConfig"
 
 
@@ -114,6 +117,7 @@ def load_game_config(path:Path)->GameServerConfig:
   base_dir=base_dir,
   phrases_path=_resolve(paths["phrases"]),
   web_root=_resolve(paths["web_root"]),
+  profile_path=_resolve(paths["profile"]),
   log_dir=_resolve(paths["log_dir"]),
   host=str(server["host"]),
   port=int(server["port"]),
@@ -127,9 +131,15 @@ def load_game_config(path:Path)->GameServerConfig:
    grades={str(key):float(value) for key,value in grades.items()},
    max_utterance_ms=float(game["max_utterance_ms"]),
    error_margin_mora=int(game["error_margin_mora"]),
+   hesitation_ms=float(game["hesitation_ms"]),
+   completion_ratio=float(game["completion_ratio"]),
+   restart_cost=float(game["restart_cost"]),
+   restart_skip_threshold=int(game["restart_skip_threshold"]),
    result_hold_ms=float(game["result_hold_ms"]),
    auto_next=bool(game["auto_next"]),
    scoring=ScoringConfig.from_dict(payload.get("scoring")),
    vad=VadConfig.from_dict(payload.get("vad")),
+   score=ScoreRules.from_dict(payload.get("score")),
+   levels=LevelRules.from_dict(payload.get("levels")),
   ),
  )

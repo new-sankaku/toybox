@@ -1,8 +1,8 @@
 const PHASE_LABEL = {
-  idle: "じゅんびちゅう",
+  idle: "準備中",
   ready: "よーい",
-  listening: "はなしてる",
-  result: "けっか",
+  listening: "発話中",
+  result: "結果",
 };
 
 const el = {
@@ -11,6 +11,9 @@ const el = {
   phraseList: document.getElementById("phrase-list"),
   next: document.getElementById("next"),
   again: document.getElementById("again"),
+  giveup: document.getElementById("giveup"),
+  lv: document.getElementById("lv"),
+  score: document.getElementById("score"),
   current: document.getElementById("current"),
   micFill: document.getElementById("mic-fill"),
   micIcon: document.getElementById("mic-icon"),
@@ -46,7 +49,7 @@ async function loadPhrases() {
     title.textContent = phrase.display;
     const meta = document.createElement("span");
     meta.className = "phrase-meta";
-    meta.textContent = `${"★".repeat(phrase.difficulty)} ${phrase.mora_count}おん`;
+    meta.textContent = `${"★".repeat(phrase.difficulty)} ${phrase.mora_count}拍`;
     item.append(title, meta);
     item.addEventListener("click", () => send({ type: "select", phrase_id: phrase.phrase_id }));
     el.phraseList.appendChild(item);
@@ -68,22 +71,41 @@ function renderLevel(event) {
 }
 
 function renderResult(event) {
-  el.verdict.textContent = event.passed ? "せいかい！" : "ざんねん！";
-  el.verdict.dataset.passed = String(event.passed);
+  if (event.abandoned) {
+    el.verdict.textContent = "ギブアップ";
+    delete el.verdict.dataset.passed;
+  } else {
+    el.verdict.textContent = event.passed ? "正解！" : "残念！";
+    el.verdict.dataset.passed = String(event.passed);
+  }
+  el.score.textContent = `${event.score}点（自己ベスト ${event.best_score}点）`;
+  const breakdown = event.breakdown || {};
   const parts = [
-    `せいかくさ ${(event.accuracy * 100).toFixed(1)}%`,
-    `${(event.duration_ms / 1000).toFixed(2)}びょう`,
+    `正確さ ${(event.accuracy * 100).toFixed(1)}%`,
+    `${(event.duration_ms / 1000).toFixed(2)}秒`,
     `ランク ${event.grade}`,
-    `れんぞく ${event.streak}かい`,
+    `連続 ${event.streak}回`,
+    `最大コンボ ${event.max_combo}`,
+    `倍率 ${breakdown.multiplier ?? "-"}`,
   ];
+  if (event.restarts > 0) {
+    parts.push(`言い直し ${event.restarts}回`);
+  }
   if (event.first_error_mora !== null && event.first_error_mora !== undefined) {
-    parts.push(`${event.first_error_mora + 1}おんめで かんだ`);
+    parts.push(`${event.first_error_mora + 1}拍目で噛んだ`);
+  }
+  if (event.levels_gained > 0) {
+    parts.push(`レベルアップ ${event.levels_gained}`);
   }
   if (event.overridden) {
-    parts.push("てなおし ずみ");
+    parts.push("手動で変更済み");
   }
   el.detail.textContent = parts.join(" / ");
   el.hypothesis.textContent = event.hypothesis || "-";
+}
+
+function renderProfile(event) {
+  el.lv.textContent = `Lv.${event.level}  ${event.exp}/${event.exp_to_next}`;
 }
 
 const HANDLERS = {
@@ -92,6 +114,7 @@ const HANDLERS = {
   },
   phrase: markActive,
   level: renderLevel,
+  profile: renderProfile,
   result: renderResult,
 };
 
@@ -108,7 +131,8 @@ function connect() {
 }
 
 el.next.addEventListener("click", () => send({ type: "select" }));
-el.again.addEventListener("click", () => send({ type: "select", phrase_id: activeId }));
+el.again.addEventListener("click", () => send({ type: "retry" }));
+el.giveup.addEventListener("click", () => send({ type: "giveup" }));
 el.pass.addEventListener("click", () => send({ type: "override", passed: true }));
 el.fail.addEventListener("click", () => send({ type: "override", passed: false }));
 

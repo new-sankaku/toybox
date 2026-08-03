@@ -34,6 +34,21 @@ h2 {
   font-size: clamp(0.85rem, 1.9vw, 1.1rem);
 }
 
+.lv {
+  padding: 0.25rem 0.9rem;
+  border-radius: 999px;
+  border: 2px solid var(--accent-ok);
+  color: var(--accent-ok);
+  font-size: clamp(0.8rem, 1.8vw, 1rem);
+}
+
+.score {
+  margin: 0;
+  font-size: clamp(1rem, 2.4vw, 1.4rem);
+  color: var(--accent-focus);
+  font-variant-numeric: tabular-nums;
+}
+
 .obs {
   font-size: clamp(0.7rem, 1.4vw, 0.88rem);
   color: var(--surface-muted-fg);

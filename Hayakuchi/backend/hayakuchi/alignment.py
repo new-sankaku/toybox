@@ -30,6 +30,7 @@ class PrefixAlignment:
  distance:float
  ops:List[AlignOp]
  consumed:int
+ skipped:int=0
 
 
 def _table(
@@ -38,6 +39,7 @@ def _table(
  substitution_cost:float,
  deletion_cost:float,
  insertion_cost:float,
+ restart_cost:Optional[float]=None,
 )->List[List[float]]:
  n=len(reference)
  m=len(hypothesis)
@@ -46,6 +48,8 @@ def _table(
   dp[i][0]=dp[i-1][0]+deletion_cost
  for j in range(1,m+1):
   dp[0][j]=dp[0][j-1]+insertion_cost
+  if restart_cost is not None:
+   dp[0][j]=min(dp[0][j],restart_cost)
  for i in range(1,n+1):
   for j in range(1,m+1):
    if reference[i-1]==hypothesis[j-1]:
@@ -110,12 +114,17 @@ def align_prefix(
  substitution_cost:float=1.0,
  deletion_cost:float=1.0,
  insertion_cost:float=1.0,
+ restart_cost:Optional[float]=None,
 )->PrefixAlignment:
  """発話途中の認識列を、正解列の先頭部分に対してAlignmentする
 
  正解列の末尾側は未発話として距離に加算しない。発話中のMora点灯に使う。
+
+ restart_costを与えると、認識列の先頭側を一定Costで読み飛ばせる。
+ 言い淀みや言い直しで先頭に余分な発話が乗っても、それを全て挿入として
+ 数えずに済む。読み飛ばした数はskippedで返す。
  """
- dp=_table(reference,hypothesis,substitution_cost,deletion_cost,insertion_cost)
+ dp=_table(reference,hypothesis,substitution_cost,deletion_cost,insertion_cost,restart_cost)
  column=len(hypothesis)
  best=min(dp[index][column] for index in range(len(reference)+1))
  consumed=max(
@@ -124,4 +133,11 @@ def align_prefix(
  ops=_traceback(
   dp,reference,hypothesis,consumed,column,substitution_cost,deletion_cost
  )
- return PrefixAlignment(distance=dp[consumed][column],ops=ops,consumed=consumed)
+ skipped=0
+ for op in ops:
+  if op.op!=INSERT:
+   break
+  skipped+=1
+ return PrefixAlignment(
+  distance=dp[consumed][column],ops=ops,consumed=consumed,skipped=skipped
+ )

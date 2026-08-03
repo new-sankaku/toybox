@@ -3,7 +3,7 @@
 WebSocketで流れる型はここに集約する。Overlay側のRender処理はこの定義にのみ依存する。
 """
 from enum import Enum
-from typing import List,Optional
+from typing import Dict,List,Optional
 
 from pydantic import BaseModel,Field
 
@@ -12,6 +12,7 @@ EVENT_PHRASE="phrase"
 EVENT_PROGRESS="progress"
 EVENT_RESULT="result"
 EVENT_LEVEL="level"
+EVENT_PROFILE="profile"
 
 
 class Phase(str,Enum):
@@ -45,7 +46,10 @@ class ProgressEvent(BaseModel):
  lit_mora:int
  mora_states:List[MoraState]
  first_error_mora:Optional[int]=None
- elapsed_ms:float
+ combo:int=0
+ restarted:bool=False
+ hesitating:bool=False
+ elapsed_ms:float=0.0
 
 
 class ResultEvent(BaseModel):
@@ -60,7 +64,25 @@ class ResultEvent(BaseModel):
  reference:str
  hypothesis:str
  streak:int=0
+ score:int=0
+ breakdown:Dict[str,float]=Field(default_factory=dict)
+ max_combo:int=0
+ restarts:int=0
+ abandoned:bool=False
+ best_score:int=0
+ levels_gained:int=0
  overridden:bool=False
+
+
+class ProfileEvent(BaseModel):
+ type:str=EVENT_PROFILE
+ level:int
+ exp:int
+ exp_to_next:int
+ total_score:int
+ plays:int
+ clears:int
+ unlocked_difficulty:int
 
 
 class LevelEvent(BaseModel):
@@ -82,3 +104,11 @@ class StartCommand(BaseModel):
 class OverrideCommand(BaseModel):
  type:str="override"
  passed:bool
+
+
+class RetryCommand(BaseModel):
+ type:str="retry"
+
+
+class GiveUpCommand(BaseModel):
+ type:str="giveup"

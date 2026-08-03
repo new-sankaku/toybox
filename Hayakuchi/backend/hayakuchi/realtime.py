@@ -29,6 +29,8 @@ class PartialJudgement:
  distance:float
  mora_states:List[str]
  lit_mora:int
+ combo:int=0
+ restarted:bool=False
  first_error_mora:Optional[int]=None
 
 
@@ -40,6 +42,8 @@ class ProgressiveJudge:
  mora_count:int
  config:ScoringConfig=field(default_factory=ScoringConfig)
  error_margin_mora:int=2
+ restart_cost:float=3.0
+ restart_skip_threshold:int=3
 
  def __post_init__(self):
   if len(self.reference)!=len(self.origins):
@@ -58,6 +62,7 @@ class ProgressiveJudge:
    substitution_cost=self.config.substitution_cost,
    deletion_cost=self.config.deletion_cost,
    insertion_cost=self.config.insertion_cost,
+   restart_cost=self.restart_cost,
   )
   states=[STATE_PENDING]*self.mora_count
   edge=self.origins[result.consumed-1] if result.consumed>0 else -1
@@ -85,6 +90,8 @@ class ProgressiveJudge:
    distance=result.distance,
    mora_states=states,
    lit_mora=lit,
+   combo=trailing_combo(states),
+   restarted=result.skipped>=self.restart_skip_threshold,
    first_error_mora=errors[0] if errors else None,
   )
 
@@ -92,12 +99,48 @@ class ProgressiveJudge:
   """発話終了後の確定判定を返す"""
   return judge(self.reference,hypothesis,self.config)
 
+ def restart_count(self,hypothesis:Sequence[str])->int:
+  """言い直しとみなせる読み飛ばしが起きた回数を返す"""
+  result=align_prefix(
+   self.reference,
+   hypothesis,
+   substitution_cost=self.config.substitution_cost,
+   deletion_cost=self.config.deletion_cost,
+   insertion_cost=self.config.insertion_cost,
+   restart_cost=self.restart_cost,
+  )
+  return 1 if result.skipped>=self.restart_skip_threshold else 0
+
  def final_states(self,result:Judgement)->List[str]:
   """確定判定からMora Stateを組み立てる"""
   states=[STATE_OK]*self.mora_count
   for unit_index in result.error_ref_indices:
    states[self.origins[unit_index]]=STATE_ERROR
   return states
+
+
+def trailing_combo(states:Sequence[str])->int:
+ """直近まで連続して正解しているMora数を返す"""
+ combo=0
+ for state in states:
+  if state==STATE_OK:
+   combo+=1
+  elif state==STATE_ERROR:
+   combo=0
+ return combo
+
+
+def max_combo(states:Sequence[str])->int:
+ """連続正解の最長を返す"""
+ best=0
+ current=0
+ for state in states:
+  if state==STATE_OK:
+   current+=1
+   best=max(best,current)
+  else:
+   current=0
+ return best
 
 
 def mora_error_indices(origins:Sequence[int],unit_indices:Sequence[int])->List[int]:

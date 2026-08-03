@@ -8,7 +8,9 @@ from hayakuchi.realtime import (
  STATE_OK,
  STATE_PENDING,
  ProgressiveJudge,
+ max_combo,
  score_to_grade,
+ trailing_combo,
 )
 
 _GRADES={"S":1.0,"A":0.95,"B":0.85,"C":0.7,"D":0.0}
@@ -115,3 +117,38 @@ def test_error_is_shown_once_the_edge_moves_past_it():
  judge.error_margin_mora=2
  partial=judge.update(["n","a","m","a","n","u","g","i","n","a","m","a"])
  assert partial.first_error_mora==2
+
+
+def test_false_start_is_skipped_when_restart_is_allowed():
+ judge=_judge("なまむぎなまごめ")
+ false_start,_=mora_to_phonemes(to_mora("なまむに"))
+ full,_=mora_to_phonemes(to_mora("なまむぎなまごめ"))
+ partial=judge.update(false_start+full)
+ assert partial.lit_mora==8
+ assert partial.restarted
+ assert partial.first_error_mora is None
+
+
+def test_clean_utterance_is_not_flagged_as_restart():
+ judge=_judge("なまむぎなまごめ")
+ full,_=mora_to_phonemes(to_mora("なまむぎなまごめ"))
+ partial=judge.update(full)
+ assert not partial.restarted
+ assert judge.restart_count(full)==0
+
+
+def test_restart_count_detects_the_retry():
+ judge=_judge("なまむぎなまごめ")
+ false_start,_=mora_to_phonemes(to_mora("なまむに"))
+ full,_=mora_to_phonemes(to_mora("なまむぎなまごめ"))
+ assert judge.restart_count(false_start+full)==1
+
+
+def test_trailing_combo_resets_on_error():
+ assert trailing_combo(["ok","ok","error","ok"])==1
+ assert trailing_combo(["ok","ok","ok"])==3
+
+
+def test_max_combo_finds_longest_run():
+ assert max_combo(["ok","ok","error","ok","ok","ok"])==3
+ assert max_combo(["error","error"])==0

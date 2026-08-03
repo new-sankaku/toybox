@@ -54,6 +54,7 @@ def main()->int:
   source_definition=source,
   web_root=config.web_root,
   base_dir=config.base_dir,
+  profile_path=config.profile_path,
  )
  host=args.host or config.host
  port=args.port or config.port

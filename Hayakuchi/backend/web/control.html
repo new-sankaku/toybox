@@ -3,16 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hayakuchi そうさ</title>
+<title>Hayakuchi 操作画面</title>
 <link rel="stylesheet" href="surface.css">
 <link rel="stylesheet" href="control.css">
 </head>
 <body class="nier-surface-main">
 
 <header class="bar nier-surface-panel">
-  <h1>はやくち</h1>
+  <h1>Hayakuchi</h1>
   <span class="now" id="now">よーい</span>
-  <span class="obs">OBSにこれを入れてね <code id="overlay-url"></code></span>
+  <span class="lv" id="lv">Lv.1</span>
+  <span class="obs">OBSに登録するURL <code id="overlay-url"></code></span>
 </header>
 
 <main class="layout">
@@ -23,35 +24,37 @@
       <span class="mic-icon" id="mic-icon">🎤</span>
       <div class="mic-meter"><div class="mic-fill" id="mic-fill"></div></div>
     </div>
-    <p class="help" id="mic-help">こえを出すとバーがのびます</p>
+    <p class="help" id="mic-help">声を出すとバーが伸びます</p>
   </section>
 
   <section class="panel nier-surface-panel">
-    <h2>いま の ことば</h2>
+    <h2>今のお題</h2>
     <p class="current" id="current">-</p>
     <div class="big-actions">
-      <button class="huge" id="next"><span>🎲</span>つぎの ことば</button>
-      <button class="huge" id="again"><span>🔁</span>もういちど</button>
+      <button class="huge" id="next"><span>🎲</span>次のお題</button>
+      <button class="huge" id="again"><span>🔁</span>やり直す</button>
+      <button class="huge" id="giveup"><span>🏳️</span>ギブアップ</button>
     </div>
   </section>
 
   <section class="panel nier-surface-panel">
-    <h2>けっか</h2>
+    <h2>結果</h2>
     <p class="verdict" id="verdict">-</p>
-    <p class="help">まちがって いたら ここで なおせます</p>
+    <p class="score" id="score"></p>
+    <p class="help">判定が違うと感じたらここで直せます</p>
     <div class="big-actions">
-      <button class="huge ok" id="pass"><span>⭕</span>せいかい</button>
-      <button class="huge ng" id="fail"><span>❌</span>ざんねん</button>
+      <button class="huge ok" id="pass"><span>⭕</span>正解にする</button>
+      <button class="huge ng" id="fail"><span>❌</span>残念にする</button>
     </div>
     <details class="detail">
-      <summary>くわしく</summary>
+      <summary>詳しく見る</summary>
       <p class="mono wrap" id="detail">-</p>
       <p class="mono wrap" id="hypothesis">-</p>
     </details>
   </section>
 
   <section class="panel nier-surface-panel wide">
-    <h2>ことば を えらぶ</h2>
+    <h2>お題を選ぶ</h2>
     <ul class="phrase-list" id="phrase-list"></ul>
   </section>
 

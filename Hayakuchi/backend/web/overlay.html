@@ -9,6 +9,8 @@
 <body>
 <div class="stage" id="stage" data-phase="ready">
 
+  <div class="banner" id="banner"></div>
+
   <div class="hero">
     <svg class="face" id="face" data-mood="idle" viewBox="0 0 220 200" aria-hidden="true">
       <g class="lines">
@@ -35,6 +37,10 @@
           <path d="M72 70 l20 20 M92 70 l-20 20"/>
           <path d="M128 70 l20 20 M148 70 l-20 20"/>
         </g>
+        <g class="eyes eyes-blank">
+          <path d="M70 82 h24"/>
+          <path d="M126 82 h24"/>
+        </g>
         <ellipse class="mouth" cx="110" cy="132" rx="30" ry="22"/>
         <ellipse class="tongue" cx="110" cy="146" rx="16" ry="9"/>
       </g>
@@ -42,7 +48,8 @@
         <path d="M172 42 q9 14 0 20 q-9 -6 0 -20"/>
       </g>
     </svg>
-    <div class="bubble" id="bubble">よーい</div>
+    <div class="bubble" id="bubble">よーい…</div>
+    <div class="combo" id="combo"></div>
     <div class="streak" id="streak"></div>
   </div>
 
@@ -50,11 +57,17 @@
   <div class="mora-row" id="mora-row"></div>
 
   <div class="stamp" id="stamp" data-show="false">
-    <span class="stamp-text" id="stamp-text">せいかい！</span>
+    <span class="stamp-text" id="stamp-text">正解！</span>
     <span class="stamp-side">
       <b id="stamp-grade">S</b>
-      <i id="stamp-time">0.00びょう</i>
+      <i id="stamp-time">0.00秒</i>
     </span>
+    <span class="stamp-score" id="stamp-score">0</span>
+  </div>
+
+  <div class="level">
+    <span class="level-tag" id="level-tag">Lv.1</span>
+    <span class="level-bar"><i class="level-fill" id="level-fill"></i></span>
   </div>
 
   <div class="confetti" id="confetti"></div>

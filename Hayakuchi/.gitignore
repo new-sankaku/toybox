@@ -10,3 +10,4 @@ backend/data/wav/
 backend/data/manifest.jsonl
 backend/data/transcripts_human.json
 backend/data/probe/
+backend/data/profile.json
