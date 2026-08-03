@@ -74,6 +74,9 @@ def _config(**overrides)->GameConfig:
   restart_cost=3.0,
   restart_skip_threshold=3,
   waveform_buckets=4,
+  time_limit_enabled=False,
+  limit_ms_per_mora=260.0,
+  limit_minimum_ms=2500.0,
   scoring=ScoringConfig(),
   vad=VadConfig(frame_ms=_FRAME_MS,start_frames=2,hangover_ms=90.0,min_speech_ms=60.0),
   score=ScoreRules(),
@@ -175,3 +178,84 @@ async def test_profile_is_persisted_between_sessions(tmp_path):
  second,_=await _play(frames,tmp_path)
  events=[event for event in second.snapshot() if event.type=="profile"]
  assert events[0].plays>=2
+
+
+@pytest.mark.asyncio
+async def test_time_limit_scales_with_mora_count(tmp_path):
+ events=[]
+
+ async def publish(event):
+  events.append(event)
+
+ session=GameSession(
+  PaceEngine(),{"p":_PHRASE},
+  _config(time_limit_enabled=True,limit_ms_per_mora=300.0,limit_minimum_ms=100.0),
+  publish,tmp_path/"profile.json",
+ )
+ await session.select("p")
+ phrase=[event for event in events if event.type=="phrase"][0]
+ assert phrase.limit_ms==pytest.approx(len(_PHRASE.mora)*300.0)
+
+
+@pytest.mark.asyncio
+async def test_time_limit_respects_the_minimum(tmp_path):
+ events=[]
+
+ async def publish(event):
+  events.append(event)
+
+ session=GameSession(
+  PaceEngine(),{"p":_PHRASE},
+  _config(time_limit_enabled=True,limit_ms_per_mora=1.0,limit_minimum_ms=4000.0),
+  publish,tmp_path/"profile.json",
+ )
+ await session.select("p")
+ phrase=[event for event in events if event.type=="phrase"][0]
+ assert phrase.limit_ms==4000.0
+
+
+@pytest.mark.asyncio
+async def test_slow_utterance_times_out(tmp_path):
+ frames=_quiet(6)+_loud(_FULL)+_quiet(10)
+ _,results=await _play(
+  frames,tmp_path,time_limit_enabled=True,limit_ms_per_mora=30.0,limit_minimum_ms=200.0
+ )
+ assert len(results)==1
+ assert results[0].timed_out
+ assert not results[0].passed
+ assert not results[0].abandoned
+
+
+@pytest.mark.asyncio
+async def test_timeout_still_awards_partial_score(tmp_path):
+ frames=_quiet(6)+_loud(_FULL)+_quiet(10)
+ _,results=await _play(
+  frames,tmp_path,time_limit_enabled=True,limit_ms_per_mora=40.0,limit_minimum_ms=300.0
+ )
+ assert results[0].timed_out
+ assert results[0].score>0
+
+
+@pytest.mark.asyncio
+async def test_fast_enough_utterance_is_not_timed_out(tmp_path):
+ frames=_quiet(6)+_loud(_FULL)+_quiet(10)
+ _,results=await _play(
+  frames,tmp_path,time_limit_enabled=True,limit_ms_per_mora=600.0,limit_minimum_ms=2000.0
+ )
+ assert not results[0].timed_out
+ assert results[0].passed
+
+
+@pytest.mark.asyncio
+async def test_disabled_time_limit_reports_no_limit(tmp_path):
+ events=[]
+
+ async def publish(event):
+  events.append(event)
+
+ session=GameSession(
+  PaceEngine(),{"p":_PHRASE},_config(time_limit_enabled=False),publish,tmp_path/"profile.json"
+ )
+ await session.select("p")
+ phrase=[event for event in events if event.type=="phrase"][0]
+ assert phrase.limit_ms==0.0

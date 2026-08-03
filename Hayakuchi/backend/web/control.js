@@ -78,7 +78,10 @@ function renderLevel(event) {
 }
 
 function renderResult(event) {
-  if (event.abandoned) {
+  if (event.timed_out) {
+    el.verdict.textContent = "時間切れ";
+    el.verdict.dataset.passed = "false";
+  } else if (event.abandoned) {
     el.verdict.textContent = "ギブアップ";
     delete el.verdict.dataset.passed;
   } else {
@@ -92,6 +95,7 @@ function renderResult(event) {
     `${(event.duration_ms / 1000).toFixed(2)}秒`,
     `ランク ${event.grade}`,
     `連続 ${event.streak}回`,
+    `制限 ${(event.limit_ms / 1000).toFixed(1)}秒`,
     `最大コンボ ${event.max_combo}`,
     `倍率 ${breakdown.multiplier ?? "-"}`,
   ];

@@ -69,6 +69,9 @@ class GameConfig:
  restart_cost:float
  restart_skip_threshold:int
  waveform_buckets:int
+ time_limit_enabled:bool
+ limit_ms_per_mora:float
+ limit_minimum_ms:float
  scoring:ScoringConfig
  vad:VadConfig
  score:ScoreRules
@@ -109,6 +112,7 @@ class GameSession:
   self._best_combo=0
   self._silence_started_samples:Optional[int]=None
   self._waveform:List[float]=[]
+  self._limit_ms=0.0
 
  @property
  def phase(self)->Phase:
@@ -134,14 +138,26 @@ class GameSession:
    unlocked_difficulty=unlocked_difficulty(self._profile.level,self._config.levels),
   )
 
- @staticmethod
- def _phrase_event(phrase:Phrase)->PhraseEvent:
+ def _time_limit(self,phrase:Phrase)->float:
+  """句のMora数から制限時間を決める
+
+  句ごとに固定値を持たせると長さの違いで不公平になる。
+  """
+  if not self._config.time_limit_enabled:
+   return 0.0
+  return max(
+   self._config.limit_minimum_ms,
+   len(phrase.mora)*self._config.limit_ms_per_mora,
+  )
+
+ def _phrase_event(self,phrase:Phrase)->PhraseEvent:
   return PhraseEvent(
    phrase_id=phrase.id,
    display=phrase.display,
    mora=phrase.mora,
    mora_display=[to_hiragana(item) for item in phrase.mora],
    difficulty=phrase.difficulty,
+   limit_ms=self._time_limit(phrase),
   )
 
  def _build_judge(self,phrase:Phrase)->ProgressiveJudge:
@@ -181,6 +197,7 @@ class GameSession:
    raise ValueError(f"unknown phrase id: {phrase_id}")
   self._phrase=self._phrases[phrase_id]
   self._judge=self._build_judge(self._phrase)
+  self._limit_ms=self._time_limit(self._phrase)
   self._last_result=None
   self._reset_attempt()
   await self._publish(self._phrase_event(self._phrase))
@@ -250,6 +267,11 @@ class GameSession:
   self._phase=phase
   await self._publish(StateEvent(phase=phase))
 
+ def _remaining_ms(self,elapsed_ms:float)->float:
+  if self._limit_ms<=0.0:
+   return 0.0
+  return max(0.0,self._limit_ms-elapsed_ms)
+
  def _elapsed_ms(self)->float:
   return self._buffered_samples/self._config.sample_rate*1000.0
 
@@ -282,6 +304,7 @@ class GameSession:
     lit_mora=partial.lit_mora,
     mora_states=[MoraState(state) for state in partial.mora_states],
     first_error_mora=partial.first_error_mora,
+    remaining_ms=self._remaining_ms(elapsed_ms),
     combo=partial.combo,
     restarted=partial.restarted,
     hesitating=hesitating,
@@ -310,7 +333,10 @@ class GameSession:
   self._silence_started_samples=self._buffered_samples
 
  async def _finish(
-  self,abandoned:bool=False,hypothesis:Optional[List[str]]=None
+  self,
+  abandoned:bool=False,
+  timed_out:bool=False,
+  hypothesis:Optional[List[str]]=None,
  )->None:
   if self._judge is None or self._phrase is None or not self._buffer:
    await self._set_phase(Phase.READY)
@@ -324,7 +350,7 @@ class GameSession:
   self._restarts+=self._judge.restart_count(hypothesis)
   states=self._judge.final_states(result)
   combo=max_combo(states)
-  passed=(not abandoned) and result.accuracy>=self._config.pass_accuracy
+  passed=(not abandoned) and (not timed_out) and result.accuracy>=self._config.pass_accuracy
   self._streak=self._streak+1 if passed else 0
   breakdown=calculate(
    difficulty=self._phrase.difficulty,
@@ -349,6 +375,8 @@ class GameSession:
    phrase_id=self._phrase.id,
    passed=passed,
    abandoned=abandoned,
+   timed_out=timed_out,
+   limit_ms=self._limit_ms,
    grade=score_to_grade(result.accuracy,self._config.grades),
    accuracy=result.accuracy,
    duration_ms=duration_ms,
@@ -373,7 +401,7 @@ class GameSession:
   self._hold_task=asyncio.create_task(self._hold_then_advance())
   self._logger.info(
    f"result: phrase={self._phrase.id} accuracy={result.accuracy:.3f} passed={passed} "
-   f"abandoned={abandoned} score={breakdown.total} restarts={self._restarts} "
+   f"abandoned={abandoned} timed_out={timed_out} score={breakdown.total} restarts={self._restarts} "
    f"combo={combo} level={self._profile.level}"
   )
 
@@ -412,6 +440,9 @@ class GameSession:
     await self._resolve_pause()
     if self._phase!=Phase.LISTENING:
      continue
+   if self._limit_ms>0.0 and self._elapsed_ms()>=self._limit_ms:
+    await self._finish(timed_out=True)
+    continue
    if self._silence_started_samples is not None:
     quiet=self._buffered_samples-self._silence_started_samples
     if quiet/self._config.sample_rate*1000.0>=self._config.hesitation_ms:

@@ -8,6 +8,7 @@ const CONFETTI_COLORS = ["#ffe066", "#5ce18a", "#7fd4ff", "#ff8fa0", "#ffffff"];
 const CONFETTI_BASE = 24;
 const COMBO_MIN = 3;
 const COUNT_UP_MS = 700;
+const URGENT_RATIO = 0.3;
 
 const el = {
   stage: document.getElementById("stage"),
@@ -17,6 +18,9 @@ const el = {
   streak: document.getElementById("streak"),
   banner: document.getElementById("banner"),
   sentence: document.getElementById("sentence"),
+  timer: document.getElementById("timer"),
+  timerFill: document.getElementById("timer-fill"),
+  timerValue: document.getElementById("timer-value"),
   wave: document.getElementById("wave"),
   moraRow: document.getElementById("mora-row"),
   stamp: document.getElementById("stamp"),
@@ -35,6 +39,8 @@ const WAVE_IDLE = "#55606c";
 const WAVE_LIVE = "#5ce18a";
 
 let moraNodes = [];
+let limitMs = 0;
+let deadline = null;
 let lastCombo = 0;
 let countUpTimer = null;
 const waveLow = new Float32Array(WAVE_COLUMNS);
@@ -79,6 +85,7 @@ function drawWave() {
   context.lineWidth = Math.max(1, step);
   context.stroke();
   requestAnimationFrame(drawWave);
+requestAnimationFrame(tickTimer);
 }
 
 function replay(node, name) {
@@ -98,8 +105,36 @@ function setBubble(text) {
   replay(el.bubble);
 }
 
+function renderTimer(remainingMs) {
+  if (limitMs <= 0) {
+    el.timer.hidden = true;
+    return;
+  }
+  el.timer.hidden = false;
+  const ratio = Math.max(0, Math.min(1, remainingMs / limitMs));
+  el.timerFill.style.width = `${ratio * 100}%`;
+  el.timerValue.textContent = `${(remainingMs / 1000).toFixed(1)}秒`;
+  el.timer.dataset.urgent = String(ratio <= URGENT_RATIO);
+}
+
+function syncTimer(remainingMs) {
+  deadline = performance.now() + remainingMs;
+  renderTimer(remainingMs);
+}
+
+function tickTimer() {
+  if (deadline !== null) {
+    renderTimer(Math.max(0, deadline - performance.now()));
+  }
+  requestAnimationFrame(tickTimer);
+}
+
 function renderPhrase(event) {
   el.sentence.textContent = event.display;
+  limitMs = event.limit_ms || 0;
+  el.timer.dataset.show = "false";
+  deadline = null;
+  renderTimer(limitMs);
   el.moraRow.replaceChildren();
   const labels = event.mora_display || event.mora;
   moraNodes = labels.map((mora) => {
@@ -169,6 +204,7 @@ function countUp(target) {
 function renderProgress(event) {
   applyStates(event.mora_states);
   renderCombo(event.combo);
+  syncTimer(event.remaining_ms);
   if (event.hesitating) {
     el.face.dataset.mood = "hesitating";
     setBubble("あれ…？");
@@ -184,7 +220,18 @@ function renderProgress(event) {
 function renderResult(event) {
   applyStates(event.mora_states);
   el.combo.replaceChildren();
-  if (event.abandoned) {
+  el.timer.dataset.show = "false";
+  if (!event.timed_out) {
+    deadline = null;
+  }
+  if (event.timed_out) {
+    el.face.dataset.mood = "miss";
+    setBubble("間に合わない！");
+    el.stamp.dataset.passed = "false";
+    el.stampText.textContent = "時間切れ！";
+    deadline = null;
+    renderTimer(0);
+  } else if (event.abandoned) {
     el.face.dataset.mood = "giveup";
     setBubble("ギブアップ…");
     el.stamp.dataset.passed = "none";
@@ -234,12 +281,16 @@ function renderState(event) {
   if (event.phase === "listening") {
     el.face.dataset.mood = "speaking";
     el.stamp.dataset.show = "false";
+    el.timer.dataset.show = "true";
   } else if (event.phase !== "result") {
     el.face.dataset.mood = "idle";
     el.stamp.dataset.show = "false";
+    el.timer.dataset.show = "false";
     el.combo.replaceChildren();
     lastCombo = 0;
     applyStates(moraNodes.map(() => "pending"));
+    deadline = null;
+    renderTimer(limitMs);
   }
   if (BUBBLE[event.phase]) {
     setBubble(BUBBLE[event.phase]);
@@ -274,3 +325,4 @@ function connect() {
 
 connect();
 requestAnimationFrame(drawWave);
+requestAnimationFrame(tickTimer);

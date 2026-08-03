@@ -40,6 +40,7 @@ class PhraseEvent(BaseModel):
  mora:List[str]
  mora_display:List[str]
  difficulty:int
+ limit_ms:float=0.0
 
 
 class ProgressEvent(BaseModel):
@@ -48,6 +49,7 @@ class ProgressEvent(BaseModel):
  mora_states:List[MoraState]
  first_error_mora:Optional[int]=None
  combo:int=0
+ remaining_ms:float=0.0
  restarted:bool=False
  hesitating:bool=False
  elapsed_ms:float=0.0
@@ -70,6 +72,8 @@ class ResultEvent(BaseModel):
  max_combo:int=0
  restarts:int=0
  abandoned:bool=False
+ timed_out:bool=False
+ limit_ms:float=0.0
  best_score:int=0
  levels_gained:int=0
  overridden:bool=False
