@@ -47,6 +47,7 @@ class GameConfig:
  max_utterance_ms:float
  error_margin_mora:int
  result_hold_ms:float
+ auto_next:bool
  scoring:ScoringConfig
  vad:VadConfig
 
@@ -74,6 +75,7 @@ class GameSession:
   self._last_inference=0.0
   self._last_level=0.0
   self._last_result:Optional[ResultEvent]=None
+  self._streak=0
   self._busy=False
   self._progress_task:Optional[asyncio.Task]=None
   self._hold_task:Optional[asyncio.Task]=None
@@ -121,7 +123,8 @@ class GameSession:
  async def select(self,phrase_id:Optional[str]=None)->None:
   """出題する句を決めて待機状態にする"""
   if phrase_id is None:
-   phrase_id=random.choice(sorted(self._phrases))
+   candidates=[key for key in sorted(self._phrases) if self._phrase is None or key!=self._phrase.id]
+   phrase_id=random.choice(candidates or sorted(self._phrases))
   if phrase_id not in self._phrases:
    raise ValueError(f"unknown phrase id: {phrase_id}")
   self._cancel_hold()
@@ -137,8 +140,11 @@ class GameSession:
   """配信者が判定を手動で覆す"""
   if self._last_result is None:
    raise ValueError("no result to override")
+  self._streak=self._streak+1 if passed and not self._last_result.passed else (
+   0 if not passed else self._streak
+  )
   self._last_result=self._last_result.model_copy(
-   update={"passed":passed,"overridden":True}
+   update={"passed":passed,"overridden":True,"streak":self._streak}
   )
   await self._publish(self._last_result)
   self._logger.info(f"result overridden by operator: passed={passed}")
@@ -157,8 +163,12 @@ class GameSession:
    await asyncio.sleep(self._config.result_hold_ms/1000.0)
   except asyncio.CancelledError:
    return
-  if self._phase==Phase.RESULT:
-   await self._set_phase(Phase.READY)
+  if self._phase!=Phase.RESULT:
+   return
+  if self._config.auto_next:
+   await self.select()
+   return
+  await self._set_phase(Phase.READY)
 
  async def _set_phase(self,phase:Phase)->None:
   self._phase=phase
@@ -212,9 +222,12 @@ class GameSession:
    self._judge.origins[result.error_ref_indices[0]]
    if result.error_ref_indices else None
   )
+  passed=result.accuracy>=self._config.pass_accuracy
+  self._streak=self._streak+1 if passed else 0
   event=ResultEvent(
    phrase_id=self._phrase.id,
-   passed=result.accuracy>=self._config.pass_accuracy,
+   passed=passed,
+   streak=self._streak,
    grade=score_to_grade(result.accuracy,self._config.grades),
    accuracy=result.accuracy,
    duration_ms=duration_ms,

@@ -1,29 +1,40 @@
-const PHASE_LABEL = {
-  idle: "IDLE",
-  ready: "READY",
-  listening: "LISTENING",
-  result: "RESULT",
+const BUBBLE = {
+  idle: "じゅんびちゅう",
+  ready: "よーい…",
+  listening: "はやくち！",
 };
 
+const CONFETTI_COLORS = ["#ffe066", "#5ce18a", "#7fd4ff", "#ff8fa0", "#ffffff"];
+const CONFETTI_COUNT = 26;
+
 const el = {
-  display: document.getElementById("display"),
-  difficulty: document.getElementById("difficulty"),
-  phase: document.getElementById("phase"),
+  stage: document.getElementById("stage"),
+  face: document.getElementById("face"),
+  bubble: document.getElementById("bubble"),
+  streak: document.getElementById("streak"),
+  title: document.getElementById("title"),
   moraRow: document.getElementById("mora-row"),
-  meter: document.getElementById("meter"),
-  resultCard: document.getElementById("result-card"),
-  verdict: document.getElementById("verdict"),
-  accuracy: document.getElementById("accuracy"),
-  duration: document.getElementById("duration"),
-  grade: document.getElementById("grade"),
-  note: document.getElementById("result-note"),
+  stamp: document.getElementById("stamp"),
+  stampText: document.getElementById("stamp-text"),
+  stampGrade: document.getElementById("stamp-grade"),
+  stampTime: document.getElementById("stamp-time"),
+  confetti: document.getElementById("confetti"),
 };
 
 let moraNodes = [];
 
+function setBubble(text) {
+  if (el.bubble.textContent === text) {
+    return;
+  }
+  el.bubble.textContent = text;
+  el.bubble.style.animation = "none";
+  void el.bubble.offsetWidth;
+  el.bubble.style.animation = "";
+}
+
 function renderPhrase(event) {
-  el.display.textContent = event.display;
-  el.difficulty.textContent = "★".repeat(event.difficulty);
+  el.title.textContent = event.display;
   el.moraRow.replaceChildren();
   moraNodes = event.mora.map((mora) => {
     const node = document.createElement("span");
@@ -33,8 +44,7 @@ function renderPhrase(event) {
     el.moraRow.appendChild(node);
     return node;
   });
-  el.meter.style.width = "0%";
-  hideResult();
+  el.stamp.dataset.show = "false";
 }
 
 function applyStates(states) {
@@ -46,43 +56,48 @@ function applyStates(states) {
   });
 }
 
-function hideResult() {
-  el.resultCard.dataset.hidden = "true";
+function burst() {
+  for (let index = 0; index < CONFETTI_COUNT; index += 1) {
+    const piece = document.createElement("span");
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.background = CONFETTI_COLORS[index % CONFETTI_COLORS.length];
+    piece.style.animationDelay = `${Math.random() * 0.35}s`;
+    el.confetti.appendChild(piece);
+    setTimeout(() => piece.remove(), 2200);
+  }
 }
 
 function renderProgress(event) {
   applyStates(event.mora_states);
-  const total = moraNodes.length || 1;
-  el.meter.style.width = `${Math.min(100, (event.lit_mora / total) * 100)}%`;
 }
 
 function renderResult(event) {
   applyStates(event.mora_states);
-  el.meter.style.width = "100%";
-  el.verdict.textContent = event.passed ? "CLEAR" : "MISS";
-  el.verdict.dataset.passed = String(event.passed);
-  el.accuracy.textContent = `${Math.round(event.accuracy * 100)}%`;
-  el.duration.textContent = `${(event.duration_ms / 1000).toFixed(2)}s`;
-  el.grade.textContent = event.grade;
-  const notes = [];
-  if (event.first_error_mora !== null && event.first_error_mora !== undefined) {
-    notes.push(`${event.first_error_mora + 1}Mora目で崩れました`);
+  el.face.dataset.mood = event.passed ? "clear" : "miss";
+  setBubble(event.passed ? "いえた！" : "かんだ！");
+  el.stamp.dataset.passed = String(event.passed);
+  el.stampText.textContent = event.passed ? "せいかい！" : "ざんねん！";
+  el.stampGrade.textContent = event.grade;
+  el.stampTime.textContent = `${(event.duration_ms / 1000).toFixed(2)}びょう`;
+  el.stamp.dataset.show = "true";
+  el.streak.textContent = event.streak > 1 ? "🔥".repeat(Math.min(event.streak, 5)) : "";
+  if (event.passed) {
+    burst();
   }
-  if (event.overridden) {
-    notes.push("配信者による判定変更");
-  }
-  el.note.textContent = notes.join(" / ");
-  el.resultCard.dataset.hidden = "false";
 }
 
 function renderState(event) {
-  el.phase.textContent = PHASE_LABEL[event.phase] || event.phase;
-  if (event.phase === "listening" || event.phase === "ready") {
-    hideResult();
-  }
-  if (event.phase === "ready") {
+  el.stage.dataset.phase = event.phase;
+  if (event.phase === "listening") {
+    el.face.dataset.mood = "speaking";
+    el.stamp.dataset.show = "false";
+  } else if (event.phase !== "result") {
+    el.face.dataset.mood = "idle";
+    el.stamp.dataset.show = "false";
     applyStates(moraNodes.map(() => "pending"));
-    el.meter.style.width = "0%";
+  }
+  if (BUBBLE[event.phase]) {
+    setBubble(BUBBLE[event.phase]);
   }
 }
 

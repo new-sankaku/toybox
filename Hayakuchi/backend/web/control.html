@@ -3,44 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hayakuchi Control</title>
+<title>Hayakuchi そうさ</title>
 <link rel="stylesheet" href="surface.css">
 <link rel="stylesheet" href="control.css">
 </head>
 <body class="nier-surface-main">
+
 <header class="bar nier-surface-panel">
-  <h1>Hayakuchi</h1>
-  <span class="badge" id="phase">READY</span>
-  <span class="hint">Overlay URL: <code id="overlay-url"></code></span>
+  <h1>はやくち</h1>
+  <span class="now" id="now">よーい</span>
+  <span class="obs">OBSにこれを入れてね <code id="overlay-url"></code></span>
 </header>
 
 <main class="layout">
+
   <section class="panel nier-surface-panel">
-    <h2>出題</h2>
+    <h2>マイク</h2>
     <div class="mic">
+      <span class="mic-icon" id="mic-icon">🎤</span>
       <div class="mic-meter"><div class="mic-fill" id="mic-fill"></div></div>
-      <span class="mono" id="mic-label">-</span>
     </div>
-    <div class="actions">
-      <button id="random">ランダム出題</button>
-    </div>
-    <ul class="phrase-list" id="phrase-list"></ul>
+    <p class="help" id="mic-help">こえを出すとバーがのびます</p>
   </section>
 
   <section class="panel nier-surface-panel">
-    <h2>判定</h2>
-    <div class="verdict-row">
-      <span class="verdict" id="verdict">-</span>
-      <span class="mono" id="detail"></span>
+    <h2>いま の ことば</h2>
+    <p class="current" id="current">-</p>
+    <div class="big-actions">
+      <button class="huge" id="next"><span>🎲</span>つぎの ことば</button>
+      <button class="huge" id="again"><span>🔁</span>もういちど</button>
     </div>
-    <p class="hint">誤判定と感じた場合はここで覆せます。Overlayへ即時反映されます。</p>
-    <div class="actions">
-      <button id="pass" class="ok">CLEARにする</button>
-      <button id="fail" class="ng">MISSにする</button>
-    </div>
-    <h3>認識結果</h3>
-    <pre class="mono wrap" id="hypothesis">-</pre>
   </section>
+
+  <section class="panel nier-surface-panel">
+    <h2>けっか</h2>
+    <p class="verdict" id="verdict">-</p>
+    <p class="help">まちがって いたら ここで なおせます</p>
+    <div class="big-actions">
+      <button class="huge ok" id="pass"><span>⭕</span>せいかい</button>
+      <button class="huge ng" id="fail"><span>❌</span>ざんねん</button>
+    </div>
+    <details class="detail">
+      <summary>くわしく</summary>
+      <p class="mono wrap" id="detail">-</p>
+      <p class="mono wrap" id="hypothesis">-</p>
+    </details>
+  </section>
+
+  <section class="panel nier-surface-panel wide">
+    <h2>ことば を えらぶ</h2>
+    <ul class="phrase-list" id="phrase-list"></ul>
+  </section>
+
 </main>
 <script src="control.js"></script>
 </body>

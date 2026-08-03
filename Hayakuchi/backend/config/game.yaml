@@ -18,7 +18,8 @@ game:
   level_interval_ms: 150.0
   max_utterance_ms: 12000.0
   error_margin_mora: 2
-  result_hold_ms: 6000.0
+  result_hold_ms: 5000.0
+  auto_next: true
   pass_accuracy: 0.9
   grades:
     S: 1.0

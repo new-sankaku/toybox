@@ -128,6 +128,7 @@ def load_game_config(path:Path)->GameServerConfig:
    max_utterance_ms=float(game["max_utterance_ms"]),
    error_margin_mora=int(game["error_margin_mora"]),
    result_hold_ms=float(game["result_hold_ms"]),
+   auto_next=bool(game["auto_next"]),
    scoring=ScoringConfig.from_dict(payload.get("scoring")),
    vad=VadConfig.from_dict(payload.get("vad")),
   ),

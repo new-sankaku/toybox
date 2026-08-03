@@ -59,6 +59,7 @@ class ResultEvent(BaseModel):
  first_error_mora:Optional[int]=None
  reference:str
  hypothesis:str
+ streak:int=0
  overridden:bool=False
 
 

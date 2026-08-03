@@ -1,10 +1,19 @@
+const PHASE_LABEL = {
+  idle: "じゅんびちゅう",
+  ready: "よーい",
+  listening: "はなしてる",
+  result: "けっか",
+};
+
 const el = {
-  phase: document.getElementById("phase"),
+  now: document.getElementById("now"),
   overlayUrl: document.getElementById("overlay-url"),
   phraseList: document.getElementById("phrase-list"),
-  random: document.getElementById("random"),
+  next: document.getElementById("next"),
+  again: document.getElementById("again"),
+  current: document.getElementById("current"),
   micFill: document.getElementById("mic-fill"),
-  micLabel: document.getElementById("mic-label"),
+  micIcon: document.getElementById("mic-icon"),
   verdict: document.getElementById("verdict"),
   detail: document.getElementById("detail"),
   hypothesis: document.getElementById("hypothesis"),
@@ -36,40 +45,42 @@ async function loadPhrases() {
     title.className = "phrase-title";
     title.textContent = phrase.display;
     const meta = document.createElement("span");
-    meta.className = "mono";
-    meta.textContent = `★${phrase.difficulty} / ${phrase.mora_count}拍`;
+    meta.className = "phrase-meta";
+    meta.textContent = `${"★".repeat(phrase.difficulty)} ${phrase.mora_count}おん`;
     item.append(title, meta);
     item.addEventListener("click", () => send({ type: "select", phrase_id: phrase.phrase_id }));
     el.phraseList.appendChild(item);
   });
 }
 
-function markActive(phraseId) {
-  activeId = phraseId;
+function markActive(event) {
+  activeId = event.phrase_id;
+  el.current.textContent = event.display;
   el.phraseList.querySelectorAll("li").forEach((item) => {
-    item.dataset.active = String(item.dataset.phraseId === phraseId);
+    item.dataset.active = String(item.dataset.phraseId === activeId);
   });
 }
 
 function renderLevel(event) {
   const ratio = (event.level_db - MIN_DB) / (MAX_DB - MIN_DB);
   el.micFill.style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
-  el.micLabel.textContent = `${event.level_db.toFixed(0)}dB / floor ${event.floor_db.toFixed(0)}dB${event.speaking ? " / speaking" : ""}`;
+  el.micIcon.dataset.speaking = String(event.speaking);
 }
 
 function renderResult(event) {
-  el.verdict.textContent = event.passed ? "CLEAR" : "MISS";
+  el.verdict.textContent = event.passed ? "せいかい！" : "ざんねん！";
   el.verdict.dataset.passed = String(event.passed);
   const parts = [
-    `accuracy ${(event.accuracy * 100).toFixed(1)}%`,
-    `${(event.duration_ms / 1000).toFixed(2)}s`,
-    `grade ${event.grade}`,
+    `せいかくさ ${(event.accuracy * 100).toFixed(1)}%`,
+    `${(event.duration_ms / 1000).toFixed(2)}びょう`,
+    `ランク ${event.grade}`,
+    `れんぞく ${event.streak}かい`,
   ];
   if (event.first_error_mora !== null && event.first_error_mora !== undefined) {
-    parts.push(`初回誤り ${event.first_error_mora + 1}拍目`);
+    parts.push(`${event.first_error_mora + 1}おんめで かんだ`);
   }
   if (event.overridden) {
-    parts.push("手動変更済み");
+    parts.push("てなおし ずみ");
   }
   el.detail.textContent = parts.join(" / ");
   el.hypothesis.textContent = event.hypothesis || "-";
@@ -77,9 +88,9 @@ function renderResult(event) {
 
 const HANDLERS = {
   state: (event) => {
-    el.phase.textContent = event.phase.toUpperCase();
+    el.now.textContent = PHASE_LABEL[event.phase] || event.phase;
   },
-  phrase: (event) => markActive(event.phrase_id),
+  phrase: markActive,
   level: renderLevel,
   result: renderResult,
 };
@@ -96,7 +107,8 @@ function connect() {
   socket.addEventListener("close", () => setTimeout(connect, 1000));
 }
 
-el.random.addEventListener("click", () => send({ type: "select" }));
+el.next.addEventListener("click", () => send({ type: "select" }));
+el.again.addEventListener("click", () => send({ type: "select", phrase_id: activeId }));
 el.pass.addEventListener("click", () => send({ type: "override", passed: true }));
 el.fail.addEventListener("click", () => send({ type: "override", passed: false }));
 
