@@ -9,55 +9,62 @@
 <body>
 <div class="stage" id="stage" data-phase="ready">
 
-  <div class="banner" id="banner"></div>
+  <header class="hud">
+    <span class="level">
+      <b class="level-tag" id="level-tag">Lv.1</b>
+      <span class="level-bar"><i class="level-fill" id="level-fill"></i></span>
+    </span>
+    <span class="streak" id="streak"></span>
+  </header>
 
-  <div class="hero">
-    <svg class="face" id="face" data-mood="idle" viewBox="0 0 220 200" aria-hidden="true">
-      <g class="lines">
-        <rect x="2" y="70" width="30" height="7" rx="3.5"/>
-        <rect x="10" y="96" width="22" height="7" rx="3.5"/>
-        <rect x="2" y="122" width="30" height="7" rx="3.5"/>
-        <rect x="188" y="70" width="30" height="7" rx="3.5"/>
-        <rect x="188" y="96" width="22" height="7" rx="3.5"/>
-        <rect x="188" y="122" width="30" height="7" rx="3.5"/>
-      </g>
-      <g class="body">
-        <circle class="head" cx="110" cy="100" r="76"/>
-        <circle class="cheek" cx="60" cy="122" r="14"/>
-        <circle class="cheek" cx="160" cy="122" r="14"/>
-        <g class="eyes eyes-normal">
-          <circle cx="82" cy="80" r="10"/>
-          <circle cx="138" cy="80" r="10"/>
+  <div class="main">
+    <div class="hero">
+      <div class="bubble" id="bubble">よーい…</div>
+      <svg class="face" id="face" data-mood="idle" viewBox="0 0 220 200" aria-hidden="true">
+        <g class="lines">
+          <rect x="2" y="70" width="30" height="7" rx="3.5"/>
+          <rect x="10" y="96" width="22" height="7" rx="3.5"/>
+          <rect x="2" y="122" width="30" height="7" rx="3.5"/>
+          <rect x="188" y="70" width="30" height="7" rx="3.5"/>
+          <rect x="188" y="96" width="22" height="7" rx="3.5"/>
+          <rect x="188" y="122" width="30" height="7" rx="3.5"/>
         </g>
-        <g class="eyes eyes-happy">
-          <path d="M68 86 q14 -20 28 0"/>
-          <path d="M124 86 q14 -20 28 0"/>
+        <g class="body">
+          <circle class="head" cx="110" cy="100" r="76"/>
+          <circle class="cheek" cx="60" cy="122" r="14"/>
+          <circle class="cheek" cx="160" cy="122" r="14"/>
+          <g class="eyes eyes-normal">
+            <circle cx="82" cy="80" r="10"/>
+            <circle cx="138" cy="80" r="10"/>
+          </g>
+          <g class="eyes eyes-happy">
+            <path d="M68 86 q14 -20 28 0"/>
+            <path d="M124 86 q14 -20 28 0"/>
+          </g>
+          <g class="eyes eyes-dizzy">
+            <path d="M72 70 l20 20 M92 70 l-20 20"/>
+            <path d="M128 70 l20 20 M148 70 l-20 20"/>
+          </g>
+          <g class="eyes eyes-blank">
+            <path d="M70 82 h24"/>
+            <path d="M126 82 h24"/>
+          </g>
+          <ellipse class="mouth" cx="110" cy="132" rx="30" ry="22"/>
+          <ellipse class="tongue" cx="110" cy="146" rx="16" ry="9"/>
         </g>
-        <g class="eyes eyes-dizzy">
-          <path d="M72 70 l20 20 M92 70 l-20 20"/>
-          <path d="M128 70 l20 20 M148 70 l-20 20"/>
+        <g class="sweat">
+          <path d="M172 42 q9 14 0 20 q-9 -6 0 -20"/>
         </g>
-        <g class="eyes eyes-blank">
-          <path d="M70 82 h24"/>
-          <path d="M126 82 h24"/>
-        </g>
-        <ellipse class="mouth" cx="110" cy="132" rx="30" ry="22"/>
-        <ellipse class="tongue" cx="110" cy="146" rx="16" ry="9"/>
-      </g>
-      <g class="sweat">
-        <path d="M172 42 q9 14 0 20 q-9 -6 0 -20"/>
-      </g>
-    </svg>
-    <div class="bubble" id="bubble">よーい…</div>
-    <div class="combo" id="combo"></div>
-    <div class="streak" id="streak"></div>
+      </svg>
+      <div class="combo" id="combo"></div>
+    </div>
+
+    <section class="board">
+      <h1 class="sentence" id="sentence">-</h1>
+      <div class="mora-row" id="mora-row"></div>
+      <canvas class="wave" id="wave" width="1600" height="200"></canvas>
+    </section>
   </div>
-
-  <section class="board">
-    <h1 class="sentence" id="sentence">-</h1>
-    <div class="mora-row" id="mora-row"></div>
-    <canvas class="wave" id="wave" width="1200" height="90"></canvas>
-  </section>
 
   <div class="stamp" id="stamp" data-show="false">
     <span class="stamp-text" id="stamp-text">正解！</span>
@@ -68,11 +75,7 @@
     <span class="stamp-score" id="stamp-score">0</span>
   </div>
 
-  <div class="level">
-    <span class="level-tag" id="level-tag">Lv.1</span>
-    <span class="level-bar"><i class="level-fill" id="level-fill"></i></span>
-  </div>
-
+  <div class="banner" id="banner"></div>
   <div class="confetti" id="confetti"></div>
 </div>
 <script src="overlay.js"></script>

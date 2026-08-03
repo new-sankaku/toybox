@@ -91,7 +91,7 @@ class LevelEvent(BaseModel):
  level_db:float
  floor_db:float
  speaking:bool
- envelope:List[float]=Field(default_factory=list)
+ waveform:List[float]=Field(default_factory=list)
 
 
 class SelectCommand(BaseModel):

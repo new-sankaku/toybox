@@ -90,3 +90,21 @@ def test_unknown_op_raises():
 def test_load_conditions_requires_entries():
  with pytest.raises(ValueError):
   load_conditions([])
+
+
+def test_waveform_points_keep_both_extremes():
+ from hayakuchi.audio import waveform_points
+ frame=np.concatenate([np.full(120,-0.6,dtype=np.float32),np.full(120,0.8,dtype=np.float32)])
+ points=waveform_points(frame,2)
+ assert points==pytest.approx([-0.6,-0.6,0.8,0.8],abs=1e-6)
+
+
+def test_waveform_points_reject_zero_buckets():
+ from hayakuchi.audio import waveform_points
+ with pytest.raises(ValueError):
+  waveform_points(np.zeros(10,dtype=np.float32),0)
+
+
+def test_waveform_points_on_empty_frame():
+ from hayakuchi.audio import waveform_points
+ assert waveform_points(np.zeros(0,dtype=np.float32),4)==[]

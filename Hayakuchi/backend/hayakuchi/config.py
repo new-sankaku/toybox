@@ -135,6 +135,7 @@ def load_game_config(path:Path)->GameServerConfig:
    completion_ratio=float(game["completion_ratio"]),
    restart_cost=float(game["restart_cost"]),
    restart_skip_threshold=int(game["restart_skip_threshold"]),
+   waveform_buckets=int(game["waveform_buckets"]),
    result_hold_ms=float(game["result_hold_ms"]),
    auto_next=bool(game["auto_next"]),
    scoring=ScoringConfig.from_dict(payload.get("scoring")),

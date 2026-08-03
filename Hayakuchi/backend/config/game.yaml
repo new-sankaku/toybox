@@ -23,6 +23,7 @@ game:
   completion_ratio: 0.85
   restart_cost: 3.0
   restart_skip_threshold: 3
+  waveform_buckets: 4
   result_hold_ms: 5000.0
   auto_next: true
   pass_accuracy: 0.9

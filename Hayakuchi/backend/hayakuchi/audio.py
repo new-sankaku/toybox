@@ -4,7 +4,7 @@
 """
 import wave
 from pathlib import Path
-from typing import Tuple
+from typing import List,Tuple
 
 import numpy as np
 
@@ -60,6 +60,25 @@ def resample(samples:np.ndarray,source_rate:int,target_rate:int)->np.ndarray:
   spectrum=np.concatenate([spectrum,np.zeros(bins-spectrum.size,dtype=spectrum.dtype)])
  resampled=np.fft.irfft(spectrum,n=target_length)*(target_length/samples.size)
  return resampled.astype(np.float32)
+
+
+def waveform_points(frame:np.ndarray,buckets:int)->List[float]:
+ """Frameを区間ごとの最小値と最大値の並びへ縮約する
+
+ 振幅の絶対値だけでは波形にならない。区間ごとの上下の振れ幅を保つことで、
+ 描画側で本来の波形と同じ形を再現できる。
+ """
+ if buckets<=0:
+  raise ValueError("waveform buckets must be positive")
+ if frame.size==0:
+  return []
+ points:List[float]=[]
+ for chunk in np.array_split(frame,buckets):
+  if chunk.size==0:
+   points.extend((0.0,0.0))
+   continue
+  points.extend((float(chunk.min()),float(chunk.max())))
+ return points
 
 
 def duration_seconds(samples:np.ndarray,sample_rate:int)->float:

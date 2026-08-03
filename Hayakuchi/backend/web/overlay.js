@@ -29,39 +29,56 @@ const el = {
   confetti: document.getElementById("confetti"),
 };
 
-const WAVE_SLOTS = 150;
-const WAVE_IDLE = "#4a5561";
+const WAVE_COLUMNS = 800;
+const WAVE_GAIN = 1.6;
+const WAVE_IDLE = "#55606c";
 const WAVE_LIVE = "#5ce18a";
 
 let moraNodes = [];
 let lastCombo = 0;
 let countUpTimer = null;
-const envelope = new Array(WAVE_SLOTS).fill(0);
+const waveLow = new Float32Array(WAVE_COLUMNS);
+const waveHigh = new Float32Array(WAVE_COLUMNS);
 let waveColor = WAVE_IDLE;
+
+function pushWaveform(values) {
+  const pairs = Math.floor(values.length / 2);
+  if (pairs <= 0) {
+    return;
+  }
+  waveLow.copyWithin(0, pairs);
+  waveHigh.copyWithin(0, pairs);
+  const base = WAVE_COLUMNS - pairs;
+  for (let index = 0; index < pairs; index += 1) {
+    waveLow[base + index] = values[index * 2];
+    waveHigh[base + index] = values[index * 2 + 1];
+  }
+}
 
 function drawWave() {
   const canvas = el.wave;
   const context = canvas.getContext("2d");
   const { width, height } = canvas;
   const middle = height / 2;
-  const slot = width / WAVE_SLOTS;
+  const scale = (height / 2 - 2) * WAVE_GAIN;
+  const step = width / WAVE_COLUMNS;
   context.clearRect(0, 0, width, height);
-  context.fillStyle = waveColor;
-  for (let index = 0; index < WAVE_SLOTS; index += 1) {
-    const amplitude = Math.min(1, envelope[index] * 1.8) * (middle - 2);
-    const bar = Math.max(1.5, amplitude);
-    context.fillRect(index * slot + slot * 0.2, middle - bar, slot * 0.6, bar * 2);
+  context.strokeStyle = "rgba(255,255,255,0.18)";
+  context.lineWidth = 1;
+  context.beginPath();
+  context.moveTo(0, middle);
+  context.lineTo(width, middle);
+  context.stroke();
+  context.beginPath();
+  for (let index = 0; index < WAVE_COLUMNS; index += 1) {
+    const x = index * step;
+    context.moveTo(x, middle - Math.min(middle - 1, waveHigh[index] * scale));
+    context.lineTo(x, middle - Math.max(-(middle - 1), waveLow[index] * scale));
   }
-  context.fillStyle = "rgba(255,255,255,0.25)";
-  context.fillRect(0, middle - 0.5, width, 1);
+  context.strokeStyle = waveColor;
+  context.lineWidth = Math.max(1, step);
+  context.stroke();
   requestAnimationFrame(drawWave);
-}
-
-function pushEnvelope(values) {
-  values.forEach((value) => {
-    envelope.push(value);
-    envelope.shift();
-  });
 }
 
 function replay(node, name) {
@@ -218,7 +235,7 @@ function renderState(event) {
 }
 
 function renderLevelMeter(event) {
-  pushEnvelope(event.envelope || []);
+  pushWaveform(event.waveform || []);
   waveColor = event.speaking ? WAVE_LIVE : WAVE_IDLE;
 }
 

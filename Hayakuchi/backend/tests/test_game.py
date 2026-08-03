@@ -73,6 +73,7 @@ def _config(**overrides)->GameConfig:
   completion_ratio=0.85,
   restart_cost=3.0,
   restart_skip_threshold=3,
+  waveform_buckets=4,
   scoring=ScoringConfig(),
   vad=VadConfig(frame_ms=_FRAME_MS,start_frames=2,hangover_ms=90.0,min_speech_ms=60.0),
   score=ScoreRules(),
