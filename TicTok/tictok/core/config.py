@@ -1012,6 +1012,30 @@ def get_clip_duration_tolerance_seconds() -> float:
     return float(os.environ.get("TICTOK_CLIP_DURATION_TOLERANCE_SECONDS", "1.0"))
 
 
+def get_clip_sidecar_enabled() -> bool:
+    """Whether a clip export also writes the transcript/comment sidecars next to the mp4.
+    The clip itself is a stream copy of a video+audio recording, so nothing about what was
+    said or posted survives into the file; without the sidecars that material stays in the
+    DB and the clip reaches an NLE as pictures and sound only."""
+    return os.environ.get("TICTOK_CLIP_SIDECAR", "1").lower() in ("1", "true", "yes")
+
+
+def get_comment_subtitle_seconds() -> float:
+    """How long one comment cue stays on screen. Comments are point events (they have a
+    post time and no duration), so a cue length has to come from somewhere; this is it.
+    A cue is cut short when the next one opens, so this is an upper bound, not a fixed
+    length."""
+    return float(os.environ.get("TICTOK_COMMENT_SUBTITLE_SECONDS", "4.0"))
+
+
+def get_comment_subtitle_max_lines() -> int:
+    """How many comments may share one cue. Comments arriving while a cue is open are
+    merged into it rather than opening an overlapping cue, because SRT cues are meant to
+    be sequential and overlapping ones are dropped or mis-ordered by many parsers. Past
+    this count the cue closes early so a burst does not become a wall of text."""
+    return int(os.environ.get("TICTOK_COMMENT_SUBTITLE_MAX_LINES", "4"))
+
+
 # ---- 通知(webhook) ----
 # 宛先URLだけは設定画面(DB)ではなく.env/環境変数に置く。Discord/Slackのwebhook URLは
 # それ自体が投稿権限を持つ資格情報であり、設定画面の値は(a)画面に平文で表示され、

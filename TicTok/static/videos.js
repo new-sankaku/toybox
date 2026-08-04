@@ -852,6 +852,7 @@ async function loadComments(recordingId) {
   state.comments = [];
   state.commentIndex = -1;
   $("comments").innerHTML = "";
+  COMMENT_EXPORT_BUTTONS.forEach(([id]) => ($(id).disabled = true));
   $("comment-note").textContent = "読み込み中…";
   let data;
   try {
@@ -869,8 +870,17 @@ async function loadComments(recordingId) {
     // 「0件」と「未index」はsearch_hits上で区別が付かない(空indexは行を残さない)ので、
     // 断定せずどちらもあり得る文言にする。
     : "Commentがないか、検索indexが未構築です。";
+  COMMENT_EXPORT_BUTTONS.forEach(([id]) => ($(id).disabled = !state.comments.length));
   renderComments();
   highlightActiveComment();
+}
+
+// 書き出しの中身はserverが作る。同じ整形をJS側にも書くと、cueの長さやtimecodeの表記が
+// 2箇所に分かれてやがて食い違う。
+const COMMENT_EXPORT_BUTTONS = [["save-comments-srt", "srt"], ["save-comments-csv", "csv"]];
+
+function commentExportUrl(format) {
+  return `/api/recordings/${state.current.recording_id}/comments/export?format=${format}`;
 }
 
 function renderComments() {
@@ -1460,6 +1470,18 @@ function bindClipControls() {
   syncClipControls(false);
 }
 
+// 切り抜きmp4にはvideoとaudioしか入らないので、字幕とcommentが隣のfileとして出たのか
+// 出なかったのかを必ず出す。黙って出さないと、利用者は素材を編集ソフトへ渡してから
+// 「文字起こしが付いていない」ことに気付くことになる。
+function clipSidecarNote(sidecars) {
+  if (!sidecars) return "";
+  if (sidecars.error) return ` / 字幕・commentの書き出しに失敗: ${sidecars.error}`;
+  if (sidecars.skipped) return ` / ${sidecars.skipped}`;
+  if (!sidecars.files.length) return " / 字幕・commentはこの区間にありません。";
+  const stale = sidecars.timemap_stale ? "（時刻mapが旧版のためズレの可能性あり）" : "";
+  return ` / 同名で${sidecars.files.length}件の字幕・commentも出力${stale}`;
+}
+
 async function runClip() {
   if (!state.current || state.cutIn === null || state.cutOut === null) return;
   const button = $("do-clip");
@@ -1472,7 +1494,7 @@ async function runClip() {
       label: state.query,
       ...clipOptions(),
     });
-    $("player-status").textContent = `出力: ${result.path}`;
+    $("player-status").textContent = `出力: ${result.path}${clipSidecarNote(result.sidecars)}`;
     await copyText(result.path, "切り出しpathをcopyしました。");
   } catch (err) {
     $("player-status").textContent = err.message;
@@ -2686,6 +2708,12 @@ function bind() {
   $("copy-chapters").addEventListener("click", copyChapterText);
   $("save-chapters").addEventListener("click", () => {
     if (state.current) location.href = chapterExportUrl("vtt");
+  });
+
+  COMMENT_EXPORT_BUTTONS.forEach(([id, format]) => {
+    $(id).addEventListener("click", () => {
+      if (state.current) location.href = commentExportUrl(format);
+    });
   });
 
   $("comments").addEventListener("click", (event) => {

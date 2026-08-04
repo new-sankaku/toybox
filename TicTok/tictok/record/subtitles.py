@@ -76,6 +76,30 @@ def usable_segments(segments, media_duration=None) -> list:
     return items
 
 
+def window_segments(segments, start: float, end: float, origin=None) -> list:
+    """[start, end]に掛かるsegmentだけを、originを0とする相対時刻へ写す。
+
+    切り抜きmp4のsidecarを作るための窓取りで、originには切り抜きの**実際の内容開始**
+    (clipper.make_clipのactual_start_seconds)を渡す。stream copyは要求位置ではなく直前の
+    keyframeから始まるため、要求のstartを0点にすると字幕がlead秒ぶん後ろへずれる。
+
+    窓の端に掛かるsegmentは落とさず端で打ち切る。落とすと切り抜きの冒頭・末尾の発話が
+    まるごと字幕から消え、「その区間は無言だった」と読めてしまう。"""
+    start = float(start)
+    end = float(end)
+    origin = start if origin is None else float(origin)
+    items = []
+    for seg in usable_segments(segments):
+        if seg["end"] <= start or seg["start"] >= end:
+            continue
+        lo = max(seg["start"], start) - origin
+        hi = min(seg["end"], end) - origin
+        if hi <= lo:
+            continue
+        items.append({"start": max(0.0, lo), "end": max(0.0, hi), "text": seg["text"]})
+    return items
+
+
 def _clock(seconds: float, millis_sep: str) -> str:
     total_ms = int(round(max(0.0, seconds) * 1000))
     ms = total_ms % 1000
@@ -84,6 +108,11 @@ def _clock(seconds: float, millis_sep: str) -> str:
     m = (total_s // 60) % 60
     h = total_s // 3600
     return f"{h:02d}:{m:02d}:{s:02d}{millis_sep}{ms:03d}"
+
+
+def clock(seconds: float, millis_sep: str = ",") -> str:
+    """字幕timecode(HH:MM:SS<sep>mmm)。CSVなど字幕以外の書き出しからも使う。"""
+    return _clock(seconds, millis_sep)
 
 
 def to_srt(segments, media_duration=None) -> str:

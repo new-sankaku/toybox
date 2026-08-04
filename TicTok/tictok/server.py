@@ -84,6 +84,7 @@ from tictok.record.recorder import (
 from tictok.record.transcription import STTError, stt_available, stt_status
 from tictok.record.transcription import transcribe as stt_transcribe
 from tictok.record.transcribe_queue import TranscribeQueue, backfill_search_index
+from tictok.media import clip_sidecar, comment_track
 from tictok.media.clipper import make_clip
 from tictok.media.thumbnails import ensure_sprite, sprite_path, thumbnail_artifact_paths
 from tictok.media.waveform import (
@@ -3019,19 +3020,27 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
     recording = storage.get_recording(recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
-    src = _clip_source(recording, params.get("variant") or "source")
+    variant = params.get("variant") or "source"
+    src = _clip_source(recording, variant)
     normalize = _clip_normalize(params.get("normalize_audio"))
     precise = bool(params.get("precise"))
     total = len(ranges)
     files = []
     total_bytes = 0
+    # 転写とcommentはbatch全体で同じものなので、範囲ごとに引き直さず1回だけ読む。
+    sidecar_skipped = clip_sidecar.skip_reason(variant)
+    transcript = None if sidecar_skipped else await asyncio.to_thread(
+        storage.get_transcript, recording_id)
+    comments = [] if sidecar_skipped else await asyncio.to_thread(
+        storage.search_hits_for, recording_id, indexer.SOURCE_COMMENT)
+    sidecar_files = []
     for index, item in enumerate(ranges):
         cancel.check_cancelled()
         await report(f"({index + 1}/{total}) 切り出し中",
                      int(index * 100 / total) if total else 0)
         try:
             async with _job_ops("clip", recording_id, stem=src.stem,
-                                variant=params.get("variant") or "source",
+                                variant=variant,
                                 job_registry_id=job["job_id"],
                                 **audio_norm.describe(normalize)):
                 result = await make_clip(
@@ -3041,14 +3050,19 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
             raise HTTPException(status_code=500, detail=str(exc))
         files.append(result["filename"])
         total_bytes += result["bytes"]
+        if not sidecar_skipped:
+            sidecar = await asyncio.to_thread(
+                clip_sidecar.write_safely, result, variant, transcript, comments)
+            sidecar_files.extend(sidecar["files"])
         # 完了ぶんを必ず報告する。開始時の報告だけだと1件のbatchは終始0%のままで、
         # 複数件でも最後の1本が丸ごと「進捗なし」の区間になる。
         await report(f"({index + 1}/{total}) 切り出し済み",
                      int((index + 1) * 100 / total) if total else 100)
     return {"recording_id": recording_id, "count": len(files), "files": files,
             "filename": files[0] if len(files) == 1 else "",
-            "bytes": total_bytes, "variant": params.get("variant") or "source",
-            "normalized": bool(normalize), "precise": precise}
+            "bytes": total_bytes, "variant": variant,
+            "normalized": bool(normalize), "precise": precise,
+            "sidecar_count": len(sidecar_files), "sidecar_skipped": sidecar_skipped}
 
 
 @contextmanager
@@ -4356,6 +4370,55 @@ async def get_recording_comments_api(recording_id: int) -> dict:
     }
 
 
+@app.get("/api/recordings/{recording_id}/comments/export")
+async def export_comments_api(recording_id: int, format: str = "srt",
+                              start: Optional[float] = None,
+                              end: Optional[float] = None) -> Response:
+    """録画窓のcommentを字幕(SRT)・表計算(CSV)・JSONで書き出す。
+
+    timecodeは転写の書き出しと同じく元録画mp4のmedia軸(PTS)基準で、焼き込み出力・Up出力
+    に対する一致は保証しない。start/endを渡すとその区間だけを書き出し、startを0点として
+    相対時刻へ写す(切り抜き1本ぶんのcomment台本として使うため)。"""
+    if format not in comment_track.EXPORT_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail="formatはsrt・csv・jsonのいずれかを指定してください。",
+        )
+    if start is not None and end is not None and end <= start:
+        raise HTTPException(status_code=400, detail="終了位置は開始位置より後にしてください。")
+    recording = storage.get_recording(recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    rows = await asyncio.to_thread(
+        storage.search_hits_for, recording_id, indexer.SOURCE_COMMENT)
+    picked = comment_track.usable_comments(rows, start, end, origin=start)
+    if not picked:
+        raise HTTPException(status_code=404, detail="書き出せるcommentがありません。")
+    # 区間指定があればその尺で、無ければ元録画の実尺でcueの終端を打ち切る。ffprobeが
+    # 無ければNone(打ち切らない)。
+    if start is not None and end is not None:
+        media_duration = float(end) - float(start)
+    else:
+        media_duration = await _duration_seconds(_safe_recording_path(recording["path"]))
+    body = comment_track.render(format, picked, media_duration)
+    suffix, media_type, encoding = comment_track.EXPORT_FORMATS[format]
+    filename = _transcript_basename(recording) + suffix
+    filename_star = quote(filename, safe="")
+    logger.info(
+        "comments exported: recording_id=%d format=%s comments=%d",
+        recording_id, format, len(picked),
+        extra={"event": "comment_track.exported",
+               "ctx": {"recording_id": recording_id, "format": format,
+                       "start": start, "end": end,
+                       "comments": len(picked), "total": len(rows)}},
+    )
+    return Response(
+        content=body.encode(encoding),
+        media_type=media_type,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename_star}"},
+    )
+
+
 @app.post("/api/recordings/{recording_id}/transcribe")
 async def transcribe_recording(recording_id: int) -> dict:
     """Run local STT over a finished recording and cache the transcript. Progress is
@@ -4479,6 +4542,22 @@ def _clip_normalize(requested: Optional[bool]) -> Optional[dict]:
     enabled = (bool(int(settings.get("clip_normalize_audio")))
                if requested is None else bool(requested))
     return audio_norm.targets(settings) if enabled else None
+
+
+async def _write_clip_sidecars(recording_id: int, clip: dict, variant: str) -> dict:
+    """切り出しmp4の隣へ字幕・comment sidecarを書く。
+
+    切り出しはstream copyなので、mp4には話した内容もcommentも残らない。DBにある両方を
+    切り抜きの時間軸へ写してfileにし、NLEが動画と一緒に読み込めるようにする。
+    書かないと決まっている素材版では、転写とcommentの読み出し自体を省く。"""
+    skipped = clip_sidecar.skip_reason(variant)
+    if skipped:
+        return {"files": [], "skipped": skipped, "timemap_stale": False}
+    transcript = await asyncio.to_thread(storage.get_transcript, recording_id)
+    comments = await asyncio.to_thread(
+        storage.search_hits_for, recording_id, indexer.SOURCE_COMMENT)
+    return await asyncio.to_thread(
+        clip_sidecar.write_safely, clip, variant, transcript, comments)
 
 
 def _output_normalize() -> Optional[dict]:
@@ -4744,6 +4823,7 @@ async def clip_recording(recording_id: int, payload: ClipRequest) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
     result["recording_id"] = recording_id
     result["variant"] = payload.variant
+    result["sidecars"] = await _write_clip_sidecars(recording_id, result, payload.variant)
     return result
 
 

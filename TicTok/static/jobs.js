@@ -181,8 +181,12 @@ function elapsedText(job) {
 function resultText(job) {
   if (job.message) return job.message;
   const result = job.result || {};
-  if (result.count > 1) return `${result.count}件を切り出し`;
-  return result.filename || "";
+  const done = result.count > 1 ? `${result.count}件を切り出し` : result.filename || "";
+  // 切り抜きmp4はvideo+audioのstream copyで字幕もcommentも入らない。隣へ何件出たのか
+  // (出なかったならなぜか)を結果に出さないと、編集ソフトへ渡すまで気付けない。
+  if (result.sidecar_skipped) return `${done} / ${result.sidecar_skipped}`;
+  if (result.sidecar_count) return `${done} / 字幕・comment ${result.sidecar_count}件`;
+  return done;
 }
 
 async function sendJobAction(path, job, confirmText) {

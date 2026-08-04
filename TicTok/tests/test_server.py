@@ -479,6 +479,66 @@ def test_transcript_export_rejects_unknown_format_before_lookup(client):
     assert response.status_code == 400
 
 
+def _index_comments(server, recording_id, session_id, rows):
+    """search_hits(source=comment)へ直接積む。indexerを通す経路はここの関心ではない。"""
+    server.storage.replace_search_hits(
+        recording_id, "comment",
+        [{"session_id": session_id, "unique_id": "tester", "started_at": 0.0,
+          "video_time": at, "nickname": "視聴者", "body": body} for at, body in rows],
+    )
+
+
+def test_comment_export_rejects_unknown_format_before_lookup(client):
+    response = client.get("/api/recordings/99999999/comments/export",
+                          params={"format": "edl"})
+    assert response.status_code == 400
+
+
+def test_comment_export_404s_when_there_is_nothing_to_write(client, make_srv_recording):
+    _s, recording_id, _p = make_srv_recording()
+    response = client.get(f"/api/recordings/{recording_id}/comments/export")
+    assert response.status_code == 404
+
+
+def test_comment_export_writes_srt_on_the_recording_axis(client, server,
+                                                         make_srv_recording):
+    session_id, recording_id, _p = make_srv_recording()
+    _index_comments(server, recording_id, session_id, [(3.5, "やば")])
+    response = client.get(f"/api/recordings/{recording_id}/comments/export")
+    assert response.status_code == 200
+    assert "00:00:03,500 -->" in response.text
+    assert "[視聴者] やば" in response.text
+
+
+def test_comment_export_windows_and_rebases_to_the_range(client, server,
+                                                         make_srv_recording):
+    """切り抜き1本ぶんの台本として使うため、start指定はそこを0点にする。"""
+    session_id, recording_id, _p = make_srv_recording()
+    _index_comments(server, recording_id, session_id,
+                    [(10.0, "圏外"), (103.5, "圏内"), (500.0, "圏外2")])
+    response = client.get(f"/api/recordings/{recording_id}/comments/export",
+                          params={"start": 100.0, "end": 110.0})
+    assert "圏外" not in response.text
+    assert "00:00:03,500 -->" in response.text
+
+
+def test_comment_export_rejects_an_inverted_range(client, make_srv_recording):
+    _s, recording_id, _p = make_srv_recording()
+    response = client.get(f"/api/recordings/{recording_id}/comments/export",
+                          params={"start": 110.0, "end": 100.0})
+    assert response.status_code == 400
+
+
+def test_comment_export_csv_carries_both_a_seconds_column_and_a_timecode(
+        client, server, make_srv_recording):
+    session_id, recording_id, _p = make_srv_recording()
+    _index_comments(server, recording_id, session_id, [(3.5, "やば")])
+    response = client.get(f"/api/recordings/{recording_id}/comments/export",
+                          params={"format": "csv"})
+    assert response.text.splitlines()[0].endswith("time_seconds,timecode,nickname,body")
+    assert "3.500,00:00:03.500,視聴者,やば" in response.text
+
+
 def test_delete_recording_404_for_unknown_id(client):
     assert client.delete("/api/recordings/99999999").status_code == 404
 
@@ -642,6 +702,54 @@ def test_clip_batch_rejects_unknown_variant(client, make_srv_recording):
     })
     assert response.status_code == 400
     assert "hdr" in response.json()["detail"]
+
+
+def _patch_make_clip(monkeypatch, server, actual_start, duration):
+    """make_clipを実物のffmpegなしで差し替える。keyframe leadぶん手前から始まる
+    stream copyの戻り値を模す(sidecarの0点がそこであることを確かめるため)。"""
+    async def fake_make_clip(src, start, end, label=None, precise=False, normalize=None):
+        out = Path(src).with_name(f"{src.stem}_clip.mp4")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(b"\x00" * 8)
+        return {"path": str(out), "filename": out.name, "bytes": 8,
+                "start": start, "end": end, "precise": precise,
+                "encoder": "copy", "normalized": bool(normalize),
+                "output_duration_seconds": duration,
+                "keyframe_lead_seconds": round(start - actual_start, 3),
+                "actual_start_seconds": actual_start}
+
+    monkeypatch.setattr(server, "make_clip", fake_make_clip)
+
+
+def test_clip_writes_the_transcript_and_comment_sidecars(client, server, monkeypatch,
+                                                         make_srv_recording):
+    """切り抜きmp4はvideo+audioのstream copyで、話した内容もcommentも中に残らない。
+    隣のfileとして出ていることがこの機能の要点。"""
+    session_id, recording_id, path = make_srv_recording()
+    server.storage.save_transcript(
+        recording_id, {"language": "ja", "text": "発話",
+                       "segments": [{"start": 100.0, "end": 102.0, "text": "発話"}],
+                       "timemap_version": server.subtitles.TIMEMAP_VERSION})
+    _index_comments(server, recording_id, session_id, [(101.0, "やば")])
+    _patch_make_clip(monkeypatch, server, actual_start=96.5, duration=13.5)
+    body = client.post(f"/api/recordings/{recording_id}/clip",
+                       json={"start": 100.0, "end": 110.0}).json()
+    stem = Path(body["path"]).stem
+    assert sorted(body["sidecars"]["files"]) == sorted(
+        [stem + ".srt", stem + ".comments.srt", stem + ".comments.csv"])
+    written = Path(body["path"]).with_name(stem + ".srt")
+    # 0点は要求の100秒ではなく実際の内容開始(96.5秒)。要求を0点にすると3.5秒ずれる。
+    assert "00:00:03,500 --> 00:00:05,500" in written.read_text("utf-8")
+    assert path.is_file()
+
+
+def test_clip_reports_when_there_is_nothing_to_write_beside_it(client, server, monkeypatch,
+                                                               make_srv_recording):
+    _s, recording_id, _p = make_srv_recording()
+    _patch_make_clip(monkeypatch, server, actual_start=100.0, duration=10.0)
+    body = client.post(f"/api/recordings/{recording_id}/clip",
+                       json={"start": 100.0, "end": 110.0}).json()
+    assert body["sidecars"] == {"files": [], "skipped": "", "timemap_stale": False}
 
 
 # ---- search / avatar / disk -------------------------------------------------------
