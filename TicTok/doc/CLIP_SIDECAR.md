@@ -38,10 +38,30 @@ stream copyは要求位置ではなく**直前のkeyframeから**始まる。key
 sidecarの0点にすると、全cueがそのlead秒ぶん後ろへずれる。
 
 `make_clip()` は `actual_start_seconds`(= 要求start - lead)を返すので、必ずそちらを0点に使う。
-窓の終端は `output_duration_seconds`(ffprobeの実測)から取る。実測が得られない場合はleadも
-測れていないので、窓は要求区間そのものになる。
-
 lead区間も切り抜きの中身なので、そこに掛かる発話・commentもsidecarへ入れる。
+
+### leadはvideo trackの尺から引く
+
+leadは「出力の尺 - 要求の尺」で求まるが、その尺に**containerの尺(`format=duration`)を使っては
+いけない**。containerの尺は全streamの最大終端-最小開始なので、音量正規化(`normalize`)で音声を
+再encodeする経路では、loudnorm/aresampleがsampleを詰めた分やAAC encoderのdelayまで含む。
+それをleadとして扱うと、**音声filterの都合でsidecarの0点がずれる**。
+
+leadが表すのは「videoがkeyframeまで手前へ伸びた量」なので、常にstream copyされる
+**video trackの尺**(`_video_duration_seconds`)だけを測る。containerの尺は音声filterが尺を
+変えたことを検知するcanaryとして別に使い続ける(`clip.duration_mismatch`)。
+
+窓の終端はcontainerの尺で取る。videoより後ろへ伸びる音声まで拾えるので末尾のcueを取りこぼさない
+(0点と違い、終端は多めに取っても実害が無い)。
+
+### 0点が測れなければ書かない
+
+ffprobeが無い等でvideo trackの尺が測れないと、leadは `None` になる。このとき要求のstartを0点と
+して書くと、**最大37秒ずれた字幕が「それらしく」出来上がる**。ズレていることはNLEへ載せて見るまで
+分からないので、書かずに理由を返す(`skipped`)。
+
+再encode(`precise = True`)はframe精度で切れるため0点は要求のstartそのもので、leadは存在しない。
+この経路は測定に依存せず書き出せる。
 
 ## 元録画から切ったものにしか出さない
 

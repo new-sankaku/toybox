@@ -33,14 +33,25 @@ logger = logging.getLogger("tictok.clip_sidecar")
 SOURCE_VARIANT = "source"
 
 
-def _window(clip: dict) -> tuple:
-    """切り抜きが実際に含む区間を元録画の時間軸で返す。
+def _window(clip: dict):
+    """切り抜きが実際に含む区間を元録画の時間軸で返す。0点が確定できなければNone。
 
-    尺はffprobeの実測を使い、測れない場合だけ要求の尺を使う(その場合keyframe leadも
-    測れていないので0点も要求どおりになり、窓は要求区間そのものになる)。"""
+    再encode(precise)はframe精度で切れるので0点は要求のstartそのもの。stream copyは
+    keyframeまで手前へ伸びるため、伸びた量が測れて初めて0点が決まる。測れていないのに
+    要求のstartを0点として書くと、字幕が最大37秒ずれたsidecarが「それらしく」出来上がる。
+    ズレていることはNLEへ載せて見るまで分からないので、書かずに理由を返す方を採る。"""
+    requested = float(clip["end"]) - float(clip["start"])
+    if clip.get("precise"):
+        actual = clip.get("output_duration_seconds")
+        return float(clip["start"]), float(clip["start"]) + (
+            requested if actual is None else float(actual))
+    if clip.get("keyframe_lead_seconds") is None:
+        return None
     origin = float(clip["actual_start_seconds"])
     actual = clip.get("output_duration_seconds")
-    span = float(clip["end"]) - float(clip["start"]) if actual is None else float(actual)
+    # 窓の終端はcontainerの尺で取る。videoより後ろへ伸びる音声まで拾えるので、末尾のcueを
+    # 取りこぼさない(0点と違い、終端は多めに取っても実害が無い)。
+    span = requested if actual is None else max(requested, float(actual))
     return origin, origin + span
 
 
@@ -75,8 +86,21 @@ def write(clip: dict, variant: str, transcript: Optional[dict], comments: list) 
     if result["skipped"]:
         return result
 
+    window = _window(clip)
+    if window is None:
+        result["skipped"] = (
+            "切り抜きの実際の開始位置を測れなかったため、字幕・commentは書き出しません"
+            "（ffprobeが要ります）。")
+        logger.warning(
+            "clip sidecar skipped: the clip origin could not be measured (%s)",
+            clip.get("filename"),
+            extra={"event": "clip.sidecar_origin_unknown",
+                   "ctx": {"output": clip.get("path"), "variant": variant}},
+        )
+        return result
+
     out = Path(clip["path"])
-    start, end = _window(clip)
+    start, end = window
     duration = end - start
 
     if transcript is not None:

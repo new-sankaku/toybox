@@ -50,6 +50,7 @@ from tictok.record.video_overlay import (
     _mapped_quality,
     _duration_seconds,
     ffmpeg_available,
+    ffprobe_available,
     video_encoder_name,
 )
 
@@ -58,6 +59,35 @@ logger = logging.getLogger(__name__)
 # file名に使えない文字と制御文字だけを落とす。検索語をそのままlabelにするため、
 # 日本語を落とすと(検索語はほぼ日本語なので)labelが常に空になり用を成さない。
 _UNSAFE_LABEL_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
+
+
+async def _video_duration_seconds(src: Path) -> Optional[float]:
+    """video trackだけの尺。keyframe leadの算出に使う。
+
+    containerの尺(format=duration)は全streamの最大終端-最小開始なので、音声を再encodeする
+    normalize経路では loudnorm/aresample がsampleを詰めた分やAAC encoderのdelayまで含む。
+    その差をleadとして扱うと、**音声filterの都合でsidecarの0点がずれる**。leadが表すのは
+    「videoがkeyframeまで手前へ伸びた量」なので、常にstream copyされるvideo trackの尺だけを
+    測る。containerの尺は音声filterが尺を変えたことを検知するcanaryとして別に使うため、
+    こちらで置き換えない。"""
+    if not ffprobe_available():
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=duration",
+            "-of", "default=nokey=1:noprint_wrappers=1", str(src),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        seconds = float(out.decode().strip())
+    except (ValueError, OSError):
+        # N/A(trackにdurationが無い)もValueErrorで来る。測れないことは測れないと返す。
+        logger.warning("ffprobe video duration probe failed for %s", src, exc_info=True)
+        return None
+    return seconds if seconds > 0 else None
 
 
 def _hhmmss(seconds: float) -> str:
@@ -160,10 +190,14 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
     actual = await _duration_seconds(out)
     # stream copyはkeyframeからしか始められないので、実際の内容は要求より手前から始まる。
     # 何秒手前かを返して、呼び出し側が実物の時刻を示せるようにする。
-    lead = None if (actual is None or precise) else max(0.0, actual - duration)
+    # 測るのはvideo trackの尺。containerの尺で引くと、音声を再encodeする経路では音声filterが
+    # 動かした尺までleadに混ざり、0点がその分ずれる(_video_duration_secondsを参照)。
+    video_actual = None if precise else await _video_duration_seconds(out)
+    lead = None if video_actual is None else max(0.0, video_actual - duration)
     tolerance = config.get_clip_duration_tolerance_seconds()
     ctx = {"src": str(src), "output": str(out), "start": start, "end": end,
            "duration_seconds": duration, "output_duration_seconds": actual,
+           "video_duration_seconds": video_actual,
            "keyframe_lead_seconds": None if lead is None else round(lead, 3),
            "precise": precise, "encoder": encoder, "size_bytes": size,
            **audio_norm.describe(normalize)}

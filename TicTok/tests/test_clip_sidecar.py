@@ -21,10 +21,12 @@ def _transcript(segments, timemap_version=TIMEMAP_VERSION):
     return {"segments": segments, "timemap_version": timemap_version}
 
 
-def _clip(tmp_path, start, end, actual_start=None, duration=None):
+def _clip(tmp_path, start, end, actual_start=None, duration=None, precise=False):
     out = tmp_path / "00001_tester_20260101_120000_001200-001300.mp4"
     out.write_bytes(b"\x00" * 8)
+    lead = None if actual_start is None else round(start - actual_start, 3)
     return {"path": str(out), "filename": out.name, "start": start, "end": end,
+            "precise": precise, "keyframe_lead_seconds": lead,
             "actual_start_seconds": start if actual_start is None else actual_start,
             "output_duration_seconds": duration}
 
@@ -196,14 +198,31 @@ def test_write_covers_the_keyframe_lead_region(tmp_path):
     assert "lead区間" in body
 
 
-def test_write_falls_back_to_the_requested_window_when_the_duration_is_unmeasurable(tmp_path):
-    """ffprobeが無い場合はleadも測れていないので、窓は要求区間そのものになる。"""
+def test_write_refuses_when_the_clip_origin_could_not_be_measured(tmp_path):
+    """leadが測れていないのに要求のstartを0点にすると、最大37秒ずれた字幕が
+    「それらしく」出来上がる。ズレはNLEへ載せて見るまで分からないので書かない。"""
     clip = _clip(tmp_path, 100.0, 110.0, duration=None)
-    assert clip_sidecar._window(clip) == (100.0, 110.0)
+    got = clip_sidecar.write(
+        clip, "source",
+        _transcript([{"start": 100.0, "end": 102.0, "text": "発話"}]),
+        [_comment(101.0, "やば")])
+    assert got["files"] == []
+    assert "実際の開始位置を測れなかった" in got["skipped"]
+    assert not (tmp_path / "00001_tester_20260101_120000_001200-001300.srt").exists()
+
+
+def test_precise_clips_are_written_from_the_requested_start(tmp_path):
+    """再encodeはframe精度で切れるので0点は要求どおり。leadは存在しない。"""
+    clip = _clip(tmp_path, 100.0, 110.0, duration=None, precise=True)
+    clip_sidecar.write(
+        clip, "source",
+        _transcript([{"start": 103.5, "end": 104.5, "text": "発話"}]), [])
+    body = (tmp_path / "00001_tester_20260101_120000_001200-001300.srt").read_text("utf-8")
+    assert "00:00:03,500 --> 00:00:04,500" in body
 
 
 def test_write_skips_a_variant_it_cannot_time(tmp_path):
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
     got = clip_sidecar.write(
         clip, "overlay",
         _transcript([{"start": 100.0, "end": 102.0, "text": "発話"}]),
@@ -215,7 +234,7 @@ def test_write_skips_a_variant_it_cannot_time(tmp_path):
 
 def test_write_skips_everything_when_the_sidecar_is_disabled(tmp_path, monkeypatch):
     monkeypatch.setenv("TICTOK_CLIP_SIDECAR", "0")
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
     got = clip_sidecar.write(
         clip, "source", _transcript([{"start": 100.0, "end": 102.0, "text": "x"}]), [])
     assert got["files"] == []
@@ -225,7 +244,7 @@ def test_write_skips_everything_when_the_sidecar_is_disabled(tmp_path, monkeypat
 def test_write_does_not_leave_an_empty_subtitle_file(tmp_path):
     """空のsidecarを置くと、NLEは字幕trackが在るものとして読み「付いているのに何も出ない」
     という切り分けにくい状態になる。"""
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
     got = clip_sidecar.write(
         clip, "source", _transcript([{"start": 500.0, "end": 502.0, "text": "圏外"}]), [])
     assert got["files"] == []
@@ -233,7 +252,7 @@ def test_write_does_not_leave_an_empty_subtitle_file(tmp_path):
 
 
 def test_write_flags_a_stale_timemap(tmp_path):
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
     got = clip_sidecar.write(
         clip, "source",
         _transcript([{"start": 100.0, "end": 102.0, "text": "発話"}], timemap_version=0),
@@ -243,7 +262,7 @@ def test_write_flags_a_stale_timemap(tmp_path):
 
 
 def test_write_without_a_transcript_still_writes_the_comments(tmp_path):
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
     got = clip_sidecar.write(clip, "source", None, [_comment(101.0, "やば")])
     assert sorted(got["files"]) == sorted([
         "00001_tester_20260101_120000_001200-001300.comments.srt",
@@ -251,7 +270,7 @@ def test_write_without_a_transcript_still_writes_the_comments(tmp_path):
 
 
 def test_write_safely_reports_a_disk_error_instead_of_failing_the_clip(tmp_path, monkeypatch):
-    clip = _clip(tmp_path, 100.0, 110.0, duration=10.0)
+    clip = _clip(tmp_path, 100.0, 110.0, actual_start=100.0, duration=10.0)
 
     def boom(*args, **kwargs):
         raise OSError("no space left on device")

@@ -239,8 +239,12 @@ def test_clip_path_truncates_a_long_label(make_recording):
     assert out.name.endswith("_" + "x" * 40 + ".mp4")
 
 
-def _patch_clip_ffmpeg(monkeypatch, captured, duration=None):
+def _patch_clip_ffmpeg(monkeypatch, captured, duration=None, video_duration=...):
+    """containerの尺とvideo trackの尺を別々に差し替える。既定は両者一致(音声を触らない
+    stream copy)。normalize経路の検証では、音声filterが尺を動かした状態を作るために
+    video_durationだけ据え置く。"""
     monkeypatch.setattr(clipper, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(clipper, "ffprobe_available", lambda: True)
 
     async def fake_exec(*cmd, **kwargs):
         captured["cmd"] = list(cmd)
@@ -258,7 +262,11 @@ def _patch_clip_ffmpeg(monkeypatch, captured, duration=None):
     async def fake_duration(path):
         return duration
 
+    async def fake_video_duration(path):
+        return duration if video_duration is ... else video_duration
+
     monkeypatch.setattr(clipper, "_duration_seconds", fake_duration)
+    monkeypatch.setattr(clipper, "_video_duration_seconds", fake_video_duration)
 
 
 async def test_make_clip_puts_the_copy_seek_before_the_input(monkeypatch, make_recording):
@@ -320,6 +328,36 @@ async def test_make_clip_reports_the_keyframe_lead(monkeypatch, make_recording):
     assert info["keyframe_lead_seconds"] == 6.4
     assert info["actual_start_seconds"] == 193.6
     assert info["start"] == 200.0
+
+
+async def test_make_clip_lead_ignores_a_length_change_made_by_the_audio_filter(
+        monkeypatch, make_recording):
+    """leadはvideo trackの尺から引く。containerの尺で引くと、音量正規化のfilterが動かした
+    尺までleadに混ざり、切り抜きに添える字幕の0点がその分ずれる。"""
+    _, mp4 = make_recording()
+    # videoはkeyframeまで6.4秒手前へ伸びただけ。containerはそこから更に音声都合で0.9秒長い。
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=17.3, video_duration=16.4)
+    monkeypatch.setattr(clipper.audio_norm, "probe_sample_rate", lambda src: 48000)
+
+    info = await clipper.make_clip(
+        mp4, 200.0, 210.0,
+        normalize={"target_lufs": -14.0, "true_peak": -1.5, "bitrate_kbps": 192},
+    )
+    assert info["keyframe_lead_seconds"] == 6.4
+    assert info["actual_start_seconds"] == 193.6
+    # containerの尺はそのまま返す(音声filterが尺を変えたことを検知するcanary)。
+    assert info["output_duration_seconds"] == 17.3
+
+
+async def test_make_clip_has_no_lead_when_the_video_duration_is_unmeasurable(
+        monkeypatch, make_recording):
+    """測れないものを0と置くと、実開始が要求どおりだったことにされる。"""
+    _, mp4 = make_recording()
+    _patch_clip_ffmpeg(monkeypatch, {}, duration=16.4, video_duration=None)
+
+    info = await clipper.make_clip(mp4, 200.0, 210.0)
+    assert info["keyframe_lead_seconds"] is None
+    assert info["actual_start_seconds"] == 200.0
 
 
 async def test_make_clip_precise_has_no_keyframe_lead(monkeypatch, make_recording):
