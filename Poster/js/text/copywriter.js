@@ -66,7 +66,7 @@ export function expand(rng, genre, pattern, bindings, depth, state) {
 const ROLE_PLAN = {
   cinema: {
     base: ['title', 'catch', 'tag', 'credit', 'release'],
-    rich: ['badge', 'extra'],
+    rich: ['badge', 'extra', 'name'],
     lean: ['title', 'catch', 'credit']
   },
   gravure: {
@@ -76,7 +76,7 @@ const ROLE_PLAN = {
   },
   novel: {
     base: ['title', 'catch', 'name', 'tag', 'badge', 'release'],
-    rich: ['credit', 'extra'],
+    rich: ['credit', 'extra', 'code'],
     lean: ['title', 'name', 'tag', 'badge']
   },
   asmr: {
@@ -86,7 +86,7 @@ const ROLE_PLAN = {
   },
   game: {
     base: ['title', 'catch', 'tag', 'badge', 'credit', 'release'],
-    rich: ['code', 'extra'],
+    rich: ['code', 'extra', 'name'],
     lean: ['title', 'catch', 'tag', 'release']
   },
   adult: {

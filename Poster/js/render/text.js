@@ -355,7 +355,8 @@ function specFromStyle(style) {
 }
 
 export function drawSlot(ctx, args) {
-  if (!args || !args.text || !(args.startSize > 0)) { return null; }
+  if (!args || !args.text || !args.slot || !(args.startSize > 0)) { return null; }
+  if (!args.decor && !args.style) { return null; }
   const spec = args.decor ? args.decor : specFromStyle(args.style);
   const scaleX = spec.transform && spec.transform.scaleX > 0 ? spec.transform.scaleX : 1;
 

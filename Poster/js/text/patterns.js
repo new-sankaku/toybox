@@ -26,7 +26,7 @@ export const PATTERNS = {
       '{season}、{place}。{clauseA}。',
       '{n:year}、{place}。{clauseB}。'
     ],
-    tag: ['{latinTag}', '{latinTag}　{person.en}', '{latinTag} — {n:year}'],
+    tag: ['{latinTag}', '{latinTag} / {person.en}', '{latinTag} — {n:year}'],
     badge: [
       '第{n:count}回 {festival}国際映画祭 正式出品',
       '{festival}国際映画祭 {n:few}部門ノミネート',
