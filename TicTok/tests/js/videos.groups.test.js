@@ -56,6 +56,7 @@ describe("videos.js のグループ", () => {
         "POST /api/cutlist": record,
         "POST /api/bookmarks": record,
         "DELETE /api/bookmarks/20": record,
+        "DELETE /api/cutlist/11": record,
         "/api/recordings/1/playback?variant=source": ({ url }) => {
           playbacks.push(url);
           return { recording_id: 1, variant: "source", mode: "mp4",
@@ -525,6 +526,126 @@ describe("videos.js のグループ", () => {
       expect(doc.getElementById("view-search").classList.contains("hidden")).toBe(false);
       expect(doc.getElementById("tab-search").classList.contains("active")).toBe(true);
       await page.settle();
+    });
+  });
+
+  // 切り出しリストも「観て確かめる」場所。詰めた範囲が狙い通りかを1件ずつ確かめる作業なので、
+  // 見どころtabと同じく、そのtabのまま観られること・OUTがどこかが観ているだけで分かることを
+  // 確かめる。playerは見どころとは別instanceなので、片方の再生がもう片方を壊さないことも見る。
+  describe("切り出しリストの視聴", () => {
+    const buttonsOf = (tr) => Array.from(tr.querySelectorAll("td:last-child button"));
+    // 位置ではなく文言で掴む(buttonが1つ増えるたびに無関係のtestが落ちる)。
+    const buttonOf = (tr, label) => buttonsOf(tr).find((b) => b.textContent === label);
+    const cutVideo = () => doc.getElementById("cut-video");
+    const status = () => doc.getElementById("cut-play-status").textContent;
+    const answerConfirm = (accept) => {
+      const modal = doc.querySelector(".confirm-modal");
+      if (!modal) throw new Error("確認dialogが出ていません");
+      const buttons = Array.from(modal.querySelectorAll(".confirm-actions button"));
+      buttons[accept ? buttons.length - 1 : 0].click();
+    };
+
+    /** jsdomの<video>はcurrentTimeを実装しないので、値を持つだけのpropertyに置き換える。 */
+    function setCurrentTime(seconds) {
+      Object.defineProperty(cutVideo(), "currentTime", {
+        configurable: true, writable: true, value: seconds,
+      });
+    }
+
+    async function watch(index) {
+      buttonOf(cutRows()[index], "視聴").click();
+      await page.settle();
+    }
+
+    beforeEach(() => doc.getElementById("tab-cuts").click());
+
+    it("行は「視聴」と「シーン検索視聴」を並べる(この場で観るか、道具付きで観るか)", () => {
+      expect(buttonsOf(cutRows()[0]).map((b) => b.textContent))
+        .toEqual(["視聴", "シーン検索視聴", "削除"]);
+    });
+
+    it("「視聴」は切り出しリストtabのまま再生する(観るたびtabを往復させない)", async () => {
+      await watch(0);
+      expect(doc.getElementById("cut-play").classList.contains("hidden")).toBe(false);
+      expect(cutVideo().getAttribute("src")).toBe("/api/recordings/1/play");
+      expect(doc.getElementById("view-cuts").classList.contains("hidden")).toBe(false);
+      expect(doc.getElementById("view-search").classList.contains("hidden")).toBe(true);
+      // 観ている対象は行と同じ身元(配信者・配信日時・IN/OUT)で名乗る。素材版もここで
+      // 名乗る — 上の「素材」で焼き込みを選んでいても、この場の再生は常に元録画なので、
+      // 焼き込みの出来を確かめたつもりで素の映像を観て誤読するのを防ぐ。
+      const head = doc.getElementById("cut-play-head").textContent;
+      expect(head.startsWith("alice / ")).toBe(true);
+      expect(head).toContain(" / 00:05:00 - 00:05:30");
+      expect(head.endsWith(" / 素材: 元録画")).toBe(true);
+    });
+
+    it("尺が分かった時点でINへ入る", async () => {
+      setCurrentTime(0);
+      await watch(0);
+      cutVideo().dispatchEvent(new win.Event("loadedmetadata"));
+      expect(cutVideo().currentTime).toBe(300);
+    });
+
+    it("OUTで一度止める(どこまでが切り出しか観ているだけで分かる)", async () => {
+      await watch(0);
+      setCurrentTime(330);
+      cutVideo().dispatchEvent(new win.Event("timeupdate"));
+      expect(status()).toContain("終端");
+      // 解除するので、続きを観たければ再生を押すだけでよい。
+      setCurrentTime(400);
+      doc.getElementById("cut-play-status").textContent = "";
+      cutVideo().dispatchEvent(new win.Event("timeupdate"));
+      expect(status()).toBe("");
+    });
+
+    it("同じ録画の別の切り出しは読み込み直さずseekだけで移る", async () => {
+      setCurrentTime(0);
+      await watch(0);
+      cutVideo().dispatchEvent(new win.Event("loadedmetadata"));
+      await watch(1);
+      expect(playbacks.length).toBe(1);
+      cutVideo().dispatchEvent(new win.Event("loadedmetadata"));
+      expect(cutVideo().currentTime).toBe(100);
+    });
+
+    it("観ている切り出しを消したらplayerを下げる(実体の無い行を観続けない)", async () => {
+      await watch(0);
+      buttonOf(cutRows()[0], "削除").click();
+      await page.settle();
+      answerConfirm(true);
+      await page.settle();
+      expect(doc.getElementById("cut-play").classList.contains("hidden")).toBe(true);
+      expect(cutVideo().hasAttribute("src")).toBe(false);
+    });
+
+    it("観ていない間は視聴側に案内を出す(右列を畳んで表幅を動かさない)", async () => {
+      const placeholder = () => doc.getElementById("cut-play-empty");
+      expect(placeholder().classList.contains("hidden")).toBe(false);
+      await watch(0);
+      expect(placeholder().classList.contains("hidden")).toBe(true);
+      doc.getElementById("cut-play-close").click();
+      expect(placeholder().classList.contains("hidden")).toBe(false);
+      expect(doc.getElementById("cut-play").classList.contains("hidden")).toBe(true);
+    });
+
+    it("「シーン検索視聴」はIN/OUTが入った状態でシーン検索へ移る", async () => {
+      buttonOf(cutRows()[0], "シーン検索視聴").click();
+      await page.settle();
+      expect(doc.getElementById("view-search").classList.contains("hidden")).toBe(false);
+      expect(doc.getElementById("tab-search").classList.contains("active")).toBe(true);
+      expect(state().cutIn).toBe(300);
+      expect(state().cutOut).toBe(330);
+    });
+
+    // 見どころと切り出しは別々の<video>で持つ。1つを共有すると、tabを移るたびに相手の
+    // 位置と読み込みを壊し合う。
+    it("見どころtabへ移っても切り出しの読み込みは捨てない(音だけ止める)", async () => {
+      await watch(0);
+      doc.getElementById("tab-marks").click();
+      await page.settle();
+      expect(cutVideo().getAttribute("src")).toBe("/api/recordings/1/play");
+      expect(cutVideo().paused).toBe(true);
+      expect(doc.getElementById("cut-play").classList.contains("hidden")).toBe(false);
     });
   });
 

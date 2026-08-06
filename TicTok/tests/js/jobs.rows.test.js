@@ -487,13 +487,76 @@ describe("jobs.js の行の組み立て", () => {
       expect([heads[4].className, heads[5].className]).toEqual(["num", "num"]);
     });
 
-    it("結果の長文は1行に切り、全文はtooltipへ回す", () => {
-      const message = "ffmpeg exited with 1: " + "x".repeat(300);
+    // 1行に切ってtooltipへ回していた頃は、肝心の失敗理由がhoverした時にしか読めず、
+    // 「見切れてメッセージが分からない」まま残っていた。列幅の上限はCSSが持つ。
+    it("結果の長文は全文をそのまま出す(切らない)", () => {
+      const message = "ffmpeg exited with 1:\n" + "x".repeat(300);
       const cells = cellsOf({ job_id: "x", state: "failed", domain: "overlay",
         finished_at: 1, message });
       const result = cells[6].firstChild;
       expect(result.className).toBe("job-result");
-      expect(result.title).toBe(message);
+      expect(result.textContent).toBe(message);
+    });
+  });
+
+  // 終わったjobの進捗列は「完了 ✓」しか出せず、どの段階に何秒かかったか・どこで落ちたかを
+  // 辿る先が無かった。段階の履歴は台帳(stages)が唯一の出所。
+  describe("段階の経過", () => {
+    const STAGES = [
+      { label: "(1/3) 動画を解析中", at: 1000, pct: 2 },
+      { label: "(2/3) コメント層を描画中", at: 1010, pct: 30 },
+      { label: "(3/3) 焼き込み合成中", at: 1070, pct: 60 },
+    ];
+    function cellsOf(job) {
+      seed([job]);
+      setFilter();
+      expand();
+      win.render();
+      return [...doc.querySelectorAll("#job-rows tr:first-child td")];
+    }
+    const stageRows = () => [...doc.querySelectorAll("#job-rows .job-stages li")]
+      .map((li) => [li.querySelector(".s-label").textContent,
+                    li.querySelector(".s-time").textContent]);
+
+    it("既定では畳み、段階数だけを名乗る", () => {
+      const cells = cellsOf({ job_id: "x", state: "completed", domain: "overlay",
+        finished_at: 1100, stages: STAGES });
+      const toggle = cells[3].querySelector(".job-stage-toggle");
+      expect(toggle.textContent).toBe("▶ 経過 3段階");
+      expect(cells[3].querySelector(".job-stages")).toBe(null);
+    });
+
+    it("開くと段階ごとの所要が出る(最後は終了時刻まで)", () => {
+      const cells = cellsOf({ job_id: "x", state: "completed", domain: "overlay",
+        finished_at: 1100, stages: STAGES });
+      cells[3].querySelector(".job-stage-toggle").click();
+      expect(stageRows()).toEqual([
+        ["(1/3) 動画を解析中", "00:00:10"],
+        ["(2/3) コメント層を描画中", "00:01:00"],
+        ["(3/3) 焼き込み合成中", "00:00:30"],
+      ]);
+    });
+
+    it("失敗したjobは最後の段階に印を付ける(そこで落ちた)", () => {
+      const cells = cellsOf({ job_id: "x", state: "failed", domain: "overlay",
+        finished_at: 1100, stages: STAGES });
+      cells[3].querySelector(".job-stage-toggle").click();
+      const items = [...doc.querySelectorAll("#job-rows .job-stages li")];
+      expect(items.map((li) => li.className)).toEqual(["", "", "s-failed"]);
+    });
+
+    it("段階を1件も持たないjob(既存行・group合成行)には出さない", () => {
+      const cells = cellsOf({ job_id: "x", state: "completed", domain: "overlay",
+        finished_at: 1100 });
+      expect(cells[3].querySelector(".job-stage-toggle")).toBe(null);
+    });
+
+    it("実行中でも通ってきた段階を出す(進捗列は今の1点しか持たない)", () => {
+      const cells = cellsOf({ job_id: "x", state: "running", domain: "overlay",
+        started_at: 1000, pct: 60, stage: "(3/3) 焼き込み合成中（1:00 / 2:00）",
+        stages: STAGES });
+      expect(cells[3].querySelector(".dl-progress")).not.toBe(null);
+      expect(cells[3].querySelector(".job-stage-toggle").textContent).toBe("▶ 経過 3段階");
     });
   });
 

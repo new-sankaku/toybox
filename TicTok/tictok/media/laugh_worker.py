@@ -26,6 +26,7 @@ try/exceptでは拾えず、logも1行も残らない(STTで実測3回)。**同�
 
 子の**標準出力はJSONLの制御channel専用**で、1行1 message:
 
+    {"t": "progress", "seconds": 復号済み秒}
     {"t": "result", "profile": {...}}      最後に1回だけ
     {"t": "error",  "message": "..."}
 
@@ -146,11 +147,13 @@ def _drain_stderr(stream, tail: deque) -> None:
         logger.info("[laugh] %s", line)
 
 
-def run_build(src, window: float, hop: float) -> dict:
+def run_build(src, window: float, hop: float, on_progress=None) -> dict:
     """``src`` の笑い確率列を子processで作り、profile dictを返す。同期(threadから呼ぶ)。
 
     GPU枠はここで押さえる。``gpu_slot`` はprocess内のsemaphoreなので、子で取っても他の
-    jobとは噛み合わない — 枠を持つのは常に親側である(stt_workerと同じ)。"""
+    jobとは噛み合わない — 枠を持つのは常に親側である(stt_workerと同じ)。
+
+    ``on_progress(復号済み秒)`` は子が送る進捗をそのまま中継する。"""
     from tictok.media.laugh_audio import LaughAudioError
 
     args = [sys.executable, "-u", "-m", "tictok.media.laugh_worker", str(src),
@@ -186,7 +189,10 @@ def run_build(src, window: float, hop: float) -> dict:
                     )
                     continue
                 kind = message.get("t")
-                if kind == "result":
+                if kind == "progress":
+                    if on_progress is not None:
+                        on_progress(message.get("seconds") or 0.0)
+                elif kind == "result":
                     profile = message.get("profile")
                 elif kind == "error":
                     failure = message
@@ -246,8 +252,19 @@ def main(argv: list) -> int:
     if hop is None:
         hop = get_laugh_audio_hop_seconds()
 
+    from tictok.core.config import get_job_progress_min_interval_seconds
+    from tictok.core.progress import IntervalGate
+
+    # 復号は1 chunkごとに進むので、そのまま送ると1本で数万行になる。親が使うのは表示用の
+    # 位置だけなので、時間で間引いて送る。
+    gate = IntervalGate(get_job_progress_min_interval_seconds())
+
+    def on_progress(seconds: float) -> None:
+        if gate.ready():
+            _emit({"t": "progress", "seconds": seconds})
+
     try:
-        profile = _build(src, window, hop)
+        profile = _build(src, window, hop, on_progress)
     except LaughAudioError as exc:
         _emit({"t": "error", "message": str(exc)})
         return 3

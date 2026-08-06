@@ -495,46 +495,71 @@
         <button id="cuts-bulk-delete" class="btn btn-danger btn-small" type="button" disabled>選択を削除</button>
       </div>
 
-      <div class="result-block vd-cutlist">
-        <h3 class="result-subtitle" id="cuts-list-title">■ 切り出しリスト</h3>
-        <!-- 約400字を1段落で置いていたため読まれず、shift+click範囲選択やdragといった
-             主要な時短経路が発見されなかった。初回に要る操作だけ残し、まれにしか要らない
-             書き出し形式の話は畳む。 -->
-        <span class="result-sub-note">行clickでIN/OUTが入った状態で開きます／shift+クリックで範囲選択／行を上のグループtabへドラッグで所属を変えられます。</span>
-        <details class="result-sub-note">
-          <summary>書き出し形式について（CSV / EDL / FCPXML）</summary>
-          mp4を書き出さずCSV/EDL/FCPXMLでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDL/FCPXMLのtimecodeは素材のfpsを実測してframe単位で組み立てます。EDLはlist全体で1つのframe rateしか持てないため、fpsの異なる録画が混ざると書き出せません（配信者で絞るか、素材ごとにframe rateを持てるFCPXMLを使ってください）。秒をそのまま扱いたい場合はCSVです。
-        </details>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th></th><th class="num">順</th><th>配信者</th><th>配信日</th><th>file</th><th class="num">IN</th><th class="num">OUT</th><th class="num">尺</th><th class="num">頭出し</th><th>ラベル</th><th>グループ</th><th>並び</th><th></th></tr>
-            </thead>
-            <tbody id="cut-rows"></tbody>
-          </table>
-          <div id="cut-empty" class="feed-empty">まだありません。シーン検索でIN/OUTを決めて「切り出しリストに追加」してください。</div>
-        </div>
-        <details class="result-sub-note">
-          <summary>「1本に連結」「mp4を一括書き出し」の注意</summary>
-          「1本に連結」はリストの<b>表示順</b>のまま繋ぎます（時刻順に並べ替えません）。stream copyなので原本画質のままですが、切れ目はkeyframeまで手前へ伸びるため実際の尺は指定より長くなります。音量正規化と精密は連結では使いません。素材の形式（解像度・profile等）が揃わない録画が混ざっていると、連結せず理由を出して失敗します。<b>現在、接合点ごとに音がわずかにずれます</b>（切り出し段の音声・映像の長さ不一致が原因で、別途対処中です）。<br />
-          一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密は上の指定を使います（シーン検索側の切り出し設定と同じもので、どちらで変えても両方に反映されます）。進み具合はJob画面で確認でき、途中で取り消せます。
-        </details>
-      </div>
+      <!-- 左=一覧・右=視聴。見どころtabと同じ作り。詰めた範囲が狙い通りかを確かめるのに
+           1件ごとシーン検索tabへ往復していると、そのたび並び順と選択が視界から消える。 -->
+      <div class="vd-msplit vd-msplit-cuts">
+        <div class="vd-mlist">
+          <div class="result-block vd-cutlist">
+            <h3 class="result-subtitle" id="cuts-list-title">■ 切り出しリスト</h3>
+            <!-- 約400字を1段落で置いていたため読まれず、shift+click範囲選択やdragといった
+                 主要な時短経路が発見されなかった。初回に要る操作だけ残し、まれにしか要らない
+                 書き出し形式の話は畳む。 -->
+            <span class="result-sub-note">「視聴」でこのtabのまま、右で範囲を再生します（OUTで一度止まります）。「シーン検索視聴」はIN/OUTが入った状態でシーン検索の再生画面へ移るので、範囲を詰め直せます／shift+クリックで範囲選択／行を上のグループtabへドラッグで所属を変えられます。</span>
+            <details class="result-sub-note">
+              <summary>書き出し形式について（CSV / EDL / FCPXML）</summary>
+              mp4を書き出さずCSV/EDL/FCPXMLでNLEへ渡せば、再encodeもdisk消費もなく原本を参照したまま調整できます。EDL/FCPXMLのtimecodeは素材のfpsを実測してframe単位で組み立てます。EDLはlist全体で1つのframe rateしか持てないため、fpsの異なる録画が混ざると書き出せません（配信者で絞るか、素材ごとにframe rateを持てるFCPXMLを使ってください）。秒をそのまま扱いたい場合はCSVです。
+            </details>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th></th><th class="num">順</th><th>配信者</th><th>配信日</th><th>file</th><th class="num">IN</th><th class="num">OUT</th><th class="num">尺</th><th class="num">頭出し</th><th>ラベル</th><th>グループ</th><th>並び</th><th></th></tr>
+                </thead>
+                <tbody id="cut-rows"></tbody>
+              </table>
+              <div id="cut-empty" class="feed-empty">まだありません。シーン検索でIN/OUTを決めて「切り出しリストに追加」してください。</div>
+            </div>
+            <details class="result-sub-note">
+              <summary>「1本に連結」「mp4を一括書き出し」の注意</summary>
+              「1本に連結」はリストの<b>表示順</b>のまま繋ぎます（時刻順に並べ替えません）。stream copyなので原本画質のままですが、切れ目はkeyframeまで手前へ伸びるため実際の尺は指定より長くなります。音量正規化と精密は連結では使いません。素材の形式（解像度・profile等）が揃わない録画が混ざっていると、連結せず理由を出して失敗します。<b>現在、接合点ごとに音がわずかにずれます</b>（切り出し段の音声・映像の長さ不一致が原因で、別途対処中です）。<br />
+              一括書き出しは録画ごとに1つのjobとしてserverのqueueへ入り、順に処理します。素材版・音量正規化・精密は上の指定を使います（シーン検索側の切り出し設定と同じもので、どちらで変えても両方に反映されます）。進み具合はJob画面で確認でき、途中で取り消せます。
+            </details>
+          </div>
 
-      <!-- 同じグループに属する見どころ。IN/OUTが未確定の素材候補なので切り出しリストとは
-           分けて置くが、同じ1本の材料なので同じ画面に置く(別tabへ追い出すと、素材を
-           拾ってから範囲を詰めるまでに画面を跨ぐことになる)。 -->
-      <div class="result-block hidden" id="cuts-marks-block">
-        <h3 class="result-subtitle">■ このグループの見どころ（素材候補）</h3>
-        <span class="result-sub-note">まだIN/OUTを詰めていない素材です。範囲付きの見どころは「切り出しへ」でそのまま同じグループの切り出しリストへ入ります（範囲のない点の見どころは、開いてIN/OUTを決めてから追加してください）。</span>
-        <div class="table-wrap">
-          <table class="result-table">
-            <thead>
-              <tr><th>配信者</th><th>配信日</th><th class="num">位置</th><th class="num">尺</th><th>メモ</th><th></th></tr>
-            </thead>
-            <tbody id="cuts-mark-rows"></tbody>
-          </table>
-          <div id="cuts-mark-empty" class="feed-empty">このグループの見どころはありません。</div>
+          <!-- 同じグループに属する見どころ。IN/OUTが未確定の素材候補なので切り出しリストとは
+               分けて置くが、同じ1本の材料なので同じ画面に置く(別tabへ追い出すと、素材を
+               拾ってから範囲を詰めるまでに画面を跨ぐことになる)。一覧側の列に積むので、
+               この棚が出ている間も右の視聴は列の高さいっぱいのまま。 -->
+          <div class="result-block hidden" id="cuts-marks-block">
+            <h3 class="result-subtitle">■ このグループの見どころ（素材候補）</h3>
+            <span class="result-sub-note">まだIN/OUTを詰めていない素材です。範囲付きの見どころは「切り出しへ」でそのまま同じグループの切り出しリストへ入ります（範囲のない点の見どころは、開いてIN/OUTを決めてから追加してください）。</span>
+            <div class="table-wrap">
+              <table class="result-table">
+                <thead>
+                  <tr><th>配信者</th><th>配信日</th><th class="num">位置</th><th class="num">尺</th><th>メモ</th><th></th></tr>
+                </thead>
+                <tbody id="cuts-mark-rows"></tbody>
+              </table>
+              <div id="cuts-mark-empty" class="feed-empty">このグループの見どころはありません。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 時間軸のUI(波形・IN/OUT・転写)はここには置かない — 範囲を詰め直す作業は
+             シーン検索側の仕事なので、「シーン検索視聴」で移る。ここは出来上がりが
+             狙い通りかを観るためだけの場所。 -->
+        <div class="vd-mstage">
+          <div id="cut-play" class="result-block vd-mplay hidden">
+            <div class="vd-mplay-head">
+              <h3 class="result-subtitle">■ 視聴</h3>
+              <span id="cut-play-head" class="vd-summary"></span>
+              <span class="sp"></span>
+              <button id="cut-play-search" class="btn btn-small" type="button" title="この切り出しをシーン検索の再生画面で開きます（IN/OUTが入った状態になります）。">シーン検索視聴</button>
+              <button id="cut-play-close" class="btn btn-small" type="button">閉じる</button>
+            </div>
+            <video id="cut-video" class="vd-mvideo" controls playsinline preload="metadata"></video>
+            <span id="cut-play-status" class="result-sub-note"></span>
+          </div>
+          <div id="cut-play-empty" class="feed-empty vd-mstage-empty">左の表の「視聴」を押すと、ここで再生します。</div>
         </div>
       </div>
       </div>

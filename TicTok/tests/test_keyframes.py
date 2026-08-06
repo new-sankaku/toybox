@@ -166,6 +166,59 @@ async def test_video_keyframes_rejects_a_non_positive_window(monkeypatch):
         await kf.video_keyframes(_source(), 5.0, 0.0)
 
 
+# ------------------------------------------------------- keyframe_resolutions
+#
+# 実測したffprobe(JSON)の形そのまま。**解像度が切り替わるkeyframeの ``pts`` はN/A**で
+# ``best_effort_timestamp`` にしか時刻が入らない(実録画で確認)。
+RESOLUTION_JSON = """{"frames":[
+ {"width":640,"height":1280,"best_effort_timestamp":324008820,"pts":324008820},
+ {"width":640,"height":1280,"best_effort_timestamp":324185220,"pts":324185220},
+ {"width":720,"height":1280,"best_effort_timestamp":326549430},
+ {"width":720,"height":1280,"best_effort_timestamp":326756340,"pts":326756340}],
+ "streams":[{"time_base":"1/90000"}]}"""
+
+
+async def test_keyframe_resolutions_folds_consecutive_duplicates(monkeypatch):
+    _stub_probe(monkeypatch, RESOLUTION_JSON)
+    found = await kf.keyframe_resolutions(_source(), 3600.0, 60.0)
+    assert [wh for _, wh in found] == [(640, 1280), (720, 1280)]
+
+
+async def test_keyframe_resolutions_times_the_change_by_best_effort_timestamp(monkeypatch):
+    """切替のkeyframeはptsがN/A。ptsだけを見ると切替点そのものを落とす。"""
+    _stub_probe(monkeypatch, RESOLUTION_JSON)
+    found = await kf.keyframe_resolutions(_source(), 3600.0, 60.0)
+    assert float(found[1][0]) == pytest.approx(326549430 / 90000)
+
+
+async def test_keyframe_resolutions_subtracts_the_media_offset(monkeypatch):
+    _stub_probe(monkeypatch, RESOLUTION_JSON)
+    found = await kf.keyframe_resolutions(_source(media_offset=1.432), 3600.0, 60.0)
+    assert float(found[1][0]) == pytest.approx(326549430 / 90000 - 1.432)
+
+
+async def test_keyframe_resolutions_asks_only_for_keyframes_in_the_window(monkeypatch):
+    seen = []
+    _stub_probe(monkeypatch, RESOLUTION_JSON, seen)
+    await kf.keyframe_resolutions(_source(media_offset=1.432), 10.0, 4.0)
+    cmd = seen[0]
+    assert cmd[cmd.index("-skip_frame") + 1] == "nokey"
+    start, end = cmd[cmd.index("-read_intervals") + 1].split("%")
+    assert (float(start), float(end)) == pytest.approx((11.432, 15.432))
+    assert cmd[cmd.index("-of") + 1] == "json", "csvはfieldを要求した順に並べない"
+
+
+async def test_keyframe_resolutions_returns_empty_when_nothing_is_readable(monkeypatch):
+    _stub_probe(monkeypatch, '{"frames":[],"streams":[{"time_base":"1/90000"}]}')
+    assert await kf.keyframe_resolutions(_source(), 0.0, 5.0) == []
+
+
+async def test_keyframe_resolutions_raises_without_a_time_base(monkeypatch):
+    _stub_probe(monkeypatch, '{"frames":[],"streams":[]}')
+    with pytest.raises(RuntimeError):
+        await kf.keyframe_resolutions(_source(), 0.0, 5.0)
+
+
 # ---------------------------------------------------------- first_at_or_after
 
 def test_first_at_or_after_takes_the_exact_hit():

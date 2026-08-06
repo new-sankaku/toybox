@@ -114,7 +114,9 @@ async def make_reel(items: list, *, label: Optional[str] = None,
             total = len(parts)
             for index, part in enumerate(parts):
                 if on_progress is not None:
-                    await on_progress(f"({index + 1}/{total}) 見どころを切り出し中",
+                    # 件数は括弧に入れる。段階名に混ぜると、jobの段階履歴が見どころの数だけ
+                    # 別々の段階として並ぶ(media_queue.stage_phase が括弧の中を落とす)。
+                    await on_progress(f"見どころを切り出し中（{index + 1} / {total}件）",
                                       int(index * 85 / total))
                 dst = workdir / f"part{index:04d}.ts"
                 cut = await concat.cut_part(

@@ -185,14 +185,19 @@ def main(argv: list) -> int:
                         format="%(name)s %(message)s")
     from tictok.record.transcription import transcribe
 
+    from tictok.core.progress import IntervalGate
+    from tictok.core.config import get_job_progress_min_interval_seconds
+
     last_pct = -1
+    # %が動かない間も再生位置は進む。Job画面はその位置を出すので(4時間の録画は1%が
+    # 2.4分で、%だけでは動いているか分からない)、%据え置きの間も間隔ぶんは送る。
+    # segment毎に全部送ると長時間録画で数千行になるため、間引きは残す。
+    gate = IntervalGate(get_job_progress_min_interval_seconds())
 
     def on_progress(done: float, total: float) -> None:
-        # 送るのは整数%が動いた時だけにする。segment毎に送ると長時間録画で数千行になり、
-        # 受け側が実際に使うのは%だけなので、見える挙動は変わらない。
         nonlocal last_pct
         pct = int(done / total * 100) if total > 0 else 0
-        if pct == last_pct:
+        if pct == last_pct and not gate.ready():
             return
         last_pct = pct
         _emit({"t": "progress", "done": done, "total": total})

@@ -9,6 +9,7 @@ import time
 from contextlib import contextmanager
 from typing import Optional
 from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from tictok.core.config import (get_db_backup_before_migration, get_db_backup_keep,
     get_db_path, get_log_slow_http_ms, get_ops_badge_window_hours,
@@ -16,6 +17,7 @@ from tictok.core.config import (get_db_backup_before_migration, get_db_backup_ke
 from tictok.core import dbmaint
 from tictok.core import ops_labels
 from tictok.core import perf
+from tictok.record import telop_preview, telop_styles
 from tictok.storage import OPS_ERROR, OPS_INFO, OPS_WARNING
 from fastapi import APIRouter
 from tictok.api import runtime
@@ -26,6 +28,27 @@ router = APIRouter()
 @router.get("/api/settings")
 async def get_settings_api() -> dict:
     return {"settings": runtime.settings.describe()}
+
+
+@router.get("/api/settings/telop-preview/{value}.png")
+async def telop_preview_image(value: int) -> FileResponse:
+    """テロップpresetの見本画像。設定画面が選択肢ごとに読みに来る。
+
+    本番と同じlibass経路で焼く(telop_preview参照)。初回は書体の取得とffmpegが走るぶん
+    数百msかかるが、以降はcacheをそのまま返す。"""
+    try:
+        style = telop_styles.style_for(value)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="そのテロップpresetはありません。")
+    try:
+        path = await telop_preview.ensure_preview(style)
+    except RuntimeError as exc:
+        # 書体を取得できない・ffmpegが無い。serverの不具合ではないので、画面が
+        # 「見本を出せない」と分かる形で返す(見本が出ないだけでpresetは選べる)。
+        raise HTTPException(status_code=503, detail=str(exc))
+    # 定義が変わればfile名の署名が変わるので、cacheさせて構わない。
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.put("/api/settings")

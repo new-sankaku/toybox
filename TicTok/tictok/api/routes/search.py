@@ -465,10 +465,17 @@ async def semantic_search_api(q: str, sources: str = "stt,comment", unique_ids: 
         return {"total": 0, "mode": "semantic", "items": [],
                 "hint": "検索する種類（発話／コメント）を選んでください。"}
     try:
-        matches = await semantic.search(q, max(1, min(limit, 200)), ids or None,
-                                        wanted, since, until)
+        found = await semantic.search(runtime.storage, q, max(1, min(limit, 200)),
+                                      ids or None, wanted, since, until)
     except semantic.SemanticError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    matches = found["items"]
+    # 文字起こしのやり直しや時刻の張り直しで、indexが指す行が消えたpassage。古い秒で返すと
+    # 数分ずれた場所へ飛ぶので落としてある。落としたことは必ず伝える — 黙って消すと
+    # 「意味検索はこの配信を拾わない」という誤った理解になる。
+    stale_note = ("" if not found["stale"] else
+                  f"（{found['stale']}件は文字起こし・時刻の張り直し後にindexが未更新のため"
+                  "除外しました。「意味検索indexを更新」を押してください）")
 
     # 意味検索は常に上位k件を返すので、そもそも該当が無い話題でも「それらしいゴミ」が並ぶ。
     # 実測ではdata内に在る話題のtop1が0.40〜0.49、無い話題が0.12〜0.27と分離するため、
@@ -479,7 +486,8 @@ async def semantic_search_api(q: str, sources: str = "stt,comment", unique_ids: 
         best = max((m["score"] for m in matches), default=0.0)
         return {"total": 0, "mode": "semantic", "items": [],
                 "hint": f"意味の近いシーンが見つかりませんでした（最も近いもので類似度{best:.2f}"
-                        f"／下限{floor:.2f}）。別の言い方を試すか、語で一致に切り替えてください。"}
+                        f"／下限{floor:.2f}）。別の言い方を試すか、語で一致に切り替えてください。"
+                        + stale_note}
     matches = kept
     # semantic.searchはpassage全文(既定25秒ぶん)をbodyに持つ。先頭行のsearch_hitsを
     # 引き直して表示すると、当たった本文ではなく「でその」のような断片が並び、
@@ -500,12 +508,12 @@ async def semantic_search_api(q: str, sources: str = "stt,comment", unique_ids: 
             "snippet": match["body"],
             "score": round(match["score"], 4),
         })
-    return {"total": len(items), "mode": "semantic", "hint": "", "items": items}
+    return {"total": len(items), "mode": "semantic", "hint": stale_note, "items": items}
 
 
 @router.get("/api/search/semantic/status")
 async def semantic_status_api() -> dict:
-    return await asyncio.to_thread(semantic.index_status)
+    return await asyncio.to_thread(semantic.index_status, runtime.storage)
 
 
 async def _broadcast_semantic_status(result: Optional[dict] = None,
@@ -517,7 +525,7 @@ async def _broadcast_semantic_status(result: Optional[dict] = None,
     ``result`` は構築完了時のみ、``error`` は失敗時のみ。応答を待たなくなった以上、
     件数のまとめも失敗も、この通知でしか画面へ届かない。"""
     try:
-        status = await asyncio.to_thread(semantic.index_status)
+        status = await asyncio.to_thread(semantic.index_status, runtime.storage)
         await runtime.hub.broadcast({"type": "semantic_index", "status": status,
                              "result": result, "error": error})
     except Exception:

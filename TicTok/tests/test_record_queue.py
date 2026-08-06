@@ -14,6 +14,7 @@ from tictok.record.media_queue import (
     MediaJobQueue,
     group_payload,
     job_payload,
+    stage_phase,
 )
 from tictok.record.recorder import timing_path as recorder_timing_path
 
@@ -478,6 +479,94 @@ async def test_repeated_identical_progress_is_collapsed(
     await queue._process(tmp_db.get_media_job("job-1"))
     stages = [m["job"]["stage"] for m in sent if m["job"]["domain"] == "overlay"]
     assert stages.count("焼き込み") == 2
+
+
+async def test_stage_phase_drops_the_detail_that_moves_every_tick():
+    """段階名の括弧の中はframe位置・件数で、数秒ごとに変わる。段階が変わったかの判定に
+    そのまま使うと、1 jobの履歴が数千件になる。"""
+    assert (stage_phase("(6/6) 焼き込み合成中（1:23:45 / 4:39:10）")
+            == "(6/6) 焼き込み合成中")
+    assert stage_phase("高画質化（12,345 / 98,765 frame）") == "高画質化"
+    assert stage_phase("音量正規化の準備中") == "音量正規化の準備中"
+    assert stage_phase("") == ""
+
+
+async def test_progress_records_one_history_row_per_stage_not_per_tick(
+        queue_factory, recording_factory, tmp_db):
+    """段階の履歴は段階が変わった時だけ伸びる。終わったjobのstageは空にされるので、
+    「どこで何秒かかったか」を後から辿れるのはこれだけである。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/2) 動画を解析中", 1)
+        for pct in range(2, 40):
+            await report(f"(2/2) 焼き込み合成中（0:{pct:02d} / 4:00）", pct)
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    stages = tmp_db.get_media_job("job-1")["stages"]
+    assert [s["label"] for s in stages] == ["(1/2) 動画を解析中", "(2/2) 焼き込み合成中"]
+    assert stages[0]["pct"] == 1 and stages[1]["pct"] == 2
+    assert stages[0]["at"] <= stages[1]["at"]
+
+
+async def test_a_failed_job_keeps_the_stage_it_died_in(
+        queue_factory, recording_factory, tmp_db):
+    """失敗行のstageは終端で消される。どこで落ちたかは履歴の最後の1件でしか読めない。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/3) 動画を解析中", 5)
+        await report("(2/3) アイコン・絵文字を取得中（12/48）", 20)
+        raise RuntimeError("ffmpeg died")
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    job = tmp_db.get_media_job("job-1")
+    assert job["state"] == "failed" and job["stage"] == ""
+    assert job["stages"][-1]["label"] == "(2/3) アイコン・絵文字を取得中"
+
+
+async def test_a_rerun_starts_the_stage_history_over(
+        queue_factory, recording_factory, tmp_db):
+    """待機へ戻した行は最初の段階からやり直す。前の実行ぶんを残すと同じ段階が二度並び、
+    段階ごとの所要も読めなくなる。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/1) 焼き込み合成中", 50)
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+    tmp_db.finish_media_job("job-1", "failed", error="x")
+    assert len(tmp_db.get_media_job("job-1")["stages"]) == 1
+
+    await queue.requeue(["job-1"])
+    await queue._process(tmp_db.claim_next_pending_media_job())
+    assert len(tmp_db.get_media_job("job-1")["stages"]) == 1
+
+
+async def test_job_payload_carries_the_stage_history(
+        queue_factory, recording_factory, tmp_db):
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/1) 焼き込み合成中", 50)
+        return {}
+
+    queue, sent = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+    finished = [m["job"] for m in sent
+                if m["job"]["job_id"] == "job-1" and m["job"]["state"] == "completed"]
+    assert finished and [s["label"] for s in finished[-1]["stages"]] == ["(1/1) 焼き込み合成中"]
 
 
 async def test_list_jobs_adds_one_folded_row_per_group(

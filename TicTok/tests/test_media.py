@@ -308,8 +308,28 @@ def _patch_clip_ffmpeg(monkeypatch, captured, duration=None, landed=None):
         # mp4入力の着地は「-ss 以下で最後のkeyframe」(keyframesの実測)。
         first = math.floor(aim / _CLIP_GOP) * _CLIP_GOP if landed is None else landed
         aframe = 1024 / 48000
-        return {"video": concat_mod.Span(first, until - 1 / 30, 1 / 30, 300),
-                "audio": concat_mod.Span(first - 0.5, until - aframe, aframe, 500)}
+        spans = {"video": concat_mod.Span(first, until - 1 / 30, 1 / 30, 300),
+                 "audio": concat_mod.Span(first - 0.5, until - aframe, aframe, 500)}
+        if pathlib.Path(path).suffix == ".ts":
+            return spans
+        # 連結の**出力**は窓の始点が0点になる。実装は中間の中の要求位置をこの軸で出すので、
+        # 寄せないと出力側-ssへ原本の絶対時刻を渡してしまう。
+        inpoint = None
+        for line in (captured.get("list") or "").splitlines():
+            if line.startswith("inpoint "):
+                inpoint = float(line.split()[1])
+                break
+        if inpoint is None:
+            return spans
+        return {kind: span._replace(first=span.first - inpoint, last=span.last - inpoint)
+                for kind, span in spans.items()}
+
+    # 連結の出力には映像packetが隙間なく並び、どれもkeyframeであるものとして返す。実装は
+    # 各partの先頭keyframeが生きているかをこの列で確かめる。
+    async def fake_packets(path):
+        return [(i / 30, True) for i in range(18000)]
+
+    monkeypatch.setattr(concat_mod, "_video_packets", fake_packets)
 
     monkeypatch.setattr(concat_mod, "video_codec", fake_codec)
     monkeypatch.setattr(concat_mod.keyframes, "video_keyframes", fake_keys)
@@ -447,7 +467,17 @@ async def test_make_clip_precise_reencodes_video(monkeypatch, make_recording):
     assert info["encoder"] == "libx264"
     assert "copy" not in cmd
     assert cmd[cmd.index("-t") + 1] == "1.500"
+    # **原本を直接復号しない**。原本へ-ssを渡す形は、出力側だと所要時間が開始位置に比例し
+    # (実測: 2.4時間の録画から60秒を切るのに開始60秒で2.95s、7200秒で49.71s)、入力側だと
+    # HLSが前方のsegmentへ飛んで頭の映像を失う(開始5000秒で映像が1.96秒遅れて始まった)。
+    # copy経路で粗く切った短い中間を再encodeするので、最後のcommandの入力は原本ではない。
+    assert pathlib.Path(cmd[cmd.index("-i") + 1]).name == "rough.mp4"
+    # 中間は要求より前置きぶん手前から始まるので、その分だけ出力側-ssで捨てる。前置きは
+    # 「要求以前の最後のkeyframe」までなので、1 GOPを超えることはない。
     assert cmd.index("-i") < cmd.index("-ss")
+    assert 0.0 <= float(cmd[cmd.index("-ss") + 1]) <= _CLIP_GOP
+    # 粗い切り出し(TS中間経由のcopy)が先に走っている。
+    assert any("mpegts" in c for c in captured["cmds"])
 
 
 async def test_make_clip_normalize_copies_video_and_reencodes_audio(monkeypatch, make_recording):
@@ -554,6 +584,27 @@ def test_smart_plan_keeps_a_head_that_is_at_least_one_frame():
     assert (k, degenerate) == (Fraction(5), None)
 
 
+def test_smart_plan_joins_after_the_last_resolution_change():
+    """切替より手前で接合すると、そのままcopyするtailが混在解像度になり連結できない。
+    切替以降で接合すればtailは単一解像度で、切替を跨ぐheadは焼き直す側なので揃えられる。"""
+    keys = [Fraction(0), Fraction(2), Fraction(4), Fraction(6), Fraction(8)]
+    k, boundary, degenerate = clipper._smart_plan(keys, 1.0, 10.0, 1 / 30, floor=5.5)
+    assert (k, boundary, degenerate) == (Fraction(6), Fraction(8), None)
+
+
+def test_smart_plan_ignores_a_resolution_change_before_the_request():
+    keys = [Fraction(0), Fraction(2), Fraction(4)]
+    k, _, _ = clipper._smart_plan(keys, 1.0, 10.0, 1 / 30, floor=0.5)
+    assert k == Fraction(2), "要求より手前の切替は接合点を動かさない"
+
+
+def test_smart_plan_degenerates_when_the_change_is_at_the_end():
+    """切替が範囲の終盤なら接合できるkeyframeが残らない。範囲全体を焼く縮退になる。"""
+    keys = [Fraction(0), Fraction(2), Fraction(4)]
+    k, _, degenerate = clipper._smart_plan(keys, 1.0, 5.0, 1 / 30, floor=4.5)
+    assert (k, degenerate) == (None, "single_gop")
+
+
 def test_profile_arg_maps_the_probe_spelling():
     assert clipper._profile_arg("h264", "High") == "high"
     assert clipper._profile_arg("h264", "Constrained Baseline") == "baseline"
@@ -568,11 +619,21 @@ def test_profile_arg_rejects_an_unknown_profile():
         clipper._profile_arg("h264", None)
 
 
-def test_head_args_put_the_seek_and_the_duration_before_the_input():
-    args = clipper._head_args(_plain_source(), H264_PARAMS, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx264", 23)
-    assert args.index("-ss") < args.index("-i")
-    assert args.index("-t") < args.index("-i")
+def _head_args(**kwargs):
+    args = {"rough": clipper.Path("rough.mp4"), "params": H264_PARAMS, "lead": 1.0,
+            "seconds": 4.0, "dst": clipper.Path("head.ts"), "encoder": "libx264",
+            "quality": 23, "size": (320, 240)}
+    args.update(kwargs)
+    return clipper._head_args(args["rough"], args["params"], args["lead"], args["seconds"],
+                              args["dst"], args["encoder"], args["quality"], args["size"])
+
+
+def test_head_args_read_the_rough_intermediate_not_the_source():
+    """原本へ-ssを渡す形はどちらの側でも壊れる(入力側はHLSが前方へ飛び、出力側は開始位置に
+    比例して遅い)。粗く切った中間を読み、前置きだけを出力側-ssで捨てる。"""
+    args = _head_args()
+    assert args[args.index("-i") + 1] == "rough.mp4"
+    assert args.index("-i") < args.index("-ss")
     assert args[args.index("-ss") + 1] == "1.000"
     assert args[args.index("-t") + 1] == "4.000"
 
@@ -580,24 +641,28 @@ def test_head_args_put_the_seek_and_the_duration_before_the_input():
 def test_head_args_never_disable_accurate_seek():
     """headは両streamを復号するので、accurate seekのままで要求位置ちょうどから始まる。
     -noaccurate_seekを付けると先頭がkeyframeへ戻り、smart cutの目的そのものが消える。"""
-    args = clipper._head_args(_plain_source(), H264_PARAMS, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx264", 23)
+    args = _head_args()
     assert "-noaccurate_seek" not in args
     assert "-copyts" not in args
 
 
+def test_head_args_force_the_tail_resolution():
+    """配信中に解像度が変わる範囲では、headがその切替を跨ぐ。tailの解像度で焼かないと
+    混在解像度になり連結の照合で落ちる。"""
+    args = _head_args(size=(720, 1280))
+    assert args[args.index("-s") + 1] == "720x1280"
+
+
 def test_head_args_reencode_audio_to_aac_at_the_source_rate():
     """GOP途中からcopyできる音声は無い。rate/channelが原本と違えば連結の照合で落ちる。"""
-    args = clipper._head_args(_plain_source(), H264_PARAMS, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx264", 23)
+    args = _head_args()
     assert args[args.index("-c:a") + 1] == "aac"
     assert args[args.index("-ar") + 1] == "44100"
     assert args[args.index("-ac") + 1] == "1"
 
 
 def test_head_args_match_the_source_video_parameters():
-    args = clipper._head_args(_plain_source(), H264_PARAMS, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx264", 23)
+    args = _head_args()
     assert args[args.index("-pix_fmt") + 1] == "yuv420p"
     assert args[args.index("-profile:v") + 1] == "high"
     assert args[args.index("-level") + 1] == "40"
@@ -609,15 +674,13 @@ def test_head_args_leave_the_level_to_the_check_for_hevc():
     params = {"video": {**H264_PARAMS["video"], "codec_name": "hevc", "profile": "Main",
                         "level": 120},
               "audio": H264_PARAMS["audio"]}
-    args = clipper._head_args(_plain_source(), params, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx265", 27)
+    args = _head_args(params=params, encoder="libx265", quality=27)
     assert "-level" not in args
     assert args[args.index("-profile:v") + 1] == "main"
 
 
 def test_head_args_strip_the_mpegts_mux_delay():
-    args = clipper._head_args(_plain_source(), H264_PARAMS, 1.0, 5.0,
-                              clipper.Path("head.ts"), "libx264", 23)
+    args = _head_args()
     assert args[args.index("-muxdelay") + 1] == "0"
     assert args[args.index("-muxpreload") + 1] == "0"
 
@@ -667,53 +730,55 @@ async def test_smart_encoder_accepts_an_encoder_of_the_same_family(monkeypatch):
     assert await clipper._smart_encoder("h264") == "h264_nvenc"
 
 
-async def test_verify_landing_accepts_within_one_frame(monkeypatch):
+async def test_landing_seconds_reports_where_the_tail_started(monkeypatch):
     async def fake_first_packet(path):
         return Fraction(1201, 240), True
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", fake_first_packet)
-    landed = await clipper._verify_landing(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
+    landed = await clipper._landing_seconds(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
     assert landed == pytest.approx(5.004, abs=1e-3)
 
 
-async def test_verify_landing_rejects_a_forward_landing(monkeypatch):
-    """HLS入力は12%の確率で要求より後ろへ着地し内容を失う。copyへ倒さず失敗させる。"""
+async def test_landing_seconds_accepts_a_forward_landing(monkeypatch):
+    """HLSは12%の確率で狙いと別のkeyframeへ着く。着いた先も実在のkeyframeなので、そこを
+    接合点に採り直せば要求どおりのIN点は保てる。ここで失敗させていた頃は、実測で開始
+    5,000秒のような位置がまるごと切り出せなかった。"""
     async def fake_first_packet(path):
         return Fraction(6789, 1000), True
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", fake_first_packet)
-    with pytest.raises(RuntimeError) as excinfo:
-        await clipper._verify_landing(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
-    assert "1.789" in str(excinfo.value)
+    landed = await clipper._landing_seconds(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
+    assert landed == pytest.approx(6.789)
 
 
-async def test_verify_landing_subtracts_the_media_offset(monkeypatch):
+async def test_landing_seconds_subtracts_the_media_offset(monkeypatch):
     async def fake_first_packet(path):
         return Fraction(6402, 1000), True
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", fake_first_packet)
-    assert await clipper._verify_landing(
+    assert await clipper._landing_seconds(
         clipper.Path("t.ts"), 5.0, 1.402, 1 / 30, {}) == pytest.approx(5.0)
 
 
-async def test_verify_landing_rejects_an_empty_part(monkeypatch):
+async def test_landing_seconds_rejects_an_empty_part(monkeypatch):
     """0 byte出力はffmpegの終了コードに出ない(Output file is empty)。ここで捕まえる。"""
     async def fake_first_packet(path):
         return None, False
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", fake_first_packet)
     with pytest.raises(RuntimeError) as excinfo:
-        await clipper._verify_landing(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
+        await clipper._landing_seconds(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
     assert "1 packet" in str(excinfo.value)
 
 
-async def test_verify_landing_rejects_a_non_keyframe_start(monkeypatch):
+async def test_landing_seconds_rejects_a_non_keyframe_start(monkeypatch):
+    """keyframeでない位置から始まるtailは、そこからstream copyしても復号できない。"""
     async def fake_first_packet(path):
         return Fraction(5), False
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", fake_first_packet)
     with pytest.raises(RuntimeError):
-        await clipper._verify_landing(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
+        await clipper._landing_seconds(clipper.Path("t.ts"), 5.0, 0.0, 1 / 30, {})
 
 
 async def test_make_clip_rejects_smart_with_precise(make_recording):
@@ -969,21 +1034,40 @@ async def test_smart_cut_on_an_hls_source_keeps_both_time_axes(
 
 
 @pytest.mark.requires_ffmpeg
-async def test_smart_cut_fails_instead_of_falling_back_when_the_landing_is_wrong(
+async def test_smart_cut_moves_the_join_to_where_the_tail_landed(
         monkeypatch, long_gop_recording):
-    """着地が狙いと違えば失敗させる。copyへ倒すと、利用者は要求どおりのIN点だと思って
-    内容の欠けた出力を受け取る。中途のfileも残さない。"""
+    """着地が狙いと違っても、そこを接合点に採り直せば要求どおりのIN点は保てる。
+
+    以前はここで失敗させていたため、着地が飛ぶ位置(実録画で12%)は切り出せなかった。
+    headをその位置まで焼くので、報告する接合点と成果物は一致する。"""
     async def landed_late(path):
         return Fraction(6789, 1000), True
 
     monkeypatch.setattr(clipper.keyframes, "first_packet", landed_late)
-    out = clipper.clip_path(long_gop_recording, 1.0, 10.0)
+    info = await clipper.make_clip(long_gop_recording, 1.0, 10.0, smart=True)
 
-    with pytest.raises(RuntimeError) as excinfo:
-        await clipper.make_clip(long_gop_recording, 1.0, 10.0, smart=True)
-    assert "1.789" in str(excinfo.value)
-    assert not out.exists()
-    assert not list(out.parent.glob(".smartcut-*")), "中間dirが残っている"
+    assert info["join_seconds"] == pytest.approx(6.789, abs=1e-3)
+    assert info["head_seconds"] == pytest.approx(5.789, abs=1e-3)
+    assert info["actual_start_seconds"] == 1.0
+    assert not list(clipper.Path(info["path"]).parent.glob(".smartcut-*")), "中間dirが残っている"
+
+
+@pytest.mark.requires_ffmpeg
+async def test_smart_cut_falls_back_to_encoding_when_the_tail_lands_outside(
+        monkeypatch, long_gop_recording):
+    """着地が範囲の外なら、そのtailを繋ぐと要求範囲と食い違う。範囲全体を焼いて応え、
+    縮退したことを報告する(黙って別の範囲を返さない)。"""
+    async def landed_outside(path):
+        return Fraction(99), True
+
+    monkeypatch.setattr(clipper.keyframes, "first_packet", landed_outside)
+    info = await clipper.make_clip(long_gop_recording, 1.0, 10.0, smart=True)
+
+    assert info["degenerate"] == "tail_landed_outside"
+    assert info["join_seconds"] is None
+    assert info["copied_seconds"] == 0.0
+    assert info["head_seconds"] == pytest.approx(9.0)
+    assert info["output_duration_seconds"] == pytest.approx(9.0, abs=TAIL_SLACK)
 
 
 # ------------------------------------------------------------------------ thumbnails

@@ -759,6 +759,73 @@ def test_media_job_progress_is_clamped_and_completion_forces_full(tmp_db, record
     assert job["error"] is None
 
 
+def test_stage_history_only_grows_when_a_phase_is_named(tmp_db, recording_id):
+    """進捗tickは1 jobで数万回鳴る。段階の履歴が同じ頻度で伸びると、その全文を毎回
+    読み書きすることになる。追記するのはphaseを渡した呼び出しだけ。"""
+    tmp_db.enqueue_media_job("j1", "burn", recording_id)
+    tmp_db.start_media_job("j1")
+    tmp_db.update_media_job_progress("j1", 5, "解析中", phase="解析中")
+    for pct in range(6, 40):
+        tmp_db.update_media_job_progress("j1", pct, f"焼き込み中（{pct}/100）")
+    tmp_db.update_media_job_progress("j1", 40, "書き出し中", phase="書き出し中")
+
+    stages = tmp_db.get_media_job("j1")["stages"]
+    assert [s["label"] for s in stages] == ["解析中", "書き出し中"]
+    assert [s["pct"] for s in stages] == [5, 40]
+    # 終端でstageは消えるが、履歴は残す(どこで何秒かかったかを辿る唯一の手段)。
+    tmp_db.finish_media_job("j1", "failed", error="ffmpeg died")
+    assert len(tmp_db.get_media_job("j1")["stages"]) == 2
+
+
+def test_stage_history_is_bounded_and_keeps_the_newest(tmp_db, recording_id):
+    """保留と再試行を繰り返すjobは段階名を理由違いで積み続けられる。上限で古い方から
+    落とすのは、失敗の追跡に効くのが「どこで止まったか」の側だから。"""
+    tmp_db.enqueue_media_job("j1", "burn", recording_id)
+    tmp_db.start_media_job("j1")
+    limit = tmp_db.MAX_JOB_STAGES
+    for n in range(limit + 10):
+        tmp_db.update_media_job_progress("j1", 1, f"段階{n}", phase=f"段階{n}")
+
+    stages = tmp_db.get_media_job("j1")["stages"]
+    assert len(stages) == limit
+    assert stages[-1]["label"] == f"段階{limit + 9}"
+
+
+def test_stages_json_is_added_to_an_existing_ledger(tmp_db, tmp_db_path, recording_id):
+    """CREATE TABLE IF NOT EXISTS は既存表に列を足さない。列が無いDBを開き直しても
+    既存の行ごと使えること(既存行は空listで入る — 過ぎた実行の段階は復元できない)。"""
+    from tictok.storage import Storage
+
+    tmp_db.enqueue_media_job("j1", "burn", recording_id)
+    tmp_db.close()
+    conn = sqlite3.connect(str(tmp_db_path))
+    conn.execute("ALTER TABLE media_job_queue DROP COLUMN stages_json")
+    conn.commit()
+    conn.close()
+
+    reopened = Storage(str(tmp_db_path))
+    try:
+        assert reopened.get_media_job("j1")["stages"] == []
+        reopened.start_media_job("j1")
+        reopened.update_media_job_progress("j1", 5, "解析中", phase="解析中")
+        assert [s["label"] for s in reopened.get_media_job("j1")["stages"]] == ["解析中"]
+    finally:
+        reopened.close()
+
+
+def test_a_claim_starts_the_stage_history_over(tmp_db, recording_id):
+    """保留から戻った行は最初の段階からやり直す。前の実行ぶんが残っていると、同じ段階が
+    二度並んで段階ごとの所要が読めなくなる。"""
+    tmp_db.enqueue_media_job("j1", "burn", recording_id)
+    tmp_db.start_media_job("j1")
+    tmp_db.update_media_job_progress("j1", 5, "解析中", phase="解析中")
+    tmp_db.defer_media_job("j1", 0.0, "復帰を待っています…")
+
+    claimed = tmp_db.claim_next_pending_media_job()
+    assert claimed["job_id"] == "j1"
+    assert claimed["stages"] == []
+
+
 def test_finish_media_job_failure_keeps_progress_and_records_error(tmp_db, recording_id):
     tmp_db.enqueue_media_job("j1", "burn", recording_id)
     tmp_db.start_media_job("j1")

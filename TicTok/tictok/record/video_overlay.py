@@ -44,7 +44,7 @@ from tictok.core.progress import (  # 進捗reporterは全長時間jobで共通
 from tictok.core.battle import battle_sides, battle_type
 from tictok.media import hls_source
 from tictok.media.avatar_pool import avatar_key
-from tictok.record import audio_norm, subtitles
+from tictok.record import audio_norm, fonts, subtitles, telop_styles
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
     SIDECAR_DIRNAME,
@@ -286,6 +286,11 @@ OVERLAY_KEYS = (
     "video_overlay_subtitles",
     "video_overlay_subtitle_font_size",
     "video_overlay_subtitle_position_percent",
+    # 書体・動き・行数はいずれも焼き上がりの見た目そのものなので、cache signatureへ入れる
+    # (入れないと「presetを変えたのに前の書体のままcache hit」になる)。
+    "video_overlay_subtitle_style",
+    "video_overlay_subtitle_animation",
+    "video_overlay_subtitle_max_lines",
     # 音量正規化は出力の中身を変えるので、cache signatureへ入る必要がある(値を変えたのに
     # 前回の音声のままcache hitする、を避ける)。
     "video_output_normalize_audio",
@@ -650,18 +655,24 @@ _CALIB_FS = 48
 _CALIB_CJK = "あ"
 _CALIB_ASCII = "abcdefghijklmnopqrstuvwxyz 0123456789 "
 
-_font_em: Optional[tuple] = None  # (wide_em, narrow_em), measured once
+# (family, bold, fontsdir) -> (wide_em, narrow_em)。commentのfontとテロップのfontは別物
+# なので、家族ごとに測って別々に持つ。折り返し幅は測った家族の値で計算しないと合わない。
+_font_em: dict = {}
 _font_em_lock = asyncio.Lock()
 
 
-def _measure_font_em_sync() -> Optional[tuple]:
+def _measure_font_em_sync(family: str = COMMENT_FONT, bold: bool = False,
+                          fontsdir: Optional[str] = None) -> Optional[tuple]:
     """Render two lengths each of a wide (CJK) and a narrow (Latin) run through
     libass and recover the per-glyph em-advance from the rendered pixel widths.
 
     Using two lengths and taking the *difference* of their right ink edges cancels
     the leading offset and the final glyph's side bearing, leaving exactly the
     advance of the added glyphs — so the result is the font's true advance, not an
-    ink estimate. Returns (wide_em, narrow_em) or None if the probe cannot run."""
+    ink estimate. Returns (wide_em, narrow_em) or None if the probe cannot run.
+
+    ``fontsdir`` を渡すと同梱fontから解決する(テロップpresetの書体)。本番のrenderと同じ
+    経路・同じ引数で測るのが要点で、ここだけhostのfontで測ると折り返しが実物とずれる。"""
     try:
         from PIL import Image
     except ImportError:
@@ -684,7 +695,8 @@ def _measure_font_em_sync() -> Optional[tuple]:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Cal,{COMMENT_FONT},{fs},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,"
+        f"Style: Cal,{family},{fs},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        f"{-1 if bold else 0},0,0,0,"
         "100,100,0,0,1,0,0,7,0,0,0,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -698,10 +710,13 @@ def _measure_font_em_sync() -> Optional[tuple]:
         # Reference the .ass by bare name with cwd=tmp so the filter graph needs no
         # Windows path escaping (drive ':' / '\\'), same as the main render path.
         # 1 frameの計測用renderなので、probeと同じ扱い(短いtimeout + 取り消し登録)で走らせる。
+        vf = "ass=calib.ass"
+        if fontsdir:
+            vf += f":fontsdir={fontsdir}"
         proc = ffprobe.run_sync(
             ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
              "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=1",
-             "-vf", "ass=calib.ass", "-frames:v", "1", "calib.png"],
+             "-vf", vf, "-frames:v", "1", "calib.png"],
             timeout=ffprobe.SHORT_TIMEOUT_SECONDS, cwd=tmp,
         )
         if not proc.ok or not png_path.is_file():
@@ -735,28 +750,34 @@ def _measure_font_em_sync() -> Optional[tuple]:
     return wide_em, narrow_em
 
 
-async def _font_metrics() -> tuple:
-    """(wide_em, narrow_em) for COMMENT_FONT, measured once and cached. Falls back
-    to the nominal ratios (logged) only when the calibration render cannot run."""
-    global _font_em
-    if _font_em is not None:
-        return _font_em
+async def _font_metrics(family: str = COMMENT_FONT, bold: bool = False,
+                        fontsdir: Optional[str] = None, what: str = "comment") -> tuple:
+    """(wide_em, narrow_em) for one font family, measured once per family and cached.
+    Falls back to the nominal ratios (logged) only when the calibration render
+    cannot run."""
+    key = (family, bold, fontsdir)
+    hit = _font_em.get(key)
+    if hit is not None:
+        return hit
     async with _font_em_lock:
-        if _font_em is not None:
-            return _font_em
+        hit = _font_em.get(key)
+        if hit is not None:
+            return hit
         loop = asyncio.get_running_loop()
-        measured = await loop.run_in_executor(None, _measure_font_em_sync)
+        measured = await loop.run_in_executor(
+            None, _measure_font_em_sync, family, bold, fontsdir)
         if measured is None:
             logger.warning(
-                "commentのfontの実測ができないため公称のem比を使います"
+                "%sのfont(%s)の実測ができないため公称のem比を使います"
                 "（wide=%.2f narrow=%.2f）折り返し幅は概算になります",
-                NOMINAL_WIDE_EM, NOMINAL_NARROW_EM,
+                what, family, NOMINAL_WIDE_EM, NOMINAL_NARROW_EM,
             )
-            _font_em = (NOMINAL_WIDE_EM, NOMINAL_NARROW_EM)
+            measured = (NOMINAL_WIDE_EM, NOMINAL_NARROW_EM)
         else:
-            logger.info("commentのfontを実測しました: wide=%.3f narrow=%.3f em", *measured)
-            _font_em = measured
-        return _font_em
+            logger.info("%sのfont(%s)を実測しました: wide=%.3f narrow=%.3f em",
+                        what, family, *measured)
+        _font_em[key] = measured
+        return measured
 
 
 def _estimate_width(text: str, font_size: float,
@@ -2695,6 +2716,57 @@ def _subtitle_font(cfg: dict, height: int) -> int:
     return max(8, int(round(cfg["video_overlay_subtitle_font_size"] * height / BASE_HEIGHT)))
 
 
+def telop_style(cfg: dict) -> "telop_styles.TelopStyle":
+    """設定値からテロップpresetを引く。"""
+    return telop_styles.style_for(
+        cfg.get("video_overlay_subtitle_style") or telop_styles.DEFAULT_STYLE_VALUE)
+
+
+def telop_animate(cfg: dict) -> bool:
+    value = cfg.get("video_overlay_subtitle_animation")
+    return True if value is None else bool(value)
+
+
+def _subtitle_max_lines(cfg: dict) -> int:
+    return max(1, int(cfg.get("video_overlay_subtitle_max_lines") or SUBTITLE_MAX_LINES))
+
+
+def fontsdir_arg(path: Path) -> str:
+    """filter graphの ``fontsdir=`` へ渡せる形にしたdirectory path。
+
+    Windowsのdrive付きpathは ``C:`` の ``:`` がfilterのoption区切りに読まれる。実測では
+    **backslash 2つ**(``C\\\\:/...``)が必要で、1つだとgraph側で剥がされたあとoption parser
+    が素の ``:`` を見て `No option name near ...` で落ちる。``\\`` は ``/`` へ倒す
+    (filterの世界では ``\\`` はescape文字なので、pathの区切りに使うと壊れる)。"""
+    return str(path).replace("\\", "/").replace(":", "\\\\:")
+
+
+def ensure_telop_font(style: "telop_styles.TelopStyle") -> Optional[Path]:
+    """presetが使う同梱fontを揃える。同梱fontを使わないpresetではNoneを返す。
+
+    取得できない場合は例外を投げて焼き込みを止める。ここで代替fontへ落とすと、選んだ
+    presetと違う書体の成果物が黙って出来る(しかも再encodeしないと直せない)。"""
+    if not style.font_file:
+        return None
+    try:
+        return fonts.ensure_telop_font(style.font_file)
+    except Exception as exc:
+        logger.error(
+            "テロップ用のfont %s を用意できないため焼き込みを中止します（preset=%s）",
+            style.font_file, style.key,
+            extra={"event": "overlay.telop_font_unavailable",
+                   "ctx": {"style": style.key, "font_file": style.font_file,
+                           "font_family": style.font_family,
+                           "path": str(fonts.FONT_DIR)}},
+            exc_info=True,
+        )
+        raise RuntimeError(
+            f"テロップの書体「{style.label}」のfont({style.font_file})を用意できませんでした。"
+            "配布元へ接続できないか、配布物が変わっています。"
+            "別の書体を選ぶか、通信できる状態で再実行してください。"
+        ) from exc
+
+
 def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
                               width: int, height: int, cfg: dict,
                               wide_em: float, narrow_em: float) -> tuple[list, dict]:
@@ -2702,14 +2774,31 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
 
     segments_jsonのstart/endは転写時にmedia軸(このmp4のPTS秒)へ再map済みで、焼き込みが
     使う軸と同一なので、壁時計mapper(to_media)へ通してはならない。通すと二重変換になる。
+
+    ``wide_em``/``narrow_em`` は **テロップpresetの書体で測った** em advanceであること。
+    commentの書体の値で折り返すと、書体を変えた瞬間に折り返し位置が実物とずれる。
+
+    縁を2本持つpresetでは1つのsegmentが2行のDialogueになる(下層=外側の縁/発光, 上層=本体)。
+    診断の ``placed`` は**字幕の件数**で、ASSの行数ではない。
     """
+    style = telop_style(cfg)
+    animate = telop_animate(cfg)
+    max_lines = _subtitle_max_lines(cfg)
     fs = _subtitle_font(cfg, height)
     pct = cfg.get("video_overlay_subtitle_position_percent") or 0
     cx = width // 2
     cy = int(round(height * pct / 100.0))
     max_w = int(width * SUBTITLE_WIDTH_FRAC)
+    # 字間はglyphの送り幅に上乗せされるので、折り返しの計算にも同じだけ足す。
+    spacing_em = style.spacing_ratio
+    wide = wide_em + spacing_em
+    narrow = narrow_em + spacing_em
     upper = video_duration if video_duration is not None else float("inf")
+    # 重ね方(層の数・順序・ずらし)はtelop_stylesが決める。ここで組み立て直すと、設定画面の
+    # 見本と成果物で重なりが変わりうる。
+    cue = telop_styles.cue_layers(style, cx, cy, fs, animate=animate)
     lines: list = []
+    placed = 0
     dropped_after = 0
     truncated = 0
     for seg in segments:
@@ -2725,26 +2814,31 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
         text = _ass_escape(_strip_bidi_controls(seg["text"]))
         if not text:
             continue
-        wrapped = _wrap_text(text, fs, max_w, wide_em, narrow_em)
-        if len(wrapped) > SUBTITLE_MAX_LINES:
+        wrapped = _wrap_text(text, fs, max_w, wide, narrow)
+        if len(wrapped) > max_lines:
             truncated += 1
-            wrapped = wrapped[:SUBTITLE_MAX_LINES]
+            wrapped = wrapped[:max_lines]
         body = "\\N".join(wrapped)
-        lines.append(
-            f"Dialogue: 7,{_ass_timestamp(start)},{_ass_timestamp(end)},Subtitle,,0,0,0,,"
-            f"{{\\an5\\pos({cx},{cy})}}{body}"
-        )
+        ts = f"{_ass_timestamp(start)},{_ass_timestamp(end)}"
+        for layer, style_name, tags in cue:
+            lines.append(f"Dialogue: {layer},{ts},{style_name},,0,0,0,,{tags}{body}")
+        placed += 1
     if dropped_after or truncated:
         logger.info(
-            "字幕の配置: %d 行を配置, %d 行は動画の外, %d 行を %d 行へ切り詰め",
-            len(lines), dropped_after, truncated, SUBTITLE_MAX_LINES,
+            "字幕の配置: %d 件を配置, %d 件は動画の外, %d 件を %d 行へ切り詰め",
+            placed, dropped_after, truncated, max_lines,
             extra={"event": "overlay.subtitles_laid_out",
-                   "ctx": {"placed": len(lines), "dropped_after_end": dropped_after,
-                           "truncated": truncated, "max_lines": SUBTITLE_MAX_LINES,
-                           "font_size": fs, "position_percent": pct}},
+                   "ctx": {"placed": placed, "dropped_after_end": dropped_after,
+                           "truncated": truncated, "max_lines": max_lines,
+                           "font_size": fs, "position_percent": pct,
+                           "style": style.key, "font_family": style.font_family,
+                           "animated": animate and style.animated,
+                           "ass_lines": len(lines)}},
         )
-    return lines, {"placed": len(lines), "dropped_after_end": dropped_after,
-                   "truncated": truncated, "font_size": fs}
+    return lines, {"placed": placed, "dropped_after_end": dropped_after,
+                   "truncated": truncated, "font_size": fs, "max_lines": max_lines,
+                   "style": style.key, "font_family": style.font_family,
+                   "animated": animate and style.animated, "ass_lines": len(lines)}
 
 
 def _build_ass(events: list, started_at: float, ended_at: Optional[float], video_duration: Optional[float],
@@ -2757,13 +2851,17 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
                time_source: str = "arrival",
                debug_sink: Optional[list] = None,
                media_pts: Optional[list] = None,
-               subtitle_segments: Optional[list] = None) -> tuple[str, list, dict, Optional[dict]]:
+               subtitle_segments: Optional[list] = None,
+               telop_em: Optional[tuple] = None) -> tuple[str, list, dict, Optional[dict]]:
     comment_fs = _comment_font(cfg, height)
     icon_px = _icon_px(cfg, height)
     coin_fs = max(10, int(round(height * COIN_REF_PX / BASE_HEIGHT)))
     outline = max(1, int(round(comment_fs * 0.08)))
     subtitle_fs = _subtitle_font(cfg, height)
-    subtitle_outline = max(2, int(round(subtitle_fs * 0.10)))
+    telop = telop_style(cfg)
+    # テロップの書体はcommentと別なので、折り返しに使うem advanceも別に測ったものを使う
+    # (``telop_em``)。渡されない場合だけcommentの値で代用する。
+    telop_wide_em, telop_narrow_em = telop_em if telop_em else (wide_em, narrow_em)
     upper = video_duration if video_duration is not None else float("inf")
     # Mode A (arrival): place every timestamp through the consumer-arrival wall->pts
     # map. Mode B (server): place events by their TikTok create_time and the battle
@@ -2987,7 +3085,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     subtitle_stats = {"placed": 0, "dropped_after_end": 0, "truncated": 0, "font_size": 0}
     if cfg.get("video_overlay_subtitles") and subtitle_segments:
         subtitle_lines, subtitle_stats = _build_subtitle_dialogues(
-            subtitle_segments, video_duration, width, height, cfg, wide_em, narrow_em)
+            subtitle_segments, video_duration, width, height, cfg,
+            telop_wide_em, telop_narrow_em)
 
     gift_lines, overlays = _build_gift_layout(
         gifts, width, height, coin_fs, icon_px, cfg["video_overlay_gift_seconds"], wide_em, narrow_em,
@@ -3027,10 +3126,10 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         # font size, colour and position for each shape/number/avatar.
         f"Style: Score,{COMMENT_FONT},20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,"
         f"100,100,0,0,1,2,0,7,0,0,0,1\n"
-        # STT字幕: 中央揃え・太めの縁取り。映像の明暗に関わらず読めるよう、Commentより
-        # 強い輪郭と影を付ける(位置は行ごとの\posで与える)。
-        f"Style: Subtitle,{COMMENT_FONT},{subtitle_fs},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,"
-        f"100,100,0,0,1,{subtitle_outline},1,5,0,0,0,1\n\n"
+        # STT字幕(テロップ): 書体・色・縁・影はpresetが決める(telop_styles)。位置は行ごとの
+        # \posで与えるので、ここは中央揃え(Alignment 5)固定。
+        + "\n".join(telop_styles.style_lines(telop, subtitle_fs))
+        + "\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -3042,7 +3141,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         "gifts": len(gift_lines),
         "score": len(score_lines),
         "bonus": len(bonus_lines),
-        "subtitles": len(subtitle_lines),
+        # 字幕は縁の重ねで1件が2行になり得るので、件数はASSの行数ではなくplacedで数える。
+        "subtitles": subtitle_stats["placed"],
         "subtitle_diag": subtitle_stats,
         "icons": len(overlays),
         "dropped_icons": dropped_icons,
@@ -3989,7 +4089,8 @@ async def _render_comment_layer(placements: list, avatar_files: dict, m: dict, f
 
 def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_input: Optional[int] = None,
                           layer_y: int = 0, scale_to: Optional[tuple] = None,
-                          cfr_fps: Optional[float] = None) -> str:
+                          cfr_fps: Optional[float] = None,
+                          fontsdir: Optional[str] = None) -> str:
     """Build the ffmpeg filter graph: scale each unique icon once, split it into
     one stream per instance, then slide each instance in/out over its window. When
     ``scale_to`` is given, the source frame is first upscaled to that (w, h) so the
@@ -4080,7 +4181,10 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
         cur = "[cl]"
     # ass output is the final [vout] unless score-bar avatars still composite on top.
     ass_out = "[assed]" if static_specs else "[vout]"
-    parts.append(f"{cur}ass={ass_name}{ass_out}")
+    # ``fontsdir`` はテロップの同梱fontを読ませるためのもの(escapeは fontsdir_arg)。
+    # 渡さないときはhostのfont設定だけを見る従来どおりの挙動になる。
+    ass_args = f"{ass_name}:fontsdir={fontsdir}" if fontsdir else ass_name
+    parts.append(f"{cur}ass={ass_args}{ass_out}")
     cur = ass_out
     for i, spec in enumerate(static_specs):
         label = label_queue[str(spec["file"])].pop(0)
@@ -4687,7 +4791,8 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
                       artifact_dir: Optional[Path] = None,
                       expect_seconds: Optional[float] = None,
                       base_pipe: Optional[dict] = None,
-                      layer_list_name: str = "list.txt") -> None:
+                      layer_list_name: str = "list.txt",
+                      fontsdir: Optional[str] = None) -> None:
     """``window`` keeps the source's absolute timestamps via ``-copyts`` and trims the
     output to that media-PTS window, so the filter graph — the very same graph the
     whole-recording burn-in builds, with the same ASS and the same gift
@@ -4809,7 +4914,8 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
         # されたbaseと軸が揃う(旧pre-passがbaseへ音声をcopy同梱していたのと同じ関係)。
         audio_index = 1 + len(seen) + (1 if comment_layer is not None else 0)
         inputs += [*audio_input_args, "-i", str(audio_from)]
-    filter_complex = _build_filter_complex(overlays, icon_px, ass_name, layer_input, layer_y, scale_to, cfr_fps)
+    filter_complex = _build_filter_complex(overlays, icon_px, ass_name, layer_input, layer_y,
+                                           scale_to, cfr_fps, fontsdir)
     # graphはfileで渡す。gift icon 100枚超・lane avatar付きのBattle録画では graph が数十KBに
     # なり、Windowsのcommand line上限(32767字)を実測27KBまで使い切って超える。-filter_complex
     # だと超えた時点でprocess生成そのものが失敗するので、常にscript渡しにして上限から外す。
@@ -5225,7 +5331,8 @@ async def _run_ffmpeg_chunked(source: "hls_source.Source", renderable: list, ico
                               scale_to: Optional[tuple], cfr_fps: float,
                               audio_normalize: Optional[dict],
                               video_dur: float, chunks: int,
-                              expect_seconds: Optional[float]) -> None:
+                              expect_seconds: Optional[float],
+                              fontsdir: Optional[str] = None) -> None:
     """本encodeを時間分割してNVENCのsession並列で走らせ、stream copyで1本へ結合する。
 
     各chunkは窓経路(_run_ffmpegのwindow)そのもので、graph・ASS・giftのenable式は
@@ -5287,6 +5394,7 @@ async def _run_ffmpeg_chunked(source: "hls_source.Source", renderable: list, ico
                        "cfr_fps": cfr_fps, "window": win,
                        "seek_offset": source.media_offset},
             layer_list_name=playlists[k],
+            fontsdir=fontsdir,
         )
 
     tasks = [asyncio.create_task(_one(k)) for k in range(chunks)]
@@ -5631,6 +5739,20 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
     width, height = _render_dimensions(src_w, src_h, int(cfg["video_overlay_min_height"]))
     await _step(0.9, "フォントを測定中")
     wide_em, narrow_em = await _font_metrics()
+    # テロップは同梱fontで描くので、fontを揃えてから **その書体で** em advanceを測る。
+    # 字幕を焼かない場合は何もしない(同梱fontの取得も測定も要らない)。
+    subtitle_segments = (
+        subtitles.usable_segments(transcript.get("segments"))
+        if (cfg.get("video_overlay_subtitles") and transcript) else []
+    )
+    fontsdir: Optional[str] = None
+    telop_em = (wide_em, narrow_em)
+    if cfg.get("video_overlay_subtitles"):
+        style = telop_style(cfg)
+        loop = asyncio.get_running_loop()
+        if await loop.run_in_executor(None, ensure_telop_font, style) is not None:
+            fontsdir = fontsdir_arg(fonts.telop_font_dir(style.font_file))
+        telop_em = await _font_metrics(style.font_family, style.bold, fontsdir, "テロップ")
     return {
         "video_dur": video_dur,
         "anchors": anchors,
@@ -5646,12 +5768,13 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
         "avatar_dir": layout.avatar_pool_dir(),
         "wide_em": wide_em,
         "narrow_em": narrow_em,
+        "telop_em": telop_em,
+        # 同梱fontを読ませるdirectory(filter用にescape済み)。字幕を焼かないときはNoneで、
+        # その場合ffmpegは今までどおりhostのfontだけを見る。
+        "fontsdir": fontsdir,
         "quality": int(cfg.get("video_overlay_quality") or 21),
         "codec": codec_family(cfg.get("video_overlay_codec")),
-        "subtitle_segments": (
-            subtitles.usable_segments(transcript.get("segments"))
-            if (cfg.get("video_overlay_subtitles") and transcript) else []
-        ),
+        "subtitle_segments": subtitle_segments,
     }
 
 
@@ -5769,6 +5892,7 @@ async def _ensure_overlay(
                            "ctx": {"stem": src.stem, "src_fps": fps, "fps": cfr_fps}})
     avatar_dir = ctx["avatar_dir"]
     wide_em, narrow_em = ctx["wide_em"], ctx["narrow_em"]
+    telop_em = ctx["telop_em"]
     quality, codec = ctx["quality"], ctx["codec"]
     subtitle_segments = ctx["subtitle_segments"]
 
@@ -5800,7 +5924,7 @@ async def _ensure_overlay(
         ass_text, overlays, stats, comment_plan = _build_ass(
             events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
             wide_em, narrow_em, pts_gaps, battles, time_source=time_source, debug_sink=debug_sink,
-            media_pts=media_pts, subtitle_segments=subtitle_segments,
+            media_pts=media_pts, subtitle_segments=subtitle_segments, telop_em=telop_em,
         )
         await progress.done(
             "plan",
@@ -5989,7 +6113,7 @@ async def _ensure_overlay(
                     ass_text, overlays, stats, _ = _build_ass(
                         events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
                         wide_em, narrow_em, pts_gaps, battles, use_comment_layer=False, time_source=time_source,
-                        media_pts=media_pts, subtitle_segments=subtitle_segments,
+                        media_pts=media_pts, subtitle_segments=subtitle_segments, telop_em=telop_em,
                     )
 
             icon_cache = layout.gift_icon_pool_dir()
@@ -6011,7 +6135,8 @@ async def _ensure_overlay(
                     on_progress=progress.cb("encode", video_dur),
                     scale_to=main_scale, cfr_fps=cfr_fps,
                     audio_normalize=audio_norm.targets_from_cfg(cfg),
-                    video_dur=video_dur, chunks=chunks, expect_seconds=video_dur)
+                    video_dur=video_dur, chunks=chunks, expect_seconds=video_dur,
+                    fontsdir=ctx["fontsdir"])
             else:
                 await _run_ffmpeg(render_src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
                                   codec=codec, comment_layer=comment_layer,
@@ -6024,7 +6149,8 @@ async def _ensure_overlay(
                                   input_args=render_args, expect_seconds=video_dur,
                                   base_pipe=base_pipe, audio_from=audio_from,
                                   audio_input_args=(tuple(source.input_args)
-                                                    if audio_from is not None else ()))
+                                                    if audio_from is not None else ()),
+                                  fontsdir=ctx["fontsdir"])
             await progress.done("encode")
         finally:
             ass_path.unlink(missing_ok=True)
@@ -6291,6 +6417,7 @@ async def _preview_plan(src: Path, source: "hls_source.Source", settings,
         ctx["anchors"], ctx["avatar_dir"], ctx["wide_em"], ctx["narrow_em"], ctx["pts_gaps"],
         battles, time_source="arrival", debug_sink=debug_sink,
         media_pts=ctx["media_pts"], subtitle_segments=ctx["subtitle_segments"],
+        telop_em=ctx["telop_em"],
     )
     if (stats["comments"] == 0 and stats["gifts"] == 0 and stats["score"] == 0
             and stats["subtitles"] == 0):
@@ -6354,7 +6481,8 @@ async def _run_preview_frame(src: Path, overlays: list, ctx: dict, ass_path: Pat
     ままの時刻で正しく効く(時刻を組み直さないための要)。"""
     cwd = sidecar_dir(src)
     filter_complex = _build_filter_complex(
-        overlays, ctx["icon_px"], ass_path.name, None, 0, ctx["scale_to"], None)
+        overlays, ctx["icon_px"], ass_path.name, None, 0, ctx["scale_to"], None,
+        ctx["fontsdir"])
     # graphは常にscript渡し(command line長の上限に触れないため。_run_ffmpegと同じ理由)。
     filter_path = out_png.with_name(out_png.stem + ".filter.txt")
     filter_path.write_text(filter_complex, encoding="utf-8")
@@ -6628,6 +6756,7 @@ async def _render_window_clip(src: Path, plan: dict, out: Path, meta_path: Path,
             audio_seek_offset=(source.media_offset if audio_from is not None else 0.0),
             artifact_dir=artifact_dir,
             base_pipe=base_pipe,
+            fontsdir=ctx["fontsdir"],
         )
         await progress.done("encode")
         if with_audio:

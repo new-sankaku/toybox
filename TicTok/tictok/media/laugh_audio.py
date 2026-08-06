@@ -448,11 +448,15 @@ def _ffmpeg_args(source) -> list:
 
 
 def _scan(source, model: _Model, indices: list, win_samples: int, hop_samples: int,
-          batch_size: int) -> tuple:
+          batch_size: int, on_progress=None) -> tuple:
     """音声をpipeで受けながら窓へ切り、確率列と総sample数を返す。
 
     全sampleをmemoryへ載せない: 3時間の録画は16kHz float32で690MBになる。保持するのは
     「まだ窓に満たない端数 + 1 chunk」だけで、窓が揃うたびbatchへ流して捨てる。
+
+    ``on_progress(復号済み秒)`` はchunkを読むたび呼ぶ。分母(録画の尺)はここでは分からない
+    (decodeし切って初めて確定する)ので渡さない — 比率を作るのは尺を知っている呼び出し側の
+    仕事で、ここで推測すると根拠の無い%になる。
     """
     src = source.path
     args = _ffmpeg_args(source)
@@ -505,6 +509,8 @@ def _scan(source, model: _Model, indices: list, win_samples: int, hop_samples: i
                 chunk, dtype="<i2", count=usable // _BYTES_PER_SAMPLE
             ).astype(np.float32) / _FULL_SCALE
             total += samples.size
+            if on_progress is not None:
+                on_progress(total / SAMPLE_RATE)
             if skip:
                 dropped = min(skip, samples.size)
                 samples = samples[dropped:]
@@ -564,8 +570,10 @@ def _scan(source, model: _Model, indices: list, win_samples: int, hop_samples: i
     return probs, total
 
 
-def _build(src: Path, window: float, hop: float) -> dict:
-    """``src``の笑い確率列を作る。Blocking(CPU/IO律速)なのでthreadから呼ぶこと。"""
+def _build(src: Path, window: float, hop: float, on_progress=None) -> dict:
+    """``src``の笑い確率列を作る。Blocking(CPU/IO律速)なのでthreadから呼ぶこと。
+
+    ``on_progress(復号済み秒)`` は解析が進むたび呼ぶ(``_scan`` 参照)。"""
     model = _get_model()
     labels = _load_labels()
     classes = get_laugh_audio_classes()
@@ -584,7 +592,8 @@ def _build(src: Path, window: float, hop: float) -> dict:
 
     started = time.monotonic()
     with hls_source.ffmpeg_source(src) as source:
-        probs, total = _scan(source, model, indices, win_samples, hop_samples, batch_size)
+        probs, total = _scan(source, model, indices, win_samples, hop_samples, batch_size,
+                             on_progress=on_progress)
     duration = total / SAMPLE_RATE
     profile = {
         "interval_seconds": round(hop, 3),
@@ -680,7 +689,7 @@ def _store_cache(src: Path, profile: dict) -> None:
         )
 
 
-async def ensure_laugh_profile(src: Path) -> dict:
+async def ensure_laugh_profile(src: Path, on_progress=None) -> dict:
     """``src``の笑い確率列を返す(cacheがあればそれを、無ければ解析してcacheする)。
 
     戻り値: ``{"interval_seconds": float, "duration_seconds": float,
@@ -688,6 +697,10 @@ async def ensure_laugh_profile(src: Path) -> dict:
     区間の判定は ``laugh_seconds`` を使うこと。
 
     解析はCPU/IO律速でeventloopを塞ぐため、生成部はto_threadへ逃がす。
+
+    ``on_progress(復号済み秒)`` はworker threadから同期で呼ばれる(cuda時は子processの
+    報告を中継する)。cacheに当たったときは1度も呼ばれない — 解析が走っていないので、
+    進捗として報告できる事実が無い。
     """
     src = Path(src)
     if not get_laugh_audio_enabled():
@@ -716,12 +729,13 @@ async def ensure_laugh_profile(src: Path) -> dict:
         if cached:
             return cached
         if get_laugh_audio_device() == "cpu":
-            profile = await asyncio.to_thread(_build, src, window, hop)
+            profile = await asyncio.to_thread(_build, src, window, hop, on_progress)
         else:
             # GPUはこのprocessへ載せない(cuDNNの同居でserverごと落ちる)。境界の説明は
             # laugh_worker の module docstring。
             from tictok.media import laugh_worker
-            profile = await asyncio.to_thread(laugh_worker.run_build, src, window, hop)
+            profile = await asyncio.to_thread(laugh_worker.run_build, src, window, hop,
+                                              on_progress)
         await asyncio.to_thread(_store_cache, src, profile)
     return profile
 

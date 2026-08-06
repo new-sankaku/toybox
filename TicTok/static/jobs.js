@@ -47,6 +47,10 @@ let pinnedJob = "";
 // 明細を開いているgroup_id。groupの合成行はjob_idにgroup_idがそのまま入るため、
 // 「group_idを持ち、かつjob_idと一致しない」行がsession一括の明細にあたる。
 const expandedGroups = new Set();
+// 段階の経過を開いているjob_id。終わったjobの進捗列は「完了 ✓」しか出せず、どの段階に
+// 何秒かかったか・どこで落ちたかを辿る先が無かった。既定で畳むのは、一覧の主目的が
+// 「いま何が動いているか」で、全行を段階listで埋めるとその見通しが失われるため。
+const expandedStages = new Set();
 let gpu = null;
 // 台帳外(transcribe_queue)の実状。GPU現況と台帳の食い違いを説明するためだけに読む。
 let stt = null;
@@ -233,17 +237,79 @@ function stateCell(job) {
   return span;
 }
 
+// 段階1件ぶんの所要秒。次の段階へ入った時刻との差で、最後の段階だけは終了時刻(実行中なら
+// 現在時刻)まで。段階の終了時刻を別に記録しないのは、段階が途切れず続くものだからで、
+// 両端を持つと「前の段階の終わり」と「次の段階の始まり」がずれ得る記録になる。
+function stageSeconds(job, stages, index) {
+  const start = stages[index].at;
+  const next = index + 1 < stages.length
+    ? stages[index + 1].at
+    : (job.finished_at || Date.now() / 1000);
+  if (!start || !next) return null;
+  return Math.max(0, next - start);
+}
+
+// 段階の経過。失敗・中断したjobでは最後の行が「そこで落ちた段階」になる。
+function stageList(job) {
+  const stages = job.stages || [];
+  const list = document.createElement("ol");
+  list.className = "job-stages";
+  stages.forEach((stage, index) => {
+    const item = document.createElement("li");
+    const label = document.createElement("span");
+    label.className = "s-label";
+    label.textContent = stage.label;
+    const seconds = stageSeconds(job, stages, index);
+    const time = document.createElement("span");
+    time.className = "s-time";
+    time.textContent = seconds === null ? "-" : fmtDuration(seconds);
+    const last = index === stages.length - 1;
+    // 最後の段階に印を付ける。終わり方によって意味が違う(実行中なら現在地、失敗なら
+    // 落ちた場所)ので、印そのものを言い分ける。
+    if (last && FAILED_STATES.includes(job.state)) {
+      item.className = "s-failed";
+      time.title = "この段階で終わっています。";
+    } else if (last && job.state === "running") {
+      item.className = "s-current";
+      time.title = "この段階の途中です（経過時間）。";
+    }
+    item.append(label, time);
+    list.appendChild(item);
+  });
+  return list;
+}
+
 function progressCell(job) {
+  const cell = document.createElement("span");
+  cell.className = "job-progress";
   if (job.state !== "running" && job.state !== "pending") {
     const wrap = document.createElement("span");
     wrap.className = "dl-progress";
     wrap.textContent = job.state === "completed" ? "完了 ✓" : "-";
-    return wrap;
+    cell.appendChild(wrap);
+  } else {
+    // 一覧は他所で動いているjobの状態表示なのでspinnerは付けない。
+    const prog = makeProgress({ spinner: false });
+    setJobProgress(prog, job);
+    cell.appendChild(prog);
   }
-  // 一覧は他所で動いているjobの状態表示なのでspinnerは付けない。
-  const prog = makeProgress({ spinner: false });
-  setJobProgress(prog, job);
-  return prog;
+  const stages = job.stages || [];
+  if (!stages.length) return cell;
+  const open = expandedStages.has(job.job_id);
+  const toggle = document.createElement("button");
+  toggle.className = "btn btn-small job-stage-toggle";
+  toggle.textContent = `${open ? "▼" : "▶"} 経過 ${stages.length}段階`;
+  toggle.title = "このjobが通った段階と、段階ごとの所要時間を開閉します。"
+    + "失敗・中断したjobでは、最後の行がそこで止まった段階です。";
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.addEventListener("click", () => {
+    if (open) expandedStages.delete(job.job_id);
+    else expandedStages.add(job.job_id);
+    render();
+  });
+  cell.appendChild(toggle);
+  if (open) cell.appendChild(stageList(job));
+  return cell;
 }
 
 function jobTargetText(job) {
@@ -293,14 +359,15 @@ function resultText(job) {
   return result.filename || "";
 }
 
-// 失敗jobのmessageはffmpeg由来の長文が入る。そのまま流すと行が数行に折り返し、隣の
-// 進捗barが幅を失って潰れる。行内は1行で切り(.job-result)、全文はtooltipで読ませる。
+// 失敗jobのmessageはffmpeg由来の長文が入る。以前は行内を1行で切ってtooltipへ逃がして
+// いたが、肝心の失敗理由が読めるのはhoverした時だけで、実際「見切れて分からない」まま
+// だった。全文を折り返して出し、列幅の上限(.job-result)で隣の進捗barを守る。
+// 改行はffmpegのlogの区切りなので潰さない(CSSはpre-wrap)。
 function resultCell(job) {
   const text = resultText(job);
   const span = document.createElement("span");
   span.className = "job-result";
   span.textContent = text;
-  if (text) span.title = text;
   return span;
 }
 

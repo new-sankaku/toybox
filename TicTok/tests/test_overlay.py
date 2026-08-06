@@ -2,6 +2,7 @@ import pytest
 
 from tictok.core import config
 from tictok.media import hls_source
+from tictok.record import telop_styles
 from tictok.record import video_overlay as vo
 from tictok.record.recorder import timing_path
 
@@ -1052,7 +1053,8 @@ def _patch_plan_internals(monkeypatch, video_dur=600.0):
     ctx = {"video_dur": video_dur, "anchors": [], "media_pts": None, "pts_gaps": None,
            "src_w": 512, "src_h": 1024, "fps": 30.0, "width": 512, "height": 1024,
            "scale_to": None, "icon_px": 64, "avatar_dir": None, "wide_em": 1.0,
-           "narrow_em": 0.5, "quality": 21, "codec": "h264", "subtitle_segments": []}
+           "narrow_em": 0.5, "telop_em": (1.0, 0.5), "fontsdir": None,
+           "quality": 21, "codec": "h264", "subtitle_segments": []}
     stats = {"comments": 1, "gifts": 0, "score": 0, "subtitles": 0}
 
     async def fake_ctx(*a, **kw):
@@ -1160,6 +1162,341 @@ def test_burnable_transcript_refuses_a_stale_or_missing_timemap():
             vo._require_burnable_transcript(on, bad)
     # 呼び出し側が既に4xxへ落としている型を継いでいること
     assert issubclass(vo.TranscriptNotBurnableError, vo.NothingToDrawError)
+
+
+# ===== テロップpreset =====
+
+
+def _telop_cfg(**over):
+    cfg = {"video_overlay_subtitles": 1, "video_overlay_subtitle_font_size": 26,
+           "video_overlay_subtitle_position_percent": 58,
+           "video_overlay_subtitle_style": 1, "video_overlay_subtitle_animation": 1,
+           "video_overlay_subtitle_max_lines": 4}
+    cfg.update(over)
+    return cfg
+
+
+SEGS = [{"start": 1.0, "end": 3.0, "text": "こんばんは"}]
+
+
+def test_every_preset_is_selectable_and_unknown_values_are_refused():
+    """未知のstyleを既定へ読み替えないこと。読み替えると、選んだのと違う書体で恒久的に
+    焼き込まれる(成果物を見るまで誰も気付けない)。"""
+    for value, style in telop_styles.STYLE_VALUES.items():
+        assert telop_styles.style_for(value) is style
+        assert telop_styles.style_for(str(value)) is style
+    # 選択肢はpresetの一覧そのもの(画面用に別の一覧を持たない)
+    assert [o["value"] for o in telop_styles.settings_options()] == list(
+        telop_styles.STYLE_VALUES)
+    for bad in (0, 99, None, "x"):
+        with pytest.raises(ValueError):
+            telop_styles.style_for(bad)
+
+
+def test_preset_font_families_are_backed_by_a_bundled_font():
+    """presetが名乗る家族名は同梱fontから解決される必要がある。manifestに無いfileを
+    指したpresetは、fontsdirを渡しているのに黙ってhostのfontで焼ける。"""
+    from tictok.record import fonts
+
+    for style in telop_styles.TELOP_STYLES:
+        assert style.font_file in fonts.TELOP_FONT_MANIFEST, style.key
+    assert set(telop_styles.font_files()) == set(fonts.TELOP_FONT_MANIFEST)
+
+
+def test_a_preset_with_a_second_border_draws_two_layers_under_the_text():
+    """縁2本のpresetは1件の字幕を2行のDialogueで描く。下層が上に来ると本文が塊で
+    覆われるので、layerの上下は逆にできない。"""
+    style = next(s for s in telop_styles.TELOP_STYLES if s.has_glow)
+    value = next(v for v, s in telop_styles.STYLE_VALUES.items() if s is style)
+    lines, stats = vo._build_subtitle_dialogues(
+        SEGS, 10.0, 1080, 1920, _telop_cfg(video_overlay_subtitle_style=value), 1.0, 0.5)
+
+    assert stats["placed"] == 1 and len(lines) == 2
+    edge, text = lines
+    assert edge.startswith(f"Dialogue: {telop_styles.EDGE_LAYER},")
+    assert text.startswith(f"Dialogue: {telop_styles.TEXT_LAYER},")
+    assert telop_styles.EDGE_LAYER < telop_styles.TEXT_LAYER
+    # 2層は同じ本文・同じ時刻・同じ動きで重なる(ずれると縁が剥がれる)
+    assert edge.split(",,")[-1].split("}")[-1] == text.split(",,")[-1].split("}")[-1]
+    assert edge.split(",")[1:3] == text.split(",")[1:3]
+
+
+def test_a_preset_without_a_second_border_stays_one_layer():
+    plain = next(s for s in telop_styles.TELOP_STYLES if not s.has_glow and not s.ghosts)
+    value = next(v for v, s in telop_styles.STYLE_VALUES.items() if s is plain)
+    lines, stats = vo._build_subtitle_dialogues(
+        SEGS, 10.0, 1080, 1920, _telop_cfg(video_overlay_subtitle_style=value), 1.0, 0.5)
+
+    assert stats["placed"] == 1 and len(lines) == 1
+    assert telop_styles.EDGE_STYLE_NAME not in lines[0]
+
+
+def test_ghost_layers_sit_below_the_text_and_keep_their_direction():
+    """ずらして敷く層(ベタ影・色ずれ)。ずれは負にもなるので、px換算で下限clampを
+    通してはならない — 通すと片側のghostだけ本体へ吸い付いて色ずれが片側だけになる。"""
+    two_way = next(s for s in telop_styles.TELOP_STYLES
+                   if len(s.ghosts) >= 2 and any(g.dx_ratio < 0 for g in s.ghosts))
+    fs = 60
+    layers = telop_styles.cue_layers(two_way, 500, 300, fs)
+
+    ghosts = [tag for layer, _n, tag in layers if layer == telop_styles.GHOST_LAYER]
+    assert len(ghosts) == len(two_way.ghosts)
+    assert telop_styles.GHOST_LAYER < telop_styles.TEXT_LAYER
+    xs = [int(tag.split("\\pos(")[1].split(",")[0]) for tag in ghosts]
+    assert min(xs) < 500 < max(xs)        # 左右へ振れていること
+    # 本体は動かさない
+    body = [tag for layer, _n, tag in layers if layer == telop_styles.TEXT_LAYER][0]
+    assert "\\pos(500,300)" in body
+
+
+def test_the_layering_is_decided_in_one_place_for_both_renderers():
+    """焼き込みと見本が各々で層を組み立てると、見本と成果物で重なりが変わる。どちらも
+    cue_layers を回していること(層の数・順序・Style名が一致)。"""
+    from tictok.record import telop_preview
+
+    for value, style in telop_styles.STYLE_VALUES.items():
+        expected = [(layer, name) for layer, name, _t in
+                    telop_styles.cue_layers(style, 1, 2, 40, animate=False)]
+        lines, _ = vo._build_subtitle_dialogues(
+            SEGS, 10.0, 1080, 1920,
+            _telop_cfg(video_overlay_subtitle_style=value,
+                       video_overlay_subtitle_animation=0), 1.0, 0.5)
+        burned = [(int(x.split(" ")[1].split(",")[0]), x.split(",")[3]) for x in lines]
+        preview = telop_preview._ass_text(style, animate=True)
+        sampled = [(int(x.split(" ")[1].split(",")[0]), x.split(",")[3])
+                   for x in preview.splitlines() if x.startswith("Dialogue:")]
+
+        assert burned == expected, style.key
+        assert sampled == expected, style.key
+        # 使うStyle行が全て定義されていること(名前を間違えるとlibassは既定styleで描く)
+        defined = {line.split(",")[0].removeprefix("Style: ")
+                   for line in telop_styles.style_lines(style, 40)}
+        assert {name for _l, name in expected} <= defined, style.key
+
+
+def test_turning_the_animation_off_keeps_the_look_but_drops_the_motion():
+    animated = next(s for s in telop_styles.TELOP_STYLES if s.animated)
+    value = next(v for v, s in telop_styles.STYLE_VALUES.items() if s is animated)
+    on, _ = vo._build_subtitle_dialogues(
+        SEGS, 10.0, 1080, 1920, _telop_cfg(video_overlay_subtitle_style=value), 1.0, 0.5)
+    off, stats = vo._build_subtitle_dialogues(
+        SEGS, 10.0, 1080, 1920,
+        _telop_cfg(video_overlay_subtitle_style=value, video_overlay_subtitle_animation=0),
+        1.0, 0.5)
+
+    assert any("\\fad(" in line or "\\t(" in line for line in on)
+    assert not any("\\fad(" in line or "\\t(" in line for line in off)
+    assert stats["animated"] is False
+    # 書体と色はStyle行が持つので、動きを止めても見た目は変わらない
+    assert len(on) == len(off)
+
+
+def test_the_wrap_width_follows_the_telop_font_not_the_comment_font():
+    """折り返しはテロップの書体で測ったem advanceで計算する。commentの書体の値で折り返すと
+    presetを変えた瞬間に折り返し位置が実物とずれる。"""
+    long_text = [{"start": 0.0, "end": 2.0, "text": "あ" * 60}]
+    cfg = _telop_cfg()
+    narrow, _ = vo._build_subtitle_dialogues(long_text, 10.0, 1080, 1920, cfg, 0.6, 0.4)
+    wide, _ = vo._build_subtitle_dialogues(long_text, 10.0, 1080, 1920, cfg, 1.2, 0.8)
+
+    assert narrow[-1].count("\\N") < wide[-1].count("\\N")
+
+
+def test_letter_spacing_is_charged_to_the_wrap_width():
+    """字間はglyphの送りに上乗せされるので、折り返しの計算にも同じだけ足す。足さないと
+    字間のあるpresetだけ画面幅からはみ出す。"""
+    spaced = max(telop_styles.TELOP_STYLES, key=lambda s: s.spacing_ratio)
+    value = next(v for v, s in telop_styles.STYLE_VALUES.items() if s is spaced)
+    long_text = [{"start": 0.0, "end": 2.0, "text": "あ" * 200}]
+
+    def first_line(style_value):
+        lines, _ = vo._build_subtitle_dialogues(
+            long_text, 10.0, 1080, 1920,
+            _telop_cfg(video_overlay_subtitle_style=style_value,
+                       video_overlay_subtitle_max_lines=6), 1.0, 0.5)
+        return lines[-1].split("}")[-1].split("\\N")[0]
+
+    assert spaced.spacing_ratio > 0
+    assert len(first_line(value)) < len(first_line(1))
+
+
+def test_the_max_line_setting_bounds_the_lines_and_is_reported():
+    long_text = [{"start": 0.0, "end": 2.0, "text": "あ" * 200}]
+    lines, stats = vo._build_subtitle_dialogues(
+        long_text, 10.0, 1080, 1920,
+        _telop_cfg(video_overlay_subtitle_max_lines=2), 1.0, 0.5)
+
+    assert lines[-1].count("\\N") == 1          # 2行 = 区切り1つ
+    assert stats["truncated"] == 1 and stats["max_lines"] == 2
+
+
+def test_the_style_lines_carry_the_presets_colours_and_scale_with_the_font():
+    """縁・影・字間はfont sizeとの比で持つ。絶対pxで持つと解像度で見た目が変わる。"""
+    style = telop_styles.STYLE_VALUES[1]
+    small = telop_styles.style_lines(style, 20)[-1].split(",")
+    large = telop_styles.style_lines(style, 40)[-1].split(",")
+
+    assert small[1] == style.font_family and small[2] == "20"
+    assert small[3] == telop_styles.ass_colour(style.fill)
+    assert small[5] == telop_styles.ass_colour(style.edge)
+    assert int(large[16]) == 2 * int(small[16])   # Outline
+    # 太さは最低1pxを割らない(0にすると縁が消えて映像に埋もれる)
+    assert int(telop_styles.style_lines(style, 4)[-1].split(",")[16]) >= 1
+
+
+def test_the_style_and_the_motion_are_part_of_the_cache_signature():
+    """presetを変えたのに前の書体のままcache hit、を防ぐ。"""
+    for key in ("video_overlay_subtitle_style", "video_overlay_subtitle_animation",
+                "video_overlay_subtitle_max_lines"):
+        assert key in vo.OVERLAY_KEYS
+
+
+def test_a_band_preset_draws_a_box_instead_of_a_border():
+    """帯presetはBorderStyle 3(不透明box)で、縁と同じfieldが帯の色と余白の意味になる。
+    下層は作らない — 帯の上に帯を重ねても濃くなるだけで縁は生えない。"""
+    band = next((s for s in telop_styles.TELOP_STYLES if s.box), None)
+    assert band is not None
+    lines = telop_styles.style_lines(band, 40)
+
+    assert len(lines) == 1 and band.has_glow is False
+    fields = lines[0].split(",")
+    assert fields[15] == "3"                                    # BorderStyle
+    assert fields[5] == telop_styles.ass_colour(band.edge, band.edge_alpha)   # 帯の色
+    assert band.edge_alpha > 0                                  # 透けない帯は映像を殺す
+
+
+def test_a_stretched_preset_pops_back_to_its_own_shape_not_to_100_percent():
+    """popの到達先はpresetの縦横比。100%へ戻すと、縦長のpresetがpopの最後で
+    普通の字形へ化ける。"""
+    tall = next(s for s in telop_styles.TELOP_STYLES
+                if (s.scale_x, s.scale_y) != (100, 100) and s.pop_percent != 100)
+    tags = telop_styles.dialogue_tags(tall, 100, 200, 40)
+
+    assert f"\\fscx{tall.scale_x}\\fscy{tall.scale_y})" in tags
+    assert f"\\fscx{round(tall.scale_x * tall.pop_percent / 100)}" in tags
+    # Style側の基準も同じ縦横比であること(片方だけだと出だしと定常で形が変わる)
+    fields = telop_styles.style_lines(tall, 40)[-1].split(",")
+    assert (fields[11], fields[12]) == (str(tall.scale_x), str(tall.scale_y))
+
+
+def test_tilt_and_shear_reach_the_ass_output():
+    tilted = next(s for s in telop_styles.TELOP_STYLES if s.angle)
+    sheared = next(s for s in telop_styles.TELOP_STYLES if s.shear_x)
+
+    # 回転はStyleのAngle欄、shearは行ごとの\fax(Styleに欄が無い)
+    assert telop_styles.style_lines(tilted, 40)[-1].split(",")[14] == f"{tilted.angle:g}"
+    assert f"\\fax{sheared.shear_x:g}" in telop_styles.dialogue_tags(sheared, 1, 2, 40)
+
+
+def test_every_preset_keeps_its_fill_visible_against_its_own_border():
+    """縁は字画を内側から食う。極太体・細線体で同じ比を使うと塗りが消えるので、
+    内側の縁は控えめに保ち、太さは外側(glow)で稼ぐ。"""
+    for style in telop_styles.TELOP_STYLES:
+        if style.box:
+            continue
+        assert style.edge_ratio <= 0.18, style.key
+        if style.edge_ratio > 0.12:
+            # 太い内側の縁を持つpresetは、外側でさらに太らせない
+            assert style.glow_ratio <= 0.30, style.key
+
+
+def test_a_windows_drive_path_survives_the_filter_graph_parser():
+    """``fontsdir`` のescapeは実測でbackslash 2つ。1つだとgraph側で剥がされたあと
+    option parserが素の ``:`` を見て落ちる(No option name near ...)。"""
+    arg = vo.fontsdir_arg(vo.Path(r"C:\dir\fonts"))
+
+    assert arg == "C\\\\:/dir/fonts"
+    assert "\\" not in arg.replace("\\\\:", "")   # path区切りにbackslashを残さない
+
+
+def test_each_telop_font_gets_its_own_directory():
+    """libassはfontsdirの全fileを読む。1部屋にまとめると、その回に使わない書体まで
+    毎processで読み込まれる(通常presetのfontだけで17MB)。"""
+    from tictok.record import fonts
+
+    dirs = {name: fonts.telop_font_dir(name) for name in fonts.TELOP_FONT_MANIFEST}
+
+    assert len(set(dirs.values())) == len(dirs)
+    for name, path in dirs.items():
+        assert path.name == vo.Path(name).stem
+        assert path.parent.name == "telop"
+
+
+# ===== テロップの見本画像 =====
+
+
+def test_the_preview_is_built_from_the_same_style_definition_as_the_output():
+    """見本をCSSやSVGで似せて描くと、本番と別実装になって黙ってずれる。見本のASSは
+    本番と同じStyle行・同じtag生成を通っていること。"""
+    from tictok.record import telop_preview
+
+    style = telop_styles.STYLE_VALUES[1]
+    text = telop_preview._ass_text(style, animate=True)
+
+    for line in telop_styles.style_lines(style, telop_preview.FONT_SIZE):
+        assert line in text
+    assert telop_preview.SAMPLE_TEXT in text
+    # 静止画なのでfadeの途中を焼かない(薄く写ると別の色のpresetに見える)
+    assert "\\fad(" not in text
+
+
+def test_a_preview_of_a_two_layer_preset_carries_both_layers():
+    from tictok.record import telop_preview
+
+    glow = next(s for s in telop_styles.TELOP_STYLES if s.has_glow and not s.ghosts)
+    plain = next(s for s in telop_styles.TELOP_STYLES if not s.has_glow and not s.ghosts)
+
+    assert telop_preview._ass_text(glow, True).count("Dialogue:") == 2
+    assert telop_preview._ass_text(plain, True).count("Dialogue:") == 1
+
+
+def test_every_preset_sample_is_drawn_on_the_same_background():
+    """見本の背景が preset ごとに違うと、比べているのが書体なのか背景なのか分からない。
+
+    ``gradients`` filterは既定で乱数(seed=-1)かつ時間で回る(speed=0.01)ので、色と両端の
+    座標を明示しても描くたびに別の背景になる(実測: 同一commandの3回が全て別hash)。
+    seedの固定とspeed=0がその2つを止めている。"""
+    from tictok.record import telop_preview
+
+    assert telop_preview.BG_SEED >= 0
+    assert telop_preview.BG_SPEED == 0
+    # 背景は全presetで同じ引数から作る(presetごとに色や向きを変えない)
+    assert telop_preview.BG_DARK != telop_preview.BG_LIGHT
+
+
+def test_the_preview_filename_changes_when_the_preset_changes(monkeypatch, tmp_path):
+    """署名をfile名へ畳んでおかないと、presetの定義を直したのに古い見本が出続ける。"""
+    from dataclasses import replace
+    from tictok.record import telop_preview
+
+    monkeypatch.setattr(telop_preview, "preview_dir", lambda: tmp_path)
+    style = telop_styles.STYLE_VALUES[1]
+    recoloured = replace(style, fill="#123456")
+
+    before = telop_preview.preview_path(style, True)
+    after = telop_preview.preview_path(recoloured, True)
+
+    assert before != after
+    assert before.name.startswith(f"{style.key}-") and before.suffix == ".png"
+
+
+def test_a_new_preview_removes_the_previous_one_for_that_preset(monkeypatch, tmp_path):
+    """署名つきの名前は定義を触るたびに増える。古い方を残すとpoolが際限なく太る。"""
+    from tictok.record import telop_preview
+
+    monkeypatch.setattr(telop_preview, "preview_dir", lambda: tmp_path)
+    style = telop_styles.STYLE_VALUES[1]
+    stale = tmp_path / f"{style.key}-deadbeef0000.png"
+    other = tmp_path / "other-deadbeef0000.png"
+    for p in (stale, other):
+        p.write_bytes(b"x")
+    keep = telop_preview.preview_path(style, True)
+    keep.write_bytes(b"y")
+
+    telop_preview._prune_stale(style, keep)
+
+    assert keep.is_file() and other.is_file()      # 別presetの見本は残す
+    assert not stale.exists()
 
 
 def test_burnable_transcript_refuses_a_transcript_from_a_different_timeline():

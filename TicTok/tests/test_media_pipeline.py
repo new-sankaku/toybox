@@ -660,7 +660,7 @@ async def test_probe_dimensions_covers_every_resolution_not_just_the_opening_one
 async def test_the_render_canvas_covers_the_whole_recording(tmp_path, monkeypatch):
     """width/height/scale_to for the burn-in must describe the whole recording. Order
     must not matter: the same two resolutions produce the same canvas either way."""
-    monkeypatch.setattr(vo, "_font_em", (1.0, 0.5))
+    monkeypatch.setattr(vo, "_font_em", {(vo.COMMENT_FONT, False, None): (1.0, 0.5)})
     cfg = {"video_overlay_min_height": 1920, "video_overlay_icon_percent": 5,
            "video_overlay_quality": 21, "video_overlay_codec": 1,
            "video_overlay_subtitles": 0}
@@ -682,7 +682,7 @@ async def test_an_aspect_changing_switch_lands_on_a_canvas_that_holds_both(
     """The case that actually distorted: two resolutions with different aspect ratios.
     The canvas has to bound both, so neither stretch is squeezed and the order it was
     recorded in cannot change the output shape."""
-    monkeypatch.setattr(vo, "_font_em", (1.0, 0.5))
+    monkeypatch.setattr(vo, "_font_em", {(vo.COMMENT_FONT, False, None): (1.0, 0.5)})
     cfg = {"video_overlay_min_height": 960, "video_overlay_icon_percent": 5,
            "video_overlay_quality": 21, "video_overlay_codec": 1,
            "video_overlay_subtitles": 0}

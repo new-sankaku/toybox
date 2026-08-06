@@ -34,8 +34,9 @@ from tictok.record import audio_norm, backups, hls_pack, subtitles
 from tictok.record.media_queue import (db_kind_for_domain, JobDeferred, JobSkipped,
     MediaJobQueue)
 from tictok.record.upscale import UpscaleError, ensure_upscaled
-from tictok.core import cancel
-from tictok.core.progress import JobProgress, pump_ffmpeg_progress, REPROCESS_PHASES
+from tictok.core import cancel, config
+from tictok.core.progress import (fmt_hms, IntervalGate, JobProgress, PACK_PHASES,
+    pump_ffmpeg_progress, REPROCESS_PHASES)
 from tictok.record.video_overlay import (_duration_seconds, material_media_seconds,
     codec_family, ensure_overlay, NothingToDrawError, overlay_enabled, preview_clip,
     render_clip_overlay, subtitles_enabled, video_encoder_name)
@@ -371,15 +372,18 @@ async def _run_stt_job(recording_id: int, report) -> dict:
         raise JobSkipped("録画fileが存在しません（削除済みか録画失敗）。")
     loop = asyncio.get_running_loop()
 
-    async def _report(pct: int) -> None:
+    async def _report(pct: int, detail: Optional[str] = None) -> None:
         # 録画詳細画面が見ているlegacy eventも従来どおり出す(Job一覧はreport側で更新される)。
         await runtime.hub.broadcast(
             {"type": "transcribe_progress", "recording_id": recording_id, "pct": pct})
-        await report("文字起こし", pct)
+        await report(f"文字起こし（{detail}）" if detail else "文字起こし", pct)
 
     def on_progress(done: float, total: float) -> None:
         pct = min(100, int(done / total * 100)) if total > 0 else 0
-        asyncio.run_coroutine_threadsafe(_report(pct), loop)
+        # 子processが送る done/total は音声の秒数。%だけだと4時間の録画で1目盛が2.4分に
+        # なるので、どこを聞いているかを併記する。
+        detail = f"{fmt_hms(done)} / {fmt_hms(total)}" if total > 0 else None
+        asyncio.run_coroutine_threadsafe(_report(pct, detail), loop)
 
     try:
         async with runtime._job_ops("stt", recording_id, stem=path.stem):
@@ -459,9 +463,27 @@ async def _run_laugh_job(recording_id: int, report) -> dict:
         raise JobSkipped("録画fileが存在しません（削除済みか録画失敗）。")
     path = api_files._resolved_recording_path(recording)
     await report("笑い声分析", 0)
+    loop = asyncio.get_running_loop()
+    # 分母は録画の実測尺。解析側は復号し切るまで尺を知らないので、%を作れるのはここだけ
+    # である。尺が記録されていない録画は%を動かさず位置だけを出す — 分母を推測すると、
+    # 90%まで進んでから伸び続ける進捗になる。
+    total_seconds = recording.get("duration_seconds") or 0.0
+    # cpu実行は解析threadから1 chunkごとに直接届く(子processを挟む経路と違い、間引きが
+    # まだ掛かっていない)。DB書き込みとbroadcastを伴うので、ここでも同じ間隔で絞る。
+    gate = IntervalGate(config.get_job_progress_min_interval_seconds())
+
+    def on_progress(seconds: float) -> None:
+        if not gate.ready():
+            return
+        detail = (f"{fmt_hms(seconds)} / {fmt_hms(total_seconds)}" if total_seconds > 0
+                  else fmt_hms(seconds))
+        pct = min(89, int(seconds / total_seconds * 90)) if total_seconds > 0 else 0
+        asyncio.run_coroutine_threadsafe(
+            report(f"笑い声分析（{detail}）", pct), loop)
+
     try:
         async with runtime._job_ops("laugh", recording_id, stem=path.stem):
-            profile = await laugh_audio.ensure_laugh_profile(path)
+            profile = await laugh_audio.ensure_laugh_profile(path, on_progress)
     except hls_source.SourceMissing as exc:
         raise JobSkipped(str(exc) or "素材が見つかりません。")
     except laugh_audio.LaughAudioError as exc:
@@ -655,7 +677,9 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
     total_bytes = 0
     for index, item in enumerate(ranges):
         cancel.check_cancelled()
-        await report(f"({index + 1}/{total}) 切り出し中",
+        # 件数は括弧に入れる。段階名の一部にすると、120件のbatchが120個の別々の段階として
+        # 履歴に並ぶ(段階の履歴は括弧の中を落として同じ段階と見なす — media_queue.stage_phase)。
+        await report(f"切り出し中（{index + 1} / {total}件）",
                      int(index * 100 / total) if total else 0)
         try:
             async with runtime._job_ops("clip", recording_id, stem=src.stem,
@@ -672,7 +696,7 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
         total_bytes += result["bytes"]
         # 完了ぶんを必ず報告する。開始時の報告だけだと1件のbatchは終始0%のままで、
         # 複数件でも最後の1本が丸ごと「進捗なし」の区間になる。
-        await report(f"({index + 1}/{total}) 切り出し済み",
+        await report(f"切り出し済み（{index + 1} / {total}件）",
                      int((index + 1) * 100 / total) if total else 100)
     return {"recording_id": recording_id, "count": len(files), "files": files,
             "filename": files[0] if len(files) == 1 else "",
@@ -1092,16 +1116,21 @@ async def _pack_recording(recording_id: int, recording: dict, report) -> dict:
                     "元segmentは検証を全て通るまで消さないため、一時的に2本分の容量を使います。"),
         )
 
-    async def _on_progress(pct: int) -> None:
-        # 取り消しはここでしか効かせられない(pack_sessionはtokenを持たない)。callbackは
-        # 5%(走査前)と60%(束ね書き込みの直前)に来るので、そこで抜ければ**まだ何も書いて
-        # いない**状態で止まる。100%は元segmentの削除まで終わった後なので、そこで中断
-        # すると完了した作業を取り消し扱いにしてしまう。
-        if pct < 100:
-            cancel.check_cancelled()
-        await report("素材を結合中", int(pct))
+    # JobProgressのsinkは(pct, stage)、queueのreportは(stage, pct)。順序を合わせる。
+    async def _emit_progress(pct: int, stage: str) -> None:
+        await report(stage, pct)
 
-    await report("素材を結合中", 0)
+    progress = JobProgress(_emit_progress, PACK_PHASES)
+
+    async def _on_progress(key: str, frac: float, detail: Optional[str] = None) -> None:
+        # 取り消しはここでも効かせる(pack_sessionはtokenを持たない)。commit段階に入った後は
+        # 受けない: 元segmentを消し始めた後で止めると、完了した作業を取り消し扱いにした上に
+        # 束ねたfileと元が半端に同居する。
+        if key != "commit":
+            cancel.check_cancelled()
+        await progress.set(key, frac, detail)
+
+    await report("ts結合の準備中", 0)
     async with runtime._job_ops("pack", recording_id, stem=hls_dir.name, path=str(hls_dir)):
         result = await hls_pack.pack_session(hls_dir, on_progress=_on_progress)
         # 束ねられなかったのは失敗。ops_eventsにも失敗として残す(この判定を外へ出すと、
@@ -1248,15 +1277,20 @@ async def _upscale_rendered(rendered: Path, recording_id: int, job_id: str,
     encoder = await video_encoder_name(codec_family(runtime.settings.get("video_overlay_codec")))
     loop = asyncio.get_running_loop()
     last_pct = -1
+    # 超解像は実時間の数十倍かかる段階で、%は1目盛が数分になる。frame位置を添えないと
+    # 「動いているか」の確認に使えない。%が動かない間の位置更新は時間で間引く(焼き込みの
+    # 段階表示と同じ扱い)。
+    gate = IntervalGate(config.get_job_progress_min_interval_seconds())
 
     def on_progress(done: float, total: float) -> None:
         nonlocal last_pct
         pct = min(100, int(done / total * 100)) if total > 0 else 0
-        if pct == last_pct:
+        if pct == last_pct and not gate.ready():
             return
         last_pct = pct
         asyncio.run_coroutine_threadsafe(
-            _report_upscale_pct(recording_id, pct, on_stage_pct), loop,
+            _report_upscale_pct(recording_id, pct, on_stage_pct,
+                                detail=f"{int(done):,} / {int(total):,} frame"), loop,
         )
 
     try:
@@ -1273,11 +1307,14 @@ async def _upscale_rendered(rendered: Path, recording_id: int, job_id: str,
     return out
 
 
-async def _report_upscale_pct(recording_id: int, pct: int, on_stage_pct) -> None:
+async def _report_upscale_pct(recording_id: int, pct: int, on_stage_pct,
+                              detail: Optional[str] = None) -> None:
     await runtime.hub.broadcast(
         {"type": "upscale_progress", "recording_id": recording_id, "pct": pct}
     )
-    await on_stage_pct("高画質化", pct)
+    # 詳細は括弧に入れる。段階の履歴はこの括弧を落とした名前で残るので、frame位置が
+    # 動くたび「高画質化」が履歴へ積み増されることはない(media_queue.stage_phase)。
+    await on_stage_pct(f"高画質化（{detail}）" if detail else "高画質化", pct)
 
 
 def _session_output_targets(session_id: int) -> list:

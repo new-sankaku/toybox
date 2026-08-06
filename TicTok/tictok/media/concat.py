@@ -48,6 +48,23 @@ audio packetを落とす手段は出力側 ``-ss`` しか無く、それは狙�
 かつvideo先頭より1 frame以上手前)。実測では、この2条件を満たしたときだけ成果物のA/Vずれが
 **17ms以下**になる。境界の途中に置くと75ms先行し、際に置くと映像streamが消える。
 
+## 窓で前置きを落とせない素材がある
+
+始点をどこへ置いても前置きを1 packetも落とせない素材が実在する。**keyframe間隔が10〜17秒の
+録画**(旧いmp4録画3件で実測)では、始点をpartの先頭packetより後ろへ置いた瞬間にconcat
+demuxerのseekが先頭keyframeを飛び越し、
+
+- partにGOPが1つしか無ければ**映像streamが丸ごと消える**
+- 次のkeyframeがあればそこまで飛ぶ(実測: 出力の映像が10.3秒地点から始まった)
+
+一方、始点をpartの先頭packetまで下げると映像は全て残るが、**audio packetは1つも落ちない**
+(実測: 644 packetのpartで、映像が入る始点はどれも644 packetのまま)。つまりこの素材では窓の
+始点は**全か無か**で、「映像を残しつつ前置きだけ落とす」始点は存在しない。
+
+そこで下げ切った先を「**始点を書かない**」に置く(:func:`concat_parts`)。落ちるのは前置きの
+ぶんのA/Vずれ(実測0.13〜0.22秒)だけで、要求した映像は全て残る。1 audio packetずつ下げる
+梯子を先に試すのは、下げ幅が小さくて済む素材で17msの揃いを保つため。
+
 ## 連結の可否は必ず事前に照合する
 
 concat demuxerのstream copyは全fileのcodec parameterが一致していることが前提で、解像度や
@@ -77,7 +94,7 @@ MUX_NO_OFFSET = ("-muxdelay", "0", "-muxpreload", "0")
 # 窓の始点を1 audio packetずつ下げて連結をやり直す上限。始点を際に置くと先頭のkeyframeが
 # 落ちるが、落ちる閾値は素材で動くので推測せず最小から試す(:func:`_inpoint_for`)。
 # 3回でaudio 3 packet(実測48kHz HE-AACで約128ms)ぶん下がる。そこまで下げても映像が入らない
-# なら原因は別なので、黙って下げ続けずに失敗させる。
+# 素材では、下げ切った先(=始点を書かない)を最後に一度だけ試す(:func:`concat_parts`)。
 WIDEN_ATTEMPTS = 3
 
 # mp4/movのlength-prefixed NALをAnnex Bへ直すbitstream filter。TS中間に入れるため必須。
@@ -247,19 +264,34 @@ class CutPart(NamedTuple):
 
     ``inpoint``/``outpoint`` は :func:`concat_parts` が連結時に両streamを揃えるための窓で、
     どちらもこのfile自身の軸(=入力のcontainer軸)。``seconds`` はその窓の長さなので、連結後の
-    尺の期待値はこれの合計になる。"""
+    尺の期待値はこれの合計になる。
+
+    ``inpoint`` が ``None`` なら**始点を書かない**(=fileの先頭から採る)。落とす前置きが無い
+    part(自分で焼いたhead)はこれにする: 先頭packetの時刻をそのまま書いても、concat demuxerは
+    そこでseekするため**先頭のkeyframeを飛ばす**(実測: 音声が映像の21ms手前から始まるheadで、
+    出力の映像が接合点のkeyframeからしか始まらなかった)。"""
 
     path: Path
     video: Span
     audio: Span
-    inpoint: float
+    inpoint: Optional[float]
     outpoint: float
     media_start: float
     lead_seconds: float
 
     @property
+    def start(self) -> float:
+        """連結後にこのpartが占める区間の始点(このfile自身の軸)。
+
+        ``inpoint`` を書かないpartでも、demuxerはfileの実際の先頭を0点に置くので、位置と
+        尺の計算にはその時刻が要る。"""
+        if self.inpoint is not None:
+            return self.inpoint
+        return min(self.video.first, self.audio.first)
+
+    @property
     def seconds(self) -> float:
-        return self.outpoint - self.inpoint
+        return self.outpoint - self.start
 
 
 async def stream_spans(path: Path, input_args=()) -> dict:
@@ -293,16 +325,23 @@ async def stream_spans(path: Path, input_args=()) -> dict:
     return spans
 
 
-async def _aim_before(source, start: float, end: float, window: float):
-    """``start`` を失わずに始めるための ``-ss`` の狙点(media軸)と、狙ったkeyframe。
+async def _aim_ladder(source, start: float, end: float, window: float) -> list:
+    """``-ss`` の狙点(media軸)の候補を、手前のGOPほど後ろになる順で返す。各要素は
+    ``(狙点, 狙ったkeyframe)``。
 
     走査は ``[start - window, end]``。手前だけでは足りない: 通常入力の狙点は ``k`` と**次の**
     keyframeの中点なので、``k`` の後ろも要る。範囲の中に次のkeyframeが無ければ、範囲の終端を
     境界として使う(``keyframes.exact_target`` の言う「``k`` より後ろで、間にkeyframeが無いと
     分かっている時刻」)。
 
-    HLS入力で ``k`` が素材の最初のkeyframeなら、その半分を狙う。手前のkeyframeが無いので
-    中点が取れず、``k`` ちょうどを渡すと丸めで1 GOP飛ぶ恐れがある。"""
+    **1つでは足りないので梯子にする。** HLS入力は12%の確率で狙いより後ろのkeyframeへ着地する
+    (実録画の密sweep)。着地が要求より後ろなら要求した内容を失うので、**1 GOP手前を狙い直す**。
+    以前は候補が1つしか無く、その1回が前方へ飛んだ範囲は切り出せないまま失敗していた。
+
+    狙点は必ず**GOPの内側**へ置く。境界の際を狙うと丸めで1 GOP動く。実測(合成HLS、keyframeが
+    0.023/5.023/42.0秒)では ``-ss`` 0〜0.05は**2つ目**のkeyframeへ着地し、0.5〜4.9は1つ目へ
+    着地した — 「最初のkeyframeの半分を狙う」形は、まさにその飛ぶ側だった。素材の最初の
+    keyframeでも、手前ではなく**次のkeyframeとの中点**を狙う。"""
     at = max(0.0, start - window)
     keys = await keyframes.video_keyframes(source, at, max(end - at, start - at + 1e-3))
     before = [k for k in keys if float(k) <= start]
@@ -310,14 +349,20 @@ async def _aim_before(source, start: float, end: float, window: float):
         raise keyframes.NoKeyframes(
             f"要求開始の手前{window:.0f}秒にkeyframeが1つもありませんでした"
             f"（{Path(source.path).name} {start:.1f}秒）。走査窓を広げてください。")
-    k = before[-1]
-    k_prev = before[-2] if len(before) > 1 else None
-    if getattr(source, "is_hls", False):
-        if k_prev is None:
-            return float(k) / 2, k
-        return float(keyframes.seek_target(k, k_prev, None, True)), k
-    k_next = next((key for key in keys if key > k), None)
-    return float(keyframes.exact_target(k, k_next if k_next is not None else end)), k
+    is_hls = bool(getattr(source, "is_hls", False))
+    ladder = []
+    for index in range(len(before) - 1, -1, -1):
+        k = before[index]
+        k_prev = before[index - 1] if index > 0 else None
+        if is_hls and k_prev is not None:
+            # 1つ手前のGOPの内側を狙う。着地は k_prev(通常)か k(前方へ飛んだ回)で、
+            # どちらも k 以前なので要求した内容を失わない。
+            aim = float(keyframes.seek_target(k, k_prev, None, True))
+        else:
+            k_next = next((key for key in keys if key > k), None)
+            aim = float(keyframes.exact_target(k, k_next if k_next is not None else end))
+        ladder.append((aim, k))
+    return ladder
 
 
 def _inpoint_for(video: Span, audio: Span, back: int = 0) -> float:
@@ -334,9 +379,14 @@ def _inpoint_for(video: Span, audio: Span, back: int = 0) -> float:
 
     ただし際に置くとvideo先頭のkeyframeが落ちる。GOPが1つしか入らないpartでは、それは
     **映像streamが丸ごと消える**ことを意味する(合成素材で実測: frame 33ms・余裕15msで映像
-    0 packet、余裕40msで182 packet)。閾値は素材で動くので**最小から始めて、出力に映像が
-    無ければ ``back`` を増やして1 packetずつ下げる**(:func:`concat_parts`)。推測した固定の
-    余裕で済ませると、素材によって黙って映像を失う。
+    0 packet、余裕40msで182 packet)。閾値は素材で動くので**最小から始めて、出力の映像が
+    窓の始点から始まっていなければ ``back`` を増やして1 packetずつ下げる**
+    (:func:`concat_parts`)。推測した固定の余裕で済ませると、素材によって黙って映像を失う。
+
+    **``audio.first`` で止めない。** 以前はそこで頭打ちにしていたため、audioの前置きが1 video
+    frameより短い素材では広げ直しが実質1段しか効かず、閾値(≒1 video frame)に届かないまま
+    失敗した(合成素材で実測: 前置き23ms・video frame 33msで、152 packetが2 packetに落ちる)。
+    ``audio.first`` より手前にaudio packetは無いので、そこを跨いでも落とすものは無い。
 
     audioがvideoより後ろから始まる素材(落とす前置きが無い)では、keyframeを残す位置だけ確保する。
     """
@@ -344,9 +394,9 @@ def _inpoint_for(video: Span, audio: Span, back: int = 0) -> float:
     if step <= 0:
         raise RuntimeError("packet間隔を測れなかったため連結の窓を決められません。")
     if audio.frame <= 0 or audio.first >= video.first:
-        return video.first - step * (back + 1)
+        return max(0.0, video.first - step * (back + 1))
     steps = math.ceil((video.first - audio.first) / audio.frame) - 1 - back
-    return audio.first + max(0, steps) * audio.frame
+    return max(0.0, audio.first + steps * audio.frame)
 
 
 async def cut_part(source, start: float, end: float, dst: Path, codec: str,
@@ -371,45 +421,60 @@ async def cut_part(source, start: float, end: float, dst: Path, codec: str,
     揃えておかないと、``inpoint`` に渡す実測値が1.4秒ずれる。
 
     ``-ss`` へ要求時刻をそのまま渡さない理由と、audioの前置きを連結時に落とす理由はmodule
-    docstringにある。着地は毎回検証し、要求より後ろへ着いたら**失敗させる** — 黙って通すと
-    要求した場面の頭が欠けた出力を、要求どおりだと思って受け取ることになる。
+    docstringにある。着地は毎回検証し、要求より後ろへ着いたら**1 GOP手前を狙い直す**
+    (:func:`_aim_ladder`)。梯子を使い切っても届かなければ失敗させる — 黙って通すと要求した
+    場面の頭が欠けた出力を、要求どおりだと思って受け取ることになる。
     """
     src = source.path
     media_offset = float(getattr(source, "media_offset", 0.0) or 0.0)
     # container軸へ直す。HLSのsegmentは0始まりではない(実測1.4秒級)。mp4入力では0なので無害。
     to_container = float(end) + media_offset
-    aim, k = await _aim_before(source, float(start), float(end),
+    ladder = await _aim_ladder(source, float(start), float(end),
                                float(config.get_clip_keyframe_scan_seconds()))
-    ctx = {"src": str(src), "start": start, "end": end, "to_container": to_container,
-           "media_offset": media_offset, "aim_seconds": round(aim, 3),
-           "keyframe_seconds": round(float(k), 3), "output": str(dst)}
-    await run(
-        ["ffmpeg", "-v", "error", "-y",
-         "-ss", f"{aim:.3f}", *source.input_args, "-i", str(src),
-         "-to", f"{to_container:.3f}", "-copyts",
-         "-c", "copy", "-bsf:v", ANNEXB_FILTERS[codec], *MUX_NO_OFFSET,
-         "-f", "mpegts", str(dst)],
-        event, ctx,
-        message or f"切り出しに失敗しました（{src.name} {start:.1f}-{end:.1f}秒）",
-    )
-    spans = await stream_spans(dst)
-    video, audio = spans["video"], spans["audio"]
-    if video is None or audio is None:
-        raise RuntimeError(
-            f"切り出した中間fileに{'映像' if video is None else '音声'}が入りませんでした"
-            f"（{src.name} {start:.1f}-{end:.1f}秒）。")
-    media_start = video.first - media_offset
-    if media_start > float(start) + video.frame:
+    late = None
+    for attempt, (aim, k) in enumerate(ladder):
+        ctx = {"src": str(src), "start": start, "end": end, "to_container": to_container,
+               "media_offset": media_offset, "aim_seconds": round(aim, 3),
+               "keyframe_seconds": round(float(k), 3), "output": str(dst),
+               "attempt": attempt}
+        await run(
+            ["ffmpeg", "-v", "error", "-y",
+             "-ss", f"{aim:.3f}", *source.input_args, "-i", str(src),
+             "-to", f"{to_container:.3f}", "-copyts",
+             "-c", "copy", "-bsf:v", ANNEXB_FILTERS[codec], *MUX_NO_OFFSET,
+             "-f", "mpegts", str(dst)],
+            event, ctx,
+            message or f"切り出しに失敗しました（{src.name} {start:.1f}-{end:.1f}秒）",
+        )
+        spans = await stream_spans(dst)
+        video, audio = spans["video"], spans["audio"]
+        if video is None or audio is None:
+            raise RuntimeError(
+                f"切り出した中間fileに{'映像' if video is None else '音声'}が入りませんでした"
+                f"（{src.name} {start:.1f}-{end:.1f}秒）。")
+        media_start = video.first - media_offset
+        late = round(media_start, 3)
+        if media_start <= float(start) + video.frame:
+            break
+        logger.warning(
+            "切り出しが要求より後ろに着地したため1 GOP手前を狙い直します"
+            "（要求 %.3f秒 / 着地 %.3f秒）", start, media_start,
+            extra={"event": "concat.cut_aim_retried",
+                   "ctx": {**ctx, "landed_seconds": late,
+                           "frame_seconds": round(video.frame, 6),
+                           "video_packets": video.packets,
+                           "remaining_aims": len(ladder) - attempt - 1}},
+        )
+    else:
         logger.error(
             "切り出しが要求した開始位置より後ろに着地し内容が失われました",
             extra={"event": "concat.cut_landed_late",
-                   "ctx": {**ctx, "landed_seconds": round(media_start, 3),
-                           "frame_seconds": round(video.frame, 6),
-                           "video_packets": video.packets}},
+                   "ctx": {"src": str(src), "start": start, "end": end,
+                           "landed_seconds": late, "aims": len(ladder)}},
         )
         raise RuntimeError(
             f"切り出しが要求より後ろから始まりました（要求 {start:.3f}秒 / 実際 "
-            f"{media_start:.3f}秒）。この範囲は要求どおりには切り出せません。")
+            f"{late:.3f}秒）。この範囲は要求どおりには切り出せません。")
     inpoint = _inpoint_for(video, audio)
     outpoint = min(video.end, audio.end)
     if outpoint <= inpoint:
@@ -420,17 +485,50 @@ async def cut_part(source, start: float, end: float, dst: Path, codec: str,
                    round(max(0.0, float(start) - media_start), 3))
 
 
+async def window_part(path: Path, *, keep_start: bool = False) -> CutPart:
+    """出来上がったpartを実測して、連結時に両streamを揃える窓を付けた :class:`CutPart` にする。
+
+    自分で作ったpart(smart cutのhead/tail)にも窓は要る。tailは原本から複製するので**先頭に
+    audioだけの区間が付く** — HLSのsegment境界から入るためで、これは狙点の置き方では消せない
+    (module docstring)。窓無しで繋ぐと、concat demuxerが次のfileへ与えるoffsetをfile全体の尺
+    (=長い方=audio)で決めるため、**接合点で映像だけが止まる**。実録画での実測では接合点に
+    2.40秒と2.08秒の映像の穴ができ、出力も要求より2.5秒長かった。
+
+    ``keep_start`` を立てると**始点を書かない**(``inpoint`` は ``None``)。**自分で焼いたpart**
+    はこちら
+    — 両streamが同じ位置から始まるので落とす前置きが無く、始点を詰めると先頭keyframeの際に
+    来て逆にそれを落とす(実測: 出力の映像がheadを飛ばしてtailから始まった)。終端だけは揃える:
+    音声が映像より1 frame長く終わると、その差だけ次のpartが後ろへずれる。
+
+    窓の始点の決め方と、際に置くと先頭keyframeが落ちる件は :func:`_inpoint_for` にある。"""
+    spans = await stream_spans(path)
+    video, audio = spans["video"], spans["audio"]
+    if video is None or audio is None:
+        raise RuntimeError(
+            f"連結するpartに{'映像' if video is None else '音声'}が入っていません"
+            f"（{path.name}）。")
+    inpoint = None if keep_start else _inpoint_for(video, audio)
+    outpoint = min(video.end, audio.end)
+    part = CutPart(path, video, audio, inpoint, outpoint, video.first, 0.0)
+    if outpoint <= part.start:
+        raise RuntimeError(f"連結するpartに映像と音声の重なりがありません（{path.name}）。")
+    return part
+
+
 def _concat_line(item) -> str:
     """concat demuxerのfile行(必要なら ``inpoint``/``outpoint`` 付き)。
 
-    ``CutPart`` を渡すと窓を書き、``Path`` を渡すとfile全体を使う。smart cutは自分で作った
-    head/tailを繋ぐだけで揃える窓が無いので、後者で呼ぶ。"""
+    ``CutPart`` を渡すと窓を書き、``Path`` を渡すとfile全体を使う。``inpoint`` が ``None`` の
+    ``CutPart`` は始点を書かない — 書けばそこでseekが起きて先頭のkeyframeを落とす
+    (:class:`CutPart`)。"""
     path = item.path if isinstance(item, CutPart) else Path(item)
     # file行はsingle quoteで囲まれるので、path中のquoteは閉じ扱いになる。中間fileの名前は
     # 呼び出し側が付ける part0000.ts 形式なので、実際には現れない。
     line = f"file '{path.as_posix()}'\n"
     if isinstance(item, CutPart):
-        line += f"inpoint {item.inpoint:.6f}\noutpoint {item.outpoint:.6f}\n"
+        if item.inpoint is not None:
+            line += f"inpoint {item.inpoint:.6f}\n"
+        line += f"outpoint {item.outpoint:.6f}\n"
     return line
 
 
@@ -460,10 +558,16 @@ async def concat_parts(parts: list, out: Path, list_path: Path, *,
     offsetがfile全体の尺(=長い方=audio)で決まるため、接合ごとにvideoへ穴が空く。
 
     ``output_args`` は既定でstream copy。音声だけを再encodeする経路(切り出しの音量正規化)は
-    ここへ ``-c:v copy -c:a ...`` を渡す — 切り出しは1 partなので、この段が唯一のmux段になる。"""
+    ここへ ``-c:v copy -c:a ...`` を渡す — 切り出しは1 partなので、この段が唯一のmux段になる。
+
+    窓の始点は際に置くと先頭のkeyframeを奪われるので、出力を毎回確かめて駄目なら下げ直す。
+    梯子の段は1 audio packetずつで、下げ切った先は**始点を書かない**(=partの先頭から採る)。
+    そこまで下げても映像が入らないなら原因は窓ではないので失敗させる。始点を外した回は
+    audioの前置きがそのまま残る(=そのぶんA/Vがずれ、接合点では映像が止まる)ので、黙って
+    通さず何秒残ったかを警告に出す。"""
     ctx = {"output": str(out), "parts": len(parts), "output_args": list(output_args)}
-    attempt = parts
-    for back in range(WIDEN_ATTEMPTS + 1):
+    attempt = list(parts)
+    for back in range(WIDEN_ATTEMPTS + 2):
         list_path.write_text("".join(_concat_line(item) for item in attempt),
                              encoding="utf-8")
         # +genptsは中間fileの絶対timestamp(copyts由来)を連結側で振り直させる。
@@ -471,27 +575,141 @@ async def concat_parts(parts: list, out: Path, list_path: Path, *,
             ["ffmpeg", "-v", "error", "-y", "-fflags", "+genpts",
              "-f", "concat", "-safe", "0", "-i", str(list_path),
              *output_args, "-movflags", "+faststart", str(out)],
-            event, {**ctx, "inpoint_back": back}, message,
+            event, {**ctx, "inpoint_back": back,
+                    "window_start_dropped": _dropped_windows(attempt)}, message,
         )
         missing = await _missing_streams(out)
-        if not missing:
+        lost = None if missing else await _lost_video_head(out, attempt)
+        if not missing and not lost:
             return
-        widened = [item._replace(inpoint=_inpoint_for(item.video, item.audio, back + 1))
-                   if isinstance(item, CutPart) else item for item in attempt]
-        if back == WIDEN_ATTEMPTS or widened == attempt:
+        widened = (_widened(parts, back + 1) if back < WIDEN_ATTEMPTS
+                   else _without_window_start(attempt))
+        if widened == attempt:
             logger.error(
-                "連結後の出力にstreamが入っていません: %s", out.name,
-                extra={"event": event, "ctx": {**ctx, "missing": missing,
+                "連結後の出力の映像が要求どおりに入っていません: %s", out.name,
+                extra={"event": event, "ctx": {**ctx, "missing": missing, "lost_head": lost,
                                                "inpoint_back": back}},
             )
+            if missing:
+                raise RuntimeError(
+                    f"連結後の出力に{'と'.join(missing)}が入りませんでした（{out.name}）。")
             raise RuntimeError(
-                f"連結後の出力に{'と'.join(missing)}が入りませんでした（{out.name}）。")
-        logger.warning(
-            "連結で先頭のkeyframeが落ちたため範囲を音声packet 1個分だけ前へ広げます",
-            extra={"event": "concat.inpoint_widened",
-                   "ctx": {**ctx, "missing": missing, "inpoint_back": back + 1}},
-        )
+                f"連結後の出力の映像が{lost['actual_seconds']:.3f}秒から始まりました"
+                f"（{lost['expected_seconds']:.3f}秒のはずです）。先頭のkeyframeが落ちています。")
+        dropped = _dropped_windows(widened) - _dropped_windows(attempt)
+        if dropped:
+            logger.warning(
+                "連結で先頭のkeyframeが落ちるため窓の始点を外します"
+                "（音声の前置き 最大%.3f秒 がそのまま残ります）", _lead_seconds(widened),
+                extra={"event": "concat.window_start_dropped",
+                       "ctx": {**ctx, "missing": missing, "lost_head": lost,
+                               "inpoint_back": back + 1, "window_start_dropped": dropped,
+                               "audio_lead_seconds": round(_lead_seconds(widened), 3)}},
+            )
+        else:
+            logger.warning(
+                "連結で先頭のkeyframeが落ちたため範囲を音声packet 1個分だけ前へ広げます",
+                extra={"event": "concat.inpoint_widened",
+                       "ctx": {**ctx, "missing": missing, "lost_head": lost,
+                               "inpoint_back": back + 1}},
+            )
         attempt = widened
+
+
+def _widened(parts: list, back: int) -> list:
+    """窓の始点を ``back`` 段ぶん手前へ下げた並び。
+
+    file自身の先頭まで下がったら**始点を書かない**へ倒す。そこから先に落とせるpacketは無く、
+    始点を書くこと自体がconcat demuxerのseekを起こして先頭のkeyframeを奪うためである
+    (module docstring)。"""
+    widened = []
+    for item in parts:
+        if not isinstance(item, CutPart) or item.inpoint is None:
+            widened.append(item)
+            continue
+        inpoint = _inpoint_for(item.video, item.audio, back)
+        head = min(item.video.first, item.audio.first)
+        widened.append(item._replace(inpoint=None if inpoint <= head else inpoint))
+    return widened
+
+
+def _without_window_start(parts: list) -> list:
+    """全partの窓の始点を外した並び(=それぞれのfileの先頭から採る)。"""
+    return [item._replace(inpoint=None) if isinstance(item, CutPart) else item
+            for item in parts]
+
+
+def _dropped_windows(parts: list) -> int:
+    """始点を書かないpartの数。"""
+    return sum(1 for item in parts if isinstance(item, CutPart) and item.inpoint is None)
+
+
+def _lead_seconds(parts: list) -> float:
+    """始点を書かないpartに残るaudioの前置きの最大秒数。"""
+    return max((item.video.first - item.start for item in parts
+                if isinstance(item, CutPart) and item.inpoint is None), default=0.0)
+
+
+async def _lost_video_head(out: Path, parts: list) -> Optional[dict]:
+    """どのpartでも、先頭keyframeが落ちて映像が窓の途中から始まっていないかを測る。
+
+    :func:`_missing_streams` だけでは足りない。あれが拾うのは映像streamが**丸ごと**消えた
+    場合(=partにGOPが1つしか無い場合)で、partに次のkeyframeがあると**映像は残るが中身が
+    ほとんど無い**形になる。合成素材での実測では、窓の始点が先頭keyframeの1µs手前に来た回で
+    152 packetが**2 packet**まで落ち、それでも「成功」として返っていた。
+
+    **先頭partだけでは足りない。** 2本目以降で落ちた回は、その接合点から先の映像が丸ごと後ろへ
+    ずれる(合成素材で実測: smart cutの接合keyframeが出力から消えた)。全partの期待位置を見る。
+
+    期待位置は「それまでの窓の長さの合計 + (partの映像先頭 - 窓の始点)」。``+genpts`` が連結側で
+    時刻を振り直すので、この足し算がそのまま出力の軸になる。許容は1.5 frame(境界frameの丸め分)。
+
+    見るのは**その位置にkeyframeが在るか**。時刻だけでは見抜けない — 先頭keyframeが落ちても
+    後続の非keyframe packetはその時刻に並ぶので、packetの有無では通ってしまう(実測:
+    接合点のkeyframeが消えた出力が、packet時刻だけの判定では成功に見えた)。
+
+    窓を持たないpartが混ざると以降の位置を足せないので、その時点で見るのをやめる。"""
+    if not parts or not isinstance(parts[0], CutPart):
+        return None
+    keys = [t for t, is_key in await _video_packets(out) if is_key]
+    if not keys:
+        return None
+    offset = 0.0
+    for index, part in enumerate(parts):
+        if not isinstance(part, CutPart):
+            break
+        expected = offset + (part.video.first - part.start)
+        frame = part.video.frame if part.video.frame > 0 else 0.04
+        nearest = min(keys, key=lambda t: abs(t - expected))
+        if abs(nearest - expected) > frame * 1.5:
+            return {"part": index, "expected_seconds": round(expected, 3),
+                    "actual_seconds": round(nearest, 3), "frame_seconds": round(frame, 6),
+                    "keyframes": len(keys)}
+        offset += part.seconds
+    return None
+
+
+async def _video_packets(path: Path) -> list:
+    """出力の映像packetの ``(時刻, keyframeか)``。``pts`` が読めないpacketは落とす
+    (MPEG-TSでは正常に混ざる)。"""
+    text = await _probe(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_packets",
+         "-show_entries", "packet=pts_time,flags", "-of", "json", str(path)],
+        path)
+    try:
+        packets = json.loads(text).get("packets") or []
+    except ValueError:
+        return []
+    rows = []
+    for row in packets:
+        value = row.get("pts_time")
+        if value in (None, "N/A"):
+            continue
+        try:
+            rows.append((float(value), str(row.get("flags") or "").startswith("K")))
+        except ValueError:
+            continue
+    return sorted(rows)
 
 
 async def _missing_streams(out: Path) -> list:

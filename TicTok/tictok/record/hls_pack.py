@@ -146,14 +146,24 @@ async def probe_segment_resolutions(path: Path) -> list:
         await _run(ffprobe.keyframe_resolution_args(path)))
 
 
-async def _resolutions_for(hls_dir: Path, entries: list, concurrency: int = 4) -> list:
-    """全segmentの解像度を求める。segmentごとにffprobeを起こすので、同時数だけ絞る。"""
+async def _resolutions_for(hls_dir: Path, entries: list, concurrency: int = 4,
+                           on_done=None) -> list:
+    """全segmentの解像度を求める。segmentごとにffprobeを起こすので、同時数だけ絞る。
+
+    ``on_done(済み件数)`` は1本測るごとに呼ぶ。ここは録画1本のts結合で最も長い区間で、
+    進んだ件数以外に「動いていること」を示せる材料が無い。"""
     sem = asyncio.Semaphore(concurrency)
+    done = 0
 
     async def one(name: str) -> list:
+        nonlocal done
         async with sem:
             cancel.check_cancelled()
-            return await probe_segment_resolutions(hls_dir / name)
+            found = await probe_segment_resolutions(hls_dir / name)
+        done += 1
+        if on_done is not None:
+            await on_done(done)
+        return found
 
     return list(await asyncio.gather(*(one(e["name"]) for e in entries)))
 
@@ -284,7 +294,11 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
 
     解像度はsegmentごとにffprobeする。playlist全体を1 passで走査して変化時刻から逆算する
     方が速いが、実測でその対応付けは41束中17束を取り違えた(segment内部で変わる1本を
-    どちらの束にも寄せられないため)。ここは速度より正しさを取る。3時間の録画で1〜2分。"""
+    どちらの束にも寄せられないため)。ここは速度より正しさを取る。3時間の録画で1〜2分。
+
+    ``on_progress(段階key, 達成率0.0-1.0, 詳細)`` は ``core.progress.PACK_PHASES`` の段階名で
+    呼ぶ。%を直接渡さないのは、段階ごとの重み付けが呼び出し側(job)の関心であり、ここが
+    「解像度判定は全体の何%か」を決めるべきではないため。"""
     hls_dir = Path(hls_dir)
     playlist = hls_dir / playlist_name
     result = {"packed": False, "reason": "", "segments": 0, "packs": 0, "bytes": 0}
@@ -309,19 +323,28 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
         return result
     result["segments"] = len(usable)
 
-    if on_progress is not None:
-        await on_progress(5)
-    resolutions = await _resolutions_for(hls_dir, usable)
-    if on_progress is not None:
-        await on_progress(60)
+    async def report(key: str, frac: float, detail: Optional[str] = None) -> None:
+        if on_progress is not None:
+            await on_progress(key, frac, detail)
+
+    total_segments = len(usable)
+
+    async def probed(done: int) -> None:
+        await report("probe", done / total_segments,
+                     f"{done:,} / {total_segments:,}本")
+
+    await report("probe", 0.0, f"0 / {total_segments:,}本")
+    resolutions = await _resolutions_for(hls_dir, usable, on_done=probed)
     packs = plan_packs(resolutions)
 
+    await report("measure", 0.0)
     source_playlist = hls_dir / ("source" + PACK_TMP_SUFFIX + ".m3u8")
     source_playlist.write_text(render_source_playlist(usable), encoding="utf-8")
     try:
         before_packets, before_seconds = await _probe_packets_and_duration(source_playlist)
     finally:
         source_playlist.unlink(missing_ok=True)
+    await report("measure", 1.0)
 
     placement: dict = {}
     placement_tmp: dict = {}
@@ -330,6 +353,7 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
     try:
         for n, indices in enumerate(packs):
             cancel.check_cancelled()
+            await report("write", n / len(packs), f"{n + 1:,} / {len(packs):,}束")
             # 組み立ては一時名で行い、検証を全部通してからcommit直前に最終名へ改名する
             # (``_pack_tmp_name`` 参照)。placementには**最終名**を入れる: snapshotとplaylist
             # は改名後の世界を書くものなので、一時名が混ざると読めない参照が残る。
@@ -352,6 +376,8 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
                 if len(set(found)) > 1:
                     raise OSError("pack %s carries %d resolutions (%s)"
                                   % (dst.name, len(set(found)), sorted(set(found))))
+        await report("write", 1.0, f"{len(packs):,} / {len(packs):,}束")
+        await report("verify", 0.0)
         snapshot = build_snapshot(hls_dir, usable, packs, placement)
         # 一時名でも ``.m3u8`` で終わらせる。ffprobe/ffmpegは拡張子でHLSと判別するので、
         # ``index.m3u8.packing`` のような名前にすると形式を見つけられず計測が空で返る。
@@ -376,6 +402,7 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
         if abs((after_seconds or 0.0) - (before_seconds or 0.0)) > 0.001:
             raise OSError("packing changed the duration: %.3fs -> %.3fs"
                           % (before_seconds or 0.0, after_seconds or 0.0))
+        await report("verify", 1.0)
     except (OSError, ValueError) as exc:
         for path in written:
             try:
@@ -396,6 +423,7 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
     # 組み立て(分単位)と比べて無視できる。snapshotを先に置くのは、pack fileが現れた瞬間に
     # ``is_packed`` がTrueになるためで、順序を逆にすると「packはあるがsnapshotが無い」
     # 状態がまた作れてしまう。
+    await report("commit", 0.0, f"{len(usable):,}本")
     snapshot_path(hls_dir).write_text(json.dumps(snapshot), encoding="utf-8")
     for tmp, final in final_names.items():
         tmp.replace(hls_dir / final)
@@ -409,8 +437,7 @@ async def pack_session(hls_dir, playlist_name: str = "index.m3u8",
             extra={"event": "hls.source_segment_orphaned",
                    "ctx": {"stem": hls_dir.name, "path": str(hls_dir / name)}},
         )
-    if on_progress is not None:
-        await on_progress(100)
+    await report("commit", 1.0, f"{len(usable):,}本")
     result.update(packed=True, packs=len(packs), bytes=freed)
     logger.info(
         "%s のts結合が完了しました: segment %d 件 -> file %d 件",

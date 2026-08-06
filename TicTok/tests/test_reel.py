@@ -35,12 +35,23 @@ def _spans(video_first, until, *, audio_lead=0.5, vframe=1 / 30,
                                      aframe, 500)}
 
 
+def _fake_packet_times(monkeypatch, first=0.0, frame=1 / 30, seconds=600.0):
+    """連結の出力に映像packetが隙間なく並び、どれもkeyframeであるものとして返す。
+
+    実装は各partの先頭keyframeが生きているかをこの列で確かめる。"""
+    rows = [(first + frame * i, True) for i in range(int(seconds / frame))]
+    monkeypatch.setattr(concat_mod, "_video_packets", _async_value(rows))
+
+
 def _fake_spans_from_command(monkeypatch, captured, gop=_GOP, **kwargs):
     """直前に組んだcut commandの ``-ss``/``-to`` から、着地したpartのspanを作る。
 
     mp4入力の着地は「``-ss`` 以下で最後のkeyframe」(``keyframes`` の実測)。"""
     async def fake_spans(path, input_args=()):
-        cmd = captured["cmds"][-1]
+        cuts = [cmd for cmd in captured["cmds"] if "-ss" in cmd and "-to" in cmd]
+        if not cuts:
+            raise AssertionError("cut commandが1つも走っていません")
+        cmd = cuts[-1]
         aim = float(cmd[cmd.index("-ss") + 1])
         until = float(cmd[cmd.index("-to") + 1])
         return _spans(math.floor(aim / gop) * gop, until, **kwargs)
@@ -97,6 +108,7 @@ def _patch_reel_ffmpeg(monkeypatch, captured, streams=None, durations=None):
     monkeypatch.setattr(reel, "_duration_seconds", fake_duration)
     _fake_keyframes(monkeypatch)
     _fake_spans_from_command(monkeypatch, captured)
+    _fake_packet_times(monkeypatch)
 
 
 def test_reel_path_lands_in_the_shared_clips_dir(make_recording, tmp_root):
@@ -183,6 +195,84 @@ async def test_cut_part_fails_when_it_lands_past_the_requested_start(monkeypatch
         await concat_mod.cut_part(source, 30.0, 45.0, tmp_path / "p0.ts", "h264")
 
 
+async def test_aim_ladder_offers_earlier_gops_after_the_first(monkeypatch, tmp_path):
+    """狙点は1つでは足りない。HLSは12%の確率で狙いより後ろへ着地するので、1 GOPずつ
+    手前へ下げられるようにしておく。"""
+    _fake_keyframes(monkeypatch)
+    source = types.SimpleNamespace(path=tmp_path / "src.m3u8", input_args=(),
+                                   is_hls=True, media_offset=0.0)
+    ladder = await concat_mod._aim_ladder(source, 31.0, 45.0, 45.0)
+    keys = [float(k) for _, k in ladder]
+    assert keys == sorted(keys, reverse=True), "手前のGOPほど後ろの候補"
+    assert keys[0] == 30.0
+    # HLSの狙点は1つ手前のGOPの内側(k_prevとkの中点)。着地はk_prevかkで、どちらもk以前。
+    assert ladder[0][0] == pytest.approx(29.0)
+
+
+async def test_aim_ladder_aims_inside_the_first_gop_not_before_it(monkeypatch, tmp_path):
+    """素材の最初のkeyframeでは、手前ではなく**次のkeyframeとの中点**を狙う。
+
+    合成HLS(keyframeが0.023/5.023/42.0秒)での実測: ``-ss`` 0〜0.05は**2つ目**のkeyframeへ
+    着地し、0.5〜4.9は1つ目へ着地した。「最初のkeyframeの半分を狙う」形は飛ぶ側だった。"""
+    async def only_first(source, at, window):
+        return [Fraction(0), Fraction(5)]
+
+    monkeypatch.setattr(concat_mod.keyframes, "video_keyframes", only_first)
+    source = types.SimpleNamespace(path=tmp_path / "src.m3u8", input_args=(),
+                                   is_hls=True, media_offset=0.0)
+    ladder = await concat_mod._aim_ladder(source, 1.0, 10.0, 45.0)
+    assert ladder == [(pytest.approx(2.5), Fraction(0))]
+
+
+async def test_cut_part_retries_one_gop_earlier_when_it_lands_late(monkeypatch, tmp_path):
+    """前方へ飛んだ回でも、1 GOP手前を狙い直せば要求した内容を失わずに済む。"""
+    aims = []
+
+    async def fake_run(cmd, event, ctx, message):
+        aims.append(float(cmd[cmd.index("-ss") + 1]))
+        reel.Path(cmd[-1]).write_bytes(b"\x00" * 8)
+
+    async def fake_spans(path, input_args=()):
+        # 1回目は要求(30.0)より後ろの32.0へ着地し、狙い直した2回目で30.0に着く。
+        return _spans(32.0 if len(aims) == 1 else 30.0, 45.0)
+
+    monkeypatch.setattr(concat_mod, "run", fake_run)
+    monkeypatch.setattr(concat_mod, "stream_spans", fake_spans)
+    _fake_keyframes(monkeypatch)
+    source = types.SimpleNamespace(path=tmp_path / "src.m3u8", input_args=(),
+                                   is_hls=True, media_offset=0.0)
+    cut = await concat_mod.cut_part(source, 30.0, 45.0, tmp_path / "p0.ts", "h264")
+    assert len(aims) == 2 and aims[1] < aims[0], "1 GOP手前を狙い直す"
+    assert cut.media_start == 30.0
+
+
+async def test_concat_detects_a_video_head_that_survived_but_lost_its_start(monkeypatch,
+                                                                           tmp_path):
+    """先頭keyframeが落ちても、partに次のkeyframeがあれば映像streamは**残る**。
+
+    stream有無だけを見ると素通りする。合成素材の実測では152 packetが2 packetまで落ちた回が
+    「成功」として返っていた。窓の始点と出力の映像先頭がずれていないかまで見ること。"""
+    seen = []
+
+    async def fake_run(cmd, event, ctx, message):
+        seen.append(ctx.get("inpoint_back"))
+        reel.Path(cmd[-1]).write_bytes(b"\x00" * 8)
+
+    monkeypatch.setattr(concat_mod, "run", fake_run)
+    monkeypatch.setattr(concat_mod, "_missing_streams", _async_value([]))
+    part = concat_mod.CutPart(tmp_path / "p0.ts", _spans(30.0, 45.0)["video"],
+                              _spans(30.0, 45.0)["audio"], 29.98, 45.0, 30.0, 0.0)
+
+    async def fake_packets(path):
+        # 出力の映像は窓の始点(29.98)から0.02秒後に始まるはず。実際は次のkeyframeまで飛ぶ。
+        first = 0.02 if len(seen) > 1 else 5.0
+        return [(first + i / 30, True) for i in range(300)]
+
+    monkeypatch.setattr(concat_mod, "_video_packets", fake_packets)
+    await concat_mod.concat_parts([part], tmp_path / "out.mp4", tmp_path / "parts.txt")
+    assert seen == [0, 1], "映像の頭が落ちていれば窓を下げてやり直す"
+
+
 async def test_concat_list_trims_each_part_to_the_video_range(monkeypatch, tmp_path):
     """partの先頭に付いたaudioだけの区間を落として、videoと同じ範囲へ揃えること。
 
@@ -196,6 +286,7 @@ async def test_concat_list_trims_each_part_to_the_video_range(monkeypatch, tmp_p
     _fake_keyframes(monkeypatch)
     spans = _spans(30.0, 45.0, audio_lead=2.0)
     monkeypatch.setattr(concat_mod, "stream_spans", _async_value(spans))
+    _fake_packet_times(monkeypatch)
 
     source = types.SimpleNamespace(path=tmp_path / "src.mp4", input_args=(),
                                    is_hls=False, media_offset=0.0)
@@ -483,6 +574,7 @@ async def test_concat_moves_the_window_back_when_the_keyframe_is_dropped(monkeyp
     _fake_keyframes(monkeypatch)
     spans = _spans(30.0, 45.0, audio_lead=2.0)
     monkeypatch.setattr(concat_mod, "stream_spans", _async_value(spans))
+    _fake_packet_times(monkeypatch)
 
     source = types.SimpleNamespace(path=tmp_path / "src.mp4", input_args=(),
                                    is_hls=False, media_offset=0.0)
@@ -498,7 +590,7 @@ async def test_concat_moves_the_window_back_when_the_keyframe_is_dropped(monkeyp
 
 async def test_concat_fails_after_moving_the_window_back_a_bounded_number_of_times(
         monkeypatch, tmp_path):
-    """下げ続けても映像が入らないなら原因は別。黙って下げ続けずに失敗させる。"""
+    """下げ切って窓の始点を外しても映像が入らないなら原因は窓ではない。失敗させる。"""
     seen = []
 
     async def fake_run(cmd, event, ctx, message):
@@ -517,4 +609,38 @@ async def test_concat_fails_after_moving_the_window_back_a_bounded_number_of_tim
     with pytest.raises(RuntimeError, match="映像が入りませんでした"):
         await concat_mod.concat_parts([cut], tmp_path / "out.mp4",
                                       tmp_path / "parts.txt")
-    assert seen == list(range(concat_mod.WIDEN_ATTEMPTS + 1))
+    # 梯子の段 + 始点を外した1回。
+    assert seen == list(range(concat_mod.WIDEN_ATTEMPTS + 2))
+
+
+async def test_concat_drops_the_window_start_when_widening_never_helps(monkeypatch,
+                                                                      tmp_path):
+    """keyframe間隔が10〜17秒の録画では、窓の始点をpartの先頭packetより後ろへ置いた時点で
+    concat demuxerが先頭keyframeを飛び越す。始点を1 packetずつ下げても閾値に届かず、届く所まで
+    下げると**audio packetは1つも落ちない**(実測: 644 packetのpartで映像が入る始点はどれも
+    644 packetのまま)。全か無かなので、下げ切った先=始点を書かない、へ倒して要求した映像を守る。"""
+    written = []
+
+    async def fake_run(cmd, event, ctx, message):
+        if "inpoint_back" in ctx:
+            written.append((tmp_path / "parts.txt").read_text(encoding="utf-8"))
+
+    async def fake_missing(out):
+        # 窓の始点を書いている間はずっと映像が入らない。外した回で初めて入る。
+        return [] if "inpoint" not in written[-1] else ["映像"]
+
+    monkeypatch.setattr(concat_mod, "run", fake_run)
+    monkeypatch.setattr(concat_mod, "_missing_streams", fake_missing)
+    _fake_keyframes(monkeypatch)
+    spans = _spans(30.0, 45.0, audio_lead=0.2)
+    monkeypatch.setattr(concat_mod, "stream_spans", _async_value(spans))
+    _fake_packet_times(monkeypatch, first=0.2)
+
+    source = types.SimpleNamespace(path=tmp_path / "src.mp4", input_args=(),
+                                   is_hls=False, media_offset=0.0)
+    cut = await concat_mod.cut_part(source, 30.0, 45.0, tmp_path / "p0.ts", "h264")
+    await concat_mod.concat_parts([cut], tmp_path / "out.mp4", tmp_path / "parts.txt")
+
+    assert "inpoint" in written[0], "まずは最小の余裕から試す"
+    assert "inpoint" not in written[-1], "下げ切ったら始点を書かない"
+    assert "outpoint" in written[-1], "終端は揃えたまま"

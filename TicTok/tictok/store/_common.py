@@ -470,6 +470,10 @@ CREATE TABLE IF NOT EXISTS media_job_queue (
     -- 投入時の指定(clip一括書き出しの範囲list・素材版・正規化の有無など)。録画idだけでは
     -- 再現できない指定を持つ種別のためにある。
     params_json TEXT NOT NULL DEFAULT '{}',
+    -- 段階(stage)の遷移履歴。stageは「今どこか」の1点しか持てず、終わったjobでは空にされる
+    -- ため、どの段階で何秒かかったか・どこで落ちたかを後から辿る手段が無かった。段階が
+    -- 変わった時だけ1件追記する(進捗tickそのものは数万回鳴るので、ここには載せない)。
+    stages_json TEXT NOT NULL DEFAULT '[]',
     -- 待機へ戻したjobを、この時刻まで拾わない(保存先volumeの復帰待ちなど)。
     not_before REAL,
     -- 最初に待機へ戻した時刻。総待ち時間の打ち切り判定に使う。

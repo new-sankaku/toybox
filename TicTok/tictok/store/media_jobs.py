@@ -20,6 +20,11 @@ class MediaJobsMixin:
     契約の詳細はmodule docstringを参照。
     """
 
+    # 1 jobが残せる段階の上限。段階そのものは6前後だが、再試行のたび段階名は作り直され、
+    # 種別によっては件数付きの段階名(「(3/120) 切り出し中」)が件数ぶん並ぶ。行が無制限に
+    # 伸びると、段階が変わるたびその全文を読み書きすることになる。
+    MAX_JOB_STAGES = 64
+
     # ===== 映像job queue(焼き込み / Up出力 / 再mp4化) =====
 
     @staticmethod
@@ -27,6 +32,7 @@ class MediaJobsMixin:
         item = dict(row)
         item["result"] = json.loads(item.pop("result_json") or "{}")
         item["params"] = json.loads(item.pop("params_json", None) or "{}")
+        item["stages"] = json.loads(item.pop("stages_json", None) or "[]")
         return item
 
     def enqueue_media_job(self, job_id: str, kind: str, recording_id: int, *,
@@ -155,9 +161,11 @@ class MediaJobsMixin:
             if row is None:
                 return None
             job_id = row["job_id"]
+            # 段階履歴はこの実行ぶんだけを持つ。保留から戻った行は最初の段階からやり直す
+            # ので、前の実行の段階を残すと同じ段階が何度も並び、所要も読めなくなる。
             self._conn.execute(
                 "UPDATE media_job_queue SET state = 'running', started_at = ?, pct = 0,"
-                " stage = '', error = NULL WHERE job_id = ?",
+                " stage = '', error = NULL, stages_json = '[]' WHERE job_id = ?",
                 (time.time(), job_id),
             )
             self._conn.commit()
@@ -177,13 +185,36 @@ class MediaJobsMixin:
         with self._lock:
             self._conn.execute(
                 "UPDATE media_job_queue SET state = 'running', started_at = ?, pct = 0,"
-                " stage = '', error = NULL WHERE job_id = ?",
+                " stage = '', error = NULL, stages_json = '[]' WHERE job_id = ?",
                 (time.time(), job_id),
             )
             self._conn.commit()
 
-    def update_media_job_progress(self, job_id: str, pct: int, stage: str) -> None:
+    def update_media_job_progress(self, job_id: str, pct: int, stage: str, *,
+                                  phase: Optional[str] = None) -> None:
+        """進捗の1点を書く。``phase`` を渡した呼び出しだけが段階履歴へ1件追記する。
+
+        追記を進捗tickと同じ頻度で行ってはいけない。tickは1 jobで数万回鳴るので、そのたび
+        履歴の全文をJSONで読み書きすれば、行の長さに比例して重くなる書き込みが延々続く。
+        段階が変わったかの判定は呼び出し側(media_queue)が持つ — 段階名の詳細(frame位置)を
+        落として比べる必要があり、それは表示文言の作法であってstorageの関心ではない。"""
+        stage_at = time.time()
         with self._lock:
+            if phase is not None:
+                row = self._conn.execute(
+                    "SELECT stages_json FROM media_job_queue WHERE job_id = ?", (job_id,)
+                ).fetchone()
+                if row is not None:
+                    stages = json.loads(row["stages_json"] or "[]")
+                    # 上限に達したら古い方から落とす。落とすのは「いつ始まったか」より
+                    # 「どこで止まったか」を残す方が失敗の追跡に効くため。
+                    stages = stages[-(self.MAX_JOB_STAGES - 1):]
+                    stages.append({"label": phase, "at": stage_at,
+                                   "pct": max(0, min(100, int(pct)))})
+                    self._conn.execute(
+                        "UPDATE media_job_queue SET stages_json = ? WHERE job_id = ?",
+                        (json.dumps(stages, ensure_ascii=False), job_id),
+                    )
             self._conn.execute(
                 "UPDATE media_job_queue SET pct = ?, stage = ? WHERE job_id = ?",
                 (max(0, min(100, int(pct))), stage, job_id),
@@ -253,7 +284,8 @@ class MediaJobsMixin:
                     "UPDATE media_job_queue SET state = 'pending', queued_at = ?,"
                     " started_at = NULL, finished_at = NULL, pct = 0, stage = '',"
                     " error = NULL, not_before = NULL, deferred_since = NULL,"
-                    " result_json = '{}', params_json = ? WHERE job_id = ?",
+                    " result_json = '{}', stages_json = '[]', params_json = ?"
+                    " WHERE job_id = ?",
                     (time.time(), json.dumps(params, ensure_ascii=False), job_id),
                 )
                 requeued += 1

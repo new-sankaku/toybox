@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from tictok.paths import PROJECT_ROOT
+from tictok.record import telop_styles
 from tictok.storage import OPS_ERROR, Storage
 
 logger = logging.getLogger("tictok.settings")
@@ -575,6 +576,44 @@ SETTING_DEFS = {
         "max": 95,
         "label": "動画化: 字幕の縦位置(画面上端からの%)",
         "note": "字幕の中心を、動画の縦方向のどの位置に置くかを%で指定します。既定の58%はCommentの表示帯(下から約33%)の直上で、CommentともBattleスコアバーとも重なりません。値を大きくするとCommentの表示帯へ、小さくするとGift演出の帯へ近づくので、重ねたくない要素に応じて調整してください。",
+    },
+    "video_overlay_subtitle_style": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLE_STYLE",
+        "default": telop_styles.DEFAULT_STYLE_VALUE,
+        "type": int,
+        "min": min(telop_styles.STYLE_VALUES),
+        "max": max(telop_styles.STYLE_VALUES),
+        "label": "動画化: 字幕(テロップ)の見た目",
+        "note": "焼き込む字幕の書体・色・フチ・動きの組み合わせを選びます。見本はいずれも本番と同じ描画経路で焼いた実物で、背景のgradientは暗い映像・明るい映像の両方でどう見えるかを確かめるためのものです(文字の大きさは見本用に拡大してあり、実際の大きさは下の設定で決まります)。書体は同梱fontを直接読ませるので、動かすmachineに何のfontが入っていても出力は同じになります(初回だけ配布元からの取得が走ります)。取得できない場合は別の書体で代替せず焼き込みを止めます。",
+        "options": telop_styles.settings_options(),
+        # 選択肢ごとの見本画像。画面はこのtemplateの {value} を選択肢の値へ差し替えて読む
+        # (どのkeyが画像を持つかを画面側にhard-codeさせないため)。
+        "option_image": "/api/settings/telop-preview/{value}.png",
+    },
+    "video_overlay_subtitle_animation": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLE_ANIMATION",
+        "default": 1,
+        "type": int,
+        "min": 0,
+        "max": 1,
+        "label": "動画化: 字幕の出入りの動き",
+        "note": "見た目で選んだpresetが持つfade(淡い出入り)と、出だしの拡大popを付けるかどうかです。書体・色・フチはそのままに動きだけを止められます。素材として別の編集softへ持ち込む場合など、動きが邪魔になるときにOFFにしてください。",
+        "options": [
+            {"value": 0, "label": "止める"},
+            {"value": 1, "label": "付ける"},
+        ],
+    },
+    "video_overlay_subtitle_max_lines": {
+        "category": "overlay",
+        "env": "TICTOK_VIDEO_OVERLAY_SUBTITLE_MAX_LINES",
+        "default": 4,
+        "type": int,
+        "min": 1,
+        "max": 6,
+        "label": "動画化: 字幕の最大行数",
+        "note": "1つの字幕が画面幅で折り返した結果この行数を超えた場合、超えた行は描きません(字幕が画面を覆うのを防ぐため)。short動画のテロップは2行までが読みやすい一方、行数を絞るほど長い発話の後半が焼き込まれなくなります。捨てた行数はlogと焼き込みの診断に残ります。",
     },
     "video_output_normalize_audio": {
         "category": "audio",
@@ -1464,6 +1503,8 @@ class Settings:
                 entry["step"] = 1 if definition["type"] is int else 0.5
             if "options" in definition:
                 entry["options"] = definition["options"]
+            if "option_image" in definition:
+                entry["option_image"] = definition["option_image"]
             if key in self._invalid:
                 # 保存済みの値が現在の定義に反しているkey。画面がその場で直せるよう、値を
                 # 黙って差し替える代わりに理由を添えて出す。適合している間はfield自体を出さない

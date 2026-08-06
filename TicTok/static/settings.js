@@ -28,6 +28,45 @@ function buildOptions(item) {
   return group;
 }
 
+// 選択肢が見本画像を持つ設定(テロップpresetなど)。名前だけでは何が変わるか分からない
+// ものは、実物を並べて選べるようにする。画像はserverが本番と同じ経路で焼いたもので、
+// 出せない場合(font未取得・ffmpeg無し)はlabelだけのcardへ落ちる — 選択自体は妨げない。
+function buildOptionGallery(item) {
+  const group = document.createElement("div");
+  group.className = "option-gallery";
+  group.setAttribute("role", "radiogroup");
+  group.setAttribute("aria-labelledby", `setlbl-${item.key}`);
+  item.options.forEach((opt) => {
+    const card = document.createElement("label");
+    card.className = "option-card";
+
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = item.key;
+    radio.value = opt.value;
+    radio.dataset.key = item.key;
+    radio.checked = String(opt.value) === String(item.value);
+
+    const img = document.createElement("img");
+    img.className = "option-card-img";
+    img.setAttribute("loading", "lazy");
+    img.alt = `${opt.label} の見本`;
+    img.src = item.option_image.replace("{value}", String(opt.value));
+    img.addEventListener("error", () => {
+      img.remove();
+      card.classList.add("option-card-noimg");
+    });
+
+    const text = document.createElement("span");
+    text.className = "option-card-label";
+    text.textContent = opt.label;
+
+    card.append(radio, img, text);
+    group.appendChild(card);
+  });
+  return group;
+}
+
 function buildNumber(item) {
   const input = document.createElement("input");
   input.type = "number";
@@ -111,7 +150,16 @@ function buildField(item) {
 
   const control = document.createElement("div");
   control.className = "s-cell s-control";
-  control.appendChild(isText ? buildText(item) : hasOptions ? buildOptions(item) : buildNumber(item));
+  const hasGallery = hasOptions && Boolean(item.option_image);
+  control.appendChild(
+    isText
+      ? buildText(item)
+      : hasGallery
+        ? buildOptionGallery(item)
+        : hasOptions
+          ? buildOptions(item)
+          : buildNumber(item),
+  );
   control.appendChild(buildDefaultRow(item, control));
 
   const note = document.createElement("div");

@@ -187,7 +187,7 @@ function showView(name) {
   // 画面に無いplayerは止める。鳴り続けると、どこから音が出ているのか分からなくなる
   // (本編と見どころのplayerが二重に鳴る)。shortcutのspaceはシーン検索tabでしか効かない
   // ので、離れた先から本編を止める手段が無い点も同じ理由で塞ぐ。
-  if (name !== "marks") pauseMarkPlayer();
+  pauseInlinePlayers(name);
   if (name !== "search") {
     const video = $("video");
     // 読み込みも位置も捨てない。戻れば続きから再生できる。
@@ -1607,7 +1607,7 @@ function renderMarks() {
       watch.className = "btn btn-small";
       watch.textContent = "視聴";
       watch.title = "このtabのまま、この位置から再生します。";
-      watch.addEventListener("click", () => playMark(mark));
+      watch.addEventListener("click", () => markPlayer.play(mark));
       const open = document.createElement("button");
       open.className = "btn btn-small";
       open.textContent = "シーン検索視聴";
@@ -1643,7 +1643,8 @@ function renderMarks() {
         if (!ok) return;
         await apiSend("DELETE", `/api/bookmarks/${mark.id}`);
         // 消した見どころを観たまま残さない(実体の無い行を再生し続けることになる)。
-        if (markWatching && markWatching.id === mark.id) closeMarkPlayer();
+        const seen = markPlayer.watching();
+        if (seen && seen.id === mark.id) markPlayer.close();
         if (state.current) loadBookmarks(state.current.recording_id);
         loadMarks();
       });
@@ -1674,7 +1675,7 @@ function renderMarks() {
         // 行内のbutton・メモ欄・グループ欄は独自の操作を持つ。素通しすると「視聴」を
         // 押しただけで再生が二重に走り、読み込みも2回投げられる。
         if (event.target.closest("button, input, select, a")) return;
-        playMark(mark);
+        markPlayer.play(mark);
       });
     },
   );
@@ -1693,7 +1694,8 @@ async function deleteSelectedMarks() {
   try {
     const result = await apiSend("POST", "/api/bookmarks/bulk", { op: "delete", ids });
     $("marks-status").textContent = `${fmtNum(result.affected)}件を削除しました。`;
-    if (markWatching && ids.includes(markWatching.id)) closeMarkPlayer();
+    const seen = markPlayer.watching();
+    if (seen && ids.includes(seen.id)) markPlayer.close();
     state.marksSelected.clear();
   } catch (err) {
     $("marks-status").textContent = err.message;
@@ -1716,140 +1718,174 @@ async function openMark(mark) {
   inheritAddGroup(mark.group_id);
 }
 
-// ===== 見どころtabのplayer =====
+// ===== 一覧tabの中で観るplayer(見どころ・切り出しリスト共用) =====
 
-// 見どころtabの中だけで使うplayer。再生経路(HLS/mp4)の決め方はシーン検索側と同じだが、
+// 一覧を持つtabの中だけで使うplayer。再生経路(HLS/mp4)の決め方はシーン検索側と同じだが、
 // 本編playerとは別の<video>・別のHls instanceで持つ。1つを共有すると、tabを移るたびに
-// 相手の位置と読み込みを壊し合う。
-let markHls = null;
-// 読み込み要求の世代。連続で別の見どころを押すと前の応答が後から届く。
-let markPlayToken = 0;
-// 今この場で読み込んである録画。同じ録画の別の見どころへはseekだけで移る。
-let markLoadedId = null;
-// 今観ている見どころ。削除された時に画面から下げるための身元。
-let markWatching = null;
-// 範囲付きの見どころの終端。ここで一度止める。nullなら止めない。
-let markStopAt = null;
+// 相手の位置と読み込みを壊し合う。見どころと切り出しリストも互いに別instanceにするので、
+// 片方で観ている録画は、もう片方のtabを触っても読み込み直しにならない。
+// prefixはHTML側のid接頭辞("mark" / "cut")、nounは終端で止めた時に名乗る対象。
+function createInlinePlayer(prefix, noun) {
+  const el = (name) => $(`${prefix}-${name}`);
+  const say = (text) => { el("play-status").textContent = text; };
+  let hls = null;
+  // 読み込み要求の世代。連続で別の行を押すと前の応答が後から届く。
+  let token = 0;
+  // 今この場で読み込んである録画。同じ録画の別の位置へはseekだけで移る。
+  let loadedId = null;
+  // 今観ている行。削除された時に画面から下げるための身元。
+  let watching = null;
+  // 範囲付きの終端。ここで一度止める。nullなら止めない。
+  let stopAt = null;
 
-function closeMarkPlayer() {
-  const video = $("mark-video");
-  markPlayToken += 1;
-  markWatching = null;
-  markStopAt = null;
-  markLoadedId = null;
-  video.pause();
-  if (markHls) {
-    markHls.destroy();
-    markHls = null;
+  // 右列は畳まない(畳むと観るたび左の表幅が動き、行を追えなくなる)。playerを下げている
+  // 間は同じ場所に案内を出し、列そのものは残す。
+  function stage(on) {
+    el("play").classList.toggle("hidden", !on);
+    el("play-empty").classList.toggle("hidden", on);
   }
-  video.removeAttribute("src");
-  video.load();
-  showMarkStage(false);
-  $("mark-play-status").textContent = "";
-}
 
-// 右列は畳まない(畳むと観るたび左の表幅が動き、行を追えなくなる)。playerを下げている
-// 間は同じ場所に案内を出し、列そのものは残す。
-function showMarkStage(on) {
-  $("mark-play").classList.toggle("hidden", !on);
-  $("mark-play-empty").classList.toggle("hidden", on);
-}
+  function close() {
+    const video = el("video");
+    token += 1;
+    watching = null;
+    stopAt = null;
+    loadedId = null;
+    video.pause();
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
+    video.removeAttribute("src");
+    video.load();
+    stage(false);
+    say("");
+  }
 
-// tabを移るときは音だけが残らないよう止める。読み込みは捨てない(戻ってきたら続きから)。
-function pauseMarkPlayer() {
-  if (markWatching) $("mark-video").pause();
-}
-
-// 範囲付きの見どころは終端で一度止める。「どこまでが見どころか」を観ているだけで
-// 分かるようにするため。止めた後は解除するので、そのまま再生を押せば続きを観られる。
-function onMarkTimeUpdate() {
-  if (markStopAt === null) return;
-  const video = $("mark-video");
-  if (video.currentTime < markStopAt) return;
-  markStopAt = null;
-  video.pause();
-  $("mark-play-status").textContent = "見どころの終端です。再生を押すと続きを観られます。";
-}
-
-async function playMark(mark) {
-  // 本編playerと同時には鳴らさない。画面は別でも音は重なる。
-  $("video").pause();
-  const video = $("mark-video");
-  const hasRange = mark.end !== null && mark.end !== undefined;
-  markWatching = mark;
-  markStopAt = hasRange ? mark.end : null;
-  showMarkStage(true);
-  // 素材版が元録画固定であることを名乗る。シーン検索側で「焼き込み」を選んで作業した後、
-  // ここで出来を確かめるつもりで観ると素のままの映像が出て、焼き込みが失敗していると
-  // 誤読する。切り替えて確かめる先(シーン検索視聴)も同じ場所で案内する。
-  const head = $("mark-play-head");
-  head.textContent =
-    `${mark.unique_id} / ${fmtDateTime(mark.recording_started_at)} / ${fmtDuration(mark.start)}`
-    + (hasRange ? ` - ${fmtDuration(mark.end)}` : "")
-    + ` / 素材: ${VARIANT_LABELS.source}`;
-  head.title = "この場での再生は常に元録画です。焼き込み・Up出力の出来を確かめる場合は"
-    + "「シーン検索視聴」で開いてください。";
-  // 同じ録画の中を移るだけなら読み込み直さない(HLSを張り直すと数秒待たされる)。
-  if (markLoadedId === mark.recording_id) {
-    $("mark-play-status").textContent = "";
-    seekMarkTo(mark.start, (markPlayToken += 1));
-    return;
-  }
-  $("mark-play-status").textContent = "読み込み中…";
-  const token = (markPlayToken += 1);
-  let playback;
-  try {
-    // 素材版は元録画に固定する。切り出し素材の指定(clip-variant)はシーン検索側の
-    // 出来の確認用で、見どころの中身を確かめるのとは目的が違う。
-    playback = await apiSend(
-      "GET", `/api/recordings/${mark.recording_id}/playback?variant=source`);
-  } catch (err) {
-    if (token === markPlayToken) $("mark-play-status").textContent = err.message;
-    return;
-  }
-  if (token !== markPlayToken) return;
-  if (markHls) {
-    markHls.destroy();
-    markHls = null;
-  }
-  if (playback.mode === "hls" && window.Hls && window.Hls.isSupported()) {
-    markHls = new window.Hls();
-    markHls.loadSource(playback.url);
-    markHls.attachMedia(video);
-    markHls.on(window.Hls.Events.ERROR, (_e, data) => {
-      // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
-      if (data.fatal) $("mark-play-status").textContent = "この録画を再生できませんでした。";
-    });
-  } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
-    $("mark-play-status").textContent = "このBrowserはHLS再生に対応していません。";
-    return;
-  } else {
-    video.src = playback.url;
-  }
-  markLoadedId = mark.recording_id;
-  $("mark-play-status").textContent =
-    playback.mode === "hls" ? "" : "この録画は.tsが残っていないため、mp4を再生しています。";
-  seekMarkTo(mark.start, token);
-}
-
-// 位置決めは尺が分かってからでないと効かない。読み込み途中なら分かった時点で入れる。
-// 待っている間に別の見どころへ移っていたら、こちらの位置は古いので捨てる。
-function seekMarkTo(at, token) {
-  const video = $("mark-video");
-  if (video.readyState >= 1) {
-    video.currentTime = at;
-    video.play().catch(() => {});
-    return;
-  }
-  video.addEventListener(
-    "loadedmetadata",
-    () => {
-      if (token !== markPlayToken) return;
+  // 位置決めは尺が分かってからでないと効かない。読み込み途中なら分かった時点で入れる。
+  // 待っている間に別の行へ移っていたら、こちらの位置は古いので捨てる。
+  function seekTo(at, want) {
+    const video = el("video");
+    if (video.readyState >= 1) {
       video.currentTime = at;
       video.play().catch(() => {});
+      return;
+    }
+    video.addEventListener(
+      "loadedmetadata",
+      () => {
+        if (want !== token) return;
+        video.currentTime = at;
+        video.play().catch(() => {});
+      },
+      { once: true },
+    );
+  }
+
+  async function play(item) {
+    // 本編playerと同時には鳴らさない。画面は別でも音は重なる。
+    $("video").pause();
+    const video = el("video");
+    const hasRange = item.end !== null && item.end !== undefined;
+    watching = item;
+    stopAt = hasRange ? item.end : null;
+    stage(true);
+    // 素材版が元録画固定であることを名乗る。シーン検索側で「焼き込み」を選んで作業した後、
+    // ここで出来を確かめるつもりで観ると素のままの映像が出て、焼き込みが失敗していると
+    // 誤読する。切り替えて確かめる先(シーン検索視聴)も同じ場所で案内する。
+    const head = el("play-head");
+    head.textContent =
+      `${item.unique_id} / ${fmtDateTime(item.recording_started_at)} / ${fmtDuration(item.start)}`
+      + (hasRange ? ` - ${fmtDuration(item.end)}` : "")
+      + ` / 素材: ${VARIANT_LABELS.source}`;
+    head.title = "この場での再生は常に元録画です。焼き込み・Up出力の出来を確かめる場合は"
+      + "「シーン検索視聴」で開いてください。";
+    // 同じ録画の中を移るだけなら読み込み直さない(HLSを張り直すと数秒待たされる)。
+    if (loadedId === item.recording_id) {
+      say("");
+      seekTo(item.start, (token += 1));
+      return;
+    }
+    say("読み込み中…");
+    const want = (token += 1);
+    let playback;
+    try {
+      // 素材版は元録画に固定する。切り出し素材の指定(clip-variant)は出来上がりの確認用で、
+      // どの場面かを確かめるのとは目的が違う。
+      playback = await apiSend(
+        "GET", `/api/recordings/${item.recording_id}/playback?variant=source`);
+    } catch (err) {
+      if (want === token) say(err.message);
+      return;
+    }
+    if (want !== token) return;
+    if (hls) {
+      hls.destroy();
+      hls = null;
+    }
+    if (playback.mode === "hls" && window.Hls && window.Hls.isSupported()) {
+      hls = new window.Hls();
+      hls.loadSource(playback.url);
+      hls.attachMedia(video);
+      hls.on(window.Hls.Events.ERROR, (_e, data) => {
+        // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
+        if (data.fatal) say("この録画を再生できませんでした。");
+      });
+    } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
+      say("このBrowserはHLS再生に対応していません。");
+      return;
+    } else {
+      video.src = playback.url;
+    }
+    loadedId = item.recording_id;
+    say(playback.mode === "hls" ? "" : "この録画は.tsが残っていないため、mp4を再生しています。");
+    seekTo(item.start, want);
+  }
+
+  return {
+    play,
+    close,
+    // tabを移るときは音だけが残らないよう止める。読み込みは捨てない(戻ってきたら続きから)。
+    pause() { if (watching) el("video").pause(); },
+    // 今観ている行。消えた行を観たまま残さないための身元照合と、「シーン検索視聴」の
+    // 対象に使う。
+    watching() { return watching; },
+    // 範囲付きは終端で一度止める。「どこまでが対象か」を観ているだけで分かるようにする
+    // ため。止めた後は解除するので、そのまま再生を押せば続きを観られる。
+    onTimeUpdate() {
+      if (stopAt === null) return;
+      const video = el("video");
+      if (video.currentTime < stopAt) return;
+      stopAt = null;
+      video.pause();
+      say(`${noun}の終端です。再生を押すと続きを観られます。`);
     },
-    { once: true },
-  );
+    // mp4経路の失敗は<video>のerror eventにしか出ない。小さなplayerなので、browserの
+    // 壊れた枠だけだと「押しても何も起きなかった」と読める。src除去(閉じる)でもerrorは
+    // 飛ぶので、観ている対象がある時だけ理由を出す。
+    onError() { if (watching) say("この録画を再生できませんでした。"); },
+  };
+}
+
+const markPlayer = createInlinePlayer("mark", "見どころ");
+const cutPlayer = createInlinePlayer("cut", "切り出し");
+
+// tabを離れる時は、そのtabのplayerだけを止める。
+function pauseInlinePlayers(name) {
+  if (name !== "marks") markPlayer.pause();
+  if (name !== "cuts") cutPlayer.pause();
+}
+
+// player枠のbutton・<video>のevent。toSearchは「シーン検索視聴」の行き先で、観ている
+// 対象をそのままシーン検索の再生画面で開く。
+function bindInlinePlayer(prefix, player, toSearch) {
+  $(`${prefix}-video`).addEventListener("timeupdate", () => player.onTimeUpdate());
+  $(`${prefix}-video`).addEventListener("error", () => player.onError());
+  $(`${prefix}-play-close`).addEventListener("click", () => player.close());
+  $(`${prefix}-play-search`).addEventListener("click", () => {
+    const item = player.watching();
+    if (item) toSearch(item);
+  });
 }
 
 function updateTimeLabel() {
@@ -3621,6 +3657,8 @@ async function deleteSelectedCuts() {
   try {
     const result = await apiSend("POST", "/api/cutlist/bulk", { op: "delete", ids });
     $("cuts-status").textContent = `${fmtNum(result.affected)}件を削除しました。`;
+    const seen = cutPlayer.watching();
+    if (seen && ids.includes(seen.id)) cutPlayer.close();
     state.cutsSelected.clear();
   } catch (err) {
     $("cuts-status").textContent = err.message;
@@ -3667,11 +3705,32 @@ function renderCuts() {
           order.appendChild(button);
         });
       }
+      // 中身を確かめるための2経路。この場で観る(視聴)か、道具付きで観る(シーン検索視聴)。
+      // 以前は行clickでシーン検索へ移るしか無く、詰めた範囲を1件確かめるたびtabを往復して
+      // 並び順と選択を見失っていた。見どころtabと同じ並び・同じ文言にする。
+      const watch = document.createElement("button");
+      watch.className = "btn btn-small";
+      watch.type = "button";
+      watch.textContent = "視聴";
+      watch.title = "このtabのまま、この範囲を再生します（OUTで一度止まります）。";
+      watch.addEventListener("click", (e) => {
+        e.stopPropagation();
+        cutPlayer.play(cut);
+      });
+      const open = document.createElement("button");
+      open.className = "btn btn-small";
+      open.type = "button";
+      open.textContent = "シーン検索視聴";
+      open.title = "シーン検索の再生画面で開きます（IN/OUTが入った状態になります）。";
+      open.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCut(cut);
+      });
       const remove = document.createElement("button");
       remove.className = "btn btn-small btn-danger";
       remove.textContent = "削除";
       remove.addEventListener("click", async (e) => {
-        // 行click(再生へ戻る)と重ならないよう、削除は行へ伝播させない。
+        // 行click(この場で再生)と重ならないよう、削除は行へ伝播させない。
         e.stopPropagation();
         // 詰めたIN/OUTと並び順は復元できない。まとめて削除する側と同じ扱いにする。
         const ok = await confirmDialog(
@@ -3680,12 +3739,25 @@ function renderCuts() {
         );
         if (!ok) return;
         await apiSend("DELETE", `/api/cutlist/${cut.id}`);
+        // 消した切り出しを観たまま残さない(実体の無い行を再生し続けることになる)。
+        const seen = cutPlayer.watching();
+        if (seen && seen.id === cut.id) cutPlayer.close();
         loadCuts();
       });
+      // 「観る」2つは同じ段に置く。列は中身が要求する幅で決まるので、buttonを平らに並べると
+      // 要求がbutton1つぶんになり、3つが縦に積まれて1行が動画1本ぶんの高さになる。
+      const views = document.createElement("span");
+      views.className = "vd-row vd-row-pair";
+      views.append(watch, open);
+      const actions = document.createElement("span");
+      actions.className = "vd-row";
+      actions.append(views, remove);
       const file = document.createElement("span");
+      file.className = "vd-file";
       file.textContent = cut.filename || "-";
       // 解決済みのpathはNLEへ渡す実体そのもの。録画を移動していても今の場所が出る。
-      if (cut.path) file.title = cut.path;
+      // 1行へ収めて省略するので、省略された分もここから読めるようにfile名を控えに置く。
+      file.title = cut.path || cut.filename || "";
       return [
         pick,
         grouped ? String(rowNumber) : "—",
@@ -3699,7 +3771,7 @@ function renderCuts() {
         cutLabelInput(cut),
         groupSelect,
         order,
-        remove,
+        actions,
       ];
     },
     [1, 5, 6, 7, 8],
@@ -3707,12 +3779,18 @@ function renderCuts() {
       bindRowDrag(tr, "cuts", cut.id);
       tr.classList.add("row-clickable");
       tr.tabIndex = 0;
-      tr.title = "この範囲を再生画面で開きます（IN/OUTが入った状態になります）。";
-      tr.addEventListener("click", () => openCut(cut));
+      // 行clickはこのtabの中で再生する(画面ごと移らないぶん安全で、見どころtabと同じ)。
+      tr.title = "この切り出しをこのtabのまま再生します。";
+      tr.addEventListener("click", (event) => {
+        // 行内のbutton・ラベル欄・グループ欄は独自の操作を持つ。素通しすると「視聴」を
+        // 押しただけで再生が二重に走り、読み込みも2回投げられる。
+        if (event.target.closest("button, input, select, a")) return;
+        cutPlayer.play(cut);
+      });
       tr.addEventListener("keydown", (e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
-        openCut(cut);
+        cutPlayer.play(cut);
       });
     },
   );
@@ -4390,8 +4468,21 @@ function renderSemantic(status) {
     reason = "意味検索indexを更新中です。完了までお待ちください。";
   }
   button.disabled = Boolean(reason);
-  note.textContent = reason;
   button.title = reason;
+  // 押せない理由が無いときは「押す理由」を出す。indexが取り残されたぶんは検索結果から
+  // 落としているので、更新しない限り出てこないことがuserに見えていないと押されない。
+  const stale = status.stale_passages || 0;
+  const unindexed = status.unindexed_groups || 0;
+  if (reason) {
+    note.textContent = reason;
+  } else if (stale || unindexed) {
+    const parts = [];
+    if (stale) parts.push(`${fmtNum(stale)}件が張り直し後で検索から除外中`);
+    if (unindexed) parts.push(`${fmtNum(unindexed)}件が未index`);
+    note.textContent = `${parts.join(" / ")}。indexを更新すると検索対象に戻ります。`;
+  } else {
+    note.textContent = "";
+  }
 }
 
 async function loadSemantic() {
@@ -5333,19 +5424,10 @@ function bind() {
   });
   $("marks-move").addEventListener("click", () => assignSelection("marks", "move"));
   $("marks-bulk-delete").addEventListener("click", deleteSelectedMarks);
-  // 見どころtabのplayer。範囲の終端で止めるのはtimeupdateで見る(seek済みの位置から
-  // 飛び越えることがあるので、等号ではなく通過で判定する)。
-  $("mark-video").addEventListener("timeupdate", onMarkTimeUpdate);
-  // mp4経路の失敗は<video>のerror eventにしか出ない。小さなplayerなので、browserの
-  // 壊れた枠だけだと「押しても何も起きなかった」と読める。src除去(閉じる)でもerrorは
-  // 飛ぶので、観ている対象がある時だけ理由を出す。
-  $("mark-video").addEventListener("error", () => {
-    if (markWatching) $("mark-play-status").textContent = "この録画を再生できませんでした。";
-  });
-  $("mark-play-close").addEventListener("click", closeMarkPlayer);
-  $("mark-play-search").addEventListener("click", () => {
-    if (markWatching) openMark(markWatching);
-  });
+  // 見どころtab・切り出しリストtabのplayer。範囲の終端で止めるのはtimeupdateで見る
+  // (seek済みの位置から飛び越えることがあるので、等号ではなく通過で判定する)。
+  bindInlinePlayer("mark", markPlayer, (mark) => openMark(mark));
+  bindInlinePlayer("cut", cutPlayer, (cut) => openCut(cut));
   // グループのメモ。入力欄から離れた時点で確定する(打鍵ごとには投げない)。
   $("cuts-group-memo").addEventListener("change", async () => {
     const memo = $("cuts-group-memo");
@@ -5380,6 +5462,9 @@ function bind() {
       { title: `${scope}の全削除`, confirmLabel: "すべて削除", danger: true },
     );
     if (!ok) return;
+    // 消える範囲を観たまま残さない(実体の無い行を再生し続けることになる)。
+    const seen = cutPlayer.watching();
+    const gone = seen && visibleCuts().some((cut) => cut.id === seen.id);
     try {
       const suffix = state.groupSel ? `?group=${encodeURIComponent(state.groupSel)}` : "";
       await apiSend("DELETE", `/api/cutlist${suffix}`);
@@ -5387,6 +5472,7 @@ function bind() {
       showError(err);
       return;
     }
+    if (gone) cutPlayer.close();
     loadCuts();
   });
 

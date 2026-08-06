@@ -637,6 +637,58 @@ def test_settings_update_round_trips_valid_value(client, server):
         server.runtime.settings.update({"session_list_limit": before})
 
 
+def test_settings_expose_the_telop_preview_url_for_every_preset(client):
+    """画面はこのtemplateからpresetごとの見本画像を読む。選択肢と見本の対応をserverが
+    持たないと、画面側にどのkeyが画像を持つかをhard-codeすることになる。"""
+    from tictok.record import telop_styles
+
+    rows = {row["key"]: row for row in client.get("/api/settings").json()["settings"]}
+    row = rows["video_overlay_subtitle_style"]
+
+    assert "{value}" in row["option_image"]
+    assert [o["value"] for o in row["options"]] == list(telop_styles.STYLE_VALUES)
+    # 画像を持たない設定にまでtemplateが生えていないこと
+    assert "option_image" not in rows["video_overlay_subtitle_animation"]
+
+
+def test_telop_preview_renders_once_and_refuses_an_unknown_preset(client, monkeypatch, tmp_path):
+    """見本はcacheを返すだけで、要求のたびにffmpegを回さない(設定画面は全presetを
+    一斉に読みに来る)。"""
+    from tictok.record import telop_preview, telop_styles
+
+    sample = tmp_path / "sample.png"
+    sample.write_bytes(b"\x89PNG\r\n\x1a\n")
+    calls = []
+
+    async def fake_preview(style, animate=True):
+        calls.append(style.key)
+        return sample
+
+    monkeypatch.setattr(telop_preview, "ensure_preview", fake_preview)
+
+    ok = client.get("/api/settings/telop-preview/1.png")
+    assert ok.status_code == 200 and ok.headers["content-type"] == "image/png"
+    assert calls == [telop_styles.STYLE_VALUES[1].key]
+
+    missing = client.get("/api/settings/telop-preview/999.png")
+    assert missing.status_code == 404
+
+
+def test_telop_preview_reports_a_missing_font_instead_of_a_server_error(client, monkeypatch):
+    """書体を取得できないのはserverの不具合ではない。5xxにすると監視がserver errorとして
+    数え、しかも画面は理由を出せない。"""
+    from tictok.record import telop_preview
+
+    async def fails(style, animate=True):
+        raise RuntimeError("配布元へ接続できませんでした")
+
+    monkeypatch.setattr(telop_preview, "ensure_preview", fails)
+
+    response = client.get("/api/settings/telop-preview/1.png")
+    assert response.status_code == 503
+    assert "配布元" in response.json()["detail"]
+
+
 # ---- recordings / transcript ------------------------------------------------------
 
 def test_transcript_404_distinguishes_missing_recording_from_missing_transcript(
@@ -2663,13 +2715,16 @@ def test_pack_endpoint_refuses_a_recording_without_material(client, pack_recordi
     assert ".ts" in response.json()["detail"]
 
 
-def _fake_pack(server, monkeypatch, result=None, calls=None, steps=(5, 60, 100)):
+def _fake_pack(server, monkeypatch, result=None, calls=None,
+               steps=(("probe", 0.0), ("probe", 1.0), ("measure", 1.0),
+                      ("write", 0.5), ("write", 1.0), ("verify", 1.0),
+                      ("commit", 1.0))):
     async def _pack_session(hls_dir, playlist_name="index.m3u8", on_progress=None):
         if calls is not None:
             calls.append(Path(hls_dir))
-        for pct in steps:
+        for key, frac in steps:
             if on_progress is not None:
-                await on_progress(pct)
+                await on_progress(key, frac, None)
         return result or {"packed": True, "reason": "", "segments": 2, "packs": 1,
                           "bytes": 256}
 
@@ -2694,7 +2749,16 @@ async def test_pack_job_runs_on_the_session_dir_and_reports_progress(
     result = await _run_pack(server, recording["id"], stages)
     assert calls == [seg_dir]
     assert result["packed"] is True and result["packs"] == 1
-    assert [pct for _stage, pct in stages] == [0, 5, 60, 100]
+    # 段階ごとの重み(PACK_PHASES)で畳まれた%が単調に伸びる。以前は5→60→100の3点しか
+    # 動かず、その間ずっと同じ「素材を結合中」1種類だった。
+    pcts = [pct for _stage, pct in stages]
+    assert pcts == sorted(pcts)
+    labels = [stage for stage, _pct in stages]
+    assert labels[0] == "ts結合の準備中"
+    # 最も長い区間(解像度判定)と、束ね書き込み・削除がそれぞれ別の段階として名乗る。
+    assert "(1/5) segmentの解像度を判定中" in labels
+    assert "(3/5) 素材を束ね書き込み中" in labels
+    assert labels[-1] == "(5/5) 元segmentを削除中"
 
 
 async def test_pack_job_is_idempotent_for_material_that_is_already_packed(
@@ -2749,8 +2813,8 @@ async def test_pack_job_waits_while_another_job_holds_the_recording(
 
 async def test_pack_job_stops_at_a_cancel_before_anything_is_written(
         server, monkeypatch, pack_recording):
-    """取り消しはcallbackでしか効かせられない。60%(束ね書き込みの直前)で抜ければ、まだ何も
-    書いていない状態で止まる。"""
+    """取り消しはcallbackでしか効かせられない。commitより前の段階で抜ければ、まだ元segmentを
+    1本も消していない状態で止まる。"""
     from tictok.core import cancel as cancel_mod
 
     recording, _path, _seg = pack_recording()
@@ -2773,7 +2837,9 @@ async def test_pack_job_does_not_cancel_after_the_work_is_done(
 
     async def _pack_session(hls_dir, playlist_name="index.m3u8", on_progress=None):
         token.cancel()
-        await on_progress(100)
+        # commit段階は元segmentの削除まで終わった後。ここで取り消しを受けると、完了した
+        # 作業を取り消し扱いにしてしまう。
+        await on_progress("commit", 1.0, None)
         return {"packed": True, "reason": "", "segments": 2, "packs": 1, "bytes": 256}
 
     monkeypatch.setattr(server.hls_pack, "pack_session", _pack_session)

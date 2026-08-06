@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "TicTok Live Comment Poster",
+  "version": "0.1.0",
+  "description": "TikTok Live のcomment欄へ一定間隔で定型文を投稿します。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://www.tiktok.com/*"],
+  "action": {
+    "default_title": "TicTok Live Comment Poster",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tiktok.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

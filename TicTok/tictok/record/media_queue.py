@@ -17,6 +17,7 @@ workerは常に1本。GPU semaphore(core.gpu)は同時実行を止めるが、�
 
 import asyncio
 import logging
+import re
 import time
 from typing import Callable, Optional
 
@@ -49,6 +50,20 @@ STATE_FILTERS = {
 _FOLDED_TO_KIND = {domain: kind
                    for mapping in (GROUP_DOMAINS, BULK_DOMAINS)
                    for kind, domain in mapping.items()}
+
+
+# 段階名から詳細を落とすための括弧。段階名は「(3/6) アイコン・絵文字を取得中（ギフト
+# アイコン 12/48）」の形で、括弧の中は数frameごとに動く。段階が変わったかの判定にそのまま
+# 使うと、同じ段階が数千件の履歴になる。
+_STAGE_DETAIL = re.compile(r"（[^（）]*）")
+
+
+def stage_phase(stage: str) -> str:
+    """段階名から進行中の詳細(frame位置・件数)を落とした、段階そのものの名前。
+
+    履歴に残すのはこちら。詳細まで含めて残すと「どの段階に何秒かけたか」ではなく
+    「1秒ごとの位置log」になり、行が数千件へ膨らんで読む対象でなくなる。"""
+    return _STAGE_DETAIL.sub("", stage or "").strip()
 
 
 def db_kind_for_domain(domain: str) -> str:
@@ -100,6 +115,9 @@ def job_payload(row: dict, queue_position: int = 0) -> dict:
         "session_id": row.get("session_id"),
         "state": row["state"],
         "stage": row.get("stage") or "",
+        # 通ってきた段階と、その段階へ入った時刻。終わったjobのstageは空にされるので、
+        # 「どこで何秒かかったか / どこで落ちたか」はこれ以外に辿る先が無い。
+        "stages": row.get("stages") or [],
         "pct": row.get("pct") or 0,
         "index": 0,
         "total": 1,
@@ -201,6 +219,10 @@ class MediaJobQueue:
         self._stopping = False
         self._tokens: dict[str, CancelToken] = {}
         self._last_progress: dict[str, tuple] = {}
+        # job_id -> 最後に履歴へ残した段階名。段階が変わった1回だけ追記するための目印で、
+        # process内に留めてよい(再起動を跨いだ行はinterruptedになり、次の実行はclaimで
+        # 履歴ごと作り直す)。
+        self._last_phase: dict[str, str] = {}
         # group_id -> 最後にgroupのまとめ行を配った時刻。進捗tickでのgroup再集計を間引く。
         self._last_group_emit: dict[str, float] = {}
         # 集計済みのgroup_id。同時に終わった2件が同じ集計を二重に残さないための目印で、
@@ -428,6 +450,7 @@ class MediaJobQueue:
         finally:
             self._tokens.pop(job_id, None)
             self._last_progress.pop(job_id, None)
+            self._last_phase.pop(job_id, None)
         await self._emit(self._storage.get_media_job(job_id))
         await self._emit_pending()
         if not deferred:
@@ -534,7 +557,15 @@ class MediaJobQueue:
         if self._last_progress.get(job_id) == (pct, stage):
             return
         self._last_progress[job_id] = (pct, stage)
-        self._storage.update_media_job_progress(job_id, pct, stage)
+        # 段階が変わった時だけ履歴へ1件足す。詳細(frame位置)は毎回動くので、それを落とした
+        # 段階名で比べる。空の段階名は履歴に残さない — 終端でstageを消す書き込みと、まだ
+        # 段階名を持たない開始直後が、中身の無い1件として並ぶ。
+        phase = stage_phase(stage)
+        changed = bool(phase) and self._last_phase.get(job_id) != phase
+        if changed:
+            self._last_phase[job_id] = phase
+        self._storage.update_media_job_progress(
+            job_id, pct, stage, phase=phase if changed else None)
         # 進捗tickはjob 1本で数十〜数百回鳴る。当事者の行は毎回配り、groupのまとめ行だけを
         # 間引く(group全件のqueryを伴うのはそちらだけである)。
         await self._emit(self._storage.get_media_job(job_id), gate_group=True)

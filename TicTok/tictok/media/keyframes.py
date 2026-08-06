@@ -82,6 +82,7 @@ keyframeで始まる)ではこの飛びは再現しなかったので、条件�
 from __future__ import annotations
 
 import bisect
+import json
 import logging
 from fractions import Fraction
 from pathlib import Path
@@ -187,6 +188,58 @@ async def video_keyframes(source, at: float, window: float) -> list:
             f"（{Path(source.path).name}）。"
         )
     return keys
+
+
+async def keyframe_resolutions(source, at: float, window: float) -> list:
+    """``[at, at+window)`` に現れる解像度を ``(時刻, (幅, 高さ))`` の出現順で返す。
+
+    連続する重複は畳むので、**戻り値の長さが1ならその窓の中で解像度は変わっていない**。
+    時刻はmedia軸の ``Fraction``。1つも読めなければ空list。
+
+    解像度の変更は必ず新しいSPS(=keyframe)を伴うので、keyframeだけを読めば取りこぼさない。
+    窓を切る理由と ``%end`` 形式で渡す理由は :func:`video_keyframes` と同じ。
+
+    **時刻は ``pts`` ではなく ``best_effort_timestamp`` を見る。** 実録画では
+    **解像度が切り替わるそのkeyframeの ``pts`` がN/A**で、``pts`` だけを見ると切替点を
+    落とす(実測: 640x1280→720x1280 の切替keyframeがまさにN/Aだった)。
+
+    **csvではなくJSONで受ける。** ffprobeのcsvはfieldを要求した順ではなく内部の順で並べる
+    ので、列の意味を取り違える(実測で一度誤読した)。"""
+    if window <= 0:
+        raise ValueError("走査窓は正の秒数で指定してください。")
+    offset = Fraction(source.media_offset)
+    start = max(0.0, float(at) + float(source.media_offset))
+    end = float(at) + float(source.media_offset) + window
+    if end <= start:
+        raise ValueError("走査窓が入力の先頭より手前で終わっています。")
+    text = await _run_probe(
+        ["ffprobe", "-v", "error", *source.input_args, "-select_streams", "v:0",
+         "-skip_frame", "nokey", "-read_intervals", f"{start:.6f}%{end:.6f}",
+         "-show_entries", "frame=width,height,best_effort_timestamp:stream=time_base",
+         "-of", "json", str(source.path)],
+        source.path,
+    )
+    try:
+        data = json.loads(text)
+    except ValueError:
+        raise RuntimeError(
+            f"解像度の走査結果を読めませんでした（{Path(source.path).name}）。")
+    streams = data.get("streams") or []
+    try:
+        time_base = Fraction(streams[0]["time_base"])
+    except (IndexError, KeyError, ValueError, ZeroDivisionError):
+        raise RuntimeError(f"time_baseを読めませんでした（{Path(source.path).name}）。")
+    found: list = []
+    for frame in data.get("frames") or []:
+        width, height = frame.get("width"), frame.get("height")
+        stamp = frame.get("best_effort_timestamp")
+        if width is None or height is None or stamp is None:
+            continue
+        size = (int(width), int(height))
+        if found and found[-1][1] == size:
+            continue
+        found.append((int(stamp) * time_base - offset, size))
+    return found
 
 
 def first_at_or_after(keys: list, t) -> Optional[Fraction]:

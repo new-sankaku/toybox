@@ -410,7 +410,7 @@ async def test_a_pack_carrying_two_resolutions_leaves_every_segment_alone(
     names = build_hls(hls, [(160, 120), (320, 240)])
 
     # 解像度が全部同じに見えれば、切ってはいけない所で切らずに1束へ入る。
-    async def all_one_resolution(hls_dir, entries, concurrency=4):
+    async def all_one_resolution(hls_dir, entries, concurrency=4, on_done=None):
         return [[(160, 120)] for _ in entries]
 
     monkeypatch.setattr(hls_pack, "_resolutions_for", all_one_resolution)

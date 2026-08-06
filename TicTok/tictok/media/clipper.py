@@ -51,9 +51,20 @@ keyframeからしか始められないという原理どおりの結果を、計
   出せないと黙ってlibx264へ落ちるので、返ってきたencoderのcodec familyを照合して**継承しない**。
   profile/level/pix_fmtも原本へ合わせ、最後に ``concat.check_compatible`` で照合して、
   合っていなければ連結せず失敗させる
+- **headは原本を直接seekしない。** 原本へ ``-ss``/``-t`` を渡す形はどちらの側でも壊れる
+  (実測。doc/CLIP_TIMEBASE.md §8): 入力側 ``-t`` は尺が膨らみ(head 4.0秒の要求が6.22秒。
+  接合点を越えた分はtailと内容が重複する)、入力側 ``-ss`` はHLSが位置によって前方のsegmentへ
+  飛ぶ(要求どおりのIN点というsmart cutの前提が崩れる)。**copy経路で粗く切った中間から焼く** —
+  あちらは狙点を要求以前のkeyframeへ寄せ、着地を毎回実測して検証している
 - **headに ``-noaccurate_seek`` は付けない。** headはvideo/audio両方を復号するので、上に書いた
-  非対称(video=keyframeから / audio=要求位置から)は起きない。既定のaccurate seekが要求位置
-  ちょうどから始めてくれる
+  非対称(video=keyframeから / audio=要求位置から)は起きない
+- **接合点は狙ったkeyframeではなく、tailが実際に着地した位置にする。** HLSは12%の確率で狙いと
+  別のkeyframeへ着く。着いた先も実在のkeyframeなので、headをそこまで焼けば要求どおりのIN点は
+  保てる。以前はここで失敗させていたため、実測で開始5,000秒のような位置はまるごと切り出せなかった
+- **配信中に解像度が変わる範囲は、接合点を最後の切替以降へ置く。** tailは原本のまま複製するので
+  混在解像度になると連結できない。切替を跨ぐheadは焼き直す側なので、tailの解像度を ``-s`` で
+  明示して揃える。そのぶんheadは伸びる(切替が範囲の終盤にあれば実質的に全編再encodeになる)が、
+  以前のように「形式が揃わない」で失敗するよりは要求に応えている
 - **headの音声はcopyではなくAACへ再encodeし、``-ar``/``-ac`` を原本に合わせる。** GOP途中から
   copyできる音声packetは無く、rate/channelが原本と違えば連結の照合で落ちる
 - **音量正規化はこの経路に足さない。** 別途の実測で、切り出し段のA/V不揃い(各partで音声が
@@ -85,7 +96,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from tictok.core import cancel, config, layout
+from tictok.core import config, layout
 from tictok.media import concat, hls_source, keyframes
 from tictok.record import audio_norm
 from tictok.record.video_overlay import (
@@ -163,19 +174,23 @@ async def _smart_encoder(codec: str) -> str:
     return encoder
 
 
-def _head_args(source, params: dict, start: float, until: float, dst: Path,
-               encoder: str, quality: int) -> list:
-    """先頭GOPを再encodeしてTS中間へ書くffmpeg command。
+def _head_args(rough: Path, params: dict, lead: float, seconds: float, dst: Path,
+               encoder: str, quality: int, size: tuple) -> list:
+    """粗く切った中間から先頭部分を再encodeしてTS中間へ書くffmpeg command。
 
-    ``-ss``/``-t`` は入力側に置く。``-t`` を出力側に置くと ``-copyts`` 経路で空出力になる実測が
-    あり(doc/CLIP_TIMEBASE.md §2)、入力側の方が音声の尺も厳密だった。``-noaccurate_seek`` は
-    **付けない** — headは両streamを復号するので、既定のaccurate seekが要求位置ちょうどから
-    始めてくれる。"""
+    **原本を直接seekしない。** 原本へ ``-ss``/``-t`` を渡す形はどちらの側でも壊れる
+    (module docstring「headは粗い中間から焼く」)。中間は要求以前のkeyframeから始まり着地も
+    検証済みなので、``lead``(その前置き秒数)だけを出力側 ``-ss`` で捨てれば要求位置ちょうど
+    から始まる。中間は数秒なので復号は安い。
+
+    ``size`` は接合先(tail)の解像度。**必ず明示する** — 配信中に解像度が変わる録画では、
+    headがその切替を跨ぐと出力が混在解像度になり、連結の照合で落ちる。tailの解像度へ寄せて
+    焼けば、切替を跨ぐ範囲でもsmart cutできる。"""
     video, audio = params["video"], params["audio"]
     codec = video["codec_name"]
-    args = ["ffmpeg", "-v", "error", "-y",
-            "-ss", f"{start:.3f}", "-t", f"{until - start:.3f}",
-            *source.input_args, "-i", str(source.path),
+    args = ["ffmpeg", "-v", "error", "-y", "-i", str(rough),
+            "-ss", f"{lead:.3f}", "-t", f"{seconds:.3f}",
+            "-s", f"{int(size[0])}x{int(size[1])}",
             *_encoder_args(encoder, quality)]
     if video.get("pix_fmt"):
         args += ["-pix_fmt", video["pix_fmt"]]
@@ -217,13 +232,20 @@ def _next_boundary(keys: list, k, end: float):
     return end
 
 
-def _smart_plan(keys: list, start: float, end: float, frame: float) -> tuple:
+def _smart_plan(keys: list, start: float, end: float, frame: float,
+                floor: Optional[float] = None) -> tuple:
     """``(接合するkeyframe, その次の境界, 縮退の種類)``。
+
+    ``floor`` は接合点の下限で、範囲の中で**解像度が最後に切り替わった時刻**を渡す。切替より
+    手前で接合すると、そのままcopyするtailが混在解像度になり連結できない。切替以降で接合すれば
+    tailは単一解像度になり、切替を跨ぐheadは焼き直す側なのでtailの解像度へ寄せられる
+    (:func:`_head_args`)。
 
     縮退は失敗ではない。``single_gop`` は範囲が1 GOPに収まる場合で、全体を再encodeする以外に
     要求どおりのIN点にできない。``start_on_keyframe`` は要求INが既にkeyframe上(差が1 frame
     未満)で、再encodeするheadが1 frameも作れない場合。どちらも報告した上で実行する。"""
-    k = keyframes.first_at_or_after(keys, start)
+    at = start if floor is None else max(start, float(floor))
+    k = keyframes.first_at_or_after(keys, at)
     if k is None or float(k) >= end:
         return None, None, "single_gop"
     boundary = _next_boundary(keys, k, end)
@@ -253,20 +275,24 @@ async def _verify_has_video(part: Path, ctx: dict) -> None:
             f"切り出しの中間fileに映像が入りませんでした（{part.name}）。")
 
 
-async def _verify_landing(part: Path, expected: float, media_offset: float,
-                          frame: float, ctx: dict) -> float:
-    """tailが本当に ``expected`` から始まっているかを実測し、違えば失敗させる。
+async def _landing_seconds(part: Path, expected: float, media_offset: float,
+                           frame: float, ctx: dict) -> float:
+    """tailが実際に始まった時刻(media軸)を測って返す。
 
-    HLS入力は任意時刻に対し12%の確率で要求より後ろのkeyframeへ着地し、内容を最大1.789秒失う
-    (実録画の密sweep)。さらに ``Output file is empty`` で0 byte fileが残る場合があり、
-    ffmpegの終了コードには出ない。**copyへ倒さずここで失敗させる**: 黙って倒すと、利用者は
-    要求どおりのIN点だと思って内容の欠けた出力を受け取る。"""
+    HLS入力は任意時刻に対し12%の確率で要求より後ろのkeyframeへ着地する(実録画の密sweep、
+    最大1.789秒)。**それは失敗ではない** — 着いた先も実在のkeyframeなので、その位置を
+    接合点として採り直せば要求どおりのIN点は保てる(headをそこまで焼けばよい)。以前はここで
+    RuntimeErrorにしていたため、実測で開始5,000秒のような位置がまるごと切り出せなかった。
+
+    失敗にするのは**測れなかったとき**だけである。``Output file is empty`` の0 byte fileは
+    ffmpegの終了コードに出ないので、ここで捕まえないと後段が空のtailを繋ぐ。先頭がkeyframeで
+    ないtailも、そこからstream copyしても復号できないので採れない。"""
     pts, is_key = await keyframes.first_packet(part)
     landed = None if pts is None else float(pts) - media_offset
-    if landed is None or not is_key or abs(landed - expected) > frame:
+    if landed is None or not is_key:
         logger.error(
-            "smart cutが意図したkeyframeに着地しませんでした", extra={
-                "event": "clip.smart_landing_mismatch",
+            "smart cutの尾側の着地を測れませんでした", extra={
+                "event": "clip.smart_landing_unknown",
                 "ctx": {**ctx, "expected_seconds": round(expected, 3),
                         "landed_seconds": None if landed is None else round(landed, 3),
                         "first_packet_is_keyframe": is_key,
@@ -277,9 +303,16 @@ async def _verify_landing(part: Path, expected: float, media_offset: float,
                 "切り出しの尾側に映像が1 packetも入りませんでした"
                 f"（{expected:.3f}秒から複製する予定でした）。")
         raise RuntimeError(
-            f"切り出しの尾側が狙った位置から始まりませんでした（要求 {expected:.3f}秒 / "
-            f"実際 {landed:.3f}秒、差 {landed - expected:+.3f}秒）。"
-            "この範囲は要求どおりのIN点では切り出せません。"
+            "切り出しの尾側がkeyframeから始まっていません"
+            f"（{landed:.3f}秒）。この位置からはstream copyできません。")
+    if abs(landed - expected) > frame:
+        logger.info(
+            "smart cutの尾側が狙いと別のkeyframeに着地したため接合点を採り直します"
+            "（狙い %.3f秒 / 実際 %.3f秒）", expected, landed,
+            extra={"event": "clip.smart_landing_moved",
+                   "ctx": {**ctx, "expected_seconds": round(expected, 3),
+                           "landed_seconds": round(landed, 3),
+                           "frame_seconds": round(frame, 6)}},
         )
     return landed
 
@@ -321,6 +354,19 @@ async def _copy_clip(source, start: float, end: float, out: Path, output_args) -
     return cut
 
 
+async def _rough_seek(rough: Path, cut, start: float) -> float:
+    """粗い中間の中で、要求時刻ちょうどに当たる出力側 ``-ss`` の値。
+
+    ``cut.lead_seconds`` をそのまま使ってはいけない。連結の窓は先頭keyframeを守るために後ろへ
+    広げ直されることがあり(:func:`tictok.media.concat.concat_parts`)、そのとき中間の0点は
+    映像先頭より手前へずれる。ずれ幅は素材で動くので、**中間を実測して足す**。"""
+    spans = await concat.stream_spans(rough)
+    video = spans["video"]
+    if video is None:
+        raise RuntimeError(f"粗い切り出しに映像が入りませんでした（{rough.name}）。")
+    return max(0.0, video.first + (start - cut.media_start))
+
+
 async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
     """先頭GOPだけを再encodeし、残りを原本のまま複製して1本へ繋ぐ。"""
     duration = end - start
@@ -341,17 +387,30 @@ async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
             keys = await keyframes.video_keyframes(source, start, duration)
         except keyframes.NoKeyframes:
             keys = []
-        k, boundary, degenerate = _smart_plan(keys, start, end, frame)
+        # 範囲の中で解像度が変わるなら、接合点は最後の切替以降へ寄せる。tailを単一解像度に
+        # しないと連結できず、切替を跨ぐheadはtailの解像度へ焼き直せば揃う。
+        sizes = await keyframes.keyframe_resolutions(source, start, duration)
+        if not sizes:
+            raise RuntimeError(
+                f"切り出す範囲の解像度を読めませんでした（{src.name} "
+                f"{start:.1f}-{end:.1f}秒）。headをどの大きさで焼くか決められません。")
+        frame_size = sizes[-1][1]
+        floor = float(sizes[-1][0]) if len(sizes) > 1 else None
+        k, boundary, degenerate = _smart_plan(keys, start, end, frame, floor)
         base = {"src": str(src), "output": str(out), "start": start, "end": end,
-                "degenerate": degenerate}
+                "degenerate": degenerate, "size": list(frame_size),
+                "resolution_changes": [[round(float(t), 3), list(wh)] for t, wh in sizes[1:]]}
 
         work = Path(tempfile.mkdtemp(prefix=".smartcut-", dir=out.parent))
         head = work / "part0.ts"
         tail = work / "part1.ts"
         encoder = "copy"
         landed = None
+        join = None
         try:
-            # tailを先に切って着地を検めるのは、駄目な範囲にencodeの時間を払わないため。
+            # tailを先に切って着地を測るのは、駄目な範囲にencodeの時間を払わないためと、
+            # **着地した位置をそのまま接合点にする**ため(狙いと違う所へ着いてもheadをそこまで
+            # 焼けば要求どおりのIN点は保てる)。
             if k is not None:
                 aim = float(keyframes.exact_target(k, boundary))
                 await concat.run(
@@ -360,17 +419,39 @@ async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
                     {**base, "keyframe_seconds": float(k), "seek_target_seconds": aim},
                     f"切り出し（尾側）に失敗しました（{src.name}）",
                 )
-                landed = await _verify_landing(
+                landed = await _landing_seconds(
                     tail, float(k), source.media_offset, frame,
                     {**base, "seek_target_seconds": aim, "part": str(tail)})
+                join = landed
+                if landed >= end - frame or landed <= start - frame:
+                    # 着地が範囲の外。そのtailを繋ぐと要求範囲と食い違うので使わず、範囲全体を
+                    # 焼く縮退へ倒す(黙って倒さず degenerate として報告する)。
+                    logger.warning(
+                        "smart cutの尾側が範囲外へ着地したため範囲全体を再encodeします"
+                        "（着地 %.3f秒 / 範囲 %.3f-%.3f秒）", landed, start, end,
+                        extra={"event": "clip.smart_tail_unusable",
+                               "ctx": {**base, "landed_seconds": round(landed, 3)}},
+                    )
+                    tail.unlink(missing_ok=True)
+                    k, join, degenerate = None, None, "tail_landed_outside"
+                elif abs(landed - start) < frame:
+                    # 着地が要求INそのもの。焼くheadが1 frameも作れないので、tailだけで足りる。
+                    degenerate = "start_on_keyframe"
             if degenerate != "start_on_keyframe":
-                until = end if k is None else float(k)
+                until = end if join is None else join
                 encoder = await _smart_encoder(codec)
                 quality = _mapped_quality(encoder, config.get_normalize_quality())
+                # headも原本を直接seekしない。粗く切った中間を1つ挟むことで、着地が検証済みの
+                # 位置から始まり、入力側-tの尺膨張(実測: 要求4.0秒が6.22秒)も踏まない。
+                rough = work / "head_rough.mp4"
+                rough_cut = await _copy_clip(source, start, until, rough, ("-c", "copy"))
+                seek = await _rough_seek(rough, rough_cut, start)
                 await concat.run(
-                    _head_args(source, params, start, until, head, encoder, quality),
+                    _head_args(rough, params, seek, until - start,
+                               head, encoder, quality, frame_size),
                     "clip.smart_head_failed",
-                    {**base, "until": until, "encoder": encoder, "quality": quality},
+                    {**base, "until": until, "encoder": encoder, "quality": quality,
+                     "rough_seek_seconds": round(seek, 3)},
                     f"切り出し（先頭GOPの再encode）に失敗しました（{src.name}）",
                 )
                 await _verify_has_video(head, {**base, "part": str(head)})
@@ -380,8 +461,12 @@ async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
                 await concat.check_compatible(
                     {p: hls_source.Source(p, (), False, 0.0) for p in parts},
                     event="clip.smart_incompatible")
+            # 窓を付けて繋ぐ。tailは原本から複製するので先頭にaudioだけの区間が付き、窓無しだと
+            # 接合点で映像だけが止まる(実録画で実測: 2.40秒と2.08秒の穴、尺も+2.5秒)。headは
+            # 自分で焼いた側で落とす前置きが無いので先頭から採り(keep_start)、終端だけ揃える。
+            windows = [await concat.window_part(p, keep_start=p is head) for p in parts]
             await concat.concat_parts(
-                parts, out, work / "parts.txt", event="clip.smart_concat_failed",
+                windows, out, work / "parts.txt", event="clip.smart_concat_failed",
                 message=f"切り出しの連結に失敗しました（{src.name}）")
         except BaseException:
             out.unlink(missing_ok=True)
@@ -391,8 +476,10 @@ async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
 
     size = out.stat().st_size
     actual = await _duration_seconds(out)
+    # 接合点は狙ったkeyframeではなく**実際に着地した位置**。狙いと違う所へ着いた回でも、
+    # headをそこまで焼いているので報告値と成果物は一致する。
     head_seconds = 0.0 if degenerate == "start_on_keyframe" else (
-        duration if k is None else float(k) - start)
+        duration if join is None else join - start)
     info = {
         "path": str(out),
         "filename": out.name,
@@ -409,9 +496,9 @@ async def _smart_clip(src: Path, start: float, end: float, out: Path) -> dict:
         "actual_start_seconds": start,
         "degenerate": degenerate,
         "head_seconds": round(head_seconds, 3),
-        # 接合点の原本上の時刻(media軸)。縮退single_gopでは接合そのものが無い。
-        "join_seconds": None if k is None else round(float(k), 3),
-        "copied_seconds": 0.0 if k is None else round(end - float(k), 3),
+        # 接合点の原本上の時刻(media軸)。縮退では接合そのものが無い。
+        "join_seconds": None if join is None else round(join, 3),
+        "copied_seconds": 0.0 if join is None else round(end - join, 3),
     }
     ctx = {**info, "landed_seconds": None if landed is None else round(landed, 3)}
     tolerance = config.get_clip_duration_tolerance_seconds()
@@ -469,45 +556,56 @@ async def make_clip(src: Path, start: float, end: float, label: Optional[str] = 
         # 正規化しないstream copyは従来どおり全streamをそのまま複製する(-c copy)。音声だけを
         # 差し替えるときだけ映像を名指しでcopyする。
         copy_args = (["-c:v", "copy", *audio_args] if normalize else ["-c", "copy"])
-        read_args = [*source.input_args, "-i", str(source.path)]
 
         cut = None
         if precise:
             codec = config.get_normalize_codec()
             encoder = await video_encoder_name(codec)
             quality = _mapped_quality(encoder, config.get_normalize_quality())
-            # -ssを-iの後ろに置くとdecodeしてから捨てるためframe精度で切れる。
-            codec_args = ["-ss", f"{start:.3f}", "-t", f"{duration:.3f}"] \
-                + _encoder_args(encoder, quality) + audio_args
-            cmd = ["ffmpeg", "-v", "error", "-y", *read_args, *codec_args,
-                   "-movflags", "+faststart", str(out)]
-            cancel.check_cancelled()
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            cancel.register_process(proc)
+            # **原本を直接復号しない**。copy経路で粗く切った短い中間を作り、そちらを再encode
+            # する。原本へ直接 ``-ss`` を渡す形は、どちらの側へ置いても壊れた(2.4時間の実録画で
+            # 実測。60秒の切り出しを開始位置を変えて測った):
+            #
+            # - 出力側 ``-ss``: ffmpegはseekせず要求位置まで復号しては捨てる。所要時間が
+            #   切り出す尺ではなく**開始位置に比例**した — 開始60秒で2.95s / 3600秒で26.55s /
+            #   7200秒で49.71s。encode自体は約2.5秒で、2時間地点では95%が捨てるための復号
+            # - 入力側 ``-ss``: 速いが、**HLSは位置によって前方のsegmentへ飛ぶ**。開始5000秒
+            #   では出力の映像が1.96秒遅れて始まり(先頭は音声だけ)、要求した頭を失った上に
+            #   末尾も同じだけ短くなった(映像58.08秒/音声60.03秒)。3点で再現
+            # - 入力側 ``-t``: 尺が膨らむ。要求60秒に対し出力82.24秒
+            # - 粗くseekしてfilterで切る形(``trim``): 配信中に解像度が変わる録画で
+            #   filter chainが途中で止まり、60秒の要求が37.76秒で終わった
+            #
+            # copy経路は狙点を要求以前のkeyframeへ寄せ、着地を毎回実測して検証する
+            # (:func:`tictok.media.concat.cut_part`)。その中間は数秒ぶんの前置きしか持たない
+            # ので、そこからの再encodeは**開始位置に依らず**要求した尺ぶんの復号で済む
+            # (実測: 6点すべてで1.75〜2.31秒、映像59.93〜60.00秒)。
+            work = Path(tempfile.mkdtemp(prefix=".precise_", dir=out.parent))
             try:
-                _, stderr = await proc.communicate()
-            finally:
-                cancel.forget_process(proc)
-            if cancel.is_cancelled():
+                rough = work / "rough.mp4"
+                rough_cut = await _copy_clip(source, float(start), float(end), rough,
+                                             ("-c", "copy"))
+                # 中間は[要求-前置き, 要求終端]。前置きだけを出力側-ssで捨てる。中間は短いので
+                # ここでの復号は安く、出力側-ssは要求位置ちょうどから始まる。
+                seek = await _rough_seek(rough, rough_cut, float(start))
+                cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(rough),
+                       "-ss", f"{seek:.3f}", "-t", f"{duration:.3f}",
+                       *_encoder_args(encoder, quality), *audio_args,
+                       "-movflags", "+faststart", str(out)]
+                await concat.run(
+                    cmd, "clip.failed",
+                    {"src": str(src), "start": start, "end": end, "precise": precise,
+                     "encoder": encoder, "rough_seek_seconds": round(seek, 3),
+                     **audio_norm.describe(normalize)},
+                    f"{src.name} の切り抜きの書き出しに失敗しました"
+                    f"（{start:.2f}-{end:.2f}）")
+            except BaseException:
                 out.unlink(missing_ok=True)
-                cancel.check_cancelled()
-            if proc.returncode != 0 or not out.is_file():
-                message = (stderr or b"").decode("utf-8", "replace").strip()
-                logger.error(
-                    "%s の切り抜きの書き出しに失敗しました（%.2f-%.2f）", src.name, start, end,
-                    extra={"event": "clip.failed",
-                           "ctx": {"src": str(src), "start": start, "end": end,
-                                   "precise": precise, "encoder": encoder,
-                                   **audio_norm.describe(normalize),
-                                   "returncode": proc.returncode,
-                                   "stderr": message[:2000]}},
-                )
-                raise RuntimeError(f"切り出しに失敗しました: {message[:300]}")
+                raise
+            finally:
+                shutil.rmtree(work, ignore_errors=True)
+            if not out.is_file():
+                raise RuntimeError("切り出しは成功しましたが出力fileがありません。")
         else:
             encoder = "copy"
             cut = await _copy_clip(source, float(start), float(end), out,

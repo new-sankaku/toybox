@@ -547,6 +547,17 @@ class MaintenanceMixin:
                        "ctx": {"table": "media_job_queue",
                                "column": "not_before,deferred_since"}},
             )
+        if "stages_json" not in media_job_columns:
+            # 段階の遷移履歴。既存行は空listで入る(過ぎた実行の段階は復元できない — log
+            # にしか残っていないので、ここで推測して埋めると出所の無い記録になる)。
+            self._conn.execute(
+                "ALTER TABLE media_job_queue ADD COLUMN stages_json TEXT NOT NULL DEFAULT '[]'"
+            )
+            logger.info(
+                "media_job_queue表にstages_json columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "media_job_queue", "column": "stages_json"}},
+            )
         if "sweep" not in media_job_columns:
             # 起動時sweepが自動で積んだ行の目印。既存行は人の投入として0で入る(実際、この列が
             # 無かった頃に積まれたsweep行はpackだけで、人の投入と同じ扱いで走っていた)。

@@ -246,6 +246,33 @@ class TranscriptsMixin:
             ).fetchone()
         return dict(row) if row else None
 
+    def search_hit_times(self, hit_ids: list) -> dict:
+        """id -> {video_time, end_time} を引く。意味検索が位置を都度解決するのに使う。
+
+        意味検索は本文とvectorを自前のindexへ持つが、**秒だけはここから引き直す**。
+        index側にも構築時の秒が入っているものの、文字起こしのやり直しや時間軸の張り直しで
+        search_hits側だけが動くと、意味検索だけが古い軸を名乗り続けるため
+        (実測: 134 group / 最大約20分のズレ)。存在しないidは戻り値に現れない — 呼び出し側は
+        「indexが指す行はもう無い」= その結果を出せない、として扱うこと。
+
+        集計read専用の接続で流す(search_hitsはbufferを経由せず即commitされる)。"""
+        out: dict = {}
+        if not hit_ids:
+            return out
+        reader = self._read_connection()
+        # SQLiteの変数上限(既定999)に触れないよう分割する。意味検索は1回で数百idを引く。
+        for start in range(0, len(hit_ids), 500):
+            chunk = [int(h) for h in hit_ids[start : start + 500]]
+            rows = reader.execute(
+                "SELECT id, video_time, end_time FROM search_hits WHERE id IN (%s)"
+                % ",".join("?" * len(chunk)),
+                chunk,
+            ).fetchall()
+            for row in rows:
+                out[row["id"]] = {"video_time": row["video_time"],
+                                  "end_time": row["end_time"]}
+        return out
+
     def search_hit_groups(self) -> list:
         """(recording_id, source)ごとの件数と最大id。意味検索の差分build判定に使う。
 
