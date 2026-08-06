@@ -259,7 +259,12 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   lines = lines.slice(0, maxLines);
   if (lines.length === 0) { return null; }
 
-  const bleedRatio = distortBleedRatio(distort);
+  const tf = spec && spec.transform ? spec.transform : null;
+  const skewAllow = tf && tf.skewX ? Math.abs(tf.skewX) : 0;
+  const rotAllow = tf && tf.rotate ? Math.abs(tf.rotate) : 0;
+  const strokeAllow = spec && spec.strokes && spec.strokes.length > 0 ? spec.strokes[0].width : 0;
+  const bleedRatio = distortBleedRatio(distort) + strokeAllow;
+  const lhFactor = slot.decor === 'title' ? LINE_HEIGHT_TIGHT : LINE_HEIGHT;
   for (let pass = 0; pass < 4; pass++) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
     let widest = 0;
@@ -267,7 +272,8 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size);
       if (w > widest) { widest = w; }
     }
-    const need = widest + bleedRatio * size * 2;
+    const blockH = size * lhFactor * lines.length;
+    const need = widest + bleedRatio * size * 2 + skewAllow * blockH + rotAllow * (widest + blockH);
     if (need <= maxWidth || size <= minSize || !(need > 0)) { break; }
     size = Math.max(minSize, size * (maxWidth / need));
   }

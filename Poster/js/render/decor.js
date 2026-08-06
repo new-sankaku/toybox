@@ -34,7 +34,7 @@ const GLYPH_SHAPES = ['circle', 'square', 'roundRect', 'diamond', 'hexagon', 'el
 const PATTERN_KINDS = ['dots', 'grid', 'diagonal', 'crosshatch', 'checker'];
 
 const AXES = [
-  { id: 'fill.solid', group: 'fill', cost: 4, w: [5, 3, 5, 2, 2, 4] },
+  { id: 'fill.solid', group: 'fill', cost: 6, w: [5, 3, 5, 2, 2, 4] },
   { id: 'fill.linear', group: 'fill', cost: 8, w: [3, 5, 2, 5, 4, 4] },
   { id: 'fill.duotone', group: 'fill', cost: 10, w: [1, 2, 0.5, 3, 1, 2] },
   { id: 'fill.metallic', group: 'fill', cost: 16, w: [3, 1, 3, 0.5, 5, 2], minLevel: 0.5 },
@@ -44,14 +44,14 @@ const AXES = [
   { id: 'fill.image', group: 'fill', cost: 18, w: [2.4, 1.2, 1, 0.6, 2, 1.4], minLevel: 0.5, need: 'source' },
   { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [1.6, 1, 0.8, 1.2, 1.4, 1.6], minLevel: 0.5 },
 
-  { id: 'stroke.single', group: 'stroke', cost: 6, w: [3, 3, 3, 2, 1.5, 1.5] },
+  { id: 'stroke.single', group: 'stroke', cost: 9, w: [3, 3, 3, 2, 1.5, 1.5] },
   { id: 'stroke.double', group: 'stroke', cost: 12, w: [1, 5, 0.8, 6, 4, 5] },
   { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.2, 1, 0.2, 1.2, 5, 4], minLevel: 0.5 },
 
-  { id: 'glow.soft', group: 'glow', cost: 8, w: [3, 3, 1, 6, 3, 2.5] },
+  { id: 'glow.soft', group: 'glow', cost: 11, w: [3, 3, 1, 6, 3, 2.5] },
   { id: 'glow.neon', group: 'glow', cost: 16, w: [0.8, 1.6, 0.3, 4, 2.6, 3], minLevel: 0.5 },
 
-  { id: 'shadow.soft', group: 'shadow', cost: 6, w: [3, 5, 3, 4, 2, 2] },
+  { id: 'shadow.soft', group: 'shadow', cost: 9, w: [3, 5, 3, 4, 2, 2] },
   { id: 'shadow.hard', group: 'shadow', cost: 8, w: [1, 1.4, 0.6, 0.8, 4, 5] },
   { id: 'shadow.long', group: 'shadow', cost: 14, w: [0.8, 0.6, 0.3, 0.5, 3, 3], minLevel: 0.5 },
   { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.6, 0.8, 0.2, 0.6, 4, 3.4], minLevel: 0.5 },
@@ -68,19 +68,19 @@ const AXES = [
 
   { id: 'distort.arc', group: 'distort', cost: 10, w: [1, 2.4, 0.4, 2.6, 1.6, 2], minLevel: 0.5 },
   { id: 'distort.wave', group: 'distort', cost: 10, w: [0.6, 2.2, 0.3, 3, 1.2, 2.2], minLevel: 0.5 },
-  { id: 'distort.jitter', group: 'distort', cost: 8, w: [1, 1.6, 0.6, 1.8, 2, 3] },
+  { id: 'distort.jitter', group: 'distort', cost: 10, w: [1, 1.6, 0.6, 1.8, 2, 3] },
   { id: 'distort.trapezoid', group: 'distort', cost: 12, w: [1.4, 1, 0.4, 0.8, 2.6, 2], minLevel: 0.5 },
   { id: 'distort.bulge', group: 'distort', cost: 10, w: [0.6, 1.8, 0.3, 1.6, 1.6, 2.4], minLevel: 0.5 },
   { id: 'distort.fan', group: 'distort', cost: 12, w: [0.6, 1.6, 0.3, 1.6, 1.2, 1.8], minLevel: 0.5 },
-  { id: 'distort.stagger', group: 'distort', cost: 8, w: [0.8, 1.4, 0.4, 1.2, 1.6, 2.4] },
-  { id: 'distort.alternate', group: 'distort', cost: 8, w: [0.6, 1.6, 0.4, 1.8, 1.2, 2.2] },
-  { id: 'distort.ramp', group: 'distort', cost: 8, w: [1.2, 1.2, 0.6, 1, 1.6, 1.8] },
-  { id: 'distort.shear', group: 'distort', cost: 8, w: [0.8, 1.2, 0.3, 1, 1.8, 2.2] },
+  { id: 'distort.stagger', group: 'distort', cost: 10, w: [0.8, 1.4, 0.4, 1.2, 1.6, 2.4] },
+  { id: 'distort.alternate', group: 'distort', cost: 10, w: [0.6, 1.6, 0.4, 1.8, 1.2, 2.2] },
+  { id: 'distort.ramp', group: 'distort', cost: 10, w: [1.2, 1.2, 0.6, 1, 1.6, 1.8] },
+  { id: 'distort.shear', group: 'distort', cost: 10, w: [0.8, 1.2, 0.3, 1, 1.8, 2.2] },
   { id: 'distort.dropCap', group: 'distort', cost: 10, w: [1, 1.2, 2.4, 1, 0.8, 1.6], minLevel: 0.5 },
   { id: 'distort.shatter', group: 'distort', cost: 12, w: [0.8, 0.8, 0.3, 0.6, 2.2, 2], minLevel: 0.5 },
 
   { id: 'fx.bevel', group: 'fx', cost: 10, w: [1, 1.2, 0.4, 0.8, 4, 2.6], minLevel: 0.5 },
-  { id: 'fx.innerLine', group: 'fx', cost: 6, w: [1.6, 1, 1.4, 0.8, 2.2, 1.6], minLevel: 0.35 },
+  { id: 'fx.innerLine', group: 'fx', cost: 9, w: [1.6, 1, 1.4, 0.8, 2.2, 1.6], minLevel: 0.35 },
   { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [1, 0.6, 0.2, 0.6, 2, 2.2], minLevel: 0.5 },
   { id: 'fx.misregister', group: 'fx', cost: 12, w: [1.4, 0.8, 0.6, 0.6, 1.6, 2], minLevel: 0.5 },
   { id: 'fx.splitCut', group: 'fx', cost: 12, w: [1.2, 0.6, 0.4, 0.4, 2, 1.8], minLevel: 0.5 },
@@ -88,14 +88,14 @@ const AXES = [
   { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [1.6, 0.6, 0.8, 0.4, 1.6, 1.4], minLevel: 0.5 },
   { id: 'fx.torn', group: 'fx', cost: 10, w: [1.2, 0.6, 1, 0.4, 1.2, 1.2], minLevel: 0.5 },
 
-  { id: 'orn.underline', group: 'orn', cost: 6, w: [2, 1.4, 3.4, 0.8, 1, 1.8] },
-  { id: 'orn.overline', group: 'orn', cost: 6, w: [1.2, 0.8, 1.6, 0.6, 0.8, 1] },
-  { id: 'orn.boten', group: 'orn', cost: 8, w: [0.4, 0.6, 3.4, 0.8, 0.3, 1.2], minLevel: 0.35 },
+  { id: 'orn.underline', group: 'orn', cost: 9, w: [2, 1.4, 3.4, 0.8, 1, 1.8] },
+  { id: 'orn.overline', group: 'orn', cost: 9, w: [1.2, 0.8, 1.6, 0.6, 0.8, 1] },
+  { id: 'orn.boten', group: 'orn', cost: 10, w: [0.4, 0.6, 3.4, 0.8, 0.3, 1.2], minLevel: 0.35 },
 
-  { id: 'tf.skew', group: 'tf', cost: 4, w: [0.8, 2.4, 0.3, 1, 3, 3.4], minLevel: 0.5 },
-  { id: 'tf.rotate', group: 'tf', cost: 3, w: [0.8, 2, 0.4, 2.4, 1.8, 3] },
-  { id: 'tf.condense', group: 'tf', cost: 4, w: [3, 1, 2, 0.6, 3.4, 2] },
-  { id: 'tf.expand', group: 'tf', cost: 4, w: [0.6, 2.2, 0.4, 2.4, 0.6, 1.6] }
+  { id: 'tf.skew', group: 'tf', cost: 9, w: [0.8, 2.4, 0.3, 1, 3, 3.4], minLevel: 0.5 },
+  { id: 'tf.rotate', group: 'tf', cost: 8, w: [0.8, 2, 0.4, 2.4, 1.8, 3] },
+  { id: 'tf.condense', group: 'tf', cost: 8, w: [3, 1, 2, 0.6, 3.4, 2] },
+  { id: 'tf.expand', group: 'tf', cost: 8, w: [0.6, 2.2, 0.4, 2.4, 0.6, 1.6] }
 ];
 
 const GROUP_CAP = { fill: 1, stroke: 1, glow: 1, shadow: 1, plate: 1, distort: 2, fx: 2, orn: 2, tf: 3 };
