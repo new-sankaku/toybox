@@ -246,14 +246,25 @@ const LOOKS = {
   }
 };
 
+function tintRgb(tint) {
+  if (!tint) { return null; }
+  if (Array.isArray(tint)) { return tint.slice(); }
+  if (Array.isArray(tint.rgb)) { return tint.rgb.slice(); }
+  return null;
+}
+
 function applyColorPlanTints(spec, colorPlan) {
   const tints = colorPlan.tints;
   if (!tints) { return; }
-  if (tints.shadow) { spec.shadowTint = tints.shadow.slice(); }
-  if (tints.highlight) { spec.highlightTint = tints.highlight.slice(); }
-  if (spec.duotone && tints.duotoneA && tints.duotoneB) {
-    spec.duotone.dark = tints.duotoneA.slice();
-    spec.duotone.light = tints.duotoneB.slice();
+  const shadow = tintRgb(tints.shadow);
+  const highlight = tintRgb(tints.highlight);
+  const duoA = tintRgb(tints.duotoneA);
+  const duoB = tintRgb(tints.duotoneB);
+  if (shadow) { spec.shadowTint = shadow; }
+  if (highlight) { spec.highlightTint = highlight; }
+  if (spec.duotone && duoA && duoB) {
+    spec.duotone.dark = duoA;
+    spec.duotone.light = duoB;
   }
   spec.tintSource = 'colorPlan';
 }

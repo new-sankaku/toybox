@@ -1040,6 +1040,29 @@ function newCanvas(w, h) {
   return cv;
 }
 
+const SCRATCH = [];
+
+function scratchCtx(slot, w, h) {
+  const e = SCRATCH[slot];
+  if (!e || e.cv.width < w || e.cv.height < h || e.cv.width * e.cv.height > w * h * 4) {
+    const cv = newCanvas(w, h);
+    if (!cv) { return null; }
+    const ctx = cv.getContext('2d');
+    if (!ctx) { return null; }
+    SCRATCH[slot] = { cv: cv, ctx: ctx };
+    return SCRATCH[slot];
+  }
+  e.ctx.setTransform(1, 0, 0, 1, 0, 0);
+  e.ctx.globalCompositeOperation = 'source-over';
+  e.ctx.globalAlpha = 1;
+  e.ctx.clearRect(0, 0, w, h);
+  return e;
+}
+
+function blit(ctx, cv, mask, dx, dy) {
+  ctx.drawImage(cv, 0, 0, mask.pw, mask.ph, mask.x + dx, mask.y + dy, mask.w, mask.h);
+}
+
 function buildMask(ctx, emitter, box, pad) {
   let sx = 1;
   let sy = 1;
@@ -1054,56 +1077,55 @@ function buildMask(ctx, emitter, box, pad) {
   const w = Math.ceil(bw * sx);
   const h = Math.ceil(bh * sy);
   if (w < 2 || h < 2 || w * h > MASK_PIXEL_LIMIT) { return null; }
-  const cv = newCanvas(w, h);
-  if (!cv) { return null; }
-  const oc = cv.getContext('2d');
-  if (!oc) { return null; }
+  const e = scratchCtx(0, w, h);
+  if (!e) { return null; }
+  const oc = e.ctx;
   const x = box.x - pad;
   const y = box.y - pad;
+  oc.save();
   oc.scale(sx, sy);
   oc.translate(-x, -y);
   oc.fillStyle = '#000000';
   emitter(oc, 'fill');
-  return { cv: cv, x: x, y: y, w: bw, h: bh, sx: sx, sy: sy };
+  oc.restore();
+  return { cv: e.cv, x: x, y: y, w: bw, h: bh, pw: w, ph: h, sx: sx, sy: sy };
 }
 
-function tintedMask(mask, rgb, alpha) {
-  const cv = newCanvas(mask.cv.width, mask.cv.height);
-  if (!cv) { return null; }
-  const oc = cv.getContext('2d');
-  if (!oc) { return null; }
-  oc.drawImage(mask.cv, 0, 0);
+function tintedMask(mask, rgb, alpha, slot) {
+  const e = scratchCtx(slot, mask.pw, mask.ph);
+  if (!e) { return null; }
+  const oc = e.ctx;
+  oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
   oc.globalCompositeOperation = 'source-in';
   oc.fillStyle = rgbToCss(rgb, alpha);
-  oc.fillRect(0, 0, cv.width, cv.height);
-  return cv;
+  oc.fillRect(0, 0, mask.pw, mask.ph);
+  oc.globalCompositeOperation = 'source-over';
+  return e.cv;
 }
 
-function maskedLayer(mask, painter) {
-  const cv = newCanvas(mask.cv.width, mask.cv.height);
-  if (!cv) { return null; }
-  const oc = cv.getContext('2d');
-  if (!oc) { return null; }
+function maskedLayer(mask, painter, slot) {
+  const e = scratchCtx(slot, mask.pw, mask.ph);
+  if (!e) { return null; }
+  const oc = e.ctx;
   oc.save();
   oc.scale(mask.sx, mask.sy);
   oc.translate(-mask.x, -mask.y);
   painter(oc);
   oc.restore();
   oc.globalCompositeOperation = 'destination-in';
-  oc.drawImage(mask.cv, 0, 0);
-  return cv;
+  oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
+  oc.globalCompositeOperation = 'source-over';
+  return e;
 }
 
-function eraseNoise(cv, spec, size, scale) {
-  const oc = cv.getContext('2d');
-  if (!oc) { return; }
+function eraseNoise(oc, pw, ph, spec, size, scale) {
   oc.save();
   oc.globalCompositeOperation = 'destination-out';
   oc.fillStyle = '#000000';
   const step = Math.max(3, size * 0.09 * scale);
   const amp = spec.amount * size * scale;
-  const cols = Math.ceil(cv.width / step);
-  const rows = Math.ceil(cv.height / step);
+  const cols = Math.ceil(pw / step);
+  const rows = Math.ceil(ph / step);
   const threshold = Math.min(0.9, 0.4 * spec.density);
   oc.beginPath();
   for (let i = 0; i < cols; i++) {
@@ -1118,15 +1140,13 @@ function eraseNoise(cv, spec, size, scale) {
   oc.restore();
 }
 
-function eraseTorn(cv, spec, size, scale) {
-  const oc = cv.getContext('2d');
-  if (!oc) { return; }
+function eraseTorn(oc, pw, ph, spec, size, scale) {
   oc.save();
   oc.globalCompositeOperation = 'destination-out';
   oc.fillStyle = '#000000';
   for (let i = 0; i < spec.count; i++) {
-    const x = hash01(spec.seed + i * 5.7) * cv.width;
-    const y = hash01(spec.seed + i * 13.1) * cv.height;
+    const x = hash01(spec.seed + i * 5.7) * pw;
+    const y = hash01(spec.seed + i * 13.1) * ph;
     const w = spec.amount * size * scale * (0.5 + hash01(spec.seed + i * 2.3));
     const h = spec.amount * size * scale * (0.5 + hash01(spec.seed + i * 9.9));
     oc.save();
@@ -1141,14 +1161,14 @@ function eraseTorn(cv, spec, size, scale) {
 function paintOffsetLayers(ctx, mask, layers, size) {
   for (let i = 0; i < layers.length; i++) {
     const l = layers[i];
-    const cv = tintedMask(mask, l.rgb, l.alpha);
+    const cv = tintedMask(mask, l.rgb, l.alpha, 1);
     if (!cv) { return; }
-    ctx.drawImage(cv, mask.x + l.dx * size, mask.y + l.dy * size, mask.w, mask.h);
+    blit(ctx, cv, mask, l.dx * size, l.dy * size);
   }
 }
 
 function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
-  const px = mask.cv.width * mask.cv.height;
+  const px = mask.pw * mask.ph;
   let n = steps;
   if (px > RAMP_THIRD_PIXELS) { n = Math.max(3, Math.round(steps / 3)); }
   else if (px > RAMP_HALF_PIXELS) { n = Math.max(3, Math.round(steps / 2)); }
@@ -1159,14 +1179,14 @@ function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
   const layers = [];
   for (let b = 0; b < buckets; b++) {
     const t = buckets > 1 ? b / (buckets - 1) : 0;
-    const cv = tintedMask(mask, blendRgb(near, far, t), alpha);
+    const cv = tintedMask(mask, blendRgb(near, far, t), alpha, 2 + b);
     if (!cv) { return; }
     layers.push(cv);
   }
   for (let i = n; i >= 1; i--) {
     const t = n > 1 ? (i - 1) / (n - 1) : 0;
     const idx = buckets > 1 ? Math.min(buckets - 1, Math.round(t * (buckets - 1))) : 0;
-    ctx.drawImage(layers[idx], mask.x + mx * size * i, mask.y + my * size * i, mask.w, mask.h);
+    blit(ctx, layers[idx], mask, mx * size * i, my * size * i);
   }
 }
 
@@ -1244,40 +1264,40 @@ function paintImageFill(oc, mask, fill) {
 }
 
 function paintKnockout(ctx, mask, regions, box, plate, size) {
-  const cv = newCanvas(mask.cv.width, mask.cv.height);
-  if (!cv) { return false; }
-  const oc = cv.getContext('2d');
-  if (!oc) { return false; }
+  const e = scratchCtx(7, mask.pw, mask.ph);
+  if (!e) { return false; }
+  const oc = e.ctx;
   oc.save();
   oc.scale(mask.sx, mask.sy);
   oc.translate(-mask.x, -mask.y);
   paintPlates(oc, regions, box, plate, size);
   oc.restore();
   oc.globalCompositeOperation = 'destination-out';
-  oc.drawImage(mask.cv, 0, 0);
-  ctx.drawImage(cv, mask.x, mask.y, mask.w, mask.h);
+  oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
+  oc.globalCompositeOperation = 'source-over';
+  blit(ctx, e.cv, mask, 0, 0);
   return true;
 }
 
 function paintReflection(ctx, mask, box, spec, size) {
-  const cv = newCanvas(mask.cv.width, mask.cv.height);
-  if (!cv) { return; }
-  const oc = cv.getContext('2d');
-  if (!oc) { return; }
-  oc.drawImage(mask.cv, 0, 0);
+  const e = scratchCtx(8, mask.pw, mask.ph);
+  if (!e) { return; }
+  const oc = e.ctx;
+  oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
   oc.globalCompositeOperation = 'source-in';
-  const g = oc.createLinearGradient(0, 0, 0, cv.height);
+  const g = oc.createLinearGradient(0, 0, 0, mask.ph);
   const rgb = spec.fill.stops[spec.fill.stops.length - 1].rgb;
   g.addColorStop(0, rgbToCss(rgb, 0));
   g.addColorStop(clamp01(1 - spec.reflection.fade), rgbToCss(rgb, 0));
   g.addColorStop(1, rgbToCss(rgb, spec.reflection.alpha));
   oc.fillStyle = g;
-  oc.fillRect(0, 0, cv.width, cv.height);
+  oc.fillRect(0, 0, mask.pw, mask.ph);
+  oc.globalCompositeOperation = 'source-over';
   const mirrorY = box.y + box.h + spec.reflection.gap * size;
   ctx.save();
   ctx.translate(0, mirrorY * 2);
   ctx.scale(1, -1);
-  ctx.drawImage(cv, mask.x, mask.y, mask.w, mask.h);
+  blit(ctx, e.cv, mask, 0, 0);
   ctx.restore();
 }
 
@@ -1407,11 +1427,11 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
         oc.fillStyle = makeFillStyle(oc, box, spec.fill);
         oc.fillRect(mask.x, mask.y, mask.w, mask.h);
       }
-    });
+    }, 6);
     if (layer) {
-      if (spec.roughEdge) { eraseNoise(layer, spec.roughEdge, size, maskScale); }
-      if (spec.torn) { eraseTorn(layer, spec.torn, size, maskScale); }
-      ctx.drawImage(layer, mask.x, mask.y, mask.w, mask.h);
+      if (spec.roughEdge) { eraseNoise(layer.ctx, mask.pw, mask.ph, spec.roughEdge, size, maskScale); }
+      if (spec.torn) { eraseTorn(layer.ctx, mask.pw, mask.ph, spec.torn, size, maskScale); }
+      blit(ctx, layer.cv, mask, 0, 0);
     }
     clearShadow(ctx);
   } else if (spec.splitCut) {
