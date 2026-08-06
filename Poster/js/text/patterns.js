@@ -184,7 +184,7 @@ export const PATTERNS = {
     ],
     extra: [
       'プレイ人数：{n:players}', 'オンライン対応 1〜{n:players}', 'セーブデータ数：{n:saves}',
-      '{n:languages}対応', '©{n:yearNo} {publisherName}'
+      '{n:languages}対応', '{systemWord}／{systemWord}'
     ]
   },
 
@@ -228,6 +228,6 @@ export const PATTERNS = {
       '出演 {person}　{makerName}',
       '出演 {person}\n{makerName}／{labelName}'
     ],
-    extra: ['{noticeWord}', '{noticeWord}／{n:code}', '{n:code}', '{formatWord}']
+    extra: ['{noticeWord}', '{noticeWord}／{n:code}', '{formatWord}', '{makerName}']
   }
 };

@@ -26,6 +26,9 @@ const SCALE_MAX = 3;
 const SY_MIN = 0.3;
 const SY_MAX = 2.4;
 const VERT_LATERAL_LIMIT = 0.3;
+const LATIN_TIER_MIN = 0.6;
+const LATIN_TIER_SCALE = 0.5;
+const TIER_LATIN_SYMBOLS = '()（）／/-–—.,:\'"’&+';
 
 function hash01(n) {
   let x = Math.sin(n * 12.9898) * 43758.5453;
@@ -204,13 +207,44 @@ function distortBleedRatio(d) {
   return b;
 }
 
-function scaledLineWidth(ctx, line, tracking, distort, size) {
+function scaledLineWidth(ctx, line, tracking, distort, size, tier) {
   let w = 0;
   for (let i = 0; i < line.length; i++) {
-    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size).s;
+    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size).s * tier;
   }
-  if (line.length > 1) { w += tracking * (line.length - 1); }
+  if (line.length > 1) { w += tracking * (line.length - 1) * tier; }
   return w;
+}
+
+function latinShare(line) {
+  let n = 0;
+  let total = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line.charAt(i);
+    const cls = charClass(ch);
+    if (cls === 'sp') { continue; }
+    total++;
+    if (cls === 'lat' || cls === 'num') { n++; }
+    else if (cls === 'sym' && TIER_LATIN_SYMBOLS.indexOf(ch) >= 0) { n++; }
+  }
+  return total === 0 ? 0 : n / total;
+}
+
+function lineTiers(lines, tiered) {
+  const t = [];
+  for (let i = 0; i < lines.length; i++) {
+    t.push(tiered && i > 0 && latinShare(lines[i]) >= LATIN_TIER_MIN ? LATIN_TIER_SCALE : 1);
+  }
+  return t;
+}
+
+function blockHeight(lines, tiers, size, lhFactor, metrics) {
+  if (lines.length === 0) { return 0; }
+  let h = metrics.ascent * tiers[0] + metrics.descent * tiers[lines.length - 1];
+  for (let i = 1; i < lines.length; i++) {
+    h += size * lhFactor * (tiers[i - 1] + tiers[i]) / 2;
+  }
+  return h;
 }
 
 function pushRegion(map, key, rect) {
@@ -262,50 +296,63 @@ function boundsOf(glyphs) {
 function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   const slot = args.slot;
   const distort = spec ? spec.distort : null;
+  const isTitle = slot.decor === 'title';
   const maxLines = slot.maxLines > 0 ? slot.maxLines : 1;
   const tracking = slot.tracking > 0 ? slot.tracking : 0;
   const maxWidth = (args.rect.w * args.W) / scaleX;
+  const availH = args.rect.h * args.H;
   const minSize = Math.max(MIN_FONT_PX, args.startSize * MIN_SIZE_RATIO);
-  let size = args.startSize;
-  let lines = null;
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-  for (;;) {
-    ctx.font = fontSpecOf(args.weight, size, args.fontCss);
-    lines = wrapText(ctx, args.text, maxWidth, tracking * size);
-    if (lines.length <= maxLines || size <= minSize) { break; }
-    size = Math.max(minSize, size * SHRINK_STEP);
-  }
-  lines = lines.slice(0, maxLines);
-  if (lines.length === 0) { return null; }
-
+  const lhFactor = isTitle ? LINE_HEIGHT_TIGHT : LINE_HEIGHT;
   const tf = spec && spec.transform ? spec.transform : null;
   const skewAllow = tf && tf.skewX ? Math.abs(tf.skewX) : 0;
   const rotAllow = tf && tf.rotate ? Math.abs(tf.rotate) : 0;
   const strokeAllow = spec && spec.strokes && spec.strokes.length > 0 ? spec.strokes[0].width : 0;
   const bleedRatio = distortBleedRatio(distort) + strokeAllow;
-  const lhFactor = slot.decor === 'title' ? LINE_HEIGHT_TIGHT : LINE_HEIGHT;
-  for (let pass = 0; pass < 4; pass++) {
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+
+  let size = args.startSize;
+  let lines = [];
+  let tiers = [];
+  let metrics = null;
+  let blockH = 0;
+
+  for (let pass = 0; pass < 18; pass++) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
+    lines = wrapText(ctx, args.text, maxWidth, tracking * size);
+    let over = 1;
+    if (lines.length > maxLines) {
+      over = 1 / SHRINK_STEP;
+      lines = lines.slice(0, maxLines);
+    }
+    if (lines.length === 0) { return null; }
+    tiers = lineTiers(lines, isTitle);
+    metrics = blockMetrics(ctx, lines.join(''), size);
     let widest = 0;
     for (let i = 0; i < lines.length; i++) {
-      const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size);
+      const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size, tiers[i]);
       if (w > widest) { widest = w; }
     }
-    const blockH = size * lhFactor * lines.length;
-    const need = widest + bleedRatio * size * 2 + skewAllow * blockH + rotAllow * (widest + blockH);
-    if (need <= maxWidth || size <= minSize || !(need > 0)) { break; }
-    size = Math.max(minSize, size * (maxWidth / need));
+    blockH = blockHeight(lines, tiers, size, lhFactor, metrics);
+    const needW = widest + bleedRatio * size * 2 + skewAllow * blockH + rotAllow * (widest + blockH);
+    if (needW > maxWidth && maxWidth > 0) { over = Math.max(over, needW / maxWidth); }
+    if (blockH > availH && availH > 0) { over = Math.max(over, blockH / availH); }
+    if (over <= 1.002 || size <= minSize) { break; }
+    size = Math.max(minSize, size / over);
   }
-  ctx.font = fontSpecOf(args.weight, size, args.fontCss);
 
-  const lh = size * (slot.decor === 'title' ? LINE_HEIGHT_TIGHT : LINE_HEIGHT);
-  const metrics = blockMetrics(ctx, lines.join(''), size);
-  const totalH = lh * (lines.length - 1) + metrics.ascent + metrics.descent;
-  const availH = args.rect.h * args.H;
+  ctx.font = fontSpecOf(args.weight, size, args.fontCss);
+  while (lines.length > 1 && blockH > availH) {
+    lines = lines.slice(0, lines.length - 1);
+    tiers = lineTiers(lines, isTitle);
+    metrics = blockMetrics(ctx, lines.join(''), size);
+    blockH = blockHeight(lines, tiers, size, lhFactor, metrics);
+  }
+  if (lines.length === 0) { return null; }
+
   const rectTop = args.rect.y * args.H;
-  let top = slot.align === 'top' ? rectTop : rectTop + (availH - totalH) / 2;
+  let top = slot.align === 'top' ? rectTop : rectTop + (availH - blockH) / 2;
   if (top < rectTop) { top = rectTop; }
 
   const rectLeft = args.rect.x * args.W;
@@ -319,14 +366,16 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
 
   const glyphs = [];
   let phrase = 0;
+  let baseY = top + metrics.ascent * tiers[0];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size);
+    const tier = tiers[i];
+    if (i > 0) { baseY += size * lhFactor * (tiers[i - 1] + tier) / 2; }
+    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier);
     let x = anchorX;
     if (align === 'center') { x -= lineW / 2; }
     else if (align === 'right') { x -= lineW; }
-    const baseY = top + metrics.ascent + i * lh;
     let prevClass = null;
     phrase++;
     for (let j = 0; j < line.length; j++) {
@@ -335,19 +384,21 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
       const mods = glyphMods(distort, j, line.length, size);
-      const adv = charWidth(ctx, ch) * mods.s;
-      const cx = x + adv / 2 + mods.dx;
-      const cy = baseY + mods.dy;
-      const asc = metrics.ascent * mods.s * mods.sy;
-      const desc = metrics.descent * mods.s * mods.sy;
+      const sx = mods.s * tier;
+      const sy = mods.s * mods.sy * tier;
+      const adv = charWidth(ctx, ch) * sx;
+      const cx = x + adv / 2 + mods.dx * tier;
+      const cy = baseY + mods.dy * tier;
+      const asc = metrics.ascent * sy;
+      const desc = metrics.descent * sy;
+      const bw = Math.max(adv, size * 0.12);
       glyphs.push({
         ch: ch, cx: cx, cy: cy, adv: adv, line: i, phrase: phrase,
-        rot: mods.rot, shear: mods.shear, sx: mods.s, sy: mods.s * mods.sy,
+        rot: mods.rot, shear: mods.shear, sx: sx, sy: sy,
         blank: cls === 'sp',
-        bx: cx - Math.max(adv, size * 0.12) / 2, by: cy - asc,
-        bw: Math.max(adv, size * 0.12), bh: asc + desc
+        bx: cx - bw / 2, by: cy - asc, bw: bw, bh: asc + desc
       });
-      x += adv + tracking * size;
+      x += adv + tracking * size * tier;
     }
   }
 
@@ -358,7 +409,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
     ascent: metrics.ascent, descent: metrics.descent,
     textAlign: 'center', textBaseline: 'alphabetic', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    regions: collectRegions(glyphs), box: box
+    regions: collectRegions(glyphs), box: box, blockH: blockH, availH: availH
   };
 }
 
@@ -396,6 +447,11 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
   const track = size * trackRatio;
   const cell = size + track;
   const colW = size * COL_ADVANCE;
+  const perColLimit = Math.max(1, Math.floor((availH + track) / cell));
+  for (let i = 0; i < cols.length; i++) {
+    if (cols[i].length > perColLimit) { cols[i] = cols[i].substring(0, perColLimit); }
+  }
+  while (cols.length > 1 && cols.length * colW > availW) { cols = cols.slice(0, cols.length - 1); }
   const blockW = cols.length * colW;
   const rectLeft = args.rect.x * args.W;
   const rectW = args.rect.w * args.W;
@@ -451,7 +507,7 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
     ascent: size / 2, descent: size / 2,
     textAlign: 'center', textBaseline: 'middle', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    regions: collectRegions(glyphs), box: box
+    regions: collectRegions(glyphs), box: box, blockH: colH, availH: availH
   };
 }
 
@@ -555,6 +611,7 @@ export function drawSlot(ctx, args) {
 
   return {
     size: layout.size, box: layout.box, lines: layout.lines,
-    vertical: layout.vertical, regions: layout.regions
+    vertical: layout.vertical, regions: layout.regions,
+    blockH: layout.blockH, availH: layout.availH
   };
 }

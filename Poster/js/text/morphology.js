@@ -203,7 +203,7 @@ export function numeric(rng, kind, genre) {
   if (kind === 'minutes') { return String(rng.int(48, 186)) + '分'; }
   if (kind === 'bonusMinutes') { return String(rng.int(8, 72)) + '分'; }
   if (kind === 'hours') { return String(rng.int(2, 9)) + '時間'; }
-  if (kind === 'seconds') { return String(rng.int(38, 240)) + '分' + String(rng.int(1, 59)) + '秒'; }
+  if (kind === 'seconds') { return String(rng.int(32, 178)) + '分' + String(rng.int(1, 59)) + '秒'; }
   if (kind === 'track') { return '全' + String(rng.int(3, 18)) + 'トラック'; }
   if (kind === 'trackNo') { return String(rng.int(1, 18)); }
   if (kind === 'files') { return String(rng.int(4, 32)) + 'ファイル'; }

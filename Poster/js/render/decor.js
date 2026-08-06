@@ -16,7 +16,11 @@ const RAMP_THIRD_PIXELS = 900000;
 const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
 const GENRE_ORDER = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
-const BUDGET = { title: 100, accent: 55, plain: 20 };
+const BUDGET = { title: 60, accent: 34, plain: 14 };
+const GENRE_BUDGET = [1, 0.92, 0.34, 0.88, 1.05, 1.1];
+const DISTORT_RATE = [0.04, 0.08, 0, 0.08, 0.12, 0.14];
+const GLITCH_RATE = [0.02, 0.01, 0, 0.01, 0.08, 0.08];
+const PARTIAL_PLATE_RATE = 0.12;
 
 const METAL_PROFILE = {
   gold: [[0, -0.42], [0.14, 0.2], [0.3, 0.62], [0.44, 0.06], [0.5, -0.34], [0.57, 0.06], [0.72, 0.58], [0.88, 0.06], [1, -0.44]],
@@ -31,76 +35,84 @@ const METAL_TINT = {
 };
 
 const BOTEN_MARKS = ['●', '・', '◆', '○'];
-const PLATE_SHAPES = ['rect', 'roundRect', 'ellipse', 'hexagon', 'diamond', 'ribbon', 'speechBubble', 'brush', 'tornPaper', 'tag', 'underlineBar'];
-const GLYPH_SHAPES = ['circle', 'square', 'roundRect', 'diamond', 'hexagon', 'ellipse'];
+const PLATE_SHAPES = [
+  { v: 'rect', w: 5 }, { v: 'roundRect', w: 4 }, { v: 'ribbon', w: 1.2 },
+  { v: 'underlineBar', w: 0.8 }, { v: 'tag', w: 0.8 }, { v: 'brush', w: 0.5 },
+  { v: 'tornPaper', w: 0.5 }, { v: 'ellipse', w: 0.3 }, { v: 'hexagon', w: 0.2 },
+  { v: 'diamond', w: 0.2 }, { v: 'speechBubble', w: 0.3 }
+];
+const GLYPH_SHAPES = [
+  { v: 'roundRect', w: 3 }, { v: 'circle', w: 2 }, { v: 'square', w: 2 },
+  { v: 'ellipse', w: 1.5 }, { v: 'diamond', w: 0.6 }, { v: 'hexagon', w: 0.5 }
+];
 const PATTERN_KINDS = ['dots', 'grid', 'diagonal', 'crosshatch', 'checker'];
 
 const AXES = [
-  { id: 'fill.solid', group: 'fill', cost: 6, w: [5, 3, 5, 2, 2, 4] },
-  { id: 'fill.linear', group: 'fill', cost: 8, w: [3, 5, 2, 5, 4, 4] },
-  { id: 'fill.duotone', group: 'fill', cost: 10, w: [1, 2, 0.5, 3, 1, 2] },
-  { id: 'fill.metallic', group: 'fill', cost: 16, w: [3, 1, 3, 0.5, 5, 2], minLevel: 0.5 },
-  { id: 'fill.mirror', group: 'fill', cost: 16, w: [1.5, 0.6, 0.6, 0.4, 3, 1.2], minLevel: 0.5 },
-  { id: 'fill.stripe', group: 'fill', cost: 14, w: [1, 1.6, 0.5, 1.4, 1.6, 2.2], minLevel: 0.5 },
-  { id: 'fill.pattern', group: 'fill', cost: 14, w: [1.2, 1.2, 1, 1.6, 1.2, 1.6], minLevel: 0.5 },
-  { id: 'fill.image', group: 'fill', cost: 18, w: [2.4, 1.2, 1, 0.6, 2, 1.4], minLevel: 0.5, need: 'source' },
-  { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [1.6, 1, 0.8, 1.2, 1.4, 1.6], minLevel: 0.5 },
+  { id: 'fill.solid', group: 'fill', cost: 6, w: [4, 4, 8, 3, 2, 3] },
+  { id: 'fill.linear', group: 'fill', cost: 8, w: [2, 3, 0, 4, 3, 3] },
+  { id: 'fill.duotone', group: 'fill', cost: 10, w: [0.4, 0.8, 0, 1.2, 0.6, 1.2], minLevel: 0.5 },
+  { id: 'fill.metallic', group: 'fill', cost: 16, w: [0.8, 0, 0, 0, 4, 2.5], minLevel: 1 },
+  { id: 'fill.mirror', group: 'fill', cost: 16, w: [0.2, 0, 0, 0, 1.2, 0.8], minLevel: 1 },
+  { id: 'fill.stripe', group: 'fill', cost: 14, w: [0.2, 0.3, 0, 0.4, 0.6, 1], minLevel: 1 },
+  { id: 'fill.pattern', group: 'fill', cost: 14, w: [0.3, 0.3, 0, 0.5, 0.5, 0.8], minLevel: 1 },
+  { id: 'fill.image', group: 'fill', cost: 18, w: [0.8, 0.3, 0, 0.2, 0.8, 0.6], minLevel: 1, need: 'source' },
+  { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [0.3, 0.2, 0, 0.3, 0.5, 0.6], minLevel: 1 },
 
-  { id: 'stroke.single', group: 'stroke', cost: 9, w: [3, 3, 3, 2, 1.5, 1.5] },
-  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1, 5, 0.8, 6, 4, 5] },
-  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.2, 1, 0.2, 1.2, 5, 4], minLevel: 0.5 },
+  { id: 'stroke.single', group: 'stroke', cost: 9, w: [3, 4, 0, 4, 1, 1] },
+  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1.5, 0.8, 0, 1.2, 3.5, 3.5] },
+  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.1, 0, 0, 0.1, 2.5, 2.5], minLevel: 1 },
 
-  { id: 'glow.soft', group: 'glow', cost: 11, w: [3, 3, 1, 6, 3, 2.5] },
-  { id: 'glow.neon', group: 'glow', cost: 16, w: [0.8, 1.6, 0.3, 4, 2.6, 3], minLevel: 0.5 },
+  { id: 'glow.soft', group: 'glow', cost: 11, w: [0, 0, 0, 4, 0.4, 0] },
+  { id: 'glow.neon', group: 'glow', cost: 16, w: [0, 0, 0, 1.2, 0.3, 0.2], minLevel: 1 },
 
-  { id: 'shadow.soft', group: 'shadow', cost: 9, w: [3, 5, 3, 4, 2, 2] },
-  { id: 'shadow.hard', group: 'shadow', cost: 8, w: [1, 1.4, 0.6, 0.8, 4, 5] },
-  { id: 'shadow.long', group: 'shadow', cost: 14, w: [0.8, 0.6, 0.3, 0.5, 3, 3], minLevel: 0.5 },
-  { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.6, 0.8, 0.2, 0.6, 4, 3.4], minLevel: 0.5 },
+  { id: 'shadow.soft', group: 'shadow', cost: 9, w: [1.5, 3.5, 0, 0.8, 1, 0.8] },
+  { id: 'shadow.hard', group: 'shadow', cost: 8, w: [0.3, 0.4, 0, 0.2, 2.5, 4] },
+  { id: 'shadow.long', group: 'shadow', cost: 14, w: [1.6, 0.2, 0, 0.1, 0.8, 1], minLevel: 1 },
+  { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.1, 0.1, 0, 0.1, 1.6, 1.2], minLevel: 1 },
 
-  { id: 'plate.all', group: 'plate', cost: 10, w: [1.2, 2, 2.6, 1.4, 1.6, 3.4] },
-  { id: 'plate.line', group: 'plate', cost: 12, w: [1, 1.6, 2, 1.2, 1.4, 3] },
-  { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.8, 1.6, 1.2, 1.4, 1.4, 2.6], minLevel: 0.5 },
-  { id: 'plate.glyph', group: 'plate', cost: 18, w: [0.6, 2.2, 0.8, 2.6, 1.6, 2.4], minLevel: 0.5 },
-  { id: 'plate.head', group: 'plate', cost: 12, w: [1, 1.4, 1.6, 1.2, 1.2, 1.8], minLevel: 0.35 },
-  { id: 'plate.tail', group: 'plate', cost: 12, w: [0.8, 1.2, 1.2, 1, 1, 1.6], minLevel: 0.35 },
-  { id: 'plate.random', group: 'plate', cost: 16, w: [0.6, 1.4, 0.6, 1.6, 1.2, 2.2], minLevel: 0.5 },
-  { id: 'plate.marker', group: 'plate', cost: 10, w: [0.6, 2, 1.2, 1.6, 0.8, 2.4], minLevel: 0.35 },
-  { id: 'plate.knockout', group: 'plate', cost: 18, w: [1.6, 1.6, 1.4, 1, 1.6, 2.4], minLevel: 0.5 },
+  { id: 'plate.all', group: 'plate', cost: 10, w: [1.5, 2.5, 3, 2, 2, 3.5] },
+  { id: 'plate.line', group: 'plate', cost: 12, w: [1.5, 2.5, 2.5, 2, 2, 3] },
+  { id: 'plate.marker', group: 'plate', cost: 10, w: [0.3, 1.2, 0.6, 1, 0.4, 1.4], minLevel: 0.35 },
+  { id: 'plate.knockout', group: 'plate', cost: 18, w: [0.8, 0.8, 1.2, 0.5, 1, 1.5], minLevel: 0.5 },
+  { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.4, 0.6, 0.3, 0.6, 0.6, 1], minLevel: 1, partial: true },
+  { id: 'plate.head', group: 'plate', cost: 12, w: [0.4, 0.6, 0.5, 0.5, 0.5, 0.8], minLevel: 1, partial: true },
+  { id: 'plate.tail', group: 'plate', cost: 12, w: [0.3, 0.4, 0.3, 0.4, 0.4, 0.6], minLevel: 1, partial: true },
+  { id: 'plate.glyph', group: 'plate', cost: 18, w: [0.2, 0.5, 0.1, 0.6, 0.4, 0.6], minLevel: 1, partial: true },
+  { id: 'plate.random', group: 'plate', cost: 16, w: [0.1, 0.3, 0.1, 0.3, 0.3, 0.5], minLevel: 1, partial: true },
 
-  { id: 'distort.arc', group: 'distort', cost: 10, w: [1, 2.4, 0.4, 2.6, 1.6, 2], minLevel: 0.5 },
-  { id: 'distort.wave', group: 'distort', cost: 10, w: [0.6, 2.2, 0.3, 3, 1.2, 2.2], minLevel: 0.5 },
-  { id: 'distort.jitter', group: 'distort', cost: 10, w: [1, 1.6, 0.6, 1.8, 2, 3] },
-  { id: 'distort.trapezoid', group: 'distort', cost: 12, w: [1.4, 1, 0.4, 0.8, 2.6, 2], minLevel: 0.5 },
-  { id: 'distort.bulge', group: 'distort', cost: 10, w: [0.6, 1.8, 0.3, 1.6, 1.6, 2.4], minLevel: 0.5 },
-  { id: 'distort.fan', group: 'distort', cost: 12, w: [0.6, 1.6, 0.3, 1.6, 1.2, 1.8], minLevel: 0.5 },
-  { id: 'distort.stagger', group: 'distort', cost: 10, w: [0.8, 1.4, 0.4, 1.2, 1.6, 2.4] },
-  { id: 'distort.alternate', group: 'distort', cost: 10, w: [0.6, 1.6, 0.4, 1.8, 1.2, 2.2] },
-  { id: 'distort.ramp', group: 'distort', cost: 10, w: [1.2, 1.2, 0.6, 1, 1.6, 1.8] },
-  { id: 'distort.shear', group: 'distort', cost: 10, w: [0.8, 1.2, 0.3, 1, 1.8, 2.2] },
-  { id: 'distort.dropCap', group: 'distort', cost: 10, w: [1, 1.2, 2.4, 1, 0.8, 1.6], minLevel: 0.5 },
-  { id: 'distort.shatter', group: 'distort', cost: 12, w: [0.8, 0.8, 0.3, 0.6, 2.2, 2], minLevel: 0.5 },
+  { id: 'distort.arc', group: 'distort', cost: 10, w: [0, 0, 0, 0, 2, 2], minLevel: 1 },
+  { id: 'distort.wave', group: 'distort', cost: 10, w: [0.3, 1.5, 0, 1.5, 0.6, 1.2], minLevel: 1 },
+  { id: 'distort.jitter', group: 'distort', cost: 10, w: [0.4, 0.8, 0, 0.8, 1.2, 2], minLevel: 1 },
+  { id: 'distort.trapezoid', group: 'distort', cost: 12, w: [0.8, 0.4, 0, 0.3, 1.6, 1.2], minLevel: 1 },
+  { id: 'distort.bulge', group: 'distort', cost: 10, w: [0.2, 0.8, 0, 0.8, 0.8, 1.2], minLevel: 1 },
+  { id: 'distort.fan', group: 'distort', cost: 12, w: [0.1, 0.6, 0, 0.6, 0.4, 0.8], minLevel: 1 },
+  { id: 'distort.stagger', group: 'distort', cost: 10, w: [0.2, 0.5, 0, 0.5, 0.6, 1.2], minLevel: 1 },
+  { id: 'distort.alternate', group: 'distort', cost: 10, w: [0.2, 0.6, 0, 0.8, 0.5, 1.2], minLevel: 1 },
+  { id: 'distort.ramp', group: 'distort', cost: 10, w: [0.4, 0.5, 0, 0.4, 0.6, 0.8], minLevel: 1 },
+  { id: 'distort.shear', group: 'distort', cost: 10, w: [0.2, 0.4, 0, 0.3, 0.8, 1], minLevel: 1 },
+  { id: 'distort.dropCap', group: 'distort', cost: 10, w: [0.3, 0.3, 0, 0.3, 0.2, 0.6], minLevel: 1 },
+  { id: 'distort.shatter', group: 'distort', cost: 12, w: [0.1, 0.2, 0, 0.1, 1, 0.8], minLevel: 1 },
 
-  { id: 'fx.bevel', group: 'fx', cost: 10, w: [1, 1.2, 0.4, 0.8, 4, 2.6], minLevel: 0.5 },
-  { id: 'fx.innerLine', group: 'fx', cost: 9, w: [1.6, 1, 1.4, 0.8, 2.2, 1.6], minLevel: 0.35 },
-  { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [1, 0.6, 0.2, 0.6, 2, 2.2], minLevel: 0.5 },
-  { id: 'fx.misregister', group: 'fx', cost: 12, w: [1.4, 0.8, 0.6, 0.6, 1.6, 2], minLevel: 0.5 },
-  { id: 'fx.splitCut', group: 'fx', cost: 12, w: [1.2, 0.6, 0.4, 0.4, 2, 1.8], minLevel: 0.5 },
-  { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.8, 1.4, 0.3, 1.2, 2, 1.4], minLevel: 0.5 },
-  { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [1.6, 0.6, 0.8, 0.4, 1.6, 1.4], minLevel: 0.5 },
-  { id: 'fx.torn', group: 'fx', cost: 10, w: [1.2, 0.6, 1, 0.4, 1.2, 1.2], minLevel: 0.5 },
+  { id: 'fx.bevel', group: 'fx', cost: 10, w: [0, 0, 0, 0, 3.5, 2.5], minLevel: 1 },
+  { id: 'fx.innerLine', group: 'fx', cost: 9, w: [0.6, 0.3, 0, 0.2, 1.5, 1], minLevel: 0.5 },
+  { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [0.3, 0.1, 0, 0.1, 1.5, 1.8], minLevel: 1, glitch: true },
+  { id: 'fx.misregister', group: 'fx', cost: 12, w: [0.5, 0.2, 0, 0.1, 1.2, 1.5], minLevel: 1, glitch: true },
+  { id: 'fx.splitCut', group: 'fx', cost: 12, w: [0.3, 0.1, 0, 0.1, 0.8, 0.8], minLevel: 1, glitch: true },
+  { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.2, 0.4, 0, 0.4, 1, 0.6], minLevel: 1 },
+  { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [0.6, 0.1, 0, 0.1, 0.6, 0.5], minLevel: 1 },
+  { id: 'fx.torn', group: 'fx', cost: 10, w: [0.4, 0.1, 0.1, 0.1, 0.4, 0.4], minLevel: 1 },
 
-  { id: 'orn.underline', group: 'orn', cost: 9, w: [2, 1.4, 3.4, 0.8, 1, 1.8] },
-  { id: 'orn.overline', group: 'orn', cost: 9, w: [1.2, 0.8, 1.6, 0.6, 0.8, 1] },
-  { id: 'orn.boten', group: 'orn', cost: 10, w: [0.4, 0.6, 3.4, 0.8, 0.3, 1.2], minLevel: 0.35 },
+  { id: 'orn.underline', group: 'orn', cost: 9, w: [1.2, 1.2, 3, 0.6, 0.8, 1.6] },
+  { id: 'orn.overline', group: 'orn', cost: 9, w: [0.6, 0.6, 1.6, 0.4, 0.6, 0.8] },
+  { id: 'orn.boten', group: 'orn', cost: 10, w: [0, 0, 3.5, 0, 0, 0], minLevel: 0.35 },
 
-  { id: 'tf.skew', group: 'tf', cost: 9, w: [0.8, 2.4, 0.3, 1, 3, 3.4], minLevel: 0.5 },
-  { id: 'tf.rotate', group: 'tf', cost: 8, w: [0.8, 2, 0.4, 2.4, 1.8, 3] },
-  { id: 'tf.condense', group: 'tf', cost: 8, w: [3, 1, 2, 0.6, 3.4, 2] },
-  { id: 'tf.expand', group: 'tf', cost: 8, w: [0.6, 2.2, 0.4, 2.4, 0.6, 1.6] }
+  { id: 'tf.skew', group: 'tf', cost: 9, w: [0.3, 1.2, 0, 0.4, 1.6, 2.5], minLevel: 1 },
+  { id: 'tf.rotate', group: 'tf', cost: 8, w: [0.2, 0.8, 0, 0.6, 0.6, 1.6], minLevel: 1 },
+  { id: 'tf.condense', group: 'tf', cost: 8, w: [3, 0.2, 0.3, 0.2, 1.2, 3] },
+  { id: 'tf.expand', group: 'tf', cost: 8, w: [0.1, 0.6, 0, 0.8, 0.2, 0.4], minLevel: 0.5 }
 ];
 
-const GROUP_CAP = { fill: 1, stroke: 1, glow: 1, shadow: 1, plate: 1, distort: 2, fx: 2, orn: 2, tf: 3 };
+const GROUP_CAP = { fill: 1, stroke: 1, glow: 1, shadow: 1, plate: 1, distort: 1, fx: 2, orn: 2, tf: 2 };
 
 const RAW_CONFLICTS = {
   'fill.outlineOnly': ['plate.knockout', 'fx.reflection', 'fx.roughEdge', 'fx.splitCut', 'fx.bevel', 'fx.innerLine'],
@@ -225,6 +237,9 @@ function accentOf(rng, base, bgs, colorPlan) {
 
 function eligible(axis, state, ignoreBudget) {
   if (state.taken[axis.id]) { return false; }
+  if (axis.group === 'distort' && !state.allow.distort) { return false; }
+  if (axis.glitch && !state.allow.glitch) { return false; }
+  if (axis.partial && !state.allow.partialPlate) { return false; }
   if (!ignoreBudget && axis.cost > state.budget) { return false; }
   if (axis.minLevel && state.level < axis.minLevel) { return false; }
   if (axis.need === 'source' && !state.source) { return false; }
@@ -319,14 +334,14 @@ function buildPlate(rng, id, base, bgs, colorPlan, forceCover) {
   let shape;
   if (forceCover) { shape = rng.weighted([{ v: 'rect', w: 4 }, { v: 'roundRect', w: 2.5 }, { v: 'ribbon', w: 1 }, { v: 'tag', w: 1 }, { v: 'tornPaper', w: 1 }, { v: 'brush', w: 1 }, { v: 'hexagon', w: 0.6 }]); }
   else if (kind === 'marker') { shape = 'markerHighlight'; }
-  else if (perGlyph) { shape = rng.pick(GLYPH_SHAPES); }
+  else if (perGlyph) { shape = rng.weighted(GLYPH_SHAPES); }
   else if (kind === 'knockout') { shape = rng.weighted([{ v: 'rect', w: 4 }, { v: 'roundRect', w: 2 }, { v: 'ribbon', w: 1 }, { v: 'tag', w: 1 }]); }
   else if (kind === 'head' || kind === 'tail') { shape = rng.weighted([{ v: 'rect', w: 3 }, { v: 'roundRect', w: 2 }, { v: 'square', w: 2 }, { v: 'circle', w: 1.5 }, { v: 'tag', w: 1.5 }, { v: 'diamond', w: 1 }]); }
-  else { shape = rng.pick(PLATE_SHAPES); }
+  else { shape = rng.weighted(PLATE_SHAPES); }
 
   let scope = kind;
   if (kind === 'marker') { scope = 'line'; }
-  if (kind === 'knockout') { scope = rng.weighted([{ v: 'all', w: 4 }, { v: 'line', w: 2 }, { v: 'phrase', w: 1 }]); }
+  if (kind === 'knockout') { scope = rng.weighted([{ v: 'all', w: 4 }, { v: 'line', w: 2 }]); }
   if (forceCover && scope !== 'all' && scope !== 'line' && scope !== 'phrase') {
     scope = rng.weighted([{ v: 'all', w: 3 }, { v: 'line', w: 2 }, { v: 'phrase', w: 1 }]);
   }
@@ -528,10 +543,10 @@ function applyAxis(id, s) {
       spec.distort.arc = rng.range(0.04, 0.16) * (rng.chance(0.75) ? 1 : -1);
       break;
     case 'distort.wave':
-      spec.distort.wave = { amp: rng.range(0.04, 0.16), freq: rng.range(0.6, 2.2), phase: rng.range(0, Math.PI * 2) };
+      spec.distort.wave = { amp: rng.range(0.03, 0.09), freq: rng.range(0.5, 1.4), phase: rng.range(0, Math.PI * 2) };
       break;
     case 'distort.jitter':
-      spec.distort.jitter = { rot: rng.range(0.01, 0.07), off: rng.range(0.02, 0.1), scale: rng.range(0.04, 0.16) };
+      spec.distort.jitter = { rot: rng.range(0.006, 0.022), off: rng.range(0.006, 0.02), scale: rng.range(0.02, 0.05) };
       break;
     case 'distort.trapezoid':
       spec.distort.trapezoid = rng.range(0.12, 0.42) * (rng.chance(0.5) ? 1 : -1);
@@ -543,7 +558,7 @@ function applyAxis(id, s) {
       spec.distort.fan = rng.range(0.05, 0.2);
       break;
     case 'distort.stagger':
-      spec.distort.stagger = rng.range(0.05, 0.2) * (rng.chance(0.5) ? 1 : -1);
+      spec.distort.stagger = rng.range(0.04, 0.12) * (rng.chance(0.5) ? 1 : -1);
       break;
     case 'distort.alternate':
       spec.distort.alternate = rng.range(0.08, 0.28);
@@ -558,7 +573,7 @@ function applyAxis(id, s) {
       spec.distort.dropCap = rng.range(0.35, 0.9);
       break;
     case 'distort.shatter':
-      spec.distort.shatter = { ratio: rng.range(0.12, 0.35), amp: rng.range(0.08, 0.3) };
+      spec.distort.shatter = { ratio: rng.range(0.08, 0.2), amp: rng.range(0.05, 0.16) };
       break;
 
     case 'fx.bevel':
@@ -671,6 +686,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   const base = style.color.slice();
   const noisy = stats.std > NOISY_STD;
   const plan = colorPlan || null;
+  const gi = genreIndex(genre);
   const source = opts && opts.sourceCanvas ? opts.sourceCanvas : null;
 
   let bareBg = stats.rgb.slice();
@@ -692,8 +708,13 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
 
   const state = {
     rng: rng, spec: spec, base: base, bgs: [bareBg], colorPlan: plan, source: source,
-    gi: genreIndex(genre), level: level, taken: {}, chosen: [], groupCount: {},
-    budget: budgetOf(slot) * (0.65 + inten * 0.7)
+    gi: gi, level: level, taken: {}, chosen: [], groupCount: {},
+    allow: {
+      distort: level >= 1 && rng.chance(DISTORT_RATE[gi]),
+      glitch: level >= 1 && rng.chance(GLITCH_RATE[gi]),
+      partialPlate: level >= 1 && rng.chance(PARTIAL_PLATE_RATE)
+    },
+    budget: budgetOf(slot) * (0.65 + inten * 0.7) * GENRE_BUDGET[gi]
   };
 
   const fillPool = [];
