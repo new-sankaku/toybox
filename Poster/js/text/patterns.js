@@ -193,7 +193,7 @@ export const PATTERNS = {
       '{attrWord}{attrWord}{noun}',
       '{attrWord}／{attrWord}／{attrWord}',
       '{adj}{noun}、{n:scenes}連発',
-      '{seriesWord} 第{n:seriesNo}弾',
+      '{seriesWord}',
       '{noun}＆{tail}',
       '{noun}×{noun}×{noun}',
       '【{attrWord}】{noun}',

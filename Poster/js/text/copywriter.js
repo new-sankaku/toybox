@@ -103,6 +103,7 @@ const ROLE_PLAN = {
 const CATCH_LIMIT = { cinema: 28, gravure: 24, novel: 25, asmr: 30, game: 20, adult: 0 };
 const TITLE_BODY_LIMIT = { cinema: 16, gravure: 18, novel: 14, asmr: 30, game: 18, adult: 40 };
 const ROLE_LIMIT = { tag: 30, badge: 30, release: 40, extra: 30, sub: 34, cast: 44 };
+const LATIN_TITLE = { cinema: true, gravure: true, novel: false, asmr: false, game: true, adult: false };
 const MEGA_MIN = 56;
 const MEGA_MAX = 120;
 
@@ -184,6 +185,10 @@ function expandTitleSkeleton(rng, genre, skeleton, core) {
   const enParts = [];
   let ja = skeleton.replace(SLOT_RE, (m, key) => {
     const pair = resolveTitlePair(rng, genre, key, bindings, state);
+    if (key === 'noun' || key === 'noun.en') {
+      delete bindings.noun;
+      delete bindings['noun.en'];
+    }
     if (pair.en) { enParts.push(pair.en); }
     return pair.ja;
   });
@@ -222,7 +227,7 @@ function buildTitle(rng, genre, opts) {
   const styleOpts = {
     vertical: !!o.verticalTitle,
     genre: genre,
-    allowLatin: o.allowLatin !== false,
+    allowLatin: o.allowLatin !== false && LATIN_TITLE[genre],
     allowExclaim: o.allowExclaim !== false
   };
 
