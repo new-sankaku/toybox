@@ -29,7 +29,7 @@ const METAL_TINT = {
 };
 
 const BOTEN_MARKS = ['●', '・', '◆', '○'];
-const PLATE_SHAPES = ['rect', 'roundRect', 'circle', 'ellipse', 'square', 'hexagon', 'diamond', 'ribbon', 'speechBubble', 'brush', 'tornPaper', 'tag', 'underlineBar'];
+const PLATE_SHAPES = ['rect', 'roundRect', 'ellipse', 'hexagon', 'diamond', 'ribbon', 'speechBubble', 'brush', 'tornPaper', 'tag', 'underlineBar'];
 const GLYPH_SHAPES = ['circle', 'square', 'roundRect', 'diamond', 'hexagon', 'ellipse'];
 const PATTERN_KINDS = ['dots', 'grid', 'diagonal', 'crosshatch', 'checker'];
 
@@ -596,7 +596,7 @@ function applyAxis(id, s) {
     case 'tf.skew': spec.transform.skewX = rng.range(0.05, 0.22); break;
     case 'tf.rotate': spec.transform.rotate = rng.range(0.004, 0.04) * (rng.chance(0.5) ? 1 : -1) * Math.PI; break;
     case 'tf.condense': spec.transform.scaleX = rng.range(0.72, 0.94); break;
-    case 'tf.expand': spec.transform.scaleX = rng.range(1.06, 1.22); break;
+    case 'tf.expand': spec.transform.scaleX = rng.range(1.05, 1.16); break;
     default: break;
   }
 }

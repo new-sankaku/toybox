@@ -25,6 +25,7 @@ const SCALE_MIN = 0.25;
 const SCALE_MAX = 3;
 const SY_MIN = 0.3;
 const SY_MAX = 2.4;
+const VERT_LATERAL_LIMIT = 0.3;
 
 function hash01(n) {
   let x = Math.sin(n * 12.9898) * 43758.5453;
@@ -174,6 +175,14 @@ function glyphMods(d, i, n, size) {
   return mods;
 }
 
+function distortBleedRatio(d) {
+  if (!d) { return 0; }
+  let b = 0;
+  if (d.jitter) { b += d.jitter.off; }
+  if (d.shatter) { b += d.shatter.amp; }
+  return b;
+}
+
 function scaledLineWidth(ctx, line, tracking, distort, size) {
   let w = 0;
   for (let i = 0; i < line.length; i++) {
@@ -250,15 +259,17 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   lines = lines.slice(0, maxLines);
   if (lines.length === 0) { return null; }
 
-  for (let pass = 0; pass < 3; pass++) {
+  const bleedRatio = distortBleedRatio(distort);
+  for (let pass = 0; pass < 4; pass++) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
     let widest = 0;
     for (let i = 0; i < lines.length; i++) {
       const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size);
       if (w > widest) { widest = w; }
     }
-    if (widest <= maxWidth || size <= minSize || !(widest > 0)) { break; }
-    size = Math.max(minSize, size * (maxWidth / widest));
+    const need = widest + bleedRatio * size * 2;
+    if (need <= maxWidth || size <= minSize || !(need > 0)) { break; }
+    size = Math.max(minSize, size * (maxWidth / need));
   }
   ctx.font = fontSpecOf(args.weight, size, args.fontCss);
 
@@ -386,7 +397,8 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
       const mods = glyphMods(distort, k, cols[c].length, size);
-      let dx = mods.dy;
+      const lateral = size * VERT_LATERAL_LIMIT;
+      let dx = Math.max(-lateral, Math.min(lateral, mods.dy));
       let dy = mods.dx;
       let rot = mods.rot;
       if (VERT_ROTATE.indexOf(ch) >= 0) { rot += Math.PI / 2; }
