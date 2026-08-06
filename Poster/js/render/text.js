@@ -76,9 +76,25 @@ function tokenizeForWrap(text) {
   return tokens;
 }
 
+let widthCacheKey = '';
+let widthCache = null;
+
+function charWidth(ctx, ch) {
+  if (widthCacheKey !== ctx.font) {
+    widthCacheKey = ctx.font;
+    widthCache = new Map();
+  }
+  let w = widthCache.get(ch);
+  if (w === undefined) {
+    w = ctx.measureText(ch).width;
+    widthCache.set(ch, w);
+  }
+  return w;
+}
+
 function measureTracked(ctx, text, tracking) {
   let w = 0;
-  for (let i = 0; i < text.length; i++) { w += ctx.measureText(text.charAt(i)).width; }
+  for (let i = 0; i < text.length; i++) { w += charWidth(ctx, text.charAt(i)); }
   if (text.length > 1) { w += tracking * (text.length - 1); }
   return w;
 }
@@ -105,13 +121,18 @@ function wrapText(ctx, text, maxWidth, tracking) {
   for (let p = 0; p < paragraphs.length; p++) {
     const tokens = tokenizeForWrap(paragraphs[p]);
     let line = '';
+    let lineW = 0;
     for (let i = 0; i < tokens.length; i++) {
-      const test = line + tokens[i];
-      if (line.length > 0 && measureTracked(ctx, test, tracking) > maxWidth) {
+      const token = tokens[i];
+      const tokenW = measureTracked(ctx, token, tracking);
+      const add = line.length === 0 ? tokenW : tokenW + tracking;
+      if (line.length > 0 && lineW + add > maxWidth) {
         lines.push(line);
-        line = tokens[i];
+        line = token;
+        lineW = tokenW;
       } else {
-        line = test;
+        line += token;
+        lineW += add;
       }
     }
     if (line.length > 0) { lines.push(line); }
@@ -186,7 +207,7 @@ function distortBleedRatio(d) {
 function scaledLineWidth(ctx, line, tracking, distort, size) {
   let w = 0;
   for (let i = 0; i < line.length; i++) {
-    w += ctx.measureText(line.charAt(i)).width * glyphMods(distort, i, line.length, size).s;
+    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size).s;
   }
   if (line.length > 1) { w += tracking * (line.length - 1); }
   return w;
@@ -314,7 +335,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
       const mods = glyphMods(distort, j, line.length, size);
-      const adv = ctx.measureText(ch).width * mods.s;
+      const adv = charWidth(ctx, ch) * mods.s;
       const cx = x + adv / 2 + mods.dx;
       const cy = baseY + mods.dy;
       const asc = metrics.ascent * mods.s * mods.sy;

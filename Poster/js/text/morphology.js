@@ -169,27 +169,81 @@ function digits(rng, n) {
   return s;
 }
 
+const NUMERIC_ALLOW = {
+  cinema: ['boxOffice', 'admission', 'countries', 'festivalNo', 'sections', 'screens',
+    'date', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count'],
+  gravure: ['minutes', 'bonusMinutes', 'days', 'sheets', 'pages', 'price', 'code', 'age',
+    'date', 'year', 'yearNo', 'chapter', 'edition', 'few', 'count'],
+  novel: ['volume', 'awardNo', 'stories', 'printing', 'price', 'spineCode', 'rating',
+    'date', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count'],
+  asmr: ['minutes', 'seconds', 'track', 'trackNo', 'seriesNo', 'files',
+    'date', 'year', 'yearNo', 'chapter', 'edition', 'few', 'count'],
+  game: ['date', 'price', 'players', 'saves', 'anniversary', 'seriesNo', 'languages',
+    'hours', 'endings', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count'],
+  adult: ['code', 'minutes', 'bonusMinutes', 'scenes', 'seriesNo', 'anniversary', 'hours',
+    'price', 'date', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count']
+};
+
+export function numericKinds(genre) {
+  const list = NUMERIC_ALLOW[genre];
+  if (!list) { throw new Error('unknown genre: ' + genre); }
+  return list.slice();
+}
+
 export function numeric(rng, kind, genre) {
+  if (genre !== undefined && genre !== null) {
+    const allow = NUMERIC_ALLOW[genre];
+    if (!allow) { throw new Error('unknown genre: ' + genre); }
+    if (allow.indexOf(kind) < 0) {
+      throw new Error('numeric kind "' + kind + '" is not allowed for genre ' + genre);
+    }
+  }
   if (kind === 'volume') { return String(rng.int(2, 180)) + '万部'; }
   if (kind === 'week') { return String(rng.int(2, 14)) + '週連続'; }
   if (kind === 'minutes') { return String(rng.int(48, 186)) + '分'; }
+  if (kind === 'bonusMinutes') { return String(rng.int(8, 72)) + '分'; }
+  if (kind === 'hours') { return String(rng.int(2, 9)) + '時間'; }
+  if (kind === 'seconds') { return String(rng.int(38, 240)) + '分' + String(rng.int(1, 59)) + '秒'; }
   if (kind === 'track') { return '全' + String(rng.int(3, 18)) + 'トラック'; }
+  if (kind === 'trackNo') { return String(rng.int(1, 18)); }
+  if (kind === 'files') { return String(rng.int(4, 32)) + 'ファイル'; }
   if (kind === 'year') { return String(rng.int(1998, 2049)) + '年'; }
+  if (kind === 'yearNo') { return String(rng.int(1998, 2049)); }
   if (kind === 'date') {
     const days = ['月', '火', '水', '木', '金', '土', '日'];
     return String(rng.int(1, 12)) + '月' + String(rng.int(1, 28)) + '日［' + rng.pick(days) + '］';
   }
-  if (kind === 'price') {
-    const yen = rng.int(6, 78) * 100 - 20;
-    return '本体' + yen.toLocaleString('en-US') + '円＋税';
-  }
+  if (kind === 'price') { return (rng.int(6, 78) * 100 - 20).toLocaleString('en-US') + '円'; }
   if (kind === 'code') {
     const f = CODE_FORMAT[genre];
     if (!f) { throw new Error('numeric code needs a known genre: ' + genre); }
     return letters(rng, f.letters) + f.sep + digits(rng, f.digits);
   }
+  if (kind === 'spineCode') {
+    const kana = ['あ', 'い', 'か', 'さ', 'た', 'な', 'は', 'ま', 'や', 'わ'];
+    return rng.pick(kana) + '-' + String(rng.int(1, 88)) + '-' + String(rng.int(1, 24));
+  }
   if (kind === 'rating') { return String(rng.int(35, 50) / 10) + '／5.0'; }
-  if (kind === 'episode') { return '第' + String(rng.int(2, 24)) + '弾'; }
+  if (kind === 'boxOffice') { return String(rng.int(3, 480)) + '億円'; }
+  if (kind === 'admission') { return String(rng.int(12, 980)) + '万人'; }
+  if (kind === 'countries') { return String(rng.int(8, 142)) + 'カ国'; }
+  if (kind === 'festivalNo') { return '第' + String(rng.int(12, 98)) + '回'; }
+  if (kind === 'sections') { return String(rng.int(1, 9)) + '部門'; }
+  if (kind === 'screens') { return String(rng.int(28, 780)) + '館'; }
+  if (kind === 'days') { return String(rng.int(2, 9)) + '日間'; }
+  if (kind === 'sheets') { return String(rng.int(2, 24)) + '枚'; }
+  if (kind === 'pages') { return String(rng.int(8, 64)) + 'P'; }
+  if (kind === 'age') { return String(rng.int(20, 34)) + '歳'; }
+  if (kind === 'awardNo') { return '第' + String(rng.int(2, 68)) + '回'; }
+  if (kind === 'stories') { return String(rng.int(3, 14)) + '篇'; }
+  if (kind === 'printing') { return '第' + String(rng.int(2, 42)) + '刷'; }
+  if (kind === 'players') { return String(rng.int(2, 8)) + '人'; }
+  if (kind === 'saves') { return String(rng.int(3, 99)); }
+  if (kind === 'anniversary') { return String(rng.int(5, 40)); }
+  if (kind === 'seriesNo') { return String(rng.int(2, 24)); }
+  if (kind === 'languages') { return String(rng.int(4, 16)) + '言語'; }
+  if (kind === 'endings') { return String(rng.int(2, 12)) + 'つ'; }
+  if (kind === 'scenes') { return String(rng.int(4, 24)) + 'シーン'; }
   if (kind === 'edition') {
     const form = rng.weighted([{ v: 'vol', w: 5 }, { v: 'ban', w: 4 }]);
     if (form === 'vol') { return 'Vol.' + String(rng.int(1, 12)); }

@@ -175,6 +175,27 @@ export const LEXICON = {
     ],
     role: [
       '監督', '脚本', '撮影', '音楽', '編集', '美術', '製作総指揮', '照明', '録音', '衣装', '原作', '主演'
+    ],
+    recommendRole: [
+      '映画評論家', '作家', 'ミュージシャン', '脚本家', '写真家', '俳優', '編集者', '劇作家'
+    ],
+    studioWord: [
+      { ja: '群青', en: 'GUNJO' }, { ja: '北天', en: 'HOKUTEN' }, { ja: '硝子', en: 'GARASU' },
+      { ja: '極東', en: 'KYOKUTO' }, { ja: '灯台', en: 'TOUDAI' }, { ja: '無名', en: 'MUMEI' },
+      { ja: '蒼波', en: 'SOUHA' }, { ja: '砂丘', en: 'SAKYU' }
+    ],
+    ratingMark: ['G', 'PG12', 'R15+'],
+    billing: [
+      '{studioWord.en} PICTURES 提供　IN ASSOCIATION WITH {studioWord.en} FILMS',
+      'A {person.en} PRODUCTION　A FILM BY {person.en}',
+      '{person.en}　{person.en}　{person.en}',
+      'CASTING BY {person.en}　COSTUMES BY {person.en}　EDITED BY {person.en}',
+      'PRODUCTION DESIGNER {person.en}　DIRECTOR OF PHOTOGRAPHY {person.en}',
+      'MUSIC BY {person.en}',
+      'EXECUTIVE PRODUCERS {person.en}　{person.en}',
+      'PRODUCED BY {person.en}',
+      'SCREENPLAY BY {person.en}',
+      'DIRECTED BY {person.en}'
     ]
   },
   gravure: {
@@ -211,7 +232,8 @@ export const LEXICON = {
     labelName: [
       'AQUA BREEZE', '蒼波企画', 'スカイライン映像', 'ゆるり工房', 'MARINE POCKET',
       '白波スタジオ', 'SUNDIAL WORKS', '潮風舎'
-    ]
+    ],
+    formatMark: ['DVD', 'Blu-ray', 'DVD & Blu-ray 同時リリース', 'Blu-ray Disc', 'DVD-Video']
   },
   novel: {
     nounHead: [
@@ -246,6 +268,13 @@ export const LEXICON = {
     ],
     criticRole: [
       '作家', '書評家', '翻訳家', '詩人', '編集者', '文芸評論家', '書店員', '装丁家'
+    ],
+    genreWord: [
+      'ミステリ', '青春小説', '恋愛小説', 'SF', '時代小説', 'ホラー', 'エンタテインメント',
+      '家族小説', '連作短編', '幻想譚'
+    ],
+    obiBoxWord: [
+      '映像化決定', '待望の文庫化', 'シリーズ最新作', '緊急重版', '各紙誌絶賛', '書店員が選んだ一冊'
     ]
   },
   asmr: {
@@ -278,7 +307,23 @@ export const LEXICON = {
       'ノイズレス収録', '実演収録', 'ロスレス配信対応'
     ],
     voiceRole: ['CV', '出演', 'Voice', '声の出演', 'ボイス', 'ナレーション'],
-    trackWord: ['トラック', '章', 'セクション', 'パート', '収録音源', 'サウンドピース']
+    trackWord: ['トラック', '章', 'セクション', 'パート', '収録音源', 'サウンドピース'],
+    tagWord: [
+      'バイノーラル', 'ハイレゾ', 'ダミーヘッド', '立体音響', '耳かき', '添い寝', '囁き',
+      '睡眠導入', '全編囁き', '環境音', 'ASMR', '癒し', '安眠', '低音ボイス', 'おやすみ',
+      '限定特典', '長時間', '実演収録', '両耳', '無音区間なし'
+    ],
+    circleName: [
+      'ゆるり音工房', 'こもれびレコーズ', '夜想スタジオ', 'ねむり堂', 'SILENT PILLOW',
+      'うたたね工房', '星屑オーディオ', 'まくらの森', 'とろとろ製作所'
+    ],
+    fileFormat: [
+      'WAV同梱', 'MP3／WAV', 'ハイレゾWAV', 'ロスレス配信', 'mp3 320kbps', 'FLAC同梱'
+    ],
+    sceneWord: [
+      '導入', '耳かき（右）', '耳かき（左）', '添い寝', '囁き', 'おやすみ', '深呼吸',
+      '寝かしつけ', '衣擦れ', '余韻'
+    ]
   },
   game: {
     nounHead: [
@@ -314,6 +359,10 @@ export const LEXICON = {
     ],
     ratingWord: [
       '全年齢対象', '推奨年齢12+', 'AGE 15+', '対象年齢：全年齢', '暴力表現あり', 'オンライン対戦対応'
+    ],
+    publisherName: [
+      '群青ゲームス', 'ヘキサソフト', 'オービットワークス', 'ゼニス・インタラクティブ',
+      '蒼波スタジオ', 'VOID WORKS', 'パルスゲームズ', 'アウラ・エンタテインメント'
     ]
   },
   adult: {
@@ -345,7 +394,25 @@ export const LEXICON = {
     ],
     formatWord: [
       '2枚組', '本編{n:minutes}', 'ハイビジョン収録', 'マルチアングル収録', '字幕対応',
-      'ダウンロード版同時発売', 'チャプター{n:track}', '両面ジャケット仕様'
+      'ダウンロード版同時発売', 'チャプター{n:scenes}', '両面ジャケット仕様'
+    ],
+    makerName: [
+      '蒼月企画', '深夜堂', 'LATE HOUR', 'ミッドナイト・ワークス', 'ルミナ・フィルム',
+      '紫苑スタジオ', 'NOIR PICTURES', 'VELVET LINE'
+    ],
+    attrWord: [
+      '完全撮り下ろし', '新人', '専属', '初単独', '独占', '限定', '未公開', '密着',
+      '長時間', '総集編', '特別編', 'ドキュメント', 'インタビュー', '舞台裏', 'ノーカット',
+      '初回', '厳選', '豪華', '永久保存', '完全版', '再編集', '特別収録'
+    ],
+    sashWord: [
+      'ついに解禁！！', 'シリーズ最新作！！', '完全版！！', '全{n:scenes}収録！！',
+      '{n:hours}ノーカット！！', '祝・{n:anniversary}周年！！', '初回限定特典付！！',
+      '待望の第{n:seriesNo}弾！！', '緊急発売！！', '再入荷！！'
+    ],
+    noticeWord: [
+      '本作品はフィクションです', '18歳未満の方は購入できません', '出演者は全て20歳以上です',
+      '商品の仕様は予告なく変更になる場合があります', 'パッケージ写真は実物と異なる場合があります'
     ]
   }
 };
