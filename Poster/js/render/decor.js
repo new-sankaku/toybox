@@ -288,6 +288,18 @@ function buildPlate(rng, preset, base, bg) {
   };
 }
 
+function settlePlate(plate, bgBefore, base) {
+  for (let i = 0; i < 8; i++) {
+    const eff = blendRgb(bgBefore, plate.rgb, plate.alpha);
+    if (contrastRatio(base, eff) >= MIN_PLATE_CONTRAST) { return eff; }
+    if (plate.alpha >= 1) { break; }
+    plate.alpha = Math.min(1, plate.alpha + 0.1);
+  }
+  plate.rgb = inkOpposite(base);
+  plate.alpha = 1;
+  return blendRgb(bgBefore, plate.rgb, plate.alpha);
+}
+
 function buildRule(rng, preset, base, bg, gain) {
   if (!chanceScaled(rng, preset.rule, gain)) { return null; }
   const rgb = contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg);
@@ -356,15 +368,11 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity) {
     boten: null, transform: null, edgeSplit: null, axes: axes
   };
 
-  const wantPlate = level > 0.2 && (chanceScaled(rng, preset.plate, gain) || (noisy && rng.chance(0.5)));
+  const wantPlate = level > 0.2
+    && (chanceScaled(rng, preset.plate, gain) || (noisy && rng.chance(0.5)) || contrastRatio(base, bg) < MIN_STOP_CONTRAST);
   if (wantPlate) {
     spec.plate = buildPlate(rng, preset, base, bg);
-    bg = blendRgb(bg, spec.plate.rgb, spec.plate.alpha);
-    axes.push('plate:' + spec.plate.kind);
-  }
-  if (contrastRatio(base, bg) < MIN_STOP_CONTRAST && !spec.plate) {
-    spec.plate = buildPlate(rng, preset, base, bg);
-    bg = blendRgb(bg, spec.plate.rgb, spec.plate.alpha);
+    bg = settlePlate(spec.plate, bg, base);
     axes.push('plate:' + spec.plate.kind);
   }
 

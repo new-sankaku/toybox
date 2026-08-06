@@ -115,6 +115,7 @@ export function styleTitle(rng, core, opts) {
   let exclaim = allowExclaim ? rng.weighted(EXCLAIM_WEIGHTS[genre]) : 'none';
 
   if (punct === 'period' && exclaim !== 'none') { punct = 'none'; }
+  if (punct === 'period' && ellipsis === 'trail') { punct = 'none'; }
   if (ellipsis !== 'none' && exclaim !== 'none' && !rng.chance(0.15)) { ellipsis = 'none'; }
 
   let latinMode = allowLatin ? rng.weighted(LATIN_WEIGHTS[genre]) : 'none';
@@ -137,7 +138,7 @@ export function styleTitle(rng, core, opts) {
     ]);
     if (form === 'chapterHead') { body = numeric(rng, 'chapter', genre) + '　' + body; }
     else if (form === 'chapterTail') { body = body + '　' + numeric(rng, 'chapter', genre); }
-    else if (form === 'volTail') { body = body + ' Vol.' + numeric(rng, 'count', genre); }
+    else if (form === 'volTail') { body = body + ' Vol.' + numeric(rng, 'few', genre); }
     else { body = body + '　' + numeric(rng, 'edition', genre); }
     numeralUsed = form;
   }

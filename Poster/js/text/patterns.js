@@ -29,7 +29,7 @@ export const PATTERNS = {
     tag: ['{latinTag}', '{latinTag}　{person.en}', '{latinTag} — {n:year}'],
     badge: [
       '第{n:count}回 {festival}国際映画祭 正式出品',
-      '{festival}国際映画祭 {n:count}部門ノミネート',
+      '{festival}国際映画祭 {n:few}部門ノミネート',
       '{n:week}興行収入第一位',
       '{festival}映画祭 審査員特別賞'
     ],
@@ -52,24 +52,24 @@ export const PATTERNS = {
     title: [
       '{noun}', '{season}の{place}で', 'はじめての{noun}', '{emotion}{tail}',
       '{place}／{emotion}距離', '{adj}{tail}、ふたりきり', '{noun}のとなり',
-      '{season}、{place}。', '{emotion}{noun}', '{place}で{n:count}日'
+      '{season}、{place}。', '{emotion}{noun}', '{place}で{n:few}日'
     ],
     catch: [
       '{clauseA}。{connective}、{clauseB}。',
       '{place}で、{emotion}表情のすべてを収めた最新作。',
       'カメラの前で見せた、{emotion}素顔。{clauseB}。',
-      '{place}で過ごした{n:count}日間の記録。',
+      '{place}で過ごした{n:few}日間の記録。',
       '誰も知らなかった{noun}の時間。{connective}、{clauseB}。',
       '{season}の{place}、{emotion}まなざし。',
       '{clauseA}。{emotion}{tail}が、そこにあった。',
       '{emotion}{tail}と、{adj}{tail}。',
       '{connective}、{clauseB}。{place}にて撮影。',
-      '{noun}のような{n:count}日間。{clauseB}。',
+      '{noun}のような{n:few}日間。{clauseB}。',
       'いちばん{emotion}{tail}を、{place}で。',
       '{clauseA}。ただ、{emotion}{tail}だけが残った。'
     ],
     sub: [
-      '{place}ロケ　{n:count}日間の撮影記録',
+      '{place}ロケ　{n:few}日間の撮影記録',
       '{emotion}{tail}を追った最新作',
       '{season}の{place}で撮り下ろし'
     ],
@@ -89,7 +89,7 @@ export const PATTERNS = {
     title: [
       '{noun}', '{noun}は{verb}ない', '{adj}{tail}', '{tail}のための{noun}',
       'ぼくが{verb}なかった理由', '{noun}と、その{tail}', '{head}、あるいは{tail}',
-      '{noun}をめぐる{n:count}の断章', '{season}の{tail}', '{person}の{tail}'
+      '{noun}をめぐる{n:few}つの断章', '{season}の{tail}', '{person}の{tail}'
     ],
     catch: [
       '{clauseA}。{connective}、{clauseB}。',
@@ -156,7 +156,7 @@ export const PATTERNS = {
       '{voiceRole}：{person}\n録音・調整：{person}'
     ],
     release: ['{n:minutes}／{n:track}', '{n:date}配信開始　{n:minutes}', '{n:track}　{n:price}'],
-    extra: ['{n:code}', '{binaural}', '{trackWord}{n:count}まで収録']
+    extra: ['{n:code}', '{binaural}', '{trackWord}{n:few}まで収録']
   },
 
   game: {
@@ -173,7 +173,7 @@ export const PATTERNS = {
       '{clauseA}。選ぶのは、君だ。',
       '{systemWord}で描く{adj}{tail}。',
       '{clauseA}。{connective}、{noun}は目を覚ます。',
-      '{n:count}の{tail}、ひとつの結末。{clauseB}。',
+      '{n:few}つの{tail}、ひとつの結末。{clauseB}。',
       '{clauseB}——{clauseA}、その先へ。',
       '{systemWord}×{systemWord}。{clauseB}。',
       '{clauseA}。{connective}、{clauseB}。{editionWord}',
