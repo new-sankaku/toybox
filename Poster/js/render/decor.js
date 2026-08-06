@@ -7,7 +7,9 @@ const MIN_EDGE_CONTRAST = 2.2;
 const NOISY_STD = 0.17;
 const MASK_PIXEL_LIMIT = 4194304;
 const RAMP_BUCKETS = 4;
-const MASK_PAD_EM = 0.9;
+const MASK_PAD_EM = 0.35;
+const RAMP_HALF_PIXELS = 250000;
+const RAMP_THIRD_PIXELS = 900000;
 const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
 const GENRE_ORDER = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
@@ -1142,8 +1144,14 @@ function paintOffsetLayers(ctx, mask, layers, size) {
 }
 
 function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
+  const px = mask.cv.width * mask.cv.height;
+  let n = steps;
+  if (px > RAMP_THIRD_PIXELS) { n = Math.max(3, Math.round(steps / 3)); }
+  else if (px > RAMP_HALF_PIXELS) { n = Math.max(3, Math.round(steps / 2)); }
+  const mx = dx * steps / n;
+  const my = dy * steps / n;
   const flat = near[0] === far[0] && near[1] === far[1] && near[2] === far[2];
-  const buckets = flat ? 1 : Math.min(RAMP_BUCKETS, steps);
+  const buckets = flat ? 1 : Math.min(RAMP_BUCKETS, n);
   const layers = [];
   for (let b = 0; b < buckets; b++) {
     const t = buckets > 1 ? b / (buckets - 1) : 0;
@@ -1151,10 +1159,10 @@ function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
     if (!cv) { return; }
     layers.push(cv);
   }
-  for (let i = steps; i >= 1; i--) {
-    const t = steps > 1 ? (i - 1) / (steps - 1) : 0;
+  for (let i = n; i >= 1; i--) {
+    const t = n > 1 ? (i - 1) / (n - 1) : 0;
     const idx = buckets > 1 ? Math.min(buckets - 1, Math.round(t * (buckets - 1))) : 0;
-    ctx.drawImage(layers[idx], mask.x + dx * size * i, mask.y + dy * size * i, mask.w, mask.h);
+    ctx.drawImage(layers[idx], mask.x + mx * size * i, mask.y + my * size * i, mask.w, mask.h);
   }
 }
 
