@@ -73,6 +73,7 @@ class AgentExecutionService:
             AgentStatus.WAITING_RESPONSE:"waiting_response",
             AgentStatus.WAITING_PROVIDER:"waiting_provider",
             AgentStatus.PAUSED:"paused",
+            AgentStatus.FROZEN:"frozen",
             AgentStatus.COMPLETED:"completed",
             AgentStatus.FAILED:"failed",
         }
