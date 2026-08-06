@@ -296,8 +296,10 @@ function buildMegaTitle(rng, opts) {
   lines.push(fitLine(rng, genre, poolsFor(genre).sashWord, MEGA_LINE.sash[0], MEGA_LINE.sash[1]));
   lines.push(main.styled.text);
   lines.push(fitLine(rng, genre, PATTERNS.adult.megaSpec, MEGA_LINE.spec[0], MEGA_LINE.spec[1]));
-  if (rng.chance(0.8)) {
+  let body = lines.join('').length;
+  if (rng.chance(0.8) || body < 46) {
     lines.push(fitLine(rng, genre, PATTERNS.adult.megaTail, MEGA_LINE.tail[0], MEGA_LINE.tail[1]));
+    body = lines.join('').length;
   }
   return {
     styled: { text: lines.join('\n'), latin: '', axes: main.styled.axes },

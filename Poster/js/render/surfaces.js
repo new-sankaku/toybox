@@ -1,4 +1,4 @@
-import { hexToRgb, rgbToCss, luma01, shade } from '../core/color.js';
+import { hexToRgb, rgbToCss, luma01, shade, rgbToHsl, hslToRgb } from '../core/color.js';
 import { SURFACE_ANCHORS } from './layouts.js';
 
 const STACK_MONO = '"SFMono-Regular",Consolas,"Roboto Mono","Courier New",monospace';
@@ -23,6 +23,20 @@ const CORNER_LABELS = ['NEW', 'LIMITED', 'HD REMASTER', '特典付', '完全版'
 
 function inkOn(hex) {
   return luma01(hexToRgb(hex)) > 0.55 ? '#12100e' : '#ffffff';
+}
+
+function liftInk(hex) {
+  const rgb = hexToRgb(hex);
+  const l = luma01(rgb);
+  if (l >= 0.62) { return rgbToCss(rgb, 0.95); }
+  return rgbToCss(shade(rgb, (0.72 - l) * 1.15), 0.95);
+}
+
+function deepInk(hex) {
+  const hsl = rgbToHsl(hexToRgb(hex));
+  const s = Math.min(hsl[1], 0.32);
+  const l = Math.min(hsl[2], 0.20);
+  return hslToRgb([hsl[0], s, l]);
 }
 
 function fitFont(ctx, text, maxWidth, startPx, weight, stack) {
@@ -100,6 +114,19 @@ function drawFilmScrim(ctx, W, H, rng) {
   ctx.restore();
 }
 
+function drawBillingPlate(ctx, W, H, rng) {
+  ctx.save();
+  const a = box(SURFACE_ANCHORS.billingPlate, W, H);
+  const g = ctx.createLinearGradient(0, a.y - H * 0.03, 0, a.y + H * 0.02);
+  g.addColorStop(0, 'rgba(3,3,4,0)');
+  g.addColorStop(1, 'rgba(3,3,4,0.96)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, a.y - H * 0.03, W, H * 0.05);
+  ctx.fillStyle = 'rgba(3,3,4,' + rng.range(0.94, 0.99).toFixed(3) + ')';
+  ctx.fillRect(0, a.y + H * 0.02, W, H - a.y - H * 0.02);
+  ctx.restore();
+}
+
 function drawObi(ctx, W, H, rng, theme) {
   ctx.save();
   const a = box(SURFACE_ANCHORS.obi, W, H);
@@ -127,6 +154,8 @@ function drawSpecBand(ctx, W, H, rng, theme) {
   hairline(ctx, 0, a.y + H * 0.007, W, rule, Math.max(1, H * 0.0010));
   ctx.fillStyle = rng.pick(theme.accentColors);
   ctx.fillRect(0, a.y - H * 0.014, W * rng.range(0.20, 0.42), H * 0.010);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.22)' : 'rgba(24,20,16,0.22)';
+  ctx.fillRect(W * 0.05, a.y + H * 0.052, W * 0.90, Math.max(1, H * 0.0010));
   ctx.restore();
 }
 
@@ -137,48 +166,119 @@ function drawHairRules(ctx, W, H, rng, theme) {
   ctx.fillStyle = rgbToCss(c, 0.85);
   ctx.fillRect(0, H * 0.052, W, t);
   ctx.fillRect(0, H * 0.052 + t * 2.4, W, t * 0.6);
-  ctx.fillRect(0, H * 0.822, W, t);
-  ctx.fillRect(0, H * 0.822 - t * 2.4, W, t * 0.6);
+  ctx.fillRect(0, H * 0.800, W, t);
+  ctx.fillRect(0, H * 0.800 - t * 2.4, W, t * 0.6);
   ctx.restore();
 }
 
-function drawVoiceBands(ctx, W, H, rng, theme) {
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
+function drawVoiceChrome(ctx, W, H, rng, theme) {
   ctx.save();
-  const top = box(SURFACE_ANCHORS.voiceTopBand, W, H);
-  const bottom = box(SURFACE_ANCHORS.voiceBottomBand, W, H);
-  const topColor = hexToRgb(rng.pick(theme.plateColors));
-  const bottomColor = hexToRgb(rng.pick(theme.obiColors));
-  const gt = ctx.createLinearGradient(0, top.y, 0, top.y + top.h);
-  gt.addColorStop(0, rgbToCss(topColor, rng.range(0.80, 0.90)));
-  gt.addColorStop(1, rgbToCss(topColor, rng.range(0.60, 0.74)));
-  ctx.fillStyle = gt;
-  ctx.fillRect(0, top.y, W, top.h);
-  const gb = ctx.createLinearGradient(0, bottom.y, 0, H);
-  gb.addColorStop(0, rgbToCss(bottomColor, rng.range(0.62, 0.76)));
-  gb.addColorStop(1, rgbToCss(bottomColor, rng.range(0.82, 0.92)));
-  ctx.fillStyle = gb;
-  ctx.fillRect(0, bottom.y, W, H - bottom.y);
+  const strip = box(SURFACE_ANCHORS.voiceTopStrip, W, H);
+  const foot = box(SURFACE_ANCHORS.voiceFootBand, W, H);
+  const plate = box(SURFACE_ANCHORS.voicePlate, W, H);
+  const stripRgb = hexToRgb(rng.pick(theme.obiColors));
+  ctx.fillStyle = rgbToCss(stripRgb, rng.range(0.62, 0.80));
+  ctx.fillRect(0, strip.y, W, strip.h);
+  const footRgb = hexToRgb(rng.pick(theme.plateColors));
+  ctx.fillStyle = rgbToCss(footRgb, rng.range(0.86, 0.96));
+  ctx.fillRect(0, foot.y, W, foot.h);
   const accent = hexToRgb(rng.pick(theme.accentColors));
-  hairline(ctx, 0, top.y + top.h, W, rgbToCss(accent, 0.85), Math.max(1, H * 0.0026));
-  hairline(ctx, 0, bottom.y, W, rgbToCss(accent, 0.85), Math.max(1, H * 0.0026));
+  hairline(ctx, 0, foot.y, W, rgbToCss(accent, 0.85), Math.max(1, H * 0.0030));
+  hairline(ctx, 0, strip.y + strip.h, W, rgbToCss(accent, 0.55), Math.max(1, H * 0.0018));
+  ctx.restore();
+
+  ctx.save();
+  const r = plate.h * 0.28;
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  roundRectPath(ctx, plate.x + plate.h * 0.04, plate.y + plate.h * 0.05, plate.w, plate.h, r);
+  ctx.fill();
+  const plateRgb = hexToRgb(rng.pick(theme.plateColors));
+  ctx.fillStyle = rgbToCss(plateRgb, rng.range(0.88, 0.97));
+  roundRectPath(ctx, plate.x, plate.y, plate.w, plate.h, r);
+  ctx.fill();
+  ctx.strokeStyle = rgbToCss(accent, 0.70);
+  ctx.lineWidth = Math.max(1, H * 0.0022);
+  roundRectPath(ctx, plate.x, plate.y, plate.w, plate.h, r);
+  ctx.stroke();
+  ctx.fillStyle = rgbToCss(accent, 0.85);
+  ctx.fillRect(plate.x + plate.w * 0.035, plate.y + plate.h * 0.50, plate.w * 0.93, Math.max(1, H * 0.0016));
+  ctx.restore();
+}
+
+function drawJacketFrame(ctx, W, H, rng, theme) {
+  ctx.save();
+  const m = Math.max(2, W * rng.range(0.008, 0.014));
+  const rgb = hexToRgb(rng.pick(theme.obiColors));
+  ctx.strokeStyle = rgbToCss(rgb, 0.85);
+  ctx.lineWidth = m;
+  ctx.strokeRect(m / 2, m / 2, W - m, H - m);
+  ctx.strokeStyle = rgbToCss(hexToRgb(rng.pick(theme.accentColors)), 0.55);
+  ctx.lineWidth = Math.max(1, m * 0.28);
+  ctx.strokeRect(m * 1.7, m * 1.7, W - m * 3.4, H - m * 3.4);
+  ctx.restore();
+}
+
+function drawCircleMark(ctx, W, H, rng, theme) {
+  ctx.save();
+  const a = box(SURFACE_ANCHORS.circleMark, W, H);
+  const cx = a.x + a.w / 2;
+  const cy = a.y + a.w / 2;
+  const r = a.w * 0.42;
+  const ink = liftInk(rng.pick(theme.accentColors));
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
+  ctx.lineWidth = Math.max(1, r * 0.10);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  const points = rng.int(4, 6);
+  ctx.beginPath();
+  for (let i = 0; i < points * 2; i++) {
+    const ang = -Math.PI / 2 + (Math.PI * i) / points;
+    const rr = i % 2 === 0 ? r * 0.62 : r * 0.26;
+    const px = cx + Math.cos(ang) * rr;
+    const py = cy + Math.sin(ang) * rr;
+    if (i === 0) { ctx.moveTo(px, py); } else { ctx.lineTo(px, py); }
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth = Math.max(1, r * 0.06);
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.75, cy + r * 1.42);
+  ctx.lineTo(cx + r * 0.75, cy + r * 1.42);
+  ctx.stroke();
   ctx.restore();
 }
 
 function drawPlatformBar(ctx, W, H, rng, theme) {
   ctx.save();
   const a = box(SURFACE_ANCHORS.platformBand, W, H);
-  const color = rng.pick(theme.accentColors);
-  const rgb = hexToRgb(color);
+  const rgb = deepInk(rng.pick(theme.obiColors));
+  const color = rgbToCss(rgb, 1);
   const g = ctx.createLinearGradient(0, 0, 0, a.h);
-  g.addColorStop(0, rgbToCss(shade(rgb, 0.20), 0.97));
-  g.addColorStop(1, rgbToCss(shade(rgb, -0.38), 0.97));
+  g.addColorStop(0, rgbToCss(shade(rgb, 0.16), 0.97));
+  g.addColorStop(1, rgbToCss(shade(rgb, -0.30), 0.97));
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, a.h);
   ctx.fillStyle = 'rgba(255,255,255,0.16)';
   ctx.fillRect(0, 0, W, a.h * 0.14);
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
   ctx.fillRect(0, a.h - Math.max(2, W * 0.004), W, Math.max(2, W * 0.004));
-  const ink = inkOn(color);
+  const ink = luma01(rgb) > 0.55 ? '#12100e' : '#ffffff';
   const mark = a.h * 0.40;
   ctx.fillStyle = ink;
   ctx.globalAlpha = 0.88;
@@ -242,23 +342,25 @@ function drawGameChrome(ctx, W, H, rng, theme) {
 
 function drawDiagonalBand(ctx, W, H, rng, theme) {
   ctx.save();
-  const cy = H * rng.range(0.400, 0.615);
-  const ang = -rng.range(0.209, 0.489);
-  const bh = H * rng.range(0.055, 0.088);
-  const color = rng.pick(theme.accentColors);
-  ctx.translate(W / 2, cy);
-  ctx.rotate(ang);
-  ctx.globalAlpha = rng.range(0.86, 0.97);
+  const a = SURFACE_ANCHORS.avSash;
+  const cx = (a.x + a.w / 2) * W;
+  const cy = (a.y + a.h / 2) * H;
+  const bw = a.w * W * 1.22;
+  const bh = a.h * H;
+  const color = rng.pick(theme.ribbonColors);
+  ctx.translate(cx, cy);
+  ctx.rotate(a.deg * Math.PI / 180);
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.fillRect(-bw / 2 + bh * 0.10, -bh / 2 + bh * 0.12, bw, bh);
   ctx.fillStyle = color;
-  ctx.fillRect(-W, -bh / 2, W * 2, bh);
-  ctx.globalAlpha = 1;
+  ctx.fillRect(-bw / 2, -bh / 2, bw, bh);
   ctx.fillStyle = 'rgba(255,255,255,0.20)';
-  ctx.fillRect(-W, -bh / 2, W * 2, bh * 0.20);
+  ctx.fillRect(-bw / 2, -bh / 2, bw, bh * 0.20);
   ctx.fillStyle = 'rgba(0,0,0,0.28)';
-  ctx.fillRect(-W, bh / 2 - bh * 0.12, W * 2, bh * 0.12);
-  if (rng.chance(0.55)) {
-    ctx.fillStyle = rng.pick(theme.ribbonColors);
-    ctx.fillRect(-W, bh / 2 + bh * 0.16, W * 2, bh * rng.range(0.14, 0.24));
+  ctx.fillRect(-bw / 2, bh / 2 - bh * 0.14, bw, bh * 0.14);
+  if (rng.chance(0.6)) {
+    ctx.fillStyle = rgbToCss(hexToRgb(rng.pick(theme.accentColors)), 0.9);
+    ctx.fillRect(-bw / 2, bh / 2, bw, bh * rng.range(0.10, 0.18));
   }
   ctx.restore();
 }
@@ -273,17 +375,6 @@ function drawAvLayers(ctx, W, H, rng, theme) {
   ctx.restore();
 
   drawDiagonalBand(ctx, W, H, rng, theme);
-
-  ctx.save();
-  const sash = box(SURFACE_ANCHORS.sashPlate, W, H);
-  const sashColor = rng.pick(theme.ribbonColors);
-  ctx.fillStyle = sashColor;
-  ctx.fillRect(sash.x, sash.y, sash.w, sash.h);
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  ctx.fillRect(sash.x, sash.y, sash.w, sash.h * 0.22);
-  ctx.fillStyle = 'rgba(0,0,0,0.30)';
-  ctx.fillRect(sash.x, sash.y + sash.h * 0.86, sash.w, sash.h * 0.14);
-  ctx.restore();
 
   ctx.save();
   const spec = box(SURFACE_ANCHORS.avSpecBand, W, H);
@@ -308,30 +399,6 @@ function drawPlate(ctx, W, H, rng, theme) {
   ctx.strokeStyle = luma01(hexToRgb(color)) > 0.55 ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.32)';
   ctx.lineWidth = Math.max(1, W * 0.0025);
   ctx.strokeRect(a.x + W * 0.012, a.y + H * 0.008, a.w - W * 0.024, a.h - H * 0.016);
-  ctx.restore();
-}
-
-function drawRoundPlate(ctx, W, H, rng, theme) {
-  ctx.save();
-  const a = box(SURFACE_ANCHORS.roundPlate, W, H);
-  const color = hexToRgb(rng.pick(theme.plateColors));
-  const r = Math.min(a.w, a.h) * 0.16;
-  ctx.beginPath();
-  ctx.moveTo(a.x + r, a.y);
-  ctx.lineTo(a.x + a.w - r, a.y);
-  ctx.arcTo(a.x + a.w, a.y, a.x + a.w, a.y + r, r);
-  ctx.lineTo(a.x + a.w, a.y + a.h - r);
-  ctx.arcTo(a.x + a.w, a.y + a.h, a.x + a.w - r, a.y + a.h, r);
-  ctx.lineTo(a.x + r, a.y + a.h);
-  ctx.arcTo(a.x, a.y + a.h, a.x, a.y + a.h - r, r);
-  ctx.lineTo(a.x, a.y + r);
-  ctx.arcTo(a.x, a.y, a.x + r, a.y, r);
-  ctx.closePath();
-  ctx.fillStyle = rgbToCss(color, rng.range(0.68, 0.84));
-  ctx.fill();
-  ctx.strokeStyle = rgbToCss(hexToRgb(rng.pick(theme.accentColors)), 0.65);
-  ctx.lineWidth = Math.max(1, H * 0.0020);
-  ctx.stroke();
   ctx.restore();
 }
 
@@ -411,25 +478,33 @@ function drawLaurelBadge(ctx, W, H, rng, theme) {
   ctx.save();
   const a = box(SURFACE_ANCHORS.laurelBadge, W, H);
   const cx = a.x + a.w / 2;
-  const cy = a.y + a.h / 2;
-  const color = hexToRgb(rng.pick(theme.accentColors));
-  ctx.strokeStyle = rgbToCss(color, 0.92);
-  ctx.fillStyle = rgbToCss(color, 0.92);
-  ctx.lineWidth = Math.max(1, a.h * 0.055);
-  const rx = a.w * 0.50;
-  const ry = a.h * 0.62;
+  const base = a.y + a.h * 0.98;
+  const ink = liftInk(rng.pick(theme.accentColors));
+  const span = a.w * 0.46;
+  const rise = a.h * 0.94;
+  const leafL = Math.max(2, a.h * 0.115);
+  const leafW = Math.max(1, a.h * 0.045);
+  ctx.strokeStyle = ink;
+  ctx.fillStyle = ink;
+  ctx.lineWidth = Math.max(1, a.h * 0.030);
+  ctx.lineCap = 'round';
   for (let side = -1; side <= 1; side += 2) {
+    const tipX = cx + side * span;
+    const ctrlX = cx + side * span * 1.28;
     ctx.beginPath();
-    ctx.ellipse(cx, cy, rx, ry, 0, side > 0 ? -0.35 : Math.PI - 0.35, side > 0 ? 0.35 + Math.PI * 0.55 : Math.PI + 0.35 + Math.PI * 0.55);
+    ctx.moveTo(cx + side * a.w * 0.10, base);
+    ctx.quadraticCurveTo(ctrlX, base - rise * 0.55, tipX, base - rise);
     ctx.stroke();
-    const leaves = 6;
-    for (let i = 0; i < leaves; i++) {
-      const t = 0.18 + (i / leaves) * 0.62;
-      const ang = Math.PI * (side > 0 ? (0.5 - t) : (0.5 + t));
-      const px = cx + Math.cos(ang) * rx * side * -1;
-      const py = cy + Math.sin(ang) * ry;
+    for (let i = 0; i < 6; i++) {
+      const t = 0.14 + i * 0.145;
+      const mt = 1 - t;
+      const px = mt * mt * (cx + side * a.w * 0.10) + 2 * mt * t * ctrlX + t * t * tipX;
+      const py = mt * mt * base + 2 * mt * t * (base - rise * 0.55) + t * t * (base - rise);
+      const dx = 2 * mt * (ctrlX - (cx + side * a.w * 0.10)) + 2 * t * (tipX - ctrlX);
+      const dy = 2 * mt * ((base - rise * 0.55) - base) + 2 * t * ((base - rise) - (base - rise * 0.55));
+      const ang = Math.atan2(dy, dx) - side * 0.85;
       ctx.beginPath();
-      ctx.ellipse(px, py, a.h * 0.075, a.h * 0.032, ang, 0, Math.PI * 2);
+      ctx.ellipse(px + Math.cos(ang) * leafL * 0.55, py + Math.sin(ang) * leafL * 0.55, leafL, leafW, ang, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -495,26 +570,20 @@ function drawWaveBand(ctx, W, H, rng, theme) {
   const h = a.h;
   const color = rng.pick(theme.accentColors);
   const rgb = hexToRgb(color);
-  const g = ctx.createLinearGradient(0, top, 0, top + h);
-  g.addColorStop(0, rgbToCss(rgb, 0));
-  g.addColorStop(0.5, rgbToCss(rgb, rng.range(0.18, 0.32)));
-  g.addColorStop(1, rgbToCss(rgb, 0));
-  ctx.fillStyle = g;
-  ctx.fillRect(0, top, W, h);
   const mid = top + h / 2;
-  const bars = rng.int(64, 120);
-  const bw = W / bars;
-  ctx.fillStyle = rgbToCss(shade(rgb, 0.35), rng.range(0.62, 0.88));
+  const bars = rng.int(38, 68);
+  const bw = a.w / bars;
+  ctx.fillStyle = rgbToCss(shade(rgb, 0.30), rng.range(0.55, 0.80));
   for (let i = 0; i < bars; i++) {
     const env = Math.sin(Math.PI * (i / bars));
-    const amp = (0.14 + 0.86 * Math.pow(rng.next(), 1.5)) * env * h * 0.46;
-    ctx.fillRect(i * bw + bw * 0.22, mid - amp, bw * 0.56, amp * 2);
+    const amp = (0.14 + 0.86 * Math.pow(rng.next(), 1.5)) * env * h * 0.44;
+    ctx.fillRect(a.x + i * bw + bw * 0.22, mid - amp, bw * 0.56, amp * 2);
   }
-  ctx.strokeStyle = rgbToCss(shade(rgb, 0.5), 0.45);
+  ctx.strokeStyle = rgbToCss(shade(rgb, 0.45), 0.40);
   ctx.lineWidth = Math.max(1, H * 0.0012);
   ctx.beginPath();
-  ctx.moveTo(0, mid);
-  ctx.lineTo(W, mid);
+  ctx.moveTo(a.x, mid);
+  ctx.lineTo(a.x + a.w, mid);
   ctx.stroke();
   ctx.restore();
 }
@@ -573,17 +642,19 @@ export const SURFACE_FUNCS = {
   topGradient: drawTopGradient,
   sideBand: drawSideBand,
   filmScrim: drawFilmScrim,
+  billingPlate: drawBillingPlate,
   obi: drawObi,
   specBand: drawSpecBand,
   hairRules: drawHairRules,
-  voiceBands: drawVoiceBands,
+  voiceChrome: drawVoiceChrome,
+  jacketFrame: drawJacketFrame,
+  circleMark: drawCircleMark,
   gameChrome: drawGameChrome,
   avLayers: drawAvLayers,
   platformBar: drawPlatformBar,
   ratingBox: drawRatingBox,
   diagonalBand: drawDiagonalBand,
   plate: drawPlate,
-  roundPlate: drawRoundPlate,
   frame: drawFrame,
   boldFrame: drawBoldFrame,
   cornerPlate: drawCornerPlate,

@@ -62,6 +62,25 @@ function jitter(hex, rng, hueAmt, litAmt) {
   return toHex(hslToRgb([h, s, l]));
 }
 
+function polarize(hex, rng) {
+  const hsl = rgbToHsl(hexToRgb(hex));
+  const toDark = hsl[2] <= 0.52;
+  if (toDark) {
+    const l = Math.min(0.32, 0.06 + hsl[2] * 0.42 + rng.range(0, 0.05));
+    const sat = Math.min(hsl[1], 0.72);
+    return toHex(hslToRgb([hsl[0], sat, l]));
+  }
+  const l = Math.max(0.88, Math.min(0.985, 0.86 + hsl[2] * 0.10 + rng.range(0, 0.04)));
+  const sat = Math.min(hsl[1], 0.30);
+  return toHex(hslToRgb([hsl[0], sat, l]));
+}
+
+function polarized(list, rng) {
+  const out = [];
+  for (let i = 0; i < list.length; i++) { out.push(polarize(list[i], rng)); }
+  return out;
+}
+
 function variant(list, rng, hueAmt, litAmt) {
   const shuffled = rng.shuffle(list);
   const out = [];
@@ -89,9 +108,9 @@ function planColors(colorPlan, names, rng, hueAmt, litAmt) {
 export function buildTheme(rng, genre, colorPlan) {
   const src = GENRE_COLORS[genre];
   const theme = {
-    obiColors: variant(src.obi, rng, 0.018, 0.030),
+    obiColors: polarized(variant(src.obi, rng, 0.018, 0.030), rng),
     ribbonColors: variant(src.ribbon, rng, 0.022, 0.034),
-    plateColors: variant(src.plate, rng, 0.012, 0.022),
+    plateColors: polarized(variant(src.plate, rng, 0.012, 0.022), rng),
     accentColors: variant(src.accent, rng, 0.026, 0.038),
     inkColors: variant(src.ink, rng, 0.008, 0.016)
   };
@@ -101,9 +120,9 @@ export function buildTheme(rng, genre, colorPlan) {
   const plate = planColors(colorPlan, ['plate', 'surfaceAlt', 'surface'], rng, 0.010, 0.018);
   const accent = planColors(colorPlan, ['accent', 'glow', 'inkAlt'], rng, 0.020, 0.030);
   const ink = planColors(colorPlan, ['ink', 'inkAlt', 'stroke'], rng, 0.006, 0.012);
-  if (obi.length) { theme.obiColors = obi; }
+  if (obi.length) { theme.obiColors = polarized(obi, rng); }
   if (ribbon.length) { theme.ribbonColors = ribbon; }
-  if (plate.length) { theme.plateColors = plate; }
+  if (plate.length) { theme.plateColors = polarized(plate, rng); }
   if (accent.length) { theme.accentColors = accent; }
   if (ink.length) { theme.inkColors = ink; }
   return theme;

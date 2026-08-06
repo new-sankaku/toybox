@@ -13,15 +13,15 @@ const BRACKETS = {
 
 const BRACKET_WEIGHTS = {
   cinema: [
-    { v: 'none', w: 90 }, { v: 'kagi', w: 2 }, { v: 'nijuukagi', w: 2 }, { v: 'paren', w: 0 },
-    { v: 'kaku', w: 1 }, { v: 'yama', w: 1 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 4 }
+    { v: 'none', w: 94 }, { v: 'kagi', w: 1 }, { v: 'nijuukagi', w: 1 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 1 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 3 }
   ],
   gravure: [
-    { v: 'none', w: 82 }, { v: 'kagi', w: 8 }, { v: 'nijuukagi', w: 4 }, { v: 'paren', w: 3 },
-    { v: 'kaku', w: 0 }, { v: 'yama', w: 1 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 2 }
+    { v: 'none', w: 87 }, { v: 'kagi', w: 6 }, { v: 'nijuukagi', w: 3 }, { v: 'paren', w: 2 },
+    { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 2 }
   ],
   novel: [
-    { v: 'none', w: 70 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 30 }, { v: 'paren', w: 0 },
+    { v: 'none', w: 72 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 28 }, { v: 'paren', w: 0 },
     { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 0 }
   ],
   asmr: [
@@ -29,12 +29,12 @@ const BRACKET_WEIGHTS = {
     { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 0 }
   ],
   game: [
-    { v: 'none', w: 92 }, { v: 'kagi', w: 1 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
-    { v: 'kaku', w: 3 }, { v: 'yama', w: 2 }, { v: 'nijuuyama', w: 2 }, { v: 'dash', w: 0 }
+    { v: 'none', w: 95 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 2 }, { v: 'yama', w: 1 }, { v: 'nijuuyama', w: 2 }, { v: 'dash', w: 0 }
   ],
   adult: [
-    { v: 'none', w: 80 }, { v: 'kagi', w: 5 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
-    { v: 'kaku', w: 6 }, { v: 'yama', w: 3 }, { v: 'nijuuyama', w: 3 }, { v: 'dash', w: 3 }
+    { v: 'none', w: 85 }, { v: 'kagi', w: 4 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 5 }, { v: 'yama', w: 2 }, { v: 'nijuuyama', w: 2 }, { v: 'dash', w: 2 }
   ]
 };
 
@@ -77,11 +77,11 @@ const EXCLAIM_WEIGHTS = {
 const EXCLAIM_MARK = { bang: '！', quest: '？', both: '！？', double: '！！' };
 
 const LATIN_WEIGHTS = {
-  cinema: [{ v: 'none', w: 34 }, { v: 'below', w: 26 }, { v: 'slash', w: 16 }, { v: 'paren', w: 8 }, { v: 'separate', w: 16 }],
-  gravure: [{ v: 'none', w: 46 }, { v: 'below', w: 18 }, { v: 'slash', w: 12 }, { v: 'paren', w: 10 }, { v: 'separate', w: 14 }],
+  cinema: [{ v: 'none', w: 38 }, { v: 'below', w: 26 }, { v: 'slash', w: 16 }, { v: 'paren', w: 2 }, { v: 'separate', w: 18 }],
+  gravure: [{ v: 'none', w: 50 }, { v: 'below', w: 18 }, { v: 'slash', w: 12 }, { v: 'paren', w: 4 }, { v: 'separate', w: 16 }],
   novel: [{ v: 'none', w: 56 }, { v: 'below', w: 14 }, { v: 'slash', w: 8 }, { v: 'paren', w: 10 }, { v: 'separate', w: 12 }],
   asmr: [{ v: 'none', w: 48 }, { v: 'below', w: 16 }, { v: 'slash', w: 14 }, { v: 'paren', w: 10 }, { v: 'separate', w: 12 }],
-  game: [{ v: 'none', w: 22 }, { v: 'below', w: 30 }, { v: 'slash', w: 14 }, { v: 'paren', w: 8 }, { v: 'separate', w: 26 }],
+  game: [{ v: 'none', w: 26 }, { v: 'below', w: 30 }, { v: 'slash', w: 14 }, { v: 'paren', w: 2 }, { v: 'separate', w: 28 }],
   adult: [{ v: 'none', w: 52 }, { v: 'below', w: 12 }, { v: 'slash', w: 12 }, { v: 'paren', w: 10 }, { v: 'separate', w: 14 }]
 };
 
@@ -153,7 +153,10 @@ export function styleTitle(rng, core, opts) {
     if (form === 'chapterHead') { body = numeric(rng, 'chapter', genre) + '　' + body; }
     else if (form === 'chapterTail') { body = body + '　' + numeric(rng, 'chapter', genre); }
     else if (form === 'volTail') { body = body + ' Vol.' + numeric(rng, 'few', genre); }
-    else if (form === 'partTail') { body = body + numeric(rng, 'part', genre); }
+    else if (form === 'partTail') {
+      const part = numeric(rng, 'part', genre);
+      body = body + (part.charAt(0) === '（' ? '' : '　') + part;
+    }
     else { body = body + '　' + numeric(rng, 'edition', genre); }
     numeralUsed = form;
   }

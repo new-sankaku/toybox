@@ -210,10 +210,11 @@ export const PATTERNS = {
       '{n:hours}収録／{bonusWord}／{formatWord}／全{n:scenes}'
     ],
     megaTail: [
-      '{makerName}／{labelName}｜{n:code}',
-      '{makerName}｜{n:code}｜{n:date}',
-      '{labelName}／{seriesWord}｜{n:code}',
-      '{makerName}　{n:date}発売　{n:code}'
+      '{makerName}｜{n:code}',
+      '{labelName}／{n:code}',
+      '{makerName}　{n:date}発売',
+      '{labelName}｜{seriesWord}',
+      '{makerName}／{labelName}'
     ],
     tag: ['{seriesWord}', '{makerName}／{labelName}', '{labelName}', '{makerName}'],
     badge: ['{sashWord}'],
