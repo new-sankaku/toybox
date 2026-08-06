@@ -167,18 +167,27 @@ function clamp01(v) {
   return v < 0 ? 0 : (v > 1 ? 1 : v);
 }
 
-function safeShade(base, amount, bg) {
+function minContrast(rgb, bgs) {
+  let m = Infinity;
+  for (let i = 0; i < bgs.length; i++) {
+    const c = contrastRatio(rgb, bgs[i]);
+    if (c < m) { m = c; }
+  }
+  return m;
+}
+
+function safeShade(base, amount, bgs) {
   let a = amount;
   for (let i = 0; i < 7; i++) {
     const c = shade(base, a);
-    if (contrastRatio(c, bg) >= MIN_STOP_CONTRAST) { return c; }
+    if (minContrast(c, bgs) >= MIN_STOP_CONTRAST) { return c; }
     a *= 0.6;
   }
   return base.slice();
 }
 
-function inkAgainst(bg) {
-  return contrastRatio(DARK_INK, bg) >= contrastRatio(LIGHT_INK, bg) ? DARK_INK.slice() : LIGHT_INK.slice();
+function inkAgainst(bgs) {
+  return minContrast(DARK_INK, bgs) >= minContrast(LIGHT_INK, bgs) ? DARK_INK.slice() : LIGHT_INK.slice();
 }
 
 function inkOpposite(rgb) {
@@ -192,9 +201,9 @@ function planRgb(colorPlan, role) {
   return [r.rgb[0], r.rgb[1], r.rgb[2]];
 }
 
-function planOr(colorPlan, role, against, minRatio, derived) {
+function planOr(colorPlan, role, bgs, minRatio, derived) {
   const c = planRgb(colorPlan, role);
-  if (c && contrastRatio(c, against) >= minRatio) { return c; }
+  if (c && minContrast(c, bgs) >= minRatio) { return c; }
   return derived;
 }
 
@@ -206,12 +215,12 @@ function metalBase(base, metal) {
   return blendRgb(base, hslToRgb([h, tint.s, l]), tint.mix);
 }
 
-function accentOf(rng, base, bg, colorPlan) {
+function accentOf(rng, base, bgs, colorPlan) {
   const fromPlan = planRgb(colorPlan, 'accent');
-  if (fromPlan && contrastRatio(fromPlan, bg) >= MIN_STOP_CONTRAST) { return fromPlan; }
+  if (fromPlan && minContrast(fromPlan, bgs) >= MIN_STOP_CONTRAST) { return fromPlan; }
   const hsl = rgbToHsl(base);
   const cand = hslToRgb([(hsl[0] + rng.range(0.3, 0.7)) % 1, Math.max(0.45, hsl[1]), hsl[2]]);
-  return contrastRatio(cand, bg) >= MIN_STOP_CONTRAST ? cand : safeShade(base, rng.chance(0.5) ? 0.5 : -0.5, bg);
+  return minContrast(cand, bgs) >= MIN_STOP_CONTRAST ? cand : safeShade(base, rng.chance(0.5) ? 0.5 : -0.5, bgs);
 }
 
 function eligible(axis, state, ignoreBudget) {
@@ -243,56 +252,69 @@ function takeAxis(state, axis) {
   state.budget -= axis.cost;
 }
 
-function buildLinearStops(rng, base, bg, colorPlan) {
+function buildLinearStops(rng, base, bgs, colorPlan) {
   const amp = rng.range(0.14, 0.44);
   const dir = rng.chance(0.62) ? 1 : -1;
   const alt = planRgb(colorPlan, 'inkAlt');
-  const far = alt && contrastRatio(alt, bg) >= MIN_STOP_CONTRAST
+  const far = alt && minContrast(alt, bgs) >= MIN_STOP_CONTRAST
     ? alt
-    : safeShade(base, -amp * dir * rng.range(0.6, 1.25), bg);
-  const stops = [{ t: 0, rgb: safeShade(base, amp * dir, bg) }];
-  if (rng.chance(0.4)) { stops.push({ t: rng.range(0.4, 0.62), rgb: safeShade(base, amp * dir * 0.2, bg) }); }
+    : safeShade(base, -amp * dir * rng.range(0.6, 1.25), bgs);
+  const stops = [{ t: 0, rgb: safeShade(base, amp * dir, bgs) }];
+  if (rng.chance(0.4)) { stops.push({ t: rng.range(0.4, 0.62), rgb: safeShade(base, amp * dir * 0.2, bgs) }); }
   stops.push({ t: 1, rgb: far });
   return stops;
 }
 
-function shadowInk(base, bg, colorPlan) {
+function shadowInk(base, bgs, colorPlan) {
   const fromPlan = planRgb(colorPlan, 'shadow');
   if (fromPlan && contrastRatio(fromPlan, base) >= 1.6) { return fromPlan; }
-  let rgb = inkAgainst(bg);
+  let rgb = inkAgainst(bgs);
   if (contrastRatio(rgb, base) < 1.6) { rgb = inkOpposite(rgb); }
   return rgb;
 }
 
-function buildShadow(rng, base, bg, colorPlan, hard) {
+function buildShadow(rng, base, bgs, colorPlan, hard) {
   const off = rng.range(0.012, hard ? 0.09 : 0.055);
   const ang = rng.range(Math.PI * 0.18, Math.PI * 0.42);
   return {
-    hard: hard, rgb: shadowInk(base, bg, colorPlan),
+    hard: hard, rgb: shadowInk(base, bgs, colorPlan),
     alpha: rng.range(hard ? 0.45 : 0.24, hard ? 0.85 : 0.6),
     dx: Math.cos(ang) * off, dy: Math.sin(ang) * off,
     blur: hard ? 0 : rng.range(0.06, 0.4)
   };
 }
 
-function buildRule(rng, base, bg, colorPlan) {
-  const derived = contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg);
+function buildRule(rng, base, bgs, colorPlan) {
+  const derived = minContrast(base, bgs) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bgs);
   return {
-    rgb: planOr(colorPlan, 'accent', bg, MIN_STOP_CONTRAST, derived),
+    rgb: planOr(colorPlan, 'accent', bgs, MIN_STOP_CONTRAST, derived),
     alpha: rng.range(0.7, 1), width: rng.range(0.022, 0.075),
     gap: rng.range(0.08, 0.24), double: rng.chance(0.3), spacing: rng.range(0.05, 0.11)
   };
 }
 
-function buildPlate(rng, id, base, bg, colorPlan, forceCover) {
-  const kind = id.substring(6);
-  const derived = inkOpposite(base);
+function plateColorFor(base, bg0, colorPlan) {
+  const opp = inkOpposite(base);
+  const cands = [];
   const planColor = planRgb(colorPlan, 'plate');
-  let rgb = planColor && contrastRatio(planColor, base) >= MIN_PLATE_CONTRAST ? planColor : derived;
-  if (rgb === derived) {
-    const tinted = blendRgb(rgb, bg, 0.18);
-    if (contrastRatio(tinted, base) >= MIN_PLATE_CONTRAST) { rgb = tinted; }
+  if (planColor) { cands.push(planColor); }
+  cands.push(blendRgb(opp, bg0, 0.18));
+  cands.push(opp);
+  cands.push([0, 0, 0]);
+  cands.push([255, 255, 255]);
+  let best = cands[0];
+  let bestC = contrastRatio(cands[0], base);
+  for (let i = 0; i < cands.length; i++) {
+    const r = contrastRatio(cands[i], base);
+    if (r >= MIN_PLATE_CONTRAST) { return cands[i]; }
+    if (r > bestC) { best = cands[i]; bestC = r; }
   }
+  return best;
+}
+
+function buildPlate(rng, id, base, bgs, colorPlan, forceCover) {
+  const kind = id.substring(6);
+  const rgb = plateColorFor(base, bgs[0], colorPlan);
   const perGlyph = kind === 'glyph' || kind === 'random';
   let shape;
   if (forceCover) { shape = rng.weighted([{ v: 'rect', w: 4 }, { v: 'roundRect', w: 2.5 }, { v: 'ribbon', w: 1 }, { v: 'tag', w: 1 }, { v: 'tornPaper', w: 1 }, { v: 'brush', w: 1 }, { v: 'hexagon', w: 0.6 }]); }
@@ -329,20 +351,20 @@ function buildPlate(rng, id, base, bg, colorPlan, forceCover) {
 }
 
 function settlePlate(plate, bgBefore, base) {
-  for (let i = 0; i < 8; i++) {
+  const target = Math.min(MIN_PLATE_CONTRAST, contrastRatio(plate.rgb, base));
+  for (let i = 0; i < 10; i++) {
     const eff = blendRgb(bgBefore, plate.rgb, plate.alpha);
-    if (contrastRatio(base, eff) >= MIN_PLATE_CONTRAST) { return eff; }
+    if (contrastRatio(base, eff) >= target) { return eff; }
     if (plate.alpha >= 1) { break; }
     plate.alpha = Math.min(1, plate.alpha + 0.1);
   }
-  plate.rgb = inkOpposite(base);
   plate.alpha = 1;
-  return blendRgb(bgBefore, plate.rgb, plate.alpha);
+  return plate.rgb.slice();
 }
 
-function buildStrokes(rng, count, base, bg, colorPlan, thick) {
+function buildStrokes(rng, count, base, bgs, colorPlan, thick) {
   if (count <= 0) { return []; }
-  const edgeBg = planOr(colorPlan, 'stroke', bg, MIN_EDGE_CONTRAST, inkAgainst(bg));
+  const edgeBg = planOr(colorPlan, 'stroke', bgs, MIN_EDGE_CONTRAST, inkAgainst(bgs));
   const edgeInk = inkOpposite(base);
   const w0 = rng.range(0.03, 0.12) * (thick ? 1.3 : 1);
   const strokes = [];
@@ -366,7 +388,7 @@ function applyAxis(id, s) {
   const rng = s.rng;
   const spec = s.spec;
   const base = s.base;
-  const bg = s.bg;
+  const bgs = s.bgs;
   const plan = s.colorPlan;
   const vertical = rng.chance(0.74);
   const angle = vertical ? Math.PI / 2 + rng.range(-0.12, 0.12) : rng.range(-0.5, 0.5);
@@ -376,13 +398,13 @@ function applyAxis(id, s) {
       spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
       break;
     case 'fill.linear':
-      spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bg, plan) };
+      spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bgs, plan) };
       break;
     case 'fill.duotone': {
       const split = rng.range(0.42, 0.58);
       const up = rng.range(0.2, 0.5) * (rng.chance(0.5) ? 1 : -1);
-      const a = planOr(plan, 'ink', bg, MIN_STOP_CONTRAST, safeShade(base, up, bg));
-      const b = planOr(plan, 'inkAlt', bg, MIN_STOP_CONTRAST, safeShade(base, -up * rng.range(0.7, 1.3), bg));
+      const a = planOr(plan, 'ink', bgs, MIN_STOP_CONTRAST, safeShade(base, up, bgs));
+      const b = planOr(plan, 'inkAlt', bgs, MIN_STOP_CONTRAST, safeShade(base, -up * rng.range(0.7, 1.3), bgs));
       spec.fill = {
         type: 'duotone', angle: angle,
         stops: [{ t: 0, rgb: a }, { t: split, rgb: a }, { t: Math.min(1, split + 0.004), rgb: b }, { t: 1, rgb: b }]
@@ -392,20 +414,20 @@ function applyAxis(id, s) {
     case 'fill.metallic': {
       const metal = rng.weighted([{ v: 'gold', w: 3 }, { v: 'silver', w: 3 }, { v: 'chrome', w: 2 }]);
       const mb = metalBase(base, metal);
-      if (contrastRatio(mb, bg) < MIN_STOP_CONTRAST) {
-        spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bg, plan) };
+      if (minContrast(mb, bgs) < MIN_STOP_CONTRAST) {
+        spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bgs, plan) };
         break;
       }
       const prof = METAL_PROFILE[metal];
       const stops = [];
-      for (let i = 0; i < prof.length; i++) { stops.push({ t: prof[i][0], rgb: safeShade(mb, prof[i][1], bg) }); }
+      for (let i = 0; i < prof.length; i++) { stops.push({ t: prof[i][0], rgb: safeShade(mb, prof[i][1], bgs) }); }
       spec.fill = { type: 'metallic', metal: metal, angle: Math.PI / 2 + rng.range(-0.08, 0.08), stops: stops };
       break;
     }
     case 'fill.mirror': {
       const split = rng.range(0.44, 0.56);
-      const hi = safeShade(base, 0.6, bg);
-      const lo = safeShade(base, -0.45, bg);
+      const hi = safeShade(base, 0.6, bgs);
+      const lo = safeShade(base, -0.45, bgs);
       spec.fill = {
         type: 'mirror', angle: Math.PI / 2,
         stops: [
@@ -416,7 +438,7 @@ function applyAxis(id, s) {
       break;
     }
     case 'fill.stripe': {
-      const alt = planOr(plan, 'accent', bg, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.55 : -0.5, bg));
+      const alt = planOr(plan, 'accent', bgs, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.55 : -0.5, bgs));
       spec.fill = {
         type: 'stripe', angle: 0,
         stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }],
@@ -428,7 +450,7 @@ function applyAxis(id, s) {
       break;
     }
     case 'fill.pattern': {
-      const alt = planOr(plan, 'accent', bg, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.5 : -0.45, bg));
+      const alt = planOr(plan, 'accent', bgs, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.5 : -0.45, bgs));
       spec.fill = {
         type: 'pattern', angle: 0,
         stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }],
@@ -455,25 +477,25 @@ function applyAxis(id, s) {
 
     case 'glow.soft':
       spec.glow = {
-        rgb: planOr(plan, 'glow', bg, 1, luma01(bg) > 0.5 ? shade(base, -0.55) : shade(base, 0.6)),
+        rgb: planOr(plan, 'glow', bgs, 1, luma01(bgs[0]) > 0.5 ? shade(base, -0.55) : shade(base, 0.6)),
         alpha: rng.range(0.25, 0.55), blur: rng.range(0.22, 0.7), passes: rng.chance(0.4) ? 2 : 1
       };
       break;
     case 'glow.neon': {
-      const tube = accentOf(rng, base, bg, plan);
+      const tube = accentOf(rng, base, bgs, plan);
       spec.glow = { rgb: tube, alpha: rng.range(0.55, 0.9), blur: rng.range(0.6, 1.3), passes: 2 };
-      spec.neon = { tube: tube, core: safeShade(base, 0.8, bg), width: rng.range(0.07, 0.14) };
+      spec.neon = { tube: tube, core: safeShade(base, 0.8, bgs), width: rng.range(0.07, 0.14) };
       break;
     }
 
-    case 'shadow.soft': spec.dropShadow = buildShadow(rng, base, bg, plan, false); break;
-    case 'shadow.hard': spec.dropShadow = buildShadow(rng, base, bg, plan, true); break;
+    case 'shadow.soft': spec.dropShadow = buildShadow(rng, base, bgs, plan, false); break;
+    case 'shadow.hard': spec.dropShadow = buildShadow(rng, base, bgs, plan, true); break;
     case 'shadow.long': {
       const ang = rng.range(Math.PI * 0.15, Math.PI * 0.45);
       const len = rng.range(0.25, 0.8);
       const steps = Math.max(6, Math.min(18, Math.round(len / 0.035)));
       spec.longShadow = {
-        rgb: shadowInk(base, bg, plan), alpha: rng.range(0.35, 0.7), steps: steps,
+        rgb: shadowInk(base, bgs, plan), alpha: rng.range(0.35, 0.7), steps: steps,
         dx: Math.cos(ang) * len / steps, dy: Math.sin(ang) * len / steps
       };
       break;
@@ -482,7 +504,7 @@ function applyAxis(id, s) {
       const ang = rng.range(Math.PI * 0.1, Math.PI * 0.5);
       const depth = rng.range(0.08, 0.26);
       const steps = Math.max(4, Math.min(14, Math.round(depth / 0.018)));
-      const face = safeShade(base, -0.55, bg);
+      const face = safeShade(base, -0.55, bgs);
       spec.extrude = {
         near: face, far: shade(face, -0.35), steps: steps,
         dx: Math.cos(ang) * depth / steps, dy: Math.sin(ang) * depth / steps
@@ -499,7 +521,7 @@ function applyAxis(id, s) {
     case 'plate.random':
     case 'plate.marker':
     case 'plate.knockout':
-      spec.plate = buildPlate(rng, id, base, bg, plan, s.forceCover);
+      spec.plate = buildPlate(rng, id, base, bgs, plan, s.forceCover);
       break;
 
     case 'distort.arc':
@@ -541,8 +563,8 @@ function applyAxis(id, s) {
 
     case 'fx.bevel':
       spec.bevel = {
-        light: safeShade(base, rng.range(0.35, 0.7), bg),
-        dark: safeShade(base, -rng.range(0.35, 0.7), bg),
+        light: safeShade(base, rng.range(0.35, 0.7), bgs),
+        dark: safeShade(base, -rng.range(0.35, 0.7), bgs),
         offset: rng.range(0.014, 0.05), alpha: rng.range(0.7, 1)
       };
       break;
@@ -560,15 +582,15 @@ function applyAxis(id, s) {
       };
       break;
     case 'fx.misregister': {
-      const a = accentOf(rng, base, bg, plan);
+      const a = accentOf(rng, base, bgs, plan);
       spec.misregister = {
         layers: [
           { rgb: a, dx: rng.range(0.008, 0.03) * (rng.chance(0.5) ? 1 : -1), dy: rng.range(-0.02, 0.02), alpha: rng.range(0.45, 0.85) },
-          { rgb: safeShade(base, -0.5, bg), dx: rng.range(-0.03, -0.008), dy: rng.range(-0.02, 0.02), alpha: rng.range(0.35, 0.7) }
+          { rgb: safeShade(base, -0.5, bgs), dx: rng.range(-0.03, -0.008), dy: rng.range(-0.02, 0.02), alpha: rng.range(0.35, 0.7) }
         ]
       };
       if (rng.chance(0.35)) {
-        spec.misregister.layers.push({ rgb: safeShade(base, 0.5, bg), dx: rng.range(-0.02, 0.02), dy: rng.range(0.008, 0.03), alpha: rng.range(0.3, 0.6) });
+        spec.misregister.layers.push({ rgb: safeShade(base, 0.5, bgs), dx: rng.range(-0.02, 0.02), dy: rng.range(0.008, 0.03), alpha: rng.range(0.3, 0.6) });
       }
       break;
     }
@@ -585,11 +607,11 @@ function applyAxis(id, s) {
       spec.torn = { count: rng.int(2, 5), amount: rng.range(0.1, 0.32), seed: rng.int(1, 9999) };
       break;
 
-    case 'orn.underline': spec.underline = buildRule(rng, base, bg, plan); break;
-    case 'orn.overline': spec.overline = buildRule(rng, base, bg, plan); break;
+    case 'orn.underline': spec.underline = buildRule(rng, base, bgs, plan); break;
+    case 'orn.overline': spec.overline = buildRule(rng, base, bgs, plan); break;
     case 'orn.boten':
       spec.boten = {
-        rgb: contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg),
+        rgb: minContrast(base, bgs) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bgs),
         mark: rng.pick(BOTEN_MARKS), size: rng.range(0.16, 0.26),
         gap: rng.range(0.06, 0.16), alpha: rng.range(0.8, 1)
       };
@@ -651,8 +673,8 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   const plan = colorPlan || null;
   const source = opts && opts.sourceCanvas ? opts.sourceCanvas : null;
 
-  let bg = stats.rgb.slice();
-  if (style.scrim) { bg = blendRgb(bg, style.scrim.color, style.scrim.alpha); }
+  let bareBg = stats.rgb.slice();
+  if (style.scrim) { bareBg = blendRgb(bareBg, style.scrim.color, style.scrim.alpha); }
 
   const spec = {
     genre: genre, level: level,
@@ -665,11 +687,11 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
       alternate: 0, ramp: 0, shear: 0, dropCap: 0, shatter: null, seed: rng.int(1, 99999)
     },
     transform: { skewX: 0, rotate: 0, scaleX: 1, originX: 0.5, originY: 0.5 },
-    vertical: false, effectiveBg: bg, axes: []
+    vertical: false, effectiveBg: bareBg, plateBg: null, axes: []
   };
 
   const state = {
-    rng: rng, spec: spec, base: base, bg: bg, colorPlan: plan, source: source,
+    rng: rng, spec: spec, base: base, bgs: [bareBg], colorPlan: plan, source: source,
     gi: genreIndex(genre), level: level, taken: {}, chosen: [], groupCount: {},
     budget: budgetOf(slot) * (0.65 + inten * 0.7)
   };
@@ -684,7 +706,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   }
 
   const selected = [];
-  if (level > 0.2 && (noisy || contrastRatio(base, bg) < MIN_STOP_CONTRAST)) {
+  if (level > 0.2 && (noisy || minContrast(base, state.bgs) < MIN_STOP_CONTRAST)) {
     const forced = pickAxis(rng, platePool, state, true);
     if (forced) {
       takeAxis(state, forced);
@@ -719,8 +741,10 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
     state.forceCover = entry.forceCover;
     applyAxis(entry.axis.id, state);
     state.forceCover = false;
-    if (entry.axis.group === 'plate' && spec.plate && spec.plate.covers) {
-      state.bg = settlePlate(spec.plate, state.bg, base);
+    if (entry.axis.group === 'plate' && spec.plate) {
+      const plated = settlePlate(spec.plate, bareBg, base);
+      spec.plateBg = plated;
+      state.bgs = spec.plate.covers ? [plated] : [bareBg, plated];
     }
     let label = entry.axis.id;
     if (entry.axis.group === 'plate' && spec.plate) { label += ':' + spec.plate.scope + '/' + spec.plate.shape; }
@@ -728,13 +752,15 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
     spec.axes.push(label);
   }
 
-  bg = state.bg;
+  const bgs = state.bgs;
 
   const covered = !!(spec.plate && (spec.plate.covers || spec.plate.knockout));
   if (spec.needStroke && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (spec.neon && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (noisy && spec.strokeCount === 0 && !covered && !spec.glow) { spec.strokeCount = 1; }
-  spec.strokes = buildStrokes(rng, spec.strokeCount, base, bg, plan, noisy && !covered);
+  if (spec.plate && spec.strokeCount === 0
+    && contrastRatio(spec.plate.rgb, base) < MIN_PLATE_CONTRAST) { spec.strokeCount = 1; }
+  spec.strokes = buildStrokes(rng, spec.strokeCount, base, bgs, plan, noisy && !covered);
 
   if (spec.neon && spec.strokes.length > 0) {
     spec.strokes[0].rgb = spec.neon.tube;
@@ -746,17 +772,18 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   }
 
   if (spec.fill.type === 'image' && !spec.fill.source) {
-    spec.fill = { type: 'linear', angle: Math.PI / 2, stops: buildLinearStops(rng, base, bg, plan) };
+    spec.fill = { type: 'linear', angle: Math.PI / 2, stops: buildLinearStops(rng, base, bgs, plan) };
   }
   if ((spec.fill.type === 'image' || spec.fill.type === 'none') && spec.strokes.length === 0) {
-    spec.strokes = buildStrokes(rng, 1, base, bg, plan, true);
+    spec.strokes = buildStrokes(rng, 1, base, bgs, plan, true);
   }
   if (noisy && !covered && !spec.glow && spec.strokes.length === 0) {
-    spec.strokes = buildStrokes(rng, 2, base, bg, plan, true);
+    spec.strokes = buildStrokes(rng, 2, base, bgs, plan, true);
     spec.axes.push('stroke.forced');
   }
 
-  spec.effectiveBg = bg;
+  spec.effectiveBg = bgs[0];
+  spec.effectiveBgs = bgs;
   capPasses(spec);
   return spec;
 }

@@ -207,7 +207,7 @@ export const REGISTER = {
       'いま、{noun}が動き出す', '{n:few}つの{tail}、ひとつの結末', '世界は、君の選択を待っている',
       '崩壊まで、あと{n:few}日', '{adj}{tail}が、大地を覆う', 'ここから先は、誰も戻れない',
       '広大な{tail}が、いま解き放たれる', '{systemWord}で描く、新たな戦場',
-      '{n:count}時間を超える冒険が待つ', '{noun}の封印が、いま解かれる', '大陸は、ふたたび燃えている',
+      '{n:hours}を超える冒険が待つ', '{noun}の封印が、いま解かれる', '大陸は、ふたたび燃えている',
       '君だけが、{tail}を継ぐ者だ', '{n:few}人の英雄が、いま集結する', '敵は、想像を超えてくる',
       '最果ての{tail}が、君を呼んでいる', '{systemWord}が、常識を書き換える',
       'すべての道は、{noun}へ通じる', '沈黙した{tail}が、目を覚ます', '選択が、世界の形を変える',
@@ -227,11 +227,11 @@ export const REGISTER = {
     nominal: [
       '{systemWord}×{systemWord}', '{n:few}つの{tail}、{n:few}通りの結末',
       '{adj}{tail}、開幕', '{editionWord}、始動', '{platform}で、いま', '{noun}、覚醒',
-      '{systemWord}アクション、誕生', '{n:count}時間の{tail}'
+      '{systemWord}アクション、誕生', '{n:hours}の{tail}'
     ],
     scale: [
       'シリーズ最大volume', '{n:week}販売本数第一位', '全世界待望', '前作を超えるscale',
-      '累計{n:volume}を突破したシリーズ最新作', '{editionWord}'
+      '累計出荷{n:count}万本を突破したシリーズ最新作', '{editionWord}'
     ],
     forms: [
       { id: 'AB', t: '[A]。[B]。', w: 22, len: 'mid' },
@@ -249,7 +249,7 @@ export const REGISTER = {
     person: 'none',
     tone: 'promo',
     clauseA: [
-      '{bonusWord}', '{seriesWord}', '{formatWord}', '本編{n:minutes}', '{n:track}収録',
+      '{bonusWord}', '{seriesWord}', '{formatWord}', '本編{n:minutes}', '全{n:scenes}収録',
       '品番 {n:code}', '{labelName} 制作', '{n:date} 発売', '{n:week}売上第一位',
       '{n:edition} 発売中', 'パッケージ版・配信版 同時展開', '特典ディスク付',
       '収録時間 {n:minutes}', 'シリーズ累計{n:count}作', '新装ジャケット仕様',
@@ -268,7 +268,7 @@ export const REGISTER = {
     connective: ['さらに', 'しかも', 'もちろん', 'なお', 'そのうえ', '加えて'],
     nominal: [
       '{labelName}｜{seriesWord}', '{bonusWord}／{formatWord}', '{n:minutes}／{n:code}',
-      '{seriesWord}｜{bonusWord}', '{formatWord}｜{n:track}', '{labelName}／{n:date}',
+      '{seriesWord}｜{bonusWord}', '{formatWord}｜全{n:scenes}', '{labelName}／{n:date}',
       '{bonusWord}｜{n:minutes}｜{n:code}', '{seriesWord}／{n:edition}'
     ],
     scale: [

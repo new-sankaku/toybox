@@ -101,12 +101,18 @@ export function styleTitle(rng, core, opts) {
   const o = opts || {};
   const genre = o.genre;
   if (!BRACKET_WEIGHTS[genre]) { throw new Error('unknown genre: ' + genre); }
+  const tags = Array.isArray(o.tags) ? o.tags : null;
+  let tagCount = 0;
+  if (tags && tags.length >= 2) {
+    tagCount = Math.min(rng.weighted([{ v: 2, w: 6 }, { v: 3, w: 4 }, { v: 4, w: 2 }]), tags.length);
+  }
   const allowLatin = o.allowLatin !== false && !!core.en;
   const allowExclaim = o.allowExclaim !== false;
   const vertical = !!o.vertical;
   const axes = [];
 
   let bracket = rng.weighted(BRACKET_WEIGHTS[genre]);
+  if (tagCount > 0 && rng.chance(0.72)) { bracket = 'none'; }
 
   let punct = rng.weighted(PUNCT_WEIGHTS[genre]);
   const seg = partsJa(core);
@@ -169,6 +175,7 @@ export function styleTitle(rng, core, opts) {
 
   const latinText = core.en ? String(core.en).toUpperCase() : '';
   if (latinText.length > 30) { latinMode = 'none'; }
+  if (tagCount > 0 && (latinMode === 'slash' || latinMode === 'paren')) { latinMode = 'separate'; }
   if (latinMode === 'slash' && text.length + latinText.length > 18) { latinMode = 'separate'; }
   if (latinMode === 'paren' && text.length + latinText.length > 26) { latinMode = 'separate'; }
   let latinOut = '';
@@ -177,6 +184,13 @@ export function styleTitle(rng, core, opts) {
   else if (latinMode === 'paren') { text = text + '（' + latinText + '）'; }
   else if (latinMode === 'separate') { latinOut = latinText; }
 
+  if (tagCount > 0) {
+    let prefix = '';
+    for (let i = 0; i < tagCount; i++) { prefix += '【' + tags[i] + '】'; }
+    text = prefix + text;
+  }
+
+  axes.push('tagrow:' + tagCount);
   axes.push('bracket:' + bracket);
   axes.push('punct:' + punct);
   axes.push('ellipsis:' + ellipsis);

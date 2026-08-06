@@ -385,7 +385,7 @@ export const LEXICON = {
       'NOIR PICTURES', '深夜堂', 'VELVET LINE', '紫苑スタジオ', 'LATE HOUR'
     ],
     seriesWord: [
-      'シリーズ{n:episode}', '人気シリーズ最新作', '好評につき続編', 'ベストセレクション',
+      'シリーズ第{n:seriesNo}弾', '人気シリーズ最新作', '好評につき続編', 'ベストセレクション',
       '総集編', '完全新作', '特別編', '新装版', 'アンコール収録'
     ],
     bonusWord: [
