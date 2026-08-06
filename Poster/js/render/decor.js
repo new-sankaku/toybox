@@ -21,8 +21,8 @@ const GENRE_BUDGET = [1, 0.92, 0.28, 0.88, 1.05, 1.1];
 const DISTORT_RATE = [0.03, 0.06, 0, 0.06, 0.09, 0.11];
 const GLITCH_RATE = [0.04, 0.015, 0, 0.015, 0.08, 0.09];
 const PARTIAL_PLATE_RATE = 0.12;
-const BEVEL_RATE = [0, 0, 0, 0, 0.55, 0.5];
-const METAL_RATE = [0.06, 0, 0, 0, 0.55, 0.45];
+const BEVEL_RATE = [0, 0, 0, 0, 0.05, 0.12];
+const METAL_RATE = [0.04, 0, 0, 0, 0.15, 0.3];
 
 const METAL_PROFILE = {
   gold: [[0, -0.42], [0.14, 0.2], [0.3, 0.62], [0.44, 0.06], [0.5, -0.34], [0.57, 0.06], [0.72, 0.58], [0.88, 0.06], [1, -0.44]],

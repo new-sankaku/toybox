@@ -176,7 +176,7 @@ function blockMetrics(ctx, sample, size) {
   return { ascent: size * EM_ASCENT, descent: size * EM_DESCENT };
 }
 
-function glyphMods(d, i, n, size) {
+function glyphMods(d, i, n, size, lineIndex) {
   const mods = { s: 1, sy: 1, dx: 0, dy: 0, rot: 0, shear: 0 };
   if (!d) { return mods; }
   const u = n > 1 ? (i + 0.5) / n : 0.5;
@@ -193,7 +193,7 @@ function glyphMods(d, i, n, size) {
   if (d.alternate) { mods.s *= 1 + d.alternate * (i % 2 === 0 ? 1 : -1); }
   if (d.ramp) { mods.s *= 1 + d.ramp * c * 0.5; }
   if (d.shear) { mods.shear += d.shear * (i % 2 === 0 ? 1 : -1); }
-  if (d.dropCap && i === 0) { mods.s *= 1 + d.dropCap; }
+  if (d.dropCap && i === 0 && lineIndex === 0) { mods.s *= 1 + d.dropCap; }
   if (d.jitter) {
     mods.rot += (hash01(d.seed + i * 3.3) - 0.5) * 2 * d.jitter.rot;
     mods.dx += (hash01(d.seed + i * 7.7) - 0.5) * 2 * d.jitter.off * size;
@@ -218,10 +218,10 @@ function distortBleedRatio(d) {
   return b;
 }
 
-function scaledLineWidth(ctx, line, tracking, distort, size, tier) {
+function scaledLineWidth(ctx, line, tracking, distort, size, tier, lineIndex) {
   let w = 0;
   for (let i = 0; i < line.length; i++) {
-    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size).s * tier;
+    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size, lineIndex).s * tier;
   }
   if (line.length > 1) { w += tracking * (line.length - 1) * tier; }
   return w;
@@ -486,7 +486,7 @@ function tryHorizontal(ctx, args, spec, cfg, env) {
     metrics = blockMetrics(ctx, lines.join(''), size);
     widest = 0;
     for (let i = 0; i < lines.length; i++) {
-      const w = scaledLineWidth(ctx, lines[i], tracking * size, env.distort, size, tiers[i]);
+      const w = scaledLineWidth(ctx, lines[i], tracking * size, env.distort, size, tiers[i], i);
       if (w > widest) { widest = w; }
     }
     blockH = blockHeight(lines, tiers, size, env.lhFactor, metrics, env.distort);
@@ -594,7 +594,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
     const line = lines[i];
     const tier = tiers[i];
     if (i > 0) { baseY += lineAdvance(size, env.lhFactor, tiers[i - 1], tier, metrics, distort, i === 1); }
-    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier);
+    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier, i);
     let x = anchorX;
     if (align === 'center') { x -= lineW / 2; }
     else if (align === 'right') { x -= lineW; }
@@ -605,7 +605,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       const cls = charClass(ch);
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
-      const mods = glyphMods(distort, j, line.length, size);
+      const mods = glyphMods(distort, j, line.length, size, i);
       const gsx = mods.s * tier;
       const gsy = mods.s * mods.sy * tier;
       const adv = charWidth(ctx, ch) * gsx;
@@ -730,7 +730,7 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
       const cls = charClass(ch);
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
-      const mods = glyphMods(distort, k, cols[c].length, size);
+      const mods = glyphMods(distort, k, cols[c].length, size, c);
       const lateral = size * VERT_LATERAL_LIMIT;
       let dx = Math.max(-lateral, Math.min(lateral, mods.dy));
       let dy = mods.dx;
