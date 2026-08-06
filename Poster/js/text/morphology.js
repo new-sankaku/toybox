@@ -16,8 +16,17 @@ export function poolsFor(genre) {
     const k = extKeys[i];
     if (merged[k]) { merged[k] = merged[k].concat(extra[k]); } else { merged[k] = extra[k].slice(); }
   }
+  merged.__own = extra;
   POOL_CACHE[genre] = merged;
   return merged;
+}
+
+const GENRE_BIAS = 0.4;
+
+function pickBiased(rng, pools, key) {
+  const own = pools.__own[key];
+  if (own && own.length > 0 && rng.chance(GENRE_BIAS)) { return rng.pick(own); }
+  return rng.pick(pools[key]);
 }
 
 const MODE_WEIGHTS = {
@@ -63,21 +72,23 @@ export function composeNoun(rng, genre, opts) {
   const mode = o.mode ? o.mode : rng.weighted(modes);
 
   if (mode === 'head') {
-    const h = rng.pick(pools.nounHead);
+    const h = pickBiased(rng, pools, 'nounHead');
     return { ja: h.ja, en: h.en, mode: mode, parts: [h] };
   }
   if (mode === 'tail') {
-    const t = rng.pick(pools.nounTail);
+    const t = pickBiased(rng, pools, 'nounTail');
     return { ja: t.ja, en: t.en, mode: mode, parts: [t] };
   }
   if (mode === 'adjNoun') {
-    const a = rng.pick(pools.adj);
-    const n = rng.chance(0.45) ? rng.pick(pools.nounHead) : rng.pick(pools.nounTail);
+    const a = pickBiased(rng, pools, 'adj');
+    const n = rng.chance(0.45) ? pickBiased(rng, pools, 'nounHead') : pickBiased(rng, pools, 'nounTail');
     return { ja: a.ja + n.ja, en: a.en + ' ' + n.en, mode: mode, parts: [a, n] };
   }
 
-  const h = rng.pick(pools.nounHead);
-  const t = pickDistinct(rng, pools.nounTail, [h.ja]);
+  const h = pickBiased(rng, pools, 'nounHead');
+  const t = rng.chance(GENRE_BIAS) && pools.__own.nounTail
+    ? pickDistinct(rng, pools.__own.nounTail, [h.ja])
+    : pickDistinct(rng, pools.nounTail, [h.ja]);
   if (!t) { return composeNoun(rng, genre, { mode: 'adjNoun' }); }
 
   if (mode === 'compound') {
@@ -180,10 +191,9 @@ export function numeric(rng, kind, genre) {
   if (kind === 'rating') { return String(rng.int(35, 50) / 10) + '／5.0'; }
   if (kind === 'episode') { return '第' + String(rng.int(2, 24)) + '弾'; }
   if (kind === 'edition') {
-    const form = rng.weighted([{ v: 'vol', w: 4 }, { v: 'ban', w: 3 }, { v: 'ki', w: 3 }]);
+    const form = rng.weighted([{ v: 'vol', w: 5 }, { v: 'ban', w: 4 }]);
     if (form === 'vol') { return 'Vol.' + String(rng.int(1, 12)); }
-    if (form === 'ban') { return '第' + String(rng.int(2, 28)) + '版'; }
-    return '第' + String(rng.int(2, 40)) + '期';
+    return '第' + String(rng.int(2, 28)) + '版';
   }
   if (kind === 'chapter') { return '第' + String(rng.int(1, 24)) + '章'; }
   if (kind === 'count') { return String(rng.int(2, 99)); }

@@ -11,7 +11,7 @@ const MIN_FONT_PX = 8;
 const MIN_SIZE_RATIO = 0.42;
 const SHRINK_STEP = 0.93;
 const LINE_HEIGHT = 1.32;
-const LINE_HEIGHT_TIGHT = 1.14;
+const LINE_HEIGHT_TIGHT = 1.16;
 const VERT_TRACK_SCALE = 0.4;
 const COL_ADVANCE = 1.34;
 const EM_ASCENT = 0.82;
@@ -21,9 +21,41 @@ const BOTEN_LIFT = 0.06;
 const VERT_SMALL_SHIFT = 0.06;
 const VERT_CORNER_SHIFT_X = 0.28;
 const VERT_CORNER_SHIFT_Y = 0.3;
+const SCALE_MIN = 0.25;
+const SCALE_MAX = 3;
+const SY_MIN = 0.3;
+const SY_MAX = 2.4;
+
+function hash01(n) {
+  let x = Math.sin(n * 12.9898) * 43758.5453;
+  x -= Math.floor(x);
+  return x < 0 ? x + 1 : x;
+}
 
 function fontSpecOf(weight, size, fontCss) {
   return weight + ' ' + size + 'px ' + fontCss;
+}
+
+function charClass(ch) {
+  const c = ch.charCodeAt(0);
+  if (c === 32 || c === 0x3000) { return 'sp'; }
+  if (c >= 0x30 && c <= 0x39) { return 'num'; }
+  if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) { return 'lat'; }
+  if (c >= 0x3040 && c <= 0x309f) { return 'hira'; }
+  if (c >= 0x30a0 && c <= 0x30ff) { return 'kata'; }
+  if ((c >= 0x4e00 && c <= 0x9fff) || (c >= 0x3400 && c <= 0x4dbf)) { return 'kanji'; }
+  return 'sym';
+}
+
+function phraseBreak(prev, cur) {
+  if (prev === null) { return false; }
+  if (cur === 'sp' || prev === 'sp') { return true; }
+  if (cur === 'sym' || prev === 'sym') { return true; }
+  if (prev === cur) { return false; }
+  if (prev === 'kanji' && cur === 'hira') { return false; }
+  if (prev === 'kata' && cur === 'hira') { return false; }
+  if (prev === 'num' && cur === 'lat') { return false; }
+  return true;
 }
 
 function tokenizeForWrap(text) {
@@ -108,8 +140,98 @@ function blockMetrics(ctx, sample, size) {
   return { ascent: size * EM_ASCENT, descent: size * EM_DESCENT };
 }
 
+function glyphMods(d, i, n, size) {
+  const mods = { s: 1, sy: 1, dx: 0, dy: 0, rot: 0, shear: 0 };
+  if (!d) { return mods; }
+  const u = n > 1 ? (i + 0.5) / n : 0.5;
+  const c = 2 * u - 1;
+  if (d.arc) {
+    mods.dy += -d.arc * size * 4 * (u - u * u);
+    mods.rot += d.arc * ARCH_ROT_SCALE * c;
+  }
+  if (d.wave) { mods.dy += d.wave.amp * size * Math.sin(d.wave.phase + u * Math.PI * 2 * d.wave.freq); }
+  if (d.fan) { mods.rot += d.fan * c * 2; mods.dy += c * c * size * d.fan; }
+  if (d.stagger) { mods.dy += (i % 3) * d.stagger * size; }
+  if (d.trapezoid) { mods.sy *= 1 + d.trapezoid * c; }
+  if (d.bulge) { mods.s *= 1 + d.bulge * (1 - c * c); }
+  if (d.alternate) { mods.s *= 1 + d.alternate * (i % 2 === 0 ? 1 : -1); }
+  if (d.ramp) { mods.s *= 1 + d.ramp * c * 0.5; }
+  if (d.shear) { mods.shear += d.shear * (i % 2 === 0 ? 1 : -1); }
+  if (d.dropCap && i === 0) { mods.s *= 1 + d.dropCap; }
+  if (d.jitter) {
+    mods.rot += (hash01(d.seed + i * 3.3) - 0.5) * 2 * d.jitter.rot;
+    mods.dx += (hash01(d.seed + i * 7.7) - 0.5) * 2 * d.jitter.off * size;
+    mods.dy += (hash01(d.seed + i * 11.1) - 0.5) * 2 * d.jitter.off * size;
+    mods.s *= 1 + (hash01(d.seed + i * 5.5) - 0.5) * 2 * d.jitter.scale;
+  }
+  if (d.shatter && hash01(d.seed + i * 13.7) < d.shatter.ratio) {
+    mods.dx += (hash01(d.seed + i * 19.3) - 0.5) * 2 * d.shatter.amp * size;
+    mods.dy += (hash01(d.seed + i * 23.1) - 0.5) * 2 * d.shatter.amp * size;
+    mods.rot += (hash01(d.seed + i * 29.7) - 0.5) * 0.5;
+  }
+  mods.s = Math.max(SCALE_MIN, Math.min(SCALE_MAX, mods.s));
+  mods.sy = Math.max(SY_MIN, Math.min(SY_MAX, mods.sy));
+  return mods;
+}
+
+function scaledLineWidth(ctx, line, tracking, distort, size) {
+  let w = 0;
+  for (let i = 0; i < line.length; i++) {
+    w += ctx.measureText(line.charAt(i)).width * glyphMods(distort, i, line.length, size).s;
+  }
+  if (line.length > 1) { w += tracking * (line.length - 1); }
+  return w;
+}
+
+function pushRegion(map, key, rect) {
+  if (!map[key]) { map[key] = { x: rect.x, y: rect.y, w: rect.w, h: rect.h }; return; }
+  const r = map[key];
+  const x1 = Math.max(r.x + r.w, rect.x + rect.w);
+  const y1 = Math.max(r.y + r.h, rect.y + rect.h);
+  r.x = Math.min(r.x, rect.x);
+  r.y = Math.min(r.y, rect.y);
+  r.w = x1 - r.x;
+  r.h = y1 - r.y;
+}
+
+function collectRegions(glyphs) {
+  const lineMap = {};
+  const phraseMap = {};
+  const glyphRects = [];
+  for (let i = 0; i < glyphs.length; i++) {
+    const g = glyphs[i];
+    if (g.blank) { continue; }
+    const rect = { x: g.bx, y: g.by, w: g.bw, h: g.bh };
+    glyphRects.push(rect);
+    pushRegion(lineMap, String(g.line), rect);
+    pushRegion(phraseMap, String(g.phrase), rect);
+  }
+  const lines = [];
+  const phrases = [];
+  const lk = Object.keys(lineMap);
+  for (let i = 0; i < lk.length; i++) { lines.push(lineMap[lk[i]]); }
+  const pk = Object.keys(phraseMap);
+  for (let i = 0; i < pk.length; i++) { phrases.push(phraseMap[pk[i]]); }
+  return { glyph: glyphRects, line: lines, phrase: phrases };
+}
+
+function boundsOf(glyphs) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < glyphs.length; i++) {
+    const g = glyphs[i];
+    if (g.blank) { continue; }
+    if (g.bx < x0) { x0 = g.bx; }
+    if (g.by < y0) { y0 = g.by; }
+    if (g.bx + g.bw > x1) { x1 = g.bx + g.bw; }
+    if (g.by + g.bh > y1) { y1 = g.by + g.bh; }
+  }
+  if (!(x1 > x0) || !(y1 > y0)) { return null; }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
 function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   const slot = args.slot;
+  const distort = spec ? spec.distort : null;
   const maxLines = slot.maxLines > 0 ? slot.maxLines : 1;
   const tracking = slot.tracking > 0 ? slot.tracking : 0;
   const maxWidth = (args.rect.w * args.W) / scaleX;
@@ -117,7 +239,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   let size = args.startSize;
   let lines = null;
 
-  ctx.textAlign = 'left';
+  ctx.textAlign = 'center';
   ctx.textBaseline = 'alphabetic';
   for (;;) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
@@ -128,18 +250,18 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   lines = lines.slice(0, maxLines);
   if (lines.length === 0) { return null; }
 
-  ctx.font = fontSpecOf(args.weight, size, args.fontCss);
-  let widest = 0;
-  for (let i = 0; i < lines.length; i++) {
-    const w = measureTracked(ctx, lines[i], tracking * size);
-    if (w > widest) { widest = w; }
-  }
-  if (widest > maxWidth && widest > 0) {
-    size = Math.max(minSize, size * (maxWidth / widest));
+  for (let pass = 0; pass < 3; pass++) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
+    let widest = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size);
+      if (w > widest) { widest = w; }
+    }
+    if (widest <= maxWidth || size <= minSize || !(widest > 0)) { break; }
+    size = Math.max(minSize, size * (maxWidth / widest));
   }
+  ctx.font = fontSpecOf(args.weight, size, args.fontCss);
 
-  const arch = spec && spec.transform ? spec.transform.arch : 0;
   const lh = size * (slot.decor === 'title' ? LINE_HEIGHT_TIGHT : LINE_HEIGHT);
   const metrics = blockMetrics(ctx, lines.join(''), size);
   const totalH = lh * (lines.length - 1) + metrics.ascent + metrics.descent;
@@ -158,56 +280,53 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   else { anchorX = rectLeft; align = 'left'; originX = 0; }
 
   const glyphs = [];
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
+  let phrase = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const lineW = measureTracked(ctx, line, tracking * size);
+    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size);
     let x = anchorX;
     if (align === 'center') { x -= lineW / 2; }
     else if (align === 'right') { x -= lineW; }
     const baseY = top + metrics.ascent + i * lh;
-    const startX = x;
+    let prevClass = null;
+    phrase++;
     for (let j = 0; j < line.length; j++) {
       const ch = line.charAt(j);
-      const w = ctx.measureText(ch).width;
-      let dy = 0;
-      let rot = 0;
-      if (arch && lineW > 0) {
-        const u = (x + w / 2 - startX) / lineW;
-        dy = -arch * size * 4 * (u - u * u);
-        rot = arch * ARCH_ROT_SCALE * (2 * u - 1);
-      }
-      glyphs.push({ ch: ch, x: x, y: baseY + dy, w: w, rot: rot });
-      if (baseY + dy - metrics.ascent < minY) { minY = baseY + dy - metrics.ascent; }
-      if (baseY + dy + metrics.descent > maxY) { maxY = baseY + dy + metrics.descent; }
-      x += w + tracking * size;
+      const cls = charClass(ch);
+      if (phraseBreak(prevClass, cls)) { phrase++; }
+      prevClass = cls;
+      const mods = glyphMods(distort, j, line.length, size);
+      const adv = ctx.measureText(ch).width * mods.s;
+      const cx = x + adv / 2 + mods.dx;
+      const cy = baseY + mods.dy;
+      const asc = metrics.ascent * mods.s * mods.sy;
+      const desc = metrics.descent * mods.s * mods.sy;
+      glyphs.push({
+        ch: ch, cx: cx, cy: cy, adv: adv, line: i, phrase: phrase,
+        rot: mods.rot, shear: mods.shear, sx: mods.s, sy: mods.s * mods.sy,
+        blank: cls === 'sp',
+        bx: cx - Math.max(adv, size * 0.12) / 2, by: cy - asc,
+        bw: Math.max(adv, size * 0.12), bh: asc + desc
+      });
+      x += adv + tracking * size;
     }
-    if (startX < minX) { minX = startX; }
-    if (startX + lineW > maxX) { maxX = startX + lineW; }
   }
 
-  if (!(maxX > minX)) { return null; }
+  const box = boundsOf(glyphs);
+  if (!box) { return null; }
   return {
-    size: size,
-    glyphs: glyphs,
-    lines: lines,
-    vertical: false,
-    ascent: metrics.ascent,
-    descent: metrics.descent,
-    textAlign: 'left',
-    textBaseline: 'alphabetic',
-    originX: originX,
+    size: size, glyphs: glyphs, lines: lines, vertical: false,
+    ascent: metrics.ascent, descent: metrics.descent,
+    textAlign: 'center', textBaseline: 'alphabetic', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+    regions: collectRegions(glyphs), box: box
   };
 }
 
 function layoutVerticalSlot(ctx, args, spec, scaleX) {
   const slot = args.slot;
+  const distort = spec ? spec.distort : null;
   const maxCols = slot.maxLines > 0 ? slot.maxLines : 1;
   const trackRatio = (slot.tracking > 0 ? slot.tracking : 0) * VERT_TRACK_SCALE;
   const availH = args.rect.h * args.H;
@@ -256,39 +375,63 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
   if (top < rectTop) { top = rectTop; }
 
   const glyphs = [];
+  let phrase = 0;
   for (let c = 0; c < cols.length; c++) {
-    const cx = blockRight - colW * (c + 0.5);
+    const colCenter = blockRight - colW * (c + 0.5);
+    let prevClass = null;
+    phrase++;
     for (let k = 0; k < cols[c].length; k++) {
       const ch = cols[c].charAt(k);
-      const cy = top + k * cell + size / 2;
-      let dx = 0;
-      let dy = 0;
-      let rot = 0;
-      if (VERT_ROTATE.indexOf(ch) >= 0) { rot = Math.PI / 2; }
-      else if (VERT_CORNER.indexOf(ch) >= 0) { dx = size * VERT_CORNER_SHIFT_X; dy = -size * VERT_CORNER_SHIFT_Y; }
-      else if (VERT_SMALL.indexOf(ch) >= 0) { dx = size * VERT_SMALL_SHIFT; dy = -size * VERT_SMALL_SHIFT; }
-      glyphs.push({ ch: ch, x: cx + dx, y: cy + dy, w: size, rot: rot, col: cx });
+      const cls = charClass(ch);
+      if (phraseBreak(prevClass, cls)) { phrase++; }
+      prevClass = cls;
+      const mods = glyphMods(distort, k, cols[c].length, size);
+      let dx = mods.dy;
+      let dy = mods.dx;
+      let rot = mods.rot;
+      if (VERT_ROTATE.indexOf(ch) >= 0) { rot += Math.PI / 2; }
+      else if (VERT_CORNER.indexOf(ch) >= 0) { dx += size * VERT_CORNER_SHIFT_X; dy -= size * VERT_CORNER_SHIFT_Y; }
+      else if (VERT_SMALL.indexOf(ch) >= 0) { dx += size * VERT_SMALL_SHIFT; dy -= size * VERT_SMALL_SHIFT; }
+      const cx = colCenter + dx;
+      const cy = top + k * cell + size / 2 + dy;
+      const half = size * 0.5 * mods.s;
+      glyphs.push({
+        ch: ch, cx: cx, cy: cy, adv: size * mods.s, line: c, phrase: phrase, col: colCenter,
+        rot: rot, shear: mods.shear, sx: mods.s, sy: mods.s * mods.sy,
+        blank: cls === 'sp',
+        bx: cx - half, by: cy - half * mods.sy, bw: half * 2, bh: half * 2 * mods.sy
+      });
     }
   }
   if (glyphs.length === 0) { return null; }
+  const box = boundsOf(glyphs);
+  if (!box) { return null; }
 
   return {
-    size: size,
-    glyphs: glyphs,
-    lines: cols,
-    vertical: true,
-    ascent: size / 2,
-    descent: size / 2,
-    textAlign: 'center',
-    textBaseline: 'middle',
-    originX: originX,
+    size: size, glyphs: glyphs, lines: cols, vertical: true,
+    ascent: size / 2, descent: size / 2,
+    textAlign: 'center', textBaseline: 'middle', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    box: { x: blockRight - blockW, y: top, w: blockW, h: colH }
+    regions: collectRegions(glyphs), box: box
   };
 }
 
+function drawGlyph(c, g, stroke) {
+  if (!g.rot && !g.shear && g.sx === 1 && g.sy === 1) {
+    if (stroke) { c.strokeText(g.ch, g.cx, g.cy); } else { c.fillText(g.ch, g.cx, g.cy); }
+    return;
+  }
+  c.save();
+  c.translate(g.cx, g.cy);
+  if (g.rot) { c.rotate(g.rot); }
+  if (g.shear) { c.transform(1, 0, -g.shear, 1, 0, 0); }
+  if (g.sx !== 1 || g.sy !== 1) { c.scale(g.sx, g.sy); }
+  if (stroke) { c.strokeText(g.ch, 0, 0); } else { c.fillText(g.ch, 0, 0); }
+  c.restore();
+}
+
 function makeEmitter(layout, spec, fontCss) {
-  return function (c, mode) {
+  const emit = function (c, mode) {
     if (mode === 'boten') {
       if (!spec || !spec.boten) { return; }
       const ms = layout.size * spec.boten.size;
@@ -298,49 +441,39 @@ function makeEmitter(layout, spec, fontCss) {
       const gap = layout.size * spec.boten.gap;
       for (let i = 0; i < layout.glyphs.length; i++) {
         const g = layout.glyphs[i];
-        if (NO_BOTEN.indexOf(g.ch) >= 0) { continue; }
+        if (g.blank || NO_BOTEN.indexOf(g.ch) >= 0) { continue; }
         if (layout.vertical) {
-          c.fillText(spec.boten.mark, g.col + layout.size * 0.5 + gap + ms / 2, g.y);
+          c.fillText(spec.boten.mark, g.col + layout.size * 0.5 + gap + ms / 2, g.cy);
         } else {
-          c.fillText(spec.boten.mark, g.x + g.w / 2, g.y - layout.ascent - gap - ms / 2 - layout.size * BOTEN_LIFT);
+          c.fillText(spec.boten.mark, g.cx, g.by - gap - ms / 2 - layout.size * BOTEN_LIFT);
         }
       }
       return;
     }
-
     c.font = layout.fontSpec;
     c.textAlign = layout.textAlign;
     c.textBaseline = layout.textBaseline;
     const stroke = mode === 'stroke';
     for (let i = 0; i < layout.glyphs.length; i++) {
       const g = layout.glyphs[i];
-      if (g.rot) {
-        c.save();
-        if (layout.vertical) {
-          c.translate(g.x, g.y);
-          c.rotate(g.rot);
-          if (stroke) { c.strokeText(g.ch, 0, 0); } else { c.fillText(g.ch, 0, 0); }
-        } else {
-          c.translate(g.x + g.w / 2, g.y);
-          c.rotate(g.rot);
-          if (stroke) { c.strokeText(g.ch, -g.w / 2, 0); } else { c.fillText(g.ch, -g.w / 2, 0); }
-        }
-        c.restore();
-      } else if (stroke) {
-        c.strokeText(g.ch, g.x, g.y);
-      } else {
-        c.fillText(g.ch, g.x, g.y);
-      }
+      if (g.blank) { continue; }
+      drawGlyph(c, g, stroke);
     }
   };
+  emit.regions = layout.regions;
+  emit.glyphs = layout.glyphs;
+  emit.vertical = layout.vertical;
+  emit.size = layout.size;
+  return emit;
 }
 
 function specFromStyle(style) {
   const spec = {
     fill: { type: 'solid', angle: 0, stops: [{ t: 0, rgb: style.color }, { t: 1, rgb: style.color }] },
-    strokes: [], glow: null, dropShadow: null, longShadow: null, bevel: null,
+    strokes: [], glow: null, dropShadow: null, longShadow: null, extrude: null, bevel: null,
     innerLine: null, plate: null, underline: null, overline: null, boten: null,
-    transform: null, edgeSplit: null, axes: ['plain']
+    edgeSplit: null, misregister: null, splitCut: null, reflection: null, roughEdge: null,
+    torn: null, distort: null, transform: null, vertical: false, axes: ['plain']
   };
   if (style.stroke) {
     spec.strokes.push({ width: style.stroke.width, rgb: style.stroke.color, alpha: style.stroke.alpha });
@@ -358,6 +491,9 @@ export function drawSlot(ctx, args) {
   if (!args || !args.text || !args.slot || !(args.startSize > 0)) { return null; }
   if (!args.decor && !args.style) { return null; }
   const spec = args.decor ? args.decor : specFromStyle(args.style);
+  if (spec.fill && spec.fill.type === 'image' && !spec.fill.source && args.sourceCanvas) {
+    spec.fill.source = args.sourceCanvas;
+  }
   const scaleX = spec.transform && spec.transform.scaleX > 0 ? spec.transform.scaleX : 1;
 
   ctx.save();
@@ -378,5 +514,8 @@ export function drawSlot(ctx, args) {
   paintDecorated(ctx, emitter, layout.box, spec, layout.size);
   ctx.restore();
 
-  return { size: layout.size, box: layout.box, lines: layout.lines, vertical: layout.vertical };
+  return {
+    size: layout.size, box: layout.box, lines: layout.lines,
+    vertical: layout.vertical, regions: layout.regions
+  };
 }

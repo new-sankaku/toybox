@@ -1,6 +1,5 @@
 import { mulberry32 } from './rng.js';
 import {
-  srgbToOklab,
   oklabToOklch,
   oklchToSrgb,
   oklchToOklab,
@@ -9,7 +8,7 @@ import {
 
 const DEFAULT_K = 6;
 const DEFAULT_ITER = 8;
-const DEFAULT_STEP = 2;
+const DEFAULT_STEP = 3;
 const COLORFULNESS_SCALE = 100;
 const SKIN = { hMin: 18, hMax: 82, cMin: 0.022, cMax: 0.20, lMin: 0.38, lMax: 0.96 };
 const NEUTRAL_CHROMA = 0.040;
@@ -21,6 +20,15 @@ export function isSkinLch(lch) {
     && lch[0] >= SKIN.lMin && lch[0] <= SKIN.lMax;
 }
 
+function buildLinearLut() {
+  const lut = new Float64Array(256);
+  for (let i = 0; i < 256; i++) {
+    const v = i / 255;
+    lut[i] = v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  }
+  return lut;
+}
+
 function collectSamples(buf, step) {
   const d = buf.data;
   const w = buf.w;
@@ -28,19 +36,25 @@ function collectSamples(buf, step) {
   const cols = Math.ceil(w / step);
   const rows = Math.ceil(h / step);
   const lab = new Float64Array(cols * rows * 3);
+  const lut = buildLinearLut();
+  const cbrt = Math.cbrt;
   let n = 0;
   let hash = 2166136261;
   let sumRg = 0, sumYb = 0, sumRg2 = 0, sumYb2 = 0;
   for (let y = 0; y < h; y += step) {
+    const rowBase = y * w;
     for (let x = 0; x < w; x += step) {
-      const p = (y * w + x) * 4;
+      const p = (rowBase + x) * 4;
       if (d[p + 3] < 8) { continue; }
       const r = d[p], g = d[p + 1], b = d[p + 2];
-      const l = srgbToOklab([r, g, b]);
+      const lr = lut[r], lg = lut[g], lb = lut[b];
+      const cl = cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+      const cm = cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+      const cs = cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
       const o = n * 3;
-      lab[o] = l[0];
-      lab[o + 1] = l[1];
-      lab[o + 2] = l[2];
+      lab[o] = 0.2104542553 * cl + 0.7936177850 * cm - 0.0040720468 * cs;
+      lab[o + 1] = 1.9779984951 * cl - 2.4285922050 * cm + 0.4505937099 * cs;
+      lab[o + 2] = 0.0259040371 * cl + 0.7827717662 * cm - 0.8086757660 * cs;
       n++;
       const rg = r - g;
       const yb = 0.5 * (r + g) - b;
@@ -100,7 +114,6 @@ function kmeans(lab, n, k, iterations, rnd) {
   const centers = seedCenters(lab, n, k, rnd);
   const sums = new Float64Array(k * 3);
   const counts = new Int32Array(k);
-  const assign = new Int32Array(n);
   for (let it = 0; it < iterations; it++) {
     sums.fill(0);
     counts.fill(0);
@@ -115,7 +128,6 @@ function kmeans(lab, n, k, iterations, rnd) {
         const d2 = dl * dl + da * da + db * db;
         if (d2 < bestD) { bestD = d2; best = c; }
       }
-      assign[i] = best;
       const t = best * 3;
       sums[t] += pl;
       sums[t + 1] += pa;
@@ -130,7 +142,7 @@ function kmeans(lab, n, k, iterations, rnd) {
       centers[q + 2] = sums[q + 2] / counts[c];
     }
   }
-  return { centers: centers, counts: counts, assign: assign };
+  return { centers: centers, counts: counts };
 }
 
 export function extractPalette(buf, opts) {

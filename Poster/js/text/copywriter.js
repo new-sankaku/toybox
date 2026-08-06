@@ -1,6 +1,7 @@
 import { composeNoun, personName, numeric, poolsFor } from './morphology.js';
 import { styleTitle } from './orthography.js';
 import { PATTERNS } from './patterns.js';
+import { buildCatchPattern, buildQuotePattern } from './register.js';
 
 const MAX_DEPTH = 6;
 const SLOT_RE = /\{([A-Za-z]+(?::[A-Za-z]+)?(?:\.en)?)\}/g;
@@ -29,6 +30,9 @@ function resolveSlot(rng, genre, key, bindings, state) {
   }
 
   if (name.indexOf('n:') === 0) { return numeric(rng, name.slice(2), genre); }
+
+  if (name === 'quote') { return buildQuotePattern(rng, genre); }
+  if (name === 'catchline') { return buildCatchPattern(rng, genre, { lenBudget: 'short' }).pattern; }
 
   if (name === 'noun') {
     return fresh(rng, state, () => {
@@ -164,20 +168,63 @@ function buildTitle(rng, genre, opts) {
   return { styled: styled, core: core, skeleton: skeleton };
 }
 
-function fillRole(rng, genre, role, density) {
+const ROLE_LIMIT = {
+  tag: 30, badge: 28, release: 34, extra: 26, sub: 32
+};
+
+const CATCH_LIMIT = { band: 40, free: 60 };
+
+function visibleLen(text) {
+  let max = 0;
+  const lines = text.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].length > max) { max = lines[i].length; }
+  }
+  return max;
+}
+
+function fitPattern(rng, genre, list, limit) {
+  let best = null;
+  for (let i = 0; i < 6; i++) {
+    const text = expand(rng, genre, rng.pick(list), null, 0);
+    const len = visibleLen(text);
+    if (len <= limit) { return text; }
+    if (!best || len < best.len) { best = { text: text, len: len }; }
+  }
+  return best.text;
+}
+
+function fitCatch(rng, genre, limit) {
+  let best = null;
+  let axes = null;
+  for (let i = 0; i < 10; i++) {
+    const budget = limit <= CATCH_LIMIT.band ? (i < 6 ? 'short' : 'mid') : (i < 6 ? 'long' : 'mid');
+    const built = buildCatchPattern(rng, genre, { lenBudget: budget });
+    const text = expand(rng, genre, built.pattern, null, 0);
+    const len = visibleLen(text);
+    if (len <= limit) { return { text: text, axes: built.axes }; }
+    if (!best || len < best.len) { best = { text: text, len: len }; axes = built.axes; }
+  }
+  return { text: best.text, axes: axes };
+}
+
+function fillRole(rng, genre, role, density, ctx) {
   const p = PATTERNS[genre];
   if (role === 'catch') {
-    let text = expand(rng, genre, rng.pick(p.catch), null, 0);
+    const limit = ctx.catchLimit;
+    const built = fitCatch(rng, genre, limit);
+    ctx.catchAxes = built.axes;
+    let text = built.text;
     if (density > 1.2 && p.sub && rng.chance(0.5)) {
-      text = text + '\n' + expand(rng, genre, rng.pick(p.sub), null, 0);
+      text = text + '\n' + fitPattern(rng, genre, p.sub, ROLE_LIMIT.sub);
     }
     return text;
   }
   if (role === 'name') { return personName(rng, genre).ja; }
-  if (role === 'tag') { return expand(rng, genre, rng.pick(p.tag), null, 0); }
-  if (role === 'badge') { return expand(rng, genre, rng.pick(p.badge), null, 0); }
-  if (role === 'release') { return expand(rng, genre, rng.pick(p.release), null, 0); }
-  if (role === 'extra') { return expand(rng, genre, rng.pick(p.extra), null, 0); }
+  if (role === 'tag') { return fitPattern(rng, genre, p.tag, ROLE_LIMIT.tag); }
+  if (role === 'badge') { return fitPattern(rng, genre, p.badge, ROLE_LIMIT.badge); }
+  if (role === 'release') { return fitPattern(rng, genre, p.release, ROLE_LIMIT.release); }
+  if (role === 'extra') { return fitPattern(rng, genre, p.extra, ROLE_LIMIT.extra); }
   if (role === 'code') { return numeric(rng, 'code', genre); }
   if (role === 'credit') {
     const list = p.credit;
@@ -205,6 +252,13 @@ export function generateCopy(rng, genre, density, opts) {
     }
   }
 
+  const o = opts || {};
+  const ctx = {
+    catchLimit: typeof o.catchLimit === 'number'
+      ? o.catchLimit
+      : (o.catchSlot === 'band' || d < 0.8 ? CATCH_LIMIT.band : CATCH_LIMIT.free),
+    catchAxes: null
+  };
   const built = buildTitle(rng, genre, opts);
   const copy = {
     title: built.styled.text,
@@ -221,10 +275,12 @@ export function generateCopy(rng, genre, density, opts) {
   for (let i = 0; i < roles.length; i++) {
     const role = roles[i];
     if (role === 'title') { continue; }
-    copy[role] = fillRole(rng, genre, role, d);
+    copy[role] = fillRole(rng, genre, role, d, ctx);
   }
 
-  if (built.styled.latin && !copy.extra) { copy.extra = built.styled.latin; }
+  if (built.styled.latin && built.styled.latin.length <= ROLE_LIMIT.extra && !copy.extra) {
+    copy.extra = built.styled.latin;
+  }
 
   copy.__axes = {
     genre: genre,
@@ -232,6 +288,8 @@ export function generateCopy(rng, genre, density, opts) {
     titleMode: built.core.mode,
     titleSkeleton: built.skeleton,
     orthography: built.styled.axes,
+    register: ctx.catchAxes ? ctx.catchAxes : [],
+    catchLimit: ctx.catchLimit,
     look: genre + '/' + built.core.mode + '/' + built.styled.axes[0].split(':')[1],
     roles: roles.slice()
   };

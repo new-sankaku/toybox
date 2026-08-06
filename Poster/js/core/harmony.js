@@ -191,47 +191,46 @@ export function hasSimultaneousShift(textLch, bgLch) {
   return d > SIMULTANEOUS.bandMin && d < SIMULTANEOUS.bandMax;
 }
 
-export function enforceChromaBudget(colors, budget) {
-  const b = budget || CHROMA_BUDGET;
-  const out = colors.map((c) => [c[0], c[1], c[2]]);
-  const order = out.map((c, i) => i).sort((x, y) => out[y][1] - out[x][1]);
-  const kept = [];
+function chromaGroups(colors, budget) {
+  const order = colors.map((c, i) => i).sort((x, y) => colors[y][1] - colors[x][1]);
+  const groups = [];
+  const owner = new Array(colors.length).fill(-1);
   for (let i = 0; i < order.length; i++) {
     const idx = order[i];
-    const c = out[idx];
-    if (c[1] <= b.high) { continue; }
-    let merged = false;
-    for (let m = 0; m < kept.length; m++) {
-      if (deltaEOkLch(c, kept[m]) <= b.mergeDe) { merged = true; break; }
+    const c = colors[idx];
+    if (c[1] <= budget.low) { continue; }
+    let merged = -1;
+    for (let m = 0; m < groups.length; m++) {
+      if (deltaEOkLch(c, colors[groups[m]]) <= budget.mergeDe) { merged = m; break; }
     }
-    if (merged) { continue; }
-    if (kept.length < b.maxHigh) { kept.push([c[0], c[1], c[2]]); continue; }
-    c[1] = b.low;
+    if (merged >= 0) { owner[idx] = merged; continue; }
+    owner[idx] = groups.length;
+    groups.push(idx);
+  }
+  return { groups: groups, owner: owner };
+}
+
+export function enforceChromaBudget(colors, budget) {
+  const b = budget || CHROMA_BUDGET;
+  const g = chromaGroups(colors, b);
+  const out = colors.map((c) => [c[0], c[1], c[2]]);
+  for (let i = 0; i < out.length; i++) {
+    if (g.owner[i] < 0) { continue; }
+    if (g.owner[i] < b.maxHigh) { continue; }
+    out[i][1] = b.low;
   }
   return out;
 }
 
 export function violatesChromaBudget(colors, budget) {
   const b = budget || CHROMA_BUDGET;
-  const high = [];
-  const mid = [];
-  for (let i = 0; i < colors.length; i++) {
-    const c = colors[i];
-    if (c[1] > b.high) {
-      let merged = false;
-      for (let m = 0; m < high.length; m++) {
-        if (deltaEOkLch(c, high[m]) <= b.mergeDe) { merged = true; break; }
-      }
-      if (!merged) { high.push(c); }
-    } else if (c[1] > b.low) {
-      let merged = false;
-      for (let m = 0; m < high.length; m++) {
-        if (deltaEOkLch(c, high[m]) <= b.mergeDe) { merged = true; break; }
-      }
-      if (!merged) { mid.push(c); }
-    }
+  const g = chromaGroups(colors, b);
+  if (g.groups.length > b.maxHigh) { return true; }
+  let high = 0;
+  for (let i = 0; i < g.groups.length; i++) {
+    if (colors[g.groups[i]][1] > b.high) { high++; }
   }
-  return high.length > b.maxHigh || mid.length > 0;
+  return high > b.maxHigh;
 }
 
 export function separateLightness(fixed, movable, minDelta) {
@@ -258,6 +257,70 @@ export function enforceLightnessSpread(colors, minDelta) {
     if (cur[0] - prev[0] < minDelta) { cur[0] = clamp01(prev[0] + minDelta); }
   }
   return out;
+}
+
+export const GROUND_BAND = {
+  small: { dark: [0.030, 0.500], light: [0.800, 0.990] },
+  large: { dark: [0.030, 0.600], light: [0.700, 0.990] }
+};
+
+export function groundSideRange(dark, tier) {
+  const b = GROUND_BAND[tier] || GROUND_BAND.small;
+  return dark ? [b.dark[0], b.dark[1]] : [b.light[0], b.light[1]];
+}
+
+export function inGroundBand(L, tier) {
+  const b = GROUND_BAND[tier] || GROUND_BAND.small;
+  return (L >= b.dark[0] && L <= b.dark[1]) || (L >= b.light[0] && L <= b.light[1]);
+}
+
+export function subtractIntervals(ranges, holes, minWidth) {
+  let cur = ranges;
+  for (let i = 0; i < holes.length; i++) {
+    const hole = holes[i];
+    const next = [];
+    for (let j = 0; j < cur.length; j++) {
+      const r = cur[j];
+      if (hole[1] <= r[0] || hole[0] >= r[1]) { next.push(r); continue; }
+      if (hole[0] > r[0]) { next.push([r[0], hole[0]]); }
+      if (hole[1] < r[1]) { next.push([hole[1], r[1]]); }
+    }
+    cur = next;
+  }
+  const out = [];
+  const w = minWidth === undefined ? 0.015 : minWidth;
+  for (let i = 0; i < cur.length; i++) {
+    if (cur[i][1] - cur[i][0] >= w) { out.push(cur[i]); }
+  }
+  return out;
+}
+
+export function sampleIntervals(rng, segs) {
+  let total = 0;
+  for (let i = 0; i < segs.length; i++) { total += segs[i][1] - segs[i][0]; }
+  let t = rng.next() * total;
+  for (let i = 0; i < segs.length; i++) {
+    const w = segs[i][1] - segs[i][0];
+    if (t <= w) { return segs[i][0] + t; }
+    t -= w;
+  }
+  return segs[segs.length - 1][1];
+}
+
+export function pickGroundLightness(rng, dark, avoids, minDelta, tier) {
+  const holes = avoids.map((L) => [L - minDelta, L + minDelta]);
+  const same = subtractIntervals([groundSideRange(dark, tier)], holes);
+  if (same.length > 0) { return sampleIntervals(rng, same); }
+  const other = subtractIntervals([groundSideRange(!dark, tier)], holes);
+  if (other.length > 0) { return sampleIntervals(rng, other); }
+  return null;
+}
+
+export function pickFreeLightness(rng, range, avoids, minDelta) {
+  const holes = avoids.map((L) => [L - minDelta, L + minDelta]);
+  const segs = subtractIntervals([range], holes);
+  if (segs.length === 0) { return null; }
+  return sampleIntervals(rng, segs);
 }
 
 export function cvdContrastOk(fgRgb, bgRgb, minWcag) {

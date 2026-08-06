@@ -5,26 +5,11 @@ export const PATTERNS = {
       '{season}の{noun}', '{noun}、ふたたび', '{head}と{noun}', '{noun}／{tail}',
       '{person}の{tail}', '{noun}は{verb}ない', '{n:chapter}　{noun}'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{clauseA}。{clauseB}。',
-      '{connective}、{clauseB}。',
-      'その{tail}は、誰にも{verb}なかった。{clauseB}。',
-      '{clauseA}——{connective}、{clauseB}。',
-      'あの{season}、{noun}だけが見ていた。{connective}、{clauseB}。',
-      '{clauseA}。それは{adj}{tail}の話だ。',
-      '{noun}に{verb}ないと、{person}は言った。{clauseB}。',
-      '{clauseA}。{connective}、{noun}は残った。',
-      '{adj}{tail}が、すべてを変える。{clauseB}。',
-      'いま、{noun}の{tail}が明かされる。',
-      '{clauseA}。{connective}、{clauseB}。それが{noun}だった。',
-      '{clauseB}。{clauseA}、ただそれだけの{tail}。'
-    ],
     sub: [
       '{noun}をめぐる{adj}{tail}の記録',
       '{place}を舞台に描く、{adj}{tail}',
-      '{season}、{place}。{clauseA}。',
-      '{n:year}、{place}。{clauseB}。'
+      '{n:year}、{place}。すべてはそこで起きた',
+      '実話をもとに描かれた{adj}{tail}'
     ],
     tag: ['{latinTag}', '{latinTag} / {person.en}', '{latinTag} — {n:year}'],
     badge: [
@@ -54,33 +39,20 @@ export const PATTERNS = {
       '{place}／{emotion}距離', '{adj}{tail}、ふたりきり', '{noun}のとなり',
       '{season}、{place}。', '{emotion}{noun}', '{place}で{n:few}日'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{place}で、{emotion}表情のすべてを収めた最新作。',
-      'カメラの前で見せた、{emotion}素顔。{clauseB}。',
-      '{place}で過ごした{n:few}日間の記録。',
-      '誰も知らなかった{noun}の時間。{connective}、{clauseB}。',
-      '{season}の{place}、{emotion}まなざし。',
-      '{clauseA}。{emotion}{tail}が、そこにあった。',
-      '{emotion}{tail}と、{adj}{tail}。',
-      '{connective}、{clauseB}。{place}にて撮影。',
-      '{noun}のような{n:few}日間。{clauseB}。',
-      'いちばん{emotion}{tail}を、{place}で。',
-      '{clauseA}。ただ、{emotion}{tail}だけが残った。'
-    ],
     sub: [
       '{place}ロケ　{n:few}日間の撮影記録',
-      '{emotion}{tail}を追った最新作',
-      '{season}の{place}で撮り下ろし'
+      '{emotion}表情を追いかけた最新作',
+      '{season}の{place}で、撮り下ろし',
+      'はじめてのことばかりの{n:few}日間'
     ],
     tag: ['IMAGE VIDEO', 'FIRST PHOTO BOOK', 'SPECIAL EDITION', 'BLU-RAY & DVD', 'DIGITAL EDITION', '{labelName}'],
-    badge: ['{bonus}', '{bonus}／{bonus}', '{bonus}　{n:edition}'],
+    badge: ['{bonus}', '{bonus}／{bonus}', '{bonus}　特典{n:minutes}'],
     credit: ['{labelName}', '{labelName}／企画・制作', '撮影 {person}　{labelName}'],
     release: [
       '{n:minutes}　{n:date}発売',
       '{n:date}発売　{n:price}',
       '収録時間 {n:minutes}　{n:date}',
-      '{n:date}リリース／{n:track}'
+      '{n:date}リリース　{n:minutes}'
     ],
     extra: ['{n:code}', '{labelName}　{n:code}', '{n:price}']
   },
@@ -91,20 +63,6 @@ export const PATTERNS = {
       'ぼくが{verb}なかった理由', '{noun}と、その{tail}', '{head}、あるいは{tail}',
       '{noun}をめぐる{n:few}つの断章', '{season}の{tail}', '{person}の{tail}'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{clauseA}。{clauseB}。',
-      '{connective}、{clauseB}。',
-      '{clauseA}——{clauseB}。',
-      '{clauseA}。{connective}、{noun}は{verb}なかった。',
-      '{pushLine}——{clauseB}。',
-      '{pushLine}／{pushLine}',
-      '{clauseA}。この{tail}は、{adj}{tail}の物語である。',
-      '{award}受賞。{clauseB}。',
-      '{clauseB}——{clauseA}、それだけの{tail}。',
-      '{clauseA}。{connective}、{clauseB}。{pushLine}',
-      '{adj}{noun}をめぐる、{adj}{tail}。'
-    ],
     sub: [
       '{imprint}　{n:price}',
       '{award}受賞作',
@@ -114,7 +72,7 @@ export const PATTERNS = {
     tag: ['{imprint}', '{imprint}／{n:edition}', '{imprint} {n:code}'],
     badge: ['{award}受賞', '{pushLine}', '{award}／{pushLine}', '{n:volume}突破'],
     credit: [
-      '「{clauseA}。{connective}、{clauseB}。」\n——{person}（{criticRole}）',
+      '「{quote}」\n——{person}（{criticRole}）',
       '「{pushLine}」\n——{person}（{criticRole}）',
       '{person}　著',
       '{person}　著／解説 {person}（{criticRole}）'
@@ -129,24 +87,11 @@ export const PATTERNS = {
       '{situation}と{situation}', '{noun}／{situation}', 'おやすみ、{noun}',
       '{situation}で{verb}なくなる夜', '{n:chapter}　{situation}', '{noun}のための{situation}'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{situation}から、{clauseB}。',
-      '{emotion}{situation}で、{clauseB}。',
-      '{connective}、{clauseB}。耳もとで、ずっと。',
-      '{clauseA}。{situation}が、{tail}をほどく。',
-      '{situation}・{situation}・{situation}を収録。',
-      '{binaural}。{clauseB}。',
-      '{clauseA}。{connective}、{situation}の音だけが残る。',
-      '{adj}{tail}を、{binaural}で。',
-      '眠れない夜に、{situation}と{situation}。',
-      '{clauseA}。{connective}、{clauseB}。{trackWord}ごとに変わる距離。',
-      '{emotion}{tail}、{n:minutes}。'
-    ],
     sub: [
       '{binaural}／{n:minutes}',
       '{situation}ほか{n:track}収録',
-      '{binaural}・{binaural}'
+      '{binaural}・{binaural}',
+      '{situation}から{situation}まで'
     ],
     tag: ['{binaural}', 'BINAURAL SLEEP AUDIO', '{binaural}／{binaural}', 'ASMR AUDIO WORK'],
     badge: ['{situation}収録', '{situation}・{situation}収録', '{n:track}', '{binaural}'],
@@ -165,24 +110,11 @@ export const PATTERNS = {
       '{noun}：{tail}', '{noun} －{tail}－', '{adj}{noun}', '{noun} {n:chapter}',
       '{tail}の{noun}', '{head}戦線／{tail}'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{connective}、{clauseB}。',
-      '{clauseA}。{connective}、{clauseB}。世界は君の手にある。',
-      '{adj}{tail}へ、いま踏み出せ。{clauseB}。',
-      '{clauseA}。選ぶのは、君だ。',
-      '{systemWord}で描く{adj}{tail}。',
-      '{clauseA}。{connective}、{noun}は目を覚ます。',
-      '{n:few}つの{tail}、ひとつの結末。{clauseB}。',
-      '{clauseB}——{clauseA}、その先へ。',
-      '{systemWord}×{systemWord}。{clauseB}。',
-      '{clauseA}。{connective}、{clauseB}。{editionWord}',
-      '果てなき{tail}が、いま起動する。'
-    ],
     sub: [
       '{systemWord}／{systemWord}',
       '{platform} 対応　{n:date}発売',
-      '{systemWord}アクション{tail}'
+      '{systemWord}アクション{tail}',
+      '{n:few}つの結末、{n:count}時間の冒険'
     ],
     tag: ['{platform}', '{platform}／{platform}', '{editionWord}', '{platform} {editionWord}'],
     badge: ['{editionWord}', '{editionWord}／{n:edition}', '{n:week}販売本数第一位', '{ratingWord}'],
@@ -205,24 +137,11 @@ export const PATTERNS = {
       '{noun}、{n:chapter}', '{head}と{tail}', '{adj}{noun}', '{tail}のはなし',
       '{noun}／{seriesWord}', '{place}の{tail}'
     ],
-    catch: [
-      '{clauseA}。{connective}、{clauseB}。',
-      '{labelName}｜{bonusWord}｜{seriesWord}',
-      '{clauseA}。{connective}、{clauseB}。{bonusWord}',
-      '{seriesWord}、{bonusWord}で登場。{clauseB}。',
-      '{adj}{tail}を、{formatWord}で。',
-      '{clauseB}。{bonusWord}／{formatWord}',
-      '{connective}、{clauseB}。{labelName}が贈る{seriesWord}。',
-      '{clauseA}。それは{adj}{tail}だった。',
-      '{bonusWord}｜{formatWord}｜{n:minutes}',
-      '{seriesWord}。{clauseB}。',
-      '{clauseA}。{connective}、{noun}だけが残った。',
-      '{labelName}　{seriesWord}／{bonusWord}'
-    ],
     sub: [
       '{formatWord}／{n:minutes}',
       '{seriesWord}　{bonusWord}',
-      '{labelName}　{formatWord}'
+      '{labelName}　{formatWord}',
+      '{n:code}｜{n:minutes}｜{bonusWord}'
     ],
     tag: ['{labelName}', '{labelName}／{seriesWord}', '{labelName} {n:code}'],
     badge: ['{bonusWord}', '{bonusWord}／{bonusWord}', '{seriesWord}', '{n:week}売上第一位'],

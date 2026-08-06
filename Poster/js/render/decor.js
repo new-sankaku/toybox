@@ -3,11 +3,14 @@ import { blendRgb, contrastRatio, hslToRgb, luma01, rgbToCss, rgbToHsl, shade } 
 const MAX_GLYPH_PASSES = 8;
 const MIN_STOP_CONTRAST = 3.0;
 const MIN_PLATE_CONTRAST = 4.5;
+const MIN_EDGE_CONTRAST = 2.2;
 const NOISY_STD = 0.17;
 const MASK_PIXEL_LIMIT = 4194304;
-const MASK_PAD_EM = 0.75;
+const MASK_PAD_EM = 0.9;
 const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
+const GENRE_ORDER = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
+const BUDGET = { title: 100, accent: 55, plain: 20 };
 
 const METAL_PROFILE = {
   gold: [[0, -0.42], [0.14, 0.2], [0.3, 0.62], [0.44, 0.06], [0.5, -0.34], [0.57, 0.06], [0.72, 0.58], [0.88, 0.06], [1, -0.44]],
@@ -22,102 +25,123 @@ const METAL_TINT = {
 };
 
 const BOTEN_MARKS = ['●', '・', '◆', '○'];
+const PLATE_SHAPES = ['rect', 'roundRect', 'circle', 'ellipse', 'square', 'hexagon', 'diamond', 'ribbon', 'speechBubble', 'brush', 'tornPaper', 'tag', 'underlineBar'];
+const GLYPH_SHAPES = ['circle', 'square', 'roundRect', 'diamond', 'hexagon', 'ellipse'];
+const PATTERN_KINDS = ['dots', 'grid', 'diagonal', 'crosshatch', 'checker'];
 
-const PRESETS = {
-  cinema: {
-    fill: [{ v: 'solid', w: 5 }, { v: 'linear', w: 3 }, { v: 'metallic', w: 3 }, { v: 'duotone', w: 1 }],
-    metal: [{ v: 'silver', w: 4 }, { v: 'gold', w: 3 }, { v: 'chrome', w: 2 }],
-    strokeCount: [{ v: 0, w: 6 }, { v: 1, w: 3 }, { v: 2, w: 1 }, { v: 3, w: 0.2 }],
-    strokeWidth: [0.02, 0.055],
-    glow: 0.32, glowAlpha: [0.2, 0.42], glowBlur: [0.22, 0.5],
-    dropShadow: 0.5, hardShadow: 0.15, shadowOffset: [0.012, 0.045], shadowBlur: [0.06, 0.24], shadowAlpha: [0.3, 0.55],
-    longShadow: 0.08, bevel: 0.12, innerLine: 0.2,
-    plate: 0.12, plateTilt: 0.15, plateRound: 0.25, plateAlpha: [0.6, 0.88],
-    rule: 0.28, ruleDouble: 0.3, boten: 0.02,
-    skew: 0.06, skewRange: [0.05, 0.13],
-    rotate: 0.06, rotateRange: [0.004, 0.016],
-    scaleX: [0.84, 1.02], archP: 0.04, archRange: [0.02, 0.06],
-    edgeSplit: 0.06
-  },
-  gravure: {
-    fill: [{ v: 'solid', w: 3 }, { v: 'linear', w: 5 }, { v: 'metallic', w: 1 }, { v: 'duotone', w: 2 }],
-    metal: [{ v: 'gold', w: 3 }, { v: 'silver', w: 2 }, { v: 'chrome', w: 1 }],
-    strokeCount: [{ v: 0, w: 1 }, { v: 1, w: 3 }, { v: 2, w: 5 }, { v: 3, w: 1 }],
-    strokeWidth: [0.06, 0.14],
-    glow: 0.3, glowAlpha: [0.25, 0.5], glowBlur: [0.3, 0.7],
-    dropShadow: 0.7, hardShadow: 0.1, shadowOffset: [0.02, 0.06], shadowBlur: [0.14, 0.4], shadowAlpha: [0.32, 0.6],
-    longShadow: 0.05, bevel: 0.1, innerLine: 0.1,
-    plate: 0.2, plateTilt: 0.3, plateRound: 0.6, plateAlpha: [0.65, 0.92],
-    rule: 0.16, ruleDouble: 0.2, boten: 0.03,
-    skew: 0.35, skewRange: [0.06, 0.16],
-    rotate: 0.2, rotateRange: [0.006, 0.028],
-    scaleX: [0.94, 1.1], archP: 0.12, archRange: [0.03, 0.09],
-    edgeSplit: 0.04
-  },
-  novel: {
-    fill: [{ v: 'solid', w: 5 }, { v: 'linear', w: 2 }, { v: 'metallic', w: 3 }, { v: 'duotone', w: 0.5 }],
-    metal: [{ v: 'gold', w: 5 }, { v: 'silver', w: 3 }, { v: 'chrome', w: 1 }],
-    strokeCount: [{ v: 0, w: 7 }, { v: 1, w: 2 }, { v: 2, w: 0.5 }, { v: 3, w: 0.1 }],
-    strokeWidth: [0.014, 0.042],
-    glow: 0.1, glowAlpha: [0.15, 0.3], glowBlur: [0.18, 0.4],
-    dropShadow: 0.3, hardShadow: 0.05, shadowOffset: [0.008, 0.026], shadowBlur: [0.05, 0.18], shadowAlpha: [0.22, 0.42],
-    longShadow: 0.02, bevel: 0.06, innerLine: 0.16,
-    plate: 0.26, plateTilt: 0.06, plateRound: 0.12, plateAlpha: [0.72, 0.96],
-    rule: 0.45, ruleDouble: 0.45, boten: 0.35,
-    skew: 0.02, skewRange: [0.03, 0.07],
-    rotate: 0.03, rotateRange: [0.003, 0.01],
-    scaleX: [0.9, 1.0], archP: 0.01, archRange: [0.01, 0.03],
-    edgeSplit: 0.01
-  },
-  asmr: {
-    fill: [{ v: 'solid', w: 2 }, { v: 'linear', w: 5 }, { v: 'metallic', w: 0.5 }, { v: 'duotone', w: 3 }],
-    metal: [{ v: 'silver', w: 3 }, { v: 'gold', w: 2 }, { v: 'chrome', w: 1 }],
-    strokeCount: [{ v: 0, w: 0.5 }, { v: 1, w: 2 }, { v: 2, w: 6 }, { v: 3, w: 1.2 }],
-    strokeWidth: [0.07, 0.15],
-    glow: 0.75, glowAlpha: [0.32, 0.62], glowBlur: [0.4, 0.95],
-    dropShadow: 0.45, hardShadow: 0.04, shadowOffset: [0.01, 0.035], shadowBlur: [0.2, 0.5], shadowAlpha: [0.24, 0.45],
-    longShadow: 0.03, bevel: 0.05, innerLine: 0.08,
-    plate: 0.12, plateTilt: 0.2, plateRound: 0.85, plateAlpha: [0.55, 0.85],
-    rule: 0.08, ruleDouble: 0.2, boten: 0.05,
-    skew: 0.1, skewRange: [0.04, 0.1],
-    rotate: 0.25, rotateRange: [0.006, 0.03],
-    scaleX: [0.96, 1.09], archP: 0.16, archRange: [0.03, 0.1],
-    edgeSplit: 0.02
-  },
-  game: {
-    fill: [{ v: 'solid', w: 2 }, { v: 'linear', w: 4 }, { v: 'metallic', w: 5 }, { v: 'duotone', w: 1 }],
-    metal: [{ v: 'chrome', w: 4 }, { v: 'gold', w: 4 }, { v: 'silver', w: 3 }],
-    strokeCount: [{ v: 0, w: 0.4 }, { v: 1, w: 1 }, { v: 2, w: 4 }, { v: 3, w: 5 }],
-    strokeWidth: [0.05, 0.125],
-    glow: 0.4, glowAlpha: [0.3, 0.6], glowBlur: [0.25, 0.7],
-    dropShadow: 0.8, hardShadow: 0.6, shadowOffset: [0.03, 0.085], shadowBlur: [0.0, 0.2], shadowAlpha: [0.45, 0.8],
-    longShadow: 0.3, bevel: 0.6, innerLine: 0.3,
-    plate: 0.15, plateTilt: 0.5, plateRound: 0.15, plateAlpha: [0.7, 0.95],
-    rule: 0.1, ruleDouble: 0.3, boten: 0.02,
-    skew: 0.5, skewRange: [0.08, 0.2],
-    rotate: 0.25, rotateRange: [0.006, 0.03],
-    scaleX: [0.76, 0.98], archP: 0.08, archRange: [0.03, 0.08],
-    edgeSplit: 0.12
-  },
-  adult: {
-    fill: [{ v: 'solid', w: 5 }, { v: 'linear', w: 4 }, { v: 'metallic', w: 2 }, { v: 'duotone', w: 2 }],
-    metal: [{ v: 'gold', w: 4 }, { v: 'chrome', w: 2 }, { v: 'silver', w: 2 }],
-    strokeCount: [{ v: 0, w: 0.3 }, { v: 1, w: 1 }, { v: 2, w: 5 }, { v: 3, w: 4 }],
-    strokeWidth: [0.07, 0.17],
-    glow: 0.3, glowAlpha: [0.28, 0.55], glowBlur: [0.2, 0.55],
-    dropShadow: 0.85, hardShadow: 0.7, shadowOffset: [0.03, 0.09], shadowBlur: [0.0, 0.16], shadowAlpha: [0.5, 0.85],
-    longShadow: 0.25, bevel: 0.3, innerLine: 0.2,
-    plate: 0.45, plateTilt: 0.6, plateRound: 0.1, plateAlpha: [0.8, 1.0],
-    rule: 0.2, ruleDouble: 0.35, boten: 0.08,
-    skew: 0.55, skewRange: [0.08, 0.22],
-    rotate: 0.4, rotateRange: [0.008, 0.04],
-    scaleX: [0.78, 1.12], archP: 0.1, archRange: [0.03, 0.1],
-    edgeSplit: 0.15
-  }
+const AXES = [
+  { id: 'fill.solid', group: 'fill', cost: 4, w: [5, 3, 5, 2, 2, 4] },
+  { id: 'fill.linear', group: 'fill', cost: 8, w: [3, 5, 2, 5, 4, 4] },
+  { id: 'fill.duotone', group: 'fill', cost: 10, w: [1, 2, 0.5, 3, 1, 2] },
+  { id: 'fill.metallic', group: 'fill', cost: 16, w: [3, 1, 3, 0.5, 5, 2], minLevel: 0.5 },
+  { id: 'fill.mirror', group: 'fill', cost: 16, w: [1.5, 0.6, 0.6, 0.4, 3, 1.2], minLevel: 0.5 },
+  { id: 'fill.stripe', group: 'fill', cost: 14, w: [1, 1.6, 0.5, 1.4, 1.6, 2.2], minLevel: 0.5 },
+  { id: 'fill.pattern', group: 'fill', cost: 14, w: [1.2, 1.2, 1, 1.6, 1.2, 1.6], minLevel: 0.5 },
+  { id: 'fill.image', group: 'fill', cost: 18, w: [2.4, 1.2, 1, 0.6, 2, 1.4], minLevel: 0.5, need: 'source' },
+  { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [1.6, 1, 0.8, 1.2, 1.4, 1.6], minLevel: 0.5 },
+
+  { id: 'stroke.single', group: 'stroke', cost: 6, w: [3, 3, 3, 2, 1.5, 1.5] },
+  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1, 5, 0.8, 6, 4, 5] },
+  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.2, 1, 0.2, 1.2, 5, 4], minLevel: 0.5 },
+
+  { id: 'glow.soft', group: 'glow', cost: 8, w: [3, 3, 1, 6, 3, 2.5] },
+  { id: 'glow.neon', group: 'glow', cost: 16, w: [0.8, 1.6, 0.3, 4, 2.6, 3], minLevel: 0.5 },
+
+  { id: 'shadow.soft', group: 'shadow', cost: 6, w: [3, 5, 3, 4, 2, 2] },
+  { id: 'shadow.hard', group: 'shadow', cost: 8, w: [1, 1.4, 0.6, 0.8, 4, 5] },
+  { id: 'shadow.long', group: 'shadow', cost: 14, w: [0.8, 0.6, 0.3, 0.5, 3, 3], minLevel: 0.5 },
+  { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.6, 0.8, 0.2, 0.6, 4, 3.4], minLevel: 0.5 },
+
+  { id: 'plate.all', group: 'plate', cost: 10, w: [1.2, 2, 2.6, 1.4, 1.6, 3.4] },
+  { id: 'plate.line', group: 'plate', cost: 12, w: [1, 1.6, 2, 1.2, 1.4, 3] },
+  { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.8, 1.6, 1.2, 1.4, 1.4, 2.6], minLevel: 0.5 },
+  { id: 'plate.glyph', group: 'plate', cost: 18, w: [0.6, 2.2, 0.8, 2.6, 1.6, 2.4], minLevel: 0.5 },
+  { id: 'plate.head', group: 'plate', cost: 12, w: [1, 1.4, 1.6, 1.2, 1.2, 1.8], minLevel: 0.35 },
+  { id: 'plate.tail', group: 'plate', cost: 12, w: [0.8, 1.2, 1.2, 1, 1, 1.6], minLevel: 0.35 },
+  { id: 'plate.random', group: 'plate', cost: 16, w: [0.6, 1.4, 0.6, 1.6, 1.2, 2.2], minLevel: 0.5 },
+  { id: 'plate.marker', group: 'plate', cost: 10, w: [0.6, 2, 1.2, 1.6, 0.8, 2.4], minLevel: 0.35 },
+  { id: 'plate.knockout', group: 'plate', cost: 18, w: [1.6, 1.6, 1.4, 1, 1.6, 2.4], minLevel: 0.5 },
+
+  { id: 'distort.arc', group: 'distort', cost: 10, w: [1, 2.4, 0.4, 2.6, 1.6, 2], minLevel: 0.5 },
+  { id: 'distort.wave', group: 'distort', cost: 10, w: [0.6, 2.2, 0.3, 3, 1.2, 2.2], minLevel: 0.5 },
+  { id: 'distort.jitter', group: 'distort', cost: 8, w: [1, 1.6, 0.6, 1.8, 2, 3] },
+  { id: 'distort.trapezoid', group: 'distort', cost: 12, w: [1.4, 1, 0.4, 0.8, 2.6, 2], minLevel: 0.5 },
+  { id: 'distort.bulge', group: 'distort', cost: 10, w: [0.6, 1.8, 0.3, 1.6, 1.6, 2.4], minLevel: 0.5 },
+  { id: 'distort.fan', group: 'distort', cost: 12, w: [0.6, 1.6, 0.3, 1.6, 1.2, 1.8], minLevel: 0.5 },
+  { id: 'distort.stagger', group: 'distort', cost: 8, w: [0.8, 1.4, 0.4, 1.2, 1.6, 2.4] },
+  { id: 'distort.alternate', group: 'distort', cost: 8, w: [0.6, 1.6, 0.4, 1.8, 1.2, 2.2] },
+  { id: 'distort.ramp', group: 'distort', cost: 8, w: [1.2, 1.2, 0.6, 1, 1.6, 1.8] },
+  { id: 'distort.shear', group: 'distort', cost: 8, w: [0.8, 1.2, 0.3, 1, 1.8, 2.2] },
+  { id: 'distort.dropCap', group: 'distort', cost: 10, w: [1, 1.2, 2.4, 1, 0.8, 1.6], minLevel: 0.5 },
+  { id: 'distort.shatter', group: 'distort', cost: 12, w: [0.8, 0.8, 0.3, 0.6, 2.2, 2], minLevel: 0.5 },
+
+  { id: 'fx.bevel', group: 'fx', cost: 10, w: [1, 1.2, 0.4, 0.8, 4, 2.6], minLevel: 0.5 },
+  { id: 'fx.innerLine', group: 'fx', cost: 6, w: [1.6, 1, 1.4, 0.8, 2.2, 1.6], minLevel: 0.35 },
+  { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [1, 0.6, 0.2, 0.6, 2, 2.2], minLevel: 0.5 },
+  { id: 'fx.misregister', group: 'fx', cost: 12, w: [1.4, 0.8, 0.6, 0.6, 1.6, 2], minLevel: 0.5 },
+  { id: 'fx.splitCut', group: 'fx', cost: 12, w: [1.2, 0.6, 0.4, 0.4, 2, 1.8], minLevel: 0.5 },
+  { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.8, 1.4, 0.3, 1.2, 2, 1.4], minLevel: 0.5 },
+  { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [1.6, 0.6, 0.8, 0.4, 1.6, 1.4], minLevel: 0.5 },
+  { id: 'fx.torn', group: 'fx', cost: 10, w: [1.2, 0.6, 1, 0.4, 1.2, 1.2], minLevel: 0.5 },
+
+  { id: 'orn.underline', group: 'orn', cost: 6, w: [2, 1.4, 3.4, 0.8, 1, 1.8] },
+  { id: 'orn.overline', group: 'orn', cost: 6, w: [1.2, 0.8, 1.6, 0.6, 0.8, 1] },
+  { id: 'orn.boten', group: 'orn', cost: 8, w: [0.4, 0.6, 3.4, 0.8, 0.3, 1.2], minLevel: 0.35 },
+
+  { id: 'tf.skew', group: 'tf', cost: 4, w: [0.8, 2.4, 0.3, 1, 3, 3.4], minLevel: 0.5 },
+  { id: 'tf.rotate', group: 'tf', cost: 3, w: [0.8, 2, 0.4, 2.4, 1.8, 3] },
+  { id: 'tf.condense', group: 'tf', cost: 4, w: [3, 1, 2, 0.6, 3.4, 2] },
+  { id: 'tf.expand', group: 'tf', cost: 4, w: [0.6, 2.2, 0.4, 2.4, 0.6, 1.6] }
+];
+
+const GROUP_CAP = { fill: 1, stroke: 1, glow: 1, shadow: 1, plate: 1, distort: 2, fx: 2, orn: 2, tf: 3 };
+
+const RAW_CONFLICTS = {
+  'fill.outlineOnly': ['plate.knockout', 'fx.reflection', 'fx.roughEdge', 'fx.splitCut', 'fx.bevel', 'fx.innerLine'],
+  'fill.image': ['fx.misregister', 'fx.edgeSplit', 'plate.knockout'],
+  'fill.stripe': ['plate.knockout', 'fx.misregister'],
+  'fill.pattern': ['plate.knockout', 'fx.misregister'],
+  'fill.metallic': ['plate.knockout', 'fill.mirror'],
+  'fill.mirror': ['plate.knockout', 'fx.splitCut'],
+  'fill.duotone': ['plate.knockout', 'fx.splitCut'],
+  'fill.linear': ['plate.knockout'],
+  'plate.knockout': ['glow.neon', 'fx.bevel', 'fx.edgeSplit', 'fx.misregister', 'fx.reflection', 'fx.splitCut', 'fx.roughEdge', 'fx.torn', 'fx.innerLine', 'shadow.extrude', 'shadow.long'],
+  'plate.glyph': ['plate.marker', 'fx.reflection'],
+  'glow.neon': ['fx.bevel', 'shadow.extrude', 'fx.misregister'],
+  'shadow.extrude': ['shadow.long', 'fx.reflection', 'fx.splitCut'],
+  'fx.splitCut': ['distort.arc', 'distort.wave', 'distort.fan', 'distort.bulge', 'distort.trapezoid', 'fx.reflection'],
+  'fx.reflection': ['distort.arc', 'distort.wave', 'distort.fan', 'distort.stagger'],
+  'fx.misregister': ['fx.edgeSplit'],
+  'fx.roughEdge': ['fx.torn', 'fx.bevel'],
+  'distort.arc': ['distort.trapezoid', 'distort.wave', 'distort.fan', 'distort.stagger', 'distort.shatter'],
+  'distort.wave': ['distort.fan', 'distort.stagger', 'distort.trapezoid'],
+  'distort.bulge': ['distort.ramp', 'distort.alternate', 'distort.dropCap'],
+  'distort.ramp': ['distort.alternate', 'distort.dropCap'],
+  'distort.fan': ['distort.stagger', 'distort.trapezoid'],
+  'distort.jitter': ['distort.shatter'],
+  'tf.condense': ['tf.expand']
 };
 
-function presetOf(genre) {
-  return PRESETS[genre] || PRESETS.cinema;
+const CONFLICTS = (function () {
+  const map = {};
+  const keys = Object.keys(RAW_CONFLICTS);
+  for (let i = 0; i < keys.length; i++) {
+    const a = keys[i];
+    const list = RAW_CONFLICTS[a];
+    if (!map[a]) { map[a] = {}; }
+    for (let j = 0; j < list.length; j++) {
+      const b = list[j];
+      map[a][b] = true;
+      if (!map[b]) { map[b] = {}; }
+      map[b][a] = true;
+    }
+  }
+  return map;
+})();
+
+function genreIndex(genre) {
+  const i = GENRE_ORDER.indexOf(genre);
+  return i < 0 ? 0 : i;
 }
 
 function levelOf(slot) {
@@ -127,12 +151,13 @@ function levelOf(slot) {
   return 0.6;
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : (v > 1 ? 1 : v);
+function budgetOf(slot) {
+  const d = slot && slot.decor ? slot.decor : 'accent';
+  return BUDGET[d] !== undefined ? BUDGET[d] : BUDGET.accent;
 }
 
-function chanceScaled(rng, p, gain) {
-  return rng.chance(clamp01(p * gain));
+function clamp01(v) {
+  return v < 0 ? 0 : (v > 1 ? 1 : v);
 }
 
 function safeShade(base, amount, bg) {
@@ -153,6 +178,19 @@ function inkOpposite(rgb) {
   return luma01(rgb) > 0.5 ? DARK_INK.slice() : LIGHT_INK.slice();
 }
 
+function planRgb(colorPlan, role) {
+  if (!colorPlan || !colorPlan.roles) { return null; }
+  const r = colorPlan.roles[role];
+  if (!r || !r.rgb || r.rgb.length < 3) { return null; }
+  return [r.rgb[0], r.rgb[1], r.rgb[2]];
+}
+
+function planOr(colorPlan, role, against, minRatio, derived) {
+  const c = planRgb(colorPlan, role);
+  if (c && contrastRatio(c, against) >= minRatio) { return c; }
+  return derived;
+}
+
 function metalBase(base, metal) {
   const tint = METAL_TINT[metal];
   const hsl = rgbToHsl(base);
@@ -161,130 +199,125 @@ function metalBase(base, metal) {
   return blendRgb(base, hslToRgb([h, tint.s, l]), tint.mix);
 }
 
-function buildFill(rng, preset, base, bg, level) {
-  if (level < 0.25) {
-    return { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
-  }
-  const type = rng.weighted(preset.fill);
-  const vertical = rng.chance(0.74);
-  const angle = vertical ? Math.PI / 2 + rng.range(-0.12, 0.12) : rng.range(-0.5, 0.5);
-
-  if (type === 'metallic') {
-    const metal = rng.weighted(preset.metal);
-    const mb = metalBase(base, metal);
-    if (contrastRatio(mb, bg) < MIN_STOP_CONTRAST) {
-      return buildLinear(rng, base, bg, angle, 'linear');
-    }
-    const prof = METAL_PROFILE[metal];
-    const stops = [];
-    for (let i = 0; i < prof.length; i++) {
-      stops.push({ t: prof[i][0], rgb: safeShade(mb, prof[i][1], bg) });
-    }
-    return { type: 'metallic', metal: metal, angle: Math.PI / 2 + rng.range(-0.08, 0.08), stops: stops };
-  }
-
-  if (type === 'duotone') {
-    const split = rng.range(0.42, 0.58);
-    const up = rng.range(0.2, 0.5) * (rng.chance(0.5) ? 1 : -1);
-    const a = safeShade(base, up, bg);
-    const b = safeShade(base, -up * rng.range(0.7, 1.3), bg);
-    return {
-      type: 'duotone', angle: angle,
-      stops: [{ t: 0, rgb: a }, { t: split, rgb: a }, { t: Math.min(1, split + 0.004), rgb: b }, { t: 1, rgb: b }]
-    };
-  }
-
-  if (type === 'linear') { return buildLinear(rng, base, bg, angle, 'linear'); }
-  return { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
+function accentOf(rng, base, bg, colorPlan) {
+  const fromPlan = planRgb(colorPlan, 'accent');
+  if (fromPlan && contrastRatio(fromPlan, bg) >= MIN_STOP_CONTRAST) { return fromPlan; }
+  const hsl = rgbToHsl(base);
+  const cand = hslToRgb([(hsl[0] + rng.range(0.3, 0.7)) % 1, Math.max(0.45, hsl[1]), hsl[2]]);
+  return contrastRatio(cand, bg) >= MIN_STOP_CONTRAST ? cand : safeShade(base, rng.chance(0.5) ? 0.5 : -0.5, bg);
 }
 
-function buildLinear(rng, base, bg, angle, type) {
+function eligible(axis, state, ignoreBudget) {
+  if (state.taken[axis.id]) { return false; }
+  if (!ignoreBudget && axis.cost > state.budget) { return false; }
+  if (axis.minLevel && state.level < axis.minLevel) { return false; }
+  if (axis.need === 'source' && !state.source) { return false; }
+  if ((state.groupCount[axis.group] || 0) >= GROUP_CAP[axis.group]) { return false; }
+  const conf = CONFLICTS[axis.id];
+  if (conf) {
+    for (let k = 0; k < state.chosen.length; k++) { if (conf[state.chosen[k]]) { return false; } }
+  }
+  return axis.w[state.gi] > 0;
+}
+
+function pickAxis(rng, pool, state, ignoreBudget) {
+  const items = [];
+  for (let i = 0; i < pool.length; i++) {
+    if (eligible(pool[i], state, ignoreBudget)) { items.push({ v: pool[i], w: pool[i].w[state.gi] }); }
+  }
+  if (items.length === 0) { return null; }
+  return rng.weighted(items);
+}
+
+function takeAxis(state, axis) {
+  state.taken[axis.id] = true;
+  state.chosen.push(axis.id);
+  state.groupCount[axis.group] = (state.groupCount[axis.group] || 0) + 1;
+  state.budget -= axis.cost;
+}
+
+function buildLinearStops(rng, base, bg, colorPlan) {
   const amp = rng.range(0.14, 0.44);
   const dir = rng.chance(0.62) ? 1 : -1;
+  const alt = planRgb(colorPlan, 'inkAlt');
+  const far = alt && contrastRatio(alt, bg) >= MIN_STOP_CONTRAST
+    ? alt
+    : safeShade(base, -amp * dir * rng.range(0.6, 1.25), bg);
   const stops = [{ t: 0, rgb: safeShade(base, amp * dir, bg) }];
-  if (rng.chance(0.4)) {
-    stops.push({ t: rng.range(0.4, 0.62), rgb: safeShade(base, amp * dir * 0.2, bg) });
-  }
-  stops.push({ t: 1, rgb: safeShade(base, -amp * dir * rng.range(0.6, 1.25), bg) });
-  return { type: type, angle: angle, stops: stops };
+  if (rng.chance(0.4)) { stops.push({ t: rng.range(0.4, 0.62), rgb: safeShade(base, amp * dir * 0.2, bg) }); }
+  stops.push({ t: 1, rgb: far });
+  return stops;
 }
 
-function buildStrokes(rng, preset, base, bg, level, noisy) {
-  let n = rng.weighted(preset.strokeCount);
-  if (level < 0.25) { n = noisy ? 1 : 0; }
-  else if (level < 0.7 && n > 2) { n = 2; }
-  if (noisy && n === 0) { n = 1; }
-  if (n === 0) { return []; }
-
-  const edgeBg = inkAgainst(bg);
-  const edgeInk = inkOpposite(base);
-  const w0 = rng.range(preset.strokeWidth[0], preset.strokeWidth[1]) * (level < 0.7 ? 0.7 : 1) * (noisy ? 1.25 : 1);
-  const strokes = [];
-
-  if (n === 1) {
-    const rgb = contrastRatio(edgeBg, base) >= 2.2 ? edgeBg : edgeInk;
-    strokes.push({ width: w0, rgb: rgb, alpha: rng.range(0.85, 1) });
-    return strokes;
-  }
-
-  strokes.push({ width: w0, rgb: edgeBg, alpha: 1 });
-  const inner = contrastRatio(edgeInk, edgeBg) >= 2.2 ? edgeInk : shade(edgeBg, luma01(edgeBg) > 0.5 ? -0.6 : 0.6);
-  strokes.push({ width: w0 * 0.56, rgb: inner, alpha: 1 });
-  if (n >= 3) {
-    const hsl = rgbToHsl(base);
-    const accent = hslToRgb([(hsl[0] + rng.range(0.36, 0.64)) % 1, Math.max(0.5, hsl[1]), 0.5]);
-    strokes.push({ width: w0 * 0.3, rgb: contrastRatio(accent, inner) >= 1.8 ? accent : shade(inner, 0.5), alpha: 1 });
-  }
-  return strokes;
-}
-
-function buildShadow(rng, preset, base, bg, gain, level) {
-  if (level < 0.15) { return null; }
-  if (!chanceScaled(rng, preset.dropShadow, gain)) { return null; }
-  const hard = rng.chance(preset.hardShadow);
+function shadowInk(base, bg, colorPlan) {
+  const fromPlan = planRgb(colorPlan, 'shadow');
+  if (fromPlan && contrastRatio(fromPlan, base) >= 1.6) { return fromPlan; }
   let rgb = inkAgainst(bg);
   if (contrastRatio(rgb, base) < 1.6) { rgb = inkOpposite(rgb); }
-  const off = rng.range(preset.shadowOffset[0], preset.shadowOffset[1]) * (hard ? 1.3 : 1);
+  return rgb;
+}
+
+function buildShadow(rng, base, bg, colorPlan, hard) {
+  const off = rng.range(0.012, hard ? 0.09 : 0.055);
   const ang = rng.range(Math.PI * 0.18, Math.PI * 0.42);
   return {
-    hard: hard,
-    rgb: rgb,
-    alpha: rng.range(preset.shadowAlpha[0], preset.shadowAlpha[1]),
-    dx: Math.cos(ang) * off,
-    dy: Math.sin(ang) * off,
-    blur: hard ? 0 : rng.range(preset.shadowBlur[0], preset.shadowBlur[1])
+    hard: hard, rgb: shadowInk(base, bg, colorPlan),
+    alpha: rng.range(hard ? 0.45 : 0.24, hard ? 0.85 : 0.6),
+    dx: Math.cos(ang) * off, dy: Math.sin(ang) * off,
+    blur: hard ? 0 : rng.range(0.06, 0.4)
   };
 }
 
-function buildGlow(rng, preset, base, bg, gain, level, noisy) {
-  const forced = noisy && level >= 0.5;
-  if (!forced && !chanceScaled(rng, preset.glow, gain)) { return null; }
-  const rgb = luma01(bg) > 0.5 ? shade(base, -0.55) : shade(base, 0.6);
+function buildRule(rng, base, bg, colorPlan) {
+  const derived = contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg);
   return {
-    rgb: rgb,
-    alpha: rng.range(preset.glowAlpha[0], preset.glowAlpha[1]),
-    blur: rng.range(preset.glowBlur[0], preset.glowBlur[1]),
-    passes: rng.chance(0.4) ? 2 : 1
+    rgb: planOr(colorPlan, 'accent', bg, MIN_STOP_CONTRAST, derived),
+    alpha: rng.range(0.7, 1), width: rng.range(0.022, 0.075),
+    gap: rng.range(0.08, 0.24), double: rng.chance(0.3), spacing: rng.range(0.05, 0.11)
   };
 }
 
-function buildPlate(rng, preset, base, bg) {
-  let rgb = inkOpposite(base);
-  const tinted = blendRgb(rgb, bg, 0.18);
-  if (contrastRatio(tinted, base) >= MIN_PLATE_CONTRAST) { rgb = tinted; }
-  const alpha = rng.range(preset.plateAlpha[0], preset.plateAlpha[1]);
-  const tilt = rng.chance(preset.plateTilt);
-  const round = rng.chance(preset.plateRound);
+function buildPlate(rng, id, base, bg, colorPlan, forceCover) {
+  const kind = id.substring(6);
+  const derived = inkOpposite(base);
+  const planColor = planRgb(colorPlan, 'plate');
+  let rgb = planColor && contrastRatio(planColor, base) >= MIN_PLATE_CONTRAST ? planColor : derived;
+  if (rgb === derived) {
+    const tinted = blendRgb(rgb, bg, 0.18);
+    if (contrastRatio(tinted, base) >= MIN_PLATE_CONTRAST) { rgb = tinted; }
+  }
+  const perGlyph = kind === 'glyph' || kind === 'random';
+  let shape;
+  if (forceCover) { shape = rng.weighted([{ v: 'rect', w: 4 }, { v: 'roundRect', w: 2.5 }, { v: 'ribbon', w: 1 }, { v: 'tag', w: 1 }, { v: 'tornPaper', w: 1 }, { v: 'brush', w: 1 }, { v: 'hexagon', w: 0.6 }]); }
+  else if (kind === 'marker') { shape = 'markerHighlight'; }
+  else if (perGlyph) { shape = rng.pick(GLYPH_SHAPES); }
+  else if (kind === 'knockout') { shape = rng.weighted([{ v: 'rect', w: 4 }, { v: 'roundRect', w: 2 }, { v: 'ribbon', w: 1 }, { v: 'tag', w: 1 }]); }
+  else if (kind === 'head' || kind === 'tail') { shape = rng.weighted([{ v: 'rect', w: 3 }, { v: 'roundRect', w: 2 }, { v: 'square', w: 2 }, { v: 'circle', w: 1.5 }, { v: 'tag', w: 1.5 }, { v: 'diamond', w: 1 }]); }
+  else { shape = rng.pick(PLATE_SHAPES); }
+
+  let scope = kind;
+  if (kind === 'marker') { scope = 'line'; }
+  if (kind === 'knockout') { scope = rng.weighted([{ v: 'all', w: 4 }, { v: 'line', w: 2 }, { v: 'phrase', w: 1 }]); }
+  if (forceCover && scope !== 'all' && scope !== 'line' && scope !== 'phrase') {
+    scope = rng.weighted([{ v: 'all', w: 3 }, { v: 'line', w: 2 }, { v: 'phrase', w: 1 }]);
+  }
+  const covers = (scope === 'all' || scope === 'line' || scope === 'phrase')
+    && shape !== 'markerHighlight' && shape !== 'underlineBar';
+
   return {
-    kind: tilt ? 'tilt' : (round ? 'round' : 'rect'),
-    rgb: rgb,
-    alpha: alpha,
-    padX: rng.range(0.14, 0.4),
-    padY: rng.range(0.06, 0.22),
-    radius: round ? rng.range(0.08, 0.34) : 0,
-    skew: rng.chance(0.35) ? rng.range(0.08, 0.24) * (rng.chance(0.5) ? 1 : -1) : 0,
-    rotate: tilt ? rng.range(0.012, 0.055) * (rng.chance(0.5) ? 1 : -1) : 0,
-    border: rng.chance(0.3) ? { rgb: base.slice(), width: rng.range(0.012, 0.03), alpha: 0.9 } : null
+    scope: scope, kind: kind, covers: covers, knockout: kind === 'knockout', shape: shape,
+    rgb: rgb, alpha: rng.range(0.7, 1),
+    n: rng.int(1, 3), ratio: rng.range(0.2, 0.5),
+    padX: perGlyph ? rng.range(0.04, 0.2) : rng.range(0.14, 0.44),
+    padY: perGlyph ? rng.range(0.02, 0.14) : rng.range(0.05, 0.24),
+    radius: rng.range(0.08, 0.34),
+    skew: rng.chance(0.3) ? rng.range(0.1, 0.3) * (rng.chance(0.5) ? 1 : -1) : 0,
+    rotate: rng.chance(0.3) ? rng.range(0.012, 0.06) * (rng.chance(0.5) ? 1 : -1) : 0,
+    perRotate: perGlyph && rng.chance(0.5) ? rng.range(0.02, 0.14) : 0,
+    border: rng.chance(0.32) ? { rgb: base.slice(), width: rng.range(0.012, 0.035), alpha: 0.9 } : null,
+    shadow: rng.chance(0.3) ? { dx: rng.range(0.02, 0.08), dy: rng.range(0.02, 0.08), blur: rng.range(0, 0.2), rgb: DARK_INK.slice(), alpha: rng.range(0.25, 0.55) } : null,
+    double: rng.chance(0.25) ? { rgb: planOr(colorPlan, 'accent', rgb, 1.6, shade(rgb, luma01(rgb) > 0.5 ? -0.35 : 0.4)), dx: rng.range(0.03, 0.12) * (rng.chance(0.5) ? 1 : -1), dy: rng.range(0.02, 0.1), alpha: rng.range(0.6, 1) } : null,
+    seed: rng.int(1, 99999)
   };
 }
 
@@ -300,47 +333,301 @@ function settlePlate(plate, bgBefore, base) {
   return blendRgb(bgBefore, plate.rgb, plate.alpha);
 }
 
-function buildRule(rng, preset, base, bg, gain) {
-  if (!chanceScaled(rng, preset.rule, gain)) { return null; }
-  const rgb = contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg);
-  return {
-    rgb: rgb,
-    alpha: rng.range(0.7, 1),
-    width: rng.range(0.022, 0.075),
-    gap: rng.range(0.08, 0.24),
-    double: rng.chance(preset.ruleDouble),
-    spacing: rng.range(0.05, 0.11)
-  };
+function buildStrokes(rng, count, base, bg, colorPlan, thick) {
+  if (count <= 0) { return []; }
+  const edgeBg = planOr(colorPlan, 'stroke', bg, MIN_EDGE_CONTRAST, inkAgainst(bg));
+  const edgeInk = inkOpposite(base);
+  const w0 = rng.range(0.03, 0.12) * (thick ? 1.3 : 1);
+  const strokes = [];
+  if (count === 1) {
+    const rgb = contrastRatio(edgeBg, base) >= MIN_EDGE_CONTRAST ? edgeBg : edgeInk;
+    strokes.push({ width: w0, rgb: rgb, alpha: rng.range(0.85, 1) });
+    return strokes;
+  }
+  strokes.push({ width: w0, rgb: edgeBg, alpha: 1 });
+  const inner = contrastRatio(edgeInk, edgeBg) >= MIN_EDGE_CONTRAST ? edgeInk : shade(edgeBg, luma01(edgeBg) > 0.5 ? -0.6 : 0.6);
+  strokes.push({ width: w0 * 0.56, rgb: inner, alpha: 1 });
+  if (count >= 3) {
+    const hsl = rgbToHsl(base);
+    const accent = hslToRgb([(hsl[0] + rng.range(0.36, 0.64)) % 1, Math.max(0.5, hsl[1]), 0.5]);
+    strokes.push({ width: w0 * 0.3, rgb: contrastRatio(accent, inner) >= 1.8 ? accent : shade(inner, 0.5), alpha: 1 });
+  }
+  return strokes;
 }
 
-function buildTransform(rng, preset, gain, level) {
-  const t = { skewX: 0, rotate: 0, scaleX: 1, arch: 0, originX: 0.5, originY: 0.5 };
-  if (level >= 0.5 && chanceScaled(rng, preset.skew, gain)) {
-    t.skewX = rng.range(preset.skewRange[0], preset.skewRange[1]);
+function applyAxis(id, s) {
+  const rng = s.rng;
+  const spec = s.spec;
+  const base = s.base;
+  const bg = s.bg;
+  const plan = s.colorPlan;
+  const vertical = rng.chance(0.74);
+  const angle = vertical ? Math.PI / 2 + rng.range(-0.12, 0.12) : rng.range(-0.5, 0.5);
+
+  switch (id) {
+    case 'fill.solid':
+      spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
+      break;
+    case 'fill.linear':
+      spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bg, plan) };
+      break;
+    case 'fill.duotone': {
+      const split = rng.range(0.42, 0.58);
+      const up = rng.range(0.2, 0.5) * (rng.chance(0.5) ? 1 : -1);
+      const a = planOr(plan, 'ink', bg, MIN_STOP_CONTRAST, safeShade(base, up, bg));
+      const b = planOr(plan, 'inkAlt', bg, MIN_STOP_CONTRAST, safeShade(base, -up * rng.range(0.7, 1.3), bg));
+      spec.fill = {
+        type: 'duotone', angle: angle,
+        stops: [{ t: 0, rgb: a }, { t: split, rgb: a }, { t: Math.min(1, split + 0.004), rgb: b }, { t: 1, rgb: b }]
+      };
+      break;
+    }
+    case 'fill.metallic': {
+      const metal = rng.weighted([{ v: 'gold', w: 3 }, { v: 'silver', w: 3 }, { v: 'chrome', w: 2 }]);
+      const mb = metalBase(base, metal);
+      if (contrastRatio(mb, bg) < MIN_STOP_CONTRAST) {
+        spec.fill = { type: 'linear', angle: angle, stops: buildLinearStops(rng, base, bg, plan) };
+        break;
+      }
+      const prof = METAL_PROFILE[metal];
+      const stops = [];
+      for (let i = 0; i < prof.length; i++) { stops.push({ t: prof[i][0], rgb: safeShade(mb, prof[i][1], bg) }); }
+      spec.fill = { type: 'metallic', metal: metal, angle: Math.PI / 2 + rng.range(-0.08, 0.08), stops: stops };
+      break;
+    }
+    case 'fill.mirror': {
+      const split = rng.range(0.44, 0.56);
+      const hi = safeShade(base, 0.6, bg);
+      const lo = safeShade(base, -0.45, bg);
+      spec.fill = {
+        type: 'mirror', angle: Math.PI / 2,
+        stops: [
+          { t: 0, rgb: lo }, { t: Math.max(0.01, split - 0.02), rgb: hi },
+          { t: Math.min(0.99, split + 0.02), rgb: lo }, { t: 1, rgb: hi }
+        ]
+      };
+      break;
+    }
+    case 'fill.stripe': {
+      const alt = planOr(plan, 'accent', bg, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.55 : -0.5, bg));
+      spec.fill = {
+        type: 'stripe', angle: 0,
+        stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }],
+        stripe: {
+          rgb: alt, width: rng.range(0.06, 0.18),
+          slant: rng.chance(0.55) ? rng.range(0.4, 1.2) * (rng.chance(0.5) ? 1 : -1) : 0
+        }
+      };
+      break;
+    }
+    case 'fill.pattern': {
+      const alt = planOr(plan, 'accent', bg, MIN_STOP_CONTRAST, safeShade(base, rng.chance(0.5) ? 0.5 : -0.45, bg));
+      spec.fill = {
+        type: 'pattern', angle: 0,
+        stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }],
+        pattern: { kind: rng.pick(PATTERN_KINDS), rgb: alt, step: rng.range(0.07, 0.2), weight: rng.range(0.1, 0.3) }
+      };
+      break;
+    }
+    case 'fill.image':
+      spec.fill = {
+        type: 'image', angle: 0,
+        stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }],
+        image: { veil: base.slice(), veilAlpha: rng.range(0.28, 0.5), zoom: rng.range(1, 1.8) },
+        source: s.source
+      };
+      break;
+    case 'fill.outlineOnly':
+      spec.fill = { type: 'none', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
+      spec.needStroke = true;
+      break;
+
+    case 'stroke.single': spec.strokeCount = 1; break;
+    case 'stroke.double': spec.strokeCount = 2; break;
+    case 'stroke.triple': spec.strokeCount = 3; break;
+
+    case 'glow.soft':
+      spec.glow = {
+        rgb: planOr(plan, 'glow', bg, 1, luma01(bg) > 0.5 ? shade(base, -0.55) : shade(base, 0.6)),
+        alpha: rng.range(0.25, 0.55), blur: rng.range(0.22, 0.7), passes: rng.chance(0.4) ? 2 : 1
+      };
+      break;
+    case 'glow.neon': {
+      const tube = accentOf(rng, base, bg, plan);
+      spec.glow = { rgb: tube, alpha: rng.range(0.55, 0.9), blur: rng.range(0.6, 1.3), passes: 2 };
+      spec.neon = { tube: tube, core: safeShade(base, 0.8, bg), width: rng.range(0.07, 0.14) };
+      break;
+    }
+
+    case 'shadow.soft': spec.dropShadow = buildShadow(rng, base, bg, plan, false); break;
+    case 'shadow.hard': spec.dropShadow = buildShadow(rng, base, bg, plan, true); break;
+    case 'shadow.long': {
+      const ang = rng.range(Math.PI * 0.15, Math.PI * 0.45);
+      const len = rng.range(0.25, 0.8);
+      const steps = Math.max(6, Math.min(18, Math.round(len / 0.035)));
+      spec.longShadow = {
+        rgb: shadowInk(base, bg, plan), alpha: rng.range(0.35, 0.7), steps: steps,
+        dx: Math.cos(ang) * len / steps, dy: Math.sin(ang) * len / steps
+      };
+      break;
+    }
+    case 'shadow.extrude': {
+      const ang = rng.range(Math.PI * 0.1, Math.PI * 0.5);
+      const depth = rng.range(0.08, 0.26);
+      const steps = Math.max(4, Math.min(14, Math.round(depth / 0.018)));
+      const face = safeShade(base, -0.55, bg);
+      spec.extrude = {
+        near: face, far: shade(face, -0.35), steps: steps,
+        dx: Math.cos(ang) * depth / steps, dy: Math.sin(ang) * depth / steps
+      };
+      break;
+    }
+
+    case 'plate.all':
+    case 'plate.line':
+    case 'plate.phrase':
+    case 'plate.glyph':
+    case 'plate.head':
+    case 'plate.tail':
+    case 'plate.random':
+    case 'plate.marker':
+    case 'plate.knockout':
+      spec.plate = buildPlate(rng, id, base, bg, plan, s.forceCover);
+      break;
+
+    case 'distort.arc':
+      spec.distort.arc = rng.range(0.04, 0.16) * (rng.chance(0.75) ? 1 : -1);
+      break;
+    case 'distort.wave':
+      spec.distort.wave = { amp: rng.range(0.04, 0.16), freq: rng.range(0.6, 2.2), phase: rng.range(0, Math.PI * 2) };
+      break;
+    case 'distort.jitter':
+      spec.distort.jitter = { rot: rng.range(0.01, 0.07), off: rng.range(0.02, 0.1), scale: rng.range(0.04, 0.16) };
+      break;
+    case 'distort.trapezoid':
+      spec.distort.trapezoid = rng.range(0.12, 0.42) * (rng.chance(0.5) ? 1 : -1);
+      break;
+    case 'distort.bulge':
+      spec.distort.bulge = rng.range(0.12, 0.45);
+      break;
+    case 'distort.fan':
+      spec.distort.fan = rng.range(0.05, 0.2);
+      break;
+    case 'distort.stagger':
+      spec.distort.stagger = rng.range(0.05, 0.2) * (rng.chance(0.5) ? 1 : -1);
+      break;
+    case 'distort.alternate':
+      spec.distort.alternate = rng.range(0.08, 0.28);
+      break;
+    case 'distort.ramp':
+      spec.distort.ramp = rng.range(0.15, 0.5) * (rng.chance(0.5) ? 1 : -1);
+      break;
+    case 'distort.shear':
+      spec.distort.shear = rng.range(0.06, 0.24);
+      break;
+    case 'distort.dropCap':
+      spec.distort.dropCap = rng.range(0.35, 0.9);
+      break;
+    case 'distort.shatter':
+      spec.distort.shatter = { ratio: rng.range(0.12, 0.35), amp: rng.range(0.08, 0.3) };
+      break;
+
+    case 'fx.bevel':
+      spec.bevel = {
+        light: safeShade(base, rng.range(0.35, 0.7), bg),
+        dark: safeShade(base, -rng.range(0.35, 0.7), bg),
+        offset: rng.range(0.014, 0.05), alpha: rng.range(0.7, 1)
+      };
+      break;
+    case 'fx.innerLine':
+      spec.innerLine = {
+        rgb: luma01(base) > 0.5 ? shade(base, -0.5) : shade(base, 0.55),
+        width: rng.range(0.008, 0.022), alpha: rng.range(0.55, 0.9)
+      };
+      break;
+    case 'fx.edgeSplit':
+      spec.edgeSplit = {
+        dx: rng.range(0.006, 0.024) * (rng.chance(0.5) ? 1 : -1),
+        dy: rng.range(0, 0.01) * (rng.chance(0.5) ? 1 : -1),
+        alpha: rng.range(0.4, 0.8), a: [255, 46, 46], b: [40, 170, 255]
+      };
+      break;
+    case 'fx.misregister': {
+      const a = accentOf(rng, base, bg, plan);
+      spec.misregister = {
+        layers: [
+          { rgb: a, dx: rng.range(0.008, 0.03) * (rng.chance(0.5) ? 1 : -1), dy: rng.range(-0.02, 0.02), alpha: rng.range(0.45, 0.85) },
+          { rgb: safeShade(base, -0.5, bg), dx: rng.range(-0.03, -0.008), dy: rng.range(-0.02, 0.02), alpha: rng.range(0.35, 0.7) }
+        ]
+      };
+      if (rng.chance(0.35)) {
+        spec.misregister.layers.push({ rgb: safeShade(base, 0.5, bg), dx: rng.range(-0.02, 0.02), dy: rng.range(0.008, 0.03), alpha: rng.range(0.3, 0.6) });
+      }
+      break;
+    }
+    case 'fx.splitCut':
+      spec.splitCut = { at: rng.range(0.4, 0.62), shift: rng.range(0.03, 0.13) * (rng.chance(0.5) ? 1 : -1) };
+      break;
+    case 'fx.reflection':
+      spec.reflection = { gap: rng.range(0.02, 0.12), alpha: rng.range(0.22, 0.5), fade: rng.range(0.3, 0.7) };
+      break;
+    case 'fx.roughEdge':
+      spec.roughEdge = { amount: rng.range(0.02, 0.06), density: rng.range(0.6, 1.4), seed: rng.int(1, 9999) };
+      break;
+    case 'fx.torn':
+      spec.torn = { count: rng.int(2, 5), amount: rng.range(0.1, 0.32), seed: rng.int(1, 9999) };
+      break;
+
+    case 'orn.underline': spec.underline = buildRule(rng, base, bg, plan); break;
+    case 'orn.overline': spec.overline = buildRule(rng, base, bg, plan); break;
+    case 'orn.boten':
+      spec.boten = {
+        rgb: contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg),
+        mark: rng.pick(BOTEN_MARKS), size: rng.range(0.16, 0.26),
+        gap: rng.range(0.06, 0.16), alpha: rng.range(0.8, 1)
+      };
+      break;
+
+    case 'tf.skew': spec.transform.skewX = rng.range(0.05, 0.22); break;
+    case 'tf.rotate': spec.transform.rotate = rng.range(0.004, 0.04) * (rng.chance(0.5) ? 1 : -1) * Math.PI; break;
+    case 'tf.condense': spec.transform.scaleX = rng.range(0.72, 0.94); break;
+    case 'tf.expand': spec.transform.scaleX = rng.range(1.06, 1.22); break;
+    default: break;
   }
-  if (chanceScaled(rng, preset.rotate, gain)) {
-    t.rotate = rng.range(preset.rotateRange[0], preset.rotateRange[1]) * (rng.chance(0.5) ? 1 : -1) * Math.PI;
-  }
-  const sx = rng.range(preset.scaleX[0], preset.scaleX[1]);
-  if (Math.abs(sx - 1) > 0.03) { t.scaleX = sx; }
-  if (level >= 0.5 && chanceScaled(rng, preset.archP, gain)) {
-    t.arch = rng.range(preset.archRange[0], preset.archRange[1]) * (rng.chance(0.75) ? 1 : -1);
-  }
-  return t;
+}
+
+function usesMask(spec) {
+  return !!(spec.longShadow || spec.extrude || spec.edgeSplit || spec.misregister
+    || spec.reflection || spec.roughEdge || spec.torn
+    || (spec.plate && spec.plate.knockout)
+    || spec.fill.type === 'stripe' || spec.fill.type === 'pattern' || spec.fill.type === 'image');
+}
+
+function layerFillActive(spec) {
+  const t = spec.fill.type;
+  return t === 'stripe' || t === 'pattern' || t === 'image' || !!spec.roughEdge || !!spec.torn;
+}
+
+function fillPasses(spec) {
+  if (spec.plate && spec.plate.knockout) { return 0; }
+  if (spec.fill.type === 'none') { return 0; }
+  if (layerFillActive(spec)) { return 0; }
+  if (spec.splitCut) { return 2; }
+  return 1;
 }
 
 function passCost(spec) {
-  let cost = 1;
+  let cost = fillPasses(spec);
   cost += spec.strokes.length;
   if (spec.glow) { cost += spec.glow.passes; }
   if (spec.bevel) { cost += 2; }
   if (spec.innerLine) { cost += 1; }
-  if (spec.longShadow || spec.edgeSplit) { cost += 1; }
+  if (usesMask(spec)) { cost += 1; }
   return cost;
 }
 
 function capPasses(spec) {
-  const drop = ['edgeSplit', 'longShadow', 'innerLine', 'bevel'];
+  const drop = ['edgeSplit', 'misregister', 'reflection', 'innerLine', 'bevel', 'splitCut', 'torn'];
   for (let i = 0; i < drop.length && passCost(spec) > MAX_GLYPH_PASSES; i++) {
     if (spec[drop[i]]) { spec[drop[i]] = null; }
   }
@@ -349,120 +636,120 @@ function capPasses(spec) {
   if (passCost(spec) > MAX_GLYPH_PASSES && spec.glow) { spec.glow = null; }
 }
 
-export function buildDecorSpec(rng, genre, slot, style, stats, intensity) {
-  const preset = presetOf(genre);
+export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorPlan, opts) {
   const level = levelOf(slot);
   const inten = typeof intensity === 'number' ? intensity : 0.5;
-  const gain = level * (0.55 + inten * 0.9);
   const base = style.color.slice();
   const noisy = stats.std > NOISY_STD;
+  const plan = colorPlan || null;
+  const source = opts && opts.sourceCanvas ? opts.sourceCanvas : null;
 
   let bg = stats.rgb.slice();
   if (style.scrim) { bg = blendRgb(bg, style.scrim.color, style.scrim.alpha); }
 
-  const axes = [];
   const spec = {
     genre: genre, level: level,
-    fill: null, strokes: [], glow: null, dropShadow: null, longShadow: null,
-    bevel: null, innerLine: null, plate: null, underline: null, overline: null,
-    boten: null, transform: null, edgeSplit: null, axes: axes
+    fill: null, strokes: [], strokeCount: 0, glow: null, neon: null, dropShadow: null,
+    longShadow: null, extrude: null, bevel: null, innerLine: null, plate: null,
+    underline: null, overline: null, boten: null, edgeSplit: null, misregister: null,
+    splitCut: null, reflection: null, roughEdge: null, torn: null, needStroke: false,
+    distort: {
+      arc: 0, wave: null, jitter: null, trapezoid: 0, bulge: 0, fan: 0, stagger: 0,
+      alternate: 0, ramp: 0, shear: 0, dropCap: 0, shatter: null, seed: rng.int(1, 99999)
+    },
+    transform: { skewX: 0, rotate: 0, scaleX: 1, originX: 0.5, originY: 0.5 },
+    vertical: false, effectiveBg: bg, axes: []
   };
 
-  const wantPlate = level > 0.2
-    && (chanceScaled(rng, preset.plate, gain) || (noisy && rng.chance(0.5)) || contrastRatio(base, bg) < MIN_STOP_CONTRAST);
-  if (wantPlate) {
-    spec.plate = buildPlate(rng, preset, base, bg);
-    bg = settlePlate(spec.plate, bg, base);
-    axes.push('plate:' + spec.plate.kind);
+  const state = {
+    rng: rng, spec: spec, base: base, bg: bg, colorPlan: plan, source: source,
+    gi: genreIndex(genre), level: level, taken: {}, chosen: [], groupCount: {},
+    budget: budgetOf(slot) * (0.65 + inten * 0.7)
+  };
+
+  const fillPool = [];
+  const platePool = [];
+  for (let i = 0; i < AXES.length; i++) {
+    if (AXES[i].group === 'fill') { fillPool.push(AXES[i]); }
+    else if (AXES[i].group === 'plate' && AXES[i].id !== 'plate.knockout'
+      && AXES[i].id !== 'plate.glyph' && AXES[i].id !== 'plate.random'
+      && AXES[i].id !== 'plate.marker') { platePool.push(AXES[i]); }
   }
 
-  spec.fill = buildFill(rng, preset, base, bg, level);
-  axes.push('fill:' + (spec.fill.metal ? spec.fill.type + '-' + spec.fill.metal : spec.fill.type));
-
-  spec.strokes = buildStrokes(rng, preset, base, bg, level, noisy && !spec.plate);
-  if (spec.strokes.length > 0) { axes.push('stroke:' + spec.strokes.length); }
-
-  spec.glow = buildGlow(rng, preset, base, bg, gain, level, noisy && !spec.plate && spec.strokes.length === 0);
-  if (spec.glow) { axes.push('glow'); }
-
-  spec.dropShadow = buildShadow(rng, preset, base, bg, gain, level);
-  if (spec.dropShadow) { axes.push(spec.dropShadow.hard ? 'shadow:hard' : 'shadow:soft'); }
-
-  if (level >= 0.5 && chanceScaled(rng, preset.longShadow, gain)) {
-    const ang = rng.range(Math.PI * 0.15, Math.PI * 0.45);
-    const len = rng.range(0.25, 0.75);
-    const steps = Math.max(6, Math.min(18, Math.round(len / 0.035)));
-    let rgb = inkAgainst(bg);
-    if (contrastRatio(rgb, base) < 1.6) { rgb = inkOpposite(rgb); }
-    spec.longShadow = {
-      rgb: rgb, alpha: rng.range(0.35, 0.7), steps: steps,
-      dx: Math.cos(ang) * len / steps, dy: Math.sin(ang) * len / steps
-    };
-    axes.push('longShadow');
-  }
-
-  if (level >= 0.5 && chanceScaled(rng, preset.bevel, gain)) {
-    spec.bevel = {
-      light: safeShade(base, rng.range(0.35, 0.7), bg),
-      dark: safeShade(base, -rng.range(0.35, 0.7), bg),
-      offset: rng.range(0.014, 0.05),
-      alpha: rng.range(0.7, 1)
-    };
-    axes.push('bevel');
-  }
-
-  if (level >= 0.35 && chanceScaled(rng, preset.innerLine, gain)) {
-    spec.innerLine = {
-      rgb: luma01(base) > 0.5 ? shade(base, -0.5) : shade(base, 0.55),
-      width: rng.range(0.008, 0.022),
-      alpha: rng.range(0.55, 0.9)
-    };
-    axes.push('innerLine');
-  }
-
-  if (level >= 0.35) {
-    const rule = buildRule(rng, preset, base, bg, gain);
-    if (rule) {
-      const where = rng.weighted([{ v: 'under', w: 6 }, { v: 'over', w: 2 }, { v: 'both', w: 1.2 }]);
-      if (where !== 'over') { spec.underline = rule; }
-      if (where !== 'under') { spec.overline = rule; }
-      axes.push('rule:' + where);
+  const selected = [];
+  if (level > 0.2 && (noisy || contrastRatio(base, bg) < MIN_STOP_CONTRAST)) {
+    const forced = pickAxis(rng, platePool, state, true);
+    if (forced) {
+      takeAxis(state, forced);
+      state.budget += forced.cost;
+      selected.push({ axis: forced, forceCover: true });
     }
   }
 
-  if (level >= 0.35 && chanceScaled(rng, preset.boten, gain)) {
-    spec.boten = {
-      rgb: contrastRatio(base, bg) >= MIN_STOP_CONTRAST ? base.slice() : inkAgainst(bg),
-      mark: rng.pick(BOTEN_MARKS),
-      size: rng.range(0.16, 0.26),
-      gap: rng.range(0.06, 0.16),
-      alpha: rng.range(0.8, 1)
-    };
-    axes.push('boten');
+  let fillAxis = pickAxis(rng, fillPool, state, false);
+  if (!fillAxis) { fillAxis = pickAxis(rng, fillPool, state, true); }
+  if (fillAxis) {
+    takeAxis(state, fillAxis);
+    selected.push({ axis: fillAxis, forceCover: false });
   }
 
-  if (level >= 0.5 && chanceScaled(rng, preset.edgeSplit, gain)) {
-    spec.edgeSplit = {
-      dx: rng.range(0.006, 0.022) * (rng.chance(0.5) ? 1 : -1),
-      dy: rng.range(0, 0.01) * (rng.chance(0.5) ? 1 : -1),
-      alpha: rng.range(0.4, 0.8),
-      a: [255, 46, 46],
-      b: [40, 170, 255]
-    };
-    axes.push('edgeSplit');
+  for (let guard = 0; guard < 24 && state.budget > 2; guard++) {
+    const axis = pickAxis(rng, AXES, state, false);
+    if (!axis) { break; }
+    takeAxis(state, axis);
+    selected.push({ axis: axis, forceCover: false });
   }
 
-  spec.transform = buildTransform(rng, preset, gain, level);
-  if (spec.transform.skewX) { axes.push('skew'); }
-  if (spec.transform.rotate) { axes.push('rotate'); }
-  if (spec.transform.scaleX !== 1) { axes.push(spec.transform.scaleX < 1 ? 'condense' : 'expand'); }
-  if (spec.transform.arch) { axes.push('arch'); }
+  const rank = { plate: 0, fill: 1 };
+  const ordered = selected.slice().sort(function (a, b) {
+    const ra = rank[a.axis.group] === undefined ? 2 : rank[a.axis.group];
+    const rb = rank[b.axis.group] === undefined ? 2 : rank[b.axis.group];
+    return ra - rb;
+  });
 
-  if (noisy && !spec.plate && !spec.glow && spec.strokes.length === 0) {
-    spec.strokes = buildStrokes(rng, preset, base, bg, Math.max(level, 0.7), true);
-    axes.push('stroke:forced');
+  for (let i = 0; i < ordered.length; i++) {
+    const entry = ordered[i];
+    state.forceCover = entry.forceCover;
+    applyAxis(entry.axis.id, state);
+    state.forceCover = false;
+    if (entry.axis.group === 'plate' && spec.plate && spec.plate.covers) {
+      state.bg = settlePlate(spec.plate, state.bg, base);
+    }
+    let label = entry.axis.id;
+    if (entry.axis.group === 'plate' && spec.plate) { label += ':' + spec.plate.scope + '/' + spec.plate.shape; }
+    if (entry.axis.group === 'fill' && spec.fill && spec.fill.metal) { label += ':' + spec.fill.metal; }
+    spec.axes.push(label);
   }
 
+  bg = state.bg;
+
+  const covered = !!(spec.plate && (spec.plate.covers || spec.plate.knockout));
+  if (spec.needStroke && spec.strokeCount === 0) { spec.strokeCount = 1; }
+  if (spec.neon && spec.strokeCount === 0) { spec.strokeCount = 1; }
+  if (noisy && spec.strokeCount === 0 && !covered && !spec.glow) { spec.strokeCount = 1; }
+  spec.strokes = buildStrokes(rng, spec.strokeCount, base, bg, plan, noisy && !covered);
+
+  if (spec.neon && spec.strokes.length > 0) {
+    spec.strokes[0].rgb = spec.neon.tube;
+    spec.strokes[0].width = spec.neon.width;
+    spec.strokes[0].alpha = 1;
+    if (spec.fill.type === 'solid' || spec.fill.type === 'linear') {
+      spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: spec.neon.core }, { t: 1, rgb: spec.neon.core }] };
+    }
+  }
+
+  if (spec.fill.type === 'image' && !spec.fill.source) {
+    spec.fill = { type: 'linear', angle: Math.PI / 2, stops: buildLinearStops(rng, base, bg, plan) };
+  }
+  if ((spec.fill.type === 'image' || spec.fill.type === 'none') && spec.strokes.length === 0) {
+    spec.strokes = buildStrokes(rng, 1, base, bg, plan, true);
+  }
+  if (noisy && !covered && !spec.glow && spec.strokes.length === 0) {
+    spec.strokes = buildStrokes(rng, 2, base, bg, plan, true);
+    spec.axes.push('stroke.forced');
+  }
+
+  spec.effectiveBg = bg;
   capPasses(spec);
   return spec;
 }
@@ -510,56 +797,213 @@ function makeFillStyle(ctx, box, fill) {
   return g;
 }
 
-function roundRectPath(ctx, x, y, w, h, r) {
-  const rr = Math.min(r, w / 2, h / 2);
-  ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.lineTo(x + w - rr, y);
-  ctx.arcTo(x + w, y, x + w, y + rr, rr);
-  ctx.lineTo(x + w, y + h - rr);
-  ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
-  ctx.lineTo(x + rr, y + h);
-  ctx.arcTo(x, y + h, x, y + h - rr, rr);
-  ctx.lineTo(x, y + rr);
-  ctx.arcTo(x, y, x + rr, y, rr);
-  ctx.closePath();
+function hash01(n) {
+  let x = Math.sin(n * 12.9898) * 43758.5453;
+  x -= Math.floor(x);
+  return x < 0 ? x + 1 : x;
 }
 
-function paintPlate(ctx, box, plate, size) {
+function shapePath(ctx, shape, x, y, w, h, r, seed) {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  ctx.beginPath();
+  if (shape === 'circle') {
+    ctx.arc(cx, cy, Math.max(w, h) / 2, 0, Math.PI * 2);
+    return;
+  }
+  if (shape === 'ellipse') {
+    if (typeof ctx.ellipse === 'function') { ctx.ellipse(cx, cy, w / 2, h / 2, 0, 0, Math.PI * 2); }
+    else { ctx.arc(cx, cy, Math.max(w, h) / 2, 0, Math.PI * 2); }
+    return;
+  }
+  if (shape === 'square') {
+    const s = Math.max(w, h) / 2;
+    ctx.rect(cx - s, cy - s, s * 2, s * 2);
+    return;
+  }
+  if (shape === 'diamond') {
+    ctx.moveTo(cx, y - h * 0.18);
+    ctx.lineTo(x + w * 1.08, cy);
+    ctx.lineTo(cx, y + h * 1.18);
+    ctx.lineTo(x - w * 0.08, cy);
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'hexagon') {
+    const k = Math.min(w * 0.3, h * 0.32);
+    ctx.moveTo(x + k, y);
+    ctx.lineTo(x + w - k, y);
+    ctx.lineTo(x + w, cy);
+    ctx.lineTo(x + w - k, y + h);
+    ctx.lineTo(x + k, y + h);
+    ctx.lineTo(x, cy);
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'ribbon') {
+    const k = Math.min(w * 0.24, h * 0.34);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w - k, cy);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.lineTo(x + k, cy);
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'tag') {
+    const k = Math.min(w * 0.3, h * 0.42);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + w - k, y);
+    ctx.lineTo(x + w, cy);
+    ctx.lineTo(x + w - k, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'speechBubble') {
+    const rr = Math.min(r, w / 2, h / 2);
+    const tx = x + w * 0.24;
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.arcTo(x + w, y, x + w, y + rr, rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    ctx.lineTo(tx + h * 0.3, y + h);
+    ctx.lineTo(tx, y + h + h * 0.34);
+    ctx.lineTo(tx, y + h);
+    ctx.lineTo(x + rr, y + h);
+    ctx.arcTo(x, y + h, x, y + h - rr, rr);
+    ctx.lineTo(x, y + rr);
+    ctx.arcTo(x, y, x + rr, y, rr);
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'brush') {
+    const n = 7;
+    ctx.moveTo(x, y + h * 0.06);
+    for (let i = 1; i <= n; i++) {
+      const t = i / n;
+      ctx.quadraticCurveTo(x + w * (t - 0.5 / n), y + h * (hash01(seed + i) * 0.18 - 0.04), x + w * t, y + h * (hash01(seed + i + 40) * 0.12));
+    }
+    ctx.lineTo(x + w, y + h * 0.94);
+    for (let i = n; i >= 0; i--) {
+      const t = i / n;
+      ctx.quadraticCurveTo(x + w * (t + 0.5 / n), y + h * (0.86 + hash01(seed + i + 80) * 0.18), x + w * t, y + h * (0.9 + hash01(seed + i + 120) * 0.1));
+    }
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'tornPaper') {
+    const n = 9;
+    ctx.moveTo(x, y);
+    for (let i = 1; i <= n; i++) { ctx.lineTo(x + w * (i / n), y + h * hash01(seed + i) * 0.12); }
+    ctx.lineTo(x + w, y + h);
+    for (let i = n; i >= 0; i--) { ctx.lineTo(x + w * (i / n), y + h * (0.88 + hash01(seed + i + 50) * 0.12)); }
+    ctx.closePath();
+    return;
+  }
+  if (shape === 'underlineBar') {
+    ctx.rect(x, y + h * 0.7, w, h * 0.3);
+    return;
+  }
+  if (shape === 'markerHighlight') {
+    ctx.rect(x, y + h * 0.36, w, h * 0.68);
+    return;
+  }
+  if (shape === 'roundRect') {
+    const rr = Math.min(r, w / 2, h / 2);
+    ctx.moveTo(x + rr, y);
+    ctx.lineTo(x + w - rr, y);
+    ctx.arcTo(x + w, y, x + w, y + rr, rr);
+    ctx.lineTo(x + w, y + h - rr);
+    ctx.arcTo(x + w, y + h, x + w - rr, y + h, rr);
+    ctx.lineTo(x + rr, y + h);
+    ctx.arcTo(x, y + h, x, y + h - rr, rr);
+    ctx.lineTo(x, y + rr);
+    ctx.arcTo(x, y, x + rr, y, rr);
+    ctx.closePath();
+    return;
+  }
+  ctx.rect(x, y, w, h);
+}
+
+function unionRect(list) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i].x < x0) { x0 = list[i].x; }
+    if (list[i].y < y0) { y0 = list[i].y; }
+    if (list[i].x + list[i].w > x1) { x1 = list[i].x + list[i].w; }
+    if (list[i].y + list[i].h > y1) { y1 = list[i].y + list[i].h; }
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+function plateRegions(regions, plate, box) {
+  if (!regions) { return [box]; }
+  const scope = plate.scope;
+  if (scope === 'line' && regions.line && regions.line.length) { return regions.line; }
+  if (scope === 'phrase' && regions.phrase && regions.phrase.length) { return regions.phrase; }
+  if (scope === 'glyph' && regions.glyph && regions.glyph.length) { return regions.glyph; }
+  const g = regions.glyph || [];
+  if ((scope === 'head' || scope === 'tail') && g.length > 0) {
+    const n = Math.max(1, Math.min(plate.n, g.length));
+    return [unionRect(scope === 'head' ? g.slice(0, n) : g.slice(g.length - n))];
+  }
+  if (scope === 'random' && g.length > 0) {
+    const out = [];
+    for (let i = 0; i < g.length; i++) {
+      if (hash01(plate.seed + i * 7.13) < plate.ratio) { out.push(g[i]); }
+    }
+    return out.length > 0 ? out : [g[0]];
+  }
+  return [box];
+}
+
+function paintPlateShape(ctx, rect, plate, size, index) {
   const px = plate.padX * size;
   const py = plate.padY * size;
-  const x = box.x - px;
-  const y = box.y - py;
-  const w = box.w + px * 2;
-  const h = box.h + py * 2;
-  if (w <= 0 || h <= 0) { return; }
+  const x = rect.x - px;
+  const y = rect.y - py;
+  const w = rect.w + px * 2;
+  const h = rect.h + py * 2;
+  if (!(w > 0) || !(h > 0)) { return; }
   ctx.save();
-  if (plate.rotate || plate.skew) {
+  const rot = plate.rotate + (plate.perRotate ? (hash01(plate.seed + index * 3.7) - 0.5) * 2 * plate.perRotate : 0);
+  if (rot || plate.skew) {
     const cx = x + w / 2;
     const cy = y + h / 2;
     ctx.translate(cx, cy);
-    if (plate.rotate) { ctx.rotate(plate.rotate); }
+    if (rot) { ctx.rotate(rot); }
     if (plate.skew) { ctx.transform(1, 0, -plate.skew, 1, 0, 0); }
     ctx.translate(-cx, -cy);
   }
-  ctx.fillStyle = rgbToCss(plate.rgb, plate.alpha);
-  if (plate.radius > 0) {
-    roundRectPath(ctx, x, y, w, h, plate.radius * size);
+  if (plate.double) {
+    ctx.fillStyle = rgbToCss(plate.double.rgb, plate.double.alpha);
+    shapePath(ctx, plate.shape, x + plate.double.dx * size, y + plate.double.dy * size, w, h, plate.radius * size, plate.seed + index);
     ctx.fill();
-    if (plate.border) {
-      ctx.lineWidth = plate.border.width * size;
-      ctx.strokeStyle = rgbToCss(plate.border.rgb, plate.border.alpha);
-      ctx.stroke();
-    }
-  } else {
-    ctx.fillRect(x, y, w, h);
-    if (plate.border) {
-      ctx.lineWidth = plate.border.width * size;
-      ctx.strokeStyle = rgbToCss(plate.border.rgb, plate.border.alpha);
-      ctx.strokeRect(x, y, w, h);
-    }
+  }
+  if (plate.shadow) {
+    ctx.shadowColor = rgbToCss(plate.shadow.rgb, plate.shadow.alpha);
+    ctx.shadowBlur = plate.shadow.blur * size;
+    ctx.shadowOffsetX = plate.shadow.dx * size;
+    ctx.shadowOffsetY = plate.shadow.dy * size;
+  }
+  ctx.fillStyle = rgbToCss(plate.rgb, plate.alpha);
+  shapePath(ctx, plate.shape, x, y, w, h, plate.radius * size, plate.seed + index);
+  ctx.fill();
+  clearShadow(ctx);
+  if (plate.border) {
+    ctx.lineWidth = plate.border.width * size;
+    ctx.strokeStyle = rgbToCss(plate.border.rgb, plate.border.alpha);
+    ctx.stroke();
   }
   ctx.restore();
+}
+
+function paintPlates(ctx, regions, box, plate, size) {
+  const rects = plateRegions(regions, plate, box);
+  for (let i = 0; i < rects.length; i++) { paintPlateShape(ctx, rects[i], plate, size, i); }
 }
 
 function paintRule(ctx, box, rule, size, top, vertical) {
@@ -581,8 +1025,15 @@ function paintRule(ctx, box, rule, size, top, vertical) {
   ctx.restore();
 }
 
-function buildMask(ctx, emitter, box, pad) {
+function newCanvas(w, h) {
   if (typeof document === 'undefined') { return null; }
+  const cv = document.createElement('canvas');
+  cv.width = w;
+  cv.height = h;
+  return cv;
+}
+
+function buildMask(ctx, emitter, box, pad) {
   let sx = 1;
   let sy = 1;
   if (typeof ctx.getTransform === 'function') {
@@ -596,22 +1047,22 @@ function buildMask(ctx, emitter, box, pad) {
   const w = Math.ceil(bw * sx);
   const h = Math.ceil(bh * sy);
   if (w < 2 || h < 2 || w * h > MASK_PIXEL_LIMIT) { return null; }
-  const cv = document.createElement('canvas');
-  cv.width = w;
-  cv.height = h;
+  const cv = newCanvas(w, h);
+  if (!cv) { return null; }
   const oc = cv.getContext('2d');
   if (!oc) { return null; }
+  const x = box.x - pad;
+  const y = box.y - pad;
   oc.scale(sx, sy);
-  oc.translate(pad - box.x, pad - box.y);
+  oc.translate(-x, -y);
   oc.fillStyle = '#000000';
   emitter(oc, 'fill');
-  return { cv: cv, x: box.x - pad, y: box.y - pad, w: bw, h: bh };
+  return { cv: cv, x: x, y: y, w: bw, h: bh, sx: sx, sy: sy };
 }
 
 function tintedMask(mask, rgb, alpha) {
-  const cv = document.createElement('canvas');
-  cv.width = mask.cv.width;
-  cv.height = mask.cv.height;
+  const cv = newCanvas(mask.cv.width, mask.cv.height);
+  if (!cv) { return null; }
   const oc = cv.getContext('2d');
   if (!oc) { return null; }
   oc.drawImage(mask.cv, 0, 0);
@@ -621,35 +1072,245 @@ function tintedMask(mask, rgb, alpha) {
   return cv;
 }
 
-function paintLongShadow(ctx, mask, ls, size) {
-  const layer = tintedMask(mask, ls.rgb, ls.alpha);
-  if (!layer) { return; }
-  for (let i = ls.steps; i >= 1; i--) {
-    ctx.drawImage(layer, mask.x + ls.dx * size * i, mask.y + ls.dy * size * i, mask.w, mask.h);
+function maskedLayer(mask, painter) {
+  const cv = newCanvas(mask.cv.width, mask.cv.height);
+  if (!cv) { return null; }
+  const oc = cv.getContext('2d');
+  if (!oc) { return null; }
+  oc.save();
+  oc.scale(mask.sx, mask.sy);
+  oc.translate(-mask.x, -mask.y);
+  painter(oc);
+  oc.restore();
+  oc.globalCompositeOperation = 'destination-in';
+  oc.drawImage(mask.cv, 0, 0);
+  return cv;
+}
+
+function eraseNoise(cv, spec, size, scale) {
+  const oc = cv.getContext('2d');
+  if (!oc) { return; }
+  oc.save();
+  oc.globalCompositeOperation = 'destination-out';
+  oc.fillStyle = '#000000';
+  const step = Math.max(2, size * 0.055 * scale);
+  const amp = spec.amount * size * scale;
+  const cols = Math.ceil(cv.width / step);
+  const rows = Math.ceil(cv.height / step);
+  const threshold = Math.min(0.9, 0.4 * spec.density);
+  for (let i = 0; i < cols; i++) {
+    for (let j = 0; j < rows; j++) {
+      if (hash01(spec.seed + i * 31.7 + j * 7.13) > threshold) { continue; }
+      const r = amp * (0.4 + hash01(spec.seed + i * 3.1 + j * 11.7));
+      oc.beginPath();
+      oc.arc(i * step + step / 2, j * step + step / 2, r, 0, Math.PI * 2);
+      oc.fill();
+    }
+  }
+  oc.restore();
+}
+
+function eraseTorn(cv, spec, size, scale) {
+  const oc = cv.getContext('2d');
+  if (!oc) { return; }
+  oc.save();
+  oc.globalCompositeOperation = 'destination-out';
+  oc.fillStyle = '#000000';
+  for (let i = 0; i < spec.count; i++) {
+    const x = hash01(spec.seed + i * 5.7) * cv.width;
+    const y = hash01(spec.seed + i * 13.1) * cv.height;
+    const w = spec.amount * size * scale * (0.5 + hash01(spec.seed + i * 2.3));
+    const h = spec.amount * size * scale * (0.5 + hash01(spec.seed + i * 9.9));
+    oc.save();
+    oc.translate(x, y);
+    oc.rotate(hash01(spec.seed + i * 17.3) * Math.PI);
+    oc.fillRect(-w / 2, -h / 2, w, h);
+    oc.restore();
+  }
+  oc.restore();
+}
+
+function paintOffsetLayers(ctx, mask, layers, size) {
+  for (let i = 0; i < layers.length; i++) {
+    const l = layers[i];
+    const cv = tintedMask(mask, l.rgb, l.alpha);
+    if (!cv) { return; }
+    ctx.drawImage(cv, mask.x + l.dx * size, mask.y + l.dy * size, mask.w, mask.h);
   }
 }
 
-function paintEdgeSplit(ctx, mask, es, size) {
-  const a = tintedMask(mask, es.a, es.alpha);
-  const b = tintedMask(mask, es.b, es.alpha);
-  if (!a || !b) { return; }
-  ctx.drawImage(a, mask.x - es.dx * size, mask.y - es.dy * size, mask.w, mask.h);
-  ctx.drawImage(b, mask.x + es.dx * size, mask.y + es.dy * size, mask.w, mask.h);
+function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
+  for (let i = steps; i >= 1; i--) {
+    const t = steps > 1 ? (i - 1) / (steps - 1) : 0;
+    const cv = tintedMask(mask, blendRgb(near, far, t), alpha);
+    if (!cv) { return; }
+    ctx.drawImage(cv, mask.x + dx * size * i, mask.y + dy * size * i, mask.w, mask.h);
+  }
+}
+
+function paintStripes(oc, mask, fill, size) {
+  oc.fillStyle = rgbToCss(fill.stops[0].rgb);
+  oc.fillRect(mask.x, mask.y, mask.w, mask.h);
+  oc.fillStyle = rgbToCss(fill.stripe.rgb);
+  const step = Math.max(1, fill.stripe.width * size);
+  const slant = fill.stripe.slant;
+  const over = Math.abs(slant) * mask.h;
+  for (let y = mask.y - mask.h; y < mask.y + mask.h * 2; y += step * 2) {
+    oc.beginPath();
+    oc.moveTo(mask.x - over, y);
+    oc.lineTo(mask.x + mask.w + over, y + slant * mask.h);
+    oc.lineTo(mask.x + mask.w + over, y + slant * mask.h + step);
+    oc.lineTo(mask.x - over, y + step);
+    oc.closePath();
+    oc.fill();
+  }
+}
+
+function paintPattern(oc, mask, fill, size) {
+  oc.fillStyle = rgbToCss(fill.stops[0].rgb);
+  oc.fillRect(mask.x, mask.y, mask.w, mask.h);
+  const p = fill.pattern;
+  const step = Math.max(2, p.step * size);
+  oc.fillStyle = rgbToCss(p.rgb);
+  oc.strokeStyle = rgbToCss(p.rgb);
+  oc.lineWidth = Math.max(0.5, step * p.weight);
+  if (p.kind === 'dots') {
+    for (let x = mask.x; x < mask.x + mask.w; x += step) {
+      for (let y = mask.y; y < mask.y + mask.h; y += step) {
+        oc.beginPath();
+        oc.arc(x, y, step * p.weight, 0, Math.PI * 2);
+        oc.fill();
+      }
+    }
+    return;
+  }
+  if (p.kind === 'checker') {
+    let i = 0;
+    for (let x = mask.x; x < mask.x + mask.w; x += step, i++) {
+      let j = 0;
+      for (let y = mask.y; y < mask.y + mask.h; y += step, j++) {
+        if ((i + j) % 2 === 0) { oc.fillRect(x, y, step, step); }
+      }
+    }
+    return;
+  }
+  oc.beginPath();
+  if (p.kind === 'grid' || p.kind === 'crosshatch') {
+    for (let x = mask.x; x < mask.x + mask.w; x += step) { oc.moveTo(x, mask.y); oc.lineTo(x, mask.y + mask.h); }
+    for (let y = mask.y; y < mask.y + mask.h; y += step) { oc.moveTo(mask.x, y); oc.lineTo(mask.x + mask.w, y); }
+  }
+  if (p.kind === 'diagonal' || p.kind === 'crosshatch') {
+    for (let x = mask.x - mask.h; x < mask.x + mask.w; x += step) {
+      oc.moveTo(x, mask.y);
+      oc.lineTo(x + mask.h, mask.y + mask.h);
+    }
+  }
+  oc.stroke();
+}
+
+function paintImageFill(oc, mask, fill) {
+  const src = fill.source;
+  const sw = src.width;
+  const sh = src.height;
+  if (!(sw > 0) || !(sh > 0)) { return; }
+  const scale = Math.max(mask.w / sw, mask.h / sh) * fill.image.zoom;
+  const dw = sw * scale;
+  const dh = sh * scale;
+  oc.drawImage(src, mask.x + (mask.w - dw) / 2, mask.y + (mask.h - dh) / 2, dw, dh);
+  oc.fillStyle = rgbToCss(fill.image.veil, fill.image.veilAlpha);
+  oc.fillRect(mask.x, mask.y, mask.w, mask.h);
+}
+
+function paintKnockout(ctx, mask, regions, box, plate, size) {
+  const cv = newCanvas(mask.cv.width, mask.cv.height);
+  if (!cv) { return false; }
+  const oc = cv.getContext('2d');
+  if (!oc) { return false; }
+  oc.save();
+  oc.scale(mask.sx, mask.sy);
+  oc.translate(-mask.x, -mask.y);
+  paintPlates(oc, regions, box, plate, size);
+  oc.restore();
+  oc.globalCompositeOperation = 'destination-out';
+  oc.drawImage(mask.cv, 0, 0);
+  ctx.drawImage(cv, mask.x, mask.y, mask.w, mask.h);
+  return true;
+}
+
+function paintReflection(ctx, mask, box, spec, size) {
+  const cv = newCanvas(mask.cv.width, mask.cv.height);
+  if (!cv) { return; }
+  const oc = cv.getContext('2d');
+  if (!oc) { return; }
+  oc.drawImage(mask.cv, 0, 0);
+  oc.globalCompositeOperation = 'source-in';
+  const g = oc.createLinearGradient(0, 0, 0, cv.height);
+  const rgb = spec.fill.stops[spec.fill.stops.length - 1].rgb;
+  g.addColorStop(0, rgbToCss(rgb, 0));
+  g.addColorStop(clamp01(1 - spec.reflection.fade), rgbToCss(rgb, 0));
+  g.addColorStop(1, rgbToCss(rgb, spec.reflection.alpha));
+  oc.fillStyle = g;
+  oc.fillRect(0, 0, cv.width, cv.height);
+  const mirrorY = box.y + box.h + spec.reflection.gap * size;
+  ctx.save();
+  ctx.translate(0, mirrorY * 2);
+  ctx.scale(1, -1);
+  ctx.drawImage(cv, mask.x, mask.y, mask.w, mask.h);
+  ctx.restore();
+}
+
+function paintSplitCut(ctx, emitter, box, spec, size) {
+  const cut = box.y + box.h * spec.splitCut.at;
+  const shift = spec.splitCut.shift * size;
+  const pad = size * 3;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x - pad, box.y - pad, box.w + pad * 2, cut - box.y + pad);
+  ctx.clip();
+  ctx.translate(-shift, 0);
+  emitter(ctx, 'fill');
+  ctx.restore();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(box.x - pad, cut, box.w + pad * 2, box.h + pad * 2);
+  ctx.clip();
+  ctx.translate(shift, 0);
+  emitter(ctx, 'fill');
+  ctx.restore();
 }
 
 export function paintDecorated(ctx, emitter, box, spec, size) {
   if (!spec || !(size > 0)) { return; }
+  const regions = emitter && emitter.regions ? emitter.regions : null;
   ctx.save();
   applyTransform(ctx, box, spec.transform);
   clearShadow(ctx);
 
-  if (spec.plate) { paintPlate(ctx, box, spec.plate, size); }
+  const mask = usesMask(spec) ? buildMask(ctx, emitter, box, size * MASK_PAD_EM) : null;
+  const maskScale = mask ? mask.sx : 1;
 
-  let mask = null;
-  if (spec.longShadow || spec.edgeSplit) {
-    mask = buildMask(ctx, emitter, box, size * MASK_PAD_EM);
+  if (spec.plate && spec.plate.knockout) {
+    if (!mask || !paintKnockout(ctx, mask, regions, box, spec.plate, size)) {
+      paintPlates(ctx, regions, box, spec.plate, size);
+      ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
+      emitter(ctx, 'fill');
+    }
+    if (spec.underline) { paintRule(ctx, box, spec.underline, size, false, !!spec.vertical); }
+    if (spec.overline) { paintRule(ctx, box, spec.overline, size, true, !!spec.vertical); }
+    ctx.restore();
+    return;
   }
-  if (spec.longShadow && mask) { paintLongShadow(ctx, mask, spec.longShadow, size); }
+
+  if (spec.plate) { paintPlates(ctx, regions, box, spec.plate, size); }
+
+  if (spec.longShadow && mask) {
+    paintRamp(ctx, mask, spec.longShadow.rgb, spec.longShadow.rgb, spec.longShadow.steps,
+      spec.longShadow.dx, spec.longShadow.dy, size, spec.longShadow.alpha);
+  }
+  if (spec.extrude && mask) {
+    paintRamp(ctx, mask, spec.extrude.near, spec.extrude.far, spec.extrude.steps,
+      spec.extrude.dx, spec.extrude.dy, size, 1);
+  }
 
   if (spec.glow) {
     ctx.fillStyle = rgbToCss(spec.glow.rgb, 1);
@@ -689,18 +1350,52 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
     ctx.translate(o, o);
   }
 
-  if (spec.edgeSplit && mask) { paintEdgeSplit(ctx, mask, spec.edgeSplit, size); }
+  if (spec.misregister && mask) { paintOffsetLayers(ctx, mask, spec.misregister.layers, size); }
+  if (spec.edgeSplit && mask) {
+    paintOffsetLayers(ctx, mask, [
+      { rgb: spec.edgeSplit.a, dx: -spec.edgeSplit.dx, dy: -spec.edgeSplit.dy, alpha: spec.edgeSplit.alpha },
+      { rgb: spec.edgeSplit.b, dx: spec.edgeSplit.dx, dy: spec.edgeSplit.dy, alpha: spec.edgeSplit.alpha }
+    ], size);
+  }
 
   if (shadowPending) { applyShadow(ctx, spec.dropShadow, size); shadowPending = false; }
-  ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
-  emitter(ctx, 'fill');
-  clearShadow(ctx);
+
+  const type = spec.fill.type;
+  if (type === 'none') {
+    clearShadow(ctx);
+  } else if (layerFillActive(spec) && mask) {
+    const layer = maskedLayer(mask, function (oc) {
+      if (type === 'stripe') { paintStripes(oc, mask, spec.fill, size); }
+      else if (type === 'pattern') { paintPattern(oc, mask, spec.fill, size); }
+      else if (type === 'image' && spec.fill.source) { paintImageFill(oc, mask, spec.fill); }
+      else {
+        oc.fillStyle = makeFillStyle(oc, box, spec.fill);
+        oc.fillRect(mask.x, mask.y, mask.w, mask.h);
+      }
+    });
+    if (layer) {
+      if (spec.roughEdge) { eraseNoise(layer, spec.roughEdge, size, maskScale); }
+      if (spec.torn) { eraseTorn(layer, spec.torn, size, maskScale); }
+      ctx.drawImage(layer, mask.x, mask.y, mask.w, mask.h);
+    }
+    clearShadow(ctx);
+  } else if (spec.splitCut) {
+    ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
+    paintSplitCut(ctx, emitter, box, spec, size);
+    clearShadow(ctx);
+  } else {
+    ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
+    emitter(ctx, 'fill');
+    clearShadow(ctx);
+  }
 
   if (spec.innerLine) {
     ctx.lineWidth = spec.innerLine.width * size;
     ctx.strokeStyle = rgbToCss(spec.innerLine.rgb, spec.innerLine.alpha);
     emitter(ctx, 'stroke');
   }
+
+  if (spec.reflection && mask) { paintReflection(ctx, mask, box, spec, size); }
 
   if (spec.underline) { paintRule(ctx, box, spec.underline, size, false, !!spec.vertical); }
   if (spec.overline) { paintRule(ctx, box, spec.overline, size, true, !!spec.vertical); }

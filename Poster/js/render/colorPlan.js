@@ -20,6 +20,10 @@ import {
   lightnessLadder,
   pickReadable,
   rotateHue,
+  pickGroundLightness,
+  pickFreeLightness,
+  inGroundBand,
+  groundSideRange,
   CHROMA_BUDGET
 } from '../core/harmony.js';
 
@@ -33,6 +37,7 @@ const TEXT_LADDER_CHROMA = 0.045;
 const TINT_MAX_CHROMA = 0.075;
 
 const ROLE_NAMES = ['ink', 'inkAlt', 'accent', 'surface', 'surfaceAlt', 'stroke', 'glow', 'plate', 'shadow'];
+const GROUND_ROLES = ['surface', 'surfaceAlt', 'plate'];
 const FIGURE_GROUND_PAIRS = [
   ['surface', 'ink'],
   ['surface', 'inkAlt'],
@@ -43,6 +48,15 @@ const FIGURE_GROUND_PAIRS = [
   ['ink', 'accent'],
   ['ink', 'stroke'],
   ['ink', 'plate']
+];
+const REPAIR_PAIRS = [
+  ['surface', 'ink'],
+  ['surface', 'inkAlt'],
+  ['surface', 'accent'],
+  ['surface', 'glow'],
+  ['surface', 'shadow'],
+  ['ink', 'accent'],
+  ['ink', 'stroke']
 ];
 const VIBRATION_PAIRS = [
   ['ink', 'surface'],
@@ -168,7 +182,7 @@ function applyAccentPull(rng, hue, bias) {
   return pullHue(hue, target, strength);
 }
 
-function chooseTintStrategy(rng, bias, palette) {
+function chooseTintStrategy(rng, bias) {
   return rng.chance(bias.tintContrastPref) ? 'contrasting' : 'harmonic';
 }
 
@@ -206,33 +220,39 @@ function buildRoles(rng, bias, colors, intensity, dark) {
   const third = colors[2] || base;
   const accentSrc = mostChromatic(colors, 1);
   const shift = bias.lightnessShift;
+  const side = groundSideRange(dark, 'small');
 
-  const surfaceL = dark ? rng.range(0.17, 0.27) + shift : rng.range(0.88, 0.965) + shift;
+  const surfaceL = dark
+    ? Math.min(side[1] - 0.06, Math.max(side[0], rng.range(0.17, 0.27) + shift))
+    : Math.max(side[0] + 0.06, Math.min(0.985, rng.range(0.88, 0.965) + shift));
   const surfaceC = Math.min(0.055, base[1] * 0.35) * bias.surfaceChroma;
   const surface = [clamp01(surfaceL), surfaceC, base[2]];
 
-  const altDir = dark ? 1 : -1;
+  const inkL = dark ? rng.range(0.93, 0.985) : Math.max(0.045, rng.range(0.10, 0.19) + shift * 0.4);
+  const inkC = Math.min(0.05, base[1] * 0.30) * bias.inkChroma;
+  const ink = [clamp01(inkL), inkC, base[2]];
+
+  const altL = pickGroundLightness(rng, dark, [surface[0]], MIN_ROLE_L_DELTA, 'large');
   const surfaceAlt = [
-    clamp01(surface[0] + altDir * rng.range(0.10, 0.20)),
+    altL === null ? clamp01(surface[0] + (dark ? 1 : -1) * MIN_ROLE_L_DELTA) : altL,
     Math.min(0.06, surfaceC * 1.4),
     second[2]
   ];
 
-  const inkL = dark ? rng.range(0.93, 0.985) : rng.range(0.10, 0.19) + shift * 0.4;
-  const inkC = Math.min(0.05, base[1] * 0.30) * bias.inkChroma;
-  const ink = [clamp01(inkL), inkC, base[2]];
-
   const inkAltL = ink[0] + (dark ? -1 : 1) * rng.range(0.14, 0.26);
   const inkAlt = [clamp01(inkAltL), Math.min(0.07, inkC * 1.8 + 0.01), second[2]];
 
-  const lo = Math.min(surface[0], ink[0]) + MIN_ROLE_L_DELTA + 0.04;
-  const hi = Math.max(surface[0], ink[0]) - MIN_ROLE_L_DELTA - 0.04;
-  const accentL = hi > lo ? rng.range(lo, hi) : clamp01((surface[0] + ink[0]) / 2);
+  const accentL = pickFreeLightness(rng, [0.10, 0.92], [surface[0], ink[0]], MIN_ROLE_L_DELTA + 0.01);
   const accentC = (0.155 + 0.065 * clamp01(intensity)) * bias.accentChroma;
   const accentH = applyAccentPull(rng, accentSrc[2], bias);
-  const accent = clampChroma([accentL, accentC, accentH]);
+  const accent = clampChroma([
+    accentL === null ? clamp01((surface[0] + ink[0]) / 2) : accentL,
+    accentC,
+    accentH
+  ]);
 
-  const glow = clampChroma([clamp01(accent[0] + 0.015), accent[1] * Math.min(1.05, bias.glowGain), accent[2]]);
+  const glowDir = accent[0] >= surface[0] ? 1 : -1;
+  const glow = clampChroma([clamp01(accent[0] + glowDir * 0.015), accent[1], accent[2]]);
 
   const stroke = [
     clamp01(dark ? rng.range(0.05, 0.15) : rng.range(0.90, 0.985)),
@@ -241,13 +261,16 @@ function buildRoles(rng, bias, colors, intensity, dark) {
   ];
 
   const plateInverted = rng.chance(0.35);
-  const plateL = plateInverted
-    ? (dark ? rng.range(0.70, 0.82) : rng.range(0.18, 0.30))
-    : (dark ? rng.range(0.14, 0.28) : rng.range(0.84, 0.955));
-  const plate = [clamp01(plateL + shift * 0.5), Math.min(0.05, surfaceC * 1.1), third[2]];
+  const plateL = pickGroundLightness(rng, plateInverted ? !dark : dark, [ink[0]], MIN_ROLE_L_DELTA, 'large');
+  const plate = [
+    plateL === null ? surface[0] : plateL,
+    Math.min(0.05, surfaceC * 1.1),
+    third[2]
+  ];
 
+  const shadowMax = dark ? Math.min(0.13, surface[0] - MIN_ROLE_L_DELTA - 0.01) : 0.13;
   const shadow = [
-    clamp01(rng.range(0.04, 0.13)),
+    clamp01(rng.range(Math.min(0.03, shadowMax), Math.max(0.035, shadowMax))),
     Math.min(0.045, base[1] * 0.4),
     base[2]
   ];
@@ -267,9 +290,9 @@ function buildRoles(rng, bias, colors, intensity, dark) {
 }
 
 function repairLightness(roles) {
-  for (let i = 0; i < FIGURE_GROUND_PAIRS.length; i++) {
-    const fixed = roles[FIGURE_GROUND_PAIRS[i][0]];
-    const name = FIGURE_GROUND_PAIRS[i][1];
+  for (let i = 0; i < REPAIR_PAIRS.length; i++) {
+    const fixed = roles[REPAIR_PAIRS[i][0]];
+    const name = REPAIR_PAIRS[i][1];
     roles[name] = separateLightness(fixed, roles[name], MIN_ROLE_L_DELTA);
   }
   return roles;
@@ -315,6 +338,14 @@ function planViolations(roles, tints) {
       out.push('lightness:' + FIGURE_GROUND_PAIRS[i].join('/'));
     }
   }
+  if (!inGroundBand(roles.surface[0], 'small')) { out.push('groundBand:surface'); }
+  for (let i = 1; i < GROUND_ROLES.length; i++) {
+    if (!inGroundBand(roles[GROUND_ROLES[i]][0], 'large')) { out.push('groundBand:' + GROUND_ROLES[i]); }
+  }
+  const surfaceRgb = oklchToSrgb(roles.surface);
+  const inkRgb = oklchToSrgb(roles.ink);
+  if (contrastRatio(inkRgb, surfaceRgb) < MIN_INK_WCAG) { out.push('inkContrastWcag'); }
+  if (Math.abs(apcaContrast(inkRgb, surfaceRgb)) < MIN_INK_APCA) { out.push('inkContrastApca'); }
   return out;
 }
 
@@ -382,7 +413,7 @@ export function buildColorPlan(rng, genre, palette, intensity) {
     scheme = attempts > MAX_ATTEMPTS ? FINAL_SCHEME : chooseScheme(rng, palette, bias.scheme);
     const colors = buildScheme(rng, keyLch, scheme);
     if (!colors) { continue; }
-    const strategy = chooseTintStrategy(rng, bias, palette);
+    const strategy = chooseTintStrategy(rng, bias);
     roles = buildRoles(rng, bias, colors, strength, dark);
     tints = buildTints(rng, strategy, keyHue, palette, bias);
     tints.strategy = strategy;
@@ -405,6 +436,8 @@ export function buildColorPlan(rng, genre, palette, intensity) {
     polarity: dark ? 'dark' : 'light',
     intensity: strength,
     genre: genre,
+    glowGain: bias.glowGain,
+    plateInverted: roles.plateInverted,
     roles: roleColors,
     textPalette: textPalette,
     tints: toTintColors(tints),

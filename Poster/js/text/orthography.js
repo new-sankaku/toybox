@@ -91,9 +91,10 @@ function partsJa(core) {
   const out = [];
   for (let i = 0; i < core.parts.length; i++) {
     const p = core.parts[i];
-    out.push(typeof p === 'string' ? p : p.ja);
+    const ja = typeof p === 'string' ? p : p.ja;
+    if (ja) { out.push(ja); }
   }
-  return out;
+  return out.length >= 2 ? out : null;
 }
 
 export function styleTitle(rng, core, opts) {
@@ -129,6 +130,7 @@ export function styleTitle(rng, core, opts) {
   if (punct === 'comma') { body = seg.join('、'); }
   else if (punct === 'nakaguro') { body = seg.join('・'); }
   else { body = core.ja; }
+  body = body.replace(/[・、]+$/, '');
 
   let numeralUsed = 'none';
   if (rng.chance(NUMERIC_CHANCE[genre])) {
@@ -166,6 +168,9 @@ export function styleTitle(rng, core, opts) {
   let text = b.open + body + b.close;
 
   const latinText = core.en ? String(core.en).toUpperCase() : '';
+  if (latinText.length > 30) { latinMode = 'none'; }
+  if (latinMode === 'slash' && text.length + latinText.length > 18) { latinMode = 'separate'; }
+  if (latinMode === 'paren' && text.length + latinText.length > 26) { latinMode = 'separate'; }
   let latinOut = '';
   if (latinMode === 'below') { text = text + '\n' + latinText; }
   else if (latinMode === 'slash') { text = text + ' / ' + latinText; }

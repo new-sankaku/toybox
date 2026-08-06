@@ -1,7 +1,7 @@
 import { clamp255, contrastRatio } from './color.js';
 
-const GAMUT_EPS = 1e-6;
-const GAMUT_ITER = 24;
+const GAMUT_EPS = 1e-9;
+const GAMUT_ITER = 26;
 const APCA = {
   trc: 2.4,
   rc: 0.2126729,
