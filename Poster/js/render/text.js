@@ -8,7 +8,7 @@ const VERT_CORNER = '、。，．';
 const NO_BOTEN = ' 　、。，．・「」『』（）ー…‥!！?？';
 
 const MIN_FONT_PX = 8;
-const MIN_SIZE_RATIO = 0.42;
+const MIN_SIZE_RATIO = 0.28;
 const SHRINK_STEP = 0.93;
 const LINE_HEIGHT = 1.32;
 const LINE_HEIGHT_TIGHT = 1.16;
@@ -29,6 +29,17 @@ const VERT_LATERAL_LIMIT = 0.3;
 const LATIN_TIER_MIN = 0.6;
 const LATIN_TIER_SCALE = 0.5;
 const TIER_LATIN_SYMBOLS = '()（）／/-–—.,:\'"’&+';
+const TIERED_RATIOS = [0.75, 1, 0.55, 0.4];
+const LINE_GAP_MIN = 0.06;
+const ELLIPSIS = '…';
+const FIT_STEPS = [
+  { track: 1, sx: 1, extra: 0 },
+  { track: 0.6, sx: 1, extra: 0 },
+  { track: 0.25, sx: 1, extra: 0 },
+  { track: 0.25, sx: 0.9, extra: 0 },
+  { track: 0.25, sx: 0.82, extra: 0 },
+  { track: 0.25, sx: 0.82, extra: 1 }
+];
 
 function hash01(n) {
   let x = Math.sin(n * 12.9898) * 43758.5453;
@@ -230,21 +241,98 @@ function latinShare(line) {
   return total === 0 ? 0 : n / total;
 }
 
-function lineTiers(lines, tiered) {
+function lineTiers(lines, isTitle, tiered) {
   const t = [];
+  if (tiered) {
+    for (let i = 0; i < lines.length; i++) {
+      t.push(TIERED_RATIOS[Math.min(i, TIERED_RATIOS.length - 1)]);
+    }
+    return t;
+  }
   for (let i = 0; i < lines.length; i++) {
-    t.push(tiered && i > 0 && latinShare(lines[i]) >= LATIN_TIER_MIN ? LATIN_TIER_SCALE : 1);
+    t.push(isTitle && i > 0 && latinShare(lines[i]) >= LATIN_TIER_MIN ? LATIN_TIER_SCALE : 1);
   }
   return t;
+}
+
+function lineAdvance(size, lhFactor, tierPrev, tierCur, metrics) {
+  const nominal = size * lhFactor * (tierPrev + tierCur) / 2;
+  const minimal = metrics.descent * tierPrev + metrics.ascent * tierCur
+    + size * LINE_GAP_MIN * Math.max(tierPrev, tierCur);
+  return nominal > minimal ? nominal : minimal;
 }
 
 function blockHeight(lines, tiers, size, lhFactor, metrics) {
   if (lines.length === 0) { return 0; }
   let h = metrics.ascent * tiers[0] + metrics.descent * tiers[lines.length - 1];
   for (let i = 1; i < lines.length; i++) {
-    h += size * lhFactor * (tiers[i - 1] + tiers[i]) / 2;
+    h += lineAdvance(size, lhFactor, tiers[i - 1], tiers[i], metrics);
   }
   return h;
+}
+
+function transformedSize(w, h, t) {
+  let bw = w * (t && t.scaleX ? Math.abs(t.scaleX) : 1);
+  let bh = h;
+  if (t && t.skewX) { bw += Math.abs(t.skewX) * bh; }
+  if (t && t.rotate) {
+    const c = Math.abs(Math.cos(t.rotate));
+    const sn = Math.abs(Math.sin(t.rotate));
+    const nw = bw * c + bh * sn;
+    const nh = bw * sn + bh * c;
+    bw = nw;
+    bh = nh;
+  }
+  return { w: bw, h: bh };
+}
+
+function transformedBounds(box, t) {
+  if (!t || (!t.skewX && !t.rotate && (!t.scaleX || t.scaleX === 1))) {
+    return { x: box.x, y: box.y, w: box.w, h: box.h };
+  }
+  const ox = box.x + box.w * (typeof t.originX === 'number' ? t.originX : 0.5);
+  const oy = box.y + box.h * (typeof t.originY === 'number' ? t.originY : 0.5);
+  const pts = [[box.x, box.y], [box.x + box.w, box.y], [box.x, box.y + box.h], [box.x + box.w, box.y + box.h]];
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const cos = t.rotate ? Math.cos(t.rotate) : 1;
+  const sin = t.rotate ? Math.sin(t.rotate) : 0;
+  for (let i = 0; i < pts.length; i++) {
+    let px = pts[i][0] - ox;
+    let py = pts[i][1] - oy;
+    if (t.scaleX && t.scaleX !== 1) { px *= t.scaleX; }
+    if (t.skewX) { px -= t.skewX * py; }
+    const rx = px * cos - py * sin;
+    const ry = px * sin + py * cos;
+    const fx = rx + ox;
+    const fy = ry + oy;
+    if (fx < x0) { x0 = fx; }
+    if (fy < y0) { y0 = fy; }
+    if (fx > x1) { x1 = fx; }
+    if (fy > y1) { y1 = fy; }
+  }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+function shiftLayout(glyphs, box, dx, dy) {
+  if (!dx && !dy) { return; }
+  for (let i = 0; i < glyphs.length; i++) {
+    glyphs[i].cx += dx;
+    glyphs[i].cy += dy;
+    glyphs[i].bx += dx;
+    glyphs[i].by += dy;
+    if (glyphs[i].col !== undefined) { glyphs[i].col += dx; }
+  }
+  box.x += dx;
+  box.y += dy;
+}
+
+function ellipsizeLine(ctx, line, tracking, maxWidth) {
+  let out = line;
+  if (out.charAt(out.length - 1) !== ELLIPSIS) { out += ELLIPSIS; }
+  while (out.length > 1 && measureTracked(ctx, out, tracking) > maxWidth) {
+    out = out.substring(0, out.length - 2) + ELLIPSIS;
+  }
+  return out;
 }
 
 function pushRegion(map, key, rect) {
@@ -293,70 +381,123 @@ function boundsOf(glyphs) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-function layoutHorizontalSlot(ctx, args, spec, scaleX) {
-  const slot = args.slot;
-  const distort = spec ? spec.distort : null;
-  const isTitle = slot.decor === 'title';
-  const maxLines = slot.maxLines > 0 ? slot.maxLines : 1;
-  const tracking = slot.tracking > 0 ? slot.tracking : 0;
-  const maxWidth = (args.rect.w * args.W) / scaleX;
+function tryHorizontal(ctx, args, spec, cfg, env) {
+  const rectW = args.rect.w * args.W;
   const availH = args.rect.h * args.H;
+  const tracking = env.baseTracking * cfg.track;
+  const sxTotal = env.baseScaleX * cfg.sx;
+  const maxLinesAllowed = env.maxLines + cfg.extra;
+  const tf = { skewX: env.skewX, rotate: env.rotate, scaleX: sxTotal };
   const minSize = Math.max(MIN_FONT_PX, args.startSize * MIN_SIZE_RATIO);
-  const lhFactor = isTitle ? LINE_HEIGHT_TIGHT : LINE_HEIGHT;
-  const tf = spec && spec.transform ? spec.transform : null;
-  const skewAllow = tf && tf.skewX ? Math.abs(tf.skewX) : 0;
-  const rotAllow = tf && tf.rotate ? Math.abs(tf.rotate) : 0;
-  const strokeAllow = spec && spec.strokes && spec.strokes.length > 0 ? spec.strokes[0].width : 0;
-  const bleedRatio = distortBleedRatio(distort) + strokeAllow;
-
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'alphabetic';
-
   let size = args.startSize;
   let lines = [];
   let tiers = [];
   let metrics = null;
   let blockH = 0;
+  let widest = 0;
+  let fits = false;
 
-  for (let pass = 0; pass < 18; pass++) {
+  for (let pass = 0; pass < 26; pass++) {
     ctx.font = fontSpecOf(args.weight, size, args.fontCss);
-    lines = wrapText(ctx, args.text, maxWidth, tracking * size);
-    let over = 1;
-    if (lines.length > maxLines) {
-      over = 1 / SHRINK_STEP;
-      lines = lines.slice(0, maxLines);
-    }
+    lines = wrapText(ctx, args.text, rectW / sxTotal, tracking * size);
     if (lines.length === 0) { return null; }
-    tiers = lineTiers(lines, isTitle);
+    tiers = lineTiers(lines, env.isTitle, env.tiered);
     metrics = blockMetrics(ctx, lines.join(''), size);
-    let widest = 0;
+    widest = 0;
     for (let i = 0; i < lines.length; i++) {
-      const w = scaledLineWidth(ctx, lines[i], tracking * size, distort, size, tiers[i]);
+      const w = scaledLineWidth(ctx, lines[i], tracking * size, env.distort, size, tiers[i]);
       if (w > widest) { widest = w; }
     }
-    blockH = blockHeight(lines, tiers, size, lhFactor, metrics);
-    const needW = widest + bleedRatio * size * 2 + skewAllow * blockH + rotAllow * (widest + blockH);
-    if (needW > maxWidth && maxWidth > 0) { over = Math.max(over, needW / maxWidth); }
-    if (blockH > availH && availH > 0) { over = Math.max(over, blockH / availH); }
-    if (over <= 1.002 || size <= minSize) { break; }
+    blockH = blockHeight(lines, tiers, size, env.lhFactor, metrics);
+    const raw = widest + env.bleedRatio * size * 2;
+    const tb = transformedSize(raw, blockH, tf);
+    let over = 1;
+    if (lines.length > maxLinesAllowed) { over = 1 / SHRINK_STEP; }
+    if (rectW > 0 && tb.w > rectW) { over = Math.max(over, tb.w / rectW); }
+    if (availH > 0 && tb.h > availH) { over = Math.max(over, tb.h / availH); }
+    if (over <= 1.002 && lines.length <= maxLinesAllowed) { fits = true; break; }
+    if (size <= minSize) { break; }
     size = Math.max(minSize, size / over);
   }
 
+  return {
+    fits: fits, size: size, lines: lines, tiers: tiers, metrics: metrics,
+    blockH: blockH, widest: widest, tracking: tracking, sxTotal: sxTotal,
+    maxLinesAllowed: maxLinesAllowed, availH: availH, rectW: rectW
+  };
+}
+
+function layoutHorizontalSlot(ctx, args, spec, scaleX) {
+  const slot = args.slot;
+  const distort = spec ? spec.distort : null;
+  const tiered = !!slot.tiered;
+  const isTitle = slot.decor === 'title' || tiered;
+  const tf = spec && spec.transform ? spec.transform : null;
+  const env = {
+    baseTracking: slot.tracking > 0 ? slot.tracking : 0,
+    baseScaleX: scaleX,
+    maxLines: slot.maxLines > 0 ? slot.maxLines : 1,
+    isTitle: isTitle,
+    tiered: tiered,
+    distort: distort,
+    lhFactor: isTitle ? LINE_HEIGHT_TIGHT : LINE_HEIGHT,
+    skewX: tf && tf.skewX ? tf.skewX : 0,
+    rotate: tf && tf.rotate ? tf.rotate : 0,
+    bleedRatio: distortBleedRatio(distort)
+      + (spec && spec.strokes && spec.strokes.length > 0 ? spec.strokes[0].width : 0)
+  };
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+
+  let attempt = null;
+  for (let i = 0; i < FIT_STEPS.length; i++) {
+    attempt = tryHorizontal(ctx, args, spec, FIT_STEPS[i], env);
+    if (!attempt) { return null; }
+    if (attempt.fits) { break; }
+  }
+
+  let truncated = false;
+  let lines = attempt.lines;
+  let tiers = attempt.tiers;
+  let metrics = attempt.metrics;
+  let blockH = attempt.blockH;
+  const size = attempt.size;
+  const tracking = attempt.tracking;
+  const sxTotal = attempt.sxTotal;
+  const availH = attempt.availH;
+  const rectW = attempt.rectW;
+
   ctx.font = fontSpecOf(args.weight, size, args.fontCss);
-  while (lines.length > 1 && blockH > availH) {
-    lines = lines.slice(0, lines.length - 1);
-    tiers = lineTiers(lines, isTitle);
+  if (!attempt.fits) {
+    if (lines.length > attempt.maxLinesAllowed) {
+      lines = lines.slice(0, attempt.maxLinesAllowed);
+      truncated = true;
+    }
+    tiers = lineTiers(lines, env.isTitle, env.tiered);
     metrics = blockMetrics(ctx, lines.join(''), size);
-    blockH = blockHeight(lines, tiers, size, lhFactor, metrics);
+    blockH = blockHeight(lines, tiers, size, env.lhFactor, metrics);
+    while (lines.length > 1 && blockH > availH) {
+      lines = lines.slice(0, lines.length - 1);
+      tiers = lineTiers(lines, env.isTitle, env.tiered);
+      metrics = blockMetrics(ctx, lines.join(''), size);
+      blockH = blockHeight(lines, tiers, size, env.lhFactor, metrics);
+      truncated = true;
+    }
+    if (truncated) {
+      const last = lines.length - 1;
+      lines[last] = ellipsizeLine(ctx, lines[last], tracking * size, rectW / sxTotal / tiers[last]);
+    }
   }
   if (lines.length === 0) { return null; }
+
+  if (spec && spec.transform) { spec.transform.scaleX = sxTotal; }
 
   const rectTop = args.rect.y * args.H;
   let top = slot.align === 'top' ? rectTop : rectTop + (availH - blockH) / 2;
   if (top < rectTop) { top = rectTop; }
 
   const rectLeft = args.rect.x * args.W;
-  const rectW = args.rect.w * args.W;
   let align = slot.align;
   let anchorX;
   let originX;
@@ -371,7 +512,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const tier = tiers[i];
-    if (i > 0) { baseY += size * lhFactor * (tiers[i - 1] + tier) / 2; }
+    if (i > 0) { baseY += lineAdvance(size, env.lhFactor, tiers[i - 1], tier, metrics); }
     const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier);
     let x = anchorX;
     if (align === 'center') { x -= lineW / 2; }
@@ -384,17 +525,17 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
       const mods = glyphMods(distort, j, line.length, size);
-      const sx = mods.s * tier;
-      const sy = mods.s * mods.sy * tier;
-      const adv = charWidth(ctx, ch) * sx;
+      const gsx = mods.s * tier;
+      const gsy = mods.s * mods.sy * tier;
+      const adv = charWidth(ctx, ch) * gsx;
       const cx = x + adv / 2 + mods.dx * tier;
       const cy = baseY + mods.dy * tier;
-      const asc = metrics.ascent * sy;
-      const desc = metrics.descent * sy;
+      const asc = metrics.ascent * gsy;
+      const desc = metrics.descent * gsy;
       const bw = Math.max(adv, size * 0.12);
       glyphs.push({
         ch: ch, cx: cx, cy: cy, adv: adv, line: i, phrase: phrase,
-        rot: mods.rot, shear: mods.shear, sx: sx, sy: sy,
+        rot: mods.rot, shear: mods.shear, sx: gsx, sy: gsy,
         blank: cls === 'sp',
         bx: cx - bw / 2, by: cy - asc, bw: bw, bh: asc + desc
       });
@@ -404,41 +545,70 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
 
   const box = boundsOf(glyphs);
   if (!box) { return null; }
+  const rect = { x: rectLeft, y: rectTop, w: rectW, h: availH };
+  const outer = transformedBounds(box, spec ? spec.transform : null);
+  let dx = 0;
+  let dy = 0;
+  if (outer.w <= rect.w) {
+    if (outer.x < rect.x) { dx = rect.x - outer.x; }
+    else if (outer.x + outer.w > rect.x + rect.w) { dx = rect.x + rect.w - (outer.x + outer.w); }
+  }
+  if (outer.h <= rect.h) {
+    if (outer.y < rect.y) { dy = rect.y - outer.y; }
+    else if (outer.y + outer.h > rect.y + rect.h) { dy = rect.y + rect.h - (outer.y + outer.h); }
+  }
+  shiftLayout(glyphs, box, dx, dy);
+
   return {
     size: size, glyphs: glyphs, lines: lines, vertical: false,
     ascent: metrics.ascent, descent: metrics.descent,
     textAlign: 'center', textBaseline: 'alphabetic', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    regions: collectRegions(glyphs), box: box, blockH: blockH, availH: availH
+    regions: collectRegions(glyphs), box: box, blockH: blockH, availH: availH,
+    truncated: truncated, rect: rect
   };
 }
 
 function layoutVerticalSlot(ctx, args, spec, scaleX) {
   const slot = args.slot;
   const distort = spec ? spec.distort : null;
-  const maxCols = slot.maxLines > 0 ? slot.maxLines : 1;
-  const trackRatio = (slot.tracking > 0 ? slot.tracking : 0) * VERT_TRACK_SCALE;
+  const baseMaxCols = slot.maxLines > 0 ? slot.maxLines : 1;
+  const baseTrack = (slot.tracking > 0 ? slot.tracking : 0) * VERT_TRACK_SCALE;
   const availH = args.rect.h * args.H;
-  const availW = (args.rect.w * args.W) / scaleX;
+  const rectW = args.rect.w * args.W;
   const minSize = Math.max(MIN_FONT_PX, args.startSize * MIN_SIZE_RATIO);
   const text = String(args.text);
+  let truncated = false;
   let size = args.startSize;
-  let cols = null;
+  let cols = [];
+  let trackRatio = baseTrack;
+  let sxTotal = scaleX;
+  let maxCols = baseMaxCols;
+  let fitted = false;
 
-  for (;;) {
-    const cell = size * (1 + trackRatio);
-    const perCol = Math.max(1, Math.floor((availH + size * trackRatio) / cell));
-    cols = wrapVertical(text, perCol);
-    let longestTry = 0;
-    for (let i = 0; i < cols.length; i++) { if (cols[i].length > longestTry) { longestTry = cols[i].length; } }
-    const fits = cols.length <= maxCols
-      && cols.length * size * COL_ADVANCE <= availW
-      && longestTry * cell - size * trackRatio <= availH;
-    if (fits || size <= minSize) { break; }
-    size = Math.max(minSize, size * SHRINK_STEP);
+  for (let step = 0; step < FIT_STEPS.length && !fitted; step++) {
+    trackRatio = baseTrack * FIT_STEPS[step].track;
+    sxTotal = scaleX * FIT_STEPS[step].sx;
+    maxCols = baseMaxCols + FIT_STEPS[step].extra;
+    const availW = rectW / sxTotal;
+    size = args.startSize;
+    for (let pass = 0; pass < 26; pass++) {
+      const cell = size * (1 + trackRatio);
+      const perCol = Math.max(1, Math.floor((availH + size * trackRatio) / cell));
+      cols = wrapVertical(text, perCol);
+      let longestTry = 0;
+      for (let i = 0; i < cols.length; i++) { if (cols[i].length > longestTry) { longestTry = cols[i].length; } }
+      const ok = cols.length <= maxCols
+        && cols.length * size * COL_ADVANCE <= availW
+        && longestTry * cell - size * trackRatio <= availH;
+      if (ok) { fitted = true; break; }
+      if (size <= minSize) { break; }
+      size = Math.max(minSize, size * SHRINK_STEP);
+    }
   }
-  cols = cols.slice(0, maxCols);
   if (cols.length === 0) { return null; }
+  if (spec && spec.transform) { spec.transform.scaleX = sxTotal; }
+  if (cols.length > maxCols) { cols = cols.slice(0, maxCols); truncated = true; }
 
   ctx.font = fontSpecOf(args.weight, size, args.fontCss);
   ctx.textAlign = 'center';
@@ -447,14 +617,26 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
   const track = size * trackRatio;
   const cell = size + track;
   const colW = size * COL_ADVANCE;
+  const availW = rectW / sxTotal;
   const perColLimit = Math.max(1, Math.floor((availH + track) / cell));
   for (let i = 0; i < cols.length; i++) {
-    if (cols[i].length > perColLimit) { cols[i] = cols[i].substring(0, perColLimit); }
+    if (cols[i].length > perColLimit) {
+      cols[i] = cols[i].substring(0, perColLimit - 1) + ELLIPSIS;
+      truncated = true;
+    }
   }
-  while (cols.length > 1 && cols.length * colW > availW) { cols = cols.slice(0, cols.length - 1); }
+  while (cols.length > 1 && cols.length * colW > availW) {
+    cols = cols.slice(0, cols.length - 1);
+    truncated = true;
+  }
+  if (truncated) {
+    const lastCol = cols[cols.length - 1];
+    if (lastCol.charAt(lastCol.length - 1) !== ELLIPSIS) {
+      cols[cols.length - 1] = lastCol.substring(0, Math.max(1, lastCol.length - 1)) + ELLIPSIS;
+    }
+  }
   const blockW = cols.length * colW;
   const rectLeft = args.rect.x * args.W;
-  const rectW = args.rect.w * args.W;
   let blockRight;
   let originX;
   if (slot.align === 'left') { blockRight = rectLeft + blockW; originX = 0; }
@@ -507,7 +689,8 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
     ascent: size / 2, descent: size / 2,
     textAlign: 'center', textBaseline: 'middle', originX: originX,
     fontSpec: fontSpecOf(args.weight, size, args.fontCss),
-    regions: collectRegions(glyphs), box: box, blockH: colH, availH: availH
+    regions: collectRegions(glyphs), box: box, blockH: colH, availH: availH,
+    truncated: truncated, rect: { x: rectLeft, y: rectTop, w: rectW, h: availH }
   };
 }
 
@@ -612,6 +795,8 @@ export function drawSlot(ctx, args) {
   return {
     size: layout.size, box: layout.box, lines: layout.lines,
     vertical: layout.vertical, regions: layout.regions,
-    blockH: layout.blockH, availH: layout.availH
+    blockH: layout.blockH, availH: layout.availH,
+    truncated: !!layout.truncated, rect: layout.rect,
+    outer: transformedBounds(layout.box, spec.transform)
   };
 }

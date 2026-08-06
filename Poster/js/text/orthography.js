@@ -13,29 +13,38 @@ const BRACKETS = {
 
 const BRACKET_WEIGHTS = {
   cinema: [
-    { v: 'none', w: 42 }, { v: 'kagi', w: 8 }, { v: 'nijuukagi', w: 6 }, { v: 'paren', w: 4 },
-    { v: 'kaku', w: 6 }, { v: 'yama', w: 8 }, { v: 'nijuuyama', w: 6 }, { v: 'dash', w: 14 }
+    { v: 'none', w: 90 }, { v: 'kagi', w: 2 }, { v: 'nijuukagi', w: 2 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 1 }, { v: 'yama', w: 1 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 4 }
   ],
   gravure: [
-    { v: 'none', w: 46 }, { v: 'kagi', w: 16 }, { v: 'nijuukagi', w: 8 }, { v: 'paren', w: 8 },
-    { v: 'kaku', w: 4 }, { v: 'yama', w: 6 }, { v: 'nijuuyama', w: 3 }, { v: 'dash', w: 9 }
+    { v: 'none', w: 82 }, { v: 'kagi', w: 8 }, { v: 'nijuukagi', w: 4 }, { v: 'paren', w: 3 },
+    { v: 'kaku', w: 0 }, { v: 'yama', w: 1 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 2 }
   ],
   novel: [
-    { v: 'none', w: 30 }, { v: 'kagi', w: 12 }, { v: 'nijuukagi', w: 24 }, { v: 'paren', w: 4 },
-    { v: 'kaku', w: 4 }, { v: 'yama', w: 8 }, { v: 'nijuuyama', w: 8 }, { v: 'dash', w: 10 }
+    { v: 'none', w: 70 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 30 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 0 }
   ],
   asmr: [
-    { v: 'none', w: 30 }, { v: 'kagi', w: 26 }, { v: 'nijuukagi', w: 10 }, { v: 'paren', w: 10 },
-    { v: 'kaku', w: 6 }, { v: 'yama', w: 6 }, { v: 'nijuuyama', w: 4 }, { v: 'dash', w: 8 }
+    { v: 'none', w: 100 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 0 }
   ],
   game: [
-    { v: 'none', w: 44 }, { v: 'kagi', w: 4 }, { v: 'nijuukagi', w: 6 }, { v: 'paren', w: 3 },
-    { v: 'kaku', w: 10 }, { v: 'yama', w: 8 }, { v: 'nijuuyama', w: 16 }, { v: 'dash', w: 9 }
+    { v: 'none', w: 92 }, { v: 'kagi', w: 1 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 3 }, { v: 'yama', w: 2 }, { v: 'nijuuyama', w: 2 }, { v: 'dash', w: 0 }
   ],
   adult: [
-    { v: 'none', w: 38 }, { v: 'kagi', w: 12 }, { v: 'nijuukagi', w: 6 }, { v: 'paren', w: 6 },
-    { v: 'kaku', w: 16 }, { v: 'yama', w: 8 }, { v: 'nijuuyama', w: 6 }, { v: 'dash', w: 8 }
+    { v: 'none', w: 80 }, { v: 'kagi', w: 5 }, { v: 'nijuukagi', w: 0 }, { v: 'paren', w: 0 },
+    { v: 'kaku', w: 6 }, { v: 'yama', w: 3 }, { v: 'nijuuyama', w: 3 }, { v: 'dash', w: 3 }
   ]
+};
+
+const NUMERAL_FORMS = {
+  cinema: [{ v: 'chapterHead', w: 4 }, { v: 'chapterTail', w: 3 }],
+  gravure: [{ v: 'chapterTail', w: 3 }, { v: 'volTail', w: 4 }, { v: 'editionTail', w: 2 }],
+  novel: [{ v: 'chapterHead', w: 3 }, { v: 'chapterTail', w: 2 }, { v: 'partTail', w: 6 }],
+  asmr: [{ v: 'chapterHead', w: 2 }, { v: 'volTail', w: 5 }],
+  game: [{ v: 'chapterTail', w: 3 }, { v: 'volTail', w: 4 }, { v: 'editionTail', w: 2 }],
+  adult: [{ v: 'chapterTail', w: 3 }, { v: 'volTail', w: 4 }, { v: 'editionTail', w: 2 }]
 };
 
 const PUNCT_WEIGHTS = {
@@ -104,7 +113,7 @@ export function styleTitle(rng, core, opts) {
   const tags = Array.isArray(o.tags) ? o.tags : null;
   let tagCount = 0;
   if (tags && tags.length >= 2) {
-    tagCount = Math.min(rng.weighted([{ v: 2, w: 6 }, { v: 3, w: 4 }, { v: 4, w: 2 }]), tags.length);
+    tagCount = Math.min(tags.length, 3);
   }
   const allowLatin = o.allowLatin !== false && !!core.en;
   const allowExclaim = o.allowExclaim !== false;
@@ -140,13 +149,11 @@ export function styleTitle(rng, core, opts) {
 
   let numeralUsed = 'none';
   if (rng.chance(NUMERIC_CHANCE[genre])) {
-    const form = rng.weighted([
-      { v: 'chapterHead', w: 4 }, { v: 'chapterTail', w: 3 },
-      { v: 'volTail', w: 4 }, { v: 'editionTail', w: 2 }
-    ]);
+    const form = rng.weighted(NUMERAL_FORMS[genre]);
     if (form === 'chapterHead') { body = numeric(rng, 'chapter', genre) + '　' + body; }
     else if (form === 'chapterTail') { body = body + '　' + numeric(rng, 'chapter', genre); }
     else if (form === 'volTail') { body = body + ' Vol.' + numeric(rng, 'few', genre); }
+    else if (form === 'partTail') { body = body + numeric(rng, 'part', genre); }
     else { body = body + '　' + numeric(rng, 'edition', genre); }
     numeralUsed = form;
   }

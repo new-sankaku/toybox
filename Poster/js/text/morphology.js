@@ -175,7 +175,7 @@ const NUMERIC_ALLOW = {
   gravure: ['minutes', 'bonusMinutes', 'days', 'sheets', 'pages', 'price', 'code', 'age',
     'date', 'year', 'yearNo', 'chapter', 'edition', 'few', 'count'],
   novel: ['volume', 'awardNo', 'stories', 'printing', 'price', 'spineCode', 'rating',
-    'date', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count'],
+    'date', 'year', 'yearNo', 'week', 'chapter', 'part', 'few', 'count'],
   asmr: ['minutes', 'seconds', 'track', 'trackNo', 'seriesNo', 'files',
     'date', 'year', 'yearNo', 'chapter', 'edition', 'few', 'count'],
   game: ['date', 'price', 'players', 'saves', 'anniversary', 'seriesNo', 'languages',
@@ -248,6 +248,13 @@ export function numeric(rng, kind, genre) {
     const form = rng.weighted([{ v: 'vol', w: 5 }, { v: 'ban', w: 4 }]);
     if (form === 'vol') { return 'Vol.' + String(rng.int(1, 12)); }
     return '第' + String(rng.int(2, 28)) + '版';
+  }
+  if (kind === 'part') {
+    const form = rng.weighted([{ v: 'jou', w: 3 }, { v: 'ge', w: 3 }, { v: 'kan', w: 2 }, { v: 'bu', w: 4 }]);
+    if (form === 'jou') { return '（上）'; }
+    if (form === 'ge') { return '（下）'; }
+    if (form === 'kan') { return '（完）'; }
+    return '第' + rng.pick(['一', '二', '三', '四', '五', '六']) + '部';
   }
   if (kind === 'chapter') { return '第' + String(rng.int(1, 24)) + '章'; }
   if (kind === 'count') { return String(rng.int(2, 99)); }

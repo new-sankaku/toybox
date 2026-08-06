@@ -21,6 +21,8 @@ const GENRE_BUDGET = [1, 0.92, 0.28, 0.88, 1.05, 1.1];
 const DISTORT_RATE = [0.03, 0.06, 0, 0.06, 0.09, 0.11];
 const GLITCH_RATE = [0.04, 0.015, 0, 0.015, 0.08, 0.09];
 const PARTIAL_PLATE_RATE = 0.12;
+const BEVEL_RATE = [0, 0, 0, 0, 0.55, 0.5];
+const METAL_RATE = [0.06, 0, 0, 0, 0.55, 0.45];
 
 const METAL_PROFILE = {
   gold: [[0, -0.42], [0.14, 0.2], [0.3, 0.62], [0.44, 0.06], [0.5, -0.34], [0.57, 0.06], [0.72, 0.58], [0.88, 0.06], [1, -0.44]],
@@ -685,6 +687,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   const inten = typeof intensity === 'number' ? intensity : 0.5;
   const base = style.color.slice();
   const noisy = stats.std > NOISY_STD;
+  const tiered = !!(slot && slot.tiered);
   const plan = colorPlan || null;
   const gi = genreIndex(genre);
   const source = opts && opts.sourceCanvas ? opts.sourceCanvas : null;
@@ -721,17 +724,22 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   const platePool = [];
   const distortPool = [];
   const glitchPool = [];
+  const metalPool = [];
+  const bevelPool = [];
   for (let i = 0; i < AXES.length; i++) {
     const a = AXES[i];
-    if (a.group === 'fill') { fillPool.push(a); }
-    else if (a.group === 'distort') { distortPool.push(a); }
+    if (a.group === 'fill') {
+      fillPool.push(a);
+      if (a.id === 'fill.metallic' || a.id === 'fill.mirror') { metalPool.push(a); }
+    } else if (a.group === 'distort') { distortPool.push(a); }
     else if (a.glitch) { glitchPool.push(a); }
+    else if (a.id === 'fx.bevel') { bevelPool.push(a); }
     else if (a.group === 'plate' && a.id !== 'plate.knockout' && a.id !== 'plate.glyph'
       && a.id !== 'plate.random' && a.id !== 'plate.marker') { platePool.push(a); }
   }
 
   const selected = [];
-  if (noisy || minContrast(base, state.bgs) < MIN_STOP_CONTRAST) {
+  if (noisy || tiered || minContrast(base, state.bgs) < MIN_STOP_CONTRAST) {
     const forced = pickAxis(rng, platePool, state, true);
     if (forced) {
       takeAxis(state, forced);
@@ -749,7 +757,14 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
     if (gx) { takeAxis(state, gx); selected.push({ axis: gx, forceCover: false }); }
   }
 
-  let fillAxis = pickAxis(rng, fillPool, state, false);
+  if (level >= 1 && rng.chance(BEVEL_RATE[gi])) {
+    const bv = pickAxis(rng, bevelPool, state, true);
+    if (bv) { takeAxis(state, bv); selected.push({ axis: bv, forceCover: false }); }
+  }
+
+  let fillAxis = null;
+  if (level >= 1 && rng.chance(METAL_RATE[gi])) { fillAxis = pickAxis(rng, metalPool, state, true); }
+  if (!fillAxis) { fillAxis = pickAxis(rng, fillPool, state, false); }
   if (!fillAxis) { fillAxis = pickAxis(rng, fillPool, state, true); }
   if (fillAxis) {
     takeAxis(state, fillAxis);
@@ -792,6 +807,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   if (spec.needStroke && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (spec.neon && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (noisy && spec.strokeCount === 0 && !covered && !spec.glow) { spec.strokeCount = 1; }
+  if (tiered && !covered && spec.strokeCount < 2) { spec.strokeCount = 2; }
   if (spec.plate && spec.strokeCount === 0
     && contrastRatio(spec.plate.rgb, base) < MIN_STOP_CONTRAST) { spec.strokeCount = 1; }
   spec.strokes = buildStrokes(rng, spec.strokeCount, base, bgs, plan, noisy && !covered);

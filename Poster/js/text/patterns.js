@@ -202,18 +202,18 @@ export const PATTERNS = {
       '{adj}{tail}{attrWord}'
     ],
     megaSpec: [
-      '{n:minutes}／全{n:scenes}／{attrWord}',
-      '{n:code}／{n:minutes}／{formatWord}',
-      '本編{n:minutes}＋特典{n:bonusMinutes}／{attrWord}',
-      '{seriesWord}／{bonusWord}／{n:minutes}',
-      '{attrWord}＋{attrWord}＋{attrWord}',
-      '{n:hours}収録／{bonusWord}／{formatWord}'
+      '{n:minutes}／全{n:scenes}／{attrWord}／{bonusWord}',
+      '{n:code}／{n:minutes}／{formatWord}／{attrWord}',
+      '本編{n:minutes}＋特典{n:bonusMinutes}／全{n:scenes}／{attrWord}',
+      '{seriesWord}／{bonusWord}／{n:minutes}／全{n:scenes}',
+      '{attrWord}＋{attrWord}＋{attrWord}／{n:minutes}',
+      '{n:hours}収録／{bonusWord}／{formatWord}／全{n:scenes}'
     ],
     megaTail: [
-      '{makerName}／{labelName}',
-      '{makerName}｜{n:code}',
-      '{labelName}／{seriesWord}',
-      '{makerName}　{n:date}発売'
+      '{makerName}／{labelName}｜{n:code}',
+      '{makerName}｜{n:code}｜{n:date}',
+      '{labelName}／{seriesWord}｜{n:code}',
+      '{makerName}　{n:date}発売　{n:code}'
     ],
     tag: ['{seriesWord}', '{makerName}／{labelName}', '{labelName}', '{makerName}'],
     badge: ['{sashWord}'],

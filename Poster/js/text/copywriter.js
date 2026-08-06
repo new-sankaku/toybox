@@ -101,11 +101,12 @@ const ROLE_PLAN = {
 };
 
 const CATCH_LIMIT = { cinema: 28, gravure: 24, novel: 25, asmr: 30, game: 20, adult: 0 };
-const TITLE_BODY_LIMIT = { cinema: 16, gravure: 18, novel: 14, asmr: 30, game: 18, adult: 40 };
+const TITLE_BODY_LIMIT = { cinema: 12, gravure: 18, novel: 16, asmr: 20, game: 16, adult: 16 };
+const TITLE_FINAL_LIMIT = { cinema: 14, gravure: 24, novel: 22, asmr: 34, game: 22, adult: 18 };
 const ROLE_LIMIT = { tag: 30, badge: 30, release: 40, extra: 30, sub: 34, cast: 44 };
 const LATIN_TITLE = { cinema: true, gravure: true, novel: false, asmr: false, game: true, adult: false };
-const MEGA_MIN = 56;
-const MEGA_MAX = 120;
+const ASMR_TITLE_MAX = 34;
+const MEGA_LINE = { sash: [8, 14], main: [10, 18], spec: [20, 30], tail: [14, 24] };
 
 const TITLE_SKELETON_CHANCE = {
   cinema: 0.55, gravure: 0.65, novel: 0.55, asmr: 0.7, game: 0.5, adult: 1
@@ -221,35 +222,63 @@ function buildCore(rng, genre) {
   return best;
 }
 
-function buildTitle(rng, genre, opts) {
-  const o = opts || {};
+function styleOnce(rng, genre, o, attempt) {
   const core = buildCore(rng, genre);
   const styleOpts = {
     vertical: !!o.verticalTitle,
     genre: genre,
-    allowLatin: o.allowLatin !== false && LATIN_TITLE[genre],
+    allowLatin: o.allowLatin !== false && LATIN_TITLE[genre] && attempt < 4,
     allowExclaim: o.allowExclaim !== false
   };
-
   if (genre === 'asmr') {
     const pools = poolsFor(genre);
-    styleOpts.tags = rng.sample(pools.tagWord, 4);
+    const count = attempt >= 3 ? 2 : (rng.chance(0.55) ? 2 : 3);
+    const tags = rng.sample(pools.tagWord, count);
+    let tagLen = 0;
+    for (let i = 0; i < tags.length; i++) { tagLen += tags[i].length + 2; }
+    styleOpts.tags = tags;
     let ja = core.ja;
-    if (rng.chance(0.55)) {
-      ja = ja + '～' + expand(rng, genre, rng.pick(PATTERNS.asmr.subtitle), null, 0) + '～';
+    if (attempt < 3 && rng.chance(0.55)) {
+      const sub = expand(rng, genre, rng.pick(PATTERNS.asmr.subtitle), null, 0);
+      if (tagLen + ja.length + sub.length + 2 <= ASMR_TITLE_MAX) { ja = ja + '～' + sub + '～'; }
     }
-    const styled = styleTitle(rng, { ja: ja, en: core.en, parts: null }, styleOpts);
-    return { styled: styled, core: core };
+    return { styled: styleTitle(rng, { ja: ja, en: core.en, parts: null }, styleOpts), core: core };
   }
+  return {
+    styled: styleTitle(rng, { ja: core.ja, en: core.en, parts: core.parts }, styleOpts),
+    core: core
+  };
+}
 
-  const styled = styleTitle(rng, { ja: core.ja, en: core.en, parts: core.parts }, styleOpts);
-  return { styled: styled, core: core };
+function buildTitle(rng, genre, opts) {
+  const o = opts || {};
+  const limit = TITLE_FINAL_LIMIT[genre];
+  let best = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const cand = styleOnce(rng, genre, o, attempt);
+    const len = visibleLen(cand.styled.text);
+    if (len <= limit) { return cand; }
+    if (!best || len < visibleLen(best.styled.text)) { best = cand; }
+  }
+  return best;
+}
+
+function fitLine(rng, genre, list, min, max) {
+  let best = null;
+  for (let i = 0; i < 10; i++) {
+    const text = expand(rng, genre, rng.pick(list), null, 0);
+    if (text.length >= min && text.length <= max) { return text; }
+    const dist = text.length < min ? min - text.length : text.length - max;
+    if (!best || dist < best.dist) { best = { text: text, dist: dist }; }
+  }
+  return best.text;
 }
 
 function buildMegaTitle(rng, opts) {
   const genre = 'adult';
   const o = opts || {};
-  let best = null;
+  const mid = (MEGA_LINE.main[0] + MEGA_LINE.main[1]) / 2;
+  let main = null;
   for (let attempt = 0; attempt < 8; attempt++) {
     const core = buildCore(rng, genre);
     const styled = styleTitle(rng, { ja: core.ja, en: core.en, parts: null }, {
@@ -258,20 +287,22 @@ function buildMegaTitle(rng, opts) {
       allowLatin: false,
       allowExclaim: true
     });
-    const lines = [];
-    lines.push(expand(rng, genre, rng.pick(poolsFor(genre).sashWord), null, 0));
-    lines.push(styled.text);
-    lines.push(expand(rng, genre, rng.pick(PATTERNS.adult.megaSpec), null, 0));
-    if (attempt > 3 || rng.chance(0.6)) {
-      lines.push(expand(rng, genre, rng.pick(PATTERNS.adult.megaTail), null, 0));
-    }
-    const text = lines.join('\n');
-    const len = totalLen(text);
-    const cand = { styled: { text: text, latin: '', axes: styled.axes }, core: core, lines: lines.length };
-    if (len >= MEGA_MIN && len <= MEGA_MAX) { return cand; }
-    if (!best || Math.abs(len - 80) < Math.abs(totalLen(best.styled.text) - 80)) { best = cand; }
+    const len = styled.text.length;
+    const cand = { styled: styled, core: core };
+    if (len >= MEGA_LINE.main[0] && len <= MEGA_LINE.main[1]) { main = cand; break; }
+    if (!main || Math.abs(len - mid) < Math.abs(main.styled.text.length - mid)) { main = cand; }
   }
-  return best;
+  const lines = [];
+  lines.push(fitLine(rng, genre, poolsFor(genre).sashWord, MEGA_LINE.sash[0], MEGA_LINE.sash[1]));
+  lines.push(main.styled.text);
+  lines.push(fitLine(rng, genre, PATTERNS.adult.megaSpec, MEGA_LINE.spec[0], MEGA_LINE.spec[1]));
+  if (rng.chance(0.8)) {
+    lines.push(fitLine(rng, genre, PATTERNS.adult.megaTail, MEGA_LINE.tail[0], MEGA_LINE.tail[1]));
+  }
+  return {
+    styled: { text: lines.join('\n'), latin: '', axes: main.styled.axes },
+    core: main.core
+  };
 }
 
 function fillName(rng, genre) {
