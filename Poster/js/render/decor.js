@@ -8,6 +8,7 @@ const NOISY_STD = 0.17;
 const MASK_PIXEL_LIMIT = 4194304;
 const RAMP_BUCKETS = 4;
 const MASK_PAD_EM = 0.35;
+const MAX_BLUR_PX = 56;
 const RAMP_HALF_PIXELS = 250000;
 const RAMP_THIRD_PIXELS = 900000;
 const DARK_INK = [12, 10, 10];
@@ -767,7 +768,7 @@ function clearShadow(ctx) {
 
 function applyShadow(ctx, sh, size) {
   ctx.shadowColor = rgbToCss(sh.rgb, sh.alpha);
-  ctx.shadowBlur = sh.blur * size;
+  ctx.shadowBlur = Math.min(sh.blur * size, MAX_BLUR_PX);
   ctx.shadowOffsetX = sh.dx * size;
   ctx.shadowOffsetY = sh.dy * size;
 }
@@ -1097,20 +1098,21 @@ function eraseNoise(cv, spec, size, scale) {
   oc.save();
   oc.globalCompositeOperation = 'destination-out';
   oc.fillStyle = '#000000';
-  const step = Math.max(2, size * 0.055 * scale);
+  const step = Math.max(3, size * 0.09 * scale);
   const amp = spec.amount * size * scale;
   const cols = Math.ceil(cv.width / step);
   const rows = Math.ceil(cv.height / step);
   const threshold = Math.min(0.9, 0.4 * spec.density);
+  oc.beginPath();
   for (let i = 0; i < cols; i++) {
     for (let j = 0; j < rows; j++) {
       if (hash01(spec.seed + i * 31.7 + j * 7.13) > threshold) { continue; }
       const r = amp * (0.4 + hash01(spec.seed + i * 3.1 + j * 11.7));
-      oc.beginPath();
+      oc.moveTo(i * step + step / 2 + r, j * step + step / 2);
       oc.arc(i * step + step / 2, j * step + step / 2, r, 0, Math.PI * 2);
-      oc.fill();
     }
   }
+  oc.fill();
   oc.restore();
 }
 
@@ -1333,7 +1335,7 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
   if (spec.glow) {
     ctx.fillStyle = rgbToCss(spec.glow.rgb, 1);
     ctx.shadowColor = rgbToCss(spec.glow.rgb, spec.glow.alpha);
-    ctx.shadowBlur = spec.glow.blur * size;
+    ctx.shadowBlur = Math.min(spec.glow.blur * size, MAX_BLUR_PX);
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
     for (let i = 0; i < spec.glow.passes; i++) { emitter(ctx, 'fill'); }
