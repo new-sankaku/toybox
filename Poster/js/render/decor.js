@@ -1,6 +1,8 @@
 import { blendRgb, contrastRatio, hslToRgb, luma01, rgbToCss, rgbToHsl, shade } from '../core/color.js';
 
 const MAX_GLYPH_PASSES = 8;
+const HEAVY_GLYPHS = 40;
+const MIN_HEAVY_PASSES = 3;
 const MIN_STOP_CONTRAST = 3.0;
 const MIN_PLATE_CONTRAST = 4.5;
 const MIN_EDGE_CONTRAST = 2.2;
@@ -1299,9 +1301,22 @@ function paintSplitCut(ctx, emitter, box, spec, size) {
   ctx.restore();
 }
 
+function trimForGlyphCount(spec, glyphCount) {
+  if (!(glyphCount > HEAVY_GLYPHS)) { return; }
+  const allowed = Math.max(MIN_HEAVY_PASSES, Math.round(MAX_GLYPH_PASSES * HEAVY_GLYPHS / glyphCount));
+  const drop = ['edgeSplit', 'misregister', 'reflection', 'innerLine', 'bevel', 'splitCut', 'torn', 'roughEdge'];
+  for (let i = 0; i < drop.length && passCost(spec) > allowed; i++) {
+    if (spec[drop[i]]) { spec[drop[i]] = null; }
+  }
+  if (passCost(spec) > allowed && spec.glow && spec.glow.passes > 1) { spec.glow.passes = 1; }
+  while (passCost(spec) > allowed && spec.strokes.length > 1) { spec.strokes.pop(); }
+  if (passCost(spec) > allowed && spec.glow) { spec.glow = null; }
+}
+
 export function paintDecorated(ctx, emitter, box, spec, size) {
   if (!spec || !(size > 0)) { return; }
   const regions = emitter && emitter.regions ? emitter.regions : null;
+  trimForGlyphCount(spec, emitter && emitter.glyphs ? emitter.glyphs.length : 0);
   ctx.save();
   applyTransform(ctx, box, spec.transform);
   clearShadow(ctx);
