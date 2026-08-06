@@ -187,5 +187,6 @@ export function numeric(rng, kind, genre) {
   }
   if (kind === 'chapter') { return '第' + String(rng.int(1, 24)) + '章'; }
   if (kind === 'count') { return String(rng.int(2, 99)); }
+  if (kind === 'few') { return String(rng.int(2, 9)); }
   throw new Error('unknown numeric kind: ' + kind);
 }

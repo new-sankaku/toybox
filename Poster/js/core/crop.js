@@ -4,7 +4,7 @@ const MATCH_TOLERANCE = 0.15;
 const PANORAMA_ASPECT = 2.2;
 const TOWER_ASPECT = 0.45;
 const MIN_CROP_WIDTH_RATIO = 0.35;
-const MAX_TRIM_PER_SIDE = 0.30;
+const MAX_TRIM_PER_SIDE = 0.25;
 const SEARCH_STEPS = 26;
 const HEADROOM_MIN = 0.35;
 const HEADROOM_MAX = 0.70;
@@ -60,14 +60,27 @@ function colProfile(map, w, h) {
 
 function trimLow(profile, limit) {
   let total = 0;
-  for (let i = 0; i < profile.length; i++) { total += profile[i]; }
+  let peak = 0;
+  for (let i = 0; i < profile.length; i++) {
+    total += profile[i];
+    if (profile[i] > peak) { peak = profile[i]; }
+  }
+  if (peak < 0.02) { return { start: 0, end: profile.length }; }
   const mean = total / profile.length;
-  const threshold = Math.max(0.012, mean * 0.16);
+  const enter = Math.min(peak * 0.05, mean * 0.10);
+  const leave = peak * 0.22;
   const maxTrim = Math.floor(profile.length * limit);
+  const blurMargin = Math.ceil(profile.length * 0.045);
   let start = 0;
-  while (start < maxTrim && profile[start] < threshold) { start++; }
+  if (profile[0] < enter) {
+    while (start < maxTrim && profile[start] < leave) { start++; }
+    if (start > 0) { start = Math.min(maxTrim, start + blurMargin); }
+  }
   let end = profile.length;
-  while (profile.length - end < maxTrim && end > start + 1 && profile[end - 1] < threshold) { end--; }
+  if (profile[end - 1] < enter) {
+    while (profile.length - end < maxTrim && end > start + 1 && profile[end - 1] < leave) { end--; }
+    if (end < profile.length) { end = Math.max(start + 1, end - Math.min(blurMargin, maxTrim - (profile.length - end))); }
+  }
   return { start: start, end: end };
 }
 
@@ -317,9 +330,9 @@ export function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) 
   let winner = null;
   let winnerZoom = 1;
   let winnerRequired = ordered.length;
+  let oversizeFaces = false;
 
   for (let attempt = 0; attempt <= ordered.length; attempt++) {
-    context.required = ordered.slice(0, Math.max(0, ordered.length - attempt));
     context.strictFaces = true;
     for (let z = 0; z < zoomLevels.length; z++) {
       const zoom = Math.max(1, zoomLevels[z]);
@@ -331,18 +344,26 @@ export function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) 
         cropH *= scale;
       }
       if (cropW > region.w + 1e-6 || cropH > region.h + 1e-6) { continue; }
+      const containable = [];
+      for (let i = 0; i < ordered.length; i++) {
+        if (ordered[i].w <= cropW * 0.98 && ordered[i].h <= cropH * 0.98) { containable.push(ordered[i]); }
+      }
+      context.faces = containable;
+      context.required = containable.slice(0, Math.max(0, containable.length - attempt));
       context.zoom = baseW / cropW;
       const found = searchWindows(context, region, cropW, cropH, rng);
       if (found && (!winner || found.score > winner.score)) {
         winner = found;
-        winnerZoom = baseW / cropW;
+        winnerZoom = Math.max(1, baseW / cropW);
         winnerRequired = context.required.length;
+        oversizeFaces = containable.length < ordered.length;
       }
     }
     if (winner) { break; }
   }
 
   if (!winner) {
+    context.faces = [];
     context.required = [];
     context.strictFaces = false;
     context.zoom = 1;
@@ -355,6 +376,7 @@ export function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) 
   const rect = winner.rect;
   if (faceList.length > 0) {
     modeParts.push(winnerRequired === faceList.length ? 'face' : 'face' + winnerRequired + '/' + faceList.length);
+    if (oversizeFaces) { modeParts.push('face-oversize'); }
   }
   if (winner.snapped) { modeParts.push('thirds'); }
   if (winnerZoom > 1.01) { modeParts.push('zoom' + winnerZoom.toFixed(2)); }
