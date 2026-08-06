@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>POSTER FORGE / 擬似パッケージ生成器</title>
+<link rel="stylesheet" href="./css/style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1>POSTER FORGE</h1>
+  <span class="sub">CLIENT SIDE PACKAGE SYNTHESIZER / NO SERVER</span>
+</header>
+
+<div id="protocolWarn" class="warn" hidden>
+  <strong>module が読み込めない配置です。</strong>
+  <code>serve.bat</code>（Windows）または <code>serve.sh</code>（Linux / macOS）で起動してください。
+</div>
+
+<div class="grid">
+
+  <div class="col-left">
+    <section class="panel">
+      <h2>01 GENRE</h2>
+      <div class="genre-list" id="genreList">
+        <button class="genre" data-genre="cinema" aria-pressed="true">
+          <span class="idx">A</span>
+          <span>映画風<span class="desc">キャッチ／クレジット／公開日</span></span>
+        </button>
+        <button class="genre" data-genre="gravure" aria-pressed="false">
+          <span class="idx">B</span>
+          <span>イメージビデオ風<span class="desc">帯・型番・特典表記</span></span>
+        </button>
+        <button class="genre" data-genre="novel" aria-pressed="false">
+          <span class="idx">C</span>
+          <span>小説風<span class="desc">縦組み・帯コピー・レーベル</span></span>
+        </button>
+        <button class="genre" data-genre="asmr" aria-pressed="false">
+          <span class="idx">D</span>
+          <span>ASMR音声作品風<span class="desc">正方形・CV表記・track情報</span></span>
+        </button>
+        <button class="genre" data-genre="game" aria-pressed="false">
+          <span class="idx">E</span>
+          <span>ゲームパッケージ風<span class="desc">機種帯・年齢区分枠・edition</span></span>
+        </button>
+        <button class="genre" data-genre="adult" aria-pressed="false">
+          <span class="idx">F</span>
+          <span>アダルトビデオ風<span class="desc">品番・斜め帯・販促文言</span></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>02 IMAGE</h2>
+      <label class="drop" id="drop" for="file">
+        <strong>画像を投入</strong>
+        タップまたはドラッグ＆ドロップ<br>JPEG / PNG / WebP
+      </label>
+      <input type="file" id="file" accept="image/*">
+    </section>
+
+    <section class="panel">
+      <h2>03 PARAMETER</h2>
+      <div class="opt">
+        <label class="switch" for="optFace"><input type="checkbox" id="optFace" checked>顔領域を避ける</label>
+      </div>
+      <div class="opt">
+        <span>背景分離</span>
+        <select id="optCutout">
+          <option value="auto" selected>自動</option>
+          <option value="force">常に試行</option>
+          <option value="off">切</option>
+        </select>
+      </div>
+      <div class="opt">
+        <span>画像加工</span>
+        <select id="optGrade">
+          <option value="auto" selected>自動</option>
+          <option value="strong">強め</option>
+          <option value="off">切</option>
+        </select>
+      </div>
+      <div class="opt">
+        <span>破壊効果</span>
+        <select id="optGlitch">
+          <option value="auto" selected>自動</option>
+          <option value="strong">多め</option>
+          <option value="off">切</option>
+        </select>
+      </div>
+      <div class="opt">
+        <span>文字量</span>
+        <select id="optDensity">
+          <option value="0.6">少なめ</option>
+          <option value="1" selected>標準</option>
+          <option value="1.4">多め</option>
+        </select>
+      </div>
+      <div class="opt">
+        <span>加工の強さ</span>
+        <input type="range" id="optIntensity" min="0" max="100" value="65">
+      </div>
+      <div class="opt">
+        <label class="switch" for="optDebug"><input type="checkbox" id="optDebug">解析を重ねて表示</label>
+      </div>
+      <div class="btnrow">
+        <button class="act primary" id="btnShuffle" disabled>SHUFFLE</button>
+        <button class="act" id="btnRedraw" disabled>SAME SEED</button>
+        <button class="act" id="btnSave" disabled>SAVE PNG</button>
+      </div>
+      <div class="log" id="log">待機中。画像を投入してください。</div>
+    </section>
+  </div>
+
+  <div class="col-right">
+    <div class="stage">
+      <canvas id="poster"></canvas>
+      <div class="placeholder" id="placeholder">
+        <div class="big">◇</div>
+        画像はこの端末の中だけで処理されます<br>アップロードは行われません
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<footer class="note">
+  架空の人名・団体名・作品名を自動生成します。実在のものとは一切関係ありません。
+</footer>
+
+</div>
+
+<script>
+if (location.protocol === 'file:') {
+  document.getElementById('protocolWarn').hidden = false;
+}
+</script>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

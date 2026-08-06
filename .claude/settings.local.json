@@ -7,7 +7,9 @@
       "Bash(echo:*)",
       "Bash(npm run lint:fix:*)",
       "Bash(npm run build:*)",
-      "Bash(npm run format:*)"
+      "Bash(npm run format:*)",
+      "Bash(mkdir -p /home/user/toybox/Poster/doc)",
+      "Bash(cp \"/root/.claude/uploads/23b3ee06-a6e6-58b9-bded-20222ad6b80a/a72d2e9f-poster_forge_1.html\" /home/user/toybox/Poster/poster_forge_1.html)"
     ]
   },
   "hooks": {
