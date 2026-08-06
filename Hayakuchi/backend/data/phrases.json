@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "phrases": [
+    {
+      "id": "nama_mugi",
+      "display": "生麦生米生卵",
+      "kana": "なまむぎなまごめなまたまご",
+      "difficulty": 1,
+      "tags": ["ma_row", "na_row", "voiced"]
+    },
+    {
+      "id": "tokkyo_kyoka",
+      "display": "東京特許許可局",
+      "kana": "とうきょうとっきょきょかきょく",
+      "difficulty": 3,
+      "tags": ["palatalized", "geminate", "ka_row"]
+    },
+    {
+      "id": "aka_makigami",
+      "display": "赤巻紙青巻紙黄巻紙",
+      "kana": "あかまきがみあおまきがみきまきがみ",
+      "difficulty": 2,
+      "tags": ["ka_row", "ma_row", "voiced"]
+    },
+    {
+      "id": "tonari_kyaku",
+      "display": "隣の客はよく柿食う客だ",
+      "kana": "となりのきゃくはよくかきくうきゃくだ",
+      "difficulty": 2,
+      "tags": ["ka_row", "palatalized"]
+    },
+    {
+      "id": "basu_gasu",
+      "display": "バスガス爆発",
+      "kana": "ばすがすばくはつ",
+      "difficulty": 2,
+      "tags": ["sa_row", "voiced", "geminate"]
+    },
+    {
+      "id": "bouzu_byoubu",
+      "display": "坊主が屏風に上手に坊主の絵を描いた",
+      "kana": "ぼうずがびょうぶにじょうずにぼうずのえをかいた",
+      "difficulty": 3,
+      "tags": ["palatalized", "voiced", "long_vowel"]
+    },
+    {
+      "id": "kaeru_pyoko",
+      "display": "蛙ぴょこぴょこ三ぴょこぴょこ合わせてぴょこぴょこ六ぴょこぴょこ",
+      "kana": "かえるぴょこぴょこみぴょこぴょこあわせてぴょこぴょこむぴょこぴょこ",
+      "difficulty": 4,
+      "tags": ["palatalized", "plosive", "long"]
+    },
+    {
+      "id": "shinshun_shanson",
+      "display": "新春シャンソンショー",
+      "kana": "しんしゅんしゃんそんしょー",
+      "difficulty": 3,
+      "tags": ["sa_row", "palatalized", "moraic_n"]
+    },
+    {
+      "id": "josetsusha",
+      "display": "除雪車除雪作業中",
+      "kana": "じょせつしゃじょせつさぎょうちゅう",
+      "difficulty": 4,
+      "tags": ["sa_row", "palatalized", "voiced"]
+    },
+    {
+      "id": "kotsu_soshou",
+      "display": "骨粗鬆症訴訟勝訴",
+      "kana": "こつそしょうしょうそしょうしょうそ",
+      "difficulty": 5,
+      "tags": ["sa_row", "palatalized", "long_vowel"]
+    },
+    {
+      "id": "dasha_sousha",
+      "display": "打者走者一斉走塁",
+      "kana": "だしゃそうしゃいっせいそうるい",
+      "difficulty": 3,
+      "tags": ["sa_row", "palatalized", "geminate"]
+    },
+    {
+      "id": "rounyaku_nannyo",
+      "display": "老若男女",
+      "kana": "ろうにゃくなんにょ",
+      "difficulty": 2,
+      "tags": ["ra_row", "na_row", "palatalized", "moraic_n"]
+    },
+    {
+      "id": "kono_kugi",
+      "display": "この釘は引き抜きにくい釘だ",
+      "kana": "このくぎはひきぬきにくいくぎだ",
+      "difficulty": 3,
+      "tags": ["ka_row", "na_row", "voiced"]
+    },
+    {
+      "id": "sumomo_momo",
+      "display": "李も桃も桃のうち",
+      "kana": "すもももももももものうち",
+      "difficulty": 2,
+      "tags": ["ma_row", "repetition"]
+    },
+    {
+      "id": "toukyou_tokkyo_kyokachou",
+      "display": "特許許可局局長",
+      "kana": "とっきょきょかきょくきょくちょう",
+      "difficulty": 5,
+      "tags": ["palatalized", "geminate", "ka_row"]
+    },
+    {
+      "id": "aoi_e",
+      "display": "青は藍より出でて藍より青し",
+      "kana": "あおはあいよりいでてあいよりあおし",
+      "difficulty": 3,
+      "tags": ["vowel_chain", "long"]
+    }
+  ]
+}
