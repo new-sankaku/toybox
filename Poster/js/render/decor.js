@@ -17,9 +17,9 @@ const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
 const GENRE_ORDER = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
 const BUDGET = { title: 60, accent: 34, plain: 14 };
-const GENRE_BUDGET = [1, 0.92, 0.34, 0.88, 1.05, 1.1];
-const DISTORT_RATE = [0.04, 0.08, 0, 0.08, 0.12, 0.14];
-const GLITCH_RATE = [0.02, 0.01, 0, 0.01, 0.08, 0.08];
+const GENRE_BUDGET = [1, 0.92, 0.28, 0.88, 1.05, 1.1];
+const DISTORT_RATE = [0.03, 0.06, 0, 0.06, 0.09, 0.11];
+const GLITCH_RATE = [0.04, 0.015, 0, 0.015, 0.08, 0.09];
 const PARTIAL_PLATE_RATE = 0.12;
 
 const METAL_PROFILE = {
@@ -59,8 +59,8 @@ const AXES = [
   { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [0.3, 0.2, 0, 0.3, 0.5, 0.6], minLevel: 1 },
 
   { id: 'stroke.single', group: 'stroke', cost: 9, w: [3, 4, 0, 4, 1, 1] },
-  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1.5, 0.8, 0, 1.2, 3.5, 3.5] },
-  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.1, 0, 0, 0.1, 2.5, 2.5], minLevel: 1 },
+  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1.5, 0.8, 0, 1.2, 5, 5] },
+  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.1, 0, 0, 0.1, 4, 4], minLevel: 1 },
 
   { id: 'glow.soft', group: 'glow', cost: 11, w: [0, 0, 0, 4, 0.4, 0] },
   { id: 'glow.neon', group: 'glow', cost: 16, w: [0, 0, 0, 1.2, 0.3, 0.2], minLevel: 1 },
@@ -70,8 +70,8 @@ const AXES = [
   { id: 'shadow.long', group: 'shadow', cost: 14, w: [1.6, 0.2, 0, 0.1, 0.8, 1], minLevel: 1 },
   { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.1, 0.1, 0, 0.1, 1.6, 1.2], minLevel: 1 },
 
-  { id: 'plate.all', group: 'plate', cost: 10, w: [1.5, 2.5, 3, 2, 2, 3.5] },
-  { id: 'plate.line', group: 'plate', cost: 12, w: [1.5, 2.5, 2.5, 2, 2, 3] },
+  { id: 'plate.all', group: 'plate', cost: 10, w: [0.5, 1.5, 0.8, 1.2, 1, 2.2] },
+  { id: 'plate.line', group: 'plate', cost: 12, w: [0.5, 1.2, 0.6, 1, 0.9, 1.8] },
   { id: 'plate.marker', group: 'plate', cost: 10, w: [0.3, 1.2, 0.6, 1, 0.4, 1.4], minLevel: 0.35 },
   { id: 'plate.knockout', group: 'plate', cost: 18, w: [0.8, 0.8, 1.2, 0.5, 1, 1.5], minLevel: 0.5 },
   { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.4, 0.6, 0.3, 0.6, 0.6, 1], minLevel: 1, partial: true },
@@ -95,14 +95,14 @@ const AXES = [
 
   { id: 'fx.bevel', group: 'fx', cost: 10, w: [0, 0, 0, 0, 3.5, 2.5], minLevel: 1 },
   { id: 'fx.innerLine', group: 'fx', cost: 9, w: [0.6, 0.3, 0, 0.2, 1.5, 1], minLevel: 0.5 },
-  { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [0.3, 0.1, 0, 0.1, 1.5, 1.8], minLevel: 1, glitch: true },
-  { id: 'fx.misregister', group: 'fx', cost: 12, w: [0.5, 0.2, 0, 0.1, 1.2, 1.5], minLevel: 1, glitch: true },
-  { id: 'fx.splitCut', group: 'fx', cost: 12, w: [0.3, 0.1, 0, 0.1, 0.8, 0.8], minLevel: 1, glitch: true },
+  { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [2, 1, 0, 1, 4, 4], minLevel: 1, glitch: true },
+  { id: 'fx.misregister', group: 'fx', cost: 12, w: [2, 1, 0, 1, 3, 3], minLevel: 1, glitch: true },
+  { id: 'fx.splitCut', group: 'fx', cost: 12, w: [1, 0.5, 0, 0.5, 2, 2], minLevel: 1, glitch: true },
   { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.2, 0.4, 0, 0.4, 1, 0.6], minLevel: 1 },
   { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [0.6, 0.1, 0, 0.1, 0.6, 0.5], minLevel: 1 },
   { id: 'fx.torn', group: 'fx', cost: 10, w: [0.4, 0.1, 0.1, 0.1, 0.4, 0.4], minLevel: 1 },
 
-  { id: 'orn.underline', group: 'orn', cost: 9, w: [1.2, 1.2, 3, 0.6, 0.8, 1.6] },
+  { id: 'orn.underline', group: 'orn', cost: 9, w: [1.2, 1.2, 2.2, 0.6, 0.8, 1.6] },
   { id: 'orn.overline', group: 'orn', cost: 9, w: [0.6, 0.6, 1.6, 0.4, 0.6, 0.8] },
   { id: 'orn.boten', group: 'orn', cost: 10, w: [0, 0, 3.5, 0, 0, 0], minLevel: 0.35 },
 
@@ -719,21 +719,34 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
 
   const fillPool = [];
   const platePool = [];
+  const distortPool = [];
+  const glitchPool = [];
   for (let i = 0; i < AXES.length; i++) {
-    if (AXES[i].group === 'fill') { fillPool.push(AXES[i]); }
-    else if (AXES[i].group === 'plate' && AXES[i].id !== 'plate.knockout'
-      && AXES[i].id !== 'plate.glyph' && AXES[i].id !== 'plate.random'
-      && AXES[i].id !== 'plate.marker') { platePool.push(AXES[i]); }
+    const a = AXES[i];
+    if (a.group === 'fill') { fillPool.push(a); }
+    else if (a.group === 'distort') { distortPool.push(a); }
+    else if (a.glitch) { glitchPool.push(a); }
+    else if (a.group === 'plate' && a.id !== 'plate.knockout' && a.id !== 'plate.glyph'
+      && a.id !== 'plate.random' && a.id !== 'plate.marker') { platePool.push(a); }
   }
 
   const selected = [];
-  if (level > 0.2 && (noisy || minContrast(base, state.bgs) < MIN_STOP_CONTRAST)) {
+  if (noisy || minContrast(base, state.bgs) < MIN_STOP_CONTRAST) {
     const forced = pickAxis(rng, platePool, state, true);
     if (forced) {
       takeAxis(state, forced);
       state.budget += forced.cost;
       selected.push({ axis: forced, forceCover: true });
     }
+  }
+
+  if (state.allow.distort) {
+    const d = pickAxis(rng, distortPool, state, true);
+    if (d) { takeAxis(state, d); selected.push({ axis: d, forceCover: false }); }
+  }
+  if (state.allow.glitch) {
+    const gx = pickAxis(rng, glitchPool, state, true);
+    if (gx) { takeAxis(state, gx); selected.push({ axis: gx, forceCover: false }); }
   }
 
   let fillAxis = pickAxis(rng, fillPool, state, false);
@@ -780,7 +793,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   if (spec.neon && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (noisy && spec.strokeCount === 0 && !covered && !spec.glow) { spec.strokeCount = 1; }
   if (spec.plate && spec.strokeCount === 0
-    && contrastRatio(spec.plate.rgb, base) < MIN_PLATE_CONTRAST) { spec.strokeCount = 1; }
+    && contrastRatio(spec.plate.rgb, base) < MIN_STOP_CONTRAST) { spec.strokeCount = 1; }
   spec.strokes = buildStrokes(rng, spec.strokeCount, base, bgs, plan, noisy && !covered);
 
   if (spec.neon && spec.strokes.length > 0) {

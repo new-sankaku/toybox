@@ -2,18 +2,18 @@ import { hexToRgb, rgbToHsl, hslToRgb, clamp255 } from '../core/color.js';
 
 const GENRE_COLORS = {
   cinema: {
-    obi: ['#0d0c0a', '#15120e', '#1b2a3a', '#241d14'],
-    ribbon: ['#a8291f', '#0d0c0a', '#d8c27a', '#7a1f18', '#3a2c1a'],
-    plate: ['#0d0c0a', '#f2ece0', '#1b2a3a', '#221c15'],
-    accent: ['#d8c27a', '#c9a227', '#a8291f', '#e8e2d4', '#8c7a4a'],
+    obi: ['#0d0c0a', '#15120e', '#12333a', '#241d14'],
+    ribbon: ['#a8291f', '#0d0c0a', '#d8c27a', '#1c4d55', '#c46a2a'],
+    plate: ['#0d0c0a', '#f2ece0', '#12333a', '#221c15'],
+    accent: ['#d8c27a', '#c9a227', '#2f7d8a', '#c46a2a', '#e8e2d4'],
     ink: ['#f2ece0', '#ffffff', '#0d0c0a', '#d8c27a', '#b8b4ad']
   },
   gravure: {
-    obi: ['#ff5f8f', '#ffd23f', '#2ec4d8', '#ff7a3d', '#ffffff'],
-    ribbon: ['#ff3f6f', '#ffb800', '#00b3c4', '#ff7a3d', '#111111'],
-    plate: ['#ffffff', '#fff0f5', '#ffe9f2', '#e8fbff'],
-    accent: ['#ff5f8f', '#ffd23f', '#2ec4d8', '#ff9ec4', '#7ee8fa'],
-    ink: ['#111111', '#ffffff', '#ff3f6f', '#0b3b45']
+    obi: ['#ffffff', '#fdf6ee', '#eaf7fb', '#ffeef4', '#f6f1e2'],
+    ribbon: ['#ff6f8f', '#ffab2e', '#4fc7d8', '#ff8a4d', '#ffd25e'],
+    plate: ['#ffffff', '#fff4f8', '#f2fbfe', '#fbf6ea'],
+    accent: ['#ff8fae', '#ffd25e', '#6fd3e4', '#ffb08a', '#a9e4f2'],
+    ink: ['#2a2622', '#ffffff', '#c2385c', '#1d5560']
   },
   novel: {
     obi: ['#9b1b1b', '#1d3557', '#f5efe2', '#111111', '#c8a24a', '#2f4f3a'],

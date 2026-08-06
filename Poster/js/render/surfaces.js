@@ -297,19 +297,6 @@ function drawAvLayers(ctx, W, H, rng, theme) {
   ctx.restore();
 }
 
-function drawRibbon(ctx, W, H, rng, theme) {
-  ctx.save();
-  const a = box(SURFACE_ANCHORS.ribbon, W, H);
-  const color = rng.pick(theme.ribbonColors);
-  ctx.fillStyle = color;
-  ctx.fillRect(a.x, a.y, a.w, a.h);
-  ctx.fillStyle = 'rgba(255,255,255,0.22)';
-  ctx.fillRect(a.x, a.y, a.w, a.h * 0.26);
-  ctx.fillStyle = 'rgba(0,0,0,0.20)';
-  ctx.fillRect(a.x, a.y + a.h * 0.86, a.w, a.h * 0.14);
-  ctx.restore();
-}
-
 function drawPlate(ctx, W, H, rng, theme) {
   ctx.save();
   const a = box(SURFACE_ANCHORS.plate, W, H);
@@ -398,9 +385,10 @@ function drawCornerPlate(ctx, W, H, rng, theme) {
 
 function drawSealBadge(ctx, W, H, rng, theme) {
   ctx.save();
-  const r = W * 0.145;
-  const cx = W * 0.7775;
-  const cy = H * 0.437;
+  const a = box(SURFACE_ANCHORS.sealBadge, W, H);
+  const r = a.w / 2;
+  const cx = a.x + a.w / 2;
+  const cy = a.y + a.h / 2;
   const color = rng.pick(theme.ribbonColors);
   ctx.fillStyle = 'rgba(0,0,0,0.22)';
   ctx.beginPath();
@@ -502,8 +490,9 @@ function drawTapeStrip(ctx, W, H, rng, theme) {
 
 function drawWaveBand(ctx, W, H, rng, theme) {
   ctx.save();
-  const top = H * 0.760;
-  const h = H * 0.075;
+  const a = box(SURFACE_ANCHORS.waveBand, W, H);
+  const top = a.y;
+  const h = a.h;
   const color = rng.pick(theme.accentColors);
   const rgb = hexToRgb(color);
   const g = ctx.createLinearGradient(0, top, 0, top + h);
@@ -593,7 +582,6 @@ export const SURFACE_FUNCS = {
   platformBar: drawPlatformBar,
   ratingBox: drawRatingBox,
   diagonalBand: drawDiagonalBand,
-  ribbon: drawRibbon,
   plate: drawPlate,
   roundPlate: drawRoundPlate,
   frame: drawFrame,
