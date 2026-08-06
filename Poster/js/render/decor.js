@@ -284,10 +284,18 @@ function buildLinearStops(rng, base, bgs, colorPlan) {
 
 function shadowInk(base, bgs, colorPlan) {
   const fromPlan = planRgb(colorPlan, 'shadow');
-  if (fromPlan && contrastRatio(fromPlan, base) >= 1.6) { return fromPlan; }
-  let rgb = inkAgainst(bgs);
-  if (contrastRatio(rgb, base) < 1.6) { rgb = inkOpposite(rgb); }
-  return rgb;
+  if (fromPlan && contrastRatio(fromPlan, base) >= 1.6 && minContrast(fromPlan, bgs) >= 1.4) { return fromPlan; }
+  const against = inkAgainst(bgs);
+  if (contrastRatio(against, base) >= 1.6) { return against; }
+  return blendRgb(base, bgs[0], 0.6);
+}
+
+function layerInk(base, bgs, t) {
+  let c = blendRgb(base, bgs[0], t);
+  if (contrastRatio(c, base) < 1.5 || minContrast(c, bgs) < 1.5) {
+    c = blendRgb(base, bgs[0], 0.55);
+  }
+  return c;
 }
 
 function buildShadow(rng, base, bgs, colorPlan, hard) {
@@ -509,10 +517,10 @@ function applyAxis(id, s) {
     case 'shadow.hard': spec.dropShadow = buildShadow(rng, base, bgs, plan, true); break;
     case 'shadow.long': {
       const ang = rng.range(Math.PI * 0.15, Math.PI * 0.45);
-      const len = rng.range(0.25, 0.8);
+      const len = rng.range(0.18, 0.5);
       const steps = Math.max(6, Math.min(18, Math.round(len / 0.035)));
       spec.longShadow = {
-        rgb: shadowInk(base, bgs, plan), alpha: rng.range(0.35, 0.7), steps: steps,
+        rgb: layerInk(base, bgs, rng.range(0.5, 0.72)), alpha: rng.range(0.5, 0.85), steps: steps,
         dx: Math.cos(ang) * len / steps, dy: Math.sin(ang) * len / steps
       };
       break;
@@ -521,9 +529,9 @@ function applyAxis(id, s) {
       const ang = rng.range(Math.PI * 0.1, Math.PI * 0.5);
       const depth = rng.range(0.08, 0.26);
       const steps = Math.max(4, Math.min(14, Math.round(depth / 0.018)));
-      const face = safeShade(base, -0.55, bgs);
+      const face = layerInk(base, bgs, rng.range(0.4, 0.6));
       spec.extrude = {
-        near: face, far: shade(face, -0.35), steps: steps,
+        near: face, far: blendRgb(face, bgs[0], 0.45), steps: steps,
         dx: Math.cos(ang) * depth / steps, dy: Math.sin(ang) * depth / steps
       };
       break;
@@ -1044,7 +1052,7 @@ function plateRegions(regions, plate, box) {
   return [box];
 }
 
-function paintPlateShape(ctx, rect, plate, size, index) {
+function paintPlateShape(ctx, rect, plate, size, index, tf) {
   const px = plate.padX * size;
   const py = plate.padY * size;
   const x = rect.x - px;
@@ -1052,14 +1060,18 @@ function paintPlateShape(ctx, rect, plate, size, index) {
   const w = rect.w + px * 2;
   const h = rect.h + py * 2;
   if (!(w > 0) || !(h > 0)) { return; }
+  const flat = plate.shape === 'markerHighlight' || plate.shape === 'underlineBar';
+  const outerSkewed = !!(tf && (tf.skewX || tf.rotate));
+  const suppress = flat || outerSkewed;
   ctx.save();
-  const rot = plate.rotate + (plate.perRotate ? (hash01(plate.seed + index * 3.7) - 0.5) * 2 * plate.perRotate : 0);
-  if (rot || plate.skew) {
+  const rot = suppress ? 0 : plate.rotate + (plate.perRotate ? (hash01(plate.seed + index * 3.7) - 0.5) * 2 * plate.perRotate : 0);
+  const skew = suppress ? 0 : plate.skew;
+  if (rot || skew) {
     const cx = x + w / 2;
     const cy = y + h / 2;
     ctx.translate(cx, cy);
     if (rot) { ctx.rotate(rot); }
-    if (plate.skew) { ctx.transform(1, 0, -plate.skew, 1, 0, 0); }
+    if (skew) { ctx.transform(1, 0, -skew, 1, 0, 0); }
     ctx.translate(-cx, -cy);
   }
   if (plate.double) {
@@ -1085,9 +1097,9 @@ function paintPlateShape(ctx, rect, plate, size, index) {
   ctx.restore();
 }
 
-function paintPlates(ctx, regions, box, plate, size) {
+function paintPlates(ctx, regions, box, plate, size, tf) {
   const rects = plateRegions(regions, plate, box);
-  for (let i = 0; i < rects.length; i++) { paintPlateShape(ctx, rects[i], plate, size, i); }
+  for (let i = 0; i < rects.length; i++) { paintPlateShape(ctx, rects[i], plate, size, i, tf); }
 }
 
 function paintRule(ctx, box, rule, size, top, vertical) {
@@ -1347,7 +1359,7 @@ function paintKnockout(ctx, mask, regions, box, plate, size) {
   oc.save();
   oc.scale(mask.sx, mask.sy);
   oc.translate(-mask.x, -mask.y);
-  paintPlates(oc, regions, box, plate, size);
+  paintPlates(oc, regions, box, plate, size, null);
   oc.restore();
   oc.globalCompositeOperation = 'destination-out';
   oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
@@ -1423,7 +1435,7 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
 
   if (spec.plate && spec.plate.knockout) {
     if (!mask || !paintKnockout(ctx, mask, regions, box, spec.plate, size)) {
-      paintPlates(ctx, regions, box, spec.plate, size);
+      paintPlates(ctx, regions, box, spec.plate, size, spec.transform);
       ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
       emitter(ctx, 'fill');
     }
@@ -1433,7 +1445,7 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
     return;
   }
 
-  if (spec.plate) { paintPlates(ctx, regions, box, spec.plate, size); }
+  if (spec.plate) { paintPlates(ctx, regions, box, spec.plate, size, spec.transform); }
 
   if (spec.longShadow && mask) {
     paintRamp(ctx, mask, spec.longShadow.rgb, spec.longShadow.rgb, spec.longShadow.steps,
