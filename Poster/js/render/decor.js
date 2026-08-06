@@ -6,6 +6,7 @@ const MIN_PLATE_CONTRAST = 4.5;
 const MIN_EDGE_CONTRAST = 2.2;
 const NOISY_STD = 0.17;
 const MASK_PIXEL_LIMIT = 4194304;
+const RAMP_BUCKETS = 4;
 const MASK_PAD_EM = 0.9;
 const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
@@ -109,6 +110,7 @@ const RAW_CONFLICTS = {
   'plate.glyph': ['plate.marker', 'fx.reflection'],
   'glow.neon': ['fx.bevel', 'shadow.extrude', 'fx.misregister'],
   'shadow.extrude': ['shadow.long', 'fx.reflection', 'fx.splitCut'],
+  'shadow.long': ['fx.reflection'],
   'fx.splitCut': ['distort.arc', 'distort.wave', 'distort.fan', 'distort.bulge', 'distort.trapezoid', 'fx.reflection'],
   'fx.reflection': ['distort.arc', 'distort.wave', 'distort.fan', 'distort.stagger'],
   'fx.misregister': ['fx.edgeSplit'],
@@ -1140,11 +1142,19 @@ function paintOffsetLayers(ctx, mask, layers, size) {
 }
 
 function paintRamp(ctx, mask, near, far, steps, dx, dy, size, alpha) {
-  for (let i = steps; i >= 1; i--) {
-    const t = steps > 1 ? (i - 1) / (steps - 1) : 0;
+  const flat = near[0] === far[0] && near[1] === far[1] && near[2] === far[2];
+  const buckets = flat ? 1 : Math.min(RAMP_BUCKETS, steps);
+  const layers = [];
+  for (let b = 0; b < buckets; b++) {
+    const t = buckets > 1 ? b / (buckets - 1) : 0;
     const cv = tintedMask(mask, blendRgb(near, far, t), alpha);
     if (!cv) { return; }
-    ctx.drawImage(cv, mask.x + dx * size * i, mask.y + dy * size * i, mask.w, mask.h);
+    layers.push(cv);
+  }
+  for (let i = steps; i >= 1; i--) {
+    const t = steps > 1 ? (i - 1) / (steps - 1) : 0;
+    const idx = buckets > 1 ? Math.min(buckets - 1, Math.round(t * (buckets - 1))) : 0;
+    ctx.drawImage(layers[idx], mask.x + dx * size * i, mask.y + dy * size * i, mask.w, mask.h);
   }
 }
 

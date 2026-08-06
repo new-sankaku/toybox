@@ -71,13 +71,40 @@ function variant(list, rng, hueAmt, litAmt) {
   return out;
 }
 
-export function buildTheme(rng, genre) {
+function planHex(role) {
+  const rgb = role && role.rgb ? role.rgb : null;
+  if (!rgb) { return null; }
+  return toHex(rgb);
+}
+
+function planColors(colorPlan, names, rng, hueAmt, litAmt) {
+  const out = [];
+  for (let i = 0; i < names.length; i++) {
+    const hex = planHex(colorPlan.roles[names[i]]);
+    if (hex) { out.push(jitter(hex, rng, hueAmt, litAmt)); }
+  }
+  return out;
+}
+
+export function buildTheme(rng, genre, colorPlan) {
   const src = GENRE_COLORS[genre];
-  return {
+  const theme = {
     obiColors: variant(src.obi, rng, 0.018, 0.030),
     ribbonColors: variant(src.ribbon, rng, 0.022, 0.034),
     plateColors: variant(src.plate, rng, 0.012, 0.022),
     accentColors: variant(src.accent, rng, 0.026, 0.038),
     inkColors: variant(src.ink, rng, 0.008, 0.016)
   };
+  if (!colorPlan || !colorPlan.roles) { return theme; }
+  const obi = planColors(colorPlan, ['surface', 'surfaceAlt', 'accent'], rng, 0.014, 0.024);
+  const ribbon = planColors(colorPlan, ['accent', 'surface', 'inkAlt'], rng, 0.018, 0.028);
+  const plate = planColors(colorPlan, ['plate', 'surfaceAlt', 'surface'], rng, 0.010, 0.018);
+  const accent = planColors(colorPlan, ['accent', 'glow', 'inkAlt'], rng, 0.020, 0.030);
+  const ink = planColors(colorPlan, ['ink', 'inkAlt', 'stroke'], rng, 0.006, 0.012);
+  if (obi.length) { theme.obiColors = obi; }
+  if (ribbon.length) { theme.ribbonColors = ribbon; }
+  if (plate.length) { theme.plateColors = plate; }
+  if (accent.length) { theme.accentColors = accent; }
+  if (ink.length) { theme.inkColors = ink; }
+  return theme;
 }

@@ -246,7 +246,19 @@ const LOOKS = {
   }
 };
 
-export function buildGradeSpec(rng, genre, intensity) {
+function applyColorPlanTints(spec, colorPlan) {
+  const tints = colorPlan.tints;
+  if (!tints) { return; }
+  if (tints.shadow) { spec.shadowTint = tints.shadow.slice(); }
+  if (tints.highlight) { spec.highlightTint = tints.highlight.slice(); }
+  if (spec.duotone && tints.duotoneA && tints.duotoneB) {
+    spec.duotone.dark = tints.duotoneA.slice();
+    spec.duotone.light = tints.duotoneB.slice();
+  }
+  spec.tintSource = 'colorPlan';
+}
+
+export function buildGradeSpec(rng, genre, intensity, colorPlan) {
   const k = Math.max(0, Math.min(1, intensity));
   const bias = GENRE_BIAS[genre] || null;
   const items = [];
@@ -261,6 +273,7 @@ export function buildGradeSpec(rng, genre, intensity) {
   for (const key in part) { spec[key] = part[key]; }
   spec.look = look;
   spec.strength = 0.34 + 0.66 * k;
+  if (colorPlan) { applyColorPlanTints(spec, colorPlan); }
   return spec;
 }
 

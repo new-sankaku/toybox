@@ -125,7 +125,7 @@ export function processImage(opts) {
   let gradeSpec = null;
   if (gradeMode !== 'off') {
     const gi = gradeMode === 'strong' ? Math.min(1, 0.5 + intensity * 0.6) : intensity;
-    gradeSpec = buildGradeSpec(rng, genre, gi);
+    gradeSpec = buildGradeSpec(rng, genre, gi, opts.colorPlan);
     reconcile(filterSpec, gradeSpec);
   }
 

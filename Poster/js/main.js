@@ -42,6 +42,8 @@ function reportInfo(info) {
     'SEED <b>' + info.seed + '</b>　' + info.ms + 'ms\n' +
     'layout: ' + escapeHtml(info.layoutId) + '　fit: ' + escapeHtml(info.fit.kind) + '　crop: ' + escapeHtml(info.crop.mode) + '\n' +
     'filter: ' + escapeHtml(info.filterMode) + '　grade: ' + escapeHtml(info.gradeLook) + '\n' +
+    'color: ' + escapeHtml(info.colorScheme) + '/' + escapeHtml(info.colorPolarity) +
+      '　tint: ' + escapeHtml(info.tintStrategy) + '　colorfulness: ' + info.colorfulness.toFixed(2) + '\n' +
     'glitch: ' + escapeHtml(info.glitchOps.length ? info.glitchOps.join(',') : 'none') + '\n' +
     'face: ' + escapeHtml(face) + ' x' + info.faces.length +
       '　cutout: ' + (info.cutoutUsed ? 'on(' + Math.round(info.cutoutRatio * 100) + '%)' : 'off') + '\n' +

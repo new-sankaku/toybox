@@ -6,6 +6,8 @@ import { computeCropRect, analyzeImageFit } from '../core/crop.js';
 import { buildSubjectMask, maskToCanvas } from '../core/segment.js';
 import { buildCostMap, findBestRect, regionStats } from '../core/placement.js';
 import { resolveTextStyle } from '../core/legibility.js';
+import { extractPalette } from '../core/palette.js';
+import { buildColorPlan } from './colorPlan.js';
 import { generateCopy } from '../text/copywriter.js';
 import { processImage } from '../image/process.js';
 import { pickFonts, PALETTES } from './fonts.js';
@@ -15,9 +17,16 @@ import { LAYOUTS } from './layouts.js';
 import { buildTheme } from './theme.js';
 import { SURFACE_FUNCS } from './surfaces.js';
 import { OVERLAY_FUNCS } from './overlays.js';
-import { rgbToCss } from '../core/color.js';
+import { rgbToCss, clamp255 } from '../core/color.js';
 
 export const OUTPUT_HEIGHT = 1400;
+
+function rgbToHex(rgb) {
+  const r = Math.round(clamp255(rgb[0]));
+  const g = Math.round(clamp255(rgb[1]));
+  const b = Math.round(clamp255(rgb[2]));
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
+}
 
 function pickLayout(rng, genre) {
   const list = LAYOUTS[genre];
@@ -145,6 +154,9 @@ export async function generatePoster(opts) {
     }
   }
 
+  const palette = extractPalette(buf, { excludeSkin: true });
+  const colorPlan = buildColorPlan(rng, genre, palette, opts.intensity);
+
   const imageResult = processImage({
     ctx: ctx,
     baseCanvas: baseCv,
@@ -157,10 +169,11 @@ export async function generatePoster(opts) {
     subject: subject,
     cutoutMode: opts.cutoutMode,
     gradeMode: opts.gradeMode,
-    glitchMode: opts.glitchMode
+    glitchMode: opts.glitchMode,
+    colorPlan: colorPlan
   });
 
-  const theme = buildTheme(rng, genre);
+  const theme = buildTheme(rng, genre, colorPlan);
   const surfaceCount = Math.max(1, Math.round(layout.surfaces.length * (0.6 + rng.next() * 0.5)));
   const chosenSurfaces = rng.sample(layout.surfaces, surfaceCount);
   for (let i = 0; i < layout.slots.length; i++) {
@@ -176,7 +189,9 @@ export async function generatePoster(opts) {
 
   const copy = generateCopy(rng, genre, opts.density, { verticalTitle: titleIsVertical(layout) });
   const fonts = pickFonts(rng, genre);
-  const palette = PALETTES[genre];
+  const textPalette = colorPlan.textPalette && colorPlan.textPalette.length
+    ? colorPlan.textPalette.map((rgb) => rgbToHex(rgb))
+    : PALETTES[genre];
 
   const occupied = [];
   const placements = [];
@@ -199,10 +214,10 @@ export async function generatePoster(opts) {
     const p = placements[i];
     const slot = p.slot;
     const stats = regionStats(postBuf, p.rect);
-    const style = resolveTextStyle(stats, palette, !!slot.big, rng);
+    const style = resolveTextStyle(stats, textPalette, !!slot.big, rng);
     if (style.scrim) { drawScrim(ctx, p.rect, style.scrim, W, H); }
 
-    const decor = buildDecorSpec(rng, genre, slot, style, stats, opts.intensity);
+    const decor = buildDecorSpec(rng, genre, slot, style, stats, opts.intensity, colorPlan);
     const fontCss = slot.latin ? fonts.latin.css : (slot.big ? fonts.title.css : fonts.sub.css);
     const weight = slot.big ? (rng.chance(0.5) ? '700' : '600') : (rng.chance(0.3) ? '600' : '400');
     const startSize = H * slot.size * (slot.big ? (0.92 + rng.next() * 0.22) : (0.94 + rng.next() * 0.16));
@@ -253,6 +268,10 @@ export async function generatePoster(opts) {
     cutoutRatio: subject ? subject.ratio : 0,
     surfaces: chosenSurfaces,
     overlays: applied,
+    colorScheme: colorPlan.scheme,
+    colorPolarity: colorPlan.polarity,
+    tintStrategy: colorPlan.tintStrategy,
+    colorfulness: palette.colorfulness,
     fonts: fonts,
     copy: copy
   };
