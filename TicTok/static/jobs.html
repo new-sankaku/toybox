@@ -22,6 +22,7 @@
     </div>
 
     <div class="x-toolbar">
+      <input id="job-flt-text" type="text" aria-label="対象 / job id で絞込" placeholder="🔎 対象 / job id で絞込" autocomplete="off" />
       <label class="x-field"><span>状態</span>
         <select id="job-flt-state">
           <option value="active">実行中・待機中</option>
@@ -29,24 +30,15 @@
           <option value="failed">失敗・中断のみ</option>
         </select>
       </label>
+      <!-- 種別の選択肢は /api/jobs の kind_labels から作る。同じ訳語を画面にも置くと
+           運用logの語とずれるため、labelの出所はserver(core/ops_labels.py)だけにする。 -->
       <label class="x-field"><span>種別</span>
         <select id="job-flt-kind">
           <option value="all">全て</option>
-          <option value="overlay">焼き込み</option>
-          <option value="upscale">Up出力</option>
-          <option value="session_overlay">Session 焼き込み</option>
-          <option value="session_upscale">Session Up出力</option>
-          <option value="bulk_overlay">一括 焼き込み出力</option>
-          <option value="bulk_upscale">一括 Up出力</option>
-          <option value="bulk_reprocess">一括 再mp4化</option>
-          <option value="bulk_audionorm">一括 音量正規化</option>
-          <option value="reprocess">再mp4化</option>
-          <option value="audionorm">音量正規化</option>
-          <option value="overlay_preview">焼き込みプレビュー</option>
-          <option value="clip_batch">clip一括書き出し</option>
         </select>
       </label>
       <span class="sp"></span>
+      <span id="job-limit-note" class="chart-note"></span>
       <span id="gpu-summary" class="chart-note"></span>
       <span id="stt-summary" class="chart-note"></span>
     </div>
@@ -55,11 +47,13 @@
       <h3>Job <span class="sub">焼き込み・Up出力・再mp4化はserver側の永続queueで1本ずつ実行します。Serverを再起動しても待機中のjobは残ります。終わったjobの記録は<a href="/ops">運用log</a>に残ります。</span></h3>
       <div class="body">
         <div class="table-wrap">
-          <table class="result-table">
+          <table class="result-table" id="job-table">
             <thead>
               <tr>
-                <th>状態</th><th>種別</th><th>対象</th><th>進捗</th>
-                <th>投入</th><th>所要</th><th>結果</th><th>操作</th>
+                <th data-sort="state">状態</th><th data-sort="kind">種別</th>
+                <th data-sort="target">対象</th><th data-sort="pct">進捗</th>
+                <th data-sort="queued">投入</th><th data-sort="elapsed">所要</th>
+                <th data-sort="result">結果</th><th>操作</th>
               </tr>
             </thead>
             <tbody id="job-rows"></tbody>

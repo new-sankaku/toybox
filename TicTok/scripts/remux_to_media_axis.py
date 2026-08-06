@@ -168,13 +168,13 @@ def find_candidates(record_dir: Path, only_base):
         hls = layout.session_dir(record_dir, mp4.stem)
         reason = None
         if not timing or not media or not media_pts:
-            reason = "no timing sidecar with media_pts (cannot convert derived times)"
-        elif not hls.is_dir() or not list(hls.glob("seg*.ts")):
-            reason = "no retained .ts segments"
+            reason = "media_ptsを持つtiming sidecarが無い(派生の時刻を変換できない)"
+        elif not hls.is_dir() or not layout.has_media(hls):
+            reason = ".tsのsegmentが残っていない"
         elif not container:
-            reason = "mp4 not probeable"
+            reason = "mp4をprobeできない"
         elif container / media < INFLATION_THRESHOLD:
-            reason = "already on the media axis (%.4f)" % (container / media)
+            reason = "既にmedia軸になっている(%.4f)" % (container / media)
         out.append({
             "mp4": mp4, "hls": hls, "timing": timing, "container": container,
             "media": media, "inflation": (container / media) if (container and media) else None,
@@ -194,28 +194,27 @@ async def remux(rec_item, record_dir: Path, backup_dir: Path) -> bool:
     r.playlist = r.hls_dir / "index.m3u8"
     r.base = mp4.stem
     r.unique_id = mp4.stem
-    r._keep_hls = True
     r._volume_paths = lambda: []
 
     kept = r._playlist_segments()
     if not kept:
-        logger.error("  %s: no usable segments; skipped", mp4.stem)
+        logger.error("  %s: 使えるsegmentが無いためskipしました", mp4.stem)
         return False
     if not await r._concat_to_mp4(tmp):
-        logger.error("  %s: re-mux failed; original untouched", mp4.stem)
+        logger.error("  %s: re-muxに失敗しました。元のfileはそのままです", mp4.stem)
         tmp.unlink(missing_ok=True)
         return False
 
-    extinf_sum = sum(e for _, e, _, _ in kept)
+    extinf_sum = sum(e for _, e, _, _, _ in kept)
     new_container = probe_duration(tmp)
     holes = audio_holes(tmp)
     if not new_container or abs(new_container - extinf_sum) / extinf_sum > DURATION_TOLERANCE:
-        logger.error("  %s: rebuilt container %.1fs vs media axis %.1fs; rejected",
+        logger.error("  %s: 作り直したcontainer %.1fs がmedia軸 %.1fs と合わないため破棄しました",
                      mp4.stem, new_container or -1, extinf_sum)
         tmp.unlink(missing_ok=True)
         return False
     if holes:
-        logger.error("  %s: rebuilt file still has %d audio hole(s); rejected",
+        logger.error("  %s: 作り直したfileにまだ音声の穴が %d件あるため破棄しました",
                      mp4.stem, holes)
         tmp.unlink(missing_ok=True)
         return False
@@ -227,7 +226,7 @@ async def remux(rec_item, record_dir: Path, backup_dir: Path) -> bool:
         shutil.copy2(str(old_sidecar), str(backup_dir / old_sidecar.name))
     os.replace(str(tmp), str(mp4))
     await r._write_timing_map(mp4)
-    logger.info("  %s: %.1fs -> %.1fs (media axis %.1fs), audio holes 0",
+    logger.info("  %s: %.1fs -> %.1fs（media軸 %.1fs）, 音声の穴 0件",
                 mp4.stem, rec_item["container"], new_container, extinf_sum)
     return True
 
@@ -311,7 +310,7 @@ async def main() -> int:
     args = ap.parse_args()
 
     if not ffprobe_available():
-        logger.error("ffprobe not on PATH")
+        logger.error("ffprobeがPATHにありません")
         return 2
 
     db_path = Path(get_db_path())
@@ -322,17 +321,17 @@ async def main() -> int:
 
     items = find_candidates(record_dir, args.base)
     todo = [i for i in items if not i["skip"]]
-    logger.info("%d recording(s) scanned, %d need the media axis", len(items), len(todo))
+    logger.info("録画 %d本を走査し、media軸へ移すべき録画は %d本", len(items), len(todo))
     for i in items:
         if i["skip"]:
-            logger.info("  skip %-46s %s", i["mp4"].stem, i["skip"])
+            logger.info("  対象外 %-46s %s", i["mp4"].stem, i["skip"])
     for i in todo:
-        logger.info("  todo %-46s inflation %.4f (%.0fs -> %.0fs)",
+        logger.info("  対象 %-46s 膨張率 %.4f（%.0fs -> %.0fs）",
                     i["mp4"].stem, i["inflation"], i["container"], i["media"])
     if args.limit:
         todo = todo[:args.limit]
     if not args.apply:
-        logger.info("dry-run; pass --apply to write")
+        logger.info("dry-runです。書き込むには --apply を付けてください")
         return 0
 
     conn = sqlite3.connect(str(db_path))
@@ -346,7 +345,7 @@ async def main() -> int:
             continue
         new_timing = read_timing(item["mp4"])
         if not new_timing or not new_timing.get("media_pts"):
-            logger.error("  %s: new sidecar has no media_pts; derived times NOT converted",
+            logger.error("  %s: 新しいsidecarにmedia_ptsが無いため派生の時刻を変換していません",
                          stem)
             failed += 1
             continue
@@ -356,19 +355,19 @@ async def main() -> int:
         if row:
             counts = drop_derived(conn, row[0], convert)
             conn.commit()
-            logger.info("  converted: %s", counts)
+            logger.info("  変換しました: %s", counts)
         else:
-            logger.warning("  %s: no recordings row; DB side skipped", stem)
+            logger.warning("  %s: recordings行が無いためDB側をskipしました", stem)
         passages = drop_passages(semantic_db, stem)
         removed = drop_overlay(item["mp4"])
-        logger.info("  passages dropped=%d, overlay artifacts removed=%s",
-                    passages, removed or "none")
+        logger.info("  削除したpassage=%d件, 削除した焼き込みの成果物=%s",
+                    passages, removed or "無し")
         done += 1
 
     conn.close()
-    logger.info("done=%d failed=%d", done, failed)
-    logger.info("next: re-run transcription indexing and the semantic index to rebuild "
-                "search_hits/passages, and re-render any overlay you still want")
+    logger.info("完了=%d 失敗=%d", done, failed)
+    logger.info("次の作業: search_hits/passagesを作り直すため転写のindexingと意味検索のindexを"
+                "再実行し、必要な焼き込みは出力し直してください")
     return 1 if failed else 0
 
 

@@ -1,8 +1,7 @@
 """bucket系列からの盛り上がり(spike)検出。
 
-配信者pageの「見どころ」(storage.streamer_highlights)と、録画単位の切り抜き候補が同じ
-判定を使うための共通層。検出器を2系統持つと、同じ配信に対して2画面が別々の時刻を指し
-示すことになる。
+録画単位の切り抜き候補が使う判定層。検出器を複数持つと、同じ配信に対して画面ごとに
+別々の時刻を指し示すことになるため、判定はここに1つだけ置く。
 
 判定はsession内のz-score: bucket系列を窓幅ぶん移動合計した系列を作り、その平均・標準
 偏差から外れ値を拾う。母集団をsession内に閉じるのは、配信ごとに規模(同接・ギフト額)が
@@ -29,7 +28,9 @@ METRICS = ("diamonds", "comments")
 # bucketに載っていることもある指標。音声由来の値(audio_peak)は録画がある区間でしか
 # 作れないので、必須にすると録画の無いsession(配信者pageの見どころ)が判定できなくなる。
 # bucket全件がkeyを持つときだけ系列を作り、欠けているものは黙って0で埋めない。
-OPTIONAL_METRICS = ("audio_peak",)
+# 笑い系の指標は「窓内で合計できる量」にしてある(秒数・件数)。audio_peakは本来peakなので
+# 窓内合計は近似でしかないが、laugh_*は最初から積算量なのでdiamonds/commentsと意味論が揃う。
+OPTIONAL_METRICS = ("audio_peak", "laugh_comment", "laugh_audio", "smile")
 
 
 def window_bucket_count(bucket_seconds: float, window_seconds: float) -> int:
@@ -67,7 +68,9 @@ def _zscores(series: list) -> Optional[tuple]:
 
 def detect_spikes(buckets: list, window_buckets: int = 1,
                   metrics: tuple = ("diamonds",),
-                  zscore_min: Optional[float] = None) -> list:
+                  zscore_min: Optional[float] = None,
+                  weights: Optional[dict] = None,
+                  min_values: Optional[dict] = None) -> list:
     """spike候補を時刻順で返す。
 
     ``buckets`` は storage の bucket 行(start / diamonds / comments を持つ dict 相当)で、
@@ -76,6 +79,15 @@ def detect_spikes(buckets: list, window_buckets: int = 1,
 
     値が取れない指標は捏造せず0として扱う(bucketの列はNOT NULLだが、NULLが来たときに
     その窓だけ落とすと系列の長さが指標間でずれる)。
+
+    ``weights`` は指標ごとのz倍率(未指定は1.0)。「笑い重視」はこれで表す。
+    ``min_values`` は指標ごとの窓内合計の絶対下限で、これを下回る窓はその指標では候補に
+    しない。**zero-inflatedな指標には必須**である: 笑い系の系列はほとんどが0なので標準偏差が
+    極小になり、ごく僅かな笑いが大きなzを叩く。実測では「窓内1件だけ」の窓が中央値z=1.50を
+    得て、22.1%のsessionでそれだけでz>=2.0を超えた。これはfallbackではなく判定条件の追加
+    (「1件の笑いは笑っている場面ではない」という定義)である。
+
+    どちらも未指定なら既存の挙動と完全に同一。配信者pageの見どころは影響を受けない。
     """
     if window_buckets < 1:
         raise ValueError("window_bucketsは1以上である必要があります。")
@@ -103,12 +115,21 @@ def detect_spikes(buckets: list, window_buckets: int = 1,
         computed = _zscores(series[metric])
         if computed is None:
             continue
-        stats[metric] = computed
+        zs, baseline = computed
+        weight = float((weights or {}).get(metric, 1.0))
+        if weight != 1.0:
+            zs = [z * weight for z in zs]
+        stats[metric] = (zs, baseline)
     if not stats:
         return []
     candidates = []
     for i, start in enumerate(starts):
-        scored = {m: (z[i], baseline) for m, (z, baseline) in stats.items()}
+        # 絶対下限を満たさない指標は、その窓では候補の根拠にしない(系列の作り方と
+        # z-scoreの母集団は一切変えない — 変えると同じ配信の他の窓の判定まで動く)。
+        scored = {m: (z[i], baseline) for m, (z, baseline) in stats.items()
+                  if series[m][i] >= float((min_values or {}).get(m, 0.0))}
+        if not scored:
+            continue
         best_metric = max(scored, key=lambda m: scored[m][0])
         best_z = scored[best_metric][0]
         if best_z < zscore_min:

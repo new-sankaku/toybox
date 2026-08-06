@@ -1,9 +1,11 @@
-"""Pre-fetch the comment-overlay fonts into assets/fonts.
+"""Pre-fetch the burn-in fonts into assets/fonts.
 
-The fonts (~30 MB) are fetched on demand the first time a recording burn-in needs
-them, so this script is optional -- it just does that download up front (e.g. to
-warm an offline environment) and reports the result. Each font is verified against
-its pinned SHA-256; a mismatch or network error exits non-zero.
+Two groups are fetched: the comment-overlay fonts (colour emoji + fallbacks) and
+the telop fonts used by the subtitle style presets. Both are fetched on demand the
+first time a burn-in needs them, so this script is optional -- it just does the
+download up front (e.g. to warm an offline environment) and reports the result.
+Each font is verified against its pinned SHA-256; a mismatch or network error exits
+non-zero.
 
 Usage (run from the TicTok directory):
     python scripts/download_fonts.py            # fetch any missing/stale fonts
@@ -19,7 +21,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tictok.record.fonts import FONT_DIR, FONT_MANIFEST, ensure_fonts  # noqa: E402
+from tictok.record.fonts import (  # noqa: E402
+    FONT_DIR, FONT_MANIFEST, TELOP_FONT_MANIFEST, ensure_fonts, ensure_telop_font,
+    telop_font_dir,
+)
 
 
 def main() -> int:
@@ -28,12 +33,22 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    log = logging.getLogger("tictok.fonts")
     try:
         ensure_fonts(force=args.force)
     except Exception:
-        logging.getLogger("tictok.fonts").error("font download failed", exc_info=True)
+        log.error("commentのfontのdownloadに失敗しました", exc_info=True)
         return 1
     print(f"All {len(FONT_MANIFEST)} comment-overlay fonts present in {FONT_DIR}")
+    for name in TELOP_FONT_MANIFEST:
+        if args.force:
+            (telop_font_dir(name) / name).unlink(missing_ok=True)
+        try:
+            ensure_telop_font(name)
+        except Exception:
+            log.error("テロップのfont %s のdownloadに失敗しました", name, exc_info=True)
+            return 1
+    print(f"All {len(TELOP_FONT_MANIFEST)} telop fonts present under {FONT_DIR / 'telop'}")
     return 0
 
 

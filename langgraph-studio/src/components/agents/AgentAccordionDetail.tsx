@@ -261,6 +261,14 @@ export function AgentAccordionDetail({
 )}
      >
       シーケンス
+      {seqData&&(seqData.totalTokens?.input||seqData.totalTokens?.output)&&(
+       <span className="ml-1 text-[10px] opacity-70">
+        ({((seqData.totalTokens?.input||0)+(seqData.totalTokens?.output||0))>=1000
+         ?`${(((seqData.totalTokens?.input||0)+(seqData.totalTokens?.output||0))/1000).toFixed(1)}k`
+         :String((seqData.totalTokens?.input||0)+(seqData.totalTokens?.output||0))
+        })
+       </span>
+)}
      </button>
      <button
       onClick={()=>setActiveTab('snapshot')}
@@ -373,7 +381,7 @@ export function AgentAccordionDetail({
        </div>
 )}
       {!promptLoading&&!promptError&&promptData&&(
-       <SystemPromptPanel data={promptData}/>
+       <SystemPromptPanel data={promptData} agentId={agent.id}/>
 )}
       {!promptLoading&&!promptError&&!promptData&&(
        <div className="flex items-center justify-center py-8 text-nier-text-light text-nier-caption">

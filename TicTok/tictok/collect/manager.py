@@ -13,13 +13,13 @@ Broadcast = Callable[[dict], Awaitable[None]]
 
 
 class CollectorManager:
-    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_pool=None, avatar_proxy=None, notifier=None) -> None:
+    def __init__(self, broadcast: Broadcast, storage: Storage, settings, gift_icons=None, avatar_proxy=None, asset_prefetch=None, notifier=None) -> None:
         self._broadcast = broadcast
         self._storage = storage
         self._settings = settings
         self._gift_icons = gift_icons
-        self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
+        self._asset_prefetch = asset_prefetch
         self._notifier = notifier
         self._collectors: dict[str, TikTokCollector] = {}
         self._probe_gate = ProbeGate(settings, self._probing_count)
@@ -74,8 +74,8 @@ class CollectorManager:
                 probe_gate=self._probe_gate,
                 resolver=self._resolver,
                 gift_icons=self._gift_icons,
-                avatar_pool=self._avatar_pool,
                 avatar_proxy=self._avatar_proxy,
+                asset_prefetch=self._asset_prefetch,
                 record_video=record_video,
                 notifier=self._notifier,
                 schedule_profiler=self._schedule_profiler,
@@ -91,7 +91,7 @@ class CollectorManager:
         await collector.start()
         with log_context(unique_id=unique_id):
             logger.info(
-                "monitor started (%d monitor(s) now active)", len(self._collectors),
+                "監視を開始しました（現在 %d 件が稼働中）", len(self._collectors),
                 extra={"event": "collector.monitor_started",
                        "ctx": {"total_monitors": len(self._collectors),
                                "record_video": collector.record_video}},
@@ -117,7 +117,7 @@ class CollectorManager:
         self._storage.remove_monitored_target(unique_id)
         with log_context(unique_id=unique_id):
             logger.info(
-                "monitor removed (%d monitor(s) remain)", len(self._collectors),
+                "監視を削除しました（残り %d 件）", len(self._collectors),
                 extra={"event": "collector.monitor_removed",
                        "ctx": {"total_monitors": len(self._collectors)}},
             )
@@ -160,7 +160,7 @@ class CollectorManager:
         if not targets:
             return
         logger.info(
-            "restoring %d monitored target(s) from the previous run", len(targets),
+            "前回起動時の監視対象 %d 件を復元します", len(targets),
             extra={"event": "collector.monitors_restore_started",
                    "ctx": {"count": len(targets),
                            "targets": [t["unique_id"] for t in targets]}},
@@ -174,8 +174,8 @@ class CollectorManager:
                 # 収集と録画は丸ごと止まったままになる。
                 with log_context(unique_id=unique_id):
                     logger.error(
-                        "failed to restore this monitor; it stays stopped until it is "
-                        "started again by hand", exc_info=True,
+                        "この監視の復元に失敗しました。手動で再開するまで停止したままです",
+                        exc_info=True,
                         extra={"event": "collector.monitor_restore_failed", "ctx": {}},
                     )
 
@@ -189,8 +189,8 @@ class CollectorManager:
                     # finalizeされないまま終わる可能性がある。
                     with log_context(unique_id=collector.unique_id):
                         logger.error(
-                            "failed to stop this monitor during shutdown; its session may "
-                            "be left unfinalized", exc_info=True,
+                            "shutdown中にこの監視を停止できませんでした。sessionがfinalize"
+                            "されないまま残る可能性があります", exc_info=True,
                             extra={"event": "collector.monitor_stop_failed",
                                    "ctx": {"state": collector.state}},
                         )

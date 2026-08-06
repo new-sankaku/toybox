@@ -89,7 +89,7 @@ def _iter_armies(log_dir: Path, unique_id: str, session_id: int, battle_id: int)
                     yield rec, payload
         except OSError:
             # 読めないdumpがあっても再判定自体は続ける(既存判定は降格させないので安全)。
-            logger.warning("failed to read the battle raw capture %s", path, exc_info=True)
+            logger.warning("battleの生dump %s を読めませんでした", path, exc_info=True)
 
 
 def _armies_create_time(payload: dict):
@@ -308,10 +308,26 @@ def migrate_glove_events(conn, log_dir) -> dict:
     """旧方式のglove_eventsを新方式で再判定してbattles表へ書き戻す。commitは呼び出し側。
     書き換えたsessionのglove analytics cacheは無効化する。"""
     log_dir = Path(log_dir)
+    # 版の判定はSQLへ置く(battle_migrationのtopo_vと同じ設計)。LIKEだけで絞ると「glove_events
+    # を持つbattle全部」が候補になり、全件が現行版でも毎起動でdata_jsonをPythonへ運んで
+    # json.loadsすることになる。battles.data_jsonは1件が最大697KB・合計36MBあり、そこを
+    # 素通りさせるだけのために起動が伸びる。
+    #
+    # ただしglove_eventsは1 battleに複数入り、版はevent単位に付く。battle単位のmarkerで
+    # 代用するとmixed(一部だけ旧版)を取りこぼすので、json_eachでevent 1件ずつ見て
+    # 「現行版未満が1件でもあるか」を問う — 下のPython側gateと同じ条件である。
+    # json_validで囲むのは、data_jsonが壊れているbattleでjson_eachがqueryごとerrorに
+    # なるのを避けるため。壊れた行は下のjson.loadsでも弾かれるので結果は変わらない
+    # (CASEは条件を順に評価するので、無効なJSONへjson_eachが走ることはない)。
     rows = conn.execute(
         "SELECT b.rowid rid, b.battle_id bid, b.session_id sid, b.data_json d,"
         " s.unique_id uid FROM battles b JOIN sessions s ON s.id = b.session_id"
         " WHERE b.data_json LIKE '%\"glove_events\": [{%'"
+        "   AND CASE WHEN json_valid(b.data_json)"
+        "            THEN EXISTS (SELECT 1 FROM json_each(b.data_json, '$.glove_events') je"
+        "                         WHERE COALESCE(json_extract(je.value, '$.v'), 0) < ?)"
+        "            ELSE 0 END",
+        (GLOVE_EVENT_VERSION,),
     ).fetchall()
     totals = {"battles": 0, "crit": 0, "normal": 0, "undecided": 0, "kept": 0}
     touched_sessions = set()
@@ -321,15 +337,15 @@ def migrate_glove_events(conn, log_dir) -> dict:
     # いないので画面から確かめる手段が無く、logだけが唯一の手がかりになる)。
     if rows:
         logger.info(
-            "glove migration: re-judging %d battle(s) from the raw captures; "
-            "the server starts once this finishes", len(rows),
+            "glove migration: 生dumpから battle %d 件を再判定します"
+            "（完了後にserverが起動します）", len(rows),
             extra={"event": "glove_migration.started", "ctx": {"candidates": len(rows)}},
         )
     gate = IntervalGate(progress_interval_seconds(config.get_log_progress_interval_seconds()))
     for index, row in enumerate(rows):
         if gate.ready():
             logger.info(
-                "glove migration: %d/%d battle(s) scanned (%d rewritten)",
+                "glove migration: battle %d/%d 件を走査しました（%d 件を書き換え）",
                 index, len(rows), totals["battles"],
                 extra={"event": "glove_migration.progress",
                        "ctx": {"scanned": index, "candidates": len(rows),

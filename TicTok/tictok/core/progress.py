@@ -43,10 +43,11 @@ OVERLAY_PHASES: tuple = (
     ("probe", "動画を解析中", 0.02),
     ("plan", "描画レイアウトを計算中", 0.03),
     ("assets", "アイコン・絵文字を取得中", 0.03),
-    ("layer", "コメント層を描画中", 0.22),
+    # CFR baseは中間fileを作らず合成へstream供給されるようになった(video_overlay
+    # _base_pipe_cmd)ので、独立した段階としては存在しない。重みはencodeが吸収する。
+    ("layer", "コメント層を描画中", 0.27),
     ("layer_encode", "コメント層を書き出し中", 0.08),
-    ("base", "CFRベースを生成中", 0.20),
-    ("encode", "焼き込み合成中", 0.42),
+    ("encode", "焼き込み合成中", 0.57),
 )
 
 # 再mp4化(元の.tsからのfinalize再実行)。concatは全segmentを1本のffmpegで通すので、
@@ -58,21 +59,34 @@ REPROCESS_PHASES: tuple = (
     ("normalize", "単一解像度へ変換中", 0.40),
 )
 
+# ts結合。解像度はsegmentごとにffprobeを起こすので走査が最も長く(3時間の録画で1〜2分)、
+# byte連結はGB規模のcopyでその次に来る。以前はこの全体が「素材を結合中」1段階で、しかも
+# %は5→60→100の3点しか動かなかった — 数千件のffprobeを回している最中がずっと5%で、
+# 止まっているのか進んでいるのかを画面から区別できなかった。
+PACK_PHASES: tuple = (
+    ("probe", "segmentの解像度を判定中", 0.45),
+    ("measure", "結合前の内容を計測中", 0.10),
+    ("write", "素材を束ね書き込み中", 0.30),
+    ("verify", "結合後の内容と照合中", 0.10),
+    # ここから先は取り消せない(元segmentを消し始めた後で止めると、束ねたfileと元が
+    # 半端に同居する)。段階として分けておくと、その境目が画面からも読める。
+    ("commit", "元segmentを削除中", 0.05),
+)
+
 # 保持policyの実行。planの構築は全録画×全root の stat と 全 .sidecars の scandir で、
 # 削除そのものより時間がかかることがある。
 RETENTION_PHASES: tuple = (
     ("transient", "中断renderの残骸を削除中", 0.2),
     ("derived", "派生fileを削除中", 0.4),
-    ("source", "録画本体を削除中", 0.4),
+    ("source", "原本を削除中", 0.4),
 )
 
 # プレビューは窓ぶんだけを同じ3 passで通す。probe/planは全尺でも軽いので1段階に畳む。
 PREVIEW_PHASES: tuple = (
     ("plan", "プレビュー範囲を準備中", 0.05),
-    ("layer", "コメント層を描画中", 0.25),
+    ("layer", "コメント層を描画中", 0.30),
     ("layer_encode", "コメント層を書き出し中", 0.10),
-    ("base", "CFRベースを生成中", 0.25),
-    ("encode", "プレビューを焼き込み中", 0.35),
+    ("encode", "プレビューを焼き込み中", 0.55),
 )
 
 
@@ -219,7 +233,7 @@ class JobProgress:
         try:
             await self._sink(self._ceiling, stage)
         except Exception:
-            logger.exception("job progress sink failed")
+            logger.exception("jobの進捗sinkが失敗しました")
 
     async def _emit(self, force: bool = False) -> None:
         if self._sink is None:
@@ -238,7 +252,7 @@ class JobProgress:
         try:
             await self._sink(pct, text)
         except Exception:
-            logger.exception("job progress sink failed")
+            logger.exception("jobの進捗sinkが失敗しました")
 
     # ---- callback adapter ----
 
@@ -301,4 +315,4 @@ async def pump_ffmpeg_progress(stream, total_us: int, on_progress: ProgressCb,
             try:
                 await on_progress(pct, max(0, out_us))
             except Exception:
-                logger.exception("overlay progress callback failed")
+                logger.exception("コメント焼き込みの進捗callbackが失敗しました")

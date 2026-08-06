@@ -1,6 +1,6 @@
 import{useActivityFeedStore,type ActivityType}from'@/stores/activityFeedStore'
 import{cn}from'@/lib/utils'
-import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle,DollarSign,RotateCcw}from'lucide-react'
+import{Play,CheckCircle,XCircle,Pause,AlertCircle,ArrowRight,Clock,MessageCircle,DollarSign,RotateCcw,Lock,Unlock}from'lucide-react'
 
 const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_started:{icon:Play,color:'text-nier-accent-orange'},
@@ -17,7 +17,9 @@ const typeConfig:Record<ActivityType,{icon:typeof Play;color:string}>={
  agent_waiting_provider:{icon:Clock,color:'text-nier-accent-blue'},
  agent_progress:{icon:Play,color:'text-nier-accent-orange'},
  intervention_agent_question:{icon:MessageCircle,color:'text-nier-accent-orange'},
- budget_warning:{icon:DollarSign,color:'text-nier-accent-orange'}
+ budget_warning:{icon:DollarSign,color:'text-nier-accent-orange'},
+ agent_frozen:{icon:Lock,color:'text-nier-text-light'},
+ agent_unfrozen:{icon:Unlock,color:'text-nier-accent-blue'}
 }
 
 function formatTimestamp(ts:string):string{

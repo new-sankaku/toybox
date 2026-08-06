@@ -14,9 +14,9 @@ from tictok.record.media_queue import (
     MediaJobQueue,
     group_payload,
     job_payload,
+    stage_phase,
 )
 from tictok.record.recorder import timing_path as recorder_timing_path
-from tictok.record.transcribe_queue import TranscribeQueue
 
 HOUR = 3600.0
 DAY = 86400.0
@@ -479,6 +479,94 @@ async def test_repeated_identical_progress_is_collapsed(
     await queue._process(tmp_db.get_media_job("job-1"))
     stages = [m["job"]["stage"] for m in sent if m["job"]["domain"] == "overlay"]
     assert stages.count("焼き込み") == 2
+
+
+async def test_stage_phase_drops_the_detail_that_moves_every_tick():
+    """段階名の括弧の中はframe位置・件数で、数秒ごとに変わる。段階が変わったかの判定に
+    そのまま使うと、1 jobの履歴が数千件になる。"""
+    assert (stage_phase("(6/6) 焼き込み合成中（1:23:45 / 4:39:10）")
+            == "(6/6) 焼き込み合成中")
+    assert stage_phase("高画質化（12,345 / 98,765 frame）") == "高画質化"
+    assert stage_phase("音量正規化の準備中") == "音量正規化の準備中"
+    assert stage_phase("") == ""
+
+
+async def test_progress_records_one_history_row_per_stage_not_per_tick(
+        queue_factory, recording_factory, tmp_db):
+    """段階の履歴は段階が変わった時だけ伸びる。終わったjobのstageは空にされるので、
+    「どこで何秒かかったか」を後から辿れるのはこれだけである。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/2) 動画を解析中", 1)
+        for pct in range(2, 40):
+            await report(f"(2/2) 焼き込み合成中（0:{pct:02d} / 4:00）", pct)
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    stages = tmp_db.get_media_job("job-1")["stages"]
+    assert [s["label"] for s in stages] == ["(1/2) 動画を解析中", "(2/2) 焼き込み合成中"]
+    assert stages[0]["pct"] == 1 and stages[1]["pct"] == 2
+    assert stages[0]["at"] <= stages[1]["at"]
+
+
+async def test_a_failed_job_keeps_the_stage_it_died_in(
+        queue_factory, recording_factory, tmp_db):
+    """失敗行のstageは終端で消される。どこで落ちたかは履歴の最後の1件でしか読めない。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/3) 動画を解析中", 5)
+        await report("(2/3) アイコン・絵文字を取得中（12/48）", 20)
+        raise RuntimeError("ffmpeg died")
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+
+    job = tmp_db.get_media_job("job-1")
+    assert job["state"] == "failed" and job["stage"] == ""
+    assert job["stages"][-1]["label"] == "(2/3) アイコン・絵文字を取得中"
+
+
+async def test_a_rerun_starts_the_stage_history_over(
+        queue_factory, recording_factory, tmp_db):
+    """待機へ戻した行は最初の段階からやり直す。前の実行ぶんを残すと同じ段階が二度並び、
+    段階ごとの所要も読めなくなる。"""
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/1) 焼き込み合成中", 50)
+        return {}
+
+    queue, _ = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+    tmp_db.finish_media_job("job-1", "failed", error="x")
+    assert len(tmp_db.get_media_job("job-1")["stages"]) == 1
+
+    await queue.requeue(["job-1"])
+    await queue._process(tmp_db.claim_next_pending_media_job())
+    assert len(tmp_db.get_media_job("job-1")["stages"]) == 1
+
+
+async def test_job_payload_carries_the_stage_history(
+        queue_factory, recording_factory, tmp_db):
+    recording = recording_factory()
+
+    async def runner(job, report):
+        await report("(1/1) 焼き込み合成中", 50)
+        return {}
+
+    queue, sent = queue_factory(runner)
+    await queue.enqueue("job-1", "overlay", recording["id"])
+    await queue._process(tmp_db.get_media_job("job-1"))
+    finished = [m["job"] for m in sent
+                if m["job"]["job_id"] == "job-1" and m["job"]["state"] == "completed"]
+    assert finished and [s["label"] for s in finished[-1]["stages"]] == ["(1/1) 焼き込み合成中"]
 
 
 async def test_list_jobs_adds_one_folded_row_per_group(
@@ -1273,135 +1361,151 @@ def test_scan_roots_labels_the_shared_bucket_and_sorts_streamers_by_size(tmp_roo
     assert disk_scan.CATEGORY_SOURCE not in disk_scan.REGENERABLE_CATEGORIES
 
 
-# ===== transcribe_queue =====
+# ===== stt_worker: 別processとの境界 =====
+#
+# 文字起こしはserverと別processで走る(CTranslate2とtorchのcuDNNが同じDLL名で衝突し、
+# processごと即死するため)。ここで固定するのは親側の受け口: 進捗と結果を取り出せること、
+# そして**子が黙って死んだ時に必ず理由が残ること**である。native crashは例外にならず、
+# 終了codeとstderrだけが手掛かりになる。
 
 
-@pytest.fixture
-def stt_queue(tmp_db, monkeypatch):
-    monkeypatch.setattr("tictok.record.transcribe_queue.stt_available", lambda: True)
-    sent = []
+class _FakeChild:
+    """subprocess.Popenの代役。stdoutに流す行と終了codeだけを持つ。
 
-    async def broadcast(message):
-        sent.append(message)
+    ``returncode`` も持たせる。取り消しの ``cancel._kill`` はこの属性で「まだ生きているか」
+    を見るので、無いと取り消し経路がAttributeErrorで落ちる(Popenは必ず持っている)。"""
 
-    queue = TranscribeQueue(tmp_db, broadcast, lambda path: Path(path))
-    return queue, sent
+    def __init__(self, stdout_lines, stderr_lines=(), code=0):
+        self.stdout = iter(stdout_lines)
+        self.stderr = iter(stderr_lines)
+        self._code = code
+        self.returncode = None
+        self.killed = False
 
+    def wait(self):
+        return self._code
 
-def test_enqueue_streamer_only_takes_completed_untranscribed_recordings_of_that_streamer(
-        stt_queue, recording_factory):
-    queue, _ = stt_queue
-    mine = recording_factory(unique_id="streamerA")
-    recording_factory(unique_id="streamerB")
-    recording_factory(unique_id="streamerA", status="recording")
+    def poll(self):
+        return self._code
 
-    result = queue.enqueue_streamer("streamerA")
-    assert result == {"added": 1, "candidates": 1}
-    items = queue.status()["items"]
-    assert [i["recording_id"] for i in items] == [mine["id"]]
+    def kill(self):
+        self.killed = True
 
 
-def test_enqueue_streamer_is_idempotent_while_the_row_is_still_pending(
-        stt_queue, recording_factory):
-    queue, _ = stt_queue
-    recording_factory(unique_id="streamerA")
-    assert queue.enqueue_streamer("streamerA")["added"] == 1
-    assert queue.enqueue_streamer("streamerA") == {"added": 0, "candidates": 0}
+def _run_with_child(monkeypatch, child, on_progress=None):
+    from tictok.record import stt_worker
+
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", lambda *a, **k: child)
+    return stt_worker.run_transcribe("x.ts", on_progress)
 
 
-def test_enqueue_recordings_rejects_an_unknown_id_before_touching_the_queue(
-        stt_queue, recording_factory):
-    queue, _ = stt_queue
-    recording = recording_factory()
-    with pytest.raises(ValueError):
-        queue.enqueue_recordings([recording["id"], 999999])
-    assert queue.status()["items"] == []
+def test_stt_worker_returns_the_childs_result_and_forwards_progress(monkeypatch):
+    seen = []
+    child = _FakeChild([
+        '{"t": "progress", "done": 5.0, "total": 10.0}\n',
+        '{"t": "result", "result": {"text": "ok", "segments": []}}\n',
+    ])
+    result = _run_with_child(monkeypatch, child, lambda d, t: seen.append((d, t)))
+    assert result == {"text": "ok", "segments": []}
+    assert seen == [(5.0, 10.0)]
 
 
-def test_cancel_only_removes_pending_work(stt_queue, recording_factory, tmp_db):
-    queue, _ = stt_queue
-    a = recording_factory()
-    b = recording_factory()
-    queue.enqueue_recordings([a["id"], b["id"]])
-    tmp_db.set_transcription_state(a["id"], "running")
+def test_stt_worker_raises_the_childs_own_failure_message(monkeypatch):
+    from tictok.record.transcription import STTError
 
-    assert queue.cancel() == 1
-    states = {i["recording_id"]: i["state"] for i in queue.status()["items"]}
-    assert states == {a["id"]: "running", b["id"]: "cancelled"}
+    child = _FakeChild(['{"t": "error", "message": "音声の読み込みに失敗しました"}\n'])
+    with pytest.raises(STTError, match="音声の読み込みに失敗しました"):
+        _run_with_child(monkeypatch, child)
 
 
-def test_status_counts_by_state_and_reports_the_running_recording(
-        stt_queue, recording_factory, tmp_db):
-    queue, _ = stt_queue
-    a = recording_factory()
-    b = recording_factory()
-    queue.enqueue_recordings([a["id"], b["id"]])
-    tmp_db.set_transcription_state(a["id"], "running")
-    queue._current = a["id"]
+def test_stt_worker_reports_the_exit_code_and_log_tail_when_the_child_dies(monkeypatch):
+    """native crash(0xc0000409等)は結果も error 行も残さない。終了codeと直前のlogを
+    error本文へ載せないと、「無言で消えた」だけが記録に残る。"""
+    from tictok.record.transcription import STTError
 
-    status = queue.status()
-    assert status["available"] is True
-    assert status["running"] == a["id"]
-    assert status["counts"] == {"running": 1, "pending": 1}
+    child = _FakeChild([], stderr_lines=["loading whisper model\n", "cuda init\n"],
+                       code=3221226505)
+    with pytest.raises(STTError) as excinfo:
+        _run_with_child(monkeypatch, child)
+    assert "3221226505" in str(excinfo.value)
+    assert "cuda init" in str(excinfo.value)
 
 
-async def test_process_marks_a_missing_media_file_failed_without_calling_stt(
-        stt_queue, recording_factory, tmp_db, monkeypatch):
-    queue, sent = stt_queue
+def test_stt_worker_registers_the_child_so_cancel_can_kill_it(monkeypatch):
+    """取り消しは子processのkillでしか効かない。復号はCTranslate2の中で回っており、python側に
+    取り消しを見に行く余地が無いため、登録し忘れると取り消しが黙って無視される。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
 
-    def explode(*args, **kwargs):
-        raise AssertionError("STT must not run for a missing file")
-
-    monkeypatch.setattr("tictok.record.transcribe_queue.stt_transcribe", explode)
-    recording = recording_factory(write_file=False)
-    queue.enqueue_recordings([recording["id"]])
-
-    await queue._process(tmp_db.next_pending_transcription())
-    item = queue.status()["items"][0]
-    assert item["state"] == "failed"
-    assert item["error"] == "録画fileが存在しません。"
-    assert sent and sent[-1]["type"] == "transcribe_queue"
-
-
-async def test_process_marks_a_deleted_recording_row_failed(stt_queue, tmp_db):
-    queue, _ = stt_queue
-    await queue._process({"recording_id": 424242})
-    assert queue.status()["items"] == []
+    child = _FakeChild([
+        '{"t": "progress", "done": 5.0, "total": 10.0}\n',
+        '{"t": "result", "result": {"text": "ok"}}\n',
+    ], code=3221225786)
+    token = cancel.CancelToken("job1")
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", lambda *a, **k: child)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts", lambda d, t: token.cancel())
+    assert child.killed
 
 
-async def test_transcribe_retries_a_transient_failure_then_succeeds(
-        stt_queue, recording_factory, tmp_db, monkeypatch):
-    queue, _ = stt_queue
-    monkeypatch.setenv("TICTOK_TRANSCRIBE_JOB_ATTEMPTS", "3")
-    monkeypatch.setenv("TICTOK_TRANSCRIBE_JOB_RETRY_BACKOFF_SECONDS", "0")
-    calls = []
+def test_stt_worker_reports_a_cancel_as_cancelled_not_as_a_crash(monkeypatch):
+    """killされた子は本物のcrashと同じ非0で返る。取り消しを先に名乗らないと、operator自身の
+    取り消しが「processが異常終了しました」というerrorとして記録される。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
 
-    def flaky(path, on_progress):
-        calls.append(path)
-        if len(calls) < 3:
-            raise RuntimeError("CUDA out of memory")
-        return {"text": "ok", "segments": []}
-
-    monkeypatch.setattr("tictok.record.transcribe_queue.stt_transcribe", flaky)
-    result = await queue._transcribe_with_retry(
-        1, Path("x.mp4"), lambda d, t: None, lambda: 0)
-    assert len(calls) == 3
-    assert result["text"] == "ok"
+    child = _FakeChild([], stderr_lines=["loading whisper model\n"], code=3221225786)
+    token = cancel.CancelToken("job1")
+    token.cancel()
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", lambda *a, **k: child)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts")
 
 
-async def test_transcribe_gives_up_after_the_configured_attempts(
-        stt_queue, monkeypatch):
-    queue, _ = stt_queue
-    monkeypatch.setenv("TICTOK_TRANSCRIBE_JOB_ATTEMPTS", "2")
-    monkeypatch.setenv("TICTOK_TRANSCRIBE_JOB_RETRY_BACKOFF_SECONDS", "0")
-    calls = []
+def test_stt_worker_does_not_start_a_child_for_an_already_cancelled_job(monkeypatch):
+    """枠待ちは数時間になり得る。待っている間に受けた取り消しが無視されると、止めたはずの
+    jobが枠を取った瞬間に改めて走り出す。"""
+    from tictok.core import cancel
+    from tictok.record import stt_worker
 
-    def always_fails(path, on_progress):
-        calls.append(path)
-        raise RuntimeError("no model")
+    spawned = []
 
-    monkeypatch.setattr("tictok.record.transcribe_queue.stt_transcribe", always_fails)
-    with pytest.raises(RuntimeError):
-        await queue._transcribe_with_retry(
-            1, Path("x.mp4"), lambda d, t: None, lambda: 0)
-    assert len(calls) == 2
+    def _spawn(*args, **kwargs):
+        spawned.append(1)
+        return _FakeChild([])
+
+    token = cancel.CancelToken("job1")
+    token.cancel()
+    monkeypatch.setattr(stt_worker.subprocess, "Popen", _spawn)
+    with cancel.token_scope(token):
+        with pytest.raises(cancel.JobCancelled):
+            stt_worker.run_transcribe("x.ts")
+    assert spawned == []
+
+
+def test_stt_worker_ignores_a_stray_stdout_line_without_losing_the_result(monkeypatch):
+    """stdoutは制御channel専用。子が素のtextを混ぜても、結果は取り出せなければならない。"""
+    child = _FakeChild([
+        "not json at all\n",
+        '{"t": "result", "result": {"text": "ok"}}\n',
+    ])
+    assert _run_with_child(monkeypatch, child) == {"text": "ok"}
+
+
+async def test_terminate_all_kills_a_running_child(monkeypatch):
+    """serverを止めたら復号の子も止める。別processにした以上、親を終えるだけでは
+    GPUを掴んだ孤児が残る(Windowsは親の終了で子を落とさない)。"""
+    from tictok.record import stt_worker
+
+    child = _FakeChild([])
+    child._code = None  # 実行中
+    with stt_worker._children_lock:
+        stt_worker._children.add(child)
+    try:
+        assert stt_worker.terminate_all() == 1
+        assert child.killed is True
+    finally:
+        with stt_worker._children_lock:
+            stt_worker._children.discard(child)

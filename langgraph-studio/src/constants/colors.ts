@@ -4,7 +4,8 @@ export const COLORS={
   running:{bg:'#C4956C',border:'#8B6914',text:'#454138'},
   waitingApproval:{bg:'#D4C896',border:'#8B7914',text:'#454138'},
   failed:{bg:'#B85C5C',border:'#8B2020',text:'#E8E4D4'},
-  pending:{bg:'#E8E4D4',border:'rgba(69, 65, 56, 0.3)',text:'#8A8578'}
+  pending:{bg:'#E8E4D4',border:'rgba(69, 65, 56, 0.3)',text:'#8A8578'},
+  frozen:{bg:'#B8C4D4',border:'#5A6A80',text:'#454138'}
  },
  progress:{
   completed:'#7AAA7A',

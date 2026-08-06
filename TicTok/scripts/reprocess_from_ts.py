@@ -7,7 +7,7 @@ whose stream-copied mp4 has a baked-in timestamp glitch.
 
 The existing mp4 is moved to a backup dir first (never overwritten in place); on any
 failure it is moved back so the recording is never left without a playable file. The HLS
-segments are kept (keep_hls) so the source stays available for verification.
+segments are the recording's source of record and are never removed by this script.
 
 Usage (from the TicTok dir, in the venv):
     python scripts/reprocess_from_ts.py --base <stem> --record-dir K:/80_Tiktok --backup-dir K:/80_Tiktok/_backup
@@ -39,13 +39,13 @@ async def reprocess_one(base: str, record_dir: Path, backup_dir: Path, dry_run: 
     mp4_path = record_dir / f"{base}.mp4"
     segs = sorted(hls_dir.glob("seg*.ts")) if hls_dir.is_dir() else []
     if not segs:
-        logger.error("no HLS segments at %s; cannot reprocess from .ts", hls_dir)
+        logger.error("%s にHLS segmentが無いため.tsからの再処理はできません", hls_dir)
         return False
-    logger.info("%s: %d segments, m3u8=%s, mp4=%s",
+    logger.info("%s: segment %d件, m3u8=%s, mp4=%s",
                 base, len(segs), (hls_dir / "index.m3u8").is_file(),
                 "present" if mp4_path.is_file() else "absent")
     if dry_run:
-        logger.info("[dry-run] would re-finalize %s from .ts (backup existing mp4 to %s)", base, backup_dir)
+        logger.info("[dry-run] %s を.tsからfinalizeし直します（既存mp4は %s へ退避）", base, backup_dir)
         return True
 
     # Move the existing mp4 out of the way (finalize writes <base>.mp4 in place). Keep it
@@ -59,29 +59,30 @@ async def reprocess_one(base: str, record_dir: Path, backup_dir: Path, dry_run: 
             backup_path = backup_dir / f"{base}.prev.mp4"
         shutil.move(str(mp4_path), str(backup_path))
         backed_up = True
-        logger.info("backed up original mp4 -> %s", backup_path)
+        logger.info("元のmp4を退避しました -> %s", backup_path)
 
-    recorder = Recorder(base, str(record_dir), None, keep_hls=True, final_dir=str(record_dir))
+    recorder = Recorder(base, str(record_dir), None, final_dir=str(record_dir))
     try:
-        await recorder.finalize_recovered_hls(base)
+        # このscriptの目的そのものがmp4化なので、結合passを明示的に要求する。
+        await recorder.finalize_recovered_hls(base, build_mp4=True)
     except Exception:
-        logger.exception("re-finalize crashed for %s", base)
+        logger.exception("%s のfinalizeやり直しが異常終了しました", base)
         if backed_up and not mp4_path.is_file():
             shutil.move(str(backup_path), str(mp4_path))
-            logger.info("restored original mp4 after crash")
+            logger.info("異常終了したため元のmp4を復元しました")
         return False
 
     snap = recorder.snapshot()
     ok = (recorder.output_path is not None and Path(recorder.output_path).is_file()
           and snap.get("bytes", 0) > 0 and recorder.state == "completed")
     if not ok:
-        logger.error("re-finalize did not produce a valid mp4 for %s (state=%s); restoring original",
+        logger.error("%s のfinalizeやり直しで正常なmp4が作られませんでした（state=%s）。元のmp4を復元します",
                      base, recorder.state)
         if backed_up and not mp4_path.is_file():
             shutil.move(str(backup_path), str(mp4_path))
-            logger.info("restored original mp4")
+            logger.info("元のmp4を復元しました")
         return False
-    logger.info("re-finalized %s -> %s (%d bytes, state=%s)",
+    logger.info("%s のfinalizeやり直しが完了しました -> %s（%d bytes, state=%s）",
                 base, recorder.output_path, snap.get("bytes", 0), recorder.state)
     return True
 
@@ -95,7 +96,7 @@ async def main() -> int:
     args = parser.parse_args()
 
     if not (ffmpeg_available() and ffprobe_available()):
-        logger.error("ffmpeg/ffprobe not found on PATH")
+        logger.error("ffmpeg/ffprobeがPATH上に見つかりません")
         return 2
     record_dir = Path(args.record_dir)
     backup_dir = Path(args.backup_dir) if args.backup_dir else record_dir / "_backup"

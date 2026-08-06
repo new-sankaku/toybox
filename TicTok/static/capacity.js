@@ -8,6 +8,13 @@
 // 呼び分けると、設定画面と突き合わせられない。DBのbackupだけは「DB backup」と書いて
 // 動画の移動と区別する(以前はどちらも「退避」で、同じ画面に2つの意味で並んでいた)。
 
+// 容量の書式は fmtBytesGb(「12.3 GB」)に統一する。同じ画面で fmtGb(x)+"GB" と混在させると、
+// 同じ値が2つの見た目で並び、別の量に見える。
+//
+// 保持policy(削除)は設定画面が持つ。この画面はfileを消さないので、消す導線はそちらへ送る。
+// settings.html には retention 用のanchorが無いため、既存のbutton idを飛び先にする。
+const RETENTION_HREF = "/settings#retention-preview";
+
 // ---- 動画の保存先 ----
 // 「対象を確認」で一覧(dry-run)を出し、確認してから「最終保存先へ移動」。押した順序を
 // 保つため、一覧を見るまで実行buttonは出さない。
@@ -15,7 +22,7 @@ let relocationPlan = null;
 
 function placeTotalText(entry) {
   if (!entry) return "-";
-  const parts = [`${fmtNum(entry.items)} 本`, `${fmtGb(entry.bytes)}GB`];
+  const parts = [`${fmtNum(entry.items)} 本`, fmtBytesGb(entry.bytes)];
   // bytes未記録の行を黙って0GBとして混ぜない。合計が実態より小さく見える理由を書く。
   if (entry.unknown_bytes) parts.push(`容量不明 ${fmtNum(entry.unknown_bytes)} 本`);
   return parts.join(" / ");
@@ -56,7 +63,7 @@ function renderPlacement(placement) {
   planBtn.disabled = false;
   const backlog = placement.items || 0;
   moveText.textContent = backlog
-    ? `まだ移していない完了録画: ${fmtNum(backlog)} 本 / ${fmtGb(placement.bytes)}GB`
+    ? `まだ移していない完了録画: ${fmtNum(backlog)} 本 / ${fmtBytesGb(placement.bytes)}`
     : "まだ移していない完了録画はありません。";
 
   const notes = [];
@@ -82,7 +89,7 @@ function renderRelocationPlan(plan) {
   tbody.replaceChildren();
   (plan.by_streamer || []).forEach((s) => {
     const tr = document.createElement("tr");
-    [`@${s.unique_id}`, `${fmtNum(s.items)} 本`, `${fmtGb(s.bytes)}GB`].forEach((value, i) => {
+    [`@${s.unique_id}`, `${fmtNum(s.items)} 本`, fmtBytesGb(s.bytes)].forEach((value, i) => {
       const td = document.createElement("td");
       if (i >= 1) td.className = "num";
       td.textContent = value;
@@ -94,9 +101,60 @@ function renderRelocationPlan(plan) {
     tbody.childElementCount === 0 ? "empty" : "ok");
 
   document.getElementById("reloc-summary").textContent =
-    `移動する録画 ${fmtNum(plan.total_items)} 本 / ${fmtGb(plan.total_bytes)}GB`
+    `移動する録画 ${fmtNum(plan.total_items)} 本 / ${fmtBytesGb(plan.total_bytes)}`
     + `（移動先 ${plan.final_dir}）`;
-  document.getElementById("reloc-apply").classList.toggle("hidden", plan.total_items === 0);
+  const applyBtn = document.getElementById("reloc-apply");
+  applyBtn.classList.toggle("hidden", plan.total_items === 0);
+  // 実行中に一覧を取り直しても、押せる見た目に戻さない(2度目は409で断られる)。
+  applyBtn.disabled = relocateRunning;
+}
+
+// ---- 移動の実行状態 ----
+// 移動は分単位かかり、進捗はjob台帳が持つ。押した本人のtabにしか実行中が出ないと、
+// 再読み込みや別tabからは「押していない」ように見えて二重に押される。台帳はWSが
+// 接続時にsnapshot(jobs)を配るので、画面はそこから復元する。
+const RELOCATE_JOB_DOMAIN = "relocate";
+const relocateJobStates = new Map();
+let relocateRunning = false;
+
+function relocStatusRunning() {
+  const status = document.getElementById("reloc-status");
+  status.replaceChildren(document.createTextNode("移動中…（進捗は"));
+  const link = document.createElement("a");
+  link.href = "/jobs?kind=relocate";
+  link.textContent = "Job画面";
+  status.append(link, document.createTextNode("で確認できます）"));
+}
+
+function applyRelocateState(running) {
+  if (running === relocateRunning) return;
+  relocateRunning = running;
+  document.getElementById("reloc-apply").disabled = running;
+  if (running) {
+    relocStatusRunning();
+    return;
+  }
+  // 終わり方(何本移せたか)はPOSTの応答が書く。応答を受け取らない側(再読み込み後・別tab)
+  // には届かないので、実行中の表示を残さず現況を取り直す。
+  document.getElementById("reloc-status").textContent = "";
+  loadCapacity();
+}
+
+function trackRelocateJob(job) {
+  if (!job || job.domain !== RELOCATE_JOB_DOMAIN) return;
+  relocateJobStates.set(job.job_id, job.state);
+}
+
+function onJobMessage(message) {
+  if (message.type === "jobs") {
+    relocateJobStates.clear();
+    (message.data || []).forEach(trackRelocateJob);
+  } else if (message.type === "job_update" && message.job) {
+    trackRelocateJob(message.job);
+  } else {
+    return;
+  }
+  applyRelocateState([...relocateJobStates.values()].some((state) => state === "running"));
 }
 
 document.getElementById("reloc-plan").addEventListener("click", async () => {
@@ -113,7 +171,7 @@ document.getElementById("reloc-plan").addEventListener("click", async () => {
 document.getElementById("reloc-apply").addEventListener("click", async () => {
   if (!relocationPlan || !relocationPlan.total_items) return;
   const ok = await confirmDialog(
-    `${fmtNum(relocationPlan.total_items)} 本（${fmtGb(relocationPlan.total_bytes)}GB）を`
+    `${fmtNum(relocationPlan.total_items)} 本（${fmtBytesGb(relocationPlan.total_bytes)}）を`
     + `\n${relocationPlan.final_dir}\nへ移します。録画中のものは含みません。`
     + `\n\n容量が大きいため数分かかります。`,
     { title: "最終保存先へ移動", confirmLabel: "移動する", danger: false },
@@ -122,20 +180,21 @@ document.getElementById("reloc-apply").addEventListener("click", async () => {
   const btn = document.getElementById("reloc-apply");
   const status = document.getElementById("reloc-status");
   btn.disabled = true;
-  status.textContent = "移動中… (進捗はJob画面で確認できます)";
+  relocStatusRunning();
   try {
     const result = await apiSend("POST", "/api/storage/relocate", { confirm: true });
     const r = result.result || {};
     const failed = (r.failures || []).length;
     status.textContent =
-      `${fmtNum(r.moved || 0)} 本（${fmtGb(r.moved_bytes || 0)}GB）を移動しました`
+      `${fmtNum(r.moved || 0)} 本（${fmtBytesGb(r.moved_bytes || 0)}）を移動しました`
       + (failed ? `。${fmtNum(failed)} 本は失敗し一時保存先に残っています。` : "。");
     renderRelocationPlan(result.plan);
     loadCapacity();
   } catch (err) {
     status.textContent = err.message;
   } finally {
-    btn.disabled = false;
+    // 実行中はWSの台帳が押せない状態を持つ。応答が返った時点で走っていなければ戻す。
+    btn.disabled = relocateRunning;
   }
 });
 
@@ -184,11 +243,10 @@ function forecastTitle(f) {
   return parts.join("\n");
 }
 
-function renderCapacity(data) {
-  const now = data.now || {};
-  const volumes = (now.disk || {}).volumes || {};
+// driveの空きだけは topbar のbarと同じ周期で取り直すので、行の描画を分けて持つ。
+function renderDiskRows(data) {
+  const volumes = ((data.now || {}).disk || {}).volumes || {};
   const forecasts = data.forecasts || {};
-
   const tbody = document.getElementById("cap-rows");
   tbody.replaceChildren();
   Object.keys(volumes).sort().forEach((name) => {
@@ -197,10 +255,10 @@ function renderCapacity(data) {
     const perDay = f.slope_bytes_per_day;
     const cells = [
       name,
-      `${fmtGb(v.free_bytes)}GB`,
-      `${fmtGb(v.total_bytes)}GB`,
+      fmtBytesGb(v.free_bytes),
+      fmtBytesGb(v.total_bytes),
       // 減少を負で出す。絶対値だけ出すと増えているのか減っているのか読めない。
-      perDay === undefined ? "—" : `${perDay > 0 ? "+" : ""}${fmtGb(perDay)}GB`,
+      perDay === undefined ? "—" : `${perDay > 0 ? "+" : ""}${fmtBytesGb(perDay)}`,
       forecastCell(f),
     ];
     const tr = document.createElement("tr");
@@ -218,6 +276,12 @@ function renderCapacity(data) {
   });
   setListState(document.getElementById("cap-empty"),
     tbody.childElementCount === 0 ? "empty" : "ok");
+}
+
+function renderCapacity(data) {
+  capacityReport = data;
+  const now = data.now || {};
+  renderDiskRows(data);
 
   const samples = data.samples || [];
   document.getElementById("cap-summary").textContent = samples.length
@@ -231,7 +295,7 @@ function renderCapacity(data) {
   dailyBody.replaceChildren();
   daily.forEach((d) => {
     const tr = document.createElement("tr");
-    [d.day, `${fmtNum(d.recordings)} 本`, `${fmtGb(d.bytes)}GB`].forEach((value, i) => {
+    [d.day, `${fmtNum(d.recordings)} 本`, fmtBytesGb(d.bytes)].forEach((value, i) => {
       const td = document.createElement("td");
       if (i >= 1) td.className = "num";
       td.textContent = value;
@@ -255,9 +319,9 @@ function renderCapacity(data) {
   const backups = now.backups || {};
   const rows = now.rows || {};
   renderChips("cap-dbusage", [
-    ["Database", `${fmtGb(db.db)}GB`],
-    ["WAL", `${fmtGb(db.wal)}GB`],
-    ["DB backup", `${fmtGb(backups.bytes)}GB (${fmtNum(backups.files || 0)}件)`],
+    ["Database", fmtBytesGb(db.db)],
+    ["WAL", fmtBytesGb(db.wal)],
+    ["DB backup", `${fmtBytesGb(backups.bytes)} (${fmtNum(backups.files || 0)}件)`],
   ]);
   document.getElementById("cap-dbrows").textContent = [
     `event ${fmtNum(rows.events || 0)}行`,
@@ -283,6 +347,9 @@ function renderChips(containerId, entries) {
   });
 }
 
+// 直近に描いた集計。空きだけを差し替えるために持つ。
+let capacityReport = null;
+
 async function loadCapacity() {
   try {
     renderCapacity(await apiSend("GET", "/api/capacity"));
@@ -292,6 +359,36 @@ async function loadCapacity() {
     setListState(document.getElementById("cap-daily-empty"), "failed", err);
   }
 }
+
+// topbarの空きbarは60秒ごとに取り直しているのに、この表は起動時の値のままだった。同じ画面に
+// 新旧2つの空きが並ぶので、barと同じ周期・同じ出所(O(1)の /api/disk)で空きだけ合わせる。
+// 完了録画の所在や日次の実績まで取り直すと、録画数千本ぶんのpath解決が60秒ごとに走るため、
+// そちらは「最新にする」を押したときだけにする。
+async function refreshDiskRows() {
+  if (!capacityReport) return;
+  let disk;
+  try {
+    disk = await apiSend("GET", "/api/disk");
+  } catch (err) {
+    // 取れなかっただけで、表に出ているのは最後に測れた値。0や空へ描き替える理由はない。
+    console.warn(`cap-rows: ${errorDetailText(err)}`, err);
+    return;
+  }
+  capacityReport.now = { ...(capacityReport.now || {}), disk };
+  renderDiskRows(capacityReport);
+}
+
+setInterval(refreshDiskRows, DISK_POLL_MS);
+
+document.getElementById("cap-reload").addEventListener("click", async () => {
+  const btn = document.getElementById("cap-reload");
+  btn.disabled = true;
+  try {
+    await loadCapacity();
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 document.getElementById("cap-sample").addEventListener("click", async () => {
   const btn = document.getElementById("cap-sample");
@@ -315,14 +412,96 @@ const usageStatusEl = document.getElementById("usage-status");
 const usageSummaryEl = document.getElementById("usage-summary");
 const usageScanBtn = document.getElementById("usage-scan");
 
+// 配信者別に出す種別列の上限。serverは11種別を返すので全部を列にすると横に潰れる。容量の
+// 大きい方から選び、残りは「その他」1列へ畳む(和が「容量」列と一致することが条件なので、
+// その他は合計からの差で出す)。
+const USAGE_STREAMER_COLUMNS = 6;
+
+// 表示する種別列と、畳む種別。列の並びはserverの定義順(category_labels)のままにする。
+// 上の種別表と列の順が入れ替わると、同じ種別を2つの並びで読むことになる。
+function usageStreamerColumns(usage) {
+  const labels = usage.category_labels || [];
+  const totals = usage.categories || {};
+  const bytesOf = (key) => (totals[key] || {}).bytes || 0;
+  const shownKeys = new Set(
+    [...labels]
+      .sort((a, b) => bytesOf(b.key) - bytesOf(a.key))
+      .slice(0, USAGE_STREAMER_COLUMNS)
+      .filter((entry) => bytesOf(entry.key) > 0)
+      .map((entry) => entry.key),
+  );
+  const hidden = labels.filter((entry) => !shownKeys.has(entry.key));
+  return {
+    shown: labels.filter((entry) => shownKeys.has(entry.key)),
+    hidden,
+    // 畳んだ側が全部0なら列を作らない(常に0.0 GBが並ぶ列は読む助けにならない)。
+    other: hidden.some((entry) => bytesOf(entry.key) > 0),
+  };
+}
+
+function renderUsageStreamerHead(columns) {
+  const head = document.getElementById("usage-streamer-head");
+  head.replaceChildren();
+  const cells = [
+    { label: "配信者" },
+    { label: "容量", num: true, title: "この配信者のfileの合計です（右の内訳の和と一致します）。" },
+  ];
+  columns.shown.forEach((entry) => cells.push({ label: entry.label, num: true }));
+  if (columns.other) {
+    cells.push({
+      label: "その他",
+      num: true,
+      title: `列にしていない種別（${columns.hidden.map((e) => e.label).join(" / ")}）の合計です。`
+        + "cellにカーソルを合わせると、その配信者ぶんの内訳が出ます。",
+    });
+  }
+  cells.forEach(({ label, num, title }) => {
+    const th = document.createElement("th");
+    if (num) th.className = "num";
+    if (title) th.title = title;
+    th.textContent = label;
+    head.appendChild(th);
+  });
+}
+
+// 「その他」cell。差で出すので、列にした種別の和と足すと必ず「容量」列に一致する。
+function usageOtherCell(row, columns) {
+  const bytesOf = (key) => (row.categories[key] || {}).bytes || 0;
+  const shownBytes = columns.shown.reduce((sum, entry) => sum + bytesOf(entry.key), 0);
+  const span = document.createElement("span");
+  span.textContent = fmtBytesGb(Math.max(0, (row.bytes || 0) - shownBytes));
+  const parts = columns.hidden
+    .filter((entry) => bytesOf(entry.key) > 0)
+    .map((entry) => `${entry.label} ${fmtBytesGb(bytesOf(entry.key))}`);
+  span.title = parts.length ? parts.join("\n") : "この配信者には該当するfileがありません。";
+  return span;
+}
+
+// 「作り直せる」種別のcell。作り直せると書きながら消す導線が無いと、読んだ人はこの画面で
+// 探し続けることになる。削除そのものは設定画面(確認2段)が持つので、そこへ送る。
+function usageRegenerableCell(row, regenerable) {
+  if (!regenerable.has(row.key)) return "作り直せない";
+  const wrap = document.createElement("span");
+  wrap.append(document.createTextNode("作り直せる "));
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-compact";
+  btn.textContent = "保持policyで確認する";
+  btn.title = "設定画面の保持policyへ移動します。この画面ではfileを消しません。";
+  btn.addEventListener("click", () => { location.href = RETENTION_HREF; });
+  wrap.appendChild(btn);
+  return wrap;
+}
+
 function renderUsage(payload) {
   const scan = payload && payload.scan;
   const hasScan = Boolean(scan && scan.usage);
-  document.getElementById("usage-category-empty").classList.toggle("hidden", hasScan);
-  document.getElementById("usage-streamer-empty").classList.toggle("hidden", hasScan);
+  setListState(document.getElementById("usage-category-empty"), hasScan ? "ok" : "empty");
+  setListState(document.getElementById("usage-streamer-empty"), hasScan ? "ok" : "empty");
   if (!hasScan) {
-    document.getElementById("usage-category-list").innerHTML = "";
-    document.getElementById("usage-streamer-list").innerHTML = "";
+    document.getElementById("usage-category-list").replaceChildren();
+    document.getElementById("usage-streamer-list").replaceChildren();
+    document.getElementById("usage-streamer-head").replaceChildren();
     usageSummaryEl.textContent = `対象folder: ${(payload.roots || []).join(" / ") || "-"}`;
     return;
   }
@@ -346,38 +525,44 @@ function renderUsage(payload) {
       row.label,
       fmtBytesGb(row.bytes),
       fmtNum(row.files),
-      regenerable.has(row.key) ? "作り直せる" : "作り直せない",
+      usageRegenerableCell(row, regenerable),
     ],
     [1, 2],
   );
 
+  const columns = usageStreamerColumns(usage);
+  renderUsageStreamerHead(columns);
   renderTableRows(
     "usage-streamer-list",
     null,
     usage.streamers || [],
     (row) => {
       const cat = (key) => fmtBytesGb((row.categories[key] || {}).bytes || 0);
-      return [
-        row.label,
-        fmtBytesGb(row.bytes),
-        cat("source"),
-        cat("overlay"),
-        cat("up"),
-        cat("ts"),
-        cat("transient"),
-      ];
+      const cells = [row.label, fmtBytesGb(row.bytes)];
+      columns.shown.forEach((entry) => cells.push(cat(entry.key)));
+      if (columns.other) cells.push(usageOtherCell(row, columns));
+      return cells;
     },
-    [1, 2, 3, 4, 5, 6],
+    // 配信者列以外はすべて容量。列数は種別の数で変わるので、番号も数から組む。
+    Array.from({ length: 1 + columns.shown.length + (columns.other ? 1 : 0) },
+      (_, i) => i + 1),
   );
 }
 
 async function loadUsage() {
   try {
-    const res = await fetch("/api/storage/usage");
-    if (!res.ok) throw new Error(String(res.status));
-    renderUsage(await res.json());
+    renderUsage(await apiSend("GET", "/api/storage/usage"));
+    usageStatusEl.textContent = "";
   } catch (err) {
-    usageStatusEl.textContent = "録画folderの内訳を取得できませんでした。";
+    // 生のfetchでは失敗時にrenderUsageを呼べず、placeholderがhiddenのまま見出しだけの
+    // 空欄になっていた。取得できなかったことを表の位置で名乗らせる。
+    document.getElementById("usage-category-list").replaceChildren();
+    document.getElementById("usage-streamer-list").replaceChildren();
+    document.getElementById("usage-streamer-head").replaceChildren();
+    setListState(document.getElementById("usage-category-empty"), "failed", err);
+    setListState(document.getElementById("usage-streamer-empty"), "failed", err);
+    usageSummaryEl.textContent = "";
+    usageStatusEl.textContent = "";
   }
 }
 
@@ -396,5 +581,6 @@ usageScanBtn.addEventListener("click", async () => {
 
 loadCapacity();
 loadUsage();
-// jobの進捗はJob画面が持つ。この画面はWSを接続表示とtopbarのjob badgeのためだけに使う。
-connectWS(() => {});
+// 進捗の中身はJob画面が持つ。この画面が台帳から要るのは「移動が走っているか」だけで、
+// 実行中の表示と二重実行の抑止をそこから復元する。
+connectWS(onJobMessage);

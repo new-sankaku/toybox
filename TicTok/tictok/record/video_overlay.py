@@ -10,16 +10,21 @@ overlay filterで同一passに合成する。生成物は設定値と元fileのh
 
 import asyncio
 import bisect
+import contextlib
 import hashlib
 import json
 import logging
 import math
+import os
 import shutil
+import socket
 import subprocess
 import tempfile
+import threading
 import time
 import unicodedata
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -27,17 +32,19 @@ from typing import Awaitable, Callable, Optional
 from tictok.paths import PROJECT_ROOT
 from tictok.core import cancel
 from tictok.core import config
+from tictok.core import ffprobe
 from tictok.core import layout
 from tictok.core.cancel import JobCancelled
-from tictok.core.gpu import gpu_slot_async
+from tictok.core.gpu import gpu_slot_async, gpu_status
 from tictok.core.logging_setup import progress_interval_seconds
 from tictok.core.progress import (  # 進捗reporterは全長時間jobで共通
     OVERLAY_PHASES, PREVIEW_PHASES, IntervalGate, JobProgress, ProgressCb, StageCb,
     fmt_hms, pump_ffmpeg_progress, pump_progress_sync,
 )
 from tictok.core.battle import battle_sides, battle_type
+from tictok.media import hls_source
 from tictok.media.avatar_pool import avatar_key
-from tictok.record import audio_norm, subtitles
+from tictok.record import audio_norm, fonts, subtitles, telop_styles
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
     SIDECAR_DIRNAME,
@@ -98,6 +105,14 @@ class NothingToDrawError(RuntimeError):
     ffmpegの失敗と同じRuntimeErrorで運ぶと、HTTP側が5xxへ落とすしか無くなり、監視とlogでは
     server errorとして数えられる(userへ出す文言は正常なのに、状態だけが異常になる)。
     呼び出し側が4xxへ落とせるよう型で分ける。"""
+
+
+class TranscriptNotBurnableError(NothingToDrawError):
+    """字幕焼き込みが要求されているのに、渡された転写が焼ける物ではない(無い/時刻mapが
+    旧版/出せるsegmentが無い)。
+
+    ``NothingToDrawError`` を継承するのは、これも「入力側の前提不成立」で、既に4xxへ
+    落とす経路が在るため。区別して別の文言を出したい呼び出し側は型で分けられる。"""
 
 
 def _timing_map_ctx(src: Path) -> dict:
@@ -198,16 +213,23 @@ META_SUFFIX = ".overlay.meta"
 # Legacy transient CFR-normalised copy of a VFR source (older builds). Kept so
 # cleanup removes any such file orphaned by an older build's crashed render.
 CFR_SUFFIX = ".cfr.mp4"
-# Transient CFR-normalised base written by the pre-pass when a comment layer is
-# composited on a VFR source (see _run_ffmpeg); removed when the render finishes.
+# Legacy transient CFR base file written by the old pre-pass (the base now streams to
+# the compositor without touching disk — see _base_pipe_cmd). Kept so cleanup removes
+# any such file orphaned by an older build's crashed render.
 CFR_BASE_SUFFIX = ".cfrbase.mp4"
 # Upper bound for the CFR normalisation target. TikTok recordings are stream-copied
 # HLS: the container's nominal rate (r_frame_rate, often 50/60) is padding — the real
 # average rate is far lower (mobile live content is ~30fps). Normalising to the nominal
-# would encode phantom duplicate frames, doubling the pre-pass, comment-layer and
+# would encode phantom duplicate frames, doubling the base, comment-layer and
 # burn-in frame counts for no visible gain, so the target is capped here. 30 preserves
 # all real motion and matches the comment layer's fps cap so base and layer share a grid.
 CFR_FPS_CAP = 30.0
+# Stems of the burn-in ffmpeg renders running right now, for the diagnostic context of a
+# truncated output (see _gpu_load_ctx). The GPU semaphore already serialises the encodes,
+# so more than one entry here means a render is proceeding outside that admission — which
+# is exactly what a concurrency-related truncation would need.
+_renders_lock = threading.Lock()
+_renders_in_flight: set = set()
 # Mode B (source-clock timing) burn-in, produced alongside Mode A for comparison
 # when video_overlay_timing_compare is on. Same source mp4, comments/battle timed
 # by TikTok create_time instead of consumer arrival.
@@ -225,6 +247,17 @@ PREVIEW_CLIP_SUFFIX = ".preview.mp4"
 PREVIEW_CLIP_META_SUFFIX = ".preview.meta"
 PREVIEW_CLIP_BASE_SUFFIX = ".preview.cfrbase.mp4"
 PREVIEW_LAYER_SUFFIX = ".preview.comments.mov"
+# 範囲焼き込み(切り抜き)の中間物とcache marker。名前は**出力ごと**(out.stem + suffix)で、
+# 録画ごとの固定名にはしない: 同一録画の2範囲を並行renderすると衝突する(本出力側が
+# out.stem + COMMENT_LAYER_SUFFIX としているのと同じ流儀)。
+#
+# 置き場は必ず**元録画の .sidecars dir**。出力先(clips dir)側へ置くと record_root_of が
+# そこをrootと解釈して sweep_orphaned_transients の射程から外れ、落ちたrenderが残した
+# 数十GBを誰も回収しなくなる。
+CLIP_ASS_SUFFIX = ".clip.ass"
+CLIP_BASE_SUFFIX = ".clip.cfrbase.mp4"
+CLIP_LAYER_SUFFIX = ".clip.comments.mov"
+CLIP_META_SUFFIX = ".clip.meta"
 ICON_CACHE_DIR = layout.GIFT_ICON_POOL_DIRNAME
 # Downloaded custom-emote images, cached by stable emote_id so a repeated emote
 # ([laugh] etc.) is fetched once and reused across comments and recordings.
@@ -253,6 +286,11 @@ OVERLAY_KEYS = (
     "video_overlay_subtitles",
     "video_overlay_subtitle_font_size",
     "video_overlay_subtitle_position_percent",
+    # 書体・動き・行数はいずれも焼き上がりの見た目そのものなので、cache signatureへ入れる
+    # (入れないと「presetを変えたのに前の書体のままcache hit」になる)。
+    "video_overlay_subtitle_style",
+    "video_overlay_subtitle_animation",
+    "video_overlay_subtitle_max_lines",
     # 音量正規化は出力の中身を変えるので、cache signatureへ入る必要がある(値を変えたのに
     # 前回の音声のままcache hitする、を避ける)。
     "video_output_normalize_audio",
@@ -363,12 +401,20 @@ def _transient_sweep_suffixes() -> tuple:
     """起動sweepが孤児と見なすsuffix。renderが自分で消す物とちょうど同じ集合。
 
     module levelのtupleにしないのは、COMMENT_LAYER_SUFFIX等がこの関数より後ろで定義されて
-    おり、import時評価ではNameErrorになるため(定義順に依存しない形にしておく)。"""
+    おり、import時評価ではNameErrorになるため(定義順に依存しない形にしておく)。
+
+    範囲焼き込み(CLIP_*)の中間物はstemが出力名なので ``overlay_transient_paths`` では
+    録画pathから列挙できない。suffixで拾うこのsweepが唯一の回収経路になるため、必ず
+    ここへ足すこと。"""
     return (
         CFR_BASE_SUFFIX, CFR_SUFFIX, COMMENT_LAYER_SUFFIX,
         PREVIEW_CLIP_BASE_SUFFIX, PREVIEW_LAYER_SUFFIX,
         PREVIEW_RAW_SUFFIX, PREVIEW_ASS_SUFFIX,
+        CLIP_BASE_SUFFIX, CLIP_LAYER_SUFFIX, CLIP_ASS_SUFFIX,
         CFR_BASE_SUFFIX.replace(".mp4", "") + ".prepass.log",
+        COMMENT_LAYER_SUFFIX + ".ffmpeg.log",
+        CLIP_LAYER_SUFFIX + ".ffmpeg.log",
+        PREVIEW_LAYER_SUFFIX + ".ffmpeg.log",
     )
 
 
@@ -409,7 +455,7 @@ def sweep_orphaned_transients(roots) -> tuple:
                 path.unlink()
             except OSError:
                 logger.warning(
-                    "could not remove the orphaned burn-in intermediate %s", path.name,
+                    "取り残された焼き込みの中間file %s を削除できません", path.name,
                     extra={"event": "overlay.transient_sweep_failed",
                            "ctx": {"path": str(path)}},
                     exc_info=True,
@@ -419,7 +465,7 @@ def sweep_orphaned_transients(roots) -> tuple:
             freed += size
     if removed:
         logger.info(
-            "removed %d orphaned burn-in intermediate(s), freeing %.1f GB",
+            "取り残された焼き込みの中間file %d 件を削除し %.1f GB を空けました",
             removed, freed / 1e9,
             extra={"event": "overlay.transient_swept",
                    "ctx": {"removed": removed, "freed_bytes": freed}},
@@ -430,11 +476,17 @@ def sweep_orphaned_transients(roots) -> tuple:
 def cleanup_overlay_files(src: Path) -> None:
     """Remove cached burn-in artifacts for a recording (called on delete)."""
     paths = overlay_artifact_paths(src) + overlay_transient_paths(src)
+    # 範囲焼き込みのcache marker/中間物は出力名でしか特定できない(録画pathからは
+    # 列挙できない)。sidecar dirはこの録画専用なので、そこに在るclip印は全て対象。
+    sidecars = sidecar_dir(src)
+    if sidecars.is_dir():
+        for suffix in (CLIP_META_SUFFIX, CLIP_ASS_SUFFIX, CLIP_BASE_SUFFIX, CLIP_LAYER_SUFFIX):
+            paths += sorted(sidecars.glob("*" + suffix))
     for path in paths:
         try:
             path.unlink(missing_ok=True)
         except OSError:
-            logger.warning("failed to remove overlay artifact %s", path, exc_info=True)
+            logger.warning("コメント焼き込みの生成物 %s を削除できませんでした", path, exc_info=True)
 
 
 async def _get_lock(key: str) -> asyncio.Lock:
@@ -483,19 +535,25 @@ def _signature(
     events_sig: Optional[str] = None,
     subtitles_sig: Optional[str] = None,
 ) -> str:
-    stat = src.stat()
+    # 素材の指紋。mp4を入力にしていた頃は src.stat() で足りたが、焼き込みは .ts を直接
+    # 読むようになり、mp4が存在しない録画がある。fingerprintはmp4が在ればstatと同じ値を
+    # 返すので、既存cacheは無効化されない。
+    mark = hls_source.fingerprint(src, prefer_hls=True)
     payload = {
+        # 30: Battleスコアバーを本家準拠へ作り直し(full-bleed/gradient/comet/bar下meta行、
+        # 陣営色を自陣=rose・敵陣=cyanへ入れ替え)。同じ設定でも描画が変わる。
+        # 29: 焼き込みの入力をmp4から原本の .ts へ変更。同じ設定でも符号化の世代が1つ
+        # 減り、mp4のmux inflationぶんの時間軸補正も掛からなくなるので、出力が変わる。
         # 28: avatar/emote/gift iconのpoolをmp4の現在地ではなくwork rootで解決するよう修正。
         # final dirへ移送済みの録画は今までpoolを1件も引けず、全コメントがイニシャル円盤へ
         # 縮退した出力になっていた。描画が変わるのでcacheを無効化する — これが無いと、
         # 直った後に焼き直しても既存のmeta+出力にcache hitして壊れた出力が返り続ける。
         # 27: TikTok custom emoteを文字高の2倍で描画し、該当行の行高も拡張。
         # commentの行送り・block高が変わるためcacheを無効化する。
-        "version": 28,
+        "version": 30,
         "variant": variant,
         "cfg": cfg,
-        "size": stat.st_size,
-        "mtime_ns": stat.st_mtime_ns,
+        "source": mark,
         "events": events_sig,
         # 転写のやり直しでsegmentが変われば描く字幕も変わるが、mp4も設定値も変わらない。
         # これが無いと転写後の焼き直しがcache hitで無視される。
@@ -597,18 +655,24 @@ _CALIB_FS = 48
 _CALIB_CJK = "あ"
 _CALIB_ASCII = "abcdefghijklmnopqrstuvwxyz 0123456789 "
 
-_font_em: Optional[tuple] = None  # (wide_em, narrow_em), measured once
+# (family, bold, fontsdir) -> (wide_em, narrow_em)。commentのfontとテロップのfontは別物
+# なので、家族ごとに測って別々に持つ。折り返し幅は測った家族の値で計算しないと合わない。
+_font_em: dict = {}
 _font_em_lock = asyncio.Lock()
 
 
-def _measure_font_em_sync() -> Optional[tuple]:
+def _measure_font_em_sync(family: str = COMMENT_FONT, bold: bool = False,
+                          fontsdir: Optional[str] = None) -> Optional[tuple]:
     """Render two lengths each of a wide (CJK) and a narrow (Latin) run through
     libass and recover the per-glyph em-advance from the rendered pixel widths.
 
     Using two lengths and taking the *difference* of their right ink edges cancels
     the leading offset and the final glyph's side bearing, leaving exactly the
     advance of the added glyphs — so the result is the font's true advance, not an
-    ink estimate. Returns (wide_em, narrow_em) or None if the probe cannot run."""
+    ink estimate. Returns (wide_em, narrow_em) or None if the probe cannot run.
+
+    ``fontsdir`` を渡すと同梱fontから解決する(テロップpresetの書体)。本番のrenderと同じ
+    経路・同じ引数で測るのが要点で、ここだけhostのfontで測ると折り返しが実物とずれる。"""
     try:
         from PIL import Image
     except ImportError:
@@ -631,7 +695,8 @@ def _measure_font_em_sync() -> Optional[tuple]:
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
         "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
         "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Cal,{COMMENT_FONT},{fs},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,"
+        f"Style: Cal,{family},{fs},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,"
+        f"{-1 if bold else 0},0,0,0,"
         "100,100,0,0,1,0,0,7,0,0,0,1\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -644,14 +709,17 @@ def _measure_font_em_sync() -> Optional[tuple]:
         ass_path.write_text(ass, encoding="utf-8")
         # Reference the .ass by bare name with cwd=tmp so the filter graph needs no
         # Windows path escaping (drive ':' / '\\'), same as the main render path.
-        proc = subprocess.run(
+        # 1 frameの計測用renderなので、probeと同じ扱い(短いtimeout + 取り消し登録)で走らせる。
+        vf = "ass=calib.ass"
+        if fontsdir:
+            vf += f":fontsdir={fontsdir}"
+        proc = ffprobe.run_sync(
             ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
              "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=1",
-             "-vf", "ass=calib.ass", "-frames:v", "1", "calib.png"],
-            cwd=str(tmp), stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+             "-vf", vf, "-frames:v", "1", "calib.png"],
+            timeout=ffprobe.SHORT_TIMEOUT_SECONDS, cwd=tmp,
         )
-        if proc.returncode != 0 or not png_path.is_file():
+        if not proc.ok or not png_path.is_file():
             return None
         im = Image.open(png_path).convert("L").point(lambda p: 255 if p > 60 else 0)
         W, H = im.size
@@ -666,7 +734,7 @@ def _measure_font_em_sync() -> Optional[tuple]:
         wide_em = (edges[1] - edges[0]) / (cjk_n2 - cjk_n1) / fs
         narrow_em = (edges[3] - edges[2]) / len(_CALIB_ASCII) / fs
     except Exception:
-        logger.warning("font metric calibration render failed", exc_info=True)
+        logger.warning("fontの寸法を測るための描画に失敗しました", exc_info=True)
         return None
     finally:
         for p in (ass_path, png_path):
@@ -682,28 +750,34 @@ def _measure_font_em_sync() -> Optional[tuple]:
     return wide_em, narrow_em
 
 
-async def _font_metrics() -> tuple:
-    """(wide_em, narrow_em) for COMMENT_FONT, measured once and cached. Falls back
-    to the nominal ratios (logged) only when the calibration render cannot run."""
-    global _font_em
-    if _font_em is not None:
-        return _font_em
+async def _font_metrics(family: str = COMMENT_FONT, bold: bool = False,
+                        fontsdir: Optional[str] = None, what: str = "comment") -> tuple:
+    """(wide_em, narrow_em) for one font family, measured once per family and cached.
+    Falls back to the nominal ratios (logged) only when the calibration render
+    cannot run."""
+    key = (family, bold, fontsdir)
+    hit = _font_em.get(key)
+    if hit is not None:
+        return hit
     async with _font_em_lock:
-        if _font_em is not None:
-            return _font_em
+        hit = _font_em.get(key)
+        if hit is not None:
+            return hit
         loop = asyncio.get_running_loop()
-        measured = await loop.run_in_executor(None, _measure_font_em_sync)
+        measured = await loop.run_in_executor(
+            None, _measure_font_em_sync, family, bold, fontsdir)
         if measured is None:
             logger.warning(
-                "comment font calibration unavailable; using nominal em ratios "
-                "(wide=%.2f narrow=%.2f) — wrap width may be approximate",
-                NOMINAL_WIDE_EM, NOMINAL_NARROW_EM,
+                "%sのfont(%s)の実測ができないため公称のem比を使います"
+                "（wide=%.2f narrow=%.2f）折り返し幅は概算になります",
+                what, family, NOMINAL_WIDE_EM, NOMINAL_NARROW_EM,
             )
-            _font_em = (NOMINAL_WIDE_EM, NOMINAL_NARROW_EM)
+            measured = (NOMINAL_WIDE_EM, NOMINAL_NARROW_EM)
         else:
-            logger.info("comment font calibrated: wide=%.3f narrow=%.3f em", *measured)
-            _font_em = measured
-        return _font_em
+            logger.info("%sのfont(%s)を実測しました: wide=%.3f narrow=%.3f em",
+                        what, family, *measured)
+        _font_em[key] = measured
+        return measured
 
 
 def _estimate_width(text: str, font_size: float,
@@ -1149,8 +1223,8 @@ def _make_comment_shaper() -> Optional["_CommentShaper"]:
         return _CommentShaper()
     except Exception:
         logger.warning(
-            "colour-emoji comment shaper unavailable (Pillow or bundled fonts "
-            "missing); comments will render with monochrome emoji via ASS",
+            "カラー絵文字用のcomment shaperが使えません（Pillowか同梱fontが無い）"
+            "commentはASS経由の白黒絵文字で描画します",
             exc_info=True,
         )
         return None
@@ -1482,7 +1556,7 @@ def _load_timing_anchors(src: Path) -> Optional[list]:
             return None
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        logger.warning("timing map read failed: %s", path, exc_info=True)
+        logger.warning("時刻の対応表を読めませんでした: %s", path, exc_info=True)
         return None
     anchors = data.get("anchors") if isinstance(data, dict) else None
     if not isinstance(anchors, list) or len(anchors) < 2:
@@ -1493,6 +1567,34 @@ def _load_timing_anchors(src: Path) -> Optional[list]:
         return None
     cleaned.sort(key=lambda a: a[0])
     return cleaned
+
+
+def material_media_seconds(src: Path) -> Optional[float]:
+    """``src`` の素材の実尺(media軸の終端)。測れなければNone。
+
+    測るのは**下流が実際に読む素材**である。``hls_source.ffmpeg_source`` は .ts が在れば
+    採用集合のVOD playlistを、無ければmp4を入力にするので、こちらも同じ順で測る。
+
+    ``timing.json`` の ``media_duration`` は使わない。finalizeが書いたsnapshotであって、
+    その後にsession dirが太れば置き去りになるからである(実測: 捕捉processが孤児化して
+    書き続けた録画で、録画行 12.0秒 に対し採用集合は 16,861.8秒)。素材が消えてmp4だけが
+    残った録画では逆に、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい転写を
+    「軸が違う」と弾いていた(実測7件)。``recordings.duration_seconds`` も同じ理由で使えない。
+
+    焼き込みの関門(``_require_burnable_transcript``)・投入時のcheck(media_jobs)・起動時の
+    timemap_migrationがいずれもこの1本で測る。物差しを複製すると、同じ転写が経路によって
+    合格したり弾かれたりする。"""
+    from tictok.record import recorder as rec
+
+    session = hls_source.session_dir_for(src)
+    if session is not None:
+        span = rec.curated_span_seconds(session, layout.streamer_of(session.name) or "")
+        if span:
+            return float(span)
+    if Path(src).is_file():
+        duration = ffprobe.duration_seconds_sync(src)
+        return float(duration) if duration and duration > 0 else None
+    return None
 
 
 def _load_media_pts(src: Path) -> Optional[list]:
@@ -1566,8 +1668,8 @@ def _media_to_pts(medias: list, walls: list, video_duration: Optional[float],
             gaps.remove(best)
         else:
             logger.warning(
-                "media break (phantom=%.1fs) has no matching mp4 PTS gap; comment "
-                "timing near it may be approximate", phantom,
+                "media軸の断裂（幻の %.1fs）に対応するmp4のPTSの穴が見つかりません"
+                "（付近のcommentの時刻は概算になります）", phantom,
             )
     points.append((media_end, video_duration))
     # Strictly increasing on both axes for the piecewise interpolation.
@@ -1765,43 +1867,53 @@ def _make_source_mappers(events: list, anchors: Optional[list], started_at: floa
 
 
 # ===== Battle score bar (burn-in) =====
-# Top-of-frame PK score bar layout, as fractions of the video (own=left/opp=right).
-SCORE_BAR_TOP = 0.075
-SCORE_BAR_H_FRAC = 0.034
-SCORE_BAR_MARGIN = 0.03
+# TikTok本家のPK barと同じ構成。画面端まで伸ばした角の無い1本のbarを上部に置き、scoreは
+# bar内の両端、境界はcomet、残り時間と形式はbarの直下に置く(座標は映像に対する比)。
+SCORE_BAR_TOP = 0.052
+SCORE_BAR_H_FRAC = 0.0215
+SCORE_BAR_MARGIN = 0.0
+# barと同じ幅で直下に置くmeta行(左=勝敗・中央=残り時間・右=形式)の位置と高さ。
+SCORE_META_GAP_FRAC = 0.007
+SCORE_META_H_FRAC = 1.22  # bar_h比
 # Gifts drop below this fraction while the score bar occupies the very top, so the
 # two layers never overlap (only applied when the bar is actually drawn).
-SCORE_BAR_GIFT_BAND_TOP = 0.135
-# Own = cool, opponent = warm; dark translucent track behind them.
-_SCORE_OWN_RGB = "22A8E6"
-_SCORE_OPP_RGB = "E6486B"
-_SCORE_TRACK_RGB = "0A0E14"
-# TikTok本家のPK bar寄りの質感付け。陣営色(上の2色)は変えず、奥行きと締まりだけを足す:
-# barの落ち影 / fill上端のgloss帯 / splitのVSノッチ(白・glow付き) / mode・clockを収める丸pill。
-_SCORE_NOTCH_RGB = "FFFFFF"
+SCORE_BAR_GIFT_BAND_TOP = 0.145
+# 陣営色は本家に合わせて 自陣=rose(左) / 敵陣=cyan(右)。各陣営は横gradientで塗る。
+# ASSにgradientは無いので縦sliceの色補間で描く(_lerp_rgb)。ramp は split ではなく track
+# 全体に張る: splitが動いてもslice色が変わらないので、時系列の塗りを run-length で畳める。
+# ramp幅は「splitが中央のとき、境界の色が本家(自陣#FF3F93 / 敵陣#00CFD8)とほぼ一致する」
+# ように取る。trackに張ったrampの中点がそれぞれ #FF3C9E / #10CCE8 になる。
+_SCORE_OWN_RGB_A, _SCORE_OWN_RGB_B = "FF3A6D", "FF3FD0"
+_SCORE_OPP_RGB_A, _SCORE_OPP_RGB_B = "00EEDC", "21AAF5"
+# barは常に陣営色で埋まるので下敷きのtrackは持たない。境界マーカー(comet/divider)とavatar
+# の縁だけが白、meta行のpillが暗色。
+_SCORE_MARKER_RGB = "FFFFFF"
 _SCORE_PILL_RGB = "0A0E14"
+# 1本のbarを何枚の縦sliceで塗るか。slice幅がこの上限を超えると帯として見えるので、
+# bar高に対して十分細かい枚数を取りつつ、行数が増えすぎない範囲で上限を掛ける。
+_SCORE_GRAD_SLICES_MAX = 64
+_SCORE_GRAD_SLICES_MIN = 12
 # avatarを囲む陣営色のring厚(av_rに対する比)。実写真はringの内側に合成するので、
 # 写真が取れた端でもringだけは残り、両端の陣営色が途切れない。
 _SCORE_RING_FRAC = 0.18
-_SCORE_GLOSS_FRAC = 0.34
-_SCORE_GLOSS_ALPHA = "\\1a&HC8&"
-_SCORE_SHADOW_ALPHA = "\\1a&H96&"
-_SCORE_GLOW_ALPHA = "\\1a&HB4&"
+_SCORE_SHADOW_ALPHA = "\\1a&H78&"
 _SCORE_PILL_ALPHA = "\\1a&H55&"
-# 個人マルチ(3コラ+)で陣営(参加者)ごとに塗り分ける敵陣色。1人目は_SCORE_OPP_RGB(rose)のままで
-# 1v1/2分割の見た目を保ち、2人目以降に別色を割り当てる。陣営数が色数を超えたら循環で再利用する。
-_SCORE_OPP_PALETTE = (
-    _SCORE_OPP_RGB,  # rose (敵陣1)
-    "9B6BE6",  # purple
-    "E6A60A",  # amber
-    "1FB58A",  # teal
-    "E6783C",  # orange
-    "E64FA6",  # pink
+# 勝敗(勝利タイム)の文字色。
+_SCORE_RESULT_RGB = "FFE44D"
+# 個人マルチ(3コラ+)で陣営(参加者)ごとに塗り分ける色のgradient対。先頭は自陣のrose、
+# 2番目以降が敵陣で、出現順(score降順)に割り当てる。陣営数が色数を超えたら循環で再利用する。
+_SCORE_LANE_PALETTE = (
+    (_SCORE_OWN_RGB_A, _SCORE_OWN_RGB_B),  # rose (自陣)
+    (_SCORE_OPP_RGB_A, _SCORE_OPP_RGB_B),  # cyan (敵陣1)
+    ("FFB02E", "FF771F"),  # amber
+    ("8A63FF", "C14BF0"),  # violet
+    ("3DE08A", "18B89B"),  # green
+    ("FF7BA8", "E64FA6"),  # pink
 )
 
-# Match Bonus Mission (倍率タイム) band, drawn just below the score bar during the
-# task/reward windows only. Gold = mission/reward, red = countdown running out.
-BONUS_BAND_TOP = 0.116
+# Match Bonus Mission (倍率タイム) band, drawn just below the score bar's meta row
+# during the task/reward windows only. Gold = mission/reward, red = countdown running out.
+BONUS_BAND_TOP = 0.113
 BONUS_BAND_H_FRAC = 0.022
 BONUS_BAND_MARGIN = 0.20
 BONUS_SETTLE_HOLD = 3.0
@@ -1836,8 +1948,8 @@ def _bonus_task_label(mission: dict) -> str:
         if key.startswith("pm_mt_") and key not in _bonus_unknown_task_keys:
             _bonus_unknown_task_keys.add(key)
             logger.info(
-                "bonus mission prompt key %s has no display text; the burn-in band "
-                "shows the mission without naming its condition", key,
+                "bonus missionのprompt key %s に表示文が無いため、焼き込みの帯は"
+                "条件名を出さずにmissionだけを表示します", key,
                 extra={"event": "overlay.bonus_prompt_key_unknown",
                        "ctx": {"prompt_key": key,
                                "target_type": mission.get("target_type") or 0}},
@@ -1877,6 +1989,110 @@ def _round_rect_path(x: float, y: float, w: float, h: float, r: float,
     if rl:
         p.append(f"b {xi} {yi} {xi} {yi} {xi + rl} {yi}")
     return " ".join(p)
+
+
+def _lerp_rgb(a_hex: str, b_hex: str, t: float) -> str:
+    """2色の線形補間。gradientをsliceで近似するための色取り。"""
+    t = min(1.0, max(0.0, t))
+    a = (int(a_hex[0:2], 16), int(a_hex[2:4], 16), int(a_hex[4:6], 16))
+    b = (int(b_hex[0:2], 16), int(b_hex[2:4], 16), int(b_hex[4:6], 16))
+    return "".join(f"{int(round(a[i] + (b[i] - a[i]) * t)):02X}" for i in range(3))
+
+
+def _grad_slice_count(track_w: float, bar_h: float) -> int:
+    """gradientを近似する縦sliceの枚数。1枚がbar高の半分より太いと段が見えるので、
+    それより細くなる枚数を取り、上限で頭打ちにする。"""
+    want = int(track_w / max(1.0, bar_h * 0.5))
+    return max(_SCORE_GRAD_SLICES_MIN, min(_SCORE_GRAD_SLICES_MAX, want))
+
+
+def _proportional_widths(scores: list, total: float, min_w: float) -> list:
+    """scoreの比で ``total`` を割りつつ、どのsegmentも ``min_w`` を下回らない幅を返す。
+
+    scoreが極端に離れるとsegmentが数pxまで潰れ、その陣営のアイコンが消える。誰が居るのかを
+    名乗れなくなるので、最小幅(アイコンが収まる幅)を保証し、不足ぶんは余裕のあるsegmentから
+    scoreの比で削る。最小幅を割り当てたsegmentを固定して残りを再配分する、を変化が無くなる
+    まで繰り返す(1周で必ず1つ以上固定されるか終わるので有限回で止まる)。
+
+    ``min_w * n >= total`` (barが狭すぎて全員ぶんの最小幅が取れない)場合と、全scoreが0
+    (試合開始直後)の場合は均等割りにする。幅の合計は常に ``total`` に一致する。
+    """
+    n = len(scores)
+    if n == 0:
+        return []
+    vals = [max(0.0, float(s)) for s in scores]
+    if min_w * n >= total or sum(vals) <= 0:
+        return [total / n] * n
+    fixed = [False] * n
+    widths = [0.0] * n
+    while True:
+        rem_w = total - min_w * sum(1 for f in fixed if f)
+        rem_tot = sum(v for v, f in zip(vals, fixed) if not f)
+        changed = False
+        for i in range(n):
+            if fixed[i]:
+                widths[i] = min_w
+                continue
+            w = rem_w * (vals[i] / rem_tot) if rem_tot > 0 else 0.0
+            if w < min_w:
+                fixed[i], widths[i], changed = True, min_w, True
+            else:
+                widths[i] = w
+        if not changed:
+            return widths
+
+
+def _segment_index(bounds: list, x: float) -> int:
+    """境界列(左端..右端)の中で x を含むsegment番号。右端はそのまま最終segment。"""
+    for i in range(len(bounds) - 1):
+        if x < bounds[i + 1]:
+            return i
+    return len(bounds) - 2
+
+
+def _fill_runs(samples: list, n_slices: int) -> tuple[list, list]:
+    """時系列の塗りを「slice単位のrun」と「境界を跨ぐsliceの端数」に分解する。
+
+    ``samples`` は [(start, end, bounds)] で、boundsはそのsampleのsegment境界(slice番号の
+    実数値。左端=0 / 右端=n_slices)。1 sliceが1 segmentに収まっていれば、そのsliceの色は
+    sample間で変わらないので、同じsegmentが続く区間を1本のrunへ畳める(これをやらないと
+    sample数×slice数のdialogueが出て、1試合で数千行になる)。境界を跨ぐsliceだけは幅が
+    sampleごとに変わるので端数として個別に描く。
+
+    戻り値 (runs, parts):
+      runs  = [(start, end, slice_index, segment_index)]
+      parts = [(start, end, x_from, x_to, segment_index)]  # x は slice単位の実数
+    """
+    runs: list = []
+    parts: list = []
+    open_run: dict = {}  # slice -> [start, end, seg]
+    for start, end, bounds in samples:
+        for k in range(n_slices):
+            lo, hi = float(k), float(k + 1)
+            seg_lo = _segment_index(bounds, lo)
+            seg_hi = _segment_index(bounds, hi - 1e-9)
+            if seg_lo == seg_hi:
+                cur = open_run.get(k)
+                if cur and cur[2] == seg_lo and abs(cur[1] - start) < 1e-6:
+                    cur[1] = end
+                else:
+                    if cur:
+                        runs.append((cur[0], cur[1], k, cur[2]))
+                    open_run[k] = [start, end, seg_lo]
+                continue
+            # 境界を跨ぐslice: 開いていたrunを閉じ、跨いだsegmentぶんの端数を積む。
+            cur = open_run.pop(k, None)
+            if cur:
+                runs.append((cur[0], cur[1], k, cur[2]))
+            x = lo
+            for seg in range(seg_lo, seg_hi + 1):
+                nx = min(hi, bounds[seg + 1])
+                if nx - x > 1e-6:
+                    parts.append((start, end, x, nx, seg))
+                x = nx
+    for k, cur in open_run.items():
+        runs.append((cur[0], cur[1], k, cur[2]))
+    return runs, parts
 
 
 def _battle_mode_label(battle: dict) -> str:
@@ -1933,17 +2149,23 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
                                use_real_avatars: bool = False,
                                wide_em: float = NOMINAL_WIDE_EM,
                                narrow_em: float = NOMINAL_NARROW_EM) -> tuple[list, list]:
-    """TikTok風のBattleスコアバーをASS dialogueで描く。Battle中だけ画面上部にバーを表示し、
-    score_seriesの各点を映像timeへ写像して時系列で更新する(数値・境界が動く)。形式に応じて
-    Web(common.jsのbattleBarUnits)と同じ分割で描く:
+    """TikTok本家と同じ構成のBattleスコアバーをASS dialogueで描く。Battle中だけ画面上部に
+    画面端まで伸びた1本のbarを置き、score_seriesの各点を映像timeへ写像して時系列で更新する
+    (数値・境界が動く)。形式に応じてWeb(common.jsのbattleBarUnits)と同じ分割で描く:
       1v1        : 自陣(左)/敵陣(右)の2分割。
-      チーム戦NvM: 自陣/敵陣のチーム合計(own/opp)で2分割。Web同様memberには割らず、境界(VS)は
+      チーム戦NvM: 自陣/敵陣のチーム合計(own/opp)で2分割。Web同様memberには割らず、境界は
                    陣営合計で時系列移動する。
       個人Nコラ  : 参加者ごとにN分割(全員別色)。
-    全形式で陣営ごとに配信者アバターを合成する: 2極は両端、個人マルチは各segmentの先頭。
-    ``_build_ass``がavatar_specを解決してoverlay合成し、解決できなかった陣営はここで描く
-    イニシャル円盤がそのまま残る(アバターはASSより上に合成されるので、円盤は常に下敷きとして
-    描いておけばよい)。陣営色のringは写真の外側に残すので、両端の陣営色は途切れない。
+    塗りは陣営ごとの横gradient。ASSにgradientは無いので縦sliceの色補間で近似し、同じ色が
+    続く区間は run-length で1本のdialogueへ畳む(_fill_runs)。境界を跨ぐsliceだけ端数として
+    sampleごとに描くので、行数はslice数×色替わり回数 + sample数×境界数に収まる。
+
+    scoreはbar内の左右端、境界は comet(白capsule + 陣営色のspeed line + arrow)、残り時間と
+    形式ラベルはbar直下のmeta行に置く。全形式で陣営ごとに配信者アバターを合成する: 2極は
+    両端、個人マルチは各segmentの先頭。``_build_ass``がavatar_specを解決してoverlay合成し、
+    解決できなかった陣営はここで描くイニシャル円盤がそのまま残る(アバターはASSより上に
+    合成されるので、円盤は常に下敷きとして描いておけばよい)。陣営色のringは写真の外側に
+    残すので、両端の陣営色は途切れない。
 
     残り時間のcountdownはscore sampleと切り離し1秒刻みで描く(sample間隔に依らない)。
     Battle終了後も``hold_seconds``だけ最終スコアと勝敗を残す(勝利タイム表示)。保持は
@@ -1954,40 +2176,54 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
     track_w = right - left
     bar_h = max(14, int(round(height * SCORE_BAR_H_FRAC)))
     top = int(round(height * SCORE_BAR_TOP))
-    radius = bar_h / 2
     cy = top + bar_h / 2
-    av_r = max(5, int(round(bar_h * 0.40)))
-    pad = max(3, int(round(bar_h * 0.16)))
-    gap = max(3, int(round(bar_h * 0.18)))
-    num_fs = max(10, int(round(bar_h * 0.54)))
-    meta_fs = max(9, int(round(bar_h * 0.46)))
+    cyi = int(round(cy))
+    pad = max(4, int(round(width * 0.028)))
+    av_r = max(5, int(round(bar_h * 0.62)))
+    gap = max(3, int(round(bar_h * 0.30)))
+    num_fs = max(10, int(round(bar_h * 0.80)))
     ini_fs = max(7, int(round(av_r * 1.05)))
-    bord = max(1, int(round(bar_h * 0.06)))
+    bord = max(1, int(round(bar_h * 0.07)))
     shad = max(1, int(round(bar_h * 0.05)))
-    meta_y = int(round(top - bar_h * 0.5))
-
-    own_c, opp_c, track_c = _ass_bgr(_SCORE_OWN_RGB), _ass_bgr(_SCORE_OPP_RGB), _ass_bgr(_SCORE_TRACK_RGB)
-    opp_palette_c = [_ass_bgr(c) for c in _SCORE_OPP_PALETTE]
-    notch_c, pill_c, shadow_c = _ass_bgr(_SCORE_NOTCH_RGB), _ass_bgr(_SCORE_PILL_RGB), _ass_bgr("000000")
-    own_cx = left + pad + av_r
-    opp_cx = right - pad - av_r
-    own_num_x = own_cx + av_r + gap
-    opp_num_x = opp_cx - av_r - gap
     # 実写真はringの内側に収める。ring厚ぶん小さい画像を円盤の中心へ重ねると、下敷きの
     # 陣営色円盤が縁として残り、写真の有無に関わらず端の見た目が揃う。
     ring = max(1, int(round(av_r * _SCORE_RING_FRAC)))
     av_size = max(4, 2 * (av_r - ring))
-    gloss_h = max(2, int(round(bar_h * _SCORE_GLOSS_FRAC)))
-    shadow_off = max(2, int(round(bar_h * 0.12)))
+    # bar直下のmeta行(左=勝敗 / 中央=残り時間 / 右=形式)。
+    meta_h = max(12, int(round(bar_h * SCORE_META_H_FRAC)))
+    meta_top = top + bar_h + max(2, int(round(height * SCORE_META_GAP_FRAC)))
+    meta_cy = int(round(meta_top + meta_h / 2))
+    meta_fs = max(9, int(round(meta_h * 0.62)))
+    gem_sz = max(6, int(round(meta_h * 0.46)))
+    n_sl = _grad_slice_count(track_w, bar_h)
+    sl_w = track_w / n_sl
+    head_w = max(6, int(round(bar_h * 3.2)))
+    # 陣営あたりの最小幅 = アイコン1つが余白ごと収まる幅。scoreがどれだけ離れても、
+    # segmentはここまでしか痩せない(2極の端アイコンはpad基準、laneの先頭アイコンは
+    # それより内側の余白なので、大きい方のpad基準で揃えれば両方に収まる)。
+    min_seg_w = min(track_w / 2, pad + av_r * 2 + gap)
 
-    def shape(layer, start, end, color, path, alpha=""):
-        return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
-                f"{{\\an7\\pos(0,0)\\bord0\\shad0\\1c{color}{alpha}\\p1}}{path}")
+    white_c = _ass_bgr(_SCORE_MARKER_RGB)
+    pill_c, shadow_c = _ass_bgr(_SCORE_PILL_RGB), _ass_bgr("000000")
+    result_c = _ass_bgr(_SCORE_RESULT_RGB)
+    own_ramp = (_SCORE_OWN_RGB_A, _SCORE_OWN_RGB_B)
+    opp_ramp = (_SCORE_OPP_RGB_A, _SCORE_OPP_RGB_B)
+    own_cx = left + pad + av_r
+    opp_cx = right - pad - av_r
+    own_num_x = own_cx + av_r + gap
+    opp_num_x = opp_cx - av_r - gap
 
-    def text(layer, start, end, x, y, an, fs, body):
+    out: list = []
+
+    def shape(layer, start, end, color, path, alpha="", clip=""):
         return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
-                f"{{\\an{an}\\pos({x},{y})\\fs{fs}\\b1\\1c&H00FFFFFF&\\3c&H00000000&"
-                f"\\bord{bord}\\shad{shad}\\4c&H00000000&}}{body}")
+                f"{{\\an7\\pos(0,0)\\bord0\\shad0\\1c{color}{alpha}{clip}\\p1}}{path}")
+
+    def text(layer, start, end, x, y, an, fs, body, color="&H00FFFFFF&", bord_=None):
+        return (f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
+                f"{{\\an{an}\\pos({int(round(x))},{int(round(y))})\\fs{fs}\\b1\\1c{color}"
+                f"\\3c&H00000000&\\bord{bord if bord_ is None else bord_}\\shad{shad}"
+                f"\\4c&H00000000&}}{body}")
 
     def disc(layer, start, end, cx, color):
         """陣営色の塗り円盤。実写真が解決すればring厚ぶん内側を覆われ、縁だけが残る。"""
@@ -1995,131 +2231,95 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
                 f"{{\\an7\\pos({int(round(cx - av_r))},{int(round(cy - av_r))})\\1c{color}"
                 f"\\bord0\\shad0\\p1}}{_circle_path(av_r)}")
 
-    def gloss(layer, start, end, x, w, rl, rr):
-        """fill上端に薄い白帯を重ねて、平坦な塗りに軽い立体感(艶)を出す。"""
-        if w < 2:
-            return
-        out.append(shape(layer, start, end, notch_c,
-                         _round_rect_path(x, top, w, gloss_h, gloss_h / 2, rl, rr),
-                         alpha=_SCORE_GLOSS_ALPHA))
+    def avatar_disc(layer, start, end, cx, color):
+        """白縁 + 陣営色の円盤。写真がbarの塗りと同化しないよう外側に白を1周置く。"""
+        out.append(f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
+                   f"{{\\an7\\pos({int(round(cx - av_r - ring))},{int(round(cy - av_r - ring))})"
+                   f"\\1c{white_c}\\bord0\\shad0\\p1}}{_circle_path(av_r + ring)}")
+        out.append(disc(layer, start, end, cx, color))
 
-    notch_w = max(2, int(round(bar_h * 0.09)))
-    # ノッチを立てられる範囲。端のavatar zoneまで寄せるとdiamondがbarの丸端からはみ出し、
-    # avatarにも重なるので、両端のavatar+余白ぶんを除いた内側にclampする。片側が0点の
-    # 試合ではsplitが端に張り付くが、その場合も境界はここで止めて枠内に収める。
-    notch_min = left + pad + av_r * 2
-    notch_max = right - pad - av_r * 2
+    def emit_fill(layer, samples, ramps):
+        """slice単位のrun + 境界の端数で、gradientの塗りを時系列に描く。"""
+        runs, parts = _fill_runs(samples, n_sl)
+        for s, e, k, seg in runs:
+            a_hex, b_hex = ramps[seg % len(ramps)]
+            col = _ass_bgr(_lerp_rgb(a_hex, b_hex, (k + 0.5) / n_sl))
+            x = left + k * sl_w
+            w = min(sl_w + 1.2, right - x)
+            out.append(shape(layer, s, e, col, _round_rect_path(x, top, w, bar_h, 0)))
+        # 端数はrunの後に描く(同じlayerでは後の行が上)。sliceの継ぎ目を消すため右へ僅かに
+        # はみ出させるが、左→右の順で描くので境界そのものは右側の端数が上書きして正確に残る。
+        for s, e, x0, x1, seg in parts:
+            a_hex, b_hex = ramps[seg % len(ramps)]
+            col = _ass_bgr(_lerp_rgb(a_hex, b_hex, (x0 + x1) / 2 / n_sl))
+            x = left + x0 * sl_w
+            w = min((x1 - x0) * sl_w + 0.8, right - x)
+            if w > 0.4:
+                out.append(shape(layer, s, e, col, _round_rect_path(x, top, w, bar_h, 0)))
 
-    def notch(layer, start, end, x):
-        """splitに立てるVSノッチ。太い半透明の白帯でglowを近似し、その上に芯の細帯と
-        中央のdiamondを重ねる。境界がどこかを一目で分かるようにする。"""
-        if notch_max <= notch_min:
-            return
-        nw = notch_w
-        xi = int(round(min(max(x, notch_min), notch_max)))
-        out.append(shape(layer, start, end, notch_c,
-                         _round_rect_path(xi - nw * 1.5, top, nw * 3, bar_h, 0),
-                         alpha=_SCORE_GLOW_ALPHA))
-        out.append(shape(layer + 1, start, end, notch_c,
-                         _round_rect_path(xi - nw / 2, top, nw, bar_h, 0)))
-        d = max(3, int(round(bar_h * 0.26)))
-        out.append(shape(layer + 1, start, end, notch_c,
-                         f"m {xi} {cyi - d} l {xi + d} {cyi} l {xi} {cyi + d} l {xi - d} {cyi}"))
+    def comet(layer, start, end, x, lead_hex, facing):
+        """splitに置く境界マーカー。白capsuleの中に優勢側の色でspeed lineとarrowを描き、
+        どちらがどれだけ押しているのかを一目で分かるようにする。barの上端には正確な
+        split位置を指すbeadを打つ(capsuleは片側にしか伸びないため)。"""
+        col = _ass_bgr(lead_hex)
+        hx = x - head_w if facing > 0 else x
+        # capsuleの内側だけを描く矩形clip。speed lineはcapsuleの外から引くが、外は塗りの
+        # gradientと色が合わないので、はみ出しはここで落とす。
+        cl = (f"\\clip({int(round(hx))},{int(round(top))},"
+              f"{int(round(hx + head_w))},{int(round(top + bar_h))})")
+        out.append(shape(layer, start, end, white_c,
+                         _round_rect_path(hx, top, head_w, bar_h, bar_h / 2)))
+        for dy, ln, tip in ((0.26, 1.30, 0.68), (0.50, 1.75, 0.60), (0.74, 1.05, 0.50)):
+            sh = max(2, int(round(bar_h * 0.15)))
+            sw = head_w * ln
+            ex = hx + head_w * (tip if facing > 0 else 1 - tip)
+            sx = ex - sw if facing > 0 else ex
+            out.append(shape(layer + 1, start, end, col,
+                             _round_rect_path(sx, top + bar_h * dy - sh / 2, sw, sh, sh / 2),
+                             clip=cl))
+        acx = hx + head_w * (0.83 if facing > 0 else 0.17)
+        d = bar_h * 0.32
+        tip_x = acx + d * 0.9 * facing
+        back_x = acx - d * 0.8 * facing
+        out.append(shape(layer + 1, start, end, col,
+                         f"m {int(round(back_x))} {int(round(cy - d))} "
+                         f"l {int(round(tip_x))} {cyi} "
+                         f"l {int(round(back_x))} {int(round(cy + d))}"))
+        br = max(2, int(round(bar_h * 0.15)))
+        out.append(f"Dialogue: {layer + 1},{_ass_timestamp(start)},{_ass_timestamp(end)},"
+                   f"Score,,0,0,0,,{{\\an7\\pos({int(round(x - br))},{int(round(top - br))})"
+                   f"\\1c{white_c}\\bord0\\shad0\\p1}}{_circle_path(br)}")
+
+    def divider(layer, start, end, x):
+        """個人マルチのsegment境界。cometは2陣営の押し合いを表す記号なので、多人数では
+        意味が壊れる。細い白線とbeadだけで境界を示す。"""
+        w = max(2, int(round(bar_h * 0.10)))
+        out.append(shape(layer, start, end, white_c,
+                         _round_rect_path(x - w / 2, top, w, bar_h, 0), alpha="\\1a&H20&"))
+        br = max(2, int(round(bar_h * 0.15)))
+        out.append(f"Dialogue: {layer + 1},{_ass_timestamp(start)},{_ass_timestamp(end)},"
+                   f"Score,,0,0,0,,{{\\an7\\pos({int(round(x - br))},{int(round(top - br))})"
+                   f"\\1c{white_c}\\bord0\\shad0\\p1}}{_circle_path(br)}")
 
     def pill(layer, start, end, x, w):
-        """mode/clockを収める丸pill。裸の文字が映像に直接乗ると読みにくく安っぽいので、
-        暗い半透明の下地を敷いて情報の塊として見せる。"""
-        ph = meta_fs + max(4, int(round(meta_fs * 0.55)))
+        """meta行の値を収める丸pill。裸の文字が映像に直接乗ると読みにくいので、暗い
+        半透明の下地を敷いて情報の塊として見せる。"""
         out.append(shape(layer, start, end, pill_c,
-                         _round_rect_path(x, meta_y - ph / 2, w, ph, ph / 2),
+                         _round_rect_path(x, meta_top, w, meta_h, meta_h / 2),
                          alpha=_SCORE_PILL_ALPHA))
 
-    def pill_w(body: str) -> int:
-        pad_x = max(4, int(round(meta_fs * 0.55)))
-        return int(round(_estimate_width(body, meta_fs, wide_em, narrow_em))) + pad_x * 2
+    def pill_w(body: str, fs: Optional[int] = None) -> int:
+        fs = meta_fs if fs is None else fs
+        return int(round(_estimate_width(body, fs, wide_em, narrow_em) + meta_h * 0.80))
 
-    cyi = int(round(cy))
-    out: list = []
-
-    def emit_bar(start, end, own, opp):
-        """One fill pair (moving split) + the two numbers for [start, end]."""
-        own = max(0, own)
-        opp = max(0, opp)
-        tot = own + opp
-        split = left + (track_w * own / tot if tot else track_w / 2)
-        if split - left >= 2:
-            out.append(shape(8, start, end, own_c,
-                             _round_rect_path(left, top, split - left, bar_h, radius, True, False)))
-            gloss(8, start, end, left, split - left, True, False)
-        if right - split >= 2:
-            out.append(shape(8, start, end, opp_c,
-                             _round_rect_path(split, top, right - split, bar_h, radius, False, True)))
-            gloss(8, start, end, split, right - split, False, True)
-        notch(8, start, end, split)
-        out.append(text(9, start, end, own_num_x, cyi, 4, num_fs, f"{own:,}"))
-        out.append(text(9, start, end, opp_num_x, cyi, 6, num_fs, f"{opp:,}"))
-
-    seg_sep = max(2, int(round(bar_h * 0.05)))
-
-    # 個人マルチのlane avatarは、laneごとに1つのoverlayを置いてxを時間で動かす(_step_xexpr)。
-    # ここではlaneごとに [(segment終了time, そのsampleでのx), ...] を貯める。segmentがavatarを
-    # 置けない幅のsampleでは画面外のxを積み、そのlaneだけ一時的に隠す。
-    lane_tracks: dict = {}
-    lane_reps: dict = {}
-
-    def emit_lanes(start, end, lanes, reps=None):
-        """個人マルチ(3コラ+): 1本のバーを各参加者のscore比でN分割し、各segment内に
-        scoreを描く。色は陣営(segment)ごとに変える: 自分=own色、相手は出現順(score降順)に
-        opp_palette_cの別色で塗り分け、自分を強調する。``lanes`` は左→右の固定順
-        [(score, is_own), ...]。全score=0なら均等割り。
-        各segmentの先頭には陣営色ringのアバターを置き、誰のlaneかを色だけに頼らず示す。
-        segmentが狭いときはavatarを優先して数値を省き、avatarも入らない幅なら両方省く。"""
-        n = len(lanes)
-        if n == 0:
-            return
-        weights = [max(0, s) for s, _ in lanes]
-        tot = sum(weights)
-        if tot <= 0:
-            weights, tot = [1] * n, n
-        avail = track_w - seg_sep * (n - 1)
-        x = float(left)
-        opp_i = 0
-        for i, (w_score, (score, is_own)) in enumerate(zip(weights, lanes)):
-            seg_w = avail * w_score / tot
-            if is_own:
-                seg_c = own_c
-            else:
-                seg_c = opp_palette_c[opp_i % len(opp_palette_c)]
-                opp_i += 1
-            if seg_w >= 2:
-                out.append(shape(8, start, end, seg_c,
-                                 _round_rect_path(x, top, seg_w, bar_h, radius, i == 0, i == n - 1)))
-                gloss(8, start, end, x, seg_w, i == 0, i == n - 1)
-            if i > 0 and seg_w >= 2:
-                notch(8, start, end, x)
-            # segment先頭のavatar。ringぶんの余白を見て、置ける幅があるsampleだけ表示する。
-            # 2本目以降のsegmentは直前にノッチが立つので、その芯幅ぶん右へ逃がして重なりを避ける。
-            lead = pad + (notch_w * 2 if i > 0 else 0)
-            av_cx = x + lead + av_r
-            fits_avatar = seg_w >= av_r * 2 + lead + pad
-            if fits_avatar:
-                out.append(disc(9, start, end, av_cx, seg_c))
-                rep = (reps or {}).get(i)
-                if rep:
-                    ini = _ass_escape((_strip_bidi_controls(rep.get("nickname")).strip()[:1] or "＊")).upper()
-                    out.append(text(9, start, end, int(round(av_cx)), cyi, 5, ini_fs, ini))
-                    lane_reps.setdefault(i, rep)
-            lane_tracks.setdefault(i, []).append(
-                (end, int(round(av_cx - av_size / 2)) if fits_avatar else -av_size - 8)
-            )
-            # 数値はavatarを置いた残り幅に収まるときだけ描く(avatarを潰してまで出さない)。
-            used = av_cx + av_r - x if fits_avatar else 0
-            text_w = seg_w - used - pad
-            if text_w >= 8:
-                label = f"{max(0, score):,}"
-                fs = min(num_fs, max(8, int(text_w / (len(label) * 0.62))))
-                out.append(text(9, start, end, int(round(x + used + text_w / 2)), cyi, 5, fs, label))
-            x += seg_w + seg_sep
+    def gem(layer, start, end, cx):
+        """残り時間pillのダイヤicon。45度回した角丸四角をrose/cyanで2枚重ねる。"""
+        s = gem_sz
+        for dx, col in ((-s * 0.22, _ass_bgr(_SCORE_OWN_RGB_A)), (s * 0.22, _ass_bgr(_SCORE_OPP_RGB_A))):
+            out.append(
+                f"Dialogue: {layer},{_ass_timestamp(start)},{_ass_timestamp(end)},Score,,0,0,0,,"
+                f"{{\\an5\\pos({int(round(cx + dx))},{meta_cy})\\frz45\\bord0\\shad0"
+                f"\\1c{col}\\p1}}{_round_rect_path(-s / 2, -s / 2, s, s, s * 0.28)}")
 
     # 陣営ごとに合成する配信者アバター(overlay)。呼び出し側(_build_ass)が解決して焼き込む。
     # 解決できなかった陣営は、下に常に描いてあるイニシャル円盤がそのまま残る。
@@ -2183,32 +2383,160 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
             continue
 
         parts = battle.get("participants") or []
-        mode = _ass_escape(_battle_mode_label(battle))
         # 形式ごとの分割はWeb(common.jsのbattleBarUnits)と一致させる。segment単位(陣営)は
         # core.battleのbattle_sidesが決めるので、2陣営なら2極、3陣営以上ならN分割:
         #   1v1 / チーム戦2v2 : 自陣/敵陣の合計(own/opp)で2分割。memberには割らない。
         #   個人マルチ(1:1:1等) : 陣営(=1人)ごとのN分割(lane)。
-        # 2極は1v1もチーム戦も同じ emit_bar で描く(sm["own"]/["opp"]が陣営合計)。
         lane_order = battle_sides(parts)
         # score_seriesがparts(host別score)を持たない古いrecordでは陣営別の内訳を時系列で
-        # 復元できず、N分割は描けない(全lane=0は emit_lanes の均等割りに落ちて捏造になる)。
-        # その場合はrecordが実際に持つown/oppの2極だけを描く。
+        # 復元できず、N分割は描けない(全lane=0は均等割りに落ちて捏造になる)。その場合は
+        # recordが実際に持つown/oppの2極だけを描く。
         has_lane_scores = any(sm.get("parts") for sm in series)
         multi = len(lane_order) > 2 and has_lane_scores
         # 陣営別内訳を欠く個人マルチ。旧collectorのown/oppは首位の敵という現行semanticsと
         # 別物なので、勝利タイムでheadline(opp_score)と混ぜない目印にする。
         lanes_unavailable = len(lane_order) > 2 and not has_lane_scores
 
-        # Static elements over the whole visible span (battle + hold).
-        # 落ち影 → track の順に敷く。影はbarと同じ形を下へずらした黒で、映像の明暗に関わらず
-        # barが板として浮いて見えるようにする(平坦な塗りだけだと映像に沈んで安っぽく見える)。
-        out.append(shape(6, win_start, disp_end, shadow_c,
-                         _round_rect_path(left, top + shadow_off, track_w, bar_h, radius),
+        # 落ち影はbar直下の細い暗線だけ。板全体をずらした影はbarが宙に浮いて見えるので、
+        # 明るい映像でも輪郭が締まる最小限に留める。
+        out.append(shape(5, win_start, disp_end, shadow_c,
+                         _round_rect_path(left, top + bar_h, track_w, max(2, bar_h * 0.10), 0),
                          alpha=_SCORE_SHADOW_ALPHA))
-        out.append(shape(7, win_start, disp_end, track_c,
-                         _round_rect_path(left, top, track_w, bar_h, radius), alpha="\\1a&H45&"))
+
+        parts_by_id = {str(p.get("user_id")): p for p in parts if p.get("user_id")}
+        # laneの representative host = その陣営で最高scoreのmember(2極の敵陣選出と同じ基準)。
+        lane_rep_by_index = {
+            i: max((parts_by_id[pid] for pid in ids if pid in parts_by_id),
+                   key=lambda p: p.get("score", 0) or 0, default=None)
+            for i, (ids, _own) in enumerate(lane_order)
+        }
+
+        # ---- sampleごとの境界を先に確定してから、塗り(run) → 前景の順に描く ----
+        spans: list = []            # [(start, end, [scores...])]
+        n = len(series)
+        for i, sm in enumerate(series):
+            s_pts = max(win_start, to_media(sm.get("t") or 0))
+            e_pts = min(win_end, to_media(series[i + 1].get("t") or 0) if i + 1 < n else win_end)
+            if e_pts <= s_pts:
+                continue
+            if multi:
+                scores = [max(0, s) for s, _own in _sample_lanes(sm, lane_order)]
+            else:
+                scores = [max(0, sm.get("own") or 0), max(0, sm.get("opp") or 0)]
+            spans.append((s_pts, e_pts, scores))
+
+        # 勝利タイム: 最終scoreを凍結して保持する。
+        if disp_end > win_end + 1e-6:
+            last = series[-1]
+            if multi:
+                fscores = [max(0, s) for s, _own in _sample_lanes(last, lane_order)]
+            elif lanes_unavailable:
+                # headline(opp_score=首位の敵)はこのrecordのseries oppと別semanticsのため、
+                # 混ぜると勝利タイムでバーが飛ぶ。seriesの最終値をそのまま保持する。
+                fscores = [max(0, last.get("own") or 0), max(0, last.get("opp") or 0)]
+            else:
+                fscores = [max(0, battle.get("own_score") or (last.get("own") or 0)),
+                           max(0, battle.get("opp_score") or (last.get("opp") or 0))]
+            spans.append((win_end, disp_end, fscores))
+        if not spans:
+            continue
+
+        n_seg = len(spans[0][2])
+        if multi:
+            # 色は陣営の並び順ではなく「自陣か否か」で決める(Web common.jsのc-own/c1..と
+            # 同じ規則)。自陣は常にrose、敵陣は出現順(score降順)に別色を割り当てる。
+            ramps, opp_i = [], 0
+            for _ids, is_own in lane_order:
+                if is_own:
+                    ramps.append(_SCORE_LANE_PALETTE[0])
+                else:
+                    ramps.append(_SCORE_LANE_PALETTE[1 + opp_i % (len(_SCORE_LANE_PALETTE) - 1)])
+                    opp_i += 1
+        else:
+            ramps = [own_ramp, opp_ramp]
+        # segment境界(slice単位)。どれだけscoreが離れても各陣営にアイコンぶんの幅は残す
+        # (_proportional_widths)。潰れた陣営が「誰なのか」を名乗れなくなるのを防ぐためで、
+        # 実数はbar内の数値が持つ。2極は comet が優勢側へ伸びるので、その頭が枠外へ出ない
+        # ところまでも寄せる(この2つのclampが競合しないよう、範囲を交差させてから当てる)。
+        fill_samples: list = []
+        splits_px: list = []
+        for s_pts, e_pts, scores in spans:
+            widths = _proportional_widths(scores, float(track_w), float(min_seg_w))
+            acc, bounds = 0.0, [0.0]
+            for w in widths:
+                acc += w
+                bounds.append(acc / sl_w)
+            bounds[-1] = float(n_sl)
+            if not multi:
+                x = left + bounds[1] * sl_w
+                lo, hi = left + min_seg_w, right - min_seg_w
+                if scores[0] >= scores[1]:
+                    lo = max(lo, left + head_w + 2)
+                else:
+                    hi = min(hi, right - head_w - 2)
+                x = min(max(x, lo), hi) if lo <= hi else (left + right) / 2
+                bounds[1] = (x - left) / sl_w
+                splits_px.append(x)
+            fill_samples.append((s_pts, e_pts, bounds))
+        emit_fill(6, fill_samples, ramps)
+
+        # ---- 前景: 境界マーカー / 数値 / lane avatar ----
+        lane_tracks: dict = {}
+        lane_reps: dict = {}
+        for si, (s_pts, e_pts, scores) in enumerate(spans):
+            bounds = fill_samples[si][2]
+            if not multi:
+                own_s, opp_s = scores[0], scores[1]
+                split = splits_px[si]
+                lead_own = own_s >= opp_s
+                comet(7, s_pts, e_pts, split, _SCORE_OWN_RGB_B if lead_own
+                      else _SCORE_OPP_RGB_A, 1 if lead_own else -1)
+                # 数値の定位置はcometの頭と独立だが、負けている側が最小幅まで痩せると、
+                # その側の数値の起点が頭の上に乗る。その時だけ頭の外へ逃がす(頭は必ず
+                # 優勢側にあるので、逃がした先が相手の数値と当たることはない)。
+                h_lo, h_hi = ((split - head_w, split) if lead_own else (split, split + head_w))
+                own_x = split + head_w + gap if h_lo <= own_num_x <= h_hi else own_num_x
+                opp_x = split - head_w - gap if h_lo <= opp_num_x <= h_hi else opp_num_x
+                out.append(text(9, s_pts, e_pts, own_x, cyi, 4, num_fs, f"{own_s:,}"))
+                out.append(text(9, s_pts, e_pts, opp_x, cyi, 6, num_fs, f"{opp_s:,}"))
+                continue
+            # 個人マルチ: segmentごとにavatar(先頭) + 数値(末尾)。狭いsampleでは
+            # avatarを優先し、入らなければ数値だけ、どちらも入らなければ何も描かない。
+            for i, score in enumerate(scores):
+                x0 = left + bounds[i] * sl_w
+                x1 = left + bounds[i + 1] * sl_w
+                seg_w = x1 - x0
+                if i > 0:
+                    divider(7, s_pts, e_pts, x0)
+                lead = pad if i == 0 else max(3, int(round(bar_h * 0.30)))
+                av_cx = x0 + lead + av_r
+                fits_avatar = seg_w >= av_r * 2 + lead + gap
+                if fits_avatar:
+                    seg_hex = ramps[i % len(ramps)][0]
+                    avatar_disc(8, s_pts, e_pts, av_cx, _ass_bgr(seg_hex))
+                    rep = lane_rep_by_index.get(i)
+                    if rep:
+                        ini = _ass_escape(
+                            (_strip_bidi_controls(rep.get("nickname")).strip()[:1] or "＊")).upper()
+                        out.append(text(9, s_pts, e_pts, av_cx, cyi, 5, ini_fs, ini, bord_=0))
+                        lane_reps.setdefault(i, rep)
+                lane_tracks.setdefault(i, []).append(
+                    (e_pts, int(round(av_cx - av_size / 2)) if fits_avatar else -av_size - 8))
+                used = (av_cx + av_r - x0) if fits_avatar else 0
+                text_w = seg_w - used - gap
+                label = f"{score:,}"
+                # 数値は「読める大きさで収まる」ときだけ描く。最小幅まで痩せたsegmentへ
+                # 無理に詰めると豆粒の数字がアイコンへ被るので、その場合はアイコンだけ残す
+                # (実数はWeb・解析側にあり、ここで潰れた数字を出す価値は無い)。
+                per_pt = _estimate_width(label, 100, wide_em, narrow_em) / 100.0
+                fs = int(text_w / per_pt) if per_pt > 0 else 0
+                if fs >= max(8, int(num_fs * 0.55)):
+                    # 右端のlaneは画面端に文字が張り付かないよう、barと同じ余白まで戻す。
+                    tx = min(x1 - gap / 2, right - pad)
+                    out.append(text(9, s_pts, e_pts, tx, cyi, 6, min(num_fs, fs), label))
+
         if not multi:
-            # 2極表示(1v1/チーム戦)は両端に representative host を出す。イニシャル円盤は常に
+            # 2極(1v1/チーム戦)は両端に representative host を出す。イニシャル円盤は常に
             # 下敷きとして描き、その上にavatar specを必ず積む。avatarはASSより後に合成される
             # ので、解決できれば写真がイニシャルを覆い、駄目なら円盤がそのまま残る。
             own_p = next((p for p in parts if p.get("is_own")), None)
@@ -2218,75 +2546,53 @@ def _build_score_bar_dialogues(battles: list, to_media, video_duration: Optional
             # nickname leading with one does not yield a tofu box as the disc letter.
             own_ini = _ass_escape((_strip_bidi_controls((own_p or {}).get("nickname")).strip()[:1] or "自")).upper()
             opp_ini = _ass_escape((_strip_bidi_controls((opp_p or {}).get("nickname")).strip()[:1] or "敵")).upper()
-            out.append(disc(9, win_start, disp_end, own_cx, own_c))
-            out.append(text(9, win_start, disp_end, own_cx, cyi, 5, ini_fs, own_ini))
-            out.append(disc(9, win_start, disp_end, opp_cx, opp_c))
-            out.append(text(9, win_start, disp_end, opp_cx, cyi, 5, ini_fs, opp_ini))
+            avatar_disc(8, win_start, disp_end, own_cx, _ass_bgr(_SCORE_OWN_RGB_A))
+            out.append(text(9, win_start, disp_end, own_cx, cyi, 5, ini_fs, own_ini, bord_=0))
+            avatar_disc(8, win_start, disp_end, opp_cx, _ass_bgr(_SCORE_OPP_RGB_B))
+            out.append(text(9, win_start, disp_end, opp_cx, cyi, 5, ini_fs, opp_ini, bord_=0))
             if use_real_avatars:
                 add_avatar_spec(own_p, own_cx, win_start, disp_end)
                 add_avatar_spec(opp_p, opp_cx, win_start, disp_end)
-        # mode / clock は丸pillの中に収める。clockは毎秒張り替えるが、pillは最大幅("59:59")
-        # で1枚だけ敷いて使い回す(毎秒pillを積むとdialogueが倍になるだけで見た目は同じ)。
+        elif use_real_avatars:
+            # 個人マルチのlane avatar: このBattleぶんの位置履歴を1 laneあたり1つのoverlayへ
+            # 畳む(勝利タイムぶんも溜め終わってからなので、hold中も正しい位置に残る)。
+            for i, entries in lane_tracks.items():
+                rep = lane_reps.get(i)
+                if rep and entries:
+                    add_avatar_spec(rep, 0, win_start, disp_end, xexpr=_step_xexpr(entries))
+
+        # ---- meta行: 中央=残り時間(ダイヤicon付き) / 右=形式 / 左=勝敗(勝利タイムのみ) ----
+        clock_body = "59:59"
+        clock_pw = int(round(gem_sz * 1.5 + meta_h * 0.30
+                             + _estimate_width(clock_body, meta_fs, wide_em, narrow_em)
+                             + meta_h * 0.80))
+        clock_px = (width - clock_pw) / 2
+        gem_cx = clock_px + meta_h * 0.40 + gem_sz * 0.75
+        clock_tx = gem_cx + gem_sz * 0.75 + meta_h * 0.30
+        pill(8, win_start, disp_end, clock_px, clock_pw)
+        gem(9, win_start, disp_end, gem_cx)
         mode_plain = _battle_mode_label(battle)
         mode_pw = pill_w(mode_plain)
-        clock_pw = pill_w("59:59")
-        pill(8, win_start, disp_end, left - max(4, int(round(meta_fs * 0.55))), mode_pw)
-        pill(8, win_start, disp_end, right + max(4, int(round(meta_fs * 0.55))) - clock_pw, clock_pw)
-        out.append(text(9, win_start, disp_end, left, meta_y, 4, meta_fs, mode))
-
-        # Fills + numbers per score sample (battle phase: scores change discretely).
-        lane_tracks.clear()
-        lane_reps.clear()
-        parts_by_id = {str(p.get("user_id")): p for p in parts if p.get("user_id")}
-        # laneの representative host = その陣営で最高scoreのmember(2極の敵陣選出と同じ基準)。
-        lane_rep_by_index = {
-            i: max((parts_by_id[pid] for pid in ids if pid in parts_by_id),
-                   key=lambda p: p.get("score", 0) or 0, default=None)
-            for i, (ids, _own) in enumerate(lane_order)
-        }
-        n = len(series)
-        for i, sm in enumerate(series):
-            s_pts = max(win_start, to_media(sm.get("t") or 0))
-            e_pts = min(win_end, to_media(series[i + 1].get("t") or 0) if i + 1 < n else win_end)
-            if e_pts <= s_pts:
-                continue
-            if multi:
-                emit_lanes(s_pts, e_pts, _sample_lanes(sm, lane_order), lane_rep_by_index)
-            else:
-                emit_bar(s_pts, e_pts, sm.get("own") or 0, sm.get("opp") or 0)
+        pill(8, win_start, disp_end, right - pad - mode_pw, mode_pw)
+        out.append(text(9, win_start, disp_end, right - pad - meta_h * 0.40, meta_cy, 6,
+                        meta_fs, _ass_escape(mode_plain)))
 
         # Countdown clock, 1-second steps (decoupled from the sample cadence).
         steps = 0
         t = win_start
         while t < win_end - 1e-6 and steps < _SCORE_CLOCK_MAX_STEPS:
             seg_end = min(t + 1.0, win_end)
-            out.append(text(9, t, seg_end, right, meta_y, 6, meta_fs, _fmt_clock(win_end - t)))
+            out.append(text(9, t, seg_end, clock_tx, meta_cy, 4, meta_fs, _fmt_clock(win_end - t)))
             t += 1.0
             steps += 1
-
-        # Victory-time hold: freeze the final score and show the result.
         if disp_end > win_end + 1e-6:
-            last = series[-1]
-            if multi:
-                emit_lanes(win_end, disp_end, _sample_lanes(last, lane_order), lane_rep_by_index)
-            elif lanes_unavailable:
-                # headline(opp_score=首位の敵)はこのrecordのseries oppと別semanticsのため、
-                # 混ぜると勝利タイムでバーが飛ぶ。seriesの最終値をそのまま保持する。
-                emit_bar(win_end, disp_end, last.get("own") or 0, last.get("opp") or 0)
-            else:
-                fown = max(0, battle.get("own_score") or (last.get("own") or 0))
-                fopp = max(0, battle.get("opp_score") or (last.get("opp") or 0))
-                emit_bar(win_end, disp_end, fown, fopp)
-            result = {"win": "WIN", "lose": "LOSE", "draw": "DRAW"}.get(battle.get("result"), "0:00")
-            out.append(text(9, win_end, disp_end, right, meta_y, 6, meta_fs, result))
-
-        # 個人マルチのlane avatar: このBattleぶんの位置履歴を1 laneあたり1つのoverlayへ畳む
-        # (勝利タイムぶんも溜め終わってからなので、hold中も正しい位置に残る)。
-        if use_real_avatars:
-            for i, entries in lane_tracks.items():
-                rep = lane_reps.get(i)
-                if rep and entries:
-                    add_avatar_spec(rep, 0, win_start, disp_end, xexpr=_step_xexpr(entries))
+            out.append(text(9, win_end, disp_end, clock_tx, meta_cy, 4, meta_fs, "0:00"))
+            result = {"win": "WIN", "lose": "LOSE", "draw": "DRAW"}.get(battle.get("result"))
+            if result:
+                res_pw = pill_w(result)
+                pill(8, win_end, disp_end, left + pad, res_pw)
+                out.append(text(9, win_end, disp_end, left + pad + meta_h * 0.40, meta_cy, 4,
+                                meta_fs, result, color=result_c))
     return out, avatar_specs
 
 
@@ -2410,6 +2716,57 @@ def _subtitle_font(cfg: dict, height: int) -> int:
     return max(8, int(round(cfg["video_overlay_subtitle_font_size"] * height / BASE_HEIGHT)))
 
 
+def telop_style(cfg: dict) -> "telop_styles.TelopStyle":
+    """設定値からテロップpresetを引く。"""
+    return telop_styles.style_for(
+        cfg.get("video_overlay_subtitle_style") or telop_styles.DEFAULT_STYLE_VALUE)
+
+
+def telop_animate(cfg: dict) -> bool:
+    value = cfg.get("video_overlay_subtitle_animation")
+    return True if value is None else bool(value)
+
+
+def _subtitle_max_lines(cfg: dict) -> int:
+    return max(1, int(cfg.get("video_overlay_subtitle_max_lines") or SUBTITLE_MAX_LINES))
+
+
+def fontsdir_arg(path: Path) -> str:
+    """filter graphの ``fontsdir=`` へ渡せる形にしたdirectory path。
+
+    Windowsのdrive付きpathは ``C:`` の ``:`` がfilterのoption区切りに読まれる。実測では
+    **backslash 2つ**(``C\\\\:/...``)が必要で、1つだとgraph側で剥がされたあとoption parser
+    が素の ``:`` を見て `No option name near ...` で落ちる。``\\`` は ``/`` へ倒す
+    (filterの世界では ``\\`` はescape文字なので、pathの区切りに使うと壊れる)。"""
+    return str(path).replace("\\", "/").replace(":", "\\\\:")
+
+
+def ensure_telop_font(style: "telop_styles.TelopStyle") -> Optional[Path]:
+    """presetが使う同梱fontを揃える。同梱fontを使わないpresetではNoneを返す。
+
+    取得できない場合は例外を投げて焼き込みを止める。ここで代替fontへ落とすと、選んだ
+    presetと違う書体の成果物が黙って出来る(しかも再encodeしないと直せない)。"""
+    if not style.font_file:
+        return None
+    try:
+        return fonts.ensure_telop_font(style.font_file)
+    except Exception as exc:
+        logger.error(
+            "テロップ用のfont %s を用意できないため焼き込みを中止します（preset=%s）",
+            style.font_file, style.key,
+            extra={"event": "overlay.telop_font_unavailable",
+                   "ctx": {"style": style.key, "font_file": style.font_file,
+                           "font_family": style.font_family,
+                           "path": str(fonts.FONT_DIR)}},
+            exc_info=True,
+        )
+        raise RuntimeError(
+            f"テロップの書体「{style.label}」のfont({style.font_file})を用意できませんでした。"
+            "配布元へ接続できないか、配布物が変わっています。"
+            "別の書体を選ぶか、通信できる状態で再実行してください。"
+        ) from exc
+
+
 def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
                               width: int, height: int, cfg: dict,
                               wide_em: float, narrow_em: float) -> tuple[list, dict]:
@@ -2417,14 +2774,31 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
 
     segments_jsonのstart/endは転写時にmedia軸(このmp4のPTS秒)へ再map済みで、焼き込みが
     使う軸と同一なので、壁時計mapper(to_media)へ通してはならない。通すと二重変換になる。
+
+    ``wide_em``/``narrow_em`` は **テロップpresetの書体で測った** em advanceであること。
+    commentの書体の値で折り返すと、書体を変えた瞬間に折り返し位置が実物とずれる。
+
+    縁を2本持つpresetでは1つのsegmentが2行のDialogueになる(下層=外側の縁/発光, 上層=本体)。
+    診断の ``placed`` は**字幕の件数**で、ASSの行数ではない。
     """
+    style = telop_style(cfg)
+    animate = telop_animate(cfg)
+    max_lines = _subtitle_max_lines(cfg)
     fs = _subtitle_font(cfg, height)
     pct = cfg.get("video_overlay_subtitle_position_percent") or 0
     cx = width // 2
     cy = int(round(height * pct / 100.0))
     max_w = int(width * SUBTITLE_WIDTH_FRAC)
+    # 字間はglyphの送り幅に上乗せされるので、折り返しの計算にも同じだけ足す。
+    spacing_em = style.spacing_ratio
+    wide = wide_em + spacing_em
+    narrow = narrow_em + spacing_em
     upper = video_duration if video_duration is not None else float("inf")
+    # 重ね方(層の数・順序・ずらし)はtelop_stylesが決める。ここで組み立て直すと、設定画面の
+    # 見本と成果物で重なりが変わりうる。
+    cue = telop_styles.cue_layers(style, cx, cy, fs, animate=animate)
     lines: list = []
+    placed = 0
     dropped_after = 0
     truncated = 0
     for seg in segments:
@@ -2440,26 +2814,31 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
         text = _ass_escape(_strip_bidi_controls(seg["text"]))
         if not text:
             continue
-        wrapped = _wrap_text(text, fs, max_w, wide_em, narrow_em)
-        if len(wrapped) > SUBTITLE_MAX_LINES:
+        wrapped = _wrap_text(text, fs, max_w, wide, narrow)
+        if len(wrapped) > max_lines:
             truncated += 1
-            wrapped = wrapped[:SUBTITLE_MAX_LINES]
+            wrapped = wrapped[:max_lines]
         body = "\\N".join(wrapped)
-        lines.append(
-            f"Dialogue: 7,{_ass_timestamp(start)},{_ass_timestamp(end)},Subtitle,,0,0,0,,"
-            f"{{\\an5\\pos({cx},{cy})}}{body}"
-        )
+        ts = f"{_ass_timestamp(start)},{_ass_timestamp(end)}"
+        for layer, style_name, tags in cue:
+            lines.append(f"Dialogue: {layer},{ts},{style_name},,0,0,0,,{tags}{body}")
+        placed += 1
     if dropped_after or truncated:
         logger.info(
-            "subtitle layout: %d line(s) placed, %d outside the video, %d truncated to %d lines",
-            len(lines), dropped_after, truncated, SUBTITLE_MAX_LINES,
+            "字幕の配置: %d 件を配置, %d 件は動画の外, %d 件を %d 行へ切り詰め",
+            placed, dropped_after, truncated, max_lines,
             extra={"event": "overlay.subtitles_laid_out",
-                   "ctx": {"placed": len(lines), "dropped_after_end": dropped_after,
-                           "truncated": truncated, "max_lines": SUBTITLE_MAX_LINES,
-                           "font_size": fs, "position_percent": pct}},
+                   "ctx": {"placed": placed, "dropped_after_end": dropped_after,
+                           "truncated": truncated, "max_lines": max_lines,
+                           "font_size": fs, "position_percent": pct,
+                           "style": style.key, "font_family": style.font_family,
+                           "animated": animate and style.animated,
+                           "ass_lines": len(lines)}},
         )
-    return lines, {"placed": len(lines), "dropped_after_end": dropped_after,
-                   "truncated": truncated, "font_size": fs}
+    return lines, {"placed": placed, "dropped_after_end": dropped_after,
+                   "truncated": truncated, "font_size": fs, "max_lines": max_lines,
+                   "style": style.key, "font_family": style.font_family,
+                   "animated": animate and style.animated, "ass_lines": len(lines)}
 
 
 def _build_ass(events: list, started_at: float, ended_at: Optional[float], video_duration: Optional[float],
@@ -2472,13 +2851,17 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
                time_source: str = "arrival",
                debug_sink: Optional[list] = None,
                media_pts: Optional[list] = None,
-               subtitle_segments: Optional[list] = None) -> tuple[str, list, dict, Optional[dict]]:
+               subtitle_segments: Optional[list] = None,
+               telop_em: Optional[tuple] = None) -> tuple[str, list, dict, Optional[dict]]:
     comment_fs = _comment_font(cfg, height)
     icon_px = _icon_px(cfg, height)
     coin_fs = max(10, int(round(height * COIN_REF_PX / BASE_HEIGHT)))
     outline = max(1, int(round(comment_fs * 0.08)))
     subtitle_fs = _subtitle_font(cfg, height)
-    subtitle_outline = max(2, int(round(subtitle_fs * 0.10)))
+    telop = telop_style(cfg)
+    # テロップの書体はcommentと別なので、折り返しに使うem advanceも別に測ったものを使う
+    # (``telop_em``)。渡されない場合だけcommentの値で代用する。
+    telop_wide_em, telop_narrow_em = telop_em if telop_em else (wide_em, narrow_em)
     upper = video_duration if video_duration is not None else float("inf")
     # Mode A (arrival): place every timestamp through the consumer-arrival wall->pts
     # map. Mode B (server): place events by their TikTok create_time and the battle
@@ -2486,20 +2869,29 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     # clock instead of drifting with the arrival path. The battle bonus windows are
     # already source-epoch, so they map through source_to_pts in both senses.
     to_media = _make_time_mapper(anchors, started_at, ended_at, video_duration, pts_gaps, media_pts)
+    # 素材が終わった後の壁時計。mapperは補間の安全のため両端でclampするので、録画終了後に
+    # 届いたeventは全部「最終frameちょうど」へ潰れ、下のupper判定(offset > upper)を素通り
+    # して最後の1枚に積み上がる。実測(00346): 末尾7件がこれに当たり、mp4経由では
+    # 267.713333 > 267.713332 という1マイクロ秒差で偶然dropしていただけだった。
+    # 超過ぶんを足し戻して、確実に範囲外として落とす。
+    # 先頭側は対称にしない: 接続の先行ぶんだけ早く着いたcommentは冒頭に出るのが正しく、
+    # ここを落とすと本来映るcommentが消える。
+    wall_end = anchors[-1][0] if anchors and len(anchors) >= 2 else None
     source = None
     if time_source == "server":
         source = _make_source_mappers(events, anchors, started_at, ended_at, video_duration, pts_gaps, media_pts)
         if source is None:
             logger.warning(
-                "overlay Mode B requested but no live create_time to anchor on; "
-                "Mode B output is unavailable for this recording",
+                "焼き込みのMode Bが指定されましたが基準にできるliveのcreate_timeが無いため、"
+                "この録画ではMode Bの出力ができません",
                 extra={"event": "overlay.time_bridge_unavailable",
                        "ctx": {"time_source": time_source, "mode": "B",
                                **_bridge_ctx(None)}},
             )
         else:
             logger.info(
-                "overlay Mode B anchored: C=%.3f on %d/%d live events (%d backlog excluded)",
+                "焼き込みのMode Bの原点が決まりました: C=%.3f / liveのevent %d/%d 件"
+                "（backlog %d 件を除外）",
                 source["c_value"], source["n_anchor"], source["n_samples"], source["n_backlog"],
                 extra={"event": "overlay.time_bridge_resolved",
                        "ctx": {"time_source": time_source, "mode": "B",
@@ -2519,7 +2911,7 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         )
         if bonus_source is None:
             logger.warning(
-                "no live create_time to anchor bonus windows; placing them on the arrival axis",
+                "bonus窓の基準にできるliveのcreate_timeが無いため到着軸に配置します",
                 extra={"event": "overlay.time_bridge_unavailable",
                        "ctx": {"time_source": time_source, "mode": "A",
                                **_bridge_ctx(None)}},
@@ -2528,7 +2920,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
             # Mode Aでも同じ橋を建てているので、その原点Cと根拠件数をAでも構造化して残す。
             # 原点破綻はModeに依らず「全eventが動画長の外」という同じ症状で出る。
             logger.info(
-                "overlay Mode A source bridge: C=%.3f on %d/%d live events (%d backlog excluded)",
+                "焼き込みのMode Aのsource橋: C=%.3f / liveのevent %d/%d 件"
+                "（backlog %d 件を除外）",
                 bonus_source["c_value"], bonus_source["n_anchor"],
                 bonus_source["n_samples"], bonus_source["n_backlog"],
                 extra={"event": "overlay.time_bridge_resolved",
@@ -2550,7 +2943,11 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
 
     def event_offset(ev) -> Optional[float]:
         if time_source != "server":
-            return to_media(ev["time"] or 0) + delay
+            t = ev["time"] or 0
+            offset = to_media(t) + delay
+            if wall_end is not None and t > wall_end:
+                offset += t - wall_end
+            return offset
         if source is None:
             return None
         ct = ev.get("create_time")
@@ -2688,7 +3085,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     subtitle_stats = {"placed": 0, "dropped_after_end": 0, "truncated": 0, "font_size": 0}
     if cfg.get("video_overlay_subtitles") and subtitle_segments:
         subtitle_lines, subtitle_stats = _build_subtitle_dialogues(
-            subtitle_segments, video_duration, width, height, cfg, wide_em, narrow_em)
+            subtitle_segments, video_duration, width, height, cfg,
+            telop_wide_em, telop_narrow_em)
 
     gift_lines, overlays = _build_gift_layout(
         gifts, width, height, coin_fs, icon_px, cfg["video_overlay_gift_seconds"], wide_em, narrow_em,
@@ -2728,10 +3126,10 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         # font size, colour and position for each shape/number/avatar.
         f"Style: Score,{COMMENT_FONT},20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,"
         f"100,100,0,0,1,2,0,7,0,0,0,1\n"
-        # STT字幕: 中央揃え・太めの縁取り。映像の明暗に関わらず読めるよう、Commentより
-        # 強い輪郭と影を付ける(位置は行ごとの\posで与える)。
-        f"Style: Subtitle,{COMMENT_FONT},{subtitle_fs},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,"
-        f"100,100,0,0,1,{subtitle_outline},1,5,0,0,0,1\n\n"
+        # STT字幕(テロップ): 書体・色・縁・影はpresetが決める(telop_styles)。位置は行ごとの
+        # \posで与えるので、ここは中央揃え(Alignment 5)固定。
+        + "\n".join(telop_styles.style_lines(telop, subtitle_fs))
+        + "\n\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
     )
@@ -2743,7 +3141,8 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
         "gifts": len(gift_lines),
         "score": len(score_lines),
         "bonus": len(bonus_lines),
-        "subtitles": len(subtitle_lines),
+        # 字幕は縁の重ねで1件が2行になり得るので、件数はASSの行数ではなくplacedで数える。
+        "subtitles": subtitle_stats["placed"],
         "subtitle_diag": subtitle_stats,
         "icons": len(overlays),
         "dropped_icons": dropped_icons,
@@ -2825,7 +3224,7 @@ async def _load_gift_map() -> dict:
                 if name:
                     by_name[name] = (gid, url)
         except Exception:
-            logger.warning("gift list fetch for icon auto-resolve failed", exc_info=True)
+            logger.warning("icon自動解決のためのgift listを取得できませんでした", exc_info=True)
         _gift_map_cache = {"by_id": by_id, "by_name": by_name}
         return _gift_map_cache
 
@@ -2846,7 +3245,7 @@ def _load_name_index(cache_dir: Path) -> dict:
         if path.is_file():
             index = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        logger.warning("gift name index read failed: %s", path, exc_info=True)
+        logger.warning("giftの名前indexを読めませんでした: %s", path, exc_info=True)
     _name_index_cache[key] = index
     return index
 
@@ -2947,7 +3346,7 @@ async def _resolve_emotes(shaper: Optional["_CommentShaper"], cache_dir: Path,
                 await loop.run_in_executor(None, _download, url, dest)
             img = await loop.run_in_executor(None, _load_emote_image, dest)
         except (OSError, ValueError):
-            logger.warning("emote download/decode failed (id=%s): %s", eid, url, exc_info=True)
+            logger.warning("emoteの取得か復号に失敗しました（id=%s）: %s", eid, url, exc_info=True)
             dest.unlink(missing_ok=True)
         if img is not None:
             for s in sents:
@@ -3007,7 +3406,7 @@ async def _resolve_icons(overlays: list, cache_dir: Path,
             if dest.stat().st_size > 0:
                 spec["file"] = dest
         except (OSError, ValueError):
-            logger.warning("gift icon download failed (id=%s): %s", gid, url, exc_info=True)
+            logger.warning("gift iconの取得に失敗しました（id=%s）: %s", gid, url, exc_info=True)
             dest.unlink(missing_ok=True)
     return [s for s in overlays if s.get("file")]
 
@@ -3064,7 +3463,7 @@ async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_
                     if dl.stat().st_size > 0:
                         src_img = dl
                 except (OSError, ValueError):
-                    logger.warning("score avatar download failed: %s", spec.get("url"), exc_info=True)
+                    logger.warning("得点表示のavatarの取得に失敗しました: %s", spec.get("url"), exc_info=True)
                     dl.unlink(missing_ok=True)
         if src_img is None:
             done[memo_key] = None
@@ -3078,7 +3477,7 @@ async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_
             try:
                 await loop.run_in_executor(None, _save_png, im, png)
             except OSError:
-                logger.warning("score avatar render failed: %s", png, exc_info=True)
+                logger.warning("得点表示のavatarの描画に失敗しました: %s", png, exc_info=True)
                 done[memo_key] = None
                 continue
         done[memo_key] = png
@@ -3096,6 +3495,17 @@ async def _resolve_score_avatars(specs: list, avatar_dir: Optional[Path], cache_
 
 def comment_layer_fps_cap() -> float:
     return config.get_overlay_layer_fps_cap()
+
+
+def _layer_save_workers() -> int:
+    """comment層のframe書き出しworker数。設定0(既定)はCPU数からの自動値。
+
+    上限8: PNG encodeのthread並列は8本あたりでdisk書き込みとGIL外区間の伸びが飽和し、
+    それ以上はrecorder等の同居processからCPUを奪うだけになる。"""
+    configured = config.get_overlay_layer_save_workers()
+    if configured > 0:
+        return configured
+    return max(2, min(8, (os.cpu_count() or 4) - 2))
 COMMENT_LAYER_SUFFIX = ".comments.mov"
 # Supersample factor for the circular avatar mask: the mask is drawn this many
 # times larger than the final avatar and downscaled, antialiasing the edge.
@@ -3119,7 +3529,7 @@ def _circle_avatar(path: Path, diameter: int):
     try:
         img = Image.open(path).convert("RGBA")
     except Exception:
-        logger.warning("avatar image decode failed: %s", path, exc_info=True)
+        logger.warning("avatarの画像を復号できませんでした: %s", path, exc_info=True)
         return None
     w, h = img.size
     side = min(w, h)
@@ -3234,7 +3644,7 @@ def _rm_frames_dir(d: Path) -> None:
                 p.unlink(missing_ok=True)
             d.rmdir()
     except OSError:
-        logger.warning("could not remove transient frames dir %s", d, exc_info=True)
+        logger.warning("一時的なframeのdir %s を削除できません", d, exc_info=True)
 
 
 def _alpha_lut(aq: int) -> bytes:
@@ -3263,7 +3673,7 @@ def _comment_layer_tiles(placements: list, avatar_files: dict, m: dict, fs: int,
     try:
         from PIL import Image  # noqa: F401  (availability check; used by the compositor)
     except ImportError:
-        logger.warning("Pillow not installed; cannot render comment layer")
+        logger.warning("Pillowが未installのためcommentの層を描画できません")
         return None
 
     avatar_d, line_h = m["avatar_d"], m["line_h"]
@@ -3377,7 +3787,8 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
                                shaper: "_CommentShaper", width: int, height: int, fps: float,
                                out_path: Path, avatar_upscale: bool = False,
                                window: Optional[tuple] = None,
-                               progress: Optional[Callable] = None) -> Optional[tuple]:
+                               progress: Optional[Callable] = None,
+                               materialise: bool = True) -> Optional[tuple]:
     """Render the comment feed as an alpha overlay video (qtrle .mov) using Pillow so
     emoji show in colour. Each comment is rasterised once to a tile and scrolled/faded
     using the same placements/timing the ASS layer would have used, so comments stay
@@ -3392,7 +3803,15 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     inside it are composited, and the produced file starts at its first frame (time 0),
     so the caller must offset the layer input by ``window[0]`` when compositing. The
     tiles and their timings are unchanged — the window narrows what is rendered, never
-    how it is placed."""
+    how it is placed.
+
+    ``materialise`` False stops after the playlist is written: the qtrle encode is left
+    to the compositing process, which runs it as a pipe (see ``_run_ffmpeg``
+    ``layer_piped``). Element 0 of the return is then the **frames dir**, not a .mov,
+    and the caller owns removing it. 全尺の層は17〜21GBになり、それを書いて読み直す時間が
+    そのままjobの尺に乗っていた — 同じencodeをpipeへ流せば、diskに落とさず合成と並走する。
+    ここで捨てているのは中間fileだけで、encodeのコマンドは materialise 経路と同一である
+    (実測: 80,145 frameの合成結果が両経路でmd5列まで一致)。"""
     tiles = _comment_layer_tiles(placements, avatar_files, m, fs, shaper, width, height,
                                  avatar_upscale, time_window=window)
     if tiles is None:
@@ -3430,7 +3849,7 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
         # ここはdisk満杯が最初に当たる2箇所のうちの1つ。pathとerrnoと空き容量が無いと、
         # 権限・path不正・ENOSPCが「layer render failed」の一行に潰れて区別できない。
         logger.error(
-            "comment layer: cannot create frames dir %s", frames_dir, exc_info=True,
+            "commentの層: frameのdir %s を作成できません", frames_dir, exc_info=True,
             extra={"event": "overlay.frames_dir_create_failed",
                    "ctx": {"path": str(frames_dir), "frames_written": 0,
                            **_oserror_ctx(exc), **_disk_ctx(frames_dir.parent)}},
@@ -3447,6 +3866,27 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     # UIへ返す進捗はlog gateとは別。logは間引いて良いが、画面の%は数十分無言にできない。
     ui_gate = IntervalGate(config.get_job_progress_min_interval_seconds())
     render_started = time.monotonic()
+    # distinct frameのcomposite+PNG書き出しはworker threadへ逃がす。PILのcompositeと
+    # PNG encode(zlib)はGILを解放するC実装なので、threadで実並列になる(3.1h録画の実測で
+    # 層renderは9分超 — その大半がこの2つ)。frame stateの走査とsignature判定(軽い)だけを
+    # 主loopに残す。tileは読み取り共有(不変)で、書き先fileはframeごとに別なので競合しない。
+    # in-flight数はsemaphoreで頭打ちにする(1枚数MBのopsが数千枚積まれるとmemoryが尽きる)。
+    workers = _layer_save_workers()
+    inflight = threading.Semaphore(workers * 2)
+    save_errors: list = []
+
+    def _save_frame(ops: list, name: str) -> None:
+        try:
+            layer = _composite_comment_frame(ops, region_x, region_w, region_h)
+            # 中間PNGはlossless固定でcompress levelだけ最速へ寄せる(見た目は不変、
+            # 変わるのは一時的なdisk占有だけ。既定level 6はここが律速になるほど遅い)。
+            layer.save(frames_dir / name, compress_level=1)
+        except Exception as exc:
+            save_errors.append(exc)
+        finally:
+            inflight.release()
+
+    pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="layer-frame")
     try:
         for f in range(first_frame, first_frame + n_frames):
             if progress is not None and ui_gate.ready():
@@ -3465,16 +3905,21 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
             sig, ops = _comment_frame_state(t, live, region_y0)
             if sig == prev_sig and entries:
                 continue  # unchanged: extends the current distinct frame's run
-            layer = _composite_comment_frame(ops, region_x, region_w, region_h)
+            inflight.acquire()
+            if save_errors:
+                # workerの失敗(実経路ではENOSPCが典型)を主loopへ運ぶ。続けても同じ失敗を
+                # 重ねるだけなので、最初の1件で打ち切る。
+                inflight.release()
+                raise save_errors[0]
             name = f"f{len(entries):07d}.png"
-            layer.save(frames_dir / name)
+            pool.submit(_save_frame, ops, name)
             # frame indexはfileの先頭を0とする相対値。窓ありでもconcatのdurationが
             # そのまま使えるようにするため、絶対frame番号は持ち込まない。
             entries.append((name, f - first_frame))
             prev_sig = sig
             if gate.ready():
                 logger.debug(
-                    "comment layer progress: %d distinct frames at %.1fs of %.1fs",
+                    "commentの層の進捗: %d 枚の異なるframe（%.1fs / %.1fs）",
                     len(entries), t, layer_end,
                     extra={"event": "overlay.comment_layer_progress_reported",
                            "ctx": {"frames_written": len(entries), "frame_index": f,
@@ -3483,17 +3928,23 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
                                    "fps": round(fps, 3),
                                    "duration_ms": int((time.monotonic() - render_started) * 1000)}},
                 )
+        # 書き出し中のframeが残ったままlist.txtへ進むと、encoderが存在しないPNGを読む。
+        pool.shutdown(wait=True)
+        if save_errors:
+            raise save_errors[0]
     except JobCancelled:
         # 展開済みpngは1配信ぶんで数GBになる。cancelでもここを掃除しないと、誰も参照しない
         # frames dirがdiskに残り続ける。
+        pool.shutdown(wait=True, cancel_futures=True)
         _rm_frames_dir(frames_dir)
         raise
     except Exception as exc:
         # disk満杯(ENOSPC)が実際に最初に当たる地点。ここでreturn Noneすると下のqtrle encode
         # には到達しないため、encode側にsignatureを置いても実経路では一度も発火しない。
         # 書けたframe数・展開済みbyte・空き容量をこの行に必ず載せる。
+        pool.shutdown(wait=True, cancel_futures=True)
         logger.error(
-            "comment layer frame render failed at frame %d of %d", f, n_frames, exc_info=True,
+            "commentの層のframeを描画できませんでした（frame %d / %d）", f, n_frames, exc_info=True,
             extra={"event": "overlay.comment_layer_frame_failed",
                    "ctx": {"path": str(frames_dir), "frames_written": len(entries),
                            "frame_index": f, "n_frames": n_frames,
@@ -3522,45 +3973,79 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
     cancel.check_cancelled()
     if progress is not None:
         progress("layer", 1.0, f"{n_frames:,}/{n_frames:,}フレーム")
+    if not materialise:
+        # 合成process側がこのdirをcwdにしてqtrleを回し、その出力を直接受け取る。
+        # frames dirはここでは消さない — 所有者は呼び出し側へ移る。
+        layer_stats = {
+            "frames_written": len(entries),
+            "n_frames": n_frames,
+            "fps": round(fps, 3),
+            "layer_duration_seconds": round(layer_end, 3),
+            "rendered_seconds": round(n_frames / fps, 3),
+            "window_start_seconds": round(first_frame / fps, 3) if window is not None else None,
+            "size_bytes": _dir_bytes(frames_dir),
+            "duration_ms": int((time.monotonic() - render_started) * 1000),
+            "piped": True,
+        }
+        logger.info(
+            "commentの層: 異なるframe %d 枚で全 %d frame を構成しました（中間fileは作らず合成へ直結）",
+            len(entries), n_frames,
+            extra={"event": "overlay.comment_layer_rendered",
+                   "ctx": {"path": str(frames_dir.resolve()), **layer_stats}},
+        )
+        return frames_dir, region_x, region_y0, layer_stats
     # Popen + register: qtrle encoding a full recording's layer runs for minutes, and an
     # unregistered process is one the cancel cannot reach — the operator would keep
     # waiting on "取り消し中…" until this finished on its own.
     layer_seconds = n_frames / fps if fps > 0 else 0.0
-    proc = subprocess.Popen(
-        ["ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-         *(["-progress", "pipe:1", "-nostats"] if progress is not None else []),
-         "-f", "concat", "-safe", "0", "-i", "list.txt",
-         "-vsync", "cfr", "-r", f"{fps:.6f}",
-         "-c:v", "qtrle", "-pix_fmt", "argb", str(out_path.resolve())],
-        cwd=str(frames_dir), stdin=subprocess.DEVNULL,
-        stdout=(subprocess.PIPE if progress is not None else None),
-    )
-    cancel.register_process(proc)
+    # この pass のstderrはこれまで親processへ素通しで、serverの下では誰も読まない場所へ
+    # 消えていた。数十GBを吐くqtrle passの警告(書き込みの失敗・timestampの異常)は、
+    # 合成後の尾切れを切り分けるときに要る。
+    log_path = out_path.with_suffix(out_path.suffix + ".ffmpeg.log")
+    log_file = open(log_path, "wb")
     try:
-        # 数十GBのqtrleを吐くこの pass も数分〜数十分かかる。worker thread内なので
-        # -progress を同thread内でそのまま読み進める(loopは塞がない)。
-        if progress is not None and proc.stdout is not None:
-            pump_progress_sync(proc.stdout, layer_seconds, progress, "layer_encode")
-        proc.wait()
+        proc = subprocess.Popen(
+            ["ffmpeg", "-nostdin", "-y", "-loglevel", config.get_ffmpeg_loglevel(),
+             *(["-progress", "pipe:1", "-nostats"] if progress is not None else []),
+             "-f", "concat", "-safe", "0", "-i", "list.txt",
+             "-vsync", "cfr", "-r", f"{fps:.6f}",
+             "-c:v", "qtrle", "-pix_fmt", "argb", str(out_path.resolve())],
+            cwd=str(frames_dir), stdin=subprocess.DEVNULL,
+            stdout=(subprocess.PIPE if progress is not None else None),
+            stderr=log_file,
+        )
+        cancel.register_process(proc)
+        try:
+            # 数十GBのqtrleを吐くこの pass も数分〜数十分かかる。worker thread内なので
+            # -progress を同thread内でそのまま読み進める(loopは塞がない)。
+            if progress is not None and proc.stdout is not None:
+                pump_progress_sync(proc.stdout, layer_seconds, progress, "layer_encode")
+            proc.wait()
+        finally:
+            cancel.forget_process(proc)
     finally:
-        cancel.forget_process(proc)
+        log_file.close()
     frames_bytes = _dir_bytes(frames_dir)
     _rm_frames_dir(frames_dir)
     if cancel.is_cancelled():
         out_path.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
         cancel.check_cancelled()
     if proc.returncode != 0 or not out_path.exists() or out_path.stat().st_size == 0:
         logger.error(
-            "comment layer encoder failed (rc=%s, output_exists=%s)",
+            "commentの層のencodeに失敗しました（rc=%s, 出力の有無=%s）",
             proc.returncode, out_path.exists(),
             extra={"event": "overlay.comment_layer_encode_failed",
                    "ctx": {"path": str(out_path.resolve()), "returncode": proc.returncode,
                            "frames_written": len(entries), "n_frames": n_frames,
                            "frames_dir_bytes": frames_bytes, "fps": round(fps, 3),
+                           "ffmpeg_log": str(log_path), "stderr_tail": _log_tail(log_path),
                            **_disk_ctx(out_path.parent)}},
         )
         out_path.unlink(missing_ok=True)
         return None
+    if not config.get_ffmpeg_log_keep_on_success():
+        log_path.unlink(missing_ok=True)
     layer_stats = {
         "frames_written": len(entries),
         "n_frames": n_frames,
@@ -3574,7 +4059,7 @@ def _render_comment_layer_sync(placements: list, avatar_files: dict, m: dict, fs
         "duration_ms": int((time.monotonic() - render_started) * 1000),
     }
     logger.info(
-        "comment layer: %d distinct frames held over %d total (sparse)", len(entries), n_frames,
+        "commentの層: 異なるframe %d 枚で全 %d frame を構成しました", len(entries), n_frames,
         extra={"event": "overlay.comment_layer_rendered",
                "ctx": {"path": str(out_path.resolve()), **layer_stats}},
     )
@@ -3585,7 +4070,8 @@ async def _render_comment_layer(placements: list, avatar_files: dict, m: dict, f
                                 shaper: "_CommentShaper", width: int, height: int, fps: float,
                                 out_path: Path, avatar_upscale: bool = False,
                                 window: Optional[tuple] = None,
-                                progress: Optional[Callable] = None) -> Optional[tuple]:
+                                progress: Optional[Callable] = None,
+                                materialise: bool = True) -> Optional[tuple]:
     """Async wrapper: the PIL/ffmpeg render is blocking, so run it off the loop.
 
     ``to_thread`` rather than ``run_in_executor``: it copies the caller's context into the
@@ -3597,13 +4083,14 @@ async def _render_comment_layer(placements: list, avatar_files: dict, m: dict, f
     return await asyncio.to_thread(
         _render_comment_layer_sync,
         placements, avatar_files, m, fs, shaper, width, height, fps, out_path, avatar_upscale,
-        window, progress,
+        window, progress, materialise,
     )
 
 
 def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_input: Optional[int] = None,
                           layer_y: int = 0, scale_to: Optional[tuple] = None,
-                          cfr_fps: Optional[float] = None) -> str:
+                          cfr_fps: Optional[float] = None,
+                          fontsdir: Optional[str] = None) -> str:
     """Build the ffmpeg filter graph: scale each unique icon once, split it into
     one stream per instance, then slide each instance in/out over its window. When
     ``scale_to`` is given, the source frame is first upscaled to that (w, h) so the
@@ -3694,7 +4181,10 @@ def _build_filter_complex(overlays: list, icon_px: int, ass_name: str, layer_inp
         cur = "[cl]"
     # ass output is the final [vout] unless score-bar avatars still composite on top.
     ass_out = "[assed]" if static_specs else "[vout]"
-    parts.append(f"{cur}ass={ass_name}{ass_out}")
+    # ``fontsdir`` はテロップの同梱fontを読ませるためのもの(escapeは fontsdir_arg)。
+    # 渡さないときはhostのfont設定だけを見る従来どおりの挙動になる。
+    ass_args = f"{ass_name}:fontsdir={fontsdir}" if fontsdir else ass_name
+    parts.append(f"{cur}ass={ass_args}{ass_out}")
     cur = ass_out
     for i, spec in enumerate(static_specs):
         label = label_queue[str(spec["file"])].pop(0)
@@ -3798,7 +4288,7 @@ async def video_encoder_name(codec: str = "auto") -> str:
         order = _AUTO_ENCODER_ORDER if codec == "auto" else _ENCODER_CANDIDATES.get(codec, ())
         for name in order:
             if await _probe_encoder(name):
-                logger.info("video overlay encoder: %s (codec=%s)", name, codec,
+                logger.info("焼き込みのencoderを決定しました: %s（codec=%s）", name, codec,
                             extra={"event": "overlay.encoder_resolved",
                                    "ctx": {"encoder": name, "codec": codec,
                                            "probed": list(order)[:list(order).index(name) + 1]}})
@@ -3808,7 +4298,7 @@ async def video_encoder_name(codec: str = "auto") -> str:
         # 利用者が選んだcodecでは出力されず、file sizeと画質が確定的に変わる(自動回復ではない)。
         # TODO: 規約上のfallback禁止に該当する。廃止は別taskで判断する。
         logger.warning(
-            "no working encoder for codec=%s; falling back to libx264", codec,
+            "codec=%s で使えるencoderが無いためlibx264に切り替えます", codec,
             extra={"event": "overlay.encoder_fallback_used",
                    "ctx": {"codec": codec, "encoder": "libx264",
                            "probed": list(order),
@@ -3824,12 +4314,41 @@ def _mapped_quality(name: str, base_quality: int) -> int:
     return max(0, min(qmax, base_quality + offset))
 
 
+_split_encode_probe: dict = {}
+
+
+def _split_encode_args(name: str) -> list:
+    """NVENCのsplit-frame encode(1 sessionをframe水平分割して複数のNVENC engineで並列に
+    encodeする)を、encoderが対応していれば有効化する。実測(00302, 1280x2560 AV1 p5):
+    302fps -> 547fps(1.81倍)、SSIM差1.4e-5・容量+1.4%で視覚上の影響は無い。RTX 40系の
+    上位(4070 Ti以上)はNVENCを2基積むが、既定(auto)はこのpresetでは分割しない。
+    optionを知らないbuildへ渡すと起動そのものが失敗するため、encoder helpを1度だけ見て
+    確認する(結果はprocess内でcache)。"""
+    cached = _split_encode_probe.get(name)
+    if cached is None:
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-h", f"encoder={name}"],
+                capture_output=True, text=True, timeout=15)
+            cached = "split_encode_mode" in (result.stdout + result.stderr)
+        except (OSError, subprocess.SubprocessError):
+            cached = False
+        _split_encode_probe[name] = cached
+        logger.info(
+            "encoder %s のsplit-frame encode対応: %s", name, "あり" if cached else "なし",
+            extra={"event": "overlay.split_encode_probed",
+                   "ctx": {"encoder": name, "supported": cached}},
+        )
+    return ["-split_encode_mode", "forced"] if cached else []
+
+
 def _encoder_args(name: str, quality: int) -> list:
     """ffmpeg encode args for the chosen encoder at the given (already codec-mapped)
     quality. Lower quality value = higher quality, larger file."""
     q = str(quality)
     if name in ("h264_nvenc", "hevc_nvenc", "av1_nvenc"):
-        return ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0"]
+        return ["-c:v", name, "-preset", "p5", "-rc", "vbr", "-cq", q, "-b:v", "0",
+                *_split_encode_args(name)]
     if name in ("h264_qsv", "hevc_qsv", "av1_qsv"):
         return ["-c:v", name, "-global_quality", q, "-preset", "slow"]
     if name in ("h264_amf", "hevc_amf", "av1_amf"):
@@ -3841,31 +4360,123 @@ def _encoder_args(name: str, quality: int) -> list:
     return ["-c:v", "libx264", "-preset", "veryfast", "-crf", q]
 
 
-async def _probe_duration_us(src: Path) -> Optional[int]:
+async def _probe_duration_us(src: Path, input_args: tuple = ()) -> Optional[int]:
     """Source duration in microseconds via ffprobe, for encode progress %.
     Returns None when ffprobe is unavailable or the duration can't be read."""
     if not ffprobe_available():
         return None
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=nokey=1:noprint_wrappers=1", str(src),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        secs = float(out.decode().strip())
-    except (ValueError, OSError):
-        logger.warning("ffprobe duration probe failed for %s", src, exc_info=True)
+        result = await ffprobe.run(ffprobe.duration_args(src, input_args))
+    except OSError:
+        logger.warning("%s の尺をffprobeで取得できませんでした", src, exc_info=True)
+        return None
+    secs = ffprobe.parse_duration(result.stdout)
+    if secs is None:
+        logger.warning("%s の尺をffprobeで取得できませんでした", src)
         return None
     return int(secs * 1_000_000) if secs > 0 else None
 
 
-async def _duration_seconds(src: Path) -> Optional[float]:
+async def _duration_seconds(src: Path, input_args: tuple = ()) -> Optional[float]:
     """Duration in seconds, or None when it could not be probed."""
-    us = await _probe_duration_us(src)
+    us = await _probe_duration_us(src, input_args)
     return us / 1_000_000 if us else None
+
+
+async def _probe_has_audio(src: Path, input_args: tuple = ()) -> Optional[bool]:
+    """``src`` に音声streamが在るか。probeできなければ**None**(不明を真偽で埋めない)。
+
+    範囲焼き込みは音声の有無が引数の組み方(input 0がCFR baseかどうか)で静かに変わるため、
+    「入力に在ったのに出力に無い」を機械で突き合わせる必要がある。無音のまま成果物を出す
+    のは、userが再生して初めて気付く種類の劣化である。"""
+    if not ffprobe_available():
+        return None
+    try:
+        result = await ffprobe.run([
+            "ffprobe", "-v", "error", *input_args, "-select_streams", "a",
+            "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(src),
+        ], timeout=ffprobe.SHORT_TIMEOUT_SECONDS)
+    except OSError:
+        logger.warning("%s の音声streamをffprobeで確認できませんでした", src, exc_info=True)
+        return None
+    if not result.ok:
+        return None
+    return bool(_first_line(result.stdout))
+
+
+async def _probe_stream_spans(path: Path) -> dict:
+    """成果物の映像/音声を **stream単位** で測る。{"video": {...}, "audio": {...}}。
+
+    ``format=duration`` では足りない。mp4のcontainer尺は最も長いtrackを名乗るので、片側の
+    trackだけが途中で終わっている成果物も「全尺ある」と答える(実測: video track 4859s /
+    audio track 12252s の成果物のcontainer尺は12252s)。判定はtrackのmdhdを直に読む。
+
+    ``duration`` が無いtrack(fragmented mp4など)のために ``nb_frames``/``time_base`` も
+    併せて拾い、尺が空の時だけframe数×frame rateで補う。probeできなければ空dictを返し、
+    「測れなかった」と「一致した」を混同させない。"""
+    if not ffprobe_available():
+        return {}
+    try:
+        result = await ffprobe.run([
+            "ffprobe", "-v", "error", "-show_entries",
+            "stream=index,codec_type,codec_name,duration,nb_frames,avg_frame_rate",
+            "-of", "json", str(path),
+        ], timeout=ffprobe.SHORT_TIMEOUT_SECONDS)
+    except OSError:
+        logger.warning("%s のstreamをffprobeで測れませんでした", path, exc_info=True,
+                       extra={"event": "overlay.stream_probe_failed",
+                              "ctx": {"path": str(path)}})
+        return {}
+    if not result.ok:
+        return {}
+    try:
+        streams = json.loads(result.stdout).get("streams") or []
+    except (ValueError, AttributeError):
+        return {}
+    spans: dict = {}
+    for s in streams:
+        kind = s.get("codec_type")
+        if kind not in ("video", "audio") or kind in spans:
+            continue  # 先頭streamだけを見る(出力は常に映像1/音声1で組んでいる)
+        try:
+            seconds = float(s.get("duration"))
+        except (TypeError, ValueError):
+            seconds = None
+        try:
+            frames = int(s.get("nb_frames"))
+        except (TypeError, ValueError):
+            frames = None
+        fps = None
+        rate = (s.get("avg_frame_rate") or "").split("/")
+        if len(rate) == 2 and rate[1] not in ("0", ""):
+            try:
+                fps = float(rate[0]) / float(rate[1])
+            except (ValueError, ZeroDivisionError):
+                fps = None
+        if seconds is None and frames and fps:
+            seconds = frames / fps
+        spans[kind] = {"seconds": seconds, "frames": frames, "fps": fps,
+                       "codec": s.get("codec_name")}
+    return spans
+
+
+def _gpu_load_ctx() -> dict:
+    """今この瞬間にGPU枠を握っている/待っているstageと、走行中の焼き込みencodeの本数。
+
+    片側streamの尾切れは同時実行(別jobのencode・STT・Up出力)との相関が疑われている。
+    後から突き合わせるには、症状を出した回そのものが「隣で何が走っていたか」を持って
+    いる必要がある。"""
+    try:
+        status = gpu_status()
+    except Exception:  # 診断のためのcontextで本処理を落とさない
+        logger.warning("GPUの実行状況を取得できませんでした", exc_info=True,
+                       extra={"event": "overlay.gpu_status_unavailable", "ctx": {}})
+        status = {}
+    with _renders_lock:
+        in_flight = sorted(_renders_in_flight)
+    return {"gpu_limit": status.get("limit"), "gpu_active": status.get("active"),
+            "gpu_waiting": status.get("waiting"),
+            "renders_in_flight": len(in_flight), "renders_running": in_flight}
 
 
 def _log_duration_check(event: str, message: str, *, fps: float,
@@ -3918,6 +4529,109 @@ def _log_duration_check(event: str, message: str, *, fps: float,
     )
 
 
+def _effective_fps(span: Optional[dict]) -> Optional[float]:
+    """実測frame数÷実測尺。名乗りのavg_frame_rateではなく、入っている物から出す。"""
+    if not span:
+        return None
+    frames, seconds = span.get("frames"), span.get("seconds")
+    if not frames or not seconds:
+        return None
+    return round(frames / seconds, 3)
+
+
+def _log_tail(log_path: Path) -> str:
+    """ffmpegのstderr log末尾。読めなければ空文字(logが無いこと自体で処理は止めない)。"""
+    try:
+        return log_path.read_text(
+            encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
+    except OSError:
+        logger.warning(
+            "ffmpeg logを読めません: %s", log_path, exc_info=True,
+            extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+        )
+        return ""
+
+
+async def _verify_output_spans(out: Path, *, expect_seconds: Optional[float],
+                               strict: bool, ctx: dict) -> bool:
+    """成果物の映像trackと音声trackが、期待尺どおりに・互いに揃って入っているかを測る。
+
+    rc=0 は成果物が正しいことを意味しない。実測で、ffmpegが成功を名乗ったまま片側の
+    trackだけ 3〜4割で終わっている出力が出ている(video 4859s / audio 12252s、逆向きの
+    video 14381s / audio 4315s)。container尺は長い側を名乗るため既存のcheckは素通りし、
+    症状はuserが再生して初めて分かる。
+
+    比較は2つ。どちらも「不足側」だけを咎める:
+    ・各trackと期待尺 — 尾切れそのもの。
+    ・映像trackと音声track — 期待尺が取れない経路でも、片側だけ短ければ必ず引っ掛かる。
+
+    戻り値は「証拠(ffmpeg log / filter graph)を片付けてよいか」。不足を見つけた回だけ
+    Falseになり、呼び出し側がlogを残す。
+
+    ``strict`` は全尺の焼き込みだけTrue。ここが最後の関門なので、不足は**検出**で
+    終わらせず例外にして成果物を名乗らせない(cacheのmetaも書かれない)。窓ありの経路は
+    Falseにする — 窓の終端は素材末尾で正当に切られるし、-ssの着地がvideo/audioで
+    非対称なぶん両trackは元々数秒ずれ得るので、同じ基準では本物の尾切れが誤検知に
+    埋もれる。測った値は同じ精度で残るので、JSONL側からは両経路を同じ目で追える。
+    """
+    spans = await _probe_stream_spans(out)
+    tolerance = config.get_overlay_output_tolerance_seconds()
+    video = (spans.get("video") or {}).get("seconds")
+    audio = (spans.get("audio") or {}).get("seconds")
+    reasons: list = []
+    if expect_seconds is not None and expect_seconds > 0:
+        for kind, seconds in (("video", video), ("audio", audio)):
+            if seconds is not None and seconds < expect_seconds - tolerance:
+                reasons.append(f"{kind} {seconds:.1f}s < 期待 {expect_seconds:.1f}s")
+    if video is not None and audio is not None and abs(video - audio) > tolerance:
+        reasons.append(f"video {video:.1f}s と audio {audio:.1f}s が不揃い")
+    payload = {
+        "video_duration_seconds": round(video, 3) if video is not None else None,
+        "audio_duration_seconds": round(audio, 3) if audio is not None else None,
+        "expect_duration_seconds": round(expect_seconds, 3) if expect_seconds else None,
+        "video_frames": (spans.get("video") or {}).get("frames"),
+        "audio_frames": (spans.get("audio") or {}).get("frames"),
+        # 尺は足りているのにframeだけ欠ける形(実測: layer 359538 に対し出力 276360)が
+        # 別にある。判定材料にできる基準がまだ無いので、値だけ残して母数を貯める。
+        "video_fps_effective": _effective_fps(spans.get("video")),
+        "av_delta_seconds": (round(video - audio, 3)
+                             if (video is not None and audio is not None) else None),
+        "tolerance_seconds": tolerance,
+        "duration_measured": bool(spans),
+        "truncated": bool(reasons),
+        "truncation_reasons": reasons,
+        "strict": strict,
+        **ctx,
+    }
+    if not spans:
+        # 測れなかったことを「合格」に化けさせない — 記録はwarningで残す。戻り値はlog/filterを
+        # 片付けてよいかだけを決めるもので、証拠が無い以上ここは片付けてよい。
+        logger.warning(
+            "%s の成果物のstreamを測れないため尾切れcheckを行えません", out.name,
+            extra={"event": "overlay.output_spans_unmeasured", "ctx": payload},
+        )
+        return True
+    if not reasons:
+        logger.info(
+            "成果物のstreamを確認しました: %s（video=%ss audio=%ss 期待=%ss）",
+            out.name, payload["video_duration_seconds"], payload["audio_duration_seconds"],
+            payload["expect_duration_seconds"],
+            extra={"event": "overlay.output_spans_checked", "ctx": payload},
+        )
+        return True
+    logger.log(
+        logging.ERROR if strict else logging.WARNING,
+        "%s の成果物が途中で終わっています（%s）", out.name, " / ".join(reasons),
+        extra={"event": "overlay.output_truncated", "ctx": payload},
+    )
+    if not strict:
+        return False
+    raise RuntimeError(
+        f"焼き込みの成果物が途中で終わっています（{' / '.join(reasons)}）。"
+        "ffmpegはrc=0を返しましたが、track単位の尺が合いません。"
+    )
+
+
 async def _probe_pts_gaps(src: Path) -> list:
     """Forward jumps in the mp4's video PTS, as [(pts_before, pts_after)] ascending.
 
@@ -3930,22 +4644,18 @@ async def _probe_pts_gaps(src: Path) -> list:
     if not ffprobe_available():
         return []
     try:
-        proc = await asyncio.create_subprocess_exec(
+        result = await ffprobe.run([
             "ffprobe", "-v", "error", "-select_streams", "v:0",
             "-show_entries", "packet=pts_time", "-of", "csv=p=0", str(src),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
+        ])
     except OSError:
-        logger.warning("ffprobe pts-gap scan failed for %s", src, exc_info=True)
+        logger.warning("%s のPTSの穴をffprobeで走査できませんでした", src, exc_info=True)
         return []
-    if proc.returncode != 0:
+    if not result.ok:
         return []
     gaps: list = []
     prev: Optional[float] = None
-    for line in out.decode("ascii", "replace").splitlines():
+    for line in result.stdout.splitlines():
         line = line.strip().rstrip(",")
         if not line:
             continue
@@ -3959,177 +4669,207 @@ async def _probe_pts_gaps(src: Path) -> list:
     return gaps
 
 
-def _prepass_encoder_args(name: str) -> list:
-    """Visually-transparent, fast encode args for the transient CFR base. It is re-encoded
-    by the main pass, so it only needs to be good enough to feed that pass (a low CQ/CRF),
-    and fast (a light preset) — the GPU encoders keep this pass off the CPU and quick.
-
-    品質は設定(get_overlay_prepass_quality)。以前はCQ16固定で、2h43mの録画で17GBに達し
-    comment layerと合わせて同時38GBを占めていた。捨て物に無劣化を求めるのは割に合わない。
-    CPU側libx264はCQと同じ数字ではCRFの方が重くなるので、2段ぶん緩めて釣り合わせる。"""
-    quality = config.get_overlay_prepass_quality()
-    if name in ("h264_nvenc", "hevc_nvenc", "av1_nvenc"):
-        return ["-c:v", name, "-preset", "p4", "-rc", "vbr", "-cq", str(quality), "-b:v", "0"]
-    if name in ("h264_qsv", "hevc_qsv", "av1_qsv"):
-        return ["-c:v", name, "-global_quality", str(quality), "-preset", "veryfast"]
-    if name in ("h264_amf", "hevc_amf", "av1_amf"):
-        return ["-c:v", name, "-rc", "cqp", "-qp_i", str(quality), "-qp_p", str(quality),
-                "-quality", "speed"]
-    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(max(0, quality - 2))]
+LAYER_PIPE_CHUNK = 1 << 20
 
 
-async def _prepass_cfr(src: Path, out: Path, scale_to: Optional[tuple], cfr_fps: float, cwd: Path,
-                       window: Optional[tuple] = None,
-                       on_progress: Optional[ProgressCb] = None) -> None:
-    """Render the scaled/CFR-normalised base to a transient near-lossless file so the
-    comment-layer overlay composites onto a real CFR stream (clean container PTS),
-    not the fps filter's in-graph output. Overlay's framesync locks to a real file but
-    drifts against the folded fps output on VFR sources — see _build_filter_complex.
-    Uses the GPU encoder when available (this base can be several GB for a long
-    recording; a CPU pass would be slow). Audio is copied through so the main pass can
-    still map it from this base.
+def _open_layer_listener() -> tuple:
+    """comment層のqtrle streamを合成へ渡すlocal TCPの受け口を開く。
 
-    ``window`` limits the base to a (start, end) media-PTS window for the burn-in
-    preview — this is where the preview's cost actually drops, since a whole-recording
-    base is the single largest intermediate. ``-ss``/``-t`` are input options (a plain
-    duration measured from the seek point, unambiguous under ``-copyts``) and
-    ``-copyts`` keeps the source's own timestamps, so the ASS/gift timeline — built for
-    the whole recording and never re-derived — still lines up with the windowed base.
-    The windowed base carries no audio: the preview is a visual check, and stream-copied
-    audio cannot be cut at an arbitrary point without shifting its start."""
-    seek: list[str] = []
-    tail: list[str] = ["-c:a", "copy"]
+    baseがpipe供給の回はstdinをbase(rawvideo)に譲る。rawvideoは拡大後で数百MB/sに達し、
+    Pythonの中継を挟むとencodeがそこで律速される(実測: asyncio relay経由で348s、OS pipe
+    直結で本来のencode-bound)。帯域の細い層(sparse qtrleで平均数MB/s)だけをthreadの
+    TCP中継で渡す。listenerは合成processの起動**前**にbind済みなので接続の競合は起きない。
+    返り値は (listener socket, 合成側が開く入力URL)。"""
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    # 合成は起動直後に接続してくる。来ない=合成が入力を開く前に死んでいるので、
+    # 待ち続けずにthreadを畳む。
+    listener.settimeout(60.0)
+    return listener, f"tcp://127.0.0.1:{listener.getsockname()[1]}"
+
+
+def _pump_layer_to_tcp(listener, stream) -> None:
+    """合成の接続をacceptし、層encoderのstdoutを流し込む(worker thread)。
+
+    合成側が先に死んだ接続断はここでは握り潰す: 失敗の報告は層encoder/合成両方のrcと
+    stderrが担い、途中で終わった出力は_verify_output_spansの関門が落とす。どの経路で
+    終わっても読み口(stream)を必ず閉じる — これが層encoderへのEPIPEになり、書き手が
+    pipeの背圧で無期限に残留するのを防ぐ。"""
+    try:
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        try:
+            with conn:
+                while True:
+                    chunk = stream.read(LAYER_PIPE_CHUNK)
+                    if not chunk:
+                        break
+                    conn.sendall(chunk)
+        except OSError:
+            pass
+    finally:
+        with contextlib.suppress(Exception):
+            stream.close()
+
+
+def _base_pipe_cmd(base_pipe: dict) -> list:
+    """CFR baseをstreamするproducer ffmpegのコマンド列。
+
+    旧pre-passと同じ入力の開き方・同じfps正規化だが、encodeせずrawvideoをnutへ包んで
+    そのまま流す。中間fileのencode/decode/数十GBの書き読みと直列の待ちが丸ごと消え、
+    劣化も1世代減る。framesyncはfile経由と同等に安定する — demuxer境界を挟むことで
+    container PTSがcleanになるためで、in-graphのfps畳み込み(v21で破綻)とは条件が違う
+    (A1実証実験: 23分の実録画でfile経由とSSIM全frame>0.93・ズレ0、尺とpacket数は完全一致)。
+
+    窓あり(preview/範囲焼き込み)は旧pre-passと同じ -itsoffset/-ss/-t/-copyts の組で、
+    絶対時刻のままのnutを流す。音声は常に載せない: pipeはffprobeできず正規化のrate probe
+    が成立しないため、音声は呼び出し側がaudio_fromで原本を別入力として開く。
+
+    **拡大(scale_to)をこちらへ寄せてはいけない。** 試して負けた(00302/23.3分の実測):
+    拡大後のrawは5.5MB/frameで、OS pipe直結でも実効約1GB/s=181fpsが上限になり、encode
+    (単体実測約300fps)がpipe律速へ落ちて214s。元解像度のraw(1.4MB/frame)を流して合成側で
+    scaleする方が速い。Pythonの中継(asyncio TCP relay)は更に遅く348s — baseは必ず
+    このstdout→合成stdinの直結で渡すこと。"""
+    cmd = ["ffmpeg", "-nostdin", "-loglevel", "error",
+           *base_pipe.get("input_args", ())]
+    window = base_pipe.get("window")
+    offset = base_pipe.get("seek_offset") or 0.0
+    vf = f"fps={base_pipe['cfr_fps']:.6f}"
     if window is not None:
         win_start, win_end = window
-        seek = ["-ss", f"{win_start:.6f}", "-t", f"{max(0.0, win_end - win_start):.6f}"]
-        tail = ["-an", "-copyts"]
-    vf: list[str] = []
-    if scale_to is not None:
-        sw, sh = scale_to
-        vf.append(f"scale={sw}:{sh}:flags=lanczos")
-    vf.append(f"fps={cfr_fps:.6f}")
-    # Prefer the H.264 GPU encoder for the transient (fastest, universally decodable);
-    # falls back to CPU libx264 only when no hardware encoder works here.
-    encoder = await video_encoder_name("h264")
-    log_path = out.with_name(out.stem + ".prepass.log")
-    log_file = open(log_path, "wb")
-    proc = None
-    # この pre-pass は4.65時間の録画で20分以上かかる。進捗を出さないと、jobは動いている
-    # のに%が据え置きになり「止まった」ようにしか見えない(実際にそう報告された)。
-    total_us = None
-    if on_progress is not None:
-        if window is not None:
-            total_us = int(max(0.0, window[1] - window[0]) * 1_000_000) or None
-        else:
-            total_us = await _probe_duration_us(src)
-    report = on_progress if total_us else None
-    try:
-        cancel.check_cancelled()
-        proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-            *(["-progress", "pipe:1", "-nostats"] if report else []),
-            *seek, "-i", str(src), "-vf", ",".join(vf),
-            *_prepass_encoder_args(encoder),
-            # faststartは付けない。moovを先頭へ移す処理はfile全体を書き直すpassで、
-            # 数十GBになるこの中間fileでは無視できない時間を食う。読むのは次のffmpegが
-            # localのfileを順に流すだけなので、先頭にmoovが在る必要が無い。
-            *tail, str(out),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=(asyncio.subprocess.PIPE if report else asyncio.subprocess.DEVNULL),
-            stderr=log_file, cwd=str(cwd),
-        )
-        cancel.register_process(proc)
-        if report:
-            # 窓ありは-copytsでsourceの絶対PTSが出るので、窓開始を引いて0起点へ戻す。
-            base_us = int(window[0] * 1_000_000) if window is not None else 0
-            await pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
-        await proc.wait()
-    finally:
-        if proc is not None:
-            cancel.forget_process(proc)
-        log_file.close()
-    if cancel.is_cancelled():
-        out.unlink(missing_ok=True)
-        log_path.unlink(missing_ok=True)
-        cancel.check_cancelled()
-    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-        tail = ""
-        try:
-            tail = log_path.read_text(
-                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
-        except OSError:
-            logger.warning(
-                "pre-pass ffmpeg log unreadable: %s", log_path, exc_info=True,
-                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
-            )
-        out.unlink(missing_ok=True)
-        logger.error(
-            "CFR base pre-pass failed for %s via %s", src.name, encoder,
-            extra={"event": "overlay.prepass_failed",
-                   "ctx": {"path": str(out.resolve()), "stem": src.stem,
-                           "encoder": encoder, "fps": round(cfr_fps, 3),
-                           "returncode": proc.returncode,
-                           "stderr_tail": tail, **_disk_ctx(out.parent)}},
-        )
-        raise RuntimeError(f"CFR正規化(pre-pass)に失敗しました（ffmpeg）。{tail}".strip())
-    log_path.unlink(missing_ok=True)
-    # baseがsourceより短ければ、この時点で映像そのものが尾切れしている。合成後に気付いても
-    # 原因がbaseかlayerか切り分けられないので、pre-pass直後に測る。
-    # 窓ありのbaseはsourceより短くて当然なので、比較対象は窓の長さにする(全尺と比べると
-    # 毎回shortfall warningになり、本物の尾切れがその中に埋もれる)。
-    expected = await _duration_seconds(src)
+        # -copyts下ではfilterが入力の絶対時刻を見る。HLS入力の先頭は0ではないので
+        # (実測1.402s)、-itsoffset でmedia軸へ寄せ、-ss へは足し戻す(-ssはitsoffsetより
+        # 前の時刻で解釈される)。詳細は hls_source.Source.media_offset。
+        if offset:
+            cmd += ["-itsoffset", f"{-offset:.6f}"]
+        # 窓の**正確な**切断は入力optionでなくfilterで行う。この実HLSではpts=N/Aの
+        # packetが混ざり、入力側-tは要求より約10%長く読む(実測: -t 699.36で773.5sまで)。
+        # filterはdecode後の実ptsを見るので、この軸ずれの影響を受けない。
+        #   ・-ss は窓開始より手前(slack)へ粗く合わせるだけ。手前から読むのは、境界を
+        #     跨いで表示中のframe(VFRのhold)をfpsに見せ、全尺renderと同じ複製で境界slotを
+        #     埋めるため。窓開始ちょうどへ正確にseekすると、そのheld frameはaccurate seek
+        #     が捨ててしまい、境界の絵が全尺と1 frameずれる。
+        #   ・-to は読み過ぎ防止の粗い上限(同じ軸ずれを持つので余白を足す)。
+        #   ・fpsのstart_timeが窓開始の格子へ頭を刻み、後段のtrimが終端を格子ちょうどで
+        #     切る(fps出力のptsは格子に乗っているのでtrim endは正確)。
+        seek_from = max(0.0, win_start - CHUNK_SEEK_SLACK_SECONDS)
+        cmd += ["-ss", f"{seek_from + offset:.6f}",
+                "-to", f"{win_end + CHUNK_SEEK_SLACK_SECONDS + offset:.6f}"]
+        # trimのendは半frame内側へ置く。fps出力のptsは格子ちょうどに乗るため、endを
+        # 格子値そのままにするとtimebase丸めの向き次第で境界frameが残り、分割encodeの
+        # 境界で1 frame重複する(実測: chunk0が+1 frame)。半frame内側なら丸めに依らず
+        # 「境界frameは次のchunkの持ち物」に確定する。
+        trim_end = win_end - 0.5 / base_pipe["cfr_fps"]
+        vf = (f"fps={base_pipe['cfr_fps']:.6f}:start_time={win_start:.6f},"
+              f"trim=end={trim_end:.6f}")
+    cmd += ["-i", str(base_pipe["src"]),
+            "-vf", vf,
+            "-an", "-c:v", "rawvideo", "-f", "nut"]
     if window is not None:
-        expected = max(0.0, window[1] - window[0])
-    _log_duration_check(
-        "overlay.prepass_completed",
-        "CFR base pre-pass done: base=%ss src=%ss (delta=%ss)",
-        fps=cfr_fps,
-        layer_seconds=None,
-        base_seconds=await _duration_seconds(out),
-        src_seconds=expected,
-        compare=("base", "src"),
-        ctx={"path": str(out.resolve()), "stem": src.stem, "encoder": encoder,
-             "window_start_seconds": round(window[0], 3) if window is not None else None,
-             "window_end_seconds": round(window[1], 3) if window is not None else None,
-             "size_bytes": out.stat().st_size},
-    )
+        cmd += ["-copyts"]
+    cmd += ["pipe:1"]
+    return cmd
 
 
 async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, out: Path, cwd: Path, quality: int,
                       codec: str = "auto", comment_layer: Optional[tuple] = None,
+                      layer_piped: bool = False, layer_fps: Optional[float] = None,
                       on_progress: Optional[ProgressCb] = None,
                       scale_to: Optional[tuple] = None,
                       cfr_fps: Optional[float] = None,
                       window: Optional[tuple] = None,
                       seek_source: bool = False,
                       layer_offset: float = 0.0,
-                      audio_normalize: Optional[dict] = None) -> None:
-    """``window`` (burn-in preview only) keeps the source's absolute timestamps via
-    ``-copyts`` and trims the output to that media-PTS window, so the filter graph — the
-    very same graph the whole-recording burn-in builds, with the same ASS and the same
-    gift ``enable=between(t,...)`` expressions — needs no rewriting. ``seek_source``
-    applies the seek to input 0; it is False when input 0 is a CFR base the pre-pass has
-    already windowed. ``layer_offset`` shifts the comment layer input (that file always
-    starts at 0) onto the window's absolute position."""
-    log_path = out.with_name(out.stem + ".ffmpeg.log")
+                      audio_normalize: Optional[dict] = None,
+                      input_args: tuple = (), seek_offset: float = 0.0,
+                      with_audio: bool = False, zero_base: bool = False,
+                      audio_from: Optional[Path] = None,
+                      audio_input_args: tuple = (), audio_seek_offset: float = 0.0,
+                      artifact_dir: Optional[Path] = None,
+                      expect_seconds: Optional[float] = None,
+                      base_pipe: Optional[dict] = None,
+                      layer_list_name: str = "list.txt",
+                      fontsdir: Optional[str] = None) -> None:
+    """``window`` keeps the source's absolute timestamps via ``-copyts`` and trims the
+    output to that media-PTS window, so the filter graph — the very same graph the
+    whole-recording burn-in builds, with the same ASS and the same gift
+    ``enable=between(t,...)`` expressions — needs no rewriting. ``seek_source``
+    applies the seek to input 0; it is False when input 0 is a piped CFR base whose
+    producer has already windowed. ``layer_offset`` shifts the comment layer input (that
+    file always starts at 0) onto the window's absolute position.
+
+    ``-copyts`` は外せない。外すとfilterの ``t`` が0起点になり、絶対時刻でkeyしている
+    overlay(giftの ``enable=between(t,...)``)が壊れる。
+
+    窓ありで足せる3つは、確認用プレビューと**成果物としての範囲焼き込み**の差である:
+
+    ``with_audio``
+        音声を出力へ通す。窓経路が無音だったのは ``-an`` が入っていたからで、
+        ``-map <n>:a?`` を足せば戻る(実HLS録画で実測)。専用の第2 inputは不要 — ただし
+        comment layerを合成する経路では input 0 が ``-an`` 付きのCFR baseなので、そこでの
+        ``-map 0:a?`` は**静かに空振りする**。その場合だけ ``audio_from`` に原本を渡し、
+        音声用の追加inputとして開く。
+    ``zero_base``
+        出力を0起点へ寄せる(``-output_ts_offset``)。これが無いと出力は絶対timestampのまま
+        で、窓開始120秒の例では両trackに121.4秒のempty editが入りNLEへ渡せない。
+        ``-avoid_negative_ts make_zero`` は不可(empty editを作り、v/aで不揃いになり、
+        audioの skip_samples side dataも落とす)。``-muxdelay 0`` は mp4 に無効
+        (mpegts/ps muxer用)。併用は劣化のみ。``-output_ts_offset`` は filter より後段の
+        mux 段で効くので、「filterは絶対軸・出力は0起点」を同時に満たせる。
+    ``artifact_dir``
+        log/filter scriptの置き場。既定(None)は出力と同じdirで、これは本出力・プレビュー
+        の現行挙動そのまま。出力を録画の外(clips dir)へ書く経路だけがsidecar dirを渡す。
+    ``expect_seconds``
+        成果物が持つべき尺。窓ありでは窓の長さが自明なので不要で、窓なしの経路だけが
+        素材の尺を渡す。ffmpegがrc=0のまま片側trackを途中で止める障害の関門
+        (``_verify_output_spans``)が、これを基準に合否を出す。
+    ``base_pipe``
+        CFR正規化したbaseをproducer ffmpegからstreamで受け取る指定(_base_pipe_cmd)。
+        指定時のinput 0はTCP loopbackのnutで、``src``/``input_args``/``seek_offset``は
+        入力としては使わず、尺probeと診断の身元にだけ使う。窓・seekはproducer側が済ませて
+        いるので ``seek_source`` はFalseで渡すこと。音声は載っていない — 音声を残す経路は
+        ``audio_from`` で原本を別入力として開く(窓なしの本出力もこれを使う)。
+    """
+    artifact_dir = artifact_dir if artifact_dir is not None else out.parent
+    log_path = artifact_dir / (out.stem + ".ffmpeg.log")
     log_file = open(log_path, "wb")
     # Compositing a comment layer on a VFR source needs a real CFR base (framesync
-    # desyncs against fps folded into the overlay graph). That base is produced by a
-    # separate pre-pass the caller runs concurrently with the comment-layer render
-    # (see _render_variant); by the time it reaches here ``src`` is already the CFR
-    # base and ``scale_to``/``cfr_fps`` are None. Gifts/ass are timestamp-driven, so
-    # without a layer the CFR normalisation stays folded into this graph via cfr_fps.
+    # desyncs against fps folded into the overlay graph). That base arrives as a
+    # demuxer-clean stream from a producer ffmpeg (``base_pipe``) running concurrently
+    # with this encode; ``cfr_fps`` is then None here. Gifts/ass are timestamp-driven,
+    # so without a layer the CFR normalisation stays folded into this graph via cfr_fps.
     win_start, win_end = window if window is not None else (0.0, 0.0)
     win_seconds = max(0.0, win_end - win_start)
-    inputs: list[str] = []
-    if window is not None:
-        # -copyts はinputのtimestampを触らせないためのoptionなので、必ず入力より前に置く。
-        # これが無いとffmpegは各入力のstart_timeを引いて0基準へ寄せてしまい、窓の内側で
-        # ASS/giftのenable式が全て外れる。
-        inputs += ["-copyts"]
-        if seek_source:
-            inputs += ["-ss", f"{win_start:.6f}", "-t", f"{win_seconds:.6f}"]
-    inputs += ["-i", str(src)]
+    layer_listener = None
+    layer_url = None
+    if base_pipe is not None:
+        # producerが窓もmedia軸寄せも拡大も済ませたnutを、このprocessのstdinへ直結で
+        # 流す(帯域が太いのでPythonの中継を挟まない)。入力側のoptionは -copyts の維持
+        # (窓経路のみ。nutの絶対PTSを0へ寄せさせない)だけで、seek/itsoffsetは付けない。
+        inputs = (["-copyts"] if window is not None else []) + ["-f", "nut", "-i", "pipe:0"]
+        if layer_piped:
+            # stdinはbaseが使うので、層はTCP中継で渡す(_open_layer_listener)。
+            layer_listener, layer_url = _open_layer_listener()
+    else:
+        # input 0 の開き方(HLS demuxer option)。input 1以降はicon/layerのfileで、常に通常の
+        # fileなので付けない。
+        inputs = list(input_args)
+        if window is not None:
+            # -copyts はinputのtimestampを触らせないためのoptionなので、必ず入力より前に置く。
+            # これが無いとffmpegは各入力のstart_timeを引いて0基準へ寄せてしまい、窓の内側で
+            # ASS/giftのenable式が全て外れる。
+            inputs += ["-copyts"]
+            # -copyts下ではfilterが絶対時刻を見る。HLS入力をmedia軸へ寄せる(_base_pipe_cmd
+            # と同じ理由)。
+            if seek_offset:
+                inputs += ["-itsoffset", f"{-seek_offset:.6f}"]
+            if seek_source:
+                # -ss は -itsoffset より前の時刻で解釈されるので、こちらには足し戻す。
+                inputs += ["-ss", f"{win_start + seek_offset:.6f}", "-t", f"{win_seconds:.6f}"]
+        inputs += ["-i", str(src)]
     seen: list[str] = []
     for spec in overlays:
         f = str(spec["file"])
@@ -4144,42 +4884,154 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
         layer_input = 1 + len(seen)  # source is [0], gift icons follow
         if layer_offset:
             inputs += ["-itsoffset", f"{layer_offset:.6f}"]
-        inputs += ["-i", str(layer_path)]
-    filter_complex = _build_filter_complex(overlays, icon_px, ass_name, layer_input, layer_y, scale_to, cfr_fps)
+        if layer_piped:
+            # 層をdiskへ落とさず、qtrle encodeの出力をそのままこのprocessへ流す
+            # (``layer_path`` は .mov ではなく展開済みframeのdir)。encodeのコマンドは
+            # materialise経路と1文字も変わらないので、届くframeは同一である。
+            # 中間物17〜21GBの消滅と、直列だったencodeの並走が同時に得られる。
+            # containerは fragmented mov だけが使える: nutはqtrleのcodec tagを持たず、
+            # matroskaはheaderの後でpacketを蹴り、aviは受け側がrawvideoと誤認する。
+            # 経路はbaseの供給形態で変わる: base_pipeが居ればstdinはbaseの持ち物なので
+            # 層はTCP中継、居なければ従来どおりstdin直結。
+            inputs += ["-f", "mov", "-i", layer_url if layer_url else "pipe:0"]
+        else:
+            inputs += ["-i", str(layer_path)]
+    # 音声input。追加は必ず**最後**にする: comment layerのinput番号は filter graph が
+    # 参照しているので、間に挟むとgraphと実inputがずれる。
+    audio_index = 0
+    if window is not None and with_audio and audio_from is not None:
+        audio_index = 1 + len(seen) + (1 if comment_layer is not None else 0)
+        # 窓と軸の扱いは映像側と同一にする(-copyts はglobal optionなのでこの入力にも
+        # 掛かる)。-ss は -itsoffset より前の時刻で解釈されるため足し戻す。
+        if audio_seek_offset:
+            inputs += ["-itsoffset", f"{-audio_seek_offset:.6f}"]
+        inputs += [*audio_input_args,
+                   "-ss", f"{win_start + audio_seek_offset:.6f}",
+                   "-t", f"{win_seconds:.6f}", "-i", str(audio_from)]
+    elif window is None and audio_from is not None:
+        # 窓なしでbaseがpipeの回。pipeは-anなので、音声は原本を追加inputとして開く。
+        # 各inputのstart_timeはffmpegが入力ごとに0へ寄せるため、producer側で同じ寄せ方を
+        # されたbaseと軸が揃う(旧pre-passがbaseへ音声をcopy同梱していたのと同じ関係)。
+        audio_index = 1 + len(seen) + (1 if comment_layer is not None else 0)
+        inputs += [*audio_input_args, "-i", str(audio_from)]
+    filter_complex = _build_filter_complex(overlays, icon_px, ass_name, layer_input, layer_y,
+                                           scale_to, cfr_fps, fontsdir)
     # graphはfileで渡す。gift icon 100枚超・lane avatar付きのBattle録画では graph が数十KBに
     # なり、Windowsのcommand line上限(32767字)を実測27KBまで使い切って超える。-filter_complex
     # だと超えた時点でprocess生成そのものが失敗するので、常にscript渡しにして上限から外す。
-    filter_path = out.with_name(out.stem + ".filter.txt")
+    filter_path = artifact_dir / (out.stem + ".filter.txt")
     filter_path.write_text(filter_complex, encoding="utf-8")
     vmap = "[vout]"
     encoder = await video_encoder_name(codec)
     encoder_args = _encoder_args(encoder, _mapped_quality(encoder, quality))
     # 進捗を出すにはsource長(分母)が要る。取得できた時だけ-progressを有効化する。
+    ts_args: list[str] = []
     if window is not None:
         total_us = int(win_seconds * 1_000_000) if win_seconds > 0 else None
         base_us = int(win_start * 1_000_000)
-        # 窓ありは音声を持たない(prepassの説明を参照)。尺の切り出しはinput側の-ss/-t
-        # (seek_source)かpre-passが済ませているので、output側では切らない: -copyts下の
-        # -tは出力timestampを基準に測るため、窓の開始offsetぶん早く打ち切ってしまう。
-        audio_args = ["-an"]
+        # 尺の切り出しはinput側の-ss/-t(seek_source)かbase producerが済ませているので、output側
+        # では切らない: -copyts下の出力側-tは出力timestampを基準に測るため、**窓開始が-t値
+        # 以上だと1 frameも出ず出力が完全に空になる**(実測: -ss 30 ... -t 10 で0 frame /
+        # 262 byte)。-copytsはglobal optionなので、output位置へ書いても回避できない。
+        if not with_audio:
+            # 確認用プレビューは映像の確認だけなので音声を持たない(costを尺だけへ寄せる)。
+            audio_args = ["-an"]
+        else:
+            # audio_from を開いた時はそちらから、開いていない時は input 0 から取る。
+            # 正規化の有無は窓なしの経路と同じ判断・同じ引数で通す(窓ありだけ正規化が
+            # 掛からないと、同じ設定で出した成果物の音量が経路で変わってしまう)。
+            probe_src = audio_from if audio_from is not None else src
+            probe_args = audio_input_args if audio_from is not None else input_args
+            if audio_normalize:
+                rate = await asyncio.to_thread(audio_norm.probe_sample_rate, probe_src,
+                                               tuple(probe_args))
+                audio_args = ["-map", f"{audio_index}:a?"] + audio_norm.encode_args(
+                    **audio_normalize, sample_rate=rate)
+            else:
+                audio_args = ["-map", f"{audio_index}:a?", "-c:a", "copy"]
+        if zero_base and win_start:
+            # 0起点化は -output_ts_offset のみが正解(他案の実測は上のdocstring)。渡す値は
+            # 「muxerが受け取る軸での窓開始」。この経路は入力側の -itsoffset -media_offset で
+            # 既にmedia軸へ寄せてあり container start_time はそこで吸収済みなので、窓開始の
+            # 符号反転で足りる。itsoffsetを掛けない経路では「container start_time + 相対seek」
+            # が必要で、相対値の符号反転だけでは足りない(HLS入力のcontainer start_timeは
+            # 実測1.43秒で0ではない)。
+            #
+            # 実HLS入力では、これを付けても約5msのempty editが残る(accurate seekのframe
+            # 量子化)。「完全にclean」にはならない。
+            ts_args = ["-output_ts_offset", f"{-win_start:.6f}"]
     else:
-        total_us = await _probe_duration_us(src) if on_progress else None
+        total_us = await _probe_duration_us(src, input_args) if on_progress else None
         base_us = 0
         # 正規化するときだけ音声を再encodeする。録画はVFRなのでfilterの前段に
-        # aresample=async=1が要る(audio_norm側で必ず付けている)。出力rateはinput 0の
-        # 実値へ戻す(loudnormは192kHzを出すため)。
+        # aresample=async=1が要る(audio_norm側で必ず付けている)。出力rateは実入力の
+        # 実値へ戻す(loudnormは192kHzを出すため)。probeはpipeに対して成立しないので、
+        # baseがpipeの回は音声input(audio_from=原本)を測る。
+        probe_src = audio_from if audio_from is not None else src
+        probe_args = audio_input_args if audio_from is not None else input_args
         if audio_normalize:
-            rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src)
-            audio_args = ["-map", "0:a?"] + audio_norm.encode_args(
+            rate = await asyncio.to_thread(audio_norm.probe_sample_rate, probe_src,
+                                           tuple(probe_args))
+            audio_args = ["-map", f"{audio_index}:a?"] + audio_norm.encode_args(
                 **audio_normalize, sample_rate=rate)
         else:
-            audio_args = ["-map", "0:a?", "-c:a", "copy"]
+            audio_args = ["-map", f"{audio_index}:a?", "-c:a", "copy"]
     report = on_progress if (on_progress and total_us) else None
     proc = None
+    layer_proc = None
+    layer_log = None
+    layer_pump = None
+    base_proc = None
+    base_log = None
+    layer_log_path = artifact_dir / (out.stem + ".layerpipe.log")
+    base_log_path = artifact_dir / (out.stem + ".basepipe.log")
+    # 隣で何が走っていたかは、症状を出した回そのものに残さないと後から復元できない。
+    load_at_start = _gpu_load_ctx()
+    with _renders_lock:
+        _renders_in_flight.add(out.stem)
     try:
         cancel.check_cancelled()
+        stdin_arg = asyncio.subprocess.DEVNULL
+        if base_pipe is not None:
+            # baseのproducerを合成より先に起こす。stdoutは合成のstdinへ直結する
+            # (rawvideoは数百MB/sなのでPythonの中継を挟んではいけない — 実測でencodeが
+            # 中継律速の3倍遅になった)。
+            base_log = open(base_log_path, "wb")
+            base_proc = subprocess.Popen(
+                _base_pipe_cmd(base_pipe), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=base_log)
+            cancel.register_process(base_proc)
+            stdin_arg = base_proc.stdout
+        if layer_piped:
+            layer_log = open(layer_log_path, "wb")
+            layer_proc = subprocess.Popen(
+                ["ffmpeg", "-nostdin", "-loglevel", config.get_ffmpeg_loglevel(),
+                 # 分割並列encode(chunk)は、窓ぶんへ切り出したplaylistを同じframes dirへ
+                 # 並べて名前で選ぶ(_chunk_layer_playlists)。既定は全尺のlist.txt。
+                 "-f", "concat", "-safe", "0", "-i", layer_list_name,
+                 # 層renderが実際に使ったfpsをそのまま渡す。statsのfpsは3桁に丸めた
+                 # 表示用の値で、24.9166..の録画ではgridが1本ずれる。
+                 "-vsync", "cfr", "-r", f"{layer_fps:.6f}",
+                 "-c:v", "qtrle", "-pix_fmt", "argb",
+                 "-movflags", "frag_keyframe+empty_moov", "-f", "mov", "-"],
+                cwd=str(comment_layer[0]), stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE, stderr=layer_log,
+            )
+            cancel.register_process(layer_proc)
+            if layer_listener is not None:
+                # stdinはbaseの持ち物。層はthread中継でTCPへ流す(帯域は細い)。中継が
+                # 終わる時(合成の死亡・accept timeout含む)にstdoutの読み口を閉じるので、
+                # 層encoderはEPIPEで畳まれ、残留しない。
+                layer_pump = threading.Thread(
+                    target=_pump_layer_to_tcp,
+                    args=(layer_listener, layer_proc.stdout),
+                    name=f"layer-pipe:{out.stem}", daemon=True)
+                layer_pump.start()
+            else:
+                # 合成が先に死んだときにEPIPEで畳めるよう、読み口はこのprocessでは持たない。
+                stdin_arg = layer_proc.stdout
         proc = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            "ffmpeg", "-nostdin", "-y", "-loglevel", config.get_ffmpeg_loglevel(),
             *inputs,
             "-filter_complex_script", str(filter_path),
             "-map", vmap,
@@ -4187,57 +5039,397 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
             *encoder_args,
             "-pix_fmt", "yuv420p",
             "-movflags", "+faststart",
+            *ts_args,
             *(["-progress", "pipe:1", "-nostats"] if report else []),
             str(out),
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=stdin_arg,
             stdout=asyncio.subprocess.PIPE if report else asyncio.subprocess.DEVNULL,
             stderr=log_file,
             cwd=str(cwd),
         )
         cancel.register_process(proc)
+        if base_proc is not None:
+            # 読み口はもう合成process側が持っている。ここで閉じておかないと、合成が
+            # 落ちてもpipeが開いたままになり、producerがEPIPEを受け取れず残留する。
+            base_proc.stdout.close()
+        if layer_proc is not None and layer_pump is None:
+            # stdin直結の回も同じ理由で読み口を手放す(TCP中継の回はpump threadが読む)。
+            layer_proc.stdout.close()
         if report and proc.stdout is not None:
             await pump_ffmpeg_progress(proc.stdout, total_us, report, base_us)
         await proc.wait()
+        if layer_proc is not None:
+            await asyncio.to_thread(layer_proc.wait)
+        if base_proc is not None:
+            # 正常時はEOFまで流し切ってEPIPE/自然終了で終わる。残った場合の安全網として
+            # 待ちに上限を置いてから畳む。
+            def _wait_base() -> None:
+                try:
+                    base_proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    base_proc.kill()
+                    base_proc.wait()
+            await asyncio.to_thread(_wait_base)
     finally:
+        # 正常経路では全processがwait済みでkillは空振りする。ここで畳むのは例外・cancel・
+        # 並列chunkの片側失敗でtaskごとcancelされた場合の残骸で、放置するとffmpegが
+        # diskとGPUを握ったまま残留する。
         if proc is not None:
+            with contextlib.suppress(ProcessLookupError):
+                if proc.returncode is None:
+                    proc.kill()
             cancel.forget_process(proc)
+        if layer_proc is not None:
+            if layer_proc.poll() is None:
+                layer_proc.kill()
+            cancel.forget_process(layer_proc)
+        if base_proc is not None:
+            if base_proc.poll() is None:
+                base_proc.kill()
+            cancel.forget_process(base_proc)
+        if layer_listener is not None:
+            # accept待ちのpump threadはlistenerのcloseで抜ける。
+            with contextlib.suppress(OSError):
+                layer_listener.close()
+        if layer_pump is not None:
+            layer_pump.join(timeout=5)
+        if base_log is not None:
+            base_log.close()
+        if layer_log is not None:
+            layer_log.close()
         log_file.close()
+        with _renders_lock:
+            _renders_in_flight.discard(out.stem)
     if cancel.is_cancelled():
         out.unlink(missing_ok=True)
         log_path.unlink(missing_ok=True)
+        base_log_path.unlink(missing_ok=True)
         filter_path.unlink(missing_ok=True)
         cancel.check_cancelled()
-    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
-        tail = ""
-        try:
-            tail = log_path.read_text(
-                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
-        except OSError:
-            logger.warning(
-                "burn-in ffmpeg log unreadable: %s", log_path, exc_info=True,
-                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
-            )
+    # 層やbaseをpipeで供給した回は、合成が正常終了しても供給側が途中で死んでいることが
+    # ある(その場合コメント消失や映像の尾切れを起こした成果物になる)。合成のrcだけを
+    # 見ていると素通りする。
+    layer_rc = layer_proc.returncode if layer_proc is not None else 0
+    base_rc = base_proc.returncode if base_proc is not None else 0
+    if (proc.returncode != 0 or layer_rc != 0 or base_rc != 0
+            or not out.exists() or out.stat().st_size == 0):
+        tail = _log_tail(log_path)
+        layer_tail = _log_tail(layer_log_path) if layer_proc is not None else ""
+        base_tail = _log_tail(base_log_path) if base_proc is not None else ""
         out.unlink(missing_ok=True)
         # 成果物は残らず、この呼び出しに自動回復経路も無いのでerror。ENOSPCはffmpegの
         # stderrにしか出ないため、空き容量を同じ行に併記して切り分け可能にする。
         logger.error(
-            "burn-in ffmpeg failed for %s (rc=%s)", out.name, proc.returncode,
+            "%s の焼き込みでffmpegが失敗しました（rc=%s 層の供給rc=%s baseの供給rc=%s）",
+            out.name, proc.returncode, layer_rc, base_rc,
             extra={"event": "overlay.burn_in_failed",
                    "ctx": {"path": str(out.resolve()), "stem": src.stem,
                            "returncode": proc.returncode, "encoder": encoder,
                            "quality": quality, "codec": codec,
                            "overlays": len(overlays),
                            "comment_layer_used": comment_layer is not None,
+                           "layer_piped": layer_piped,
+                           "layer_returncode": layer_rc,
+                           "layer_log": str(layer_log_path.resolve()) if layer_proc else None,
+                           "layer_stderr_tail": layer_tail,
+                           "base_piped": base_pipe is not None,
+                           "base_returncode": base_rc,
+                           "base_log": str(base_log_path.resolve()) if base_proc else None,
+                           "base_stderr_tail": base_tail,
                            "filter_chars": len(filter_complex),
+                           "ffmpeg_log": str(log_path.resolve()),
+                           "gpu_load_at_start": load_at_start,
+                           "gpu_load_at_end": _gpu_load_ctx(),
                            "stderr_tail": tail, **_disk_ctx(out.parent)}},
         )
         raise RuntimeError(f"動画へのComment/Gift焼き込みに失敗しました（ffmpeg）。{tail}".strip())
-    log_path.unlink(missing_ok=True)
+    # rc=0でも成果物が正しいとは限らない。ここを通ってから初めて成功と呼ぶ。
+    try:
+        verified = await _verify_output_spans(
+            out,
+            expect_seconds=(win_seconds if window is not None else expect_seconds),
+            strict=window is None,
+            ctx={"path": str(out.resolve()), "stem": src.stem, "encoder": encoder,
+                 "quality": quality, "codec": codec, "overlays": len(overlays),
+                 "comment_layer_used": comment_layer is not None,
+                 "windowed": window is not None,
+                 "ffmpeg_log": str(log_path.resolve()),
+                 "stderr_tail": _log_tail(log_path),
+                 "gpu_load_at_start": load_at_start,
+                 "gpu_load_at_end": _gpu_load_ctx(),
+                 **_disk_ctx(out.parent)},
+        )
+    except Exception:
+        # 尾切れの原因はwarning段のstderrにしか出ない。成功pathの掃除より証拠を優先する
+        # (filter graphも残す — 合成の組み方そのものが疑いの対象になる)。
+        out.unlink(missing_ok=True)
+        raise
+    if not verified:
+        # 窓ありで不足を見つけた回。成果物は残す(窓の終端は正当に切られ得る)が、証拠も残す。
+        return
+    if not config.get_ffmpeg_log_keep_on_success():
+        log_path.unlink(missing_ok=True)
+        layer_log_path.unlink(missing_ok=True)
+        base_log_path.unlink(missing_ok=True)
     filter_path.unlink(missing_ok=True)
 
 
+# 分割並列encodeを使う最短の録画尺。これ未満は分割の固定費(playlist生成・concat・
+# 検証の重複)の方が大きい。
+OVERLAY_CHUNK_MIN_SECONDS = 480.0
+# 窓つきbase producerが窓の手前・後ろへ余分に読む幅(秒)。手前側は境界を跨ぐVFRの
+# held frameを拾うため(これより長いholdが境界を跨ぐと、境界slotの絵が全尺renderと
+# 1 frame分だけ変わり得る)。後ろ側は入力側-toの軸ずれ(実測+10%)の吸収用の粗い上限。
+CHUNK_SEEK_SLACK_SECONDS = 5.0
+CHUNK_SUFFIX = ".chunk.mp4"
+CHUNK_AUDIO_SUFFIX = ".chunkaudio.m4a"
+
+
+def _encode_chunk_count(video_dur: Optional[float]) -> int:
+    """この録画の本encodeを何分割で走らせるか。"""
+    if video_dur is None or video_dur < OVERLAY_CHUNK_MIN_SECONDS:
+        return 1
+    return config.get_overlay_encode_chunks()
+
+
+def _chunk_bounds(video_dur: float, cfr_fps: float, chunks: int) -> list:
+    """chunk境界(秒)。必ずCFRのframe格子に整列させる — 境界が格子から外れると、隣接chunk
+    の先頭/末尾frameが重複または欠落し、concat後に1 frameの飛びとして残る。"""
+    total_frames = int(round(video_dur * cfr_fps))
+    bounds = [round(total_frames * k / chunks) / cfr_fps for k in range(chunks)]
+    # 終端は素材の実際の終わりに任せる(-tを尺+マージンで渡し、producerはEOFで止まる)。
+    bounds.append(video_dur + 2.0 / cfr_fps)
+    return bounds
+
+
+def _chunk_layer_playlists(frames_dir: Path, bounds: list) -> list:
+    """全尺のlist.txtから、各chunkの窓ぶんへ切り出したconcat playlistを作る。
+
+    層encoderに-ssで窓当てをしてはいけない: accurate seekは窓開始を跨いで表示中の
+    held frame(pts < 窓開始)を捨てるため、chunk先頭のcomment帯が次のframe変化まで
+    消える。entriesと累積時刻は手元にあるので、先頭entryのdurationを窓開始で刻んだ
+    playlistを書けば、streamは正確に窓開始のframeから始まる(境界はframe格子整列済み
+    なので刻んだdurationも格子に乗る)。戻り値はchunkごとのplaylist file名。"""
+    entries: list = []
+    cur: Optional[str] = None
+    for line in (frames_dir / "list.txt").read_text(encoding="utf-8").splitlines():
+        if line.startswith("file '"):
+            cur = line[6:-1]
+        elif line.startswith("duration ") and cur is not None:
+            entries.append((cur, float(line[len("duration "):])))
+    if not entries:
+        raise RuntimeError("commentの層のplaylistが空です。")
+    starts: list = []
+    t = 0.0
+    for _name, dur in entries:
+        starts.append(t)
+        t += dur
+    names: list = []
+    for k in range(len(bounds) - 1):
+        win_s, win_e = bounds[k], bounds[k + 1]
+        lines = ["ffconcat version 1.0"]
+        last_name: Optional[str] = None
+        idx = max(0, bisect.bisect_right(starts, win_s + 1e-9) - 1)
+        for j in range(idx, len(entries)):
+            name, dur = entries[j]
+            ent_s, ent_e = starts[j], starts[j] + dur
+            if ent_e <= win_s + 1e-9:
+                continue
+            if ent_s >= win_e - 1e-9:
+                break
+            clipped = min(ent_e, win_e) - max(ent_s, win_s)
+            lines.append(f"file '{name}'")
+            lines.append(f"duration {clipped:.9f}")
+            last_name = name
+        if last_name is None:
+            # 窓が層の総尺より後ろ(commentが早々に尽きた録画の末尾chunk)。最終frameを
+            # 窓ぶんholdする — 全尺のlistが末尾へやっている扱いと同じで、絵は透明のまま。
+            last_name = entries[-1][0]
+            lines.append(f"file '{last_name}'")
+            lines.append(f"duration {max(0.0, win_e - win_s):.9f}")
+        # concat demuxerは最後のdurationを無視するので、最終entryをもう一度並べる
+        # (全尺のlist.txtと同じ理由)。
+        lines.append(f"file '{last_name}'")
+        fname = f"list.chunk{k}.txt"
+        (frames_dir / fname).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        names.append(fname)
+    return names
+
+
+async def _encode_audio_track(src: Path, out: Path, cwd: Path,
+                              audio_normalize: Optional[dict],
+                              input_args: tuple) -> None:
+    """分割並列encode用の音声track。映像chunkと並走して1本のm4aを作り、concatの
+    mux段で結合する。正規化の有無・引数は非分割経路と同一にする(分割の有無で音量が
+    変わってはならない)。"""
+    if audio_normalize:
+        rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src, tuple(input_args))
+        audio_args = audio_norm.encode_args(**audio_normalize, sample_rate=rate)
+    else:
+        audio_args = ["-c:a", "copy"]
+    log_path = out.with_suffix(out.suffix + ".log")
+    with open(log_path, "wb") as log_file:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            *input_args, "-i", str(src), "-vn", *audio_args,
+            "-movflags", "+faststart", str(out),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+            stderr=log_file, cwd=str(cwd),
+        )
+        cancel.register_process(proc)
+        try:
+            await proc.wait()
+        finally:
+            cancel.forget_process(proc)
+    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        tail = _log_tail(log_path)
+        out.unlink(missing_ok=True)
+        raise RuntimeError(f"音声trackのencodeに失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+
+
+async def _concat_chunks(chunk_files: list, audio_path: Optional[Path], out: Path,
+                         cwd: Path, artifact_dir: Path) -> None:
+    """映像chunkをstream copyで結合し、音声trackをmuxする。再encodeは一切しない。"""
+    concat_list = artifact_dir / (out.stem + ".chunks.txt")
+    concat_list.write_text(
+        "ffconcat version 1.0\n"
+        + "".join(f"file '{p.resolve().as_posix()}'\n" for p in chunk_files),
+        encoding="utf-8")
+    log_path = artifact_dir / (out.stem + ".concat.log")
+    audio_inputs: list = []
+    audio_map: list = ["-an"]
+    if audio_path is not None:
+        audio_inputs = ["-i", str(audio_path)]
+        audio_map = ["-map", "1:a?", "-c:a", "copy"]
+    with open(log_path, "wb") as log_file:
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            "-f", "concat", "-safe", "0", "-i", str(concat_list), *audio_inputs,
+            "-map", "0:v", "-c:v", "copy", *audio_map,
+            "-movflags", "+faststart", str(out),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
+            stderr=log_file, cwd=str(cwd),
+        )
+        cancel.register_process(proc)
+        try:
+            await proc.wait()
+        finally:
+            cancel.forget_process(proc)
+    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        tail = _log_tail(log_path)
+        out.unlink(missing_ok=True)
+        raise RuntimeError(f"chunkの結合に失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+    concat_list.unlink(missing_ok=True)
+
+
+async def _run_ffmpeg_chunked(source: "hls_source.Source", renderable: list, icon_px: int,
+                              ass_name: str, out: Path, cwd: Path, quality: int, *,
+                              codec: str, comment_layer: tuple, layer_fps: float,
+                              on_progress: Optional[ProgressCb],
+                              scale_to: Optional[tuple], cfr_fps: float,
+                              audio_normalize: Optional[dict],
+                              video_dur: float, chunks: int,
+                              expect_seconds: Optional[float],
+                              fontsdir: Optional[str] = None) -> None:
+    """本encodeを時間分割してNVENCのsession並列で走らせ、stream copyで1本へ結合する。
+
+    各chunkは窓経路(_run_ffmpegのwindow)そのもので、graph・ASS・giftのenable式は
+    非分割時と1文字も変わらない(-copytsで絶対時刻のまま焼き、mux段の-output_ts_offset
+    で0起点へ寄せる)。境界はCFRのframe格子に整列させ、層は窓ぶんへ切り出したplaylistで
+    各chunkへ供給する(_chunk_layer_playlists)。音声は分割せず1本で並走encodeし、結合の
+    mux段で合流する。
+
+    既知の未解決: 先頭chunkだけ合成出力がproducerの供給(実測17,484 frame)より1 frame
+    多く、境界以降の映像が音声に対し1 frame(40ms)遅れる。timelineは完全に規則的で
+    重複ptsも無い(consumer側のどこかで1 frame増えている)。既定は分割なし
+    (get_overlay_encode_chunks=1)でこの経路は走らないが、追いかけ焼き込み(B3)が
+    多境界でこれを使う前に根治が必須(境界ごとに40msずつ累積する)。
+
+    速度の注意: NVENCの並列sessionは合計処理量を分け合うだけでwallは縮まない(実測:
+    2分割で各chunkがちょうど半速)。分割の価値は並列化ではなく増分encode(B3)にある。"""
+    frames_dir = comment_layer[0]
+    bounds = _chunk_bounds(video_dur, cfr_fps, chunks)
+    playlists = _chunk_layer_playlists(frames_dir, bounds)
+    chunk_files = [cwd / f"{out.stem}.{k}{CHUNK_SUFFIX}" for k in range(chunks)]
+    audio_path = cwd / (out.stem + CHUNK_AUDIO_SUFFIX)
+    logger.info(
+        "焼き込みの本encodeを%d分割で並列実行します: %s（境界=%s）",
+        chunks, out.name, [round(b, 3) for b in bounds[:-1]],
+        extra={"event": "overlay.chunked_encode_started",
+               "ctx": {"stem": out.stem, "chunks": chunks,
+                       "bounds": [round(b, 3) for b in bounds],
+                       "video_duration_seconds": video_dur}},
+    )
+    # 各chunkの出力位置(µs)を合算して1本の%へ畳む。個々のchunkの%をそのまま流すと
+    # chunk数ぶん往復して見える。
+    positions: dict = {}
+    total_us_all = int(video_dur * 1_000_000)
+
+    def _chunk_cb(k: int) -> Optional[ProgressCb]:
+        if on_progress is None:
+            return None
+
+        async def _cb(_pct: int, out_us: Optional[int] = None) -> None:
+            positions[k] = max(positions.get(k, 0), out_us or 0)
+            total = sum(positions.values())
+            await on_progress(min(99, int(total * 100 / total_us_all)), total)
+        return _cb
+
+    async def _one(k: int) -> None:
+        win = (bounds[k], bounds[k + 1])
+        await _run_ffmpeg(
+            source.path, renderable, icon_px, ass_name, chunk_files[k], cwd, quality,
+            codec=codec, comment_layer=comment_layer, layer_piped=True,
+            layer_fps=layer_fps, on_progress=_chunk_cb(k),
+            scale_to=scale_to, cfr_fps=None,
+            window=win, seek_source=False,
+            layer_offset=win[0],
+            input_args=tuple(source.input_args), seek_offset=0.0,
+            with_audio=False, zero_base=True,
+            artifact_dir=cwd,
+            base_pipe={"src": source.path,
+                       "input_args": tuple(source.input_args),
+                       "cfr_fps": cfr_fps, "window": win,
+                       "seek_offset": source.media_offset},
+            layer_list_name=playlists[k],
+            fontsdir=fontsdir,
+        )
+
+    tasks = [asyncio.create_task(_one(k)) for k in range(chunks)]
+    tasks.append(asyncio.create_task(_encode_audio_track(
+        source.path, audio_path, cwd, audio_normalize, tuple(source.input_args))))
+    try:
+        await asyncio.gather(*tasks)
+        await _concat_chunks(chunk_files, audio_path, out, cwd, cwd)
+        # 結合後の成果物を非分割経路と同じ関門(strict)へ通す。chunk個々の検証(窓の
+        # 緩い判定)だけでは、結合時の取りこぼしを見られない。
+        verified = await _verify_output_spans(
+            out, expect_seconds=expect_seconds, strict=True,
+            ctx={"path": str(out.resolve()), "stem": out.stem,
+                 "chunks": chunks, "chunked": True, **_disk_ctx(out.parent)},
+        )
+        if not verified:
+            raise RuntimeError("分割encodeの結合結果が想定の尺に届きませんでした。")
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(BaseException):
+                await task
+        raise
+    finally:
+        for p in chunk_files:
+            p.unlink(missing_ok=True)
+        audio_path.unlink(missing_ok=True)
+        for name in playlists:
+            (frames_dir / name).unlink(missing_ok=True)
+
+
 async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict,
-                          on_progress: Optional[ProgressCb] = None) -> None:
+                          on_progress: Optional[ProgressCb] = None,
+                          input_args: tuple = ()) -> None:
     """描く物が1つも無い録画へ音量正規化だけを掛ける。映像はstream copyなので再encodeは
     音声だけで、GPUも尺なりのencode時間も要らない。
 
@@ -4246,15 +5438,15 @@ async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict
     組み替えないこと。"""
     log_path = out.with_name(out.stem + ".ffmpeg.log")
     log_file = open(log_path, "wb")
-    total_us = await _probe_duration_us(src) if on_progress else None
+    total_us = await _probe_duration_us(src, input_args) if on_progress else None
     report = on_progress if (on_progress and total_us) else None
-    rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src)
+    rate = await asyncio.to_thread(audio_norm.probe_sample_rate, src, tuple(input_args))
     proc = None
     try:
         cancel.check_cancelled()
         proc = await asyncio.create_subprocess_exec(
             "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
-            "-i", str(src),
+            *input_args, "-i", str(src),
             "-map", "0:v:0", "-map", "0:a?",
             "-c:v", "copy",
             *audio_norm.encode_args(**audio_normalize, sample_rate=rate),
@@ -4285,12 +5477,12 @@ async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict
                 encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
         except OSError:
             logger.warning(
-                "audio-normalise ffmpeg log unreadable: %s", log_path, exc_info=True,
+                "音量の正規化のffmpeg logを読めません: %s", log_path, exc_info=True,
                 extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
             )
         out.unlink(missing_ok=True)
         logger.error(
-            "audio-normalise ffmpeg failed for %s (rc=%s)", out.name, proc.returncode,
+            "%s の音量の正規化でffmpegが失敗しました（rc=%s）", out.name, proc.returncode,
             extra={"event": "overlay.audio_normalise_failed",
                    "ctx": {"path": str(out.resolve()), "stem": src.stem,
                            "returncode": proc.returncode,
@@ -4302,7 +5494,80 @@ async def _run_audio_only(src: Path, out: Path, cwd: Path, audio_normalize: dict
     log_path.unlink(missing_ok=True)
 
 
+async def _run_remux(src: Path, out: Path, cwd: Path,
+                     on_progress: Optional[ProgressCb] = None,
+                     input_args: tuple = ()) -> None:
+    """描く物も音量正規化も無く、素通しで返せるmp4も残っていない録画を、再encodeせず
+    containerだけ詰め替えて1本のmp4にする。映像も音声もstream copyなので画質・音質は
+    bit単位で原本のまま。
+
+    finalizeの結合passと同じ ``-fflags +genpts`` / ``-avoid_negative_ts make_zero`` を
+    使う: HLSのsegmentは連番のtimestampを持たないため、これが無いとmp4のPTSが負や不連続
+    になり、playerが先頭で固まる。"""
+    log_path = out.with_name(out.stem + ".ffmpeg.log")
+    log_file = open(log_path, "wb")
+    total_us = await _probe_duration_us(src, input_args) if on_progress else None
+    report = on_progress if (on_progress and total_us) else None
+    proc = None
+    try:
+        cancel.check_cancelled()
+        proc = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-nostdin", "-y", "-loglevel", "error",
+            *input_args, "-fflags", "+genpts", "-i", str(src),
+            "-map", "0:v:0", "-map", "0:a?", "-c", "copy",
+            "-movflags", "+faststart", "-avoid_negative_ts", "make_zero",
+            *(["-progress", "pipe:1", "-nostats"] if report else []),
+            str(out),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE if report else asyncio.subprocess.DEVNULL,
+            stderr=log_file,
+            cwd=str(cwd),
+        )
+        cancel.register_process(proc)
+        if report and proc.stdout is not None:
+            await pump_ffmpeg_progress(proc.stdout, total_us, report)
+        await proc.wait()
+    finally:
+        if proc is not None:
+            cancel.forget_process(proc)
+        log_file.close()
+    if cancel.is_cancelled():
+        out.unlink(missing_ok=True)
+        log_path.unlink(missing_ok=True)
+        cancel.check_cancelled()
+    if proc.returncode != 0 or not out.exists() or out.stat().st_size == 0:
+        tail = ""
+        try:
+            tail = log_path.read_text(
+                encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
+        except OSError:
+            logger.warning(
+                "mp4化のffmpeg logを読めません: %s", log_path, exc_info=True,
+                extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
+            )
+        out.unlink(missing_ok=True)
+        logger.error(
+            "%s のmp4化でffmpegが失敗しました（rc=%s）", out.name, proc.returncode,
+            extra={"event": "overlay.remux_failed",
+                   "ctx": {"path": str(out.resolve()), "src": str(src),
+                           "returncode": proc.returncode, "stderr_tail": tail,
+                           **_disk_ctx(out.parent)}},
+        )
+        raise RuntimeError(f"mp4化に失敗しました（ffmpeg）。{tail}".strip())
+    log_path.unlink(missing_ok=True)
+
+
 DEFAULT_FPS = 30.0
+
+
+def _first_line(out: str) -> str:
+    """ffprobeの出力から最初の非空行。HLSのplaylistでは同じstreamがprogramの数だけ
+    並ぶので、1行ぶんの値を期待する呼び出しは必ずこれを通すこと。"""
+    for line in out.splitlines():
+        line = line.strip()
+        if line:
+            return line
+    return ""
 
 
 def _parse_fps(token: str) -> float:
@@ -4315,27 +5580,50 @@ def _parse_fps(token: str) -> float:
     return float(token) if token else DEFAULT_FPS
 
 
-async def _probe_dimensions(src: Path) -> tuple[int, int, float]:
+async def _probe_dimensions(src: Path, input_args: tuple = ()) -> tuple[int, int, float]:
+    """Source (width, height, fps) for sizing the render canvas.
+
+    ``stream=width,height`` は**開いた時点の解像度**しか返さない。配信は途中で解像度を
+    変えることがあり、その録画に対してここは最初の1組だけを見て全編のcanvasを決めていた:
+    同じ2解像度でも並び順が違うだけでcanvasが変わり(実測: portrait始まり720x960 /
+    landscape始まり1280x960)、切替後のframeがcanvasを埋められない。判定は録画全体を
+    keyframe単位で走査する ``recorder.probe_mp4_resolutions`` に合わせ、**現れた全解像度の
+    最大**を採る。こうすると縮小は起きても引き伸ばしは起きない。"""
     if not ffprobe_available():
         return DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_FPS
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
+        result = await ffprobe.run([
+            "ffprobe", "-v", "error", *input_args, "-select_streams", "v:0",
             "-show_entries", "stream=width,height,r_frame_rate", "-of", "csv=s=x:p=0",
             str(src),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        width, height, rate = out.decode().strip().split("x")
+        ], timeout=ffprobe.SHORT_TIMEOUT_SECONDS)
+        # HLSのplaylistを開くとffprobeは同じstreamをprogramの数だけ並べる(実測2行)。
+        # 全体をsplitすると値が6個になって落ちるので、最初の非空行だけを採る。
+        line = _first_line(result.stdout)
+        width, height, rate = line.split("x")
         fps = _parse_fps(rate)
         if not (0 < fps <= 120):
             fps = DEFAULT_FPS
-        return int(width), int(height), fps
+        return await _widest_resolution(src, int(width), int(height), input_args) + (fps,)
     except (ValueError, OSError):
-        logger.warning("ffprobe dimension probe failed for %s; using default", src, exc_info=True)
+        logger.warning("%s の解像度をffprobeで取得できないため既定値を使います", src, exc_info=True)
         return DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_FPS
+
+
+async def _widest_resolution(src: Path, opening_w: int, opening_h: int,
+                             input_args: tuple = ()) -> tuple[int, int]:
+    """その録画に現れる解像度の、幅と高さそれぞれの最大。走査できなければ開いた時の値。
+
+    幅と高さを独立に採るのは、切替でaspectまで変わる録画があるため(実測: 720x1280 と
+    432x864 と 320x640 が同じ録画に同居し、9:16 と 1:2 が混在する)。どちらか一方の組を
+    canvasにすると、もう一方は必ずはみ出すか余る。両者を包む枠にしておけば、frame側の
+    scale/padで歪みなく収まる。"""
+    from tictok.record.recorder import probe_mp4_resolutions
+
+    found = await probe_mp4_resolutions(src, tuple(input_args))
+    if not found:
+        return opening_w, opening_h
+    return max(w for w, _ in found), max(h for _, h in found)
 
 
 def _render_dimensions(src_w: int, src_h: int, min_height: int) -> tuple[int, int]:
@@ -4359,28 +5647,36 @@ def _render_dimensions(src_w: int, src_h: int, min_height: int) -> tuple[int, in
     return out_w - (out_w % 2), out_h - (out_h % 2)
 
 
-async def _probe_is_vfr(src: Path, nominal_fps: float) -> bool:
+async def _probe_is_vfr(src: Path, nominal_fps: float, input_args: tuple = (),
+                        is_hls: bool = False) -> bool:
     """True when the source is variable-frame-rate: its average frame rate is
     meaningfully below the nominal (r_frame_rate). TikTok recordings are stream-
     copied HLS, so the framerate follows the live stream and is genuinely variable.
     ffmpeg's ``overlay`` cannot keep a constant-rate comment layer time-locked to a
     VFR base (the comments drift many seconds behind), so such a source is normalised
-    to CFR in the burn-in filter graph (see ``_build_filter_complex`` ``cfr_fps``)."""
+    to CFR in the burn-in filter graph (see ``_build_filter_complex`` ``cfr_fps``).
+
+    ``is_hls`` はcurated playlistを直接読む経路(焼き込みは常にこちら)。**HLS入力では
+    ``avg_frame_rate`` を見てはいけない。** hls demuxerが名乗るのはsegmentの実測平均では
+    なくcontainerのhintで、00398の実測(283,793 packet / 12843.2s = 22.10fps)に対して
+    ``25/1`` を返す。公称(``r_frame_rate`` = 299/12 = 24.9167)より**上**の値なので下の
+    比較は必ずFalseへ倒れ、CFR base pre-passが丸ごと飛ぶ。そうなると24.917fps CFRの
+    comment層をVFRのHLSへ直接合成することになり、ffmpegはrc=0のまま片側trackを途中で
+    止める(実測4件: 00372/00391/00392/00398)。録画はlive HLSのstream copyで定義上VFR
+    なので、この経路は測らずVFRとして扱う。"""
+    if is_hls:
+        return True
     if not ffprobe_available() or nominal_fps <= 0:
         return False
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
+        result = await ffprobe.run([
+            "ffprobe", "-v", "error", *input_args, "-select_streams", "v:0",
             "-show_entries", "stream=avg_frame_rate", "-of", "default=nk=1:nw=1",
             str(src),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        avg = _parse_fps(out.decode().strip())
+        ], timeout=ffprobe.SHORT_TIMEOUT_SECONDS)
+        avg = _parse_fps(_first_line(result.stdout))
     except (ValueError, OSError):
-        logger.warning("VFR probe failed for %s", src, exc_info=True)
+        logger.warning("%s のVFRかどうかの確認に失敗しました", src, exc_info=True)
         return False
     # avg_frame_rate is 0/0 (→0) when unknown; treat as CFR to avoid a needless
     # re-encode. A >5% shortfall against nominal is a clear VFR signal.
@@ -4388,40 +5684,75 @@ async def _probe_is_vfr(src: Path, nominal_fps: float) -> bool:
 
 
 async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
-                          progress: Optional["JobProgress"] = None) -> dict:
+                          progress: Optional["JobProgress"] = None,
+                          probe_src: Optional[Path] = None,
+                          input_args: tuple = (), is_hls: bool = False) -> dict:
     """Probe everything a render needs from the source: duration, the wall->media timing
     map inputs, geometry, CFR target, font metrics and the usable subtitle segments.
 
     The burn-in and the burn-in preview both go through here, unconditionally and with
     the same arguments, so the preview cannot end up on a different timeline from the
     output it is previewing. Nothing in here is allowed to branch on "this is a preview"
-    — a preview that builds its own time map would be worse than no preview at all."""
+    — a preview that builds its own time map would be worse than no preview at all.
+
+    ``src`` は録画の身元(mp4 path)で、sidecar(timing map)の在処もここから決まる。実際に
+    ffprobeへ渡すのは ``probe_src`` で、HLS直読みではcurated playlistになる。この2つを
+    取り違えるとsidecarを引けない(あるいは別録画のを引く)ので、必ず区別すること。"""
+    probe_src = Path(probe_src) if probe_src is not None else src
+
     async def _step(frac: float, detail: str) -> None:
         if progress is not None:
             await progress.set("probe", frac, detail)
 
     await _step(0.05, "長さを取得中")
-    dur_us = await _probe_duration_us(src)
+    dur_us = await _probe_duration_us(probe_src, input_args)
     video_dur = dur_us / 1_000_000 if dur_us else None
     await _step(0.25, "時刻mapを読み込み中")
     anchors = _load_timing_anchors(src)
-    media_pts = _load_media_pts(src)
-    # media_pts(version-2 mapで2点以上)があればmapperはpts_gapsを参照しない。全packetの
-    # pts_timeをdumpするprobeは長時間録画で数十万行になるため、必要な時だけ走らせる。
-    if media_pts and len(media_pts) >= 2:
+    if is_hls:
+        # HLSを直接読むとき、filter graphが見る時刻はmedia軸そのものになる。実測(3.1時間
+        # /5,628 segmentの録画): HLS demuxerが返す format=duration は EXTINF累計と完全に
+        # 一致し(11256.381993s)、container の start_time=1.402s は -copyts を付けない限り
+        # ffmpegが0へ寄せる(filterの1枚目が pts_time:0)。末尾に見えた -1.957s のずれは
+        # 最後のkeyframe以降の残り(keyframe間隔の中央値1.96sと一致)で、drift ではない。
+        #
+        # 録画時に作った media_pts は media->**mp4のPTS** の対応で、mp4を入力にした時に
+        # しか正しくない。ここでそれを掛けると、mp4の mux inflation ぶんだけコメントを
+        # ずらすことになる。恒等の2点mapを渡して、既存の経路をそのまま恒等で通す。
+        media_pts = [(0.0, 0.0), (video_dur, video_dur)] if video_dur else None
         pts_gaps = None
     else:
-        # 全packet走査。長時間録画では数分かかるので、入る前に必ず知らせる。
-        await _step(0.35, "PTSの欠落を走査中")
-        pts_gaps = await _probe_pts_gaps(src)
+        media_pts = _load_media_pts(src)
+        # media_pts(version-2 mapで2点以上)があればmapperはpts_gapsを参照しない。全packetの
+        # pts_timeをdumpするprobeは長時間録画で数十万行になるため、必要な時だけ走らせる。
+        if media_pts and len(media_pts) >= 2:
+            pts_gaps = None
+        else:
+            # 全packet走査。長時間録画では数分かかるので、入る前に必ず知らせる。
+            await _step(0.35, "PTSの欠落を走査中")
+            pts_gaps = await _probe_pts_gaps(probe_src)
     await _step(0.75, "解像度・フレームレートを取得中")
-    src_w, src_h, fps = await _probe_dimensions(src)
+    src_w, src_h, fps = await _probe_dimensions(probe_src, input_args)
     # Render (and burn) at the upscaled resolution when the source is low-res, so the
     # overlay text/emoji are crisp; scale_to tells ffmpeg to bring the source frame up
     # to the same canvas before compositing. None when no upscale is needed.
     width, height = _render_dimensions(src_w, src_h, int(cfg["video_overlay_min_height"]))
     await _step(0.9, "フォントを測定中")
     wide_em, narrow_em = await _font_metrics()
+    # テロップは同梱fontで描くので、fontを揃えてから **その書体で** em advanceを測る。
+    # 字幕を焼かない場合は何もしない(同梱fontの取得も測定も要らない)。
+    subtitle_segments = (
+        subtitles.usable_segments(transcript.get("segments"))
+        if (cfg.get("video_overlay_subtitles") and transcript) else []
+    )
+    fontsdir: Optional[str] = None
+    telop_em = (wide_em, narrow_em)
+    if cfg.get("video_overlay_subtitles"):
+        style = telop_style(cfg)
+        loop = asyncio.get_running_loop()
+        if await loop.run_in_executor(None, ensure_telop_font, style) is not None:
+            fontsdir = fontsdir_arg(fonts.telop_font_dir(style.font_file))
+        telop_em = await _font_metrics(style.font_family, style.bold, fontsdir, "テロップ")
     return {
         "video_dur": video_dur,
         "anchors": anchors,
@@ -4437,12 +5768,13 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
         "avatar_dir": layout.avatar_pool_dir(),
         "wide_em": wide_em,
         "narrow_em": narrow_em,
+        "telop_em": telop_em,
+        # 同梱fontを読ませるdirectory(filter用にescape済み)。字幕を焼かないときはNoneで、
+        # その場合ffmpegは今までどおりhostのfontだけを見る。
+        "fontsdir": fontsdir,
         "quality": int(cfg.get("video_overlay_quality") or 21),
         "codec": codec_family(cfg.get("video_overlay_codec")),
-        "subtitle_segments": (
-            subtitles.usable_segments(transcript.get("segments"))
-            if (cfg.get("video_overlay_subtitles") and transcript) else []
-        ),
+        "subtitle_segments": subtitle_segments,
     }
 
 
@@ -4477,8 +5809,30 @@ async def ensure_overlay(
     if not ffmpeg_available():
         raise RuntimeError("ffmpegが見つかりません。焼き込みにはffmpegのinstallが必要です。")
     src = Path(src_path)
-    if not src.is_file():
+    if not hls_source.available(src):
         raise RuntimeError("録画fileが存在しません。")
+    # 焼き込みは入力を再encodeする唯一の下流なので、mp4が在っても原本の .ts を読む。
+    # mp4を経由すると「配信 -> mp4 -> 焼き込み」で再圧縮が重なる(解像度が変わった録画では
+    # 正規化のre-encodeが挟まって実際に2世代になる)。原本から1 passで焼けば1世代で済む。
+    async with hls_source.ffmpeg_source_async(src, prefer_hls=True) as source:
+        return await _ensure_overlay(src, source, started_at, ended_at, events, settings,
+                                     battles, on_progress, transcript)
+
+
+async def _ensure_overlay(
+    src: Path,
+    source: "hls_source.Source",
+    started_at: float,
+    ended_at: Optional[float],
+    events: list,
+    settings,
+    battles: Optional[list] = None,
+    on_progress: Optional[StageCb] = None,
+    transcript: Optional[dict] = None,
+) -> dict:
+    """``ensure_overlay`` の本体。``src`` は録画の身元(出力名・sidecar・cacheの鍵)で、
+    ``source`` がffmpegの実入力。この2つは別物で、HLS直読みでは ``src`` のmp4が存在
+    しないこともある。"""
     # The burned-in mp4 lands in the recordings root; the transient/cache artifacts
     # (ass, meta, comment layer, ffmpeg log) live under the per-recording .sidecars
     # dir, so create it before any write.
@@ -4494,7 +5848,8 @@ async def ensure_overlay(
     b_possible = (bool(settings.get("video_overlay_timing_compare"))
                   and len(_live_create_samples(events)) >= SOURCE_MIN_ANCHOR_SAMPLES)
     progress.span(0, 2 if b_possible else 1)
-    ctx = await _render_context(src, cfg, transcript, progress)
+    ctx = await _render_context(src, cfg, transcript, progress, probe_src=source.path,
+                                input_args=source.input_args, is_hls=source.is_hls)
     await progress.done("probe")
     video_dur = ctx["video_dur"]
     anchors, media_pts, pts_gaps = ctx["anchors"], ctx["media_pts"], ctx["pts_gaps"]
@@ -4503,7 +5858,8 @@ async def ensure_overlay(
     # 前提条件が見えている必要がある。特にtiming mapはrecorderがCFR転落時にunlinkする
     # ため、「無い」ことと「その理由の時刻」が開始行に残っていないと辿れない。
     logger.info(
-        "overlay job started for %s (events=%d window=%s..%s duration=%ss %dx%d @%.3ffps)",
+        "コメント焼き込みの処理を開始しました: %s"
+        "（event=%d 窓=%s..%s 尺=%ss %dx%d @%.3ffps）",
         src.name, len(events), started_at, ended_at, video_dur, src_w, src_h, fps,
         extra={"event": "overlay.job_started",
                "ctx": {"path": str(src.resolve()), "stem": src.stem,
@@ -4521,23 +5877,22 @@ async def ensure_overlay(
     # TikTok recordings are stream-copied HLS and thus variable-frame-rate. ffmpeg's
     # overlay filter cannot keep the constant-rate comment layer time-locked to a VFR
     # base — comments end up many seconds behind the footage — so the base is normalised
-    # to CFR. This is folded into the burn-in filter graph (see _build_filter_complex)
-    # rather than run as a separate full re-encode pass, so the video body is encoded
-    # once instead of twice. cfr_fps is None for an already-CFR source (no resample).
+    # to CFR: with a comment layer it is streamed in as a piped CFR base (see
+    # _base_pipe_cmd), without one it is folded into the burn-in filter graph
+    # (_build_filter_complex). cfr_fps is None for an already-CFR source (no resample).
     # Cap the CFR target: the nominal rate is HLS padding (see CFR_FPS_CAP), so a
     # 50/60fps VFR source normalises to 30 — halving the frames every downstream pass
     # touches — while a source already at or below the cap keeps its own rate.
-    cfr_fps = min(fps, CFR_FPS_CAP) if await _probe_is_vfr(src, fps) else None
-    if cfr_fps is None:
-        # 既にCFRならbase pre-passは走らない。重みに残すと全体%がその分だけ頭打ちになる。
-        progress.disable("base")
+    cfr_fps = min(fps, CFR_FPS_CAP) if await _probe_is_vfr(
+        source.path, fps, source.input_args, source.is_hls) else None
     if cfr_fps is not None:
-        logger.info("overlay: normalising VFR source (nominal %.3ffps) to CFR %.3ffps for %s",
+        logger.info("焼き込み: VFRの入力（公称 %.3ffps）をCFR %.3ffps へ揃えます: %s",
                     fps, cfr_fps, src.name,
                     extra={"event": "overlay.cfr_normalisation_planned",
                            "ctx": {"stem": src.stem, "src_fps": fps, "fps": cfr_fps}})
     avatar_dir = ctx["avatar_dir"]
     wide_em, narrow_em = ctx["wide_em"], ctx["narrow_em"]
+    telop_em = ctx["telop_em"]
     quality, codec = ctx["quality"], ctx["codec"]
     subtitle_segments = ctx["subtitle_segments"]
 
@@ -4569,7 +5924,7 @@ async def ensure_overlay(
         ass_text, overlays, stats, comment_plan = _build_ass(
             events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
             wide_em, narrow_em, pts_gaps, battles, time_source=time_source, debug_sink=debug_sink,
-            media_pts=media_pts, subtitle_segments=subtitle_segments,
+            media_pts=media_pts, subtitle_segments=subtitle_segments, telop_em=telop_em,
         )
         await progress.done(
             "plan",
@@ -4590,10 +5945,10 @@ async def ensure_overlay(
             normalize = audio_norm.targets_from_cfg(cfg) if time_source == "arrival" else None
             logger.log(
                 logging.WARNING if broken else logging.INFO,
-                "overlay[%s]: nothing to draw for %s; %s "
-                "(events=%d placed=%d dropped_before=%d dropped_after=%d offsets=%s..%s of %ss)",
+                "焼き込み[%s]: %s に描くものがありません（%s）"
+                "（event=%d 配置=%d 前方drop=%d 後方drop=%d offset=%s..%s / %ss）",
                 time_source, src.name,
-                "normalising audio only" if normalize else "serving source",
+                "音量の正規化のみ実行" if normalize else "入力をそのまま提供",
                 stats["events_total"], stats["placed"],
                 stats["dropped_before_start"], stats["dropped_after_end"],
                 stats["offset_min"], stats["offset_max"], stats["video_duration_seconds"],
@@ -4604,19 +5959,34 @@ async def ensure_overlay(
             if time_source == "arrival":
                 a_drew_nothing = True
             if normalize is None:
-                out.unlink(missing_ok=True)
-                meta_path.unlink(missing_ok=True)
-                return src if time_source == "arrival" else None
+                if time_source != "arrival":
+                    out.unlink(missing_ok=True)
+                    meta_path.unlink(missing_ok=True)
+                    return None
+                if src.is_file():
+                    out.unlink(missing_ok=True)
+                    meta_path.unlink(missing_ok=True)
+                    return src
+                # 描く物も正規化も無く、素通しで返せるmp4も無い(.tsしか残っていない録画)。
+                # 「無い」を返すと焼き込みが失敗扱いになるので、再encodeせずcontainerだけ
+                # 詰め替えて1本のmp4にする。画質はbit単位で原本のままである。
+                progress.disable("assets", "layer", "layer_encode")
+                await _run_remux(source.path, out, sidecar_dir(src),
+                                 progress.cb("encode", video_dur),
+                                 input_args=source.input_args)
+                meta_path.write_text(f"{signature}\n{AUDIO_ONLY_MARK}", encoding="utf-8")
+                return out
             # 描く物は無いが音量正規化は要求されている。映像はstream copyのままで音声だけを
             # 再encodeし、履歴の出力にも正規化が掛かった状態で残す。
             # 描く物が無い経路: 残るのは音声の再encodeだけなので、層生成の段階を重みから
             # 外して、この1本で100%へ届くようにする。
-            progress.disable("assets", "layer", "layer_encode", "base")
-            await _run_audio_only(src, out, sidecar_dir(src), normalize,
-                                  progress.cb("encode", video_dur))
+            progress.disable("assets", "layer", "layer_encode")
+            await _run_audio_only(source.path, out, sidecar_dir(src), normalize,
+                                  progress.cb("encode", video_dur),
+                                  input_args=source.input_args)
             meta_path.write_text(f"{signature}\n{AUDIO_ONLY_MARK}", encoding="utf-8")
             logger.info(
-                "overlay[%s]: audio-only normalise done for %s (%d bytes)",
+                "焼き込み[%s]: %s の音量の正規化のみを完了しました（%d bytes）",
                 time_source, out.name, out.stat().st_size,
                 extra={"event": "overlay.audio_normalised",
                        "ctx": {"path": str(out.resolve()), "stem": src.stem,
@@ -4626,23 +5996,25 @@ async def ensure_overlay(
             )
             return out
 
-        # comment layer(数GB)とCFR base(数十GB)は、合成まで到達しなかった経路でも必ず
-        # 消す。pre-passのre-raiseやcancelはlayer renderの後・_run_ffmpegの前で抜けるため、
-        # _run_ffmpegのfinallyに置いたままでは回収する所有者が誰も居なくなる。
+        # comment layer(数GB)は、合成まで到達しなかった経路でも必ず消す。cancelはlayer
+        # renderの後・_run_ffmpegの前で抜けることがあるため、_run_ffmpegのfinallyに
+        # 置いたままでは回収する所有者が誰も居なくなる。
         comment_layer_path: Optional[Path] = None
-        prepass_file: Optional[Path] = None
         try:
             comment_layer = None
             comment_fallback = False
             comment_layer_path = sidecar_dir(src) / (out.stem + COMMENT_LAYER_SUFFIX)
             # ``render_src``/``main_cfr``/``main_scale`` are what the burn-in graph sees.
-            # They stay as the source unless a CFR base pre-pass runs, which swaps in the
-            # normalised base and drops the in-graph resample.
-            render_src, main_cfr, main_scale = src, cfr_fps, scale_to
+            # When the CFR base is piped in, the in-graph resample is dropped instead.
+            render_src, main_cfr, main_scale = source.path, cfr_fps, scale_to
+            render_args: tuple = tuple(source.input_args)
+            # CFR baseのstream供給(producer ffmpeg→TCP→合成)。層が実際に出来た時だけ使う。
+            base_pipe: Optional[dict] = None
+            audio_from: Optional[Path] = None
             if comment_plan is None:
-                # commentが1件も無い(ギフトだけ等)。層は作られず、CFR正規化も本graphに
-                # 畳まれてbase pre-passは走らない。3段階まとめて重みから外す。
-                progress.disable("layer", "layer_encode", "base")
+                # commentが1件も無い(ギフトだけ等)。層は作られず、CFR正規化は本graphに
+                # 畳まれる。層の2段階を重みから外す。
+                progress.disable("layer", "layer_encode")
             if comment_plan is not None:
                 # Download the custom-emote images and attach them to the shaper before the
                 # layer render draws them inline (cached by emote_id under the recording's
@@ -4651,91 +6023,72 @@ async def ensure_overlay(
                                       layout.emote_pool_dir(),
                                       _asset_step)
                 layer_fps = min(fps, comment_layer_fps_cap())
-                # Run the CFR base pre-pass (GPU) concurrently with the comment-layer
-                # render (CPU/qtrle): they are independent (both only read the source) and
-                # bound different hardware, so overlapping them roughly halves the pre-burn
-                # "preparing" wait. Started optimistically since the layer almost always
-                # renders; if it ends up unavailable the base is discarded below and the
-                # in-graph CFR path is used for the ASS fallback instead.
-                prepass_task = None
-                if cfr_fps is not None:
-                    prepass_file = sidecar_dir(src) / (out.stem + CFR_BASE_SUFFIX)
-                    # baseは**元の解像度のまま**作る。この pre-pass が担うのはCFR化だけで、
-                    # 拡大は本passのgraphでやれば足りる(framesyncが噛むのはfpsだけ)。以前は
-                    # ここで min_height(既定2560)へ引き伸ばしてから中間fileに焼いていたため、
-                    # 捨てる中間物にNVENCの時間と容量を最終尺ぶん払っていた。実測(31分の
-                    # 512x1024): 178秒/2844MB -> 33秒/666MB。
-                    prepass_task = asyncio.create_task(
-                        _prepass_cfr(src, prepass_file, None, cfr_fps, sidecar_dir(src),
-                                     on_progress=progress.cb("base", video_dur)))
                 # The comment layer streams every frame through a long-lived pipe to a
                 # qtrle encoder; under load that pipe can break transiently and yield
                 # None. Retry once before giving up, since a mono fallback must never be
                 # cached as the final result (see the meta write below).
                 layer_progress = progress.thread_cb_multi(asyncio.get_running_loop())
+                # 層のqtrleは合成processへpipeで直結する(中間fileを作らない)。encode自体は
+                # 無くなるのではなく合成と並走するので、独立した段階としては数えない。
+                progress.disable("layer_encode")
                 for attempt in range(1, 3):
                     comment_layer = await _render_comment_layer(
                         comment_plan["placements"], comment_plan["avatar_files"], comment_plan["metrics"],
                         comment_plan["comment_fs"], comment_plan["shaper"],
                         width, height, layer_fps, comment_layer_path,
                         comment_plan.get("avatar_upscale", False),
-                        progress=layer_progress,
+                        progress=layer_progress, materialise=False,
                     )
                     if comment_layer is not None:
-                        await progress.done("layer_encode")
                         break
                     logger.warning(
-                        "comment layer render produced nothing for %s (attempt %d/2)", src.name, attempt,
+                        "%s のcommentの層が何も生成しませんでした（%d 回目/2）", src.name, attempt,
                         extra={"event": "overlay.comment_layer_retried",
                                "ctx": {"stem": src.stem, "attempt": attempt,
                                        "time_source": time_source, "fps": layer_fps}},
                     )
-                if prepass_task is not None:
-                    try:
-                        await prepass_task
-                        # pumpは99%上限(100はjob完了専用)なので、そのままではこの段階が
-                        # 永久に「進行中」で残り、重みぶんの%も届かない。完了を明示する。
-                        await progress.done("base")
-                    except Exception:
-                        # The base pre-pass failed. If the layer rendered, it cannot be
-                        # composited on a VFR base without drift, so re-raise (fatal); if
-                        # the layer also failed the base is not needed anyway.
-                        prepass_file.unlink(missing_ok=True)
-                        prepass_file = None
-                        progress.disable("base")
-                        if comment_layer is not None:
-                            raise
-                if comment_layer is not None and prepass_file is not None:
-                    # Composite onto the real CFR base; the main graph no longer resamples
-                    # the frame rate. 拡大(scale_to)は本graphに残す — baseは元解像度で作って
-                    # あり、overlay/ASSは出力canvasの座標で組まれているため、合成の前に
-                    # 引き伸ばす必要がある。
-                    render_src, main_cfr, main_scale = prepass_file, None, scale_to
+                if comment_layer is not None and cfr_fps is not None:
+                    # 層をVFRのsourceへ直接合成すると framesync がずれる(v21)。CFR化した
+                    # baseをproducer ffmpegから合成のstdinへstreamし、本graphのresampleを
+                    # 外す。拡大(scale_to)は本graphに残す — producer側で拡大すると
+                    # rawの帯域がpipeの上限に当たりencodeが律速される(_base_pipe_cmd)。
+                    # baseは-anなので、音声は原本を追加inputとして開く(_run_ffmpeg)。
+                    # render_args はそのまま残す: base_pipe指定時の_run_ffmpegはinput 0に
+                    # input_argsを使わず、尺probe(ffprobe)の開き方にだけ使う。
+                    base_pipe = {"src": source.path,
+                                 "input_args": tuple(source.input_args),
+                                 "cfr_fps": cfr_fps}
+                    main_cfr = None
+                    audio_from = source.path
                 if comment_layer is not None:
                     # layerがbaseより短ければ、合成後にcommentが途中で無警告に消える
                     # (eof_action=passの設計上、ffmpegは何も言わない)。合成前に測る。
                     layer_stats = comment_layer[3]
+                    # 「層がbaseより短い」を合成の**前**に捕まえる関門。層の実体はpipe経路では
+                    # playlist、materialise経路では .mov で、測り方が違う。要素0をどちらか
+                    # 一方と決め打つと、もう片方では存在しないpathをffprobeに渡して関門が
+                    # 黙って無効化される(実際にそうなった)。baseはsourceそのもの(stream供給は
+                    # fpsを揃えるだけで尺を変えない)なので、比較相手はsourceの尺でよい。
+                    if layer_stats.get("piped"):
+                        layer_probe = (comment_layer[0] / "list.txt",
+                                       ("-f", "concat", "-safe", "0"))
+                    else:
+                        layer_probe = (comment_layer[0], ())
                     _log_duration_check(
                         "overlay.comment_layer_checked",
-                        "comment layer duration check: layer=%ss base=%ss (delta=%ss)",
+                        "commentの層の尺を確認しました: layer=%ss 素材=%ss（差=%ss）",
                         fps=layer_fps,
-                        layer_seconds=await _duration_seconds(comment_layer[0]),
-                        base_seconds=await _duration_seconds(render_src),
+                        layer_seconds=await _duration_seconds(*layer_probe),
+                        base_seconds=None,
                         src_seconds=video_dur,
-                        compare=("layer", "base"),
+                        compare=("layer", "src"),
                         n_frames=layer_stats["n_frames"],
                         ctx={"path": str(comment_layer[0].resolve()), "stem": src.stem,
                              "time_source": time_source,
                              "frames_written": layer_stats["frames_written"],
                              "size_bytes": layer_stats["size_bytes"],
-                             "base_is_prepass": prepass_file is not None},
+                             "base_piped": base_pipe is not None},
                     )
-                elif prepass_file is not None:
-                    # Layer unavailable → base unused; drop it and let the ASS path
-                    # normalise CFR in-graph via cfr_fps.
-                    prepass_file.unlink(missing_ok=True)
-                    prepass_file = None
-                    progress.disable("base")
                 if comment_layer is None:
                     # The colour-emoji layer could not be produced; rebuild the ASS with
                     # the monochrome comment feed so comments still show. This output is
@@ -4748,7 +6101,7 @@ async def ensure_overlay(
                     # 確定的に劣化する(自動回復ではない)。転落した事実と理由を必ずerrorで残す。
                     # TODO: 規約上のfallback禁止に該当する。廃止は別taskで判断する。
                     logger.warning(
-                        "comment layer unavailable for %s after retry; falling back to monochrome ASS comments",
+                        "%s は再試行後もcommentの層を作れないためASSの白黒commentへ切り替えます",
                         src.name,
                         extra={"event": "overlay.comment_layer_fallback_used",
                                "ctx": {"stem": src.stem, "time_source": time_source,
@@ -4760,7 +6113,7 @@ async def ensure_overlay(
                     ass_text, overlays, stats, _ = _build_ass(
                         events, started_at, ended_at, video_dur, width, height, cfg, anchors, avatar_dir,
                         wide_em, narrow_em, pts_gaps, battles, use_comment_layer=False, time_source=time_source,
-                        media_pts=media_pts, subtitle_segments=subtitle_segments,
+                        media_pts=media_pts, subtitle_segments=subtitle_segments, telop_em=telop_em,
                     )
 
             icon_cache = layout.gift_icon_pool_dir()
@@ -4771,18 +6124,42 @@ async def ensure_overlay(
                                                        _asset_step)
             await progress.done("assets", f"アイコン{len(renderable):,}件")
             ass_path.write_text(ass_text, encoding="utf-8")
-            await _run_ffmpeg(render_src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
-                              codec=codec, comment_layer=comment_layer,
-                              on_progress=progress.cb("encode", video_dur),
-                              scale_to=main_scale, cfr_fps=main_cfr,
-                              audio_normalize=audio_norm.targets_from_cfg(cfg))
+            # 分割並列encodeは、層とbase pipeが揃った本経路(base_pipeあり)だけに掛ける。
+            # 層なし・素通し系の経路は単発で十分に速い。
+            chunks = _encode_chunk_count(video_dur) if base_pipe is not None else 1
+            if chunks > 1:
+                await _run_ffmpeg_chunked(
+                    source, renderable, icon_px, ass_path.name, out, sidecar_dir(src),
+                    quality, codec=codec, comment_layer=comment_layer,
+                    layer_fps=layer_fps,
+                    on_progress=progress.cb("encode", video_dur),
+                    scale_to=main_scale, cfr_fps=cfr_fps,
+                    audio_normalize=audio_norm.targets_from_cfg(cfg),
+                    video_dur=video_dur, chunks=chunks, expect_seconds=video_dur,
+                    fontsdir=ctx["fontsdir"])
+            else:
+                await _run_ffmpeg(render_src, renderable, icon_px, ass_path.name, out, sidecar_dir(src), quality,
+                                  codec=codec, comment_layer=comment_layer,
+                                  layer_piped=bool(comment_layer
+                                                   and comment_layer[3].get("piped")),
+                                  layer_fps=layer_fps if comment_plan is not None else None,
+                                  on_progress=progress.cb("encode", video_dur),
+                                  scale_to=main_scale, cfr_fps=main_cfr,
+                                  audio_normalize=audio_norm.targets_from_cfg(cfg),
+                                  input_args=render_args, expect_seconds=video_dur,
+                                  base_pipe=base_pipe, audio_from=audio_from,
+                                  audio_input_args=(tuple(source.input_args)
+                                                    if audio_from is not None else ()),
+                                  fontsdir=ctx["fontsdir"])
             await progress.done("encode")
         finally:
             ass_path.unlink(missing_ok=True)
             if comment_layer_path is not None:
                 comment_layer_path.unlink(missing_ok=True)
-            if prepass_file is not None:
-                prepass_file.unlink(missing_ok=True)
+                # pipe経路では層は .mov ではなく展開済みframeのdirとして残っている。
+                # 所有権が層renderからここへ移っているので、cancelでも例外でも必ず消す。
+                _rm_frames_dir(comment_layer_path.with_name(
+                    comment_layer_path.stem + ".frames"))
         if comment_fallback:
             meta_path.unlink(missing_ok=True)
         else:
@@ -4798,14 +6175,14 @@ async def ensure_overlay(
                     encoding="utf-8",
                 )
             except OSError:
-                logger.warning("failed to write timing debug sidecar %s", debug_path, exc_info=True)
+                logger.warning("時刻の診断用sidecar %s を書けませんでした", debug_path, exc_info=True)
         placement = _placement_ctx(stats)
         drop_ratio = stats["dropped_ratio"]
         broken = drop_ratio >= config.get_log_overlay_drop_warn_ratio()
         logger.log(
             logging.WARNING if broken else logging.INFO,
-            "overlay rendered[%s]: %s (comments=%d gifts=%d score=%d icons=%d dropped_icons=%d "
-            "avatars=%d placed=%d/%d dropped_before=%d dropped_after=%d)",
+            "焼き込みの出力[%s]: %s（comment=%d gift=%d 得点=%d icon=%d icon drop=%d "
+            "avatar=%d 配置=%d/%d 前方drop=%d 後方drop=%d）",
             time_source, out.name, stats["comments"], stats["gifts"], stats["score"], len(renderable),
             stats["dropped_icons"], stats["avatars"], stats["placed"], stats["events_total"],
             stats["dropped_before_start"], stats["dropped_after_end"],
@@ -4989,24 +6366,58 @@ def _pick_preview_window(points: list, video_duration, seconds: float) -> tuple:
     return best, end
 
 
-async def _preview_plan(src: Path, settings, started_at: float, ended_at,
+def _explicit_window(window: tuple, video_duration) -> tuple:
+    """利用者が明示した窓を検証して (start, end) で返す。
+
+    IN点は**動かさない**。素材の実尺を超えた末尾だけを切り、切った結果として区間が
+    消えるなら失敗させる(黙って別の区間を焼くより、要求が素材に無いことを言う方がよい)。"""
+    try:
+        start = float(window[0])
+        end = float(window[1])
+    except (TypeError, ValueError, IndexError) as exc:
+        raise ValueError(f"焼き込み範囲の指定が不正です: {window!r}") from exc
+    if start < 0:
+        raise ValueError(f"焼き込み範囲の開始が負です: {start}")
+    if end <= start:
+        raise ValueError(f"焼き込み範囲の終了が開始以下です: {start}..{end}")
+    if video_duration:
+        if start >= video_duration:
+            raise ValueError(
+                f"焼き込み範囲の開始({start:.3f}秒)が録画の長さ({video_duration:.3f}秒)を"
+                "超えています。"
+            )
+        end = min(end, video_duration)
+    return start, end
+
+
+async def _preview_plan(src: Path, source: "hls_source.Source", settings,
+                        started_at: float, ended_at,
                         events: list, battles, transcript,
-                        seconds: float, at_seconds) -> dict:
-    """プレビュー1回ぶんの描画plan。本出力と同じ_render_context・同じ_build_assを、同じ
-    引数で通す(ここが分岐したらプレビューは嘘になる)。窓だけをこの後で決める。"""
+                        seconds: float, at_seconds,
+                        window: Optional[tuple] = None) -> dict:
+    """窓焼き込み1回ぶんの描画plan。本出力と同じ_render_context・同じ_build_assを、同じ
+    引数で通す(ここが分岐したらプレビューは嘘になる)。窓だけをこの後で決める。
+
+    ``source`` も本出力と同じ物でなければならない。片方がmp4でもう片方が .ts だと時刻軸
+    (mp4のmux inflation補正の有無)が食い違い、プレビューが本出力と別の配置を見せる。
+
+    ``window`` は利用者が明示した (start, end)。**明示窓は動かさない** — ``at_seconds``
+    の経路には「尺ぶんの確認材料を必ず確保する」ための後ろ押し戻しclampが入っているが、
+    切り抜きで同じことをすると利用者のIN点を勝手にずらすことになる。末尾だけは素材の
+    実尺で切る(存在しない区間を要求されても作れない)。"""
     if not ffmpeg_available():
         raise RuntimeError("ffmpegが見つかりません。プレビューにはffmpegのinstallが必要です。")
-    if not src.is_file():
-        raise RuntimeError("録画fileが存在しません。")
     sidecar_dir(src).mkdir(parents=True, exist_ok=True)
     cfg = overlay_settings(settings)
-    ctx = await _render_context(src, cfg, transcript)
+    ctx = await _render_context(src, cfg, transcript, probe_src=source.path,
+                                input_args=source.input_args, is_hls=source.is_hls)
     debug_sink: list = []
     ass_text, overlays, stats, comment_plan = _build_ass(
         events, started_at, ended_at, ctx["video_dur"], ctx["width"], ctx["height"], cfg,
         ctx["anchors"], ctx["avatar_dir"], ctx["wide_em"], ctx["narrow_em"], ctx["pts_gaps"],
         battles, time_source="arrival", debug_sink=debug_sink,
         media_pts=ctx["media_pts"], subtitle_segments=ctx["subtitle_segments"],
+        telop_em=ctx["telop_em"],
     )
     if (stats["comments"] == 0 and stats["gifts"] == 0 and stats["score"] == 0
             and stats["subtitles"] == 0):
@@ -5018,7 +6429,10 @@ async def _preview_plan(src: Path, settings, started_at: float, ended_at,
                                 ctx["pts_gaps"], ctx["media_pts"])
     battle_windows = _battle_media_windows(battles, to_media, ctx["video_dur"])
     points = _preview_points(debug_sink, cfg, battle_windows, ctx["video_dur"])
-    if at_seconds is None:
+    if window is not None:
+        win_start, win_end = _explicit_window(window, ctx["video_dur"])
+        auto = False
+    elif at_seconds is None:
         win_start, win_end = _pick_preview_window(points, ctx["video_dur"], seconds)
         auto = True
     else:
@@ -5029,7 +6443,7 @@ async def _preview_plan(src: Path, settings, started_at: float, ended_at,
     return {"cfg": cfg, "ctx": ctx, "ass_text": ass_text, "overlays": overlays,
             "stats": stats, "comment_plan": comment_plan, "points": points,
             "window": (win_start, win_end), "window_auto": auto,
-            "battle_windows": battle_windows}
+            "battle_windows": battle_windows, "source": source}
 
 
 def _comments_in_window(comment_plan, window: tuple) -> bool:
@@ -5060,19 +6474,29 @@ async def _preview_render_inputs(src: Path, plan: dict) -> list:
 
 
 async def _run_preview_frame(src: Path, overlays: list, ctx: dict, ass_path: Path,
-                             out_png: Path, at: float) -> None:
+                             out_png: Path, at: float,
+                             source: Optional["hls_source.Source"] = None) -> None:
     """``at`` の1 frameを、本出力と同一のfilter graphを通してpngへ書く。``-copyts``で
     sourceのtimestampを保つので、ASSのDialogueもgiftの``enable=between(t,...)``も全尺の
     ままの時刻で正しく効く(時刻を組み直さないための要)。"""
     cwd = sidecar_dir(src)
     filter_complex = _build_filter_complex(
-        overlays, ctx["icon_px"], ass_path.name, None, 0, ctx["scale_to"], None)
+        overlays, ctx["icon_px"], ass_path.name, None, 0, ctx["scale_to"], None,
+        ctx["fontsdir"])
     # graphは常にscript渡し(command line長の上限に触れないため。_run_ffmpegと同じ理由)。
     filter_path = out_png.with_name(out_png.stem + ".filter.txt")
     filter_path.write_text(filter_complex, encoding="utf-8")
     log_path = out_png.with_name(out_png.stem + ".ffmpeg.log")
     log_file = open(log_path, "wb")
-    inputs: list = ["-copyts", "-ss", f"{at:.6f}", "-i", str(src)]
+    in_path = source.path if source is not None else src
+    in_args = list(source.input_args) if source is not None else []
+    # -copyts下ではfilterが絶対時刻を見るので、HLS入力はmedia軸へ寄せる。-ss は
+    # -itsoffset より前の時刻で解釈されるため、そちらへは足し戻す(_base_pipe_cmdと同じ)。
+    offset = source.media_offset if source is not None else 0.0
+    inputs: list = [*in_args, "-copyts"]
+    if offset:
+        inputs += ["-itsoffset", f"{-offset:.6f}"]
+    inputs += ["-ss", f"{at + offset:.6f}", "-i", str(in_path)]
     seen: list = []
     for spec in overlays:
         f = str(spec["file"])
@@ -5110,13 +6534,13 @@ async def _run_preview_frame(src: Path, overlays: list, ctx: dict, ass_path: Pat
                 encoding="utf-8", errors="replace")[-config.get_log_ffmpeg_stderr_chars():]
         except OSError:
             logger.warning(
-                "preview ffmpeg log unreadable: %s", log_path, exc_info=True,
+                "previewのffmpeg logを読めません: %s", log_path, exc_info=True,
                 extra={"event": "overlay.ffmpeg_log_unreadable", "ctx": {"path": str(log_path)}},
             )
         out_png.unlink(missing_ok=True)
         filter_path.unlink(missing_ok=True)
         logger.error(
-            "preview frame extraction failed for %s at %.3fs (rc=%s)", src.name, at,
+            "%s の %.3fs 地点のpreview用frameを抽出できませんでした（rc=%s）", src.name, at,
             proc.returncode,
             extra={"event": "overlay.preview_frame_failed",
                    "ctx": {"path": str(out_png.resolve()), "stem": src.stem,
@@ -5168,13 +6592,24 @@ async def preview_still(src_path: str, started_at: float, ended_at,
                         at_seconds=None) -> dict:
     """焼き込み設定の静止画プレビュー。指定(既定はevent密度で自動選定した)media PTSの
     1 frameだけを抜き、本出力と同じASS・同じgift overlay・同じPIL comment層を重ねてpngへ
-    書く。動画encodeもcomment layerのpipeもCFR pre-passも通らないので秒で返る。"""
+    書く。動画encodeもcomment layerのpipeもCFR baseの供給も通らないので秒で返る。"""
     src = Path(src_path)
+    if not hls_source.available(src):
+        raise RuntimeError("録画fileが存在しません。")
+    # prefer_hls は本出力(ensure_overlay)と必ず同じにする。違えると時刻軸が食い違う。
+    async with hls_source.ffmpeg_source_async(src, prefer_hls=True) as source:
+        return await _preview_still(src, source, started_at, ended_at, events, settings,
+                                    battles, transcript, at_seconds)
+
+
+async def _preview_still(src: Path, source: "hls_source.Source", started_at: float,
+                         ended_at, events: list, settings, battles, transcript,
+                         at_seconds) -> dict:
     # 窓の長さはGift演出の表示秒数に合わせる。giftは自分のoffsetから表示秒数のあいだ画面に
     # 残るので、その幅で最も濃い窓の「終わり」が、Gift/Commentが最も多く同時に出ている瞬間
     # になる。
     span = float(settings.get("video_overlay_gift_seconds") or 0) or SLIDE_SECONDS
-    plan = await _preview_plan(src, settings, started_at, ended_at, events, battles,
+    plan = await _preview_plan(src, source, settings, started_at, ended_at, events, battles,
                                transcript, span, at_seconds)
     ctx = plan["ctx"]
     at = plan["window"][1] if at_seconds is None else plan["window"][0]
@@ -5194,7 +6629,8 @@ async def preview_still(src_path: str, started_at: float, ended_at,
         renderable = await _preview_render_inputs(src, plan)
         ass_path.write_text(plan["ass_text"], encoding="utf-8")
         try:
-            await _run_preview_frame(src, renderable, ctx, ass_path, raw_path, at)
+            await _run_preview_frame(src, renderable, ctx, ass_path, raw_path, at,
+                                     source=source)
             if draw_comments:
                 drawn = await _preview_still_compose(comment_plan, ctx, raw_path,
                                                      still_path, at)
@@ -5205,7 +6641,7 @@ async def preview_still(src_path: str, started_at: float, ended_at,
             ass_path.unlink(missing_ok=True)
             raw_path.unlink(missing_ok=True)
     logger.info(
-        "overlay preview still rendered at %.3fs for %s (comments=%s icons=%d)",
+        "焼き込みのpreview画像を %.3fs 地点で作成しました: %s（comment=%s icon=%d）",
         at, src.name, drawn, len(renderable),
         extra={"event": "overlay.preview_still_rendered",
                "ctx": {"path": str(still_path.resolve()), "stem": src.stem,
@@ -5219,46 +6655,59 @@ async def preview_still(src_path: str, started_at: float, ended_at,
             "video_duration_seconds": ctx["video_dur"]}
 
 
-async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path,
-                               signature: str, on_progress) -> None:
+async def _render_window_clip(src: Path, plan: dict, out: Path, meta_path: Path,
+                              signature: str, on_progress, *,
+                              ass_path: Path, layer_path: Path,
+                              log_event: str, log_message: str,
+                              phases: tuple = PREVIEW_PHASES,
+                              artifact_dir: Optional[Path] = None,
+                              with_audio: bool = False,
+                              zero_base: bool = False,
+                              audio_normalize: Optional[dict] = None,
+                              publish_as: Optional[Path] = None) -> None:
+    """窓(media PTS)のぶんだけを焼き込む共通経路。設定確認用のプレビューと、成果物として
+    出す範囲焼き込み(切り抜き)の**両方がこの1本を通る** — 3時間の録画を丸ごと焼かずに
+    60秒だけを焼けるのはこの経路しかなく、preview専用に留めておく理由が無い。
+
+    既定引数はプレビューの挙動そのまま(音声なし・絶対timestamp・出力pathへ直接書く)で、
+    ffmpegの引数列も1 byte変わらない。成果物側だけが以下を足す:
+
+    ``with_audio`` / ``zero_base`` / ``publish_as``
+        音声を通す / 出力を0起点へ寄せる / tmpへ書いてからrenameする。前2つの根拠は
+        ``_run_ffmpeg`` のdocstring。renameは、中断が「完成品の顔をした断片mp4」を残さない
+        ようにするため(upscaleと同じ流儀)。
+
+    中間物(ass / comment layer)のpathは呼び出し側が渡す。名前を出力ごとに
+    分けないと、同一録画の2範囲を並行renderした時に互いの中間物を壊し合う。"""
     ctx = plan["ctx"]
     window = plan["window"]
     win_start, win_end = window
-    # プレビューも本出力と同じ3 pass構成(層描画→CFRベース→合成)を通る。窓ぶんとはいえ
-    # 数十秒かかるので、本出力と同じ段階表示にする。
-    progress = JobProgress(on_progress, PREVIEW_PHASES)
+    # プレビューも本出力と同じ組み方(層描画→CFR baseのstream供給つき合成)を通る。
+    # 窓ぶんとはいえ数十秒かかるので、本出力と同じ段階表示にする。
+    progress = JobProgress(on_progress, phases)
     win_seconds = max(0.0, win_end - win_start)
     comment_plan = plan["comment_plan"]
     render_started = time.monotonic()
-    cfr_fps = min(ctx["fps"], CFR_FPS_CAP) if await _probe_is_vfr(src, ctx["fps"]) else None
-    ass_path = sidecar_path(src, PREVIEW_ASS_SUFFIX)
-    layer_path = sidecar_path(src, PREVIEW_LAYER_SUFFIX)
-    prepass_file = None
+    source = plan["source"]
+    cfr_fps = min(ctx["fps"], CFR_FPS_CAP) if await _probe_is_vfr(
+        source.path, ctx["fps"], source.input_args, source.is_hls) else None
+    base_pipe: Optional[dict] = None
     comment_layer = None
-    render_src, main_cfr, main_scale = src, cfr_fps, ctx["scale_to"]
+    render_src, main_cfr, main_scale = source.path, cfr_fps, ctx["scale_to"]
+    render_args: tuple = tuple(source.input_args)
+    render_offset = source.media_offset
     seek_source = True
+    # 音声の取り出し元。input 0 が原本のままなら input 0 から取れる(audio_from=None)。
+    audio_from: Optional[Path] = None
     draw_comments = _comments_in_window(comment_plan, window)
     try:
         await progress.done("plan", f"{fmt_hms(win_seconds)}ぶん")
-        # base pre-passはcomment層を合成する時にしか作らない(下のbranchの中)。commentが
-        # 窓に無ければ層もbaseも走らないので、両方まとめて重みから外す。
-        if not draw_comments or cfr_fps is None:
-            progress.disable("base")
         if not draw_comments:
             progress.disable("layer", "layer_encode")
         if draw_comments:
             await _resolve_emotes(comment_plan["shaper"],
                                   layout.emote_pool_dir())
             layer_fps = min(ctx["fps"], comment_layer_fps_cap())
-            prepass_task = None
-            if cfr_fps is not None:
-                prepass_file = sidecar_path(src, PREVIEW_CLIP_BASE_SUFFIX)
-                # 本出力と同じ組み方: baseは元解像度でCFR化だけ、拡大は本graphに残す。
-                # ここが本出力と違うと、プレビューが本出力と別の絵を見せることになる。
-                prepass_task = asyncio.create_task(
-                    _prepass_cfr(src, prepass_file, None, cfr_fps,
-                                 sidecar_dir(src), window=window,
-                                 on_progress=progress.cb("base", win_seconds)))
             comment_layer = await _render_comment_layer(
                 comment_plan["placements"], comment_plan["avatar_files"],
                 comment_plan["metrics"], comment_plan["comment_fs"], comment_plan["shaper"],
@@ -5267,25 +6716,29 @@ async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path
                 progress=progress.thread_cb_multi(asyncio.get_running_loop()),
             )
             await progress.done("layer_encode")
-            if prepass_task is not None:
-                try:
-                    await prepass_task
-                    await progress.done("base")
-                except Exception:
-                    prepass_file.unlink(missing_ok=True)
-                    prepass_file = None
-                    raise
             if comment_layer is None:
-                # 本出力はここでASSの白黒feedへ転落するが、プレビューでは転落させない。
-                # 本出力と違う見た目を「プレビュー」として見せる方が有害なので、失敗を
+                # 本出力はここでASSの白黒feedへ転落するが、窓経路では転落させない。
+                # 本出力と違う見た目を「プレビュー」として見せる方が有害で、切り抜きでは
+                # カラー絵文字も実写アイコンも落ちた成果物が残ってしまう。失敗を
                 # そのまま失敗として返す。
                 raise RuntimeError(
-                    "プレビューのComment層を描画できませんでした。"
+                    "Comment層を描画できませんでした。"
                     "空き容量とPillow/fontのinstallを確認してください。"
                 )
-            if prepass_file is not None:
-                render_src, main_cfr, main_scale = prepass_file, None, ctx["scale_to"]
-                seek_source = False  # pre-passが既に窓で切っている
+            if cfr_fps is not None:
+                # 本出力と同じ組み方: CFR化した元解像度のbaseをstream供給し、拡大は
+                # 本graphに残す。ここが本出力と違うと、プレビューが本出力と別の絵を
+                # 見せることになる。窓のseekとmedia軸寄せはproducer側が済ませる。
+                base_pipe = {"src": source.path,
+                             "input_args": tuple(source.input_args),
+                             "cfr_fps": cfr_fps, "window": window,
+                             "seek_offset": source.media_offset}
+                main_cfr, main_scale = None, ctx["scale_to"]
+                render_offset = 0.0  # producerが-itsoffsetで寄せ済み
+                seek_source = False  # producerが既に窓で切っている
+                # baseは -an で流れる(pipeはffprobeできず正規化のrate probeが成立しない)。
+                # input 0 からは音声が取れない — 原本を音声用にもう1本開く。
+                audio_from = source.path
         renderable = await _preview_render_inputs(src, plan)
         ass_path.write_text(plan["ass_text"], encoding="utf-8")
         await _run_ffmpeg(
@@ -5295,27 +6748,88 @@ async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path
             window=window, seek_source=seek_source,
             # layer fileは常に0始まり。窓の絶対位置へずらして初めてbaseと噛み合う。
             layer_offset=(win_start if comment_layer is not None else 0.0),
+            input_args=render_args, seek_offset=render_offset,
+            with_audio=with_audio, zero_base=zero_base,
+            audio_normalize=(audio_normalize if with_audio else None),
+            audio_from=audio_from,
+            audio_input_args=(tuple(source.input_args) if audio_from is not None else ()),
+            audio_seek_offset=(source.media_offset if audio_from is not None else 0.0),
+            artifact_dir=artifact_dir,
+            base_pipe=base_pipe,
+            fontsdir=ctx["fontsdir"],
         )
         await progress.done("encode")
+        if with_audio:
+            await _require_audio_kept(source, out, stem=src.stem)
     finally:
         ass_path.unlink(missing_ok=True)
         layer_path.unlink(missing_ok=True)
-        if prepass_file is not None:
-            prepass_file.unlink(missing_ok=True)
+    if publish_as is not None:
+        # ここまで来た物だけが成果物の名前を名乗る。renameは同一volume内なので原子的。
+        out.replace(publish_as)
+        out = publish_as
     meta_path.write_text(signature, encoding="utf-8")
     logger.info(
-        "overlay preview clip rendered: %s (%.3f..%.3fs, comments=%s)",
-        out.name, win_start, win_end, comment_layer is not None,
-        extra={"event": "overlay.preview_clip_rendered",
+        log_message, out.name, win_start, win_end, comment_layer is not None,
+        extra={"event": log_event,
                "ctx": {"path": str(out.resolve()), "stem": src.stem,
                        "window_start_seconds": round(win_start, 3),
                        "window_end_seconds": round(win_end, 3),
                        "window_auto": plan["window_auto"],
                        "comment_layer_used": comment_layer is not None,
-                       "prepass_used": prepass_file is not None,
+                       "base_piped": base_pipe is not None,
+                       "audio_kept": with_audio,
+                       "audio_from_source_input": audio_from is not None,
+                       "zero_based": bool(zero_base and win_start),
                        "codec": ctx["codec"], "quality": ctx["quality"],
                        "size_bytes": out.stat().st_size if out.is_file() else None,
                        "duration_ms": int((time.monotonic() - render_started) * 1000)}},
+    )
+
+
+async def _require_audio_kept(source: "hls_source.Source", out: Path, *, stem: str) -> None:
+    """入力に音声が在ったのに出力に無い、を検出して失敗させる。
+
+    窓経路の音声は「input 0 が原本か、``-an`` で作ったCFR baseか」で取り出し先が変わる。
+    間違えても ``-map <n>:a?`` の ``?`` が黙って空振りするだけなので、userが再生して初めて
+    気付く。無音の成果物を残すのは劣化であってfallbackにもならないため、ここで落とす。
+
+    probeできなかった場合は真偽を捏造せず、検証できなかった事実をwarningで残す。"""
+    src_has = await _probe_has_audio(source.path, tuple(source.input_args))
+    out_has = await _probe_has_audio(out)
+    if src_has and out_has is False:
+        out.unlink(missing_ok=True)
+        logger.error(
+            "%s の焼き込みで音声が落ちました（入力には音声があり出力にはありません）",
+            out.name,
+            extra={"event": "overlay.clip_audio_lost",
+                   "ctx": {"path": str(out.resolve()), "stem": stem,
+                           "source": str(source.path), "is_hls": source.is_hls}},
+        )
+        raise RuntimeError(
+            "焼き込みの出力から音声が落ちました（入力には音声があります）。"
+            "無音の成果物は残さず中止しました。"
+        )
+    if src_has is None or out_has is None:
+        logger.warning(
+            "%s の音声の有無を確認できません（入力=%s 出力=%s）",
+            out.name, src_has, out_has,
+            extra={"event": "overlay.clip_audio_unverified",
+                   "ctx": {"path": str(out.resolve()), "stem": stem,
+                           "source_has_audio": src_has, "output_has_audio": out_has}},
+        )
+
+
+async def _render_preview_clip(src: Path, plan: dict, out: Path, meta_path: Path,
+                               signature: str, on_progress) -> None:
+    """設定確認用プレビューの窓焼き込み。中間物は録画ごとの固定名で足りる(プレビューは
+    1録画に1本しか走らず、lock keyも1つ)。"""
+    await _render_window_clip(
+        src, plan, out, meta_path, signature, on_progress,
+        ass_path=sidecar_path(src, PREVIEW_ASS_SUFFIX),
+        layer_path=sidecar_path(src, PREVIEW_LAYER_SUFFIX),
+        log_event="overlay.preview_clip_rendered",
+        log_message="焼き込みのpreviewを出力しました: %s（%.3f..%.3fs, comment=%s）",
     )
 
 
@@ -5323,14 +6837,25 @@ async def preview_clip(src_path: str, started_at: float, ended_at,
                        events: list, settings, battles=None, transcript=None,
                        on_progress=None, at_seconds=None) -> dict:
     """焼き込み設定の動画プレビュー。実解像度・実codec・実qualityのまま、media PTS窓の
-    ぶんだけを焼き込む。窓は comment layerのrender・CFR pre-pass・本encode の3箇所すべてに
+    ぶんだけを焼き込む。窓は comment layerのrender・CFR baseの供給・本encode の3箇所すべてに
     効かせる(1つでも全尺のままなら本出力とcostが変わらず、プレビューの意味が消える)。
 
     描画planは全尺のまま組み、窓はffmpegのseekと``-copyts``でしか効かせない。時刻mapを
     組み直さないので、ここで見えたズレは本出力でも同じだけ起きる。"""
     src = Path(src_path)
+    if not hls_source.available(src):
+        raise RuntimeError("録画fileが存在しません。")
+    # prefer_hls は本出力(ensure_overlay)と必ず同じにする。違えると時刻軸が食い違う。
+    async with hls_source.ffmpeg_source_async(src, prefer_hls=True) as source:
+        return await _preview_clip(src, source, started_at, ended_at, events, settings,
+                                   battles, transcript, on_progress, at_seconds)
+
+
+async def _preview_clip(src: Path, source: "hls_source.Source", started_at: float,
+                        ended_at, events: list, settings, battles, transcript,
+                        on_progress, at_seconds) -> dict:
     seconds = preview_seconds(settings)
-    plan = await _preview_plan(src, settings, started_at, ended_at, events, battles,
+    plan = await _preview_plan(src, source, settings, started_at, ended_at, events, battles,
                                transcript, seconds, at_seconds)
     ctx, cfg = plan["ctx"], plan["cfg"]
     window = plan["window"]
@@ -5359,3 +6884,188 @@ async def preview_clip(src_path: str, started_at: float, ended_at,
                                        on_progress)
     return {"path": clip_path, "window": window, "window_auto": plan["window_auto"],
             "cached": False, "video_duration_seconds": ctx["video_dur"]}
+
+
+# ===== 範囲だけを焼き込む正式な出力経路(切り抜き) =====
+# 60秒の切り抜きへ字幕・comment・giftを焼くために3時間の録画を丸ごと焼く必要は無い。
+# 可逆中間がC:を192GB/時食う環境では長尺の全尺焼きはそもそも完走しないので、窓経路が
+# 唯一実行可能な道である。描画planは全尺のまま組み、窓はffmpegのseekと-copytsでしか
+# 効かせない(時刻mapを組み直さない)という不変条件はプレビューと共通で、_render_window_clip
+# が両者の唯一の実装になっている。
+
+# 段階列。3 pass構成と重みは PREVIEW_PHASES と同じで、文言だけを成果物側(プレビューでは
+# ない)に合わせる。labelは本出力(OVERLAY_PHASES)から借りて、同じ作業が画面ごとに別の名前で
+# 呼ばれないようにしてある。
+# TODO: 他のphase tupleは tictok/core/progress.py に集約されている。同fileを触れる作業と
+# 一緒に移すこと(今回の変更範囲外)。
+CLIP_PHASES: tuple = (
+    ("plan", "描画レイアウトを計算中", 0.05),
+    ("layer", "コメント層を描画中", 0.30),
+    ("layer_encode", "コメント層を書き出し中", 0.10),
+    ("encode", "焼き込み合成中", 0.55),
+)
+
+
+def _require_burnable_transcript(settings, transcript: Optional[dict],
+                                 media_seconds: Optional[float] = None) -> None:
+    """字幕焼き込みが要求されているなら、渡された転写が焼ける物かを確かめる。
+
+    本出力(server側)と同じ規則を範囲焼き込みへも継承する: 転写が無い / 時刻mapが現行版で
+    ない / **素材と時間軸が違う** / 出せるsegmentが無い場合は、字幕なしで焼かずに**拒否**
+    する。焼き込みは元に戻せない成果物なので、ズレた字幕や無言の欠落を作るより先に転写を
+    やり直させる方が安い。
+
+    ``media_seconds`` は素材の実尺(timing.jsonのmedia_duration)。Noneなら軸の判定はしない
+    — ズレている証拠が無いまま拒否すると、正しい転写まで焼けなくなる。"""
+    if not subtitles_enabled(settings):
+        return
+    if transcript is None:
+        raise TranscriptNotBurnableError(
+            "字幕の焼き込みが有効ですが、この録画は文字起こしがありません。"
+            "先に文字起こしを実行してください。"
+        )
+    if not subtitles.timemap_current(transcript.get("timemap_version")):
+        raise TranscriptNotBurnableError(
+            "この録画の文字起こしは古い時刻mapで作られており、字幕が動画とズレます。"
+            "文字起こしをやり直してから焼き込んでください。"
+        )
+    if not subtitles.axis_matches_media(transcript, media_seconds):
+        raise TranscriptNotBurnableError(
+            "この録画の文字起こしは素材と時間軸が違います"
+            f"（文字起こし {float(transcript['duration']):.0f}秒 / 素材 {media_seconds:.0f}秒）。"
+            "そのまま焼くと字幕が動画とズレます。"
+            "文字起こしをやり直してから焼き込んでください。"
+        )
+    if not subtitles.usable_segments(transcript.get("segments")):
+        raise TranscriptNotBurnableError(
+            "この録画の文字起こしに、字幕として焼き込めるsegmentがありません。"
+        )
+
+
+def clip_overlay_sidecars(src: Path, out: Path) -> tuple:
+    """範囲焼き込み1回ぶんの (ass, comment layer, meta)。
+
+    stemは**出力ごと**。録画ごとの固定名にすると、同一録画の2範囲を並行renderした時に
+    互いの中間物を上書きし合う(本出力が out.stem を使っているのと同じ理由)。置き場は
+    元録画の .sidecars dir で、出力先のdirへは1 fileも置かない — clips dir側へ置くと
+    record_root_of がそこをrootと解釈して起動sweepの射程から外れる。"""
+    home = sidecar_dir(src)
+    stem = Path(out).stem
+    return (home / (stem + CLIP_ASS_SUFFIX), home / (stem + CLIP_LAYER_SUFFIX),
+            home / (stem + CLIP_META_SUFFIX))
+
+
+async def render_clip_overlay(
+    src_path: str,
+    started_at: float,
+    ended_at: Optional[float],
+    events: list,
+    settings,
+    out_path: str,
+    start_seconds: float,
+    end_seconds: float,
+    battles: Optional[list] = None,
+    on_progress: Optional[StageCb] = None,
+    transcript: Optional[dict] = None,
+) -> dict:
+    """``[start_seconds, end_seconds)`` (media軸) だけを焼き込んで ``out_path`` へ出す。
+
+    引数は ``ensure_overlay`` と同じ意味・同じ順序で、出力pathと窓だけが増えている
+    (``started_at``/``ended_at`` は**録画の**捕捉窓で、焼く範囲ではない。混同すると
+    eventの時刻mapが崩れる)。``settings`` の13項目と描画planは本出力と共通なので、
+    出来上がる絵は同じ設定の全尺焼きの当該区間と一致する。
+
+    返り値は ``{"path", "window", "cached", "stats", "video_duration_seconds"}``。
+    ``stats`` は**録画全体**の配置結果である(描画planを全尺のまま組むのがこの経路の不変
+    条件で、窓はffmpeg側でしか効かない)。窓の中に何件出たかではないので、その数字を
+    「この切り抜きのcomment件数」として画面へ出さないこと。
+
+    窓の指定が不正(負・逆順・素材の外)なら ``ValueError``。素材・ffmpeg・音声の欠落は
+    ``RuntimeError``、字幕の前提不成立は ``TranscriptNotBurnableError``。
+
+    本出力との違いは3点だけで、いずれも「成果物として渡せる形」にするためである:
+    音声を通す・出力を0起点へ寄せる(絶対timestampのままではNLEへ渡せない)・
+    tmpへ書いてからrenameする。
+
+    ``start_seconds`` は**動かさない**。素材の尾で ``end_seconds`` を切ることはあるが、
+    利用者のIN点を後ろへ押し戻すことはしない(自動選定のプレビューとはここが違う)。
+
+    字幕がONなら ``transcript`` は現行の時刻mapで作られた物でなければならず、そうでなければ
+    ``TranscriptNotBurnableError`` で拒否する(字幕なしで焼く・ズレたまま焼くのは禁止)。
+
+    失敗はすべて例外。素の切り出しへ倒す等のfallbackは無い。"""
+    if not ffmpeg_available():
+        raise RuntimeError("ffmpegが見つかりません。焼き込みにはffmpegのinstallが必要です。")
+    src = Path(src_path)
+    if not hls_source.available(src):
+        raise RuntimeError("録画fileが存在しません。")
+    if not overlay_enabled(settings):
+        # 何も描かない設定でこの経路を通す意味は無い(素の切り出しは呼び出し側の仕事)。
+        raise NothingToDrawError(
+            "焼き込む層が1つも有効になっていません。Comment/Gift/Battle/字幕のいずれかを"
+            "有効にしてください。"
+        )
+    _require_burnable_transcript(settings, transcript, material_media_seconds(src))
+    out = Path(out_path)
+    # prefer_hls は本出力(ensure_overlay)と必ず同じにする。違えると時刻軸が食い違い、
+    # 同じ設定でも全尺焼きと別の位置にcommentが出る。
+    async with hls_source.ffmpeg_source_async(src, prefer_hls=True) as source:
+        return await _render_clip_overlay(
+            src, source, started_at, ended_at, events, settings, out,
+            (start_seconds, end_seconds), battles, on_progress, transcript)
+
+
+async def _render_clip_overlay(src: Path, source: "hls_source.Source", started_at: float,
+                               ended_at, events: list, settings, out: Path, window: tuple,
+                               battles, on_progress, transcript) -> dict:
+    """``render_clip_overlay`` の本体。``src`` は録画の身元(sidecar・cacheの鍵)、``source``
+    がffmpegの実入力、``out`` は録画の外に置かれる成果物で、3つはすべて別物である。"""
+    # 尺(第9引数)は自動選定にしか使われないので0で通す。窓は明示指定側で検証される。
+    plan = await _preview_plan(src, source, settings, started_at, ended_at, events, battles,
+                               transcript, 0.0, None, window=window)
+    ctx, cfg = plan["ctx"], plan["cfg"]
+    win_start, win_end = plan["window"]
+    ass_path, layer_path, meta_path = clip_overlay_sidecars(src, out)
+    signature = _signature(
+        src, cfg, timing_path(src),
+        # 本出力・プレビュー・他範囲のsignature空間と絶対に交差させないため、variantに窓を
+        # 畳み込む。窓が違えば中身が違うので、cacheを共有してはならない。
+        variant=f"clip:{win_start:.3f}:{win_end:.3f}",
+        events_sig=_events_fingerprint(events),
+        subtitles_sig=(subtitles.fingerprint(transcript)
+                       if cfg.get("video_overlay_subtitles") else ""),
+    )
+    lock = await _get_lock(f"clip-overlay:{out}")
+    async with lock:
+        if out.is_file() and meta_path.is_file():
+            try:
+                if meta_path.read_text(encoding="utf-8").strip() == signature:
+                    return {"path": out, "window": (win_start, win_end), "cached": True,
+                            "stats": plan["stats"],
+                            "video_duration_seconds": ctx["video_dur"]}
+            except OSError:
+                pass
+        out.parent.mkdir(parents=True, exist_ok=True)
+        # tmpは出力と同じdirへ置く(renameが同一volume内で原子的になるのはこの時だけ)。
+        # 中間物と違い、これは成果物の置き場に居るので名前で断片だと分かる形にする。
+        tmp = out.with_suffix(".tmp" + out.suffix)
+        try:
+            async with gpu_slot_async(f"overlay-clip:{out.stem}"):
+                await _render_window_clip(
+                    src, plan, tmp, meta_path, signature, on_progress,
+                    ass_path=ass_path, layer_path=layer_path,
+                    log_event="overlay.clip_rendered",
+                    log_message="範囲の焼き込みを出力しました: %s（%.3f..%.3fs, comment=%s）",
+                    phases=CLIP_PHASES,
+                    # log/filter scriptは録画のsidecarへ。成果物のdirへ作業fileを置かない。
+                    artifact_dir=sidecar_dir(src),
+                    with_audio=True, zero_base=True,
+                    audio_normalize=audio_norm.targets_from_cfg(cfg),
+                    publish_as=out,
+                )
+        except BaseException:
+            # cancelでも例外でも、断片は残さない(残すと次回のcache判定が実体を信じる)。
+            tmp.unlink(missing_ok=True)
+            raise
+    return {"path": out, "window": (win_start, win_end), "cached": False,
+            "stats": plan["stats"], "video_duration_seconds": ctx["video_dur"]}

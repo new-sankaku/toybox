@@ -13,10 +13,40 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def server(env_guard):
-    import tictok.server as srv
+    # env_guard を先に効かせてから import する。tictok.api.runtime は import 時に
+    # Storage / instance lock / record dir を掴むため、順序が逆だと本番を掴む。
+    import asyncio as _asyncio
+    from types import SimpleNamespace
 
-    assert not str(srv.RECORD_DIR).lower().endswith("tictok\\recordings")
-    return srv
+    import tictok.server as srv
+    from tictok.api import access_log, disk, files, fsfacts, media_jobs, runtime, startup
+    from tictok.api.routes import (ai, analytics, bulk, media, monitors, pages,
+                                   recordings, search, sessions, storage, streamers,
+                                   system, ws)
+    from tictok.core import layout
+    from tictok.media import laugh_audio, smile
+    from tictok.record import audio_norm, hls_pack
+    from tictok.record.media_queue import JobDeferred
+    from tictok.record.recorder import Recorder
+    from tictok.search import indexer
+    from fastapi import HTTPException
+
+    assert not str(runtime.RECORD_DIR).lower().endswith("tictok\\recordings")
+    return SimpleNamespace(
+        app=srv.app, main=srv.main,
+        # 分割後のmodule。module levelの名前を差し替えるときはここを通す
+        # (``from ... import`` で束ねると差し替えが届かない)。
+        runtime=runtime, files=files, fsfacts=fsfacts, disk=disk,
+        media_jobs=media_jobs, startup=startup, access_log=access_log,
+        routes=SimpleNamespace(ai=ai, analytics=analytics, bulk=bulk, media=media,
+                               monitors=monitors, pages=pages, recordings=recordings,
+                               search=search, sessions=sessions, storage=storage,
+                               streamers=streamers, system=system, ws=ws),
+        # objectそのものを差し替える先。実体は1つなので、どのmoduleから見ても同じ。
+        layout=layout, smile=smile, indexer=indexer, hls_pack=hls_pack,
+        audio_norm=audio_norm, laugh_audio=laugh_audio, asyncio=_asyncio,
+        Recorder=Recorder, HTTPException=HTTPException, JobDeferred=JobDeferred,
+    )
 
 
 @pytest.fixture
@@ -29,11 +59,11 @@ def make_recording(server):
     """一括の対象になり得る録画を1本作る。overlay済みにしたい場合は with_output=True。"""
     def _make(unique_id="tester", status="completed", file_exists=True,
               with_output=False, seconds=300):
-        storage = server.storage
+        storage = server.runtime.storage
         session_id = storage.create_session(unique_id, 60)
         storage.update_session(session_id, "connected")
         stem = f"00001_{unique_id}_{secrets.token_hex(4)}"
-        directory = server.RECORD_DIR / unique_id / "mp4"
+        directory = server.runtime.RECORD_DIR / unique_id / "mp4"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{stem}.mp4"
         if file_exists:
@@ -53,9 +83,9 @@ def make_recording(server):
             overlay.parent.mkdir(parents=True, exist_ok=True)
             overlay.write_bytes(b"\x00" * 32)
         # 出力状態はfilesystem由来でcacheされる。前のtestの残りを持ち越さない。
-        server._fs_state_cache.clear()
-        server._fs_bulk_cache.clear()
-        server._bulk_status_cache.clear()
+        server.fsfacts._fs_state_cache.clear()
+        server.fsfacts._fs_bulk_cache.clear()
+        server.fsfacts._bulk_status_cache.clear()
         return session_id, recording_id, path
 
     return _make
@@ -76,7 +106,9 @@ def test_estimate_counts_only_recordings_that_can_be_output(client, make_recordi
                       params={"kind": "overlay", "unique_id": "alice"}).json()
     assert body["recordings"] == 1
     assert body["skipped"]["done"] == 1
-    assert body["skipped"]["no_file"] == 1
+    # 焼き込みの入力はmp4ではなく素材(.ts)になった。mp4だけが無い録画は焼けるので、
+    # ここで落ちるのは「mp4も.tsも無い」場合だけ = no_source。
+    assert body["skipped"]["no_source"] == 1
 
 
 def test_estimate_redo_brings_back_already_output_recordings(client, make_recording):
@@ -101,9 +133,9 @@ def test_estimate_reports_unknown_eta_without_history(client, make_recording):
 
 def test_estimate_derives_eta_from_completed_jobs(client, server, make_recording,
                                                   monkeypatch):
-    monkeypatch.setattr(server, "get_media_queue_workers", lambda: 1)
+    monkeypatch.setattr(server.routes.bulk, "get_media_queue_workers", lambda: 1)
     _, recording_id, _ = make_recording(unique_id="dave", seconds=100)
-    storage = server.storage
+    storage = server.runtime.storage
     # 100秒の録画を200秒かけて焼いた実績 → 次の100秒も200秒と見積もる。
     storage.enqueue_media_job("past-1", "overlay", recording_id)
     storage.start_media_job("past-1")
@@ -129,7 +161,7 @@ def test_estimate_accounts_for_concurrent_workers(client, server, make_recording
     環境で「入るはず」と示した直後に空き容量を割る。"""
     _, recording_id, _ = make_recording(unique_id="frank", seconds=100)
     make_recording(unique_id="frank", seconds=100)
-    storage = server.storage
+    storage = server.runtime.storage
     storage.enqueue_media_job("past-2", "overlay", recording_id)
     storage.start_media_job("past-2")
     storage.finish_media_job("past-2", "completed")
@@ -143,9 +175,9 @@ def test_estimate_accounts_for_concurrent_workers(client, server, make_recording
         return client.get("/api/bulk/estimate",
                           params={"kind": "overlay", "unique_id": "frank"}).json()
 
-    monkeypatch.setattr(server, "get_media_queue_workers", lambda: 1)
+    monkeypatch.setattr(server.routes.bulk, "get_media_queue_workers", lambda: 1)
     one = _estimate()
-    monkeypatch.setattr(server, "get_media_queue_workers", lambda: 2)
+    monkeypatch.setattr(server.routes.bulk, "get_media_queue_workers", lambda: 2)
     two = _estimate()
 
     assert two["eta_seconds"] == pytest.approx(one["eta_seconds"] / 2, rel=0.01)
@@ -161,7 +193,7 @@ def test_queue_enqueues_one_job_per_recording_under_one_group(client, server,
     body = client.post("/api/bulk/queue",
                        json={"kind": "overlay", "unique_id": "erin"}).json()
     assert body["total"] == 2
-    rows = server.storage.media_jobs_in_group(body["group_id"])
+    rows = server.runtime.storage.media_jobs_in_group(body["group_id"])
     assert len(rows) == 2
     # 他の配信者を巻き込まないこと。
     assert {row["recording_id"] for row in rows} == set(body["recording_ids"])
@@ -177,7 +209,7 @@ def test_queued_group_is_not_reported_as_a_session_job(client, server, make_reco
     body = client.post("/api/bulk/queue",
                        json={"kind": "overlay", "unique_id": "grace"}).json()
 
-    group = group_payload(server.storage.media_jobs_in_group(body["group_id"]))
+    group = group_payload(server.runtime.storage.media_jobs_in_group(body["group_id"]))
     assert group["domain"] == "bulk_overlay"
     assert group["session_id"] is None
 
@@ -187,10 +219,10 @@ def test_session_group_still_folds_into_a_session_job(server, make_recording):
     from tictok.record.media_queue import group_payload
 
     session_id, recording_id, _ = make_recording(unique_id="heidi")
-    server.storage.enqueue_media_job("s-1", "overlay", recording_id,
+    server.runtime.storage.enqueue_media_job("s-1", "overlay", recording_id,
                                      session_id=session_id, group_id="grp-s")
 
-    group = group_payload(server.storage.media_jobs_in_group("grp-s"))
+    group = group_payload(server.runtime.storage.media_jobs_in_group("grp-s"))
     assert group["domain"] == "session_overlay"
     assert group["session_id"] == session_id
 
@@ -200,10 +232,10 @@ def test_group_row_counts_all_members_even_past_the_ledger_limit(server, make_re
     畳むと、limitを超える一括投入が実際より小さい母数で進捗を出す。"""
     _, recording_id, _ = make_recording(unique_id="mallory")
     for index in range(5):
-        server.storage.enqueue_media_job(f"m-{index}", "overlay", recording_id,
+        server.runtime.storage.enqueue_media_job(f"m-{index}", "overlay", recording_id,
                                          group_id="grp-big", params={"bulk": True})
 
-    payloads = server.media_job_queue.list_jobs(limit=2)
+    payloads = server.media_jobs.media_job_queue.list_jobs(limit=2)
     group = next(p for p in payloads if p["job_id"] == "grp-big")
     assert group["total"] == 5
 
@@ -220,7 +252,7 @@ def test_queue_refuses_when_nothing_is_eligible(client, make_recording):
 def test_queue_skips_recordings_already_in_the_queue(client, server, make_recording):
     _, recording_id, _ = make_recording(unique_id="judy")
     make_recording(unique_id="judy")
-    server.storage.enqueue_media_job("dup-1", "overlay", recording_id)
+    server.runtime.storage.enqueue_media_job("dup-1", "overlay", recording_id)
 
     body = client.post("/api/bulk/queue",
                        json={"kind": "overlay", "unique_id": "judy"}).json()
@@ -255,13 +287,13 @@ def test_reprocess_skips_recordings_that_were_already_rebuilt(client, server,
     同じ内容の元mp4が_backupへ積まれていた(同一録画に3世代・退避307GB)。"""
     _, done_id, _ = make_recording(unique_id="mika")
     make_recording(unique_id="mika")
-    monkeypatch.setattr(server, "_recording_has_hls", lambda _r: True)
-    monkeypatch.setattr(server, "_bulk_hls_batch",
+    monkeypatch.setattr(server.fsfacts, "_recording_has_hls", lambda _r: True)
+    monkeypatch.setattr(server.fsfacts, "_bulk_hls_batch",
                         lambda recordings, facts: [f.update({"has_hls": True})
                                                    for f in facts.values()])
-    server.storage.set_recording_reprocessed(done_id, 1000.0)
-    server._bulk_status_cache.clear()
-    server._fs_bulk_cache.clear()
+    server.runtime.storage.set_recording_reprocessed(done_id, 1000.0)
+    server.fsfacts._bulk_status_cache.clear()
+    server.fsfacts._fs_bulk_cache.clear()
 
     body = client.get("/api/bulk/estimate",
                       params={"kind": "reprocess", "unique_id": "mika"}).json()
@@ -281,8 +313,8 @@ def test_audionorm_targets_recordings_that_are_not_normalized_yet(client, server
     """済み判定はDBの列だけを見る。mp4からは正規化の有無を判別できない。"""
     _, done_id, _ = make_recording(unique_id="nina")
     make_recording(unique_id="nina")
-    server.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
-    server._bulk_status_cache.clear()
+    server.runtime.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
+    server.fsfacts._bulk_status_cache.clear()
 
     body = client.get("/api/bulk/estimate",
                       params={"kind": "audionorm", "unique_id": "nina"}).json()
@@ -295,8 +327,8 @@ def test_audionorm_targets_recordings_that_are_not_normalized_yet(client, server
 def test_audionorm_redo_brings_back_normalized_recordings(client, server,
                                                           make_recording):
     _, recording_id, _ = make_recording(unique_id="olga")
-    server.storage.set_recording_audio_normalized(recording_id, 1000.0, -14.0)
-    server._bulk_status_cache.clear()
+    server.runtime.storage.set_recording_audio_normalized(recording_id, 1000.0, -14.0)
+    server.fsfacts._bulk_status_cache.clear()
 
     body = client.get("/api/bulk/estimate",
                       params={"kind": "audionorm", "unique_id": "olga", "redo": 1}).json()
@@ -309,7 +341,7 @@ def test_recordings_endpoint_reports_eligibility_per_recording(client, server,
                                                                make_recording):
     _, done_id, _ = make_recording(unique_id="pam")
     _, open_id, _ = make_recording(unique_id="pam")
-    server.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
+    server.runtime.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
 
     rows = client.get("/api/bulk/recordings",
                       params={"kind": "audionorm", "unique_id": "pam"}).json()["recordings"]
@@ -324,7 +356,7 @@ def test_recordings_endpoint_marks_already_queued_recordings(client, server,
                                                              make_recording):
     """選べるのに投入されない録画を作らないため、queue済みも対象外として返すこと。"""
     _, recording_id, _ = make_recording(unique_id="quinn")
-    server.storage.enqueue_media_job("q-1", "audionorm", recording_id)
+    server.runtime.storage.enqueue_media_job("q-1", "audionorm", recording_id)
 
     rows = client.get("/api/bulk/recordings",
                       params={"kind": "audionorm", "unique_id": "quinn"}).json()["recordings"]
@@ -362,7 +394,7 @@ def test_estimate_and_queue_select_the_same_recordings(client, server, make_reco
     """見せた本数と積んだ本数が食い違わないこと(選択投入でも同じ_bulk_planを通る)。"""
     _, first_id, _ = make_recording(unique_id="tina")
     _, done_id, _ = make_recording(unique_id="tina")
-    server.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
+    server.runtime.storage.set_recording_audio_normalized(done_id, 1000.0, -14.0)
 
     params = {"kind": "audionorm", "unique_id": "tina",
               "recording_id": [first_id, done_id]}
@@ -378,9 +410,9 @@ def test_estimate_and_queue_select_the_same_recordings(client, server, make_reco
 
 def _with_hls(server, monkeypatch, present=True):
     """.ts走査の結果を差し替える。実segmentを並べなくても対象判定を通せる。"""
-    monkeypatch.setattr(server, "_recording_has_hls", lambda _r: present)
+    monkeypatch.setattr(server.fsfacts, "_recording_has_hls", lambda _r: present)
     monkeypatch.setattr(
-        server, "_bulk_hls_batch",
+        server.fsfacts, "_bulk_hls_batch",
         lambda recordings, facts: [f.update({"has_hls": present}) for f in facts.values()])
 
 
@@ -403,7 +435,7 @@ def test_delete_mp4_removes_only_the_source_and_keeps_derived_outputs(
     assert body["freed_bytes"] == 64
     assert not path.exists()
     assert overlay.is_file() and renamed.is_file()
-    row = server.storage.get_recording(recording_id)
+    row = server.runtime.storage.get_recording(recording_id)
     # 消したmp4についての主張は落とす。残すと再mp4化の対象から外れたままになる。
     assert row["bytes"] == 0
     assert row["reprocessed_at"] is None
@@ -428,7 +460,7 @@ def test_delete_mp4_estimate_reports_the_untouchable_ones_as_a_reason(
     """警告の材料は見積りが返す。画面はここから「.tsが無いN本は削除しません」を出す。"""
     make_recording(unique_id="mix")
     _with_hls(server, monkeypatch, present=False)
-    server._bulk_status_cache.clear()
+    server.fsfacts._bulk_status_cache.clear()
 
     body = client.get("/api/bulk/estimate",
                       params={"kind": "delete_mp4", "unique_id": "mix"}).json()
@@ -440,8 +472,8 @@ def test_delete_mp4_estimate_reports_the_untouchable_ones_as_a_reason(
 def test_delete_mp4_keeps_protected_recordings(client, server, make_recording, monkeypatch):
     _s, recording_id, path = make_recording(unique_id="prot")
     _with_hls(server, monkeypatch)
-    server.storage.set_recording_protected(recording_id, True)
-    server._bulk_status_cache.clear()
+    server.runtime.storage.set_recording_protected(recording_id, True)
+    server.fsfacts._bulk_status_cache.clear()
 
     response = client.post("/api/bulk/delete-mp4",
                            json={"kind": "delete_mp4", "unique_id": "prot"})
@@ -467,8 +499,8 @@ def test_delete_mp4_skips_recordings_a_job_is_holding(client, server, make_recor
     見積りの時点で外す(実行時に初めて減ると、確認した本数と消えた本数が食い違う)。"""
     _s, recording_id, path = make_recording(unique_id="busy")
     _with_hls(server, monkeypatch)
-    server.storage.enqueue_media_job("hold-1", "overlay", recording_id)
-    server._bulk_status_cache.clear()
+    server.runtime.storage.enqueue_media_job("hold-1", "overlay", recording_id)
+    server.fsfacts._bulk_status_cache.clear()
 
     body = client.get("/api/bulk/estimate",
                       params={"kind": "delete_mp4", "unique_id": "busy"}).json()
@@ -478,3 +510,168 @@ def test_delete_mp4_skips_recordings_a_job_is_holding(client, server, make_recor
     assert client.post("/api/bulk/delete-mp4",
                        json={"kind": "delete_mp4", "unique_id": "busy"}).status_code == 409
     assert path.is_file()
+
+
+# ---- 文字起こし ----
+# 対象の選び方(_bulk_plan)は他の種別と共有し、投入先だけがtranscribe_queueになる。
+# 走る台帳が違うので、済み判定・二重投入・所要の実測比の出所も他の種別とは別になる。
+
+
+@pytest.fixture
+def stt_ready(server, monkeypatch):
+    """STTが使える状態にする。実modelは読まない(投入APIの可否判定だけを通す)。"""
+    monkeypatch.setattr(server.routes.bulk, "stt_available", lambda: True)
+
+
+def _save_transcript(server, recording_id):
+    server.runtime.storage.save_transcript(
+        recording_id, {"language": "ja", "model": "test", "text": "あ",
+                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}],
+                       "duration": 1.0})
+
+
+def test_transcribe_targets_recordings_without_a_transcript(client, server,
+                                                            make_recording):
+    """済み判定はtranscripts表だけ。転写はfileを作らないので、filesystemからは判別できない。"""
+    make_recording(unique_id="stt")
+    _s, done_id, _p = make_recording(unique_id="stt")
+    _save_transcript(server, done_id)
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": "stt"}).json()
+    assert body["recordings"] == 1
+    assert body["skipped"]["done"] == 1
+
+
+def test_transcribe_accepts_recordings_that_only_have_segments(client, server,
+                                                               make_recording, monkeypatch):
+    """入力は素材(.ts)でもよい。mp4を要求すると、単体では転写できる録画が一括だけ弾かれる。"""
+    make_recording(unique_id="tsonly", file_exists=False)
+    _with_hls(server, monkeypatch)
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": "tsonly"}).json()
+    assert body["recordings"] == 1
+
+
+def test_transcribe_redo_brings_back_transcribed_recordings(client, server,
+                                                            make_recording):
+    """modelを替えたときや時刻mapの版が上がったときは転写し直すしかない。"""
+    _s, recording_id, _p = make_recording(unique_id="again")
+    _save_transcript(server, recording_id)
+
+    plain = client.get("/api/bulk/estimate",
+                       params={"kind": "transcribe", "unique_id": "again"}).json()
+    redone = client.get("/api/bulk/estimate",
+                        params={"kind": "transcribe", "unique_id": "again", "redo": 1}).json()
+    assert (plain["recordings"], redone["recordings"]) == (0, 1)
+
+
+def test_transcribe_queues_into_the_media_ledger_as_an_stt_job(
+        client, server, make_recording, stt_ready):
+    """文字起こしも映像jobと同じ台帳(kind=stt)で走る。台帳を分けていた頃は、同じGPUを
+    取り合っているのにJob一覧へ出ず、取り消しも別画面だった。"""
+    _s, recording_id, _p = make_recording(unique_id="into")
+
+    body = client.post("/api/bulk/queue",
+                       json={"kind": "transcribe", "unique_id": "into"}).json()
+
+    assert body["total"] == 1
+    assert body["recording_ids"] == [recording_id]
+    assert ("stt", recording_id) in server.runtime.storage.pending_media_job_keys()
+
+
+def test_transcribe_skips_recordings_already_in_the_stt_queue(client, server,
+                                                              make_recording, stt_ready):
+    """待機中の録画をもう一度積まない。判定は映像jobと同じ (kind, recording_id) で行う。"""
+    _s, recording_id, _p = make_recording(unique_id="dup")
+    server.runtime.storage.enqueue_media_job("j-dup", "stt", recording_id)
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": "dup"}).json()
+    assert body["recordings"] == 0
+    assert body["skipped"]["queued"] == 1
+
+
+def test_transcribe_redo_queues_an_already_transcribed_recording(client, server,
+                                                                make_recording, stt_ready):
+    """文字起こし済みでもredoなら積む。「済み」の根拠はtranscriptsの存在で、queueの行では
+    ないため、やり直しはjobを1件足すだけで済む(doneの行を蘇生させる特殊操作が要らない)。"""
+    _s, recording_id, _p = make_recording(unique_id="revive")
+    _save_transcript(server, recording_id)
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.post("/api/bulk/queue",
+                       json={"kind": "transcribe", "unique_id": "revive", "redo": True}).json()
+
+    assert body["total"] == 1
+    assert ("stt", recording_id) in server.runtime.storage.pending_media_job_keys()
+
+
+def test_transcribe_without_redo_leaves_transcribed_recordings_alone(
+        client, server, make_recording, stt_ready):
+    """redoを指定していないのに済みまで積むと、投入のたびに文字起こし済みをGPUで焼き直す。"""
+    _s, recording_id, _p = make_recording(unique_id="keep")
+    _save_transcript(server, recording_id)
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": "keep"}).json()
+    assert body["recordings"] == 0
+    assert ("stt", recording_id) not in server.runtime.storage.pending_media_job_keys()
+
+
+def test_transcribe_refuses_when_stt_is_unavailable(client, server, make_recording,
+                                                    monkeypatch):
+    """STTが無い環境で積むと、workerが1件ずつ失敗にするだけの行が残る。"""
+    make_recording(unique_id="nostt")
+    monkeypatch.setattr(server.routes.bulk, "stt_available", lambda: False)
+
+    response = client.post("/api/bulk/queue",
+                           json={"kind": "transcribe", "unique_id": "nostt"})
+    assert response.status_code == 503
+
+
+def test_transcribe_refuses_when_nothing_is_eligible(client, server, make_recording,
+                                                     stt_ready):
+    _s, recording_id, _p = make_recording(unique_id="allstt")
+    _save_transcript(server, recording_id)
+
+    response = client.post("/api/bulk/queue",
+                           json={"kind": "transcribe", "unique_id": "allstt"})
+    assert response.status_code == 409
+    assert "処理済み" in response.json()["detail"]
+
+
+def test_transcribe_eta_comes_from_finished_stt_jobs(client, server, make_recording):
+    """所要の実測比は実績のあるjobから出す。文字起こしも同じ台帳(kind=stt)にいる。"""
+    _s, past_id, _p = make_recording(unique_id="eta", seconds=100)
+    server.runtime.storage.enqueue_media_job("j-eta", "stt", past_id)
+    server.runtime.storage.finish_media_job("j-eta", "completed")
+    # 100秒の録画を50秒で文字起こしした実績にする(状態遷移は実時刻を書くので上書きする)。
+    with server.runtime.storage._lock:
+        server.runtime.storage._conn.execute(
+            "UPDATE media_job_queue SET started_at = 0, finished_at = 50"
+            " WHERE job_id = 'j-eta'")
+        server.runtime.storage._conn.commit()
+    _save_transcript(server, past_id)
+    make_recording(unique_id="eta", seconds=200)
+    server.fsfacts._bulk_status_cache.clear()
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": "eta"}).json()
+    assert body["eta_samples"] == 1
+    # STTは直列(worker1本)なので、同時実行数で詰まらない。
+    assert body["eta_seconds"] == pytest.approx(100.0)
+
+
+def test_transcribe_status_counts_targets_and_done(client, server, make_recording):
+    make_recording(unique_id="cnt")
+    _s, done_id, _p = make_recording(unique_id="cnt")
+    _save_transcript(server, done_id)
+
+    body = client.get("/api/bulk/status", params={"kinds": "transcribe"}).json()
+    entry = next(s for s in body["streamers"] if s["unique_id"] == "cnt")
+    assert (entry["targets"]["transcribe"], entry["done"]["transcribe"]) == (1, 1)

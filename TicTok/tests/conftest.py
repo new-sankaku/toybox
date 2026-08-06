@@ -96,7 +96,18 @@ def env_guard(tmp_path, monkeypatch):
         import os
 
         assert not _is_under_production(os.environ[name]), f"{name} still points at production"
+
+    # layoutのroot cacheはprocess全体で1つ。envをtmpへ張り替えてもcacheは前のtestの
+    # tmp dirを指したまま残るため、次のtestが**前のtestのsandbox**の中に素材を見つける
+    # (実際にそれで1件が誤って通った)。前後どちらでも落として、探索を必ずこのtestの
+    # sandboxだけに閉じる。
+    from tictok.core import layout as _layout
+
+    _layout.reset_pool_root()
+    _layout.reset_record_roots()
     yield sandbox
+    _layout.reset_pool_root()
+    _layout.reset_record_roots()
 
 
 @pytest.fixture(autouse=True)

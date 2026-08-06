@@ -85,7 +85,7 @@ def main() -> int:
 
         for _rowid, session_id, battle_id, nickname, _battle in repaired:
             logger.info(
-                "%s session=%s battle=%s -> own host = %r",
+                "%s session=%s battle=%s -> 自陣のhost = %r",
                 "REPAIR" if args.apply else "WOULD REPAIR",
                 session_id,
                 battle_id,
@@ -106,7 +106,7 @@ def main() -> int:
             conn.commit()
 
         logger.info(
-            "%s %d battle(s)%s",
+            "%s battle %d件%s",
             "Repaired" if args.apply else "Would repair",
             len(repaired),
             "" if args.apply else " (dry-run; pass --apply to write)",

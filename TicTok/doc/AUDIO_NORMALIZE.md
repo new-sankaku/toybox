@@ -11,7 +11,7 @@ preset tableのような機構は置かない。
 | `audio_normalize_true_peak` | -1.5 | 全経路共通の上限ピーク |
 | `audio_normalize_bitrate_kbps` | 192 | 再encode(AAC)の品質 |
 | `clip_normalize_audio` | 0 | 切り出しの既定(画面で毎回変更可) |
-| `video_output_normalize_audio` | 0 | 焼き込み出力・Up出力 |
+| `video_output_normalize_audio` | 1 | 焼き込み出力・Up出力(出力を作るときに揃える) |
 | `reprocess_normalize_audio` | 1 | 再mp4化のついでに録画本体も揃える |
 
 ## 方式: one-pass loudnorm 単体
@@ -55,6 +55,13 @@ battleが2本入り相手の声が同じmixに乗る区間)で4方式を実測�
 | 焼き込み・Up出力 | 完成mp4 | 再encode | `.overlay.mp4` / `.up.mp4` |
 | 音量正規化(`audionorm`) | 完成mp4 | **stream copy** | 元mp4を差し替え(元は `_backup/`) |
 | 再mp4化(`reprocess`) | 保持HLS(.ts) | stream copy | 元mp4を差し替え(元は `_backup/`) |
+
+「音量正規化」という**操作**(動画画面のbutton・一括処理の `audionorm`)が触るのは
+**録画本体のmp4だけ**である。`recordings.filename` が名指ししている1本を入力に取り、
+音声だけ作り直して同じpathへ差し替える。焼き込み(`.overlay.mp4`)・Up出力(`.up.mp4`)は
+この操作の対象ではない — それらは**作るときに**
+`video_output_normalize_audio`(既定ON)で揃うので、出来上がった出力を後から正規化する
+経路は持たない。既に作った出力の音量を変えたい場合は、設定を変えて出力し直す。
 
 - 音量正規化は映像をstream copyするので、画質も、焼き込みが突き合わせるtimestampも動かない
   (コメントのズレを持ち込まない)。

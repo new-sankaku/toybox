@@ -108,8 +108,8 @@ def _image_size(source) -> Optional[tuple[int, int]]:
         if not _pillow_missing_reported:
             _pillow_missing_reported = True
             logger.warning(
-                "Pillow is unavailable; avatar sizes fall back to the URL size hint and "
-                "resolution upgrades may be missed",
+                "Pillowが利用できないためavatarのsizeはURLのsize hintに依存し、"
+                "解像度の向上を検出できない場合があります",
                 extra={"event": "collector.avatar_sizing_degraded",
                        "ctx": {"reason": "pillow_missing"}},
                 exc_info=True,
@@ -122,7 +122,7 @@ def _image_size(source) -> Optional[tuple[int, int]]:
     except Exception:
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "could not read the pixel size of an avatar image",
+                "avatar imageのpixel sizeを読み取れませんでした",
                 extra={"event": "collector.avatar_size_read_failed",
                        "ctx": {"path": str(source) if not isinstance(source, (bytes, bytearray)) else "",
                                "size_bytes": len(source) if isinstance(source, (bytes, bytearray)) else None}},
@@ -185,14 +185,14 @@ class AvatarPool:
                 moved += 1
             except OSError:
                 logger.warning(
-                    "failed to migrate legacy avatar %s", src.name,
+                    "旧形式のavatar %s の移行に失敗しました", src.name,
                     extra={"event": "collector.avatar_migration_failed",
                            "ctx": {"path": str(src)}},
                     exc_info=True,
                 )
         if moved:
             logger.info(
-                "migrated %d legacy avatar(s) into %s", moved, self._dir,
+                "旧形式のavatar %d 件を %s へ移行しました", moved, self._dir,
                 extra={"event": "collector.avatars_migrated",
                        "ctx": {"moved": moved, "path": str(self._dir)}},
             )
@@ -228,8 +228,8 @@ class AvatarPool:
                     return data
         except (OSError, ValueError):
             logger.warning(
-                "failed to read avatar meta (user=%s); the next fetch decision is made "
-                "without it", user_id,
+                "avatarのmetaを読み取れないため次回の取得判定はmeta無しで行います"
+                "（user=%s）", user_id,
                 extra={"event": "collector.avatar_meta_read_failed",
                        "ctx": {"user_id": user_id, "path": str(path)}},
                 exc_info=True,
@@ -244,8 +244,8 @@ class AvatarPool:
             )
         except OSError:
             logger.warning(
-                "failed to write avatar meta (user=%s); avatar upgrades for this user "
-                "will not be detected", user_id,
+                "avatarのmetaを書き込めないためこのuserのavatarの向上を検出できません"
+                "（user=%s）", user_id,
                 extra={"event": "collector.avatar_meta_write_failed",
                        "ctx": {"user_id": user_id, "path": str(self._meta_path(user_id))}},
                 exc_info=True,
@@ -319,7 +319,7 @@ class AvatarPool:
             return content, content_type
         except OSError:
             logger.warning(
-                "failed to read pooled avatar (user=%s)", user_id,
+                "pool内のavatarを読み取れませんでした（user=%s）", user_id,
                 extra={"event": "collector.avatar_read_failed",
                        "ctx": {"user_id": user_id, "path": str(path)}},
                 exc_info=True,
@@ -360,8 +360,8 @@ class AvatarPool:
                         # attempts logged as recoverable warnings; this is the line that
                         # says the recovery never happened.
                         logger.error(
-                            "avatar for %s could not be persisted after %d attempt(s); "
-                            "the signed URL cannot be retried later",
+                            "%s のavatarを %d 回試行しても保存できませんでした"
+                            "（署名付きURLのため後から再試行できません）",
                             user_id, self._attempts,
                             extra={"event": "collector.avatar_persist_exhausted",
                                    "ctx": {"user_id": user_id,
@@ -387,8 +387,8 @@ class AvatarPool:
                 # Not retried, and the signed URL will not be valid later: this user's
                 # avatar is permanently unavailable to the burn-in.
                 logger.error(
-                    "avatar response for %s is unusable (%d bytes); the avatar is lost "
-                    "for this user", user_id, len(content),
+                    "%s のavatar responseが使用できないため（%d bytes）"
+                    "このuserのavatarは失われます", user_id, len(content),
                     extra={"event": "collector.avatar_persist_failed",
                            "ctx": {"user_id": user_id, "reason": "invalid_size",
                                    "size_bytes": len(content), "max_bytes": _MAX_BYTES,
@@ -406,7 +406,7 @@ class AvatarPool:
             self._write_meta(user_id, aid, width, height)
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "persisted avatar for %s (%dx%d, %d bytes)",
+                    "%s のavatarを保存しました（%dx%d, %d bytes）",
                     user_id, width, height, len(content),
                     extra={"event": "collector.avatar_persisted",
                            "ctx": {"user_id": user_id, "width": width, "height": height,
@@ -420,7 +420,7 @@ class AvatarPool:
             # and cannot be re-fetched later, so the burn-in will never have this avatar.
             log = logger.warning if retryable else logger.error
             log(
-                "avatar persist HTTP %d (user=%s, attempt=%d/%d, retry=%s): %s",
+                "avatarの保存がHTTP %d で失敗しました（user=%s, attempt=%d/%d, 再試行=%s）: %s",
                 status, user_id, attempt, self._attempts, retryable, url,
                 extra={"event": "collector.avatar_persist_failed",
                        "ctx": {"user_id": user_id, "reason": "http_status",
@@ -430,7 +430,7 @@ class AvatarPool:
             return retryable, False
         except (httpx.TimeoutException, httpx.TransportError):
             logger.warning(
-                "avatar persist transport error (user=%s, attempt=%d/%d): %s",
+                "avatarの保存でtransport errorが発生しました（user=%s, attempt=%d/%d）: %s",
                 user_id, attempt, self._attempts, url,
                 extra={"event": "collector.avatar_persist_retried",
                        "ctx": {"user_id": user_id, "reason": "transport",
@@ -443,7 +443,7 @@ class AvatarPool:
             # it will be missing from every burn-in of every recording this user appears
             # in. Previously a warning, which understated a permanent data loss.
             logger.error(
-                "avatar persist failed (user=%s, attempt=%d/%d): %s",
+                "avatarの保存に失敗しました（user=%s, attempt=%d/%d）: %s",
                 user_id, attempt, self._attempts, url,
                 extra={"event": "collector.avatar_persist_failed",
                        "ctx": {"user_id": user_id, "reason": "unexpected",

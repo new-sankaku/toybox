@@ -36,11 +36,15 @@ from tictok.core.config import (
     get_upscale_tile_overlap,
 )
 from tictok.core import cancel
+from tictok.core import ffprobe
+from tictok.core.config import get_normalize_scale_mode
+from tictok.media import hls_source
 from tictok.record import audio_norm
 from tictok.core.gpu import gpu_slot
 from tictok.paths import PROJECT_ROOT
 from tictok.record.recorder import (
     ProgressGate,
+    _normalize_filter,
     ffmpeg_available,
     ffmpeg_ctx,
     ffprobe_available,
@@ -162,7 +166,7 @@ def cleanup_upscale_files(src: Path) -> None:
             path.unlink(missing_ok=True)
         except OSError:
             logger.warning(
-                "failed to remove upscale artifact %s", path.name,
+                "AI高画質化の生成物 %s を削除できませんでした", path.name,
                 extra={"event": "upscale.artifact_removal_failed",
                        "ctx": {"stem": src.stem, "path": str(path)}},
                 exc_info=True,
@@ -214,7 +218,8 @@ def load_image_model():
         if _model is None or _model_key != key:
             started = time.monotonic()
             logger.info(
-                "loading upscale model: %s device=%s compute=%s", model_path, device, compute,
+                "AI高画質化のmodelを読み込みます: %s device=%s compute=%s",
+                model_path, device, compute,
                 extra={"event": "upscale.model_load_started",
                        "ctx": {"path": model_path, "device": device, "compute": compute,
                                "size_bytes": model_file.stat().st_size}},
@@ -223,7 +228,7 @@ def load_image_model():
                 descriptor = ModelLoader().load_from_file(model_path)
             except Exception as exc:
                 logger.error(
-                    "could not load the upscale model %s", model_file.name,
+                    "AI高画質化のmodel %s を読み込めません", model_file.name,
                     extra={"event": "upscale.model_load_failed",
                            "ctx": {"path": model_path, "device": device, "compute": compute,
                                    "reason": "unreadable",
@@ -233,7 +238,7 @@ def load_image_model():
                 raise UpscaleError(f"Upscale modelの読み込みに失敗しました: {exc}") from exc
             if not isinstance(descriptor, ImageModelDescriptor):
                 logger.error(
-                    "the configured upscale model %s is not an image-to-image model",
+                    "設定されたAI高画質化のmodel %s は画像から画像へのmodelではありません",
                     model_file.name,
                     extra={"event": "upscale.model_load_failed",
                            "ctx": {"path": model_path, "reason": "wrong_model_kind",
@@ -245,7 +250,7 @@ def load_image_model():
             elif compute == "float16":
                 if not descriptor.supports_half:
                     logger.error(
-                        "the configured upscale model %s does not support float16",
+                        "設定されたAI高画質化のmodel %s はfloat16に対応していません",
                         model_file.name,
                         extra={"event": "upscale.model_load_failed",
                                "ctx": {"path": model_path, "reason": "half_unsupported",
@@ -262,7 +267,7 @@ def load_image_model():
                 descriptor.model.eval()
             except Exception as exc:
                 logger.error(
-                    "could not initialise the upscale model %s on %s",
+                    "AI高画質化のmodel %s を %s で初期化できません",
                     model_file.name, device,
                     extra={"event": "upscale.model_load_failed",
                            "ctx": {"path": model_path, "device": device, "half": half,
@@ -274,7 +279,7 @@ def load_image_model():
             _model = (descriptor, device, half)
             _model_key = key
             logger.info(
-                "upscale model ready: %s x%s on %s (half=%s)",
+                "AI高画質化のmodelの準備ができました: %s x%s / %s（half=%s）",
                 model_file.name, descriptor.scale, device, half,
                 extra={"event": "upscale.model_loaded",
                        "ctx": {"path": model_path, "device": device, "half": half,
@@ -284,19 +289,30 @@ def load_image_model():
     return _model
 
 
-def _probe_video(src: Path) -> tuple[int, int, float, float]:
-    """(width, height, fps, duration_seconds) via ffprobe. Raises UpscaleError when
-    the probe fails — frame geometry must be exact for raw-pipe decode."""
+def _probe_video(source) -> tuple[int, int, float, float, int]:
+    """(width, height, fps, duration_seconds, 解像度の種類数) via ffprobe. Raises
+    UpscaleError when the probe fails — frame geometry must be exact for raw-pipe decode.
+
+    「exactでなければならない」の意味がstream headerの1組では足りない。混在解像度の録画で
+    その1組(=開いた所の値)を採ると、Up出力は**録画が最初に映っていた解像度から**全編を
+    引き伸ばすことになる。実測(ffmpeg 2026-06-10、160x120で開いて240x180へ切り替わる素材):
+    raw pipeへ出てくるframeは60枚とも160x120で、切替後の本来大きい絵は一度160x120へ縮めて
+    から渡されていた。低い側で開いた録画ほど、実在する画素を捨ててから拡大することになる。
+
+    全編に現れる解像度の最大を枠に採り、種類数を呼び出し側へ返して、複数あるときは復号側で
+    その枠へ揃えさせる(``_render``)。"""
     if not ffprobe_available():
         raise UpscaleError("ffprobeが見つかりません。高画質化にはffmpeg一式のinstallが必要です。")
+    src = source.path
     args = [
-        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "ffprobe", "-v", "error", *source.input_args, "-select_streams", "v:0",
         "-show_entries", "stream=width,height,r_frame_rate",
         "-show_entries", "format=duration", "-of", "json", str(src),
     ]
     try:
         completed = subprocess.run(
-            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60, check=True,
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=ffprobe.SHORT_TIMEOUT_SECONDS, check=True,
         )
         info = json.loads(completed.stdout.decode("utf-8", "replace"))
         stream = info["streams"][0]
@@ -306,7 +322,7 @@ def _probe_video(src: Path) -> tuple[int, int, float, float]:
     except (OSError, subprocess.SubprocessError, KeyError, IndexError, ValueError) as exc:
         stderr = getattr(exc, "stderr", None)
         logger.error(
-            "could not probe %s for upscaling", src.name,
+            "AI高画質化のために %s を調べられません", src.name,
             extra={"event": "process.ffprobe_failed",
                    "ctx": {"stage": "upscale_probe", "stem": src.stem, "path": str(src),
                            **ffmpeg_ctx(
@@ -319,14 +335,18 @@ def _probe_video(src: Path) -> tuple[int, int, float, float]:
         raise UpscaleError(f"動画情報の取得に失敗しました: {exc}") from exc
     if width <= 0 or height <= 0 or not (0 < fps <= 240):
         logger.error(
-            "probe of %s returned unusable geometry: %dx%d @ %s fps",
+            "%s の調査結果が使えない値です: %dx%d @ %s fps",
             src.name, width, height, fps,
             extra={"event": "upscale.probe_rejected",
                    "ctx": {"stem": src.stem, "path": str(src), "input_width": width,
                            "input_height": height, "fps": fps}},
         )
         raise UpscaleError(f"動画の解像度/フレームレートが不正です: {width}x{height} @ {fps}")
-    return width, height, fps, duration
+    found = hls_source.resolutions_sync(source)
+    if found:
+        width = max(w for w, _ in found)
+        height = max(h for _, h in found)
+    return width, height, fps, duration, len(found)
 
 
 def _output_dimensions(src_w: int, src_h: int, scale: int) -> tuple[int, int]:
@@ -369,11 +389,19 @@ def _upscale_frame(descriptor, frame, tile: int, overlap: int, scale: int):
 
 def _signature(input_path: Path, model_path: str, encoder: str, quality: int,
                audio_normalize: Optional[dict] = None) -> str:
-    stat = input_path.stat()
+    # mp4が在るときの鍵は今までと同じ形のまま残す。Up出力は1本で数時間かかるので、
+    # 鍵の形を変えると既にある出力が一斉に作り直しになる。mp4が無い(=.tsから読む)経路には
+    # そもそも既存の出力が無いので、素材そのものの指紋を使う。
+    if input_path.is_file():
+        stat = input_path.stat()
+        source_key = [stat.st_size, stat.st_mtime_ns]
+    else:
+        key = hls_source.fingerprint(input_path)
+        source_key = [key["size"], key["mtime"], key["segments"]]
     mstat = Path(model_path).stat()
     payload = {
         "version": _SIGNATURE_VERSION,
-        "input": [stat.st_size, stat.st_mtime_ns],
+        "input": source_key,
         "model": [model_path, mstat.st_size, mstat.st_mtime_ns],
         "encoder": encoder,
         "quality": quality,
@@ -399,7 +427,7 @@ def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progres
     if not ffmpeg_available():
         raise UpscaleError("ffmpegが見つかりません。高画質化にはffmpegのinstallが必要です。")
     src = Path(input_path)
-    if not src.is_file():
+    if not hls_source.available(src):
         raise UpscaleError("入力の動画fileが存在しません。")
     descriptor, device, half = _get_model()
     dst = upscale_output_path(src)
@@ -410,7 +438,7 @@ def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progres
         try:
             if meta.read_text(encoding="utf-8").strip() == signature:
                 logger.debug(
-                    "reusing the cached upscale of %s", src.name,
+                    "%s のAI高画質化はcacheを再利用します", src.name,
                     extra={"event": "upscale.reused",
                            "ctx": {"stem": src.stem, "path": str(dst),
                                    "size_bytes": dst.stat().st_size}},
@@ -418,7 +446,7 @@ def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progres
                 return dst
         except OSError:
             logger.warning(
-                "could not read the upscale cache signature for %s; re-rendering",
+                "%s のAI高画質化のcache signatureを読めないため作り直します",
                 src.name,
                 extra={"event": "upscale.cache_read_failed",
                        "ctx": {"stem": src.stem, "path": str(meta)}},
@@ -433,25 +461,31 @@ def ensure_upscaled(input_path: str, encoder: str, base_quality: int, on_progres
     )
     started = time.monotonic()
     with gpu_slot("upscale"), _upscale_lock:
-        _render(src, dst, descriptor, device, half, encoder, quality, on_progress,
-                audio_normalize)
+        # mp4が無い録画は.tsのHLSから読む。復号も音声の拾い直しも同じ入力を指す必要が
+        # あるので、貸し出しはrender全体を包む(hls_source参照)。
+        with hls_source.ffmpeg_source(src) as source:
+            _render(src, source, dst, descriptor, device, half, encoder, quality,
+                    on_progress, audio_normalize)
     sidecar_dir(src).mkdir(parents=True, exist_ok=True)
     meta.write_text(signature, encoding="utf-8")
     logger.info(
-        "upscaled %s -> %s", src.name, dst.name,
+        "AI高画質化が完了しました: %s -> %s", src.name, dst.name,
         extra={"event": "upscale.completed",
                "ctx": {"stem": src.stem, "path": str(dst),
                        "size_bytes": dst.stat().st_size,
-                       "input_bytes": src.stat().st_size,
+                       "input_bytes": src.stat().st_size if src.is_file() else None,
                        "encoder": encoder, "quality": quality, "device": device,
                        "duration_ms": int((time.monotonic() - started) * 1000)}},
     )
     return dst
 
 
-def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
+def _render(src: Path, source, dst: Path, descriptor, device: str, half: bool,
             encoder: str, quality: int, on_progress,
             audio_normalize: Optional[dict] = None) -> None:
+    """``src`` はこの録画のpath(log・sidecar・表示名の基準)、``source`` は実際にffmpegへ
+    渡す入力。mp4が無い録画では後者だけが使い捨てのplaylistを指し、前者は変わらない —
+    sidecarをplaylist側で解くと、jobごとに別の場所へ書かれる。"""
     import queue
     import numpy as np
     import torch
@@ -461,10 +495,10 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
     torch.backends.cudnn.benchmark = True
 
     scale = int(descriptor.scale)
-    width, height, fps, duration = _probe_video(src)
+    width, height, fps, duration, distinct = _probe_video(source)
     # 音声は入力1からそのまま拾う。正規化する場合だけ、loudnormが上げたrateを戻すため
     # sourceの実値を測る。
-    audio_rate = audio_norm.probe_sample_rate(src) if audio_normalize else None
+    audio_rate = audio_norm.probe_sample_rate(source.path) if audio_normalize else None
     out_w, out_h = _output_dimensions(width, height, scale)
     total_frames = max(1, int(round(duration * fps)))
     tile = get_upscale_tile()
@@ -475,12 +509,20 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
     dtype = torch.float16 if half else torch.float32
     fps_str = f"{fps:.6f}"
     frame_bytes = width * height * 3
+    # 解像度が変わる録画は、何も指定しないとffmpegが**開いた所の寸法**でfilter graphを
+    # 固定し、切替後のframeをそこへ縮めてから渡してくる(実測: 160x120で開くと240x180の
+    # 区間も160x120で出てくる)。低い側で開いた録画は、実在する画素を捨ててから拡大される。
+    # 上で採った枠を明示すれば、大きい側の絵はその大きさのまま model へ渡る。
+    # 均一な入力(既定)には何も足さない — 従来と同じ1 filterのままにする。
+    geometry = (_normalize_filter(width, height, get_normalize_scale_mode()) + ","
+                if distinct > 1 else "")
 
     sidecar_dir(src).mkdir(parents=True, exist_ok=True)
     log_path = sidecar_path(src, UPSCALE_LOG_SUFFIX)
     tmp_dst = dst.with_suffix(".tmp.mp4")
     logger.info(
-        "upscale start: %s %dx%d -> %dx%d (model x%d, device=%s, half=%s, tile=%d, encoder=%s, ~%d frames)",
+        "AI高画質化を開始しました: %s %dx%d -> %dx%d"
+        "（model x%d, device=%s, half=%s, tile=%d, encoder=%s, 約%d frame）",
         src.name, width, height, out_w, out_h, scale, device, half, tile, encoder, total_frames,
         extra={"event": "upscale.started",
                "ctx": {"stem": src.stem, "path": str(src),
@@ -507,12 +549,13 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             # normalise timing here or the muxed audio would drift on long videos.
             # (Burned-in overlay inputs are already CFR — the filter is a no-op.)
             decode_args = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(src),
-                "-map", "0:v:0", "-vf", f"fps={fps_str}",
+                "ffmpeg", "-hide_banner", "-loglevel", "error",
+                *source.input_args, "-i", str(source.path),
+                "-map", "0:v:0", "-vf", f"{geometry}fps={fps_str}",
                 "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1",
             ]
             logger.debug(
-                "starting the upscale decoder for %s", src.name,
+                "%s のAI高画質化の復号processを起動します", src.name,
                 extra={"event": "process.ffmpeg_started",
                        "ctx": {"stage": "upscale_decode", "stem": src.stem,
                                "stderr_path": str(log_path), **ffmpeg_ctx(decode_args)}},
@@ -529,7 +572,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{out_w}x{out_h}",
                 "-framerate", fps_str, "-i", "pipe:0",
-                "-i", str(src),
+                *source.input_args, "-i", str(source.path),
                 "-map", "0:v:0", "-map", "1:a?",
                 # 音量正規化のときだけ音声を再encodeする。入力(焼き込み済み or 録画)は
                 # VFR由来のtimestampを持つため、audio_norm側でaresample=async=1を前置する。
@@ -539,7 +582,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                 "-movflags", "+faststart", "-f", "mp4", str(tmp_dst),
             ]
             logger.debug(
-                "starting the upscale encoder for %s", src.name,
+                "%s のAI高画質化のencode processを起動します", src.name,
                 extra={"event": "process.ffmpeg_started",
                        "ctx": {"stage": "upscale_encode", "stem": src.stem,
                                "stderr_path": str(log_path), **ffmpeg_ctx(encode_args)}},
@@ -611,7 +654,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                             out = _upscale_frame(descriptor, frame, tile, overlap, scale)
                         except torch.cuda.OutOfMemoryError as exc:
                             logger.error(
-                                "the GPU ran out of memory upscaling %s at frame %d",
+                                "%s のAI高画質化でGPUのmemoryが不足しました（frame %d）",
                                 src.name, done + 1,
                                 extra={"event": "upscale.memory_exhausted",
                                        "ctx": {"stem": src.stem, "frames_done": done,
@@ -658,7 +701,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
                         rate = done / elapsed if elapsed > 0 else 0.0
                         remaining = max(0, max(total_frames, done) - done)
                         logger.info(
-                            "upscaling %s: %d/%d frames (%.1f%%) at %.2f fps",
+                            "%s をAI高画質化中: %d/%d frame（%.1f%%）%.2f fps",
                             src.name, done, max(total_frames, done), percent, rate,
                             extra={"event": "upscale.progress_reported",
                                    "ctx": {"stem": src.stem, "frames_done": done,
@@ -695,7 +738,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             encode_rc = encode.wait()
         if decode_rc != 0:
             logger.error(
-                "the upscale decoder for %s exited %s after %d frame(s)",
+                "%s のAI高画質化の復号processが %s で終了しました（frame %d 件の処理後）",
                 src.name, decode_rc, done,
                 extra={"event": "process.ffmpeg_failed",
                        "ctx": {"stage": "upscale_decode", "stem": src.stem,
@@ -705,7 +748,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             raise UpscaleError(f"動画のdecodeに失敗しました（詳細: {log_path.name}）。")
         if encode_rc != 0 or not tmp_dst.is_file():
             logger.error(
-                "the upscale encoder for %s exited %s after %d frame(s)",
+                "%s のAI高画質化のencode processが %s で終了しました（frame %d 件の処理後）",
                 src.name, encode_rc, done,
                 extra={"event": "process.ffmpeg_failed",
                        "ctx": {"stage": "upscale_encode", "stem": src.stem,
@@ -716,7 +759,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             raise UpscaleError(f"動画のencodeに失敗しました（詳細: {log_path.name}）。")
         if done == 0:
             logger.error(
-                "the upscale decoder for %s produced no frames", src.name,
+                "%s のAI高画質化の復号processがframeを1枚も出しませんでした", src.name,
                 extra={"event": "upscale.no_frames_decoded",
                        "ctx": {"stem": src.stem, "frames": total_frames,
                                **ffmpeg_ctx(decode_args, decode_rc, log_path)}},
@@ -727,7 +770,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
             on_progress(total_frames, total_frames)
         elapsed = time.monotonic() - render_started
         logger.info(
-            "upscale rendered: %s (%d frames)", dst.name, done,
+            "AI高画質化の出力を書き出しました: %s（frame %d 件）", dst.name, done,
             extra={"event": "upscale.rendered",
                    "ctx": {"stem": src.stem, "path": str(dst), "frames_done": done,
                            "frames": total_frames, "size_bytes": dst.stat().st_size,
@@ -736,7 +779,7 @@ def _render(src: Path, dst: Path, descriptor, device: str, half: bool,
         )
     except BrokenPipeError as exc:
         logger.error(
-            "the upscale encoder pipe for %s broke after %d frame(s)", src.name, done,
+            "%s のAI高画質化のencode pipeが切れました（frame %d 件の処理後）", src.name, done,
             extra={"event": "process.ffmpeg_failed",
                    "ctx": {"stage": "upscale_encode", "stem": src.stem,
                            "frames_done": done, "frames": total_frames,

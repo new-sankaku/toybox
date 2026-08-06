@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tictok.core import layout
-from tictok.core.config import get_db_path, get_record_dir, record_dir_from_db
+from tictok.core.config import get_db_path, record_dir_from_db
 
 # Root-level shared dirs that are never per-streamer and must stay put.
 _KEEP_DIRS = {".sidecars", "avatars", "emotes", "gift_icons", "_backup"}

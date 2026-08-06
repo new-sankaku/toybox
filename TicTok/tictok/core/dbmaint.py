@@ -162,7 +162,7 @@ def prune_backups(reason: str, keep: Optional[int] = None) -> list:
             # 古い世代を1つ消せなくても、新しい世代は既に出来ている。退避そのものを失敗
             # 扱いにすると、消せないfileがある間ずっとbackupが取れなくなる。
             logger.warning(
-                "could not prune the old database snapshot %s", item["path"], exc_info=True,
+                "古いDBの退避file %s を削除できませんでした", item["path"], exc_info=True,
                 extra={"event": "dbmaint.prune_failed", "ctx": {"path": item["path"]}},
             )
             continue
@@ -206,7 +206,7 @@ def create_backup(db_path, *, reason: str = REASON_MANUAL, keep: Optional[int] =
 
     started = time.monotonic()
     logger.info(
-        "database snapshot started (reason=%s)", reason_key,
+        "DBの退避を開始しました（reason=%s）", reason_key,
         extra={"event": "dbmaint.backup_started",
                "ctx": {"reason": reason_key, "target": str(final), **space}},
     )
@@ -248,7 +248,7 @@ def create_backup(db_path, *, reason: str = REASON_MANUAL, keep: Optional[int] =
         "pruned": pruned,
     }
     logger.info(
-        "database snapshot completed (reason=%s, %d bytes)", reason_key, size,
+        "DBの退避が完了しました（reason=%s, %d bytes）", reason_key, size,
         extra={"event": "dbmaint.backup_completed", "ctx": result},
     )
     return result

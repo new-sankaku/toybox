@@ -14,9 +14,11 @@ from TikTokLive.proto import (
     ImageBadge,
     ImageModel,
     PrivilegeLogExtra,
+    User,
     UserFansClubInfo,
     UserIdentity,
 )
+from TikTokLive.events import CommentEvent
 
 from tictok.collect import collector as C
 from tictok.collect.live_resolver import LiveResolveBlocked, interpret_live_state
@@ -300,6 +302,20 @@ def test_user_payload_identity_key_prefers_the_immutable_numeric_id():
     assert payload["identity_key"] == "7012345678"
 
 
+def test_event_user_survives_multi_word_proto_fields():
+    """event.userはExtendedUser.from_user経由。TikTokLive 6.6.5はここでto_pydictを
+    casing無しで呼ぶためnick_nameがnickNameになりTypeErrorで落ちる(ttlive_compatで補正)。
+    既存testはExtendedUserを直に組むのでisinstanceで素通りし、この経路を通らない。"""
+    event = CommentEvent(
+        user_info=User(id=7_012_345_678, nick_name="Nick", username="handle", sec_uid="sec"),
+        content="やあ",
+    )
+    payload = C._user_payload(event.user)
+    assert payload["nickname"] == "Nick"
+    assert payload["unique_id"] == "handle"
+    assert payload["identity_key"] == "7012345678"
+
+
 def test_user_payload_falls_back_unique_id_then_unknown_for_the_display_name():
     assert C._user_payload(ExtendedUser(username="handle"))["nickname"] == "handle"
     anonymous = C._user_payload(ExtendedUser())
@@ -504,6 +520,74 @@ def test_extract_league_reads_the_only_known_source_and_never_invents():
     assert C._extract_league({"gifts_info": {"gift_gallery_info": {}}}) == ""
     assert C._extract_league(None) == ""
     assert C._extract_league("not a dict") == ""
+
+
+# ---------------- sign server outage ----------------
+
+
+def _sign_error(reason, status=None):
+    from TikTokLive.client.errors import SignAPIError
+
+    response = None if status is None else SimpleNamespace(status_code=status, headers={})
+    return SignAPIError(reason, "boom", response=response)
+
+
+@pytest.mark.parametrize("reason", ["RATE_LIMIT", "CONNECT_ERROR", "EMPTY_PAYLOAD", "EMPTY_COOKIES"])
+def test_sign_server_outage_classifies_server_side_reasons_as_external(reason):
+    from TikTokLive.client.errors import SignAPIError
+
+    outage = C.sign_server_outage(_sign_error(SignAPIError.ErrorReason[reason]))
+    assert outage is not None
+    assert "sign server" in outage["reason"]
+    assert outage["ctx"]["sign_reason"] == reason
+
+
+def test_sign_server_outage_treats_non_200_by_status_class():
+    from TikTokLive.client.errors import SignAPIError
+
+    # 5xxはsign server自身の不調 -> 外部要因として1行に落とす。
+    outage = C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500))
+    assert outage is not None and outage["ctx"]["sign_status"] == 500
+    assert "500" in outage["reason"]
+    # 4xxはこちらのrequest/keyの問題なので隠さない(Stack Trace経路のまま)。
+    assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 403)) is None
+    # statusが読めないSIGN_NOT_200も外部と断定できないので隠さない。
+    assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200)) is None
+
+
+def test_sign_server_outage_does_not_hide_entitlement_or_unrelated_failures():
+    from TikTokLive.client.errors import SignAPIError
+
+    # API keyの権限不足は設定で直せる自陣の問題。一時障害へ吸わせない。
+    for reason in ("PREMIUM_ENDPOINT", "AUTHENTICATED_WS"):
+        assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason[reason])) is None
+    assert C.sign_server_outage(RuntimeError("unrelated")) is None
+
+
+@pytest.mark.asyncio
+async def test_opponent_listener_logs_sign_outage_without_a_traceback(caplog, monkeypatch):
+    from TikTokLive.client.errors import SignAPIError
+
+    class _Resolver:
+        async def resolve(self, _handle):
+            raise _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500)
+
+    class _Gate:
+        async def acquire(self, priority=False):
+            return None
+
+    listener = C.OpponentRoomListener(
+        "rina__0910", "123", "battle-1", _Resolver(), _Gate(), None
+    )
+    with caplog.at_level("WARNING", logger="tictok.collector"):
+        await listener._run()
+
+    records = [r for r in caplog.records if r.event == "collector.opponent_listener_sign_unavailable"]
+    assert len(records) == 1
+    assert records[0].exc_info is None
+    assert "対処不要" in records[0].getMessage()
+    assert records[0].ctx["battle_id"] == "battle-1"
+    assert records[0].ctx["sign_status"] == 500
 
 
 # ---------------- ProbeGate ----------------
@@ -1097,3 +1181,176 @@ def test_save_envelopes_replaces_per_session(tmp_db, make_session):
     tmp_db.save_envelopes(session_id, [row])
     tmp_db.save_envelopes(session_id, [row])
     assert len(tmp_db.session_envelopes(session_id)) == 1
+
+
+# ---------------- 録画確定時のcomment index ----------------
+
+
+def _finalized_recorder(tmp_db, tmp_root, session_id, state="completed", started=1000.0,
+                        ended=1600.0):
+    """確定直後のRecorderを模したstub。collectorが読むfieldだけを持たせる。
+
+    DB行もupdate_recording済み(=確定を書き戻した後)にしておく。indexはended_atでevent窓を
+    切るので、書き戻す前に張ると次の録画のcommentまで巻き込む。"""
+    path = tmp_root / "streamer" / "mp4" / "00001_streamer_20260101_120000.mp4"
+    recording_id = tmp_db.create_recording(
+        session_id, "streamer", str(path), path.name, "hd", started)
+    tmp_db.update_recording(recording_id, state, str(path), path.name, ended, 1024,
+                            None, ended - started)
+    return SimpleNamespace(
+        recording_id=recording_id, state=state, output_path=path, ended_at=ended,
+        error=None, duration_seconds=ended - started, base=path.stem,
+        snapshot=lambda: {"bytes": 1024},
+    )
+
+
+async def test_finalized_recording_indexes_its_comments(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """確定した録画のcommentがその場でindexへ入ること。
+
+    起動時のbackfillしか張る経路が無かった頃は、server稼働中に始まって終わった録画は
+    次の再起動までcomment panelにも横断検索にも1件も出なかった。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+    tmp_db.add_event(session_id, event_builder("comment", at=1030.0, comment="こんばんは"))
+    tmp_db.add_event(session_id, event_builder("comment", at=1700.0, comment="録画の外"))
+
+    await collector._index_recording_comments(recorder)
+
+    rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
+    assert [(r["video_time"], r["body"]) for r in rows] == [(30.0, "こんばんは")]
+
+
+async def test_finalized_recording_skips_the_index_when_the_material_failed(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """failedの録画は張らない。起動時backfill(recordings_briefがcompleted/interruptedのみ)と
+    同じ規則にしないと、commentが出る録画の条件が2つに分かれる。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id, state="failed")
+    tmp_db.add_event(session_id, event_builder("comment", at=1030.0, comment="こんばんは"))
+
+    await collector._index_recording_comments(recorder)
+
+    assert tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT) == []
+
+
+async def test_index_failure_does_not_break_the_finalize_callback(
+        collector, tmp_db, tmp_root, make_session, monkeypatch):
+    """indexが落ちても確定処理は続ける。ここで送出すると通知も次の録画への再開も落ちる。"""
+    async def boom(*args, **kwargs):
+        raise OSError("timing.jsonが読めません")
+
+    monkeypatch.setattr(C.indexer, "index_comments", boom)
+    session_id = make_session("streamer", status="connected")
+    collector.session_id = session_id
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+
+    await collector._on_recording_finalized(recorder)
+
+    assert tmp_db.get_recording(recorder.recording_id)["status"] == "completed"
+
+
+async def test_finalize_callback_wires_the_comment_index(
+        collector, tmp_db, tmp_root, make_session, event_builder):
+    """確定callbackそのものがindexを張ること(呼び出しの結線が外れていないこと)。"""
+    from tictok.search import indexer
+
+    session_id = make_session("streamer", status="connected")
+    collector.session_id = session_id
+    recorder = _finalized_recorder(tmp_db, tmp_root, session_id)
+    tmp_db.add_event(session_id, event_builder("comment", at=1100.0, comment="おつぽみ"))
+
+    await collector._on_recording_finalized(recorder)
+
+    rows = tmp_db.search_hits_for(recorder.recording_id, indexer.SOURCE_COMMENT)
+    assert [r["body"] for r in rows] == ["おつぽみ"]
+
+
+# ---------------- 焼き込みassetの先行取得への結線 ----------------
+
+
+class _RecordingPrefetch:
+    """AssetPrefetcherのうち、collectorが呼ぶ面だけを持つstub。"""
+
+    def __init__(self):
+        self.gift_icons = []
+        self.avatars = []
+        self.emotes = []
+
+    def submit_gift_icon(self, gift_id, url):
+        self.gift_icons.append((gift_id, url))
+
+    def submit_avatar(self, user_key, url):
+        self.avatars.append((user_key, url))
+
+    def submit_emotes(self, raw):
+        self.emotes.append(raw)
+
+
+@pytest.mark.asyncio
+async def test_recorded_event_queues_the_user_avatar_and_comment_emotes(collector):
+    """_record は履歴に載る全event種が通る唯一の口で、そこがasset先行取得のhook。
+    avatarとemoteのCDN URLは配信終了後403になるため、ここで積み損ねると焼き込みは
+    頭文字円盤と透明な余白へ縮退し、後から取り直す手段が無い。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+    emotes = json.dumps([{"index": 0, "id": "700111", "url": "https://cdn.example/e.png"}])
+
+    await collector._record("comment", {
+        "user": {"unique_id": "viewer", "avatar": "https://cdn.example/a.png"},
+        "comment": "こんばんは",
+        "emotes": emotes,
+    })
+
+    assert prefetch.avatars == [("viewer", "https://cdn.example/a.png")]
+    assert prefetch.emotes == [emotes]
+
+
+@pytest.mark.asyncio
+async def test_event_without_emotes_queues_nothing_for_emotes(collector):
+    """emoteを持たないeventで空の要求を積まないこと(queueは有界で、席は有限)。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+
+    await collector._record("like", {"user": {"unique_id": "viewer", "avatar": ""}, "count": 1})
+
+    assert prefetch.emotes == []
+    assert prefetch.avatars == [("viewer", "")]
+
+
+@pytest.mark.asyncio
+async def test_gift_event_queues_the_icon_while_its_url_is_fresh(collector, monkeypatch):
+    """gift iconはgift eventの側で積む(gift_idはそこにしか無い)。"""
+    prefetch = _RecordingPrefetch()
+    collector._asset_prefetch = prefetch
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(collector, "_record", _noop)
+
+    await collector._on_gift(SimpleNamespace(
+        user=ExtendedUser(username="handle"),
+        gift=SimpleNamespace(name="rose", diamond_count=10,
+                             image=ImageModel(m_urls=["https://cdn.example/rose.png"]), id=5827),
+        repeat_count=1,
+        streaking=False,
+        base_message=SimpleNamespace(create_time=0),
+    ))
+
+    assert prefetch.gift_icons == [(5827, "https://cdn.example/rose.png")]
+
+
+@pytest.mark.asyncio
+async def test_collector_without_a_prefetcher_still_records_events(collector):
+    """先行取得を無効にしたserverでも収集そのものは動く(assetが貯まらないだけ)。"""
+    collector._asset_prefetch = None
+
+    await collector._record("comment", {"user": {"unique_id": "viewer", "avatar": "u"},
+                                        "comment": "やあ"})
+
+    assert collector.stats["events_total"] == 1

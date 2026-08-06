@@ -1,21 +1,29 @@
 import asyncio
 import errno
+import fnmatch
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import sys
 import time
+import uuid
+from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
 from tictok.core import cancel
 from tictok.core import config
+from tictok.core import ffprobe
 from tictok.core import layout
+from tictok.core import orphan_capture
 from tictok.core.logctx import ctx_recording_id, ctx_session_id, ctx_unique_id
 from tictok.core.logging_setup import is_debug_enabled, progress_interval_seconds
 from tictok.core.progress import pump_ffmpeg_progress
+from tictok.record import hls_pack
 
 logger = logging.getLogger("tictok.recorder")
 
@@ -31,6 +39,35 @@ STATE_FINALIZING = "finalizing"
 STATE_COMPLETED = "completed"
 STATE_FAILED = "failed"
 
+# 確定処理(timing map・検証・最終保存先への移送)が今この瞬間掴んでいる録画のid。移送は
+# session dirを丸ごと別volumeへ複製して元を消すので、その足元で素材を触るjob(ts結合・
+# 再mp4化・焼き込み)が走ると読み手も移送も壊れる。
+#
+# DBのstatusでは代わりにならない。確定中でもDB行は「録画中」ではなく、復旧で確定する録画に
+# 至っては interrupted のままなので、jobs側の「録画中は触らない」guardを素通りする(実測
+# 2026-07-26 13:10、起動時のts結合sweepが復旧中の録画を束ね、移送のcopyが消えたばかりの
+# segmentを掴んでFileNotFoundで落ちた)。同一processの単一instance運用なので、排他はここ
+# (process内のset)で足りる。
+_finalizing_ids: set = set()
+
+
+@contextmanager
+def finalizing_scope(recording_id):
+    """``recording_id`` を確定処理中として登録する。DB行を持たないRecorderでは何もしない。"""
+    rid = int(recording_id) if recording_id is not None else None
+    if rid is not None:
+        _finalizing_ids.add(rid)
+    try:
+        yield
+    finally:
+        if rid is not None:
+            _finalizing_ids.discard(rid)
+
+
+def is_finalizing(recording_id) -> bool:
+    """その録画の確定処理が走っている最中か。素材を触るjobの投入・実行judgeに使う。"""
+    return recording_id is not None and int(recording_id) in _finalizing_ids
+
 # Log levels for the ops severities (Storage.OPS_INFO / OPS_WARNING / OPS_ERROR),
 # used when a Recorder runs without a Storage and only Layer1 is available.
 _OPS_SEVERITY_LEVELS = {
@@ -45,6 +82,9 @@ HEALTHY_WAIT_SECONDS = 14
 MIN_SEGMENTS = 2
 MAX_LAUNCH_ATTEMPTS = 4
 SEGMENT_SECONDS = 2
+# ``Path.glob("seg*.ts")`` と同じ判定を1回のscandirで下すためのmatcher。normcaseを噛ませて
+# あるので、Windowsの大小無視までglobと一致する(patternは normcase 済みの綴りへ変換する)。
+_SEGMENT_NAME_MATCH = re.compile(fnmatch.translate(os.path.normcase("seg*.ts"))).match
 # How long ffmpeg keeps retrying a dropped input before giving up. Absorbs brief
 # host-side blips that reuse the same stream URL. A full host re-broadcast
 # reissues the URL, which ffmpeg cannot follow; that case is handled upstream by
@@ -119,9 +159,9 @@ def _volume_key(path) -> str:
     """Identifier of the storage volume holding ``path``.
 
     The working dir (SSD), the final dir (HDD), the DB and the logs can each live on
-    a different drive — ``_relocate_to_final`` exists precisely because of that — so a
-    single "free bytes" number cannot answer which drive filled up. On Windows the
-    drive letter is the volume; elsewhere the enclosing mount point is."""
+    a different drive — the split between the two record roots exists precisely because
+    of that — so a single "free bytes" number cannot answer which drive filled up. On
+    Windows the drive letter is the volume; elsewhere the enclosing mount point is."""
     # Resolved first: a relative path has neither drive nor anchor, so keying it
     # directly would report the working directory as a volume of its own and split one
     # physical drive across two entries.
@@ -161,7 +201,7 @@ def disk_free_by_volume(paths) -> dict:
             # drive that is not mounted, for instance. Reporting nothing for it would
             # read as "this volume is fine".
             logger.warning(
-                "no existing directory on the path to %s; its free space is unknown", path,
+                "%s までのpathに実在するdirectoryが無いため空き容量が分かりません", path,
                 extra={"event": "recording.disk_check_failed",
                        "ctx": {"path": str(path), "reason": "path_absent"}},
             )
@@ -173,7 +213,7 @@ def disk_free_by_volume(paths) -> dict:
             usage = shutil.disk_usage(str(anchor))
         except OSError:
             logger.warning(
-                "could not read free space for %s", anchor,
+                "%s の空き容量を読み取れません", anchor,
                 extra={"event": "recording.disk_check_failed",
                        "ctx": {"path": str(anchor), "volume": volume}},
                 exc_info=True,
@@ -202,11 +242,12 @@ def log_disk_preflight(event: str, paths, stage: str, **extra_ctx) -> dict:
     if low:
         ctx["low_volumes"] = low
         logger.warning(
-            "low free disk space on %s before %s", ", ".join(low), stage,
+            "%s の空き容量が不足しています（%s の実行前）", ", ".join(low), stage,
             extra={"event": event, "ctx": ctx},
         )
     else:
-        logger.info("disk space checked before %s", stage, extra={"event": event, "ctx": ctx})
+        logger.info("%s の実行前に空き容量を確認しました", stage,
+                    extra={"event": event, "ctx": ctx})
     return report
 
 
@@ -301,10 +342,15 @@ def is_pts_discontinuity(extinf: float, wall_seconds: float) -> bool:
     )
 
 
+# PATH上の実行fileの有無はprocessの寿命で変わらない。Windowsの ``shutil.which`` は
+# PATH x PATHEXT ぶんの存在確認を毎回叩くため、収集のsnapshotのように高頻度で通る経路で
+# 効いてくる。
+@lru_cache(maxsize=1)
 def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+@lru_cache(maxsize=1)
 def ffprobe_available() -> bool:
     return shutil.which("ffprobe") is not None
 
@@ -347,7 +393,7 @@ async def replace_with_retry(tmp: Path, dst: Path, attempts: int = 22,
                 return False
             if i and i % 5 == 0:
                 logger.info(
-                    "%s is still locked; retrying the swap (attempt %d/%d)",
+                    "%s がまだlockされています。差し替えを再試行します（%d/%d 回目）",
                     dst.name, i + 1, attempts,
                     extra={"event": "recording.replace_retried",
                            "ctx": {"path": str(dst), "attempt": i + 1,
@@ -362,15 +408,8 @@ async def _probe_duration_seconds(path: Path) -> Optional[float]:
     """Container duration in seconds via ffprobe, or None on failure. Module-level twin of
     Recorder._probe_duration for callers without a Recorder instance."""
     try:
-        proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=nokey=1:noprint_wrappers=1", str(path),
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        return float(out.decode("ascii", "replace").strip())
-    except (OSError, ValueError):
+        return await ffprobe.duration_seconds(path)
+    except OSError:
         return None
 
 
@@ -381,6 +420,116 @@ RECLAIM_REPLACE_ATTEMPTS = 7
 # frameを増減させないので、正常な再encodeは尺がそのまま残る。下回るのは途中でdecodeが
 # 止まった場合だけで、実測では 872秒 / 10675秒 (8%) まで落ちた。
 REENCODE_MIN_COVERAGE = 0.98
+
+
+_COPY_CHUNK = 1 << 20
+
+
+def _copy_durable(src: Path, dst: Path) -> int:
+    """srcをdstへ複製し、**diskへ着くまで待って**からbytes数を返す。
+
+    ``shutil.copy`` は書き込みがOSのcacheへ入った時点で返る。外付けdriveがcopyの途中で
+    busから外れると、失敗はcallが返ったずっと後に「遅延書き込みの失敗」として現れるため、
+    直後にsizeを確かめても cache 上の値を読むだけで「着いた」証明にならない。ここで fsync
+    するのは、その値を根拠に元を消すからである。"""
+    written = 0
+    with open(src, "rb") as fin, open(dst, "wb") as fout:
+        while True:
+            chunk = fin.read(_COPY_CHUNK)
+            if not chunk:
+                break
+            fout.write(chunk)
+            written += len(chunk)
+        fout.flush()
+        os.fsync(fout.fileno())
+    shutil.copystat(src, dst)
+    return written
+
+
+def render_vod_playlist(kept: list, absolute: bool = False) -> str:
+    """``_playlist_segments`` が採った集合を、終端済みVOD playlistとして描く。
+
+    ``#EXT-X-PLAYLIST-TYPE:VOD`` と ``#EXT-X-ENDLIST`` が、終端の付かないcapture index
+    (停止時のffmpegは強制終了されるので付かない)をlive streamと見なす挙動を止める。
+
+    finalizeと再生の両方がここを通る。captureのindex.m3u8をそのまま再生に出すと、
+    ``_playlist_segments`` が落としたsegment — 源のtimestampが壊れてEXTINFだけが巨大に
+    なったもの — が再生の時間軸に戻ってくる。実測では132録画中6件がこれに当たり、
+    1本のEXTINFが 2156s / 3760s / **28287s(7.8時間)** だった。落とす判断と描く場所を
+    一致させておかないと、mp4の秒と再生の秒が録画によって何時間もずれる。"""
+    target = max(int(extinf) + 1 for _, extinf, _, _, _ in kept)
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:6",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-INDEPENDENT-SEGMENTS",
+        "#EXT-X-TARGETDURATION:%d" % target,
+    ]
+    for seg, extinf, _, discontinuous, byterange in kept:
+        if discontinuous:
+            lines.append("#EXT-X-DISCONTINUITY")
+        lines.append("#EXTINF:%.6f," % extinf)
+        if byterange is not None:
+            # 束ね済みの録画では複数segmentが1 fileに入っているので、entryはそのfileの
+            # 一部を指す。この行が無いとdemuxerは束の先頭から全体を1 segmentとして読む。
+            lines.append("#EXT-X-BYTERANGE:%d@%d" % (byterange[1], byterange[0]))
+        # Bare names resolve relative to the playlist's own directory, so a playlist
+        # written anywhere else has to spell the segments out in full.
+        lines.append(str(seg.resolve()) if absolute else seg.name)
+    lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines) + "\n"
+
+
+def write_curated_playlist(hls_dir, dst, unique_id: str = "") -> Optional[Path]:
+    """その録画の採用集合だけを指す終端済みVOD playlistを ``dst`` へ書き、pathを返す。
+    採用できるsegmentが無ければNone。
+
+    **HLSをffmpegの入力にする処理は、captureのindex.m3u8ではなく必ずこれを使う。** 生の
+    indexには源のtimestampが壊れたsegmentが残っており、実測でEXTINFが 28287秒(7.8時間)の
+    ものがあった。そのまま食わせると、2.9時間の録画が10.7時間として読まれる。終端tagが
+    無い(停止時のffmpegは強制終了される)ためlive扱いで待ち続ける問題も同時に避けられる。
+
+    ``dst`` は session dir の外でもよい(一時dirへ書いて捨てる使い方を想定している)。その場合は
+    segmentをfull pathで書く: playlistの参照は素のfile名だと**playlist自身のdirectory**から
+    解決されるので、別の場所へ置くと参照が全て外れる。外れてもffmpegはstreamが無いだけの
+    正常終了に見えることがあり、静かに空の結果を返す。"""
+    hls_dir = Path(hls_dir)
+    recorder = Recorder(unique_id or hls_dir.name,
+                        str(layout.record_root_of(hls_dir.parent)), None)
+    recorder.hls_dir = hls_dir
+    recorder.playlist = hls_dir / "index.m3u8"
+    recorder.base = hls_dir.name
+    kept = recorder._playlist_segments()
+    if not kept:
+        return None
+    dst = Path(dst)
+    dst.write_text(render_vod_playlist(kept, absolute=dst.parent.resolve() != hls_dir.resolve()),
+                   encoding="utf-8")
+    return dst
+
+
+def curated_span_seconds(hls_dir, unique_id: str = "") -> Optional[float]:
+    """その録画の採用集合が名乗る尺(秒)。採用できるsegmentが無ければNone。
+
+    ``write_curated_playlist`` が書くのと**同じ集合**を測る。下流(転写・切り出し・焼き込み)
+    がffmpegへ渡すのはその集合なので、「素材が何秒あるか」を問う側もここを見なければ、
+    読む対象と測る対象が別物になる。
+
+    ``recordings.duration_seconds`` も finalize が書いた ``timing.json`` も使えない。
+    どちらも確定した瞬間のsnapshotで、その後にdirが太れば置き去りになる(実測: 録画行
+    12.0秒に対し採用集合 16,861.8秒)。"""
+    hls_dir = Path(hls_dir)
+    recorder = Recorder(unique_id or hls_dir.name,
+                        str(layout.record_root_of(hls_dir.parent)), None)
+    recorder.hls_dir = hls_dir
+    recorder.playlist = hls_dir / "index.m3u8"
+    recorder.base = hls_dir.name
+    kept = recorder._playlist_segments()
+    if not kept:
+        return None
+    total = sum(entry[1] for entry in kept)
+    return total if total > 0 else None
 
 
 def normalize_tmp_path(mp4_path) -> Path:
@@ -410,8 +559,8 @@ def _write_normalize_marker(tmp: Path, timing_mode: str, target_w: int, target_h
         }), encoding="utf-8")
     except OSError:
         logger.warning(
-            "could not write the normalization marker for %s; a failed swap would leave "
-            "the re-encode unreclaimable", tmp.name,
+            "%s の正規化の完了印を書けません（差し替えが失敗すると再encodeを"
+            "回収できなくなります）", tmp.name,
             extra={"event": "recording.normalize_marker_write_failed",
                    "ctx": {"path": str(marker)}},
             exc_info=True,
@@ -513,7 +662,7 @@ async def reencode_single_resolution(
             "-f", "mp4", str(dst),
         ]
         logger.debug(
-            "starting resolution normalization re-encode of %s", src.name,
+            "%s の解像度を揃える再encodeを開始します", src.name,
             extra={"event": "process.ffmpeg_started",
                    "ctx": {"stage": "normalize", "stem": src.stem, **ffmpeg_ctx(args)}},
         )
@@ -535,7 +684,7 @@ async def reencode_single_resolution(
                     cancel.forget_process(proc)
         except Exception:
             logger.error(
-                "resolution normalization re-encode failed to launch for %s", src.name,
+                "%s の解像度を揃える再encodeを起動できません", src.name,
                 extra={"event": "process.ffmpeg_launch_failed",
                        "ctx": {"stage": "normalize", "stem": src.stem, **ffmpeg_ctx(args)}},
                 exc_info=True,
@@ -544,7 +693,7 @@ async def reencode_single_resolution(
         if proc.returncode == 0 and dst.exists() and dst.stat().st_size > 0:
             return True
         logger.warning(
-            "resolution normalization re-encode of %s exited %s", src.name, proc.returncode,
+            "%s の解像度を揃える再encodeが %s で終了しました", src.name, proc.returncode,
             extra={"event": "process.ffmpeg_failed",
                    "ctx": {"stage": "normalize", "stem": src.stem,
                            **ffmpeg_ctx(args, proc.returncode, log_path)}},
@@ -561,7 +710,7 @@ async def reencode_single_resolution(
         素材が壊れているわけではない)。尺で突き合わせない限り、この落ち方は検出できない。"""
         if not src_seconds:
             logger.warning(
-                "could not measure %s; the re-encode's completeness is unverified", src.name,
+                "%s の尺を測れないため再encodeの完全性を検証できません", src.name,
                 extra={"event": "recording.reencode_unverified",
                        "ctx": {"stem": src.stem, "timing_mode": timing_mode,
                                "path": str(dst)}},
@@ -571,7 +720,7 @@ async def reencode_single_resolution(
         if out_seconds and out_seconds >= src_seconds * REENCODE_MIN_COVERAGE:
             return True
         logger.error(
-            "re-encode of %s stopped early: %.0fs of %.0fs (%s timing)",
+            "%s の再encodeが途中で止まりました: %.0fs / %.0fs（timing %s）",
             src.name, out_seconds or 0.0, src_seconds, timing_mode,
             extra={"event": "recording.reencode_incomplete",
                    "ctx": {"stem": src.stem, "timing_mode": timing_mode,
@@ -587,7 +736,7 @@ async def reencode_single_resolution(
         log_path.unlink(missing_ok=True)
         _write_normalize_marker(dst, "passthrough", target_w, target_h)
         logger.info(
-            "re-encoded %s to a single resolution (passthrough timing)", src.name,
+            "%s を単一解像度へ再encodeしました（timing passthrough）", src.name,
             extra={"event": "recording.reencode_completed",
                    "ctx": {"stem": src.stem, "timing_mode": "passthrough",
                            "width": target_w, "height": target_h, "encoder": encoder,
@@ -602,7 +751,7 @@ async def reencode_single_resolution(
     # 足りなかったか。どちらだったかは直前のlog(process.ffmpeg_failed /
     # recording.reencode_incomplete)が数字付きで残している。
     logger.warning(
-        "passthrough re-encode did not produce a complete output for %s; retrying as CFR",
+        "%s のpassthrough再encodeが完全な出力になりませんでした。CFRで再試行します",
         src.name,
         extra={"event": "recording.reencode_retried",
                "ctx": {"stem": src.stem, "timing_mode": "cfr", "path": str(log_path)}},
@@ -611,7 +760,7 @@ async def reencode_single_resolution(
         log_path.unlink(missing_ok=True)
         _write_normalize_marker(dst, "cfr", target_w, target_h)
         logger.info(
-            "re-encoded %s to a single resolution (CFR timing)", src.name,
+            "%s を単一解像度へ再encodeしました（timing CFR）", src.name,
             extra={"event": "recording.reencode_completed",
                    "ctx": {"stem": src.stem, "timing_mode": "cfr",
                            "width": target_w, "height": target_h, "encoder": encoder,
@@ -623,7 +772,7 @@ async def reencode_single_resolution(
     dst.unlink(missing_ok=True)
     normalize_marker_path(dst).unlink(missing_ok=True)
     logger.error(
-        "both passthrough and CFR re-encodes failed for %s", src.name,
+        "%s はpassthroughとCFRのどちらの再encodeも失敗しました", src.name,
         extra={"event": "recording.reencode_failed",
                "ctx": {"stem": src.stem, "encoder": encoder,
                        "width": target_w, "height": target_h,
@@ -657,7 +806,7 @@ async def _consume_ffmpeg_progress(proc, total_us, on_progress) -> None:
                     await on_progress(pct)
                 except Exception:
                     logger.debug(
-                        "re-encode progress callback failed at %d%%", pct,
+                        "再encodeの進捗callbackが %d%% で失敗しました", pct,
                         extra={"event": "recording.progress_callback_failed",
                                "ctx": {"percent": pct}},
                         exc_info=True,
@@ -684,56 +833,43 @@ async def probe_mp4_resolutions(mp4_path: Path, input_args: tuple = ()) -> set:
     ``input_args`` はHLS再生listを直接読ませるためのdemuxer option(HLS_INPUT_ARGS)。連結後の
     mp4と同じdecoder経路を通るので結果は一致する(segment単位のstream probeとは別物)。concat
     と同時に走らせて、mp4を頭から読み直す一巡ぶんを消すために使う。"""
-    args = [
-        "ffprobe", "-v", "error", *input_args, "-select_streams", "v:0",
-        "-skip_frame", "nokey", "-show_entries", "frame=width,height",
-        "-of", "csv=p=0", str(mp4_path),
-    ]
+    args = ffprobe.keyframe_resolution_args(mp4_path, input_args)
     best: set = set()
     for attempt in range(3):
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            )
-            out, err = await proc.communicate()
+            result = await ffprobe.run(args)
         except OSError as exc:
             logger.error(
-                "keyframe resolution probe could not run for %s", mp4_path.name,
+                "%s のkeyframe解像度のprobeを起動できません", mp4_path.name,
                 extra={"event": "process.ffprobe_launch_failed",
                        "ctx": {"stage": "resolutions", "stem": mp4_path.stem,
                                **ffmpeg_ctx(args), **_oserror_ctx(exc)}},
                 exc_info=True,
             )
             return best
-        seen = set()
-        for line in out.decode("ascii", "replace").splitlines():
-            parts = line.strip().split(",")
-            if len(parts) >= 2:
-                try:
-                    seen.add((int(parts[0]), int(parts[1])))
-                except ValueError:
-                    continue
+        seen = set(ffprobe.parse_resolution_csv(result.stdout))
         if len(seen) > len(best):
             best = seen
         # A clean full scan (exit 0) is authoritative; only retry when ffprobe aborted,
         # since that can truncate the list and hide a resolution.
-        if proc.returncode == 0:
+        if result.ok:
             return seen
         logger.warning(
-            "keyframe resolution probe of %s aborted (attempt %d); retrying",
+            "%s のkeyframe解像度のprobeが中断しました（%d 回目）。再試行します",
             mp4_path.name, attempt + 1,
             extra={"event": "process.ffprobe_retried",
                    "ctx": {"stage": "resolutions", "stem": mp4_path.stem,
                            "attempt": attempt + 1, "partial_resolutions": len(seen),
-                           **ffmpeg_ctx(args, proc.returncode,
-                                        stderr_text=err.decode("utf-8", "replace"))}},
+                           **ffmpeg_ctx(args, result.returncode,
+                                        stderr_text=result.stderr)}},
         )
+        # timeoutは再試行しない。返らない入力は3回やっても返らず、待ちだけが3倍になる。
+        if result.timed_out:
+            return best
         await asyncio.sleep(1)
     logger.error(
-        "keyframe resolution probe of %s never completed cleanly; mixed-resolution "
-        "detection may be incomplete", mp4_path.name,
+        "%s のkeyframe解像度のprobeが一度も正常終了しませんでした。混在解像度の"
+        "検出は不完全な可能性があります", mp4_path.name,
         extra={"event": "process.ffprobe_failed",
                "ctx": {"stage": "resolutions", "stem": mp4_path.stem,
                        "partial_resolutions": len(best), **ffmpeg_ctx(args)}},
@@ -766,8 +902,8 @@ async def reclaim_normalized_mp4(mp4_path) -> str:
     distinct = await probe_mp4_resolutions(tmp)
     if len(distinct) != 1:
         logger.error(
-            "normalized leftover %s is not a single-resolution mp4 (%d found); leaving both "
-            "files in place", tmp.name, len(distinct),
+            "正規化の残り %s は単一解像度のmp4ではありません（%d 種類）。両方のfileを"
+            "そのまま残します", tmp.name, len(distinct),
             extra={"event": "recording.normalize_reclaim_rejected",
                    "ctx": {"path": str(tmp), "stem": mp4_path.stem,
                            "distinct_resolutions": sorted(f"{w}x{h}" for w, h in distinct)}},
@@ -778,15 +914,15 @@ async def reclaim_normalized_mp4(mp4_path) -> str:
     # finalize本体(数分)より短く切って、startupや焼き込みの前段を長く塞がない。
     if not await commit_normalized(tmp, mp4_path, timing_mode, attempts=RECLAIM_REPLACE_ATTEMPTS):
         logger.warning(
-            "normalized output for %s is still waiting: %s is locked. Close it in any "
-            "player and it will be swapped in at the next attempt", mp4_path.name, mp4_path.name,
+            "%s の正規化した出力は待機中です: %s がlockされています。playerで開いていれば"
+            "閉じると次の試行で差し替わります", mp4_path.name, mp4_path.name,
             extra={"event": "recording.normalize_reclaim_deferred",
                    "ctx": {"path": str(tmp), "stem": mp4_path.stem,
                            "size_bytes": tmp.stat().st_size if tmp.is_file() else 0}},
         )
         return "locked"
     logger.info(
-        "reclaimed the normalized mp4 for %s (%dx%d, %s timing)", mp4_path.stem,
+        "%s の正規化済みmp4を差し替えました（%dx%d, timing %s）", mp4_path.stem,
         marker.get("width") or 0, marker.get("height") or 0, timing_mode,
         extra={"event": "recording.normalize_reclaimed",
                "ctx": {"path": str(mp4_path), "stem": mp4_path.stem,
@@ -821,14 +957,14 @@ async def reclaim_pending_normalizations(storage, roots) -> int:
                     storage.update_recording_bytes(row["id"], mp4_path.stat().st_size)
             except Exception:
                 logger.exception(
-                    "could not reclaim the normalized mp4 for %s", stem,
+                    "%s の正規化済みmp4を差し替えられません", stem,
                     extra={"event": "recording.normalize_reclaim_failed",
                            "ctx": {"stem": stem, "path": str(mp4_path)}},
                 )
     if reclaimed:
         logger.info(
-            "startup sweep swapped in %d normalized recording(s) that a locked file had "
-            "left orphaned", reclaimed,
+            "起動時のsweepでlockのため取り残されていた正規化済み録画 %d 件を"
+            "差し替えました", reclaimed,
             extra={"event": "recording.normalize_reclaim_swept",
                    "ctx": {"reclaimed": reclaimed}},
         )
@@ -945,7 +1081,7 @@ def migrate_sidecars(record_dir) -> int:
             moved += 1
         except OSError as exc:
             logger.warning(
-                "failed to migrate recording artifact %s to the current layout", entry.name,
+                "録画の付随file %s を現在のlayoutへ移せません", entry.name,
                 extra={"event": "recording.sidecar_migration_failed",
                        "ctx": {"path": str(entry), "stem": entry.stem, **_oserror_ctx(exc)}},
                 exc_info=True,
@@ -964,7 +1100,7 @@ def migrate_sidecars(record_dir) -> int:
 
     if moved:
         logger.info(
-            "migrated %d recording artifact(s) to the current layout", moved,
+            "録画の付随file %d 件を現在のlayoutへ移しました", moved,
             extra={"event": "recording.sidecars_migrated",
                    "ctx": {"moved": moved, "path": str(root)}},
         )
@@ -1015,7 +1151,7 @@ def extract_stream_url(room_info: dict, quality_pref: str = "") -> tuple[Optiona
         chosen = next((q for q in order if (data.get(q, {}).get("main") or {}).get("flv")
                        or (data.get(q, {}).get("main") or {}).get("hls")), None)
         logger.info(
-            "stream quality rungs: %s | chosen=%s", _rung_summary(data), chosen,
+            "配信の画質段: %s | 選択=%s", _rung_summary(data), chosen,
             extra={"event": "recording.quality_selected",
                    "ctx": {"chosen": chosen, "offered": sorted(data.keys()),
                            "requested": quality_pref or None,
@@ -1045,7 +1181,12 @@ class Recorder:
     """Records a TikTok LIVE stream to disk via ffmpeg as HLS (live-previewable),
     then concatenates the segments into a single mp4 on stop. Stream copy only."""
 
-    def __init__(self, unique_id: str, record_dir: str, session_id: int, keep_hls: bool = False,
+    # ``session_id`` はNoneを取る。recordings.session_idが ``ON DELETE SET NULL`` で、
+    # session削除後の録画は実測374本中136本がNULLだからである。保守経路(再mp4化・
+    # 再生playlistの描き直し)はその行からRecorderを組むので、intに狭めると実態と食い違う。
+    # なおNoneのままfile名を作ることはできない(session_prefixがintを要求する)。それらの
+    # 経路はbaseを自分で入れ直すので通らない — 通ってしまったら落ちるのが正しい。
+    def __init__(self, unique_id: str, record_dir: str, session_id: Optional[int],
                  final_dir: Optional[str] = None, storage=None,
                  normalize_audio: Optional[dict] = None) -> None:
         # ``storage`` is optional so the recorder stays usable from maintenance scripts
@@ -1060,16 +1201,15 @@ class Recorder:
         self._normalize_audio = normalize_audio
         self.unique_id = unique_id
         self._record_dir = Path(record_dir)
-        # Working dir (record_dir, SSD) holds HLS + the mp4 during capture/finalize; a
-        # completed mp4 is relocated to final_dir (HDD) at the end of _finalize. When
-        # final_dir is unset or equals the working dir there is no split (no relocation).
+        # Working dir (record_dir, SSD) holds the HLS segments and the mp4 for the whole
+        # life of the recording. Moving a completed recording to final_dir (HDD) is a
+        # manual action (the capacity screen / POST /api/storage/relocate) — finalize
+        # never moves anything. final_dir is still recorded here because the free space of
+        # the destination volume is part of this recording's disk report.
         self._final_dir = Path(final_dir) if final_dir else self._record_dir
         # Session number that owns this recording; prefixed (zero-padded) onto the
         # output filename so recordings group by session on disk.
         self.session_id = session_id
-        # When set, the HLS intermediate (segments/playlist/concat list) is kept
-        # after the mp4 is built, for diagnosing the mp4-PTS vs segment timeline.
-        self._keep_hls = keep_hls
         self.state = STATE_IDLE
         self.quality: Optional[str] = None
         self.error: Optional[str] = None
@@ -1130,29 +1270,59 @@ class Recorder:
         )
 
     def _live_bytes(self) -> int:
+        """録画実体のbyte数。束ね(hls_pack)後は pack*.ts になるので、seg*.ts だけを見ると
+        束ねた録画が0byteに見える。layout.media_files が唯一の判定に揃えてある。"""
         if self.hls_dir is None or not self.hls_dir.exists():
             return 0
-        return sum(f.stat().st_size for f in self.hls_dir.glob("seg*.ts"))
+        total = 0
+        for f in layout.media_files(self.hls_dir):
+            try:
+                total += f.stat().st_size
+            except OSError:
+                continue
+        return total
 
     def progress_token(self) -> tuple[int, int]:
         """Cheap monotonic capture-progress signal for stall detection: (segment
         count, newest segment size). It advances whenever ffmpeg writes video —
         either a new seg*.ts appears or the open segment grows — and freezes
         entirely when the source silently stalls (the CDN stops serving new
-        segments) even though ffmpeg stays alive retrying the now-dead URL. Only
-        the newest segment is stat()ed, so polling stays O(1) over a long
-        recording. Segment names are zero-padded, so the lexical max is the
-        highest index (newest)."""
+        segments) even though ffmpeg stays alive retrying the now-dead URL.
+        Segment names are zero-padded, so the lexical max is the highest index
+        (newest).
+
+        costはdirectoryの列挙1回 + 最新1本への ``stat`` 1回。**O(1)ではない** — 以前ここは
+        「最新の1本しかstatしないのでpollingはO(1)」と書いていたが、それはstatの回数の話
+        でしかなく、列挙は録画が伸びるほど重くなる(実測5,400 segment: ``Path.glob`` 版
+        10.2ms / 現行のscandir版 7.5ms)。この監査でその一文が「ここは軽い」という誤った
+        判断を招いたので、正確に書き直してある。
+
+        **sizeを ``os.scandir`` の ``DirEntry.stat()`` から取ってはいけない。** Windowsでは
+        開いたままのfileのsizeがdirectory entryの古い値のまま返る(実測: 4,096 byte書き込み
+        済み・flush済みのfileを0 byteと報告した)。それはffmpegがいま書いているsegment
+        そのものの状態なので、使うと「開いているsegmentが伸びている」ことを検出できず、
+        録画中に誤ってstallと判定して不要な再接続を起こす。列挙は名前だけを見て、sizeは
+        最新1本を ``stat`` で取り直すこと。"""
         if self.hls_dir is None or not self.hls_dir.exists():
             return (0, 0)
-        segs = list(self.hls_dir.glob("seg*.ts"))
-        if not segs:
+        count = 0
+        newest = ""
+        try:
+            with os.scandir(self.hls_dir) as entries:
+                for entry in entries:
+                    if not _SEGMENT_NAME_MATCH(os.path.normcase(entry.name)):
+                        continue
+                    count += 1
+                    if entry.name > newest:
+                        newest = entry.name
+        except PermissionError:
+            return (0, 0)
+        if not count:
             return (0, 0)
         try:
-            newest = max(segs, key=lambda p: p.name)
-            return (len(segs), newest.stat().st_size)
+            return (count, (self.hls_dir / newest).stat().st_size)
         except OSError:
-            return (len(segs), 0)
+            return (count, 0)
 
     def snapshot(self) -> dict:
         if self.output_path is not None and self.output_path.exists():
@@ -1197,7 +1367,7 @@ class Recorder:
             raise RuntimeError("既に録画中です。")
         if not ffmpeg_available():
             logger.error(
-                "cannot start recording for %s: ffmpeg is not installed", self.unique_id,
+                "%s の録画を開始できません: ffmpegがinstallされていません", self.unique_id,
                 extra={"event": "recording.start_failed",
                        "ctx": {"reason": "ffmpeg_missing"}},
             )
@@ -1211,7 +1381,7 @@ class Recorder:
         url, quality = extract_stream_url(room_info)
         if not url:
             logger.error(
-                "cannot start recording for %s: no stream URL in room info", self.unique_id,
+                "%s の録画を開始できません: room infoにstream URLがありません", self.unique_id,
                 extra={"event": "recording.start_failed",
                        "ctx": {"reason": "no_stream_url"}},
             )
@@ -1241,7 +1411,7 @@ class Recorder:
             f"@{self.unique_id} の録画を開始しました（画質 {quality}）",
             detail={"quality": quality, "stem": self.base, "path": str(self.hls_dir),
                     "segment_seconds": SEGMENT_SECONDS,
-                    "final_dir": str(self._final_dir), "keep_hls": self._keep_hls},
+                    "final_dir": str(self._final_dir)},
         )
 
     async def _run(self, url: str) -> None:
@@ -1272,7 +1442,7 @@ class Recorder:
                         # was exhausted). Capture ends here; the collector restarts a
                         # recording when the websocket reconnects.
                         logger.warning(
-                            "capture process for %s exited %s on its own",
+                            "%s の録画processが自ら %s で終了しました",
                             self.unique_id, proc.returncode,
                             extra={"event": "recording.capture_ended",
                                    "ctx": {"attempt": attempt, "segments": self._segment_count(),
@@ -1283,7 +1453,7 @@ class Recorder:
                 if self._stop_requested or attempt >= MAX_LAUNCH_ATTEMPTS:
                     if not self._has_segments():
                         logger.error(
-                            "recording for %s never became healthy after %d attempt(s)",
+                            "%s の録画が %d 回の試行でも安定しませんでした",
                             self.unique_id, attempt,
                             extra={"event": "recording.launch_failed",
                                    "ctx": {"attempts": attempt, "max_attempts": MAX_LAUNCH_ATTEMPTS,
@@ -1298,7 +1468,7 @@ class Recorder:
                         )
                     break
                 logger.warning(
-                    "recording attempt %d unhealthy for %s, retrying", attempt, self.unique_id,
+                    "%d 回目の録画が安定しないため再試行します（%s）", attempt, self.unique_id,
                     extra={"event": "recording.launch_retried",
                            "ctx": {"attempt": attempt, "max_attempts": MAX_LAUNCH_ATTEMPTS,
                                    "segments": self._segment_count(),
@@ -1311,7 +1481,7 @@ class Recorder:
             raise
         except Exception as exc:
             logger.exception(
-                "recording failed for %s", self.unique_id,
+                "%s の録画が失敗しました", self.unique_id,
                 extra={"event": "recording.capture_failed",
                        "ctx": {"attempts": attempt, "segments": self._segment_count(),
                                "error": str(exc)}},
@@ -1320,6 +1490,10 @@ class Recorder:
             self.state = STATE_FAILED
         finally:
             self._proc = None
+            # 捕捉が終わったdirの目印は必ず消す。残すと次の起動が、既に別の用途へ回された
+            # かもしれないpidを探しに行くことになる。
+            if self.hls_dir is not None:
+                orphan_capture.clear(self.hls_dir)
             await self._finalize()
 
     def _segment_count(self) -> int:
@@ -1345,22 +1519,27 @@ class Recorder:
         # without re-deriving (and possibly mis-stating) it.
         self._capture_args = args
         logger.debug(
-            "launching capture process for %s", self.unique_id,
+            "%s の録画processを起動します", self.unique_id,
             extra={"event": "process.ffmpeg_started",
                    "ctx": {"stage": "capture", "attempt": self._launch_attempts,
                            "stderr_path": str(log_path), **ffmpeg_ctx(args)}},
         )
         log_file = open(log_path, "ab")
         try:
-            return await asyncio.create_subprocess_exec(
+            proc = await asyncio.create_subprocess_exec(
                 *args,
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=log_file,
             )
+            # 捕捉processの身元をdirへ残す。serverが後始末を通らずに死ぬと(hard kill・
+            # コンソールのCLOSE・native crash)、Windowsは子を道連れにしないためこのffmpegが
+            # 生き残り、主の居ないdirへ書き続ける。次の起動がこの目印で回収する。
+            orphan_capture.mark(self.hls_dir, proc.pid)
+            return proc
         except Exception:
             logger.error(
-                "capture process for %s failed to launch", self.unique_id,
+                "%s の録画processを起動できません", self.unique_id,
                 extra={"event": "process.ffmpeg_launch_failed",
                        "ctx": {"stage": "capture", "attempt": self._launch_attempts,
                                **ffmpeg_ctx(args)}},
@@ -1407,11 +1586,12 @@ class Recorder:
                 await self._on_notify()
             except Exception:
                 logger.exception(
-                    "recording notify callback failed for %s", self.unique_id,
+                    "%s の録画通知callbackが失敗しました", self.unique_id,
                     extra={"event": "recording.notify_failed", "ctx": {"state": self.state}},
                 )
 
-    async def finalize_recovered_hls(self, base: str, progress=None, mp4_root=None) -> None:
+    async def finalize_recovered_hls(self, base: str, progress=None, mp4_root=None,
+                                     build_mp4: bool = False) -> None:
         """既存HLSディレクトリ(base)を、live captureを伴わずconcat→mp4化する。録画中にプロセスが
         クラッシュして_finalizeを走らせられなかった録画を、起動時に復元するために使う。start()を
         経ないのでpath類をここで確定してから通常のfinalize経路を再利用する。``progress``が
@@ -1431,7 +1611,9 @@ class Recorder:
         self._mp4_path.parent.mkdir(parents=True, exist_ok=True)
         self.output_path = None
         self.started_at = self.started_at or time.time()
-        await self._finalize(progress=progress)
+        # ``build_mp4`` は「mp4化」operation専用。復旧(crash後の確定)は通常のfinalizeと
+        # 同じ結果にしなければならないので既定はFalseで、mp4は作らない。
+        await self._finalize(progress=progress, build_mp4=build_mp4)
 
     def _hls_log_path(self) -> Optional[Path]:
         if self.hls_dir is None:
@@ -1439,7 +1621,61 @@ class Recorder:
         path = self.hls_dir / "ffmpeg.log"
         return path if path.is_file() else None
 
-    async def _finalize(self, progress=None) -> None:
+    async def _finalize_from_segments(self, mp4_path: Path, segments: int,
+                                      build_mp4: bool, progress) -> None:
+        """素材が揃った録画の確定処理。時刻map・見どころ・尺・検証。
+
+        ``build_mp4`` は「mp4化」operationから来た時だけTrueで、その場合だけ書き出した
+        mp4を単一解像度へ揃える。原本の .ts は常に無傷で、確定の主語はそちらである。
+
+        最終保存先への移送はここでは行わない。確定した録画は一時保存先に残り、動画容量画面の
+        「最終保存先へ移動」(POST /api/storage/relocate)でだけ動く。"""
+        if progress is not None:
+            await progress.set("timing", 0.0)
+        await self._write_timing_map(mp4_path)
+        if progress is not None:
+            await progress.done("timing")
+        if build_mp4:
+            # 外へ出すfileだけ単一解像度へ揃える。混在のままだとplayerが切替のたびに
+            # 固まる/急拡大する。原本の .ts は触らない。
+            await self._normalize_mixed_resolution(mp4_path, progress=progress)
+        # 配信中に押された見どころをmedia軸へ載せ直す。
+        await self._remap_live_bookmarks(mp4_path)
+        # 尺はEXTINF累計。焼き込みが開くplaylistの尺と定義上同一になる。
+        self.duration_seconds = self._measure_media_seconds()
+        if not ffprobe_available():
+            logger.warning(
+                "ffprobeが使えないため %s の素材を検証していません", self.unique_id,
+                extra={"event": "recording.validation_skipped",
+                       "ctx": {"reason": "no_ffprobe", "stem": self.base,
+                               "path": str(self.hls_dir)}},
+            )
+            if self.state != STATE_FAILED:
+                self.state = STATE_COMPLETED
+            return
+        if await self._validate_source():
+            if self.state != STATE_FAILED:
+                self.state = STATE_COMPLETED
+            return
+        if self.state != STATE_FAILED:
+            self.state = STATE_FAILED
+            self.error = self.error or "録画素材に再生できる映像がありません。"
+        self._ops(
+            "recording.validation_failed",
+            f"録画素材に再生できる映像がありません（@{self.unique_id}）。segmentは残します",
+            severity="error",
+            detail={"stem": self.base, "path": str(self.hls_dir),
+                    "size_bytes": self._live_bytes(),
+                    "segments": segments, "volumes": self._disk_report},
+        )
+
+    async def _finalize(self, progress=None, build_mp4: bool = False) -> None:
+        # 確定の間じゅうこの録画を「触るな」と名乗っておく(``finalizing_scope`` 参照)。
+        # 掴む範囲は移送だけでなく確定全体にする: timing mapも検証も同じsegmentを読む。
+        with finalizing_scope(self.recording_id):
+            await self._finalize_body(progress=progress, build_mp4=build_mp4)
+
+    async def _finalize_body(self, progress=None, build_mp4: bool = False) -> None:
         self.ended_at = time.time()
         started_ms = time.monotonic()
         # Sample free space now, while every artifact of this recording is still on
@@ -1456,86 +1692,32 @@ class Recorder:
             self.state = STATE_FINALIZING
         await self._notify()
         if self._has_segments():
+            # 録画の実体は .ts である。以前はここでmp4へ結合していたが、それを要求して
+            # いたのは焼き込みだけで、その焼き込みが .ts を直接読むようになった(再生は
+            # HLS、文字起こし・切抜き・thumbnail・波形・Up出力はhls_source経由)。結合
+            # passは配信全長を1本書き直す最も重いI/Oで、誰も読まないfileのために毎回
+            # 払っていた。mp4が要る場合は「mp4化」operationで作る。
+            #
+            # ``_mp4_path`` はfileではなく**録画の身元**として残す。sidecar(timing map・
+            # 焼き込み出力・thumbnail)の在処も、hls_sourceが .ts を引く鍵も、この名前から
+            # 決まる。実在しないpathを指すのは意図的である。
             mp4_path = self._mp4_path
-            if await self._concat_to_mp4(mp4_path, progress=progress):
-                self.output_path = mp4_path
-                # Persist the wall->media->pts timing map while the HLS source
-                # still exists, so the burn-in can lock comments to the video
-                # timeline.
-                if progress is not None:
-                    await progress.set("timing", 0.0)
-                await self._write_timing_map(mp4_path)
-                if progress is not None:
-                    await progress.done("timing")
-                # If the source switched resolution mid-broadcast, the stream-copied
-                # mp4 carries mixed resolutions in one track (players freeze/zoom at
-                # each switch). Re-encode to a single resolution, timestamps preserved
-                # so the timing map above stays valid. Detected from the concatenated
-                # mp4's keyframes; a no-op for uniform streams.
-                await self._normalize_mixed_resolution(mp4_path, progress=progress)
-                # 配信中に押された見どころをmp4のPTS軸へ載せ直す。正規化の後に置くのは、
-                # CFR再encodeへ落ちるとtiming mapが破棄されるため。前に置くと、既に無効な
-                # mapで確定させてしまう。
-                await self._remap_live_bookmarks(mp4_path)
-                # 尺は出来上がったmp4から測る。移送(_relocate_to_final)より前に測るのは、
-                # 移送先が別volumeで、失敗すれば所在が変わるため。中身は同じなので値は同じ。
-                self.duration_seconds = await self._measure_duration(mp4_path)
-                # Keep the HLS source until the mp4 is confirmed playable. If
-                # ffprobe is unavailable we cannot confirm, so keep HLS too.
-                if not ffprobe_available():
-                    logger.warning(
-                        "ffprobe unavailable; keeping HLS for %s (mp4 unverified)", self.unique_id,
-                        extra={"event": "recording.validation_skipped",
-                               "ctx": {"reason": "no_ffprobe", "stem": self.base,
-                                       "path": str(self.hls_dir)}},
-                    )
-                    if self.state != STATE_FAILED:
-                        self.state = STATE_COMPLETED
-                elif await self._validate_mp4(mp4_path):
-                    if self.state != STATE_FAILED:
-                        self.state = STATE_COMPLETED
-                    if not self._keep_hls:
-                        shutil.rmtree(self.hls_dir, ignore_errors=True)
-                        # Relocate only in the clean path (mp4 validated, HLS removed).
-                        # keep_hls / unverified paths retain the HLS in the working dir,
-                        # so the mp4 stays beside it rather than splitting the pair.
-                        await self._relocate_to_final()
-                    else:
-                        logger.info(
-                            "keeping HLS for %s (diagnostic): %s", self.unique_id, self.hls_dir,
-                            extra={"event": "recording.hls_retained",
-                                   "ctx": {"reason": "keep_hls", "stem": self.base,
-                                           "path": str(self.hls_dir), "segments": segments}},
-                        )
-                else:
-                    # 検証に失敗したmp4をsnapshotへ晒さない。再生可能な成果物は温存
-                    # したHLSなので、concat失敗branchと同様にplaylistを指す。
-                    self.output_path = self.playlist
-                    if self.state != STATE_FAILED:
-                        self.state = STATE_FAILED
-                        self.error = self.error or "mp4の検証に失敗しました（HLSを保持しています）。"
-                    self._ops(
-                        "recording.validation_failed",
-                        f"確定したmp4に再生できる映像がありません（@{self.unique_id}）。"
-                        f"HLS segmentは残します",
-                        severity="error",
-                        detail={"stem": self.base, "path": str(mp4_path),
-                                "size_bytes": mp4_path.stat().st_size if mp4_path.is_file() else 0,
-                                "segments": segments, "volumes": self._disk_report},
-                    )
-            else:
-                # Keep HLS dir as the fallback artifact (still playable).
-                self.output_path = self.playlist
+            self.output_path = mp4_path
+            # 「mp4化」operationからだけ結合を走らせる。ここで作ったmp4は、以降この録画の
+            # 入力ではなく**書き出し**として扱われる(焼き込みも下流も原本の .ts を読む)。
+            if build_mp4 and not await self._concat_to_mp4(mp4_path, progress=progress):
                 if self.state != STATE_FAILED:
                     self.state = STATE_FAILED
-                    self.error = self.error or "mp4への変換に失敗しました（HLSは残っています）。"
+                    self.error = self.error or "mp4への変換に失敗しました（素材は残っています）。"
                 self._ops(
                     "recording.concat_failed",
-                    f"mp4を組み立てられませんでした（@{self.unique_id}）。HLS segmentは残します",
+                    f"mp4を組み立てられませんでした（@{self.unique_id}）。segmentは残します",
                     severity="error",
                     detail={"stem": self.base, "segments": segments,
                             "path": str(self.hls_dir), "volumes": self._disk_report},
                 )
+            else:
+                await self._finalize_from_segments(mp4_path, segments, build_mp4, progress)
         else:
             if self.state != STATE_FAILED:
                 self.state = STATE_FAILED
@@ -1561,7 +1743,7 @@ class Recorder:
                 await self._on_finalize(self)
             except Exception:
                 logger.exception(
-                    "recording finalize callback failed for %s", self.unique_id,
+                    "%s の録画の確定callbackが失敗しました", self.unique_id,
                     extra={"event": "recording.finalize_callback_failed",
                            "ctx": {"state": self.state, "stem": self.base}},
                 )
@@ -1583,66 +1765,61 @@ class Recorder:
                     "media_seconds": self.duration_seconds, "error": self.error},
         )
 
-    async def _relocate_to_final(self) -> None:
-        """Move the finished mp4 (and its timing sidecar) from the working dir (SSD) to
-        the final dir (HDD). The move is cross-volume, so it runs off the event loop via
-        shutil.move (copy+unlink). On failure the mp4 stays in the working dir and keeps
-        serving as output_path (still playable/renderable): no fake final location, and
-        the working dir is an allowed record root so output/delete still resolve it."""
-        if self._final_dir == self._record_dir:
-            return
-        src = self.output_path
-        if src is None or not src.is_file():
-            return
-        dst = layout.mp4_path(self._final_dir, self.base)
-        size_bytes = src.stat().st_size
-        started = time.monotonic()
+    @staticmethod
+    def _move_session_dir(src: Path, dst: Path) -> int:
+        """Move the recording's HLS session dir so it follows its mp4 across roots.
+        Returns the bytes moved (0 when there was nothing to move). Runs in a thread.
+
+        The segments are the recording itself, not an intermediate, so this does not hand
+        them to ``shutil.move`` and trust it: it copies, checks that every file arrived at
+        its full size, and only then removes the source. A cross-volume move is
+        copy+unlink internally, and an interruption partway through would otherwise delete
+        segments that never landed.
+
+        Moved before the mp4 (see ``_move_recording_files``): this is the large, slow half
+        and therefore the half that actually fails on a full disk or an I/O error. Failing
+        here leaves the whole recording untouched in the working root; failing after the
+        mp4 had already moved would strand the pair across two volumes instead.
+
+        Each file is fsync'd before it counts as arrived. Checking sizes straight after a
+        plain copy only proves the write reached the OS cache, and the destination here is
+        an external drive: one that drops off the bus mid-copy reports "delayed write
+        failed" long after the call returned, and a size check served from cache would
+        have already licensed deleting the source."""
+        stem = src.stem
+        src_dir = layout.session_dir(layout.record_root_of(src), stem)
+        dst_dir = layout.session_dir(layout.record_root_of(dst), stem)
+        if src_dir == dst_dir or not src_dir.is_dir():
+            return 0
+        expected = {p.name: p.stat().st_size for p in src_dir.iterdir() if p.is_file()}
         try:
-            moved_derived = await asyncio.to_thread(self._move_recording_files, src, dst)
-        except OSError as exc:
-            # Degraded but not lost: the mp4 stays in the working dir, which is an
-            # allowed record root, so playback and rendering still resolve it.
-            logger.warning(
-                "failed to relocate recording %s to final dir %s; kept at %s",
-                src.name, self._final_dir, src,
-                extra={"event": "recording.relocation_failed",
-                       "ctx": {"stem": self.base, "path": str(src),
-                               "final_dir": str(self._final_dir),
-                               "size_bytes": size_bytes,
-                               "volumes": self._disk_report, **_oserror_ctx(exc)}},
-                exc_info=True,
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            for name in expected:
+                _copy_durable(src_dir / name, dst_dir / name)
+            arrived = {p.name: p.stat().st_size for p in dst_dir.iterdir() if p.is_file()}
+        except OSError:
+            shutil.rmtree(dst_dir, ignore_errors=True)
+            raise
+        missing = [name for name, size in expected.items() if arrived.get(name) != size]
+        if missing:
+            shutil.rmtree(dst_dir, ignore_errors=True)
+            raise OSError(
+                "%d of %d segment file(s) did not arrive intact at %s (e.g. %s)"
+                % (len(missing), len(expected), dst_dir, ", ".join(missing[:3]))
             )
-            # Drop a partial copy left by an interrupted cross-volume move so a later
-            # scan does not mistake it for a complete recording (src is still intact).
-            if src.is_file() and dst.is_file():
-                try:
-                    dst.unlink()
-                except OSError as unlink_exc:
-                    logger.error(
-                        "could not remove the partial copy left by the failed relocation "
-                        "of %s; a later scan may mistake it for a complete recording",
-                        src.name,
-                        extra={"event": "recording.partial_copy_orphaned",
-                               "ctx": {"stem": self.base, "path": str(dst),
-                                       **_oserror_ctx(unlink_exc)}},
-                        exc_info=True,
-                    )
-            return
-        self.output_path = dst
-        logger.info(
-            "relocated recording %s -> %s (%d derived file(s))", src.name, dst, moved_derived,
-            extra={"event": "recording.relocated",
-                   "ctx": {"stem": self.base, "path": str(dst),
-                           "final_dir": str(self._final_dir), "size_bytes": size_bytes,
-                           "derived_moved": moved_derived,
-                           "duration_ms": int((time.monotonic() - started) * 1000)}},
-        )
+        shutil.rmtree(src_dir, ignore_errors=True)
+        return sum(expected.values())
 
     @staticmethod
     def _move_recording_files(src: Path, dst: Path) -> int:
-        """Move the mp4 and every artifact derived from it. Runs in a thread. Returns the
-        number of derived files moved. A failed mp4 move raises (caller keeps the working
-        copy); a failed derived move is logged but not fatal.
+        """Move the mp4, the HLS segments it was built from, and every artifact derived
+        from it. Runs in a thread. Returns the number of derived files moved. A failed
+        segment or mp4 move raises (caller keeps the working copy); a failed derived move
+        is logged but not fatal.
+
+        録画の実体である.tsは、mp4と必ず同じrootに置く。別rootへ分かれると、artifactを
+        mp4基準(``record_root_of``)で解く側と、素材を.ts基準で解く側が違うvolumeを指し、
+        再mp4化のたびに録画が root 間を往復する。
 
         すべての派生fileは現在のmp4位置から解決される(``record_root_of``)。mp4だけを移すと
         残りは旧rootに取り残され、誰も見に行かなくなる:焼き込み済みの``.overlay.mp4``は
@@ -1657,8 +1834,13 @@ class Recorder:
         this verbatim instead of growing a second mover that could drift from this one.
         ``self._move_recording_files(src, dst)`` still resolves as before.
         """
+        Recorder._move_session_dir(src, dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
+        # mp4は「作られていれば移す」に変わった。finalizeはもう作らないので、多くの録画で
+        # ここは存在しない。無い物をmoveしようとすると移送全体が失敗し、素材だけ移った
+        # 中途半端な状態(実測: K:に残骸が残る)になるので、在るときだけ動かす。
+        if src.is_file():
+            shutil.move(str(src), str(dst))
         moved = 0
         for src_path, dst_path in zip(relocatable_artifact_paths(src),
                                       relocatable_artifact_paths(dst)):
@@ -1670,7 +1852,7 @@ class Recorder:
                 moved += 1
             except OSError as exc:
                 logger.warning(
-                    "relocated mp4 but failed to move derived file %s for %s",
+                    "mp4は移送しましたが派生file %s を移せませんでした（%s）",
                     src_path.name, src.name,
                     extra={"event": "recording.derived_relocation_failed",
                            "ctx": {"stem": src.stem, "path": str(src_path),
@@ -1717,7 +1899,7 @@ class Recorder:
         kept = self._playlist_segments()
         if not kept:
             logger.error(
-                "no usable HLS segments to concatenate for %s", self.unique_id,
+                "%s には結合できるHLS segmentがありません", self.unique_id,
                 extra={"event": "recording.concat_aborted",
                        "ctx": {"stem": self.base, "path": str(self.hls_dir),
                                "reason": "no_segments"}},
@@ -1726,7 +1908,7 @@ class Recorder:
         list_path = self.hls_dir / VOD_PLAYLIST_NAME
         if not self._write_vod_playlist(kept, list_path):
             return False
-        segments = [seg for seg, _, _, _ in kept]
+        segments = [seg for seg, _, _, _, _ in kept]
         # 解像度のkeyframe走査を、concatと同じ再生listに対して並行で走らせる。連結後のmp4を
         # 頭から読み直すのと結果は同じで(同じdemuxer→decoder経路)、順番に走らせていたその
         # 一巡ぶん(実測: 349MBで14秒、1.2GBで50秒)がまるごと消える。concatはこの間ずっと
@@ -1751,7 +1933,7 @@ class Recorder:
             # burn-in maps against are untouched.
             # 分母は再生listのEXTINFの総和。数時間ぶんの.tsを1本のffmpegで通すこの pass が
             # 再mp4化の実時間の大半で、以前はここが完全に無報告だった。
-            total_us = int(sum(extinf for _, extinf, _, _ in kept) * 1_000_000)
+            total_us = int(sum(extinf for _, extinf, _, _, _ in kept) * 1_000_000)
             report = (progress.cb("concat", total_us / 1_000_000)
                       if (progress is not None and total_us > 0) else None)
             args = [
@@ -1799,7 +1981,7 @@ class Recorder:
                 if probe_task is not None:
                     self._concat_resolutions = (await probe_task) or None
                 logger.info(
-                    "concatenated %d segment(s) of %s into an mp4",
+                    "segment %d 件を結合してmp4にしました（%s）",
                     len(segments), self.unique_id,
                     extra={"event": "recording.concatenated",
                            "ctx": {"stem": self.base, "path": str(dst),
@@ -1811,7 +1993,7 @@ class Recorder:
                     await progress.done("concat")
                 return True
             logger.error(
-                "concat to mp4 failed for %s (exit %s, %d bytes written)",
+                "%s のmp4への結合が失敗しました（exit %s, 書き込み %d bytes）",
                 self.unique_id, proc.returncode, size_bytes,
                 extra={"event": "process.ffmpeg_failed",
                        "ctx": {"stage": "concat", "stem": self.base,
@@ -1822,7 +2004,7 @@ class Recorder:
             return False
         except Exception:
             logger.exception(
-                "concat to mp4 failed to run for %s", self.unique_id,
+                "%s のmp4への結合を実行できません", self.unique_id,
                 extra={"event": "process.ffmpeg_launch_failed",
                        "ctx": {"stage": "concat", "stem": self.base,
                                "segments": len(segments)}},
@@ -1836,10 +2018,72 @@ class Recorder:
                     await probe_task
                 except (asyncio.CancelledError, Exception):
                     pass
-            # Keep the VOD playlist alongside the segments when retaining HLS, so the
-            # exact segment order/durations fed to the muxer can be inspected later.
-            if not self._keep_hls:
-                list_path.unlink(missing_ok=True)
+            # The VOD playlist stays alongside the segments: it is the authority for the
+            # segment order and #EXTINF durations that define the recording's media axis,
+            # so it outlives the mux that produced it.
+
+    def _segment_facts(self) -> Optional[list]:
+        """この録画を構成するsegment 1本ごとの事実を、順序どおりに返す。
+
+        ``[{"name","extinf","disc","wall","size","path","byterange"}, ...]``。読めなければ
+        None。``byterange`` は束ね済み録画でのみ ``(offset, length)`` を持つ。
+
+        素材の置かれ方は2通りある。**未結合**なら1 segment = 1 fileで、wallはそのfileの
+        mtime、sizeはそのfileのsize。**束ね済み**(tictok.record.hls_pack)なら複数segmentが
+        1 fileへ連結されていてfile自体がもう無いので、束ねる直前に ``segments.json`` へ
+        固定した値を読む。どちらもここで同じ形に均し、以降の判定(重複・空・巻き戻し・PTS
+        不連続)は素材の置かれ方を知らずに済む。
+
+        wallを取り違えるとtiming mapのanchorがずれ、焼き込みのコメントが録画全体で
+        ずれる。束ねる側とここが同じ表を見ていることが、その一致の根拠になる。"""
+        if self.hls_dir is None:
+            return None
+        snapshot = hls_pack.read_snapshot(self.hls_dir)
+        if snapshot is not None:
+            return [{
+                "name": s["name"], "extinf": s["extinf"], "disc": bool(s["disc"]),
+                "wall": s["wall"], "size": s["size"],
+                "path": self.hls_dir / s["pack"],
+                "byterange": (s["offset"], s["length"]),
+            } for s in snapshot["segments"]]
+        if hls_pack.is_packed(self.hls_dir):
+            # 束ねた後は元のsegment fileが無いので、下のplaylist経路へ流すと全entryが
+            # 「fileが無い」と判定され、素材ごと失われた録画に見える。読めないことを
+            # 読めないまま返す。
+            logger.error(
+                "%s はts結合済みですが %s が無い、または読めません。未結合のsegmentとしては"
+                "読み取りません", self.unique_id, hls_pack.SNAPSHOT_NAME,
+                extra={"event": "recording.pack_snapshot_unreadable",
+                       "ctx": {"stem": self.base, "path": str(self.hls_dir),
+                               "snapshot": str(hls_pack.snapshot_path(self.hls_dir))}},
+            )
+            return None
+        if self.playlist is None or not self.playlist.is_file():
+            return None
+        try:
+            text = self.playlist.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            logger.warning(
+                "%s のHLS再生listを読み取れません", self.unique_id,
+                extra={"event": "recording.playlist_read_failed",
+                       "ctx": {"stem": self.base, "path": str(self.playlist)}},
+                exc_info=True,
+            )
+            return None
+        facts = []
+        for entry in hls_pack.parse_playlist(text):
+            seg = self.hls_dir / entry["name"]
+            try:
+                st = seg.stat()
+            except OSError:
+                st = None
+            facts.append({
+                "name": entry["name"], "extinf": entry["extinf"], "disc": entry["disc"],
+                "wall": st.st_mtime if st else None,
+                "size": st.st_size if st else 0,
+                "path": seg, "byterange": None,
+            })
+        return facts
 
     def _playlist_segments(self) -> list:
         """Ordered ``[(path, extinf, wall, discontinuous), ...]`` for the segments that
@@ -1857,17 +2101,10 @@ class Recorder:
 
         The concat and the timing map both build on this, so the two cannot disagree
         about which segments the finalized mp4 contains."""
-        if self.playlist is None or not self.playlist.is_file() or self.hls_dir is None:
+        if self.hls_dir is None:
             return []
-        try:
-            lines = self.playlist.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            logger.warning(
-                "HLS playlist read failed for %s", self.unique_id,
-                extra={"event": "recording.playlist_read_failed",
-                       "ctx": {"stem": self.base, "path": str(self.playlist)}},
-                exc_info=True,
-            )
+        facts = self._segment_facts()
+        if facts is None:
             return []
         kept: list = []
         dropped: list = []
@@ -1876,27 +2113,13 @@ class Recorder:
         empties: list = []
         rewinds = 0
         seen: set = set()
-        pending: Optional[float] = None
         prev_wall: Optional[float] = None
-        marked = False   # the source flagged a discontinuity before the next entry
         carry = False    # the preceding entry was dropped, so the next one jumps
-        for line in lines:
-            line = line.strip()
-            if line == "#EXT-X-DISCONTINUITY":
-                marked = True
-            elif line.startswith("#EXTINF:"):
-                try:
-                    pending = float(line[len("#EXTINF:"):].split(",", 1)[0])
-                except ValueError:
-                    pending = None
-            elif line and not line.startswith("#"):
-                extinf, pending = pending, None
-                seg = self.hls_dir / line
-                try:
-                    st = seg.stat() if extinf is not None else None
-                except OSError:
-                    st = None
-                if extinf is None or st is None:
+        for fact in facts:
+                line = fact["name"]
+                extinf, seg = fact["extinf"], fact["path"]
+                marked = fact["disc"]
+                if extinf is None or fact["wall"] is None:
                     unusable += 1
                     carry = True
                     continue
@@ -1910,13 +2133,13 @@ class Recorder:
                     duplicates.append(line)
                     continue
                 seen.add(line)
-                if st.st_size == 0:
+                if fact["size"] == 0:
                     # Its #EXTINF still counts: the segment's timestamps are preserved
                     # by the mux, so the media time really did elapse and the result is
                     # an honest freeze rather than a shift. Worth surfacing all the same
                     # -- an empty segment means a write that did not land.
                     empties.append(line)
-                wall = st.st_mtime
+                wall = fact["wall"]
                 if prev_wall is not None and wall <= prev_wall:
                     # The wall clock moved backwards or stalled (NTP correction, DST, a
                     # manual set). Anchors must come out strictly ascending: the burn-in
@@ -1931,11 +2154,11 @@ class Recorder:
                     dropped.append((line, extinf, delta))
                     carry = True
                     continue
-                kept.append((seg, extinf, wall, marked or carry))
-                marked = carry = False
+                kept.append((seg, extinf, wall, marked or carry, fact["byterange"]))
+                carry = False
         if dropped:
             logger.warning(
-                "%s: dropping %d PTS-discontinuity segment(s) to avoid a phantom gap: %s",
+                "%s: 幻の穴を避けるためPTS不連続なsegment %d 件を除外します: %s",
                 self.unique_id, len(dropped),
                 ", ".join("%s(EXTINF=%.1fs wall=%.1fs)" % (n, e, w) for n, e, w in dropped),
                 extra={"event": "recording.segments_dropped",
@@ -1949,7 +2172,7 @@ class Recorder:
             )
         if unusable:
             logger.warning(
-                "%s: %d playlist entry/entries had no usable segment file or #EXTINF",
+                "%s: 再生listの %d 件に使えるsegment fileまたは#EXTINFがありません",
                 self.unique_id, unusable,
                 extra={"event": "recording.playlist_entries_unusable",
                        "ctx": {"stem": self.base, "unusable": unusable,
@@ -1957,8 +2180,8 @@ class Recorder:
             )
         if duplicates:
             logger.warning(
-                "%s: playlist listed %d segment name(s) more than once; kept the first "
-                "occurrence of each: %s", self.unique_id, len(duplicates),
+                "%s: 再生listに %d 件のsegment名が重複していたため、最初の1件だけを"
+                "残しました: %s", self.unique_id, len(duplicates),
                 ", ".join(duplicates[:10]),
                 extra={"event": "recording.playlist_entries_duplicated",
                        "ctx": {"stem": self.base, "duplicates": len(duplicates),
@@ -1967,8 +2190,8 @@ class Recorder:
             )
         if empties:
             logger.warning(
-                "%s: %d segment file(s) are empty; that media is lost and plays as a "
-                "freeze: %s", self.unique_id, len(empties), ", ".join(empties[:10]),
+                "%s: segment file %d 件が空です。その部分の映像は失われ再生は静止します: %s",
+                self.unique_id, len(empties), ", ".join(empties[:10]),
                 extra={"event": "recording.segments_empty",
                        "ctx": {"stem": self.base, "empty": len(empties),
                                "empty_segments": empties[:50],
@@ -1976,9 +2199,8 @@ class Recorder:
             )
         if rewinds:
             logger.warning(
-                "%s: the wall clock failed to advance across %d segment boundary/ies; "
-                "anchors were nudged to stay ordered and comment sync near them is "
-                "approximate", self.unique_id, rewinds,
+                "%s: segment境界 %d 箇所で壁時計が進みませんでした。順序を保つためanchorを"
+                "ずらしたので、その付近のcommentの同期は概算です", self.unique_id, rewinds,
                 extra={"event": "recording.wall_clock_rewound",
                        "ctx": {"stem": self.base, "rewinds": rewinds,
                                "segments": len(kept) + len(dropped) + unusable}},
@@ -1986,31 +2208,12 @@ class Recorder:
         return kept
 
     def _write_vod_playlist(self, kept: list, path: Path) -> bool:
-        """Write the terminated VOD playlist the HLS demuxer reads at finalize.
-
-        #EXT-X-PLAYLIST-TYPE:VOD plus #EXT-X-ENDLIST is what stops the demuxer from
-        treating the captured (never-ended) capture index as a live stream."""
-        target = max(int(extinf) + 1 for _, extinf, _, _ in kept)
-        lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:6",
-            "#EXT-X-PLAYLIST-TYPE:VOD",
-            "#EXT-X-MEDIA-SEQUENCE:0",
-            "#EXT-X-INDEPENDENT-SEGMENTS",
-            "#EXT-X-TARGETDURATION:%d" % target,
-        ]
-        for seg, extinf, _, discontinuous in kept:
-            if discontinuous:
-                lines.append("#EXT-X-DISCONTINUITY")
-            lines.append("#EXTINF:%.6f," % extinf)
-            # Bare names resolve relative to the playlist's own directory.
-            lines.append(seg.name)
-        lines.append("#EXT-X-ENDLIST")
+        """Write the terminated VOD playlist the HLS demuxer reads at finalize."""
         try:
-            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            path.write_text(render_vod_playlist(kept), encoding="utf-8")
         except OSError as exc:
             logger.error(
-                "failed to write the VOD playlist for %s", self.unique_id,
+                "%s のVOD再生listを書き出せません", self.unique_id,
                 extra={"event": "recording.concat_list_write_failed",
                        "ctx": {"stem": self.base, "path": str(path),
                                "segments": len(kept),
@@ -2026,36 +2229,31 @@ class Recorder:
         if not ffprobe_available():
             return None
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                "-of", "default=nokey=1:noprint_wrappers=1", str(path),
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-            )
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except (OSError, asyncio.TimeoutError):
+            result = await ffprobe.run(
+                ffprobe.duration_args(path),
+                timeout=ffprobe.SEGMENT_TIMEOUT_SECONDS)
+        except OSError:
             # Called once per HLS segment, so this is guarded rather than emitted: a
             # long recording has thousands of segments and the aggregate outcome is
             # reported by the caller as timing_map_degraded.
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "duration probe did not complete for %s", path.name,
+                    "%s の尺のprobeが完了しませんでした", path.name,
                     extra={"event": "process.ffprobe_failed",
                            "ctx": {"stage": "duration", "path": str(path)}},
                     exc_info=True,
                 )
             return None
-        try:
-            return float(out.decode("ascii", "replace").strip())
-        except ValueError:
+        seconds = ffprobe.parse_duration(result.stdout)
+        if seconds is None:
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "duration probe returned no duration for %s", path.name,
+                    "%s の尺のprobeが尺を返しませんでした", path.name,
                     extra={"event": "process.ffprobe_failed",
                            "ctx": {"stage": "duration", "path": str(path),
-                                   "exit_code": proc.returncode}},
+                                   "exit_code": result.returncode}},
                 )
-            return None
+        return seconds
 
     async def _normalize_mixed_resolution(self, mp4_path: Path, progress=None) -> None:
         """When the source switched resolution mid-broadcast, the stream-copied mp4 carries
@@ -2090,9 +2288,9 @@ class Recorder:
         else:
             skip_reason = ""
         logger.info(
-            "recording %s carries %d distinct resolution(s): %s%s",
+            "録画 %s は解像度 %d 種類を含みます: %s%s",
             self.unique_id, len(distinct), ", ".join(summary) or "unknown",
-            f" (normalization skipped: {skip_reason})" if skip_reason else "",
+            f"（正規化をskip: {skip_reason}）" if skip_reason else "",
             extra={"event": "recording.resolutions_probed",
                    "ctx": {"stem": self.base, "path": str(mp4_path),
                            "distinct_resolutions": summary,
@@ -2109,8 +2307,8 @@ class Recorder:
                 progress.disable("normalize")
             if len(distinct) > 1:
                 logger.warning(
-                    "recording %s is mixed-resolution but normalization was skipped (%s); "
-                    "players may freeze or zoom at each switch point",
+                    "録画 %s は混在解像度ですが正規化をskipしました（%s）。playerが切替点ごとに"
+                    "固まる、または急拡大する可能性があります",
                     self.unique_id, skip_reason,
                     extra={"event": "recording.normalization_skipped",
                            "ctx": {"stem": self.base, "skip_reason": skip_reason,
@@ -2126,7 +2324,7 @@ class Recorder:
         mode = config.get_normalize_scale_mode()
         started = time.monotonic()
         logger.info(
-            "normalizing mixed-resolution recording %s: %d distinct (%s) -> %dx%d (mode=%s)",
+            "混在解像度の録画 %s を揃えます: %d 種類（%s）-> %dx%d（mode=%s）",
             self.unique_id, len(distinct), ", ".join(summary), target_w, target_h, mode,
             extra={"event": "recording.normalization_started",
                    "ctx": {"stem": self.base, "distinct_resolutions": summary,
@@ -2148,7 +2346,7 @@ class Recorder:
                 await progress.done("normalize")
         except Exception:
             logger.exception(
-                "resolution normalization failed for %s", self.unique_id,
+                "%s の解像度を揃える処理が失敗しました", self.unique_id,
                 extra={"event": "recording.normalization_failed",
                        "ctx": {"stem": self.base, "path": str(mp4_path),
                                "width": target_w, "height": target_h,
@@ -2159,8 +2357,8 @@ class Recorder:
             return
         if not ok:
             logger.error(
-                "resolution normalization produced no valid output for %s; keeping the "
-                "mixed-resolution stream-copy mp4", self.unique_id,
+                "%s の解像度を揃える処理が有効な出力を作れませんでした。混在解像度の"
+                "stream copy mp4をそのまま使います", self.unique_id,
                 extra={"event": "recording.normalization_failed",
                        "ctx": {"stem": self.base, "path": str(mp4_path),
                                "width": target_w, "height": target_h,
@@ -2175,9 +2373,9 @@ class Recorder:
             # 残るので、この時点では「壊れた方が使われている」状態。完了印を添えてあるため、
             # 次のserver起動時のsweepと次の焼き込み直前に自動で拾い直される。
             logger.error(
-                "could not swap normalized mp4 into place for %s (destination locked); "
-                "the re-encode is kept at %s and will be reclaimed at the next startup "
-                "sweep or output job", self.unique_id, tmp.name,
+                "%s の正規化済みmp4を差し替えられません（差し替え先がlockされています）。"
+                "再encodeは %s に残し、次の起動時sweepか出力jobで拾い直します",
+                self.unique_id, tmp.name,
                 extra={"event": "recording.normalized_output_orphaned",
                        "ctx": {"stem": self.base, "path": str(tmp),
                                "size_bytes": tmp.stat().st_size if tmp.is_file() else 0,
@@ -2190,8 +2388,8 @@ class Recorder:
             # commit_normalized already dropped the now-mismatched media->pts map; the
             # comment burn-in falls back to its wall-clock approximation.
             logger.warning(
-                "resolution-normalized recording %s -> %dx%d via CFR fallback; dropped the "
-                "timing map (comment sync will be approximate)", self.unique_id, target_w, target_h,
+                "録画 %s の解像度を %dx%d へ揃えました（CFRで代替）。timing mapは破棄したため"
+                "commentの同期は概算になります", self.unique_id, target_w, target_h,
                 extra={"event": "recording.timing_map_dropped",
                        "ctx": {"stem": self.base, "reason": "cfr_reencode",
                                "path": str(timing_path(mp4_path)),
@@ -2200,7 +2398,7 @@ class Recorder:
             )
         else:
             logger.info(
-                "resolution-normalized recording %s -> %dx%d",
+                "録画 %s の解像度を %dx%d へ揃えました",
                 self.unique_id, target_w, target_h,
                 extra={"event": "recording.normalized",
                        "ctx": {"stem": self.base, "path": str(mp4_path),
@@ -2232,7 +2430,7 @@ class Recorder:
         try:
             if self.playlist is None or not self.playlist.is_file() or self.hls_dir is None:
                 logger.warning(
-                    "no HLS playlist for %s; the comment timing map cannot be built",
+                    "%s にHLS再生listが無いためcommentのtiming mapを作れません",
                     self.unique_id,
                     extra={"event": "recording.timing_map_skipped",
                            "ctx": {"stem": self.base, "reason": "no_playlist",
@@ -2244,8 +2442,8 @@ class Recorder:
             kept = self._playlist_segments()
             if not kept:
                 logger.warning(
-                    "no usable segment in the playlist of %s; the comment timing map "
-                    "cannot be built", self.unique_id,
+                    "%s の再生listに使えるsegmentが無いためcommentのtiming mapを"
+                    "作れません", self.unique_id,
                     extra={"event": "recording.timing_map_skipped",
                            "ctx": {"stem": self.base, "reason": "no_segments",
                                    "segments": 0}},
@@ -2256,13 +2454,18 @@ class Recorder:
             # recording, and to any recording whose other segments were dropped.
             media = 0.0
             anchors: list[tuple[float, float]] = []
-            for _, extinf, wall, _ in kept:
+            for _, extinf, wall, _, _ in kept:
                 media += extinf
                 anchors.append((wall, round(media, 6)))
             # Prepend the first-frame zero point: media 0 at the start of seg0.
             anchors.insert(0, (anchors[0][0] - anchors[0][1], 0.0))
 
-            media_pts = await self._build_media_pts(kept, mp4_path)
+            # media_pts は media軸 -> **mp4のPTS軸** の対応で、mp4を入力にする時にしか
+            # 意味がない。finalizeがmp4を作らなくなったので、在るときだけ作る(再mp4化で
+            # 作られた録画と、mp4しか無い古い録画のため)。無い場合は焼き込み側がHLSの
+            # 時刻軸=media軸と判断して恒等で扱う(video_overlay._render_context)。
+            media_pts = (await self._build_media_pts(kept, mp4_path)
+                         if mp4_path.is_file() else None)
             payload = {
                 "version": 2 if media_pts else 1,
                 "media_duration": anchors[-1][1],
@@ -2274,7 +2477,7 @@ class Recorder:
             # Building the map failed (playlist parse / probe orchestration). The
             # recording survives; the burn-in falls back to a wall-clock approximation.
             logger.warning(
-                "could not build the comment timing map for %s", self.unique_id,
+                "%s のcommentのtiming mapを組み立てられません", self.unique_id,
                 extra={"event": "recording.timing_map_skipped",
                        "ctx": {"stem": self.base, "reason": "build_error",
                                "path": str(self.playlist) if self.playlist else ""}},
@@ -2292,8 +2495,8 @@ class Recorder:
             # space that would have identified the cause. No automatic retry exists, so
             # the map is permanently lost for this recording -> error.
             logger.error(
-                "failed to write the comment timing map for %s; comment sync for this "
-                "recording will be approximate", self.unique_id,
+                "%s のcommentのtiming mapを書き出せません。この録画のcommentの同期は"
+                "概算になります", self.unique_id,
                 extra={"event": "recording.timing_map_write_failed",
                        "ctx": {"stem": self.base, "path": str(out),
                                "size_bytes": len(serialized.encode("utf-8")),
@@ -2304,7 +2507,7 @@ class Recorder:
             )
             return
         logger.info(
-            "wrote the comment timing map for %s (%d anchors, %.1fs of media)",
+            "%s のcommentのtiming mapを書き出しました（anchor %d 件, media %.1fs）",
             self.unique_id, len(payload.get("anchors") or []), payload.get("media_duration") or 0.0,
             extra={"event": "recording.timing_map_written",
                    "ctx": {"stem": self.base, "path": str(out),
@@ -2324,12 +2527,12 @@ class Recorder:
         pinned to the finalized duration, which absorbs the sub-second residual
         between the spans the source declares and the ones it actually delivers."""
         mp4_dur = await self._probe_duration(mp4_path)
-        extinfs = [extinf for _, extinf, _, _ in kept]
+        extinfs = [extinf for _, extinf, _, _, _ in kept]
         media_pts = media_pts_from_segments(extinfs, extinfs, mp4_dur)
         if media_pts is None:
             logger.warning(
-                "timing map for %s: the finalized mp4 could not be probed; media->pts "
-                "falls back to the scale model", self.unique_id,
+                "%s のtiming map: 確定したmp4をprobeできなかったため、media->ptsは"
+                "scale modelで代替します", self.unique_id,
                 extra={"event": "recording.timing_map_degraded",
                        "ctx": {"stem": self.base, "reason": "mp4_probe_failed",
                                "segments": len(extinfs),
@@ -2366,8 +2569,8 @@ class Recorder:
         anchors = _load_timing_anchors(mp4_path)
         if not anchors:
             logger.warning(
-                "live bookmarks for %s keep their provisional wall-clock position "
-                "(%d marker(s)): no timing map to map them onto the mp4 timeline",
+                "%s の配信中の見どころ %d 件は暫定の壁時計位置のまま残します: "
+                "mp4の時刻軸へ載せ替えるtiming mapがありません",
                 self.unique_id, len(pending),
                 extra={"event": "recording.bookmark_remap_skipped",
                        "ctx": {"stem": self.base, "markers": len(pending),
@@ -2375,7 +2578,10 @@ class Recorder:
             )
             return
         media_pts = _load_media_pts(mp4_path)
-        video_duration = await self._probe_duration(mp4_path)
+        # mp4が在ればその軸へ、無ければ素材のmedia軸へ載せる。存在しないfileへffprobeを
+        # 掛けると毎回warningが出るだけで何も得られないので、先にEXTINF累計を使う。
+        video_duration = (await self._probe_duration(mp4_path) if mp4_path.is_file()
+                          else self._measure_media_seconds())
         mapper = _make_time_mapper(
             anchors, self.started_at, self.ended_at, video_duration, None, media_pts)
 
@@ -2388,8 +2594,8 @@ class Recorder:
         applied = self._storage.apply_bookmark_pts(mapped)
         worst = max((abs(s) for s in shifts), default=0.0)
         logger.info(
-            "remapped %d live bookmark(s) for %s onto the mp4 timeline "
-            "(largest correction %.1fs)", applied, self.unique_id, worst,
+            "配信中の見どころ %d 件を %s のmp4の時刻軸へ載せ直しました"
+            "（最大の補正 %.1fs）", applied, self.unique_id, worst,
             extra={"event": "recording.bookmarks_remapped",
                    "ctx": {"stem": self.base, "markers": applied,
                            "max_shift_seconds": round(worst, 3),
@@ -2410,41 +2616,63 @@ class Recorder:
         if seconds and seconds > 0:
             return seconds
         logger.warning(
-            "could not measure the duration of %s; leaving it unmeasured", path.name,
+            "%s の尺を測れないため未測定のまま残します", path.name,
             extra={"event": "recording.duration_unmeasured",
                    "ctx": {"stem": self.base, "path": str(path),
                            "ffprobe": ffprobe_available()}},
         )
         return None
 
-    async def _validate_mp4(self, path: Path) -> bool:
-        """Confirm the mp4 has a decodable video stream before discarding HLS."""
+    def _measure_media_seconds(self) -> Optional[float]:
+        """採用したsegmentのEXTINF累計。これがこの録画のmedia軸の全長である。
+
+        ffprobeを起こさないのは速いからではなく、**これが定義そのもの**だからである。
+        焼き込みも同じcurated playlistを開き、HLS demuxerはEXTINFから尺を返す(実測で
+        11256.381993s と累計が完全一致)。ここで別の測り方をすると、DBの尺と焼き込みの
+        時間軸が食い違う。"""
+        kept = self._playlist_segments()
+        if not kept:
+            return None
+        total = sum(extinf for _, extinf, _, _, _ in kept)
+        return total if total > 0 else None
+
+    async def _validate_source(self) -> bool:
+        """採用集合が復号できる映像を持つか。mp4を作らなくなったので、検証の対象は
+        原本の .ts になった。終端済みのVOD playlist越しに見るのは、captureのindexが
+        #EXT-X-ENDLIST を持たずliveと見なされて待ち続けるためである。"""
+        session = self.hls_dir
+        if session is None:
+            return False
+        probe = session / (".validate-" + uuid.uuid4().hex[:8] + ".m3u8")
+        try:
+            if write_curated_playlist(session, probe, self.unique_id) is None:
+                return False
+            return await self._validate_mp4(probe, tuple(HLS_INPUT_ARGS))
+        finally:
+            probe.unlink(missing_ok=True)
+
+    async def _validate_mp4(self, path: Path, input_args: tuple = ()) -> bool:
+        """Confirm the input has a decodable video stream before treating it as complete."""
         args = [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "ffprobe", "-v", "error", *input_args, "-select_streams", "v:0",
             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path),
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            out, err = await proc.communicate()
-            if proc.returncode == 0 and b"video" in out:
+            result = await ffprobe.run(args)
+            if result.ok and "video" in result.stdout:
                 return True
             logger.warning(
-                "mp4 validation of %s found no video stream (exit %s)",
-                path.name, proc.returncode,
+                "%s の検証で映像streamが見つかりませんでした（exit %s）",
+                path.name, result.returncode,
                 extra={"event": "process.ffprobe_failed",
                        "ctx": {"stage": "validate", "stem": self.base, "path": str(path),
-                               **ffmpeg_ctx(args, proc.returncode,
-                                            stderr_text=err.decode("utf-8", "replace"))}},
+                               **ffmpeg_ctx(args, result.returncode,
+                                            stderr_text=result.stderr)}},
             )
             return False
         except Exception:
             logger.exception(
-                "mp4 validation could not run for %s", self.unique_id,
+                "%s の検証を実行できません", self.unique_id,
                 extra={"event": "process.ffprobe_launch_failed",
                        "ctx": {"stage": "validate", "stem": self.base,
                                "path": str(path), **ffmpeg_ctx(args)}},
@@ -2467,7 +2695,7 @@ class Recorder:
                 await asyncio.wait_for(asyncio.shield(self._task), timeout=60)
             except (asyncio.TimeoutError, asyncio.CancelledError):
                 logger.warning(
-                    "recording task slow to finalize for %s; continuing without it",
+                    "%s の録画の確定が遅いため待たずに続行します",
                     self.unique_id,
                     extra={"event": "recording.finalize_timed_out",
                            "ctx": {"stem": self.base, "state": self.state}},
@@ -2504,8 +2732,8 @@ async def _reattach_orphan_mp4(storage, row: dict, base: str, mp4_path: Path) ->
     recorder.base = base
     if ffprobe_available() and not await recorder._validate_mp4(mp4_path):
         logger.error(
-            "orphan mp4 for recording id=%s has no decodable video stream; leaving the "
-            "row interrupted", row.get("id"),
+            "録画 id=%s の孤立したmp4に復号できる映像streamがありません。DB行はinterrupted"
+            "のまま残します", row.get("id"),
             extra={"event": "recording.reattach_failed",
                    "ctx": {"stem": base, "path": str(mp4_path),
                            "size_bytes": mp4_path.stat().st_size}},
@@ -2519,7 +2747,7 @@ async def _reattach_orphan_mp4(storage, row: dict, base: str, mp4_path: Path) ->
         row["id"], STATE_COMPLETED, str(mp4_path), mp4_path.name, stat.st_size, None,
         duration_seconds=duration, ended_at_if_missing=stat.st_mtime)
     logger.warning(
-        "reattached recording id=%s to its finalized mp4 %s (DB row pointed at %s)",
+        "録画 id=%s を確定済みのmp4 %s へ張り直しました（DB行は %s を指していました）",
         row.get("id"), mp4_path, row.get("path"),
         extra={"event": "recording.reattached",
                "ctx": {"stem": base, "path": str(mp4_path), "stale_path": row.get("path"),
@@ -2528,8 +2756,7 @@ async def _reattach_orphan_mp4(storage, row: dict, base: str, mp4_path: Path) ->
     return True
 
 
-async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = False,
-                                         final_dir=None) -> int:
+async def recover_interrupted_recordings(storage, record_dir, final_dir=None) -> int:
     """起動時、クラッシュで中断した録画の捕捉済みHLS segmentをmp4へ再finalizeしてDB行を復旧する。
     プロセスが録画中に落ちると_finalizeが走らずDB行はseg*.tsを指さないまま(pathは録画dir、
     filenameは未生成mp4)残り、seg*.tsは孤立して再生不能になる。ここでconcat→mp4化し、成功した
@@ -2540,8 +2767,8 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
     mp4も無いものは既存のinterruptedのまま残す(mark_stale_recordingsの後始末に委ねる)。"""
     if not ffmpeg_available():
         logger.error(
-            "ffmpeg unavailable; interrupted recordings cannot be recovered and their "
-            "HLS segments stay unplayable",
+            "ffmpegが使えないため中断した録画を復旧できず、HLS segmentは再生できない"
+            "ままになります",
             extra={"event": "recording.recovery_skipped", "ctx": {"reason": "ffmpeg_missing"}},
         )
         return 0
@@ -2555,6 +2782,11 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
     recovered = 0
     candidates = 0
     reattached = 0
+    # 待機/実行中のjobが掴んでいる録画には手を出さない。復旧はsegmentを読んでmp4の在処を
+    # 決め直し、最後にsession dirごと最終保存先へ移す処理なので、同じ素材を読み書きしている
+    # jobの足元を抜くことになる(逆向きは ``finalizing_scope`` が塞ぐが、jobが先に走り出して
+    # いた場合はこちらが譲るしかない)。見送った録画はinterruptedのまま残り、次の起動で拾う。
+    busy_ids = {rid for _kind, rid in storage.pending_media_job_keys()}
     for row in storage.recordings_for_recovery():
         filename = row.get("filename") or ""
         base = Path(filename).stem if filename else ""
@@ -2566,8 +2798,17 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
         if _row_points_at_file(row):
             continue
         existing = _finalized_mp4(base, {record_dir, final_dir})
-        hls_dir = layout.session_dir(record_dir, base)
-        has_segments = hls_dir.is_dir() and any(hls_dir.glob("seg*.ts"))
+        # 素材はwork rootとは限らない。移送済みの録画はfinal rootに在り、work rootだけを
+        # 見ると「作り直す材料が無い」と判断して行が永久にinterruptedのまま残る(実測1件:
+        # 素材はK:に589 segment在るのに画面から辿れなくなった)。
+        # 判定に ``layout.has_media`` を使うのも必須で、``seg*.ts`` だけを数えると
+        # 束ね済み(pack*.ts)の録画が全部「素材無し」になる。
+        hls_root = next(
+            (root for root in (record_dir, final_dir)
+             if layout.has_media(layout.session_dir(root, base))),
+            None)
+        hls_dir = layout.session_dir(hls_root or record_dir, base)
+        has_segments = hls_root is not None
         if existing is not None and not has_segments:
             # 作り直す材料(seg*.ts)が無いので、出来ているmp4へ行を張り直す。作り直しでは
             # なく突き合わせなので、再生可能かをffprobeで確かめてからcompletedにする。
@@ -2576,21 +2817,32 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
             continue
         if not has_segments:
             continue  # 再finalizeできるsegmentが残っていない
+        if row.get("id") in busy_ids:
+            logger.warning(
+                "中断した録画 id=%s はmedia jobが掴んでいます。復旧は次回の起動へ"
+                "見送ります", row.get("id"),
+                extra={"event": "recording.recovery_deferred",
+                       "ctx": {"stem": base, "path": str(hls_dir),
+                               "recording_id": row.get("id")}},
+            )
+            continue
         # Counted here, not per DB row: rows that already have an mp4 or have no
         # segments left were not recovery attempts and must not make the summary read
         # as a failure rate.
         candidates += 1
-        recorder = Recorder(row.get("unique_id") or "", str(record_dir), row.get("session_id"),
-                            keep_hls=keep_hls, final_dir=str(final_dir), storage=storage)
+        # 素材が在るrootをrecord dirとして渡す。work root固定で渡すと、final rootの録画に
+        # 対して存在しないdirを見に行き、素材ゼロとして確定してしまう。
+        recorder = Recorder(row.get("unique_id") or "", str(hls_root), row.get("session_id"),
+                            final_dir=str(final_dir), storage=storage)
         recorder.recording_id = row.get("id")
         try:
             await recorder.finalize_recovered_hls(base)
         except Exception:
             logger.exception(
-                "failed to recover interrupted recording id=%s", row.get("id"),
+                "中断した録画 id=%s の復旧に失敗しました", row.get("id"),
                 extra={"event": "recording.recovery_failed",
                        "ctx": {"stem": base, "path": str(hls_dir),
-                               "segments": len(list(hls_dir.glob("seg*.ts")))}},
+                               "segments": len(layout.media_files(hls_dir))}},
             )
             continue
         snap = recorder.snapshot()
@@ -2614,7 +2866,7 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
             )
             recovered += 1
             logger.info(
-                "recovered interrupted recording id=%s -> %s (%s)",
+                "中断した録画 id=%s を復旧しました -> %s（%s）",
                 row.get("id"), recorder.output_path, recorder.state,
                 extra={"event": "recording.recovered",
                        "ctx": {"stem": base, "path": str(recorder.output_path),
@@ -2622,8 +2874,8 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
             )
         else:
             logger.error(
-                "interrupted recording id=%s produced no usable mp4; its HLS segments "
-                "remain unplayable", row.get("id"),
+                "中断した録画 id=%s から使えるmp4を作れませんでした。HLS segmentは再生"
+                "できないままです", row.get("id"),
                 extra={"event": "recording.recovery_failed",
                        "ctx": {"stem": base, "state": recorder.state,
                                "path": str(hls_dir), "size_bytes": snap.get("bytes", 0),
@@ -2631,8 +2883,8 @@ async def recover_interrupted_recordings(storage, record_dir, keep_hls: bool = F
             )
     if candidates or reattached:
         logger.warning(
-            "recovered %d of %d interrupted recordings from the previous run "
-            "(+%d reattached to an existing mp4)",
+            "前回の実行で中断した録画 %d / %d 件を復旧しました"
+            "（既存mp4への張り直し %d 件）",
             recovered, candidates, reattached,
             extra={"event": "recording.recovery_completed",
                    "ctx": {"recovered": recovered, "candidates": candidates,

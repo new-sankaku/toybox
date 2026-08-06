@@ -1,9 +1,14 @@
 """保持policy(retention)の候補選定。実際の削除は行わず、何をどの順で消せるかだけを組む。
 
-削除順序は固定で (1)孤児transient → (2)再生成可能な派生物 → (3)生録画 とする。source mp4 は
-唯一の再取得不能資産で、overlay / up / cfrbase / comments.mov は source と収集eventから
-作り直せる派生物にすぎない。source を先に消すと reprocess・再output・transcribe・clip・heat が
-まとめて復旧不能になるため、この順序を崩してはならない。
+削除順序は固定で (1)孤児transient → (2)作り直せる派生物 → (3)再取得不能な原本 とする。原本を
+先に消すと reprocess・再output・transcribe・clip・heat がまとめて復旧不能になるため、この順序を
+崩してはならない。
+
+**どのfileが原本かは録画ごとに違う**。素材(.ts)が残っている録画では、原本は素材の方で、mp4は
+そこから作り直せる派生物にすぎない(overlay / up / cfrbase / comments.mov と同じ立場)。素材が
+残っていない録画では、従来どおりmp4が唯一の再取得不能資産である。呼び出し側が
+``has_media(recording)`` でこの区別を渡す — **省略時や判定できないときは素材が無い側**、つまり
+mp4を原本として保護する側へ倒す。分からないまま原本を派生物へ落とすと、最後の1本を消す。
 
 「転写済みで再利用予定が薄い」といった主観scoreは持たない(根拠の無い順位付けは捏造に近い)。
 並べ替えは最終更新の古い順のみで、同点はpathで決める。
@@ -42,8 +47,8 @@ PHASE_SOURCE = "source"
 PHASE_ORDER = (PHASE_TRANSIENT, PHASE_DERIVED, PHASE_SOURCE)
 PHASE_LABELS = {
     PHASE_TRANSIENT: "① 中断したrenderが残した中間file",
-    PHASE_DERIVED: "② 作り直せる派生物(焼き込み・AI高画質化)",
-    PHASE_SOURCE: "③ 生録画(mp4本体・再取得不能)",
+    PHASE_DERIVED: "② 作り直せる派生物(焼き込み・AI高画質化・素材が残る録画のmp4)",
+    PHASE_SOURCE: "③ 再取得不能な原本(素材の.ts、素材が無い録画はmp4本体)",
 }
 
 # transient と判定するsuffix。すべて .sidecars 配下に書かれるので、走査もそこだけで足りる。
@@ -130,7 +135,7 @@ def transient_candidates(roots, recordings, resolve_path,
             entries = list(os.scandir(sidecars))
         except OSError:
             logger.warning(
-                "could not read %s while planning retention", sidecars,
+                "retentionの計画中に %s を読み取れません", sidecars,
                 extra={"event": "retention.scan_failed", "ctx": {"path": str(sidecars)}},
                 exc_info=True,
             )
@@ -161,11 +166,22 @@ def transient_candidates(roots, recordings, resolve_path,
     return items
 
 
-def derived_candidates(recordings, resolve_path, min_age_seconds: float, now: float) -> list:
-    """焼き込み/AI高画質化の出力とそのmeta。保護flagの立った録画は対象外。
+def _rebuildable(recording, has_media) -> bool:
+    """この録画のmp4が素材から作り直せるか。判定手段が無ければFalse(=原本として保護)。"""
+    return bool(has_media(recording)) if has_media is not None else False
+
+
+def derived_candidates(recordings, resolve_path, min_age_seconds: float, now: float,
+                       has_media=None) -> list:
+    """作り直せる派生物。焼き込み/AI高画質化の出力に加え、**素材(.ts)が残っている録画では
+    mp4本体もここへ入る**(素材から同じものを作り直せるため)。保護flagの立った録画は対象外。
 
     経過time刻は派生物自身の最終更新で測る(元録画の日付ではない)。作り直した直後の出力を
-    「古い録画だから」で消してしまうのを避けるため。"""
+    「古い録画だから」で消してしまうのを避けるため。
+
+    mp4を含む項目には ``includes_source`` を立て、そのbytesを ``source_bytes`` に分けて持つ。
+    削除側はmp4を別経路(実在確認と行の更新を伴う)で消すため、そこが断ったときに解放bytesを
+    差し引けるようにしておく。"""
     items = []
     for recording in recordings:
         if recording.get("protected"):
@@ -173,11 +189,19 @@ def derived_candidates(recordings, resolve_path, min_age_seconds: float, now: fl
         if recording.get("status") == "recording":
             continue
         src = resolve_path(recording)
-        if src is None or not src.is_file():
-            # 元mp4が無い派生物は「作り直せる」派生物ではなく最後の1本なので、この段階では
-            # 消さない(回収したい場合は録画行ごと削除するUIが同じfileを消す)。
+        if src is None:
             continue
         found = _existing(overlay_artifact_paths(src) + upscale_artifact_paths(src))
+        source_bytes = 0
+        if _rebuildable(recording, has_media):
+            source = _existing([src])
+            source_bytes = sum(size for _, size, _ in source)
+            found = found + source
+        elif not src.is_file():
+            # 素材の無い録画で元mp4も無いなら、残る派生物は「作り直せる」ものではなく最後の
+            # 1本なので、この段階では消さない(回収したい場合は録画行ごと削除するUIが同じ
+            # fileを消す)。
+            continue
         if not found:
             continue
         newest = max(mtime for _, _, mtime in found)
@@ -193,14 +217,32 @@ def derived_candidates(recordings, resolve_path, min_age_seconds: float, now: fl
             "files": len(found),
             "mtime": newest,
             "age_days": round(age / _DAY_SECONDS, 1),
+            "includes_source": source_bytes > 0,
+            "source_bytes": source_bytes,
         })
     items.sort(key=lambda item: (item["mtime"], item["path"]))
     return items
 
 
-def source_candidates(recordings, resolve_path, min_age_seconds: float, now: float) -> list:
-    """生録画本体。ここに載ることと消してよいことは別で、実行するかどうかは設定の明示的な
-    有効化と operator の確認に委ねる(既定はOFF)。"""
+def _media_usage_of(recording, has_media, media_usage):
+    """素材(.ts)が原本として残っているならその実体量、そうでなければNone。
+
+    ``has_media`` / ``media_usage`` のどちらかを渡されていない = 呼び出し側が素材を見て
+    いないので、mp4を原本として扱う側へ倒す。"""
+    if media_usage is None or not _rebuildable(recording, has_media):
+        return None
+    usage = media_usage(recording) or {}
+    return usage if usage.get("files") else None
+
+
+def source_candidates(recordings, resolve_path, min_age_seconds: float, now: float,
+                      has_media=None, media_usage=None) -> list:
+    """再取得不能な原本。素材(.ts)が残っている録画では**素材そのもの**を、素材が無い録画では
+    mp4本体を指す。ここに載ることと消してよいことは別で、実行するかどうかは設定の明示的な
+    有効化と operator の確認に委ねる(既定はOFF)。
+
+    素材が残る録画のbytesは素材ぶんだけを数える。同じ録画のmp4は②が数えており、両方へ
+    載せるとplan全体の解放見込みが実在しない容量まで膨らむ。"""
     items = []
     for recording in recordings:
         if recording.get("protected"):
@@ -208,44 +250,56 @@ def source_candidates(recordings, resolve_path, min_age_seconds: float, now: flo
         if recording.get("status") == "recording":
             continue
         src = resolve_path(recording)
-        if src is None or not src.is_file():
+        if src is None:
+            continue
+        usage = _media_usage_of(recording, has_media, media_usage)
+        info = _stat(src)
+        if usage is not None:
+            size, files, disk_mtime = usage["bytes"], usage["files"], usage["mtime"]
+        elif info is not None and src.is_file():
             # 中断録画のpathはmp4ではなくrecord dir自体を指すことがある。実fileでない行を
             # 候補にすると、消えていない録画のDB行だけが落ちる。
+            artifacts = _existing(
+                overlay_artifact_paths(src) + overlay_transient_paths(src)
+                + upscale_artifact_paths(src)
+            )
+            size = info.st_size + sum(s for _, s, _ in artifacts)
+            files = 1 + len(artifacts)
+            disk_mtime = info.st_mtime
+        else:
             continue
-        info = _stat(src)
-        if info is None:
-            continue
-        # 完了time刻が無い録画(中断など)は本体のmtimeで測る。存在しない値を0で埋めると
+        # 完了time刻が無い録画(中断など)は実体のmtimeで測る。存在しない値を0で埋めると
         # 「無限に古い」扱いになり、最優先で消える側に回ってしまう。
-        finished = recording.get("ended_at") or info.st_mtime
+        finished = recording.get("ended_at") or disk_mtime
         age = now - finished
         if age < min_age_seconds:
             continue
-        artifacts = _existing(
-            overlay_artifact_paths(src) + overlay_transient_paths(src)
-            + upscale_artifact_paths(src)
-        )
         items.append({
             "recording_id": recording["id"],
             "filename": recording.get("filename") or src.name,
             "unique_id": recording.get("unique_id") or "",
             "path": str(src),
-            "bytes": info.st_size + sum(size for _, size, _ in artifacts),
-            "files": 1 + len(artifacts),
+            "bytes": size,
+            "files": files,
             "mtime": finished,
             "age_days": round(age / _DAY_SECONDS, 1),
             "has_transcript": bool(recording.get("has_transcript")),
+            "media": usage is not None,
         })
     items.sort(key=lambda item: (item["mtime"], item["path"]))
     return items
 
 
-def build_plan(recordings, roots, resolve_path, rules: dict, now: float) -> dict:
+def build_plan(recordings, roots, resolve_path, rules: dict, now: float,
+               has_media=None, media_usage=None) -> dict:
     """3 phaseの削除候補を実行順で返す。``rules`` は server が設定から組む
     {transient_hours, derived_days, source_days, source_enabled} 。
 
     値が 0(=無効)の phase は候補を作らず ``enabled: false`` と理由を返す。無効を空list
-    として返すと「対象が無い」と区別が付かず、設定を直せば消せるのか判断できなくなる。"""
+    として返すと「対象が無い」と区別が付かず、設定を直せば消せるのか判断できなくなる。
+
+    ``has_media`` / ``media_usage`` は素材(.ts)を見るための入口。省略すると素材を持たない
+    録画として扱い、mp4を原本として保護する(module docstring)。"""
     phases = []
 
     transient_hours = float(rules.get("transient_hours") or 0)
@@ -259,7 +313,8 @@ def build_plan(recordings, roots, resolve_path, rules: dict, now: float) -> dict
 
     derived_days = float(rules.get("derived_days") or 0)
     if derived_days > 0:
-        items = derived_candidates(recordings, resolve_path, derived_days * _DAY_SECONDS, now)
+        items = derived_candidates(recordings, resolve_path, derived_days * _DAY_SECONDS, now,
+                                   has_media=has_media)
         phases.append(_phase(PHASE_DERIVED, True, "", items))
     else:
         phases.append(_phase(PHASE_DERIVED, False,
@@ -273,7 +328,8 @@ def build_plan(recordings, roots, resolve_path, rules: dict, now: float) -> dict
         phases.append(_phase(PHASE_SOURCE, False,
                              "「生録画を削除するまでの日数」が0のため実行しません。", []))
     else:
-        items = source_candidates(recordings, resolve_path, source_days * _DAY_SECONDS, now)
+        items = source_candidates(recordings, resolve_path, source_days * _DAY_SECONDS, now,
+                                  has_media=has_media, media_usage=media_usage)
         phases.append(_phase(PHASE_SOURCE, True, "", items))
 
     return {

@@ -600,3 +600,63 @@ def test_cancel_token_scope_does_not_leak_into_a_sibling_context():
         assert is_cancelled() is True
     assert is_cancelled() is False
     assert cancel_mod.current_token() is None
+
+
+# ------------------------------------------- detect_spikes: weights / min_values
+
+
+def _laugh(values):
+    """laugh_comment だけを載せた bucket 列。diamonds/comments は全て0。"""
+    return _buckets([0] * len(values), extra={"laugh_comment": values})
+
+
+def test_min_values_suppresses_a_single_hit_in_a_zero_inflated_metric():
+    """笑い系は系列のほぼ全てが0なので、1件でも大きなzが出る。
+
+    下限を置かないと「ほとんど笑わない配信のたった1件」が候補を占領する。実測では
+    窓内1件だけの窓が中央値z=1.50を得て、22.1%のsessionでz>=2.0を超えた。
+    """
+    buckets = _laugh([0] * 9 + [1])
+    metrics = ("laugh_comment",)
+    assert len(detect_spikes(buckets, metrics=metrics, zscore_min=2.0)) == 1
+    assert detect_spikes(buckets, metrics=metrics, zscore_min=2.0,
+                         min_values={"laugh_comment": 2.0}) == []
+
+
+def test_min_values_keeps_windows_that_clear_the_floor():
+    buckets = _laugh([0] * 9 + [5])
+    got = detect_spikes(buckets, metrics=("laugh_comment",), zscore_min=2.0,
+                        min_values={"laugh_comment": 2.0})
+    assert [c["values"]["laugh_comment"] for c in got] == [5]
+
+
+def test_min_values_does_not_change_the_zscore_population():
+    """下限は候補化の条件だけを変える。系列もz-scoreの母集団も動かさない
+    (動かすと同じ配信の他の窓の判定まで変わる)。"""
+    buckets = _laugh([0] * 8 + [3, 9])
+    plain = {c["start"]: c["zscore"] for c in
+             detect_spikes(buckets, metrics=("laugh_comment",), zscore_min=1.0)}
+    floored = detect_spikes(buckets, metrics=("laugh_comment",), zscore_min=1.0,
+                            min_values={"laugh_comment": 5.0})
+    assert len(floored) == 1
+    assert floored[0]["zscore"] == plain[floored[0]["start"]]
+
+
+def test_weights_scale_the_zscore_of_one_metric_only():
+    buckets = _buckets([0] * 9 + [10], extra={"laugh_comment": [0] * 9 + [10]})
+    metrics = ("diamonds", "laugh_comment")
+    plain = detect_spikes(buckets, metrics=metrics, zscore_min=3.0)[0]
+    assert plain["zscore"] == pytest.approx(3.0)
+    weighted = detect_spikes(buckets, metrics=metrics, zscore_min=3.0,
+                             weights={"laugh_comment": 2.0})[0]
+    assert weighted["metric"] == "laugh_comment"
+    assert weighted["zscore"] == pytest.approx(6.0)
+    # 重み付けしていない側のzは動かない。
+    assert weighted["zscores"]["diamonds"] == pytest.approx(3.0)
+
+
+def test_weights_and_min_values_default_to_the_previous_behaviour():
+    """未指定なら既存の挙動と完全に同一。配信者pageの見どころは影響を受けない。"""
+    buckets = _buckets([0] * 9 + [10])
+    assert (detect_spikes(buckets, zscore_min=3.0)
+            == detect_spikes(buckets, zscore_min=3.0, weights=None, min_values=None))

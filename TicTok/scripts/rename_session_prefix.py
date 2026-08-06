@@ -99,7 +99,7 @@ def main() -> int:
     db_path = args.db or get_db_path()
     record_dir = Path(args.record_dir) if args.record_dir else Path(record_dir_from_db(db_path))
     if not record_dir.is_dir():
-        logger.error("recordings directory not found: %s", record_dir)
+        logger.error("recordingのdirectoryが見つかりません: %s", record_dir)
         return 1
 
     conn = sqlite3.connect(db_path, timeout=5)
@@ -137,8 +137,8 @@ def main() -> int:
 
     if not args.apply:
         logger.info(
-            "dry-run: %d 件を rename 予定 / %d 件は対象外（session_id 無し・実体無し・付与済み）。"
-            "適用は --apply。", len(safe_plans), skipped,
+            "dry-run: %d 件を rename 予定 / %d 件は対象外（session_id 無し・実体無し・付与済み）"
+            "、適用は --apply", len(safe_plans), skipped,
         )
         conn.close()
         return 0
@@ -156,9 +156,9 @@ def main() -> int:
             applied += 1
         except OSError:
             conn.rollback()
-            logger.warning("  [fail id=%s] rename 失敗（ファイルロック?）", plan["id"], exc_info=True)
+            logger.warning("  [fail id=%s] rename に失敗しました（file lock?）", plan["id"], exc_info=True)
     conn.close()
-    logger.info("applied: %d 件を rename・DB 更新 / %d 件は対象外。", applied, skipped)
+    logger.info("applied: %d 件を rename・DB 更新 / %d 件は対象外", applied, skipped)
     return 0
 
 

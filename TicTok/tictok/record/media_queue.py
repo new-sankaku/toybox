@@ -17,6 +17,7 @@ workerは常に1本。GPU semaphore(core.gpu)は同時実行を止めるが、�
 
 import asyncio
 import logging
+import re
 import time
 from typing import Callable, Optional
 
@@ -31,10 +32,47 @@ GROUP_DOMAINS = {"overlay": "session_overlay", "upscale": "session_upscale"}
 # またがるため。session_*のまま出すと履歴画面が先頭録画のsession行1つを掴み、そのsessionに
 # 属さない録画まで含む進捗と件数をそこへ貼り付けてしまう。
 BULK_DOMAINS = {"overlay": "bulk_overlay", "upscale": "bulk_upscale",
-                "reprocess": "bulk_reprocess", "audionorm": "bulk_audionorm"}
+                "reprocess": "bulk_reprocess", "audionorm": "bulk_audionorm",
+                "pack": "bulk_pack"}
 # 実行が終わったstate。pending/runningの補集合として書くと、新しいstateを足したときに
 # 「終わっていないのに終了扱い」へ静かに転ぶので列挙する。
 FINISHED_STATES = ("completed", "failed", "cancelled", "skipped", "interrupted")
+
+# 画面の状態filter → 台帳のstate。Job画面のselectはこのkeyを送る。台帳を絞るのは画面では
+# なくここで、「新しい200行に紛れなかった古い失敗」が0件として消えないようにする。
+STATE_FILTERS = {
+    "active": ("pending", "running"),
+    "failed": ("failed", "interrupted"),
+}
+
+# 畳んだ表示用domain → 畳む前のkind。GROUP_DOMAINS/BULK_DOMAINSの逆引きで、対応表を
+# 2つ持たない(片方だけ足すと種別filterが黙って0件になる)。
+_FOLDED_TO_KIND = {domain: kind
+                   for mapping in (GROUP_DOMAINS, BULK_DOMAINS)
+                   for kind, domain in mapping.items()}
+
+
+# 段階名から詳細を落とすための括弧。段階名は「(3/6) アイコン・絵文字を取得中（ギフト
+# アイコン 12/48）」の形で、括弧の中は数frameごとに動く。段階が変わったかの判定にそのまま
+# 使うと、同じ段階が数千件の履歴になる。
+_STAGE_DETAIL = re.compile(r"（[^（）]*）")
+
+
+def stage_phase(stage: str) -> str:
+    """段階名から進行中の詳細(frame位置・件数)を落とした、段階そのものの名前。
+
+    履歴に残すのはこちら。詳細まで含めて残すと「どの段階に何秒かけたか」ではなく
+    「1秒ごとの位置log」になり、行が数千件へ膨らんで読む対象でなくなる。"""
+    return _STAGE_DETAIL.sub("", stage or "").strip()
+
+
+def db_kind_for_domain(domain: str) -> str:
+    """画面のdomain名 → 台帳のkind。
+
+    session_*/bulk_* は録画ごとの行を畳んだ表示専用の名前で、台帳にその文字列を持つ行は
+    無い。畳む前のkind(overlay等)へ戻して引く。それ以外のdomainはkindと同じ語なのでその
+    まま返す — 台帳に載らないdomain(容量scan等)は0件になるが、それが事実である。"""
+    return _FOLDED_TO_KIND.get(domain, domain)
 
 
 class JobDeferred(Exception):
@@ -77,6 +115,9 @@ def job_payload(row: dict, queue_position: int = 0) -> dict:
         "session_id": row.get("session_id"),
         "state": row["state"],
         "stage": row.get("stage") or "",
+        # 通ってきた段階と、その段階へ入った時刻。終わったjobのstageは空にされるので、
+        # 「どこで何秒かかったか / どこで落ちたか」はこれ以外に辿る先が無い。
+        "stages": row.get("stages") or [],
         "pct": row.get("pct") or 0,
         "index": 0,
         "total": 1,
@@ -90,6 +131,9 @@ def job_payload(row: dict, queue_position: int = 0) -> dict:
         "not_before": row.get("not_before"),
         "filename": row.get("filename"),
         "unique_id": row.get("unique_id"),
+        # 起動時sweepが自動で積んだ行。人が投げた覚えのないjobが並ぶ理由を画面が名乗れる
+        # ようにする(同時実行を別枠で絞っているのもこの印)。
+        "sweep": bool(row.get("sweep")),
         "result": row.get("result") or {},
     }
 
@@ -175,6 +219,12 @@ class MediaJobQueue:
         self._stopping = False
         self._tokens: dict[str, CancelToken] = {}
         self._last_progress: dict[str, tuple] = {}
+        # job_id -> 最後に履歴へ残した段階名。段階が変わった1回だけ追記するための目印で、
+        # process内に留めてよい(再起動を跨いだ行はinterruptedになり、次の実行はclaimで
+        # 履歴ごと作り直す)。
+        self._last_phase: dict[str, str] = {}
+        # group_id -> 最後にgroupのまとめ行を配った時刻。進捗tickでのgroup再集計を間引く。
+        self._last_group_emit: dict[str, float] = {}
         # 集計済みのgroup_id。同時に終わった2件が同じ集計を二重に残さないための目印で、
         # process内に留めてよい(再起動を跨ぐと、そのgroupは既に終わっているので通らない)。
         self._summarized: set = set()
@@ -186,7 +236,7 @@ class MediaJobQueue:
         self._tasks = [asyncio.create_task(self._run()) for _ in range(workers)]
         if workers > 1:
             logger.info(
-                "media queue: %d concurrent worker(s)", workers,
+                "media queue: 並列 worker %d 本で開始しました", workers,
                 extra={"event": "media_queue.workers_started",
                        "ctx": {"workers": workers}},
             )
@@ -208,13 +258,13 @@ class MediaJobQueue:
     async def enqueue(self, job_id: str, kind: str, recording_id: int, *,
                       session_id: Optional[int] = None, group_id: str = "",
                       title: str = "", priority: int = 0,
-                      params: Optional[dict] = None) -> dict:
+                      params: Optional[dict] = None, sweep: bool = False) -> dict:
         row = self._storage.enqueue_media_job(
             job_id, kind, recording_id, session_id=session_id, group_id=group_id,
-            title=title, priority=priority, params=params,
+            title=title, priority=priority, params=params, sweep=sweep,
         )
         logger.info(
-            "media queue: enqueued %s for recording %s", kind, recording_id,
+            "media queue: %s をqueueへ投入しました（recording %s）", kind, recording_id,
             extra={"event": "media_queue.enqueued",
                    "ctx": {"job_id": job_id, "kind": kind, "recording_id": recording_id,
                            "session_id": session_id, "group_id": group_id}},
@@ -222,6 +272,36 @@ class MediaJobQueue:
         self._wake.set()
         await self._emit(row)
         return row
+
+    def _insert_many(self, specs: list) -> list:
+        return [self._storage.enqueue_media_job(**spec) for spec in specs]
+
+    async def enqueue_many(self, specs: list) -> list:
+        """複数のjobを1回の投入として積む。``specs`` は ``enqueue_media_job`` のkeyword引数。
+
+        1本ずつ ``enqueue`` を呼ぶと、投入のたびに待機列全件(list_media_jobs)とgroup全件を
+        引き直すので、N本の投入が**N²のquery**になる。しかもそれは同期queryなのでevent loop
+        の上で起きる — 配信者まるごとの一括(数百本)を積む間、収集も他の画面も止まっていた。
+        行の書き込みはthreadでまとめ、配信は最後に1回だけ行う。
+
+        途中経過を配らないことで画面が失うものは無い。``_emit_pending`` が待機中の行を
+        **全件**、正しい順番付きで配り直すため、受け取る最終状態は1本ずつ配ったときと同じ
+        である(投入中にworkerが拾った行は、workerの開始側が自分で配る)。"""
+        if not specs:
+            return []
+        rows = await asyncio.to_thread(self._insert_many, specs)
+        logger.info(
+            "media queue: %d件をまとめてqueueへ投入しました", len(rows),
+            extra={"event": "media_queue.enqueued_many",
+                   "ctx": {"count": len(rows),
+                           "kinds": sorted({r["kind"] for r in rows}),
+                           "group_ids": sorted({r.get("group_id") or "" for r in rows})}},
+        )
+        self._wake.set()
+        await self._emit_pending()
+        for group_id in dict.fromkeys(row.get("group_id") or "" for row in rows):
+            await self._emit_group(group_id, gate=False)
+        return rows
 
     def pending_for(self, kind: str, recording_id: int) -> Optional[dict]:
         return self._storage.pending_media_job_for(kind, recording_id)
@@ -269,17 +349,25 @@ class MediaJobQueue:
             return "cancelling"
         return "finished"
 
-    def _queue_positions(self) -> dict:
-        """{job_id: 順番(1始まり)}。workerが次に拾う順(priority DESC, queued_at)と
-        同じ並びで数える。ここが実際の実行順と食い違うと、待機列の表示が嘘になる。"""
+    def _pending_in_order(self) -> list:
+        """待機中の行を、workerが次に拾う順(priority DESC, queued_at)に並べたもの。
+        ここが実際の実行順と食い違うと、待機列の表示が嘘になる。"""
         pending = [r for r in self._storage.list_media_jobs(1000)
                    if r["state"] == "pending"]
         pending.sort(key=lambda r: (-(r.get("priority") or 0), r.get("queued_at") or 0))
-        return {r["job_id"]: i + 1 for i, r in enumerate(pending)}
+        return pending
 
-    def list_jobs(self, limit: int = 200) -> list:
-        """単体jobと、session一括投入をgroupへ畳んだjobの一覧。"""
-        rows = self._storage.list_media_jobs(limit)
+    def _queue_positions(self) -> dict:
+        """{job_id: 順番(1始まり)}。"""
+        return {r["job_id"]: i + 1 for i, r in enumerate(self._pending_in_order())}
+
+    def list_jobs(self, limit: int = 200, *, states=None, kinds=None, job_id=None) -> list:
+        """単体jobと、session一括投入をgroupへ畳んだjobの一覧。
+
+        ``states`` / ``kinds`` / ``job_id`` は台帳を引く時点の絞り込み。畳んだgroup行はgroup
+        全件から組み直すので、条件に一致した明細1件からでもその一括の全体像が出る(逆に、
+        group行自体は条件に一致しないことがある — 一致した明細を消さないのは画面側の仕事)。"""
+        rows = self._storage.list_media_jobs(limit, states=states, kinds=kinds, job_id=job_id)
         positions = self._queue_positions()
         payloads = [job_payload(row, positions.get(row["job_id"], 0)) for row in rows]
         group_ids = {row["group_id"] for row in rows if row.get("group_id")}
@@ -299,7 +387,8 @@ class MediaJobQueue:
         while not self._stopping:
             # 取得と同時にrunningへ落とす。workerが複数居るとき、選んでから開始を書くまでの
             # 隙間に別のworkerが同じ行を拾えてしまう。
-            job = self._storage.claim_next_pending_media_job()
+            job = self._storage.claim_next_pending_media_job(
+                sweep_limit=config.get_media_queue_sweep_concurrency())
             if job is None:
                 self._wake.clear()
                 try:
@@ -329,7 +418,7 @@ class MediaJobQueue:
             deferred = self._defer(job, exc)
         except JobCancelled:
             logger.info(
-                "media job cancelled: %s (%s)", job_id, job["kind"],
+                "media jobを取り消しました: %s（%s）", job_id, job["kind"],
                 extra={"event": "media_queue.job_cancelled",
                        "ctx": {"job_id": job_id, "kind": job["kind"],
                                "recording_id": job.get("recording_id")}},
@@ -337,7 +426,7 @@ class MediaJobQueue:
             self._storage.finish_media_job(job_id, "cancelled", error="取り消しました。")
         except JobSkipped as exc:
             logger.info(
-                "media job skipped: %s (%s) %s", job_id, job["kind"], exc,
+                "media jobをskipしました: %s（%s）%s", job_id, job["kind"], exc,
                 extra={"event": "media_queue.job_skipped",
                        "ctx": {"job_id": job_id, "kind": job["kind"],
                                "recording_id": job.get("recording_id"),
@@ -349,7 +438,7 @@ class MediaJobQueue:
             detail = getattr(exc, "detail", None)
             message = detail if isinstance(detail, str) else str(exc)
             logger.exception(
-                "media job failed: %s (%s)", job_id, job["kind"],
+                "media jobが失敗しました: %s（%s）", job_id, job["kind"],
                 extra={"event": "media_queue.job_failed",
                        "ctx": {"job_id": job_id, "kind": job["kind"],
                                "recording_id": job.get("recording_id")}},
@@ -361,6 +450,7 @@ class MediaJobQueue:
         finally:
             self._tokens.pop(job_id, None)
             self._last_progress.pop(job_id, None)
+            self._last_phase.pop(job_id, None)
         await self._emit(self._storage.get_media_job(job_id))
         await self._emit_pending()
         if not deferred:
@@ -402,7 +492,7 @@ class MediaJobQueue:
         if waited > limit:
             message = f"{exc.reason}（{int(waited // 60)}分待っても解消しませんでした）"
             logger.error(
-                "media job gave up waiting: %s (%s) %s", job_id, job["kind"], exc.reason,
+                "media jobの待機を打ち切りました: %s（%s）%s", job_id, job["kind"], exc.reason,
                 extra={"event": "media_queue.job_defer_timeout",
                        "ctx": {"job_id": job_id, "kind": job["kind"],
                                "recording_id": job.get("recording_id"),
@@ -414,7 +504,7 @@ class MediaJobQueue:
         self._storage.defer_media_job(
             job_id, time.time() + wait, f"{exc.reason} 復帰を待っています…")
         logger.warning(
-            "media job deferred for %.0fs: %s (%s) %s", wait, job_id, job["kind"], exc.reason,
+            "media jobを %.0fs 保留します: %s（%s）%s", wait, job_id, job["kind"], exc.reason,
             extra={"event": "media_queue.job_deferred",
                    "ctx": {"job_id": job_id, "kind": job["kind"],
                            "recording_id": job.get("recording_id"),
@@ -446,7 +536,7 @@ class MediaJobQueue:
                     raise
                 wait = backoff * attempt
                 logger.warning(
-                    "media job attempt %d/%d failed, retrying in %.1fs: %s (%s)",
+                    "media jobの %d/%d 回目が失敗したため %.1fs 後に再試行します: %s（%s）",
                     attempt, attempts, wait, job_id, job["kind"], exc_info=True,
                     extra={"event": "media_queue.job_retry",
                            "ctx": {"job_id": job_id, "kind": job["kind"],
@@ -467,29 +557,64 @@ class MediaJobQueue:
         if self._last_progress.get(job_id) == (pct, stage):
             return
         self._last_progress[job_id] = (pct, stage)
-        self._storage.update_media_job_progress(job_id, pct, stage)
-        await self._emit(self._storage.get_media_job(job_id))
+        # 段階が変わった時だけ履歴へ1件足す。詳細(frame位置)は毎回動くので、それを落とした
+        # 段階名で比べる。空の段階名は履歴に残さない — 終端でstageを消す書き込みと、まだ
+        # 段階名を持たない開始直後が、中身の無い1件として並ぶ。
+        phase = stage_phase(stage)
+        changed = bool(phase) and self._last_phase.get(job_id) != phase
+        if changed:
+            self._last_phase[job_id] = phase
+        self._storage.update_media_job_progress(
+            job_id, pct, stage, phase=phase if changed else None)
+        # 進捗tickはjob 1本で数十〜数百回鳴る。当事者の行は毎回配り、groupのまとめ行だけを
+        # 間引く(group全件のqueryを伴うのはそちらだけである)。
+        await self._emit(self._storage.get_media_job(job_id), gate_group=True)
 
     async def _emit_pending(self) -> None:
         """待機列の順番を配り直す。1件が動き出す/終わるたびに後続の順番が繰り上がるので、
-        当事者の行だけを配ると、残りの行が古い順番を表示したまま残る。"""
-        positions = self._queue_positions()
-        for job_id, position in positions.items():
-            row = self._storage.get_media_job(job_id)
-            if row is not None:
-                await self._broadcast({"type": "job_update",
-                                       "job": job_payload(row, position)})
+        当事者の行だけを配ると、残りの行が古い順番を表示したまま残る。
 
-    async def _emit(self, row: Optional[dict]) -> None:
+        並べ替えに使った行をそのまま配る。以前はjob_idだけを取り出してから1件ずつ
+        get_media_jobで引き直しており、待機N件につきN回の余計なqueryを、jobの開始と
+        終了のたびに払っていた。"""
+        for position, row in enumerate(self._pending_in_order(), start=1):
+            await self._broadcast({"type": "job_update",
+                                   "job": job_payload(row, position)})
+
+    async def _emit_group(self, group_id: str, *, gate: bool) -> None:
+        """一括投入のまとめ行を配る。
+
+        まとめ行はgroup全件をDBから引き直して作るので、memberの進捗tickごとに呼ぶと、
+        数百本のgroupでは1%動くたび数百行のqueryがevent loop上で走る。``gate`` を立てた
+        呼び出しは最小間隔で間引く — 間引いた更新は捨てるが、次の配信が最新のgroup状態を
+        そのまま運ぶので、表示が古いまま固定されることはない。
+
+        状態遷移(投入・開始・終了・取り消し)の呼び出しは ``gate=False`` で必ず通す。
+        そこを間引くと、終わったgroupが終わったように見えない時間が生まれる。"""
+        if not group_id:
+            return
+        now = time.monotonic()
+        if gate:
+            last = self._last_group_emit.get(group_id)
+            if (last is not None
+                    and now - last < config.get_media_job_group_emit_min_interval_seconds()):
+                return
+        group = group_payload(self._storage.media_jobs_in_group(group_id))
+        if group is None:
+            return
+        if group["state"] in FINISHED_STATES:
+            # 終わったgroupの目印は残さない。残すと、requeueで動き出したときの初回が
+            # 間引かれ、再開が画面に出ないまま進む。台帳の伸びも同時に止まる。
+            self._last_group_emit.pop(group_id, None)
+        else:
+            self._last_group_emit[group_id] = now
+        await self._broadcast({"type": "job_update", "job": group})
+
+    async def _emit(self, row: Optional[dict], *, gate_group: bool = False) -> None:
         if row is None:
             return
         position = 0
         if row["state"] == "pending":
             position = self._queue_positions().get(row["job_id"], 0)
         await self._broadcast({"type": "job_update", "job": job_payload(row, position)})
-        group_id = row.get("group_id") or ""
-        if not group_id:
-            return
-        group = group_payload(self._storage.media_jobs_in_group(group_id))
-        if group is not None:
-            await self._broadcast({"type": "job_update", "job": group})
+        await self._emit_group(row.get("group_id") or "", gate=gate_group)

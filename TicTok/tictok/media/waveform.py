@@ -5,9 +5,12 @@ mono/低sample rateへ落としてs16le rawでpipe受けする。3時間級の�
 全sampleをmemoryへ載せる/PythonでloopするのはNG:
   - decodeはpipeから固定chunkで逐次読みし、chunk単位でnumpyへ渡す。
   - 縮約はreshape+maxのvector演算のみ。frame単位のPython loopは無い。
-中間表現として ``FINE_FRAME_MS`` 刻みのpeak列を持ち、最後に要求bucket数へ
-maximum.reduceatで畳む。こうすると再生時間に依らずmemoryが尺に比例するだけ(3時間で
-数MB)に収まり、bucket数の決定にffprobeの尺を先読みする必要も無い。
+中間表現として ``FINE_FRAME_MS`` 刻みのpeak列を持ち、最後に ``WAVE_BUCKET_SECONDS``
+刻みへmaximum.reduceatで畳む。bucketを個数でなく**時間**で刻むのは、再生画面が
+拡大表示(zoom)を持つため。個数固定だと長い録画ほど1bucketの実時間が延び、拡大しても
+細部が出ない。時間固定なら尺に依らず同じ細かさで、bucket index→秒の換算も単純積になる。
+memoryは尺に比例するだけ(3時間で数MB)に収まり、bucket数の決定にffprobeの尺を
+先読みする必要も無い。
 
 結果はrecorderと同じsidecar置き場(.sidecars)へJSONでcacheし、srcのmtime+sizeと
 bucket数が一致する限りffmpegを再実行しない。
@@ -28,6 +31,8 @@ from typing import Optional
 
 import numpy as np
 
+from tictok.core import cancel
+from tictok.media import hls_source
 from tictok.core.config import (
     get_audio_profile_interval_seconds,
     get_audio_silence_dbfs,
@@ -43,11 +48,13 @@ WAVEFORM_SUFFIX = ".waveform.json"
 # 静かな配信のnoise floorが可聴扱いになる。
 AUDIO_PROFILE_SUFFIX = ".audio.json"
 # cache schemaのversion。縮約方法や正規化を変えたら上げる(旧cacheを無効化するため)。
-_CACHE_VERSION = 1
+# v2: bucket個数固定(2000)から時間刻み(WAVE_BUCKET_SECONDS)へ変更。
+_CACHE_VERSION = 2
 _PROFILE_VERSION = 1
-# 表示用波形を伴わずprofileだけを要求されたときのbucket数。decodeは1回で両方作れるので、
-# ついでに作る表示用波形の解像度を決めるためだけの値(APIの既定値と揃えてある)。
-_PROFILE_DISPLAY_BUCKETS = 2000
+# 表示用波形のbucketの実時間。拡大表示が数十秒窓でも包絡が読める細かさで、3時間の録画でも
+# 10.8万点(JSONで約1MB)に収まる。変えるときは_CACHE_VERSIONを上げること(全cacheの
+# bucket数が変わるため)。
+WAVE_BUCKET_SECONDS = 0.1
 
 # 波形表示に必要なのは振幅の包絡だけで音質は不要。8kHzでも数千bucketの包絡は変わらず、
 # decode量(=所要時間)は元の48kHzの1/6で済む。
@@ -92,33 +99,47 @@ def waveform_artifact_paths(src) -> tuple:
 
 def _source_key(src: Path) -> dict:
     """cacheの有効性を判定するsrcの指紋。hashは3時間/12GBのfileを毎回全読みすることに
-    なるので使わず、mtime+sizeで判定する(録画は追記でなく差し替えで更新される)。"""
-    stat = src.stat()
-    return {"mtime": round(stat.st_mtime, 3), "size": stat.st_size}
+    なるので使わず、mtime+sizeで判定する(録画は追記でなく差し替えで更新される)。
+
+    mp4が在る録画では今までと同じ値になるので、既にある波形cacheはそのまま生きる。
+    mp4が無い録画では素材(.ts)の本数・合計byte・最新mtimeを数える — playlistのstatは
+    segmentの入れ替わりを映さず、鍵にすると素材が変わってもcacheが当たり続ける。"""
+    key = hls_source.fingerprint(src)
+    # JSONへ書いて読み戻す往復で下位桁が揺れるので、比較に使う桁だけ残す。
+    return {**key, "mtime": round(key["mtime"], 3)}
 
 
-def _load_cache(src: Path, buckets: int) -> dict:
-    """有効なcacheがあれば戻り値dictを、無ければ空dictを返す。bucket数までkeyに含めるのは、
-    別解像度の要求へ既存cacheを畳み直すと境界がbucketの整数倍でない限り近似になり、
+def _key_matches(data: dict, key: dict) -> bool:
+    """cacheに記録された指紋が今の素材と一致するか。``segments`` は.tsから読んだ録画に
+    しか無い項なので、mp4のcache(この項が無い)と混ざらないよう欠落もそのまま比べる。"""
+    return all(data.get(name) == value for name, value in key.items())
+
+
+def _load_cache(src: Path) -> dict:
+    """有効なcacheがあれば戻り値dictを、無ければ空dictを返す。刻み幅までkeyに含めるのは、
+    別解像度へ既存cacheを畳み直すと境界がbucketの整数倍でない限り近似になり、
     表示位置が微妙にずれるため。"""
     path = waveform_path(src)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if data.get("version") != _CACHE_VERSION or data.get("buckets") != buckets:
+    if data.get("version") != _CACHE_VERSION:
+        return {}
+    if data.get("bucket_seconds") != WAVE_BUCKET_SECONDS:
         return {}
     try:
         key = _source_key(src)
-    except OSError:
+    except (OSError, hls_source.SourceMissing):
         return {}
-    if data.get("mtime") != key["mtime"] or data.get("size") != key["size"]:
+    if not _key_matches(data, key):
         return {}
     peaks = data.get("peaks")
-    if not isinstance(peaks, list) or len(peaks) != buckets:
+    if not isinstance(peaks, list) or len(peaks) != data.get("buckets"):
         return {}
     return {
-        "buckets": buckets,
+        "buckets": data["buckets"],
+        "bucket_seconds": WAVE_BUCKET_SECONDS,
         "duration_seconds": float(data.get("duration_seconds", 0.0)),
         "peaks": peaks,
     }
@@ -152,9 +173,9 @@ def _load_profile_cache(src: Path, interval: float) -> dict:
         return {}
     try:
         key = _source_key(src)
-    except OSError:
+    except (OSError, hls_source.SourceMissing):
         return {}
-    if data.get("mtime") != key["mtime"] or data.get("size") != key["size"]:
+    if not _key_matches(data, key):
         return {}
     levels = data.get("levels")
     if not isinstance(levels, list):
@@ -181,7 +202,7 @@ def _store_cache(src: Path, result: dict) -> None:
         tmp.replace(path)
     except OSError as exc:
         logger.warning(
-            "waveform cache write failed for %s", src.name,
+            "%s の波形cacheの書き込みに失敗しました", src.name,
             extra={"event": "waveform.cache_write_failed",
                    "ctx": {"src": str(src), "path": str(path), "error": str(exc)}},
         )
@@ -199,7 +220,7 @@ def _store_profile_cache(src: Path, profile: dict) -> None:
         tmp.replace(path)
     except OSError as exc:
         logger.warning(
-            "audio profile cache write failed for %s", src.name,
+            "%s の音量profile cacheの書き込みに失敗しました", src.name,
             extra={"event": "waveform.profile_write_failed",
                    "ctx": {"src": str(src), "path": str(path), "error": str(exc)}},
         )
@@ -270,28 +291,23 @@ def _fine_peaks(proc: "subprocess.Popen") -> np.ndarray:
     return np.concatenate(blocks)
 
 
-def _reduce(fine: np.ndarray, buckets: int) -> np.ndarray:
-    """fine peak列を厳密にbuckets個へ畳む。
+def _display_peaks(fine: np.ndarray) -> np.ndarray:
+    """fine peak列を ``WAVE_BUCKET_SECONDS`` 刻みへ畳む。
 
-    bucket境界は等分位置``i*n//buckets``で、n>=bucketsなら間隔が必ず1以上になるため
-    reduceatが空区間(直後の値をそのまま返す挙動)を作らない。縮約は
-    ``np.maximum.reduceat``の一括呼び出しで、区間ごとのloopは張らない。fineがbucketsより
-    短い録画(数秒もの)では畳めないので、逆に最近傍indexで引き伸ばす。どちらの経路でも
-    bucket数は要求どおりになる。
+    ``_levels`` と同じ時間刻みのreduceatで、bucket数は尺から決まる(個数指定は持たない)。
+    ``WAVE_BUCKET_SECONDS`` は ``FINE_FRAME_MS`` の整数倍なので、境界は常にfine frameの
+    切れ目に一致し近似を作らない。
     """
-    n = fine.size
-    if n >= buckets:
-        starts = (np.arange(buckets, dtype=np.int64) * n) // buckets
-        return np.maximum.reduceat(fine, starts)
-    idx = np.minimum((np.arange(buckets, dtype=np.int64) * n) // buckets, n - 1)
-    return fine[idx]
+    frames = max(1, int(round(WAVE_BUCKET_SECONDS * 1000.0 / FINE_FRAME_MS)))
+    starts = np.arange(0, fine.size, frames, dtype=np.int64)
+    return np.maximum.reduceat(fine, starts)
 
 
 def _levels(fine: np.ndarray, interval: float) -> dict:
     """fine peak列を固定秒刻みへ畳み、full scale基準(0.0〜1.0)の絶対levelにする。
 
-    表示用の``_reduce``と違い、bucket数ではなく**時間**で刻む。無音判定も音量spikeも
-    「何秒目のlevelか」で答える必要があり、録画の尺で刻み幅が変わってはならないため。
+    表示用の``_display_peaks``と刻み幅だけが違う。無音判定も音量spikeも
+    「何秒目のlevelか」で答える必要があり、録画の尺で刻み幅が変わってはならない。
     """
     frames = max(1, int(round(interval * 1000.0 / FINE_FRAME_MS)))
     n = fine.size
@@ -304,10 +320,11 @@ def _levels(fine: np.ndarray, interval: float) -> dict:
     }
 
 
-def _decode_fine_peaks(src: Path) -> np.ndarray:
+def _decode_fine_peaks(source) -> np.ndarray:
     """ffmpegで音声のみをmono/``SAMPLE_RATE``へdecodeし、fine peak列を返す。"""
+    src = source.path
     args = [
-        "ffmpeg", "-v", "error", "-nostdin", "-i", str(src),
+        "ffmpeg", "-v", "error", "-nostdin", *source.input_args, "-i", str(src),
         # 映像/字幕は捨てて音声1本だけ。-vnだけだと他stream選択でmuxerが迷う。
         "-vn", "-map", "0:a:0", "-af", _RESAMPLE_FILTER,
         "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "s16le", "-",
@@ -320,17 +337,21 @@ def _decode_fine_peaks(src: Path) -> np.ndarray:
         )
     except OSError as exc:
         logger.error(
-            "waveform ffmpeg launch failed for %s", src.name,
+            "波形生成で %s のffmpegを起動できませんでした", src.name,
             extra={"event": "waveform.launch_failed",
                    "ctx": {"src": str(src), **ffmpeg_ctx(args), "error": str(exc)}},
             exc_info=True,
         )
         raise RuntimeError(f"波形生成でffmpegを起動できませんでした: {exc}") from exc
+    # pipeから読みながら進む経路なのでtimeoutは持てない(長尺の正常なdecodeを落とす)。
+    # 取り消しはprocessの登録だけで届かせる — smile._scan と同じ形。
+    cancel.register_process(proc)
 
     drain = _StderrDrain(proc.stderr)
     try:
         fine = _fine_peaks(proc)
     finally:
+        cancel.forget_process(proc)
         if proc.stdout is not None:
             proc.stdout.close()
         message = drain.text()
@@ -340,7 +361,7 @@ def _decode_fine_peaks(src: Path) -> np.ndarray:
 
     if proc.returncode != 0:
         logger.error(
-            "waveform decode failed for %s", src.name,
+            "波形生成で %s のdecodeに失敗しました", src.name,
             extra={"event": "waveform.decode_failed",
                    "ctx": {"src": str(src),
                            **ffmpeg_ctx(args, proc.returncode, stderr_text=message)}},
@@ -348,7 +369,7 @@ def _decode_fine_peaks(src: Path) -> np.ndarray:
         raise RuntimeError(f"波形生成の音声decodeに失敗しました: {message[:300]}")
     if fine.size == 0:
         logger.error(
-            "waveform decode produced no audio for %s", src.name,
+            "波形生成のdecodeで %s の音声を取得できませんでした", src.name,
             extra={"event": "waveform.no_audio",
                    "ctx": {"src": str(src),
                            **ffmpeg_ctx(args, proc.returncode, stderr_text=message)}},
@@ -357,7 +378,7 @@ def _decode_fine_peaks(src: Path) -> np.ndarray:
     return fine
 
 
-def _build(src: Path, buckets: int, interval: float) -> tuple:
+def _build(src: Path, interval: float) -> tuple:
     """1回のdecodeから、表示用波形と絶対level profileの両方を作る。
 
     profileを別々に作らないのは、decodeがcontainerを丸ごと読む(長尺で90秒級)処理で、
@@ -365,10 +386,14 @@ def _build(src: Path, buckets: int, interval: float) -> tuple:
     ここで刻み直すだけならffmpegの再実行は要らない。
     """
     started = time.monotonic()
-    fine = _decode_fine_peaks(src)
+    # mp4が無い録画は.tsのHLSから読む。音声は同じstreamなので、どちらから読んでも
+    # 同じsampleが出る(hls_source参照)。
+    with hls_source.ffmpeg_source(src) as source:
+        fine = _decode_fine_peaks(source)
     duration = fine.size * FINE_FRAME_MS / 1000.0
     profile = _levels(fine, interval)
-    peaks = _reduce(fine, buckets)
+    peaks = _display_peaks(fine)
+    buckets = int(peaks.size)
     # 全尺のpeakで割る「表示用」正規化。full scale固定で割ると入力levelの低い配信が
     # 一様に潰れて包絡が読めなくなるため、seek bar下の表示にはこちらが要る。
     loudest = float(fine.max())
@@ -376,11 +401,12 @@ def _build(src: Path, buckets: int, interval: float) -> tuple:
         peaks = peaks / loudest
     result = {
         "buckets": buckets,
+        "bucket_seconds": WAVE_BUCKET_SECONDS,
         "duration_seconds": round(duration, 3),
         "peaks": [round(float(v), _PEAK_DECIMALS) for v in peaks],
     }
     logger.info(
-        "waveform built: %s (%.1fs audio, %d buckets)", src.name, duration, buckets,
+        "波形を生成しました: %s（音声 %.1fs, %d buckets）", src.name, duration, buckets,
         extra={"event": "waveform.built",
                "ctx": {"src": str(src), "buckets": buckets,
                        "duration_seconds": result["duration_seconds"],
@@ -392,22 +418,19 @@ def _build(src: Path, buckets: int, interval: float) -> tuple:
     return result, profile
 
 
-async def ensure_waveform(src: Path, buckets: int = 2000) -> dict:
+async def ensure_waveform(src: Path) -> dict:
     """``src``の波形を返す(cacheがあればそれを、無ければ生成してcacheする)。
 
-    戻り値: ``{"buckets": int, "duration_seconds": float, "peaks": list[float]}``。
-    peaksは0.0〜1.0のbucketごとのpeak振幅。
+    戻り値: ``{"buckets": int, "bucket_seconds": float, "duration_seconds": float,
+    "peaks": list[float]}``。peaksは0.0〜1.0の ``WAVE_BUCKET_SECONDS`` ごとのpeak振幅。
 
     decodeはCPU/IO律速でeventloopを塞ぐため、生成部はto_threadへ逃がす。
     """
     src = Path(src)
-    buckets = int(buckets)
-    if buckets <= 0:
-        raise RuntimeError("bucketsは1以上にしてください。")
-    if not src.is_file():
-        raise RuntimeError("録画fileが存在しません。")
+    if not hls_source.available(src):
+        raise hls_source.SourceMissing()
 
-    cached = await asyncio.to_thread(_load_cache, src, buckets)
+    cached = await asyncio.to_thread(_load_cache, src)
     if cached:
         return cached
 
@@ -419,11 +442,11 @@ async def ensure_waveform(src: Path, buckets: int = 2000) -> dict:
     # /play が91秒待たされた)。lock取得後にcacheを見直すのは、待っている間に先行requestが
     # 生成を終えているため。
     async with _lock_for(str(src.resolve())):
-        cached = await asyncio.to_thread(_load_cache, src, buckets)
+        cached = await asyncio.to_thread(_load_cache, src)
         if cached:
             return cached
         result, profile = await asyncio.to_thread(
-            _build, src, buckets, get_audio_profile_interval_seconds())
+            _build, src, get_audio_profile_interval_seconds())
         await asyncio.to_thread(_store_cache, src, result)
         await asyncio.to_thread(_store_profile_cache, src, profile)
     return result
@@ -441,8 +464,8 @@ async def ensure_audio_profile(src: Path) -> dict:
     interval = get_audio_profile_interval_seconds()
     if interval <= 0:
         raise RuntimeError("音声profileの刻み幅は正の値にしてください。")
-    if not src.is_file():
-        raise RuntimeError("録画fileが存在しません。")
+    if not hls_source.available(src):
+        raise hls_source.SourceMissing()
 
     cached = await asyncio.to_thread(_load_profile_cache, src, interval)
     if cached:
@@ -455,8 +478,7 @@ async def ensure_audio_profile(src: Path) -> dict:
         cached = await asyncio.to_thread(_load_profile_cache, src, interval)
         if cached:
             return cached
-        result, profile = await asyncio.to_thread(
-            _build, src, _PROFILE_DISPLAY_BUCKETS, interval)
+        result, profile = await asyncio.to_thread(_build, src, interval)
         await asyncio.to_thread(_store_cache, src, result)
         await asyncio.to_thread(_store_profile_cache, src, profile)
     return profile

@@ -1,0 +1,399 @@
+"""耐久journalからの復元(Storage.recover_from_journal)。
+
+この経路は「batch writerの停滞やクラッシュでDBから欠けたeventを、取り込み時にdiskへ
+書いた記録から埋め戻す」最後の防波堤である。誤ると静かにeventが恒久的に失われるため、
+判定に使う件数と、実際に書き戻す行が食い違わないことをここで固定する。
+
+中心にあるのは1つの不変条件である:
+
+    件数だけを数えるpass(_count_journal_rows)と、行を組み立てるpass
+    (_collect_journal_rows)は、同じfileに対して常に同じ件数でなければならない。
+
+復元するか否かは前者の件数で決め(DBの行数と突き合わせる)、実際にDELETE→全置換するのは
+後者の行なので、ここがずれると「DBの方が多いのに少ない方で上書きする」= event消失が
+起きる。行幅の正規化(現行schemaより短い行はNULLで埋めて採用 / 長い行は不採用)が
+片方にしか入っていない、といった食い違いを検出するのがこのtestの目的である。
+"""
+import gzip
+import json
+
+import pytest
+
+from tictok.storage import _EVENTS_COLUMNS, Storage
+
+EVENT_WIDTH = len(_EVENTS_COLUMNS)
+VIEWER_WIDTH = 6
+
+
+def _event_row(session_id, time_value, kind="comment", width=EVENT_WIDTH):
+    """journalに載るevents行。widthで現行schemaより短い/長い行を作れる。"""
+    row = [None] * EVENT_WIDTH
+    row[0] = session_id
+    row[1] = time_value
+    row[3] = kind
+    if width < EVENT_WIDTH:
+        return row[:width]
+    if width > EVENT_WIDTH:
+        return row + ["extra"] * (width - EVENT_WIDTH)
+    return row
+
+
+def _viewer_row(session_id, time_value, viewers=5):
+    return [session_id, time_value, None, viewers, None, None]
+
+
+def _write_journal(path, records, compress=False):
+    """recordsは (t, row) のlist。生の文字列を渡すとその行をそのまま書く。"""
+    lines = []
+    for record in records:
+        if isinstance(record, str):
+            lines.append(record)
+        else:
+            kind, row = record
+            lines.append(json.dumps({"t": kind, "r": row}, ensure_ascii=False))
+    body = "\n".join(lines) + "\n"
+    if compress:
+        with gzip.open(path, "wt", encoding="utf-8") as fh:
+            fh.write(body)
+    else:
+        path.write_text(body, encoding="utf-8")
+    return path
+
+
+@pytest.fixture
+def journal_dir(env_guard, tmp_path, monkeypatch):
+    """復元の入力だけを置く空のdirectory。
+
+    env_guardへ明示的に依存するのは、あちらがTICTOK_JOURNAL_DIRを自分のsandboxへ
+    向け直すためで、順序が入れ替わるとこのdirectoryが使われない。
+    """
+    path = tmp_path / "journal_only"
+    path.mkdir()
+    monkeypatch.setenv("TICTOK_JOURNAL_DIR", str(path))
+    return path
+
+
+@pytest.fixture
+def storage(tmp_db_path):
+    instance = Storage(str(tmp_db_path))
+    try:
+        yield instance
+    finally:
+        instance.close()
+
+
+# ===== 中心の不変条件: 数えるpassと組み立てるpassが一致する =====================
+
+
+def _corpus(journal_dir):
+    """現実に起こりうる行の形を全部入れたjournal。
+
+    - 現行schemaちょうどの行
+    - 現行schemaより短い行(列を足す前のjournal。NULLで埋めて採用する)
+    - 現行schemaより長い行(新しい版が書いた記録。列の対応が決められないので不採用)
+    - viewer sample行
+    - 空行 / 壊れたJSON / "r"を持たないrecord / 未知のt
+    - 複数session、複数file、.gz
+    """
+    plain = _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(1, 100.0)),
+        ("e", _event_row(1, 101.0, width=EVENT_WIDTH - 12)),   # 短い: 採用
+        ("e", _event_row(1, 102.0, width=EVENT_WIDTH + 3)),    # 長い: 不採用
+        ("v", _viewer_row(1, 103.0)),
+        "",                                                     # 空行
+        "   ",                                                  # 空白のみ
+        "{ this is not json",                                   # 壊れたJSON
+        json.dumps({"t": "e"}),                                 # "r"が無い
+        json.dumps({"t": "x", "r": _event_row(1, 104.0)}),      # 未知のt
+        ("e", _event_row(2, 105.0)),
+        ("v", _viewer_row(2, 106.0)),
+    ])
+    gz = _write_journal(journal_dir / "events-20260102.jsonl.gz", [
+        ("e", _event_row(1, 200.0)),
+        ("e", _event_row(2, 201.0, width=EVENT_WIDTH - 1)),     # 短い: 採用
+        ("e", _event_row(2, 202.0, width=EVENT_WIDTH + 1)),     # 長い: 不採用
+        ("v", _viewer_row(2, 203.0)),
+        ("v", _viewer_row(3, 204.0)),
+    ], compress=True)
+    return [plain, gz]
+
+
+def test_count_pass_and_collect_pass_agree_on_every_row_shape(storage, journal_dir):
+    """**この試験がこの経路の要である。**
+
+    数えるpassと組み立てるpassが、あらゆる行の形について同じ件数を出すこと。
+    片方だけが行幅の正規化を持っていれば、ここで必ず落ちる。
+    """
+    paths = _corpus(journal_dir)
+
+    event_counts, viewer_counts = storage._count_journal_rows(paths)
+    events_by_sid, viewers_by_sid = storage._collect_journal_rows(paths)
+
+    assert event_counts == {sid: len(rows) for sid, rows in events_by_sid.items()}
+    assert viewer_counts == {sid: len(rows) for sid, rows in viewers_by_sid.items()}
+
+    # 期待値そのものも固定する(両passが「同じように間違えている」のを見逃さないため)。
+    # session 1: 100.0と101.0(短い行)と200.0を採用、102.0(長い行)は不採用。
+    # session 2: 105.0と201.0(短い行)を採用、202.0(長い行)は不採用。
+    assert event_counts == {1: 3, 2: 2}
+    assert viewer_counts == {1: 1, 2: 2, 3: 1}
+
+
+def test_short_rows_are_padded_to_the_current_schema_width(storage, journal_dir):
+    """列を足す前のjournalは、不足分をNULLで埋めて採用する(値の捏造ではなく未計測)。"""
+    paths = [_write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(1, 100.0, width=EVENT_WIDTH - 5)),
+    ])]
+
+    event_counts, _ = storage._count_journal_rows(paths)
+    events_by_sid, _ = storage._collect_journal_rows(paths)
+
+    assert event_counts == {1: 1}
+    (row,) = events_by_sid[1]
+    assert len(row) == EVENT_WIDTH
+    assert row[-5:] == (None,) * 5
+
+
+def test_overlong_rows_are_dropped_by_both_passes(storage, journal_dir):
+    """現行schemaより列が多い記録は復元しない。位置がずれたまま入れる方が有害である。"""
+    paths = [_write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(1, 100.0, width=EVENT_WIDTH + 2)),
+        ("e", _event_row(1, 101.0)),
+    ])]
+
+    event_counts, _ = storage._count_journal_rows(paths)
+    events_by_sid, _ = storage._collect_journal_rows(paths)
+
+    assert event_counts == {1: 1}
+    assert len(events_by_sid[1]) == 1
+
+
+def test_collect_pass_can_be_restricted_to_the_sessions_that_need_restoring(
+    storage, journal_dir
+):
+    """組み立ては復元が要るsessionだけに絞れる(絞っても件数は変わらない)。"""
+    paths = _corpus(journal_dir)
+
+    event_counts, viewer_counts = storage._count_journal_rows(paths)
+    events_by_sid, viewers_by_sid = storage._collect_journal_rows(paths, wanted={2})
+
+    assert set(events_by_sid) <= {2}
+    assert set(viewers_by_sid) <= {2}
+    assert len(events_by_sid[2]) == event_counts[2]
+    assert len(viewers_by_sid[2]) == viewer_counts[2]
+    # 絞っても、絞らないときと同じ行が同じ順で出る。
+    full_events, full_viewers = storage._collect_journal_rows(paths)
+    assert events_by_sid[2] == full_events[2]
+    assert viewers_by_sid[2] == full_viewers[2]
+
+
+def test_collect_pass_never_exceeds_the_counted_rows_when_the_file_grew(
+    storage, journal_dir
+):
+    """2 passの間にjournalが伸びても、判定に使った件数を超えて取り込まない。
+
+    journalは追記のみなので、1 pass目が数えた行は2 pass目でも先頭から同じ順で現れる。
+    後から増えた行まで取り込むと「件数で決めた判断」と「書き戻す行」がずれるため、
+    1 pass目の件数を上限にする。
+    """
+    path = journal_dir / "events-20260101.jsonl"
+    _write_journal(path, [("e", _event_row(1, 100.0)), ("e", _event_row(1, 101.0))])
+
+    event_counts, viewer_counts = storage._count_journal_rows([path])
+    assert event_counts == {1: 2}
+
+    # 1 pass目と2 pass目のあいだにcollectorが書き足した状況。
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps({"t": "e", "r": _event_row(1, 102.0)}) + "\n")
+        fh.write(json.dumps({"t": "v", "r": _viewer_row(1, 103.0)}) + "\n")
+
+    events_by_sid, viewers_by_sid = storage._collect_journal_rows(
+        [path], limits=(event_counts, viewer_counts))
+
+    assert len(events_by_sid[1]) == 2
+    assert [row[1] for row in events_by_sid[1]] == [100.0, 101.0]
+    assert viewers_by_sid.get(1, []) == []
+
+
+def test_unreadable_journal_file_does_not_abort_the_other_files(storage, journal_dir):
+    """壊れたfileがあっても、他のfileの記録は数えられる/組み立てられる。"""
+    broken = journal_dir / "events-20260101.jsonl.gz"
+    broken.write_bytes(b"this is not gzip")
+    good = _write_journal(journal_dir / "events-20260102.jsonl", [
+        ("e", _event_row(1, 100.0)),
+    ])
+
+    event_counts, _ = storage._count_journal_rows([broken, good])
+    events_by_sid, _ = storage._collect_journal_rows([broken, good])
+
+    assert event_counts == {1: 1}
+    assert len(events_by_sid[1]) == 1
+
+
+# ===== 復元そのもののsemantics(既存の挙動を固定する) =========================
+
+
+def _session_with_events(storage, count, unique_id="someone"):
+    """DB側だけにeventを積む。この仕込み自体はjournalへ書かない — 書くと復元の入力が
+    testの意図した中身と混ざり、何を根拠に復元したのかが読めなくなる。"""
+    session_id = storage.create_session(unique_id, 10)
+    storage._journal_enabled = False
+    try:
+        for i in range(count):
+            storage.add_event(session_id, {
+                "time": 1000.0 + i, "kind": "comment", "comment": f"c{i}",
+                "user": {"user_id": f"u{i}", "unique_id": f"h{i}", "nickname": f"n{i}"},
+            })
+        storage.flush()
+    finally:
+        storage._journal_enabled = True
+    return session_id
+
+
+def _db_counts(storage, session_id):
+    with storage._lock:
+        events = storage._conn.execute(
+            "SELECT COUNT(*) c FROM events WHERE session_id = ?", (session_id,)
+        ).fetchone()["c"]
+        viewers = storage._conn.execute(
+            "SELECT COUNT(*) c FROM viewer_samples WHERE session_id = ?", (session_id,)
+        ).fetchone()["c"]
+    return events, viewers
+
+
+def test_restores_events_missing_from_the_db(storage, journal_dir):
+    """journalがDBを全項目で上回るときだけ、そのsessionを全置換で復元する。"""
+    session_id = _session_with_events(storage, 2)
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+        ("e", _event_row(session_id, 1002.0)),
+        ("v", _viewer_row(session_id, 1003.0)),
+    ])
+
+    summary = storage.recover_from_journal()
+
+    assert summary["sessions"] == 1
+    assert summary["events"] == 1
+    assert summary["viewers"] == 1
+    assert _db_counts(storage, session_id) == (3, 1)
+
+
+def test_leaves_the_db_alone_when_it_already_has_as_many_rows(storage, journal_dir):
+    """DBが同数以上なら何もしない。ここで全置換するとDB側の分を失う。"""
+    session_id = _session_with_events(storage, 3)
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+    ])
+
+    summary = storage.recover_from_journal()
+
+    assert summary == {"sessions": 0, "events": 0, "viewers": 0}
+    assert _db_counts(storage, session_id) == (3, 0)
+
+
+def test_skips_the_session_when_the_counts_are_inconsistent(storage, journal_dir):
+    """片方でDBを下回るjournalは不整合。全置換するとDB側の分を失うのでskipする。"""
+    session_id = _session_with_events(storage, 2)
+    with storage._lock:
+        storage._conn.execute(
+            "INSERT INTO viewer_samples (session_id, time, create_time, viewers,"
+            " total_viewers, anonymous) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, 1000.0, None, 5, None, None))
+        storage._conn.commit()
+    # eventは上回るがviewerは下回る。
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+        ("e", _event_row(session_id, 1002.0)),
+    ])
+
+    summary = storage.recover_from_journal()
+
+    assert summary == {"sessions": 0, "events": 0, "viewers": 0}
+    assert _db_counts(storage, session_id) == (2, 1)
+
+
+def test_does_not_resurrect_a_deleted_session(storage, journal_dir):
+    """session行が無いなら復元しない(削除の意思を尊重する)。"""
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(4242, 1000.0)),
+        ("e", _event_row(4242, 1001.0)),
+    ])
+
+    summary = storage.recover_from_journal()
+
+    assert summary == {"sessions": 0, "events": 0, "viewers": 0}
+    with storage._lock:
+        assert storage._conn.execute(
+            "SELECT COUNT(*) c FROM events WHERE session_id = 4242"
+        ).fetchone()["c"] == 0
+
+
+def test_rebuilds_stats_and_buckets_after_restoring(storage, journal_dir):
+    """置換後はstats_jsonとbucketをeventから作り直す(復元しただけでは画面が空になる)。"""
+    session_id = _session_with_events(storage, 1)
+    with storage._lock:
+        storage._conn.execute("DELETE FROM buckets WHERE session_id = ?", (session_id,))
+        storage._conn.commit()
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+        ("e", _event_row(session_id, 1002.0)),
+    ])
+
+    storage.recover_from_journal()
+
+    with storage._lock:
+        buckets = storage._conn.execute(
+            "SELECT COUNT(*) c FROM buckets WHERE session_id = ?", (session_id,)
+        ).fetchone()["c"]
+        stats = storage._conn.execute(
+            "SELECT stats_json FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()["stats_json"]
+    assert buckets > 0
+    assert json.loads(stats)["events_total"] == 3
+
+
+def test_does_nothing_when_the_journal_is_disabled(storage, journal_dir):
+    """journalを切っている環境では、fileが在っても読みに行かない。"""
+    session_id = _session_with_events(storage, 1)
+    _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+    ])
+    storage._journal_enabled = False
+
+    assert storage.recover_from_journal() == {"sessions": 0, "events": 0, "viewers": 0}
+    assert _db_counts(storage, session_id) == (1, 0)
+
+
+def test_prune_runs_after_the_scan_so_expiring_files_still_contribute(
+    storage, journal_dir, monkeypatch
+):
+    """保持期間を過ぎたfileも、消える前にその起動の復元へ寄与する。
+
+    pruneを走査より先に回すと、本来復元できたeventが復元されないままjournalごと
+    消える経路ができる。順序はここで固定する。
+    """
+    import time as time_module
+
+    session_id = _session_with_events(storage, 1)
+    old = _write_journal(journal_dir / "events-20260101.jsonl", [
+        ("e", _event_row(session_id, 1000.0)),
+        ("e", _event_row(session_id, 1001.0)),
+    ])
+    # 保持期間より古いmtimeにして、この起動でpruneの対象になるようにする。
+    stale = time_module.time() - 400 * 86400
+    import os
+
+    os.utime(old, (stale, stale))
+    monkeypatch.setattr(
+        "tictok.store.ingest.get_journal_retention_days", lambda: 1)
+
+    summary = storage.recover_from_journal()
+
+    assert summary["sessions"] == 1
+    assert _db_counts(storage, session_id) == (2, 0)
+    assert not old.exists()

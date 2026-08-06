@@ -34,6 +34,16 @@ vectorは**生binary(``semantic_vectors.bin``)をnp.memmapで読む**。理由:
     容量は2.3GB vs 1.15GBだが、5,195時間の動画を抱えるprojectで1GBの差は誤差である一方、
     1.3秒の検索待ちはUIとして許容できない。容量が制約になる環境向けにdtypeはconfigで
     float16へ落とせる(TICTOK_SEMANTIC_DTYPE)。
+== 秒はindexから返さない ==
+passagesにもvideo_time/end_timeを持つが、これは**構築時のsnapshotであって回答ではない**。
+文字起こしのやり直し(media軸への貼り直し)やcomment indexの張り直しでsearch_hits側の秒だけが
+動くと、意味検索は古い軸を名乗り続ける。実測では331 groupのうち134 groupが取り残され、
+中央値167秒・最大1,194秒(約20分)ずれていた。語で一致(search_scenes)はsearch_hitsを毎回読むので
+無事で、意味検索だけがずれる — 症状が検索modeに依存するので原因が見えにくい。
+そこで**位置はhit_id経由でsearch_hitsから都度引く**。indexが持つのは vector・本文・hit_idだけで、
+時間軸の真実はDB側にしか無い。indexの秒はこのズレを検出する材料として残してある
+(index_statusのstale判定)。
+
 metadata(passage -> search_hitsのid群・時刻・unique_id)は**tictok.dbと同じdirectoryの
 別sqlite file(``semantic_index.db``)**へ置く。tictok/storage.pyは他担当が編集中で触れない
 ため自前permanenceを持つ必要があり、かつ別fileならindexの作り直しが本体DBに一切影響しない。
@@ -60,6 +70,8 @@ from typing import Callable, Optional
 
 import httpx
 import numpy as np
+
+from tictok.core import perf
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +228,7 @@ class HttpEmbedder(Embedder):
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(url, json=body, headers=headers)
         except httpx.HTTPError as exc:
-            logger.warning("embedding endpoint unreachable: %s", exc, exc_info=True)
+            logger.warning("埋め込みendpointへ接続できません: %s", exc, exc_info=True)
             raise SemanticError(
                 f"埋め込みエンドポイントへ接続できません（{self._base_url}）: {exc}"
             ) from exc
@@ -370,6 +382,17 @@ def _dim(conn: sqlite3.Connection) -> Optional[int]:
 def _index_dtype(conn: sqlite3.Connection) -> str:
     """indexが実際に書かれているdtype。未記録(未構築)なら現在の設定値。"""
     return _get_meta(conn, "dtype") or get_semantic_dtype()
+
+
+def _is_current(indexed_row, group: dict) -> bool:
+    """そのgroupのindexが今のsearch_hitsを写しているか。
+
+    件数と最大idで見る。search_hitsの張り直しは常に全行DELETE -> 再INSERTなので、
+    行が入れ替われば必ずどちらかが動く(``replace_search_hits``)。逆に、秒だけをUPDATEする
+    移行scriptではどちらも動かない — そちらは秒をDBから引き直すことで無害化してあるので、
+    ここで検出する必要が無い(再埋め込みの対象は本文が変わったgroupだけでよい)。"""
+    return (indexed_row["hit_count"] == group["n"]
+            and indexed_row["hit_max_id"] == group["max_id"])
 
 
 def _vector_rows(dim: int, dtype: str) -> int:
@@ -528,8 +551,7 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
                 out = []
                 for group in groups:
                     prev = done_rows.get((group["recording_id"], group["source"]))
-                    if (prev and prev["hit_count"] == group["n"]
-                            and prev["hit_max_id"] == group["max_id"]):
+                    if prev and _is_current(prev, group):
                         continue
                     out.append(group)
                 return out
@@ -540,7 +562,7 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
             total_hits = sum(g["n"] for g in pending)
             progress(stage="start", groups=len(pending), hits=total_hits, done=0, total=total_hits)
             logger.info(
-                "semantic index build start: groups=%d hits=%d model=%s",
+                "意味検索のindex作成を開始しました: groups=%d hits=%d model=%s",
                 len(pending), total_hits, embedder.name,
                 extra={"event": "search.semantic_build_start",
                        "ctx": {"groups": len(pending), "hits": total_hits,
@@ -647,7 +669,7 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
                 "vector_bytes": vector_file.stat().st_size if vector_file.is_file() else 0,
             }
             logger.info(
-                "semantic index build done: passages=%d hits=%d elapsed=%.1fs model=%s",
+                "意味検索のindex作成が完了しました: passages=%d hits=%d 所要 %.1fs model=%s",
                 embedded_passages, total_hits, elapsed, embedder.name,
                 extra={"event": "search.semantic_build_done", "ctx": result},
             )
@@ -697,14 +719,20 @@ def _scan_scores(vectors: np.memmap, query: np.ndarray, rownos: Optional[np.ndar
     return all_rownos[top], all_scores[top]
 
 
-async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
+async def search(storage, query: str, limit: int = 50, unique_ids: Optional[list] = None,
                  sources: Optional[list] = None, since: Optional[float] = None,
-                 until: Optional[float] = None) -> list:
-    """意味的に近いsceneを返す。
+                 until: Optional[float] = None) -> dict:
+    """意味的に近いsceneを返す。``{"items": [...], "stale": 除外件数}``。
 
-    戻り値の各要素は search_hits の ``id`` と ``score`` を必ず持つ。passageは複数の
+    itemsの各要素は search_hits の ``id`` と ``score`` を必ず持つ。passageは複数の
     search_hits行を束ねたものなので、``id`` はpassage先頭行のid、束ねた全idは
     ``hit_ids`` に入れてある(呼び出し側はどちらでもsearch_hitsと突き合わせられる)。
+
+    **秒(video_time/end_time)は ``storage`` から引き直す**(理由はmodule docstring)。
+    indexが指すsearch_hits行が既に無いpassageは、位置を名乗れないので結果から落とし、
+    その件数を ``stale`` で返す。古い秒で返すより出さない方が良い — 数分ずれた場所へ飛ぶ
+    結果は、無い結果より始末が悪い。``stale`` が立つのはindexの更新が要るときだけなので、
+    呼び出し側はそれをuserへの案内に使う。
 
     ``sources``(stt/comment)・``since``/``until``(録画のstarted_at基準、keyword検索の
     search_scenesと同じ意味)はmetadata側で先に効かせる。総当たり走査の対象行がそのまま
@@ -716,7 +744,7 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
     # 「1種類も選ばれていない」と「絞り込み無し」は別物。前者で全件を返すと、画面で
     # 種類checkを全部外したのに結果が出るという逆の挙動になる。
     if sources is not None and not sources:
-        return []
+        return {"items": [], "stale": 0}
     embedder = get_embedder()
     limit = max(1, int(limit))
 
@@ -774,20 +802,25 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
 
     dim, dtype, path, rows_total, rownos = await asyncio.to_thread(_prepare)
     if rownos is not None and len(rownos) == 0:
-        return []
+        return {"items": [], "stale": 0}
 
-    query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
+    # 埋め込みは外部のAI serverへのHTTP。走査(CPU)と足して1つにすると、遅い回の原因が
+    # model側なのかindex走査なのか分けられない。
+    with perf.timer("net.embed"):
+        query_vec = await _embed_all(embedder, [get_semantic_query_prefix() + query], dim)
     vector = query_vec[0][0].astype(np.float32)
 
     def _scan() -> tuple:
         """memmapの走査もmetadataの引き当てもblocking。48k×768のdot積は今は一瞬でも、
         passage数に比例して伸びる — event loopに載せるとその分だけserverが固まる。"""
         started = time.time()
-        vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
-        # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
-        # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
-        fetch = min(limit * 4, rows_total) if rownos is None else min(limit * 4, len(rownos))
-        top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
+        with perf.phase("search.semantic_scan"):
+            vectors = np.memmap(path, dtype=dtype, mode="r", shape=(rows_total, dim))
+            # 削除されたpassageの穴(参照の無い行)も走査に混じるが、metadataに存在しない
+            # rownoは下のSELECTで落ちるので結果には出ない。穴の分だけ多めに取る。
+            fetch = (min(limit * 4, rows_total) if rownos is None
+                     else min(limit * 4, len(rownos)))
+            top_rownos, top_scores = _scan_scores(vectors, vector, rownos, max(fetch, limit))
         elapsed = time.time() - started
 
         score_by_rowno = {int(r): float(s) for r, s in zip(top_rownos, top_scores)}
@@ -806,10 +839,32 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
 
     score_by_rowno, meta_rows, elapsed = await asyncio.to_thread(_scan)
     if not score_by_rowno:
-        return []
+        return {"items": [], "stale": 0}
+
+    # passageの端(先頭行と末尾行)のidだけを引く。中間行は本文がpassageに入っているので
+    # 位置の決定には要らず、引く行数を結果数の2倍で頭打ちにできる。
+    hit_spans = {}
+    wanted: set = set()
+    for row in meta_rows:
+        ids = json.loads(row["hit_ids"])
+        if not ids:
+            continue
+        hit_spans[row["rowno"]] = (int(ids[0]), int(ids[-1]))
+        wanted.update(hit_spans[row["rowno"]])
+    times = await asyncio.to_thread(storage.search_hit_times, sorted(wanted))
 
     items = []
+    stale = 0
     for row in meta_rows:
+        span = hit_spans.get(row["rowno"])
+        head = times.get(span[0]) if span else None
+        tail = times.get(span[1]) if span else None
+        if head is None or tail is None:
+            # indexが指す行が消えている = そのgroupは張り直された。今のindexは古い本文と
+            # 古い秒しか持たないので、位置を名乗れない。indexを更新するまで出さない。
+            stale += 1
+            continue
+        end = tail["end_time"] if tail["end_time"] is not None else tail["video_time"]
         items.append({
             "id": row["hit_id"],
             "score": round(score_by_rowno[row["rowno"]], 6),
@@ -819,24 +874,30 @@ async def search(query: str, limit: int = 50, unique_ids: Optional[list] = None,
             "session_id": row["session_id"],
             "unique_id": row["unique_id"],
             "started_at": row["started_at"],
-            "video_time": row["video_time"],
-            "end_time": row["end_time"],
+            "video_time": head["video_time"],
+            "end_time": end,
             "body": row["body"],
         })
     items.sort(key=lambda item: -item["score"])
     items = items[:limit]
     logger.info(
-        "semantic search: q_len=%d hits=%d scan=%s elapsed=%.3fs",
-        len(query), len(items), rows_total if rownos is None else len(rownos), elapsed,
+        "意味検索を実行しました: q_len=%d hits=%d 除外(index古い)=%d scan=%s 所要 %.3fs",
+        len(query), len(items), stale, rows_total if rownos is None else len(rownos),
+        elapsed,
         extra={"event": "search.semantic_query",
-               "ctx": {"results": len(items), "scanned": rows_total if rownos is None
+               "ctx": {"results": len(items), "stale": stale,
+                       "scanned": rows_total if rownos is None
                        else int(len(rownos)), "elapsed_seconds": round(elapsed, 4)}},
     )
-    return items
+    return {"items": items, "stale": stale}
 
 
-def index_status() -> dict:
-    """indexの現況。画面のbadge/構築ボタンの出し分け用。"""
+def index_status(storage=None) -> dict:
+    """indexの現況。画面のbadge/構築ボタンの出し分け用。
+
+    ``storage`` を渡すと「search_hitsが張り直されてindexが取り残されたgroup」と
+    「一度もindexしていないgroup」も数える。userがindexの更新を押す動機は、押せるか否か
+    ではなく**どれだけ検索から抜け落ちているか**なので、押せない理由と同じ場所で出す。"""
     status = {
         "available": semantic_available(),
         "enabled": get_semantic_enabled(),
@@ -856,6 +917,10 @@ def index_status() -> dict:
         # 実行中だと分からない。
         "building": _build_lock.locked(),
         "passage_seconds": get_semantic_passage_seconds(),
+        # 検索に出せなくなっているpassage(index更新で戻る)と、まだindexしていないgroup。
+        "stale_groups": 0,
+        "stale_passages": 0,
+        "unindexed_groups": 0,
     }
     path = meta_path()
     if not path.is_file():
@@ -873,6 +938,22 @@ def index_status() -> dict:
         status["recordings"] = row["recs"]
         last = conn.execute("SELECT MAX(built_at) AS t FROM indexed").fetchone()
         status["last_built_at"] = last["t"]
+        if storage is not None:
+            groups = {(g["recording_id"], g["source"]): g
+                      for g in storage.search_hit_groups()}
+            counts = {(r["recording_id"], r["source"]): r["n"] for r in conn.execute(
+                "SELECT recording_id, source, COUNT(*) AS n FROM passages"
+                " GROUP BY recording_id, source")}
+            indexed = set()
+            for row in conn.execute("SELECT * FROM indexed"):
+                key = (row["recording_id"], row["source"])
+                indexed.add(key)
+                group = groups.get(key)
+                if group is None or _is_current(row, group):
+                    continue
+                status["stale_groups"] += 1
+                status["stale_passages"] += counts.get(key, 0)
+            status["unindexed_groups"] = len(set(groups) - indexed)
     finally:
         conn.close()
     vectors = vector_path()

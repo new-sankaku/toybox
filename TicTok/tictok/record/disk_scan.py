@@ -69,7 +69,9 @@ CATEGORY_OTHER = "other"
 CATEGORY_LABELS = [
     (CATEGORY_SOURCE, "生録画(mp4)"),
     (CATEGORY_OVERLAY, "焼き込み(overlay)"),
-    (CATEGORY_UPSCALE, "AI高画質化(up)"),
+    # 呼称はJob画面・運用logと同じ「Up出力」に揃える。同じ物を画面ごとに別名で呼ぶと、
+    # 「Up出力が800GB」という会話が画面をまたいで通じなくなる。
+    (CATEGORY_UPSCALE, "Up出力(up)"),
     (CATEGORY_TRANSIENT, "renderの中間file"),
     (CATEGORY_HLS, "HLS中間data(.ts)"),
     (CATEGORY_SIDECAR, "sidecar(timing/meta/log)"),
@@ -168,7 +170,7 @@ def _walk(root: Path, totals: dict, errors: list) -> None:
         except OSError as exc:
             errors.append({"path": str(current), "error": str(exc)})
             logger.warning(
-                "could not read %s while measuring disk usage", current,
+                "disk使用量の集計中に %s を読み取れません", current,
                 extra={"event": "storage.scan_dir_failed",
                        "ctx": {"path": str(current)}},
                 exc_info=True,

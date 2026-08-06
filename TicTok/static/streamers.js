@@ -48,7 +48,12 @@ function renderList() {
     meta.className = "sm-item-meta";
     meta.innerHTML =
       `<span class="v">${fmtCompact(s.diamonds)}</span><span class="l">コイン</span>`
-      + `<span class="v">${fmtNum(s.sessions)}</span><span class="l">配信</span>`;
+      + `<span class="v">${fmtNum(s.sessions)}</span><span class="l">配信</span>`
+      + `<span class="v">${fmtPercent(s.liver_coin_share)}</span>`
+      + `<span class="l">ライバー/コイン</span>`
+      + `<span class="v">${fmtPercent(s.liver_gifter_share)}</span>`
+      + `<span class="l">ライバー/人数</span>`;
+    meta.title = liverTitle(s);
     item.appendChild(meta);
     item.addEventListener("click", () => selectStreamer(s.unique_id));
     list.appendChild(item);
@@ -79,17 +84,7 @@ async function selectStreamer(uid, light = false) {
   renderProfile(profile);
   if (!light) {
     resetAiReview();
-    loadCohortAndHighlights(uid);
-    // 配信者が変わった時点で前の一覧は無効。表示中なら即引き直し、そうでなければ
-    // sectionが画面へ入った時点で読む。
-    filesLoadedUid = null;
-    fileItems = [];
-    renderTableRows("sm-files-rows", null, [], () => [], []);
-    chipBar("sm-files-summary", []);
-    refreshFileSelection();
-    // 画面外なら読みにいかないので「読み込み中」とは言わない。
-    setListMessage(document.getElementById("sm-files-empty"), "この位置まで表示すると容量を集計します。");
-    maybeLoadFiles();
+    loadCohort(uid);
   }
 }
 
@@ -220,14 +215,10 @@ function renderAiReview(r) {
   res.classList.remove("hidden");
 }
 
-async function loadCohortAndHighlights(uid) {
-  const [cRes, hRes] = await Promise.all([
-    fetch(`/api/streamers/${encodeURIComponent(uid)}/cohort`),
-    fetch(`/api/streamers/${encodeURIComponent(uid)}/highlights`),
-  ]);
+async function loadCohort(uid) {
+  const res = await fetch(`/api/streamers/${encodeURIComponent(uid)}/cohort`);
   if (selectedUid !== uid) return;
-  if (cRes.ok) renderCohort(await cRes.json());
-  if (hRes.ok) renderHighlights((await hRes.json()).highlights || []);
+  if (res.ok) renderCohort(await res.json());
 }
 
 function renderProfile(p) {
@@ -243,9 +234,13 @@ function renderProfile(p) {
   renderHeatmap();
   renderConcentration(p.concentration);
   renderGifters(p.gifters);
+  renderLivers(p.livers || []);
+  renderCoop(p.coop);
   renderBattle(p.battles);
   renderBattleTrend(p.battles.history || []);
   renderBattleGifters(p.battles.gifters || []);
+  // 配信者を選び直したら相手の絞込は持ち越さない(別人の相手で絞られたままになる)。
+  pickedOpponent = null;
   renderOpponents(p.battles.opponents);
   renderBattleHistory(p.battles.history || []);
 }
@@ -286,59 +281,74 @@ function renderCohort(data) {
   );
 }
 
-// ---- ハイライト(コイン急増点) ----
-function renderHighlights(list) {
-  renderTableRows(
-    "sm-highlight-rows",
-    "sm-highlight-empty",
-    list,
-    (h, rank) => [
-      String(rank),
-      fmtDateTime(h.time),
-      `#${h.session_id}`,
-      fmtNum(h.diamonds),
-      `×${h.ratio.toFixed(1)}`,
-      fmtNum(h.comments),
-      highlightRecCell(h),
-    ],
-    [0, 3, 4, 5],
-  );
-}
-
-// 録画がこの急増点をカバーしていれば、その時刻へ飛ぶ再生buttonを出す。
-function highlightRecCell(h) {
-  if (!h.recording_id) return "—";
-  const btn = document.createElement("button");
-  btn.className = "btn btn-small";
-  btn.textContent = "▶ 再生";
-  btn.title = `録画 #${h.recording_id} の ${fmtDuration(h.offset || 0)} 付近から再生`;
-  btn.addEventListener("click", () =>
-    openVideo(h.recording_id, h.offset || 0, `急増点 ${fmtDateTime(h.time)}（録画 #${h.recording_id}）`),
-  );
-  return btn;
-}
-
-// ---- ハイライト録画の再生(deep-link) ----
+// ---- 録画の再生(Battle履歴から該当場面へ) ----
 // 再生中の録画。errorの理由をserverへ問い合わせる間に別の録画へ移ることがあるため、
 // 到達時の対象と突き合わせる。
 let playingRecordingId = null;
 
-function openVideo(recordingId, offset, label) {
+// 素材(.ts)が残っている録画はHLSで直接観る。mp4しか残っていない録画はmp4を観る。どちらに
+// なるかはserverが録画ごとの実物を見て決めるので、こちらは受け取った経路で読み込む。
+let hlsPlayer = null;
+
+function detachHls() {
+  if (!hlsPlayer) return;
+  hlsPlayer.destroy();
+  hlsPlayer = null;
+}
+
+// 再生できなかった理由を、再生boxの同じ場所に出す。再生できた/できなかったを利用者が
+// 1か所で読めるようにするため、失敗も動画と同じ枠へ出す。
+function showVideoMessage(label, text) {
+  const box = document.getElementById("sm-video-box");
+  document.getElementById("sm-video-title").textContent = label;
+  document.getElementById("sm-video-message").textContent = text;
+  box.classList.remove("hidden");
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+async function openVideo(recordingId, offset, label) {
   const box = document.getElementById("sm-video-box");
   const video = document.getElementById("sm-video");
+  const message = document.getElementById("sm-video-message");
   document.getElementById("sm-video-title").textContent = label;
-  document.getElementById("sm-video-message").textContent = "";
+  message.textContent = "";
   playingRecordingId = recordingId;
-  video.src = `/api/recordings/${recordingId}/play`;
-  // メタデータ確定後に急増点へseekして再生。Range対応のため部分読み込みでseekできる。
+  detachHls();
+  box.classList.remove("hidden");
+  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  let playback;
+  try {
+    playback = await apiSend("GET", `/api/recordings/${recordingId}/playback`);
+  } catch (err) {
+    message.textContent = err.message;
+    return;
+  }
+  // 待っている間に別の録画へ移っていたら、こちらは古い。上書きしない。
+  if (playingRecordingId !== recordingId) return;
+  if (playback.mode === "hls" && window.Hls && window.Hls.isSupported()) {
+    hlsPlayer = new window.Hls();
+    hlsPlayer.loadSource(playback.url);
+    hlsPlayer.attachMedia(video);
+    hlsPlayer.on(window.Hls.Events.ERROR, (_e, data) => {
+      // hls.jsが握った失敗は<video>のerror eventにならないので、ここで理由を出す。
+      if (data.fatal && playingRecordingId === recordingId) {
+        message.textContent = "この録画を再生できませんでした。";
+      }
+    });
+  } else if (playback.mode === "hls" && !video.canPlayType("application/vnd.apple.mpegurl")) {
+    message.textContent = "このBrowserはHLS再生に対応していません。";
+    return;
+  } else {
+    video.src = playback.url;
+  }
+  // メタデータ確定後に急増点へseekして再生。HLSのcurrentTimeはplaylistのEXTINF累積で、
+  // mp4のmedia軸と同じ秒数なので、offsetはどちらの経路でもそのまま使える。
   const seek = () => {
     try { video.currentTime = offset; } catch (e) { /* seek不可でも先頭から再生 */ }
     video.play().catch(() => {});
     video.removeEventListener("loadedmetadata", seek);
   };
   video.addEventListener("loadedmetadata", seek);
-  box.classList.remove("hidden");
-  box.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 function closeVideo() {
@@ -348,190 +358,10 @@ function closeVideo() {
   // src除去より先にidを落とす。除去自体がerrorを飛ばすので、残したままだと
   // 閉じただけで「再生できませんでした」を出しにいく。
   playingRecordingId = null;
+  detachHls();
   video.removeAttribute("src");
   video.load();
   box.classList.add("hidden");
-}
-
-// ---- 録画容量の整理 ----
-// 直近に読み込んだ一覧。checkbox選択の集計と確認文の件数/容量に使う。
-let fileItems = [];
-// この一覧は録画ごとに実fileをstatし、HLSはdirectoryを走査する(server側
-// _recording_file_summary)。配信者を選ぶたびに走らせると選択そのものが重くなるので、
-// sectionが実際に画面へ入ったときだけ読む。表示は常時そこにあり、click操作は増えない。
-let filesLoadedUid = null;
-let filesVisible = false;
-
-function maybeLoadFiles() {
-  if (!filesVisible || !selectedUid || filesLoadedUid === selectedUid) return;
-  loadFiles();
-}
-
-function fileSelection() {
-  const rows = document.getElementById("sm-files-rows");
-  const picked = (kind) =>
-    Array.from(rows.querySelectorAll(`input[data-kind="${kind}"]:checked`))
-      .map((el) => Number(el.dataset.id));
-  return { mp4_ids: picked("mp4"), ts_ids: picked("ts") };
-}
-
-function refreshFileSelection() {
-  const sel = fileSelection();
-  const byId = new Map(fileItems.map((i) => [i.id, i]));
-  const bytes =
-    sel.mp4_ids.reduce((a, id) => a + byId.get(id).mp4_bytes + byId.get(id).derived_bytes, 0)
-    + sel.ts_ids.reduce((a, id) => a + byId.get(id).ts_bytes, 0);
-  const count = sel.mp4_ids.length + sel.ts_ids.length;
-  document.getElementById("sm-files-selected").textContent =
-    count ? `${count}件 / ${fmtBytes(bytes)} を解放` : "";
-  document.getElementById("sm-files-run").disabled = count === 0;
-  return { ...sel, bytes, count };
-}
-
-function fileCheckbox(item, kind) {
-  const exists = kind === "mp4" ? item.mp4_exists : item.ts_exists;
-  if (!exists) return "—";
-  const box = document.createElement("input");
-  box.type = "checkbox";
-  box.dataset.kind = kind;
-  box.dataset.id = String(item.id);
-  // busyの判断はserverが返す。理由(録画中/焼き込み中/転写中)をUI側で組み直すと、
-  // server側の条件が増えたときに黙って選べてしまう。
-  box.disabled = item.busy;
-  if (item.busy) box.title = "録画中または処理中のため削除できません。";
-  box.addEventListener("change", refreshFileSelection);
-  return box;
-}
-
-// 状態＋保護toggle。履歴の録画表と同じ見た目・同じ操作にする。
-function fileState(item) {
-  const wrap = document.createElement("span");
-  wrap.className = "rec-state";
-  wrap.append(item.status);
-  // 収集中の録画は保持policyの対象外なので保護toggleを出さない(履歴側と同条件)。
-  if (item.status === "completed" || item.status === "interrupted") {
-    wrap.appendChild(protectBadge(item, loadFiles));
-  }
-  return wrap;
-}
-
-// 動画容量の内訳。派生物(焼き込み・Up出力)は元録画を残したまま消せるので、
-// 実在するときだけその場に削除buttonを出す。容量整理の主戦場はこの列。
-function fileSizeCell(item) {
-  const wrap = document.createElement("span");
-  wrap.className = "sm-size-cell";
-  wrap.append(fmtBytes(item.mp4_bytes + item.derived_bytes));
-  if (item.derived_bytes > 0) {
-    const note = document.createElement("span");
-    note.className = "result-sub-note";
-    note.textContent = `内 派生物 ${fmtBytes(item.derived_bytes)}`;
-    wrap.appendChild(note);
-    const btn = document.createElement("button");
-    btn.className = "btn btn-small";
-    btn.textContent = "派生物削除";
-    btn.title = "焼き込み(.overlay.mp4)・Up出力(.up.mp4)・renderの中間fileだけを削除します。元の録画は残るため、必要になれば出力し直せます。";
-    btn.disabled = item.busy;
-    if (item.busy) btn.title = "録画中または処理中のため削除できません。";
-    btn.addEventListener("click", () => deleteDerived(item, loadFiles));
-    wrap.appendChild(btn);
-  }
-  return wrap;
-}
-
-function renderFileRows() {
-  renderTableRows(
-    "sm-files-rows",
-    "sm-files-empty",
-    fileItems,
-    (item) => [
-      fileCheckbox(item, "mp4"),
-      fileCheckbox(item, "ts"),
-      `#${item.id}`,
-      item.filename || "—",
-      fileState(item),
-      fmtDateTime(item.started_at),
-      fileSizeCell(item),
-      fmtBytes(item.ts_bytes),
-    ],
-    [2, 6, 7],
-  );
-  // renderTableRowsはplaceholderのhiddenを切り替えるだけで文言を戻さない。読み込み中の
-  // 表示が0件の結果に残らないよう、状態はここで明示する。
-  setListState(document.getElementById("sm-files-empty"), fileItems.length ? "ok" : "empty");
-  document.getElementById("sm-files-all-mp4").checked = false;
-  document.getElementById("sm-files-all-ts").checked = false;
-  refreshFileSelection();
-}
-
-async function loadFiles() {
-  if (!selectedUid) return;
-  const uid = selectedUid;
-  filesLoadedUid = uid;
-  // 一括処理tabへは配信者を渡す。渡さないと向こうで一覧から選び直すことになる。
-  document.getElementById("sm-files-bulk").href =
-    `/videos?streamer=${encodeURIComponent(uid)}#bulk`;
-  document.getElementById("sm-files-message").textContent = "";
-  fileItems = [];
-  renderTableRows("sm-files-rows", null, [], () => [], []);
-  refreshFileSelection();
-  setListState(document.getElementById("sm-files-empty"), "loading");
-  let payload;
-  try {
-    payload = await apiSend("GET", `/api/streamers/${encodeURIComponent(uid)}/recordings`);
-  } catch (err) {
-    // 取得済み扱いのままだと再scrollしても引き直さない。失敗は未取得へ戻す。
-    if (filesLoadedUid === uid) filesLoadedUid = null;
-    setListState(document.getElementById("sm-files-empty"), "failed", err);
-    return;
-  }
-  // 読んでいる間に別の配信者へ切り替わっていたら、その一覧を上書きしない。
-  if (payload.unique_id !== selectedUid) return;
-  fileItems = payload.recordings || [];
-  chipBar("sm-files-summary", [
-    ["録画数", fmtNum(fileItems.length)],
-    ["動画+派生物", fmtBytes(payload.total_mp4_bytes)],
-    ["TS(HLS)", fmtBytes(payload.total_ts_bytes)],
-    ["合計", fmtBytes(payload.total_mp4_bytes + payload.total_ts_bytes)],
-  ]);
-  renderFileRows();
-}
-
-function toggleAllFiles(kind, checked) {
-  const rows = document.getElementById("sm-files-rows");
-  rows.querySelectorAll(`input[data-kind="${kind}"]:not(:disabled)`)
-    .forEach((el) => { el.checked = checked; });
-  refreshFileSelection();
-}
-
-async function runFileDelete() {
-  const sel = refreshFileSelection();
-  if (!sel.count) return;
-  const parts = [];
-  if (sel.mp4_ids.length) parts.push(`動画 ${sel.mp4_ids.length}件（焼き込み・Up出力・cacheを含む）`);
-  if (sel.ts_ids.length) parts.push(`TS ${sel.ts_ids.length}件`);
-  const ok = await confirmDialog(
-    `@${selectedUid} の ${parts.join(" と ")} をdiskから削除します（${fmtBytes(sel.bytes)}）。\n`
-    + "転写・検索index・bookmark・切り出しlist・解析は残りますが、削除したfileは元に戻せません。",
-    { title: "録画fileの削除", confirmLabel: "削除する", danger: true },
-  );
-  if (!ok) return;
-  const run = document.getElementById("sm-files-run");
-  run.disabled = true;
-  try {
-    const res = await apiSend(
-      "POST", `/api/streamers/${encodeURIComponent(selectedUid)}/recordings/delete-files`,
-      { mp4_ids: sel.mp4_ids, ts_ids: sel.ts_ids },
-    );
-    showToast(`${fmtBytes(res.freed_bytes)} を解放しました。`);
-  } catch (err) {
-    document.getElementById("sm-files-message").textContent = err.message;
-    run.disabled = false;
-    return;
-  }
-  // 実測を取り直す。解放bytesの予測値で表を書き換えると、消せなかったfileが
-  // 消えたことになる。
-  await loadFiles();
-  loadDiskBar();
 }
 
 function renderHead(identity, count) {
@@ -703,6 +533,34 @@ function hmCell(text, cls) {
 }
 
 // ---- Gifter / 収益分析 ----
+// ライバー比率は判定済みのコインを分母にした値。判定は待ち行列で順に進むので、
+// 未判定を「ライバーではない」と数えると実際より低く出る。判定がまだ1件も無い間は
+// 0%ではなく — を出す(「居ないと確認できた」と「まだ判っていない」を混同させない)。
+// ライバー(自分でも配信している人)の割合は、コイン基準と人数基準で意味が違う。1人の大口
+// ライバーが居ればコイン比率だけが跳ね、少額のライバーが大勢居れば人数比率だけが上がる。
+// どちらの分母かが名前から読めるよう、独立した項目として出す。
+//
+// 値が無い場合(判定が1件も済んでいない / serverが旧processでfieldを返さない)は — にする。
+// 0%は「ライバーが居ないと確認できた」という別の意味なので、そこへ丸めない。
+function fmtPercent(value) {
+  return typeof value === "number" ? `${value.toFixed(1)}%` : "—";
+}
+
+// 分母はどちらも全体。未判定の人はライバーに数えられないため、この比率は下限である。
+// 「判定済み」を必ず併記して、どこまで確認できた上での値かを読めるようにする。
+function liverTitle(c) {
+  const coin =
+    `コイン: ${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)}`;
+  const head =
+    `人数: ${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人`;
+  return (
+    `ギフトに占めるライバー（自分でも配信している人）の割合です。\n${coin}\n${head}\n`
+    + `分母は全体です。リーグ未判定の人はライバーに数えないため、この値は下限です`
+    + `（判定済み コイン ${fmtPercent(c.liver_coin_coverage)} / `
+    + `人数 ${fmtPercent(c.liver_gifter_coverage)}）。`
+  );
+}
+
 function renderConcentration(c) {
   chipBar("sm-conc", [
     ["Gifter数", fmtNum(c.total_gifters)],
@@ -711,6 +569,19 @@ function renderConcentration(c) {
     ["Top1 比率", `${c.top1.toFixed(1)}%`],
     ["Top5 比率", `${c.top5.toFixed(1)}%`],
     ["Top10 比率", `${c.top10.toFixed(1)}%`],
+    // 分母を名前に持たせて独立させる。「ライバー比率」だけでは、コインに対してなのか
+    // 人数に対してなのかが読めない。
+    ["ライバー / コイン全体", fmtPercent(c.liver_coin_share), "",
+      `${fmtNum(c.liver_diamonds || 0)} / ${fmtNum(c.liver_gift_diamonds || 0)} コイン。`
+      + `${liverTitle(c)}`],
+    ["ライバー / ギフト人数", fmtPercent(c.liver_gifter_share), "",
+      `${fmtNum(c.liver_gifters || 0)} / ${fmtNum(c.liver_total_gifters || 0)} 人。`
+      + `${liverTitle(c)}`],
+    ["リーグ判定済み(コイン)", fmtPercent(c.liver_coin_coverage), "",
+      "リーグを確認できたギフターのコインが、コイン全体に占める割合です。"
+      + "上の2つはこの範囲で確定した分だけを数えた下限値です。"],
+    ["リーグ判定済み(人数)", fmtPercent(c.liver_gifter_coverage), "",
+      "リーグを確認できたギフターが、ギフト人数全体に占める割合です。"],
   ]);
 }
 
@@ -733,6 +604,118 @@ function renderGifters(gifters) {
     ],
     [0, 2, 3, 4],
   );
+}
+
+// ライバーからのギフト。比率だけでは「誰が投げたのか」が読めないので、リーグ帯の内訳と
+// 本人の一覧を並べる。帯はA/B/Cのグループ単位で畳む(A1とA2を別の帯として並べると、
+// 帯が10種類以上になって「どんなライバーか」が却って読めなくなる)。
+function liverTiers(livers) {
+  const groups = new Map();
+  livers.forEach((l) => {
+    const group = (l.league || "?").charAt(0);
+    if (!groups.has(group)) groups.set(group, { count: 0, diamonds: 0, tiers: new Set() });
+    const g = groups.get(group);
+    g.count += 1;
+    g.diamonds += l.diamonds || 0;
+    g.tiers.add(l.league);
+  });
+  return Array.from(groups.entries()).sort((a, b) => b[1].diamonds - a[1].diamonds);
+}
+
+function renderLivers(livers) {
+  chipBar(
+    "sm-liver-tiers",
+    liverTiers(livers).map(([group, g]) => [
+      `${group} 帯`,
+      `${fmtNum(g.count)} 人 / ${fmtNum(g.diamonds)} コイン`,
+      "",
+      `内訳: ${Array.from(g.tiers).sort().join(", ")}`,
+    ]),
+  );
+  renderTableRows(
+    "sm-livers",
+    "sm-livers-empty",
+    livers,
+    (l, rank) => [
+      String(rank),
+      userCell(l, {
+        stackId: true,
+        href: l.identity_key ? `/fans?fan=${encodeURIComponent(l.identity_key)}` : "",
+        linkTitle: "この視聴者のFan台帳（全配信者横断の実績）を開きます。",
+      }),
+      fmtNum(l.diamonds),
+      fmtNum(l.gifts),
+      `${fmtNum(l.sessions)} 回`,
+    ],
+    [0, 2, 3, 4],
+  );
+}
+
+// ---- 共演構成(コラボ / Battle / ソロ) ----
+// 「1時間あたり何回」は総配信時間が短いほど跳ねる指標なので、実数(回数)と集計対象の
+// 配信時間を同じbarに並べて、頻度を単独で読ませない。
+const COOP_SEGMENTS = [
+  { key: "solo", label: "ソロ", color: "#4d4a3f" },
+  { key: "collab", label: "コラボ", color: "#7a6a8e" },
+  { key: "battle", label: "Battle", color: "#a4502f" },
+];
+
+function fmtMinutes(seconds) {
+  if (!seconds) return "—";
+  const m = seconds / 60;
+  return m >= 10 ? `${Math.round(m)} 分` : `${m.toFixed(1)} 分`;
+}
+
+function renderCoop(c) {
+  const empty = document.getElementById("sm-coop-empty");
+  const mix = document.getElementById("sm-coop-mix");
+  const legend = document.getElementById("sm-coop-legend");
+  mix.innerHTML = "";
+  legend.innerHTML = "";
+  if (!c || !c.active_seconds) {
+    chipBar("sm-coop", []);
+    empty.classList.remove("hidden");
+    return;
+  }
+  empty.classList.add("hidden");
+  chipBar("sm-coop", [
+    ["コラボ比率", `${c.collab_share.toFixed(1)}%`],
+    ["Battle比率", `${c.battle_share.toFixed(1)}%`],
+    ["ソロ比率", `${c.solo_share.toFixed(1)}%`],
+    ["共演計", `${c.coop_share.toFixed(1)}%`, c.coop_share >= 50 ? "ok" : ""],
+    ["Battle 回/時", `${c.battles_per_hour.toFixed(2)}`],
+    ["コラボ 回/時", `${c.collabs_per_hour.toFixed(2)}`],
+    ["Battle回数", `${fmtNum(c.battle_count)} 回`],
+    ["コラボ回数", `${fmtNum(c.collab_count)} 回`],
+    ["平均Battle長", fmtMinutes(c.avg_battle_seconds)],
+    ["平均コラボ長", fmtMinutes(c.avg_collab_seconds)],
+    ["コラボした配信", `${fmtNum(c.sessions_with_collab)} / ${fmtNum(c.sessions)}`],
+    ["集計対象", `${fmtDuration(c.active_seconds)}`],
+  ]);
+
+  COOP_SEGMENTS.forEach((seg) => {
+    const share = c[`${seg.key}_share`] || 0;
+    if (share > 0) {
+      const el = document.createElement("span");
+      el.className = "sm-mix-seg";
+      el.style.flexGrow = String(share);
+      el.style.background = seg.color;
+      el.title = `${seg.label} ${share.toFixed(1)}% / ${fmtDuration(c[`${seg.key}_seconds`])}`;
+      // 幅が狭い区間に文字を押し込むと読めなくなるので、数字はlegend側で必ず出す。
+      const b = document.createElement("b");
+      b.textContent = `${share.toFixed(0)}%`;
+      el.appendChild(b);
+      mix.appendChild(el);
+    }
+    const item = document.createElement("span");
+    item.className = "sm-mix-item";
+    const dot = document.createElement("i");
+    dot.style.background = seg.color;
+    const text = document.createElement("span");
+    text.textContent = `${seg.label} ${share.toFixed(1)}%（${fmtDuration(c[`${seg.key}_seconds`])}）`;
+    item.append(dot, text);
+    legend.appendChild(item);
+  });
 }
 
 // ---- Battle 分析 ----
@@ -758,14 +741,57 @@ function renderBattle(b) {
     `貢献者${b.key_contrib_threshold}+ 自室/陣営`;
 }
 
+// 対戦相手別: serverは全件(配信者あたり数百)返す。ここで絞込・並べ替えして出す。
+// 上位N件で切ると、裾の相手が「対戦していない」ように見えるため件数の上限は設けない。
+let opponentsAll = [];
+
 function renderOpponents(opponents) {
+  opponentsAll = opponents || [];
+  renderOpponentRows();
+}
+
+// 勝率は勝敗のついたBattleだけが母数。引分/未確定しかない相手は率を持たないため、
+// 率での並べ替えでは末尾へ置く(0%として混ぜると「全敗」と読めてしまう)。
+function opponentRate(o) {
+  const decided = o.wins + o.losses;
+  return decided ? o.wins / decided : null;
+}
+
+const OPPONENT_SORTS = {
+  battles: (o) => o.battles,
+  wins: (o) => o.wins,
+  losses: (o) => o.losses,
+  rate: (o) => (opponentRate(o) == null ? -1 : opponentRate(o)),
+};
+
+function renderOpponentRows() {
+  const q = document.getElementById("sm-opp-search").value.trim().toLowerCase();
+  const min = Number(document.getElementById("sm-opp-min").value) || 1;
+  const sortKey = document.getElementById("sm-opp-sort").value;
+  const keyOf = OPPONENT_SORTS[sortKey] || OPPONENT_SORTS.battles;
+  const rows = opponentsAll
+    .filter((o) => o.battles >= min)
+    .filter((o) => !q || `${o.nickname} @${o.unique_id}`.toLowerCase().includes(q))
+    // 同値は対戦数の多い順を第2キーにする(率で並べた時に1戦だけの相手が上に来ないように)。
+    .sort((a, b) => keyOf(b) - keyOf(a) || b.battles - a.battles);
+  document.getElementById("sm-opp-note").textContent = opponentsAll.length
+    ? `（${fmtNum(opponentsAll.length)} 名中 ${fmtNum(rows.length)} 名）`
+    : "";
+  if (opponentsAll.length && !rows.length) {
+    setListMessage(
+      document.getElementById("sm-opponents-empty"),
+      "条件に合う対戦相手がいません。絞込を緩めてください。",
+    );
+  } else {
+    setListMessage(document.getElementById("sm-opponents-empty"), "Battleの記録がありません。");
+  }
   renderTableRows(
     "sm-opponents",
     "sm-opponents-empty",
-    opponents || [],
+    rows,
     (o, rank) => {
-      const decided = o.wins + o.losses;
-      const rate = decided ? `${((o.wins / decided) * 100).toFixed(0)}%` : "—";
+      const r = opponentRate(o);
+      const rate = r == null ? "—" : `${(r * 100).toFixed(0)}%`;
       return [
         String(rank),
         userCell(o, { stackId: true }),
@@ -776,7 +802,45 @@ function renderOpponents(opponents) {
       ];
     },
     [0, 2, 3, 4, 5],
+    // 行clickでBattle履歴をその相手だけに絞る。相手を見つけてから「その対戦がどれか」
+    // を探すのに、履歴を日時で目視照合させない(1配信者で数百戦ある)。
+    (tr, o) => {
+      tr.classList.add("row-clickable");
+      tr.classList.toggle("sm-opp-picked", !!pickedOpponent && pickedOpponent.key === o.key);
+      tr.tabIndex = 0;
+      tr.title = "clickでこの相手とのBattle履歴に絞込";
+      tr.addEventListener("click", () => pickOpponent(o));
+      tr.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        pickOpponent(o);
+      });
+    },
   );
+}
+
+// 対戦相手別で選んでいる相手(null=絞込なし)。Battle履歴の絞込と、相手一覧の選択表示の
+// 両方がこれ1つを見る。
+let pickedOpponent = null;
+
+function pickOpponent(o) {
+  // 同じ相手をもう一度clickしたら解除。絞込を外す手段が帯のbuttonだけだと、選び直しの
+  // たびに一覧と帯を往復することになる。
+  pickedOpponent = pickedOpponent && pickedOpponent.key === o.key ? null : o;
+  renderOpponentRows();
+  renderBattleHistoryRows();
+  if (pickedOpponent) {
+    document
+      .getElementById("sm-battle-history")
+      .closest(".table-wrap")
+      .scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function clearOpponentPick() {
+  pickedOpponent = null;
+  renderOpponentRows();
+  renderBattleHistoryRows();
 }
 
 // Battle Gifter: Battle時間窓内に自陣へ投げたファンの集計（どんなギフターで出てきたか）。
@@ -807,13 +871,80 @@ function pairValue(own, team) {
 }
 const BATTLE_RESULT = { win: ["WIN", "ok"], lose: ["LOSE", "warn"], draw: ["分", ""] };
 
+// Battle開始の何秒前から再生するか。開始時刻ちょうどに飛ぶと、既にBattleが始まった絵から
+// 見ることになり、直前の呼びかけ(誰が入ってきたか)が見えない。
+const BATTLE_VIDEO_LEAD_SECONDS = 5;
+
+// その対戦を含む録画があれば、対戦の場面から再生するbutton。録画が無い対戦(未録画・
+// retentionで削除済み)は「—」— 押しても何も無いbuttonは出さない。
+function battleVideoCell(h) {
+  if (!h.recording_id) return "—";
+  const btn = document.createElement("button");
+  btn.className = "btn btn-small";
+  btn.textContent = "▶ 再生";
+  const label = `Battle ${fmtDateTime(h.started_at)}（録画 #${sessionNo(h.session_id)}）`;
+  btn.title = `${label} の場面から再生します。`;
+  btn.addEventListener("click", async (e) => {
+    // 行clickはBattle結果modalを開く。buttonを押した時に両方走らせない。
+    e.stopPropagation();
+    btn.disabled = true;
+    try {
+      // 動画の何秒地点かはserverに解かせる。壁時計との差(起動latency・再接続の穴・mux)は
+      // 録画fileの時刻anchorが無いと解けず、画面で引き算すると分単位でずれる。
+      const at = encodeURIComponent(h.started_at);
+      const found = await apiSend("GET", `/api/recordings/${h.recording_id}/locate?at=${at}`);
+      openVideo(
+        h.recording_id,
+        Math.max(0, found.video_time - BATTLE_VIDEO_LEAD_SECONDS),
+        label,
+      );
+    } catch (err) {
+      // 理由を出せる場所は再生boxしかない。前の再生は止めてから出す(音が続いたまま
+      // 別の対戦のerrorが出ると、どちらの話か読めない)。
+      closeVideo();
+      showVideoMessage(label, err.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  return btn;
+}
+
 // Battle 履歴: 1戦ごとのScore/結果/相手/Batt中コイン（新しい順）。
 // 「どんなスコアになったか」を過去のBattle全体で一覧できる。
+let battleHistoryAll = [];
+
 function renderBattleHistory(history) {
+  battleHistoryAll = history || [];
+  renderBattleHistoryRows();
+}
+
+function renderBattleHistoryRows() {
+  // 絞込は代表相手ではなく参加した全員(opponent_keys)に当てる。チーム戦・個人マルチで
+  // 格下だった相手を選んだ時に、その対戦が履歴から消えてしまうため。
+  const rows = pickedOpponent
+    ? battleHistoryAll.filter((h) => (h.opponent_keys || []).includes(pickedOpponent.key))
+    : battleHistoryAll;
+  const filterBar = document.getElementById("sm-battle-history-filter");
+  filterBar.classList.toggle("hidden", !pickedOpponent);
+  if (pickedOpponent) {
+    const name = pickedOpponent.nickname || pickedOpponent.unique_id || "(unknown)";
+    document.getElementById("sm-battle-history-filter-label").textContent =
+      `${name} との対戦 ${fmtNum(rows.length)} 戦`;
+  }
+  document.getElementById("sm-battle-history-note").textContent = battleHistoryAll.length
+    ? `（新しい順・${fmtNum(rows.length)} / ${fmtNum(battleHistoryAll.length)} 戦）`
+    : "（新しい順）";
+  setListMessage(
+    document.getElementById("sm-battle-history-empty"),
+    pickedOpponent
+      ? "この相手との対戦は履歴にありません。"
+      : "Battleの記録がありません。",
+  );
   renderTableRows(
     "sm-battle-history",
     "sm-battle-history-empty",
-    history,
+    rows,
     (h) => {
       const [label, cls] = BATTLE_RESULT[h.result] || ["—", ""];
       const res = document.createElement("span");
@@ -832,6 +963,7 @@ function renderBattleHistory(history) {
         res,
         pairValue(h.diamonds, h.team_diamonds),
         `${pairValue(h.key_contributors, h.team_key_contributors)} 人`,
+        battleVideoCell(h),
       ];
     },
     [3, 4, 6, 7],
@@ -913,8 +1045,8 @@ function createBattleTrendChart(canvas) {
       labels: [],
       datasets: [
         { type: "bar", label: "Batt中コイン", data: [], backgroundColor: "rgba(169, 110, 73, 0.35)", yAxisID: "y2" },
-        { type: "line", label: "自陣Score", data: [], borderColor: "#5d6e4e", backgroundColor: "#5d6e4e", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
-        { type: "line", label: "敵陣Score", data: [], borderColor: "#a4502f", backgroundColor: "#a4502f", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
+        { type: "line", label: "自陣Score", data: [], borderColor: BATTLE_OWN_LINE, backgroundColor: BATTLE_OWN_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
+        { type: "line", label: "敵陣Score", data: [], borderColor: BATTLE_OPP_LINE, backgroundColor: BATTLE_OPP_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y" },
       ],
     },
     options: {
@@ -1167,6 +1299,10 @@ function handleMessage(msg) {
 
 elSearch.addEventListener("input", renderList);
 elHmMetric.addEventListener("change", renderHeatmap);
+document.getElementById("sm-opp-search").addEventListener("input", renderOpponentRows);
+document.getElementById("sm-opp-min").addEventListener("change", renderOpponentRows);
+document.getElementById("sm-opp-sort").addEventListener("change", renderOpponentRows);
+document.getElementById("sm-battle-history-clear").addEventListener("click", clearOpponentPick);
 document.getElementById("sm-ai-btn").addEventListener("click", () => runAiReview(false));
 document.getElementById("sm-ai-rerun").addEventListener("click", () => runAiReview(true));
 document.getElementById("sm-video-stop").addEventListener("click", closeVideo);
@@ -1182,14 +1318,6 @@ bindVideoError(
   () => playingRecordingId,
   (text) => { document.getElementById("sm-video-message").textContent = text; },
 );
-// section手前200pxで先読みし、scrollし切る前に表が埋まっているようにする。
-new IntersectionObserver((entries) => {
-  filesVisible = entries.some((e) => e.isIntersecting);
-  maybeLoadFiles();
-}, { rootMargin: "200px" }).observe(document.getElementById("sm-files-section"));
-document.getElementById("sm-files-run").addEventListener("click", runFileDelete);
-document.getElementById("sm-files-all-mp4").addEventListener("change", (e) => toggleAllFiles("mp4", e.target.checked));
-document.getElementById("sm-files-all-ts").addEventListener("change", (e) => toggleAllFiles("ts", e.target.checked));
 document.getElementById("sm-battle-close").addEventListener("click", closeBattleDetail);
 document.getElementById("sm-battle-modal").addEventListener("click", (e) => {
   if (e.target.id === "sm-battle-modal") closeBattleDetail();

@@ -346,7 +346,7 @@ async def main() -> int:
         return 2
     roots = _roots(db_path)
     logger.info("DB: %s", db_path)
-    logger.info("record roots: %s", " / ".join(str(r) for r in roots))
+    logger.info("録画root: %s", " / ".join(str(r) for r in roots))
 
     rows = _rows(db_path, args.unique_id)
     if not rows:

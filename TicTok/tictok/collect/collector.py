@@ -17,6 +17,7 @@ from websockets.exceptions import ConnectionClosed
 from TikTokLive import TikTokLiveClient
 from TikTokLive.client.errors import (
     AgeRestrictedError,
+    SignAPIError,
     TikTokLiveError,
     UserNotFoundError,
     UserOfflineError,
@@ -92,10 +93,19 @@ from tictok.core.logging_setup import compress_async, progress_interval_seconds
 from tictok.collect.live_resolver import LiveResolveBlocked
 from tictok.collect.proto_dict import safe_event_to_dict
 from tictok.collect.sampler import EventSampler
-from tictok.record.recorder import Recorder, extract_stream_url, ffmpeg_available
-from tictok.storage import OPS_ERROR, OPS_INFO, OPS_WARNING, _identity_key
+from tictok.collect.ttlive_compat import apply_ttlive_patches
+from tictok.record.recorder import (
+    STATE_COMPLETED,
+    Recorder,
+    extract_stream_url,
+    ffmpeg_available,
+)
+from tictok.search import indexer
+from tictok.storage import OPS_INFO, OPS_WARNING, _identity_key
 
 logger = logging.getLogger("tictok.collector")
+
+apply_ttlive_patches()
 
 # WebcastLinkMicBattleBattleAction (tiktok_proto). A PK that ends via CANCEL /
 # REJECT / CUT_SHORT never produced a real contest (matchmaking aborted or the
@@ -187,7 +197,7 @@ def _apply_locale() -> None:
     )
     WebDefaults.web_client_headers["Accept-Language"] = f"{lang_country},{lang};q=0.9"
     logger.info(
-        "TikTok client locale applied: lang=%s region=%s", lang, country,
+        "TikTok clientのlocaleを適用しました: lang=%s region=%s", lang, country,
         extra={"event": "collector.locale_applied",
                "ctx": {"lang": lang, "country": country,
                        "lang_country": lang_country, "tz": tz}},
@@ -202,8 +212,8 @@ def _apply_sign_api_key() -> None:
     if api_key:
         WebDefaults.tiktok_sign_api_key = api_key
     logger.info(
-        "sign api key %s; sign requests run on the %s tier",
-        "configured" if api_key else "absent",
+        "sign api keyは%sです。sign requestは%s tierで実行されます",
+        "設定済み" if api_key else "未設定",
         "keyed" if api_key else "anonymous",
         extra={"event": "collector.sign_key_configured",
                "ctx": {"configured": bool(api_key)}},
@@ -212,6 +222,43 @@ def _apply_sign_api_key() -> None:
 
 _apply_locale()
 _apply_sign_api_key()
+
+# Sign server(EulerStream)側の失敗理由 -> 運用者向けの日本語説明。ここに載るものは
+# こちらのcodeでは直せない外部要因なので、Stack Traceを出さず1行で残す。
+# PREMIUM_ENDPOINT / AUTHENTICATED_WS は API keyの権限不足、つまり設定で直せる自陣の
+# 問題なので意図的に載せない(隠すと恒久的な設定ミスが一時障害に埋もれる)。
+_SIGN_OUTAGE_REASONS = {
+    SignAPIError.ErrorReason.RATE_LIMIT: "sign serverの利用上限に達しました",
+    SignAPIError.ErrorReason.CONNECT_ERROR: "sign serverへ接続できませんでした",
+    SignAPIError.ErrorReason.EMPTY_PAYLOAD: "sign serverが空応答を返しました",
+    SignAPIError.ErrorReason.EMPTY_COOKIES: "sign serverがcookieを返しませんでした",
+}
+
+
+def sign_server_outage(exc: BaseException) -> Optional[dict]:
+    """Sign server側の一時障害なら日本語の理由とctxを返し、それ以外はNoneを返す。
+
+    TikTokのWebSocketはsign serverを必ず経由するため、その5xx/利用上限/接続断は
+    こちらのcodeでは直せない。呼び出し元はこれが返ったときだけStack Traceを省き、
+    外部要因である旨を日本語で残す。分類できない失敗はNoneのまま従来どおり
+    Stack Trace付きで報告する(未知の失敗を一時障害へ吸わせない)。
+    """
+    if not isinstance(exc, SignAPIError):
+        return None
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) if response is not None else None
+    reason = _SIGN_OUTAGE_REASONS.get(getattr(exc, "reason", None))
+    if reason is None:
+        # 非200は中身次第。5xxはsign server自身の不調、4xxはこちらのrequest/keyの問題。
+        if getattr(exc, "reason", None) is not SignAPIError.ErrorReason.SIGN_NOT_200:
+            return None
+        if not isinstance(status, int) or status < 500:
+            return None
+        reason = f"sign serverが{status}を返しました"
+    ctx = {"sign_reason": getattr(getattr(exc, "reason", None), "name", None),
+           "sign_status": status,
+           "sign_log_id": getattr(exc, "log_id", None)}
+    return {"reason": reason, "ctx": ctx}
 
 # league_probe診断: field名がこれらを含めばリーグ/ランク関連の可能性が高い(snake/camel両対応)。
 _LEAGUE_KEY_RE = re.compile(r"league|ranking|grade", re.IGNORECASE)
@@ -490,16 +537,27 @@ class OpponentRoomListener:
             await client.connect(room_id=int(room_id), fetch_live_check=False, fetch_room_info=False)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             # 相手陣の実弾が欠けるだけで主Collectorの収集は継続する(劣化)。Battle終了まで
             # 再試行はしないので、どのPKで欠けたかを battle_id 付きで残す。
+            ctx = {"opp_unique_id": self._handle,
+                   "opp_host_id": self.host_id,
+                   "battle_id": self._battle_id}
+            outage = sign_server_outage(exc)
+            if outage is not None:
+                logger.warning(
+                    "Sign serverの一時障害で相手Room @%s へ接続できませんでした（%s）。"
+                    "このBattleの相手陣ギフト集計のみ欠測します。録画と収集は継続中で、"
+                    "対処不要です",
+                    self._handle, outage["reason"],
+                    extra={"event": "collector.opponent_listener_sign_unavailable",
+                           "ctx": {**ctx, **outage["ctx"]}},
+                )
+                return
             logger.warning(
-                "opponent room listener failed for @%s; opponent gift totals will be "
-                "incomplete for this battle", self._handle, exc_info=True,
-                extra={"event": "collector.opponent_listener_failed",
-                       "ctx": {"opp_unique_id": self._handle,
-                               "opp_host_id": self.host_id,
-                               "battle_id": self._battle_id}},
+                "相手Room @%s のlistenerが失敗しました。このbattleの相手陣ギフト集計は"
+                "欠測します", self._handle, exc_info=True,
+                extra={"event": "collector.opponent_listener_failed", "ctx": ctx},
             )
 
     async def _handle_gift(self, event: "GiftEvent") -> None:
@@ -521,7 +579,7 @@ class OpponentRoomListener:
                 # 切断は後続のtask cancelでも成立するため実害は無い。ただし無音にすると
                 # 「相手Roomのsocketが残っていないか」を後から確認できないのでDEBUGで残す。
                 logger.debug(
-                    "opponent room disconnect failed for @%s; falling through to cancel",
+                    "相手Room @%s の切断に失敗しました。cancelへ進みます",
                     self._handle, exc_info=True,
                     extra={"event": "collector.opponent_listener_disconnect_failed",
                            "ctx": {"opp_unique_id": self._handle,
@@ -535,7 +593,7 @@ class OpponentRoomListener:
                 pass
             except Exception:
                 logger.debug(
-                    "opponent room listener task raised while stopping for @%s",
+                    "相手Room @%s のlistener taskが停止処理中に例外を投げました",
                     self._handle, exc_info=True,
                     extra={"event": "collector.opponent_listener_stop_failed",
                            "ctx": {"opp_unique_id": self._handle,
@@ -891,7 +949,7 @@ def _epoch_seconds(raw: Any) -> Optional[float]:
 
 class TikTokCollector:
     def __init__(
-        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_pool=None, avatar_proxy=None, record_video: bool = True, notifier=None, schedule_profiler=None
+        self, unique_id: str, broadcast: Broadcast, storage, settings, probe_gate=None, resolver=None, gift_icons=None, avatar_proxy=None, asset_prefetch=None, record_video: bool = True, notifier=None, schedule_profiler=None
     ) -> None:
         self._broadcast = broadcast
         self._schedule_profiler = schedule_profiler
@@ -902,12 +960,15 @@ class TikTokCollector:
         self._notifier = notifier
         self._probe_gate = probe_gate or ProbeGate(settings, lambda: 1)
         self._resolver = resolver
+        # gift catalogueの一括事前cacheだけがここを直接使う(gift/avatar/emoteの1件ずつの
+        # 取得は _asset_prefetch のqueue越し)。
         self._gift_icons = gift_icons
-        self._avatar_pool = avatar_pool
         self._avatar_proxy = avatar_proxy
-        self._avatar_tasks: set = set()
+        # 焼き込みassetの先行取得(有界queue＋worker)。avatar/gift icon/emoteの取得要求は
+        # すべてここへ積む。以前はasset 1件ごとにtaskを起こしていたが、コメントが殺到した
+        # ときの同時DL数に上限が無かった。
+        self._asset_prefetch = asset_prefetch
         self._gift_icon_tasks: set = set()
-        self._avatar_pool_tasks: set = set()
         self._badge_tasks: set = set()
         # 取得済みバッジURLのset(同一URLの再取得spam防止)。proxyのpath単位ディスク
         # キャッシュが最終的な重複排除を担うので、ここはbest-effortの軽い前段で十分。
@@ -1276,8 +1337,8 @@ class TikTokCollector:
             self._storage.append_markers(self.session_id, self._all_markers())
         except Exception:
             logger.warning(
-                "failed to checkpoint session markers; the next checkpoint will write "
-                "the missing ones", exc_info=True,
+                "session markerのcheckpointに失敗しました。次のcheckpointで未書き込み分を"
+                "書きます", exc_info=True,
                 extra={"event": "collector.marker_checkpoint_failed",
                        "ctx": {"markers": len(self.markers),
                                "conn_markers": len(self.conn_markers),
@@ -1309,8 +1370,8 @@ class TikTokCollector:
             self._storage.set_session_live_create_time(self.session_id, create_time)
         except Exception:
             logger.warning(
-                "failed to persist the broadcast create_time; collection start delay "
-                "will not be measurable for this session", exc_info=True,
+                "配信のcreate_timeの保存に失敗しました。このsessionでは収集開始の遅延を"
+                "計測できません", exc_info=True,
                 extra={"event": "collector.live_create_time_persist_failed",
                        "ctx": {"room_id": self.room_id,
                                "live_create_time": create_time}},
@@ -1446,7 +1507,7 @@ class TikTokCollector:
         # 冒頭で張り、この行はrequestを出した側のlogに監視対象を載せるだけ。
         with log_context(unique_id=self.unique_id):
             logger.info(
-                "monitoring start requested (mode=%s)",
+                "監視の開始を要求されました（mode=%s）",
                 "simulation" if self._simulation else "live",
                 extra={"event": "collector.monitor_start_requested",
                        "ctx": {"simulation": self._simulation,
@@ -1462,7 +1523,7 @@ class TikTokCollector:
             raise RuntimeError("収集は実行されていません。")
         with log_context(unique_id=self.unique_id, session_id=self.session_id):
             logger.info(
-                "collection stop requested while %s", self.state,
+                "収集の停止を要求されました（状態 %s）", self.state,
                 extra={"event": "collector.monitor_stop_requested",
                        "ctx": {"state": self.state}},
             )
@@ -1473,8 +1534,8 @@ class TikTokCollector:
                 except Exception:
                     # 停止要求のdisconnect失敗。この後のtask cancelが必ず落とすので回復する。
                     logger.warning(
-                        "graceful disconnect failed on stop; falling back to cancelling "
-                        "the collector task", exc_info=True,
+                        "停止時のgraceful disconnectに失敗しました。collector taskのcancelへ"
+                        "切り替えます", exc_info=True,
                         extra={"event": "collector.disconnect_failed",
                                "ctx": {"phase": "stop"}},
                     )
@@ -1485,7 +1546,7 @@ class TikTokCollector:
                 if pending:
                     task.cancel()
                     logger.warning(
-                        "collector task did not stop within the grace period; cancelling",
+                        "collector taskが猶予時間内に停止しませんでした。cancelします",
                         extra={"event": "collector.stop_timed_out", "ctx": {}},
                     )
 
@@ -1532,7 +1593,7 @@ class TikTokCollector:
                 self.steps["receiving"] = "done"
             await self._notify_state()
             logger.info(
-                "collector task finished in state %s", self.state,
+                "collector taskが終了しました（状態 %s）", self.state,
                 extra={"event": "collector.finished", "ctx": {"state": self.state}},
             )
 
@@ -1570,7 +1631,7 @@ class TikTokCollector:
         if outcome in ("stopped", "fatal"):
             return "break"
         logger.info(
-            "session closed (%s); resuming the watch loop", outcome,
+            "sessionを終了しました（%s）。監視loopへ戻ります", outcome,
             extra={"event": "collector.watch_resumed", "ctx": {"outcome": outcome}},
         )
         return "continue"
@@ -1585,7 +1646,7 @@ class TikTokCollector:
         url, quality = extract_stream_url(self._room_info)
         if not url:
             logger.warning(
-                "no stream URL in room_info; this broadcast cannot be recorded",
+                "room_infoにstream URLがありません。この配信は録画できません",
                 extra={"event": "collector.stream_url_missing",
                        "ctx": {"room_id": self.room_id,
                                "room_info_keys": sorted(self._room_info.keys())}},
@@ -1597,20 +1658,19 @@ class TikTokCollector:
         remaining = url_ctx.get("seconds_to_expiry")
         if remaining is not None and remaining <= get_log_stream_url_expiry_warn_seconds():
             logger.warning(
-                "stream URL has %.0fs of validity left at launch; the recording is "
-                "likely to finalize empty", remaining,
+                "起動時点でstream URLの残り有効時間が%.0f秒しかありません。録画が空で"
+                "finalizeされる可能性が高いです", remaining,
                 extra={"event": "collector.stream_url_expiry_detected",
                        "ctx": {"quality": quality, **url_ctx}},
             )
         else:
             logger.info(
-                "stream URL resolved for recording (quality=%s)", quality,
+                "録画用のstream URLを取得しました（quality=%s）", quality,
                 extra={"event": "collector.stream_url_resolved",
                        "ctx": {"quality": quality, **url_ctx}},
             )
         recorder = Recorder(
             self.unique_id, self._record_dir, self.session_id,
-            keep_hls=bool(self._settings.get("recording_keep_hls")),
             final_dir=self._final_record_dir,
             storage=self._storage,
         )
@@ -1648,7 +1708,7 @@ class TikTokCollector:
         # User-initiated stop: clear intent so a later reconnect does not resume it.
         self._recording_desired = False
         logger.info(
-            "recording stop requested by the user",
+            "userから録画の停止を要求されました",
             extra={"event": "collector.recording_stop_requested", "ctx": {}},
         )
         await self.recorder.stop()
@@ -1664,7 +1724,7 @@ class TikTokCollector:
             return
         self.record_video = record_video
         logger.info(
-            "video saving turned %s for this monitor", "on" if record_video else "off",
+            "この監視対象の動画保存を%sにしました", "ON" if record_video else "OFF",
             extra={"event": "collector.record_video_toggled",
                    "ctx": {"record_video": record_video}},
         )
@@ -1675,8 +1735,8 @@ class TikTokCollector:
             except Exception:
                 # ffmpegが残る可能性があるが、次のstop/finalizeとwatchdogが回収する。
                 logger.warning(
-                    "failed to stop the recording when video saving was turned off; "
-                    "ffmpeg may still be running", exc_info=True,
+                    "動画保存をOFFにした際の録画停止に失敗しました。ffmpegがまだ動作している"
+                    "可能性があります", exc_info=True,
                     extra={"event": "collector.recording_stop_failed",
                            "ctx": {"phase": "record_video_off"}},
                 )
@@ -1691,8 +1751,8 @@ class TikTokCollector:
                 # session終了時のstopなので、失敗するとmp4が未finalizeのまま残りうる。
                 # 自動でこれを拾い直す経路は無い。
                 logger.error(
-                    "failed to stop the recording at session end; the mp4 may be left "
-                    "unfinalized", exc_info=True,
+                    "session終了時の録画停止に失敗しました。mp4がfinalizeされないまま残る"
+                    "可能性があります", exc_info=True,
                     extra={"event": "collector.recording_stop_failed",
                            "ctx": {"phase": "session_end"}},
                 )
@@ -1710,8 +1770,8 @@ class TikTokCollector:
                 # _maybe_resume_after_finalize が別URLで撃ち直す形でしか無いので、
                 # 「何も残らなかった」事実そのものはここで確定させて残す。
                 logger.warning(
-                    "recording finalized empty (no bytes, no output file); dropping its "
-                    "history row and attempting recovery",
+                    "録画が空でfinalizeされました（byte数0・出力fileなし）。履歴の行を削除して"
+                    "復旧を試みます",
                     extra={"event": "collector.recording_empty_dropped",
                            "ctx": {"recorder_state": recorder.state,
                                    "error": recorder.error}},
@@ -1728,6 +1788,7 @@ class TikTokCollector:
                     recorder.error,
                     recorder.duration_seconds,
                 )
+                await self._index_recording_comments(recorder)
         text = (
             "録画を終了しました（Data未受信のため履歴から削除）。"
             if empty
@@ -1736,6 +1797,41 @@ class TikTokCollector:
         await self._record("system", {"text": text})
         await self._notify_state()
         await self._maybe_resume_after_finalize(recorder)
+
+    async def _index_recording_comments(self, recorder: Recorder) -> None:
+        """確定した録画のcommentを検索indexへ張る。
+
+        検索hitもplayer下段のcomment panelも search_hits しか読まず、eventsを直接は見ない。
+        その search_hits を作る経路が起動時のbackfill(backfill_search_index)だけだったため、
+        server稼働中に始まって終わった録画は次の再起動までcommentが1件も出なかった。転写側は
+        STT完了時に index_transcript を呼ぶので、commentだけが取り残されていた。
+
+        対象を completed に限るのは起動時backfillと同じ規則にするため。素材の検証に落ちた録画は
+        recordings_brief() に載らずbackfillも触らないので、ここだけが張ると「録画によって
+        commentが出たり出なかったりする」条件が2つに分かれる。
+
+        eventはこの時点で出揃っている: ended_at は _finalize_body の入口で刻まれ、この
+        callbackは時刻mapの書き出しと素材の検証を終えた後に呼ばれるため、確定処理のぶんだけ
+        取り込みの猶予がある。
+
+        indexが失敗しても録画の確定は続ける。ここはcallbackの中で、送出すると通知も
+        次の録画への再開(_maybe_resume_after_finalize)も落ちる。"""
+        if recorder.recording_id is None or recorder.state != STATE_COMPLETED:
+            return
+        recording = self._storage.get_recording(recorder.recording_id)
+        if recording is None:
+            return
+        try:
+            await indexer.index_comments(self._storage, recording, recorder.output_path)
+        except Exception:
+            logger.exception(
+                "確定した録画のcomment indexを作れませんでした。次回起動のbackfillまで"
+                "この録画のcommentは検索・comment panelに出ません: recording_id=%d",
+                recorder.recording_id,
+                extra={"event": "search.finalize_index_failed",
+                       "ctx": {"recording_id": recorder.recording_id,
+                               "stem": recorder.base, "unique_id": self.unique_id}},
+            )
 
     async def _announce_waiting(self) -> None:
         # Hold the "restricted" status while a known members-only / age-restricted
@@ -1750,8 +1846,8 @@ class TikTokCollector:
         # _log_still_waiting の間隔gate経由でしか出さない。
         self._last_wait_log_at = time.monotonic()
         logger.info(
-            "%s for a live to start (poll interval %ss)",
-            "restricted; watching" if self.state == STATE_RESTRICTED else "waiting",
+            "%s: 配信の開始を待っています（poll間隔 %s秒）",
+            "制限中のため監視継続" if self.state == STATE_RESTRICTED else "待機開始",
             self._settings.get("live_check_interval"),
             extra={"event": "collector.live_wait_started",
                    "ctx": {"state": self.state,
@@ -1769,7 +1865,7 @@ class TikTokCollector:
             return
         self._last_wait_log_at = now
         logger.info(
-            "still watching for a live to start (consecutive live-check failures: %d)",
+            "配信の開始を待っています（live checkの連続失敗: %d回）",
             failures,
             extra={"event": "collector.live_wait_progressed",
                    "ctx": {"state": self.state, "consecutive_failures": failures,
@@ -1795,8 +1891,8 @@ class TikTokCollector:
             try:
                 if await self._resolve_live(priority=use_priority):
                     logger.info(
-                        "live detected on room %s after %d failed live-check(s); "
-                        "opening a session", self._resolved_room_id, failures,
+                        "room %s で配信を検知しました（live checkの失敗 %d回のあと）。"
+                        "sessionを開きます", self._resolved_room_id, failures,
                         extra={"event": "collector.live_detected",
                                "ctx": {"room_id": self._resolved_room_id,
                                        "consecutive_failures": failures,
@@ -1808,7 +1904,7 @@ class TikTokCollector:
                 # ended, so drop the hold and let the status revert to plain waiting.
                 if self._restricted_room_id is not None:
                     logger.info(
-                        "restricted broadcast on room %s has ended; releasing the hold",
+                        "room %s の限定配信が終了しました。保留を解除します",
                         self._restricted_room_id,
                         extra={"event": "collector.restricted_hold_released",
                                "ctx": {"room_id": self._restricted_room_id,
@@ -1826,8 +1922,8 @@ class TikTokCollector:
                 # returning here and is polled on the (backed-off) live-check cadence.
                 failures += 1
                 logger.warning(
-                    "live page exposes no LiveRoom (consecutive=%d): the user may not "
-                    "exist or the page rendered partially; continuing to watch", failures,
+                    "live pageにLiveRoomがありません（連続%d回）: userが存在しないか、pageが"
+                    "部分的にしか描画されていません。監視を続けます", failures,
                     extra={"event": "collector.live_room_missing",
                            "ctx": {"consecutive_failures": failures}},
                 )
@@ -1837,14 +1933,14 @@ class TikTokCollector:
                 # browser resolver normally clears this on retry.
                 failures += 1
                 logger.warning(
-                    "live check blocked (consecutive=%d): %s; backing off", failures, exc,
+                    "live checkがblockされました（連続%d回）: %s。間隔を広げます", failures, exc,
                     extra={"event": "collector.live_check_blocked",
                            "ctx": {"consecutive_failures": failures, "reason": str(exc)}},
                 )
             except Exception as exc:
                 failures += 1
                 logger.warning(
-                    "live check failed (consecutive=%d): %s", failures, exc, exc_info=True,
+                    "live checkが失敗しました（連続%d回）: %s", failures, exc, exc_info=True,
                     extra={"event": "collector.live_check_failed",
                            "ctx": {"consecutive_failures": failures,
                                    "exc_type": type(exc).__name__}},
@@ -1955,7 +2051,7 @@ class TikTokCollector:
             self._restricted_recheck_count += 1
             next_delay = self._arm_restricted_recheck()
             logger.info(
-                "restriction still in effect for room %s (attempt %s, next recheck in %ss)",
+                "room %s の制限がまだ続いています（%s回目、次の再確認は%s秒後）",
                 self._restricted_room_id, self._restricted_recheck_count, next_delay,
                 extra={"event": "collector.restriction_recheck_held",
                        "ctx": {"room_id": self._restricted_room_id,
@@ -1966,7 +2062,7 @@ class TikTokCollector:
         # 制限が解けて再接続できる = 正常な状態遷移。ここをwarningにすると「録画できる状態に
         # 戻った」という良い知らせがwarning検索の結果を汚し、本物の劣化が埋もれる。
         logger.info(
-            "restriction lifted for room %s after %s recheck(s); reconnecting",
+            "room %s の制限が解除されました（再確認%s回のあと）。再接続します",
             self._restricted_room_id, self._restricted_recheck_count,
             extra={"event": "collector.restriction_lifted",
                    "ctx": {"room_id": self._restricted_room_id,
@@ -1991,7 +2087,7 @@ class TikTokCollector:
             data = (resp.json() or {}).get("data", {}) or {}
         except Exception:
             logger.warning(
-                "restriction recheck failed for room %s; treating as still restricted",
+                "room %s の制限の再確認に失敗しました。制限が続いているものとして扱います",
                 room_id, exc_info=True,
                 extra={"event": "collector.restriction_recheck_failed",
                        "ctx": {"room_id": room_id}},
@@ -2018,7 +2114,7 @@ class TikTokCollector:
                 self._storage.delete_session(self.session_id)
                 self._storage.extend_session_end(existing)
                 logger.info(
-                    "restricted attempt for room %s folded into session %s",
+                    "room %s の制限付き接続の試行をsession %s に畳み込みました",
                     self._resolved_room_id, existing,
                     extra={"event": "collector.restricted_session_folded",
                            "ctx": {"room_id": self._resolved_room_id,
@@ -2035,7 +2131,7 @@ class TikTokCollector:
             )
         except Exception:
             logger.exception(
-                "failed to record restricted session %s", self.session_id,
+                "制限付きsession %s の記録に失敗しました", self.session_id,
                 extra={"event": "collector.restricted_session_record_failed",
                        "ctx": {"room_id": self._resolved_room_id}},
             )
@@ -2063,8 +2159,8 @@ class TikTokCollector:
         except Exception:
             # 次のcheckpoint/finalizeが同じ内容を全置換で書き直すので自動回復する。
             logger.warning(
-                "failed to checkpoint battle/collab windows; the next checkpoint will "
-                "rewrite them", exc_info=True,
+                "battle/collab窓のcheckpointに失敗しました。次のcheckpointで書き直します",
+                exc_info=True,
                 extra={"event": "collector.checkpoint_failed",
                        "ctx": {"battles": len(self._battles),
                                "collab_open": len(self._collab_open),
@@ -2091,8 +2187,8 @@ class TikTokCollector:
             # finalizeが落ちるとこのsessionは ended_at 未確定のまま残り、以後どこからも
             # 書き直されない(集計から恒久的に欠落する)。回復経路が無いのでerror。
             logger.error(
-                "failed to persist session %s; it stays unfinalized and will be missing "
-                "from aggregations", self.session_id, exc_info=True,
+                "session %s の保存に失敗しました。finalizeされないまま残り、集計から欠落します",
+                self.session_id, exc_info=True,
                 extra={"event": "session.persist_failed",
                        "ctx": {"state": self.state}},
             )
@@ -2159,7 +2255,7 @@ class TikTokCollector:
                 # broadcast is gone, not a permanent failure. End this session and
                 # resume watching so a later live on this id still records.
                 logger.info(
-                    "live page no longer exposes LiveRoom; treating the broadcast as ended",
+                    "live pageにLiveRoomが無くなりました。配信終了として扱います",
                     extra={"event": "collector.live_ended",
                            "ctx": {"reason": "live_room_gone_on_offline_confirm"}},
                 )
@@ -2167,15 +2263,15 @@ class TikTokCollector:
                 return ("ended", None)
             if offline_confirmed:
                 logger.info(
-                    "offline report confirmed by re-resolution; the broadcast has ended",
+                    "再解決でoffline応答を確認しました。配信は終了しています",
                     extra={"event": "collector.live_ended",
                            "ctx": {"reason": "offline_confirmed"}},
                 )
                 self.state = STATE_ENDED
                 return ("ended", None)
             logger.info(
-                "TikTok reported offline but re-resolution still shows a live; "
-                "treating as transient and reconnecting",
+                "TikTokはofflineと応答しましたが再解決では配信中です。一時的な事象として"
+                "再接続します",
                 extra={"event": "collector.offline_unconfirmed", "ctx": {}},
             )
             return ("transient", "TikTokが一時的に未配信と応答しました（再確認では配信中）")
@@ -2184,8 +2280,8 @@ class TikTokCollector:
             # the broadcast ended or the page rendered partially. End this session
             # (non-terminal) and resume watching instead of killing the monitor.
             logger.info(
-                "room_info reports no LiveRoom for a room that just resolved live; "
-                "treating as ended and resuming the watch loop",
+                "配信中と解決したroomのroom_infoにLiveRoomがありません。終了として扱い、"
+                "監視loopへ戻ります",
                 extra={"event": "collector.live_ended",
                        "ctx": {"reason": "live_room_missing_in_room_info",
                                "room_id": self._resolved_room_id}},
@@ -2201,8 +2297,19 @@ class TikTokCollector:
             self.error_message = "メンバー限定または年齢制限のため録画できません（通常配信の開始を監視継続中）。"
             return ("restricted", "メンバー限定/年齢制限の配信")
         except TikTokLiveError as exc:
+            # Sign serverの不調はTikTokLiveError(SignAPIError)として上がってくるが、原因が
+            # 外部にある一時障害なのでStack Traceは調査の空振りにしかならない。1行に落とす。
+            outage = sign_server_outage(exc)
+            if outage is not None:
+                logger.warning(
+                    "Sign serverの一時障害でLIVE接続に失敗しました（%s）。再接続します。"
+                    "外部service側の問題のため対処不要です", outage["reason"],
+                    extra={"event": "collector.sign_unavailable",
+                           "ctx": {"exc_type": type(exc).__name__, **outage["ctx"]}},
+                )
+                return ("transient", f"Sign serverの一時障害です（{outage['reason']}）。再接続します")
             logger.warning(
-                "TikTokLive error on the live connection: %s; reconnecting", exc,
+                "LIVE接続でTikTokLiveのerrorが発生しました: %s。再接続します", exc,
                 exc_info=True,
                 extra={"event": "collector.tiktok_error_raised",
                        "ctx": {"exc_type": type(exc).__name__}},
@@ -2212,7 +2319,7 @@ class TikTokCollector:
             # Timeout / network drop while fetching the signed websocket: an expected
             # transient hiccup, not a defect. Log one line (no traceback) and reconnect.
             logger.warning(
-                "network error on the live connection: %s: %s; reconnecting",
+                "LIVE接続でnetwork errorが発生しました: %s: %s。再接続します",
                 type(exc).__name__, exc,
                 extra={"event": "collector.network_error_raised",
                        "ctx": {"exc_type": type(exc).__name__, "error": str(exc)}},
@@ -2224,7 +2331,7 @@ class TikTokCollector:
             # a defect. ConnectionClosed is the base of both ClosedError and ClosedOK, so
             # this covers abnormal and clean closes. Log one line (no traceback) and reconnect.
             logger.warning(
-                "live websocket closed by TikTok: %s: %s; reconnecting",
+                "live websocketがTikTok側から切断されました: %s: %s。再接続します",
                 type(exc).__name__, exc,
                 extra={"event": "collector.websocket_closed",
                        "ctx": {"exc_type": type(exc).__name__, "error": str(exc)}},
@@ -2234,7 +2341,7 @@ class TikTokCollector:
             # 上の型別分岐で拾えなかった=想定していない失敗。再接続で先へは進むが、原因が
             # 分類できていないこと自体が問題なので、既知transientと同じwarningに埋めない。
             logger.exception(
-                "unclassified error on the live connection: %s; reconnecting", exc,
+                "LIVE接続で分類できないerrorが発生しました: %s。再接続します", exc,
                 extra={"event": "collector.unexpected_error_raised",
                        "ctx": {"exc_type": type(exc).__name__}},
             )
@@ -2248,8 +2355,8 @@ class TikTokCollector:
             except Exception:
                 # watchdogが死ぬと以後この接続のhalf-open検知が効かない(自動回復しない)。
                 logger.error(
-                    "idle watchdog raised; half-open detection is inactive for this "
-                    "connection", exc_info=True,
+                    "idle watchdogが例外を投げました。この接続ではhalf-openの検知が"
+                    "無効です", exc_info=True,
                     extra={"event": "collector.watchdog_failed", "ctx": {}},
                 )
             # Awaiting connect_task does not cancel it when our own coroutine is
@@ -2262,7 +2369,7 @@ class TikTokCollector:
                     pass
                 except Exception:
                     logger.debug(
-                        "connect task raised while being cancelled", exc_info=True,
+                        "connect taskがcancel中に例外を投げました", exc_info=True,
                         extra={"event": "collector.connect_cancel_failed", "ctx": {}},
                     )
 
@@ -2342,7 +2449,7 @@ class TikTokCollector:
             await asyncio.wait_for(self._client.disconnect(), timeout=5)
         except Exception:
             logger.warning(
-                "watchdog graceful disconnect failed; cancelling the connect task instead",
+                "watchdogのgraceful disconnectに失敗しました。代わりにconnect taskをcancelします",
                 exc_info=True,
                 extra={"event": "collector.disconnect_failed",
                        "ctx": {"phase": "watchdog", "reason": reason}},
@@ -2381,8 +2488,8 @@ class TikTokCollector:
             raise
         except Exception as exc:
             logger.warning(
-                "offline confirmation check failed (%s); treating the offline report as "
-                "unconfirmed and reconnecting", exc, exc_info=True,
+                "offlineの確認checkに失敗しました（%s）。offline応答は未確認として扱い、"
+                "再接続します", exc, exc_info=True,
                 extra={"event": "collector.offline_check_failed",
                        "ctx": {"exc_type": type(exc).__name__}},
             )
@@ -2405,7 +2512,7 @@ class TikTokCollector:
         and discards the body, so the raw GET is the only way to capture what TikTok
         returns for each restriction type. Never raises."""
         logger.warning(
-            "restricted live detected (%s), recording is not possible for room %s",
+            "限定配信を検知しました（%s）。room %s は録画できません",
             source, room_id,
             extra={"event": "collector.restriction_detected",
                    "ctx": {"source": source, "room_id": room_id}},
@@ -2418,7 +2525,7 @@ class TikTokCollector:
             data = (resp.json() or {}).get("data", {}) or {}
         except Exception:
             logger.warning(
-                "restriction diagnostics unavailable: raw room_info fetch failed for room %s",
+                "制限の診断情報を取得できません: room %s の生room_info取得に失敗しました",
                 room_id, exc_info=True,
                 extra={"event": "collector.restriction_diagnostics_failed",
                        "ctx": {"room_id": room_id}},
@@ -2428,7 +2535,7 @@ class TikTokCollector:
         diag["has_prompts"] = "prompts" in data
         diag["data_keys"] = sorted(data.keys())
         logger.warning(
-            "restriction diagnostics for room %s: %s", room_id, diag,
+            "room %s の制限の診断情報: %s", room_id, diag,
             extra={"event": "collector.restriction_diagnosed",
                    "ctx": {"room_id": room_id, **diag}},
         )
@@ -2446,7 +2553,7 @@ class TikTokCollector:
         if truncated:
             text = text[:limit] + "…(truncated)"
         logger.warning(
-            "restriction payload for room %s: %s", room_id, text,
+            "room %s の制限のpayload: %s", room_id, text,
             extra={"event": "collector.restriction_payload_captured",
                    "ctx": {"room_id": room_id, "payload": text, "truncated": truncated}},
         )
@@ -2460,7 +2567,7 @@ class TikTokCollector:
         flags = {k: self._room_info.get(k) for k in self._RESTRICTION_FIELDS}
         if any(flags.get(k) for k in ("live_sub_only", "live_room_mode", "disable_preview_sub_only")):
             logger.warning(
-                "connected room %s carries sub-only flags: %s", self.room_id, flags,
+                "接続中のroom %s がsub-only flagを持っています: %s", self.room_id, flags,
                 extra={"event": "collector.sub_only_flags_observed",
                        "ctx": {"room_id": self.room_id, **flags}},
             )
@@ -2508,7 +2615,7 @@ class TikTokCollector:
         self.steps["websocket"] = "active"
         self.steps["receiving"] = "pending"
         logger.info(
-            "reconnecting (attempt %d/%d) in %.1fs: %s",
+            "再接続します（%d/%d回目、%.1f秒後）: %s",
             self._reconnect_attempt, max_attempts, delay, reason,
             extra={"event": "collector.reconnect_scheduled",
                    "ctx": {"attempt": self._reconnect_attempt,
@@ -2562,8 +2669,8 @@ class TikTokCollector:
                 return False
         except Exception as exc:
             logger.info(
-                "reconnect live re-check inconclusive on attempt %d (%s); "
-                "continuing to reconnect", attempt, exc,
+                "再接続%d回目のlive再checkで判定できませんでした（%s）。再接続を続けます",
+                attempt, exc,
                 extra={"event": "collector.reconnect_livecheck_inconclusive",
                        "ctx": {"attempt": attempt, "exc_type": type(exc).__name__}},
             )
@@ -2593,7 +2700,7 @@ class TikTokCollector:
         self.state = STATE_ERROR
         self.error_message = message
         logger.error(
-            "collector failed at step %s: %s", step, message,
+            "collectorがstep %s で失敗しました: %s", step, message,
             extra={"event": "collector.step_failed",
                    "ctx": {"step": step, "message": message}},
         )
@@ -2696,13 +2803,13 @@ class TikTokCollector:
         except Exception:
             # 次のconnectで取り直す。sessionのleague列が空のままになるだけ。
             logger.warning(
-                "failed to persist the streamer league band %s for this session", league,
+                "このsessionの配信者league帯 %s の保存に失敗しました", league,
                 exc_info=True,
                 extra={"event": "collector.league_persist_failed",
                        "ctx": {"league": league}},
             )
         logger.info(
-            "streamer league band captured: %s", league,
+            "配信者league帯を取得しました: %s", league,
             extra={"event": "collector.league_captured", "ctx": {"league": league}},
         )
         await self._notify_state()
@@ -2727,7 +2834,7 @@ class TikTokCollector:
                 )
         except Exception:
             logger.warning(
-                "[league-probe] scan failed for %s; this probe yields no hits", source,
+                "[league-probe] %s のscanに失敗しました。このprobeでは何も検出できません", source,
                 exc_info=True,
                 extra={"event": "collector.league_probe_failed",
                        "ctx": {"source": source}},
@@ -2811,8 +2918,8 @@ class TikTokCollector:
             # _owner_id が立たないとBattleのscore追跡が丸ごと無効化され、このsessionの
             # 間ずっと復旧しない(room_infoは再接続まで取り直さない)。
             logger.error(
-                "failed to read the room owner from room_info; battle score tracking "
-                "and owner identity will be missing for this session", exc_info=True,
+                "room_infoからroomのownerを読み取れませんでした。このsessionではbattleのscore"
+                "追跡とownerの身元が欠落します", exc_info=True,
                 extra={"event": "collector.owner_read_failed",
                        "ctx": {"room_id": self.room_id,
                                "room_info_keys": sorted(self._room_info.keys())}},
@@ -2846,8 +2953,7 @@ class TikTokCollector:
             # that was in effect before the drop (auto, or a manual start not stopped).
             if self._recording_desired and ffmpeg_available():
                 logger.info(
-                    "resuming the recording after a reconnect against the freshly "
-                    "issued stream URL",
+                    "再接続後、新しく発行されたstream URLに対して録画を再開します",
                     extra={"event": "collector.recording_resume_started",
                            "ctx": {"room_id": self.room_id}},
                 )
@@ -2858,8 +2964,8 @@ class TikTokCollector:
             except Exception as exc:
                 # 自動録画は以後この接続では再試行されない(次のreconnect/liveまで無い)。
                 logger.warning(
-                    "auto-record failed to start: %s; this broadcast will be collected "
-                    "without video unless recording is started manually", exc,
+                    "自動録画を開始できませんでした: %s。手動で録画を開始しない限り、この配信は"
+                    "動画なしで収集します", exc,
                     exc_info=True,
                     extra={"event": "collector.auto_record_failed",
                            "ctx": {"exc_type": type(exc).__name__, "room_id": self.room_id}},
@@ -2879,60 +2985,20 @@ class TikTokCollector:
             self.owner["nickname"] = cached["nickname"]
 
     def _persist_owner_avatar(self, url: str) -> None:
-        """Download the streamer avatar into the shared by-id pool in the background
-        so 履歴 / browser proxy / video burn-in can all render it after the signed
-        CDN URL expires. Keyed by the monitored unique_id — the id the browser /
-        history pass to the proxy (sessions.unique_id) and the same per-user pool
-        the commenter avatars use. Non-blocking: connect must not wait on a CDN
-        round-trip."""
-        if not url or self._avatar_pool is None:
-            return
-        owner_id = self.unique_id
-        # Skip scheduling when the pool already holds this (or a better) avatar for the
-        # owner; a re-signed same-rendition URL on every reconnect must not re-fetch.
-        if not self._avatar_pool.needs_update(owner_id, url):
-            return
-
-        async def _run() -> None:
-            try:
-                await self._avatar_pool.persist(owner_id, url)
-            except Exception:
-                logger.warning(
-                    "owner avatar persist failed; history and burn-in will fall back "
-                    "to the initial-letter avatar for this streamer", exc_info=True,
-                    extra={"event": "collector.avatar_persist_failed",
-                           "ctx": {"user_key": owner_id, "scope": "owner"}},
-                )
-
-        # 単一属性だと連続呼び出し(resolver→connect)で先行taskへの強参照が消え、
-        # 完了前にGCで破棄され得る。他のpersist系と同じくset+done_callbackで保持する。
-        task = asyncio.create_task(_run())
-        self._avatar_tasks.add(task)
-        task.add_done_callback(self._avatar_tasks.discard)
+        """Queue the streamer avatar for the shared by-id pool so 履歴 / browser proxy /
+        video burn-in can all render it after the signed CDN URL expires. Keyed by the
+        monitored unique_id — the id the browser / history pass to the proxy
+        (sessions.unique_id) and the same per-user pool the commenter avatars use.
+        Non-blocking: connect must not wait on a CDN round-trip."""
+        self._persist_avatar(self.unique_id, url)
 
     def _persist_gift_icon(self, gift_id: int, url: str) -> None:
-        """Cache a gift icon to disk in the background while its URL is fresh, so
-        the burn-in pipeline can composite it after the CDN URL would expire.
-        Non-blocking: event handling must not wait on a CDN round-trip."""
-        if not gift_id or not url or self._gift_icons is None:
+        """Queue a gift icon for the disk pool while its URL is fresh, so the burn-in
+        pipeline can composite it after the CDN URL would expire. Non-blocking: event
+        handling must not wait on a CDN round-trip."""
+        if self._asset_prefetch is None:
             return
-        if self._gift_icons.has(gift_id):
-            return
-
-        async def _run() -> None:
-            try:
-                await self._gift_icons.persist(gift_id, url)
-            except Exception:
-                logger.warning(
-                    "gift icon persist failed for gift %s; the burn-in will render this "
-                    "gift without its icon", gift_id, exc_info=True,
-                    extra={"event": "collector.gift_icon_persist_failed",
-                           "ctx": {"gift_id": gift_id}},
-                )
-
-        task = asyncio.create_task(_run())
-        self._gift_icon_tasks.add(task)
-        task.add_done_callback(self._gift_icon_tasks.discard)
+        self._asset_prefetch.submit_gift_icon(gift_id, url)
 
     def _persist_badge(self, url: str) -> None:
         """Pre-fetch a Lv/grade badge image through the avatar proxy while its signed
@@ -2950,8 +3016,8 @@ class TikTokCollector:
                 await self._avatar_proxy.fetch(url)
             except Exception:
                 logger.warning(
-                    "badge prefetch failed; the badge will be missing in history once "
-                    "its CDN signature expires", exc_info=True,
+                    "badgeの事前取得に失敗しました。CDNの署名が失効すると履歴でこのbadgeが"
+                    "欠落します", exc_info=True,
                     extra={"event": "collector.badge_prefetch_failed",
                            "ctx": {"badge_url": url}},
                 )
@@ -2968,34 +3034,23 @@ class TikTokCollector:
         self._persist_avatar(user.get("unique_id") or user.get("nickname"), user.get("avatar"))
 
     def _persist_avatar(self, user_key: Optional[str], url: Optional[str]) -> None:
-        """Cache a user's avatar into the shared by-id pool in the background while
-        its URL is fresh, so the burn-in pipeline can composite the real avatar after
-        the CDN URL would 403, and the browser proxy / history can fall back to it by
-        id. Keyed by user_key (unique_id, else nickname) — the same key the burn-in
-        side and the proxy derive for that user. Non-blocking."""
-        if self._avatar_pool is None or not user_key or not url:
+        """Queue a user's avatar for the shared by-id pool while its URL is fresh, so
+        the burn-in pipeline can composite the real avatar after the CDN URL would 403,
+        and the browser proxy / history can fall back to it by id. Keyed by user_key
+        (unique_id, else nickname) — the same key the burn-in side and the proxy derive
+        for that user. Non-blocking."""
+        if self._asset_prefetch is None:
             return
-        # Consult the pool's identity/resolution check instead of a plain "already have
-        # one": this re-fetches only when the avatar is a higher resolution or the user
-        # changed it, and skips the common re-signed same-image URL — so a task is not
-        # spawned per comment for a known, unchanged user.
-        if not self._avatar_pool.needs_update(user_key, url):
+        self._asset_prefetch.submit_avatar(user_key, url)
+
+    def _persist_emotes(self, raw) -> None:
+        """Queue the custom emote images a comment carries. The burn-in reads them by
+        emote_id from the same pool; their CDN URLs expire with the stream, so a comment
+        whose emote is not pooled now renders as a transparent gap forever."""
+        # emoteを持つのはcommentの一部だけで、大半のeventはここで戻る。
+        if not raw or self._asset_prefetch is None:
             return
-
-        async def _run() -> None:
-            try:
-                await self._avatar_pool.persist(user_key, url)
-            except Exception:
-                logger.warning(
-                    "user avatar persist failed for %s; history and burn-in will fall "
-                    "back to the initial-letter avatar", user_key, exc_info=True,
-                    extra={"event": "collector.avatar_persist_failed",
-                           "ctx": {"user_key": user_key, "scope": "user"}},
-                )
-
-        task = asyncio.create_task(_run())
-        self._avatar_pool_tasks.add(task)
-        task.add_done_callback(self._avatar_pool_tasks.discard)
+        self._asset_prefetch.submit_emotes(raw)
 
     def _precache_gift_icons(self) -> None:
         """At connect, pre-cache the room's full gift catalogue so every icon is
@@ -3013,14 +3068,14 @@ class TikTokCollector:
                 n = await self._gift_icons.persist_gift_list(gift_list)
                 if n:
                     logger.info(
-                        "pre-cached %d gift icons from the room gift catalogue", n,
+                        "roomのgift catalogueからgift icon %d件を事前cacheしました", n,
                         extra={"event": "collector.gift_icons_precached",
                                "ctx": {"count": n}},
                     )
             except Exception:
                 logger.warning(
-                    "gift list pre-cache failed; gift icons will only be cached as "
-                    "gifts arrive", exc_info=True,
+                    "gift listの事前cacheに失敗しました。gift iconはgift到着時にのみ"
+                    "cacheされます", exc_info=True,
                     extra={"event": "collector.gift_list_precache_failed", "ctx": {}},
                 )
 
@@ -3040,8 +3095,8 @@ class TikTokCollector:
                 # 旧ffmpegが残ると死んだURLを掴んだまま回り続ける。置き換えは続行するが、
                 # 残留processの有無はここでしか分からない。
                 logger.warning(
-                    "failed to stop the stale recorder before resuming; a previous "
-                    "ffmpeg may still be running against the dead URL", exc_info=True,
+                    "再開前に古いrecorderを停止できませんでした。失効したURLに対して以前の"
+                    "ffmpegがまだ動作している可能性があります", exc_info=True,
                     extra={"event": "collector.recording_stop_failed",
                            "ctx": {"phase": "resume"}},
                 )
@@ -3058,7 +3113,7 @@ class TikTokCollector:
             # 置き換え起動の失敗。empty finalize経由なら回復loopが再入するが、
             # bytes>0からのresumeではここが最後の試行になる。
             logger.warning(
-                "failed to start the replacement recording: %s", exc, exc_info=True,
+                "録画の差し替え開始に失敗しました: %s", exc, exc_info=True,
                 extra={"event": "collector.replacement_recording_failed",
                        "ctx": {"exc_type": type(exc).__name__}},
             )
@@ -3077,8 +3132,8 @@ class TikTokCollector:
             info = await client.web.fetch_room_info(room_id=self.room_id or self._resolved_room_id)
         except AgeRestrictedError:
             logger.warning(
-                "room_info refresh rejected as restricted; no fresh stream URL is "
-                "available right now",
+                "room_infoの再取得が限定配信として拒否されました。今回は新しいstream URLを"
+                "取得できません",
                 extra={"event": "collector.room_info_refresh_failed",
                        "ctx": {"reason": "age_restricted",
                                "room_id": self.room_id or self._resolved_room_id}},
@@ -3086,7 +3141,7 @@ class TikTokCollector:
             return False
         except Exception as exc:
             logger.warning(
-                "room_info refresh failed: %s; no fresh stream URL this round",
+                "room_infoの再取得に失敗しました: %s。今回は新しいstream URLを取得できません",
                 exc, exc_info=True,
                 extra={"event": "collector.room_info_refresh_failed",
                        "ctx": {"reason": "fetch_failed",
@@ -3096,8 +3151,8 @@ class TikTokCollector:
             return False
         if not info:
             logger.warning(
-                "room_info refresh returned an empty payload; no fresh stream URL "
-                "this round",
+                "room_infoの再取得が空のpayloadを返しました。今回は新しいstream URLを"
+                "取得できません",
                 extra={"event": "collector.room_info_refresh_failed",
                        "ctx": {"reason": "empty_payload",
                                "room_id": self.room_id or self._resolved_room_id}},
@@ -3135,8 +3190,7 @@ class TikTokCollector:
             if self.state != STATE_CONNECTED or self._stop_requested:
                 return
             logger.info(
-                "recording ended on its own while the live is still connected; "
-                "re-resolving the stream URL and resuming",
+                "LIVE接続中に録画が自然終了しました。stream URLを再解決して再開します",
                 extra={"event": "collector.recording_resume_started",
                        "ctx": {"reason": "finalized_while_live",
                                "size_bytes": recorder.snapshot().get("bytes", 0)}},
@@ -3152,8 +3206,8 @@ class TikTokCollector:
             return
         self._recovering = True
         logger.warning(
-            "recording captured nothing while the live is still connected; starting the "
-            "stream-URL recovery loop",
+            "LIVE接続中なのに録画が何も取得できませんでした。stream URLの復旧loopを"
+            "開始します",
             extra={"event": "collector.recording_recovery_started",
                    "ctx": {"room_id": self.room_id,
                            "recorder_state": recorder.state,
@@ -3175,7 +3229,7 @@ class TikTokCollector:
                         return
                     except Exception as exc:
                         logger.warning(
-                            "recording recovery relaunch failed on round %d: %s",
+                            "録画の復旧の再起動が%d回目で失敗しました: %s",
                             rounds + 1, exc, exc_info=True,
                             extra={"event": "collector.recording_recovery_failed",
                                    "ctx": {"round": rounds + 1,
@@ -3187,7 +3241,7 @@ class TikTokCollector:
         finally:
             self._recovering = False
             logger.info(
-                "stream-URL recovery loop finished after %d round(s)", rounds,
+                "stream URLの復旧loopが%d回で終了しました", rounds,
                 extra={"event": "collector.recording_recovery_finished",
                        "ctx": {"rounds": rounds, "state": self.state,
                                "recording_desired": self._recording_desired}},
@@ -3235,7 +3289,7 @@ class TikTokCollector:
             if _on_wire(extra) else ""
         ) or SOURCE_UNKNOWN
         logger.info(
-            "TikTok signalled that the broadcast has ended",
+            "TikTokから配信終了の通知を受けました",
             extra={"event": "collector.live_ended",
                    "ctx": {"reason": "live_end_event", "room_id": self.room_id,
                            "end_source": source,
@@ -3388,8 +3442,8 @@ class TikTokCollector:
         except Exception:
             # このeventの生payloadは二度と手に入らない(TikTokは再送しない)。
             logger.error(
-                "failed to write the battle raw capture for %s; this event's raw "
-                "payload is lost", kind, exc_info=True,
+                "%s のbattle生captureの書き込みに失敗しました。このeventの生payloadは"
+                "失われます", kind, exc_info=True,
                 extra={"event": "collector.battle_raw_write_failed",
                        "ctx": {"kind": kind, "path": self._battle_raw_path}},
             )
@@ -3409,8 +3463,8 @@ class TikTokCollector:
         except OSError:
             # 閉じられなかったfileは圧縮に回さない(open handleのまま圧縮するのを避ける)。
             logger.warning(
-                "failed to close the battle raw capture handle; leaving the plain file "
-                "uncompressed", exc_info=True,
+                "battle生captureのhandleを閉じられませんでした。fileは未圧縮のまま残します",
+                exc_info=True,
                 extra={"event": "collector.battle_raw_close_failed",
                        "ctx": {"path": path}},
             )
@@ -3441,15 +3495,15 @@ class TikTokCollector:
             path.rename(target)
         except OSError:
             logger.warning(
-                "failed to stage the battle raw capture for compression; leaving the "
-                "plain file", exc_info=True,
+                "battle生captureの圧縮準備に失敗しました。fileはそのまま残します",
+                exc_info=True,
                 extra={"event": "collector.battle_raw_compress_failed",
                        "ctx": {"path": str(path)}},
             )
             return
         compress_async(target)
         logger.info(
-            "battle raw capture closed and queued for compression",
+            "battle生captureを閉じ、圧縮のqueueへ入れました",
             extra={"event": "collector.battle_raw_closed",
                    "ctx": {"path": str(target), "size_bytes": size_bytes}},
         )
@@ -3466,8 +3520,8 @@ class TikTokCollector:
         except Exception:
             # rosterが読めないとその窓のguests_maxが過小になる(窓自体は残る)。
             logger.warning(
-                "linkmic roster parse failed; the collab guest count for this window "
-                "may be understated", exc_info=True,
+                "linkmic rosterの解析に失敗しました。この窓のcollab guest数が少なく出る"
+                "可能性があります", exc_info=True,
                 extra={"event": "collector.linkmic_roster_parse_failed", "ctx": {}},
             )
         return uids
@@ -3504,7 +3558,7 @@ class TikTokCollector:
                 self._collab_open[channel_id] = state
                 self._add_linkmic_marker("collab", "コラボ")
                 logger.info(
-                    "collab (non-battle LinkMic) window opened on channel %s", channel_id,
+                    "channel %s でcollab（非battleのLinkMic）の窓が開きました", channel_id,
                     extra={"event": "collector.collab_opened",
                            "ctx": {"channel_id": channel_id,
                                    "trigger": ("create" if is_create
@@ -3527,7 +3581,7 @@ class TikTokCollector:
                 )
                 self._collab_open.pop(channel_id, None)
                 logger.info(
-                    "collab window closed on channel %s (%.0fs, max %d guest(s))",
+                    "channel %s でcollabの窓が閉じました（%.0f秒、最大guest %d名）",
                     channel_id, now - state["start"], state["guests_max"],
                     extra={"event": "collector.collab_closed",
                            "ctx": {"channel_id": channel_id,
@@ -3539,8 +3593,8 @@ class TikTokCollector:
         except Exception:
             # この窓の入室コンテキスト分類が欠ける。次のLinkLayer eventで再入する。
             logger.warning(
-                "link layer handling failed; this collab window may be missing from the "
-                "join-context classification", exc_info=True,
+                "link layerの処理に失敗しました。このcollab窓は入室contextの分類から"
+                "欠落する可能性があります", exc_info=True,
                 extra={"event": "collector.collab_handling_failed", "ctx": {}},
             )
 
@@ -3593,8 +3647,8 @@ class TikTokCollector:
         # 分類の全ての基準になるので、どちらへ分岐したかは後から確定できる必要がある。
         if rec.get("aborted") or action == BATTLE_ACTION_FINISH:
             logger.info(
-                "battle %s %s (action=%s); closing its window",
-                battle_id, "aborted" if rec.get("aborted") else "finished", action,
+                "battle %s が%sしました（action=%s）。窓を閉じます",
+                battle_id, "中断" if rec.get("aborted") else "終了", action,
                 extra={"event": "collector.battle_closed",
                        "ctx": {"battle_id": battle_id, "action": action,
                                "aborted": bool(rec.get("aborted")),
@@ -3609,7 +3663,7 @@ class TikTokCollector:
             self._persist_progress()
         else:
             logger.info(
-                "battle %s is in progress (action=%s) with %d opponent host(s)",
+                "battle %s が進行中です（action=%s、相手host %d名）",
                 battle_id, action, len(rec.get("opponents") or []),
                 extra={"event": "collector.battle_opened",
                        "ctx": {"battle_id": battle_id, "action": action,
@@ -3735,8 +3789,8 @@ class TikTokCollector:
             # 倍率はSTART messageにしか載らないため、この mission の ×N は復元不能。
             # 以後のUPDATE/SETTLEでも埋まらない。
             logger.warning(
-                "battle %s: bonus mission START was not seen (mtype=%s); its multiplier "
-                "cannot be recovered and the overlay will show 'BONUS' without xN",
+                "battle %s: bonus missionのSTARTを観測できませんでした（mtype=%s）。倍率は"
+                "復元できず、overlayはxN無しの'BONUS'表示になります",
                 battle_id, mtype,
                 extra={"event": "collector.bonus_mission_start_missing",
                        "ctx": {"battle_id": battle_id, "message_type": mtype}},
@@ -3776,8 +3830,8 @@ class TikTokCollector:
                     mission["bonus_sum"] = int(total)
                 except ValueError:
                     logger.warning(
-                        "bonus mission settle sum is not an integer (%r); the confirmed "
-                        "bonus for battle %s stays 0", total, battle_id,
+                        "bonus missionの確定合計が整数ではありません（%r）。battle %s の"
+                        "確定bonusは0のままです", total, battle_id,
                         extra={"event": "collector.bonus_sum_unparsed",
                                "ctx": {"battle_id": battle_id, "raw": str(total)}},
                     )
@@ -3916,8 +3970,8 @@ class TikTokCollector:
         except Exception:
             # 窓が取れないとこのcardのcrit判定母集団が丸ごと欠ける(再送は無い)。
             logger.error(
-                "glove (critical strike) window capture failed; this card's crit "
-                "statistics are lost", exc_info=True,
+                "glove（critical strike）の窓のcaptureに失敗しました。このcardのcrit統計は"
+                "失われます", exc_info=True,
                 extra={"event": "collector.glove_window_failed", "ctx": {}},
             )
 
@@ -3952,8 +4006,8 @@ class TikTokCollector:
                 return
         rec["glove_windows"].append(window)
         logger.info(
-            "glove (critical strike) window opened on battle %s for %s host, %ds",
-            rec["battle_id"], "own" if window["own"] else "opponent",
+            "battle %s の%s hostでglove（critical strike）の窓が開きました（%d秒）",
+            rec["battle_id"], "自陣" if window["own"] else "敵陣",
             window["end"] - window["start"],
             extra={"event": "collector.glove_window_opened",
                    "ctx": {"battle_id": rec["battle_id"],
@@ -4047,8 +4101,8 @@ class TikTokCollector:
             return
         self._glove_clock_warned = True
         logger.warning(
-            "glove crit resolution dropped a %s event without a server create_time; "
-            "those gifts stay undecided (crit=None) for this session", source,
+            "glove critの判定で、server側create_timeの無い%s eventを除外しました。"
+            "該当giftはこのsessionでは判定不能（crit=None）のままです", source,
             extra={"event": "collector.glove_clock_missing",
                    "ctx": {"source": source, "room_id": self.room_id}},
         )
@@ -4247,15 +4301,14 @@ class TikTokCollector:
             if not self._owner_warned:
                 self._owner_warned = True
                 logger.warning(
-                    "room owner id is unknown; battle score tracking is disabled for "
-                    "this session",
+                    "roomのowner idが不明です。このsessionではbattleのscore追跡を"
+                    "無効にします",
                     extra={"event": "collector.owner_id_missing",
                            "ctx": {"room_id": self.room_id}},
                 )
             return
         battle_id = getattr(event, "battle_id", 0)
         rec = self._battle_record(battle_id)
-        prev_own = rec["own_score"]
         team_armies = getattr(event, "team_armies", None)
         if team_armies:
             # Team PK carries scores in team_armies[].team_total_score with the
@@ -4276,8 +4329,8 @@ class TikTokCollector:
         except Exception:
             # 未解決のpendingは次のarmiesで再試行されるが、この回のdeltaは失われる。
             logger.warning(
-                "glove crit resolution failed for this armies event; pending gifts stay "
-                "unresolved until the next one", exc_info=True,
+                "このarmies eventでglove critの判定に失敗しました。保留中のgiftは次のevent"
+                "まで未判定のままです", exc_info=True,
                 extra={"event": "collector.glove_resolve_failed", "ctx": {}},
             )
         if opp_scores:
@@ -4408,7 +4461,7 @@ class TikTokCollector:
                    list(team["members"].keys())[:6], len(team["armies"]), anchors)
             )
         logger.info(
-            "team_armies shape for battle %s | %s", battle_id, " || ".join(parts),
+            "battle %s のteam_armies shape | %s", battle_id, " || ".join(parts),
             extra={"event": "collector.team_armies_shape_observed",
                    "ctx": {"battle_id": battle_id, "owner_id": self._owner_id,
                            "teams": len(teams), "shape": " || ".join(parts)}},
@@ -4668,8 +4721,8 @@ class TikTokCollector:
             self._follower_saved = count
         except Exception:
             logger.error(
-                "failed to persist the streamer's follower total; this datapoint is "
-                "lost from the session's follower curve",
+                "配信者のfollower総数の保存に失敗しました。この値はsessionのfollower推移から"
+                "欠落します",
                 exc_info=True,
                 extra={"event": "collector.follower_sample_persist_failed",
                        "ctx": {"follower_count": count}},
@@ -4813,8 +4866,8 @@ class TikTokCollector:
             except Exception:
                 # この時点の同接サンプルは失われ、再取得の手段は無い。
                 logger.error(
-                    "failed to persist a viewer sample; this datapoint is lost from the "
-                    "session's viewer curve", exc_info=True,
+                    "viewerのsample保存に失敗しました。この値はsessionのviewer推移から"
+                    "欠落します", exc_info=True,
                     extra={"event": "collector.viewer_sample_persist_failed",
                            "ctx": {"viewers": event.m_total}},
                 )
@@ -4865,8 +4918,8 @@ class TikTokCollector:
             self._contrib_saved_sig = sig
         except Exception:
             logger.error(
-                "failed to persist a contributor ranking sample; this snapshot of "
-                "TikTok's cumulative contribution ranking is lost",
+                "contributor rankingのsample保存に失敗しました。TikTokの累計貢献rankingの"
+                "この時点のsnapshotは失われます",
                 exc_info=True,
                 extra={"event": "collector.contributor_sample_persist_failed",
                        "ctx": {"contributors": len(rows)}},
@@ -4995,7 +5048,7 @@ class TikTokCollector:
                         "simulation": True},
             )
             logger.info(
-                "simulation connected to a synthetic live (room %s)", self.room_id,
+                "simulationが擬似LIVEに接続しました（room %s）", self.room_id,
                 extra={"event": "collector.simulation_connected",
                        "ctx": {"room_id": self.room_id}},
             )
@@ -5101,7 +5154,7 @@ class TikTokCollector:
             self._persist_final()
             await self._notify_state()
             logger.info(
-                "simulation stopped",
+                "simulationを停止しました",
                 extra={"event": "collector.simulation_stopped", "ctx": {}},
             )
 
@@ -5299,7 +5352,7 @@ class TikTokCollector:
         if not self._create_time_logged:
             self._create_time_logged = True
             logger.info(
-                "first event create_time observed: raw=%s -> %.3fs (unit=%s)",
+                "最初のeventのcreate_timeを観測しました: raw=%s -> %.3f秒（unit=%s）",
                 raw, sec, "ms" if is_ms else "s",
                 extra={"event": "collector.create_time_observed",
                        "ctx": {"raw": raw, "create_time_seconds": round(sec, 3),
@@ -5315,7 +5368,7 @@ class TikTokCollector:
         # INFO運用では1行も出ない。DEBUG時だけ「何が届いていたか」を時系列で辿れる。
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "event recorded: %s", kind,
+                "eventを記録しました: %s", kind,
                 extra={"event": "collector.event_recorded",
                        "ctx": {"kind": kind,
                                "has_create_time": create_time is not None,
@@ -5325,7 +5378,10 @@ class TikTokCollector:
         # Single capture point: any user that lands in history (comment / gift /
         # follow / share / join / subscribe) gets their avatar pooled by id, so it
         # is reusable across sessions for the browser, 履歴 and the video burn-in.
+        # commentが持つcustom emoteも同じ理由でここから積む(gift iconはgift eventの
+        # 単価・IDを見る _on_gift 側で積む)。どちらも投入はqueueへ置くだけで戻る。
         self._persist_user_avatar(entry.get("user"))
+        self._persist_emotes(entry.get("emotes"))
         owner_changed = self._follow_owner_identity(entry.get("user"))
         if self.session_id is not None:
             try:
@@ -5334,8 +5390,8 @@ class TikTokCollector:
                 # add_eventはbatch writer/journal込みでの受け口なので、ここで例外が出た
                 # 場合このeventはどこにも残らない。再送も無い。
                 logger.error(
-                    "failed to persist a %s event; it is lost from this session's "
-                    "history", kind, exc_info=True,
+                    "%s eventの保存に失敗しました。このsessionの履歴から欠落します",
+                    kind, exc_info=True,
                     extra={"event": "collector.event_persist_failed",
                            "ctx": {"kind": kind}},
                 )

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import pathlib
 import subprocess
 import sys
 
@@ -196,6 +197,27 @@ def test_timemap_current_only_for_exact_current_version():
     assert subtitles.timemap_current(None) is False
     assert subtitles.timemap_current(str(transcription.TIMEMAP_VERSION)) is False
     assert subtitles.timemap_current(transcription.TIMEMAP_VERSION + 1) is False
+
+
+def test_axis_matches_media_rejects_a_transcript_from_a_different_timeline():
+    """版が同じでも、作られたときの入力が別物なら時刻は尺に比例してずれる。実測(版1のまま)
+    で実尺+191秒・+28287秒の文字起こしが存在した。焼き込みは戻せないので拒否する。"""
+    assert subtitles.axis_matches_media({"duration": 5265.93}, 5074.8) is False
+    assert subtitles.axis_matches_media({"duration": 38584.7}, 10297.4) is False
+
+
+def test_axis_matches_media_accepts_a_transcript_of_the_same_material():
+    assert subtitles.axis_matches_media({"duration": 5074.78}, 5074.8) is True
+    assert subtitles.axis_matches_media({"duration": 5076.0}, 5074.8) is True
+
+
+def test_axis_matches_media_allows_when_there_is_no_evidence():
+    """実尺が測れない/尺を持たない文字起こしは、ズレている証拠が無い。根拠なく拒否すると
+    正しい文字起こしまで焼けなくなる。"""
+    assert subtitles.axis_matches_media({"duration": 5265.93}, None) is True
+    assert subtitles.axis_matches_media({"duration": 5265.93}, 0) is True
+    assert subtitles.axis_matches_media({}, 5074.8) is True
+    assert subtitles.axis_matches_media(None, 5074.8) is True
 
 
 def test_fingerprint_empty_for_missing_transcript():
@@ -780,6 +802,49 @@ async def test_recovery_skips_rows_with_neither_segments_nor_mp4(
     assert tmp_db.get_recording(recording_id)["status"] == "interrupted"
 
 
+async def test_recovery_leaves_recordings_a_media_job_is_holding(
+        recovery_env, tmp_db, tmp_root, monkeypatch):
+    """待機/実行中のjobが掴んでいる録画は、この起動では復旧しない。
+
+    復旧は確定をやり直す処理で、最後にsession dirごと最終保存先へ移す。同じ素材を読み書き
+    しているjobの足元を抜くことになるため、jobが先に走り出していたらこちらが譲る(実測
+    2026-07-26 13:10、起動時のts結合が復旧中の録画のsegmentを消し、移送のcopyがそれを
+    掴んでFileNotFoundで落ちた)。"""
+    from tictok.record import recorder
+
+    calls = []
+
+    async def fake_finalize(self, base, on_progress=None):
+        calls.append(base)
+
+    monkeypatch.setattr(recorder.Recorder, "finalize_recovered_hls", fake_finalize)
+    recording_id, _, _ = recovery_env(segments=3)
+    tmp_db.enqueue_media_job("packjob1", "pack", recording_id)
+
+    assert await recorder.recover_interrupted_recordings(tmp_db, tmp_root) == 0
+    assert calls == []
+    assert tmp_db.get_recording(recording_id)["status"] == "interrupted"
+
+
+async def test_finalize_holds_the_recording_against_media_jobs(tmp_root, monkeypatch):
+    """確定処理の間、その録画は ``is_finalizing`` で「触るな」と名乗る。抜けたら解ける。"""
+    from tictok.record import recorder
+
+    seen = []
+
+    async def fake_body(self, progress=None, build_mp4=False):
+        seen.append(recorder.is_finalizing(self.recording_id))
+
+    monkeypatch.setattr(recorder.Recorder, "_finalize_body", fake_body)
+    rec = recorder.Recorder("tester", str(tmp_root), 1)
+    rec.recording_id = 4242
+
+    await rec._finalize()
+
+    assert seen == [True]
+    assert not recorder.is_finalizing(4242)
+
+
 async def test_recovery_does_not_stamp_ended_at_with_the_recovery_time(
         recovery_env, tmp_db, tmp_root, monkeypatch):
     """復旧は捕捉が終わった時刻を動かさない。既にended_atがある行は据え置く。
@@ -997,7 +1062,7 @@ def test_playlist_segments_uses_playlist_order_and_extinf(tmp_path):
 
     kept = r._playlist_segments()
 
-    assert [(p.name, e, d) for p, e, _, d in kept] == [
+    assert [(p.name, e, d) for p, e, _, d, _ in kept] == [
         ("seg00000.ts", 1.96, False),
         ("seg00001.ts", 2.04, False),
     ]
@@ -1012,7 +1077,7 @@ def test_playlist_segments_excludes_ts_absent_from_the_playlist(tmp_path):
         {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0},
     )
 
-    assert [p.name for p, _, _, _ in r._playlist_segments()] == ["seg00000.ts"]
+    assert [p.name for p, _, _, _, _ in r._playlist_segments()] == ["seg00000.ts"]
 
 
 def test_playlist_segments_drops_pts_discontinuity_and_marks_the_next(tmp_path):
@@ -1025,7 +1090,7 @@ def test_playlist_segments_drops_pts_discontinuity_and_marks_the_next(tmp_path):
 
     kept = r._playlist_segments()
 
-    assert [(p.name, d) for p, _, _, d in kept] == [
+    assert [(p.name, d) for p, _, _, d, _ in kept] == [
         ("seg00000.ts", False),
         ("seg00002.ts", True),
     ]
@@ -1037,7 +1102,7 @@ def test_playlist_segments_carries_a_source_flagged_discontinuity(tmp_path):
     r = _recorder_with_hls(
         tmp_path, body, {"seg00000.ts": 1000.0, "seg00001.ts": 1002.0})
 
-    assert [d for _, _, _, d in r._playlist_segments()] == [False, True]
+    assert [d for _, _, _, d, _ in r._playlist_segments()] == [False, True]
 
 
 def test_playlist_segments_empty_without_a_playlist(tmp_path):
@@ -1169,3 +1234,267 @@ async def test_concat_audio_args_add_loudnorm_when_asked(tmp_path, monkeypatch):
     # first_pts=0を落とすと、live .tsの任意の開始PTSがそのまま残り音声だけ原点がずれる。
     assert filters == "aresample=async=1:first_pts=0,loudnorm=I=-14:TP=-1.5"
     assert args[args.index("-ar") + 1] == "44100"
+
+
+# --------------------------------------------------------------------------
+# relocation: the segments move with the mp4
+# --------------------------------------------------------------------------
+
+STEM = "00042_alice_20260101_120000"
+
+
+def _make_pair(root, segments=3, seg_size=188):
+    """work root に「.ts一式 + mp4 + sidecar」の実レイアウトを作り、mp4 pathを返す。"""
+    from tictok.record.recorder import timing_path
+
+    ts_dir = layout.session_dir(root, STEM)
+    ts_dir.mkdir(parents=True, exist_ok=True)
+    for i in range(segments):
+        (ts_dir / ("seg%05d.ts" % i)).write_bytes(b"\x47" * seg_size)
+    (ts_dir / "index.m3u8").write_text("#EXTM3U\n", encoding="utf-8")
+    mp4 = layout.mp4_path(root, STEM)
+    mp4.parent.mkdir(parents=True, exist_ok=True)
+    mp4.write_bytes(b"\x00" * 2048)
+    tp = timing_path(mp4)
+    tp.parent.mkdir(parents=True, exist_ok=True)
+    tp.write_text('{"version": 2}', encoding="utf-8")
+    return mp4
+
+
+def test_relocation_moves_the_segments_with_the_mp4(tmp_path):
+    """.tsは録画の実体なので、mp4だけを移すと原本が作業volumeに取り残される。"""
+    from tictok.record.recorder import Recorder, timing_path
+
+    work, final = tmp_path / "work", tmp_path / "final"
+    src = _make_pair(work)
+    dst = layout.mp4_path(final, STEM)
+
+    Recorder._move_recording_files(src, dst)
+
+    assert dst.is_file()
+    assert timing_path(dst).is_file()
+    moved_ts = layout.session_dir(final, STEM)
+    assert sorted(p.name for p in moved_ts.iterdir()) == [
+        "index.m3u8", "seg00000.ts", "seg00001.ts", "seg00002.ts"]
+    assert not layout.session_dir(work, STEM).exists()
+
+
+def test_relocation_verifies_every_segment_before_dropping_the_source(tmp_path, monkeypatch):
+    """copyが途中で欠けたら元を消さない。cross-volume moveはcopy+unlinkなので、
+    検証せずに消すと「着いていないsegmentを消す」ことになる。"""
+    from tictok.record import recorder as rec_mod
+
+    work, final = tmp_path / "work", tmp_path / "final"
+    src = _make_pair(work)
+    dst = layout.mp4_path(final, STEM)
+
+    real_copy = rec_mod._copy_durable
+
+    def _short_copy(s, d):
+        n = real_copy(s, d)
+        if d.name == "seg00001.ts":
+            d.write_bytes(b"G")      # 途中までしか着かなかった
+        return n
+
+    monkeypatch.setattr(rec_mod, "_copy_durable", _short_copy)
+
+    with pytest.raises(OSError, match="did not arrive intact"):
+        rec_mod.Recorder._move_recording_files(src, dst)
+
+    assert layout.session_dir(work, STEM).is_dir()
+    assert len(list(layout.session_dir(work, STEM).glob("seg*.ts"))) == 3
+    assert not layout.session_dir(final, STEM).exists()
+    assert src.is_file()
+
+
+def test_relocation_is_idempotent_when_the_segments_already_moved(tmp_path):
+    """mp4だけ失敗して分かれた状態から、同じmoverを再実行すれば揃うこと。"""
+    from tictok.record.recorder import Recorder
+
+    work, final = tmp_path / "work", tmp_path / "final"
+    src = _make_pair(work)
+    dst = layout.mp4_path(final, STEM)
+    Recorder._move_session_dir(src, dst)
+    assert not layout.session_dir(work, STEM).exists()
+
+    Recorder._move_recording_files(src, dst)
+
+    assert dst.is_file()
+    assert len(list(layout.session_dir(final, STEM).glob("seg*.ts"))) == 3
+
+
+def test_relocation_preserves_each_segment_mtime(tmp_path):
+    """segmentのmtimeはtiming mapのwall軸そのもの(recorder._playlist_segments)。
+    移送で失うと、移送済み録画の焼き込みでコメントの時刻が壊れる。"""
+    import os
+
+    from tictok.record.recorder import Recorder
+
+    work, final = tmp_path / "work", tmp_path / "final"
+    src = _make_pair(work, segments=3)
+    ts_dir = layout.session_dir(work, STEM)
+    stamps = {}
+    for i, p in enumerate(sorted(ts_dir.glob("seg*.ts"))):
+        when = 1_750_000_000 + i * 2
+        os.utime(p, (when, when))
+        stamps[p.name] = when
+
+    Recorder._move_recording_files(src, layout.mp4_path(final, STEM))
+
+    moved = layout.session_dir(final, STEM)
+    assert {p.name: int(p.stat().st_mtime) for p in sorted(moved.glob("seg*.ts"))} == stamps
+
+
+def test_a_curated_playlist_written_elsewhere_spells_out_full_paths(tmp_path):
+    """playlistの参照は素のfile名だとplaylist自身のdirectoryから解決される。session dirの
+    外へ書いたときに素のままだと参照が全て外れ、しかもffmpegは「streamが無い」正常終了に
+    見えるので、静かに空の結果を返す。"""
+    from tictok.record.recorder import write_curated_playlist
+
+    hls = layout.session_dir(tmp_path / "work", STEM)
+    hls.mkdir(parents=True)
+    for i in range(2):
+        (hls / ("seg%05d.ts" % i)).write_bytes(b"\x47" * 188)
+    (hls / "index.m3u8").write_text(
+        "#EXTM3U\n#EXTINF:2.000000,\nseg00000.ts\n#EXTINF:2.000000,\nseg00001.ts\n",
+        encoding="utf-8")
+
+    inside = write_curated_playlist(hls, hls / "vod.m3u8")
+    outside = write_curated_playlist(hls, tmp_path / "vod.m3u8")
+
+    assert "\nseg00000.ts\n" in inside.read_text(encoding="utf-8")
+    body = outside.read_text(encoding="utf-8")
+    assert str((hls / "seg00000.ts").resolve()) in body
+    assert "\nseg00000.ts\n" not in body
+
+
+async def test_recovery_finds_material_that_was_already_moved_to_the_final_root(
+        recovery_env, tmp_db, tmp_root, monkeypatch):
+    """素材がfinal rootへ移送済みの録画も復旧すること。
+
+    work rootだけを見ていると「作り直す材料が無い」と判断され、行はinterruptedのまま
+    永久に残る。実測でそうなった録画が1本あり、素材はfinal rootに589 segment在るのに
+    画面から辿れなくなっていた。"""
+    from tictok.record import recorder
+
+    final_root = tmp_root.parent / "final"
+    recording_id, stem, _ = recovery_env(segments=0)
+    # 素材をfinal rootにだけ置く(=移送済みの形)。
+    moved = layout.session_dir(final_root, stem, "tester")
+    moved.mkdir(parents=True, exist_ok=True)
+    for i in range(3):
+        (moved / f"seg{i:05d}.ts").write_bytes(b"\x47" * 188)
+
+    seen = {}
+
+    async def fake_finalize(self, base, progress=None, mp4_root=None, build_mp4=False):
+        seen["record_dir"] = self._record_dir
+        self.output_path = layout.mp4_path(final_root, base, "tester")
+        self.state = recorder.STATE_COMPLETED
+        self.ended_at = 4242.0
+        self.duration_seconds = 12.0
+
+    monkeypatch.setattr(recorder.Recorder, "finalize_recovered_hls", fake_finalize)
+    monkeypatch.setattr(recorder.Recorder, "snapshot", lambda self: {"bytes": 564})
+
+    got = await recorder.recover_interrupted_recordings(
+        tmp_db, tmp_root, final_dir=final_root)
+
+    assert got == 1, "final rootの素材が見つかっていない"
+    assert str(seen["record_dir"]) == str(final_root), "素材の在るrootが渡っていない"
+    assert tmp_db.get_recording(recording_id)["status"] == "completed"
+
+
+async def test_recovery_sees_a_packed_recording_as_having_material(
+        recovery_env, tmp_db, tmp_root, monkeypatch):
+    """束ね済み(pack*.ts)の録画も「素材あり」と判定すること。
+
+    ``seg*.ts`` だけを数えていると、束ねた録画は全部「素材無し」になり復旧されない。
+    束ねは100本超の録画に適用済みなので、ここを外すとその全部が対象外になる。"""
+    from tictok.record import recorder
+
+    recording_id, stem, _ = recovery_env(segments=0)
+    session = layout.session_dir(tmp_root, stem, "tester")
+    session.mkdir(parents=True, exist_ok=True)
+    (session / "pack000.ts").write_bytes(b"\x47" * 564)
+
+    async def fake_finalize(self, base, progress=None, mp4_root=None, build_mp4=False):
+        self.output_path = layout.mp4_path(tmp_root, base, "tester")
+        self.state = recorder.STATE_COMPLETED
+        self.ended_at = 4242.0
+        self.duration_seconds = 12.0
+
+    monkeypatch.setattr(recorder.Recorder, "finalize_recovered_hls", fake_finalize)
+    monkeypatch.setattr(recorder.Recorder, "snapshot", lambda self: {"bytes": 564})
+
+    assert await recorder.recover_interrupted_recordings(tmp_db, tmp_root) == 1
+    assert tmp_db.get_recording(recording_id)["status"] == "completed"
+
+
+# --------------------------------------------------------------------------
+# 焼き込み/プレビューの入力取得は event loop 上でやらない
+# --------------------------------------------------------------------------
+
+
+def _loop_side_storage_calls(module_path, function_names):
+    """``function_names`` のasync関数から、threadを経由せず storage を触っている箇所。
+
+    ``asyncio.to_thread(storage.x, ...)`` は関数objectを渡しているだけなので数えない。"""
+    import ast
+
+    tree = ast.parse(pathlib.Path(module_path).read_text(encoding="utf-8"))
+    found = []
+
+    class Walk(ast.NodeVisitor):
+        def __init__(self, name):
+            self.name = name
+
+        def visit_Call(self, node):
+            if getattr(node.func, "attr", None) == "to_thread":
+                for arg in node.args[1:]:
+                    self.visit(arg)
+                return
+            target = node.func
+            label = None
+            if isinstance(target, ast.Attribute):
+                owner = target.value
+                chain = []
+                while isinstance(owner, ast.Attribute):
+                    chain.append(owner.attr)
+                    owner = owner.value
+                if isinstance(owner, ast.Name):
+                    chain.append(owner.id)
+                if ".".join(reversed(chain)).endswith("storage"):
+                    label = "storage.%s" % target.attr
+                elif target.attr in _BLOCKING_HELPERS:
+                    # ``media_jobs._preview_sources(...)`` のようにmodule越しの呼び方も拾う。
+                    label = target.attr
+            elif isinstance(target, ast.Name) and target.id in _BLOCKING_HELPERS:
+                label = target.id
+            if label:
+                found.append("%s:%d %s -> %s" % (module_path, node.lineno, self.name, label))
+            self.generic_visit(node)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name in function_names:
+            Walk(node.name).visit(node)
+    return found
+
+
+# 中でstorageを触る同期helper。async側から素で呼ぶと同じことになる。
+_BLOCKING_HELPERS = {"_preview_sources", "_subtitle_transcript"}
+
+
+@pytest.mark.parametrize("module_path,functions", [
+    ("tictok/api/media_jobs.py",
+     {"_burn_in_recording", "_run_preview_clip_job", "_run_clip_overlay_job"}),
+    ("tictok/api/routes/media.py", {"preview_still_api", "preview_clip_api"}),
+])
+def test_burn_in_inputs_are_never_loaded_on_the_event_loop(module_path, functions):
+    """焼き込みとプレビューの入力取得は必ずthreadへ出す。
+
+    ``iter_events`` はbufferのflushを待ってからsessionの全eventを読む(実測37,214件で372ms)。
+    event loop上で呼ぶとその間serverが丸ごと止まり、writer lockも握るのでcollectorの
+    書き出しまで巻き添えになる。実測ではloop上の呼び出しがlock保持者を待つと、待った時間が
+    そのままevent loopの停止時間になった(4,706ms 対 to_thread経由17ms)。"""
+    assert _loop_side_storage_calls(module_path, functions) == []

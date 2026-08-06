@@ -240,7 +240,7 @@ async def _chat(messages: list, schema: dict, schema_name: str) -> str:
         async with httpx.AsyncClient(timeout=get_ai_timeout_seconds()) as client:
             resp = await client.post(url, json=body, headers=headers)
     except httpx.HTTPError as exc:
-        logger.warning("AI endpoint unreachable: %s", exc, exc_info=True)
+        logger.warning("AI endpointへ接続できません: %s", exc, exc_info=True)
         raise AIError(f"AIエンドポイントへ接続できません（{get_ai_base_url()}）: {exc}") from exc
     if resp.status_code != 200:
         hint = ""
@@ -345,7 +345,7 @@ async def analyze_streamer(data: dict) -> dict:
     ]
     content = await _chat(messages, _REVIEW_JSON_SCHEMA, "streamer_review")
     result = _extract_json(content)
-    logger.info("streamer review done: model=%s", get_ai_model())
+    logger.info("配信者の講評が完了しました: model=%s", get_ai_model())
     return result
 
 
@@ -363,7 +363,7 @@ async def analyze_comments(sample: list) -> dict:
         raise AIError("分析できるコメントがありません。")
     content = await _chat(_build_messages(cleaned), _COMMENT_JSON_SCHEMA, "comment_analysis")
     data = _extract_json(content)
-    logger.info("comment analysis done: %d comments, model=%s", len(cleaned), get_ai_model())
+    logger.info("commentの分析が完了しました: comment %d件, model=%s", len(cleaned), get_ai_model())
     return data
 
 
@@ -667,7 +667,7 @@ async def analyze_chapters(transcript: dict, media_duration=None) -> dict:
         "reduced": reduced,
     }
     logger.info(
-        "chapters done: %d chapter(s) from %d segment(s) in %d chunk(s), model=%s",
+        "chapterの生成が完了しました: %d chapter（%d segment / %d chunk）, model=%s",
         len(result["chapters"]), len(segments), len(chunks), get_ai_model(),
         extra={"event": "ai.chapters_done",
                "ctx": {"chapters": len(result["chapters"]), "segments": len(segments),

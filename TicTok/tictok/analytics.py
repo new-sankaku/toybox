@@ -22,7 +22,14 @@ import time
 from typing import Optional
 
 from tictok.core import config
+from tictok.core import perf
 from tictok.core.battle import BATTLE_SETTLE_GRACE_SECONDS, resolve_result
+from tictok.core.intervals import (
+    in_intervals,
+    merge_intervals,
+    subtract_intervals,
+    total_span,
+)
 from tictok.core.logctx import log_context
 
 logger = logging.getLogger("tictok.analytics")
@@ -197,22 +204,19 @@ _AC_MIN_SESSIONS = 3
 CACHE_VERSIONS = {
     "summary": 2,
     "time_index": 3,
-    "relations": 1,
     "peri_share": 3,
     "peri_battle": 4,
     "battle_ratio": 2,
     "glove": 3,
     "join_quality": 2,
-    "scale_efficiency": 2,
     "retention": 2,
     "join_context": 3,
     "organic": 3,
     "entry_source": 1,
-    "battle_flow": 2,
     "coverage": 1,
+    "battle_flow": 2,
     "gift_sku": 1,
     "dwell": 1,
-    "anomaly": 1,
     "activation": 1,
 }
 KINDS = tuple(CACHE_VERSIONS)
@@ -325,13 +329,6 @@ def _pearson(xs: list, ys: list) -> Optional[float]:
     return sxy / (sxx * syy) ** 0.5
 
 
-def _spearman(xs: list, ys: list) -> Optional[float]:
-    """Spearman順位相関: ランクに変換してPearson。外れ値・非線形に頑健。"""
-    if len(xs) < 3:
-        return None
-    return _pearson(_rank_average(xs), _rank_average(ys))
-
-
 def _spearman_significant(r: Optional[float], n: int, k_controls: int = 0) -> Optional[bool]:
     """Spearman(偏)相関のt近似による両側5%有意判定。df = n - 2 - 制御変数の数。
     小標本の相関は偶然±1近くへ振れやすく、点推定の濃淡だけでは誤読を招くため、
@@ -395,55 +392,12 @@ def _partial_spearman(a: list, b: list, controls: list) -> Optional[float]:
     return _pearson(era, erb)
 
 
-def _merge_intervals(intervals: list) -> list:
-    """[(start,end),...] を重なり/隣接を統合してソート済み非重複区間へ。"""
-    clean = [(a, b) for a, b in intervals if b > a]
-    if not clean:
-        return []
-    clean.sort()
-    merged = [list(clean[0])]
-    for a, b in clean[1:]:
-        if a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return [(a, b) for a, b in merged]
-
-
-def _subtract_intervals(base: list, cut: list) -> list:
-    """base区間群から cut区間群を差し引く(base, cut は非重複ソート済み前提でなくてよい)。"""
-    base = _merge_intervals(base)
-    cut = _merge_intervals(cut)
-    result = []
-    for a, b in base:
-        segments = [(a, b)]
-        for ca, cb in cut:
-            next_segments = []
-            for sa, sb in segments:
-                if cb <= sa or ca >= sb:
-                    next_segments.append((sa, sb))
-                    continue
-                if ca > sa:
-                    next_segments.append((sa, min(ca, sb)))
-                if cb < sb:
-                    next_segments.append((max(cb, sa), sb))
-            segments = next_segments
-        result.extend(s for s in segments if s[1] > s[0])
-    return result
-
-
-def _in_intervals(t: float, intervals: list) -> bool:
-    """t が非重複ソート済み区間群のいずれかに入るか(端は[start,end))。"""
-    for a, b in intervals:
-        if a <= t < b:
-            return True
-        if a > t:
-            break
-    return False
-
-
-def _total_span(intervals: list) -> float:
-    return sum(b - a for a, b in intervals)
+# 区間演算は tictok.core.intervals が正。配信者profile(storage)も同じ実装を使う。
+# 既存の呼び出し・testが参照している私有名はそのまま別名で残す。
+_merge_intervals = merge_intervals
+_subtract_intervals = subtract_intervals
+_in_intervals = in_intervals
+_total_span = total_span
 
 
 def concentration(values: list, lorenz_points: int = 40) -> dict:
@@ -524,93 +478,6 @@ def _peri_aggregate(clusters: list):
     return mean, ci
 
 
-def _mad(values: list, center: Optional[float] = None) -> float:
-    """中央絶対偏差。外れ値そのものを探すので、baselineは平均・標準偏差では作れない
-    (検出したい1本が自分でbaselineを膨らませ、自分を平凡に見せてしまう)。"""
-    if not values:
-        return 0.0
-    med = _median(values) if center is None else center
-    return _median([abs(v - med) for v in values])
-
-
-def _robust_z(value: float, baseline: list) -> Optional[float]:
-    """baseline(自分を除いた同一配信者の他配信)に対する頑健z。
-
-    1.4826はMADを正規分布の標準偏差と同じ尺度へ揃える定数。MAD=0(他配信が同じ値ばかり)
-    では尺度が定義できないのでNone(0除算を避けるために小さい数を入れると、わずかな差が
-    無限大のzに化ける)。"""
-    if len(baseline) < 2:
-        return None
-    med = _median(baseline)
-    mad = _mad(baseline, med)
-    if mad <= 0:
-        return None
-    return (value - med) / (1.4826 * mad)
-
-
-def _empirical_p(value: float, baseline: list) -> Optional[float]:
-    """baselineの中で「中央値からこれ以上離れている」割合(両側)。
-
-    分布を仮定しない。正規近似のp値を使わないのは、実測でこのdataの裾が正規より
-    桁違いに重いため(|z|>3で約13倍、|z|>4で約375倍)。正規のp値を当てると、
-    ただの重い裾を「極めて有意な異常」として大量に出してしまう。
-    到達できる最小値は 1/(n+1) で、baselineの本数が検出力の上限を決める。"""
-    if not baseline:
-        return None
-    med = _median(baseline)
-    dev = abs(value - med)
-    at_least = sum(1 for v in baseline if abs(v - med) >= dev)
-    return (at_least + 1) / (len(baseline) + 1)
-
-
-def benjamini_hochberg(pvalues: list) -> list:
-    """BH法のq値(FDR調整済みp)。入力と同じ並びで返す。
-
-    指標×配信の数だけ検定するため、素のp値をそのまま閾値に当てると偽陽性が積み上がる。
-    q値は単調になるよう後ろから累積minを取る(BHの標準手順)。"""
-    n = len(pvalues)
-    if n == 0:
-        return []
-    order = sorted(range(n), key=lambda i: pvalues[i])
-    out = [1.0] * n
-    running = 1.0
-    for rank in range(n - 1, -1, -1):
-        i = order[rank]
-        running = min(running, pvalues[i] * n / (rank + 1))
-        out[i] = min(1.0, running)
-    return out
-
-
-def _rank_cusum(rank_values: list, min_segment: int):
-    """順位CUSUMの最大絶対値と分割位置(Pettittの変化点統計量)。
-
-    水準そのものではなく順位で見るのは、1本の高額ギフトや瞬間的なspikeで変化点が
-    決まらないようにするため。分割位置の前後には最低segment長を要求する
-    (端で切ると片側が数点になり、統計量が不安定になる)。"""
-    n = len(rank_values)
-    if n < 2 * min_segment:
-        return 0.0, None
-    mean = sum(rank_values) / n
-    best, at, running = 0.0, None, 0.0
-    for k in range(n - 1):
-        running += rank_values[k] - mean
-        if k + 1 < min_segment or n - (k + 1) < min_segment:
-            continue
-        if abs(running) > best:
-            best, at = abs(running), k + 1
-    return best, at
-
-
-def _block_shuffled(seq: list, block: int, rng) -> list:
-    """circular block permutation。連続blockを丸ごと並べ替え、短期の自己相関を保つ。"""
-    n = len(seq)
-    out = []
-    for _ in range((n + block - 1) // block):
-        start = rng.randrange(n)
-        out.extend(seq[(start + k) % n] for k in range(block))
-    return out[:n]
-
-
 def _identity_digest(identity_key: str) -> str:
     """identity_keyをcache payload用の短いdigestへ。session跨ぎで同一人物を突き合わせる
     ためだけに使うので、決定論的でありさえすればよい(暗号用途ではない)。"""
@@ -686,17 +553,6 @@ def _payload_time_index(conn, sess: dict) -> dict:
             for r in rows
         ]
     }
-
-
-def _payload_relations(conn, sess: dict) -> dict:
-    row = conn.execute(
-        "SELECT COUNT(*) AS n, SUM(joins) AS joins, SUM(comments) AS comments,"
-        " SUM(diamonds) AS diamonds, SUM(likes) AS likes, SUM(follows) AS follows,"
-        " MAX(viewers) AS viewers"
-        " FROM buckets WHERE session_id = ?",
-        (sess["id"],),
-    ).fetchone()
-    return {m: row[m] for m in RELATION_METRICS} | {"n": row["n"]}
 
 
 def _payload_peri(conn, sess: dict, treatment: str) -> dict:
@@ -863,33 +719,49 @@ def _payload_battle_ratio(conn, sess: dict) -> dict:
     outside = duration - _total_span(union)
     if outside <= 0:
         return {"battles": battles}
-    trows = conn.execute(
-        "SELECT kind, COUNT(*) AS c, COALESCE(SUM(diamonds), 0) AS d"
-        " FROM events WHERE session_id = ? GROUP BY kind",
+    # eventはsessionぶんを1度だけ読み、窓の切り出しはkind別の時刻列への二分探索で行う。
+    # 窓ごとにGROUP BY queryを投げると、(session_id, kind, time)のindexはkindを跨ぐ
+    # 時間範囲を絞れないため1窓ごとにsession全eventを走査することになり、battle数×
+    # session内event数で伸びる(実測: event 37,214件/battle 11本のsessionで210ms)。
+    # diamondsはINTEGERなので、累積和の差はSUM()と同じ値になる。
+    ev_rows = conn.execute(
+        "SELECT kind, time, COALESCE(diamonds, 0) AS diamonds FROM events"
+        " WHERE session_id = ? ORDER BY time",
         (sid,),
     ).fetchall()
-    totals = {r["kind"]: {"c": r["c"], "d": r["d"]} for r in trows}
+    by_kind: dict = {}
+    for r in ev_rows:
+        times, cumulative = by_kind.setdefault(r["kind"], ([], [0]))
+        times.append(r["time"])
+        cumulative.append(cumulative[-1] + r["diamonds"])
+    totals = {
+        kind: {"c": len(times), "d": cumulative[-1]}
+        for kind, (times, cumulative) in by_kind.items()
+    }
+
+    def _window_stat(begin: float, end: float) -> dict:
+        """[begin, end) に入るeventのkind別 件数/コイン。GROUP BY queryと同じく、
+        1件も無いkindは載せない。"""
+        stat = {}
+        for kind, (times, cumulative) in by_kind.items():
+            lo = bisect.bisect_left(times, begin)
+            hi = bisect.bisect_left(times, end)
+            if hi > lo:
+                stat[kind] = {"c": hi - lo, "d": cumulative[hi] - cumulative[lo]}
+        return stat
+
     # 全battle窓union内のevent量。窓外量 = 総量 - union内量。
     union_stat: dict = {}
     for a, b in union:
-        for r in conn.execute(
-            "SELECT kind, COUNT(*) AS c, COALESCE(SUM(diamonds), 0) AS d"
-            " FROM events WHERE session_id = ? AND time >= ? AND time < ? GROUP BY kind",
-            (sid, a, b),
-        ).fetchall():
-            u = union_stat.setdefault(r["kind"], {"c": 0, "d": 0})
-            u["c"] += r["c"]
-            u["d"] += r["d"]
+        for kind, s in _window_stat(a, b).items():
+            u = union_stat.setdefault(kind, {"c": 0, "d": 0})
+            u["c"] += s["c"]
+            u["d"] += s["d"]
     for rec, start_time, end_time in parsed:
         inside = min(end_time, s_end) - max(start_time, s_start)
         if inside <= 0:
             continue
-        irows = conn.execute(
-            "SELECT kind, COUNT(*) AS c, COALESCE(SUM(diamonds), 0) AS d"
-            " FROM events WHERE session_id = ? AND time >= ? AND time < ? GROUP BY kind",
-            (sid, start_time, end_time),
-        ).fetchall()
-        inside_stat = {r["kind"]: {"c": r["c"], "d": r["d"]} for r in irows}
+        inside_stat = _window_stat(start_time, end_time)
         up = {}
         for metric, kind in (("joins", "join"), ("comments", "comment"), ("follows", "follow")):
             in_c = inside_stat.get(kind, {}).get("c", 0)
@@ -973,7 +845,10 @@ def _payload_join_quality(conn, sess: dict) -> dict:
 def _payload_scale_efficiency(conn, sess: dict) -> dict:
     """規模(平均同接)と効率の分子分母。効率の分母は視聴量(viewer-minutes=Σ同接×bucket分)。
     Peak(瞬間値)で割ると総コインが配信の長さに比例して膨らむ分が残り「1視聴あたり」に
-    ならないため、時間で積分した視聴量を使う。"""
+    ならないため、時間で積分した視聴量を使う。
+
+    これ自体はcache kindではない(節としての規模vs効率は廃止した)。滞在時間(⑭)が視聴量を
+    同じ定義で使うため、その素材を作る helper としてだけ残っている。"""
     row = conn.execute(
         "SELECT MAX(viewers) AS p, AVG(viewers) AS a, COALESCE(SUM(viewers), 0) AS v"
         " FROM buckets WHERE session_id = ?",
@@ -1087,12 +962,98 @@ def _dwell_windows(samples: list, comment_times: list):
     return windows, rejects
 
 
+def _payload_battle_flow(conn, sess: dict) -> dict:
+    """Battle 1戦ごとの展開(残り時間軸)。リード交代・残り1分時点のリード・末尾集中度を
+    記述統計としてだけ持つ(横断のdedupと率の算出はreduce側)。"""
+    rows = conn.execute(
+        "SELECT battle_id AS bid, data_json AS d FROM battles WHERE session_id = ?"
+        " ORDER BY rowid",
+        (sess["id"],),
+    ).fetchall()
+    battles = []
+    for row in rows:
+        rec = {"bid": row["bid"], "ok": 0, "why": "parse"}
+        battles.append(rec)
+        try:
+            battle = json.loads(row["d"])
+        except (ValueError, TypeError):
+            continue
+        if battle.get("aborted"):
+            rec["why"] = "aborted"
+            continue
+        start_time, end_time = battle.get("start_time"), battle.get("end_time")
+        if start_time is None or end_time is None or end_time <= start_time:
+            rec["why"] = "no_end"
+            continue
+        duration = end_time - start_time
+        if duration < _BF_MIN_DURATION_SECONDS:
+            rec["why"] = "short"
+            continue
+        # 確定scoreを載せた最後のarmies更新はend_timeと前後して届く。切り口はcore.battleに
+        # 一本化し、履歴画面・焼き込みと同じ窓を使う。
+        settle_time = end_time + BATTLE_SETTLE_GRACE_SECONDS
+        series, form = _bf_rival_series(battle, settle_time)
+        if series is None:
+            rec["why"] = form
+            continue
+        # 勝敗はcore.battle.resolve_result(=履歴画面の表示と同じ判定)を使う。battles表の
+        # resultはPK後のroster解体まで含んだ最後のarmies更新の値なので、差異は件数だけ別掲する。
+        resolved = resolve_result(battle)
+        rec.update({"ok": 1, "why": None, "form": form, "dur": round(duration, 1),
+                    "res": resolved["result"],
+                    "res_diff": 1 if resolved["reported"] != resolved["result"] else 0})
+
+        # リード交代: 優劣が反転した回数。同点を挟んでも符号が戻れば交代とは数えない。
+        changes = 0
+        sign = 0
+        for _, own, rival in series:
+            cur = 1 if own > rival else (-1 if own < rival else 0)
+            if cur and sign and cur != sign:
+                changes += 1
+            if cur:
+                sign = cur
+        rec["lc"] = changes
+
+        checkpoint = end_time - _BF_LEAD_CHECKPOINT_SECONDS
+        c_own, c_rival = _bf_step(series, checkpoint, 1), _bf_step(series, checkpoint, 2)
+        rec["cp"] = "own" if c_own > c_rival else ("opp" if c_own < c_rival else "tie")
+
+        extras, unresolved = _bf_crit_extra(battle)
+        rec["cu"] = unresolved
+        tail_start = end_time - _BF_TAIL_SECONDS
+        # 総得点は勝敗と同じ確定時点で採る(end_timeで切ると、確定burstが数百ms遅れて
+        # 届いた戦だけ総得点が小さく出て、resと矛盾する)。
+        total_raw = _bf_step(series, settle_time, 1)
+        tail_raw = total_raw - _bf_step(series, tail_start, 1)
+        rec["tail"] = [tail_raw, total_raw]
+        total_adj = total_raw - _bf_extra_before(extras, settle_time)
+        tail_adj = total_adj - (_bf_step(series, tail_start, 1)
+                                - _bf_extra_before(extras, tail_start))
+        # critの上乗せを引いて総得点が0以下になるのは突合の破綻。補正値を出さない。
+        rec["tail_adj"] = [tail_adj, total_adj] if total_adj > 0 and tail_adj >= 0 else None
+
+        # 残り時間binごとの自陣得点。battleの尺に収まるbinだけを埋め、覆っていないbinは
+        # 分母にも入れない(短いbattleを0得点として混ぜると序盤帯が薄く出る)。
+        bins = []
+        for i in range(_BF_MAX_REMAINING // _BF_BIN_SECONDS):
+            r_from = i * _BF_BIN_SECONDS
+            r_to = r_from + _BF_BIN_SECONDS
+            if r_to > duration:
+                bins.append(None)
+                continue
+            # 残り0の側の端だけは確定時点まで含める(total_rawと同じ切り口に揃える)。
+            upper = settle_time if r_from == 0 else end_time - r_from
+            gain = _bf_step(series, upper, 1) - _bf_step(series, end_time - r_to, 1)
+            bins.append(gain)
+        rec["bins"] = bins
+    return {"battles": battles}
+
+
 def _payload_dwell(conn, sess: dict) -> dict:
     """滞在時間(Little則)の素材。定常とみなせる窓ごとの同接水準・到着数・Comment数。
 
-    配信まるごとの粗い推定値(視聴量÷総来場者)も併せて持つ。分子の視聴量は⑧規模vs効率と
-    同じ定義でなければならないため、_payload_scale_efficiencyをそのまま呼んで揃える
-    (viewer-minutesの定義を二重に持つと、同じ画面の2箇所で違う視聴量が出る)。"""
+    配信まるごとの粗い推定値(視聴量÷総来場者)も併せて持つ。分子の視聴量の定義を二重に
+    持たないよう、_payload_scale_efficiencyをそのまま呼んで揃える。"""
     sid = sess["id"]
     samples = [
         (r["time"], r["viewers"], r["total_viewers"])
@@ -1128,87 +1089,6 @@ def _payload_dwell(conn, sess: dict) -> dict:
         "arr": arrivals,
         "jn": joins or 0,
         "avgv": scale["avgv"],
-    }
-
-
-def _payload_anomaly(conn, sess: dict) -> dict:
-    """異常検知の素材: 1配信ぶんの水準指標と、session内の水準shift(変化点)。
-
-    水準指標はbucketsではなくevents/viewer_samplesから作る。bucketsはfinalize_session
-    でしか書かれず、切断で終わった配信(status=disconnected)には残らない。実測でbuckets
-    を持つのは109本中67本で、欠けるのは長時間・不安定な配信に偏るため、bucketsを基準に
-    すると母集団が系統的に歪む(events基準なら同じ配信者で16本→49本になる)。"""
-    sid = sess["id"]
-    placeholders = ", ".join("?" * len(_AN_NON_ACTIVITY_KINDS))
-    agg = conn.execute(
-        "SELECT COUNT(*) AS n, MIN(time) AS t0, MAX(time) AS t1,"
-        " COALESCE(SUM(CASE WHEN kind = 'gift' THEN diamonds ELSE 0 END), 0) AS coins,"
-        " COALESCE(SUM(kind = 'comment'), 0) AS comments,"
-        " COALESCE(SUM(kind = 'join'), 0) AS joins,"
-        " COALESCE(SUM(kind = 'follow'), 0) AS follows"
-        f" FROM events WHERE session_id = ? AND kind NOT IN ({placeholders})",
-        (sid, *_AN_NON_ACTIVITY_KINDS),
-    ).fetchone()
-    samples = [
-        (r["time"], r["viewers"]) for r in conn.execute(
-            "SELECT time, viewers FROM viewer_samples WHERE session_id = ? ORDER BY time",
-            (sid,),
-        )
-    ]
-    span = (agg["t1"] - agg["t0"]) if agg["t0"] is not None else 0.0
-    metrics = {}
-    if (agg["n"] or 0) >= _AN_MIN_EVENTS and span >= _AN_MIN_SPAN_SECONDS:
-        minutes = span / 60.0
-        metrics["coins_per_min"] = round((agg["coins"] or 0) / minutes, 4)
-        metrics["comments_per_min"] = round((agg["comments"] or 0) / minutes, 4)
-        metrics["joins_per_min"] = round((agg["joins"] or 0) / minutes, 4)
-        if (agg["joins"] or 0) >= _AN_MIN_JOINS_FOR_RATIO:
-            metrics["follow_per_join"] = round((agg["follows"] or 0) / agg["joins"], 6)
-        if len(samples) >= _AN_MIN_VIEWER_SAMPLES:
-            metrics["viewers_med"] = _median([v for _t, v in samples])
-    return {
-        "m": metrics,
-        "span": round(span, 1),
-        "ev": agg["n"] or 0,
-        "cp": _changepoint(sid, samples),
-    }
-
-
-def _changepoint(session_id: int, samples: list) -> Optional[dict]:
-    """session内の水準shift。順位CUSUMで最も割れる時点を採り、block permutationで
-    「配信のいつもの起伏でもこの程度は出る」かを確かめる。
-
-    乱数はsession_idで固定する。payloadはcacheへ載るので、同じ配信を再計算したときに
-    違うp値が出てはならない。"""
-    if len(samples) < 2:
-        return None
-    base = samples[0][0]
-    bins: dict = {}
-    for t, viewers in samples:
-        bins.setdefault(int((t - base) // _AN_CP_BIN_SECONDS), []).append(viewers)
-    # 観測の穴はbinごと落とす(0で埋めると、切断を「同接0への急落」として検出する)。
-    index = sorted(bins)
-    values = [_median(bins[i]) for i in index]
-    if len(values) < _AN_CP_MIN_BINS:
-        return None
-    rank_values = _rank_average(values)
-    stat, at = _rank_cusum(rank_values, _AN_CP_MIN_SEGMENT)
-    if at is None:
-        return None
-    rng = random.Random(session_id)
-    exceed = sum(
-        1 for _ in range(_AN_CP_PERMUTATIONS)
-        if _rank_cusum(_block_shuffled(rank_values, _AN_CP_BLOCK_BINS, rng),
-                       _AN_CP_MIN_SEGMENT)[0] >= stat
-    )
-    before = _median(values[:at])
-    after = _median(values[at:])
-    return {
-        "at": round(base + index[at] * _AN_CP_BIN_SECONDS, 1),
-        "before": round(before, 2),
-        "after": round(after, 2),
-        "p": round((exceed + 1) / (_AN_CP_PERMUTATIONS + 1), 4),
-        "bins": len(values),
     }
 
 
@@ -1435,26 +1315,25 @@ def _payload_organic(conn, sess: dict) -> dict:
                 engaged.add(key)
     join_keys = list(first_join)
     # 再訪: 同一配信者(owner_key)の過去sessionへの入室歴。
-    prior_ids = [
-        r["id"]
-        for r in conn.execute(
-            "SELECT id FROM sessions"
-            " WHERE COALESCE(NULLIF(owner_user_id, ''), unique_id) = ?"
-            " AND started_at < ? AND id != ?",
-            (sess["owner_key"], sess["started_at"], sid),
-        ).fetchall()
-    ]
+    # 引き当ては「この配信の入室者」を起点にする。過去session側を起点にすると走査量が
+    # その配信者の過去session数に比例し(実測で6本目3,314行→93本目101,258行)、cacheの
+    # 全再計算が本数の二乗になる。identity_key起点なら(kind, identity_key, ..., session_id)
+    # のindexで引けるので、この配信の入室者数までしか伸びない。
+    # _payload_join_qualityが users.first_seen を引くのと同じ形だが、再訪は配信者ごとの
+    # 判定なので全体のfirst_seenでは代用できず、sessionsのowner_keyで絞る。
     returning: set = set()
-    if prior_ids and join_keys:
-        for chunk in _chunked(prior_ids):
+    if join_keys:
+        for chunk in _chunked(join_keys):
             ph = ",".join("?" * len(chunk))
             for r in conn.execute(
-                f"SELECT DISTINCT identity_key AS key FROM events"
-                f" WHERE session_id IN ({ph}) AND kind = 'join'",
-                tuple(chunk),
+                "SELECT DISTINCT e.identity_key AS key FROM events e"
+                " JOIN sessions s ON s.id = e.session_id"
+                f" WHERE e.kind = 'join' AND e.identity_key IN ({ph})"
+                " AND COALESCE(NULLIF(s.owner_user_id, ''), s.unique_id) = ?"
+                " AND s.started_at < ? AND s.id != ?",
+                (*chunk, sess["owner_key"], sess["started_at"], sid),
             ).fetchall():
                 returning.add(r["key"])
-        returning &= set(join_keys)
     # level保有: users表のfans/gifter level(session確定時点のsnapshot)。
     leveled: set = set()
     for chunk in _chunked(join_keys):
@@ -1673,93 +1552,6 @@ def _bf_extra_before(extras: list, t: float) -> float:
     return total
 
 
-def _payload_battle_flow(conn, sess: dict) -> dict:
-    """Battle 1戦ごとの展開(残り時間軸)。リード交代・残り1分時点のリード・末尾集中度を
-    記述統計としてだけ持つ(横断のdedupと率の算出はreduce側)。"""
-    rows = conn.execute(
-        "SELECT battle_id AS bid, data_json AS d FROM battles WHERE session_id = ?"
-        " ORDER BY rowid",
-        (sess["id"],),
-    ).fetchall()
-    battles = []
-    for row in rows:
-        rec = {"bid": row["bid"], "ok": 0, "why": "parse"}
-        battles.append(rec)
-        try:
-            battle = json.loads(row["d"])
-        except (ValueError, TypeError):
-            continue
-        if battle.get("aborted"):
-            rec["why"] = "aborted"
-            continue
-        start_time, end_time = battle.get("start_time"), battle.get("end_time")
-        if start_time is None or end_time is None or end_time <= start_time:
-            rec["why"] = "no_end"
-            continue
-        duration = end_time - start_time
-        if duration < _BF_MIN_DURATION_SECONDS:
-            rec["why"] = "short"
-            continue
-        # 確定scoreを載せた最後のarmies更新はend_timeと前後して届く。切り口はcore.battleに
-        # 一本化し、履歴画面・焼き込みと同じ窓を使う。
-        settle_time = end_time + BATTLE_SETTLE_GRACE_SECONDS
-        series, form = _bf_rival_series(battle, settle_time)
-        if series is None:
-            rec["why"] = form
-            continue
-        # 勝敗はcore.battle.resolve_result(=履歴画面の表示と同じ判定)を使う。battles表の
-        # resultはPK後のroster解体まで含んだ最後のarmies更新の値なので、差異は件数だけ別掲する。
-        resolved = resolve_result(battle)
-        rec.update({"ok": 1, "why": None, "form": form, "dur": round(duration, 1),
-                    "res": resolved["result"],
-                    "res_diff": 1 if resolved["reported"] != resolved["result"] else 0})
-
-        # リード交代: 優劣が反転した回数。同点を挟んでも符号が戻れば交代とは数えない。
-        changes = 0
-        sign = 0
-        for _, own, rival in series:
-            cur = 1 if own > rival else (-1 if own < rival else 0)
-            if cur and sign and cur != sign:
-                changes += 1
-            if cur:
-                sign = cur
-        rec["lc"] = changes
-
-        checkpoint = end_time - _BF_LEAD_CHECKPOINT_SECONDS
-        c_own, c_rival = _bf_step(series, checkpoint, 1), _bf_step(series, checkpoint, 2)
-        rec["cp"] = "own" if c_own > c_rival else ("opp" if c_own < c_rival else "tie")
-
-        extras, unresolved = _bf_crit_extra(battle)
-        rec["cu"] = unresolved
-        tail_start = end_time - _BF_TAIL_SECONDS
-        # 総得点は勝敗と同じ確定時点で採る(end_timeで切ると、確定burstが数百ms遅れて
-        # 届いた戦だけ総得点が小さく出て、resと矛盾する)。
-        total_raw = _bf_step(series, settle_time, 1)
-        tail_raw = total_raw - _bf_step(series, tail_start, 1)
-        rec["tail"] = [tail_raw, total_raw]
-        total_adj = total_raw - _bf_extra_before(extras, settle_time)
-        tail_adj = total_adj - (_bf_step(series, tail_start, 1)
-                                - _bf_extra_before(extras, tail_start))
-        # critの上乗せを引いて総得点が0以下になるのは突合の破綻。補正値を出さない。
-        rec["tail_adj"] = [tail_adj, total_adj] if total_adj > 0 and tail_adj >= 0 else None
-
-        # 残り時間binごとの自陣得点。battleの尺に収まるbinだけを埋め、覆っていないbinは
-        # 分母にも入れない(短いbattleを0得点として混ぜると序盤帯が薄く出る)。
-        bins = []
-        for i in range(_BF_MAX_REMAINING // _BF_BIN_SECONDS):
-            r_from = i * _BF_BIN_SECONDS
-            r_to = r_from + _BF_BIN_SECONDS
-            if r_to > duration:
-                bins.append(None)
-                continue
-            # 残り0の側の端だけは確定時点まで含める(total_rawと同じ切り口に揃える)。
-            upper = settle_time if r_from == 0 else end_time - r_from
-            gain = _bf_step(series, upper, 1) - _bf_step(series, end_time - r_to, 1)
-            bins.append(gain)
-        rec["bins"] = bins
-    return {"battles": battles}
-
-
 def _payload_coverage(conn, sess: dict) -> dict:
     """収集の穴(欠測)を測る素材。sessionが終わった時点で確定する値だけを持つ。
 
@@ -1921,22 +1713,19 @@ def _payload_gift_sku(conn, sess: dict) -> dict:
 _PAYLOAD_FUNCS = {
     "summary": _payload_summary,
     "time_index": _payload_time_index,
-    "relations": _payload_relations,
     "peri_share": _payload_peri_share,
     "peri_battle": _payload_peri_battle,
     "battle_ratio": _payload_battle_ratio,
     "glove": _payload_glove,
     "join_quality": _payload_join_quality,
-    "scale_efficiency": _payload_scale_efficiency,
     "retention": _payload_retention,
     "join_context": _payload_join_context,
     "organic": _payload_organic,
     "entry_source": _payload_entry_source,
-    "battle_flow": _payload_battle_flow,
     "coverage": _payload_coverage,
+    "battle_flow": _payload_battle_flow,
     "gift_sku": _payload_gift_sku,
     "dwell": _payload_dwell,
-    "anomaly": _payload_anomaly,
     "activation": _payload_activation,
 }
 
@@ -1972,7 +1761,7 @@ def _record_compute(kind: str, sess: dict, duration_ms: float) -> None:
     slot[2] += duration_ms
     if duration_ms >= config.get_log_slow_analytics_payload_ms():
         logger.warning(
-            "slow analytics payload: kind=%s took %.0fms for one session",
+            "analytics payloadの計算が低速です: kind=%s が1 sessionで %.0fms かかりました",
             kind, duration_ms,
             extra={"event": "analytics.payload_slow",
                    "ctx": {"kind": kind, "duration_ms": round(duration_ms, 1),
@@ -1980,7 +1769,7 @@ def _record_compute(kind: str, sess: dict, duration_ms: float) -> None:
         )
     elif logger.isEnabledFor(logging.DEBUG):
         logger.debug(
-            "analytics payload computed: kind=%s in %.1fms", kind, duration_ms,
+            "analytics payloadを計算しました: kind=%s, %.1fms", kind, duration_ms,
             extra={"event": "analytics.payload_computed",
                    "ctx": {"kind": kind, "duration_ms": round(duration_ms, 1),
                            "version": CACHE_VERSIONS[kind], "live": live}},
@@ -1995,7 +1784,10 @@ def compute_payload(conn, sess: dict, kind: str) -> dict:
     bindされていない)。"""
     with log_context(session_id=sess.get("id"), unique_id=sess.get("unique_id")):
         started = time.perf_counter()
-        payload = _PAYLOAD_FUNCS[kind](conn, sess)
+        # 内訳では中のDB読み(db.read)と計算を分ける。cache missが何件出たかは上のlogが
+        # 持つが、requestから見て「集計計算そのもの」がどれだけかはここでしか取れない。
+        with perf.phase("analytics.payload"):
+            payload = _PAYLOAD_FUNCS[kind](conn, sess)
         _record_compute(kind, sess, (time.perf_counter() - started) * 1000.0)
     return payload
 
@@ -2010,17 +1802,18 @@ def _stage(kind):
             resolved = kind(*args, **kwargs) if callable(kind) else kind
             if logger.isEnabledFor(logging.DEBUG):
                 logger.debug(
-                    "analytics stage started: %s (%d sessions)", resolved, len(rows),
+                    "analytics stageを開始しました: %s（%d session）", resolved, len(rows),
                     extra={"event": "analytics.stage_started",
                            "ctx": {"kind": resolved, "rows": len(rows)}},
                 )
             started = time.perf_counter()
             try:
-                result = func(rows, *args, **kwargs)
+                with perf.phase("analytics.reduce"):
+                    result = func(rows, *args, **kwargs)
             except Exception:
                 _compute_counters().pop(resolved, None)
                 logger.error(
-                    "analytics stage failed: %s (%d sessions)", resolved, len(rows),
+                    "analytics stageが失敗しました: %s（%d session）", resolved, len(rows),
                     exc_info=True,
                     extra={"event": "analytics.stage_failed",
                            "ctx": {"kind": resolved, "rows": len(rows),
@@ -2053,13 +1846,13 @@ def _log_stage_completed(kind: str, rows: int, duration_ms: float) -> None:
         "computed_live": live,
     }
     message = (
-        f"analytics stage {kind}: {rows} sessions in {total_ms:.0f}ms"
-        f" (reduce {duration_ms:.0f}ms, payload {compute_ms:.0f}ms for"
-        f" {missed + live} sessions)"
+        f"analytics stage {kind}: {rows} session を {total_ms:.0f}ms で処理しました"
+        f"（reduce {duration_ms:.0f}ms, payload {compute_ms:.0f}ms /"
+        f" {missed + live} session）"
     )
     if total_ms >= config.get_log_slow_analytics_ms():
         logger.warning(
-            "slow " + message,
+            "低速: " + message,
             extra={"event": "analytics.stage_slow", "ctx": ctx},
         )
     else:
@@ -2162,45 +1955,6 @@ def reduce_time_index(rows: list, metric: str) -> dict:
         "slots": slots,
         "n_sessions": n_sessions,
         "n_observations": sum(len(b) for b in all_buckets),
-    }
-
-
-@_stage("relations")
-def reduce_relations(rows: list) -> dict:
-    """指標間の関連(配信単位)。1配信 = 1観測として、Spearman順位相関で突き合わせる。
-    素の相関はscale交絡(大箱は全指標が同時に多い)で過大になるため、同接(viewers)と
-    配信長(bucket数)を制御した偏相関を併せて返す。相関対象はSUM累積なので、長い配信
-    ほど全指標が一斉に膨らむ分はpeak同接だけでは除けない。小標本の偶然相関を濃色で
-    断定しないよう、t近似の5%有意判定(sig)も返す。"""
-    obs = [p for _, p in rows if p["n"] > 0]
-    columns = {m: [p[m] or 0 for p in obs] for m in RELATION_METRICS}
-    controls = [columns["viewers"], [p["n"] or 0 for p in obs]]
-    n_obs = len(obs)
-    matrix = {}
-    partial = {}
-    sig = {}
-    for a in RELATION_METRICS:
-        matrix[a] = {}
-        partial[a] = {}
-        sig[a] = {}
-        for b in RELATION_METRICS:
-            r = 1.0 if a == b else _spearman(columns[a], columns[b])
-            matrix[a][b] = r
-            sig[a][b] = True if a == b else _spearman_significant(r, n_obs)
-            if a == b:
-                partial[a][b] = 1.0
-            elif a == "viewers" or b == "viewers":
-                # 制御変数自身との偏相関は定義できない。
-                partial[a][b] = None
-            else:
-                partial[a][b] = _partial_spearman(columns[a], columns[b], controls)
-    return {
-        "metrics": RELATION_METRICS,
-        "matrix": matrix,
-        "partial": partial,
-        "sig": sig,
-        "control": "viewers+duration",
-        "n_sessions": n_obs,
     }
 
 
@@ -2573,42 +2327,6 @@ def reduce_join_quality(rows: list) -> dict:
     }
 
 
-@_stage("scale_efficiency")
-def reduce_scale_efficiency(rows: list, owners: dict) -> dict:
-    """規模 vs 効率: 配信者ごとに 規模=配信ごとの平均同接の中央値 と
-    効率=総コイン÷総視聴時間(コイン/同接・時間=1人が1時間視聴するあたりのコイン)。
-    視聴時間(viewer-hours)で割ることで、配信が長いほど効率が高く見える交絡を除く。
-    1点=配信者。同接データのない(平均同接0の)sessionは統計・件数に入れない。"""
-    by_uid: dict = {}
-    for sess, payload in rows:
-        avgv = payload.get("avgv") or 0
-        if avgv <= 0:
-            continue
-        g = by_uid.setdefault(sess["unique_id"], {"avgs": [], "coins": 0, "vmin": 0.0})
-        g["avgs"].append(avgv)
-        g["coins"] += payload["coins"] or 0
-        g["vmin"] += payload.get("vmin") or 0.0
-    result = []
-    for uid, g in by_uid.items():
-        viewer_hours = g["vmin"] / 60.0
-        owner = owners.get(uid)
-        result.append(
-            {
-                "unique_id": uid,
-                "nickname": (owner["nickname"] if owner else "") or uid,
-                "avatar": (owner["avatar"] if owner else "") or "",
-                "sessions": len(g["avgs"]),
-                "avg_viewers": round(_median(g["avgs"]), 1),
-                "coins": g["coins"],
-                "coins_per_viewer_hour": (
-                    round(g["coins"] / viewer_hours, 2) if viewer_hours > 0 else 0.0
-                ),
-            }
-        )
-    result.sort(key=lambda x: x["coins"], reverse=True)
-    return {"streamers": result}
-
-
 def _dwell_mean_ci(values: list):
     """配信ごとに1点へ畳んだ滞在時間の平均と95%CI半幅。
 
@@ -2816,130 +2534,6 @@ _AN_METRIC_LABELS = {
 }
 
 
-@_stage("anomaly")
-def reduce_anomaly(rows: list) -> dict:
-    """配信の異常検知: その配信者自身の過去分布に対する1配信まるごとの水準の逸脱。
-
-    baselineは必ず「自分を除いた」同一配信者の他配信(leave-one-out)。判定したい配信を
-    baselineに混ぜると、外れているほど基準が自分に引き寄せられ、逸脱が過小に出る。
-
-    有意性はBH法でFDRを制御する。p値は分布を仮定しない経験p値で、到達できる最小値が
-    1/(baseline本数+1)であるため、現在のdata量では多重検定を通過しない。これは手法の
-    不備ではなくdata量の上限なので、埋めずに「検出力不足」として本数とともに返す。"""
-    per_streamer: dict = {}
-    changepoints = []
-    n_measured = 0
-    for sess, payload in rows:
-        metrics = payload.get("m") or {}
-        if metrics:
-            n_measured += 1
-        per_streamer.setdefault(sess["unique_id"], []).append((sess, metrics))
-        cp = payload.get("cp")
-        if cp:
-            before, after = cp.get("before") or 0.0, cp.get("after") or 0.0
-            ratio = (after / before) if before > 0 else None
-            changepoints.append({
-                "session_id": sess["id"],
-                "unique_id": sess["unique_id"],
-                "started_at": sess["started_at"],
-                "at": cp.get("at"),
-                "before": before,
-                "after": after,
-                "ratio": None if ratio is None else round(ratio, 3),
-                "p": cp.get("p"),
-                "bins": cp.get("bins"),
-            })
-
-    findings = []
-    coverage = []
-    for uid, entries in sorted(per_streamer.items()):
-        for metric in _AN_METRICS:
-            values = [(s, m[metric]) for s, m in entries if metric in m]
-            n = len(values)
-            baseline_n = max(0, n - 1)
-            if baseline_n < _AN_MIN_BASELINE:
-                coverage.append({"unique_id": uid, "metric": metric, "sessions": n,
-                                 "status": "insufficient", "baseline": baseline_n})
-                continue
-            # 到達できる最小p値。これがBHを通れないなら、この配信者・指標では
-            # どれだけ外れた配信があっても有意判定は出せない。
-            coverage.append({"unique_id": uid, "metric": metric, "sessions": n,
-                             "status": "ok", "baseline": baseline_n,
-                             "min_p": round(1.0 / (baseline_n + 1), 4)})
-            for sess, value in values:
-                others = [v for s2, v in values if s2["id"] != sess["id"]]
-                z = _robust_z(value, others)
-                p = _empirical_p(value, others)
-                if z is None or p is None:
-                    continue
-                findings.append({
-                    "session_id": sess["id"],
-                    "unique_id": uid,
-                    "started_at": sess["started_at"],
-                    "metric": metric,
-                    "label": _AN_METRIC_LABELS[metric],
-                    "value": round(value, 4),
-                    "typical": round(_median(others), 4),
-                    "p25": round(_percentile(others, 25), 4),
-                    "p75": round(_percentile(others, 75), 4),
-                    "z": round(z, 2),
-                    "p": round(p, 4),
-                    "baseline": len(others),
-                })
-
-    qvalues = benjamini_hochberg([f["p"] for f in findings])
-    for finding, q in zip(findings, qvalues):
-        finding["q"] = round(q, 4)
-        finding["significant"] = q < _AN_FDR_Q
-    findings.sort(key=lambda f: -abs(f["z"]))
-
-    # 検出力の上限。経験p値が到達できる最小値は 1/(baseline+1) で、BHで最小順位の
-    # 検定が通るには p <= q/検定数 が要る。両者から「有意判定が出せる最小のbaseline
-    # 本数」が決まる。届いていないなら、どれだけ外れた配信があっても有意にはならない。
-    n_tests = len(findings)
-    power = None
-    if n_tests:
-        needed_p = _AN_FDR_Q / n_tests
-        best_p = min(f["p"] for f in findings)
-        power = {
-            "tests": n_tests,
-            "needed_p": round(needed_p, 6),
-            "best_p": round(best_p, 4),
-            "needed_baseline": int(math.ceil(1.0 / needed_p)) - 1,
-            "reachable": best_p <= needed_p,
-        }
-
-    shifts = [
-        c for c in changepoints
-        if c["p"] is not None and c["p"] <= _AN_CP_ALPHA and c["ratio"] is not None
-        and (c["ratio"] <= _AN_CP_MIN_RATIO_DROP or c["ratio"] >= _AN_CP_MIN_RATIO_RISE)
-    ]
-    shifts.sort(key=lambda c: c["ratio"])
-
-    return {
-        "n_sessions": len(rows),
-        "n_measured": n_measured,
-        "metrics": list(_AN_METRICS),
-        "labels": _AN_METRIC_LABELS,
-        "fdr_q": _AN_FDR_Q,
-        "min_baseline": _AN_MIN_BASELINE,
-        "findings": findings,
-        "n_significant": sum(1 for f in findings if f["significant"]),
-        "power": power,
-        "coverage": coverage,
-        "changepoints": {
-            "tested": len(changepoints),
-            "alpha": _AN_CP_ALPHA,
-            "bin_seconds": _AN_CP_BIN_SECONDS,
-            "block_bins": _AN_CP_BLOCK_BINS,
-            "significant": sum(
-                1 for c in changepoints if c["p"] is not None and c["p"] <= _AN_CP_ALPHA
-            ),
-            "shifts": shifts,
-        },
-    }
-
-
 def _life_table_curve(table: list) -> Optional[list]:
     """life-tableから累積反応率 1-S(t) をbin境界ごとに返す。
 
@@ -3023,6 +2617,129 @@ def _ac_bootstrap_ci(tables: list, rng) -> dict:
             if len(vals) >= _AC_BOOTSTRAP // 2 else None
         )
     return out
+
+
+@_stage("battle_flow")
+def reduce_battle_flow(rows: list) -> dict:
+    """Battle展開の横断記述統計。母集団は相手が一意に定まるbattleのみ(1v1・実チーム戦・
+    直近rivalを再構成できた個人マルチ)。battle_idは配信者双方が監視対象のとき重複しうる
+    ため横断でdedupする(初出のsessionを採用)。
+
+    「残り1分リード時の勝率」は記述統計であって戦術の効果ではない。リードしている側は
+    そもそも強い/相手が弱い/課金が乗っているという選択効果を含むため、因果として読めない。"""
+    seen = set()
+    n_total = 0
+    excluded = {reason: 0 for reason in _BF_EXCLUSION_REASONS}
+    forms = {form: 0 for form in _BF_FORMS}
+    lead_changes = []
+    checkpoint = {"own": [0, 0], "opp": [0, 0], "tie": [0, 0]}  # [勝ち, 件数]
+    comeback_n = comeback_k = 0
+    tail_shares, tail_uniform = [], []
+    adj_shares, adj_uniform = [], []
+    unresolved_battles = 0
+    result_diff = 0
+    n_bins = _BF_MAX_REMAINING // _BF_BIN_SECONDS
+    bin_gain = [0] * n_bins
+    bin_total = [0] * n_bins
+    bin_n = [0] * n_bins
+    # pooled share(合計÷合計)は少数の高額ギフトに支配されるため、battle単位シェアの
+    # 中央値も併記する。両者が大きく離れる帯は「一部のbattleだけで起きたこと」。
+    bin_shares = [[] for _ in range(n_bins)]
+    n_sessions = 0
+    for _, payload in rows:
+        n_sessions += 1
+        for rec in payload["battles"]:
+            bid = rec["bid"]
+            if bid:
+                if bid in seen:
+                    continue
+                seen.add(bid)
+            n_total += 1
+            if not rec["ok"]:
+                reason = rec.get("why")
+                if reason in excluded:
+                    excluded[reason] += 1
+                continue
+            forms[rec["form"]] = forms.get(rec["form"], 0) + 1
+            result_diff += rec.get("res_diff", 0)
+            lead_changes.append(rec["lc"])
+            result = rec.get("res")
+            slot = checkpoint.get(rec["cp"])
+            if slot is not None and result in ("win", "lose", "draw"):
+                slot[1] += 1
+                slot[0] += 1 if result == "win" else 0
+                # 逆転: 残り1分時点の優劣が最終結果でひっくり返ったか(引き分けは除く)。
+                if rec["cp"] in ("own", "opp") and result in ("win", "lose"):
+                    comeback_n += 1
+                    if (rec["cp"] == "own") != (result == "win"):
+                        comeback_k += 1
+            duration = rec["dur"]
+            uniform = _BF_TAIL_SECONDS / duration if duration else 0
+            tail_raw, total_raw = rec["tail"]
+            if total_raw > 0 and uniform > 0:
+                tail_shares.append(tail_raw / total_raw)
+                tail_uniform.append(uniform)
+            adj = rec.get("tail_adj")
+            if adj and adj[1] > 0 and uniform > 0:
+                adj_shares.append(adj[0] / adj[1])
+                adj_uniform.append(uniform)
+            if rec.get("cu"):
+                unresolved_battles += 1
+            for i, gain in enumerate(rec["bins"]):
+                if gain is None:
+                    continue
+                bin_gain[i] += gain
+                bin_total[i] += total_raw
+                bin_n[i] += 1
+                if total_raw > 0:
+                    bin_shares[i].append(gain / total_raw)
+
+    hist = {}
+    for value in lead_changes:
+        key = min(value, _BF_LEAD_CHANGE_CAP)
+        hist[key] = hist.get(key, 0) + 1
+    bins = [
+        {"from": i * _BF_BIN_SECONDS, "to": (i + 1) * _BF_BIN_SECONDS,
+         "share": round(bin_gain[i] / bin_total[i], 4) if bin_total[i] else None,
+         "median_share": round(_median(bin_shares[i]), 4) if bin_shares[i] else None,
+         "n": bin_n[i]}
+        for i in range(n_bins)
+    ]
+    return {
+        "n_battles": n_total,
+        "n_eligible": sum(forms.values()),
+        "n_sessions": n_sessions,
+        "excluded": excluded,
+        "forms": forms,
+        "result_diff": result_diff,
+        "lead_changes": {
+            "n": len(lead_changes),
+            "median": round(_median(lead_changes), 2) if lead_changes else None,
+            "p75": round(_percentile(lead_changes, 75), 2) if lead_changes else None,
+            "max": max(lead_changes) if lead_changes else None,
+            "hist": [{"changes": key, "count": hist[key],
+                      "capped": key >= _BF_LEAD_CHANGE_CAP}
+                     for key in sorted(hist)],
+        },
+        "checkpoint": {
+            "seconds": _BF_LEAD_CHECKPOINT_SECONDS,
+            "own": _bf_rate(checkpoint["own"][0], checkpoint["own"][1]),
+            "opp": _bf_rate(checkpoint["opp"][0], checkpoint["opp"][1]),
+            "tie": _bf_rate(checkpoint["tie"][0], checkpoint["tie"][1]),
+            "comeback": _bf_rate(comeback_k, comeback_n),
+        },
+        "tail": {
+            "seconds": _BF_TAIL_SECONDS,
+            "raw": _bf_tail_stats(tail_shares, tail_uniform),
+            "adjusted": _bf_tail_stats(adj_shares, adj_uniform),
+            "unresolved_battles": unresolved_battles,
+            "heavy_ratio": _BF_TAIL_HEAVY_RATIO,
+            "light_ratio": _BF_TAIL_LIGHT_RATIO,
+        },
+        "bins": bins,
+        "bin_seconds": _BF_BIN_SECONDS,
+        "min_duration_seconds": _BF_MIN_DURATION_SECONDS,
+    }
 
 
 @_stage("activation")
@@ -3379,129 +3096,6 @@ def _bf_tail_stats(shares: list, uniform: list) -> dict:
         "p75": round(_percentile(shares, 75), 4),
         "uniform_median": round(_median(uniform), 4),
         "heavy": heavy, "flat": flat, "light": light,
-    }
-
-
-@_stage("battle_flow")
-def reduce_battle_flow(rows: list) -> dict:
-    """Battle展開の横断記述統計。母集団は相手が一意に定まるbattleのみ(1v1・実チーム戦・
-    直近rivalを再構成できた個人マルチ)。battle_idは配信者双方が監視対象のとき重複しうる
-    ため横断でdedupする(初出のsessionを採用)。
-
-    「残り1分リード時の勝率」は記述統計であって戦術の効果ではない。リードしている側は
-    そもそも強い/相手が弱い/課金が乗っているという選択効果を含むため、因果として読めない。"""
-    seen = set()
-    n_total = 0
-    excluded = {reason: 0 for reason in _BF_EXCLUSION_REASONS}
-    forms = {form: 0 for form in _BF_FORMS}
-    lead_changes = []
-    checkpoint = {"own": [0, 0], "opp": [0, 0], "tie": [0, 0]}  # [勝ち, 件数]
-    comeback_n = comeback_k = 0
-    tail_shares, tail_uniform = [], []
-    adj_shares, adj_uniform = [], []
-    unresolved_battles = 0
-    result_diff = 0
-    n_bins = _BF_MAX_REMAINING // _BF_BIN_SECONDS
-    bin_gain = [0] * n_bins
-    bin_total = [0] * n_bins
-    bin_n = [0] * n_bins
-    # pooled share(合計÷合計)は少数の高額ギフトに支配されるため、battle単位シェアの
-    # 中央値も併記する。両者が大きく離れる帯は「一部のbattleだけで起きたこと」。
-    bin_shares = [[] for _ in range(n_bins)]
-    n_sessions = 0
-    for _, payload in rows:
-        n_sessions += 1
-        for rec in payload["battles"]:
-            bid = rec["bid"]
-            if bid:
-                if bid in seen:
-                    continue
-                seen.add(bid)
-            n_total += 1
-            if not rec["ok"]:
-                reason = rec.get("why")
-                if reason in excluded:
-                    excluded[reason] += 1
-                continue
-            forms[rec["form"]] = forms.get(rec["form"], 0) + 1
-            result_diff += rec.get("res_diff", 0)
-            lead_changes.append(rec["lc"])
-            result = rec.get("res")
-            slot = checkpoint.get(rec["cp"])
-            if slot is not None and result in ("win", "lose", "draw"):
-                slot[1] += 1
-                slot[0] += 1 if result == "win" else 0
-                # 逆転: 残り1分時点の優劣が最終結果でひっくり返ったか(引き分けは除く)。
-                if rec["cp"] in ("own", "opp") and result in ("win", "lose"):
-                    comeback_n += 1
-                    if (rec["cp"] == "own") != (result == "win"):
-                        comeback_k += 1
-            duration = rec["dur"]
-            uniform = _BF_TAIL_SECONDS / duration if duration else 0
-            tail_raw, total_raw = rec["tail"]
-            if total_raw > 0 and uniform > 0:
-                tail_shares.append(tail_raw / total_raw)
-                tail_uniform.append(uniform)
-            adj = rec.get("tail_adj")
-            if adj and adj[1] > 0 and uniform > 0:
-                adj_shares.append(adj[0] / adj[1])
-                adj_uniform.append(uniform)
-            if rec.get("cu"):
-                unresolved_battles += 1
-            for i, gain in enumerate(rec["bins"]):
-                if gain is None:
-                    continue
-                bin_gain[i] += gain
-                bin_total[i] += total_raw
-                bin_n[i] += 1
-                if total_raw > 0:
-                    bin_shares[i].append(gain / total_raw)
-
-    hist = {}
-    for value in lead_changes:
-        key = min(value, _BF_LEAD_CHANGE_CAP)
-        hist[key] = hist.get(key, 0) + 1
-    bins = [
-        {"from": i * _BF_BIN_SECONDS, "to": (i + 1) * _BF_BIN_SECONDS,
-         "share": round(bin_gain[i] / bin_total[i], 4) if bin_total[i] else None,
-         "median_share": round(_median(bin_shares[i]), 4) if bin_shares[i] else None,
-         "n": bin_n[i]}
-        for i in range(n_bins)
-    ]
-    return {
-        "n_battles": n_total,
-        "n_eligible": sum(forms.values()),
-        "n_sessions": n_sessions,
-        "excluded": excluded,
-        "forms": forms,
-        "result_diff": result_diff,
-        "lead_changes": {
-            "n": len(lead_changes),
-            "median": round(_median(lead_changes), 2) if lead_changes else None,
-            "p75": round(_percentile(lead_changes, 75), 2) if lead_changes else None,
-            "max": max(lead_changes) if lead_changes else None,
-            "hist": [{"changes": key, "count": hist[key],
-                      "capped": key >= _BF_LEAD_CHANGE_CAP}
-                     for key in sorted(hist)],
-        },
-        "checkpoint": {
-            "seconds": _BF_LEAD_CHECKPOINT_SECONDS,
-            "own": _bf_rate(checkpoint["own"][0], checkpoint["own"][1]),
-            "opp": _bf_rate(checkpoint["opp"][0], checkpoint["opp"][1]),
-            "tie": _bf_rate(checkpoint["tie"][0], checkpoint["tie"][1]),
-            "comeback": _bf_rate(comeback_k, comeback_n),
-        },
-        "tail": {
-            "seconds": _BF_TAIL_SECONDS,
-            "raw": _bf_tail_stats(tail_shares, tail_uniform),
-            "adjusted": _bf_tail_stats(adj_shares, adj_uniform),
-            "unresolved_battles": unresolved_battles,
-            "heavy_ratio": _BF_TAIL_HEAVY_RATIO,
-            "light_ratio": _BF_TAIL_LIGHT_RATIO,
-        },
-        "bins": bins,
-        "bin_seconds": _BF_BIN_SECONDS,
-        "min_duration_seconds": _BF_MIN_DURATION_SECONDS,
     }
 
 

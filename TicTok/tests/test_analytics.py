@@ -58,47 +58,15 @@ class TestRankAndCorrelation:
     def test_rank_average_assigns_mean_rank_to_ties(self):
         assert an._rank_average([10, 20, 20, 30]) == [1.0, 2.5, 2.5, 4.0]
 
-    def test_spearman_perfect_monotone(self):
-        assert _approx(an._spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)
-        assert _approx(an._spearman([1, 2, 3, 4], [40, 30, 20, 10]), -1.0)
-
-    def test_spearman_is_rank_based_not_linear(self):
-        # 単調だが非線形。Pearsonなら1未満、Spearmanは1.0。
-        xs = [1, 2, 3, 4, 5]
-        ys = [1, 2, 4, 8, 1000]
-        assert _approx(an._spearman(xs, ys), 1.0)
-        assert an._pearson(xs, ys) < 0.9
+    def test_pearson_is_linear_not_rank_based(self):
+        # 単調だが非線形。順位ベースなら1.0になるところをPearsonは1未満に落とす。
+        assert an._pearson([1, 2, 3, 4, 5], [1, 2, 4, 8, 1000]) < 0.9
 
     def test_too_few_points_is_none(self):
-        assert an._spearman([1, 2], [1, 2]) is None
         assert an._pearson([1, 2], [1, 2]) is None
 
     def test_constant_column_is_none(self):
         assert an._pearson([1, 1, 1], [1, 2, 3]) is None
-        assert an._spearman([1, 1, 1], [1, 2, 3]) is None
-
-
-class TestSpearmanSignificance:
-    def test_none_r_propagates(self):
-        assert an._spearman_significant(None, 100) is None
-
-    def test_df_below_one_is_false(self):
-        assert an._spearman_significant(0.9, 3, k_controls=1) is False
-
-    def test_perfect_correlation_needs_five_points(self):
-        assert an._spearman_significant(1.0, 4) is False
-        assert an._spearman_significant(1.0, 5) is True
-
-    def test_moderate_r_small_n_not_significant(self):
-        assert an._spearman_significant(0.5, 4) is False
-
-    def test_strong_r_large_n_significant(self):
-        assert an._spearman_significant(0.8, 30) is True
-
-    def test_t975_falls_back_to_normal_beyond_table(self):
-        assert an._t_975(0) == an._T975[1]
-        assert an._t_975(1) == 12.706
-        assert an._t_975(31) == 1.96
 
 
 class TestLinearAlgebra:
@@ -123,7 +91,6 @@ class TestLinearAlgebra:
         a = [1, 2, 3, 4, 5, 6]
         b = [2, 4, 6, 8, 10, 12]
         controls = [[10, 20, 30, 40, 50, 60]]
-        assert _approx(an._spearman(a, b), 1.0)
         assert an._partial_spearman(a, b, controls) is None
 
 
@@ -744,37 +711,6 @@ class TestReducePeri:
         assert out["baseline_rate"] == 0.0
 
 
-class TestReduceScaleEfficiency:
-    def test_coins_per_viewer_hour_and_median_scale(self):
-        rows = [
-            (_sess(1, "a"), {"avgv": 10.0, "coins": 100, "vmin": 120.0, "peak": 20}),
-            (_sess(2, "a"), {"avgv": 30.0, "coins": 200, "vmin": 120.0, "peak": 40}),
-        ]
-        out = an.reduce_scale_efficiency(rows, {})
-        assert len(out["streamers"]) == 1
-        s = out["streamers"][0]
-        assert s["sessions"] == 2
-        assert s["avg_viewers"] == 20.0
-        assert s["coins"] == 300
-        assert s["coins_per_viewer_hour"] == 75.0
-        assert s["nickname"] == "a"
-
-    def test_sessions_without_viewer_data_are_dropped(self):
-        rows = [(_sess(1, "a"), {"avgv": 0.0, "coins": 999, "vmin": 0.0})]
-        assert an.reduce_scale_efficiency(rows, {})["streamers"] == []
-
-    def test_sorted_by_coins_descending_and_owner_metadata_used(self):
-        rows = [
-            (_sess(1, "small"), {"avgv": 5.0, "coins": 10, "vmin": 60.0}),
-            (_sess(2, "big"), {"avgv": 5.0, "coins": 500, "vmin": 60.0}),
-        ]
-        owners = {"big": {"nickname": "Big One", "avatar": "http://x/a.png"}}
-        out = an.reduce_scale_efficiency(rows, owners)
-        assert [s["unique_id"] for s in out["streamers"]] == ["big", "small"]
-        assert out["streamers"][0]["nickname"] == "Big One"
-        assert out["streamers"][1]["avatar"] == ""
-
-
 def _dwell_samples(seconds=600.0, step=5.0, viewers=60, rate=0.5, start=0.0, total0=0):
     """定常な観測列。rate=1秒あたりの到着数で累積counterを伸ばす。"""
     out = []
@@ -918,162 +854,41 @@ class TestReduceDwell:
         assert out["streamers"] == [] and out["hours"] == []
 
 
-class TestRobustStats:
-    def test_mad_ignores_a_single_extreme(self):
-        # 1本だけ桁違いでも尺度が壊れないこと(標準偏差ならここで跳ね上がる)。
-        assert an._mad([1, 2, 3, 4, 5]) == 1.0
-        assert an._mad([1, 2, 3, 4, 100000]) == 1.0
+def _loo_reference(values):
+    """leave-one-out統計を「1点ずつ残りを作り直して統計ヘルパーを呼ぶ」素直な形で出す。
 
-    def test_robust_z_scales_like_a_standard_deviation(self):
-        # 正規標本ではMAD*1.4826 ≈ σ。1σぶん離れた点のzは概ね1になる。
-        baseline = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
-        z = an._robust_z(_median_plus(baseline, 1.4826 * an._mad(baseline)), baseline)
-        assert 0.9 < z < 1.1
-
-    def test_robust_z_is_none_when_scale_is_undefined(self):
-        # MAD=0で微小な差を無限大のzにしない。
-        assert an._robust_z(5.0, [3, 3, 3, 3, 3]) is None
-        assert an._robust_z(5.0, [3]) is None
-
-    def test_empirical_p_floor_is_bounded_by_baseline_size(self):
-        baseline = list(range(20))
-        p = an._empirical_p(9999.0, baseline)
-        assert _approx(p, 1 / (len(baseline) + 1))
-
-    def test_empirical_p_is_two_sided(self):
-        baseline = [10] * 5 + [0, 20]
-        assert _approx(an._empirical_p(0.0, baseline), an._empirical_p(20.0, baseline))
-
-    def test_empirical_p_of_a_typical_value_is_large(self):
-        assert an._empirical_p(10.0, list(range(0, 21))) > 0.9
+    _loo_robust_stats がこれをO(n log n)へ畳んだものなので、この素朴版が仕様の定義に
+    あたる。速いほうを直すときは、まずこちらを読むこと。"""
+    out = []
+    for i, value in enumerate(values):
+        others = [v for j, v in enumerate(values) if j != i]
+        med = an._median(others)
+        mad = an._mad(others, med)
+        dev = abs(value - med)
+        at_least = sum(1 for v in others if abs(v - med) >= dev)
+        out.append((med, an._percentile(others, 25.0), an._percentile(others, 75.0),
+                    mad, at_least))
+    return out
 
 
-class TestBenjaminiHochberg:
-    def test_preserves_input_order(self):
-        q = an.benjamini_hochberg([0.5, 0.01, 0.2])
-        assert len(q) == 3
-        assert q[1] < q[0] and q[1] < q[2]
-
-    def test_is_monotone_in_rank(self):
-        ps = [0.001, 0.008, 0.02, 0.3, 0.9]
-        q = an.benjamini_hochberg(ps)
-        assert q == sorted(q)
-
-    def test_never_exceeds_one(self):
-        assert all(v <= 1.0 for v in an.benjamini_hochberg([0.9, 0.95, 0.99]))
-
-    def test_single_test_leaves_p_unchanged(self):
-        assert _approx(an.benjamini_hochberg([0.03])[0], 0.03)
-
-    def test_empty(self):
-        assert an.benjamini_hochberg([]) == []
+# 乱数を使わず、並びも同値の重なり方も決め打ちで作る(seedを覚えなくても再現する)。
+def _spread(n):
+    """散らばった実数。値の大小と入力順が一致しないよう剰余で回す。"""
+    return [((i * 37) % 101) / 7.0 for i in range(n)]
 
 
-class TestChangepointStatistic:
-    def test_finds_the_split_of_a_clear_step(self):
-        values = [1] * 20 + [9] * 20
-        _stat, at = an._rank_cusum(an._rank_average(values), 4)
-        assert at == 20
+def _ties(n):
+    """同値だらけ。中央値と偏差の両方で同順位が大量に出る。"""
+    return [float((i * 7) % 5) for i in range(n)]
 
-    def test_refuses_splits_inside_the_minimum_segment(self):
-        # 端に段があっても最小segment長を割る位置は返さない。
-        values = [1] + [9] * 19
-        _stat, at = an._rank_cusum(an._rank_average(values), 5)
-        assert at is None or 5 <= at <= 15
 
-    def test_too_short_series_has_no_split(self):
-        assert an._rank_cusum([1.0, 2.0, 3.0], 4) == (0.0, None)
-
-    def test_flat_series_yields_no_signal(self):
-        stat, _at = an._rank_cusum(an._rank_average([5] * 30), 4)
-        assert _approx(stat, 0.0, tol=1e-9)
-
-    def test_block_shuffle_preserves_length_and_multiset(self):
-        import random as _random
-        seq = list(range(20))
-        out = an._block_shuffled(seq, 4, _random.Random(1))
-        assert len(out) == len(seq)
-        assert set(out) <= set(seq)
+def _signed_ints(n):
+    """負値を含むint。floatに揃えずintのまま通す。"""
+    return [(i * 13) % 21 - 10 for i in range(n)]
 
 
 def _median_plus(values, delta):
     return an._median(values) + delta
-
-
-class TestReduceAnomaly:
-    def _payload(self, metrics=None, cp=None, span=3600.0, ev=500):
-        return {"m": metrics if metrics is not None else {}, "span": span,
-                "ev": ev, "cp": cp}
-
-    def _rows(self, n=15, uid="a", value=10.0, spike_value=None):
-        rows = []
-        for i in range(n):
-            v = value if (spike_value is None or i < n - 1) else spike_value
-            # baselineに幅を持たせる(MAD=0だと尺度が定義できず判定不能になる)。
-            v = v + (i % 3) - 1
-            rows.append((_sess(i + 1, uid, started=1000.0 + i),
-                         self._payload({"coins_per_min": v})))
-        return rows
-
-    def test_streamer_without_enough_history_is_not_judged(self):
-        rows = self._rows(n=an._AN_MIN_BASELINE)
-        out = an.reduce_anomaly(rows)
-        assert out["findings"] == []
-        short = [c for c in out["coverage"] if c["status"] == "insufficient"]
-        assert short and short[0]["unique_id"] == "a"
-
-    def test_baseline_excludes_the_session_under_test(self):
-        rows = self._rows(n=16, value=10.0, spike_value=1000.0)
-        out = an.reduce_anomaly(rows)
-        top = out["findings"][0]
-        # 自分をbaselineへ混ぜていれば中央値が跳ね上がり、この逸脱は出ない。
-        assert top["session_id"] == 16
-        assert top["typical"] < 20
-        assert top["z"] > 10
-        assert top["baseline"] == 15
-
-    def test_reports_the_normal_range_alongside_the_deviation(self):
-        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
-        top = out["findings"][0]
-        assert top["p25"] <= top["typical"] <= top["p75"]
-        assert top["label"]
-
-    def test_significance_uses_bh_not_raw_p(self):
-        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
-        top = out["findings"][0]
-        assert top["q"] >= top["p"]
-        assert top["significant"] == (top["q"] < out["fdr_q"])
-
-    def test_power_reports_the_detection_floor(self):
-        out = an.reduce_anomaly(self._rows(n=16, spike_value=1000.0))
-        power = out["power"]
-        assert power["tests"] == len(out["findings"])
-        assert _approx(power["best_p"], 1 / 16, tol=1e-3)
-        assert power["reachable"] is (power["best_p"] <= power["needed_p"])
-
-    def test_sessions_without_measurable_metrics_are_counted_separately(self):
-        rows = self._rows(n=16) + [(_sess(99, "a"), self._payload({}))]
-        out = an.reduce_anomaly(rows)
-        assert out["n_sessions"] == 17
-        assert out["n_measured"] == 16
-
-    def test_changepoint_shift_needs_both_significance_and_magnitude(self):
-        big = {"at": 500.0, "before": 40.0, "after": 8.0, "p": 0.005, "bins": 30}
-        tiny = {"at": 500.0, "before": 10.0, "after": 9.8, "p": 0.005, "bins": 30}
-        noisy = {"at": 500.0, "before": 40.0, "after": 8.0, "p": 0.9, "bins": 30}
-        rows = [
-            (_sess(1, "a"), self._payload(cp=big)),
-            (_sess(2, "a"), self._payload(cp=tiny)),
-            (_sess(3, "a"), self._payload(cp=noisy)),
-        ]
-        shifts = an.reduce_anomaly(rows)["changepoints"]["shifts"]
-        assert [s["session_id"] for s in shifts] == [1]
-
-    def test_empty_rows_do_not_fabricate_results(self):
-        out = an.reduce_anomaly([])
-        assert out["findings"] == [] and out["n_significant"] == 0
-        assert out["power"] is None
-        assert out["changepoints"]["shifts"] == []
 
 
 class TestObservedSpan:
@@ -1525,49 +1340,6 @@ class TestReduceCoverage:
         assert out["n_sessions"] == 0
         assert out["instrumented"]["coverage"] is None
         assert out["transcript"]["ratio"] is None
-
-
-class TestReduceRelations:
-    def _rows(self, n=6):
-        rows = []
-        for i in range(n):
-            p = {"joins": i + 1, "comments": (i + 1) * 2, "diamonds": (n - i),
-                 "likes": i + 1, "follows": 1, "viewers": (i + 1) * 3, "n": 10}
-            rows.append((_sess(i), p))
-        return rows
-
-    def test_diagonal_is_one_and_significant(self):
-        out = an.reduce_relations(self._rows())
-        for m in an.RELATION_METRICS:
-            assert out["matrix"][m][m] == 1.0
-            assert out["partial"][m][m] == 1.0
-            assert out["sig"][m][m] is True
-
-    def test_monotone_pair_is_perfectly_correlated(self):
-        out = an.reduce_relations(self._rows())
-        assert _approx(out["matrix"]["joins"]["comments"], 1.0)
-        assert _approx(out["matrix"]["joins"]["diamonds"], -1.0)
-        assert out["sig"]["joins"]["comments"] is True
-
-    def test_partial_against_the_control_itself_is_none(self):
-        out = an.reduce_relations(self._rows())
-        for m in an.RELATION_METRICS:
-            if m != "viewers":
-                assert out["partial"]["viewers"][m] is None
-                assert out["partial"][m]["viewers"] is None
-
-    def test_sessions_without_buckets_are_dropped(self):
-        rows = self._rows() + [(_sess(99), {m: 0 for m in an.RELATION_METRICS} | {"n": 0})]
-        out = an.reduce_relations(rows)
-        assert out["n_sessions"] == 6
-        assert out["control"] == "viewers+duration"
-
-    def test_matrix_is_symmetric(self):
-        out = an.reduce_relations(self._rows())
-        for a in an.RELATION_METRICS:
-            for b in an.RELATION_METRICS:
-                ra, rb = out["matrix"][a][b], out["matrix"][b][a]
-                assert (ra is None and rb is None) or _approx(ra, rb, 1e-9)
 
 
 class TestCacheVersionContract:

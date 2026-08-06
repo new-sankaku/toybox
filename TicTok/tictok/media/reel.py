@@ -4,147 +4,59 @@
 (clipper)は範囲ごとに別fileを作るので、N個の見どころは N本のmp4になり結局全部開くことに
 なる。ここでは同じ範囲listを**1本のmp4**へ連結する。
 
-## 方式: 2段のstream copy
+方式は2段のstream copy(各範囲をTS中間へ切り出し、concat demuxerで1本へ繋ぐ)。実装と、
+引数順・TS中間・連結可否の照合をそう選んだ実測上の理由は :mod:`tictok.media.concat` に
+ある。再encodeを一切しないので3時間の録画から数分のreelを作っても実時間は数秒で、画質も
+原本のままになる。
 
-1. 各範囲を MPEG-TS の中間fileへ切り出す(``-c copy``)
-2. concat demuxerで中間fileを1本のmp4へ連結する(``-c copy``)
+## 前置き(lead)は残す
 
-再encodeを一切しないので3時間の録画から数分のreelを作っても実時間は数秒で、画質も原本の
-ままになる。中間をmp4ではなくTSにするのは、TSが任意のtimestampを許すためで、実測では
-mp4中間だと連結時にNon-monotonic DTSが多発した(TS中間では0件)。
-
-## 切り出しの引数順
-
-``-ss <start> -i <src> -to <end> -copyts`` を使う。理由は実測に基づく:
-
-- **出力側 -ss(clipper方式)は使えない**。stream copyの出力側seekは最初のkeyframeが来るまで
-  video packetを捨てるため、GOPより短い範囲は**映像が1 frameも入らない**(実録画の一例では
-  keyframe間隔が17.7秒あり、10秒の切り出しが音声だけのmp4になった)。
-- ``-ss K -i src -t D`` 形式は、Kがkeyframeから僅かでも手前へずれると1 GOPぶん手前へ飛び、
-  尺が倍近くなる(0.0003秒の丸めで16.3秒が33.9秒になる実例を確認)。keyframe位置を秒で
-  持ち回る形は脆い。
-- ``-ss start -i src -to end -copyts`` は「startの直前のkeyframeからendまで」を過不足なく
-  出す。keyframeを自前で探す必要が無く、丸めにも影響されない。
-
-stream copyはkeyframe境界でしか切れないので、各範囲の頭には最大1 GOPぶんの前置き(lead)が
-付く。これは捨てずにそのまま残し、実際の開始位置を戻り値で報告する。frame単位で詰めるには
+stream copyはkeyframe境界でしか切れないので、各範囲の頭には最大1 GOPぶんの前置きが付く。
+これは捨てずにそのまま残し、実際の開始位置を戻り値で報告する。frame単位で詰めるには
 再encodeが要るが、それはreelの目的(通しで俯瞰する)に対して割に合わない。
 
-## 音量の正規化はここでは行わない
+## 接合点のA/Vずれ(解決済み)
 
-範囲ごとに ``loudnorm`` を掛ける形(clipperと同じやり方)を実装して実測したところ、各範囲の
-**先頭およそ0.5秒だけ音がずれる**(以降は一致する)。``-copyts`` で絶対timestampを保った入力
-に対して音声filter graphを通すと、映像のkeyframe位置と音声の復号開始位置の差を
-``aresample=async=1`` が埋めにかかるためで、stream copyのままなら全域でlag 0.001秒未満に
-収まることを同じ素材で確認している。ずれた音を黙って出すより出さない方を採る。録画ごとの
-音量差を均す必要が出たら、範囲ごとではなく連結後のreelへ1回だけ掛ける形にすること。
+かつては接合点ごとに音と映像がずれていた。原因は連結ではなく**切り出し段の非対称**で、
+``-ss`` に要求時刻を渡すと video は要求の直後のkeyframeから・audio は手前のsegment境界から
+始まり、partの先頭に約2秒の音声だけの区間ができていた。concat demuxerはfileのoffsetを
+file全体の尺(=長い方=audio)で決めるので、その差が接合ごとにvideoの穴として現れる。
 
-## 素材が揃わないとき
+実録画5範囲での実測(成果物から f_v(t)=映っているframeの原本時刻・f_a(t)=鳴っている音の
+原本時刻を測り、その差を見た):
 
-concat demuxerのstream copyは全fileのcodec parameterが一致していることが前提で、解像度や
-H.264 profileが違うものを繋ぐと再生できない動画が出来る。実DBには同一session内でも profile
-が Main と High で食い違う録画が存在するため、連結前に必ず照合し、**違えば明示的に失敗**
-させる(黙って再encodeへ倒すと、利用者は原本画質のつもりで再encode物を受け取る)。
+===================  ==========  ==========
+指標                 修正前      修正後
+===================  ==========  ==========
+A/Vずれの最大        1,320ms     **68ms**
+videoの穴(合計)      10.5秒      2.3秒(注1)
+audioの穴(合計)      0.671秒     **0秒**
+===================  ==========  ==========
+
+注1: 残る2.3秒は原本自身がkeyframeごとに持つ1 frameぶん(40ms)の間隔が37箇所で、接合とは
+無関係。修正後の残差は測り直すと8〜68msの幅で動く(測定側が1 frame単位でぶれる)ので、
+**68ms以下**と読むこと。修正前の1,320msはpartの頭(映像が前のpartで止まっている区間)で出る
+値で、partの内側では修正前も±18msだった — 症状は「連続的なずれ」ではなく「接合ごとの穴」。
+
+方式は :mod:`tictok.media.concat` にある。当時「``loudnorm`` で先頭0.5秒がずれる」を根拠に
+正規化を避けていたが、切り分けの結果 loudnorm は**完全にtiming中立**で(loudnormのみを掛けた
+出力は無しの版と全点0.2ms以内で一致)、ずれていたのは同梱していた ``aresample=async=1``
+の方だった。切り出し段が揃った今、``aresample`` は不要である。
 """
 
-import asyncio
-import json
+import contextlib
 import logging
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Optional
 
-from tictok.core import cancel, config, layout
+from tictok.core import config, layout
 from tictok.media.clipper import _UNSAFE_LABEL_RE, _hhmmss
+from tictok.media import concat, hls_source
 from tictok.record.video_overlay import _duration_seconds, ffmpeg_available
 
 logger = logging.getLogger(__name__)
-
-# mp4/movのlength-prefixed NALをAnnex Bへ直すbitstream filter。TS中間に入れるため必須。
-# 未知のcodecは黙って素通しにせず落とす: 変換が要るのに掛けなければTSは壊れる。
-_ANNEXB_FILTERS = {"h264": "h264_mp4toannexb", "hevc": "hevc_mp4toannexb"}
-
-# 連結の可否を決めるstream parameter。avcC(mp4のcodec設定)は先頭fileのものが1つだけ書かれる
-# ので、ここが食い違う素材を繋ぐと後半が復号できない。levelまで見るのは、同じprofileでも
-# levelが違えばSPSが違い、strictなhardware decoderが後半で詰まるため。
-_VIDEO_KEYS = ("codec_name", "width", "height", "pix_fmt", "profile", "level")
-_AUDIO_KEYS = ("codec_name", "sample_rate", "channels")
-
-_VIDEO_LABELS = {"codec_name": "映像codec", "width": "幅", "height": "高さ",
-                 "pix_fmt": "pixel format", "profile": "profile", "level": "level"}
-_AUDIO_LABELS = {"codec_name": "音声codec", "sample_rate": "sample rate",
-                 "channels": "channel数"}
-
-
-async def _probe_streams(src: Path) -> dict:
-    """srcの先頭video/audio streamのparameterを返す。取れない項目は捏造せずNoneのまま残す
-    (Noneは他fileのNone以外と一致しないので、照合は自然に失敗する)。"""
-    cmd = ["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(src)]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        message = (stderr or b"").decode("utf-8", "replace").strip()
-        logger.error(
-            "reel probe failed for %s", src.name,
-            extra={"event": "reel.probe_failed",
-                   "ctx": {"src": str(src), "returncode": proc.returncode,
-                           "stderr": message[:2000]}},
-        )
-        raise RuntimeError(f"素材を解析できませんでした: {src.name}")
-    streams = json.loads(stdout.decode("utf-8", "replace")).get("streams") or []
-    video = next((s for s in streams if s.get("codec_type") == "video"), None)
-    audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
-    if video is None:
-        raise RuntimeError(f"映像streamがありません: {src.name}")
-    if audio is None:
-        raise RuntimeError(f"音声streamがありません: {src.name}")
-    return {
-        "video": {k: video.get(k) for k in _VIDEO_KEYS},
-        "audio": {k: audio.get(k) for k in _AUDIO_KEYS},
-    }
-
-
-def _mismatch_reasons(first: dict, other: dict) -> list:
-    """firstを基準に、otherの食い違う項目を日本語で並べる。"""
-    reasons = []
-    for kind, keys, labels in (("video", _VIDEO_KEYS, _VIDEO_LABELS),
-                               ("audio", _AUDIO_KEYS, _AUDIO_LABELS)):
-        for key in keys:
-            want, got = first[kind][key], other[kind][key]
-            if want != got:
-                reasons.append(f"{labels[key]} {want} と {got}")
-    return reasons
-
-
-async def _probe_sources(sources: list) -> dict:
-    """全素材のparameterを取り、1つでも食い違えば連結せずに失敗させる。"""
-    infos = {}
-    for src in sources:
-        infos[src] = await _probe_streams(src)
-    first_src = sources[0]
-    first = infos[first_src]
-    codec = first["video"]["codec_name"]
-    if codec not in _ANNEXB_FILTERS:
-        raise RuntimeError(f"連結に対応していない映像codecです: {codec}")
-    for src in sources[1:]:
-        reasons = _mismatch_reasons(first, infos[src])
-        if not reasons:
-            continue
-        logger.warning(
-            "reel sources are not concat-compatible: %s vs %s", first_src.name, src.name,
-            extra={"event": "reel.incompatible",
-                   "ctx": {"first": str(first_src), "other": str(src),
-                           "first_params": first, "other_params": infos[src],
-                           "reasons": reasons}},
-        )
-        raise RuntimeError(
-            f"素材の形式が揃っていないため連結できません（{first_src.name} と {src.name}: "
-            f"{ '、'.join(reasons) }）。同じ形式の録画だけを選ぶか、先に再mp4化してください。"
-        )
-    return first
 
 
 def reel_path(src: Path, start: float, end: float, count: int,
@@ -159,42 +71,6 @@ def reel_path(src: Path, start: float, end: float, count: int,
             name = f"{name}_{safe}"
     return target_dir / f"{name}.mp4"
 
-
-async def _run(cmd: list, event: str, ctx: dict, message: str) -> None:
-    cancel.check_cancelled()
-    proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=asyncio.subprocess.DEVNULL,
-        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-    cancel.register_process(proc)
-    try:
-        _, stderr = await proc.communicate()
-    finally:
-        cancel.forget_process(proc)
-    cancel.check_cancelled()
-    if proc.returncode != 0:
-        detail = (stderr or b"").decode("utf-8", "replace").strip()
-        logger.error(
-            "%s", message,
-            extra={"event": event,
-                   "ctx": {**ctx, "returncode": proc.returncode, "stderr": detail[:2000]}},
-        )
-        raise RuntimeError(f"{message}: {detail[:300]}")
-
-
-async def _cut_part(src: Path, start: float, end: float, dst: Path, codec: str) -> float:
-    """[直前のkeyframe, end)をTSの中間fileへ複製し、その実尺(秒)を返す。"""
-    await _run(
-        ["ffmpeg", "-v", "error", "-y",
-         "-ss", f"{start:.3f}", "-i", str(src), "-to", f"{end:.3f}", "-copyts",
-         "-c", "copy", "-bsf:v", _ANNEXB_FILTERS[codec], "-f", "mpegts", str(dst)],
-        "reel.cut_failed",
-        {"src": str(src), "start": start, "end": end, "output": str(dst)},
-        f"見どころの切り出しに失敗しました（{src.name} {start:.1f}-{end:.1f}秒）",
-    )
-    written = await _duration_seconds(dst)
-    if written is None:
-        raise RuntimeError(f"切り出した中間fileの尺を測れませんでした（{src.name}）。")
-    return written
 
 
 async def make_reel(items: list, *, label: Optional[str] = None,
@@ -215,14 +91,10 @@ async def make_reel(items: list, *, label: Optional[str] = None,
         start, end = float(item["start"]), float(item["end"])
         if end <= start:
             raise RuntimeError("終了位置は開始位置より後にしてください。")
-        if not src.is_file():
+        if not hls_source.available(src):
             raise RuntimeError(f"録画fileが存在しません: {src.name}")
         parts.append({"src": src, "start": start, "end": end,
                       "label": item.get("label") or ""})
-
-    sources = list(dict.fromkeys(part["src"] for part in parts))
-    first = await _probe_sources(sources)
-    codec = first["video"]["codec_name"]
 
     out = reel_path(parts[0]["src"], parts[0]["start"], parts[-1]["end"],
                     len(parts), label)
@@ -231,44 +103,47 @@ async def make_reel(items: list, *, label: Optional[str] = None,
     # 判定(呼び出し側)と実際に消費する場所を一致させる。
     workdir = Path(tempfile.mkdtemp(prefix=".reel_", dir=out.parent))
 
-    try:
-        total = len(parts)
-        for index, part in enumerate(parts):
-            if on_progress is not None:
-                await on_progress(f"({index + 1}/{total}) 見どころを切り出し中",
-                                  int(index * 85 / total))
-            dst = workdir / f"part{index:04d}.ts"
-            written = await _cut_part(part["src"], part["start"], part["end"], dst, codec)
-            # stream copyはkeyframeでしか切れないので、実際の開始は要求より手前になる。
-            # 何秒手前かは呼び出し側が利用者へ見せられるよう返す(黙って要求どおりと報告
-            # すると、reelの目次と実物の時刻が食い違う)。
-            requested = part["end"] - part["start"]
-            part.update({"path": dst, "seconds": written,
-                         "lead_seconds": round(max(0.0, written - requested), 3),
-                         "requested_seconds": round(requested, 3)})
+    # mp4が無い録画は.tsのHLSから切る。素材は同じ物を何度も切るので、貸し出しは全部の
+    # 切り出しが終わるまで開いたままにする(hls_source参照)。
+    async with contextlib.AsyncExitStack() as stack:
+        sources = {src: await stack.enter_async_context(hls_source.ffmpeg_source_async(src))
+                   for src in dict.fromkeys(part["src"] for part in parts)}
+        first = await concat.check_compatible(sources, event="reel.incompatible")
+        codec = first["video"]["codec_name"]
+        try:
+            total = len(parts)
+            for index, part in enumerate(parts):
+                if on_progress is not None:
+                    # 件数は括弧に入れる。段階名に混ぜると、jobの段階履歴が見どころの数だけ
+                    # 別々の段階として並ぶ(media_queue.stage_phase が括弧の中を落とす)。
+                    await on_progress(f"見どころを切り出し中（{index + 1} / {total}件）",
+                                      int(index * 85 / total))
+                dst = workdir / f"part{index:04d}.ts"
+                cut = await concat.cut_part(
+                    sources[part["src"]], part["start"], part["end"], dst, codec,
+                    event="reel.cut_failed",
+                    message=f'見どころの切り出しに失敗しました（{part["src"].name} '
+                            f'{part["start"]:.1f}-{part["end"]:.1f}秒）')
+                # stream copyはkeyframeでしか切れないので、実際の開始は要求より手前になる。
+                # 何秒手前かは呼び出し側が利用者へ見せられるよう返す(黙って要求どおりと報告
+                # すると、reelの目次と実物の時刻が食い違う)。実測値を使う: 尺の差から逆算
+                # すると、audioだけが手前から入っているぶんまで前置きに数えてしまう。
+                requested = part["end"] - part["start"]
+                part.update({"cut": cut, "path": dst, "seconds": cut.seconds,
+                             "lead_seconds": cut.lead_seconds,
+                             "requested_seconds": round(requested, 3)})
 
-        if on_progress is not None:
-            await on_progress("連結中", 85)
-        list_path = workdir / "concat.txt"
-        # concat demuxerのfile行はsingle quoteで囲まれるので、path中のquoteは閉じ扱いになる。
-        # 中間fileの名前はここで作った part0000.ts なので、実際には現れない。
-        list_path.write_text(
-            "".join(f"file '{part['path'].as_posix()}'\n" for part in parts),
-            encoding="utf-8")
-        # +genptsは中間fileの絶対timestamp(copyts由来)を連結側で振り直させる。
-        await _run(
-            ["ffmpeg", "-v", "error", "-y", "-fflags", "+genpts",
-             "-f", "concat", "-safe", "0", "-i", str(list_path),
-             "-c", "copy", "-movflags", "+faststart", str(out)],
-            "reel.concat_failed",
-            {"output": str(out), "parts": len(parts)},
-            "見どころの連結に失敗しました",
-        )
-    except BaseException:
-        out.unlink(missing_ok=True)
-        raise
-    finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+            if on_progress is not None:
+                await on_progress("連結中", 85)
+            list_path = workdir / "concat.txt"
+            await concat.concat_parts(
+                [part["cut"] for part in parts], out, list_path,
+                event="reel.concat_failed", message="見どころの連結に失敗しました")
+        except BaseException:
+            out.unlink(missing_ok=True)
+            raise
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     if not out.is_file():
         raise RuntimeError("連結は成功しましたが出力fileがありません。")
@@ -285,12 +160,13 @@ async def make_reel(items: list, *, label: Optional[str] = None,
     # keyframeぶんの前置きを常に誤差として数えることになり、本物の欠落を隠す。
     if actual is not None and abs(actual - expected) > config.get_clip_duration_tolerance_seconds():
         logger.warning(
-            "reel duration differs from its parts: %s (%.2fs of parts, %.2fs written)",
+            "連結後の尺が素材の合計と異なります: %s（素材 %.2fs, 出力 %.2fs）",
             out.name, expected, actual,
             extra={"event": "reel.duration_mismatch", "ctx": ctx},
         )
     logger.info(
-        "reel exported: %s (%d parts, %d sources)", out.name, len(parts), len(sources),
+        "切り出しの連結が完了しました: %s（%d parts, %d sources）",
+        out.name, len(parts), len(sources),
         extra={"event": "reel.exported", "ctx": ctx},
     )
     if on_progress is not None:
