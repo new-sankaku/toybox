@@ -1,0 +1,56 @@
+[
+  {
+    "id": "asmr-01-vertical-glow",
+    "src": "doc/reference/asmr/ASMR7.webp",
+    "box": [
+      0,
+      10,
+      112,
+      410
+    ],
+    "bgbox": [
+      312,
+      80,
+      36,
+      46
+    ],
+    "text": "お泊りデート",
+    "note": "縦組み極太gothic・白fill・柔らかい紫glow・小さなpink ruby(とま)"
+  },
+  {
+    "id": "asmr-02-pop-ruby",
+    "src": "doc/reference/asmr/ASMR5.webp",
+    "box": [
+      0,
+      302,
+      560,
+      116
+    ],
+    "bgbox": [
+      400,
+      400,
+      46,
+      14
+    ],
+    "text": "極上ご奉仕",
+    "note": "丸pop体・cream→white縦gradient・細い白縁・mint角丸座布団のruby"
+  },
+  {
+    "id": "asmr-03-plate-mincho",
+    "src": "doc/reference/asmr/ASMR6.webp",
+    "box": [
+      270,
+      83,
+      290,
+      89
+    ],
+    "bgbox": [
+      120,
+      300,
+      290,
+      89
+    ],
+    "text": "お耳のお掃除",
+    "note": "白明朝・淡いglow・半透明の青座布団(line scope)"
+  }
+]

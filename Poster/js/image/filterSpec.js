@@ -1,6 +1,9 @@
+(function (PF) {
+'use strict';
+
 let canvasFilterSupported = null;
 
-export function supportsCanvasFilter() {
+function supportsCanvasFilter() {
   if (canvasFilterSupported !== null) { return canvasFilterSupported; }
   try {
     const cv = document.createElement('canvas');
@@ -15,7 +18,21 @@ export function supportsCanvasFilter() {
   return canvasFilterSupported;
 }
 
-export function buildFilterSpec(rng, genre, intensity) {
+const MODE_WEIGHTS = [
+  { v: 'neutral', w: 30 },
+  { v: 'desaturate', w: 22 },
+  { v: 'mono', w: 5 },
+  { v: 'sepia', w: 7 },
+  { v: 'vivid', w: 21 },
+  { v: 'bleach', w: 9 },
+  { v: 'shift', w: 6 }
+];
+
+const MODE_BIAS = {
+  adult: { vivid: 2.6, neutral: 1.3, shift: 1.2, sepia: 0.25, bleach: 0.3, desaturate: 0.15, mono: 0.06 }
+};
+
+function buildFilterSpec(rng, genre, intensity) {
   const k = Math.max(0, Math.min(1, intensity));
   const spec = {
     grayscale: 0,
@@ -27,15 +44,14 @@ export function buildFilterSpec(rng, genre, intensity) {
     blur: 0,
     mode: 'neutral'
   };
-  const mode = rng.weighted([
-    { v: 'neutral', w: 20 },
-    { v: 'desaturate', w: 24 },
-    { v: 'mono', w: 14 },
-    { v: 'sepia', w: 12 },
-    { v: 'vivid', w: 18 },
-    { v: 'bleach', w: 10 },
-    { v: 'shift', w: 8 }
-  ]);
+  const bias = MODE_BIAS[genre] || null;
+  const items = [];
+  for (let i = 0; i < MODE_WEIGHTS.length; i++) {
+    const name = MODE_WEIGHTS[i].v;
+    const mul = bias && bias[name] ? bias[name] : 1;
+    items.push({ v: name, w: MODE_WEIGHTS[i].w * mul });
+  }
+  const mode = rng.weighted(items);
   if (mode === 'neutral') {
     spec.contrast = 1 + rng.range(0, 0.12) * k;
     spec.saturate = 1 + rng.range(-0.1, 0.15) * k;
@@ -69,11 +85,25 @@ export function buildFilterSpec(rng, genre, intensity) {
   if (genre === 'novel') {
     spec.saturate = Math.min(spec.saturate, 1.05);
   }
+  if (genre === 'game') {
+    spec.grayscale = 0;
+    spec.sepia = 0;
+    spec.hueRotate = 0;
+    spec.saturate = Math.max(spec.saturate, 1 + 0.10 * k);
+    spec.brightness = Math.max(spec.brightness, 1);
+    spec.contrast = Math.max(spec.contrast, 1 + 0.06 * k);
+  }
+  if (genre === 'asmr') {
+    spec.grayscale = 0;
+    spec.sepia = Math.min(spec.sepia, 0.18);
+    spec.saturate = Math.max(spec.saturate, 1.02 + 0.10 * k);
+    spec.brightness += 0.03 * k;
+  }
   spec.mode = mode;
   return spec;
 }
 
-export function filterSpecToCss(spec, extraBlur) {
+function filterSpecToCss(spec, extraBlur) {
   const parts = [];
   if (spec.grayscale > 0.001) { parts.push('grayscale(' + (spec.grayscale * 100).toFixed(1) + '%)'); }
   if (spec.sepia > 0.001) { parts.push('sepia(' + (spec.sepia * 100).toFixed(1) + '%)'); }
@@ -143,7 +173,7 @@ function boxBlurVertical(src, dst, w, h, radius) {
   }
 }
 
-export function applyFilterFallback(ctx, w, h, spec) {
+function applyFilterFallback(ctx, w, h, spec) {
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
   const gs = spec.grayscale || 0;
@@ -210,7 +240,7 @@ export function applyFilterFallback(ctx, w, h, spec) {
   ctx.putImageData(img, 0, 0);
 }
 
-export function drawWithFilter(dstCtx, src, w, h, spec, extraBlur) {
+function drawWithFilter(dstCtx, src, w, h, spec, extraBlur) {
   if (supportsCanvasFilter()) {
     dstCtx.save();
     dstCtx.filter = filterSpecToCss(spec, extraBlur);
@@ -233,3 +263,8 @@ export function drawWithFilter(dstCtx, src, w, h, spec, extraBlur) {
   };
   applyFilterFallback(dstCtx, w, h, merged);
 }
+
+Object.assign(PF, {
+  supportsCanvasFilter, buildFilterSpec, filterSpecToCss, applyFilterFallback, drawWithFilter
+});
+})(window.PF = window.PF || {});

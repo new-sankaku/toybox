@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>decor repro bench</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #202020; }
+  #stage { display: block; }
+</style>
+</head>
+<body>
+<canvas id="stage" width="600" height="300"></canvas>
+<script src="../../js/core/color.js"></script>
+<script src="../../js/core/oklch.js"></script>
+<script src="../../js/render/decor.js"></script>
+<script src="../../js/render/text.js"></script>
+<script>
+(function () {
+'use strict';
+const cv = document.getElementById('stage');
+
+function loadImage(url) {
+  return new Promise(function (res, rej) {
+    const im = new Image();
+    im.onload = function () { res(im); };
+    im.onerror = function () { rej(new Error('load失敗: ' + url)); };
+    im.src = url;
+  });
+}
+
+// spec の欠損fieldを paintDecorated が期待する形に埋める
+function normalizeSpec(s) {
+  const spec = Object.assign({
+    fill: { type: 'solid', angle: 0, stops: [{ t: 0, rgb: [255, 255, 255] }] },
+    strokes: [], glow: null, dropShadow: null, longShadow: null, extrude: null,
+    bevel: null, innerLine: null, plate: null, underline: null, overline: null,
+    boten: null, edgeSplit: null, misregister: null, splitCut: null,
+    reflection: null, roughEdge: null, torn: null, distort: null, transform: null,
+    vertical: false, axes: ['repro']
+  }, s || {});
+  if (!spec.fill.stops) { spec.fill.stops = [{ t: 0, rgb: [255, 255, 255] }]; }
+  if (typeof spec.fill.angle !== 'number') { spec.fill.angle = 0; }
+  if (spec.plate && spec.plate.seed === undefined) { spec.plate.seed = 1; }
+  if (spec.plate && spec.plate.rotate === undefined) { spec.plate.rotate = 0; }
+  if (spec.plate && spec.plate.skew === undefined) { spec.plate.skew = 0; }
+  if (spec.plate && spec.plate.radius === undefined) { spec.plate.radius = 0; }
+  if (spec.plate && spec.plate.scope === undefined) { spec.plate.scope = 'all'; }
+  if (spec.glow && spec.glow.passes === undefined) { spec.glow.passes = 1; }
+  return spec;
+}
+
+window.renderTarget = async function (job) {
+  const W = job.W;
+  const H = job.H;
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+
+  let sourceCanvas = null;
+  if (job.bg && job.bg.url) {
+    const im = await loadImage(job.bg.url);
+    ctx.drawImage(im, 0, 0, W, H);
+    const sc = document.createElement('canvas');
+    sc.width = W;
+    sc.height = H;
+    sc.getContext('2d').drawImage(im, 0, 0, W, H);
+    sourceCanvas = sc;
+  } else if (job.bg && job.bg.rgb) {
+    ctx.fillStyle = 'rgb(' + job.bg.rgb.join(',') + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  const out = [];
+  const items = job.items || [job];
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const r = window.PF.drawSlot(ctx, {
+      text: it.text,
+      slot: Object.assign({ align: 'center', vertical: false, maxLines: 1, tracking: 0, decor: 'title' }, it.slot || {}),
+      rect: it.rect || { x: 0, y: 0, w: 1, h: 1 },
+      W: W, H: H,
+      weight: it.weight || '900',
+      fontCss: it.fontCss,
+      startSize: it.startSize,
+      decor: normalizeSpec(it.spec),
+      sourceCanvas: sourceCanvas
+    });
+    out.push(r ? {
+      size: r.size, box: r.box, lines: r.lines, truncated: r.truncated,
+      regions: r.regions ? { line: r.regions.line.length, phrase: r.regions.phrase.length } : null
+    } : null);
+  }
+  return out;
+};
+
+window.reproReady = true;
+})();
+</script>
+</body>
+</html>

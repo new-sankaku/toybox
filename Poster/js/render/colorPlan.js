@@ -1,31 +1,9 @@
-import { contrastRatio } from '../core/color.js';
-import {
-  oklchToSrgb,
-  srgbToOklch,
-  clampChroma,
-  clamp01,
-  mod360,
-  hueDistance,
-  pullHue,
-  apcaContrast
-} from '../core/oklch.js';
-import { pickKeyColor } from '../core/palette.js';
-import {
-  buildScheme,
-  chooseScheme,
-  hasVibration,
-  enforceChromaBudget,
-  violatesChromaBudget,
-  separateLightness,
-  lightnessLadder,
-  pickReadable,
-  rotateHue,
-  pickGroundLightness,
-  pickFreeLightness,
-  inGroundBand,
-  groundSideRange,
-  CHROMA_BUDGET
-} from '../core/harmony.js';
+(function (PF) {
+'use strict';
+const { contrastRatio } = PF;
+const { oklchToSrgb, srgbToOklch, clampChroma, clamp01, mod360, hueDistance, pullHue, apcaContrast } = PF;
+const { pickKeyColor } = PF;
+const { buildScheme, chooseScheme, hasVibration, enforceChromaBudget, violatesChromaBudget, separateLightness, lightnessLadder, pickReadable, rotateHue, pickGroundLightness, pickFreeLightness, inGroundBand, groundSideRange } = PF;
 
 const MAX_ATTEMPTS = 3;
 const FINAL_SCHEME = 'accentedNeutral';
@@ -34,6 +12,8 @@ const MIN_INK_WCAG = 4.5;
 const MIN_INK_APCA = 60;
 const TEXT_LADDER_STEPS = 7;
 const TEXT_LADDER_CHROMA = 0.045;
+const TEXT_ACCENT_STEPS = 5;
+const TEXT_ACCENT_L_RANGE = [0.20, 0.88];
 const TINT_MAX_CHROMA = 0.075;
 
 const ROLE_NAMES = ['ink', 'inkAlt', 'accent', 'surface', 'surfaceAlt', 'stroke', 'glow', 'plate', 'shadow'];
@@ -72,8 +52,17 @@ const VIBRATION_PAIRS = [
 
 const GENRE_BIAS = {
   cinema: {
+    textChromaBias: 0.50,
+    textLBand: null,
+    textMinChroma: 0.00,
+    titleCover: 0.15,
     darkPolarity: 0.78,
+    roleChromaCap: { surface: 0.055, ink: 0.050, plate: 0.050 },
+    chromaBudget: { high: 0.14, low: 0.08, maxHigh: 1, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 1, extremeChroma: 0 },
     inkChroma: 0.50,
+    inkChromaFloor: 0.00,
+    surfaceChromaFloor: 0.00,
     surfaceChroma: 0.55,
     accentChroma: 1.00,
     lightnessShift: -0.03,
@@ -86,8 +75,17 @@ const GENRE_BIAS = {
     }
   },
   gravure: {
+    textChromaBias: 3.60,
+    textLBand: null,
+    textMinChroma: 0.05,
+    titleCover: 0.40,
     darkPolarity: 0.28,
+    roleChromaCap: { surface: 0.075, ink: 0.085, plate: 0.100 },
+    chromaBudget: { high: 0.16, low: 0.10, maxHigh: 2, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 2, extremeChroma: 0.035 },
     inkChroma: 0.70,
+    inkChromaFloor: 0.45,
+    surfaceChromaFloor: 0.35,
     surfaceChroma: 0.90,
     accentChroma: 1.25,
     lightnessShift: 0.05,
@@ -100,8 +98,17 @@ const GENRE_BIAS = {
     }
   },
   novel: {
+    textChromaBias: -0.85,
+    textLBand: null,
+    textMinChroma: 0.00,
+    titleCover: 0.05,
     darkPolarity: 0.35,
+    roleChromaCap: { surface: 0.055, ink: 0.050, plate: 0.050 },
+    chromaBudget: { high: 0.14, low: 0.08, maxHigh: 1, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 1, extremeChroma: 0 },
     inkChroma: 0.25,
+    inkChromaFloor: 0.00,
+    surfaceChromaFloor: 0.00,
     surfaceChroma: 0.35,
     accentChroma: 0.90,
     lightnessShift: 0.02,
@@ -114,11 +121,20 @@ const GENRE_BIAS = {
     }
   },
   asmr: {
+    textChromaBias: 7.00,
+    textLBand: [0.62, 0.96],
+    textMinChroma: 0.08,
+    titleCover: 0.70,
     darkPolarity: 0.18,
-    inkChroma: 0.45,
-    surfaceChroma: 0.60,
-    accentChroma: 0.70,
-    lightnessShift: 0.10,
+    roleChromaCap: { surface: 0.085, ink: 0.095, plate: 0.110 },
+    chromaBudget: { high: 0.17, low: 0.11, maxHigh: 2, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 3, extremeChroma: 0.055 },
+    inkChroma: 0.55,
+    inkChromaFloor: 0.70,
+    surfaceChromaFloor: 0.55,
+    surfaceChroma: 0.70,
+    accentChroma: 1.10,
+    lightnessShift: 0.06,
     accentPull: { hues: [310, 200], strength: [0.15, 0.35] },
     glowGain: 0.8,
     tintContrastPref: 0.30,
@@ -128,10 +144,19 @@ const GENRE_BIAS = {
     }
   },
   game: {
+    textChromaBias: 5.50,
+    textLBand: null,
+    textMinChroma: 0.10,
+    titleCover: 0.85,
     darkPolarity: 0.80,
-    inkChroma: 0.40,
+    roleChromaCap: { surface: 0.090, ink: 0.140, plate: 0.170 },
+    chromaBudget: { high: 0.22, low: 0.13, maxHigh: 3, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 3, extremeChroma: 0.060 },
+    inkChroma: 1.10,
+    inkChromaFloor: 0.80,
+    surfaceChromaFloor: 0.45,
     surfaceChroma: 0.50,
-    accentChroma: 1.15,
+    accentChroma: 1.55,
     lightnessShift: -0.04,
     accentPull: { hues: [95, 250], strength: [0.20, 0.45] },
     glowGain: 1.3,
@@ -142,12 +167,21 @@ const GENRE_BIAS = {
     }
   },
   adult: {
+    textChromaBias: 6.50,
+    textLBand: null,
+    textMinChroma: 0.10,
+    titleCover: 0.85,
     darkPolarity: 0.62,
-    inkChroma: 0.80,
-    surfaceChroma: 1.00,
-    accentChroma: 1.40,
+    roleChromaCap: { surface: 0.150, ink: 0.130, plate: 0.210 },
+    chromaBudget: { high: 0.24, low: 0.14, maxHigh: 3, mergeDe: 0.025 },
+    textPalette: { accentFamilies: 3, extremeChroma: 0.065 },
+    inkChroma: 1.20,
+    inkChromaFloor: 0.80,
+    surfaceChromaFloor: 0.55,
+    surfaceChroma: 1.30,
+    accentChroma: 1.75,
     lightnessShift: 0.00,
-    accentPull: { hues: [350, 100, 200], strength: [0.15, 0.40] },
+    accentPull: { hues: [350, 55, 320], strength: [0.30, 0.62] },
     glowGain: 1.4,
     tintContrastPref: 0.60,
     scheme: {
@@ -225,12 +259,16 @@ function buildRoles(rng, bias, colors, intensity, dark) {
   const surfaceL = dark
     ? Math.min(side[1] - 0.06, Math.max(side[0], rng.range(0.17, 0.27) + shift))
     : Math.max(side[0] + 0.06, Math.min(0.985, rng.range(0.88, 0.965) + shift));
-  const surfaceC = Math.min(0.055, base[1] * 0.35) * bias.surfaceChroma;
+  const cap = bias.roleChromaCap;
+  const surfaceC = Math.min(cap.surface, Math.max(cap.surface * bias.surfaceChromaFloor, base[1] * 0.35 * bias.surfaceChroma));
   const surface = [clamp01(surfaceL), surfaceC, base[2]];
 
   const inkL = dark ? rng.range(0.93, 0.985) : Math.max(0.045, rng.range(0.10, 0.19) + shift * 0.4);
-  const inkC = Math.min(0.05, base[1] * 0.30) * bias.inkChroma;
-  const ink = [clamp01(inkL), inkC, base[2]];
+  // 元画像の彩度だけを根拠にすると、モノクロ写真では文字が必ずグレーになる。
+  // 原色・ネオンが前提のジャンルは cap に対する下限を持たせる。
+  const inkC = Math.min(cap.ink, Math.max(cap.ink * bias.inkChromaFloor, base[1] * 0.30 * bias.inkChroma));
+  const inkHue = bias.inkChromaFloor > 0 ? applyAccentPull(rng, base[2], bias) : base[2];
+  const ink = [clamp01(inkL), inkC, inkHue];
 
   const altL = pickGroundLightness(rng, dark, [surface[0]], MIN_ROLE_L_DELTA, 'large');
   const surfaceAlt = [
@@ -264,7 +302,7 @@ function buildRoles(rng, bias, colors, intensity, dark) {
   const plateL = pickGroundLightness(rng, plateInverted ? !dark : dark, [ink[0]], MIN_ROLE_L_DELTA, 'large');
   const plate = [
     plateL === null ? surface[0] : plateL,
-    Math.min(0.05, surfaceC * 1.1),
+    Math.min(cap.plate, surfaceC * 1.1),
     third[2]
   ];
 
@@ -298,34 +336,35 @@ function repairLightness(roles) {
   return roles;
 }
 
-function repairChroma(roles, tints) {
+function repairChroma(roles, tints, budget) {
   const names = ROLE_NAMES.slice();
   const list = names.map((n) => roles[n]);
   const tintNames = ['shadow', 'highlight', 'duotoneA', 'duotoneB'];
   for (let i = 0; i < tintNames.length; i++) { list.push(tints[tintNames[i]]); }
-  const fixed = enforceChromaBudget(list, CHROMA_BUDGET);
+  const fixed = enforceChromaBudget(list, budget);
   for (let i = 0; i < names.length; i++) { roles[names[i]] = fixed[i]; }
   for (let i = 0; i < tintNames.length; i++) { tints[tintNames[i]] = fixed[names.length + i]; }
 }
 
-function repairInkContrast(roles, dark) {
+function repairInkContrast(roles, dark, cap) {
   const surfaceRgb = oklchToSrgb(roles.surface);
   let inkRgb = oklchToSrgb(roles.ink);
   if (contrastRatio(inkRgb, surfaceRgb) >= MIN_INK_WCAG
     && Math.abs(apcaContrast(inkRgb, surfaceRgb)) >= MIN_INK_APCA) {
     return true;
   }
-  roles.ink = [dark ? 0.99 : 0.04, Math.min(roles.ink[1], 0.02), roles.ink[2]];
+  // 明度を振り切るのはcontrastの回復に必要だが、色味まで捨てるとジャンルの原色が消える
+  roles.ink = clampChroma([dark ? 0.97 : 0.06, Math.min(roles.ink[1], cap.ink), roles.ink[2]]);
   inkRgb = oklchToSrgb(roles.ink);
   return contrastRatio(inkRgb, surfaceRgb) >= MIN_INK_WCAG
     && Math.abs(apcaContrast(inkRgb, surfaceRgb)) >= MIN_INK_APCA;
 }
 
-function planViolations(roles, tints) {
+function planViolations(roles, tints, budget) {
   const out = [];
   const list = ROLE_NAMES.map((n) => roles[n])
     .concat([tints.shadow, tints.highlight, tints.duotoneA, tints.duotoneB]);
-  if (violatesChromaBudget(list, CHROMA_BUDGET)) { out.push('chromaBudget'); }
+  if (violatesChromaBudget(list, budget)) { out.push('chromaBudget'); }
   for (let i = 0; i < VIBRATION_PAIRS.length; i++) {
     const a = roles[VIBRATION_PAIRS[i][0]];
     const b = roles[VIBRATION_PAIRS[i][1]];
@@ -349,14 +388,48 @@ function planViolations(roles, tints) {
   return out;
 }
 
-function buildTextPalette(roles, dark) {
-  const ladder = lightnessLadder(roles.ink, TEXT_LADDER_STEPS, TEXT_LADDER_CHROMA);
+// lightnessLadder は明度の両端で彩度を落とすため、contrast選別を通るのは無彩色だけになる。
+// 有彩の候補を背景の明度に関わらず残すため、彩度を保ったまま明度段を張る。
+function chromaticLadder(baseLch, steps, range) {
+  const out = [];
+  const n = Math.max(2, steps);
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    out.push(clampChroma([range[0] + t * (range[1] - range[0]), baseLch[1], baseLch[2]]));
+  }
+  return out;
+}
+
+// ジャンルの署名色（accentPull.hues）で accent 系の段を増やす。
+// 無彩の ink ladder しか無いと、contrast選別を通った時点で白黒が最有力になってしまう。
+function accentFamilies(roles, bias) {
+  const out = [roles.accent];
+  const hues = bias.accentPull.hues;
+  const want = bias.textPalette.accentFamilies;
+  for (let i = 0; i < hues.length && out.length < want; i++) {
+    out.push(clampChroma([roles.accent[0], roles.accent[1], mod360(hues[i])]));
+  }
+  return out;
+}
+
+function buildTextPalette(roles, dark, bias) {
+  const cfg = bias.textPalette;
+  // 段の彩度を固定値で切ると、ink に載せた色味が palette 側で消えてしまう
+  const ladder = lightnessLadder(roles.ink, TEXT_LADDER_STEPS, Math.max(TEXT_LADDER_CHROMA, roles.ink[1]));
   const list = ladder.map((c) => oklchToSrgb(c));
   list.push(oklchToSrgb(roles.ink));
   list.push(oklchToSrgb(roles.inkAlt));
-  list.push(oklchToSrgb(roles.accent));
-  list.push(oklchToSrgb([dark ? 0.995 : 0.035, 0, roles.ink[2]]));
-  list.push(oklchToSrgb([dark ? 0.035 : 0.995, 0, roles.ink[2]]));
+  const families = accentFamilies(roles, bias);
+  for (let f = 0; f < families.length; f++) {
+    list.push(oklchToSrgb(families[f]));
+    const accentLadder = chromaticLadder(families[f], TEXT_ACCENT_STEPS, TEXT_ACCENT_L_RANGE);
+    for (let i = 0; i < accentLadder.length; i++) { list.push(oklchToSrgb(accentLadder[i])); }
+  }
+  // 明度の両端。extremeChroma が 0 なら純白・純黒、正なら accent の色味を残した白黒
+  const ec = cfg.extremeChroma;
+  const eh = ec > 0 ? roles.accent[2] : roles.ink[2];
+  list.push(oklchToSrgb(clampChroma([dark ? 0.985 : 0.045, ec, eh])));
+  list.push(oklchToSrgb(clampChroma([dark ? 0.045 : 0.985, ec, eh])));
   const seen = [];
   const out = [];
   for (let i = 0; i < list.length; i++) {
@@ -366,6 +439,15 @@ function buildTextPalette(roles, dark) {
     out.push(list[i]);
   }
   return out;
+}
+
+// 文字の下地。無彩の黒板ではなく accent の色相へ寄せることで、
+// 濃く敷いても配色から浮かない
+function buildCoverColors(roles) {
+  return {
+    dark: oklchToSrgb(clampChroma([0.16, Math.min(0.090, roles.accent[1] * 0.55), roles.accent[2]])),
+    light: oklchToSrgb(clampChroma([0.94, Math.min(0.050, roles.accent[1] * 0.30), roles.accent[2]]))
+  };
 }
 
 function buildRatio(rng) {
@@ -393,7 +475,7 @@ function toTintColors(tints) {
   };
 }
 
-export function buildColorPlan(rng, genre, palette, intensity) {
+function buildColorPlan(rng, genre, palette, intensity) {
   const bias = biasFor(genre);
   const key = pickKeyColor(palette, { excludeSkin: true });
   const keyHue = key.isNeutral ? mod360(rng.range(0, 360)) : key.lch[2];
@@ -418,14 +500,14 @@ export function buildColorPlan(rng, genre, palette, intensity) {
     tints = buildTints(rng, strategy, keyHue, palette, bias);
     tints.strategy = strategy;
     repairLightness(roles);
-    repairChroma(roles, tints);
-    repairInkContrast(roles, dark);
+    repairChroma(roles, tints, bias.chromaBudget);
+    repairInkContrast(roles, dark, bias.roleChromaCap);
     repairLightness(roles);
-    violations = planViolations(roles, tints);
+    violations = planViolations(roles, tints, bias.chromaBudget);
     if (violations.length === 0) { break; }
   }
 
-  const textPalette = buildTextPalette(roles, dark);
+  const textPalette = buildTextPalette(roles, dark, bias);
   const roleColors = toRoleColors(roles);
 
   return {
@@ -437,6 +519,11 @@ export function buildColorPlan(rng, genre, palette, intensity) {
     intensity: strength,
     genre: genre,
     glowGain: bias.glowGain,
+    textChromaBias: bias.textChromaBias,
+    titleCover: bias.titleCover,
+    textMinChroma: bias.textMinChroma,
+    textLBand: bias.textLBand,
+    coverColors: buildCoverColors(roles),
     plateInverted: roles.plateInverted,
     roles: roleColors,
     textPalette: textPalette,
@@ -450,13 +537,13 @@ export function buildColorPlan(rng, genre, palette, intensity) {
   };
 }
 
-export function planTextColor(plan, bgRgb, isLarge) {
+function planTextColor(plan, bgRgb, isLarge) {
   const minWcag = isLarge ? 3.4 : 4.5;
   const minApca = isLarge ? 45 : 60;
   return pickReadable(plan.textPalette, bgRgb, minWcag, minApca);
 }
 
-export function planSurfaceFor(plan, bgRgb) {
+function planSurfaceFor(plan, bgRgb) {
   const surface = plan.roles.surface.rgb;
   const alt = plan.roles.surfaceAlt.rgb;
   const bg = srgbToOklch(bgRgb);
@@ -465,6 +552,9 @@ export function planSurfaceFor(plan, bgRgb) {
   return ds >= da ? surface : alt;
 }
 
-export function planAccentHueDistance(plan, hue) {
+function planAccentHueDistance(plan, hue) {
   return hueDistance(plan.roles.accent.lch[2], hue);
 }
+
+Object.assign(PF, { buildColorPlan, planTextColor, planSurfaceFor, planAccentHueDistance });
+})(window.PF = window.PF || {});

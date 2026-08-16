@@ -1,0 +1,56 @@
+[
+  {
+    "id": "adult-01-gloss-gold",
+    "src": "doc/reference/adult/AdultVideo1.webp",
+    "box": [
+      1235,
+      768,
+      880,
+      168
+    ],
+    "bgbox": [
+      1420,
+      1120,
+      880,
+      168
+    ],
+    "text": "メイドのご奉仕",
+    "note": "白の光沢gradient + 金の外周glow（MOODYZ系の上品なtitle）"
+  },
+  {
+    "id": "adult-02-pink-outline",
+    "src": "doc/reference/adult/AdultVideo7.webp",
+    "box": [
+      1150,
+      1268,
+      1030,
+      156
+    ],
+    "bgbox": [
+      1490,
+      950,
+      400,
+      156
+    ],
+    "text": "生★中出しSEX!",
+    "note": "黄色塗り + 桃色の極太フチ（WANZ系の煽りtitle）"
+  },
+  {
+    "id": "adult-03-plate-vertical",
+    "src": "doc/reference/adult/AdultVideo1.webp",
+    "box": [
+      590,
+      185,
+      165,
+      505
+    ],
+    "bgbox": [
+      1370,
+      120,
+      165,
+      505
+    ],
+    "text": "ご奉仕メイド",
+    "note": "縦組み・字ごとの金座布団 + 文字型に抜くknockout"
+  }
+]

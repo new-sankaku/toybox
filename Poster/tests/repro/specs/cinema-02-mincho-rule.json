@@ -1,0 +1,60 @@
+{
+  "W": 326,
+  "H": 56,
+  "items": [
+    {
+      "text": "青春の影",
+      "fontCss": "\"Yu Mincho\",\"Noto Serif JP\",serif",
+      "weight": "600",
+      "startSize": 38,
+      "rect": {
+        "x": -0.5789,
+        "y": -0.2911,
+        "w": 2.2393,
+        "h": 1.6
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 2.863,
+        "decor": "accent"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "overline": {
+          "rgb": [
+            255,
+            255,
+            255
+          ],
+          "alpha": 1,
+          "width": 0.05,
+          "gap": 0.245,
+          "double": false,
+          "spacing": 0,
+          "extend": 0.0493,
+          "shift": -0.649,
+          "taper": 0
+        },
+        "transform": {
+          "skewX": 0,
+          "rotate": 0,
+          "scaleX": 0.588
+        }
+      }
+    }
+  ]
+}

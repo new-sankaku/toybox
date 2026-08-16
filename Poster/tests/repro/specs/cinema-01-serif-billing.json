@@ -1,0 +1,28 @@
+{
+  "W": 305,
+  "H": 58,
+  "items": [
+    {
+      "text": "Live & Documentary Movie",
+      "fontCss": "\"Times New Roman\",\"Cambria\",serif",
+      "weight": "400",
+      "startSize": 24.5,
+      "rect": { "x": -0.5000, "y": -0.4224, "w": 2.0, "h": 1.5 },
+      "slot": { "align": "center", "maxLines": 1, "tracking": 0.004, "decor": "accent" },
+      "spec": {
+        "fill": { "type": "solid", "angle": 0, "stops": [{ "t": 0, "rgb": [255, 255, 255] }] }
+      }
+    },
+    {
+      "text": "i☆Ris on STAGE",
+      "fontCss": "\"Times New Roman\",\"Cambria\",serif",
+      "weight": "400",
+      "startSize": 23.86,
+      "rect": { "x": -0.4951, "y": -0.0517, "w": 2.0, "h": 1.5 },
+      "slot": { "align": "center", "maxLines": 1, "tracking": 0, "decor": "accent" },
+      "spec": {
+        "fill": { "type": "solid", "angle": 0, "stops": [{ "t": 0, "rgb": [255, 255, 255] }] }
+      }
+    }
+  ]
+}

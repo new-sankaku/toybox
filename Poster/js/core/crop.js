@@ -1,4 +1,6 @@
-import { buildIntegral, integralSum } from './analysis.js';
+(function (PF) {
+'use strict';
+const { buildIntegral, integralSum } = PF;
 
 const MATCH_TOLERANCE = 0.15;
 const PANORAMA_ASPECT = 2.2;
@@ -10,7 +12,7 @@ const HEADROOM_MIN = 0.35;
 const HEADROOM_MAX = 0.70;
 const THIRDS = [1 / 3, 2 / 3];
 
-export function analyzeImageFit(srcW, srcH, targetAspect) {
+function analyzeImageFit(srcW, srcH, targetAspect) {
   const srcAspect = srcW / srcH;
   const ratio = srcAspect / targetAspect;
   let kind;
@@ -271,7 +273,7 @@ function orderFacesByArea(faces) {
   return faces.slice().sort(function (a, b) { return (b.w * b.h) - (a.w * a.h); });
 }
 
-export function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) {
+function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) {
   const fit = analyzeImageFit(srcW, srcH, targetAspect);
   const faceList = faces ? faces.slice() : [];
   const hasSaliency = !!(saliency && saliency.map && saliency.w > 0 && saliency.h > 0);
@@ -397,3 +399,6 @@ export function computeCropRect(srcW, srcH, targetAspect, faces, saliency, rng) 
     zoom: winnerZoom
   };
 }
+
+Object.assign(PF, { analyzeImageFit, computeCropRect });
+})(window.PF = window.PF || {});

@@ -1,17 +1,20 @@
-export function clamp255(v) {
+(function (PF) {
+'use strict';
+
+function clamp255(v) {
   return v < 0 ? 0 : (v > 255 ? 255 : v);
 }
 
-export function srgbToLinear(c) {
+function srgbToLinear(c) {
   const v = c / 255;
   return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
 }
 
-export function relativeLuminance(r, g, b) {
+function relativeLuminance(r, g, b) {
   return 0.2126 * srgbToLinear(r) + 0.7152 * srgbToLinear(g) + 0.0722 * srgbToLinear(b);
 }
 
-export function contrastRatio(rgbA, rgbB) {
+function contrastRatio(rgbA, rgbB) {
   const la = relativeLuminance(rgbA[0], rgbA[1], rgbA[2]);
   const lb = relativeLuminance(rgbB[0], rgbB[1], rgbB[2]);
   const hi = Math.max(la, lb);
@@ -19,7 +22,7 @@ export function contrastRatio(rgbA, rgbB) {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-export function hexToRgb(hex) {
+function hexToRgb(hex) {
   const h = hex.replace('#', '');
   return [
     parseInt(h.substring(0, 2), 16),
@@ -28,7 +31,7 @@ export function hexToRgb(hex) {
   ];
 }
 
-export function rgbToCss(rgb, alpha) {
+function rgbToCss(rgb, alpha) {
   const r = Math.round(clamp255(rgb[0]));
   const g = Math.round(clamp255(rgb[1]));
   const b = Math.round(clamp255(rgb[2]));
@@ -36,7 +39,7 @@ export function rgbToCss(rgb, alpha) {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 }
 
-export function blendRgb(bg, fg, alpha) {
+function blendRgb(bg, fg, alpha) {
   return [
     bg[0] * (1 - alpha) + fg[0] * alpha,
     bg[1] * (1 - alpha) + fg[1] * alpha,
@@ -44,7 +47,7 @@ export function blendRgb(bg, fg, alpha) {
   ];
 }
 
-export function shade(rgb, amount) {
+function shade(rgb, amount) {
   if (amount >= 0) {
     return [
       rgb[0] + (255 - rgb[0]) * amount,
@@ -56,11 +59,11 @@ export function shade(rgb, amount) {
   return [rgb[0] * k, rgb[1] * k, rgb[2] * k];
 }
 
-export function luma01(rgb) {
+function luma01(rgb) {
   return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
 }
 
-export function rgbToHsl(rgb) {
+function rgbToHsl(rgb) {
   const r = rgb[0] / 255, g = rgb[1] / 255, b = rgb[2] / 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
   const l = (max + min) / 2;
@@ -84,7 +87,7 @@ function hueToRgb(p, q, t) {
   return p;
 }
 
-export function hslToRgb(hsl) {
+function hslToRgb(hsl) {
   const h = hsl[0], s = hsl[1], l = hsl[2];
   if (s === 0) { return [l * 255, l * 255, l * 255]; }
   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
@@ -95,3 +98,9 @@ export function hslToRgb(hsl) {
     hueToRgb(p, q, h - 1 / 3) * 255
   ];
 }
+
+Object.assign(PF, {
+  clamp255, srgbToLinear, relativeLuminance, contrastRatio, hexToRgb, rgbToCss, blendRgb, shade, luma01,
+  rgbToHsl, hslToRgb
+});
+})(window.PF = window.PF || {});

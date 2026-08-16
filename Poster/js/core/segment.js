@@ -1,3 +1,6 @@
+(function (PF) {
+'use strict';
+
 const MIN_BACKGROUND_RATIO = 0.10;
 const MAX_BACKGROUND_RATIO = 0.90;
 
@@ -107,7 +110,7 @@ function collectSeeds(w, h) {
   return corners.concat(edges);
 }
 
-export function buildSubjectMask(buf, tolerance) {
+function buildSubjectMask(buf, tolerance) {
   const w = buf.w, h = buf.h;
   const total = w * h;
   if (total < 64) { return null; }
@@ -184,7 +187,7 @@ export function buildSubjectMask(buf, tolerance) {
   return { mask: blurMask(raw, w, h, 2), ratio: ratio };
 }
 
-export function maskToCanvas(mask, w, h) {
+function maskToCanvas(mask, w, h) {
   const cv = document.createElement('canvas');
   cv.width = w;
   cv.height = h;
@@ -202,3 +205,6 @@ export function maskToCanvas(mask, w, h) {
   ctx.putImageData(img, 0, 0);
   return cv;
 }
+
+Object.assign(PF, { buildSubjectMask, maskToCanvas });
+})(window.PF = window.PF || {});

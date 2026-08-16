@@ -1,10 +1,7 @@
-import { mulberry32 } from './rng.js';
-import {
-  oklabToOklch,
-  oklchToSrgb,
-  oklchToOklab,
-  deltaEOk
-} from './oklch.js';
+(function (PF) {
+'use strict';
+const { mulberry32 } = PF;
+const { oklabToOklch, oklchToSrgb, oklchToOklab, deltaEOk } = PF;
 
 const DEFAULT_K = 6;
 const DEFAULT_ITER = 8;
@@ -14,7 +11,7 @@ const SKIN = { hMin: 18, hMax: 82, cMin: 0.022, cMax: 0.20, lMin: 0.38, lMax: 0.
 const NEUTRAL_CHROMA = 0.040;
 const NEUTRAL_COLORFULNESS = 0.13;
 
-export function isSkinLch(lch) {
+function isSkinLch(lch) {
   return lch[2] >= SKIN.hMin && lch[2] <= SKIN.hMax
     && lch[1] >= SKIN.cMin && lch[1] <= SKIN.cMax
     && lch[0] >= SKIN.lMin && lch[0] <= SKIN.lMax;
@@ -145,7 +142,7 @@ function kmeans(lab, n, k, iterations, rnd) {
   return { centers: centers, counts: counts };
 }
 
-export function extractPalette(buf, opts) {
+function extractPalette(buf, opts) {
   const o = opts || {};
   const k = o.k || DEFAULT_K;
   const iterations = o.iterations || DEFAULT_ITER;
@@ -217,7 +214,7 @@ export function extractPalette(buf, opts) {
   };
 }
 
-export function pickKeyColor(palette, opts) {
+function pickKeyColor(palette, opts) {
   const o = opts || {};
   const clusters = palette.clusters;
   if (!clusters || clusters.length === 0) {
@@ -247,7 +244,7 @@ export function pickKeyColor(palette, opts) {
   return { lch: best.lch.slice(), rgb: best.rgb.slice(), source: source, weight: best.weight, isNeutral: false };
 }
 
-export function nearestCluster(palette, lch) {
+function nearestCluster(palette, lch) {
   const lab = oklchToOklab(lch);
   let best = null;
   let bestD = Infinity;
@@ -257,3 +254,6 @@ export function nearestCluster(palette, lch) {
   }
   return best;
 }
+
+Object.assign(PF, { isSkinLch, extractPalette, pickKeyColor, nearestCluster });
+})(window.PF = window.PF || {});

@@ -1,0 +1,164 @@
+{
+  "W": 466,
+  "H": 208,
+  "items": [
+    {
+      "text": "OCTOPATH",
+      "fontCss": "\"Times New Roman\",serif",
+      "weight": "400",
+      "startSize": 77,
+      "rect": {
+        "x": -0.5269,
+        "y": -0.2212,
+        "w": 2.0,
+        "h": 1.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.011,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                252,
+                252,
+                250
+              ]
+            }
+          ]
+        },
+        "dropShadow": {
+          "rgb": [
+            0,
+            0,
+            0
+          ],
+          "alpha": 0.3,
+          "dx": 0.003,
+          "dy": 0.01,
+          "blur": 0.05
+        },
+        "underline": {
+          "rgb": [
+            250,
+            250,
+            248
+          ],
+          "alpha": 1,
+          "width": 0.038,
+          "gap": 0.15,
+          "extend": 0.01,
+          "shift": 0.032,
+          "taper": 0
+        }
+      }
+    },
+    {
+      "text": "TRAVELER",
+      "fontCss": "\"Times New Roman\",serif",
+      "weight": "400",
+      "startSize": 76,
+      "rect": {
+        "x": -0.5269,
+        "y": 0.1514,
+        "w": 2.0,
+        "h": 1.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0.009,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                252,
+                252,
+                250
+              ]
+            }
+          ]
+        },
+        "dropShadow": {
+          "rgb": [
+            0,
+            0,
+            0
+          ],
+          "alpha": 0.3,
+          "dx": 0.003,
+          "dy": 0.01,
+          "blur": 0.05
+        },
+        "underline": {
+          "rgb": [
+            250,
+            250,
+            248
+          ],
+          "alpha": 1,
+          "width": 0.03,
+          "gap": 0.132,
+          "extend": 0.014,
+          "shift": 0.032,
+          "taper": 0
+        }
+      }
+    },
+    {
+      "text": "®",
+      "fontCss": "\"Times New Roman\",serif",
+      "weight": "400",
+      "startSize": 19,
+      "rect": {
+        "x": 0.4216,
+        "y": 0.26439999999999997,
+        "w": 1.0,
+        "h": 1.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                252,
+                252,
+                250
+              ]
+            }
+          ]
+        },
+        "dropShadow": {
+          "rgb": [
+            0,
+            0,
+            0
+          ],
+          "alpha": 0.3,
+          "dx": 0.01,
+          "dy": 0.03,
+          "blur": 0.08
+        }
+      }
+    }
+  ]
+}

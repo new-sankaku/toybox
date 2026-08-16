@@ -1,25 +1,40 @@
+(function (PF) {
+'use strict';
+
 const LOOK_WEIGHTS = [
-  { v: 'teal-orange', w: 14 },
-  { v: 'bleach-bypass', w: 9 },
-  { v: 'cross-process', w: 8 },
+  { v: 'teal-orange', w: 16 },
+  { v: 'bleach-bypass', w: 5 },
+  { v: 'cross-process', w: 6 },
   { v: 'cold-night', w: 10 },
-  { v: 'golden-hour', w: 11 },
-  { v: 'faded-film', w: 12 },
+  { v: 'golden-hour', w: 14 },
+  { v: 'faded-film', w: 11 },
   { v: 'high-key-pastel', w: 8 },
-  { v: 'cyanotype', w: 6 },
-  { v: 'duotone', w: 7 },
+  { v: 'cyanotype', w: 1.5 },
+  { v: 'duotone', w: 2 },
   { v: 'neon-night', w: 7 },
-  { v: 'warm-portrait', w: 12 },
-  { v: 'silver-halide', w: 9 }
+  { v: 'warm-portrait', w: 15 },
+  { v: 'silver-halide', w: 3 }
 ];
 
 const GENRE_BIAS = {
   cinema: { 'teal-orange': 1.5, 'bleach-bypass': 1.35, 'cold-night': 1.25, 'silver-halide': 1.15 },
   gravure: { 'golden-hour': 1.45, 'high-key-pastel': 1.4, 'warm-portrait': 1.5, 'cyanotype': 0.7 },
   novel: { 'faded-film': 1.45, 'silver-halide': 1.4, 'cyanotype': 1.25, 'neon-night': 0.7 },
-  asmr: { 'high-key-pastel': 1.45, 'cold-night': 1.25, 'duotone': 1.2, 'bleach-bypass': 0.8 },
-  game: { 'neon-night': 1.55, 'cross-process': 1.3, 'teal-orange': 1.25, 'faded-film': 0.75 },
-  adult: { 'neon-night': 1.3, 'warm-portrait': 1.3, 'cross-process': 1.2, 'high-key-pastel': 0.8 }
+  asmr: {
+    'warm-portrait': 1.6, 'golden-hour': 1.4, 'high-key-pastel': 1.15, 'cold-night': 0.8,
+    'teal-orange': 0.6, 'cross-process': 0.8, 'faded-film': 0.35, 'duotone': 0.3,
+    'bleach-bypass': 0.15, 'silver-halide': 0.12, 'cyanotype': 0.1, 'neon-night': 0.7
+  },
+  game: {
+    'teal-orange': 1.45, 'neon-night': 1.30, 'cross-process': 1.20, 'golden-hour': 1.20,
+    'warm-portrait': 1.15, 'cold-night': 1.10,
+    'high-key-pastel': 0.18, 'faded-film': 0.10, 'duotone': 0.12,
+    'bleach-bypass': 0.12, 'silver-halide': 0.06, 'cyanotype': 0.04
+  },
+  adult: {
+    'neon-night': 1.6, 'warm-portrait': 1.5, 'cross-process': 1.4, 'golden-hour': 1.3, 'teal-orange': 1.15,
+    'high-key-pastel': 0.5, 'bleach-bypass': 0.35, 'faded-film': 0.25, 'silver-halide': 0.2, 'cyanotype': 0.15
+  }
 };
 
 const DUOTONE_PAIRS = [
@@ -269,7 +284,7 @@ function applyColorPlanTints(spec, colorPlan) {
   spec.tintSource = 'colorPlan';
 }
 
-export function buildGradeSpec(rng, genre, intensity, colorPlan) {
+function buildGradeSpec(rng, genre, intensity, colorPlan) {
   const k = Math.max(0, Math.min(1, intensity));
   const bias = GENRE_BIAS[genre] || null;
   const items = [];
@@ -307,7 +322,7 @@ function buildToneLut(lift, gamma, gain, contrast, strength) {
   return lut;
 }
 
-export function applyGrade(ctx, w, h, spec) {
+function applyGrade(ctx, w, h, spec) {
   if (!spec || w <= 0 || h <= 0) { return; }
   const strength = Math.max(0, Math.min(1, spec.strength === undefined ? 1 : spec.strength));
   if (strength <= 0.002) { return; }
@@ -388,3 +403,6 @@ export function applyGrade(ctx, w, h, spec) {
   }
   ctx.putImageData(img, 0, 0);
 }
+
+Object.assign(PF, { buildGradeSpec, applyGrade });
+})(window.PF = window.PF || {});

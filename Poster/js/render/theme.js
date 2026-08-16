@@ -1,4 +1,6 @@
-import { hexToRgb, rgbToHsl, hslToRgb, clamp255 } from '../core/color.js';
+(function (PF) {
+'use strict';
+const { hexToRgb, rgbToHsl, hslToRgb, clamp255 } = PF;
 
 const GENRE_COLORS = {
   cinema: {
@@ -105,7 +107,7 @@ function planColors(colorPlan, names, rng, hueAmt, litAmt) {
   return out;
 }
 
-export function buildTheme(rng, genre, colorPlan) {
+function buildTheme(rng, genre, colorPlan) {
   const src = GENRE_COLORS[genre];
   const theme = {
     obiColors: polarized(variant(src.obi, rng, 0.018, 0.030), rng),
@@ -127,3 +129,6 @@ export function buildTheme(rng, genre, colorPlan) {
   if (ink.length) { theme.inkColors = ink; }
   return theme;
 }
+
+Object.assign(PF, { buildTheme });
+})(window.PF = window.PF || {});

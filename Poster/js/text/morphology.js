@@ -1,8 +1,10 @@
-import { COMMON, LEXICON } from './lexicon.js';
+(function (PF) {
+'use strict';
+const { COMMON, LEXICON } = PF;
 
 const POOL_CACHE = {};
 
-export function poolsFor(genre) {
+function poolsFor(genre) {
   if (POOL_CACHE[genre]) { return POOL_CACHE[genre]; }
   const extra = LEXICON[genre];
   if (!extra) { throw new Error('unknown genre: ' + genre); }
@@ -64,7 +66,7 @@ function pickDistinct(rng, pool, taken) {
   return null;
 }
 
-export function composeNoun(rng, genre, opts) {
+function composeNoun(rng, genre, opts) {
   const o = opts || {};
   const pools = poolsFor(genre);
   const modes = MODE_WEIGHTS[genre];
@@ -130,7 +132,7 @@ const NAME_STYLE = {
   adult: { sep: '　', soft: 0.75, enOrder: 'giveFam' }
 };
 
-export function personName(rng, genre) {
+function personName(rng, genre) {
   const pools = poolsFor(genre);
   const style = NAME_STYLE[genre];
   if (!style) { throw new Error('unknown genre: ' + genre); }
@@ -184,13 +186,13 @@ const NUMERIC_ALLOW = {
     'price', 'date', 'year', 'yearNo', 'week', 'chapter', 'edition', 'few', 'count']
 };
 
-export function numericKinds(genre) {
+function numericKinds(genre) {
   const list = NUMERIC_ALLOW[genre];
   if (!list) { throw new Error('unknown genre: ' + genre); }
   return list.slice();
 }
 
-export function numeric(rng, kind, genre) {
+function numeric(rng, kind, genre) {
   if (genre !== undefined && genre !== null) {
     const allow = NUMERIC_ALLOW[genre];
     if (!allow) { throw new Error('unknown genre: ' + genre); }
@@ -261,3 +263,6 @@ export function numeric(rng, kind, genre) {
   if (kind === 'few') { return String(rng.int(2, 9)); }
   throw new Error('unknown numeric kind: ' + kind);
 }
+
+Object.assign(PF, { poolsFor, composeNoun, personName, numericKinds, numeric });
+})(window.PF = window.PF || {});

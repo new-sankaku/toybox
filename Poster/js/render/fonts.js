@@ -1,4 +1,7 @@
-export const FONT_JP = [
+(function (PF) {
+'use strict';
+
+const FONT_JP = [
   {
     name: 'mincho',
     kind: 'mincho',
@@ -43,7 +46,7 @@ export const FONT_JP = [
   }
 ];
 
-export const FONT_LATIN = [
+const FONT_LATIN = [
   {
     name: 'latin-serif',
     kind: 'serif',
@@ -81,7 +84,7 @@ export const FONT_LATIN = [
   }
 ];
 
-export const PALETTES = {
+const PALETTES = {
   cinema: ['#ffffff', '#f2ece0', '#0d0c0a', '#d8c27a', '#b8b4ad', '#a8291f', '#1b2a3a', '#e6d8b8'],
   gravure: ['#ffffff', '#fff4f7', '#ff5f8f', '#ffd23f', '#2ec4d8', '#1a1a1a', '#ff7a3d', '#7d4bd8'],
   novel: ['#111111', '#ffffff', '#f5efe2', '#9b1b1b', '#1d3557', '#c8a24a', '#3b3027', '#7a2b3a'],
@@ -134,7 +137,7 @@ function resolveGenre(table, genre) {
   return table[genre] ? genre : 'cinema';
 }
 
-export function pickFonts(rng, genre) {
+function pickFonts(rng, genre) {
   const jpKey = resolveGenre(JP_WEIGHTS, genre);
   const latinKey = resolveGenre(LATIN_WEIGHTS, genre);
   const title = JP_BY_NAME[rng.weighted(toItems(JP_WEIGHTS[jpKey].title))];
@@ -145,3 +148,6 @@ export function pickFonts(rng, genre) {
   const latin = LATIN_BY_NAME[rng.weighted(toItems(LATIN_WEIGHTS[latinKey]))];
   return { title: title, sub: sub, latin: latin };
 }
+
+Object.assign(PF, { FONT_JP, FONT_LATIN, PALETTES, pickFonts });
+})(window.PF = window.PF || {});

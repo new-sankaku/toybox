@@ -1,0 +1,140 @@
+{
+  "W": 635,
+  "H": 190,
+  "items": [
+    {
+      "text": "まつもと、みいな",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "400",
+      "startSize": 78,
+      "rect": {
+        "x": -0.5505,
+        "y": -0.582,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.075,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                216,
+                110,
+                162
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "glow": [
+          {
+            "rgb": [
+              255,
+              238,
+              248
+            ],
+            "alpha": 0.5,
+            "blur": 0.16,
+            "passes": 1
+          }
+        ],
+        "transform": {
+          "rotate": -0.175
+        },
+        "erode": {
+          "width": 0.004
+        }
+      }
+    },
+    {
+      "text": "♡",
+      "fontCss": "\"Segoe UI Symbol\",\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "400",
+      "startSize": 46,
+      "rect": {
+        "x": -0.055,
+        "y": -0.7895,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                216,
+                110,
+                162
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "glow": {
+          "rgb": [
+            255,
+            238,
+            248
+          ],
+          "alpha": 0.5,
+          "blur": 0.16,
+          "passes": 1
+        }
+      }
+    },
+    {
+      "text": "MIINA MATSUMOTO",
+      "fontCss": "\"Noto Sans JP\",sans-serif",
+      "weight": "300",
+      "startSize": 39,
+      "rect": {
+        "x": -0.496,
+        "y": -0.295,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.038,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "alpha": 0.68,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                252,
+                248
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "transform": {
+          "rotate": -0.175
+        }
+      }
+    }
+  ]
+}

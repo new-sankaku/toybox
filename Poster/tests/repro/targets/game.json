@@ -1,0 +1,56 @@
+[
+  {
+    "id": "game-01-octopath-rule",
+    "src": "doc/reference/game/Game2.jpg",
+    "box": [
+      122,
+      628,
+      466,
+      208
+    ],
+    "bgbox": [
+      122,
+      520,
+      466,
+      130
+    ],
+    "text": "OCTOPATH TRAVELER",
+    "note": "白のserif大文字 + 各行の下に細い罫。字送りが広い"
+  },
+  {
+    "id": "game-02-goemon-outline",
+    "src": "doc/reference/game/amz_07.jpg",
+    "box": [
+      205,
+      72,
+      132,
+      310
+    ],
+    "bgbox": [
+      430,
+      90,
+      105,
+      270
+    ],
+    "text": "ゴエモン",
+    "note": "縦組み 極太ポップ体 赤fill + 暗赤の内側罫 + 太い白縁 + 落ち影"
+  },
+  {
+    "id": "game-03-dx-metal",
+    "src": "doc/reference/game/amz_00.jpg",
+    "box": [
+      333,
+      174,
+      158,
+      136
+    ],
+    "bgbox": [
+      494,
+      185,
+      30,
+      118
+    ],
+    "text": "DX",
+    "note": "金metallic gradient + 黒縁 + 濃緑の縁 + 太い白縁 + 落ち影"
+  }
+]

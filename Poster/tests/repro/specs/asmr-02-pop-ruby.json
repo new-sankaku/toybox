@@ -1,0 +1,235 @@
+{
+  "W": 560,
+  "H": 116,
+  "items": [
+    {
+      "text": "極上ご奉仕",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "900",
+      "startSize": 85,
+      "rect": {
+        "x": -0.502,
+        "y": -0.536,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0.261,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "linear",
+          "angle": 1.5708,
+          "stops": [
+            {
+              "t": 0.0,
+              "rgb": [
+                255,
+                255,
+                178
+              ]
+            },
+            {
+              "t": 0.6,
+              "rgb": [
+                255,
+                255,
+                181
+              ]
+            },
+            {
+              "t": 0.79,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "t": 1.0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.04,
+            "rgb": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 1,
+            "align": "outside"
+          }
+        ],
+        "transform": {
+          "scaleX": 1.03
+        },
+        "erode": {
+          "width": 0.008
+        }
+      }
+    },
+    {
+      "text": "ごく",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "700",
+      "startSize": 10,
+      "rect": {
+        "x": 0.049,
+        "y": 0.619,
+        "w": 0.3,
+        "h": 0.4
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0.7,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "plate": {
+          "scope": "glyph",
+          "shape": "roundRect",
+          "rgb": [
+            132,
+            212,
+            196
+          ],
+          "alpha": 1,
+          "padX": 0.25,
+          "padY": 0.5,
+          "radius": 0.45
+        },
+        "distort": {
+          "drift": 0.45,
+          "seed": 1
+        }
+      }
+    },
+    {
+      "text": "じょう",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "700",
+      "startSize": 10,
+      "rect": {
+        "x": 0.23,
+        "y": 0.447,
+        "w": 0.3,
+        "h": 0.4
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0.7,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "plate": {
+          "scope": "glyph",
+          "shape": "roundRect",
+          "rgb": [
+            132,
+            212,
+            196
+          ],
+          "alpha": 1,
+          "padX": 0.25,
+          "padY": 0.5,
+          "radius": 0.45
+        },
+        "distort": {
+          "drift": 0.2,
+          "seed": 1
+        }
+      }
+    },
+    {
+      "text": "ほうし",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "700",
+      "startSize": 10,
+      "rect": {
+        "x": 0.636,
+        "y": 0.55,
+        "w": 0.3,
+        "h": 0.4
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0.7,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "plate": {
+          "scope": "glyph",
+          "shape": "roundRect",
+          "rgb": [
+            132,
+            212,
+            196
+          ],
+          "alpha": 1,
+          "padX": 0.25,
+          "padY": 0.5,
+          "radius": 0.45
+        },
+        "distort": {
+          "drift": 0.67,
+          "seed": 1
+        }
+      }
+    }
+  ]
+}

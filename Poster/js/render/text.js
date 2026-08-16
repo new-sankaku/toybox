@@ -1,4 +1,6 @@
-import { paintDecorated } from './decor.js';
+(function (PF) {
+'use strict';
+const { paintDecorated } = PF;
 
 const KINSOKU_HEAD = '、。，．・：；？！」』）］｝〉》〕ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮーゝゞ々…‥';
 const KINSOKU_TAIL = '「『（［｛〈《〔';
@@ -8,7 +10,10 @@ const VERT_CORNER = '、。，．';
 const NO_BOTEN = ' 　、。，．・「」『』（）ー…‥!！?？';
 
 const MIN_FONT_PX = 8;
-const MIN_SIZE_RATIO = 0.28;
+// 絶対pxだけで下限を決めると、出力が大きいほど相対的に小さくなり表示倍率で潰れる。
+// canvas高に対する比でも下限を持たせ、収まらない場合は縮小ではなく詰め・省略で処理する。
+const MIN_FONT_H_RATIO = 0.0105;
+const MIN_SIZE_RATIO = 0.46;
 const SHRINK_STEP = 0.93;
 const LINE_HEIGHT = 1.32;
 const LINE_HEIGHT_TIGHT = 1.16;
@@ -26,11 +31,16 @@ const SCALE_MAX = 3;
 const SY_MIN = 0.3;
 const SY_MAX = 2.4;
 const VERT_LATERAL_LIMIT = 0.3;
+const VERT_TIER_IMBALANCE = 0.62;
+const VERT_TIER_POW = 1.1;
+const VERT_TIER_MIN = 0.45;
+const VERT_TIER_GROW_MAX = 2.2;
 const LATIN_TIER_MIN = 0.6;
 const LATIN_TIER_SCALE = 0.5;
 const TIER_LATIN_SYMBOLS = '()（）／/-–—.,:\'"’&+';
 const TIERED_RATIOS = [0.75, 1, 0.55, 0.4];
 const LINE_GAP_MIN = 0.06;
+const TRACK_MIN = -0.3;
 const ELLIPSIS = '…';
 const FIT_STEPS = [
   { track: 1, sx: 1, extra: 0 },
@@ -38,13 +48,20 @@ const FIT_STEPS = [
   { track: 0.25, sx: 1, extra: 0 },
   { track: 0.25, sx: 0.9, extra: 0 },
   { track: 0.25, sx: 0.82, extra: 0 },
-  { track: 0.25, sx: 0.82, extra: 1 }
+  { track: 0.15, sx: 0.74, extra: 0 },
+  { track: 0.15, sx: 0.68, extra: 1 }
 ];
 
 function hash01(n) {
   let x = Math.sin(n * 12.9898) * 43758.5453;
   x -= Math.floor(x);
   return x < 0 ? x + 1 : x;
+}
+
+// 下限は「絶対px」「canvas高比」「開始サイズ比」の最大値。ただし開始サイズは超えない
+function minFontSize(startSize, H) {
+  const floor = Math.max(MIN_FONT_PX, (H || 0) * MIN_FONT_H_RATIO, startSize * MIN_SIZE_RATIO);
+  return Math.min(startSize, floor);
 }
 
 function fontSpecOf(weight, size, fontCss) {
@@ -166,6 +183,41 @@ function wrapVertical(text, perColumn) {
   return applyKinsoku(cols);
 }
 
+function verticalPhrases(text) {
+  const out = [];
+  let cur = '';
+  let prev = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i);
+    const cls = charClass(ch);
+    if (cur.length > 0 && phraseBreak(prev, cls)
+      && KINSOKU_HEAD.indexOf(ch) < 0 && KINSOKU_TAIL.indexOf(cur.charAt(cur.length - 1)) < 0) {
+      out.push(cur);
+      cur = '';
+    }
+    cur += ch;
+    prev = cls;
+  }
+  if (cur.length > 0) { out.push(cur); }
+  return out;
+}
+
+function wrapVerticalPhrase(text, perColumn) {
+  const paragraphs = String(text).split('\n');
+  const cols = [];
+  for (let p = 0; p < paragraphs.length; p++) {
+    const tokens = verticalPhrases(paragraphs[p]);
+    let col = '';
+    for (let i = 0; i < tokens.length; i++) {
+      const t = tokens[i];
+      if (col.length > 0 && col.length + t.length > perColumn) { cols.push(col); col = ''; }
+      col += t;
+    }
+    if (col.length > 0) { cols.push(col); }
+  }
+  return applyKinsoku(cols);
+}
+
 function blockMetrics(ctx, sample, size) {
   const m = ctx.measureText(sample);
   const a = m.actualBoundingBoxAscent;
@@ -177,8 +229,10 @@ function blockMetrics(ctx, sample, size) {
 }
 
 function glyphMods(d, i, n, size, lineIndex) {
-  const mods = { s: 1, sy: 1, dx: 0, dy: 0, rot: 0, shear: 0 };
+  const mods = { s: 1, sy: 1, dx: 0, dy: 0, rot: 0, shear: 0, drift: 0, kern: 0 };
   if (!d) { return mods; }
+  // 字は正立のまま、行（列）だけを斜めに流す。skewは字まで倒れるので別軸にする。
+  if (d.drift) { mods.drift = d.drift * size * (i - (n - 1) / 2); }
   const u = n > 1 ? (i + 0.5) / n : 0.5;
   const c = 2 * u - 1;
   if (d.arc) {
@@ -205,6 +259,20 @@ function glyphMods(d, i, n, size, lineIndex) {
     mods.dy += (hash01(d.seed + i * 23.1) - 0.5) * 2 * d.shatter.amp * size;
     mods.rot += (hash01(d.seed + i * 29.7) - 0.5) * 0.5;
   }
+  // 式では決まらない手書きlogo調の癖（「2字目だけ大きい」等）を字番号で直接指定する
+  if (d.perGlyph) {
+    for (let k = 0; k < d.perGlyph.length; k++) {
+      const e = d.perGlyph[k];
+      if (e.i !== i) { continue; }
+      if (e.s) { mods.s *= e.s; }
+      if (e.sy) { mods.sy *= e.sy; }
+      if (e.dx) { mods.dx += e.dx * size; }
+      if (e.dy) { mods.dy += e.dy * size; }
+      if (e.rot) { mods.rot += e.rot; }
+      if (e.shear) { mods.shear += e.shear; }
+      if (e.kern) { mods.kern += e.kern; }
+    }
+  }
   mods.s = Math.max(SCALE_MIN, Math.min(SCALE_MAX, mods.s));
   mods.sy = Math.max(SY_MIN, Math.min(SY_MAX, mods.sy));
   return mods;
@@ -218,10 +286,12 @@ function distortBleedRatio(d) {
   return b;
 }
 
-function scaledLineWidth(ctx, line, tracking, distort, size, tier, lineIndex) {
+function scaledLineWidth(ctx, line, tracking, distort, size, tier, lineIndex, gk) {
   let w = 0;
   for (let i = 0; i < line.length; i++) {
-    w += charWidth(ctx, line.charAt(i)) * glyphMods(distort, i, line.length, size, lineIndex).s * tier;
+    const m = glyphMods(distort, i, line.length, size, lineIndex);
+    w += charWidth(ctx, line.charAt(i)) * m.s * tier * (gk > 0 ? gk : 1);
+    if (i < line.length - 1) { w += m.kern * size * tier; }
   }
   if (line.length > 1) { w += tracking * (line.length - 1) * tier; }
   return w;
@@ -264,6 +334,14 @@ function distortScaleMax(d, withDropCap) {
   if (d.jitter) { k *= 1 + d.jitter.scale; }
   if (d.trapezoid) { k *= 1 + Math.abs(d.trapezoid); }
   if (withDropCap && d.dropCap) { k *= 1 + d.dropCap; }
+  if (d.perGlyph) {
+    let m = 1;
+    for (let i = 0; i < d.perGlyph.length; i++) {
+      const s = d.perGlyph[i].s;
+      if (s > m) { m = s; }
+    }
+    k *= m;
+  }
   return k;
 }
 
@@ -276,6 +354,15 @@ function distortBleedY(d) {
   if (d.stagger) { b += Math.abs(d.stagger) * 2; }
   if (d.jitter) { b += d.jitter.off; }
   if (d.shatter) { b += d.shatter.amp; }
+  if (d.drift) { b += Math.abs(d.drift) * 3; }
+  if (d.perGlyph) {
+    let m = 0;
+    for (let i = 0; i < d.perGlyph.length; i++) {
+      const v = Math.abs(d.perGlyph[i].dy || 0);
+      if (v > m) { m = v; }
+    }
+    b += m;
+  }
   return b;
 }
 
@@ -465,11 +552,13 @@ function boundsOf(glyphs) {
 function tryHorizontal(ctx, args, spec, cfg, env) {
   const rectW = args.rect.w * args.W;
   const availH = args.rect.h * args.H;
-  const tracking = env.baseTracking * cfg.track;
+  // 詰め組み（負のtracking）は字面の設計そのもの。収まらない時の逃げに使う
+  // 段階的な緩めは、空けている（正の）時だけ掛ける。
+  const tracking = env.baseTracking >= 0 ? env.baseTracking * cfg.track : env.baseTracking;
   const sxTotal = env.baseScaleX * cfg.sx;
   const maxLinesAllowed = env.maxLines + cfg.extra;
   const tf = { skewX: env.skewX, rotate: env.rotate, scaleX: sxTotal };
-  const minSize = Math.max(MIN_FONT_PX, args.startSize * MIN_SIZE_RATIO);
+  const minSize = minFontSize(args.startSize, args.H);
   let size = args.startSize;
   let lines = [];
   let tiers = [];
@@ -486,7 +575,7 @@ function tryHorizontal(ctx, args, spec, cfg, env) {
     metrics = blockMetrics(ctx, lines.join(''), size);
     widest = 0;
     for (let i = 0; i < lines.length; i++) {
-      const w = scaledLineWidth(ctx, lines[i], tracking * size, env.distort, size, tiers[i], i);
+      const w = scaledLineWidth(ctx, lines[i], tracking * size, env.distort, size, tiers[i], i, env.gk);
       if (w > widest) { widest = w; }
     }
     blockH = blockHeight(lines, tiers, size, env.lhFactor, metrics, env.distort);
@@ -515,7 +604,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   const isTitle = slot.decor === 'title' || tiered;
   const tf = spec && spec.transform ? spec.transform : null;
   const env = {
-    baseTracking: slot.tracking > 0 ? slot.tracking : 0,
+    baseTracking: typeof slot.tracking === 'number' ? Math.max(TRACK_MIN, slot.tracking) : 0,
     baseScaleX: scaleX,
     maxLines: slot.maxLines > 0 ? slot.maxLines : 1,
     isTitle: isTitle,
@@ -524,6 +613,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
     lhFactor: isTitle ? LINE_HEIGHT_TIGHT : LINE_HEIGHT,
     skewX: tf && tf.skewX ? tf.skewX : 0,
     rotate: tf && tf.rotate ? tf.rotate : 0,
+    gk: spec && spec.glyphScaleX > 0 ? spec.glyphScaleX : 1,
     bleedRatio: distortBleedRatio(distort)
       + (spec && spec.strokes && spec.strokes.length > 0 ? spec.strokes[0].width : 0)
   };
@@ -586,6 +676,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   else if (align === 'right') { anchorX = rectLeft + rectW; originX = 1; }
   else { anchorX = rectLeft; align = 'left'; originX = 0; }
 
+  const gk = env.gk;
   const glyphs = [];
   let phrase = 0;
   let baseY = top + metrics.ascent * tiers[0] * distortScaleMax(distort, true) + distortBleedY(distort) * size;
@@ -594,7 +685,7 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
     const line = lines[i];
     const tier = tiers[i];
     if (i > 0) { baseY += lineAdvance(size, env.lhFactor, tiers[i - 1], tier, metrics, distort, i === 1); }
-    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier, i);
+    const lineW = scaledLineWidth(ctx, line, tracking * size, distort, size, tier, i, gk);
     let x = anchorX;
     if (align === 'center') { x -= lineW / 2; }
     else if (align === 'right') { x -= lineW; }
@@ -606,11 +697,11 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
       const mods = glyphMods(distort, j, line.length, size, i);
-      const gsx = mods.s * tier;
+      const gsx = mods.s * tier * gk;
       const gsy = mods.s * mods.sy * tier;
       const adv = charWidth(ctx, ch) * gsx;
       const cx = x + adv / 2 + mods.dx * tier;
-      const cy = baseY + mods.dy * tier;
+      const cy = baseY + (mods.dy + mods.drift) * tier;
       const asc = metrics.ascent * gsy;
       const desc = metrics.descent * gsy;
       const bw = Math.max(adv, size * 0.12);
@@ -620,7 +711,8 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
         blank: cls === 'sp',
         bx: cx - bw / 2, by: cy - asc, bw: bw, bh: asc + desc
       });
-      x += adv + tracking * size * tier;
+      // kern は字ごとの手詰め。均等 tracking では作れない字面を実測値で組む
+      x += adv + (tracking * size + mods.kern * size) * tier;
     }
   }
 
@@ -638,25 +730,82 @@ function layoutHorizontalSlot(ctx, args, spec, scaleX) {
   };
 }
 
+function contentLen(col) {
+  let n = 0;
+  for (let i = 0; i < col.length; i++) {
+    const cls = charClass(col.charAt(i));
+    if (cls !== 'sym' && cls !== 'sp') { n++; }
+  }
+  return n;
+}
+
+function columnTiers(cols, enabled) {
+  const lens = [];
+  let minLen = Infinity;
+  let maxLen = 0;
+  for (let i = 0; i < cols.length; i++) {
+    const n = contentLen(cols[i]);
+    lens.push(n);
+    if (n > 0 && n < minLen) { minLen = n; }
+    if (n > maxLen) { maxLen = n; }
+  }
+  const tiers = [];
+  const apply = enabled && cols.length >= 2 && maxLen > 0
+    && minLen <= maxLen && minLen / maxLen <= VERT_TIER_IMBALANCE;
+  for (let i = 0; i < cols.length; i++) {
+    if (!apply) { tiers.push(1); continue; }
+    if (lens[i] === 0) { tiers.push(i > 0 ? tiers[i - 1] : 1); continue; }
+    tiers.push(Math.max(VERT_TIER_MIN, Math.pow(minLen / lens[i], VERT_TIER_POW)));
+  }
+  for (let i = 0; i < tiers.length; i++) {
+    if (apply && lens[i] === 0 && i === 0 && tiers.length > 1) { tiers[i] = tiers[1]; }
+  }
+  return tiers;
+}
+
+function columnKern(distort, len, colIndex, size) {
+  if (!distort || !distort.perGlyph || len < 2) { return 0; }
+  let k = 0;
+  for (let i = 0; i < len - 1; i++) { k += glyphMods(distort, i, len, size, colIndex).kern; }
+  return k;
+}
+
+function columnExtent(cols, tiers, size, trackRatio, distort) {
+  let width = 0;
+  let height = 0;
+  for (let i = 0; i < cols.length; i++) {
+    const s = size * tiers[i];
+    width += s * COL_ADVANCE;
+    const h = cols[i].length * s * (1 + trackRatio) - s * trackRatio
+      + columnKern(distort, cols[i].length, i, s) * s;
+    if (h > height) { height = h; }
+  }
+  return { w: width, h: height };
+}
+
 function layoutVerticalSlot(ctx, args, spec, scaleX) {
   const slot = args.slot;
   const distort = spec ? spec.distort : null;
   const baseMaxCols = slot.maxLines > 0 ? slot.maxLines : 1;
-  const baseTrack = (slot.tracking > 0 ? slot.tracking : 0) * VERT_TRACK_SCALE;
+  const gk = spec && spec.glyphScaleX > 0 ? spec.glyphScaleX : 1;
+  const rawTrack = typeof slot.tracking === 'number' ? Math.max(TRACK_MIN, slot.tracking) : 0;
+  const baseTrack = rawTrack >= 0 ? rawTrack * VERT_TRACK_SCALE : rawTrack;
   const availH = args.rect.h * args.H;
   const rectW = args.rect.w * args.W;
-  const minSize = Math.max(MIN_FONT_PX, args.startSize * MIN_SIZE_RATIO);
+  const minSize = minFontSize(args.startSize, args.H);
   const text = String(args.text);
+  const tierOn = !!slot.sizeTier;
   let truncated = false;
   let size = args.startSize;
   let cols = [];
+  let tiers = [];
   let trackRatio = baseTrack;
   let sxTotal = scaleX;
   let maxCols = baseMaxCols;
   let fitted = false;
 
   for (let step = 0; step < FIT_STEPS.length && !fitted; step++) {
-    trackRatio = baseTrack * FIT_STEPS[step].track;
+    trackRatio = baseTrack >= 0 ? baseTrack * FIT_STEPS[step].track : baseTrack;
     sxTotal = scaleX * FIT_STEPS[step].sx;
     maxCols = baseMaxCols + FIT_STEPS[step].extra;
     const availW = rectW / sxTotal;
@@ -664,7 +813,7 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
     for (let pass = 0; pass < 26; pass++) {
       const cell = size * (1 + trackRatio);
       const perCol = Math.max(1, Math.floor((availH + size * trackRatio) / cell));
-      cols = wrapVertical(text, perCol);
+      cols = slot.phraseWrap ? wrapVerticalPhrase(text, perCol) : wrapVertical(text, perCol);
       let longestTry = 0;
       for (let i = 0; i < cols.length; i++) { if (cols[i].length > longestTry) { longestTry = cols[i].length; } }
       const ok = cols.length <= maxCols
@@ -683,19 +832,20 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
-  const track = size * trackRatio;
-  const cell = size + track;
-  const colW = size * COL_ADVANCE;
   const availW = rectW / sxTotal;
-  const perColLimit = Math.max(1, Math.floor((availH + track) / cell));
+  tiers = columnTiers(cols, tierOn);
   for (let i = 0; i < cols.length; i++) {
-    if (cols[i].length > perColLimit) {
-      cols[i] = cols[i].substring(0, perColLimit - 1) + ELLIPSIS;
+    const s = size * tiers[i];
+    const limit = Math.max(1, Math.floor((availH + s * trackRatio) / (s * (1 + trackRatio))));
+    if (cols[i].length > limit) {
+      cols[i] = cols[i].substring(0, limit - 1) + ELLIPSIS;
       truncated = true;
     }
   }
-  while (cols.length > 1 && cols.length * colW > availW) {
+  tiers = columnTiers(cols, tierOn);
+  while (cols.length > 1 && columnExtent(cols, tiers, size, trackRatio, distort).w > availW) {
     cols = cols.slice(0, cols.length - 1);
+    tiers = columnTiers(cols, tierOn);
     truncated = true;
   }
   if (truncated) {
@@ -703,8 +853,28 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
     if (lastCol.charAt(lastCol.length - 1) !== ELLIPSIS) {
       cols[cols.length - 1] = lastCol.substring(0, Math.max(1, lastCol.length - 1)) + ELLIPSIS;
     }
+    tiers = columnTiers(cols, tierOn);
   }
-  const blockW = cols.length * colW;
+  if (tierOn) {
+    const grown = columnExtent(cols, tiers, size, trackRatio, distort);
+    if (grown.w > 0 && grown.h > 0) {
+      const k = Math.min(availW / grown.w, availH / grown.h, VERT_TIER_GROW_MAX);
+      if (k > 1) { size = size * k; }
+    }
+  }
+  const colWidths = [];
+  const colHeights = [];
+  let blockW = 0;
+  let colH = 0;
+  for (let i = 0; i < cols.length; i++) {
+    const s = size * tiers[i];
+    colWidths.push(s * COL_ADVANCE * gk);
+    const h = cols[i].length * s * (1 + trackRatio) - s * trackRatio
+      + columnKern(distort, cols[i].length, i, s) * s;
+    colHeights.push(h);
+    blockW += s * COL_ADVANCE * gk;
+    if (h > colH) { colH = h; }
+  }
   const rectLeft = args.rect.x * args.W;
   let blockRight;
   let originX;
@@ -712,17 +882,23 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
   else if (slot.align === 'right') { blockRight = rectLeft + rectW; originX = 1; }
   else { blockRight = rectLeft + rectW / 2 + blockW / 2; originX = 0.5; }
 
-  let longest = 0;
-  for (let i = 0; i < cols.length; i++) { if (cols[i].length > longest) { longest = cols[i].length; } }
-  const colH = longest * cell - track;
   const rectTop = args.rect.y * args.H;
-  let top = slot.align === 'top' ? rectTop : rectTop + (availH - colH) / 2;
-  if (top < rectTop) { top = rectTop; }
+  let tiered = false;
+  for (let i = 0; i < tiers.length; i++) { if (tiers[i] !== 1) { tiered = true; } }
 
   const glyphs = [];
   let phrase = 0;
+  let xCursor = blockRight;
   for (let c = 0; c < cols.length; c++) {
-    const colCenter = blockRight - colW * (c + 0.5);
+    const cs = size * tiers[c];
+    const ctrack = cs * trackRatio;
+    const ccell = cs + ctrack;
+    const colCenter = xCursor - colWidths[c] / 2;
+    xCursor -= colWidths[c];
+    let top = slot.align === 'top'
+      ? rectTop
+      : rectTop + (availH - (tiered ? colHeights[c] : colH)) / 2;
+    if (top < rectTop) { top = rectTop; }
     let prevClass = null;
     phrase++;
     for (let k = 0; k < cols[c].length; k++) {
@@ -730,22 +906,24 @@ function layoutVerticalSlot(ctx, args, spec, scaleX) {
       const cls = charClass(ch);
       if (phraseBreak(prevClass, cls)) { phrase++; }
       prevClass = cls;
-      const mods = glyphMods(distort, k, cols[c].length, size, c);
-      const lateral = size * VERT_LATERAL_LIMIT;
+      const mods = glyphMods(distort, k, cols[c].length, cs, c);
+      const lateral = cs * VERT_LATERAL_LIMIT;
       let dx = Math.max(-lateral, Math.min(lateral, mods.dy));
       let dy = mods.dx;
       let rot = mods.rot;
       if (VERT_ROTATE.indexOf(ch) >= 0) { rot += Math.PI / 2; }
-      else if (VERT_CORNER.indexOf(ch) >= 0) { dx += size * VERT_CORNER_SHIFT_X; dy -= size * VERT_CORNER_SHIFT_Y; }
-      else if (VERT_SMALL.indexOf(ch) >= 0) { dx += size * VERT_SMALL_SHIFT; dy -= size * VERT_SMALL_SHIFT; }
-      const cx = colCenter + dx;
-      const cy = top + k * cell + size / 2 + dy;
-      const half = size * 0.5 * mods.s;
+      else if (VERT_CORNER.indexOf(ch) >= 0) { dx += cs * VERT_CORNER_SHIFT_X; dy -= cs * VERT_CORNER_SHIFT_Y; }
+      else if (VERT_SMALL.indexOf(ch) >= 0) { dx += cs * VERT_SMALL_SHIFT; dy -= cs * VERT_SMALL_SHIFT; }
+      // drift は列そのものの傾きなので VERT_LATERAL_LIMIT の clamp を掛けない
+      const cx = colCenter + dx + mods.drift;
+      const cy = top + k * ccell + cs / 2 + dy;
+      const gs = mods.s * tiers[c];
+      const half = cs * 0.5 * mods.s;
       glyphs.push({
-        ch: ch, cx: cx, cy: cy, adv: size * mods.s, line: c, phrase: phrase, col: colCenter,
-        rot: rot, shear: mods.shear, sx: mods.s, sy: mods.s * mods.sy,
+        ch: ch, cx: cx, cy: cy, adv: cs * mods.s, line: c, phrase: phrase, col: colCenter,
+        rot: rot, shear: mods.shear, sx: gs * gk, sy: gs * mods.sy, tier: tiers[c],
         blank: cls === 'sp',
-        bx: cx - half, by: cy - half * mods.sy, bw: half * 2, bh: half * 2 * mods.sy
+        bx: cx - half * gk, by: cy - half * mods.sy, bw: half * 2 * gk, bh: half * 2 * mods.sy
       });
     }
   }
@@ -801,11 +979,14 @@ function makeEmitter(layout, spec, fontCss) {
     c.textAlign = layout.textAlign;
     c.textBaseline = layout.textBaseline;
     const stroke = mode === 'stroke';
+    const baseLine = c.lineWidth;
     for (let i = 0; i < layout.glyphs.length; i++) {
       const g = layout.glyphs[i];
       if (g.blank) { continue; }
+      if (stroke && g.tier !== undefined && g.tier !== 1) { c.lineWidth = baseLine * g.tier; }
       drawGlyph(c, g, stroke);
     }
+    if (stroke) { c.lineWidth = baseLine; }
   };
   emit.regions = layout.regions;
   emit.glyphs = layout.glyphs;
@@ -834,7 +1015,7 @@ function specFromStyle(style) {
   return spec;
 }
 
-export function drawSlot(ctx, args) {
+function drawSlot(ctx, args) {
   if (!args || !args.text || !args.slot || !(args.startSize > 0)) { return null; }
   if (!args.decor && !args.style) { return null; }
   const spec = args.decor ? args.decor : specFromStyle(args.style);
@@ -870,3 +1051,6 @@ export function drawSlot(ctx, args) {
     outer: layout.outer || transformedBounds(layout.box, spec.transform)
   };
 }
+
+Object.assign(PF, { drawSlot });
+})(window.PF = window.PF || {});

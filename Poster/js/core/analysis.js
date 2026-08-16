@@ -1,6 +1,9 @@
-export const ANALYSIS_WIDTH = 192;
+(function (PF) {
+'use strict';
 
-export function buildSampleBuffer(source, srcW, srcH) {
+const ANALYSIS_WIDTH = 192;
+
+function buildSampleBuffer(source, srcW, srcH) {
   const w = ANALYSIS_WIDTH;
   const h = Math.max(1, Math.round(w * srcH / srcW));
   const cv = document.createElement('canvas');
@@ -13,7 +16,7 @@ export function buildSampleBuffer(source, srcW, srcH) {
   return { w: w, h: h, data: ctx.getImageData(0, 0, w, h).data };
 }
 
-export function computeLumaMap(buf) {
+function computeLumaMap(buf) {
   const n = buf.w * buf.h;
   const out = new Float32Array(n);
   const d = buf.data;
@@ -24,7 +27,7 @@ export function computeLumaMap(buf) {
   return out;
 }
 
-export function computeEdgeMap(luma, w, h) {
+function computeEdgeMap(luma, w, h) {
   const out = new Float32Array(w * h);
   let max = 1e-6;
   for (let y = 1; y < h - 1; y++) {
@@ -44,7 +47,7 @@ export function computeEdgeMap(luma, w, h) {
   return out;
 }
 
-export function buildIntegral(src, w, h) {
+function buildIntegral(src, w, h) {
   const iw = w + 1;
   const out = new Float64Array(iw * (h + 1));
   for (let y = 0; y < h; y++) {
@@ -57,7 +60,7 @@ export function buildIntegral(src, w, h) {
   return out;
 }
 
-export function integralSum(integral, w, x, y, rw, rh) {
+function integralSum(integral, w, x, y, rw, rh) {
   const iw = w + 1;
   const x0 = Math.max(0, Math.min(w, x));
   const y0 = Math.max(0, y);
@@ -65,3 +68,8 @@ export function integralSum(integral, w, x, y, rw, rh) {
   const y1 = Math.max(0, y + rh);
   return integral[y1 * iw + x1] - integral[y0 * iw + x1] - integral[y1 * iw + x0] + integral[y0 * iw + x0];
 }
+
+Object.assign(PF, {
+  ANALYSIS_WIDTH, buildSampleBuffer, computeLumaMap, computeEdgeMap, buildIntegral, integralSum
+});
+})(window.PF = window.PF || {});

@@ -1,0 +1,111 @@
+{
+  "W": 68,
+  "H": 160,
+  "items": [
+    {
+      "text": "日本人にとって",
+      "fontCss": "\"Noto Sans JP\",\"Yu Gothic\",sans-serif",
+      "weight": "700",
+      "startSize": 21,
+      "rect": {
+        "x": 0.2261,
+        "y": 0.0561,
+        "w": 0.9883,
+        "h": 1.5375
+      },
+      "slot": {
+        "align": "top",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0.0595,
+        "decor": "accent"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                211,
+                15,
+                55
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "text": "「推し」とは",
+      "fontCss": "\"Noto Sans JP\",\"Yu Gothic\",sans-serif",
+      "weight": "700",
+      "startSize": 32,
+      "rect": {
+        "x": -0.3701,
+        "y": -0.0688,
+        "w": 1.1529,
+        "h": 1.7938
+      },
+      "slot": {
+        "align": "top",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": -0.095,
+        "decor": "accent"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                211,
+                15,
+                55
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "text": "何か。",
+      "fontCss": "\"Noto Sans JP\",\"Yu Gothic\",sans-serif",
+      "weight": "700",
+      "startSize": 31,
+      "rect": {
+        "x": -0.9367,
+        "y": 0.0468,
+        "w": 1.1529,
+        "h": 1.025
+      },
+      "slot": {
+        "align": "top",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "accent"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                211,
+                15,
+                55
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

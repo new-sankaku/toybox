@@ -1,25 +1,28 @@
-import { createRng } from '../core/rng.js';
-import { buildSampleBuffer, computeLumaMap } from '../core/analysis.js';
-import { detectFaces, detectFacesSkin, remapFaces } from '../core/face.js';
-import { computeSaliency } from '../core/saliency.js';
-import { computeCropRect, analyzeImageFit } from '../core/crop.js';
-import { buildSubjectMask, maskToCanvas } from '../core/segment.js';
-import { buildCostMap, findBestRect, regionStats } from '../core/placement.js';
-import { resolveTextStyle } from '../core/legibility.js';
-import { extractPalette } from '../core/palette.js';
-import { buildColorPlan } from './colorPlan.js';
-import { generateCopy } from '../text/copywriter.js';
-import { processImage } from '../image/process.js';
-import { pickFonts, PALETTES } from './fonts.js';
-import { buildDecorSpec } from './decor.js';
-import { drawSlot } from './text.js';
-import { LAYOUTS } from './layouts.js';
-import { buildTheme } from './theme.js';
-import { SURFACE_FUNCS } from './surfaces.js';
-import { OVERLAY_FUNCS } from './overlays.js';
-import { rgbToCss, clamp255 } from '../core/color.js';
+(function (PF) {
+'use strict';
+const { createRng } = PF;
+const { buildSampleBuffer, computeLumaMap } = PF;
+const { detectFaces, remapFaces } = PF;
+const { computeSaliency } = PF;
+const { computeCropRect, analyzeImageFit } = PF;
+const { buildSubjectMask, maskToCanvas } = PF;
+const { buildCostMap, findBestRect, regionStats } = PF;
+const { resolveTextStyle } = PF;
+const { extractPalette } = PF;
+const { buildColorPlan } = PF;
+const { generateCopy } = PF;
+const { processImage } = PF;
+const { pickFonts, PALETTES } = PF;
+const { buildDecorSpec } = PF;
+const { drawSlot } = PF;
+const { buildSkeleton, composeLayout } = PF;
+const { setActiveAnchors, beginAnchorTrace, endAnchorTrace } = PF;
+const { buildTheme } = PF;
+const { SURFACE_FUNCS } = PF;
+const { OVERLAY_FUNCS } = PF;
+const { rgbToCss, clamp255 } = PF;
 
-export const OUTPUT_HEIGHT = 1400;
+const OUTPUT_HEIGHT = 1400;
 
 function rgbToHex(rgb) {
   const r = Math.round(clamp255(rgb[0]));
@@ -28,34 +31,26 @@ function rgbToHex(rgb) {
   return '#' + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1);
 }
 
-function pickLayout(rng, genre) {
-  const list = LAYOUTS[genre];
-  if (!list || list.length === 0) { throw new Error('layout未定義: ' + genre); }
-  return rng.pick(list);
-}
-
-function titleIsVertical(layout) {
-  for (let i = 0; i < layout.slots.length; i++) {
-    if (layout.slots[i].role === 'title') { return !!layout.slots[i].vertical; }
-  }
-  return false;
-}
-
 function drawScrim(ctx, rect, scrim, W, H) {
   const pad = W * 0.012;
   const gx = rect.x * W - pad;
   const gy = rect.y * H - pad;
   const gw = rect.w * W + pad * 2;
   const gh = rect.h * H + pad * 2;
-  const grad = ctx.createLinearGradient(0, gy, 0, gy + gh);
   const cs = rgbToCss(scrim.color, scrim.alpha);
-  const cs0 = rgbToCss(scrim.color, 0);
-  grad.addColorStop(0, cs0);
-  grad.addColorStop(0.25, cs);
-  grad.addColorStop(0.75, cs);
-  grad.addColorStop(1, cs0);
   ctx.save();
-  ctx.fillStyle = grad;
+  if (scrim.solid) {
+    // 端をfadeさせると文字の上下が下地の薄い所に載り、濃く敷いた意味が消える
+    ctx.fillStyle = cs;
+  } else {
+    const grad = ctx.createLinearGradient(0, gy, 0, gy + gh);
+    const cs0 = rgbToCss(scrim.color, 0);
+    grad.addColorStop(0, cs0);
+    grad.addColorStop(0.25, cs);
+    grad.addColorStop(0.75, cs);
+    grad.addColorStop(1, cs0);
+    ctx.fillStyle = grad;
+  }
   ctx.fillRect(gx, gy, gw, gh);
   ctx.restore();
 }
@@ -94,8 +89,12 @@ function drawDebugOverlay(ctx, W, H, buf, costInfo, faces, placements) {
   ctx.restore();
 }
 
-export async function generatePoster(opts) {
+async function generatePoster(opts) {
   const t0 = performance.now();
+  if (typeof opts.decorIntensity !== 'number' || !isFinite(opts.decorIntensity)) {
+    throw new Error('generatePoster: opts.decorIntensity が数値ではありません: ' + opts.decorIntensity);
+  }
+  const decorIntensity = Math.max(0, Math.min(1, opts.decorIntensity));
   const rng = createRng(opts.seed);
   const genre = opts.genre;
   const src = opts.bitmap;
@@ -105,10 +104,10 @@ export async function generatePoster(opts) {
   const fullBuf = buildSampleBuffer(src, srcW, srcH);
   const fullLuma = computeLumaMap(fullBuf);
   const fullSaliency = computeSaliency(fullBuf, fullLuma);
-  const preFaces = opts.avoidFace ? await detectFaces(src, fullBuf) : [];
+  const preFaces = opts.avoidFace ? await detectFaces(src, srcW, srcH) : [];
 
-  const layout = pickLayout(rng, genre);
-  const aspect = layout.aspect;
+  const plan = buildSkeleton(rng, genre);
+  const aspect = plan.aspect;
   const H = OUTPUT_HEIGHT;
   const W = Math.round(H * aspect);
   const fit = analyzeImageFit(srcW, srcH, aspect);
@@ -126,11 +125,7 @@ export async function generatePoster(opts) {
   const luma = computeLumaMap(buf);
   const saliency = computeSaliency(buf, luma);
 
-  let faces = [];
-  if (opts.avoidFace) {
-    faces = remapFaces(preFaces, crop, srcW, srcH);
-    if (faces.length === 0) { faces = detectFacesSkin(buf); }
-  }
+  const faces = opts.avoidFace ? remapFaces(preFaces, crop, srcW, srcH) : [];
   const costInfo = buildCostMap(buf, luma, faces, opts.avoidFace, saliency);
 
   const out = opts.canvas;
@@ -155,7 +150,7 @@ export async function generatePoster(opts) {
   }
 
   const palette = extractPalette(buf, { excludeSkin: true });
-  const colorPlan = buildColorPlan(rng, genre, palette, opts.intensity);
+  const colorPlan = buildColorPlan(rng, genre, palette, decorIntensity);
 
   const imageResult = processImage({
     ctx: ctx,
@@ -173,37 +168,40 @@ export async function generatePoster(opts) {
     colorPlan: colorPlan
   });
 
+  const copy = generateCopy(rng, genre, opts.density, { verticalTitle: plan.titleVertical });
+  const layout = composeLayout(rng, plan, copy);
+  setActiveAnchors(layout.anchors);
+
   const theme = buildTheme(rng, genre, colorPlan);
-  const surfaceCount = Math.max(1, Math.round(layout.surfaces.length * (0.6 + rng.next() * 0.5)));
-  const chosenSurfaces = rng.sample(layout.surfaces, surfaceCount);
-  for (let i = 0; i < layout.slots.length; i++) {
-    const need = layout.slots[i].onSurface;
-    if (need && chosenSurfaces.indexOf(need) < 0 && layout.surfaces.indexOf(need) >= 0) {
-      chosenSurfaces.push(need);
-    }
+  const chosenSurfaces = [];
+  for (let i = 0; i < layout.surfaces.length; i++) {
+    if (chosenSurfaces.indexOf(layout.surfaces[i]) < 0) { chosenSurfaces.push(layout.surfaces[i]); }
   }
+  beginAnchorTrace();
   for (let i = 0; i < chosenSurfaces.length; i++) {
     const fn = SURFACE_FUNCS[chosenSurfaces[i]];
     if (fn) { fn(ctx, W, H, rng, theme); }
   }
+  const surfaceRects = endAnchorTrace();
 
-  const copy = generateCopy(rng, genre, opts.density, { verticalTitle: titleIsVertical(layout) });
   const fonts = pickFonts(rng, genre);
   const textPalette = colorPlan.textPalette && colorPlan.textPalette.length
     ? colorPlan.textPalette.map((rgb) => rgbToHex(rgb))
     : PALETTES[genre];
 
-  const occupied = [];
+  // surface は文字より先に描かれるが占有情報が無く、自由配置の文字が上に乗ってしまう。
+  // overlap は soft penalty なので、置き場が無ければ従来通り重なる。
+  const occupied = surfaceRects.slice();
   const placements = [];
   for (let i = 0; i < layout.slots.length; i++) {
     const slot = layout.slots[i];
     const text = copy[slot.role];
     if (!text) { continue; }
     let rect;
-    if (slot.onSurface) {
-      rect = slot.candidates[0];
+    if (slot.fixed) {
+      rect = slot.rect;
     } else {
-      rect = findBestRect(costInfo, buf.w, buf.h, slot.candidates, occupied, 0.045);
+      rect = findBestRect(costInfo, buf.w, buf.h, slot.candidates, occupied, slot.slide);
     }
     occupied.push(rect);
     placements.push({ slot: slot, rect: rect, text: text });
@@ -214,16 +212,24 @@ export async function generatePoster(opts) {
     const p = placements[i];
     const slot = p.slot;
     const stats = regionStats(postBuf, p.rect);
-    const style = resolveTextStyle(stats, textPalette, !!slot.big, rng);
-    if (style.scrim) { drawScrim(ctx, p.rect, style.scrim, W, H); }
+    const style = resolveTextStyle(stats, textPalette, !!slot.big, rng, {
+      inkOnly: !!slot.inkOnly,
+      outline: !!slot.outline,
+      chromaBias: colorPlan.textChromaBias,
+      minChroma: colorPlan.textMinChroma,
+      lBand: colorPlan.textLBand,
+      forceCover: !!slot.big && !slot.outline && rng.chance(colorPlan.titleCover),
+      coverColors: colorPlan.coverColors
+    });
+    if (style.scrim && !slot.outline) { drawScrim(ctx, p.rect, style.scrim, W, H); }
 
-    const decor = buildDecorSpec(rng, genre, slot, style, stats, opts.intensity, colorPlan);
+    const decor = buildDecorSpec(rng, genre, slot, style, stats, decorIntensity, colorPlan);
     const fontCss = slot.latin ? fonts.latin.css : (slot.big ? fonts.title.css : fonts.sub.css);
     const weight = slot.big ? (rng.chance(0.5) ? '700' : '600') : (rng.chance(0.3) ? '600' : '400');
     const startSize = H * slot.size * (slot.big ? (0.92 + rng.next() * 0.22) : (0.94 + rng.next() * 0.16));
 
     ctx.save();
-    drawSlot(ctx, {
+    const drawn = drawSlot(ctx, {
       text: p.text,
       rect: p.rect,
       slot: slot,
@@ -236,9 +242,11 @@ export async function generatePoster(opts) {
       H: H
     });
     ctx.restore();
+    p.size = drawn ? drawn.size : 0;
+    p.truncated = !!(drawn && drawn.truncated);
   }
 
-  const overlayCount = Math.max(1, Math.round(layout.overlays.length * (0.5 + opts.intensity * 0.8)));
+  const overlayCount = Math.max(1, Math.round(layout.overlays.length * (0.34 + opts.intensity * 0.66)));
   const chosenOverlays = rng.sample(layout.overlays, overlayCount);
   const applied = [];
   for (let i = 0; i < chosenOverlays.length; i++) {
@@ -251,12 +259,21 @@ export async function generatePoster(opts) {
   if (opts.debug) {
     drawDebugOverlay(ctx, W, H, buf, costInfo, faces, placements);
   }
+  setActiveAnchors(null);
+
+  const placedRects = [];
+  for (let i = 0; i < placements.length; i++) {
+    placedRects.push({ role: placements[i].slot.role, rect: placements[i].rect, size: placements[i].size, truncated: placements[i].truncated });
+  }
 
   return {
     ms: Math.round(performance.now() - t0),
     seed: opts.seed,
     genre: genre,
     layoutId: layout.id,
+    heroMode: layout.heroMode,
+    bands: layout.bands,
+    placements: placedRects,
     aspect: aspect,
     fit: fit,
     crop: crop,
@@ -276,3 +293,6 @@ export async function generatePoster(opts) {
     copy: copy
   };
 }
+
+Object.assign(PF, { OUTPUT_HEIGHT, generatePoster });
+})(window.PF = window.PF || {});

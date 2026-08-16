@@ -1,0 +1,111 @@
+{
+  "W": 880,
+  "H": 168,
+  "items": [
+    {
+      "text": "メイドのご奉仕",
+      "fontCss": "\"Yu Mincho\",\"Noto Serif JP\",serif",
+      "weight": "400",
+      "startSize": 181,
+      "rect": {
+        "x": -0.49570000000000003,
+        "y": -0.2405,
+        "w": 2.0,
+        "h": 1.6
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.29,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "linear",
+          "angle": 1.5708,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "t": 0.9,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            },
+            {
+              "t": 1,
+              "rgb": [
+                251,
+                241,
+                222
+              ]
+            }
+          ]
+        },
+        "glow": [
+          {
+            "rgb": [
+              196,
+              146,
+              66
+            ],
+            "alpha": 0.55,
+            "blur": 0.28,
+            "passes": 2
+          },
+          {
+            "rgb": [
+              226,
+              180,
+              108
+            ],
+            "alpha": 1,
+            "blur": 0.035,
+            "passes": 2
+          }
+        ],
+        "transform": {
+          "skewX": 0,
+          "rotate": 0,
+          "scaleX": 0.94
+        },
+        "distort": {
+          "perGlyph": [
+            {
+              "i": 0,
+              "kern": -0.112
+            },
+            {
+              "i": 1,
+              "kern": -0.094
+            },
+            {
+              "i": 2,
+              "kern": -0.059
+            },
+            {
+              "i": 3,
+              "kern": -0.047
+            },
+            {
+              "i": 4,
+              "kern": 0.047
+            },
+            {
+              "i": 5,
+              "kern": 0.1
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

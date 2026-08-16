@@ -1,0 +1,76 @@
+{
+  "W": 92,
+  "H": 358,
+  "items": [
+    {
+      "text": "初恋天使",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "400",
+      "startSize": 77,
+      "rect": {
+        "x": -0.505,
+        "y": -0.301,
+        "w": 2.0,
+        "h": 1.6
+      },
+      "slot": {
+        "align": "center",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0.357,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                250,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.2,
+            "rgb": [
+              242,
+              132,
+              178
+            ],
+            "alpha": 1
+          }
+        ],
+        "glow": [
+          {
+            "rgb": [
+              240,
+              128,
+              176
+            ],
+            "alpha": 0.32,
+            "blur": 0.42,
+            "passes": 2
+          },
+          {
+            "rgb": [
+              242,
+              132,
+              178
+            ],
+            "alpha": 0.5,
+            "blur": 0.12,
+            "passes": 2
+          }
+        ],
+        "erode": {
+          "width": 0.0285
+        }
+      }
+    }
+  ]
+}

@@ -1,11 +1,15 @@
-import { buildFilterSpec, drawWithFilter } from './filterSpec.js';
-import { buildGradeSpec, applyGrade } from './grade.js';
-import { buildGlitchPlan, applyGlitch } from './glitch.js';
-import { maskToCanvas } from '../core/segment.js';
-import { ANALYSIS_WIDTH } from '../core/analysis.js';
+(function (PF) {
+'use strict';
+const { buildFilterSpec, drawWithFilter } = PF;
+const { buildGradeSpec, applyGrade } = PF;
+const { buildGlitchPlan, applyGlitch } = PF;
+const { maskToCanvas } = PF;
+const { ANALYSIS_WIDTH } = PF;
 
 const COOL_LOOKS = { 'cold-night': 1, 'cyanotype': 1, 'neon-night': 1, 'teal-orange': 1 };
 const SAT_LOOKS = { 'neon-night': 1, 'cross-process': 1, 'teal-orange': 1 };
+const CUTOUT_RATE = { cinema: 0.55, gravure: 0.55, novel: 0.55, asmr: 0.14, game: 0.55, adult: 0.55 };
+const HEAVY_LOOKS = { cyanotype: 1, duotone: 1, 'silver-halide': 1, 'bleach-bypass': 1 };
 
 function clamp01(v) {
   const n = typeof v === 'number' && isFinite(v) ? v : 0;
@@ -41,8 +45,10 @@ function reconcile(f, g) {
   if (Math.abs(f.hueRotate || 0) > 0.05 && g.look === 'cyanotype') { f.hueRotate = 0; }
 }
 
-function backgroundGrade(spec, darker, rng) {
-  const gainScale = darker ? rng.range(0.68, 0.82) : rng.range(1.08, 1.2);
+function backgroundGrade(spec, darker, rng, keepColor) {
+  const gainScale = darker
+    ? (keepColor ? rng.range(0.82, 0.92) : rng.range(0.68, 0.82))
+    : (keepColor ? rng.range(1.04, 1.12) : rng.range(1.08, 1.2));
   const out = {
     look: spec.look,
     strength: Math.min(1, spec.strength * 0.9),
@@ -50,7 +56,7 @@ function backgroundGrade(spec, darker, rng) {
     gamma: spec.gamma.slice(),
     gain: [spec.gain[0] * gainScale, spec.gain[1] * gainScale, spec.gain[2] * gainScale],
     contrast: 1 + (spec.contrast - 1) * 0.7,
-    saturation: (1 + (spec.saturation - 1) * 0.3) * 0.42,
+    saturation: (1 + (spec.saturation - 1) * 0.3) * (keepColor ? 0.92 : 0.42),
     shadowTint: spec.shadowTint.slice(),
     shadowAmount: Math.min(0.85, spec.shadowAmount * 1.2),
     shadowExp: spec.shadowExp,
@@ -72,7 +78,7 @@ function maskSize(subject) {
   return { w: w, h: h };
 }
 
-function drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng) {
+function drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng, keepColor) {
   let maskCv = subject.canvas || null;
   if (!maskCv) {
     const size = maskSize(subject);
@@ -82,17 +88,19 @@ function drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng) {
   if (!maskCv || !maskCv.width || !maskCv.height) { return false; }
   const darker = rng.chance(0.62);
   const bgFilter = {
-    grayscale: Math.min(1, filterSpec.grayscale + rng.range(0.35, 0.55)),
+    grayscale: keepColor ? filterSpec.grayscale : Math.min(1, filterSpec.grayscale + rng.range(0.35, 0.55)),
     sepia: filterSpec.sepia * 0.6,
-    saturate: filterSpec.saturate * rng.range(0.25, 0.45),
+    saturate: filterSpec.saturate * (keepColor ? rng.range(0.86, 1.0) : rng.range(0.25, 0.45)),
     contrast: filterSpec.contrast * rng.range(0.88, 0.96),
-    brightness: filterSpec.brightness * (darker ? rng.range(0.62, 0.80) : rng.range(1.12, 1.26)),
+    brightness: filterSpec.brightness * (darker
+      ? (keepColor ? rng.range(0.80, 0.90) : rng.range(0.62, 0.80))
+      : (keepColor ? rng.range(1.05, 1.14) : rng.range(1.12, 1.26))),
     hueRotate: filterSpec.hueRotate,
     blur: 0,
     mode: filterSpec.mode
   };
-  drawWithFilter(ctx, base, W, H, bgFilter, W * rng.range(0.003, 0.006));
-  if (gradeSpec) { applyGrade(ctx, W, H, backgroundGrade(gradeSpec, darker, rng)); }
+  drawWithFilter(ctx, base, W, H, bgFilter, W * (keepColor ? rng.range(0.0015, 0.003) : rng.range(0.003, 0.006)));
+  if (gradeSpec) { applyGrade(ctx, W, H, backgroundGrade(gradeSpec, darker, rng, keepColor)); }
 
   const fgCv = document.createElement('canvas');
   fgCv.width = W;
@@ -107,7 +115,7 @@ function drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng) {
   return true;
 }
 
-export function processImage(opts) {
+function processImage(opts) {
   const ctx = opts.ctx;
   const base = opts.baseCanvas;
   const W = opts.W;
@@ -130,7 +138,8 @@ export function processImage(opts) {
   }
 
   const subject = opts.subject;
-  const wantCutout = !!subject && cutoutMode !== 'off' && (cutoutMode === 'force' || rng.chance(0.55));
+  const cutoutRate = CUTOUT_RATE[genre] === undefined ? 0.55 : CUTOUT_RATE[genre];
+  const wantCutout = !!subject && cutoutMode !== 'off' && (cutoutMode === 'force' || rng.chance(cutoutRate));
 
   ctx.save();
   ctx.globalAlpha = 1;
@@ -139,7 +148,7 @@ export function processImage(opts) {
 
   let cutoutUsed = false;
   if (wantCutout) {
-    cutoutUsed = drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng);
+    cutoutUsed = drawSeparated(ctx, base, W, H, filterSpec, gradeSpec, subject, rng, genre === 'game');
   }
   if (!cutoutUsed) {
     drawWithFilter(ctx, base, W, H, filterSpec, 0);
@@ -147,7 +156,10 @@ export function processImage(opts) {
   }
   ctx.restore();
 
-  const plan = buildGlitchPlan(rng, genre, intensity, glitchMode);
+  let restraint = 1;
+  if (gradeSpec && HEAVY_LOOKS[gradeSpec.look]) { restraint *= 0.35; }
+  if (filterSpec.grayscale >= 0.6 || filterSpec.sepia >= 0.5) { restraint *= 0.4; }
+  const plan = buildGlitchPlan(rng, genre, intensity, glitchMode, restraint);
   const applied = applyGlitch(ctx, W, H, plan, rng, faces);
   const glitchOps = [];
   for (let i = 0; i < applied.length; i++) { glitchOps.push(applied[i].type); }
@@ -159,3 +171,6 @@ export function processImage(opts) {
     cutoutUsed: cutoutUsed
   };
 }
+
+Object.assign(PF, { processImage });
+})(window.PF = window.PF || {});

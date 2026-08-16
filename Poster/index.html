@@ -14,11 +14,6 @@
   <span class="sub">CLIENT SIDE PACKAGE SYNTHESIZER / NO SERVER</span>
 </header>
 
-<div id="protocolWarn" class="warn" hidden>
-  <strong>module が読み込めない配置です。</strong>
-  <code>serve.bat</code>（Windows）または <code>serve.sh</code>（Linux / macOS）で起動してください。
-</div>
-
 <div class="grid">
 
   <div class="col-left">
@@ -69,25 +64,25 @@
       <div class="opt">
         <span>背景分離</span>
         <select id="optCutout">
-          <option value="auto" selected>自動</option>
+          <option value="auto">自動</option>
           <option value="force">常に試行</option>
-          <option value="off">切</option>
+          <option value="off" selected>切</option>
         </select>
       </div>
       <div class="opt">
         <span>画像加工</span>
         <select id="optGrade">
-          <option value="auto" selected>自動</option>
+          <option value="auto">自動</option>
           <option value="strong">強め</option>
-          <option value="off">切</option>
+          <option value="off" selected>切</option>
         </select>
       </div>
       <div class="opt">
         <span>破壊効果</span>
         <select id="optGlitch">
-          <option value="auto" selected>自動</option>
+          <option value="auto">自動</option>
           <option value="strong">多め</option>
-          <option value="off">切</option>
+          <option value="off" selected>切</option>
         </select>
       </div>
       <div class="opt">
@@ -99,8 +94,12 @@
         </select>
       </div>
       <div class="opt">
-        <span>加工の強さ</span>
-        <input type="range" id="optIntensity" min="0" max="100" value="65">
+        <span>画像加工の強さ</span>
+        <input type="range" id="optIntensity" min="0" max="100" value="0">
+      </div>
+      <div class="opt">
+        <span>文字装飾の強さ</span>
+        <input type="range" id="optDecor" min="0" max="100" value="80">
       </div>
       <div class="opt">
         <label class="switch" for="optDebug"><input type="checkbox" id="optDebug">解析を重ねて表示</label>
@@ -132,11 +131,64 @@
 
 </div>
 
-<script>
-if (location.protocol === 'file:') {
-  document.getElementById('protocolWarn').hidden = false;
-}
-</script>
-<script type="module" src="./js/main.js"></script>
+<script src="./vendor/tfjs/tf-core.min.js"></script>
+<script src="./vendor/tfjs/tf-backend-webgl.min.js"></script>
+<script src="./vendor/tfjs/tf-converter.min.js"></script>
+<script src="./vendor/tfjs/blazeface.min.umd.js"></script>
+<script src="./vendor/model/blazeface.artifacts.js"></script>
+<script src="./js/core/analysis.js"></script>
+<script src="./js/core/color.js"></script>
+<script src="./js/core/crop.js"></script>
+<script src="./js/core/face.js"></script>
+<script src="./js/core/oklch.js"></script>
+<script src="./js/core/harmony.js"></script>
+<script src="./js/core/legibility.js"></script>
+<script src="./js/core/rng.js"></script>
+<script src="./js/core/palette.js"></script>
+<script src="./js/core/placement.js"></script>
+<script src="./js/core/saliency.js"></script>
+<script src="./js/core/segment.js"></script>
+<script src="./js/image/filterSpec.js"></script>
+<script src="./js/image/glitch.js"></script>
+<script src="./js/image/grade.js"></script>
+<script src="./js/image/process.js"></script>
+<script src="./js/render/colorPlan.js"></script>
+<script src="./js/text/lexicon.common.a.js"></script>
+<script src="./js/text/lexicon.common.b.js"></script>
+<script src="./js/text/lexicon.cinema.js"></script>
+<script src="./js/text/lexicon.cinema.b.js"></script>
+<script src="./js/text/lexicon.gravure.js"></script>
+<script src="./js/text/lexicon.novel.js"></script>
+<script src="./js/text/lexicon.asmr.js"></script>
+<script src="./js/text/lexicon.game.js"></script>
+<script src="./js/text/lexicon.game.b.js"></script>
+<script src="./js/text/lexicon.adult.js"></script>
+<script src="./js/text/lexicon.adult.b.js"></script>
+<script src="./js/text/lexicon.adult.words.js"></script>
+<script src="./js/text/lexicon.js"></script>
+<script src="./js/text/morphology.js"></script>
+<script src="./js/text/orthography.js"></script>
+<script src="./js/text/register.cinema.js"></script>
+<script src="./js/text/register.gravure.js"></script>
+<script src="./js/text/register.gravure.b.js"></script>
+<script src="./js/text/register.novel.js"></script>
+<script src="./js/text/register.asmr.js"></script>
+<script src="./js/text/register.game.js"></script>
+<script src="./js/text/register.game.b.js"></script>
+<script src="./js/text/register.adult.js"></script>
+<script src="./js/text/register.adult.b.js"></script>
+<script src="./js/text/patterns.js"></script>
+<script src="./js/text/register.js"></script>
+<script src="./js/text/copywriter.js"></script>
+<script src="./js/render/fonts.js"></script>
+<script src="./js/render/decor.js"></script>
+<script src="./js/render/text.js"></script>
+<script src="./js/render/anchors.js"></script>
+<script src="./js/render/skeleton.js"></script>
+<script src="./js/render/theme.js"></script>
+<script src="./js/render/surfaces.js"></script>
+<script src="./js/render/overlays.js"></script>
+<script src="./js/render/poster.js"></script>
+<script src="./js/main.js"></script>
 </body>
 </html>

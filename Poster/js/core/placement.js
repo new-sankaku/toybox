@@ -1,8 +1,12 @@
-import { computeEdgeMap, buildIntegral, integralSum } from './analysis.js';
+(function (PF) {
+'use strict';
+const { computeEdgeMap, buildIntegral, integralSum } = PF;
 
 const FACE_PENALTY = 3.2;
 const OVERLAP_PENALTY = 2.5;
-const ORDER_PENALTY = 0.04;
+const ORDER_PENALTY = 0.018;
+const DRIFT_PENALTY_X = 0.030;
+const DRIFT_PENALTY_Y = 0.018;
 const VARIANCE_RADIUS = 2;
 
 function resolveSaliencyMap(saliency, w, h) {
@@ -60,7 +64,7 @@ function applyFacePenalty(cost, w, h, faces) {
   }
 }
 
-export function buildCostMap(buf, luma, faces, avoidFace, saliency) {
+function buildCostMap(buf, luma, faces, avoidFace, saliency) {
   const w = buf.w, h = buf.h;
   const edge = computeEdgeMap(luma, w, h);
   const variance = buildVarianceMap(luma, w, h);
@@ -81,7 +85,7 @@ export function buildCostMap(buf, luma, faces, avoidFace, saliency) {
   return { cost: cost, integral: buildIntegral(cost, w, h), edge: edge };
 }
 
-export function rectCost(costInfo, w, h, rect) {
+function rectCost(costInfo, w, h, rect) {
   const x = Math.max(0, Math.min(w - 1, Math.round(rect.x * w)));
   const y = Math.max(0, Math.min(h - 1, Math.round(rect.y * h)));
   const rw = Math.max(1, Math.min(w - x, Math.round(rect.w * w)));
@@ -89,7 +93,7 @@ export function rectCost(costInfo, w, h, rect) {
   return integralSum(costInfo.integral, w, x, y, rw, rh) / (rw * rh);
 }
 
-export function overlapRatio(a, b) {
+function overlapRatio(a, b) {
   const x0 = Math.max(a.x, b.x);
   const y0 = Math.max(a.y, b.y);
   const x1 = Math.min(a.x + a.w, b.x + b.w);
@@ -98,17 +102,18 @@ export function overlapRatio(a, b) {
   return ((x1 - x0) * (y1 - y0)) / (a.w * a.h);
 }
 
-export function findBestRect(costInfo, w, h, candidates, occupied, slide) {
+function findBestRect(costInfo, w, h, candidates, occupied, slide) {
   let best = null;
   let bestScore = Infinity;
-  const verticalSteps = 9;
-  const horizontalSteps = 5;
-  const horizontalSlide = slide * 0.45;
+  const span = slide > 0 ? slide : 0.045;
+  const verticalSteps = 11;
+  const horizontalSteps = 7;
+  const horizontalSlide = span * 0.70;
   const placed = occupied || [];
   for (let c = 0; c < candidates.length; c++) {
     const base = candidates[c];
     for (let s = 0; s < verticalSteps; s++) {
-      const dy = (s / (verticalSteps - 1) - 0.5) * 2 * slide;
+      const dy = (s / (verticalSteps - 1) - 0.5) * 2 * span;
       for (let t = 0; t < horizontalSteps; t++) {
         const dx = horizontalSteps === 1 ? 0 : (t / (horizontalSteps - 1) - 0.5) * 2 * horizontalSlide;
         const rect = { x: base.x + dx, y: base.y + dy, w: base.w, h: base.h };
@@ -116,8 +121,8 @@ export function findBestRect(costInfo, w, h, candidates, occupied, slide) {
         if (rect.x < 0.01 || rect.x + rect.w > 0.99) { continue; }
         let score = rectCost(costInfo, w, h, rect);
         score += c * ORDER_PENALTY;
-        score += Math.abs(dx) * 0.30;
-        score += Math.abs(dy) * 0.12;
+        score += (horizontalSlide > 0 ? Math.abs(dx) / horizontalSlide : 0) * DRIFT_PENALTY_X;
+        score += Math.abs(dy) / span * DRIFT_PENALTY_Y;
         for (let o = 0; o < placed.length; o++) {
           score += overlapRatio(rect, placed[o]) * OVERLAP_PENALTY;
         }
@@ -128,7 +133,7 @@ export function findBestRect(costInfo, w, h, candidates, occupied, slide) {
   return best || candidates[0];
 }
 
-export function regionStats(buf, rect) {
+function regionStats(buf, rect) {
   const w = buf.w, h = buf.h, d = buf.data;
   const x0 = Math.max(0, Math.round(rect.x * w));
   const y0 = Math.max(0, Math.round(rect.y * h));
@@ -152,3 +157,6 @@ export function regionStats(buf, rect) {
     std: Math.sqrt(Math.max(0, l2 / n - meanL * meanL))
   };
 }
+
+Object.assign(PF, { buildCostMap, rectCost, overlapRatio, findBestRect, regionStats });
+})(window.PF = window.PF || {});

@@ -1,0 +1,158 @@
+{
+  "W": 158,
+  "H": 136,
+  "items": [
+    {
+      "text": "DX",
+      "fontCss": "\"Times New Roman\",serif",
+      "weight": "700",
+      "startSize": 105,
+      "rect": {
+        "x": -0.475,
+        "y": -0.504,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.06,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "metallic",
+          "angle": 1.5708,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                238,
+                150
+              ]
+            },
+            {
+              "t": 0.13,
+              "rgb": [
+                252,
+                206,
+                62
+              ]
+            },
+            {
+              "t": 0.32,
+              "rgb": [
+                234,
+                158,
+                14
+              ]
+            },
+            {
+              "t": 0.52,
+              "rgb": [
+                210,
+                118,
+                0
+              ]
+            },
+            {
+              "t": 0.66,
+              "rgb": [
+                245,
+                182,
+                52
+              ]
+            },
+            {
+              "t": 0.86,
+              "rgb": [
+                204,
+                110,
+                0
+              ]
+            },
+            {
+              "t": 1,
+              "rgb": [
+                240,
+                170,
+                54
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.191,
+            "rgb": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 1,
+            "isotropic": true
+          },
+          {
+            "width": 0.105,
+            "rgb": [
+              0,
+              126,
+              65
+            ],
+            "alpha": 1,
+            "isotropic": true
+          },
+          {
+            "width": 0.038,
+            "rgb": [
+              18,
+              10,
+              4
+            ],
+            "alpha": 1,
+            "isotropic": true
+          }
+        ],
+        "dropShadow": {
+          "rgb": [
+            60,
+            55,
+            50
+          ],
+          "alpha": 0.4,
+          "dx": 0.015,
+          "dy": 0.02,
+          "blur": 0.05
+        },
+        "transform": {
+          "rotate": -0.36
+        },
+        "bevel": {
+          "light": [
+            255,
+            240,
+            175
+          ],
+          "dark": [
+            120,
+            52,
+            0
+          ],
+          "offset": 0.013,
+          "alpha": 0.95
+        },
+        "innerLine": {
+          "rgb": [
+            255,
+            222,
+            130
+          ],
+          "width": 0.015,
+          "alpha": 0.75
+        },
+        "glyphScaleX": 0.84
+      }
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+{
+  "W": 290,
+  "H": 89,
+  "items": [
+    {
+      "text": "お耳のお掃除",
+      "fontCss": "\"Noto Serif JP\",serif",
+      "weight": "300",
+      "startSize": 63,
+      "rect": {
+        "x": -0.497,
+        "y": -0.534,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                252,
+                253,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "glow": [
+          {
+            "rgb": [
+              190,
+              220,
+              255
+            ],
+            "alpha": 0.22,
+            "blur": 0.16,
+            "passes": 1
+          },
+          {
+            "rgb": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 0.35,
+            "blur": 0.045,
+            "passes": 1
+          }
+        ],
+        "plate": {
+          "scope": "line",
+          "shape": "rect",
+          "rgb": [
+            55,
+            110,
+            190
+          ],
+          "alpha": 0.72,
+          "padX": 0.02,
+          "padY": 0.056,
+          "radius": 0
+        },
+        "transform": {
+          "scaleX": 0.7
+        },
+        "distort": {
+          "perGlyph": [
+            {
+              "i": 2,
+              "s": 0.85
+            }
+          ],
+          "seed": 1
+        },
+        "erode": {
+          "width": 0.006
+        }
+      }
+    }
+  ]
+}

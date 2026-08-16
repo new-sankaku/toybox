@@ -1,4 +1,7 @@
-export function mulberry32(seed) {
+(function (PF) {
+'use strict';
+
+function mulberry32(seed) {
   let a = seed >>> 0;
   return function () {
     a = (a + 0x6D2B79F5) | 0;
@@ -8,7 +11,7 @@ export function mulberry32(seed) {
   };
 }
 
-export function createRng(seed) {
+function createRng(seed) {
   const next = mulberry32(seed);
   const api = {
     seed: seed,
@@ -41,6 +44,9 @@ export function createRng(seed) {
   return api;
 }
 
-export function randomSeed() {
+function randomSeed() {
   return (Math.random() * 0xffffffff) >>> 0;
 }
+
+Object.assign(PF, { mulberry32, createRng, randomSeed });
+})(window.PF = window.PF || {});

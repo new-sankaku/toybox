@@ -1,4 +1,6 @@
-import { clamp255, contrastRatio } from './color.js';
+(function (PF) {
+'use strict';
+const { clamp255, contrastRatio } = PF;
 
 const GAMUT_EPS = 1e-9;
 const GAMUT_ITER = 26;
@@ -36,27 +38,27 @@ const CVD_MAT = {
   tritan: [-0.395913, 0.801109, 0]
 };
 
-export function clamp01(v) {
+function clamp01(v) {
   return v < 0 ? 0 : (v > 1 ? 1 : v);
 }
 
-export function mod360(h) {
+function mod360(h) {
   let x = h % 360;
   if (x < 0) { x += 360; }
   return x;
 }
 
-export function srgbChannelToLinear(v) {
+function srgbChannelToLinear(v) {
   const c = v / 255;
   return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
 }
 
-export function linearChannelToSrgb(v) {
+function linearChannelToSrgb(v) {
   const c = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
   return c * 255;
 }
 
-export function linearRgbToOklab(lin) {
+function linearRgbToOklab(lin) {
   const r = lin[0], g = lin[1], b = lin[2];
   const l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
   const m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
@@ -69,7 +71,7 @@ export function linearRgbToOklab(lin) {
   ];
 }
 
-export function oklabToLinearRgb(lab) {
+function oklabToLinearRgb(lab) {
   const L = lab[0], a = lab[1], b = lab[2];
   const lc = L + 0.3963377774 * a + 0.2158037573 * b;
   const mc = L - 0.1055613458 * a - 0.0638541728 * b;
@@ -82,7 +84,7 @@ export function oklabToLinearRgb(lab) {
   ];
 }
 
-export function srgbToOklab(rgb) {
+function srgbToOklab(rgb) {
   return linearRgbToOklab([
     srgbChannelToLinear(rgb[0]),
     srgbChannelToLinear(rgb[1]),
@@ -90,7 +92,7 @@ export function srgbToOklab(rgb) {
   ]);
 }
 
-export function oklabToSrgb(lab) {
+function oklabToSrgb(lab) {
   const lin = oklabToLinearRgb(lab);
   return [
     clamp255(linearChannelToSrgb(lin[0] < 0 ? 0 : (lin[0] > 1 ? 1 : lin[0]))),
@@ -99,19 +101,19 @@ export function oklabToSrgb(lab) {
   ];
 }
 
-export function oklabToOklch(lab) {
+function oklabToOklch(lab) {
   const a = lab[1], b = lab[2];
   const c = Math.sqrt(a * a + b * b);
   const h = c < 1e-9 ? 0 : mod360(Math.atan2(b, a) * 180 / Math.PI);
   return [lab[0], c, h];
 }
 
-export function oklchToOklab(lch) {
+function oklchToOklab(lch) {
   const rad = lch[2] * Math.PI / 180;
   return [lch[0], lch[1] * Math.cos(rad), lch[1] * Math.sin(rad)];
 }
 
-export function srgbToOklch(rgb) {
+function srgbToOklch(rgb) {
   return oklabToOklch(srgbToOklab(rgb));
 }
 
@@ -121,11 +123,11 @@ function linearInGamut(lin) {
     && lin[2] >= -GAMUT_EPS && lin[2] <= 1 + GAMUT_EPS;
 }
 
-export function isInGamut(lch) {
+function isInGamut(lch) {
   return linearInGamut(oklabToLinearRgb(oklchToOklab(lch)));
 }
 
-export function clampChroma(lch) {
+function clampChroma(lch) {
   const L = clamp01(lch[0]);
   const h = mod360(lch[2]);
   const c0 = lch[1] < 0 ? 0 : lch[1];
@@ -139,7 +141,7 @@ export function clampChroma(lch) {
   return [L, lo, h];
 }
 
-export function oklchToSrgb(lch) {
+function oklchToSrgb(lch) {
   const safe = clampChroma(lch);
   const lin = oklabToLinearRgb(oklchToOklab(safe));
   return [
@@ -149,23 +151,23 @@ export function oklchToSrgb(lch) {
   ];
 }
 
-export function deltaEOk(a, b) {
+function deltaEOk(a, b) {
   const dl = a[0] - b[0];
   const da = a[1] - b[1];
   const db = a[2] - b[2];
   return Math.sqrt(dl * dl + da * da + db * db);
 }
 
-export function deltaEOkLch(a, b) {
+function deltaEOkLch(a, b) {
   return deltaEOk(oklchToOklab(a), oklchToOklab(b));
 }
 
-export function hueDistance(a, b) {
+function hueDistance(a, b) {
   const d = Math.abs(mod360(a) - mod360(b));
   return d > 180 ? 360 - d : d;
 }
 
-export function mixOklch(a, b, t) {
+function mixOklch(a, b, t) {
   const ha = mod360(a[2]);
   const hb = mod360(b[2]);
   let dh = hb - ha;
@@ -176,7 +178,7 @@ export function mixOklch(a, b, t) {
   return [a[0] + (b[0] - a[0]) * t, ca + (cb - ca) * t, h];
 }
 
-export function pullHue(h, target, strength) {
+function pullHue(h, target, strength) {
   return mixOklch([0, 1, h], [0, 1, target], strength)[2];
 }
 
@@ -187,7 +189,7 @@ function apcaY(rgb) {
   return y < APCA.blkThrs ? y + Math.pow(APCA.blkThrs - y, APCA.blkClmp) : y;
 }
 
-export function apcaContrast(textRgb, bgRgb) {
+function apcaContrast(textRgb, bgRgb) {
   const yt = apcaY(textRgb);
   const yb = apcaY(bgRgb);
   if (Math.abs(yb - yt) < APCA.deltaYmin) { return 0; }
@@ -203,7 +205,7 @@ export function apcaContrast(textRgb, bgRgb) {
   return out * 100;
 }
 
-export function apcaThreshold(fontPx, weight) {
+function apcaThreshold(fontPx, weight) {
   const w = weight >= 700 ? 1 : 0;
   if (fontPx >= 96) { return w ? 30 : 35; }
   if (fontPx >= 48) { return w ? 38 : 45; }
@@ -212,7 +214,7 @@ export function apcaThreshold(fontPx, weight) {
   return w ? 65 : 75;
 }
 
-export function simulateCvd(rgb, type) {
+function simulateCvd(rgb, type) {
   const m = CVD_MAT[type];
   if (!m) { return [rgb[0], rgb[1], rgb[2]]; }
   const r = srgbChannelToLinear(rgb[0]);
@@ -235,6 +237,14 @@ export function simulateCvd(rgb, type) {
   ];
 }
 
-export function cvdContrastRatio(fgRgb, bgRgb, type) {
+function cvdContrastRatio(fgRgb, bgRgb, type) {
   return contrastRatio(simulateCvd(fgRgb, type), simulateCvd(bgRgb, type));
 }
+
+Object.assign(PF, {
+  clamp01, mod360, srgbChannelToLinear, linearChannelToSrgb, linearRgbToOklab, oklabToLinearRgb,
+  srgbToOklab, oklabToSrgb, oklabToOklch, oklchToOklab, srgbToOklch, isInGamut, clampChroma, oklchToSrgb,
+  deltaEOk, deltaEOkLch, hueDistance, mixOklch, pullHue, apcaContrast, apcaThreshold, simulateCvd,
+  cvdContrastRatio
+});
+})(window.PF = window.PF || {});

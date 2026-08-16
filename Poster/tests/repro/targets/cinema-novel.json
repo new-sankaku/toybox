@@ -1,0 +1,26 @@
+[
+  {
+    "id": "cinema-01-serif-billing",
+    "src": "doc/reference/cinema/amz_01.jpg",
+    "box": [165, 290, 305, 58],
+    "bgbox": [20, 290, 150, 58],
+    "text": "Live & Documentary Movie / i☆Ris on STAGE",
+    "note": "細身serifの2段billing。純白・字送りほぼ0・影/縁なし、暗部に置くだけで効かせる型"
+  },
+  {
+    "id": "cinema-02-mincho-rule",
+    "src": "doc/reference/cinema/amz_04.jpg",
+    "box": [14, 337, 326, 56],
+    "bgbox": [14, 396, 326, 56],
+    "text": "青春の影",
+    "note": "細明朝の副題。長体0.59＋字送り2.9emの極端な疎組み＋直上に細い白罫（字面より左へ大きく伸びる）"
+  },
+  {
+    "id": "novel-01-tate-obi",
+    "src": "doc/reference/novel/shincho_04.jpg",
+    "box": [152, 192, 68, 160],
+    "bgbox": [72, 192, 40, 30],
+    "text": "日本人にとって/「推し」とは/何か。",
+    "note": "帯の縦組みcatch copy。赤の太gothic3列。右2列を全高で切り出し、鉤括弧「」の縦回転と7字分の字送りを見る"
+  }
+]

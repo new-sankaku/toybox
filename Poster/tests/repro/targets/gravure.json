@@ -1,0 +1,26 @@
+[
+  {
+    "id": "gravure-01-title",
+    "src": "doc/reference/gravure/amz_02.jpg",
+    "box": [12, 32, 92, 358],
+    "bgbox": [430, 30, 92, 358],
+    "text": "初恋天使",
+    "note": "縦組み・白の丸ゴシック＋ピンクの縁取り＋外周のピンクglow"
+  },
+  {
+    "id": "gravure-02-logo",
+    "src": "doc/reference/gravure/amz_00.jpg",
+    "box": [20, 178, 308, 142],
+    "bgbox": [20, 95, 308, 80],
+    "text": "るみなす",
+    "note": "横組み・白の丸ゴシック手書きロゴ＋水色の細い縁＋水色glow・字ごとの揺れ・下に長い払い"
+  },
+  {
+    "id": "gravure-03-name",
+    "src": "doc/reference/gravure/amz_05.jpg",
+    "box": [0, 690, 635, 190],
+    "bgbox": [0, 380, 635, 190],
+    "text": "まつもと、みいな",
+    "note": "横組み・ピンクの丸ゴシック＋白の柔らかい縁・右上がりの傾き、下に白の細い欧文"
+  }
+]

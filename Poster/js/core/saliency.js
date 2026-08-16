@@ -1,4 +1,6 @@
-import { buildIntegral } from './analysis.js';
+(function (PF) {
+'use strict';
+const { buildIntegral } = PF;
 
 const FEATURE_PAIRS = [[0, 2], [1, 3], [2, 4]];
 
@@ -171,7 +173,7 @@ function applyCenterPrior(map, w, h) {
   }
 }
 
-export function computeSaliency(buf, luma) {
+function computeSaliency(buf, luma) {
   const w = buf.w;
   const h = buf.h;
   const step = w >= 128 && h >= 128 ? 2 : 1;
@@ -209,3 +211,6 @@ export function computeSaliency(buf, luma) {
   robustScale(map);
   return { map: map, w: w, h: h };
 }
+
+Object.assign(PF, { computeSaliency });
+})(window.PF = window.PF || {});

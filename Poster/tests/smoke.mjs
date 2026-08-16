@@ -1,53 +1,44 @@
 import { chromium } from 'playwright-core';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const PORT = Number(process.env.PORT || 8123);
+const pageUrl = pathToFileURL(resolve(root, 'index.html')).href;
 const GENRES = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
 const SEEDS_PER_GENRE = Number(process.env.SEEDS || 4);
 const shotDir = process.env.SHOT_DIR || resolve(here, 'shots');
 
+function findPwBrowsers() {
+  const base = '/opt/pw-browsers';
+  if (!existsSync(base)) { return []; }
+  return readdirSync(base)
+    .filter((n) => n.startsWith('chromium-'))
+    .map((n) => resolve(base, n, 'chrome-linux/chrome'));
+}
+
 function findChromium() {
   if (process.env.CHROMIUM_PATH) { return process.env.CHROMIUM_PATH; }
-  const base = '/opt/pw-browsers';
-  if (!existsSync(base)) { throw new Error('browser directoryが見つかりません: ' + base); }
-  const candidates = readdirSync(base)
-    .filter((n) => n.startsWith('chromium-'))
-    .map((n) => resolve(base, n, 'chrome-linux/chrome'))
-    .filter((p) => existsSync(p));
-  if (candidates.length === 0) { throw new Error('chromium実行fileが見つかりません'); }
+  const candidates = [
+    ...findPwBrowsers(),
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+  ].filter((p) => existsSync(p));
+  if (candidates.length === 0) {
+    throw new Error('chromium実行fileが見つかりません。CHROMIUM_PATH で指定してください');
+  }
   return candidates[0];
 }
 
-function startServer() {
-  const proc = spawn('python3', ['-m', 'http.server', String(PORT), '--directory', root], {
-    stdio: ['ignore', 'ignore', 'ignore']
-  });
-  return proc;
-}
-
-async function waitForServer(url, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) { return; }
-    } catch (e) { /* retry */ }
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  throw new Error('server起動待ちがtimeoutしました: ' + url);
-}
-
-const server = startServer();
 let exitCode = 0;
 let browser = null;
 
 try {
-  await waitForServer(`http://127.0.0.1:${PORT}/index.html`, 15000);
   browser = await chromium.launch({ executablePath: findChromium() });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 
@@ -55,13 +46,23 @@ try {
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') { errors.push('console: ' + m.text()); } });
 
-  await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: 'load' });
+  await page.goto(pageUrl, { waitUntil: 'load' });
   await page.waitForFunction('typeof window.posterForge === "object"', null, { timeout: 15000 });
 
   if (errors.length > 0) {
     console.error('読込時にerror:\n' + errors.join('\n'));
-    throw new Error('module読込に失敗');
+    throw new Error('script読込に失敗');
   }
+
+  await page.setInputFiles('#file', resolve(here, 'sample.jpg'));
+  await page.waitForFunction('window.posterForge.state.bitmap !== null', null, { timeout: 30000 });
+  const fileRoute = await page.evaluate(async () => {
+    const cv = document.getElementById('poster');
+    const px = cv.getContext('2d').getImageData(0, 0, 4, 4).data.length;
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+    return { bitmap: window.posterForge.state.bitmap.width, px: px, png: blob ? blob.size : 0 };
+  });
+  console.log(`file投入経路 OK  bitmap=${fileRoute.bitmap}px  getImageData=${fileRoute.px}bytes  PNG=${fileRoute.png}bytes`);
 
   mkdirSync(shotDir, { recursive: true });
 
@@ -127,6 +128,7 @@ try {
             seed: record.seed,
             density: 1,
             intensity: 0.65,
+            decorIntensity: 0.8,
             avoidFace: true,
             cutoutMode: 'auto',
             gradeMode: 'auto',
@@ -207,7 +209,6 @@ try {
   exitCode = 1;
 } finally {
   if (browser) { await browser.close(); }
-  server.kill();
 }
 
 process.exit(exitCode);

@@ -1,7 +1,9 @@
-import { composeNoun, personName, numeric, poolsFor } from './morphology.js';
-import { styleTitle } from './orthography.js';
-import { PATTERNS } from './patterns.js';
-import { buildCatchPattern, buildQuotePattern } from './register.js';
+(function (PF) {
+'use strict';
+const { composeNoun, personName, numeric, poolsFor } = PF;
+const { styleTitle } = PF;
+const { PATTERNS } = PF;
+const { buildCatchPattern, buildQuotePattern } = PF;
 
 const MAX_DEPTH = 6;
 const SLOT_RE = /\{([A-Za-z]+(?::[A-Za-z]+)?(?:\.en)?)\}/g;
@@ -58,7 +60,7 @@ function resolveSlot(rng, genre, key, bindings, state) {
   throw new Error('unknown slot: ' + key + ' (genre ' + genre + ')');
 }
 
-export function expand(rng, genre, pattern, bindings, depth, state) {
+function expand(rng, genre, pattern, bindings, depth, state) {
   const d = depth === undefined ? 0 : depth;
   if (d > MAX_DEPTH) { throw new Error('slot expansion too deep: ' + pattern); }
   const st = state || { seen: Object.create(null) };
@@ -84,9 +86,9 @@ const ROLE_PLAN = {
     lean: ['title', 'name', 'tag', 'badge']
   },
   asmr: {
-    base: ['title', 'catch', 'name', 'tag', 'credit', 'release'],
-    rich: ['badge', 'extra'],
-    lean: ['title', 'credit', 'release', 'tag']
+    base: ['title', 'catch', 'credit', 'name', 'tag'],
+    rich: ['badge'],
+    lean: ['title', 'catch', 'credit', 'name']
   },
   game: {
     base: ['title', 'catch', 'tag', 'badge', 'credit', 'release'],
@@ -94,22 +96,23 @@ const ROLE_PLAN = {
     lean: ['title', 'catch', 'tag', 'badge', 'release']
   },
   adult: {
-    base: ['title', 'name', 'tag', 'badge', 'credit', 'release', 'code'],
+    base: ['title', 'name', 'catch', 'tag', 'badge', 'credit', 'release', 'code'],
     rich: ['extra'],
-    lean: ['title', 'name', 'badge', 'release', 'code']
+    lean: ['title', 'name', 'catch', 'badge', 'release', 'code']
   }
 };
 
-const CATCH_LIMIT = { cinema: 28, gravure: 24, novel: 25, asmr: 30, game: 20, adult: 0 };
-const TITLE_BODY_LIMIT = { cinema: 12, gravure: 18, novel: 16, asmr: 20, game: 16, adult: 16 };
-const TITLE_FINAL_LIMIT = { cinema: 14, gravure: 24, novel: 22, asmr: 34, game: 22, adult: 18 };
+const CATCH_LIMIT = { cinema: 28, gravure: 24, novel: 25, asmr: 18, game: 20, adult: 14 };
+const CATCH_LINES = { cinema: 3, gravure: 2, novel: 3, asmr: 2, game: 2, adult: 2 };
+const CATCH_BUDGET = { cinema: 'long', gravure: 'mid', novel: 'long', asmr: 'mid', game: 'mid', adult: 'mid' };
+const TITLE_BODY_LIMIT = { cinema: 12, gravure: 18, novel: 16, asmr: 14, game: 16, adult: 16 };
+const TITLE_FINAL_LIMIT = { cinema: 14, gravure: 24, novel: 22, asmr: 16, game: 22, adult: 18 };
 const ROLE_LIMIT = { tag: 30, badge: 30, release: 40, extra: 30, sub: 34, cast: 44 };
-const LATIN_TITLE = { cinema: true, gravure: true, novel: false, asmr: false, game: true, adult: false };
-const ASMR_TITLE_MAX = 34;
+const LATIN_TITLE = { cinema: true, gravure: true, novel: false, asmr: true, game: true, adult: false };
 const MEGA_LINE = { sash: [8, 14], main: [10, 18], spec: [20, 30], tail: [14, 24] };
 
 const TITLE_SKELETON_CHANCE = {
-  cinema: 0.55, gravure: 0.65, novel: 0.55, asmr: 0.7, game: 0.5, adult: 1
+  cinema: 0.8, gravure: 0.85, novel: 0.8, asmr: 1, game: 0.95, adult: 1
 };
 
 function visibleLen(text) {
@@ -125,38 +128,93 @@ function totalLen(text) {
   return text.split('\n').join('').length;
 }
 
+function hasEcho(text) {
+  const s = text.split('\n').join('');
+  for (let n = 4; n >= 3; n--) {
+    for (let i = 0; i + n <= s.length; i++) {
+      if (s.indexOf(s.slice(i, i + n), i + n) >= 0) { return true; }
+    }
+  }
+  return false;
+}
+
 function fitPattern(rng, genre, list, limit) {
   let best = null;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 8; i++) {
     const text = expand(rng, genre, rng.pick(list), null, 0);
-    const len = visibleLen(text);
-    if (len <= limit) { return text; }
-    if (!best || len < best.len) { best = { text: text, len: len }; }
+    const score = visibleLen(text) + (hasEcho(text) ? 1000 : 0);
+    if (score <= limit) { return text; }
+    if (!best || score < best.score) { best = { text: text, score: score }; }
   }
   return best.text;
 }
 
+function splitUnits(text) {
+  const units = [];
+  let cur = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    cur += ch;
+    if (ch === '。' || ch === '！' || ch === '？') { units.push(cur); cur = ''; continue; }
+    if (ch === '—' && text[i + 1] === '—') { cur += '—'; i++; units.push(cur); cur = ''; }
+  }
+  if (cur) { units.push(cur); }
+  return units;
+}
+
+function wrapCatch(text, limit, maxLines) {
+  if (visibleLen(text) <= limit) { return text; }
+  const units = splitUnits(text);
+  if (units.length < 2) { return null; }
+  const lines = [];
+  let cur = '';
+  for (let i = 0; i < units.length; i++) {
+    if (!cur) { cur = units[i]; continue; }
+    if (cur.length + units[i].length <= limit) { cur += units[i]; continue; }
+    lines.push(cur);
+    cur = units[i];
+  }
+  if (cur) { lines.push(cur); }
+  if (lines.length > maxLines) { return null; }
+  const out = lines.join('\n');
+  return visibleLen(out) <= limit ? out : null;
+}
+
 function fitCatch(rng, genre, limit) {
+  const maxLines = CATCH_LINES[genre];
   let best = null;
   let axes = null;
-  for (let i = 0; i < 14; i++) {
-    const budget = limit <= 25 ? 'short' : (i < 8 ? 'short' : 'mid');
+  for (let i = 0; i < 16; i++) {
+    const budget = i < 10 ? CATCH_BUDGET[genre] : 'short';
     const built = buildCatchPattern(rng, genre, { lenBudget: budget });
-    const text = expand(rng, genre, built.pattern, null, 0);
-    const len = visibleLen(text);
-    if (len <= limit) { return { text: text, axes: built.axes }; }
-    if (!best || len < best.len) { best = { text: text, len: len }; axes = built.axes; }
+    const raw = expand(rng, genre, built.pattern, null, 0);
+    const wrapped = wrapCatch(raw, limit, maxLines);
+    if (wrapped !== null && !hasEcho(wrapped)) { return { text: wrapped, axes: built.axes }; }
+    const len = visibleLen(raw);
+    if (!best || len < best.len) { best = { text: raw, len: len }; axes = built.axes; }
   }
   return { text: best.text, axes: axes };
 }
 
+function markComposed(state, c) {
+  state.seen[c.ja] = 1;
+  if (!c.parts) { return; }
+  for (let i = 0; i < c.parts.length; i++) {
+    const ja = typeof c.parts[i] === 'string' ? c.parts[i] : c.parts[i].ja;
+    if (ja) { state.seen[ja] = 1; }
+  }
+}
+
 function resolveTitlePair(rng, genre, key, bindings, state) {
   if (bindings && Object.prototype.hasOwnProperty.call(bindings, key)) {
+    state.seen[bindings[key]] = 1;
     return { ja: bindings[key], en: bindings[key + '.en'] || '' };
   }
   if (key.indexOf('n:') === 0) { return { ja: numeric(rng, key.slice(2), genre), en: '' }; }
   if (key === 'noun') {
-    const c = composeNoun(rng, genre, null);
+    let c = composeNoun(rng, genre, null);
+    for (let i = 0; i < 4 && state.seen[c.ja]; i++) { c = composeNoun(rng, genre, null); }
+    markComposed(state, c);
     return { ja: c.ja, en: c.en };
   }
   if (key === 'person') {
@@ -182,6 +240,7 @@ function resolveTitlePair(rng, genre, key, bindings, state) {
 
 function expandTitleSkeleton(rng, genre, skeleton, core) {
   const state = { seen: Object.create(null) };
+  markComposed(state, core);
   const bindings = { noun: core.ja, 'noun.en': core.en };
   const enParts = [];
   let ja = skeleton.replace(SLOT_RE, (m, key) => {
@@ -230,20 +289,6 @@ function styleOnce(rng, genre, o, attempt) {
     allowLatin: o.allowLatin !== false && LATIN_TITLE[genre] && attempt < 4,
     allowExclaim: o.allowExclaim !== false
   };
-  if (genre === 'asmr') {
-    const pools = poolsFor(genre);
-    const count = attempt >= 3 ? 2 : (rng.chance(0.55) ? 2 : 3);
-    const tags = rng.sample(pools.tagWord, count);
-    let tagLen = 0;
-    for (let i = 0; i < tags.length; i++) { tagLen += tags[i].length + 2; }
-    styleOpts.tags = tags;
-    let ja = core.ja;
-    if (attempt < 3 && rng.chance(0.55)) {
-      const sub = expand(rng, genre, rng.pick(PATTERNS.asmr.subtitle), null, 0);
-      if (tagLen + ja.length + sub.length + 2 <= ASMR_TITLE_MAX) { ja = ja + '～' + sub + '～'; }
-    }
-    return { styled: styleTitle(rng, { ja: ja, en: core.en, parts: null }, styleOpts), core: core };
-  }
   return {
     styled: styleTitle(rng, { ja: core.ja, en: core.en, parts: core.parts }, styleOpts),
     core: core
@@ -356,7 +401,7 @@ function fillRole(rng, genre, role, density, ctx) {
   throw new Error('unknown role: ' + role);
 }
 
-export function generateCopy(rng, genre, density, opts) {
+function generateCopy(rng, genre, density, opts) {
   const plan = ROLE_PLAN[genre];
   if (!plan) { throw new Error('unknown genre: ' + genre); }
   const d = typeof density === 'number' ? density : 1;
@@ -416,3 +461,6 @@ export function generateCopy(rng, genre, density, opts) {
 
   return copy;
 }
+
+Object.assign(PF, { expand, generateCopy });
+})(window.PF = window.PF || {});

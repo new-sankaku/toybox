@@ -1,5 +1,7 @@
-import { hexToRgb, rgbToCss, luma01, shade, rgbToHsl, hslToRgb } from '../core/color.js';
-import { SURFACE_ANCHORS } from './layouts.js';
+(function (PF) {
+'use strict';
+const { hexToRgb, rgbToCss, luma01, shade, rgbToHsl, hslToRgb } = PF;
+const { A, hasAnchor } = PF;
 
 const STACK_MONO = '"SFMono-Regular",Consolas,"Roboto Mono","Courier New",monospace';
 const STACK_CONDENSED = '"Arial Narrow","Helvetica Neue",Arial,"Noto Sans JP",sans-serif';
@@ -12,11 +14,11 @@ const PLATFORM_NAMES = [
 ];
 
 const RATING_RANKS = [
-  { key: 'A', age: '全年齢対象', color: '#1b1b1b' },
-  { key: 'B', age: '12才以上対象', color: '#2f7d32' },
-  { key: 'C', age: '15才以上対象', color: '#1f5fa8' },
-  { key: 'D', age: '17才以上対象', color: '#d97a12' },
-  { key: 'Z', age: '18才以上対象', color: '#b32020' }
+  { key: 'A', age: '全年齢対象' },
+  { key: 'B', age: '12才以上対象' },
+  { key: 'C', age: '15才以上対象' },
+  { key: 'D', age: '17才以上対象' },
+  { key: 'Z', age: '18才以上対象' }
 ];
 
 const CORNER_LABELS = ['NEW', 'LIMITED', 'HD REMASTER', '特典付', '完全版', 'Vol.'];
@@ -30,13 +32,6 @@ function liftInk(hex) {
   const l = luma01(rgb);
   if (l >= 0.62) { return rgbToCss(rgb, 0.95); }
   return rgbToCss(shade(rgb, (0.72 - l) * 1.15), 0.95);
-}
-
-function deepInk(hex) {
-  const hsl = rgbToHsl(hexToRgb(hex));
-  const s = Math.min(hsl[1], 0.32);
-  const l = Math.min(hsl[2], 0.20);
-  return hslToRgb([hsl[0], s, l]);
 }
 
 function fitFont(ctx, text, maxWidth, startPx, weight, stack) {
@@ -104,7 +99,7 @@ function drawSideBand(ctx, W, H, rng) {
 
 function drawFilmScrim(ctx, W, H, rng) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.filmScrim, W, H);
+  const a = box(A('filmScrim'), W, H);
   const g = ctx.createLinearGradient(0, a.y, 0, H);
   g.addColorStop(0, 'rgba(4,4,5,0)');
   g.addColorStop(0.45, 'rgba(4,4,5,' + rng.range(0.62, 0.78).toFixed(3) + ')');
@@ -116,7 +111,7 @@ function drawFilmScrim(ctx, W, H, rng) {
 
 function drawBillingPlate(ctx, W, H, rng) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.billingPlate, W, H);
+  const a = box(A('billingPlate'), W, H);
   const g = ctx.createLinearGradient(0, a.y - H * 0.03, 0, a.y + H * 0.02);
   g.addColorStop(0, 'rgba(3,3,4,0)');
   g.addColorStop(1, 'rgba(3,3,4,0.96)');
@@ -129,45 +124,69 @@ function drawBillingPlate(ctx, W, H, rng) {
 
 function drawObi(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.obi, W, H);
+  const a = box(A('obi'), W, H);
   const color = rng.pick(theme.obiColors);
   ctx.fillStyle = color;
   ctx.fillRect(a.x, a.y, a.w, a.h);
   const dark = luma01(hexToRgb(color)) < 0.55;
   hairline(ctx, 0, a.y, W, 'rgba(0,0,0,0.22)', Math.max(1, H * 0.0022));
-  hairline(ctx, 0, a.y + H * 0.006, W, dark ? 'rgba(255,255,255,0.30)' : 'rgba(30,24,18,0.30)', Math.max(1, H * 0.0012));
-  const bx = box(SURFACE_ANCHORS.obiBox, W, H);
-  ctx.fillStyle = dark ? '#f3efe6' : '#141210';
-  ctx.fillRect(bx.x, bx.y, bx.w, bx.h);
+  const inner = a.h * 0.022 + H * 0.002;
+  hairline(ctx, 0, a.y + inner, W, dark ? 'rgba(255,255,255,0.30)' : 'rgba(30,24,18,0.30)', Math.max(1, H * 0.0012));
+  if (hasAnchor('obiBox')) {
+    const bx = box(A('obiBox'), W, H);
+    ctx.fillStyle = dark ? '#f3efe6' : '#141210';
+    ctx.fillRect(bx.x, bx.y, bx.w, bx.h);
+  }
   ctx.restore();
 }
 
 function drawSpecBand(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.specBand, W, H);
+  const a = box(A('specBand'), W, H);
   const color = rng.pick(theme.plateColors);
   ctx.fillStyle = color;
   ctx.fillRect(a.x, a.y, a.w, a.h);
   const dark = luma01(hexToRgb(color)) < 0.55;
   const rule = dark ? 'rgba(255,255,255,0.42)' : 'rgba(24,20,16,0.42)';
   hairline(ctx, 0, a.y, W, rule, Math.max(1, H * 0.0026));
-  hairline(ctx, 0, a.y + H * 0.007, W, rule, Math.max(1, H * 0.0010));
+  hairline(ctx, 0, a.y + a.h * 0.042, W, rule, Math.max(1, H * 0.0010));
   ctx.fillStyle = rng.pick(theme.accentColors);
-  ctx.fillRect(0, a.y - H * 0.014, W * rng.range(0.20, 0.42), H * 0.010);
+  ctx.fillRect(rng.chance(0.5) ? 0 : W * rng.range(0.30, 0.58), a.y - H * 0.014, W * rng.range(0.18, 0.44), H * 0.010);
   ctx.fillStyle = dark ? 'rgba(255,255,255,0.22)' : 'rgba(24,20,16,0.22)';
-  ctx.fillRect(W * 0.05, a.y + H * 0.052, W * 0.90, Math.max(1, H * 0.0010));
+  ctx.fillRect(W * 0.05, a.y + a.h * rng.range(0.24, 0.40), W * 0.90, Math.max(1, H * 0.0010));
   ctx.restore();
 }
 
+// 帯の縁に沿わせる。乱数のyに引くと写真の上を横切るだけの線になり、意味を持たない。
+const RULE_FOOT_ANCHORS = ['specBand', 'obi', 'avSpecBand', 'gameFoot', 'filmScrim', 'voiceFootBand'];
+const RULE_HEAD_ANCHORS = ['seriesBand', 'platformBand', 'voiceTopStrip'];
+
+function firstAnchorRect(names, W, H) {
+  for (let i = 0; i < names.length; i++) {
+    if (hasAnchor(names[i])) { return box(A(names[i]), W, H); }
+  }
+  return null;
+}
+
 function drawHairRules(ctx, W, H, rng, theme) {
+  const foot = firstAnchorRect(RULE_FOOT_ANCHORS, W, H);
+  const head = firstAnchorRect(RULE_HEAD_ANCHORS, W, H);
+  if (!foot && !head) { return; }
   ctx.save();
   const c = hexToRgb(rng.pick(theme.accentColors));
   const t = Math.max(1, H * 0.0018);
+  const gap = t * 2.4;
   ctx.fillStyle = rgbToCss(c, 0.85);
-  ctx.fillRect(0, H * 0.052, W, t);
-  ctx.fillRect(0, H * 0.052 + t * 2.4, W, t * 0.6);
-  ctx.fillRect(0, H * 0.800, W, t);
-  ctx.fillRect(0, H * 0.800 - t * 2.4, W, t * 0.6);
+  if (head) {
+    const y = head.y + head.h + H * rng.range(0.008, 0.020);
+    ctx.fillRect(0, y, W, t);
+    ctx.fillRect(0, y + gap, W, t * 0.6);
+  }
+  if (foot) {
+    const y = foot.y - H * rng.range(0.008, 0.020);
+    ctx.fillRect(0, y - t, W, t);
+    ctx.fillRect(0, y - t - gap, W, t * 0.6);
+  }
   ctx.restore();
 }
 
@@ -187,35 +206,84 @@ function roundRectPath(ctx, x, y, w, h, r) {
 
 function drawVoiceChrome(ctx, W, H, rng, theme) {
   ctx.save();
-  const strip = box(SURFACE_ANCHORS.voiceTopStrip, W, H);
-  const foot = box(SURFACE_ANCHORS.voiceFootBand, W, H);
-  const plate = box(SURFACE_ANCHORS.voicePlate, W, H);
+  const stripH = H * rng.range(0.026, 0.062);
+  const foot = box(A('voiceFootBand'), W, H);
+  const strip = { x: 0, y: 0, w: W, h: stripH };
   const stripRgb = hexToRgb(rng.pick(theme.obiColors));
-  ctx.fillStyle = rgbToCss(stripRgb, rng.range(0.62, 0.80));
-  ctx.fillRect(0, strip.y, W, strip.h);
+  if (rng.chance(0.55)) {
+    ctx.fillStyle = rgbToCss(stripRgb, rng.range(0.62, 0.80));
+    ctx.fillRect(0, strip.y, W, strip.h);
+  } else {
+    strip.h = 0;
+  }
   const footRgb = hexToRgb(rng.pick(theme.plateColors));
   ctx.fillStyle = rgbToCss(footRgb, rng.range(0.86, 0.96));
   ctx.fillRect(0, foot.y, W, foot.h);
   const accent = hexToRgb(rng.pick(theme.accentColors));
   hairline(ctx, 0, foot.y, W, rgbToCss(accent, 0.85), Math.max(1, H * 0.0030));
-  hairline(ctx, 0, strip.y + strip.h, W, rgbToCss(accent, 0.55), Math.max(1, H * 0.0018));
+  if (strip.h > 0) {
+    hairline(ctx, 0, strip.y + strip.h, W, rgbToCss(accent, 0.55), Math.max(1, H * 0.0018));
+  }
   ctx.restore();
+}
 
+function mostSaturated(list) {
+  let best = list[0];
+  let bestS = -1;
+  for (let i = 0; i < list.length; i++) {
+    const s = rgbToHsl(hexToRgb(list[i]))[1];
+    if (s > bestS) { bestS = s; best = list[i]; }
+  }
+  return best;
+}
+
+function drawVoicePill(ctx, W, H, rng, theme, anchor) {
+  const a = box(anchor, W, H);
+  const r = a.h / 2;
   ctx.save();
-  const r = plate.h * 0.28;
-  ctx.fillStyle = 'rgba(0,0,0,0.20)';
-  roundRectPath(ctx, plate.x + plate.h * 0.04, plate.y + plate.h * 0.05, plate.w, plate.h, r);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  roundRectPath(ctx, a.x + a.h * 0.06, a.y + a.h * 0.10, a.w, a.h, r);
   ctx.fill();
-  const plateRgb = hexToRgb(rng.pick(theme.plateColors));
-  ctx.fillStyle = rgbToCss(plateRgb, rng.range(0.88, 0.97));
-  roundRectPath(ctx, plate.x, plate.y, plate.w, plate.h, r);
+  const base = hexToRgb(mostSaturated(theme.ribbonColors));
+  const hsl = rgbToHsl(base);
+  const fill = hslToRgb([hsl[0], Math.max(hsl[1], 0.55), Math.min(0.72, Math.max(0.55, hsl[2]))]);
+  ctx.fillStyle = rgbToCss(fill, rng.range(0.90, 1));
+  roundRectPath(ctx, a.x, a.y, a.w, a.h, r);
   ctx.fill();
-  ctx.strokeStyle = rgbToCss(accent, 0.70);
-  ctx.lineWidth = Math.max(1, H * 0.0022);
-  roundRectPath(ctx, plate.x, plate.y, plate.w, plate.h, r);
+  const gloss = ctx.createLinearGradient(0, a.y, 0, a.y + a.h);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.30)');
+  gloss.addColorStop(0.5, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gloss;
+  roundRectPath(ctx, a.x, a.y, a.w, a.h, r);
+  ctx.fill();
+  ctx.strokeStyle = luma01(fill) > 0.55 ? 'rgba(32,26,38,0.55)' : 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = Math.max(2, H * 0.0040);
+  roundRectPath(ctx, a.x, a.y, a.w, a.h, r);
   ctx.stroke();
-  ctx.fillStyle = rgbToCss(accent, 0.85);
-  ctx.fillRect(plate.x + plate.w * 0.035, plate.y + plate.h * 0.50, plate.w * 0.93, Math.max(1, H * 0.0016));
+  ctx.restore();
+}
+
+function drawCvPlateRight(ctx, W, H, rng, theme) {
+  drawVoicePill(ctx, W, H, rng, theme, A('cvPlateRight'));
+}
+
+function drawCvPlateLeft(ctx, W, H, rng, theme) {
+  drawVoicePill(ctx, W, H, rng, theme, A('cvPlateLeft'));
+}
+
+function drawVoiceLogoPlate(ctx, W, H, rng, theme) {
+  const a = box(A('voiceLogoPlate'), W, H);
+  const r = a.h * 0.20;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.16)';
+  roundRectPath(ctx, a.x + a.h * 0.05, a.y + a.h * 0.07, a.w, a.h, r);
+  ctx.fill();
+  const plate = hexToRgb(rng.pick(theme.plateColors));
+  ctx.fillStyle = rgbToCss(plate, rng.range(0.88, 0.97));
+  roundRectPath(ctx, a.x, a.y, a.w, a.h, r);
+  ctx.fill();
+  ctx.fillStyle = rgbToCss(hexToRgb(rng.pick(theme.accentColors)), 0.90);
+  ctx.fillRect(a.x + a.w * 0.12, a.y + a.h * 0.78, a.w * 0.76, Math.max(1, H * 0.0024));
   ctx.restore();
 }
 
@@ -234,7 +302,7 @@ function drawJacketFrame(ctx, W, H, rng, theme) {
 
 function drawCircleMark(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.circleMark, W, H);
+  const a = box(A('circleMark'), W, H);
   const cx = a.x + a.w / 2;
   const cy = a.y + a.w / 2;
   const r = a.w * 0.42;
@@ -264,92 +332,208 @@ function drawCircleMark(ctx, W, H, rng, theme) {
   ctx.restore();
 }
 
-function drawPlatformBar(ctx, W, H, rng, theme) {
+function brandColor(hex, rng) {
+  const hsl = rgbToHsl(hexToRgb(hex));
+  const s = Math.min(0.96, Math.max(0.66, hsl[1] * 1.5 + 0.34));
+  return hslToRgb([hsl[0], s, rng.range(0.33, 0.45)]);
+}
+
+function signColor(hex, rng) {
+  const hsl = rgbToHsl(hexToRgb(hex));
+  const light = rng.chance(0.4);
+  const s = light
+    ? Math.min(0.55, Math.max(0.14, hsl[1] * 0.8 + 0.10))
+    : Math.min(0.94, Math.max(0.58, hsl[1] * 1.4 + 0.30));
+  return hslToRgb([hsl[0], s, light ? rng.range(0.80, 0.92) : rng.range(0.28, 0.42)]);
+}
+
+function splitPlatformName(name) {
+  const words = name.split(' ');
+  if (words.length < 2) { return [name]; }
+  return [words[0], words.slice(1).join(' ')];
+}
+
+function trackedWidth(ctx, text, track) {
+  return ctx.measureText(text).width + track * Math.max(0, text.length - 1);
+}
+
+function fillTracked(ctx, text, cx, y, track) {
+  const total = trackedWidth(ctx, text, track);
+  let x = cx - total / 2;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charAt(i);
+    ctx.fillText(ch, x, y);
+    x += ctx.measureText(ch).width + track;
+  }
+}
+
+function drawConsoleMark(ctx, cx, cy, w, h, color) {
+  const r = Math.min(w, h) * 0.26;
   ctx.save();
-  const a = box(SURFACE_ANCHORS.platformBand, W, H);
-  const rgb = deepInk(rng.pick(theme.obiColors));
-  const color = rgbToCss(rgb, 1);
-  const g = ctx.createLinearGradient(0, 0, 0, a.h);
-  g.addColorStop(0, rgbToCss(shade(rgb, 0.16), 0.97));
-  g.addColorStop(1, rgbToCss(shade(rgb, -0.30), 0.97));
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, a.h);
-  ctx.fillStyle = 'rgba(255,255,255,0.16)';
-  ctx.fillRect(0, 0, W, a.h * 0.14);
-  ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(0, a.h - Math.max(2, W * 0.004), W, Math.max(2, W * 0.004));
-  const ink = luma01(rgb) > 0.55 ? '#12100e' : '#ffffff';
-  const mark = a.h * 0.40;
-  ctx.fillStyle = ink;
-  ctx.globalAlpha = 0.88;
-  ctx.fillRect(W * 0.035, a.h * 0.5 - mark / 2, mark, mark);
-  ctx.globalAlpha = 1;
-  const name = rng.pick(PLATFORM_NAMES);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, h * 0.16);
+  roundRectPath(ctx, cx - w / 2, cy - h / 2, w, h, r);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fillRect(cx - h * 0.06, cy - h / 2 + h * 0.16, h * 0.12, h * 0.68);
+  ctx.restore();
+}
+
+function drawGameSpine(ctx, W, H, rgb) {
+  ctx.save();
+  const w = W * 0.019;
+  ctx.fillStyle = rgbToCss(rgb, 1);
+  ctx.fillRect(0, 0, w, H);
+  ctx.fillStyle = 'rgba(0,0,0,0.32)';
+  ctx.fillRect(w - Math.max(1, W * 0.0016), 0, Math.max(1, W * 0.0016), H);
+  ctx.restore();
+}
+
+function drawPlatformTab(ctx, W, H, rng, theme, rgb) {
+  ctx.save();
+  const a = box(A('platformTab'), W, H);
+  roundRectPath(ctx, a.x, a.y, a.w, a.h, Math.min(a.w, a.h) * 0.15);
+  ctx.fillStyle = rgbToCss(rgb, 1);
+  ctx.fill();
+  const lines = splitPlatformName(rng.pick(PLATFORM_NAMES));
+  const markH = a.h * 0.30;
+  drawConsoleMark(ctx, a.x + a.w / 2, a.y + a.h * 0.30, markH * 1.55, markH, '#ffffff');
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = ink;
-  fitFont(ctx, name, W * 0.30, a.h * 0.40, '700', STACK_CONDENSED);
-  ctx.fillText(name, W * 0.035 + mark * 1.5, a.h * 0.50);
+  ctx.fillStyle = '#ffffff';
+  const textTop = a.y + a.h * 0.56;
+  const step = a.h * 0.24;
+  for (let i = 0; i < lines.length; i++) {
+    const track = a.w * 0.016;
+    let px = fitFont(ctx, lines[i], a.w * 0.80, a.h * 0.20, '800', STACK_CONDENSED);
+    while (trackedWidth(ctx, lines[i], track) > a.w * 0.80 && px > 4) {
+      px *= 0.94;
+      ctx.font = '800 ' + px + 'px ' + STACK_CONDENSED;
+    }
+    fillTracked(ctx, lines[i], a.x + a.w / 2, textTop + step * i, track);
+  }
+  ctx.restore();
+}
+
+function drawPlatformBand(ctx, W, H, rng, theme, rgb) {
+  ctx.save();
+  const a = box(A('platformBand'), W, H);
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, rgbToCss(shade(rgb, -0.45), 1));
+  g.addColorStop(0.55, rgbToCss(rgb, 1));
+  g.addColorStop(1, rgbToCss(shade(rgb, 0.42), 1));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, a.h);
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.fillRect(0, a.h - Math.max(1, H * 0.0022), W, Math.max(1, H * 0.0022));
+  const markH = a.h * 0.52;
+  drawConsoleMark(ctx, W * 0.048 + markH * 0.78, a.h * 0.50, markH * 1.55, markH, '#ffffff');
+  const name = rng.pick(PLATFORM_NAMES);
+  const left = W * 0.048 + markH * 1.9;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#ffffff';
+  fitFont(ctx, name, W * 0.38, a.h * 0.44, '800', STACK_CONDENSED);
+  ctx.fillText(name, left, a.h * 0.52);
   ctx.restore();
 }
 
 function drawRatingBox(ctx, W, H, rng) {
   ctx.save();
-  const a = SURFACE_ANCHORS.ratingPlate;
-  const side = H * a.h;
+  const a = A('ratingPlate');
+  const w = W * a.w;
+  const h = H * a.h;
   const x = W * a.x;
   const y = H * a.y;
   const rank = rng.pick(RATING_RANKS);
-  ctx.fillStyle = '#f6f4f0';
-  ctx.fillRect(x, y, side, side);
-  ctx.strokeStyle = '#14120f';
-  ctx.lineWidth = Math.max(1.5, side * 0.035);
-  ctx.strokeRect(x, y, side, side);
-  const headH = side * 0.20;
-  ctx.fillStyle = rank.color;
-  ctx.fillRect(x, y, side, headH);
+  const edge = Math.max(1.2, w * 0.045);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = '#111111';
+  ctx.lineWidth = edge;
+  ctx.strokeRect(x + edge / 2, y + edge / 2, w - edge, h - edge);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  const headH = h * 0.28;
+  ctx.fillStyle = '#111111';
+  fitFont(ctx, 'CERO', w * 0.68, headH * 0.62, '700', STACK_CONDENSED);
+  ctx.fillText('CERO', x + w / 2, y + headH * 0.60);
+  ctx.fillRect(x + edge, y + headH, w - edge * 2, Math.max(1, edge * 0.5));
+  const footH = h * 0.20;
+  fitFont(ctx, rank.key, w * 0.56, h * 0.52, '700', STACK_SANS);
+  ctx.fillText(rank.key, x + w / 2, y + headH + (h - headH - footH) * 0.50);
+  ctx.fillRect(x + edge, y + h - footH - edge, w - edge * 2, footH);
   ctx.fillStyle = '#ffffff';
-  fitFont(ctx, 'RATING', side * 0.80, headH * 0.62, '700', STACK_CONDENSED);
-  ctx.fillText('RATING', x + side / 2, y + headH * 0.55);
-  ctx.fillStyle = rank.color;
-  fitFont(ctx, rank.key, side * 0.58, side * 0.46, '800', STACK_SANS);
-  ctx.fillText(rank.key, x + side / 2, y + headH + (side - headH) * 0.38);
-  const footH = side * 0.24;
-  ctx.fillStyle = '#14120f';
-  ctx.fillRect(x, y + side - footH, side, footH);
-  ctx.fillStyle = '#ffffff';
-  fitFont(ctx, rank.age, side * 0.88, footH * 0.50, '600', STACK_JP);
-  ctx.fillText(rank.age, x + side / 2, y + side - footH * 0.48);
+  fitFont(ctx, rank.age, (w - edge * 2) * 0.90, footH * 0.60, '600', STACK_JP);
+  ctx.fillText(rank.age, x + w / 2, y + h - footH * 0.50 - edge);
   ctx.restore();
 }
 
 function drawGameChrome(ctx, W, H, rng, theme) {
-  drawPlatformBar(ctx, W, H, rng, theme);
+  const rgb = brandColor(rng.pick(theme.ribbonColors), rng);
+  if (W / H < 0.66) {
+    drawGameSpine(ctx, W, H, rgb);
+    drawPlatformTab(ctx, W, H, rng, theme, rgb);
+  } else {
+    drawPlatformBand(ctx, W, H, rng, theme, rgb);
+  }
   ctx.save();
-  const pub = box(SURFACE_ANCHORS.publisherRow, W, H);
-  const g = ctx.createLinearGradient(0, pub.y - H * 0.06, 0, H);
-  g.addColorStop(0, 'rgba(6,7,10,0)');
-  g.addColorStop(1, 'rgba(6,7,10,' + rng.range(0.80, 0.94).toFixed(3) + ')');
+  const foot = H * A('gameFoot').y;
+  const g = ctx.createLinearGradient(0, foot, 0, H);
+  g.addColorStop(0, 'rgba(8,8,10,0)');
+  g.addColorStop(0.55, 'rgba(8,8,10,' + rng.range(0.34, 0.46).toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(8,8,10,' + rng.range(0.66, 0.80).toFixed(3) + ')');
   ctx.fillStyle = g;
-  ctx.fillRect(0, pub.y - H * 0.06, W, H - pub.y + H * 0.06);
-  const accent = hexToRgb(rng.pick(theme.accentColors));
-  hairline(ctx, W * 0.20, pub.y - H * 0.008, W * 0.78, rgbToCss(accent, 0.75), Math.max(1, H * 0.0016));
+  ctx.fillRect(0, foot, W, H - foot);
   ctx.restore();
   drawRatingBox(ctx, W, H, rng);
 }
 
+function drawKeyartMarks(ctx, W, H, rng, theme) {
+  ctx.save();
+  const accents = theme.accentColors;
+  const cells = rng.int(6, 9);
+  const barW = W * rng.range(0.150, 0.260);
+  const cellW = barW / cells;
+  const barX = rng.chance(0.5) ? W * rng.range(0.055, 0.180) : W - barW - W * rng.range(0.055, 0.180);
+  const barY = H * rng.range(0.930, 0.968);
+  const barH = H * 0.011;
+  for (let i = 0; i < cells; i++) {
+    ctx.fillStyle = rgbToCss(hexToRgb(accents[i % accents.length]), rng.range(0.72, 0.95));
+    ctx.fillRect(barX + i * cellW, barY, cellW * 0.84, barH);
+  }
+  ctx.strokeStyle = liftInk(rng.pick(accents));
+  ctx.lineWidth = Math.max(1, H * 0.0013);
+  const spots = [
+    { x: W * rng.range(0.040, 0.130), y: H * rng.range(0.120, 0.320) },
+    { x: W * rng.range(0.690, 0.940), y: H * rng.range(0.560, 0.790) }
+  ];
+  const r = H * 0.020;
+  for (let i = 0; i < spots.length; i++) {
+    ctx.beginPath();
+    ctx.moveTo(spots[i].x - r, spots[i].y);
+    ctx.lineTo(spots[i].x + r, spots[i].y);
+    ctx.moveTo(spots[i].x, spots[i].y - r);
+    ctx.lineTo(spots[i].x, spots[i].y + r);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(spots[i].x, spots[i].y, r * 0.42, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawDiagonalBand(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = SURFACE_ANCHORS.avSash;
-  const cx = (a.x + a.w / 2) * W;
-  const cy = (a.y + a.h / 2) * H;
-  const bw = a.w * W * 1.22;
-  const bh = a.h * H;
+  const a = A('avSash');
+  const cx = (a.x + a.w / 2) * W + W * rng.range(-0.06, 0.10);
+  const cy = (a.y + a.h / 2) * H + H * rng.range(-0.30, 0.14);
+  const bw = a.w * W * rng.range(1.05, 1.45);
+  const bh = a.h * H * rng.range(0.82, 1.30);
   const color = rng.pick(theme.ribbonColors);
+  const deg = (a.deg == null ? -16 : a.deg) * rng.range(0.35, 1.55) * rng.sign();
   ctx.translate(cx, cy);
-  ctx.rotate(a.deg * Math.PI / 180);
+  ctx.rotate(deg * Math.PI / 180);
   ctx.fillStyle = 'rgba(0,0,0,0.30)';
   ctx.fillRect(-bw / 2 + bh * 0.10, -bh / 2 + bh * 0.12, bw, bh);
   ctx.fillStyle = color;
@@ -367,7 +551,7 @@ function drawDiagonalBand(ctx, W, H, rng, theme) {
 
 function drawAvLayers(ctx, W, H, rng, theme) {
   ctx.save();
-  const series = box(SURFACE_ANCHORS.seriesBand, W, H);
+  const series = box(A('seriesBand'), W, H);
   const seriesColor = rng.pick(theme.obiColors);
   ctx.fillStyle = seriesColor;
   ctx.fillRect(0, 0, W, series.h);
@@ -377,7 +561,20 @@ function drawAvLayers(ctx, W, H, rng, theme) {
   drawDiagonalBand(ctx, W, H, rng, theme);
 
   ctx.save();
-  const spec = box(SURFACE_ANCHORS.avSpecBand, W, H);
+  const spec = box(A('avSpecBand'), W, H);
+  const specColor = hexToRgb(rng.pick(theme.plateColors));
+  const g = ctx.createLinearGradient(0, spec.y, 0, H);
+  g.addColorStop(0, rgbToCss(specColor, 0.90));
+  g.addColorStop(1, rgbToCss(shade(specColor, -0.20), 0.97));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, spec.y, W, H - spec.y);
+  hairline(ctx, 0, spec.y, W, rgbToCss(hexToRgb(rng.pick(theme.accentColors)), 0.92), Math.max(2, H * 0.0030));
+  ctx.restore();
+}
+
+function drawAvBottomBar(ctx, W, H, rng, theme) {
+  ctx.save();
+  const spec = box(A('avSpecBand'), W, H);
   const specColor = hexToRgb(rng.pick(theme.plateColors));
   const g = ctx.createLinearGradient(0, spec.y, 0, H);
   g.addColorStop(0, rgbToCss(specColor, 0.90));
@@ -390,7 +587,7 @@ function drawAvLayers(ctx, W, H, rng, theme) {
 
 function drawPlate(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.plate, W, H);
+  const a = box(A('plate'), W, H);
   const color = rng.pick(theme.plateColors);
   ctx.globalAlpha = rng.range(0.88, 1);
   ctx.fillStyle = color;
@@ -407,12 +604,15 @@ function drawFrame(ctx, W, H, rng, theme) {
   const m = W * rng.range(0.030, 0.050);
   const accent = rng.pick(theme.accentColors);
   ctx.strokeStyle = rng.chance(0.4) ? rgbToCss(hexToRgb(accent), 0.7) : (rng.chance(0.5) ? 'rgba(255,255,255,0.55)' : 'rgba(20,16,12,0.55)');
+  const obi = A('obi');
+  const top = obi.y > 0.5 ? m : H * (obi.y + obi.h) + m * 0.6;
+  const bottom = obi.y > 0.5 ? H * obi.y - m * 0.4 : H - m;
   ctx.lineWidth = Math.max(1, W * 0.0022);
-  ctx.strokeRect(m, m, W - m * 2, H * 0.655 - m);
+  ctx.strokeRect(m, top, W - m * 2, bottom - top);
   if (rng.chance(0.5)) {
-    const m2 = m + W * 0.010;
+    const m2 = W * 0.010;
     ctx.lineWidth = Math.max(1, W * 0.0011);
-    ctx.strokeRect(m2, m2, W - m2 * 2, H * 0.655 - m2);
+    ctx.strokeRect(m + m2, top + m2, W - (m + m2) * 2, bottom - top - m2 * 2);
   }
   ctx.restore();
 }
@@ -434,25 +634,29 @@ function drawBoldFrame(ctx, W, H, rng, theme) {
 
 function drawCornerPlate(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.cornerPlate, W, H);
-  const color = rng.pick(theme.ribbonColors);
-  ctx.fillStyle = color;
-  ctx.fillRect(a.x, a.y, a.w, a.h);
-  ctx.fillStyle = 'rgba(255,255,255,0.18)';
-  ctx.fillRect(a.x, a.y, a.w, a.h * 0.30);
-  const base = rng.pick(CORNER_LABELS);
-  const label = base === 'Vol.' ? 'Vol.' + rng.int(1, 9) : base;
-  ctx.fillStyle = inkOn(color);
-  ctx.textAlign = 'center';
+  const a = box(A('cornerPlate'), W, H);
+  const color = signColor(rng.pick(theme.ribbonColors), rng);
+  const seed = rng.pick(CORNER_LABELS);
+  const label = seed === 'Vol.' ? 'Vol.' + rng.int(1, 9) : seed;
+  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  fitFont(ctx, label, a.w * 0.84, a.h * 0.44, '700', STACK_CONDENSED);
-  ctx.fillText(label, a.x + a.w / 2, a.y + a.h * 0.56);
+  fitFont(ctx, label, a.w * 0.72, a.h * 0.46, '700', STACK_JP);
+  const track = a.h * 0.07;
+  const bw = Math.min(a.w, trackedWidth(ctx, label, track) + a.h * 1.2);
+  const bx = a.x + a.w - bw;
+  ctx.fillStyle = rgbToCss(color, 1);
+  ctx.fillRect(bx, a.y, bw, a.h);
+  ctx.strokeStyle = 'rgba(12,12,14,0.35)';
+  ctx.lineWidth = Math.max(1, H * 0.0014);
+  ctx.strokeRect(bx, a.y, bw, a.h);
+  ctx.fillStyle = luma01(color) > 0.55 ? '#12100e' : '#ffffff';
+  fillTracked(ctx, label, bx + bw / 2, a.y + a.h * 0.54, track);
   ctx.restore();
 }
 
 function drawSealBadge(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.sealBadge, W, H);
+  const a = box(A('sealBadge'), W, H);
   const r = a.w / 2;
   const cx = a.x + a.w / 2;
   const cy = a.y + a.h / 2;
@@ -476,7 +680,7 @@ function drawSealBadge(ctx, W, H, rng, theme) {
 
 function drawLaurelBadge(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.laurelBadge, W, H);
+  const a = box(A('laurelBadge'), W, H);
   const cx = a.x + a.w / 2;
   const base = a.y + a.h * 0.98;
   const ink = liftInk(rng.pick(theme.accentColors));
@@ -513,7 +717,7 @@ function drawLaurelBadge(ctx, W, H, rng, theme) {
 
 function drawBarcode(ctx, W, H, rng) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.barcode, W, H);
+  const a = box(A('barcode'), W, H);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(a.x, a.y, a.w, a.h);
   ctx.fillStyle = '#111111';
@@ -532,40 +736,10 @@ function drawBarcode(ctx, W, H, rng) {
   ctx.restore();
 }
 
-function drawTapeStrip(ctx, W, H, rng, theme) {
-  ctx.save();
-  const w = W * rng.range(0.16, 0.28);
-  const h = w * rng.range(0.16, 0.24);
-  const left = rng.chance(0.5);
-  const x = left ? W * rng.range(0.06, 0.12) : W * rng.range(0.60, 0.74);
-  const y = H * rng.range(0.14, 0.58);
-  const color = rng.pick(theme.accentColors);
-  ctx.translate(x + w / 2, y + h / 2);
-  ctx.rotate(rng.range(-0.24, 0.24));
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
-  ctx.fillRect(-w / 2 + w * 0.012, -h / 2 + h * 0.05, w, h);
-  ctx.globalAlpha = rng.range(0.80, 0.95);
-  ctx.fillStyle = color;
-  ctx.fillRect(-w / 2, -h / 2, w, h);
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = 'rgba(255,255,255,0.28)';
-  ctx.fillRect(-w / 2, -h / 2, w, h * 0.22);
-  const notch = h * 0.16;
-  ctx.fillStyle = 'rgba(0,0,0,0.16)';
-  for (let t = -w / 2 + notch; t < w / 2 - notch; t += notch * 2.2) {
-    ctx.beginPath();
-    ctx.arc(t, -h / 2, notch * 0.42, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(t, h / 2, notch * 0.42, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
 
 function drawWaveBand(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.waveBand, W, H);
+  const a = box(A('waveBand'), W, H);
   const top = a.y;
   const h = a.h;
   const color = rng.pick(theme.accentColors);
@@ -590,7 +764,9 @@ function drawWaveBand(ctx, W, H, rng, theme) {
 
 function drawDiscSpine(ctx, W, H, rng, theme) {
   ctx.save();
-  const w = W * rng.range(0.024, 0.036);
+  // anchor 経由で引くことで、文字配置側が占有領域として避けられる
+  const a = box(A('discSpine'), W, H);
+  const w = a.w;
   const color = rng.pick(theme.obiColors);
   const rgb = hexToRgb(color);
   const g = ctx.createLinearGradient(0, 0, w, 0);
@@ -598,17 +774,17 @@ function drawDiscSpine(ctx, W, H, rng, theme) {
   g.addColorStop(0.65, rgbToCss(rgb, 0.94));
   g.addColorStop(1, rgbToCss(shade(rgb, -0.45), 0.94));
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, H);
+  ctx.fillRect(a.x, a.y, w, a.h);
   const accent = hexToRgb(rng.pick(theme.accentColors));
   ctx.fillStyle = rgbToCss(accent, 0.9);
-  ctx.fillRect(w - Math.max(1, w * 0.16), 0, Math.max(1, w * 0.16), H);
-  ctx.fillRect(0, H * rng.range(0.10, 0.20), w, H * rng.range(0.05, 0.09));
+  ctx.fillRect(a.x + w - Math.max(1, w * 0.16), a.y, Math.max(1, w * 0.16), a.h);
+  ctx.fillRect(a.x, a.y + a.h * rng.range(0.10, 0.20), w, a.h * rng.range(0.05, 0.09));
   ctx.restore();
 }
 
 function drawGridPlate(ctx, W, H, rng, theme) {
   ctx.save();
-  const a = box(SURFACE_ANCHORS.gridPlate, W, H);
+  const a = box(A('gridPlate'), W, H);
   const color = hexToRgb(rng.pick(theme.plateColors));
   ctx.fillStyle = rgbToCss(color, rng.range(0.14, 0.26));
   ctx.fillRect(a.x, a.y, a.w, a.h);
@@ -636,7 +812,7 @@ function drawGridPlate(ctx, W, H, rng, theme) {
   ctx.restore();
 }
 
-export const SURFACE_FUNCS = {
+const SURFACE_FUNCS = {
   letterbox: drawLetterbox,
   bottomGradient: drawBottomGradient,
   topGradient: drawTopGradient,
@@ -647,11 +823,17 @@ export const SURFACE_FUNCS = {
   specBand: drawSpecBand,
   hairRules: drawHairRules,
   voiceChrome: drawVoiceChrome,
+  cvPlateRight: drawCvPlateRight,
+  cvPlateLeft: drawCvPlateLeft,
+  voiceLogoPlate: drawVoiceLogoPlate,
   jacketFrame: drawJacketFrame,
   circleMark: drawCircleMark,
   gameChrome: drawGameChrome,
   avLayers: drawAvLayers,
-  platformBar: drawPlatformBar,
+  avBottomBar: drawAvBottomBar,
+  platformBand: drawPlatformBand,
+  platformTab: drawPlatformTab,
+  keyartMarks: drawKeyartMarks,
   ratingBox: drawRatingBox,
   diagonalBand: drawDiagonalBand,
   plate: drawPlate,
@@ -661,8 +843,10 @@ export const SURFACE_FUNCS = {
   sealBadge: drawSealBadge,
   laurelBadge: drawLaurelBadge,
   barcode: drawBarcode,
-  tapeStrip: drawTapeStrip,
   waveBand: drawWaveBand,
   discSpine: drawDiscSpine,
   gridPlate: drawGridPlate
 };
+
+Object.assign(PF, { SURFACE_FUNCS });
+})(window.PF = window.PF || {});

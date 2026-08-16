@@ -1,27 +1,29 @@
-import { hslToRgb, rgbToCss } from '../core/color.js';
+(function (PF) {
+'use strict';
+const { hslToRgb, rgbToCss } = PF;
 
 const OP_WEIGHTS = [
-  { type: 'sliceShift', base: 9, gain: 15 },
-  { type: 'rgbSplitBand', base: 17, gain: 6 },
-  { type: 'blockScramble', base: 2, gain: 14 },
-  { type: 'scanTear', base: 9, gain: 7 },
-  { type: 'posterizeBand', base: 4, gain: 9 },
-  { type: 'monoBand', base: 6, gain: 7 },
-  { type: 'pixelBand', base: 1, gain: 12 },
-  { type: 'lightLeak', base: 16, gain: 3 },
-  { type: 'halftoneBand', base: 2, gain: 10 },
-  { type: 'edgeGhost', base: 4, gain: 10 },
-  { type: 'waveWarp', base: 3, gain: 11 },
-  { type: 'noiseBand', base: 14, gain: 5 }
+  { type: 'sliceShift', base: 7, gain: 11, tier: 'uncommon' },
+  { type: 'rgbSplitBand', base: 17, gain: 6, tier: 'common' },
+  { type: 'blockScramble', base: 3, gain: 12, tier: 'rare' },
+  { type: 'scanTear', base: 7, gain: 6, tier: 'uncommon' },
+  { type: 'posterizeBand', base: 5, gain: 9, tier: 'rare' },
+  { type: 'monoBand', base: 6, gain: 6, tier: 'uncommon' },
+  { type: 'pixelBand', base: 2, gain: 11, tier: 'rare' },
+  { type: 'lightLeak', base: 18, gain: 4, tier: 'common' },
+  { type: 'halftoneBand', base: 3, gain: 10, tier: 'rare' },
+  { type: 'edgeGhost', base: 5, gain: 8, tier: 'common' },
+  { type: 'waveWarp', base: 4, gain: 10, tier: 'rare' },
+  { type: 'noiseBand', base: 16, gain: 5, tier: 'common' }
 ];
 
 const OP_LIMIT = {
-  sliceShift: 3,
-  rgbSplitBand: 3,
+  sliceShift: 2,
+  rgbSplitBand: 2,
   blockScramble: 1,
-  scanTear: 2,
-  posterizeBand: 2,
-  monoBand: 2,
+  scanTear: 1,
+  posterizeBand: 1,
+  monoBand: 1,
   pixelBand: 1,
   lightLeak: 2,
   halftoneBand: 1,
@@ -30,12 +32,28 @@ const OP_LIMIT = {
   noiseBand: 2
 };
 
+const TIER_BUDGET = { common: 3, uncommon: 1, rare: 1 };
+
+const TIER_GATE = {
+  common: function () { return 1; },
+  uncommon: function (k) { return 0.05 + 0.20 * k; },
+  rare: function (k) { return 0.015 + 0.09 * k; }
+};
+
 const GENRE_BIAS = {
   cinema: { sliceShift: 1.2, lightLeak: 1.3, noiseBand: 1.2, halftoneBand: 0.7 },
   gravure: { lightLeak: 1.5, noiseBand: 1.2, blockScramble: 0.6, pixelBand: 0.5 },
   novel: { halftoneBand: 1.5, noiseBand: 1.3, monoBand: 1.3, pixelBand: 0.6 },
-  asmr: { waveWarp: 1.4, rgbSplitBand: 1.3, blockScramble: 0.7 },
-  game: { blockScramble: 1.5, sliceShift: 1.4, pixelBand: 1.4, edgeGhost: 1.3 },
+  asmr: {
+    sliceShift: 0, rgbSplitBand: 0, blockScramble: 0, scanTear: 0,
+    posterizeBand: 0, monoBand: 0, pixelBand: 0, halftoneBand: 0,
+    edgeGhost: 0, waveWarp: 0, noiseBand: 0.12, lightLeak: 1.20
+  },
+  game: {
+    blockScramble: 0, pixelBand: 0, sliceShift: 0, scanTear: 0,
+    halftoneBand: 0, monoBand: 0, posterizeBand: 0, waveWarp: 0,
+    rgbSplitBand: 0, edgeGhost: 0, lightLeak: 1.25, noiseBand: 1.10
+  },
   adult: { rgbSplitBand: 1.3, lightLeak: 1.3, edgeGhost: 1.2 }
 };
 
@@ -157,17 +175,32 @@ function makeOp(type, rng, k) {
   };
 }
 
-export function buildGlitchPlan(rng, genre, intensity, mode) {
+function tierBudget(rng, k, strong, calm) {
+  const budget = {};
+  for (const tier in TIER_BUDGET) {
+    if (strong) {
+      budget[tier] = TIER_BUDGET[tier] + 1;
+      continue;
+    }
+    const gate = TIER_GATE[tier](k) * (tier === 'common' ? 1 : calm);
+    budget[tier] = gate >= 1 || rng.chance(gate) ? TIER_BUDGET[tier] : 0;
+  }
+  return budget;
+}
+
+function buildGlitchPlan(rng, genre, intensity, mode, restraint) {
   if (mode === 'off') { return []; }
   const strong = mode === 'strong';
   const base = Math.max(0, Math.min(1, intensity));
   const k = strong ? Math.min(1, 0.45 + base * 0.75) : base;
+  const calm = typeof restraint === 'number' ? Math.max(0, Math.min(1, restraint)) : 1;
   const count = strong
     ? rng.int(4, 8)
-    : Math.max(0, Math.round(rng.range(-0.4, 1.3) + k * 3.4));
+    : Math.max(0, Math.round(rng.range(-0.8, 1.0) + k * 2.8));
   if (count <= 0) { return []; }
 
   const bias = GENRE_BIAS[genre] || null;
+  const budget = tierBudget(rng, k, strong, calm);
   const used = {};
   const plan = [];
   for (let n = 0; n < count; n++) {
@@ -175,12 +208,16 @@ export function buildGlitchPlan(rng, genre, intensity, mode) {
     for (let i = 0; i < OP_WEIGHTS.length; i++) {
       const t = OP_WEIGHTS[i].type;
       if ((used[t] || 0) >= OP_LIMIT[t]) { continue; }
-      const mul = bias && bias[t] ? bias[t] : 1;
+      if (budget[OP_WEIGHTS[i].tier] <= 0) { continue; }
+      const mul = bias && typeof bias[t] === 'number' ? bias[t] : 1;
       const w = (OP_WEIGHTS[i].base + OP_WEIGHTS[i].gain * k) * mul;
-      if (w > 0) { items.push({ v: t, w: w }); }
+      if (w > 0) { items.push({ v: t, w: w, tier: OP_WEIGHTS[i].tier }); }
     }
     if (items.length === 0) { break; }
     const type = rng.weighted(items);
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].v === type) { budget[items[i].tier] -= 1; break; }
+    }
     used[type] = (used[type] || 0) + 1;
     plan.push(makeOp(type, rng, k));
   }
@@ -599,7 +636,7 @@ function runOp(ctx, W, H, op, rng, store) {
   }
 }
 
-export function applyGlitch(ctx, w, h, plan, rng, faces) {
+function applyGlitch(ctx, w, h, plan, rng, faces) {
   const applied = [];
   if (!plan || plan.length === 0 || w < 8 || h < 8) { return applied; }
   const free = freeIntervals(faceBlocked(faces || []));
@@ -615,3 +652,6 @@ export function applyGlitch(ctx, w, h, plan, rng, faces) {
   }
   return applied;
 }
+
+Object.assign(PF, { buildGlitchPlan, applyGlitch });
+})(window.PF = window.PF || {});

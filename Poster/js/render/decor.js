@@ -1,4 +1,7 @@
-import { blendRgb, contrastRatio, hslToRgb, luma01, rgbToCss, rgbToHsl, shade } from '../core/color.js';
+(function (PF) {
+'use strict';
+const { blendRgb, contrastRatio, hslToRgb, luma01, rgbToCss, rgbToHsl, shade } = PF;
+const { srgbToOklch, oklchToSrgb, clampChroma } = PF;
 
 const MAX_GLYPH_PASSES = 8;
 const HEAVY_GLYPHS = 40;
@@ -6,6 +9,18 @@ const MIN_HEAVY_PASSES = 3;
 const MIN_STOP_CONTRAST = 3.0;
 const MIN_PLATE_CONTRAST = 4.5;
 const MIN_EDGE_CONTRAST = 2.2;
+const OUTLINE_MIN_CONTRAST = 6.0;
+const OUTLINE_MIN_SEPARATION = 1.6;
+const OUTLINE_DARK_L = 0.42;
+const OUTLINE_LIGHT_L = 0.86;
+// 塗りの彩度の下限。genre順は GENRE_ORDER に合わせる。
+// 原色・ネオン・パステルが前提のgenreは、fill構築で無彩色に寄っても最後に引き戻す。
+const FILL_MIN_CHROMA = [0, 0.05, 0, 0.09, 0.13, 0.13];
+// pastel前提のgenreは、背景が明るくても暗色へ倒さず明度上側で処理する（縁が分離を作る）
+const FILL_L_PREFER = [null, null, null, 'light', null, null];
+const VIVID_L_LOW = 0.45;
+const VIVID_L_HIGH = 0.80;
+const FILL_KEEP_TYPES = { metallic: 1, mirror: 1, image: 1, none: 1 };
 const NOISY_STD = 0.17;
 const MASK_PIXEL_LIMIT = 4194304;
 const RAMP_BUCKETS = 4;
@@ -16,10 +31,11 @@ const RAMP_THIRD_PIXELS = 900000;
 const DARK_INK = [12, 10, 10];
 const LIGHT_INK = [248, 246, 242];
 const GENRE_ORDER = ['cinema', 'gravure', 'novel', 'asmr', 'game', 'adult'];
+const STROKE_GAIN = { cinema: 1, gravure: 1, novel: 1, asmr: 1.25, game: 1.3, adult: 1.85 };
 const BUDGET = { title: 60, accent: 34, plain: 14 };
 const GENRE_BUDGET = [1, 0.92, 0.28, 0.88, 1.05, 1.1];
-const DISTORT_RATE = [0.03, 0.06, 0, 0.06, 0.09, 0.11];
-const GLITCH_RATE = [0.04, 0.015, 0, 0.015, 0.08, 0.09];
+const DISTORT_RATE = [0.03, 0.06, 0, 0, 0.09, 0.11];
+const GLITCH_RATE = [0.04, 0.015, 0, 0, 0.08, 0.09];
 const PARTIAL_PLATE_RATE = 0.12;
 const BEVEL_RATE = [0, 0, 0, 0, 0.05, 0.12];
 const METAL_RATE = [0.04, 0, 0, 0, 0.15, 0.3];
@@ -50,34 +66,34 @@ const GLYPH_SHAPES = [
 const PATTERN_KINDS = ['dots', 'grid', 'diagonal', 'crosshatch', 'checker'];
 
 const AXES = [
-  { id: 'fill.solid', group: 'fill', cost: 6, w: [4, 4, 8, 3, 2, 3] },
-  { id: 'fill.linear', group: 'fill', cost: 8, w: [2, 3, 0, 4, 3, 3] },
-  { id: 'fill.duotone', group: 'fill', cost: 10, w: [0.4, 0.8, 0, 1.2, 0.6, 1.2], minLevel: 0.5 },
+  { id: 'fill.solid', group: 'fill', cost: 6, w: [4, 4, 8, 2, 1.2, 2] },
+  { id: 'fill.linear', group: 'fill', cost: 8, w: [2, 3, 0, 6, 6, 6] },
+  { id: 'fill.duotone', group: 'fill', cost: 10, w: [0.4, 0.8, 0, 2.4, 2.2, 2.6], minLevel: 0.5 },
   { id: 'fill.metallic', group: 'fill', cost: 16, w: [0.8, 0, 0, 0, 4, 2.5], minLevel: 1 },
   { id: 'fill.mirror', group: 'fill', cost: 16, w: [0.2, 0, 0, 0, 1.2, 0.8], minLevel: 1 },
-  { id: 'fill.stripe', group: 'fill', cost: 14, w: [0.2, 0.3, 0, 0.4, 0.6, 1], minLevel: 1 },
-  { id: 'fill.pattern', group: 'fill', cost: 14, w: [0.3, 0.3, 0, 0.5, 0.5, 0.8], minLevel: 1 },
-  { id: 'fill.image', group: 'fill', cost: 18, w: [0.8, 0.3, 0, 0.2, 0.8, 0.6], minLevel: 1, need: 'source' },
-  { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [0.3, 0.2, 0, 0.3, 0.5, 0.6], minLevel: 1 },
+  { id: 'fill.stripe', group: 'fill', cost: 14, w: [0.2, 0.3, 0, 0, 0.6, 1], minLevel: 1 },
+  { id: 'fill.pattern', group: 'fill', cost: 14, w: [0.3, 0.3, 0, 0, 0.5, 0.8], minLevel: 1 },
+  { id: 'fill.image', group: 'fill', cost: 18, w: [0.8, 0.3, 0, 0, 0.8, 0.6], minLevel: 1, need: 'source' },
+  { id: 'fill.outlineOnly', group: 'fill', cost: 10, w: [0.3, 0.2, 0, 0, 0.5, 1.8], minLevel: 1 },
 
   { id: 'stroke.single', group: 'stroke', cost: 9, w: [3, 4, 0, 4, 1, 1] },
-  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1.5, 0.8, 0, 1.2, 5, 5] },
-  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.1, 0, 0, 0.1, 4, 4], minLevel: 1 },
+  { id: 'stroke.double', group: 'stroke', cost: 12, w: [1.5, 0.8, 0, 1.2, 5, 6.5] },
+  { id: 'stroke.triple', group: 'stroke', cost: 18, w: [0.1, 0, 0, 0.1, 4, 7], minLevel: 1 },
 
-  { id: 'glow.soft', group: 'glow', cost: 11, w: [0, 0, 0, 4, 0.4, 0] },
-  { id: 'glow.neon', group: 'glow', cost: 16, w: [0, 0, 0, 1.2, 0.3, 0.2], minLevel: 1 },
+  { id: 'glow.soft', group: 'glow', cost: 11, w: [0, 0, 0, 3, 2, 1.5] },
+  { id: 'glow.neon', group: 'glow', cost: 16, w: [0, 0, 0, 0.8, 4.5, 3], minLevel: 1 },
 
   { id: 'shadow.soft', group: 'shadow', cost: 9, w: [1.5, 3.5, 0, 0.8, 1, 0.8] },
-  { id: 'shadow.hard', group: 'shadow', cost: 8, w: [0.3, 0.4, 0, 0.2, 2.5, 4] },
-  { id: 'shadow.long', group: 'shadow', cost: 14, w: [1.6, 0.2, 0, 0.1, 0.8, 1], minLevel: 1 },
-  { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.1, 0.1, 0, 0.1, 1.6, 1.2], minLevel: 1 },
+  { id: 'shadow.hard', group: 'shadow', cost: 8, w: [0.3, 0.4, 0, 0, 2.5, 5] },
+  { id: 'shadow.long', group: 'shadow', cost: 14, w: [1.6, 0.2, 0, 0, 0.1, 1], minLevel: 1 },
+  { id: 'shadow.extrude', group: 'shadow', cost: 16, w: [0.1, 0.1, 0, 0, 1.6, 1.2], minLevel: 1 },
 
-  { id: 'plate.all', group: 'plate', cost: 10, w: [0.5, 1.5, 0.8, 1.2, 1, 2.2] },
-  { id: 'plate.line', group: 'plate', cost: 12, w: [0.5, 1.2, 0.6, 1, 0.9, 1.8] },
+  { id: 'plate.all', group: 'plate', cost: 10, w: [0.5, 1.5, 0.8, 1.2, 1, 1.35] },
+  { id: 'plate.line', group: 'plate', cost: 12, w: [0.5, 1.2, 0.6, 1, 0.9, 1.4] },
   { id: 'plate.marker', group: 'plate', cost: 10, w: [0.3, 1.2, 0.6, 1, 0.4, 1.4], minLevel: 0.35 },
-  { id: 'plate.knockout', group: 'plate', cost: 18, w: [0.8, 0.8, 1.2, 0.5, 1, 1.5], minLevel: 0.5 },
-  { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.4, 0.6, 0.3, 0.6, 0.6, 1], minLevel: 1, partial: true },
-  { id: 'plate.head', group: 'plate', cost: 12, w: [0.4, 0.6, 0.5, 0.5, 0.5, 0.8], minLevel: 1, partial: true },
+  { id: 'plate.knockout', group: 'plate', cost: 18, w: [0.8, 0.8, 1.2, 0.5, 1, 2.4], minLevel: 0.5 },
+  { id: 'plate.phrase', group: 'plate', cost: 14, w: [0.4, 0.6, 0.3, 0.6, 0.6, 2.2], minLevel: 1, partial: true },
+  { id: 'plate.head', group: 'plate', cost: 12, w: [0.4, 0.6, 0.5, 0.5, 0.5, 1.8], minLevel: 1, partial: true },
   { id: 'plate.tail', group: 'plate', cost: 12, w: [0.3, 0.4, 0.3, 0.4, 0.4, 0.6], minLevel: 1, partial: true },
   { id: 'plate.glyph', group: 'plate', cost: 18, w: [0.2, 0.5, 0.1, 0.6, 0.4, 0.6], minLevel: 1, partial: true },
   { id: 'plate.random', group: 'plate', cost: 16, w: [0.1, 0.3, 0.1, 0.3, 0.3, 0.5], minLevel: 1, partial: true },
@@ -100,12 +116,12 @@ const AXES = [
   { id: 'fx.edgeSplit', group: 'fx', cost: 8, w: [2, 1, 0, 1, 4, 4], minLevel: 1, glitch: true },
   { id: 'fx.misregister', group: 'fx', cost: 12, w: [2, 1, 0, 1, 3, 3], minLevel: 1, glitch: true },
   { id: 'fx.splitCut', group: 'fx', cost: 12, w: [1, 0.5, 0, 0.5, 2, 2], minLevel: 1, glitch: true },
-  { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.2, 0.4, 0, 0.4, 1, 0.6], minLevel: 1 },
-  { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [0.6, 0.1, 0, 0.1, 0.6, 0.5], minLevel: 1 },
-  { id: 'fx.torn', group: 'fx', cost: 10, w: [0.4, 0.1, 0.1, 0.1, 0.4, 0.4], minLevel: 1 },
+  { id: 'fx.reflection', group: 'fx', cost: 12, w: [0.2, 0.4, 0, 0, 0.12, 0.6], minLevel: 1 },
+  { id: 'fx.roughEdge', group: 'fx', cost: 10, w: [0.6, 0.1, 0, 0, 0.6, 0.5], minLevel: 1 },
+  { id: 'fx.torn', group: 'fx', cost: 10, w: [0.4, 0.1, 0.1, 0, 0.4, 0.4], minLevel: 1 },
 
-  { id: 'orn.underline', group: 'orn', cost: 9, w: [1.2, 1.2, 2.2, 0.6, 0.8, 1.6] },
-  { id: 'orn.overline', group: 'orn', cost: 9, w: [0.6, 0.6, 1.6, 0.4, 0.6, 0.8] },
+  { id: 'orn.underline', group: 'orn', cost: 9, w: [1.2, 1.2, 2.2, 0.15, 0.12, 1.6] },
+  { id: 'orn.overline', group: 'orn', cost: 9, w: [0.6, 0.6, 1.6, 0, 0.08, 0.8] },
   { id: 'orn.boten', group: 'orn', cost: 10, w: [0, 0, 3.5, 0, 0, 0], minLevel: 0.35 },
 
   { id: 'tf.skew', group: 'tf', cost: 9, w: [0.3, 1.2, 0, 0.4, 1.6, 2.5], minLevel: 1 },
@@ -177,8 +193,9 @@ function budgetOf(slot) {
   return BUDGET[d] !== undefined ? BUDGET[d] : BUDGET.accent;
 }
 
+// 未指定fieldがそのまま抜けて NaN を作らないよう、数でないものは 0 に落とす
 function clamp01(v) {
-  return v < 0 ? 0 : (v > 1 ? 1 : v);
+  return v > 0 ? (v > 1 ? 1 : v) : 0;
 }
 
 function minContrast(rgb, bgs) {
@@ -198,6 +215,58 @@ function safeShade(base, amount, bgs) {
     a *= 0.6;
   }
   return base.slice();
+}
+
+// 色相・彩度を保ったまま明度だけを目標側へ寄せる。
+// shade() は白黒へ混ぜるので彩度も落ちてしまい、原色が灰色に寄る。
+function pushLightness(rgb, targetL) {
+  const lch = srgbToOklch(rgb);
+  const L = targetL < 0.5 ? Math.min(lch[0], targetL) : Math.max(lch[0], targetL);
+  return oklchToSrgb(clampChroma([L, lch[1], lch[2]]));
+}
+
+// 塗りは solid / linear / duotone / stripe など経路が多く、それぞれが独自に色を混ぜて
+// 彩度を落とす。個々を直すより、組み上がった stops に対して一度だけ下限を課す。
+function vividize(rgb, minC, fallbackHue, preferHigh) {
+  const lch = srgbToOklch(rgb);
+  if (lch[1] >= minC) { return rgb; }
+  const hue = lch[1] < 0.012 ? fallbackHue : lch[2];
+  let out = clampChroma([lch[0], minC, hue]);
+  if (out[1] < minC * 0.7) {
+    // 明度が端に寄っているとgamut上その彩度を持てない（純黒は彩度を上げても黒のまま）。
+    // 彩度を出せる明度帯へ寄せる。
+    out = clampChroma([(preferHigh || lch[0] > 0.5) ? VIVID_L_HIGH : VIVID_L_LOW, minC, hue]);
+  }
+  return oklchToSrgb(out);
+}
+
+function enforceVividFill(spec, colorPlan, minC, preferHigh) {
+  if (!(minC > 0) || !spec.fill || FILL_KEEP_TYPES[spec.fill.type]) { return; }
+  const stops = spec.fill.stops;
+  if (!stops || stops.length === 0) { return; }
+  const accent = planRgb(colorPlan, 'accent');
+  const fallbackHue = accent ? srgbToOklch(accent)[2] : 0;
+  for (let i = 0; i < stops.length; i++) {
+    stops[i].rgb = vividize(stops[i].rgb, minC, fallbackHue, preferHigh);
+  }
+}
+
+// 彩度の下限を課すと、塗りが plate と同系色になって沈むことがある。
+// plate は塗りより後に決まるので、最後に明度側で分離させる（色相・彩度は保つ）。
+function repairFillAgainstPlate(spec, minContrastNeeded) {
+  const plate = spec.plate;
+  if (!plate || !plate.rgb || !spec.fill || !spec.fill.stops) { return; }
+  if (plate.knockout) { return; }
+  const plateL = srgbToOklch(plate.rgb)[0];
+  const targets = plateL > 0.5 ? [VIVID_L_LOW, 0.12] : [VIVID_L_HIGH, 0.95];
+  const stops = spec.fill.stops;
+  for (let i = 0; i < stops.length; i++) {
+    for (let t = 0; t < targets.length; t++) {
+      if (contrastRatio(stops[i].rgb, plate.rgb) >= minContrastNeeded) { break; }
+      const lch = srgbToOklch(stops[i].rgb);
+      stops[i].rgb = oklchToSrgb(clampChroma([targets[t], lch[1], lch[2]]));
+    }
+  }
 }
 
 function inkAgainst(bgs) {
@@ -239,6 +308,9 @@ function accentOf(rng, base, bgs, colorPlan) {
 
 function eligible(axis, state, ignoreBudget) {
   if (state.taken[axis.id]) { return false; }
+  // neon管は太く、詰まった多行タイトルでは字面を埋めて色が管の色に化ける
+  if (state.tiered && axis.id === 'glow.neon') { return false; }
+  if (state.outline && (axis.group === 'plate' || axis.id === 'fill.outlineOnly')) { return false; }
   if (axis.group === 'distort' && !state.allow.distort) { return false; }
   if (axis.glitch && !state.allow.glitch) { return false; }
   if (axis.partial && !state.allow.partialPlate) { return false; }
@@ -387,19 +459,25 @@ function settlePlate(plate, bgBefore, base) {
   return plate.rgb.slice();
 }
 
-function buildStrokes(rng, count, base, bgs, colorPlan, thick) {
+function buildStrokes(rng, count, base, bgs, colorPlan, thick, gain) {
   if (count <= 0) { return []; }
   const edgeBg = planOr(colorPlan, 'stroke', bgs, MIN_EDGE_CONTRAST, inkAgainst(bgs));
   const edgeInk = inkOpposite(base);
-  const w0 = rng.range(0.03, 0.12) * (thick ? 1.3 : 1);
+  const w0 = rng.range(0.03, 0.12) * (thick ? 1.3 : 1) * gain;
   const strokes = [];
   if (count === 1) {
     const rgb = contrastRatio(edgeBg, base) >= MIN_EDGE_CONTRAST ? edgeBg : edgeInk;
     strokes.push({ width: w0, rgb: rgb, alpha: rng.range(0.85, 1) });
     return strokes;
   }
-  strokes.push({ width: w0, rgb: edgeBg, alpha: 1 });
-  const inner = contrastRatio(edgeInk, edgeBg) >= MIN_EDGE_CONTRAST ? edgeInk : shade(edgeBg, luma01(edgeBg) > 0.5 ? -0.6 : 0.6);
+  const bg0 = bgs[bgs.length - 1];
+  let outer = contrastRatio(edgeBg, base) >= MIN_EDGE_CONTRAST ? edgeBg : edgeInk;
+  // 塗りが背景に埋もれる場合、印を背景から切り離せるのは最外周だけになる
+  if (contrastRatio(base, bg0) < MIN_EDGE_CONTRAST && contrastRatio(outer, bg0) < MIN_EDGE_CONTRAST) {
+    outer = inkOpposite(bg0);
+  }
+  strokes.push({ width: w0, rgb: outer, alpha: 1 });
+  const inner = contrastRatio(edgeInk, outer) >= MIN_EDGE_CONTRAST ? edgeInk : shade(outer, luma01(outer) > 0.5 ? -0.6 : 0.6);
   strokes.push({ width: w0 * 0.56, rgb: inner, alpha: 1 });
   if (count >= 3) {
     const hsl = rgbToHsl(base);
@@ -407,6 +485,72 @@ function buildStrokes(rng, count, base, bgs, colorPlan, thick) {
     strokes.push({ width: w0 * 0.3, rgb: contrastRatio(accent, inner) >= 1.8 ? accent : shade(inner, 0.5), alpha: 1 });
   }
   return strokes;
+}
+
+function pullToInk(rgb, base, halo) {
+  let c = rgb;
+  for (let i = 0; i < 6 && contrastRatio(c, halo) < MIN_STOP_CONTRAST; i++) {
+    c = blendRgb(c, base, 0.4);
+  }
+  return contrastRatio(c, halo) >= MIN_STOP_CONTRAST ? c : base.slice();
+}
+
+function keepInkAgainstHalo(spec, base) {
+  const halo = inkOpposite(base);
+  const fill = spec.fill;
+  if (fill && fill.stops) {
+    for (let i = 0; i < fill.stops.length; i++) {
+      fill.stops[i].rgb = pullToInk(fill.stops[i].rgb, base, halo);
+    }
+  }
+  if (fill && fill.stripe) { fill.stripe.rgb = pullToInk(fill.stripe.rgb, base, halo); }
+  if (fill && fill.pattern) { fill.pattern.rgb = pullToInk(fill.pattern.rgb, base, halo); }
+  if (spec.bevel) {
+    spec.bevel.light = pullToInk(spec.bevel.light, base, halo);
+    spec.bevel.dark = pullToInk(spec.bevel.dark, base, halo);
+  }
+  if (spec.innerLine) { spec.innerLine.rgb = pullToInk(spec.innerLine.rgb, base, halo); }
+}
+
+function applyOutline(rng, spec, base, bgs, colorPlan, level, gain) {
+  // 塗りが無い意匠では見える印は halo だけなので、文字色ではなく背景と contrast を取る
+  let halo = inkOpposite(base);
+  if (contrastRatio(halo, bgs[bgs.length - 1]) < MIN_EDGE_CONTRAST) {
+    halo = inkOpposite(halo);
+  }
+  const width = (level >= 1 ? rng.range(0.105, 0.155) : rng.range(0.078, 0.118)) * gain;
+  const strokes = [{ width: width, rgb: halo, alpha: 1 }];
+  if (spec.neon) {
+    // neon を捨てず、暗い縁の外側を光る管として残す
+    strokes.unshift({ width: width * rng.range(1.45, 1.75), rgb: spec.neon.tube, alpha: 1 });
+  } else {
+    const rim = planRgb(colorPlan, 'accent');
+    if (level >= 1 && rng.chance(0.45)
+      && rim && rgbToHsl(rim)[1] >= 0.35 && contrastRatio(rim, halo) >= MIN_EDGE_CONTRAST) {
+      strokes.unshift({ width: width * rng.range(1.20, 1.34), rgb: rim, alpha: rng.range(0.85, 1) });
+    }
+  }
+  spec.strokes = strokes;
+  spec.strokeCount = strokes.length;
+  spec.neon = null;
+  if (spec.glow) {
+    if (contrastRatio(spec.glow.rgb, base) < MIN_EDGE_CONTRAST) { spec.glow.rgb = halo; }
+    spec.glow.blur = Math.min(spec.glow.blur, 0.34);
+    spec.glow.alpha = Math.min(spec.glow.alpha, 0.30);
+  }
+  if (spec.fill.type === 'none') {
+    spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
+  }
+  if (spec.dropShadow) {
+    spec.dropShadow.hard = false;
+    spec.dropShadow.blur = Math.min(spec.dropShadow.blur, 0.11);
+    spec.dropShadow.alpha = Math.min(spec.dropShadow.alpha, 0.36);
+  } else if (!spec.longShadow && !spec.extrude) {
+    spec.dropShadow = {
+      hard: false, rgb: inkOpposite(halo), alpha: rng.range(0.20, 0.34),
+      dx: 0, dy: rng.range(0.014, 0.032), blur: rng.range(0.04, 0.10)
+    };
+  }
 }
 
 function applyAxis(id, s) {
@@ -650,8 +794,17 @@ function applyAxis(id, s) {
   }
 }
 
+function hasIsotropicStroke(spec) {
+  for (let i = 0; i < spec.strokes.length; i++) {
+    if (spec.strokes[i].isotropic) { return true; }
+  }
+  return false;
+}
+
 function usesMask(spec) {
-  return !!(spec.longShadow || spec.extrude || spec.edgeSplit || spec.misregister
+  return !!(hasIsotropicStroke(spec)
+    || (spec.innerLine && spec.innerLine.inset) || (spec.bevel && spec.bevel.inset)
+    || spec.longShadow || spec.extrude || spec.edgeSplit || spec.misregister
     || spec.reflection || spec.roughEdge || spec.torn
     || (spec.plate && spec.plate.knockout)
     || spec.fill.type === 'stripe' || spec.fill.type === 'pattern' || spec.fill.type === 'image');
@@ -670,10 +823,24 @@ function fillPasses(spec) {
   return 1;
 }
 
+// 光は「字に密着した細いrim」と「その外の広いhalo」で段が違う。
+// 単一のblurでは片方しか出ないため、配列で複数段を受ける。
+function glowLayers(spec) {
+  if (!spec.glow) { return []; }
+  return Array.isArray(spec.glow) ? spec.glow : [spec.glow];
+}
+
+function glowPasses(spec) {
+  const g = glowLayers(spec);
+  let n = 0;
+  for (let i = 0; i < g.length; i++) { n += g[i].passes > 0 ? g[i].passes : 1; }
+  return n;
+}
+
 function passCost(spec) {
   let cost = fillPasses(spec);
   cost += spec.strokes.length;
-  if (spec.glow) { cost += spec.glow.passes; }
+  cost += glowPasses(spec);
   if (spec.bevel) { cost += 2; }
   if (spec.innerLine) { cost += 1; }
   if (usesMask(spec)) { cost += 1; }
@@ -685,23 +852,44 @@ function capPasses(spec) {
   for (let i = 0; i < drop.length && passCost(spec) > MAX_GLYPH_PASSES; i++) {
     if (spec[drop[i]]) { spec[drop[i]] = null; }
   }
-  if (passCost(spec) > MAX_GLYPH_PASSES && spec.glow && spec.glow.passes > 1) { spec.glow.passes = 1; }
+  while (passCost(spec) > MAX_GLYPH_PASSES && Array.isArray(spec.glow) && spec.glow.length > 1) { spec.glow.pop(); }
+  const g0 = glowLayers(spec)[0];
+  if (passCost(spec) > MAX_GLYPH_PASSES && g0 && g0.passes > 1) { g0.passes = 1; }
   while (passCost(spec) > MAX_GLYPH_PASSES && spec.strokes.length > 1) { spec.strokes.pop(); }
   if (passCost(spec) > MAX_GLYPH_PASSES && spec.glow) { spec.glow = null; }
 }
 
-export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorPlan, opts) {
+function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorPlan, opts) {
   const level = levelOf(slot);
   const inten = typeof intensity === 'number' ? intensity : 0.5;
-  const base = style.color.slice();
+  let base = style.color.slice();
   const noisy = stats.std > NOISY_STD;
   const tiered = !!(slot && slot.tiered);
+  const isBig = !!(slot && slot.big);
+  const outline = !!(slot && slot.outline);
+  const inkOnly = !!(slot && slot.inkOnly);
   const plan = colorPlan || null;
   const gi = genreIndex(genre);
   const source = opts && opts.sourceCanvas ? opts.sourceCanvas : null;
 
   let bareBg = stats.rgb.slice();
-  if (style.scrim) { bareBg = blendRgb(bareBg, style.scrim.color, style.scrim.alpha); }
+  if (style.scrim && !outline) { bareBg = blendRgb(bareBg, style.scrim.color, style.scrim.alpha); }
+  if (outline) {
+    // 縁は applyOutline が必ず引くので、可読性は縁が担保する。
+    // 黒白へ置換したり shade で潰すと原色・ネオンが消えるため、
+    // 背景とほぼ同色になる時だけ明度を離す。
+    if (contrastRatio(base, bareBg) < OUTLINE_MIN_SEPARATION) {
+      base = pushLightness(base, FILL_L_PREFER[gi] === 'light'
+        ? OUTLINE_LIGHT_L
+        : (luma01(bareBg) > 0.5 ? OUTLINE_DARK_L : OUTLINE_LIGHT_L));
+    }
+  }
+  // 縁色・glow・plate は base から導かれるため、彩度の下限は
+  // それらを組み立てる前に効かせないと配色がずれる
+  if (isBig && FILL_MIN_CHROMA[gi] > 0) {
+    const accentRgb = planRgb(plan, 'accent');
+    base = vividize(base, FILL_MIN_CHROMA[gi], accentRgb ? srgbToOklch(accentRgb)[2] : 0, FILL_L_PREFER[gi] === 'light');
+  }
 
   const spec = {
     genre: genre, level: level,
@@ -719,7 +907,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
 
   const state = {
     rng: rng, spec: spec, base: base, bgs: [bareBg], colorPlan: plan, source: source,
-    gi: gi, level: level, taken: {}, chosen: [], groupCount: {},
+    gi: gi, level: level, outline: outline, tiered: tiered, taken: {}, chosen: [], groupCount: {},
     allow: {
       distort: level >= 1 && rng.chance(DISTORT_RATE[gi]),
       glitch: level >= 1 && rng.chance(GLITCH_RATE[gi]),
@@ -747,7 +935,7 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
   }
 
   const selected = [];
-  if (noisy || tiered || minContrast(base, state.bgs) < MIN_STOP_CONTRAST) {
+  if (!outline && (noisy || tiered || minContrast(base, state.bgs) < MIN_STOP_CONTRAST)) {
     const forced = pickAxis(rng, platePool, state, true);
     if (forced) {
       takeAxis(state, forced);
@@ -811,14 +999,20 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
 
   const bgs = state.bgs;
 
+  if (spec.plate && spec.plate.knockout
+    && contrastRatio(spec.plate.rgb, stats.rgb) < MIN_STOP_CONTRAST) {
+    spec.plate.knockout = false;
+    spec.plate.covers = true;
+  }
   const covered = !!(spec.plate && (spec.plate.covers || spec.plate.knockout));
   if (spec.needStroke && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (spec.neon && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (noisy && spec.strokeCount === 0 && !covered && !spec.glow) { spec.strokeCount = 1; }
   if (tiered && !covered && spec.strokeCount < 2) { spec.strokeCount = 2; }
+  if (isBig && !covered && spec.strokeCount === 0) { spec.strokeCount = 1; }
   if (spec.plate && spec.strokeCount === 0
     && contrastRatio(spec.plate.rgb, base) < MIN_STOP_CONTRAST) { spec.strokeCount = 1; }
-  spec.strokes = buildStrokes(rng, spec.strokeCount, base, bgs, plan, noisy && !covered);
+  spec.strokes = buildStrokes(rng, spec.strokeCount, base, bgs, plan, noisy && !covered, STROKE_GAIN[genre]);
 
   if (spec.neon && spec.strokes.length > 0) {
     spec.strokes[0].rgb = spec.neon.tube;
@@ -828,6 +1022,8 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
       spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: spec.neon.core }, { t: 1, rgb: spec.neon.core }] };
     }
   }
+
+  if (outline) { applyOutline(rng, spec, base, bgs, plan, level, STROKE_GAIN[genre]); }
 
   if (spec.fill.type === 'image' && !spec.fill.source) {
     spec.fill = { type: 'linear', angle: Math.PI / 2, stops: buildLinearStops(rng, base, bgs, plan) };
@@ -839,6 +1035,18 @@ export function buildDecorSpec(rng, genre, slot, style, stats, intensity, colorP
     spec.strokes = buildStrokes(rng, 2, base, bgs, plan, true);
     spec.axes.push('stroke.forced');
   }
+
+  if (inkOnly) {
+    if (level < 1) {
+      spec.fill = { type: 'solid', angle: 0, stops: [{ t: 0, rgb: base.slice() }, { t: 1, rgb: base.slice() }] };
+    }
+    keepInkAgainstHalo(spec, base);
+  }
+
+  // 彩度・明度の方針は「縁や下地で分離を作れる大きな文字」にだけ課す。
+  // 小文字にも掛けると、plate上の暗色文字まで持ち上げて地色と同化する。
+  if (isBig) { enforceVividFill(spec, plan, FILL_MIN_CHROMA[gi], FILL_L_PREFER[gi] === 'light'); }
+  repairFillAgainstPlate(spec, isBig ? MIN_PLATE_CONTRAST : MIN_STOP_CONTRAST);
 
   spec.effectiveBg = bgs[0];
   spec.effectiveBgs = bgs;
@@ -872,19 +1080,25 @@ function applyTransform(ctx, box, t) {
   ctx.translate(-ox, -oy);
 }
 
+function fillAlpha(fill, stop) {
+  if (stop && typeof stop.a === 'number') { return stop.a; }
+  return fill && typeof fill.alpha === 'number' ? fill.alpha : 1;
+}
+
 function makeFillStyle(ctx, box, fill) {
   if (!fill || fill.type === 'solid' || fill.stops.length < 2 || box.w <= 0 || box.h <= 0) {
-    return rgbToCss(fill && fill.stops.length > 0 ? fill.stops[0].rgb : [255, 255, 255]);
+    const s = fill && fill.stops.length > 0 ? fill.stops[0] : null;
+    return rgbToCss(s ? s.rgb : [255, 255, 255], fillAlpha(fill, s));
   }
   const cx = box.x + box.w / 2;
   const cy = box.y + box.h / 2;
   const ca = Math.cos(fill.angle);
   const sa = Math.sin(fill.angle);
   const half = (Math.abs(box.w * ca) + Math.abs(box.h * sa)) / 2;
-  if (half <= 0) { return rgbToCss(fill.stops[0].rgb); }
+  if (half <= 0) { return rgbToCss(fill.stops[0].rgb, fillAlpha(fill, fill.stops[0])); }
   const g = ctx.createLinearGradient(cx - ca * half, cy - sa * half, cx + ca * half, cy + sa * half);
   for (let i = 0; i < fill.stops.length; i++) {
-    g.addColorStop(clamp01(fill.stops[i].t), rgbToCss(fill.stops[i].rgb));
+    g.addColorStop(clamp01(fill.stops[i].t), rgbToCss(fill.stops[i].rgb, fillAlpha(fill, fill.stops[i])));
   }
   return g;
 }
@@ -1052,7 +1266,28 @@ function plateRegions(regions, plate, box) {
   return [box];
 }
 
-function paintPlateShape(ctx, rect, plate, size, index, tf) {
+// 並んだ板は同じ塗りでは平板に見える。並び順に沿って明度を振る。
+function plateFillAt(plate, index, count) {
+  const f = plate.fill;
+  if (!f || !plate.ramp || count < 2) { return f; }
+  const t = index / (count - 1) - 0.5;
+  const k = 1 + plate.ramp * t * 2;
+  const stops = [];
+  for (let i = 0; i < f.stops.length; i++) {
+    const c = f.stops[i].rgb;
+    stops.push({
+      t: f.stops[i].t, a: f.stops[i].a,
+      rgb: [
+        Math.max(0, Math.min(255, c[0] * k)),
+        Math.max(0, Math.min(255, c[1] * k)),
+        Math.max(0, Math.min(255, c[2] * k))
+      ]
+    });
+  }
+  return { type: f.type, angle: f.angle, alpha: f.alpha, stops: stops };
+}
+
+function paintPlateShape(ctx, rect, plate, size, index, tf, count) {
   const px = plate.padX * size;
   const py = plate.padY * size;
   const x = rect.x - px;
@@ -1061,7 +1296,9 @@ function paintPlateShape(ctx, rect, plate, size, index, tf) {
   const h = rect.h + py * 2;
   if (!(w > 0) || !(h > 0)) { return; }
   const flat = plate.shape === 'markerHighlight' || plate.shape === 'underlineBar';
-  const outerSkewed = !!(tf && (tf.skewX || tf.rotate));
+  // 外側transformと板の傾きが二重に掛かると歪みが二乗になるため既定では捨てる。
+  // 板だけ別角度に倒したい形は ignoreOuterTransform で明示させる。
+  const outerSkewed = !!(tf && (tf.skewX || tf.rotate)) && !plate.ignoreOuterTransform;
   const suppress = flat || outerSkewed;
   ctx.save();
   const rot = suppress ? 0 : plate.rotate + (plate.perRotate ? (hash01(plate.seed + index * 3.7) - 0.5) * 2 * plate.perRotate : 0);
@@ -1079,15 +1316,32 @@ function paintPlateShape(ctx, rect, plate, size, index, tf) {
     shapePath(ctx, plate.shape, x + plate.double.dx * size, y + plate.double.dy * size, w, h, plate.radius * size, plate.seed + index);
     ctx.fill();
   }
+  // 金属板の縁は上辺が明るく下辺が暗い。本体より先に明暗をずらして敷く。
+  if (plate.bevel) {
+    const bo = plate.bevel.offset * size;
+    ctx.fillStyle = rgbToCss(plate.bevel.dark, 1);
+    shapePath(ctx, plate.shape, x + bo, y + bo, w, h, plate.radius * size, plate.seed + index);
+    ctx.fill();
+    ctx.fillStyle = rgbToCss(plate.bevel.light, 1);
+    shapePath(ctx, plate.shape, x - bo, y - bo, w, h, plate.radius * size, plate.seed + index);
+    ctx.fill();
+  }
   if (plate.shadow) {
     ctx.shadowColor = rgbToCss(plate.shadow.rgb, plate.shadow.alpha);
     ctx.shadowBlur = plate.shadow.blur * size;
     ctx.shadowOffsetX = plate.shadow.dx * size;
     ctx.shadowOffsetY = plate.shadow.dy * size;
   }
-  ctx.fillStyle = rgbToCss(plate.rgb, plate.alpha);
+  // 板1枚ごとの矩形を基準にgradientを張る（金・銀の板を単色で塗ると平板になる）
+  if (plate.fill && plate.fill.stops && plate.fill.stops.length >= 2) {
+    ctx.globalAlpha = plate.alpha;
+    ctx.fillStyle = makeFillStyle(ctx, { x: x, y: y, w: w, h: h }, plateFillAt(plate, index, count));
+  } else {
+    ctx.fillStyle = rgbToCss(plate.rgb, plate.alpha);
+  }
   shapePath(ctx, plate.shape, x, y, w, h, plate.radius * size, plate.seed + index);
   ctx.fill();
+  ctx.globalAlpha = 1;
   clearShadow(ctx);
   if (plate.border) {
     ctx.lineWidth = plate.border.width * size;
@@ -1099,26 +1353,82 @@ function paintPlateShape(ctx, rect, plate, size, index, tf) {
 
 function paintPlates(ctx, regions, box, plate, size, tf) {
   const rects = plateRegions(regions, plate, box);
-  for (let i = 0; i < rects.length; i++) { paintPlateShape(ctx, rects[i], plate, size, i, tf); }
+  for (let i = 0; i < rects.length; i++) { paintPlateShape(ctx, rects[i], plate, size, i, tf, rects.length); }
+}
+
+// 罫は矩形とは限らない。手書きlogoの払いは「傾く・box外へ伸びる・端が細る」ため、
+// 中心の太さから両端へ絞った紡錘形のpathで描く（taper=0 なら従来どおりの帯）。
+function rulePath(ctx, len, lw, taper) {
+  const he = lw / 2 * (1 - clamp01(taper));
+  const hm = lw / 2;
+  const ctrl = 2 * hm - he;
+  ctx.beginPath();
+  ctx.moveTo(-len / 2, -he);
+  ctx.quadraticCurveTo(0, -ctrl, len / 2, -he);
+  ctx.lineTo(len / 2, he);
+  ctx.quadraticCurveTo(0, ctrl, -len / 2, he);
+  ctx.closePath();
+}
+
+function paintOneRule(ctx, cx, cy, len, lw, angle, rule, size) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (angle) { ctx.rotate(angle); }
+  if (rule.border) {
+    ctx.lineWidth = rule.border.width * size * 2;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = rgbToCss(rule.border.rgb, typeof rule.border.alpha === 'number' ? rule.border.alpha : 1);
+    rulePath(ctx, len, lw, rule.taper);
+    ctx.stroke();
+  }
+  ctx.fillStyle = rgbToCss(rule.rgb, rule.alpha);
+  rulePath(ctx, len, lw, rule.taper);
+  ctx.fill();
+  ctx.restore();
 }
 
 function paintRule(ctx, box, rule, size, top, vertical) {
   const gap = rule.gap * size;
   const lw = rule.width * size;
+  const ext = rule.extend > 0 ? rule.extend : 0;
+  const tilt = rule.angle ? rule.angle : 0;
+  const shift = rule.shift ? rule.shift * size : 0;
   ctx.save();
-  ctx.fillStyle = rgbToCss(rule.rgb, rule.alpha);
   if (vertical) {
     const x0 = top ? box.x + box.w + gap : box.x - gap;
     const d = rule.spacing * size * (top ? 1 : -1);
-    ctx.fillRect(x0 - lw / 2, box.y, lw, box.h);
-    if (rule.double) { ctx.fillRect(x0 + d - lw * 0.3, box.y, lw * 0.6, box.h); }
+    const len = box.h * (1 + ext * 2);
+    paintOneRule(ctx, x0, box.y + box.h / 2 + shift, len, lw, Math.PI / 2 + tilt, rule, size);
+    if (rule.double) {
+      paintOneRule(ctx, x0 + d, box.y + box.h / 2 + shift, len, lw * 0.6, Math.PI / 2 + tilt, rule, size);
+    }
   } else {
     const y0 = top ? box.y - gap : box.y + box.h + gap;
     const d = rule.spacing * size * (top ? -1 : 1);
-    ctx.fillRect(box.x, y0 - lw / 2, box.w, lw);
-    if (rule.double) { ctx.fillRect(box.x, y0 + d - lw * 0.3, box.w, lw * 0.6); }
+    const len = box.w * (1 + ext * 2);
+    paintOneRule(ctx, box.x + box.w / 2 + shift, y0, len, lw, tilt, rule, size);
+    if (rule.double) {
+      paintOneRule(ctx, box.x + box.w / 2 + shift, y0 + d, len, lw * 0.6, tilt, rule, size);
+    }
   }
   ctx.restore();
+}
+
+// 2段titleの各行に罫を引く形は、塊ひとつのboxでは作れない。
+// perLine のときは行単位の region を回す。
+function paintRules(ctx, regions, box, spec, size) {
+  const vertical = !!spec.vertical;
+  const pairs = [{ rule: spec.underline, top: false }, { rule: spec.overline, top: true }];
+  for (let i = 0; i < pairs.length; i++) {
+    const rule = pairs[i].rule;
+    if (!rule) { continue; }
+    const boxes = rule.perLine && regions && regions.line && regions.line.length > 0
+      ? regions.line
+      : [box];
+    for (let k = 0; k < boxes.length; k++) {
+      paintRule(ctx, boxes[k], rule, size, pairs[i].top, vertical);
+    }
+  }
 }
 
 function newCanvas(w, h) {
@@ -1178,6 +1488,51 @@ function buildMask(ctx, emitter, box, pad) {
   emitter(oc, 'fill');
   oc.restore();
   return { cv: e.cv, x: x, y: y, w: bw, h: bh, pw: w, ph: h, sx: sx, sy: sy };
+}
+
+// 層の不透明部分を半径 r ぶん一様に削る（形態学的収縮）。
+// 反転を膨張させてから引く。太いfontしか無い環境で細い字面を作るための手段。
+function erodeAlpha(cv, pw, ph, r) {
+  if (!(r > 0.3)) { return; }
+  const inv = scratchCtx(8, pw, ph);
+  const dil = scratchCtx(9, pw, ph);
+  if (!inv || !dil) { return; }
+  inv.ctx.fillStyle = '#000000';
+  inv.ctx.fillRect(0, 0, pw, ph);
+  inv.ctx.globalCompositeOperation = 'destination-out';
+  inv.ctx.drawImage(cv, 0, 0, pw, ph, 0, 0, pw, ph);
+  inv.ctx.globalCompositeOperation = 'source-over';
+  const n = 16;
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    dil.ctx.drawImage(inv.cv, 0, 0, pw, ph, Math.cos(a) * r, Math.sin(a) * r, pw, ph);
+  }
+  const c = cv.getContext('2d');
+  c.save();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalCompositeOperation = 'destination-out';
+  c.drawImage(dil.cv, 0, 0, pw, ph, 0, 0, pw, ph);
+  c.restore();
+}
+
+// 字型を半径 r ぶん膨らませて色を着ける。canvasのstrokeは字を横に潰すと
+// 縁まで楕円に潰れるため、字面を潰したうえで等方な縁を回したい時はこちらを使う。
+function fattenedMask(mask, r, rgb, alpha, slot) {
+  const e = scratchCtx(slot, mask.pw, mask.ph);
+  if (!e) { return null; }
+  const oc = e.ctx;
+  const n = 16;
+  oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph, 0, 0, mask.pw, mask.ph);
+  for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2;
+    oc.drawImage(mask.cv, 0, 0, mask.pw, mask.ph,
+      Math.cos(a) * r, Math.sin(a) * r, mask.pw, mask.ph);
+  }
+  oc.globalCompositeOperation = 'source-in';
+  oc.fillStyle = rgbToCss(rgb, alpha);
+  oc.fillRect(0, 0, mask.pw, mask.ph);
+  oc.globalCompositeOperation = 'source-over';
+  return e.cv;
 }
 
 function tintedMask(mask, rgb, alpha, slot) {
@@ -1417,18 +1772,54 @@ function trimForGlyphCount(spec, glyphCount) {
   for (let i = 0; i < drop.length && passCost(spec) > allowed; i++) {
     if (spec[drop[i]]) { spec[drop[i]] = null; }
   }
-  if (passCost(spec) > allowed && spec.glow && spec.glow.passes > 1) { spec.glow.passes = 1; }
+  while (passCost(spec) > allowed && Array.isArray(spec.glow) && spec.glow.length > 1) { spec.glow.pop(); }
+  const g0 = glowLayers(spec)[0];
+  if (passCost(spec) > allowed && g0 && g0.passes > 1) { g0.passes = 1; }
   while (passCost(spec) > allowed && spec.strokes.length > 1) { spec.strokes.pop(); }
   if (passCost(spec) > allowed && spec.glow) { spec.glow = null; }
 }
 
-export function paintDecorated(ctx, emitter, box, spec, size) {
+function paintDecorated(ctx, emitter, box, spec, size) {
   if (!spec || !(size > 0)) { return; }
   const regions = emitter && emitter.regions ? emitter.regions : null;
   trimForGlyphCount(spec, emitter && emitter.glyphs ? emitter.glyphs.length : 0);
   ctx.save();
   applyTransform(ctx, box, spec.transform);
   clearShadow(ctx);
+
+  // 字を痩せさせる。canvasの destination-out は下地の写真まで抜くため、
+  // 装飾一式を層へ描いてから層の中だけで削り、削り終えてから下地の上へ置く。
+  if (spec.erode && spec.erode.width > 0) {
+    const pad = size * (MASK_PAD_EM + spec.erode.width * 2);
+    const em = buildMask(ctx, emitter, box, pad);
+    const layer = em ? scratchCtx(7, em.pw, em.ph) : null;
+    if (layer) {
+      const sub = {};
+      const keys = Object.keys(spec);
+      for (let i = 0; i < keys.length; i++) { sub[keys[i]] = spec[keys[i]]; }
+      sub.erode = null;
+      sub.transform = null;
+      // 罫・傍点は字ではないので一緒に削らない。収縮を終えてから引く。
+      sub.underline = null;
+      sub.overline = null;
+      sub.boten = null;
+      const oc = layer.ctx;
+      oc.save();
+      oc.scale(em.sx, em.sy);
+      oc.translate(-em.x, -em.y);
+      paintDecorated(oc, emitter, box, sub, size);
+      oc.restore();
+      erodeAlpha(layer.cv, em.pw, em.ph, spec.erode.width * size * em.sx);
+      blit(ctx, layer.cv, em, 0, 0);
+      paintRules(ctx, regions, box, spec, size);
+      if (spec.boten) {
+        ctx.fillStyle = rgbToCss(spec.boten.rgb, spec.boten.alpha);
+        emitter(ctx, 'boten');
+      }
+      ctx.restore();
+      return;
+    }
+  }
 
   const mask = usesMask(spec) ? buildMask(ctx, emitter, box, size * MASK_PAD_EM) : null;
   const maskScale = mask ? mask.sx : 1;
@@ -1439,8 +1830,7 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
       ctx.fillStyle = makeFillStyle(ctx, box, spec.fill);
       emitter(ctx, 'fill');
     }
-    if (spec.underline) { paintRule(ctx, box, spec.underline, size, false, !!spec.vertical); }
-    if (spec.overline) { paintRule(ctx, box, spec.overline, size, true, !!spec.vertical); }
+    paintRules(ctx, regions, box, spec, size);
     ctx.restore();
     return;
   }
@@ -1456,13 +1846,17 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
       spec.extrude.dx, spec.extrude.dy, size, 1);
   }
 
-  if (spec.glow) {
-    ctx.fillStyle = rgbToCss(spec.glow.rgb, 1);
-    ctx.shadowColor = rgbToCss(spec.glow.rgb, spec.glow.alpha);
-    ctx.shadowBlur = Math.min(spec.glow.blur * size, MAX_BLUR_PX);
+  // 配列で渡した場合は先頭から順に描くので、広いhaloを先・細いrimを後に並べる
+  const glows = glowLayers(spec);
+  for (let gi = 0; gi < glows.length; gi++) {
+    const gl = glows[gi];
+    ctx.fillStyle = rgbToCss(gl.rgb, 1);
+    ctx.shadowColor = rgbToCss(gl.rgb, gl.alpha);
+    ctx.shadowBlur = Math.min(gl.blur * size, MAX_BLUR_PX);
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 0;
-    for (let i = 0; i < spec.glow.passes; i++) { emitter(ctx, 'fill'); }
+    const passes = gl.passes > 0 ? gl.passes : 1;
+    for (let i = 0; i < passes; i++) { emitter(ctx, 'fill'); }
     clearShadow(ctx);
   }
 
@@ -1475,13 +1869,32 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
     const s = spec.strokes[i];
     if (shadowPending) { applyShadow(ctx, spec.dropShadow, size); shadowPending = false; }
     else { clearShadow(ctx); }
-    ctx.lineWidth = s.width * size;
-    ctx.strokeStyle = rgbToCss(s.rgb, s.alpha);
-    emitter(ctx, 'stroke');
+    if (s.isotropic && mask) {
+      const ring = fattenedMask(mask, s.width * size * maskScale, s.rgb, s.alpha, 5);
+      if (ring) { blit(ctx, ring, mask, 0, 0); }
+    } else {
+      // canvasのstrokeは中心線なので半分が字の内側へ食い込む。
+      // align:'outside' は倍幅で描き、内側は後段の塗りで埋め戻す（字面を痩せさせない）。
+      ctx.lineWidth = s.width * size * (s.align === 'outside' ? 2 : 1);
+      ctx.strokeStyle = rgbToCss(s.rgb, s.alpha);
+      emitter(ctx, 'stroke');
+    }
   }
   clearShadow(ctx);
 
-  if (spec.bevel) {
+  if (spec.bevel && spec.bevel.inset && mask) {
+    const o = spec.bevel.offset * size;
+    const layer = maskedLayer(mask, function (oc) {
+      oc.fillStyle = rgbToCss(spec.bevel.dark, spec.bevel.alpha);
+      oc.translate(o, o);
+      emitter(oc, 'fill');
+      oc.translate(-o * 2, -o * 2);
+      oc.fillStyle = rgbToCss(spec.bevel.light, spec.bevel.alpha);
+      emitter(oc, 'fill');
+      oc.translate(o, o);
+    }, 5);
+    if (layer) { blit(ctx, layer.cv, mask, 0, 0); }
+  } else if (spec.bevel) {
     const o = spec.bevel.offset * size;
     if (shadowPending) { applyShadow(ctx, spec.dropShadow, size); shadowPending = false; }
     ctx.fillStyle = rgbToCss(spec.bevel.dark, spec.bevel.alpha);
@@ -1534,15 +1947,27 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
   }
 
   if (spec.innerLine) {
-    ctx.lineWidth = spec.innerLine.width * size;
-    ctx.strokeStyle = rgbToCss(spec.innerLine.rgb, spec.innerLine.alpha);
-    emitter(ctx, 'stroke');
+    // 中心線strokeは幅の半分が字の外へ出て縁を痩せさせる。
+    // inset は字型で切り、光沢を画線の内側だけに留める。
+    if (spec.innerLine.inset && mask) {
+      const layer = maskedLayer(mask, function (oc) {
+        oc.lineJoin = 'round';
+        oc.lineCap = 'round';
+        oc.lineWidth = spec.innerLine.width * size * 2;
+        oc.strokeStyle = rgbToCss(spec.innerLine.rgb, spec.innerLine.alpha);
+        emitter(oc, 'stroke');
+      }, 5);
+      if (layer) { blit(ctx, layer.cv, mask, 0, 0); }
+    } else {
+      ctx.lineWidth = spec.innerLine.width * size;
+      ctx.strokeStyle = rgbToCss(spec.innerLine.rgb, spec.innerLine.alpha);
+      emitter(ctx, 'stroke');
+    }
   }
 
   if (spec.reflection && mask) { paintReflection(ctx, mask, box, spec, size); }
 
-  if (spec.underline) { paintRule(ctx, box, spec.underline, size, false, !!spec.vertical); }
-  if (spec.overline) { paintRule(ctx, box, spec.overline, size, true, !!spec.vertical); }
+  paintRules(ctx, regions, box, spec, size);
 
   if (spec.boten) {
     ctx.fillStyle = rgbToCss(spec.boten.rgb, spec.boten.alpha);
@@ -1551,3 +1976,6 @@ export function paintDecorated(ctx, emitter, box, spec, size) {
 
   ctx.restore();
 }
+
+Object.assign(PF, { buildDecorSpec, paintDecorated });
+})(window.PF = window.PF || {});

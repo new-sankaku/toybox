@@ -1,4 +1,6 @@
-import { numeric } from './morphology.js';
+(function (PF) {
+'use strict';
+const { numeric } = PF;
 
 const BRACKETS = {
   none: { open: '', close: '' },
@@ -21,7 +23,7 @@ const BRACKET_WEIGHTS = {
     { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 2 }
   ],
   novel: [
-    { v: 'none', w: 72 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 28 }, { v: 'paren', w: 0 },
+    { v: 'none', w: 88 }, { v: 'kagi', w: 0 }, { v: 'nijuukagi', w: 12 }, { v: 'paren', w: 0 },
     { v: 'kaku', w: 0 }, { v: 'yama', w: 0 }, { v: 'nijuuyama', w: 0 }, { v: 'dash', w: 0 }
   ],
   asmr: [
@@ -51,7 +53,7 @@ const PUNCT_WEIGHTS = {
   cinema: [{ v: 'none', w: 62 }, { v: 'period', w: 14 }, { v: 'comma', w: 14 }, { v: 'nakaguro', w: 10 }],
   gravure: [{ v: 'none', w: 56 }, { v: 'period', w: 16 }, { v: 'comma', w: 18 }, { v: 'nakaguro', w: 10 }],
   novel: [{ v: 'none', w: 60 }, { v: 'period', w: 12 }, { v: 'comma', w: 18 }, { v: 'nakaguro', w: 10 }],
-  asmr: [{ v: 'none', w: 52 }, { v: 'period', w: 12 }, { v: 'comma', w: 16 }, { v: 'nakaguro', w: 20 }],
+  asmr: [{ v: 'none', w: 58 }, { v: 'period', w: 20 }, { v: 'comma', w: 16 }, { v: 'nakaguro', w: 6 }],
   game: [{ v: 'none', w: 66 }, { v: 'period', w: 4 }, { v: 'comma', w: 8 }, { v: 'nakaguro', w: 22 }],
   adult: [{ v: 'none', w: 58 }, { v: 'period', w: 8 }, { v: 'comma', w: 12 }, { v: 'nakaguro', w: 22 }]
 };
@@ -60,15 +62,15 @@ const ELLIPSIS_WEIGHTS = {
   cinema: [{ v: 'none', w: 78 }, { v: 'lead', w: 8 }, { v: 'trail', w: 14 }],
   gravure: [{ v: 'none', w: 70 }, { v: 'lead', w: 10 }, { v: 'trail', w: 20 }],
   novel: [{ v: 'none', w: 72 }, { v: 'lead', w: 10 }, { v: 'trail', w: 18 }],
-  asmr: [{ v: 'none', w: 58 }, { v: 'lead', w: 14 }, { v: 'trail', w: 28 }],
+  asmr: [{ v: 'none', w: 62 }, { v: 'lead', w: 3 }, { v: 'trail', w: 35 }],
   game: [{ v: 'none', w: 88 }, { v: 'lead', w: 4 }, { v: 'trail', w: 8 }],
   adult: [{ v: 'none', w: 74 }, { v: 'lead', w: 8 }, { v: 'trail', w: 18 }]
 };
 
 const EXCLAIM_WEIGHTS = {
-  cinema: [{ v: 'none', w: 84 }, { v: 'bang', w: 6 }, { v: 'quest', w: 4 }, { v: 'both', w: 3 }, { v: 'double', w: 3 }],
-  gravure: [{ v: 'none', w: 76 }, { v: 'bang', w: 12 }, { v: 'quest', w: 4 }, { v: 'both', w: 4 }, { v: 'double', w: 4 }],
-  novel: [{ v: 'none', w: 90 }, { v: 'bang', w: 4 }, { v: 'quest', w: 4 }, { v: 'both', w: 1 }, { v: 'double', w: 1 }],
+  cinema: [{ v: 'none', w: 96 }, { v: 'bang', w: 1 }, { v: 'quest', w: 3 }, { v: 'both', w: 0 }, { v: 'double', w: 0 }],
+  gravure: [{ v: 'none', w: 94 }, { v: 'bang', w: 3 }, { v: 'quest', w: 3 }, { v: 'both', w: 0 }, { v: 'double', w: 0 }],
+  novel: [{ v: 'none', w: 92 }, { v: 'bang', w: 4 }, { v: 'quest', w: 4 }, { v: 'both', w: 0 }, { v: 'double', w: 0 }],
   asmr: [{ v: 'none', w: 82 }, { v: 'bang', w: 8 }, { v: 'quest', w: 5 }, { v: 'both', w: 3 }, { v: 'double', w: 2 }],
   game: [{ v: 'none', w: 66 }, { v: 'bang', w: 16 }, { v: 'quest', w: 4 }, { v: 'both', w: 6 }, { v: 'double', w: 8 }],
   adult: [{ v: 'none', w: 70 }, { v: 'bang', w: 14 }, { v: 'quest', w: 6 }, { v: 'both', w: 5 }, { v: 'double', w: 5 }]
@@ -80,17 +82,17 @@ const LATIN_WEIGHTS = {
   cinema: [{ v: 'none', w: 38 }, { v: 'below', w: 26 }, { v: 'slash', w: 16 }, { v: 'paren', w: 2 }, { v: 'separate', w: 18 }],
   gravure: [{ v: 'none', w: 50 }, { v: 'below', w: 18 }, { v: 'slash', w: 12 }, { v: 'paren', w: 4 }, { v: 'separate', w: 16 }],
   novel: [{ v: 'none', w: 56 }, { v: 'below', w: 14 }, { v: 'slash', w: 8 }, { v: 'paren', w: 10 }, { v: 'separate', w: 12 }],
-  asmr: [{ v: 'none', w: 48 }, { v: 'below', w: 16 }, { v: 'slash', w: 14 }, { v: 'paren', w: 10 }, { v: 'separate', w: 12 }],
-  game: [{ v: 'none', w: 26 }, { v: 'below', w: 30 }, { v: 'slash', w: 14 }, { v: 'paren', w: 2 }, { v: 'separate', w: 28 }],
+  asmr: [{ v: 'none', w: 64 }, { v: 'below', w: 6 }, { v: 'slash', w: 0 }, { v: 'paren', w: 0 }, { v: 'separate', w: 30 }],
+  game: [{ v: 'none', w: 22 }, { v: 'below', w: 44 }, { v: 'slash', w: 0 }, { v: 'paren', w: 0 }, { v: 'separate', w: 34 }],
   adult: [{ v: 'none', w: 52 }, { v: 'below', w: 12 }, { v: 'slash', w: 12 }, { v: 'paren', w: 10 }, { v: 'separate', w: 14 }]
 };
 
 const SPACING_CHANCE = {
-  cinema: 0.16, gravure: 0.12, novel: 0.14, asmr: 0.1, game: 0.2, adult: 0.14
+  cinema: 0.16, gravure: 0.12, novel: 0.14, asmr: 0, game: 0.06, adult: 0.14
 };
 
 const NUMERIC_CHANCE = {
-  cinema: 0.1, gravure: 0.08, novel: 0.14, asmr: 0.18, game: 0.2, adult: 0.16
+  cinema: 0.1, gravure: 0.08, novel: 0.14, asmr: 0.03, game: 0.2, adult: 0.16
 };
 
 const PLAIN_JA_RE = /^[぀-ゟ゠-ヿ々一-鿿]{2,6}$/;
@@ -106,7 +108,7 @@ function partsJa(core) {
   return out.length >= 2 ? out : null;
 }
 
-export function styleTitle(rng, core, opts) {
+function styleTitle(rng, core, opts) {
   const o = opts || {};
   const genre = o.genre;
   if (!BRACKET_WEIGHTS[genre]) { throw new Error('unknown genre: ' + genre); }
@@ -211,3 +213,6 @@ export function styleTitle(rng, core, opts) {
 
   return { text: text, latin: latinOut, axes: axes };
 }
+
+Object.assign(PF, { styleTitle });
+})(window.PF = window.PF || {});

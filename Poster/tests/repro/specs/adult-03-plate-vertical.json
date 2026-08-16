@@ -1,0 +1,139 @@
+{
+  "W": 165,
+  "H": 505,
+  "items": [
+    {
+      "text": "ご奉仕メイド",
+      "fontCss": "\"HGSSoeiKakugothicUB\",\"MS PGothic\",sans-serif",
+      "weight": "400",
+      "startSize": 78,
+      "rect": {
+        "x": -0.206,
+        "y": -0.195,
+        "w": 1.4,
+        "h": 1.4
+      },
+      "slot": {
+        "align": "center",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0.05,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                208,
+                174,
+                130
+              ]
+            },
+            {
+              "t": 1,
+              "rgb": [
+                208,
+                174,
+                130
+              ]
+            }
+          ]
+        },
+        "plate": {
+          "scope": "glyph",
+          "shape": "rect",
+          "rgb": [
+            208,
+            174,
+            130
+          ],
+          "alpha": 1,
+          "padX": 0.0,
+          "padY": 0.015,
+          "radius": 0,
+          "rotate": 0,
+          "perRotate": 0,
+          "skew": 0,
+          "knockout": true,
+          "seed": 1,
+          "fill": {
+            "type": "metallic",
+            "angle": 0.25,
+            "stops": [
+              {
+                "t": 0,
+                "rgb": [
+                  238,
+                  206,
+                  168
+                ]
+              },
+              {
+                "t": 0.1,
+                "rgb": [
+                  206,
+                  168,
+                  120
+                ]
+              },
+              {
+                "t": 0.35,
+                "rgb": [
+                  176,
+                  143,
+                  100
+                ]
+              },
+              {
+                "t": 0.55,
+                "rgb": [
+                  200,
+                  165,
+                  118
+                ]
+              },
+              {
+                "t": 0.75,
+                "rgb": [
+                  232,
+                  200,
+                  152
+                ]
+              },
+              {
+                "t": 1,
+                "rgb": [
+                  198,
+                  162,
+                  114
+                ]
+              }
+            ]
+          },
+          "bevel": {
+            "light": [
+              252,
+              240,
+              208
+            ],
+            "dark": [
+              96,
+              68,
+              26
+            ],
+            "offset": 0.018
+          }
+        },
+        "transform": {
+          "skewX": -0.105,
+          "rotate": 0,
+          "scaleX": 1
+        }
+      }
+    }
+  ]
+}

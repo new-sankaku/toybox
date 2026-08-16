@@ -49,17 +49,6 @@ header.masthead .sub{
 }
 header.masthead .sub::before{content:"// ";}
 
-.warn{
-  border:1px solid var(--accent);
-  background:rgba(168,67,42,.10);
-  color:var(--accent);
-  padding:10px 12px;
-  margin-bottom:16px;
-  font-size:13px;
-  letter-spacing:.04em;
-}
-.warn code{font-family:var(--font-mono);font-size:12px;}
-
 .grid{
   display:grid;
   grid-template-columns:minmax(min(100%,17rem),22rem) minmax(0,1fr);

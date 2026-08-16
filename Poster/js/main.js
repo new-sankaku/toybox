@@ -1,5 +1,7 @@
-import { randomSeed } from './core/rng.js';
-import { generatePoster } from './render/poster.js';
+(function (PF) {
+'use strict';
+const { randomSeed } = PF;
+const { generatePoster } = PF;
 
 const els = {
   canvas: document.getElementById('poster'),
@@ -17,6 +19,7 @@ const els = {
   optGlitch: document.getElementById('optGlitch'),
   optDensity: document.getElementById('optDensity'),
   optIntensity: document.getElementById('optIntensity'),
+  optDecor: document.getElementById('optDecor'),
   optDebug: document.getElementById('optDebug')
 };
 
@@ -63,6 +66,7 @@ async function render() {
       seed: state.seed,
       density: parseFloat(els.optDensity.value),
       intensity: parseInt(els.optIntensity.value, 10) / 100,
+      decorIntensity: parseInt(els.optDecor.value, 10) / 100,
       avoidFace: els.optFace.checked,
       cutoutMode: els.optCutout.value,
       gradeMode: els.optGrade.value,
@@ -185,7 +189,7 @@ els.btnSave.addEventListener('click', () => {
   }, 'image/png');
 });
 
-['optFace', 'optCutout', 'optGrade', 'optGlitch', 'optDensity', 'optIntensity', 'optDebug'].forEach((id) => {
+['optFace', 'optCutout', 'optGrade', 'optGlitch', 'optDensity', 'optIntensity', 'optDecor', 'optDebug'].forEach((id) => {
   document.getElementById(id).addEventListener('change', () => {
     if (state.bitmap) { render(); }
   });
@@ -202,3 +206,5 @@ window.posterForge = {
   generate: generatePoster,
   canvas: els.canvas
 };
+
+})(window.PF = window.PF || {});

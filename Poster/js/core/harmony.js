@@ -1,18 +1,9 @@
-import { contrastRatio } from './color.js';
-import {
-  srgbToOklch,
-  srgbToOklab,
-  oklchToSrgb,
-  deltaEOk,
-  deltaEOkLch,
-  hueDistance,
-  mod360,
-  clamp01,
-  apcaContrast,
-  simulateCvd
-} from './oklch.js';
+(function (PF) {
+'use strict';
+const { contrastRatio } = PF;
+const { srgbToOklch, srgbToOklab, oklchToSrgb, deltaEOk, deltaEOkLch, hueDistance, mod360, clamp01, apcaContrast, simulateCvd } = PF;
 
-export const SCHEMES = [
+const SCHEMES = [
   'monochromatic',
   'analogous',
   'complementary',
@@ -47,12 +38,12 @@ const HIGH_COLORFUL_W = {
   analogousComplement: 0.60
 };
 
-export const VIBRATION = { hueMin: 150, lightMax: 0.15, chromaMin: 0.12 };
-export const CHROMA_BUDGET = { high: 0.14, low: 0.08, maxHigh: 1, mergeDe: 0.025 };
-export const SIMULTANEOUS = { bgChroma: 0.10, textChroma: 0.05, bandMin: 15, bandMax: 75 };
-export const CVD_TYPES = ['protan', 'deutan'];
-export const CVD_RELAX = 0.8;
-export const CVD_MIN_DE = 0.08;
+const VIBRATION = { hueMin: 150, lightMax: 0.15, chromaMin: 0.12 };
+const CHROMA_BUDGET = { high: 0.14, low: 0.08, maxHigh: 1, mergeDe: 0.025 };
+const SIMULTANEOUS = { bgChroma: 0.10, textChroma: 0.05, bandMin: 15, bandMax: 75 };
+const CVD_TYPES = ['protan', 'deutan'];
+const CVD_RELAX = 0.8;
+const CVD_MIN_DE = 0.08;
 
 function piecewise(src, dst, v) {
   const x = mod360(v);
@@ -66,15 +57,15 @@ function piecewise(src, dst, v) {
   return dst[dst.length - 1];
 }
 
-export function warpHue(h) {
+function warpHue(h) {
   return piecewise(HUE_ANCHOR_H, HUE_ANCHOR_P, h);
 }
 
-export function unwarpHue(p) {
+function unwarpHue(p) {
   return piecewise(HUE_ANCHOR_P, HUE_ANCHOR_H, p);
 }
 
-export function rotateHue(h, deg) {
+function rotateHue(h, deg) {
   return mod360(unwarpHue(mod360(warpHue(h) + deg)));
 }
 
@@ -82,7 +73,7 @@ function lch(L, C, h) {
   return [clamp01(L), C < 0 ? 0 : C, mod360(h)];
 }
 
-export function buildScheme(rng, keyLch, schemeName) {
+function buildScheme(rng, keyLch, schemeName) {
   const L = clamp01(keyLch[0]);
   const C = Math.max(keyLch[1], 0.02);
   const h = mod360(keyLch[2]);
@@ -162,7 +153,7 @@ export function buildScheme(rng, keyLch, schemeName) {
   }
 }
 
-export function chooseScheme(rng, palette, genreWeights) {
+function chooseScheme(rng, palette, genreWeights) {
   const t = clamp01((palette.colorfulness - 0.20) / 0.40);
   const items = [];
   for (let i = 0; i < SCHEMES.length; i++) {
@@ -177,14 +168,14 @@ export function chooseScheme(rng, palette, genreWeights) {
   return rng.weighted(items);
 }
 
-export function hasVibration(a, b) {
+function hasVibration(a, b) {
   return hueDistance(a[2], b[2]) >= VIBRATION.hueMin
     && Math.abs(a[0] - b[0]) < VIBRATION.lightMax
     && a[1] > VIBRATION.chromaMin
     && b[1] > VIBRATION.chromaMin;
 }
 
-export function hasSimultaneousShift(textLch, bgLch) {
+function hasSimultaneousShift(textLch, bgLch) {
   if (bgLch[1] <= SIMULTANEOUS.bgChroma) { return false; }
   if (textLch[1] <= SIMULTANEOUS.textChroma) { return false; }
   const d = hueDistance(textLch[2], bgLch[2]);
@@ -210,7 +201,7 @@ function chromaGroups(colors, budget) {
   return { groups: groups, owner: owner };
 }
 
-export function enforceChromaBudget(colors, budget) {
+function enforceChromaBudget(colors, budget) {
   const b = budget || CHROMA_BUDGET;
   const g = chromaGroups(colors, b);
   const out = colors.map((c) => [c[0], c[1], c[2]]);
@@ -222,7 +213,7 @@ export function enforceChromaBudget(colors, budget) {
   return out;
 }
 
-export function violatesChromaBudget(colors, budget) {
+function violatesChromaBudget(colors, budget) {
   const b = budget || CHROMA_BUDGET;
   const g = chromaGroups(colors, b);
   if (g.groups.length > b.maxHigh) { return true; }
@@ -233,7 +224,7 @@ export function violatesChromaBudget(colors, budget) {
   return high > b.maxHigh;
 }
 
-export function separateLightness(fixed, movable, minDelta) {
+function separateLightness(fixed, movable, minDelta) {
   const d = movable[0] - fixed[0];
   if (Math.abs(d) >= minDelta) { return movable; }
   const up = fixed[0] + minDelta;
@@ -248,7 +239,7 @@ export function separateLightness(fixed, movable, minDelta) {
   return [clamp01(target), movable[1], movable[2]];
 }
 
-export function enforceLightnessSpread(colors, minDelta) {
+function enforceLightnessSpread(colors, minDelta) {
   const idx = colors.map((c, i) => i).sort((a, b) => colors[a][0] - colors[b][0]);
   const out = colors.map((c) => [c[0], c[1], c[2]]);
   for (let i = 1; i < idx.length; i++) {
@@ -259,22 +250,22 @@ export function enforceLightnessSpread(colors, minDelta) {
   return out;
 }
 
-export const GROUND_BAND = {
+const GROUND_BAND = {
   small: { dark: [0.030, 0.500], light: [0.800, 0.990] },
   large: { dark: [0.030, 0.600], light: [0.700, 0.990] }
 };
 
-export function groundSideRange(dark, tier) {
+function groundSideRange(dark, tier) {
   const b = GROUND_BAND[tier] || GROUND_BAND.small;
   return dark ? [b.dark[0], b.dark[1]] : [b.light[0], b.light[1]];
 }
 
-export function inGroundBand(L, tier) {
+function inGroundBand(L, tier) {
   const b = GROUND_BAND[tier] || GROUND_BAND.small;
   return (L >= b.dark[0] && L <= b.dark[1]) || (L >= b.light[0] && L <= b.light[1]);
 }
 
-export function subtractIntervals(ranges, holes, minWidth) {
+function subtractIntervals(ranges, holes, minWidth) {
   let cur = ranges;
   for (let i = 0; i < holes.length; i++) {
     const hole = holes[i];
@@ -295,7 +286,7 @@ export function subtractIntervals(ranges, holes, minWidth) {
   return out;
 }
 
-export function sampleIntervals(rng, segs) {
+function sampleIntervals(rng, segs) {
   let total = 0;
   for (let i = 0; i < segs.length; i++) { total += segs[i][1] - segs[i][0]; }
   let t = rng.next() * total;
@@ -307,7 +298,7 @@ export function sampleIntervals(rng, segs) {
   return segs[segs.length - 1][1];
 }
 
-export function pickGroundLightness(rng, dark, avoids, minDelta, tier) {
+function pickGroundLightness(rng, dark, avoids, minDelta, tier) {
   const holes = avoids.map((L) => [L - minDelta, L + minDelta]);
   const same = subtractIntervals([groundSideRange(dark, tier)], holes);
   if (same.length > 0) { return sampleIntervals(rng, same); }
@@ -316,14 +307,14 @@ export function pickGroundLightness(rng, dark, avoids, minDelta, tier) {
   return null;
 }
 
-export function pickFreeLightness(rng, range, avoids, minDelta) {
+function pickFreeLightness(rng, range, avoids, minDelta) {
   const holes = avoids.map((L) => [L - minDelta, L + minDelta]);
   const segs = subtractIntervals([range], holes);
   if (segs.length === 0) { return null; }
   return sampleIntervals(rng, segs);
 }
 
-export function cvdContrastOk(fgRgb, bgRgb, minWcag) {
+function cvdContrastOk(fgRgb, bgRgb, minWcag) {
   for (let i = 0; i < CVD_TYPES.length; i++) {
     const f = simulateCvd(fgRgb, CVD_TYPES[i]);
     const b = simulateCvd(bgRgb, CVD_TYPES[i]);
@@ -333,7 +324,7 @@ export function cvdContrastOk(fgRgb, bgRgb, minWcag) {
   return true;
 }
 
-export function pickReadable(candidates, bgRgb, minWcag, minApca) {
+function pickReadable(candidates, bgRgb, minWcag, minApca) {
   if (!candidates || candidates.length === 0) { return null; }
   const bgLch = srgbToOklch(bgRgb);
   let best = null;
@@ -354,7 +345,7 @@ export function pickReadable(candidates, bgRgb, minWcag, minApca) {
   return best;
 }
 
-export function readableCandidates(candidates, bgRgb, minWcag, minApca) {
+function readableCandidates(candidates, bgRgb, minWcag, minApca) {
   const out = [];
   const bgLch = srgbToOklch(bgRgb);
   for (let i = 0; i < candidates.length; i++) {
@@ -370,7 +361,7 @@ export function readableCandidates(candidates, bgRgb, minWcag, minApca) {
   return out;
 }
 
-export function lightnessLadder(baseLch, steps, maxChroma) {
+function lightnessLadder(baseLch, steps, maxChroma) {
   const out = [];
   const n = Math.max(2, steps);
   for (let i = 0; i < n; i++) {
@@ -383,8 +374,17 @@ export function lightnessLadder(baseLch, steps, maxChroma) {
   return out;
 }
 
-export function toRgbList(lchList) {
+function toRgbList(lchList) {
   const out = [];
   for (let i = 0; i < lchList.length; i++) { out.push(oklchToSrgb(lchList[i])); }
   return out;
 }
+
+Object.assign(PF, {
+  SCHEMES, VIBRATION, CHROMA_BUDGET, SIMULTANEOUS, CVD_TYPES, CVD_RELAX, CVD_MIN_DE, warpHue, unwarpHue,
+  rotateHue, buildScheme, chooseScheme, hasVibration, hasSimultaneousShift, enforceChromaBudget,
+  violatesChromaBudget, separateLightness, enforceLightnessSpread, GROUND_BAND, groundSideRange,
+  inGroundBand, subtractIntervals, sampleIntervals, pickGroundLightness, pickFreeLightness, cvdContrastOk,
+  pickReadable, readableCandidates, lightnessLadder, toRgbList
+});
+})(window.PF = window.PF || {});

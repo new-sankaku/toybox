@@ -1,50 +1,102 @@
-const MAX_FACES = 5;
-const MIN_FACE_SCORE = 0.34;
-const NMS_IOU = 0.32;
+(function (PF) {
+'use strict';
 
-function buildCountIntegral(mask, w, h) {
-  const iw = w + 1;
-  const out = new Int32Array(iw * (h + 1));
-  for (let y = 0; y < h; y++) {
-    let rowSum = 0;
-    for (let x = 0; x < w; x++) {
-      rowSum += mask[y * w + x];
-      out[(y + 1) * iw + (x + 1)] = out[y * iw + (x + 1)] + rowSum;
+const MAX_FACES = 8;
+const MIN_PROBABILITY = 0.70;
+const IOU_THRESHOLD = 0.3;
+const MERGE_IOU = 0.30;
+const DETECT_LONG_EDGE = 384;
+const BOX_EXPAND_TOP = 0.30;
+const BOX_EXPAND_SIDE = 0.08;
+const BOX_EXPAND_BOTTOM = 0.12;
+const MIN_BOX_RATIO = 0.005;
+
+// BlazeFaceは入力を128x128へ潰すため、画面に占める顔が小さいほどスコアが落ちる
+// （実測: 全体像で0.23、顔が1/4を占めるcropで0.93）。粗→細のtile探索で小さい顔を拾う。
+const PYRAMID = [1, 2];
+const TILE_OVERLAP = 0.25;
+
+let modelPromise = null;
+
+function clamp01(v) {
+  return v < 0 ? 0 : (v > 1 ? 1 : v);
+}
+
+function decodeBase64(text) {
+  const bin = window.atob(text);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) { out[i] = bin.charCodeAt(i); }
+  return out;
+}
+
+function modelArtifacts() {
+  const src = window.PF_BLAZEFACE_ARTIFACTS;
+  if (!src) {
+    throw new Error('顔検出modelが読み込まれていません: vendor/model/blazeface.artifacts.js を確認してください');
+  }
+  const bytes = decodeBase64(src.weightDataBase64);
+  return {
+    format: src.format,
+    generatedBy: src.generatedBy,
+    convertedBy: src.convertedBy,
+    userDefinedMetadata: src.userDefinedMetadata,
+    modelTopology: src.modelTopology,
+    weightSpecs: src.weightSpecs,
+    weightData: bytes.buffer
+  };
+}
+
+function loadModel() {
+  if (modelPromise) { return modelPromise; }
+  if (!window.tf || !window.tf.io || typeof window.tf.io.fromMemory !== 'function') {
+    throw new Error('TensorFlow.js が読み込まれていません: vendor/tfjs/tf-core.min.js を確認してください');
+  }
+  if (!window.blazeface || typeof window.blazeface.load !== 'function') {
+    throw new Error('BlazeFace が読み込まれていません: vendor/tfjs/blazeface.min.umd.js を確認してください');
+  }
+  modelPromise = window.blazeface.load({
+    maxFaces: MAX_FACES,
+    iouThreshold: IOU_THRESHOLD,
+    scoreThreshold: MIN_PROBABILITY,
+    modelUrl: window.tf.io.fromMemory(modelArtifacts())
+  });
+  return modelPromise;
+}
+
+function tileRects(W, H, n) {
+  if (n <= 1) { return [{ x: 0, y: 0, w: W, h: H }]; }
+  const cell = (W > H ? W : H) / n;
+  const tw = Math.min(W, cell);
+  const th = Math.min(H, cell);
+  const step = 1 - TILE_OVERLAP;
+  const nx = Math.max(1, Math.ceil((W - tw) / (tw * step)) + 1);
+  const ny = Math.max(1, Math.ceil((H - th) / (th * step)) + 1);
+  const out = [];
+  for (let iy = 0; iy < ny; iy++) {
+    for (let ix = 0; ix < nx; ix++) {
+      out.push({
+        x: nx === 1 ? 0 : (W - tw) * (ix / (nx - 1)),
+        y: ny === 1 ? 0 : (H - th) * (iy / (ny - 1)),
+        w: tw,
+        h: th
+      });
     }
   }
   return out;
 }
 
-function morph(mask, w, h, radius, dilate) {
-  const integral = buildCountIntegral(mask, w, h);
-  const iw = w + 1;
-  const out = new Uint8Array(w * h);
-  for (let y = 0; y < h; y++) {
-    const y0 = y - radius < 0 ? 0 : y - radius;
-    const y1 = y + radius + 1 > h ? h : y + radius + 1;
-    for (let x = 0; x < w; x++) {
-      const x0 = x - radius < 0 ? 0 : x - radius;
-      const x1 = x + radius + 1 > w ? w : x + radius + 1;
-      const count = integral[y1 * iw + x1] - integral[y0 * iw + x1] - integral[y1 * iw + x0] + integral[y0 * iw + x0];
-      const area = (x1 - x0) * (y1 - y0);
-      out[y * w + x] = dilate ? (count > 0 ? 1 : 0) : (count === area ? 1 : 0);
-    }
-  }
-  return out;
-}
-
-function isSkinPixel(r, g, b) {
-  const yv = 0.299 * r + 0.587 * g + 0.114 * b;
-  if (yv < 48 || yv > 250) { return false; }
-  const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
-  const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
-  if (cb < 74 || cb > 130 || cr < 132 || cr > 180) { return false; }
-  if (cr + 0.6 * cb < 190 || cr + 0.6 * cb > 245) { return false; }
-  if (r <= g || g < b - 14) { return false; }
-  const max = r > g ? (r > b ? r : b) : (g > b ? g : b);
-  const min = r < g ? (r < b ? r : b) : (g < b ? g : b);
-  if (max - min < 12) { return false; }
-  return true;
+// 原寸を渡しても内部で128x128へ潰されるので、tileごとに一定サイズへ縮めて転送量を抑える
+function tileCanvas(source, rect) {
+  const long = rect.w > rect.h ? rect.w : rect.h;
+  const k = long > DETECT_LONG_EDGE ? DETECT_LONG_EDGE / long : 1;
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(rect.w * k));
+  cv.height = Math.max(1, Math.round(rect.h * k));
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'medium';
+  ctx.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, cv.width, cv.height);
+  return cv;
 }
 
 function iou(a, b) {
@@ -57,151 +109,69 @@ function iou(a, b) {
   return inter / (a.w * a.h + b.w * b.h - inter);
 }
 
-function suppress(boxes, threshold) {
+function suppress(boxes) {
   const sorted = boxes.slice().sort(function (p, q) { return q.score - p.score; });
   const kept = [];
-  for (let i = 0; i < sorted.length; i++) {
+  for (let i = 0; i < sorted.length && kept.length < MAX_FACES; i++) {
     let blocked = false;
     for (let k = 0; k < kept.length; k++) {
-      if (iou(sorted[i], kept[k]) > threshold) { blocked = true; break; }
+      if (iou(sorted[i], kept[k]) > MERGE_IOU) { blocked = true; break; }
     }
     if (!blocked) { kept.push(sorted[i]); }
-    if (kept.length >= MAX_FACES) { break; }
   }
   return kept;
 }
 
-function clamp01(v) {
-  return v < 0 ? 0 : (v > 1 ? 1 : v);
+// BlazeFaceのboxは目から口までに寄るので、額と顎を含む「顔領域」へ広げたうえで
+// tile座標から画像全体の正規化座標へ戻す
+function toImageBox(f, cv, rect, W, H) {
+  const kx = rect.w / cv.width;
+  const ky = rect.h / cv.height;
+  const x0 = rect.x + f.topLeft[0] * kx;
+  const y0 = rect.y + f.topLeft[1] * ky;
+  const x1 = rect.x + f.bottomRight[0] * kx;
+  const y1 = rect.y + f.bottomRight[1] * ky;
+  const bw = x1 - x0;
+  const bh = y1 - y0;
+  const nx = clamp01((x0 - bw * BOX_EXPAND_SIDE) / W);
+  const ny = clamp01((y0 - bh * BOX_EXPAND_TOP) / H);
+  return {
+    x: nx,
+    y: ny,
+    w: clamp01((x1 + bw * BOX_EXPAND_SIDE) / W) - nx,
+    h: clamp01((y1 + bh * BOX_EXPAND_BOTTOM) / H) - ny
+  };
 }
 
-function labelComponents(mask, w, h) {
-  const total = w * h;
-  const visited = new Uint8Array(total);
-  const stack = new Int32Array(total);
-  const components = [];
-  for (let start = 0; start < total; start++) {
-    if (mask[start] !== 1 || visited[start] === 1) { continue; }
-    let sp = 0;
-    stack[sp++] = start;
-    visited[start] = 1;
-    let minX = w, minY = h, maxX = -1, maxY = -1, area = 0;
-    while (sp > 0) {
-      const idx = stack[--sp];
-      const x = idx % w;
-      const y = (idx - x) / w;
-      area++;
-      if (x < minX) { minX = x; }
-      if (x > maxX) { maxX = x; }
-      if (y < minY) { minY = y; }
-      if (y > maxY) { maxY = y; }
-      for (let dy = -1; dy <= 1; dy++) {
-        const ny = y + dy;
-        if (ny < 0 || ny >= h) { continue; }
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = x + dx;
-          if (nx < 0 || nx >= w) { continue; }
-          const nIdx = ny * w + nx;
-          if (mask[nIdx] === 1 && visited[nIdx] === 0) { visited[nIdx] = 1; stack[sp++] = nIdx; }
-        }
+async function detectFaces(source, srcW, srcH) {
+  const W = srcW || (source ? (source.naturalWidth || source.width || 0) : 0);
+  const H = srcH || (source ? (source.naturalHeight || source.height || 0) : 0);
+  if (!W || !H) { return []; }
+
+  const model = await loadModel();
+  const found = [];
+  for (let level = 0; level < PYRAMID.length; level++) {
+    const rects = tileRects(W, H, PYRAMID[level]);
+    for (let t = 0; t < rects.length; t++) {
+      const cv = tileCanvas(source, rects[t]);
+      const hits = await model.estimateFaces(cv, false, false, true);
+      for (let i = 0; i < hits.length; i++) {
+        const f = hits[i];
+        if (!f.topLeft || !f.bottomRight) { continue; }
+        const score = Array.isArray(f.probability) ? f.probability[0] : f.probability;
+        if (!(score >= MIN_PROBABILITY)) { continue; }
+        const box = toImageBox(f, cv, rects[t], W, H);
+        if (box.w < MIN_BOX_RATIO || box.h < MIN_BOX_RATIO) { continue; }
+        box.score = score;
+        box.src = 'blazeface';
+        found.push(box);
       }
     }
-    components.push({ minX: minX, minY: minY, maxX: maxX, maxY: maxY, area: area });
   }
-  return components;
+  return suppress(found);
 }
 
-export function detectFacesSkin(buf) {
-  const w = buf.w, h = buf.h, d = buf.data;
-  const total = w * h;
-  const raw = new Uint8Array(total);
-  let skinCount = 0;
-  for (let i = 0; i < total; i++) {
-    const p = i * 4;
-    if (isSkinPixel(d[p], d[p + 1], d[p + 2])) { raw[i] = 1; skinCount++; }
-  }
-  if (skinCount < total * 0.004) { return []; }
-
-  const opened = morph(morph(raw, w, h, 1, false), w, h, 1, true);
-  const closed = morph(morph(opened, w, h, 2, true), w, h, 2, false);
-
-  const components = labelComponents(closed, w, h);
-  const candidates = [];
-  for (let c = 0; c < components.length; c++) {
-    const comp = components[c];
-    const bw = comp.maxX - comp.minX + 1;
-    const bh = comp.maxY - comp.minY + 1;
-    if (bw < 4 || bh < 4) { continue; }
-    const areaRatio = comp.area / total;
-    if (areaRatio < 0.0035 || areaRatio > 0.35) { continue; }
-    const aspect = bw / bh;
-    if (aspect < 0.40 || aspect > 2.2) { continue; }
-    const fill = comp.area / (bw * bh);
-    if (fill < 0.42) { continue; }
-
-    const fillScore = clamp01((fill - 0.42) / 0.36);
-    const aspectLog = Math.log(aspect / 0.78);
-    const aspectScore = Math.exp(-(aspectLog * aspectLog) / 0.18);
-    const centerY = (comp.minY + comp.maxY) * 0.5 / h;
-    const positionScore = clamp01(1.18 - centerY);
-    const sizeLog = Math.log(areaRatio / 0.035);
-    const sizeScore = Math.exp(-(sizeLog * sizeLog) / 1.8);
-    const score = 0.36 * fillScore + 0.30 * aspectScore + 0.16 * positionScore + 0.18 * sizeScore;
-    if (score < MIN_FACE_SCORE) { continue; }
-
-    candidates.push({
-      x: comp.minX / w,
-      y: comp.minY / h,
-      w: bw / w,
-      h: bh / h,
-      score: score,
-      src: 'skin'
-    });
-  }
-  return suppress(candidates, NMS_IOU);
-}
-
-async function detectFacesNative(source, srcW, srcH) {
-  if (typeof window === 'undefined' || typeof window.FaceDetector !== 'function') { return null; }
-  if (!srcW || !srcH) { return null; }
-  try {
-    const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: MAX_FACES + 1 });
-    const found = await detector.detect(source);
-    if (!found || found.length === 0) { return null; }
-    const out = [];
-    for (let i = 0; i < found.length; i++) {
-      const box = found[i].boundingBox;
-      if (!box || box.width <= 0 || box.height <= 0) { continue; }
-      const rect = {
-        x: clamp01(box.x / srcW),
-        y: clamp01(box.y / srcH),
-        w: Math.min(1, box.width / srcW),
-        h: Math.min(1, box.height / srcH),
-        score: 1,
-        src: 'native'
-      };
-      if (rect.x + rect.w > 1) { rect.w = 1 - rect.x; }
-      if (rect.y + rect.h > 1) { rect.h = 1 - rect.y; }
-      if (rect.w > 0.005 && rect.h > 0.005) { out.push(rect); }
-    }
-    if (out.length === 0) { return null; }
-    out.sort(function (a, b) { return (b.w * b.h) - (a.w * a.h); });
-    return out.slice(0, MAX_FACES);
-  } catch (e) {
-    return null;
-  }
-}
-
-export async function detectFaces(source, buf) {
-  const srcW = source ? (source.naturalWidth || source.width || 0) : 0;
-  const srcH = source ? (source.naturalHeight || source.height || 0) : 0;
-  const native = await detectFacesNative(source, srcW, srcH);
-  if (native && native.length > 0) { return native; }
-  if (!buf) { return []; }
-  return detectFacesSkin(buf);
-}
-
-export function remapFaces(faces, crop, srcW, srcH) {
+function remapFaces(faces, crop, srcW, srcH) {
   const out = [];
   if (!faces || !crop || crop.w <= 0 || crop.h <= 0) { return out; }
   for (let i = 0; i < faces.length; i++) {
@@ -232,3 +202,6 @@ export function remapFaces(faces, crop, srcW, srcH) {
   }
   return out;
 }
+
+Object.assign(PF, { detectFaces, remapFaces });
+})(window.PF = window.PF || {});

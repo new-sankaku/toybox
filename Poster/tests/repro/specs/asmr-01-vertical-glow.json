@@ -1,0 +1,147 @@
+{
+  "W": 112,
+  "H": 410,
+  "items": [
+    {
+      "text": "お泊りデート",
+      "fontCss": "\"HGSSoeiKakugothicUB\",\"Noto Sans JP\",sans-serif",
+      "weight": "900",
+      "startSize": 88,
+      "rect": {
+        "x": -0.168,
+        "y": -0.0713,
+        "w": 1.3,
+        "h": 1.15
+      },
+      "slot": {
+        "align": "center",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": -0.211,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                255,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "glow": [
+          {
+            "rgb": [
+              140,
+              120,
+              232
+            ],
+            "alpha": 0.65,
+            "blur": 0.4,
+            "passes": 2
+          },
+          {
+            "rgb": [
+              210,
+              225,
+              255
+            ],
+            "alpha": 0.5,
+            "blur": 0.07,
+            "passes": 1
+          }
+        ],
+        "strokes": [],
+        "transform": {
+          "rotate": 0.06
+        },
+        "distort": {
+          "perGlyph": [
+            {
+              "i": 0,
+              "s": 0.81
+            },
+            {
+              "i": 1,
+              "s": 1.1,
+              "dx": 0.052
+            },
+            {
+              "i": 2,
+              "s": 0.82,
+              "dx": 0.15
+            },
+            {
+              "i": 3,
+              "s": 0.99,
+              "dx": 0.1
+            },
+            {
+              "i": 4,
+              "s": 0.67,
+              "sy": 1.5,
+              "dx": 0.209
+            },
+            {
+              "i": 5,
+              "s": 0.77
+            }
+          ],
+          "seed": 1
+        }
+      }
+    },
+    {
+      "text": "とま",
+      "fontCss": "\"Noto Sans JP\",sans-serif",
+      "weight": "500",
+      "startSize": 30,
+      "rect": {
+        "x": 0.647,
+        "y": 0.105,
+        "w": 0.5,
+        "h": 0.4
+      },
+      "slot": {
+        "align": "center",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "tag"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                246,
+                120,
+                165
+              ]
+            }
+          ]
+        },
+        "glow": [
+          {
+            "rgb": [
+              246,
+              120,
+              165
+            ],
+            "alpha": 0.35,
+            "blur": 0.12,
+            "passes": 1
+          }
+        ],
+        "strokes": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,188 @@
+{
+  "W": 308,
+  "H": 142,
+  "items": [
+    {
+      "text": "るみなす",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "400",
+      "startSize": 87,
+      "rect": {
+        "x": -0.4673,
+        "y": -0.614,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.126,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "alpha": 0.55,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                150,
+                181,
+                207
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.046,
+            "rgb": [
+              150,
+              181,
+              207
+            ],
+            "alpha": 0.55,
+            "align": "outside"
+          }
+        ],
+        "glow": [
+          {
+            "rgb": [
+              150,
+              180,
+              208
+            ],
+            "alpha": 0.55,
+            "blur": 0.34,
+            "passes": 2
+          }
+        ],
+        "distort": {
+          "perGlyph": [
+            {
+              "i": 0,
+              "s": 1.1,
+              "sy": 1.11,
+              "dy": 0.035,
+              "dx": 0.023,
+              "kern": 0.09
+            },
+            {
+              "i": 1,
+              "s": 0.88,
+              "sy": 1.155,
+              "dy": 0.034,
+              "kern": 0.126
+            },
+            {
+              "i": 2,
+              "s": 0.89,
+              "sy": 1.07,
+              "dy": 0.011,
+              "kern": 0.095
+            },
+            {
+              "i": 3,
+              "s": 1.0,
+              "sy": 1.16,
+              "dy": 0.012
+            }
+          ]
+        },
+        "underline": {
+          "rgb": [
+            246,
+            253,
+            255
+          ],
+          "alpha": 1,
+          "width": 0.05,
+          "gap": 0.1,
+          "angle": -0.125,
+          "extend": 0.15,
+          "taper": 0.75,
+          "shift": 0,
+          "border": {
+            "rgb": [
+              150,
+              181,
+              207
+            ],
+            "width": 0.028,
+            "alpha": 0.6
+          }
+        }
+      }
+    },
+    {
+      "text": "るみなす",
+      "fontCss": "\"HGMaruGothicMPRO\",sans-serif",
+      "weight": "400",
+      "startSize": 87,
+      "rect": {
+        "x": -0.4673,
+        "y": -0.614,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": -0.126,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                250,
+                255,
+                255
+              ]
+            }
+          ]
+        },
+        "strokes": [],
+        "distort": {
+          "perGlyph": [
+            {
+              "i": 0,
+              "s": 1.1,
+              "sy": 1.11,
+              "dy": 0.035,
+              "dx": 0.023,
+              "kern": 0.09
+            },
+            {
+              "i": 1,
+              "s": 0.88,
+              "sy": 1.155,
+              "dy": 0.034,
+              "kern": 0.126
+            },
+            {
+              "i": 2,
+              "s": 0.89,
+              "sy": 1.07,
+              "dy": 0.011,
+              "kern": 0.095
+            },
+            {
+              "i": 3,
+              "s": 1.0,
+              "sy": 1.16,
+              "dy": 0.012
+            }
+          ]
+        },
+        "erode": {
+          "width": 0.0172
+        }
+      }
+    }
+  ]
+}

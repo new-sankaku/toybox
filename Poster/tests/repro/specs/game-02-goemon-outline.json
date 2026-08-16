@@ -1,0 +1,74 @@
+{
+  "W": 132,
+  "H": 310,
+  "items": [
+    {
+      "text": "ゴエモン",
+      "fontCss": "\"HGSSoeiKakupoptai\",\"HGSSoeiKakugothicUB\",sans-serif",
+      "weight": "400",
+      "startSize": 72,
+      "rect": {
+        "x": -0.5,
+        "y": -0.4694,
+        "w": 2.0,
+        "h": 2.0
+      },
+      "slot": {
+        "align": "center",
+        "vertical": true,
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                230,
+                1,
+                34
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.133,
+            "rgb": [
+              255,
+              255,
+              255
+            ],
+            "alpha": 1,
+            "isotropic": true
+          },
+          {
+            "width": 0.048,
+            "rgb": [
+              230,
+              1,
+              34
+            ],
+            "alpha": 1,
+            "isotropic": true
+          }
+        ],
+        "dropShadow": {
+          "rgb": [
+            60,
+            45,
+            40
+          ],
+          "alpha": 0.22,
+          "dx": 0.012,
+          "dy": 0.018,
+          "blur": 0.03
+        },
+        "glyphScaleX": 1.35
+      }
+    }
+  ]
+}

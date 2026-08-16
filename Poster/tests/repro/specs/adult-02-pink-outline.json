@@ -1,0 +1,74 @@
+{
+  "W": 1030,
+  "H": 156,
+  "items": [
+    {
+      "text": "生★中出しSEX!",
+      "fontCss": "\"HGSSoeiKakugothicUB\",\"MS PGothic\",sans-serif",
+      "weight": "400",
+      "startSize": 147,
+      "rect": {
+        "x": -0.4985,
+        "y": -0.329,
+        "w": 2.0,
+        "h": 1.6
+      },
+      "slot": {
+        "align": "center",
+        "maxLines": 1,
+        "tracking": 0,
+        "decor": "title"
+      },
+      "spec": {
+        "fill": {
+          "type": "solid",
+          "angle": 0,
+          "stops": [
+            {
+              "t": 0,
+              "rgb": [
+                248,
+                245,
+                0
+              ]
+            },
+            {
+              "t": 1,
+              "rgb": [
+                248,
+                245,
+                0
+              ]
+            }
+          ]
+        },
+        "strokes": [
+          {
+            "width": 0.063,
+            "rgb": [
+              227,
+              0,
+              129
+            ],
+            "alpha": 1,
+            "align": "outside"
+          },
+          {
+            "width": 0.026,
+            "rgb": [
+              248,
+              245,
+              0
+            ],
+            "alpha": 1
+          }
+        ],
+        "transform": {
+          "skewX": 0,
+          "rotate": 0,
+          "scaleX": 0.975
+        }
+      }
+    }
+  ]
+}

@@ -1,4 +1,6 @@
-import { hexToRgb, rgbToCss, shade } from '../core/color.js';
+(function (PF) {
+'use strict';
+const { hexToRgb, rgbToCss, shade } = PF;
 
 function scratch(w, h) {
   const c = document.createElement('canvas');
@@ -285,7 +287,7 @@ function drawLightLeak(ctx, W, H, rng, theme) {
   ctx.restore();
 }
 
-export const OVERLAY_FUNCS = {
+const OVERLAY_FUNCS = {
   grain: drawGrain,
   vignette: drawVignette,
   scanline: drawScanline,
@@ -301,3 +303,6 @@ export const OVERLAY_FUNCS = {
   inkBleed: drawInkBleed,
   lightLeak: drawLightLeak
 };
+
+Object.assign(PF, { OVERLAY_FUNCS });
+})(window.PF = window.PF || {});
