@@ -1,0 +1,1817 @@
+{
+ "summary": {
+  "measured_on": "2026-08-12",
+  "n_items": 172,
+  "n_keywords": 22,
+  "参入年次s": [
+   {
+    "label": "参入3年以内",
+    "n": 23,
+    "installs_per_month": {
+     "p25": 6.3,
+     "p50": 36.2,
+     "p75": 90.8
+    }
+   },
+   {
+    "label": "3〜6年",
+    "n": 27,
+    "installs_per_month": {
+     "p25": 5.9,
+     "p50": 38.1,
+     "p75": 106.4
+    }
+   },
+   {
+    "label": "6〜10年",
+    "n": 61,
+    "installs_per_month": {
+     "p25": 10.4,
+     "p50": 52.6,
+     "p75": 312.8
+    }
+   },
+   {
+    "label": "10年超",
+    "n": 61,
+    "installs_per_month": {
+     "p25": 22.8,
+     "p50": 171.0,
+     "p75": 1295.1
+    }
+   }
+  ],
+  "gate_condition_A": {
+   "definition": "上位N件に、直近3年に登録された掲載が1件以上あるか",
+   "passed": [
+    "appointment scheduling",
+    "approval workflow",
+    "booking calendar",
+    "document management",
+    "expense report",
+    "helpdesk",
+    "inventory management",
+    "payroll",
+    "quotation",
+    "recruitment",
+    "shipping",
+    "subscription billing",
+    "tax calculation"
+   ],
+   "failed": [
+    "accounting",
+    "asset management",
+    "compliance audit",
+    "contract management",
+    "crm",
+    "digital signature",
+    "invoice",
+    "purchase order",
+    "timesheet"
+   ]
+  },
+  "best_newcomer_rate": {
+   "appointment scheduling": 804.2,
+   "approval workflow": 16.3,
+   "booking calendar": 1063.1,
+   "document management": 86.3,
+   "expense report": 42.3,
+   "helpdesk": 905.1,
+   "inventory management": 42.3,
+   "payroll": 9.9,
+   "quotation": 2.1,
+   "recruitment": 10.4,
+   "shipping": 2867.8,
+   "subscription billing": 36.2,
+   "tax calculation": 1211.1
+  },
+  "failures": [],
+  "params": {
+   "top": 8,
+   "min_age_months": 6.0,
+   "keywords_file": "config/keywords_business.txt"
+  }
+ },
+ "items": [
+  {
+   "keyword": "invoice",
+   "rank": 1,
+   "slug": "woocommerce-pdf-invoices-packing-slips",
+   "hits": 1518,
+   "age_months": 150.8,
+   "active_installs": 300000,
+   "installs_per_month": 1989.5424836601308,
+   "months_since_update": 1.0
+  },
+  {
+   "keyword": "invoice",
+   "rank": 2,
+   "slug": "woocommerce-delivery-notes",
+   "hits": 1518,
+   "age_months": 175.4,
+   "active_installs": 30000,
+   "installs_per_month": 171.0432665293126,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "invoice",
+   "rank": 3,
+   "slug": "pepro-ultimate-invoice",
+   "hits": 1518,
+   "age_months": 73.0,
+   "active_installs": 5000,
+   "installs_per_month": 68.5276902296263,
+   "months_since_update": 5.2
+  },
+  {
+   "keyword": "invoice",
+   "rank": 4,
+   "slug": "wc-invoice-gateway",
+   "hits": 1518,
+   "age_months": 118.0,
+   "active_installs": 2000,
+   "installs_per_month": 16.948775055679288,
+   "months_since_update": 2.8
+  },
+  {
+   "keyword": "invoice",
+   "rank": 5,
+   "slug": "sliced-invoices",
+   "hits": 1518,
+   "age_months": 127.7,
+   "active_installs": 5000,
+   "installs_per_month": 39.16623777663407,
+   "months_since_update": 8.0
+  },
+  {
+   "keyword": "invoice",
+   "rank": 6,
+   "slug": "print-invoices-packing-slip-labels-for-woocommerce",
+   "hits": 1518,
+   "age_months": 121.9,
+   "active_installs": 50000,
+   "installs_per_month": 410.2425876010782,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "invoice",
+   "rank": 7,
+   "slug": "easy-invoice",
+   "hits": 1518,
+   "age_months": 45.7,
+   "active_installs": 600,
+   "installs_per_month": 13.120689655172415,
+   "months_since_update": 1.3
+  },
+  {
+   "keyword": "invoice",
+   "rank": 8,
+   "slug": "flexible-invoices",
+   "hits": 1518,
+   "age_months": 119.6,
+   "active_installs": 6000,
+   "installs_per_month": 50.1620433946718,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 1,
+   "slug": "booking",
+   "hits": 721,
+   "age_months": 203.9,
+   "active_installs": 50000,
+   "installs_per_month": 245.24653561069934,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 2,
+   "slug": "wp-simple-booking-calendar",
+   "hits": 721,
+   "age_months": 180.0,
+   "active_installs": 20000,
+   "installs_per_month": 111.0948905109489,
+   "months_since_update": 1.4
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 3,
+   "slug": "eventprime-event-calendar-management",
+   "hits": 721,
+   "age_months": 89.4,
+   "active_installs": 7000,
+   "installs_per_month": 78.28067597354887,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 4,
+   "slug": "events-manager",
+   "hits": 721,
+   "age_months": 216.2,
+   "active_installs": 70000,
+   "installs_per_month": 323.82978723404256,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 5,
+   "slug": "wp-booking-system",
+   "hits": 721,
+   "age_months": 149.2,
+   "active_installs": 10000,
+   "installs_per_month": 67.00418225841955,
+   "months_since_update": 1.4
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 6,
+   "slug": "ameliabooking",
+   "hits": 721,
+   "age_months": 92.0,
+   "active_installs": 90000,
+   "installs_per_month": 978.0792574080685,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 7,
+   "slug": "simplybook",
+   "hits": 721,
+   "age_months": 28.2,
+   "active_installs": 30000,
+   "installs_per_month": 1063.0966239813738,
+   "months_since_update": 2.8
+  },
+  {
+   "keyword": "booking calendar",
+   "rank": 8,
+   "slug": "appointment-hour-booking",
+   "hits": 721,
+   "age_months": 104.1,
+   "active_installs": 10000,
+   "installs_per_month": 96.08585858585859,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 1,
+   "slug": "simply-schedule-appointments",
+   "hits": 332,
+   "age_months": 98.7,
+   "active_installs": 60000,
+   "installs_per_month": 608.1918081918083,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 2,
+   "slug": "ameliabooking",
+   "hits": 332,
+   "age_months": 92.0,
+   "active_installs": 90000,
+   "installs_per_month": 978.0792574080685,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 3,
+   "slug": "supersaas-appointment-scheduling",
+   "hits": 332,
+   "age_months": 193.7,
+   "active_installs": 1000,
+   "installs_per_month": 5.161946752586061,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 4,
+   "slug": "fluent-booking",
+   "hits": 332,
+   "age_months": 24.9,
+   "active_installs": 20000,
+   "installs_per_month": 804.2272126816381,
+   "months_since_update": 1.6
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 5,
+   "slug": "bookly-responsive-appointment-booking-tool",
+   "hits": 332,
+   "age_months": 142.0,
+   "active_installs": 60000,
+   "installs_per_month": 422.3866790009251,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 6,
+   "slug": "hydra-booking",
+   "hits": 332,
+   "age_months": 21.0,
+   "active_installs": 2000,
+   "installs_per_month": 95.27386541471049,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 7,
+   "slug": "motopress-appointment-lite",
+   "hits": 332,
+   "age_months": 54.5,
+   "active_installs": 2000,
+   "installs_per_month": 36.69680530440024,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "appointment scheduling",
+   "rank": 8,
+   "slug": "timetics",
+   "hits": 332,
+   "age_months": 42.4,
+   "active_installs": 2000,
+   "installs_per_month": 47.1937984496124,
+   "months_since_update": 0.6
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 1,
+   "slug": "brikpanel-admin-panel-dashboard-for-woocommerce",
+   "hits": 729,
+   "age_months": 16.6,
+   "active_installs": 700,
+   "installs_per_month": 42.27777777777778,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 2,
+   "slug": "atum-stock-manager-for-woocommerce",
+   "hits": 729,
+   "age_months": 115.2,
+   "active_installs": 10000,
+   "installs_per_month": 86.82258984597833,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 3,
+   "slug": "woocommerce-product-stock-alert",
+   "hits": 729,
+   "age_months": 134.7,
+   "active_installs": 2000,
+   "installs_per_month": 14.852403025128082,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 4,
+   "slug": "wp-inventory-manager",
+   "hits": 729,
+   "age_months": 131.3,
+   "active_installs": 1000,
+   "installs_per_month": 7.613806903451727,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 5,
+   "slug": "multi-location-product-and-inventory-management",
+   "hits": 729,
+   "age_months": 12.6,
+   "active_installs": 100,
+   "installs_per_month": 7.906493506493507,
+   "months_since_update": 1.6
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 6,
+   "slug": "eventprime-event-calendar-management",
+   "hits": 729,
+   "age_months": 89.4,
+   "active_installs": 7000,
+   "installs_per_month": 78.28067597354887,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 7,
+   "slug": "shelf-planner",
+   "hits": 729,
+   "age_months": 57.9,
+   "active_installs": 100,
+   "installs_per_month": 1.7275822928490352,
+   "months_since_update": 1.5
+  },
+  {
+   "keyword": "inventory management",
+   "rank": 8,
+   "slug": "wpc-badge-management",
+   "hits": 729,
+   "age_months": 52.4,
+   "active_installs": 2000,
+   "installs_per_month": 38.145363408521305,
+   "months_since_update": 1.3
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 1,
+   "slug": "timesheet",
+   "hits": 16,
+   "age_months": 121.9,
+   "active_installs": 70,
+   "installs_per_month": 0.5743396226415094,
+   "months_since_update": 14.1
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 2,
+   "slug": "user-login-history",
+   "hits": 16,
+   "age_months": 123.2,
+   "active_installs": 10000,
+   "installs_per_month": 81.19498532942119,
+   "months_since_update": 4.9
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 3,
+   "slug": "dynamic-time",
+   "hits": 16,
+   "age_months": 113.3,
+   "active_installs": 200,
+   "installs_per_month": 1.7646376811594204,
+   "months_since_update": 2.6
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 4,
+   "slug": "happyforms",
+   "hits": 16,
+   "age_months": 102.1,
+   "active_installs": 20000,
+   "installs_per_month": 195.88159588159587,
+   "months_since_update": 1.0
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 5,
+   "slug": "ndizi-project-management",
+   "hits": 16,
+   "age_months": 187.8,
+   "active_installs": 10,
+   "installs_per_month": 0.05323539699195523,
+   "months_since_update": 0.4
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 6,
+   "slug": "gravity-signature-forms-add-on",
+   "hits": 16,
+   "age_months": 131.0,
+   "active_installs": 1000,
+   "installs_per_month": 7.630985209325646,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 7,
+   "slug": "wp-forms-signature-contract-add-on",
+   "hits": 16,
+   "age_months": 115.4,
+   "active_installs": 900,
+   "installs_per_month": 7.7962435970404105,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "timesheet",
+   "rank": 8,
+   "slug": "ninja-signature-contract-forms-add-on",
+   "hits": 16,
+   "age_months": 126.5,
+   "active_installs": 300,
+   "installs_per_month": 2.370716510903427,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "payroll",
+   "rank": 1,
+   "slug": "clockify-lite",
+   "hits": 29,
+   "age_months": 65.3,
+   "active_installs": 90,
+   "installs_per_month": 1.3780684104627767,
+   "months_since_update": 4.5
+  },
+  {
+   "keyword": "payroll",
+   "rank": 2,
+   "slug": "dynamic-time",
+   "hits": 29,
+   "age_months": 113.3,
+   "active_installs": 200,
+   "installs_per_month": 1.7646376811594204,
+   "months_since_update": 2.6
+  },
+  {
+   "keyword": "payroll",
+   "rank": 3,
+   "slug": "netcash-pay-now-payment-gateway-for-woocommerce",
+   "hits": 29,
+   "age_months": 30.4,
+   "active_installs": 300,
+   "installs_per_month": 9.872432432432433,
+   "months_since_update": 1.2
+  },
+  {
+   "keyword": "payroll",
+   "rank": 4,
+   "slug": "hr-management-lite",
+   "hits": 29,
+   "age_months": 81.1,
+   "active_installs": 200,
+   "installs_per_month": 2.46677471636953,
+   "months_since_update": 1.5
+  },
+  {
+   "keyword": "payroll",
+   "rank": 5,
+   "slug": "erp",
+   "hits": 29,
+   "age_months": 124.8,
+   "active_installs": 5000,
+   "installs_per_month": 40.05263157894737,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "payroll",
+   "rank": 6,
+   "slug": "suretriggers",
+   "hits": 29,
+   "age_months": 43.2,
+   "active_installs": 90000,
+   "installs_per_month": 2084.931506849315,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "payroll",
+   "rank": 7,
+   "slug": "content-writer",
+   "hits": 29,
+   "age_months": 106.0,
+   "active_installs": 200,
+   "installs_per_month": 1.8871667699938004,
+   "months_since_update": 9.9
+  },
+  {
+   "keyword": "payroll",
+   "rank": 8,
+   "slug": "pay-check-mate",
+   "hits": 29,
+   "age_months": 31.5,
+   "active_installs": 20,
+   "installs_per_month": 0.6341666666666667,
+   "months_since_update": 17.3
+  },
+  {
+   "keyword": "crm",
+   "rank": 1,
+   "slug": "fluent-crm",
+   "hits": 1305,
+   "age_months": 70.4,
+   "active_installs": 80000,
+   "installs_per_month": 1136.3509099393375,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "crm",
+   "rank": 2,
+   "slug": "zero-bs-crm",
+   "hits": 1305,
+   "age_months": 121.3,
+   "active_installs": 30000,
+   "installs_per_month": 247.41262530479545,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "crm",
+   "rank": 3,
+   "slug": "jetpack",
+   "hits": 1305,
+   "age_months": 186.7,
+   "active_installs": 3000000,
+   "installs_per_month": 16068.977652648251,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "crm",
+   "rank": 4,
+   "slug": "crm-perks-forms",
+   "hits": 1305,
+   "age_months": 95.8,
+   "active_installs": 1000,
+   "installs_per_month": 10.438957475994513,
+   "months_since_update": 1.9
+  },
+  {
+   "keyword": "crm",
+   "rank": 5,
+   "slug": "gf-dynamics-crm",
+   "hits": 1305,
+   "age_months": 87.8,
+   "active_installs": 300,
+   "installs_per_month": 3.4176646706586826,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "crm",
+   "rank": 6,
+   "slug": "zoho-crm-forms",
+   "hits": 1305,
+   "age_months": 104.0,
+   "active_installs": 3000,
+   "installs_per_month": 28.843967150979154,
+   "months_since_update": 2.1
+  },
+  {
+   "keyword": "crm",
+   "rank": 7,
+   "slug": "wp-fusion-lite",
+   "hits": 1305,
+   "age_months": 95.0,
+   "active_installs": 5000,
+   "installs_per_month": 52.60974766678189,
+   "months_since_update": 0.4
+  },
+  {
+   "keyword": "crm",
+   "rank": 8,
+   "slug": "cf7-zoho",
+   "hits": 1305,
+   "age_months": 93.4,
+   "active_installs": 3000,
+   "installs_per_month": 32.132301196340606,
+   "months_since_update": 1.2
+  },
+  {
+   "keyword": "expense report",
+   "rank": 1,
+   "slug": "wp-ever-accounting",
+   "hits": 70,
+   "age_months": 80.6,
+   "active_installs": 1000,
+   "installs_per_month": 12.414355628058727,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "expense report",
+   "rank": 2,
+   "slug": "brikpanel-admin-panel-dashboard-for-woocommerce",
+   "hits": 70,
+   "age_months": 16.6,
+   "active_installs": 700,
+   "installs_per_month": 42.27777777777778,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "expense report",
+   "rank": 3,
+   "slug": "computer-repair-shop",
+   "hits": 70,
+   "age_months": 125.5,
+   "active_installs": 400,
+   "installs_per_month": 3.187434554973822,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "expense report",
+   "rank": 4,
+   "slug": "alpha-insights-sales-report-builder-analytics-for-woocommerce",
+   "hits": 70,
+   "age_months": 6.4,
+   "active_installs": 40,
+   "installs_per_month": 6.2441025641025645,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "expense report",
+   "rank": 5,
+   "slug": "erp",
+   "hits": 70,
+   "age_months": 124.8,
+   "active_installs": 5000,
+   "installs_per_month": 40.05263157894737,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "expense report",
+   "rank": 6,
+   "slug": "wc-gateway-greeninvoice",
+   "hits": 70,
+   "age_months": 72.2,
+   "active_installs": 1000,
+   "installs_per_month": 13.855257168866636,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "expense report",
+   "rank": 7,
+   "slug": "happyforms",
+   "hits": 70,
+   "age_months": 102.1,
+   "active_installs": 20000,
+   "installs_per_month": 195.88159588159587,
+   "months_since_update": 1.0
+  },
+  {
+   "keyword": "expense report",
+   "rank": 8,
+   "slug": "cost-of-goods-for-woocommerce",
+   "hits": 70,
+   "age_months": 92.2,
+   "active_installs": 9000,
+   "installs_per_month": 97.63364219529579,
+   "months_since_update": 1.0
+  },
+  {
+   "keyword": "contract management",
+   "rank": 1,
+   "slug": "forminator",
+   "hits": 261,
+   "age_months": 95.2,
+   "active_installs": 600000,
+   "installs_per_month": 6300.103483959987,
+   "months_since_update": 0.4
+  },
+  {
+   "keyword": "contract management",
+   "rank": 2,
+   "slug": "woocommerce-germanized",
+   "hits": 261,
+   "age_months": 141.4,
+   "active_installs": 70000,
+   "installs_per_month": 495.1894027422728,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "contract management",
+   "rank": 3,
+   "slug": "events-manager",
+   "hits": 261,
+   "age_months": 216.2,
+   "active_installs": 70000,
+   "installs_per_month": 323.82978723404256,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "contract management",
+   "rank": 5,
+   "slug": "everest-forms",
+   "hits": 261,
+   "age_months": 102.3,
+   "active_installs": 90000,
+   "installs_per_month": 880.051397365885,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "contract management",
+   "rank": 6,
+   "slug": "projectopia-core",
+   "hits": 261,
+   "age_months": 57.7,
+   "active_installs": 200,
+   "installs_per_month": 3.468945868945869,
+   "months_since_update": 1.7
+  },
+  {
+   "keyword": "contract management",
+   "rank": 7,
+   "slug": "mobile-dj-manager",
+   "hits": 261,
+   "age_months": 142.2,
+   "active_installs": 50,
+   "installs_per_month": 0.35158235158235157,
+   "months_since_update": 0.8
+  },
+  {
+   "keyword": "contract management",
+   "rank": 8,
+   "slug": "shelf-planner",
+   "hits": 261,
+   "age_months": 57.9,
+   "active_installs": 100,
+   "installs_per_month": 1.7275822928490352,
+   "months_since_update": 1.5
+  },
+  {
+   "keyword": "quotation",
+   "rank": 1,
+   "slug": "product-quotation-for-woocommerce",
+   "hits": 296,
+   "age_months": 67.6,
+   "active_installs": 100,
+   "installs_per_month": 1.4798249878463783,
+   "months_since_update": 2.1
+  },
+  {
+   "keyword": "quotation",
+   "rank": 2,
+   "slug": "quotes-for-woocommerce",
+   "hits": 296,
+   "age_months": 107.4,
+   "active_installs": 4000,
+   "installs_per_month": 37.23547400611621,
+   "months_since_update": 1.9
+  },
+  {
+   "keyword": "quotation",
+   "rank": 3,
+   "slug": "product-enquiry-for-woocommerce",
+   "hits": 296,
+   "age_months": 161.9,
+   "active_installs": 10000,
+   "installs_per_month": 61.76948051948052,
+   "months_since_update": 1.7
+  },
+  {
+   "keyword": "quotation",
+   "rank": 4,
+   "slug": "get-a-quote-button-for-woocommerce",
+   "hits": 296,
+   "age_months": 78.3,
+   "active_installs": 6000,
+   "installs_per_month": 76.61073825503355,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "quotation",
+   "rank": 5,
+   "slug": "yith-woocommerce-wishlist",
+   "hits": 296,
+   "age_months": 158.4,
+   "active_installs": 400000,
+   "installs_per_month": 2524.569769852789,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "quotation",
+   "rank": 6,
+   "slug": "enquiry-quotation-for-woocommerce",
+   "hits": 296,
+   "age_months": 86.4,
+   "active_installs": 1000,
+   "installs_per_month": 11.574144486692015,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "quotation",
+   "rank": 7,
+   "slug": "convertcalculator",
+   "hits": 296,
+   "age_months": 83.0,
+   "active_installs": 800,
+   "installs_per_month": 9.644356435643566,
+   "months_since_update": 14.0
+  },
+  {
+   "keyword": "quotation",
+   "rank": 8,
+   "slug": "invoize",
+   "hits": 296,
+   "age_months": 9.7,
+   "active_installs": 20,
+   "installs_per_month": 2.0707482993197277,
+   "months_since_update": 1.6
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 1,
+   "slug": "gazchaps-woocommerce-purchase-order-payment-gateway",
+   "hits": 2848,
+   "age_months": 101.6,
+   "active_installs": 200,
+   "installs_per_month": 1.9676793794440854,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 2,
+   "slug": "purchase-orders-for-woocommerce",
+   "hits": 2848,
+   "age_months": 106.7,
+   "active_installs": 1000,
+   "installs_per_month": 9.37192118226601,
+   "months_since_update": 9.0
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 3,
+   "slug": "klarna-order-management-for-woocommerce",
+   "hits": 2848,
+   "age_months": 104.0,
+   "active_installs": 10000,
+   "installs_per_month": 96.17693522906794,
+   "months_since_update": 5.6
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 4,
+   "slug": "oneclick-whatsapp-order",
+   "hits": 2848,
+   "age_months": 90.2,
+   "active_installs": 40000,
+   "installs_per_month": 443.57012750455374,
+   "months_since_update": 2.6
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 6,
+   "slug": "mailpoet",
+   "hits": 2848,
+   "age_months": 117.4,
+   "active_installs": 500000,
+   "installs_per_month": 4257.342657342658,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 7,
+   "slug": "minimum-purchase-amount-for-woo-cart",
+   "hits": 2848,
+   "age_months": 70.9,
+   "active_installs": 5000,
+   "installs_per_month": 70.52826691380909,
+   "months_since_update": 7.6
+  },
+  {
+   "keyword": "purchase order",
+   "rank": 8,
+   "slug": "wp-reviews-plugin-for-google",
+   "hits": 2848,
+   "age_months": 80.9,
+   "active_installs": 900000,
+   "installs_per_month": 11118.506493506493,
+   "months_since_update": 1.6
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 1,
+   "slug": "order-approval-woocommerce",
+   "hits": 415,
+   "age_months": 75.1,
+   "active_installs": 1000,
+   "installs_per_month": 13.315835520559931,
+   "months_since_update": 1.2
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 2,
+   "slug": "wordpress-seo",
+   "hits": 415,
+   "age_months": 190.0,
+   "active_installs": 10000000,
+   "installs_per_month": 52627.93914246197,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 3,
+   "slug": "user-approval-manager",
+   "hits": 415,
+   "age_months": 6.1,
+   "active_installs": 100,
+   "installs_per_month": 16.27807486631016,
+   "months_since_update": 2.2
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 4,
+   "slug": "content-approval-workflow",
+   "hits": 415,
+   "age_months": 30.6,
+   "active_installs": 70,
+   "installs_per_month": 2.2887218045112783,
+   "months_since_update": 17.5
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 5,
+   "slug": "ai-workflow-automation-lite",
+   "hits": 415,
+   "age_months": 22.2,
+   "active_installs": 80,
+   "installs_per_month": 3.607703703703704,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 6,
+   "slug": "publishpress-checklists",
+   "hits": 415,
+   "age_months": 80.3,
+   "active_installs": 3000,
+   "installs_per_month": 37.364975450081836,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 7,
+   "slug": "ai-engine",
+   "hits": 415,
+   "age_months": 43.5,
+   "active_installs": 100000,
+   "installs_per_month": 2299.093655589124,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "approval workflow",
+   "rank": 8,
+   "slug": "easy-file-upload-approval",
+   "hits": 415,
+   "age_months": 7.9,
+   "active_installs": 50,
+   "installs_per_month": 6.368200836820084,
+   "months_since_update": 1.4
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 1,
+   "slug": "digital-signature-for-contact-form-7",
+   "hits": 243,
+   "age_months": 51.1,
+   "active_installs": 5000,
+   "installs_per_month": 97.87781350482315,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 2,
+   "slug": "woocommerce-digital-signature",
+   "hits": 243,
+   "age_months": 133.8,
+   "active_installs": 1000,
+   "installs_per_month": 7.473606678124233,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 3,
+   "slug": "digital-signature-checkout-for-woocommerce",
+   "hits": 243,
+   "age_months": 45.5,
+   "active_installs": 200,
+   "installs_per_month": 4.398843930635838,
+   "months_since_update": 1.4
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 4,
+   "slug": "gravity-signature-forms-add-on",
+   "hits": 243,
+   "age_months": 131.0,
+   "active_installs": 1000,
+   "installs_per_month": 7.630985209325646,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 5,
+   "slug": "digital-signature-contact-form-7-addon",
+   "hits": 243,
+   "age_months": 113.2,
+   "active_installs": 300,
+   "installs_per_month": 2.650798258345428,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 6,
+   "slug": "wp-forms-signature-contract-add-on",
+   "hits": 243,
+   "age_months": 115.4,
+   "active_installs": 900,
+   "installs_per_month": 7.7962435970404105,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 7,
+   "slug": "edd-digital-signature-add-on",
+   "hits": 243,
+   "age_months": 131.8,
+   "active_installs": 80,
+   "installs_per_month": 0.6068278096187392,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "digital signature",
+   "rank": 8,
+   "slug": "wordpress-seo",
+   "hits": 243,
+   "age_months": 190.0,
+   "active_installs": 10000000,
+   "installs_per_month": 52627.93914246197,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 1,
+   "slug": "woocommerce",
+   "hits": 515,
+   "age_months": 178.5,
+   "active_installs": 7000000,
+   "installs_per_month": 39219.58402355973,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 2,
+   "slug": "woocommerce-services",
+   "hits": 515,
+   "age_months": 114.4,
+   "active_installs": 500000,
+   "installs_per_month": 4369.796152741889,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 3,
+   "slug": "forminator",
+   "hits": 515,
+   "age_months": 95.2,
+   "active_installs": 600000,
+   "installs_per_month": 6300.103483959987,
+   "months_since_update": 0.4
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 4,
+   "slug": "tax-switch-for-woocommerce",
+   "hits": 515,
+   "age_months": 22.6,
+   "active_installs": 900,
+   "installs_per_month": 39.81976744186046,
+   "months_since_update": 1.0
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 5,
+   "slug": "woocommerce-germanized",
+   "hits": 515,
+   "age_months": 141.4,
+   "active_installs": 70000,
+   "installs_per_month": 495.1894027422728,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 6,
+   "slug": "stripe-tax-for-woocommerce",
+   "hits": 515,
+   "age_months": 24.8,
+   "active_installs": 30000,
+   "installs_per_month": 1211.1405835543767,
+   "months_since_update": 1.2
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 7,
+   "slug": "nextgen-gallery",
+   "hits": 515,
+   "age_months": 231.6,
+   "active_installs": 300000,
+   "installs_per_month": 1295.1354417813077,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "tax calculation",
+   "rank": 8,
+   "slug": "calculation-for-contact-form-7",
+   "hits": 515,
+   "age_months": 50.8,
+   "active_installs": 1000,
+   "installs_per_month": 19.689521345407503,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "accounting",
+   "rank": 1,
+   "slug": "wp-ever-accounting",
+   "hits": 430,
+   "age_months": 80.6,
+   "active_installs": 1000,
+   "installs_per_month": 12.414355628058727,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "accounting",
+   "rank": 2,
+   "slug": "woo-accounting-report",
+   "hits": 430,
+   "age_months": 90.6,
+   "active_installs": 900,
+   "installs_per_month": 9.936887921653971,
+   "months_since_update": 2.5
+  },
+  {
+   "keyword": "accounting",
+   "rank": 3,
+   "slug": "accounting-for-woocommerce",
+   "hits": 430,
+   "age_months": 66.9,
+   "active_installs": 500,
+   "installs_per_month": 7.475442043222005,
+   "months_since_update": 2.3
+  },
+  {
+   "keyword": "accounting",
+   "rank": 4,
+   "slug": "erp",
+   "hits": 430,
+   "age_months": 124.8,
+   "active_installs": 5000,
+   "installs_per_month": 40.05263157894737,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "accounting",
+   "rank": 5,
+   "slug": "hesabfa-accounting",
+   "hits": 430,
+   "age_months": 73.3,
+   "active_installs": 500,
+   "installs_per_month": 6.825112107623318,
+   "months_since_update": 10.4
+  },
+  {
+   "keyword": "accounting",
+   "rank": 6,
+   "slug": "zero-bs-accounting",
+   "hits": 430,
+   "age_months": 63.2,
+   "active_installs": 50,
+   "installs_per_month": 0.7914716588663547,
+   "months_since_update": 8.1
+  },
+  {
+   "keyword": "accounting",
+   "rank": 7,
+   "slug": "wc-donation-platform",
+   "hits": 430,
+   "age_months": 58.1,
+   "active_installs": 7000,
+   "installs_per_month": 120.52036199095024,
+   "months_since_update": 6.1
+  },
+  {
+   "keyword": "accounting",
+   "rank": 8,
+   "slug": "woo-order-export-lite",
+   "hits": 430,
+   "age_months": 132.1,
+   "active_installs": 100000,
+   "installs_per_month": 757.2139303482587,
+   "months_since_update": 2.1
+  },
+  {
+   "keyword": "shipping",
+   "rank": 1,
+   "slug": "flexible-shipping",
+   "hits": 3606,
+   "age_months": 121.9,
+   "active_installs": 100000,
+   "installs_per_month": 820.2640797628671,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "shipping",
+   "rank": 2,
+   "slug": "woocommerce",
+   "hits": 3606,
+   "age_months": 178.5,
+   "active_installs": 7000000,
+   "installs_per_month": 39219.58402355973,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "shipping",
+   "rank": 3,
+   "slug": "woocommerce-shipping",
+   "hits": 3606,
+   "age_months": 24.4,
+   "active_installs": 70000,
+   "installs_per_month": 2867.833109017497,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "shipping",
+   "rank": 4,
+   "slug": "colissimo-shipping-methods-for-woocommerce",
+   "hits": 3606,
+   "age_months": 77.7,
+   "active_installs": 10000,
+   "installs_per_month": 128.7648054145516,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "shipping",
+   "rank": 5,
+   "slug": "weight-based-shipping-for-woocommerce",
+   "hits": 3606,
+   "age_months": 156.6,
+   "active_installs": 60000,
+   "installs_per_month": 383.21443558539653,
+   "months_since_update": 1.8
+  },
+  {
+   "keyword": "shipping",
+   "rank": 6,
+   "slug": "flexible-shipping-usps",
+   "hits": 3606,
+   "age_months": 57.7,
+   "active_installs": 2000,
+   "installs_per_month": 34.68945868945869,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "shipping",
+   "rank": 7,
+   "slug": "gls-shipping-for-woocommerce",
+   "hits": 3606,
+   "age_months": 25.8,
+   "active_installs": 2000,
+   "installs_per_month": 77.55414012738854,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "shipping",
+   "rank": 8,
+   "slug": "flexible-shipping-ups",
+   "hits": 3606,
+   "age_months": 102.1,
+   "active_installs": 7000,
+   "installs_per_month": 68.58062439652397,
+   "months_since_update": 0.8
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 1,
+   "slug": "subscriptions-for-woocommerce",
+   "hits": 861,
+   "age_months": 64.1,
+   "active_installs": 10000,
+   "installs_per_month": 156.02255253716046,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 2,
+   "slug": "subscription",
+   "hits": 861,
+   "age_months": 53.5,
+   "active_installs": 900,
+   "installs_per_month": 16.82800982800983,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 3,
+   "slug": "flexible-subscriptions",
+   "hits": 861,
+   "age_months": 27.7,
+   "active_installs": 1000,
+   "installs_per_month": 36.1520190023753,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 4,
+   "slug": "user-registration",
+   "hits": 861,
+   "age_months": 109.2,
+   "active_installs": 50000,
+   "installs_per_month": 457.88206979542724,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 5,
+   "slug": "yith-woocommerce-subscription",
+   "hits": 861,
+   "age_months": 128.6,
+   "active_installs": 7000,
+   "installs_per_month": 54.4404701073071,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 6,
+   "slug": "paid-member-subscriptions",
+   "hits": 861,
+   "age_months": 129.2,
+   "active_installs": 10000,
+   "installs_per_month": 77.37671581087952,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 7,
+   "slug": "woocommerce-gateway-stripe",
+   "hits": 861,
+   "age_months": 122.6,
+   "active_installs": 700000,
+   "installs_per_month": 5711.069418386492,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "subscription billing",
+   "rank": 8,
+   "slug": "easy-digital-downloads",
+   "hits": 861,
+   "age_months": 172.0,
+   "active_installs": 40000,
+   "installs_per_month": 232.4995226274585,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 1,
+   "slug": "chatway-live-chat",
+   "hits": 333,
+   "age_months": 33.1,
+   "active_installs": 30000,
+   "installs_per_month": 905.0545094152627,
+   "months_since_update": 0.0
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 2,
+   "slug": "fluent-support",
+   "hits": 333,
+   "age_months": 57.0,
+   "active_installs": 10000,
+   "installs_per_month": 175.54786620530567,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 3,
+   "slug": "cleantalk-spam-protect",
+   "hits": 333,
+   "age_months": 170.8,
+   "active_installs": 200000,
+   "installs_per_month": 1170.9944220042316,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 4,
+   "slug": "awesome-support",
+   "hits": 333,
+   "age_months": 139.8,
+   "active_installs": 6000,
+   "installs_per_month": 42.93370944992948,
+   "months_since_update": 2.6
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 5,
+   "slug": "elex-helpdesk-customer-support-ticket-system",
+   "hits": 333,
+   "age_months": 74.5,
+   "active_installs": 300,
+   "installs_per_month": 4.026455026455027,
+   "months_since_update": 2.8
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 6,
+   "slug": "support-genix-lite",
+   "hits": 333,
+   "age_months": 49.4,
+   "active_installs": 2000,
+   "installs_per_month": 40.45182724252492,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 7,
+   "slug": "wp-ticket",
+   "hits": 333,
+   "age_months": 140.3,
+   "active_installs": 400,
+   "installs_per_month": 2.85152224824356,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "helpdesk",
+   "rank": 8,
+   "slug": "knowledgebase-helpdesk",
+   "hits": 333,
+   "age_months": 111.8,
+   "active_installs": 30,
+   "installs_per_month": 0.26843033509700176,
+   "months_since_update": 1.5
+  },
+  {
+   "keyword": "asset management",
+   "rank": 1,
+   "slug": "atum-stock-manager-for-woocommerce",
+   "hits": 1955,
+   "age_months": 115.2,
+   "active_installs": 10000,
+   "installs_per_month": 86.82258984597833,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "asset management",
+   "rank": 2,
+   "slug": "admin-management-xtended",
+   "hits": 1955,
+   "age_months": 219.4,
+   "active_installs": 5000,
+   "installs_per_month": 22.787842491390926,
+   "months_since_update": 2.7
+  },
+  {
+   "keyword": "asset management",
+   "rank": 3,
+   "slug": "elementor",
+   "hits": 1955,
+   "age_months": 122.4,
+   "active_installs": 10000000,
+   "installs_per_month": 81696.18894256576,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "asset management",
+   "rank": 4,
+   "slug": "wp-reviews-plugin-for-google",
+   "hits": 1955,
+   "age_months": 80.9,
+   "active_installs": 900000,
+   "installs_per_month": 11118.506493506493,
+   "months_since_update": 1.6
+  },
+  {
+   "keyword": "asset management",
+   "rank": 5,
+   "slug": "w3-total-cache",
+   "hits": 1955,
+   "age_months": 204.4,
+   "active_installs": 900000,
+   "installs_per_month": 4402.378274144304,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "asset management",
+   "rank": 6,
+   "slug": "sugar-calendar-lite",
+   "hits": 1955,
+   "age_months": 166.2,
+   "active_installs": 10000,
+   "installs_per_month": 60.1699940699743,
+   "months_since_update": 0.9
+  },
+  {
+   "keyword": "asset management",
+   "rank": 7,
+   "slug": "mycred",
+   "hits": 1955,
+   "age_months": 159.7,
+   "active_installs": 10000,
+   "installs_per_month": 62.63374485596709,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "document management",
+   "rank": 1,
+   "slug": "catfolders-document-gallery",
+   "hits": 1080,
+   "age_months": 34.8,
+   "active_installs": 3000,
+   "installs_per_month": 86.31379962192818,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "document management",
+   "rank": 2,
+   "slug": "document-gallery",
+   "hits": 1080,
+   "age_months": 167.5,
+   "active_installs": 8000,
+   "installs_per_month": 47.74901960784314,
+   "months_since_update": 1.4
+  },
+  {
+   "keyword": "document management",
+   "rank": 3,
+   "slug": "wp-document-revisions",
+   "hits": 1080,
+   "age_months": 183.4,
+   "active_installs": 2000,
+   "installs_per_month": 10.904531613827691,
+   "months_since_update": 0.4
+  },
+  {
+   "keyword": "document management",
+   "rank": 4,
+   "slug": "document-library-lite",
+   "hits": 1080,
+   "age_months": 52.2,
+   "active_installs": 4000,
+   "installs_per_month": 76.62680931403399,
+   "months_since_update": 0.5
+  },
+  {
+   "keyword": "document management",
+   "rank": 5,
+   "slug": "file-manager-advanced",
+   "hits": 1080,
+   "age_months": 104.7,
+   "active_installs": 100000,
+   "installs_per_month": 954.8306148055207,
+   "months_since_update": 2.1
+  },
+  {
+   "keyword": "document management",
+   "rank": 6,
+   "slug": "filebird-document-library",
+   "hits": 1080,
+   "age_months": 49.4,
+   "active_installs": 5000,
+   "installs_per_month": 101.1295681063123,
+   "months_since_update": 2.6
+  },
+  {
+   "keyword": "document management",
+   "rank": 7,
+   "slug": "document-emberdder",
+   "hits": 1080,
+   "age_months": 83.0,
+   "active_installs": 9000,
+   "installs_per_month": 108.37025316455696,
+   "months_since_update": 0.6
+  },
+  {
+   "keyword": "document management",
+   "rank": 8,
+   "slug": "complianz-gdpr",
+   "hits": 1080,
+   "age_months": 97.5,
+   "active_installs": 1000000,
+   "installs_per_month": 10252.610306500505,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 1,
+   "slug": "wp-job-openings",
+   "hits": 111,
+   "age_months": 95.9,
+   "active_installs": 30000,
+   "installs_per_month": 312.846865364851,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 2,
+   "slug": "job-manager-career",
+   "hits": 111,
+   "age_months": 82.6,
+   "active_installs": 2000,
+   "installs_per_month": 24.226024671707123,
+   "months_since_update": 1.8
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 3,
+   "slug": "easyjobs",
+   "hits": 111,
+   "age_months": 80.7,
+   "active_installs": 4000,
+   "installs_per_month": 49.55636955636956,
+   "months_since_update": 1.2
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 4,
+   "slug": "wp-job-portal",
+   "hits": 111,
+   "age_months": 71.7,
+   "active_installs": 8000,
+   "installs_per_month": 111.60403299725023,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 5,
+   "slug": "essential-addons-for-elementor-lite",
+   "hits": 111,
+   "age_months": 108.7,
+   "active_installs": 2000000,
+   "installs_per_month": 18392.74924471299,
+   "months_since_update": 0.1
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 6,
+   "slug": "jobus",
+   "hits": 111,
+   "age_months": 9.7,
+   "active_installs": 100,
+   "installs_per_month": 10.353741496598639,
+   "months_since_update": 1.8
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 7,
+   "slug": "vk-google-job-posting-manager",
+   "hits": 111,
+   "age_months": 88.1,
+   "active_installs": 2000,
+   "installs_per_month": 22.699478001491425,
+   "months_since_update": 3.5
+  },
+  {
+   "keyword": "recruitment",
+   "rank": 8,
+   "slug": "hr-management",
+   "hits": 111,
+   "age_months": 30.5,
+   "active_installs": 100,
+   "installs_per_month": 3.283710895361381,
+   "months_since_update": 2.4
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 2,
+   "slug": "cookie-notice",
+   "hits": 749,
+   "age_months": 157.1,
+   "active_installs": 900000,
+   "installs_per_month": 5727.785908425674,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 3,
+   "slug": "wp-security-audit-log",
+   "hits": 749,
+   "age_months": 158.6,
+   "active_installs": 300000,
+   "installs_per_month": 1891.0747566784014,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 4,
+   "slug": "woocommerce-eu-vat-compliance",
+   "hits": 749,
+   "age_months": 140.4,
+   "active_installs": 3000,
+   "installs_per_month": 21.361403508771932,
+   "months_since_update": 4.6
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 5,
+   "slug": "simple-history",
+   "hits": 749,
+   "age_months": 193.1,
+   "active_installs": 300000,
+   "installs_per_month": 1553.325395475421,
+   "months_since_update": 0.2
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 6,
+   "slug": "cookie-law-info",
+   "hits": 749,
+   "age_months": 170.7,
+   "active_installs": 1000000,
+   "installs_per_month": 5858.352578906852,
+   "months_since_update": 0.3
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 7,
+   "slug": "stream",
+   "hits": 749,
+   "age_months": 152.2,
+   "active_installs": 80000,
+   "installs_per_month": 525.7340241796201,
+   "months_since_update": 0.7
+  },
+  {
+   "keyword": "compliance audit",
+   "rank": 8,
+   "slug": "wp-statistics",
+   "hits": 749,
+   "age_months": 184.8,
+   "active_installs": 600000,
+   "installs_per_month": 3247.5106685633004,
+   "months_since_update": 0.6
+  }
+ ]
+}

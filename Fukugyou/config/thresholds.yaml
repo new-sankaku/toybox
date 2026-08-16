@@ -1,0 +1,259 @@
+# Phase 2 定量 scan（棄却 gate）の閾値
+#
+# すべての値は 2026-08-11 に実際の API を叩いて得た分布の percentile です。
+# 測定方法・実行 command・生の分布は doc/research/G_thresholds.md を参照してください。
+# 恣意的な丸め数値は使わず、実測 percentile をそのまま置いています。
+#
+# 読み方:
+#   percentiles ... 実測分布（この file を再生成するときの基準値）
+#   conditions  ... 判定式。value は percentiles のどれかを写したもので、basis に根拠を書いています
+#   gate        ... 何条件成立で候補を残すか
+#
+# 単位:
+#   months          ... 最終更新からの経過月数（1 か月 = 30.44 日）
+#   rating          ... wordpress のみ 0〜100、他は 0〜5 stars
+#   complaint_ratio ... support_threads / active_installs × 1000（1000 install あたりの thread 数）
+
+meta:
+  measured_on: 2026-08-11
+  timezone: UTC
+  month_days: 30.44
+  # 語 (keyword) 単位の percentile は n=20〜22 しかなく、bootstrap 90%CI は
+  # 点推定の 1/3〜1.6 倍まで動きます。閾値を絶対視せず、再測定して更新してください。
+  keyword_level_percentile_is_unstable: true
+  reference: doc/research/G_thresholds.md
+
+# 判定に共通する前提
+common:
+  top_n: 8                  # 上位何件を見るか（現行 doc の「上位8件」を踏襲）
+  min_rating_sample: 5      # rating を有効とみなす最小の評価件数。これ未満は欠測扱い
+  # ★の低さを不満の proxy にしない（rating inflation。MARKET_RESEARCH.md §5.3）。
+  # C2 は「不満がある」ではなく「上位に評価の低い大手が居る」という事実の記述に留めること。
+
+ecosystems:
+
+  # =====================================================================
+  wordpress:
+    enabled: true
+    endpoint: "https://api.wordpress.org/plugins/info/1.2/?action=query_plugins&request[search]={kw}&request[per_page]=24"
+    auth: none
+    note: "curl で叩くときは -g (--globoff) が必須。active_installs は有効数字1桁に丸められている"
+    sample:
+      keywords: 22          # 業務系 keyword 22 語
+      items: 176            # 22 語 × 上位8件
+    percentiles:
+      hits:       {p10: 73.2,  p25: 268.5, p50: 472.0, p75: 1019.8, p90: 1902.7}   # 語単位 n=22
+      installs:   {p10: 100,   p25: 900,   p50: 5000,  p75: 52500,  p90: 500000}   # 件単位 n=176
+      rating:     {p10: 78.0,  p25: 88.0,  p50: 94.0,  p75: 98.0,   p90: 100.0}    # 件単位 n=152（評価5件以上）
+      num_ratings: {p10: 3,    p25: 9,     p50: 32,    p75: 298.5,  p90: 1754.5}   # 件単位 n=176
+      months:     {p10: 0.0,   p25: 0.16,  p50: 0.61,  p75: 1.71,   p90: 3.07}     # 件単位 n=176
+      kw_median_months: {p10: 0.18, p25: 0.29, p50: 0.52, p75: 1.19, p90: 1.98}    # 語単位 n=22
+      concentration:    {p10: 0.324, p25: 0.642, p50: 0.839, p75: 0.945, p90: 0.976}  # top1/top8 install、語単位 n=22
+      complaint_ratio:  {p10: 0.0, p25: 0.0, p50: 0.024, p75: 0.333, p90: 1.350}   # 件単位 n=176
+      kw_median_complaint_ratio: {p10: 0.0, p25: 0.004, p50: 0.043, p75: 0.116, p90: 0.332}  # 語単位 n=22
+    conditions:
+      C1_thin_search:
+        enabled: true
+        metric: info.results
+        op: "<="
+        value: 268.5
+        basis: "語別 hit 数分布の p25（n=22 / 90%CI 79.5〜415.5・2026-08-11）"
+        note: "現行 doc の「数百件以下」は 500 相当で、実測では p50。p25 まで絞ると 6/22 語が該当"
+      C2_big_but_unloved:
+        enabled: true
+        rule: "上位8件に (installs >= installs.p75 かつ rating <= rating.p25) が1件以上"
+        installs_threshold: 52500
+        rating_threshold: 88.0
+        basis: "installs は件単位 p75（n=176 / 90%CI 30,000〜72,500）、rating は件単位 p25（n=152 / 90%CI 86〜90）"
+        note: "現行 doc の install 1万 は実測 p65、rating 80 は実測 p12。両者の厳しさが 5 倍ずれていた"
+      C3_abandoned:
+        enabled: true
+        metric: kw_median_months
+        op: ">="
+        value: 1.19
+        basis: "語別「上位8件の更新月数中央値」分布の p75（n=22 / 90%CI 0.61〜1.91）"
+        note: |
+          現行 doc の「6か月以上更新停止が2件以上」は件単位分布の p93 に相当し、22 語中 3 語しか
+          満たしません。WordPress 生態系は更新が速く（件単位 p90 = 3.07 か月）、6 か月は極端な裾です。
+      C4_complaint_stock:
+        enabled: true
+        metric: kw_median_complaint_ratio
+        op: ">="
+        value: 0.1157
+        basis: "語別「上位8件の support_threads/1k installs 中央値」分布の p75（n=22 / 90%CI 0.060〜0.298）"
+        note: "現行 doc の「同 category 中央値の2倍」は件単位分布の p56 に相当し、ほぼ選別していなかった"
+    gate:
+      evaluable_conditions: 4
+      min_conditions: 2
+      measured_pass_rate: 0.36      # 8/22 語
+      rejected_alternative:
+        min_conditions: 3
+        measured_pass_rate: 0.00    # 0/22 語。percentile 閾値では 3-of-4 は空になる
+
+  # =====================================================================
+  atlassian:
+    enabled: true
+    endpoint: "https://marketplace.atlassian.com/rest/2/addons?text={kw}&limit=24"
+    update_date_endpoint: "https://marketplace.atlassian.com/rest/2/addons/{key}/versions/latest"  # release.date を使う
+    auth: none
+    note: |
+      search 応答の _embedded に distribution / reviews / lastModified が同梱されるので、
+      distribution を個別に叩く必要はありません。ただし
+        - totalUsers: -1 は sentinel（合計しない）
+        - bundled / bundledCloud が true の app は同梱であり自発的導入ではないので除外
+        - _embedded.lastModified は marketplace 側の一括更新日が混入する（後述）ので使わない
+    sample:
+      keywords: 22
+      items: 176
+      update_dates_fetched: 157   # 上位8件の unique app 数
+    percentiles:
+      hits:       {p10: 22.8, p25: 107.5, p50: 446.0, p75: 1704.3, p90: 2625.6}   # 語単位 n=22
+      installs:   {p10: 4.5,  p25: 35.8,  p50: 181.5, p75: 982.3,  p90: 5420}     # totalInstalls、件単位 n=176
+      rating:     {p10: 3.75, p25: 4.284, p50: 4.581, p75: 4.750,  p90: 5.0}      # averageStars、件単位 n=108（評価5件以上）
+      num_ratings: {p10: 0,   p25: 2,     p50: 9,     p75: 39.3,   p90: 140}
+      months:     {p10: 0.03, p25: 0.21,  p50: 1.31,  p75: 8.21,   p90: 31.93}    # release.date 基準、件単位 n=176
+      kw_median_months: {p10: 0.23, p25: 0.36, p50: 1.85, p75: 5.60, p90: 9.12}   # 語単位 n=22
+      concentration:    {p10: 0.288, p25: 0.312, p50: 0.500, p75: 0.739, p90: 0.799}
+    conditions:
+      C1_thin_search:
+        enabled: true
+        metric: count
+        op: "<="
+        value: 107.5
+        basis: "語別 hit 数分布の p25（n=22 / 90%CI 30〜231）"
+      C2_big_but_unloved:
+        enabled: true
+        rule: "上位8件に (totalInstalls >= installs.p75 かつ averageStars <= rating.p25) が1件以上"
+        installs_threshold: 982
+        rating_threshold: 4.284
+        basis: "installs 件単位 p75（n=176 / 90%CI 594〜1,463）、rating 件単位 p25（n=108 / 90%CI 4.13〜4.38）"
+      C3_abandoned:
+        enabled: true
+        metric: kw_median_months
+        op: ">="
+        value: 5.60
+        basis: "語別「上位8件の release.date 経過月数中央値」分布の p75（n=22 / 90%CI 2.89〜8.77）"
+      C4_complaint_stock:
+        enabled: false
+        reason: "不満 stock に相当する field が無い。review 本文の星別内訳は /reviews で取れるが 追加で app 数ぶんの request が要り、今回の 200 request 上限に収まらなかった（未測定）"
+    gate:
+      evaluable_conditions: 3
+      min_conditions: 2
+      measured_pass_rate: 0.23      # 5/22 語
+
+  # =====================================================================
+  vscode:
+    enabled: true
+    endpoint: "POST https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery"
+    headers:
+      Content-Type: "application/json"
+      Accept: "application/json;api-version=7.2-preview.1"
+    query_flags: 914               # statistics を含める
+    filter_types: {target: 8, search_text: 10}
+    auth: none
+    note: |
+      install を使うこと。downloadCount は 70 倍違う別物です。
+      averagerating / ratingcount は評価が無い extension では statistics に現れません。
+    # ---- 業務系 keyword を投げた場合（生態系外の語） ----
+    business_keywords:
+      sample: {keywords: 22, items: 162}
+      percentiles:
+        hits:     {p10: 5.3,  p25: 16.3, p50: 84.5, p75: 518.5, p90: 1775.4}
+        installs: {p10: 4,    p25: 12,   p50: 68,   p75: 520,   p90: 10173}
+        rating:   {p10: 4.36, p25: 4.44, p50: 4.74, p75: 4.96,  p90: 5.0}   # n=6 のみ。使用不可
+        months:   {p10: 0.58, p25: 3.18, p50: 10.59, p75: 52.30, p90: 61.48}
+        kw_median_months: {p10: 2.18, p25: 6.61, p50: 11.26, p75: 39.27, p90: 52.49}
+      C2_usable: false
+      reason: "評価件数の p75 が 1 件。162 件中 rating が有効なのは 6 件しかなく、C2 の閾値を percentile で決められません"
+    # ---- 開発系 keyword（生態系内の語）。VS Code の閾値はこちらを使う ----
+    dev_keywords:
+      sample: {keywords: 20, items: 160}
+      percentiles:
+        hits:     {p10: 309.4, p25: 532.0, p50: 1722.5, p75: 4046.5, p90: 6380.4}
+        installs: {p10: 62.7, p25: 4267.8, p50: 138984, p75: 813364, p90: 5181974}
+        rating:   {p10: 3.147, p25: 3.833, p50: 4.415, p75: 4.750, p90: 5.0}   # n=85（評価5件以上）
+        num_ratings: {p10: 0, p25: 1, p50: 5, p75: 21, p90: 62.1}
+        months:   {p10: 0.82, p25: 2.93, p50: 14.34, p75: 52.78, p90: 91.18}
+        kw_median_months: {p10: 3.69, p25: 10.02, p50: 18.76, p75: 46.73, p90: 52.79}
+        concentration: {p10: 0.350, p25: 0.573, p50: 0.750, p75: 0.861, p90: 0.906}
+      conditions:
+        C1_thin_search:
+          enabled: true
+          metric: resultMetadata.ResultCount.TotalCount
+          op: "<="
+          value: 532
+          basis: "語別 hit 数分布の p25（n=20 / 90%CI 313〜1,482）"
+        C2_big_but_unloved:
+          enabled: true
+          rule: "上位8件に (install >= installs.p75 かつ averagerating <= rating.p25) が1件以上"
+          installs_threshold: 813364
+          rating_threshold: 3.833
+          basis: "installs 件単位 p75（n=160 / 90%CI 486,527〜1,809,245）、rating 件単位 p25（n=85 / 90%CI 3.53〜4.05）"
+        C3_abandoned:
+          enabled: true
+          metric: kw_median_months
+          op: ">="
+          value: 46.73
+          basis: "語別「上位8件の lastUpdated 経過月数中央値」分布の p75（n=20 / 90%CI 23.7〜52.8）"
+          note: "VS Code は放置が常態。件単位 p50 が 14.3 か月で、WordPress の 6 か月線をそのまま持ち込むと 全語が該当します"
+        C4_complaint_stock:
+          enabled: false
+          reason: "不満 stock に相当する field が無い"
+      gate:
+        evaluable_conditions: 3
+        min_conditions: 2
+        measured_pass_rate: 0.20    # 4/20 語
+
+  # =====================================================================
+  chrome_web_store:
+    enabled: partial
+    api: none
+    note: |
+      公開 API はありません（2026-08-11 時点で確認）。検索結果 page と詳細 page が
+      server-side rendering されているため HTML から読めますが、
+        - 検索結果に hit 総数が出ないので C1 は測れません
+        - user 数が有効数字1〜2桁に丸められています（例: 1,000,000 / 59,000,000）
+        - 評価件数も大きい値は丸められます（例: 290.3K）
+      詳細は doc/research/G_thresholds.md の「測れなかったもの」を参照。
+    source:
+      search: "https://chromewebstore.google.com/search/{kw}   （HTML。data-item-id と星のみ）"
+      detail: "https://chromewebstore.google.com/detail/{id}   （HTML。users / Updated / N out of 5 / N ratings）"
+    sample:
+      keywords: 10           # 標本が小さい。percentile の信頼性は他の生態系より低い
+      items: 80
+      users_parsed: 77
+    percentiles:
+      installs: {p10: 15, p25: 57, p50: 922, p75: 10000, p90: 58000}   # users、件単位 n=77
+      rating:   {p10: 3.25, p25: 3.925, p50: 4.5, p75: 4.9, p90: 5.0}  # 件単位 n=46（評価5件以上）
+      months:   {p10: 0.13, p25: 0.93, p50: 4.99, p75: 15.10, p90: 23.29}
+      kw_median_months: {p10: 1.14, p25: 1.60, p50: 3.53, p75: 11.28, p90: 12.72}
+      concentration: {p10: 0.511, p25: 0.592, p50: 0.635, p75: 0.888, p90: 0.930}
+    conditions:
+      C1_thin_search:
+        enabled: false
+        reason: "検索結果 page に hit 総数の表記が無い（HTML 全文を検索して不在を確認）"
+      C2_big_but_unloved:
+        enabled: true
+        rule: "上位8件に (users >= installs.p75 かつ rating <= rating.p25) が1件以上"
+        installs_threshold: 10000
+        rating_threshold: 3.925
+        basis: "users 件単位 p75（n=77 / 90%CI 9,000〜30,000）、rating 件単位 p25（n=46 / 90%CI 3.70〜4.30）"
+        note: "users は丸め値なので閾値付近の比較は桁でしか意味を持ちません"
+      C3_abandoned:
+        enabled: true
+        metric: kw_median_months
+        op: ">="
+        value: 11.28
+        basis: "語別「上位8件の Updated 経過月数中央値」分布の p75（n=10 / 90%CI 4.02〜15.10）"
+      C4_complaint_stock:
+        enabled: false
+        reason: "不満 stock に相当する field が無い"
+    gate:
+      evaluable_conditions: 2
+      min_conditions: 2
+      measured_pass_rate: 0.10      # 1/10 語。条件が2つしか無いため他生態系より通しにくい
+
+  # =====================================================================
+  shopify:
+    enabled: false
+    reason: "内訳非公開。MARKET_RESEARCH.md §3 の記述どおり、上位 app の review 件数分布で代替し gate を Phase 3 に寄せる。今回は未測定"

@@ -1,0 +1,24 @@
+# 業務系 keyword 22語。doc/research/G_thresholds.md §1.1 と同一。
+# この file は人が書きます。script が候補を生成することは禁止です（AUTOMATION.md §2 制約1）。
+invoice
+booking calendar
+appointment scheduling
+inventory management
+timesheet
+payroll
+crm
+expense report
+contract management
+quotation
+purchase order
+approval workflow
+digital signature
+tax calculation
+accounting
+shipping
+subscription billing
+helpdesk
+asset management
+document management
+recruitment
+compliance audit
