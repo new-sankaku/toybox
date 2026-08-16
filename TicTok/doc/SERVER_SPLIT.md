@@ -14,7 +14,7 @@
 | 2 | `api/files.py` | 録画1行(recordings表のdict)から実体を引く。path解決・素材(.ts)とmp4の実在判定・削除の道連れ範囲・再生variant・尺 |
 | 3 | `api/fsfacts.py` | filesystemから引いた事実のTTL cacheと一括取得。一括画面のstatus rollup cacheも同居 |
 | 4 | `api/disk.py` | 容量・空き・退避(final dirへの移送)・保持policyの**計算** |
-| 5 | `api/media_jobs.py` | 映像jobの永続queueとjob本体(焼き込み・Up出力・再mp4化・音量正規化・ts結合・切り出し・転写) |
+| 5 | `api/media_jobs.py` | 映像jobの永続queueとjob本体(焼き込み・Up出力・再mp4化・音量正規化・ts結合・切り出し・文字起こし) |
 | 6 | `api/startup.py` / `api/routes/*.py` | lifespanと起動時処理 / 各router |
 | — | `api/access_log.py` | access logと計測のmiddleware、静的fileのcache方針。他のapi moduleに依存しない |
 

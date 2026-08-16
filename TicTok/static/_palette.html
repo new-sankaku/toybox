@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ja" data-palette="live">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok — 配色sample</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" />
+  <!-- 相対にしておくと server 経由(/static/_palette.html)でも file:// でも同じ style.css を読む -->
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* ── 候補palette ────────────────────────────────────────────────
+       砂丘の地(--sand- / --ink / --line / --invert- 系)は現行を踏襲し、意味を持つ色
+       (押せる=accent / 危ない=warn / 良い=ok / 登録済み=gold / 負符号=sign-neg)だけを
+       差し替える。値はOKLCHで色相を振ったうえで、現行tokenが満たしていた
+       contrast制約(明地=4.5:1 / 暗地=4.5:1)を満たす明度へ自動で寄せてある。
+       [data-palette] は要素単位で効くので、並べて比較にも同じ定義を使う。 */
+    /* "live" は上書きを持たない = style.css の :root(採用中の値)をそのまま測る面。
+       候補blockを足せば、この画面だけで次の案を同じ関門に掛けられる。 */
+    [data-palette="live"] { --ok-surface: color-mix(in srgb, var(--ok) 40%, var(--sand-panel-muted)); }
+    [data-palette="current"] {
+      --accent: #a96e49;
+      --accent-deep: #85482a;
+      --accent-ink: #6f3a20;
+      --accent-bright: #e8bb7a;
+      --ok: #5d6e4e;
+      --ok-ink: #3f5136;
+      --ok-bright: #b4cfa0;
+      --warn: #a4502f;
+      --warn-ink: #7a3620;
+      --warn-bright: #ffab93;
+      --gold-ink: #6b4503;
+      --sign-neg-ink: #35504f;
+    }
+    [data-palette="ai"] {
+      --accent: #5b7fc2;
+      --accent-deep: #375897;
+      --accent-ink: #284886;
+      --accent-bright: #9fbdf2;
+      --ok: #6c7a5b;
+      --ok-ink: #404e30;
+      --ok-bright: #b2c0a2;
+      --warn: #ab553a;
+      --warn-ink: #802e12;
+      --warn-bright: #fca78c;
+      --gold-ink: #654304;
+      --sign-neg-ink: #235151;
+    }
+    [data-palette="seiji"] {
+      --accent: #2b9192;
+      --accent-deep: #086364;
+      --accent-ink: #085152;
+      --accent-bright: #84c7c7;
+      --ok: #6c7a5b;
+      --ok-ink: #404e30;
+      --ok-bright: #b2c0a2;
+      --warn: #ab553a;
+      --warn-ink: #802e12;
+      --warn-bright: #fca78c;
+      --gold-ink: #654304;
+      --sign-neg-ink: #584169;
+    }
+    [data-palette="ebi"] {
+      --accent: #a26a9d;
+      --accent-deep: #7a4576;
+      --accent-ink: #6b3767;
+      --accent-bright: #daadd5;
+      --ok: #6c7a5b;
+      --ok-ink: #404e30;
+      --ok-bright: #b2c0a2;
+      --warn: #ab553a;
+      --warn-ink: #802e12;
+      --warn-bright: #fca78c;
+      --gold-ink: #654304;
+      --sign-neg-ink: #235151;
+    }
+    [data-palette] { --ok-surface: color-mix(in srgb, var(--ok) 40%, var(--sand-panel-muted)); }
+
+    /* ── sample画面自体の骨格。project classとぶつからないよう pv- で始める ── */
+    .pv-shell { padding: 0 1.2rem 4rem; }
+    .pv-switch {
+      position: sticky;
+      top: 0;
+      z-index: 120;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 1.2rem;
+      margin: 0 -1.2rem 1rem;
+      background: var(--sand-bg-deep);
+      border-bottom: 2px solid var(--line);
+    }
+    .pv-switch b { font-size: 0.78rem; letter-spacing: 0.18em; color: var(--ink-strong); }
+    .pv-switch .pv-note { font-size: 0.68rem; color: var(--ink-muted); margin-left: auto; }
+    .pv-sec { margin: 1.6rem 0; }
+    .pv-sec > h2 {
+      font-size: 0.78rem;
+      letter-spacing: 0.2em;
+      color: var(--ink-strong);
+      border-bottom: 0.15rem solid var(--accent-deep);
+      padding-bottom: 0.25rem;
+      margin: 0 0 0.7rem;
+    }
+    .pv-sec > h2 .pv-h-sub { font-size: 0.66rem; letter-spacing: 0.08em; color: var(--ink-muted); font-weight: 400; margin-left: 0.6rem; }
+    .pv-row { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; }
+    .pv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 0.8rem; }
+    .pv-cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 0.8rem; }
+    .pv-cmp > div { border: 1px solid var(--line); background: var(--sand-panel); padding: 0.6rem; }
+    .pv-cmp h3 { margin: 0 0 0.5rem; font-size: 0.72rem; letter-spacing: 0.16em; color: var(--ink-strong); }
+    .pv-swatches { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.5rem; }
+    .pv-swatch { inline-size: 2.2rem; block-size: 1.4rem; border: 1px solid var(--line); }
+    .pv-audit { inline-size: 100%; border-collapse: collapse; font-size: 0.72rem; background: var(--sand-panel-muted); }
+    .pv-audit th, .pv-audit td { padding: 0.3rem 0.5rem; text-align: left; border-top: 1px solid rgba(143, 136, 113, 0.45); }
+    .pv-audit th { background: var(--sand-panel); color: var(--ink-muted); font-size: 0.68rem; letter-spacing: 0.08em; }
+    .pv-audit td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    .pv-audit td.ng { color: var(--warn-ink); font-weight: 700; }
+    .pv-chipbox { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.5rem; border: 1px solid var(--line); background: var(--sand-panel-muted); font-size: 0.7rem; }
+    .pv-dark { background: var(--invert-bg); border: 1px solid var(--line); padding: 0.6rem; color: var(--invert-fg); font-size: 0.75rem; }
+    .pv-dark .pv-row { gap: 0.9rem; }
+    .pv-btn {
+      font: inherit;
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      padding: 0.35rem 0.9rem;
+      border: 1px solid var(--line);
+      background: var(--sand-panel-muted);
+      color: var(--ink-strong);
+      cursor: pointer;
+    }
+    .pv-btn[aria-pressed="true"] { background: var(--invert-bg); color: var(--invert-fg); border-color: var(--invert-bg); }
+  </style>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <div class="pv-shell">
+    <div class="pv-switch">
+      <b>配色sample</b>
+      <button class="pv-btn" data-set="live" aria-pressed="true">採用中 :root</button>
+      <button class="pv-btn" data-set="current" aria-pressed="false">旧 terracotta</button>
+      <button class="pv-btn" data-set="ai" aria-pressed="false">A 藍 Ai</button>
+      <button class="pv-btn" data-set="seiji" aria-pressed="false">B 青磁 Seiji</button>
+      <button class="pv-btn" data-set="ebi" aria-pressed="false">C 葡萄 Ebi</button>
+      <span class="pv-note">砂丘の地色は全案共通。変えたのは意味を持つ色だけ。</span>
+    </div>
+
+    <!-- 監視画面の chrome -->
+    <section class="pv-sec">
+      <h2>監視 topbar / tab<span class="pv-h-sub">押せる物・状態・危ない物が同じ帯に並ぶ場所</span></h2>
+      <div class="a-topbar">
+        <div class="a-brand"><span class="m">■</span> <b>TicTok</b></div>
+        <nav class="a-nav">
+          <a href="#" class="active">監視</a>
+          <a href="#">概況</a>
+          <a href="#">配信者</a>
+          <a href="#">動画</a>
+          <a href="#">Job</a>
+        </nav>
+        <div class="a-add">
+          <span class="at">@</span>
+          <input type="text" value="pomiiiip" aria-label="username" />
+          <label class="a-rec-opt"><input type="checkbox" checked /> 動画保存</label>
+          <button type="button">監視開始</button>
+        </div>
+        <div class="a-disk">
+          <span class="d-vol"><span class="l">K:</span><span class="track"><span class="fill" style="inline-size: 62%"></span></span><span class="v">1.8TB</span></span>
+          <span class="d-vol low"><span class="l">C:</span><span class="track"><span class="fill" style="inline-size: 91%"></span></span><span class="v">42GB</span></span>
+        </div>
+        <div class="a-ws"><span class="dot online">●</span> <span>Server接続</span></div>
+        <div class="a-form-msg">監視を開始しました</div>
+      </div>
+
+      <div class="a-tabs">
+        <button class="a-tab on"><span class="a-tab-name">pomiiiip</span></button>
+        <button class="a-tab st-connected"><span class="a-tab-name">配信者B</span></button>
+        <button class="a-tab"><span class="a-tab-name">配信者C</span></button>
+      </div>
+    </section>
+
+    <!-- 状態badge・dot -->
+    <section class="pv-sec">
+      <h2>状態 badge / dot<span class="pv-h-sub">接続=ok / 接続中=accent / 失敗=warn</span></h2>
+      <div class="pv-row">
+        <span class="badge badge-idle">IDLE</span>
+        <span class="badge badge-connecting">CONNECTING</span>
+        <span class="badge badge-reconnecting">RECONNECTING</span>
+        <span class="badge badge-waiting">WAITING</span>
+        <span class="badge badge-connected">CONNECTED</span>
+        <span class="badge badge-restricted">RESTRICTED</span>
+        <span class="badge badge-error">ERROR</span>
+        <span class="badge badge-ended">ENDED</span>
+      </div>
+      <div class="pv-row" style="margin-top:0.6rem">
+        <span class="pv-chipbox"><span class="tab-dot dot-connected">●</span> 接続</span>
+        <span class="pv-chipbox"><span class="tab-dot dot-connecting">●</span> 接続中</span>
+        <span class="pv-chipbox"><span class="tab-dot dot-error">●</span> 失敗</span>
+        <span class="pv-chipbox"><span class="tab-dot dot-idle">●</span> 待機</span>
+        <span class="pv-chipbox" style="color:var(--gold-ink)">★ 登録済み</span>
+        <span class="pv-chipbox">相関 <span style="color:var(--sign-neg-ink);font-weight:700">-0.42</span> / <span style="color:var(--ink-strong);font-weight:700">+0.61</span></span>
+      </div>
+    </section>
+
+    <!-- 操作 -->
+    <section class="pv-sec">
+      <h2>操作<span class="pv-h-sub">hoverすると「押せる」の合図が出る（既定は中立）</span></h2>
+      <div class="pv-row">
+        <button class="btn btn-compact">通常</button>
+        <button class="btn btn-compact btn-primary">実行する</button>
+        <button class="btn btn-compact btn-danger">削除</button>
+        <button class="btn btn-compact" disabled>不可</button>
+        <button class="btn btn-compact btn-recording">● 録画中</button>
+        <select>
+          <option>すべての配信者</option>
+        </select>
+        <span class="form-message">記録しました</span>
+        <span class="form-message is-error">保存に失敗しました</span>
+      </div>
+      <div class="pv-row" style="margin-top:0.6rem">
+        <span class="pv-chipbox" style="min-inline-size:16rem">
+          <span class="dl-progress" style="inline-size:100%">
+            <span class="dl-bar"><span class="dl-bar-fill" style="inline-size:64%"></span></span>
+            <span class="dl-pct">64%</span>
+          </span>
+        </span>
+        <span class="record-status rec-active"><span class="rec-dot">●</span> 録画中 00:41:12</span>
+      </div>
+    </section>
+
+    <!-- 表 -->
+    <section class="pv-sec">
+      <h2>表<span class="pv-h-sub">1位=左の縦線と太字 / 危ない=最終列だけ warn / 量は長さで示す</span></h2>
+      <div class="table-wrap">
+        <table class="result-table">
+          <thead>
+            <tr>
+              <th data-sort>配信者</th>
+              <th data-sort class="sorted">配信時間</th>
+              <th data-sort>視聴者</th>
+              <th data-sort>コイン</th>
+              <th data-sort>空きまで</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="rank-top">
+              <td>pomiiiip</td>
+              <td class="num">4:12:08</td>
+              <td class="num q" style="--q:1">18,402</td>
+              <td class="num q" style="--q:1">1,204,880</td>
+              <td class="num">18日</td>
+            </tr>
+            <tr>
+              <td>配信者B</td>
+              <td class="num">2:38:44</td>
+              <td class="num q" style="--q:0.52">9,558</td>
+              <td class="num q" style="--q:0.31">377,120</td>
+              <td class="num">44日</td>
+            </tr>
+            <tr class="row-warn">
+              <td>配信者C</td>
+              <td class="num">0:51:03</td>
+              <td class="num q" style="--q:0.18">3,310</td>
+              <td class="num q" style="--q:0.09">108,400</td>
+              <td class="num">2日</td>
+            </tr>
+            <tr class="row-clickable">
+              <td>配信者D</td>
+              <td class="num">1:22:19</td>
+              <td class="num q" style="--q:0.33">6,041</td>
+              <td class="num q" style="--q:0.21">254,900</td>
+              <td class="num">31日</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 暗地 -->
+    <section class="pv-sec">
+      <h2>暗地に載る文字<span class="pv-h-sub">player pane・焼き込み設定など。*-bright を使う面</span></h2>
+      <div class="pv-dark">
+        <div class="pv-row">
+          <span>録画 pomiiiip_20260808.ts</span>
+          <span style="color:var(--ok-bright);font-weight:700">完了</span>
+          <span style="color:var(--accent-bright);font-weight:700">処理中 62%</span>
+          <span style="color:var(--warn-bright);font-weight:700">失敗</span>
+          <span style="color:var(--invert-fg-muted)">1.8GB · 00:41:12</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 並べて比較 -->
+    <section class="pv-sec">
+      <h2>4案を並べて比較<span class="pv-h-sub">押せる / 危ない / 良い が一目で撃ち分けられるか</span></h2>
+      <div class="pv-cmp" id="pv-cmp"></div>
+    </section>
+
+    <!-- contrast監査 -->
+    <section class="pv-sec">
+      <h2>contrast監査<span class="pv-h-sub">選択中palette。4.5:1 未満は警告色で出る</span></h2>
+      <table class="pv-audit" id="pv-audit">
+        <thead><tr><th>面</th><th>字</th><th>地</th><th class="r">比</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+
+  <script>
+    const PALETTES = ["live", "current", "seiji", "ebi"];
+    const LABELS = {
+      live: "採用中 :root(藍)", current: "旧 terracotta", ai: "A 藍 Ai",
+      seiji: "B 青磁 Seiji", ebi: "C 葡萄 Ebi",
+    };
+
+    function setPalette(name) {
+      document.documentElement.dataset.palette = name;
+      document.querySelectorAll(".pv-switch .pv-btn").forEach((b) => {
+        b.setAttribute("aria-pressed", String(b.dataset.set === name));
+      });
+      renderAudit();
+    }
+    document.querySelectorAll(".pv-switch .pv-btn").forEach((b) => {
+      b.addEventListener("click", () => setPalette(b.dataset.set));
+    });
+
+    /* 比較列。data-paletteは要素単位で効くので、同じ markup を4回置くだけで並ぶ。 */
+    const CMP = document.getElementById("pv-cmp");
+    CMP.innerHTML = PALETTES.map((p) => `
+      <div data-palette="${p}">
+        <h3>${LABELS[p]}</h3>
+        <div class="pv-swatches">
+          ${["--accent-deep", "--accent-ink", "--accent-bright", "--warn", "--warn-ink", "--ok", "--ok-ink", "--gold-ink"]
+            .map((t) => `<span class="pv-swatch" style="background:var(${t})" title="${t}"></span>`).join("")}
+        </div>
+        <div class="pv-row" style="margin-bottom:0.5rem">
+          <button class="btn btn-compact btn-primary">実行</button>
+          <button class="btn btn-compact">通常</button>
+          <span class="badge badge-connected">OK</span>
+          <span class="badge badge-error">ERR</span>
+        </div>
+        <div class="a-tabs" style="margin:0 0 0.5rem">
+          <button class="a-tab on"><span class="a-tab-name">選択中</span></button>
+          <button class="a-tab st-connected"><span class="a-tab-name">接続</span></button>
+        </div>
+        <table class="result-table">
+          <thead><tr><th data-sort class="sorted">値</th><th>状態</th></tr></thead>
+          <tbody>
+            <tr class="rank-top"><td class="num q" style="--q:1">18,402</td><td>1位</td></tr>
+            <tr class="row-warn"><td class="num q" style="--q:0.2">3,310</td><td>危険</td></tr>
+          </tbody>
+        </table>
+        <div class="pv-dark" style="margin-top:0.5rem">
+          <span style="color:var(--accent-bright)">処理中</span>
+          <span style="color:var(--ok-bright)">完了</span>
+          <span style="color:var(--warn-bright)">失敗</span>
+        </div>
+      </div>`).join("");
+
+    /* ── contrast監査 ───────────────────────────────────────────── */
+    function parseColor(css) {
+      const m = css.match(/-?[\d.]+/g);
+      if (!m) return [0, 0, 0];
+      return m.slice(0, 3).map(Number);
+    }
+    function lum(css) {
+      const [r, g, b] = parseColor(css).map((v) => {
+        const c = v / 255;
+        return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    /* var() の実値は getComputedStyle で取れるが hex のままなので、
+       描画済み要素の color を経由して rgb() へ正規化する。 */
+    const PROBE = document.createElement("span");
+    PROBE.style.display = "none";
+    document.body.appendChild(PROBE);
+    function tokenRgb(token) {
+      PROBE.style.color = `var(${token})`;
+      return getComputedStyle(PROBE).color;
+    }
+    function ratio(a, b) {
+      const la = lum(tokenRgb(a)), lb = lum(tokenRgb(b));
+      const hi = Math.max(la, lb), lo = Math.min(la, lb);
+      return (hi + 0.05) / (lo + 0.05);
+    }
+    const PAIRS = [
+      ["primary button", "--invert-fg", "--accent-deep"],
+      ["badge CONNECTING", "--invert-fg", "--accent-ink"],
+      ["押せる文字 / panel", "--accent-ink", "--sand-panel-muted"],
+      ["並替中の表header", "--accent-ink", "--sand-panel"],
+      ["暗地の accent", "--accent-bright", "--invert-bg"],
+      ["危ない文字 / panel", "--warn-ink", "--sand-panel-muted"],
+      ["badge ERROR", "--invert-fg", "--warn-ink"],
+      ["暗地の warn", "--warn-bright", "--invert-bg"],
+      ["良い文字 / panel", "--ok-ink", "--sand-panel-muted"],
+      ["badge CONNECTED", "--invert-fg", "--ok-ink"],
+      ["暗地の ok", "--ok-bright", "--invert-bg"],
+      ["★登録済み / panel", "--gold-ink", "--sand-panel-muted"],
+      ["負符号 / panel", "--sign-neg-ink", "--sand-panel-muted"],
+      ["本文 / 地", "--ink", "--sand-bg"],
+    ];
+    function renderAudit() {
+      const tb = document.querySelector("#pv-audit tbody");
+      tb.innerHTML = PAIRS.map(([label, fg, bg]) => {
+        const r = ratio(fg, bg);
+        return `<tr><td>${label}</td><td>${fg}</td><td>${bg}</td>` +
+          `<td class="r ${r < 4.5 ? "ng" : ""}">${r.toFixed(2)}</td></tr>`;
+      }).join("");
+    }
+    renderAudit();
+  </script>
+</body>
+</html>

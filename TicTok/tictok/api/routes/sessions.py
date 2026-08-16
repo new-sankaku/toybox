@@ -12,6 +12,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from tictok.record.upscale import upscale_done
 from fastapi import APIRouter
+from tictok.api import battles
 from tictok.api import files
 from tictok.api import fsfacts
 from tictok.api import runtime
@@ -88,7 +89,7 @@ async def session_detail(session_id: int) -> dict:
         return {
             "timeline": timeline,
             "recordings": recordings,
-            "summary": runtime.storage.session_summary(session_id),
+            "summary": _summary_with_gift_icons(runtime.storage.session_summary(session_id)),
             # 宝箱/Portalの実測。collectorがcheckpointで書くので、収集中でも直近まで読める。
             "envelopes": runtime.storage.session_envelopes(session_id),
         }
@@ -102,21 +103,37 @@ async def session_detail(session_id: int) -> dict:
     }
 
 
+def _summary_with_gift_icons(summary: dict) -> dict:
+    """summaryにgift_id→icon URLの対応を添える。
+
+    URLはgift単位で1本あればよいので、行ごとに持たせず1つのmapにまとめる。iconを出せない
+    giftはmapに載らない — icon画像が無いことは「そのgiftが飛ばなかった」ではないので、
+    行そのものは名前だけで残す。"""
+    sources: dict = {}
+    for gift in summary.get("gifts") or []:
+        gift_id = int(gift.get("gift_id") or 0)
+        if gift_id and not sources.get(gift_id):
+            sources[gift_id] = gift.get("gift_image") or ""
+    for user in summary.get("users") or []:
+        for item in (user.get("items") or {}).values():
+            gift_id = int(item.get("gift_id") or 0)
+            if gift_id and not sources.get(gift_id):
+                sources[gift_id] = item.get("gift_image") or ""
+    icons = {}
+    for gift_id, image_url in sources.items():
+        url = runtime.gift_icon_url(gift_id, image_url)
+        if url:
+            icons[str(gift_id)] = url
+    summary["gift_icons"] = icons
+    return summary
+
+
 async def _battles_for_session(session: dict) -> list:
-    """Battles are persisted only when the session ends (_persist_final). While the
-    session is still collecting, the live collector holds the authoritative, updating
-    battle list, so serve that; once ended, read the saved rows.
+    """そのsessionのBattle一覧(収集中はlive collector、終わっていればDB)。
 
-    どちらの経路も勝敗はcore.battleの確定判定へ揃えて返す(live側はbattles_snapshot、
-    保存側はbattles_for_sessionがannotate_result済み)。
-
-    live側だけevent loopに残すのは、あれがprocess内のsnapshotで、別threadから覗くと
-    収集中のcollectorが書き換えている最中の状態を掴むため。終わったsessionを読む側は
-    DBなので、書き込みlockを待つあいだloopを明け渡す。"""
-    collector = runtime.manager.get(session["unique_id"])
-    if collector is not None and collector.session_id == session["id"]:
-        return collector.battles_snapshot()["battles"]
-    return await asyncio.to_thread(runtime.storage.battles_for_session, session["id"])
+    分岐の本体は :mod:`tictok.api.battles` にある — 再生画面(録画)側も同じ一覧を引くので、
+    経路ごとに書くと片方だけが収集中のsessionでPKを出さない状態になる。"""
+    return await battles.battles_for_session(session["unique_id"], session["id"])
 
 
 def _session_owner(session: dict) -> dict:
@@ -136,6 +153,48 @@ async def session_battles(session_id: int) -> dict:
         "unique_id": session["unique_id"],
         "owner": _session_owner(session),
         "battles": await _battles_for_session(session),
+    }
+
+
+@router.get("/api/sessions/{session_id}/battle-series/{battle_id}")
+async def session_battle_series(session_id: int, battle_id: int) -> dict:
+    """1戦のscore推移(時系列)だけを返す軽い経路。
+
+    session丸ごとのbattles(中央値183KB・最大1.1MB。貢献者一覧とグローブ判定を含む)を
+    曲線1本のために引かせないための分割。相手別のscoreが要る(個人マルチ/チーム戦では
+    opp_scoreは最強の敵陣であって特定の相手の値ではない)ので、参加者別のsampleも返す。"""
+    session = await asyncio.to_thread(runtime._get_session_or_404, session_id)
+    fought = await _battles_for_session(session)
+    battle = next((b for b in fought if b.get("battle_id") == battle_id), None)
+    if battle is None:
+        raise HTTPException(status_code=404, detail="そのBattleは見つかりません。")
+    return {
+        "battle_id": battle_id,
+        "start_time": battle.get("start_time"),
+        "end_time": battle.get("end_time"),
+        "type": battle.get("type") or "personal",
+        "result": battle.get("result"),
+        "participants": [
+            {
+                "user_id": p.get("user_id", ""),
+                "nickname": p.get("nickname", ""),
+                "is_own": bool(p.get("is_own")),
+                "side": p.get("side"),
+            }
+            for p in (battle.get("participants") or [])
+        ],
+        "series": [
+            {
+                "t": s.get("t"),
+                "own": s.get("own", 0) or 0,
+                "opp": s.get("opp", 0) or 0,
+                "parts": [
+                    {"id": p.get("id", ""), "score": p.get("score", 0) or 0}
+                    for p in (s.get("parts") or [])
+                ],
+            }
+            for s in (battle.get("score_series") or [])
+        ],
     }
 
 

@@ -19,7 +19,6 @@ recording cannot be converted and is skipped rather than guessed at.
 What moves, and how:
   transcripts.segments_json  converted in place (start/end)
   bookmarks.start/end        converted in place
-  cut_list.start/end         converted in place
   search_hits                deleted for the recording; rebuilt from the converted
                              transcript and from comments (comments re-derive from the
                              new sidecar, so converting them would be a worse answer)
@@ -246,14 +245,17 @@ def drop_derived(conn: sqlite3.Connection, recording_id: int, convert) -> dict:
             segments = None
         if isinstance(segments, list):
             for seg in segments:
-                for key in ("start", "end"):
-                    if isinstance(seg.get(key), (int, float)):
-                        seg[key] = convert(float(seg[key]))
+                # 語ごとの時刻も同じ軸へ移す。segmentだけ移すと、字幕の分割は語の時刻で
+                # 行うためcueだけが古い軸に残り、segmentの表示は正しく見えるので気付けない。
+                for row in [seg, *(seg.get("words") or [])]:
+                    for key in ("start", "end"):
+                        if isinstance(row.get(key), (int, float)):
+                            row[key] = convert(float(row[key]))
             conn.execute("UPDATE transcripts SET segments_json=? WHERE recording_id=?",
                          (json.dumps(segments, ensure_ascii=False), recording_id))
             counts["transcript_segments"] = len(segments)
 
-    for table in ("bookmarks", "cut_list"):
+    for table in ("bookmarks",):
         try:
             rows = conn.execute(
                 "SELECT id, start, end FROM %s WHERE recording_id=?" % table,
@@ -366,7 +368,7 @@ async def main() -> int:
 
     conn.close()
     logger.info("完了=%d 失敗=%d", done, failed)
-    logger.info("次の作業: search_hits/passagesを作り直すため転写のindexingと意味検索のindexを"
+    logger.info("次の作業: search_hits/passagesを作り直すため文字起こしのindexingと意味検索のindexを"
                 "再実行し、必要な焼き込みは出力し直してください")
     return 1 if failed else 0
 

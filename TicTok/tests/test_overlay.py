@@ -378,8 +378,38 @@ def test_anchor_mappers_prefer_exact_media_pts_over_the_scale_model():
 
 def test_anchor_mappers_without_anchors_fit_the_capture_window():
     wall_to_media, media_to_pts = vo._anchor_mappers(None, 100.0, 200.0, 50.0)
-    assert wall_to_media(150.0) == pytest.approx(25.0)
-    assert media_to_pts(25.0) == 25.0
+    # 壁時計窓そのものがmedia軸で、mp4へ載せるのはmedia_to_pts側(合成は従来と同じ値)
+    assert wall_to_media(150.0) == pytest.approx(50.0)
+    assert media_to_pts(50.0) == pytest.approx(25.0)
+    assert media_to_pts(wall_to_media(150.0)) == pytest.approx(25.0)
+
+
+def test_anchor_mappers_without_anchors_anchor_the_mp4_pad():
+    # 壁時計100s / mp4 200s、うち80sは映像も音も無い凍結区間 -> 素材を消費しない
+    _wall_to_media, media_to_pts = vo._anchor_mappers(
+        None, 100.0, 200.0, 200.0, pts_gaps=[(60.0, 140.0)])
+    assert media_to_pts(49.9) == pytest.approx(59.88)
+    assert media_to_pts(50.1) == pytest.approx(140.12)
+    assert media_to_pts(100.0) == pytest.approx(200.0)
+
+
+def test_media_to_pts_anchors_a_pad_that_has_no_media_break():
+    # 素材100s / mp4 140s、うち30sは凍結区間。残り10sがsegmentごとの水増し
+    to_pts = vo._media_to_pts([0.0, 100.0], [0.0, 100.0], 140.0, [(40.0, 70.0)])
+    assert to_pts(36.36) == pytest.approx(40.0, abs=0.01)   # 穴の入口
+    assert to_pts(36.37) == pytest.approx(70.0, abs=0.02)   # 穴の出口
+    assert to_pts(100.0) == pytest.approx(140.0)
+    # 穴を挟んだ前後は同じ傾き(=水増しを除いた実尺の比)
+    assert (to_pts(20.0) - to_pts(10.0)) == pytest.approx(to_pts(90.0) - to_pts(80.0))
+    values = [to_pts(x / 10.0) for x in range(0, 1010)]
+    assert values == sorted(values)
+
+
+def test_media_to_pts_leaves_a_genuine_freeze_to_the_surrounding_region():
+    # mp4が素材より長くない -> 穴の30sは実在した時間。潰すと今より悪くなる
+    to_pts = vo._media_to_pts([0.0, 100.0], [0.0, 100.0], 100.0, [(40.0, 70.0)])
+    assert to_pts(50.0) == pytest.approx(50.0)
+    assert to_pts(100.0) == pytest.approx(100.0)
 
 
 def test_anchor_mappers_last_resort_is_the_raw_wall_offset():
@@ -915,6 +945,21 @@ async def test_mp4_source_still_decides_by_measured_average(tmp_path, monkeypatc
     assert await vo._probe_is_vfr(tmp_path / "src.mp4", 24.9166666) is True
 
 
+async def test_probe_pts_gaps_sorts_decode_order_before_differencing(tmp_path, monkeypatch):
+    """B-frameでpts_timeが復号順に前後しても、穴は1つとして数える。"""
+    import types
+
+    async def fake_run(args, **kwargs):
+        # 約35秒の穴を1つ持つmp4。各GOPは復号順(後続frameが先に出る)で並ぶ。
+        return types.SimpleNamespace(
+            stdout="0.0\n0.08\n0.04\n45.0\n45.08\n45.04\n10.0\n10.08\n10.04\n",
+            stderr="", ok=True)
+
+    monkeypatch.setattr(vo, "ffprobe_available", lambda: True)
+    monkeypatch.setattr(vo.ffprobe, "run", fake_run)
+    assert await vo._probe_pts_gaps(tmp_path / "src.mp4") == [(10.08, 45.0)]
+
+
 def window_call(tmp_path, **overrides):
     """プレビューが _run_ffmpeg へ渡す形(HLS入力・窓あり・comment層なし)。"""
     kwargs = dict(
@@ -934,13 +979,19 @@ async def test_preview_window_argv_is_frozen(tmp_path, monkeypatch):
     範囲焼き込みの実装はこの経路を汎用化して作られている。窓経路は実測で確定したoption群
     (-copyts / 入力側の-ss+-t / -itsoffsetのmedia軸寄せ)の上に立っており、1つ動かすと
     「プレビューでは合っているのに本出力はズレる」あるいは出力が空になる。引数列そのものを
-    固定して、汎用化の側から静かに変わることを防ぐ。"""
+    固定して、汎用化の側から静かに変わることを防ぐ。
+
+    ``-ss`` が窓開始そのもの(media軸)なのは実測による。以前はここへ container start_time を
+    足し戻していて、実HLS録画3本を音の相互相関で測ると切り出しの頭が要求より **+1.48〜
+    1.51秒**後ろへ着地していた(container start_time の実測1.517秒そのもの)。映像だけが
+    後ろへずれ、字幕・コメント・ギフトは要求どおりの軸に置かれるので、**焼いた物が全部
+    約1.5秒遅れて出ていた**。"""
     cmds = fake_ffmpeg(monkeypatch, [])
     await vo._run_ffmpeg(**window_call(tmp_path))
     assert cmds[0] == [
         "ffmpeg", "-nostdin", "-y", "-loglevel", config.get_ffmpeg_loglevel(),
         "-allowed_extensions", "ALL", "-copyts",
-        "-itsoffset", "-1.402000", "-ss", "121.402000", "-t", "60.000000",
+        "-itsoffset", "-1.402000", "-ss", "120.000000", "-t", "60.000000",
         "-i", str(tmp_path / "src.m3u8"),
         "-filter_complex_script", str(tmp_path / "x.preview.filter.txt"),
         "-map", "[vout]", "-an",
@@ -1000,8 +1051,13 @@ async def test_clip_opens_the_source_for_audio_when_input0_is_the_cfr_base(tmp_p
     assert inputs == [str(tmp_path / "base.clip.cfrbase.mp4"),
                       str(tmp_path / "x.clip.comments.mov"),
                       str(tmp_path / "src.m3u8")]
-    # -ss は -itsoffset より前の時刻で解釈されるので、media offsetを足し戻している
-    assert "121.402000" in argv
+    # ``-ss`` は **media軸**で渡す。container start_time はffmpeg側が足すので、ここで
+    # 足し戻すと二重計上になる。以前は 120 + 1.402 を渡しており、実HLS録画3本を音の
+    # 相互相関で測ると切り出しの頭が要求より **+1.48〜1.51秒** 後ろへ着地していた
+    # (container start_time の実測1.517秒そのもの)。映像だけが後ろへずれ、字幕は要求
+    # どおりの軸に置かれるので、テロップが約1.5秒遅れて出ていた。
+    assert "120.000000" in argv
+    assert "121.402000" not in argv
     assert argv[argv.index("-output_ts_offset") + 1] == "-120.000000"
 
 
@@ -1144,7 +1200,7 @@ def test_cleanup_removes_the_clip_markers_of_a_deleted_recording(make_recording,
 
 
 def test_burnable_transcript_refuses_a_stale_or_missing_timemap():
-    """焼き込みは元に戻せないので、字幕ONで転写が無い/時刻mapが旧版/出せるsegmentが無い
+    """焼き込みは元に戻せないので、字幕ONで文字起こしが無い/時刻mapが旧版/出せるsegmentが無い
     場合は字幕なしで焼かずに拒否する(本出力と同じ規則)。"""
     from tictok.record import transcription
 
@@ -1304,20 +1360,26 @@ def test_the_wrap_width_follows_the_telop_font_not_the_comment_font():
 
 def test_letter_spacing_is_charged_to_the_wrap_width():
     """字間はglyphの送りに上乗せされるので、折り返しの計算にも同じだけ足す。足さないと
-    字間のあるpresetだけ画面幅からはみ出す。"""
+    字間のあるpresetだけ画面幅からはみ出す。
+
+    測るのは行数である。折る位置は文の切れ目に限られるので(:mod:`tictok.record.jp_wrap`)、
+    1行あたりの文字数は幅だけでは決まらない——同じ文を同じ上限で折った**行の本数**だけが、
+    幅の見積もりが変わったことを素直に映す。
+    """
     spaced = max(telop_styles.TELOP_STYLES, key=lambda s: s.spacing_ratio)
     value = next(v for v, s in telop_styles.STYLE_VALUES.items() if s is spaced)
-    long_text = [{"start": 0.0, "end": 2.0, "text": "あ" * 200}]
+    long_text = [{"start": 0.0, "end": 2.0,
+                  "text": "今日はいい天気ですね、明日も晴れるといいなと思います。" * 4}]
 
-    def first_line(style_value):
+    def line_count(style_value):
         lines, _ = vo._build_subtitle_dialogues(
             long_text, 10.0, 1080, 1920,
             _telop_cfg(video_overlay_subtitle_style=style_value,
-                       video_overlay_subtitle_max_lines=6), 1.0, 0.5)
-        return lines[-1].split("}")[-1].split("\\N")[0]
+                       video_overlay_subtitle_max_lines=20), 1.0, 0.5)
+        return lines[-1].count("\\N")
 
     assert spaced.spacing_ratio > 0
-    assert len(first_line(value)) < len(first_line(1))
+    assert line_count(value) > line_count(1)
 
 
 def test_the_max_line_setting_bounds_the_lines_and_is_reported():
@@ -1501,7 +1563,7 @@ def test_a_new_preview_removes_the_previous_one_for_that_preset(monkeypatch, tmp
 
 def test_burnable_transcript_refuses_a_transcript_from_a_different_timeline():
     """版が同じでも、作られたときの入力が別物なら時刻はずれる。版だけを見ていた頃は
-    実尺+191秒の転写が素通りし、ズレた字幕が恒久的に焼き付いていた。"""
+    実尺+191秒の文字起こしが素通りし、ズレた字幕が恒久的に焼き付いていた。"""
     from tictok.record import transcription
 
     on = {"video_overlay_subtitles": 1}
@@ -1509,7 +1571,7 @@ def test_burnable_transcript_refuses_a_transcript_from_a_different_timeline():
              "segments": [{"start": 0.0, "end": 1.0, "text": "hi"}]}
     with pytest.raises(vo.TranscriptNotBurnableError, match="時間軸が違います"):
         vo._require_burnable_transcript(on, stale, 5074.8)
-    # 同じ素材から作られた転写は通る。実尺が測れないときも通す(ズレの証拠が無い)。
+    # 同じ素材から作られた文字起こしは通る。実尺が測れないときも通す(ズレの証拠が無い)。
     fresh = dict(stale, duration=5074.78)
     vo._require_burnable_transcript(on, fresh, 5074.8)
     vo._require_burnable_transcript(on, stale, None)

@@ -1,0 +1,75 @@
+# 装飾の層（要素）が持っているもの
+
+要素の数: 8 / 要素に属さない Input: 232個
+
+== 要素1 が持つもの（61個） ==
+   AdaptThicknessToPerspective    Number       0.0
+   Alpha                          Number       1.0
+   AngleX                         Number       0.0
+   AngleY                         Number       0.0
+   AngleZ                         Number       0.0
+   Blue                           Number       1.0
+   CleanIntersections             Number       0.0
+   ColorBrush                     Number       0.0
+   ColorFile                      Text         ''
+   ColorImage                     Image        None
+   ElementSeparator               Number       0.0
+   ElementShape                   Number       0.0
+   ElementSpacer                  Number       0.0
+   Enabled                        Number       1.0
+   ExtendHorizontal               Number       0.0
+   ExtendVertical                 Number       0.0
+   Green                          Number       1.0
+   ImageShadingEdges              Number       1.0
+   ImageShadingSampling           Number       1.0
+   ImageSource                    Number       0.0
+   JoinStyle                      Number       1.0
+   Level                          Number       3.0
+   LineStyle                      Number       0.0
+   MiterLimit                     Number       10.0
+   Name                           Text         'White Solid Fill'
+   Offset                         Point        {1: 0.0, 2: 0.0, 3: 0.0}
+   OffsetZ                        Number       0.0
+   Opacity                        Number       1.0
+   OutsideOnly                    Number       0.0
+   Overlap                        Number       2.0
+   OverrideColor                  Number       0.0
+   Pivot                          Point        {1: 0.0, 2: 0.0, 3: 0.0}
+   PivotNest                      Number       0.0
+   PivotZ                         Number       0.0
+   Position                       Number       1.0
+   PriorityBack                   Number       8.0
+   Properties                     Number       1.0
+   Red                            Number       1.0
+   Rotation                       Number       0.0
+   Round                          Number       0.0
+   ShadingGradient                Gradient     <BlackmagicFusion.PyRemoteObject object at 0x00000202494CE9B0>
+   ShadingMapping                 Number       1.0
+   ShadingMappingAngle            Number       0.0
+   ShadingMappingAspect           Number       1.0
+   ShadingMappingLevel            Number       4.0
+   ShadingMappingSize             Number       1.0
+   ShadingMappingSpacer           Number       0.0
+   Shear                          Number       0.0
+   ShearX                         Number       0.0
+   ShearY                         Number       0.0
+   Size                           Number       0.0
+   SizeX                          Number       1.0
+   SizeY                          Number       1.0
+   Softness                       Number       0.0
+   SoftnessBlend                  Number       1.0
+   SoftnessGlow                   Number       0.0
+   SoftnessOnFillColorToo         Number       0.0
+   SoftnessX                      Number       0.0
+   SoftnessY                      Number       0.0
+   Thickness                      Number       0.02
+   Type                           Number       0.0
+
+== 要素1 との違い ==
+   要素2: 62個 / 増えたもの Blank / 無いもの なし
+   要素3: 61個 / 増えたもの なし / 無いもの なし
+   要素4: 61個 / 増えたもの なし / 無いもの なし
+   要素5: 62個 / 増えたもの Blank / 無いもの なし
+   要素6: 61個 / 増えたもの なし / 無いもの なし
+   要素7: 61個 / 増えたもの なし / 無いもの なし
+   要素8: 61個 / 増えたもの なし / 無いもの なし

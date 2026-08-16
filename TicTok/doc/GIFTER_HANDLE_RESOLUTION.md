@@ -87,6 +87,35 @@ nickname の変化(71人)の方が件数は多い。最大は
 avatar が855人と最多なのは、avatar URLが署名付きで頻繁に変わるため。`MAX()` の辞書順に
 意味は無く、users表の「最後に観測した値」の方が意味を持つ。
 
+## 抜けていた経路: 配信者profileの Battle Gifter (2026-08-12 修正)
+
+上の規則は「集計のscopeで決める」だが、**source のscopeと consumer のscopeが違う経路**が
+1つ残っていた。
+
+配信者profileの Battle Gifter は全期間の通算表なのに、値の出どころが session単位の
+`battle_gift_contributions`(= point-in-time側)だった。そのうえ集約が `setdefault` なので、
+**最初に当たったBattle の値で固定**される。処理順は `s.started_at ASC`(最古のsessionから)
+なので、結果は「最新の名前」でも「そのsessionでの名前」でもなく、**その人を最初に観測した
+頃の名前**だった。
+
+| | Gifter一覧 | Battle Gifter(修正前) |
+|---|---|---|
+| 集計単位 | `identity_key` | `identity_key`(同じ) |
+| 表示handle | users表(最新) | 最古sessionの `MAX()` |
+| Fan台帳への導線 | あり | **`identity_key` を持たず不可** |
+
+数え方(人数・コイン・Battle数)はどちらも `identity_key` 単位で最初から正しく、
+**壊れていたのは表示だけ**である。改名した人が2つの表で別名に見え、同じ人なのに片方
+からしかFan台帳へ飛べなかった。
+
+修正: 集約後に `gifter_rows`(この配信者の全gift eventが母集合＝Battle Gifterの上位集合)
+から最新の身元へ解決し直す。追加queryは無い。`battle_gift_contributions` 自体は
+Battle card が point-in-time で使うので**変更していない** — 直したのは consumer 側である。
+
+残る1経路: 収集中の配信では、`gifter_rows`(読取り接続)を読んだ後に届いたgiftが Battle側
+(writer接続でflush済みを読む)にだけ現れうる。その1件は観測値のまま出て、次の読み込みで
+最新の身元へ揃う。
+
 ## 影響の確認
 
 - **consumer**: gifterの `unique_id` / `nickname` / `avatar` は全consumerで**表示専用**。

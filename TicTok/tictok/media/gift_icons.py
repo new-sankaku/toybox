@@ -29,6 +29,13 @@ _ALLOWED_HOST_SUFFIXES = (
 
 _FETCH_TIMEOUT_SECONDS = 8.0
 _MAX_BYTES = 4 * 1024 * 1024
+# pool上のfileは形式を名前に持たない(``<gift_id>.img``)。browserへ返すときは中身の
+# 先頭bytesで名乗る — 実物と違うcontent-typeを付けたimageはdecodeされず描かれない。
+_IMAGE_MAGIC = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"GIF8", "image/gif"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+)
 _FETCH_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -37,6 +44,19 @@ _FETCH_HEADERS = {
     "Referer": "https://www.tiktok.com/",
     "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
 }
+
+
+def sniff_image_type(head: bytes) -> "str | None":
+    """先頭bytesから画像形式を判定する。判らなければNone。
+
+    推測で名乗らないのは、形式の違うimageをbrowserが黙って捨てるため — 「iconが
+    出ない」だけの症状になり、原因がserver側の名乗りにあることが画面から読めない。"""
+    for magic, media_type in _IMAGE_MAGIC:
+        if head.startswith(magic):
+            return media_type
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
 
 
 class GiftIconCache:
@@ -74,6 +94,33 @@ class GiftIconCache:
             return path.is_file() and path.stat().st_size > 0
         except OSError:
             return False
+
+    def load(self, gift_id: int) -> "tuple[bytes, str] | None":
+        """pool上のiconを (中身, content-type) で返す。無い・読めない・形式が判らない
+        場合はNone。browserへ直接返すための読み口(焼き込み側はfileを直に読む)。"""
+        if not self.has(gift_id):
+            return None
+        path = self.path_for(gift_id)
+        try:
+            content = path.read_bytes()
+        except OSError:
+            logger.warning(
+                "保存済みgift iconを読めませんでした: %s", path,
+                extra={"event": "http.gift_icon_read_failed",
+                       "ctx": {"gift_id": int(gift_id), "path": str(path)}},
+                exc_info=True,
+            )
+            return None
+        media_type = sniff_image_type(content[:16])
+        if media_type is None:
+            logger.warning(
+                "gift icon %s の画像形式を判定できませんでした: %s", gift_id, path,
+                extra={"event": "http.gift_icon_unknown_format",
+                       "ctx": {"gift_id": int(gift_id), "path": str(path),
+                               "size_bytes": len(content)}},
+            )
+            return None
+        return content, media_type
 
     async def persist(self, gift_id: int, url: str) -> bool:
         """Download the icon once and store it as ``<gift_id>.img``. Returns True

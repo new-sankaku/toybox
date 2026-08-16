@@ -123,6 +123,15 @@ class AvatarProxy:
                 return downloaded
             return None
 
+    def pooled(self, user_key: str) -> Optional[tuple[bytes, str]]:
+        """user単位のpoolに在る画像だけを返す(URL不要・network無し)。その時点のavatar URLを
+        記録できなかった行 — 署名が通らずroom_infoまで届かなかったsessionなど — のために、
+        身元(unique_id)だけでアイコンを引く口。URLが無い以上取りに行ける先は無いので、
+        pooledに無ければNoneを返し、呼び出し側は頭文字へ落とす。"""
+        if not user_key or self._pool is None:
+            return None
+        return self._pool.get(user_key)
+
     def _load_local(self, url: str, user_key: Optional[str]) -> Optional[tuple[bytes, str]]:
         """Best already-held copy of this avatar, or None. Order: the by-id pool
         (canonical per user, shared with history and the video burn-in), then legacy

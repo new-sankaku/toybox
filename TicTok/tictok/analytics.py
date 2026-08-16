@@ -1556,7 +1556,7 @@ def _payload_coverage(conn, sess: dict) -> dict:
     """収集の穴(欠測)を測る素材。sessionが終わった時点で確定する値だけを持つ。
 
     録画カバレッジとSTT率は後から変わる(finalizeより後にmp4のended_atが埋まり、
-    転写は数日後に走ることもある)ため、ここへは入れずreduce側で都度集計する。"""
+    文字起こしは数日後に走ることもある)ため、ここへは入れずreduce側で都度集計する。"""
     sid = sess["id"]
     s_start, s_end = sess["started_at"], sess["ended_at"]
     meta = conn.execute(
@@ -3118,8 +3118,8 @@ def reduce_coverage(rows: list, media: list) -> dict:
     欠測秒数を0と出すと「存在しない健全性」の提示になる。計測不能として別掲し、
     欠測系の分母には一切入れない。録画率・STT率・sampling間隔は旧sessionでも正しい。
 
-    mediaは (session_id, 録画のstarted_at/ended_at/status, 転写有無)の生row列。録画の
-    ended_atも転写もsessionが終わった後から埋まるため、payload cacheへは載せず都度集計する。"""
+    mediaは (session_id, 録画のstarted_at/ended_at/status, 文字起こし有無)の生row列。録画の
+    ended_atも文字起こしもsessionが終わった後から埋まるため、payload cacheへは載せず都度集計する。"""
     n_sessions = 0
     n_instrumented = 0
     n_ended = 0

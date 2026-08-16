@@ -273,8 +273,9 @@ async def test_videos_tabs_switch(ui_server, page):
     """配信者動画のtabが切り替わる(view の出し分けが効いている)。"""
     await page.goto(ui_server + "/videos", wait_until="networkidle")
     # 文字起こしは一括処理の1種別になり、専用tabは無くなった(選ぶ場所と進捗を見る場所が
-    # 別tabに固定され、1回の作業で必ず往復していたため)。
-    for view in ["marks", "cuts", "bulk", "search"]:
+    # 別tabに固定され、1回の作業で必ず往復していたため)。切り出しリストも見どころへ
+    # 畳んだ(同じ範囲を2つの表で持っていた)。
+    for view in ["marks", "groups", "bulk", "search"]:
         await page.click(f"#tab-{view}")
         await page.wait_for_selector(f"#view-{view}:not(.hidden)", timeout=5000)
         classes = (await page.get_attribute(f"#tab-{view}", "class")).split()

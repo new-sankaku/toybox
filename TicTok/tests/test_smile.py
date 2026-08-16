@@ -141,7 +141,7 @@ def test_the_feature_is_off_and_unconfigured_by_default(monkeypatch):
     assert status["enabled"] is False
     assert status["configured"] is False
     assert status["face_model"] == "" and status["smile_model"] == ""
-    # GPUは転写と超解像が12GBを取り合っている。ここは常にCPU。
+    # GPUは文字起こしと超解像が12GBを取り合っている。ここは常にCPU。
     assert status["device"] == "cpu"
 
 

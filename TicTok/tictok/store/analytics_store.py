@@ -272,7 +272,7 @@ class AnalyticsMixin:
     def analytics_coverage(self, since: float = 0.0) -> dict:
         """収集カバレッジ: 開始遅延・切断欠測・sampling間隔・録画率・STT率。
 
-        録画のended_atも転写もsessionが終わった後から埋まるため、この2つはsession単位
+        録画のended_atも文字起こしもsessionが終わった後から埋まるため、この2つはsession単位
         payload cacheへ載せず、都度素データから集計する(cacheすると永久に古い値になる)。"""
         # 収集中sessionのsampling間隔はviewer_samplesをその場で読むため、batch writerに
         # 滞留したsampleを先に確定させる(読み取り前flush)。

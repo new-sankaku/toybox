@@ -1,15 +1,15 @@
 import json
 import sqlite3
 import threading
-import xml.etree.ElementTree as ET
-from fractions import Fraction
 from pathlib import Path
 
 import pytest
 
 from tictok.core import layout
 from tictok.record.recorder import timing_path
-from tictok.search import cutlist_export, indexer
+from tictok.search import indexer
+from tictok.search.normalize import (FOLD_VERSION, MentionNames, blank_mention, fold,
+                                     index_fold, mark)
 from tictok.search.query import MIN_FTS_CHARS, QueryError, parse
 
 
@@ -117,7 +117,8 @@ def test_parse_quoted_phrase_containing_or_stays_and_mode():
     # フレーズの中身は語であって演算子ではない。ANDのつもりの検索をORへ倒さない。
     out = parse('"a OR b" ramen')
     assert out["or_mode"] is False
-    assert out["match"] == '("a OR b" AND "ramen")'
+    # MATCH式へ載る語は畳んだ形(index側も同じ形)。英大文字は小文字へ寄る。
+    assert out["match"] == '("a or b" AND "ramen")'
 
 
 def test_parse_bare_or_still_switches_to_or_mode():
@@ -131,7 +132,7 @@ def test_parse_phrase_that_is_only_or_is_a_term_not_an_operator():
     assert out["or_mode"] is False
     assert out["terms"] == ["OR"]
     assert out["match"] is None
-    assert out["like_all"] == ["%OR%"]
+    assert out["like_all"] == ["%or%"]
 
 
 def test_parse_or_with_negation_keeps_or_mode_and_the_exclusion():
@@ -165,265 +166,96 @@ def test_parse_match_expressions_are_valid_fts5_trigram_syntax(raw, hits, misses
     assert found == set(hits)
 
 
-# ===== cutlist_export =====
+# ===== normalize (表記ゆれの畳み込み) =====
 
 
-FPS30 = Fraction(30, 1)
-FPS2997 = Fraction(30000, 1001)
+@pytest.mark.parametrize("raw,expected", [
+    ("うざ", "ウザ"),
+    ("ウザ", "ウザ"),
+    ("ヴぁゝゞ", "ヴァヽヾ"),
+    ("ＡＢＣ１２３", "abc123"),
+    ("Ramen", "ramen"),
+    ("ｱｲｳ", "アイウ"),
+    ("５０％", "50%"),
+    ("空　白", "空 白"),
+    ("ウサ", "ウサ"),      # 濁点は畳まない(ウザとウサは別語)
+    ("ツ", "ツ"),          # 小書きも畳まない(ッとツは別語)
+])
+def test_fold_normalizes_the_written_form(raw, expected):
+    assert fold(raw) == expected
 
 
-def _media(fps=FPS30, width=1080, height=1920, duration=None,
-           audio_channels=None, audio_rate=None):
-    return {"fps": fps, "width": width, "height": height, "duration": duration,
-            "audio_channels": audio_channels, "audio_rate": audio_rate}
+@pytest.mark.parametrize("raw", [
+    "うざい", "ｳｻﾞｲ", "ＡＢ①㍿", "😀👍", "が゙", "ﾞﾟ゛゜", "", "ＡＢＣ",
+])
+def test_fold_keeps_the_character_count(raw):
+    """畳んだ本文の位置をそのまま原文へ当てて強調するので、長さが変わってはいけない。"""
+    assert len(fold(raw)) == len(raw)
 
 
-def _cut(unique_id="s", start=0.0, end=1.0, fps=FPS30, **extra):
-    cut = {"unique_id": unique_id, "start": start, "end": end,
-           "media": _media(fps) if fps is not None else None}
-    cut.update(extra)
-    return cut
+def test_fold_keeps_the_character_count_for_every_code_point():
+    """1文字→1文字であることをUnicode全域で担保する。文字起こしにもコメントにも何が来るか
+    分からない以上、代表例だけでは前提が崩れたことに気付けない。"""
+    assert [ch for ch in map(chr, range(0x110000)) if len(fold(ch)) != 1] == []
 
 
-@pytest.mark.parametrize(
-    "seconds,expected",
-    [
-        (0.0, "00:00:00:00"),
-        (1.5, "00:00:01:15"),
-        (59.0, "00:00:59:00"),
-        (60.0, "00:01:00:00"),
-        (3661.0, "01:01:01:00"),
-        (-5.0, "00:00:00:00"),
-    ],
-)
-def test_timecode_at_boundaries(seconds, expected):
-    assert cutlist_export._timecode(seconds, FPS30) == expected
+def test_mark_wraps_the_original_text_not_the_folded_one():
+    marked = mark("前ウザい後うざい", ["ウザ"])
+    assert marked == "前\x02ウザ\x03い後\x02うざ\x03い"
 
 
-def test_timecode_rounds_frames_rather_than_truncating():
-    assert cutlist_export._timecode(0.98, FPS30) == "00:00:00:29"
-    # 29.7 frame は切り上げられるので、境界直前でも次の秒へ繰り上がる。
-    assert cutlist_export._timecode(0.99, FPS30) == "00:00:01:00"
-    assert cutlist_export._timecode(1.0, FPS30) == "00:00:01:00"
+def test_mark_merges_overlapping_terms_into_one_span():
+    """囲みが入れ子になると、画面側の分割が強調の対応を取り違える。"""
+    marked = mark("ラーメン屋", ["ラーメ", "ーメン"])
+    assert marked == "\x02ラーメン\x03屋"
 
 
-def test_is_drop_frame_only_for_ntsc_fractional_rates():
-    assert cutlist_export.is_drop_frame(FPS2997) is True
-    assert cutlist_export.is_drop_frame(Fraction(60000, 1001)) is True
-    assert cutlist_export.is_drop_frame(FPS30) is False
-    assert cutlist_export.is_drop_frame(Fraction(60, 1)) is False
+def test_mark_without_a_hit_leaves_the_body_untouched():
+    assert mark("うどん", ["ラーメン"]) == "うどん"
 
 
-def test_drop_frame_labels_skip_two_at_each_minute_but_not_the_tenth():
-    tc = cutlist_export._timecode_frames
-    # 最初の1分は取りこぼしが無く、1800 frame目で ;00 と ;01 を飛ばして ;02 になる。
-    assert tc(1799, FPS2997) == "00:00:59;29"
-    assert tc(1800, FPS2997) == "00:01:00;02"
-    # 10分ごとは飛ばさないので、label と実経過時間がここで揃う。
-    assert tc(17982, FPS2997) == "00:10:00;00"
+# ===== normalize (返信の宛先を索引から外す) =====
 
 
-def test_drop_frame_uses_semicolon_separator():
-    assert ";" in cutlist_export._timecode(1.0, FPS2997)
-    assert ";" not in cutlist_export._timecode(1.0, FPS30)
+def test_blank_mention_removes_the_leading_reply_target():
+    assert blank_mention("@よい おやすみ") == "    おやすみ"
 
 
-def test_to_csv_header_and_row_shape():
-    csv_text = cutlist_export.to_csv([
-        _cut(unique_id="streamer", filename="a.mp4", path="C:/rec/a.mp4",
-             start=12.5, end=20.0, label="best bit"),
-    ])
-    lines = csv_text.strip().split("\n")
-    assert lines[0].split(",") == [
-        "unique_id", "filename", "path", "start_seconds", "end_seconds",
-        "duration_seconds", "fps", "start_timecode", "end_timecode", "label",
-    ]
-    assert lines[1] == (
-        "streamer,a.mp4,C:/rec/a.mp4,12.500,20.000,7.500,30.000000,"
-        "00:00:12:15,00:00:20:00,best bit"
-    )
+def test_blank_mention_keeps_the_character_count():
+    body = "＠ニヤてち ところで なんの話ですか？"
+    assert len(blank_mention(body)) == len(body)
 
 
-def test_to_csv_defaults_optional_fields_to_empty_and_quotes_commas():
-    csv_text = cutlist_export.to_csv([_cut(label="a,b")])
-    row = csv_text.strip().split("\n")[1]
-    assert row == 's,,,0.000,1.000,1.000,30.000000,00:00:00:00,00:00:01:00,"a,b"'
+def test_blank_mention_ignores_an_at_sign_that_is_not_at_the_head():
+    body = "(@￣ρ￣@)ｚｚｚｚ"
+    assert blank_mention(body) == body
 
 
-def test_to_csv_keeps_seconds_but_blanks_timecode_when_fps_is_unmeasurable():
-    # CSVは秒を無損失で持つので、fpsが測れなくても行自体は正しい。推測値では埋めない。
-    csv_text = cutlist_export.to_csv([_cut(start=0.0, end=1.0, fps=None)])
-    row = csv_text.strip().split("\n")[1]
-    assert row == "s,,,0.000,1.000,1.000,,,,"
+def test_blank_mention_blanks_a_body_that_is_only_a_mention():
+    assert blank_mention("@よい") == "   "
 
 
-def test_to_csv_empty_cuts_still_emits_header_only():
-    assert cutlist_export.to_csv([]).strip().count("\n") == 0
+def test_blank_mention_cuts_at_the_known_name_not_at_the_first_space():
+    """表示名そのものに空白があると、空白で切った残りが索引へ残って結局その名前で当たる。"""
+    names = MentionNames(["Maiza Santos"])
+    assert blank_mention("@Maiza Santos please gift", names) == " " * 14 + "please gift"
+    # 名前を知らなければ空白で切るしかなく、後半が索引へ残る。
+    assert "Santos" in blank_mention("@Maiza Santos please gift")
 
 
-def test_to_edl_accumulates_the_record_timeline():
-    edl = cutlist_export.to_edl([
-        _cut(filename="a.mp4", start=10.0, end=12.0),
-        _cut(filename="b.mp4", start=100.0, end=103.0),
-    ])
-    lines = edl.split("\n")
-    assert lines[0] == "TITLE: tictok_cutlist"
-    assert lines[1] == "FCM: NON-DROP FRAME"
-    events = [ln for ln in lines if ln.startswith("00")]
-    assert events[0].endswith("00:00:10:00 00:00:12:00 00:00:00:00 00:00:02:00")
-    # 2本目のrecord inは1本目の尺(2s)から始まる。
-    assert events[1].endswith("00:01:40:00 00:01:43:00 00:00:02:00 00:00:05:00")
-    assert events[0].startswith("001  AX       AA/V  C")
-    assert events[1].startswith("002  AX       AA/V  C")
+def test_blank_mention_falls_back_to_the_first_space_for_an_unknown_name():
+    assert blank_mention("@ギフ禁のきき どぞ", MentionNames(["別人"])) == " " * 8 + "どぞ"
 
 
-def test_to_edl_marks_fcm_drop_frame_for_ntsc_material():
-    edl = cutlist_export.to_edl([_cut(start=0.0, end=1.0, fps=FPS2997)])
-    assert edl.split("\n")[1] == "FCM: DROP FRAME"
+def test_mention_names_takes_the_longest_match():
+    long_name = "よい【そのギフト】🐢"
+    names = MentionNames(["よい", long_name])
+    assert names.match_length(long_name + " ありがと") == len(long_name)
 
 
-def test_to_edl_omits_source_and_comment_lines_when_absent():
-    edl = cutlist_export.to_edl([_cut()])
-    assert "* FROM CLIP NAME: " in edl
-    assert "* SOURCE FILE:" not in edl
-    assert "* COMMENT:" not in edl
-
-
-def test_to_edl_custom_title():
-    edl = cutlist_export.to_edl([_cut()], title="mine")
-    assert edl.startswith("TITLE: mine\nFCM: NON-DROP FRAME")
-
-
-def test_to_edl_refuses_empty_cuts():
-    with pytest.raises(cutlist_export.CutlistExportError):
-        cutlist_export.to_edl([], title="mine")
-
-
-def test_to_edl_refuses_material_whose_fps_could_not_be_measured():
-    # 推測fpsでtimecodeを作らない、が設計上の要件。
-    with pytest.raises(cutlist_export.CutlistExportError) as excinfo:
-        cutlist_export.to_edl([_cut(filename="a.mp4", fps=None)])
-    assert "a.mp4" in str(excinfo.value)
-
-
-def test_to_edl_refuses_mixed_frame_rates():
-    # EDLはlist全体で1つのtimebaseしか持てないため混在は書き出さない。
-    with pytest.raises(cutlist_export.CutlistExportError) as excinfo:
-        cutlist_export.to_edl([
-            _cut(filename="a.mp4", fps=FPS30),
-            _cut(filename="b.mp4", fps=FPS2997),
-        ])
-    assert "FCPXML" in str(excinfo.value)
-
-
-def test_to_edl_clamps_reversed_range_on_the_record_side_only():
-    # 実挙動の記録: record側はmax(0)で潰れるが、source out < source in はそのまま出る。
-    edl = cutlist_export.to_edl([_cut(start=10.0, end=5.0)])
-    event = [ln for ln in edl.split("\n") if ln.startswith("001")][0]
-    assert event.endswith("00:00:10:00 00:00:05:00 00:00:00:00 00:00:00:00")
-
-
-def test_timecode_frame_field_follows_the_measured_fps():
-    """同じ秒でもfpsが違えばframe桁は変わる。実録画は25/30/60fpsが混ざっており、
-    既定値で決め打ちするとNLE上の位置が素材ごとにずれる。"""
-    assert cutlist_export._timecode(22.5, Fraction(25, 1)) == "00:00:22:12"
-    assert cutlist_export._timecode(22.5, FPS30) == "00:00:22:15"
-    assert cutlist_export._timecode(22.5, Fraction(60, 1)) == "00:00:22:30"
-
-
-def test_to_edl_timecode_follows_the_measured_fps():
-    """source側もrecord側も、素材の実測fpsで数える。"""
-    edl = cutlist_export.to_edl([_cut(start=10.0, end=32.5, fps=Fraction(25, 1))])
-    event = [ln for ln in edl.split("\n") if ln.startswith("001")][0]
-    assert event.endswith("00:00:10:00 00:00:32:12 00:00:00:00 00:00:22:12")
-
-
-def test_to_fcpxml_is_well_formed_and_lands_on_frame_boundaries(tmp_path):
-    # pathは実在しなくてよいが、file:// URLにできる絶対pathである必要がある
-    # (絶対pathの綴りはOSで違うので、tmp_pathから組む)。
-    src = str(tmp_path / "a.mp4")
-    xml = cutlist_export.to_fcpxml([
-        _cut(filename="a.mp4", path=src, start=10.0, end=20.0,
-             label="笑 <確認> & test"),
-        _cut(filename="a.mp4", path=src, start=30.0, end=35.5),
-    ])
-    root = ET.fromstring(xml)
-    assert root.get("version") == cutlist_export.FCPXML_VERSION
-    # 同じfileを2度切ってもasset/formatは共有する。id重複はFCP側で読み込みが壊れる。
-    ids = [el.get("id") for el in root.find("resources")]
-    assert len(ids) == len(set(ids))
-    assert len(root.findall(".//asset")) == 1
-    # 時刻はframe数から組み立てた有理秒。frameDurationの整数倍でない値はNLEが丸める。
-    clips = root.findall(".//asset-clip")
-    assert [c.get("offset") for c in clips] == ["0s", "300/30s"]
-    assert [c.get("start") for c in clips] == ["300/30s", "900/30s"]
-    assert [c.get("duration") for c in clips] == ["300/30s", "165/30s"]
-    assert clips[0].find("note").text == "笑 <確認> & test"
-
-
-def test_to_fcpxml_carries_a_format_per_source_so_mixed_rates_are_fine(tmp_path):
-    """EDLと違いFCPXMLは素材ごとにframe rateを持てる。混在はこちらで出す。"""
-    xml = cutlist_export.to_fcpxml([
-        _cut(filename="a.mp4", path=str(tmp_path / "a.mp4"), fps=Fraction(25, 1)),
-        _cut(filename="b.mp4", path=str(tmp_path / "b.mp4"), fps=Fraction(60, 1)),
-    ])
-    root = ET.fromstring(xml)
-    formats = {el.get("id"): el.get("frameDuration") for el in root.iter("format")}
-    assert set(formats.values()) == {"1/25s", "1/60s"}
-    clips = root.findall(".//asset-clip")
-    assert formats[clips[0].get("format")] == "1/25s"
-    assert formats[clips[1].get("format")] == "1/60s"
-
-
-def test_to_fcpxml_keeps_ntsc_rational_frame_duration_and_marks_drop_frame(tmp_path):
-    # 29.97はfloatに落とすと30000/1001へ戻らない。有理数のまま持つことが要件。
-    xml = cutlist_export.to_fcpxml([_cut(path=str(tmp_path / "a.mp4"), fps=FPS2997)])
-    root = ET.fromstring(xml)
-    assert root.find(".//format").get("frameDuration") == "1001/30000s"
-    assert root.find(".//sequence").get("tcFormat") == "DF"
-
-
-def test_to_fcpxml_refuses_material_whose_fps_could_not_be_measured():
-    with pytest.raises(cutlist_export.CutlistExportError) as excinfo:
-        cutlist_export.to_fcpxml([_cut(filename="a.mp4", fps=None)])
-    assert "a.mp4" in str(excinfo.value)
-
-
-async def test_resolve_timebases_probes_each_file_once(monkeypatch, tmp_path):
-    calls = []
-
-    async def fake_probe(path):
-        calls.append(Path(path))
-        return _media(Fraction(25, 1)), None
-
-    monkeypatch.setattr(cutlist_export, "_probe_media", fake_probe)
-    first, second = tmp_path / "a.mp4", tmp_path / "b.mp4"
-    resolved = await cutlist_export.resolve_timebases([
-        _cut(path=str(first), fps=None),
-        _cut(path=str(first), fps=None),
-        _cut(path=str(second), fps=None),
-    ])
-    # 同じfileを何度切ってもffprobeは1回。cut listは同一録画から何十本も出る。
-    assert calls == [first, second]
-    assert [c["media"]["fps"] for c in resolved] == [Fraction(25, 1)] * 3
-
-
-async def test_resolve_timebases_leaves_unprobeable_cuts_unmeasured(monkeypatch, tmp_path):
-    """ffprobeが失敗した素材へ既定fpsを与えない。frame基準の形式側で止めるため、
-    未解決はNoneのまま残す。"""
-    async def fail_probe(path):
-        return None, "映像streamがありません"
-
-    monkeypatch.setattr(cutlist_export, "_probe_media", fail_probe)
-    resolved = await cutlist_export.resolve_timebases(
-        [_cut(path=str(tmp_path / "a.mp4"), fps=None)])
-    assert resolved[0]["media"] is None
-    # 失敗理由は潰さずcutへ載せる。汎用errorに畳むとuserが原因を切り分けられない。
-    assert resolved[0]["media_error"] == "映像streamがありません"
-    # pathが無いcutはffprobeを起こしようがないので、そもそも測りに行かない。
-    pathless = await cutlist_export.resolve_timebases([_cut(fps=None)])
-    assert pathless[0]["media"] is None
-    assert pathless[0]["media_error"] == "cutにfileのpathがありません"
+def test_index_fold_folds_after_dropping_the_target():
+    # 宛先を外したうえで表記ゆれを畳む(「うざ」は「ウザ」の形で索引へ載る)。
+    assert index_fold("@ウザ うざい") == "    ウザイ"
 
 
 # ===== indexer =====
@@ -679,8 +511,110 @@ def test_search_scenes_highlights_the_hit_in_fts_mode(tmp_db, seeded):
     assert item["snippet"].replace("\x02", "").replace("\x03", "") == "前ラーメン後"
 
 
+@pytest.mark.parametrize("query,mode", [
+    ("うざい", "fts"),      # 3文字以上: FTSの索引語も畳んだ形で入っている
+    ("ウザい", "fts"),
+    ("ウザ", "like"),       # 2文字以下: LIKEも畳んだ本文(body_norm)を見る
+    ("うざ", "like"),
+])
+def test_search_scenes_matches_across_hiragana_and_katakana(tmp_db, seeded, query, mode):
+    seeded(["それうざい", "それウザい", "関係ない話"])
+    result = tmp_db.search_scenes(query, [indexer.SOURCE_STT])
+    assert result["mode"] == mode
+    assert _bodies(result) == ["それうざい", "それウザい"]
+
+
+def test_search_scenes_matches_across_width_and_case(tmp_db, seeded):
+    seeded(["ＬＩＶＥ配信", "live配信", "関係ない話"])
+    assert len(tmp_db.search_scenes("LIVE", [indexer.SOURCE_STT])["items"]) == 2
+    assert len(tmp_db.search_scenes("ｌｉｖｅ", [indexer.SOURCE_STT])["items"]) == 2
+
+
+def test_search_scenes_keeps_the_written_form_of_the_body_in_the_snippet(tmp_db, seeded):
+    """畳んだ本文を索引しているので、返す本文まで畳んでしまうと画面の文字が化ける。"""
+    seeded(["それうざい"])
+    item = tmp_db.search_scenes("ウザい", [indexer.SOURCE_STT])["items"][0]
+    assert item["body"] == "それうざい"
+    assert item["snippet"] == "それ\x02うざい\x03"
+
+
+def test_search_scenes_highlights_in_like_mode_too(tmp_db, seeded):
+    """2文字以下の検索はFTSを通らないが、強調はFTS経路と同じに出す。"""
+    seeded(["前うざ後"])
+    result = tmp_db.search_scenes("ウザ", [indexer.SOURCE_STT])
+    assert result["mode"] == "like"
+    assert result["items"][0]["snippet"] == "前\x02うざ\x03後"
+
+
+def test_search_scenes_negation_also_folds_the_written_form(tmp_db, seeded):
+    seeded(["うざいけど好き", "好きなだけ"])
+    result = tmp_db.search_scenes("好き -ウザい", [indexer.SOURCE_STT])
+    assert _bodies(result) == ["好きなだけ"]
+
+
+def _downgrade_search_index(path):
+    """畳み込みを入れる前のDBの姿へ戻す(索引は原文のbody列・版markerも無い)。"""
+    conn = sqlite3.connect(str(path))
+    conn.execute("DROP TABLE search_fts")
+    conn.execute("ALTER TABLE search_hits DROP COLUMN body_norm")
+    conn.execute("CREATE VIRTUAL TABLE search_fts USING fts5("
+                 " body, content='search_hits', content_rowid='id', tokenize='trigram')")
+    conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')")
+    conn.execute("DELETE FROM db_maintenance WHERE key = 'search_fold_version'")
+    conn.commit()
+    conn.close()
+
+
+def _reopen(path):
+    from tictok.storage import Storage
+    return Storage(str(path))
+
+
+def test_migration_folds_rows_written_before_the_index_was_folded(
+        tmp_db, tmp_db_path, seeded):
+    """既に貯まっている索引(原文で作られたもの)も、起動時に畳み直されること。"""
+    seeded(["それうざい"])
+    tmp_db.close()
+    _downgrade_search_index(tmp_db_path)
+
+    storage = _reopen(tmp_db_path)
+    try:
+        assert _bodies(storage.search_scenes("ウザい", [indexer.SOURCE_STT])) == ["それうざい"]
+        assert _bodies(storage.search_scenes("ウザ", [indexer.SOURCE_STT])) == ["それうざい"]
+    finally:
+        storage.close()
+
+
+def test_migration_reruns_when_the_folding_rule_version_changes(
+        tmp_db, tmp_db_path, seeded, monkeypatch):
+    """畳むruleを変えたら索引を作り直すこと。queryだけ新ruleで畳まれると、その語だけ
+    当たらないという形で静かに壊れる。"""
+    seeded(["それうざい"])
+    tmp_db.close()
+    conn = sqlite3.connect(str(tmp_db_path))
+    # 索引を「古いruleで畳んだ状態」に見立てて壊しておく。作り直しが走ればここは
+    # 上書きされ、走らなければ残る。
+    conn.execute("UPDATE search_hits SET body_norm = '畳み損ね'")
+    conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')")
+    conn.commit()
+    conn.close()
+
+    unchanged = _reopen(tmp_db_path)
+    try:
+        assert unchanged.search_scenes("ウザい", [indexer.SOURCE_STT])["total"] == 0
+    finally:
+        unchanged.close()
+
+    monkeypatch.setattr("tictok.search.normalize.FOLD_VERSION", FOLD_VERSION + 1)
+    bumped = _reopen(tmp_db_path)
+    try:
+        assert _bodies(bumped.search_scenes("ウザい", [indexer.SOURCE_STT])) == ["それうざい"]
+    finally:
+        bumped.close()
+
+
 def test_search_scenes_source_filter_is_applied(tmp_db, seeded):
-    seeded(["転写のラーメン"], source=indexer.SOURCE_STT)
+    seeded(["文字起こしのラーメン"], source=indexer.SOURCE_STT)
     seeded(["コメントのラーメン"], source=indexer.SOURCE_COMMENT)
     assert _bodies(tmp_db.search_scenes("ラーメン", [indexer.SOURCE_COMMENT])) == ["コメントのラーメン"]
     assert tmp_db.search_scenes("ラーメン", [])["total"] == 0
@@ -770,3 +704,34 @@ def test_replace_search_hits_drops_the_stale_fts_index(tmp_db, seeded):
     seeded(["新しいうどん"])
     assert tmp_db.search_scenes("ラーメン", [indexer.SOURCE_STT])["total"] == 0
     assert tmp_db.search_scenes("うどん", [indexer.SOURCE_STT])["total"] == 1
+
+
+# ===== search_scenes — 返信の宛先は索引に載せない =====
+
+
+def test_search_scenes_does_not_match_the_reply_target(tmp_db, seeded):
+    """@よい への返信が「よい」で全部出てくると、その人宛の返信が検索を埋める。"""
+    seeded(["@よい おやすみなさいー", "よい香りがする"], source=indexer.SOURCE_COMMENT)
+    result = tmp_db.search_scenes("よい", [indexer.SOURCE_COMMENT])
+    assert _bodies(result) == ["よい香りがする"]
+
+
+def test_search_scenes_still_finds_the_reply_body(tmp_db, seeded):
+    """外すのは宛先だけ。返信の中身は今まで通り引ける。"""
+    seeded(["@よい おやすみなさいー"], source=indexer.SOURCE_COMMENT)
+    result = tmp_db.search_scenes("おやすみ", [indexer.SOURCE_COMMENT])
+    # 画面に出す本文は原文のまま。誰への返信かは読めていなければならない。
+    assert _bodies(result) == ["@よい おやすみなさいー"]
+
+
+def test_search_scenes_cuts_the_target_at_a_known_name_with_a_space(
+        tmp_db, tmp_db_path, seeded):
+    """表示名に空白があっても、名前の後半で引っかからないこと。"""
+    tmp_db.flush()
+    with tmp_db._lock:
+        tmp_db._conn.execute(
+            "INSERT INTO users (identity_key, nickname) VALUES ('k1', 'Maiza Santos')")
+        tmp_db._conn.commit()
+    seeded(["@Maiza Santos please gift"], source=indexer.SOURCE_COMMENT)
+    assert tmp_db.search_scenes("Santos", [indexer.SOURCE_COMMENT])["total"] == 0
+    assert tmp_db.search_scenes("gift", [indexer.SOURCE_COMMENT])["total"] == 1

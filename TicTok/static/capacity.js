@@ -62,11 +62,18 @@ function renderPlacement(placement) {
   move.classList.remove("cap-move-off");
   planBtn.disabled = false;
   const backlog = placement.items || 0;
+  const clipBacklog = placement.clip_items || 0;
   moveText.textContent = backlog
     ? `まだ移していない完了録画: ${fmtNum(backlog)} 本 / ${fmtBytesGb(placement.bytes)}`
     : "まだ移していない完了録画はありません。";
 
   const notes = [];
+  // 切り出しは常に一時保存先へ出て、録画に随伴して最終保存先へ移る。録画が0本でも成果物
+  // だけが残るので(録画を移した後に切り出した分)、別の行として必ず出す。
+  if (clipBacklog) {
+    notes.push(`一緒に移る切り出し ${fmtNum(clipBacklog)} 本`
+      + `（${fmtBytesGb(placement.clip_bytes)}）`);
+  }
   if (locations.outside && locations.outside.items) {
     notes.push(`どちらの保存先にも無い記録 ${fmtNum(locations.outside.items)} 本`
       + "（外部で動かされたか、保存先の設定を変えた録画です）");
@@ -100,11 +107,15 @@ function renderRelocationPlan(plan) {
   setListState(document.getElementById("reloc-empty"),
     tbody.childElementCount === 0 ? "empty" : "ok");
 
+  const clips = plan.clip_total_items || 0;
   document.getElementById("reloc-summary").textContent =
     `移動する録画 ${fmtNum(plan.total_items)} 本 / ${fmtBytesGb(plan.total_bytes)}`
+    + (clips ? ` ＋ 切り出し ${fmtNum(clips)} 本 / ${fmtBytesGb(plan.clip_total_bytes)}` : "")
     + `（移動先 ${plan.final_dir}）`;
   const applyBtn = document.getElementById("reloc-apply");
-  applyBtn.classList.toggle("hidden", plan.total_items === 0);
+  // 録画が0本でも切り出しだけが残ることがある。件数の合計で判断しないと、移すものが在る
+  // のにbuttonが出ない。
+  applyBtn.classList.toggle("hidden", plan.total_items === 0 && clips === 0);
   // 実行中に一覧を取り直しても、押せる見た目に戻さない(2度目は409で断られる)。
   applyBtn.disabled = relocateRunning;
 }
@@ -116,9 +127,13 @@ function renderRelocationPlan(plan) {
 const RELOCATE_JOB_DOMAIN = "relocate";
 const relocateJobStates = new Map();
 let relocateRunning = false;
+// このtabがPOSTの応答を待っているか。待っている側は応答が終わり方を書くので、WSからは
+// 出さない(同じことを2回名乗ると、どちらが結果なのか読めなくなる)。
+let relocateAwaitingHere = false;
 
 function relocStatusRunning() {
   const status = document.getElementById("reloc-status");
+  status.classList.remove("is-error");
   status.replaceChildren(document.createTextNode("移動中…（進捗は"));
   const link = document.createElement("a");
   link.href = "/jobs?kind=relocate";
@@ -136,7 +151,7 @@ function applyRelocateState(running) {
   }
   // 終わり方(何本移せたか)はPOSTの応答が書く。応答を受け取らない側(再読み込み後・別tab)
   // には届かないので、実行中の表示を残さず現況を取り直す。
-  document.getElementById("reloc-status").textContent = "";
+  setFormMessage(document.getElementById("reloc-status"), "");
   loadCapacity();
 }
 
@@ -150,7 +165,23 @@ function onJobMessage(message) {
     relocateJobStates.clear();
     (message.data || []).forEach(trackRelocateJob);
   } else if (message.type === "job_update" && message.job) {
-    trackRelocateJob(message.job);
+    const job = message.job;
+    const prev = relocateJobStates.get(job.job_id);
+    trackRelocateJob(job);
+    // 移動は数分かかる。終わり方を持っているのはPOSTの応答を待っているtabだけで、
+    // reload後や別tabには何も届かなかった。実行中から終端へ移ったここが唯一の契機。
+    // snapshot(type=jobs)では出さない — 接続のたび過去の移動を蒸し返すことになる。
+    if (job.domain === RELOCATE_JOB_DOMAIN && !relocateAwaitingHere
+        && ["pending", "running"].includes(prev)
+        && !["pending", "running"].includes(job.state)) {
+      if (job.state === "completed") {
+        showToast(job.message || "最終保存先への移動が終わりました。", null,
+          { title: "最終保存先へ移動" });
+      } else {
+        showToast(job.message || job.state, "error", { title: "最終保存先へ移動" });
+      }
+      // 現況の取り直しはapplyRelocateStateが実行中→停止の移りで既に行う。
+    }
   } else {
     return;
   }
@@ -159,20 +190,27 @@ function onJobMessage(message) {
 
 document.getElementById("reloc-plan").addEventListener("click", async () => {
   const status = document.getElementById("reloc-status");
-  status.textContent = "対象を確認中…";
+  setFormMessage(status, "対象を確認中…");
   try {
     renderRelocationPlan(await apiSend("GET", "/api/storage/relocate"));
-    status.textContent = "";
+    setFormMessage(status, "");
   } catch (err) {
-    status.textContent = err.message;
+    setFormMessage(status, err.message, true);
+    showError(err, "移動対象の確認");
   }
 });
 
 document.getElementById("reloc-apply").addEventListener("click", async () => {
-  if (!relocationPlan || !relocationPlan.total_items) return;
+  if (!relocationPlan) return;
+  const planClips = relocationPlan.clip_total_items || 0;
+  if (!relocationPlan.total_items && !planClips) return;
   const ok = await confirmDialog(
     `${fmtNum(relocationPlan.total_items)} 本（${fmtBytesGb(relocationPlan.total_bytes)}）を`
     + `\n${relocationPlan.final_dir}\nへ移します。録画中のものは含みません。`
+    + (planClips
+      ? `\n\nその録画から作った切り出し ${fmtNum(planClips)} 本`
+        + `（${fmtBytesGb(relocationPlan.clip_total_bytes)}）も一緒に移します。`
+      : "")
     + `\n\n容量が大きいため数分かかります。`,
     { title: "最終保存先へ移動", confirmLabel: "移動する", danger: false },
   );
@@ -181,18 +219,29 @@ document.getElementById("reloc-apply").addEventListener("click", async () => {
   const status = document.getElementById("reloc-status");
   btn.disabled = true;
   relocStatusRunning();
+  relocateAwaitingHere = true;
   try {
     const result = await apiSend("POST", "/api/storage/relocate", { confirm: true });
     const r = result.result || {};
     const failed = (r.failures || []).length;
-    status.textContent =
+    // 一部でも移せなかったら警告色にする。全部成功したときと同じ見た目で出すと、
+    // 「移動しました」の後ろに付く失敗件数が読み飛ばされる。
+    setFormMessage(
+      status,
       `${fmtNum(r.moved || 0)} 本（${fmtBytesGb(r.moved_bytes || 0)}）を移動しました`
-      + (failed ? `。${fmtNum(failed)} 本は失敗し一時保存先に残っています。` : "。");
+      + (r.clips_moved
+        ? `。切り出し ${fmtNum(r.clips_moved)} 本（${fmtBytesGb(r.clips_moved_bytes || 0)}）も移動しました`
+        : "")
+      + (failed ? `。${fmtNum(failed)} 本は失敗し一時保存先に残っています。` : "。"),
+      failed > 0,
+    );
     renderRelocationPlan(result.plan);
     loadCapacity();
   } catch (err) {
-    status.textContent = err.message;
+    setFormMessage(status, err.message, true);
+    showError(err, "最終保存先へ移動");
   } finally {
+    relocateAwaitingHere = false;
     // 実行中はWSの台帳が押せない状態を持つ。応答が返った時点で走っていなければ戻す。
     btn.disabled = relocateRunning;
   }
@@ -249,6 +298,9 @@ function renderDiskRows(data) {
   const forecasts = data.forecasts || {};
   const tbody = document.getElementById("cap-rows");
   tbody.replaceChildren();
+  // 空きの列に敷くbarの基準。drive間で全体sizeが違うので、比べたいのは「空きの絶対量」
+  // ではなくそのdriveの中でどれだけ残っているか。各行の全体を1とする。
+  const freeRatio = (v) => (v.total_bytes ? (v.free_bytes || 0) / v.total_bytes : 0);
   Object.keys(volumes).sort().forEach((name) => {
     const v = volumes[name] || {};
     const f = forecasts[name] || { status: "insufficient_data", n: 0 };
@@ -266,12 +318,19 @@ function renderDiskRows(data) {
       const td = document.createElement("td");
       if (i >= 1) td.className = "num";
       td.textContent = value;
+      // 空きの列だけ、そのdriveの全体に対する割合をbarで敷く。桁を読む前に残量が判る。
+      if (i === 1) {
+        td.classList.add("q");
+        td.style.setProperty("--q", freeRatio(v).toFixed(4));
+      }
       tr.appendChild(td);
     });
     const title = forecastTitle(f);
     if (title) tr.title = title;
     // 閾値割れは既にops_eventとして残るので、ここでは色を付けるだけにする。
-    if (f.status === "ok" && f.days_low < 14) tr.classList.add("rank-top");
+    // rank-topは順位表の1位を指すclassで、renderTableRowsが先頭行へ自動で付ける。
+    // 「危ない」に流用すると1位の強調と見分けが付かないので、警告は専用のclassで出す。
+    if (f.status === "ok" && f.days_low < 14) tr.classList.add("row-warn");
     tbody.appendChild(tr);
   });
   setListState(document.getElementById("cap-empty"),
@@ -293,12 +352,18 @@ function renderCapacity(data) {
   const daily = (data.recording_daily || []).slice(-14).reverse();
   const dailyBody = document.getElementById("cap-daily");
   dailyBody.replaceChildren();
+  // 増加の列に敷くbarは、出ている14日の中での最大を1とする相対。
+  const dailyMax = daily.reduce((a, d) => (d.bytes > a ? d.bytes : a), 0);
   daily.forEach((d) => {
     const tr = document.createElement("tr");
     [d.day, `${fmtNum(d.recordings)} 本`, fmtBytesGb(d.bytes)].forEach((value, i) => {
       const td = document.createElement("td");
       if (i >= 1) td.className = "num";
       td.textContent = value;
+      if (i === 2 && dailyMax > 0) {
+        td.classList.add("q");
+        td.style.setProperty("--q", ((d.bytes || 0) / dailyMax).toFixed(4));
+      }
       tr.appendChild(td);
     });
     dailyBody.appendChild(tr);
@@ -309,10 +374,12 @@ function renderCapacity(data) {
   const c = data.completion || {};
   // 母数0はnullで返る(0%ではない)。「対象なし」と「1件も終わっていない」を混同しない。
   const rate = (value) => (value === null || value === undefined ? "—" : `${value.toFixed(1)}%`);
+  // 率はserverが%で返す(0〜100)。barへ渡すのは0〜1なので100で割る。
+  const ratio = (value) => (value === null || value === undefined ? null : value / 100);
   renderChips("cap-completion", [
     ["完了した録画", `${fmtNum(c.completed_recordings || 0)} 本`],
-    ["転写済み", `${rate(c.transcribed_rate)} (${fmtNum(c.transcribed || 0)})`],
-    ["焼き込み済み", `${rate(c.overlay_rate)} (${fmtNum(c.overlay_done || 0)})`],
+    ["文字起こし済み", `${rate(c.transcribed_rate)} (${fmtNum(c.transcribed || 0)})`, ratio(c.transcribed_rate)],
+    ["焼き込み済み", `${rate(c.overlay_rate)} (${fmtNum(c.overlay_done || 0)})`, ratio(c.overlay_rate)],
   ]);
 
   const db = now.db_files || {};
@@ -330,10 +397,12 @@ function renderCapacity(data) {
   ].join(" / ");
 }
 
+// 3つ目のratio(0〜1)は任意。割合の値にだけ達成barを添える。母数が無い(null)ときは
+// 付けない — 長さ0のbarは「0%」に読めるが、実際は「対象なし」で別の意味になる。
 function renderChips(containerId, entries) {
   const bar = document.getElementById(containerId);
   bar.replaceChildren();
-  entries.forEach(([label, value]) => {
+  entries.forEach(([label, value, ratio]) => {
     const chip = document.createElement("div");
     chip.className = "a-chip";
     const l = document.createElement("span");
@@ -343,6 +412,14 @@ function renderChips(containerId, entries) {
     v.className = "v";
     v.textContent = value;
     chip.append(l, v);
+    if (Number.isFinite(ratio)) {
+      const track = document.createElement("span");
+      track.className = "bar";
+      const fill = document.createElement("i");
+      fill.style.width = `${Math.min(100, Math.max(0, ratio * 100)).toFixed(1)}%`;
+      track.appendChild(fill);
+      chip.appendChild(track);
+    }
     bar.appendChild(chip);
   });
 }
@@ -350,13 +427,17 @@ function renderChips(containerId, entries) {
 // 直近に描いた集計。空きだけを差し替えるために持つ。
 let capacityReport = null;
 
+// 取り直せたかを返す。「最新にする」は押しても値がほとんど動かない操作なので、
+// 押した側が成否を名乗るにはここの結果が要る。
 async function loadCapacity() {
   try {
     renderCapacity(await apiSend("GET", "/api/capacity"));
+    return true;
   } catch (err) {
     // 取得失敗を「記録なし」として描くと、予測が出ない理由を取り違える。
     setListState(document.getElementById("cap-empty"), "failed", err);
     setListState(document.getElementById("cap-daily-empty"), "failed", err);
+    return false;
   }
 }
 
@@ -382,25 +463,29 @@ setInterval(refreshDiskRows, DISK_POLL_MS);
 
 document.getElementById("cap-reload").addEventListener("click", async () => {
   const btn = document.getElementById("cap-reload");
+  const status = document.getElementById("cap-status");
   btn.disabled = true;
-  try {
-    await loadCapacity();
-  } finally {
-    btn.disabled = false;
-  }
+  setFormMessage(status, "取り直し中…");
+  // 取り直しても値はほぼ同じで、グラフは同じ絵のまま描き直る。取り直した時刻を出さないと
+  // 押せたのかどうかが画面から読めない(新しいsampleを作る操作ではないので数値も動かない)。
+  const ok = await loadCapacity();
+  setFormMessage(status,
+    ok ? `取り直しました（${fmtDateTime(Date.now() / 1000)}）` : "取り直せませんでした。", !ok);
+  btn.disabled = false;
 });
 
 document.getElementById("cap-sample").addEventListener("click", async () => {
   const btn = document.getElementById("cap-sample");
   const status = document.getElementById("cap-status");
   btn.disabled = true;
-  status.textContent = "記録中…";
+  setFormMessage(status, "記録中…");
   try {
     const result = await apiSend("POST", "/api/capacity/sample");
     renderCapacity(result.report);
-    status.textContent = `記録しました（${fmtDateTime(result.sampled_at)}）`;
+    setFormMessage(status, `記録しました（${fmtDateTime(result.sampled_at)}）`);
   } catch (err) {
-    status.textContent = err.message;
+    setFormMessage(status, err.message, true);
+    showError(err, "容量の記録");
   } finally {
     btn.disabled = false;
   }
@@ -528,6 +613,8 @@ function renderUsage(payload) {
       usageRegenerableCell(row, regenerable),
     ],
     [1, 2],
+    null,
+    [{ col: 1, value: (row) => row.bytes }],
   );
 
   const columns = usageStreamerColumns(usage);
@@ -546,13 +633,17 @@ function renderUsage(payload) {
     // 配信者列以外はすべて容量。列数は種別の数で変わるので、番号も数から組む。
     Array.from({ length: 1 + columns.shown.length + (columns.other ? 1 : 0) },
       (_, i) => i + 1),
+    null,
+    // barを敷くのは合計の列だけ。種別ごとの列にも敷くと、列ごとに基準の違うbarが横に
+    // 7本並び、隣の列と長さを比べられるように見えてしまう。
+    [{ col: 1, value: (row) => row.bytes }],
   );
 }
 
 async function loadUsage() {
   try {
     renderUsage(await apiSend("GET", "/api/storage/usage"));
-    usageStatusEl.textContent = "";
+    setFormMessage(usageStatusEl, "");
   } catch (err) {
     // 生のfetchでは失敗時にrenderUsageを呼べず、placeholderがhiddenのまま見出しだけの
     // 空欄になっていた。取得できなかったことを表の位置で名乗らせる。
@@ -562,18 +653,21 @@ async function loadUsage() {
     setListState(document.getElementById("usage-category-empty"), "failed", err);
     setListState(document.getElementById("usage-streamer-empty"), "failed", err);
     usageSummaryEl.textContent = "";
-    usageStatusEl.textContent = "";
+    setFormMessage(usageStatusEl, "");
   }
 }
 
 usageScanBtn.addEventListener("click", async () => {
   usageScanBtn.disabled = true;
-  usageStatusEl.textContent = "走査中…（数TB規模では数分かかります）";
+  setFormMessage(usageStatusEl, "走査中…（数TB規模では数分かかります）");
   try {
     renderUsage(await apiSend("POST", "/api/storage/scan"));
-    usageStatusEl.textContent = "走査しました。";
+    setFormMessage(usageStatusEl, "走査しました。");
+    // 数TB規模では数分かかる。待つ間に画面を離れるのが普通なので、結末はtoastで残す。
+    showToast("録画folderを走査しました。", null, { title: "容量の再scan" });
   } catch (err) {
-    usageStatusEl.textContent = err.message;
+    setFormMessage(usageStatusEl, err.message, true);
+    showError(err, "容量の再scan");
   } finally {
     usageScanBtn.disabled = false;
   }

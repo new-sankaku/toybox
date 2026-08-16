@@ -18,7 +18,7 @@ from tictok.api import runtime
 from tictok.api import access_log
 from tictok.api import startup
 from tictok.api.routes import (
-    ai, analytics, bulk, media, monitors, pages, recordings, search, sessions,
+    ai, analytics, bulk, clips, media, monitors, pages, recordings, search, sessions,
     storage, streamers, system, ws,
 )
 from tictok.core.config import get_host, get_log_level, get_port
@@ -39,6 +39,9 @@ app.include_router(sessions.router)
 app.include_router(recordings.router)
 app.include_router(storage.router)
 app.include_router(media.router)
+# 成果物を作る側(media)の直後。/api/clips のGET・DELETEはこちら、POST /api/clips/batch は
+# 投入口なのでmedia側に居る(pathは重なるがmethodが違うので一致判定には効かない)。
+app.include_router(clips.router)
 app.include_router(bulk.router)
 app.include_router(search.router)
 app.include_router(ai.router)

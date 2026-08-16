@@ -21,7 +21,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
 
     対象は2つ:
       - comment: 収集済みなので、起動時に一度均せば全録画が検索対象になる。
-      - 転写: この機能より前に作られたtranscriptはindex経路を通っていない。ここで拾わないと
+      - 文字起こし: この機能より前に作られたtranscriptはindex経路を通っていない。ここで拾わないと
         「文字起こし済みなのに音声で検索できない」録画が残り続ける。
     """
     indexed = storage.search_indexed_counts()
@@ -75,7 +75,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         # 「完了した」という記録だけが目に入る。
         logger.warning(
             "検索indexのbackfillが %d 件の失敗を残して終了しました"
-            "（comment=%d 転写=%d）該当の録画は検索に出ません",
+            "（comment=%d 文字起こし=%d）該当の録画は検索に出ません",
             len(failed), done["comments"], done["transcripts"],
             extra={"event": "search.backfill_incomplete",
                    "ctx": {**done, "failed": len(failed),
@@ -83,7 +83,7 @@ async def backfill_search_index(storage, resolve_path: Callable[[str], Path]) ->
         )
     elif done["comments"] or done["transcripts"]:
         logger.info(
-            "検索indexのbackfillが完了しました（comment=%d 転写=%d）",
+            "検索indexのbackfillが完了しました（comment=%d 文字起こし=%d）",
             done["comments"], done["transcripts"],
             extra={"event": "search.backfill_completed", "ctx": done},
         )

@@ -10,8 +10,8 @@ import time
 from typing import Optional
 from fastapi import HTTPException, Query
 from pydantic import BaseModel
-from tictok.core.config import get_media_queue_workers
-from tictok.record.transcription import stt_available
+from tictok.core.config import get_laugh_index_exclude_coop, get_media_queue_workers
+from tictok.record.transcription import TIMEMAP_VERSION, stt_available
 from tictok.media import laugh_audio
 from tictok.search import indexer
 from tictok.storage import OPS_INFO, OPS_WARNING
@@ -35,8 +35,8 @@ BULK_KINDS = ("transcribe", "laugh", "overlay", "upscale", "reprocess", "audiono
 
 # queueへ載る種別。delete_mp4はfileを1本消すだけでffmpegを起こさないため、jobにすると
 # 実行時間0の行が録画数ぶん台帳へ並ぶだけになる。専用APIで即時に実行する。
-# 文字起こしもここには入らない: 走る先がmedia_job_queueではなくtranscribe_queue(GPUを
-# 直列で1本ずつ使う別台帳)で、同じ投入APIから種別で振り分ける。
+# 文字起こしもここには入らない: 走る先は同じmedia_job_queue(kind=stt)だが、投入は
+# _enqueue_stt_jobs が持つ(group_idを振らない)ため、同じ投入APIから種別で振り分ける。
 BULK_QUEUE_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack")
 
 # 対象判定に .ts の走査が要る種別。母集合単位の呼び出しは _bulk_hls_batch で先に埋める。
@@ -80,9 +80,13 @@ BULK_SKIP_LABELS = {
 # するが、画面の済み件数からは落とせない(結合済みが0本と出ると、進み具合が読めなくなる)。
 _BULK_DONE_REASONS = ("done", "packed")
 
-# statusの既定集計種別。reprocessは対象判定に録画ごとの.ts走査を伴うので、既定から外し、画面が
-# 再mp4化を選んだときだけ ?kinds=reprocess で取りに来させる(既定のtab表示で走査を走らせない)。
-_BULK_STATUS_DEFAULT_KINDS = ("overlay", "upscale", "audionorm")
+# statusの既定集計種別。全種別を一度に数える — 画面は種別を列に並べた1枚の表なので、
+# 種別を選ぶたびに集計し直す形にすると、列が増えるほどrequestが増える。
+# かつて reprocess だけを既定から外していたのは「対象判定に録画ごとの.ts走査を伴う」ため
+# だったが、その走査(_bulk_hls_batch)は overlay/upscale の判定でも要るので既定でも走って
+# いた。除外は集計costを何も減らしておらず、画面に「選ぶまで数字が出ない列」を作るだけ
+# だった。全種別を足しても増えるのは判定loop(dict操作)とDB照会2本だけである。
+_BULK_STATUS_DEFAULT_KINDS = BULK_KINDS
 
 
 def _require_bulk_kind(kind: str) -> None:
@@ -100,10 +104,24 @@ def _parse_bulk_status_kinds(kinds: Optional[str]) -> tuple:
     return requested
 
 
+def _laugh_index_current(meta: Optional[dict]) -> bool:
+    """この録画の笑い声indexが、今の条件で張られたものか。
+
+    行の有無では見ない。共演中を外す設定(``TICTOK_LAUGH_INDEX_EXCLUDE_COOP``)やrule版を
+    変えると、同じ行が別の意味を持つためで、古い条件のindexを済みのままにすると誰も
+    張り直せない。条件を記録していない録画(この仕組みより前に張ったindex)も対象へ戻す。
+    """
+    if not meta:
+        return False
+    return (meta.get("version") == indexer.LAUGH_INDEX_VERSION
+            and meta.get("mode") == get_laugh_index_exclude_coop())
+
+
 def _bulk_classify(kind: str, recording: dict,
                    facts: Optional[dict] = None,
                    transcribed: Optional[set] = None,
-                   indexed: Optional[dict] = None) -> tuple[bool, str]:
+                   indexed: Optional[dict] = None,
+                   laugh_meta: Optional[dict] = None) -> tuple[bool, str]:
     """この録画がkindの投入対象か。(対象か, 対象外の理由) を返す。
 
     理由を数えて画面へ返すのは、「対象0本」とだけ出ると原因(fileが無いのか、既に出力済みか、
@@ -112,12 +130,16 @@ def _bulk_classify(kind: str, recording: dict,
     ``facts`` は_recording_fs_factsのcache済みfilesystem事実。呼び出し側が録画数ぶんの
     loopで1回だけ引いて渡すことで、種別ごと・呼び出しごとのstat/globの重複を無くす。
 
-    ``transcribed`` は転写済みのrecording_id集合(transcribeの済み判定)。facts と同じく
-    母集合単位で1回だけ引いて渡す — 録画ごとにget_transcriptを叩くと、本文まで読んで
-    捨てることになる。
+    ``transcribed`` は**字幕として使える**文字起こしを持つrecording_id集合(transcribeの済み判定)。
+    facts と同じく母集合単位で1回だけ引いて渡す — 録画ごとにget_transcriptを叩くと、本文まで
+    読んで捨てることになる。行の有無ではなく中身の版で引く理由は
+    ``current_transcript_recording_ids`` を参照。
 
     ``indexed`` は ``storage.search_indexed_counts()``(recording_id -> source -> 件数)。
-    笑い声分析の済み判定に使う。
+    コメント索引の本数に使う。
+
+    ``laugh_meta`` は ``storage.laugh_index_meta_map()``(recording_id -> indexを張った
+    条件)。笑い声分析の済み判定に使う。
     """
     if recording.get("status") not in ("completed", "interrupted"):
         return False, "recording"
@@ -130,24 +152,34 @@ def _bulk_classify(kind: str, recording: dict,
             has_hls = fsfacts._recording_has_hls(recording)
         if not facts["has_file"] and not has_hls:
             return False, "no_source"
-        # 済み判定は**検索indexの有無**で見る。sidecar(確率列)だけ在ってindexが無い録画は
-        # 「解析は済んだが検索に出ない」状態で、sidecarで済みにすると誰も拾い直せない。
-        # jobは解析cacheに当たって数十msで終わり、indexだけを埋める。
-        if indexed is None:
-            indexed = runtime.storage.search_indexed_counts()
-        done = indexer.SOURCE_LAUGH in (indexed.get(recording["id"]) or {})
+        # 済み判定は**indexを張った条件**で見る。sidecar(確率列)だけ在ってindexが無い
+        # 録画は「解析は済んだが検索に出ない」状態で、sidecarで済みにすると誰も拾い直せ
+        # ない。jobは解析cacheに当たって数十msで終わり、indexだけを埋める。行の有無でも
+        # 足りない: 共演中を外す設定を変えると同じ行が別の意味になり、外れていないindexが
+        # 済みのまま残る。
+        if laugh_meta is None:
+            laugh_meta = runtime.storage.laugh_index_meta_map()
+        done = _laugh_index_current(laugh_meta.get(recording["id"]))
         return (False, "done") if done else (True, "")
     if kind == "transcribe":
-        # 入力は素材(.ts)でもmp4でもよい(transcribe_queueはhls_source経由で開く)。
+        # 入力は素材(.ts)でもmp4でもよい(文字起こしはhls_source経由で開く)。
         has_hls = facts.get("has_hls")
         if has_hls is None:
             has_hls = fsfacts._recording_has_hls(recording)
         if not facts["has_file"] and not has_hls:
             return False, "no_source"
-        # 済み判定はDBのtranscripts表だけ。転写はfileを作らないので、filesystemからは
-        # 判別できない。
-        done = (recording["id"] in transcribed) if transcribed is not None \
-            else runtime.storage.get_transcript(recording["id"]) is not None
+        # 済み判定はDBのtranscripts表だけ。文字起こしはfileを作らないので、filesystemからは
+        # 判別できない。行の有無では足りない: 語ごとの時刻を持たない文字起こしはcueを語の端で
+        # 締められず、segmentの終端が次のsegmentの開始まで伸びたまま出る(実測: SRTが
+        # timelineを覆う割合が中央値97.7%。実発話は約30%)。時刻mapの版が古いものも同様に
+        # 再文字起こしでしか直らない。どちらも「済み」から外す(current_transcript_recording_ids)。
+        if transcribed is not None:
+            done = recording["id"] in transcribed
+        else:
+            stored = runtime.storage.get_transcript(recording["id"])
+            done = bool(stored
+                        and stored.get("timemap_version") == TIMEMAP_VERSION
+                        and stored.get("word_times"))
         return (False, "done") if done else (True, "")
     if kind == "reprocess":
         # 済み判定はDBの列だけを見る。作り直したmp4は元と同じ名前・場所の別内容なので、
@@ -239,14 +271,15 @@ def _bulk_plan(kind: str, unique_id: Optional[str], redo: bool,
     pending = runtime.storage.pending_media_job_keys()
     stt_pending = {rid for kind_, rid in pending if kind_ == "stt"}
     pending |= {("transcribe", rid) for rid in stt_pending}
-    # 素材やmp4を掴んでいる録画。転写もGPUの裏で元mp4/.tsを読み続けるので、映像jobと
+    # 素材やmp4を掴んでいる録画。文字起こしもGPUの裏で元mp4/.tsを読み続けるので、映像jobと
     # 同じく「掴んでいる」側に数える(削除の実行直前に見るbusy_recording_idsと同じ集合)。
     busy_ids = {rid for _kind, rid in pending} | stt_pending
     recordings = _bulk_recordings(unique_id)
-    transcribed = runtime.storage.transcribed_recording_ids() if kind == "transcribe" else None
+    transcribed = runtime.storage.current_transcript_recording_ids(TIMEMAP_VERSION) if kind == "transcribe" else None
     # 済み判定に検索indexを見る種別は、母集合単位で1回だけ引く(録画ごとに引くと
-    # search_hitsの集計が録画数ぶん走る)。
-    indexed = runtime.storage.search_indexed_counts() if kind in BULK_SEARCH_INDEX_KINDS else None
+    # 録画表の集計が録画数ぶん走る)。
+    laugh_meta = (runtime.storage.laugh_index_meta_map()
+                  if kind in BULK_SEARCH_INDEX_KINDS else None)
     facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
     if kind in BULK_HLS_KINDS:
         fsfacts._bulk_hls_batch(recordings, facts_by_id)
@@ -258,7 +291,7 @@ def _bulk_plan(kind: str, unique_id: Optional[str], redo: bool,
         if selected is not None and recording["id"] not in selected:
             continue
         ok, reason = _bulk_classify(kind, recording, facts_by_id[recording["id"]],
-                                    transcribed, indexed)
+                                    transcribed, None, laugh_meta)
         # 素材やmp4を置き換える種別は、他の何かがその録画を掴んでいる間は外す。焼き込みは
         # 実行中ずっと元mp4を読み、再mp4化は素材を読んでいるので、その足元で消す/束ね直すと
         # 道半ばで壊れたjobが残る。
@@ -289,7 +322,7 @@ def _bulk_estimate(kind: str, targets: list) -> dict:
         facts = fsfacts._recording_fs_facts(recording)
         if facts["has_file"]:
             sizes.append(facts["bytes"])
-    # 実測比の出所は種別の走る台帳。転写はmedia_job_queueに行が出ないので、そちらを見ても
+    # 実測比の出所は種別の走る台帳。文字起こしはmedia_job_queueに行が出ないので、そちらを見ても
     # 常に「実績なし」になる。
     # 文字起こしも同じ台帳で走るので、実測の出所はkind名の読み替えだけで済む。
     durations = runtime.storage.media_job_durations("stt" if kind == "transcribe" else kind)
@@ -298,7 +331,7 @@ def _bulk_estimate(kind: str, targets: list) -> dict:
     median = ratios[len(ratios) // 2] if ratios else None
     # 同時実行数ぶんのjobが並ぶので、中間fileの山も本数ぶん重なる。1本ぶんで見せると、
     # workerを増やした環境で「入るはず」と示した直後に空き容量を割る。
-    # 転写はSTT側のlockで完全に直列化されており、workerを増やしても1本ずつしか進まない。
+    # 文字起こしはSTT側のlockで完全に直列化されており、workerを増やしても1本ずつしか進まない。
     # 笑い声分析も同じ: cudaならgpu_slot、cpuなら_infer_lockで、どちらも1本ずつになる。
     workers = 1 if kind in ("transcribe", "laugh") \
         else min(get_media_queue_workers(), len(sizes) or 1)
@@ -318,29 +351,40 @@ def _bulk_estimate(kind: str, targets: list) -> dict:
 async def bulk_status(kinds: Optional[str] = None) -> dict:
     """配信者ごとの、種別ごとの残り本数と出力済み本数。表示専用で投入はしない。
 
-    ``kinds`` 未指定は軽い既定(overlay/upscale/audionorm)だけ集計する。reprocessは録画ごとの
-    .ts走査を伴うため、画面が再mp4化を選んだとき ?kinds=reprocess で取りに来る。集計は要求
-    種別の組ごとにcacheする。"""
+    ``kinds`` 未指定は全種別。集計は要求種別の組ごとにcacheする。
+
+    実体の有無(``playable``)とコメント索引の本数(``comment_indexed``)も返す。どちらも投入
+    対象の数ではないが、この一覧は画面の配信者選択そのものでもあるため: DB行だけを数えると、
+    素材もmp4も残っていない配信者(retentionで消えた・外で消された)が「録画N本」を名乗って
+    選択肢に出続ける。同じ走査を別endpointでもう一度やると、同じ画面に母集合の違う「録画」
+    列が2つ並ぶことになる。"""
     requested = _parse_bulk_status_kinds(kinds)
     now = time.time()
     key = ",".join(sorted(requested))
     cached = fsfacts._bulk_status_cache.get(key)
     if cached is not None and cached[0] > now:
-        return {**cached[1], "disk": disk._disk_report()}
+        return {**cached[1], "disk": disk._disk_report(),
+                "stt_available": stt_available()}
 
     def _collect() -> list:
         recordings = runtime.storage.list_recordings(100000)
-        transcribed = runtime.storage.transcribed_recording_ids() if "transcribe" in requested else None
-        indexed = (runtime.storage.search_indexed_counts()
-                   if any(k in BULK_SEARCH_INDEX_KINDS for k in requested) else None)
+        transcribed = runtime.storage.current_transcript_recording_ids(TIMEMAP_VERSION) if "transcribe" in requested else None
+        # 索引の件数はコメント索引の列に要る。種別に関係なく引くのはそのため(この一覧が
+        # 検索側の配信者選択の出所でもある)。
+        indexed = runtime.storage.search_indexed_counts()
+        laugh_meta = runtime.storage.laugh_index_meta_map() if "laugh" in requested else None
         facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
-        if any(k in BULK_HLS_KINDS for k in requested):
-            fsfacts._bulk_hls_batch(recordings, facts_by_id)
+        # 種別に関わらず引く。実体の有無(playable)がこの走査でしか出せないためで、要求種別に
+        # よって has_hls が埋まったり埋まらなかったりすると、同じ配信者が要求の仕方で
+        # 「実体なし」と名乗ったり名乗らなかったりする。
+        fsfacts._bulk_hls_batch(recordings, facts_by_id)
         per: dict = {}
         for recording in recordings:
             entry = per.setdefault(recording["unique_id"], {
                 "unique_id": recording["unique_id"],
                 "recordings": 0,
+                "playable": 0,
+                "comment_indexed": 0,
                 "seconds": 0.0,
                 "targets": {kind: 0 for kind in requested},
                 "done": {kind: 0 for kind in requested},
@@ -348,8 +392,13 @@ async def bulk_status(kinds: Optional[str] = None) -> dict:
             entry["recordings"] += 1
             entry["seconds"] += files._recording_seconds(recording)
             facts = facts_by_id[recording["id"]]
+            if facts.get("has_hls") or facts.get("has_file"):
+                entry["playable"] += 1
+            if indexer.SOURCE_COMMENT in (indexed.get(recording["id"]) or {}):
+                entry["comment_indexed"] += 1
             for kind in requested:
-                ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed)
+                ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed,
+                                            laugh_meta)
                 if ok:
                     entry["targets"][kind] += 1
                 elif reason in _BULK_DONE_REASONS:
@@ -358,7 +407,9 @@ async def bulk_status(kinds: Optional[str] = None) -> dict:
 
     payload = {"streamers": await asyncio.to_thread(_collect), "kinds": list(requested)}
     fsfacts._bulk_status_cache[key] = (now + fsfacts._BULK_STATUS_TTL_SECONDS, payload)
-    return {**payload, "disk": disk._disk_report()}
+    # STTの可否はcacheへ入れない。設定で切り替わるものを20秒間そのままにすると、押せない
+    # buttonが押せるままになる(押してから503で知ることになる)。
+    return {**payload, "disk": disk._disk_report(), "stt_available": stt_available()}
 
 
 @router.get("/api/bulk/estimate")
@@ -390,16 +441,16 @@ async def bulk_recordings(kind: str, unique_id: str, redo: int = 0) -> dict:
         pending = runtime.storage.pending_media_job_keys()
         pending |= {("transcribe", rid) for kind_, rid in pending if kind_ == "stt"}
         recordings = runtime.storage.recordings_for_user(unique_id)
-        transcribed = runtime.storage.transcribed_recording_ids() if kind == "transcribe" else None
-        indexed = (runtime.storage.search_indexed_counts()
-                   if kind in BULK_SEARCH_INDEX_KINDS else None)
+        transcribed = runtime.storage.current_transcript_recording_ids(TIMEMAP_VERSION) if kind == "transcribe" else None
+        laugh_meta = (runtime.storage.laugh_index_meta_map()
+                      if kind in BULK_SEARCH_INDEX_KINDS else None)
         facts_by_id = fsfacts._bulk_fs_facts_batch(recordings)
         if kind in BULK_HLS_KINDS:
             fsfacts._bulk_hls_batch(recordings, facts_by_id)
         rows = []
         for recording in recordings:
             facts = facts_by_id[recording["id"]]
-            ok, reason = _bulk_classify(kind, recording, facts, transcribed, indexed)
+            ok, reason = _bulk_classify(kind, recording, facts, transcribed, None, laugh_meta)
             if not ok and redo and reason == "done":
                 ok, reason = True, ""
             if ok and (kind, recording["id"]) in pending:
@@ -497,10 +548,10 @@ def _bulk_skipped_detail(skipped: dict) -> str:
 
 
 async def _bulk_queue_transcribe(payload: BulkQueueRequest) -> dict:
-    """一括処理の文字起こし。対象の選び方は他の種別と同じ_bulk_planで、投入先だけが
-    transcribe_queue(GPUを直列に使う別台帳)になる。
+    """一括処理の文字起こし。対象の選び方は他の種別と同じ_bulk_planで、台帳も同じ
+    media_job_queue(kind=stt)だが、投入の口だけ _enqueue_stt_jobs を通る。
 
-    disk下限は見ない。転写が書くのはDBのtranscript行だけで、映像jobのような中間fileも
+    disk下限は見ない。文字起こしが書くのはDBのtranscript行だけで、映像jobのような中間fileも
     出力fileも作らないため、空きが細っている状況こそ先に回しておきたい処理である。
     """
     if not stt_available():
@@ -523,7 +574,7 @@ async def _bulk_queue_transcribe(payload: BulkQueueRequest) -> dict:
     # 投入で対象が消えるので、次のstatusは作り直す。
     fsfacts._bulk_status_cache.clear()
     scope = f"@{payload.unique_id}" if payload.unique_id else "全配信者"
-    runtime.logger.info("一括投入: 音声の転写 %d件（%s）", added["added"], scope,
+    runtime.logger.info("一括投入: 音声の文字起こし %d件（%s）", added["added"], scope,
                 extra={"event": "bulk.enqueued",
                        "ctx": {"kind": "transcribe", "unique_id": payload.unique_id,
                                "total": added["added"], "candidates": len(targets),
@@ -580,9 +631,9 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
     session一括と同じく行は録画ごとに分ける(再起動しても残りが走る・1本だけ取り消せる)。
     同じ group_id を振るので、jobの取消APIにこのidを渡せば一括ぶんをまとめて取り消せる。
 
-    文字起こしだけは走る先がtranscribe_queueなので、対象の選び方(=_bulk_plan)を共有した
-    まま投入先を分ける。画面から見た導線を種別ごとに割るより、ここで振り分けるほうが
-    「見せた本数と積んだ本数が同じ」を保ちやすい。
+    文字起こしだけは投入の口が別(group_idを振らない_enqueue_stt_jobs)なので、対象の選び方
+    (=_bulk_plan)を共有したまま投入先を分ける。画面から見た導線を種別ごとに割るより、ここで
+    振り分けるほうが「見せた本数と積んだ本数が同じ」を保ちやすい。
     """
     kind = payload.kind
     _require_bulk_kind(kind)
@@ -605,7 +656,7 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
             detail=f"{BULK_KIND_TITLES[kind]}の対象になる録画がありません（内訳: "
                    + _bulk_skipped_detail(plan["skipped"]) + "）。",
         )
-    # 字幕焼き込みが有効な場合、1本でも転写が欠けていれば全体を止める。半分だけ字幕付きの
+    # 字幕焼き込みが有効な場合、1本でも文字起こしが欠けていれば全体を止める。半分だけ字幕付きの
     # 出力が並ぶ状態は、どれが字幕付きか後から判別できず運用を壊す(session一括と同じ判断)。
     if kind in ("overlay", "upscale") and subtitles_enabled(runtime.settings):
         def _missing() -> list:
@@ -620,7 +671,7 @@ async def bulk_queue(payload: BulkQueueRequest) -> dict:
                         + ("…" if len(missing) > 5 else "")
                         + "）。先に一括文字起こしを実行してください。"),
             )
-        # 1本ごとに転写の読み出しとtiming.jsonのparseを行う検証。直上の_missingと同じく
+        # 1本ごとに文字起こしの読み出しとtiming.jsonのparseを行う検証。直上の_missingと同じく
         # threadで回す(loop上では対象数ぶんのDB読みとJSON parseがserverを止める)。
         def _verify() -> None:
             for target in targets:

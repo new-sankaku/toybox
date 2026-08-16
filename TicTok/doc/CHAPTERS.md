@@ -1,6 +1,6 @@
 # 章立て(chapter)の自動生成
 
-3時間級の録画を「読める目次」に変える機能。転写(`transcripts.segments_json`)を局所LLMへ渡し、
+3時間級の録画を「読める目次」に変える機能。文字起こし(`transcripts.segments_json`)を局所LLMへ渡し、
 話題の切れ目で章に割って表題を付ける。
 
 実体は `tictok/ai/ai_analysis.py` の `analyze_chapters()`、書き出しは
@@ -22,9 +22,9 @@ modelに時刻を書かせる形にすると、存在しない位置を指す章
 
 ## 処理の流れ (map-reduce)
 
-78KB級の転写は一度にmodelの文脈へ入らないため2段で組む。
+78KB級の文字起こしは一度にmodelの文脈へ入らないため2段で組む。
 
-1. **map**: 転写を文字数予算でchunkへ割り(境界は必ずsegmentの切れ目)、chunkごとに
+1. **map**: 文字起こしを文字数予算でchunkへ割り(境界は必ずsegmentの切れ目)、chunkごとに
    「話題が変わる行」を候補として出させる。重なりは付けない。
 2. **reduce**: 候補の一覧(表題+時刻)だけをもう一度渡し、残す候補と最終的な表題を選ばせる。
    reduce段は**どれを残すかだけ**を決める役で、位置を動かす権限を持たない
@@ -75,7 +75,7 @@ timecodeが合うのは**元録画mp4**に対してだけである(焼き込み�
 
 | 環境変数 | 既定 | 意味 |
 | --- | --- | --- |
-| `TICTOK_AI_CHAPTER_CHUNK_CHARS` | 12000 | map段1回に載せる転写の文字数上限 |
+| `TICTOK_AI_CHAPTER_CHUNK_CHARS` | 12000 | map段1回に載せる文字起こしの文字数上限 |
 | `TICTOK_AI_CHAPTER_PER_CHUNK` | 6 | chunk1つから採る候補の上限 |
 | `TICTOK_AI_CHAPTER_MAX` | 30 | 最終的な章数の上限 |
 | `TICTOK_AI_CHAPTER_MIN_SECONDS` | 60 | 隣り合う章の最小間隔 |

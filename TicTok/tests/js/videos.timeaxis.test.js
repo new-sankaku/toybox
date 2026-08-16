@@ -142,7 +142,10 @@ describe("videos.js の時間軸と対応付け", () => {
       expect(doc.getElementById("cut-out").value).toBe("00:00:25.0");
       expect(doc.getElementById("cut-len").textContent).toBe("尺 00:00:15");
       expect(doc.getElementById("do-clip").disabled).toBe(false);
-      expect(doc.getElementById("add-cut").disabled).toBe(false);
+      // 記録の口は1つで、IN/OUTが立っていれば尺つきで入ると自分で名乗る。
+      const add = doc.getElementById("add-mark");
+      expect(add.disabled).toBe(false);
+      expect(add.textContent).toBe("見どころに記録（尺あり）");
     });
 
     it("OUTがINより前なら尺を出さず理由を出す(負の尺で投入させない)", () => {
@@ -151,9 +154,11 @@ describe("videos.js の時間軸と対応付け", () => {
       expect(doc.getElementById("do-clip").disabled).toBe(true);
     });
 
+    // 等値は逆転ではない。上端laneをdragせずclickするとpointerdownがIN=OUTを置くので、
+    // ここで「OUTがINより前です」と出すと、seekのつもりで押しただけで叱られる。
     it("IN==OUT は0秒の切り出しなので通さない", () => {
       win.setCut(10, 10);
-      expect(doc.getElementById("cut-len").textContent).toBe("OUTがINより前です");
+      expect(doc.getElementById("cut-len").textContent).toBe("範囲が0です");
       expect(doc.getElementById("do-clip").disabled).toBe(true);
     });
 
@@ -242,9 +247,10 @@ describe("videos.js の時間軸と対応付け", () => {
       expect(doc.getElementById("clip-normalize").checked).toBe(true);
     });
 
-    it("clipOptions は3つの指定をすべて載せる(取りこぼすと既定値で走る)", () => {
+    it("clipOptions は5つの指定をすべて載せる(取りこぼすと既定値で走る)", () => {
       const opts = win.clipOptions();
-      expect(Object.keys(opts).sort()).toEqual(["mode", "normalize_audio", "variant"]);
+      expect(Object.keys(opts).sort()).toEqual(
+        ["mode", "normalize_audio", "remove_bgm", "subtitles", "variant"]);
     });
 
     it("clipOptions はprimary側の現在値を返す", () => {
@@ -446,11 +452,250 @@ describe("videos.js の時間軸と対応付け", () => {
     });
   });
 
+  // 飛んだgiftのicon。時間軸の上へ並べる物なので、間引きで残す基準と残す位置が
+  // ずれると「その時刻に飛んでいないgift」を描くことになる。
+  describe("ギフトiconの間引き", () => {
+    const gift = (t, diamonds, giftId = 1) => ({ t, diamonds, gift_id: giftId });
+    // 秒をそのままxとして扱う写像。間引きの規則だけを見る。
+    const asX = (seconds) => seconds;
+    // 幅の実測に使うcontext(stubは1文字6px)。名前を出すときの場所取りがこれで決まる。
+    const ctx = () => doc.getElementById("heat").getContext("2d");
+    const pick = (gifts, size = 10, rows = 1, withName = false) =>
+      win.pickGiftIcons(ctx(), gifts, asX, 200, size, rows, withName);
+
+    it("重なる位置では高額なgiftだけを残す", () => {
+      expect(pick([gift(10, 1), gift(14, 500), gift(60, 5)])
+        .map((p) => p.gift.diamonds)).toEqual([500, 5]);
+    });
+
+    it("iconの一辺ぶん離れていれば両方残す", () => {
+      expect(pick([gift(10, 1), gift(30, 1)]).map((p) => p.x)).toEqual([10, 30]);
+    });
+
+    it("barの外のgiftは持ち込まない", () => {
+      expect(pick([gift(-40, 9), gift(50, 9), gift(400, 9)]).map((p) => p.x)).toEqual([50]);
+    });
+
+    it("残した後は左から右へ並べ直す(高額順のまま描かない)", () => {
+      expect(pick([gift(150, 1), gift(50, 900), gift(100, 20)]).map((p) => p.x))
+        .toEqual([50, 100, 150]);
+    });
+
+    it("拡大窓は窓の中でicon画像を出せるgiftだけを拾う", () => {
+      state().gifts = [gift(5, 1, 11), gift(50, 1, 22), gift(60, 1, 33), gift(500, 1, 22)];
+      // 22番のiconだけ出せる。出せないgiftを場所取りに使うと、そこに描けたはずの
+      // 隣のgiftまで消える。
+      state().giftIcons = { 22: "/api/gift-icon?gift_id=22" };
+      const picked = win.giftIconsInWindow(ctx(), { start: 10, end: 100 }, asX, 200, 10, 1);
+      expect(picked.map((p) => p.gift.gift_id)).toEqual([22]);
+    });
+
+    // 送り主を添える版。名前のぶん1件が横に広がるので、場所取りがiconの幅のままだと
+    // 「iconは離れているのに名前だけ重なる」状態になる。
+    describe("送り主つき", () => {
+      const named = (t, diamonds, nickname) =>
+        ({ ...gift(t, diamonds), nickname });
+
+      it("名前は頭3文字だけを採る(絵文字も1文字として数える)", () => {
+        expect(win.giftSenderName({ nickname: "あいうえお" })).toBe("あいう");
+        expect(win.giftSenderName({ nickname: "🎁🎈🎀🎉" })).toBe("🎁🎈🎀");
+        expect(win.giftSenderName({ nickname: "", uid: "gifter" })).toBe("gif");
+        expect(win.giftSenderName({ nickname: "", uid: "" })).toBe("");
+      });
+
+      it("名前のぶんまで場所を取る(iconの幅だけでは名前が重なる)", () => {
+        // 3文字=18px。1件の幅は max(icon 10, 18+2)=20 なので、20px差では並べられない。
+        const gifts = [named(50, 9, "あいうえお"), named(70, 5, "かきくけこ")];
+        expect(pick(gifts, 10, 1, true).map((p) => p.gift.diamonds)).toEqual([9]);
+        expect(pick(gifts, 10, 1, false).map((p) => p.gift.diamonds)).toEqual([9, 5]);
+      });
+
+      it("同じ列に置けないものは下の段へ回す(段が在れば落とさない)", () => {
+        const picked = pick([named(50, 9, "あいう"), named(70, 5, "かきく")], 10, 2, true);
+        expect(picked.map((p) => [p.gift.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
+      });
+
+      it("段が尽きたら落とす(高額なものから段を埋める)", () => {
+        const picked = pick(
+          [named(50, 1, "あいう"), named(55, 9, "かきく"), named(60, 5, "さしす")], 10, 2, true);
+        expect(picked.map((p) => [p.gift.diamonds, p.row])).toEqual([[9, 0], [5, 1]]);
+      });
+
+      it("段が空いていれば全て最上段へ載る(混んだ時だけ下へ伸びる)", () => {
+        const picked = pick([named(30, 9, "あいう"), named(120, 5, "かきく")], 10, 3, true);
+        expect(picked.every((p) => p.row === 0)).toBe(true);
+      });
+    });
+  });
+
+  // 間引きの規則が正しくても、canvasへ落ちる位置がずれれば同じ嘘になる。実際に描かれた
+  // drawImageのx座標で見る。
+  describe("ギフトiconの描画", () => {
+    /** jsdomはlayoutを持たないので、canvasの実寸はtestが与える(0だと描画がそのまま返る)。 */
+    function sizeCanvas(id, width, height) {
+      const el = doc.getElementById(id);
+      Object.defineProperty(el, "clientWidth", { configurable: true, get: () => width });
+      Object.defineProperty(el, "clientHeight", { configurable: true, get: () => height });
+      return el;
+    }
+
+    function drawnIcons(canvas) {
+      return canvas.getContext("2d").__ops.filter((op) => op[0] === "drawImage");
+    }
+
+    beforeEach(() => {
+      doc.getElementById("show-gifts").checked = true;
+      state().gifts = [{ t: 50, diamonds: 9, gift_id: 22 }];
+      state().giftIcons = { 22: "/api/gift-icon?gift_id=22" };
+      // 読み込み済みのicon画像。jsdomは画像を取りに行かないので、載る条件だけを与える。
+      page.run('giftIconImages.set("22", { complete: true, naturalWidth: 24 })');
+      page.run("giftLayout = null");
+      setDuration(100);
+      setCurrentTime(0);
+    });
+
+    it("全尺barでは尺に対する位置へ置く(iconの中心が時刻)", () => {
+      const canvas = sizeCanvas("heat", 200, 60);
+      win.drawHeat();
+      const icons = drawnIcons(canvas);
+      expect(icons).toHaveLength(1);
+      // 50/100秒 → x=100。drawImageの左端はそこからicon半分ぶん戻る。
+      expect(icons[0][2] + icons[0][4] / 2).toBeCloseTo(100, 1);
+    });
+
+    it("拡大窓では窓の中の位置へ置く", () => {
+      const canvas = sizeCanvas("zoom", 200, 90);
+      state().zoomStart = 40;
+      state().zoomSpan = 20;
+      doc.getElementById("zoom-follow").checked = false;
+      win.drawZoom();
+      const icons = drawnIcons(canvas);
+      expect(icons).toHaveLength(1);
+      // 窓は40〜60秒。50秒は窓の中央なのでx=100。
+      expect(icons[0][2] + icons[0][4] / 2).toBeCloseTo(100, 1);
+    });
+
+    it("表示を切れば描かない", () => {
+      doc.getElementById("show-gifts").checked = false;
+      const canvas = sizeCanvas("heat", 200, 60);
+      win.drawHeat();
+      expect(drawnIcons(canvas)).toHaveLength(0);
+    });
+
+    it("icon画像を取れなかったgiftは描かない(別の絵で代用しない)", () => {
+      page.run('giftIconImages.set("22", { complete: true, naturalWidth: 0 })');
+      const canvas = sizeCanvas("heat", 200, 60);
+      win.drawHeat();
+      expect(drawnIcons(canvas)).toHaveLength(0);
+    });
+
+    // 送り主。誰が送ったかは拡大窓だけで出す(全尺barは1px≈数秒で名前が読めない)。
+    describe("送り主の表示", () => {
+      function openZoom(height = 128) {
+        const canvas = sizeCanvas("zoom", 200, height);
+        state().zoomStart = 40;
+        state().zoomSpan = 20;
+        doc.getElementById("zoom-follow").checked = false;
+        win.drawZoom();
+        return canvas;
+      }
+      const texts = (canvas) =>
+        canvas.getContext("2d").__ops.filter((op) => op[0] === "fillText").map((op) => op[1]);
+
+      it("拡大窓には名前の頭3文字を出す", () => {
+        state().gifts = [{ t: 50, diamonds: 9, gift_id: 22, nickname: "あいうえお", uid: "gifter" }];
+        expect(texts(openZoom())).toContain("あいう");
+      });
+
+      it("avatarを取れていなければ頭文字の円へ落とす(別人の絵を置かない)", () => {
+        state().gifts = [{ t: 50, diamonds: 9, gift_id: 22, nickname: "Zoe", uid: "zoe" }];
+        // jsdomは画像を取りに行かないので、pool側は常に未取得のまま。
+        expect(texts(openZoom())).toEqual(expect.arrayContaining(["Z", "Zoe"]));
+      });
+
+      it("全尺barは送り主を出さない(名前を足すと隣のgiftが落ちるだけ)", () => {
+        state().gifts = [{ t: 50, diamonds: 9, gift_id: 22, nickname: "あいうえお", uid: "gifter" }];
+        page.run("giftLayout = null");
+        const canvas = sizeCanvas("heat", 200, 60);
+        win.drawHeat();
+        expect(texts(canvas)).not.toContain("あいう");
+      });
+
+      it("送り主が判らない行には何も添えない", () => {
+        state().gifts = [{ t: 50, diamonds: 9, gift_id: 22, nickname: "", uid: "" }];
+        expect(texts(openZoom())).not.toContain("?");
+      });
+    });
+  });
+
   describe("chapterExportUrl", () => {
     it("開いている録画のidと書式をURLへ載せる", () => {
       state().current = { recording_id: 42 };
       expect(win.chapterExportUrl("txt")).toBe("/api/recordings/42/chapters/export?format=txt");
       expect(win.chapterExportUrl("vtt")).toBe("/api/recordings/42/chapters/export?format=vtt");
+    });
+  });
+
+  // 文字起こしの「今の行」。無音は実データで再生時間の3〜5割を占めるので、そこで印が
+  // 外れると一文ごとに点滅する。帯(vd-seg-prev)は残し、太字(vd-seg-active)だけを
+  // 発話中に限る。
+  describe("highlightActiveSegment", () => {
+    beforeEach(() => {
+      state().segments = [
+        { start: 0, end: 2, text: "いち" },
+        { start: 5, end: 7, text: "に" },
+        { start: 10, end: 12, text: "さん" },
+      ];
+      win.renderSegments();
+    });
+
+    const classesAt = (index) =>
+      Array.from(doc.getElementById("segments").children[index].classList);
+
+    it("発話中の行はvd-seg-active", () => {
+      setCurrentTime(6);
+      win.highlightActiveSegment();
+      expect(classesAt(1)).toContain("vd-seg-active");
+      expect(classesAt(0)).not.toContain("vd-seg-prev");
+    });
+
+    it("無音では直前の行に帯を残す(印を消さない)", () => {
+      setCurrentTime(6);
+      win.highlightActiveSegment();
+      setCurrentTime(8);
+      win.highlightActiveSegment();
+      expect(classesAt(1)).toContain("vd-seg-prev");
+      expect(classesAt(1)).not.toContain("vd-seg-active");
+    });
+
+    it("同じ行の発話中/無音の入れ替わりを取りこぼさない", () => {
+      setCurrentTime(6);
+      win.highlightActiveSegment();
+      setCurrentTime(8);
+      win.highlightActiveSegment();
+      setCurrentTime(6);
+      win.highlightActiveSegment();
+      expect(classesAt(1)).toContain("vd-seg-active");
+      expect(classesAt(1)).not.toContain("vd-seg-prev");
+    });
+
+    it("印は1行だけ(次の発話へ移ると前の行から両方外れる)", () => {
+      setCurrentTime(8);
+      win.highlightActiveSegment();
+      setCurrentTime(11);
+      win.highlightActiveSegment();
+      expect(classesAt(1)).not.toContain("vd-seg-prev");
+      expect(classesAt(1)).not.toContain("vd-seg-active");
+      expect(classesAt(2)).toContain("vd-seg-active");
+    });
+
+    it("最初の発話より前は印を付けない(まだ読む行が無い)", () => {
+      setCurrentTime(6);
+      win.highlightActiveSegment();
+      setCurrentTime(-1);
+      win.highlightActiveSegment();
+      expect(classesAt(0)).not.toContain("vd-seg-active");
+      expect(classesAt(1)).not.toContain("vd-seg-prev");
     });
   });
 });

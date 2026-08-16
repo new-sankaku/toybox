@@ -10,11 +10,15 @@ server起動のたびに「まだ作られていない派生物」をqueueへ積
 | ts結合 (`pack`) | media job queue | `pack_sweep_per_start` | 10本/起動 |
 | 音声波形 (`waveform`) | media job queue | `waveform_sweep_per_start` | 10本/起動 |
 | サムネ (`sprite`) | media job queue | `sprite_sweep_per_start` | 10本/起動 |
-| 文字起こし (`transcribe`) | transcribe queue | `transcribe_sweep_enabled` | ON・本数無制限 |
+| 文字起こし (`transcribe`) | media job queue (kind=stt) | `transcribe_sweep_enabled` | ON・本数無制限 |
 
-文字起こしだけ本数で区切らないのは、転写queueが映像jobとは別台帳で、GPUを1本ずつ直列に
-使い、再起動をまたいで残るため。全部積んでも同時に走るのは常に1本で、終わらなかったぶんは
-次の起動でそのまま続く。
+文字起こしだけ本数で区切らないのは、GPUを1本ずつ直列に使い、queueが再起動をまたいで残る
+ため。全部積んでも同時に走るのは常に1本で、終わらなかったぶんは次の起動でそのまま続く。
+
+上限が無いぶん、待機列は文字起こしのない録画で埋まる。人が録画詳細から1本を頼んだときは、その録画が
+既にsweep行として並んでいるのが普通なので、新しい行を足さずその行の順番だけを人の優先度へ
+上げる(`media_job_queue.promote`)。二重投入として拒むと「押しても何も始まらない」になり、
+順番を上げないと数百本の自動投入の後ろで動かない。
 
 ## 何を積まないか
 

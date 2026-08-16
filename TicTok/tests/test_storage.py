@@ -229,6 +229,38 @@ def test_add_event_without_identifiable_user_creates_no_users_row(
     assert db_read.execute("SELECT COUNT(*) n FROM events").fetchone()["n"] == 1
 
 
+# ===== コラボ相手(共演者)の身元 =====
+
+def test_save_peer_identity_writes_the_user_row_and_reads_back_by_user_id(tmp_db, db_read):
+    """コラボ相手の身元はusers表へ残す。identity_keyは不変user_id優先の規則そのままなので、
+    user_idで引き直せること(collectorが次のprocessで通信せずに名前を出す経路)。"""
+    tmp_db.save_peer_identity(
+        "7300000000000000009", "kotsubu", "こつぶ組", "https://cdn/a.jpg", room_id="7658",
+    )
+    assert tmp_db.peer_identities(["7300000000000000009"]) == {
+        "7300000000000000009": {"nickname": "こつぶ組", "unique_id": "kotsubu",
+                                "avatar": "https://cdn/a.jpg"},
+    }
+    row = db_read.execute(
+        "SELECT broadcaster_room_id, broadcaster, league_checked_at FROM users"
+        " WHERE identity_key = ?", ("7300000000000000009",),
+    ).fetchone()
+    assert row["broadcaster_room_id"] == "7658"
+    # 「@handleで照会して配信者だと確かめた」のはリーグ取得workerの観測。室を1つ見ただけの
+    # こちらがその欄を埋めると、確かめていないことを確かめたことにする。
+    assert (row["broadcaster"], row["league_checked_at"]) == (None, None)
+
+
+def test_peer_identities_skips_rows_that_have_no_name(tmp_db, make_session, event_builder):
+    """名前も@handleも無い行は返さない。返すと呼び出し側は「解決できた」と読み、数値IDを
+    名前の位置へ出すことになる。"""
+    session_id = make_session(status="connected")
+    faceless = event_builder.user(user_id="7300000000000000010", unique_id="", nickname="")
+    tmp_db.add_event(session_id, event_builder("comment", at=100.0, user=faceless))
+    tmp_db.flush()
+    assert tmp_db.peer_identities(["7300000000000000010", ""]) == {}
+
+
 # ===== upsert間引きcache(_user_cache)の上限 =====
 
 def test_user_cache_skips_the_upsert_within_the_ttl(
@@ -583,7 +615,10 @@ def test_session_summary_aggregates_gifts_and_hides_missing_levels(
     top = summary["users"][0]
     assert top["diamonds"] == 15
     assert top["gifts"] == 3
-    assert top["items"]["Rose"] == {"count": 3, "diamonds": 15}
+    rose = top["items"]["Rose"]
+    assert (rose["count"], rose["diamonds"]) == (3, 15)
+    # icon表示用の身元。gift_nameと1対1なので、まとめても1件に畳まれる。
+    assert rose["gift_id"] > 0
     assert top["gifter_level"] == 7
     # Lv/badgeはpoint-in-timeのみ。未観測は0(非表示)で、捏造して埋めない。
     assert summary["users"][1]["gifter_level"] == 0
@@ -1231,6 +1266,64 @@ def test_search_scenes_falls_back_to_like_for_short_terms(tmp_db, make_session):
     assert long_q["total"] == 1
 
 
+def _laugh_rows(tmp_db, make_session):
+    """2本の録画に笑い声の窓を入れる。強さ・長さ・配信日の3つが互いに逆順になるよう
+    置く(どれか1つの順序で偶然揃っていると、並べ替えが効いていなくてもtestが通る)。"""
+    old = make_session("alice", status="connected")
+    new = make_session("bob", status="connected")
+    rec_old = tmp_db.create_recording(old, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    rec_new = tmp_db.create_recording(new, "bob", "/b.mp4", "b.mp4", "hd", 2.0)
+    # 古い配信 = 一番強く、一番短い。
+    tmp_db.replace_search_hits(rec_old, "laugh", [
+        {"unique_id": "alice", "started_at": 100.0, "video_time": 10.0, "end_time": 13.0,
+         "session_id": old, "body": "3秒（強さ 0.90）", "score": 0.9},
+    ])
+    # 新しい配信 = 弱いが長い。
+    tmp_db.replace_search_hits(rec_new, "laugh", [
+        {"unique_id": "bob", "started_at": 200.0, "video_time": 20.0, "end_time": 40.0,
+         "session_id": new, "body": "20秒（強さ 0.40）", "score": 0.4},
+    ])
+    return rec_old, rec_new
+
+
+def test_laugh_scenes_orders_by_time_strength_and_length(tmp_db, make_session):
+    _laugh_rows(tmp_db, make_session)
+    by_time = tmp_db.laugh_scenes(order="time")
+    assert by_time["total"] == 2
+    assert [row["unique_id"] for row in by_time["items"]] == ["bob", "alice"]
+    # 強い順は「はっきり笑っている場面」から。長い順は「笑いが続いた場面」から。
+    assert [r["unique_id"] for r in tmp_db.laugh_scenes(order="strength")["items"]] \
+        == ["alice", "bob"]
+    assert [r["unique_id"] for r in tmp_db.laugh_scenes(order="length")["items"]] \
+        == ["bob", "alice"]
+
+
+def test_laugh_scenes_returns_only_laughter_and_never_the_word_index(tmp_db, make_session):
+    """語で入れた行(文字起こし・comment)を混ぜないこと。ここは語を持たない行だけの一覧である。"""
+    _laugh_rows(tmp_db, make_session)
+    session_id = make_session("carol", status="connected")
+    rec = tmp_db.create_recording(session_id, "carol", "/c.mp4", "c.mp4", "hd", 3.0)
+    tmp_db.replace_search_hits(rec, "stt", [
+        {"unique_id": "carol", "started_at": 300.0, "video_time": 1.0,
+         "session_id": session_id, "body": "笑い声が聞こえる"},
+    ])
+    result = tmp_db.laugh_scenes()
+    assert result["total"] == 2
+    assert {row["source"] for row in result["items"]} == {"laugh"}
+    # 画面は検索hitと同じ表を描く。囲む語が無いので原文がそのままsnippetになる。
+    assert result["items"][0]["snippet"] == result["items"][0]["body"]
+
+
+def test_laugh_scenes_narrows_by_streamer_and_pages(tmp_db, make_session):
+    _laugh_rows(tmp_db, make_session)
+    only = tmp_db.laugh_scenes(unique_ids=["alice"])
+    assert only["total"] == 1 and only["items"][0]["unique_id"] == "alice"
+    # 件数は絞り込み後の全体で、pageの中身とは別に返る(「さらに読み込む」の判断材料)。
+    page = tmp_db.laugh_scenes(limit=1, offset=1)
+    assert page["total"] == 2 and len(page["items"]) == 1
+    assert page["items"][0]["unique_id"] == "alice"
+
+
 def test_search_scenes_degrades_gracefully_on_empty_or_bad_query(tmp_db):
     assert tmp_db.search_scenes("hello", [])["total"] == 0
     # 除外語だけの入力はerrorではなく空 + hintで返す(画面が落ちない)。
@@ -1272,20 +1365,58 @@ def test_storage_scan_is_none_until_first_scan(tmp_db):
     assert got["duration_ms"] == 456.0
 
 
-# ===== 切り出し / 見どころ =====
+# ===== 見どころ(=切り出し候補) =====
 
-def test_cut_list_add_delete_and_clear(tmp_db, make_session):
+def test_bookmark_add_delete_and_clear(tmp_db, make_session):
     session_id = make_session("alice", status="connected")
     rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
-    cut = tmp_db.add_cut(rec, "alice", 10.0, 20.0, "good")
-    assert cut["start"] == 10.0
-    assert cut["label"] == "good"
-    tmp_db.add_cut(rec, "alice", 30.0, 40.0)
-    assert len(tmp_db.list_cuts()) == 2
-    assert tmp_db.delete_cut(cut["id"]) is True
-    assert tmp_db.delete_cut(cut["id"]) is False
-    assert tmp_db.clear_cuts() == 1
-    assert tmp_db.list_cuts() == []
+    mark = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, "good")
+    assert mark["start"] == 10.0
+    assert mark["memo"] == "good"
+    assert mark["origin"] == "manual"
+    tmp_db.add_bookmark(rec, "alice", 30.0, 40.0)
+    assert len(tmp_db.list_bookmarks()) == 2
+    assert tmp_db.delete_bookmark(mark["id"]) is True
+    assert tmp_db.delete_bookmark(mark["id"]) is False
+    assert tmp_db.clear_bookmarks() == 1
+    assert tmp_db.list_bookmarks() == []
+
+
+def test_bookmark_if_absent_reuses_same_range_and_keeps_origin(tmp_db, make_session):
+    """shortの自動生成の書き戻し先。同じ範囲の行が在れば作らず、その行を返す。
+
+    人が付けた見どころと同じ範囲を機械が作っても、その行は機械の物にならない
+    (originを動かすと、人が付けた印が既定で隠れる側へ落ちる)。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    manual = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, "人が付けた")
+    same = tmp_db.add_bookmark_if_absent(rec, "alice", 10.0, 20.0, memo="機械")
+    assert same["id"] == manual["id"]
+    assert same["origin"] == "manual"
+    assert same["memo"] == "人が付けた"
+    # 1 frame以下のずれは同じ場面として扱う(無音への吸着で端はわずかに動く)。
+    near = tmp_db.add_bookmark_if_absent(rec, "alice", 10.02, 20.02)
+    assert near["id"] == manual["id"]
+    fresh = tmp_db.add_bookmark_if_absent(rec, "alice", 100.0, 110.0, memo="機械の範囲")
+    assert fresh["id"] != manual["id"]
+    assert fresh["origin"] == "auto"
+    # 点は素材にならないので、同じ位置に点が在っても書き戻し先にはならない。
+    tmp_db.add_bookmark(rec, "alice", 200.0)
+    made = tmp_db.add_bookmark_if_absent(rec, "alice", 200.0, 210.0)
+    assert made["end"] == 210.0
+
+
+def test_bookmark_export_record_survives_range_edit(tmp_db, make_session):
+    """書き出しの記録は過去の事実で、範囲を直しても消えない(その出力fileは今も在る)。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    mark = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0)
+    assert tmp_db.mark_bookmark_exported(mark["id"], "/out/a.mp4", 999.0) is True
+    assert tmp_db.mark_bookmark_exported(999999, "/out/x.mp4") is False
+    tmp_db.update_bookmark_range(mark["id"], 12.5, 18.0, end_given=True)
+    got = tmp_db.get_bookmark(mark["id"])
+    assert (got["start"], got["end"]) == (12.5, 18.0)
+    assert (got["exported_at"], got["exported_path"]) == (999.0, "/out/a.mp4")
 
 
 def test_clip_group_crud_counts_and_delete_returns_items_to_ungrouped(tmp_db, make_session):
@@ -1294,57 +1425,103 @@ def test_clip_group_crud_counts_and_delete_returns_items_to_ungrouped(tmp_db, ma
     group = tmp_db.add_group("XXX発言")
     # 同名は冪等(既存を返す)。同名が2つ並ぶと追加先がどちらか読めなくなる。
     assert tmp_db.add_group("XXX発言")["id"] == group["id"]
-    first = tmp_db.add_cut(rec, "alice", 10.0, 20.0, "a", group_id=group["id"])
-    second = tmp_db.add_cut(rec, "alice", 30.0, 40.0, "b", group_id=group["id"])
+    first = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, "a", group_id=group["id"])
+    second = tmp_db.add_bookmark(rec, "alice", 30.0, 40.0, "b", group_id=group["id"])
     # グループへ入れた順にpositionが振られる(グループ内の並び=書き出し順)。
     assert (first["position"], second["position"]) == (0, 1)
-    mark = tmp_db.add_bookmark(rec, "alice", 5.0, group_id=group["id"])
+    point = tmp_db.add_bookmark(rec, "alice", 5.0, group_id=group["id"])
     listed = tmp_db.list_groups()
     assert [g["id"] for g in listed] == [group["id"]]
-    assert listed[0]["cut_count"] == 2
-    assert listed[0]["cut_seconds"] == pytest.approx(20.0)
-    assert listed[0]["bookmark_count"] == 1
+    assert listed[0]["item_count"] == 3
+    # 点は素材にならないので、尺のある件数にも合計尺にも入らない。
+    assert listed[0]["ranged_count"] == 2
+    assert listed[0]["ranged_seconds"] == pytest.approx(20.0)
     assert tmp_db.update_group(group["id"], name="YYY発言")["name"] == "YYY発言"
     assert tmp_db.update_group(999999, name="zzz") is None
-    # グループの削除は項目を消さず未分類へ戻す。
+    # グループの削除は項目を消さず未分類へ戻す(書き出し順は失われる)。
     assert tmp_db.delete_group(group["id"]) is True
     assert tmp_db.delete_group(group["id"]) is False
-    assert all(c["group_id"] is None and c["position"] is None for c in tmp_db.list_cuts())
-    assert tmp_db.get_bookmark(mark["id"])["group_id"] is None
+    assert all(b["group_id"] is None and b["position"] is None
+               for b in tmp_db.list_bookmarks())
+    assert tmp_db.get_bookmark(point["id"])["group_id"] is None
 
 
-def test_cut_group_move_copy_reorder_and_scoped_clear(tmp_db, make_session):
+def test_bookmark_group_move_copy_reorder_and_scoped_clear(tmp_db, make_session):
     session_id = make_session("alice", status="connected")
     rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
     g1 = tmp_db.add_group("g1")
     g2 = tmp_db.add_group("g2")
-    first = tmp_db.add_cut(rec, "alice", 10.0, 20.0, group_id=g1["id"])
-    second = tmp_db.add_cut(rec, "alice", 30.0, 40.0, group_id=g1["id"])
-    loose = tmp_db.add_cut(rec, "alice", 50.0, 60.0)
+    first = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, group_id=g1["id"])
+    second = tmp_db.add_bookmark(rec, "alice", 30.0, 40.0, group_id=g1["id"])
+    loose = tmp_db.add_bookmark(rec, "alice", 50.0, 60.0)
+    by_id = lambda rows: {b["id"]: b for b in rows}  # noqa: E731
     # move: 移動先の末尾へ。未分類の行はpositionを持たない。
-    assert tmp_db.move_cuts_to_group([loose["id"]], g2["id"]) == 1
-    moved = next(c for c in tmp_db.list_cuts() if c["id"] == loose["id"])
+    assert tmp_db.set_bookmark_group([loose["id"]], g2["id"]) == 1
+    moved = by_id(tmp_db.list_bookmarks())[loose["id"]]
     assert (moved["group_id"], moved["position"]) == (g2["id"], 0)
     # copy: 行の複製。元(g1)は残り、複製は相対順(first→second)を保ってg2の末尾へ。
-    assert tmp_db.copy_cuts_to_group([second["id"], first["id"]], g2["id"]) == 2
-    g1_rows = [c for c in tmp_db.list_cuts() if c["group_id"] == g1["id"]]
-    assert {c["id"] for c in g1_rows} == {first["id"], second["id"]}
-    g2_rows = sorted((c for c in tmp_db.list_cuts() if c["group_id"] == g2["id"]),
-                     key=lambda c: c["position"])
-    assert [c["start"] for c in g2_rows] == [50.0, 10.0, 30.0]
+    assert tmp_db.copy_bookmarks_to_group([second["id"], first["id"]], g2["id"]) == 2
+    g1_rows = [b for b in tmp_db.list_bookmarks() if b["group_id"] == g1["id"]]
+    assert {b["id"] for b in g1_rows} == {first["id"], second["id"]}
+    g2_rows = tmp_db.bookmarks_in_group(g2["id"])
+    assert [b["start"] for b in g2_rows] == [50.0, 10.0, 30.0]
     # reorder: 指定順へ振り直し、指定に無い行は現状の相対順のまま後ろへ。
-    ids = [c["id"] for c in g2_rows]
-    assert tmp_db.reorder_group_cuts(g2["id"], [ids[2], ids[0]]) == 3
-    reordered = sorted((c for c in tmp_db.list_cuts() if c["group_id"] == g2["id"]),
-                       key=lambda c: c["position"])
-    assert [c["id"] for c in reordered] == [ids[2], ids[0], ids[1]]
+    ids = [b["id"] for b in g2_rows]
+    assert tmp_db.reorder_group_bookmarks(g2["id"], [ids[2], ids[0]]) == 3
+    assert [b["id"] for b in tmp_db.bookmarks_in_group(g2["id"])] == [ids[2], ids[0], ids[1]]
     # 一括削除はグループ/未分類のscopeを持つ。
-    assert tmp_db.clear_cuts(group_id=g1["id"]) == 2
-    assert tmp_db.clear_cuts(only_ungrouped=True) == 0
-    assert tmp_db.move_cuts_to_group([ids[0]], None) == 1
-    assert tmp_db.clear_cuts(only_ungrouped=True) == 1
-    assert tmp_db.delete_cuts([ids[1], ids[2]]) == 2
-    assert tmp_db.list_cuts() == []
+    assert tmp_db.clear_bookmarks(group_id=g1["id"]) == 2
+    assert tmp_db.clear_bookmarks(only_ungrouped=True) == 0
+    assert tmp_db.set_bookmark_group([ids[0]], None) == 1
+    assert tmp_db.clear_bookmarks(only_ungrouped=True) == 1
+    assert tmp_db.delete_bookmarks([ids[1], ids[2]]) == 2
+    assert tmp_db.list_bookmarks() == []
+
+
+def test_copy_does_not_carry_export_record(tmp_db, make_session):
+    """複製は「同じ場面を別グループ用に詰め直す」ための操作で、まだ何も書き出していない。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    group = tmp_db.add_group("g1")
+    mark = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, "元ネタ")
+    tmp_db.mark_bookmark_exported(mark["id"], "/out/a.mp4")
+    assert tmp_db.copy_bookmarks_to_group([mark["id"]], group["id"]) == 1
+    copied = tmp_db.bookmarks_in_group(group["id"])[0]
+    assert copied["memo"] == "元ネタ"
+    assert copied["exported_at"] is None
+    assert copied["exported_path"] is None
+
+
+def test_group_shelf_order_and_merge(tmp_db, make_session):
+    """棚の並べ替えと統合。統合は「中身は移ったが空のグループが残る」半端な状態を
+    残さないため、1回の呼び出しで移動と削除まで済ませる。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    first = tmp_db.add_group("g1")
+    second = tmp_db.add_group("g2")
+    third = tmp_db.add_group("g3")
+    # 既定は作成順。positionは作った順に採番される。
+    assert [g["id"] for g in tmp_db.list_groups()] == [first["id"], second["id"], third["id"]]
+    # 指定に無いグループは現状の相対順のまま後ろへ。
+    assert tmp_db.reorder_groups([third["id"], first["id"]]) == 3
+    assert [g["id"] for g in tmp_db.list_groups()] == [third["id"], first["id"], second["id"]]
+    # 存在しないidは黙って無視する(他グループのpositionを書き換えない)。
+    assert tmp_db.reorder_groups([999999, second["id"]]) == 3
+    assert [g["id"] for g in tmp_db.list_groups()][0] == second["id"]
+
+    into = tmp_db.add_bookmark(rec, "alice", 100.0, 110.0, group_id=second["id"])
+    a = tmp_db.add_bookmark(rec, "alice", 10.0, 20.0, group_id=first["id"])
+    b = tmp_db.add_bookmark(rec, "alice", 30.0, 40.0, group_id=first["id"])
+    tmp_db.reorder_group_bookmarks(first["id"], [b["id"], a["id"]])
+    outside = tmp_db.add_bookmark(rec, "alice", 6.0, group_id=third["id"])
+
+    assert tmp_db.merge_groups(first["id"], second["id"]) == {"bookmarks": 2}
+    # 統合元は消え、中身は移動先の末尾へ相対順(b→a)を保って付く。
+    assert first["id"] not in [g["id"] for g in tmp_db.list_groups()]
+    assert [b["id"] for b in tmp_db.bookmarks_in_group(second["id"])] \
+        == [into["id"], b["id"], a["id"]]
+    # 無関係のグループの見どころは動かない。
+    assert tmp_db.get_bookmark(outside["id"])["group_id"] == third["id"]
 
 
 def test_bookmark_group_assignment(tmp_db, make_session):
@@ -1364,7 +1541,7 @@ def test_bookmark_point_keeps_null_end_and_memo_is_editable(tmp_db, make_session
     rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
     point = tmp_db.add_bookmark(rec, "alice", 5.0)
     span = tmp_db.add_bookmark(rec, "alice", 8.0, end=12.0, memo="range")
-    # end IS NULL が点、endを持てば範囲。
+    # end IS NULL が点、endを持てば範囲(=mp4にできる素材)。
     assert point["end"] is None
     assert span["end"] == 12.0
 
@@ -1374,6 +1551,19 @@ def test_bookmark_point_keeps_null_end_and_memo_is_editable(tmp_db, make_session
     assert tmp_db.delete_bookmark(point["id"]) is True
     assert tmp_db.delete_bookmark(point["id"]) is False
 
+
+def test_bookmark_point_gains_span_and_returns_to_point(tmp_db, make_session):
+    """点と範囲は同じ行の上を行き来する。尺を与えればmp4にでき、外せば点へ戻る。"""
+    session_id = make_session("alice", status="connected")
+    rec = tmp_db.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    point = tmp_db.add_bookmark(rec, "alice", 5.0)
+    ranged = tmp_db.update_bookmark_range(point["id"], None, 20.0, end_given=True)
+    assert (ranged["start"], ranged["end"]) == (5.0, 20.0)
+    back = tmp_db.update_bookmark_range(point["id"], None, None, end_given=True)
+    assert back["end"] is None
+    # end_given=False は「endに触らない」。位置だけを動かせる。
+    tmp_db.update_bookmark_range(point["id"], 7.5, None)
+    assert tmp_db.get_bookmark(point["id"])["start"] == 7.5
 
 # ===== close時の最終drain =====
 
@@ -1412,6 +1602,34 @@ def test_streamer_profile_returns_every_opponent_not_just_the_top_ranked(tmp_db,
     assert len(opponents) == 40
     assert [o["unique_id"] for o in opponents] == [f"rival{i:02d}" for i in range(40)]
     assert opponents[-1]["battles"] == 1
+
+
+def test_streamer_profile_folds_an_opponent_by_user_id_across_renames(tmp_db, make_session):
+    """同じ相手は不変のuser_idで1人に畳む。handle先頭で畳んでいた頃は、handleの載らない
+    戦(実data 1921件中24件)が別人として割れ、実測13名が2行になっていた。監視画面の
+    コラボ相手はuser_idしか名乗らないので、その軸で引けることも同時に要る。"""
+    now = time.time()
+    session_id = make_session("owner")
+    plain = _battle(1, now - 7200, ["rival"])
+    plain["opponents"][0]["user_id"] = "7450739310981366791"
+    # handleもnicknameも載らなかった戦(実dataに在る)。同じ相手として畳まれること。
+    bare = _battle(2, now - 3600, ["rival"])
+    bare["opponents"][0] = {
+        "unique_id": "", "nickname": "", "avatar": "", "user_id": "7450739310981366791",
+    }
+    tmp_db.save_battles(session_id, [plain, bare])
+
+    profile = tmp_db.streamer_profile("owner")["battles"]
+    assert len(profile["opponents"]) == 1
+    opponent = profile["opponents"][0]
+    assert opponent["battles"] == 2
+    assert opponent["user_id"] == "7450739310981366791"
+    # 1戦目に載っていた表示情報が、名前の無い戦を先に読んでも残ること。
+    assert opponent["unique_id"] == "rival"
+    assert opponent["nickname"] == "RIVAL"
+    assert all(
+        h["opponent_user_ids"] == ["7450739310981366791"] for h in profile["history"]
+    )
 
 
 def test_streamer_profile_history_keeps_every_battle_for_opponent_lookup(tmp_db, make_session):
@@ -1489,6 +1707,51 @@ def test_streamer_profile_history_bounds_an_interrupted_recording_by_the_next_on
     assert by_id[2]["recording_id"] == later
 
 
+def test_streamer_profile_drops_battles_where_every_side_stayed_at_the_no_contest_score(
+    tmp_db, tmp_db_path, make_session
+):
+    """全陣営のscoreが閾値以下のBattleは勝負が成立していない。勝率・平均Score・対戦相手へ
+    混ぜると、実際には戦っていない枠が実力の数字を薄める。共演構成からは外さない
+    (成立しなくてもその時間はBattle枠に使われている)。"""
+    session_id = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute(
+            "UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (session_id,)
+        )
+        side.commit()
+    finally:
+        side.close()
+    tmp_db.save_battles(
+        session_id,
+        [
+            # 自陣が閾値ちょうど・敵陣はそれ以下 → どの陣営も越えていないので除外。
+            dict(
+                _battle(1, 100.0, ["ghost"], own_score=100, opp_score=40),
+                end_time=400.0,
+                result="win",
+            ),
+            # 敵陣だけが閾値を越えた → 勝負は成立している(負けを消してはいけない)。
+            dict(
+                _battle(2, 1000.0, ["rival"], own_score=10, opp_score=101),
+                end_time=1300.0,
+                result="lose",
+            ),
+        ],
+    )
+
+    profile = tmp_db.streamer_profile("owner")
+    battles = profile["battles"]
+    assert battles["count"] == 1
+    assert battles["no_contest"] == 1
+    assert battles["no_contest_score"] == 100
+    assert (battles["wins"], battles["losses"]) == (0, 1)
+    assert [h["battle_id"] for h in battles["history"]] == [2]
+    assert [o["unique_id"] for o in battles["opponents"]] == ["rival"]
+    assert profile["coop"]["battle_count"] == 2
+    assert profile["coop"]["battle_seconds"] == 600
+
+
 # ===== 共演構成(コラボ / Battle / ソロ) =====
 
 class TestCoopSummary:
@@ -1549,6 +1812,44 @@ class TestCoopSummary:
         assert coop["battle_seconds"] == 0.0
         assert coop["solo_share"] == 100.0
 
+    def test_series_lists_every_session_in_time_order_including_collab_free_ones(self):
+        """コラボ比率の推移用の内訳。コラボ0%の配信を落とすと「コラボした配信だけ」の
+        系列になり、推移が実態より高く見える。並びは古い→新しい。"""
+        coop = _coop_summary(
+            [(2, 1000.0, 4600.0), (1, 0.0, 3600.0)],   # 入力順は新しい方が先
+            [(1, 0.0, 900.0)],                          # session1だけコラボ 900秒
+            [],
+        )
+        series = coop["series"]
+        assert [s["session_id"] for s in series] == [1, 2]
+        assert series[0]["collab_share"] == 25.0
+        assert series[0]["collab_count"] == 1
+        assert series[1]["collab_share"] == 0.0
+        assert series[1]["active_seconds"] == 3600.0
+
+    def test_series_share_is_within_the_session_not_the_lifetime(self):
+        """各配信の比率はその配信の中での割合。通算の分母で割ると、短い配信の
+        コラボが薄まって0%に見える。"""
+        coop = _coop_summary(
+            [(1, 0.0, 600.0), (2, 1000.0, 37000.0)],
+            [(1, 0.0, 300.0)],
+            [],
+        )
+        by_id = {s["session_id"]: s for s in coop["series"]}
+        assert by_id[1]["collab_share"] == 50.0
+        assert coop["collab_share"] < 1.0  # 通算では埋もれる
+
+    def test_series_splits_overlapping_battle_out_of_collab_per_session(self):
+        """重なりの扱いは通算と同じ(Battle側にだけ数える)。配信ごとでも同じでないと、
+        棒の合計が通算の比率と食い違う。"""
+        coop = _coop_summary(
+            [(1, 0.0, 1000.0)],
+            [(1, 100.0, 600.0)],
+            [(1, 300.0, 500.0)],
+        )
+        s = coop["series"][0]
+        assert (s["collab_seconds"], s["battle_seconds"], s["solo_seconds"]) == (300.0, 200.0, 500.0)
+
     def test_rates_are_per_streaming_hour(self):
         coop = _coop_summary(
             [(1, 0.0, 7200.0)],
@@ -1577,9 +1878,7 @@ def test_streamer_profile_reports_coop_composition(tmp_db, tmp_db_path, make_ses
         side.commit()
     finally:
         side.close()
-    tmp_db.save_collab_windows(
-        session_id, [{"channel_id": "c1", "start": 100.0, "end": 1900.0}]
-    )
+    tmp_db.save_collab_windows(session_id, [_collab_window(100.0, 1900.0)])
     tmp_db.save_battles(
         session_id,
         [
@@ -1595,6 +1894,252 @@ def test_streamer_profile_reports_coop_composition(tmp_db, tmp_db_path, make_ses
     assert coop["collab_share"] == 25.0
     assert coop["battles_per_hour"] == 1.0
     assert coop["sessions_with_collab"] == 1
+
+
+def _collab_window(start, end, channel_id="c1"):
+    """現行ruleで収集した体の窓。versionを省くと旧形式(v1)扱いで集計から外れるため、
+    共演構成のtestは必ずこれを使う。"""
+    from tictok.core.collab import COLLAB_WINDOW_VERSION
+
+    return {
+        "channel_id": channel_id,
+        "start": start,
+        "end": end,
+        "version": COLLAB_WINDOW_VERSION,
+    }
+
+
+def test_collab_windows_from_the_old_rule_are_not_counted(tmp_db, tmp_db_path, make_session):
+    """旧rule(v1)の窓はfinishでしか閉じておらず、間のソロ時間を丸ごとコラボに数えている。
+    補正材料がDBに無いので集計から外す。0%ではなく**未計測**として名乗ること — 0%だと
+    その時間が全部ソロに見え、旧ruleとは逆向きの嘘になる。"""
+    session_id = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute(
+            "UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (session_id,)
+        )
+        side.commit()
+    finally:
+        side.close()
+    # versionを持たない窓 = 旧形式。save_collab_windowsは1として保存する。
+    tmp_db.save_collab_windows(session_id, [{"channel_id": "c1", "start": 100.0, "end": 1900.0}])
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["collab_available"] is False
+    assert coop["collab_since"] is None
+    assert coop["collab_seconds"] == 0
+    # 分母は絞らない。Battle側の値は窓に依存しないので、全配信ぶんで正しい。
+    assert coop["sessions"] == 1
+    assert coop["active_seconds"] == 3600
+
+
+def test_collab_windows_from_the_current_rule_are_counted(tmp_db, tmp_db_path, make_session):
+    from tictok.core.collab import COLLAB_WINDOW_VERSION
+
+    session_id = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute(
+            "UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (session_id,)
+        )
+        side.commit()
+    finally:
+        side.close()
+    tmp_db.save_collab_windows(
+        session_id,
+        [{"channel_id": "c1", "start": 100.0, "end": 1900.0, "version": COLLAB_WINDOW_VERSION}],
+    )
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["collab_available"] is True
+    assert coop["collab_window_version"] == COLLAB_WINDOW_VERSION
+    assert coop["collab_seconds"] == 1800
+    assert coop["collab_share"] == 50.0
+
+
+def test_coop_windows_for_a_session_carry_both_collab_and_battle(tmp_db, make_session):
+    """笑い声indexが外す窓の出所。コラボとBattleを分けて返すのは、外す範囲を設定で
+    選べるようにするため(コラボだけ / 共演すべて)。"""
+    session_id = make_session("owner")
+    tmp_db.save_collab_windows(session_id, [_collab_window(100.0, 200.0)])
+    tmp_db.save_battles(session_id, [dict(_battle(1, 300.0, ["rival"]), end_time=400.0)])
+
+    windows = tmp_db.coop_windows_for_session(session_id)
+    assert windows["collab"] == [(100.0, 200.0)]
+    assert windows["battle"] == [(300.0, 400.0)]
+    assert windows["collab_observed"] is True
+
+
+def test_coop_windows_leave_out_the_old_rule_and_say_nothing_was_observed(tmp_db,
+                                                                          make_session):
+    """旧rule(v1)の窓はソロ時間まで飲み込んでいる。混ぜると単独の場面まで一緒に外れる
+    ので使わない。使えないことは名乗る — 黙って空を返すと「コラボの無い配信」に見え、
+    外れていない索引が「外した」と名乗ることになる。"""
+    session_id = make_session("owner")
+    tmp_db.save_collab_windows(session_id, [{"channel_id": "c1", "start": 100.0, "end": 200.0}])
+
+    windows = tmp_db.coop_windows_for_session(session_id)
+    assert windows["collab"] == []
+    assert windows["collab_observed"] is False
+
+
+def test_an_ongoing_battle_keeps_an_open_end_instead_of_a_guess(tmp_db, make_session):
+    """終端を名乗れない窓に「今」や配信終了を埋めると、その秒が窓の長さに化ける。
+    Noneのまま返し、どこで閉じるかは自分の窓を知っている呼び出し側が決める。"""
+    session_id = make_session("owner")
+    tmp_db.save_battles(session_id, [_battle(1, 300.0, ["rival"])])
+    assert tmp_db.coop_windows_for_session(session_id)["battle"] == [(300.0, None)]
+
+
+def test_collab_windows_table_gains_the_version_column_on_an_old_database(tmp_path):
+    """version列を持たない既存DBを開いたら列が足され、既存行は旧rule(1)のまま残ること。
+    ここで現行版を打つと、旧ruleの窓が新ruleを名乗って集計へ戻ってくる。"""
+    from tictok.storage import Storage
+
+    path = tmp_path / "legacy.db"
+    # 現行schemaで作ってからversion列を落とす。手書きの旧schemaでは他の列が足りず、
+    # migrationまで辿り着く前に別の理由で落ちる。
+    seed = Storage(str(path))
+    session_id = seed.create_session("owner", 60)
+    seed.close()
+    conn = sqlite3.connect(str(path))
+    conn.execute("ALTER TABLE collab_windows DROP COLUMN version")
+    conn.execute(
+        "INSERT INTO collab_windows (session_id, channel_id, start, end)"
+        " VALUES (?, 'c1', 100.0, 200.0)",
+        (session_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    store = Storage(str(path))
+    try:
+        columns = {row["name"] for row in store._conn.execute("PRAGMA table_info(collab_windows)")}
+        assert "version" in columns
+        assert store._conn.execute("SELECT version FROM collab_windows").fetchone()[0] == 1
+    finally:
+        store.close()
+
+
+def test_cut_list_is_folded_into_bookmarks_and_dropped(tmp_path):
+    """cut_listを持つ既存DBを開いたら、行が見どころへ畳まれて表が落ちること。
+
+    畳み方は行を失わない方へ倒す。元の見どころと範囲もグループも一致する行はその見どころ
+    へ書き出し順と書き出し記録を移して消え、それ以外(詰め直して範囲がずれた・元が消えた・
+    1つの見どころから複数作った)は新しい見どころとして残る。寄せてしまうと、詰めた範囲か
+    元の範囲かのどちらかが黙って消える。"""
+    from tictok.storage import Storage
+
+    path = tmp_path / "legacy.db"
+    seed = Storage(str(path))
+    session_id = seed.create_session("alice", 60)
+    rec = seed.create_recording(session_id, "alice", "/a.mp4", "a.mp4", "hd", 1.0)
+    group = seed.add_group("g1")
+    same = seed.add_bookmark(rec, "alice", 10.0, 20.0, "そのまま", group_id=group["id"])
+    trimmed = seed.add_bookmark(rec, "alice", 50.0, 60.0, "詰めた元", group_id=group["id"])
+    seed.close()
+
+    # 統合前のschemaを再現する。bookmarksから新しい列を落とし、cut_listを手で作る。
+    # 索引を先に落とすのは、列を参照している索引が残っているとDROP COLUMNが弾かれるため。
+    conn = sqlite3.connect(str(path))
+    conn.execute("DROP INDEX idx_bookmarks_group")
+    for column in ("position", "origin", "exported_at", "exported_path"):
+        conn.execute(f"ALTER TABLE bookmarks DROP COLUMN {column}")
+    conn.execute(
+        "CREATE TABLE cut_list ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, recording_id INTEGER NOT NULL,"
+        " unique_id TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL,"
+        " label TEXT NOT NULL DEFAULT '', group_id INTEGER, position INTEGER,"
+        " bookmark_id INTEGER, exported_at REAL, exported_path TEXT,"
+        " created_at REAL NOT NULL)"
+    )
+    rows = [
+        # 範囲もグループも一致 → 元の見どころへ畳まれる。
+        (rec, "alice", 10.0, 20.0, "そのまま", group["id"], 0, same["id"], 111.0, "/out/a.mp4"),
+        # 詰め直して範囲がずれた → 別の行として残す(どちらの範囲も消さない)。
+        (rec, "alice", 52.5, 58.0, "詰めた", group["id"], 1, trimmed["id"], None, None),
+        # 元の見どころを持たない(再生画面から直接足した・shortの書き戻し)。
+        (rec, "alice", 300.0, 310.0, "出所なし", None, None, None, 222.0, "/out/b.mp4"),
+    ]
+    conn.executemany(
+        "INSERT INTO cut_list (recording_id, unique_id, start, end, label, group_id,"
+        " position, bookmark_id, exported_at, exported_path, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+    store = Storage(str(path))
+    try:
+        assert store._has_table("cut_list") is False
+        folded = store.get_bookmark(same["id"])
+        assert (folded["position"], folded["exported_at"]) == (0, 111.0)
+        assert folded["exported_path"] == "/out/a.mp4"
+        assert folded["memo"] == "そのまま"
+        # 詰めた行は別の見どころとして残り、元(50.0-60.0)も消えない。
+        assert store.get_bookmark(trimmed["id"])["end"] == 60.0
+        made = [b for b in store.list_bookmarks() if b["start"] == 52.5]
+        assert len(made) == 1
+        assert (made[0]["group_id"], made[0]["position"]) == (group["id"], 1)
+        orphan = [b for b in store.list_bookmarks() if b["start"] == 300.0]
+        assert len(orphan) == 1
+        assert orphan[0]["exported_path"] == "/out/b.mp4"
+        # 移行分は人が付けた行として入れる。shortの書き戻しと区別する手掛かりがDBに無く、
+        # 推測で分けると人の見どころが既定で隠れる側へ落ちる。
+        assert {b["origin"] for b in store.list_bookmarks()} == {"manual"}
+        assert len(store.list_bookmarks()) == 4
+    finally:
+        store.close()
+
+def test_streamer_profile_coop_skips_sessions_from_before_collab_collection(
+    tmp_db, tmp_db_path, make_session
+):
+    """コラボ窓の収集が始まる前の配信は、コラボが無かったのか記録が無いだけなのかを
+    区別できない。0%として混ぜるとその配信時間が丸ごとソロへ化ける。"""
+    old = make_session("owner")
+    new = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute("UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (old,))
+        side.execute(
+            "UPDATE sessions SET started_at = 10000, ended_at = 13600 WHERE id = ?", (new,)
+        )
+        side.commit()
+    finally:
+        side.close()
+    tmp_db.save_collab_windows(new, [_collab_window(10100.0, 11900.0)])
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["sessions"] == 1
+    assert coop["unobserved_sessions"] == 1
+    assert coop["collab_since"] == 10000
+    assert coop["active_seconds"] == 3600
+    assert coop["collab_share"] == 50.0
+    assert [s["session_id"] for s in coop["series"]] == [new]
+
+
+def test_streamer_profile_coop_keeps_every_session_when_nothing_was_ever_collected(
+    tmp_db, tmp_db_path, make_session
+):
+    """コラボ窓が1件も無いDBでは境目が決まらない。ここで全配信を落とすと、コラボしない
+    配信者の共演構成が丸ごと消える(Battle・ソロの内訳まで見られなくなる)。"""
+    session_id = make_session("owner")
+    side = _side_conn(tmp_db_path)
+    try:
+        side.execute(
+            "UPDATE sessions SET started_at = 0, ended_at = 3600 WHERE id = ?", (session_id,)
+        )
+        side.commit()
+    finally:
+        side.close()
+
+    coop = tmp_db.streamer_profile("owner")["coop"]
+    assert coop["sessions"] == 1
+    assert coop["unobserved_sessions"] == 0
+    assert coop["collab_since"] is None
+    assert coop["solo_share"] == 100.0
 
 
 def test_streamer_profile_coop_uses_deduped_battles(tmp_db, tmp_db_path, make_session):
@@ -1619,10 +2164,14 @@ def test_streamer_profile_coop_uses_deduped_battles(tmp_db, tmp_db_path, make_se
 
 # ===== 未監視配信者の発見(discovery) =====
 
-def _battle(battle_id, start_time, opponents):
+def _battle(battle_id, start_time, opponents, own_score=1200, opp_score=1000):
+    # scoreの既定は不成立の閾値(_BATTLE_NO_CONTEST_SCORE)より上。既定を0にすると全戦が
+    # 「勝負が成立しなかった」扱いでBattle分析から外れ、対戦相手・履歴のtestが空を見る。
     return {
         "battle_id": battle_id,
         "start_time": start_time,
+        "own_score": own_score,
+        "opp_score": opp_score,
         "opponents": [
             {"unique_id": handle, "nickname": handle.upper(), "avatar": "", "user_id": ""}
             for handle in opponents
@@ -1890,6 +2439,96 @@ def test_fan_profile_rejects_non_identity_and_reports_missing(tmp_db):
     assert tmp_db.fan_profile("no-such-identity") == {}
 
 
+# ===== 大口(実弾)の日次人数 =====
+
+def _local_noon(day: int) -> float:
+    """localtimeの正午。日境界はDBのstrftime(...,'localtime')が切るので、UTC固定の
+    epochを置くと環境のtimezone次第で前後の日へずれる。"""
+    return time.mktime((2026, 8, day, 12, 0, 0, 0, 0, -1))
+
+
+def _ymd(at: float) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(at))
+
+
+def test_cohort_counts_whales_by_the_day_total_not_by_each_gift(
+    tmp_db, make_session, gift_builder
+):
+    """帯は「その日1日のコイン合計」で決まる。1回ごとの額で判定すると、少額を積んで
+    1Kへ届いた人が数から漏れる。帯は排他なので、積み上げた合計が1K以上の人数になる。"""
+    session_id = make_session("owner")
+    day1, day2 = _local_noon(1), _local_noon(2)
+    # 600+400=1000 で1Kへ届く(1回ずつでは届かない)。
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 600, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 400, at=day1 + 60))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9002", 1200, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9003", 999, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9004", 120000, at=day1))
+    # 日を跨いだ分は合算しない(同じ人でもその日ごとに数え直す)。
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 6000, at=day2))
+    tmp_db.flush()
+
+    result = tmp_db.streamer_cohort("owner")
+    assert [t["label"] for t in result["tiers"]] == [
+        "1K〜5K", "5K〜10K", "10K〜20K", "20K〜30K", "30K〜40K", "40K〜50K",
+        "50K〜75K", "75K〜100K", "100K〜200K", "200K〜300K", "300K↑",
+    ]
+    assert [t["min_label"] for t in result["tiers"]] == [
+        "1K", "5K", "10K", "20K", "30K", "40K", "50K", "75K", "100K", "200K", "300K",
+    ]
+    days = {d["date"]: d for d in result["days"]}
+    # 120000コインは100K〜200K(index 8)。
+    assert days[_ymd(day1)]["tiers"] == [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]
+    assert days[_ymd(day1)]["whales"] == 3
+    assert days[_ymd(day2)]["tiers"] == [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    assert days[_ymd(day2)]["whales"] == 1
+
+
+def test_cohort_days_without_whales_still_report_zero(
+    tmp_db, make_session, gift_builder, event_builder
+):
+    """giftが無い日も視聴者は居る。帯だけ落とすとグラフの日付が飛んで、配信が無かった
+    のか大口が居なかったのかが読めなくなる。"""
+    session_id = make_session("owner")
+    day1 = _local_noon(1)
+    tmp_db.add_event(session_id, event_builder("comment", at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 50, at=day1))
+    tmp_db.flush()
+
+    day = tmp_db.streamer_cohort("owner")["days"][0]
+    assert day["date"] == _ymd(day1)
+    assert day["tiers"] == [0] * 11
+    assert day["whales"] == 0
+    assert day["whales_list"] == []
+
+
+def test_cohort_returns_whale_roster_with_identity(tmp_db, make_session, gift_builder):
+    """人数だけでは「同じ常連が毎日居るのか、日替わりで別人が来ているのか」が読めない。
+    帯ごとに顔ぶれを引けるだけの身元を添える。身元は人ぶんしか無い(日数×人ではない)ので
+    日ごとの一覧はidentity_keyと額だけを持ち、名前・アイコンはpeopleへ1人1件で畳む。"""
+    session_id = make_session("owner")
+    day1, day2 = _local_noon(1), _local_noon(2)
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 3000, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9002", 8000, at=day1))
+    # 1Kに届かない人は大口ではないので顔ぶれにも載らない。
+    tmp_db.add_event(session_id, _gift(gift_builder, "9003", 500, at=day1))
+    tmp_db.add_event(session_id, _gift(gift_builder, "9001", 1500, at=day2))
+    tmp_db.flush()
+
+    result = tmp_db.streamer_cohort("owner")
+    days = {d["date"]: d for d in result["days"]}
+    # 額の多い順。帯番号は棒の段(帯)で絞るためのもの。
+    assert [(w["coins"], w["tier"]) for w in days[_ymd(day1)]["whales_list"]] == [
+        (8000, 1), (3000, 0),
+    ]
+    keys = [w["key"] for w in days[_ymd(day1)]["whales_list"]]
+    assert result["people"][keys[0]]["unique_id"] == "handle9002"
+    assert result["people"][keys[0]]["nickname"] == "Fan 9002"
+    # 同じ人が別の日にも居るが、身元は1件だけ持つ。
+    assert [w["key"] for w in days[_ymd(day2)]["whales_list"]] == [keys[1]]
+    assert len(result["people"]) == 2
+
+
 # ===== live見どころ(wall-clock -> PTS再map) =====
 
 def _recording(tmp_db, session_id, unique_id="alice", started_at=1000.0):
@@ -1980,6 +2619,42 @@ def test_streamer_profile_shows_the_current_handle_not_the_lexicographic_max(
     assert top["unique_id"] != "zzz_old_handle"
 
 
+def test_battle_gifters_show_the_same_identity_as_the_gifter_table(
+    tmp_db, make_session, gift_builder
+):
+    """Battle Gifterも全期間の通算表なので、Gifter一覧と同じ最新の身元で出すこと。
+
+    源のbattle_gift_contributionsはsession単位のpoint-in-time(しかもMAX()は辞書順最大)で、
+    集約側はそれを最初に当たったBattle=最古のsessionの値で固定していた。同じ人が2つの表で
+    別名に見え、identity_keyを持たないのでFan台帳へも飛べなかった。
+    """
+    session_id = make_session("streamer")
+    tmp_db.update_session(session_id, "ended")
+    _renamed_gifter(tmp_db, gift_builder, session_id)
+    # 改名前(at=100)と改名後(at=200)の2件を1つのBattle窓に収める。
+    battle = _battle(1, 50.0, ["rival"])
+    battle["end_time"] = 300.0
+    tmp_db.save_battles(session_id, [battle])
+
+    profile = tmp_db.streamer_profile("streamer")
+    rows = [g for g in profile["battles"]["gifters"]
+            if g["user_id"] == "7300000000000000009"]
+    # 改名しても1人1行。数え方はidentity_key単位で、名前で割れていないこと。
+    assert len(rows) == 1
+    bg = rows[0]
+    assert bg["unique_id"] == "aaa_new_handle"
+    assert bg["nickname"] == "New Name"
+    assert bg["unique_id"] != "zzz_old_handle"
+    assert bg["battles"] == 1
+
+    # 同じ人がGifter一覧と同じ身元・同じFan台帳の当たり先で出ること。
+    top = next(g for g in profile["gifters"] if g["user_id"] == "7300000000000000009")
+    assert bg["identity_key"] == top["identity_key"] == "7300000000000000009"
+    assert (bg["unique_id"], bg["nickname"]) == (top["unique_id"], top["nickname"])
+    # 窓が全giftを含むので、Battle窓の合計は通算と一致する。
+    assert bg["diamonds"] == top["diamonds"]
+
+
 def test_aggregate_dashboard_shows_the_current_handle(tmp_db, make_session, gift_builder):
     """全体dashboardも通算集計なので同じ規則。"""
     session_id = make_session("streamer")
@@ -2039,6 +2714,29 @@ def test_levels_stay_point_in_time_in_cross_session_aggregates(
     users = tmp_db.session_summary(session_id)["users"]
     top = next(u for u in users if u["user_id"] == "7300000000000000010")
     assert top["gifter_level"] == 5
+
+
+def test_claim_can_be_limited_to_one_lane(tmp_db, recording_id):
+    """即時lane(media_queue.INSTANT_KINDS)は自分の種別だけを拾い、同じ録画で別のjobが
+    走っていても拾う。
+
+    laneが無かった頃、スクショは通常のworkerの列に並んだ。その列は既定2本で、しかも
+    「同じ録画で走っているjobが在る間は次を拾わない」ので、押した1枚が焼き込みの裏で
+    数時間保存されないままになる。スクショは読んで別fileを1つ出すだけなので、走っている
+    jobの足元は抜かない。"""
+    tmp_db.enqueue_media_job("burn", "overlay", recording_id)
+    tmp_db.enqueue_media_job("shot", "still", recording_id)
+    tmp_db.start_media_job("burn")
+
+    # 通常の列: 同じ録画で焼き込みが走っている間は何も拾わない。
+    assert tmp_db.claim_next_pending_media_job() is None
+    # laneは自分の種別だけを、走っているjobに関わらず拾う。
+    claimed = tmp_db.claim_next_pending_media_job(
+        kinds=("still",), allow_busy_recording=True)
+    assert claimed["job_id"] == "shot" and claimed["state"] == "running"
+    # laneは他の種別へは手を出さない。
+    assert tmp_db.claim_next_pending_media_job(
+        kinds=("still",), allow_busy_recording=True) is None
 
 
 def test_media_job_queue_forbids_a_null_recording_id(tmp_db, make_session):

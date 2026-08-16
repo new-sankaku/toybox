@@ -24,6 +24,7 @@ from tictok.record.recorder import (ffmpeg_available, ffprobe_available,
 # 文字起こしは必ず別processで走らせる。serverでCTranslate2を読むと、torch(焼き込み・Up出力)
 # と別versionのcuDNNが同じDLL名で同居し、processごと即死する(tictok.record.stt_worker参照)。
 from tictok.record import stt_worker
+from tictok.record import bgm_remove
 # 笑い声検出をGPUで走らせるときも同じ理由で別processになる(cpu実行なら子は起きない)。
 from tictok.media import laugh_worker
 from tictok.collect.gifter_league import GifterLeagueWorker
@@ -161,7 +162,7 @@ async def _reclaim_normalizations_bg():
 # 起動時sweepが積む映像job。「素材を書き換えない」「消えても作り直せる」「無いと人がその場で
 # 待たされる」を満たす種別だけを置く。焼き込み・Up出力・再mp4化・音量正規化を入れないのは、
 # 不可逆な成果物を作るか元mp4を差し替える処理で、人が投げた覚えの無いまま起動のたびに走って
-# よい理由が無いため(文字起こしは走る先がtranscribe_queueなので別扱い)。
+# よい理由が無いため(文字起こしは同じ台帳だが本数で区切らないので_sweep_transcriptionsが持つ)。
 STARTUP_SWEEP_LIMIT_SETTINGS = {
     "pack": "pack_sweep_per_start",
     "waveform": "waveform_sweep_per_start",
@@ -243,7 +244,7 @@ def _startup_sweep_candidates(limits: dict) -> dict:
 
 
 async def _sweep_transcriptions() -> dict:
-    """未文字起こしの録画をまとめてqueueへ積む。積んだ件数と候補数を返す。
+    """文字起こしのない録画をまとめてqueueへ積む。積んだ件数と候補数を返す。
 
     本数で区切らないのは、GPUを1本ずつ直列に使い、再起動をまたいで残るため。全部積んでも
     同時に走るのは常に1本で、終わらなかったぶんは次の起動でそのまま続く。文字起こし済みと
@@ -279,13 +280,13 @@ async def _startup_sweep_bg(after=None):
         if after is not None:
             # 復旧側は自分で例外を吸うので、ここへ来るのは完了か取り消しだけ。
             await after
-        # 転写は映像jobと台帳もworkerも別なので、映像側の候補選びを待たせない。
+        # 文字起こしは映像jobと台帳もworkerも別なので、映像側の候補選びを待たせない。
         # to_threadへ逃がさない: enqueueはworkerを起こすasyncio.Eventを叩くので、別threadから
         # 呼ぶと起床が届かず、次のidle pollまで止まって見える(一括投入APIと同じ理由)。
         stt = await _sweep_transcriptions()
         if stt["added"]:
             runtime.logger.info(
-                "音声の転写に %d件の録画をqueueへ入れました（候補 %d件）",
+                "音声の文字起こしに %d件の録画をqueueへ入れました（候補 %d件）",
                 stt["added"], stt["candidates"],
                 extra={"event": "stt.sweep_queued",
                        "ctx": {"queued": stt["added"], "candidates": stt["candidates"]}},
@@ -482,6 +483,8 @@ async def lifespan(app: FastAPI):
     stt_worker.terminate_all()
     # 笑い声検出をGPUで走らせている場合も同じ形の子processが居る(cpu実行なら0件)。
     laugh_worker.terminate_all()
+    # BGM除去も別venvのpythonを子として起こす(掛けていなければ0件)。
+    bgm_remove.terminate_all()
     await media_jobs.media_job_queue.stop()
     await runtime.manager.stop_all()
     await runtime.manager.shutdown()

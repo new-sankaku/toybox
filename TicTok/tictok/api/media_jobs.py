@@ -1,4 +1,4 @@
-"""映像job(焼き込み・Up出力・再mp4化・音量正規化・ts結合・切り出し・転写)の実体。
+"""映像job(焼き込み・Up出力・再mp4化・音量正規化・ts結合・切り出し・文字起こし)の実体。
 
 永続queue(``media_job_queue``)と、queueが呼び出すjob本体、投入の入口(``_enqueue_media_job``)
 が同居する。queue側は種別を知らず、``_media_job_runner`` -> ``_run_media_job`` の2段で
@@ -11,6 +11,7 @@
 """
 
 import asyncio
+import json
 import secrets
 import shutil
 import time
@@ -18,19 +19,23 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 from fastapi import HTTPException
-from tictok.core import layout
+from tictok.core import layout, ops_labels
 from tictok.record.recorder import (disk_free_by_volume, ffmpeg_available, ffmpeg_ctx,
     ffprobe_available, is_finalizing, reclaim_normalized_mp4, Recorder, session_prefix)
 from tictok.record.transcription import STTError, stt_available
 from tictok.record.stt_worker import run_transcribe as stt_transcribe
-from tictok.media import hls_source
+from tictok.media import clip_range, clip_subtitles, hls_source
 from tictok.media import laugh_audio
-from tictok.media.clipper import clip_path, make_clip
+from tictok.media import short as short_media
+from tictok.media import work as work_media
+from tictok.media.clipper import clip_path, make_clip, still_path, STILL_VARIANT_SUFFIXES
 from tictok.media.reel import make_reel
+from tictok.media.still import capture_still
 from tictok.media.thumbnails import ensure_sprite
-from tictok.media.waveform import ensure_audio_profile, ensure_waveform
+from tictok.media.waveform import ensure_audio_profile, ensure_waveform, silence_spans
+from tictok.ai import ai_analysis
 from tictok.search import indexer
-from tictok.record import audio_norm, backups, hls_pack, subtitles
+from tictok.record import audio_norm, backups, bgm_remove, hls_pack, subtitles
 from tictok.record.media_queue import (db_kind_for_domain, JobDeferred, JobSkipped,
     MediaJobQueue)
 from tictok.record.upscale import UpscaleError, ensure_upscaled
@@ -40,6 +45,7 @@ from tictok.core.progress import (fmt_hms, IntervalGate, JobProgress, PACK_PHASE
 from tictok.record.video_overlay import (_duration_seconds, material_media_seconds,
     codec_family, ensure_overlay, NothingToDrawError, overlay_enabled, preview_clip,
     render_clip_overlay, subtitles_enabled, video_encoder_name)
+from tictok.api import candidates as api_candidates
 from tictok.api import files as api_files
 from tictok.api import disk
 from tictok.api import fsfacts
@@ -164,13 +170,17 @@ def _recording_media_seconds(recording: dict) -> Optional[float]:
         return None
 
 
-def _subtitle_transcript(recording_id: int) -> Optional[dict]:
+def _subtitle_transcript(recording_id: int, settings=None) -> Optional[dict]:
     """字幕焼き込みに使うtranscript。設定がOFFならNone。
 
-    設定がONなのに転写が無い / 時刻mapが現行版でない / **素材と時間軸が違う** / 出せる
+    設定がONなのに文字起こしが無い / 時刻mapが現行版でない / **素材と時間軸が違う** / 出せる
     segmentが無い場合は、字幕なしで焼かずに拒否する。焼き込みは元に戻せない成果物なので、
-    ズレた字幕や無言の欠落を作るより先に転写をやり直させる方が安い(提案書②-4の必須条件(c))。"""
-    if not subtitles_enabled(runtime.settings):
+    ズレた字幕や無言の欠落を作るより先に文字起こしをやり直させる方が安い(提案書②-4の必須条件(c))。
+
+    ``settings`` はshortのように「字幕の有無を型が決める」経路のための差し替え口。判定の
+    中身は同じで、どのsettingsを見るかだけが変わる(short用に別の判定を書くと、字幕が焼ける
+    条件が2つに割れる)。"""
+    if not subtitles_enabled(runtime.settings if settings is None else settings):
         return None
     transcript = runtime.storage.get_transcript(recording_id)
     if transcript is None:
@@ -216,7 +226,7 @@ async def _burn_in_recording(recording: dict, path: Path, job_id: str,
     # 焼き込みの入力を揃えるところは全てthreadへ出す。event loop上で引くとその間serverが
     # 止まる: iter_eventsはbufferのflushを待ってからsessionの全eventを読み(実測37,214件で
     # 372ms)、writer lockも同じだけ握るのでcollectorの書き出しまで巻き添えにする。
-    # 転写側はsegments_json(実測800KB級)の復号が載る。
+    # 文字起こし側はsegments_json(実測800KB級)の復号が載る。
     transcript = await asyncio.to_thread(_subtitle_transcript, recording_id)
     events = await asyncio.to_thread(
         runtime.storage.iter_events,
@@ -282,20 +292,32 @@ def _preview_sources(recording_id: int) -> tuple:
     return recording, path, events, battles, transcript
 
 
-MEDIA_JOB_TITLES = {"overlay": "焼き込み", "upscale": "Up出力", "reprocess": "再mp4化",
-                    "audionorm": "音量正規化", "pack": "ts結合",
-                    "waveform": "音声波形", "sprite": "サムネ",
-                    "overlay_preview": "焼き込みプレビュー", "clip_batch": "clip一括書き出し",
-                    "reel": "切り出しの連結", "clip_overlay": "範囲焼き込み",
-                    # 文字起こしも同じ台帳で走る。別台帳だった頃はJob一覧に出ず、GPUを同じ
-                    # 枠で取り合っているのに「動いているのにjobが無い」と読める状態だった。
-                    "stt": "文字起こし",
-                    # 笑い声分析も同じ台帳。cudaで走らせると文字起こしと同じGPU枠を取る。
-                    "laugh": "笑い声分析"}
+# DBのqueue(media_job_queue)に載るjobの種類。``_run_media_job`` が分岐できる全てであり、
+# 取り消し・再実行が効くのもこの範囲そのものである(Job画面はこれをserverから受け取る)。
+# 文字起こし・笑い声分析も同じ台帳で走る。別台帳だった頃はJob一覧に出ず、GPUを同じ枠で
+# 取り合っているのに「動いているのにjobが無い」と読める状態だった。
+MEDIA_JOB_KINDS = ("overlay", "upscale", "reprocess", "audionorm", "pack",
+                   "waveform", "sprite", "overlay_preview", "clip_batch",
+                   "reel", "clip_overlay", "short", "stt", "laugh", "still")
+
+# 台帳に出る種別名。訳語の出所はops_labelsの1箇所だけにする(同じ語を2箇所に置くと、job
+# titleと種別labelがずれる — ops_labelsのmodule docstringと同じ約束)。
+MEDIA_JOB_TITLES = {kind: ops_labels.JOB_DOMAIN_LABELS[kind] for kind in MEDIA_JOB_KINDS}
+
+# Job画面で取り消し・再実行のbuttonを出してよいdomain。台帳の種別に加えて、一括投入を
+# 1行へ畳んだgroup行(group全体へ効く)を含む。画面側に同じ一覧を持たせていた頃は、台帳へ
+# 種別が増えても画面が黙って古いままで、実際に文字起こしのjobだけbuttonが出なかった。
+QUEUED_JOB_DOMAINS = MEDIA_JOB_KINDS + tuple(ops_labels.GROUP_DOMAIN_LABELS)
 
 # 録画単位の二重投入judgeを通さないkind。reelは複数録画にまたがり、同じ先頭録画でも範囲listが
-# 違えば別の成果物なので、(kind, recording_id)で弾くと2本目が永久に投げられない。
-_NO_PER_RECORDING_DEDUPE = ("reel",)
+# 違えば別の成果物なので、(kind, recording_id)で弾くと2本目が永久に投げられない。stillも同じで、
+# 位置が違えば別の1枚である(同じ録画から続けて撮る操作を弾いてはならない)。
+_NO_PER_RECORDING_DEDUPE = ("reel", "still")
+
+# スクショは人がその場で待っている1 clickの操作で、実処理は数秒のffmpeg 1本である。待機列の
+# 末尾に付けると、長い焼き込みが数十本並んでいる間ずっと保存されない。順番だけを前へ出す
+# (同時実行の枠は media_queue の instant lane が別に持つ)。
+STILL_JOB_PRIORITY = 20
 
 # 起動時sweepが積むjobのpriority。負にしておけば、sweepが数十本並んでいる最中に人が投げた
 # jobが必ず先に始まる(待機列はpriority DESC, queued_atで並ぶ)。同時実行の本数を絞るのは
@@ -323,9 +345,14 @@ async def _enqueue_media_job(kind: str, recording_id: int, *, group_id: str = ""
             detail=f"この録画の{MEDIA_JOB_TITLES[kind]}は既にqueueにあります（jobで確認できます）。",
         )
     if kind in ("overlay", "upscale", "overlay_preview", "clip_overlay"):
-        # 字幕焼き込みが有効なら、転写が揃っているかを投入時に確かめる。workerで初めて
+        # 字幕焼き込みが有効なら、文字起こしが揃っているかを投入時に確かめる。workerで初めて
         # 落とすと、GPUの順番を待った末に失敗することになる。
         _subtitle_transcript(recording_id)
+    if kind == "short":
+        # shortは字幕の有無を型が決めるので、その型の指定で同じ確認をする。
+        preset = _short_preset(params or {})
+        _subtitle_transcript(
+            recording_id, short_media.ShortSettings(runtime.settings, preset))
     job_id = secrets.token_hex(4)
     row = await media_job_queue.enqueue(
         job_id, kind, recording_id,
@@ -337,23 +364,45 @@ async def _enqueue_media_job(kind: str, recording_id: int, *, group_id: str = ""
             "state": row["state"], "queued_at": row["queued_at"]}
 
 
-async def _transcribe_into_storage(recording: dict, path: Path, on_progress) -> dict:
-    """1本を文字起こしして保存し、検索indexへ反映する。単発APIとqueue jobの共通の本体。
+CORRECTION_POLICIES = ("keep", "discard")
+
+
+def _corrections_policy(params: Optional[dict]) -> str:
+    """再文字起こし時に既存の訂正をどうするか。既定は引き継ぎ。
+
+    未知の値は既定へ倒さず弾く。訂正を捨てるかどうかは取り返しの付き方が違う操作で、
+    綴り違いを黙って「引き継ぎ」と読むと、破棄を指示したつもりの人に古い訂正が残る。"""
+    value = (params or {}).get("corrections") or "keep"
+    if value not in CORRECTION_POLICIES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"correctionsは {'/'.join(CORRECTION_POLICIES)} のいずれかです。")
+    return value
+
+
+async def _transcribe_into_storage(recording: dict, path: Path, on_progress,
+                                   corrections: str = "keep") -> dict:
+    """1本を文字起こしして保存し、検索indexへ反映する。
 
     復号は必ず ``stt_worker`` の子processで走る(serverでCTranslate2を読むと、torchと別version
-    のcuDNNが同じDLL名で同居してprocessごと即死する)。GPU枠も子の生存期間ぶんそこで押さえる。"""
+    のcuDNNが同じDLL名で同居してprocessごと即死する)。GPU枠も子の生存期間ぶんそこで押さえる。
+
+    ``corrections`` は既にある訂正の扱い。``keep`` は新しいsegmentへ貼り直し(当たらなければ
+    保留)、``discard`` は捨てる(行は残す)。誤りを1件ずつ直した後なら前者、modelや時刻mapを
+    変えたなら後者が正しく、どちらかに決め打てないので実行時に選ぶ。"""
     async with hls_source.ffmpeg_source_async(
             path, prefer_hls=hls_source.plays_from_hls(path)) as source:
         result = await asyncio.to_thread(stt_transcribe, str(source.path), on_progress)
-    # 転写1本ぶんのsegments_jsonは実測800KB級。event loop上で書くとその間serverが止まる
+    # 文字起こし1本ぶんのsegments_jsonは実測800KB級。event loop上で書くとその間serverが止まる
     # (単発API側の同じ保存は既にthreadへ出ている)。
-    await asyncio.to_thread(runtime.storage.save_transcript, recording["id"], result)
+    await asyncio.to_thread(runtime.storage.save_transcript, recording["id"], result,
+                            corrections)
     # 保存と同時に検索indexへ反映する。ここを省くと文字起こし済みなのに検索へ出ない録画が残る。
     await asyncio.to_thread(indexer.index_transcript, runtime.storage, recording)
     return result
 
 
-async def _run_stt_job(recording_id: int, report) -> dict:
+async def _run_stt_job(recording_id: int, report, params: Optional[dict] = None) -> dict:
     """文字起こしをqueueのworkerとして実行する。
 
     以前は専用台帳(transcribe_queue)で動いていた。分離の根拠だった「済み台帳を兼ねる」役割は
@@ -387,7 +436,8 @@ async def _run_stt_job(recording_id: int, report) -> dict:
 
     try:
         async with runtime._job_ops("stt", recording_id, stem=path.stem):
-            result = await _transcribe_into_storage(recording, path, on_progress)
+            result = await _transcribe_into_storage(
+                recording, path, on_progress, _corrections_policy(params))
     except STTError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     await _report(100)
@@ -395,7 +445,8 @@ async def _run_stt_job(recording_id: int, report) -> dict:
             "language": result.get("language"), "duration_seconds": result.get("duration")}
 
 
-async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = False) -> dict:
+async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = False,
+                            corrections: str = "keep") -> dict:
     """文字起こしを録画ごとに1件ずつqueueへ載せる。投入できた数と内訳を返す。
 
     既にqueueに居る録画は数えて先へ進む(二重投入の判断は ``_enqueue_media_job`` と同じ
@@ -428,14 +479,15 @@ async def _enqueue_stt_jobs(recordings: list, priority: int = 0, sweep: bool = F
                 "recording_id": recording_id,
                 "session_id": recording.get("session_id"), "group_id": "",
                 "title": f"{MEDIA_JOB_TITLES['stt']} {stem}".strip(),
-                "params": None, "priority": priority, "sweep": sweep,
+                "params": {"corrections": corrections}, "priority": priority,
+                "sweep": sweep,
             })
         return specs, already, skipped_no_media
 
     specs, already, skipped_no_media = await asyncio.to_thread(_classify)
     added = len(await media_job_queue.enqueue_many(specs))
     runtime.logger.info(
-        "音声の転写jobをqueueへ入れました: 追加=%d 既存=%d 素材なしでskip=%d", added, already,
+        "音声の文字起こしjobをqueueへ入れました: 追加=%d 既存=%d 素材なしでskip=%d", added, already,
         skipped_no_media,
         extra={"event": "stt.jobs_enqueued",
                "ctx": {"added": added, "already": already,
@@ -491,8 +543,10 @@ async def _run_laugh_job(recording_id: int, report) -> dict:
         # 失敗として理由ごと残す(JobSkippedにすると設定の不備が静かに流れる)。
         raise HTTPException(status_code=503, detail=str(exc))
     await report("検索indexへ登録", 90)
+    # 共演中を外すための窓は、解析したのと同じ素材から時間軸を作る(pathを渡さないと
+    # DBのmp4 pathを見に行き、実体の無い録画で軸が素のwall offsetへ縮退する)。
     windows = await asyncio.to_thread(
-        indexer.index_laughter, runtime.storage, recording, profile)
+        indexer.index_laughter, runtime.storage, recording, profile, None, path)
     await report("笑い声分析", 100)
     return {"recording_id": recording_id, "windows": windows,
             "duration_seconds": profile.get("duration_seconds")}
@@ -522,7 +576,8 @@ async def _enqueue_laugh_jobs(recordings: list, priority: int = 0,
                 "recording_id": recording_id,
                 "session_id": recording.get("session_id"), "group_id": "",
                 "title": f"{MEDIA_JOB_TITLES['laugh']} {stem}".strip(),
-                "params": None, "priority": priority, "sweep": sweep,
+                "params": {"corrections": corrections}, "priority": priority,
+                "sweep": sweep,
             })
         return specs, already, skipped_no_media
 
@@ -609,7 +664,8 @@ async def _run_clip_overlay_job(job: dict, report) -> dict:
             result = await render_clip_overlay(
                 str(path), recording["started_at"], recording.get("ended_at"),
                 events, runtime.settings, str(out), start, end,
-                battles=battles, on_progress=report, transcript=transcript)
+                battles=battles, on_progress=short_media._stage_adapter(report),
+                transcript=transcript)
     except NothingToDrawError as exc:  # 字幕の前提不成立(subclass)も含む
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
@@ -633,7 +689,7 @@ async def _run_clip_overlay_job(job: dict, report) -> dict:
 
 
 async def _run_reel_job(job: dict, report) -> dict:
-    """切り出しリストの範囲を1本のmp4へ連結する。
+    """見どころの範囲を1本のmp4へ連結する。
 
     素材の形式が揃わなければ make_reel が明示的に失敗する(黙って再encodeへ倒さない)。
     連結できる組み合わせかは投入前にも確かめているが、その間に素材が変わり得るので
@@ -671,9 +727,15 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
         raise HTTPException(status_code=404, detail="録画が見つかりません。")
     src = api_files._clip_source(recording, params.get("variant") or "source")
     normalize = _clip_normalize(params.get("normalize_audio"))
+    remove_bgm = _clip_remove_bgm(params.get("remove_bgm"))
+    variant = params.get("variant") or "source"
+    want_subtitles = _clip_subtitles(params.get("subtitles"))
     mode = _clip_mode(params.get("mode"), params.get("precise"))
     total = len(ranges)
     files = []
+    paths = []
+    subtitle_files: list = []
+    subtitle_note = ""
     total_bytes = 0
     for index, item in enumerate(ranges):
         cancel.check_cancelled()
@@ -685,23 +747,436 @@ async def _run_clip_batch_job(job: dict, report) -> dict:
             async with runtime._job_ops("clip", recording_id, stem=src.stem,
                                 variant=params.get("variant") or "source",
                                 job_registry_id=job["job_id"],
-                                **audio_norm.describe(normalize)):
+                                **audio_norm.describe(normalize),
+                                **bgm_remove.describe(remove_bgm)):
                 result = await make_clip(
                     src, float(item["start"]), float(item["end"]), item.get("label"),
                     precise=(mode == "precise"), normalize=normalize,
-                    smart=(mode == "smart"))
+                    smart=(mode == "smart"), remove_bgm=remove_bgm)
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc))
+        if want_subtitles:
+            await _attach_clip_subtitles(result, recording_id, variant)
+            subtitle_files.extend(result["subtitles"].get("files") or [])
+            # 出せなかった理由は最後の1件ぶんを持つ。理由は範囲ではなく録画側の事情
+            # (文字起こしの有無・時刻mapの版・素材版)で決まるので、全件で同じになる。
+            subtitle_note = result["subtitles"].get("message") or subtitle_note
         files.append(result["filename"])
+        paths.append(result["path"])
         total_bytes += result["bytes"]
+        # 由来の見どころへ「いつ・どこへ出したか」を書き戻す。これが無いと、一覧は何度
+        # 書き出しても同じ見た目のままで、どの行が成果物を持っているのか読み取れない。
+        # 書き戻しに失敗してもmp4は出来ているので、切り出し自体は失敗にしない。
+        if item.get("bookmark_id") is not None:
+            try:
+                await asyncio.to_thread(runtime.storage.mark_bookmark_exported,
+                                        int(item["bookmark_id"]), result["path"])
+            except Exception:
+                runtime.logger.warning(
+                    "見どころの書き出し記録に失敗しました（bookmark_id=%s）",
+                    item.get("bookmark_id"), exc_info=True,
+                    extra={"event": "clip.export_mark_failed",
+                           "ctx": {"bookmark_id": item.get("bookmark_id"),
+                                   "path": result["path"]}})
         # 完了ぶんを必ず報告する。開始時の報告だけだと1件のbatchは終始0%のままで、
         # 複数件でも最後の1本が丸ごと「進捗なし」の区間になる。
         await report(f"切り出し済み（{index + 1} / {total}件）",
                      int((index + 1) * 100 / total) if total else 100)
+    # 出力先は結果の一部である。以前はfile名だけを返していたので、画面もlogも「どこに
+    # 出来たか」を名乗れず、利用者は成果物を探せなかった(単発の切り出しだけがpathを返す
+    # 非対称な状態だった)。dirは全件同じ(clip_pathは録画ごとに1つの置き場を決める)。
+    output_dir = str(Path(paths[0]).parent) if paths else ""
     return {"recording_id": recording_id, "count": len(files), "files": files,
+            "paths": paths, "output_dir": output_dir,
             "filename": files[0] if len(files) == 1 else "",
-            "bytes": total_bytes, "variant": params.get("variant") or "source",
-            "normalized": bool(normalize), "mode": mode}
+            "output_path": paths[0] if len(paths) == 1 else "",
+            "bytes": total_bytes, "variant": variant,
+            "normalized": bool(normalize), "mode": mode,
+            # 添えた字幕fileは成果物なので件数を名乗る。要求したのに0件だったときは理由を
+            # 添える(黙って出ていないと、利用者は切り出しごとやり直す)。
+            "subtitle_files": subtitle_files,
+            "subtitle_note": "" if subtitle_files else subtitle_note}
+
+
+def _short_preset(params: dict) -> dict:
+    """このjobが使う型。指定が無ければ並びの先頭。1件も無ければ**失敗させる**。
+
+    既定値で埋めないのは、どの尺で作ったのかを誰も言えない成果物を出さないためである。"""
+    preset_id = params.get("preset_id")
+    preset = (runtime.storage.get_clip_preset(int(preset_id)) if preset_id
+              else runtime.storage.default_clip_preset())
+    if preset is None:
+        raise HTTPException(
+            status_code=409,
+            detail="shortの型が1つもありません。設定でshortの型を作ってから実行してください。")
+    return preset
+
+
+def _short_boundaries(recording_id: int, path: Path, duration) -> dict:
+    """範囲確定が使う観測(発話・章)を集める。取れないものは空のまま返す。
+
+    章立ては**既にあるものだけ**を使い、ここで生成はしない。章の生成はLLMを長時間回す
+    別の操作で、shortを作るついでに黙って走らせてよいものではない。
+    """
+    transcript = runtime.storage.get_transcript(recording_id)
+    segments: list = []
+    if transcript and subtitles.timemap_current(transcript.get("timemap_version")):
+        # 古い時刻mapのtranscriptは端の吸着先として使えない(尺が伸びるほど後ろへずれる)。
+        # 字幕を焼かない型でも同じで、ずれた境界へ吸着させれば範囲そのものがずれる。
+        segments = subtitles.usable_segments(transcript.get("segments"), duration)
+    cached = runtime.storage.get_ai_analysis(
+        ai_analysis.KIND_CHAPTERS, ai_analysis.TARGET_RECORDING, str(recording_id))
+    chapters = ((cached or {}).get("payload") or {}).get("chapters") or []
+    return {"segments": segments, "chapters": chapters, "transcript": transcript}
+
+
+def _short_taken_ranges(recording_id: int) -> list:
+    """この録画で既に押さえてある範囲。同じ場面を二度出さないための入力。
+
+    人が付けた見どころも機械が書き戻した行も等しく「押さえてある」。範囲を持つ行だけが
+    素材なので、点(``end IS NULL``)はここに来ない。"""
+    return [{"start": float(row["start"]), "end": float(row["end"])}
+            for row in runtime.storage.list_bookmarks(recording_id)
+            if row.get("end") is not None]
+
+
+async def _short_meta(recording: dict, segments: list, item: dict) -> Optional[dict]:
+    """範囲1つぶんの題名・説明・hashtag・表紙位置。cacheが効く。
+
+    modelが変わればcacheは外れる(save_ai_analysisのkeyにmodel名とprompt版が入る)。ここで
+    確かめるのは入力指紋の一致だけで、判定そのものは既存のcache機構と同じ約束に従う。
+    """
+    target_id = ai_analysis.clip_target_id(recording["id"], item["start"], item["end"])
+    lines = ai_analysis.clip_lines(segments, item["start"], item["end"])
+    signature = ai_analysis.input_signature(
+        {"lines": [line["text"] for line in lines], "streamer": recording["unique_id"]})
+    cached = runtime.storage.get_ai_analysis(
+        ai_analysis.KIND_CLIP_META, ai_analysis.TARGET_CLIP, target_id)
+    if (cached and cached.get("payload")
+            and cached["input_signature"] == signature
+            and cached["model"] == ai_analysis.get_ai_model()
+            and cached["prompt_version"] == ai_analysis.CLIP_META_PROMPT_VERSION):
+        return cached["payload"]
+    payload = await ai_analysis.analyze_clip_meta(
+        segments, item["start"], item["end"],
+        {"streamer": recording["unique_id"], "reason": item.get("label") or ""})
+    await asyncio.to_thread(
+        runtime.storage.save_ai_analysis,
+        ai_analysis.KIND_CLIP_META, ai_analysis.TARGET_CLIP, target_id,
+        session_id=recording.get("session_id"), model=ai_analysis.get_ai_model(),
+        prompt_version=ai_analysis.CLIP_META_PROMPT_VERSION,
+        input_signature=signature, payload=payload)
+    return payload
+
+
+async def _plan_short_ranges(recording_id: int, path: Path, preset: dict,
+                             params: dict) -> dict:
+    """候補から範囲を確定する。範囲を明示指定されていればそれをそのまま使う。"""
+    duration = await _duration_seconds(path)
+    if duration is None:
+        raise HTTPException(status_code=409, detail="録画の尺を測れないため範囲を決められません。")
+    boundaries = await asyncio.to_thread(
+        _short_boundaries, recording_id, path, duration)
+    if params.get("ranges"):
+        # 人が選んだ範囲。吸着も章の挟み込みも掛けない — 選んだ位置を動かさないのが
+        # 手で指定するということの意味である。
+        ranges = [{"start": float(item["start"]), "end": float(item["end"]),
+                   "seconds": round(float(item["end"]) - float(item["start"]), 3),
+                   "label": item.get("label") or "", "manual": True}
+                  for item in params["ranges"]]
+        return {"ranges": ranges, "rejected": [], **boundaries}
+    found = await api_candidates.compute_clip_candidates(recording_id)
+    silences: list = []
+    if int(preset["snap_silence"]):
+        try:
+            silences = silence_spans(await ensure_audio_profile(path))
+        except RuntimeError as exc:
+            # 無音が測れないなら、その吸着だけが使えない。発話境界の吸着は残るので、
+            # 範囲確定そのものは続けられる(何が使えなかったかはlogに残す)。
+            runtime.logger.warning(
+                "shortの範囲確定: 無音を測れないため無音への吸着を使いません（recording=%s）",
+                recording_id, exc_info=True,
+                extra={"event": "short.silence_unavailable",
+                       "ctx": {"recording_id": recording_id, "error": str(exc)}})
+    taken = await asyncio.to_thread(_short_taken_ranges, recording_id)
+    limit = int(params.get("limit") or config.get_short_batch_limit())
+    plan = clip_range.plan_ranges(
+        found["candidates"], preset, duration=duration,
+        segments=boundaries["segments"], silences=silences,
+        chapters=boundaries["chapters"], limit=limit, taken=taken)
+    for item in plan["ranges"]:
+        item["label"] = (item.get("candidate") or {}).get("label") or ""
+        item["manual"] = False
+    return {**plan, **boundaries, "candidate_count": len(found["candidates"])}
+
+
+def _write_short_sidecar(result: dict, meta: Optional[dict], recording: dict) -> str:
+    """成果物の隣へ、題名・説明・hashtag・検品結果を書く。
+
+    投稿するときに必要なものが1箇所に揃っていること、そして**検品に落ちた事実が成果物に
+    貼り付いていること**が目的である。落ちたshortはfileとして残るので、印がfileの側に無いと
+    どれが不合格だったのか分からなくなる。
+    """
+    path = short_media.sidecar_path(Path(result["path"]))
+    payload = {
+        "filename": result["filename"],
+        "recording_id": recording["id"],
+        "streamer": recording["unique_id"],
+        "start_seconds": result["start"],
+        "end_seconds": result["end"],
+        "duration_seconds": result.get("output_duration_seconds"),
+        "preset": {"id": result.get("preset_id"), "name": result.get("preset_name")},
+        "title": (meta or {}).get("title") or "",
+        "description": (meta or {}).get("description") or "",
+        "hashtags": (meta or {}).get("hashtags") or [],
+        "cover": result.get("cover"),
+        "steps": result.get("steps") or [],
+        "gate": {"ok": result["gate"]["ok"], "failures": result["gate"]["failures"]},
+    }
+    # 人が開いて読み、そのまま投稿欄へ貼るfileなので整形して書く(1行JSONにしない)。
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return str(path)
+
+
+async def _overlay_material(recording: dict, preset: dict) -> dict:
+    """1つの録画から、焼き込みに渡す材料(設定・捕捉窓・event・battle・文字起こし)を集める。
+
+    **録画単位で1回だけ集める。** 作品(work)は同じ録画から複数のシーンを採ることが多く、
+    シーンごとに集めると3時間ぶんのevent読み出しをその回数だけ繰り返すことになる。
+    """
+    settings = short_media.ShortSettings(runtime.settings, preset)
+    if recording.get("session_id") is None:
+        raise HTTPException(
+            status_code=409,
+            detail="この録画にはSessionが紐づいておらず、焼き込むeventがありません。")
+    transcript = await asyncio.to_thread(
+        _subtitle_transcript, int(recording["id"]), settings)
+    events = await asyncio.to_thread(
+        runtime.storage.iter_events, recording["session_id"],
+        recording["started_at"], recording.get("ended_at"))
+    battles = await asyncio.to_thread(
+        runtime.storage.battles_for_session, recording["session_id"])
+    return {"settings": runtime.settings, "started_at": recording["started_at"],
+            "ended_at": recording.get("ended_at"), "events": events,
+            "battles": battles, "transcript": transcript}
+
+
+async def _run_work_job(job: dict, report) -> dict:
+    """グループ1件を作品1本にする。
+
+    シーンの並びは ``bookmarks.position`` そのもの(=人が決めた書き出し順)で、ここでは
+    並べ替えない。時刻順へ整えると、並びを決めた操作が無かったことになる。
+
+    範囲を持たない見どころ(点)は素材にならないので外す。**黙って落とさず件数で名乗る** —
+    グループに5件と数えたものが4シーンで出て、消えた1件の理由がどこにも無いのは事故である。
+
+    1シーンの失敗で作品全体を失敗させる。shortの一括生成と違うのは、あちらが「N本のうち
+    1本が落ちても残りは手に入る」のに対し、作品は**1本の成果物**だからである — 3シーン目が
+    落ちた作品を「出来た」として渡す先が無い。
+    """
+    params = job.get("params") or {}
+    group_id = int(params["group_id"])
+    group = await asyncio.to_thread(runtime.storage.get_group, group_id)
+    if group is None:
+        raise JobSkipped("グループが見つかりません（削除済み）。")
+    preset = await asyncio.to_thread(_short_preset, params)
+    members = await asyncio.to_thread(runtime.storage.bookmarks_in_group, group_id)
+    cuts = [row for row in members if row.get("end") is not None]
+    if not cuts:
+        raise JobSkipped(f"グループ「{group['name']}」に尺のある見どころが1件もありません。")
+    skipped_points = len(members) - len(cuts)
+
+    await report("素材を確かめています", 1)
+    wants_overlay = short_media.draws_anything(preset)
+    materials: dict = {}
+    scenes = []
+    for index, cut in enumerate(cuts):
+        recording_id = int(cut["recording_id"])
+        with _input_precondition():
+            recording, path = _recording_for_output(recording_id)
+        if wants_overlay and recording_id not in materials:
+            materials[recording_id] = await _overlay_material(recording, preset)
+        scenes.append({"src": path, "start": float(cut["start"]), "end": float(cut["end"]),
+                       "label": cut["memo"] or "",
+                       "overlay": materials.get(recording_id)})
+        if index == 0:
+            first_recording_id, first_stem = recording_id, path.stem
+
+    try:
+        async with runtime._job_ops("work", first_recording_id, stem=first_stem,
+                                    job_registry_id=job["job_id"],
+                                    group=group["name"], scenes=len(scenes)):
+            result = await work_media.make_work(
+                scenes, preset=preset, label=group["name"], on_progress=report)
+    except NothingToDrawError as exc:  # 字幕の前提不成立(subclass)も含む
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    # 使ったシーンに「書き出した」印を付ける。作品のfileはDBに行を持たないので、次に同じ
+    # グループを見たときに何が出済みかを言えるのはこの列だけである。
+    for cut in cuts:
+        await asyncio.to_thread(
+            runtime.storage.mark_bookmark_exported, int(cut["id"]), result["path"])
+    return {
+        "recording_id": first_recording_id,
+        "group_id": group_id,
+        "group": group["name"],
+        "skipped_points": skipped_points,
+        "filename": result["filename"],
+        "output_path": result["path"],
+        "bytes": result["bytes"],
+        "scenes": result["scenes"],
+        "requested_seconds": result["requested_seconds"],
+        "tightened_seconds": result["tightened_seconds"],
+        "output_duration_seconds": result["output_duration_seconds"],
+        "preset_name": result["preset_name"],
+        "gate_ok": result["gate"]["ok"],
+        "gate_failures": [f["label"] for f in result["gate"]["failures"]],
+    }
+
+
+async def _run_short_job(job: dict, report) -> dict:
+    """1録画から short を最大N本まで作る。
+
+    候補の算出 -> 範囲の確定 -> 生成 -> 検品 -> metadata の書き出し、までを1 jobで通す。
+    **1本の失敗で全体を止めない**: 検品に落ちた成果物はそのまま残し、結果へ理由を載せる。
+    残りの範囲を作らずに終わると、落ちた1本を直すまで何も手に入らない。
+    """
+    recording_id = job["recording_id"]
+    params = job.get("params") or {}
+    preset = await asyncio.to_thread(_short_preset, params)
+    recording, path = _recording_for_output(recording_id)
+    want_ai = bool(params.get("ai"))
+    if want_ai and not ai_analysis.ai_status()["configured"]:
+        # 途中で気付くと、題名の無いshortが何本か出来た後で止まることになる。
+        raise HTTPException(
+            status_code=409,
+            detail="題名の自動生成が指定されていますが、AIが未設定です。設定を確認してください。")
+
+    await report("見どころを探しています", 2)
+    plan = await _plan_short_ranges(recording_id, path, preset, params)
+    ranges = plan["ranges"]
+    if not ranges:
+        raise JobSkipped(
+            "この録画からは、型の条件を満たす範囲が1つも取れませんでした"
+            f"（候補 {plan.get('candidate_count', 0)}件）。")
+
+    overlay = (await _overlay_material(recording, preset)
+               if short_media.draws_anything(preset) else None)
+
+    total = len(ranges)
+    made: list = []
+    failed: list = []
+    for index, item in enumerate(ranges):
+        cancel.check_cancelled()
+        base = int(index * 100 / total)
+        span = int(100 / total)
+
+        async def _step(stage: str, pct: int, _base=base, _span=span,
+                        _index=index) -> None:
+            # 件数は括弧に入れる。段階名に混ぜるとN本ぶんの別々の段階として履歴に並ぶ
+            # (media_queue.stage_phase が括弧の中を落とす)。
+            await report(f"{stage}（{_index + 1} / {total}本）",
+                         min(100, _base + int(pct * _span / 100)))
+
+        meta = None
+        if want_ai:
+            await _step("題名を作成中", 0)
+            try:
+                meta = await _short_meta(recording, plan["segments"], item)
+            except ai_analysis.AIError as exc:
+                # 題名が付かないことは成果物の欠陥ではない。生成は続け、理由を残す。
+                runtime.logger.warning(
+                    "shortの題名を作成できませんでした（recording=%s %.1f-%.1f）: %s",
+                    recording_id, item["start"], item["end"], exc,
+                    extra={"event": "short.meta_failed",
+                           "ctx": {"recording_id": recording_id, "start": item["start"],
+                                   "end": item["end"], "error": str(exc)}})
+        label = (meta or {}).get("title") or item.get("label") or ""
+        subtitle_lines = len(ai_analysis.clip_lines(
+            plan["segments"], item["start"], item["end"]))
+        try:
+            async with runtime._job_ops("short", recording_id, stem=path.stem,
+                                job_registry_id=job["job_id"],
+                                start=item["start"], end=item["end"],
+                                preset=preset["name"]):
+                result = await short_media.make_short(
+                    path, start=item["start"], end=item["end"], preset=preset,
+                    label=label, overlay=overlay,
+                    cover_seconds=(meta or {}).get("cover_seconds"),
+                    subtitle_lines=subtitle_lines, on_progress=_step)
+        except NothingToDrawError as exc:
+            # 焼く物が無い範囲。成果物は出来ないが、他の範囲は作れる。
+            failed.append({"start": item["start"], "end": item["end"],
+                           "error": str(exc)})
+            continue
+        except RuntimeError as exc:
+            failed.append({"start": item["start"], "end": item["end"],
+                           "error": str(exc)})
+            runtime.logger.warning(
+                "shortの生成に失敗しました（recording=%s %.1f-%.1f）: %s",
+                recording_id, item["start"], item["end"], exc, exc_info=True,
+                extra={"event": "short.failed",
+                       "ctx": {"recording_id": recording_id, "start": item["start"],
+                               "end": item["end"]}})
+            continue
+        sidecar = await asyncio.to_thread(
+            _write_short_sidecar, result, meta, recording)
+        # 作った範囲を台帳へ残す。次に同じ録画で走らせたとき、同じ場面をもう一度出さない
+        # ための唯一の手掛かりである(成果物のfileはDBに行を持たない)。
+        await asyncio.to_thread(_record_short_cut, recording, item, result, label)
+        made.append({**{k: v for k, v in result.items() if k != "gate"},
+                     "sidecar_path": sidecar,
+                     "title": (meta or {}).get("title") or "",
+                     "gate_ok": result["gate"]["ok"],
+                     "gate_failures": [f["code"] for f in result["gate"]["failures"]]})
+
+    passed = [item for item in made if item["gate_ok"]]
+    return {
+        "recording_id": recording_id,
+        "preset_id": preset["id"],
+        "preset_name": preset["name"],
+        "count": len(made),
+        "passed": len(passed),
+        "rejected_ranges": len(plan.get("rejected") or []),
+        "failed": failed,
+        "files": [item["filename"] for item in made],
+        "paths": [item["path"] for item in made],
+        "output_dir": str(Path(made[0]["path"]).parent) if made else "",
+        "filename": made[0]["filename"] if len(made) == 1 else "",
+        "output_path": made[0]["path"] if len(made) == 1 else "",
+        "bytes": sum(item["bytes"] for item in made),
+        "shorts": made,
+    }
+
+
+def _record_short_cut(recording: dict, item: dict, result: dict, label: str) -> None:
+    """作ったshortを見どころとして1行残し、書き出し済みとして印を付ける。
+
+    同じ範囲の行が既に在れば**新しい行を作らず、その行を書き出し済みにする**。同じ場面を
+    二度出さないための ``taken`` は範囲を決める時に一度読むだけなので、同じ録画へshortの
+    jobが重なると双方が空の台帳を見て同じ場面を作る。台帳へ書くこの1箇所が最後の関門で、
+    ここを通さないと同じ範囲の行が何本も並び、行だけを読んでも区別が付かなくなる。
+
+    新しく作る行は ``origin='auto'``(機械が決めた範囲)で入る。人が付けた見どころと混ぜて
+    一覧へ並べると、自分が付けた覚えの無い行が画面を埋めるためで、画面は既定でこれを出さない。
+
+    書き戻しに失敗してもmp4は出来ているので、shortそのものは失敗にしない(clip一括書き出しと
+    同じ扱い)。"""
+    try:
+        cut = runtime.storage.add_bookmark_if_absent(
+            recording["id"], recording["unique_id"], result["start"], result["end"],
+            memo=label, origin="auto")
+        runtime.storage.mark_bookmark_exported(cut["id"], result["path"])
+    except Exception:
+        runtime.logger.warning(
+            "shortの台帳への記録に失敗しました（recording=%s %.1f-%.1f）",
+            recording["id"], result["start"], result["end"], exc_info=True,
+            extra={"event": "short.cut_record_failed",
+                   "ctx": {"recording_id": recording["id"], "path": result["path"]}})
 
 
 async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
@@ -741,6 +1216,48 @@ async def _run_sidecar_cache_job(kind: str, recording_id: int, report) -> dict:
         raise HTTPException(status_code=500, detail=str(exc))
     await report("完了", 100)
     return {"recording_id": recording_id, "kind": kind, **detail}
+
+
+async def _run_still_job(job: dict, report) -> dict:
+    """再生位置の1 frameをpngで残す。GPUもdiskもほとんど使わないが、台帳に載せるのは
+    「押した後の結末(出力先・失敗の理由)」が他の成果物と同じ場所に出るようにするため。"""
+    recording_id = job["recording_id"]
+    params = job.get("params") or {}
+    at = float(params.get("at") or 0.0)
+    variant = params.get("variant") or "source"
+    label = params.get("label") or ""
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise JobSkipped("録画が見つかりません（削除済み）。")
+    with _input_precondition():
+        # 素材版が無い録画は404。積み直しても変わらないのでskipへ落ちる。
+        src = api_files._clip_source(recording, variant)
+    path = api_files._resolved_recording_path(recording)
+    suffix = STILL_VARIANT_SUFFIXES.get(variant, "")
+    out = still_path(path, at, label, suffix=suffix)
+    await report("スクショを保存中", 0)
+    try:
+        async with runtime._job_ops("still", recording_id, stem=path.stem,
+                                    variant=variant, at=round(at, 2)):
+            result = await capture_still(
+                src, at, out,
+                prefer_hls=(variant == "source" and hls_source.plays_from_hls(path)))
+    except hls_source.SourceMissing as exc:
+        raise JobSkipped(str(exc) or "素材が見つかりません。")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    # file名は**実際に採れたframeの位置**で付け直す。要求どおりに撮れないことがあり
+    # (素材の映像がそこから始まっていない等)、そのとき要求値のまま名乗ると、名前だけを
+    # 見て中身を取り違える。
+    final = still_path(path, result["at_seconds"], label, suffix=suffix)
+    if final != out:
+        out.replace(final)
+    await report("完了", 100)
+    return {"recording_id": recording_id, "filename": final.name,
+            "output_path": str(final), "output_dir": str(final.parent),
+            "bytes": result["bytes"], "at_seconds": result["at_seconds"],
+            "requested_seconds": result["requested_seconds"],
+            "variant": variant, "label": label}
 
 
 @contextmanager
@@ -790,7 +1307,7 @@ async def _run_media_job(job: dict, report) -> dict:
     if kind in ("waveform", "sprite"):
         return await _run_sidecar_cache_job(kind, recording_id, report)
     if kind == "stt":
-        return await _run_stt_job(recording_id, report)
+        return await _run_stt_job(recording_id, report, job.get("params"))
     if kind == "laugh":
         return await _run_laugh_job(recording_id, report)
     if kind == "overlay_preview":
@@ -801,6 +1318,12 @@ async def _run_media_job(job: dict, report) -> dict:
         return await _run_reel_job(job, report)
     if kind == "clip_overlay":
         return await _run_clip_overlay_job(job, report)
+    if kind == "short":
+        return await _run_short_job(job, report)
+    if kind == "work":
+        return await _run_work_job(job, report)
+    if kind == "still":
+        return await _run_still_job(job, report)
     if kind not in ("overlay", "upscale"):
         raise HTTPException(status_code=400, detail=f"未知のjob種別です: {kind}")
     with _input_precondition():
@@ -1350,7 +1873,7 @@ async def _start_session_output(session_id: int, upscale: bool) -> dict:
     targets = _session_output_targets(session_id)
     # 実行はworkerなので、投入時点で下限割れなら即答する(全件がworkerで失敗するより早い)。
     disk._require_disk_space(disk._disk_volume_paths(), "session_output", session_id=session_id)
-    # 字幕焼き込みが有効な場合、1本でも転写が欠けていれば Session 全体を止める。半分だけ
+    # 字幕焼き込みが有効な場合、1本でも文字起こしが欠けていれば Session 全体を止める。半分だけ
     # 字幕付きの出力が並ぶ状態は、どれが字幕付きか後から判別できず運用を壊す。
     if subtitles_enabled(runtime.settings):
         missing = [t for t in targets if runtime.storage.get_transcript(t["id"]) is None]
@@ -1412,6 +1935,56 @@ def _clip_normalize(requested: Optional[bool]) -> Optional[dict]:
     enabled = (bool(int(runtime.settings.get("clip_normalize_audio")))
                if requested is None else bool(requested))
     return audio_norm.targets(runtime.settings) if enabled else None
+
+
+def _clip_remove_bgm(requested: Optional[bool]) -> bool:
+    """切り出しでBGM除去を掛けるか。Noneなら設定の既定に従う。
+
+    使えない構成のときは**投入時に弾く**(workerで初めて落とすと、押した人は待った末に
+    理由を知ることになる)。既定ONのまま環境が整っていない場合も同じで、黙って掛けずに
+    出すことはしない — 名前が ``.nobgm`` を名乗る以上、掛かっていない出力は嘘になる。
+    """
+    enabled = (bool(int(runtime.settings.get("clip_remove_bgm")))
+               if requested is None else bool(requested))
+    if not enabled:
+        return False
+    reason = bgm_remove.unavailable_reason()
+    if reason:
+        raise HTTPException(status_code=400, detail=reason)
+    return True
+
+
+def _clip_subtitles(requested: Optional[bool]) -> bool:
+    """切り出しに字幕file(sidecar)を添えるか。Noneなら設定の既定に従う。"""
+    return (clip_subtitles.enabled_by_settings(runtime.settings)
+            if requested is None else bool(requested))
+
+
+async def _attach_clip_subtitles(result: dict, recording_id: int, variant: str) -> dict:
+    """出来上がった切り抜きの隣へ字幕fileを置き、結果へ書き加える。
+
+    ここで失敗しても切り出しは失敗にしない — mp4は既に出来ており、それを消す理由が無い
+    (見どころへの書き戻しと同じ扱い)。ただし黙って0件にはせず、理由を結果とlogへ
+    残す。「出したはずの字幕が無い」を利用者が追える形にしておく。
+    """
+    try:
+        result["subtitles"] = await clip_subtitles.write_for_clip(
+            result,
+            await asyncio.to_thread(runtime.storage.get_transcript, recording_id),
+            runtime.settings,
+            formats=clip_subtitles.formats_from_settings(runtime.settings),
+            variant=variant)
+    except Exception as exc:
+        runtime.logger.warning(
+            "切り抜きの字幕fileを書き出せませんでした: %s", result.get("path"),
+            exc_info=True,
+            extra={"event": "clip.subtitles_failed",
+                   "ctx": {"output": result.get("path"), "recording_id": recording_id,
+                           "variant": variant}})
+        result["subtitles"] = {"written": [], "files": [], "segments": 0,
+                               "reason": "error",
+                               "message": f"字幕fileを書き出せませんでした: {exc}"}
+    return result
 
 
 def _output_normalize() -> Optional[dict]:

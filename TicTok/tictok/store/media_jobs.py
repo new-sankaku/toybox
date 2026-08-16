@@ -61,7 +61,7 @@ class MediaJobsMixin:
         return self._media_job_row(row)
 
     def busy_recording_ids(self) -> set:
-        """焼き込み/Up出力/転写が待機・実行中の録画id。
+        """焼き込み/Up出力/文字起こしが待機・実行中の録画id。
 
         文字起こしも同じ台帳(kind=stt)にいるので、1回のqueryで両方が入る。
         これらのjobはsrc mp4を実行中に読むため、消すと道半ばで壊れたjobだけが残る。
@@ -124,7 +124,9 @@ class MediaJobsMixin:
             ).fetchone()
         return self._media_job_row(row) if row else None
 
-    def claim_next_pending_media_job(self, sweep_limit: int = 0) -> Optional[dict]:
+    def claim_next_pending_media_job(self, sweep_limit: int = 0, *,
+                                     kinds: Optional[tuple] = None,
+                                     allow_busy_recording: bool = False) -> Optional[dict]:
         """次の待機jobをrunningへ落として返す(無ければNone)。
 
         選ぶのと掴むのを1つのlockの中で済ませるのは、workerが複数居るときに同じ行を
@@ -138,7 +140,13 @@ class MediaJobsMixin:
         ``sweep_limit`` は起動時sweepが積んだ行の同時実行上限(0で無制限)。sweepは人が待って
         いない自動投入なので、workerを全部占めると人の投入がその後ろで待たされる。数え方と
         掴み方を同じlockの中に置くのは、上限判定と掴みが別呼び出しだと2人のworkerが同時に
-        「まだ空きがある」と判断できてしまうため。"""
+        「まだ空きがある」と判断できてしまうため。
+
+        ``kinds`` を渡すとその種別だけを拾う。``allow_busy_recording`` は「同じ録画で別のjobが
+        走っていても拾う」印で、**録画に書き込まないjob専用**である(スクショは1 frameを読んで
+        別fileへ書くだけなので、焼き込みの裏で走っても互いの足元を抜かない)。この2つは
+        media_queueのinstant laneが使う — 既定の呼び出しは今までどおり全種別・排他のままで、
+        書き込む種別がこの経路へ入ることは無い。"""
         with self._lock:
             sweep_clause = ""
             if sweep_limit > 0:
@@ -148,15 +156,21 @@ class MediaJobsMixin:
                 ).fetchone()["n"]
                 if running_sweeps >= sweep_limit:
                     sweep_clause = " AND sweep = 0"
+            busy_clause = "" if allow_busy_recording else (
+                " AND recording_id NOT IN ("
+                "   SELECT recording_id FROM media_job_queue"
+                "   WHERE state = 'running' AND recording_id IS NOT NULL)")
+            kind_clause = ""
+            params: list = [time.time()]
+            if kinds:
+                kind_clause = f" AND kind IN ({','.join('?' * len(kinds))})"
+                params.extend(kinds)
             row = self._conn.execute(
                 "SELECT job_id FROM media_job_queue WHERE state = 'pending'"
                 " AND (not_before IS NULL OR not_before <= ?)"
-                + sweep_clause +
-                " AND recording_id NOT IN ("
-                "   SELECT recording_id FROM media_job_queue"
-                "   WHERE state = 'running' AND recording_id IS NOT NULL)"
+                + sweep_clause + kind_clause + busy_clause +
                 " ORDER BY priority DESC, queued_at LIMIT 1",
-                (time.time(),),
+                tuple(params),
             ).fetchone()
             if row is None:
                 return None
@@ -292,6 +306,24 @@ class MediaJobsMixin:
             self._conn.commit()
         return requeued
 
+    def promote_media_job(self, job_id: str, priority: int) -> bool:
+        """待機中の行の順番だけを上げる。上げたらTrueを返す。
+
+        起動時sweepは文字起こしのない録画を上限なしで積むので、人が今開いた1本はほぼ必ず既に待機列に
+        居る(しかもsweep priorityで最後尾)。二重投入を拒むだけだと、人がその場で待っている
+        1本が数百本の自動投入の後ろで動かないままになる。行を作り直さずpriorityだけ上げる
+        のは、同じ録画に2本走らせない約束を崩さないため。
+
+        既に同じか高いpriorityの行は触らない(押し直しで順番が変わらない)。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE media_job_queue SET priority = ? WHERE job_id = ?"
+                " AND state = 'pending' AND priority < ?",
+                (priority, job_id, priority),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
     def set_media_job_result(self, job_id: str, result: dict) -> None:
         """実行の途中で判明した後始末情報を、終了を待たずに残す。再mp4化が元mp4を_backupへ
         退避した直後の退避先がこれで、processがここで落ちると起動時のrecoveryが唯一の
@@ -408,7 +440,7 @@ class MediaJobsMixin:
     def interrupt_running_media_jobs(self) -> list:
         """起動時: 前回processが落ちて'running'のまま残った行を返し、'interrupted'にする。
 
-        転写queueのようにここでpendingへ戻さないのは、映像jobが中途の成果物(退避したmp4・
+        文字起こしqueueのようにここでpendingへ戻さないのは、映像jobが中途の成果物(退避したmp4・
         部分出力)を残したまま死んでいる可能性があるためで、後始末を済ませるまで自動で走らせては
         いけない。返した行はserver側のrecoveryが個別に処理し、原状へ戻した上で待機列へ戻す
         (``requeue_media_jobs(auto=True)``)。順序が逆だと、断片の上から作り直しが始まる。"""

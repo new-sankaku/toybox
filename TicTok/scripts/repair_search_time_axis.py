@@ -15,10 +15,15 @@
                     ``--enqueue-transcripts`` で文字起こしqueueへ redo 投入できる。
   bookmark      ... 検出のみ。ユーザーが再生画面で付けた秒で、同じ理由で機械的には直せない。
 
+mp4でしか再生しない録画も対象である。以前はここを「そのmp4のPTS軸で既に正しい」として
+外していたが、A/Vズレ修復より前のconcatは素材に無い時間をmp4へ書き足しており(実測 録画
+00066: 素材5時間12分に対しmp4が5時間31分)、その水増しに混じる凍結区間を単一scaleへ畳んだ
+結果、中盤のcommentが最大288秒早い位置に載っていた。文字起こしはそのmp4から復号されていて
+軸が一致するので、こちらは触らない(検出も行わない)。
+
 対象外(触らない):
-  * .tsが無くmp4だけの録画 — 再生も文字起こしもそのmp4のPTS軸で、焼き付いた秒は既に正しい。
   * 素材が1つも無い録画 — 再生できないので軸が定義できない。
-  * anchors(timing.json)が無い録画 — 引き直す根拠が無い。素の wall offset で上書きすると、
+  * anchorsもmp4の実体も無い録画 — 引き直す根拠が無い。素の wall offset で上書きすると、
     今より悪い値を「直した」と称して書くことになる。
 
 保存先は1次(record_dir)・2次(record_dir_final)の両方を見る。mp4だけが2次へ移り.tsが1次に
@@ -104,7 +109,7 @@ def media_duration_of(src: Path) -> float | None:
     return None
 
 
-def comment_drift(storage, recording: dict, src: Path) -> tuple:
+async def comment_drift(storage, recording: dict, src: Path) -> tuple:
     """(現行DB値と再計算値の最大ズレ秒, 比較できた件数)。比較できなければ (None, 0)。
 
     比較は本文+nicknameが録画内で一意なcommentだけで行う。同一発言が複数あるとどの行が
@@ -112,12 +117,15 @@ def comment_drift(storage, recording: dict, src: Path) -> tuple:
     hits = storage.search_hits_for(recording["id"], indexer.SOURCE_COMMENT)
     if not hits:
         return None, 0
-    anchors = indexer._load_timing_anchors(src)
-    if not anchors:
+    if not indexer._load_timing_anchors(src):
+        # 引き直す根拠が無い。anchorsが無い録画で残る手掛かりは捕捉の壁時計窓だけだが、
+        # その ended_at は finalize や repair_recording_durations が「started_at + mp4の尺」
+        # で書き直していることがあり、独立した物差しになっていない。実測(録画00283):
+        # 窓とmp4の尺が小数以下まで一致し、引き直すと素のwall offsetへ潰れて、読み上げ
+        # までの間が中央値1.3秒から68.1秒へ悪化した。既存の秒をそのまま残す。
         return None, 0
-    to_axis = indexer._make_time_mapper(
-        anchors, recording["started_at"], recording.get("ended_at"), None, None,
-        indexer._playback_media_pts(src, anchors))
+    to_axis, _info = await indexer.build_playback_mapper(
+        src, recording["started_at"], recording.get("ended_at"))
     stored: dict = {}
     for hit in hits:
         stored.setdefault((hit["nickname"], hit["body"]), []).append(hit["video_time"])
@@ -144,7 +152,7 @@ async def repair(args) -> int:
         recordings = storage.recordings_brief()
         if args.recording:
             recordings = [r for r in recordings if r["id"] == args.recording]
-        stats = {"reindexed": 0, "already": 0, "no_material": 0, "mp4_only": 0,
+        stats = {"reindexed": 0, "already": 0, "no_material": 0,
                  "no_anchors": 0, "no_comments": 0}
         stale_transcripts: list = []
         stale_bookmarks: list = []
@@ -156,15 +164,18 @@ async def repair(args) -> int:
             src = resolve_source(recording)
             stem = Path(recording.get("filename") or "").stem
             plays_hls = hls_source.plays_from_hls(src)
-            if not plays_hls:
-                # mp4が在るならその軸のままで正しい。素材が1つも無ければ再生できない。
-                stats["mp4_only" if src.is_file() else "no_material"] += 1
+            if not plays_hls and not src.is_file():
+                # 素材が1つも無い録画は再生できないので軸が定義できない。
+                stats["no_material"] += 1
                 continue
 
             axis = indexer.playback_axis(src)
-            # --- 文字起こし(検出のみ) ---
-            transcript = storage.get_transcript(recording["id"])
-            media_duration = media_duration_of(src)
+            # --- 文字起こし・bookmark(検出のみ) ---
+            # mp4でしか再生しない録画では、文字起こしもそのmp4から復号されていて軸が既に
+            # 一致する。media軸の実尺と突き合わせると、正しい文字起こしを「ズレている」と
+            # 名指すことになるので見ない。
+            transcript = storage.get_transcript(recording["id"]) if plays_hls else None
+            media_duration = media_duration_of(src) if plays_hls else None
             if transcript and media_duration:
                 stored_duration = transcript.get("duration")
                 if stored_duration and abs(float(stored_duration) - media_duration) \
@@ -185,12 +196,12 @@ async def repair(args) -> int:
                                                 "start": mark["start"]})
 
             # --- comment index ---
-            worst, compared = comment_drift(storage, recording, src)
+            worst, compared = await comment_drift(storage, recording, src)
             if worst is None:
-                if not indexer._load_timing_anchors(src):
-                    stats["no_anchors"] += 1
-                else:
+                if not storage.search_hits_for(recording["id"], indexer.SOURCE_COMMENT):
                     stats["no_comments"] += 1
+                else:
+                    stats["no_anchors"] += 1
                 continue
             if worst <= REINDEX_TOLERANCE and recording.get("time_axis") == axis:
                 stats["already"] += 1
@@ -202,10 +213,10 @@ async def repair(args) -> int:
             stats["reindexed"] += 1
 
         logger.info(
-            "\n%s comment index 張り直し %d / 既に一致 %d / mp4再生 %d / 素材無し %d"
-            " / anchors無し %d / comment無し %d",
+            "\n%s comment index 張り直し %d / 既に一致 %d / 素材無し %d"
+            " / 引き直せない %d / comment無し %d",
             "適用:" if args.apply else "[dry-run] 対象:",
-            stats["reindexed"], stats["already"], stats["mp4_only"], stats["no_material"],
+            stats["reindexed"], stats["already"], stats["no_material"],
             stats["no_anchors"], stats["no_comments"])
 
         if stale_transcripts:

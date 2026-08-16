@@ -31,7 +31,7 @@
           <option value="diamonds">コイン 多い順</option>
           <option value="gifts">Gift数 多い順</option>
           <option value="sessions">出現Session 多い順</option>
-          <option value="comments">Comment 多い順</option>
+          <option value="comments">コメント 多い順</option>
           <option value="last_seen">最終観測が新しい順</option>
           <option value="last_seen_asc">最終観測が古い順</option>
           <option value="first_seen">初観測が古い順</option>
@@ -53,7 +53,7 @@
         <table class="result-table">
           <thead><tr>
             <th>#</th><th>視聴者</th><th>コイン</th><th>Gift数</th><th>出現Session</th>
-            <th>Comment</th><th>投げた配信者</th><th>初観測</th><th>最終観測</th><th>経過</th>
+            <th>コメント</th><th>投げた配信者</th><th>初観測</th><th>最終観測</th><th>経過</th>
           </tr></thead>
           <tbody id="fan-rows"></tbody>
         </table>
@@ -87,7 +87,7 @@
               <tbody id="fan-modal-streamers"></tbody>
             </table>
           </div>
-          <div id="fan-modal-streamers-empty" class="feed-empty">記録がありません。</div>
+          <div id="fan-modal-streamers-empty" class="feed-empty" data-label="配信者別の明細">記録がありません。</div>
         </section>
 
         <section class="result-block">
@@ -98,7 +98,7 @@
               <tbody id="fan-modal-sessions"></tbody>
             </table>
           </div>
-          <div id="fan-modal-sessions-empty" class="feed-empty">記録がありません。</div>
+          <div id="fan-modal-sessions-empty" class="feed-empty" data-label="Session別の明細">記録がありません。</div>
         </section>
       </div>
     </div>

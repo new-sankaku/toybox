@@ -10,12 +10,15 @@ lock契約: lock保持前提のmethodは無い。身元解決(_owner_handles_loc
   self._lock を取らない(session_rankings は身元解決を使わないため一度も取らない)。
 """
 import json
+from datetime import datetime, timedelta
 
 from tictok.core.battle import annotate_result, gift_window_end, gift_window_fallback_duration
+from tictok.core.collab import COLLAB_WINDOW_VERSION
 from tictok.core.league import display_league_sql
 
 from tictok.store._common import (
     _BATTLE_KEY_CONTRIB_DIAMONDS,
+    _BATTLE_NO_CONTEST_SCORE,
     _EXCLUDE_RESTRICTED,
     _EXCLUDE_RESTRICTED_NO_ALIAS,
     _SESSION_TOTALS_CTE,
@@ -25,6 +28,158 @@ from tictok.store._common import (
     _opponent_key,
     logger,
 )
+
+
+# 実弾(コイン)の大口帯。その日の合計で判定するため、1回のGiftの額ではなく同じ人の同日の
+# 積み上げで数える。帯は排他(1K〜5K / 5K〜10K / …)にして、積み上げた合計がそのまま
+# 「その日1K以上を投げた人数」になるようにする(重ねると同じ人を何度も数えることになる)。
+# 閾値はここが唯一の定義で、labelごと画面へ渡す(frontend側で数値を再掲しない)。
+# 10K以上は元の3帯(10K〜50K / 50K〜100K / 100K↑)では中が見えないので、既存の境目
+# (10K・50K・100K)を保ったまま内側を割る。境目を動かすと過去に読んだ帯の人数と
+# 意味が変わるため、割るときは足すだけにする。
+_WHALE_TIERS = (
+    1000, 5000, 10000, 20000, 30000, 40000, 50000, 75000, 100000, 200000, 300000,
+)
+
+
+def _coin_label(value: int) -> str:
+    """コイン額の短縮表記(1000→1K, 100000→100K)。帯のlabelに使う。"""
+    if value >= 1000:
+        scaled = value / 1000
+        return (f"{scaled:.0f}" if scaled == int(scaled) else f"{scaled:g}") + "K"
+    return str(value)
+
+
+# ---- 期間別ランキングの期間 ----
+# 暦どおりに切る(月=1日〜末日 / 週=月曜〜日曜 / 日=0時〜24時)。ローカル時刻で切るのは
+# heatmap・cohortと同じ軸へ揃えるためで、画面ごとに日の境目が違う状態を作らない。
+# SQL側の式(_PERIOD_SQL)とPython側の_period_keyは同じ境界を出すこと。片方だけ直すと、
+# 期間の一覧と一覧の中身が別の切り方になり、合計が合わない。
+RANKING_GRANULARITIES = ("month", "week", "day")
+_PERIOD_SQL = {
+    "month": "strftime('%Y-%m', {col}, 'unixepoch', 'localtime')",
+    # 週の代表はその週の月曜。'weekday 0' は次の日曜(その日が日曜ならその日)へ送るので、
+    # 6日戻すと同じ週の月曜になる。
+    "week": "date({col}, 'unixepoch', 'localtime', 'weekday 0', '-6 days')",
+    "day": "date({col}, 'unixepoch', 'localtime')",
+}
+# 期間の一覧に載せる上限と、一覧を組むループの止め値。時刻が壊れた行が1つ混じるだけで
+# 1970年からの日付が並ぶため、無制限に回さない。切ったときは件数を画面へ返す(黙って
+# 切ると「この配信者はこの期間しか配信していない」と読めてしまう)。
+_RANKING_PERIOD_MAX = 2000
+_RANKING_PERIOD_SCAN_MAX = 40000
+# 人×期間の一覧が持つ列(期間)と行(人)。列を増やすほどBattle窓の解決が伸びるので上限を
+# 置く。上限は粒度ごとに違う — 月は1列の中に入る戦が日の30倍あり、同じ列数では持たない。
+_MATRIX_COLUMNS = {"day": 14, "week": 12, "month": 12}
+_MATRIX_COLUMNS_MAX = {"day": 60, "week": 26, "month": 24}
+_MATRIX_ROWS = 40
+
+
+def _period_key(ts: float, granularity: str) -> str:
+    """POSIX秒が属する期間のkey。週は その週の月曜(YYYY-MM-DD)で名乗る。"""
+    d = datetime.fromtimestamp(ts)
+    if granularity == "month":
+        return d.strftime("%Y-%m")
+    if granularity == "week":
+        return (d - timedelta(days=d.weekday())).strftime("%Y-%m-%d")
+    return d.strftime("%Y-%m-%d")
+
+
+def _period_bounds(key: str, granularity: str) -> tuple:
+    """期間keyの [start, end) をPOSIX秒で返す。endは次の期間の開始そのもの。"""
+    if granularity == "month":
+        year, month = int(key[:4]), int(key[5:7])
+        start = datetime(year, month, 1)
+        end = datetime(year + month // 12, month % 12 + 1, 1)
+    else:
+        start = datetime.strptime(key, "%Y-%m-%d")
+        end = start + timedelta(days=7 if granularity == "week" else 1)
+    return start.timestamp(), end.timestamp()
+
+
+def _period_dates(key: str, granularity: str) -> tuple:
+    """期間keyの最初の日と最後の日を 'YYYY-MM-DD' で返す。カレンダーの端に使う。"""
+    start, end = _period_bounds(key, granularity)
+    return (datetime.fromtimestamp(start).strftime("%Y-%m-%d"),
+            datetime.fromtimestamp(end - 1).strftime("%Y-%m-%d"))
+
+
+def _date_to_period(text: str, granularity: str) -> str:
+    """カレンダーで選んだ 'YYYY-MM-DD' を、その日の属する期間keyへ寄せる。
+
+    月・週の粒度でも画面は日付で選ぶ。7/15を選んだら「7月」「その週」を指したことにする —
+    月の1日・週の月曜だけを有効にすると、選べない日をcalendarが黙って弾くことになる。
+    """
+    try:
+        d = datetime.strptime(text, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"日付の形式が不正です: {text}") from exc
+    return _period_key(d.timestamp(), granularity)
+
+
+def _period_range(first: str, last: str, granularity: str) -> tuple:
+    """firstからlastまでの期間keyを1つも飛ばさずに並べ、(一覧, 落とした件数)を返す。
+
+    ギフトも配信も無かった期間を抜くと、「その週は誰も投げていない」が「その週は無かった」
+    に化ける。上限に当たったときは新しい側を残す(古い側を見たい場合より頻度が高い)。
+    """
+    keys = []
+    key = first
+    while key <= last and len(keys) < _RANKING_PERIOD_SCAN_MAX:
+        keys.append(key)
+        key = _period_key(_period_bounds(key, granularity)[1], granularity)
+    dropped = max(0, len(keys) - _RANKING_PERIOD_MAX)
+    return keys[dropped:], dropped
+
+
+def _unknown_identity(identity_key: str) -> dict:
+    """users表に行の無いidentity_keyの受け皿。名前を作らず「取れていない」と名乗る。
+    起きるのは、Gift eventだけが在ってuser行がまだ書かれていない収集中の一瞬である。"""
+    return {
+        "identity_key": identity_key, "user_id": "", "unique_id": "",
+        "nickname": "(unknown)", "avatar": "", "fans_level": 0, "gifter_level": 0,
+        "gifter_badge": "", "member_badge": "", "league": "",
+    }
+
+
+def _whale_tier_defs() -> list:
+    defs = []
+    for i, low in enumerate(_WHALE_TIERS):
+        high = _WHALE_TIERS[i + 1] if i + 1 < len(_WHALE_TIERS) else None
+        low_label = _coin_label(low)
+        label = f"{low_label}〜{_coin_label(high)}" if high else f"{low_label}↑"
+        # min_labelは帯の下限そのものの表記。積み上げ合計の呼び名(「1K↑ 合計」)に使う。
+        # 画面側でlabelを切り出すと、帯の書式を変えたとき静かに壊れる。
+        defs.append({"min": low, "max": high, "label": label, "min_label": low_label})
+    return defs
+
+
+def _whale_tier_index(coins: int):
+    """coinsが属する排他帯のindex。最小帯に満たなければNone(大口ではない)。"""
+    idx = None
+    for i, low in enumerate(_WHALE_TIERS):
+        if coins >= low:
+            idx = i
+    return idx
+
+
+# 1日ぶんの帯に添える顔ぶれの上限。人数そのものはtiersが持つので、この一覧は表示用で
+# あって数の根拠ではない(切っても人数は狂わない)。実測でも1日25人が最大だが、荒れた日に
+# payloadが際限なく伸びないよう天井を置く。
+_WHALE_ROSTER_PER_DAY = 100
+
+
+def _battle_no_contest(battle: dict) -> bool:
+    """全ての陣営のscoreが下限以下だった(=勝負が成立していない)Battleか。
+
+    opp_scoreは常に「最も強い敵陣営」のscore(合計ではない)なので、自陣とこの2値の最大が
+    閾値以下なら、どの陣営も閾値を越えていない。チーム戦のown_scoreは陣営合計で、個々の
+    memberはそれ以下だから同じ判定で足りる。
+
+    判定はannotate_result後の値に対して行うこと。確定時点のscoreと保存値(PK後のroster
+    解体を含む)は食い違い、後者では成立した勝負が0対0に潰れて見えることがある。
+    """
+    return max(battle.get("own_score") or 0, battle.get("opp_score") or 0) <= _BATTLE_NO_CONTEST_SCORE
 
 
 def _liver_share(
@@ -74,6 +229,107 @@ def _liver_share(
         ),
         "liver_checked_gifters": checked_gifters,
         "liver_gifter_coverage": (checked_gifters / gifters * 100) if gifters else 0.0,
+    }
+
+
+# 同接の階段保持積分でbucketの間を埋める上限。bucket行はeventの無い窓に存在しないので
+# 隣り合うbucketの間は空く。短い空白は「静かだっただけ」で直前の同接が続いているが、
+# これを超える空白は収集そのものが落ちていた区間で、直前の値を持ち越すと居なかった人を
+# 数えることになる(実測: あるsessionで名目4.74時間に対し観測は2.37時間しかない)。
+# 上限を超えた空白は平均の分母(観測秒)からも外す。
+_VIEWER_GAP_CAP_SECONDS = 60
+# 宝箱(红包)の入室誘引窓の尾。告知(envelopes.time)から開封(unpack_at)までの待ちで人が
+# 流れ込み、開封後に引く。尾の長さは孤立宝箱(前後20分に他の宝箱が無い)22件の実測で決めた。
+# 直前の素の水準に対し開封時点2.77倍・+60秒2.21倍・+120秒1.81倍・+180秒1.51倍で、
+# 以降は+900秒まで1.3〜1.5倍の緩い高止まりになる。切りたいのは急増ぶんなので、減衰が
+# 平らになる+180秒で窓を閉じる。残る高止まりぶんは窓外へ残るため、この線は
+# 「宝箱の影響を消した同接」ではなく「宝箱窓を除いた同接」である。
+_ENVELOPE_TAIL_SECONDS = 180
+
+
+def _envelope_windows(conn, session_ids: list) -> dict:
+    """session別の宝箱窓(重なりを畳んだ [開始, 終了] の時刻昇順list)。"""
+    if not session_ids:
+        return {}
+    ph = ",".join("?" * len(session_ids))
+    windows: dict = {}
+    for row in conn.execute(
+        "SELECT session_id, time, COALESCE(unpack_at, time) + ? AS until FROM envelopes"
+        f" WHERE session_id IN ({ph}) AND kind = 'envelope' ORDER BY session_id, time",
+        (_ENVELOPE_TAIL_SECONDS, *session_ids),
+    ):
+        merged = windows.setdefault(row["session_id"], [])
+        if merged and row["time"] <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], row["until"])
+        else:
+            merged.append([row["time"], row["until"]])
+    return windows
+
+
+def _viewer_levels(conn, session_ids: list) -> dict:
+    """session別の同接水準。bucketのviewersを階段保持で時間積分し、時間加重平均と、
+    宝箱窓を除いた時間加重平均を返す。
+
+    単純な AVG(viewers) は使えない。bucket行はeventの無い窓に存在しないため、賑わった
+    区間だけが濃く効く(実測で最大+33%: 27.9対21.0)。滞在時間推定(analytics)が同じ理由で
+    階段保持の時間積分を採っているのと同じ作法である。
+
+    宝箱窓を除いた平均は「素の視聴」の水準。実測では窓内の同接が窓外の2〜5.6倍あり、
+    宝箱を何回落としたかで全体平均がいくらでも動く(あるsessionで全体35.0に対し窓外9.8)。
+
+    返す観測秒(observed)は、上限を超える空白を除いた実際に観測できていた時間。
+    コメント率の分母もこれを使う ―― 名目の配信時間で割ると、収集が落ちた配信だけ
+    率が半分に見える。
+    """
+    if not session_ids:
+        return {}
+    ph = ",".join("?" * len(session_ids))
+    rows = conn.execute(
+        "SELECT b.session_id AS sid, b.start AS start, b.viewers AS viewers,"
+        " s.bucket_seconds AS bucket_seconds"
+        " FROM buckets b JOIN sessions s ON s.id = b.session_id"
+        f" WHERE b.session_id IN ({ph}) ORDER BY b.session_id, b.start",
+        tuple(session_ids),
+    ).fetchall()
+    windows = _envelope_windows(conn, session_ids)
+    levels: dict = {}
+    total = len(rows)
+    for i, row in enumerate(rows):
+        sid = row["sid"]
+        nxt = rows[i + 1] if i + 1 < total else None
+        # 最後のbucketは次が無いのでbucket幅ぶんだけ続いたものとして数える。
+        span = (
+            min(nxt["start"] - row["start"], _VIEWER_GAP_CAP_SECONDS)
+            if nxt is not None and nxt["sid"] == sid
+            else (row["bucket_seconds"] or 0)
+        )
+        level = levels.get(sid)
+        if level is None:
+            merged = windows.get(sid) or []
+            level = levels[sid] = {
+                "sum": 0.0, "observed": 0.0, "sum_nobox": 0.0, "nobox": 0.0,
+                "windows": merged, "cursor": 0,
+            }
+        level["sum"] += row["viewers"] * span
+        level["observed"] += span
+        # 窓は時刻昇順で、bucketも時刻昇順。今どの窓まで来たかを持って前へだけ進める。
+        merged = level["windows"]
+        cursor = level["cursor"]
+        while cursor < len(merged) and merged[cursor][1] < row["start"]:
+            cursor += 1
+        level["cursor"] = cursor
+        if cursor < len(merged) and merged[cursor][0] <= row["start"]:
+            continue
+        level["sum_nobox"] += row["viewers"] * span
+        level["nobox"] += span
+    return {
+        sid: {
+            "viewers_avg": (lv["sum"] / lv["observed"]) if lv["observed"] else None,
+            "observed_seconds": lv["observed"],
+            "viewers_avg_nobox": (lv["sum_nobox"] / lv["nobox"]) if lv["nobox"] else None,
+            "nobox_seconds": lv["nobox"],
+        }
+        for sid, lv in levels.items()
     }
 
 
@@ -282,15 +538,42 @@ class StreamersMixin:
         # どれだけを共演に使ったか」を出すために引く。集計対象はsession_rowsと同じ
         # session集合(制限中を除く直近limit件)へ後で絞る — 分母(配信時間)と分子が
         # 別のsession集合になると比率が意味を失う。
+        # **現行版の窓だけ**を読む。旧rule(v1)の窓はfinishでしか閉じておらず、間のソロ
+        # 時間を丸ごとコラボに数えている(録画照合で窓の中の大半がソロだった)。補正材料が
+        # DBに残っていないので、混ぜずに捨てる。
         collab_rows = [
             (r["session_id"], r["start"], r["end"])
             for r in conn.execute(
                 "SELECT cw.session_id AS session_id, cw.start AS start, cw.end AS end"
                 " FROM collab_windows cw JOIN sessions s ON s.id = cw.session_id"
-                f" WHERE s.unique_id IN ({ph})",
-                tuple(handles),
+                f" WHERE s.unique_id IN ({ph}) AND cw.version = ?",
+                (*handles, COLLAB_WINDOW_VERSION),
             ).fetchall()
         ]
+        # コラボ窓の収集が始まる前の配信は「コラボが無かった」のか「記録が無い」のかを
+        # 区別できない。0%として混ぜるとその配信時間が丸ごとソロへ化ける(実測: ある
+        # 配信者でソロ32.1%→4.9%、コラボ49.8%→75.0%)ので、共演構成の集計対象から外す。
+        # 境目は「現行ruleで最初にコラボ窓を記録したsessionの開始時刻」。そのsessionより
+        # 前は現行ruleでの観測が存在しない。窓の時刻(MIN(cw.start))ではなくsessionの開始で
+        # 切るのは、窓は必ずsession開始より後に立つため、窓時刻で切るとその最初のsession
+        # 自身が対象から落ちるためである。
+        collab_since = conn.execute(
+            "SELECT MIN(s.started_at) AS since FROM collab_windows cw"
+            " JOIN sessions s ON s.id = cw.session_id WHERE cw.version = ?",
+            (COLLAB_WINDOW_VERSION,),
+        ).fetchone()["since"]
+        # 同接の水準(時間加重平均・宝箱窓を除いた平均・観測秒)。集計対象はsession_rowsと
+        # 同じsession集合に限る ―― 制限中や窓の外のsessionまで走らせると、画面に出ない
+        # 行のためにbucketを走査することになる。
+        level_ids = [row["id"] for row in session_rows]
+        viewer_levels = _viewer_levels(conn, level_ids)
+        # 宝箱の収集開始。これより前の配信は「宝箱を落とさなかった」のか「記録していない」
+        # のかを区別できないので、宝箱を除いた同接は出さない(出すと、記録の無い期間だけ
+        # 素の同接が高かったように読める)。collab_sinceと同じ理由・同じ形の境目である。
+        envelope_since = conn.execute(
+            "SELECT MIN(s.started_at) AS since FROM envelopes e"
+            " JOIN sessions s ON s.id = e.session_id WHERE e.kind = 'envelope'"
+        ).fetchone()["since"]
         # 収集中(ended_atなし)のsessionには終端が無い。最後に何かが届いた時刻を終端に
         # 使う(analytics._observed_spanと同じ根拠)。started_atで潰すと、その配信の窓が
         # まるごと落ちる。
@@ -329,12 +612,16 @@ class StreamersMixin:
         # 自身のBattle gifterだけで、全Battleを通して「Battleに必ず現れるgifter」を表す。
         battle_gifters: dict = {}
         parsed_battles = []
+        # 共演構成(配信時間の内訳)が使う窓は、成立しなかったBattleも含む全戦ぶん。枠として
+        # 時間は使われているため、Battle分析から外す戦をここから落とすとソロ時間へ化ける。
+        battle_windows = []
         # battle_id is TikTok's globally-unique PK id, so the same physical battle
         # carries the same id across sessions. Dedup on it to keep concurrent-
         # collection duplicates from inflating every battle metric. id 0/missing is
         # treated as un-dedupable (old/synthetic records) and kept as-is.
         seen_battle_ids = set()
         dropped_duplicates = 0
+        dropped_no_contest = 0
         for session_id, session_battles in battles_by_session.items():
             # 窓解決には(重複除外前の)そのsessionの全Battleを使う。除外されるのは別session
             # が同じBattleを重複収集した分で、このsessionの「次Battle開始」は変わらないため。
@@ -352,6 +639,10 @@ class StreamersMixin:
                         dropped_duplicates += 1
                         continue
                     seen_battle_ids.add(battle_id)
+                battle_windows.append((session_id, start_time, battle.get("end_time")))
+                if _battle_no_contest(battle):
+                    dropped_no_contest += 1
+                    continue
                 end_time = gift_window_end(battle, starts, fallback_duration)
                 gift = self._cached_battle_gift_contributions(
                     session_id, battle, start_time, end_time)
@@ -370,10 +661,21 @@ class StreamersMixin:
                     agg = battle_gifters.setdefault(
                         key,
                         {
+                            # 表示属性をここで確定させてはいけない。gの身元はそのsession
+                            # での見え方(point-in-time)で、setdefaultだと最初に当たった
+                            # Battle=最古のsessionの名前が最後まで残る。通算表としての
+                            # 身元は集計後にusers表(最新)へ解決し直す(下の身元解決)。
+                            # ここに置く値は、その解決に載らなかった場合の観測値である。
+                            "identity_key": key,
                             "user_id": g["user_id"],
                             "unique_id": g["unique_id"],
                             "nickname": g["nickname"],
                             "avatar": g["avatar"],
+                            "league": "",
+                            "fans_level": g["fans_level"],
+                            "gifter_level": g["gifter_level"],
+                            "gifter_badge": g["gifter_badge"],
+                            "member_badge": g["member_badge"],
                             "diamonds": 0,
                             "gifts": 0,
                             "battles": 0,
@@ -432,8 +734,16 @@ class StreamersMixin:
                 dropped_duplicates,
                 unique_id,
             )
+        if dropped_no_contest:
+            logger.info(
+                "streamer_profile: battle %d 件を不成立（全陣営のscoreが%d以下）として"
+                "Battle分析から除外しました（%s）",
+                dropped_no_contest,
+                _BATTLE_NO_CONTEST_SCORE,
+                unique_id,
+            )
 
-        # 共演構成(コラボ / Battle / ソロ)。Battle窓は重複除外後のparsed_battlesを使う
+        # 共演構成(コラボ / Battle / ソロ)。Battle窓は重複除外後のbattle_windowsを使う
         # (同じBattleを2 instanceが収集した分を足すと、その時間だけ二重に計上される)。
         session_spans = [
             (
@@ -445,14 +755,21 @@ class StreamersMixin:
             )
             for row in session_rows
         ]
-        coop = _coop_summary(
-            session_spans,
-            collab_rows,
-            [
-                (pb["session_id"], pb["battle"].get("start_time"), pb["battle"].get("end_time"))
-                for pb in parsed_battles
-            ],
-        )
+        # 現行ruleの窓が1件も無い間は、コラボは「0%」ではなく**未計測**である。0%として
+        # 出すとその時間が全部ソロに見え、旧ruleと逆向きの嘘になる。この場合はsessionを
+        # 絞らずに集計し(Battle側の値は窓に依存せず正しい)、collab_available=Falseで
+        # コラボ・ソロ・共演計を名乗らないことを画面へ伝える。
+        collab_available = collab_since is not None
+        observed_spans = [
+            span for span in session_spans if not collab_available or span[1] >= collab_since
+        ]
+        coop = _coop_summary(observed_spans, collab_rows, battle_windows)
+        # 何をもって集計対象としたかを画面へ渡す。除外を黙って行うと、Battle回数が
+        # Battle分析の対戦数と食い違う理由が読めなくなる。
+        coop["collab_available"] = collab_available
+        coop["collab_window_version"] = COLLAB_WINDOW_VERSION
+        coop["collab_since"] = collab_since
+        coop["unobserved_sessions"] = len(session_spans) - len(observed_spans)
 
         identity = {
             "unique_id": unique_id,
@@ -463,6 +780,8 @@ class StreamersMixin:
         sessions = []
         for row in session_rows:
             stats = json.loads(row["stats_json"])
+            level = viewer_levels.get(row["id"]) or {}
+            covered = envelope_since is not None and row["started_at"] >= envelope_since
             sessions.append(
                 {
                     "session_id": row["id"],
@@ -477,6 +796,13 @@ class StreamersMixin:
                     or row["peak_viewers"]
                     or stats.get("viewers", 0)
                     or 0,
+                    # 同接の水準。viewersはPeak(瞬間値)、viewers_avgは観測時間で加重した
+                    # 平均、viewers_avg_noboxは宝箱窓を除いた平均。bucketの無いsessionは
+                    # 平均を持たないのでNone(0にすると「誰も居なかった」と読める)。
+                    "viewers_avg": level.get("viewers_avg"),
+                    "viewers_avg_nobox": level.get("viewers_avg_nobox") if covered else None,
+                    "nobox_seconds": level.get("nobox_seconds", 0.0) if covered else 0.0,
+                    "observed_seconds": level.get("observed_seconds", 0.0),
                     "battles": stats.get("battles", 0) or 0,
                     "battle_points": stats.get("battle_points", 0) or 0,
                 }
@@ -486,6 +812,25 @@ class StreamersMixin:
         totals = {m: sum(s[m] for s in sessions) for m in metrics}
         average = {m: (totals[m] / count if count else 0) for m in metrics}
         best = {m: max((s[m] for s in sessions), default=0) for m in metrics}
+        # 通算の同接水準。average["viewers"]は各配信のPeakを配信数で割った物なので、
+        # 「1配信あたりのPeak」であって同接の平均ではない。こちらは観測時間で加重する
+        # (10分の配信と6時間の配信を同じ重みで平均しない)。averageへ混ぜないのは、
+        # あちらがmetricsから機械的に作られる形で、API側でも同じ式で作り直されるため。
+        observed_total = sum(s["observed_seconds"] for s in sessions)
+        nobox_total = sum(s["nobox_seconds"] for s in sessions)
+        viewer_level = {
+            "avg": (
+                sum((s["viewers_avg"] or 0) * s["observed_seconds"] for s in sessions) / observed_total
+                if observed_total else None
+            ),
+            "avg_nobox": (
+                sum((s["viewers_avg_nobox"] or 0) * s["nobox_seconds"] for s in sessions) / nobox_total
+                if nobox_total else None
+            ),
+            "observed_seconds": observed_total,
+            "nobox_seconds": nobox_total,
+            "envelope_since": envelope_since,
+        }
 
         gifters = [
             {
@@ -562,6 +907,10 @@ class StreamersMixin:
                         # 履歴側(opponent_keys)と突き合わせるためのkey。表示名やhandleから
                         # 画面が組み直すと、handleを持たない相手で別人と混ざる。
                         "key": key,
+                        # 監視画面のコラボ相手はLinkLayer由来の数値user_idしか名乗らない
+                        # (Playerはroom_idとuidの2 fieldのみ)。keyの中身に頼らず、この
+                        # fieldで突合できるようにする。
+                        "user_id": opp.get("user_id", ""),
                         "unique_id": opp.get("unique_id", ""),
                         "nickname": opp.get("nickname", "(unknown)"),
                         "avatar": opp.get("avatar", ""),
@@ -570,12 +919,37 @@ class StreamersMixin:
                         "losses": 0,
                     },
                 )
+                # 同じ相手でも表示情報の載らない戦がある(実data 1921件中24件)。1戦目が
+                # それだと相手が名前なしのまま固定されるので、後の戦で判った分を埋める。
+                for field in ("user_id", "unique_id", "avatar"):
+                    if not stat[field] and opp.get(field):
+                        stat[field] = opp[field]
+                if stat["nickname"] == "(unknown)" and opp.get("nickname"):
+                    stat["nickname"] = opp["nickname"]
                 stat["battles"] += 1
                 if b.get("result") == "win":
                     stat["wins"] += 1
                 elif b.get("result") == "lose":
                     stat["losses"] += 1
         opponent_list = sorted(opponents.values(), key=lambda o: o["battles"], reverse=True)
+        # Battle Gifterの身元をGifter一覧と同じ基準(users表=最新)へ揃える。集計はどちらも
+        # identity_key単位で一致しているのに、表示だけがBattle側はevent由来だった。しかも
+        # 源のMAX()は辞書順の最大であって最新のhandleではなく、その上でsetdefaultが最古の
+        # Battleの値を固定するため、改名した人が2つの表で別名に見えていた。どちらも全期間の
+        # 通算表で「そのSessionでの見え方」という基準を持たないので、最新の身元で揃える
+        # (point-in-time厳守はsession単位のbattle_gift_contributions側=Battle cardの話)。
+        # gifter_rowsはこの配信者の全gift eventが母集合なので、Battle Gifterはその部分集合。
+        gifter_by_key = {g["identity_key"]: g for g in gifters if g["identity_key"]}
+        for key, agg in battle_gifters.items():
+            latest = gifter_by_key.get(key)
+            # 収集中の配信では、gifter_rows(読取り接続)を読んだ後に届いたgiftがBattle側
+            # (writer接続でflush済みを読む)にだけ現れうる。その1件は観測値のまま出し、
+            # 次の読み込みで最新の身元に揃う。
+            if latest is None:
+                continue
+            for field in ("user_id", "unique_id", "nickname", "avatar", "league",
+                          "fans_level", "gifter_level", "gifter_badge", "member_badge"):
+                agg[field] = latest[field]
         battle_gifter_list = sorted(battle_gifters.values(), key=lambda g: g["diamonds"], reverse=True)
 
         # Per-battle history (newest first) — the chronological record behind the
@@ -619,6 +993,11 @@ class StreamersMixin:
                     # 代表1人だけをkeyにすると、チーム戦・個人マルチで格下だった相手から
                     # その対戦へ辿れない(対戦相手別の戦数と履歴の件数も食い違う)。
                     "opponent_keys": [k for k in (_opponent_key(o) for o in opps) if k],
+                    # 監視画面のコラボ相手(数値user_idしか名乗らない)から、その相手が出た
+                    # 戦へ辿るための軸。opponent_keysの中身に頼らず明示する。
+                    "opponent_user_ids": [
+                        str(o["user_id"]) for o in opps if o.get("user_id")
+                    ],
                     "opponent": {
                         "unique_id": opp.get("unique_id", ""),
                         "nickname": opp.get("nickname", "") or "(unknown)",
@@ -645,6 +1024,10 @@ class StreamersMixin:
         own_host_scores = [h["own_host_score"] for h in history if h["own_host_score"] is not None]
         battle_summary = {
             "count": battle_count,
+            # 不成立として外した戦数と、その閾値。件数を出さないと「対戦数」が実際の枠数と
+            # 食い違う理由が画面から判らなくなる(閾値も画面で数値を再掲しない)。
+            "no_contest": dropped_no_contest,
+            "no_contest_score": _BATTLE_NO_CONTEST_SCORE,
             "wins": wins,
             "losses": losses,
             "draws": draws,
@@ -691,6 +1074,7 @@ class StreamersMixin:
             "totals": totals,
             "average": average,
             "best": best,
+            "viewer_level": viewer_level,
             "gifters": gifters[:100],
             # ライバーだけを抜いた一覧。gifters[:100] から絞ると、コイン順で100位より下の
             # ライバーが消えて「誰が投げたか」が欠ける(比率の分子には入っているのに一覧に
@@ -707,15 +1091,25 @@ class StreamersMixin:
         present on a day if they produced any watch-side event (entering the room,
         commenting, liking, following, sharing, subscribing, or gifting) — presence
         is what matters here, not whether they gifted. For each day: active viewers,
-        new (first-ever visit this day) vs returning, and retention = share of the
-        previous active day's viewers who came back to watch this day. Days are
-        local-time so they line up with the browser-local UI."""
+        new (first-ever visit this day), retained (present on the previous active day
+        as well), and retention = share of the previous active day's viewers who came
+        back to watch this day — None on the first day, which has nothing to compare
+        against. Days are local-time so they line up with the browser-local UI.
+
+        大口帯(tiers)も同じ走査から出す。1人1日ぶんのコイン合計はこの集計が既に持って
+        いるので、帯の人数のためだけに全期間をもう一度走らせない(この走査は実測640ms)。
+
+        帯の顔ぶれ(whales_list)も併せて返す。人数だけでは「同じ常連が毎日居るのか、
+        日替わりで別人が来ているのか」が読めないためである。身元は人ぶんしか無い(日数×人
+        ではない)ので、日ごとの一覧はidentity_keyと額だけを持ち、名前・アイコンは
+        peopleへ1人1件で畳む。"""
         with self._lock:
             handles = self._owner_handles_locked(unique_id)
         ph = ",".join("?" * len(handles))
         # この配信者の視聴側eventを全期間ぶん走査する(実測640ms)。書き込み接続で流すと
         # その間collectorのevent書き出しが待たされるので、集計read専用の接続を使う。
-        rows = self._read_connection().execute(
+        conn = self._read_connection()
+        rows = conn.execute(
             "SELECT e.identity_key AS key,"
             " strftime('%Y-%m-%d', e.time, 'unixepoch', 'localtime') AS ymd,"
             " SUM(e.diamonds) AS diamonds"
@@ -737,23 +1131,502 @@ class StreamersMixin:
                 first_seen[key] = ymd
         days = []
         prev_keys: set = set()
+        whale_keys: set = set()
         for ymd in sorted(by_day.keys()):
             keys = set(by_day[ymd].keys())
             new = {k for k in keys if first_seen[k] == ymd}
             retained = keys & prev_keys
+            tiers = [0] * len(_WHALE_TIERS)
+            whales_list = []
+            for key, coins in by_day[ymd].items():
+                idx = _whale_tier_index(coins)
+                if idx is not None:
+                    tiers[idx] += 1
+                    whales_list.append({"key": key, "coins": coins, "tier": idx})
+            # 額の多い順。切るときも上から残す(下から欠けるほうが読み手の期待に近い)。
+            whales_list.sort(key=lambda w: -w["coins"])
+            del whales_list[_WHALE_ROSTER_PER_DAY:]
+            whale_keys.update(w["key"] for w in whales_list)
             days.append(
                 {
                     "date": ymd,
                     "active": len(keys),
                     "new": len(new),
-                    "returning": len(keys) - len(new),
+                    # 前回配信日にも居た人。この日のActiveは new / retained / 残り(復帰)で
+                    # 過不足なく分かれる(newは初観測なのでretainedと重ならない)。
                     "retained": len(retained),
-                    "retention": (len(retained) / len(prev_keys) * 100) if prev_keys else 0,
+                    # 比べる前の日が無い初日は率が存在しない。0を入れると「全員離脱した日」
+                    # として棒・線に描かれてしまうので、無いものは無いまま返す。
+                    "retention": (len(retained) / len(prev_keys) * 100) if prev_keys else None,
                     "diamonds": sum(by_day[ymd].values()),
+                    "tiers": tiers,
+                    "whales": sum(tiers),
+                    # 顔ぶれ。tiersが人数で、こちらは誰かの一覧(上限で切れうる)。
+                    "whales_list": whales_list,
                 }
             )
             prev_keys = keys
-        return {"days": days}
+        return {
+            "days": days,
+            "tiers": _whale_tier_defs(),
+            "people": self._whale_people(conn, handles, whale_keys),
+        }
+
+    def _whale_people(self, conn, handles: list, keys: set) -> dict:
+        """大口の身元(表示名・@id・アイコン)をidentity_keyごとに1件だけ返す。
+
+        日ごとの一覧へ埋め込むと同じ人の身元を日数ぶん繰り返すことになる(実測で1人が
+        数十日に出る)。users表(最新)を主にして、一度も観測できていない列だけをevent
+        記録値で補う — profileのGifter一覧と同じ解決規則。"""
+        out: dict = {}
+        keys = [k for k in keys if k]
+        if not keys or not handles:
+            return out
+        ph = ",".join("?" * len(handles))
+        # keyの数だけplaceholderを並べるので、SQLiteの変数上限へ触れないよう分けて引く。
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            kph = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                "SELECT e.identity_key AS key,"
+                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar"
+                " FROM events e JOIN sessions s ON s.id = e.session_id"
+                " LEFT JOIN users u ON u.identity_key = e.identity_key"
+                f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+                f" AND e.identity_key IN ({kph})"
+                " GROUP BY e.identity_key",
+                (*handles, *chunk),
+            ).fetchall()
+            for row in rows:
+                out[row["key"]] = {
+                    "unique_id": row["unique_id"] or "",
+                    "nickname": row["nickname"] or "",
+                    "avatar": row["avatar"] or "",
+                }
+        return out
+
+    def streamer_gifter_ranking(self, unique_id: str, granularity: str = "month",
+                                period: str = "", limit: int = 100) -> dict:
+        """配信者1人のGifter / Battle Gifterを、暦で切った期間ごとに並べたランキング。
+
+        通算のstreamer_profileとは別の入口で、効くのはこの2つの一覧だけ。KPI・推移・
+        Battle成績は通算のまま残す(既存の数字の意味を変えないため)。
+
+        順位の動きを読めるように、選んだ期間とその1つ前の期間を同じ規則で集計して順位差を
+        付ける。前の期間に居なかった人はdeltaをNoneで返す — 0や大きな数で埋めると「急上昇」
+        として描かれてしまう。
+
+        身元はstreamer_profileと同じくusers表(最新)で解決する。どちらも複数sessionを畳んだ
+        表で、「そのSessionでの見え方」という基準を持たないためである。
+
+        Battleはstart_timeの属する期間へ数える。窓は次Battleの開始まで伸びうるので、期間を
+        跨いだ窓のGiftもその戦の期間に入る(戦を2つの期間へ割らない)。
+        """
+        if granularity not in RANKING_GRANULARITIES:
+            raise ValueError(f"未知の粒度です: {granularity}")
+        with self._lock:
+            handles = self._owner_handles_locked(unique_id)
+        # 全期間ぶんのGift eventを触るので、書き込み接続で流すとcollectorのevent書き出しが
+        # その間待たされる(streamer_profile / cohortと同じ理由)。
+        conn = self._read_connection()
+        ph = ",".join("?" * len(handles))
+        empty = {
+            "granularity": granularity, "period": "", "prev_period": "",
+            "periods": [], "gifters": [], "battle_gifters": [],
+            "battles": 0, "diamonds": 0, "dropped_periods": 0,
+        }
+
+        # 期間の一覧はGiftではなく配信の在った範囲から作る。Giftのあった期間だけを並べると、
+        # 「配信したが誰も投げなかった」期間が一覧から消える。
+        span = conn.execute(
+            "SELECT MIN(s.started_at) AS first, MAX(COALESCE(s.ended_at, s.started_at)) AS last"
+            f" FROM sessions s WHERE s.unique_id IN ({ph})" + _EXCLUDE_RESTRICTED,
+            tuple(handles),
+        ).fetchone()
+        totals_rows = conn.execute(
+            f"SELECT {_PERIOD_SQL[granularity].format(col='e.time')} AS p,"
+            " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " GROUP BY p",
+            tuple(handles),
+        ).fetchall()
+        totals = {r["p"]: (r["diamonds"] or 0, r["gifts"] or 0) for r in totals_rows if r["p"]}
+        edges = list(totals)
+        if span["first"] is not None:
+            # 収集中のsessionはended_atを持たない。Giftが今の期間まで届いているので、
+            # totals側のkeyと併せて端を決める。
+            edges += [_period_key(span["first"], granularity),
+                      _period_key(span["last"], granularity)]
+        if not edges:
+            return empty
+        keys, dropped = _period_range(min(edges), max(edges), granularity)
+        if not keys:
+            return empty
+        if dropped:
+            logger.warning(
+                "期間別ランキングの期間一覧が上限を超えたため古い側を切りました",
+                extra={"event": "ranking_periods_truncated", "unique_id": unique_id,
+                       "granularity": granularity, "dropped": dropped},
+            )
+
+        selected = period if period in set(keys) else keys[-1]
+        index = keys.index(selected)
+        prev = keys[index - 1] if index > 0 else ""
+
+        def _gift_ranking(key: str) -> list:
+            """その期間にGiftを投げた人をコイン順に。順位差のために全件返す(表示側で切る)。"""
+            if not key:
+                return []
+            start, end = _period_bounds(key, granularity)
+            rows = conn.execute(
+                "SELECT e.identity_key AS key,"
+                " COALESCE(NULLIF(u.user_id, ''), MAX(e.user_id)) AS user_id,"
+                " COALESCE(NULLIF(u.unique_id, ''), MAX(e.user_unique_id)) AS unique_id,"
+                " COALESCE(NULLIF(u.nickname, ''), MAX(e.user_nickname)) AS nickname,"
+                " COALESCE(NULLIF(u.avatar, ''), MAX(e.user_avatar)) AS avatar,"
+                " u.fans_level AS fans_level, u.gifter_level AS gifter_level,"
+                " u.gifter_badge AS gifter_badge, u.member_badge AS member_badge,"
+                f" {display_league_sql('u')} AS league,"
+                " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts,"
+                " COUNT(DISTINCT e.session_id) AS sessions"
+                " FROM events e JOIN sessions s ON s.id = e.session_id"
+                " LEFT JOIN users u ON u.identity_key = e.identity_key"
+                f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+                " AND e.time >= ? AND e.time < ?"
+                " GROUP BY e.identity_key"
+                " ORDER BY diamonds DESC, gifts DESC",
+                (*handles, start, end),
+            ).fetchall()
+            return [
+                {
+                    "identity_key": row["key"],
+                    "user_id": row["user_id"] or "",
+                    "unique_id": row["unique_id"] or "",
+                    "nickname": row["nickname"] or "(unknown)",
+                    "avatar": row["avatar"] or "",
+                    "fans_level": row["fans_level"] or 0,
+                    "gifter_level": row["gifter_level"] or 0,
+                    "gifter_badge": row["gifter_badge"] or "",
+                    "member_badge": row["member_badge"] or "",
+                    "league": row["league"] or "",
+                    "diamonds": row["diamonds"] or 0,
+                    "gifts": row["gifts"] or 0,
+                    "sessions": row["sessions"] or 0,
+                }
+                for row in rows
+                if row["key"]
+            ]
+
+        battle_agg, battle_counts = self._battle_gifter_periods(
+            conn, handles, ph, granularity, {k for k in (selected, prev) if k})
+        identities = self._latest_identities(
+            conn, {k for period_agg in battle_agg.values() for k in period_agg})
+
+        def _battle_ranking(key: str) -> list:
+            if not key:
+                return []
+            rows = []
+            for ik, agg in battle_agg.get(key, {}).items():
+                row = dict(identities.get(ik) or _unknown_identity(ik))
+                row.update(agg)
+                rows.append(row)
+            rows.sort(key=lambda g: (g["diamonds"], g["gifts"]), reverse=True)
+            return rows
+
+        def _with_rank_delta(current: list, previous: list) -> list:
+            prev_rank = {g["identity_key"]: i + 1 for i, g in enumerate(previous)}
+            ranked = []
+            for i, row in enumerate(current[:limit]):
+                row = dict(row)
+                row["rank"] = i + 1
+                before = prev_rank.get(row["identity_key"])
+                row["prev_rank"] = before
+                # 前の期間に居なかった=初登場。Noneのまま返し、画面側で「new」と出す。
+                row["rank_delta"] = (before - row["rank"]) if before else None
+                ranked.append(row)
+            return ranked
+
+        current_gifters = _gift_ranking(selected)
+        current_battle = _battle_ranking(selected)
+        return {
+            "granularity": granularity,
+            "period": selected,
+            # 空文字は「比べる前の期間が無い」。画面はこれを見て順位差の列を—にする。
+            "prev_period": prev,
+            "periods": [
+                {"key": k, "diamonds": totals.get(k, (0, 0))[0], "gifts": totals.get(k, (0, 0))[1]}
+                for k in keys
+            ],
+            "gifters": _with_rank_delta(current_gifters, _gift_ranking(prev)),
+            "battle_gifters": _with_rank_delta(current_battle, _battle_ranking(prev)),
+            # 一覧はlimitで切るが、人数は切る前の全員。画面上部の集中度chip(通算のGifter数)と
+            # 並ぶので、この期間に何人居たのかを切られていない値で名乗る。
+            "gifter_count": len(current_gifters),
+            "battle_gifter_count": len(current_battle),
+            "battles": battle_counts.get(selected, 0),
+            "diamonds": totals.get(selected, (0, 0))[0],
+            "dropped_periods": dropped,
+        }
+
+    def streamer_gifter_matrix(self, unique_id: str, granularity: str = "day",
+                               since: str = "", until: str = "",
+                               columns: int = 0) -> dict:
+        """配信の在った期間を列、Gifterを行にした一覧(人×期間)。
+
+        期間を1つ選ぶstreamer_gifter_rankingと違い、同じ人を期間を跨いで横へ並べる。
+        「その期間の中で誰が上か」と「その人が続いているか」を、期間を選び直さずに読む口。
+
+        列は「Giftの在った期間」と「配信の在った期間」の合併にする。sessionの開始日だけで
+        組むと日を跨いだ配信の深夜ぶんが列から落ち、そのGiftがどこにも載らない。
+
+        since/untilはカレンダーで選んだ日付('YYYY-MM-DD')で、その日の属する期間まで含む。
+        指定が無ければ新しい側から既定の列数を取る。
+        """
+        if granularity not in RANKING_GRANULARITIES:
+            raise ValueError(f"未知の粒度です: {granularity}")
+        limit = max(1, min(int(columns or _MATRIX_COLUMNS[granularity]),
+                           _MATRIX_COLUMNS_MAX[granularity]))
+        since_key = _date_to_period(since, granularity) if since else ""
+        until_key = _date_to_period(until, granularity) if until else ""
+        if since_key and until_key and since_key > until_key:
+            raise ValueError("期間の開始が終了より後です")
+        with self._lock:
+            handles = self._owner_handles_locked(unique_id)
+        # 期間別ランキングと同じく全期間ぶんのGift eventを触るので読み取り専用接続で流す。
+        conn = self._read_connection()
+        ph = ",".join("?" * len(handles))
+        empty = {
+            "granularity": granularity, "since": since, "until": until,
+            "periods": [], "gifters": [], "battle_gifters": [],
+            "gifter_count": 0, "battle_gifter_count": 0, "older_periods": 0,
+            "first_date": "", "last_date": "",
+        }
+        period_sql = _PERIOD_SQL[granularity]
+        totals = {}
+        for row in conn.execute(
+            f"SELECT {period_sql.format(col='e.time')} AS p,"
+            " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " GROUP BY p",
+            tuple(handles),
+        ).fetchall():
+            if row["p"]:
+                totals[row["p"]] = (row["diamonds"] or 0, row["gifts"] or 0)
+        session_periods = {
+            row["p"]
+            for row in conn.execute(
+                f"SELECT DISTINCT {period_sql.format(col='s.started_at')} AS p"
+                f" FROM sessions s WHERE s.unique_id IN ({ph})" + _EXCLUDE_RESTRICTED,
+                tuple(handles),
+            ).fetchall()
+            if row["p"]
+        }
+        all_keys = sorted(set(totals) | session_periods)
+        if not all_keys:
+            return empty
+        # カレンダーの端。指定した範囲に1つも入らなかったときも返す — 「記録が無い」と
+        # 「選んだ範囲に無い」を画面が描き分けられるようにするため。
+        empty["first_date"] = _period_dates(all_keys[0], granularity)[0]
+        empty["last_date"] = _period_dates(all_keys[-1], granularity)[1]
+        in_range = [
+            key for key in all_keys
+            if (not since_key or key >= since_key) and (not until_key or key <= until_key)
+        ]
+        keys = in_range[-limit:]
+        if not keys:
+            return empty
+        key_set = set(keys)
+        start = _period_bounds(keys[0], granularity)[0]
+        end = _period_bounds(keys[-1], granularity)[1]
+
+        gift_cells: dict = {}
+        for row in conn.execute(
+            "SELECT e.identity_key AS key,"
+            f" {period_sql.format(col='e.time')} AS p,"
+            " SUM(e.diamonds) AS diamonds, SUM(e.gift_count) AS gifts"
+            " FROM events e JOIN sessions s ON s.id = e.session_id"
+            f" WHERE s.unique_id IN ({ph}) AND e.kind = 'gift'"
+            " AND e.time >= ? AND e.time < ?"
+            " GROUP BY e.identity_key, p",
+            (*handles, start, end),
+        ).fetchall():
+            if not row["key"] or row["p"] not in key_set:
+                continue
+            gift_cells.setdefault(row["key"], {})[row["p"]] = {
+                "diamonds": row["diamonds"] or 0, "gifts": row["gifts"] or 0,
+            }
+
+        battle_agg, battle_counts = self._battle_gifter_periods(
+            conn, handles, ph, granularity, key_set)
+        battle_cells: dict = {}
+        for key, per_identity in battle_agg.items():
+            for identity_key, agg in per_identity.items():
+                battle_cells.setdefault(identity_key, {})[key] = {
+                    "diamonds": agg["diamonds"], "gifts": agg["gifts"],
+                    "battles": agg["battles"],
+                }
+        identities = self._latest_identities(
+            conn, set(gift_cells) | set(battle_cells))
+
+        def _rows(cells: dict) -> tuple:
+            ranked = sorted(
+                cells.items(),
+                key=lambda kv: (sum(c["diamonds"] for c in kv[1].values()),
+                                sum(c["gifts"] for c in kv[1].values())),
+                reverse=True,
+            )
+            out = []
+            for identity_key, per_period in ranked[:_MATRIX_ROWS]:
+                row = dict(identities.get(identity_key) or _unknown_identity(identity_key))
+                row["cells"] = per_period
+                row["diamonds"] = sum(c["diamonds"] for c in per_period.values())
+                row["gifts"] = sum(c["gifts"] for c in per_period.values())
+                # 投げた期間の数。粒度で意味が変わるので画面が「N 日」「N 週」と名乗る。
+                row["periods"] = len(per_period)
+                out.append(row)
+            return out, len(ranked)
+
+        gifters, gifter_count = _rows(gift_cells)
+        battle_gifters, battle_gifter_count = _rows(battle_cells)
+        return {
+            "granularity": granularity,
+            "since": since,
+            "until": until,
+            "first_date": empty["first_date"],
+            "last_date": empty["last_date"],
+            "periods": [
+                {"key": key, "diamonds": totals.get(key, (0, 0))[0],
+                 "gifts": totals.get(key, (0, 0))[1],
+                 "battles": battle_counts.get(key, 0)}
+                for key in keys
+            ],
+            "gifters": gifters,
+            "battle_gifters": battle_gifters,
+            # 行は_MATRIX_ROWSで切るが、人数は切る前の全員。
+            "gifter_count": gifter_count,
+            "battle_gifter_count": battle_gifter_count,
+            # 上限で出せなかった古い期間の数。黙って切ると「これしか配信していない」と
+            # 読める。範囲の外は「選ばなかった」ぶんなので、ここには数えない。
+            "older_periods": max(0, len(in_range) - len(keys)),
+        }
+
+    def _battle_gifter_periods(self, conn, handles, ph, granularity, wanted: set) -> tuple:
+        """欲しい期間ぶんだけ、Battle窓のGift貢献をidentity_key単位で積む。
+
+        窓の解き方(次Battleの開始まで/fallback)はstreamer_profileと同じ。重複収集された
+        同じBattleはbattle_idで落とす — これを忘れるとBattle数もコインも二重に乗る。
+        """
+        # data_jsonは1戦あたりが大きく(実測: 1配信者699戦で23MB)、全戦をparseするだけで
+        # 440ms掛かる。窓の解決に要るのは時刻だけなのでjson_extractで引き、実体をparseする
+        # のは見ている期間の戦だけにする。annotate_resultはresultとscoreにしか触れないので、
+        # ここで抜く時刻はannotate後の値と一致する。
+        light_rows = conn.execute(
+            "SELECT b.rowid AS rowid, b.session_id AS session_id,"
+            " json_extract(b.data_json, '$.battle_id') AS battle_id,"
+            " json_extract(b.data_json, '$.start_time') AS start_time,"
+            " json_extract(b.data_json, '$.end_time') AS end_time,"
+            " json_extract(b.data_json, '$.duration') AS duration"
+            " FROM battles b JOIN sessions s ON s.id = b.session_id"
+            f" WHERE s.unique_id IN ({ph})"
+            " ORDER BY s.started_at ASC, b.session_id ASC",
+            tuple(handles),
+        ).fetchall()
+        rows_by_session: dict = {}
+        for row in light_rows:
+            rows_by_session.setdefault(row["session_id"], []).append(row)
+
+        agg_by_period: dict = {key: {} for key in wanted}
+        counts = {key: 0 for key in wanted}
+        seen_battle_ids: set = set()
+        # (rowid) -> その戦を数える期間と、窓を閉じるための材料。
+        targets: dict = {}
+        for session_id, rows in rows_by_session.items():
+            # 窓の解決には(期間で絞る前の)そのsessionの全戦を使う。「次Battleの開始」は
+            # 見ている期間とは関係なく決まる。
+            starts = sorted(r["start_time"] for r in rows if r["start_time"] is not None)
+            fallback_duration = gift_window_fallback_duration(
+                [{"duration": r["duration"], "start_time": r["start_time"],
+                  "end_time": r["end_time"]} for r in rows]
+            )
+            for row in rows:
+                start_time = row["start_time"]
+                if start_time is None:
+                    continue
+                battle_id = row["battle_id"]
+                if battle_id:
+                    # 重複判定は期間で絞る前に行う。絞ってから数えると、同じBattleの
+                    # 重複が「見ている期間の側」に残るかどうかで結果が変わる。
+                    if battle_id in seen_battle_ids:
+                        continue
+                    seen_battle_ids.add(battle_id)
+                key = _period_key(start_time, granularity)
+                if key not in agg_by_period:
+                    continue
+                targets[row["rowid"]] = (session_id, key, starts, fallback_duration)
+
+        for rowid, data_json in self._battle_bodies(conn, list(targets)):
+            session_id, key, starts, fallback_duration = targets[rowid]
+            battle = annotate_result(json.loads(data_json))
+            # 勝負が成立しなかった戦はBattle分析から外す(判定はannotate後の値で行う)。
+            if _battle_no_contest(battle):
+                continue
+            counts[key] += 1
+            end_time = gift_window_end(battle, starts, fallback_duration)
+            for g in self._cached_battle_gift_contributions(
+                    session_id, battle, battle.get("start_time"), end_time):
+                identity_key = g["key"]
+                if not identity_key:
+                    continue
+                agg = agg_by_period[key].setdefault(
+                    identity_key, {"diamonds": 0, "gifts": 0, "battles": 0})
+                agg["diamonds"] += g["diamonds"]
+                agg["gifts"] += g["gifts"]
+                agg["battles"] += 1
+        return agg_by_period, counts
+
+    def _battle_bodies(self, conn, rowids: list):
+        """rowid指定でbattleの実体を引く。SQLiteの変数上限に当たらないよう分割する。"""
+        for start in range(0, len(rowids), 500):
+            chunk = rowids[start:start + 500]
+            rph = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                f"SELECT rowid AS rowid, data_json FROM battles WHERE rowid IN ({rph})",
+                tuple(chunk),
+            ).fetchall():
+                yield row["rowid"], row["data_json"]
+
+    def _latest_identities(self, conn, keys: set) -> dict:
+        """identity_key -> 最新の表示属性(users表)。SQLiteの変数上限に当たらないよう分割
+        して引く。1回のINに全員を並べると、Battleの多い月で静かに落ちる。"""
+        found: dict = {}
+        pending = [k for k in keys if k]
+        for start in range(0, len(pending), 500):
+            chunk = pending[start:start + 500]
+            kph = ",".join("?" * len(chunk))
+            for row in conn.execute(
+                "SELECT identity_key, user_id, unique_id, nickname, avatar,"
+                " fans_level, gifter_level, gifter_badge, member_badge,"
+                f" {display_league_sql('users')} AS league"
+                f" FROM users WHERE identity_key IN ({kph})",
+                tuple(chunk),
+            ).fetchall():
+                found[row["identity_key"]] = {
+                    "identity_key": row["identity_key"],
+                    "user_id": row["user_id"] or "",
+                    "unique_id": row["unique_id"] or "",
+                    "nickname": row["nickname"] or "(unknown)",
+                    "avatar": row["avatar"] or "",
+                    "fans_level": row["fans_level"] or 0,
+                    "gifter_level": row["gifter_level"] or 0,
+                    "gifter_badge": row["gifter_badge"] or "",
+                    "member_badge": row["member_badge"] or "",
+                    "league": row["league"] or "",
+                }
+        return found
 
     def session_rankings(self, limit: int) -> dict:
         # session全件とevent全件のGROUP BY。書き込み接続で流すと、その間ずっとcollectorの

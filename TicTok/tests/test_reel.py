@@ -111,11 +111,19 @@ def _patch_reel_ffmpeg(monkeypatch, captured, streams=None, durations=None):
     _fake_packet_times(monkeypatch)
 
 
-def test_reel_path_lands_in_the_shared_clips_dir(make_recording, tmp_root):
+def test_reel_path_lands_in_the_streamers_clips_dir(make_recording, tmp_root):
     stem, mp4 = make_recording(streamer="some.user_x")
     out = reel.reel_path(mp4, 10.0, 130.0, 3)
     assert out.parent == layout.clips_dir(tmp_root, "some.user_x")
     assert out.name == f"{stem}_reel3_000010-000210.mp4"
+
+
+def test_reel_path_stays_in_the_work_root_for_a_relocated_recording(tmp_root, tmp_path):
+    """連結も切り出しと同じ置き方。録画が最終保存先に在っても一時保存先へ出る。"""
+    mp4 = layout.mp4_path(tmp_path / "final", "00042_some.user_x_20260101_120000",
+                          "some.user_x")
+    assert reel.reel_path(mp4, 10.0, 130.0, 3).parent == layout.clips_dir(
+        tmp_root, "some.user_x")
 
 
 def test_reel_path_sanitises_the_label_but_keeps_japanese(make_recording):

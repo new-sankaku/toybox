@@ -44,8 +44,8 @@ describe("analytics.js の表示計算", () => {
     });
 
     it("背景の明るさで文字色を切り替える", () => {
-      expect(win.tiColor(1).fg).toBe("#2f2b22");
-      expect(win.tiColor(4).fg).toBe("#f0ead6");
+      expect(win.tiColor(1).fg).toBe("#322f27"); // --ink-strong
+      expect(win.tiColor(4).fg).toBe("#e9e3cf"); // --chart-surface
     });
 
     it("観測が無いマスは色を塗らず「データなし」と名乗る", () => {

@@ -223,7 +223,7 @@ def _recording_source_exists(recording: dict) -> bool:
     """この録画に手を出せるか。mp4の有無**ではない**。
 
     finalizeはmp4を作らなくなり、原本は .ts になった。焼き込み・切り出し・波形・thumbnail・
-    転写はいずれもhls_source経由で .ts を読むので、mp4だけを見て断ると新しい録画が1本も
+    文字起こしはいずれもhls_source経由で .ts を読むので、mp4だけを見て断ると新しい録画が1本も
     通らない。「mp4 or 使える素材のどちらかが在る」がこの録画を扱える唯一の条件で、
     判定はここへ一本化する(mp4を実際に要求する操作 — 音量正規化・元mp4の削除 — だけは
     別に ``_existing_recording_file`` を使う)。"""

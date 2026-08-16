@@ -14,6 +14,13 @@ Pillow>=10.0.0
 numpy>=1.24.0
 fonttools>=4.40.0
 
+# 日本語字幕の改行位置。文字数だけで折ると実録画のcue 14,500件のうち49.7%が語の内側で
+# 切れた(「〜だか|ら」「取り|たいから」)。形態素解析で文節の切れ目を選ぶと3.6%まで落ちる。
+# SudachiPyも比較したが、fugashiの切り位置はSudachiPyが96.6%認めるのに対し逆は92.8%で、
+# fugashiを採った(実測はdoc/SUBTITLE_LINEBREAK.md)。unidic-liteは同梱辞書。
+fugashi>=1.3.0
+unidic-lite>=1.0.8
+
 # LIVE detection runs through a headless Chromium to pass TikTok's SlardarWAF
 # JS challenge (plain HTTP clients receive a WAF stub page with no SIGI_STATE).
 # After pip install, run: playwright install chromium
@@ -46,8 +53,18 @@ playwright>=1.40.0
 #       pip install spandrel
 # torch
 # spandrel
+#   - BGM除去(切り出しのoption): 話し声だけを残すspeech enhancementをGPUで実行する。
+#     **本体venvへは入れない。** clearvoiceはtorchをCPU版で上書きするため、同居させると
+#     Up出力がGPUを失う。専用venvを作り、.env でそのpythonを指す:
+#       python -m venv AI_AUDIO/venv_cv
+#       AI_AUDIO/venv_cv/Scripts/pip install clearvoice
+#       AI_AUDIO/venv_cv/Scripts/pip install --force-reinstall torch==2.11.0 torchaudio==2.11.0 \
+#           --index-url https://download.pytorch.org/whl/cu128
+#       TICTOK_BGM_REMOVE_ENABLED=1
+#       TICTOK_BGM_REMOVE_PYTHON=AI_AUDIO/venv_cv/Scripts/python.exe
+#     順番が重要(clearvoiceを後に入れるとtorchがCPU版へ戻る)。詳細は doc/BGM_REMOVE.md
 #   - 笑い声検出(切り出し候補): onnxruntime でAudioSetのaudio tagging modelをCPU実行する
-#     (GPUは転写・超解像が使うので取らない)。modelとlabel fileは利用者が置き .env で指定する。
+#     (GPUは文字起こし・超解像が使うので取らない)。modelとlabel fileは利用者が置き .env で指定する。
 #     入手・再exportの手順は doc/LAUGH_AUDIO_MODEL.md:
 #       pip install onnxruntime
 #       TICTOK_LAUGH_AUDIO_ENABLED=1

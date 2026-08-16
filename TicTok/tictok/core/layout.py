@@ -5,17 +5,31 @@
     <root>/<streamer>/ts/<stem>/seg*.ts   ... HLSセグメント(セッションフォルダ)
     <root>/<streamer>/mp4/<stem>.mp4      ... 完成mp4と焼き込み(<stem>.overlay.mp4)・高画質化(<stem>.up.mp4)
 
+    <root>/<streamer>/_clips/                ... 切り出し・reel・作品(動画の成果物)
+    <root>/<streamer>/_screenshots/          ... スクショ・shortの表紙(静止画の成果物)
+
 stem は ``NNNNN_<streamer>_YYYYMMDD_HHMMSS`` で、<streamer> は録画時の unique_id と一致する。
 
-root 直下のfileは2種類あり、解決の基準が違う:
+root 直下のfileは3種類あり、解決の基準が違う:
 
-  録画ごとのartifact (.sidecars/, _clips/) は ``record_root_of`` — mp4と同じrootに置き、
+  録画ごとのartifact (.sidecars/) は ``record_root_of`` — mp4と同じrootに置き、
   mp4がfinal dirへ移送されれば一緒に移る。
 
   録画横断のpool (avatars/, emotes/, gift_icons/) は ``pool_root`` — mp4の位置とは無関係に
   work root ただ1つに置く。書き込むのは収集時のcollector(AvatarPool/GiftIconCache)で、
   そこはwork root固定であり、mp4の現在地では解決できない。
+
+  切り出し成果物 (<streamer>/_clips/) は ``clip_output_dir`` — **作る先は常にwork root**で、
+  録画の現在地では決めない。最終保存先へ運ぶのは「最終保存先へ移動」だけである
+  (``tictok.api.disk``)。録画の位置で出力先を決めていた頃は、同じ操作の成果物が録画ごとに
+  別のdriveへ出て、出来上がったfileの在り処が人には辿れなかった。
+
+  静止画 (<streamer>/_screenshots/) は ``still_output_dir`` — 決め方は切り出しと同じ
+  (work root固定・配信者folderの下)で、置き場だけを分ける。数百本の切り出しmp4に1枚ずつ
+  pngが混ざると、探しているのがどちらでも目的の物に辿り着けない。分けても一覧・移動・容量は
+  両方を見る(``iter_clip_dirs``)ので、画面から辿る口は1つのままである。
 """
+import os
 import re
 from pathlib import Path
 
@@ -112,15 +126,65 @@ def mp4_path(root, stem, streamer=None) -> Path:
 
 
 CLIPS_DIRNAME = "_clips"
+# 静止画(スクショ・shortの表紙)の置き場。切り出しと同じ規約で並ぶが、dirは分ける — 動画の
+# 成果物とpngが同じdirに積み上がると、file名の規約(``_shot``)を知らない限りどちらも探せない。
+STILLS_DIRNAME = "_screenshots"
 
-NON_STREAMER_DIRS = {".sidecars", "avatars", "emotes", "gift_icons", "_backup", CLIPS_DIRNAME}
+# 成果物の置き場のdir名。一覧・移動・容量・片付けは**必ずこの両方**を見る。片方だけを見る
+# 経路があると、そこからだけ静止画が消える(画面に並ばない・最終保存先へ随伴しない)。
+ARTIFACT_DIRNAMES = (CLIPS_DIRNAME, STILLS_DIRNAME)
+
+# root直下に置かれる、配信者folderではないdir。成果物のdir名が入っているのは、配信者を読み
+# 取れないstemから出た成果物の受け皿(下記 ``clips_dir``)と、配信者folderの下へ移す前の
+# 旧規約(``<root>/_clips/<配信者>/``)の実体が root直下にも在り得るためである。
+NON_STREAMER_DIRS = {".sidecars", "avatars", "emotes", "gift_icons", "_backup",
+                     *ARTIFACT_DIRNAMES}
+
+
+def _artifact_dir(root, streamer, dirname: str) -> Path:
+    """成果物の置き場。**配信者folderの下**(``<root>/<配信者>/<dirname>``)。
+
+    録画(``ts``/``mp4``)と同じ配信者folderの中に置く。配信者ごとの片付け — folderごと消す・
+    別driveへ移す・容量を見る — が、録画と成果物で別の場所を指さずに済む。
+
+    ``streamer`` が読めないとき(規約外のstem)だけ root直下へ落とす。録画自体も同じ条件で
+    root直下へ落ちる(``mp4_dir``)ので、決め方を揃える。"""
+    root = Path(root)
+    return root / streamer / dirname if streamer else root / dirname
 
 
 def clips_dir(root, streamer=None) -> Path:
-    """切り出しクリップの置き場。root 直下の共有領域で、配信者フォルダとは区別される
-    (iter_sessions は NON_STREAMER_DIRS として読み飛ばす)。"""
-    root = Path(root) / CLIPS_DIRNAME
-    return root / streamer if streamer else root
+    """切り出し・reel・作品(動画)の置き場(``<root>/<配信者>/_clips``)。
+
+    rootを引数で取るのは、**在るものを数える側**(一覧・移動先の算出)が両rootを見るため。
+    新しく作る側は必ず :func:`clip_output_dir` を通す。"""
+    return _artifact_dir(root, streamer, CLIPS_DIRNAME)
+
+
+def stills_dir(root, streamer=None) -> Path:
+    """スクショ・shortの表紙(静止画)の置き場(``<root>/<配信者>/_screenshots``)。
+
+    決め方は :func:`clips_dir` と同じで、dirだけが違う。新しく作る側は必ず
+    :func:`still_output_dir` を通す。"""
+    return _artifact_dir(root, streamer, STILLS_DIRNAME)
+
+
+def clip_output_dir(streamer=None) -> Path:
+    """切り出し・reel・作品を**作る**先。常に一時保存先(work root)。
+
+    録画がどちらのrootに在るかでは決めない。決めていた頃は、同じ「切り出す」操作でも
+    録画の所在によって成果物がwork rootとfinal rootへ分かれ、file systemだけが台帳である
+    以上、人は自分が作った物の在り処を知る手段を持たなかった。作る場所を1つに固定すれば
+    「作った物はここに在る」が常に成り立ち、最終保存先へ運ぶかどうかは移動の操作が決める。
+    """
+    return clips_dir(work_root(), streamer)
+
+
+def still_output_dir(streamer=None) -> Path:
+    """静止画(スクショ・shortの表紙)を**作る**先。常に一時保存先(work root)。
+
+    root の決め方は :func:`clip_output_dir` と同じ理由で work root 固定である。"""
+    return stills_dir(work_root(), streamer)
 
 
 def iter_sessions(root):
@@ -142,7 +206,7 @@ def iter_sessions(root):
 
 
 def record_root_of(path) -> Path:
-    """その録画のartifact(.sidecars/_clips)を解決するための record root。
+    """その録画のartifact(.sidecars)を解決するための record root。
 
     入れ子レイアウト(<root>/<streamer>/{ts,mp4}/...)なら root を、
     そうでなければ(規約外・フラット)親ディレクトリを返す。
@@ -230,6 +294,85 @@ def reset_pool_root() -> None:
     """``pool_root`` のcacheを捨てる。設定を差し替えるtestが使う。"""
     global _pool_root
     _pool_root = None
+
+
+def work_root() -> Path:
+    """録画が生まれるroot(一時保存先) = serverの RECORD_DIR。
+
+    値は ``pool_root`` と同じだが、意味が違うので名前を分ける。あちらは「録画横断のpoolを
+    置く場所」で、こちらは「録画も切り出しもまずここに出来る場所」である。解決の経路まで
+    分けると、片方だけがDB設定を見るような食い違いが生まれる。"""
+    return pool_root()
+
+
+def iter_clip_dirs(root):
+    """``root`` に実在する成果物の置き場(``_clips`` と ``_screenshots``)を辿る。
+
+    置き場は配信者ごとに分かれた(``<root>/<配信者>/_clips``)ので、rootの下に1つではない。
+    root直下の ``_clips`` / ``_screenshots`` も在れば返す — 配信者を読み取れない成果物の
+    受け皿であり、配信者folderの下へ移す前の実体もそこに在る。
+
+    動画と静止画で置き場は分かれたが、辿る側は分けない。一覧も移動も容量も「その配信者が
+    作った物」を丸ごと相手にするので、ここで両方を返しておけば下流は置き場の数を知らずに
+    済む(知る必要が出た経路だけが、静止画を取りこぼす)。"""
+    root = Path(root)
+    if not root.is_dir():
+        return
+    for dirname in ARTIFACT_DIRNAMES:
+        shared = root / dirname
+        if shared.is_dir():
+            yield shared
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir() or entry.name in NON_STREAMER_DIRS:
+            continue
+        for dirname in ARTIFACT_DIRNAMES:
+            found = entry / dirname
+            if found.is_dir():
+                yield found
+
+
+def clip_streamer_of(root, path):
+    """成果物のpathから、**置き場が名乗る**配信者を返す。読めなければ None。
+
+    file名からは読まない(名前が規約外でも置き場は配信者別である)。旧規約
+    ``<root>/_clips/<配信者>/`` も読めるようにしてある — 移し損ねた実体を、持ち主不明として
+    扱わないため。"""
+    try:
+        parts = Path(path).relative_to(root).parts
+    except ValueError:
+        return None
+    if len(parts) > 2:
+        if parts[1] in ARTIFACT_DIRNAMES:
+            return parts[0]
+        if parts[0] in ARTIFACT_DIRNAMES:
+            return parts[1]
+    return None
+
+
+def is_clip_path(root, path) -> bool:
+    """``path`` が ``root`` の成果物の置き場(``_clips`` / ``_screenshots``)の下に在るか。
+
+    client由来の名前を実pathへ解いた後の照合に使う。rootの下に居ることだけを確かめると、
+    同じrootに在る録画本体(``<配信者>/mp4/``)まで名前指定で配信・削除できてしまう。"""
+    try:
+        parts = Path(path).relative_to(root).parts
+    except ValueError:
+        return False
+    return any(part in ARTIFACT_DIRNAMES for part in parts[:2])
+
+
+def iter_clip_files(root):
+    """``root`` の成果物の置き場に在るfileのpathを辿る。
+
+    先頭が ``.`` のdirは入らない。そこに在るのは切り出し中の中間(``.clip_``/``.short_``等)と
+    作品のシーンcache(``.scenes``)で、どちらも成果物ではない — 中間は落ちた回の残骸、cacheは
+    次の焼き直しを速くするためだけの物なので、移動にも一覧にも載せない。"""
+    for base in iter_clip_dirs(root):
+        for dirpath, dirnames, filenames in os.walk(base):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            here = Path(dirpath)
+            for name in filenames:
+                yield here / name
 
 
 def avatar_pool_dir() -> Path:

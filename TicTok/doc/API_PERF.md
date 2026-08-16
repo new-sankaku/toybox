@@ -79,6 +79,6 @@ DBの読み取りを変える場合、実DBを2回読んで比べても収集が
 | --- | --- | --- | --- |
 | `GET /api/streamers` | 208ms | 4.4ms | 未確定sessionの通算CTEが、未確定が2件でも events index を全走査していた。結合順を未確定側から回すよう固定 |
 | `GET /api/dashboard` | 486ms | 56ms | 同じCTEを2回使っている。加えてgifter上位50が全gift eventで行本体を読んでいたのを2段構えへ |
-| `GET /api/search/status` | — | — | 36万行のindex走査をevent loop上で回していた(別threadへ)。search_hitsの集計2本を書き込み接続から集計read専用接続へ |
+| `GET /api/search/status` | — | — | 36万行のindex走査をevent loop上で回していた(別threadへ)。search_hitsの集計2本を書き込み接続から集計read専用接続へ。※このendpointは後に廃止し、集計は `GET /api/bulk/status` へ一本化した(同じ走査を2箇所で回していた) |
 
 いずれも結果が変わらないことをsnapshot上で突き合わせて確認済み。

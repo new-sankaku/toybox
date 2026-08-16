@@ -512,7 +512,7 @@ def write_curated_playlist(hls_dir, dst, unique_id: str = "") -> Optional[Path]:
 def curated_span_seconds(hls_dir, unique_id: str = "") -> Optional[float]:
     """その録画の採用集合が名乗る尺(秒)。採用できるsegmentが無ければNone。
 
-    ``write_curated_playlist`` が書くのと**同じ集合**を測る。下流(転写・切り出し・焼き込み)
+    ``write_curated_playlist`` が書くのと**同じ集合**を測る。下流(文字起こし・切り出し・焼き込み)
     がffmpegへ渡すのはその集合なので、「素材が何秒あるか」を問う側もここを見なければ、
     読む対象と測る対象が別物になる。
 

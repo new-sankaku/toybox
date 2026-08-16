@@ -43,7 +43,7 @@ function renderKpi(totals, streamerCount, recordingCount) {
     ["総Session", fmtNum(totals.sessions)],
     ["総Gift", fmtNum(totals.gifts)],
     ["総コイン", fmtNum(totals.diamonds)],
-    ["総Comment", fmtNum(totals.comments)],
+    ["総コメント", fmtNum(totals.comments)],
     ["配信者数", fmtNum(streamerCount)],
     ["録画数", fmtNum(recordingCount)],
   ];
@@ -137,7 +137,7 @@ const SESSION_SORT_COLUMNS = {
   },
   gifts: { label: "Gift", dir: "desc", get: (s) => sessionStat(s, "gifts") },
   diamonds: { label: "コイン", dir: "desc", get: (s) => sessionStat(s, "diamonds") },
-  comments: { label: "Comment", dir: "desc", get: (s) => sessionStat(s, "comments") },
+  comments: { label: "コメント", dir: "desc", get: (s) => sessionStat(s, "comments") },
   likes_total: { label: "Like", dir: "desc", get: (s) => sessionStat(s, "likes_total") },
   follows: { label: "Follow", dir: "desc", get: (s) => sessionStat(s, "follows") },
   shares: { label: "Share", dir: "desc", get: (s) => sessionStat(s, "shares") },
@@ -161,7 +161,27 @@ const SESSION_SORT_PRESETS = {
 // 列headerからの並びがselectのどの選択肢にも当たらないとき、その並びを表示する行き先。
 const SORT_COLUMN_OPTION = "column";
 
+// 並びは画面を離れても残す。残すのはselectのvalueではなくsortState(列+昇降)。列header
+// からの並びはselectの選択肢に無い(SORT_COLUMN_OPTION)ため、selectのvalueを残すと
+// header由来の並びだけ復元できない。どちらの操作も同じ1つの値で表す。
+const SORT_PREF_KEY = "tictok.history.sort";
+
 let sortState = { ...SESSION_SORT_PRESETS.started_desc };
+
+function persistSort() {
+  prefSet(SORT_PREF_KEY, `${sortState.key}:${sortState.dir}`);
+}
+
+// 保存値は現存する列と昇降だけ受ける。読めない値のときは既定(markupのstarted_desc)で
+// 始める。selectの表示はsyncSortSelectがsortStateから作り直す。
+function restoreSort() {
+  const stored = prefGet(SORT_PREF_KEY);
+  if (!stored) return;
+  const [key, dir] = stored.split(":");
+  if (!SESSION_SORT_COLUMNS[key] || (dir !== "asc" && dir !== "desc")) return;
+  sortState = { key, dir };
+  syncSortSelect();
+}
 
 function sessionStat(session, key) {
   return (session.stats && session.stats[key]) || 0;
@@ -242,6 +262,7 @@ function applySort(key) {
   sortState = sortState.key === key
     ? { key, dir: sortState.dir === "desc" ? "asc" : "desc" }
     : { key, dir: column.dir };
+  persistSort();
   syncSortSelect();
   renderTable();
 }
@@ -279,17 +300,28 @@ function statusCell(session) {
 
 // 操作Buttonは1つずつ独立したtable列(td.act)に入れる。全行が同じ列構成のため、
 // tableの列機構が幅を自動で合わせ、複数行に渡って縦に揃う（幅をnumberで指定しない）。
-// 列数は表headerの操作thのcolspan(actionColumnCount)と一致させる。
-function actionColumnCount() {
-  return 3 + Number(upscaleConfigured) + Number(sttConfigured);
+// 列は2群に分ける。行を開く「詳細」と本命の「焼き込み出力」は#と配信者の間(lead)、
+// 時間のかかる派生出力(AI高画質/字幕化)と削除は数値列の後ろ(rest)。
+// 各群の列数は表headerの操作thのcolspanと一致させる。
+const ACTION_LEAD_COLUMNS = 2;
+
+function actionRestColumnCount() {
+  return 1 + Number(upscaleConfigured) + Number(sttConfigured);
 }
 
+function actionColumnCount() {
+  return ACTION_LEAD_COLUMNS + actionRestColumnCount();
+}
+
+// 返り値は {lead, rest}。行の組み立て(buildSessionRow)と差分更新(patchSessionRow)は
+// どちらも lead→rest の順で1本に均すので、群の分け方は1箇所にしか無い。
 function actionCells(session) {
   const isActive = activeIds.has(session.id);
   const outputting = activeOutputs.has(session.id);
   const upOutputting = activeUpOutputs.has(session.id);
   const hasVideo = (session.recording_count || 0) > 0;
-  const cells = [];
+  const lead = [];
+  const rest = [];
   const cell = (node) => {
     const td = document.createElement("td");
     td.className = "act";
@@ -304,7 +336,7 @@ function actionCells(session) {
     e.stopPropagation();
     showDetail(session.id);
   });
-  cells.push(cell(showBtn));
+  lead.push(cell(showBtn));
 
   // 出力中の行は再描画されても、進行中のprogress要素をそのまま再装着する。
   let outNode;
@@ -320,14 +352,14 @@ function actionCells(session) {
       ? "収集中のSessionは出力できません"
       : !hasVideo
         ? "このSessionには出力できる録画がありません（動画保存OFF等で動画が未保存）。"
-        : "このSessionの録画にComment/Gift演出を焼き込み、recordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
+        : "このSessionの録画にコメント/Gift演出を焼き込み、recordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
     out.addEventListener("click", (e) => {
       e.stopPropagation();
       outputSession(session, out);
     });
     outNode = out;
   }
-  cells.push(cell(outNode));
+  lead.push(cell(outNode));
 
   // Up出力(AI高画質化)。ローカルAIのUpscale設定が有効な場合のみ列を出す。
   if (upscaleConfigured) {
@@ -351,7 +383,7 @@ function actionCells(session) {
       });
       upNode = up;
     }
-    cells.push(cell(upNode));
+    rest.push(cell(upNode));
   }
 
   // 文字起こし(STT有効時のみ列を出す)。複数録画がある場合は結果がRecording単位のため
@@ -373,7 +405,7 @@ function actionCells(session) {
       e.stopPropagation();
       transcribeSession(session, tr);
     });
-    cells.push(cell(tr));
+    rest.push(cell(tr));
   }
 
   const del = document.createElement("button");
@@ -384,7 +416,7 @@ function actionCells(session) {
     ? "収集中のSessionは削除できません"
     : outputting || upOutputting
       ? "出力中のSessionは削除できません"
-      : "このSessionの記録(Comment/Gift/分析)と録画をまとめて削除します。取り消せません。";
+      : "このSessionの記録(コメント/Gift/分析)と録画をまとめて削除します。取り消せません。";
   del.addEventListener("click", async (e) => {
     e.stopPropagation();
     const ok = await confirmDialog(
@@ -397,12 +429,12 @@ function actionCells(session) {
       if (currentSessionId === session.id) closeDetail();
       await Promise.all([loadSessions(), loadKpi()]);
     } catch (err) {
-      showError(err);
+      showError(err, `Session #${sessionNo(session.id)} の削除`);
     }
   });
-  cells.push(cell(del));
+  rest.push(cell(del));
 
-  return cells;
+  return { lead, rest };
 }
 
 // 履歴一覧の操作からの文字起こし。SessionのRecordingを取得し、単一なら即表示、
@@ -417,7 +449,8 @@ async function transcribeSession(session, btn) {
     const recs = (data.recordings || []).filter(
       (r) => r.status === "completed" || r.status === "interrupted");
     if (!recs.length) {
-      showToast("文字起こしできる録画がありません。");
+      showToast("文字起こしできる録画がありません。", null,
+        { title: `Session #${sessionNo(session.id)} の文字起こし` });
       return;
     }
     if (recs.length === 1) {
@@ -434,7 +467,7 @@ async function transcribeSession(session, btn) {
       onSelect: () => transcribeOrShow(rec, btn),
     })));
   } catch (err) {
-    showError(err);
+    showError(err, `Session #${sessionNo(session.id)} の文字起こし`);
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -502,10 +535,11 @@ function buildSessionRow(s) {
   statusTd.appendChild(statusCell(s));
   const numTds = SESSION_NUM_FIELDS.map((key) => numTd(sessionStat(s, key)));
   const note = noteTd(s);
-  const actionTds = actionCells(s);
+  const { lead, rest } = actionCells(s);
+  const actionTds = [...lead, ...rest];
   [
-    textTd(`#${sessionNo(s.id)}`), nameTd, textTd(fmtDateTime(s.started_at)),
-    durationTd, statusTd, ...numTds, note, ...actionTds,
+    textTd(`#${sessionNo(s.id)}`), ...lead, nameTd, textTd(fmtDateTime(s.started_at)),
+    durationTd, statusTd, ...numTds, note, ...rest,
   ].forEach((td) => tr.appendChild(td));
   return {
     tr, nameTd, durationTd, statusTd, numTds, actionTds,
@@ -541,7 +575,8 @@ function patchSessionRow(record, s) {
   }
   const actionSig = sessionActionSig(s);
   if (record.actionSig !== actionSig) {
-    const next = actionCells(s);
+    const { lead, rest } = actionCells(s);
+    const next = [...lead, ...rest];
     record.actionTds.forEach((td, i) => record.tr.replaceChild(next[i], td));
     record.actionTds = next;
     record.actionSig = actionSig;
@@ -553,9 +588,10 @@ function renderTable() {
   const rows = filteredSessions();
   syncSortHeaders();
   // 操作Buttonは1列ずつ独立tdなので、header操作thをその列数だけ横結合して整合させる。
+  // 先頭群(詳細/焼き込み出力)は設定に依らず固定なのでmarkupのcolspanのまま。
   const opTh = document.getElementById("op-th");
   const columns = actionColumnCount();
-  if (opTh) opTh.colSpan = columns;
+  if (opTh) opTh.colSpan = actionRestColumnCount();
   const emptyEl = document.getElementById("session-empty");
   if (rows.length > 0) setListState(emptyEl, "ok");
   else if (sessionsState === "failed") setListState(emptyEl, "failed", sessionsError);
@@ -637,8 +673,9 @@ function noteTd(session) {
         document.getElementById("note-input").value = value;
       }
     } catch (err) {
+      // 入力欄は元の値へ戻している。戻した理由を出さないと、打ち直しが消えたようにしか見えない。
       input.value = current.note || "";
-      showError(err);
+      showError(err, `Session #${sessionNo(sessionId)} のMemo保存`);
     }
   });
   td.appendChild(input);
@@ -651,7 +688,8 @@ async function showDetail(sessionId, fromHistory) {
   try {
     data = await apiSend("GET", `/api/sessions/${sessionId}`);
   } catch (err) {
-    showToast(`Session詳細を取得できませんでした。\n${errorDetailText(err)}`, "error");
+    showToast(["Session詳細を取得できませんでした。", errorDetailText(err)], "error",
+      { title: `Session #${sessionNo(sessionId)} の詳細` });
     return;
   }
   const session = data.session;
@@ -673,7 +711,7 @@ async function showDetail(sessionId, fromHistory) {
     ["収集時間", duration],
     ["Gift合計", fmtNum(stats.gifts)],
     ["コイン合計", fmtNum(stats.diamonds)],
-    ["Comment合計", fmtNum(stats.comments)],
+    ["コメント合計", fmtNum(stats.comments)],
     ["Like合計", fmtNum(stats.likes_total)],
     ["最大同接", fmtNum(stats.viewers_peak)],
     ["Battle回数", fmtNum(stats.battles)],
@@ -688,18 +726,35 @@ async function showDetail(sessionId, fromHistory) {
   detailChart.update(data.timeline, data.battles || []);
 
   const summary = data.summary || {};
+  // gift_idごとのicon URL。serverが出せるgiftだけが載る(載らないgiftは名前だけで並ぶ)。
+  const giftIcons = summary.gift_icons || {};
   renderTableRows(
     "user-ranking",
     "user-ranking-empty",
     summary.users || [],
-    (user, rank) => [String(rank), userCell(user, { stackId: true }), fmtNum(user.gifts), fmtNum(user.diamonds), giftItemsNode(user.items)],
-    [0, 2, 3],
+    (user, rank) => [
+      String(rank),
+      // GLv/MLvは名前の後ろに付けず独立した列にする。名前の長さで横位置が動くと、
+      // 行をまたいでLvを読み比べられない。
+      userCell(user, { stackId: true, hideBadges: true }),
+      badgeLevelCell(user.gifter_badge, user.gifter_level, "GLv (ギフトレベル/課金グレード)"),
+      badgeLevelCell(user.member_badge, user.fans_level, "MLv (メンバーレベル/ファンクラブ)"),
+      fmtNum(user.gifts),
+      fmtNum(user.diamonds),
+      giftItemsNode(user.items, giftIcons),
+    ],
+    [0, 4, 5],
   );
   renderTableRows(
     "gift-ranking",
     "gift-ranking-empty",
     summary.gifts || [],
-    (gift, rank) => [String(rank), gift.name, fmtNum(gift.count), fmtNum(gift.diamonds)],
+    (gift, rank) => [
+      String(rank),
+      giftNameNode(gift.name, gift.gift_id, giftIcons),
+      fmtNum(gift.count),
+      fmtNum(gift.diamonds),
+    ],
     [0, 2, 3],
   );
 
@@ -845,14 +900,29 @@ async function ensureNotifyPermission() {
   }
 }
 
-function notifyOutputDone(name) {
+// labelは終わった操作の名前。行に出る「完了 ✓」は、直後のshowDetail/loadSessionsが
+// 操作cellごと差し替えるためAPI往復1回ぶんで消える。数十分待つ処理で、しかも失敗側は
+// showError/showToastで必ず残るので、成功だけ残らないと「終わったのか落ちたのか」が
+// 画面から読めない。browser通知は許可が要るので、画面内のtoastを唯一の確実な合図にする。
+function notifyOutputDone(name, label) {
+  const title = `${label || "出力"}が完了しました`;
+  showToast(name, null, { title });
   try {
     if ("Notification" in window && Notification.permission === "granted") {
-      new Notification("出力が完了しました", { body: name });
+      new Notification(title, { body: name });
     }
   } catch (e) {
     /* 通知不可でも出力自体は完了しているため無視 */
   }
+}
+
+// 一覧の操作列に出す進捗。押したButtonと同じcellに収まるよう、名乗るのは短い操作名と%
+// だけにする。serverのstageは「(4/6) コメント層を描画中（0:12:34 / 4:39:10）＋ 焼き込み
+// 合成中（…）」のような長文で、折り返さない表にそのまま出すと操作列が横へ大きく伸び、
+// 一覧の他の列が押し出される。段階の全文と残り時間はtooltipに残し、段階を追う場所は
+// Job画面が持つ。
+function rowProgress(label) {
+  return makeProgress({ compact: true, shortLabel: label });
 }
 
 // jobをqueueへ投入し、完了(または失敗)まで待つ。応答はjob_idだけで、進捗も結果も
@@ -874,11 +944,16 @@ function applyRecordingJob(job) {
   const watcher = jobWatchers.get(job.job_id);
   if (!watcher) return false;
   if (job.state === "pending" || job.state === "running") {
-    setJobProgress(watcher.prog, job);
+    // 進捗要素を持たない待受(文字起こしはbutton文言へ出す)もあるため、どちらか一方でよい。
+    if (watcher.prog) setJobProgress(watcher.prog, job);
+    if (watcher.onState) watcher.onState(job);
     return true;
   }
   jobWatchers.delete(job.job_id);
   if (job.state === "completed") watcher.resolve(job);
+  // 取り消しは人が止めた正常な終わり方。失敗と同じ文言で出すと、自分で止めたjobが
+  // 不具合に見える。
+  else if (job.state === "cancelled") watcher.reject(new Error("取り消しました。"));
   else watcher.reject(new Error(job.message || watcher.failMessage));
   return true;
 }
@@ -897,17 +972,17 @@ async function downloadRecording(rec, btn) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeProgress();
+  const prog = rowProgress("焼き込み中");
   btn.replaceWith(prog);
   try {
     const name = await outputRecording(rec, prog);
     finishProgress(prog);
-    notifyOutputDone(name);
+    notifyOutputDone(name, `${recName(rec)} の焼き込み出力`);
     // done badge(出力済)を反映するため詳細を再描画する。
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    showError(err);
+    showError(err, `${recName(rec)} の出力`);
   }
 }
 
@@ -915,18 +990,18 @@ async function downloadRecording(rec, btn) {
 // 元のmp4と差し替える(元は_backup/へ退避)。進捗はWS audionorm_progressで届く。
 async function audionormRecording(rec, btn) {
   ensureNotifyPermission();
-  const prog = makeProgress();
+  const prog = rowProgress("音量正規化中");
   btn.replaceWith(prog);
   audionormProgress.set(rec.id, (pct, stage) =>
     setProgress(prog, stage || "音量正規化", pct));
   try {
     const job = await startRecordingJob(rec, prog, "audionorm", "音量正規化に失敗しました。");
     finishProgress(prog);
-    notifyOutputDone((job.result || {}).filename || rec.filename);
+    notifyOutputDone((job.result || {}).filename || rec.filename, `${recName(rec)} の音量正規化`);
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    showError(err);
+    showError(err, `${recName(rec)} の音量正規化`);
   } finally {
     audionormProgress.delete(rec.id);
   }
@@ -937,20 +1012,20 @@ async function audionormRecording(rec, btn) {
 // serverからWSで届く reprocess_progress をprogに反映する。
 async function reprocessRecording(rec, btn) {
   ensureNotifyPermission();
-  const prog = makeProgress();
+  const prog = rowProgress("再mp4化中");
   btn.replaceWith(prog);
-  // stageはserverが段階名(セグメントを結合中／単一解像度へ変換中…)を載せてくる。
-  // 固定文字列で上書きすると、どの段階で待っているのかが分からなくなる。
+  // stageはserverが段階名(セグメントを結合中／単一解像度へ変換中…)を載せてくる。行では
+  // 名乗りを短く保つため、段階名はtooltipへ回す(setProgressがshortLabel側を優先する)。
   reprocessProgress.set(rec.id, (pct, stage) =>
     setProgress(prog, stage || "再mp4化", pct));
   try {
     const job = await startRecordingJob(rec, prog, "reprocess", "再mp4化に失敗しました。");
     finishProgress(prog);
-    notifyOutputDone((job.result || {}).filename || rec.filename);
+    notifyOutputDone((job.result || {}).filename || rec.filename, `${recName(rec)} の再mp4化`);
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    showError(err);
+    showError(err, `${recName(rec)} の再mp4化`);
   } finally {
     reprocessProgress.delete(rec.id);
   }
@@ -959,11 +1034,13 @@ async function reprocessRecording(rec, btn) {
 // Session単位の出力(履歴一覧の操作)。録画を1本ずつ回すloopはserver側のjobで、ここは
 // 起動と進捗表示だけを持つ。以前はこのloopがbrowser側にあったため、tabを閉じると残りの
 // 録画は起動すらされず、reloadすると完了も失敗も届かなくなっていた。
-async function startSessionOutput(session, btn, path, activeMap, failMessage) {
+// labelは操作の名前("出力"/"Up出力")。失敗文言とtoastの見出しの両方をここから作り、
+// 二重に持たない。runningは行に出す短い名乗り(「焼き込み中」等)。
+async function startSessionOutput(session, btn, path, activeMap, label, running) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeProgress();
+  const prog = rowProgress(running);
   btn.replaceWith(prog);
   // 再描画でprogが行から切り離されても進捗を保持できるよう登録する。
   activeMap.set(session.id, prog);
@@ -971,18 +1048,18 @@ async function startSessionOutput(session, btn, path, activeMap, failMessage) {
     const res = await fetch(`/api/sessions/${session.id}/${path}`, { method: "POST" });
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
+      throw new Error(typeof payload.detail === "string" ? payload.detail : `${label}に失敗しました。`);
     }
     // 以降の進捗・完了・失敗はserverのjob(WS job_update)で届く。
   } catch (err) {
     activeMap.delete(session.id);
     prog.replaceWith(btn);
-    showError(err);
+    showError(err, `Session #${sessionNo(session.id)} の${label}`);
   }
 }
 
 async function outputSession(session, btn) {
-  await startSessionOutput(session, btn, "output", activeOutputs, "出力に失敗しました。");
+  await startSessionOutput(session, btn, "output", activeOutputs, "出力", "焼き込み中");
 }
 
 // server側job(session_overlay / session_upscale)の状態を行のprogress要素へ反映する。
@@ -998,7 +1075,7 @@ function applyJob(job) {
     let prog = activeMap.get(job.session_id);
     if (!prog) {
       // このpageがjobを開始していない場合(reload後・別tabからの開始)はここで作る。
-      prog = makeProgress();
+      prog = rowProgress(job.domain === "session_upscale" ? "AI高画質中" : "焼き込み中");
       activeMap.set(job.session_id, prog);
       renderTable();
     }
@@ -1006,13 +1083,27 @@ function applyJob(job) {
     return;
   }
   const prog = activeMap.get(job.session_id);
-  if (!prog) return;
+  const label = job.domain === "session_upscale" ? "Up出力" : "出力";
+  // progが無いのは、この画面が進捗を出していないjobが終わったとき(別画面で始めた・
+  // 一覧の絞込で行が出ていない)。以前はここで捨てていたので、失敗が誰にも届かなかった。
+  if (!prog) {
+    if (job.state !== "completed" && job.state !== "cancelled") {
+      showToast(job.message || `${label}に失敗しました。`, "error",
+        { title: `Session #${sessionNo(job.session_id)} の${label}` });
+      loadSessions();
+    }
+    return;
+  }
   activeMap.delete(job.session_id);
   if (job.state === "completed") {
     finishProgress(prog);
-    notifyOutputDone(job.message || job.title);
+    notifyOutputDone(job.message || job.title,
+      `Session #${sessionNo(job.session_id)} の${label}`);
   } else {
-    showToast(job.message || "出力に失敗しました。", "error");
+    // 一覧には複数のSessionが並ぶ。どのSessionのどちらの出力が落ちたのかを名乗らないと、
+    // 行のprogressが消えただけになって対象が辿れない。
+    showToast(job.message || `${label}に失敗しました。`, "error",
+      { title: `Session #${sessionNo(job.session_id)} の${label}` });
   }
   // done badge(出力済)をbackendの最新状態で反映する。
   loadSessions();
@@ -1030,25 +1121,24 @@ async function upDownloadRecording(rec, btn) {
   // 通知許可は完了時の通知にしか使わないため、awaitで待つとプロンプト応答まで
   // spinner表示(btn.replaceWith)に進めず「無反応」に見える。gesture内で要求だけ行い待たない。
   ensureNotifyPermission();
-  const prog = makeProgress();
+  const prog = rowProgress("AI高画質中");
   btn.replaceWith(prog);
   try {
     const name = await upOutputRecording(rec, prog);
     finishProgress(prog);
-    notifyOutputDone(name);
+    notifyOutputDone(name, `${recName(rec)} のUp出力`);
     // done badge(Up出力済)を反映するため詳細を再描画する。
     if (currentSessionId !== null) showDetail(currentSessionId);
   } catch (err) {
     prog.replaceWith(btn);
-    showError(err);
+    showError(err, `${recName(rec)} のUp出力`);
   }
 }
 
 // Session単位のUp出力(履歴一覧の操作)。そのSessionの完了録画をすべて高画質化する。
 // 出力と同じくloopの実体はserver側のjob。
 async function upOutputSession(session, btn) {
-  await startSessionOutput(session, btn, "upscale-output", activeUpOutputs,
-    "Up出力に失敗しました。");
+  await startSessionOutput(session, btn, "upscale-output", activeUpOutputs, "Up出力", "AI高画質中");
 }
 
 function recordingActions(rec) {
@@ -1058,7 +1148,7 @@ function recordingActions(rec) {
   // Buttonを7個並べると操作列が列幅を食い、#やFile名まで折り返して読めなくなる。
   const menuItems = [];
   // 容量整理でmp4だけ消した録画は行が残る。srcを読む操作(出力・Up出力・再mp4化・
-  // 新規の文字起こし)は押しても404になるだけなので出さない。ただし保存済みの転写を
+  // 新規の文字起こし)は押しても404になるだけなので出さない。ただし保存済みの文字起こしを
   // 「見る」のはsrc不要で、行を残す意味そのものなので消してはならない。
   const hasSource = rec.file_exists !== false;
   const finished = rec.status === "completed" || rec.status === "interrupted";
@@ -1067,7 +1157,7 @@ function recordingActions(rec) {
     dl.className = "btn btn-small";
     // 出力済みでも再出力可能（活性のまま）。ラベルだけ「済」にする。
     dl.textContent = rec.has_output ? "焼き込み出力済" : "焼き込み出力";
-    dl.title = "設定でComment/Gift演出が有効な場合、焼き込み済み動画をrecordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
+    dl.title = "設定でコメント/Gift演出が有効な場合、焼き込み済み動画をrecordings folderへ出力します（再Encodeのため時間がかかります）。完了時にブラウザ通知を出します。";
     dl.addEventListener("click", () => downloadRecording(rec, dl));
     wrap.appendChild(dl);
 
@@ -1082,7 +1172,7 @@ function recordingActions(rec) {
     }
   }
 
-  // 保存済みの転写を開くのはDBだけで完結する。動画fileを消した録画でも、転写を読む
+  // 保存済みの文字起こしを開くのはDBだけで完結する。動画fileを消した録画でも、文字起こしを読む
   // 手段は残す(それが行を残す理由そのもの)。新規の文字起こしは音声が要るのでsrc必須。
   if (finished && sttConfigured && (hasSource || rec.has_transcript)) {
     const tr = document.createElement("button");
@@ -1144,7 +1234,7 @@ function recordingActions(rec) {
         await apiSend("DELETE", `/api/recordings/${rec.id}`);
         if (currentSessionId !== null) showDetail(currentSessionId);
       } catch (err) {
-        showError(err);
+        showError(err, `${recName(rec)} の削除`);
       }
     },
   });
@@ -1229,7 +1319,7 @@ function renderAiMeta(payload) {
   meta.textContent = `分析日時: ${fmtDateTime(payload.computed_at)}`
     + ` / model: ${payload.model || "-"}`
     + ` / prompt版: ${payload.prompt_version}`
-    + (payload.comment_count ? ` / ${fmtNum(payload.comment_count)}件のCommentを分析` : "");
+    + (payload.comment_count ? ` / ${fmtNum(payload.comment_count)}件のコメントを分析` : "");
 }
 
 function resetAiResult() {
@@ -1286,11 +1376,14 @@ async function runAiAnalysis(refresh) {
     renderAiMeta(payload);
     status.textContent = payload.cached
       ? "前回と同じ入力・同じmodelのため、保存済みの結果を表示しました。"
-      : `${fmtNum(payload.comment_count)}件のCommentを分析しました。`;
+      : `${fmtNum(payload.comment_count)}件のコメントを分析しました。`;
     btn.classList.add("hidden");
     rerun.classList.remove("hidden");
   } catch (err) {
+    // 数十秒待つ操作で、待つ間にmodalの別の場所を読んでいると実行中文言の差し替えは
+    // 目に入らない。成功は結果bodyが現れて明白なので、失敗だけtoastで拾う。
     status.textContent = err.message;
+    showError(err, "AIコメント分析");
   } finally {
     btn.disabled = false;
     btn.textContent = "分析する";
@@ -1413,26 +1506,61 @@ async function loadSttStatus() {
   }
 }
 
-// 文字起こし: 既にあれば表示、無ければ実行してから表示。実行中はWS進捗をbtnに反映。
+// 文字起こしをqueueへ投入し、完了まで待つ。進捗要素の代わりにbutton文言へ出すため、
+// 待受にprogは持たせない(%はWSのtranscribe_progressが、待機中の順番はjob_updateが書く)。
+function startTranscribeJob(rec, btn, failMessage) {
+  return new Promise((resolve, reject) => {
+    fetch(`/api/recordings/${rec.id}/transcribe`, { method: "POST" })
+      .then(async (res) => {
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
+        }
+        // job_idが無いと完了を待つ相手が居ない。待受を張らずに黙って待つと、押した側が
+        // 永久に「待機中…」のまま止まる。
+        if (!payload.job_id) throw new Error(failMessage);
+        jobWatchers.set(payload.job_id, {
+          resolve, reject, failMessage,
+          // GPUを1本ずつ直列に使うので、投入直後は前のjobの後ろで待つ。「0%」のまま
+          // 動かないと止まって見えるため、待機中は順番を名乗る。
+          onState: (job) => {
+            if (job.state !== "pending") return;
+            // 文言は列幅ぶんに収める。Buttonの幅は表が全行で揃えるので、実行中だけ長い
+            // 文言に差し替えると操作列が横へ広がって一覧が押し出される。
+            btn.textContent = job.queue_position
+              ? `待機 ${job.queue_position}番目`
+              : "待機中";
+          },
+        });
+      })
+      .catch(reject);
+  });
+}
+
+// 文字起こし: 既にあれば表示、無ければqueueへ積んで完了を待ってから表示。実処理はJob台帳
+// (種別「文字起こし」)で走るので、Job画面から取り消し・再実行ができる。
 async function transcribeOrShow(rec, btn) {
   const orig = btn.textContent;
+  const failMessage = "文字起こしに失敗しました。";
   btn.disabled = true;
   try {
     let res = await fetch(`/api/recordings/${rec.id}/transcript`);
     if (res.status === 404) {
-      btn.textContent = "文字起こし中… 0%";
+      btn.textContent = "待機中";
       transcribeProgress.set(rec.id, (pct) => {
-        btn.textContent = `文字起こし中… ${pct}%`;
+        btn.textContent = `字幕化 ${pct}%`;
       });
-      res = await fetch(`/api/recordings/${rec.id}/transcribe`, { method: "POST" });
+      await startTranscribeJob(rec, btn, failMessage);
+      // 文字起こしの保存はjobの完了より前に終わっている(worker側で保存→検索index→完了)。
+      res = await fetch(`/api/recordings/${rec.id}/transcript`);
     }
     const payload = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(typeof payload.detail === "string" ? payload.detail : "文字起こしに失敗しました。");
+      throw new Error(typeof payload.detail === "string" ? payload.detail : failMessage);
     }
     openTranscript(rec, payload);
   } catch (err) {
-    showError(err);
+    showError(err, `${recName(rec)} の文字起こし`);
   } finally {
     transcribeProgress.delete(rec.id);
     btn.disabled = false;
@@ -1454,7 +1582,7 @@ function openTranscript(rec, data) {
   document.getElementById("transcript-video-message").textContent = "";
   transcriptRecordingId = rec.id;
   // 同録画をRange対応endpointで配信。segmentクリックでその時刻へseekできる。
-  // 動画fileを消した録画でも転写は開ける。再生できないことはerror時に文言で伝える。
+  // 動画fileを消した録画でも文字起こしは開ける。再生できないことはerror時に文言で伝える。
   video.src = `/api/recordings/${rec.id}/play`;
   // 字幕fileの書き出し。timecodeは元録画mp4のmedia軸基準（hintに明記済み）。
   [["transcript-srt", "srt"], ["transcript-vtt", "vtt"], ["transcript-txt", "txt"]]
@@ -1462,16 +1590,27 @@ function openTranscript(rec, data) {
       const a = document.getElementById(id);
       a.href = `/api/recordings/${rec.id}/transcript/export?format=${fmt}`;
     });
-  // 時刻mapの版が現行と違うtranscriptは、書き出した字幕が動画とズレる可能性がある。
-  // 版が取れていない場合は判定できないので警告を出さない（推測で出さない）。
+  // 書き出した字幕が使い物にならない理由は2つあり、どちらも再文字起こしでしか直らない。
+  // 判定できない材料（版が取れていない等）では警告を出さない（推測で出さない）。
   const warn = document.getElementById("transcript-warn");
-  const stale = sttTimemapVersion !== null && data.timemap_version !== sttTimemapVersion;
-  warn.classList.toggle("hidden", !stale);
-  if (stale) {
-    warn.textContent =
-      `この文字起こしは古い時刻map（版 ${data.timemap_version === null || data.timemap_version === undefined ? "なし" : data.timemap_version}` +
-      ` / 現行 ${sttTimemapVersion}）で作られています。書き出した字幕の時刻が動画とズレる場合があります。` +
-      "正確な時刻が必要な場合は文字起こしをやり直してください。";
+  const reasons = [];
+  if (sttTimemapVersion !== null && data.timemap_version !== sttTimemapVersion) {
+    reasons.push(
+      `古い時刻map（版 ${data.timemap_version === null || data.timemap_version === undefined ? "なし" : data.timemap_version}` +
+      ` / 現行 ${sttTimemapVersion}）で作られているため、時刻が動画とズレる場合があります。`);
+  }
+  if (data.word_times === 0) {
+    // 語ごとの時刻が無いとcueを語の端で締められず、segmentの終端が次のsegmentの開始まで
+    // 伸びる。実測でSRTが録画の97.7%を覆う（実際の発話は約30%）ため、無音の上に関係のない
+    // 字幕が出続ける。
+    reasons.push(
+      "語ごとの時刻を持たないため、無音の区間にも字幕が出続けます" +
+      "（SRTが録画のほぼ全区間を覆います）。");
+  }
+  warn.classList.toggle("hidden", reasons.length === 0);
+  if (reasons.length) {
+    warn.textContent = "この文字起こしは" + reasons.join("また、") +
+      "文字起こしをやり直すと直ります。";
   }
   const wrap = document.getElementById("transcript-segments");
   wrap.innerHTML = "";
@@ -1588,13 +1727,19 @@ async function openUserDelete() {
   const userdelModal = document.getElementById("userdel-modal");
   userdelModal.classList.remove("hidden");
   focusModalOpen(userdelModal, document.getElementById("userdel-close"));
+  const empty = document.getElementById("userdel-empty");
   try {
     const res = await fetch("/api/streamers");
     if (!res.ok) throw new Error("配信者一覧の取得に失敗しました。");
     userdelStreamers = (await res.json()).streamers || [];
+    setListState(empty, "empty");
   } catch (err) {
+    // 取得できなかったものを「配信者がいません。」と描くと、消す相手が居ないという
+    // 別の事実の提示になる。この画面の他の一覧と同じ3状態へ揃える。
     userdelStreamers = [];
+    setListState(empty, "failed", err);
     document.getElementById("userdel-status").textContent = err.message;
+    showError(err, "配信者一覧の取得");
   }
   renderUserDelete();
 }
@@ -1675,10 +1820,14 @@ async function runUserDelete() {
     if (currentSessionId !== null) closeDetail();
     closeUserDelete();
     await Promise.all([loadSessions(), loadKpi()]);
-    // 削除完了はKPI/一覧の更新で分かるが、件数は明示しない(modalは閉じ済)。
-    void result;
+    // modalが閉じる見た目は中止と同じなので、消えた量はtoastで名乗る。取り消せない削除で
+    // 「何名ぶん・何Session消えたか」がどこにも残らないと、対象を間違えても気付けない。
+    showToast(
+      `${fmtNum(ids.length)}名の履歴を削除しました（Session ${fmtNum(result.deleted_sessions ?? 0)}件）。`,
+      null, { title: "配信者を削除" });
   } catch (err) {
     status.textContent = err.message;
+    showError(err, "配信者の削除");
     run.disabled = false;
   }
 }
@@ -1708,7 +1857,10 @@ document.getElementById("note-save").addEventListener("click", async () => {
     status.textContent = "保存しました。";
     await loadSessions();
   } catch (err) {
+    // 一覧の行内編集(noteTd)は既にshowErrorで名乗る。同じMemo保存が経路によって
+    // 失敗の出方を変えると、modal側だけ「押したのに何も起きない」に見える。
     status.textContent = err.message;
+    showError(err, `Session #${currentSessionId} のMemo保存`);
   }
 });
 
@@ -1726,20 +1878,23 @@ document.getElementById("detail-modal").addEventListener("click", (e) => {
 document.getElementById("export-csv").addEventListener("click", exportVisibleCsv);
 // 検索は1キーストロークごとにtbody全再構築が走るため~200msデバウンスする。
 // period/status/sortは離散的な選択のため即時反映でよい。
+// 検索語は1回限りの入力なので残さない(period/status/並びは次に開いた時も同じ見え方で始める)。
 let searchTimer = null;
 flt.search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(renderTable, 200);
 });
-[flt.period, flt.status].forEach((el) =>
-  el.addEventListener("input", renderTable),
-);
+bindPref(flt.period, "tictok.history.period", renderTable);
+bindPref(flt.status, "tictok.history.status", renderTable);
 flt.sort.addEventListener("input", () => {
   const preset = SESSION_SORT_PRESETS[flt.sort.value];
   // 列headerが足した選択肢を選び直しただけなら、今の並びがそのまま正。
   if (preset) sortState = { ...preset };
+  persistSort();
   renderTable();
 });
+// 並びの復元は最初のrenderTableより前。後にすると復元前の並びで一度描いてしまう。
+restoreSort();
 bindSortHeaders();
 
 function handleMessage(msg) {

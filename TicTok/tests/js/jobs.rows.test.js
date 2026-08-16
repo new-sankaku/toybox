@@ -16,10 +16,15 @@ const KIND_LABELS = {
 // bootで叩くURL。filterの初期値(状態=実行中・待機中)がそのまま載る。
 const BOOT_URL = "GET /api/jobs?state=active&kind=all&limit=200";
 
+// 取り消し・再実行が効くdomainもserverが唯一の出所(api/media_jobs.QUEUED_JOB_DOMAINS)。
+// 画面が同じ一覧を持っていた頃は、台帳へ種別が増えても画面が古いままで、実際に文字起こし
+// (stt)のjobだけbuttonが出ず、実行中の9時間jobを取り消せなかった。
+const QUEUED_KINDS = ["overlay", "upscale", "reprocess", "stt", "session_overlay"];
+
 function jobsBody(extra = {}) {
   return {
-    jobs: [], gpu: null, stt: null,
-    total: 0, limit: 200, kind_labels: KIND_LABELS, ...extra,
+    jobs: [], gpu: null, stt: null, total: 0, limit: 200,
+    kind_labels: KIND_LABELS, queued_kinds: QUEUED_KINDS, ...extra,
   };
 }
 
@@ -416,6 +421,50 @@ describe("jobs.js の行の組み立て", () => {
     });
   });
 
+  // navのtabはfilterを積まない(積むと、失敗が履歴に残っている間ずっと「失敗・中断のみ」へ
+  // 着地して人の選んだ状態filterを毎回上書きする)。隠れている失敗を名乗る口はこの画面側。
+  describe("filterで隠れている失敗の注記", () => {
+    const note = () => doc.getElementById("job-failed-note");
+    function seedBar(list) {
+      win.applyJobBar({ type: "jobs", data: list });
+    }
+
+    it("実行中・待機中で絞っている間は、隠れている失敗の件数と行き先を出す", () => {
+      seedBar([{ job_id: "1", state: "failed" }, { job_id: "2", state: "interrupted" }]);
+      setFilter({ state: "active" });
+      win.render();
+      expect(note().textContent).toContain("失敗・中断が2件");
+      expect(note().querySelector("a").getAttribute("href")).toBe("/jobs?state=failed");
+    });
+
+    it("失敗が無ければ何も出さない", () => {
+      seedBar([{ job_id: "1", state: "running" }]);
+      setFilter({ state: "active" });
+      win.render();
+      expect(note().textContent).toBe("");
+    });
+
+    it("全て・失敗のみで見ているときは出さない(一覧に出ている)", () => {
+      seedBar([{ job_id: "1", state: "failed" }]);
+      setFilter({ state: "all" });
+      win.render();
+      expect(note().textContent).toBe("");
+      setFilter({ state: "failed" });
+      win.render();
+      expect(note().textContent).toBe("");
+    });
+
+    it("種別・対象で絞っている間は出さない(その範囲の件数ではない)", () => {
+      seedBar([{ job_id: "1", state: "failed" }]);
+      setFilter({ state: "active", kind: "upscale" });
+      win.render();
+      expect(note().textContent).toBe("");
+      setFilter({ state: "active", text: "abc" });
+      win.render();
+      expect(note().textContent).toBe("");
+    });
+  });
+
   describe("列clickでの並べ替え", () => {
     const LIST = [
       { job_id: "run", state: "running", domain: "overlay", started_at: 5, queued_at: 1 },
@@ -479,12 +528,60 @@ describe("jobs.js の行の組み立て", () => {
       expect(cells[4].textContent).toBe("08/02 09:03:04");
     });
 
+    // 待機中のjobの所要をqueued_atからの経過で出していた頃は、順番待ちの時間が
+    // 「実行にかかった時間」として積み上がり、まだ1秒も動いていないjobが3時間かかった
+    // ように読めた(待機列が詰まっているのか重いjobなのかを取り違える)。
+    it("所要は実行時間だけを出す(待機中は待機の長さと名乗る)", () => {
+      // jobs.js は jsdom realm の中で動くので、そちらの Date を止める。
+      const now = 1_000_000_000;
+      const clock = vi.spyOn(win.Date, "now").mockReturnValue(now * 1000);
+      try {
+        const waiting = cellsOf({ job_id: "w", state: "pending", domain: "overlay",
+          queued_at: now - 3600 });
+        expect(waiting[5].textContent).toBe("待機 01:00:00");
+        expect(waiting[5].querySelector(".job-wait")).not.toBeNull();
+        const running = cellsOf({ job_id: "r", state: "running", domain: "overlay",
+          queued_at: now - 3600, started_at: now - 60 });
+        expect(running[5].textContent).toBe("00:01:00");
+        const done = cellsOf({ job_id: "d", state: "completed", domain: "overlay",
+          queued_at: now - 3600, started_at: now - 3000, finished_at: now - 2880 });
+        expect(done[5].textContent).toBe("00:02:00");
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    // 実行前に取り消した(始まっていないまま終わった)行は所要そのものが無い。
+    // 待機の長さを出すと、もう並んでいないjobが待ち続けているように見える。
+    it("実行されずに終わったjobの所要は空(-)", () => {
+      const now = 1_000_000_000;
+      const cells = cellsOf({ job_id: "c", state: "cancelled", domain: "overlay",
+        queued_at: now - 3600, finished_at: now });
+      expect(cells[5].textContent).toBe("-");
+    });
+
     it("投入と所要は右寄せ(num)で、headerも同じ列に合わせる", () => {
       cellsOf({ job_id: "x", state: "completed", domain: "overlay", queued_at: 1 });
       const cells = [...doc.querySelectorAll("#job-rows tr:first-child td")];
       expect([cells[4].className, cells[5].className]).toEqual(["num", "num"]);
       const heads = [...doc.querySelectorAll("#job-table thead th")];
       expect([heads[4].className, heads[5].className]).toEqual(["num", "num"]);
+    });
+
+    // 操作列。取り消せるかどうかの根拠は応答のqueued_kinds。画面に一覧を持っていた頃は
+    // 台帳へ足された種別(stt/laugh)が漏れ、実行中のjobを止める手段が画面から無かった。
+    const actionLabels = () =>
+      [...doc.querySelectorAll("#job-rows tr:first-child .row-actions button")]
+        .map((b) => b.textContent);
+
+    it("台帳のjobは実行中でも取り消せる(種別はserverの一覧で判断する)", () => {
+      cellsOf({ job_id: "x", state: "running", domain: "stt", started_at: 1 });
+      expect(actionLabels()).toEqual(["取り消し"]);
+    });
+
+    it("台帳に無い種別(容量scan等)はbuttonを出さない", () => {
+      cellsOf({ job_id: "x", state: "running", domain: "storage", started_at: 1 });
+      expect(actionLabels()).toEqual([]);
     });
 
     // 1行に切ってtooltipへ回していた頃は、肝心の失敗理由がhoverした時にしか読めず、
@@ -496,6 +593,35 @@ describe("jobs.js の行の組み立て", () => {
       const result = cells[6].firstChild;
       expect(result.className).toBe("job-result");
       expect(result.textContent).toBe(message);
+    });
+
+    // 成果物を作るjobはどれもpathを返しているのに、この列はfile名しか出しておらず
+    // 「どこに出来たのか分からない」ままだった。切り出しは配信者別の _clips へ出るうえ、
+    // rootが録画の所在で変わるので、dirまで出さないと利用者は成果物に辿り着けない。
+    it("成果物の置き場をfile名と一緒に出す", () => {
+      const cells = cellsOf({ job_id: "x", state: "completed", domain: "overlay",
+        finished_at: 1,
+        result: { filename: "a.overlay.mp4", output_path: "K:\\rec\\u\\mp4\\a.overlay.mp4" } });
+      const result = cells[6].firstChild;
+      expect(result.textContent).toContain("a.overlay.mp4");
+      expect(result.querySelector(".job-result-path").textContent).toBe("K:\\rec\\u\\mp4");
+    });
+
+    it("一括切り出しは件数と出力先dirを出す(file名は1本に定まらない)", () => {
+      const cells = cellsOf({ job_id: "x", state: "completed", domain: "clip_batch",
+        finished_at: 1,
+        result: { count: 3, output_dir: "K:\\rec\\_clips\\u" } });
+      const result = cells[6].firstChild;
+      expect(result.textContent).toContain("3件を切り出し");
+      expect(result.querySelector(".job-result-path").textContent).toBe("K:\\rec\\_clips\\u");
+    });
+
+    // 失敗理由と置き場が1つの塊になると、どちらも読めなくなる。
+    it("失敗した行にはpathを足さない", () => {
+      const cells = cellsOf({ job_id: "x", state: "failed", domain: "overlay",
+        finished_at: 1, message: "ffmpeg exited with 1",
+        result: { output_path: "K:\\rec\\u\\mp4\\a.mp4" } });
+      expect(cells[6].firstChild.querySelector(".job-result-path")).toBe(null);
     });
   });
 

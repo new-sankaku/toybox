@@ -477,16 +477,21 @@ class SessionsMixin:
                 " GROUP BY e.identity_key ORDER BY diamonds DESC, gifts DESC LIMIT 100",
                 (session_id,),
             ).fetchall()
+            # gift_id/gift_imageはicon表示のための身元。gift_nameとは1対1なので、この
+            # groupの中では代表値を1つ取れば足りる(gift_imageは古いeventでNULLになり得る
+            # ため、MAXで値のある行を拾う)。
             item_rows = self._conn.execute(
                 "SELECT identity_key AS key,"
-                " gift_name, SUM(gift_count) AS count, SUM(diamonds) AS diamonds"
+                " gift_name, SUM(gift_count) AS count, SUM(diamonds) AS diamonds,"
+                " MAX(gift_id) AS gift_id, MAX(gift_image) AS gift_image"
                 " FROM events WHERE session_id = ? AND kind = 'gift'"
                 " GROUP BY identity_key, gift_name",
                 (session_id,),
             ).fetchall()
             gift_rows = self._conn.execute(
                 "SELECT gift_name AS name, SUM(gift_count) AS count, SUM(diamonds) AS diamonds,"
-                " MAX(CASE WHEN gift_count > 0 THEN diamonds / gift_count ELSE 0 END) AS diamonds_each"
+                " MAX(CASE WHEN gift_count > 0 THEN diamonds / gift_count ELSE 0 END) AS diamonds_each,"
+                " MAX(gift_id) AS gift_id, MAX(gift_image) AS gift_image"
                 " FROM events WHERE session_id = ? AND kind = 'gift'"
                 " GROUP BY gift_name ORDER BY diamonds DESC, count DESC LIMIT 100",
                 (session_id,),
@@ -496,6 +501,8 @@ class SessionsMixin:
             items_by_user.setdefault(row["key"], {})[row["gift_name"]] = {
                 "count": row["count"] or 0,
                 "diamonds": row["diamonds"] or 0,
+                "gift_id": int(row["gift_id"] or 0),
+                "gift_image": row["gift_image"] or "",
             }
         users = []
         for row in user_rows:
@@ -514,7 +521,13 @@ class SessionsMixin:
                     "items": items_by_user.get(row["key"], {}),
                 }
             )
-        return {"users": users, "gifts": [dict(g) for g in gift_rows]}
+        gifts = []
+        for row in gift_rows:
+            gift = dict(row)
+            gift["gift_id"] = int(gift.get("gift_id") or 0)
+            gift["gift_image"] = gift.get("gift_image") or ""
+            gifts.append(gift)
+        return {"users": users, "gifts": gifts}
 
     def session_comments(self, session_id: int, limit: int) -> list:
         """Most recent comment texts for a session, for AI analysis. The text lives in
@@ -656,12 +669,17 @@ class SessionsMixin:
         return out
 
     def save_collab_windows(self, session_id: int, windows: list) -> None:
-        """コラボ(非BattleのLinkMic)接続窓を保存。Battle窓の差し引きは分析側で行う。"""
+        """コラボ(非BattleのLinkMic)接続窓を保存。Battle窓の差し引きは分析側で行う。
+
+        versionは窓を作った判定ruleの版(core.collab.COLLAB_WINDOW_VERSION)。版を持たない
+        窓は旧rule(v1)の収集物なので1として残す — 分析側が現行版だけを集計するための印で、
+        ここで現行版を打ってしまうと旧dataが新ruleを名乗る。"""
         with self._lock:
             self._conn.execute("DELETE FROM collab_windows WHERE session_id = ?", (session_id,))
             self._conn.executemany(
-                "INSERT INTO collab_windows (session_id, channel_id, start, end, guests_max, data_json)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO collab_windows"
+                " (session_id, channel_id, start, end, guests_max, version, data_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         session_id,
@@ -669,6 +687,7 @@ class SessionsMixin:
                         w["start"],
                         w.get("end"),
                         w.get("guests_max", 0) or 0,
+                        int(w.get("version") or 1),
                         json.dumps(w, ensure_ascii=False),
                     )
                     for w in windows
@@ -685,6 +704,61 @@ class SessionsMixin:
                 (session_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def coop_windows_for_session(self, session_id: int) -> dict:
+        """このsessionの「誰かと一緒に映っていた/声が乗っていた」窓(wall-clock秒)。
+
+        ``{"collab": [(start, end|None)], "battle": [(start, end|None)],
+        "collab_observed": bool}``。終端が決まっていない窓は ``end=None`` で返す
+        (収集断や進行中のBattle) — 呼び出し側が自分の窓の終わりでclipすること。
+
+        **コラボは現行rule版の窓だけ**を返す(``core.collab.COLLAB_WINDOW_VERSION``)。
+        旧rule(v1)はfinishでしか窓を閉じず、間のソロ時間を丸ごとコラボに数えていたので、
+        混ぜると単独の場面まで一緒に外れる(streamer_profileと同じ扱い)。
+
+        ``collab_observed`` は「このsessionが現行ruleでコラボを観測できた時期のものか」。
+        境目は現行ruleで最初にコラボ窓を記録したsessionの開始時刻で、それより前のsessionは
+        コラボが**無かった**のか**記録が無い**のかを区別できない。Falseの窓を「コラボ無し」
+        として扱うと、外したつもりで1秒も外れていない結果を渡すことになる。
+
+        Battleの時刻はTikTokのserver時計(battle_setting.*_ms)で、collab窓とsessionは
+        こちらの時計である。両者を同じ軸として扱うのは共演構成(_coop_summary)と同じで、
+        NTPの効いた環境では差は秒単位に収まる。
+        """
+        from tictok.core.collab import COLLAB_WINDOW_VERSION
+
+        with self._lock:
+            collab = self._conn.execute(
+                "SELECT start, end FROM collab_windows"
+                " WHERE session_id = ? AND version = ? ORDER BY start",
+                (session_id, COLLAB_WINDOW_VERSION),
+            ).fetchall()
+            battle_rows = self._conn.execute(
+                "SELECT data_json FROM battles WHERE session_id = ?", (session_id,)
+            ).fetchall()
+            since = self._conn.execute(
+                "SELECT MIN(s.started_at) AS since FROM collab_windows cw"
+                " JOIN sessions s ON s.id = cw.session_id WHERE cw.version = ?",
+                (COLLAB_WINDOW_VERSION,),
+            ).fetchone()["since"]
+            started_at = self._conn.execute(
+                "SELECT started_at FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+        battles = []
+        for row in battle_rows:
+            battle = json.loads(row["data_json"] or "{}")
+            # 中止された戦は枠として時間を使っていない(collectorも保存対象から外している)。
+            if battle.get("aborted") or battle.get("start_time") is None:
+                continue
+            battles.append((float(battle["start_time"]), battle.get("end_time")))
+        battles.sort()
+        observed = (since is not None and started_at is not None
+                    and started_at["started_at"] >= since)
+        return {
+            "collab": [(row["start"], row["end"]) for row in collab],
+            "battle": battles,
+            "collab_observed": bool(observed),
+        }
 
     def session_buckets(self, session_id: int, start: float | None = None,
                         end: float | None = None) -> list:

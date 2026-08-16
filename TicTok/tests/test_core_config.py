@@ -406,10 +406,65 @@ def test_non_conforming_stem_falls_back_to_flat_layout(tmp_root):
     assert layout.mp4_path(tmp_root, "garbage") == tmp_root / "garbage.mp4"
 
 
-def test_clips_dir_is_shared_and_excluded_from_streamer_scan(tmp_root):
+def test_clips_dir_lives_under_the_streamer_folder(tmp_root):
+    """置き場は配信者folderの下。録画(ts/mp4)と同じ階層に並べる。"""
+    assert layout.clips_dir(tmp_root, "user") == tmp_root / "user" / "_clips"
+    # 配信者が読めないときだけroot直下へ落ちる(mp4_dirと同じ決め方)。root直下の ``_clips``
+    # を配信者folderと取り違えないよう、名前は共有dirのままにしておく。
     assert layout.clips_dir(tmp_root) == tmp_root / "_clips"
-    assert layout.clips_dir(tmp_root, "user") == tmp_root / "_clips" / "user"
     assert layout.CLIPS_DIRNAME in layout.NON_STREAMER_DIRS
+
+
+def test_stills_dir_is_separate_from_the_clips_dir(tmp_root):
+    """静止画は動画と別のdirへ出す。決め方(配信者folderの下・root直下への落ち方)は同じ。"""
+    assert layout.stills_dir(tmp_root, "user") == tmp_root / "user" / "_screenshots"
+    assert layout.stills_dir(tmp_root) == tmp_root / "_screenshots"
+    assert layout.stills_dir(tmp_root, "user") != layout.clips_dir(tmp_root, "user")
+    assert layout.STILLS_DIRNAME in layout.NON_STREAMER_DIRS
+
+
+def test_iter_clip_dirs_finds_every_placement(tmp_root):
+    """走査は配信者ごとの置き場と、root直下の受け皿の両方を見る。
+
+    片方しか見ない実装は、移行の途中や規約外stemの成果物を「どこにも無い」と言う。
+    静止画の置き場も同じ理由でここが返す — 分けたのはdirだけで、一覧・移動・容量が
+    見る範囲は分けていない。"""
+    layout.clips_dir(tmp_root, "alice").mkdir(parents=True)
+    layout.clips_dir(tmp_root, "bob").mkdir(parents=True)
+    layout.clips_dir(tmp_root).mkdir(parents=True)
+    layout.stills_dir(tmp_root, "alice").mkdir(parents=True)
+    layout.stills_dir(tmp_root).mkdir(parents=True)
+    (tmp_root / "alice" / layout.MP4_DIRNAME).mkdir(parents=True)
+
+    assert set(layout.iter_clip_dirs(tmp_root)) == {
+        tmp_root / "_clips",
+        tmp_root / "_screenshots",
+        tmp_root / "alice" / "_clips",
+        tmp_root / "alice" / "_screenshots",
+        tmp_root / "bob" / "_clips",
+    }
+
+
+def test_clip_streamer_of_reads_the_placement_not_the_name(tmp_root):
+    """配信者は置き場から読む。旧規約(root直下)の実体も持ち主不明にしない。"""
+    assert layout.clip_streamer_of(
+        tmp_root, layout.clips_dir(tmp_root, "alice") / "メモ.mp4") == "alice"
+    assert layout.clip_streamer_of(
+        tmp_root, layout.stills_dir(tmp_root, "alice") / "メモ.png") == "alice"
+    assert layout.clip_streamer_of(
+        tmp_root, tmp_root / "_clips" / "bob" / "メモ.mp4") == "bob"
+    assert layout.clip_streamer_of(tmp_root, tmp_root / "_clips" / "メモ.mp4") is None
+    assert layout.clip_streamer_of(tmp_root, tmp_root / "alice" / "mp4" / "x.mp4") is None
+
+
+def test_is_clip_path_rejects_the_recordings_beside_it(tmp_root):
+    """置き場の外は扱わない。rootの下に居ることだけでは録画本体まで通ってしまう。"""
+    assert layout.is_clip_path(tmp_root, layout.clips_dir(tmp_root, "alice") / "x.mp4")
+    assert layout.is_clip_path(tmp_root, layout.stills_dir(tmp_root, "alice") / "x.png")
+    assert layout.is_clip_path(tmp_root, tmp_root / "_clips" / "x.mp4")
+    assert layout.is_clip_path(tmp_root, tmp_root / "_screenshots" / "x.png")
+    assert not layout.is_clip_path(tmp_root, tmp_root / "alice" / "mp4" / "x.mp4")
+    assert not layout.is_clip_path(tmp_root, tmp_root.parent / "x.mp4")
 
 
 def test_record_root_of_resolves_shared_root_from_nested_artifacts(tmp_root):

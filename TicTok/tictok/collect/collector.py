@@ -59,6 +59,10 @@ from TikTokLive.events import (
     UnknownEvent,
     WeeklyRankRewardEvent,
 )
+# スーパーファン加入。TikTokLive.eventsが再exportしていないためcustom_eventsから直接読む。
+# 実体はBarrageEventのうち content.key に ttlive_superFan を含むものだけで、
+# client.handle_custom_event がこの型へ振り分ける。SubscribeEvent(サブスク)とは別経路。
+from TikTokLive.events.custom_events import SuperFanEvent
 
 from TikTokLive.client.web.web_settings import WebDefaults
 
@@ -83,6 +87,7 @@ from tictok.core.battle import (
     annotate_result,
     battle_type,
 )
+from tictok.core.collab import COLLAB_WINDOW_VERSION, linkmic_state
 from tictok.core.logctx import (
     ctx_recording_id,
     ctx_session_id,
@@ -91,7 +96,7 @@ from tictok.core.logctx import (
 )
 from tictok.core.logging_setup import compress_async, progress_interval_seconds
 from tictok.collect.live_resolver import LiveResolveBlocked
-from tictok.collect.proto_dict import safe_event_to_dict
+from tictok.collect.proto_dict import safe_event_to_dict, to_plain
 from tictok.collect.sampler import EventSampler
 from tictok.collect.ttlive_compat import apply_ttlive_patches
 from tictok.record.recorder import (
@@ -383,6 +388,18 @@ _RESTRICTED_FAST_RECHECKS = 3
 # 必ず超えるため、これ以上は段数を伸ばしても結果が変わらない。
 _RESTRICTED_MAX_BACKOFF_STEPS = 12
 
+
+# 署名が通らない配信は基準間隔で粘るため、撃ち直しが何十回にもなる。opsへ残すのはこの
+# 回数ごと(1回目、11回目…)に留める。全部残すと1配信の状況説明で運用logが埋まる。
+_UNSIGNED_OPS_EVENT_EVERY = 10
+
+
+def _payload_looks_restricted(data: dict) -> bool:
+    """生room_infoが限定配信(メンバー限定/年齢制限)のpayloadかを返す。式はTikTokLive自身の
+    fetch_room_infoの判定(promptsを含む/中身が空同然ならAgeRestrictedError)に合わせる。
+    こちらだけ緩く見ると、向こうが弾くroomへ無駄なconnectを撃つことになる。"""
+    return "prompts" in data or len(data) <= 1
+
 # Grace period before resuming a recording that ended on its own while the live
 # is still connected. Lets a concurrent websocket drop surface first, so a full
 # host drop is handled once by the reconnect path rather than by a doomed resume.
@@ -609,6 +626,35 @@ STEP_LABELS = {
 }
 
 
+# 生LinkLayer captureの1 sessionあたり上限。判定ruleの答え合わせに要るのは「接続/切断が
+# いつ届いたか」の列で、1配信ぶん取れれば足りる。上限が無いと、設定を戻し忘れたまま長時間
+# 配信を掴んだ時にdiskを食い続ける(1件あたり数KB)。
+_LINKLAYER_RAW_MAX_PER_SESSION = 50000
+
+
+def _sim_group_change(rooms: list) -> Any:
+    """simulation用のgroup_change_content。実payloadと同じ入れ子で組む
+    (group_user.user[].{channel_id,status,all_user.linked_list[].link_user.{uid,room_id}})。
+    形が実物とずれると、simulationでだけ通る/落ちるcodeができる。"""
+    return SimpleNamespace(
+        group_user=SimpleNamespace(
+            user=[
+                SimpleNamespace(
+                    channel_id=room_id,
+                    status=status,
+                    all_user=SimpleNamespace(
+                        linked_list=[
+                            SimpleNamespace(
+                                link_user=SimpleNamespace(uid=uid, room_id=room_id))
+                        ]
+                    ),
+                )
+                for room_id, uid, status in rooms
+            ]
+        )
+    )
+
+
 def _empty_stats() -> dict:
     return {
         "viewers": 0,
@@ -624,6 +670,7 @@ def _empty_stats() -> dict:
         "shares": 0,
         "joins": 0,
         "subscribes": 0,
+        "super_fans": 0,
         "battles": 0,
         "battle_points": 0,
         "events_total": 0,
@@ -910,6 +957,78 @@ def _comment_signals(event: Any) -> dict:
     }
 
 
+# events.extra へ残すfield。実配信のsampleで実値を確認済みで、かつ専用の列を持たない
+# ものだけを並べる。列にしないのはkindごとに疎で意味が未確定なため — 解釈が定まった
+# ものだけ後から列へ昇格させる。ここでは解釈もlabel付けもせず生値のまま残す。
+#
+# 除外しているのは中身が定型文か内部配線のfield: signature / signature_version /
+# public_area_message_common / gift_monitor_info / m_log_id / disable_gift_tracking /
+# display_text_for_anchor / linkmic_gift_expression_strategy(表示・監査用の定型)、
+# m_gift(gift_name/gift_id/diamonds/gift_imageとして既に列にある)、
+# specified_display_text(uidごとの表示文で、userは既に列にある)。
+_EXTRA_FIELDS = {
+    "comment": ("comment_quality_scores", "input_type"),
+    # fan_ticket_count / room_fan_ticket_count は実測でどちらも「単価×repeat」= diamonds
+    # と一致した(sample 36件で例外なし)。既存列と重複するが、TikTokが送っている値その
+    # ものなので落とさない。
+    "gift": ("fan_ticket_count", "room_fan_ticket_count", "combo_count", "group_count",
+             "repeat_end", "send_type", "color_id", "match_info", "asset",
+             "sponsorship_info"),
+    # like_effect(実測941 B/件)は入れない。中身はversion/effectCnt/effectIntervalMs/level
+    # のanimation設定で、effectCntはeffect_cntと同値。現行の行数で計算すると556 MB増える
+    # のに対し、新しく分かる事実は無い。
+    "like": ("effect_cnt",),
+    "share": ("share_count",),
+    # anchor_display_text(実測3,606 B/件)も入れない。"{0:user} joined" の定型文と、
+    # その中に埋め込まれたuser(id/nickname/avatar)のcopyでできており、userは既に列にある。
+    # 現行の行数で821 MB — DBのほぼ2/3に相当する量が、全部同じ文とcopyになる。
+    "join": (),
+    # LiveEndEventはkind='system'として記録するが、載るfieldは他のsystem eventと違う。
+    # punish_infoはTikTok側が配信を止めた理由(実測 punish_reason='captcha')で、
+    # 「配信者が終えた」のか「止められた」のかを事後に分ける唯一の材料。
+    "live_end": ("punish_info", "perception_dialog_info"),
+}
+# base_message側。room単位の値なのでkindを問わず載る(実測1〜5)。fold_typeはTikTokが
+# そのmessageを折り畳んだかどうかで、意味は非公開。どちらも解釈は付けない。
+_EXTRA_BASE_FIELDS = ("room_message_heat_level", "fold_type", "anchor_fold_type")
+
+
+def _extra_payload(event: Any, kind: str) -> Optional[str]:
+    """eventのうち専用の列を持たないfieldをJSONへ畳む。1つも載っていなければNoneを
+    返す(空dictを入れると「観測したが空」に見えてしまう)。betterprotoは未設定fieldにも
+    defaultを返すため、defaultと同じ値はto_plain側で落ちる。"""
+    out: dict = {}
+    base = getattr(event, "base_message", None)
+    for name in _EXTRA_BASE_FIELDS:
+        value = to_plain(getattr(base, name, None)) if base is not None else None
+        if value not in (None, 0, "", [], {}):
+            out[name] = value
+    for name in _EXTRA_FIELDS.get(kind, ()):
+        value = to_plain(getattr(event, name, None))
+        if value not in (None, 0, "", [], {}):
+            out[name] = value
+    if not out:
+        return None
+    return json.dumps(out, ensure_ascii=False)
+
+
+def _barrage_user(event: Any) -> Any:
+    """Barrage系(SuperFan等)の主体。この系統はuser fieldを持たず、表示文のTextPiece
+    (user_value.user)にしか本人が載らない。betterprotoは未設定fieldにも空instanceを返す
+    ため、idか名前のどちらかが実際に埋まっている最初のpieceを本人として採る。1つも
+    埋まっていなければNoneを返し、身元不明のまま残す(捏造しない)。"""
+    content = getattr(event, "content", None)
+    for piece in (getattr(content, "pieces", None) or []):
+        user = getattr(getattr(piece, "user_value", None), "user", None)
+        if user is None:
+            continue
+        ident = str(getattr(user, "user_id", "") or getattr(user, "id", "") or "").strip()
+        name = str(getattr(user, "nick_name", "") or getattr(user, "unique_id", "") or "").strip()
+        if ident or name:
+            return user
+    return None
+
+
 def _identity_signals(event: Any) -> dict:
     """payload.userIdentity 由来の配信者との関係。Comment / Gift に載る。moderator除外と
     subscriber判定の正規の源。message ごと不在なら全項目 未観測(None)にする。"""
@@ -970,6 +1089,7 @@ class TikTokCollector:
         self._asset_prefetch = asset_prefetch
         self._gift_icon_tasks: set = set()
         self._badge_tasks: set = set()
+        self._peer_tasks: set = set()
         # 取得済みバッジURLのset(同一URLの再取得spam防止)。proxyのpath単位ディスク
         # キャッシュが最終的な重複排除を担うので、ここはbest-effortの軽い前段で十分。
         self._seen_badges: set = set()
@@ -1026,15 +1146,25 @@ class TikTokCollector:
         self._glove_attr: dict = {}
         self._glove_clock_warned = False
         # コラボ(非BattleのLinkMic)接続窓。channel_id -> {start, guests_max}(接続中)、
-        # finish/session終了で _collab_windows へ確定。入室コンテキスト3分類(doc §14)に使う。
+        # 切断/session終了で _collab_windows へ確定。入室コンテキスト3分類(doc §14)に使う。
+        # 開閉はtictok.core.collab.linkmic_stateのrule(v2)に従う。
         self._collab_open: dict = {}
         self._collab_windows: list = []
+        # コラボ相手の身元(user_id -> {nickname, unique_id, avatar})。LinkLayerはuser_idと
+        # room_idしか名乗らないため、相手のroom_infoを1度だけ引いて解決する。sessionを
+        # またいで持ち回る(同じ相手と何度も繋ぐので、session毎に引き直す理由が無い)。
+        self._peer_identity: dict = {}
+        # 解決を試みた相手。成否に関わらず入れる — 引けない相手(制限中の室など)へ
+        # LinkLayer eventのたびに撃ち直さないため。
+        self._peer_resolved: set = set()
         # 宝箱/Portalの実測。markerの不応期とは別に、1件ずつ残す(支出の合計が要るため)。
         # _envelope_index は envelope_id -> 行 で、同一宝箱のNEW/HIDE通知を1行へ畳む。
         self._envelopes: list = []
         self._envelope_index: dict = {}
         # 進行中sessionのbattles/collab_windowsを最後に中間永続化した時刻(定期checkpoint用)。
         self._last_checkpoint_at: float = 0.0
+        # 生LinkLayer captureの記録件数(session内)。上限で頭打ちにする。
+        self._linklayer_raw_count = 0
         self._owner_id: str = ""
         self.owner: dict = {"unique_id": unique_id, "nickname": unique_id, "avatar": "", "league": ""}
         self._apply_cached_owner()
@@ -1100,6 +1230,25 @@ class TikTokCollector:
         self._restricted_recheck_at: float = 0.0
         # 現holdで再確認を行った回数。間隔を段階的に広げるbackoffの段数。
         self._restricted_recheck_count: int = 0
+        # Room id whose websocket the sign server refuses to sign (repeated 5xx for this
+        # room while other monitors sign fine at the same moment). Retrying changes
+        # nothing, so the room is held and re-attempted on a widening backoff instead of
+        # the per-session reconnect loop. Cleared on a successful connect or room end.
+        self._unsigned_room_id: Optional[int] = None
+        # monotonic期限。これを過ぎたら署名保留中のroomへ1度だけconnectを撃ち直す。
+        self._unsigned_retry_at: float = 0.0
+        # 現holdで撃ち直した回数。間隔を段階的に広げるbackoffの段数。
+        self._unsigned_attempts: int = 0
+        # 現sessionで署名が通らなかった連続回数。一過性の障害と、そのroom固有の
+        # 署名不可とを撃った回数で見分けるためにsessionごとに数える。
+        self._sign_failures: int = 0
+        # 署名が通らないまま映像だけを録っている最中か。録画は署名を必要としないため、
+        # eventの受信不能と録画不能は別。websocketが繋がった時点で降りる。
+        self._video_only: bool = False
+        # 直近のlive判定で観測したhost profile(その時点の実測値)。sessionを開いた時点で
+        # 行へ書き、connectまで届かなかった配信でも身元が残るようにする。sessionを跨いで
+        # 持つ: 次の観測が上書きするまでが最後に判っている「今」の値。
+        self._resolved_owner = {"avatar": "", "nickname": ""}
         # Per-target preference: when False this monitor only collects data and never
         # records video (auto-record is skipped and manual recording is rejected).
         self.record_video = record_video
@@ -1134,7 +1283,38 @@ class TikTokCollector:
                 for step in STEP_IDS
             ],
             "recent_events": list(self.recent_events),
+            "collab": self.collab_snapshot(),
         }
+
+    def collab_snapshot(self) -> list:
+        """進行中のコラボ窓(未クローズ)。保存側(_collab_windows_public)は終端が決まるまで
+        窓を含めないが、こちらは「今まさに繋がっている」ことだけを伝えるので開いた窓を出す。
+
+        peersはLinkLayerのPlayerが持つ数値user_idのみ(Playerはroom_idとuidの2 fieldしか
+        持たない)。表示名/avatarはこのeventに載らないため、peer_infoへ別途解決した身元を
+        載せる ―― 出所は相手のroom_info(_resolve_peer_identities)で、解決できていない相手は
+        keyごと出さない。画面はこれと過去の対戦相手の両方から名前を決める。"""
+        return [
+            {
+                "channel_id": channel_id,
+                "start": state["start"],
+                "guests_max": state["guests_max"],
+                "peers": sorted(state.get("now_peers") or ()),
+                "peer_info": {
+                    uid: self._peer_identity[uid]
+                    for uid in sorted(state.get("now_peers") or ())
+                    if uid in self._peer_identity
+                },
+            }
+            for channel_id, state in self._collab_open.items()
+        ]
+
+    def _collab_signature(self) -> tuple:
+        """今つないでいる相手の顔ぶれ。変化したときだけ画面へstateを配るための比較値。"""
+        return tuple(
+            (channel_id, tuple(sorted(state.get("now_peers") or ())))
+            for channel_id, state in sorted(self._collab_open.items())
+        )
 
     def timeline_snapshot(self) -> dict:
         return {
@@ -1380,6 +1560,8 @@ class TikTokCollector:
     def _reset_session_data(self) -> None:
         self._reconnect_attempt = 0
         self._ever_connected = False
+        self._sign_failures = 0
+        self._video_only = False
         # _resolved_room_id is intentionally NOT cleared here: _wait_for_live_start
         # resolves it just before this runs, and _connect_once needs it to connect by
         # room id (skipping the WAF-gated HTML scrape) and to gate restricted rooms.
@@ -1423,6 +1605,8 @@ class TikTokCollector:
         self._envelopes = []
         self._envelope_index = {}
         self._last_checkpoint_at = 0.0
+        # 上限はsessionごと。持ち越すと2本目以降の配信が1行も残らない。
+        self._linklayer_raw_count = 0
         self._team_shape_logged = set()
         # 前Sessionのlistenerは_runの終了処理でstop済み。dictだけ空に戻す。
         self._opp_listeners = {}
@@ -1462,6 +1646,30 @@ class TikTokCollector:
         self._restricted_recheck_at = time.monotonic() + delay
         return delay
 
+    def _clear_unsigned_hold(self) -> None:
+        """署名保留の状態を一括で解除する。room id・再試行期限・backoff段数は必ず同時に
+        落とすこと(段数が残ると、次の別配信の再試行がいきなり上限間隔から始まる)。
+        _reset_session_dataからは呼ばない: 保留の再試行そのものがsessionを開くため、
+        session開始で落とすと段数が毎回0に戻り、間隔が広がらない。"""
+        self._unsigned_room_id = None
+        self._unsigned_retry_at = 0.0
+        self._unsigned_attempts = 0
+
+    def _arm_unsigned_retry(self, room_id: Optional[int]) -> int:
+        """署名が通らなかったroomを保留し、次にconnectを撃ち直すまでの秒数を返す。
+
+        間隔は基準間隔のまま広げない。この保留に入るのは「録画できる見込みが残っている」
+        配信だけで(限定配信と判ったものは制限holdへ回す)、間隔を広げるとその分だけ配信の
+        頭を落とす。撃ち直しが実るのは配信中のどの瞬間かも判らないため、粘る側に倒す。
+        roomが変われば回数は0から数え直す。"""
+        if room_id != self._unsigned_room_id:
+            self._unsigned_room_id = room_id
+            self._unsigned_attempts = 0
+        delay = self._settings.get("restricted_recheck_interval")
+        self._unsigned_attempts += 1
+        self._unsigned_retry_at = time.monotonic() + delay
+        return delay
+
     def _prepare_session(self) -> None:
         self._reset_session_data()
         self.steps = {step: "pending" for step in STEP_IDS}
@@ -1470,6 +1678,7 @@ class TikTokCollector:
         self.steps["websocket"] = "active"
         self.state = STATE_CONNECTING
         self.session_id = self._storage.create_session(self.unique_id, self._bucket_seconds)
+        self._persist_resolved_owner()
         self._client = self._build_client(self.unique_id)
         # session_id を束ねるのは _run のループ本体で、この行はその外側(直前)に居る。
         # 「どのsessionが起きたか」が最初に確定する行なので、ここだけ明示的に束ねる。
@@ -1481,6 +1690,30 @@ class TikTokCollector:
                 detail={"room_id": self._resolved_room_id,
                         "bucket_seconds": self._bucket_seconds,
                         "record_video": self.record_video},
+            )
+
+    def _persist_resolved_owner(self) -> None:
+        """開いたばかりのsession行へ、直前のlive判定で観測した身元(アイコン/表示名)を書く。
+
+        owner_avatarはこれまでconnect後のroom_infoからしか書かれず、connectへ届かなかった
+        配信(署名が通らない・制限)の行は身元が空のまま残り、履歴で頭文字の円盤になっていた。
+        書くのは他sessionから借りた値ではなく、このsessionを開く直前に実際に観測した値なので、
+        「過去sessionは当時の身元で表示する」方針は崩れない。接続できればroom_infoが上書きする。"""
+        if self.session_id is None:
+            return
+        avatar = self._resolved_owner.get("avatar") or ""
+        nickname = self._resolved_owner.get("nickname") or ""
+        if not avatar and not nickname:
+            return
+        try:
+            self._storage.update_session_owner(self.session_id, nickname, avatar)
+        except Exception:
+            # 身元は表示のためだけの情報。書けなくても収集は続ける(頭文字表示に留まる)。
+            logger.warning(
+                "session %s へ解決済みの配信者の身元を書けませんでした。この行は表示名/"
+                "アイコンが空のまま残ります", self.session_id, exc_info=True,
+                extra={"event": "collector.resolved_owner_persist_failed",
+                       "ctx": {"room_id": self._resolved_room_id}},
             )
 
     async def start(self) -> None:
@@ -1573,6 +1806,15 @@ class TikTokCollector:
                     and await self._restricted_hold_continues()
                 ):
                     continue
+                # 署名が通らないroomも同じく撃ち直しても結果が変わらない。ただし制限と違い
+                # 未署名GETでは見分けられない(room_info自体は正常に返る)ので、期限が来たら
+                # 保留を素通りさせ、connectを1度だけ撃って結果で判断する。
+                if (
+                    self._resolved_room_id is not None
+                    and self._resolved_room_id == self._unsigned_room_id
+                    and time.monotonic() < self._unsigned_retry_at
+                ):
+                    continue
                 self._prepare_session()
                 # session scopeはループ本体で持つ。_persist_final が self.session_id を
                 # Noneに落とすので、with の終端はその**後**に置くこと(先に抜けると
@@ -1611,6 +1853,9 @@ class TikTokCollector:
             # The empty session row is kept and finalized as "restricted" rather
             # than deleted: deleting it left an unexplained gap in the history id
             # sequence. Aggregations exclude the status, so it costs no statistics.
+            # 署名の保留から回ってきた場合、そのroomは限定配信と判った。保留を2つ抱えると
+            # 待ち方が2重になるので、こちらへ寄せる。
+            self._clear_unsigned_hold()
             self._restricted_room_id = self._resolved_room_id
             self._restricted_recheck_count = 0
             recheck_seconds = self._arm_restricted_recheck()
@@ -1625,6 +1870,28 @@ class TikTokCollector:
                 detail={"room_id": self._resolved_room_id,
                         "recheck_seconds": recheck_seconds},
             )
+            return "continue"
+        if outcome == "unsigned":
+            # roomは生きている(限定配信のpayloadではない)のに署名だけが通らない。原因を
+            # 断定できないので名乗りは観測どおりに留め、間隔は広げずに撃ち直す。空行は
+            # 同じroomの1本へ畳むので、粘っても履歴は伸びない。
+            retry_seconds = self._arm_unsigned_retry(self._resolved_room_id)
+            self.state = STATE_RESTRICTED
+            self._mark_session_restricted()
+            await self._notify_state()
+            # 基準間隔で粘る以上、毎回opsへ書くと1配信で数十〜数百行になる。状況が変わった
+            # 最初の1回と、長引いていることが判る間隔だけ残す(logには毎回残る)。
+            if self._unsigned_attempts % _UNSIGNED_OPS_EVENT_EVERY == 1:
+                self._storage.record_ops_event(
+                    logger, "session.unsigned",
+                    f"配信の署名が通らないため録画できません（room {self._resolved_room_id}、"
+                    f"{self._unsigned_attempts}回目）。{retry_seconds}秒ごとに撃ち直しています",
+                    severity=OPS_WARNING,
+                    detail={"room_id": self._resolved_room_id,
+                            "sign_failures": self._sign_failures,
+                            "attempt": self._unsigned_attempts,
+                            "retry_seconds": retry_seconds},
+                )
             return "continue"
         self._persist_final()
         await self._notify_state()
@@ -1643,6 +1910,12 @@ class TikTokCollector:
             raise RuntimeError("録画は配信に接続中のみ開始できます。")
         if self.recorder is not None and self.recorder.is_active:
             raise RuntimeError("既に録画中です。")
+        await self._start_recorder()
+
+    async def _start_recorder(self) -> None:
+        """room_infoのstream URLで録画を始める。呼ぶ前に可否(動画保存ON・重複なし)を
+        確かめること。event websocketには依存しない — 映像のURLは署名不要のroom_infoから
+        取れるので、署名が通らない配信でも映像だけは録れる(_begin_video_only)。"""
         url, quality = extract_stream_url(self._room_info)
         if not url:
             logger.warning(
@@ -1701,6 +1974,65 @@ class TikTokCollector:
         self._add_conn_marker("record", "録画開始")
         await self._record("system", {"text": f"録画を開始しました（quality: {recorder.quality}）。"})
         await self._notify_state()
+
+    def _video_only_active(self) -> bool:
+        """eventのwebsocketが繋がらないまま映像だけ録っている最中ならTrue。"""
+        return self._video_only and self.recorder is not None and self.recorder.is_active
+
+    async def _begin_video_only(self, payload: Optional[dict]) -> bool:
+        """署名が通らない配信の映像だけを先に録り始める。始められたらTrue。
+
+        録画は署名を必要としない。映像のURLは署名不要のroom_infoに入っていて、ffmpegが
+        直接引く。署名が要るのはコメント・ギフトのwebsocketだけなので、「署名が通らない
+        から録画もしない」は繋げる必要のない2つを繋いでいた。ここで映像を確保しておけば、
+        署名が後から通ったときに同じsession・同じ録画へeventが合流する。"""
+        if self.session_id is None or not payload:
+            return False
+        if self.recorder is not None and self.recorder.is_active:
+            return True
+        if not self.record_video or not self._settings.get("auto_record"):
+            return False
+        if not ffmpeg_available():
+            return False
+        url, _quality = extract_stream_url(payload)
+        if not url:
+            return False
+        self._room_info = payload
+        if self._resolved_room_id is not None:
+            self.room_id = self._resolved_room_id
+            self._storage.update_session(self.session_id, self.state, self.room_id)
+        self._video_only = True
+        try:
+            await self._start_recorder()
+        except Exception:
+            self._video_only = False
+            logger.warning(
+                "署名が通らない配信の映像のみ録画を開始できませんでした。この配信は"
+                "録画されません", exc_info=True,
+                extra={"event": "collector.video_only_start_failed",
+                       "ctx": {"room_id": self._resolved_room_id}},
+            )
+            return False
+        self._persist_live_create_time()
+        self._add_conn_marker("video_only", "映像のみ")
+        self.error_message = (
+            "署名が通らないためコメント・ギフトを受信できていません（映像のみ録画中、"
+            "署名が通り次第このsessionへ合流します）。"
+        )
+        self._storage.record_ops_event(
+            logger, "session.video_only",
+            f"署名が通らないため映像のみ録画を開始しました（room {self._resolved_room_id}）。"
+            f"コメント・ギフトは署名が通るまで記録されません",
+            severity=OPS_WARNING,
+            detail={"room_id": self._resolved_room_id,
+                    "sign_failures": self._sign_failures},
+        )
+        await self._record(
+            "system",
+            {"text": "署名が通らないため映像のみ録画を開始しました。"
+                     "コメント・ギフトは署名が通るまで記録されません。"},
+        )
+        return True
 
     async def stop_recording(self) -> None:
         if self.recorder is None or not self.recorder.is_active:
@@ -1803,7 +2135,7 @@ class TikTokCollector:
 
         検索hitもplayer下段のcomment panelも search_hits しか読まず、eventsを直接は見ない。
         その search_hits を作る経路が起動時のbackfill(backfill_search_index)だけだったため、
-        server稼働中に始まって終わった録画は次の再起動までcommentが1件も出なかった。転写側は
+        server稼働中に始まって終わった録画は次の再起動までcommentが1件も出なかった。文字起こし側は
         STT完了時に index_transcript を呼ぶので、commentだけが取り残されていた。
 
         対象を completed に限るのは起動時backfillと同じ規則にするため。素材の検証に落ちた録画は
@@ -1835,9 +2167,11 @@ class TikTokCollector:
 
     async def _announce_waiting(self) -> None:
         # Hold the "restricted" status while a known members-only / age-restricted
-        # broadcast is still up; otherwise announce ordinary waiting. Both keep
-        # polling for a (new) normal broadcast on the same cadence.
-        self.state = STATE_RESTRICTED if self._restricted_room_id is not None else STATE_WAITING
+        # broadcast is still up, or while a room the sign server will not sign is up;
+        # otherwise announce ordinary waiting. Both keep polling for a (new) normal
+        # broadcast on the same cadence.
+        unrecordable = self._restricted_room_id is not None or self._unsigned_room_id is not None
+        self.state = STATE_RESTRICTED if unrecordable else STATE_WAITING
         self.steps = {step: "pending" for step in STEP_IDS}
         self.steps["request"] = "done"
         self.steps["live_check"] = "active"
@@ -1852,7 +2186,8 @@ class TikTokCollector:
             extra={"event": "collector.live_wait_started",
                    "ctx": {"state": self.state,
                            "live_check_interval_seconds": self._settings.get("live_check_interval"),
-                           "restricted_room_id": self._restricted_room_id}},
+                           "restricted_room_id": self._restricted_room_id,
+                           "unsigned_room_id": self._unsigned_room_id}},
         )
 
     def _log_still_waiting(self, failures: int) -> None:
@@ -1911,6 +2246,19 @@ class TikTokCollector:
                                        "reason": "resolved_offline"}},
                     )
                     self._clear_restricted_hold()
+                    waiting_announced = False
+                # 署名保留も同じく、その配信が終わった時点で意味を失う。次の配信は別の
+                # room idで来るので、保留を残すと次の1回を無駄に待たせる。
+                if self._unsigned_room_id is not None:
+                    logger.info(
+                        "room %s の配信が終了しました。署名の保留を解除します",
+                        self._unsigned_room_id,
+                        extra={"event": "collector.unsigned_hold_released",
+                               "ctx": {"room_id": self._unsigned_room_id,
+                                       "attempts": self._unsigned_attempts,
+                                       "reason": "resolved_offline"}},
+                    )
+                    self._clear_unsigned_hold()
                     waiting_announced = False
             except UserNotFoundError:
                 # A missing LiveRoom module is NOT a reliable permanent signal: it
@@ -1992,6 +2340,13 @@ class TikTokCollector:
         snapshotをpushする。live接続後はより確実なroom_infoが上書きする。"""
         if resolution is None:
             return
+        # 直近のlive判定で「今」観測したhost profile。sessionを開いた時点の身元として
+        # session行へ書く根拠になる(_apply_cached_ownerが借りてくる他sessionの値とは別物で、
+        # こちらはその時点の観測なのでpoint-in-timeを崩さない)。
+        if resolution.avatar:
+            self._resolved_owner["avatar"] = resolution.avatar
+        if resolution.nickname:
+            self._resolved_owner["nickname"] = resolution.nickname
         changed = False
         avatar = resolution.avatar or ""
         if avatar and self.owner.get("avatar") != avatar:
@@ -2033,11 +2388,39 @@ class TikTokCollector:
     async def _session_loop(self) -> str:
         while True:
             outcome, reason = await self._connect_once()
+            if outcome == "unsigned":
+                # 既に映像を録っているなら診断は済んでいる。撃ち直しのたびに引き直すと、
+                # 配信の間ずっと同じ観測logを出し続けることになる。
+                if not self._video_only_active():
+                    # 署名の応答からは理由が判らない。署名を使わない生room_infoで1度だけ
+                    # 観測し、限定配信なら諦め(制限hold)、そうでなければ映像だけ先に録る。
+                    verdict, payload = await self._diagnose_unsigned_room(self._resolved_room_id)
+                    if verdict == "restricted":
+                        return "restricted"
+                    if not await self._begin_video_only(payload):
+                        return "unsigned"
+                # 映像は録れている。sessionを畳まずに署名の撃ち直しを続け、通れば同じ
+                # session・同じ録画へeventが合流する。
+                outcome, reason = "transient", f"{reason}（映像のみ録画中）"
             if outcome != "transient":
                 return outcome
             result = await self._wait_for_reconnect(reason)
             if result != "retry":
                 return result
+
+    def _sign_blocked(self) -> bool:
+        """今の署名失敗を「このroomを署名できない」と見なすならTrue。2つ課す:
+
+        - このsessionで一度も接続できていないこと。接続後の切断からの再接続が署名で弾かれる
+          のは本物の一時障害でも起こるため、そこで打ち切ると配信中の録画を余計に待たせる。
+        - 同じroomで規定回数続けて弾かれたこと。既に署名不可として保留中のroomなら1回で足りる
+          (保留の撃ち直しが同じ結果を返しただけなので、待ち時間を広げて下がるだけでよい)。
+        """
+        if self._ever_connected:
+            return False
+        if self._resolved_room_id is not None and self._resolved_room_id == self._unsigned_room_id:
+            return True
+        return self._sign_failures >= self._settings.get("sign_block_attempts")
 
     async def _restricted_hold_continues(self) -> bool:
         """制限holdを続けるならTrue。期限が来るたびroom_infoを1度だけ撃ち直し、間隔は
@@ -2071,29 +2454,64 @@ class TikTokCollector:
         self._clear_restricted_hold()
         return False
 
-    async def _restriction_lifted(self) -> bool:
-        """holdしているroomのroom_infoを1度だけ引き、実payloadが返るようになったかを返す。
-        判定はTikTokLibのfetch_room_info自身の制限判定(promptsを含む/中身が空同然なら
-        AgeRestrictedError)と同じ式にして、こちらだけ緩く見て無駄なconnectを撃たない。
-        probe gateを通し、失敗時は「まだ制限中」とみなす(確認できない状態でconnectを
-        撃つとholdの意味が無くなるため)。"""
-        room_id = self._restricted_room_id
+    async def _fetch_room_payload(self, room_id: Optional[int]) -> Optional[dict]:
+        """署名を消費せずroom_infoの生payloadを1度だけ引く(web.getは既定sign_url=False)。
+        取得できなければNone。制限の再確認も署名不能roomの診断もこの1つの観測から導く。
+        probe gateを通すので、live checkと同じ流量制御に乗る。"""
         if self._client is None or room_id is None:
-            return False
+            return None
         try:
             await self._probe_gate.acquire()
             url = WebDefaults.tiktok_webcast_url + "/room/info/"
             resp = await self._client.web.get(url=url, extra_params={"room_id": str(room_id)})
-            data = (resp.json() or {}).get("data", {}) or {}
+            return (resp.json() or {}).get("data", {}) or {}
         except Exception:
             logger.warning(
-                "room %s の制限の再確認に失敗しました。制限が続いているものとして扱います",
-                room_id, exc_info=True,
-                extra={"event": "collector.restriction_recheck_failed",
+                "room %s の生room_infoを取得できませんでした", room_id, exc_info=True,
+                extra={"event": "collector.room_payload_failed",
                        "ctx": {"room_id": room_id}},
             )
+            return None
+
+    async def _restriction_lifted(self) -> bool:
+        """holdしているroomのroom_infoを1度だけ引き、実payloadが返るようになったかを返す。
+        判定はTikTokLibのfetch_room_info自身の制限判定(promptsを含む/中身が空同然なら
+        AgeRestrictedError)と同じ式にして、こちらだけ緩く見て無駄なconnectを撃たない。
+        取得できなければ「まだ制限中」とみなす(確認できない状態でconnectを撃つとholdの
+        意味が無くなるため)。"""
+        data = await self._fetch_room_payload(self._restricted_room_id)
+        if data is None:
             return False
-        return "prompts" not in data and len(data) > 1
+        return not _payload_looks_restricted(data)
+
+    async def _diagnose_unsigned_room(self, room_id: Optional[int]) -> tuple:
+        """署名が通らなかったroomを署名無しで1度観測し、次にどう粘るかを決める。
+
+        返すのは (判定, 観測したpayload)。判定は
+        "restricted"(限定配信のpayload = 撃ち直しても録画できない) か
+        "recordable"(通常のpayload = まだ録画できる見込みがある)。観測できなければ
+        録画できる側に倒す — 判らないことを理由に諦めると、録れたはずの配信を落とす。
+
+        映像のstream URLが取れるかも併せて残す。録画に必要なのはroom_info(署名不要)で
+        あって署名ではないため、「署名だけが通らない配信を映像だけ録る」判断の材料になる。
+        観測したpayloadはそのまま返す — 録画を始めるのに同じものを引き直さないため。"""
+        data = await self._fetch_room_payload(room_id)
+        if data is None:
+            return "recordable", None
+        restricted = _payload_looks_restricted(data)
+        stream_url, quality = extract_stream_url(data)
+        logger.warning(
+            "署名が通らないroom %s を署名無しで観測しました: 限定配信payload=%s / "
+            "映像URL=%s（画質 %s）",
+            room_id, restricted, bool(stream_url), quality or "不明",
+            extra={"event": "collector.sign_blocked_probe",
+                   "ctx": {"room_id": room_id,
+                           "restricted_payload": restricted,
+                           "has_stream_url": bool(stream_url),
+                           "quality": quality,
+                           "payload_keys": sorted(data)[:40]}},
+        )
+        return ("restricted" if restricted else "recordable"), data
 
     def _mark_session_restricted(self) -> None:
         """Finalize the empty session row created for a broadcast that turned out to be
@@ -2175,6 +2593,8 @@ class TikTokCollector:
             int((time.time() - connected_at) * 1000) if connected_at else None
         )
         try:
+            # 繋いだまま配信が終わった窓を、この時刻で閉じてから永続化する(closed_by=session_end)。
+            self._close_open_collab_windows(time.time())
             # battles/collab_windowsはfinalize_sessionより先に永続化する。finalize_session末尾の
             # 全体解析cache計算(_refresh_session_analytics_locked)がこの2表を読むため、後だと
             # 空集合でcacheが焼き付き、確定sessionのBattle率/glove crit率/join_context帰属が
@@ -2301,11 +2721,36 @@ class TikTokCollector:
             # 外部にある一時障害なのでStack Traceは調査の空振りにしかならない。1行に落とす。
             outage = sign_server_outage(exc)
             if outage is not None:
+                self._sign_failures += 1
+                if self._sign_blocked():
+                    # 実測: 同一roomだけが数十分に渡り500を返し続ける一方、同じ時刻に別の
+                    # 監視対象は同じsign serverで再接続に成功していた。sign server全体の
+                    # 障害ではなくそのroomを署名できない状態なので、撃ち直しても結果は
+                    # 変わらない。session内の再接続loop(既定100回)を打ち切り、roomごとの
+                    # 保留へ移して間隔を広げながら撃ち直す。
+                    logger.warning(
+                        "room %s の署名が%d回続けて通らずLIVE接続できません（%s）。"
+                        "同時刻に他の監視が署名できていればsign server全体の障害ではなく"
+                        "このroom固有です。再接続を打ち切り、間隔を広げて撃ち直します",
+                        self._resolved_room_id, self._sign_failures, outage["reason"],
+                        extra={"event": "collector.sign_blocked",
+                               "ctx": {"exc_type": type(exc).__name__,
+                                       "room_id": self._resolved_room_id,
+                                       "sign_failures": self._sign_failures,
+                                       "ever_connected": self._ever_connected,
+                                       **outage["ctx"]}},
+                    )
+                    self.error_message = (
+                        "配信の署名が通らないため接続できません（通常配信の開始を監視継続中）。"
+                    )
+                    return ("unsigned", f"署名が通りません（{outage['reason']}）")
                 logger.warning(
                     "Sign serverの一時障害でLIVE接続に失敗しました（%s）。再接続します。"
                     "外部service側の問題のため対処不要です", outage["reason"],
                     extra={"event": "collector.sign_unavailable",
-                           "ctx": {"exc_type": type(exc).__name__, **outage["ctx"]}},
+                           "ctx": {"exc_type": type(exc).__name__,
+                                   "sign_failures": self._sign_failures,
+                                   **outage["ctx"]}},
                 )
                 return ("transient", f"Sign serverの一時障害です（{outage['reason']}）。再接続します")
             logger.warning(
@@ -2578,7 +3023,10 @@ class TikTokCollector:
             return "stopped"
         max_attempts = self._settings.get("reconnect_max_attempts")
         self._reconnect_attempt += 1
-        if self._reconnect_attempt > max_attempts:
+        # 映像を録っている間は試行回数で打ち切らない。ここで終わらせると、まだ続いている
+        # 配信の録画をこちらから止めることになる。配信が終わればofflineの再解決
+        # (_broadcast_ended_during_reconnect)がsessionを閉じる。
+        if self._reconnect_attempt > max_attempts and not self._video_only_active():
             # Reconnect targets the broadcast's webcast WebSocket, and each attempt
             # also spends one EulerStream sign request. A sign-server rate limit or a
             # prolonged host network drop is transient, so terminating the monitor
@@ -2624,12 +3072,15 @@ class TikTokCollector:
                            "reason": reason}},
         )
         await self._notify_state()
-        await self._record(
-            "system",
-            {
-                "text": f"再接続します ({self._reconnect_attempt}/{max_attempts}回目、{delay:.0f}秒後)。原因: {reason}"
-            },
-        )
+        # 映像のみ録画中の撃ち直しは配信が終わるまで続くため、毎回eventへ書くと1配信で
+        # 数百行になり、後から合流した本物のコメントが埋もれる。間隔を空けて残す。
+        if not self._video_only_active() or self._reconnect_attempt % _UNSIGNED_OPS_EVENT_EVERY == 1:
+            await self._record(
+                "system",
+                {
+                    "text": f"再接続します ({self._reconnect_attempt}/{max_attempts}回目、{delay:.0f}秒後)。原因: {reason}"
+                },
+            )
         await asyncio.sleep(delay)
         if self._stop_requested:
             self.state = STATE_DISCONNECTED
@@ -2717,6 +3168,7 @@ class TikTokCollector:
         client.add_listener(ShareEvent, self._on_share)
         client.add_listener(JoinEvent, self._on_join)
         client.add_listener(SubscribeEvent, self._on_subscribe)
+        client.add_listener(SuperFanEvent, self._on_super_fan)
         client.add_listener(RoomUserSeqEvent, self._on_room_user)
         client.add_listener(LinkMicBattleEvent, self._on_battle)
         client.add_listener(LinkMicArmiesEvent, self._on_armies)
@@ -2759,6 +3211,7 @@ class TikTokCollector:
             ("ShareEvent", ShareEvent),
             ("JoinEvent", JoinEvent),
             ("SubscribeEvent", SubscribeEvent),
+            ("SuperFanEvent", SuperFanEvent),
             ("RoomUserSeqEvent", RoomUserSeqEvent),
             ("LinkMicBattleEvent", LinkMicBattleEvent),
             ("LinkMicArmiesEvent", LinkMicArmiesEvent),
@@ -2869,6 +3322,50 @@ class TikTokCollector:
             payload = event
         self._scan_league(f"event:{name}", payload)
 
+    def _capture_linklayer_raw(self, event: Any) -> None:
+        """LinkLayerEventを**重複除外なしで全件**、時刻つきに落とす診断用capture。
+
+        コラボ判定(core.collab)が実配信の届き方と合っているかは、shape重複除外つきの
+        通常samplerでは確かめられない — 接続/切断が「いつ届いたか」の列が要るためである。
+        録画と突き合わせて判定ruleを答え合わせするための素材で、既定OFF。
+        """
+        # _samplerと同じく実API mode専用(simulationの擬似eventを貯めても検証にならない)。
+        if self._sampler is None or not self._settings.get("linklayer_raw_capture"):
+            return
+        if self._linklayer_raw_count >= _LINKLAYER_RAW_MAX_PER_SESSION:
+            return
+        try:
+            path = Path(get_sample_dir()) / "raw" / f"LinkLayerEvent_{self.session_id}.jsonl"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            record = {
+                "t": time.time(),
+                "session_id": self.session_id,
+                "unique_id": self.unique_id,
+                "owner_id": self._owner_id,
+                "room_id": self.room_id,
+                "payload": safe_event_to_dict(event),
+            }
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+            self._linklayer_raw_count += 1
+            if self._linklayer_raw_count >= _LINKLAYER_RAW_MAX_PER_SESSION:
+                logger.info(
+                    "LinkLayerEventの生captureが上限 %d 件に達しました。この配信ではこれ以上"
+                    "記録しません（%s）",
+                    _LINKLAYER_RAW_MAX_PER_SESSION, path,
+                    extra={"event": "collector.linklayer_raw_capped",
+                           "ctx": {"path": str(path),
+                                   "max": _LINKLAYER_RAW_MAX_PER_SESSION}},
+                )
+        except Exception:
+            # 診断用の任意機能。収集本流は止めないが、貯まらない理由が判らなくなるので
+            # 無音にはしない。
+            logger.warning(
+                "LinkLayerEventの生captureに失敗しました。この1件は記録されません",
+                exc_info=True,
+                extra={"event": "collector.linklayer_raw_failed", "ctx": {}},
+            )
+
     def _capture_sample(self, kind: str, event: Any) -> None:
         """実配信サンプラーへ1件渡す。設定OFF / simulation / 未生成時は何もしない。
         識別のためsession/unique_idを付与する。best-effortで本流は止めない。"""
@@ -2889,6 +3386,31 @@ class TikTokCollector:
         self._reconnect_attempt = 0
         # We reached a recordable broadcast; any prior restriction hold no longer applies.
         self._clear_restricted_hold()
+        # 署名が通ったroomは保留する理由が無い。撃ち直しが実って繋がった場合もここを通る。
+        if self._unsigned_room_id is not None:
+            logger.info(
+                "room %s の署名が通り接続できました（撃ち直し%d回のあと）。保留を解除します",
+                self._unsigned_room_id, self._unsigned_attempts,
+                extra={"event": "collector.unsigned_hold_released",
+                       "ctx": {"room_id": self._unsigned_room_id,
+                               "attempts": self._unsigned_attempts,
+                               "reason": "connected"}},
+            )
+            self._clear_unsigned_hold()
+        self._sign_failures = 0
+        if self._video_only:
+            # 映像だけ録っていた録画へ、ここからeventが合流する。録画は続いているので
+            # 撮り直さない(録画を止めると映像が2本に割れ、焼き込みの窓も分かれる)。
+            self._video_only = False
+            self._add_conn_marker("event_attach", "コメント受信開始")
+            self.error_message = None
+            self._storage.record_ops_event(
+                logger, "session.video_only_attached",
+                "署名が通りコメント・ギフトの受信を開始しました（映像は先行して録画済み。"
+                "それ以前の区間にコメントはありません）",
+                severity=OPS_INFO,
+                detail={"room_id": self._resolved_room_id},
+            )
         self.state = STATE_CONNECTED
         self.steps["live_check"] = "done"
         self.steps["websocket"] = "done"
@@ -2958,6 +3480,14 @@ class TikTokCollector:
                            "ctx": {"room_id": self.room_id}},
                 )
                 await self._resume_recording()
+        elif self.recorder is not None and self.recorder.is_active:
+            # 署名が通る前に始めた映像のみ録画が走っている。撮り直さない。
+            logger.info(
+                "先行して始めた録画が続いています。eventはこの録画へ合流します",
+                extra={"event": "collector.recording_kept_on_attach",
+                       "ctx": {"room_id": self.room_id,
+                               "recording_id": self.recorder.recording_id}},
+            )
         elif self.record_video and self._settings.get("auto_record") and ffmpeg_available():
             try:
                 await self.start_recording()
@@ -3288,21 +3818,30 @@ class TikTokCollector:
             str(getattr(extra, "source", "") or "").strip()
             if _on_wire(extra) else ""
         ) or SOURCE_UNKNOWN
+        # TikTok側が止めた場合の理由。source と違い、違反による停止のときだけ載る。
+        punish = getattr(event, "punish_info", None)
+        punish_reason = (
+            str(getattr(punish, "punish_reason", "") or "").strip()
+            if _on_wire(punish) else ""
+        )
         logger.info(
             "TikTokから配信終了の通知を受けました",
             extra={"event": "collector.live_ended",
                    "ctx": {"reason": "live_end_event", "room_id": self.room_id,
                            "end_source": source,
+                           "punish_reason": punish_reason,
                            "recording_active": bool(
                                self.recorder is not None and self.recorder.is_active
                            )}},
         )
         self._storage.record_ops_event(
             logger, "collector.live_ended",
-            f"配信が終了しました（room {self.room_id}、検知元: {source}）",
+            f"配信が終了しました（room {self.room_id}、検知元: {source}）"
+            + (f"｜TikTok側が停止: {punish_reason}" if punish_reason else ""),
             severity=OPS_INFO,
             detail={"room_id": self.room_id,
                     "end_source": source,
+                    "punish_reason": punish_reason,
                     "state": self.state,
                     "recording_desired": self._recording_desired,
                     "recording_active": bool(
@@ -3311,8 +3850,33 @@ class TikTokCollector:
         )
         self.state = STATE_ENDED
         self._add_conn_marker("live_end", "LIVE終了")
-        await self._record("system", {"text": "LIVE配信が終了しました。"})
+        await self._record(
+            "system",
+            {"text": "LIVE配信が終了しました。", "extra": _extra_payload(event, "live_end")},
+        )
         await self._notify_state()
+
+    # LinkMicBattle / LinkMicArmies が運んでいるのに読んでいなかったfield。battlesの
+    # data_json へ生値のまま残す(列を増やさないのは、data_jsonが元々このrecordの器で、
+    # _battle_public が rec をそのまま展開するため)。
+    #
+    # battle_result / team_battle_result は**TikTok側が確定させた勝敗と最終score**で、
+    # 自前で追っている own_score / opp_score / result とは別の源。両方残しておけば後から
+    # 突き合わせられる。ここでは照合も上書きもしない(自前判定を静かに書き換えない)。
+    _BATTLE_EXTRA_FIELDS = ("battle_result", "team_battle_result", "battle_combos",
+                            "action_by_user_id")
+    # armies側。trigger_reasonはscore更新の理由(TRIGGER_REASON_BATTLE_END等)、
+    # score_update_timeはTikTok側のscore時刻(こちらは受信時刻しか持っていない)、
+    # battle_settingsはchannel_idを含む(LinkMic channelとBattleを結ぶ唯一の値)。
+    _ARMIES_EXTRA_FIELDS = ("trigger_reason", "score_update_time", "battle_settings")
+
+    def _capture_battle_extras(self, rec: dict, event: Any, fields=None) -> None:
+        """eventの未使用fieldをbattle recordへ写す。届かなかった回で既存の値を消さない
+        よう、値のあるfieldだけ上書きする(armiesは同じbattleへ何度も届く)。"""
+        for name in (fields or self._BATTLE_EXTRA_FIELDS):
+            value = to_plain(getattr(event, name, None))
+            if value not in (None, 0, "", [], {}):
+                rec[name] = value
 
     def _battle_record(self, battle_id: int) -> dict:
         rec = self._battles.get(battle_id)
@@ -3341,6 +3905,8 @@ class TikTokCollector:
                 # グローブ窓中に自陣へ入ったギフト単位のクリ判定records。
                 # {t, gift_id, gift_count, coins, total, score_delta, mult, crit}
                 "glove_events": [],
+                # 使われた道具card(グローブを含む)。{kind, msg_type, card}
+                "item_cards": [],
                 "updated_at": now,
             }
             self._battles[battle_id] = rec
@@ -3508,88 +4074,69 @@ class TikTokCollector:
                    "ctx": {"path": str(target), "size_bytes": size_bytes}},
         )
 
-    def _linkmic_roster_uids(self, all_list_user) -> set:
-        """AllListUser.linked_list から接続中userのuid集合を取り出す(host含む)。"""
-        uids = set()
-        try:
-            for item in getattr(all_list_user, "linked_list", None) or []:
-                link_user = getattr(item, "link_user", None)
-                uid = getattr(link_user, "uid", 0) if link_user is not None else 0
-                if uid:
-                    uids.add(str(uid))
-        except Exception:
-            # rosterが読めないとその窓のguests_maxが過小になる(窓自体は残る)。
-            logger.warning(
-                "linkmic rosterの解析に失敗しました。この窓のcollab guest数が少なく出る"
-                "可能性があります", exc_info=True,
-                extra={"event": "collector.linkmic_roster_parse_failed", "ctx": {}},
-            )
-        return uids
-
     async def _on_link_layer(self, event: LinkLayerEvent) -> None:
-        """コラボ(非BattleのLinkMic)の接続窓を収集する。message_typeはTikTokが番号を
-        使い回すため当てにできず、content(create/finish/list/join)の有無で判定する。
-        create→finishでchannel窓、roster(linked_list)で guest数(host=_owner_id 除外)を
-        追跡。Battle窓の差し引きは分析側で行う。best-effortで本流は止めない(doc §14)。"""
+        """コラボ(非BattleのLinkMic)の接続窓を収集する。
+
+        窓の開閉は core.collab.linkmic_state (v2) が決める: 「自室がLINKED かつ 他室に
+        LINKEDが1つ以上」の間だけ繋がっているとみなす。create/finishだけで開閉していた
+        v1は、その間のソロ時間を丸ごとコラボに数えていた(録画照合で窓の中の大半がソロ)。
+        判定できないevent(自室が載っていないsnapshot等)では状態を変えない。
+        Battle窓の差し引きは分析側で行う。best-effortで本流は止めない(doc §14)。"""
         try:
             channel_id = str(getattr(event, "channel_id", 0) or "")
             if not channel_id:
                 return
+            self._capture_linklayer_raw(event)
             now = time.time()
-            roster = None
-            list_content = getattr(event, "list_content", None)
-            if list_content is not None:
-                roster = self._linkmic_roster_uids(getattr(list_content, "user_list", None))
-            join_content = getattr(event, "join_direct_content", None)
-            if join_content is not None:
-                extra = self._linkmic_roster_uids(getattr(join_content, "all_users", None))
-                roster = (roster or set()) | extra if extra else roster
-            create_content = getattr(event, "create_channel_content", None)
-            is_create = bool(create_content and getattr(getattr(create_content, "owner", None), "uid", 0))
-            finish_content = getattr(event, "finish_content", None)
-            is_finish = bool(
-                finish_content
-                and (getattr(getattr(finish_content, "owner", None), "uid", 0)
-                     or getattr(finish_content, "finish_reason", 0))
-            )
             state = self._collab_open.get(channel_id)
-            if state is None and (is_create or roster is not None or is_finish):
-                state = {"start": now, "guests_max": 0, "channel_id": channel_id}
+            # 今繋がっている相手を渡す。切断eventが他人を名指ししたとき、残りが居るかを
+            # 判定側が決められるようにするため(v3)。
+            state_now = linkmic_state(
+                event, self._owner_id, str(self.room_id or ""),
+                {uid: (state or {}).get("peer_rooms", {}).get(uid, "")
+                 for uid in (state or {}).get("now_peers", ())},
+            )
+            connected = state_now["connected"]
+            if connected is None:
+                return
+            before = self._collab_signature()
+            if connected and state is None:
+                state = {"start": now, "guests_max": 0, "channel_id": channel_id,
+                         "peers": set(), "now_peers": set(), "peer_rooms": {}}
                 self._collab_open[channel_id] = state
                 self._add_linkmic_marker("collab", "コラボ")
                 logger.info(
-                    "channel %s でcollab（非battleのLinkMic）の窓が開きました", channel_id,
+                    "channel %s でcollab（非battleのLinkMic）の窓が開きました（相手%d名、%s）",
+                    channel_id, len(state_now["peers"]), state_now["source"],
                     extra={"event": "collector.collab_opened",
                            "ctx": {"channel_id": channel_id,
-                                   "trigger": ("create" if is_create
-                                               else "finish" if is_finish else "roster"),
-                                   "roster_size": len(roster) if roster else 0}},
+                                   "source": state_now["source"],
+                                   "peers": len(state_now["peers"])}},
                 )
-            if state is None:
-                return
-            if roster:
-                guests = {u for u in roster if u != self._owner_id}
-                state["guests_max"] = max(state["guests_max"], len(guests))
-            if is_finish:
-                self._collab_windows.append(
-                    {
-                        "channel_id": channel_id,
-                        "start": state["start"],
-                        "end": now,
-                        "guests_max": state["guests_max"],
-                    }
+            if state is not None and connected:
+                peers = {p for p in state_now["peers"] if p != self._owner_id}
+                # peers は窓の生涯の和集合(保存形が使う)、now_peers はこの瞬間の顔ぶれ。
+                # 画面が「今つないでいる相手」を出すには和集合では足りない(抜けた相手が
+                # 残り続け、入れ替わりが2人同時のコラボに見える)。
+                state["peers"] |= peers
+                state["now_peers"] = peers
+                state["guests_max"] = max(state["guests_max"], len(peers))
+                # 相手のroomは切断eventの名指し(room_idしか名乗らない形)と突き合わせるため
+                # 窓が閉じるまで持ち続ける。空で上書きしない。
+                state.setdefault("peer_rooms", {}).update(
+                    {uid: room for uid, room in (state_now["peer_rooms"] or {}).items()
+                     if room and uid in peers}
                 )
-                self._collab_open.pop(channel_id, None)
-                logger.info(
-                    "channel %s でcollabの窓が閉じました（%.0f秒、最大guest %d名）",
-                    channel_id, now - state["start"], state["guests_max"],
-                    extra={"event": "collector.collab_closed",
-                           "ctx": {"channel_id": channel_id,
-                                   "duration_ms": int((now - state["start"]) * 1000),
-                                   "guests_max": state["guests_max"]}},
+                self._schedule_peer_identities(
+                    {uid: room for uid, room in (state_now["peer_rooms"] or {}).items()
+                     if uid in peers}
                 )
-                # 窓が確定したので即中間永続化(クラッシュ耐性)。
-                self._persist_progress()
+            if not connected and state is not None:
+                self._close_collab_window(channel_id, state, now, state_now["source"])
+            if self._collab_signature() != before:
+                # 顔ぶれが変わった時だけstateを配る。LinkLayer eventは接続中ずっと届き続ける
+                # ため、毎回broadcastすると監視画面へsnapshotを撒き散らすことになる。
+                await self._notify_state()
         except Exception:
             # この窓の入室コンテキスト分類が欠ける。次のLinkLayer eventで再入する。
             logger.warning(
@@ -3598,20 +4145,176 @@ class TikTokCollector:
                 extra={"event": "collector.collab_handling_failed", "ctx": {}},
             )
 
-    def _collab_windows_public(self) -> list:
-        """確定済み窓＋未クローズ窓(終端=現在時刻で補完)。session終了時の保存に使う。"""
-        now = time.time()
-        windows = list(self._collab_windows)
-        for channel_id, state in self._collab_open.items():
-            windows.append(
-                {
-                    "channel_id": channel_id,
-                    "start": state["start"],
-                    "end": now,
-                    "guests_max": state["guests_max"],
+    def _close_open_collab_windows(self, now: float) -> None:
+        """session終了時点でまだ開いている窓を、その時刻で閉じて確定させる。
+
+        以前は保存せずに捨てていた(終端が実際の切断時刻ではなく「収集が終わった時刻」に
+        なるため)。録画18本との照合でその前提が崩れた: コラボを繋いだまま配信が終わる
+        録画が3本あり、取りこぼしの648秒がこれだった。終端が実観測でないことは
+        ``closed_by`` で名乗るので、後から選り分けられる。"""
+        for channel_id, state in list(self._collab_open.items()):
+            self._close_collab_window(channel_id, state, now, "session_end")
+
+    def _close_collab_window(self, channel_id: str, state: dict, now: float, source) -> None:
+        """接続が切れた窓を確定させる。長さ0の窓は残さない(回数だけが持ち上がる)。"""
+        self._collab_open.pop(channel_id, None)
+        if now <= state["start"]:
+            return
+        self._collab_windows.append(self._collab_window_record(channel_id, state, now, source))
+        logger.info(
+            "channel %s でcollabの窓が閉じました（%.0f秒、最大guest %d名、%s）",
+            channel_id, now - state["start"], state["guests_max"], source,
+            extra={"event": "collector.collab_closed",
+                   "ctx": {"channel_id": channel_id,
+                           "duration_ms": int((now - state["start"]) * 1000),
+                           "guests_max": state["guests_max"], "source": source}},
+        )
+        # 窓が確定したので即中間永続化(クラッシュ耐性)。
+        self._persist_progress()
+
+    def _collab_window_record(self, channel_id: str, state: dict, end: float,
+                              closed_by: str = "") -> dict:
+        """保存形。versionは判定ruleの版で、分析側はこれが現行と一致する窓だけを集計する。
+
+        ``closed_by`` は終端の出所(切断eventのsource名、または ``session_end``)。
+        ``session_end`` の窓だけは終端が実観測ではないので、後から選り分けられるようにする。"""
+        return {
+            "channel_id": channel_id,
+            "start": state["start"],
+            "end": end,
+            "guests_max": state["guests_max"],
+            "version": COLLAB_WINDOW_VERSION,
+            "peers": sorted(state.get("peers") or ()),
+            "closed_by": closed_by or "",
+        }
+
+    def _schedule_peer_identities(self, peer_rooms: dict) -> None:
+        """身元の判っていないコラボ相手が居れば、解決を別taskへ出す。LinkLayer eventの
+        処理は接続窓の開閉が本流なので、HTTPの往復をここで待たせない。"""
+        pending = {
+            uid: room for uid, room in (peer_rooms or {}).items()
+            if room and uid not in self._peer_resolved
+        }
+        if not pending:
+            return
+        # 印は解決の前に付ける。LinkLayer eventは接続中ずっと届き続けるので、応答を待つ
+        # 間にも同じ相手のeventが何度も来る。
+        self._peer_resolved.update(pending)
+        task = asyncio.create_task(self._resolve_peer_identities(pending))
+        self._peer_tasks.add(task)
+        task.add_done_callback(self._peer_tasks.discard)
+
+    async def _resolve_peer_identities(self, peer_rooms: dict) -> None:
+        """コラボ相手の表示名/@handle/avatarを決める。
+
+        LinkLayerが載せるのはuser_idとroom_idだけなので、**相手のroom_infoを引いてowner
+        を読む**。自室のroom_info取得と同じunsigned GETで、sign APIを消費しない。判った
+        身元はusers表へ残す(次のprocessでは待たずに名前が出る)。
+
+        既にDBが知っている身元は先に画面へ配る。room_infoの往復を待つ間だけ数値IDが出る、
+        という見え方を避けるためで、その後の取得結果で上書きする。
+
+        引けなかった相手は身元を持たないままにする。user_idや@handleを名前の位置へ置くと、
+        画面はそれを「解決できた名前」として読む。"""
+        if self._simulation:
+            # simulationは外へ出さない。身元も作り物で与え、画面の表示経路(名前・アイコン)
+            # を本番と同じだけ通す。
+            for uid in peer_rooms:
+                self._peer_identity[uid] = {
+                    "nickname": f"コラボ相手{uid[-4:]}",
+                    "unique_id": f"sim_peer_{uid[-4:]}",
+                    "avatar": "",
                 }
+            await self._notify_state()
+            return
+        try:
+            known = await asyncio.to_thread(
+                self._storage.peer_identities, list(peer_rooms))
+        except Exception:
+            known = {}
+            logger.warning(
+                "コラボ相手の既知の身元をDBから引けませんでした。room_infoの取得結果だけで"
+                "名前を出します", exc_info=True,
+                extra={"event": "collector.peer_identity_db_failed",
+                       "ctx": {"peers": len(peer_rooms)}},
             )
-        return windows
+        if known:
+            self._peer_identity.update(known)
+            await self._notify_state()
+        resolved = 0
+        for uid, room in peer_rooms.items():
+            identity = await self._fetch_peer_identity(uid, room)
+            if identity is None:
+                continue
+            self._peer_identity[uid] = identity
+            resolved += 1
+        if resolved:
+            await self._notify_state()
+
+    async def _fetch_peer_identity(self, user_id: str, room_id: str) -> Optional[dict]:
+        """相手のroom_infoからownerの身元を読む。引けなければNone(best-effort)。"""
+        client = self._client
+        if client is None:
+            return None
+        try:
+            info = await client.web.fetch_room_info(room_id=room_id)
+        except Exception as exc:
+            # 制限中/終了済みの室、レート制限。名前が出ないだけなので本流は止めない。
+            logger.info(
+                "コラボ相手のroom_infoを取得できませんでした（room %s）: %s。"
+                "この相手はuser_idのまま表示されます", room_id, exc, exc_info=True,
+                extra={"event": "collector.peer_identity_fetch_failed",
+                       "ctx": {"peer_user_id": user_id, "peer_room_id": room_id,
+                               "error": f"{type(exc).__name__}: {exc}"[:200]}},
+            )
+            return None
+        owner = (info or {}).get("owner") or {}
+        owner_id = str(owner.get("id") or "")
+        if owner_id and owner_id != str(user_id):
+            # 引いた室の主が相手本人ではない。名前を取り違えるので採らない。
+            logger.warning(
+                "コラボ相手のroom_infoが別のownerを返しました（相手 %s / 室の主 %s）。"
+                "この相手の身元は採りません", user_id, owner_id,
+                extra={"event": "collector.peer_identity_owner_mismatch",
+                       "ctx": {"peer_user_id": user_id, "peer_room_id": room_id,
+                               "owner_id": owner_id}},
+            )
+            return None
+        nickname = (owner.get("nickname") or "").strip()
+        unique_id = (owner.get("display_id") or "").strip()
+        if not nickname and not unique_id:
+            return None
+        avatar = _best_owner_image(owner)
+        try:
+            await asyncio.to_thread(
+                self._storage.save_peer_identity, str(user_id), unique_id, nickname,
+                avatar, str(room_id),
+            )
+        except Exception:
+            # 保存できなくてもこのprocessでは表示できる。次回また引き直すだけ。
+            logger.warning(
+                "コラボ相手の身元を保存できませんでした（%s）", user_id, exc_info=True,
+                extra={"event": "collector.peer_identity_save_failed",
+                       "ctx": {"peer_user_id": user_id}},
+            )
+        # 相手のアイコンも他のuserと同じ pool へ入れる(CDNの署名が切れた後も出せる)。
+        self._persist_avatar(unique_id or nickname, avatar)
+        logger.info(
+            "コラボ相手の身元をroom_infoから解決しました: %s（@%s）",
+            nickname or unique_id, unique_id or "-",
+            extra={"event": "collector.peer_identity_resolved",
+                   "ctx": {"peer_user_id": str(user_id), "peer_room_id": str(room_id),
+                           "unique_id": unique_id}},
+        )
+        return {"nickname": nickname or unique_id, "unique_id": unique_id, "avatar": avatar}
+
+    def _collab_windows_public(self) -> list:
+        """確定済み窓のみ。
+
+        進行中の中間永続化(_persist_progress)ではまだ開いている窓を含めない — 終端が
+        決まっていないためで、次のcheckpointが全置換で書き直す。session終了時は
+        ``_close_open_collab_windows`` が先に走り、開いていた窓はそこで確定している。"""
+        return list(self._collab_windows)
 
     async def _on_battle(self, event: LinkMicBattleEvent) -> None:
         self._dump_battle_raw("LinkMicBattle", event)
@@ -3636,6 +4339,7 @@ class TikTokCollector:
         # team構造で送る個人マルチ(1:1:1)が全てチーム戦になるため、参加者のteam_idから
         # core.battleのruleで導出する(_battle_public)。
         self._capture_opponents(rec, getattr(event, "anchor_info", None))
+        self._capture_battle_extras(rec, event)
         self._recount_battles()
         label = f"Battle #{battle_id}"
         self._add_linkmic_marker("battle", label)
@@ -3966,6 +4670,15 @@ class TikTokCollector:
         armies処理で「窓中に自陣へ入ったギフトのクリ率」をcoin帯別に集計する母集団になる。"""
         self._dump_battle_raw("LinkMicBattleItemCard", event)
         try:
+            self._capture_item_card(event)
+        except Exception:
+            # グローブ以外のcardは記録だけの用途なので、失敗してもcrit判定は続ける。
+            logger.warning(
+                "battle item cardの記録に失敗しました。このcardの使用歴は残りません",
+                exc_info=True,
+                extra={"event": "collector.item_card_record_failed", "ctx": {}},
+            )
+        try:
             self._capture_glove_window(event)
         except Exception:
             # 窓が取れないとこのcardのcrit判定母集団が丸ごと欠ける(再送は無い)。
@@ -3974,6 +4687,26 @@ class TikTokCollector:
                 "失われます", exc_info=True,
                 extra={"event": "collector.glove_window_failed", "ctx": {}},
             )
+
+    # Battleで使われる道具card。これまではグローブ(critical strike)だけを窓として読み、
+    # 他は1件も残していなかった。どのcardがいつ使われたかは対戦の流れそのものなので、
+    # 生値のままbattle recordへ積む(効果の解釈はしない)。
+    _ITEM_CARD_FIELDS = ("use_critical_strike_card", "use_extra_time_card", "use_smoke_card",
+                         "use_special_effect_card", "use_top2_card", "use_top3_card",
+                         "award_card_notice")
+
+    def _capture_item_card(self, event: LinkMicBattleItemCardEvent) -> None:
+        rec = self._battle_record(int(getattr(event, "battle_id", 0) or 0))
+        msg_type = _enum_value(getattr(event, "msg_type", None))
+        for name in self._ITEM_CARD_FIELDS:
+            card = to_plain(getattr(event, name, None))
+            if card in (None, 0, "", [], {}):
+                continue
+            entry = {"kind": name, "msg_type": msg_type, "card": card}
+            # 同一cardが複数回届く(dispatch_strategy)。同じ中身の重複は積まない。
+            cards = rec.setdefault("item_cards", [])
+            if entry not in cards:
+                cards.append(entry)
 
     def _capture_glove_window(self, event: LinkMicBattleItemCardEvent) -> None:
         msg_name = getattr(getattr(event, "msg_type", None), "name", "") or str(getattr(event, "msg_type", ""))
@@ -4309,6 +5042,7 @@ class TikTokCollector:
             return
         battle_id = getattr(event, "battle_id", 0)
         rec = self._battle_record(battle_id)
+        self._capture_battle_extras(rec, event, self._ARMIES_EXTRA_FIELDS)
         team_armies = getattr(event, "team_armies", None)
         if team_armies:
             # Team PK carries scores in team_armies[].team_total_score with the
@@ -4649,6 +5383,7 @@ class TikTokCollector:
                 "gift_id": gift_id,
                 "text": f"{user['nickname']} が {gift_name} x{count} を送りました ({diamonds} diamonds)",
                 **_identity_signals(event),
+                "extra": _extra_payload(event, "gift"),
             },
             create_time=create_time_sec,
         )
@@ -4672,6 +5407,7 @@ class TikTokCollector:
             "text": f"{user['nickname']}: {event.comment}",
             **_identity_signals(event),
             **_comment_signals(event),
+            "extra": _extra_payload(event, "comment"),
         }
         emotes = _emote_payload(event)
         if emotes:
@@ -4690,6 +5426,7 @@ class TikTokCollector:
                 "total": event.total,
                 "text": f"{user['nickname']} がLike x{event.count} (累計 {event.total})",
                 **_follow_signals(event.user),
+                "extra": _extra_payload(event, "like"),
             },
             create_time=self._create_time_sec(event),
         )
@@ -4700,7 +5437,9 @@ class TikTokCollector:
         self._bucket()["follows"] += 1
         self._save_follower_count(event)
         await self._record(
-            "follow", {"user": user, "text": f"{user['nickname']} がFollowしました"},
+            "follow",
+            {"user": user, "text": f"{user['nickname']} がFollowしました",
+             "extra": _extra_payload(event, "follow")},
             create_time=self._create_time_sec(event),
         )
 
@@ -4735,7 +5474,7 @@ class TikTokCollector:
         await self._record(
             "share",
             {"user": user, "text": f"{user['nickname']} がLIVEをShareしました",
-             **_share_signals(event)},
+             **_share_signals(event), "extra": _extra_payload(event, "share")},
             create_time=self._create_time_sec(event),
         )
 
@@ -4746,7 +5485,8 @@ class TikTokCollector:
         await self._record(
             "join",
             {"user": user, "text": f"{user['nickname']} が入室しました",
-             **_enter_signals(event), **_follow_signals(event.user)},
+             **_enter_signals(event), **_follow_signals(event.user),
+             "extra": _extra_payload(event, "join")},
             create_time=self._create_time_sec(event),
         )
 
@@ -4754,7 +5494,22 @@ class TikTokCollector:
         user = _user_payload(getattr(event, "user", None))
         self.stats["subscribes"] += 1
         await self._record(
-            "subscribe", {"user": user, "text": f"{user['nickname']} がSubscribeしました"},
+            "subscribe",
+            {"user": user, "text": f"{user['nickname']} がSubscribeしました",
+             "extra": _extra_payload(event, "subscribe")},
+            create_time=self._create_time_sec(event),
+        )
+
+    async def _on_super_fan(self, event: SuperFanEvent) -> None:
+        """スーパーファン加入。SubscribeEvent(サブスク)とは別messageで届くので、
+        subscribeを待っていても永久に入らない。userはBarrageの表示文のpieceにしか
+        載らないため _barrage_user で読む。"""
+        user = _user_payload(_barrage_user(event))
+        self.stats["super_fans"] += 1
+        await self._record(
+            "super_fan",
+            {"user": user, "text": f"{user['nickname']} がスーパーファンになりました",
+             "extra": _extra_payload(event, "super_fan")},
             create_time=self._create_time_sec(event),
         )
 
@@ -5121,29 +5876,41 @@ class TikTokCollector:
                     await self._on_follow(
                         SimpleNamespace(user=user, follow_count=sim_followers)
                     )
-                else:
+                elif roll < 0.995:
                     await self._on_share(SimpleNamespace(user=user))
+                else:
+                    # スーパーファン加入。実protoと同形(本人は表示文のpieceにしか載らない)で
+                    # 流し、_barrage_userの読み出し経路をsimulationでも必ず通す。
+                    await self._on_super_fan(SimpleNamespace(
+                        content=SimpleNamespace(
+                            pieces=[SimpleNamespace(user_value=SimpleNamespace(user=user))]
+                        )
+                    ))
                 if tick % 60 == 0:
                     await self._simulate_battle(rng, users)
-                # 擬似コラボ窓(非BattleのLinkMic): 開始→roster(guest1名)→終了 を
-                # LinkLayerEvent経由で流し、入室コンテキスト3分類の収集/集計を検証する。
+                # 擬似コラボ窓(非BattleのLinkMic)。実配信で主に届くのは
+                # group_change_content(参加room単位のsnapshot)なので、simulationも
+                # 同じ形で流す: 接続時は「自室LINKED + 相手room LINKED」、切断は
+                # 「相手が消えて自室だけが残ったsnapshot」。切断をfinishで送ってしまうと、
+                # 本番で実際に効く経路(rosterが縮む)がsimulationで一度も通らない。
                 if tick % 80 == 20:
                     sim_collab_channel = rng.randrange(10**18, 10**19)
                     await self._on_link_layer(
                         SimpleNamespace(
                             channel_id=sim_collab_channel,
-                            create_channel_content=SimpleNamespace(
-                                owner=SimpleNamespace(uid=9001, room_id=self.room_id)),
-                            list_content=SimpleNamespace(user_list=SimpleNamespace(
-                                linked_list=[SimpleNamespace(link_user=SimpleNamespace(uid=7777))])),
+                            group_change_content=_sim_group_change(
+                                [(str(self.room_id), self._owner_id, "GROUP_STATUS_LINKED"),
+                                 ("7658549112440064788", "7777", "GROUP_STATUS_LINKED")]
+                            ),
                         )
                     )
                 elif tick % 80 == 60 and sim_collab_channel:
                     await self._on_link_layer(
                         SimpleNamespace(
                             channel_id=sim_collab_channel,
-                            finish_content=SimpleNamespace(
-                                owner=SimpleNamespace(uid=9001), finish_reason=1),
+                            group_change_content=_sim_group_change(
+                                [(str(self.room_id), self._owner_id, "GROUP_STATUS_LINKED")]
+                            ),
                         )
                     )
                     sim_collab_channel = None

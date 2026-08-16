@@ -63,7 +63,7 @@ function renderSummary() {
   } else {
     parts.push("身元を特定できないGiftは0件");
   }
-  parts.push("集計対象はgiftを送った視聴者のみ（Commentのみの視聴者は含みません）");
+  parts.push("集計対象はgiftを送った視聴者のみ（コメントのみの視聴者は含みません）");
   document.getElementById("fan-note").textContent = parts.join(" / ");
 }
 
@@ -165,6 +165,9 @@ async function showFanDetail(fan) {
   ident.innerHTML = "";
   ident.appendChild(userCell(fan, { stackId: true }));
   chipBar("fan-modal-kpi", []);
+  // 前回の取得失敗の文言を持ち越さない(placeholderの文字はrenderTableRowsでは戻らない)。
+  setListState(document.getElementById("fan-modal-streamers-empty"), "empty");
+  setListState(document.getElementById("fan-modal-sessions-empty"), "empty");
   renderTableRows("fan-modal-streamers", "fan-modal-streamers-empty", [], () => [], []);
   renderTableRows("fan-modal-sessions", "fan-modal-sessions-empty", [], () => [], []);
 
@@ -172,7 +175,11 @@ async function showFanDetail(fan) {
   try {
     profile = await apiSend("GET", `/api/fans/${encodeURIComponent(fan.identity_key)}`);
   } catch (err) {
+    // 先に空で描いてあるので、失敗すると両方の表が「記録がありません。」を出す。
+    // 取得できなかったものを0件として描かない(この画面の台帳側と同じ作法へ揃える)。
     message.textContent = `明細を取得できませんでした。${errorDetailText(err)}`;
+    setListState(document.getElementById("fan-modal-streamers-empty"), "failed", err);
+    setListState(document.getElementById("fan-modal-sessions-empty"), "failed", err);
     return;
   }
   if (modal.classList.contains("hidden")) return;
@@ -181,7 +188,7 @@ async function showFanDetail(fan) {
   chipBar("fan-modal-kpi", [
     ["コイン", fmtNum(profile.diamonds)],
     ["Gift数", fmtNum(profile.gifts)],
-    ["Comment", fmtNum(act.comment || 0)],
+    ["コメント", fmtNum(act.comment || 0)],
     ["Like", fmtNum(act.like || 0)],
     ["入室", fmtNum(act.join || 0)],
     ["Gifter Lv", fmtNum(profile.gifter_level)],
@@ -220,9 +227,11 @@ async function showFanDetail(fan) {
   );
 }
 
+// 並べ替えと絞込は残す。復元はこの下のloadLedger()より前なので、最初のrenderRowsが
+// 保存値を読む。検索語は「今この人を探す」ための1回限りの入力なので残さない。
 elSearch.addEventListener("input", renderRows);
-elSort.addEventListener("change", renderRows);
-elFilter.addEventListener("change", renderRows);
+bindPref(elSort, "tictok.fans.sort", renderRows);
+bindPref(elFilter, "tictok.fans.filter", renderRows);
 document.getElementById("fan-modal-close").addEventListener("click", closeFanDetail);
 document.getElementById("fan-modal").addEventListener("click", (e) => {
   if (e.target.id === "fan-modal") closeFanDetail();

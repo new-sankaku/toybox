@@ -3,6 +3,7 @@ import io
 import json
 import math
 import pathlib
+import re
 import shutil
 import subprocess
 import types
@@ -17,6 +18,7 @@ from tictok.media import clipper
 from tictok.media import concat as concat_mod
 from tictok.media import gift_icons as gi
 from tictok.media import hls_source
+from tictok.media import still
 from tictok.media import thumbnails as th
 from tictok.media import waveform as wf
 from tictok.record import recorder as rec
@@ -228,11 +230,26 @@ def test_hhmmss(seconds, expected):
     assert clipper._hhmmss(seconds) == expected
 
 
-def test_clip_path_lands_in_the_shared_clips_dir(make_recording, tmp_root):
+def test_clip_path_lands_in_the_streamers_clips_dir(make_recording, tmp_root):
     stem, mp4 = make_recording(streamer="some.user_x")
     out = clipper.clip_path(mp4, 10.0, 70.0)
     assert out.parent == layout.clips_dir(tmp_root, "some.user_x")
+    # 置き場は配信者folderの下。録画の素材(ts)・元mp4と同じ階層に並ぶ。
+    assert out.parent == tmp_root / "some.user_x" / "_clips"
     assert out.name == f"{stem}_000010-000110.mp4"
+
+
+def test_clip_path_stays_in_the_work_root_for_a_relocated_recording(tmp_root, tmp_path):
+    """録画が最終保存先に在っても、切り出しは一時保存先へ出る。
+
+    出力先を録画の所在で決めていた頃は、同じ操作の成果物が録画ごとに別のdriveへ出ていた。
+    切り出しはDBに行を持たずfile systemだけが台帳なので、それは「作った物の在り処を人が
+    知る手段が無い」ことと同じだった。最終保存先へ運ぶのは移動の操作だけが行う。"""
+    final = tmp_path / "final"
+    mp4 = layout.mp4_path(final, "00042_some.user_x_20260101_120000", "some.user_x")
+    out = clipper.clip_path(mp4, 10.0, 70.0)
+    assert out.parent == layout.clips_dir(tmp_root, "some.user_x")
+    assert clipper.still_path(mp4, 1.0).parent == layout.stills_dir(tmp_root, "some.user_x")
 
 
 def test_clip_path_sanitises_the_label_but_keeps_japanese(make_recording):
@@ -251,6 +268,122 @@ def test_clip_path_truncates_a_long_label(make_recording):
     _, mp4 = make_recording()
     out = clipper.clip_path(mp4, 0, 1, label="x" * 100)
     assert out.name.endswith("_" + "x" * 40 + ".mp4")
+
+
+# --------------------------------------------------------------------------- スクショ
+# 静止画は1 frameが成果物なので、位置がずれた事故は「別の場面が保存された」としてしか
+# 現れない(fileは正常に出来る)。時刻の扱いだけを守る。
+
+
+def test_still_path_lands_in_the_streamers_screenshots_dir(make_recording, tmp_root):
+    """静止画は切り出しmp4とは別のdirへ出す(配信者folderの下・一時保存先固定は同じ)。"""
+    stem, mp4 = make_recording(streamer="some.user_x")
+    out = clipper.still_path(mp4, 12.35)
+    assert out.parent == layout.stills_dir(tmp_root, "some.user_x")
+    assert out.parent == tmp_root / "some.user_x" / "_screenshots"
+    assert out.parent != layout.clips_dir(tmp_root, "some.user_x")
+    assert out.name == f"{stem}_shot00001235.png"
+
+
+def _patch_still_ffmpeg(monkeypatch, captured, *, returncode=0, write=True, landed=None):
+    """ffmpegを差し替える。着地時刻は ``showinfo`` の行としてstderrへ返す。
+
+    ``landed`` はcallable(要求時刻, 前置き) -> 着地時刻。既定は要求どおりに着く素材。"""
+    monkeypatch.setattr(still, "ffmpeg_available", lambda: True)
+
+    async def fake_exec(*cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured.setdefault("cmds", []).append(list(cmd))
+        vf = cmd[cmd.index("-vf") + 1]
+        at = float(re.search(r"gte\(t,([0-9.]+)\)", vf).group(1))
+        lead = at - float(cmd[cmd.index("-ss") + 1])
+        out = pathlib.Path(cmd[-1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if write:
+            out.write_bytes(b"\x89PNG" + b"\x00" * 16)
+        where = at if landed is None else landed(at, lead)
+
+        async def communicate():
+            return b"", f"[Parsed_showinfo_1 @ 0] n:0 pts_time:{where:.3f} ".encode()
+
+        return types.SimpleNamespace(returncode=returncode, communicate=communicate,
+                                     kill=lambda: None)
+
+    monkeypatch.setattr(still.asyncio, "create_subprocess_exec", fake_exec)
+
+
+async def test_capture_still_decodes_from_before_the_request(monkeypatch, make_recording):
+    """``-ss`` に要求時刻をそのまま渡さない。
+
+    HLS入力は要求より**後ろ**のsegment境界へ着地することがある(実測最大1.789秒)。静止画では
+    その差がそのまま別の場面になるので、手前から復号して ``select`` で要求時刻以降の最初の
+    frameを採る。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_still_ffmpeg(monkeypatch, captured)
+
+    result = await still.capture_still(mp4, 200.0, mp4.parent / "shot.png")
+
+    cmd = captured["cmd"]
+    assert float(cmd[cmd.index("-ss") + 1]) == pytest.approx(200.0 - still.SEEK_LEADS[0])
+    assert "select='gte(t,200.000000)',showinfo" in cmd
+    # -copyts下でのみfilterのtが絶対時刻になる(この作りの前提)。
+    assert "-copyts" in cmd
+    # 要求どおりに着いたなら撮り直さない。
+    assert len(captured["cmds"]) == 1
+    assert result["at_seconds"] == 200.0 and result["bytes"] > 0
+
+
+async def test_capture_still_seeks_from_zero_near_the_head(monkeypatch, make_recording):
+    """先頭付近では手前へ下げられない。負の-ssを渡さない。"""
+    _, mp4 = make_recording()
+    captured = {}
+    _patch_still_ffmpeg(monkeypatch, captured)
+
+    await still.capture_still(mp4, 1.5, mp4.parent / "shot.png")
+
+    cmd = captured["cmd"]
+    assert float(cmd[cmd.index("-ss") + 1]) == pytest.approx(0.0)
+
+
+async def test_capture_still_widens_the_lead_when_it_lands_late(monkeypatch, make_recording):
+    """着地が要求より後ろなら前置きを広げて撮り直す。前置きの要否は素材で決まるので、
+    足りているかは測って確かめる(仮定しない)。"""
+    _, mp4 = make_recording()
+    captured = {}
+    # 1つ目の前置きでは要求+2.9秒(実測と同じ幅)へ着き、広げると要求どおりに着く素材。
+    _patch_still_ffmpeg(monkeypatch, captured,
+                        landed=lambda at, lead: at if lead > still.SEEK_LEADS[0] else at + 2.9)
+
+    result = await still.capture_still(mp4, 200.0, mp4.parent / "shot.png")
+
+    leads = [float(cmd[cmd.index("-vf") + 1].split("gte(t,")[1].split(")")[0])
+             - float(cmd[cmd.index("-ss") + 1]) for cmd in captured["cmds"]]
+    assert leads == list(still.SEEK_LEADS[:2])
+    assert result["at_seconds"] == 200.0
+
+
+async def test_capture_still_reports_the_frame_it_actually_got(monkeypatch, make_recording):
+    """広げても寄らない素材(冒頭に映像frameが無い録画)では、実際の位置で名乗る。
+
+    要求値のまま返すと、file名も画面も撮れていない位置を名乗ることになる。"""
+    _, mp4 = make_recording()
+    _patch_still_ffmpeg(monkeypatch, {}, landed=lambda at, lead: 10.127)
+
+    result = await still.capture_still(mp4, 5.0, mp4.parent / "shot.png")
+    assert result["at_seconds"] == pytest.approx(10.127)
+    assert result["requested_seconds"] == 5.0
+
+
+async def test_capture_still_fails_when_no_frame_was_written(monkeypatch, make_recording):
+    """尺の外を指すとffmpegは正常終了して0 frameを出す。成功として返さない。"""
+    _, mp4 = make_recording()
+    _patch_still_ffmpeg(monkeypatch, {}, write=False)
+
+    out = mp4.parent / "shot.png"
+    with pytest.raises(RuntimeError, match="映像がありません"):
+        await still.capture_still(mp4, 99999.0, out)
+    assert not out.exists()
 
 
 _CLIP_GOP = 2.0
@@ -665,12 +798,15 @@ def test_head_args_match_the_source_video_parameters():
     args = _head_args()
     assert args[args.index("-pix_fmt") + 1] == "yuv420p"
     assert args[args.index("-profile:v") + 1] == "high"
-    assert args[args.index("-level") + 1] == "40"
     assert args[-3:] == ["-f", "mpegts", "head.ts"]
 
 
-def test_head_args_leave_the_level_to_the_check_for_hevc():
-    """HEVCのgeneral_level_idcは30倍の別scaleで、ffprobeの値をそのまま渡せない。"""
+def test_head_args_never_pass_a_level():
+    """原本のlevel宣言は、その原本自身の内容を満たしていないことがある。実測で432x864の
+    配信がlevel 3.0を名乗るが、その解像度は30fpsで上限を超える — libx264は黙って受け取り、
+    h264_nvencはInitializeEncoderで拒否した(GPUのある環境ではsmart cutが全て失敗していた)。
+    encoderに選ばせれば実際の解像度・fpsを満たす最小のlevelになる。"""
+    assert "-level" not in _head_args()
     params = {"video": {**H264_PARAMS["video"], "codec_name": "hevc", "profile": "Main",
                         "level": 120},
               "audio": H264_PARAMS["audio"]}
@@ -1142,6 +1278,33 @@ async def test_keyframe_probe_reports_none_when_nothing_was_read(monkeypatch):
     絵が複製されたspriteをcacheへ焼き付ける。"""
     async def fake_run(args, **kwargs):
         return types.SimpleNamespace(ok=True, returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(th.ffprobe, "run", fake_run)
+    source = types.SimpleNamespace(path=pathlib.Path("curated.m3u8"), input_args=())
+    assert await th._max_keyframe_gap(source, 3600.0) is None
+
+
+async def test_keyframe_probe_skips_frames_without_a_timestamp(monkeypatch):
+    """``pts=N/A`` のframeは数えず、走査ごと落とさない。
+
+    seek直後の先頭などでN/Aは正常に混ざる(実測: 3.1時間の録画で128 keyframe中1本、他の
+    録画では0本)。``float()`` へ渡すと ``ValueError`` で走査が例外になり、spriteのjobも
+    ``/api/recordings/{id}/thumbnails`` の500も、素材次第で当たり外れになる(実測: 8回)。"""
+    async def fake_run(args, **kwargs):
+        return types.SimpleNamespace(ok=True, returncode=0, stderr="",
+                                     stdout="1.0\nN/A\n3.0\n5.0\n")
+
+    monkeypatch.setattr(th.ffprobe, "run", fake_run)
+    source = types.SimpleNamespace(path=pathlib.Path("curated.m3u8"), input_args=())
+    assert await th._max_keyframe_gap(source, 3600.0) == 2.0
+
+
+async def test_keyframe_probe_reports_none_when_every_frame_lacks_a_timestamp(monkeypatch):
+    """全frameがN/Aなら「測れなかった」と同じNone。推測してkeyframe-onlyへ倒れると、
+    絵が複製されたspriteがcacheへ残る。"""
+    async def fake_run(args, **kwargs):
+        return types.SimpleNamespace(ok=True, returncode=0, stderr="",
+                                     stdout="N/A\nN/A\n")
 
     monkeypatch.setattr(th.ffprobe, "run", fake_run)
     source = types.SimpleNamespace(path=pathlib.Path("curated.m3u8"), input_args=())

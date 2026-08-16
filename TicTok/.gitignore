@@ -1,0 +1,6 @@
+
+# BGM除去の検証用venvと作業file(weightsとwavで数GBになる)
+AI_AUDIO/venv/
+AI_AUDIO/venv_cv/
+AI_AUDIO/work/
+models/audio_sep/

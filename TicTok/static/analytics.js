@@ -5,7 +5,7 @@
 
 const METRIC_LABELS = {
   joins: "入室",
-  comments: "Comment",
+  comments: "コメント",
   diamonds: "コイン",
   likes: "Like",
   follows: "Follow",
@@ -34,6 +34,7 @@ const elTiNumbers = document.getElementById("an-ti-numbers");
 const elTiEmpty = document.getElementById("an-ti-empty");
 
 const PERIOD_KEY = "tictok.analytics.days";
+const TI_METRIC_KEY = "tictok.analytics.timeIndexMetric";
 const TI_NUMBERS_KEY = "tictok.analytics.timeIndexNumbers";
 const TI_EMPTY_KEY = "tictok.analytics.timeIndexEmptyRows";
 
@@ -48,7 +49,7 @@ const vLinePlugin = {
     const { top, bottom } = chart.chartArea;
     const ctx = chart.ctx;
     ctx.save();
-    ctx.strokeStyle = opts.color || "#8a4b4b";
+    ctx.strokeStyle = opts.color || cssToken("--chart-ink");
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
@@ -109,11 +110,15 @@ function periodDays() {
 }
 
 // 1つの描画が失敗しても他を巻き込まないよう個別に囲う。
+// 描けたかを返す。取れたのに描けなかったsectionを成功として数えると、上部statusが
+// 「取得失敗0件」と名乗ったまま、そのsectionだけ前の期間の絵が残る。
 function safeRender(label, fn, data) {
   try {
     if (data) fn(data);
+    return true;
   } catch (err) {
     console.error(`render ${label} failed`, err);
+    return false;
   }
 }
 
@@ -188,8 +193,8 @@ const TI_DOW = [
   { src: 3, label: "水" },
   { src: 4, label: "木" },
   { src: 5, label: "金" },
-  { src: 6, label: "土", head: "#3f6aa0" },
-  { src: 0, label: "日", head: "#b0453f" },
+  { src: 6, label: "土", head: cssToken("--series-4") },
+  { src: 0, label: "日", head: cssToken("--series-1") },
 ];
 
 // 発散配色: 倍率をlog2で対数対称に見て 0.5x(寒)〜1.0x(中間)〜2.0x(暖) へmap。
@@ -203,7 +208,7 @@ function tiColor(ratio) {
   const c = a.map((v, i) => Math.round(v + (b[i] - v) * u));
   // 相対輝度で文字色を切替え、どのマスでも数値が読めるようにする。
   const lum = (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
-  return { bg: `rgb(${c[0]}, ${c[1]}, ${c[2]})`, fg: lum < 0.5 ? "#f0ead6" : "#2f2b22" };
+  return { bg: `rgb(${c[0]}, ${c[1]}, ${c[2]})`, fg: lum < 0.5 ? cssToken("--chart-surface") : cssToken("--ink-strong") };
 }
 
 // 20分slot(0..71)を "HH:MM" へ。
@@ -312,7 +317,7 @@ function renderJoinContext(data) {
   }
   contextChart = new Chart(document.getElementById("an-context-chart"), {
     type: "bar",
-    data: { labels, datasets: [{ label: "入室/分", data: vals, backgroundColor: ["#a4502f", "#7a6a8e", "#4d4a3f"], borderWidth: 0 }] },
+    data: { labels, datasets: [{ label: "入室/分", data: vals, backgroundColor: [cssToken("--series-1"), cssToken("--series-2"), cssToken("--series-3")], borderWidth: 0 }] },
     options: {
       indexAxis: "y",
       responsive: true,
@@ -344,11 +349,11 @@ function periDatasets(data, hex) {
   const pts = (f) => lags.map((l, i) => ({ x: l, y: f(i) }));
   const hidden = { borderColor: "rgba(0,0,0,0)", pointRadius: 0, tension: 0.25, fill: false };
   // placebo帯は背景(砂色)と同系色で塗りだけでは埋もれるため、破線の輪郭で境界を明示する。
-  const plEdge = { borderColor: "rgba(111,106,89,0.85)", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0.25, fill: false };
+  const plEdge = { borderColor: cssTokenAlpha("--chart-ink", 0.85), borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0.25, fill: false };
   return [
     // placebo帯(灰): 下限→上限をfillで塗る。
     { ...plEdge, label: "_pl_lo", data: pts((i) => pl[i] - pci[i]) },
-    { ...plEdge, label: "placebo", data: pts((i) => pl[i] + pci[i]), fill: "-1", backgroundColor: "rgba(111,106,89,0.3)" },
+    { ...plEdge, label: "placebo", data: pts((i) => pl[i] + pci[i]), fill: "-1", backgroundColor: cssTokenAlpha("--chart-ink", 0.3) },
     // 実uplift 95%CI帯(暖色)。
     { ...hidden, label: "_ci_lo", data: pts((i) => up[i] - ci[i]) },
     { ...hidden, label: "95%CI", data: pts((i) => up[i] + ci[i]), fill: "-1", backgroundColor: _rgba(hex, 0.2) },
@@ -377,7 +382,7 @@ function renderPeri(canvasId, chart, data, hex) {
       },
       plugins: {
         legend: { display: false },
-        vline: { value: 0, color: "#6f6a59" },
+        vline: { value: 0, color: cssToken("--chart-ink") },
         tooltip: {
           ...nierTooltip(),
           filter: (item) => item.dataset.label === "入室の増減",
@@ -401,7 +406,7 @@ function renderShare(data) {
     setNote("an-share-note", `シェアのサンプルが不足しています（${fmtNum((data && data.n_events) || 0)}件）。`);
     return;
   }
-  shareChart = renderPeri("an-share-chart", shareChart, data, "#a4502f");
+  shareChart = renderPeri("an-share-chart", shareChart, data, cssToken("--series-1"));
   let msg =
     `入室はシェア後ピークで <b>${peakPct(data)}</b>（${data.peak.lag >= 0 ? "+" : ""}${data.peak.lag}s）。`;
   if (data.pre_rise) {
@@ -418,7 +423,7 @@ function renderBattle(data) {
     setNote("an-battle-note", `バトルのサンプルが不足しています（${fmtNum((data && data.n_events) || 0)}件）。`);
     return;
   }
-  battleChart = renderPeri("an-battle-chart", battleChart, data, "#4d6e6e");
+  battleChart = renderPeri("an-battle-chart", battleChart, data, cssToken("--series-4"));
   const ratio = ((data.ratio_metrics || {}).metrics || {}).joins || {};
   const ratioPct = ratio.median != null ? `${ratio.median >= 1 ? "+" : ""}${((ratio.median - 1) * 100).toFixed(1)}%` : "—";
   // 有意判定は「開始後(lag>0)」かつ「増加」のbinのみ。開始前の上振れは効果でなく
@@ -463,9 +468,9 @@ const gloveLabelPlugin = {
       const align = outside ? "left" : "right";
       // バーやグリッドに重なっても読めるよう背景チップを敷いてから描く
       const chipX = outside ? tx - PAD : tx - w - PAD;
-      ctx.fillStyle = "rgba(205, 198, 174, 0.9)";
+      ctx.fillStyle = cssTokenAlpha("--sand-panel", 0.9);
       ctx.fillRect(chipX, bar.y - 8, w + PAD * 2, 16);
-      ctx.fillStyle = b.gifts ? "#403d33" : "rgba(64, 61, 51, 0.5)";
+      ctx.fillStyle = b.gifts ? cssToken("--ink") : cssTokenAlpha("--ink", 0.5);
       ctx.textAlign = align;
       ctx.fillText(txt, tx, bar.y);
     });
@@ -480,7 +485,7 @@ function renderGloveCrit(data) {
   const vals = buckets.map((b) => (b.rate == null ? null : b.rate));
   // 抽選率(20〜30%)付近=暖色、それ未満=くすませる。件数0はtransparent。
   const colors = buckets.map((b) =>
-    b.gifts === 0 ? "rgba(0,0,0,0)" : b.rate >= 20 ? "rgba(164, 80, 47, 0.8)" : "rgba(169, 110, 73, 0.45)"
+    b.gifts === 0 ? "rgba(0,0,0,0)" : b.rate >= 20 ? cssToken("--ramp-5") : cssToken("--ramp-2")
   );
   const overall = data.overall_rate == null ? "—" : `${data.overall_rate.toFixed(1)}%`;
   if (!data.total_gifts) {
@@ -556,31 +561,24 @@ function renderRetention(data) {
   const joins = byHour.map((h) => h.join_rate);
   const viewers = byHour.map((h) => h.viewers);
   if (retentionHourChart) {
-    retentionHourChart.data.labels = labels;
-    retentionHourChart.data.datasets[0].data = joins;
-    retentionHourChart.data.datasets[1].data = viewers;
-    retentionHourChart.update();
+    retentionHourChart.update(labels, [joins, viewers]);
   } else {
-    retentionHourChart = new Chart(document.getElementById("an-retention-hour"), {
-      data: {
-        labels,
-        datasets: [
-          { type: "bar", label: "入室(件/分)", data: joins, backgroundColor: "rgba(164, 80, 47, 0.55)", borderWidth: 0, yAxisID: "y" },
-          { type: "line", label: "平均同接", data: viewers, borderColor: "#5d6e4e", backgroundColor: "#5d6e4e", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y2", spanGaps: true },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        scales: {
-          x: { ticks: { ...nierTicks(), autoSkip: false, maxTicksLimit: 24 }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "時刻", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
-          y: { beginAtZero: true, position: "left", ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("入室(件/分)") },
-          y2: { beginAtZero: true, position: "right", ticks: nierTicks(), grid: { drawOnChartArea: false }, title: vAxisTitle("平均同接(人)") },
+    // 入室の速さ(件/分)と同接(人)は単位が違う。二軸で重ねると、線が棒を上回る時刻に
+    // 意味があるように見えてしまうので、panelを分けて時刻軸だけ共有する。
+    retentionHourChart = createStackedTimeChart(document.getElementById("an-retention-hour"), {
+      xTicks: { autoSkip: false, maxTicksLimit: 24 },
+      panes: [
+        {
+          type: "bar", lead: true, title: "入室(件/分)",
+          datasets: [{ type: "bar", label: "入室(件/分)", data: [], backgroundColor: cssToken("--series-1"), borderWidth: 0 }],
         },
-        plugins: { legend: { display: true, labels: { ...nierTicks(), boxWidth: 12 } }, tooltip: { ...nierTooltip() } },
-      },
+        {
+          type: "line", title: "平均同接(人)",
+          datasets: [{ type: "line", label: "平均同接", data: [], borderColor: cssToken("--series-4"), backgroundColor: cssToken("--series-4"), borderWidth: 2, pointRadius: 2, tension: 0.25, spanGaps: true }],
+        },
+      ],
     });
+    retentionHourChart.update(labels, [joins, viewers]);
   }
 }
 
@@ -629,7 +627,7 @@ function renderDwell(data) {
   // 窓の少ない時刻は棒を薄くする。消すと「その時刻は配信が無い」に読めてしまうため、
   // 残したうえで参考値だと見て分かるようにする。
   const minWindows = data.hour_min_windows || 0;
-  const colors = counts.map((n) => (n >= minWindows ? "rgba(93, 110, 78, 0.6)" : "rgba(93, 110, 78, 0.18)"));
+  const colors = counts.map((n) => (n >= minWindows ? cssToken("--series-1") : cssTokenAlpha("--series-1", 0.3)));
   if (dwellHourChart) {
     dwellHourChart.data.labels = labels;
     dwellHourChart.data.datasets[0].data = values;
@@ -709,8 +707,8 @@ function renderDwell(data) {
   }
   if (eng.rho != null) {
     detail += eng.significant
-      ? ` 妥当性check: 滞在が長いと推定された配信ほど視聴時間あたりのCommentも多い傾向（同接を統制した偏順位相関 ρ=${eng.rho.toFixed(2)}・n=${fmtNum(eng.n)}・有意）。`
-      : ` <span class="an-warn">妥当性check: 視聴時間あたりのCommentとの関連は ρ=${eng.rho.toFixed(2)}（n=${fmtNum(eng.n)}）で有意ではありません。滞在時間の推定が別の指標から裏付けられてはいない点に留意してください。</span>`;
+      ? ` 妥当性check: 滞在が長いと推定された配信ほど視聴時間あたりのコメントも多い傾向（同接を統制した偏順位相関 ρ=${eng.rho.toFixed(2)}・n=${fmtNum(eng.n)}・有意）。`
+      : ` <span class="an-warn">妥当性check: 視聴時間あたりのコメントとの関連は ρ=${eng.rho.toFixed(2)}（n=${fmtNum(eng.n)}）で有意ではありません。滞在時間の推定が別の指標から裏付けられてはいない点に留意してください。</span>`;
   }
   setNote("an-dwell-note", line, detail);
 }
@@ -753,7 +751,7 @@ function renderActivation(data) {
     tension: 0.1,
     fill: false,
   });
-  const datasets = [mk(wl, "#a4502f"), mk(nl, "#5d6e4e")];
+  const datasets = [mk(wl, cssToken("--series-1")), mk(nl, cssToken("--series-4"))];
   if (activationChart) {
     activationChart.data.datasets = datasets;
     activationChart.update();
@@ -835,8 +833,8 @@ function renderActivation(data) {
 
 // ---- ⑥ 集中度(Lorenz曲線) ----
 function renderConcentration(data) {
-  renderLorenz("gift", "an-lorenz-gift", "an-conc-gift-note", "an-conc-gift-top", "コイン", data.gifts, "#a96e49");
-  renderLorenz("comment", "an-lorenz-comment", "an-conc-comment-note", "an-conc-comment-top", "Comment", data.comments, "#5d6e4e");
+  renderLorenz("gift", "an-lorenz-gift", "an-conc-gift-note", "an-conc-gift-top", "コイン", data.gifts, cssToken("--series-1"));
+  renderLorenz("comment", "an-lorenz-comment", "an-conc-comment-note", "an-conc-comment-top", "コメント", data.comments, cssToken("--series-4"));
 }
 function renderLorenz(key, canvasId, noteId, topId, unit, c, color) {
   if (!c) return;
@@ -852,7 +850,7 @@ function renderLorenz(key, canvasId, noteId, topId, unit, c, color) {
   const equality = [{ x: 0, y: 0 }, { x: 1, y: 1 }];
   const datasets = [
     { label: "実際", data: pts, borderColor: color, backgroundColor: color, borderWidth: 2, pointRadius: 0, tension: 0.1, fill: false },
-    { label: "全員均等", data: equality, borderColor: "#6f6a59", borderWidth: 1, borderDash: [4, 3], pointRadius: 0, fill: false },
+    { label: "全員均等", data: equality, borderColor: cssToken("--chart-ink"), borderWidth: 1, borderDash: [4, 3], pointRadius: 0, fill: false },
   ];
   if (lorenzCharts[key]) {
     lorenzCharts[key].data.datasets[0].data = pts;
@@ -871,7 +869,7 @@ function renderLorenz(key, canvasId, noteId, topId, unit, c, color) {
         y: { min: 0, max: 1, ticks: { ...nierTicks(), callback: (v) => Math.round(v * 100) + "%" }, grid: { color: NIER_GRID_COLOR }, title: vAxisTitle(`${unit}累積シェア`) },
       },
       plugins: {
-        legend: { labels: { color: "#4d4a3f", font: { family: "monospace", size: 10 }, boxWidth: 12, boxHeight: 8 } },
+        legend: { labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 10 }, boxWidth: 12, boxHeight: 8 } },
         tooltip: { ...nierTooltip(), callbacks: { label: (i) => `下位${Math.round(i.parsed.x * 100)}%の人で ${unit}の${Math.round(i.parsed.y * 100)}%` } },
       },
     },
@@ -901,8 +899,8 @@ function organicChartFor(canvasId, existing, bySlot) {
     return existing;
   }
   const datasets = [
-    { type: "line", label: "生の入室数", data: rawCnt, borderColor: "#918b78", backgroundColor: "#918b78", borderWidth: 2, pointRadius: 2, tension: 0.25, spanGaps: false },
-    { type: "line", label: "ノイズ除去後", data: orgCnt, borderColor: "#a4502f", backgroundColor: "#a4502f", borderWidth: 2.6, pointRadius: 2, tension: 0.25, spanGaps: false },
+    { type: "line", label: "生の入室数", data: rawCnt, borderColor: cssTokenAlpha("--chart-ink", 0.75), backgroundColor: cssTokenAlpha("--chart-ink", 0.75), borderWidth: 2, pointRadius: 2, tension: 0.25, spanGaps: false },
+    { type: "line", label: "ノイズ除去後", data: orgCnt, borderColor: cssToken("--series-1"), backgroundColor: cssToken("--series-1"), borderWidth: 2.6, pointRadius: 2, tension: 0.25, spanGaps: false },
   ];
   return new Chart(document.getElementById(canvasId), {
     data: { labels, datasets },
@@ -915,7 +913,7 @@ function organicChartFor(canvasId, existing, bySlot) {
         y: { beginAtZero: true, ticks: { ...nierTicks() }, grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("入室数(件)") },
       },
       plugins: {
-        legend: { labels: { color: "#4d4a3f", font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
+        legend: { labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
         tooltip: { ...nierTooltip() },
       },
     },
@@ -1106,7 +1104,7 @@ function renderEntrySource(data) {
     `入室 ${fmtNum(joins.total || 0)}件中 <b>流入元が届いたのは ${fmtNum(joins.measured || 0)}件（取得率 ${cov(joins.coverage)}）</b>`
     + `、フォロー関係は ${fmtNum(follow.measured || 0)}件（取得率 ${cov(follow.coverage)}）。`,
     `配信 ${fmtNum(data.n_sessions || 0)}本のうち ${fmtNum(data.n_sessions_measured || 0)}本で値を取得。`
-    + ` Comment/Gift ${fmtNum(engaged.total || 0)}件中 ${fmtNum(engaged.measured || 0)}件（取得率 ${cov(engaged.coverage)}）で配信者との関係を取得。`
+    + ` コメント/Gift ${fmtNum(engaged.total || 0)}件中 ${fmtNum(engaged.measured || 0)}件（取得率 ${cov(engaged.coverage)}）で配信者との関係を取得。`
     + roleText("sub", "うちサブスク") + roleText("mod", "モデレータ") + roleText("gg", "ギフト経験者")
     + ` 構成比の分母は値が届いた分のみです。届かなかった分（この機能より前に収集した入室）は構成比に含めていません。`
     + `流入元の表示名はTikTokが送る生値からの推定和訳で、生値は行にマウスを乗せると確認できます。`);
@@ -1125,37 +1123,29 @@ function renderQuality(data) {
     + (data.excluded ? ` 識別できない入室 ${fmtNum(data.excluded)}件は除外しています。` : "")
     + ` 「新規」はこの監視で初めて観測した人。監視を始めた直後は以前からの常連も新規に数えられて高めに出ます。他の監視配信者で観測済みの人は常連扱いです。`);
 
-  const datasets = [
-    { type: "bar", label: "新規", data: news, backgroundColor: "#a4502f", stack: "j", yAxisID: "y" },
-    { type: "bar", label: "常連", data: rets, backgroundColor: "#4d4a3f", stack: "j", yAxisID: "y" },
-    { type: "line", label: "新規率", data: ratio, borderColor: "#9b8c52", backgroundColor: "#9b8c52", borderWidth: 2, pointRadius: 2, tension: 0.25, yAxisID: "y2", spanGaps: true },
-  ];
   if (qualityChart) {
-    qualityChart.data.labels = labels;
-    qualityChart.data.datasets[0].data = news;
-    qualityChart.data.datasets[1].data = rets;
-    qualityChart.data.datasets[2].data = ratio;
-    qualityChart.update();
+    qualityChart.update(labels, [[news, rets], ratio]);
     return;
   }
-  qualityChart = new Chart(document.getElementById("an-quality-chart"), {
-    type: "bar",
-    data: { labels, datasets },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      scales: {
-        x: { stacked: true, ticks: { ...nierTicks(), autoSkip: false, maxTicksLimit: 24 }, grid: { color: NIER_GRID_COLOR }, title: { display: true, text: "時刻", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } } },
-        y: { stacked: true, beginAtZero: true, position: "left", ticks: nierTicks(), grid: { color: NIER_GRID_COLOR }, title: vAxisTitle("入室数(人)") },
-        y2: { beginAtZero: true, max: 100, position: "right", ticks: nierTicks(), grid: { drawOnChartArea: false }, title: vAxisTitle("新規率(%)") },
+  // 人数(人)と新規率(%)は単位が違う。二軸で重ねると、率の線が積み棒のどこを横切るかに
+  // 意味があるように見えるので、panelを分けて時刻軸だけ共有する。
+  qualityChart = createStackedTimeChart(document.getElementById("an-quality-chart"), {
+    xTicks: { autoSkip: false, maxTicksLimit: 24 },
+    panes: [
+      {
+        type: "bar", lead: true, stacked: true, title: "入室数(人)",
+        datasets: [
+          { type: "bar", label: "新規", data: [], backgroundColor: cssToken("--series-1"), stack: "j" },
+          { type: "bar", label: "常連", data: [], backgroundColor: cssToken("--series-3"), stack: "j" },
+        ],
       },
-      plugins: {
-        legend: { labels: { color: "#4d4a3f", font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
-        tooltip: { ...nierTooltip() },
+      {
+        type: "line", title: "新規率(%)", max: 100,
+        datasets: [{ type: "line", label: "新規率", data: [], borderColor: cssToken("--series-4"), backgroundColor: cssToken("--series-4"), borderWidth: 2, pointRadius: 2, tension: 0.25, spanGaps: true }],
       },
-    },
+    ],
   });
+  qualityChart.update(labels, [[news, rets], ratio]);
 }
 
 // ---- ⑪ 収集カバレッジ ----
@@ -1274,8 +1264,11 @@ function requestSection(section, q, signal) {
   return fetchJSON(`/api/analytics/${section.api}?${q}${section.extra ? section.extra() : ""}`, signal)
     .then((data) => {
       if (sectionGen.get(section.key) !== gen) return true;
-      safeRender(section.key, section.render, data);
-      return true;
+      if (safeRender(section.key, section.render, data)) return true;
+      if (section.note) {
+        setNote(section.note, `<span class="an-warn">描画に失敗しました。グラフは前回の表示が残っている場合があります。</span>`);
+      }
+      return false;
     })
     .catch((err) => {
       if (sectionGen.get(section.key) !== gen) return true;
@@ -1310,6 +1303,13 @@ function loadAll() {
       done += 1;
       if (!ok) failed += 1;
       setStatus(done < total ? `更新中… ${done}/${total}` : finishedStatus(failed));
+      // 「取得失敗 N件」は画面上端の小さなspanで、押した後にそこへ視線を戻す理由がない。
+      // 前の期間のグラフが残ったまま新しい期間の結果として読まれるので、1度だけ名乗る。
+      if (done === total && failed) {
+        showToast(
+          `${fmtNum(failed)}件のsectionを更新できませんでした。図は前回の表示が残っている場合があります（該当sectionの注記に印があります）。`,
+          "error", { title: "全体解析の更新" });
+      }
     });
   });
 }
@@ -1325,7 +1325,7 @@ function loadTimeIndex() {
 // (手書きの目次は追加・削除で必ずずれる)。
 const HEADING_CONTROL_TAGS = /^(SELECT|OPTION|INPUT|BUTTON|LABEL)$/;
 
-// 見出しの文字。<select>を含むとoption文字列(「入室」「Comment」…)まで連結され、
+// 見出しの文字。<select>を含むとoption文字列(「入室」「コメント」…)まで連結され、
 // chipのtitleが選択肢の羅列になる。form controlだけを外し、見出しの一部であるspan
 // (①の指標名)は残す。
 function headingText(heading) {
@@ -1388,42 +1388,36 @@ function syncPeriodUrl() {
   history.replaceState(history.state, "", `${url.pathname}${url.search}${location.hash}`);
 }
 
+// URLで名指しされた期間は保存値より強い。貼られたlinkは、開いた人がいつも見ている期間
+// ではなくlinkの期間で開かないと、同じURLが人によって別の集計を指すことになる。
+// 保存値はこの前にbindPrefが当てているので、ここはURLの分だけを上書きする。
 function initPeriod() {
   const fromUrl = new URLSearchParams(location.search).get("days");
-  const stored = localStorage.getItem(PERIOD_KEY);
-  const wanted = [fromUrl, stored].find((v) => v != null && hasOption(elPeriod, v));
-  if (wanted != null) elPeriod.value = String(wanted);
+  if (fromUrl != null && hasOption(elPeriod, fromUrl)) elPeriod.value = String(fromUrl);
   syncPeriodUrl();
 }
 
-function bindViewToggle(el, key, rerender) {
-  if (!el) return;
-  el.checked = localStorage.getItem(key) === "1";
-  el.addEventListener("change", () => {
-    localStorage.setItem(key, el.checked ? "1" : "0");
-    rerender();
-  });
+function rerenderTimeIndex() {
+  if (lastTimeIndex) safeRender("time-index", renderTimeIndex, lastTimeIndex);
 }
 
+// 期間と①の指標は「選び直す物」なので残す。復元でonChangeは呼ばれないため、初回の集計は
+// 末尾のloadAll()1回だけで、保存値を当てるための取り直しは起きない。
+bindPref(elPeriod, PERIOD_KEY, () => {
+  syncPeriodUrl();
+  loadAll();
+});
 initPeriod();
 buildSectionIndex();
 openDetailsTarget(location.hash);
 
-elPeriod.addEventListener("change", () => {
-  localStorage.setItem(PERIOD_KEY, elPeriod.value);
-  syncPeriodUrl();
-  loadAll();
-});
-elTiMetric.addEventListener("change", loadTimeIndex);
+// ①の指標はrequestのparameter(SECTIONS.extra)なので、loadAll()より前に戻し終える。
+bindPref(elTiMetric, TI_METRIC_KEY, loadTimeIndex);
 document.getElementById("an-reload").addEventListener("click", loadAll);
 
 // 見せ方だけのcontrolは再取得しない。直前の応答から描き直す。
-bindViewToggle(elTiNumbers, TI_NUMBERS_KEY, () => {
-  if (lastTimeIndex) safeRender("time-index", renderTimeIndex, lastTimeIndex);
-});
-bindViewToggle(elTiEmpty, TI_EMPTY_KEY, () => {
-  if (lastTimeIndex) safeRender("time-index", renderTimeIndex, lastTimeIndex);
-});
+bindPref(elTiNumbers, TI_NUMBERS_KEY, rerenderTimeIndex);
+bindPref(elTiEmpty, TI_EMPTY_KEY, rerenderTimeIndex);
 // WS接続はServer接続表示の維持のみ(重い集計を毎tick再計算しない)。
 connectWS(() => {});
 loadAll();

@@ -54,12 +54,12 @@
       <!-- ① 時間帯インデックス -->
       <section class="result-block an-col1" id="an-s1">
         <h3 class="result-subtitle">■ ① <span id="an-ti-title-metric">入室</span>が多いのはいつか</h3>
-        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body"><b>縦＝20分刻みの時刻・横＝曜日</b>のマスです。各配信の平均入室を <b>1.0</b> としたとき、その20分の入室が<b>何倍か</b>を表します（例: 1.40なら平均の1.4倍）。暖色が濃いほど平均より多い時間帯。右端<b>全部</b>は全曜日をまとめた値（中央値・合計ではありません）。マスにカーソルを合わせると倍率と観測数(配信×日)が出ます。<b>マスに数値を表示</b>を入れると倍率を直接書き込みます（648マス全部に数字が乗ると色の濃淡が読めなくなるため既定は色だけです）。指標は入室・Comment・コインなどに切替できます。<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。</div></details>
+        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body"><b>縦＝20分刻みの時刻・横＝曜日</b>のマスです。各配信の平均入室を <b>1.0</b> としたとき、その20分の入室が<b>何倍か</b>を表します（例: 1.40なら平均の1.4倍）。暖色が濃いほど平均より多い時間帯。右端<b>全部</b>は全曜日をまとめた値（中央値・合計ではありません）。マスにカーソルを合わせると倍率と観測数(配信×日)が出ます。<b>マスに数値を表示</b>を入れると倍率を直接書き込みます（648マス全部に数字が乗ると色の濃淡が読めなくなるため既定は色だけです）。指標は入室・コメント・コインなどに切替できます。<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。</div></details>
         <div class="an-ti-ctls">
           <label class="an-ctl">指標
             <select id="an-ti-metric">
               <option value="joins">入室</option>
-              <option value="comments">Comment</option>
+              <option value="comments">コメント</option>
               <option value="diamonds">コイン</option>
               <option value="likes">Like</option>
               <option value="follows">Follow</option>
@@ -76,7 +76,7 @@
       <!-- ①' organic入室(ノイズ除去した時間帯の関心) -->
       <section class="result-block an-col1" id="an-s1d">
         <h3 class="result-subtitle">■ ①' ノイズを除くと時間帯別の入室はどう変わるか</h3>
-        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">生の入室数には、配信内容に関心のない一時的な流入（<b>宝箱狙いの外国勢・運営boost・シェア直後の瞬間流入・配信開始直後の初速</b>）が混ざります。そこで各入室に、その後の<b>再訪・入室後の反応・レベル</b>から「質の重み」を付け、質の低い入室を割り引いて足し直したのがこのグラフです。<b>灰線＝生の入室数、暖色線＝割り引き後（本来の関心による入室）</b>。重みは常に1以下のため<b>暖色はどの時間帯も灰より低く</b>なります。見るのは上下ではなく<b>灰との差（ギャップ）</b>で、差が大きい帯ほど一時的な流入で水増しされていた帯です（gift・Commentの実勢との一致はデータ量の多い配信者で確認済み。データが薄い場合は参考程度に。提案書§15）。<b>平日（月〜金）と休日（土日）</b>で分けています（祝日は曜日で判別できないため休日に含みません）。時間帯は<b>15分刻み</b>のまま、<a href="#an-s1">①</a>と同様に<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。<br /><b class="an-warn">母集団の注意：</b>この数値は<a href="#an-caveats">入室eventが記録された人</a>に限られます。<br /><b class="an-warn">この重み付けには、重み以前の問題として母集団の偏りがあります。</b>「再訪・入室後の反応・レベル」で質を測っていますが、<b>その対象となる入室そのものが、熱心な視聴者ほど記録されていません</b>（<a href="#an-s14">⑭</a>）。つまり重みの係数が正しいかどうかとは別に、<b>質の高い入室が母集団から先に抜けている</b>という系統誤差が乗っています。グレーとの差（ギャップ）の大小は、この偏りの上でのものとして読んでください。<br /><b class="an-warn">同接の注意：</b><a href="#an-caveats">同接が保存されている配信</a>だけが対象です。</div></details>
+        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">生の入室数には、配信内容に関心のない一時的な流入（<b>宝箱狙いの外国勢・運営boost・シェア直後の瞬間流入・配信開始直後の初速</b>）が混ざります。そこで各入室に、その後の<b>再訪・入室後の反応・レベル</b>から「質の重み」を付け、質の低い入室を割り引いて足し直したのがこのグラフです。<b>灰線＝生の入室数、暖色線＝割り引き後（本来の関心による入室）</b>。重みは常に1以下のため<b>暖色はどの時間帯も灰より低く</b>なります。見るのは上下ではなく<b>灰との差（ギャップ）</b>で、差が大きい帯ほど一時的な流入で水増しされていた帯です（gift・コメントの実勢との一致はデータ量の多い配信者で確認済み。データが薄い場合は参考程度に。提案書§15）。<b>平日（月〜金）と休日（土日）</b>で分けています（祝日は曜日で判別できないため休日に含みません）。時間帯は<b>15分刻み</b>のまま、<a href="#an-s1">①</a>と同様に<b>20分経つ前に終了した短時間配信は集計から除外</b>しています。<br /><b class="an-warn">母集団の注意：</b>この数値は<a href="#an-caveats">入室eventが記録された人</a>に限られます。<br /><b class="an-warn">この重み付けには、重み以前の問題として母集団の偏りがあります。</b>「再訪・入室後の反応・レベル」で質を測っていますが、<b>その対象となる入室そのものが、熱心な視聴者ほど記録されていません</b>（<a href="#an-s14">⑭</a>）。つまり重みの係数が正しいかどうかとは別に、<b>質の高い入室が母集団から先に抜けている</b>という系統誤差が乗っています。グレーとの差（ギャップ）の大小は、この偏りの上でのものとして読んでください。<br /><b class="an-warn">同接の注意：</b><a href="#an-caveats">同接が保存されている配信</a>だけが対象です。</div></details>
         <div class="an-organic-pair">
           <div class="an-organic-col">
             <div class="result-subtitle an-subhead" id="an-organic-wd-head">平日（月〜金）</div>
@@ -142,13 +142,13 @@
         <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">時刻別に<b>入室の速さ(棒・件/分)と平均同接(線)を並べました</b>。棒は観測1分あたりに直してあり、配信本数の多い時刻ほど高く見える偏りはありません。上の1数値は、入室があった時間の同接の動きから入室のない時間の自然な増減を差し引いた<b>「1入室あたりの同接押し上げ」の推定値</b>です。入室は再入室・間引きを含む概算のため、厳密な定着率ではなく目安として見てください。<br /><b class="an-warn">母集団の注意：</b>この数値は<a href="#an-caveats">入室eventが記録された人</a>に限られます。<br /><b class="an-warn">同接の注意：</b><a href="#an-caveats">同接が保存されている配信</a>だけが対象です。</div></details>
         <div class="an-legendline" id="an-retention-note"></div>
         <details class="an-help an-note-more" id="an-retention-note-more" hidden><summary>この節の但し書き（統計の作法）</summary><div class="an-help-body"></div></details>
-        <div class="x-chartwrap an-chart-short"><canvas id="an-retention-hour"></canvas></div>
+        <div class="x-chartstack an-chart-short" id="an-retention-hour"></div>
       </section>
 
       <!-- ⑥ ギフト / コメント集中度 -->
       <section class="result-block an-col1" id="an-s6">
-        <h3 class="result-subtitle">■ ⑥ コイン・Commentは何人に偏っているか</h3>
-        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">コイン・Commentが少数の<b>重課金者・常連</b>にどれだけ偏っているかを、<b>Lorenz曲線とGini係数</b>で見ます。曲線が対角線(＝全員均等)から<b>下に膨らむほど偏りが大きい</b>。下のタグ＝上位N%が全体の何%を占めるか。Giniは0が均等で、大きいほど少数への偏りが強い指標です。対象は<b>コインを送った人・Commentした人のみ</b>（無言の視聴者は含みません）。人数nが少ないとGiniの上限は約(n-1)/nまでしか届かない点に注意してください。</div></details>
+        <h3 class="result-subtitle">■ ⑥ コイン・コメントは何人に偏っているか</h3>
+        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">コイン・コメントが少数の<b>重課金者・常連</b>にどれだけ偏っているかを、<b>Lorenz曲線とGini係数</b>で見ます。曲線が対角線(＝全員均等)から<b>下に膨らむほど偏りが大きい</b>。下のタグ＝上位N%が全体の何%を占めるか。Giniは0が均等で、大きいほど少数への偏りが強い指標です。対象は<b>コインを送った人・コメントした人のみ</b>（無言の視聴者は含みません）。人数nが少ないとGiniの上限は約(n-1)/nまでしか届かない点に注意してください。</div></details>
         <div class="an-grid2">
           <div>
             <div class="an-legendline" id="an-conc-gift-note"></div>
@@ -167,7 +167,7 @@
       <section class="result-block an-col1" id="an-s7">
         <h3 class="result-subtitle">■ ⑦ 入室者のうち何割が新規か</h3>
         <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">入室者のうち<b>初めて来た人(新規)</b>の割合を時間帯別に表します。棒＝新規/常連の<b>人数（時間帯ごとのユニーク人数・再入室は1人と数える）</b>、線＝<b>新規率(%)</b>。「新規」は<b>この監視ツールが初めて観測した人</b>のことで、監視を始めた直後は以前からの常連も新規に数えられ高めに出ます。他の監視配信者で観測済みの人は常連扱いです。<br /><b class="an-warn">母集団の注意：</b>この数値は<a href="#an-caveats">入室eventが記録された人</a>に限られます。</div></details>
-        <div class="x-chartwrap an-chart-short"><canvas id="an-quality-chart"></canvas></div>
+        <div class="x-chartstack an-chart-short" id="an-quality-chart"></div>
         <div class="an-legendline" id="an-quality-note"></div>
         <details class="an-help an-note-more" id="an-quality-note-more" hidden><summary>この節の但し書き（統計の作法）</summary><div class="an-help-body"></div></details>
       </section>
@@ -207,7 +207,7 @@
       <!-- ⑭ 入室後の初回反応(activation funnel) -->
       <section class="result-block" id="an-s14">
         <h3 class="result-subtitle">■ ⑭ 入室した人はどれくらいで反応するか</h3>
-        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">入室した人が、その配信の中で<b>最初にComment・いいね・ギフト・フォロー・シェアのいずれかを行うまでの時間</b>と、<b>何もせず去る割合</b>です。縦軸は「入室からその時間までに反応した人の割合」で、右へ行くほど積み上がります。<br />
+        <details class="an-help"><summary>解説を読む</summary><div class="an-help-body">入室した人が、その配信の中で<b>最初にコメント・いいね・ギフト・フォロー・シェアのいずれかを行うまでの時間</b>と、<b>何もせず去る割合</b>です。縦軸は「入室からその時間までに反応した人の割合」で、右へ行くほど積み上がります。<br />
         配信終了で観測が切れた人を「反応しなかった」と数えると反応率が下に歪むため、<b>打ち切りを扱えるKaplan-Meier法</b>で推定しています。信頼区間は、同じ配信の視聴者は独立ではないため<b>配信を単位にした再抽出（bootstrap）</b>で求めています。<br />
         <b class="an-warn">2本の線は必ず両方を見てください。</b>いいねはTikTokが<b>まとめ送り</b>する（1件あたり平均13.9個）ため、記録される時刻は<b>実際にタップした時刻より遅く</b>なります。一方いいねは初回反応の<b>6割</b>を占めるため、除くと反応の大半が消えます。<b>含む線は「遅く見える」方向に、除く線は「反応が少なく見える」方向に</b>、それぞれ逆向きに歪みます。</div></details>
         <div class="a-kpibar an-conc-top" id="an-act-kpi"></div>

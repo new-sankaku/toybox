@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadCommon } from "./helpers/page.js";
 
 // Timelineのbucket集計。ここは**桁が違うだけの嘘**が出る場所で、線は普通に描かれるので
-// 気付かれない。特に危ないのが2つ:
-//   - 同接(level)を合計してしまう … bucketを束ねた瞬間に「同接3000人」のような値が出る
+// 気付かれない。bucketは束ねずに1本=1点で描くので、値はDBのbucketそのものが出るのが正しい。
+// 危ないのは2つ:
 //   - 欠損bucketの同接を0にしてしまう … 実際には続いていた配信が急落したように見える
-// 集計の指定は TIMELINE_SERIES の agg("sum" / "last")が唯一の根拠。
+//   - 表示上限での切り詰めを取り違える … 残すのは新しい側で、古い側から落とす
 describe("common.js のTimeline集計", () => {
   let page;
   let win;
@@ -38,15 +38,19 @@ describe("common.js のTimeline集計", () => {
     };
   }
 
-  // 表示上限(CHART_DISPLAY_LIMIT)での切り詰めが先、束ねはその後。順序を取り違えると
-  // 束ねる本数が変わり、件数系列の1点あたりの意味が静かにずれる。
-  const GROUP_OF = (count) => {
-    const kept = Math.min(count, page.get("CHART_DISPLAY_LIMIT"));
-    return Math.ceil(kept / page.get("TIMELINE_MAX_POINTS"));
-  };
+  // 上限は本数ではなく時間で持ち、bucket幅から本数を出す。本数をベタ書きすると、
+  // bucket_secondsを変えた瞬間に「描く時間の長さ」が黙って変わる。
+  it("表示上限はbucket幅から計算する(時間で持つ)", () => {
+    const hours = page.get("TIMELINE_SPAN_HOURS");
+    const ceiling = page.get("TIMELINE_MAX_POINTS");
+    expect(win.timelineDisplayLimit(60)).toBe((hours * 3600) / 60);
+    expect(win.timelineDisplayLimit(30)).toBe((hours * 3600) / 30);
+    // 細かいbucketでは時間側でなく点数の天井が効く(際限なく増やさない)。
+    expect(win.timelineDisplayLimit(1)).toBe(ceiling);
+  });
 
-  it("同接と件数で集計の仕方が違う(同接は合計しない)", () => {
-    // 540 bucket: 表示上限(720)には掛からず、上限点数(180)は超えるので必ず束ねられる。
+  it("bucketは束ねない(1本=1点で、値はbucketそのまま)", () => {
+    // 540 bucket: 旧実装では上限点数(180)を超えて3本ずつ束ねられていた本数。
     const rows = [];
     for (let i = 0; i < 540; i += 1) {
       rows.push({ diamonds: 1, viewers: 100, comments: 2, likes: 0 });
@@ -54,45 +58,39 @@ describe("common.js のTimeline集計", () => {
     chart.update(buckets(rows), []);
     const s = series();
 
-    const group = GROUP_OF(540);
-    expect(group).toBe(3);
-    // 件数は束ねた本数ぶん積み上がる。
-    expect(s.diamonds[0]).toBe(group * 1);
-    expect(s.comments[0]).toBe(group * 2);
-    // 同接はどれだけ束ねても人数のまま。
+    expect(s.labels).toHaveLength(540);
+    // 束ねていれば diamonds[0] は3、comments[0] は6になる。
+    expect(s.diamonds[0]).toBe(1);
+    expect(s.comments[0]).toBe(2);
     expect(s.viewers.every((v) => v === 100)).toBe(true);
   });
 
-  it("束ねた同接はその窓の最後の値になる(平均でも最大でもない)", () => {
+  it("同接も束ねずbucketの値がそのまま並ぶ", () => {
     const rows = [];
     for (let i = 0; i < 540; i += 1) {
       rows.push({ diamonds: 0, viewers: i, comments: 0, likes: 0 });
     }
     chart.update(buckets(rows), []);
     const s = series();
-    const group = GROUP_OF(540);
-    // 1つ目の窓は 0..group-1 を束ねるので、最後の値 = group-1。
-    expect(s.viewers[0]).toBe(group - 1);
-    expect(s.viewers[1]).toBe(2 * group - 1);
+    expect(s.viewers.slice(0, 3)).toEqual([0, 1, 2]);
+    expect(s.viewers[539]).toBe(539);
   });
 
-  it("切り詰めてから束ねる(束ねてから切り詰めない)", () => {
-    const limit = page.get("CHART_DISPLAY_LIMIT");
+  it("表示上限を超えたら古い側から切り詰める(新しい側は必ず残る)", () => {
+    const limit = win.timelineDisplayLimit(10);
     const rows = [];
-    for (let i = 0; i < 1000; i += 1) {
+    for (let i = 0; i < limit + 280; i += 1) {
       rows.push({ diamonds: 1, viewers: i, comments: 0, likes: 0 });
     }
     chart.update(buckets(rows), []);
     const s = series();
-    // 1000本を先に720本へ切り詰めるので、束ねる本数は ceil(720/180)=4。
-    // 先に束ねていたなら ceil(1000/180)=6 になる。
-    expect(GROUP_OF(1000)).toBe(4);
-    expect(s.diamonds[0]).toBe(4);
-    // 残るのは新しい側の720本(index 280..999)なので、最初の窓の最終値は283。
-    expect(s.viewers[0]).toBe(1000 - limit + 3);
+    expect(s.labels).toHaveLength(limit);
+    // 残るのは新しい側のlimit本(index 280..)。
+    expect(s.viewers[0]).toBe(280);
+    expect(s.viewers[limit - 1]).toBe(limit + 279);
   });
 
-  it("束ねない量なら値がそのまま出る", () => {
+  it("短い配信は当然そのまま出る", () => {
     chart.update(
       buckets([
         { diamonds: 5, viewers: 10, comments: 1, likes: 0 },
@@ -129,7 +127,7 @@ describe("common.js のTimeline集計", () => {
 
   it("先頭を切り詰めても、最初の点は0ではなく切り詰め前の同接から続く", () => {
     const size = 10;
-    const limit = page.get("CHART_DISPLAY_LIMIT");
+    const limit = win.timelineDisplayLimit(10);
     const rows = [];
     // 表示上限より多く並べ、古い側の同接だけ別の値にしておく。
     for (let i = 0; i < limit + 50; i += 1) {
@@ -138,17 +136,18 @@ describe("common.js のTimeline集計", () => {
     chart.update(buckets(rows, size), []);
     const s = series();
     // 切り詰めで残るのは新しい側だけ。
-    expect(s.labels.length).toBeLessThanOrEqual(page.get("TIMELINE_MAX_POINTS"));
+    expect(s.labels).toHaveLength(limit);
     expect(s.viewers.every((v) => v === 100)).toBe(true);
   });
 
   it("表示点数は上限を超えない", () => {
+    const limit = win.timelineDisplayLimit(10);
     const rows = [];
-    for (let i = 0; i < 3000; i += 1) {
+    for (let i = 0; i < limit + 1000; i += 1) {
       rows.push({ diamonds: 1, viewers: 5, comments: 0, likes: 0 });
     }
     chart.update(buckets(rows), []);
-    expect(series().labels.length).toBeLessThanOrEqual(page.get("TIMELINE_MAX_POINTS"));
+    expect(series().labels).toHaveLength(limit);
   });
 
   it("bucketが1件も無ければ前回の線を消す(古い線を残さない)", () => {
@@ -160,7 +159,7 @@ describe("common.js のTimeline集計", () => {
     expect(s.labels).toEqual([]);
   });
 
-  it("最大値は束ねた後の系列から採る(同接は人数、件数は窓の合計)", () => {
+  it("最大値は描いている系列から採る(bucketの最大値そのもの)", () => {
     const peaks = () =>
       Array.from(page.document.querySelectorAll(".a-spark-peak")).map((el) => el.textContent);
     chart.update(

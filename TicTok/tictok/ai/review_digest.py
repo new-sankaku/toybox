@@ -170,10 +170,10 @@ def _coverage_digest(coverage: dict) -> dict:
         "欠測を計測できたsession数": coverage["gaps"]["n_sessions"],
         "同接sampling間隔_中央値秒": coverage["sampling"]["median"]["median"],
         "録画率_percent中央値": coverage["recording"]["ratio"]["median"],
-        # analytics側は録画率をpercent、転写率を比率で返す。単位を揃えずに渡すと
+        # analytics側は録画率をpercent、文字起こし率を比率で返す。単位を揃えずに渡すと
         # modelが比率をそのままpercentとして読み(0.9451→"0.9451%")、100倍ずれた
         # 講評になる。ここでpercentへ統一し、key名にも単位を明示する。
-        "転写率_percent": _ratio_percent(coverage["transcript"]["ratio"]),
+        "文字起こし率_percent": _ratio_percent(coverage["transcript"]["ratio"]),
         "n_sessions": coverage["n_sessions"],
         "note": "収集の健全性。欠測が大きいsessionが多いほど、他の指標の推定も粗くなる。",
     }

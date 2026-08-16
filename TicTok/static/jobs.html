@@ -37,7 +37,11 @@
           <option value="all">全て</option>
         </select>
       </label>
+      <!-- 絞り込みと同じ範囲に効く一括取消。1本ずつの取り消しは行のbuttonが持つが、
+           数百本の一括投入を止める手段がここにしか無い(投入した画面には台帳が無い)。 -->
+      <button id="job-cancel-all" class="btn btn-danger btn-small" type="button">表示中の未終了をまとめて取消</button>
       <span class="sp"></span>
+      <span id="job-failed-note" class="chart-note"></span>
       <span id="job-limit-note" class="chart-note"></span>
       <span id="gpu-summary" class="chart-note"></span>
       <span id="stt-summary" class="chart-note"></span>

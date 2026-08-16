@@ -106,3 +106,34 @@ async def streamer_profile(unique_id: str) -> dict:
 @router.get("/api/streamers/{unique_id}/cohort")
 async def streamer_cohort(unique_id: str) -> dict:
     return await asyncio.to_thread(runtime.storage.streamer_cohort, unique_id)
+
+
+@router.get("/api/streamers/{unique_id}/ranking")
+async def streamer_gifter_ranking(unique_id: str, granularity: str = "month",
+                                  period: str = "") -> dict:
+    """Gifter / Battle Gifterを暦の期間(月・週・日)で切ったランキング。periodを省くと
+    最新の期間を返す。profileとは別の口にしてあるのは、期間を変えるたびに通算集計
+    (session全件・battle全件)を引き直さないためである。"""
+    try:
+        return await asyncio.to_thread(
+            runtime.storage.streamer_gifter_ranking, unique_id, granularity, period)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/streamers/{unique_id}/matrix")
+async def streamer_gifter_matrix(
+    unique_id: str, granularity: str = "day", since: str = "", until: str = "",
+    columns: int = 0,
+) -> dict:
+    """期間 × Gifter の一覧。rankingが1期間の断面なのに対し、こちらは期間を跨いで同じ人を
+    横へ並べる。1回の応答にGifterとBattle Gifterの両方が入る。
+
+    since/untilはカレンダーで選んだ日付('YYYY-MM-DD')で、その日の属する期間まで含む。
+    """
+    try:
+        return await asyncio.to_thread(
+            runtime.storage.streamer_gifter_matrix, unique_id, granularity,
+            since, until, columns)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

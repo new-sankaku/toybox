@@ -24,6 +24,7 @@ from tictok.core.config import get_db_backup_before_migration
 
 from tictok.store._common import (
     _MIGRATION_BACKUP_KEY,
+    _SEARCH_FOLD_KEY,
     _SQLITE_FATAL_ERRORNAMES,
     _SQLITE_FATAL_MESSAGES,
     _migration_versions,
@@ -78,12 +79,17 @@ class MaintenanceMixin:
             has_rows = self._conn.execute(
                 "SELECT 1 WHERE EXISTS(SELECT 1 FROM battles)"
                 " OR EXISTS(SELECT 1 FROM transcripts)").fetchone() is not None
+            # cut_listの統合は表そのものを落とす。上の2表が空でも、畳む行が残っていれば
+            # 守る対象は在る。
+            if not has_rows and self._has_table("cut_list"):
+                has_rows = self._conn.execute(
+                    "SELECT 1 WHERE EXISTS(SELECT 1 FROM cut_list)").fetchone() is not None
         if done == versions:
             return {"taken": False, "skipped": "already_migrated", "versions": versions}
         if not has_rows:
-            # migrationが書き換えるのはbattles表(glove/topo)とtranscripts表(timemap)だけ。
-            # どちらも空なら守る対象が無い(新規DBの初回起動)。片方だけを見ていると、そちらが
-            # 空のDBで退避されないまま、もう片方の書き換えが走る。
+            # migrationが書き換えるのはbattles表(glove/topo)・transcripts表(timemap)・
+            # cut_list表(統合)だけ。どれも空なら守る対象が無い(新規DBの初回起動)。
+            # 1つだけを見ていると、そちらが空のDBで退避されないまま他の書き換えが走る。
             return {"taken": False, "skipped": "no_rows", "versions": versions}
         try:
             result = dbmaint.create_backup(
@@ -215,8 +221,8 @@ class MaintenanceMixin:
         return any(marker in message for marker in _SQLITE_FATAL_MESSAGES)
 
     def _migrate(self) -> None:
-        # 転写時のmedia時間軸mapの版と実測drift。これが無いと、gapless復号由来のズレを
-        # 含む既存transcript(=再転写対象)をqueryで母集団として抽出できない。
+        # 文字起こし時のmedia時間軸mapの版と実測drift。これが無いと、gapless復号由来のズレを
+        # 含む既存transcript(=再文字起こし対象)をqueryで母集団として抽出できない。
         transcript_columns = [
             row["name"] for row in self._conn.execute("PRAGMA table_info(transcripts)")
         ]
@@ -224,6 +230,11 @@ class MaintenanceMixin:
             ("timemap_version", "INTEGER"),
             ("timemap_anchors", "INTEGER"),
             ("timemap_drift_seconds", "REAL"),
+            # 語ごとの時刻を持つか。持たない文字起こしはcueを語の端で締められず、segmentの終端が
+            # 次のsegmentの開始まで伸びたまま出る(実測: SRTがtimelineを覆う割合が中央値
+            # 97.7%。実発話は約30%)。segments_jsonを毎回舐めずに「再文字起こしが要る母集団」を
+            # queryで引けるよう、行に持たせる。
+            ("word_times", "INTEGER"),
         ):
             if name not in transcript_columns:
                 self._conn.execute(f"ALTER TABLE transcripts ADD COLUMN {name} {decl}")
@@ -232,6 +243,22 @@ class MaintenanceMixin:
                     extra={"event": "storage.schema_migrated",
                            "ctx": {"table": "transcripts", "column": name}},
                 )
+        if "word_times" not in transcript_columns:
+            # 既存行の埋め戻し。segments_jsonはJSONへ起こさず文字列のまま探す(1本800KB級を
+            # 331本parseすると起動がそのぶん延びる)。語を持つ文字起こしは必ず ``"words":`` を含む。
+            filled = self._conn.execute(
+                "UPDATE transcripts SET word_times ="
+                " CASE WHEN instr(segments_json, '\"words\"') > 0 THEN 1 ELSE 0 END"
+            ).rowcount
+            with_words = self._conn.execute(
+                "SELECT COUNT(*) FROM transcripts WHERE word_times = 1").fetchone()[0]
+            logger.info(
+                "既存transcript %d 件のword_timesを判定しました（語の時刻あり %d 件）",
+                filled, with_words,
+                extra={"event": "storage.schema_backfilled",
+                       "ctx": {"table": "transcripts", "column": "word_times",
+                               "rows": filled, "with_word_times": with_words}},
+            )
         recording_columns = [
             row["name"] for row in self._conn.execute("PRAGMA table_info(recordings)")
         ]
@@ -243,6 +270,107 @@ class MaintenanceMixin:
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "recordings", "column": "time_axis"}},
             )
+        # 笑い声indexを最後に張った条件(rule版と共演の除外設定)。既存行はNULLのまま残す
+        # ―― 過去のindexは共演中を外していないので、現行の条件で張ったと名乗らせては
+        # ならない。一括処理の済み判定がこの列を見るため、NULLの録画は自動で対象へ戻る。
+        if "laugh_index_json" not in recording_columns:
+            self._conn.execute("ALTER TABLE recordings ADD COLUMN laugh_index_json TEXT")
+            logger.info(
+                "recordings表にlaugh_index_json columnを追加しました（既存indexは条件不明）",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "recordings", "column": "laugh_index_json"}},
+            )
+        # コラボ窓の判定rule版。既存行は旧rule(v1)の収集物なので1のまま残す。v1は窓を
+        # finishでしか閉じず、間のソロ時間を丸ごとコラボに数えていた(録画照合で判明)。
+        # 補正材料がDBに無いため、分析側は現行版の窓だけを使う。
+        collab_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(collab_windows)")
+        ]
+        if "version" not in collab_columns:
+            self._conn.execute(
+                "ALTER TABLE collab_windows ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+            logger.info(
+                "collab_windows表にversion columnを追加しました（既存窓は旧rule=1）",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "collab_windows", "column": "version"}},
+            )
+        # cut_listは廃止した表で、この後の統合migrationがbookmarksへ畳んでDROPする。
+        # 畳む前に列が揃っている必要があるので、表が残っているDBに限って旧migrationを通す。
+        if self._has_table("cut_list"):
+            cut_columns = [
+                row["name"] for row in self._conn.execute("PRAGMA table_info(cut_list)")
+            ]
+            for name, decl in (
+                # 最後にmp4を書き出した時刻と出力path。既存行はNULLのまま残す — 過去に
+                # 書き出した行も在るが、どこへ出したかは記録が無く、backfillすれば捏造になる。
+                ("exported_at", "REAL"),
+                ("exported_path", "TEXT"),
+            ):
+                if name not in cut_columns:
+                    self._conn.execute(f"ALTER TABLE cut_list ADD COLUMN {name} {decl}")
+                    logger.info(
+                        "cut_list表に %s columnを追加しました", name,
+                        extra={"event": "storage.schema_migrated",
+                               "ctx": {"table": "cut_list", "column": name}},
+                    )
+            # 元になった見どころ。追加時は範囲が一致するので既存行も辿れるが、切り出しの
+            # IN/OUTは詰めるためにあるので、詰めた行は範囲では二度と辿れない。
+            if "bookmark_id" not in cut_columns:
+                self._conn.execute("ALTER TABLE cut_list ADD COLUMN bookmark_id INTEGER")
+                logger.info(
+                    "cut_list表にbookmark_id columnを追加しました",
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "cut_list", "column": "bookmark_id"}},
+                )
+                self._backfill_cut_bookmark_ids()
+            # 見どころのメモと切り出しのラベルは昇格の時点で同じ物になるが、以後メモだけを
+            # 直した分は切り出し側へ届いていない。列の有無とは独立の一度きりの反映なので、
+            # settings markerで管理する(bookmark_id列は既に在るDBにも効かせる)。
+            if not self._migration_done("cut_label_from_memo_v1"):
+                self._sync_cut_labels_from_memo()
+                self._mark_migration("cut_label_from_memo_v1")
+        # 語を持たない行(笑い声)の強さ。既存行はNULLのまま残す — 本文の「強さ 0.78」から
+        # 読み戻せば埋まるが、それは表示の書式を数値の出所にすることなので行わない。強さ順は
+        # NULLを末尾へ落とし、笑い声分析を入れ直した録画から順に値が付く。
+        hit_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(search_hits)")
+        ]
+        if "score" not in hit_columns:
+            self._conn.execute("ALTER TABLE search_hits ADD COLUMN score REAL")
+            logger.info(
+                "search_hits表にscore columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "search_hits", "column": "score"}},
+            )
+        # 焼く要素をcommentから分離した後に足した列。既存の型はDEFAULTのまま残す。
+        preset_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(clip_presets)")
+        ]
+        for name, decl in (
+            ("gifts", "INTEGER NOT NULL DEFAULT 0"),
+            ("score_bar", "INTEGER NOT NULL DEFAULT 1"),
+        ):
+            if preset_columns and name not in preset_columns:
+                self._conn.execute(f"ALTER TABLE clip_presets ADD COLUMN {name} {decl}")
+                logger.info(
+                    "clip_presets表に %s columnを追加しました", name,
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "clip_presets", "column": name}},
+                )
+        # shortの作り方一式(clip_presets)。表が空のときだけ初期の型を入れる。全部消した
+        # 状態は尊重する(起動のたびに復活すると、消す操作が効かない)。
+        seeded = self._seed_clip_presets_locked()
+        if seeded:
+            logger.info(
+                "shortの型(clip_presets)を %s 件で初期化しました", seeded,
+                extra={"event": "storage.schema_seeded",
+                       "ctx": {"table": "clip_presets", "rows": seeded}},
+            )
+        # 新規/既存いずれのDBでもindexを保証する(sourceだけで絞る笑い声の一覧用)。
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_search_hits_source"
+            " ON search_hits(source, started_at)"
+        )
         columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(events)")]
         if "comment" not in columns:
             self._conn.execute("ALTER TABLE events ADD COLUMN comment TEXT")
@@ -291,6 +419,10 @@ class MaintenanceMixin:
             # どちらも後から追加されたfieldで、古い収集分では届かない。
             ("content_language", "TEXT"),
             ("comment_tag", "TEXT"),
+            # 専用の列を持たないfieldのJSON(collector._extra_payload)。TikTokが送って
+            # いるのに読んでいなかった値を捨てないための受け皿で、意味が確定した項目は
+            # 個別の列へ昇格させる。既存行はNULL=計装前の未計測。
+            ("extra", "TEXT"),
         ):
             if name not in columns:
                 # backfillはしない。既存行は「計装前で未計測」であって「不明と観測した」
@@ -437,7 +569,7 @@ class MaintenanceMixin:
             )
         if "duration_seconds" not in recording_columns:
             # 尺の出所を壁時計(ended_at - started_at)から実測へ移す。既存行はNULL(未測定)
-            # から始め、転写を持つ録画だけ転写側の実尺で埋める(転写はmp4そのものを読んで
+            # から始め、文字起こしを持つ録画だけ文字起こし側の実尺で埋める(文字起こしはmp4そのものを読んで
             # 作られており、fileからの推測ではない)。残りは scripts/repair_recording_
             # durations.py がmp4/HLSを測って埋める。
             self._conn.execute("ALTER TABLE recordings ADD COLUMN duration_seconds REAL")
@@ -507,19 +639,72 @@ class MaintenanceMixin:
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "bookmarks", "column": "group_id"}},
             )
-        cut_columns = [
-            row["name"] for row in self._conn.execute("PRAGMA table_info(cut_list)")
+        # 見どころが素材の候補も兼ねるようになった分の列。旧cut_listから畳む先でもある。
+        for name, decl in (
+            # グループ内の並び順(=mp4の書き出し順)。既存行はNULL(末尾扱い)から始める。
+            ("position", "INTEGER"),
+            # 人が付けた行(manual)か、shortの自動生成が書き戻した行(auto)か。
+            ("origin", "TEXT NOT NULL DEFAULT 'manual'"),
+            # 最後にmp4として書き出した時刻と出力path。既存行はNULLのまま残す。
+            ("exported_at", "REAL"),
+            ("exported_path", "TEXT"),
+        ):
+            if name not in bookmark_columns:
+                self._conn.execute(f"ALTER TABLE bookmarks ADD COLUMN {name} {decl}")
+                logger.info(
+                    "bookmarks表に %s columnを追加しました", name,
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "bookmarks", "column": name}},
+                )
+        # グループ内の並びを引く索引。列を足した後でなければ張れないのでSCHEMA側には無い。
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bookmarks_group"
+            " ON bookmarks(group_id, position)")
+        if self._has_table("cut_list"):
+            cut_columns = [
+                row["name"] for row in self._conn.execute("PRAGMA table_info(cut_list)")
+            ]
+            if "group_id" not in cut_columns:
+                # グループへの所属とグループ内の並び順(mp4の書き出し順)。既存行は未分類(NULL)。
+                self._conn.execute(
+                    "ALTER TABLE cut_list ADD COLUMN group_id INTEGER"
+                    " REFERENCES clip_groups(id)"
+                )
+                self._conn.execute("ALTER TABLE cut_list ADD COLUMN position INTEGER")
+                logger.info(
+                    "cut_list表にgroup_id/position columnを追加しました",
+                    extra={"event": "storage.schema_migrated",
+                           "ctx": {"table": "cut_list", "column": "group_id,position"}},
+                )
+        group_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(clip_groups)")
         ]
-        if "group_id" not in cut_columns:
-            # グループへの所属とグループ内の並び順(EDL/FCPXMLの書き出し順)。既存行は未分類(NULL)。
-            self._conn.execute(
-                "ALTER TABLE cut_list ADD COLUMN group_id INTEGER REFERENCES clip_groups(id)"
-            )
-            self._conn.execute("ALTER TABLE cut_list ADD COLUMN position INTEGER")
+        if "position" not in group_columns:
+            # 棚の表示順。既存行は作成順(今までの並び)をそのまま採番して、移行だけで
+            # 並びが変わらないようにする。
+            self._conn.execute("ALTER TABLE clip_groups ADD COLUMN position INTEGER")
+            rows = self._conn.execute(
+                "SELECT id FROM clip_groups ORDER BY created_at, id").fetchall()
+            for position, row in enumerate(rows):
+                self._conn.execute(
+                    "UPDATE clip_groups SET position = ? WHERE id = ?", (position, row["id"]))
             logger.info(
-                "cut_list表にgroup_id/position columnを追加しました",
+                "clip_groups表にposition columnを追加しました",
                 extra={"event": "storage.schema_migrated",
-                       "ctx": {"table": "cut_list", "column": "group_id,position"}},
+                       "ctx": {"table": "clip_groups", "column": "position"}},
+            )
+        preset_columns = [
+            row["name"] for row in self._conn.execute("PRAGMA table_info(clip_presets)")
+        ]
+        if "sfx" not in preset_columns:
+            # 効果音(作品のみ)。既存の型はoffのまま — 型を作った時点に無かった演出が、
+            # 更新しただけで勝手に入ると、次に書き出した作品が別物になる。
+            self._conn.execute(
+                "ALTER TABLE clip_presets ADD COLUMN sfx INTEGER NOT NULL DEFAULT 0")
+            logger.info(
+                "clip_presets表にsfx columnを追加しました",
+                extra={"event": "storage.schema_migrated",
+                       "ctx": {"table": "clip_presets", "column": "sfx"}},
             )
         media_job_columns = [
             row["name"] for row in self._conn.execute("PRAGMA table_info(media_job_queue)")
@@ -569,6 +754,193 @@ class MaintenanceMixin:
                 extra={"event": "storage.schema_migrated",
                        "ctx": {"table": "media_job_queue", "column": "sweep"}},
             )
+        # cut_listの統合はここでは行わない。表を1つ落とす破壊的な操作なので、退避
+        # (_backup_before_migrations)を越えた後の区間から呼ぶ(__init__を参照)。
+        self._migrate_search_index()
+
+    def _has_table(self, name: str) -> bool:
+        """その名前の表が在るか。lock保持前提。廃止した表に触るmigrationを、既に畳んだDBで
+        素通りさせるために使う(PRAGMA table_infoは表が無くても空を返すだけで、区別が付かない)。"""
+        row = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone()
+        return row is not None
+
+    def merge_cut_list_into_bookmarks(self) -> None:
+        """切り出し(cut_list)を見どころ(bookmarks)へ畳み、cut_listを落とす。lock保持前提。
+
+        **退避を越えた後の区間から呼ぶこと。** 表そのものを落とすので、_migrate の中
+        (退避より前)で走らせると、退避なしで取り返しの付かない操作をすることになる。
+
+        2表に割れていた理由は「グループごとにIN/OUTの詰め方が変わるので所属を共有できない」
+        だったが、実データでは切り出し21件のうち20件が元の見どころと範囲・グループ・
+        ラベルまで一致し、詰め直しは一度も起きていなかった。写した先で別の値になるという
+        前提が成立していないので、表を1つにする。
+
+        畳み方は2通りで、**行を失わない方**へ倒す:
+
+        * 元の見どころが在り、範囲もグループも一致する → その見どころへ書き出し順・
+          書き出し記録を移し、切り出しの行は捨てる(同じ場面が2行にならない)。
+        * それ以外(元が消えている・詰め直して範囲がずれた・1つの見どころから複数の切り出しを
+          作った・再生画面から直接足した) → 切り出しを**新しい見どころ**として作る。
+          ここで「元の見どころへ寄せる」と、詰めた範囲か元の範囲かのどちらかが黙って消える。
+
+        新しく作る行の ``origin`` は 'manual' で入れる。shortの自動生成が書き戻した行だけを
+        'auto' にしたいところだが、その行はlabelにAIの題名が入ることがあり、人が足した行と
+        区別する手掛かりがDBに無い。推測で分けると、人が付けた見どころが既定で隠れる側へ
+        落ちる。区別は列を持った後に書かれた行から始める。
+        """
+        from tictok.store._common import CUT_SAME_RANGE_TOLERANCE as tol
+
+        cuts = self._conn.execute(
+            "SELECT * FROM cut_list ORDER BY (position IS NULL), position, start, id"
+        ).fetchall()
+        folded = 0
+        created = 0
+        # 1つの見どころから複数の切り出しを作っていた場合、畳めるのは最初の1件だけである
+        # (2件目を同じ行へ書くと、先に畳んだ書き出し順と記録を黙って上書きする)。
+        taken: set = set()
+        for cut in cuts:
+            target = None
+            if cut["bookmark_id"] is not None and cut["bookmark_id"] not in taken:
+                row = self._conn.execute(
+                    "SELECT * FROM bookmarks WHERE id = ?", (cut["bookmark_id"],)
+                ).fetchone()
+                if (row is not None and row["end"] is not None
+                        and abs(row["start"] - cut["start"]) <= tol
+                        and abs(row["end"] - cut["end"]) <= tol
+                        and row["group_id"] == cut["group_id"]):
+                    target = row
+                    taken.add(row["id"])
+            if target is not None:
+                # ラベルは昇格の時点でメモと同じ物になっているが、メモが空のまま切り出し側に
+                # だけ言葉が付いている行が在り得る。空のメモを優先すると書き出しfile名が消える。
+                memo = target["memo"] or cut["label"] or ""
+                self._conn.execute(
+                    "UPDATE bookmarks SET memo = ?, position = ?, exported_at = ?,"
+                    " exported_path = ? WHERE id = ?",
+                    (memo, cut["position"], cut["exported_at"], cut["exported_path"],
+                     target["id"]))
+                folded += 1
+                continue
+            self._conn.execute(
+                "INSERT INTO bookmarks (recording_id, unique_id, start, end, memo,"
+                " source_hit_id, live_wall, pts_mapped, group_id, position, origin,"
+                " exported_at, exported_path, created_at)"
+                " VALUES (?, ?, ?, ?, ?, NULL, NULL, 1, ?, ?, 'manual', ?, ?, ?)",
+                (cut["recording_id"], cut["unique_id"], cut["start"], cut["end"],
+                 cut["label"] or "", cut["group_id"], cut["position"],
+                 cut["exported_at"], cut["exported_path"], cut["created_at"]))
+            created += 1
+        self._conn.execute("DROP TABLE cut_list")
+        logger.info(
+            "切り出し %d 件を見どころへ統合しました（既存へ畳んだ %d 件・新しい行 %d 件）",
+            len(cuts), folded, created,
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "bookmarks", "merged_from": "cut_list",
+                           "cuts": len(cuts), "folded": folded, "created": created}},
+        )
+
+    def _backfill_cut_bookmark_ids(self) -> None:
+        """bookmark_id列を足した直後に、既存の切り出しへ元の見どころを結び直す。lock保持前提。
+
+        列を足した時点では対応が範囲の一致でしか辿れないので、その一致が残っているうちに
+        1度だけ固定する(以後IN/OUTを詰めても対応は切れない)。同じ範囲の見どころが複数
+        並ぶ行は結ばない ―― どちらが元かはDBに無く、選べば捏造になる。"""
+        from tictok.store._common import CUT_SAME_RANGE_TOLERANCE as tol
+
+        pairs = self._conn.execute(
+            "SELECT c.id AS cut_id, MIN(b.id) AS bookmark_id, COUNT(*) AS n"
+            " FROM cut_list c JOIN bookmarks b ON b.recording_id = c.recording_id"
+            " WHERE b.end IS NOT NULL"
+            " AND ABS(b.start - c.start) <= ? AND ABS(b.end - c.end) <= ?"
+            " GROUP BY c.id HAVING n = 1",
+            (tol, tol),
+        ).fetchall()
+        if not pairs:
+            return
+        self._conn.executemany(
+            "UPDATE cut_list SET bookmark_id = ? WHERE id = ?",
+            [(row["bookmark_id"], row["cut_id"]) for row in pairs],
+        )
+        logger.info(
+            "切り出し %d 件へ元の見どころを結び直しました", len(pairs),
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "cut_list", "column": "bookmark_id",
+                           "linked": len(pairs)}},
+        )
+
+    def _sync_cut_labels_from_memo(self) -> None:
+        """既存の切り出しのラベルを、元になった見どころのメモへ揃える。lock保持前提。
+
+        以後の更新は :meth:`update_bookmark_memo` が同時に行う。ここは、その仕組みが無かった
+        間にメモだけが動いた分の遅れを取り戻す1度きりの反映である。
+
+        メモが空の見どころは写さない。空で上書きすると、手で付けたラベル(=書き出しfile名)を
+        消すことになり、『見どころを反映する』ではなく『消す』migrationになる。空のメモへ
+        揃えたい行は、画面でメモを直せばその時に揃う。"""
+        synced = self._conn.execute(
+            "UPDATE cut_list SET label = ("
+            "  SELECT b.memo FROM bookmarks b WHERE b.id = cut_list.bookmark_id)"
+            " WHERE bookmark_id IS NOT NULL AND EXISTS ("
+            "  SELECT 1 FROM bookmarks b WHERE b.id = cut_list.bookmark_id"
+            "   AND b.memo <> '' AND b.memo <> cut_list.label)"
+        ).rowcount
+        if not synced:
+            return
+        logger.info(
+            "切り出し %d 件のラベルを元の見どころのメモへ揃えました", synced,
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "cut_list", "column": "label", "synced": synced}},
+        )
+
+    def _migrate_search_index(self) -> None:
+        """検索の索引を畳んだ本文(body_norm)へ載せ替える。lock保持前提。
+
+        「ウザ」で「うざ」が出ない取りこぼしを無くすため、索引もLIKEも
+        tictok.search.normalize.fold を通した本文で照合する。既存行はここで畳み直し、
+        FTSは索引語そのものが変わるので作り直す(external contentなので、content表さえ
+        埋まっていればrebuildで再構築できる)。
+
+        畳むruleを変えたときも同じ道を通す。索引だけが古いruleのまま残ると、queryは
+        新しいruleで畳まれるので、その語だけ当たらないという形で静かに壊れる。
+
+        索引へ載せる本文は返信の宛先(``@表示名``)を外した形(``index_fold``)。名前の切れ目は
+        既知の表示名でしか決まらないので、ここで一度だけ台帳を読む。"""
+        from tictok.search.normalize import FOLD_VERSION, index_fold
+        from tictok.store._common import SEARCH_FTS_DDL
+
+        columns = [row["name"] for row in self._conn.execute("PRAGMA table_info(search_hits)")]
+        version = str(FOLD_VERSION)
+        if "body_norm" in columns:
+            if self._get_maintenance_locked(_SEARCH_FOLD_KEY) == version:
+                return
+        else:
+            self._conn.execute(
+                "ALTER TABLE search_hits ADD COLUMN body_norm TEXT NOT NULL DEFAULT ''")
+        started = time.time()
+        # self._lock 保持中なので、表示名の台帳も書き込み接続から読む。
+        names = self._load_mention_names(self._conn)
+        self._conn.create_function(
+            "tictok_index_fold", 1, lambda body: index_fold(body, names), deterministic=True)
+        self._conn.execute("UPDATE search_hits SET body_norm = tictok_index_fold(body)")
+        rows = self._conn.execute("SELECT COUNT(*) AS n FROM search_hits").fetchone()["n"]
+        # 旧FTSはbody列を索引している。索引する列の入れ替えはALTERできないので作り直す。
+        self._conn.execute("DROP TABLE IF EXISTS search_fts")
+        self._conn.executescript(SEARCH_FTS_DDL)
+        self._conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')")
+        self._set_maintenance_locked(_SEARCH_FOLD_KEY, version)
+        elapsed = round(time.time() - started, 1)
+        logger.info(
+            "検索の索引を表記ゆれを畳んだ本文へ作り直しました"
+            "（版%s / %d 行 / %.1f 秒 / 既知の表示名 %d 件）",
+            version, rows, elapsed, len(names),
+            extra={"event": "storage.schema_migrated",
+                   "ctx": {"table": "search_hits", "column": "body_norm",
+                           "fold_version": FOLD_VERSION, "rows": rows,
+                           "mention_names": len(names),
+                           "elapsed_seconds": elapsed}},
+        )
 
     def _migrate_ops_events(self) -> None:
         """ops_eventsの列をSCHEMA定義へ揃える。CREATE TABLE IF NOT EXISTSは既存表の列を

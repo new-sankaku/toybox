@@ -49,7 +49,7 @@
           <option value="started_asc">開始(古い順)</option>
           <option value="gifts">Gift 多い順</option>
           <option value="diamonds">コイン 多い順</option>
-          <option value="comments">Comment 多い順</option>
+          <option value="comments">コメント 多い順</option>
           <option value="likes_total">Like 多い順</option>
           <option value="battle_points">B.Score 多い順</option>
           <option value="unique_id">配信者</option>
@@ -65,13 +65,15 @@
       <table class="xtab" id="session-table">
         <thead>
           <tr>
-            <th data-sort="id">#</th><th data-sort="unique_id">配信者</th>
+            <th data-sort="id">#</th>
+            <th id="op-th-lead" colspan="2">操作</th>
+            <th data-sort="unique_id">配信者</th>
             <th data-sort="started_at">開始</th><th data-sort="duration">時間</th><th>状態</th>
-            <th class="n" data-sort="diamonds">コイン</th><th class="n" data-sort="comments">Comment</th>
+            <th class="n" data-sort="diamonds">コイン</th><th class="n" data-sort="comments">コメント</th>
             <th class="n" data-sort="likes_total">Like</th><th class="n" data-sort="follows">Follow</th>
             <th class="n" data-sort="shares">Share</th><th class="n" data-sort="joins">入室</th>
             <th class="n" data-sort="battles">Battle</th><th class="n" data-sort="battle_points">B.Score</th>
-            <th class="n" data-sort="viewers_peak">最大同接</th><th>Memo</th><th id="op-th">操作</th>
+            <th class="n" data-sort="viewers_peak">最大同接</th><th>Memo</th><th id="op-th">その他操作</th>
           </tr>
         </thead>
         <tbody id="session-rows"></tbody>
@@ -112,7 +114,7 @@
             <h3 class="result-subtitle">■ UserごとのGift</h3>
             <div class="table-wrap">
               <table class="result-table">
-                <thead><tr><th>#</th><th>User</th><th>Gift数</th><th>コイン</th><th>Gift内訳</th></tr></thead>
+                <thead><tr><th>#</th><th>User</th><th>GLv</th><th>MLv</th><th>Gift数</th><th>コイン</th><th>Gift内訳</th></tr></thead>
                 <tbody id="user-ranking"></tbody>
               </table>
             </div>
@@ -230,11 +232,11 @@
         <div class="table-wrap userdel-listwrap">
           <table class="result-table">
             <thead>
-              <tr><th></th><th>配信者</th><th class="num">Session</th><th class="num">コイン</th><th class="num">Comment</th></tr>
+              <tr><th></th><th>配信者</th><th class="num">Session</th><th class="num">コイン</th><th class="num">コメント</th></tr>
             </thead>
             <tbody id="userdel-rows"></tbody>
           </table>
-          <div id="userdel-empty" class="feed-empty">配信者がいません。</div>
+          <div id="userdel-empty" class="feed-empty" data-label="配信者">配信者がいません。</div>
         </div>
         <div class="userdel-footer">
           <span id="userdel-status" class="form-message"></span>

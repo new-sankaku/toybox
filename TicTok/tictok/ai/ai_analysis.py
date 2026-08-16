@@ -17,6 +17,9 @@ from tictok.core.config import (
     get_ai_chapter_max,
     get_ai_chapter_min_seconds,
     get_ai_chapter_per_chunk,
+    get_ai_clip_description_chars,
+    get_ai_clip_hashtag_max,
+    get_ai_clip_title_chars,
     get_ai_comment_sample,
     get_ai_comment_sample_windows,
     get_ai_enabled,
@@ -42,14 +45,25 @@ class AIError(RuntimeError):
 COMMENT_PROMPT_VERSION = 2
 REVIEW_PROMPT_VERSION = 2
 CHAPTERS_PROMPT_VERSION = 1
+CLIP_META_PROMPT_VERSION = 1
 
 # ai_analysis表のkind/target_type。DBのkeyなので画面・APIの文言とは分けて固定する。
 KIND_COMMENT = "comment_analysis"
 KIND_STREAMER_REVIEW = "streamer_review"
 KIND_CHAPTERS = "chapters"
+KIND_CLIP_META = "clip_meta"
 TARGET_SESSION = "session"
 TARGET_STREAMER = "streamer"
 TARGET_RECORDING = "recording"
+# shortは録画の一部分なので、録画idだけでは的を指せない。target_idは範囲まで含めた文字列
+# (:func:`clip_target_id`)で、同じ録画の別範囲が別の行になる。
+TARGET_CLIP = "clip"
+
+
+def clip_target_id(recording_id: int, start: float, end: float) -> str:
+    """short 1本を指すcacheのkey。範囲をmilli秒まで書くのは、範囲確定が吸着で数百ms動く
+    ためで、秒で丸めると別の範囲が同じ的を指す。"""
+    return f"{int(recording_id)}:{float(start):.3f}-{float(end):.3f}"
 
 
 def input_signature(payload) -> str:
@@ -368,8 +382,8 @@ async def analyze_comments(sample: list) -> dict:
 
 
 # ---- 章立て(chapter)生成 ---------------------------------------------------------------
-# 3時間級の転写は一度にmodelの文脈へ入らないため、map-reduceで組む。
-#   map:    転写を予算内のchunkへ割り、chunkごとに「話題が変わる行」を候補として出させる。
+# 3時間級の文字起こしは一度にmodelの文脈へ入らないため、map-reduceで組む。
+#   map:    文字起こしを予算内のchunkへ割り、chunkごとに「話題が変わる行」を候補として出させる。
 #   reduce: 候補の一覧(title+時刻)だけをもう一度渡し、最終的に残す候補と表題を選ばせる。
 #
 # 時刻をmodelに書かせないことがこの実装の要点である。map/reduceのどちらでもmodelが返すのは
@@ -385,7 +399,7 @@ def _stamp(seconds: float) -> str:
 
 
 def chapter_chunks(segments: list) -> list:
-    """転写segmentを文字数予算でchunkへ割る。境界は必ずsegmentの切れ目に置く。
+    """文字起こしsegmentを文字数予算でchunkへ割る。境界は必ずsegmentの切れ目に置く。
 
     重なりは付けない。chunkの先頭segmentはそれ自体がmap段の候補になり得るので、chunk境界に
     ある話題の切れ目は候補として拾える。重なりを入れると同じ話題が2つのchunkから別々の候補
@@ -590,7 +604,7 @@ def _finalize(chapters: list, segments: list, duration) -> list:
 
 
 async def analyze_chapters(transcript: dict, media_duration=None) -> dict:
-    """転写から章立てを作る。``transcript`` は storage.get_transcript の戻り値そのもの。
+    """文字起こしから章立てを作る。``transcript`` は storage.get_transcript の戻り値そのもの。
 
     時刻mapが現行版でないtranscriptは拒否する。焼き込みと同じ理由で、ズレは尺に比例して
     大きくなり、出てきた章は「それらしいが合っていない目次」になる。合っていないことは
@@ -672,5 +686,189 @@ async def analyze_chapters(transcript: dict, media_duration=None) -> dict:
         extra={"event": "ai.chapters_done",
                "ctx": {"chapters": len(result["chapters"]), "segments": len(segments),
                        "chunks": len(chunks), "candidates": len(candidates)}},
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------------------
+# short の題名・説明・hashtag・表紙
+# ---------------------------------------------------------------------------------------
+
+_CLIP_SYSTEM = (
+    "あなたはライブ配信の切り抜き動画に、題名・説明・hashtagを付ける編集者です。"
+    "出力は指定のJSON形式のみとし、日本語で記述してください。JSON以外の文字は一切出力しないでください。"
+)
+
+_CLIP_RULES = (
+    "- 題名・説明は、提示した発話に実際に出てくる内容だけで書く。推測で補わないこと。\n"
+    "- 何が起きたかが分かる題名にする。「面白い場面」「神回」のような中身を持たない語は使わない。\n"
+    "- 誇張しないこと。提示した発話より強い出来事が起きたように書かない。\n"
+    "- hashtag は「#」を付けず語だけを返す。配信者名や、発話に出てくる語から選ぶ。\n"
+    "- cover_line は、表紙にするのに最もふさわしい発話の行番号を1つ選ぶ。"
+    "提示した範囲内の整数にすること。"
+)
+
+
+def _clean_text(value, limit: int) -> str:
+    """1行へ均して上限で切る。上限は設定値なので呼び出し側から渡す。"""
+    text = " ".join(str(value or "").strip().split())
+    return text[:limit]
+
+
+def _clean_hashtags(values, limit: int) -> list:
+    """hashtagを語だけの列へ均す。先頭の「#」は落とし、重複と空を捨てる。
+
+    modelは指示に関わらず「#」を付けてくることがある。ここで落としておかないと、投稿先で
+    「##配信」になるか、こちらで二重に付けないよう表示側が各所で気を遣うことになる。
+    """
+    cleaned: list = []
+    for value in values or []:
+        word = " ".join(str(value or "").strip().split()).lstrip("#").strip()
+        # 語中の空白と「#」は投稿先でtagが切れる原因になるので、そこで打ち切る。
+        word = word.split()[0] if word.split() else ""
+        word = word.split("#")[0]
+        if word and word not in cleaned:
+            cleaned.append(word)
+        if len(cleaned) >= limit:
+            break
+    return cleaned
+
+
+def _clip_json_schema(line_count: int) -> dict:
+    """題名・説明・hashtag・表紙行のschema。
+
+    件数と行番号の上限をschemaへ載せるのが要点で、chapterと同じ理由である。promptで
+    「最大N件」と言うだけでは復号は止まらず、範囲外の行番号も復号段階で弾けない。
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "hashtags": {
+                "type": "array",
+                "maxItems": max(1, get_ai_clip_hashtag_max()),
+                "items": {"type": "string"},
+            },
+            "cover_line": {"type": "integer", "minimum": 1,
+                           "maximum": max(1, line_count)},
+        },
+        "required": ["title", "description", "hashtags", "cover_line"],
+        "additionalProperties": False,
+    }
+
+
+_CLIP_SCHEMA_HINT = (
+    '{\n'
+    '  "title": "<題名>",\n'
+    '  "description": "<説明>",\n'
+    '  "hashtags": ["<語>"],\n'
+    '  "cover_line": <行番号>\n'
+    '}'
+)
+
+
+def _clip_messages(lines: list, context: dict, seconds: float) -> list:
+    who = context.get("streamer") or ""
+    why = context.get("reason") or ""
+    comments = context.get("comments") or []
+    intro = f"配信者: {who}\n" if who else ""
+    if why:
+        intro += f"この場面が候補になった理由: {why}\n"
+    if comments:
+        listing = " / ".join(comments)
+        intro += f"この場面の視聴者コメント（抜粋）: {listing}\n"
+    body = "\n".join(lines)
+    user = (
+        f"以下はライブ配信の切り抜き（{seconds:.0f}秒）の書き起こしです。"
+        f"各行は「行番号 発話」の形式です。\n\n"
+        f"{intro}\n"
+        f"<transcript>\n{body}\n</transcript>\n\n"
+        f"この切り抜きに付ける題名（{get_ai_clip_title_chars()}文字以内）、"
+        f"説明（{get_ai_clip_description_chars()}文字以内）、"
+        f"hashtag（最大{get_ai_clip_hashtag_max()}語）、"
+        "表紙にする発話の行番号を、次のJSON形式で出力してください（JSON以外は出力しない）:\n"
+        f"{_CLIP_SCHEMA_HINT}\n\n"
+        f"{_CLIP_RULES}"
+    )
+    return [
+        {"role": "system", "content": _CLIP_SYSTEM},
+        {"role": "user", "content": user},
+    ]
+
+
+def clip_lines(segments: list, start: float, end: float) -> list:
+    """範囲に掛かる発話segmentだけを、時刻順で返す。
+
+    掛かっていれば端が範囲の外へはみ出していても採る。切り出しの端は無音や発話の切れ目へ
+    吸着させてあるので、はみ出す量は語の途中までであり、その語を落とすと題名の根拠が欠ける。
+    """
+    picked = []
+    for seg in segments or []:
+        try:
+            seg_start, seg_end = float(seg["start"]), float(seg["end"])
+            text = str(seg.get("text") or "").strip()
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not text or seg_end <= start or seg_start >= end:
+            continue
+        picked.append({"start": seg_start, "end": seg_end, "text": text})
+    picked.sort(key=lambda s: s["start"])
+    return picked
+
+
+async def analyze_clip_meta(segments: list, start: float, end: float,
+                            context: dict | None = None) -> dict:
+    """short 1本ぶんの題名・説明・hashtag・表紙位置を作る。
+
+    **秒はmodelに書かせない。** 表紙の位置はmodelが選んだ行番号から、こちら側がsegmentの
+    ``start`` を引いて決める。章立てと同じ理由で、時刻を書かせる形にすると存在しない位置を
+    指す表紙が混ざっても検出する手段が無くなる。範囲外の行番号は近い行へ寄せずに落とし、
+    表紙位置を ``None`` のまま返す — 寄せれば根拠の無い位置が表紙になる。
+    """
+    if not get_ai_enabled():
+        raise AIError("AI機能が無効です（TICTOK_AI_ENABLED=1 を設定してください）。")
+    if not get_ai_model():
+        raise AIError("AI modelが未設定です（TICTOK_AI_MODEL を設定してください）。")
+    lines = clip_lines(segments, float(start), float(end))
+    if not lines:
+        raise AIError("この範囲には題名の根拠になる発話がありません。")
+
+    numbered = [f"{i} {line['text']}" for i, line in enumerate(lines, start=1)]
+    content = await _chat(
+        _clip_messages(numbered, context or {}, float(end) - float(start)),
+        _clip_json_schema(len(lines)), "clip_meta")
+    data = _extract_json(content)
+
+    title = _clean_text(data.get("title"), get_ai_clip_title_chars())
+    if not title:
+        raise AIError("題名が空で返りました。")
+    cover_line = None
+    cover_seconds = None
+    try:
+        index = int(data.get("cover_line"))
+    except (TypeError, ValueError):
+        index = None
+    if index is not None and 1 <= index <= len(lines):
+        cover_line = index
+        cover_seconds = round(lines[index - 1]["start"], 3)
+    result = {
+        "title": title,
+        "description": _clean_text(data.get("description"),
+                                   get_ai_clip_description_chars()),
+        "hashtags": _clean_hashtags(data.get("hashtags"), get_ai_clip_hashtag_max()),
+        "cover_line": cover_line,
+        "cover_seconds": cover_seconds,
+        "line_count": len(lines),
+        "start": round(float(start), 3),
+        "end": round(float(end), 3),
+    }
+    logger.info(
+        "shortのmetadataを生成しました: %s（%d行, 表紙 %s）",
+        title, len(lines), "なし" if cover_seconds is None else f"{cover_seconds:.1f}s",
+        extra={"event": "ai.clip_meta_done",
+               "ctx": {"lines": len(lines), "cover_seconds": cover_seconds,
+                       "hashtags": len(result["hashtags"]),
+                       "start": result["start"], "end": result["end"]}},
     )
     return result

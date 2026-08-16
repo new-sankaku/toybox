@@ -23,6 +23,11 @@ from tictok.core.intervals import merge_intervals, subtract_intervals, total_spa
 
 logger = logging.getLogger("tictok.storage")
 
+# 同じ場面と見なす端のずれ(1 frame)。切り出しの範囲は無音への吸着やframe境界の都合で
+# わずかに動くので、厳密一致だけを重複と見なすと同じ場面の行が何本も並ぶ。画面側の
+# 重複判定(videos.jsのFRAME_STEP_SECONDS)と同じ幅にしてある。
+CUT_SAME_RANGE_TOLERANCE = 1.0 / 30.0
+
 # events / viewer_samples のINSERT。batch(executemany)と1行隔離(execute)で同一SQLを使うため
 # 定数化する。列順はbuffer済みtupleおよびjournal記録のrowと厳密に一致させること。
 _EVENTS_COLUMNS = (
@@ -38,6 +43,10 @@ _EVENTS_COLUMNS = (
     # Share の行き先 / Comment の言語判定。上と同じ規約で、NULL=計装前の未計測、
     # 'unknown'=届いたが空。share_targetは意味が未確定なので生値をそのまま入れる。
     "share_type", "share_target", "content_language", "comment_tag",
+    # 届いているが専用の列を持たないfieldのJSON。列にしないのはkindごとに疎で、意味が
+    # 未確定なため — 解釈が定まったものだけ後から列へ昇格させる。中身の規約は
+    # collector._extra_payload にあり、NULLは「計装前で未計測」を意味する。
+    "extra",
 )
 _EVENTS_INSERT_SQL = (
     f"INSERT INTO events ({', '.join(_EVENTS_COLUMNS)})"
@@ -54,6 +63,10 @@ _WRITE_BATCH_SIZE = 50
 _WRITE_FLUSH_INTERVAL_SECONDS = 0.2
 # 同一identity_keyの属性が変わらない限り、この秒数はusers表のupsertを間引く(live取り込みのみ)。
 _USER_UPSERT_TTL_SECONDS = 60.0
+# 索引から先頭メンションを外すための既知表示名(Storage.mention_names)の保持秒数。
+# 実測31.8万件・0.4秒で、一括のindex投入は録画ごとに引く。名前の台帳は分単位で変わる
+# ものではないので、読み直しの頻度より安さを取る。
+_MENTION_NAMES_TTL_SECONDS = 600.0
 # upsert間引きcacheの上限件数。keyはidentity_keyで、上限が無いとprocess寿命の間ずっと
 # 積み上がる(実測: 1 sessionで最大8,642 user、DB全体では78,355 identity)。
 #
@@ -71,6 +84,12 @@ _USER_CACHE_MAX = 40000
 # 1戦のBattle貢献者を「主力貢献者」とみなすcoin(diamond)下限。この閾値以上を投げた
 # 貢献者を1戦ごとに数え、過去全Battleの平均人数を出す。
 _BATTLE_KEY_CONTRIB_DIAMONDS = 100
+# Battle分析の集計対象にするscore下限。**全ての陣営**のscoreがこの値以下だったBattleは
+# 勝負が成立していない(開始直後に流れた/相手が現れない枠)ため、勝率・平均Score・貢献者
+# などの集計から外す。実dataでは984戦中202戦(20.5%)がこれに当たり、うち0対0は6戦だけで
+# 残りは1〜100の微少scoreである。共演構成(配信時間の内訳)からは外さない — 成立しなくても
+# その時間はBattle枠に使われているため。
+_BATTLE_NO_CONTEST_SCORE = 100
 # 終了済みBattleの貢献集計cacheの上限件数。窓が確定したBattleの集計は不変なので期限は
 # 要らないが、profile閲覧のたびに全sessionのBattleが載るため件数だけは頭打ちにする。
 _BATTLE_CONTRIB_CACHE_MAX = 2000
@@ -87,11 +106,19 @@ _MIGRATION_BACKUP_KEY = "premigration_backup_versions"
 # 選別ruleだけが変わった場合(物差しの変更)にも選り直しが要り、逆に時刻map版が同じまま
 # rule版だけ据え置けば選り直しは不要、という組み合わせがあるため。
 _TIMEMAP_SELECTION_KEY = "timemap_selection_version"
+# 「検索の索引を、どの畳み込みrule(normalize.FOLD_VERSION)で作ったか」。索引語そのものが
+# ruleに依存するので、版が上がったら全行を畳み直してFTSを作り直す。
+_SEARCH_FOLD_KEY = "search_fold_version"
+
+
+# cut_listをbookmarksへ畳んだ版。**表を1つ落とす**ので、この版を上げないと退避を取らずに
+# 破壊的なmigrationが走る(他の3つはin-placeの書き換えで、表そのものは残る)。
+CUT_MERGE_VERSION = 1
 
 
 def _migration_versions() -> str:
     return (f"glove={GLOVE_EVENT_VERSION},topo={BATTLE_TOPOLOGY_VERSION}"
-            f",timemap={TIMEMAP_VERSION}")
+            f",timemap={TIMEMAP_VERSION},cutmerge={CUT_MERGE_VERSION}")
 
 
 OPS_INFO = "info"
@@ -243,6 +270,8 @@ CREATE TABLE IF NOT EXISTS collab_windows (
     start REAL NOT NULL,
     end REAL,
     guests_max INTEGER NOT NULL DEFAULT 0,
+    -- 窓を作った判定ruleの版(core.collab.COLLAB_WINDOW_VERSION)。既定1は旧rule。
+    version INTEGER NOT NULL DEFAULT 1,
     data_json TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_collab_session ON collab_windows(session_id);
@@ -313,7 +342,7 @@ CREATE TABLE IF NOT EXISTS recordings (
     -- 長さなので、推測で埋めず測った値を持つ。
     duration_seconds REAL,
     -- この録画に紐づく「秒」がどの時間軸の値か。'pts' はmp4のPTS軸(既定)、'media' は
-    -- HLSのmedia軸(#EXTINF累積)。search_hits.video_time / bookmarks / cut_list /
+    -- HLSのmedia軸(#EXTINF累積)。search_hits.video_time / bookmarks /
     -- transcripts.segments_json が従う軸で、再生位置もこれに一致していなければならない。
     --
     -- 2軸を併存させるのは、片方へ寄せきれないため: HLSで再生する録画はmedia軸で観るが、
@@ -325,7 +354,12 @@ CREATE TABLE IF NOT EXISTS recordings (
     -- 'checked'(確認済)。operatorが手で付ける印で、再生や出力では動かさない: 開いただけで
     -- 「確認中」が付くと、印が観た事実を指すのか開いた事実を指すのか読めなくなる。
     review_state TEXT NOT NULL DEFAULT 'unchecked',
-    review_updated_at REAL
+    review_updated_at REAL,
+    -- 笑い声indexを最後に張ったときの条件(search.indexer.laugh_index_metaのJSON)。rule版と
+    -- 共演の除外設定を持つ。NULLは「まだ張っていない、または条件が分からない」で、
+    -- 一括処理(笑い声分析)の済み判定はこの列が現行の条件と一致することを見る ―― 行が
+    -- 在るかだけで済みにすると、共演中を外す前に張ったindexが済みのまま残る。
+    laugh_index_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_recordings_session ON recordings(session_id);
 -- 録画一覧は常に新しい順の全件走査、配信者動画画面はunique_id絞り+新しい順、
@@ -355,9 +389,33 @@ CREATE TABLE IF NOT EXISTS transcripts (
     created_at REAL NOT NULL,
     timemap_version INTEGER,
     timemap_anchors INTEGER,
-    timemap_drift_seconds REAL
+    timemap_drift_seconds REAL,
+    word_times INTEGER
 );
--- 配信者動画画面の横断検索index。転写segmentとcommentを同じ行形式へ正規化し、
+-- 文字起こしの訂正。transcriptsは常に生のまま置き、直しはここへ積んで読み出し時に重ねる
+-- (tictok.record.corrections)。書き戻さないのは、再文字起こしで直しが消えるためである。
+-- 同定はindexではなく (start, src) の組で行う: 再文字起こしでindexも時刻も変わるため、
+-- indexで指すと次の実行で別の発話へ乗る。当たらなかった行は state='orphan' で人へ返す。
+--   state: active(適用中) / orphan(貼り直せず保留) / discarded(破棄。行は消さない)
+CREATE TABLE IF NOT EXISTS transcript_corrections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recording_id INTEGER NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+    start REAL NOT NULL,
+    src TEXT NOT NULL,
+    dst TEXT NOT NULL,
+    origin TEXT NOT NULL DEFAULT 'human',
+    confidence TEXT,
+    note TEXT,
+    state TEXT NOT NULL DEFAULT 'active',
+    created_at REAL NOT NULL,
+    updated_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_transcript_corrections_rec
+    ON transcript_corrections(recording_id, state);
+-- 同じ発話への同じ訂正を二重に積まない(取り込みを何度流しても同じ状態になる)。
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transcript_corrections_key
+    ON transcript_corrections(recording_id, start, src);
+-- 配信者動画画面の横断検索index。文字起こしsegmentとcommentを同じ行形式へ正規化し、
 -- video_timeにmp4のPTS秒を持たせる。commentのwall-clock -> PTS変換はindex時に一度だけ
 -- video_overlayと同じmapperで行うので、検索時は変換不要かつ焼き込み動画と位置が一致する。
 CREATE TABLE IF NOT EXISTS search_hits (
@@ -370,45 +428,101 @@ CREATE TABLE IF NOT EXISTS search_hits (
     video_time REAL NOT NULL,
     end_time REAL,
     nickname TEXT,
-    body TEXT NOT NULL
+    body TEXT NOT NULL,
+    -- 照合用に表記ゆれを畳んだ本文(tictok.search.normalize.fold)。索引もLIKEもこちらを
+    -- 見る。bodyは画面に出す原文のまま残す。畳み込みは文字数を保つので、body_norm上で
+    -- 見つけた位置はbodyの同じ位置である。
+    body_norm TEXT NOT NULL DEFAULT '',
+    -- その行の強さ。尺度はsourceごとに違い、laughは窓の中の最大確率(0..1)。語を持たない
+    -- 行(笑い声)は語の一致で順位を付けられないので、強い順に並べる根拠はこの列しか無い。
+    -- 本文へ「強さ 0.78」と書いた文字列から読み戻すのは、表示の書式を数値の出所にする
+    -- ことになるので行わない。語で引く行(文字起こし・comment)はNULLのまま。
+    score REAL
 );
 CREATE INDEX IF NOT EXISTS idx_search_hits_rec ON search_hits(recording_id, source);
 CREATE INDEX IF NOT EXISTS idx_search_hits_uid ON search_hits(unique_id, started_at);
--- 日本語は語境界が無いのでunicode61では部分一致にならない。trigramなら3文字以上の
--- 任意部分文字列が引ける(1-2文字のqueryはLIKEへ落とす)。
-CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
-    body, content='search_hits', content_rowid='id', tokenize='trigram'
-);
--- 切り抜きグループ(group)。cut_list/bookmarksの項目を「切り抜き動画1本のグループ」単位で束ねる。
--- 項目側は排他所属(group_idを1つ持つ)で、グループ間の共用は行の複製で表す: NLEへ渡す前提では
--- グループごとにIN/OUTの詰め方が変わるため、所属を共有すると片方の調整が他方のグループを壊す。
+-- source単独で絞って新しい順に並べる経路(笑い声の一覧)用。source条件だけでは
+-- idx_search_hits_rec も idx_search_hits_uid も効かず、56万行の全表走査に落ちる。
+CREATE INDEX IF NOT EXISTS idx_search_hits_source ON search_hits(source, started_at);
+-- 切り抜きグループ(group)。見どころ(bookmarks)を「切り抜き動画1本のグループ」単位で束ねる。
+-- 項目側は排他所属(group_idを1つ持つ)で、グループ間の共用は行の複製で表す: グループごとに
+-- IN/OUTの詰め方が変わるため、所属を共有すると片方の調整が他方のグループを壊す。
 CREATE TABLE IF NOT EXISTS clip_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     memo TEXT NOT NULL DEFAULT '',
-    created_at REAL NOT NULL
-);
--- 切り出し候補の蓄積。複数配信を横断して探す性質上、見つけた端から溜めて最後にまとめて
--- NLEへ渡すため、mp4出力とは独立に範囲だけを保持する。
-CREATE TABLE IF NOT EXISTS cut_list (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    recording_id INTEGER NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
-    unique_id TEXT NOT NULL,
-    start REAL NOT NULL,
-    end REAL NOT NULL,
-    label TEXT NOT NULL DEFAULT '',
-    -- 所属するグループ。NULLは未分類。positionはグループ内の並び順で、EDL/FCPXMLの書き出し順
-    -- (=NLEのtimeline順)そのものになる。NULLは末尾扱い(グループに入れた時に採番する)。
-    -- FK pragmaは有効化していないためON DELETE系は書かず、グループ削除時の解除は
-    -- delete_group()が自前で行う。
-    group_id INTEGER REFERENCES clip_groups(id),
+    -- 棚(グループ一覧)の表示順。作成順は「今どれを進めているか」とは無関係なので、
+    -- 人が並べ替えられるようにする。NULLは末尾扱い(並べ替え前の既存行)。
     position INTEGER,
     created_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_cut_list_rec ON cut_list(recording_id);
--- 見どころ(bookmark)。cut_listが「書き出す素材の候補」なのに対し、こちらは「後でまた
--- 見たい場所」の記憶で、書き出しの意思とは独立に溜まる。end IS NULLが点(コメント1件や
--- 現在位置)、endを持てば範囲。source_hit_idはメモ元のsearch_hits行(コメント由来のとき)。
+-- 切り出し候補(cut_list)は廃止した。範囲を持つ見どころ(bookmarks.end IS NOT NULL)が
+-- そのまま素材の候補で、二重に持たない。移行は _migrate() の cut_list 統合が行う。
+-- short(縦の短尺動画)の作り方一式。「尺をどう決め、どう仕上げるか」の組を1行で持つ。
+--
+-- 設定表(settings)ではなく独立の表にしてあるのは、これが**同時に複数成立する**値だから
+-- である。settingsは1 keyに1値しか持てないので、15〜60秒の型と30〜90秒の型を併存させたい
+-- 時点で表現できない。key名に番号を埋めて増やす形(clip_short1_*, clip_short2_*)は、型の
+-- 数を code 側で固定することになるので採らない。
+--
+-- 範囲確定(media/clip_range)が読むのは尺とsnapの列だけ、仕上げ(short job)が読むのは
+-- 残りの列だけで、両者は同じ行を別の目的で参照する。
+CREATE TABLE IF NOT EXISTS clip_presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    -- 一覧の並び順と、種別を指定しなかったときに使う既定(先頭の行)。
+    position INTEGER,
+    -- 尺の狙いと許容。targetは範囲を作るときの目標で、min/maxは満たせなければ候補ごと
+    -- 捨てる下限・上限である(縮めて無理やり通すと話の途中で切れた物が出る)。
+    min_seconds REAL NOT NULL,
+    target_seconds REAL NOT NULL,
+    max_seconds REAL NOT NULL,
+    -- 山(盛り上がりの中心)を範囲内のどこへ置くか。0.5で中央。大きいほど山が後ろに来る
+    -- =頭に助走が付く。shortは「何が起きるか」を見せてから山へ入る必要があるため既定は
+    -- 中央より後ろに置く。
+    peak_position REAL NOT NULL DEFAULT 0.65,
+    -- 端の吸着先。発話境界(文字起こしsegment)へ寄せると話の途中で始まらなくなり、無音spanへ
+    -- 寄せると音の切れ目で始まる。両方立てた場合は近い方を採る。
+    snap_speech INTEGER NOT NULL DEFAULT 1,
+    snap_silence INTEGER NOT NULL DEFAULT 1,
+    -- 吸着で端を動かしてよい最大秒。これを超える距離しか吸着先が無い端は動かさない
+    -- (遠くの境界へ引っ張ると、山を範囲から押し出す)。
+    snap_max_shift_seconds REAL NOT NULL DEFAULT 3.0,
+    -- 章(chapter)の境界を跨がせない。跨いだ範囲は「別の話題が混ざったshort」になる。
+    chapter_clamp INTEGER NOT NULL DEFAULT 1,
+    -- 間の詰め(無音カット)。max_secondsに収めるための手段でもある。
+    tighten INTEGER NOT NULL DEFAULT 0,
+    tighten_min_silence_seconds REAL NOT NULL DEFAULT 1.2,
+    tighten_keep_seconds REAL NOT NULL DEFAULT 0.25,
+    -- 仕上げで何を焼くか。commentの既定がoffなのは、shortでは画面が小さく、telopと
+    -- commentが同じ面積を奪い合うため。gift・スコアバーはcommentと別に持つ — 短い尺では
+    -- 「コメントは要らないがBattleの点は要る」という組み合わせが実際に成立する。
+    subtitles INTEGER NOT NULL DEFAULT 1,
+    comments INTEGER NOT NULL DEFAULT 0,
+    gifts INTEGER NOT NULL DEFAULT 0,
+    score_bar INTEGER NOT NULL DEFAULT 1,
+    normalize_audio INTEGER NOT NULL DEFAULT 1,
+    upscale INTEGER NOT NULL DEFAULT 0,
+    -- 効果音(作品のみ)。シーンの継ぎ目とテロップの出現に置く。既定でoffなのは、素材として
+    -- 外部の編集softへ持ち込む用途では音が入っていると邪魔になるためである。
+    sfx INTEGER NOT NULL DEFAULT 0,
+    -- 縦画面の安全域(上下からの%)。投稿先のUIが被る帯で、ここにはtelopを置かない。
+    safe_top_percent REAL NOT NULL DEFAULT 12.0,
+    safe_bottom_percent REAL NOT NULL DEFAULT 18.0,
+    created_at REAL NOT NULL
+);
+-- 見どころ(bookmark)。録画の中で人が印を付けた1箇所で、**素材の候補もこの表が持つ**。
+--
+-- 以前は「後でまた見たい場所」(bookmarks)と「書き出す素材の候補」(cut_list)を別表にし、
+-- 範囲付きの見どころを『昇格』させてcut_listへ写していた。分けた理由は「グループごとに
+-- IN/OUTの詰め方が変わるので所属を共有できない」だったが、実データではcut_list 21件の
+-- うち20件が元の見どころと範囲・グループ・ラベルまで完全一致で、詰め直しは一度も起き
+-- なかった。写した先で別の値になるという前提が成立していないので、昇格は行を1つ増やす
+-- だけの操作になっていた。表を1つにして、その1行が印であり素材でもある形にする。
+-- グループを跨いで同じ場面を別々に詰めたい場合は、行ごと複製する(所属は排他のまま)。
+--
+-- end IS NULLが点(コメント1件や現在位置)、endを持てば範囲。**mp4にできるのは範囲だけ**で、
+-- 点は書き出しの対象に入らない。source_hit_idはメモ元のsearch_hits行(コメント由来のとき)。
 -- live_wall/pts_mappedは配信を見ながら押した見どころのため。押した瞬間に判るのは
 -- wall-clockだけで、mp4のPTS軸とはmux inflationぶんずれる(実測: 112分の録画で340秒)。
 -- 押下時はwall-clockから出した暫定値をstartへ入れてpts_mapped=0とし、finalizeで
@@ -420,17 +534,32 @@ CREATE TABLE IF NOT EXISTS bookmarks (
     unique_id TEXT NOT NULL,
     start REAL NOT NULL,
     end REAL,
+    -- 覚え書きであり、mp4を書き出すときのfile名でもある(旧cut_list.labelを兼ねる)。
     memo TEXT NOT NULL DEFAULT '',
     source_hit_id INTEGER,
     live_wall REAL,
     pts_mapped INTEGER NOT NULL DEFAULT 1,
-    -- 所属するグループ(cut_listと共通のclip_groups)。NULLは未分類。見どころは点の記憶で
-    -- 書き出し順を持たないため、positionは持たない(並びは常にstart順)。
+    -- 所属するグループ。NULLは未分類。positionはグループ内の並び順で、mp4の書き出し順
+    -- (=「1本に連結」「作品にする」の繋ぐ順)そのものになる。NULLは末尾扱い。
+    -- FK pragmaは有効化していないためON DELETE系は書かず、グループ削除時の解除は
+    -- delete_group()が自前で行う。
     group_id INTEGER REFERENCES clip_groups(id),
+    position INTEGER,
+    -- 誰が付けた行か。manual=人、auto=shortの自動生成が「同じ場面を二度作らない」ために
+    -- 書き戻した行。機械の行を人の印と混ぜて並べると、自分が付けた覚えの無い行が一覧を
+    -- 埋めるので、画面は既定でmanualだけを出す(autoは絞り込みで呼び出す)。
+    origin TEXT NOT NULL DEFAULT 'manual',
+    -- 最後にmp4として書き出した時刻と、その出力path。「この行は書き出した」という**過去の
+    -- 事実**であって、今もそのfileが在るという意味ではない(出力先の掃除はDBを通らない)。
+    -- 画面が「済」ではなく日時とpathで名乗るのはそのため。無ければ一度も書き出していない。
+    exported_at REAL,
+    exported_path TEXT,
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_bookmarks_rec ON bookmarks(recording_id, start);
--- 一括転写のqueue。processが落ちても残るようDBに置き、起動時にrunningをpendingへ戻す。
+-- group_id/positionのindexはここに置けない。既存DBではこのscriptが走る時点で列がまだ
+-- 無く(ALTERは_migrateが行う)、索引だけが先に列を要求して落ちる。_migrateが張る。
+-- 一括文字起こしのqueue。processが落ちても残るようDBに置き、起動時にrunningをpendingへ戻す。
 CREATE TABLE IF NOT EXISTS transcribe_queue (
     recording_id INTEGER PRIMARY KEY REFERENCES recordings(id) ON DELETE CASCADE,
     unique_id TEXT NOT NULL,
@@ -443,7 +572,7 @@ CREATE TABLE IF NOT EXISTS transcribe_queue (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_transcribe_queue_state ON transcribe_queue(state, priority, queued_at);
--- 映像job(焼き込み/Up出力/再mp4化)の永続queue。転写queueと同格の位置づけだが、1録画に対して
+-- 映像job(焼き込み/Up出力/再mp4化)の永続queue。文字起こしqueueと同格の位置づけだが、1録画に対して
 -- 種別違いのjobが同時に並ぶ(焼き込みとUp出力)ため、PKはrecording_idではなく独立のidにする。
 -- job_idはJobRegistry(process内の進捗台帳)とops_events.job_idと同じ値を入れ、log・DB・画面を
 -- 1つのIDで突き合わせられるようにする。
@@ -604,6 +733,18 @@ CREATE TABLE IF NOT EXISTS ai_analysis (
 );
 """
 
+# 横断検索の索引。日本語は語境界が無いのでunicode61では部分一致にならない。trigramなら
+# 3文字以上の任意部分文字列が引ける(1-2文字のqueryはLIKEへ落とす)。索引する列は原文
+# (body)ではなく畳んだ本文(body_norm)で、「ウザ」と「うざ」が同じ索引語になる。
+# 列の入れ替えには既存索引の作り直しが要るため、DDLはmigrationからも参照する。
+SEARCH_FTS_DDL = """
+CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
+    body_norm, content='search_hits', content_rowid='id', tokenize='trigram'
+);
+"""
+
+SCHEMA += SEARCH_FTS_DDL
+
 # メンバー限定/年齢制限で接続できず、event・録画・bucketを1件も持たないsession。
 # 「なぜこのidが欠けているのか」を履歴で説明するため行は残すが、配信実績ではないので
 # 回数集計・統計・全体解析cacheからは一貫して除外する(除外を忘れると配信回数が水増しされ、
@@ -726,8 +867,12 @@ def _session_ids_of(*row_lists) -> list:
 
 def _opponent_key(opp: dict):
     """Battleの対戦相手を1人として畳むkey。集計(対戦相手別)と1戦ごとの履歴が同じkeyを
-    名乗らないと、画面で相手から履歴を辿れない(名前だけが一致する別人になる)。"""
-    return opp.get("unique_id") or opp.get("nickname") or opp.get("user_id")
+    名乗らないと、画面で相手から履歴を辿れない(名前だけが一致する別人になる)。
+
+    順番は不変のuser_idが先(users表のidentity_keyと同じ考え方)。handle先頭にしていた頃は、
+    同じ相手でもhandleの載らない戦(実data 1921件中24件)が別keyへ落ち、13名が2行に割れて
+    いた。handleは改名で変わり、nicknameは別人と衝突しうるので、両方ともfallback。"""
+    return opp.get("user_id") or opp.get("unique_id") or opp.get("nickname")
 
 
 def _covering_recording(recs: list, session_id, at) -> Optional[dict]:
@@ -788,21 +933,48 @@ def _coop_summary(session_spans: list, collab_windows: list, battle_windows: lis
         if c:
             by_session.setdefault(sid, {"b": [], "c": []})["c"].append(c)
 
-    active_seconds = sum(end - start for start, end in spans.values())
+    active_seconds = 0.0
     battle_seconds = collab_seconds = 0.0
     battle_count = collab_count = 0
     sessions_with_battle = sessions_with_collab = 0
-    for sid, kinds in by_session.items():
+    # 配信ごとの内訳(古い順)。**窓を1つも持たないsessionも並べる** — コラボ0%の配信を
+    # 落とすと、推移が「コラボした配信だけ」の系列になり、比率が実態より高く見える。
+    series = []
+    for sid, start, _end in sorted(session_spans, key=lambda s: (s[1], s[0])):
+        span = spans.get(sid)
+        if span is None:
+            continue
+        kinds = by_session.get(sid) or {"b": [], "c": []}
         b_ints = merge_intervals(kinds["b"])
         c_only = subtract_intervals(merge_intervals(kinds["c"]), b_ints)
-        battle_seconds += total_span(b_ints)
-        collab_seconds += total_span(c_only)
+        s_active = span[1] - span[0]
+        s_battle = total_span(b_ints)
+        s_collab = total_span(c_only)
+        active_seconds += s_active
+        battle_seconds += s_battle
+        collab_seconds += s_collab
         battle_count += len(kinds["b"])
         collab_count += len(kinds["c"])
         if kinds["b"]:
             sessions_with_battle += 1
         if kinds["c"]:
             sessions_with_collab += 1
+        series.append(
+            {
+                "session_id": sid,
+                "started_at": span[0],
+                "active_seconds": s_active,
+                "collab_seconds": s_collab,
+                "battle_seconds": s_battle,
+                "solo_seconds": max(0.0, s_active - s_battle - s_collab),
+                # 比率は各配信の中での割合。移動平均は画面側で秒を足し直して出す
+                # (この率をそのまま平均すると、10分の配信と6時間の配信が同じ重みになる)。
+                "collab_share": (s_collab / s_active * 100) if s_active > 0 else 0.0,
+                "battle_share": (s_battle / s_active * 100) if s_active > 0 else 0.0,
+                "collab_count": len(kinds["c"]),
+                "battle_count": len(kinds["b"]),
+            }
+        )
     solo_seconds = max(0.0, active_seconds - battle_seconds - collab_seconds)
     hours = active_seconds / 3600
 
@@ -831,6 +1003,9 @@ def _coop_summary(session_spans: list, collab_windows: list, battle_windows: lis
         "avg_collab_seconds": (collab_seconds / collab_count) if collab_count else 0.0,
         "sessions_with_battle": sessions_with_battle,
         "sessions_with_collab": sessions_with_collab,
+        # 配信ごとの内訳(古い順)。通算の比率だけでは「増えているのか減っているのか」が
+        # 判らないため、推移を引けるだけの素の秒を渡す。
+        "series": series,
     }
 
 

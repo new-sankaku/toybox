@@ -266,6 +266,48 @@ describe("history.js の絞り込みと並び替え", () => {
     });
   });
 
+  // 操作列は2群(状態の右 = 詳細/焼き込み出力、数値の後ろ = AI高画質/字幕化/削除)に分かれ、
+  // 各群の幅はheaderのcolspanでしか宣言されない。列数がずれると、表は描かれるのに
+  // 見出しと値が1列ずつずれる — 行が消えるbugと違って気付かれない。
+  describe("操作列の配置", () => {
+    const headers = () =>
+      Array.from(doc.querySelectorAll("#session-table thead th"));
+    const labels = (tr) =>
+      Array.from(tr.cells).map((td) => td.textContent.trim());
+
+    function renderWith({ upscale = false, stt = false } = {}) {
+      seed();
+      setFilters();
+      page.set("upscaleConfigured", upscale);
+      page.set("sttConfigured", stt);
+      win.renderTable();
+      return doc.querySelectorAll("#session-rows tr");
+    }
+
+    it("headerのcolspan合計と行のcell数が一致する(設定で列が増減しても)", () => {
+      [{}, { upscale: true }, { stt: true }, { upscale: true, stt: true }].forEach((opts) => {
+        const rows = renderWith(opts);
+        const declared = headers().reduce((sum, th) => sum + th.colSpan, 0);
+        expect(rows.length).toBeGreaterThan(0);
+        rows.forEach((tr) => expect(tr.cells.length).toBe(declared));
+      });
+    });
+
+    it("詳細と焼き込み出力は配信者の左、残りの操作は数値の後ろ", () => {
+      renderWith({ upscale: true, stt: true });
+      // 終了済みで録画のあるsession(=全操作が活性)で並びを見る。
+      page.set("allSessions", [{ ...SESSIONS[0], recording_count: 1 }]);
+      win.renderTable();
+      const cells = labels(doc.querySelector("#session-rows tr"));
+      // # の次が操作の先頭群で、その右に 配信者・開始・時間・状態 が並ぶ。
+      expect(cells.slice(1, 3)).toEqual(["詳細", "焼き込み出力"]);
+      // 状態の次からが数値列(コインが先頭)。
+      expect(cells[7]).toBe("500");
+      // 末尾はMemo(入力欄なので空文字)を挟んで残りの操作。
+      expect(cells.slice(-3)).toEqual(["AI高画質", "字幕化", "削除"]);
+    });
+  });
+
   describe("applySort", () => {
     beforeEach(() => seed());
 

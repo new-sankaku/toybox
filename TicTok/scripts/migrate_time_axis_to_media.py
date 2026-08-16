@@ -116,13 +116,17 @@ def _convert_transcript(con, recording_id: int, to_media) -> tuple:
         return 0, 0.0
     worst = 0.0
     for seg in segments:
-        for key in ("start", "end"):
-            value = seg.get(key)
-            if value is None:
-                continue
-            moved = to_media(float(value))
-            worst = max(worst, abs(moved - float(value)))
-            seg[key] = moved
+        # 語ごとの時刻も同じ軸へ移す。segmentだけ移すと、字幕の分割(split_for_display)は
+        # 語の時刻で行うため、cueだけが古い軸に残る。segmentの表示は正しく見えるので、
+        # 気付く手段が無い。
+        for row in [seg, *(seg.get("words") or [])]:
+            for key in ("start", "end"):
+                value = row.get(key)
+                if value is None:
+                    continue
+                moved = to_media(float(value))
+                worst = max(worst, abs(moved - float(value)))
+                row[key] = moved
     con.execute("UPDATE transcripts SET segments_json = ? WHERE rowid = ?",
                 (json.dumps(segments, ensure_ascii=False), row["_rid"]))
     return len(segments), worst
@@ -178,15 +182,13 @@ def main() -> int:
             con, "search_hits", ("video_time", "end_time"), rec["id"], to_media)
         marks, worst_marks = _convert_rows(
             con, "bookmarks", ("start", "end"), rec["id"], to_media)
-        cuts, worst_cuts = _convert_rows(
-            con, "cut_list", ("start", "end"), rec["id"], to_media)
         segs, worst_segs = _convert_transcript(con, rec["id"], to_media)
-        worst = max(worst_hits, worst_marks, worst_cuts, worst_segs)
+        worst = max(worst_hits, worst_marks, worst_segs)
         con.execute("UPDATE recordings SET time_axis = 'media' WHERE id = ?", (rec["id"],))
         converted += 1
         logger.info(
-            "%s%s: hits=%d bookmarks=%d cuts=%d transcript_segments=%d  最大移動=%.3fs",
-            "" if args.apply else "[dry-run] ", stem[:44], hits, marks, cuts, segs, worst,
+            "%s%s: hits=%d bookmarks=%d transcript_segments=%d  最大移動=%.3fs",
+            "" if args.apply else "[dry-run] ", stem[:44], hits, marks, segs, worst,
         )
 
     if args.apply:

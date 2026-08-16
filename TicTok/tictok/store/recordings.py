@@ -156,10 +156,51 @@ class RecordingsMixin:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def recordings_by_stem(self) -> dict:
+        """file名のstem -> 録画の身元(id / 配信者 / 開始時刻)。
+
+        切り出し成果物はDBに行を持たず、file名のstemだけが録画への手掛かりになる。一覧を
+        出すたびにfile1本ごと ``get_recording`` を引くと件数ぶんqueryが飛ぶので、1回の走査で
+        引き当てられるようにここで畳む。stemはfilenameを優先する(中断録画のpathはmp4では
+        なくrecord dirを指すことがある — files._recording_stemと同じ理由)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, unique_id, filename, path, started_at FROM recordings"
+            ).fetchall()
+        found: dict = {}
+        for row in rows:
+            raw = row["filename"] or Path(row["path"] or "").name
+            stem = Path(raw).stem if raw else ""
+            if stem:
+                found[stem] = {"recording_id": row["id"], "unique_id": row["unique_id"],
+                               "started_at": row["started_at"]}
+        return found
+
     def transcribed_recording_ids(self) -> set:
         """Recording ids that have a stored transcript (existence only, no payload)."""
         with self._lock:
             rows = self._conn.execute("SELECT recording_id FROM transcripts").fetchall()
+        return {row["recording_id"] for row in rows}
+
+    def current_transcript_recording_ids(self, timemap_version: int) -> set:
+        """字幕として使える文字起こしを持つ録画のid。
+
+        「行がある」では足りない。文字起こしの内容は同じ形のまま意味が変わってきた:
+
+          * 時刻mapの版が古い文字起こし … 尺が伸びるほど後ろへずれる(timemap_migrationが選別する)
+          * 語ごとの時刻を持たない文字起こし … cueを語の端で締められず、segmentの終端が次の
+            segmentの開始まで伸びる。実測でSRTがtimelineを覆う割合は中央値97.7%(語の時刻が
+            あれば62.0%、表示単位へ割れば48.4%)で、無音の上に関係のないcueが出続ける。
+
+        どちらも再文字起こしでしか直らないので、一括投入の「済み」から外す母集団をここで引く。
+        ``transcribed_recording_ids`` は「行があるか」のままにする — 検索indexのbackfillは
+        中身の新旧に関係なく全件を対象にする必要がある。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT recording_id FROM transcripts"
+                " WHERE timemap_version = ? AND word_times = 1",
+                (timemap_version,),
+            ).fetchall()
         return {row["recording_id"] for row in rows}
 
     def delete_recording(self, recording_id: int) -> Optional[dict]:
@@ -221,6 +262,39 @@ class RecordingsMixin:
             self._conn.commit()
         return cursor.rowcount > 0
 
+    def set_laugh_index_meta(self, recording_id: int, meta: Optional[dict]) -> bool:
+        """笑い声indexを張った条件を記録する(``None``で未記録へ戻す)。
+
+        indexを張った側だけがこの条件を知っている。「行が在る=済み」で代用できないのは、
+        共演中を外す設定を変えた後も古い行がそのまま済みに見えるためで、一括処理の
+        済み判定はここを見て条件の違う録画を対象へ戻す。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE recordings SET laugh_index_json = ? WHERE id = ?",
+                (json.dumps(meta, ensure_ascii=False) if meta is not None else None,
+                 recording_id),
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
+
+    def laugh_index_meta_map(self) -> dict:
+        """recording_id -> 笑い声indexを張った条件。列がNULLの録画はkeyごと現れない。
+
+        一括処理の済み判定と録画一覧の両方が録画数ぶん必要とするので、母集合単位で
+        1回だけ引く(録画ごとにget_recordingを叩くと行を丸ごと読んで捨てることになる)。"""
+        rows = self._read_connection().execute(
+            "SELECT id, laugh_index_json FROM recordings WHERE laugh_index_json IS NOT NULL"
+        ).fetchall()
+        out: dict = {}
+        for row in rows:
+            try:
+                out[row["id"]] = json.loads(row["laugh_index_json"])
+            except ValueError:
+                # 読めない値は「条件が分からない」= 未記録と同じ扱い。ここで既定値を
+                # 作ると、張っていない条件で張ったと名乗ることになる。
+                continue
+        return out
+
     def set_recording_audio_normalized(self, recording_id: int, at: Optional[float],
                                        lufs: Optional[float]) -> bool:
         """録画本体の音量正規化の適用状態を書く。``at=None``で未適用へ戻す。
@@ -279,8 +353,8 @@ class RecordingsMixin:
         return dict(row) if row else None
 
     def recordings_for_retention(self) -> list:
-        """保持policyの候補選定に必要な全録画。転写の有無まで含めるのは、生録画を消すと
-        転写も道連れ(transcriptsはON DELETE CASCADE)になることを画面で示すため。"""
+        """保持policyの候補選定に必要な全録画。文字起こしの有無まで含めるのは、生録画を消すと
+        文字起こしも道連れ(transcriptsはON DELETE CASCADE)になることを画面で示すため。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT r.*, (t.recording_id IS NOT NULL) AS has_transcript"

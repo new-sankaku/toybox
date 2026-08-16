@@ -163,9 +163,10 @@ describe("common.js のbattle構造", () => {
         owner,
       );
       const units = win.battleBarUnits(topo);
+      // labelはsegmentのhoverでだけ使う名乗り(細いsegmentは数値しか出ないため)。
       expect(units).toEqual([
-        { score: 700, own: true, self: false },
-        { score: 900, own: false, self: false },
+        { score: 700, own: true, self: false, label: "自チーム" },
+        { score: 900, own: false, self: false, label: "敵チーム" },
       ]);
     });
   });

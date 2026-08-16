@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok 配信者 — Gifterの遷移をどう出すか（案1/2/3）</title>
+  <style>
+    :root {
+      --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+      --ink:#403d33; --ink-strong:#322f27; --ink-muted:#4a4636; --line:#8f8871;
+      --accent:#5b7fc2; --accent-deep:#375897; --accent-ink:#284886;
+      --invert-bg:#4d4a3f; --invert-fg:#d8d2bc; --invert-fg-muted:rgba(216,210,188,0.88);
+      --ok:#6c7a5b; --warn:#ab553a; --shadow:rgba(59,56,47,0.35);
+      --ramp-0:#e9dfc4; --ramp-1:#e8894a; --ramp-2:#cf7230; --ramp-3:#b55b11; --ramp-4:#974902; --ramp-5:#783903;
+    }
+    * { box-sizing:border-box; }
+    html,body { margin:0; min-height:100%; }
+    body {
+      background: radial-gradient(ellipse at 50% -20%, rgba(255,250,230,0.25), transparent 60%), var(--sand-bg);
+      color:var(--ink); font-family:"Roboto Mono","Noto Sans Mono","Courier New",monospace; letter-spacing:0.04em;
+    }
+    .mock-switch { position:sticky; top:0; z-index:200; display:flex; align-items:center; gap:0.5rem; padding:0.5rem 1rem; background:var(--invert-bg); color:var(--invert-fg); border-bottom:2px solid var(--line); flex-wrap:wrap; }
+    .mock-switch strong { letter-spacing:0.2em; font-size:0.8rem; margin-inline-end:0.5rem; }
+    .mock-switch .note { font-size:0.68rem; color:var(--invert-fg-muted); }
+    .mock-btn { font:inherit; cursor:pointer; padding:0.3rem 0.9rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); letter-spacing:0.1em; font-size:0.75rem; }
+    .mock-btn.on { background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep); }
+    .mock-view { display:none; padding:1rem; } .mock-view.on { display:block; }
+
+    .panel { background:var(--sand-panel); border:1px solid var(--line); box-shadow:0.35rem 0.35rem 0 var(--shadow); padding:0.9rem 1rem 1rem; margin-bottom:1rem; }
+    .panel-title { margin:0 0 0.7rem; font-size:0.85rem; font-weight:600; color:var(--invert-fg); background:var(--invert-bg); padding:0.35rem 0.6rem; letter-spacing:0.15em; }
+    .sub { margin:1rem 0 0.5rem; font-size:0.76rem; color:var(--ink-strong); border-bottom:1px solid var(--line); padding-bottom:0.2rem; letter-spacing:0.12em; font-weight:600; }
+    .note { font-size:0.7rem; color:var(--ink-muted); line-height:1.8; margin:0.5rem 0 0; }
+    .verdict { font-size:0.72rem; color:var(--ink-strong); background:var(--sand-panel-muted); border-inline-start:0.25rem solid var(--ok); padding:0.45rem 0.7rem; margin:0.6rem 0 0; line-height:1.9; }
+    .verdict.bad { border-inline-start-color:var(--warn); }
+    .verdict b { letter-spacing:0.08em; }
+    .toolbar { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; font-size:0.68rem; color:var(--ink-muted); margin:0 0 0.4rem; }
+    .toolbar .k { border:1px solid var(--line); background:var(--sand-panel-muted); padding:0 0.25rem; font-size:0.62rem; }
+    .seg { display:inline-flex; border:1px solid var(--line); }
+    .seg button { font:inherit; font-size:0.68rem; cursor:pointer; padding:0.15rem 0.6rem; border:0; border-inline-end:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink); }
+    .seg button:last-child { border-inline-end:0; }
+    .seg button.on { background:var(--invert-bg); color:var(--invert-fg); }
+
+    table.t { inline-size:100%; border-collapse:collapse; font-size:0.74rem; }
+    table.t th { background:var(--invert-bg); color:var(--invert-fg); text-align:start; padding:0.3rem 0.6rem; font-size:0.66rem; letter-spacing:0.1em; white-space:nowrap; }
+    table.t td { padding:0.26rem 0.6rem; border-top:1px solid rgba(143,136,113,0.45); }
+    table.t td.n, table.t th.n { text-align:end; font-variant-numeric:tabular-nums; }
+    table.t tbody tr:hover, table.t tbody tr.on { background:var(--sand-panel-muted); }
+    span.who { display:inline-flex; align-items:center; gap:0.4rem; vertical-align:middle; }
+    .rk-new { color:var(--accent-ink); } .rk-flat { color:var(--ink-muted); opacity:0.6; }
+
+    svg.chart { inline-size:100%; block-size:auto; display:block; }
+    svg .p { cursor:pointer; }
+    svg.dim .p { opacity:0.16; }
+    svg.dim .p.on { opacity:1; }
+    svg .grid { stroke:var(--line); stroke-opacity:0.45; stroke-width:1; }
+    svg .lab { font-family:inherit; font-size:11px; fill:var(--ink-muted); }
+    svg .lab.b { fill:var(--ink-strong); font-size:12px; }
+    svg .daycol { fill:transparent; cursor:pointer; }
+    svg .daycol:hover { fill:rgba(77,74,63,0.08); }
+    svg .daycol.on { fill:rgba(55,88,151,0.14); }
+
+    /* ---- 案3 heatmap ---- */
+    table.hm { border-collapse:collapse; font-size:0.7rem; inline-size:100%; }
+    table.hm th, table.hm td { border:1px solid rgba(143,136,113,0.5); padding:0; }
+    table.hm th.day { background:var(--invert-bg); color:var(--invert-fg); font-size:0.58rem; font-weight:400; padding:0.2rem 0.1rem; cursor:pointer; text-align:center; white-space:nowrap; }
+    table.hm th.day.on { background:var(--accent-deep); }
+    table.hm th.who { background:var(--invert-bg); color:var(--invert-fg); text-align:start; padding:0.2rem 0.5rem; font-size:0.62rem; white-space:nowrap; }
+    table.hm td.who { padding:0.15rem 0.5rem; background:var(--sand-panel-muted); white-space:nowrap; }
+    table.hm td.c { text-align:center; font-size:0.58rem; font-variant-numeric:tabular-nums; color:var(--ink-strong); block-size:1.35rem; }
+    table.hm td.c.on { outline:2px solid var(--accent-deep); outline-offset:-2px; }
+    table.hm tr:hover td.who { background:var(--invert-bg); color:var(--invert-fg); }
+    table.hm td.tot { text-align:end; padding:0.15rem 0.5rem; font-variant-numeric:tabular-nums; background:var(--sand-panel-muted); white-space:nowrap; }
+    table.hm tr.off td.who, table.hm tr.off td.tot { opacity:0.5; }
+    table.hm .rk { display:inline-block; min-inline-size:1.2rem; text-align:end; margin-inline-end:0.3rem; font-size:0.6rem; color:var(--ink-muted); }
+    .av { inline-size:1.15rem; block-size:1.15rem; border-radius:50%; display:inline-grid; place-items:center; font-size:0.6rem; color:#fff; flex:0 0 auto; }
+    .legend { display:flex; align-items:center; gap:0.3rem; font-size:0.62rem; color:var(--ink-muted); margin-block-start:0.4rem; flex-wrap:wrap; }
+    .legend i { inline-size:1.4rem; block-size:0.7rem; display:inline-block; border:1px solid rgba(143,136,113,0.5); }
+
+    /* ---- Before ---- */
+    .sm-period { display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap; margin:0 0 0.5rem; }
+    .sm-period select { font:inherit; font-size:0.7rem; background:var(--sand-panel-muted); color:var(--ink); border:1px solid var(--line); padding:0.18rem 0.3rem; }
+    .btn-small { font:inherit; font-size:0.75rem; cursor:pointer; padding:0.15rem 0.5rem; border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink); }
+    .hand { position:relative; display:inline-block; }
+    .hand::after { content:attr(data-step); position:absolute; inset-block-start:-0.55rem; inset-inline-start:-0.4rem; background:var(--warn); color:#fff; font-size:0.6rem; inline-size:1rem; block-size:1rem; border-radius:50%; display:grid; place-items:center; }
+  </style>
+</head>
+<body>
+  <div class="mock-switch">
+    <strong>Gifterの遷移をどう出すか</strong>
+    <button class="mock-btn" data-view="before">Before（現行）</button>
+    <button class="mock-btn on" data-view="s1">案1 順位の折れ線</button>
+    <button class="mock-btn" data-view="s2">案2 実額の折れ線</button>
+    <button class="mock-btn" data-view="s3">案3 人×日の一覧</button>
+    <span class="note">同じ架空データです。どの案も期間の切り替え操作なしで、直近14配信日ぶんが最初から出ています。</span>
+  </div>
+
+  <!-- ========================= Before ========================= -->
+  <section class="mock-view" id="v-before">
+    <div class="panel">
+      <h2 class="panel-title">■ Gifter / 収益分析（現行）</h2>
+      <div class="sm-period">
+        <div class="seg">
+          <button class="on">全期間</button><button class="hand" data-step="1">月</button><button>週</button><button class="hand" data-step="2">日</button>
+        </div>
+        <button class="btn-small">‹</button>
+        <span class="hand" data-step="3"><select><option>2026-08-12　38.2K</option></select></span>
+        <button class="btn-small">›</button>
+        <span class="note" style="margin:0">Gifter 24 人</span>
+      </div>
+      <table class="t"><thead><tr><th>#</th><th>Gifter</th><th class="n">コイン</th><th class="n">Gift数</th><th class="n">出現Session</th><th>前期比</th></tr></thead><tbody id="b-g"></tbody></table>
+      <p class="verdict bad">
+        <b>1つの期間の断面しか出ない</b> — 遷移は「前期比」の矢印1つに畳まれていて、どれだけ動いたのかは読めません。<br>
+        <b>比べるには操作が要る</b> — 日を出すまで3手、2つの表ぶんで6手。前の日と見比べるには行き来しながら記憶する必要があります。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========================= 案1 順位の折れ線 ========================= -->
+  <section class="mock-view on" id="v-s1">
+    <div class="panel">
+      <h2 class="panel-title">■ 案1 — 順位の折れ線（誰が誰を抜いたか）</h2>
+      <div class="toolbar">
+        <span>縦＝その日の順位（上が1位） ／ 線の太さ＝その日のコイン ／ 線が切れている日＝その日は投げていない</span>
+        <span>線かアイコンにpointerを乗せると、その人だけが濃く出ます。下の表の行に乗せても同じです。</span>
+      </div>
+      <svg class="chart" id="s1-svg" viewBox="0 0 1000 470" preserveAspectRatio="xMidYMid meet" role="img" aria-label="順位の遷移"></svg>
+      <h3 class="sub">選んだ日の内訳 <span id="s1-day" style="font-weight:400;color:var(--ink-muted)"></span></h3>
+      <table class="t"><thead><tr><th class="n">#</th><th>Gifter</th><th class="n">コイン</th><th class="n">Gift数</th><th>前日比</th></tr></thead><tbody id="s1-tb"></tbody></table>
+      <p class="verdict">
+        <b>相対性がそのまま線になる</b> — 交差が「抜いた／抜かれた」で、傾きが動いた量です。誰かの上昇は必ず誰かの下降として見えます。<br>
+        <b>操作0で遷移が出ている</b> — 日を選ぶのは内訳を見たいときだけ（点か列をclick）。<br>
+        <b>弱点</b> — 縦軸が順位なので<b>金額の桁は消えます</b>（1位が50Kでも600でも同じ高さ）。線の太さで補っていますが、正確な量は読めません。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========================= 案2 実額の折れ線 ========================= -->
+  <section class="mock-view" id="v-s2">
+    <div class="panel">
+      <h2 class="panel-title">■ 案2 — 実額の折れ線（どれだけ投げたか）</h2>
+      <div class="toolbar">
+        <span>縦＝その日のコイン</span>
+        <span class="seg" id="s2-scale"><button data-v="log" class="on">対数</button><button data-v="linear">線形</button></span>
+        <span>薄い面＝その日の総コイン（全員） ／ 右端のアイコン＝現在の並び</span>
+      </div>
+      <svg class="chart" id="s2-svg" viewBox="0 0 1000 430" preserveAspectRatio="xMidYMid meet" role="img" aria-label="コインの遷移"></svg>
+      <h3 class="sub">選んだ日の内訳 <span id="s2-day" style="font-weight:400;color:var(--ink-muted)"></span></h3>
+      <table class="t"><thead><tr><th class="n">#</th><th>Gifter</th><th class="n">コイン</th><th class="n">Gift数</th><th>前日比</th></tr></thead><tbody id="s2-tb"></tbody></table>
+      <p class="verdict">
+        <b>量の相対性が主役</b> — 「1位だが前の日の半分」「6位だが一人だけ伸びている」が読めます。総コインの面と重なるので、全体が伸びたのか一人が伸びたのかも分かれます。<br>
+        <b>弱点</b> — 桁差が大きいので既定は対数です（線形にすると跳ねた1日で他が底へ潰れます）。順位そのものは読みにくく、線が混み合います。
+      </p>
+    </div>
+  </section>
+
+  <!-- ========================= 案3 人×日 ========================= -->
+  <section class="mock-view" id="v-s3">
+    <div class="panel">
+      <h2 class="panel-title">■ 案3 — 人 × 日 の一覧（全部出す）</h2>
+      <div class="toolbar">
+        <span>行＝Gifter（濃さ＝その日のコイン） ／ 列＝配信日</span>
+        <span class="seg" id="s3-sort"><button data-v="total" class="on">並び: 通算</button><button data-v="recent">並び: 直近3日</button><button data-v="trend">並び: 伸び</button><button data-v="day">並び: 選んだ日</button></span>
+        <span><b>列の見出し（日付）をclickすると、その日のコイン順に並び替わります。</b>その日に投げていない人は下へ落ちます。</span>
+      </div>
+      <div style="overflow-x:auto"><table class="hm" id="s3-hm"></table></div>
+      <div class="legend"><span>コイン</span><i style="background:var(--ramp-0)"></i><i style="background:#e6c39a"></i><i style="background:var(--ramp-1)"></i><i style="background:var(--ramp-3)"></i><i style="background:var(--ramp-5)"></i><span>少 → 多（対数）</span><span>空欄＝その日は投げていない</span></div>
+      <h3 class="sub">選んだ日の内訳 <span id="s3-day" style="font-weight:400;color:var(--ink-muted)"></span></h3>
+      <table class="t"><thead><tr><th class="n">#</th><th>Gifter</th><th class="n">コイン</th><th class="n">Gift数</th><th>前日比</th></tr></thead><tbody id="s3-tb"></tbody></table>
+      <p class="verdict">
+        <b>縦にも横にも比べられる</b> — 縦＝その日の中での相対、横＝その人の続き方。「毎回来る人」と「跳ねた日だけの人」が模様で分かれます。<br>
+        <b>日付をclickするとその日の順で並ぶ</b> — 現行の「その日のランキング」が、周りの日を残したまま出ます。行の先頭にその日の順位が付き、投げていない人は薄くして下へ落とします。<br>
+        <b>操作が要らない</b> — 期間の選択そのものが無く、全員×全日が最初から出ています。<br>
+        <b>弱点</b> — 濃さは量の細かい差に鈍く（対数）、正確な金額はhoverか下の表で読むことになります。人数・日数が増えると縦横に伸びます。
+      </p>
+    </div>
+  </section>
+
+<script>
+// ================= 架空データ =================
+function hash(s) { let h = 2166136261; for (const c of s) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { let x = seed || 1; return () => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; x >>>= 0; return x / 4294967296; }; }
+const pad = (n) => String(n).padStart(2, "0");
+const fmt = (n) => n >= 10000 ? Math.round(n / 1000) + "K" : n >= 1000 ? (n / 1000).toFixed(1) + "K" : String(Math.round(n));
+
+const DAYS = [];
+{
+  const start = new Date(2026, 4, 18), end = new Date(2026, 7, 12);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    const key = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const r = rng(hash(key)), wd = d.getDay();
+    const live = r() < (wd === 0 || wd === 3 || wd === 5 ? 0.85 : 0.35);
+    const spike = r() < 0.08;
+    DAYS.push({ key, live, coins: live ? Math.round((spike ? 90000 : 14000) * (0.35 + r() * 1.3)) : 0,
+                battles: live && r() < 0.6 ? 1 + Math.floor(r() * 4) : 0 });
+  }
+}
+const LIVE = DAYS.filter((d) => d.live);
+const WIN = LIVE.slice(-14);                       // 3つの案が共通で出す窓
+const NAMES = ["ぬるぽ_0x7f","kuro__neko","たけのこ帝国","Sora__Rin","yamada_9","猫背のP","MIKA","ばぐとり係","hoshi_00","Ren","こんぶ茶","くらげ","もふ丸","zzz_sleep"];
+const HUES = {}; NAMES.forEach((n, i) => { HUES[n] = `hsl(${(i * 47 + 15) % 360} 32% 38%)`; });
+
+// その日のコインを来ていた人へ配り切る(表の合計と総コインが一致する)
+function dayGifters(day) {
+  if (!day.live) return {};
+  const r = rng(hash(day.key + "|g")), here = [];
+  NAMES.forEach((n, i) => {
+    if (r() > Math.max(0.3, 0.92 - i * 0.05)) return;
+    here.push({ n, w: Math.pow(NAMES.length - i, 1.7) * (0.35 + r() * 1.5), gifts: 1 + Math.floor(r() * 18) });
+  });
+  if (!here.length) return {};
+  const sum = here.reduce((a, x) => a + x.w, 0), out = {};
+  here.forEach((x) => { out[x.n] = { coins: Math.max(1, Math.round(day.coins * x.w / sum)), gifts: x.gifts }; });
+  return out;
+}
+const G = new Map(WIN.map((d) => [d.key, dayGifters(d)]));           // 窓の中の全日ぶん
+const rankOf = new Map();                                            // key -> [name順位1..]
+WIN.forEach((d) => rankOf.set(d.key, Object.entries(G.get(d.key)).sort((a, b) => b[1].coins - a[1].coins).map(([n]) => n)));
+const totalIn = (name) => WIN.reduce((a, d) => a + ((G.get(d.key)[name] || {}).coins || 0), 0);
+const TOP = [...NAMES].sort((a, b) => totalIn(b) - totalIn(a)).slice(0, 8);
+const maxDay = Math.max(...WIN.map((d) => d.coins));
+const maxOne = Math.max(...WIN.flatMap((d) => Object.values(G.get(d.key)).map((v) => v.coins)));
+const mdLabel = (k) => k.slice(5).replace("-", "/");
+const initial = (n) => n.replace(/^[_\W]+/, "").charAt(0).toUpperCase() || n.charAt(0);
+
+// ================= 共通: 日の内訳表 =================
+function dayTable(tbodyId, dayKey, onHover) {
+  const tb = document.getElementById(tbodyId);
+  tb.innerHTML = "";
+  const cur = rankOf.get(dayKey) || [];
+  const i = WIN.findIndex((d) => d.key === dayKey);
+  const prev = i > 0 ? rankOf.get(WIN[i - 1].key) : null;
+  cur.slice(0, 8).forEach((name, idx) => {
+    const v = G.get(dayKey)[name];
+    let delta = "—";
+    if (prev) {
+      const b = prev.indexOf(name);
+      delta = b < 0 ? '<span class="rk-new">new</span>'
+        : b === idx ? '<span class="rk-flat">±0</span>'
+        : b > idx ? `↑${b - idx}` : `↓${idx - b}`;
+    }
+    const tr = document.createElement("tr");
+    tr.dataset.name = name;
+    tr.innerHTML = `<td class="n">${idx + 1}</td>`
+      + `<td><span class="who"><span class="av" style="background:${HUES[name]}">${initial(name)}</span>${name}</span></td>`
+      + `<td class="n">${fmt(v.coins)}</td><td class="n">${v.gifts}</td><td>${delta}</td>`;
+    if (onHover) {
+      tr.onmouseenter = () => onHover(name);
+      tr.onmouseleave = () => onHover(null);
+    }
+    tb.appendChild(tr);
+  });
+}
+
+// ================= 案1: 順位の折れ線 =================
+const S1 = { day: WIN[WIN.length - 1].key };
+function drawS1() {
+  const W = 1000, H = 470, padL = 176, padR = 156, padT = 26, padB = 96;
+  const N = TOP.length;
+  const x = (i) => padL + (i * (W - padL - padR)) / (WIN.length - 1);
+  const y = (rank) => padT + ((rank - 1) * (H - padT - padB)) / (N - 1);
+  const svg = document.getElementById("s1-svg");
+  let s = "";
+
+  // 順位の横線と目盛り
+  for (let r = 1; r <= N; r++) {
+    s += `<line class="grid" x1="${padL - 8}" y1="${y(r)}" x2="${W - padR + 8}" y2="${y(r)}" />`;
+    s += `<text class="lab" x="${padL - 12}" y="${y(r) + 4}" text-anchor="end">${r}位</text>`;
+  }
+  // 日付軸 + 総コインの棒
+  const baseY = H - padB + 56;
+  WIN.forEach((d, i) => {
+    s += `<text class="lab" x="${x(i)}" y="${H - padB + 20}" text-anchor="middle" font-size="10">${mdLabel(d.key)}</text>`;
+    const h = 30 * (d.coins / maxDay);
+    s += `<rect x="${x(i) - 7}" y="${baseY - h}" width="14" height="${h}" fill="var(--ramp-3)" opacity="0.75" />`;
+    s += `<text class="lab" x="${x(i)}" y="${baseY + 12}" text-anchor="middle" font-size="9">${fmt(d.coins)}</text>`;
+  });
+  s += `<text class="lab" x="${padL - 12}" y="${baseY}" text-anchor="end" font-size="10">総コイン</text>`;
+
+  // 人ごとの線
+  TOP.forEach((name) => {
+    const pts = [];
+    WIN.forEach((d, i) => {
+      const r = (rankOf.get(d.key) || []).indexOf(name);
+      if (r >= 0 && r < N) pts.push({ i, r: r + 1, coins: G.get(d.key)[name].coins });
+    });
+    if (!pts.length) return;
+    let g = `<g class="p" data-name="${name}">`;
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], b = pts[k];
+      if (b.i - a.i > 2) continue;                       // 間が空いたら繋がない
+      const w = 1.4 + 5 * (b.coins / maxOne);
+      const mx = (x(a.i) + x(b.i)) / 2;
+      g += `<path d="M${x(a.i)},${y(a.r)} C${mx},${y(a.r)} ${mx},${y(b.r)} ${x(b.i)},${y(b.r)}"`
+        + ` fill="none" stroke="${HUES[name]}" stroke-width="${w.toFixed(2)}" stroke-linecap="round" />`;
+    }
+    pts.forEach((p) => {
+      g += `<circle cx="${x(p.i)}" cy="${y(p.r)}" r="3.4" fill="${HUES[name]}" />`;
+      g += `<title>${name}　${mdLabel(WIN[p.i].key)}　${p.r}位　${fmt(p.coins)}</title>`;
+    });
+    // 名前は最初の日/最後の日に居た人だけへ付ける(同じ段へ2人ぶん重ならないように)
+    const li = (rankOf.get(WIN[0].key) || []).indexOf(name);
+    if (li >= 0 && li < N) {
+      g += avatar(name, 18, y(li + 1), 11) + `<text class="lab b" x="${34}" y="${y(li + 1) + 4}">${name}</text>`;
+    }
+    const ri = (rankOf.get(WIN[WIN.length - 1].key) || []).indexOf(name);
+    if (ri >= 0 && ri < N) {
+      g += avatar(name, W - padR + 16, y(ri + 1), 11) + `<text class="lab b" x="${W - padR + 32}" y="${y(ri + 1) + 4}">${name}</text>`;
+    }
+    g += "</g>";
+    s += g;
+  });
+  // 日の当たり判定
+  WIN.forEach((d, i) => {
+    s += `<rect class="daycol${d.key === S1.day ? " on" : ""}" data-day="${d.key}"`
+      + ` x="${x(i) - (W - padL - padR) / (WIN.length - 1) / 2}" y="${padT - 18}"`
+      + ` width="${(W - padL - padR) / (WIN.length - 1)}" height="${H - padT - padB + 28}" />`;
+  });
+  svg.innerHTML = s;
+  wire(svg, "s1", S1, drawS1, "s1-tb", "s1-day");
+}
+function avatar(name, cx, cy, r) {
+  return `<g><circle cx="${cx}" cy="${cy}" r="${r}" fill="${HUES[name]}" />`
+    + `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="11" fill="#fff" font-family="inherit">${initial(name)}</text></g>`;
+}
+// 線・行のhover強調と、日のclickを繋ぐ
+function wire(svg, id, state, redraw, tbId, dayLabelId) {
+  const focus = (name) => {
+    svg.classList.toggle("dim", Boolean(name));
+    svg.querySelectorAll("g.p").forEach((g) => g.classList.toggle("on", g.dataset.name === name));
+    document.querySelectorAll(`#${tbId} tr`).forEach((tr) => tr.classList.toggle("on", tr.dataset.name === name));
+  };
+  svg.querySelectorAll("g.p").forEach((g) => {
+    g.onmouseenter = () => focus(g.dataset.name);
+    g.onmouseleave = () => focus(null);
+  });
+  svg.querySelectorAll("rect.daycol").forEach((r) => {
+    r.onclick = () => { state.day = r.dataset.day; redraw(); };
+  });
+  const d = WIN.find((x) => x.key === state.day);
+  document.getElementById(dayLabelId).textContent = `${state.day}　総コイン ${fmt(d.coins)}　${d.battles} 戦`;
+  dayTable(tbId, state.day, focus);
+}
+
+// ================= 案2: 実額の折れ線 =================
+const S2 = { day: WIN[WIN.length - 1].key, scale: "log" };
+function drawS2() {
+  const W = 1000, H = 430, padL = 74, padR = 190, padT = 22, padB = 60;
+  const x = (i) => padL + (i * (W - padL - padR)) / (WIN.length - 1);
+  const top = Math.max(maxDay, maxOne) * 1.05;
+  // 対数の下端はデータの最小に合わせる(0から引くと下半分が空白になる)
+  const lo = Math.max(1, Math.min(...WIN.flatMap((d) => TOP.map((n) => (G.get(d.key)[n] || {}).coins).filter(Boolean))) * 0.8);
+  const yv = (v) => {
+    if (S2.scale === "linear") return H - padB - (v / top) * (H - padT - padB);
+    const t = (Math.log10(Math.max(lo, v)) - Math.log10(lo)) / (Math.log10(top) - Math.log10(lo));
+    return H - padB - t * (H - padT - padB);
+  };
+  const svg = document.getElementById("s2-svg");
+  let s = "";
+  const ticks = S2.scale === "linear" ? [0, top / 4, top / 2, (top * 3) / 4, top]
+    : [10, 100, 1000, 10000, 100000].filter((v) => v >= lo && v <= top);
+  ticks.forEach((v) => {
+    s += `<line class="grid" x1="${padL}" y1="${yv(v)}" x2="${W - padR}" y2="${yv(v)}" />`;
+    s += `<text class="lab" x="${padL - 10}" y="${yv(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  });
+  // 総コインの面
+  let area = `M${x(0)},${H - padB}`;
+  WIN.forEach((d, i) => { area += ` L${x(i)},${yv(d.coins)}`; });
+  area += ` L${x(WIN.length - 1)},${H - padB} Z`;
+  s += `<path d="${area}" fill="var(--ink)" opacity="0.1" />`;
+  WIN.forEach((d, i) => {
+    s += `<text class="lab" x="${x(i)}" y="${H - padB + 18}" text-anchor="middle" font-size="10">${mdLabel(d.key)}</text>`;
+  });
+  // 人ごとの線
+  const order = (rankOf.get(WIN[WIN.length - 1].key) || []).filter((n) => TOP.includes(n));
+  const labelY = [];
+  TOP.forEach((name) => {
+    const pts = [];
+    WIN.forEach((d, i) => { const v = G.get(d.key)[name]; if (v) pts.push({ i, v: v.coins }); });
+    if (!pts.length) return;
+    let g = `<g class="p" data-name="${name}">`;
+    let dpath = "";
+    pts.forEach((p, k) => {
+      if (k && p.i - pts[k - 1].i > 2) { dpath += ` M${x(p.i)},${yv(p.v)}`; return; }
+      dpath += `${k ? " L" : "M"}${x(p.i)},${yv(p.v)}`;
+    });
+    g += `<path d="${dpath}" fill="none" stroke="${HUES[name]}" stroke-width="2.2" stroke-linejoin="round" />`;
+    pts.forEach((p) => {
+      g += `<circle cx="${x(p.i)}" cy="${yv(p.v)}" r="2.8" fill="${HUES[name]}">`
+        + `<title>${name}　${mdLabel(WIN[p.i].key)}　${fmt(p.v)}</title></circle>`;
+    });
+    // 右端の名前は「最後の日にも投げていた人」だけ。抜けた人はその日の点にアイコンを置く
+    // (最後の点を右端へ引くと、来ていない人が今日も居るように見える)。
+    const last = pts[pts.length - 1];
+    if (last.i === WIN.length - 1) {
+      let ly = yv(last.v);
+      while (labelY.some((v) => Math.abs(v - ly) < 15)) ly += 15;
+      labelY.push(ly);
+      g += `<line x1="${x(last.i)}" y1="${yv(last.v)}" x2="${W - padR + 8}" y2="${ly}" stroke="${HUES[name]}" stroke-width="1" opacity="0.5" />`;
+      g += avatar(name, W - padR + 20, ly, 10);
+      g += `<text class="lab b" x="${W - padR + 34}" y="${ly + 4}">${name}　${fmt(last.v)}</text>`;
+    } else {
+      g += avatar(name, x(last.i), yv(last.v), 8);
+    }
+    g += "</g>";
+    s += g;
+  });
+  WIN.forEach((d, i) => {
+    s += `<rect class="daycol${d.key === S2.day ? " on" : ""}" data-day="${d.key}"`
+      + ` x="${x(i) - (W - padL - padR) / (WIN.length - 1) / 2}" y="${padT - 14}"`
+      + ` width="${(W - padL - padR) / (WIN.length - 1)}" height="${H - padT - padB + 20}" />`;
+  });
+  svg.innerHTML = s;
+  wire(svg, "s2", S2, drawS2, "s2-tb", "s2-day");
+}
+
+// ================= 案3: 人×日の一覧 =================
+const S3 = { day: WIN[WIN.length - 1].key, sort: "total" };
+// 濃さは「窓の中の最小〜最大」を対数で割る。0起点で割ると大半が同じ濃さへ寄って、
+// 縦にも横にも比べられなくなる。
+const HEAT_LO = Math.min(...WIN.flatMap((d) => Object.values(G.get(d.key)).map((v) => v.coins)));
+function heatColor(v) {
+  if (!v) return "transparent";
+  const t = (Math.log10(v) - Math.log10(HEAT_LO)) / (Math.log10(maxOne) - Math.log10(HEAT_LO));
+  const stops = ["#e9dfc4", "#e6c39a", "#e8894a", "#b55b11", "#783903"];
+  return stops[Math.max(0, Math.min(stops.length - 1, Math.floor(t * stops.length)))];
+}
+function drawS3() {
+  const rows = [...NAMES].filter((n) => totalIn(n) > 0);
+  const recent = (n) => WIN.slice(-3).reduce((a, d) => a + ((G.get(d.key)[n] || {}).coins || 0), 0);
+  const early = (n) => WIN.slice(0, 7).reduce((a, d) => a + ((G.get(d.key)[n] || {}).coins || 0), 0);
+  const late = (n) => WIN.slice(7).reduce((a, d) => a + ((G.get(d.key)[n] || {}).coins || 0), 0);
+  const onDay = (n) => (G.get(S3.day)[n] || {}).coins || 0;
+  if (S3.sort === "recent") rows.sort((a, b) => recent(b) - recent(a));
+  else if (S3.sort === "trend") rows.sort((a, b) => (late(b) - early(b)) - (late(a) - early(a)));
+  // 選んだ日で並べる。同じ0どうしは通算順にして、投げていない人が日ごとに入れ替わらないように。
+  else if (S3.sort === "day") rows.sort((a, b) => (onDay(b) - onDay(a)) || (totalIn(b) - totalIn(a)));
+  else rows.sort((a, b) => totalIn(b) - totalIn(a));
+  document.querySelectorAll("#s3-sort button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.v === S3.sort);
+    if (b.dataset.v === "day") b.textContent = `並び: ${mdLabel(S3.day)}`;
+  });
+
+  let s = "<thead><tr><th class=\"who\">Gifter</th>";
+  WIN.forEach((d) => { s += `<th class="day${d.key === S3.day ? " on" : ""}" data-day="${d.key}">${mdLabel(d.key)}${d.battles ? "<br>▪" : "<br>&nbsp;"}</th>`; });
+  s += "<th class=\"who\" style=\"text-align:end\">通算</th><th class=\"who\" style=\"text-align:end\">伸び</th></tr></thead><tbody>";
+  rows.forEach((name, idx) => {
+    const rk = S3.sort === "day" && onDay(name) ? `<span class="rk">${idx + 1}</span>` : "";
+    s += `<tr class="${S3.sort === "day" && !onDay(name) ? "off" : ""}">`
+      + `<td class="who">${rk}<span class="who"><span class="av" style="background:${HUES[name]}">${initial(name)}</span>${name}</span></td>`;
+    WIN.forEach((d) => {
+      const v = (G.get(d.key)[name] || {}).coins || 0;
+      const dark = ["#b55b11", "#783903"].includes(heatColor(v));
+      s += `<td class="c${d.key === S3.day ? " on" : ""}" style="background:${heatColor(v)}${dark ? ";color:#f2ead6" : ""}"`
+        + ` title="${name}　${d.key}　${v ? fmt(v) : "投げていない"}">${v >= 3000 ? fmt(v) : ""}</td>`;
+    });
+    const diff = late(name) - early(name);
+    s += `<td class="tot">${fmt(totalIn(name))}</td>`
+      + `<td class="tot">${diff > 0 ? "↑" : diff < 0 ? "↓" : "±"}${fmt(Math.abs(diff))}</td></tr>`;
+  });
+  s += "</tbody>";
+  const t = document.getElementById("s3-hm");
+  t.innerHTML = s;
+  // 日付の見出しclick = その日を選ぶ + その日で並べ替える
+  t.querySelectorAll("th.day").forEach((th) => {
+    th.onclick = () => { S3.day = th.dataset.day; S3.sort = "day"; drawS3(); };
+  });
+  const d = WIN.find((x) => x.key === S3.day);
+  document.getElementById("s3-day").textContent = `${S3.day}　総コイン ${fmt(d.coins)}　${d.battles} 戦`;
+  dayTable("s3-tb", S3.day, null);
+}
+
+// ================= 起動 =================
+document.getElementById("s2-scale").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  S2.scale = b.dataset.v;
+  document.querySelectorAll("#s2-scale button").forEach((x) => x.classList.toggle("on", x === b));
+  drawS2();
+};
+document.getElementById("s3-sort").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  S3.sort = b.dataset.v;
+  drawS3();
+};
+document.querySelectorAll(".mock-btn").forEach((b) => b.onclick = () => {
+  document.querySelectorAll(".mock-btn").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".mock-view").forEach((v) => v.classList.toggle("on", v.id === `v-${b.dataset.view}`));
+});
+dayTable("b-g", WIN[WIN.length - 1].key, null);
+drawS1(); drawS2(); drawS3();
+</script>
+</body>
+</html>

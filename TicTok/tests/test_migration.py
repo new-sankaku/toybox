@@ -773,7 +773,7 @@ def test_timemap_promotes_transcript_that_fits_the_material(conn):
 
 
 def test_timemap_keeps_transcript_that_overruns_the_material(conn):
-    # 実測(録画00126)の形: 素材2時間51分に対し転写の終端が10時間43分。
+    # 実測(録画00126)の形: 素材2時間51分に対し文字起こしの終端が10時間43分。
     _put_transcript(conn, 1, duration=38584.7, version=TMV - 1)
     totals = timemap_migration.migrate_timemap_version(conn, lambda path: 10297.4)
     conn.commit()
@@ -782,7 +782,7 @@ def test_timemap_keeps_transcript_that_overruns_the_material(conn):
 
 
 def test_timemap_promotes_when_the_material_cannot_be_measured(conn):
-    # 実尺が測れない旧録画。証拠が無いまま据え置くと、正しい転写まで焼き込めなくなる。
+    # 実尺が測れない旧録画。証拠が無いまま据え置くと、正しい文字起こしまで焼き込めなくなる。
     _put_transcript(conn, 1, duration=600.0, version=TMV - 1)
     totals = timemap_migration.migrate_timemap_version(conn, lambda path: None)
     conn.commit()
@@ -791,7 +791,7 @@ def test_timemap_promotes_when_the_material_cannot_be_measured(conn):
 
 
 def test_timemap_leaves_versionless_transcripts_alone(conn):
-    # map以前の転写。media軸に載っている保証がそもそも無く、昇格の根拠が無い。
+    # map以前の文字起こし。media軸に載っている保証がそもそも無く、昇格の根拠が無い。
     _put_transcript(conn, 1, duration=600.0, version=None)
     totals = timemap_migration.migrate_timemap_version(conn, lambda path: 600.0)
     conn.commit()
@@ -843,7 +843,7 @@ def test_timemap_selection_runs_once_per_selection_rule(tmp_db_path, monkeypatch
         assert calls == [1], "同じ選別ruleで二度走らせてはいけない"
     finally:
         second.close()
-    # 物差しを変えたら選り直す。上げ忘れると、新しい物差しなら合格する転写が据え置かれ続ける。
+    # 物差しを変えたら選り直す。上げ忘れると、新しい物差しなら合格する文字起こしが据え置かれ続ける。
     monkeypatch.setattr(tm, "SELECTION_VERSION", tm.SELECTION_VERSION + 1)
     third = Storage(str(tmp_db_path))
     try:

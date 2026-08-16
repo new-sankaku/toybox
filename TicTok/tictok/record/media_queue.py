@@ -1,6 +1,6 @@
 """映像job(焼き込み / Up出力 / 再mp4化 / 音量正規化)の永続queue。
 
-転写queueと同じ形だが、支える要求が2つ多い。
+文字起こしqueueと同じ形だが、支える要求が2つ多い。
 
 1. **投入意図がprocessをまたぐ**。焼き込み＋超解像は実時間の数倍かかるため、投入から完了まで
    の間にserverが再起動する運用が普通にある。in-processの台帳(server.JobRegistry)だけでは
@@ -37,6 +37,14 @@ BULK_DOMAINS = {"overlay": "bulk_overlay", "upscale": "bulk_upscale",
 # 実行が終わったstate。pending/runningの補集合として書くと、新しいstateを足したときに
 # 「終わっていないのに終了扱い」へ静かに転ぶので列挙する。
 FINISHED_STATES = ("completed", "failed", "cancelled", "skipped", "interrupted")
+
+# 専用laneで拾う種別。条件は2つとも満たすものだけ:
+#   1. 人がその場で待つ1 clickの操作で、実処理が数秒で終わる
+#   2. 録画にも中間fileにも書き込まない(読んで別fileを1つ出すだけ)
+# 通常のworkerは既定で2本、しかも同じ録画で走っているjobがあると次を拾わない。スクショを
+# その列に入れると、長い焼き込みの裏で押した1枚が数時間保存されないままになる。laneは順番
+# ではなく**枠**を分ける仕組みで、順番の優先度(priority)とは別物である。
+INSTANT_KINDS = ("still",)
 
 # 画面の状態filter → 台帳のstate。Job画面のselectはこのkeyを送る。台帳を絞るのは画面では
 # なくここで、「新しい200行に紛れなかった古い失敗」が0件として消えないようにする。
@@ -121,7 +129,10 @@ def job_payload(row: dict, queue_position: int = 0) -> dict:
         "pct": row.get("pct") or 0,
         "index": 0,
         "total": 1,
-        "started_at": row.get("started_at") or row.get("queued_at"),
+        # 待機中はNoneのまま渡す。queued_atで埋めると、順番待ちの時間が「実行にかかった
+        # 時間」として画面に積み上がり、まだ1秒も動いていないjobが何時間もかかったように
+        # 読める。DBのstarted_atも「実行を始めた時刻」なので、payloadだけ意味をずらさない。
+        "started_at": row.get("started_at"),
         "finished_at": row.get("finished_at"),
         "message": row.get("error") or "",
         "group_id": row.get("group_id") or "",
@@ -178,6 +189,8 @@ def group_payload(rows: list) -> Optional[dict]:
         state = "completed"
         # skipped(作る物が無かった)を出力済みに数えると件数が実態と合わなくなる。
         message = f"{total - len(cancelled) - len(skipped)}件の録画を出力しました"
+    started = [r["started_at"] for r in rows if r.get("started_at")]
+    queued = [r["queued_at"] for r in rows if r.get("queued_at")]
     stage = ""
     index = len(done)
     if running:
@@ -198,8 +211,11 @@ def group_payload(rows: list) -> Optional[dict]:
         "pct": pct if state in ("running", "pending") else 100,
         "index": index,
         "total": total,
-        "started_at": min((r.get("started_at") or r.get("queued_at")) for r in rows),
+        # groupの開始は「最初のmemberが動き出した時刻」。1件も動いていない一括はNone
+        # (=まだ所要時間が無い)で、投入時刻はqueued_atが別に名乗る。
+        "started_at": min(started) if started else None,
         "finished_at": max((r.get("finished_at") or 0) for r in rows) or None,
+        "queued_at": min(queued) if queued else None,
         "message": message,
         "group_id": first["group_id"],
     }
@@ -234,11 +250,18 @@ class MediaJobQueue:
     def start(self) -> None:
         workers = config.get_media_queue_workers()
         self._tasks = [asyncio.create_task(self._run()) for _ in range(workers)]
-        if workers > 1:
+        instant = config.get_media_queue_instant_workers()
+        self._tasks += [
+            asyncio.create_task(self._run(kinds=INSTANT_KINDS, allow_busy_recording=True))
+            for _ in range(instant)
+        ]
+        if workers > 1 or instant:
             logger.info(
-                "media queue: 並列 worker %d 本で開始しました", workers,
+                "media queue: 並列 worker %d 本（即時lane %d 本）で開始しました",
+                workers, instant,
                 extra={"event": "media_queue.workers_started",
-                       "ctx": {"workers": workers}},
+                       "ctx": {"workers": workers, "instant_workers": instant,
+                               "instant_kinds": list(INSTANT_KINDS)}},
             )
 
     async def stop(self) -> None:
@@ -305,6 +328,16 @@ class MediaJobQueue:
 
     def pending_for(self, kind: str, recording_id: int) -> Optional[dict]:
         return self._storage.pending_media_job_for(kind, recording_id)
+
+    async def promote(self, job_id: str, priority: int = 0) -> bool:
+        """既に待機列に居る行の順番を上げる。人が今その1本を待っている場合に使う。
+
+        順番が変わるのは当事者の行だけではないので、待機列は全件配り直す(``_emit_pending``)。
+        既に実行中・既に同じ優先度の行では何もせずFalseを返す。"""
+        if not await asyncio.to_thread(self._storage.promote_media_job, job_id, priority):
+            return False
+        await self._emit_pending()
+        return True
 
     async def requeue(self, job_ids) -> int:
         """終わってしまったjobを同じ行のまま待機へ戻す。戻した件数を返す。
@@ -382,13 +415,16 @@ class MediaJobQueue:
 
     # ===== worker =====
 
-    async def _run(self) -> None:
+    async def _run(self, kinds: Optional[tuple] = None,
+                   allow_busy_recording: bool = False) -> None:
+        """1本のworker。``kinds`` を渡すとその種別だけを拾う専用lane(:data:`INSTANT_KINDS`)。"""
         poll = config.get_media_queue_poll_seconds()
         while not self._stopping:
             # 取得と同時にrunningへ落とす。workerが複数居るとき、選んでから開始を書くまでの
             # 隙間に別のworkerが同じ行を拾えてしまう。
             job = self._storage.claim_next_pending_media_job(
-                sweep_limit=config.get_media_queue_sweep_concurrency())
+                sweep_limit=config.get_media_queue_sweep_concurrency(),
+                kinds=kinds, allow_busy_recording=allow_busy_recording)
             if job is None:
                 self._wake.clear()
                 try:

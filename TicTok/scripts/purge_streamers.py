@@ -7,11 +7,13 @@ retentionは配信者を区別しないため、「もう追っていない配�
 
 削除するもの:
 
-  disk  <root>/<配信者>/ 一式(ts/ の素材、mp4/ の元mp4・焼き込み・Up出力)
+  disk  <root>/<配信者>/ 一式(ts/ の素材、mp4/ の元mp4・焼き込み・Up出力、
+        _clips/ の切り出し成果物、_screenshots/ のスクショ)
         <root>/.sidecars/ の当該録画ぶん(波形・sprite・timing map)
-        <root>/_clips/<配信者>/ と <root>/_backup/ の当該録画ぶん
+        <root>/_clips/<配信者>/(配信者folderの下へ移す前の実体)と
+        <root>/_backup/ の当該録画ぶん
   DB    recordings 行(FK cascadeで transcripts / search_hits / bookmarks /
-        cut_list / media_job_queue / transcribe_queue が連鎖削除される)
+        media_job_queue / transcribe_queue が連鎖削除される)
         sessions 行(cascadeで events / buckets / viewer_samples / markers /
         battles / contributor_samples / collab_windows / envelopes /
         follower_samples / analytics_session_cache / ai_analysis も落ちる)
@@ -114,8 +116,10 @@ def _plan_files(roots: list[Path], keep: set[str]) -> tuple[list[tuple[Path, str
             if entry.name in keep:
                 continue
             targets.append((entry, "録画folder", _dir_bytes(entry)))
-        # 共有dirの中身は録画ごとのartifact。file名からstemと配信者を解いて選ぶ。
-        for shared in (layout.CLIPS_DIRNAME,):
+        # 成果物は配信者folderの下(``<配信者>/_clips/``・``<配信者>/_screenshots/``)へ出るので、
+        # 上の「録画folder」で一緒に消える。ここで見るのは root直下に残る旧い置き場だけ
+        # (``scripts/migrate_clips_layout.py`` で移す前の実体)。
+        for shared in layout.ARTIFACT_DIRNAMES:
             shared_dir = root / shared
             if not shared_dir.is_dir():
                 continue
@@ -164,7 +168,6 @@ def _plan_db(conn: sqlite3.Connection, keep: list[str]) -> dict:
         "search_hits": count(
             f"SELECT COUNT(*) FROM search_hits WHERE recording_id IN {drop_rec}"),
         "bookmarks": count(f"SELECT COUNT(*) FROM bookmarks WHERE recording_id IN {drop_rec}"),
-        "cut_list": count(f"SELECT COUNT(*) FROM cut_list WHERE recording_id IN {drop_rec}"),
         "media_jobs": count(
             f"SELECT COUNT(*) FROM media_job_queue WHERE recording_id IN {drop_rec}"),
         "transcribe_queue": count(
@@ -182,8 +185,8 @@ def _apply_db(conn: sqlite3.Connection, keep: list[str]) -> None:
     conn.execute("PRAGMA foreign_keys=ON")
     drop_rec = f"(SELECT id FROM recordings WHERE unique_id NOT IN ({holes}))"
     conn.execute(
-        "INSERT INTO search_fts(search_fts, rowid, body)"
-        f" SELECT 'delete', id, body FROM search_hits WHERE recording_id IN {drop_rec}",
+        "INSERT INTO search_fts(search_fts, rowid, body_norm)"
+        f" SELECT 'delete', id, body_norm FROM search_hits WHERE recording_id IN {drop_rec}",
         keep,
     )
     # sessionを先に消す。recordings.session_id は ON DELETE SET NULL なので、録画行を
@@ -338,7 +341,6 @@ def main() -> int:
         logger.info("    transcripts    %6d行", db_plan["transcripts"])
         logger.info("    search_hits    %6d行 (FTS索引も同時に抜きます)", db_plan["search_hits"])
         logger.info("    bookmarks      %6d行", db_plan["bookmarks"])
-        logger.info("    cut_list       %6d行", db_plan["cut_list"])
         logger.info("    media_job_queue %5d行", db_plan["media_jobs"])
         logger.info("    transcribe_queue %4d行", db_plan["transcribe_queue"])
         logger.info("  sessions         %6d行 (これを消すと以下が連鎖削除)", db_plan["sessions"])

@@ -1,0 +1,1497 @@
+<title>字幕装飾プリセット</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<style>
+:root{
+  --bg:#0d1014; --panel:#141920; --panel2:#1a2029; --line:#252d38;
+  --ink:#e7edf5; --ink2:#a8b4c4; --ink3:#6f7d8f;
+  --accent:#6ea8ff; --accent-ink:#0d1014; --warn:#ffb454;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.6 "Yu Gothic UI","Noto Sans JP",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:.02em}
+button,input,select,textarea{font:inherit;color:inherit}
+
+.top{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:10px 20px;border-bottom:1px solid var(--line);background:var(--panel);
+  position:sticky;top:0;z-index:5;
+}
+.top h1{font-size:15px}
+.top p{margin:0;color:var(--ink3);font-size:12px}
+.top .spacer{flex:1}
+.top .sel{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink3)}
+.top .sel b{color:var(--ink);font-size:13px}
+
+.grid{
+  display:grid;gap:12px;padding:12px 20px 0;align-items:start;
+  grid-template-columns:minmax(340px,1fr) minmax(320px,1fr);
+}
+body.editing .grid{
+  grid-template-columns:minmax(320px,1fr) minmax(300px,1fr) minmax(250px,.7fr);
+}
+#col-edit{display:none}
+body.editing #col-edit{display:block}
+
+/* 割り当ての一覧は長い。プレビューと調整は画面に貼り付いて追従させる */
+#col-preview,#col-edit{
+  position:sticky;
+  top:calc(var(--top-h,48px) + 12px);
+  max-height:calc(100vh - var(--top-h,48px) - var(--bottom-h,52px) - 24px);
+  overflow:auto;
+}
+#col-preview::-webkit-scrollbar,#col-edit::-webkit-scrollbar{width:8px}
+#col-preview::-webkit-scrollbar-thumb,#col-edit::-webkit-scrollbar-thumb{
+  background:#2b3644;border-radius:4px;
+}
+
+@media(max-width:1150px){
+  .grid,body.editing .grid{grid-template-columns:1fr}
+  #col-preview,#col-edit{position:static;max-height:none;overflow:visible}
+}
+
+/* 折りたたみ ----------------------------------------------------- */
+details.card>summary{
+  display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;
+  padding:8px 12px;background:var(--panel2);font-size:13px;font-weight:600;
+}
+details.card>summary::-webkit-details-marker{display:none}
+details.card>summary::before{content:"▸";color:var(--ink3);font-size:10px}
+details.card[open]>summary{border-bottom:1px solid var(--line)}
+details.card[open]>summary::before{content:"▾"}
+details.card>summary .note{margin-left:auto;color:var(--ink3);font-size:11px;font-weight:400}
+
+.bottom{position:sticky;bottom:0;z-index:4;padding:0 20px 10px;background:var(--bg)}
+.bottom .card{border-color:#2f3a48}
+.bottom .body{padding:8px 12px}
+.bottom .outbar{margin:0}
+.bottom .outbar b{font-size:12px}
+.bottom pre.code{max-height:180px;font-size:10px;line-height:1.45;margin-top:8px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.card>header{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel2);
+}
+.card>header h2{font-size:13px}
+.card>header .note{color:var(--ink3);font-size:11px;font-weight:400}
+.card .body{padding:10px}
+.card+.card{margin-top:12px}
+
+.btn{
+  border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+  border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;
+}
+.btn:hover{border-color:#3b485a}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.btn.on{border-color:var(--accent);color:var(--accent)}
+
+/* 見本の札（割り当て・見た目プリセットで共用） ---------------------- */
+.tiles{display:grid;gap:6px;grid-template-columns:repeat(3,1fr)}
+@media(max-width:520px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{
+  position:relative;display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:7px;overflow:hidden;
+  background:#0a0c10;cursor:pointer;text-align:left;padding:0;
+}
+.tile:hover{border-color:#3b485a}
+.tile.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.tile .stage{
+  position:relative;height:72px;display:grid;place-items:center;overflow:hidden;
+  background:radial-gradient(120% 90% at 30% 20%,#4b5a72 0%,#2a3140 45%,#14181f 100%);
+}
+.tile .stage::after{
+  content:"";position:absolute;inset:0;
+  background:repeating-linear-gradient(115deg,rgba(255,255,255,.05) 0 6px,transparent 6px 14px);
+}
+.tile .stage .txt{position:relative;z-index:1;white-space:nowrap}
+.badge{
+  position:absolute;top:3px;left:3px;z-index:2;
+  font:600 9px/1 ui-monospace,Consolas,monospace;color:#dbe6f5;
+  background:rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.18);
+  border-radius:4px;padding:2px 3px;
+}
+.tile .src{
+  position:absolute;top:3px;right:3px;z-index:2;font-size:9px;color:var(--warn);
+  background:rgba(0,0,0,.6);border-radius:4px;padding:2px 3px;
+}
+.tile .foot{
+  display:flex;align-items:center;justify-content:center;min-height:26px;
+  padding:3px 5px;border-top:1px solid var(--line);background:var(--panel);
+}
+.tile .foot b{font-size:10px;font-weight:600;text-align:center;line-height:1.25}
+.tile .foot .fit{font-size:9px;color:var(--ink3);margin-left:4px;flex:none}
+.tile .foot .fit.bad{color:var(--warn);font-weight:600}
+.catline{
+  display:flex;align-items:center;gap:8px;
+  font-size:10px;font-weight:600;color:var(--ink3);margin:10px 0 5px;
+}
+.catline:first-child{margin-top:0}
+.catline::after{content:"";flex:1;height:1px;background:var(--line)}
+
+.chip{
+  font:600 11px/1 ui-monospace,Consolas,monospace;color:var(--accent);
+  background:rgba(110,168,255,.12);border:1px solid rgba(110,168,255,.3);
+  border-radius:5px;padding:3px 5px;white-space:nowrap;
+}
+
+/* 調整 ---------------------------------------------------------- */
+.group{border-top:1px solid var(--line)}
+.group:first-child{border-top:0}
+.group>summary{
+  display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;
+  padding:8px 2px;font-size:12px;font-weight:600;color:var(--ink2);
+}
+.group>summary::-webkit-details-marker{display:none}
+.group>summary::before{content:"▸";color:var(--ink3);font-size:10px}
+.group[open]>summary::before{content:"▾"}
+.group>summary .el{margin-left:auto;color:var(--ink3);font-weight:400;font-size:10px}
+.rows{padding:0 0 8px}
+.row{display:grid;grid-template-columns:66px 1fr auto;gap:7px;align-items:center;margin:5px 0}
+.row>label{color:var(--ink2);font-size:12px}
+.row input[type=text],.row input[type=number],.row select{
+  width:100%;background:#0b0e13;border:1px solid var(--line);border-radius:6px;padding:4px 6px;font-size:12px;
+}
+.row input[type=range]{width:100%;accent-color:var(--accent)}
+.row .val{font:400 11px/1 ui-monospace,Consolas,monospace;color:var(--ink3);min-width:46px;text-align:right}
+.row input[type=color]{
+  width:34px;height:24px;padding:0;border:1px solid var(--line);
+  border-radius:6px;background:none;cursor:pointer;
+}
+.row.sw{grid-template-columns:66px 1fr}
+.row.grad{grid-template-columns:66px 1fr}
+.gradbox{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.gradbox .bar{flex:1 1 60px;min-width:0;align-self:stretch;min-height:24px;
+  border:1px solid var(--line);border-radius:6px}
+.gradbox .btn{padding:2px 8px}
+.gradbox .btn:disabled{opacity:.35;cursor:default}
+.hint{grid-column:2/4;color:var(--ink3);font-size:11px;margin:-2px 0 4px}
+.hint.warn{grid-column:auto;color:var(--warn);margin:2px 0 0}
+
+#toast{
+  position:fixed;left:50%;bottom:18px;transform:translate(-50%,14px);z-index:40;
+  padding:9px 16px;border-radius:8px;font-size:12.5px;
+  background:var(--accent);color:var(--accent-ink);font-weight:600;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  opacity:0;pointer-events:none;transition:opacity .12s,transform .12s;
+}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+
+.sw-toggle{position:relative;display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.sw-toggle input{appearance:none;width:32px;height:18px;border-radius:9px;background:#2a3341;
+  border:1px solid var(--line);position:relative;cursor:pointer;transition:background .12s}
+.sw-toggle input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;
+  border-radius:50%;background:var(--ink3);transition:transform .12s,background .12s}
+.sw-toggle input:checked{background:rgba(110,168,255,.35)}
+.sw-toggle input:checked::after{transform:translateX(14px);background:var(--accent)}
+
+/* プレビュー ----------------------------------------------------- */
+.pv-wrap{display:flex;justify-content:center;margin-bottom:10px}
+.phone{
+  /* 画面の縦を使い切る。高さから幅を決めるので、9:16は保ったまま大きくなる */
+  position:relative;flex:none;border-radius:12px;overflow:hidden;border:1px solid var(--line);
+  height:var(--phone-h,520px);
+  aspect-ratio:9/16;width:auto;max-width:100%;margin:0 auto;
+}
+@media(max-width:1150px){ .phone{height:auto;width:min(360px,100%)} }
+.phone .bg{position:absolute;inset:0}
+.phone .safe{position:absolute;inset:0;pointer-events:none}
+.phone .safe i{position:absolute;left:0;right:0;background:rgba(255,84,84,.07);
+  border-block:1px dashed rgba(255,84,84,.45)}
+.phone .safe .t{top:0;height:8%}
+.phone .safe .b{bottom:0;height:19%}
+.phone .safe .r{position:absolute;top:36%;bottom:19%;left:auto;right:0;width:17%;
+  background:rgba(255,84,84,.06);border-block:0;border-left:1px dashed rgba(255,84,84,.4)}
+.phone .block{position:absolute;left:0;right:0;text-align:center}
+textarea{
+  width:100%;background:#0b0e13;border:1px solid var(--line);
+  border-radius:6px;padding:6px 8px;resize:vertical;font-size:12px;
+}
+#pv-text{min-height:52px}
+.bgpick{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:7px}
+.bgpick button{
+  border:1px solid var(--line);background:var(--panel2);border-radius:6px;
+  padding:3px 7px;font-size:11px;cursor:pointer;color:var(--ink2);
+}
+.bgpick button.on{border-color:var(--accent);color:var(--ink)}
+
+/* 文字の重ね描き ------------------------------------------------- */
+/* 同じ本文を持つ層を重ねる。1つだけ流し込みで置いて枠を決め、残りは絶対配置で真上に敷く */
+.tx{position:relative;display:inline-block}
+.tx .ln{position:relative;display:inline-block;vertical-align:top}
+.tx .lyr{white-space:pre;display:block}
+.tx .lyr.ghost{visibility:hidden}
+.tx .lyr.paint{position:absolute;left:0;top:0;width:100%}
+.tx .seg{display:inline-block}
+
+/* 判定テスト ----------------------------------------------------- */
+table.test{width:100%;border-collapse:collapse;font-size:12px}
+table.test th,table.test td{
+  text-align:left;padding:3px 5px;border-bottom:1px solid var(--line);vertical-align:top;
+}
+table.test th{color:var(--ink3);font-weight:600;font-size:11px}
+table.test td.hit{color:var(--accent)}
+table.test td.none{color:var(--ink3)}
+
+/* 出力 ----------------------------------------------------------- */
+.outbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.outbar label{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--ink2)}
+pre.code{
+  margin:0;max-height:340px;overflow:auto;background:#0a0d11;border:1px solid var(--line);
+  border-radius:8px;padding:10px;font:400 11px/1.5 ui-monospace,Consolas,monospace;
+  color:#c9d6e6;white-space:pre;
+}
+</style>
+
+<datalist id="fonts"><!--@FONTS@--></datalist>
+<datalist id="styles">
+<option value="Regular"><option value="Bold"><option value="Black"><option value="Medium">
+<option value="DemiLight"><option value="Light"><option value="Thin"><option value="Extrabold">
+<option value="Italic"><option value="Bold Italic">
+</datalist>
+
+<script type="text/plain" id="tpl-tool"><!--@TPL_TOOL@--></script>
+
+<div class="top" id="topbar">
+  <h1>字幕装飾プリセット</h1>
+  <p>行頭の目印ごとに Text+ の装飾を決め、Console に貼るスクリプトを書き出します。</p>
+  <span class="spacer"></span>
+  <span class="sel">選択中 <span class="chip" id="sel-marker"></span> <b id="sel-name"></b></span>
+  <button class="btn" id="toggle-edit">調整</button>
+</div>
+
+<div class="grid">
+
+  <div id="col-assign">
+    <div class="card">
+      <header><h2>装飾の割り当て</h2><span class="note" id="assign-note"></span></header>
+      <div class="body">
+        <p class="note" style="color:var(--ink3);font-size:11px;margin:0 0 8px">
+          行頭にこの目印を書くと、その行の装飾が変わります。目印は重ねられます
+          （<b>+!</b> なら「かわいい見た目で、驚き」）。下の分類ほど強く、後から上書きします。
+        </p>
+        <div id="tiles"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="col-preview">
+    <div class="card">
+      <header><h2>プレビュー</h2><span class="note">赤はTikTokのUIが重なる範囲</span></header>
+      <div class="body">
+        <div class="pv-wrap">
+          <div class="phone" id="phone">
+            <div class="bg" id="pv-bg"></div>
+            <div class="safe"><i class="t"></i><i class="b"></i><i class="r"></i></div>
+            <div class="block" id="pv-block"></div>
+          </div>
+        </div>
+        <div class="bgpick" id="bgpick"></div>
+        <textarea id="pv-text"></textarea>
+        <p class="note" id="pv-fit" style="font-size:11px;margin:6px 0 0"></p>
+        <p class="note" id="pv-accuracy" style="font-size:11px;margin:6px 0 0"></p>
+      </div>
+    </div>
+
+    <details class="card">
+      <summary>目印の効き方を試す<span class="note">書き間違いの確認用</span></summary>
+      <div class="body">
+        <p class="note" style="color:var(--ink3);font-size:11px;margin:0 0 8px">
+          文字起こしの行をそのまま貼ると、<b>どの目印が拾われ、本文から何が消え、
+          どの装飾が重なるか</b>が出ます。<b>ｗｗｗ</b> のように目印だけに見える行が
+          本文として残るかもここで分かります。
+        </p>
+        <textarea id="test-src" style="min-height:72px"></textarea>
+        <table class="test" id="test-out"></table>
+      </div>
+    </details>
+  </div>
+
+  <div id="col-edit">
+    <div class="card">
+      <header><h2>調整</h2><span class="note" id="editing"></span></header>
+      <div class="body"><div id="controls"></div></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="bottom" id="bottombar">
+  <div class="card">
+    <div class="body">
+      <div class="outbar">
+        <b>貼り付けるスクリプト</b>
+        <button class="btn pri" id="copy">コピー</button>
+        <button class="btn" id="toggle-code">コードを見る</button>
+        <span class="note" id="which-note" style="color:var(--ink3);font-size:11px"></span>
+      </div>
+      <pre class="code" id="out" hidden></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+// @DATA@
+
+/* ---------- 共通 ---------- */
+const el = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const hexRgb = h => {
+  h = h.replace("#", "");
+  return [parseInt(h.slice(0,2),16)/255, parseInt(h.slice(2,4),16)/255, parseInt(h.slice(4,6),16)/255];
+};
+const rgba = (hex, a) => {
+  const [r,g,b] = hexRgb(hex);
+  return "rgba(" + Math.round(r*255) + "," + Math.round(g*255) + "," + Math.round(b*255) + "," + a + ")";
+};
+const intSet = new Set(INT_KEYS);
+const gradSet = new Set(GRAD_KEYS);
+
+/* 色の並びを ShadingGradient の値に直す。位置は色の数で等分する。
+   Fusionが要るのは {位置: {1: r, ...}} の辞書だが、JSONにすると数値キーが文字列に化ける。
+   辞書へ直すのは書き込む直前（3_装飾ツール.py の set_input）で行う。 */
+function gradStops(colors){
+  const last = Math.max(colors.length - 1, 1);
+  return colors.map((hex, i) => {
+    const [r, g, b] = hexRgb(hex);
+    return [i / last, r, g, b, 1.0];
+  });
+}
+
+/* ---------- 見た目 → Text+ のInput ---------- */
+function toPreset(s){
+  const p = {};
+  p.Font = s.font; p.Style = s.style; p.Size = s.size;
+  p.CharacterSpacing = s.tracking; p.LineSpacing = s.leading;
+  p.Center = [s.cx, s.cy];
+  /* Text+ の列挙値は plugin の文字列表の逆順。ElementShape と Level で裏取りした。
+     Direction 0=自動 1=横 2=逆向き横 3=縦 4=逆向き縦 / LineDirection 0=上から 1=下から
+     JoinStyle 0=Bevel 1=Round 2=Miter 3=Miter Clip */
+  p.Direction = s.vertical ? 3 : 0; p.LineDirection = s.lineDir;
+  p.Wrap = 1; p.VerticalTopCenterBottom = 1;
+  p.VerticalJustificationNew = 3; p.HorizontalJustificationNew = 3;
+
+  let c = hexRgb(s.fill);
+  p.Enabled1 = 1; p.ElementShape1 = 0;
+  /* Type は塗り方の切り替え。0=単色 2=グラデーション。
+     off でも書き出すのは、前に当てた装飾のグラデーションが残るのを防ぐため */
+  p.Type1 = s.fillGradOn ? 2 : 0;
+  p.Red1 = c[0]; p.Green1 = c[1]; p.Blue1 = c[2]; p.Alpha1 = s.fillA; p.Softness1 = 1;
+  if (s.fillGradOn){
+    p.ShadingGradient1 = gradStops(s.fillGradC);
+    p.ShadingMappingAngle1 = s.fillGradAngle;
+  }
+
+  c = hexRgb(s.edgeC);
+  p.Enabled2 = s.edgeOn; p.ElementShape2 = 1;
+  p.Type2 = s.edgeGradOn ? 2 : 0;
+  p.Thickness2 = s.edgeW;
+  p.JoinStyle2 = s.edgeRound ? 1 : 3; p.OutsideOnly2 = s.edgeOutside;
+  p.AngleZ2 = s.edgeAngle; p.SizeX2 = s.edgeScale; p.SizeY2 = s.edgeScale;
+  p.Offset2 = [s.edgeOffX, s.edgeOffY];
+  p.Red2 = c[0]; p.Green2 = c[1]; p.Blue2 = c[2]; p.Alpha2 = 1.0; p.Softness2 = 1;
+  if (s.edgeGradOn){
+    p.ShadingGradient2 = gradStops(s.edgeGradC);
+    p.ShadingMappingAngle2 = s.edgeGradAngle;
+  }
+
+  c = hexRgb(s.edge2C);
+  p.Enabled3 = s.edge2On; p.ElementShape3 = 1; p.Thickness3 = s.edge2W;
+  p.JoinStyle3 = 1; p.OutsideOnly3 = 1;
+  p.Red3 = c[0]; p.Green3 = c[1]; p.Blue3 = c[2]; p.Alpha3 = 1.0; p.Softness3 = 1;
+
+  c = hexRgb(s.glowC);
+  p.Enabled4 = s.glowOn; p.ElementShape4 = 1; p.Thickness4 = s.glowW;
+  p.JoinStyle4 = 1; p.OutsideOnly4 = 1;
+  p.Red4 = c[0]; p.Green4 = c[1]; p.Blue4 = c[2]; p.Alpha4 = 1.0;
+  p.Opacity4 = s.glowOpacity; p.Softness4 = 1;
+  p.SoftnessX4 = s.glowBlur; p.SoftnessY4 = s.glowBlur; p.SoftnessGlow4 = s.glowSpread;
+
+  c = hexRgb(s.shadowC);
+  p.Enabled5 = s.shadowOn; p.ElementShape5 = 0; p.Offset5 = [s.shadowX, s.shadowY];
+  p.Red5 = c[0]; p.Green5 = c[1]; p.Blue5 = c[2]; p.Alpha5 = 1.0;
+  p.Opacity5 = s.shadowOpacity; p.Softness5 = 1;
+  p.SoftnessX5 = s.shadowBlur; p.SoftnessY5 = s.shadowBlur;
+
+  c = hexRgb(s.bandC);
+  p.Enabled6 = s.bandOn; p.ElementShape6 = 2; p.Level6 = s.bandLevel;
+  p.ExtendHorizontal6 = s.bandPadX; p.ExtendVertical6 = s.bandPadY; p.Round6 = s.bandRound;
+  p.Red6 = c[0]; p.Green6 = c[1]; p.Blue6 = c[2]; p.Alpha6 = 1.0;
+  p.Opacity6 = s.bandOpacity; p.Softness6 = 1; p.Shear6 = 1; p.ShearX6 = s.bandShearX;
+
+  /* ElementShape 3 は帯の縁。帯と同じ大きさを持たせないと縁がずれる */
+  p.Enabled7 = s.bandEdgeOn;
+  if (s.bandEdgeOn){
+    c = hexRgb(s.bandEdgeC);
+    p.ElementShape7 = 3; p.Level7 = s.bandLevel;
+    p.ExtendHorizontal7 = s.bandPadX; p.ExtendVertical7 = s.bandPadY;
+    p.Round7 = s.bandRound; p.Thickness7 = s.bandEdgeW;
+    p.Red7 = c[0]; p.Green7 = c[1]; p.Blue7 = c[2]; p.Alpha7 = 1.0; p.Softness7 = 1;
+  }
+  return p;
+}
+
+/* グラデーションは配列の配列で持つ。中まで見ないと「同じ」の判定を誤る */
+const same = (a, b) => Array.isArray(a) && Array.isArray(b)
+  ? a.length === b.length && a.every((v, i) => same(v, b[i])) : a === b;
+
+function diffPreset(base, target){
+  const keep = new Set();
+  for (const k in target) if (!same(base[k], target[k])) keep.add(k);
+  for (const g of COLOR_GROUPS) if (g.some(k => keep.has(k))) g.forEach(k => keep.add(k));
+  const out = {};
+  for (const k in target) if (keep.has(k)) out[k] = target[k];
+  return out;
+}
+
+function fmtValue(key, v){
+  if (typeof v === "string") return JSON.stringify(v);
+  if (Array.isArray(v)){
+    /* グラデーションは [[位置, r, g, b, a], ...]。座標の [x, y] と形が違う */
+    if (Array.isArray(v[0])){
+      return "[" + v.map(stop =>
+        "[" + stop.map(n => n.toFixed(4)).join(", ") + "]").join(", ") + "]";
+    }
+    return "[" + v[0].toFixed(4) + ", " + v[1].toFixed(4) + "]";
+  }
+  if (intSet.has(key)) return String(Math.round(v));
+  return v.toFixed(4);
+}
+
+function fmtBlock(preset, indent){
+  const keys = Object.keys(preset);
+  if (!keys.length) return "{}";
+  const w = Math.max(...keys.map(k => k.length)) + 3;
+  const lines = ["{"];
+  for (const k of keys){
+    lines.push(indent + "    " + ('"' + k + '":').padEnd(w) + " " + fmtValue(k, preset[k]) + ",");
+  }
+  lines.push(indent + "}");
+  return lines.join("\n");
+}
+
+function styleOf(entry){ return Object.assign({}, BASE, entry.over); }
+
+/* 見た目のプリセットが触るInput名を全部集める。
+   プリセット同士は重なりうる（+++ は + と ++ にも一致する）。差分だけを書くと
+   前のプリセットの色や書体が残って混ざるため、どのプリセットも同じキー一式を書く。 */
+function lookKeys(basePreset){
+  const keys = new Set();
+  for (const e of entries){
+    if (!e.look) continue;
+    for (const k in diffPreset(basePreset, toPreset(styleOf(e)))) keys.add(k);
+  }
+  return keys;
+}
+
+function lookPreset(keys, entry){
+  const full = toPreset(styleOf(entry));
+  const out = {};
+  for (const k in full) if (keys.has(k)) out[k] = full[k];
+  return out;
+}
+
+function pythonBlocks(){
+  const basePreset = toPreset(BASE);
+  const keys = lookKeys(basePreset);
+  const markerLine = "MARKER_CHARS = " + JSON.stringify(MARKER_CHARS);
+  const baseBlock = "BASE_PRESET = " + fmtBlock(basePreset, "");
+  const rules = ["RULES = ["];
+  for (const e of entries){
+    const preset = e.look ? lookPreset(keys, e) : diffPreset(basePreset, toPreset(styleOf(e)));
+    rules.push("    {");
+    rules.push('        "name":    ' + JSON.stringify(e.name) + ",");
+    rules.push('        "marker":  ' + JSON.stringify(e.marker) + ",");
+    rules.push('        "key":     ' + JSON.stringify(e.key || "") + ",");
+    rules.push('        "pattern": ' + JSON.stringify(e.pattern || "") + ",");
+    rules.push('        "source":  ' + JSON.stringify(e.source || "") + ",");
+    rules.push('        "preset":  ' + fmtBlock(preset, "        ") + ",");
+    rules.push("    },");
+  }
+  rules.push("]");
+  const looks = ["LOOKS = ["];
+  for (const e of entries){
+    if (!e.look) continue;
+    looks.push("    {");
+    looks.push('        "name":   ' + JSON.stringify(e.name) + ",");
+    looks.push('        "key":    ' + JSON.stringify(e.key) + ",");
+    looks.push('        "cat":    ' + JSON.stringify(e.cat) + ",");
+    looks.push('        "preset": ' + fmtBlock(lookPreset(keys, e), "        ") + ",");
+    looks.push("    },");
+  }
+  looks.push("]");
+  return [markerLine, baseBlock, rules.join("\n"), looks.join("\n")];
+}
+
+/* ---------- ブラウザ側の描画 ---------- */
+/* Text+ の値をpxへ直す係数は PREVIEW にある。基準は「文字の実寸（塗りの高さ）」。
+   実測前は推定値なので、大きさ・縁の太さ・ぼかしの量は Resolve の実物とずれる。 */
+function px(s, w){ return PREVIEW.sizeToPx * s.size * w; }
+
+/* 太さは書体ファイルに書いてある値（usWeightClass）を使う。
+   書体名や Style から推し量ると、すでに太い書体にブラウザが合成太字を掛けて
+   Resolve より太く出る。表に無い書体だけ Style から見当を付ける。 */
+function cssWeight(style, font){
+  const known = FONT_WEIGHT[font + "|" + style];
+  if (known) return String(known);
+  return /Bold|Black|Heavy|Ultra|Extra/i.test(String(style)) ? "700" : "400";
+}
+
+/* この書体で、文字の実寸が font-size の何倍になるかを測る（■の描画範囲から） */
+const inkCache = new Map();
+function inkRatio(font, style){
+  const key = font + "|" + style;
+  if (inkCache.has(key)) return inkCache.get(key);
+  let ratio = 0.72;
+  try {
+    const c = document.createElement("canvas").getContext("2d");
+    const weight = cssWeight(style, font);
+    c.font = weight + " 100px \"" + font + "\",\"" + font + " " + style + "\",sans-serif";
+    const m = c.measureText("■");
+    const h = (m.actualBoundingBoxAscent + m.actualBoundingBoxDescent) / 100;
+    if (h > 0.2 && h < 2) ratio = h;
+  } catch (e) { /* 測れない環境では既定値のまま */ }
+  inkCache.set(key, ratio);
+  return ratio;
+}
+
+/* --- 漢字の内側が塗り潰れないかを測る ---
+   縁取りは字の輪郭から外へ伸びる。漢字の内側の隙間も輪郭に囲まれているので同じだけ埋まり、
+   隙間に入る円の半径より太い縁を引くと内側が潰れる。書体ごとにその半径を測っておく。 */
+const COUNTER_CHARS = "無理本番緊急速報展開驚";
+const COUNTER_INK = 200;    /* 文字の実寸をこの高さに揃えて測る */
+const COUNTER_ALLOW = 1.3;  /* 大きい穴は開いたまま、細い穴だけ埋まる境目 */
+const counterCache = new Map();
+
+function counterRadius(font, style){
+  const key = font + "|" + style;
+  if (counterCache.has(key)) return counterCache.get(key);
+  const W = 400, H = 400;
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  const all = [];
+  for (const ch of COUNTER_CHARS){
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = "#fff";
+    ctx.font = cssWeight(style, font) + " " + (COUNTER_INK / inkRatio(font, style)) + "px \"" + font + "\"";
+    ctx.textBaseline = "middle";
+    ctx.fillText(ch, 60, 200);
+    const px = ctx.getImageData(0, 0, W, H).data;
+    const on = new Uint8Array(W * H);
+    for (let i = 0; i < W * H; i++) on[i] = px[i * 4 + 3] > 128 ? 1 : 0;
+    /* 外側の余白を塗り分ける。残った空白が字の内側の隙間 */
+    const out = new Uint8Array(W * H), st = [];
+    for (let x = 0; x < W; x++){ st.push(x); st.push((H - 1) * W + x); }
+    for (let y = 0; y < H; y++){ st.push(y * W); st.push(y * W + W - 1); }
+    while (st.length){
+      const p = st.pop();
+      if (on[p] || out[p]) continue;
+      out[p] = 1;
+      const x = p % W, y = (p - x) / W;
+      if (x > 0) st.push(p - 1);
+      if (x < W - 1) st.push(p + 1);
+      if (y > 0) st.push(p - W);
+      if (y < H - 1) st.push(p + W);
+    }
+    /* 字からの距離を2方向に走らせて求める（チャンファー距離） */
+    const dist = new Float32Array(W * H);
+    for (let i = 0; i < W * H; i++) dist[i] = on[i] ? 0 : 1e9;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++){
+      const p = y * W + x; let v = dist[p];
+      if (x > 0) v = Math.min(v, dist[p - 1] + 1);
+      if (y > 0) v = Math.min(v, dist[p - W] + 1);
+      if (x > 0 && y > 0) v = Math.min(v, dist[p - W - 1] + 1.414);
+      if (x < W - 1 && y > 0) v = Math.min(v, dist[p - W + 1] + 1.414);
+      dist[p] = v;
+    }
+    for (let y = H - 1; y >= 0; y--) for (let x = W - 1; x >= 0; x--){
+      const p = y * W + x; let v = dist[p];
+      if (x < W - 1) v = Math.min(v, dist[p + 1] + 1);
+      if (y < H - 1) v = Math.min(v, dist[p + W] + 1);
+      if (x < W - 1 && y < H - 1) v = Math.min(v, dist[p + W + 1] + 1.414);
+      if (x > 0 && y < H - 1) v = Math.min(v, dist[p + W - 1] + 1.414);
+      dist[p] = v;
+    }
+    const seen = new Uint8Array(W * H);
+    for (let p = 0; p < W * H; p++){
+      if (on[p] || out[p] || seen[p]) continue;
+      let area = 0, best = 0; const s2 = [p]; seen[p] = 1;
+      while (s2.length){
+        const q = s2.pop(); area++;
+        if (dist[q] > best) best = dist[q];
+        const x = q % W, y = (q - x) / W;
+        for (const n of [x > 0 ? q - 1 : -1, x < W - 1 ? q + 1 : -1,
+                         y > 0 ? q - W : -1, y < H - 1 ? q + W : -1]){
+          if (n >= 0 && !on[n] && !out[n] && !seen[n]){ seen[n] = 1; s2.push(n); }
+        }
+      }
+      if (area >= 20) all.push(best);
+    }
+  }
+  all.sort((a, b) => a - b);
+  const median = all.length ? all[Math.floor(all.length / 2)] : 0;
+  counterCache.set(key, median);
+  return median;
+}
+
+/* この書体で引ける縁の太さの上限（Thickness の値） */
+function edgeLimit(s){
+  const r = counterRadius(s.font, s.style);
+  return r ? r * COUNTER_ALLOW / (COUNTER_INK * PREVIEW.thickToPx) : 0;
+}
+
+function segments(text, level){
+  if (level >= 3) return Array.from(text);
+  if (level === 2) return text.split(/(\s+)/).filter(t => t.length);
+  return [text];
+}
+
+function bandCss(s, ink){
+  const css = {
+    background: rgba(s.bandC, s.bandOpacity),
+    padding: (s.bandPadY * ink * PREVIEW.extendYToPx).toFixed(2) + "px "
+           + (s.bandPadX * ink * PREVIEW.extendXToPx).toFixed(2) + "px",
+    borderRadius: (s.bandRound * ink * PREVIEW.roundToPx).toFixed(2) + "px",
+    transform: s.bandShearX ? "skewX(" + (-s.bandShearX * 30) + "deg)" : "",
+  };
+  /* 帯の縁は箱の外へ出る。border だと箱が太って文字がずれるので box-shadow の広がりで描く */
+  if (s.bandEdgeOn){
+    css.boxShadow = "0 0 0 " + (s.bandEdgeW * ink * PREVIEW.thickToPx).toFixed(2)
+                  + "px " + s.bandEdgeC;
+  }
+  return css;
+}
+
+/* Fusion は色の並びの先頭が下・末尾が上に出る。CSS の linear-gradient(0deg,…) も
+   先頭が下なので、角度0どうしで一致する。向きだけ逆（Fusionは反時計回りが正） */
+function gradImage(colors, angle){
+  const list = colors.length >= 2 ? colors : colors.concat(colors);
+  return "linear-gradient(" + (-angle).toFixed(2) + "deg," + list.join(",") + ")";
+}
+
+/* 文字の形へグラデーションを流し込む。塗りの色は background が受け持つので消す */
+function gradPaint(colors, angle){
+  return {
+    backgroundImage: gradImage(colors, angle),
+    WebkitBackgroundClip: "text", backgroundClip: "text",
+    WebkitTextFillColor: "transparent",
+  };
+}
+
+/* 縁だけを動かす。CSS の rotate は時計回りが正、Fusion は反時計回りが正なので符号を返す。
+   既定のままなら空を返し、transform を付けない（今までの見え方を変えないため） */
+function edgeTransform(s, stageW){
+  const parts = [];
+  if (s.edgeOffX || s.edgeOffY){
+    parts.push("translate(" + (s.edgeOffX * stageW * PREVIEW.offsetToW).toFixed(2) + "px,"
+             + (-s.edgeOffY * stageW * PREVIEW.offsetToW).toFixed(2) + "px)");
+  }
+  if (s.edgeAngle) parts.push("rotate(" + (-s.edgeAngle).toFixed(2) + "deg)");
+  if (s.edgeScale !== 1) parts.push("scale(" + Number(s.edgeScale).toFixed(3) + ")");
+  return parts.join(" ");
+}
+
+function layer(text, css){
+  const span = document.createElement("span");
+  span.className = "lyr";
+  span.textContent = text;
+  Object.assign(span.style, css);
+  return span;
+}
+
+/* 1行を、奥から手前へ重ねて描く（影→グロー→二重縁→縁→塗り） */
+function renderLine(line, s, ink, stageW){
+  const ln = document.createElement("span");
+  ln.className = "ln";
+  /* Text+ の縁は外側だけ。ブラウザの text-stroke は中心線なので2倍にして外へ出す */
+  const stroke = w => (2 * w * ink * PREVIEW.thickToPx).toFixed(2) + "px";
+  const blur = v => "blur(" + (v * ink * PREVIEW.softToPx).toFixed(2) + "px)";
+  const ghost = layer(line, {});
+  ghost.classList.add("ghost");
+  ln.appendChild(ghost);
+  const paint = css => {
+    const l = layer(line, css);
+    l.classList.add("paint");
+    ln.appendChild(l);
+  };
+
+  if (s.shadowOn){
+    paint({
+      color: s.shadowC, opacity: s.shadowOpacity,
+      filter: s.shadowBlur ? blur(s.shadowBlur) : "",
+      transform: "translate(" + (s.shadowX * stageW * PREVIEW.offsetToW).toFixed(2) + "px," +
+                 (-s.shadowY * stageW * PREVIEW.offsetToW).toFixed(2) + "px)",
+    });
+  }
+  if (s.glowOn){
+    paint({
+      color: s.glowC, WebkitTextStroke: stroke(s.glowW) + " " + s.glowC,
+      paintOrder: "stroke fill", opacity: s.glowOpacity,
+      filter: blur(s.glowBlur) + (s.glowSpread ? " brightness(" + (1 + s.glowSpread) + ")" : ""),
+    });
+  }
+  if (s.edge2On){
+    paint({
+      color: s.edge2C, WebkitTextStroke: stroke(s.edge2W) + " " + s.edge2C,
+      paintOrder: "stroke fill",
+    });
+  }
+  if (s.edgeOn){
+    const css = {
+      color: s.edgeC, WebkitTextStroke: stroke(s.edgeW) + " " + s.edgeC,
+      paintOrder: "stroke fill",
+    };
+    if (s.edgeGradOn){
+      Object.assign(css, gradPaint(s.edgeGradC, s.edgeGradAngle));
+      /* 縁の形は「太らせた文字」。縁の色も透明にすると background-clip:text の
+         切り抜きが縁のぶんまで広がり、太らせた形の全体にグラデーションが乗る。
+         内側は、この上に重なる塗りの層が塗り色で抜く */
+      css.WebkitTextStrokeColor = "transparent";
+    }
+    const move = edgeTransform(s, stageW);
+    if (move) css.transform = move;
+    paint(css);
+  }
+  const fill = { color: s.fill, opacity: s.fillA };
+  if (s.fillGradOn) Object.assign(fill, gradPaint(s.fillGradC, s.fillGradAngle));
+  paint(fill);
+  return ln;
+}
+
+function renderText(host, text, s, ink, stageW){
+  host.textContent = "";
+  const fontPx = ink / inkRatio(s.font, s.style);
+  const box = document.createElement("span");
+  box.className = "tx";
+  Object.assign(box.style, {
+    fontFamily: '"' + s.font + '","' + s.font + " " + s.style + '",sans-serif',
+    fontWeight: cssWeight(s.style, s.font),
+    fontStyle: /Italic/i.test(s.style) ? "italic" : "normal",
+    fontSize: fontPx.toFixed(2) + "px",
+    letterSpacing: ((s.tracking - 1) * fontPx).toFixed(2) + "px",
+    lineHeight: String(s.leading * 1.35),
+    writingMode: s.vertical ? "vertical-rl" : "horizontal-tb",
+  });
+
+  for (const line of String(text).split("\n")){
+    const wrap = document.createElement("span");
+    wrap.style.display = "block";
+    const parts = s.bandOn && s.bandLevel >= 2 ? segments(line, s.bandLevel) : [line];
+    for (const part of parts){
+      const seg = document.createElement("span");
+      seg.className = "seg";
+      seg.appendChild(renderLine(part, s, ink, stageW));
+      if (s.bandOn && s.bandLevel >= 2 && part.trim()) Object.assign(seg.style, bandCss(s, ink));
+      wrap.appendChild(seg);
+    }
+    if (s.bandOn && s.bandLevel === 1){
+      const inner = document.createElement("span");
+      inner.style.display = "inline-block";
+      Object.assign(inner.style, bandCss(s, ink));
+      while (wrap.firstChild) inner.appendChild(wrap.firstChild);
+      wrap.appendChild(inner);
+    }
+    box.appendChild(wrap);
+  }
+  if (s.bandOn && s.bandLevel === 0) Object.assign(box.style, bandCss(s, ink));
+  host.appendChild(box);
+  return box;
+}
+
+/* 枠いっぱいまで拡げて描く。見本は小さいほど見えないので、余白を残さない */
+function fillInto(host, text, s, boxW, boxH, refW){
+  host.style.transform = "";
+  const box = renderText(host, text, s, px(s, refW), refW);
+  const rect = box.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return;
+  const scale = Math.min(boxW / rect.width, boxH / rect.height);
+  host.style.transform = "scale(" + scale.toFixed(3) + ")";
+}
+
+/* ---------- 目印の判定 ---------- */
+/* 目印は2種類。1文字の記号（話者・感情）と、[名前] で書く見た目のプリセット。
+   括弧は中身が既知の名前のときだけ食べるので、「【耳かき】…」のような本文は素通りする。 */
+function findByKey(name){
+  if (!name) return null;
+  return entries.find(e => e.key && (name === e.key || name === e.name)) || null;
+}
+
+function splitMarker(text){
+  let i = 0;
+  const symbols = [], names = [];
+  while (i < text.length){
+    const ch = text[i];
+    const pair = BRACKETS.find(p => p[0] === ch);
+    if (pair){
+      const close = text.indexOf(pair[1], i + 1);
+      if (close < 0) break;
+      const inner = text.slice(i + 1, close).trim();
+      if (!findByKey(inner)) break;
+      names.push(inner);
+      i = close + 1;
+      continue;
+    }
+    if (MARKER_CHARS.indexOf(ch) >= 0){ symbols.push(ch); i++; continue; }
+    break;
+  }
+  const body = text.slice(i).trim();
+  if (!body) return ["", [], text.trim()];
+  return [symbols.join(""), names, body];
+}
+
+function ruleHits(e, symbols, names, body){
+  const byName = !!e.key && (names.indexOf(e.key) >= 0 || names.indexOf(e.name) >= 0);
+  const byMark = !!e.marker && !!symbols && new RegExp(e.marker).test(symbols);
+  if (e.pattern && !new RegExp(e.pattern).test(body)) return false;
+  if (e.marker || e.key) return byName || byMark;
+  return !!e.pattern;
+}
+
+function resolveStyle(text){
+  const [symbols, names, body] = splitMarker(text);
+  const s = Object.assign({}, BASE);
+  let source = "", matched = [];
+  for (const e of entries){
+    if (!ruleHits(e, symbols, names, body)) continue;
+    matched.push(e.name);
+    Object.assign(s, e.over);
+    if (e.source) source = e.source;
+  }
+  return { body, style: s, source, matched };
+}
+
+/* ---------- 画面 ---------- */
+let current = -1;   /* -1 は「通常（既定）」 */
+let bgIndex = 0;
+
+const BGS = [
+  ["人物風", "radial-gradient(70% 55% at 50% 32%,#c8a882 0%,#6a5540 38%,#241d18 78%),linear-gradient(#1b1712,#0c0a08)"],
+  ["明るい", "linear-gradient(160deg,#f2f5f8 0%,#c9d4de 55%,#93a3b3 100%)"],
+  ["暗い", "linear-gradient(160deg,#1a1f27 0%,#0c0f14 100%)"],
+  ["ごちゃつき", "repeating-linear-gradient(28deg,#274060 0 22px,#8a4b3a 22px 44px,#3f7a52 44px 66px,#7a6a2e 66px 88px)"],
+];
+
+const CONTROLS = [
+  { g:"文字", items:[
+    { k:"font", t:"font", label:"書体", list:"fonts" },
+    { k:"style", t:"font", label:"スタイル", list:"styles" },
+    { k:"size", t:"num", label:"サイズ", min:0.02, max:0.16, step:0.001,
+      hint:"画面幅に対する比。0.065 ≒ 1080幅で70px" },
+    { k:"tracking", t:"num", label:"字間", min:0.80, max:1.60, step:0.01 },
+    { k:"leading", t:"num", label:"行間", min:0.60, max:1.40, step:0.01 },
+    { k:"fill", t:"color", label:"色" },
+    { k:"fillA", t:"num", label:"不透明度", min:0, max:1, step:0.01 },
+  ]},
+  { g:"塗りのグラデーション", el:"1", on:"fillGradOn", items:[
+    { k:"fillGradC", t:"grad", label:"色の並び",
+      hint:"先頭が下、末尾が上。2〜4色まで" },
+    { k:"fillGradAngle", t:"num", label:"角度", min:-180, max:180, step:1, digits:0,
+      hint:"度。反時計回りが正。0で下から上" },
+  ]},
+  { g:"縁取り", el:"2", on:"edgeOn", width:"edgeW", scale:"edgeScale", items:[
+    { k:"edgeC", t:"color", label:"色" },
+    { k:"edgeW", t:"num", label:"太さ", min:0, max:0.12, step:0.001,
+      hint:"文字サイズに対する比。0.03がResolve標準、0.075〜0.1で極太" },
+    { k:"edgeRound", t:"bool", label:"角を丸める" },
+    { k:"edgeOutside", t:"bool", label:"外側のみ" },
+    { k:"edgeAngle", t:"num", label:"回転", min:-45, max:45, step:1, digits:0,
+      hint:"縁だけを回す。度で、反時計回りが正" },
+    { k:"edgeScale", t:"num", label:"拡大", min:0.8, max:1.6, step:0.01,
+      hint:"縁だけを大きくする。1.0で等倍" },
+    { k:"edgeOffX", t:"num", label:"横ずれ", min:-0.03, max:0.03, step:0.001 },
+    { k:"edgeOffY", t:"num", label:"縦ずれ", min:-0.03, max:0.03, step:0.001,
+      hint:"縁だけをずらす。正で上へ。塗りから外して段差を作れる" },
+  ]},
+  { g:"縁のグラデーション", el:"2", on:"edgeGradOn", items:[
+    { k:"edgeGradC", t:"grad", label:"色の並び",
+      hint:"先頭が下、末尾が上。2〜4色まで" },
+    { k:"edgeGradAngle", t:"num", label:"角度", min:-180, max:180, step:1, digits:0 },
+  ]},
+  { g:"二重縁取り", el:"3", on:"edge2On", width:"edge2W", items:[
+    { k:"edge2C", t:"color", label:"色" },
+    { k:"edge2W", t:"num", label:"太さ", min:0, max:0.16, step:0.001,
+      hint:"内側の縁より太くすると2色の縁になる" },
+  ]},
+  { g:"グロー（ぼかした縁）", el:"4", on:"glowOn", items:[
+    { k:"glowC", t:"color", label:"色" },
+    { k:"glowW", t:"num", label:"広がり", min:0, max:0.18, step:0.001 },
+    { k:"glowBlur", t:"num", label:"ぼかし", min:0, max:20, step:0.1,
+      hint:"ずらさずぼかすと、背景から文字だけが浮く" },
+    { k:"glowSpread", t:"num", label:"発光", min:0, max:1, step:0.01 },
+    { k:"glowOpacity", t:"num", label:"濃さ", min:0, max:1, step:0.01 },
+  ]},
+  { g:"影（落とし影）", el:"5", on:"shadowOn", items:[
+    { k:"shadowC", t:"color", label:"色" },
+    { k:"shadowX", t:"num", label:"横ずれ", min:-0.03, max:0.03, step:0.001 },
+    { k:"shadowY", t:"num", label:"縦ずれ", min:-0.03, max:0.03, step:0.001 },
+    { k:"shadowBlur", t:"num", label:"ぼかし", min:0, max:10, step:0.1 },
+    { k:"shadowOpacity", t:"num", label:"濃さ", min:0, max:1, step:0.01,
+      hint:"濃い落とし影は古く見える。迷うならグローだけにする" },
+  ]},
+  { g:"帯（座布団）", el:"6", on:"bandOn", items:[
+    { k:"bandC", t:"color", label:"色" },
+    { k:"bandOpacity", t:"num", label:"濃さ", min:0, max:1, step:0.01 },
+    { k:"bandLevel", t:"pick", label:"単位",
+      opts:[[0,"全体"],[1,"行ごと"],[2,"単語ごと"],[3,"文字ごと"]],
+      hint:"行ごとにすると、行の長さに合わせて帯が縮む" },
+    { k:"bandPadX", t:"num", label:"左右余白", min:0, max:0.6, step:0.01 },
+    { k:"bandPadY", t:"num", label:"上下余白", min:0, max:0.6, step:0.01 },
+    { k:"bandRound", t:"num", label:"角丸", min:0, max:1, step:0.01 },
+    { k:"bandShearX", t:"num", label:"傾き", min:-0.4, max:0.4, step:0.01 },
+  ]},
+  { g:"帯の縁", el:"7", on:"bandEdgeOn", items:[
+    { k:"bandEdgeC", t:"color", label:"色" },
+    { k:"bandEdgeW", t:"num", label:"太さ", min:0, max:0.08, step:0.001,
+      hint:"帯の外へ出る。帯を切ったときは帯の設定が縁にもそのまま効く" },
+  ]},
+  { g:"組み方", items:[
+    { k:"vertical", t:"bool", label:"縦書き",
+      hint:"Text+ の Direction を Vertical にする。行の位置は下の「位置」で決める" },
+    { k:"lineDir", t:"pick", label:"行の向き", opts:[[0,"上から"],[1,"下から"]] },
+  ]},
+  { g:"位置", items:[
+    { k:"cx", t:"num", label:"左右", min:0, max:1, step:0.005 },
+    { k:"cy", t:"num", label:"上下", min:0, max:1, step:0.005,
+      hint:"0が下端、1が上端。赤い帯はTikTokのUIが重なる範囲" },
+  ]},
+];
+
+function targetStyle(){ return current === -1 ? BASE : styleOf(entries[current]); }
+
+function setValue(key, value){
+  if (current === -1){ BASE[key] = value; return; }
+  const e = entries[current];
+  if (same(BASE[key], value)) delete e.over[key];
+  else e.over[key] = value;
+}
+
+/* 押した札の目印を写す。字幕の行頭にそのまま貼れる。
+   clipboard は許可されないことがあるので、書けたかどうかを見て知らせ方を変える。 */
+function copyMarker(text){
+  const done = ok => toast(ok ? text + " をコピーしました。字幕の行頭に貼ってください"
+                              : "コピーできませんでした: " + text);
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(() => done(true), () => done(execCopy(text)));
+    return;
+  }
+  done(execCopy(text));
+}
+
+function execCopy(text){
+  const box = document.createElement("textarea");
+  box.value = text;
+  box.style.cssText = "position:fixed;top:-100px;opacity:0";
+  document.body.appendChild(box);
+  box.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  box.remove();
+  return ok;
+}
+
+let toastTimer = 0;
+function toast(message){
+  const box = el("toast");
+  box.textContent = message;
+  box.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => box.classList.remove("on"), 1800);
+}
+
+function markerLabel(e){
+  if (!e.marker) return "[" + e.key + "]";
+  /* 先頭が \ のときはescapeなので次の1文字を採る（[\^＾] なら ^）。
+     escapeごと採ると札を押して入る目印が \ になり、行頭に貼っても何にも当たらない。 */
+  const m = e.marker.match(/^\[\\?(.)/);
+  const rep = e.marker.match(/\{(\d+),/);
+  return m ? m[1].repeat(rep ? parseInt(rep[1], 10) : 1) : e.marker;
+}
+
+/* --- 割り当ての一覧（分類ごとに1つの表） ---
+   選択のたびに作り直すと、一瞬中身が空になってブラウザがスクロール位置を切り詰める。
+   作るのは起動時と画面幅が変わったときだけにして、選択は class の付け替えで済ませる。 */
+let tiles = [];
+
+/* --- この装飾で全角何文字まで画面に収まるか ---
+   書体ごとの送り幅は Resolve で実測した値（FONT_WIDTH）だけを使う。
+   測っていない書体では答えられないので 0 を返し、画面には何も出さない。
+   推定値で代わりに答えると、はみ出すものを見逃したのか、収まるものを
+   狭く言ったのかが分からなくなる。
+
+   字送りは送り幅に**掛けない**。1.0 との差をそのまま**足す**
+   （実測: 字送り1.3 で 64.0px → 92.8px。差は 0.3 × Size × 画面幅 ちょうど）。 */
+function fitChars(s){
+  if (FIT.note) return 0;      // 測った大きさが字幕を出す大きさと違う／まだ測っていない
+  const m = FONT_WIDTH[s.font + "|" + s.style];
+  if (!m || s.vertical) return 0;
+  const advance = m[0], oneWidth = m[1], oneHeight = m[2];
+  const ink = oneHeight * s.size;
+  const edge = Math.max(s.edgeOn ? s.edgeW * s.edgeScale : 0,
+                        s.edge2On ? s.edge2W : 0) * ink * PREVIEW.thickToPx
+               + Math.abs(s.edgeOffX);
+  const band = s.bandOn ? s.bandPadX * ink * PREVIEW.extendXToPx
+                          + (s.bandEdgeOn ? s.bandEdgeW * ink * PREVIEW.thickToPx : 0) : 0;
+  const room = FIT.width - 2 * Math.max(edge, band) - oneWidth * s.size;
+  const step = (advance + (s.tracking - 1)) * s.size;
+  if (step <= 0) return 0;
+  return Math.max(0, Math.floor(room / step) + 1);
+}
+
+/* 選んでいる装飾が、字幕の文字数に足りているかを名乗る */
+function syncFit(){
+  const node = el("pv-fit");
+  const n = fitChars(targetStyle());
+  if (!n){
+    node.textContent = FIT.note
+      ? FIT.note + "Resolveで Resolveで動かす/道具_Text+の実寸と書体の字幅を測ってサンプルデータを変更する.py を実行すると出ます。" : "";
+    node.style.color = "var(--warn)";
+    return;
+  }
+  const short = n < FIT.chars;
+  node.textContent = short
+    ? "この装飾は全角" + n + "字までしか入りません。字幕は全角" + FIT.chars
+      + "字なので、はみ出します。大きさか字送りを詰めてください。"
+    : "全角" + n + "字まで入ります（字幕は全角" + FIT.chars + "字）。";
+  node.style.color = short ? "var(--warn)" : "var(--ink3)";
+}
+
+function tileFor(grid, index, name, rule, source, sample){
+  const tile = document.createElement("button");
+  tile.className = "tile" + (index === current ? " on" : "");
+  tile.title = name;
+  tile.onclick = () => { select(index); if (rule) copyMarker(markerLabel(rule)); };
+
+  const stage = document.createElement("div");
+  stage.className = "stage";
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = rule ? markerLabel(rule) : "既定";
+  const txt = document.createElement("div");
+  txt.className = "txt";
+  stage.append(badge, txt);
+  if (source){
+    const src = document.createElement("span");
+    src.className = "src";
+    src.textContent = "素材";
+    src.title = "Media Pool の " + source + " を使います";
+    stage.appendChild(src);
+  }
+
+  const foot = document.createElement("div");
+  foot.className = "foot";
+  const b = document.createElement("b");
+  b.textContent = name;
+  foot.appendChild(b);
+  const room = fitChars(index === -1 ? BASE : styleOf(entries[index]));
+  if (room){
+    const fit = document.createElement("span");
+    fit.className = "fit" + (room < FIT.chars ? " bad" : "");
+    fit.textContent = room + "字";
+    fit.title = "全角" + room + "文字まで画面幅の"
+                + Math.round(FIT.width * 100) + "%に収まります（実測）";
+    foot.appendChild(fit);
+  }
+
+  tile.append(stage, foot);
+  grid.appendChild(tile);
+
+  const entry = { index, name, sample, tile, txt, stage, shot: false };
+  tiles.push(entry);
+  drawTile(entry);
+}
+
+/* 1つの札の見本だけを描き直す */
+function drawTile(entry){
+  if (entry.shot) return;
+  const style = entry.index === -1 ? BASE : styleOf(entries[entry.index]);
+  fillInto(entry.txt, splitMarker(entry.sample)[2], style,
+           entry.stage.clientWidth - 12, entry.stage.clientHeight - 10, 200);
+}
+
+/* 既定を触ったときは全部、そうでなければ選択中の1つだけ描き直す */
+function refreshTiles(){
+  if (current === -1) tiles.forEach(drawTile);
+  else {
+    const entry = tiles.find(t => t.index === current);
+    if (entry) drawTile(entry);
+  }
+}
+
+function syncSelection(){
+  for (const t of tiles) t.tile.classList.toggle("on", t.index === current);
+}
+
+function syncHeader(){
+  el("sel-name").textContent = current === -1 ? "通常（既定）" : entries[current].name;
+  el("sel-marker").textContent = current === -1 ? "既定" : markerLabel(entries[current]);
+  el("editing").textContent = current === -1
+    ? "すべての字幕に効きます" : "この目印の行だけ上書きします";
+}
+
+/* 割り当てを選ぶ。一覧は作り直さないので、見ていた場所から動かない */
+function select(index){
+  current = index;
+  el("out").hidden = false;
+  syncSelection();
+  syncHeader();
+  buildControls();
+  renderPreview();
+  renderOut();
+  syncFit();
+}
+
+/* 値をひとつ変える。調整欄は作り直さないので、つまみを掴んだまま動かせる */
+function applyValue(key, value){
+  setValue(key, value);
+  refreshTiles();
+  renderPreview();
+  renderOut();
+  syncWarn();
+  syncFit();
+}
+
+function newGrid(host, label){
+  const line = document.createElement("div");
+  line.className = "catline";
+  line.textContent = label;
+  const grid = document.createElement("div");
+  grid.className = "tiles";
+  host.append(line, grid);
+  return grid;
+}
+
+function buildTiles(){
+  const keep = window.scrollY;
+  const host = el("tiles");
+  host.textContent = "";
+  tiles = [];
+  el("assign-note").textContent = (entries.length + 1) + "件";
+
+  tileFor(newGrid(host, "すべての字幕"), -1, "通常（既定）", "", "", "普通の字幕です");
+  for (const cat of CAT_ORDER){
+    const rows = entries.map((e, i) => [e, i]).filter(([e]) => e.cat === cat);
+    if (!rows.length) continue;
+    const grid = newGrid(host, cat);
+    for (const [e, i] of rows){
+      tileFor(grid, i, e.name, e, e.source, e.sample);
+    }
+  }
+  if (window.scrollY !== keep) window.scrollTo(0, keep);
+}
+
+/* --- 調整 --- */
+function buildControls(){
+  const host = el("controls");
+  host.textContent = "";
+  warnRows = [];
+  const s = targetStyle();
+
+  for (const grp of CONTROLS){
+    const d = document.createElement("details");
+    d.className = "group";
+    d.open = !grp.on || !!s[grp.on];
+    const sum = document.createElement("summary");
+    sum.textContent = grp.g;
+    if (grp.on){
+      const sw = document.createElement("label");
+      sw.className = "sw-toggle";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!s[grp.on];
+      cb.onclick = ev => ev.stopPropagation();
+      cb.onchange = () => { applyValue(grp.on, cb.checked ? 1 : 0); d.open = cb.checked; };
+      sw.appendChild(cb);
+      sum.appendChild(sw);
+    }
+    if (grp.el){
+      const tag = document.createElement("span");
+      tag.className = "el";
+      tag.textContent = "要素" + grp.el;
+      sum.appendChild(tag);
+    }
+    d.appendChild(sum);
+
+    const rows = document.createElement("div");
+    rows.className = "rows";
+    for (const it of grp.items) rows.appendChild(controlRow(it, s));
+    if (grp.width){
+      const warn = document.createElement("div");
+      warn.className = "hint warn";
+      rows.appendChild(warn);
+      warnRows.push({ node: warn, on: grp.on, key: grp.width, scale: grp.scale });
+    }
+    d.appendChild(rows);
+    host.appendChild(d);
+  }
+  syncWarn();
+}
+
+/* 縁が太すぎて漢字の内側が潰れる状態を、値をいじっている間もその場で知らせる */
+let warnRows = [];
+function syncWarn(){
+  if (!warnRows.length) return;
+  const s = targetStyle();
+  const limit = edgeLimit(s);
+  for (const w of warnRows){
+    /* 拡大すると外へ出る量も増えるので、太さは拡大を掛けてから見る */
+    const width = Number(s[w.key]) * (w.scale ? Number(s[w.scale]) : 1);
+    const over = limit && s[w.on] && width > limit;
+    w.node.textContent = over
+      ? "この書体だと縁は " + limit.toFixed(3) + " までです。今は " + width.toFixed(3)
+        + " で、漢字の内側の隙間が塗り潰れます。"
+      : "";
+    w.node.style.display = over ? "" : "none";
+  }
+}
+
+function controlRow(it, s){
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = it.label;
+  row.appendChild(lab);
+
+  if (it.t === "num"){
+    const rng = document.createElement("input");
+    rng.type = "range"; rng.min = it.min; rng.max = it.max; rng.step = it.step;
+    rng.value = s[it.k];
+    const val = document.createElement("span");
+    val.className = "val";
+    const show = v => Number(v).toFixed(
+      it.digits !== undefined ? it.digits : (it.step < 0.01 ? 3 : 2));
+    val.textContent = show(s[it.k]);
+    rng.oninput = () => {
+      const value = parseFloat(rng.value);
+      val.textContent = show(value);
+      applyValue(it.k, value);
+    };
+    row.append(rng, val);
+  } else if (it.t === "color"){
+    const c = document.createElement("input");
+    c.type = "color"; c.value = s[it.k];
+    const hex = document.createElement("input");
+    hex.type = "text"; hex.value = s[it.k];
+    c.oninput = () => { hex.value = c.value; applyValue(it.k, c.value); };
+    hex.onchange = () => {
+      if (!/^#[0-9a-fA-F]{6}$/.test(hex.value)) { hex.value = c.value; return; }
+      c.value = hex.value.toLowerCase();
+      applyValue(it.k, c.value);
+    };
+    row.append(hex, c);
+  } else if (it.t === "font"){
+    const i = document.createElement("input");
+    i.type = "text"; i.value = s[it.k]; i.setAttribute("list", it.list);
+    i.onchange = () => applyValue(it.k, i.value);
+    row.append(i, document.createElement("span"));
+  } else if (it.t === "bool"){
+    row.className = "row sw";
+    const sw = document.createElement("label");
+    sw.className = "sw-toggle";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!s[it.k];
+    cb.onchange = () => applyValue(it.k, cb.checked ? 1 : 0);
+    sw.appendChild(cb);
+    row.appendChild(sw);
+  } else if (it.t === "grad"){
+    /* 色を並べて持つ設定。色見本1つでは足りないので、増減できる列にする。
+       今の値は buildControls のときの写しではなく毎回引き直す（増減で中身が変わるため） */
+    row.className = "row grad";
+    const box = document.createElement("div");
+    box.className = "gradbox";
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const draw = () => {
+      const colors = targetStyle()[it.k];
+      box.textContent = "";
+      colors.forEach((hex, i) => {
+        const c = document.createElement("input");
+        c.type = "color"; c.value = hex;
+        c.title = (i === 0 ? "下" : i === colors.length - 1 ? "上" : "途中") + "の色";
+        c.oninput = () => {
+          const next = targetStyle()[it.k].slice();
+          next[i] = c.value;
+          applyValue(it.k, next);
+          bar.style.backgroundImage = gradImage(next, 0);
+        };
+        box.appendChild(c);
+      });
+      const add = document.createElement("button");
+      add.className = "btn"; add.textContent = "＋"; add.title = "色を足す";
+      add.disabled = colors.length >= 4;
+      add.onclick = () => {
+        applyValue(it.k, colors.concat([colors[colors.length - 1]]));
+        draw();
+      };
+      const drop = document.createElement("button");
+      drop.className = "btn"; drop.textContent = "−"; drop.title = "色を減らす";
+      drop.disabled = colors.length <= 2;
+      drop.onclick = () => { applyValue(it.k, colors.slice(0, -1)); draw(); };
+      bar.style.backgroundImage = gradImage(colors, 0);
+      box.append(bar, add, drop);
+    };
+    draw();
+    row.appendChild(box);
+  } else if (it.t === "pick"){
+    const sel = document.createElement("select");
+    for (const [v, t] of it.opts){
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t; o.selected = Number(s[it.k]) === v;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => applyValue(it.k, parseInt(sel.value, 10));
+    row.append(sel, document.createElement("span"));
+  }
+
+  if (it.hint){
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = it.hint;
+    row.appendChild(h);
+  }
+  return row;
+}
+
+/* --- プレビュー --- */
+function buildBgPick(){
+  const host = el("bgpick");
+  host.textContent = "";
+  BGS.forEach(([name, css], i) => {
+    const b = document.createElement("button");
+    b.textContent = name;
+    b.className = i === bgIndex ? "on" : "";
+    b.onclick = () => {
+      bgIndex = i;
+      for (const other of host.children) other.classList.remove("on");
+      b.classList.add("on");
+      renderPreview();
+    };
+    host.appendChild(b);
+  });
+}
+
+function renderPreview(){
+  const block = el("pv-block");
+  const phone = block.parentElement;
+  block.style.cssText = "";
+  const s = targetStyle();
+  el("pv-bg").style.background = BGS[bgIndex][1];
+  const w = phone.getBoundingClientRect().width || 238;
+  const h = phone.getBoundingClientRect().height || (w * 16 / 9);
+  block.style.bottom = (s.cy * h).toFixed(1) + "px";
+  block.style.transform = "translate(" + ((s.cx - 0.5) * w).toFixed(1) + "px,50%)";
+  renderText(block, el("pv-text").value, s, px(s, w), w);
+}
+
+/* --- 判定テスト --- */
+function renderTest(){
+  const table = el("test-out");
+  table.textContent = "";
+  const head = table.insertRow();
+  ["入力", "本文", "効く装飾"].forEach(t => {
+    const th = document.createElement("th");
+    th.textContent = t;
+    head.appendChild(th);
+  });
+  for (const line of el("test-src").value.split("\n")){
+    if (!line.trim()) continue;
+    const r = resolveStyle(line);
+    const tr = table.insertRow();
+    tr.insertCell().textContent = line;
+    tr.insertCell().textContent = r.body;
+    const c = tr.insertCell();
+    c.textContent = r.matched.length ? r.matched.join(" + ") : "既定のみ";
+    c.className = r.matched.length ? "hit" : "none";
+  }
+}
+
+/* --- 出力 --- */
+const TPL = el("tpl-tool").textContent;
+
+function buildScript(){
+  const [markerLine, baseBlock, rulesBlock, looksBlock] = pythonBlocks();
+  let src = TPL;
+  src = src.replace(/^MARKER_CHARS = .*$/m, () => markerLine);
+  src = src.replace(/^BASE_PRESET = \{[\s\S]*?\n\}/m, () => baseBlock);
+  src = src.replace(/^RULES = \[[\s\S]*?\n\]/m, () => rulesBlock);
+  src = src.replace(/^LOOKS = \[[\s\S]*?\n\]/m, () => looksBlock);
+  return src;
+}
+
+function renderOut(){
+  el("which-note").textContent =
+    "Console に貼ると窓が出ます。置き換え・作り直し・切り替え・並べる のすべてがここから行えます。";
+  el("out").textContent = buildScript();
+}
+
+/* 貼り付く高さは、上の帯と下の帯の実寸から決める。
+   プレビューの枠は、そこから余った縦を全部使う。 */
+function syncSticky(){
+  const root = document.documentElement.style;
+  const top = el("topbar").offsetHeight, bottom = el("bottombar").offsetHeight;
+  root.setProperty("--top-h", top + "px");
+  root.setProperty("--bottom-h", bottom + "px");
+  const card = el("phone") && el("phone").closest(".card");
+  const rest = card ? card.offsetHeight - el("phone").offsetHeight : 0;
+  const free = innerHeight - top - bottom - rest - 46;
+  root.setProperty("--phone-h", Math.max(320, free) + "px");
+}
+
+/* --- まとめて描き直す。起動時と画面幅が変わったときだけ --- */
+function render(){
+  syncSticky();
+  syncHeader();
+  buildTiles();
+  buildControls();
+  renderPreview();
+  renderTest();
+  renderOut();
+}
+
+/* --- 起動 --- */
+el("pv-accuracy").textContent = PREVIEW.measured
+  ? "Resolveの実測値で描いています。文字の大きさ・縁の太さ・ぼかしは実物に合わせてあります。"
+  : "換算はマニュアルからの推定で未実測です。大きさ・縁の太さ・ぼかしは実物とずれます。"
+    + "Resolveで Resolveで動かす/道具_Text+の実寸と書体の字幅を測ってサンプルデータを変更する.py を実行すると合います。";
+el("pv-accuracy").style.color = PREVIEW.measured ? "var(--ink3)" : "var(--warn)";
+syncFit();
+el("pv-text").value = "ここに字幕が出ます\n2行になるとこう見えます";
+el("test-src").value = TEST_LINES.join("\n");
+el("pv-text").oninput = () => renderPreview();
+el("test-src").oninput = () => renderTest();
+el("toggle-edit").onclick = () => {
+  const on = document.body.classList.toggle("editing");
+  el("toggle-edit").classList.toggle("on", on);
+  buildTiles();      // 列の幅が変わるので札の大きさを取り直す
+  renderPreview();
+};
+el("toggle-code").onclick = () => {
+  const shown = el("out").hasAttribute("hidden");
+  el("out").toggleAttribute("hidden", !shown);
+  el("toggle-code").textContent = shown ? "コードを隠す" : "コードを見る";
+  el("toggle-code").classList.toggle("on", shown);
+  syncSticky();   // 下の帯の高さが変わる
+};
+el("copy").onclick = async () => {
+  await navigator.clipboard.writeText(buildScript());
+  el("copy").textContent = "コピーしました";
+  setTimeout(() => { el("copy").textContent = "コピー"; }, 1200);
+};
+buildBgPick();
+render();
+
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { syncSticky(); buildTiles(); renderPreview(); }, 120);
+});
+</script>
+
+<div id="toast"></div>

@@ -212,6 +212,58 @@ describe("capacity.js の移動の実行状態", () => {
   });
 });
 
+// 切り出しは常に一時保存先へ出て、最終保存先へは録画に随伴してしか移らない。つまり録画が
+// 0本でも成果物だけが残る状態が普通に起きる(録画を移した後に切り出した分)。件数を出さず
+// 本数だけで実行buttonを出していると、移すものが在るのに画面には何も出ない。
+describe("capacity.js の移動対象(切り出しの随伴)", () => {
+  let page;
+  let win;
+  let errorSpy;
+
+  beforeEach(async () => {
+    page = loadPage({ page: "capacity", url: "http://localhost:8520/capacity" });
+    win = page.win;
+    errorSpy = vi.spyOn(win.console, "error").mockImplementation(() => {});
+    await page.settle();
+  });
+  afterEach(async () => {
+    errorSpy.mockRestore();
+    await page.close();
+  });
+
+  const plan = (extra) => ({
+    enabled: true, items: [], total_items: 0, total_bytes: 0,
+    by_streamer: [], final_dir: "L:/final",
+    clip_items: [], clip_total_items: 0, clip_total_bytes: 0, clip_orphans: 0,
+    ...extra,
+  });
+
+  it("録画が0本でも切り出しが在れば実行buttonを出す", () => {
+    win.renderRelocationPlan(plan({ clip_total_items: 3, clip_total_bytes: 1024 ** 3 }));
+    const apply = page.document.getElementById("reloc-apply");
+    expect(apply.classList.contains("hidden")).toBe(false);
+    expect(page.document.getElementById("reloc-summary").textContent)
+      .toContain("切り出し 3 本 / 1.0 GB");
+  });
+
+  it("どちらも0なら実行buttonは出さない", () => {
+    win.renderRelocationPlan(plan());
+    expect(page.document.getElementById("reloc-apply").classList.contains("hidden"))
+      .toBe(true);
+    expect(page.document.getElementById("reloc-summary").textContent)
+      .not.toContain("切り出し");
+  });
+
+  it("常設の表示にも一緒に移る本数を出す", () => {
+    win.renderPlacement({
+      enabled: true, record_dir: "K:/work", final_dir: "L:/final",
+      items: 0, bytes: 0, clip_items: 5, clip_bytes: 1024 ** 3 * 2, locations: {},
+    });
+    expect(page.document.getElementById("cap-place-note").textContent)
+      .toContain("一緒に移る切り出し 5 本（2.0 GB）");
+  });
+});
+
 // 配信者別の内訳。列を画面がhard-codeしていた頃は、serverが返す11種別のうち5種別しか
 // 列が無く、「容量」列(全種別の合計)と内訳の和が合わなかった。_backup(再mp4化の退避)は
 // 配信者別では完全に不可視で、合計だけが大きい理由が画面から辿れなかった。

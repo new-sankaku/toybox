@@ -1,4 +1,4 @@
-"""切り出し候補APIの、素材由来の指標(_MATERIAL_METRICS)の配線。
+"""切り出し候補(api/candidates)の、素材由来の指標(_MATERIAL_METRICS)の配線。
 
 engineそのもの(笑い声の検出精度)は tests/test_laugh_audio.py の担当なので、ここで見るのは
 候補APIとengineの間だけである。壊れ方が最も分かりにくいのは「笑いを見ているつもりで見て
@@ -10,14 +10,11 @@ engineそのもの(笑い声の検出精度)は tests/test_laugh_audio.py の担
   4. 判定できない録画では指標を外す。0で埋めない(=keyを付けない)
 """
 
-import re
 import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
-STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 BUCKET_SECONDS = 10
 BUCKET_COUNT = 20
@@ -31,7 +28,8 @@ def server(env_guard):
     from types import SimpleNamespace
 
     import tictok.server as srv
-    from tictok.api import access_log, disk, files, fsfacts, media_jobs, runtime, startup
+    from tictok.api import (access_log, candidates, disk, files, fsfacts, media_jobs,
+                            runtime, startup)
     from tictok.api.routes import (ai, analytics, bulk, media, monitors, pages,
                                    recordings, search, sessions, storage, streamers,
                                    system, ws)
@@ -50,6 +48,7 @@ def server(env_guard):
         # (``from ... import`` で束ねると差し替えが届かない)。
         runtime=runtime, files=files, fsfacts=fsfacts, disk=disk,
         media_jobs=media_jobs, startup=startup, access_log=access_log,
+        candidates=candidates,
         routes=SimpleNamespace(ai=ai, analytics=analytics, bulk=bulk, media=media,
                                monitors=monitors, pages=pages, recordings=recordings,
                                search=search, sessions=sessions, storage=storage,
@@ -141,7 +140,7 @@ def recording(server, monkeypatch):
     async def _duration(src, input_args=()):
         return float(BUCKET_SECONDS * BUCKET_COUNT)
 
-    monkeypatch.setattr(server.routes.recordings, "_duration_seconds", _duration)
+    monkeypatch.setattr(server.candidates, "_duration_seconds", _duration)
     _install()
     return type("Rec", (), {"id": recording_id, "session_id": session_id,
                             "started_at": started, "path": path,
@@ -293,34 +292,20 @@ def test_every_registered_material_metric_is_wired_all_the_way_through(server):
     """登録表へ1 entry足すだけで配線が揃うことを、逆側から固定する。
 
     指標を足したときに落ちやすいのは判定側ではなく、設定・badge文言・畳み込みの引き継ぎ
-    ・画面の列といった周辺で、どれも欠けても候補は普通に返ってしまう。"""
+    といった周辺で、どれが欠けても候補は普通に返ってしまう。
+
+    画面(videos.js/videos.html)の列までは見ない。候補一覧のUIは再生画面の改装で外され、
+    候補の利用者はshortの一括生成(api/media_jobs)だけになった。"""
     from tictok.core import spike
     from tictok.core.settings import SETTING_DEFS
 
-    videos_js = (STATIC_DIR / "videos.js").read_text(encoding="utf-8")
-    labels = re.search(r"const CANDIDATE_METRIC_LABELS = \{(.*?)\};", videos_js, re.S)
-    columns = re.search(r"const CANDIDATE_MATERIAL_COLUMNS = \[(.*?)\];", videos_js, re.S)
-    assert labels and columns, "videos.jsの候補metricの表が見つからない"
-
-    assert server.routes.recordings._MATERIAL_METRICS
-    for metric in server.routes.recordings._MATERIAL_METRICS:
+    assert server.candidates._MATERIAL_METRICS
+    for metric in server.candidates._MATERIAL_METRICS:
         assert metric.key in spike.OPTIONAL_METRICS, metric.key
-        assert metric.key in server.routes.recordings._CANDIDATE_LABELS, metric.key
-        assert metric.key in server.routes.recordings._CANDIDATE_REPRESENTATIVE_KEYS, metric.key
+        assert metric.key in server.candidates._CANDIDATE_LABELS, metric.key
+        assert metric.key in server.candidates._CANDIDATE_REPRESENTATIVE_KEYS, metric.key
         for key in (metric.setting, metric.weight_setting, metric.min_setting):
             assert key in SETTING_DEFS, key
-        assert f"{metric.key}:" in labels.group(1), metric.key
-        assert f'key: "{metric.key}"' in columns.group(1), metric.key
-
-
-def test_the_candidate_table_has_a_column_for_every_material_metric(server):
-    """列数と行の要素数が合わないと、値がheaderと1つずれた列へ入る。"""
-    html = (STATIC_DIR / "videos.html").read_text(encoding="utf-8")
-    header = re.search(r'<tbody id="cand-rows">', html)
-    assert header
-    row = re.findall(r"<tr>(<th.*?)</tr>", html[:header.start()], re.S)[-1]
-    # IN/OUT/尺/根拠/z/コイン/Comment/笑い + 素材由来の指標 + 操作。
-    assert row.count("<th") == 9 + len(server.routes.recordings._MATERIAL_METRICS)
 
 
 # ---- 笑顔(映像) --------------------------------------------------------------------

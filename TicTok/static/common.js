@@ -18,11 +18,23 @@ const NAV_ITEMS = [
   ["/settings", "設定"],
 ];
 
+// 末尾の / を落として現在地・link先を突き合わせる("/history/" でも履歴と見なす)。
+function navPath(href) {
+  return new URL(href, location.origin).pathname.replace(/\/+$/, "") || "/";
+}
+
+// navのlinkはpathで引く。badgeを付ける側が href の文字列そのもの(a[href="/jobs"])で
+// 引いていた頃は、誰かがそのhrefへqueryを足した瞬間にlinkが引けなくなり、badgeの数字が
+// 更新されないまま固まっていた(実際にJob tabで起きていた)。
+function navLink(path) {
+  return [...document.querySelectorAll(".a-nav a")]
+    .find((a) => navPath(a.getAttribute("href")) === path) || null;
+}
+
 function renderNav() {
   const nav = document.querySelector("nav.a-nav");
   if (!nav) return;
-  // 末尾の / は落とす("/history/" でも履歴を現在地と見なす)。
-  const here = location.pathname.replace(/\/+$/, "") || "/";
+  const here = navPath(location.pathname);
   nav.innerHTML = "";
   NAV_ITEMS.forEach(([href, label]) => {
     const a = document.createElement("a");
@@ -64,11 +76,19 @@ const STATUS_LABELS = {
   disconnected: { badge: "STOPPED", cls: "badge-idle", message: "収集を停止しました。" },
   ended: { badge: "LIVE ENDED", cls: "badge-ended", message: "LIVE配信が終了しました。" },
   error: { badge: "ERROR", cls: "badge-error", message: "Errorが発生しました。" },
-  restricted: { badge: "録画不可", cls: "badge-restricted", message: "メンバー限定または年齢制限のため録画できません。通常配信の開始を監視継続中です。" },
+  restricted: { badge: "録画不可", cls: "badge-restricted", message: "録画できない配信のため接続していません（メンバー限定・年齢制限、または配信の署名が通らない）。理由はOps画面のeventに残ります。通常配信の開始を監視継続中です。" },
 };
 
+// Timelineはbucket 1本ごとにlabelを作るので、6時間の配信で数千回通る。
+// Date.toLocaleTimeStringは呼ぶ度にformatterを組み直し、実測5,000件で413ms掛かる
+// (使い回せば8ms)。時を2桁固定にするのは、既定が1桁で軸labelのHH:MM切り出しが
+// "9:00:" と欠けるため。
+const TIME_FORMAT = new Intl.DateTimeFormat("ja-JP", {
+  hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+
 function fmtTime(epochSeconds) {
-  return new Date(epochSeconds * 1000).toLocaleTimeString("ja-JP", { hour12: false });
+  return TIME_FORMAT.format(new Date(epochSeconds * 1000));
 }
 
 function fmtDateTime(epochSeconds) {
@@ -93,6 +113,15 @@ function fmtYmd(epochSeconds) {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}${m}${day}`;
+}
+
+// 人が読む日付。fmtYmd は区切りの無い連番(20260617)で、chartのlabelや突合keyのための形。
+// 文中に置くと桁の切れ目が読めないので、説明文にはこちらを使う。
+function fmtDate(epochSeconds) {
+  if (!epochSeconds) return "-";
+  const d = new Date(epochSeconds * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
 }
 
 function fmtDuration(seconds) {
@@ -243,15 +272,76 @@ function connectWS(onMessage) {
   return ws;
 }
 
-const NIER_AXIS_COLOR = "#6f6a59";
-const NIER_GRID_COLOR = "rgba(143, 136, 113, 0.3)";
-const CHART_DISPLAY_LIMIT = 720;
+// 色の出処はCSSのtoken(:root)ひとつに固める。canvasにはCSSが効かないので値をJSへ持ち出す
+// 必要があるが、hexを書き写すとpaletteを変えた時にchartだけ旧色で取り残される。
+const CSS_ROOT_STYLE = getComputedStyle(document.documentElement);
+function cssToken(name) {
+  return CSS_ROOT_STYLE.getPropertyValue(name).trim();
+}
+// token(#rrggbb)に透明度を載せる。濃さは呼び出し側の意味(強調の強さ)で決める。
+function cssTokenAlpha(name, alpha) {
+  const n = parseInt(cssToken(name).slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// 系列色はこの順で使う。並び順自体が色覚多様性への安全装置なので、途中を飛ばさない。
+// 任意の2色が隣り合う面(small multiples)は先頭4色まで。定義と検証値は style.css の :root。
+const SERIES = [
+  cssToken("--series-1"),
+  cssToken("--series-2"),
+  cssToken("--series-3"),
+  cssToken("--series-4"),
+  cssToken("--series-5"),
+];
+// 量の段。薄→濃で順序を色に出す。段数が5より少ない時は濃い側から採る(薄い端は地に近い)。
+const RAMP_STEPS = [
+  cssToken("--ramp-1"),
+  cssToken("--ramp-2"),
+  cssToken("--ramp-3"),
+  cssToken("--ramp-4"),
+  cssToken("--ramp-5"),
+];
+function rampOf(count) {
+  return RAMP_STEPS.slice(RAMP_STEPS.length - count);
+}
+
+const NIER_AXIS_COLOR = cssToken("--chart-ink");
+const NIER_GRID_COLOR = cssToken("--chart-grid");
+// Timelineに描く範囲。bucketは1本=1点で描く(束ねない)ので、実際の点数は配信の長さが
+// 決める。ここで持つのは上限だけで、本数ではなく**時間**で持つ — bucket_secondsは
+// session単位で可変なので、本数で持つとbucket幅を変えた瞬間に描く時間の長さが変わる。
+const TIMELINE_SPAN_HOURS = 24;
+// 点数側の天井。値の札の山探索(prominentPeaks)は最悪形で13ms/panel掛かるのがこの辺り
+// (実測)。時間側だけで持つと、bucket幅を細かくしたときに描画点数だけが際限なく増える。
+const TIMELINE_MAX_POINTS = 8640;
+
+// そのbucket幅で描く本数の上限。上限に掛かるのは古い側で、新しい側は必ず残る。
+function timelineDisplayLimit(bucketSeconds) {
+  const bySpan = Math.ceil((TIMELINE_SPAN_HOURS * 3600) / bucketSeconds);
+  return Math.min(TIMELINE_MAX_POINTS, bySpan);
+}
+
+// chartへ紙の面を敷く。panelの地(中間調)の上に直接描くと、系列色が地に沈んで3:1に届かない。
+// canvasにはCSSが効かないので、描画の一番下で塗る。plot領域だけでなくcanvas全面を塗るのは、
+// 軸ラベルと凡例がplot領域の外に出るため ―― 紙の外に置くと、その文字だけ中間調の地に載る。
+// Chartを読まないpage(videos等)でもcommon.jsは読まれるため、居る時だけ登録する。
+const chartSurfacePlugin = {
+  id: "chartSurface",
+  beforeDraw(chart) {
+    const { ctx } = chart;
+    ctx.save();
+    ctx.fillStyle = cssToken("--chart-surface");
+    ctx.fillRect(0, 0, chart.width, chart.height);
+    ctx.restore();
+  },
+};
+if (typeof Chart !== "undefined") Chart.register(chartSurfacePlugin);
 
 function nierTooltip() {
   return {
-    backgroundColor: "#4d4a3f",
-    titleColor: "#d8d2bc",
-    bodyColor: "#d8d2bc",
+    backgroundColor: cssToken("--invert-bg"),
+    titleColor: cssToken("--invert-fg"),
+    bodyColor: cssToken("--invert-fg"),
     titleFont: { family: "monospace" },
     bodyFont: { family: "monospace" },
   };
@@ -261,34 +351,432 @@ function nierTicks() {
   return { color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 }, precision: 0 };
 }
 
+// ---- 横長chartの読み取り支援 ----
+// 幅が画面の端まで伸びると、線の右端で高さを見てから左のy軸・系列名まで目線を戻す
+// 往復が起きる。値と、その値の意味を決める物(名前・目盛り)を近づける手を2つ置く。
+//   (1) 積んだpanelで縦線を共有し、cursorを置いていないpanelは値をその線の脇で名乗る
+//   (2) hoverしていない間も、目立つ山にだけ値を撒く(全点に撒くと重なって読めない)
+// 既存chartの構成には触れず、外からpluginとして足す。効くかどうかは chart.$xhair /
+// chart.$marks の有無で決まるので、登録は全体で1度でよい。
+const READOUT_FONT = "10px monospace";
+const READOUT_CHIP_H = 15;
+
+// 値の札。地をchart面と同じ不透明色で塗ってから書く ―― 線や棒の上に直接書くと数字が
+// 形に食われる。文字は本文と同じ濃さのinkにする。系列色は地に対して3:1(線・塗り向けの
+// 下限)しか無く、10pxの文字では読み負けるため、系列の身元は左端のswatchが持つ。
+function drawReadoutChip(ctx, { x, y, text, color, bounds }) {
+  ctx.font = READOUT_FONT;
+  const w = ctx.measureText(text).width + 17;
+  let left = x + 6;
+  if (bounds && left + w > bounds.right) left = x - 6 - w;
+  if (bounds && left < bounds.left) left = x + 6;
+  const top = y - READOUT_CHIP_H / 2;
+  ctx.fillStyle = cssToken("--chart-surface");
+  ctx.fillRect(left, top, w, READOUT_CHIP_H);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, w - 1, READOUT_CHIP_H - 1);
+  ctx.fillStyle = color;
+  ctx.fillRect(left + 4, top + 4.5, 5, 6);
+  ctx.fillStyle = cssToken("--ink-strong");
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, left + 13, y);
+}
+
+// 描いた値と、名乗らせたい値が違うchart(頭打ちで上端に寄せた点など)は
+// chart.$readoutValue で実値へ差し替える。tooltipのcallbackと同じ責務。
+function readoutValue(chart, di, index, drawn) {
+  return chart.$readoutValue ? chart.$readoutValue(di, index, drawn) : drawn;
+}
+
+// 札に出す数。桁は落とさず、意味の無い小数だけを畳む ―― 配信時間のような割り算で出た値は
+// 3.6865342557430267 のまま持っており、そのまま書くと札が数字の帯になる。
+function readoutRound(v) {
+  const a = Math.abs(v);
+  if (a >= 100 || Number.isInteger(v)) return Math.round(v);
+  return Number(v.toFixed(a >= 1 ? 1 : 2));
+}
+
+// dataの1点。x軸が実時間のchartは {x, y} で持つので、数値と両方を受ける。
+function readoutNumber(data, index) {
+  const raw = data[index];
+  const v = raw && typeof raw === "object" ? raw.y : raw;
+  return typeof v === "number" && !Number.isNaN(v) ? v : null;
+}
+
+// 指定indexの描画点(pixel・値・系列色)。値を持たない点はnull。
+function readoutPoint(chart, di, index) {
+  const meta = chart.getDatasetMeta(di);
+  const el = meta && meta.data && meta.data[index];
+  if (!el || el.skip) return null;
+  const v = readoutNumber(chart.data.datasets[di].data, index);
+  if (v == null) return null;
+  const o = el.options || {};
+  const color = meta.type === "line" ? (o.borderColor || o.backgroundColor) : (o.backgroundColor || o.borderColor);
+  return { x: el.x, y: el.y, value: v, color: color || NIER_AXIS_COLOR };
+}
+
+// どのindexを指しているかはChart.js自身の当たり判定に任せる。x軸がcategoryか実時間かで
+// pixel→値の意味が変わるため、自前でpixelから逆算するとtooltipと違う点を指すことがある。
+function xhairIndexAt(chart, args) {
+  if (!args.inChartArea || args.event.type === "mouseout") return null;
+  const hit = chart.getElementsAtEventForMode(args.event, "index", { intersect: false }, true);
+  return hit.length ? hit[0].index : null;
+}
+
+// 縦線を引くx。軸の型に依らず、実際に描かれた点のpixelを採る。
+function xhairPixel(chart, index) {
+  for (let di = 0; di < chart.data.datasets.length; di++) {
+    if (!chart.isDatasetVisible(di)) continue;
+    const el = chart.getDatasetMeta(di).data[index];
+    if (el && !el.skip && Number.isFinite(el.x)) return el.x;
+  }
+  return null;
+}
+
+// x(時間軸)を共有するchart群を1本の縦線で結ぶ。どのpanelにcursorが在っても全panelの
+// 同じ時点に線が落ちる。
+function linkCrosshair(charts) {
+  const group = { charts, index: null, source: null };
+  charts.forEach((c) => { c.$xhair = group; });
+  return group;
+}
+
+const crosshairPlugin = {
+  id: "tictokCrosshair",
+  afterEvent(chart, args) {
+    const g = chart.$xhair;
+    if (!g) return;
+    const idx = xhairIndexAt(chart, args);
+    if (g.index === idx && (idx === null || g.source === chart)) return;
+    g.index = idx;
+    g.source = idx === null ? null : chart;
+    args.changed = true;
+    // 兄弟panelはeventを受け取らないので、こちらから引き直す。draw()は面の塗りと
+    // pluginを通す完全な描き直しで、scaleの再計算(update)は要らない。
+    g.charts.forEach((c) => { if (c !== chart) c.draw(); });
+  },
+  afterDraw(chart) {
+    const g = chart.$xhair;
+    if (!g || g.index == null) return;
+    const { ctx, chartArea } = chart;
+    const x = xhairPixel(chart, g.index);
+    if (x == null || x < chartArea.left || x > chartArea.right) return;
+    ctx.save();
+    ctx.strokeStyle = cssToken("--chart-ink");
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    // cursorが載っているpanelは標準のtooltipが値と時刻を出す。同じ物を二重に出さない。
+    if (g.source !== chart) {
+      const picks = [];
+      chart.data.datasets.forEach((ds, di) => {
+        if (!chart.isDatasetVisible(di)) return;
+        const p = readoutPoint(chart, di, g.index);
+        if (!p) return;
+        const v = readoutValue(chart, di, g.index, p.value);
+        if (v == null) return;
+        picks.push({ ...p, text: `${ds.label ? `${ds.label} ` : ""}${fmtNum(readoutRound(v))}` });
+      });
+      // 同じ縦線上で札が重なると、どの系列の値か読めなくなる。上から順に最小間隔で開く。
+      picks.sort((a, b) => a.y - b.y);
+      let floor = chartArea.top + READOUT_CHIP_H / 2;
+      picks.forEach((p) => {
+        const cy = Math.min(chartArea.bottom - READOUT_CHIP_H / 2, Math.max(floor, p.y));
+        floor = cy + READOUT_CHIP_H + 2;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(x, p.y, 3, 0, Math.PI * 2);
+        ctx.fill();
+        drawReadoutChip(ctx, { x, y: cy, text: p.text, color: p.color, bounds: chartArea });
+      });
+    }
+    ctx.restore();
+  },
+};
+
+// 値を撒く点の選び方は「上位N点」ではなく卓越度(prominence)にする。値の大きい順に採ると
+// 一番高い山の肩ばかりが並び、離れた場所の小さな山は1つも名乗らない。卓越度は「その点から
+// より高い点に出会うまで下った時の、最も高い鞍部との差」で、山ひとつに代表を1点だけ立てる
+// (地形図の主峰選定と同じ考え)。系列の振れ幅で正規化するので、単位の違うpanelを同じ閾値で
+// 切れる。端の点は外側を-∞と見るため、右肩上がりで終わる系列は終端がそのまま代表になる。
+function prominentPeaks(values, limit) {
+  const n = values.length;
+  if (n < 2) return [];
+  const at = (i) => readoutNumber(values, i);
+  let vmax = -Infinity;
+  let vmin = Infinity;
+  for (let i = 0; i < n; i++) {
+    const v = at(i);
+    if (v == null) continue;
+    if (v > vmax) vmax = v;
+    if (v < vmin) vmin = v;
+  }
+  const span = vmax - vmin;
+  if (!(span > 0)) return [];
+  const peaks = [];
+  for (let i = 0; i < n; i++) {
+    const v = at(i);
+    if (v == null) continue;
+    const prev = i > 0 ? at(i - 1) : null;
+    const next = i < n - 1 ? at(i + 1) : null;
+    // 平坦な頂は左端を代表にする(同じ高さの点が並んだ時に札が増えないように)。
+    if ((prev != null && prev >= v) || (next != null && next > v)) continue;
+    let saddleL = v;
+    let saddleR = v;
+    let higherL = false;
+    let higherR = false;
+    for (let j = i - 1; j >= 0; j--) {
+      const w = at(j);
+      if (w == null) continue;
+      if (w > v) { higherL = true; break; }
+      if (w < saddleL) saddleL = w;
+    }
+    for (let j = i + 1; j < n; j++) {
+      const w = at(j);
+      if (w == null) continue;
+      if (w > v) { higherR = true; break; }
+      if (w < saddleR) saddleR = w;
+    }
+    // 鞍部は「より高い点へ向かう途中の一番低い所」なので、より高い点が無かった側は
+    // 鞍部を持たない。両側とも無い点=系列の最大値で、ここは最も低い所からの高さで測る
+    // (この扱いをしないと最大値が他の山に順位を譲り、山の代表として名乗らないことがある)。
+    let saddle;
+    if (higherL && higherR) saddle = Math.max(saddleL, saddleR);
+    else if (higherL) saddle = saddleL;
+    else if (higherR) saddle = saddleR;
+    else saddle = Math.min(saddleL, saddleR);
+    const prom = v - saddle;
+    if (prom <= 0) continue;
+    peaks.push({ index: i, value: v, span, score: prom / span });
+  }
+  peaks.sort((a, b) => b.score - a.score);
+  return peaks.slice(0, limit);
+}
+
+// hoverしなくても読める常設の値。opts.topInset は canvas上に重ねたDOMのlabel帯
+// (.a-spark-label / .a-spark-peak)の高さで、その帯へ札を出しても隠れて見えない。
+function enableValueMarks(chart, opts = {}) {
+  chart.$marks = {
+    limit: opts.limit || 4,
+    minScore: opts.minScore || 0.12,
+    topInset: opts.topInset || 0,
+    cache: [],
+  };
+}
+
+const valueMarkPlugin = {
+  id: "tictokValueMarks",
+  afterDatasetsDraw(chart) {
+    const st = chart.$marks;
+    if (!st) return;
+    // crosshairが出ている間は、そちらが読み取りの主役。撒いた値と札が重なるので伏せる。
+    // 指したindexが今のdataに無い時(更新でdataが短くなった等)は線も引けないので、伏せない。
+    if (chart.$xhair && chart.$xhair.index != null && xhairPixel(chart, chart.$xhair.index) != null) return;
+    // 積み棒は「その系列の値」と「棒の高さ」が一致しない。数字を置くと段の合計と読める。
+    const y = chart.options.scales && chart.options.scales.y;
+    if (y && y.stacked) return;
+    const cands = [];
+    chart.data.datasets.forEach((ds, di) => {
+      if (ds.noMark || !chart.isDatasetVisible(di)) return;
+      // 山の選定はdataの形だけで決まる。描き直す度に走らせると重いので、data配列の
+      // 差し替え(=chartのupdate)を境にcacheする。
+      let entry = st.cache[di];
+      if (!entry || entry.ref !== ds.data) {
+        entry = { ref: ds.data, peaks: prominentPeaks(ds.data, st.limit * 3) };
+        st.cache[di] = entry;
+      }
+      entry.peaks.forEach((pk) => { if (pk.score >= st.minScore) cands.push({ ...pk, di }); });
+    });
+    if (!cands.length) return;
+    cands.sort((a, b) => b.score - a.score);
+    const { ctx, chartArea } = chart;
+    const ceiling = chartArea.top + st.topInset;
+    // 札同士が近いと、どの山の値か分からないまま数字だけが並ぶ。矩形の重なりだけでは
+    // 隣の山と数px空いた並びを許してしまうので、横の最小間隔も課す。
+    const minGap = Math.max(52, (chartArea.right - chartArea.left) / 10);
+    const placed = [];
+    let drawn = 0;
+    ctx.save();
+    ctx.font = READOUT_FONT;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    for (const c of cands) {
+      if (drawn >= st.limit) break;
+      const p = readoutPoint(chart, c.di, c.index);
+      if (!p) continue;
+      const v = readoutValue(chart, c.di, c.index, p.value);
+      if (v == null) continue;
+      const text = fmtCompact(readoutRound(v));
+      const w = ctx.measureText(text).width + 8;
+      // 常に点の上へ置く。上端に余白が無い山(自動scaleの最大点など)は上端で止める ――
+      // 下へ回すと山の内側に数字が入り、棒や塗りの中で浮いて見える。
+      const box = {
+        left: Math.min(Math.max(chartArea.left, p.x - w / 2), chartArea.right - w),
+        top: Math.max(ceiling, p.y - READOUT_CHIP_H - 4),
+      };
+      box.right = box.left + w;
+      box.bottom = box.top + READOUT_CHIP_H;
+      if (box.bottom > chartArea.bottom) continue;
+      // 同じ高さの山が並ぶ系列(Comment等)は、卓越度の上位が全部ほぼ同じ値になる。
+      // 「56・56・55」と並べても読み手は何も得ないので、既出と差の無い値は撒かない。
+      if (placed.some((q) => Math.abs(q.x - p.x) < minGap
+        || (q.di === c.di && Math.abs(q.value - c.value) < c.span * 0.05)
+        || (box.right > q.left - 4 && box.left < q.right + 4 && box.bottom > q.top - 2 && box.top < q.bottom + 2))) continue;
+      placed.push({ ...box, x: p.x, di: c.di, value: c.value });
+      ctx.fillStyle = cssToken("--chart-surface");
+      ctx.fillRect(box.left, box.top, w, READOUT_CHIP_H);
+      ctx.fillStyle = cssToken("--ink-strong");
+      ctx.fillText(text, box.left + w / 2, box.top + READOUT_CHIP_H / 2);
+      // どの点の値かは、札と点を結ぶ短い線が示す。色数は系列色のまま増やさない。
+      if (p.y - box.bottom > 2) {
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x, box.bottom);
+        ctx.lineTo(p.x, p.y - 2);
+        ctx.stroke();
+      }
+      drawn++;
+    }
+    ctx.restore();
+  },
+};
+
+if (typeof Chart !== "undefined") {
+  Chart.register(crosshairPlugin);
+  Chart.register(valueMarkPlugin);
+}
+
+// ---- 尺度の違う指標を積む(二軸の置き換え) ----
+// 1枚に2つの目盛を置くと、線と棒の交点や上下関係が、実際には無い意味を持って見える
+// (右軸の倍率次第でどうにでも作れる)。尺度ごとにpanelを分け、x軸だけを共有して縦に積む。
+//
+// 同じ時点が縦に並ぶことがこの形の全てなので、plot領域の左端を揃える。y軸の幅は目盛の
+// 桁数で変わる(120 と 120,000 で軸幅が違う)ため、全panelで固定幅にする。
+const STACKED_Y_WIDTH = 58;
+function stackedYFit(scale) { scale.width = STACKED_Y_WIDTH; }
+
+// container(.x-chartstack)の中にpanelを作り、canvasを返す。leadは主指標のpanelで高さを厚く取る。
+// canvasにはcontainerのidから起こした連番idを振る ―― panelは動的に作るので、idが無いと
+// 「どのpanelのchartか」を後から指せない(test・debugの取っ掛かりが消える)。
+function stackPane(container, { lead = false } = {}) {
+  const pane = document.createElement("div");
+  pane.className = lead ? "x-cs-pane lead" : "x-cs-pane";
+  const canvas = document.createElement("canvas");
+  canvas.id = `${container.id}-p${container.children.length + 1}`;
+  pane.appendChild(canvas);
+  container.appendChild(pane);
+  return canvas;
+}
+
+// 積んだpanelのx軸。最下段だけが目盛を出す。
+function stackedXScale({ bottom, stacked = false, ticks = {} } = {}) {
+  return {
+    stacked,
+    display: true,
+    ticks: { ...nierTicks(), maxRotation: 0, autoSkip: true, maxTicksLimit: 24, ...ticks, display: bottom },
+    grid: { color: NIER_GRID_COLOR },
+  };
+}
+
+// x(時間・時刻)を共有するpanelを縦に積んだchart。paneごとに独立した尺度を持つ。
+// pane: { type, lead, title, datasets, stacked, max, ticks, tooltip }
+// update(labels, perPane) の perPane は pane ごとの data。系列が複数のpaneは配列の配列で渡す。
+function createStackedTimeChart(container, { xTicks = {}, panes = [] } = {}) {
+  const charts = panes.map((p, i) => new Chart(stackPane(container, { lead: p.lead }), {
+    type: p.type || "line",
+    data: { labels: [], datasets: p.datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: stackedXScale({ bottom: i === panes.length - 1, stacked: Boolean(p.stacked), ticks: xTicks }),
+        y: {
+          beginAtZero: true,
+          stacked: Boolean(p.stacked),
+          afterFit: stackedYFit,
+          max: p.max,
+          ticks: { ...nierTicks(), ...(p.ticks || {}) },
+          grid: { color: NIER_GRID_COLOR },
+          title: { display: true, text: p.title, color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
+        },
+      },
+      plugins: {
+        // 1系列のpaneに凡例は要らない。軸のtitleがその指標を名乗っている。
+        legend: {
+          display: p.datasets.length > 1,
+          labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 11 }, boxWidth: 12, boxHeight: 8 },
+        },
+        tooltip: p.tooltip || nierTooltip(),
+      },
+    },
+  }));
+
+  // 積んだpanelは時間軸を共有しているので、読み取りの縦線も共有する。
+  linkCrosshair(charts);
+  charts.forEach((c) => enableValueMarks(c));
+
+  function update(labels, perPane) {
+    charts.forEach((c, i) => {
+      c.data.labels = labels;
+      const d = perPane[i] || [];
+      const cols = Array.isArray(d[0]) ? d : [d];
+      c.data.datasets.forEach((ds, j) => { ds.data = cols[j] || []; });
+      c.update();
+    });
+  }
+
+  function clear() {
+    charts.forEach((c) => {
+      c.data.labels = [];
+      c.data.datasets.forEach((ds) => { ds.data = []; });
+      c.update();
+    });
+  }
+
+  return { charts, update, clear };
+}
+
 // TIMELINE: 桁の違う4指標を1枚に重ねると小さい系列が潰れて読めない。指標ごとに
 // 独立scaleの小型折れ線(small multiples)を縦に並べ、時間軸とLIVE Markerを共有する。
 // aggはbucketを束ねる時の集計: countは合計、level(同接)はbucket内の最終値。
 // zeroBase: countは0基準で塗りつぶし量を出す。levelの同接は0基準だと微増減が潰れる
 // ため自動scale(min..max)で推移を見せる。
+// 4枚は隣り合って比べられるので、系列色は先頭4色まで(全対分離を確かめてある範囲)。
+// 4色目は分離が floor 帯なので、各panelの見出しに指標名を出すことが前提になっている。
 const TIMELINE_SERIES = [
-  { key: "diamonds", label: "コイン", color: "#a96e49", fill: "rgba(169, 110, 73, 0.16)", agg: "sum", zeroBase: true },
-  { key: "viewers", label: "同接", color: "#4d4a3f", fill: false, agg: "last", zeroBase: false },
-  { key: "comments", label: "Comment", color: "#5d6e4e", fill: "rgba(93, 110, 78, 0.16)", agg: "sum", zeroBase: true },
-  { key: "likes", label: "Like", color: "#9b8c52", fill: "rgba(155, 140, 82, 0.18)", agg: "sum", zeroBase: true },
+  { key: "diamonds", label: "コイン", color: SERIES[0], fill: cssTokenAlpha("--series-1", 0.16), agg: "sum", zeroBase: true },
+  { key: "viewers", label: "同接", color: SERIES[1], fill: false, agg: "last", zeroBase: false },
+  { key: "comments", label: "コメント", color: SERIES[2], fill: cssTokenAlpha("--series-3", 0.16), agg: "sum", zeroBase: true },
+  { key: "likes", label: "Like", color: SERIES[3], fill: cssTokenAlpha("--series-4", 0.16), agg: "sum", zeroBase: true },
 ];
-// 配信が長くなると点が密集して読めなくなるため、表示点数に上限を設けて
-// 超過時はbucketを束ねて間引く(stepSecondsは束ねた後の実効bucket幅)。
-const TIMELINE_MAX_POINTS = 180;
 
 // Timeline上のevent marker。backendのlabelは "Battle #<巨大ID>" 等で長く、密集すると
 // 数字の羅列が重なって読めなくなるため、kindごとに短tag+色を割当てて表示する。
+// markerはtagの文字で身元を名乗るので、色は意味の区別だけを担う。8種に8色を当てると
+// 隣り合った時に見分けが付かず、色を数える作業になる。出来事=系列色、接続=良い、
+// 切断=危ない、で束ねる。
 const MARKER_STYLES = {
-  battle: { color: "#a4502f", short: "PK" },
-  collab: { color: "#7a6a8e", short: "コラボ" },
-  record: { color: "#5d6e4e", short: "REC" },
-  connect: { color: "#4d4a3f", short: "接続" },
-  reconnect: { color: "#9b8c52", short: "再接続" },
-  disconnect: { color: "#8a4b4b", short: "切断" },
-  disconnect_unplanned: { color: "#7a2f2f", short: "異常切断" },
-  live_end: { color: "#8a4b4b", short: "終了" },
+  battle: { color: cssToken("--series-1"), short: "PK" },
+  collab: { color: cssToken("--series-2"), short: "コラボ" },
+  record: { color: cssToken("--series-5"), short: "REC" },
+  connect: { color: cssToken("--ok-ink"), short: "接続" },
+  video_only: { color: cssToken("--warn-ink"), short: "映像のみ" },
+  event_attach: { color: cssToken("--ok-ink"), short: "受信開始" },
+  reconnect: { color: cssToken("--chart-ink"), short: "再接続" },
+  disconnect: { color: cssToken("--warn-ink"), short: "切断" },
+  disconnect_unplanned: { color: cssToken("--warn-ink"), short: "異常切断" },
+  live_end: { color: cssToken("--chart-ink"), short: "終了" },
 };
-const MARKER_DEFAULT = { color: "#a4502f", short: "•" };
+const MARKER_DEFAULT = { color: cssToken("--chart-ink"), short: "•" };
 
 function decorateMarkers(raw) {
   let battleNo = 0;
@@ -335,7 +823,7 @@ function createTimelineChart(container) {
           const x1 = scales.x.getPixelForValue(range[1]);
           const left = Math.min(x0, x1);
           const width = Math.max(2, Math.abs(x1 - x0));
-          ctx.fillStyle = "rgba(164, 80, 47, 0.12)";
+          ctx.fillStyle = cssTokenAlpha("--warn", 0.12);
           ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
         });
         ctx.restore();
@@ -350,7 +838,7 @@ function createTimelineChart(container) {
         ctx.textAlign = "center";
         // 帯の下端に置き、上部のPK序数tag(markerplugin)との重なりを避ける。
         ctx.textBaseline = "bottom";
-        ctx.fillStyle = "#a4502f";
+        ctx.fillStyle = cssToken("--warn");
         battleBands.forEach((b) => {
           const range = bandIndexRange(b, n);
           if (!range) return;
@@ -478,8 +966,12 @@ function createTimelineChart(container) {
       },
       plugins: [makeBandPlugin(s.key === "diamonds"), makeMarkerPlugin(i === 0, s.label)],
     });
+    // 段の名前(左上)と最大値(右上)はcanvasの上に重ねたDOM。その帯へ札を出すと隠れる。
+    enableValueMarks(chart, { topInset: 18, limit: 3 });
     return { key: s.key, agg: s.agg, chart, peak };
   });
+  // 4段は同じ時刻で縦に並ぶことが売りなので、読み取りの縦線も4段で共有する。
+  linkCrosshair(panels.map((p) => p.chart));
 
   function clear() {
     firstStart = null;
@@ -507,9 +999,10 @@ function createTimelineChart(container) {
     }
     const byStart = new Map(raw.map((b) => [b.start, b]));
     const last = raw[raw.length - 1].start;
+    const limit = timelineDisplayLimit(size);
     let first = raw[0].start;
-    if ((last - first) / size + 1 > CHART_DISPLAY_LIMIT) {
-      first = last - (CHART_DISPLAY_LIMIT - 1) * size;
+    if ((last - first) / size + 1 > limit) {
+      first = last - (limit - 1) * size;
     }
 
     // 欠損bucketを0埋めした連続系列を作る(同接は直前値を持ち越す)。
@@ -530,30 +1023,16 @@ function createTimelineChart(container) {
       });
     }
 
-    // 表示点数の上限を超えたらbucketを束ねて間引く。
+    // bucketは束ねずに1本=1点で描く。刻みはbucket_secondsそのもの(marker・Battle帯の
+    // index換算もstepSecondsを見る)。
     const n = starts.length;
-    const group = Math.max(1, Math.ceil(n / TIMELINE_MAX_POINTS));
-    stepSeconds = size * group;
+    stepSeconds = size;
     firstStart = first;
-    const labels = [];
-    const out = {};
-    TIMELINE_SERIES.forEach((s) => { out[s.key] = []; });
-    for (let i = 0; i < n; i += group) {
-      const end = Math.min(i + group, n);
-      labels.push(fmtTime(starts[i]));
-      TIMELINE_SERIES.forEach((ser) => {
-        if (ser.agg === "last") {
-          out[ser.key].push(full[ser.key][end - 1]);
-        } else {
-          let sum = 0;
-          for (let j = i; j < end; j++) sum += full[ser.key][j];
-          out[ser.key].push(sum);
-        }
-      });
-    }
+    const labels = new Array(n);
+    for (let i = 0; i < n; i++) labels[i] = fmtTime(starts[i]);
 
     panels.forEach((p) => {
-      const values = out[p.key];
+      const values = full[p.key];
       const peak = values.reduce((m, v) => (v > m ? v : m), 0);
       p.chart.data.labels = labels;
       p.chart.data.datasets[0].data = values;
@@ -569,92 +1048,375 @@ function createTimelineChart(container) {
 // (right axis). Two axes because diamond totals dwarf gift counts; the line keeps
 // gift volume legible against the much larger diamond bars.
 // 末尾基準の単純移動平均(trailing SMA)。系列の「伸び」を均して見せる。
+// 値を持たない点(観測が無くて率を出せない配信など)は窓から外す ―― 0として混ぜると
+// 均した線だけが落ち込み、実際には起きていない減少に見える。窓が全部空なら線も引かない。
 function movingAverage(values, window) {
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const start = Math.max(0, i - window + 1);
     let sum = 0;
-    for (let j = start; j <= i; j++) sum += values[j];
-    out.push(sum / (i - start + 1));
+    let count = 0;
+    for (let j = start; j <= i; j++) {
+      if (values[j] == null) continue;
+      sum += values[j];
+      count += 1;
+    }
+    out.push(count ? sum / count : null);
   }
   return out;
 }
 
-// opts.movingAvg: コインの移動平均線(左軸)を追加で重ねる(成長トレンド可視化)。既定off
-// なので履歴ページ等の既存呼び出しには影響しない。opts.movingAvgWindow で窓幅(既定5)。
-function createSessionTrendChart(canvas, opts = {}) {
-  let rows = [];
-  const datasets = [
-    { label: "コイン", type: "bar", data: [], backgroundColor: "rgba(169, 110, 73, 0.55)", yAxisID: "y" },
-    { label: "配信時間", type: "line", data: [], borderColor: "#8e4f2f", backgroundColor: "#8e4f2f", borderWidth: 2, pointRadius: 3, tension: 0.25, yAxisID: "y2" },
-  ];
-  if (opts.movingAvg) {
-    datasets.push({ label: "コイン移動平均", type: "line", data: [], borderColor: "#5d6e4e", backgroundColor: "transparent", borderWidth: 2, borderDash: [5, 3], pointRadius: 0, tension: 0.3, yAxisID: "y" });
+// 比率の移動平均。率をそのまま平均すると10分の配信と6時間の配信が同じ重みになるため、
+// 窓の中の分子・分母をそれぞれ足してから割る(時間加重)。戻り値は率(%)。
+// 分母が0の窓(その期間まったく配信していない)は率を持たないのでnull — 0%にすると
+// 「共演しなかった」と読めてしまう。
+function weightedShareAverage(numerators, denominators, window) {
+  const out = [];
+  for (let i = 0; i < numerators.length; i++) {
+    const start = Math.max(0, i - window + 1);
+    let num = 0;
+    let den = 0;
+    for (let j = start; j <= i; j++) {
+      num += numerators[j] || 0;
+      den += denominators[j] || 0;
+    }
+    out.push(den > 0 ? (num / den) * 100 : null);
   }
-  const chart = new Chart(canvas, {
-    type: "bar",
-    data: {
-      labels: [],
-      datasets,
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: "index", intersect: false },
-      scales: {
-        x: { ticks: { ...nierTicks(), maxRotation: 0, autoSkip: true, maxTicksLimit: 24 }, grid: { color: NIER_GRID_COLOR } },
-        y: { position: "left", beginAtZero: true, title: { display: true, text: "コイン", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } }, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } },
-        y2: { position: "right", beginAtZero: true, title: { display: true, text: "配信時間(h)", color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } }, ticks: nierTicks(), grid: { drawOnChartArea: false } },
-      },
-      plugins: {
-        legend: { labels: { color: "#4d4a3f", font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
-        tooltip: {
-          ...nierTooltip(),
-          callbacks: {
-            title: (items) => {
-              const r = rows[items[0].dataIndex];
-              return r ? `#${sessionNo(r.id)}  ${fmtDateTime(r.started_at)}` : "";
-            },
-            label: (item) => {
-              if (item.dataset.label === "配信時間") {
-                const r = rows[item.dataIndex];
-                const dur = r && r.ended_at ? fmtDuration(r.ended_at - r.started_at) : "収集中";
-                return `配信時間: ${dur}`;
-              }
-              return `${item.dataset.label}: ${fmtNum(item.parsed.y)}`;
-            },
-          },
-        },
-      },
-    },
-  });
+  return out;
+}
 
-  function update(sessionRows) {
-    rows = sessionRows || [];
+// 期間まとめ(週/月)の刻み。週の起点は月曜0時、月は暦月1日の0時で、どちらもbrowserの
+// local時刻で刻む — 画面の他の日付(fmtDate・時間帯ヒートマップ)と同じ物差しに揃える。
+function trendPeriodStart(epochSeconds, unit) {
+  const d = new Date(epochSeconds * 1000);
+  d.setHours(0, 0, 0, 0);
+  if (unit === "week") d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  if (unit === "month") d.setDate(1);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function trendPeriodNext(startSeconds, unit) {
+  const d = new Date(startSeconds * 1000);
+  if (unit === "month") d.setMonth(d.getMonth() + 1);
+  else d.setDate(d.getDate() + 7);
+  return Math.floor(d.getTime() / 1000);
+}
+
+// 推移paneの定義。1指標=1paneで、x軸(時間)だけを共有して縦に積む。
+// value(p) がその点の値(無い時はnullを返す ―― spanGapsで線を繋ぎ、棒は空ける)。
+// ma:true の系列は同じ色の破線で移動平均を重ねる。paneを足すときはここへ1件足す。
+//
+// 色は指標ごとに1色。同じpaneの複数系列は「同じ量の別の読み方」なので色を変えず、
+// 実線(平均)・破線(条件付きの平均)・細い薄線(Peak)で描き分ける。別の色を当てると
+// 別の指標に見える(コインの移動平均を同色の破線にしているのと同じ理由)。
+const TREND_PANES = {
+  coins: {
+    lead: true, type: "bar", title: "コイン", color: 0,
+    ticks: { callback: (v) => fmtCompact(v) },
+    series: [{ label: "コイン", bar: true, ma: true, value: (p) => p.coins,
+               fmt: (v) => fmtNum(Math.round(v)) }],
+  },
+  comments: {
+    type: "bar", title: "コメント/分", color: 2,
+    // 実数のままだと10分の配信と6時間の配信が同じ物差しで並ばない(長く配信した分だけ
+    // 棒が伸びる)。分母は名目の配信時間ではなく観測秒 ―― 収集が落ちた区間はコメントも
+    // 記録されていないので、名目で割るとその配信だけ率が半分に見える。
+    series: [{ label: "コメント/分", bar: true, ma: true, value: (p) => p.commentsPerMin,
+               fmt: (v) => v.toFixed(1) }],
+  },
+  // 平均とPeakは同じ「人」だが桁が違う(実測で平均12〜29に対しPeakは140〜205)。1枚に
+  // 収めるとPeakが目盛を決めてしまい、平均が下端の帯へ潰れて伸びが読めない ―― 平均が
+  // 2.4倍になった週でも線はほぼ水平に見える。paneを分けて、それぞれの範囲で描く。
+  // 平均と「宝箱窓を除く平均」は同じ範囲を動く同じ読み方なので、こちらは1枚に重ねる
+  // (2本の差が宝箱ぶんで、それを読むのがこの線の目的である)。
+  viewers: {
+    lead: true, type: "line", title: "平均同接(人)", color: 1,
+    series: [
+      { label: "平均同接", value: (p) => p.viewersAvg, fmt: (v) => fmtNum(Math.round(v)) },
+      { label: "宝箱窓を除く", dash: true, value: (p) => p.viewersNobox,
+        fmt: (v) => fmtNum(Math.round(v)) },
+    ],
+  },
+  peak: {
+    // 平均と同じ量の別の読み方なので色は変えない。どちらの読み方かは軸のtitleが名乗る。
+    type: "line", title: "Peak同接(人)", color: 1,
+    series: [{ label: "Peak同接", value: (p) => p.viewersPeak,
+               fmt: (v) => fmtNum(Math.round(v)) }],
+  },
+  hours: {
+    // 4枚が隣り合う面なので、色は先頭4色に収める(隣り合う任意の2色の分離が
+    // 確かめてあるのはそこまで ―― SERIESの定義を参照)。
+    type: "line", title: "配信時間(h)", color: 3,
+    series: [{ label: "配信時間", value: (p) => p.hours, text: (p) => p.durText }],
+  },
+};
+
+// opts.panels: 積むpaneのkey(TREND_PANESの見出し)。既定は ["coins", "hours"] で、
+// 既存の呼び出し(chart見本ページ)はこれまでどおり2枚のまま。
+// opts.movingAvg: ma:true のpaneへ移動平均線を重ねる(成長トレンド可視化)。既定off。
+// opts.movingAvgWindow で窓幅(既定5)。containerは .x-chartstack。
+// 指標ごとに単位も桁も違うので、二軸で重ねず上下のpanelへ分ける。時間軸は共有する。
+function createSessionTrendChart(container, opts = {}) {
+  // 描画点。session単位は1配信=1点、week/month単位はその期間の合計=1点。
+  // 棒・線・tooltip・x目盛はすべてこの配列だけを読む。
+  let points = [];
+  // x目盛に出すのは「いつ頃か」だけ。年は期間が延びるほど幅を食い、同じ日の2本目以降に
+  // 付く連番(:2)は棒を区別するための添字で、軸には要らない。1本の素性はtooltipが名乗る。
+  function xTickLabel(index) {
+    const p = points[index];
+    return p ? p.tick : "";
+  }
+
+  const p2 = (n) => String(n).padStart(2, "0");
+
+  // 率の分母。0で割らないだけでなく、観測秒を持たない配信(bucketが無い)は率そのものを
+  // 持たないのでnullを返す。0にすると「コメントが無かった」と読めてしまう。
+  const rate = (num, den) => (den > 0 ? num / den : null);
+  // 時間加重平均。10分の配信と6時間の配信を同じ重みで平均しない。重みの合計が0の期間は
+  // その平均を持たない(宝箱の記録が無い期間の「宝箱窓を除く同接」がこれに当たる)。
+  function weightedMean(rows, pick, weigh) {
+    let num = 0;
+    let den = 0;
+    rows.forEach((s) => {
+      const v = pick(s);
+      const w = weigh(s) || 0;
+      if (v == null || w <= 0) return;
+      num += v * w;
+      den += w;
+    });
+    return den > 0 ? num / den : null;
+  }
+
+  // 配信1本=1点。同じ日に2本以上あるとx keyが衝突するので連番を足す(軸には出さない)。
+  function sessionPoints(rows) {
     const ymdSeen = {};
-    chart.data.labels = rows.map((s) => {
+    return rows.map((s) => {
       const ymd = fmtYmd(s.started_at);
       ymdSeen[ymd] = (ymdSeen[ymd] || 0) + 1;
-      return ymdSeen[ymd] > 1 ? `${ymd}:${ymdSeen[ymd]}` : ymd;
+      const observed = s.observed_seconds || 0;
+      return {
+        key: ymdSeen[ymd] > 1 ? `${ymd}:${ymdSeen[ymd]}` : ymd,
+        tick: ymd.length === 8 ? `${ymd.slice(4, 6)}/${ymd.slice(6, 8)}` : ymd,
+        title: `#${sessionNo(s.id)}  ${fmtDateTime(s.started_at)}`,
+        // 収集中の配信は終端が無い。0時間として黙って畳むと「短い配信」に見えるので、
+        // 尺のかわりに収集中と名乗る(棒の高さは0のまま)。
+        durText: s.ended_at ? fmtDuration(s.ended_at - s.started_at) : "収集中",
+        sub: "",
+        coins: (s.stats && s.stats.diamonds) || 0,
+        hours: s.ended_at ? (s.ended_at - s.started_at) / 3600 : 0,
+        commentsPerMin: rate(s.comments || 0, observed / 60),
+        viewersAvg: s.viewers_avg == null ? null : s.viewers_avg,
+        viewersNobox: s.viewers_avg_nobox == null ? null : s.viewers_avg_nobox,
+        viewersPeak: s.viewers || null,
+        observedSeconds: observed,
+        noboxSeconds: s.nobox_seconds || 0,
+      };
     });
-    const coins = rows.map((s) => (s.stats && s.stats.diamonds) || 0);
-    chart.data.datasets[0].data = coins;
-    chart.data.datasets[1].data = rows.map((s) => (s.ended_at ? (s.ended_at - s.started_at) / 3600 : 0));
-    if (opts.movingAvg) {
-      chart.data.datasets[2].data = movingAverage(coins, opts.movingAvgWindow || 5);
+  }
+
+  // 週/月の合計。配信の無い期間も0の点として残す — 飛ばすと空白期間が詰まり、離れた
+  // 2つの週(月)が隣り合っているように読める。
+  // 合計にできるのは量(コイン・配信時間)だけ。率(コメント/分)と水準(同接)は期間の中で
+  // 足しても意味を持たないので、期間の中の分子・分母をそれぞれ足してから割る。
+  function periodPoints(rows, unit) {
+    const buckets = new Map();
+    let first = Infinity;
+    let last = -Infinity;
+    rows.forEach((s) => {
+      const start = trendPeriodStart(s.started_at, unit);
+      if (start < first) first = start;
+      if (start > last) last = start;
+      if (!buckets.has(start)) buckets.set(start, []);
+      buckets.get(start).push(s);
+    });
+    const out = [];
+    for (let start = first; start <= last; start = trendPeriodNext(start, unit)) {
+      const group = buckets.get(start) || [];
+      const d = new Date(start * 1000);
+      const hours = group.reduce((acc, s) => acc + (s.ended_at ? (s.ended_at - s.started_at) / 3600 : 0), 0);
+      const observed = group.reduce((acc, s) => acc + (s.observed_seconds || 0), 0);
+      out.push({
+        key: String(start),
+        // 月は年をまたいで並ぶので、目盛にも年(下2桁)を残す。週は日付だけで足りる。
+        tick: unit === "month"
+          ? `${String(d.getFullYear()).slice(2)}/${p2(d.getMonth() + 1)}`
+          : `${p2(d.getMonth() + 1)}/${p2(d.getDate())}`,
+        title: unit === "month"
+          ? `${d.getFullYear()}/${p2(d.getMonth() + 1)}（月合計）`
+          : `${fmtDate(start)}〜${fmtDate(trendPeriodNext(start, unit) - 1)}（週合計）`,
+        durText: fmtDuration(Math.round(hours * 3600)),
+        // 1本の棒が何本ぶんの合計かを名乗らないと、1配信の棒と区別が付かない。
+        sub: `配信 ${fmtNum(group.length)}本`,
+        coins: group.reduce((acc, s) => acc + ((s.stats && s.stats.diamonds) || 0), 0),
+        hours,
+        commentsPerMin: rate(group.reduce((acc, s) => acc + (s.comments || 0), 0), observed / 60),
+        viewersAvg: weightedMean(group, (s) => s.viewers_avg, (s) => s.observed_seconds),
+        viewersNobox: weightedMean(group, (s) => s.viewers_avg_nobox, (s) => s.nobox_seconds),
+        viewersPeak: group.reduce((acc, s) => Math.max(acc, s.viewers || 0), 0) || null,
+        observedSeconds: observed,
+        noboxSeconds: group.reduce((acc, s) => acc + (s.nobox_seconds || 0), 0),
+      });
     }
-    chart.update();
+    return out;
+  }
+
+  const keys = (opts.panels && opts.panels.length ? opts.panels : ["coins", "hours"])
+    .filter((k) => TREND_PANES[k]);
+
+  function paneDatasets(spec) {
+    const color = SERIES[spec.color];
+    const sets = [];
+    spec.series.forEach((s) => {
+      if (s.bar) {
+        // 数百日ぶんを1枚に並べると1本あたりの幅が数pxまで痩せる。slotをほぼ使い切る
+        // 太さにしておくと本数が増えても棒が消えず、逆に本数が少ない時は太りすぎない
+        // よう上限で抑える。
+        sets.push({ label: s.label, type: "bar", data: [], backgroundColor: color,
+                    categoryPercentage: 0.92, barPercentage: 0.96, maxBarThickness: 26 });
+      } else {
+        sets.push({
+          label: s.label, type: "line", data: [],
+          borderColor: color,
+          backgroundColor: "transparent",
+          borderWidth: 2,
+          borderDash: s.dash ? [5, 3] : undefined,
+          pointRadius: 3, pointHoverRadius: 4, tension: 0.25, spanGaps: true,
+        });
+      }
+      if (s.ma && opts.movingAvg) {
+        // 移動平均はその指標そのものの平滑なので、同じ色の破線にする。別の色を当てると
+        // 別の指標に見える。同じ尺度なので同じpanelに重ねてよい。均した派生値なので
+        // 常設の値marksは出さない(同じ山に実績と移動平均の2つの数字が並ぶと、どちらが
+        // 実績か読めなくなる)。
+        sets.push({ label: `${s.label} 移動平均`, type: "line", data: [], borderColor: color,
+                    backgroundColor: "transparent", borderWidth: 2, borderDash: [5, 3],
+                    pointRadius: 0, tension: 0.3, spanGaps: true, noMark: true });
+      }
+    });
+    return sets;
+  }
+
+  // datasetのindexから「どの系列定義か」を引く表。移動平均は元の系列の定義を指す
+  // (tooltipの書式を実績と揃えるため)。
+  function paneSeriesIndex(spec) {
+    const index = [];
+    spec.series.forEach((s) => {
+      index.push(s);
+      if (s.ma && opts.movingAvg) index.push(s);
+    });
+    return index;
+  }
+
+  function tooltipFor(spec, seriesIndex) {
+    return {
+      ...nierTooltip(),
+      callbacks: {
+        title: (items) => {
+          const p = points[items[0].dataIndex];
+          return p ? p.title : "";
+        },
+        label: (item) => {
+          const p = points[item.dataIndex];
+          // 1系列のpaneはdatasetIndexが無くても引けるようにする(先頭が唯一の系列)。
+          const s = seriesIndex[item.datasetIndex || 0];
+          if (s && s.text) return `${s.label}: ${p ? s.text(p) : "-"}`;
+          const v = item.parsed ? item.parsed.y : null;
+          // 値を持たない点は0と書かない。「無かった」と「測れていない」は別のことである。
+          if (v == null) return `${item.dataset.label}: —`;
+          return `${item.dataset.label}: ${s && s.fmt ? s.fmt(v) : fmtNum(v)}`;
+        },
+        // 複数行になり得るので常にlistで返す(Chart.jsは1行でもlistを受ける)。
+        footer: (items) => {
+          const p = points[items[0].dataIndex];
+          if (!p) return [];
+          const lines = p.sub ? [p.sub] : [];
+          // 宝箱窓を除いた同接は、除いた後に残る時間が短いほど代表性が落ちる。何割を
+          // 残した平均なのかを添えないと、窓が配信の8割を占める配信でも同じ重みで読める。
+          if (spec.key === "viewers" && p.observedSeconds > 0) {
+            lines.push(p.viewersNobox == null
+              ? "宝箱窓を除く: 宝箱の記録が無い期間"
+              : `宝箱窓の外: 観測時間の ${Math.round((p.noboxSeconds / p.observedSeconds) * 100)}%`);
+          }
+          return lines;
+        },
+      },
+    };
+  }
+
+  const panes = keys.map((key, i) => {
+    const spec = { ...TREND_PANES[key], key };
+    const datasets = paneDatasets(spec);
+    const seriesIndex = paneSeriesIndex(spec);
+    const chart = new Chart(stackPane(container, { lead: Boolean(spec.lead) }), {
+      type: spec.type,
+      data: { labels: [], datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          // 目盛は日付(週/月まとめではその期間の頭)。本数が増えるほど詰まるので出す数を絞る。
+          x: stackedXScale({ bottom: i === keys.length - 1, ticks: { maxTicksLimit: 12, callback: (v, n) => xTickLabel(n) } }),
+          y: {
+            position: "left", beginAtZero: true, afterFit: stackedYFit,
+            title: { display: true, text: spec.title, color: NIER_AXIS_COLOR, font: { family: "monospace", size: 10 } },
+            // y軸の幅はpanel間で揃えるため固定。桁が伸びると軸titleに被るので、コインは
+            // 短縮表記(250k)にして枠に収める。実数はtooltipと山の値marksで読む。
+            ticks: { ...nierTicks(), ...(spec.ticks || {}) },
+            grid: { color: NIER_GRID_COLOR },
+          },
+        },
+        plugins: {
+          // 1系列のpaneに凡例は要らない。軸のtitleがその指標を名乗っている。
+          legend: { display: datasets.length > 1, labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
+          tooltip: tooltipFor(spec, seriesIndex),
+        },
+      },
+    });
+    enableValueMarks(chart);
+    return { spec, chart };
+  });
+
+  linkCrosshair(panes.map((p) => p.chart));
+
+  // view.unit: "session"(既定・1配信=1本) / "week" / "month"。週・月はその期間の合計を
+  // 1本にまとめる。view.movingAvgWindow は点の本数で数える窓幅(単位ごとに呼び側が決める)。
+  function update(sessionRows, view = {}) {
+    const rows = sessionRows || [];
+    const unit = view.unit || "session";
+    points = unit === "session" || !rows.length ? sessionPoints(rows) : periodPoints(rows, unit);
+    const labels = points.map((p) => p.key);
+    const window = view.movingAvgWindow || opts.movingAvgWindow || 5;
+    panes.forEach(({ spec, chart }) => {
+      chart.data.labels = labels;
+      let di = 0;
+      spec.series.forEach((s) => {
+        const values = points.map((p) => s.value(p));
+        chart.data.datasets[di].data = values;
+        // 点が隣と接し始めたら数珠つなぎの帯になって線の形が読めない。混んだら点を伏せ、
+        // 線そのもので推移を見せる(indexで拾うtooltip/crosshairは点が無くても効く)。
+        if (!s.bar) chart.data.datasets[di].pointRadius = points.length > 60 ? 0 : 3;
+        di += 1;
+        if (s.ma && opts.movingAvg) {
+          chart.data.datasets[di].data = movingAverage(values, window);
+          di += 1;
+        }
+      });
+      chart.update();
+    });
   }
 
   function clear() {
-    rows = [];
-    chart.data.labels = [];
-    chart.data.datasets.forEach((ds) => { ds.data = []; });
-    chart.update();
+    points = [];
+    panes.forEach(({ chart }) => {
+      chart.data.labels = [];
+      chart.data.datasets.forEach((ds) => { ds.data = []; });
+      chart.update();
+    });
   }
 
-  return { chart, update, clear };
+  return { chart: panes[0] && panes[0].chart, charts: panes.map((p) => p.chart), update, clear };
 }
 
 // ---- Battle cards (shared by history detail modal, monitor, overview, streamers) ----
@@ -796,12 +1558,17 @@ function buildBattleHead(battle, ordinal) {
 function battleBarUnits(topo) {
   if (topo.kind === "team") {
     // チーム合計を1segmentずつ(自チーム→敵チーム順、battleTeamsが整列済み)。
-    return topo.teams.map((t) => ({ score: t.total, own: t.own, self: false }));
+    return topo.teams.map((t) => ({ score: t.total, own: t.own, self: false, label: t.label }));
   }
   // 個人戦: 自分を先頭、相手はscore降順で安定配置(overlayのlane順と一致)。
   const own = topo.parts.filter((p) => p.is_own);
   const opp = topo.parts.filter((p) => !p.is_own).sort((a, b) => (b.score || 0) - (a.score || 0));
-  return [...own, ...opp].map((p) => ({ score: p.score || 0, own: p.is_own, self: p.is_own }));
+  // labelはsegmentのhoverでだけ使う。色は陣営を分けるが「どの色が誰か」は色だけでは
+  // 名乗れないので、幅の中に名前を書けない細いsegmentでも誰の分かを引けるようにする。
+  return [...own, ...opp].map((p) => ({
+    score: p.score || 0, own: p.is_own, self: p.is_own,
+    label: participantUser(p, topo.owner).nickname,
+  }));
 }
 
 // 敵陣segmentの別色数(c1..cN)。これを超える陣営は循環で色を再利用する。動画焼き込みの
@@ -810,8 +1577,8 @@ const SEG_OPP_COLORS = 5;
 
 // Battle chartの自陣/敵陣線。バーの陣営色(rose/cyan)と同系だが、明地の上で線として
 // 読める暗さのink側を使う(style.cssの--battle-own-ink/--battle-opp-inkと同値)。
-const BATTLE_OWN_LINE = "#b3123f";
-const BATTLE_OPP_LINE = "#0b6478";
+const BATTLE_OWN_LINE = cssToken("--battle-own-ink");
+const BATTLE_OPP_LINE = cssToken("--battle-opp-ink");
 
 // 動画overlayの焼き込みと同じ「1本のバーをN分割」スコアバー。各segmentの幅は
 // flex-grow=scoreで境界が比率移動し、内側にscoreを描く。色は陣営(segment)ごとに変える:
@@ -831,6 +1598,7 @@ function buildBattleScoreBar(topo) {
     seg.className = `seg ${colorCls}` + (u.self ? " self" : "");
     // 全scoreが0(開始直後等)なら均等割りで全segmentを見せる。
     seg.style.flexGrow = total > 0 ? String(Math.max(0, u.score || 0)) : "1";
+    if (u.label) seg.title = `${u.label}：${fmtNum(Math.max(0, u.score || 0))}`;
     const v = document.createElement("b");
     v.textContent = fmtNum(Math.max(0, u.score || 0));
     seg.appendChild(v);
@@ -1106,7 +1874,7 @@ function syncBattleScoreChart(entry, battle) {
         y: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } },
       },
       plugins: {
-        legend: { labels: { color: "#4d4a3f", font: { family: "monospace", size: 10 }, boxWidth: 12, boxHeight: 6 } },
+        legend: { labels: { color: cssToken("--chart-ink"), font: { family: "monospace", size: 10 }, boxWidth: 12, boxHeight: 6 } },
         tooltip: { ...nierTooltip(), callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtNum(ctx.parsed.y)}` } },
       },
     },
@@ -1304,8 +2072,41 @@ function renderBattleCards(container, battles, owner) {
   });
 }
 
+// Gift icon画像。iconはpoolに在るgiftしか出せないので、URLが無ければ何も返さない
+// (空の枠も壊れた画像箱も置かない)。iconsはgift_id→URLで、server側が出せる分だけ載せる。
+function giftIconNode(giftId, icons) {
+  const url = icons && giftId ? icons[String(giftId)] : "";
+  if (!url) return null;
+  const img = document.createElement("img");
+  img.className = "gi-icon";
+  img.src = url;
+  img.alt = "";
+  img.loading = "lazy";
+  // proxyが取り込めなかった場合(URL失効・取得失敗)は画像だけ消し、名前は残す。
+  img.addEventListener("error", () => img.remove());
+  return img;
+}
+
+// Gift名の前に置くicon枠。iconを出せないgiftでも枠だけは残す — 有る行だけ名前が右へ
+// ずれると、並んだGift名の頭が揃わず縦に読めなくなる。
+function giftIconSlot(giftId, icons) {
+  const slot = document.createElement("span");
+  slot.className = "gi-ic";
+  const icon = giftIconNode(giftId, icons);
+  if (icon) slot.appendChild(icon);
+  return slot;
+}
+
+// icon付きのGift名。
+function giftNameNode(name, giftId, icons) {
+  const wrap = document.createElement("span");
+  wrap.className = "gi-label";
+  wrap.append(giftIconSlot(giftId, icons), name);
+  return wrap;
+}
+
 // User単位のGift内訳: Gift種ごとに改行し、個数とコイン数を併記する。
-function giftItemsNode(items) {
+function giftItemsNode(items, icons) {
   const wrap = document.createElement("div");
   wrap.className = "gift-items";
   const entries = Object.entries(items || {});
@@ -1319,7 +2120,7 @@ function giftItemsNode(items) {
     line.className = "gi-line";
     const n = document.createElement("span");
     n.className = "gi-name";
-    n.textContent = name;
+    n.append(giftIconSlot(info && info.gift_id, icons), name);
     const count = document.createElement("span");
     count.className = "gi-count";
     count.textContent = `×${fmtNum(info.count)}`;
@@ -1348,7 +2149,11 @@ function avatarChar(user) {
 // URLs expire, so route them through the same-origin server proxy. Pass through
 // data: URLs and already-proxied URLs untouched.
 function avatarSrc(url, id) {
-  if (!url || /^(data:|\/api\/avatar\?)/.test(url)) return url;
+  // URLが無くてもIDが判っていれば、そのID単位のpoolを引く。署名が通らずroom_infoまで
+  // 届かなかったsessionのように、その時点のavatar URLを記録できなかった行のため。
+  // poolにも無ければ404になり、img errorが頭文字へ落とす。
+  if (!url) return id ? `/api/avatar?id=${encodeURIComponent(id)}` : "";
+  if (/^(data:|\/api\/avatar\?)/.test(url)) return url;
   let src = `/api/avatar?u=${encodeURIComponent(url)}`;
   // 配信者ID(unique_id)を渡すと、URL期限切れ時にそのID単位の最新アイコンにfallbackする。
   if (id) src += `&id=${encodeURIComponent(id)}`;
@@ -1360,10 +2165,10 @@ function avatarSrc(url, id) {
 function avatarNode(user, extraClass) {
   const av = document.createElement("span");
   av.className = "av" + (extraClass ? " " + extraClass : "");
-  const url = user && user.avatar;
-  if (url) {
+  const src = avatarSrc(user && user.avatar, user && user.unique_id);
+  if (src) {
     const img = document.createElement("img");
-    img.src = avatarSrc(url, user && user.unique_id);
+    img.src = src;
     img.alt = "";
     img.loading = "lazy";
     img.addEventListener("error", () => {
@@ -1444,6 +2249,13 @@ function userBadges(user) {
   return box;
 }
 
+// GLv/MLvを表の「列」として出すためのcell。userCellの中に混ぜると、名前の長さで
+// 横位置が行ごとに動いて縦に読めない。値の無い行にも「-」を置き、列としての縦線を保つ。
+function badgeLevelCell(url, num, label) {
+  if (!url && !(num > 0)) return "-";
+  return badgeNum(url, num, label);
+}
+
 function userCell(user, opts = {}) {
   // href付きならlinkにする。名前が出ている場所からその人の画面へ直接飛べないと、
   // nav→検索box→入力→行clickの遠回りになる(Fan台帳と配信者画面が実際そうだった)。
@@ -1477,8 +2289,11 @@ function userCell(user, opts = {}) {
     if (id) wrap.appendChild(id);
   }
   if (!opts.leagueFirst && user && user.league) wrap.appendChild(leagueChip(user.league));
-  const badges = userBadges(user);
-  if (badges) wrap.appendChild(badges);
+  // hideBadges: GLv/MLvを別の列(badgeLevelCell)で出す表では、名前の後ろに重ねない。
+  if (!opts.hideBadges) {
+    const badges = userBadges(user);
+    if (badges) wrap.appendChild(badges);
+  }
   return wrap;
 }
 
@@ -1552,8 +2367,24 @@ function rowMenu(items, opts) {
   return toggle;
 }
 
+// barCols は任意。[{ col, value }] を渡すと、その列のcellの背後へ占有barを敷く。
+// value(row) は書式化前の生値を返す(cellの文字列 "12.3 GB" からは量を復元できないため)。
+// 割合はその列の最大値を1とする相対で、表を跨いだ比較には使えない。列に負値や非数が
+// 混ざる表では長さが意味を持たないので、渡す側で判断する。
+function barRatios(rows, barCols) {
+  return (barCols || []).map((spec) => {
+    const values = rows.map((row) => {
+      const v = Number(spec.value(row));
+      return Number.isFinite(v) && v > 0 ? v : 0;
+    });
+    // 行数は数百〜数千になる。Math.max(...values) はspreadの引数上限に触れるので畳む。
+    const max = values.reduce((a, b) => (b > a ? b : a), 0);
+    return { col: spec.col, values, max };
+  });
+}
+
 // onRow(tr, row, index) は任意。行に属性やevent(行dblclick等)を付ける用途で呼ぶ。
-function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
+function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow, barCols) {
   closeRowMenu();
   const tbody = document.getElementById(tbodyId);
   const empty = document.getElementById(emptyId);
@@ -1575,6 +2406,7 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
   // 行数ぶんlayoutが走る(この共通描画は数百行の表でも使われる)。
   const fragment = document.createDocumentFragment();
   const numeric = new Set(numericCols);
+  const bars = barRatios(rows, barCols);
   rows.forEach((row, i) => {
     const tr = document.createElement("tr");
     if (i === 0) tr.className = "rank-top";
@@ -1583,12 +2415,25 @@ function renderTableRows(tbodyId, emptyId, rows, toCells, numericCols, onRow) {
       if (numeric.has(col)) td.className = "num";
       if (cell instanceof Node) td.appendChild(cell);
       else td.textContent = cell;
+      // 全部0の列にbarを敷くと、長さ0の帯が並ぶだけで読む助けにならない。
+      const bar = bars.find((b) => b.col === col);
+      if (bar && bar.max > 0) {
+        td.classList.add("q");
+        td.style.setProperty("--q", (bar.values[i] / bar.max).toFixed(4));
+      }
       tr.appendChild(td);
     });
     if (onRow) onRow(tr, row, i);
     fragment.appendChild(tr);
   });
   tbody.appendChild(fragment);
+}
+
+// 状態の文言(.form-message)。失敗のときだけ警告色にする。成功・進行中・空文字でも必ず
+// classを外すこと。外し忘れると、前の失敗の色が次の成功の文言にそのまま残る。
+function setFormMessage(el, text, isError) {
+  el.textContent = text;
+  el.classList.toggle("is-error", Boolean(isError));
 }
 
 // KPIの帯(a-kpibar)へlabel/値のchipを並べる。fans/streamers/videosが同じ物を持って
@@ -1712,6 +2557,95 @@ function initSegmented(id) {
 
   paint();
   return root;
+}
+
+// ---- 表示設定の永続化 ----
+// 各画面は独立したHTML documentで、nav遷移はフルリロードになる。並べ替え・絞り込み・
+// 表示切替のようなuserが選んだ「見せ方」はlocalStorageへ残し、次に開いた時も同じ
+// 見え方で始める。残すのは繰り返し同じ値を選ぶcontrolだけで、1回限りの入力(検索語)や
+// 実行対象の指定・破壊的操作のoptionは既定値から始める。
+// keyは "tictok.<画面>.<control>" で統一する。
+const PREF_PREFIX = "tictok.";
+
+function prefKey(name) {
+  return name.startsWith(PREF_PREFIX) ? name : PREF_PREFIX + name;
+}
+
+// storageはprivate modeやquota超過で例外を投げる。設定が残らないのは許容できるが、
+// そこで画面が止まるのは許容できないので読み書きは常に失敗を飲む。
+function prefGet(name) {
+  try {
+    return window.localStorage.getItem(prefKey(name));
+  } catch (err) {
+    return null;
+  }
+}
+
+function prefSet(name, value) {
+  try {
+    if (value == null) window.localStorage.removeItem(prefKey(name));
+    else window.localStorage.setItem(prefKey(name), String(value));
+  } catch (err) {
+    /* 保存できなくても操作は続行する */
+  }
+}
+
+function prefBool(name, fallback) {
+  const stored = prefGet(name);
+  if (stored === null) return fallback;
+  return stored === "1";
+}
+
+function prefIsToggle(el) {
+  return el.type === "checkbox" || el.type === "radio";
+}
+
+// selectとsegmented controlは、保存時と選択肢が変わっていることがある(配信者一覧や
+// 素材版など、中身がdataで決まるもの)。無い値を書くと選択なしの空表示になるため、
+// 現存する有効な選択肢だけを復元する。
+function prefSelectable(el, value) {
+  const options = el.options;
+  if (!options) return true;
+  return Array.from(options).some((o) => o.value === String(value) && !o.disabled);
+}
+
+// 保存値をcontrolへ適用する。選択肢を後から作るcontrolは、埋めた後にもう一度呼ぶ。
+// 戻り値は「保存値を実際に適用したか」。
+function restorePref(el, name) {
+  if (!el) return false;
+  const stored = prefGet(name);
+  if (stored === null) return false;
+  if (el.tagName === "DETAILS") {
+    el.open = stored === "1";
+    return true;
+  }
+  if (prefIsToggle(el)) {
+    el.checked = stored === "1";
+    return true;
+  }
+  if (!prefSelectable(el, stored)) return false;
+  el.value = stored;
+  return el.value === stored;
+}
+
+function prefCurrent(el) {
+  if (el.tagName === "DETAILS") return el.open ? "1" : "0";
+  if (prefIsToggle(el)) return el.checked ? "1" : "0";
+  return el.value;
+}
+
+// 保存値の復元とuser操作の保存をまとめて張る。onChangeはuser操作の時だけ呼ぶ
+// (復元は各画面の初期描画に任せ、二重の再取得を起こさない)。
+// opts.event で購読するeventを変えられる(text入力を打つ度に残す場合は "input")。
+function bindPref(el, name, onChange, opts = {}) {
+  if (!el) return false;
+  const applied = restorePref(el, name);
+  const event = opts.event || (el.tagName === "DETAILS" ? "toggle" : "change");
+  el.addEventListener(event, () => {
+    prefSet(name, prefCurrent(el));
+    if (onChange) onChange();
+  });
+  return applied;
 }
 
 // ---- 一覧placeholderの3状態 ----
@@ -1896,7 +2830,7 @@ if (document.getElementById("disk-bar")) {
 const OPS_BADGE_POLL_MS = 60000;
 
 function opsBadgeElement() {
-  const link = document.querySelector('.a-nav a[href="/ops"]');
+  const link = navLink("/ops");
   if (!link) return null;
   let badge = link.querySelector(".nav-badge");
   if (!badge) {
@@ -1933,7 +2867,7 @@ async function loadOpsBadge() {
   badge.className = "nav-badge";
 }
 
-if (document.querySelector('.a-nav a[href="/ops"]')) {
+if (navLink("/ops")) {
   loadOpsBadge();
   setInterval(loadOpsBadge, OPS_BADGE_POLL_MS);
 }
@@ -1946,6 +2880,9 @@ if (document.querySelector('.a-nav a[href="/ops"]')) {
 // 録画・出力の失敗が自動消滅すると、戻ってきたときに失敗した事実そのものが残らない。
 // 閉じる操作を挟むことで「見た」がユーザーの明示になる(alertの確認強制の代わり)。
 const TOAST_MS = 6000;
+// 配列で複数行を渡したときに1行ずつ出す間隔。全行を一度に出すと、量の多い通知は
+// 塊として目に入って読み飛ばされる。順に増えると視線が最初の行から始まる。
+const TOAST_LINE_MS = 50;
 
 function toastLayer() {
   let layer = document.getElementById("toast-layer");
@@ -1960,15 +2897,43 @@ function toastLayer() {
   return layer;
 }
 
+// 消える演出の長さはCSS側の定義をそのまま読む。JSに秒数を持つと二重定義になり、
+// animationendに頼ると、演出が無効な環境(reduced motion・CSS未適用)で永久に残る。
+function dismissToast(toast) {
+  if (!toast.isConnected || toast.classList.contains("toast-out")) return;
+  toast.classList.add("toast-out");
+  const ms = (parseFloat(getComputedStyle(toast).animationDuration) || 0) * 1000;
+  if (ms <= 0) {
+    toast.remove();
+    return;
+  }
+  setTimeout(() => {
+    if (toast.isConnected) toast.remove();
+  }, ms);
+}
+
+// 残り時間をbarの幅で見せる。barはtransformで縮めるのでlayoutを再計算しない。
+function startToastProgress(toast, duration) {
+  const bar = toast.querySelector(".toast-progress-bar");
+  if (bar) bar.style.animation = `toast-progress ${duration}ms linear forwards`;
+  setTimeout(() => dismissToast(toast), duration);
+}
+
 // kindは "error"(失敗の報告) と既定の情報表示。errorは自動で消さず、閉じるまで残す。
-function showToast(message, kind) {
-  const text = String(message === undefined || message === null ? "" : message).trim();
-  if (!text) return null;
+// messageは文字列か、1行ずつ順に出す配列。optsは {title, duration}。
+function showToast(message, kind, opts) {
+  const options = opts || {};
+  const toLine = (value) => String(value === undefined || value === null ? "" : value).trim();
+  const lines = (Array.isArray(message) ? message : [message]).map(toLine).filter(Boolean);
+  if (!lines.length) return null;
+  const title = toLine(options.title);
+  const duration = Number(options.duration) > 0 ? Number(options.duration) : TOAST_MS;
+  const key = title ? `${title}\n${lines.join("\n")}` : lines.join("\n");
   // errorは閉じるまで残るので、同じ失敗が繰り返されると画面が埋まる(録画の再試行や
   // job失敗は同一文面で連続する)。同じ文面は増やさず回数だけ更新する。
   if (kind === "error") {
     const existing = [...toastLayer().querySelectorAll(".toast-error")].find(
-      (el) => el.dataset.toastText === text,
+      (el) => el.dataset.toastText === key,
     );
     if (existing) {
       const count = Number(existing.dataset.toastCount || "1") + 1;
@@ -1979,28 +2944,60 @@ function showToast(message, kind) {
   }
   const toast = document.createElement("div");
   toast.className = kind === "error" ? "toast toast-error" : "toast";
-  toast.dataset.toastText = text;
-  const body = document.createElement("span");
+  toast.dataset.toastText = key;
+  const main = document.createElement("div");
+  main.className = "toast-main";
+  if (title) {
+    const head = document.createElement("div");
+    head.className = "toast-title";
+    head.textContent = title;
+    main.appendChild(head);
+  }
+  const body = document.createElement("div");
   body.className = "toast-body";
-  body.textContent = text;
+  main.appendChild(body);
   const count = document.createElement("span");
   count.className = "toast-count";
   const close = document.createElement("button");
   close.className = "toast-close";
+  close.type = "button";
   close.textContent = "✕";
   close.title = "この通知を閉じる";
-  const dismiss = () => {
-    if (toast.isConnected) toast.remove();
-  };
-  close.addEventListener("click", dismiss);
-  toast.append(body, count, close);
+  close.addEventListener("click", () => dismissToast(toast));
+  toast.append(main, count, close);
+  if (kind !== "error") {
+    const progress = document.createElement("div");
+    progress.className = "toast-progress";
+    const bar = document.createElement("div");
+    bar.className = "toast-progress-bar";
+    progress.appendChild(bar);
+    toast.appendChild(progress);
+  }
   toastLayer().appendChild(toast);
-  if (kind !== "error") setTimeout(dismiss, TOAST_MS);
+  // 出し切ってから残り時間の計測を始める。行を出している途中でbarが減り始めると、
+  // 最後の行が出た時点で読める時間が既に目減りしている。
+  let index = 0;
+  const showNextLine = () => {
+    if (!toast.isConnected) return;
+    if (index < lines.length) {
+      const line = document.createElement("div");
+      line.className = "toast-line";
+      line.textContent = lines[index];
+      body.appendChild(line);
+      index += 1;
+      setTimeout(showNextLine, TOAST_LINE_MS);
+      return;
+    }
+    if (kind !== "error") startToastProgress(toast, duration);
+  };
+  showNextLine();
   return toast;
 }
 
-function showError(err) {
-  showToast(err && err.message ? err.message : String(err), "error");
+// titleは失敗した操作の名前。API由来のmessageは何の操作で出たのかを名乗らないことが
+// 多く、errorは閉じるまで積まれるので、後から見たときに出所が分からなくなる。
+function showError(err, title) {
+  showToast(err && err.message ? err.message : String(err), "error", { title });
 }
 
 // ---- 共通UI: 録画の保守操作 ----
@@ -2025,7 +3022,7 @@ function protectBadge(rec, onDone) {
       if (onDone) onDone();
     } catch (err) {
       badge.disabled = false;
-      showError(err);
+      showError(err, "録画の保護");
     }
   });
   return badge;
@@ -2040,14 +3037,17 @@ async function deleteDerived(rec, onDone) {
     showToast(`録画 ${recName(rec)} の派生物 ${fmtBytes(res.freed_bytes)} を削除しました。`);
     if (onDone) onDone();
   } catch (err) {
-    showError(err);
+    showError(err, "派生物の削除");
   }
 }
 
 // ---- 共通UI: 確認dialog ----
 // 取り消せない操作の前に確認を取る。window.confirmと違い、何を消すのかを複数行で読ませ、
 // 破壊的な操作は実行Buttonを危険色にできる。
-// 返り値はPromise<boolean>で、Escape・背景click・取消はいずれもfalse。
+// 返り値はPromise<boolean>で、Escape・背景click・キャンセルはいずれもfalse。
+// 閉じる側は「キャンセル」で固定する。「取消」だと、jobの取り消しのように操作そのものが
+// 「取り消し」のとき、実行buttonと同じ意味に読めてどちらが何をするのか分からなくなる。
+// 実行側のlabelは呼び出し側が対象まで名乗る(「jobを取り消す」「削除する」)。
 function confirmDialog(message, opts) {
   const options = opts || {};
   return new Promise((resolve) => {
@@ -2067,7 +3067,7 @@ function confirmDialog(message, opts) {
     actions.className = "confirm-actions";
     const cancel = document.createElement("button");
     cancel.className = "btn";
-    cancel.textContent = options.cancelLabel || "取消";
+    cancel.textContent = options.cancelLabel || "キャンセル";
     const ok = document.createElement("button");
     ok.className = options.danger === false ? "btn btn-primary" : "btn btn-danger";
     ok.textContent = options.confirmLabel || "実行";
@@ -2124,7 +3124,7 @@ function promptDialog(message, opts) {
     actions.className = "confirm-actions";
     const cancel = document.createElement("button");
     cancel.className = "btn";
-    cancel.textContent = options.cancelLabel || "取消";
+    cancel.textContent = options.cancelLabel || "キャンセル";
     const ok = document.createElement("button");
     ok.className = "btn btn-primary";
     ok.textContent = options.confirmLabel || "決定";
@@ -2170,23 +3170,18 @@ function promptDialog(message, opts) {
 // ---- 共通UI: 進捗bar ----
 // spinner付きは「今この画面から起動して待っている」操作向け、spinner無しは一覧に並ぶ
 // 他所で動いているjobの状態表示向け。
+// compactは一覧の操作列(Buttonと同じcell)に出す版。server側のstageは段階名に位置まで
+// 含む長文（例:「(4/6) コメント層を描画中（0:12:34 / 4:39:10）＋ 焼き込み合成中（…）」）で、
+// 折り返さない表にそのまま出すと操作列だけが数十文字ぶん横へ伸び、一覧全体が読めなくなる。
+// compactでは自前の短いlabel(shortLabel)だけを名乗り、barと%を下段へ落として横幅を
+// Button1個ぶんに収める。段階の全文と残り時間はtooltipへ、段階を追う画面はJob一覧が持つ。
 function makeProgress(opts) {
   const options = opts || {};
   const prog = document.createElement("span");
   prog.className = "dl-progress";
-  if (options.spinner !== false) {
-    const spinner = document.createElement("span");
-    spinner.className = "spinner dl-spinner";
-    const core = document.createElement("span");
-    core.className = "spinner-core";
-    spinner.appendChild(core);
-    prog.appendChild(spinner);
-  }
-  // 段階名(詳細つきで長い)と%は別の要素にする。1要素に混ぜると、段階名の長さで%まで
-  // 押し出されるか、cellが横に伸びてtable全体が崩れる。段階名だけを縮める。
   const stage = document.createElement("span");
   stage.className = "dl-stage";
-  stage.textContent = options.label || "準備中…";
+  stage.textContent = options.label || options.shortLabel || "準備中…";
   const bar = document.createElement("span");
   bar.className = "dl-bar";
   const fill = document.createElement("span");
@@ -2194,15 +3189,42 @@ function makeProgress(opts) {
   bar.appendChild(fill);
   const text = document.createElement("span");
   text.className = "dl-pct";
+  let spinner = null;
+  if (options.spinner !== false) {
+    spinner = document.createElement("span");
+    spinner.className = "spinner dl-spinner";
+    const core = document.createElement("span");
+    core.className = "spinner-core";
+    spinner.appendChild(core);
+  }
+  if (options.compact) {
+    prog.classList.add("dl-compact");
+    if (options.shortLabel) prog.dataset.short = options.shortLabel;
+    const head = document.createElement("span");
+    head.className = "dl-row";
+    if (spinner) head.appendChild(spinner);
+    head.appendChild(stage);
+    const foot = document.createElement("span");
+    foot.className = "dl-row";
+    foot.append(bar, text);
+    prog.append(head, foot);
+    return prog;
+  }
+  // 段階名(詳細つきで長い)と%は別の要素にする。1要素に混ぜると、段階名の長さで%まで
+  // 押し出されるか、cellが横に伸びてtable全体が崩れる。段階名だけを縮める。
+  if (spinner) prog.appendChild(spinner);
   prog.append(stage, bar, text);
   return prog;
 }
 
 function setProgress(prog, label, pct) {
   const value = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  const short = prog.dataset.short || "";
   prog.querySelector(".dl-bar-fill").style.inlineSize = `${value}%`;
-  prog.querySelector(".dl-stage").textContent = label;
+  prog.querySelector(".dl-stage").textContent = short || label;
   prog.querySelector(".dl-pct").textContent = `${value}%`;
+  // 短いlabelで名乗った場合でも、段階の全文が読めなくなってはいけない。
+  if (short) prog.title = `${label} ${value}%`;
 }
 
 // 実行中jobの残り時間。開始からの経過と達成率だけで見積もる(段階ごとの重みはserver側で
@@ -2221,21 +3243,29 @@ function jobEtaText(job) {
 // job台帳の1行を進捗表示へ写す。待機中はまだ何も進んでいないので%を出さない
 // (0%と描くと、動き出したのに止まっているように読める)。
 function setJobProgress(prog, job) {
+  const short = prog.dataset.short || "";
   if (job.state === "pending") {
     prog.querySelector(".dl-bar-fill").style.inlineSize = "0%";
     // 順番が分かる時は必ず出す。「待機中」だけでは、次に始まるのか3時間jobの後ろに
     // 並んだのかが区別できない。
     const position = Number(job.queue_position) || 0;
-    prog.querySelector(".dl-stage").textContent =
-      position > 0 ? `待機中（${position}番目）` : "待機中";
+    prog.querySelector(".dl-stage").textContent = position > 0
+      ? (short ? `待機 ${position}番目` : `待機中（${position}番目）`)
+      : "待機中";
     prog.querySelector(".dl-pct").textContent = "";
-    prog.title = position > 1
+    const wait = position > 1
       ? `順番待ちです。前に${position - 1}件あります。終わり次第、自動で始まります。`
       : "順番待ちです。前のjobが終わり次第、自動で始まります。";
+    prog.title = short ? `${short}｜${wait}` : wait;
     return;
   }
   setProgress(prog, job.stage || "準備中", job.pct);
   const eta = jobEtaText(job);
+  // 残り時間も段階名と同じく行を横へ伸ばす。compactでは%だけを出し、残りはtooltipへ回す。
+  if (short) {
+    if (eta) prog.title += `・${eta}`;
+    return;
+  }
   if (eta) prog.querySelector(".dl-pct").textContent += `・${eta}`;
   // 段階名は詳細(frame数・encode位置)まで含めると長い。省略表示になっても全文が
   // 読めるよう、tooltipには必ず全文を入れる。
@@ -2246,16 +3276,21 @@ function finishProgress(prog, text) {
   const spinner = prog.querySelector(".dl-spinner");
   if (spinner) spinner.remove();
   prog.querySelector(".dl-bar-fill").style.inlineSize = "100%";
-  prog.querySelector(".dl-stage").textContent = "";
-  prog.querySelector(".dl-pct").textContent = text || "完了 ✓";
+  // compactは段階名の行と bar+% の行が分かれている。完了文言を%側へ入れると段階名の行が
+  // 空のまま残り、cellの中で文字が下段だけに沈む。名乗る側(上段)へ入れる。
+  const done = text || "完了 ✓";
+  const compact = prog.classList.contains("dl-compact");
+  prog.querySelector(".dl-stage").textContent = compact ? done : "";
+  prog.querySelector(".dl-pct").textContent = compact ? "" : done;
   prog.title = "";
   prog.classList.add("done");
 }
 
-// ---- job状況(全画面共通のトップバー) ----
+// ---- job状況(全画面共通のnav badge) ----
 // job台帳のsnapshot(jobs)と更新(job_update)は全pageのWSへ届いているのに、Job画面以外は
-// 捨てていた。出力が動いているか・失敗が残っているかはどの画面からでも見えるべきなので、
-// トップバーへ集約する。数はWSが唯一の出所で、届く前は何も出さない(0件と描かない)。
+// 捨てていた。出力が動いているか・失敗が残っているかはどの画面からでも見えるべきである。
+// 出す場所はnavの「Job」1箇所だけにする: topbarに独立した帯を置いていた頃は、行き先
+// (Job画面)と数字が別の場所に在り、tabだけを見ても何本走っているのか分からなかった。
 const JOB_BAR_FAILED_STATES = ["failed", "interrupted"];
 let jobBarState = null;
 
@@ -2267,49 +3302,55 @@ function jobBarCountable(job) {
 }
 
 function jobBarElement() {
-  const topbar = document.querySelector(".a-topbar");
-  if (!topbar) return null;
-  let el = document.getElementById("job-bar");
-  if (!el) {
-    el = document.createElement("a");
-    el.id = "job-bar";
-    el.className = "a-jobs";
-    el.href = "/jobs";
-    const disk = document.getElementById("disk-bar");
-    topbar.insertBefore(el, disk || null);
+  const link = navLink("/jobs");
+  if (!link) return null;
+  let badge = link.querySelector(".nav-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "nav-badge";
+    link.appendChild(badge);
   }
-  return el;
+  return badge;
+}
+
+// 帯が数えている失敗・中断の件数。Job画面が「今のfilterでは出ていない失敗」を名乗るのに
+// 読む。数え方(group行の畳み込み・対象state)をJob画面へ写すと必ずずれるので、出所は
+// この関数1つにする。
+function jobBarFailedCount() {
+  if (!jobBarState) return 0;
+  return [...jobBarState.values()].filter(jobBarCountable)
+    .filter((job) => JOB_BAR_FAILED_STATES.includes(job.state)).length;
 }
 
 function renderJobBar() {
-  const el = jobBarElement();
-  if (!el || !jobBarState) return;
+  const badge = jobBarElement();
+  if (!badge || !jobBarState) return;
+  const link = badge.parentElement;
   const rows = [...jobBarState.values()].filter(jobBarCountable);
   const running = rows.filter((job) => job.state === "running").length;
   const pending = rows.filter((job) => job.state === "pending").length;
-  const failed = rows.filter((job) => JOB_BAR_FAILED_STATES.includes(job.state)).length;
-  el.replaceChildren();
+  const failed = jobBarFailedCount();
+  // navのtabは行き先が固定の移動手段で、filterを積まない。失敗が在る間ずっと
+  // ?state=failed を積んでいた頃は、失敗した履歴が直近に残っているだけで毎回
+  // 「失敗・中断のみ」へ着地し、人が選んだ状態filterが押すたびに上書きされていた。
+  // 失敗が隠れて見えないことはJob画面側(job-failed-note)が名乗る。
+  link.href = "/jobs";
   if (!running && !pending && !failed) {
-    el.removeAttribute("title");
-    el.href = "/jobs";
+    badge.textContent = "";
+    badge.className = "nav-badge";
+    link.removeAttribute("title");
     return;
   }
-  const active = document.createElement("span");
-  active.className = "j-active";
-  active.textContent = `job: 実行中 ${running} / 待機中 ${pending}`;
-  el.appendChild(active);
-  if (failed) {
-    const bad = document.createElement("span");
-    bad.className = "j-failed";
-    bad.textContent = `失敗 ${failed}`;
-    el.appendChild(bad);
-  }
-  // 失敗が在るのに既定filter(実行中・待機中)へ着地すると、押した先が空の表になり
-  // 「直った」と読まれる。失敗を数えているときは、それが見えるfilterへ直接送る。
-  el.href = failed ? "/jobs?state=failed" : "/jobs";
-  el.title = failed
-    ? `直近のjob履歴に失敗・中断が${failed}件あります。押すとJob画面の「失敗・中断のみ」で開きます。`
-    : "焼き込み・Up出力などのjobの実行状況です。押すとJob画面へ移動します。";
+  // 数字は1つだけ出す。動いている本数(実行中+待機中)と失敗を並べると、tabに2つの数が
+  // 付いてどちらが何なのか読めない。失敗が在るときは失敗を出す — 放っておけないのは
+  // そちらで、内訳はhoverが持つ。
+  badge.textContent = String(failed || running + pending);
+  badge.className = failed ? "nav-badge alert" : "nav-badge";
+  link.title = failed
+    ? `実行中 ${running} / 待機中 ${pending}。直近のjob履歴に失敗・中断が${failed}件あります。`
+      + "押すとJob画面へ移動します（失敗・中断は状態filterで絞れます）。"
+    : `焼き込み・Up出力・文字起こしなどのjob: 実行中 ${running} / 待機中 ${pending}。`
+      + "押すとJob画面へ移動します。";
 }
 
 function applyJobBar(message) {
@@ -2592,3 +3633,61 @@ document.addEventListener("keydown", (ev) => {
   if (jumpUI && !jumpUI.overlay.classList.contains("hidden")) closeJump();
   else openJump();
 });
+
+// 入れ子scrollのlatch。外側(modal本文・画面全体)を転がしている最中にpointerが内側の
+// scroller(表・card列)へ入ると、以降のwheelが内側へ配送されて外側が止まる。手が動いて
+// いる間は最初に動かしたscrollerへ配送し続け、止まったら解除する。page固有のwheel処理
+// (videos.jsの拡縮など)はpreventDefault済みなので手を出さない。
+const SCROLL_LATCH_MS = 400;
+const SCROLL_LINE_PX = 16;
+let scrollLatchEl = null;
+let scrollLatchAt = 0;
+
+function wheelDeltaPx(ev) {
+  const unit = ev.deltaMode === 1 ? SCROLL_LINE_PX : ev.deltaMode === 2 ? window.innerHeight : 1;
+  return { x: ev.deltaX * unit, y: ev.deltaY * unit };
+}
+
+// 指定方向へまだ動ける余地があるか(どちらかの軸で余地があればtrue)。
+function scrollRoom(el, dx, dy) {
+  const spanY = el.scrollHeight - el.clientHeight;
+  const spanX = el.scrollWidth - el.clientWidth;
+  if (dy && spanY > 1 && (dy > 0 ? el.scrollTop < spanY - 1 : el.scrollTop > 1)) return true;
+  if (dx && spanX > 1 && (dx > 0 ? el.scrollLeft < spanX - 1 : el.scrollLeft > 1)) return true;
+  return false;
+}
+
+function scrollerUnder(node, dx, dy) {
+  for (let el = node instanceof Element ? node : null; el; el = el.parentElement) {
+    if (el === document.body || el === document.documentElement) break;
+    const style = getComputedStyle(el);
+    const movable =
+      (dy && /auto|scroll|overlay/.test(style.overflowY) && scrollRoom(el, 0, dy)) ||
+      (dx && /auto|scroll|overlay/.test(style.overflowX) && scrollRoom(el, dx, 0));
+    if (movable) return el;
+  }
+  const root = document.scrollingElement || document.documentElement;
+  return scrollRoom(root, dx, dy) ? root : null;
+}
+
+window.addEventListener("wheel", (ev) => {
+  if (ev.defaultPrevented || ev.ctrlKey) return;
+  const { x, y } = wheelDeltaPx(ev);
+  if (!x && !y) return;
+  const now = performance.now();
+  const held =
+    scrollLatchEl && scrollLatchEl.isConnected &&
+    now - scrollLatchAt < SCROLL_LATCH_MS && scrollRoom(scrollLatchEl, x, y)
+      ? scrollLatchEl
+      : null;
+  const under = scrollerUnder(ev.target, x, y);
+  if (held && held !== under) {
+    ev.preventDefault();
+    held.scrollTop += y;
+    held.scrollLeft += x;
+    scrollLatchAt = now;
+    return;
+  }
+  scrollLatchEl = held || under;
+  scrollLatchAt = now;
+}, { passive: false });

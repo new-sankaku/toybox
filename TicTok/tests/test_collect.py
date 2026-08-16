@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -9,16 +10,23 @@ from TikTokLive.proto import (
     BadgeStruct,
     BadgeStructBadgeSceneType,
     CombineBadgeStruct,
+    CommonMessageData,
     ExtendedUser,
     FollowInfo,
     ImageBadge,
     ImageModel,
     PrivilegeLogExtra,
+    Text,
+    TextPiece,
+    TextPieceUser,
     User,
     UserFansClubInfo,
     UserIdentity,
+    WebcastBarrageMessage,
+    WebcastLikeMessage,
+    WebcastSocialMessage,
 )
-from TikTokLive.events import CommentEvent
+from TikTokLive.events import CommentEvent, LikeEvent, SocialEvent
 
 from tictok.collect import collector as C
 from tictok.collect.live_resolver import LiveResolveBlocked, interpret_live_state
@@ -510,6 +518,174 @@ def test_emote_payload_drops_entries_without_an_image_and_returns_none_when_empt
     assert C._emote_payload(SimpleNamespace()) is None
 
 
+# ---------------- スーパーファン加入 ----------------
+
+
+def _super_fan_event(*users, key="ttlive_superFan_join"):
+    """実配信と同形のSuperFanEvent。Barrage系はuser fieldを持たず、表示文のTextPiece
+    にしか本人が載らないので、必ずwire経由(parse)で組んでその読み出しを検証する。"""
+    message = WebcastBarrageMessage(
+        base_message=CommonMessageData(create_time=1700000000),
+        content=Text(
+            key=key,
+            pieces=[TextPiece(user_value=TextPieceUser(user=user)) for user in users],
+        ),
+    )
+    return C.SuperFanEvent().parse(bytes(message))
+
+
+def test_super_fan_user_comes_from_the_text_piece_not_a_user_field():
+    event = _super_fan_event(User(id=9001, nick_name="2B"))
+    assert not hasattr(event, "user")
+    payload = C._user_payload(C._barrage_user(event))
+    assert payload["nickname"] == "2B"
+    assert payload["identity_key"] == "9001"
+
+
+def test_super_fan_skips_empty_pieces_and_never_invents_a_user():
+    # 空のuser pieceは「載っていない」。ここを拾うと身元不明が1 identityへ畳まれる。
+    event = _super_fan_event(User(), User(id=9002, nick_name="Pod 042"))
+    assert C._user_payload(C._barrage_user(event))["nickname"] == "Pod 042"
+
+    empty = _super_fan_event(User())
+    assert C._barrage_user(empty) is None
+    assert C._user_payload(C._barrage_user(empty))["nickname"] == "(unknown)"
+    assert C._barrage_user(C.SuperFanEvent().parse(b"")) is None
+
+
+def test_super_fan_reads_the_simulation_shape_too():
+    """simulationが流す擬似eventも同じ経路で読めること。presence判定をbetterproto専用に
+    すると本番だけ通ってsimulationが身元不明に落ち、画面の表示経路を検証できなくなる。"""
+    user = SimpleNamespace(unique_id="pod042", nick_name="Pod 042", id=2002)
+    event = SimpleNamespace(
+        content=SimpleNamespace(pieces=[SimpleNamespace(user_value=SimpleNamespace(user=user))])
+    )
+    assert C._user_payload(C._barrage_user(event))["nickname"] == "Pod 042"
+
+
+@pytest.mark.asyncio
+async def test_super_fan_is_stored_as_its_own_kind(collector, tmp_db, db_read, make_session):
+    """スーパーファン加入がevents表へ残ること。SubscribeEvent(サブスク)とは別messageで
+    届くため、subscribeを待つ経路では永久に入らない。"""
+    collector.session_id = make_session("streamer", status="connected")
+
+    await collector._on_super_fan(_super_fan_event(User(id=9001, nick_name="2B")))
+
+    tmp_db.flush()
+    row = db_read.execute(
+        "SELECT kind, text, user_nickname, identity_key, create_time"
+        " FROM events WHERE session_id = ?", (collector.session_id,)
+    ).fetchone()
+    assert row["kind"] == "super_fan"
+    assert row["text"] == "2B がスーパーファンになりました"
+    assert row["user_nickname"] == "2B"
+    assert row["identity_key"] == "9001"
+    # 表示順の基準になるTikTok側時刻を落とさない(焼き込みのMode Bが使う)。
+    assert row["create_time"] == 1700000000
+    assert collector.stats["super_fans"] == 1
+
+
+# ---------------- 列を持たないfieldの保存(events.extra / battles) ----------------
+
+
+def test_extra_keeps_fields_that_have_no_column_of_their_own():
+    """専用の列が無いだけで捨てていたfieldを残すこと。base_message側(room単位)と
+    event本体側の両方を拾う。"""
+    msg = WebcastLikeMessage(
+        base_message=CommonMessageData(room_message_heat_level=3, fold_type=1),
+        count=2, total=10, effect_cnt=4,
+    )
+    extra = json.loads(C._extra_payload(LikeEvent().parse(bytes(msg)), "like"))
+    assert extra["room_message_heat_level"] == 3
+    assert extra["fold_type"] == 1
+    assert extra["effect_cnt"] == 4
+
+
+def test_extra_is_null_when_nothing_arrived():
+    """1つも載っていなければNULL。空dictを入れると「観測したが空」に見えてしまい、
+    計装前の未計測と区別できなくなる。"""
+    assert C._extra_payload(LikeEvent().parse(b""), "like") is None
+    # kindに登録の無いeventでもbase_message側だけは拾う。
+    msg = WebcastLikeMessage(base_message=CommonMessageData(room_message_heat_level=2))
+    assert json.loads(C._extra_payload(LikeEvent().parse(bytes(msg)), "battle")) == {
+        "room_message_heat_level": 2
+    }
+
+
+def test_share_count_is_kept_even_though_the_row_counts_as_one():
+    """1回のshareで何人に送ったか。events行は1本なので、ここを捨てると人数が消える。"""
+    msg = WebcastSocialMessage(share_count=7)
+    extra = json.loads(C._extra_payload(SocialEvent().parse(bytes(msg)), "share"))
+    assert extra["share_count"] == 7
+
+
+@pytest.mark.asyncio
+async def test_extra_round_trips_into_the_events_table(collector, tmp_db, db_read, make_session):
+    """列順は _EVENTS_COLUMNS と ingest.add_event の位置対応で決まる。ここがずれると
+    journal復元まで巻き添えになるので、実際にDBへ入れて読み直す。"""
+    collector.session_id = make_session("streamer", status="connected")
+    msg = WebcastLikeMessage(
+        base_message=CommonMessageData(room_message_heat_level=5),
+        user=User(id=9001, nick_name="2B"), count=2, total=10, effect_cnt=3,
+    )
+
+    await collector._on_like(LikeEvent().parse(bytes(msg)))
+
+    tmp_db.flush()
+    row = db_read.execute(
+        "SELECT kind, count, extra FROM events WHERE session_id = ?",
+        (collector.session_id,),
+    ).fetchone()
+    assert row["kind"] == "like" and row["count"] == 2
+    assert json.loads(row["extra"]) == {"room_message_heat_level": 5, "effect_cnt": 3}
+
+
+@pytest.mark.asyncio
+async def test_battle_keeps_the_official_result_without_touching_our_own(collector):
+    """TikTokが確定させた勝敗を残す。自前で追っている own_score/result とは別の源なので、
+    照合も上書きもせず両方持つ(照合は解析側の判断)。"""
+    official = {"9001": {"user_id": 9001, "result": "RESULT_LOSE", "score": 4140}}
+    await collector._on_battle(SimpleNamespace(
+        battle_id=77, action=None, battle_setting=None, anchor_info=None,
+        battle_result=official, action_by_user_id="9001",
+    ))
+
+    rec = collector._battles[77]
+    assert rec["battle_result"] == official
+    assert rec["action_by_user_id"] == "9001"
+    # 自前の判定は書き換えない。
+    assert rec["own_score"] == 0 and rec["result"] is None
+
+
+@pytest.mark.asyncio
+async def test_battle_extras_are_not_erased_by_a_later_event(collector):
+    """armiesは同じbattleへ何度も届き、毎回すべてのfieldを載せてくるわけではない。
+    値の無い回で既存を消すと、最後の1件だけが残って履歴が壊れる。"""
+    await collector._on_battle(SimpleNamespace(
+        battle_id=77, action=None, battle_setting=None, anchor_info=None,
+        battle_result={"9001": {"score": 1}},
+    ))
+    await collector._on_battle(SimpleNamespace(
+        battle_id=77, action=None, battle_setting=None, anchor_info=None,
+    ))
+    assert collector._battles[77]["battle_result"] == {"9001": {"score": 1}}
+
+
+@pytest.mark.asyncio
+async def test_item_cards_other_than_the_glove_are_kept_and_deduped(collector):
+    """グローブ以外の道具cardは1件も残していなかった。同じcardは複数回届くので畳む。"""
+    event = SimpleNamespace(
+        battle_id=77, msg_type=None,
+        use_smoke_card={"card_info": {"card_name_key": "pm_mt_boost_mist_name"}},
+    )
+    await collector._on_item_card(event)
+    await collector._on_item_card(event)
+
+    cards = collector._battles[77]["item_cards"]
+    assert [c["kind"] for c in cards] == ["use_smoke_card"]
+    assert cards[0]["card"] == {"card_info": {"card_name_key": "pm_mt_boost_mist_name"}}
+
+
 # ---------------- league ----------------
 
 
@@ -553,6 +729,249 @@ def test_sign_server_outage_treats_non_200_by_status_class():
     assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 403)) is None
     # statusが読めないSIGN_NOT_200も外部と断定できないので隠さない。
     assert C.sign_server_outage(_sign_error(SignAPIError.ErrorReason.SIGN_NOT_200)) is None
+
+
+async def _connect_raising(collector, exc, room_id=7000):
+    """_connect_onceを1回だけ回し、client.connectが投げるexcの分類結果を返す。"""
+    async def _connect(**_kwargs):
+        raise exc
+
+    collector._resolved_room_id = room_id
+    collector._client = SimpleNamespace(connect=_connect, room_id=room_id, room_info={})
+    return await collector._connect_once()
+
+
+@pytest.mark.asyncio
+async def test_repeated_sign_failures_on_one_room_stop_the_reconnect_loop(collector):
+    """同じroomだけが署名を拒まれ続けるなら、撃ち直しても結果は変わらない。規定回数で
+    transient(=session内の再接続loop)を降り、room単位の保留へ移すこと。
+
+    実測: room 7672781787921353493は1時間48分で97回500を返し続けた一方、同じ時刻に別の
+    監視対象は同じsign serverで再接続に成功していた。sign server全体の障害ではない。"""
+    from TikTokLive.client.errors import SignAPIError
+
+    exc = _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500)
+    threshold = collector._settings.get("sign_block_attempts")
+
+    for attempt in range(1, threshold):
+        outcome, _reason = await _connect_raising(collector, exc)
+        assert outcome == "transient", f"{attempt}回目はまだ一時障害と見分けが付かない"
+
+    outcome, reason = await _connect_raising(collector, exc)
+    assert outcome == "unsigned"
+    assert "署名" in reason
+
+
+@pytest.mark.asyncio
+async def test_sign_failures_after_a_successful_connect_stay_transient(collector):
+    """一度でも繋がった配信の再接続は打ち切らない。接続後の署名失敗は本物の一時障害でも
+    起こり、ここで諦めると録画中の配信を余計に待たせる。"""
+    from TikTokLive.client.errors import SignAPIError
+
+    exc = _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500)
+    collector._ever_connected = True
+
+    for _ in range(collector._settings.get("sign_block_attempts") + 3):
+        outcome, _reason = await _connect_raising(collector, exc)
+        assert outcome == "transient"
+
+
+@pytest.mark.asyncio
+async def test_a_room_already_held_as_unsigned_is_dropped_on_the_first_failure(collector):
+    """保留中のroomへ撃ち直して同じ結果なら、閾値を待たず1回で保留へ戻す。待ち時間だけ
+    広げればよく、同じ答えを聞き直す意味は無い。"""
+    from TikTokLive.client.errors import SignAPIError
+
+    collector._unsigned_room_id = 7000
+    outcome, _reason = await _connect_raising(
+        collector, _sign_error(SignAPIError.ErrorReason.SIGN_NOT_200, 500), room_id=7000
+    )
+    assert outcome == "unsigned"
+
+
+def _stub_outcome(outcome):
+    async def _run():
+        return outcome
+
+    return _run
+
+
+def _stub_room_payload(collector, monkeypatch, data):
+    async def _fetch(_room_id):
+        return data
+
+    monkeypatch.setattr(collector, "_fetch_room_payload", _fetch)
+
+
+@pytest.mark.asyncio
+async def test_an_unsigned_broadcast_leaves_one_folded_row_and_keeps_watching(
+    collector, monkeypatch
+):
+    """署名が通らない配信は録画不可の行を1本だけ残し、監視は続ける。撃ち直すたびに行が
+    伸びないよう、同じroomの2本目以降は既存行へ畳むこと。"""
+    monkeypatch.setattr(collector, "_session_loop", _stub_outcome("unsigned"))
+    _stub_room_payload(collector, monkeypatch, {"id": 7000, "title": "普通の配信"})
+    collector._resolved_room_id = 7000
+
+    for _ in range(3):
+        collector._prepare_session()
+        assert await collector._run_session() == "continue"
+
+    rows = [s for s in collector._storage.list_sessions(0) if s["status"] == "restricted"]
+    assert len(rows) == 1, "同じroomの試行は1行に畳む"
+    assert rows[0]["room_id"] == "7000", "どのroomで録画できなかったかは行に残す"
+    assert collector._unsigned_room_id == 7000
+    assert collector._restricted_room_id is None, "限定配信ではないので制限holdへは回さない"
+
+
+def _stub_connect(outcome, reason=""):
+    async def _connect_once():
+        return (outcome, reason)
+
+    return _connect_once
+
+
+# 録画できる普通のroomのpayload(署名を使わないGETで返るもの)。stream URLが取れる形。
+_RECORDABLE_PAYLOAD = {
+    "id": 7000,
+    "stream_url": {"flv_pull_url": {"HD1": "https://pull.example/live.flv"}},
+}
+
+
+@pytest.mark.asyncio
+async def test_a_limited_broadcast_behind_a_sign_failure_goes_to_the_restricted_hold(
+    collector, monkeypatch
+):
+    """署名の失敗が限定配信の裏返しだったなら、撃ち直しても録画はできない。制限holdへ
+    回して間隔を広げ、署名を無駄打ちしないこと。"""
+    monkeypatch.setattr(collector, "_connect_once", _stub_connect("unsigned", "署名が通りません"))
+    _stub_room_payload(collector, monkeypatch, {"prompts": "", "message": None})
+    collector._resolved_room_id = 7000
+
+    assert await collector._session_loop() == "restricted"
+
+
+@pytest.mark.asyncio
+async def test_a_room_that_will_not_sign_is_recorded_video_only_and_keeps_retrying(
+    collector, monkeypatch
+):
+    """録画は署名を必要としない。署名が通らなくても映像URLが取れるなら先に録り始め、
+    sessionを畳まずに署名を撃ち直し続けること(通れば同じ録画へeventが合流する)。"""
+    started = []
+
+    async def _start_recorder():
+        started.append(True)
+        collector.recorder = SimpleNamespace(is_active=True, recording_id=1)
+
+    monkeypatch.setattr(C, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(collector, "_start_recorder", _start_recorder)
+    monkeypatch.setattr(collector, "_connect_once", _stub_connect("unsigned", "署名が通りません"))
+    _stub_room_payload(collector, monkeypatch, _RECORDABLE_PAYLOAD)
+
+    async def _wait(reason):
+        assert "映像のみ録画中" in reason, "撃ち直しの理由に映像を録っていることを載せる"
+        return "ended"
+
+    monkeypatch.setattr(collector, "_wait_for_reconnect", _wait)
+    collector._resolved_room_id = 7000
+    collector._prepare_session()
+
+    assert await collector._session_loop() == "ended", "配信が終わるまでsessionは畳まない"
+    assert started == [True]
+    assert collector._video_only_active()
+
+
+@pytest.mark.asyncio
+async def test_video_only_does_not_re_probe_the_room_on_every_retry(collector, monkeypatch):
+    """診断は録り始める前の1回だけ。撃ち直すたびに引き直すと、配信の間ずっと同じ観測を
+    繰り返してlogを埋める。"""
+    probes = []
+
+    async def _fetch(room_id):
+        probes.append(room_id)
+        return _RECORDABLE_PAYLOAD
+
+    async def _start_recorder():
+        collector.recorder = SimpleNamespace(is_active=True, recording_id=1)
+
+    retries = []
+
+    async def _wait(_reason):
+        retries.append(True)
+        return "retry" if len(retries) < 3 else "ended"
+
+    monkeypatch.setattr(C, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(collector, "_fetch_room_payload", _fetch)
+    monkeypatch.setattr(collector, "_start_recorder", _start_recorder)
+    monkeypatch.setattr(collector, "_connect_once", _stub_connect("unsigned", "署名が通りません"))
+    monkeypatch.setattr(collector, "_wait_for_reconnect", _wait)
+    collector._resolved_room_id = 7000
+    collector._prepare_session()
+
+    assert await collector._session_loop() == "ended"
+    assert probes == [7000], "診断は1回だけ"
+
+
+@pytest.mark.asyncio
+async def test_a_room_with_no_stream_url_is_not_pretended_to_be_recording(
+    collector, monkeypatch
+):
+    """映像URLが取れないなら録画は始まらない。始まったふりをすると、録れていない配信を
+    録れているものとして扱うことになる。"""
+    monkeypatch.setattr(C, "ffmpeg_available", lambda: True)
+    monkeypatch.setattr(collector, "_connect_once", _stub_connect("unsigned", "署名が通りません"))
+    _stub_room_payload(collector, monkeypatch, {"id": 7000, "title": "映像URLの無いpayload"})
+    collector._resolved_room_id = 7000
+    collector._prepare_session()
+
+    assert await collector._session_loop() == "unsigned"
+    assert not collector._video_only
+
+
+@pytest.mark.asyncio
+async def test_a_room_that_cannot_be_observed_is_treated_as_still_recordable(
+    collector, monkeypatch
+):
+    """観測できないことを理由に諦めない。判らない側へ倒すと、録れたはずの配信を落とす。"""
+    _stub_room_payload(collector, monkeypatch, None)
+    assert await collector._diagnose_unsigned_room(7000) == ("recordable", None)
+
+
+def test_unsigned_retry_keeps_the_base_interval_and_resets_on_a_new_room(collector):
+    """撃ち直しの間隔は広げない。広げた分だけ配信の頭を落とすため、粘る側に倒す。"""
+    base = collector._settings.get("restricted_recheck_interval")
+
+    assert [collector._arm_unsigned_retry(7000) for _ in range(10)] == [base] * 10
+    assert collector._unsigned_room_id == 7000
+
+    assert collector._arm_unsigned_retry(8000) == base
+    assert collector._unsigned_attempts == 1, "別roomは回数を持ち越さない"
+
+
+@pytest.mark.asyncio
+async def test_a_session_that_never_connects_still_carries_the_resolved_owner(collector):
+    """connectまで届かなかった配信でも、session行はその時点で観測した身元を持つこと。
+    owner_avatarがroom_info経由でしか書かれなかったため、署名が通らない/制限の行は
+    履歴で頭文字の円盤になっていた。"""
+    await collector._apply_resolved_owner(
+        SimpleNamespace(avatar="https://cdn.example/a.webp", nickname="ぽみ", room_id=7000)
+    )
+    collector._resolved_room_id = 7000
+    collector._prepare_session()
+
+    row = collector._storage.get_session(collector.session_id)
+    assert row["owner_avatar"] == "https://cdn.example/a.webp"
+    assert row["owner_nickname"] == "ぽみ"
+
+
+def test_a_session_with_nothing_resolved_does_not_borrow_another_sessions_owner(collector):
+    """観測できていない身元は書かない。他sessionから借りた値を行へ書くと、過去sessionを
+    当時の身元で表示する前提が崩れる(表示だけのfallbackはUI側の役目)。"""
+    collector._resolved_room_id = 7000
+    collector._prepare_session()
+
+    row = collector._storage.get_session(collector.session_id)
+    assert not row["owner_avatar"]
 
 
 def test_sign_server_outage_does_not_hide_entitlement_or_unrelated_failures():
@@ -891,24 +1310,30 @@ def test_score_sample_window_tightens_only_near_the_end(collector):
 # ---------------- LinkMic roster ----------------
 
 
-def test_linkmic_roster_uids_collects_uids_and_survives_a_broken_payload(collector):
-    roster = SimpleNamespace(linked_list=[
-        SimpleNamespace(link_user=SimpleNamespace(uid=1)),
-        SimpleNamespace(link_user=SimpleNamespace(uid=0)),
-        SimpleNamespace(link_user=None),
-        SimpleNamespace(link_user=SimpleNamespace(uid=1)),
-        SimpleNamespace(link_user=SimpleNamespace(uid=2)),
-    ])
-    assert collector._linkmic_roster_uids(roster) == {"1", "2"}
-    assert collector._linkmic_roster_uids(None) == set()
+@pytest.mark.asyncio
+async def test_link_layer_survives_a_broken_payload(collector):
+    """rosterが読めないeventで例外を上へ投げないこと(収集本流を止めない)。判定そのものは
+    tests/test_collab_rule.py が持つ。"""
 
     class Broken:
         @property
         def linked_list(self):
             raise RuntimeError("bad payload")
 
-    # 読めなくても窓自体は残す(例外を上へ投げない)。
-    assert collector._linkmic_roster_uids(Broken()) == set()
+    event = SimpleNamespace(
+        channel_id="ch1",
+        group_change_content=SimpleNamespace(
+            group_user=SimpleNamespace(
+                user=[SimpleNamespace(
+                    channel_id="ch1", status="GROUP_STATUS_LINKED", all_user=Broken())]
+            )
+        ),
+    )
+
+    await collector._on_link_layer(event)
+
+    assert collector._collab_open == {}
+    assert collector._collab_windows == []
 
 
 # ---------------- CollectorManager ----------------
@@ -1354,3 +1779,291 @@ async def test_collector_without_a_prefetcher_still_records_events(collector):
                                         "comment": "やあ"})
 
     assert collector.stats["events_total"] == 1
+
+
+# ---------------- コラボ(非BattleのLinkMic)窓 ----------------
+
+
+def _link_event(channel_id, rooms):
+    """LinkLayerEventのgroup_change_content形。roomsは (room_id, uid, status)。"""
+    return SimpleNamespace(
+        channel_id=channel_id,
+        group_change_content=C._sim_group_change(rooms),
+    )
+
+
+@pytest.mark.asyncio
+async def test_collab_window_opens_on_link_and_closes_when_the_peer_leaves(collector, monkeypatch):
+    """rosterが縮んだ時点で窓を閉じること。**v1はfinishが来るまで閉じず**、その間の
+    ソロ時間を丸ごとコラボに数えていた(録画照合で窓の中の大半がソロ)。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    # 実時計だと2 eventが同じ刻に載って長さ0の窓になり、落ちる回が出る(実際に発生した)。
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
+    linked = [("111", "own", "GROUP_STATUS_LINKED"), ("222", "peer", "GROUP_STATUS_LINKED")]
+
+    await collector._on_link_layer(_link_event("ch1", linked))
+    assert len(collector._collab_open) == 1, "接続で窓が開く"
+    assert collector._collab_windows == []
+
+    clock["t"] += 300.0
+    await collector._on_link_layer(_link_event("ch1", [("111", "own", "GROUP_STATUS_LINKED")]))
+    assert collector._collab_open == {}, "相手が抜けたら閉じる"
+    assert len(collector._collab_windows) == 1
+    window = collector._collab_windows[0]
+    assert window["version"] == C.COLLAB_WINDOW_VERSION
+    assert window["peers"] == ["peer"]
+    assert (window["start"], window["end"]) == (1000.0, 1300.0)
+
+
+@pytest.mark.asyncio
+async def test_collab_window_of_zero_length_is_dropped(collector, monkeypatch):
+    """開いた瞬間に閉じた窓は残さない。回数だけが持ち上がる(既存のcollab窓の数え方と同じ)。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peer", "GROUP_STATUS_LINKED"),
+    ]))
+    await collector._on_link_layer(_link_event("ch1", [("111", "own", "GROUP_STATUS_LINKED")]))
+
+    assert collector._collab_open == {}
+    assert collector._collab_windows == []
+
+
+@pytest.mark.asyncio
+async def test_collab_window_does_not_open_while_only_waiting(collector, monkeypatch):
+    """自室がWAITINGの間は参加待ちで、まだ一緒に映っていない。ここで開くと、繋がる前の
+    時間までコラボに入る。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_WAITING"),
+        ("222", "peer", "GROUP_STATUS_LINKED"),
+    ]))
+
+    assert collector._collab_open == {}
+    assert collector._collab_windows == []
+
+
+@pytest.mark.asyncio
+async def test_collab_snapshot_names_the_current_peers_and_notifies_on_change(
+    collector, monkeypatch
+):
+    """監視画面が「今この相手と繋がっている」を出すための口。保存形(peers)は窓の生涯の
+    和集合なので、入れ替わりのあるコラボでは今の顔ぶれにならない ―― snapshotは現在の
+    rosterを出すこと。stateを配るのは顔ぶれが変わった時だけ(LinkLayer eventは接続中ずっと
+    届き続けるため、毎回配ると監視画面へsnapshotを撒き散らす)。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    notified = []
+
+    async def _notify():
+        notified.append(collector.collab_snapshot())
+
+    monkeypatch.setattr(collector, "_notify_state", _notify)
+    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+
+    assert collector.snapshot()["collab"] == []
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    assert collector.snapshot()["collab"] == [
+        {"channel_id": "ch1", "start": 1000.0, "guests_max": 1, "peers": ["peerA"],
+         # 身元を解決できていない相手はkeyごと出さない。空dictを置くと画面は
+         # 「名前が空の相手」と読む。
+         "peer_info": {}}
+    ]
+    assert len(notified) == 1
+
+    # 同じ顔ぶれのsnapshotが繰り返し届いても配り直さない。
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    assert len(notified) == 1
+
+    # 相手が入れ替わったら、今の相手だけを名乗る(抜けたpeerAは残さない)。
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("333", "peerB", "GROUP_STATUS_LINKED"),
+    ]))
+    assert collector.snapshot()["collab"][0]["peers"] == ["peerB"]
+    assert len(notified) == 2
+
+
+class _PeerRoomClient:
+    """room_infoだけを持つclientのstub。呼ばれたroom_idを記録する。"""
+
+    def __init__(self, rooms):
+        self._rooms = rooms
+        self.calls = []
+        self.web = SimpleNamespace(fetch_room_info=self._fetch)
+
+    async def _fetch(self, room_id=None):
+        self.calls.append(str(room_id))
+        return self._rooms[str(room_id)]
+
+
+def _owner_payload(user_id, nickname, display_id):
+    return {"owner": {"id": user_id, "nickname": nickname, "display_id": display_id,
+                      "avatar_larger": {"url_list": ["https://cdn/大.jpg"]},
+                      "avatar_thumb": {"url_list": ["https://cdn/小.jpg"]}}}
+
+
+@pytest.mark.asyncio
+async def test_collab_peer_identity_comes_from_the_peer_room_info(collector, monkeypatch):
+    """コラボ相手の表示名は相手のroom_idからroom_infoを引いて解決すること。LinkLayerは
+    user_idとroom_idしか載せないので、これが唯一の経路である。解決はeventの処理を
+    待たせず、結果はusers表へ残す(次のprocessが待たずに名前を出せる)。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+    collector._client = _PeerRoomClient(
+        {"222": _owner_payload("peerA", "こつぶ組", "kotsubu")})
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    await asyncio.gather(*collector._peer_tasks)
+
+    assert collector.snapshot()["collab"][0]["peer_info"] == {
+        "peerA": {"nickname": "こつぶ組", "unique_id": "kotsubu",
+                  "avatar": "https://cdn/大.jpg"},
+    }
+    assert collector._storage.peer_identities(["peerA"])["peerA"]["nickname"] == "こつぶ組"
+
+    # 同じ相手のeventが続いても撃ち直さない(LinkLayerは接続中ずっと届き続ける)。
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    await asyncio.gather(*collector._peer_tasks)
+    assert collector._client.calls == ["222"]
+
+
+@pytest.mark.asyncio
+async def test_collab_peer_identity_is_dropped_when_the_room_owner_is_someone_else(
+    collector, monkeypatch
+):
+    """引いた室の主が相手本人でなければ身元を採らない。採ると別人の名前をコラボ相手として
+    出すことになる(IDのままの方がまだ正しい)。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    collector._client = _PeerRoomClient(
+        {"222": _owner_payload("別人", "別の配信者", "other")})
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    await asyncio.gather(*collector._peer_tasks)
+
+    assert collector.snapshot()["collab"][0]["peer_info"] == {}
+    assert collector._storage.peer_identities(["peerA"]) == {}
+
+
+@pytest.mark.asyncio
+async def test_collab_peer_identity_falls_silent_when_the_room_cannot_be_read(
+    collector, monkeypatch
+):
+    """制限中/終了済みの室は引けない。名前が出ないだけで、収集も窓の開閉も止めないこと。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+
+    async def _boom(room_id=None):
+        raise RuntimeError("age restricted")
+
+    collector._client = SimpleNamespace(web=SimpleNamespace(fetch_room_info=_boom))
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+    ]))
+    await asyncio.gather(*collector._peer_tasks)
+
+    assert len(collector._collab_open) == 1, "窓は開いたまま"
+    assert collector.snapshot()["collab"][0]["peer_info"] == {}
+
+
+@pytest.mark.asyncio
+async def test_open_collab_window_is_held_back_until_the_session_ends(collector, monkeypatch):
+    """進行中は終端が決まらないので中間永続化に含めず、session終了時にその時刻で確定する。
+
+    以前は終了時も捨てていた。録画18本の照合で、コラボを繋いだまま配信が終わる録画が
+    3本(計648秒)あり、取りこぼしの一角だった。終端が実観測でないことは closed_by で
+    名乗る。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    monkeypatch.setattr(C.time, "time", lambda: 1000.0)
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peer", "GROUP_STATUS_LINKED"),
+    ]))
+
+    assert collector._collab_open, "接続中の窓は状態としては持つ"
+    assert collector._collab_windows_public() == [], "終端が決まるまでは保存しない"
+
+    collector._close_open_collab_windows(1300.0)
+    assert collector._collab_open == {}
+    window = collector._collab_windows_public()[0]
+    assert (window["start"], window["end"]) == (1000.0, 1300.0)
+    assert window["closed_by"] == "session_end"
+    assert window["version"] == C.COLLAB_WINDOW_VERSION
+
+
+@pytest.mark.asyncio
+async def test_a_peers_departure_keeps_the_window_open_for_the_remaining_peers(
+    collector, monkeypatch
+):
+    """groupコラボで他人が抜けても自分の窓は閉じないこと(v2の取りこぼしの最大成分)。
+
+    finish_contentが名乗るのは「終了したroom」で、他の参加者のroomが入る。v2は当事者を
+    見ずに閉じていたため、次のgroup_change snapshotが届くまで(実測で数十〜数百秒)
+    コラボが記録されなかった。"""
+    collector.room_id = 111
+    collector._owner_id = "own"
+    monkeypatch.setattr(collector, "_persist_progress", lambda: None)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(C.time, "time", lambda: clock["t"])
+
+    await collector._on_link_layer(_link_event("ch1", [
+        ("111", "own", "GROUP_STATUS_LINKED"),
+        ("222", "peerA", "GROUP_STATUS_LINKED"),
+        ("333", "peerB", "GROUP_STATUS_LINKED"),
+    ]))
+    assert len(collector._collab_open) == 1
+
+    clock["t"] += 100.0
+    await collector._on_link_layer(SimpleNamespace(
+        channel_id="ch1",
+        finish_content=SimpleNamespace(owner=SimpleNamespace(uid="peerA", room_id="222")),
+    ))
+    assert len(collector._collab_open) == 1, "残りの相手が居るので窓は開いたまま"
+    assert collector._collab_windows == []
+
+    clock["t"] += 100.0
+    await collector._on_link_layer(SimpleNamespace(
+        channel_id="ch1",
+        finish_content=SimpleNamespace(owner=SimpleNamespace(uid="peerB", room_id="333")),
+    ))
+    assert collector._collab_open == {}, "最後の相手が抜けたら閉じる"
+    window = collector._collab_windows[0]
+    assert (window["start"], window["end"]) == (1000.0, 1200.0)
+    assert window["closed_by"] == "finish_content:peer"

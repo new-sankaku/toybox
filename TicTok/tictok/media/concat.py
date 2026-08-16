@@ -203,22 +203,29 @@ async def probe_stream_params(source) -> dict:
     }
 
 
-def mismatch_reasons(first: dict, other: dict) -> list:
-    """firstを基準に、otherの食い違う項目を日本語で並べる。"""
+def mismatch_reasons(first: dict, other: dict, ignore: tuple = ()) -> list:
+    """firstを基準に、otherの食い違う項目を日本語で並べる。
+
+    ``ignore`` は照合から外すkey。**外してよいのは、食い違っても連結の正しさに影響しないと
+    根拠を示せる項目だけ**である(呼び出し側にその根拠を書くこと)。"""
     reasons = []
     for kind, keys, labels in (("video", VIDEO_KEYS, VIDEO_LABELS),
                                ("audio", AUDIO_KEYS, AUDIO_LABELS)):
         for key in keys:
+            if key in ignore:
+                continue
             want, got = first[kind][key], other[kind][key]
             if want != got:
                 reasons.append(f"{labels[key]} {want} と {got}")
     return reasons
 
 
-async def check_compatible(sources: dict, *, event: str = "concat.incompatible") -> dict:
+async def check_compatible(sources: dict, *, event: str = "concat.incompatible",
+                           ignore: tuple = ()) -> dict:
     """全素材のparameterを取り、1つでも食い違えば連結せずに失敗させる。
 
-    ``sources`` は {Path: source} の並び。先頭を基準にする。戻り値は基準のparameter。"""
+    ``sources`` は {Path: source} の並び。先頭を基準にする。戻り値は基準のparameter。
+    ``ignore`` は :func:`mismatch_reasons` へそのまま渡す。"""
     infos = {}
     for src, source in sources.items():
         infos[src] = await probe_stream_params(source)
@@ -228,7 +235,7 @@ async def check_compatible(sources: dict, *, event: str = "concat.incompatible")
     if codec not in ANNEXB_FILTERS:
         raise RuntimeError(f"連結に対応していない映像codecです: {codec}")
     for src in list(sources)[1:]:
-        reasons = mismatch_reasons(first, infos[src])
+        reasons = mismatch_reasons(first, infos[src], ignore)
         if not reasons:
             continue
         logger.warning(

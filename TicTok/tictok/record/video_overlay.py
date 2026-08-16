@@ -44,7 +44,7 @@ from tictok.core.progress import (  # 進捗reporterは全長時間jobで共通
 from tictok.core.battle import battle_sides, battle_type
 from tictok.media import hls_source
 from tictok.media.avatar_pool import avatar_key
-from tictok.record import audio_norm, fonts, subtitles, telop_styles
+from tictok.record import audio_norm, fonts, jp_wrap, subtitles, telop_styles
 from tictok.record.recorder import (
     PTS_DISCONTINUITY_MIN_SECONDS,
     SIDECAR_DIRNAME,
@@ -108,7 +108,7 @@ class NothingToDrawError(RuntimeError):
 
 
 class TranscriptNotBurnableError(NothingToDrawError):
-    """字幕焼き込みが要求されているのに、渡された転写が焼ける物ではない(無い/時刻mapが
+    """字幕焼き込みが要求されているのに、渡された文字起こしが焼ける物ではない(無い/時刻mapが
     旧版/出せるsegmentが無い)。
 
     ``NothingToDrawError`` を継承するのは、これも「入力側の前提不成立」で、既に4xxへ
@@ -291,6 +291,12 @@ OVERLAY_KEYS = (
     "video_overlay_subtitle_style",
     "video_overlay_subtitle_animation",
     "video_overlay_subtitle_max_lines",
+    # 表示単位の寸法は、字幕の枚の割り方と折り返し位置をそのまま決める。入れないと
+    # 「1行の字数を変えたのに前の割り方のままcache hit」になる。
+    "subtitle_chars_per_line",
+    "subtitle_wrap_lines",
+    "subtitle_safe_margin_percent",
+    "subtitle_max_seconds",
     # 音量正規化は出力の中身を変えるので、cache signatureへ入る必要がある(値を変えたのに
     # 前回の音声のままcache hitする、を避ける)。
     "video_output_normalize_audio",
@@ -332,7 +338,7 @@ def overlay_enabled(settings) -> bool:
 
 
 def subtitles_enabled(settings) -> bool:
-    """字幕焼き込みが要求されているか。呼び出し側はこれが真のとき、転写の有無と時刻mapの
+    """字幕焼き込みが要求されているか。呼び出し側はこれが真のとき、文字起こしの有無と時刻mapの
     版を確かめてから焼き込みへ入る(無いまま字幕なしで焼くのは禁止)。"""
     return bool(settings.get("video_overlay_subtitles"))
 
@@ -550,13 +556,20 @@ def _signature(
         # 直った後に焼き直しても既存のmeta+出力にcache hitして壊れた出力が返り続ける。
         # 27: TikTok custom emoteを文字高の2倍で描画し、該当行の行高も拡張。
         # commentの行送り・block高が変わるためcacheを無効化する。
-        "version": 30,
+        # 32: 語の時刻を持つ文字起こしを、テロップとして出せる長さの表示単位へ割ってから焼く
+        # ようにした。同じ文字起こしでも描く物が変わる。
+        # 31: 窓経路の `-ss` から container start_time の足し戻しを外した。実HLS録画では
+        # 切り出しの頭が要求より1.5秒後ろへ着地し、字幕だけが要求どおりの軸に置かれるため
+        # テロップが約1.5秒遅れて出ていた(音の相互相関で実測、一致度0.98〜0.997)。同じ
+        # 設定でも出力が変わるのでcacheを無効化する — これが無いと、直した後に焼き直しても
+        # 既存のmeta+出力にcache hitしてズレた出力が返り続ける。
+        "version": 32,
         "variant": variant,
         "cfg": cfg,
         "source": mark,
         "events": events_sig,
-        # 転写のやり直しでsegmentが変われば描く字幕も変わるが、mp4も設定値も変わらない。
-        # これが無いと転写後の焼き直しがcache hitで無視される。
+        # 文字起こしのやり直しでsegmentが変われば描く字幕も変わるが、mp4も設定値も変わらない。
+        # これが無いと文字起こし後の焼き直しがcache hitで無視される。
         "subtitles": subtitles_sig,
     }
     # The wall->media timing map changes comment placement, so a new/refreshed
@@ -1578,11 +1591,11 @@ def material_media_seconds(src: Path) -> Optional[float]:
     ``timing.json`` の ``media_duration`` は使わない。finalizeが書いたsnapshotであって、
     その後にsession dirが太れば置き去りになるからである(実測: 捕捉processが孤児化して
     書き続けた録画で、録画行 12.0秒 に対し採用集合は 16,861.8秒)。素材が消えてmp4だけが
-    残った録画では逆に、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい転写を
+    残った録画では逆に、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい文字起こしを
     「軸が違う」と弾いていた(実測7件)。``recordings.duration_seconds`` も同じ理由で使えない。
 
     焼き込みの関門(``_require_burnable_transcript``)・投入時のcheck(media_jobs)・起動時の
-    timemap_migrationがいずれもこの1本で測る。物差しを複製すると、同じ転写が経路によって
+    timemap_migrationがいずれもこの1本で測る。物差しを複製すると、同じ文字起こしが経路によって
     合格したり弾かれたりする。"""
     from tictok.record import recorder as rec
 
@@ -1637,6 +1650,48 @@ def _detect_media_breaks(walls: list, medias: list) -> list:
     return breaks
 
 
+def _phantom_pad_points(matched: list, pads: list, media_end: float,
+                        video_duration: float) -> list:
+    """mp4にだけ在る穴を「media軸の時間を1秒も消費しない対応点」として返す。
+
+    A/Vズレ修復より前のconcatは、素材に無い時間をmp4へ書き足した。その水増しは
+    segmentごとの細かいぶんと、映像も音も無い凍結区間に分かれる。凍結区間はmedia軸に
+    対応する断裂を持たない(素材側では何も起きていない)ので ``_media_to_pts`` の照合には
+    掛からず、単一scaleへ畳まれて録画全体へ塗り広げられる。実測(録画00066、素材5時間12分に
+    対しmp4が5時間31分、うち凍結389秒): 中盤のcommentが最大288秒早い位置に載っていた。
+
+    穴を「mediaを消費しない」点として写像へ入れると、穴の前後がそれぞれ正しい側へ寄り、
+    同じ実測で残差は中央値15秒(読み上げまでの間を含む)へ縮む。
+
+    穴が**本物の停止**(配信が止まり、その間も壁時計とmedia軸は進んだ)である録画では、
+    穴を除いてもなおmp4が素材より長い、という関係が成り立たない。その場合は何も返さず、
+    従来どおり周囲の区間に吸収させる — 消費しない扱いにすると、実在する時間を潰して
+    今より悪い位置へ動かすことになる。"""
+    if not pads:
+        return []
+    pad_total = sum(end - start for start, end in pads)
+    clean_media = media_end - sum(m_post - m_pre for m_pre, m_post, _, _ in matched)
+    clean_pts = video_duration - sum(e - s for _, _, s, e in matched) - pad_total
+    if clean_media <= 0 or clean_pts < clean_media:
+        return []
+    scale = clean_pts / clean_media
+    points: list = []
+    cur_media = cur_pts = 0.0
+    events = sorted([(s, e, m_post) for m_pre, m_post, s, e in matched]
+                    + [(s, e, None) for s, e in pads])
+    for start, end, break_media in events:
+        if break_media is None:
+            # 穴の入口までは素材の時間が流れている。その先の出口までは流れていない。
+            media_at = cur_media + (start - cur_pts) / scale
+            points.append((media_at, start))
+            points.append((media_at, end))
+            cur_media = media_at
+        else:
+            cur_media = break_media
+        cur_pts = end
+    return points
+
+
 def _media_to_pts(medias: list, walls: list, video_duration: Optional[float],
                   pts_gaps: Optional[list]):
     """Return f(media) -> mp4 PTS seconds.
@@ -1648,29 +1703,35 @@ def _media_to_pts(medias: list, walls: list, video_duration: Optional[float],
     ``scale = mp4_dur/media_end`` smears (b) across the whole timeline, so every
     comment drifts by tens of seconds, reversing sign at the gap. Instead, anchor
     the map on the real mp4 gap edges and give each clean region its own scale,
-    which removes the drift; with no discontinuities this is exactly one scale."""
+    which removes the drift; with no discontinuities this is exactly one scale.
+
+    An mp4 gap that has no media-axis break is handled by _phantom_pad_points."""
     media_end = medias[-1]
     if not video_duration or media_end <= 0:
         return lambda m: m
 
     breaks = _detect_media_breaks(walls, medias)
     gaps = sorted(pts_gaps or [])
-    # Correspondence points (media, pts), ascending, pinned at both endpoints.
-    points: list = [(0.0, 0.0)]
+    matched: list = []
     for m_pre, m_post in breaks:
         phantom = m_post - m_pre
         # Match this glitch to the mp4 gap of the same size (a genuine freeze, which
         # is not a break, is left untouched and handled by the surrounding region).
         best = min(gaps, key=lambda g: abs((g[1] - g[0]) - phantom), default=None)
         if best is not None and abs((best[1] - best[0]) - phantom) <= max(5.0, 0.05 * phantom):
-            points.append((m_pre, best[0]))
-            points.append((m_post, best[1]))
+            matched.append((m_pre, m_post, best[0], best[1]))
             gaps.remove(best)
         else:
             logger.warning(
                 "media軸の断裂（幻の %.1fs）に対応するmp4のPTSの穴が見つかりません"
                 "（付近のcommentの時刻は概算になります）", phantom,
             )
+    # Correspondence points (media, pts), ascending, pinned at both endpoints.
+    points: list = [(0.0, 0.0)]
+    for m_pre, m_post, pts_pre, pts_post in matched:
+        points.append((m_pre, pts_pre))
+        points.append((m_post, pts_post))
+    points.extend(_phantom_pad_points(matched, gaps, media_end, video_duration))
     points.append((media_end, video_duration))
     # Strictly increasing on both axes for the piecewise interpolation.
     points = sorted(set(points))
@@ -1741,8 +1802,14 @@ def _anchor_mappers(anchors: Optional[list], started_at: float, ended_at: Option
         return wall_to_media, media_to_pts
 
     if video_duration is not None and ended_at is not None and ended_at > started_at:
-        scale = video_duration / (ended_at - started_at)
-        return (lambda t: (t - started_at) * scale), (lambda m: m)
+        # anchorsが無い旧録画。捕捉の壁時計窓そのものをmedia軸として扱い、mp4へ載せるのは
+        # anchorsが在るときと同じ _media_to_pts に任せる。穴が無ければ両端を留めた単一
+        # scaleそのもので、在れば穴の前後が正しい側へ寄る。scaleをwall_to_media側へ畳むと
+        # 「media軸」が壁時計でもmp4でもない別物になり、Mode Bのsource秒がそこへ載る。
+        span = ended_at - started_at
+        media_to_pts = _media_to_pts([0.0, span], [started_at, ended_at],
+                                     video_duration, pts_gaps)
+        return (lambda t: t - started_at), media_to_pts
 
     return (lambda t: t - started_at), (lambda m: m)
 
@@ -2770,9 +2837,9 @@ def ensure_telop_font(style: "telop_styles.TelopStyle") -> Optional[Path]:
 def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
                               width: int, height: int, cfg: dict,
                               wide_em: float, narrow_em: float) -> tuple[list, dict]:
-    """転写segmentをASSのDialogue行へ。時刻変換は一切しない。
+    """文字起こしsegmentをASSのDialogue行へ。時刻変換は一切しない。
 
-    segments_jsonのstart/endは転写時にmedia軸(このmp4のPTS秒)へ再map済みで、焼き込みが
+    segments_jsonのstart/endは文字起こし時にmedia軸(このmp4のPTS秒)へ再map済みで、焼き込みが
     使う軸と同一なので、壁時計mapper(to_media)へ通してはならない。通すと二重変換になる。
 
     ``wide_em``/``narrow_em`` は **テロップpresetの書体で測った** em advanceであること。
@@ -2788,7 +2855,10 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
     pct = cfg.get("video_overlay_subtitle_position_percent") or 0
     cx = width // 2
     cy = int(round(height * pct / 100.0))
-    max_w = int(width * SUBTITLE_WIDTH_FRAC)
+    # 帯の幅からさらに余白を引く。上限ちょうどまで詰めた行は、投稿先のUI(TikTokの右列icon等)
+    # や書体の実測差が少し違うだけで端に触れる。SRT/VTTと同じ割合を使う — 経路ごとに違う
+    # 余白にすると、同じ文字起こしから出した字幕の折り位置が経路で変わる。
+    max_w = int(width * SUBTITLE_WIDTH_FRAC * (1.0 - subtitles.layout_from_settings(cfg)["margin"]))
     # 字間はglyphの送り幅に上乗せされるので、折り返しの計算にも同じだけ足す。
     spacing_em = style.spacing_ratio
     wide = wide_em + spacing_em
@@ -2811,14 +2881,21 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
         if end <= start:
             dropped_after += 1
             continue
-        text = _ass_escape(_strip_bidi_controls(seg["text"]))
+        text = _strip_bidi_controls(seg["text"]).strip()
         if not text:
             continue
-        wrapped = _wrap_text(text, fs, max_w, wide, narrow)
+        # 折るのは**escapeする前**の生の文。escape後の文字列を解析器へ渡すと、置換で
+        # 増減した文字のぶんだけ語の位置がずれる。
+        # 上限より広く折らせてから切り詰める。上限ちょうどで折らせると、収まらない文が
+        # 「溢れた行」として返り、切り詰めた件数を数えられなくなる。
+        wrapped = jp_wrap.wrap(text, max_w, max_lines + 2,
+                               measure=lambda ch: (wide if ord(ch) > 0x2E7F else narrow) * fs)
         if len(wrapped) > max_lines:
             truncated += 1
             wrapped = wrapped[:max_lines]
-        body = "\\N".join(wrapped)
+        body = "\\N".join(_ass_escape(line) for line in wrapped)
+        if not body:
+            continue
         ts = f"{_ass_timestamp(start)},{_ass_timestamp(end)}"
         for layer, style_name, tags in cue:
             lines.append(f"Dialogue: {layer},{ts},{style_name},,0,0,0,,{tags}{body}")
@@ -2839,6 +2916,71 @@ def _build_subtitle_dialogues(segments: list, video_duration: Optional[float],
                    "truncated": truncated, "font_size": fs, "max_lines": max_lines,
                    "style": style.key, "font_family": style.font_family,
                    "animated": animate and style.animated, "ass_lines": len(lines)}
+
+
+# ASSの書式行。焼き込みのASSと、切り抜きへ添える外部字幕file(clip_subtitles)が同じ物を
+# 出すために1箇所へ置く。列の並びを片方だけ変えると、読み手は黙って別の解釈をする。
+_ASS_STYLE_FORMAT = (
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
+    "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
+    "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
+)
+_ASS_EVENT_FORMAT = (
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+)
+
+
+def _ass_header(width: int, height: int, style_lines: list) -> str:
+    """[Script Info]から[Events]のFormat行まで。Dialogueはこの後ろへ続ける。
+
+    ``PlayResX``/``PlayResY`` は行ごとの ``\\pos`` が載る座標系そのものなので、**その字幕を
+    重ねる映像の実寸**を渡すこと。別の寸法を渡すと、playerが比で伸縮して位置も字の大きさも
+    ずれる。"""
+    return (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {width}\n"
+        f"PlayResY: {height}\n"
+        "ScaledBorderAndShadow: yes\n"
+        "WrapStyle: 2\n\n"
+        "[V4+ Styles]\n"
+        f"{_ASS_STYLE_FORMAT}\n"
+        + "\n".join(style_lines)
+        + "\n\n"
+        "[Events]\n"
+        f"{_ASS_EVENT_FORMAT}\n"
+    )
+
+
+async def telop_metrics(cfg: dict) -> tuple:
+    """テロップpresetの同梱fontを揃え、``((wide_em, narrow_em), fontsdir)`` を返す。
+
+    折り返しは**テロップの書体で測った**送り幅で計算する必要がある(commentの書体の値で
+    折り返すと、書体を変えた瞬間に折り返し位置が実物とずれる)。fontを揃えられない場合は
+    :func:`ensure_telop_font` が送出する — 別の書体で焼く/書き出すことはしない。
+    """
+    style = telop_style(cfg)
+    loop = asyncio.get_running_loop()
+    fontsdir: Optional[str] = None
+    if await loop.run_in_executor(None, ensure_telop_font, style) is not None:
+        fontsdir = fontsdir_arg(fonts.telop_font_dir(style.font_file))
+    return await _font_metrics(style.font_family, style.bold, fontsdir, "テロップ"), fontsdir
+
+
+async def subtitle_ass_document(segments: list, width: int, height: int, cfg: dict,
+                                duration: Optional[float] = None) -> tuple[str, dict]:
+    """字幕だけを持つASS(外部字幕file用)。
+
+    焼き込みと**同じpreset・同じ配置・同じ折り返し**で組む。Dialogueの組み立ては
+    :func:`_build_subtitle_dialogues` に任せるので、装飾(色・縁・発光・影武者・出入りの
+    動き)は焼き込んだ物と同じ層構成になる。ここが独自に組み直すと、焼き込みと添付fileで
+    見た目の違う字幕が出る。
+    """
+    telop_em, _ = await telop_metrics(cfg)
+    lines, stats = _build_subtitle_dialogues(segments, duration, width, height, cfg, *telop_em)
+    header = _ass_header(width, height, telop_styles.style_lines(
+        telop_style(cfg), _subtitle_font(cfg, height)))
+    return header + "\n".join(lines) + "\n", stats
 
 
 def _build_ass(events: list, started_at: float, ended_at: Optional[float], video_duration: Optional[float],
@@ -3105,34 +3247,21 @@ def _build_ass(events: list, started_at: float, ended_at: Optional[float], video
     # than competing with gifts for the MAX_GIFT_OVERLAYS budget.
     overlays.extend(score_avatars)
 
-    header = (
-        "[Script Info]\n"
-        "ScriptType: v4.00+\n"
-        f"PlayResX: {width}\n"
-        f"PlayResY: {height}\n"
-        "ScaledBorderAndShadow: yes\n"
-        "WrapStyle: 2\n\n"
-        "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, "
-        "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, "
-        "Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
+    header = _ass_header(width, height, [
         f"Style: Comment,{COMMENT_FONT},{comment_fs},&H00FFFFFF,&H000000FF,&H90000000,&H64000000,0,0,0,0,"
-        f"100,100,0,0,1,{outline},1,1,0,0,0,1\n"
+        f"100,100,0,0,1,{outline},1,1,0,0,0,1",
         # BorderStyle 3 = opaque box: a semi-transparent dark card behind the coin
         # count so a gift reads clearly even when its icon could not be resolved.
         f"Style: Gift,{COMMENT_FONT},{coin_fs},&H00FFFFFF,&H000000FF,&H40202020,&H80000000,1,0,0,0,"
-        f"100,100,0,0,3,5,0,5,0,0,0,1\n"
+        f"100,100,0,0,3,5,0,5,0,0,0,1",
         # Score bar: outline style, top-left aligned; per-line overrides set the real
         # font size, colour and position for each shape/number/avatar.
         f"Style: Score,{COMMENT_FONT},20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,"
-        f"100,100,0,0,1,2,0,7,0,0,0,1\n"
+        f"100,100,0,0,1,2,0,7,0,0,0,1",
         # STT字幕(テロップ): 書体・色・縁・影はpresetが決める(telop_styles)。位置は行ごとの
         # \posで与えるので、ここは中央揃え(Alignment 5)固定。
-        + "\n".join(telop_styles.style_lines(telop, subtitle_fs))
-        + "\n\n"
-        "[Events]\n"
-        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
-    )
+        *telop_styles.style_lines(telop, subtitle_fs),
+    ])
     body = "\n".join(comment_lines + gift_lines + score_lines + bonus_lines + subtitle_lines)
     stats = {
         # Count drawable comments (not ASS lines) so the "nothing to draw" check holds
@@ -4640,7 +4769,12 @@ async def _probe_pts_gaps(src: Path) -> list:
     of it. Only gaps at least PTS_DISCONTINUITY_MIN_SECONDS are reported, so segment
     jitter and the small startup discontinuity are ignored; the time map then matches
     each gap to its media-axis discontinuity by size. Returns [] when ffprobe is
-    unavailable or the scan fails."""
+    unavailable or the scan fails.
+
+    ffprobeはpacketをfile順(=復号順)で吐くので、B-frameを持つmp4ではpts_timeが行ごとに
+    前後する(実測 録画00066: 389,723行のうち192,872行が直前より小さい)。穴は表示の時間軸
+    に空いた区間なので、差を取る前にpts順へ並べ替える。並べ替えないと、1つの穴が復号順の
+    前後で2回報告され、穴の総量が水増しされる(同じ録画で131.7秒ぶん)。"""
     if not ffprobe_available():
         return []
     try:
@@ -4653,20 +4787,18 @@ async def _probe_pts_gaps(src: Path) -> list:
         return []
     if not result.ok:
         return []
-    gaps: list = []
-    prev: Optional[float] = None
+    times: list = []
     for line in result.stdout.splitlines():
         line = line.strip().rstrip(",")
         if not line:
             continue
         try:
-            t = float(line)
+            times.append(float(line))
         except ValueError:
             continue
-        if prev is not None and t - prev >= PTS_DISCONTINUITY_MIN_SECONDS:
-            gaps.append((prev, t))
-        prev = t
-    return gaps
+    times.sort()
+    return [(prev, t) for prev, t in zip(times, times[1:])
+            if t - prev >= PTS_DISCONTINUITY_MIN_SECONDS]
 
 
 LAYER_PIPE_CHUNK = 1 << 20
@@ -4867,8 +4999,16 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
             if seek_offset:
                 inputs += ["-itsoffset", f"{-seek_offset:.6f}"]
             if seek_source:
-                # -ss は -itsoffset より前の時刻で解釈されるので、こちらには足し戻す。
-                inputs += ["-ss", f"{win_start + seek_offset:.6f}", "-t", f"{win_seconds:.6f}"]
+                # ``-ss`` は **media軸**で渡す。container start_time はffmpeg側が足すので、
+                # こちらで足し戻すと**二重計上**になる(:mod:`tictok.media.concat` が実測で
+                # 確立した規則と同じ)。
+                #
+                # 以前はここへ ``win_start + seek_offset`` を渡していた。実HLS録画3本を
+                # 音の相互相関で測ると(一致度0.98〜0.997)、切り出しの頭が要求より
+                # **+1.48〜1.51秒**後ろに着地していた — container start_time の実測値
+                # 1.517秒そのものである。映像だけが後ろへずれ、字幕は要求どおりの軸へ
+                # 置かれるので、**テロップが約1.5秒遅れて出る**。
+                inputs += ["-ss", f"{win_start:.6f}", "-t", f"{win_seconds:.6f}"]
         inputs += ["-i", str(src)]
     seen: list[str] = []
     for spec in overlays:
@@ -4905,8 +5045,10 @@ async def _run_ffmpeg(src: Path, overlays: list, icon_px: int, ass_name: str, ou
         # 掛かる)。-ss は -itsoffset より前の時刻で解釈されるため足し戻す。
         if audio_seek_offset:
             inputs += ["-itsoffset", f"{-audio_seek_offset:.6f}"]
+        # 映像側と同じく ``-ss`` は media軸(足し戻さない)。ここだけ足すと、映像を直した
+        # 結果として今度はA/Vが container start_time ぶんずれる。
         inputs += [*audio_input_args,
-                   "-ss", f"{win_start + audio_seek_offset:.6f}",
+                   "-ss", f"{win_start:.6f}",
                    "-t", f"{win_seconds:.6f}", "-i", str(audio_from)]
     elif window is None and audio_from is not None:
         # 窓なしでbaseがpipeの回。pipeは-anなので、音声は原本を追加inputとして開く。
@@ -5741,18 +5883,21 @@ async def _render_context(src: Path, cfg: dict, transcript: Optional[dict],
     wide_em, narrow_em = await _font_metrics()
     # テロップは同梱fontで描くので、fontを揃えてから **その書体で** em advanceを測る。
     # 字幕を焼かない場合は何もしない(同梱fontの取得も測定も要らない)。
+    # 語の時刻を持つ文字起こしは、テロップとして出せる長さの表示単位へ割ってから焼く。割らずに
+    # segmentのまま焼くと、1枚が数十秒画面へ居座り、その間ずっと別の言葉が喋られる
+    # (:func:`tictok.record.subtitles.split_for_display` に実測)。
+    box = subtitles.layout_from_settings(cfg)
     subtitle_segments = (
-        subtitles.usable_segments(transcript.get("segments"))
+        subtitles.split_for_display(
+            subtitles.usable_segments(transcript.get("segments")),
+            max_seconds=box["max_seconds"], max_chars=box["max_chars"],
+            per_line=box["per_line"], wrap_lines=box["wrap_lines"])
         if (cfg.get("video_overlay_subtitles") and transcript) else []
     )
     fontsdir: Optional[str] = None
     telop_em = (wide_em, narrow_em)
     if cfg.get("video_overlay_subtitles"):
-        style = telop_style(cfg)
-        loop = asyncio.get_running_loop()
-        if await loop.run_in_executor(None, ensure_telop_font, style) is not None:
-            fontsdir = fontsdir_arg(fonts.telop_font_dir(style.font_file))
-        telop_em = await _font_metrics(style.font_family, style.bold, fontsdir, "テロップ")
+        telop_em, fontsdir = await telop_metrics(cfg)
     return {
         "video_dur": video_dur,
         "anchors": anchors,
@@ -6908,15 +7053,15 @@ CLIP_PHASES: tuple = (
 
 def _require_burnable_transcript(settings, transcript: Optional[dict],
                                  media_seconds: Optional[float] = None) -> None:
-    """字幕焼き込みが要求されているなら、渡された転写が焼ける物かを確かめる。
+    """字幕焼き込みが要求されているなら、渡された文字起こしが焼ける物かを確かめる。
 
-    本出力(server側)と同じ規則を範囲焼き込みへも継承する: 転写が無い / 時刻mapが現行版で
+    本出力(server側)と同じ規則を範囲焼き込みへも継承する: 文字起こしが無い / 時刻mapが現行版で
     ない / **素材と時間軸が違う** / 出せるsegmentが無い場合は、字幕なしで焼かずに**拒否**
-    する。焼き込みは元に戻せない成果物なので、ズレた字幕や無言の欠落を作るより先に転写を
+    する。焼き込みは元に戻せない成果物なので、ズレた字幕や無言の欠落を作るより先に文字起こしを
     やり直させる方が安い。
 
     ``media_seconds`` は素材の実尺(timing.jsonのmedia_duration)。Noneなら軸の判定はしない
-    — ズレている証拠が無いまま拒否すると、正しい転写まで焼けなくなる。"""
+    — ズレている証拠が無いまま拒否すると、正しい文字起こしまで焼けなくなる。"""
     if not subtitles_enabled(settings):
         return
     if transcript is None:

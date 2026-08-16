@@ -109,7 +109,7 @@ def test_the_feature_is_off_and_unconfigured_by_default(monkeypatch):
     assert status["enabled"] is False
     assert status["configured"] is False
     assert status["model"] == ""
-    # GPUは転写と超解像が取り合っているので、ここは常にCPU。
+    # GPUは文字起こしと超解像が取り合っているので、ここは常にCPU。
     assert status["device"] == "cpu"
 
 
@@ -407,7 +407,7 @@ def test_loading_the_model_reports_every_missing_prerequisite(monkeypatch, tmp_p
 
 
 def test_the_model_runs_on_the_cpu_provider_only(monkeypatch, configured):
-    """既定ではGPUを取らない。12GBは転写と超解像が奪い合っており、ここが割り込むと
+    """既定ではGPUを取らない。12GBは文字起こしと超解像が奪い合っており、ここが割り込むと
     焼き込みが待たされる。GPUで走らせたい場合だけ TICTOK_LAUGH_AUDIO_DEVICE=cuda に
     して、**別process**(laugh_worker)へ出す。"""
     ort = pytest.importorskip("onnxruntime")
@@ -655,44 +655,163 @@ def test_nothing_over_the_threshold_is_no_windows_not_one_empty_window():
     assert laugh_windows(_laugh_profile([]), 0.5, 2.0, 0.0) == []
 
 
+class _Store:
+    """indexerが触るstorageの最小面。共演窓は「1つも記録が無い」を既定にする
+    (窓を持たないsessionでの索引はこれまでと同じ結果でなければならない)。"""
+
+    def __init__(self, collab=(), battle=(), collab_observed=True):
+        self.written = {}
+        self.meta = None
+        self.calls = []
+        self._coop = {"collab": list(collab), "battle": list(battle),
+                      "collab_observed": collab_observed}
+
+    def replace_search_hits(self, recording_id, source, rows):
+        self.written[source] = rows
+        self.calls.append((recording_id, source, len(rows)))
+        return len(rows)
+
+    def coop_windows_for_session(self, session_id):
+        return self._coop
+
+    def next_recording_start(self, session_id, started_at):
+        return None
+
+    def set_laugh_index_meta(self, recording_id, meta):
+        self.meta = meta
+        return True
+
+
 def test_index_laughter_writes_rows_a_person_can_choose_from(monkeypatch):
-    """行の本文だけで「どれを開くか」を選べること。語(笑い声)でも引けること。"""
+    """行の本文だけで「どれを開くか」を選べること。強さは並べ替えに使うので、本文の
+    文字列とは別に数値でも持つこと(本文から読み戻すのは表示の書式を数値の出所にする)。"""
     from tictok.search import indexer
     monkeypatch.setenv("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", "0")
     monkeypatch.setenv("TICTOK_LAUGH_INDEX_MIN_SECONDS", "0")
-    written = {}
-
-    class _Store:
-        def replace_search_hits(self, recording_id, source, rows):
-            written[source] = rows
-            return len(rows)
+    store = _Store()
+    written = store.written
 
     recording = {"id": 7, "session_id": 3, "unique_id": "@who", "started_at": 100.0}
-    count = indexer.index_laughter(_Store(), recording,
+    count = indexer.index_laughter(store, recording,
                                    _laugh_profile([0.0, 0.8, 0.8]), threshold=0.5)
     assert count == 1
     row = written[indexer.SOURCE_LAUGH][0]
     assert (row["video_time"], row["end_time"]) == (1.0, 3.0)
-    assert row["body"] == "笑い声 2秒（強さ 0.80）"
+    assert row["body"] == "2秒（強さ 0.80）"
     assert row["unique_id"] == "@who" and row["session_id"] == 3
-    # 語で引く側はtrigram FTS。3文字あるので走査へ落ちない。
-    assert "笑い声" in row["body"]
+    assert row["score"] == pytest.approx(0.8)
+    # 種別は行の種別欄が名乗る。本文で繰り返すと、一覧の全行が同じ語で始まる。
+    assert "笑い声" not in row["body"]
 
 
 def test_index_laughter_replaces_the_previous_rows_for_the_recording():
     """閾値を変えて入れ直したとき、古い窓が残ると同じ場面が二重に並ぶ。"""
     from tictok.search import indexer
-    calls = []
-
-    class _Store:
-        def replace_search_hits(self, recording_id, source, rows):
-            calls.append((recording_id, source, len(rows)))
-            return len(rows)
-
+    store = _Store()
     recording = {"id": 7, "session_id": None, "unique_id": "@who", "started_at": 0.0}
-    indexer.index_laughter(_Store(), recording, _laugh_profile([0.1, 0.1]), threshold=0.5)
+    indexer.index_laughter(store, recording, _laugh_profile([0.1, 0.1]), threshold=0.5)
     # 1件も無くてもreplaceは呼ぶ(呼ばないと前回の窓が残る)。
-    assert calls == [(7, indexer.SOURCE_LAUGH, 0)]
+    assert store.calls == [(7, indexer.SOURCE_LAUGH, 0)]
+
+
+# ------------------------------------------------------- 共演中(コラボ・Battle)の除外
+
+
+def _coop_recording() -> dict:
+    """時間軸mapが無い録画。壁時計 -> 動画時間は素のoffsetへ縮退するので、窓の秒が
+    そのまま読める(mapper自体はindex_commentsと共有で、別testが見ている)。"""
+    return {"id": 7, "session_id": 3, "unique_id": "@who", "path": "no-such-file.mp4",
+            "started_at": 100.0, "ended_at": 110.0}
+
+
+def test_laughter_inside_a_collab_window_never_reaches_the_list(monkeypatch):
+    """コラボ中の音声には相手の声が乗っており、どの笑いが配信者のものかを音から決める
+    手段が無い。一覧は「この配信者が笑った場面」として読まれるので行にしない。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", "0")
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MIN_SECONDS", "0")
+    # 0-2秒と6-8秒に笑い。コラボは壁時計105-108(=動画5-8秒)。
+    probs = [0.9, 0.9, 0.0, 0.0, 0.0, 0.0, 0.9, 0.9]
+    store = _Store(collab=[(105.0, 108.0)])
+    count = indexer.index_laughter(store, _coop_recording(), _laugh_profile(probs),
+                                  threshold=0.5)
+    assert count == 1
+    assert [(r["video_time"], r["end_time"]) for r in store.written[indexer.SOURCE_LAUGH]]         == [(0.0, 2.0)]
+    assert store.meta["collab_seconds"] == 3.0
+    assert store.meta["excluded_laugh_seconds"] == 2.0
+
+
+def test_a_window_is_not_merged_across_the_excluded_stretch(monkeypatch):
+    """除外区間は谷ではなく切れ目。merge_gapでつなぐと共演中を跨いだ1つの窓になり、
+    外したはずの秒が窓の長さへ戻ってくる。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", "10")
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MIN_SECONDS", "0")
+    probs = [0.9, 0.0, 0.0, 0.0, 0.9]
+    store = _Store(collab=[(101.0, 104.0)])
+    indexer.index_laughter(store, _coop_recording(), _laugh_profile(probs), threshold=0.5)
+    assert [(r["video_time"], r["end_time"]) for r in store.written[indexer.SOURCE_LAUGH]]         == [(0.0, 1.0), (4.0, 5.0)]
+
+
+def test_battle_windows_are_excluded_only_when_asked_for(monkeypatch):
+    """Battleもコラボと同じく相手の声が乗るが、外す範囲は設定で決める。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MERGE_GAP_SECONDS", "0")
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_MIN_SECONDS", "0")
+    probs = [0.9, 0.9]
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", "coop")
+    store = _Store(battle=[(100.0, 102.0)])
+    assert indexer.index_laughter(store, _coop_recording(), _laugh_profile(probs),
+                                  threshold=0.5) == 0
+    assert store.meta["battle_seconds"] == 2.0
+
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", "collab")
+    store = _Store(battle=[(100.0, 102.0)])
+    assert indexer.index_laughter(store, _coop_recording(), _laugh_profile(probs),
+                                  threshold=0.5) == 1
+    assert store.meta["battle_seconds"] == 0.0
+
+
+def test_battle_seconds_do_not_double_count_the_overlap_with_a_collab(monkeypatch):
+    """コラボとBattleは同じLinkMicの上で起きて重なり得る。そのまま足すと、外した秒の
+    合計が実際より長く見える。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", "coop")
+    store = _Store(collab=[(100.0, 106.0)], battle=[(104.0, 108.0)])
+    indexer.index_laughter(store, _coop_recording(), _laugh_profile([0.0] * 10),
+                           threshold=0.5)
+    assert (store.meta["collab_seconds"], store.meta["battle_seconds"]) == (6.0, 2.0)
+
+
+def test_a_session_from_before_collab_was_recorded_says_it_excluded_nothing(monkeypatch):
+    """記録の無いことを「コラボが無かった」と読まない。外れていない索引を「外した」と
+    名乗ると、共演中の笑いが配信者のものとして一覧に並び続ける。"""
+    from tictok.search import indexer
+    store = _Store(collab_observed=False)
+    indexer.index_laughter(store, _coop_recording(), _laugh_profile([0.9, 0.9]),
+                           threshold=0.5)
+    assert store.meta["collab_observed"] is False
+    assert store.meta["collab_seconds"] == 0.0
+
+
+def test_the_conditions_of_the_index_are_recorded_on_the_recording(monkeypatch):
+    """条件を残さないと、設定を変えた後も古い条件のindexが済みのまま残る
+    (一括処理の済み判定がこの記録を見る)。"""
+    from tictok.search import indexer
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", "collab")
+    store = _Store()
+    indexer.index_laughter(store, _coop_recording(), _laugh_profile([0.9]), threshold=0.5)
+    assert store.meta["version"] == indexer.LAUGH_INDEX_VERSION
+    assert store.meta["mode"] == "collab"
+    assert store.meta["threshold"] == 0.5
+
+
+def test_an_unreadable_exclusion_setting_is_refused_rather_than_guessed(monkeypatch):
+    """外す範囲を推測で決めると、外したつもりで外れていない索引が黙って出来上がる。"""
+    from tictok.core.config import ConfigError, get_laugh_index_exclude_coop
+    monkeypatch.setenv("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", "collabo")
+    with pytest.raises(ConfigError):
+        get_laugh_index_exclude_coop()
 
 
 # --------------------------------------------------------------------------- device

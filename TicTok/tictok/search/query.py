@@ -13,9 +13,15 @@ trigram tokenizerは3文字未満のtokenを作らないため、短い語はMAT
 
 ``OR``がひとつでも現れたら、その検索の肯定語はすべてORで結ぶ。ANDとORの混在は
 優先順位の説明が必要になり、入力欄1つのUIでは誤解の方が多いと判断した。
+
+MATCH式・LIKE patternへ載せる語は ``normalize.fold`` で畳む(index側も同じ形で入って
+いる)。「ウザ」と「うざ」を別語として引かないため。``terms``だけは入力のまま返す —
+画面の強調表示と切り抜きラベルが使うので、打った語がそのまま見えるべきである。
 """
 
 import re
+
+from tictok.search.normalize import fold
 
 MIN_FTS_CHARS = 3
 
@@ -27,11 +33,13 @@ class QueryError(ValueError):
 
 
 def _fts_phrase(text: str) -> str:
-    return '"%s"' % text.replace('"', '""')
+    return '"%s"' % fold(text).replace('"', '""')
 
 
 def _like_pattern(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    # 畳んでからescapeする。全角の％は畳むと半角%になるので、順序が逆だとwildcardとして
+    # 素通りする。
+    escaped = fold(text).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"%{escaped}%"
 
 

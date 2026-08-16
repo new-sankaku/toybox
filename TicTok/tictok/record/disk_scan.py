@@ -124,9 +124,11 @@ _DIR_CATEGORIES = {
     AVATAR_CACHE_DIR: CATEGORY_AVATAR,
     ICON_CACHE_DIR: CATEGORY_ICON,
     EMOTE_CACHE_DIR: CATEGORY_ICON,
-    layout.CLIPS_DIRNAME: CATEGORY_CLIP,
     BACKUP_DIRNAME: CATEGORY_BACKUP,
 }
+# 成果物の置き場(``_clips``/``_screenshots``)はここに置かない。置き場が配信者folderの下
+# (``<配信者>/_clips/``)へ移り、root直下の名前では当たらなくなったため、path要素のどこに
+# 在っても効く判定で拾う。
 
 # 配信者に紐付かない共有領域のbytesをまとめる行のkey。実在する配信者名と衝突しない
 # ように空文字を使い、文言は画面側ではなくこのmoduleが決める。
@@ -139,11 +141,17 @@ def classify(rel_parts, name: str) -> tuple:
 
     配信者が決まらない共有cache等は ``SHARED_STREAMER_KEY`` を返す。捏造を避けるため、
     規約に合わない file は種別 ``other`` ・共有扱いにして黙って配信者へ按分しない。"""
-    category = None
-    for suffix, cat in _SUFFIX_CATEGORIES:
-        if name.endswith(suffix):
-            category = cat
-            break
+    # 切り出しの置き場は**suffixより先に**見る。中身は焼き込み切り抜き(....overlay.mp4)や
+    # Up出力から撮ったスクショ(....up.png)で、録画の派生物と同じsuffixを持つ。suffixを先に
+    # 引くと、人が作った成果物が「焼き込み」「Up出力」として数えられ、retentionが触ってよい
+    # 種別(REGENERABLE_CATEGORIES)の量にも混ざる。
+    category = (CATEGORY_CLIP
+                if any(part in layout.ARTIFACT_DIRNAMES for part in rel_parts) else None)
+    if category is None:
+        for suffix, cat in _SUFFIX_CATEGORIES:
+            if name.endswith(suffix):
+                category = cat
+                break
     top = rel_parts[0] if rel_parts else ""
     if category is None:
         category = _DIR_CATEGORIES.get(top)

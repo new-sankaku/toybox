@@ -7,6 +7,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PROJECT_ROOT = path.resolve(HERE, "..", "..", "..");
 export const STATIC_DIR = path.join(PROJECT_ROOT, "static");
 
+// canvas(chart・timeline)の色は CSS の token(:root)を読んで決まる。本番の page は必ず
+// style.css を link しているので、token の定義が無い document で script を評価すると
+// test だけが「色の無い世界」になり、色を持たない不具合を見逃す。
+// 値を test 側へ書き写すと二重定義になるため、定義は実 file の :root から切り出して使う。
+// 全文を食わせないのは、4000行超の CSS を document ごとに parse させないため。
+const ROOT_TOKENS_CSS = (() => {
+  const css = readFileSync(path.join(STATIC_DIR, "style.css"), "utf8");
+  const m = css.match(/^:root\s*\{[\s\S]*?\n\}/m);
+  if (!m) throw new Error("style.css の :root block が見つかりません");
+  return m[0];
+})();
+
 // static/ の JS は ES module ではなく classic script。HTML の <script src> がそのまま
 // global scope へ流し込む読み方なので、test も同じ読み方を再現する。個別に import できる
 // 形へ書き換えると、本番が読んでいる物と test が読んでいる物が別になる。
@@ -256,6 +268,10 @@ export function loadPage(opts = {}) {
     clipboard: [],
     scrolledIntoView: [],
   };
+
+  const tokenStyle = win.document.createElement("style");
+  tokenStyle.textContent = ROOT_TOKENS_CSS;
+  win.document.head.appendChild(tokenStyle);
 
   installVendorStubs(win, calls);
   installBrowserStubs(win, calls);

@@ -53,6 +53,11 @@ describe("common.js の書式helper", () => {
       expect(win.fmtTime(EPOCH)).toBe("14:49:49");
     });
 
+    // Timelineの軸labelは先頭5文字をHH:MMとして切り出す。時が1桁だと "9:00:" になる。
+    it("fmtTimeの時は2桁固定(午前も桁が落ちない)", () => {
+      expect(win.fmtTime(Date.UTC(2026, 6, 21, 0, 5, 3) / 1000)).toBe("09:05:03");
+    });
+
     it("fmtYmdは YYYYMMDD", () => {
       expect(win.fmtYmd(EPOCH)).toBe("20260721");
     });
@@ -132,6 +137,11 @@ describe("common.js の書式helper", () => {
       expect(win.avatarSrc("data:image/png;base64,AAA")).toBe("data:image/png;base64,AAA");
       expect(win.avatarSrc("/api/avatar?u=x")).toBe("/api/avatar?u=x");
       expect(win.avatarSrc("")).toBe("");
+    });
+
+    it("URLが無くてもIDが判っていればpoolを引く(記録できなかった行のため)", () => {
+      expect(win.avatarSrc("", "someone")).toBe("/api/avatar?id=someone");
+      expect(win.avatarSrc(null, "")).toBe("");
     });
 
     it("avatarChar は表示名の頭文字、無ければ ?", () => {

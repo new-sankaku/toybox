@@ -41,7 +41,7 @@ index)にも使われるため、潰れた行では次の録画ぶんのcomment�
 ## 尺の出所(mp4を消した録画でも大抵は残っている)
 
 現行mp4 > HLSのEXTINF合計 > timing map(``.timing.json``の``media_duration``) >
-thumb sheet(``.thumbs.json``) > 既存のduration_seconds(転写由来) > ``_backup``の退避mp4。
+thumb sheet(``.thumbs.json``) > 既存のduration_seconds(文字起こし由来) > ``_backup``の退避mp4。
 どれもその録画をffprobeで測って書かれた値で、壁時計からの推定ではない。現行mp4が残る
 12本で突き合わせた誤差は timing map が最大3.9秒(2.3%)、thumb sheet はほぼ完全一致。
 
@@ -101,7 +101,7 @@ SRC_MP4 = "mp4"
 SRC_HLS = "HLS(EXTINF)"
 SRC_TIMING = "timing map"
 SRC_THUMBS = "thumb sheet"
-SRC_STORED = "既存値(転写)"
+SRC_STORED = "既存値(文字起こし)"
 SRC_BACKUP = "_backup"
 SOURCES = (SRC_MP4, SRC_HLS, SRC_TIMING, SRC_THUMBS, SRC_STORED, SRC_BACKUP)
 
@@ -246,8 +246,8 @@ async def _measure(row: sqlite3.Row, roots: list[Path]) -> tuple[float | None, s
       1. 現行mp4          — その録画そのもの
       2. HLS(EXTINF合計)  — mp4を消しても.tsが残っていれば素材の尺は確定する
       3. timing map / thumb sheet — 生成時にffprobeで測った値(_sidecar_seconds)
-      4. 既存のduration_seconds — migrationが転写(transcripts.duration)から埋めた値。
-         転写はmp4そのものを読んで作られており、fileからの推測ではない
+      4. 既存のduration_seconds — migrationが文字起こし(transcripts.duration)から埋めた値。
+         文字起こしはmp4そのものを読んで作られており、fileからの推測ではない
       5. _backup の退避mp4 — ここまで全て無い録画の最後の手段。**旧経路(concat
          demuxer)で作った退避は幻の音声穴でtimestampが伸びており、同じ内容を作り直すと
          尺だけが数%縮む**(実測: 4151秒 -> 4000秒、frame数は同一)。数%長い側に外れる

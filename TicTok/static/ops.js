@@ -32,8 +32,10 @@ function kindText(kind) {
 function opsFilters() {
   const params = new URLSearchParams();
   const severity = document.getElementById("flt-severity").value;
-  const kind = document.getElementById("flt-kind").value;
-  const unique = document.getElementById("flt-unique").value;
+  // 種別・配信者は選択肢がserverの応答から生えるまでselectへ入れられない。まだ預かって
+  // いる保存値(pendingKind/pendingUnique)は、selectより先にこちらを条件へ載せる。
+  const kind = pendingKind || document.getElementById("flt-kind").value;
+  const unique = pendingUnique || document.getElementById("flt-unique").value;
   const job = document.getElementById("flt-job").value.trim();
   const since = document.getElementById("flt-since").value;
   const until = document.getElementById("flt-until").value;
@@ -279,6 +281,8 @@ async function loadFilterOptions() {
     data = await apiSend("GET", "/api/ops/kinds");
   } catch (err) {
     // 候補が引けないだけで一覧は読める。選択肢を捏造せず「すべて」のままにする。
+    // 預かっている保存値も当てる先が無いので解く(条件だけが効いた状態を残さない)。
+    applyPendingSelects();
     return;
   }
   kindLabels = data.kind_labels || {};
@@ -319,6 +323,7 @@ async function loadFilterOptions() {
     option.textContent = `@${entry.unique_id}（${fmtNum(entry.count)}）`;
     uniqueSelect.appendChild(option);
   });
+  applyPendingSelects();
 }
 
 async function loadSummary() {
@@ -455,11 +460,47 @@ document.getElementById("perf-reset").addEventListener("click", async () => {
   } catch (err) {
     note.textContent = "計測をresetできませんでした。";
     note.title = errorDetailText(err);
+    showError(err, "API計測のreset");
     return;
   }
   note.removeAttribute("title");
   loadPerf();
 });
+
+// ---- 表示設定の永続化 ----
+// 画面ごとに独立したdocumentで、nav遷移はフルリロードになる。重要度・種別・配信者は
+// 毎回同じ値を選び直すものなので残す。job IDと期間(日付)は残さない — job IDは1回の処理を
+// 指した一時的な対象指定で、日付は絶対値なので、残すと翌日には「新しい記録が出てこない
+// 一覧」を今の全件として読むことになる。この画面の目的は新しい失敗に気付くことなので、
+// 気付けない条件を既定にはしない。
+const OPS_SEVERITY_PREF = "tictok.ops.severity";
+const OPS_KIND_PREF = "tictok.ops.kind";
+const OPS_UNIQUE_PREF = "tictok.ops.unique";
+// 種別・配信者の選択肢は /api/ops/kinds から生えるので、この時点ではselectへ当てられない。
+// 保存値を預かってopsFilters()へ先に載せる(選択肢が揃うのを待って当てると、初回の一覧を
+// 条件無しで取ってから同じ物を絞り込みで取り直すことになる)。
+let pendingKind = prefGet(OPS_KIND_PREF) || "";
+let pendingUnique = prefGet(OPS_UNIQUE_PREF) || "";
+
+// 預かった保存値をselectへ当てる。選択肢が消えていた場合(保持期間を過ぎて記録が無くなった
+// 種別・監視から外れた配信者)は復元せず、その条件で取ってしまった一覧を取り直す。
+// selectが「すべて」を指しているのに一覧だけが絞られている状態を残すと、条件に一致しなかった
+// だけの空の表を「記録が無い」と読むことになる。
+function applyPendingSelects() {
+  const stale = [
+    [document.getElementById("flt-kind"), OPS_KIND_PREF, pendingKind],
+    [document.getElementById("flt-unique"), OPS_UNIQUE_PREF, pendingUnique],
+  ].filter(([el, key, pending]) => pending && !restorePref(el, key));
+  pendingKind = "";
+  pendingUnique = "";
+  if (stale.length) loadEvents(false);
+}
+
+// 保存はuser操作の時だけ。下のloadEvents側のlistenerより先に張って、預かりの解除が
+// 取り直しより前に済むようにする。
+bindPref(document.getElementById("flt-severity"), OPS_SEVERITY_PREF);
+bindPref(document.getElementById("flt-kind"), OPS_KIND_PREF, () => { pendingKind = ""; });
+bindPref(document.getElementById("flt-unique"), OPS_UNIQUE_PREF, () => { pendingUnique = ""; });
 
 document.getElementById("flt-apply").addEventListener("click", () => loadEvents(false));
 // 選択式の条件は選んだ時点で意図が確定する。「絞り込む」を押し忘れて古い結果を今の条件の
@@ -480,6 +521,11 @@ document.getElementById("flt-apply").addEventListener("click", () => loadEvents(
 document.getElementById("flt-reset").addEventListener("click", () => {
   ["flt-severity", "flt-kind", "flt-unique", "flt-job", "flt-since", "flt-until"]
     .forEach((id) => { document.getElementById(id).value = ""; });
+  // 残している条件の保存値も一緒に落とす。値だけ戻して保存を残すと、次に開いた時に
+  // 「条件をclear」したはずの絞り込みが復活する。
+  pendingKind = "";
+  pendingUnique = "";
+  [OPS_SEVERITY_PREF, OPS_KIND_PREF, OPS_UNIQUE_PREF].forEach((key) => prefSet(key, null));
   loadEvents(false);
 });
 

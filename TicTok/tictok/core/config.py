@@ -868,6 +868,27 @@ def get_ai_chapter_min_seconds() -> float:
     return _env_float("TICTOK_AI_CHAPTER_MIN_SECONDS", 60.0)
 
 
+def get_ai_clip_title_chars() -> int:
+    """Max characters in a generated short title. Override with
+    TICTOK_AI_CLIP_TITLE_CHARS.
+
+    Enforced twice: stated in the prompt and clamped after decoding. Local models
+    routinely overshoot a stated limit, and the cached value has to be the one the screen
+    shows — truncating at display time would leave the two disagreeing."""
+    return _env_int("TICTOK_AI_CLIP_TITLE_CHARS", 30)
+
+
+def get_ai_clip_description_chars() -> int:
+    """Max characters in a generated short description. Override with
+    TICTOK_AI_CLIP_DESCRIPTION_CHARS."""
+    return _env_int("TICTOK_AI_CLIP_DESCRIPTION_CHARS", 120)
+
+
+def get_ai_clip_hashtag_max() -> int:
+    """Max hashtags generated per short. Override with TICTOK_AI_CLIP_HASHTAG_MAX."""
+    return _env_int("TICTOK_AI_CLIP_HASHTAG_MAX", 5)
+
+
 def get_ai_comment_sample_windows() -> int:
     """Number of equal-time windows the session is split into before sampling comments.
     The sample is drawn proportionally from every window, so the reported sentiment is an
@@ -994,6 +1015,36 @@ def get_upscale_compute_type() -> str:
     return os.environ.get("TICTOK_UPSCALE_COMPUTE_TYPE", "auto").strip()
 
 
+def get_bgm_remove_enabled() -> bool:
+    """Enable BGM/effect removal (speech enhancement) as an output option."""
+    return _env_bool("TICTOK_BGM_REMOVE_ENABLED", False)
+
+
+def get_bgm_remove_python() -> str:
+    """Interpreter of the venv that has torch + clearvoice, run as a child process.
+    Empty by default; PROJECT_ROOT-relative paths are accepted. It must NOT be the
+    server's own venv — clearvoice replaces torch with the CPU build, which would
+    cost the upscale path its GPU (see tictok.record.bgm_child)."""
+    return os.environ.get("TICTOK_BGM_REMOVE_PYTHON", "").strip()
+
+
+def get_bgm_remove_model() -> str:
+    """Speech-enhancement model name resolved by ClearerVoice-Studio. The default is
+    the only 48kHz-native one, so the recording's own sample rate survives untouched."""
+    return os.environ.get("TICTOK_BGM_REMOVE_MODEL", "MossFormer2_SE_48K").strip()
+
+
+def get_bgm_remove_task() -> str:
+    """ClearerVoice-Studio task the model belongs to."""
+    return os.environ.get("TICTOK_BGM_REMOVE_TASK", "speech_enhancement").strip()
+
+
+def get_bgm_remove_device() -> str:
+    """Inference device: 'cuda', 'cpu', or 'auto' (cuda when available). CPU is
+    rejected by the child rather than silently taking tens of times longer."""
+    return os.environ.get("TICTOK_BGM_REMOVE_DEVICE", "auto").strip()
+
+
 def get_upscale_tile() -> int:
     """Tile edge (source pixels) for tiled inference; caps VRAM usage on large
     frames. 0 runs the whole frame at once."""
@@ -1060,6 +1111,79 @@ def get_normalize_quality() -> int:
     matching the burn-in here would stack two generations of loss at the same quality.
     Override with TICTOK_NORMALIZE_QUALITY."""
     return _env_int("TICTOK_NORMALIZE_QUALITY", 17)
+
+
+def get_short_codec() -> str:
+    """Video codec family for the short (vertical clip) output: 'h264' (default), 'av1',
+    'hevc', or 'auto'.
+
+    Unlike the normalization pass, this output **leaves the machine**. The archived
+    recording only has to play back here, which is why that pass defaults to AV1 for its
+    3x size win; a short is uploaded, and AV1-in-MP4 is still refused or silently
+    re-encoded by parts of that path. H.264 High + AAC is the combination every consumer
+    accepts, and at a 60-second clip the size argument that justified AV1 upstream is
+    worth a few megabytes. Override with TICTOK_SHORT_CODEC."""
+    return os.environ.get("TICTOK_SHORT_CODEC", "h264").strip()
+
+
+def get_short_quality() -> int:
+    """Encode quality for the short output on the H.264 CRF/CQ scale (lower = higher
+    quality), auto-mapped per codec like every other encode here.
+
+    One step above the normalization pass because a short is the last generation before
+    upload and the platform re-encodes it again. Override with TICTOK_SHORT_QUALITY."""
+    return _env_int("TICTOK_SHORT_QUALITY", 19)
+
+
+def get_short_fps() -> float:
+    """Frame rate the short output is folded to. Override with TICTOK_SHORT_FPS.
+
+    Shorts must be CFR: the recordings are VFR HLS, and every operation here that renumbers
+    frames (the silence tightening's ``setpts=N/FRAME_RATE/TB``) produces timestamps that
+    disagree with the real frame spacing unless the input was folded first."""
+    return _env_float("TICTOK_SHORT_FPS", 30.0)
+
+
+def get_short_batch_limit() -> int:
+    """How many shorts one auto-generation run produces from a single recording by
+    default. Override with TICTOK_SHORT_BATCH_LIMIT.
+
+    The bound exists because the ranking is only meaningful at the top: candidates are
+    ordered by how far the moment sits from that stream's own baseline, and past the first
+    handful the z-scores flatten into ordinary conversation."""
+    return _env_int("TICTOK_SHORT_BATCH_LIMIT", 5)
+
+
+def get_short_gate_tolerance_seconds() -> float:
+    """How far the short's two tracks may disagree, and how far the output may fall short
+    of what was asked for, before the gate refuses it. Override with
+    TICTOK_SHORT_GATE_TOLERANCE_SECONDS.
+
+    The failure this catches is measured, not hypothetical: ffmpeg returns rc=0 with one
+    track ending at 30-40% of the other, and the container reports the longer one (see
+    doc/OVERLAY_OUTPUT_INTEGRITY.md). Normal separation there was 0.05-0.06s against
+    7,000s+ when broken, so a sub-second bound is nowhere near the noise."""
+    return _env_float("TICTOK_SHORT_GATE_TOLERANCE_SECONDS", 0.5)
+
+
+def get_short_gate_silent_ratio() -> float:
+    """Fraction of a short that may be silence before the gate refuses it (default 0.9).
+    Override with TICTOK_SHORT_GATE_SILENT_RATIO.
+
+    Not 1.0: a clip whose audio is entirely missing and one that is 97% silence are the
+    same defect from the viewer's side, and the second is the one that actually happens
+    (the range landed on a lull rather than the moment)."""
+    return _env_float("TICTOK_SHORT_GATE_SILENT_RATIO", 0.9)
+
+
+def get_short_gate_black_ratio() -> float:
+    """Fraction of a short that may be black frames before the gate refuses it
+    (default 0.5). Override with TICTOK_SHORT_GATE_BLACK_RATIO.
+
+    Lower than the silence bound because black video has no benign cause here — the
+    source is a live camera feed, so sustained black means the stream dropped or the
+    encode produced nothing."""
+    return _env_float("TICTOK_SHORT_GATE_BLACK_RATIO", 0.5)
 
 
 def get_overlay_encode_chunks() -> int:
@@ -1175,6 +1299,18 @@ def get_media_queue_workers() -> int:
     使用量が本数ぶん増える(焼き込みは1本あたりCFR base+コメント層で数GB〜数十GB)ので、
     空き容量と相談すること。"""
     return max(1, _env_int("TICTOK_MEDIA_QUEUE_WORKERS", 2))
+
+
+def get_media_queue_instant_workers() -> int:
+    """即時lane(``media_queue.INSTANT_KINDS``)専用のworker本数。0でlaneを持たない。
+
+    通常のworkerは既定2本で、しかも同じ録画で走っているjobがある間は次を拾わない。人が
+    その場で待つ数秒のjob(スクショ)をその列へ入れると、長い焼き込み・Up出力の裏で押した
+    1枚が数時間保存されない。laneが拾うのは録画へ書き込まない種別だけなので、本体のjobと
+    重なっても互いの足元を抜かない(``claim_next_pending_media_job`` 参照)。
+
+    1本で足りるのは、この種別が1枚あたり数秒で終わるためである。"""
+    return max(0, _env_int("TICTOK_MEDIA_QUEUE_INSTANT_WORKERS", 1))
 
 
 def get_media_queue_sweep_concurrency() -> int:
@@ -1446,6 +1582,36 @@ def get_laugh_index_min_seconds() -> float:
     return _env_float("TICTOK_LAUGH_INDEX_MIN_SECONDS", 2.0)
 
 
+# 検索indexから外す共演の範囲。indexの中身を決める値なので、変えたら入れ直しが要る
+# (笑い声分析の済み判定がこの値を見るので、一括処理が自動で対象へ戻す)。
+LAUGH_INDEX_COOP_MODES = ("none", "collab", "coop")
+
+
+def get_laugh_index_exclude_coop() -> str:
+    """検索indexへ入れる笑い声から、共演中の窓を外すか。
+
+    ``coop``(既定) = コラボ(非BattleのLinkMic)とBattleの両方を外す / ``collab`` =
+    コラボだけ外す / ``none`` = 外さない。
+
+    外すのは、共演中の音声には相手の声が混ざっており、**どの笑い声が配信者のものかを
+    音から決める手段が無い**ため。一覧は「この配信者が笑った場面」として読まれるので、
+    共演者の笑いが混ざると根拠が別人だったという壊れ方をする(smileのmodule docstringが
+    映像側で同じ結論を書いている)。
+
+    窓の出所はDB(collab_windows / battles)である。映像の顔の数
+    (:func:`tictok.media.smile.multi_face_spans`)を使わないのは、こちらが音の話だから:
+    カメラを外している間もゲーム画面を映している間も相手の声は乗り続けるので、画面に
+    顔が2つ映っている区間だけでは足りない。"""
+    raw = os.environ.get("TICTOK_LAUGH_INDEX_EXCLUDE_COOP")
+    if raw is None:
+        return "coop"
+    value = raw.strip().lower()
+    if value not in LAUGH_INDEX_COOP_MODES:
+        _reject("TICTOK_LAUGH_INDEX_EXCLUDE_COOP", raw,
+                "/".join(LAUGH_INDEX_COOP_MODES) + " のいずれか", "coop")
+    return value
+
+
 def get_laugh_audio_device() -> str:
     """推論を走らせるdevice: ``cpu``(既定) か ``cuda``。
 
@@ -1463,7 +1629,7 @@ def get_laugh_audio_device() -> str:
 
 def get_laugh_audio_threads() -> int:
     """onnxruntimeのintra-op thread数。0はonnxruntimeの既定(論理coreの半分)に任せる。
-    録画中に走らせると録画・転写とCPUを奪い合うため、絞れるようにしておく。"""
+    録画中に走らせると録画・文字起こしとCPUを奪い合うため、絞れるようにしておく。"""
     return _env_int("TICTOK_LAUGH_AUDIO_THREADS", 0)
 
 
@@ -1488,7 +1654,7 @@ def get_laugh_comment_min_w_run() -> int:
 # Opt-in。onnxruntime は optional dependency で lazy import する。weights は deployment が
 # 置く file を path で受け、model 名も class 名も logic に焼かない。既定は無効。
 # Fallback は持たない: 無効・未導入・model不備・推論失敗はいずれも SmileError で返す。
-# 実行は常に CPU(laugh_audio と同じ理由。GPU 12GB は転写と超解像が奪い合っている)。
+# 実行は常に CPU(laugh_audio と同じ理由。GPU 12GB は文字起こしと超解像が奪い合っている)。
 #
 # 前処理の定数(mean/scale)と活性化は **model の契約** であって好みの値ではない。既定値は
 # doc/SMILE_MODEL.md に書いた参照exportに合わせてあり、別のweightsを置くなら必ず上書きする
@@ -1640,5 +1806,5 @@ def get_smile_bucket_seconds() -> float:
 
 def get_smile_threads() -> int:
     """onnxruntimeのintra-op thread数。0はonnxruntimeの既定に任せる。録画中に走らせると
-    録画・転写とCPUを奪い合うため、絞れるようにしておく。"""
+    録画・文字起こしとCPUを奪い合うため、絞れるようにしておく。"""
     return _env_int("TICTOK_SMILE_THREADS", 0)

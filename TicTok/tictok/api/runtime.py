@@ -23,6 +23,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from fastapi import HTTPException, WebSocket
 from tictok.paths import PROJECT_ROOT
 from tictok.core.logging_setup import setup_logging
@@ -502,7 +503,7 @@ manager = CollectorManager(
 )
 
 
-# 一括転写のworkerは1本(STT自体がprocess内で直列化されている)。queueの実体はDB側にあり、
+# 一括文字起こしのworkerは1本(STT自体がprocess内で直列化されている)。queueの実体はDB側にあり、
 # processが落ちても投入内容は残る。
 
 
@@ -514,6 +515,21 @@ def _missing_record_roots() -> list:
     retryは「.tsが見つかりません」で即failedになった。復帰後も誰も拾い直さないため、
     録画は書きかけのmp4を指したまま残った。これはfailedではなく待つべき事象である。"""
     return [str(root) for root in _RECORD_ROOTS if not root.is_dir()]
+
+
+def gift_icon_url(gift_id: int, image_url: str = "") -> str:
+    """画面がそのまま``<img src>``に使えるicon URL。出せないときは空文字。
+
+    poolに在ればidだけで引ける。無いgiftはeventが持っていたCDN URLを添えて、その場で
+    1度だけ取り込ませる(URLは失効し得るので、取り込めるとは限らない)。許可hostでない
+    URLは添えない — proxyをSSRFの口にしないため。"""
+    if not gift_id:
+        return ""
+    if gift_icons.has(gift_id):
+        return f"/api/gift-icon?gift_id={gift_id}"
+    if image_url and GiftIconCache.is_allowed(image_url):
+        return f"/api/gift-icon?gift_id={gift_id}&u={quote(image_url, safe='')}"
+    return ""
 
 
 def _normalize_unique_id(raw: str) -> str:

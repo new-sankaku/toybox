@@ -1,0 +1,25 @@
+# 値を書いて読み返した結果
+
+ツール            Input名                 判定         書いた値 → 読めた値
+TextPlus       Size                   入った        0.07 → 0.07   （文字の大きさ）
+TextPlus       CharacterSpacing       入った        1.2 → 1.2   （字送り）
+TextPlus       AngleZ                 入った        12.5 → 12.5   （文字全体の回転）
+TextPlus       Angle                  Input が無い  12.5 → None   （Text+ には無いはず（回転は AngleZ））
+TextPlus       Type1                  入った        2 → 2.0   （塗りをグラデーションにする）
+TextPlus       ShadingGradient1       入った（中身は照合できない） {0.0: {1: 0.72, 2: 0.53, 3: 0.17, 4: 1.0}, 0.5: {1: 1.0, 2: 0.96, 3... → <BlackmagicFusion.PyRemoteObject object at 0x000002026BE550D0>   （グラデーションの中身）
+TextPlus       ShadingMappingAngle1   入った        30.0 → 30.0   （グラデーションの角度）
+TextPlus       AngleZ2                入った        4.0 → 4.0   （縁だけ回す）
+TextPlus       SizeX2                 入った        1.06 → 1.06   （縁だけ広げる）
+TextPlus       Offset2                入った        [0.004, -0.002] → {1: 0.004, 2: -0.002, 3: 0.0}   （縁だけずらす（Point））
+TextPlus       ElementShape7          入った        3 → 3.0   （帯の縁）
+TextPlus       Thickness7             入った        0.02 → 0.02   （帯の縁の太さ）
+TextPlus       MergeOperator1         Input が無い  1 → None   （無いはず）
+TextPlus       Extrusion1             Input が無い  0.1 → None   （無いはず）
+TextPlus       ElementPosition1       Input が無い  1 → None   （無いはず）
+Background     Type                   入った        'Solid' → 'Solid'   （文字列で渡す（FuID））
+Background     Type                   入った        'Horizontal' → 'Horizontal'   （文字列で渡す（FuID））
+Background     Type                   捨てられた      1 → None   （数値では入らないはず）
+Background     GradientType           入った        'Radial' → 'Radial'   （文字列で渡す（FuID））
+Merge          Angle                  入った        15.0 → 15.0   （Merge には在る）
+RectangleMask  Angle                  入った        15.0 → 15.0   （RectangleMask には在る）
+Transform      Angle                  入った        15.0 → 15.0   （Transform には在る）

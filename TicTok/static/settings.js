@@ -136,6 +136,17 @@ function buildDefaultRow(item, control) {
     note.textContent = `環境変数 ${item.env} で上書き中（本来の既定値: ${item.builtin_default}）`;
     row.appendChild(note);
   }
+  // 保存済みの値が現在の定義に適合しないkey。serverはこの値のまま動かし、理由をinvalidで
+  // 返してくる(既定値へ黙って差し替えない方針)。選択肢の外の値は該当するradioが無いため
+  // 「どれも選ばれていない」状態で描かれ、保存でもそのkeyは送られない — 画面が理由を
+  // 出さないと、設定が消えたようにしか見えないまま実際の値は古い値で動き続ける。
+  if (item.invalid) {
+    const note = document.createElement("span");
+    note.className = "s-envnote";
+    note.textContent = `保存済みの値「${item.value}」は現在の定義に適合しません（${item.invalid}）。`
+      + "この値のまま動いています。選び直して保存してください。";
+    row.appendChild(note);
+  }
   return row;
 }
 
@@ -151,13 +162,16 @@ function buildField(item) {
   const control = document.createElement("div");
   control.className = "s-cell s-control";
   const hasGallery = hasOptions && Boolean(item.option_image);
+  // 選択肢を持つ設定は、値が文字でも選ばせる。serverは選択肢の外を422で拒むので、
+  // 自由入力にすると「綴りを外した保存だけが失敗する」欄になる(値の一覧は画面のどこにも
+  // 出ていなかった)。自由入力は選択肢を持たないもの(保存先のpath)だけが使う。
   control.appendChild(
-    isText
-      ? buildText(item)
-      : hasGallery
-        ? buildOptionGallery(item)
-        : hasOptions
-          ? buildOptions(item)
+    hasGallery
+      ? buildOptionGallery(item)
+      : hasOptions
+        ? buildOptions(item)
+        : isText
+          ? buildText(item)
           : buildNumber(item),
   );
   control.appendChild(buildDefaultRow(item, control));
@@ -198,12 +212,18 @@ function applyFilter() {
 }
 
 async function loadSettings() {
-  const res = await fetch("/api/settings");
-  if (!res.ok) {
+  let data;
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`設定の取得に失敗しました（HTTP ${res.status}）。`);
+    data = await res.json();
+  } catch (err) {
+    // server停止・網断ではfetchがrejectする。包まないと以降へ進めず、設定表が空のまま
+    // 何も出ない(この画面の全操作の前提なので、無反応と取り違えると原因を探せない)。
     statusEl.textContent = "設定の取得に失敗しました。";
+    showError(err, "設定の取得");
     return;
   }
-  const data = await res.json();
   form.innerHTML = "";
   buildHeader();
   let category = null;
@@ -230,12 +250,20 @@ document.getElementById("settings-save").addEventListener("click", async () => {
   form.querySelectorAll("input[type=radio][data-key]:checked").forEach((input) => {
     values[input.dataset.key] = input.value;
   });
+  const saveBtn = document.getElementById("settings-save");
+  saveBtn.disabled = true;
   statusEl.textContent = "保存中…";
   try {
     await apiSend("PUT", "/api/settings", values);
     statusEl.textContent = "保存しました。";
+    showToast("設定を保存しました。", null, { title: "設定" });
   } catch (err) {
+    // statusElは0.75remのmutedな1行で、成功と失敗が同じ色・同じ大きさで出る。
+    // 値を弾かれたのに保存できたと読めてしまうので、失敗はtoastで別に名乗る。
     statusEl.textContent = err.message;
+    showError(err, "設定の保存");
+  } finally {
+    saveBtn.disabled = false;
   }
 });
 
@@ -288,7 +316,12 @@ async function loadPreviewRecordings() {
     const data = await res.json();
     fillPreviewRecordings(data.recordings);
   } catch (err) {
+    // 一覧を取れないとselectが空のまま。buttonを押せるままにすると、値が無いので
+    // 即returnして完全な無反応になる(0件のときと同じ扱いへ倒す)。
     previewStatusEl.textContent = "録画一覧を取得できませんでした。";
+    previewStillBtn.disabled = true;
+    previewClipBtn.disabled = true;
+    showError(err, "プレビュー用の録画一覧");
   }
 }
 
@@ -306,10 +339,14 @@ previewStillBtn.addEventListener("click", async () => {
     previewOutputEl.appendChild(img);
     previewMetaEl.textContent =
       `表示time刻: ${fmtDuration(res.at_seconds)}（${res.window_auto ? "自動選定" : "指定"}）`
-      + (res.comments_drawn ? "" : " / この時刻に表示中のCommentはありません");
+      + (res.comments_drawn ? "" : " / この時刻に表示中のコメントはありません");
     previewStatusEl.textContent = "生成しました。";
   } catch (err) {
+    // 前回の画像を残したまま失敗文言だけ差し替えると、古い絵を新しい結果として読む。
+    previewOutputEl.innerHTML = "";
+    previewMetaEl.textContent = "";
     previewStatusEl.textContent = err.message;
+    showError(err, "静止画プレビュー");
   } finally {
     previewStillBtn.disabled = false;
   }
@@ -319,12 +356,18 @@ previewClipBtn.addEventListener("click", async () => {
   const id = previewSelect.value;
   if (!id) return;
   previewClipBtn.disabled = true;
-  previewStatusEl.textContent = "queueへ投入しました。順番が来ると焼き込みが始まります。";
+  // 投入の成否が確定してから名乗る。応答の前に「投入しました」と書くと、失敗したときに
+  // 一度成功を告げてから小さく差し替わることになる。
+  previewStatusEl.textContent = "queueへ投入中…";
   try {
     const res = await apiSend("POST", `/api/recordings/${id}/preview/clip`);
     previewJobs.set(res.job_id, id);
+    previewStatusEl.textContent = "queueへ投入しました。順番が来ると焼き込みが始まります。";
+    showToast("プレビュー動画をqueueへ投入しました。順番が来ると焼き込みが始まります。",
+      null, { title: "焼き込みプレビュー" });
   } catch (err) {
     previewStatusEl.textContent = err.message;
+    showError(err, "プレビュー動画の生成");
     previewClipBtn.disabled = false;
   }
 });
@@ -408,12 +451,17 @@ notifyTestBtn.addEventListener("click", async () => {
   try {
     const res = await apiSend("POST", "/api/notify/test");
     const failed = (res.results || []).filter((r) => !r.ok).length;
-    notifyStatusEl.textContent = failed
+    const text = failed
       ? `${failed} 件の宛先へ送信できませんでした。`
       : "送信しました。宛先側で受信を確認してください。";
+    notifyStatusEl.textContent = text;
+    // 宛先の一部が落ちるのはこの操作の主たる結果。全成功と同じ色・同じ大きさで出ると
+    // 「送れた」と読める。
+    showToast(text, failed ? "error" : null, { title: "テスト通知" });
     await loadNotifyStatus(res.results);
   } catch (err) {
     notifyStatusEl.textContent = err.message;
+    showError(err, "テスト通知");
     await loadNotifyStatus();
   } finally {
     notifyTestBtn.disabled = false;
@@ -491,7 +539,10 @@ retentionPreviewBtn.addEventListener("click", async () => {
       ? "削除内容を確認してください。まだ何も削除していません。"
       : "削除対象はありません。";
   } catch (err) {
+    // 前回のplanを残すと、それを今回の対象と読んだまま「削除する」へ進める動線になる。
+    retentionPlanEl.innerHTML = "";
     retentionStatusEl.textContent = err.message;
+    showError(err, "削除内容の確認");
   } finally {
     retentionPreviewBtn.disabled = false;
   }
@@ -509,12 +560,17 @@ retentionApplyBtn.addEventListener("click", async () => {
   try {
     const res = await apiSend("POST", "/api/storage/retention", { apply: true, confirm: true });
     renderRetentionPlan(res.plan);
-    retentionStatusEl.textContent =
+    const text =
       `${fmtNum(res.result.removed_items)} 件・${fmtBytesGb(res.result.freed_bytes)} を削除しました。`
       + (res.result.stopped_at ? "（空き容量が目標に達したため途中で打ち切りました）" : "");
+    retentionStatusEl.textContent = text;
+    showToast(text, null, { title: "保持policyの適用" });
     loadDiskBar();
   } catch (err) {
+    // 取り消せない削除の失敗を、成功と同色のmutedな1行だけで済ませない。
+    // apply側は「削除内容を確認」からやり直す必要があるので、押せないまま残すのが正しい。
     retentionStatusEl.textContent = err.message;
+    showError(err, "保持policyの適用");
   } finally {
     retentionPreviewBtn.disabled = false;
   }
@@ -582,13 +638,15 @@ async function loadMaintenance() {
   }
 }
 
-async function runMaintenance(path, body, running, done) {
+// labelは操作の名前。保守は完了まで数分かかることがあり、その間に別の画面を見ていても
+// 結果はtoastで届く。どの保守の結果なのかを名乗らせないと、戻ってきたとき対応が取れない。
+async function runMaintenance(path, body, running, done, label) {
   setMaintenanceBusy(true, running);
   try {
     const result = await apiSend("POST", path, body);
-    showToast(done(result));
+    showToast(done(result), null, { title: label });
   } catch (err) {
-    showError(err);
+    showError(err, label);
     setMaintenanceBusy(false, "");
     await loadMaintenance();
     return;
@@ -600,6 +658,7 @@ async function runMaintenance(path, body, running, done) {
 document.getElementById("mnt-backup").addEventListener("click", () => runMaintenance(
   "/api/maintenance/backup", undefined, "退避中…（DBの大きさに応じて時間がかかります）",
   (data) => `退避しました: ${data.backup.name}（${fmtGb(data.backup.bytes)}GB）`,
+  "DBの退避",
 ));
 
 document.getElementById("mnt-integrity").addEventListener("click", () => runMaintenance(
@@ -607,6 +666,7 @@ document.getElementById("mnt-integrity").addEventListener("click", () => runMain
   (data) => data.ok
     ? "健全性check: 問題は見つかりませんでした。"
     : `健全性check: ${fmtNum(data.problems.length)}件の問題を検出しました。詳細は運用log画面で確認してください。`,
+  "健全性check",
 ));
 
 document.getElementById("mnt-checkpoint").addEventListener("click", () => runMaintenance(
@@ -614,6 +674,7 @@ document.getElementById("mnt-checkpoint").addEventListener("click", () => runMai
   (data) => data.busy === 0
     ? `WALを書き戻しました（WAL ${fmtGb(data.wal_bytes)}GB）`
     : `WALの一部は書き戻せませんでした（読み取り中の処理があります。WAL ${fmtGb(data.wal_bytes)}GB）`,
+  "WAL checkpoint",
 ));
 
 document.getElementById("mnt-vacuum").addEventListener("click", async () => {
@@ -626,7 +687,152 @@ document.getElementById("mnt-vacuum").addEventListener("click", async () => {
   await runMaintenance(
     "/api/maintenance/vacuum", { confirm: true }, "VACUUMを実行中…（書き込みは待たされます）",
     (data) => `VACUUMが完了しました（${fmtGb(data.freed_bytes)}GB回収 / ${fmtGb(data.bytes_after)}GB）`,
+    "VACUUM",
   );
 });
 
 loadMaintenance();
+
+// ===== shortの型 =====
+// 型は設定表(settings)ではなく別の表なので、この節だけは値の保存も別経路になる。設定表と
+// 同じ格子(.settings-form)を使うのは見た目の統一のためで、保存bottonは型ごとに1つ持つ。
+
+const shortPresetList = document.getElementById("short-preset-list");
+const shortPresetStatus = document.getElementById("short-preset-status");
+let shortPresetFields = {};
+
+function shortPresetInput(key, spec, value) {
+  const input = document.createElement("input");
+  input.dataset.presetKey = key;
+  if (spec.type === "bool") {
+    input.type = "checkbox";
+    input.checked = Boolean(Number(value));
+    return input;
+  }
+  input.type = "number";
+  // 値域はserverの1箇所(PRESET_FIELDS)から来る。画面が別の範囲を持つと、通したのに
+  // 保存で弾かれる項目が生まれる。
+  input.min = spec.min;
+  input.max = spec.max;
+  input.step = "0.05";
+  input.value = value;
+  return input;
+}
+
+function shortPresetValues(block) {
+  const values = {};
+  block.querySelectorAll("[data-preset-key]").forEach((input) => {
+    const key = input.dataset.presetKey;
+    values[key] = input.type === "checkbox" ? (input.checked ? 1 : 0) : Number(input.value);
+  });
+  return values;
+}
+
+function renderShortPreset(preset) {
+  const block = document.createElement("div");
+  block.className = "settings-form";
+  block.dataset.presetId = String(preset.id);
+
+  const head = document.createElement("div");
+  head.className = "s-section";
+  const name = document.createElement("input");
+  name.type = "text";
+  name.value = preset.name;
+  name.setAttribute("aria-label", "型の名前");
+  const save = document.createElement("button");
+  save.className = "btn btn-small btn-primary";
+  save.textContent = "この型を保存";
+  const remove = document.createElement("button");
+  remove.className = "btn btn-small btn-danger";
+  remove.textContent = "削除";
+  head.append(name, save, remove);
+  block.appendChild(head);
+
+  Object.entries(shortPresetFields).forEach(([key, spec]) => {
+    const label = document.createElement("div");
+    label.className = "s-cell s-label";
+    label.textContent = spec.label;
+    const control = document.createElement("div");
+    control.className = "s-cell s-control";
+    control.appendChild(shortPresetInput(key, spec, preset[key]));
+    const note = document.createElement("div");
+    note.className = "s-cell s-note";
+    note.textContent = spec.note || "";
+    block.append(label, control, note);
+  });
+
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    try {
+      await apiSend("PATCH", `/api/clip-presets/${preset.id}`,
+        { name: name.value, values: shortPresetValues(block) });
+      shortPresetStatus.textContent = `「${name.value}」を保存しました。`;
+      // #short-preset-statusはcard冒頭の「型を追加」行にある。型が数個並ぶと押したbuttonと
+      // 結果表示が画面外に離れるので、結末はtoastでも名乗る。
+      showToast(`「${name.value}」を保存しました。`, null, { title: "shortの型" });
+      await loadShortPresets();
+    } catch (err) {
+      // 弾かれた理由をそのまま出す。丸めて保存されるより、入れた値が残って理由が読める方
+      // が直せる(値域を外れた値はserverが丸めずに弾く)。
+      shortPresetStatus.textContent = err.message;
+      showError(err, `shortの型「${name.value}」の保存`);
+    } finally {
+      save.disabled = false;
+    }
+  });
+  remove.addEventListener("click", async () => {
+    const ok = await confirmDialog(
+      `「${preset.name}」を削除します。この型で作った成果物は残ります。`,
+      { title: "shortの型を削除しますか？", confirmLabel: "削除" });
+    if (!ok) return;
+    try {
+      await apiSend("DELETE", `/api/clip-presets/${preset.id}`);
+      shortPresetStatus.textContent = `「${preset.name}」を削除しました。`;
+      await loadShortPresets();
+    } catch (err) {
+      // 失敗すると型のblockは残る。「消えていない＝押せていない」と読んで押し直すので、
+      // 消えなかった理由を押した場所から離れないtoastで出す。
+      shortPresetStatus.textContent = err.message;
+      showError(err, `shortの型「${preset.name}」の削除`);
+    }
+  });
+  return block;
+}
+
+async function loadShortPresets() {
+  const empty = document.getElementById("short-preset-empty");
+  setListState(empty, "loading");
+  let data;
+  try {
+    data = await apiSend("GET", "/api/clip-presets");
+  } catch (err) {
+    setListState(empty, "failed", err);
+    return;
+  }
+  shortPresetFields = data.fields || {};
+  shortPresetList.innerHTML = "";
+  (data.presets || []).forEach((preset) => {
+    shortPresetList.appendChild(renderShortPreset(preset));
+  });
+  setListState(empty, (data.presets || []).length ? "ok" : "empty");
+}
+
+document.getElementById("short-preset-add").addEventListener("click", async () => {
+  const input = document.getElementById("short-preset-name");
+  try {
+    // 尺だけは必須なので、新規作成は最初の型の値ではなく素の値で作る。既存の型を写すと
+    // 「どの型を写したか」が名前からは読めない複製が増える。
+    await apiSend("POST", "/api/clip-presets", {
+      name: input.value,
+      values: { min_seconds: 15, target_seconds: 30, max_seconds: 60 },
+    });
+    input.value = "";
+    shortPresetStatus.textContent = "型を追加しました。下の欄で値を調整してください。";
+    await loadShortPresets();
+  } catch (err) {
+    shortPresetStatus.textContent = err.message;
+    showError(err, "shortの型の追加");
+  }
+});
+
+loadShortPresets();

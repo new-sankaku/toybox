@@ -86,7 +86,7 @@ mp4を削除しても、その録画を測って書かれた値は方々に残�
 | HLS playlist | EXTINF合計(素材そのものの尺) | 26 |
 | `.sidecars/*.timing.json` | `media_duration`(recorderがfinalizeで書く) | 48 |
 | `.sidecars/*.thumbs.json` | `sprite.duration_seconds`(サムネ生成時の実測) | 5 |
-| `transcripts.duration` | 転写時にmp4を読んだ値(migrationがbackfill) | 28 |
+| `transcripts.duration` | 文字起こし時にmp4を読んだ値(migrationがbackfill) | 28 |
 | `_backup/` の退避mp4 | 最後の手段 | 1 |
 
 現行mp4が残る12本で突き合わせた誤差は、timing map が最大3.9秒(2.3%)、thumb sheet は
@@ -115,7 +115,7 @@ fileも派生物も削除済みの録画は、**どんなplayerでも測りよ�
 
 - 列の追加はserver起動時のmigrationが行う。scriptは列が無ければ何もせず止まる
   (schemaの定義箇所が2つに割れると、片方だけ直る状態が生まれる)。
-- migrationは転写を持つ録画だけ `transcripts.duration` で初期値を埋める。転写はmp4その
+- migrationは文字起こしを持つ録画だけ `transcripts.duration` で初期値を埋める。文字起こしはmp4その
   ものを読んで作られており、fileからの推測ではない。
 - 録画カバレッジ(analytics)は壁時計のままでよい。あれは「sessionのどこを録画していたか」
   を問う指標で、動画の長さではない。`ended_at` の是正で正しくなる。
@@ -137,7 +137,7 @@ serverがきれいに終われば捕捉ffmpegは `Recorder._terminate` が止め
 | 00436_leia87.n_20260801_183012 | 12,180.0秒 | 22,564.7秒 | +10,385秒 |
 
 容量だけの話では済まない。再生playlist(`files._finalized_playlist`)はdirの採用集合から
-描き直すので、**playerが再生する尺と録画行の尺が別物になる**。転写・切り出し・軸の一致判定は
+描き直すので、**playerが再生する尺と録画行の尺が別物になる**。文字起こし・切り出し・軸の一致判定は
 いずれも素材を読むため、録画行の尺を信じている側が全部ずれる(実測: 素材17.6秒の録画に
 2,194秒の文字起こしが付いた)。
 

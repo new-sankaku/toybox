@@ -1,6 +1,6 @@
 """成果物を作る投入と、その台帳(jobs)。
 
-焼き込み・Up出力・再mp4化・音量正規化・ts結合・preview・切り出し・reel。どれも即時には
+焼き込み・Up出力・再mp4化・音量正規化・ts結合・preview・切り出し・reel・文字起こし。どれも即時には
 行わず ``media_jobs`` のqueueへ積み、進捗はjob台帳が持つ。1件ずつの投入と、session単位の
 まとめ投入が同じ場所に居るのは、どちらも同じqueueの入口だから。
 """
@@ -12,12 +12,16 @@ from typing import Optional
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from tictok.core import ops_labels
+from tictok.core import config, ops_labels
 from tictok.core.gpu import gpu_status
+from tictok.media import clip_range, hls_source
+from tictok.media import work as work_media
 from tictok.media.clipper import make_clip
 from tictok.media.reel import reel_path
-from tictok.record import audio_norm
+from tictok.store import clip_presets
+from tictok.record import audio_norm, bgm_remove
 from tictok.record import media_queue
+from tictok.record.transcription import stt_available
 from tictok.record.upscale import upscale_status
 from tictok.record.video_overlay import (NothingToDrawError, overlay_enabled, preview_paths,
     preview_still)
@@ -155,6 +159,46 @@ async def audionorm_recording(recording_id: int) -> dict:
                                     stem=files._recording_label(recording))
 
 
+@router.post("/api/recordings/{recording_id}/transcribe")
+async def transcribe_recording(recording_id: int, corrections: str = "keep") -> dict:
+    """1録画の文字起こしをqueueへ積む(kind=stt)。応答はjob_idで、進捗と結果はWSで届く。
+
+    ``corrections`` は既にある訂正の扱い(``keep`` 引き継ぎ / ``discard`` 破棄)。誤りを
+    1件ずつ直した後なら引き継ぎ、modelや時刻mapを変えたなら破棄が正しい。既に待機列に
+    同じ録画の行が居る場合はそちらへ相乗りするので、**その行の指定が優先される** —
+    応答の ``corrections`` は実際に効く方を返す。
+
+    以前はこのrouteだけがqueueを通さずprocess内で走っていた。Job一覧には出るのに台帳へ行が
+    無いため取り消しがmissingで空振りし、実処理は止まらないまま「取り消せるjobはありません」
+    と出ていた。台帳へ載せれば取り消し・再実行・中断復帰が他の種別と同じになる。"""
+    if not stt_available():
+        raise HTTPException(
+            status_code=503,
+            detail="STTが利用できません。faster-whisperのinstallとTICTOK_STT_ENABLEDを確認してください。")
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    # 文字起こしはmp4でも素材(.ts)でも走る。mp4だけを見ていた頃は、同じ録画がqueue経路なら
+    # 文字起こしできて録画詳細のbuttonからは404という食い違いになっていた。
+    if not files._recording_source_exists(recording):
+        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
+    # 起動時sweepが文字起こしのない録画を上限なしで積むので、人が開いた1本はほぼ必ず既に待機列に
+    # 居る。ここで409を返すと「押しても何も始まらない」になるため、既にある行へ相乗りし、
+    # その1本の順番だけを人の優先度へ上げる(同じ録画に2本は走らせない)。
+    policy = media_jobs._corrections_policy({"corrections": corrections})
+    existing = media_jobs.media_job_queue.pending_for("stt", recording_id)
+    if existing is not None:
+        await media_jobs.media_job_queue.promote(existing["job_id"])
+        return {"job_id": existing["job_id"], "kind": "stt", "recording_id": recording_id,
+                "state": existing["state"], "queued_at": existing["queued_at"],
+                "corrections": ((existing.get("params") or {}).get("corrections")
+                                or "keep")}
+    queued = await media_jobs._enqueue_media_job(
+        "stt", recording_id, recording=recording,
+        stem=files._recording_label(recording), params={"corrections": policy})
+    return {**queued, "corrections": policy}
+
+
 @router.get("/api/upscale/status")
 async def upscale_status_api() -> dict:
     return upscale_status()
@@ -203,7 +247,9 @@ async def list_jobs(state: str = "all", kind: str = "all", job: str = "",
     ``limit``の外に居ても必ず応答へ入るよう、台帳をjob_idで直接引く。
 
     種別labelを同梱するのは、同じ訳語を画面にも置くと必ずずれるため
-    (``core/ops_labels.py`` のdocstring)。種別filterの選択肢もこれから作る。"""
+    (``core/ops_labels.py`` のdocstring)。種別filterの選択肢もこれから作る。取り消し・再実行が
+    効くdomain(``queued_kinds``)を同梱するのも同じ理由で、画面が独自の一覧を持つと台帳へ
+    種別が増えたときに黙って古いままになる。"""
     if state != "all" and state not in media_queue.STATE_FILTERS:
         raise HTTPException(status_code=400, detail=f"知らない状態filterです: {state}")
     if limit < 1:
@@ -223,7 +269,44 @@ async def list_jobs(state: str = "all", kind: str = "all", job: str = "",
             "stt",
         )},
         "kind_labels": ops_labels.JOB_KIND_LABELS,
+        # 取り消し・再実行が効くdomain。効くのはDBのqueueに載る映像jobだけで、容量scan等の
+        # in-process jobは台帳に行が無い。画面側に同じ一覧を持たせていた頃は、台帳へ種別が
+        # 増えても画面が黙って古いままだった(文字起こしのjobだけbuttonが出なかった)。
+        "queued_kinds": list(media_jobs.QUEUED_JOB_DOMAINS),
     }
+
+
+@router.post("/api/jobs/cancel-matching")
+async def cancel_matching_jobs(kind: str = "all") -> dict:
+    """種別で絞った未終了job(待機中・実行中)をまとめて取り消す。
+
+    ``kind`` はJob画面の種別filterと同じ語(``all`` は全種別)。状態filterは受け取らない —
+    取り消せるのは待機中と実行中だけで、それ以外を渡せる形にすると「失敗のみを取り消す」
+    のような効かない指定を画面が作れてしまう。
+
+    実行中の1本も止まる。数十分走った文字起こしやencodeが捨てられるので、確認は画面が出す。"""
+    domains = None if kind == "all" else (kind,)
+    snapshot = await asyncio.to_thread(
+        media_jobs._job_snapshot, states=("pending", "running"), domains=domains,
+        limit=100000)
+    # 取り消せるのは台帳(DBのqueue)に載るjobだけ。容量scan等のin-process jobは台帳に行が
+    # 無く、cancelは必ずmissingを返す。母数に混ぜると「N件中0件を取り消した」と出る。
+    # 一括投入の合成行(job_id=group_id)も外す。中身は録画ごとの明細として同じ一覧に
+    # 並んでいるので、合成行まで数えると同じ一括を二重に数えることになる。
+    jobs = [job for job in snapshot
+            if job["domain"] in media_jobs.QUEUED_JOB_DOMAINS
+            and job.get("group_id") != job["job_id"]]
+    cancelled = 0
+    for job in jobs:
+        outcome = await media_jobs.media_job_queue.cancel(job["job_id"])
+        if outcome in ("cancelled", "cancelling"):
+            cancelled += 1
+    runtime.logger.info(
+        "未終了jobを%d件取り消しました（種別=%s / 対象=%d件）", cancelled, kind, len(jobs),
+        extra={"event": "media_queue.batch_cancelled",
+               "ctx": {"kind": kind, "cancelled": cancelled, "total": len(jobs)}},
+    )
+    return {"cancelled": cancelled, "total": len(jobs)}
 
 
 @router.post("/api/jobs/{job_id}/cancel")
@@ -304,6 +387,10 @@ class ClipRequest(BaseModel):
     variant: str = "source"
     # 未指定は設定の既定(clip_normalize_audio)に従う。
     normalize_audio: Optional[bool] = None
+    # 未指定は設定の既定(clip_remove_bgm)に従う。
+    remove_bgm: Optional[bool] = None
+    # 未指定は設定の既定(clip_subtitles)に従う。書式は設定(clip_subtitle_formats)が決める。
+    subtitles: Optional[bool] = None
 
 
 class ClipRangeRequest(BaseModel):
@@ -311,14 +398,28 @@ class ClipRangeRequest(BaseModel):
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     label: Optional[str] = None
+    # どの見どころから来た範囲か。書き出した事実をその行へ書き戻すためだけに使う
+    # (範囲そのものはpayloadの値をそのまま使う — 行を引き直すと、投入後に詰め直された
+    # IN/OUTで書き出すことになり、利用者が押した時に見えていた範囲と食い違う)。
+    bookmark_id: Optional[int] = None
 
 
 class ClipBatchRequest(BaseModel):
     items: list[ClipRangeRequest]
     variant: str = "source"
     normalize_audio: Optional[bool] = None
+    remove_bgm: Optional[bool] = None
+    subtitles: Optional[bool] = None
     precise: bool = False
     mode: Optional[str] = None
+
+
+class StillRequest(BaseModel):
+    """スクショ1枚。範囲を持たないので ``at`` の1点だけを受ける。"""
+
+    at: float = Field(ge=0)
+    variant: str = "source"
+    label: Optional[str] = Field(default=None, max_length=200)
 
 
 class ReelRequest(BaseModel):
@@ -360,20 +461,42 @@ async def clip_recording(recording_id: int, payload: ClipRequest) -> dict:
         return row
     src = files._clip_source(recording, payload.variant)
     normalize = media_jobs._clip_normalize(payload.normalize_audio)
+    remove_bgm = media_jobs._clip_remove_bgm(payload.remove_bgm)
     try:
         async with runtime._job_ops("clip", recording_id, stem=src.stem, variant=payload.variant,
-                            **audio_norm.describe(normalize)):
+                            **audio_norm.describe(normalize),
+                            **bgm_remove.describe(remove_bgm)):
             mode = media_jobs._clip_mode(payload.mode, payload.precise)
             result = await make_clip(
                 src, payload.start, payload.end, payload.label,
                 precise=(mode == "precise"), normalize=normalize,
-                smart=(mode == "smart"))
+                smart=(mode == "smart"), remove_bgm=remove_bgm)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+    # 字幕fileはmp4が出来てから添える。原点は要求した開始位置ではなく、make_clipが実測した
+    # 実開始(actual_start_seconds)なので、切り出しが終わるまで確定しない。
+    if media_jobs._clip_subtitles(payload.subtitles):
+        await media_jobs._attach_clip_subtitles(result, recording_id, payload.variant)
     result["recording_id"] = recording_id
     result["variant"] = payload.variant
     result["route"] = "copy"
     return result
+
+
+@router.post("/api/recordings/{recording_id}/still")
+async def still_recording(recording_id: int, payload: StillRequest) -> dict:
+    """再生位置の1 frameをpngで保存するjobを立てる(静止画の置き場 ``_screenshots`` へ出る)。
+
+    素材版の実在は投入時に確かめる。workerで初めて落とすと、押した人は待った末に理由を
+    知ることになる(切り出し・焼き込みと同じ作法)。"""
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    src = files._clip_source(recording, payload.variant)
+    return await media_jobs._enqueue_media_job(
+        "still", recording_id, recording=recording, stem=src.stem,
+        priority=media_jobs.STILL_JOB_PRIORITY,
+        params={"at": payload.at, "variant": payload.variant, "label": payload.label})
 
 
 @router.post("/api/clips/batch")
@@ -387,6 +510,9 @@ async def clip_batch_api(payload: ClipBatchRequest) -> dict:
     if payload.variant not in files.CLIP_VARIANTS:
         raise HTTPException(status_code=400, detail=f"未知の素材版です: {payload.variant}")
     disk._require_disk_space(disk._disk_volume_paths(), "clip_batch", items=len(payload.items))
+    # BGM除去を使えない構成なら、queueへ載せる前にここで弾く(判定はworkerでも同じ関数が
+    # 行うが、120件を積んでから1件ずつ落ちるのでは押した人が理由に辿り着けない)。
+    media_jobs._clip_remove_bgm(payload.remove_bgm)
     by_recording: dict = {}
     for item in payload.items:
         if item.end <= item.start:
@@ -403,8 +529,11 @@ async def clip_batch_api(payload: ClipBatchRequest) -> dict:
         params = {
             "variant": payload.variant,
             "normalize_audio": payload.normalize_audio,
+            "remove_bgm": payload.remove_bgm,
+            "subtitles": payload.subtitles,
             "mode": media_jobs._clip_mode(payload.mode, payload.precise),
-            "ranges": [{"start": i.start, "end": i.end, "label": i.label} for i in items],
+            "ranges": [{"start": i.start, "end": i.end, "label": i.label,
+                        "bookmark_id": i.bookmark_id} for i in items],
         }
         jobs_started.append(await media_jobs._enqueue_media_job(
             "clip_batch", recording_id, group_id=group_id, recording=recording,
@@ -415,7 +544,7 @@ async def clip_batch_api(payload: ClipBatchRequest) -> dict:
 
 @router.post("/api/reels")
 async def create_reel_api(payload: ReelRequest) -> dict:
-    """切り出しリストの範囲を1本のmp4へ連結するjobを立てる。
+    """見どころの範囲を1本のmp4へ連結するjobを立てる。
 
     ``items`` の並びがそのまま尺順になる(make_reelは並べ替えない)。時刻順へ整えないのは、
     「表示した順と違う順で繋がれた」方が「順序を指定できない」より悪い誤認を生むため。
@@ -440,4 +569,268 @@ async def create_reel_api(payload: ReelRequest) -> dict:
     )
     row.update({"output_name": out.name, "parts": len(items),
                 "variant": payload.variant})
+    return row
+
+
+# ---------------------------------------------------------------------------------------
+# short(縦の短尺動画)
+# ---------------------------------------------------------------------------------------
+
+
+class ClipPresetRequest(BaseModel):
+    """shortの型の作成・更新。値は :data:`tictok.store.clip_presets.PRESET_FIELDS` の
+    keyだけを受け、値域の判定はstore側の1箇所で行う(画面は通すがDBが弾く、を作らない)。"""
+
+    name: Optional[str] = None
+    values: dict = Field(default_factory=dict)
+
+
+class ClipPresetOrderRequest(BaseModel):
+    preset_ids: list[int]
+
+
+class ShortRange(BaseModel):
+    """人が選んだ範囲。録画はpathが指すので ``recording_id`` は持たない。"""
+
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    label: Optional[str] = None
+
+
+class ShortRequest(BaseModel):
+    preset_id: Optional[int] = None
+    # 未指定なら設定の既定本数。0や負は「作らない」ではなく指定誤りなので受けない。
+    limit: Optional[int] = Field(default=None, ge=1, le=50)
+    # 題名・説明・hashtag・表紙位置をAIに作らせるか。AIが未設定なら投入時に断る。
+    ai: bool = False
+    # 範囲を人が選ぶ場合。渡すと候補算出も吸着も行わず、その範囲のまま作る。
+    ranges: list[ShortRange] = Field(default_factory=list)
+
+
+@router.get("/api/clip-presets")
+async def list_clip_presets_api() -> dict:
+    """shortの型の一覧と、各列の値域。画面はこのfieldsを見てformを組む。"""
+    presets = await asyncio.to_thread(runtime.storage.list_clip_presets)
+    return {"presets": presets,
+            "fields": {key: {k: v for k, v in spec.items() if k != "type"}
+                       | {"type": spec["type"].__name__}
+                       for key, spec in clip_presets.PRESET_FIELDS.items()}}
+
+
+@router.post("/api/clip-presets")
+async def create_clip_preset_api(payload: ClipPresetRequest) -> dict:
+    try:
+        preset_id = await asyncio.to_thread(
+            runtime.storage.create_clip_preset, payload.name or "", payload.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return await asyncio.to_thread(runtime.storage.get_clip_preset, preset_id)
+
+
+@router.patch("/api/clip-presets/{preset_id}")
+async def update_clip_preset_api(preset_id: int, payload: ClipPresetRequest) -> dict:
+    try:
+        found = await asyncio.to_thread(
+            runtime.storage.update_clip_preset, preset_id, payload.name, payload.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    if not found:
+        raise HTTPException(status_code=404, detail="この型はもうありません。")
+    return await asyncio.to_thread(runtime.storage.get_clip_preset, preset_id)
+
+
+@router.delete("/api/clip-presets/{preset_id}")
+async def delete_clip_preset_api(preset_id: int) -> dict:
+    removed = await asyncio.to_thread(runtime.storage.delete_clip_preset, preset_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="この型はもうありません。")
+    return {"deleted": True, "preset_id": preset_id}
+
+
+@router.post("/api/clip-presets/order")
+async def reorder_clip_presets_api(payload: ClipPresetOrderRequest) -> dict:
+    count = await asyncio.to_thread(
+        runtime.storage.reorder_clip_presets, payload.preset_ids)
+    return {"ordered": count}
+
+
+@router.get("/api/recordings/{recording_id}/short-plan")
+async def short_plan_api(recording_id: int, preset_id: Optional[int] = None,
+                         limit: Optional[int] = None) -> dict:
+    """作らずに、どの範囲でどう作るかだけを返す。
+
+    生成は1本あたり分単位かかる操作なので、範囲の妥当性を成果物を見て確かめる形にすると
+    確認のcostが実行のcostと同じになる。**捨てた候補も理由つきで返す** — 数だけが減ると、
+    検出が弱いのか範囲確定で落ちているのかを切り分ける手段が無い。
+    """
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    preset = await asyncio.to_thread(
+        media_jobs._short_preset, {"preset_id": preset_id})
+    path = files._resolved_recording_path(recording)
+    plan = await media_jobs._plan_short_ranges(
+        recording_id, path, preset, {"limit": limit})
+    return {
+        "recording_id": recording_id,
+        "preset": preset,
+        "candidate_count": plan.get("candidate_count", 0),
+        "chapters": len(plan.get("chapters") or []),
+        "segments": len(plan.get("segments") or []),
+        "ranges": [{k: v for k, v in item.items() if k != "candidate"}
+                   for item in plan["ranges"]],
+        "rejected": [{"start": item.get("start"), "end": item.get("end"),
+                      "seconds": item.get("seconds"), "peak": item.get("peak"),
+                      "reason": item["rejected"],
+                      "reason_label": clip_range.REJECT_LABELS[item["rejected"]]}
+                     for item in plan.get("rejected") or []],
+    }
+
+
+@router.post("/api/recordings/{recording_id}/short")
+async def create_short_api(recording_id: int, payload: ShortRequest) -> dict:
+    """1録画からshortをまとめて作るjobを立てる。
+
+    範囲の確定も生成もworkerで行う。ここでするのは、待った末に落ちる条件(型が無い・字幕の
+    材料が無い・AIが未設定・空き容量)を投入時に確かめることだけである。
+    """
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    for item in payload.ranges:
+        if item.end <= item.start:
+            raise HTTPException(status_code=422, detail="終了位置は開始位置より後にしてください。")
+    path = files._resolved_recording_path(recording)
+    disk._require_disk_space([path.parent], "short", ranges=len(payload.ranges))
+    params = {
+        "preset_id": payload.preset_id,
+        "limit": payload.limit,
+        "ai": payload.ai,
+        "ranges": [{"start": i.start, "end": i.end, "label": i.label}
+                   for i in payload.ranges],
+    }
+    return await media_jobs._enqueue_media_job(
+        "short", recording_id, recording=recording, stem=path.stem, params=params)
+
+
+# ---------------------------------------------------------------------------------------
+# 作品(グループ1件 -> 完成品1本)
+# ---------------------------------------------------------------------------------------
+
+
+class WorkRequest(BaseModel):
+    """グループを作品にする指定。範囲はグループが持つので、ここには渡さない。"""
+
+    preset_id: Optional[int] = None
+
+
+@router.get("/api/groups/{group_id}/work-plan")
+async def work_plan_api(group_id: int, preset_id: Optional[int] = None) -> dict:
+    """作らずに、何をどの順で繋ぐかだけを返す。
+
+    生成は分単位かかる操作なので、中身の確認を成果物を見て行う形にすると、確認のcostが
+    実行のcostと同じになる（short の下見と同じ理由）。
+
+    ``part_ready`` は「前回作った中間が今も在る」という**事実**であって、「焼き直さない」
+    という予言ではない。焼き込みのcache判定は設定・event・文字起こしまで見る別の場所が持っており、
+    そこが焼き直すと決めればこの値に関わらず切り出しから作り直される。
+    """
+    group = await asyncio.to_thread(runtime.storage.get_group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="グループが見つかりません。")
+    preset = await asyncio.to_thread(
+        media_jobs._short_preset, {"preset_id": preset_id})
+    cuts = [row for row
+            in await asyncio.to_thread(runtime.storage.bookmarks_in_group, group_id)
+            if row.get("end") is not None]
+    codec = config.get_short_codec()
+
+    def _collect() -> list:
+        scenes = []
+        for index, cut in enumerate(cuts):
+            recording = runtime.storage.get_recording(int(cut["recording_id"]))
+            # 素材が無いシーンは投入してから落ちる。下見の目的はそれを先に見せることなので、
+            # 見つからないことを行として残す(黙って除くと件数だけが減る)。
+            path = (files._resolved_recording_path(recording)
+                    if recording is not None else None)
+            state = (work_media.scene_cache_state(
+                        path, float(cut["start"]), float(cut["end"]), preset, codec)
+                     if path is not None else {})
+            scenes.append({
+                "position": index + 1,
+                "bookmark_id": cut["id"],
+                "recording_id": cut["recording_id"],
+                "unique_id": cut["unique_id"],
+                "start": cut["start"],
+                "end": cut["end"],
+                "seconds": round(float(cut["end"]) - float(cut["start"]), 3),
+                "label": cut["memo"] or "",
+                "source_missing": path is None or not hls_source.available(path),
+                # 焼き込みにはSessionのeventが要る。紐づいていない録画は投入時に断られる。
+                "no_session": recording is not None and recording.get("session_id") is None,
+                **state,
+            })
+        return scenes
+
+    scenes = await asyncio.to_thread(_collect)
+    burns = [name for key, name in (("subtitles", "字幕"), ("comments", "コメント"),
+                                    ("gifts", "ギフト"), ("score_bar", "スコアバー"))
+             if int(preset.get(key) or 0)]
+    return {
+        "group_id": group_id,
+        "group": group["name"],
+        "preset": preset,
+        "scenes": scenes,
+        "scene_count": len(scenes),
+        "requested_seconds": round(sum(s["seconds"] for s in scenes), 3),
+        # 何を焼くか。押す前に読めないと、テロップ入りのつもりで素の連結が出る。
+        "burns": burns,
+        "tighten": bool(int(preset.get("tighten") or 0)),
+        "upscale": bool(int(preset.get("upscale") or 0)),
+        "cache_bytes": sum(s.get("cache_bytes") or 0 for s in scenes),
+        # 投入すれば落ちると分かっている条件。ここに1つでも在れば押させない。
+        "blocking": [s["position"] for s in scenes
+                     if s["source_missing"] or (burns and s["no_session"])],
+    }
+
+
+@router.post("/api/groups/{group_id}/work")
+async def create_work_api(group_id: int, payload: WorkRequest) -> dict:
+    """グループ1件を、投稿できるmp4 1本にするjobを立てる。
+
+    ``reel``(切り出しの連結)との違いは、あちらがstream copyで繋ぐだけの**素材**なのに対し、
+    こちらは各シーンにテロップを焼き、間を詰め、検品まで通した**完成品**であること。素材が
+    要る場面もあるので、reelは残して別の口にしている。
+
+    シーンの並びはグループの ``position``(=人が決めた書き出し順)。ここでは渡さない —
+    渡す形にすると、画面が並びを組み立て直すたびにDBの並びと食い違う余地が生まれる。
+
+    投入時に確かめるのは「待った末に落ちる条件」だけ(グループが空・録画が消えている・
+    空き容量)。実際の生成はworkerで行う。
+    """
+    group = await asyncio.to_thread(runtime.storage.get_group, group_id)
+    if group is None:
+        raise HTTPException(status_code=404, detail="グループが見つかりません。")
+    cuts = [row for row
+            in await asyncio.to_thread(runtime.storage.bookmarks_in_group, group_id)
+            if row.get("end") is not None]
+    if not cuts:
+        raise HTTPException(
+            status_code=422,
+            detail=f"グループ「{group['name']}」に尺のある見どころがありません。"
+                   "先に追加してください。")
+    recording_id = int(cuts[0]["recording_id"])
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail="先頭シーンの録画が見つかりません（削除済み）。")
+    path = files._resolved_recording_path(recording)
+    # 中間はシーンぶんの再encode物が同時に載る。空きの判定は出力と同じvolumeで行う
+    # (make_workが中間をそこへ置くため)。
+    disk._require_disk_space([path.parent], "work", parts=len(cuts))
+    row = await media_jobs._enqueue_media_job(
+        "work", recording_id, recording=recording,
+        stem=f"{group['name']} ({len(cuts)}シーン)",
+        params={"group_id": group_id, "preset_id": payload.preset_id})
+    row.update({"group_id": group_id, "group": group["name"], "scenes": len(cuts)})
     return row

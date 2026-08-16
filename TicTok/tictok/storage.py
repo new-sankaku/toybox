@@ -92,10 +92,12 @@ from tictok.store.gifter_league import GifterLeagueMixin
 from tictok.store.battles import BattlesMixin
 from tictok.store.streamers import StreamersMixin
 from tictok.store.analytics_store import AnalyticsMixin
+from tictok.store.corrections import CorrectionsMixin
 from tictok.store.recordings import RecordingsMixin
 from tictok.store.transcripts import TranscriptsMixin
 from tictok.store.media_jobs import MediaJobsMixin
 from tictok.store.settings_store import SettingsMixin
+from tictok.store.clip_presets import ClipPresetsMixin
 
 # 分割前の tictok.storage が公開していた名前。importしている側(server / collector /
 # core.notify / test)を書き換えずに済ませるため、ここから再exportし続ける。
@@ -158,8 +160,10 @@ class Storage(
     AnalyticsMixin,
     RecordingsMixin,
     TranscriptsMixin,
+    CorrectionsMixin,
     MediaJobsMixin,
     SettingsMixin,
+    ClipPresetsMixin,
 ):
     """単一のDB窓口。分割の理由・lockの所有と取得順はmodule docstringを参照。"""
 
@@ -187,6 +191,10 @@ class Storage(
         self._user_cache: dict = {}
         # 終了済みBattleの窓は固定なので貢献集計を1度だけ計算してキャッシュする。
         self._battle_contrib_cache: dict = {}
+        # 索引から返信の宛先(@表示名)を外すための既知表示名。読み直しはTTLで間引く
+        # (mention_names / _MENTION_NAMES_TTL_SECONDS)。
+        self._mention_names = None
+        self._mention_names_at = 0.0
         self._closed = False
         # 追記型の耐久journal。batched SQLite writerとは独立に、取り込み時点でeventをdiskへ
         # 追記する最終防波堤。writer停滞やクラッシュでもここに残り、起動時recoverで復元できる。
@@ -223,6 +231,12 @@ class Storage(
         # 開くためで、ここはまだwriter threadも起動していない起動直後の単独実行区間である。
         premigration_backup = self._backup_before_migrations()
         with self._lock:
+            # 切り出し(cut_list)を見どころへ畳んで表を落とす。**表そのものを落とす**ので、
+            # 退避を越えたこの区間で行う(schemaのALTERと違い、失敗しても列を足し直せば
+            # 済む類の操作ではない)。冪等で、表が無ければno-op。
+            if self._has_table("cut_list"):
+                self.merge_cut_list_into_bookmarks()
+                self._conn.commit()
             # 「この選別ruleでの選別は完走済み」。timemapの選別だけがこれを見る(下記)。
             timemap_selection = str(timemap_migration.SELECTION_VERSION)
             timemap_done = (
@@ -244,7 +258,7 @@ class Storage(
             # 残り続けるので、毎起動で同じ母集合を測り直すことになる。しかも物差し
             # (material_media_seconds)は採用集合のplaylist解析かffprobeで、1件あたり数百ms
             # かかる — writer threadを起こす前のこの区間でそれを繰り返すと、据え置きが増える
-            # ほど起動が延びる。据え置いた行は再転写でしか動かず、再転写は現行版で保存する。
+            # ほど起動が延びる。据え置いた行は再文字起こしでしか動かず、再文字起こしは現行版で保存する。
             if timemap_done:
                 timemap_stats = {"checked": 0, "promoted": 0, "kept": 0, "skipped": "done"}
             else:

@@ -70,12 +70,18 @@ async def relocate_api(request: RelocateRequest) -> dict:
             runtime.storage.record_ops_event,
             runtime.logger,
             "storage.relocated",
-            "{moved}本の録画（{gb:.1f}GB）を最終保存先へ退避しました{failed}".format(
+            "{moved}本の録画（{gb:.1f}GB）を最終保存先へ退避しました{clips}{failed}".format(
                 moved=result["moved"], gb=result["moved_bytes"] / (1024 ** 3),
+                # 切り出しは録画に随伴して動く。本数を出さないと、成果物の在り処が変わった
+                # ことがどこにも残らない(切り出しはDBに行を持たず、台帳はfile systemだけ)。
+                clips=(f"。切り出し{result['clips_moved']}本も一緒に移しました"
+                       if result["clips_moved"] else ""),
                 failed=f"。{len(result['failures'])}本は失敗しました" if result["failures"] else ""),
             severity=OPS_WARNING if result["failures"] else OPS_INFO,
             job_id=job_id,
             detail={"moved": result["moved"], "moved_bytes": result["moved_bytes"],
+                    "clips_moved": result["clips_moved"],
+                    "clips_moved_bytes": result["clips_moved_bytes"],
                     "failures": result["failures"], "final_dir": str(runtime.FINAL_DIR)},
         )
     return {"applied": True, "result": result,
@@ -84,7 +90,7 @@ async def relocate_api(request: RelocateRequest) -> dict:
 
 @router.get("/api/capacity")
 async def capacity_api() -> dict:
-    """容量の現況・時系列・満杯予測(区間)・転写/出力の完了率。"""
+    """容量の現況・時系列・満杯予測(区間)・文字起こし/出力の完了率。"""
     return await asyncio.to_thread(disk._capacity_report)
 
 

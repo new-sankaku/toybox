@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>動画容量 — 配色の修正案</title>
+</head>
+<body>
+<!--ARTIFACT-BEGIN-->
+<style>
+:root{
+  --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+  --ink:#403d33; --ink-strong:#322f27; --ink-muted:#4a4636; --line:#8f8871;
+  --accent:#a96e49; --accent-deep:#85482a; --accent-ink:#6f3a20;
+  --invert-bg:#4d4a3f; --invert-fg:#d8d2bc; --invert-fg-muted:rgba(216,210,188,.88);
+  --ok:#5d6e4e; --ok-ink:#3f5136; --warn:#a4502f; --warn-ink:#7a3620;
+  --shadow:rgba(59,56,47,.35);
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--sand-bg); color:var(--ink);
+  font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:14px; line-height:1.6;
+}
+.page{padding:1rem clamp(.6rem,3vw,2rem) 4rem; max-inline-size:100rem; margin-inline:auto}
+.page > h1{font-size:1.05rem; letter-spacing:.18em; margin:0 0 .3rem}
+.lead{font-size:.78rem; color:var(--ink-muted); margin:0 0 1rem}
+.lead b{color:var(--ink-strong)}
+
+/* ---- 案の切替 ---- */
+.switch{display:flex; flex-wrap:wrap; gap:.4rem; margin-bottom:.6rem; position:sticky; top:0; z-index:9;
+  background:var(--sand-bg); padding:.5rem 0; border-block-end:1px solid var(--line)}
+.switch button{
+  font:inherit; font-size:.72rem; letter-spacing:.1em; padding:.4rem 1rem; cursor:pointer;
+  border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong);
+}
+.switch button[aria-pressed="true"]{background:var(--invert-bg); color:var(--invert-fg); border-color:var(--invert-bg)}
+.plan{margin-bottom:.8rem; padding:.6rem .8rem; background:var(--sand-panel); border:1px solid var(--line)}
+.plan h2{margin:0 0 .3rem; font-size:.8rem; letter-spacing:.14em; color:var(--ink-strong)}
+.plan p{margin:0 0 .4rem; font-size:.76rem}
+.plan ul{margin:0; padding-inline-start:1.2rem; font-size:.74rem; color:var(--ink-muted)}
+.plan li{margin-block:.15rem}
+.plan .cost{display:inline-block; font-size:.68rem; letter-spacing:.1em; padding:.1rem .5rem;
+  border:1px solid var(--line); background:var(--sand-panel-muted); margin-inline-start:.4rem}
+.stats{display:flex; flex-wrap:wrap; gap:.5rem; margin-block:.5rem}
+.stats div{flex:1 1 9rem; border:1px solid var(--line); background:var(--sand-panel-muted); padding:.25rem .6rem}
+.stats .k{display:block; font-size:.6rem; letter-spacing:.1em; color:var(--ink-muted)}
+.stats .n{display:block; font-size:1.05rem; font-weight:700; font-variant-numeric:tabular-nums; color:var(--ink-strong)}
+.pane{display:none}
+.pane.on{display:block}
+
+/* ================= 画面の再現（style.css 相当の抜粋） ================= */
+.app-shell{border:1px solid var(--line); background:var(--sand-bg); box-shadow:.35rem .35rem 0 var(--shadow)}
+.a-topbar{display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; padding:.35rem .8rem;
+  background:var(--sand-bg-deep); border-bottom:1px solid var(--line); font-size:.7rem}
+.a-brand{letter-spacing:.2em; color:var(--ink-strong)}
+.a-nav{display:flex; gap:.3rem}
+.nav-link{font-size:.66rem; letter-spacing:.1em; padding:.2rem .6rem; border:1px solid transparent;
+  color:var(--ink-muted); text-decoration:none}
+.nav-link.active{background:var(--invert-bg); color:var(--invert-fg)}
+.a-disk{display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-left:auto; font-size:.68rem; color:var(--ink-muted)}
+.a-disk .d-vol{display:flex; align-items:center; gap:.3rem; text-decoration:none; color:inherit}
+.a-disk .d-vol .v{color:var(--ink-strong)}
+.a-disk .d-vol .track{display:block; inline-size:clamp(2.5rem,6vw,6rem); block-size:.45rem;
+  border:1px solid var(--line); background:var(--sand-panel-muted)}
+.a-disk .d-vol .fill{display:block; block-size:100%; background:var(--ink-muted)}
+.a-disk .d-vol.low .v,.a-disk .d-vol.low .l{color:var(--warn-ink)}
+.a-disk .d-vol.low .fill{background:var(--warn)}
+.a-ws{font-size:.66rem; color:var(--ink-muted)}
+.a-ws .dot{color:var(--ok-ink)}
+.a-content{padding:.8rem 1rem 1.2rem; display:flex; flex-direction:column; gap:.6rem}
+
+.a-card{background:var(--sand-panel); border:1px solid var(--line); display:flex; flex-direction:column}
+.a-settingscard{box-shadow:.35rem .35rem 0 var(--shadow)}
+.a-card > h3{margin:0; font-size:.72rem; font-weight:600; letter-spacing:.15em;
+  color:var(--invert-fg); background:var(--invert-bg); padding:.25rem .5rem;
+  display:flex; align-items:center; justify-content:space-between; gap:.5rem; flex-wrap:wrap}
+.a-card > h3 .sub{font-size:.6rem; opacity:.7; font-weight:400}
+.a-card > .body{padding:.5rem}
+
+.btn{font:inherit; letter-spacing:.15em; font-size:.74rem; padding:.45rem 1.1rem;
+  border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--ink-strong); cursor:pointer}
+.btn.btn-compact{padding:.2rem .6rem; letter-spacing:.06em; font-size:.7rem; white-space:nowrap}
+.btn-primary{background:var(--invert-bg); color:var(--invert-fg)}
+.note-actions{display:flex; align-items:center; gap:.8rem; flex-wrap:wrap; margin-block:.4rem}
+.form-message{font-size:.75rem; color:var(--accent-ink); min-height:1em}
+.chart-note{font-size:.7rem; color:var(--ink-muted); margin-bottom:.5rem}
+
+.table-wrap{overflow-x:auto; border:1px solid var(--line)}
+.result-table{inline-size:100%; border-collapse:collapse; font-size:.78rem; background:var(--sand-panel-muted)}
+.result-table th{background:var(--invert-bg); color:var(--invert-fg); text-align:left; font-weight:600;
+  letter-spacing:.1em; padding:.4rem .6rem; font-size:.7rem; white-space:nowrap}
+.result-table td{padding:.35rem .6rem; border-top:1px solid rgba(143,136,113,.45); color:var(--ink-strong)}
+.result-table tbody tr:nth-child(odd){background:rgba(255,250,230,.18)}
+.result-table th.num,.result-table td.num{text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap}
+.result-table .rank-top td{background:rgba(169,110,73,.18)}
+.result-subtitle{margin:0 0 .3rem; font-size:.74rem; font-weight:600; letter-spacing:.12em; color:var(--ink-strong)}
+.result-sub-note{font-size:.64rem; font-weight:400; letter-spacing:.04em; color:var(--ink-muted); margin-left:.4rem}
+
+.cap-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,20rem),1fr)); gap:.6rem .8rem; align-items:start}
+.cap-cell{display:flex; flex-direction:column; gap:.4rem; min-inline-size:0}
+.cap-kpibar{padding:.4rem; background:var(--sand-panel-muted); border:1px solid var(--line);
+  display:flex; gap:.4rem; flex-wrap:wrap}
+.a-chip{display:flex; flex-direction:column; gap:.1rem; border:1px solid var(--line);
+  background:var(--invert-bg); color:var(--invert-fg); padding:.25rem .6rem; min-inline-size:6rem}
+.a-chip .l{font-size:.58rem; letter-spacing:.1em; color:var(--invert-fg-muted)}
+.a-chip .v{font-size:.95rem; font-variant-numeric:tabular-nums}
+
+.cap-flow{display:flex; flex-direction:column; gap:.35rem; margin-block-end:.5rem}
+.cap-place{display:flex; flex-wrap:wrap; align-items:baseline; gap:.3rem .8rem; padding:.45rem .6rem;
+  background:var(--sand-panel-muted); border:1px solid var(--line)}
+.cap-place .l{font-weight:700; letter-spacing:.08em}
+.cap-place .p{color:var(--ink-muted); word-break:break-all; min-inline-size:0; font-size:.74rem}
+.cap-place .v{margin-inline-start:auto; white-space:nowrap; font-variant-numeric:tabular-nums}
+.cap-move{display:flex; flex-wrap:wrap; align-items:center; gap:.3rem .8rem; padding-inline:.6rem}
+.cap-move .cap-arrow{color:var(--accent-ink)}
+.cap-move-text{font-weight:700}
+
+/* ============================================================
+   A案: 骨格はそのまま、色の役を1つずつに固定する
+   黒帯=見出し / 茶=押せる物 / 赤茶=危ない / 値は明地
+   ============================================================ */
+[data-v="a"] .result-table th{
+  background:var(--sand-bg-deep); color:var(--ink-strong);
+  border-block-end:2px solid var(--line);
+}
+[data-v="a"] .btn-primary{background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep)}
+[data-v="a"] .a-chip{
+  background:var(--sand-panel); color:var(--ink-strong);
+  border-inline-start:.2rem solid var(--line);
+}
+[data-v="a"] .a-chip .l{color:var(--ink-muted)}
+[data-v="a"] .cap-kpibar{background:transparent; border:0; padding:0}
+[data-v="a"] .form-message{color:var(--ink-muted)}
+[data-v="a"] .cap-move .cap-arrow{color:var(--ink-muted)}
+[data-v="a"] .result-table .rank-top td{
+  background:rgba(164,80,47,.14);
+}
+[data-v="a"] .result-table .rank-top td:first-child{box-shadow:inset .2rem 0 0 var(--warn)}
+[data-v="a"] .result-table .rank-top td.num:last-child{color:var(--warn-ink); font-weight:700}
+
+/* ============================================================
+   B案: 黒帯を1枚も出さない。見出しは文字＋罫線、表headerも罫線
+   ============================================================ */
+[data-v="b"] .a-card > h3{
+  background:transparent; color:var(--ink-strong);
+  border-block-end:.15rem solid var(--accent-deep);
+  padding:.4rem .6rem;
+}
+[data-v="b"] .a-card > h3 .sub{color:var(--ink-muted); opacity:1}
+[data-v="b"] .result-table{background:transparent}
+[data-v="b"] .result-table th{
+  background:var(--sand-panel); color:var(--ink-muted); font-weight:700;
+  border-block-end:1px solid var(--ink-muted);
+}
+[data-v="b"] .table-wrap{background:var(--sand-panel-muted)}
+[data-v="b"] .btn-primary{background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep)}
+[data-v="b"] .a-chip{background:transparent; color:var(--ink-strong); border:0;
+  border-inline-start:1px solid var(--line); border-radius:0; padding-inline:.7rem}
+[data-v="b"] .a-chip:first-child{border-inline-start:0; padding-inline-start:.2rem}
+[data-v="b"] .a-chip .l{color:var(--ink-muted)}
+[data-v="b"] .a-chip .v{font-size:1.05rem; font-weight:700}
+[data-v="b"] .cap-kpibar{background:transparent; border:0; padding:.2rem 0}
+[data-v="b"] .form-message{color:var(--ink-muted)}
+[data-v="b"] .cap-move .cap-arrow{color:var(--ink-muted)}
+[data-v="b"] .cap-place{background:transparent; border:0; border-inline-start:.2rem solid var(--line)}
+[data-v="b"] .result-table .rank-top td{background:transparent}
+[data-v="b"] .result-table .rank-top td.num:last-child{color:var(--warn-ink); font-weight:700}
+[data-v="b"] .result-table .rank-top td:first-child{box-shadow:inset .2rem 0 0 var(--warn)}
+[data-v="b"] .nav-link.active{background:transparent; color:var(--ink-strong); border-block-end:.15rem solid var(--accent-deep)}
+
+/* ============================================================
+   C案: B案 + 量を「長さ」で示す。色は警告だけ
+   ============================================================ */
+[data-v="c"] .a-card > h3{
+  background:transparent; color:var(--ink-strong);
+  border-block-end:.15rem solid var(--ink-muted); padding:.4rem .6rem;
+}
+[data-v="c"] .a-card > h3 .sub{color:var(--ink-muted); opacity:1}
+[data-v="c"] .result-table{background:transparent}
+[data-v="c"] .result-table th{background:var(--sand-panel); color:var(--ink-muted); font-weight:700;
+  border-block-end:1px solid var(--ink-muted)}
+[data-v="c"] .table-wrap{background:var(--sand-panel-muted)}
+[data-v="c"] .btn-primary{background:var(--accent-deep); color:var(--invert-fg); border-color:var(--accent-deep)}
+[data-v="c"] .a-chip{background:transparent; color:var(--ink-strong); border:0;
+  border-inline-start:1px solid var(--line); padding-inline:.7rem; flex:1 1 8rem}
+[data-v="c"] .a-chip:first-child{border-inline-start:0; padding-inline-start:.2rem}
+[data-v="c"] .a-chip .l{color:var(--ink-muted)}
+[data-v="c"] .a-chip .v{font-size:1.05rem; font-weight:700}
+[data-v="c"] .cap-kpibar{background:transparent; border:0; padding:.2rem 0}
+[data-v="c"] .form-message{color:var(--ink-muted)}
+[data-v="c"] .cap-move .cap-arrow{color:var(--ink-muted)}
+[data-v="c"] .cap-place{background:transparent; border:0; border-inline-start:.2rem solid var(--line)}
+[data-v="c"] .result-table .rank-top td{background:transparent}
+[data-v="c"] .result-table .rank-top td.num:last-child{color:var(--warn-ink); font-weight:700}
+[data-v="c"] .result-table .rank-top td:first-child{box-shadow:inset .2rem 0 0 var(--warn)}
+[data-v="c"] .nav-link.active{background:transparent; color:var(--ink-strong); border-block-end:.15rem solid var(--ink-muted)}
+/* C案だけ: 量のcellに占有barを敷く（--q = 最大値に対する割合） */
+[data-v="c"] td.q{position:relative; isolation:isolate}
+/* barは数字の側(右)から伸ばす。左端から伸ばすと、右寄せの数字とbarの端が離れて
+   「どの数字のbarか」が読めなくなる。 */
+[data-v="c"] td.q::before{
+  content:""; position:absolute; inset-block:.15rem; inset-inline-end:0;
+  inline-size:calc(var(--q,0) * 100%); background:rgba(64,61,51,.16); z-index:-1;
+}
+[data-v="c"] tr.rank-top td.q::before{background:rgba(164,80,47,.28)}
+/* C案だけ: 完了率chipに達成barを付ける */
+[data-v="c"] .a-chip .bar{display:block; block-size:.3rem; background:var(--sand-bg-deep);
+  border:1px solid var(--line); margin-block-start:.2rem}
+[data-v="c"] .a-chip .bar i{display:block; block-size:100%; background:var(--ink-muted)}
+.a-chip .bar{display:none}
+
+/* 案ごとの凡例 */
+.legend{display:flex; flex-wrap:wrap; gap:.5rem; margin-block:.5rem 0; font-size:.68rem}
+.legend span{display:inline-flex; align-items:center; gap:.3rem; color:var(--ink-muted)}
+.legend i{inline-size:1.1rem; block-size:.7rem; border:1px solid var(--line); display:inline-block}
+</style>
+
+<div class="page">
+  <h1>動画容量 — 配色の修正案</h1>
+  <p class="lead">
+    いまの原因: 濃い墨色 <b>--invert-bg</b> が「card見出し・表header・KPI chip・primary button・btn hover」の<b>5役</b>を兼ね、
+    茶 <b>--accent</b> が「▼矢印・status文言・警告行・sort中header・hover」に散っています。
+    その結果 <b>1画面に黒帯が9本</b>並び、どれが見出しでどれが押せるのか判別できません。
+    3案とも「1つの色 = 1つの意味」に揃える方針で、差は<b>どこまで帯を捨てるか</b>です。
+  </p>
+
+  <p class="lead"><b>採用: C案</b>（2026-08-08 適用済み）。表headerの3実装(.result-table / .xtab / .a-rank / .a-cmp)も同時に統一し、
+    明地化で読めなくなる子要素(.a-livecard&gt;h3 の配信者名、.a-chip の ok/warn、.a-tile の REC)を差し替えています。
+    このpageは判断の記録として残しています。実物は /capacity を見てください。</p>
+
+  <div class="switch" id="switch"></div>
+  <div id="planbox"></div>
+  <div id="panes"></div>
+</div>
+
+<template id="screen">
+  <div class="app-shell">
+    <div class="a-topbar">
+      <div class="a-brand">■ <b>TicTok</b></div>
+      <nav class="a-nav">
+        <a class="nav-link" href="#">Overview</a>
+        <a class="nav-link active" href="#">動画容量</a>
+        <a class="nav-link" href="#">Job</a>
+      </nav>
+      <div class="a-disk">
+        <a class="d-vol" href="#"><span class="l">C:</span><span class="track"><span class="fill" style="width:87%"></span></span><span class="v">241.6GB</span></a>
+        <a class="d-vol low" href="#"><span class="l">K:</span><span class="track"><span class="fill" style="width:58%"></span></span><span class="v">3120.2GB</span></a>
+      </div>
+      <div class="a-ws"><span class="dot">●</span> 接続済み</div>
+    </div>
+
+    <div class="a-content">
+      <div class="a-card a-settingscard">
+        <h3>動画の保存先 <span class="sub">録画は一時保存先(SSD)に残ります。最終保存先(HDD)へはこの画面から移します</span></h3>
+        <div class="body">
+          <div class="cap-flow">
+            <div class="cap-place">
+              <span class="l">一時保存先</span><code class="p">C:\rec</code>
+              <span class="v">1,284 本 / 1,902.4 GB</span>
+            </div>
+            <div class="cap-move">
+              <span class="cap-arrow">▼</span>
+              <span class="cap-move-text">まだ移していない完了録画: 212 本 / 388.6 GB</span>
+              <span class="note-actions">
+                <button class="btn">対象を確認</button>
+                <button class="btn btn-primary">最終保存先へ移動</button>
+                <span class="form-message">212 本（388.6 GB）を移動しました。</span>
+              </span>
+            </div>
+            <div class="cap-place">
+              <span class="l">最終保存先</span><code class="p">K:\rec_final</code>
+              <span class="v">3,517 本 / 6,441.8 GB</span>
+            </div>
+          </div>
+          <div class="chart-note">どちらの保存先にも無い記録 4 本（外部で動かされたか、保存先の設定を変えた録画です）</div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>driveの空きと満杯まで <span class="sub">日次の記録から1日あたりの増減を出し、満杯までを幅で見積もります</span></h3>
+        <div class="body">
+          <div class="note-actions">
+            <button class="btn">最新にする</button>
+            <button class="btn">容量を今すぐ記録</button>
+            <span class="form-message">記録しました（2026-08-08 03:00）</span>
+          </div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>Drive</th><th class="num">空き</th><th class="num">全体</th><th class="num">1日あたり</th><th class="num">満杯まで</th></tr></thead>
+              <tbody>
+                <tr class="rank-top"><td>C:</td><td class="num q" style="--q:.13">241.6 GB</td><td class="num">1863.0 GB</td><td class="num">-18.4 GB</td><td class="num">9 〜 17 日</td></tr>
+                <tr><td>K:</td><td class="num q" style="--q:.42">3120.2 GB</td><td class="num">7452.0 GB</td><td class="num">-42.1 GB</td><td class="num">61 〜 96 日</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="chart-note">記録 128 件（最新 2026-08-08 03:00）／満杯までは幅で出します。観測期間が短いうちは数値を出しません。</div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>使用量の推移 <span class="sub">何がどれだけ増えているか</span></h3>
+        <div class="body">
+          <div class="cap-grid">
+            <section class="cap-cell">
+              <h4 class="result-subtitle">録画の増加実績 <span class="result-sub-note">（録画の記録から遡って算出）</span></h4>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead><tr><th>日</th><th class="num">録画</th><th class="num">増加</th></tr></thead>
+                  <tbody>
+                    <tr><td>2026-08-07</td><td class="num">12 本</td><td class="num q" style="--q:.78">41.2 GB</td></tr>
+                    <tr><td>2026-08-06</td><td class="num">9 本</td><td class="num q" style="--q:.64">33.8 GB</td></tr>
+                    <tr><td>2026-08-05</td><td class="num">14 本</td><td class="num q" style="--q:1">52.6 GB</td></tr>
+                    <tr><td>2026-08-04</td><td class="num">7 本</td><td class="num q" style="--q:.41">21.9 GB</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="cap-cell">
+              <h4 class="result-subtitle">後処理の完了率 <span class="result-sub-note">（未処理が多いほど今後の出力で増えます）</span></h4>
+              <div class="a-kpibar cap-kpibar">
+                <div class="a-chip"><span class="l">完了した録画</span><span class="v">3,517 本</span></div>
+                <div class="a-chip"><span class="l">文字起こし済み</span><span class="v">61.4% (2,159)</span><span class="bar"><i style="width:61.4%"></i></span></div>
+                <div class="a-chip"><span class="l">焼き込み済み</span><span class="v">28.2% (992)</span><span class="bar"><i style="width:28.2%"></i></span></div>
+              </div>
+            </section>
+
+            <section class="cap-cell">
+              <h4 class="result-subtitle">Databaseの使用量 <span class="result-sub-note">（動画とは別枠）</span></h4>
+              <div class="a-kpibar cap-kpibar">
+                <div class="a-chip"><span class="l">Database</span><span class="v">3.8 GB</span></div>
+                <div class="a-chip"><span class="l">WAL</span><span class="v">0.2 GB</span></div>
+                <div class="a-chip"><span class="l">DB backup</span><span class="v">11.4 GB (6件)</span></div>
+              </div>
+              <div class="chart-note">event 48,203,911行 / 検索index 1,204,558行 / User 812,004人</div>
+            </section>
+          </div>
+        </div>
+      </div>
+
+      <div class="a-card a-settingscard">
+        <h3>録画folderの内訳 <span class="sub">配信者別・種別別に、実際にfolderを走査して集計します</span></h3>
+        <div class="body">
+          <div class="chart-note">結果は保存され、再走査は下のbuttonを押したときだけ実行します。<strong>この画面はfileを消しません。</strong></div>
+          <div class="note-actions">
+            <button class="btn btn-primary">容量を再scanする</button>
+            <span class="form-message">走査しました。</span>
+          </div>
+          <div class="chart-note">最終scan: 2026-08-08 02:14（214秒）/ 合計 9,828.7 GB・69,463 file</div>
+          <div class="table-wrap">
+            <table class="result-table">
+              <thead><tr><th>種別</th><th class="num">容量</th><th class="num">file数</th><th>作り直せるか</th></tr></thead>
+              <tbody>
+                <tr><td>生録画(.ts)</td><td class="num q" style="--q:1">4880.2 GB</td><td class="num">21,904</td><td>作り直せない</td></tr>
+                <tr><td>録画mp4</td><td class="num q" style="--q:.6">2910.6 GB</td><td class="num">3,517</td><td>作り直せない</td></tr>
+                <tr><td>焼き込み出力</td><td class="num q" style="--q:.25">1204.8 GB</td><td class="num">992</td><td>作り直せる <button class="btn btn-compact">保持policyで確認する</button></td></tr>
+                <tr><td>Up出力</td><td class="num q" style="--q:.13">612.4 GB</td><td class="num">148</td><td>作り直せる <button class="btn btn-compact">保持policyで確認する</button></td></tr>
+                <tr><td>中間file</td><td class="num q" style="--q:.04">208.1 GB</td><td class="num">1,022</td><td>作り直せる <button class="btn btn-compact">保持policyで確認する</button></td></tr>
+                <tr><td>サムネ</td><td class="num q" style="--q:.003">12.6 GB</td><td class="num">41,880</td><td>作り直せる <button class="btn btn-compact">保持policyで確認する</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-wrap" style="margin-block-start:.5rem">
+            <table class="result-table">
+              <thead><tr><th>配信者</th><th class="num">容量</th><th class="num">生録画</th><th class="num">録画mp4</th><th class="num">焼き込み</th><th class="num">Up出力</th><th class="num">その他</th></tr></thead>
+              <tbody>
+                <tr><td>@kirinuki_ch</td><td class="num q" style="--q:1">2904.1 GB</td><td class="num">1502.3 GB</td><td class="num">880.5 GB</td><td class="num">402.1 GB</td><td class="num">98.4 GB</td><td class="num">20.8 GB</td></tr>
+                <tr><td>@yozora_live</td><td class="num q" style="--q:.68">1988.7 GB</td><td class="num">1044.0 GB</td><td class="num">602.2 GB</td><td class="num">241.9 GB</td><td class="num">88.1 GB</td><td class="num">12.5 GB</td></tr>
+                <tr><td>@himawari</td><td class="num q" style="--q:.49">1412.0 GB</td><td class="num">760.8 GB</td><td class="num">440.6 GB</td><td class="num">160.2 GB</td><td class="num">40.0 GB</td><td class="num">10.4 GB</td></tr>
+                <tr><td>@nekomata</td><td class="num q" style="--q:.31">902.4 GB</td><td class="num">498.1 GB</td><td class="num">280.9 GB</td><td class="num">96.6 GB</td><td class="num">21.2 GB</td><td class="num">5.6 GB</td></tr>
+                <tr><td>@sabaku</td><td class="num q" style="--q:.18">511.8 GB</td><td class="num">288.4 GB</td><td class="num">154.0 GB</td><td class="num">52.1 GB</td><td class="num">14.0 GB</td><td class="num">3.3 GB</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+"use strict";
+const VARIANTS = [
+  {
+    id: "now", tab: "現状",
+    title: "現状",
+    stats: [["濃い墨色の面","17"],["有彩色が持つ意味","5"],["変更するCSS規則","—"]],
+    lead: "同じ濃い墨色が5つの役を兼ねているため、帯の意味が読めない状態です。",
+    cost: "—",
+    points: [
+      "card見出し・表header・KPI chip・primary button が全部同じ --invert-bg",
+      "▼矢印と「記録しました」が茶（＝警告色）で、正常な状態が警告に見える",
+      "警告行(残り14日未満)の茶tintが、hover色・sort中headerと同じ茶で埋もれる",
+    ],
+    legend: [],
+  },
+  {
+    id: "a", tab: "A案 役を固定",
+    title: "A案 — 骨格はそのまま、色の役を1つずつに固定する",
+    lead: "レイアウトは一切触らず、「どの色が何を意味するか」だけを決め直します。黒帯は card見出しだけに残し、表headerとchipを明地へ落とします。",
+    cost: "CSS 10規則ほど / 全画面に波及",
+    stats: [["濃い墨色の面","5"],["有彩色が持つ意味","2"],["変更するCSS規則","約10"]],
+    points: [
+      "<b>黒帯 = card見出しだけ</b>。表headerは --sand-bg-deep + 2px下線に（黒帯9本 → 4本）",
+      "<b>茶 = 押せる物だけ</b>。primary button を --accent-deep 塗りにし、▼矢印から茶を外す",
+      "<b>赤茶 = 危ない数値だけ</b>。満杯まで14日未満の行は左に赤茶の縦線＋その数字だけ赤茶",
+      "KPI chip は明地＋左罫線。「値」が「押せる物」に見えなくなる",
+      "status文言は既定 ink-muted、失敗時だけ赤茶（正常な報告が警告に見えなくなる）",
+      "注意: <code>.result-table th</code> と <code>.a-chip</code> は全画面共通なので、他画面も同時に変わります",
+    ],
+    legend: [
+      ["var(--invert-bg)", "見出し"],
+      ["var(--accent-deep)", "押せる物"],
+      ["var(--warn)", "危ない"],
+      ["var(--sand-panel-muted)", "地・値"],
+    ],
+  },
+  {
+    id: "b", tab: "B案 帯を捨てる",
+    title: "B案 — 黒帯を1枚も出さない。区切りは罫線と余白でやる",
+    lead: "card見出しの黒帯も廃止し、見出しは「文字＋下線」にします。塗り面が消えるぶん、表の中身（＝この画面の主役である数字）が最前面に出ます。",
+    cost: "CSS 14規則ほど / 全画面に波及",
+    stats: [["濃い墨色の面","0"],["有彩色が持つ意味","2"],["変更するCSS規則","約14"]],
+    points: [
+      "<b>塗り潰した帯はゼロ</b>。card見出し = ink-strong の文字 + 2px --accent-deep の下線",
+      "表header = 地は panel のまま、ink-muted の小文字 + 1px 下線（罫線だけで列を仕切る）",
+      "chip = 枠を外して縦罫で区切る数値ブロック。値を 1.05rem / 700 に上げて数字を主役に",
+      "<b>茶が出るのは primary button と見出し下線だけ</b>、<b>赤茶が出るのは危ない行だけ</b>",
+      "保存先panelも塗りをやめ、左 2px の罫線だけにする（一時→最終の並びが縦線で読める）",
+      "注意: A案より変更が広く、他画面の「card見出し」の見え方も変わります",
+    ],
+    legend: [
+      ["var(--accent-deep)", "押せる物・見出し下線"],
+      ["var(--warn)", "危ない"],
+      ["var(--sand-panel)", "地"],
+      ["var(--ink-muted)", "従属文字・罫線"],
+    ],
+  },
+  {
+    id: "c", tab: "C案 量は長さで",
+    title: "C案 — B案 ＋ 量は色ではなく「長さ」で示す",
+    lead: "B案の配色に加え、容量cellの背後に占有barを敷きます。この画面は「どれが太っているか」を探す画面なので、桁を読まなくても大小が分かるのが効きます。色はさらに減らし、有彩色は警告と button だけになります。",
+    cost: "CSS 18規則ほど + JS で --q を渡す / 全画面に波及",
+    stats: [["濃い墨色の面","0"],["有彩色が持つ意味","2"],["変更するCSS規則","約18 + JS"]],
+    points: [
+      "容量・増加・空きのcellに、その表の最大値に対する割合で <b>薄い占有bar</b> を敷く",
+      "見出し下線も茶をやめて ink-muted に。<b>有彩色は「押せる物」と「危ない」の2つだけ</b>",
+      "完了率 chip に達成bar。61.4% と 28.2% の差が数字を読む前に分かる",
+      "危ない行のbarだけ赤茶に変わるので、警告が「長さ」でも「色」でも同時に立つ",
+      "実装: <code>renderTableRows</code> の数値列に <code>--q</code> を計算して渡す小改修が要ります",
+      "注意: barは「その表の中での相対」です。表を跨いだ比較には使えない旨を注記に入れます",
+    ],
+    legend: [
+      ["var(--accent-deep)", "押せる物"],
+      ["var(--warn)", "危ない"],
+      ["rgba(64,61,51,.16)", "量（長さ）"],
+      ["var(--sand-panel)", "地"],
+    ],
+  },
+];
+
+const tpl = document.getElementById("screen");
+const panes = document.getElementById("panes");
+const switchBar = document.getElementById("switch");
+const planbox = document.getElementById("planbox");
+
+VARIANTS.forEach((v) => {
+  const pane = document.createElement("div");
+  pane.className = "pane";
+  pane.dataset.pane = v.id;
+  const wrap = document.createElement("div");
+  wrap.dataset.v = v.id;
+  wrap.appendChild(tpl.content.cloneNode(true));
+  pane.appendChild(wrap);
+  panes.appendChild(pane);
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = v.tab;
+  btn.dataset.go = v.id;
+  switchBar.appendChild(btn);
+});
+
+function show(id) {
+  const v = VARIANTS.find((x) => x.id === id);
+  panes.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.dataset.pane === id));
+  switchBar.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.go === id)));
+  planbox.innerHTML =
+    `<div class="plan"><h2>${v.title}<span class="cost">${v.cost}</span></h2>`
+    + `<p>${v.lead}</p>`
+    + `<div class="stats">${v.stats.map(([k, n]) => `<div><span class="k">${k}</span><span class="n">${n}</span></div>`).join("")}</div>`
+    + `<ul>${v.points.map((p) => `<li>${p}</li>`).join("")}</ul>`
+    + (v.legend.length
+      ? `<div class="legend">${v.legend.map(([c, l]) => `<span><i style="background:${c}"></i>${l}</span>`).join("")}</div>`
+      : "")
+    + `</div>`;
+}
+
+switchBar.addEventListener("click", (e) => {
+  const id = e.target.dataset && e.target.dataset.go;
+  if (id) show(id);
+});
+show("now");
+</script>
+<!--ARTIFACT-END-->
+</body>
+</html>

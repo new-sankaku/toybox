@@ -1,0 +1,71 @@
+== 換算 ==
+  文字の高さ: Size 0.150 -> 86px / Size 0.300 -> 172px（比 2.00 倍、値の比は 2.00 倍）
+  縁の太さ: Thickness 0.060 -> 5.0px / 0.120 -> 10.0px（比 2.00 倍）
+  ぼかし: Softness 0 -> 88px / Softness 5.0 -> 96px（裾が片側 4.0px = σ 3.1px）
+  帯の余白: ExtendH 0.300 -> 片側 81.0px / ExtendV 0.300 -> 片側 70.5px
+  帯の角丸: Round 1.000 -> 半径 113.3px（帯の高さの 0.50 倍）
+
+  sizeToPx     0.5309
+  thickToPx    0.9690
+  softToPx     0.0073
+  extendXToPx  3.1395
+  extendYToPx  2.7326
+  roundToPx    1.3171
+
+== 送り幅 ==  1080x1920 / 書体 42件
+  Noto Sans JP Bold                  送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  BIZ UDPGothic Bold                 送り 0.8000 / 字幅 0.6296 / 字高 0.6481
+  Noto Sans JP Medium Regular        送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  Noto Sans JP Black Regular         送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  HGMaruGothicMPRO Regular           送り 0.8000 / 字幅 0.5926 / 字高 0.5741
+  HGPSoeiKakupoptai Regular          送り 0.8000 / 字幅 0.7407 / 字高 0.7222
+  RocknRoll One Regular              送り 0.5556 / 字幅 0.4815 / 字高 0.4815
+  Mochiy Pop One Regular             送り 0.5556 / 字幅 0.4074 / 字高 0.5000
+  Zen Maru Gothic Black Regular      送り 0.5481 / 字幅 0.4815 / 字高 0.4630
+  Zen Maru Gothic Bold               送り 0.5481 / 字幅 0.4815 / 字高 0.4630
+  UD Digi Kyokasho NP-B Bold         送り 0.6889 / 字幅 0.5185 / 字高 0.5185
+  HGPKyokashotai Medium              送り 0.8000 / 字幅 0.5926 / 字高 0.5741
+  Yusei Magic Regular                送り 0.5519 / 字幅 0.4074 / 字高 0.4259
+  Hachi Maru Pop Regular             送り 0.5481 / 字幅 0.4074 / 字高 0.4074
+  Yomogi Regular                     送り 0.5556 / 字幅 0.4074 / 字高 0.4444
+  Noto Serif JP Regular              送り 0.5556 / 字幅 0.4444 / 字高 0.4444
+  Yu Mincho Demibold Bold            送り 0.7259 / 字幅 0.5556 / 字高 0.5556
+  Shippori Mincho B1 ExtraBold Regular 送り 0.5481 / 字幅 0.4815 / 字高 0.4630
+  Klee One SemiBold Regular          送り 0.5556 / 字幅 0.4815 / 字高 0.4815
+  Zen Old Mincho Black Regular       送り 0.5481 / 字幅 0.4815 / 字高 0.4630
+  Noto Sans JP DemiLight Regular     送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  Zen Antique Regular                送り 0.5481 / 字幅 0.4815 / 字高 0.4630
+  HGPMinchoE Regular                 送り 0.8000 / 字幅 0.5926 / 字高 0.5926
+  HGPGothicE Regular                 送り 0.8000 / 字幅 0.6296 / 字高 0.6111
+  Noto Serif JP Black Regular        送り 0.5556 / 字幅 0.4444 / 字高 0.4444
+  HGSGyoshotai Medium                送り 0.8000 / 字幅 0.5926 / 字高 0.5741
+  Yu Gothic UI Bold                  送り 0.6000 / 字幅 0.4444 / 字高 0.4630
+  Noto Sans JP Light Regular         送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  HGPSoeiPresenceEB Extra-Bold       送り 0.8000 / 字幅 0.7037 / 字高 0.7037
+  Train One Regular                  送り 0.5556 / 字幅 0.4815 / 字高 0.4815
+  Rampart One Regular                送り 0.5519 / 字幅 0.4630 / 字高 0.5370
+  Dela Gothic One Regular            送り 0.5556 / 字幅 0.3704 / 字高 0.3704
+  Reggae One Regular                 送り 0.5556 / 字幅 0.4815 / 字高 0.4815
+  HGSSoeiPresenceEB Extra-Bold       送り 0.8000 / 字幅 0.7037 / 字高 0.7037
+  HGPSoeiKakugothicUB Regular        送り 0.8000 / 字幅 0.6852 / 字高 0.6852
+  HGPGyoshotai Medium                送り 0.8000 / 字幅 0.5926 / 字高 0.5741
+  HGSeikaishotaiPRO Regular          送り 0.8000 / 字幅 0.5926 / 字高 0.5926
+  HGSKyokashotai Medium              送り 0.8000 / 字幅 0.5926 / 字高 0.5741
+  Noto Serif JP Bold Regular         送り 0.5556 / 字幅 0.4444 / 字高 0.4444
+  Noto Sans JP Regular               送り 0.6667 / 字幅 0.5185 / 字高 0.5370
+  DotGothic16 Regular                送り 0.5556 / 字幅 0.4815 / 字高 0.4815
+  MS Gothic Regular                  送り 0.8000 / 字幅 0.5741 / 字高 0.5741
+
+書体ごとのばらつき: 送り幅 38.2% / 字の高さ 66.6%
+送り幅も字の高さも書体でばらついている。Size が何を決めているかはここでは決まらないが、幅の判定は書体ごとの実測値をそのまま使うので支障は無い。
+字送り1.30の確かめ: 足された分 0.3037（0.3000 のはず、ずれ 0.0037）
+大きさ2倍の確かめ: 送り幅 0.6667（基準 0.6667、比 1.000 倍。1.000 なら比例）
+
+== 作り直し ==
+割り当て 138件（うち見た目のプリセット 118件）/ 書体 405件 を書き出しました。
+装飾データ.json: RULES 138件 / LOOKS 118件 / SWATCH_CASES 139件（版 1）
+注意: よちよち（水色） は縁が 0.050 で、Zen Maru Gothic の上限 0.047 を超えます（漢字の内側が塗り潰れます）。
+注意: ほっぺ（もちもち） は縁が 0.036 で、Zen Maru Gothic Black の上限 0.035 を超えます（漢字の内側が塗り潰れます）。
+確かめ: 139件すべて確かめ済み。Resolve で流し直す必要はありません。
+注意: 絶叫 は全角11文字で画面の 87% を占めます（上限 86%）。大きさを 0.0967 以下にするか、字送りを詰めてください。
+注意: 煽り は全角11文字で画面の 87% を占めます（上限 86%）。大きさを 0.0990 以下にするか、字送りを詰めてください。

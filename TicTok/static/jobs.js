@@ -23,6 +23,12 @@ const JOB_STATE_LABELS = {
 // (実際「Up出力」と「AI高画質化」、「焼き込み」と「コメント焼き込み」がずれていた)。
 let kindLabels = {};
 
+// 取り消し・再実行が効くdomain。これもserver(api/media_jobs.QUEUED_JOB_DOMAINS)が唯一の
+// 出所。ここに同じ一覧を書いていた頃は、台帳へ種別が増えても画面が黙って古いままで、
+// 文字起こし(stt)・笑い声分析(laugh)のjobだけbuttonが出ず取り消せなかった。
+// 取得前は空 = buttonを出さない(押せない物を押せるように見せるより、出ない方が実態に近い)。
+let queuedKinds = new Set();
+
 // 状態filterの値 → 対象のstate。server側の同じ表(record/media_queue.STATE_FILTERS)が台帳を
 // 絞り、ここはWSで届いた行に同じ判定を当てるために持つ(訳語ではなくstate keyなので二重に
 // 持っても語がずれることはない)。
@@ -52,7 +58,8 @@ const expandedGroups = new Set();
 // 「いま何が動いているか」で、全行を段階listで埋めるとその見通しが失われるため。
 const expandedStages = new Set();
 let gpu = null;
-// 台帳外(transcribe_queue)の実状。GPU現況と台帳の食い違いを説明するためだけに読む。
+// 文字起こしの台帳(kind=stt)をstate別に数えた値。この一覧はlimitで切れるので、件数だけは
+// 全体を名乗れるようにする(GPU現況と一覧の食い違いを説明するために読む)。
 let stt = null;
 // 一覧が空に見えるときの理由。取得前(loading)・0件(ok)・取得失敗(failed)を取り違えると、
 // 落ちているだけのserverを「jobが無い」と読み違える。
@@ -153,7 +160,8 @@ const JOB_SORT_COLUMNS = {
   target: { dir: "asc", value: (job) => jobTargetText(job) },
   pct: { dir: "desc", value: (job) => job.pct || 0 },
   queued: { dir: "desc", value: (job) => job.queued_at || job.started_at || 0 },
-  // 未実行(開始も投入も無い)は所要が「無い」ので、0秒のjobより後ろへ置く。
+  // 待機中など未実行のjobは所要が「無い」ので、0秒のjobより後ろへ置く(待機の長さを
+  // ここへ混ぜると、順番待ちが長いだけのjobが最も時間を食ったjobとして先頭に来る)。
   elapsed: { dir: "desc", value: (job) => (elapsedSeconds(job) === null ? -1 : elapsedSeconds(job)) },
   result: { dir: "asc", value: (job) => resultText(job) },
 };
@@ -189,6 +197,7 @@ function applySort(key) {
   if (!sortState || sortState.key !== key) sortState = { key, dir: column.dir };
   else if (sortState.dir === column.dir) sortState = { key, dir: column.dir === "desc" ? "asc" : "desc" };
   else sortState = null;
+  prefSet(JOB_SORT_PREF, sortState ? `${sortState.key}:${sortState.dir}` : null);
   render();
 }
 
@@ -340,16 +349,34 @@ function targetCell(row) {
   return wrap;
 }
 
+// 所要は「実行にかかった時間」。始まっていないjobには存在しないので、投入からの経過で
+// 代用しない — 順番待ちの時間をここへ積むと、まだ1秒も動いていないjobが3時間かかったよう
+// に読め、待機列が詰まっているのか本当に重いjobなのかを取り違える。
 function elapsedSeconds(job) {
-  const start = job.started_at || job.queued_at;
-  if (!start) return null;
+  if (!job.started_at) return null;
   const end = job.finished_at || Date.now() / 1000;
-  return Math.max(0, end - start);
+  return Math.max(0, end - job.started_at);
 }
 
-function elapsedText(job) {
+// 投入からの経過(順番待ちの長さ)。所要とは別物なので、名乗りも別にする。
+function waitSeconds(job) {
+  if (job.state !== "pending" || !job.queued_at) return null;
+  return Math.max(0, Date.now() / 1000 - job.queued_at);
+}
+
+// 待機中は所要の代わりに「待機 hh:mm:ss」を出す。ここを "-" だけにすると、詰まったjobが
+// いつから並んでいるのかを投入時刻から暗算するしかなくなる。
+function elapsedCell(job) {
   const seconds = elapsedSeconds(job);
-  return seconds === null ? "-" : fmtDuration(seconds);
+  if (seconds !== null) return fmtDuration(seconds);
+  const waiting = waitSeconds(job);
+  if (waiting === null) return "-";
+  const span = document.createElement("span");
+  span.className = "job-wait";
+  span.textContent = `待機 ${fmtDuration(waiting)}`;
+  span.title = "まだ実行が始まっていないjobです。投入してからの順番待ちの長さで、"
+    + "実行にかかった時間ではありません。";
+  return span;
 }
 
 function resultText(job) {
@@ -357,6 +384,18 @@ function resultText(job) {
   const result = job.result || {};
   if (result.count > 1) return `${result.count}件を切り出し`;
   return result.filename || "";
+}
+
+// 出来上がったfileの置き場。成果物を作るjobは全てpathを返しているのに、この列は
+// file名しか出しておらず「どこに出来たのか分からない」ままだった。成果物は配信者folderの
+// 下(動画は<配信者>/_clips/・静止画は<配信者>/_screenshots/)へ出るうえ、保存先も2箇所ある
+// ので、dirまで出さないと探せない。
+function resultLocation(job) {
+  const result = job.result || {};
+  if (result.output_dir) return result.output_dir;
+  const path = result.output_path || result.path || "";
+  const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
+  return cut > 0 ? path.slice(0, cut) : "";
 }
 
 // 失敗jobのmessageはffmpeg由来の長文が入る。以前は行内を1行で切ってtooltipへ逃がして
@@ -368,17 +407,32 @@ function resultCell(job) {
   const span = document.createElement("span");
   span.className = "job-result";
   span.textContent = text;
+  // 失敗messageが入っている行には足さない。理由と場所が1つの塊になって読めなくなる。
+  const dir = job.message ? "" : resultLocation(job);
+  if (dir) {
+    const where = document.createElement("span");
+    where.className = "job-result-path";
+    where.textContent = dir;
+    where.title = dir;
+    span.appendChild(where);
+  }
   return span;
 }
 
+// 実行側のbuttonは何を取り消すのかまで名乗らせる(dialogを閉じる側は「キャンセル」)。
 async function sendJobAction(path, job, confirmText, confirmOpts) {
-  const opts = confirmOpts || { title: "jobの取り消し", confirmLabel: "取り消す" };
+  const opts = confirmOpts || { title: "jobの取り消し", confirmLabel: "jobを取り消す" };
   if (confirmText && !await confirmDialog(confirmText, opts)) return;
+  const label = path === "cancel" ? "取り消し" : "再投入";
   try {
     await apiSend("POST", `/api/jobs/${job.job_id}/${path}`);
     await load();
+    // 状態の絞り込みが掛かっていると、再投入した行はpendingになって一覧から外れる。
+    // 押した結果が「行の消滅」に見えるので、何をしたのかは行の外に残す。
+    showToast(`「${job.title}」を${label}しました。`, null, { title: `jobの${label}` });
   } catch (err) {
-    showError(err);
+    // 一覧には多数のjobが並ぶ。どのjobのどの操作かまで名乗らないと対象が辿れない。
+    showError(err, `「${job.title}」の${label}`);
   }
 }
 
@@ -417,18 +471,15 @@ function actionsCell(job) {
   const wrap = document.createElement("span");
   wrap.className = "row-actions";
   // 取り消し・再実行が効くのはDBのqueueに載る映像jobだけ。容量scan等のin-process jobは
-  // 台帳に行が無いので、押せるように見せない。
-  const queued = ["overlay", "upscale", "reprocess", "audionorm", "pack",
-    "waveform", "sprite", "overlay_preview", "clip_batch", "reel", "clip_overlay",
-    "session_overlay", "session_upscale",
-    "bulk_overlay", "bulk_upscale", "bulk_reprocess", "bulk_audionorm", "bulk_pack"]
-    .includes(job.domain);
-  if (!queued) return wrap;
+  // 台帳に行が無いので、押せるように見せない。判定の元はserverが返す(queuedKinds)。
+  if (!queuedKinds.has(job.domain)) return wrap;
   if (ACTIVE_STATES.includes(job.state)) {
     const cancel = document.createElement("button");
     cancel.className = "btn btn-small";
     cancel.textContent = "取り消し";
-    cancel.title = "待機中のjobはqueueから外します。実行中のjobはffmpegを止めて途中のfileを片付けるため、状態が変わるまで少し時間がかかります。";
+    // 実行中を止める相手は種別で違う(焼き込みはffmpeg、文字起こしは復号process)ので、
+    // 特定の道具の名前は出さない。
+    cancel.title = "待機中のjobはqueueから外します。実行中のjobは処理を止めて途中のfileを片付けるため、状態が変わるまで少し時間がかかります。";
     // group行の取り消しは1本ではなくgroupの未終了ぶん全部に効く。配信者まるごとの一括は
     // 数百本になるので、待機中でも件数を言わずに消してはいけない。
     const confirmText = job.total > 1
@@ -516,6 +567,28 @@ function renderLimitNote() {
     + "これより古いjobはこの一覧に出ません。状態・種別で絞ると、古いjobもserver側から拾い直します。";
 }
 
+// 状態filterで失敗・中断を落としているとき、その存在をこの画面が名乗る。navのtabは
+// filterを積まない移動手段なので、隠れた失敗を知らせる口はここにしかない。
+//
+// 名乗れるのは「隠しているのが状態filterだけ」のときに限る。種別・対象で絞っている
+// 一覧に全種別の件数を並べると、今見ている範囲の失敗として読まれる(outsideLedgerと同じ理由)。
+function renderFailedNote() {
+  const el = document.getElementById("job-failed-note");
+  el.textContent = "";
+  el.removeAttribute("title");
+  const filter = currentFilter();
+  if (loadState !== "loaded" || filter.state !== "active") return;
+  if (filter.kind !== "all" || filter.text || pinnedJob) return;
+  const failed = jobBarFailedCount();
+  if (!failed) return;
+  const link = document.createElement("a");
+  link.href = "/jobs?state=failed";
+  link.textContent = `※ 失敗・中断が${fmtNum(failed)}件（この一覧には出ていません）`;
+  link.title = "直近のjob履歴にある失敗・中断の件数です。"
+    + "今の状態filter「実行中・待機中」では表に出ません。押すと「失敗・中断のみ」で開き直します。";
+  el.appendChild(link);
+}
+
 function render() {
   const rows = visibleRows();
   renderTableRows("job-rows", null, rows, (row) => [
@@ -524,7 +597,7 @@ function render() {
     targetCell(row),
     progressCell(row.job),
     fmtDateTimeShort(row.job.queued_at || row.job.started_at),
-    elapsedText(row.job),
+    elapsedCell(row.job),
     resultCell(row.job),
     actionsCell(row.job),
   ], JOB_NUMERIC_COLS, (tr, row) => {
@@ -535,6 +608,7 @@ function render() {
   });
   renderEmptyState(rows.length);
   syncSortHeaders();
+  renderFailedNote();
   renderLimitNote();
   renderGpu();
 }
@@ -583,13 +657,14 @@ function renderGpu() {
   const running = counts.running || 0;
   const pending = counts.pending || 0;
   if (running || pending) {
-    // 状況を見る場所と操作する場所が分かれていた。待機が詰まっているのを見つけても
-    // その場で取り消せないので、操作できる画面へ直接繋ぐ。
+    // 文字起こしはこの一覧の1種別(kind=stt)なので、行き先は別画面ではなくこの一覧の
+    // 絞り込みである。別画面へ送っていた頃は、取り消しも進捗も向こうに縮小版があり、
+    // どちらが今の状態なのか読み分けられなかった。
     sttEl.innerHTML = "";
     const link = document.createElement("a");
-    link.href = "/videos#transcribe";
+    link.href = "/jobs?kind=stt";
     link.textContent = `文字起こしqueue: 実行中 ${running} / 待機中 ${pending}`;
-    link.title = "文字起こしはこの一覧にも種別「文字起こし」として出ます。clickで一括投入・一括取り消しができる画面へ移動します。";
+    link.title = "押すとこの一覧を種別「文字起こし」で絞り込みます（取り消し・再実行もここで行えます）。";
     sttEl.appendChild(link);
   }
 }
@@ -609,6 +684,7 @@ async function load() {
     gpu = data.gpu || null;
     stt = data.stt || null;
     kindLabels = data.kind_labels || {};
+    queuedKinds = new Set(data.queued_kinds || []);
     jobTotal = data.total || 0;
     jobLimit = data.limit || JOB_PAGE_LIMIT;
     loadState = "loaded";
@@ -638,11 +714,66 @@ function onMessage(message) {
   }
 }
 
+// ---- 表示設定の永続化 ----
+// 画面ごとに独立したdocumentで、nav遷移はフルリロードになる。状態・種別・並べ替えは
+// 毎回同じ値を選び直すものなので残す。対象の絞込(自由入力)と明細・段階の開閉(特定のjobを
+// 指した一時的な指定)は残さない。
+const JOB_STATE_PREF = "tictok.jobs.state";
+const JOB_KIND_PREF = "tictok.jobs.kind";
+const JOB_SORT_PREF = "tictok.jobs.sort";
+
+// 状態は選択肢がmarkupに揃っているのでこの場で戻る。onChangeは渡さない — 取り直しは
+// 下のchange listenerが行うので、ここでも呼ぶと初回に同じrequestを2度出す。
+bindPref(document.getElementById("job-flt-state"), JOB_STATE_PREF);
+// 種別の選択肢はserverの応答から作るため、この時点ではselectへ当てられない。?kind=と
+// 同じ経路(pendingKind)へ預け、requestには先に載せてから選択肢が揃った時点で当てる。
+// 保存値がuser操作で変わったときは預かりを解く(選択肢が揃う前の操作でも今の選択が勝つ)。
+bindPref(document.getElementById("job-flt-kind"), JOB_KIND_PREF, () => { pendingKind = ""; });
+pendingKind = prefGet(JOB_KIND_PREF) || "";
+
+// 並べ替えは列clickで、対応するcontrolが無い。列と向きを1つの値にして残す。
+(function restoreSort() {
+  const stored = prefGet(JOB_SORT_PREF);
+  if (!stored) return;
+  const [key, dir] = stored.split(":");
+  // 消えた列・読めない向きの保存値は捨てて既定の並び(実行中→待機中→その他)で始める。
+  if (!JOB_SORT_COLUMNS[key] || (dir !== "asc" && dir !== "desc")) return;
+  sortState = { key, dir };
+})();
+
 // 状態・種別はserver側の絞り込みが変わるので取り直す。対象の絞込は手元の行に効くだけ
 // なので描き直しで足りる(1文字ごとにserverを叩かない)。
 ["job-flt-state", "job-flt-kind"].forEach((id) =>
   document.getElementById(id).addEventListener("change", load),
 );
+
+// 種別の絞り込みと同じ範囲の未終了jobをまとめて取り消す。範囲は必ずserverが決める
+// (手元の行だけを対象にすると、limitで切れた古い行が黙って残る)。
+document.getElementById("job-cancel-all").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const kind = document.getElementById("job-flt-kind").value || "all";
+  const scope = kind === "all" ? "全種別" : kindLabel(kind);
+  const ok = await confirmDialog(
+    `${scope}の待機中・実行中のjobをすべて取り消します。`
+    + "実行中の1本もその場で止まり、そこまでの処理は破棄されます。",
+    { title: "未終了jobの取り消し", confirmLabel: "まとめて取り消す", danger: true },
+  );
+  if (!ok) return;
+  button.disabled = true;
+  try {
+    const result = await apiSend(
+      "POST", `/api/jobs/cancel-matching?kind=${encodeURIComponent(kind)}`);
+    // 0件でも黙らない。「押したのに何も起きない」と「取り消せるものが無かった」は別。
+    showToast(result.cancelled
+      ? `${fmtNum(result.cancelled)}件のjobを取り消しました。`
+      : "取り消せるjobはありませんでした（待機中・実行中が0件です）。");
+  } catch (err) {
+    showError(err, "jobの一括取り消し");
+  } finally {
+    button.disabled = false;
+    load();
+  }
+});
 document.getElementById("job-flt-text").addEventListener("input", () => {
   // ?job= で1件に固定したまま別の語で探させると、いくら打っても0件になる。人が入力へ
   // 触った時点で名指しを解き、台帳から取り直す。

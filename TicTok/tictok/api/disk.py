@@ -7,6 +7,7 @@ routeから切り離して置く。route側(``tictok.api.routes.storage``)は lo
 依存は runtime / files / fsfacts。
 """
 
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -323,11 +324,18 @@ def _relocation_plan() -> dict:
             item["unique_id"], {"unique_id": item["unique_id"], "items": 0, "bytes": 0})
         entry["items"] += 1
         entry["bytes"] += item["bytes"]
+    # 切り出しは録画に随伴する。今回移す録画のぶんも含めて数えないと、dry-runの量と実際に
+    # 動く量が食い違う(録画を移した直後に、その録画の成果物も移動対象になるため)。
+    clip_items, clip_orphans = _clip_relocation_items({Path(i["src"]).stem for i in plan})
     return {
         "enabled": enabled,
         "items": plan,
         "total_items": len(plan),
         "total_bytes": total_bytes,
+        "clip_items": clip_items,
+        "clip_total_items": sum(item["count"] for item in clip_items),
+        "clip_total_bytes": sum(item["bytes"] for item in clip_items),
+        "clip_orphans": clip_orphans,
         "skipped_missing": skipped_missing,
         "skipped_existing_at_destination": skipped_bytes_unknown,
         "by_streamer": sorted(by_streamer.values(), key=lambda e: -e["bytes"]),
@@ -335,6 +343,127 @@ def _relocation_plan() -> dict:
         "record_dir": str(runtime.RECORD_DIR),
         "final_dir": str(runtime.FINAL_DIR),
     }
+
+
+# ---- 切り出し成果物の随伴 ----------------------------------------------------------
+# 切り出し・reel・作品・スクショは常に一時保存先へ出る(``layout.clip_output_dir``)。
+# 最終保存先へ運ぶ口はここ1つで、録画の移動と同じ操作にぶら下げる: その録画が最終保存先に
+# 在るなら、そこから作った成果物も同じ側へ置く。録画より先に成果物だけが移ることはない。
+
+def _match_clip_owner(name: str, stems) -> Optional[tuple]:
+    """成果物のfile名から持ち主の録画を当てる。当たらなければ None。
+
+    名前の解析はしない。切り出しの名前は種別(clip/reel/work/still)ごとに続きが違うが、
+    **必ず録画のstemで始まる**という一点だけは全種別で共通で、作品が横に置くJSONにも同じ
+    規約が効く。種別ごとの規則を持ち込むと、種別が増えるたびに移動から漏れるfileが出る。
+    """
+    if not stems:
+        return None
+    for stem, info in stems.items():
+        if name.startswith(stem):
+            return stem, info
+    return None
+
+
+def _clip_relocation_items(pending_final_stems=()) -> tuple:
+    """一時保存先の置き場(``_clips``/``_screenshots``)に在る成果物のうち、最終保存先へ運ぶ
+    ものを録画ごとに束ねる。
+
+    戻り値は ``(items, orphan_files)``。``pending_final_stems`` は同じ計画でこれから最終保存先へ
+    移る録画で、dry-runが「録画を移したあとに続けて動く量」まで出せるように受け取る(実行側は
+    録画を先に移し終えてから、その時点のDBで引き直す)。
+
+    持ち主が分からないfileは動かさずに数だけ返す。録画の行が消えても成果物は実在するので
+    (切り出しはretentionにも録画削除にも載らない)、当てずっぽうで最終保存先へ送らない。
+    """
+    if not _relocation_enabled():
+        return [], 0
+    owners: dict = {}
+    for row in runtime.storage.completed_recordings_with_paths():
+        stem = Path(row["filename"] or "").stem
+        if not stem:
+            # file名を持たない行。空のstemは名前の先頭一致で**全部の成果物に当たる**ため、
+            # 1行あるだけで一時保存先の成果物が丸ごとその録画の持ち物になる。
+            continue
+        owners.setdefault(row["unique_id"] or "", {})[stem] = {
+            "recording_id": row["id"],
+            "unique_id": row["unique_id"],
+            "to_final": (_is_under(Path(row["path"]), runtime.FINAL_DIR)
+                         or stem in pending_final_stems),
+        }
+    flat = {stem: info for bucket in owners.values() for stem, info in bucket.items()}
+
+    base = Path(runtime.RECORD_DIR)
+    groups: dict = {}
+    orphans = 0
+    for path in layout.iter_clip_files(runtime.RECORD_DIR):
+        # 相対はrootから採る(``<配信者>/_clips/<file名>``・``<配信者>/_screenshots/<file名>``)。
+        # 最終保存先の**同じ相対位置**へ置けば、配信者folderの下という置き場の規約も、動画と
+        # 静止画を分ける規約も、そのまま向こう側でも成り立つ。
+        rel = path.relative_to(base)
+        # 置き場は配信者別なので、dir名で候補を絞ってから当てる。当たらないときだけ全件を
+        # 見る(配信者名を変えた・置き場が読めない旧い成果物のため)。
+        bucket = owners.get(layout.clip_streamer_of(base, path) or "")
+        found = _match_clip_owner(path.name, bucket) or _match_clip_owner(path.name, flat)
+        if found is None:
+            orphans += 1
+            continue
+        stem, info = found
+        if not info["to_final"]:
+            continue
+        try:
+            size = path.stat().st_size
+        except OSError:
+            continue
+        group = groups.setdefault(stem, {
+            "stem": stem, "recording_id": info["recording_id"],
+            "unique_id": info["unique_id"], "files": [], "bytes": 0,
+        })
+        group["files"].append(rel.as_posix())
+        group["bytes"] += size
+    items = sorted(groups.values(), key=lambda g: (g["unique_id"] or "", g["stem"]))
+    for group in items:
+        group["count"] = len(group["files"])
+    return items, orphans
+
+
+def _relocate_clip_group(item: dict) -> tuple:
+    """1録画ぶんの成果物を最終保存先の**同じ相対位置**へ移す。
+
+    戻り値は ``(移せた本数, 移したbytes, 失敗の理由list)``。1本の失敗で残りを諦めない
+    (録画本体と違い、成果物どうしは互いに依存しない)。
+    """
+    src_base = Path(runtime.RECORD_DIR)
+    dst_base = Path(runtime.FINAL_DIR)
+    moved = 0
+    moved_bytes = 0
+    errors: list = []
+    for rel in item["files"]:
+        src = src_base / rel
+        dst = dst_base / rel
+        if not src.is_file():
+            # 走査から実行までの間に消えた(利用者が一覧から削除した)。失敗ではない。
+            continue
+        if dst.exists():
+            errors.append(f"{Path(rel).name}: 移動先に同名のfileがあります")
+            continue
+        try:
+            size = src.stat().st_size
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+        except OSError as exc:
+            runtime.logger.warning(
+                "切り出し %s を最終保存先へ移せませんでした", rel,
+                extra={"event": "clip.relocation_failed",
+                       "ctx": {"recording_id": item["recording_id"], "src": str(src),
+                               "dst": str(dst)}},
+                exc_info=True,
+            )
+            errors.append(f"{Path(rel).name}: {exc}")
+            continue
+        moved += 1
+        moved_bytes += size
+    return moved, moved_bytes, errors
 
 
 def _relocate_one(item: dict) -> Optional[str]:
@@ -382,11 +511,14 @@ def _run_relocation(plan: dict, on_item=None) -> dict:
 
     1本がlockされているだけで残り全部を諦めるのは、この機能の目的(取り残しを減らす)に
     反する。失敗は数えて報告し、次へ進む。
+
+    録画を全部運んでから切り出しを運ぶ。順序が逆だと、これから移す録画の成果物だけが先に
+    最終保存先へ着き、録画の移送が失敗した場合に成果物と録画が別のdriveへ分かれる。
     """
     moved = 0
     moved_bytes = 0
     failures: list = []
-    total = len(plan["items"])
+    total = len(plan["items"]) + len(plan.get("clip_items") or [])
     for index, item in enumerate(plan["items"]):
         cancel.check_cancelled()
         if on_item is not None:
@@ -411,9 +543,32 @@ def _run_relocation(plan: dict, on_item=None) -> dict:
             moved_bytes += item["bytes"]
         else:
             failures.append({"filename": item["filename"], "reason": error})
+
+    # 成果物は録画を運び終えた時点のDBで引き直す。計画時の一覧をそのまま使うと、移送に失敗
+    # して一時保存先に残った録画の成果物まで最終保存先へ送ることになる。
+    clip_items, _orphans = _clip_relocation_items()
+    clips_moved = 0
+    clips_moved_bytes = 0
+    busy = {rid for _kind, rid in runtime.storage.pending_media_job_keys()}
+    for offset, item in enumerate(clip_items):
+        cancel.check_cancelled()
+        label = f"{item['stem']} の切り出し {item['count']}本"
+        if on_item is not None:
+            on_item(len(plan["items"]) + offset, total, {"filename": label})
+        if item["recording_id"] in busy:
+            # 出力中のfileを動かすと、書いている側が「移動元が消えた」で落ちる。
+            failures.append({"filename": label, "reason": "他の処理が使用中です"})
+            continue
+        count, size, errors = _relocate_clip_group(item)
+        clips_moved += count
+        clips_moved_bytes += size
+        for reason in errors:
+            failures.append({"filename": item["stem"], "reason": reason})
+
     if on_item is not None:
         on_item(total, total, None)
-    return {"moved": moved, "moved_bytes": moved_bytes, "failures": failures}
+    return {"moved": moved, "moved_bytes": moved_bytes, "failures": failures,
+            "clips_moved": clips_moved, "clips_moved_bytes": clips_moved_bytes}
 
 
 def _relocation_summary() -> dict:
@@ -423,6 +578,10 @@ def _relocation_summary() -> dict:
         "enabled": plan["enabled"],
         "items": plan["total_items"],
         "bytes": plan["total_bytes"],
+        # 録画が0本でも成果物だけが残ることがある(録画を移した後に切り出した分)。件数を
+        # 出さないと、移すものが在るのに「移していない録画はありません」だけが並ぶ。
+        "clip_items": plan["clip_total_items"],
+        "clip_bytes": plan["clip_total_bytes"],
         "locations": plan["locations"],
         "skipped_missing": plan["skipped_missing"],
         "skipped_existing_at_destination": plan["skipped_existing_at_destination"],

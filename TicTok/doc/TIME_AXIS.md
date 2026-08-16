@@ -35,32 +35,35 @@ DBへ焼き付ける秒は、すべてこの軸に合わせる:
 | `search_hits.video_time` (comment) | `indexer.index_comments` | 再生経路の軸で wall から引き直す |
 | `search_hits.video_time` (stt) | `indexer.index_transcript` | 文字起こしのsegment時刻をそのまま使う |
 | `transcripts.segments_json` | `transcription.transcribe` | **再生に使うのと同じ入力**から復号する |
-| `bookmarks` / `cut_list` | ユーザーの操作 | playerの秒がそのまま入る |
+| `bookmarks` | ユーザーの操作 | playerの秒がそのまま入る |
 | `recordings.time_axis` | 書いた側が名乗る | `media` / `pts`。二重変換の防止に使う |
 
 文字起こしだけは注意が要る。faster-whisperの復号器はframeのPTSを捨てて samples を詰めるので、素の
 segment時刻は**gapless軸**(音声が実在するぶんだけの軸)になる。`transcription` はこれを自分で
 復号し直して container の時刻へ戻す(`timemap_version` / `timemap_drift_seconds`)。戻す先は
 「復号したcontainerの軸」なので、**mp4から文字起こしすればPTS軸、.tsから文字起こしすればmedia軸**になる。
-`transcribe_queue` が `prefer_hls=hls_source.plays_from_hls(path)` を渡すのはこのためである。
+`_transcribe_into_storage` が `prefer_hls=hls_source.plays_from_hls(path)` を渡すのはこのためである。
+文字起こしの入口(録画詳細の1本・一括・意味検索・起動時sweep)はすべてこの1箇所を通るので、どこから
+頼んでも同じ軸に載る。以前は録画詳細の1本だけがqueueを通らず自分で開いており、この指定が
+抜けていた。
 
 ### 時刻map版(`timemap_version`)
 
 | 版 | 中身 |
 |---|---|
-| NULL | mapが無かった頃の転写。gapless軸のままで、尺が伸びるほど後ろへズレる |
+| NULL | mapが無かった頃の文字起こし。gapless軸のままで、尺が伸びるほど後ろへズレる |
 | 1 | gapless→media軸のanchor map |
 | 2 | 1 に加え、源のtimestampが壊れたsegmentが残した**幻のjump**をplaylistの尺で畳む(`_rebase_phantom_jumps`) |
 
-版2を入れた当初は版を据え置いたため、壊れた地図で作られた転写が現行版を名乗ったまま残った
-(実測 録画00126: 素材2時間51分に対し転写の終端10時間43分。630.7秒地点の +28,288秒のjumpが
+版2を入れた当初は版を据え置いたため、壊れた地図で作られた文字起こしが現行版を名乗ったまま残った
+(実測 録画00126: 素材2時間51分に対し文字起こしの終端10時間43分。630.7秒地点の +28,288秒のjumpが
 線形補間で残り全体へ引き伸ばされ、字幕clickが録画の外側へ飛ぶ)。
 
 既存の版1は起動時の `timemap_migration` が選別する。物差しは焼き込みの関門と同じ
-`video_overlay.material_media_seconds` と `subtitles.axis_matches_media` で、**転写の尺が素材に
+`video_overlay.material_media_seconds` と `subtitles.axis_matches_media` で、**文字起こしの尺が素材に
 収まっていれば畳む対象が無かった**のだから版2へ昇格させ、食い違うものだけ版1のまま据え置いて
-「要再転写」を名乗らせる。実尺が測れない録画は昇格させる — 降格は「ズレている証拠がある」ときに
-だけ行う。据え置かれた録画は再転写でしか直らない(既存segmentの張り直しは不可能)。
+「要再文字起こし」を名乗らせる。実尺が測れない録画は昇格させる — 降格は「ズレている証拠がある」ときに
+だけ行う。据え置かれた録画は再文字起こしでしか直らない(既存segmentの張り直しは不可能)。
 
 選別を走らせるかどうかは `timemap_migration.SELECTION_VERSION`(db_maintenanceへ刻む)で決める。
 据え置いた行は版1のまま残るため、素直に毎起動で走らせると同じ母集合を測り直し続ける。
@@ -74,7 +77,7 @@ segment時刻は**gapless軸**(音声が実在するぶんだけの軸)になる
 `timing.json` の `media_duration` も `recordings.duration_seconds` も使わない。どちらも
 finalize時のsnapshotで、その後にsession dirが太れば置き去りになる(実測: 捕捉processが
 孤児化して書き続けた録画で、録画行 12.0秒 に対し採用集合 16,861.8秒)。逆に素材が消えてmp4
-だけが残った録画では、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい転写を
+だけが残った録画では、もう存在しない .ts の尺を名乗り続け、mp4から作った正しい文字起こしを
 「軸が違う」と弾いていた(実測9件)。
 
 ## comment indexをいつ張るか
@@ -87,11 +90,11 @@ comment panelも `search_hits` しか読まず、`events` を直接は見ない�
 |---|---|---|
 | 録画の確定 | `TikTokCollector._on_recording_finalized` | 確定した1本(`completed` のみ) |
 | server起動 | `backfill_search_index`(`startup` の background task) | comment indexがまだ無い録画すべて |
-| 手動 | `scripts/repair_search_time_axis.py --apply` | **既に張ってある**indexの軸の張り直し |
+| 手動 | `scripts/repair_search_time_axis.py --apply` | **既に張ってある**indexの軸の張り直し(anchorsが在る録画のみ) |
 
 確定時に張るのは、起動時のbackfillだけでは**server稼働中に始まって終わった録画が次の再起動まで
 空のまま**になるためである(実測 2026-07-29、録画00398/00399: eventは703件・780件揃っているのに
-comment 0件)。転写側は STT 完了時に `index_transcript` を呼ぶので、この穴はcommentにしか出ない。
+comment 0件)。文字起こし側は STT 完了時に `index_transcript` を呼ぶので、この穴はcommentにしか出ない。
 
 手動scriptは既存hitとのズレを測って判定するため、hitが0件の録画は `no_comments` として素通りする。
 **張り直し用であって、張り忘れの回収には使えない**。
@@ -124,6 +127,40 @@ python scripts/repair_search_time_axis.py                       # dry-run
 python scripts/repair_search_time_axis.py --apply               # comment indexを張り直す
 python scripts/repair_search_time_axis.py --apply --enqueue-transcripts  # 文字起こしも再実行
 ```
+
+## 障害: mp4だけが持つ「水増しの穴」に、単一scaleでcommentを載せた
+
+A/Vズレ修復より前のconcatは、素材に無い時間をmp4へ書き足す。水増しは2つの形で現れる:
+
+- **segmentごとの細かいぶん** — 継ぎ目ごとに一定量。時間に比例するので単一scaleで吸収できる。
+- **凍結区間** — 映像packetが1本も無く、音も digital silence の区間。**素材側では何も起きて
+  いない**ので、media軸に対応する断裂(`_detect_media_breaks`)を持たない。
+
+後者は照合に掛からないまま単一scaleへ畳まれ、録画全体へ塗り広げられる。実測(録画00066、
+素材5時間12分に対しmp4が5時間31分、うち凍結区間が31分地点に257秒と90分地点に132秒):
+
+- 頭と末尾は合っている(両端を留めているため)のに、**中盤のcommentが最大288秒早い**
+- 配信者がコメントを読み上げるまでの間が、中央値193.5秒(正しければ数秒〜数十秒)
+
+`_phantom_pad_points` が、この穴を「media軸の時間を1秒も消費しない対応点」として写像へ入れる。
+同じ録画で読み上げまでの間は中央値17.1秒(min -2.4 / max 53.7)へ縮んだ。
+
+**本物の停止と取り違えてはいけない。** 配信が止まっただけなら壁時計もmedia軸も進んでいるので、
+その穴を「消費しない」扱いにすると実在した時間を潰すことになる。判定は「穴を全部除いてもなお
+mp4が素材より長いか」で行う — 本物の停止では成り立たない関係である。
+
+穴の位置は `_probe_pts_gaps` が実測する。ffprobeはpacketをfile順(=復号順)で吐き、B-frameを
+持つmp4ではpts_timeが行ごとに前後する(録画00066では389,723行のうち192,872行が直前より小さい)
+ので、**差を取る前にpts順へ並べ替える**。並べ替えないと1つの穴が復号順の前後で2回報告され、
+穴の総量が水増しされる(同じ録画で131.7秒ぶん)。
+
+### anchorsが無い録画は引き直さない
+
+anchors(`timing.json`)が無い録画で残る手掛かりは捕捉の壁時計窓だけだが、その `ended_at` は
+finalize や `repair_recording_durations` が「started_at + mp4の尺」で書き直していることがあり、
+**独立した物差しになっていない**。実測(録画00283): 窓とmp4の尺が小数以下まで一致していて、
+引き直すと素のwall offsetへ潰れ、読み上げまでの間が中央値1.3秒から68.1秒へ**悪化**した。
+既存の秒の方が正しいので、`repair_search_time_axis.py` はこの母集合に触れない。
 
 commentは `events` の壁時計から今の軸で引き直せる(anchorsが根拠なので常に現在の軸になる)。
 **文字起こしは引き直せない** — 古い軸から今の軸へ戻すmapは、timing.jsonを作り直した時点で失われて

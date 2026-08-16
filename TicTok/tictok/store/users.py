@@ -11,7 +11,8 @@ upsert間引きcache(_user_cache)の所有者もここ。上限は _USER_CACHE_M
 
 lock契約:
   _upsert_user_locked は self._lock 保持前提。呼び出し元は _upsert_users_locked(ingest)と
-  _backfill_users(maintenance)で、いずれも lock 区間の内側から辿り着く。
+  _backfill_users(maintenance)、save_peer_identity(コラボ相手の身元)で、いずれも
+  lock 区間の内側から辿り着く。
   _latest_owner_handles_locked / _owner_handles_locked も self._lock 保持前提で、
   呼び出し元(streamer_index / streamer_profile / streamer_cohort /
   streamer_history_stats / session_ids_for_users / aggregate_dashboard)は
@@ -22,8 +23,10 @@ import time
 from typing import Optional
 
 from tictok.core.league import display_league, display_league_sql
+from tictok.search.normalize import MentionNames
 from tictok.store._common import (
     NON_IDENTITY_KEYS,
+    _MENTION_NAMES_TTL_SECONDS,
     _USER_CACHE_MAX,
     _USER_UPSERT_TTL_SECONDS,
     _identity_key,
@@ -114,6 +117,38 @@ class UsersMixin:
         )
         return key
 
+    def _load_mention_names(self, conn) -> MentionNames:
+        """既知の表示名(と@handle)を読む。接続は呼び出し側が選ぶ。
+
+        lock契約の都合で口を分けてある。索引の投入は self._lock を取る前に読める(read側)が、
+        起動時のmigrationは既に self._lock を保持しているので書き込み接続で読むしかない。
+        """
+        rows = conn.execute(
+            "SELECT nickname AS name FROM users WHERE nickname IS NOT NULL AND nickname != ''"
+            " UNION"
+            " SELECT unique_id FROM users WHERE unique_id IS NOT NULL AND unique_id != ''"
+        ).fetchall()
+        return MentionNames(row[0] for row in rows)
+
+    def mention_names(self) -> MentionNames:
+        """本文の先頭メンションを索引から外すための、既知の表示名。
+
+        出所がusers表なのは、名前の切れ目が表示名そのものでしか決まらないため(空白を含む
+        表示名がある)。全観測userの台帳はここだけである。
+
+        実測31.8万件・読み込み0.4秒。録画1本ごとのindex投入で毎回引くには重いのでTTLで持つ。
+        保持中に現れた新規userへのメンションは名前で切れず空白へ落ちるが、その録画を張り直せば
+        直る種類のズレなので、常に最新であることより読み込みの安さを取る。
+        """
+        now = time.time()
+        if (self._mention_names is not None
+                and now - self._mention_names_at < _MENTION_NAMES_TTL_SECONDS):
+            return self._mention_names
+        names = self._load_mention_names(self._read_connection())
+        self._mention_names = names
+        self._mention_names_at = now
+        return names
+
     def _latest_owners(self) -> dict:
         owners = self._conn.execute(
             "SELECT unique_id,"
@@ -162,6 +197,62 @@ class UsersMixin:
             "nickname": (row["nickname"] if row else "") or "",
         }
 
+    def peer_identities(self, user_ids) -> dict:
+        """user_id -> 表示できる身元(nickname/@handle/avatar)。users表(名寄せの唯一の真実)を
+        主keyで引く。identity_keyは不変user_id優先なので、これは主key照合である。
+
+        名前も@handleも無い行は返さない。IDだけの行を返すと、呼び出し側は「解決できた」と
+        読んで数値IDを名前の位置へ出すことになる。"""
+        keys = [str(uid).strip() for uid in user_ids if str(uid or "").strip()]
+        if not keys:
+            return {}
+        placeholders = ",".join("?" * len(keys))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT identity_key, unique_id, nickname, avatar FROM users"
+                f" WHERE identity_key IN ({placeholders})",
+                keys,
+            ).fetchall()
+        out: dict = {}
+        for row in rows:
+            nickname = (row["nickname"] or "").strip()
+            unique_id = (row["unique_id"] or "").strip()
+            if not nickname and not unique_id:
+                continue
+            out[row["identity_key"]] = {
+                "nickname": nickname,
+                "unique_id": unique_id,
+                "avatar": row["avatar"] or "",
+            }
+        return out
+
+    def save_peer_identity(
+        self, user_id: str, unique_id: str, nickname: str, avatar: str,
+        room_id: str = "", now: Optional[float] = None,
+    ) -> str:
+        """コラボ相手(共演者)の身元をusers表へ残す。LinkLayerはuser_idとroom_idしか
+        名乗らないため、collectorが相手のroom_infoを引いた結果をここへ書く。次のprocessは
+        通信せずに名前を出せる。
+
+        broadcaster/league/league_checked_atには触らない。あれはリーグ取得workerが
+        「@handleで照会して確かめた」という別の観測で、こちらは室を1つ見ただけである。
+        room_idは過去の室でもleagueを引けるので、判っている値として残す。"""
+        now = time.time() if now is None else now
+        with self._lock:
+            key = self._upsert_user_locked(
+                {"user_id": str(user_id or ""), "unique_id": unique_id or "",
+                 "nickname": nickname or "", "avatar": avatar or ""},
+                now,
+                key=str(user_id or "").strip(),
+            )
+            if key and room_id:
+                self._conn.execute(
+                    "UPDATE users SET broadcaster_room_id = ? WHERE identity_key = ?",
+                    (str(room_id), key),
+                )
+            self._conn.commit()
+        return key
+
     def _owner_handles_locked(self, unique_id: str) -> list:
         """同一配信者(不変owner数値ID)に属する全@handleを返す。owner_user_idが判れば
         それを共有する全handleを、無ければ入力handle単体を返す。@handle変更が起きても
@@ -185,7 +276,10 @@ class UsersMixin:
     def _fill_owner(self, item: dict) -> dict:
         """履歴の各sessionは、そのsession自身が確定したowner identityで表示する。
         新配信で配信者が改名/アイコン変更しても過去sessionへは遡及させない方針のため、
-        空でも最新配信のidentityは借りない。nicknameが空なら@handle(unique_id)で代替する。"""
+        空でも最新配信のidentityは借りない。nicknameが空なら@handle(unique_id)で代替する。
+
+        身元を一度も観測できなかった古い行のアイコンは、画面側が/api/avatar?id=…で
+        unique_id単位のpoolを引いて描く(表示だけの補完で、行の値は空のまま)。"""
         if not item.get("owner_nickname"):
             item["owner_nickname"] = item.get("unique_id") or ""
         if not item.get("owner_avatar"):

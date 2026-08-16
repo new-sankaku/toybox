@@ -11,11 +11,10 @@ from urllib.parse import quote
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+from tictok.core.battle import battle_type, gift_window_end, gift_window_fallback_duration
 from tictok.core.config import get_laugh_comment_min_w_run
 from tictok.core import laugh_text
 from tictok.record.recorder import ffmpeg_available
-from tictok.record.transcription import STTError
-from tictok.record.stt_worker import run_transcribe as stt_transcribe
 from tictok.media import hls_source
 from tictok.media import laugh_audio
 from tictok.media import smile
@@ -29,6 +28,8 @@ from tictok.core import spike
 from tictok.storage import RECORDING_REVIEW_STATES, REVIEW_UNCHECKED
 from tictok.record.video_overlay import _duration_seconds, cleanup_overlay_files
 from fastapi import APIRouter
+from tictok.api import battles
+from tictok.api import candidates
 from tictok.api import files
 from tictok.api import fsfacts
 from tictok.api import media_jobs
@@ -54,12 +55,18 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
     """検索語を持たない「録画をそのまま開く」ための一覧。
 
     シーン検索は語が無いと1件も返さないため、これが無いと「とりあえずこの配信を見る」
-    ができず、当たる語を先に発明する必要がある。転写の有無まで返すのは、転写が無い
-    録画は検索でそもそも当たらず、一覧側で見分けられないと選びようがないため。"""
+    ができず、当たる語を先に発明する必要がある。文字起こしの有無まで返すのは、文字起こしが無い
+    録画は検索でそもそも当たらず、一覧側で見分けられないと選びようがないため。
+
+    笑い声は合計秒・窓の数と、**indexを張った条件**まで返す。並べ替えの根拠としてだけ
+    でなく、0秒が「笑っていない」なのか「まだ解析していない」なのかを画面が見分けるのに
+    要る(条件を持たない録画は後者、または共演中を外す前に張ったindexである)。"""
     handle = runtime._normalize_unique_id(unique_id) if unique_id else None
 
     def _collect() -> list:
         transcribed = runtime.storage.transcribed_recording_ids()
+        laughs = runtime.storage.laugh_totals_by_recording()
+        laugh_meta = runtime.storage.laugh_index_meta_map()
         rows = (runtime.storage.recordings_for_user(handle) if handle
                 else runtime.storage.list_recordings(max(1, min(limit, 2000))))
         # 実体の種別はdir単位に畳んだ一括版で引く。録画ごとにglob(.ts)+statを起こすと、
@@ -75,10 +82,15 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
             # 尺も素材も動いている最中なので従来どおり除く。
             if rec["status"] not in ("completed", "interrupted"):
                 continue
-            # 実体が無い録画も行は残す。転写・検索・bookmarkはそのまま使えるので、
+            # 実体が無い録画も行は残す。文字起こし・検索・bookmarkはそのまま使えるので、
             # 一覧から消すとその録画へ辿る道が無くなる。開けないことは``media``が空である
             # ことで画面が示す(消すのではなく、何が在るかを名乗らせる)。
             media = kinds_by_id.get(rec["id"], [])
+            laugh = laughs.get(rec["id"])
+            meta = laugh_meta.get(rec["id"]) or {}
+            # 笑い声。解析した記録も行も無い録画は0ではなくNULLで返す ―― 未解析と
+            # 「解析して0件」を同じ0にすると、並べ替えの末尾が両者の混ざった塊になる。
+            analysed = bool(laugh or meta)
             items.append({
                 "recording_id": rec["id"],
                 "session_id": rec.get("session_id"),
@@ -99,6 +111,17 @@ async def browse_recordings(unique_id: Optional[str] = None, limit: int = 200) -
                 # 「mp4というfileがある」と読ませないよう、実物が何かを併せて返す。
                 "media": media,
                 "file_exists": bool(media),
+                "laugh_seconds": (laugh or {}).get("seconds", 0.0) if analysed else None,
+                "laugh_windows": (laugh or {}).get("windows", 0) if analysed else None,
+                # indexを張ったときの共演の除外条件。未記録(=NULL)なら、この仕組みより
+                # 前に張ったindexで、共演中の笑い声がそのまま入っている。
+                "laugh_exclude": meta.get("mode"),
+                # 現行ruleでコラボを観測できた時期のsessionか。Falseなら記録が無いので
+                # 1秒も外れていない(「コラボが無かった」ではない)。
+                "laugh_collab_observed": meta.get("collab_observed"),
+                "laugh_excluded_seconds": (
+                    round(meta["collab_seconds"] + meta["battle_seconds"], 2)
+                    if "collab_seconds" in meta else None),
             })
         return items[:max(1, min(limit, 2000))]
 
@@ -249,6 +272,95 @@ async def get_transcript_api(recording_id: int) -> dict:
     return transcript
 
 
+class TranscriptCorrection(BaseModel):
+    """1件の訂正。``start`` と ``src`` の組がその発話の身元になる。"""
+
+    start: float
+    src: str
+    dst: str
+    origin: str = "human"
+    confidence: Optional[str] = None
+    note: Optional[str] = None
+
+
+class TranscriptCorrectionsRequest(BaseModel):
+    corrections: list[TranscriptCorrection]
+
+
+class TranscriptCorrectionStateRequest(BaseModel):
+    ids: list[int]
+    state: str
+
+
+@router.get("/api/recordings/{recording_id}/transcript/corrections")
+async def list_transcript_corrections_api(recording_id: int,
+                                          include_discarded: bool = False) -> dict:
+    """この録画の訂正。``orphan`` は再文字起こしで貼り直せなかったもの。
+
+    保留を件数ではなく中身で返すのは、人が「どこへ当てるはずだったか」を見て手当てするか
+    捨てるかを決めるため。機械が近い行へ寄せることはしない。"""
+    if await asyncio.to_thread(runtime.storage.get_recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    states = ("active", "orphan", "discarded") if include_discarded else ("active", "orphan")
+    rows = await asyncio.to_thread(
+        runtime.storage.list_corrections, recording_id, states)
+    return {
+        "recording_id": recording_id,
+        "corrections": rows,
+        "active": sum(1 for row in rows if row["state"] == "active"),
+        "orphan": sum(1 for row in rows if row["state"] == "orphan"),
+    }
+
+
+@router.post("/api/recordings/{recording_id}/transcript/corrections")
+async def upsert_transcript_corrections_api(
+        recording_id: int, payload: TranscriptCorrectionsRequest) -> dict:
+    """訂正をまとめて入れる。同じ (start, src) は上書きなので、何度流しても同じ状態になる。
+
+    入れた瞬間から字幕の書き出し・切り抜き字幕・焼き込み・検索が訂正後の文字を使う
+    (すべて ``get_transcript`` を通るため)。**既存の検索indexは張り直しが要る** — 索引は
+    文字列を写し取った別の行で、重ね合わせは通らない。"""
+    if await asyncio.to_thread(runtime.storage.get_recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    if await asyncio.to_thread(
+            runtime.storage.get_transcript, recording_id, True) is None:
+        raise HTTPException(status_code=404, detail="この録画の文字起こしはまだありません。")
+    try:
+        result = await asyncio.to_thread(
+            runtime.storage.upsert_corrections, recording_id,
+            [row.model_dump() for row in payload.corrections])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    transcript = await asyncio.to_thread(runtime.storage.get_transcript, recording_id)
+    return {"recording_id": recording_id, **result,
+            "applied": transcript.get("corrections_applied", 0)}
+
+
+@router.patch("/api/recordings/{recording_id}/transcript/corrections")
+async def set_transcript_correction_state_api(
+        recording_id: int, payload: TranscriptCorrectionStateRequest) -> dict:
+    """訂正の状態を変える(適用/保留/破棄)。破棄しても行は消さない — 後から戻せるように。"""
+    if await asyncio.to_thread(runtime.storage.get_recording, recording_id) is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    try:
+        changed = await asyncio.to_thread(
+            runtime.storage.set_correction_state, payload.ids, payload.state)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"recording_id": recording_id, "changed": changed, "state": payload.state}
+
+
+@router.delete("/api/recordings/{recording_id}/transcript/corrections/{correction_id}")
+async def delete_transcript_correction_api(recording_id: int,
+                                           correction_id: int) -> dict:
+    """入れ間違えた訂正を本当に消す(取り消しの既定は破棄であって削除ではない)。"""
+    removed = await asyncio.to_thread(
+        runtime.storage.delete_correction, correction_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="訂正が見つかりません。")
+    return {"recording_id": recording_id, "correction_id": correction_id, "deleted": True}
+
+
 def _transcript_basename(recording: dict) -> str:
     """字幕fileのbase名。録画file名と揃えるとNLEで動画と自動で紐づく。
 
@@ -262,11 +374,14 @@ def _transcript_basename(recording: dict) -> str:
 
 @router.get("/api/recordings/{recording_id}/transcript/export")
 async def export_transcript_api(recording_id: int, format: str = "srt") -> Response:
-    """転写を字幕file(SRT/VTT)または素のtextで書き出す。
+    """文字起こしを字幕file(SRT/VTT)または素のtextで書き出す。
 
     timecodeは元録画mp4のmedia軸(PTS)基準。焼き込み出力・Up出力は再encodeを挟むので、
     それらに対するPTS一致は保証しない。時刻mapが現行版でないtranscriptも書き出しは通すが、
-    ズレている可能性を応答headerで明示する(外部で直せるsidecarなので拒否はしない)。"""
+    ズレている可能性を応答headerで明示する(外部で直せるsidecarなので拒否はしない)。
+
+    SRT/VTTは語の時刻で表示単位へ割る(``subtitles.render``)。割らないとsegmentの終端が次の
+    segmentの開始まで伸び、間の無音までcueに入る。txtは原稿として使う書式なので割らない。"""
     if format not in subtitles.EXPORT_FORMATS:
         raise HTTPException(
             status_code=400,
@@ -281,7 +396,7 @@ async def export_transcript_api(recording_id: int, format: str = "srt") -> Respo
     # timecodeは元録画mp4のmedia軸なので、打ち切りもその実尺で測る(transcriptのdurationは
     # gapless長からの換算値で、実尺そのものではない)。ffprobeが無ければNone=打ち切らない。
     media_duration = await _duration_seconds(files._safe_recording_path(recording["path"]))
-    body = subtitles.render(format, transcript, media_duration)
+    body = subtitles.render(format, transcript, media_duration, runtime.settings)
     if not body.strip():
         raise HTTPException(status_code=404, detail="書き出せるsegmentがありません。")
     suffix, media_type, encoding = subtitles.EXPORT_FORMATS[format]
@@ -290,7 +405,7 @@ async def export_transcript_api(recording_id: int, format: str = "srt") -> Respo
     filename_star = quote(filename, safe="")
     stale = not subtitles.timemap_current(transcript.get("timemap_version"))
     runtime.logger.info(
-        "転写を書き出しました: recording_id=%d format=%s segments=%d",
+        "文字起こしを書き出しました: recording_id=%d format=%s segments=%d",
         recording_id, format, len(transcript.get("segments") or []),
         extra={"event": "subtitle.exported",
                "ctx": {"recording_id": recording_id, "format": format,
@@ -326,56 +441,6 @@ async def get_recording_comments_api(recording_id: int) -> dict:
              "nickname": row["nickname"], "body": row["body"]}
             for row in rows
         ],
-    }
-
-
-@router.post("/api/recordings/{recording_id}/transcribe")
-async def transcribe_recording(recording_id: int) -> dict:
-    """Run local STT over a finished recording and cache the transcript. Progress is
-    broadcast over the websocket as transcribe_progress while segments decode."""
-    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail="録画が見つかりません。")
-    path = files._resolved_recording_path(recording)
-    # queue経路(transcribe_queue)と同じ条件・同じ入力にする。あちらは hls_source で .ts を
-    # 読めるのに、単発だけがmp4を要求していたため、同じ録画がqueueなら転写できて録画詳細の
-    # buttonからは404という食い違いになっていた。
-    if not files._recording_source_exists(recording):
-        raise HTTPException(status_code=404, detail="録画fileが存在しません。")
-    loop = asyncio.get_running_loop()
-    async with runtime._tracked_job("stt", f"文字起こし {path.stem}", recording_id=recording_id,
-                            session_id=recording.get("session_id")) as job_id:
-        async def _report(pct: int) -> None:
-            await runtime.hub.broadcast(
-                {"type": "transcribe_progress", "recording_id": recording_id, "pct": pct}
-            )
-            await runtime.jobs.progress(job_id, pct, stage="文字起こし")
-
-        def on_progress(done: float, total: float) -> None:
-            pct = min(100, int(done / total * 100)) if total > 0 else 0
-            asyncio.run_coroutine_threadsafe(_report(pct), loop)
-
-        try:
-            async with runtime._job_ops("stt", recording_id, stem=path.stem,
-                                job_registry_id=job_id):
-                # mp4が無い録画は.tsのHLSから転写する(transcribe_queueと同じ貸し出し方)。
-                async with hls_source.ffmpeg_source_async(path) as source:
-                    result = await asyncio.to_thread(
-                        stt_transcribe, str(source.path), on_progress)
-        except STTError as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
-        await asyncio.to_thread(runtime.storage.save_transcript, recording_id, result)
-        # 保存と同時に検索indexへ反映する。ここを省くと単発転写した録画だけが検索に出ない。
-        await asyncio.to_thread(indexer.index_transcript, runtime.storage, recording)
-        await _report(100)
-    return {
-        "recording_id": recording_id,
-        "language": result["language"],
-        "model": result["model"],
-        "duration": result["duration"],
-        "text": result["text"],
-        "segments": result["segments"],
-        "segments_count": len(result["segments"]),
     }
 
 
@@ -468,336 +533,204 @@ async def recording_heat_api(recording_id: int) -> dict:
     return {"recording_id": recording_id, "points": points}
 
 
-class _MaterialMetric(NamedTuple):
-    """素材(録画そのもの)を解析して各bucketへ載せるper-bucket指標の登録項。
+def _battle_wall_window(battle: dict) -> Optional[tuple]:
+    """Battleが壁時計のどの区間かを (start, end) で返す。窓を持たないrecordはNone。
 
-    diamonds/comments/laugh_commentはDBのeventだけで作れるが、音声・映像から作る指標は
-    「有効かを設定で見る → 解析engineを回す → 判定できない録画では外す → 重みと下限を
-    設定から引く」という同じ4手順を必ず踏む。指標ごとに候補APIの本体へifを積むと、
-    その4手順が少しずつ違う枝に分かれて失敗の扱いが揃わなくなるため、登録表で持つ。
+    始点はscore_seriesの1点目を優先する(start_timeはTikTokのbattle settingが持つserver
+    時刻で、seriesのtは受信側時計。片方だけを使うと録画との突合で系統的にずれる)。
+    焼き込みの窓解決(_battle_media_windows)と同じ決め方にしてある。"""
+    series = battle.get("score_series") or []
+    start = series[0].get("t") if series else battle.get("start_time")
+    end = battle.get("end_time") or (series[-1].get("t") if series else None)
+    if start is None or end is None:
+        return None
+    return start, end
 
-    ``attach`` は値を載せられたら None を、載せられなかったら理由(logのctx)を返す。
-    載せられない場合に0で埋めてはならない — 「笑っていなかった」という観測を捏造する。
+
+def _battles_in_window(fought: list, started_at: float, ended_at) -> list:
+    """録画窓に掛かるBattleを、seriesとgift窓つきで古い順に返す。
+
+    ordinalは**session内の通し番号**(1戦目・2戦目…)で、録画に掛かった分だけを数え直す
+    ことはしない — 1 sessionを複数本に録った2本目が「1戦目」を名乗ると、同じPKが録画に
+    よって別の番号で呼ばれる。
     """
+    upper = ended_at if ended_at is not None else float("inf")
+    starts = sorted(b["start_time"] for b in fought if b.get("start_time") is not None)
+    fallback = gift_window_fallback_duration(fought)
+    ordered = sorted(fought, key=lambda b: b.get("start_time") or 0)
+    out = []
+    for ordinal, battle in enumerate(ordered, start=1):
+        window = _battle_wall_window(battle)
+        if window is None:
+            continue
+        start, end = window
+        if end < started_at or start > upper:
+            continue
+        out.append({
+            "battle": battle,
+            "ordinal": ordinal,
+            "start": start,
+            "end": end,
+            # giftの帰属窓はcore.battleのruleに従う(貢献集計と同じ窓でなければ、同じgiftが
+            # 画面のpanelとBattle cardで別のPKのものとして数えられる)。
+            "gift_window": (battle.get("start_time"), gift_window_end(battle, starts, fallback)),
+        })
+    return out
 
-    key: str
-    setting: str
-    weight_setting: str
-    min_setting: str
-    # どちらも呼ぶためのもの。``object`` のままだと型検査が「呼べない」と言う。
-    label: Callable[[dict], str]
-    attach: Callable[..., Awaitable[Optional[dict]]]
 
+def _gift_battle_ordinal(entries: list, at: float):
+    """gift 1件がどのPKの窓で飛んだか(session内の通し番号)。どのPKにも入らなければNone。
 
-async def _attach_laugh_audio(path: Path, buckets: list, bucket_seconds: int,
-                              to_pts) -> Optional[dict]:
-    """各bucketへ ``laugh_audio``(窓内で笑い声が出ていた秒数)を載せる。
+    窓は重ならない(gift_window_endが次のBattleの開始で閉じる)ので、最初に入った1つで
+    決まる。進行中Battleの窓は開いたまま(end=None)なのでそれ以降は全てそのPKへ入る。
 
-    確率列は動画時間軸なので、bucketの窓をwall-clockから動画時間へ写してから引く
-    (audio_peakと同じ理由: 生の差分を使うと焼き込み動画とずれる)。
-
-    modelが未配置・未導入のときは ``LaughAudioError`` がそのまま上がる。ここで捕まえて
-    笑い抜きの候補を返すと、利用者は「笑いの無い配信」と読む — 呼び出し側で503にする。
-
-    ``clip_candidate_laugh_audio_solo_only`` が立っていれば、画面に顔が2つ以上映って
-    いる間の笑い声を数えない。コラボ中の笑いは共演者のものかもしれず、どの顔が配信者かを
-    画面から決める手段が無いため(smile module docstringと同じ制約)。窓は映像から作る —
-    DBの ``collab_windows`` はLinkMic channelの有無であって人数ではなく、実測で
-    ``guests_max`` が811窓中805窓で0のままだった。
-    """
-    profile = await laugh_audio.ensure_laugh_profile(path)
-    exclude_spans = None
-    if int(runtime.settings.get("clip_candidate_laugh_audio_solo_only")):
-        # 顔検出のmodelが無ければ SmileError がそのまま上がる。ここで黙って除外なしに
-        # 落とすと、「コラボを外した候補」として外れていない候補を渡すことになる。
-        faces_profile = await smile.ensure_smile_profile(path)
-        exclude_spans = smile.multi_face_spans(faces_profile)
-    seconds = [
-        laugh_audio.laugh_seconds(profile, to_pts(bucket["start"]),
-                                  to_pts(bucket["start"] + bucket_seconds),
-                                  exclude_spans=exclude_spans)
-        for bucket in buckets
-    ]
-    outside = next((i for i, value in enumerate(seconds) if value is None), None)
-    if outside is not None:
-        return {"bucket_start": buckets[outside]["start"],
-                "laugh_duration_seconds": profile["duration_seconds"]}
-    for bucket, value in zip(buckets, seconds):
-        bucket["laugh_audio"] = value
+    battle_idではなくordinalで名指すのは、battle_idを持たない古いrecordが0で保存され、
+    同じsessionに2件あると別のPKのgiftが1つのPKへ畳まれるため。"""
+    for entry in entries:
+        start, end = entry["gift_window"]
+        if start is None or at < start:
+            continue
+        if end is None or at <= end:
+            return entry["ordinal"]
     return None
 
 
-async def _attach_smile(path: Path, buckets: list, bucket_seconds: int,
-                        to_pts) -> Optional[dict]:
-    """各bucketへ ``smile``(窓内で笑顔と判定できた秒数)を載せる。
-
-    ``laugh_audio`` と同じく動画時間軸なので、bucketの窓を写してから引く。
-
-    「笑顔」と名乗れるのは**顔がちょうど1つ映っている標本だけ**である(smile module
-    docstring: 配信者を画面から特定する手段が無く、battle・collabでは複数の顔が映る)。
-    判定できない標本は数えないので、そういう区間の値は実際より小さく出る。
-    """
-    profile = await smile.ensure_smile_profile(path)
-    seconds = [
-        smile.smile_seconds(profile, to_pts(bucket["start"]),
-                            to_pts(bucket["start"] + bucket_seconds))
-        for bucket in buckets
-    ]
-    outside = next((i for i, value in enumerate(seconds) if value is None), None)
-    if outside is not None:
-        return {"bucket_start": buckets[outside]["start"],
-                "smile_duration_seconds": profile["duration_seconds"]}
-    for bucket, value in zip(buckets, seconds):
-        bucket["smile"] = value
-    return None
-
-
-# 素材由来のper-bucket指標。足すときはengine側を書いてからここへ1 entry追加する。
-_MATERIAL_METRICS = (
-    _MaterialMetric(
-        key="laugh_audio",
-        setting="clip_candidate_laugh_audio",
-        weight_setting="clip_candidate_laugh_audio_weight",
-        min_setting="clip_candidate_laugh_audio_min_seconds",
-        label=lambda item: f"笑い声{item['laugh_audio']:g}秒",
-        attach=_attach_laugh_audio,
-    ),
-    _MaterialMetric(
-        key="smile",
-        setting="clip_candidate_smile",
-        weight_setting="clip_candidate_smile_weight",
-        min_setting="clip_candidate_smile_min_seconds",
-        label=lambda item: f"笑顔{item['smile']:g}秒",
-        attach=_attach_smile,
-    ),
-)
-
-# 候補badgeの文言。指標を足したらここも足すこと(素通りするとKeyErrorで気付ける)。
-_CANDIDATE_LABELS = {
-    "diamonds": lambda item: f"ダイヤ{item['diamonds']}",
-    "comments": lambda item: f"コメント{item['comments']}",
-    "audio_peak": lambda item: "音量",
-    "laugh_comment": lambda item: f"笑い{item['laugh_comment']}",
-    **{metric.key: metric.label for metric in _MATERIAL_METRICS},
-}
-# 窓が重なった候補を畳むときに、代表となった窓から引き継ぐkey。
-_CANDIDATE_REPRESENTATIVE_KEYS = (
-    "zscore", "metric", "diamonds", "comments", "ratio", "silent_ratio", "laugh_comment",
-    *(metric.key for metric in _MATERIAL_METRICS),
-)
+def _battle_payload(entry: dict, to_pts, started_at: float, ended_at) -> dict:
+    """1戦ぶんの表示data。時刻はすべて動画の秒(score推移をplayerの位置と重ねるため)。"""
+    battle = entry["battle"]
+    upper = ended_at if ended_at is not None else float("inf")
+    participants = battle.get("participants") or []
+    return {
+        "battle_id": battle.get("battle_id") or 0,
+        "ordinal": entry["ordinal"],
+        "type": battle.get("type") or battle_type(participants),
+        "start": round(max(0.0, to_pts(entry["start"])), 2),
+        "end": round(max(0.0, to_pts(entry["end"])), 2),
+        # 録画を跨いだPK。この録画には片側しか映っていないことを名乗らないと、途中から
+        # 立ち上がる曲線が「そのPKの全体」に見える。
+        "partial": bool(entry["start"] < started_at or entry["end"] > upper),
+        "aborted": bool(battle.get("aborted")),
+        "ongoing": bool(battle.get("ongoing")),
+        "result": battle.get("result"),
+        "own_score": int(battle.get("own_score") or 0),
+        "opp_score": int(battle.get("opp_score") or 0),
+        "opponents": [p.get("nickname") or p.get("unique_id") or ""
+                      for p in participants if not p.get("is_own")],
+        # 陣営(participant)。再生画面のスコアバーはこの分割で描く(1v1=2分割、個人マルチ=
+        # 人数ぶん、チーム戦=チーム数)。ここのscoreは確定値で、再生位置での値はseriesの
+        # partsから引く。nicknameは陣営の名乗り(barのhover)にしか使わない。
+        "participants": [
+            {"user_id": str(p.get("user_id") or ""),
+             "nickname": p.get("nickname") or "",
+             "unique_id": p.get("unique_id") or "",
+             "is_own": bool(p.get("is_own")),
+             "side": p.get("side"),
+             "team_id": p.get("team_id"),
+             "score": int(p.get("score") or 0)}
+            for p in participants
+        ],
+        # 録画の窓の外のsampleは載せない。写像は録画の中の時刻にしか意味が無く、外側を
+        # 渡すと0秒や末尾へ潰れた点が端にぶら下がる。
+        "series": [
+            {"t": round(to_pts(sample["t"]), 2),
+             "own": int(sample.get("own") or 0), "opp": int(sample.get("opp") or 0),
+             # その時刻の陣営別score。名前はparticipantsが持つので、sampleごとには
+             # 繰り返さない(user_idと、陣営を決めるside/team_idだけを載せる)。
+             # 記録側のkeyは"id"(collector._append_score_sample)で、participantsの
+             # user_idと同じ値。画面が2つのkeyを覚えずに済むよう、ここで名前を揃える。
+             "parts": [
+                 {"user_id": str(part.get("id") or ""),
+                  "score": int(part.get("score") or 0),
+                  "side": part.get("side"),
+                  "team_id": part.get("team_id")}
+                 for part in (sample.get("parts") or [])
+             ]}
+            for sample in (battle.get("score_series") or [])
+            if sample.get("t") is not None and started_at <= sample["t"] <= upper
+        ],
+    }
 
 
-def _attach_laugh_comments(session_id: int, buckets: list, bucket_seconds: int) -> None:
-    """各bucketへ ``laugh_comment``(笑いcommentの件数)を載せる。
+@router.get("/api/recordings/{recording_id}/gifts")
+async def recording_gifts_api(recording_id: int) -> dict:
+    """録画窓のgiftを1件ずつ、掛かっているPK(Battle)のscore推移と併せて動画時間軸で返す
+    (timelineのicon、および再生画面の「PK・ギフト」panel用)。
 
-    bucketsへ列を足さないのは、判定patternを運用しながら調整するものだからで、patternを
-    変えるたびにschema migrationと全session backfillが要る設計は誤りである。3時間・comment
-    2万件でも正規表現の走査は数十msで済む。
+    heatは窓ごとの密度なので「どれだけ来たか」しか読めない。**何が**飛んだのかは
+    gift別のiconでしか判らないので、こちらは個々のeventをそのまま返す。時刻はheat・
+    commentと同じmapperを通す(生の差分だと焼き込み動画や検索hitと位置がずれる)。
 
-    丸めは ``CAST(time / bs) * bs``(storage._rebuild_buckets_locked)と同じ式を使う。
-    独自に丸めると既存bucketと1つずれる。
-    """
-    compiled = laugh_text.compile_patterns(min_w_run=get_laugh_comment_min_w_run())
-    starts = {b["start"] for b in buckets}
-    counts: dict = {}
-    bodies = []
-    rows = []
-    for event in runtime.storage.iter_events(session_id, kinds=("comment",)):
-        # 旧録画は text 列に入っている(storage側もCOALESCEで両方見ている)。
-        body = (event.get("comment") or event.get("text") or "").strip()
-        if not body:
-            continue
-        rows.append((int(event["time"] // bucket_seconds) * bucket_seconds, body))
-        bodies.append(body)
-    templates = laugh_text.template_bodies(bodies)
-    for start, body in rows:
-        if start not in starts or body in templates:
-            continue
-        if laugh_text.classify(body, compiled) is not None:
-            counts[start] = counts.get(start, 0) + 1
-    for bucket in buckets:
-        bucket["laugh_comment"] = counts.get(bucket["start"], 0)
+    ``icons`` はgift_id→icon URLで、画像を出せるgiftだけが載る。載らないgiftも
+    ``items`` には残す — icon画像が無いことは「giftが飛ばなかった」ではない。
+
+    ``uid`` は送り主のavatarを引くkey。avatar poolのkey規則(unique_id、無ければ
+    nickname)に揃えてあるので、画面は ``/api/avatar?id=`` にそのまま渡せば、焼き込みや
+    履歴と同じ1枚を得る。eventはavatar URLを持たないため、ここでURLは返さない。
+
+    ``battles`` はこの録画に掛かったPKのscore推移、``items[].battle`` はそのgiftが飛んだ
+    PKのordinal(どのPKにも入らなければ null)。gift一覧とPKを別のrouteに分けると同じevent列を
+    2度読み、片方だけが別の窓で数えることになるので1つの口にまとめてある。
+
+    ``battles[].participants`` は陣営(名前・side・team_id)、``series[].parts`` はその時刻の
+    陣営別score。再生画面のスコアバーは再生位置での実値で分割するため、確定scoreだけでは
+    足りない(個人マルチ3本目・チーム別の内訳が出せない)。
+
+    ``items`` に載るのは**自室(味方陣)のgift**だけである。相手陣のコインは相手Roomの
+    listenerがBattleの貢献・scoreへ入れるが、eventとしては保存していない。"""
+    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="録画が見つかりません。")
+    session_id = recording.get("session_id")
+    if session_id is None:
+        return {"recording_id": recording_id, "items": [], "icons": {}, "battles": []}
+    path = files._resolved_recording_path(recording)
+    started_at = recording["started_at"]
+    ended_at = recording.get("ended_at")
+    to_pts = await asyncio.to_thread(
+        indexer.build_time_mapper_sync, path, started_at, ended_at)
+    rows = await asyncio.to_thread(
+        runtime.storage.iter_events, session_id, started_at, ended_at, ["gift"])
+    # 収集中のsessionはBattleがまだDBに無い(session終了時にしか永続化されない)。録画中の
+    # 録画を開いた時に「PKなし」と名乗らないよう、履歴画面と同じ入口で引く。
+    fought = await battles.battles_for_session(recording["unique_id"], session_id)
+    entries = _battles_in_window(fought, started_at, ended_at)
+    items = []
+    icons: dict = {}
+    for row in rows:
+        gift_id = int(row.get("gift_id") or 0)
+        # 帰属はserver時刻(create_time)で見る。窓の境界(battle_setting.*_ms)がserver時刻
+        # なので、受信時刻のまま突合すると端のgiftが隣のPKへ流れる(欠落時のみtimeで代用)。
+        at = row.get("create_time") or row["time"]
+        items.append({
+            "t": round(to_pts(row["time"]), 2),
+            "gift_id": gift_id,
+            "name": row.get("gift_name") or "",
+            "count": int(row.get("gift_count") or 1),
+            "diamonds": int(row.get("diamonds") or 0),
+            "nickname": row.get("user_nickname") or "",
+            "uid": row.get("user_unique_id") or row.get("user_nickname") or "",
+            "battle": _gift_battle_ordinal(entries, at),
+        })
+        if gift_id and gift_id not in icons:
+            url = await asyncio.to_thread(
+                runtime.gift_icon_url, gift_id, row.get("gift_image") or "")
+            if url:
+                icons[gift_id] = url
+    return {"recording_id": recording_id, "items": items,
+            "icons": {str(gift_id): url for gift_id, url in icons.items()},
+            "battles": [_battle_payload(entry, to_pts, started_at, ended_at)
+                        for entry in entries]}
 
 
-async def _attach_material_metrics(recording_id: int, path: Path, buckets: list,
-                                   bucket_seconds: int, to_pts, metrics: tuple,
-                                   weights: dict, min_values: dict) -> tuple:
-    """有効になっている素材由来の指標を各bucketへ載せ、判定に使うmetricsを返した上で
-    ``weights`` / ``min_values`` へその指標ぶんを書き込む。
-
-    下限(min_values)は指標ごとに必須である。素材由来の指標はどれもほとんどの窓で0なので、
-    下限が無いとごく僅かな検出が大きなz-scoreを叩いて候補を占領する(spike.detect_spikes)。
-    """
-    for metric in _MATERIAL_METRICS:
-        if not int(runtime.settings.get(metric.setting)):
-            continue
-        try:
-            skipped = await metric.attach(path, buckets, bucket_seconds, to_pts)
-        except hls_source.SourceMissing as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except RuntimeError as exc:
-            # 有効なのに解析できない(model未配置・engine未導入・解析失敗)ならここで失敗を
-            # 返す。黙って先へ進めると「その指標では盛り上がりが無かった」結果と見分けが
-            # 付かず、笑いを見ているつもりで見ていない候補一覧を渡すことになる。
-            raise HTTPException(status_code=503, detail=str(exc))
-        if skipped is not None:
-            runtime.logger.info(
-                "切り抜き候補: %s の指標をrecording %s では判定から外しました"
-                "（解析した素材の外に出るbucketがあります）", metric.key, recording_id,
-                extra={"event": "clip.material_metric_skipped",
-                       "ctx": {"recording_id": recording_id, "metric": metric.key,
-                               **skipped}},
-            )
-            continue
-        metrics = metrics + (metric.key,)
-        weights[metric.key] = float(runtime.settings.get(metric.weight_setting))
-        min_values[metric.key] = float(runtime.settings.get(metric.min_setting))
-    return metrics
-
-
-def _merge_candidates(items: list) -> list:
-    """時刻順に並んだ候補のうち、範囲が重なるものを1つへ畳む。移動窓は1 bucketずつずれた
-    窓を連続で拾うため、畳まないと同じ盛り上がりが何本ものclipになる。"""
-    merged: list = []
-    for item in sorted(items, key=lambda c: c["start"]):
-        if merged and item["start"] <= merged[-1]["end"]:
-            prev = merged[-1]
-            prev["end"] = max(prev["end"], item["end"])
-            if item["zscore"] > prev["zscore"]:
-                # 代表値は最も外れている窓のものを残す(合算すると窓の重なりを二重に数える)。
-                prev.update({k: item[k] for k in _CANDIDATE_REPRESENTATIVE_KEYS
-                             if k in item})
-            continue
-        merged.append(dict(item))
-    return merged
 
 
 @router.get("/api/recordings/{recording_id}/clip-candidates")
 async def recording_clip_candidates_api(recording_id: int) -> dict:
     """録画窓の盛り上がりから切り出し候補を出す。時刻は動画時間軸(秒)。
 
-    判定は core.spike で、窓だけを設定の秒数へ広げる。窓に入るbucket数はsessionのbucket幅から導くので、bucket幅の違う
-    session間でも窓の実長は揃う。"""
-    recording = await asyncio.to_thread(runtime.storage.get_recording, recording_id)
-    if recording is None:
-        raise HTTPException(status_code=404, detail="録画が見つかりません。")
-    window_seconds = int(runtime.settings.get("clip_candidate_window_seconds"))
-    pad_before = int(runtime.settings.get("clip_pad_before_seconds"))
-    pad_after = int(runtime.settings.get("clip_pad_after_seconds"))
-    lead = int(runtime.settings.get("clip_candidate_lead_seconds"))
-    empty = {"recording_id": recording_id, "window_seconds": window_seconds,
-             "pad_before_seconds": pad_before, "pad_after_seconds": pad_after,
-             "lead_seconds": lead, "candidates": []}
-    session_id = recording.get("session_id")
-    if session_id is None:
-        return empty
-    session = await asyncio.to_thread(runtime.storage.get_session, session_id)
-    if session is None:
-        return empty
-    bucket_seconds = session.get("bucket_seconds")
-    if not bucket_seconds:
-        # bucket幅が無いsessionは窓のbucket数を出せない。推測で埋めると窓の実長が嘘になる。
-        return empty
-    started_at = recording["started_at"]
-    ended_at = recording.get("ended_at")
-    buckets = await asyncio.to_thread(
-        runtime.storage.session_buckets,
-        session_id,
-        started_at,
-        ended_at,
-    )
-    window_buckets = spike.window_bucket_count(bucket_seconds, window_seconds)
-    path = files._resolved_recording_path(recording)
-    to_pts = await asyncio.to_thread(
-        indexer.build_time_mapper_sync, path, started_at, ended_at)
-    # 指標は設定で増える(音声・映像・笑い)。要素数まで固定した型にすると、
-    # 足すたびに型が変わったと言われる。
-    metrics: tuple = spike.METRICS
-    profile = None
-    if int(runtime.settings.get("clip_candidate_audio")):
-        try:
-            profile = await ensure_audio_profile(path)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc))
-        # 音声は動画時間軸なので、各bucketの窓を動画時間へ写してからpeakを引く。
-        # 録画の外へ落ちるbucketがあるとlevelの取れない窓ができるため、その録画では
-        # 音声を判定から外す(0で埋めると「無音だった」という観測を作ってしまう)。
-        outside = next((b for b in buckets
-                        if level_peak(profile, to_pts(b["start"]),
-                                      to_pts(b["start"] + bucket_seconds)) is None), None)
-        if outside is None:
-            for bucket in buckets:
-                bucket["audio_peak"] = level_peak(
-                    profile, to_pts(bucket["start"]),
-                    to_pts(bucket["start"] + bucket_seconds))
-            metrics = metrics + ("audio_peak",)
-        else:
-            runtime.logger.info(
-                "切り抜き候補: 音声の指標をrecording %s では判定から外しました"
-                "（録音の外に出るbucketがあります）", recording_id,
-                extra={"event": "clip.audio_metric_skipped",
-                       "ctx": {"recording_id": recording_id,
-                               "bucket_start": outside["start"],
-                               "audio_duration_seconds": profile["duration_seconds"]}},
-            )
-    weights: dict = {}
-    min_values: dict = {}
-    if int(runtime.settings.get("clip_candidate_laugh_comment")):
-        await asyncio.to_thread(
-            _attach_laugh_comments, session_id, buckets, bucket_seconds)
-        metrics = metrics + ("laugh_comment",)
-        weights["laugh_comment"] = float(runtime.settings.get("clip_candidate_laugh_weight"))
-        # 笑いの系列はほぼ全てが0で標準偏差が極小になるため、下限を置かないと
-        # 「ほとんど笑わない配信のたった1件」がzを叩いて候補を占領する。
-        min_values["laugh_comment"] = float(
-            runtime.settings.get("clip_candidate_laugh_min_comments"))
-    metrics = await _attach_material_metrics(
-        recording_id, path, buckets, bucket_seconds, to_pts, metrics, weights, min_values)
-    found = spike.detect_spikes(
-        buckets, window_buckets=window_buckets, metrics=metrics,
-        zscore_min=float(runtime.settings.get("clip_candidate_zscore")),
-        weights=weights or None, min_values=min_values or None)
-    if not found:
-        return empty
-    video_seconds = await _duration_seconds(path)
-    span = bucket_seconds * window_buckets
-    items = []
-    for candidate in found:
-        start = to_pts(candidate["start"]) - lead - pad_before
-        end = to_pts(candidate["start"] + span) + pad_after
-        start = max(0.0, start)
-        if video_seconds is not None:
-            end = min(end, video_seconds)
-        if end <= start:
-            continue
-        item = {
-            "start": round(start, 2),
-            "end": round(end, 2),
-            "zscore": round(candidate["zscore"], 2),
-            "metric": candidate["metric"],
-            "ratio": round(candidate["ratio"], 2),
-            "diamonds": int(candidate["values"]["diamonds"]),
-            "comments": int(candidate["values"]["comments"]),
-            # 生値を並記する。「なぜこの候補なのか」をその場で反証できる状態にしておく
-            # (候補が的外れでも気付きにくい種類の機能なので、表示は検証手段でもある)。
-            "laugh_comment": int(candidate["values"].get("laugh_comment", 0)),
-        }
-        # 素材由来の指標は、載せられた録画にだけkeyを付ける。判定していない録画でも0を
-        # 入れると、画面には「笑い声0秒」と出て検出していないことが読めなくなる。
-        for metric in _MATERIAL_METRICS:
-            if metric.key in candidate["values"]:
-                item[metric.key] = round(float(candidate["values"][metric.key]), 2)
-        items.append(item)
-    merged = _merge_candidates(items)
-    merged.sort(key=lambda c: c["zscore"], reverse=True)
-    limit = int(runtime.settings.get("clip_candidate_limit"))
-    for item in merged:
-        item["label"] = _CANDIDATE_LABELS[item["metric"]](item)
-        if profile is not None:
-            # 無音割合は畳んだ後の区間で測る。代表窓の値を引き継ぐと、窓が伸びた分の
-            # 無音が数に入らず実態とずれる。判定できなければNoneのまま。
-            item["silent_ratio"] = silent_ratio(profile, item["start"], item["end"])
-    return {**empty, "candidates": merged[:limit]}
+    実体は :func:`tictok.api.candidates.compute_clip_candidates`。short の一括生成が同じ
+    候補から範囲を決めるため、算出はrouteの外に置いてある。"""
+    return await candidates.compute_clip_candidates(recording_id)
 
 
 @router.get("/api/recordings/{recording_id}/waveform")

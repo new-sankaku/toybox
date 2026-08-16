@@ -13,6 +13,8 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from tictok.record.transcription import TIMEMAP_VERSION
+
 
 @pytest.fixture
 def server(env_guard):
@@ -23,7 +25,7 @@ def server(env_guard):
 
     import tictok.server as srv
     from tictok.api import access_log, disk, files, fsfacts, media_jobs, runtime, startup
-    from tictok.api.routes import (ai, analytics, bulk, media, monitors, pages,
+    from tictok.api.routes import (ai, analytics, bulk, clips, media, monitors, pages,
                                    recordings, search, sessions, storage, streamers,
                                    system, ws)
     from tictok.core import layout
@@ -41,10 +43,10 @@ def server(env_guard):
         # (``from ... import`` で束ねると差し替えが届かない)。
         runtime=runtime, files=files, fsfacts=fsfacts, disk=disk,
         media_jobs=media_jobs, startup=startup, access_log=access_log,
-        routes=SimpleNamespace(ai=ai, analytics=analytics, bulk=bulk, media=media,
-                               monitors=monitors, pages=pages, recordings=recordings,
-                               search=search, sessions=sessions, storage=storage,
-                               streamers=streamers, system=system, ws=ws),
+        routes=SimpleNamespace(ai=ai, analytics=analytics, bulk=bulk, clips=clips,
+                               media=media, monitors=monitors, pages=pages,
+                               recordings=recordings, search=search, sessions=sessions,
+                               storage=storage, streamers=streamers, system=system, ws=ws),
         # objectそのものを差し替える先。実体は1つなので、どのmoduleから見ても同じ。
         layout=layout, smile=smile, indexer=indexer, hls_pack=hls_pack,
         audio_norm=audio_norm, laugh_audio=laugh_audio, asyncio=_asyncio,
@@ -268,6 +270,53 @@ def test_session_detail_shape_for_recording_without_derivatives(client, make_srv
     assert (rec["has_transcript"], rec["has_output"], rec["has_up_output"]) == (False, False, False)
 
 
+def test_battle_series_route_returns_only_the_curve_of_one_battle(server, client):
+    """監視画面がコラボ相手との1戦を開いた時に引く口。session丸ごとのbattles(貢献者一覧と
+    グローブ判定を含み、中央値183KB)を曲線1本のために引かせないための分割なので、
+    参加者別のsampleは残しつつ、その戦だけが返ること。"""
+    storage = server.runtime.storage
+    session_id = storage.create_session("curved", 60)
+    storage.save_battles(session_id, [
+        {"battle_id": 7, "start_time": 1000.0, "end_time": 1300.0, "own_score": 40,
+         "opp_score": 30, "result": "win",
+         "participants": [{"user_id": "own", "is_own": True, "side": "own", "score": 40},
+                          {"user_id": "rival", "is_own": False, "side": "opp", "score": 30}],
+         "score_series": [
+             {"t": 1000.0, "own": 0, "opp": 0, "parts": [{"id": "rival", "score": 0}]},
+             {"t": 1300.0, "own": 40, "opp": 30, "parts": [{"id": "rival", "score": 30}]},
+         ]},
+        {"battle_id": 8, "start_time": 2000.0, "own_score": 1, "opp_score": 2,
+         "score_series": [{"t": 2000.0, "own": 1, "opp": 2, "parts": []}]},
+    ])
+
+    body = client.get(f"/api/sessions/{session_id}/battle-series/7").json()
+    assert body["battle_id"] == 7
+    assert [s["own"] for s in body["series"]] == [0, 40]
+    # 相手個人のscore。個人マルチ/チーム戦のoppは「最強の敵陣」で本人の点とは限らない。
+    assert body["series"][-1]["parts"] == [{"id": "rival", "score": 30}]
+    assert {p["user_id"] for p in body["participants"]} == {"own", "rival"}
+
+    missing = client.get(f"/api/sessions/{session_id}/battle-series/999")
+    assert missing.status_code == 404
+
+
+# 詳細画面のGift表はiconを名前の横に出す。URLはgift単位で1本あればよいので、行ごとではなく
+# gift_id→URLのmapで届く。poolに在るgiftだけが載る(出せないgiftは名前だけで並ぶ)。
+def test_session_detail_carries_gift_icon_urls(server, client, gift_builder):
+    storage = server.runtime.storage
+    session_id = storage.create_session("gifted", 60)
+    storage.update_session(session_id, "connected")
+    storage.add_event(session_id, gift_builder("Rose", diamonds=10, at=100.0))
+    storage.flush()
+    icons = server.runtime.gift_icons
+    icons.path_for(5655).write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+
+    summary = client.get(f"/api/sessions/{session_id}").json()["summary"]
+    assert summary["gift_icons"]["5655"] == "/api/gift-icon?gift_id=5655"
+    assert summary["gifts"][0]["gift_id"] == 5655
+    assert summary["users"][0]["items"]["Rose"]["gift_id"] == 5655
+
+
 # シーン検索は語が無いと0件を返す。語なしで「録画をそのまま開く」導線がこの一覧なので、
 # 語を1文字も打たない状態で中身が返ることそのものが仕様。
 def test_browse_recordings_lists_completed_recordings_without_a_query(client, make_srv_recording):
@@ -333,6 +382,61 @@ def test_browse_recordings_reports_the_measured_duration_not_the_wall_clock(
     assert rec["duration_seconds"] == 123.0
 
 
+def test_browse_recordings_carries_the_laughter_total_for_sorting(
+        client, server, make_srv_recording):
+    """録画一覧を笑い声の多い順で並べるための値。合計秒を持つのは、区間の数だけでは
+    「短い笑いが多い録画」と「長く笑っている録画」が同じ顔で並ぶため。"""
+    from tictok.search import indexer
+
+    _, recording_id, _ = make_srv_recording(unique_id="laugher")
+    storage = server.runtime.storage
+    recording = storage.get_recording(recording_id)
+    storage.replace_search_hits(recording_id, indexer.SOURCE_LAUGH, [
+        {"session_id": recording.get("session_id"), "unique_id": recording["unique_id"],
+         "started_at": recording["started_at"], "video_time": 10.0, "end_time": 14.0,
+         "nickname": None, "body": "4秒（強さ 0.80）", "score": 0.8},
+        {"session_id": recording.get("session_id"), "unique_id": recording["unique_id"],
+         "started_at": recording["started_at"], "video_time": 30.0, "end_time": 36.0,
+         "nickname": None, "body": "6秒（強さ 0.90）", "score": 0.9},
+    ])
+    storage.set_laugh_index_meta(recording_id, {
+        "version": indexer.LAUGH_INDEX_VERSION, "mode": "coop", "collab_observed": True,
+        "collab_seconds": 120.0, "battle_seconds": 60.0})
+
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert (rec["laugh_seconds"], rec["laugh_windows"]) == (10.0, 2)
+    # 何を外して数えた値かまで返す。0秒の理由(共演で埋まっていた)が画面から読めなくなる。
+    assert rec["laugh_exclude"] == "coop"
+    assert rec["laugh_excluded_seconds"] == 180.0
+
+
+def test_browse_recordings_leaves_an_unanalysed_laughter_total_null(
+        client, make_srv_recording):
+    """未解析は0秒ではない。0として返すと、笑い声順の末尾が「笑わなかった配信」と
+    「まだ数えていない配信」の混ざった塊になる。"""
+    _, recording_id, _ = make_srv_recording()
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert rec["laugh_seconds"] is None and rec["laugh_windows"] is None
+    assert rec["laugh_exclude"] is None
+
+
+def test_browse_recordings_reports_zero_laughter_once_it_has_been_analysed(
+        client, server, make_srv_recording):
+    """解析して1件も無かった録画は0秒と名乗る(未解析と同じ「—」に落とさない)。"""
+    from tictok.search import indexer
+
+    _, recording_id, _ = make_srv_recording()
+    server.runtime.storage.set_laugh_index_meta(recording_id, {
+        "version": indexer.LAUGH_INDEX_VERSION, "mode": "coop", "collab_observed": True,
+        "collab_seconds": 0.0, "battle_seconds": 0.0})
+
+    body = client.get("/api/recordings/browse").json()
+    rec = next(r for r in body["recordings"] if r["recording_id"] == recording_id)
+    assert (rec["laugh_seconds"], rec["laugh_windows"]) == (0.0, 0)
+
+
 def test_browse_recordings_leaves_an_unmeasured_duration_null(client, make_srv_recording):
     """測っていない録画に壁時計を代入しない。画面は「—」と出す。"""
     _, recording_id, _ = make_srv_recording()
@@ -343,43 +447,70 @@ def test_browse_recordings_leaves_an_unmeasured_duration_null(client, make_srv_r
 
 # 配信者別の集計は「DB行がN本ある」ではなく「手を出せる録画がN本ある」を返す。画面の
 # 配信者選択がこの一覧から作られるため、実体を見ないと素材の消えた配信者が選択肢に残る。
-def _status_entry(client, unique_id):
-    body = client.get("/api/search/status").json()
+# 出所は一括処理の集計1本だけ。同じ走査をする一覧を検索側にもう1本持っていた頃は、同じ
+# 画面に母集合の違う「録画」列が2つ並んでいた。
+def _status_entry(client, server, unique_id):
+    # 集計は要求種別の組ごとに20秒cacheされる。testは同じprocessで連続するので、前のtestの
+    # 集計がそのまま返らないよう捨ててから引く。
+    server.fsfacts._bulk_status_cache.clear()
+    body = client.get("/api/bulk/status").json()
     return next(s for s in body["streamers"] if s["unique_id"] == unique_id)
 
 
-def test_search_status_counts_a_recording_with_material_as_playable(client, make_srv_recording):
+def test_bulk_status_counts_a_recording_with_material_as_playable(client, server,
+                                                                  make_srv_recording):
     make_srv_recording(unique_id="haspulse", file_exists=False, ts_segments=2)
-    entry = _status_entry(client, "haspulse")
+    entry = _status_entry(client, server, "haspulse")
     assert entry["recordings"] == 1
     assert entry["playable"] == 1
-    assert entry["transcribable"] == 1
+    assert entry["targets"]["transcribe"] == 1
 
 
-def test_search_status_reports_a_streamer_without_material_as_unplayable(
-        client, make_srv_recording):
+def test_bulk_status_reports_a_streamer_without_material_as_unplayable(
+        client, server, make_srv_recording):
     """素材もmp4も無い配信者。行は残すが、実体0本であることを名乗る — 画面はこれを見て
-    配信者選択から外し、文字起こしのbuttonを押させない(投入側も実体の無い録画を弾く)。"""
+    配信者選択から外し、文字起こしのcellを押させない(投入側も実体の無い録画を弾く)。"""
     make_srv_recording(unique_id="ghosted", file_exists=False)
-    entry = _status_entry(client, "ghosted")
+    entry = _status_entry(client, server, "ghosted")
     assert entry["recordings"] == 1
     assert entry["playable"] == 0
-    assert entry["transcribable"] == 0
+    assert entry["targets"]["transcribe"] == 0
 
 
-def test_search_status_excludes_transcribed_recordings_from_transcribable(
+def test_bulk_status_excludes_transcribed_recordings_from_the_transcribe_targets(
         client, server, make_srv_recording):
-    """転写済の録画は積み直す対象ではない。実体があっても transcribable には数えない。"""
+    """文字起こし済の録画は積み直す対象ではない。実体があっても未処理には数えず、処理済へ回す。
+
+    「済み」は行の有無ではなく中身の版で決まる（現行の時刻map・語ごとの時刻あり）。古い形の
+    文字起こしは字幕として使えず再文字起こしでしか直らないので、済みには数えない。"""
+    from tictok.record.transcription import TIMEMAP_VERSION
+
     _, recording_id, _ = make_srv_recording(unique_id="alldone", file_exists=False,
                                             ts_segments=2)
     server.runtime.storage.save_transcript(
         recording_id, {"language": "ja", "model": "test", "text": "あ",
-                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}],
-                       "duration": 1.0})
-    entry = _status_entry(client, "alldone")
+                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ",
+                                     "words": [{"start": 0.0, "end": 1.0, "text": "あ"}]}],
+                       "duration": 1.0, "timemap_version": TIMEMAP_VERSION})
+    entry = _status_entry(client, server, "alldone")
     assert entry["playable"] == 1
-    assert entry["transcribed"] == 1
-    assert entry["transcribable"] == 0
+    assert entry["done"]["transcribe"] == 1
+    assert entry["targets"]["transcribe"] == 0
+
+
+def test_bulk_status_answers_every_kind_without_being_asked(client, server,
+                                                            make_srv_recording):
+    """種別を指定しない既定は全種別。画面は種別を選ばずに1枚の表を描くので、既定が一部
+    だけだと「選ぶまで数字が無い列」ができる。"""
+    make_srv_recording(unique_id="allkinds", ts_segments=2)
+    kinds = server.routes.bulk.BULK_KINDS
+    server.fsfacts._bulk_status_cache.clear()
+    body = client.get("/api/bulk/status").json()
+    assert set(body["kinds"]) == set(kinds)
+    entry = next(s for s in body["streamers"] if s["unique_id"] == "allkinds")
+    for kind in kinds:
+        assert kind in entry["targets"]
+        assert kind in entry["done"]
 
 
 # 「この録画を観たか」は一覧からしか分からない。印が既定値を名乗らないと、画面はどの
@@ -702,11 +833,129 @@ def test_transcript_404_distinguishes_missing_recording_from_missing_transcript(
     assert no_transcript.json()["detail"] != missing.json()["detail"]
 
 
+def test_transcript_api_says_whether_it_has_word_times(client, server, make_srv_recording):
+    """画面が「無音にも字幕が出続ける文字起こし」を名乗れるようにする。
+
+    語ごとの時刻が無い文字起こしはcueを語の端で締められず、SRTが録画のほぼ全区間を覆う(実測
+    中央値97.7%。実発話は約30%)。再文字起こしでしか直らないので、黙って書き出させない。"""
+    _, plain_id, _ = make_srv_recording()
+    _, worded_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.save_transcript(plain_id, {
+        "language": "ja", "model": "t", "text": "あ", "duration": 1.0,
+        "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}]})
+    storage.save_transcript(worded_id, {
+        "language": "ja", "model": "t", "text": "あ", "duration": 1.0,
+        "segments": [{"start": 0.0, "end": 1.0, "text": "あ",
+                      "words": [{"start": 0.0, "end": 1.0, "text": "あ"}]}]})
+
+    assert client.get(f"/api/recordings/{plain_id}/transcript").json()["word_times"] == 0
+    assert client.get(f"/api/recordings/{worded_id}/transcript").json()["word_times"] == 1
+
+
+def test_transcript_export_splits_srt_but_not_txt(client, server, make_srv_recording):
+    """書き出しの経路まで通して確かめる。segmentの端をそのまま出すと、語と語の間の無音まで
+    1枚のcueが覆う。"""
+    _, recording_id, _ = make_srv_recording()
+    server.runtime.storage.save_transcript(recording_id, {
+        "language": "ja", "model": "t", "text": "あい", "duration": 12.0,
+        "segments": [{"start": 0.0, "end": 12.0, "text": "あい",
+                      "words": [{"start": 0.0, "end": 1.0, "text": "あ"},
+                                {"start": 11.0, "end": 12.0, "text": "い"}]}]})
+
+    srt = client.get(f"/api/recordings/{recording_id}/transcript/export",
+                     params={"format": "srt"}).content.decode("utf-8")
+    assert "00:00:00,000 --> 00:00:01,000" in srt
+    assert "00:00:11,000 --> 00:00:12,000" in srt
+    assert "00:00:00,000 --> 00:00:12,000" not in srt
+
+    txt = client.get(f"/api/recordings/{recording_id}/transcript/export",
+                     params={"format": "txt"}).content.decode("utf-8")
+    assert txt.strip() == "あい"
+
+
 def test_transcript_export_rejects_unknown_format_before_lookup(client):
     # format check が録画の存在確認より前にあること(未知 id でも 400 が返る)。
     response = client.get("/api/recordings/99999999/transcript/export",
                           params={"format": "ass"})
     assert response.status_code == 400
+
+
+# ===== 文字起こしの訂正(transcript_corrections) =====
+# 訂正はtranscriptsへ書き戻さず読み出し時に重ねる。出口(本文API・字幕書き出し)まで
+# 届いていることをここで守る — 重ね忘れは「直したはずの字幕に旧い文字が出る」形で出る。
+
+@pytest.fixture
+def srv_recording(server, make_srv_recording):
+    _session_id, recording_id, _path = make_srv_recording()
+    server.runtime.storage.save_transcript(recording_id, {
+        "text": "サイウスちゃん",
+        "segments": [{"start": 10.0, "end": 12.0, "text": "サイウスちゃん",
+                      "words": [{"start": 10.0, "end": 10.3, "text": "サイ"},
+                                {"start": 10.3, "end": 10.6, "text": "ウス"},
+                                {"start": 10.6, "end": 12.0, "text": "ちゃん"}]}],
+        "duration": 12.0, "timemap_version": 2,
+    })
+    return recording_id
+
+
+def _post_correction(client, recording_id, **overrides):
+    body = {"start": 10.0, "src": "サイウスちゃん", "dst": "サイフォスちゃん",
+            "origin": "ai", "confidence": "高", "note": "視聴者名"}
+    body.update(overrides)
+    return client.post(f"/api/recordings/{recording_id}/transcript/corrections",
+                       json={"corrections": [body]})
+
+
+def test_posted_correction_reaches_the_transcript_api(client, srv_recording):
+    assert _post_correction(client, srv_recording).json() == {
+        "recording_id": srv_recording, "received": 1, "added": 1, "updated": 0,
+        "applied": 1}
+    got = client.get(f"/api/recordings/{srv_recording}/transcript").json()
+    assert got["segments"][0]["text"] == "サイフォスちゃん"
+
+
+def test_posted_correction_reaches_the_srt_export(client, srv_recording):
+    """字幕fileの出力も訂正後を使う。SRTの本文は語の連結から作られるので、
+    語まで貼り直せていないとここで原文が出る。"""
+    before = client.get(f"/api/recordings/{srv_recording}/transcript/export?format=srt")
+    assert "サイウスちゃん" in before.text
+
+    _post_correction(client, srv_recording)
+    after = client.get(f"/api/recordings/{srv_recording}/transcript/export?format=srt")
+    assert "サイフォスちゃん" in after.text
+    assert "サイウスちゃん" not in after.text
+
+
+def test_correction_list_separates_active_from_held(client, srv_recording, server):
+    _post_correction(client, srv_recording)
+    listed = client.get(
+        f"/api/recordings/{srv_recording}/transcript/corrections").json()
+    assert (listed["active"], listed["orphan"]) == (1, 0)
+
+    # 原文が変わる再文字起こし → 貼り直せず保留
+    server.runtime.storage.save_transcript(srv_recording, {
+        "text": "サイフォースちゃん",
+        "segments": [{"start": 10.0, "end": 12.0, "text": "サイフォースちゃん"}],
+        "duration": 12.0, "timemap_version": 2,
+    })
+    held = client.get(
+        f"/api/recordings/{srv_recording}/transcript/corrections").json()
+    assert (held["active"], held["orphan"]) == (0, 1)
+
+
+def test_correction_api_refuses_a_recording_without_a_transcript(
+        client, make_srv_recording):
+    _session_id, recording_id, _path = make_srv_recording()
+    assert _post_correction(client, recording_id).status_code == 404
+
+
+def test_transcribe_endpoint_rejects_an_unknown_correction_policy(client, srv_recording):
+    response = client.post(
+        f"/api/recordings/{srv_recording}/transcribe?corrections=nope")
+    assert response.status_code in (400, 503)
+    if response.status_code == 400:
+        assert "corrections" in response.json()["detail"]
 
 
 def test_delete_recording_404_for_unknown_id(client):
@@ -926,62 +1175,234 @@ def test_comments_are_empty_when_nothing_is_indexed(client, make_srv_recording):
     assert body == {"recording_id": recording_id, "items": []}
 
 
-# ---- cut list / bookmarks ---------------------------------------------------------
+# ---- gift icon --------------------------------------------------------------------
 
-def test_add_cut_404_for_unknown_recording(client):
-    response = client.post("/api/cutlist",
+_ICON_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 24
+_ICON_CDN_URL = "https://p16-webcast.tiktokcdn.com/img/maliva/rose~tplv-obj.png"
+
+
+def _add_gift(server, session_id, at, gift_id, name="Rose", diamonds=1, image=""):
+    server.runtime.storage.add_event(session_id, {
+        "time": at, "kind": "gift",
+        "user": {"user_id": "u1", "unique_id": "gifter", "nickname": "送り主"},
+        "gift_name": name, "repeat_count": 1, "diamonds": diamonds,
+        "gift_id": gift_id, "gift_image": image,
+    })
+
+
+def test_gifts_404_for_unknown_recording(client):
+    assert client.get("/api/recordings/99999999/gifts").status_code == 404
+
+
+def test_gifts_are_returned_on_the_video_time_axis(client, make_srv_recording, server):
+    """timelineへiconを載せるための時刻は動画の秒。壁時計のまま返すと、iconだけが
+    heat・commentと違う位置に並ぶ。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _add_gift(server, session_id, started + 30, 5655, diamonds=100)
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(g["t"], g["gift_id"], g["diamonds"]) for g in body["items"]] == [
+        (pytest.approx(30.0, abs=0.1), 5655, 100)]
+
+
+def test_gifts_carry_the_senders_avatar_pool_key(client, make_srv_recording, server):
+    """送り主のavatarを引くkeyはavatar poolの規則(unique_id、無ければnickname)に揃える。
+    別のkeyで返すと、画面は同じ人物のavatarをpoolから引けず全員が頭文字へ落ちる。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _add_gift(server, session_id, started + 1, 5655)
+    server.runtime.storage.add_event(session_id, {
+        "time": started + 2, "kind": "gift",
+        "user": {"user_id": "u2", "unique_id": "", "nickname": "名無し"},
+        "gift_name": "Rose", "repeat_count": 1, "diamonds": 1, "gift_id": 5655,
+    })
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(g["uid"], g["nickname"]) for g in body["items"]] == [
+        ("gifter", "送り主"), ("名無し", "名無し")]
+
+
+def test_gifts_exclude_events_outside_the_recording_window(client, make_srv_recording,
+                                                           server):
+    """1 sessionで複数本録った場合、他の録画の窓のgiftまで載せない。"""
+    session_id, recording_id, _ = make_srv_recording()
+    recording = server.runtime.storage.get_recording(recording_id)
+    _add_gift(server, session_id, recording["started_at"] - 60, 111)
+    _add_gift(server, session_id, recording["started_at"] + 10, 222)
+    _add_gift(server, session_id, recording["ended_at"] + 60, 333)
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [g["gift_id"] for g in body["items"]] == [222]
+
+
+def test_gifts_list_icon_urls_only_for_icons_that_can_be_served(
+        client, make_srv_recording, server):
+    """iconを出せないgiftも件数としては残す(画像が無いことは「飛ばなかった」ではない)。
+    許可hostでないURLは添えない — proxyをSSRFの口にしないため。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    server.runtime.gift_icons.path_for(5655).write_bytes(_ICON_PNG)
+    _add_gift(server, session_id, started + 1, 5655)
+    _add_gift(server, session_id, started + 2, 7777, image=_ICON_CDN_URL)
+    _add_gift(server, session_id, started + 3, 8888, image="https://evil.example/x.png")
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [g["gift_id"] for g in body["items"]] == [5655, 7777, 8888]
+    assert body["icons"]["5655"] == "/api/gift-icon?gift_id=5655"
+    assert body["icons"]["7777"].startswith("/api/gift-icon?gift_id=7777&u=https%3A%2F%2F")
+    assert "8888" not in body["icons"]
+
+
+def _save_battle(server, session_id, battles):
+    server.runtime.storage.save_battles(session_id, battles)
+
+
+def _battle(battle_id, start, end, own=400, opp=300, samples=None):
+    return {
+        "battle_id": battle_id, "start_time": start, "end_time": end,
+        "own_score": own, "opp_score": opp, "result": "win",
+        "participants": [{"user_id": "own", "is_own": True, "side": "own", "score": own},
+                         {"user_id": "rival", "is_own": False, "side": "opp",
+                          "nickname": "相手", "score": opp}],
+        "score_series": samples if samples is not None else [
+            {"t": start, "own": 0, "opp": 0}, {"t": end, "own": own, "opp": opp}],
+    }
+
+
+def test_gifts_carry_the_battles_of_the_recording_on_the_video_time_axis(
+        client, make_srv_recording, server):
+    """再生画面のPK・ギフトpanelはスコアとギフトを同じplayerの上へ重ねる。推移の時刻が
+    壁時計のままだと、スコアだけが行と別の位置を指す。"""
+    session_id, recording_id, _ = make_srv_recording()
+    recording = server.runtime.storage.get_recording(recording_id)
+    started = recording["started_at"]
+    _save_battle(server, session_id, [_battle(7, started + 60, started + 120)])
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(b["battle_id"], b["ordinal"], b["result"]) for b in body["battles"]] == [(7, 1, "win")]
+    battle = body["battles"][0]
+    assert (battle["start"], battle["end"]) == (pytest.approx(60, abs=0.1),
+                                                pytest.approx(120, abs=0.1))
+    assert [(s["t"], s["own"], s["opp"]) for s in battle["series"]] == [
+        (pytest.approx(60, abs=0.1), 0, 0), (pytest.approx(120, abs=0.1), 400, 300)]
+
+
+def test_gifts_are_attributed_to_the_battle_window_they_landed_in(
+        client, make_srv_recording, server):
+    """どのPKで飛んだかは、貢献集計と同じ窓(core.battleのrule)で決める。窓を別に持つと、
+    同じギフトがpanelとBattle cardで別のPKのものとして数えられる。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _save_battle(server, session_id, [_battle(7, started + 60, started + 120)])
+    _add_gift(server, session_id, started + 30, 111)
+    _add_gift(server, session_id, started + 90, 222)
+    _add_gift(server, session_id, started + 150, 333)
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(g["gift_id"], g["battle"]) for g in body["items"]] == [
+        (111, None), (222, 1), (333, None)]
+
+
+def test_gifts_list_only_the_battles_that_touch_this_recording(
+        client, make_srv_recording, server):
+    """1 sessionで複数本録った場合、他の録画の窓のPKまで並べない。通し番号(ordinal)は
+    session内のままにする — 録画ごとに数え直すと、同じPKが録画によって別の番号で呼ばれる。"""
+    session_id, recording_id, _ = make_srv_recording()
+    recording = server.runtime.storage.get_recording(recording_id)
+    started = recording["started_at"]
+    _save_battle(server, session_id, [
+        _battle(1, started - 500, started - 400),
+        _battle(2, started + 60, started + 120),
+    ])
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()
+    assert [(b["battle_id"], b["ordinal"]) for b in body["battles"]] == [(2, 2)]
+
+
+def test_gifts_mark_a_battle_that_the_recording_only_holds_part_of(
+        client, make_srv_recording, server):
+    """録画の頭より前に始まったPK。途中から立ち上がるスコアを「そのPKの全体」と読ませない
+    ため、掛かっていることを名乗り、窓の外のsampleは載せない。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    _save_battle(server, session_id, [_battle(9, started - 60, started + 60, samples=[
+        {"t": started - 60, "own": 0, "opp": 0},
+        {"t": started + 30, "own": 100, "opp": 50},
+        {"t": started + 60, "own": 400, "opp": 300},
+    ])])
+    battle = client.get(f"/api/recordings/{recording_id}/gifts").json()["battles"][0]
+    assert battle["partial"] is True
+    assert [s["own"] for s in battle["series"]] == [100, 400]
+
+
+def test_gifts_carry_the_per_side_score_of_each_sample(
+        client, make_srv_recording, server):
+    """再生画面のスコアバーは再生位置での陣営別scoreで分割する(1v1=2、個人マルチ=人数、
+    チーム戦=チーム数)。sampleがown/oppの2値しか持たないと、3コラの3本目が描けない。
+    名前はparticipantsが1度だけ持ち、sampleごとには繰り返さない。"""
+    session_id, recording_id, _ = make_srv_recording()
+    started = server.runtime.storage.get_recording(recording_id)["started_at"]
+    battle = _battle(7, started + 60, started + 120, samples=[
+        # 記録側のkeyは"id"(collector._append_score_sample)。
+        {"t": started + 60, "own": 0, "opp": 0,
+         "parts": [{"id": "own", "score": 0, "side": "own", "team_id": None},
+                   {"id": "rival", "score": 0, "side": "opp", "team_id": None}]},
+        {"t": started + 120, "own": 400, "opp": 300,
+         "parts": [{"id": "own", "score": 400, "side": "own", "team_id": None},
+                   {"id": "rival", "score": 300, "side": "opp", "team_id": None}]},
+    ])
+    _save_battle(server, session_id, [battle])
+    body = client.get(f"/api/recordings/{recording_id}/gifts").json()["battles"][0]
+    assert [(p["user_id"], p["is_own"], p["nickname"]) for p in body["participants"]] == [
+        ("own", True, ""), ("rival", False, "相手")]
+    assert [[(part["user_id"], part["score"]) for part in sample["parts"]]
+            for sample in body["series"]] == [
+        [("own", 0), ("rival", 0)], [("own", 400), ("rival", 300)]]
+
+
+def test_gift_icon_serves_the_pooled_image_with_its_real_type(client, server):
+    """pool上のfileは形式を名前に持たない(<gift_id>.img)。中身と違うcontent-typeで
+    名乗るとbrowserが黙って捨てる。"""
+    server.runtime.gift_icons.path_for(4242).write_bytes(_ICON_PNG)
+    response = client.get("/api/gift-icon", params={"gift_id": 4242})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content == _ICON_PNG
+
+
+def test_gift_icon_404s_when_nothing_is_pooled_and_no_url_is_given(client):
+    assert client.get("/api/gift-icon", params={"gift_id": 4243}).status_code == 404
+
+
+def test_gift_icon_rejects_a_url_outside_the_allowed_hosts(client):
+    response = client.get("/api/gift-icon",
+                          params={"gift_id": 4244, "u": "https://evil.example/x.png"})
+    assert response.status_code == 400
+
+
+# ---- 見どころ(=切り出し候補) ---------------------------------------------------------
+
+def test_add_bookmark_404_for_unknown_recording(client):
+    response = client.post("/api/bookmarks",
                            json={"recording_id": 99999999, "start": 0, "end": 5})
     assert response.status_code == 404
 
 
-def test_add_cut_rejects_non_positive_range(client, make_srv_recording):
-    _, recording_id, _ = make_srv_recording()
-    response = client.post(
-        "/api/cutlist", json={"recording_id": recording_id, "start": 10, "end": 10})
-    assert response.status_code == 400
-    assert "終了位置" in response.json()["detail"]
-
-
-def test_cut_lifecycle_add_list_delete(client, make_srv_recording):
+def test_bookmark_lifecycle_add_list_delete(client, make_srv_recording):
     _, recording_id, _ = make_srv_recording()
     created = client.post(
-        "/api/cutlist",
-        json={"recording_id": recording_id, "start": 1.5, "end": 9.0, "label": "山場"},
+        "/api/bookmarks",
+        json={"recording_id": recording_id, "start": 1.5, "end": 9.0, "memo": "山場"},
     ).json()
-    listed = client.get("/api/cutlist").json()["items"]
-    assert any(c["id"] == created["id"] and c["label"] == "山場" for c in listed)
-    assert client.delete(f"/api/cutlist/{created['id']}").json() == {"deleted": created["id"]}
-    assert client.delete(f"/api/cutlist/{created['id']}").status_code == 404
+    listed = client.get("/api/bookmarks").json()["items"]
+    assert any(b["id"] == created["id"] and b["memo"] == "山場" for b in listed)
+    assert client.delete(f"/api/bookmarks/{created['id']}").json() \
+        == {"deleted": created["id"]}
+    assert client.delete(f"/api/bookmarks/{created['id']}").status_code == 404
 
 
-def test_cut_label_can_be_edited(client, make_srv_recording):
-    """labelは書き出しfile名とEDL/FCPXMLのclip名になる。見どころのメモを引き継いだまま
-    直せないと、綴りの誤りが最終成果物にそのまま残る。"""
-    _, recording_id, _ = make_srv_recording()
-    created = client.post(
-        "/api/cutlist",
-        json={"recording_id": recording_id, "start": 1.5, "end": 9.0, "label": "山場"},
-    ).json()
-    response = client.patch(f"/api/cutlist/{created['id']}", json={"label": "  決着  "})
-    assert response.status_code == 200
-    assert response.json()["label"] == "決着"
-    listed = client.get("/api/cutlist").json()["items"]
-    assert any(c["id"] == created["id"] and c["label"] == "決着" for c in listed)
-
-
-def test_cut_label_patch_404_for_unknown_cut(client):
-    assert client.patch("/api/cutlist/99999999", json={"label": "x"}).status_code == 404
-
-
-def test_cutlist_export_rejects_unknown_format(client):
-    response = client.get("/api/cutlist/export", params={"format": "xml"})
-    assert response.status_code == 400
-
-
-def test_cutlist_csv_export_is_bom_prefixed(client):
-    response = client.get("/api/cutlist/export", params={"format": "csv"})
-    assert response.status_code == 200
-    assert response.content.startswith(b"\xef\xbb\xbf")
+def test_bookmark_list_resolves_the_recording_path(client, make_srv_recording):
+    """一覧のpathは移動後の実体を指す。範囲を持つ見どころはそのまま書き出しの素材なので、
+    ここが実体と食い違うと、書き出せない行が書き出せるように見える。"""
+    _, recording_id, path = make_srv_recording()
+    created = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0}).json()
+    listed = {b["id"]: b for b in client.get("/api/bookmarks").json()["items"]}
+    assert listed[created["id"]]["path"] == str(path)
 
 
 def test_add_bookmark_rejects_end_at_or_before_start(client, make_srv_recording):
@@ -1004,6 +1425,65 @@ def test_patch_unknown_bookmark_is_404(client):
     assert client.patch("/api/bookmarks/99999999", json={"memo": "x"}).status_code == 404
 
 
+def test_bookmark_memo_can_be_edited(client, make_srv_recording):
+    """メモは覚え書きであり、mp4を書き出すときのfile名でもある。直せないと綴りの誤りが
+    最終成果物にそのまま残る。"""
+    _, recording_id, _ = make_srv_recording()
+    created = client.post(
+        "/api/bookmarks",
+        json={"recording_id": recording_id, "start": 1.5, "end": 9.0, "memo": "山場"},
+    ).json()
+    response = client.patch(f"/api/bookmarks/{created['id']}", json={"memo": "決着"})
+    assert response.status_code == 200
+    assert response.json()["memo"] == "決着"
+
+
+def test_bookmark_range_patch_moves_and_clears(client, make_srv_recording):
+    """見どころの位置と範囲を一覧から直せること。
+
+    直せないと、点に尺を与えるにも端を1秒詰めるにも再生画面へ戻って取り直すことになり、
+    古い行を消し忘れれば同じ場面の見どころが2件残る。
+    """
+    _, recording_id, _ = make_srv_recording()
+    mark = client.post(
+        "/api/bookmarks", json={"recording_id": recording_id, "start": 10.0}).json()
+    # 点へ尺を与える(endだけを渡す)。これで書き出しの素材になる。
+    ranged = client.patch(f"/api/bookmarks/{mark['id']}", json={"end": 40.0}).json()
+    assert (ranged["start"], ranged["end"]) == (10.0, 40.0)
+    # 位置だけを渡した時にendへ触らないこと(画面は尺を保つために両方渡す)。
+    moved = client.patch(f"/api/bookmarks/{mark['id']}", json={"start": 20.0}).json()
+    assert (moved["start"], moved["end"]) == (20.0, 40.0)
+    # end=nullは「範囲を捨てて点へ戻す」。既定値と読み違えて無視すると範囲が残る。
+    point = client.patch(f"/api/bookmarks/{mark['id']}", json={"end": None}).json()
+    assert point["end"] is None and point["start"] == 20.0
+    # 逆転した範囲は断る(0秒の見どころはmp4にできない)。
+    assert client.patch(
+        f"/api/bookmarks/{mark['id']}", json={"end": 20.0}).status_code == 422
+    assert client.patch(
+        f"/api/bookmarks/{mark['id']}", json={"start": -1.0}).status_code == 422
+    assert client.patch("/api/bookmarks/99999999", json={"start": 1.0}).status_code == 404
+    # 空のPATCHを200で返すと、画面は保存できたつもりで何も変わっていない。
+    assert client.patch(f"/api/bookmarks/{mark['id']}", json={}).status_code == 400
+
+
+def test_live_bookmark_range_patch_is_refused_until_finalize(
+        client, server, make_srv_recording):
+    """配信中に押した見どころは、録画の確定まで位置を直させないこと。
+
+    startはwall-clockから出した暫定値で、finalizeでPTS軸へ載せ直される。ここを通すと
+    手で入れた値が再mapに上書きされ、endだけが手入力のまま残る。
+    """
+    _, recording_id, _ = make_srv_recording()
+    mark = server.runtime.storage.add_live_bookmark(
+        recording_id, "alice", 1300.0, 300.0)
+    response = client.patch(f"/api/bookmarks/{mark['id']}", json={"end": 320.0})
+    assert response.status_code == 422
+    assert "録画の確定" in response.json()["detail"]
+    # メモとグループは押した直後でも直せる(PTS軸と関係がない)。
+    assert client.patch(
+        f"/api/bookmarks/{mark['id']}", json={"memo": "後で見る"}).json()["memo"] == "後で見る"
+
+
 # ---- 切り抜きグループ(group) ------------------------------------------------------------
 
 def test_group_crud_and_idempotent_name(client):
@@ -1021,137 +1501,157 @@ def test_group_crud_and_idempotent_name(client):
     assert client.delete(f"/api/groups/{created['id']}").status_code == 404
 
 
+def test_group_counts_split_ranged_from_points(client, make_srv_recording):
+    """棚の件数は全件と「尺のある件数」を分けて出す。合計尺は尺のある行だけの和なので、
+    件数を1つしか出さないと「3件あるのに0秒」という読めない組み合わせが出る。"""
+    _, recording_id, _ = make_srv_recording()
+    group = client.post("/api/groups", json={"name": "内訳"}).json()
+    client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0, "end": 11.0,
+        "group_id": group["id"]})
+    client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 20.0, "group_id": group["id"]})
+    listed = {g["id"]: g for g in client.get("/api/groups").json()["items"]}
+    assert listed[group["id"]]["item_count"] == 2
+    assert listed[group["id"]]["ranged_count"] == 1
+    assert listed[group["id"]]["ranged_seconds"] == 10.0
+
+
 def test_group_delete_returns_items_to_ungrouped(client, make_srv_recording):
     _, recording_id, _ = make_srv_recording()
     group = client.post("/api/groups", json={"name": "帰る先"}).json()
-    cut = client.post("/api/cutlist", json={
+    ranged = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "end": 2.0,
         "group_id": group["id"]}).json()
-    assert (cut["group_id"], cut["position"]) == (group["id"], 0)
-    mark = client.post("/api/bookmarks", json={
+    assert (ranged["group_id"], ranged["position"]) == (group["id"], 0)
+    point = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "group_id": group["id"]}).json()
-    assert mark["group_id"] == group["id"]
+    assert point["group_id"] == group["id"]
     client.delete(f"/api/groups/{group['id']}")
-    cuts = client.get("/api/cutlist").json()["items"]
-    assert next(c for c in cuts if c["id"] == cut["id"])["group_id"] is None
-    marks = client.get("/api/bookmarks").json()["items"]
-    assert next(m for m in marks if m["id"] == mark["id"])["group_id"] is None
+    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
+    # 書き出し順はグループの中でしか意味を持たないので一緒に落ちる。
+    assert (marks[ranged["id"]]["group_id"], marks[ranged["id"]]["position"]) == (None, None)
+    assert marks[point["id"]]["group_id"] is None
 
 
-def test_add_cut_with_unknown_group_is_404(client, make_srv_recording):
+def test_group_shelf_reorder(client):
+    """棚の表示順。グループ内の見どころの並び(/api/groups/{id}/order)とは別物で、
+    こちらは書き出し順に一切影響しない。"""
+    first = client.post("/api/groups", json={"name": "棚1"}).json()
+    second = client.post("/api/groups", json={"name": "棚2"}).json()
+    mine = {first["id"], second["id"]}
+
+    def order():
+        return [g["id"] for g in client.get("/api/groups").json()["items"] if g["id"] in mine]
+
+    assert order() == [first["id"], second["id"]]
+    body = client.post("/api/groups/order",
+                       json={"group_ids": [second["id"], first["id"]]})
+    assert body.status_code == 200
+    assert body.json()["ordered"] >= 2
+    assert order() == [second["id"], first["id"]]
+
+
+def test_group_merge_moves_items_and_removes_source(client, make_srv_recording):
     _, recording_id, _ = make_srv_recording()
-    response = client.post("/api/cutlist", json={
+    source = client.post("/api/groups", json={"name": "統合元"}).json()
+    target = client.post("/api/groups", json={"name": "統合先"}).json()
+    ranged = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0, "end": 2.0,
+        "group_id": source["id"]}).json()
+    point = client.post("/api/bookmarks", json={
+        "recording_id": recording_id, "start": 1.0, "group_id": source["id"]}).json()
+
+    assert client.post(f"/api/groups/{source['id']}/merge",
+                       json={"into": source["id"]}).status_code == 400
+    assert client.post(f"/api/groups/{source['id']}/merge",
+                       json={"into": 99999999}).status_code == 404
+    assert client.post("/api/groups/99999999/merge",
+                       json={"into": target["id"]}).status_code == 404
+
+    body = client.post(f"/api/groups/{source['id']}/merge",
+                       json={"into": target["id"]}).json()
+    assert body["bookmarks"] == 2
+    # 統合元は消え、中身は移動先へ移る(空のグループが残らない)。
+    assert source["id"] not in [g["id"] for g in client.get("/api/groups").json()["items"]]
+    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
+    assert marks[ranged["id"]]["group_id"] == target["id"]
+    assert marks[point["id"]]["group_id"] == target["id"]
+
+
+def test_add_bookmark_with_unknown_group_is_404(client, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    response = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": 99999999})
     assert response.status_code == 404
 
 
-def test_cutlist_bulk_move_copy_delete(client, make_srv_recording):
+def test_bookmarks_bulk_move_copy_delete(client, make_srv_recording):
     _, recording_id, _ = make_srv_recording()
     g1 = client.post("/api/groups", json={"name": "g1"}).json()
     g2 = client.post("/api/groups", json={"name": "g2"}).json()
-    first = client.post("/api/cutlist", json={
+    first = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": g1["id"]}).json()
-    second = client.post("/api/cutlist", json={
+    second = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 3.0, "end": 4.0, "group_id": g1["id"]}).json()
-    # copy: 元(g1)は残り、複製がg2へ末尾追記される。
-    body = client.post("/api/cutlist/bulk", json={
+    # copy: 元(g1)は残り、複製がg2へ末尾追記される。所属は排他なので、同じ場面を
+    # グループごとに別の詰め方で持つ手段はこれしかない。
+    body = client.post("/api/bookmarks/bulk", json={
         "op": "copy", "ids": [first["id"], second["id"]], "group_id": g2["id"]}).json()
     assert body["affected"] == 2
-    items = client.get("/api/cutlist").json()["items"]
-    assert len([c for c in items if c["group_id"] == g1["id"]]) == 2
-    copies = sorted((c for c in items if c["group_id"] == g2["id"]),
-                    key=lambda c: c["position"])
-    assert [c["start"] for c in copies] == [1.0, 3.0]
+    items = client.get("/api/bookmarks").json()["items"]
+    assert len([b for b in items if b["group_id"] == g1["id"]]) == 2
+    copies = sorted((b for b in items if b["group_id"] == g2["id"]),
+                    key=lambda b: b["position"])
+    assert [b["start"] for b in copies] == [1.0, 3.0]
     # move: group_id=Noneで未分類へ戻る(positionも外れる)。
-    body = client.post("/api/cutlist/bulk", json={
+    body = client.post("/api/bookmarks/bulk", json={
         "op": "move", "ids": [first["id"]], "group_id": None}).json()
     assert body["affected"] == 1
-    moved = next(c for c in client.get("/api/cutlist").json()["items"]
-                 if c["id"] == first["id"])
+    moved = next(b for b in client.get("/api/bookmarks").json()["items"]
+                 if b["id"] == first["id"])
     assert (moved["group_id"], moved["position"]) == (None, None)
-    assert client.post("/api/cutlist/bulk", json={
+    assert client.post("/api/bookmarks/bulk", json={
         "op": "delete", "ids": [second["id"]]}).json()["affected"] == 1
-    assert client.post("/api/cutlist/bulk",
+    assert client.post("/api/bookmarks/bulk",
                        json={"op": "explode", "ids": [1]}).status_code == 400
-    assert client.post("/api/cutlist/bulk",
+    assert client.post("/api/bookmarks/bulk",
                        json={"op": "move", "ids": []}).status_code == 400
-    assert client.post("/api/cutlist/bulk", json={
+    assert client.post("/api/bookmarks/bulk", json={
         "op": "move", "ids": [second["id"]], "group_id": 99999999}).status_code == 404
 
 
-def test_bookmarks_bulk_move_and_delete(client, make_srv_recording):
-    _, recording_id, _ = make_srv_recording()
-    group = client.post("/api/groups", json={"name": "見どころ束"}).json()
-    first = client.post("/api/bookmarks", json={
-        "recording_id": recording_id, "start": 1.0}).json()
-    second = client.post("/api/bookmarks", json={
-        "recording_id": recording_id, "start": 2.0}).json()
-    assert (first["group_id"], second["group_id"]) == (None, None)
-    body = client.post("/api/bookmarks/bulk", json={
-        "op": "move", "ids": [first["id"], second["id"]], "group_id": group["id"]}).json()
-    assert body["affected"] == 2
-    # 他testの行を数えないよう、自分のidの有無だけで見る(server fixtureはDBを共有する)。
-    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
-    assert marks[first["id"]]["group_id"] == group["id"]
-    assert marks[second["id"]]["group_id"] == group["id"]
-    # 未分類へ戻す。
-    assert client.post("/api/bookmarks/bulk", json={
-        "op": "move", "ids": [first["id"]], "group_id": None}).json()["affected"] == 1
-    marks = {m["id"]: m for m in client.get("/api/bookmarks").json()["items"]}
-    assert marks[first["id"]]["group_id"] is None
-    assert client.post("/api/bookmarks/bulk", json={
-        "op": "delete", "ids": [first["id"], second["id"]]}).json()["affected"] == 2
-    remaining = {m["id"] for m in client.get("/api/bookmarks").json()["items"]}
-    assert first["id"] not in remaining and second["id"] not in remaining
-    # 見どころは並びもIN/OUTも持たないのでcopyは受け付けない。
-    assert client.post("/api/bookmarks/bulk", json={
-        "op": "copy", "ids": [1], "group_id": group["id"]}).status_code == 400
-    assert client.post("/api/bookmarks/bulk", json={"op": "move", "ids": []}).status_code == 400
-    assert client.post("/api/bookmarks/bulk", json={
-        "op": "move", "ids": [1], "group_id": 99999999}).status_code == 404
-
-
-def test_group_reorder_defines_export_order_and_filename(client, make_srv_recording):
+def test_group_reorder_defines_export_order(client, make_srv_recording):
     _, recording_id, _ = make_srv_recording()
     group = client.post("/api/groups", json={"name": "グループA"}).json()
-    first = client.post("/api/cutlist", json={
+    first = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "end": 2.0, "group_id": group["id"]}).json()
-    second = client.post("/api/cutlist", json={
+    second = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 3.0, "end": 4.0, "group_id": group["id"]}).json()
     assert client.post(f"/api/groups/{group['id']}/order", json={
-        "cut_ids": [second["id"], first["id"]]}).json()["ordered"] == 2
-    response = client.get("/api/cutlist/export",
-                          params={"format": "csv", "group": str(group["id"])})
-    assert response.status_code == 200
-    # file名はグループ名(RFC 5987)で、行は並び順(second→first)=NLEのtimeline順で出る。
-    assert "filename*=UTF-8''" in response.headers["content-disposition"]
-    import csv as csv_mod
-    import io as io_mod
-    rows = list(csv_mod.reader(io_mod.StringIO(response.content.decode("utf-8-sig"))))
-    assert [row[3] for row in rows[1:]] == ["3.000", "1.000"]
-    assert client.get("/api/cutlist/export",
-                      params={"format": "csv", "group": "99999999"}).status_code == 404
-    assert client.get("/api/cutlist/export",
-                      params={"format": "csv", "group": "abc"}).status_code == 400
+        "bookmark_ids": [second["id"], first["id"]]}).json()["ordered"] == 2
+    # 並びはpositionが持つ。mp4の一括書き出しと「1本に連結」「作品にする」がこの順で走る。
+    items = {b["id"]: b for b in client.get("/api/bookmarks").json()["items"]}
+    assert items[second["id"]]["position"] < items[first["id"]]["position"]
 
 
-def test_clear_cutlist_scoped_by_group(client, make_srv_recording):
+def test_clear_bookmarks_scoped_by_group(client, make_srv_recording):
     # serverのDBはtest間で共有されるため、全体件数ではなく自分の行のid有無で確かめる。
     _, recording_id, _ = make_srv_recording()
     group = client.post("/api/groups", json={"name": "scoped"}).json()
-    grouped = client.post("/api/cutlist", json={
+    grouped = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 1.0, "end": 2.0,
         "group_id": group["id"]}).json()
-    loose = client.post("/api/cutlist", json={
+    loose = client.post("/api/bookmarks", json={
         "recording_id": recording_id, "start": 3.0, "end": 4.0}).json()
-    assert client.delete("/api/cutlist",
+    assert client.delete("/api/bookmarks",
                          params={"group": str(group["id"])}).json()["deleted"] == 1
-    ids = {c["id"] for c in client.get("/api/cutlist").json()["items"]}
+    ids = {b["id"] for b in client.get("/api/bookmarks").json()["items"]}
     assert grouped["id"] not in ids and loose["id"] in ids
-    assert client.delete("/api/cutlist", params={"group": "none"}).json()["deleted"] >= 1
-    ids = {c["id"] for c in client.get("/api/cutlist").json()["items"]}
+    assert client.delete("/api/bookmarks", params={"group": "none"}).json()["deleted"] >= 1
+    ids = {b["id"] for b in client.get("/api/bookmarks").json()["items"]}
     assert loose["id"] not in ids
-    assert client.delete("/api/cutlist", params={"group": "abc"}).status_code == 400
+    assert client.delete("/api/bookmarks", params={"group": "abc"}).status_code == 400
 
 
 def test_bookmark_group_patch_keeps_memo_and_group_independent(client, make_srv_recording):
@@ -1260,6 +1760,70 @@ def test_ops_kind_labels_use_the_same_words_as_the_job_screen(client):
     assert ops_labels.job_domain_label("reprocess") == "再mp4化"
 
 
+# 一括投入を止める手段はJob画面にしか無い(投入した画面は台帳を持たない)。範囲はserverが
+# 決める — 手元の行だけを対象にすると、limitで切れた古い行が黙って残る。
+def test_cancel_matching_jobs_stops_only_the_asked_kind(client, server, make_srv_recording):
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.enqueue_media_job("stt-1", "stt", recording_id)
+    storage.enqueue_media_job("stt-2", "stt", recording_id)
+    storage.enqueue_media_job("ovl-1", "overlay", recording_id)
+
+    body = client.post("/api/jobs/cancel-matching", params={"kind": "stt"}).json()
+    # 台帳は他のtestの行も抱えるので、件数は「この2本を含む」までしか言えない。
+    assert body["cancelled"] >= 2
+    assert storage.get_media_job("stt-1")["state"] == "cancelled"
+    assert storage.get_media_job("stt-2")["state"] == "cancelled"
+    assert storage.get_media_job("ovl-1")["state"] == "pending"
+
+
+def test_cancel_matching_jobs_leaves_finished_rows_alone(client, server, make_srv_recording):
+    """取り消せるのは待機中・実行中だけ。終わった行まで数えると「N件中0件」と出る。"""
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.enqueue_media_job("done-1", "audionorm", recording_id)
+    storage.finish_media_job("done-1", "completed")
+
+    client.post("/api/jobs/cancel-matching", params={"kind": "audionorm"})
+    assert storage.get_media_job("done-1")["state"] == "completed"
+
+
+# 履歴画面の1本文字起こし。台帳を通さずprocess内で走っていた頃は、Job一覧に出るのに台帳へ行が
+# 無く、取り消しがmissingで空振りしていた(実処理は止まらないまま「取り消せるjobはありません」
+# と出る)。台帳に載っていることは、取り消しが効くかどうかで確かめる。
+def test_transcribing_one_recording_goes_through_the_job_queue(
+        client, server, make_srv_recording, monkeypatch):
+    monkeypatch.setattr(server.routes.media, "stt_available", lambda: True)
+    _, recording_id, _ = make_srv_recording()
+
+    body = client.post(f"/api/recordings/{recording_id}/transcribe").json()
+
+    row = server.runtime.storage.get_media_job(body["job_id"])
+    assert row is not None, "台帳に行が無い(process内で走っている)"
+    assert (row["kind"], row["state"]) == ("stt", "pending")
+    assert client.post(f"/api/jobs/{body['job_id']}/cancel").status_code == 200
+    assert server.runtime.storage.get_media_job(body["job_id"])["state"] == "cancelled"
+
+
+def test_transcribing_one_recording_joins_and_promotes_the_sweep_row(
+        client, server, make_srv_recording, monkeypatch):
+    """起動時sweepが積んだ行へ相乗りし、その1本の順番だけを人の優先度へ上げる。
+
+    sweepは文字起こしのない録画を上限なしで積むので、人が開いた1本はほぼ必ず既に待機列に居る。
+    二重投入として409を返すと「押しても何も始まらない」になり、順番を上げないと数百本の
+    自動投入の後ろで動かないままになる。"""
+    monkeypatch.setattr(server.routes.media, "stt_available", lambda: True)
+    _, recording_id, _ = make_srv_recording()
+    storage = server.runtime.storage
+    storage.enqueue_media_job("sweep-stt", "stt", recording_id,
+                              priority=server.media_jobs.SWEEP_JOB_PRIORITY, sweep=True)
+
+    body = client.post(f"/api/recordings/{recording_id}/transcribe").json()
+
+    assert body["job_id"] == "sweep-stt", "既にある行へ相乗りせず二重に積んでいる"
+    assert storage.get_media_job("sweep-stt")["priority"] == 0
+
+
 def test_cancel_unknown_job_is_404(client):
     response = client.post("/api/jobs/deadbeef/cancel")
     assert response.status_code == 404
@@ -1317,6 +1881,28 @@ def test_avatar_proxy_rejects_non_allowlisted_host(client):
     assert response.status_code == 400
 
 
+def test_avatar_proxy_serves_the_pool_when_only_an_id_is_known(client, server):
+    """URLを記録できなかった行(署名が通らずroom_infoまで届かなかったsessionなど)は
+    idだけでpoolを引ける。取りに行くURLが無いのでnetworkへは出ない。"""
+    pool = server.runtime.avatar_pool
+    pool.path_for("tester").write_bytes(b"\x89PNG-bytes")
+    pool._type_path("tester").write_text("image/png", encoding="utf-8")
+
+    response = client.get("/api/avatar", params={"id": "tester"})
+    assert response.status_code == 200
+    assert response.content == b"\x89PNG-bytes"
+    assert response.headers["content-type"] == "image/png"
+
+
+def test_avatar_proxy_without_a_url_or_id_is_a_bad_request(client):
+    assert client.get("/api/avatar").status_code == 400
+
+
+def test_avatar_proxy_reports_a_user_with_no_pooled_image(client):
+    """poolに無ければ404。別の画像を返すと、その人のアイコンとして別人が出る。"""
+    assert client.get("/api/avatar", params={"id": "nobody-here"}).status_code == 404
+
+
 def test_disk_report_names_the_configured_floor(client, server):
     body = client.get("/api/disk").json()
     assert set(body) == {"volumes", "min_free_bytes", "low_volumes"}
@@ -1337,6 +1923,66 @@ def test_comment_analysis_post_is_503_when_ai_is_disabled(client, make_srv_recor
     response = client.post(f"/api/sessions/{session_id}/comment-analysis")
     assert response.status_code == 503
     assert "AI機能が無効" in response.json()["detail"]
+
+
+def test_streamer_ranking_route_returns_the_latest_period_by_default(server, client):
+    """期間別ランキングの口。periodを省いたら最新の期間が返り、粒度も一緒に名乗ること
+    (画面はこの値でselectとnoteを組む)。"""
+    storage = server.runtime.storage
+    session_id = storage.create_session("ranked", 60)
+    storage.add_event(session_id, {
+        "kind": "gift", "time": time.time(), "diamonds": 120, "gift_count": 1,
+        "user": {"user_id": "911", "unique_id": "fan", "nickname": "Fan", "avatar": "",
+                 "identity_key": "911", "fans_level": 0, "gifter_level": 0,
+                 "gifter_badge": "", "member_badge": ""},
+    })
+    storage.flush()
+
+    body = client.get("/api/streamers/ranked/ranking").json()
+    assert body["granularity"] == "month"
+    assert body["period"] and body["period"] == body["periods"][-1]["key"]
+    assert [g["unique_id"] for g in body["gifters"]] == ["fan"]
+    assert body["gifter_count"] == 1
+    # 比べる前の期間が無いので順位差は付かない(0で埋めない)。
+    assert body["prev_period"] == "" and body["gifters"][0]["rank_delta"] is None
+
+
+def test_streamer_matrix_route_returns_days_and_rows(server, client):
+    """人×日の口。画面は days を列、gifters/battle_gifters を行、cells を升目として
+    組むので、その3つが同じ応答で揃って返ること。"""
+    storage = server.runtime.storage
+    session_id = storage.create_session("matrixed", 60)
+    storage.add_event(session_id, {
+        "kind": "gift", "time": time.time(), "diamonds": 120, "gift_count": 1,
+        "user": {"user_id": "912", "unique_id": "fan", "nickname": "Fan", "avatar": "",
+                 "identity_key": "912", "fans_level": 0, "gifter_level": 0,
+                 "gifter_badge": "", "member_badge": ""},
+    })
+    storage.flush()
+
+    body = client.get("/api/streamers/matrixed/matrix?columns=7").json()
+    assert len(body["periods"]) == 1
+    day = body["periods"][0]["key"]
+    assert body["periods"][0]["diamonds"] == 120
+    row = body["gifters"][0]
+    assert row["unique_id"] == "fan"
+    assert row["cells"][day]["diamonds"] == 120
+    assert body["gifter_count"] == 1
+    assert body["battle_gifters"] == []
+
+    # 粒度は月・週も受ける。列は畳まれるが中身は同じ1件。
+    monthly = client.get("/api/streamers/matrixed/matrix?granularity=month").json()
+    assert monthly["granularity"] == "month"
+    assert len(monthly["periods"]) == 1 and len(monthly["periods"][0]["key"]) == 7
+    # 壊れた指定は400で断る(既定へ倒すと、画面の名乗りと中身が食い違う)。
+    assert client.get("/api/streamers/matrixed/matrix?granularity=hour").status_code == 400
+    assert client.get("/api/streamers/matrixed/matrix?since=2026/01/01").status_code == 400
+
+
+def test_streamer_ranking_route_refuses_an_unknown_granularity(client):
+    """粒度は月・週・日だけ。黙って月へ倒すと、画面が別の切り方を出していても気づけない。"""
+    response = client.get("/api/streamers/ranked/ranking?granularity=year")
+    assert response.status_code == 400
 
 
 def test_ai_review_post_is_503_before_looking_up_the_streamer(client):
@@ -2118,6 +2764,183 @@ def test_relocation_carries_every_derived_file_not_just_the_timing_map(
     assert all(path.is_file() for path in relocatable_artifact_paths(dst))
 
 
+# ---- 切り出しの随伴 ------------------------------------------------------------------
+# 切り出しは常に一時保存先へ出る(``layout.clip_output_dir``)。最終保存先へ運ぶ口は
+# 「最終保存先へ移動」だけで、判断の基準は「その録画が最終保存先に在るか」に一本化する。
+
+def _make_clip(root, unique_id, stem, name=None, body=b"clip"):
+    """``<root>/<配信者>/_clips/`` に成果物を1本置く。"""
+    from tictok.core import layout
+
+    path = layout.clips_dir(root, unique_id) / (name or f"{stem}_000010-000020.mp4")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    return path
+
+
+def test_relocation_carries_the_clips_of_the_recordings_it_moves(server, relocation_dirs):
+    """録画を移したら、その録画から作った成果物も同じ側へ移ること。
+
+    成果物はDBに行を持たず台帳はfile systemだけなので、録画と別のdriveへ残ると、後から
+    どちらの保存先を見ればよいかを決める手掛かりが無くなる。"""
+    from tictok.core import layout
+
+    work, final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    clip = _make_clip(work, "alice", src.stem)
+
+    result = server.disk._run_relocation(server.disk._relocation_plan())
+
+    assert (result["moved"], result["clips_moved"], result["failures"]) == (1, 1, [])
+    assert not clip.exists()
+    assert (layout.clips_dir(final, "alice") / clip.name).is_file()
+
+
+def test_relocation_carries_the_screenshots_too(server, relocation_dirs):
+    """スクショ(``_screenshots``)も録画に随伴すること。
+
+    置き場を動画と分けたので、移動が ``_clips`` だけを歩く形のままだと、静止画だけが一時
+    保存先に取り残される。取り残された側は録画の隣に居ないまま、次の移動でも拾われない。"""
+    from tictok.core import layout
+
+    work, final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    shot = layout.stills_dir(work, "alice") / f"{src.stem}_shot00001235.png"
+    shot.parent.mkdir(parents=True, exist_ok=True)
+    shot.write_bytes(b"png")
+
+    result = server.disk._run_relocation(server.disk._relocation_plan())
+
+    assert (result["moved"], result["clips_moved"], result["failures"]) == (1, 1, [])
+    assert not shot.exists()
+    assert (layout.stills_dir(final, "alice") / shot.name).is_file()
+
+
+def test_relocation_plan_counts_the_clips_that_will_follow(server, relocation_dirs):
+    """dry-runは「録画を移した後に続けて動く成果物」まで数える。
+
+    計画時点ではその録画はまだ一時保存先に在るので、所在だけで選ぶと計画は0本と言い、
+    実行だけが黙って動かすことになる。"""
+    work, _final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    _make_clip(work, "alice", src.stem, body=b"x" * 100)
+
+    plan = server.disk._relocation_plan()
+
+    assert plan["total_items"] == 1
+    assert plan["clip_total_items"] == 1
+    assert plan["clip_total_bytes"] == 100
+
+
+def test_relocation_picks_up_clips_made_after_the_recording_moved(server, relocation_dirs):
+    """録画が既に最終保存先に在る場合、成果物だけでも移せること。
+
+    出力先は一時保存先固定なので、移送済みの録画から切り出すと成果物だけが一時保存先に
+    生まれる。これを拾わないと、その成果物は二度と最終保存先へ行けない。"""
+    from tictok.core import layout
+
+    work, final = relocation_dirs
+    _rid, src = _make_relocatable(server, final, unique_id="bob")
+    clip = _make_clip(work, "bob", src.stem)
+
+    plan = server.disk._relocation_plan()
+    assert (plan["total_items"], plan["clip_total_items"]) == (0, 1)
+
+    result = server.disk._run_relocation(plan)
+
+    assert (result["moved"], result["clips_moved"]) == (0, 1)
+    assert not clip.exists()
+    assert (layout.clips_dir(final, "bob") / clip.name).is_file()
+
+
+def test_relocation_keeps_the_clips_of_a_recording_that_did_not_move(
+    server, relocation_dirs, monkeypatch
+):
+    """録画の移送が失敗したら、その成果物も一時保存先に残すこと。
+
+    実行側は録画を運び終えた**後の**DBで引き直す。計画時の一覧をそのまま使うと、一時保存先に
+    残った録画の成果物だけが最終保存先へ行き、対になるものが2つのdriveへ分かれる。"""
+    work, _final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    clip = _make_clip(work, "alice", src.stem)
+
+    def _boom(source, destination):
+        raise OSError(32, "file is in use")
+
+    monkeypatch.setattr(server.Recorder, "_move_recording_files", staticmethod(_boom))
+    result = server.disk._run_relocation(server.disk._relocation_plan())
+
+    assert (result["moved"], result["clips_moved"]) == (0, 0)
+    assert clip.is_file()
+
+
+def test_relocation_leaves_a_clip_whose_recording_is_unknown(server, relocation_dirs):
+    """持ち主の分からない成果物は動かさず、数だけ名乗ること。
+
+    録画の行が消えても成果物は実在する(切り出しはretentionにも録画削除にも載らない)。
+    当てずっぽうで最終保存先へ送ると、消えた録画の成果物が黙って別のdriveへ移る。"""
+    work, _final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    orphan = _make_clip(work, "ghost", "00099_ghost_20260101_120000")
+
+    plan = server.disk._relocation_plan()
+    assert plan["clip_orphans"] == 1
+    assert plan["clip_total_items"] == 0
+
+    server.disk._run_relocation(plan)
+    assert orphan.is_file()
+
+
+def test_relocation_ignores_a_recording_row_without_a_filename(server, relocation_dirs):
+    """file名を持たない録画行は持ち主の候補にしない。
+
+    持ち主は名前の先頭一致で決めるので、空のstemは**全部の成果物に当たる**。1行あるだけで
+    一時保存先の成果物が丸ごとその録画の持ち物になり、その録画の所在だけで全部が動く。"""
+    work, final = relocation_dirs
+    storage = server.runtime.storage
+    session_id = storage.create_session("nameless", 60)
+    rid = storage.create_recording(session_id, "nameless", str(final / "x.mp4"), "",
+                                   "hd", time.time() - 600)
+    storage.update_recording(rid, "completed", str(final / "x.mp4"), "", time.time(), 1)
+    clip = _make_clip(work, "alice", "00042_alice_20260101_120000")
+
+    plan = server.disk._relocation_plan()
+
+    assert plan["clip_total_items"] == 0
+    assert clip.is_file()
+
+
+def test_relocation_does_not_carry_the_scene_cache(server, relocation_dirs):
+    """作品のシーンcacheは移さない。焼き直しは常に一時保存先で走るので、付いて行くと
+    次のcacheが必ず外れる(残骸の中間dirも同じ理由で成果物として扱わない)。"""
+    from tictok.media.work import SCENE_CACHE_DIR
+
+    work, _final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    cache = _make_clip(work, "alice", src.stem,
+                       name=f"{SCENE_CACHE_DIR}/{src.stem}_000010-000020.part.ts")
+
+    result = server.disk._run_relocation(server.disk._relocation_plan())
+
+    assert (result["moved"], result["clips_moved"]) == (1, 0)
+    assert cache.is_file()
+
+
+def test_relocation_does_not_overwrite_a_clip_at_the_destination(server, relocation_dirs):
+    """移動先に同名が居たら触らない。同じ範囲を別の版で切り直した成果物は中身が違う。"""
+    work, final = relocation_dirs
+    _rid, src = _make_relocatable(server, work, unique_id="alice")
+    clip = _make_clip(work, "alice", src.stem, body=b"new")
+    existing = _make_clip(final, "alice", src.stem, body=b"old")
+
+    result = server.disk._run_relocation(server.disk._relocation_plan())
+
+    assert result["clips_moved"] == 0
+    assert clip.read_bytes() == b"new"
+    assert existing.read_bytes() == b"old"
+    assert "同名" in result["failures"][0]["reason"]
+
+
 def test_relocation_survives_a_derived_file_that_cannot_be_moved(
     server, relocation_dirs, monkeypatch
 ):
@@ -2592,7 +3415,7 @@ def test_the_source_phase_leaves_the_material_alone_for_an_mp4_only_recording(
 
 def test_the_derived_phase_keeps_the_mp4_while_a_job_holds_the_recording(
         server, monkeypatch, retention_recording):
-    """焼き込み・転写が走っている録画のmp4を抜くと、実行中のffmpegの入力が消える。"""
+    """焼き込み・文字起こしが走っている録画のmp4を抜くと、実行中のffmpegの入力が消える。"""
     recording, path, _seg = retention_recording()
     monkeypatch.setattr(server.runtime.storage, "busy_recording_ids",
                         lambda: {recording["id"]})
@@ -3099,6 +3922,43 @@ def test_create_reel_404s_for_a_variant_the_recording_does_not_have(
     assert response.status_code == 404
 
 
+# ===== スクショ =====
+
+
+def test_still_queues_the_position_it_was_asked_for(client, server, make_srv_recording):
+    """押した位置と素材版をそのままqueueへ載せる。
+
+    実処理はworkerなので、押した瞬間にfileは無い。応答がjob_idだけであること自体が仕様で、
+    ここで守るのは「渡した位置が別の値にならない」ことである(位置が変われば別の場面が
+    保存され、しかもfileは正常に出来るので失敗としては現れない)。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    response = client.post(f"/api/recordings/{recording_id}/still",
+                           json={"at": 12.34, "label": "歓声"})
+    assert response.status_code == 200 and response.json()["kind"] == "still"
+    job = [j for j in server.runtime.storage.list_media_jobs() if j["kind"] == "still"][0]
+    assert job["params"]["at"] == 12.34
+    assert job["params"]["variant"] == "source" and job["params"]["label"] == "歓声"
+
+
+def test_still_can_be_taken_twice_from_the_same_recording(client, make_srv_recording):
+    """同じ録画から続けて撮れる。位置が違えば別の1枚である。
+
+    録画単位の二重投入judgeをそのまま通すと、2枚目が「既にqueueにあります」で拒まれる。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    first = client.post(f"/api/recordings/{recording_id}/still", json={"at": 1.0})
+    second = client.post(f"/api/recordings/{recording_id}/still", json={"at": 2.0})
+    assert (first.status_code, second.status_code) == (200, 200)
+    assert first.json()["job_id"] != second.json()["job_id"]
+
+
+def test_still_404s_for_a_variant_the_recording_does_not_have(client, make_srv_recording):
+    """無い版を黙って元録画へ落とすと、焼き込み済みを頼んだのに素の絵が保存される。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    response = client.post(f"/api/recordings/{recording_id}/still",
+                           json={"at": 1.0, "variant": "overlay"})
+    assert response.status_code == 404
+
+
 # ===== 切り出しの方式(mode) =====
 
 
@@ -3132,6 +3992,79 @@ def test_clip_rejects_an_unknown_mode(client, make_srv_recording):
         "start": 0.0, "end": 5.0, "mode": "lossless",
     })
     assert response.status_code == 400
+
+
+# ===== 切り出しに添える字幕file =====
+
+
+def _clip_result(path, *, origin: float) -> dict:
+    """make_clipの戻り値の形。``actual_start_seconds`` は実測した**実開始**である。"""
+    return {"path": str(path), "filename": path.name, "bytes": 1, "start": 10.0,
+            "end": 20.0, "encoder": "copy", "normalized": False,
+            "output_duration_seconds": 10.0 + (10.0 - origin),
+            "keyframe_lead_seconds": 10.0 - origin, "actual_start_seconds": origin}
+
+
+def test_clip_writes_the_subtitle_sidecar_on_the_clip_axis(
+    client, server, make_srv_recording, monkeypatch, tmp_path
+):
+    """字幕fileの原点は要求した開始位置ではなく、切り出しの実開始である。
+
+    stream copyは要求より手前のkeyframeから始まるので、要求値を引くとその差が全cueの
+    ズレになる(しかも再生してみるまで気付けない形で出る)。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    server.runtime.storage.save_transcript(recording_id, {
+        "language": "ja", "model": "test", "text": "あ", "duration": 60.0,
+        "segments": [{"start": 12.0, "end": 13.0, "text": "こんばんは"}],
+        "timemap_version": TIMEMAP_VERSION})
+    out = tmp_path / "00001_tester_20250101_000000_000010-000020.mp4"
+    out.write_bytes(b"\x00")
+
+    async def fake_make_clip(*args, **kwargs):
+        return _clip_result(out, origin=8.0)
+
+    monkeypatch.setattr(server.routes.media, "make_clip", fake_make_clip)
+    server.runtime.settings.update({"clip_subtitle_formats": "srt"})
+    body = client.post(f"/api/recordings/{recording_id}/clip", json={
+        "start": 10.0, "end": 20.0, "subtitles": True,
+    }).json()
+    assert body["subtitles"]["written"] == ["srt"]
+    assert body["subtitles"]["files"] == [out.with_suffix(".srt").name]
+    # 12.0秒の発話は、実開始8.0秒の切り抜きでは4.0秒。要求(10.0)を引いた2.0秒ではない。
+    assert "00:00:04,000 --> 00:00:05,000" in out.with_suffix(".srt").read_text(encoding="utf-8")
+
+
+def test_clip_says_why_no_subtitle_file_came_out(
+    client, server, make_srv_recording, monkeypatch, tmp_path
+):
+    """出せないときは黙って0件にしない。理由が無いと、利用者は切り出しごとやり直す。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    out = tmp_path / "00001_tester_20250101_000000_000010-000020.mp4"
+    out.write_bytes(b"\x00")
+
+    async def fake_make_clip(*args, **kwargs):
+        return _clip_result(out, origin=8.0)
+
+    monkeypatch.setattr(server.routes.media, "make_clip", fake_make_clip)
+    body = client.post(f"/api/recordings/{recording_id}/clip", json={
+        "start": 10.0, "end": 20.0, "subtitles": True,
+    }).json()
+    assert body["subtitles"]["reason"] == "no_transcript"
+    assert body["subtitles"]["message"]
+    assert not out.with_suffix(".srt").exists()
+
+
+def test_clip_batch_carries_the_subtitle_request_into_the_job(
+    client, server, make_srv_recording
+):
+    """一括書き出しでも同じ指定で走る(画面は1組のcontrolを両tabで共有している)。"""
+    _, recording_id, _ = make_srv_recording(ts_segments=2)
+    client.post("/api/clips/batch", json={
+        "items": [{"recording_id": recording_id, "start": 0.0, "end": 5.0}],
+        "subtitles": True,
+    })
+    job = [j for j in server.runtime.storage.list_media_jobs() if j["kind"] == "clip_batch"][0]
+    assert job["params"]["subtitles"] is True
 
 
 def test_clip_default_mode_setting_is_a_choice_not_a_path(client):

@@ -93,9 +93,14 @@ def test_job_payload_maps_error_to_message_and_defaults_totals():
     assert payload["domain"] == "overlay"
 
 
-def test_job_payload_started_at_falls_back_to_queued_at():
+def test_job_payload_keeps_started_at_empty_while_pending():
+    """待機中の行はqueued_atで埋めない。埋めると順番待ちの時間が所要時間として画面に
+    積み上がり、まだ動いていないjobが何時間もかかったように読める。"""
     payload = job_payload(_row(started_at=None, queued_at=42.0))
-    assert payload["started_at"] == 42.0
+    assert payload["started_at"] is None
+    assert payload["queued_at"] == 42.0
+    payload = job_payload(_row(state="running", started_at=50.0, queued_at=42.0))
+    assert payload["started_at"] == 50.0
 
 
 def test_group_payload_none_for_empty_or_ungroupable_kind():
@@ -112,6 +117,21 @@ def test_group_payload_all_completed_reports_count_and_full_pct():
     assert group["pct"] == 100
     assert (group["index"], group["total"]) == (3, 3)
     assert group["finished_at"] == 202.0
+
+
+def test_group_payload_starts_at_the_first_member_that_actually_ran():
+    """groupの開始は最初のmemberが動き出した時刻。1件も動いていない一括はNone(所要が
+    まだ無い)で、いつ投げたかはqueued_atが別に名乗る。"""
+    waiting = [_row(job_id="a", queued_at=100.0), _row(job_id="b", queued_at=110.0)]
+    group = group_payload(waiting)
+    assert group["state"] == "pending"
+    assert group["started_at"] is None
+    assert group["queued_at"] == 100.0
+    started = [
+        _row(job_id="a", state="completed", queued_at=100.0, started_at=150.0, finished_at=200.0),
+        _row(job_id="b", state="running", queued_at=110.0, started_at=200.0),
+    ]
+    assert group_payload(started)["started_at"] == 150.0
 
 
 def test_group_payload_excludes_skipped_from_the_output_count():
@@ -166,7 +186,8 @@ def test_group_payload_running_blends_finished_count_with_partial_pct():
 def test_group_payload_finished_at_is_none_while_nothing_finished():
     group = group_payload([_row(state="pending"), _row(job_id="b", state="pending")])
     assert group["finished_at"] is None
-    assert group["started_at"] == 100.0
+    assert group["started_at"] is None
+    assert group["queued_at"] == 100.0
 
 
 # ===== media_queue: worker =====

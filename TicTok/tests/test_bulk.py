@@ -10,6 +10,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from tictok.record.transcription import TIMEMAP_VERSION
+
 
 @pytest.fixture
 def server(env_guard):
@@ -513,8 +515,8 @@ def test_delete_mp4_skips_recordings_a_job_is_holding(client, server, make_recor
 
 
 # ---- 文字起こし ----
-# 対象の選び方(_bulk_plan)は他の種別と共有し、投入先だけがtranscribe_queueになる。
-# 走る台帳が違うので、済み判定・二重投入・所要の実測比の出所も他の種別とは別になる。
+# 対象の選び方(_bulk_plan)は他の種別と共有し、投入の口だけ_enqueue_stt_jobsを通る(台帳は
+# 同じmedia_job_queue)。済み判定の出所だけは他と違い、queueの行ではなくtranscriptsの実在。
 
 
 @pytest.fixture
@@ -523,16 +525,24 @@ def stt_ready(server, monkeypatch):
     monkeypatch.setattr(server.routes.bulk, "stt_available", lambda: True)
 
 
-def _save_transcript(server, recording_id):
+def _save_transcript(server, recording_id, word_times=True,
+                     timemap_version=TIMEMAP_VERSION):
+    """済みとして数えられる文字起こしを1本保存する。
+
+    既定は**いまの版**の文字起こし(現行の時刻map・語ごとの時刻あり)。済み判定はこの2つを見るので、
+    既定を古い形にすると全testが「文字起こしなし」側へ倒れて済み判定を検証できなくなる。"""
+    segment = {"start": 0.0, "end": 1.0, "text": "あ"}
+    if word_times:
+        segment["words"] = [{"start": 0.0, "end": 1.0, "text": "あ"}]
     server.runtime.storage.save_transcript(
         recording_id, {"language": "ja", "model": "test", "text": "あ",
-                       "segments": [{"start": 0.0, "end": 1.0, "text": "あ"}],
-                       "duration": 1.0})
+                       "segments": [segment], "duration": 1.0,
+                       "timemap_version": timemap_version})
 
 
 def test_transcribe_targets_recordings_without_a_transcript(client, server,
                                                             make_recording):
-    """済み判定はtranscripts表だけ。転写はfileを作らないので、filesystemからは判別できない。"""
+    """済み判定はtranscripts表だけ。文字起こしはfileを作らないので、filesystemからは判別できない。"""
     make_recording(unique_id="stt")
     _s, done_id, _p = make_recording(unique_id="stt")
     _save_transcript(server, done_id)
@@ -543,9 +553,30 @@ def test_transcribe_targets_recordings_without_a_transcript(client, server,
     assert body["skipped"]["done"] == 1
 
 
+@pytest.mark.parametrize("kwargs,label", [
+    ({"word_times": False}, "nowords"),
+    ({"timemap_version": TIMEMAP_VERSION - 1}, "oldmap"),
+])
+def test_transcribe_retargets_transcripts_that_cannot_be_used_as_subtitles(
+        client, server, make_recording, kwargs, label):
+    """行があるだけでは済みにしない。中身の版が古い文字起こしは再文字起こしでしか直らない。
+
+    語の時刻を持たない文字起こしはcueを語の端で締められず、segmentの終端が次のsegmentの開始まで
+    伸びたまま出る（実測: SRTがtimelineを覆う割合が中央値97.7%、実発話は約30%）。行の有無で
+    済みにしていた頃は、この母集団が一括投入から永久に外れていた（実測293件・471時間）。
+    """
+    _s, old_id, _p = make_recording(unique_id=label)
+    _save_transcript(server, old_id, **kwargs)
+
+    body = client.get("/api/bulk/estimate",
+                      params={"kind": "transcribe", "unique_id": label}).json()
+    assert body["recordings"] == 1, label
+    assert body["skipped"].get("done", 0) == 0, label
+
+
 def test_transcribe_accepts_recordings_that_only_have_segments(client, server,
                                                                make_recording, monkeypatch):
-    """入力は素材(.ts)でもよい。mp4を要求すると、単体では転写できる録画が一括だけ弾かれる。"""
+    """入力は素材(.ts)でもよい。mp4を要求すると、単体では文字起こしできる録画が一括だけ弾かれる。"""
     make_recording(unique_id="tsonly", file_exists=False)
     _with_hls(server, monkeypatch)
     server.fsfacts._bulk_status_cache.clear()
@@ -557,7 +588,7 @@ def test_transcribe_accepts_recordings_that_only_have_segments(client, server,
 
 def test_transcribe_redo_brings_back_transcribed_recordings(client, server,
                                                             make_recording):
-    """modelを替えたときや時刻mapの版が上がったときは転写し直すしかない。"""
+    """modelを替えたときや時刻mapの版が上がったときは文字起こしをやり直すしかない。"""
     _s, recording_id, _p = make_recording(unique_id="again")
     _save_transcript(server, recording_id)
 

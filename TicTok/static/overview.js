@@ -2,11 +2,16 @@
 
 const monitors = new Map();
 const players = new Map(); // uid -> { hls, video }
-const audioOn = new Set(); // uids whose audio is enabled (persists across live start/stop)
+// uids whose audio is enabled (persists across live start/stop)
+// 画面を開き直した時は必ず全muteで始める。localStorageへ残して復元すると、user操作の
+// 無いまま音ありでplay()することになり、browserのautoplay policyに弾かれて映像ごと
+// 出なくなる(ensurePlayerはvideo.mutedをこのSetから決める)。
+const audioOn = new Set();
 const grid = document.getElementById("monitor-grid");
 const gridEmpty = document.getElementById("grid-empty");
 const sortSelect = document.getElementById("sort-select");
 
+// 既に保存済みのkeyなので改名しない(改名すると既存userの並べ替えが1度だけ既定へ戻る)。
 const SORT_KEY = "tictok.overviewSort";
 
 function isRecording(snap) {
@@ -199,7 +204,8 @@ async function toggleRecord(uid) {
   try {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/record/${recording ? "stop" : "start"}`);
   } catch (err) {
-    showError(err);
+    // 一覧は複数の配信者を同時に出すので、どの配信者の操作かまで名乗らないと的が絞れない。
+    showError(err, `@${uid} ${recording ? "録画の停止" : "録画の開始"}`);
     if (btn) btn.disabled = false;
   }
 }
@@ -217,8 +223,11 @@ async function markBookmark(uid) {
       clearTimeout(btn._flashTimer);
       btn._flashTimer = setTimeout(() => { btn.textContent = "🔖"; }, 1500);
     }
+    // 記録した見どころはこの画面に残らない。1.5秒の✓だけだと、押せたのか・何件目なのかが
+    // 後から確かめられない(失敗側はshowErrorで残るので、成功だけ消えるのは不揃いでもある)。
+    showToast("見どころを記録しました。", null, { title: `@${uid}` });
   } catch (err) {
-    showError(err);
+    showError(err, `@${uid} 見どころの記録`);
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -242,7 +251,7 @@ async function toggleRecordVideo(uid) {
   try {
     await apiSend("POST", `/api/monitors/${encodeURIComponent(uid)}/record-video`, { record_video: next });
   } catch (err) {
-    showError(err);
+    showError(err, `@${uid} ${next ? "動画保存をONにする" : "動画保存をOFFにする"}`);
     if (btn) btn.disabled = false;
   }
 }
@@ -638,22 +647,24 @@ function handleMessage(msg) {
   }
 }
 
-if (sortSelect) {
-  const stored = window.localStorage.getItem(SORT_KEY);
-  if (stored) sortSelect.value = stored;
-  sortSelect.addEventListener("change", () => {
-    window.localStorage.setItem(SORT_KEY, sortSelect.value);
-    renderGrid();
-  });
-}
+// 復元はWS接続(下)より前。tileを描くrenderGridはmonitors messageで初めて走るので、
+// 並べ替えは最初の描画から保存値で効く。
+bindPref(sortSelect, SORT_KEY, renderGrid);
 
 document.getElementById("video-all-on").addEventListener("click", () => {
+  let started = 0;
   monitors.forEach((monitor, uid) => {
     if (monitor.snapshot && monitor.snapshot.recording && monitor.snapshot.recording.live && monitor.snapshot.recording.state === "recording") {
       const tile = grid.querySelector(`[data-uid="${CSS.escape(uid)}"]`);
-      if (tile) ensurePlayer(uid, tile);
+      if (tile) {
+        ensurePlayer(uid, tile);
+        started += 1;
+      }
     }
   });
+  // 対象が1件も無いとloopが空回りして完全な無反応になる。押せた上で何も起きないのと、
+  // 起こす相手が居ないのは別の事実なので言い分ける。
+  if (!started) showToast("映像を開始できる録画中の配信はありません。", null, { title: "映像 全ON" });
 });
 
 document.getElementById("audio-all-off").addEventListener("click", () => {

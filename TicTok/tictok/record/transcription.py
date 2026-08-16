@@ -33,10 +33,10 @@ logger = logging.getLogger("tictok.stt")
 # re-running" an answerable query instead of a guess.
 #
 # 2: 幻のtimestamp jumpをplaylistの尺で畳む(_rebase_phantom_jumps)。これを入れた時に版を
-#    据え置いたため、壊れた地図で作られた転写(実測: 2時間51分の録画に対し終端10時間43分)が
-#    現行版を名乗ったまま残り、画面もDBもそれを見分けられなかった。既存の版1の転写は起動時の
+#    据え置いたため、壊れた地図で作られた文字起こし(実測: 2時間51分の録画に対し終端10時間43分)が
+#    現行版を名乗ったまま残り、画面もDBもそれを見分けられなかった。既存の版1の文字起こしは起動時の
 #    timemap_migrationが選別する — 畳む対象が無かったものは版2の出力と一致するので昇格させ、
-#    素材と尺が食い違うものだけ版1のまま残して「要再転写」として名乗らせる。
+#    素材と尺が食い違うものだけ版1のまま残して「要再文字起こし」として名乗らせる。
 TIMEMAP_VERSION = 2
 
 
@@ -88,7 +88,7 @@ def _register_cuda_dll_dirs() -> None:
                     os.add_dll_directory(bin_dir)
                 except OSError:
                     logger.warning(
-                        "CUDAのDLL dir %s を登録できません（GPUでの転写がCPUへ"
+                        "CUDAのDLL dir %s を登録できません（GPUでの文字起こしがCPUへ"
                         "落ちる可能性があります）", bin_dir,
                         extra={"event": "stt.cuda_dll_dir_rejected",
                                "ctx": {"path": bin_dir}},
@@ -382,7 +382,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
         container = av.open(path, mode="r", metadata_errors="ignore")
     except Exception as exc:
         logger.error(
-            "転写のために %s を開けません", os.path.basename(path),
+            "文字起こしのために %s を開けません", os.path.basename(path),
             extra={"event": "stt.audio_open_failed", "ctx": {"path": path}},
             exc_info=True,
         )
@@ -464,7 +464,7 @@ def _decode_audio_with_media_map(path: str, sampling_rate: int = 16000):
     )
     if invalid_frames_skipped:
         logger.warning(
-            "壊れた音声frame %d 件を %s の復号中にskipしました（転写はcontainerより"
+            "壊れた音声frame %d 件を %s の復号中にskipしました（文字起こしはcontainerより"
             "短い音声しか覆いません）",
             invalid_frames_skipped, os.path.basename(path),
             extra={"event": "stt.invalid_frames_skipped",
@@ -537,6 +537,13 @@ def transcribe(path: str, on_progress=None) -> dict:
                 vad_filter=True,
                 condition_on_previous_text=get_stt_condition_on_previous_text(),
                 no_repeat_ngram_size=get_stt_no_repeat_ngram_size(),
+                # 語ごとの時刻。**字幕として使うための必須条件**であって、装飾のためではない。
+                # segmentは1件が数十秒になることがあり(実測: 全297文字起こし459,738件のうち5秒超が
+                # 16.5%・20秒超が1.0%・最大5,354秒)、それを1枚のテロップとして出すと、画面には
+                # 40秒ぶんの文が居座り、その間ずっと別の言葉が喋られる。「テロップが合わない」の
+                # 実体はこれで、時刻軸をどう直しても解けない — 分割できる位置がdataに無いため。
+                # 文字数で按分して割るのは時刻の捏造なので採らない(tictok.record.subtitles)。
+                word_timestamps=True,
             )
         except Exception as exc:
             logger.error(
@@ -564,7 +571,19 @@ def transcribe(path: str, on_progress=None) -> dict:
             if text:
                 start = round(_media_time(anchor_gapless, anchor_media, segment.start), 2)
                 end = round(_media_time(anchor_gapless, anchor_media, segment.end), 2)
-                out_segments.append({"start": start, "end": end, "text": text})
+                row = {"start": start, "end": end, "text": text}
+                # 語の時刻も同じmedia軸へ写して持つ。持たない文字起こし(既存分)と区別できるよう、
+                # 空listではなくkey自体を置かない。
+                words = [
+                    {"start": round(_media_time(anchor_gapless, anchor_media, w.start), 2),
+                     "end": round(_media_time(anchor_gapless, anchor_media, w.end), 2),
+                     "text": (w.word or "")}
+                    for w in (getattr(segment, "words", None) or [])
+                    if w.start is not None and w.end is not None and (w.word or "").strip()
+                ]
+                if words:
+                    row["words"] = words
+                out_segments.append(row)
                 texts.append(raw)
             if on_progress and gapless_total > 0:
                 on_progress(segment.end, gapless_total)
@@ -573,7 +592,7 @@ def transcribe(path: str, on_progress=None) -> dict:
                 if gate.due(percent):
                     elapsed = time.monotonic() - started
                     logger.info(
-                        "%s を転写中: 音声 %.0f/%.0fs（%.1f%%）, segment %d 件",
+                        "%s を文字起こし中: 音声 %.0f/%.0fs（%.1f%%）, segment %d 件",
                         os.path.basename(path), segment.end, gapless_total,
                         percent, len(out_segments),
                         extra={"event": "stt.progress_reported",
@@ -586,7 +605,7 @@ def transcribe(path: str, on_progress=None) -> dict:
                     )
     elapsed = time.monotonic() - started
     logger.info(
-        "%s の転写が完了しました: segment %d 件 / 音声 %.0fs 分",
+        "%s の文字起こしが完了しました: segment %d 件 / 音声 %.0fs 分",
         os.path.basename(path), len(out_segments), media_total or gapless_total,
         extra={"event": "stt.transcribed",
                "ctx": {"path": path, "model": get_stt_model(),

@@ -7,7 +7,7 @@
 == なぜCPUなのか ==
 
 推論はonnxruntimeの **CPUExecutionProvider 固定**である。GPUは12GBしかなく
-faster-whisper(転写)と超解像がそこを奪い合っている。ここが ``gpu_slot`` を取ると、
+faster-whisper(文字起こし)と超解像がそこを奪い合っている。ここが ``gpu_slot`` を取ると、
 その間だけ焼き込みが待たされる — 笑い検出は「後から一括で回す解析」であって、
 利用者が待っている処理ではないので、待たせる側になってはいけない。tagging modelは
 tiny級(数M parameter)で、CPUでも実時間の数十倍で流せる。
@@ -121,7 +121,7 @@ _model: Optional[_Model] = None
 _model_key = None
 _model_lock = threading.Lock()
 # 同一processでの並行推論を1本に束ねる。CPU推論は既にthreadを使い切っており、
-# 重ねても速くならないうえ録画・転写からcoreを奪う。
+# 重ねても速くならないうえ録画・文字起こしからcoreを奪う。
 _infer_lock = threading.Lock()
 
 _build_locks: dict = {}
@@ -766,14 +766,14 @@ def laugh_seconds(profile: dict, start: float, end: float,
     if first >= last or first >= len(probs):
         return None
     threshold = get_laugh_audio_threshold() if threshold is None else threshold
-    excluded = _excluded_ticks(exclude_spans, interval, first, last)
+    excluded = excluded_ticks(exclude_spans, interval, first, last)
     hits = sum(1 for i in range(first, last)
                if probs[i] >= threshold and i not in excluded)
     return round(hits * interval, 3)
 
 
-def _excluded_ticks(spans: Optional[list], interval: float,
-                    first: int, last: int) -> set:
+def excluded_ticks(spans: Optional[list], interval: float,
+                   first: int, last: int) -> set:
     """``spans`` が覆う刻みindexの集合(``[first, last)`` の範囲だけ)。
 
     刻みは ``[i*interval, (i+1)*interval)`` を表すので、窓と少しでも重なる刻みを外す。

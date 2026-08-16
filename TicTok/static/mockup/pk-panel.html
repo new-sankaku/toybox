@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TicTok 再生画面「PK・ギフト」欄 — 表示案</title>
+<style>
+:root {
+  --sand-bg:#b3ac98; --sand-bg-deep:#a89f88; --sand-panel:#cdc6ae; --sand-panel-muted:#c2bba4;
+  --ink:#403d33; --ink-strong:#322f27; --ink-muted:#4a4636; --line:#8f8871;
+  --accent:#5b7fc2; --accent-deep:#375897; --accent-ink:#284886;
+  --invert-bg:#4d4a3f; --invert-fg:#d8d2bc;
+  --ok:#6c7a5b; --ok-ink:#404e30; --warn:#ab553a; --warn-ink:#802e12;
+  --gold-ink:#654304; --shadow:rgba(59,56,47,0.35);
+  --battle-own-a:#ff3a6d; --battle-own-b:#ff3fd0;
+  --battle-opp-a:#00eedc; --battle-opp-b:#21aaf5;
+  --battle-own-ink:#b3123f; --battle-opp-ink:#0b6478;
+  --battle-lane2-a:#ffb02e; --battle-lane2-b:#ff771f;
+  --battle-lane3-a:#8a63ff; --battle-lane3-b:#c14bf0;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; min-height:100%; }
+body {
+  background: radial-gradient(ellipse at 50% -20%, rgba(255,250,230,0.25), transparent 60%), var(--sand-bg);
+  color:var(--ink);
+  font-family:"JetBrains Mono","Roboto Mono","BIZ UDPGothic","Yu Gothic UI","Hiragino Sans","Noto Sans CJK JP",monospace;
+  letter-spacing:0.04em; font-size:0.82rem;
+}
+.wrap { padding:1rem 1.2rem 2.5rem; }
+h1 { font-size:0.86rem; letter-spacing:0.16em; color:var(--invert-fg); background:var(--invert-bg);
+     padding:0.3rem 0.6rem; margin:0 0 0.7rem; display:inline-block; }
+.lead { max-width:62rem; font-size:0.74rem; color:var(--ink-muted); line-height:1.9; margin:0 0 1.2rem; }
+.lead b { color:var(--ink-strong); }
+
+/* 状態は縦に積む。どの状態でも欄の高さが同じであることを、箱の高さがそのまま見せる。 */
+.cases { display:flex; flex-direction:column; gap:1.4rem; max-width:34rem; }
+.case-label { font-size:0.72rem; letter-spacing:0.12em; color:var(--ink-strong);
+  border-block-end:1px solid var(--line); padding-block-end:0.15rem; margin-block-end:0.4rem; }
+.case-label .sub { color:var(--ink-muted); letter-spacing:0.04em; font-size:0.68rem; }
+
+/* ===== PK・ギフトblock ===== */
+.pk-block { display:flex; flex-direction:column; gap:0.2rem; }
+.pk-head { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
+.pk-head .fold { font:inherit; font-size:0.72rem; letter-spacing:0.12em; cursor:pointer;
+  border:0; background:none; color:var(--ink-strong); padding:0; }
+.pk-head .chk { font-size:0.68rem; color:var(--ink-muted); display:flex; align-items:center; gap:0.2rem; }
+.pk-head .sp { flex:1 1 auto; }
+.pk-head .sum { font-size:0.68rem; color:var(--ink-muted); font-variant-numeric:tabular-nums; }
+
+.res { font-size:0.62rem; letter-spacing:0.1em; padding:0 0.3rem; border:1px solid; }
+.res.win { color:var(--ok-ink); border-color:var(--ok); }
+.res.lose { color:var(--warn-ink); border-color:var(--warn); }
+.res.draw { color:var(--ink-muted); border-color:var(--line); }
+.t { font-variant-numeric:tabular-nums; color:var(--accent-ink); flex:0 0 auto; }
+
+/* PK欄。曲線を持たないので、見出し・スコアバー・素性の3行ぶんで高さが決まる。
+   その高さを固定して、PKの有無で下のギフト欄が跳ねないようにする。 */
+.pk-now {
+  flex:0 0 auto; block-size:5.2rem; border:1px solid var(--line); background:var(--sand-panel);
+  display:flex; flex-direction:column; overflow:hidden;
+}
+.pk-now-head { display:flex; align-items:center; gap:0.4rem; padding:0.2rem 0.4rem;
+  border-block-end:1px solid var(--line); background:var(--sand-panel-muted); font-size:0.74rem; }
+.pk-now-head .name { color:var(--ink-strong); font-weight:600; }
+.pk-now-head .lead-gap { margin-inline-start:auto; font-size:0.66rem; color:var(--ink-muted); font-variant-numeric:tabular-nums; }
+.pk-now-body { flex:1 1 auto; display:flex; flex-direction:column; justify-content:center;
+  gap:0.3rem; padding:0.3rem 0.4rem; min-block-size:0; }
+
+/* 動画焼き込みと同じN分割スコアバー。1 segment=陣営で、幅はflex-grow=scoreの比率。 */
+.bar-multi { display:flex; block-size:1.5rem; background:var(--line);
+  border:1px solid var(--line); overflow:hidden; }
+.bar-multi .seg { display:flex; align-items:center; justify-content:center;
+  min-inline-size:2.6em; padding-inline:0.3em; overflow:hidden; }
+.bar-multi .seg b { font-size:0.7rem; font-weight:800; color:#fff;
+  text-shadow:0 1px 2px rgba(0,0,0,0.6); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.bar-multi .seg.c-own { background:linear-gradient(90deg, var(--battle-own-a), var(--battle-own-b)); }
+.bar-multi .seg.c1 { background:linear-gradient(90deg, var(--battle-opp-a), var(--battle-opp-b)); }
+.bar-multi .seg.c2 { background:linear-gradient(90deg, var(--battle-lane2-a), var(--battle-lane2-b)); }
+.bar-multi .seg.c3 { background:linear-gradient(90deg, var(--battle-lane3-a), var(--battle-lane3-b)); }
+.pk-foot { font-size:0.64rem; color:var(--ink-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* ギフト欄。件数によらず高さは同じで、中だけscrollする。 */
+.pk-gifts { flex:0 0 auto; block-size:13rem; border:1px solid var(--line); background:var(--sand-panel);
+  display:flex; flex-direction:column; overflow:hidden; }
+.pk-gifts-head { display:flex; align-items:center; gap:0.4rem; padding:0.15rem 0.4rem;
+  border-block-end:1px solid var(--line); background:var(--sand-panel-muted);
+  font-size:0.68rem; color:var(--ink-muted); }
+.pk-gifts-head .coin { margin-inline-start:auto; color:var(--gold-ink); font-variant-numeric:tabular-nums; }
+.pk-gifts-body { position:relative; flex:1 1 auto; overflow:auto; min-block-size:0; }
+
+.gift { display:flex; align-items:center; gap:0.35rem; padding:0.1rem 0.4rem; font-size:0.72rem;
+  cursor:pointer; border-block-end:1px solid color-mix(in srgb, var(--line) 25%, transparent); }
+.gift:hover { background:var(--sand-panel-muted); box-shadow:inset 2px 0 0 var(--accent-deep); }
+.gift.now { background:color-mix(in srgb, var(--accent) 22%, var(--sand-panel)); color:var(--ink-strong); font-weight:700; }
+.gift .icon { flex:0 0 auto; inline-size:1.1rem; text-align:center; }
+.gift .who { flex:1 1 auto; min-inline-size:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gift .gname { flex:0 1 auto; min-inline-size:0; color:var(--ink-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gift .dia { flex:0 0 auto; font-variant-numeric:tabular-nums; color:var(--gold-ink); }
+
+/* 空の名乗り。欄は残したまま、中身だけを「無い」と言う。 */
+.empty { block-size:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:0.35rem; color:var(--ink-muted); font-size:0.72rem; text-align:center; padding:0.4rem; }
+.empty button { font:inherit; font-size:0.66rem; cursor:pointer; padding:0.1rem 0.5rem;
+  border:1px solid var(--line); background:var(--sand-panel-muted); color:var(--accent-ink); }
+
+.why { max-width:62rem; font-size:0.72rem; color:var(--ink-muted); line-height:1.9; margin-block-start:1.6rem; }
+.why li { margin-block-end:0.35rem; }
+.why b { color:var(--ink-strong); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>再生画面「PK・ギフト」欄 — 表示案</h1>
+  <p class="lead">
+    再生位置が入っている<b>PK 1戦だけ</b>を出します。スコアは<b>バーだけ</b>（曲線は廃止）、
+    ギフトは<b>その戦の窓に飛んだ味方陣の分だけ</b>。PK中でなければどちらも空にしますが、
+    <b>PK欄・ギフト欄とも高さは常に同じ</b>で、下の欄が跳ねません。
+    以下は同じ欄が再生位置によってどう見えるかの4状態です（高さが揃っていることを確かめてください）。
+  </p>
+
+  <div id="cases" class="cases"></div>
+
+  <ul class="why">
+    <li><b>今の1戦だけ</b>：窓の外へ出た瞬間に空へ戻るので、複数のPKが同時に並ぶことはありません。</li>
+    <li><b>スコアバー</b>：動画焼き込みと同じN分割バー（自陣=rose、敵陣=cyan以降）。
+      個人マルチ・チーム戦は陣営ぶんに分かれ、数値はバーの中に載ります。</li>
+    <li><b>味方のギフトだけ</b>：一覧は自室（味方陣）へ飛んだギフトです。相手陣のコインは
+      相手Roomのlistenerが拾ってスコアに入りますが、1件ずつの行は持ちません。</li>
+    <li><b>行のclick</b>：ギフト行clickでその瞬間へ移動します（実画面のシークバーが動きます）。</li>
+  </ul>
+</div>
+
+<script>
+"use strict";
+
+const GIFT_KINDS = [
+  { name:"バラ", icon:"🌹", dia:1 }, { name:"TikTok", icon:"🎵", dia:5 },
+  { name:"ドーナツ", icon:"🍩", dia:30 }, { name:"パフューム", icon:"💎", dia:20 },
+  { name:"ハート", icon:"💗", dia:10 }, { name:"花火", icon:"🎆", dia:99 },
+  { name:"宇宙", icon:"🌌", dia:1000 }, { name:"ライオン", icon:"🦁", dia:2999 },
+  { name:"グローブ", icon:"🥊", dia:199 },
+];
+const NAMES = ["さんかく","ゆき","くろねこ","MIKU","たろう","ぽんず","ぷりん","青空","ぐりこ",
+  "しろ","かえで","ぱんだ","ゆず","ライト","なぎさ","こばと","もぐ","ぜろ"];
+
+let seed = 20260816;
+function rnd() { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; }
+function pick(list) { return list[Math.floor(rnd() * list.length)]; }
+const fmtNum = (n) => Math.round(n).toLocaleString("ja-JP");
+function fmtDuration(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60]
+    .map((v) => String(v).padStart(2, "0")).join(":");
+}
+function makeGifts(start, end, count, activeAt) {
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const kind = pick(GIFT_KINDS);
+    const n = kind.dia >= 1000 ? 1 : 1 + Math.floor(rnd() * 5);
+    out.push({ t: start + rnd() * (end - start), name:kind.name, icon:kind.icon,
+               count:n, diamonds:kind.dia * n, nickname:pick(NAMES) });
+  }
+  out.sort((a, b) => a.t - b.t);
+  out.forEach((g) => { g.t = Math.round(g.t); });
+  let active = -1;
+  out.forEach((g, i) => { if (g.t <= activeAt) active = i; });
+  return { rows: out, active };
+}
+
+// 4状態。sides は陣営(先頭=自陣)で、幅はscoreの比、色はc-own/c1..で焼き込みと同じ順。
+const CASES = [
+  {
+    label: "① PK中（個人戦・進行中）",
+    sub: "再生位置 00:49:10 — 3戦目の窓の中",
+    battle: {
+      ordinal:3, start:2880, end:3180, at:2950, state:{ cls:"draw", text:"進行中" },
+      sides:[{ name:"自陣", score:7366, cls:"c-own" }, { name:"@nana_pk", score:4564, cls:"c1" }],
+      foot:"個人戦 / 相手: @nana_pk / 尺 00:05:00",
+    },
+    gifts: makeGifts(2880, 2950, 27, 2950),
+  },
+  {
+    label: "② PK中（個人マルチ・3陣）",
+    sub: "陣営が増えてもバーが分かれるだけで、欄の高さは変わらない",
+    battle: {
+      ordinal:5, start:3900, end:4200, at:4090, state:{ cls:"win", text:"WIN" },
+      sides:[{ name:"自陣", score:18200, cls:"c-own" }, { name:"@mika_live", score:9400, cls:"c1" },
+             { name:"@yuu_ch", score:5100, cls:"c2" }],
+      foot:"個人マルチ / 相手: @mika_live・@yuu_ch / 尺 00:05:00",
+    },
+    gifts: makeGifts(3900, 4090, 41, 4090),
+  },
+  {
+    label: "③ PK外",
+    sub: "再生位置 00:03:20 — どのPKの窓にも入っていない",
+    battle: null,
+    next: { ordinal:1, start:320 },
+    gifts: null,
+  },
+  {
+    label: "④ 不成立（相手が抜けた等）",
+    sub: "勝敗が付かない戦。ギフトが0件でも欄は同じ高さのまま",
+    battle: {
+      ordinal:4, start:4290, end:4590, at:4310, state:{ cls:"draw", text:"不成立" },
+      sides:[{ name:"自陣", score:400, cls:"c-own" }, { name:"@kei_room", score:0, cls:"c1" }],
+      foot:"個人戦 / 相手: @kei_room / 尺 00:05:00",
+    },
+    gifts: { rows: [], active: -1 },
+  },
+];
+
+function buildBar(sides) {
+  const bar = document.createElement("div");
+  bar.className = "bar-multi";
+  const total = sides.reduce((sum, s) => sum + s.score, 0);
+  sides.forEach((side) => {
+    const seg = document.createElement("div");
+    seg.className = `seg ${side.cls}`;
+    // 0点の陣営も席は残す(消すと1v1が1色の帯に見え、相手が居ないPKと区別が付かない)。
+    seg.style.flex = `${Math.max(side.score, total * 0.04)} 1 0`;
+    seg.title = `${side.name}：${fmtNum(side.score)} コイン`;
+    seg.innerHTML = `<b>${fmtNum(side.score)}</b>`;
+    bar.appendChild(seg);
+  });
+  return bar;
+}
+
+function buildPanel(item) {
+  const block = document.createElement("div");
+  block.className = "pk-block";
+
+  const head = document.createElement("div");
+  head.className = "pk-head";
+  head.innerHTML = `<button class="fold" type="button">▾ PK・ギフト</button>`
+    + `<label class="chk"><input type="checkbox" checked /> 再生に追従</label>`
+    + `<span class="sp"></span><span class="sum">この録画 5戦 3勝1敗</span>`;
+  block.appendChild(head);
+
+  const now = document.createElement("div");
+  now.className = "pk-now";
+  if (item.battle) {
+    const b = item.battle;
+    const own = b.sides[0].score;
+    const best = Math.max(...b.sides.slice(1).map((s) => s.score));
+    const gap = own - best;
+    const nowHead = document.createElement("div");
+    nowHead.className = "pk-now-head";
+    nowHead.innerHTML = `<span class="t">${fmtDuration(b.start)}</span>`
+      + `<span class="name">PK ${b.ordinal}戦目</span>`
+      + `<span class="res ${b.state.cls}">${b.state.text}</span>`
+      + `<span class="lead-gap">${gap === 0 ? "互角" : (gap > 0 ? `+${fmtNum(gap)} リード` : `${fmtNum(gap)} ビハインド`)}</span>`;
+    const body = document.createElement("div");
+    body.className = "pk-now-body";
+    const foot = document.createElement("div");
+    foot.className = "pk-foot";
+    foot.textContent = b.foot;
+    body.append(buildBar(b.sides), foot);
+    now.append(nowHead, body);
+  } else {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.innerHTML = `<div>PK中ではありません</div>`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = `次のPK ${item.next.ordinal}戦目 ${fmtDuration(item.next.start)} へ`;
+    empty.appendChild(btn);
+    now.appendChild(empty);
+  }
+  block.appendChild(now);
+
+  const gifts = document.createElement("div");
+  gifts.className = "pk-gifts";
+  const gHead = document.createElement("div");
+  gHead.className = "pk-gifts-head";
+  const gBody = document.createElement("div");
+  gBody.className = "pk-gifts-body";
+  if (!item.gifts) {
+    gHead.innerHTML = `<span>ギフト</span>`;
+    gBody.innerHTML = `<div class="empty">—</div>`;
+  } else if (!item.gifts.rows.length) {
+    gHead.innerHTML = `<span>味方へのギフト 0件</span><span class="coin">0 コイン</span>`;
+    gBody.innerHTML = `<div class="empty">この戦に飛んだギフトはありません</div>`;
+  } else {
+    const coins = item.gifts.rows.reduce((sum, g) => sum + g.diamonds, 0);
+    gHead.innerHTML = `<span>味方へのギフト ${fmtNum(item.gifts.rows.length)}件</span>`
+      + `<span class="coin">${fmtNum(coins)} コイン</span>`;
+    const frag = document.createDocumentFragment();
+    item.gifts.rows.forEach((g, i) => {
+      const row = document.createElement("div");
+      row.className = "gift" + (i === item.gifts.active ? " now" : "");
+      row.innerHTML = `<span class="t">${fmtDuration(g.t)}</span>`
+        + `<span class="icon">${g.icon}</span>`
+        + `<span class="who">${g.nickname}</span>`
+        + `<span class="gname">${g.name}${g.count > 1 ? "×" + g.count : ""}</span>`
+        + `<span class="dia">${fmtNum(g.diamonds)}</span>`;
+      frag.appendChild(row);
+    });
+    gBody.appendChild(frag);
+  }
+  gifts.append(gHead, gBody);
+  block.appendChild(gifts);
+  return { block, gBody, active: item.gifts ? item.gifts.active : -1 };
+}
+
+const host = document.getElementById("cases");
+const built = [];
+CASES.forEach((item) => {
+  const wrap = document.createElement("div");
+  const label = document.createElement("div");
+  label.className = "case-label";
+  label.innerHTML = `${item.label} <span class="sub">${item.sub}</span>`;
+  const panel = buildPanel(item);
+  wrap.append(label, panel.block);
+  host.appendChild(wrap);
+  built.push(panel);
+});
+// 追従の見え方。再生位置以前で最後の1件を中央へ置く。
+built.forEach((panel) => {
+  if (panel.active < 0) return;
+  const row = panel.gBody.children[panel.active];
+  if (!row) return;
+  panel.gBody.scrollTop = Math.max(0, row.offsetTop - (panel.gBody.clientHeight - row.offsetHeight) / 2);
+});
+</script>
+</body>
+</html>

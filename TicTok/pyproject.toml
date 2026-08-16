@@ -154,7 +154,6 @@ module = [
     "tictok.record.transcription",
     "tictok.record.upscale",
     "tictok.record.video_overlay",
-    "tictok.search.cutlist_export",
     "tictok.search.query",
 ]
 ignore_errors = true

@@ -13,12 +13,12 @@ SemanticErrorを送出し、呼び出し側が「利用不可」として見せ�
 search_hitsは現在約55,000行だが、全録画(5,195時間)を文字起こしすると約800万行になる。
 1行ずつ埋め込むと768次元float32で約24GBになり、埋め込みcostも保存も破綻する。そこで
 **同一recording・同一sourceの連続行をPASSAGE_SECONDS(既定25秒)の窓へ束ねてから**
-埋め込む。転写segmentは1本あたり2-4秒なので概ね1/8前後まで落ち、5,195時間なら
+埋め込む。文字起こしsegmentは1本あたり2-4秒なので概ね1/8前後まで落ち、5,195時間なら
 18.7M秒 / 25秒 ≒ 75万passageになる。768次元float16なら約1.1GBで収まり、実測でも
 brute-forceのcos計算が1秒未満で回る(下の「限界」を参照)。
 
 束ねる単位をrecording+sourceで切るのは、passageが録画をまたぐと動画seek先が定まらない
-ため。sourceを混ぜないのは、転写(発話)とcomment(視聴者反応)で文体も語彙も別物で、
+ため。sourceを混ぜないのは、文字起こし(発話)とcomment(視聴者反応)で文体も語彙も別物で、
 混ぜると片方の語がもう片方を薄めるだけになるため。
 
 == 保存形式 ==
@@ -51,7 +51,7 @@ metadata(passage -> search_hitsのid群・時刻・unique_id)は**tictok.dbと�
 == 限界と、その先 ==
 検索は総当たり(全passageとのdot積)。実測(float32 memmap, 768次元, page cache温間):
     10万passage(  694時間相当)  0.31GB   約 14ms
-    75万passage(5,208時間相当)  2.30GB   約101ms   <- 全録画を転写した場合の想定規模
+    75万passage(5,208時間相当)  2.30GB   約101ms   <- 全録画を文字起こしした場合の想定規模
    300万passage(2万時間相当)    9.22GB   約388ms
 想定規模(75万)では総当たりで十分速く、ANNのindex構築cost・近似誤差・依存追加に見合わない。
 **300万passage(=2万時間)を超えたあたりが総当たりの限界**で、そこからはANN
@@ -72,6 +72,7 @@ import httpx
 import numpy as np
 
 from tictok.core import perf
+from tictok.search.normalize import MentionNames, blank_mention
 
 logger = logging.getLogger(__name__)
 
@@ -404,15 +405,28 @@ def _vector_rows(dim: int, dtype: str) -> int:
 
 # ===== passageへの束ね =====
 
-def _flush_passage(group: list) -> Optional[dict]:
+def _flush_passage(group: list, names: Optional[MentionNames] = None) -> Optional[dict]:
+    """束ねた行から passage を1つ作る。``body``は画面に出す形、``embed``は埋め込む形。
+
+    分けてあるのは名前のため。誰の発言か・誰への返信かは画面では読めていなければ
+    ならないが、埋め込みに混ぜると名前が語として効く(実測: commentのpassage本文の40.5%が
+    話者名の繰り返しだった)。"""
     if not group:
         return None
     bodies = []
+    embeds = []
     for row in group:
         nickname = row["nickname"]
         body = row["body"]
         # commentは話者が変わると意味も変わるので、誰の発言かをpassageへ残す。
         bodies.append(f"{nickname}: {body}" if nickname else body)
+        stripped = blank_mention(body, names).lstrip()
+        if stripped:
+            embeds.append(stripped)
+    if not embeds:
+        # 宛先しか無いpassage(``@よい``だけの発言が並んだ窓)。埋め込む中身が無いものを
+        # 空文字で埋め込むと、内容の無いvectorがどんな検索にも中途半端な近さで浮く。
+        return None
     first = group[0]
     last = group[-1]
     end = last["end_time"] if last["end_time"] is not None else last["video_time"]
@@ -427,11 +441,13 @@ def _flush_passage(group: list) -> Optional[dict]:
         "hit_id": int(first["id"]),
         "hit_ids": [int(r["id"]) for r in group],
         "body": "\n".join(bodies),
+        "embed": "\n".join(embeds),
     }
 
 
 def build_passages(rows: list, window_seconds: Optional[float] = None,
-                   max_chars: Optional[int] = None) -> list:
+                   max_chars: Optional[int] = None,
+                   names: Optional[MentionNames] = None) -> list:
     """search_hitsの行(同一recording/source、video_time昇順)をpassageへ束ねる。
 
     窓は「passage先頭からwindow_seconds以内」かつ「合計max_chars以内」で切る。時間だけで
@@ -449,7 +465,7 @@ def build_passages(rows: list, window_seconds: Optional[float] = None,
             continue
         video_time = float(row["video_time"])
         if group and (video_time - group_start > window or group_chars + len(body) > limit):
-            passage = _flush_passage(group)
+            passage = _flush_passage(group, names)
             if passage:
                 passages.append(passage)
             group, group_chars = [], 0
@@ -457,7 +473,7 @@ def build_passages(rows: list, window_seconds: Optional[float] = None,
             group_start = video_time
         group.append(row)
         group_chars += len(body)
-    passage = _flush_passage(group)
+    passage = _flush_passage(group, names)
     if passage:
         passages.append(passage)
     return passages
@@ -623,17 +639,23 @@ async def build_index(storage, on_progress: Optional[Callable] = None) -> dict:
                 _set_meta(conn, "model", embedder.name)
                 conn.commit()
 
+            # 返信の宛先を埋め込みから外すための表示名。groupごとに引くと台帳の読み込みが
+            # 録画の本数だけ走るので、buildの頭で一度だけ確定させる。
+            names = await asyncio.to_thread(storage.mention_names)
+
             for group in pending:
                 recording_id, source = group["recording_id"], group["source"]
                 # sqliteもpassageの束ねもblocking。event loopで回すと、build中は検索も
                 # 画面も止まる(まさにlockで起きていた問題を別経路で再現することになる)。
                 rows = await asyncio.to_thread(_load_hits, storage, recording_id, source)
-                passages = await asyncio.to_thread(build_passages, rows)
+                passages = await asyncio.to_thread(build_passages, rows, None, None, names)
                 if not passages:
                     await asyncio.to_thread(_record_empty, recording_id, source, group)
                     continue
 
-                texts = [get_semantic_doc_prefix() + p["body"] for p in passages]
+                # 埋め込むのは名前を落とした側(p["embed"])。p["body"]は画面に出す形で、
+                # 話者名と宛先を含む。
+                texts = [get_semantic_doc_prefix() + p["embed"] for p in passages]
                 # 進捗はhits単位(group跨ぎで比較できる唯一の尺度)。batchはpassage単位なので、
                 # group内の消化率をそのgroupのhit数へ按分して滑らかな値にする。
                 embedded_in_group = 0

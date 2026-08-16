@@ -247,6 +247,72 @@ describe("toast", () => {
     page.document.querySelector(".toast-close").click();
     expect(page.document.querySelectorAll(".toast")).toHaveLength(0);
   });
+
+  it("titleを付けると見出し行が出て、無指定なら出ない", () => {
+    win.showToast("接続できませんでした。", "error", { title: "録画の保護" });
+    win.showToast("保存しました。");
+    const withTitle = page.document.querySelector(".toast-error");
+    expect(withTitle.querySelector(".toast-title").textContent).toBe("録画の保護");
+    const plain = page.document.querySelector(".toast:not(.toast-error)");
+    expect(plain.querySelector(".toast-title")).toBeNull();
+  });
+
+  it("titleが違えば同じ文面でも別のtoastとして積む", () => {
+    win.showToast("接続できませんでした。", "error", { title: "録画の保護" });
+    win.showToast("接続できませんでした。", "error", { title: "派生物の削除" });
+    expect(page.document.querySelectorAll(".toast-error")).toHaveLength(2);
+  });
+
+  it("showError の第2引数が操作名の見出しになる", () => {
+    win.showError(new Error("Serverへ接続できませんでした。"), "派生物の削除");
+    const toast = page.document.querySelector(".toast-error");
+    expect(toast.querySelector(".toast-title").textContent).toBe("派生物の削除");
+    expect(toast.querySelector(".toast-body").textContent).toBe("Serverへ接続できませんでした。");
+  });
+
+  it("配列は1行ずつ順に出る", async () => {
+    vi.useFakeTimers();
+    try {
+      const toast = win.showToast(["1行目", "2行目", "3行目"]);
+      expect(toast.querySelectorAll(".toast-line")).toHaveLength(1);
+      vi.advanceTimersByTime(50);
+      expect(toast.querySelectorAll(".toast-line")).toHaveLength(2);
+      vi.advanceTimersByTime(100);
+      expect(toast.querySelectorAll(".toast-line")).toHaveLength(3);
+      expect(toast.textContent).toContain("3行目");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("空行は詰めて、全部空なら何も出さない", () => {
+    const toast = win.showToast(["有効な行", "", null]);
+    expect(toast.querySelectorAll(".toast-line")).toHaveLength(1);
+    expect(win.showToast(["", null])).toBeNull();
+  });
+
+  it("進捗barは自動で消える情報表示にだけ付く(errorには付けない)", () => {
+    win.showToast("保存しました。");
+    win.showToast("失敗しました。", "error");
+    const plain = page.document.querySelector(".toast:not(.toast-error)");
+    expect(plain.querySelector(".toast-progress-bar")).not.toBeNull();
+    expect(page.document.querySelector(".toast-error .toast-progress-bar")).toBeNull();
+  });
+
+  it("情報表示は出し切ってからdurationぶん経つと消え、errorは残る", () => {
+    vi.useFakeTimers();
+    try {
+      win.showToast("保存しました。", null, { duration: 1000 });
+      win.showToast("失敗しました。", "error");
+      vi.advanceTimersByTime(50);
+      expect(page.document.querySelectorAll(".toast:not(.toast-error)")).toHaveLength(1);
+      vi.advanceTimersByTime(1000);
+      expect(page.document.querySelectorAll(".toast:not(.toast-error)")).toHaveLength(0);
+      expect(page.document.querySelectorAll(".toast-error")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("segmented control", () => {
@@ -312,26 +378,27 @@ describe("segmented control", () => {
   });
 });
 
-// job帯は全画面のトップバーに出る。数の出所はWSだけで、届く前は何も描かない
+// job件数はnavの「Job」に付くbadge。数の出所はWSだけで、届く前は何も描かない
 // (0件と描くと「job が無い」という未確認の主張になる)。
-describe("job帯", () => {
+describe("job badge", () => {
   let page;
   let win;
   beforeEach(() => {
     page = loadCommon({
-      html: `<!doctype html><html><body><div class="a-topbar"></div></body></html>`,
+      html: `<!doctype html><html><body><div class="a-topbar"><nav class="a-nav"></nav></div></body></html>`,
     });
     win = page.win;
   });
   afterEach(async () => page.close());
 
-  const jobBar = () => page.document.getElementById("job-bar");
+  const jobLink = () => page.document.querySelector('.a-nav a[href^="/jobs"]');
+  const jobBadge = () => jobLink().querySelector(".nav-badge");
 
-  it("snapshot が届く前は帯そのものを作らない", () => {
-    expect(jobBar()).toBeNull();
+  it("snapshot が届く前はbadgeそのものを作らない", () => {
+    expect(jobBadge()).toBeNull();
   });
 
-  it("実行中・待機中の数を出す", () => {
+  it("実行中・待機中の合計を出す", () => {
     win.applyJobBar({
       type: "jobs",
       data: [
@@ -341,11 +408,12 @@ describe("job帯", () => {
         { job_id: "4", state: "completed" },
       ],
     });
-    expect(jobBar().querySelector(".j-active").textContent).toBe("job: 実行中 1 / 待機中 2");
-    expect(jobBar().querySelector(".j-failed")).toBeNull();
+    expect(jobBadge().textContent).toBe("3");
+    expect(jobBadge().className).toBe("nav-badge");
+    expect(jobLink().title).toContain("実行中 1 / 待機中 2");
   });
 
-  it("失敗・中断は別枠で数える", () => {
+  it("失敗・中断が在るときはその件数を警告色で出すが、tabの行き先は変えない", () => {
     win.applyJobBar({
       type: "jobs",
       data: [
@@ -353,8 +421,25 @@ describe("job帯", () => {
         { job_id: "2", state: "interrupted" },
       ],
     });
-    expect(jobBar().querySelector(".j-failed").textContent).toBe("失敗 2");
-    expect(jobBar().title).toContain("失敗・中断が2件");
+    expect(jobBadge().textContent).toBe("2");
+    expect(jobBadge().className).toContain("alert");
+    // filterを積むと、失敗が履歴に残っている間ずっと「失敗・中断のみ」へ着地し、
+    // 人が選んだ状態filterが押すたびに上書きされる。
+    expect(jobLink().getAttribute("href")).toBe("/jobs");
+    expect(jobLink().title).toContain("失敗・中断が2件");
+    expect(win.jobBarFailedCount()).toBe(2);
+  });
+
+  // badgeを引く側がhrefの文字列で照合していた頃は、tabのhrefにqueryが付いた時点で
+  // linkを見失い、以後どれだけjobが動いても数字がその場で固まっていた。
+  it("tabのhrefにqueryが付いていても数え直せる", () => {
+    win.applyJobBar({ type: "jobs", data: [{ job_id: "1", state: "failed" }] });
+    jobLink().setAttribute("href", "/jobs?state=failed");
+    win.applyJobBar({
+      type: "jobs",
+      data: [{ job_id: "1", state: "failed" }, { job_id: "2", state: "failed" }],
+    });
+    expect(jobBadge().textContent).toBe("2");
   });
 
   it("session一括投入の明細行は合成行と二重に数えない", () => {
@@ -366,14 +451,15 @@ describe("job帯", () => {
         { job_id: "j2", group_id: "g1", state: "pending" },
       ],
     });
-    expect(jobBar().querySelector(".j-active").textContent).toBe("job: 実行中 1 / 待機中 0");
+    expect(jobBadge().textContent).toBe("1");
   });
 
-  it("動いているjobが無ければ帯を空にする", () => {
+  it("動いているjobが無ければbadgeを空にする", () => {
     win.applyJobBar({ type: "jobs", data: [{ job_id: "1", state: "running" }] });
     win.applyJobBar({ type: "jobs", data: [{ job_id: "1", state: "completed" }] });
-    expect(jobBar().textContent).toBe("");
-    expect(jobBar().hasAttribute("title")).toBe(false);
+    expect(jobBadge().textContent).toBe("");
+    expect(jobLink().hasAttribute("title")).toBe(false);
+    expect(jobLink().getAttribute("href")).toBe("/jobs");
   });
 });
 

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TicTok — chart配色sample</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .pv-shell { padding: 1rem 1.2rem 4rem; }
+    .pv-head { border-bottom: 2px solid var(--line); padding-bottom: 0.5rem; margin-bottom: 1rem; }
+    .pv-head b { font-size: 0.82rem; letter-spacing: 0.18em; color: var(--ink-strong); }
+    .pv-head .s { font-size: 0.7rem; color: var(--ink-muted); margin-left: 0.8rem; }
+    .pv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr)); gap: 0.9rem; }
+    .pv-card { border: 1px solid var(--line); background: var(--sand-panel-muted); padding: 0.5rem; }
+    .pv-card h3 { margin: 0 0 0.4rem; font-size: 0.72rem; letter-spacing: 0.14em; color: var(--ink-strong); }
+    .pv-card .n { font-size: 0.64rem; color: var(--ink-muted); font-weight: 400; letter-spacing: 0.04em; }
+    .pv-plot { position: relative; block-size: 15rem; }
+    .pv-plot > canvas { position: absolute; inset: 0; }
+    .pv-tall { block-size: 22rem; }
+    .pv-swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.8rem; }
+    .pv-sw { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.66rem; color: var(--ink-muted); }
+    .pv-sw i { inline-size: 1.6rem; block-size: 0.9rem; border: 1px solid var(--line); font-style: normal; }
+  </style>
+</head>
+<body>
+  <div class="scanlines" aria-hidden="true"></div>
+  <div class="pv-shell">
+    <div class="pv-head">
+      <b>chart配色sample</b>
+      <span class="s">実 common.js の系列token・紙の面・順序rampをそのまま描く</span>
+      <div class="pv-swatches" id="pv-swatches"></div>
+    </div>
+
+    <div class="pv-grid">
+      <div class="pv-card" style="grid-column: 1 / -1">
+        <h3>TIMELINE <span class="n">small multiples・4指標 / 実 createTimelineChart</span></h3>
+        <div id="tl" style="block-size: 26rem"></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>Session別推移 <span class="n">実 createSessionTrendChart / 二軸をやめ2枚に分割</span></h3>
+        <div class="x-chartstack" id="trend" style="border:0; background:transparent; padding:0"></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>入室の内訳 <span class="n">実 createStackedTimeChart / 人数(人)と率(%)を分割</span></h3>
+        <div class="x-chartstack" id="joins" style="border:0; background:transparent; padding:0"></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>cohort <span class="n">順序ramp3段(継続→復帰→新規) + 合計</span></h3>
+        <div class="pv-plot"><canvas id="cohort"></canvas></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>大口の帯 <span class="n">順序ramp5段</span></h3>
+        <div class="pv-plot"><canvas id="whale"></canvas></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>共演構成 <span class="n">nominal 3区分</span></h3>
+        <div class="pv-plot"><canvas id="coop"></canvas></div>
+      </div>
+
+      <div class="pv-card">
+        <h3>Battle推移 <span class="n">Score(点)とコイン(枚)を分割 / 陣営色は焼き込みと共有</span></h3>
+        <div class="x-chartstack" id="battle" style="border:0; background:transparent; padding:0"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="vendor/chart.umd.min.js"></script>
+  <script src="common.js"></script>
+  <script>
+    const T = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+    document.getElementById("pv-swatches").innerHTML =
+      ["--series-1", "--series-2", "--series-3", "--series-4", "--series-5",
+       "--ramp-1", "--ramp-2", "--ramp-3", "--ramp-4", "--ramp-5",
+       "--chart-surface", "--chart-ink", "--chart-grid"]
+        .map((t) => `<span class="pv-sw"><i style="background:var(${t})"></i>${t.replace("--", "")}</span>`)
+        .join("");
+
+    const N = 40;
+    const rnd = (seed) => { let x = seed; return () => (x = (x * 1103515245 + 12345) % 2147483648) / 2147483648; };
+    const r = rnd(7);
+    const labels = Array.from({ length: N }, (_, i) => `${String(6 + Math.floor(i / 4)).padStart(2, "0")}:${(i % 4) * 15 || "00"}`);
+
+    // ── TIMELINE(実factory) ──────────────────────────────
+    const tl = createTimelineChart(document.getElementById("tl"));
+    const t0 = 1754600000;
+    tl.update({
+      bucket_seconds: 60,
+      markers: [
+        { time: t0 + 300, kind: "record", label: "REC" },
+        { time: t0 + 900, kind: "battle", label: "PK" },
+        { time: t0 + 1500, kind: "collab", label: "collab" },
+        { time: t0 + 2100, kind: "reconnect", label: "re" },
+        { time: t0 + 2700, kind: "disconnect_unplanned", label: "x" },
+      ],
+      buckets: Array.from({ length: N }, (_, i) => ({
+        start: t0 + i * 60,
+        diamonds: Math.round(200 + 900 * r() * (1 + Math.sin(i / 5))),
+        viewers: Math.round(1200 + 400 * Math.sin(i / 6) + 120 * r()),
+        comments: Math.round(20 + 40 * r()),
+        likes: Math.round(300 + 500 * r()),
+      })),
+    }, [{ start_time: t0 + 900, end_time: t0 + 1400 }]);
+
+    // ── Session別推移(実factory) ─────────────────────────
+    const trend = createSessionTrendChart(document.getElementById("trend"), { movingAvg: true });
+    trend.update(Array.from({ length: 14 }, (_, i) => ({
+      started_at: 1754000000 + i * 86400,
+      ended_at: 1754000000 + i * 86400 + 3600 * (1 + 3 * r()),
+      stats: { diamonds: Math.round(20000 + 90000 * r()) },
+    })));
+
+    const base = (extra = {}) => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: { labels: { color: T("--chart-ink"), font: { family: "monospace", size: 11 }, boxWidth: 14, boxHeight: 8 } },
+        tooltip: nierTooltip(),
+      },
+      scales: {
+        x: { ticks: { ...nierTicks(), maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: NIER_GRID_COLOR } },
+        y: { beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } },
+      },
+      ...extra,
+    });
+
+    // ── 入室の内訳(二軸をやめ、人数と率をpanelへ分ける) ────────
+    const joins = createStackedTimeChart(document.getElementById("joins"), {
+      xTicks: { autoSkip: false, maxTicksLimit: 24 },
+      panes: [
+        {
+          type: "bar", lead: true, stacked: true, title: "入室数(人)",
+          datasets: [
+            { type: "bar", label: "新規", data: [], backgroundColor: T("--series-1"), stack: "j" },
+            { type: "bar", label: "常連", data: [], backgroundColor: T("--series-3"), stack: "j" },
+          ],
+        },
+        {
+          type: "line", title: "新規率(%)", max: 100,
+          datasets: [{ type: "line", label: "新規率", data: [], borderColor: T("--series-4"), backgroundColor: T("--series-4"), borderWidth: 2, pointRadius: 2, tension: 0.25 }],
+        },
+      ],
+    });
+    joins.update(labels.slice(0, 16), [
+      [Array.from({ length: 16 }, () => Math.round(40 * r() + 10)),
+       Array.from({ length: 16 }, () => Math.round(60 * r() + 20))],
+      Array.from({ length: 16 }, () => Math.round(60 * r() + 20)),
+    ]);
+
+    // ── cohort(順序ramp3段 + 合計) ───────────────────────
+    const c3 = rampOf(3);
+    new Chart(document.getElementById("cohort"), {
+      type: "line",
+      data: {
+        labels: labels.slice(0, 20),
+        datasets: [
+          { label: "継続", data: Array.from({ length: 20 }, () => Math.round(120 * r() + 60)), borderColor: c3[2], backgroundColor: c3[2], fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
+          { label: "復帰", data: Array.from({ length: 20 }, () => Math.round(60 * r() + 20)), borderColor: c3[1], backgroundColor: c3[1], fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
+          { label: "新規", data: Array.from({ length: 20 }, () => Math.round(40 * r() + 10)), borderColor: c3[0], backgroundColor: c3[0], fill: true, borderWidth: 1.5, pointRadius: 0, tension: 0.25 },
+          { label: "Active(合計)", data: Array.from({ length: 20 }, () => Math.round(260 * r() + 140)), borderColor: T("--chart-ink"), backgroundColor: "transparent", borderWidth: 1, borderDash: [4, 4], pointRadius: 0 },
+        ],
+      },
+      options: base({ scales: { x: { stacked: true, ticks: { ...nierTicks(), maxRotation: 0, maxTicksLimit: 6 }, grid: { color: NIER_GRID_COLOR } }, y: { stacked: true, beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } } } }),
+    });
+
+    // ── 大口の帯(順序ramp5段) ────────────────────────────
+    new Chart(document.getElementById("whale"), {
+      type: "bar",
+      data: {
+        labels: labels.slice(0, 10),
+        datasets: RAMP_STEPS.map((c, i) => ({
+          label: `帯${i + 1}`,
+          data: Array.from({ length: 10 }, () => Math.round(30 * r() + 5)),
+          backgroundColor: c,
+          stack: "w",
+        })),
+      },
+      options: base({ scales: { x: { stacked: true, ticks: { ...nierTicks(), maxRotation: 0 }, grid: { color: NIER_GRID_COLOR } }, y: { stacked: true, beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } } } }),
+    });
+
+    // ── 共演構成(nominal 3) ──────────────────────────────
+    new Chart(document.getElementById("coop"), {
+      type: "bar",
+      data: {
+        labels: ["配信A", "配信B", "配信C"],
+        datasets: [
+          { label: "ソロ", data: [62, 48, 71], backgroundColor: T("--series-1"), stack: "c" },
+          { label: "コラボ", data: [24, 33, 12], backgroundColor: T("--series-2"), stack: "c" },
+          { label: "Battle", data: [14, 19, 17], backgroundColor: T("--series-3"), stack: "c" },
+        ],
+      },
+      options: base({ indexAxis: "y", scales: { x: { stacked: true, beginAtZero: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } }, y: { stacked: true, ticks: nierTicks(), grid: { color: NIER_GRID_COLOR } } } }),
+    });
+
+    // ── Battle推移(二軸をやめ、Scoreとコインをpanelへ分ける) ──
+    const battle = createStackedTimeChart(document.getElementById("battle"), {
+      xTicks: { maxTicksLimit: 18 },
+      panes: [
+        {
+          type: "line", lead: true, title: "Score",
+          datasets: [
+            { type: "line", label: "自陣Score", data: [], borderColor: BATTLE_OWN_LINE, backgroundColor: BATTLE_OWN_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25 },
+            { type: "line", label: "敵陣Score", data: [], borderColor: BATTLE_OPP_LINE, backgroundColor: BATTLE_OPP_LINE, borderWidth: 2, pointRadius: 2, tension: 0.25 },
+          ],
+        },
+        {
+          type: "bar", title: "コイン",
+          datasets: [{ type: "bar", label: "Batt中コイン", data: [], backgroundColor: T("--ramp-2") }],
+        },
+      ],
+    });
+    battle.update(labels.slice(0, 12), [
+      [Array.from({ length: 12 }, () => Math.round(600 * r() + 200)),
+       Array.from({ length: 12 }, () => Math.round(600 * r() + 200))],
+      Array.from({ length: 12 }, () => Math.round(800 * r() + 100)),
+    ]);
+  </script>
+</body>
+</html>

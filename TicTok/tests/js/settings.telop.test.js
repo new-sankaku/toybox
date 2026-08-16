@@ -159,3 +159,64 @@ describe("settings.js の見本つき選択肢", () => {
     expect(checked.value).toBe("1");
   });
 });
+
+// 値が文字の設定(kind=text)でも、選択肢を持つなら選ばせる。serverは選択肢の外を422で
+// 拒むので、自由入力にすると「綴りを外した保存だけが失敗する」欄になる — しかも選べる
+// 値の一覧は画面のどこにも出ていなかった。
+describe("settings.js の文字の選択肢", () => {
+  let page;
+
+  function textChoiceRow(extra = {}) {
+    return {
+      key: "clip_subtitle_formats",
+      value: "srt,ass",
+      label: "切り出し: 字幕fileの書式",
+      note: "SRTは装飾を持たず、ASSは焼き込みと同じテロップの装飾を持ちます。",
+      category: "clip",
+      category_label: "切り出し",
+      default: "srt,ass",
+      default_source: "builtin",
+      builtin_default: "srt,ass",
+      env: "TICTOK_CLIP_SUBTITLE_FORMATS",
+      kind: "text",
+      options: [
+        { value: "srt", label: "SRTのみ" },
+        { value: "srt,ass", label: "SRT + ASS" },
+        { value: "ass", label: "ASSのみ" },
+      ],
+      ...extra,
+    };
+  }
+
+  async function open(rows) {
+    page = loadPage({
+      page: "settings",
+      url: "http://localhost:8520/settings",
+      routes: { "GET /api/settings": settingsBody(rows) },
+    });
+    page.fireReady();
+    await page.settle();
+  }
+
+  afterEach(async () => {
+    if (page) await page.close();
+    page = null;
+  });
+
+  it("選択肢を持つ文字の設定は自由入力ではなくradioで出る", async () => {
+    await open([textChoiceRow()]);
+    const doc = page.document;
+    expect(doc.querySelector('input[type=text][data-key="clip_subtitle_formats"]')).toBeNull();
+    const checked = doc.querySelectorAll('input[name="clip_subtitle_formats"]:checked');
+    expect(checked.length).toBe(1);
+    expect(checked[0].value).toBe("srt,ass");
+  });
+
+  it("選択肢を持たない文字の設定(保存先のpath)は今までどおり自由入力", async () => {
+    await open([textChoiceRow({
+      key: "record_dir", value: "K:/80_Tiktok", label: "録画の保存先",
+      env: "TICTOK_RECORD_DIR", options: undefined,
+    })]);
+    expect(page.document.querySelector('input[type=text][data-key="record_dir"]')).not.toBeNull();
+  });
+});

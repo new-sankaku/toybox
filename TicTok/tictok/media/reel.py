@@ -63,7 +63,7 @@ def reel_path(src: Path, start: float, end: float, count: int,
               label: Optional[str] = None) -> Path:
     """出力path。同じ範囲listで作り直すと同じfileを上書きする(clipperと同じ決め方)。"""
     streamer = layout.streamer_of(src.stem)
-    target_dir = layout.clips_dir(layout.record_root_of(src), streamer)
+    target_dir = layout.clip_output_dir(streamer)
     name = f"{src.stem}_reel{count}_{_hhmmss(start)}-{_hhmmss(end)}"
     if label:
         safe = _UNSAFE_LABEL_RE.sub("_", label).strip(" ._")[:40]

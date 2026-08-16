@@ -123,7 +123,7 @@ TICTOK_SMILE_THREADS=0             # onnxruntimeのintra-op thread数(0=既定�
 ```
 
 `pip install onnxruntime` が必要(lazy importなので未installでも他の機能は動く)。推論は
-**CPU固定**である。GPU 12GBはfaster-whisper(転写)と超解像が奪い合っており、ここが
+**CPU固定**である。GPU 12GBはfaster-whisper(文字起こし)と超解像が奪い合っており、ここが
 `gpu_slot` を取るとその間だけ焼き込みが待たされる。どちらのmodelもtiny級なのでCPUで足りる。
 
 閾値(`TICTOK_SMILE_THRESHOLD`)を変えても再解析は要らない。sidecarには閾値を掛ける前の

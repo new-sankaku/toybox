@@ -44,7 +44,7 @@ battle・collabの窓はDB側(``collab_windows`` / battle判定)が持ってい�
 == なぜCPUなのか ==
 
 推論はonnxruntimeの **CPUExecutionProvider 固定**である。:mod:`tictok.media.laugh_audio`
-と同じ理由で、GPU 12GBはfaster-whisper(転写)と超解像が奪い合っており、ここが
+と同じ理由で、GPU 12GBはfaster-whisper(文字起こし)と超解像が奪い合っており、ここが
 ``gpu_slot`` を取るとその間だけ焼き込みが待たされる。顔検出modelも表情分類modelもtiny級で、
 CPUでも実時間の数十倍で流せる。
 
@@ -194,7 +194,7 @@ _models: Optional[_Models] = None
 _models_key = None
 _models_lock = threading.Lock()
 # 同一processでの並行推論を1本に束ねる。CPU推論は既にthreadを使い切っており、重ねても
-# 速くならないうえ録画・転写からcoreを奪う。
+# 速くならないうえ録画・文字起こしからcoreを奪う。
 _infer_lock = threading.Lock()
 
 _build_locks: dict = {}

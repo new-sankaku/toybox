@@ -176,6 +176,14 @@ async def _max_keyframe_gap(source, duration: float) -> float | None:
     pts=N/Aのpacketで1 packet読んだ時点で打ち切られ、0 frameしか返らない(実測: 3.1時間の
     録画で 0 frame 対 128 frame)。0 frameはNone(=測れなかった)として全frame decodeへ倒れる
     ため、故障は「遅いだけ」の形でしか現れない。``media/keyframes.py`` も同じ理由で絶対時刻。
+
+    返ってきたframeにも ``pts=N/A`` は混ざる(seek直後の先頭など。実測: 同じ3.1時間の録画で
+    128 keyframe中1本、他の録画では0本と出る回・出ない回がある)。位置を決められないframeなので
+    数えない — ``float()`` へ渡すと走査ごと ``ValueError`` になり、spriteのjobも
+    ``/api/recordings/{id}/thumbnails`` も落ちる(実測: 8回)。``best_effort_timestamp`` に
+    替えても同じframeがN/Aなので、``media/concat.py`` と同じく除外する以外に手は無い。
+    落とした前後のgapは繋がって広く出るが、広い側は全frame decodeへ倒れるだけで、誤った
+    spriteは作らない。
     """
     span = KEYFRAME_PROBE_SPAN_SECONDS
     starts = [duration * (i + 0.5) / KEYFRAME_PROBE_WINDOWS
@@ -196,7 +204,8 @@ async def _max_keyframe_gap(source, duration: float) -> float | None:
         )
         return None
     times = sorted(
-        float(line) for line in result.stdout.split() if line.strip()
+        float(line) for line in result.stdout.split()
+        if line.strip() and line != "N/A"
     )
     gaps = [b - a for a, b in zip(times, times[1:]) if b - a <= span]
     if not gaps:
