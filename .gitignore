@@ -88,6 +88,10 @@ testdata/
 __pycache__/
 *.pyc
 
+# Python virtual environment (repository root)
+.venv/
+venv/
+
 TicTok/venv/
 TicTok/__pycache__/
 TicTok/tests/__pycache__/
