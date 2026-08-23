@@ -50,7 +50,7 @@ MARKER = NO_MARKER             # 装飾名     … まだ何も選んでいな�
                                # 効くのは字幕から作ったトラックだけ。他トラックの Text+ は
                                # 目印か控えを名乗ったものしか触らない。
 
-KEEP_MARKS = True              # True  … 一度当てた行（Comments に控えの在る行）は
+KEEP_MARKS = False              # True  … 一度当てた行（Comments に控えの在る行）は
                                #         MARKER で塗り替えない
                                # False … 控えを捨てて当て直す。行ごとに選んだ装飾は消え、
                                #         字幕トラックの行は MARKER、他トラックは既定になる

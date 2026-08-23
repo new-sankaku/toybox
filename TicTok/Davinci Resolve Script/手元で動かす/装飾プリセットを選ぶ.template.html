@@ -123,15 +123,26 @@ details.card>summary .note{margin-left:auto;color:var(--ink3);font-size:11px;fon
   background:rgba(0,0,0,.6);border-radius:4px;padding:2px 3px;
 }
 .tile .foot{
-  display:flex;align-items:center;justify-content:center;min-height:26px;
+  display:flex;flex-wrap:wrap;align-content:center;align-items:center;
+  justify-content:center;min-height:40px;
   padding:3px 5px;border-top:1px solid var(--line);background:var(--panel);
 }
 .tile .foot b{font-size:10px;font-weight:600;text-align:center;line-height:1.25}
 .tile .foot .fit{font-size:9px;color:var(--ink3);margin-left:4px;flex:none}
 .tile .foot .fit.bad{color:var(--warn);font-weight:600}
+/* もとにしたゲームの題字。名前は見た目を表す日本語なので、これが無いと何を見て
+   作ったのかが辿れない。名前より弱く見せて、探すときの手掛かりに留める。 */
+.sel-from{font-size:10px;color:var(--ink3);margin-left:6px}
+.tile .foot .from{
+  flex-basis:100%;font-size:10px;color:var(--accent);text-align:center;
+  line-height:1.3;margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:13px;
+}
+/* 分類の見出し。10px の ink3 では札の名前より弱く、どこで分類が変わったのかが
+   目で追えなかった。本文より大きく明るくして、区切りとして先に目に入るようにする。 */
 .catline{
   display:flex;align-items:center;gap:8px;
-  font-size:10px;font-weight:600;color:var(--ink3);margin:10px 0 5px;
+  font-size:13px;font-weight:700;color:var(--ink);margin:16px 0 6px;
 }
 .catline:first-child{margin-top:0}
 .catline::after{content:"";flex:1;height:1px;background:var(--line)}
@@ -263,7 +274,8 @@ pre.code{
   <h1>字幕装飾プリセット</h1>
   <p>行頭の目印ごとに Text+ の装飾を決め、Console に貼るスクリプトを書き出します。</p>
   <span class="spacer"></span>
-  <span class="sel">選択中 <span class="chip" id="sel-marker"></span> <b id="sel-name"></b></span>
+  <span class="sel">選択中 <span class="chip" id="sel-marker"></span> <b id="sel-name"></b>
+    <span class="sel-from" id="sel-from"></span></span>
   <button class="btn" id="toggle-edit">調整</button>
 </div>
 
@@ -477,7 +489,46 @@ function fmtBlock(preset, indent){
   return lines.join("\n");
 }
 
-function styleOf(entry){ return Object.assign({}, BASE, entry.over); }
+/* --- 大きさは装飾ごとに解く（Python側の size_for と同じ式） ---
+   同じ Size でも書体で送り幅が1.5倍違い、字送り・縁・帯も幅を押し広げる。
+   全体に同じ倍率を掛けても大きさは揃わないので、狙いの字数がちょうど横幅
+   いっぱいになる Size を装飾ごとに1件ずつ解く。だから装飾は size を持たない。
+   送り幅を測っていない書体は解けない。見当で埋めるとはみ出したのか余らせたのかが
+   分からなくなるので 0 を返し、画面は何も描かずに「入る字数が出せない」と名乗る。 */
+function fitWidthOf(s, chars){
+  const m = FONT_WIDTH[s.font + "|" + s.style];
+  if (!m) return null;
+  const advance = m[0], oneWidth = m[1], oneHeight = m[2];
+  const step = advance + (s.tracking - 1);
+  const text = ((chars - 1) * step + oneWidth) * s.size;
+  const ink = oneHeight * s.size;
+  let edge = Math.max(s.edgeOn ? s.edgeW * s.edgeScale : 0,
+                      s.edge2On ? s.edge2W : 0) * ink * PREVIEW.thickToPx;
+  edge += Math.abs(s.edgeOffX);
+  let band = 0;
+  if (s.bandOn){
+    band = s.bandPadX * ink * PREVIEW.extendXToPx;
+    if (s.bandEdgeOn) band += s.bandEdgeW * ink * PREVIEW.thickToPx;
+  }
+  return text + 2 * Math.max(edge, band);
+}
+
+function sizeFor(s){
+  const probe = Object.assign({}, s);
+  probe.size = 1;
+  if (fitWidthOf(probe, FIT.chars) === null) return 0;
+  let low = 0, high = 1;
+  for (let i = 0; i < 60; i++){
+    const mid = (low + high) / 2;
+    probe.size = mid;
+    if (fitWidthOf(probe, FIT.chars) <= FIT.width) low = mid; else high = mid;
+  }
+  return Math.floor(low * 10000) / 10000;
+}
+
+function withSize(s){ s.size = sizeFor(s); return s; }
+
+function styleOf(entry){ return withSize(Object.assign({}, BASE, entry.over)); }
 
 /* 見た目のプリセットが触るInput名を全部集める。
    プリセット同士は重なりうる（+++ は + と ++ にも一致する）。差分だけを書くと
@@ -499,7 +550,7 @@ function lookPreset(keys, entry){
 }
 
 function pythonBlocks(){
-  const basePreset = toPreset(BASE);
+  const basePreset = toPreset(withSize(Object.assign({}, BASE)));
   const keys = lookKeys(basePreset);
   const markerLine = "MARKER_CHARS = " + JSON.stringify(MARKER_CHARS);
   const baseBlock = "BASE_PRESET = " + fmtBlock(basePreset, "");
@@ -512,6 +563,11 @@ function pythonBlocks(){
     rules.push('        "key":     ' + JSON.stringify(e.key || "") + ",");
     rules.push('        "pattern": ' + JSON.stringify(e.pattern || "") + ",");
     rules.push('        "source":  ' + JSON.stringify(e.source || "") + ",");
+    /* この装飾で1行に載る全角の文字数。Resolve 側はこれで折り返す。
+       送り幅を測っていない書体と縦書きは数えられないので None を書く
+       （Python 側の fit_chars と同じ。見当の数を書くと折り返しが静かにずれる）。 */
+    const chars = fitChars(styleOf(e));
+    rules.push('        "chars":   ' + (chars ? chars : "None") + ",");
     rules.push('        "preset":  ' + fmtBlock(preset, "        ") + ",");
     rules.push("    },");
   }
@@ -523,6 +579,7 @@ function pythonBlocks(){
     looks.push('        "name":   ' + JSON.stringify(e.name) + ",");
     looks.push('        "key":    ' + JSON.stringify(e.key) + ",");
     looks.push('        "cat":    ' + JSON.stringify(e.cat) + ",");
+    looks.push('        "origin": ' + JSON.stringify(e.origin || "") + ",");
     looks.push('        "preset": ' + fmtBlock(lookPreset(keys, e), "        ") + ",");
     looks.push("    },");
   }
@@ -883,8 +940,6 @@ const CONTROLS = [
   { g:"文字", items:[
     { k:"font", t:"font", label:"書体", list:"fonts" },
     { k:"style", t:"font", label:"スタイル", list:"styles" },
-    { k:"size", t:"num", label:"サイズ", min:0.02, max:0.16, step:0.001,
-      hint:"画面幅に対する比。0.065 ≒ 1080幅で70px" },
     { k:"tracking", t:"num", label:"字間", min:0.80, max:1.60, step:0.01 },
     { k:"leading", t:"num", label:"行間", min:0.60, max:1.40, step:0.01 },
     { k:"fill", t:"color", label:"色" },
@@ -964,7 +1019,9 @@ const CONTROLS = [
   ]},
 ];
 
-function targetStyle(){ return current === -1 ? BASE : styleOf(entries[current]); }
+function targetStyle(){
+  return current === -1 ? withSize(Object.assign({}, BASE)) : styleOf(entries[current]);
+}
 
 function setValue(key, value){
   if (current === -1){ BASE[key] = value; return; }
@@ -1063,7 +1120,7 @@ function syncFit(){
   node.style.color = short ? "var(--warn)" : "var(--ink3)";
 }
 
-function tileFor(grid, index, name, rule, source, sample){
+function tileFor(grid, index, name, rule, source, sample, origin){
   const tile = document.createElement("button");
   tile.className = "tile" + (index === current ? " on" : "");
   tile.title = name;
@@ -1090,7 +1147,8 @@ function tileFor(grid, index, name, rule, source, sample){
   const b = document.createElement("b");
   b.textContent = name;
   foot.appendChild(b);
-  const room = fitChars(index === -1 ? BASE : styleOf(entries[index]));
+  const room = fitChars(index === -1 ? withSize(Object.assign({}, BASE))
+                                     : styleOf(entries[index]));
   if (room){
     const fit = document.createElement("span");
     fit.className = "fit" + (room < FIT.chars ? " bad" : "");
@@ -1099,6 +1157,17 @@ function tileFor(grid, index, name, rule, source, sample){
                 + Math.round(FIT.width * 100) + "%に収まります（実測）";
     foot.appendChild(fit);
   }
+
+  /* もとの題名は札に出し、年と機種は tooltip へ回す。札の幅は見本を大きく見せる
+     ために取ってあるので、括弧まで並べると題名の側が切れて読めなくなる。
+     もとを持たない札にも空の枠を置く。持つ札だけ背が高いと並びが段違いになる。 */
+  const from = document.createElement("span");
+  from.className = "from";
+  if (origin){
+    from.textContent = origin.replace(/（[^）]*）\s*$/, "");
+    from.title = "この見た目のもとにした題字: " + origin;
+  }
+  foot.appendChild(from);
 
   tile.append(stage, foot);
   grid.appendChild(tile);
@@ -1111,7 +1180,8 @@ function tileFor(grid, index, name, rule, source, sample){
 /* 1つの札の見本だけを描き直す */
 function drawTile(entry){
   if (entry.shot) return;
-  const style = entry.index === -1 ? BASE : styleOf(entries[entry.index]);
+  const style = entry.index === -1 ? withSize(Object.assign({}, BASE))
+                                   : styleOf(entries[entry.index]);
   fillInto(entry.txt, splitMarker(entry.sample)[2], style,
            entry.stage.clientWidth - 12, entry.stage.clientHeight - 10, 200);
 }
@@ -1131,6 +1201,8 @@ function syncSelection(){
 
 function syncHeader(){
   el("sel-name").textContent = current === -1 ? "通常（既定）" : entries[current].name;
+  const from = current === -1 ? "" : (entries[current].origin || "");
+  el("sel-from").textContent = from ? "もと: " + from : "";
   el("sel-marker").textContent = current === -1 ? "既定" : markerLabel(entries[current]);
   el("editing").textContent = current === -1
     ? "すべての字幕に効きます" : "この目印の行だけ上書きします";
@@ -1175,13 +1247,13 @@ function buildTiles(){
   tiles = [];
   el("assign-note").textContent = (entries.length + 1) + "件";
 
-  tileFor(newGrid(host, "すべての字幕"), -1, "通常（既定）", "", "", "普通の字幕です");
+  tileFor(newGrid(host, "すべての字幕"), -1, "通常（既定）", "", "", "普通の字幕です", "");
   for (const cat of CAT_ORDER){
     const rows = entries.map((e, i) => [e, i]).filter(([e]) => e.cat === cat);
     if (!rows.length) continue;
     const grid = newGrid(host, cat);
     for (const [e, i] of rows){
-      tileFor(grid, i, e.name, e, e.source, e.sample);
+      tileFor(grid, i, e.name, e, e.source, e.sample, e.origin);
     }
   }
   if (window.scrollY !== keep) window.scrollTo(0, keep);

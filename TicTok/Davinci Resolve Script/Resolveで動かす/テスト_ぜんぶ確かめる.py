@@ -292,7 +292,9 @@ def check_api(project, media_pool, out):
     check("字幕トラックの本数", lambda: timeline.GetTrackCount("subtitle") + 1)
     check("静止画を書き出す", lambda: project.ExportCurrentFrameAsStill(
         os.path.join(tempfile.gettempdir(), "resolve_api_probe.png")))
-    check("再生ヘッドを動かす", lambda: playhead_to(timeline, timeline.GetStartTimecode()))
+    check("再生ヘッドを動かす",
+          lambda: playhead_to(project, timeline, timeline.GetStartTimecode(),
+                              float(project.GetSetting("timelineFrameRate") or 30)))
     check("クリップの位置と尺",
           lambda: "開始%s 尺%s" % (item.GetStart(), item.GetDuration()) if item else None)
 
@@ -335,16 +337,36 @@ def write_read(tool, key, value):
     return tool.GetInput(key)
 
 
-def playhead_to(timeline, timecode):
-    """再生ヘッドを動かして、動いた先を返す。
+def tc_to_frames(timecode, fps):
+    """timecode を frame番号に直す。区切りは : でも ; でも同じに扱う。"""
+    parts = [int(part) for part in timecode.replace(";", ":").split(":")]
+    rate = int(round(fps))
+    return ((parts[0] * 60 + parts[1]) * 60 + parts[2]) * rate + parts[3]
+
+
+def playhead_to(project, timeline, timecode, fps):
+    """再生ヘッドを動かして、着いた位置を返す。着かなければ理由を添えて落とす。
 
     SetCurrentTimecode は既にその位置に居ると False を返す。返り値では
     「動かせない」と「動く必要が無い」を見分けられないので、読み返した位置で見る。
+
+    比べるのは frame番号。timecode の文字列で比べると、drop-frame の区切りや
+    桁の揺れで、動いているのに食い違ったことになる（道具_Text+の実寸… は
+    frame番号で比べていて、42書体の測定を通している）。
+
+    SetCurrentTimecode が効くのは現在のタイムラインだけなので、食い違ったときは
+    どのタイムラインが現在なのかも残す。返り値 None だけでは切り分けられない。
     """
     timeline.SetCurrentTimecode(timecode)
     now = timeline.GetCurrentTimecode()
-    if now is None or now.replace(";", ":") != timecode.replace(";", ":"):
-        return None
+    current = project.GetCurrentTimeline()
+    where = current.GetName() if current else None
+    if now is None:
+        raise RuntimeError("求めた %s / 読み返せません（現在のtimeline %r）"
+                           % (timecode, where))
+    if tc_to_frames(now, fps) != tc_to_frames(timecode, fps):
+        raise RuntimeError("求めた %s / 着いた %s（現在のtimeline %r・このtimeline %r）"
+                           % (timecode, now, where, timeline.GetName()))
     return now
 
 

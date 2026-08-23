@@ -39,7 +39,7 @@ import sys
 
 # 生成側（手元で動かす/道具_装飾プリセットを生成.py）が書き替える。手で直さない。
 PROJECT = r"C:\01_work\00_Git\toybox\TicTok\Davinci Resolve Script"
-PYTHON = r"C:\01_work\00_Git\toybox\TicTok\venv\Scripts\python.exe"
+PYTHON = r"C:\Users\sanka\AppData\Local\Programs\Python\Python310\python.exe"
 FACES = [
     ["Noto Sans JP", "Bold"],
     ["BIZ UDPGothic", "Bold"],
